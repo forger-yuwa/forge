@@ -926,8 +926,10 @@ $Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、�
 **`pw_upstream: poly` の壁だけ**が対象で、`ramp` の壁 (ランプ区間の $s\,\delta_r$ は区間ごとに 10 次で厳密に表せない) との組み合わせは例外
 (最小二乗の版は 2026-10-07 のユーザ決定で外した)。
 
-- **キー**: 問題 YAML の `geometry.physical_wall_repr` = `legacy` | `single_bspline`。**キー無しは今の壁で、変更前とビット同一**
-  (壁ファイルも書かない)。`legacy` を明示すると今の壁のまま壁ファイルを書く。joint 壁 + 解析経路 (offset radial) 専用で、他の壁・
+- **キー**: 問題 YAML の `geometry.physical_wall_repr` = `legacy` | `single_bspline`。**キー無しは、`pw_upstream: poly` の壁なら
+  1 本で表せる構成のとき `single_bspline`** (2026-10-07 ユーザ決定の既定; 表せない構成 [offset normal・旧 starting line・δ_r の表が出口を覆わない等] は
+  区分表現のまま作り、理由を `prepare_info.json` の `physical_wall` に記録)。ランプの壁はキー無しで区分表現 (壁ファイルなし)。
+  ソルバ入力は区分表現とビット同一 (W3・W4)。`legacy` を明示すると区分表現のまま壁ファイルを書く。joint 壁 + 解析経路 (offset radial) 専用で、他の壁・
   Euler の `prepare` に `single_bspline` を書くと例外。値は完全一致 (大文字・空白・null は例外)。
 - **作り直し** (ノット挿入): 直管は定数の係数、$Q$ は 5 次多項式の Bernstein 係数 ($[-L_U, 0]$ の Bézier)。$[0, x_e]$ は S と $\delta_r$
   (`delta_r_from_table` の補間スプライン) を、$\delta_r$ は $x=0$・$x_e$ で重複度 6 まで挿入して切り出し、内部ノットの和集合

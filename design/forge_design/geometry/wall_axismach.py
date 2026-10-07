@@ -1427,31 +1427,50 @@ class SingleBSplinePhysicalWall:
 
     REQUIRED_ATTRS = _REQ_COMMON + REQUIRED_ATTRS_BY_UPSTREAM["poly"] + _REQ_SINGLE
 
+    @staticmethod
+    def applicability(src) -> str | None:
+        """1 本の B-spline に作り直せる構成か (誤差・ゲートの検査はしない)。None = 作れる、文字列 = 作れない理由。
+        `physical_wall_repr` のキーが無い poly の壁を既定で 1 本にするか (2026-10-07 ユーザ決定) の判定と、`__init__` の入口の検査の共通。"""
+        if not isinstance(src, PhysicalNozzleWall) or not src.analytic or src.offset_mode != "radial":
+            return ("SingleBSplinePhysicalWall: joint 壁 + 物理壁の解析経路 (offset: radial) の PhysicalNozzleWall 専用 "
+                    f"(受け取った: {type(src).__name__}, analytic={getattr(src, 'analytic', '?')}, "
+                    f"offset={getattr(src, 'offset_mode', '?')})")
+        if src.pw_upstream != "poly":
+            return (f"SingleBSplinePhysicalWall: pw_upstream {src.pw_upstream!r} は不可 — ランプ区間の s·δ_r は区間ごとに 10 次で "
+                    "5 次の B-spline で厳密に表せない (pw_upstream: poly の壁だけ; plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1b)")
+        design = src.design
+        if not isinstance(design, JointFitCFDWall):
+            return f"SingleBSplinePhysicalWall: 設計壁が JointFitCFDWall でない ({type(design).__name__})"
+        if float(design.x0) != 0.0:
+            return f"SingleBSplinePhysicalWall: 設計壁の始点 x0 = {design.x0!r} ≠ 0 (旧・縦 starting line 構成) は未対応"
+        dr = src._dr
+        for a_ in ("spline", "x_range"):
+            if not hasattr(dr, a_):
+                return f"SingleBSplinePhysicalWall: δ_r の関数に `{a_}` が無い (delta_r_from_table の関数を使う)"
+        S, D = design._spl, dr.spline
+        if int(S.k) != 5 or int(D.k) != 5:
+            return f"SingleBSplinePhysicalWall: 設計壁 S (k={S.k})・δ_r (k={D.k}) は 5 次の B-spline であること"
+        tab_lo, tab_hi = (float(v) for v in dr.x_range)
+        if not (tab_lo <= 0.0 and tab_hi >= float(src.x_e)):
+            return (f"SingleBSplinePhysicalWall: δ_r の表の範囲 [{tab_lo:.9g}, {tab_hi:.9g}] が設計スロート 0 から出口 "
+                    f"{float(src.x_e):.9g} までを覆わない (表の外は端値延長で導関数 0 — 1 本の 5 次 B-spline で表せない)")
+        L, x_in, x_e = float(src.L_U), float(src.x_in), float(src.x_e)
+        if not (x_in < -L < 0.0 < x_e):
+            return f"SingleBSplinePhysicalWall: 区間の並び x_in {x_in!r} < −L_U {-L!r} < 0 < x_e {x_e!r} でない"
+        return None
+
     def __init__(self, src, tol: dict | None = None) -> None:
         import time
         from scipy.interpolate import BSpline
         t_start = time.perf_counter()
         tol = dict(SINGLE_BSPLINE_TOL if tol is None else tol)
-        if not isinstance(src, PhysicalNozzleWall) or not src.analytic or src.offset_mode != "radial":
-            raise ValueError("SingleBSplinePhysicalWall: joint 壁 + 物理壁の解析経路 (offset: radial) の PhysicalNozzleWall 専用 "
-                             f"(受け取った: {type(src).__name__}, analytic={getattr(src, 'analytic', '?')}, "
-                             f"offset={getattr(src, 'offset_mode', '?')})")
-        if src.pw_upstream != "poly":
-            raise ValueError(f"SingleBSplinePhysicalWall: pw_upstream {src.pw_upstream!r} は不可 — ランプ区間の s·δ_r は区間ごとに 10 次で "
-                             "5 次の B-spline で厳密に表せない (pw_upstream: poly の壁だけ; plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1b)")
+        why = SingleBSplinePhysicalWall.applicability(src)
+        if why is not None:
+            raise ValueError(why)
         design = src.design
-        if not isinstance(design, JointFitCFDWall):
-            raise ValueError(f"SingleBSplinePhysicalWall: 設計壁が JointFitCFDWall でない ({type(design).__name__})")
-        if float(design.x0) != 0.0:
-            raise ValueError(f"SingleBSplinePhysicalWall: 設計壁の始点 x0 = {design.x0!r} ≠ 0 (旧・縦 starting line 構成) は未対応")
         dr = src._dr
-        for a_ in ("spline", "x_range"):
-            if not hasattr(dr, a_):
-                raise ValueError(f"SingleBSplinePhysicalWall: δ_r の関数に `{a_}` が無い (delta_r_from_table の関数を使う)")
         k = 5
         S, D = design._spl, dr.spline
-        if int(S.k) != k or int(D.k) != k:
-            raise ValueError(f"SingleBSplinePhysicalWall: 設計壁 S (k={S.k})・δ_r (k={D.k}) は 5 次の B-spline であること")
         L = float(src.L_U)
         x_in, x_e = float(src.x_in), float(src.x_e)
         tab_lo, tab_hi = (float(v) for v in dr.x_range)

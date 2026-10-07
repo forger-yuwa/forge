@@ -103,6 +103,29 @@ check(f"構成はノット挿入 (最小二乗なし): {B.fit_diag['construction
 xs = np.linspace(-12.5, B.x_e, 20001)
 check(f"r(x) が元の壁と一致 (均等 20001 点の max |Δr| {np.abs(B.r(xs) - PW.r(xs)).max():.2e} ≤ 1e-12)",
       np.abs(B.r(xs) - PW.r(xs)).max() <= 1e-12)
+# --- 1b. 既定 (2026-10-07 ユーザ決定: キー無しの poly の壁は 1 本で表せれば single_bspline) ----------------------------
+from forge_design.evaluate import runner_axismach as _RA  # noqa: E402
+check("既定: poly・radial の壁は 1 本で表せる (applicability = None)", SingleBSplinePhysicalWall.applicability(PW) is None)
+_wd = _RA.build_physical_wall(p, d, S, delta_r_x=drx, offset="radial")
+check(f"既定: キー無しの poly は build_physical_wall が 1 本の B-spline を返す ({type(_wd).__name__})、元の壁と一致",
+      isinstance(_wd, SingleBSplinePhysicalWall) and np.abs(_wd.r(xs) - B.r(xs)).max() == 0.0)
+p.geometry["physical_wall_repr"] = "legacy"
+_wl = _RA.build_physical_wall(p, d, S, delta_r_x=drx, offset="radial")
+check(f"既定: legacy を明示すると区分表現のまま ({type(_wl).__name__})", type(_wl) is PhysicalNozzleWall)
+p.geometry.pop("physical_wall_repr")
+_PWr = PhysicalNozzleWall(*args, offset="radial", delta_r_x=drx, ramp=(-11.0, -6.0), upstream="ramp")
+_why = SingleBSplinePhysicalWall.applicability(_PWr)
+check(f"既定: ランプの壁は 1 本で表せない理由を返す ({(_why or '')[:50]})", _why is not None and "pw_upstream" in _why)
+_orig_app = SingleBSplinePhysicalWall.applicability
+try:
+    SingleBSplinePhysicalWall.applicability = staticmethod(lambda src: "試験: 表せない構成")
+    _wf = _RA.build_physical_wall(p, d, S, delta_r_x=drx, offset="radial")
+    check("既定: 1 本で表せない poly の壁は区分表現のまま作り、理由を壁に残す (黙って落とさない)",
+          type(_wf) is PhysicalNozzleWall and getattr(_wf, "single_bspline_default_skipped", None) == "試験: 表せない構成")
+finally:
+    SingleBSplinePhysicalWall.applicability = staticmethod(_orig_app) if not isinstance(_orig_app, staticmethod) else _orig_app
+check("既定: applicability を元に戻した", SingleBSplinePhysicalWall.applicability(PW) is None)
+
 jj = B.fit_diag["joint_jumps"]
 check(f"継ぎ目の r・r′・r″ の跳び ≤ 1e-8 (区間多項式の左右の極限): max {max(max(j['jump_d0'], j['jump_d1'], j['jump_d2']) for j in jj):.1e}",
       all(max(j["jump_d0"], j["jump_d1"], j["jump_d2"]) <= 1e-8 for j in jj))
