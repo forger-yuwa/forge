@@ -44,6 +44,8 @@ GATE_KEYS = ("C_T", "C_L", "C_M")
 
 # slauWallNormalChi の既定変更 (runner_sern.FLAG_POLICY と同じ値)
 from ..evaluate.runner_sern import FLAG_POLICY  # noqa: E402
+# 処置の識別 (import 時に束縛する: 試験は R を偽の runner に差し替えてからキャンペーンを作る)
+from ..evaluate.runner_sern import ZTE_EFFECTIVE, zte_signature_of, zte_spec_from_evaluate  # noqa: E402
 
 class DesignInfeasible(ValueError):
     """物理的に成立しない候補 (逆設計不成立 / L_ramp_max 超過)。数値失敗と区別する (R1)。"""
@@ -66,10 +68,28 @@ class _KrgBoth:
 
 REQUIRED_SCALAR_GRADIENT = "lsq"
 REQUIRED_WALL_NORMAL_CHI = 1   # 2026-09-26 から node+SLAU の既定 (auto)。明示 0 の評価は別の応答関数なので混ぜない
+# 厚さ 0 の板の自由端の速度再構成の処置 (plan convection-zero-thickness-edge-reconstruction §4「設計チェーンへの配線」):
+# 作動点ごとの実効値 ("off" / "tags=...;rings=N" / None = 不明) がキャンペーンの要求 (基準 YAML の
+# evaluate.zero_thickness_edge_velocity) と一致する行だけを学習・Pareto に使う。処置の導入前の行 (キーが無い) は "off"。
+# **処置なしの旧評価を処置ありのキャンペーンへ持ち越すのは、作動点を名指しした明示の指定
+# (`opt.zero_thickness_edge_velocity_carry_over: [m6_on, m4_off]`) があるときだけ** (可否の判定は plan §6.2 #6・#7)
+ZTE_CARRY_OVER_KEY = "zero_thickness_edge_velocity_carry_over"
 
 
-def _learnable(r: dict) -> bool:
-    """学習・Pareto に使ってよい行: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq かつ実効 chi が 1。
+def _zte_effective_of(o: dict):
+    """作動点要約の処置の実効値。キーが無い行 (処置の導入前の評価) は "off"、キーがあって None なら不明。"""
+    return o[ZTE_EFFECTIVE] if ZTE_EFFECTIVE in o else "off"
+
+
+def _zte_compatible(op: str, o: dict, required: str = "off", carry_over=()) -> bool:
+    eff = _zte_effective_of(o)
+    if eff is None:
+        return False
+    return eff == required or (eff == "off" and op in carry_over)
+
+
+def _learnable_base(r: dict) -> bool:
+    """処置以外の採否: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq かつ実効 chi が 1。
     不明 (None) は除外 (codex result 2026-09-27 chi-default M4: 日付と scalarGradient だけでは chi 0/1/不明が混ざる)。"""
     if r.get("status") != "PASS" or r.get("flag_policy") != FLAG_POLICY:
         return False
@@ -77,6 +97,22 @@ def _learnable(r: dict) -> bool:
     return bool(ops) and all(o.get("scalar_gradient_effective") == REQUIRED_SCALAR_GRADIENT
                              and o.get("slau_wall_normal_chi_effective") in (REQUIRED_WALL_NORMAL_CHI, str(REQUIRED_WALL_NORMAL_CHI))
                              for o in ops.values())
+
+
+def _zte_row_ok(r: dict, zte_required: str = "off", zte_carry_over=()) -> bool:
+    """全作動点の処置の実効値がキャンペーンの要求と一致 (処置なしは明示の持ち越し指定の作動点だけ可)。不明は不可。"""
+    ops = r.get("ops") or {}
+    return bool(ops) and all(_zte_compatible(name, o, zte_required, zte_carry_over) for name, o in ops.items())
+
+
+def _learnable(r: dict, zte_required: str = "off", zte_carry_over=()) -> bool:
+    """学習・Pareto に使ってよい行 = 処置以外の採否 (_learnable_base) かつ処置の一致 (_zte_row_ok)。"""
+    return _learnable_base(r) and _zte_row_ok(r, zte_required, zte_carry_over)
+
+
+def _zte_policy(obj):
+    """キャンペーン (または試験の偽物) の処置の要求と持ち越し指定。属性が無ければ処置なし・持ち越しなし。"""
+    return getattr(obj, "zte_required", "off"), tuple(getattr(obj, "zte_carry_over", ()))
 
 
 class SernCampaign:
@@ -89,13 +125,28 @@ class SernCampaign:
         self.optcfg = self.base_raw.get("opt", {})
         self.ledger = self.dir / "ledger.jsonl"
         self.rows = [json.loads(l) for l in self.ledger.read_text().splitlines() if l.strip()] if self.ledger.exists() else []
+        # 処置の要求 (基準 YAML) と、処置なしの旧評価の持ち越し指定 (作動点名のリスト、既定なし)
+        self.zte_required = zte_signature_of(zte_spec_from_evaluate(self.base_raw.get("evaluate") or {}))
+        _co = self.optcfg.get(ZTE_CARRY_OVER_KEY) or []
+        if not isinstance(_co, list) or not all(isinstance(o, str) for o in _co):
+            raise ValueError(f"opt.{ZTE_CARRY_OVER_KEY} は作動点名のリスト: {_co!r}")
+        _unknown = sorted(set(_co) - {o["name"] for o in self.ops})
+        if _unknown:
+            raise ValueError(f"opt.{ZTE_CARRY_OVER_KEY} に無い作動点: {_unknown}")
+        if _co and self.zte_required == "off":
+            raise ValueError(f"opt.{ZTE_CARRY_OVER_KEY} は処置ありのキャンペーン (evaluate.zero_thickness_edge_velocity) でだけ意味がある")
+        self.zte_carry_over = tuple(_co)
         _old = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") != FLAG_POLICY)
         if _old:
             print(f"[campaign] flag_policy が {FLAG_POLICY} でない PASS 行 {_old} 件を学習から除外 "
                   f"(既定変更前の評価: slauWallNormalChi 2026-09-26 / scalarGradient 2026-09-27)", flush=True)
-        _nolsq = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") == FLAG_POLICY and not _learnable(r))
+        _nolsq = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") == FLAG_POLICY and not _learnable_base(r))
         if _nolsq:
             print(f"[campaign] 実効 scalarGradient (lsq) / slauWallNormalChi (1) が全作動点で確認できない PASS 行 {_nolsq} 件を学習から除外", flush=True)
+        _nozte = sum(1 for r in self.rows if _learnable_base(r) and not _zte_row_ok(r, self.zte_required, self.zte_carry_over))
+        if _nozte:
+            print(f"[campaign] 処置 (zero_thickness_edge_velocity) の実効値が要求 {self.zte_required} と違う・不明な PASS 行 {_nozte} 件を学習から除外"
+                  f" (持ち越し指定: {list(self.zte_carry_over) or 'なし'})", flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))
@@ -185,6 +236,10 @@ class SernCampaign:
                 "forge_rc": out.get("forge_rc"), "gate": g.get("verdict"), "gate_fail_class": g.get("fail_class"),
                 "slau_wall_normal_chi_effective": out.get("slau_wall_normal_chi_effective"), "flag_policy": out.get("flag_policy"),
                 "scalar_gradient_effective": out.get("scalar_gradient_effective"),
+                # 処置の実効値 (設計 DB の識別) と、その評価が読んだ w の格子署名・ハッシュ (来歴)
+                ZTE_EFFECTIVE: out.get(ZTE_EFFECTIVE),
+                "zero_thickness_edge_velocity_mesh_signature": (out.get("zero_thickness_edge_velocity") or {}).get("mesh_signature"),
+                "zero_thickness_edge_velocity_field_hash": (out.get("zero_thickness_edge_velocity") or {}).get("field_hash"),
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
                 "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
 
@@ -206,7 +261,7 @@ class SernCampaign:
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time(); prob = self._write_problem(x, self.dir / f"{tag}.yaml")
         row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
-               "flag_policy": FLAG_POLICY}
+               "flag_policy": FLAG_POLICY, "zero_thickness_edge_velocity": self.zte_required}
         try:
             ct_w, L_ramp, cm_w, wsum = 0.0, None, 0.0, 0.0
             for o in self.ops:
@@ -254,7 +309,7 @@ class SernCampaign:
         # convection-slau-wall-normal-chi-default §4.4、codex plan M3)。flag_policy の無い旧行と不一致の行は除外する。
         # さらに mesh.scalarGradient の node 既定 lsq 化 (2026-09-27) 以降は、**全作動点の実効値が lsq と確認できた行だけ**を使う
         # (日付の一致だけでは gg 評価・不明が混ざる。codex diagnose 2026-09-27、plan gradient-scalar-lsq-unification #6)。
-        ok = [r for r in self.rows if _learnable(r)]
+        ok = [r for r in self.rows if _learnable(r, *_zte_policy(self))]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         return X, F
 
@@ -291,7 +346,7 @@ class SernCampaign:
         """Pareto 要約。**degraded / tag / 作動点ごとのゲート要約を落とさない** (R1: pareto.json でも追える)。"""
         rows = self.rows if rows is None else rows
         # Pareto・HV の母集団も学習と同じ選別 (codex result 2026-09-27 M2: 学習から外した gg・旧方針の行が Pareto に混ざっていた)
-        ok = [r for r in rows if _learnable(r)]
+        ok = [r for r in rows if _learnable(r, *_zte_policy(self))]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         pareto = []
         if len(ok):
@@ -300,7 +355,8 @@ class SernCampaign:
                 pareto.append({"tag": r["tag"], "x": dict(zip(DV_ORDER, X[i].tolist())), "C_T_w": float(-F[i, 0]), "L_ramp": float(F[i, 1]),
                                "C_M_w": r["C_M_w"], "degraded": bool(r.get("degraded")), "degraded_ops": r.get("degraded_ops", []),
                                "flag_policy": r.get("flag_policy"),
-                               "ops": {op: {k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness", "scalar_gradient_effective")}
+                               "ops": {op: {**{k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness", "scalar_gradient_effective")},
+                                            ZTE_EFFECTIVE: _zte_effective_of(v)}
                                        for op, v in r.get("ops", {}).items()}})
         pareto.sort(key=lambda r: r["L_ramp"])
         classes = {}
@@ -310,6 +366,7 @@ class SernCampaign:
         n_status_pass = sum(1 for r in rows if r["status"] == "PASS")
         return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_pass_excluded_by_policy": int(n_status_pass - len(ok)),
                 "flag_policy": FLAG_POLICY, "required_scalar_gradient": REQUIRED_SCALAR_GRADIENT,
+                "required_zero_thickness_edge_velocity": _zte_policy(self)[0], ZTE_CARRY_OVER_KEY: list(_zte_policy(self)[1]),
                 "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
                 "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,
                 "gate_policy": "R1: rc==0 + finite field + residual no NaN/rising + objective & C_T/C_L/C_M STEADY (no divergent adoption)",
@@ -325,7 +382,8 @@ class SernCampaign:
             tag = r0["tag"]; prob = self.dir / f"{tag}.yaml"
             row = {"tag": tag, "x": r0["x"], "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
                    "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w"),
-                   "flag_policy": r0.get("flag_policy")}   # 評価時の方針を引き継ぐ (再判定で現行方針に書き換えない)
+                   "flag_policy": r0.get("flag_policy"),   # 評価時の方針を引き継ぐ (再判定で現行方針に書き換えない)
+                   "zero_thickness_edge_velocity": r0.get("zero_thickness_edge_velocity", "off")}   # 同上 (処置の導入前の行は off)
             try:
                 if not prob.exists():
                     raise EvalFailure("ERROR", "problem yaml missing")

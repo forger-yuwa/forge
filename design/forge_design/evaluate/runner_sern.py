@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import h5py
@@ -64,6 +65,318 @@ def _last_launch_chi(run_dir):
     前の起動の値に遡らない (codex result 2026-09-27 chi-default M4、scalarGradient と同じ厳格さ)。"""
     v = _last_launch_value(run_dir, "slauWallNormalChi", allowed=("0", "1"))
     return None if v is None else int(v)
+
+
+# --- 厚さ 0 の板の自由端の近傍で速度の再構成を節点値にする処置 -------------------------------------------------------
+# plan convection-zero-thickness-edge-reconstruction §4「設計チェーンへの配線」(codex plan レビュー 2026-10-08 M3)、
+# 2026-10-08 のユーザ判断 (端の判定はソルバでなく前処理) と codex diagnose 2026-10-08 (edge-weight-preprocessing) の Major:
+# 問題 YAML の `evaluate.zero_thickness_edge_velocity: {tags: [cowl_in, cowl_out], rings: 2}` は**前処理の入力**で、
+# prepare が**最終の node 変換の後**に道具で meshFileName の `/AUX/w_recon_vel` に節点の重み w を書く (格子を作るたびに
+# 作り直す)。各段の solverConfig の space には有効/フィールド名だけを出す。未指定 = 無効 (config は今とバイト一致)。
+# 区間識別と来歴には、各段の起動前に meshFileName から**再計算した**格子署名と w のハッシュを入れる (属性のハッシュは
+# 転記しない)。読み出しと再計算の正本は tools/stage_manifest.py の zte_* (計算そのものは道具の関数)。
+ZTE_FIELD = "w_recon_vel"
+ZTE_SPACE_FRAGMENT = f", zeroThicknessEdgeVelocity: {{field: {ZTE_FIELD}}}"
+ZTE_TOOL = FORGE_TOOLS / "mark_zero_thickness_edges.py"
+ZTE_LAUNCHES = "zte_launches.jsonl"     # 処置を有効にした段の起動前の記録 (runner が書く。forge_launches.jsonl とは cfg_fnv で対応)
+ZTE_EFFECTIVE = "zero_thickness_edge_velocity_effective"     # 設計 DB の作動点要約で処置の識別に使うキー
+_ZTE_TAG_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _stage_manifest():
+    """solver_density_cuda/tools/stage_manifest.py (区間識別と処置のフィールドの読み出しの正本)。"""
+    tools = str(FORGE_TOOLS)
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import stage_manifest
+    return stage_manifest
+
+
+def zte_spec_from_evaluate(ev: dict, known_tags=None) -> dict | None:
+    """`evaluate.zero_thickness_edge_velocity` を正規化する。未指定・null・false → None (無効)。
+    指定 → {"tags": 並べ替えたタグ, "rings": int}。known_tags を渡すとタグがその境界名に含まれるかも検査する。"""
+    v = (ev or {}).get("zero_thickness_edge_velocity")
+    if v is None or v is False:
+        return None
+    if not isinstance(v, dict):
+        raise ValueError(f"evaluate.zero_thickness_edge_velocity は {{tags: [...], rings: N}} か null: {v!r}")
+    unknown = set(v) - {"tags", "rings"}
+    if unknown:
+        raise ValueError(f"evaluate.zero_thickness_edge_velocity の未知キー: {sorted(unknown)} (tags | rings)")
+    tags, rings = v.get("tags"), v.get("rings")
+    # 道具 (mark_zero_thickness_edges.py) の契約に合わせる: タグは板の上下の壁面のちょうど 2 つ、rings は 1 以上
+    if not isinstance(tags, (list, tuple)) or len(tags) != 2 or not all(isinstance(t, str) and _ZTE_TAG_RE.match(t) for t in tags):
+        raise ValueError(f"evaluate.zero_thickness_edge_velocity.tags は板の上下の壁面の境界名 (英数・_.-) ちょうど 2 つ: {tags!r}")
+    if len(set(tags)) != len(tags):
+        raise ValueError(f"evaluate.zero_thickness_edge_velocity.tags に重複: {tags!r}")
+    if isinstance(rings, bool) or not isinstance(rings, int) or rings < 1:
+        raise ValueError(f"evaluate.zero_thickness_edge_velocity.rings は 1 以上の整数: {rings!r}")
+    if known_tags is not None:
+        bad = sorted(set(tags) - set(known_tags))
+        if bad:
+            raise ValueError(f"evaluate.zero_thickness_edge_velocity.tags に格子に無い境界名: {bad} (候補 {sorted(known_tags)})")
+    return {"tags": sorted(tags), "rings": int(rings)}
+
+
+def zte_spec(p: Problem, known_tags=None) -> dict | None:
+    return zte_spec_from_evaluate(p.evaluate, known_tags)
+
+
+def zte_signature_of(spec: dict | None) -> str:
+    """処置の識別子。無効は "off"、有効は stage_manifest.zte_signature (タグ並べ替え・rings)。"""
+    return "off" if spec is None else _stage_manifest().zte_signature(spec["tags"], spec["rings"])
+
+
+def qc_cell_config(cfg: str, disc: str) -> str:
+    """品質ゲート用の primal (cell) 変換の config。node 専用のキーを落とす (変換器も solverConfig を読んで検査する)。
+    処置のキーも落とす: cell では起動時エラーで、w は最終の node 格子に書くのでこの段階には無い。"""
+    return (cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
+            .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", "")
+            .replace(ZTE_SPACE_FRAGMENT, ""))
+
+
+def _mesh_nodes(h5path) -> int | None:
+    with h5py.File(h5path, "r") as f:
+        return int(f["VALUE/ro"].shape[0]) if "VALUE/ro" in f else None
+
+
+def verify_zte_field(run_dir, spec: dict, mesh: str = MESH) -> dict:
+    """meshFileName の `/AUX/<ZTE_FIELD>` を要求と照合する: 属性のタグ・rings が要求と一致、長さ = 節点数。
+    戻り = stage_manifest.zte_identity (格子署名と w のハッシュは再計算した値)。"""
+    h5 = Path(run_dir) / mesh
+    a = _stage_manifest().zte_identity(h5, ZTE_FIELD)
+    if a is None:
+        raise ValueError(f"{h5}: 処置の重み /AUX/{ZTE_FIELD} が無い (前処理の道具が書いていない)")
+    if a["tags"] != spec["tags"] or a["rings"] != spec["rings"]:
+        raise ValueError(f"{h5}: /AUX/{ZTE_FIELD} の属性 tags={a['tags']} rings={a['rings']} が要求 {spec} と違う")
+    n = _mesh_nodes(h5)
+    if n is not None and a["n"] != n:
+        raise ValueError(f"{h5}: w の長さ {a['n']} が節点数 {n} と違う (別の格子の w)")
+    return a
+
+
+def mark_zte_field(run_dir, spec: dict, mesh: str = MESH) -> dict:
+    """前処理の道具で meshFileName に処置の重み w を書き、照合して識別量を返す。**道具の呼び出しはここ 1 か所**
+    (道具の CLI が決まったらここだけ直す。試験はこの関数を差し替える)。格子を作るたびに prepare から呼ぶ。"""
+    run_dir = Path(run_dir)
+    if not ZTE_TOOL.exists():
+        raise RuntimeError(f"処置の前処理の道具 {ZTE_TOOL} が無い (evaluate.zero_thickness_edge_velocity を使うには道具が要る)")
+    cmd = [sys.executable, str(ZTE_TOOL), mesh, "--tags", *spec["tags"], "--bcond-config", "bcondConfig.yaml",
+           "--rings", str(spec["rings"]), "--field", ZTE_FIELD]
+    r = subprocess.run(cmd, cwd=run_dir, env=_ENV, capture_output=True, text=True)
+    (run_dir / "ZTE_MARK.txt").write_text(" ".join(cmd) + "\n" + (r.stdout or "") + (r.stderr or ""))
+    if r.returncode != 0:
+        raise RuntimeError(f"処置の前処理の道具が失敗 (rc={r.returncode})\n" + (r.stdout or "")[-1500:] + (r.stderr or "")[-1500:])
+    return verify_zte_field(run_dir, spec, mesh)
+
+
+def check_zte_stage(cfg_text: str, bcond_text: str, run_dir=None) -> dict | None:
+    """処置を有効にした段の config が、ソルバの起動時エラーの条件 (node・SLAU/SLAU2・gpu 1・非周期・非軸対称、
+    input/zeroThicknessEdge.cpp) に当たらないこと、
+    run_dir を渡せば meshFileName に w があることを確かめ、**その段が読む w の識別量** (再計算) を返す。
+    無効の段は None (何もしない)。違反は ValueError (driver では発散 [RuntimeError] でなく ERROR に分類される)。"""
+    sm = _stage_manifest()
+    zc = sm.zte_config(cfg_text)
+    if zc is None:
+        return None
+    import yaml
+    doc = yaml.safe_load(cfg_text) or {}
+    ms = doc.get("mesh") or {}
+    errs = []
+    if zc["invalid"]:
+        errs.append(f"space.zeroThicknessEdgeVelocity が不正 ({zc['invalid']})")
+    if str(ms.get("discretization", "")).strip('"\'') != "node":
+        errs.append(f"discretization {ms.get('discretization')!r} (node のみ)")
+    if str(doc.get("solver", "")).strip('"\'') not in ("SLAU", "SLAU2"):
+        errs.append(f"solver {doc.get('solver')!r} (SLAU / SLAU2 のみ)")
+    if str(doc.get("gpu", "")).strip() != "1":
+        errs.append(f"gpu {doc.get('gpu')!r} (gpu: 1 のみ)")
+    if int(ms.get("isAxisymmetric", 0) or 0) or int((doc.get("physProp") or {}).get("isAxisymmetric", 0) or 0):
+        errs.append("isAxisymmetric (軸対称は未検証で起動時エラー)")
+    if re.search(r"\bkind\s*:\s*[\"']?periodic", bcond_text or ""):
+        errs.append("周期境界 (初版は起動時エラー)")
+    a = None
+    if run_dir is not None and not errs:
+        h5 = sm.zte_mesh_file(cfg_text, run_dir)
+        try:
+            a = sm.zte_identity(h5, zc["field"])
+        except SystemExit as e:      # 道具・h5py が無い: 識別できないまま起動しない (driver では ERROR)
+            raise ValueError(str(e)) from None
+        if a is None:
+            errs.append(f"meshFileName {h5} に /AUX/{zc['field']} が無い")
+    if errs:
+        raise ValueError("処置 (space.zeroThicknessEdgeVelocity) を有効にした段がソルバの起動条件に合わない: " + "; ".join(errs))
+    return a
+
+
+def _record_zte_launch(run_dir) -> None:
+    """起動直前に、その段の config が処置を有効にしていれば条件を検査し、meshFileName から再計算した格子署名と
+    w のハッシュを `zte_launches.jsonl` に追記する (無効の段は何も書かない = 旧 run とファイル構成も同じ)。"""
+    rd = Path(run_dir)
+    cfgp = rd / "solverConfig.yaml"
+    cfg = cfgp.read_text() if cfgp.exists() else ""
+    if "zeroThicknessEdgeVelocity" not in cfg:
+        return
+    bcp = rd / "bcondConfig.yaml"
+    a = check_zte_stage(cfg, bcp.read_text() if bcp.exists() else "", rd)
+    if a is None:
+        return
+    sm = _stage_manifest()
+    rec = {"time": int(time.time()), "cfg_fnv": sm.fnv1a64(cfg), "field": sm.zte_config(cfg)["field"],
+           "tags": a["tags"], "rings": a["rings"], "n": a["n"], "mesh_signature": a["mesh_signature"], "field_hash": a["field_hash"]}
+    with open(rd / ZTE_LAUNCHES, "a") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def _last_jsonl(path):
+    """jsonl の最後の非空行 (dict)。無い・壊れていれば None。前の行に遡らない。"""
+    p = Path(path)
+    if not p.exists():
+        return None
+    lines = [l for l in p.read_text().splitlines() if l.strip()]
+    try:
+        rec = json.loads(lines[-1]) if lines else None
+    except Exception:
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+_ZTE_LOG_EFF = re.compile(r"^'zeroThicknessEdgeVelocity' effective: (\d)(?: \(field (\S+), w<1 nodes (\d+), "
+                          r"field_sha256 ([0-9a-f]+), mesh_signature ([0-9a-f]+)\))?")
+_ZTE_LOG_FULL = re.compile(r"field_sha256[^(\n]*\(([0-9a-f]{64})\)[^(\n]*mesh_signature[^(\n]*\(([0-9a-f]{64})")
+_ZTE_LOG_COUNTS = re.compile(r"(n_edge_nodes|n_marked_nodes|n_nodes)(?:\([A-Z0-9_]+\))?=(\d+)")
+
+
+def _zte_from_log(run_dir) -> dict | None:
+    """起動ログ forge_run.log (run_case.sh が起動ごとに上書き = 最後の起動のログ) から処置の記録を拾う。
+    `'zeroThicknessEdgeVelocity' effective: 0|1 (field …, w<1 nodes N, field_sha256 <先頭16>, mesh_signature <先頭16>)` と、
+    あれば全桁のハッシュと属性の数 (n_edge_nodes(E)= / n_marked_nodes(S)=)。行が無ければ None。"""
+    p = Path(run_dir) / "forge_run.log"
+    if not p.exists():
+        return None
+    info, after = None, 0
+    with open(p, errors="replace") as fh:          # 長い run のログは大きいので、起動時の行の少し後で読むのをやめる
+        for line in fh:
+            m = _ZTE_LOG_EFF.match(line)
+            if m:
+                info = {"enabled": m.group(1) == "1", "source": "forge_run.log"}
+                if m.group(2):
+                    info.update({"field": m.group(2).rsplit("/", 1)[-1], "w_lt1_nodes": int(m.group(3)),
+                                 "field_hash": m.group(4), "mesh_signature": m.group(5)})
+                continue
+            if info is not None:
+                mf = _ZTE_LOG_FULL.search(line)
+                if mf:
+                    info["field_hash"], info["mesh_signature"] = mf.group(1), mf.group(2)
+                for k, v in _ZTE_LOG_COUNTS.findall(line):
+                    info[k] = int(v)
+                after += 1
+                if after >= 20:
+                    break
+    return info
+
+
+def _last_launch_zte(run_dir):
+    """最後の起動の処置の記録。forge_launches.jsonl の最後の非空行に処置のキー (入れ子 `zeroThicknessEdgeVelocity: {...}` /
+    平坦 `zeroThicknessEdgeVelocity_<名>`) があればそれ、無ければ起動ログ (forge_run.log) の effective 行。
+    戻り: (状態, 記録, cfg_fnv)。状態 = "absent" (起動記録が無い・壊れている) / "no_info" (処置の記録が無い) / "ok"。
+    前の起動の値に遡らない (_last_launch_value と同じ厳格さ)。"""
+    rec = _last_jsonl(Path(run_dir) / "forge_launches.jsonl")
+    if rec is None:
+        return "absent", None, None
+    key = "zeroThicknessEdgeVelocity"
+    v = rec.get(key)
+    info = dict(v) if isinstance(v, dict) else ({} if v is None else {"enabled": v})
+    for k, x in rec.items():
+        if k.startswith(key) and k != key:
+            info[k[len(key):].lstrip("_.")] = x
+    if info:
+        info["source"] = "forge_launches.jsonl"
+        en = info.get("enabled")
+        try:
+            info["enabled"] = bool(int(en)) if en is not None else (True if info.get("field") else None)
+        except (TypeError, ValueError):
+            info["enabled"] = None
+    else:
+        info = _zte_from_log(run_dir)
+    if not info:
+        return "no_info", None, rec.get("cfg_fnv")
+    return "ok", info, rec.get("cfg_fnv")
+
+
+def _hash_agrees(recorded, full) -> bool:
+    """ソルバの記録したハッシュ (全桁、または起動ログの先頭 16 桁) が再計算の全桁と一致するか。記録が無ければ True。"""
+    if recorded in (None, ""):
+        return True
+    r = str(recorded).lower()
+    return len(r) >= 16 and str(full).lower().startswith(r)
+
+
+def zte_provenance(run_dir) -> dict:
+    """評価の来歴: 処置の有効状態・フィールド・属性のタグ/rings・格子署名・w のハッシュ・節点数・起動の記録と、
+    設計 DB の識別に使う `effective` ("off" / "tags=...;rings=N" / None = 不明)。
+    有効の評価が確定する条件: 最後の起動 (forge_launches.jsonl) の config が solverConfig_main と同じ・runner の起動前の
+    記録 (zte_launches.jsonl) がその起動に対応する・いま meshFileName から再計算した格子署名と w のハッシュが起動前と
+    同じ・**ソルバが有効を記録** (forge_launches.jsonl に処置のキーがあればそれ、無ければ起動ログ forge_run.log の
+    effective 行。格子署名・ハッシュを記録していれば一致)。旧バイナリは未知の space キーを
+    黙って無視しうるので、設定だけでは処置が掛かったと言えない。無効は設定にキーが無ければ確定
+    (最後の起動が有効を記録していたら矛盾で不明)。"""
+    sm = _stage_manifest()
+    rd = Path(run_dir)
+    cfgp = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
+    st, launch, launch_fnv = _last_launch_zte(rd)
+    pre = _last_jsonl(rd / ZTE_LAUNCHES)
+    out = {"enabled": False, "field": None, "tags": None, "rings": None, "mesh_signature": None, "field_hash": None,
+           "n_nodes": None, "attrs": None, "launch_state": st, "launch": launch, "pre_launch": pre, "effective": None, "reason": ""}
+    if not cfgp.exists():
+        out["reason"] = "solverConfig が無い"
+        return out
+    cfg = cfgp.read_text()
+    zc = sm.zte_config(cfg)
+    if zc is None:
+        if launch is not None and launch.get("enabled"):
+            out["reason"] = "設定は無効なのに最後の起動が有効を記録"
+        else:
+            out["effective"] = "off"
+        return out
+    out.update({"enabled": True, "field": zc["field"]})
+    if zc["invalid"]:
+        out["reason"] = f"設定が不正 ({zc['invalid']})"
+        return out
+    h5 = sm.zte_mesh_file(cfg, rd)
+    try:
+        a = sm.zte_identity(h5, zc["field"])
+    except SystemExit as e:          # 道具・h5py が無い: 識別できないので不明 (collect・再判定を止めない)
+        out["reason"] = str(e)
+        return out
+    if a is None:
+        out["reason"] = f"meshFileName {h5} に /AUX/{zc['field']} が無い"
+        return out
+    out.update({"tags": a["tags"], "rings": a["rings"], "mesh_signature": a["mesh_signature"], "field_hash": a["field_hash"],
+                "n_nodes": a["n"], "attrs": a["attrs"], "h5": Path(h5).name})
+    n = _mesh_nodes(h5)
+    fnv = sm.fnv1a64(cfg)
+    if not a["tags"] or a["rings"] is None:
+        out["reason"] = "w の属性 (tags / rings) が欠けている"
+    elif n is not None and a["n"] != n:
+        out["reason"] = f"w の長さ {a['n']} が節点数 {n} と違う"
+    elif launch_fnv is None:
+        out["reason"] = "ソルバの起動記録 (forge_launches.jsonl) が無い (どの config で起動したか結び付けられない)"
+    elif launch_fnv != fnv:
+        out["reason"] = "最後の起動の config が solverConfig_main と違う (本段で終わっていない)"
+    elif pre is None or pre.get("cfg_fnv") != fnv:
+        out["reason"] = f"runner の起動前の記録 ({ZTE_LAUNCHES}) が最後の段に対応していない"
+    elif (pre.get("mesh_signature"), pre.get("field_hash")) != (a["mesh_signature"], a["field_hash"]):
+        out["reason"] = "起動前と今で格子署名または w のハッシュが違う (起動後に h5 が変わった)"
+    elif launch is None or launch.get("enabled") is not True:
+        out["reason"] = f"最後の起動が処置の有効を記録していない (起動記録: {st})"
+    elif launch.get("field") not in (None, zc["field"]):
+        out["reason"] = f"最後の起動のフィールド {launch.get('field')} が設定 {zc['field']} と違う"
+    elif not all(_hash_agrees(launch.get(k), a[k]) for k in ("mesh_signature", "field_hash")):
+        out["reason"] = "ソルバが記録した格子署名または w のハッシュが再計算と違う"
+    else:
+        out["effective"] = sm.zte_signature(a["tags"], a["rings"])
+    return out
 
 
 def _dv(p: Problem, name, default=None) -> float:
@@ -287,6 +600,14 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     _pmin = f", pMin: {float(pm)}" if pm is not None else ""   # physProp 配下 (space ではない)
     disc = p.mesh.get("discretization", "cell")
     model = p.evaluate.get("model", "euler")
+    # 厚さ 0 の板の自由端の速度再構成 (plan convection-zero-thickness-edge-reconstruction §4): 有効/フィールド名だけを出す。
+    # 段階起動の全段に同じ値が出る (run_staged の各段は cfg_main の置換なので)。1 次・層流暖機の段では効かないが、値は
+    # 同じに出して区間識別と来歴をそろえる。node 以外はソルバの起動時エラーなので、ここで先に止める
+    _zte_key = ""
+    if zte_spec(p) is not None:
+        if disc != "node":
+            raise ValueError(f"evaluate.zero_thickness_edge_velocity は node のみ (mesh.discretization: {disc})")
+        _zte_key = ZTE_SPACE_FRAGMENT
     node_keys = ", nodeWallDirichlet: 1" if (disc == "node" and model != "euler") else ""
     # R4b(i) (2026-09-13): 入口∩壁の角ノードの半割面所有を壁側に (converter が変換時に読む)。既定 0 = 旧 run とビット一致。
     # 生産 YAML は mesh.node_inlet_corner_wall: 1 (角ノードの壁圧 1.75 p_in 対策; plans/active/boundary-node-inlet-corner-wall.md)
@@ -343,7 +664,7 @@ time:
   outStepInterval: {out_int}
   timeIntegration: 11
   nStepInner: 5
-space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, venkatK: {_vk}{_wnc_key}}}
+space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, venkatK: {_vk}{_wnc_key}{_zte_key}}}
 {turb}
 initial: "uniform_p101325_u10"
 """
@@ -578,6 +899,10 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     p = load_problem(problem_path)
     if p.type != "sern_2d":
         raise ValueError("runner_sern は sern_2d 専用")
+    # 厚さ 0 の板の自由端の処置: 指定の検査 (タグは格子の境界名) を格子を作る前に済ませる
+    zte = zte_spec(p, known_tags=PHYS_SERN.keys())
+    if zte is not None and p.mesh.get("discretization", "cell") != "node":
+        raise ValueError("evaluate.zero_thickness_edge_velocity は node のみ (mesh.discretization: node にすること)")
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     d0 = design_snapshot(p)                        # 設計点 (作動点で上書きされる前に保存)
@@ -614,8 +939,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     write_species_db(p, run_dir, frozen_gases(p))     # R3: species_meta.yaml (lump の NASA-9 はソルバが合成、cpg なら何も書かない)
     disc = p.mesh.get("discretization", "cell")
     # 品質ゲートは primal (cell) 変換で
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
-                                               .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
+    (run_dir / "solverConfig.yaml").write_text(qc_cell_config(cfg, disc))
     # 品質ゲートの primal (cell) 変換では farfield を slip に読み替える: farfield は node 専用で、変換器も境界の対応範囲を
     # 検査して止まる (2026-10-05、R7a で初めて farfield 入りの生産 YAML から格子を作って発覚)。どちらも壁ではないので
     # 壁距離・品質判定は同じ。node の本変換の前に元の bcond に戻す
@@ -640,6 +964,8 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     for f in run_dir.glob("sern_qc.xmf"):
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg)
+    if zte is not None:      # 処置の節点フィールドを変換した格子に書く (格子を作るたびに作り直す)
+        mark_zte_field(run_dir, zte)
     # `mesh.ic: moc` で排気側を MOC 場から与える (既定 uniform)。一様 IC は入口状態を全域に置くので
     # 出口で 17 倍ずれており、梯子 12000 step の主因になっている (2026-09-19)
     _ic = str(p.mesh.get("ic", "uniform")).lower()
@@ -659,6 +985,10 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                        "p_te_over_p_in": kern.p_te_over_p_in, "warnings": design.info["warnings"]},
             "moc_forces": fr_moc, "F_ideal_N_per_m": F_ideal_nd * ex["P"] * H, "M_e_ideal": M_e_id,
             "mesh": minfo, "discretization": disc, "model": p.evaluate.get("model", "euler")}
+    if zte is not None:      # IC・化学種属性を書いた後でも w が残っていることを確かめ、再計算した識別量を来歴に残す
+        info["zero_thickness_edge_velocity"] = {"requested": zte, "signature": zte_signature_of(zte), "field": ZTE_FIELD,
+                                                "identity": verify_zte_field(run_dir, zte)}
+    check_zte_stage(cfg, (run_dir / "bcondConfig.yaml").read_text(), run_dir)     # 本段の起動条件 (無効なら何もしない)
     (run_dir / "solverConfig_main.yaml").write_text(cfg)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
@@ -865,6 +1195,7 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
 
 
 def run_forge(run_dir) -> int:
+    _record_zte_launch(run_dir)     # 処置を有効にした段だけ: 起動条件の検査と、読む w の識別量の記録 (無効の段は何もしない)
     r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=_ENV, capture_output=True, text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
     return r.returncode
@@ -1046,6 +1377,11 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     out["slau_wall_normal_chi_effective"] = _last_launch_chi(run_dir)
     # 実効 mesh.scalarGradient (plan gradient-scalar-lsq-unification #6、codex diagnose 2026-09-27)。記録が無ければ None = 不明。
     out["scalar_gradient_effective"] = _last_launch_value(run_dir, "scalarGradient", allowed=("gg", "lsq"))
+    # 厚さ 0 の板の自由端の処置 (plan convection-zero-thickness-edge-reconstruction §4): 有効状態・タグ・rings・格子署名・
+    # w のハッシュ・起動の記録と、設計 DB の識別子 (処置の有無・タグ・rings が違う評価を同じ設計点として混ぜない)
+    _zp = zte_provenance(run_dir)
+    out["zero_thickness_edge_velocity"] = _zp
+    out[ZTE_EFFECTIVE] = _zp["effective"]
     out["flag_policy"] = FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out

@@ -127,6 +127,11 @@ def paste_region_ic3d(h5path, y_mid, scale, half_W_m, st, gamma, minfo=None):
 
 def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     p = load_problem(problem_path)
+    # 厚さ 0 の板の自由端の処置 (plan convection-zero-thickness-edge-reconstruction §4): 指定の検査を格子を作る前に済ませる
+    zte = R2.zte_spec(p, known_tags=PHYS_SERN3D.keys())
+    if zte is not None and p.mesh.get("discretization", "cell") != "node":
+        # config の discretization は R2._solver_config の既定 (cell) に従うので、明示の node を要求する
+        raise ValueError("evaluate.zero_thickness_edge_velocity は node のみ (mesh.discretization: node にすること)")
     run_dir = Path(run_dir); run_dir.mkdir(parents=True, exist_ok=False)
     d0 = R2.design_snapshot(p); opinfo = R2.select_operating_point(p, op); st = R2.gas_states(p)
     kern, design, fr_moc, theta_b = R2.design_from_problem(p, design=d0)
@@ -146,6 +151,8 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
                            vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
                            ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
                            interface_angle=float(m2.get("interface_angle_rad", theta_b)),
+                           # 後縁下流の中間線の局所変形の長さ L_b / H (0 = 無効 = 旧格子。plan convection-zero-thickness-edge-reconstruction §4.2)
+                           te_wake_blend_H=float(m.get("te_wake_blend_H", 0.0)),
                            top_ext_angle=float(np.deg2rad(m2.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))), scale=H)
     coords, hexes, B, minfo, y_mid = generate_sern_mesh3d(design, prm)
     write_msh41_3d(run_dir / "sern.msh", coords, hexes, B, PHYS_SERN3D)
@@ -156,8 +163,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     (run_dir / "bcondConfig.yaml").write_text(_bcond_config(p, st)); (run_dir / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")
     R2.write_species_db(p, run_dir, R2.frozen_gases(p))     # R3
     disc = p.mesh.get("discretization", "node")
-    (run_dir / "solverConfig.yaml").write_text(cfg.replace(f'discretization: "{disc}"', 'discretization: "cell"')
-                                               .replace(", nodeWallDirichlet: 1", "").replace(", nodeInletCornerWall: 1", ""))
+    (run_dir / "solverConfig.yaml").write_text(R2.qc_cell_config(cfg, disc))
     # 品質ゲートの primal (cell) 変換では farfield を slip に読み替える: farfield は node 専用で、変換器も境界の対応範囲を
     # 検査して止まる (2026-10-05、R7a で初めて farfield 入りの生産 YAML から格子を作って発覚)。どちらも壁ではないので
     # 壁距離・品質判定は同じ。node の本変換の前に元の bcond に戻す
@@ -181,6 +187,8 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     for f in run_dir.glob("sern_qc.xmf"):
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg); (run_dir / "solverConfig_main.yaml").write_text(cfg)
+    if zte is not None:      # 処置の重み w を最終の node 格子に書く (品質確認用の cell 格子ではない。格子を作るたびに作り直す)
+        R2.mark_zte_field(run_dir, zte)
     paste_region_ic3d(run_dir / MESH, y_mid, H, 0.5 * prm.W * H, st, p.gamma, minfo=minfo if disc == "node" else None)
     ex = st["exhaust"]; F_ideal_nd, M_e_id = R2.ideal_thrust(p, st)
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "operating_point": opinfo, "gas_model": st["gas_model"],
@@ -191,6 +199,10 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
             # R2 (codex M5): 幅外の機体下面 (ramp タグの z > W/2) は **物理的な機体幅 W_vehicle** までを機体力として
             # 集計し、遠方境界 Z_ext に依存させない (None = 上限なし = 旧挙動)。総推力 C_T にはどちらも入れない
             "half_W_vehicle_m": (0.5 * float(m["W_vehicle"]) * H) if m.get("W_vehicle") is not None else None}
+    if zte is not None:      # IC を書いた後でも w が残っていることを確かめ、再計算した識別量を来歴に残す
+        info["zero_thickness_edge_velocity"] = {"requested": zte, "signature": R2.zte_signature_of(zte), "field": R2.ZTE_FIELD,
+                                                "identity": R2.verify_zte_field(run_dir, zte)}
+    R2.check_zte_stage(cfg, (run_dir / "bcondConfig.yaml").read_text(), run_dir)     # 本段の起動条件 (無効なら何もしない)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -359,6 +371,9 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     # 来歴 (2D runner と同じ関数・同じ厳格さ。codex result 2026-09-27 chi-default m6)
     out["slau_wall_normal_chi_effective"] = R2._last_launch_chi(run_dir)
     out["scalar_gradient_effective"] = R2._last_launch_value(run_dir, "scalarGradient", allowed=("gg", "lsq"))
+    _zp = R2.zte_provenance(run_dir)      # 厚さ 0 の板の自由端の処置 (2D runner と同じ関数)
+    out["zero_thickness_edge_velocity"] = _zp
+    out[R2.ZTE_EFFECTIVE] = _zp["effective"]
     out["flag_policy"] = R2.FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out
