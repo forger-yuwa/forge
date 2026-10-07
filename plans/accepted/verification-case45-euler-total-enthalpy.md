@@ -3,12 +3,12 @@
 ## メタ
 
 - **area**: `verification`
-- **status**: `draft`  <!-- 診断の段階。次の手の登録が揃ったら plan 段レビュー (§5.1 #4) を回して in_progress に -->
+- **status**: `done`  <!-- 2026-10-07: 原因の候補と未確定の範囲での完了 (§8)。Euler は mesh_euler、較正値 6.8825e-6 -->
 - **related_docs**:
   - `procedures/solver-settings.md` (Euler・node・SLAU・block-DPLUR の設定)
   - `solver_density_cuda/tools/total_quantities.py` (全温・全圧の求め方)
 - **related_plans**:
-  - [discretization-moc-axis-limit-and-corrector.md](discretization-moc-axis-limit-and-corrector.md) (V5・V5b・V5c でこの異常が見つかった。MOC の生産採用の判断は本 plan の切り分けを待つ)
+  - [discretization-moc-axis-limit-and-corrector.md](../active/discretization-moc-axis-limit-and-corrector.md) (V5・V5b・V5c でこの異常が見つかった。MOC の生産採用の判断は本 plan の切り分けを待つ)
   - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (単調壁の採用の E′ も同じ種類の Euler の比較)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`
@@ -68,7 +68,8 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | 6 | ~~E5 δ_E の参照場の感度~~ 完了 (2026-10-07、PASS) | §9 | O |
 | 7 | ~~E6 初期線 run_0062 への影響の表~~ 完了 (2026-10-07) | §9 | O |
 | 8 | ~~§8 の整理~~ 完了 (2026-10-07) | §9「§8 の整理」 | O |
-| 5 | codex result 段レビュー | `--stage result` | O |
+| 5 | ~~codex result 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M0/m2、全件採用 (§6.1) | O |
+| 9 | 保留 (今回の完了条件の外) | ① G1 の後期の壁際の異常の原因 (薄い高 AR セルの離散化・float32 の幾何の精度・反復の振る舞い) の分離。② soft 段の起動時の過渡と ① の因果。③ 初期線 run_0062 の全温・質量流束の時系列と 1100 × 65 の離散化誤差の影響。**再調査の条件**: 壁際細分化の格子で Euler を回す必要が再び出たとき (設計チェーンの Euler は `mesh_euler` で避けている)、または NS で同種の全温の外れが見つかったとき。MOC の採否 (V5d の保留・V5′) は plan discretization-moc-axis-limit-and-corrector に引き継ぐ | — |
 
 ## 6. 検証
 
@@ -138,7 +139,8 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | diagnose (E2 の穴 2 つ) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-t0-e2-holes2-diagnose.md`](../../notes/reviews/2026-10-07-euler-t0-e2-holes2-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-t0-e2-holes2.md`](../../notes/reviews/briefs/2026-10-07-euler-t0-e2-holes2.md)) | M3/m1 | 採用: 近零の主指標は偏差のまま、整定は絶対の幅 ≤ 0.1 K で判定し STEADY は記録だけ (M) / T₀ そのものへの置換・近零の列だけの例外は却下 (M) / 本段 54000 step・窓 42000〜54000、still converging は許さない (M) / 実装担当の読みを採用、ただし「スロートの 3 領域」は 3 領域を合わせた最大 > 100 K、割合は評価点の数の割合 (m) |
 | diagnose (切り替えの計画) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md`](../../notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-grid-switch-plan.md`](../../notes/reviews/briefs/2026-10-07-euler-grid-switch-plan.md)) | M6/m1 | 全件採用: `mesh_euler` を設ける (YAML の値だけ直す案は却下) / E2 の B を「設計の評価量も準定常」と読まない (全温以外は未確認、B の正式な判定は DRIFTING 25 列・OSCILLATING 2 列) / E4 は legacy MOC で / 出口コア M は共通の η の列で、NS への移植は NS で判定 / V5d は両腕に同じ較正値 / 較正値が変わったら NS の対照 (N0) を更新してから U4 (N1)・V5′ (N2) / 実効の設定の記録と手順書の更新 (m) |
 | diagnose (E4 の段 1 の僅差) | `2026-10-07` | [`notes/reviews/2026-10-07-e4-stage1-marginal-diagnose.md`](../../notes/reviews/2026-10-07-e4-stage1-marginal-diagnose.md) (ブリーフ [`briefs/2026-10-07-e4-stage1-marginal.md`](../../notes/reviews/briefs/2026-10-07-e4-stage1-marginal.md)) | M3 | 採用: 段 1 は判別不能のまま、δcand の独立の検証 E4V を事前に登録して 1 回だけ (M) / 段 2 として進めて合格だけで採る案は却下 (M) / 0.1 K を緩める案は却下 (M) |
-| plan (遅延) | `2026-10-07` | [`notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-plan.md`](../../notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-plan.md) | GO-with-changes, C0/M3/m2 | 全件採用。Major の採否は上位に諮らずに決めた (採用は検査と記録の追加だけで、設計方針を変えないため)。M1 出口較正と δ_E・C2 の参照を別のゲートに → §6 E5・§5.1 #6 / M2 初期線 run_0062 への影響を全温の両側と初期線の量で → §6 E6・§5.1 #7 / M3 §8 を閉じる作業を §5.1 #8 に / m4 E3 の (4) は登録条件「FAIL 0」が未達で、既存の失敗 3 件 (`run_sern_gates_tests.py`・`run_sern_moc_tests.py`・`run_species_attrs_ic_tests.py`、変更前の 7a505415 でも FAIL) として免除と明記 (§9) / m5 §2 の範囲を更新、`methods/design/overview.md`・`procedures/nozzle-design-workflow.md` の較正値を現行値 6.88e-6 に同期。レビューの注記「手元の評価 JSON は段 1 までの記録」は、E4V の評価の JSON が AWS にあり手元に同期していなかったため。result 段レビューの前に同期する |
+| result | `2026-10-07` | [`notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-result.md`](../../notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-result.md) | GO-with-changes, C0/M0/m2 | 全件採用: m1 §5.1 #9 に今回の完了条件の外の保留事項と再調査の条件・MOC の採否の引き継ぎを書いた / m2 ①(b) の偏差を「最終 54000 時点で −234.9〜+292.6 K、窓の全体では最大 +294.5 K」に訂正。レビューは E1〜E6・E4V の数値を保存記録から再現 (E6 は run_0062 の res_6000 を直接再計算) |
+| plan | `2026-10-07` | [`notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-plan.md`](../../notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-plan.md) | GO-with-changes, C0/M3/m2 | (遅延: E3 の実装の後に回した、§9) 全件採用。Major の採否は上位に諮らずに決めた (採用は検査と記録の追加だけで、設計方針を変えないため)。M1 出口較正と δ_E・C2 の参照を別のゲートに → §6 E5・§5.1 #6 / M2 初期線 run_0062 への影響を全温の両側と初期線の量で → §6 E6・§5.1 #7 / M3 §8 を閉じる作業を §5.1 #8 に / m4 E3 の (4) は登録条件「FAIL 0」が未達で、既存の失敗 3 件 (`run_sern_gates_tests.py`・`run_sern_moc_tests.py`・`run_species_attrs_ic_tests.py`、変更前の 7a505415 でも FAIL) として免除と明記 (§9) / m5 §2 の範囲を更新、`methods/design/overview.md`・`procedures/nozzle-design-workflow.md` の較正値を現行値 6.88e-6 に同期。レビューの注記「手元の評価 JSON は段 1 までの記録」は、E4V の評価の JSON が AWS にあり手元に同期していなかったため。result 段レビューの前に同期する |
 
 ## 7. 影響範囲
 
@@ -148,8 +150,8 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 
 - [x] 発生する段と原因 (または原因の候補と未確定の範囲) を §9 に記録する (2026-10-07「§8 の整理」)
 - [x] 設計チェーンの入力 (初期線 run_0062・出口較正) への影響の見積もりを記録する (同上)
-- [ ] codex レビュー 2 回 (plan / result) を §6.1 に記録
-- [ ] `status: done` にして accepted へ移動し、`plans/README.md` を同期
+- [x] codex レビュー 2 回 (plan / result) を §6.1 に記録
+- [x] `status: done` にして accepted へ移動し、`plans/README.md` を同期 (2026-10-07)
 
 ## 9. 変更ログ
 
@@ -208,7 +210,7 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 - `2026-10-07` — **§8 の整理** (plan 段レビュー M3。2026-10-07 の諮問 `notes/reviews/2026-10-07-euler-t0-result-interpretation-diagnose.md` で ①〜③ を訂正した版。訂正前の文言は commit 9fb2500d の版):
   - **① 発生する段と原因 — 2 つの観測を分けて書く**:
     - (a) **起動時の過渡 (両配点に共通)**: soft 段 (1 次・cfl 0.5・3000 step) の終わりに、下流の軸上で数百 K の偏差がある。G1 (E2 の A) で −354.8〜+315.4 K、全域 0.005 (E2 の B) でも −329.1〜+346.2 K (`_band_ab/euler_t0_e2_eval.json`)。等エントロピーの IC (E1 の A) は全節点 ±0.011 K で、本段の起動での変化は最大 1 ULP (E1 の B→C)。したがって偏差は IC の生成でも本段の起動でもなく、soft 段の間 (起動直後の初期化か反復の途中かは区別していない) に現れる。
-    - (b) **G1 の後期の壁際の異常 (G1 だけ)**: 本段 42000〜54000 で、A (G1) はスロート付近の壁際に −234.9〜+292.6 K の偏差が残り、窓の中でも動く (最大絶対偏差は全時点で > 182 K)。B (全域 0.005) は同じ窓で全領域の最大絶対偏差 ≤ 0.103 K で、登録した窓の絶対の変動幅の条件を満たした (ただし B の準定常の正式判定は DRIFTING 25 列・OSCILLATING 2 列で、収束の認定ではない)。E2 の登録上の判定は「判別不能」(A の時間の幅の前提が不成立) のまま。
+    - (b) **G1 の後期の壁際の異常 (G1 だけ)**: 本段 42000〜54000 で、A (G1) はスロート付近の壁際に偏差が残り、窓の中でも動く (最終 54000 時点で −234.9〜+292.6 K、窓の全体では最大 +294.5 K [53000]、最大絶対偏差は全時点で > 182 K)。B (全域 0.005) は同じ窓で全領域の最大絶対偏差 ≤ 0.103 K で、登録した窓の絶対の変動幅の条件を満たした (ただし B の準定常の正式判定は DRIFTING 25 列・OSCILLATING 2 列で、収束の認定ではない)。E2 の登録上の判定は「判別不能」(A の時間の幅の前提が不成立) のまま。
     - **原因の候補 (b について)**: 壁際の薄い高 AR セル (第 1 セル 1e-5 以下・AR 約 4300) での離散化、float32 の幾何の精度 (前例 `axisym-rweight-closure-fp32`・`node-yp1-dual-geometry-float32-fix`)、反復の振る舞い (整定しない収束は観測された症状で、前の 2 つと排他的な原因ではない)。**未確定**: どれかは分離していない (倍精度のビルドや配点の段階的な変更はしていない)。(a) が (b) の種になっているかも確かめていない。
   - **② 設計の入力への影響**:
     - 初期線 run_0062: **使っている凍結スナップショット res_6000 には数百 K の異常を認めない** (T₀ − 1600 は −0.058〜+0.073 K、E6)。初期線の量の 5 枚の安定性も既存の記録で 1e-4 以下。凍結源は維持する。全温・質量流束の時系列と、1100 × 65 の離散化誤差の影響は未評価。
@@ -216,3 +218,4 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
     - 単調壁の E′ (G1 の Euler の比較) は取り消さない (ユーザ決定)。MOC の V5/V5b (G1) は、再評価先を V5d (新しい格子) に移したが、V5d も「保留 (前提不成立)」で採否は保留。
   - **③ 下流の参照の採用条件**: 出口較正の採用 (E4V: 出口 M・全温・残差の条件) と δ_E・C2 の参照の採用 (E5: 参照の窓の中の δ_E/δ_C の幅 ≤ 5e-4) を別のゲートにした。**run_0164 は両方を満たす** (E4V 合格・E5 PASS)。**run_0174 は E5 は PASS だが、出口較正の条件の全部は満たしていない**: V5d の記録で出口の M_common は 13 枚とも \|M − 6\| ≤ 5.3e-5 (目標 1e-4 の内) だが、全温の時間の幅 (`max_dn_wall`) が 0.113〜0.126 K で 0.1 K を超える (V5d は前提不成立で保留)。N2 の δ_E の参照に run_0174 を使うことは E5 で支持されるが、run_0174 を較正の場としては採らない (較正値は 3 条件で共通の run_0164 由来)。
 - `2026-10-07` — **codex (diagnose) に諮った (result 段の前の解釈)**: `notes/reviews/2026-10-07-euler-t0-result-interpretation-diagnose.md` — 追加の CFD は行わず、解釈の限定と採用の根拠を §9 に反映した版を result 段レビューに回す。全件採用し「§8 の整理」を訂正: ① soft 段の終わりの偏差は両配点に共通の起動時の過渡 (B でも −329〜+346 K、下流の軸上) で、G1 の後期の壁際の異常とは別の観測 (訂正前は「G1 格子の soft 段の計算の中で発生」と書いていた — 誤り) / ② run_0062 は「凍結スナップショットに異常を認めない」に限定、較正の差は「新しい評価条件で較正し直した結果の差」 / ③ run_0174 は E5 PASS だが全温の時間の幅が 0.1 K を超え、両方のゲートの合格とは言えない (訂正前は「run_0164・run_0174 は両方を満たす」— run_0174 について誤り) / E2 の B は「整定」でなく「登録窓の絶対の変動幅の条件を満たした」、V5/V5b は「V5d に移したが採否は保留」。
+- `2026-10-07` — **codex result 段レビュー**: `notes/reviews/2026-10-07-verification-case45-euler-total-enthalpy-result.md` (GO-with-changes、C0/M0/m2)。全件採用 (§6.1)。**完了**: 区分は「原因の候補と未確定の範囲での完了」(§8)。成果は (1) Euler の格子を `mesh_euler` (壁に寄せない配点) に分けた (E3)、(2) 新しい格子で出口較正をやり直した (E4V、較正値 6.8825162455159465e-06)、(3) δ_E の参照の採用を別のゲートにした (E5)。原因の同定・MOC の生産採用は完了として扱わない (§5.1 #9)。accepted へ移す。
