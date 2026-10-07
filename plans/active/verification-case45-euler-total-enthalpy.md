@@ -62,7 +62,7 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | 3c | ~~E2 の解釈と次の手~~ ユーザ決定 2026-10-07 | 「あなたの方針でよい」: Euler の格子を壁に寄せない配点に切り替え、出口較正と MOC の V5 をやり直す。単調壁の E′ は採用を取り消さない | ユーザ |
 | 4b | ~~切り替えとやり直しの登録~~ 完了 | 判断: 2026-10-07 codex (diagnose) — `mesh_euler` を設けて Euler の既定を全域 0.005、E4 は legacy MOC で先に、順序は E3 → E4 → V5d → 較正値の確定 → NS の対照の更新 → U4 → V5′ | F |
 | 5a | ~~E3~~ 完了 (commit 3a9bc9f8、(1) の run_0162 との直接の照合だけ AWS で残り) | §9 | O |
-| 5b | E4 | スクリプトは commit 3a9bc9f8。**AWS で回して判定を出す** | O |
+| 5b | E4 | 段 1 (run_0163) は判別不能 (§9)。**E4V (δcand の独立の検証、§6) を回す** | O |
 | 4 | codex plan 段レビュー | 次の手の登録が揃った時点で `codex_review.py <本 plan> --stage plan` | O |
 | 5 | codex result 段レビュー | `--stage result` | O |
 
@@ -110,6 +110,12 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
   - NS の出口の合否は NS で判定する (Euler の較正の合格を NS に移せるとは限らない。配点も粘性も違う)。
   - やらないこと: G1 の異常な場の再利用、合格するまで窓や補正の回数を変えること。
 
+- **E4V δ の候補の独立の検証 (2026-10-07 登録、検証の run の結果を誰も見る前。諮問 `notes/reviews/2026-10-07-e4-stage1-marginal-diagnose.md`)**: E4 の段 1 (run_0163) の判定は「判別不能」(全温の時間の幅が 27 列中 1 列 `max_dn_wall` で 0.10653168238 K > 0.1 K) のまま維持し、遡って変えない。その結果から得た δcand = 6.8825162455159465e-6 (= δ₀ − (13 枚の平均 M_common − 6)) を探索的な候補として固定し、独立の検証 E4V を **1 回だけ** 行う。
+  - 旧段 1 の合格は E4V の開始条件にしない。固定の条件・初期化・計算の長さ・評価窓・P1 (残差)・P2 (全温、時間の幅 ≤ 0.1 K を維持)・P3 (出口 M)・Mach の目標 (13 枚すべてで \|M_common − 6\| ≤ 1e-4) は旧 E4 と同じ。変える入力は `Md_moc_offset` だけ (壁と格子はそれに従って作り直す)。run は run_0164_euler_e4_recal_d1。
+  - E4V 自身が全条件を満たす場合に限り、今回の実務の較正として δcand とその参照の場 (run_0164) を採る。全前提を満たして目標を外せば「係数 1 の 1 回の補正で足りる」を退ける。前提の未達は保留。追加の補正・窓の変更・延長による救済はしない。
+  - 0.1 K は緩めない (Mach の誤差 ≤ 1e-4 を保証する換算の根拠はないが、今回の結果だけを根拠に緩める理由もない)。A (δ₀) と B (δcand) を「収束解の差」の証明には使わない (A は未合格)。
+  - 実装: `e4_recal.py make-d1` と `e4_recal_eval.py` の段 2 の判定を、この登録 (段 1 が判別不能でも、登録した δcand と一致するときだけ作る・判定する) に合わせる。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -120,6 +126,7 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | diagnose (E2 の収束の前提) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-t0-e2-convergence-precondition-diagnose.md`](../../notes/reviews/2026-10-07-euler-t0-e2-convergence-precondition-diagnose.md) | M3 | 採用: plateau は固定の予算の配点の感度の診断に限って認める (M) / STEADY だけで 1 K の整定は保証できない (合成 300→304 K が STEADY) ので、時間方向の幅 ≤ 0.1 K を追加 (M) / plateau の認定は全残差列の内訳で、停滞だけのときに限る (M)。§6 E2 の判定の前提と判定を確定 |
 | diagnose (E2 の穴 2 つ) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-t0-e2-holes2-diagnose.md`](../../notes/reviews/2026-10-07-euler-t0-e2-holes2-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-t0-e2-holes2.md`](../../notes/reviews/briefs/2026-10-07-euler-t0-e2-holes2.md)) | M3/m1 | 採用: 近零の主指標は偏差のまま、整定は絶対の幅 ≤ 0.1 K で判定し STEADY は記録だけ (M) / T₀ そのものへの置換・近零の列だけの例外は却下 (M) / 本段 54000 step・窓 42000〜54000、still converging は許さない (M) / 実装担当の読みを採用、ただし「スロートの 3 領域」は 3 領域を合わせた最大 > 100 K、割合は評価点の数の割合 (m) |
 | diagnose (切り替えの計画) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md`](../../notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-grid-switch-plan.md`](../../notes/reviews/briefs/2026-10-07-euler-grid-switch-plan.md)) | M6/m1 | 全件採用: `mesh_euler` を設ける (YAML の値だけ直す案は却下) / E2 の B を「設計の評価量も準定常」と読まない (全温以外は未確認、B の正式な判定は DRIFTING 25 列・OSCILLATING 2 列) / E4 は legacy MOC で / 出口コア M は共通の η の列で、NS への移植は NS で判定 / V5d は両腕に同じ較正値 / 較正値が変わったら NS の対照 (N0) を更新してから U4 (N1)・V5′ (N2) / 実効の設定の記録と手順書の更新 (m) |
+| diagnose (E4 の段 1 の僅差) | `2026-10-07` | [`notes/reviews/2026-10-07-e4-stage1-marginal-diagnose.md`](../../notes/reviews/2026-10-07-e4-stage1-marginal-diagnose.md) (ブリーフ [`briefs/2026-10-07-e4-stage1-marginal.md`](../../notes/reviews/briefs/2026-10-07-e4-stage1-marginal.md)) | M3 | 採用: 段 1 は判別不能のまま、δcand の独立の検証 E4V を事前に登録して 1 回だけ (M) / 段 2 として進めて合格だけで採る案は却下 (M) / 0.1 K を緩める案は却下 (M) |
 
 ## 7. 影響範囲
 
@@ -161,3 +168,4 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
   - 実装時の判断 (主セッションで採用): 1100 × 65 の旧 Euler の問題は記録の格子のまま明示 (記録の再現のため)。
 - `2026-10-07` — **E4 のスクリプト (投入前の記録)**: `case/45.isobutane_m6_d155/{run_e4_recal.sh, e4_recal.py, e4_recal_eval.py, test_e4_recal_eval.py, problem_d155_euler_e4_recal_d0.yaml}`。評価器の sha256 39722e1a6286c60c242189835119e4a1ed0b5d034f0289e85572e56f27974573 (登録 99431498)、commit 3a9bc9f8、試験 65 件 FAIL 0、乾式確認 OK (AR 最大 4.9、IC の max\|T₀ − 1600\| 0.0106 K)。実装時の読み (結果を見る前、主セッションで採用): δ₁ の「平均 M_common」は判定窓 13 枚の平均 (#11f は末尾 5 枚、その値も記録する) / float の ≤ はそのまま / 「末尾 5 枚 − 直前 5 枚 (45000〜49000)」の平均の差は絶対値 / M_common の η は G1 の最終断面の 12 点 (0.08876〜0.67224、sha 96a495c2…、AWS で run_0147 と照合) / 全温の評価点は自格子の節点。
 - `2026-10-07` — **E3 (1) の直接の照合: PASS** (AWS の run_0162 の `nozzle.msh` の sha256 859076b7… と座標の sha256 44ddbcec… が、変更後のコード + `mesh_euler` の生成と一致)。E4 の乾式確認を AWS でも OK、E4 の段 1 (δ₀) を投入 (run_0163_euler_e4_recal_d0)。
+- `2026-10-07` — **E4 の段 1 の判定: 判別不能** (run_0163_euler_e4_recal_d0、出力 `case/45.isobutane_m6_d155/_band_ab/e4_recal_eval.json`・`e4_recal_d0_run.log`)。残差は停滞だけ (成立)、出口 M は両窓 STEADY・13 枚の幅 9.4e-6・末尾 5 − 直前 5 = −4.7e-8 (成立)、全温は全領域で ≤ 0.160 K (±1 K は成立) だが時間の幅が 27 列中 1 列 (`max_dn_wall`) で 0.10653 K > 0.1 K。参考: M_common の 13 枚の平均 6.000370 (max\|M − 6\| 3.75e-4)、δ₁ = 6.88e-6。η の列は run_0147 と 4.3e-8 で一致。**codex (diagnose) に諮った** (`notes/reviews/2026-10-07-e4-stage1-marginal-diagnose.md`): 段 1 は判別不能のまま、δcand の独立の検証 E4V を登録 (§6)。
