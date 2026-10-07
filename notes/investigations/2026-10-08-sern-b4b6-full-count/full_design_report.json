@@ -1,0 +1,1226 @@
+{
+ "contours": {
+  "ramp": {
+   "path": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/b4a/contours/ramp_contour.csv",
+   "sha256": "2f74755d7898412a537f825fc3adb854b5d6f3dfa55f1fd2e3f0097b24e6b963",
+   "n": 4419
+  },
+  "cowl": {
+   "path": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/b4a/contours/cowl_contour.csv",
+   "sha256": "70540032d786cc894861b8156278a74fef40c1a3a1bbde358b8b407a50fc7c7e",
+   "n": 637
+  }
+ },
+ "meta": {
+  "R_f": 0.1,
+  "theta_r0_deg": 15.000000000035259,
+  "t_f": 0.013165249758770887,
+  "x_f1": -0.013165249758770887,
+  "x_f2": 0.01271665475154063,
+  "n_arc": 400,
+  "problem": "/home/sano/work/forge-sern-design/case/46.sern_design/problem_3d_prod_m6on_wallres_lswx08.yaml",
+  "H_m": 0.1,
+  "L_cowl_H": 1.2,
+  "y_te_H": -0.10498639623110881,
+  "L_ramp_H": 10.091642885701802,
+  "n_ramp": 4419,
+  "n_cowl": 637
+ },
+ "mem_model": {
+  "generate_check": [
+   1450.0,
+   0.0
+  ],
+  "convert": [
+   1579.0,
+   117.0
+  ],
+  "solver_host": [
+   1371.0,
+   120.0
+  ],
+  "solver_gpu": [
+   1400.0,
+   0.0
+  ]
+ },
+ "selfcheck_pure": [
+  {
+   "model": "b4a_tc0.005_s1",
+   "count_mesh": [
+    4349372,
+    4259394
+   ],
+   "recorded": [
+    4349372,
+    4259394
+   ],
+   "generic": [
+    4349372,
+    4259394
+   ],
+   "full_table": [
+    4349372,
+    4259394
+   ],
+   "euler": [
+    1,
+    1
+   ],
+   "ok": true
+  },
+  {
+   "model": "design",
+   "count_mesh": [
+    4034091,
+    3949416
+   ],
+   "recorded": [
+    4034091,
+    3949416
+   ],
+   "generic": [
+    4034091,
+    3949416
+   ],
+   "full_table": [
+    4034091,
+    3949416
+   ],
+   "euler": [
+    1,
+    1
+   ],
+   "ok": true
+  },
+  {
+   "model": "default",
+   "count_mesh": [
+    4433456,
+    4342320
+   ],
+   "recorded": [
+    4433456,
+    4342320
+   ],
+   "generic": [
+    4433456,
+    4342320
+   ],
+   "full_table": [
+    4433456,
+    4342320
+   ],
+   "euler": [
+    1,
+    1
+   ],
+   "ok": true
+  },
+  {
+   "model": "final",
+   "count_mesh": [
+    15559061,
+    15326600
+   ],
+   "recorded": [
+    15559061,
+    15326600
+   ],
+   "generic": [
+    15559061,
+    15326600
+   ],
+   "full_table": [
+    15559061,
+    15326600
+   ],
+   "euler": [
+    1,
+    1
+   ],
+   "ok": true
+  }
+ ],
+ "selfcheck_generator": [
+  {
+   "case": "default",
+   "nx": [
+    11,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26
+   ],
+   "nx_build": [
+    11,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26
+   ],
+   "stations": [
+    154,
+    154
+   ],
+   "nodes": [
+    4433456,
+    4433456
+   ],
+   "hexes": [
+    4342320,
+    4342320
+   ],
+   "counts_diff": {},
+   "conflicts": [
+    0,
+    0
+   ],
+   "ok": true
+  },
+  {
+   "case": "design",
+   "nx": [
+    8,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26
+   ],
+   "nx_build": [
+    8,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26
+   ],
+   "stations": [
+    151,
+    151
+   ],
+   "nodes": [
+    4034091,
+    4034091
+   ],
+   "hexes": [
+    3949416,
+    3949416
+   ],
+   "counts_diff": {},
+   "conflicts": [
+    0,
+    0
+   ],
+   "ok": true
+  },
+  {
+   "case": "final",
+   "nx": [
+    11,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26
+   ],
+   "nx_build": [
+    11,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26
+   ],
+   "stations": [
+    154,
+    154
+   ],
+   "nodes": [
+    15559061,
+    15559061
+   ],
+   "hexes": [
+    15326600,
+    15326600
+   ],
+   "counts_diff": {},
+   "conflicts": [
+    462,
+    462
+   ],
+   "ok": true
+  },
+  {
+   "case": "design_full_length",
+   "nx": [
+    8,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26,
+    93
+   ],
+   "nx_build": [
+    8,
+    28,
+    20,
+    23,
+    25,
+    20,
+    26,
+    93
+   ],
+   "stations": [
+    244,
+    244
+   ],
+   "nodes": [
+    7410604,
+    7410604
+   ],
+   "hexes": [
+    7287156,
+    7287156
+   ],
+   "counts_diff": {},
+   "conflicts": [
+    0,
+    0
+   ],
+   "ok": true
+  }
+ ],
+ "params": {
+  "AR_TAN": 900.0,
+  "CLEAR": 0.06,
+  "DR": 0.08,
+  "DXW": 0.001,
+  "DXW_B": 0.004,
+  "E5K": 1.03,
+  "FAR_LAW": "progression",
+  "FILLET_NMIN": 12,
+  "G": 1.2,
+  "H": 0.1,
+  "H1": 0.00016,
+  "H1_END": 0.001,
+  "H1_cowl_base": 0.001,
+  "H1_cowl_in": 0.00016,
+  "H1_cowl_out": 0.00016,
+  "H1_cowl_side": 0.00064,
+  "H1_ramp": 0.00016,
+  "H1_sidewall_end": 0.001,
+  "H1_sidewall_in": 0.00016,
+  "H1_sidewall_out": 0.00064,
+  "H1_vehicle_base": 0.00017,
+  "H1_vehicle_side": 0.00064,
+  "H1_vehicle_top": 0.00064,
+  "HFAR": 0.1,
+  "HX": 0.1,
+  "HX_FAR": 0.16,
+  "KV": 1.02,
+  "LCOWL": 1.2,
+  "LSW": 0.8,
+  "LWAKE": 0.02,
+  "LWAKE_B": 0.02,
+  "L_UP": 0.5,
+  "MEET_SCAN": 400,
+  "MITER_STATION": 1,
+  "M_SPL": 129,
+  "NY_CAP_SW_ONLY": 0,
+  "NZ": 31,
+  "PRESET": "design",
+  "RAMP_ZONE": 1,
+  "RING_CORE_RATIO": 0.7071067811865476,
+  "SW_END_RULE": 1,
+  "TAPER": 0.35,
+  "TC": 0.005,
+  "TOP_DEPTH": 2.0,
+  "TSW": 0.005,
+  "T_BASE": 0.02,
+  "WEDGE_DEG": 3.0,
+  "XEND": 1.5,
+  "X_OUT_EXTRA": 2.0,
+  "YBOT": -12.320694,
+  "ZFAR": 2.5,
+  "ZONE": 0.3,
+  "ZW": 1.0
+ },
+ "base": {
+  "nodes": 29784472,
+  "hexes": 29366792,
+  "unique_edges": 88934475,
+  "quads": 88516796,
+  "euler": 1,
+  "n_stations": 387,
+  "counts": {
+   "NL": 30,
+   "NL_co": 30,
+   "NL_so": 22,
+   "NL_END": {
+    "sidewall_end": 20,
+    "cowl_base": 20
+   },
+   "NR": 62,
+   "NY": 109,
+   "NZ": 50,
+   "NSW": 12,
+   "NTC": 19,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NL_vt": 22,
+   "NT": 46
+  },
+  "wall_h1_um": {
+   "ramp": 16.000000000000004,
+   "vehicle": 16.000000000000004,
+   "sidewall_in": 16.000000000000004,
+   "sidewall_out": 64.00000000000001,
+   "cowl_in": 16.000000000000004,
+   "cowl_out": 16.000000000000004,
+   "cowl_side": 64.00000000000001,
+   "sidewall_end": 100.0,
+   "cowl_base": 100.0,
+   "vehicle_top": 64.00000000000001,
+   "vehicle_base": 17.000000000000004,
+   "vehicle_side": 64.00000000000001
+  },
+  "nodes_by_region": {
+   "U0": 3076066,
+   "A": 5176794,
+   "B": 5175888,
+   "C": 11878944,
+   "D": 4476780
+  },
+  "hexes_by_region": {
+   "U0": 3035804,
+   "A": 5109036,
+   "B": 5115776,
+   "C": 11752048,
+   "D": 4354128
+  },
+  "stations_by_region": {
+   "U0": 41,
+   "A": 69,
+   "B": 68,
+   "C": 154,
+   "D": 55
+  },
+  "rows_cols": {
+   "nodes": {
+    "a": [
+     5611500,
+     1234530,
+     2469060,
+     3815820
+    ],
+    "b": [
+     580500,
+     127710,
+     255420,
+     394740
+    ],
+    "c": [
+     188100,
+     41382,
+     156456,
+     236844
+    ],
+    "de": [
+     7065458,
+     329756,
+     931392,
+     1421064
+    ],
+    "v": [
+     198000,
+     43560,
+     636912,
+     947376
+    ],
+    "tb": [
+     442300,
+     96974,
+     187308,
+     289476
+    ],
+    "tc": [
+     890100,
+     195822,
+     391644,
+     605268
+    ]
+   },
+   "hexes": {
+    "a": [
+     5466146,
+     1227094,
+     2454188,
+     3792836
+    ],
+    "b": [
+     567420,
+     127380,
+     254760,
+     393720
+    ],
+    "c": [
+     183456,
+     41184,
+     152856,
+     236232
+    ],
+    "de": [
+     6972704,
+     327888,
+     917136,
+     1417392
+    ],
+    "v": [
+     190512,
+     42768,
+     611424,
+     944928
+    ],
+    "tb": [
+     416108,
+     93412,
+     186824,
+     288728
+    ],
+    "tc": [
+     870044,
+     195316,
+     390632,
+     603704
+    ]
+   }
+  },
+  "nodes_by_block": {
+   "U1a": 5611500,
+   "U2a": 1234530,
+   "Sb_a": 2469060,
+   "Sc_a": 3815820,
+   "U1b": 580500,
+   "U2b": 127710,
+   "Sb_b": 255420,
+   "Sc_b": 394740,
+   "Sb_c": 156456,
+   "Sc_c": 236844,
+   "N_BOT": 1208600,
+   "N_CORE": 2089800,
+   "N_SIDE": 2591352,
+   "N_TOP": 1175706,
+   "Sb_de": 931392,
+   "Sc_de": 1421064,
+   "Sb_v": 636912,
+   "Sc_v": 947376,
+   "T1b": 442300,
+   "T2b": 96974,
+   "Sb_tb": 187308,
+   "Sc_tb": 289476,
+   "T1c": 890100,
+   "T2c": 195822,
+   "Sb_tc": 391644,
+   "Sc_tc": 605268,
+   "SW": 329756,
+   "CW1": 188100,
+   "CW2": 41382,
+   "V1": 198000,
+   "V2": 43560
+  },
+  "layout": {
+   "phys": [
+    {
+     "x_a": -0.5,
+     "x_b": -0.013165249758770887,
+     "region": "U0",
+     "n": 25,
+     "r": -1.1459010620292083
+    },
+    {
+     "x_a": -0.013165249758770887,
+     "x_b": -0.00021830471454256873,
+     "region": "U0",
+     "n": 15,
+     "r": -1.1766808141263971
+    },
+    {
+     "x_a": -0.00021830471454256873,
+     "x_b": 0.0,
+     "region": "U0",
+     "n": 1,
+     "r": 1.0
+    },
+    {
+     "x_a": 0.0,
+     "x_b": 0.01271665475154063,
+     "region": "A",
+     "n": 15,
+     "r": 1.1745187216171051
+    },
+    {
+     "x_a": 0.01271665475154063,
+     "x_b": 0.3213699457567993,
+     "region": "A",
+     "n": 22,
+     "r": 1.1456273290277679
+    },
+    {
+     "x_a": 0.3213699457567993,
+     "x_b": 0.5000000000000001,
+     "region": "A",
+     "n": 4,
+     "r": -1.0557887252862663
+    },
+    {
+     "x_a": 0.5000000000000001,
+     "x_b": 0.8000000000000002,
+     "region": "A",
+     "n": 28,
+     "r": -1.1452347874384516
+    },
+    {
+     "x_a": 0.8000000000000002,
+     "x_b": 0.8200000000000002,
+     "region": "B",
+     "n": 20,
+     "r": 1.0
+    },
+    {
+     "x_a": 0.8200000000000002,
+     "x_b": 1.0,
+     "region": "B",
+     "n": 23,
+     "r": 1.1488396587633432
+    },
+    {
+     "x_a": 1.0,
+     "x_b": 1.2,
+     "region": "B",
+     "n": 25,
+     "r": -1.1460593334776004
+    },
+    {
+     "x_a": 1.2,
+     "x_b": 1.22,
+     "region": "C",
+     "n": 20,
+     "r": 1.0
+    },
+    {
+     "x_a": 1.22,
+     "x_b": 1.4999999999999998,
+     "region": "C",
+     "n": 26,
+     "r": 1.1494758333737773
+    },
+    {
+     "x_a": 1.4999999999999998,
+     "x_b": 2.471838442962555,
+     "region": "C",
+     "n": 11,
+     "r": 1.138238906398167
+    },
+    {
+     "x_a": 2.471838442962555,
+     "x_b": 6.559567875706171,
+     "region": "C",
+     "n": 23,
+     "r": -0.9981194906277988
+    },
+    {
+     "x_a": 6.559567875706171,
+     "x_b": 9.791642885701801,
+     "region": "C",
+     "n": 34,
+     "r": -1.0461432282033827
+    },
+    {
+     "x_a": 9.791642885701801,
+     "x_b": 10.0916428857018,
+     "region": "C",
+     "n": 40,
+     "r": -1.1497125806159807
+    },
+    {
+     "x_a": 10.0916428857018,
+     "x_b": 10.111642885701801,
+     "region": "D",
+     "n": 18,
+     "r": 1.191936896291082
+    },
+    {
+     "x_a": 10.111642885701801,
+     "x_b": 10.3916428857018,
+     "region": "D",
+     "n": 18,
+     "r": 1.1458601689465273
+    },
+    {
+     "x_a": 10.3916428857018,
+     "x_b": 12.0916428857018,
+     "region": "D",
+     "n": 18,
+     "r": 1.0869864733034018
+    }
+   ],
+   "n_stations": 387,
+   "dx_min": 0.00016999999999933735,
+   "dx_max": 0.18177326991405174,
+   "dx_max_far": 0.18177326991405174,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "x_adjacent_ratio_at": 10.0918128857018,
+   "x_adjacent_ratio_gt": [],
+   "meet": {
+    "A": {
+     "x": 0.3213699457567993,
+     "ratio": 1.1705880077363897,
+     "ratio_run_max": 1.1745187216171054
+    },
+    "C": {
+     "x": 2.471838442962555,
+     "ratio": 1.1198624789630418,
+     "ratio_run_max": 1.149712580615981
+    }
+   },
+   "x_m": -0.00021830471454256873,
+   "x0": 6.559567875706171,
+   "L_ramp": 10.0916428857018,
+   "x_out": 12.0916428857018,
+   "fillet_cap": 0.0021568253758592927,
+   "kink_dx": 0.00021830471454256873
+  },
+  "conflicts": [
+   {
+    "kind": "count",
+    "where": "行 v (vy4k: y_r..b)",
+    "n_lo": 72,
+    "n_hi": 56,
+    "x_long": -0.5,
+    "L_long": 1.746526318342552,
+    "x_short": 10.090794366988773,
+    "L_short": 0.020044409742373537,
+    "ends_um": [
+     16.512193674537844,
+     64.13726840773526
+    ],
+    "reason": "長い辺 (上流の機体高さ) が要る区間数が、短い辺 (ベース近くの t_base) に入る区間数の上限を超える (端の間隔と公比 <= 1.19)"
+   }
+  ],
+  "asym_ranges": {
+   "SW 列 (hz?1)": [
+    11,
+    13
+   ]
+  },
+  "NV_range": [
+   72,
+   56
+  ],
+  "far_spacing_max": {
+   "y": 0.09990733372845854,
+   "z": 0.09901619131821905,
+   "t": 0.09947653634012438
+  },
+  "far_law": "progression",
+  "Lmax": 3.714959480309014,
+  "Lv": [
+   0.020000000000000018,
+   1.746526318342552
+  ],
+  "ar_far_estimate": 1136.0829369628232,
+  "ar_far_parts": {
+   "dx_max_far": 0.18177326991405174,
+   "far_max": 0.18177326991405174,
+   "s_min_um": 16.000000000000004
+  },
+  "memory_gib": {
+   "generate_check": 40.221479162573814,
+   "convert": 43.914061672985554,
+   "solver_host": 38.14728952199221,
+   "solver_gpu": 38.83453160524368
+  },
+  "budget_nodes": 6000000.0,
+  "budget_ratio": 4.9640786666666665,
+  "within_budget": false,
+  "geometry": {
+   "L_ramp": 10.0916428857018,
+   "x_out": 12.0916428857018,
+   "x0": 6.559567875706171,
+   "x_m": -0.00021830471454256873,
+   "x_f1": -0.013165249758770887,
+   "x_f2": 0.01271665475154063,
+   "y_veh": 2.7465263183425517,
+   "theta_e_deg": -0.7544311944002042,
+   "y_bot": -12.320694,
+   "z_far": 2.5,
+   "z_o": 1.005,
+   "top_depth": 2.0,
+   "t_base": 0.02
+  }
+ },
+ "sens": {
+  "hx_far_0.24": {
+   "desc": "HX_FAR 0.16 -> 0.24 H (C・D の x)",
+   "change": {
+    "HX_FAR": 0.24
+   },
+   "nodes": 28301848,
+   "hexes": 27899584,
+   "unique_edges": 84502038,
+   "n_stations": 368,
+   "budget_ratio": 4.716974666666666,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1691.6027740593238,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 38.2193174213171,
+    "convert": 41.733776576817036,
+    "solver_host": 36.25421107560396,
+    "solver_gpu": 36.901409924030304
+   }
+  },
+  "hx_0.15": {
+   "desc": "HX 0.10 -> 0.15 H (U0・A・B の x)",
+   "change": {
+    "HX": 0.15
+   },
+   "nodes": 29784472,
+   "hexes": 29366792,
+   "unique_edges": 88934475,
+   "n_stations": 387,
+   "budget_ratio": 4.9640786666666665,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1136.0829369628232,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 40.221479162573814,
+    "convert": 43.914061672985554,
+    "solver_host": 38.14728952199221,
+    "solver_gpu": 38.83453160524368
+   }
+  },
+  "hfar_0.20": {
+   "desc": "HFAR 0.10 -> 0.20 H (遠方帯の全部: 行 a・列 3・行 tc)",
+   "change": {
+    "HFAR": 0.2
+   },
+   "nodes": 21943078,
+   "hexes": 21598928,
+   "unique_edges": 65483961,
+   "n_stations": 387,
+   "budget_ratio": 3.6571796666666665,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 180,
+   "NFZ": 22,
+   "NV": 73,
+   "NT": 29,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1244.9296184821922,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 29.632321652024984,
+    "convert": 32.38283428736031,
+    "solver_host": 28.13505852408707,
+    "solver_gpu": 28.61051745712757
+   }
+  },
+  "hfar_0.50": {
+   "desc": "HFAR 0.10 -> 0.50 H (遠方帯の全部。codex 2026-10-06 は AR で却下した値)",
+   "change": {
+    "HFAR": 0.5
+   },
+   "nodes": 18204658,
+   "hexes": 17905680,
+   "unique_edges": 54313965,
+   "n_stations": 387,
+   "budget_ratio": 3.0341096666666667,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 92,
+   "NFZ": 22,
+   "NV": 73,
+   "NT": 25,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 3092.4962526517884,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 24.58389298990369,
+    "convert": 26.88526955805719,
+    "solver_host": 23.3616821821779,
+    "solver_gpu": 23.736172541975975
+   }
+  },
+  "hfar_a_0.50": {
+   "desc": "行 a の遠方だけ HFAR 0.50 H (プルームが横切る帯を粗くする。他は 0.10)",
+   "change": {
+    "HFAR_Y": 0.5
+   },
+   "nodes": 20864509,
+   "hexes": 20545920,
+   "unique_edges": 62273874,
+   "n_stations": 387,
+   "budget_ratio": 3.477418166666667,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 92,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 3092.4962526517884,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 28.175802947953343,
+    "convert": 30.796735643409193,
+    "solver_host": 26.757894976995885,
+    "solver_gpu": 27.204223535954952
+   }
+  },
+  "far_capped": {
+   "desc": "遠方帯の分布則を「公比 g_t で HFAR まで増やして一様」に (生成器の等比 1 本の則の代わり。仮想)",
+   "change": {
+    "FAR_LAW": "capped"
+   },
+   "nodes": 20311486,
+   "hexes": 19989308,
+   "unique_edges": 60611203,
+   "n_stations": 387,
+   "budget_ratio": 3.385247666666667,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 132,
+   "NFZ": 24,
+   "NV": 73,
+   "NT": 29,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1136.0829369628232,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 27.42899088189006,
+    "convert": 29.983483055606484,
+    "solver_host": 26.051771292462945,
+    "solver_gpu": 26.483163610100746
+   }
+  },
+  "far_capped_a_0.50": {
+   "desc": "遠方帯を capped かつ行 a だけ HFAR 0.50 H",
+   "change": {
+    "FAR_LAW": "capped",
+    "HFAR_Y": 0.5
+   },
+   "nodes": 16708903,
+   "hexes": 16429616,
+   "unique_edges": 49846432,
+   "n_stations": 387,
+   "budget_ratio": 2.7848171666666666,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 45,
+   "NFZ": 24,
+   "NV": 73,
+   "NT": 29,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 3124.9999999999995,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 22.563998913392425,
+    "convert": 24.685674560256302,
+    "solver_host": 21.45183750707656,
+    "solver_gpu": 21.78592998534441
+   }
+  },
+  "vehicle_top_16um": {
+   "desc": "vehicle_top 64 -> 16 µm (行 v の両端分布が解ける組合せ)",
+   "change": {
+    "H1_vehicle_top": 0.00016
+   },
+   "nodes": 30349576,
+   "hexes": 29923848,
+   "unique_edges": 90621723,
+   "n_stations": 387,
+   "budget_ratio": 5.058262666666667,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 81,
+   "NT": 46,
+   "NL_vt": 30,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1136.0829369628232,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 0,
+   "memory_gib": {
+    "generate_check": 40.9846056252718,
+    "convert": 44.74508007615805,
+    "solver_host": 38.868838749825954,
+    "solver_gpu": 39.57134336233139
+   }
+  },
+  "no_miter_station": {
+   "desc": "外壁のマイタ頂点を station にしない (フィレット 12 区間・内壁の折れ点 0 だけ)",
+   "change": {
+    "MITER_STATION": 0
+   },
+   "nodes": 28584056,
+   "hexes": 28182088,
+   "unique_edges": 85348971,
+   "n_stations": 371,
+   "budget_ratio": 4.764009333333333,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1136.0829369628232,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 38.600416108965874,
+    "convert": 42.14877990633249,
+    "solver_host": 36.614546455442905,
+    "solver_gpu": 37.26936727762222
+   }
+  },
+  "no_ramp_zone": {
+   "desc": "L_ramp ± ZONE の物理 station を置かない (march の等比 1 本が長い区間に掛かる)",
+   "change": {
+    "RAMP_ZONE": 0
+   },
+   "nodes": 31044208,
+   "hexes": 30613704,
+   "unique_edges": 92700843,
+   "n_stations": 403,
+   "budget_ratio": 5.174034666666667,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1144.4621846324608,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 41.92264899611473,
+    "convert": 45.76657696068287,
+    "solver_host": 39.755774930119514,
+    "solver_gpu": 40.47704041004181
+   }
+  },
+  "lwake_b_0.08": {
+   "desc": "ベース後流の Δx 上限区間 0.02 -> 0.08 H (= 4 t_base)",
+   "change": {
+    "LWAKE_B": 0.08
+   },
+   "nodes": 33691480,
+   "hexes": 33237128,
+   "unique_edges": 100618779,
+   "n_stations": 435,
+   "budget_ratio": 5.615246666666667,
+   "within_budget": false,
+   "NY": 109,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1136.0829369628232,
+   "x_adjacent_ratio_design": 1.176680814126408,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 45.49757204949856,
+    "convert": 49.65954489260912,
+    "solver_host": 43.13592631369829,
+    "solver_gpu": 43.92869025468826
+   }
+  },
+  "ny_cap_sw_only": {
+   "desc": "NY の AR 上限 (900 h1) を側壁のある x <= L_sw だけに掛ける (生成器の規則の変更)",
+   "change": {
+    "NY_CAP_SW_ONLY": 1
+   },
+   "nodes": 28966396,
+   "hexes": 28556816,
+   "unique_edges": 86488359,
+   "n_stations": 387,
+   "budget_ratio": 4.827732666666667,
+   "within_budget": false,
+   "NY": 97,
+   "NZ": 50,
+   "NFY": 289,
+   "NFZ": 34,
+   "NV": 73,
+   "NT": 46,
+   "NL_vt": 22,
+   "NSW": 12,
+   "NTC": 19,
+   "NR": 62,
+   "ar_far_estimate": 1136.0829369628232,
+   "x_adjacent_ratio_design": 1.1919368962989116,
+   "n_conflicts": 1,
+   "memory_gib": {
+    "generate_check": 39.11673482507467,
+    "convert": 42.711033184081316,
+    "solver_host": 37.102734703570604,
+    "solver_gpu": 37.7678819000721
+   }
+  }
+ },
+ "final_common2": {
+  "desc": "隅 (ramp・cowl_in・sidewall_in) を共通 2 µm、cowl_out 16 µm、緩める壁は design と同じ、HX 0.05・HX_FAR 0.08 H",
+  "nodes": 119756791,
+  "hexes": 118635626,
+  "unique_edges": 358147072,
+  "n_stations": 442,
+  "budget_ratio": 19.959465166666668,
+  "within_budget": false,
+  "NY": 849,
+  "NZ": 65,
+  "NFY": 289,
+  "NFZ": 34,
+  "NV": 85,
+  "NT": 46,
+  "NL_vt": 22,
+  "NSW": 23,
+  "NTC": 28,
+  "NR": 92,
+  "ar_far_estimate": 4995.366686422927,
+  "x_adjacent_ratio_design": 1.1919368962989116,
+  "n_conflicts": 0,
+  "memory_gib": {
+   "generate_check": 161.72169423662126,
+   "convert": 176.22360622603446,
+   "solver_host": 153.02783770579845,
+   "solver_gpu": 156.14508409053087
+  },
+  "wall_h1_um": {
+   "ramp": 2.0000000000000004,
+   "vehicle": 2.0000000000000004,
+   "sidewall_in": 2.0000000000000004,
+   "sidewall_out": 64.00000000000001,
+   "cowl_in": 2.0000000000000004,
+   "cowl_out": 16.000000000000004,
+   "cowl_side": 64.00000000000001,
+   "sidewall_end": 100.0,
+   "cowl_base": 100.0,
+   "vehicle_top": 64.00000000000001,
+   "vehicle_base": 17.000000000000004,
+   "vehicle_side": 64.00000000000001
+  },
+  "conflicts": [],
+  "NV_range": [
+   84,
+   109
+  ]
+ },
+ "final_common2_nycap_sw": {
+  "desc": "同上 + NY の AR 上限を x <= L_sw だけに (生成器の規則の変更)",
+  "nodes": 63730447,
+  "hexes": 63044810,
+  "unique_edges": 190504120,
+  "n_stations": 442,
+  "budget_ratio": 10.621741166666666,
+  "within_budget": false,
+  "NY": 297,
+  "NZ": 65,
+  "NFY": 289,
+  "NFZ": 34,
+  "NV": 85,
+  "NT": 46,
+  "NL_vt": 22,
+  "NSW": 23,
+  "NTC": 28,
+  "NR": 92,
+  "ar_far_estimate": 4995.366686422927,
+  "x_adjacent_ratio_design": 1.1919368962989116,
+  "n_conflicts": 0,
+  "memory_gib": {
+   "generate_check": 86.06272577308118,
+   "convert": 93.83359849918634,
+   "solver_host": 81.4909785585478,
+   "solver_gpu": 83.09504557400942
+  },
+  "conflicts": []
+ }
+}
