@@ -1,0 +1,157 @@
+判定 (plan §6.3): 新規 base も超過 → 判定不能 (基準 3 本では再現性を捉えられていない。T や反復数をその場で増やして合格にしない)
+
+固定幅の独立 A/B — 段階 2 の結果 (2026-10-07)
+================================================
+- 計画: PLAN.txt / plan.json (commit 55aaf586)。T_frozen.tsv sha256 45168ae5adf4…444451e を launch-plan と eval が照合して一致。
+- 投入: AWS ~/forge-b4/case/66.hostmem_regression/、`run_matrix.py launch-plan fixedwidth_c44dual_ckpt100/plan.json`
+  (入力 7 ファイル・バイナリ 2 本・T の sha256 照合が通過)。最初の 1 本で `pgrep -x forge` が自分の run に一致
+  (cwd run_0194_fw_c44dual_b1、exe forge_9c9f623c)。12 本を計画の順 (b1, n1, …, b6, n6) に 1 本ずつ、02:17:19〜02:18:42 UTC
+  (83 s、各 6 s)。全 12 本 rc 0・NANCHECK PASS・`run_matrix.py verify` PASS (forge_bin・sha256 が計画どおり)。中断・再投入なし。
+- 評価: `fixedwidth_eval.py eval --plan fixedwidth_c44dual_ckpt100/plan.json` (242 s) → result/fixedwidth_result.txt。
+  記述: `fixedwidth_describe.py` → result/describe.txt。
+- 全 12 本で構造 (ファイル集合・データセット集合・shape・dtype・属性・CHECKPOINT の totalTime 等)・行キー・初期出力・整数は既存 B1 と一致
+  (構造の違い 0)。超過はすべて「幅」の量。
+
+1. 本ごとの超過数 (幅を超えた量の数)
+   b1 run_0194 4 / n1 run_0195 3 / b2 run_0196 2 / n2 run_0197 0 / b3 run_0198 0 / n3 run_0199 7 /
+   b4 run_0200 4 / n4 run_0201 2 / b5 run_0202 4 / n5 run_0203 4 / b6 run_0204 0 / n6 run_0205 0
+   → 全量が幅内だったのは b 2/6 (b3・b6)、n 2/6 (n2・n6)。
+
+2. 幅を超えた量 (超えた本数 b / n)
+   VALUE/condClampCorrQ_0        b 3 / n 4   (1.45〜1.46e23 型 4 本・7.746e20 型 3 本。T 7.248e19)
+   VALUE/passiveFloorCorr_g_0    b 4 / n 3   (T 7.29e-27。v 7.36e-27〜1.91e-16)
+   VALUE/passiveFloorCorr_Q0_0   b 3 / n 3   (T 2.17e8。v 2.6e8〜6.0e8、最大差はすべて節点 19889)
+   VALUE/passiveLimCorr_Q2_0     b 3 / n 1   (T 2.42e-4。v 2.66e-4〜3.25e-4、節点 20084)
+   VALUE/condR30_0               b 1 / n 1   (T 3.170e-5。v 3.177e-5 [b1、比 1.002]・4.415e-5 [n4])
+   VALUE/condClampCorr_0         b 0 / n 1   (n5: v 9.62e-11、T 1.21e-12、節点 23594)
+   VALUE/Q0_0                    b 0 / n 1   (n3: 比 1.020、節点 18643)
+   VALUE/roQ0_0                  b 0 / n 1   (n3: 比 1.020、節点 18643)
+   CHECKPOINT/roQ1_0_fctH        b 0 / n 1   (n3: 比 1.001、節点 18643)
+   値・位置・その位置の X と B_i の値は result/describe.txt の 2.。
+
+3. 記述 (判定には使わない、plan §6.3 の投入前の観察に対応)
+   - condClampCorrQ_0 > 1e22 (節点 19954、1.45〜1.46e23) に入った本数: **新規 base 2/6 (b2・b4)・新規 new 2/6 (n3・n5)**。
+     既存 base 3 本 (T の算定) は 0/3。
+   - 7.746e20 @ 節点 18784 (既存 c44dual_pindiag base r1 と同じ値) が b5・n1・n4 の 3 本。
+   - 全 15 本 (新規 12・既存 3) で、condClampCorrQ_0 の最大 × 1e-30 がその節点の roQ1_0 か roQ2_0 と相対 4e-8 以下で一致
+     (分母が床 1e-30 だったことと整合。補正前の値は出力に無い)。
+   - 各 run の最大と位置は result/describe.txt の 1.。
+
+4. この結果で言えること・言えないこと (plan §6.3 の表のとおり)
+   - 新規 base 6 本のうち 4 本が、既存 base 3 本から決めた幅を超えた → 基準 3 本では同じバイナリの再現性を捉えられていない。
+     判定表の 3 行目「判定不能」。T・本数・順序・対象は変えていない。
+   - new だけが超えた量 (condClampCorr_0・Q0_0・roQ0_0・roQ1_0_fctH、いずれも 1 本) は、判定表では「判定不能」の中に含まれる
+     (表の 2 行目は「新規 base は幅内」が前提)。記述として残す。
+
+原出力
+------
+固定幅の独立 A/B (plan §6.3) 段階 2 の評価 2026-10-07T02:19:12+0000
+T_frozen.tsv sha256 45168ae5adf4f0f3896b1f85aa1aef110857bf30f4049b0818084be3b444451e (照合済み)、既存 base: run_0029_c44dual_ckpt100_base_r1, run_0038_c44dual_ckpt100_base_r2, run_0068_c44dual_ckpt100_base_r3
+
+run_0194_fw_c44dual_b1 (b): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condR30_0 [幅] v 3.177e-05 T 3.170e-05 — 幅超過 (最悪 B2)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.517e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 1.850e-18 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 2.750e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+run_0195_fw_c44dual_n1 (n): 超過・不一致 3、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 7.746e+20 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 6.047e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 1.909e-16 T 7.291e-27 — 幅超過 (最悪 B1)
+run_0196_fw_c44dual_b2 (b): 超過・不一致 2、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.447e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 7.388e-27 T 7.291e-27 — 幅超過 (最悪 B1)
+run_0197_fw_c44dual_n2 (n): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+run_0198_fw_c44dual_b3 (b): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+run_0199_fw_c44dual_n3 (n): 超過・不一致 7、構造の違い 0、NANCHECK: PASS
+    res_100.h5:CHECKPOINT/roQ1_0_fctH [幅] v 5.124e+03 T 5.120e+03 — 幅超過 (最悪 B2)
+    res_100.h5:VALUE/Q0_0 [幅] v 2.434e+12 T 2.387e+12 — 幅超過 (最悪 B2)
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.448e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.724e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 9.389e-17 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 3.251e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/roQ0_0 [幅] v 2.193e+11 T 2.149e+11 — 幅超過 (最悪 B2)
+run_0200_fw_c44dual_b4 (b): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.460e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.769e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 1.076e-16 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 2.659e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+run_0201_fw_c44dual_n4 (n): 超過・不一致 2、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 7.746e+20 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/condR30_0 [幅] v 4.415e-05 T 3.170e-05 — 幅超過 (最悪 B1)
+run_0202_fw_c44dual_b5 (b): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 7.746e+20 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.727e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 7.359e-27 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 2.724e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+run_0203_fw_c44dual_n5 (n): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.464e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/condClampCorr_0 [幅] v 9.617e-11 T 1.209e-12 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 2.558e+08 T 2.175e+08 — 幅超過 (最悪 B3)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 2.064e-17 T 7.291e-27 — 幅超過 (最悪 B1)
+run_0204_fw_c44dual_b6 (b): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+run_0205_fw_c44dual_n6 (n): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+
+超過した量 (b 本数 / n 本数):
+  res_100.h5:CHECKPOINT/roQ1_0_fctH  b 0 / n 1
+  res_100.h5:VALUE/Q0_0  b 0 / n 1
+  res_100.h5:VALUE/condClampCorrQ_0  b 3 / n 4
+  res_100.h5:VALUE/condClampCorr_0  b 0 / n 1
+  res_100.h5:VALUE/condR30_0  b 1 / n 1
+  res_100.h5:VALUE/passiveFloorCorr_Q0_0  b 3 / n 3
+  res_100.h5:VALUE/passiveFloorCorr_g_0  b 4 / n 3
+  res_100.h5:VALUE/passiveLimCorr_Q2_0  b 3 / n 1
+  res_100.h5:VALUE/roQ0_0  b 0 / n 1
+
+判定 (plan §6.3): 新規 base も超過 → 判定不能 (基準 3 本では再現性を捉えられていない。T や反復数をその場で増やして合格にしない)
+
+1. condClampCorrQ_0 の最大と位置 (> 1e+22 を「1.46e23 型の状態」として数える。記述であって判定には使わない)
+   run                            build           最大  index  座標 (x, y)              >1e22 床との整合 (max×1e-30 と roQk_0 の相対差が最小の k)
+   run_0194_fw_c44dual_b1         b       4.6198e+18  23681  (4.98584, 0.44351)  no    roQ1_0 4.6198e-12 (相対差 4.3e-09) → 整合
+   run_0195_fw_c44dual_n1         n      7.74601e+20  18784  (3.43728, 0.78354)  no    roQ1_0 7.74601e-10 (相対差 1.6e-08) → 整合
+   run_0196_fw_c44dual_b2         b       1.4475e+23  19954  (3.80404, 0.79212)  yes   roQ2_0 1.4475e-07 (相対差 7.8e-09) → 整合
+   run_0197_fw_c44dual_n2         n      2.44269e+17  23096  (4.80246, 0.44350)  no    roQ1_0 2.44269e-13 (相対差 1.4e-08) → 整合
+   run_0198_fw_c44dual_b3         b      8.13836e+17  23356  (4.88396, 0.44351)  no    roQ1_0 8.13836e-13 (相対差 2.7e-08) → 整合
+   run_0199_fw_c44dual_n3         n      1.44795e+23  19954  (3.80404, 0.79212)  yes   roQ2_0 1.44795e-07 (相対差 1.2e-08) → 整合
+   run_0200_fw_c44dual_b4         b      1.45958e+23  19954  (3.80404, 0.79212)  yes   roQ2_0 1.45958e-07 (相対差 1.7e-08) → 整合
+   run_0201_fw_c44dual_n4         n      7.74601e+20  18784  (3.43728, 0.78354)  no    roQ1_0 7.74601e-10 (相対差 1.6e-08) → 整合
+   run_0202_fw_c44dual_b5         b      7.74601e+20  18784  (3.43728, 0.78354)  no    roQ1_0 7.74601e-10 (相対差 1.6e-08) → 整合
+   run_0203_fw_c44dual_n5         n      1.46351e+23  19954  (3.80404, 0.79212)  yes   roQ2_0 1.46351e-07 (相対差 3.0e-08) → 整合
+   run_0204_fw_c44dual_b6         b      1.31665e+17  22966  (4.76171, 0.44350)  no    roQ1_0 1.31665e-13 (相対差 7.1e-09) → 整合
+   run_0205_fw_c44dual_n6         n       5.4622e+16  22771  (4.70058, 0.44348)  no    roQ1_0 5.4622e-14 (相対差 3.6e-08) → 整合
+   run_0029_c44dual_ckpt100_base_r1 existing  8.15595e+17  23356  (4.88396, 0.44351)  no    roQ1_0 8.15595e-13 (相対差 1.5e-08) → 整合
+   run_0038_c44dual_ckpt100_base_r2 existing  8.14621e+17  23356  (4.88396, 0.44351)  no    roQ1_0 8.14621e-13 (相対差 3.3e-08) → 整合
+   run_0068_c44dual_ckpt100_base_r3 existing  3.62414e+19  23422  (4.90434, 0.45824)  no    roQ1_0 3.62414e-11 (相対差 9.8e-10) → 整合
+   > 1e22 の本数: 新規 base 2/6、新規 new 2/6、既存 base (T の算定に使った 3 本) 0/3
+
+2. T を超えた量 (fixedwidth_eval.py の結果) の位置
+   run                      量                                          v           T      v/T 最悪  index  座標 (x, y)              X の値        B_i の値
+   run_0194_fw_c44dual_b1   VALUE/condR30_0                   3.1772e-05  3.1703e-05    1.002 B2  17568  (3.07051, 0.38213)         3.17724e-05             0
+   run_0194_fw_c44dual_b1   VALUE/passiveFloorCorr_Q0_0       3.5165e+08  2.1747e+08    1.617 B1  19889  (3.78367, 0.79176)         3.46478e+09   3.11313e+09
+   run_0194_fw_c44dual_b1   VALUE/passiveFloorCorr_g_0        1.8500e-18  7.2911e-27 2.537e+08 B1  20019  (3.82442, 0.79246)         1.85001e-18             0
+   run_0194_fw_c44dual_b1   VALUE/passiveLimCorr_Q2_0         2.7498e-04  2.4191e-04    1.137 B1  20084  (3.84480, 0.79280)          0.00137172    0.00109673
+   run_0195_fw_c44dual_n1   VALUE/condClampCorrQ_0            7.7460e+20  7.2483e+19    10.69 B1  18784  (3.43728, 0.78354)         7.74601e+20             1
+   run_0195_fw_c44dual_n1   VALUE/passiveFloorCorr_Q0_0       6.0473e+08  2.1747e+08    2.781 B1  19889  (3.78367, 0.79176)         3.71786e+09   3.11313e+09
+   run_0195_fw_c44dual_n1   VALUE/passiveFloorCorr_g_0        1.9095e-16  7.2911e-27 2.619e+10 B1  19954  (3.80404, 0.79212)         1.90947e-16             0
+   run_0196_fw_c44dual_b2   VALUE/condClampCorrQ_0            1.4475e+23  7.2483e+19     1997 B1  19954  (3.80404, 0.79212)          1.4475e+23       3.41576
+   run_0196_fw_c44dual_b2   VALUE/passiveFloorCorr_g_0        7.3879e-27  7.2911e-27    1.013 B1  23674  (4.98584, 0.32645)         1.28036e-26   5.41571e-27
+   run_0199_fw_c44dual_n3   CHECKPOINT/roQ1_0_fctH            5.1238e+03  5.1195e+03    1.001 B2  18643  (3.39653, 0.73177)         4.14885e+06   4.15397e+06
+   run_0199_fw_c44dual_n3   VALUE/Q0_0                        2.4343e+12  2.3875e+12     1.02 B2  18643  (3.39653, 0.73177)         1.37477e+15   1.37721e+15
+   run_0199_fw_c44dual_n3   VALUE/condClampCorrQ_0            1.4480e+23  7.2483e+19     1998 B1  19954  (3.80404, 0.79212)         1.44795e+23       3.41576
+   run_0199_fw_c44dual_n3   VALUE/passiveFloorCorr_Q0_0       3.7237e+08  2.1747e+08    1.712 B1  19889  (3.78367, 0.79176)          3.4855e+09   3.11313e+09
+   run_0199_fw_c44dual_n3   VALUE/passiveFloorCorr_g_0        9.3890e-17  7.2911e-27 1.288e+10 B1  19954  (3.80404, 0.79212)         9.38902e-17             0
+   run_0199_fw_c44dual_n3   VALUE/passiveLimCorr_Q2_0         3.2506e-04  2.4191e-04    1.344 B1  20084  (3.84480, 0.79280)           0.0014218    0.00109673
+   run_0199_fw_c44dual_n3   VALUE/roQ0_0                      2.1927e+11  2.1495e+11     1.02 B2  18643  (3.39653, 0.73177)         1.23794e+14   1.24013e+14
+   run_0200_fw_c44dual_b4   VALUE/condClampCorrQ_0            1.4596e+23  7.2483e+19     2014 B1  19954  (3.80404, 0.79212)         1.45958e+23       3.41576
+   run_0200_fw_c44dual_b4   VALUE/passiveFloorCorr_Q0_0       3.7695e+08  2.1747e+08    1.733 B1  19889  (3.78367, 0.79176)         3.49008e+09   3.11313e+09
+   run_0200_fw_c44dual_b4   VALUE/passiveFloorCorr_g_0        1.0760e-16  7.2911e-27 1.476e+10 B1  19954  (3.80404, 0.79212)         1.07599e-16             0
+   run_0200_fw_c44dual_b4   VALUE/passiveLimCorr_Q2_0         2.6589e-04  2.4191e-04    1.099 B1  20084  (3.84480, 0.79280)          0.00136263    0.00109673
+   run_0201_fw_c44dual_n4   VALUE/condClampCorrQ_0            7.7460e+20  7.2483e+19    10.69 B1  18784  (3.43728, 0.78354)         7.74601e+20             1
+   run_0201_fw_c44dual_n4   VALUE/condR30_0                   4.4146e-05  3.1703e-05    1.392 B1  17244  (2.96863, 0.39516)         4.41465e-05             0
+   run_0202_fw_c44dual_b5   VALUE/condClampCorrQ_0            7.7460e+20  7.2483e+19    10.69 B1  18784  (3.43728, 0.78354)         7.74601e+20             1
+   run_0202_fw_c44dual_b5   VALUE/passiveFloorCorr_Q0_0       3.7273e+08  2.1747e+08    1.714 B1  19889  (3.78367, 0.79176)         3.48586e+09   3.11313e+09
+   run_0202_fw_c44dual_b5   VALUE/passiveFloorCorr_g_0        7.3585e-27  7.2911e-27    1.009 B1  23674  (4.98584, 0.32645)         1.27742e-26   5.41571e-27
+   run_0202_fw_c44dual_b5   VALUE/passiveLimCorr_Q2_0         2.7236e-04  2.4191e-04    1.126 B1  20084  (3.84480, 0.79280)           0.0013691    0.00109673
+   run_0203_fw_c44dual_n5   VALUE/condClampCorrQ_0            1.4635e+23  7.2483e+19     2019 B1  19954  (3.80404, 0.79212)         1.46351e+23       3.41576
+   run_0203_fw_c44dual_n5   VALUE/condClampCorr_0             9.6170e-11  1.2091e-12    79.54 B1  23594  (4.94509, 0.79846)         9.61699e-11             0
+   run_0203_fw_c44dual_n5   VALUE/passiveFloorCorr_Q0_0       2.5577e+08  2.1747e+08    1.176 B3  19889  (3.78367, 0.79176)         2.96609e+09   3.22187e+09
+   run_0203_fw_c44dual_n5   VALUE/passiveFloorCorr_g_0        2.0637e-17  7.2911e-27 2.83e+09 B1  20019  (3.82442, 0.79246)         2.06371e-17             0

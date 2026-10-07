@@ -1,0 +1,58 @@
+固定幅の独立 A/B (plan §6.3) 段階 2 の評価 2026-10-07T02:19:12+0000
+T_frozen.tsv sha256 45168ae5adf4f0f3896b1f85aa1aef110857bf30f4049b0818084be3b444451e (照合済み)、既存 base: run_0029_c44dual_ckpt100_base_r1, run_0038_c44dual_ckpt100_base_r2, run_0068_c44dual_ckpt100_base_r3
+
+run_0194_fw_c44dual_b1 (b): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condR30_0 [幅] v 3.177e-05 T 3.170e-05 — 幅超過 (最悪 B2)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.517e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 1.850e-18 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 2.750e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+run_0195_fw_c44dual_n1 (n): 超過・不一致 3、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 7.746e+20 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 6.047e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 1.909e-16 T 7.291e-27 — 幅超過 (最悪 B1)
+run_0196_fw_c44dual_b2 (b): 超過・不一致 2、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.447e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 7.388e-27 T 7.291e-27 — 幅超過 (最悪 B1)
+run_0197_fw_c44dual_n2 (n): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+run_0198_fw_c44dual_b3 (b): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+run_0199_fw_c44dual_n3 (n): 超過・不一致 7、構造の違い 0、NANCHECK: PASS
+    res_100.h5:CHECKPOINT/roQ1_0_fctH [幅] v 5.124e+03 T 5.120e+03 — 幅超過 (最悪 B2)
+    res_100.h5:VALUE/Q0_0 [幅] v 2.434e+12 T 2.387e+12 — 幅超過 (最悪 B2)
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.448e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.724e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 9.389e-17 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 3.251e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/roQ0_0 [幅] v 2.193e+11 T 2.149e+11 — 幅超過 (最悪 B2)
+run_0200_fw_c44dual_b4 (b): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.460e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.769e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 1.076e-16 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 2.659e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+run_0201_fw_c44dual_n4 (n): 超過・不一致 2、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 7.746e+20 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/condR30_0 [幅] v 4.415e-05 T 3.170e-05 — 幅超過 (最悪 B1)
+run_0202_fw_c44dual_b5 (b): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 7.746e+20 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 3.727e+08 T 2.175e+08 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 7.359e-27 T 7.291e-27 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveLimCorr_Q2_0 [幅] v 2.724e-04 T 2.419e-04 — 幅超過 (最悪 B1)
+run_0203_fw_c44dual_n5 (n): 超過・不一致 4、構造の違い 0、NANCHECK: PASS
+    res_100.h5:VALUE/condClampCorrQ_0 [幅] v 1.464e+23 T 7.248e+19 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/condClampCorr_0 [幅] v 9.617e-11 T 1.209e-12 — 幅超過 (最悪 B1)
+    res_100.h5:VALUE/passiveFloorCorr_Q0_0 [幅] v 2.558e+08 T 2.175e+08 — 幅超過 (最悪 B3)
+    res_100.h5:VALUE/passiveFloorCorr_g_0 [幅] v 2.064e-17 T 7.291e-27 — 幅超過 (最悪 B1)
+run_0204_fw_c44dual_b6 (b): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+run_0205_fw_c44dual_n6 (n): 超過・不一致 0、構造の違い 0、NANCHECK: PASS
+
+超過した量 (b 本数 / n 本数):
+  res_100.h5:CHECKPOINT/roQ1_0_fctH  b 0 / n 1
+  res_100.h5:VALUE/Q0_0  b 0 / n 1
+  res_100.h5:VALUE/condClampCorrQ_0  b 3 / n 4
+  res_100.h5:VALUE/condClampCorr_0  b 0 / n 1
+  res_100.h5:VALUE/condR30_0  b 1 / n 1
+  res_100.h5:VALUE/passiveFloorCorr_Q0_0  b 3 / n 3
+  res_100.h5:VALUE/passiveFloorCorr_g_0  b 4 / n 3
+  res_100.h5:VALUE/passiveLimCorr_Q2_0  b 3 / n 1
+  res_100.h5:VALUE/roQ0_0  b 0 / n 1
+
+判定 (plan §6.3): 新規 base も超過 → 判定不能 (基準 3 本では再現性を捉えられていない。T や反復数をその場で増やして合格にしない)

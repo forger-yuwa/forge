@@ -285,7 +285,13 @@ c26optin 20/191 (env 23/212)・SERN g3 23/223。
   最終出力の量 196 (幅 121、差 0 を要求 72、厳密一致 3) + 行キー 1 + 初期出力 44。new は使っていない。
   段階 2 の投入計画 (run_0194–0205 を b,n 交互、バイナリ・入力の sha256、評価法、判定表) は [`PLAN.txt`](fixedwidth_c44dual_ckpt100/PLAN.txt)・`plan.json`。
   追加記録 (twall_z の最悪差の位置と ULP、condClampCorrQ_0 の最大位置) は [`notes.txt`](fixedwidth_c44dual_ckpt100/notes.txt)。
-- **段階 2 は未投入** (T_frozen.tsv と PLAN を commit してから)。
+- **段階 2 (2026-10-07、commit 55aaf586 で凍結した計画どおり)**: **判定 (plan §6.3): 新規 base も超過 → 判定不能**
+  (基準 3 本では再現性を捉えられていない。T・本数・順序・対象は変えていない)。原本 [`RESULT.txt`](fixedwidth_c44dual_ckpt100/RESULT.txt)。
+  - run_0194–0205 (b,n 交互、各 100 step、83 s で 12 本)。全 rc 0・NaN PASS・verify PASS、構造・行キー・初期出力は全本で既存 B1 と一致。中断・再投入なし。
+  - 全量が幅内だったのは新規 base 2/6・new 2/6。幅を超えた量 (本数 b/n): `condClampCorrQ_0` 3/4、`passiveFloorCorr_g_0` 4/3、
+    `passiveFloorCorr_Q0_0` 3/3、`passiveLimCorr_Q2_0` 3/1、`condR30_0` 1/1、new 1 本だけ `condClampCorr_0`・`Q0_0`・`roQ0_0`・`CHECKPOINT/roQ1_0_fctH`。
+  - 記述: `condClampCorrQ_0` > 1e22 (節点 19954、1.45〜1.46e23) に入った本数は**新規 base 2/6・new 2/6** (T の算定に使った既存 base は 0/3)。
+    全本で最大値 × 1e-30 がその節点の `roQ1_0` か `roQ2_0` と相対 4e-8 以下で一致 (分母床 1e-30 と整合)。
 
 ## 既知の注意
 
@@ -513,3 +519,15 @@ new = `.bin/new/forge` → `~/bin-hostmem/forge_93e55957`、全部 `FORGE_CUDA_B
 | `run_0191_c52cht_new_r5` | 共役伝熱 (new r5) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
 | `run_0192_c52cht_new_r6` | 共役伝熱 (new r6) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
 | `run_0193_c52cht_new_r7` | 共役伝熱 (new r7) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0194_fw_c44dual_b1` | 固定幅の独立 A/B (plan §6.3) b1: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 4 量、`condClampCorrQ_0` 最大 4.62e18 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0195_fw_c44dual_n1` | 固定幅の独立 A/B (plan §6.3) n1: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 3 量、`condClampCorrQ_0` 最大 7.75e20 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0196_fw_c44dual_b2` | 固定幅の独立 A/B (plan §6.3) b2: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 2 量、`condClampCorrQ_0` 最大 **1.45e23** ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0197_fw_c44dual_n2` | 固定幅の独立 A/B (plan §6.3) n2: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 0 量、`condClampCorrQ_0` 最大 2.44e17 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0198_fw_c44dual_b3` | 固定幅の独立 A/B (plan §6.3) b3: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 0 量、`condClampCorrQ_0` 最大 8.14e17 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0199_fw_c44dual_n3` | 固定幅の独立 A/B (plan §6.3) n3: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 7 量、`condClampCorrQ_0` 最大 **1.45e23** ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0200_fw_c44dual_b4` | 固定幅の独立 A/B (plan §6.3) b4: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 4 量、`condClampCorrQ_0` 最大 **1.46e23** ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0201_fw_c44dual_n4` | 固定幅の独立 A/B (plan §6.3) n4: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 2 量、`condClampCorrQ_0` 最大 7.75e20 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0202_fw_c44dual_b5` | 固定幅の独立 A/B (plan §6.3) b5: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 4 量、`condClampCorrQ_0` 最大 7.75e20 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0203_fw_c44dual_n5` | 固定幅の独立 A/B (plan §6.3) n5: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 4 量、`condClampCorrQ_0` 最大 **1.46e23** ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0204_fw_c44dual_b6` | 固定幅の独立 A/B (plan §6.3) b6: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 0 量、`condClampCorrQ_0` 最大 1.32e17 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+| `run_0205_fw_c44dual_n6` | 固定幅の独立 A/B (plan §6.3) n6: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 0 量、`condClampCorrQ_0` 最大 5.46e16 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
