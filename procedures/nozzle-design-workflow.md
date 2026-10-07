@@ -122,7 +122,7 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
      Euler の較正の合格を NS に移せるとは限らない (配点も粘性も違う) ので、**NS の出口 M は NS で判定する**。
      旧手順「生産 NS と同じ格子パラメータの Euler で決める」(plan `tooling-nozzle-cfd-pinned-initial-line` §5.1 #11f。粗い Euler 格子
      1100 × 65 で決めると細分格子の NS で出口 M が約 −0.0008 ずれた経緯) は、G1 の Euler の全温が整定しない (E2) ため取り下げた。
-     case/45 の +3.770e-4 は G1 の Euler (run_0113+0114) 由来で、新しい配点でやり直す (同 plan §6 E4)。
+     case/45 の旧値 +3.770e-4 は G1 の Euler (run_0113+0114) 由来で、新しい配点でやり直した (同 plan §6 E4・E4V)。現行値は 6.8825162455159465e-06 (run_0164)。
    - `pw_upstream: poly` (既定。新しい YAML には明記する) — スロートより上流に δ_r を足さず、配管〜設計スロートを 5 次多項式 1 本にする
      (plan `tooling-nozzle-upstream-poly-and-throat-sizing`、2026-10-07)。`pw_ramp` は書かない (併記すると例外)。
      旧設定: `pw_upstream: ramp` + `pw_ramp: [−11, −6]` (縮流部側で δ_r をなめらかに入れる区間)。case/45 の生産 YAML は NS・凝縮の再評価
