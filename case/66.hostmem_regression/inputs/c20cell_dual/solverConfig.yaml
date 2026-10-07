@@ -1,0 +1,51 @@
+mesh:
+  meshFileName: "naca.h5"
+  valueFileName: "naca.h5"
+
+
+gpu: 1 # 0:off , 1:on
+
+#solver: "KEEP_SLAU" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
+solver: "SLAU" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
+#solver: "ROE" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
+
+physProp:
+  thermalMethod: 0 # 0:calorically perfect
+  viscMethod: 0 # 0:use visc , 1:sutherland
+  visc : 0.000018  #[Pa*s]
+  #visc : 0.00  #[Pa*s]
+  thermCond: 0.0257 # [W/(mK)]
+  cp : 1004.5 # [J/(kgK)]
+  gamma : 1.4 # [J/(kgK)]
+
+time: 
+  unsteady: 1 # unsteady
+  dualTime: 1 # dual-time
+  last: 
+    nStepOuter: 100
+    time: 1.00 # [second]
+  deltaT:  
+    control: 0 # fixed physical dt
+    dt: 0.0000005
+    cfl: 1.5
+    cfl_pseudo: 10.0 # for pseudo dt
+    blockDPLUR: 1
+    implicitRelax: 1.0
+    dt_min: 0.000000001
+    dt_max: 1.0 
+  outStepStart: 0
+  outStepInterval: 100 
+  timeIntegration: 11 # block DPLUR dual-time
+  nStepInner: 4
+  nSubIterDualTime: 12
+  bdfOrder: 2
+
+space: 
+  convMethod: 2 # 0:1stUp 1:2ndup 2:MUSCL
+  limiter: 2 # 1:barth 2:venkata
+
+turbulence:
+  model: "wale"   # 複製時に旧キー LESorRANS 1 / LESmodel 1 から移行
+
+initial: "supercritical"
+

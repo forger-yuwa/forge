@@ -1,0 +1,12 @@
+input: c56extra
+src  : /home/sano/work/forge/case/56.gap_tp1187/run_0027_s6_f32_b
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/56.gap_tp1187/run_0027_s6_f32_b/solverConfig.yaml (sha256 5fbf18a74f20fc28)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/56.gap_tp1187/run_0027_s6_f32_b/bcondConfig.yaml (sha256 f1c53b600d54b6c0)
+copy  probe.yaml <- /home/sano/work/forge/case/56.gap_tp1187/run_0027_s6_f32_b/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  mesh.h5 <- /home/sano/work/forge/case/56.gap_tp1187/run_0027_s6_f32_b/mesh.h5 (sha256 aabb7fbdffc8999c)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 無修正 (extraFields に res_ro 等。元は 1 step → 200 step)

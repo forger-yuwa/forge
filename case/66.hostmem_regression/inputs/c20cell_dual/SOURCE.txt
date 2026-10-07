@@ -1,0 +1,14 @@
+input: c20cell_dual
+src  : /home/sano/work/forge/case/20.naca_ml/001.test/run_case04_les_unsteady_dualtime
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/20.naca_ml/001.test/run_case04_les_unsteady_dualtime/solverConfig.yaml (sha256 efd9feb9b746241f)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/20.naca_ml/001.test/run_case04_les_unsteady_dualtime/bcondConfig.yaml (sha256 380c48c7d9fdc63a)
+copy  probe.yaml <- /home/sano/work/forge/case/20.naca_ml/001.test/run_case04_les_unsteady_dualtime/probe.yaml (sha256 402036dabd3593a4)
+copy  naca.h5 <- /home/sano/work/forge/case/20.naca_ml/001.test/run_case04_les_unsteady_dualtime/naca.h5 (sha256 3640c792a9a53904)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 100' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 100' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)LESorRANS:\\s*1\\b.*$' -> '\\g<1>model: "wale"   # 複製時に旧キー LESorRANS 1 / LESmodel 1 から移行' (1 件)
+edit  solverConfig.yaml: '(?m)^\\s*LESmodel:\\s*1\\b.*\\n' -> '' (1 件)
+
+nStepOuter = 100, outStepInterval = 100
+note : 旧キー LESorRANS 1 / LESmodel 1 → `model: wale`

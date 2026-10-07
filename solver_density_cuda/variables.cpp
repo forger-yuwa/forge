@@ -294,71 +294,21 @@ variables::~variables() {
     this->freeQAccumulator();
 }
 
-void variables::allocVariables(const int &useGPU , mesh& msh)
+void variables::allocVariables(const int &useGPU , mesh& msh, const std::set<std::string>& hostCells)
 {
-    // W-I 実力診断 (§4.2) は FORGE_WI_FORCE_DIAG=1 のときだけ有効。OFF なら
-    // 確保も出力もしない (通常経路のメモリ・D2H・HDF5 を増やさない)。
-    {
-        const char* e = std::getenv("FORGE_WI_FORCE_DIAG");
-        if (!(e && std::atoi(e) != 0)) {
-            for (const char* n : {"wi_ftan", "wi_fnrm", "wi_fnrm_abs", "wi_ftan_res", "wi_eheat", "wi_ework"}) {
-                cellValNames.remove(n);
-                output_cellValNames.remove(n);
-                c.erase(n);
-                c_d.erase(n);
-            }
-        }
-    }
-    // E3 (§5) の wf_sprod も env ゲート (OFF ならメモリ・D2H・HDF5 を増やさない)
-    {
-        const char* e = std::getenv("FORGE_WF_OMEGA_SOURCE");
-        if (!(e && std::atoi(e) != 0)) {
-            cellValNames.remove("wf_sprod");
-            output_cellValNames.remove("wf_sprod");
-            c.erase("wf_sprod");
-            c_d.erase("wf_sprod");
-        }
-    }
-    // 閉包則診断 (§5.2 ③) の wf_g も env ゲート
-    {
-        const char* e = std::getenv("FORGE_WF_CLOSURE_DIAG");
-        if (!(e && std::atoi(e) != 0)) {
-            cellValNames.remove("wf_g");
-            output_cellValNames.remove("wf_g");
-            c.erase("wf_g");
-            c_d.erase("wf_g");
-        }
-    }
-    // 代表点幾何診断 (§3.1) も env ゲート
-    {
-        const char* e = std::getenv("FORGE_WF_REP_DIAG");
-        if (!(e && std::atoi(e) != 0)) {
-            for (const char* n : {"rep_id", "rep_y", "rep_dist", "rep_cos", "rep_toff", "rep_wdratio",
-                                  "rep_nx", "rep_ny", "rep_nz"}) {
-                cellValNames.remove(n);
-                output_cellValNames.remove(n);
-                c.erase(n);
-                c_d.erase(n);
-            }
-        }
-    }
-    // omega 項別収支 (§4.1) も env ゲート
-    {
-        const char* e = std::getenv("FORGE_OMEGA_BUDGET");
-        if (!(e && std::atoi(e) != 0)) {
-            for (const char* n : {"omg_prod", "omg_dest", "omg_cross", "omg_trans", "omg_axisym"}) {
-                cellValNames.remove(n);
-                output_cellValNames.remove(n);
-                c.erase(n);
-                c_d.erase(n);
-            }
-        }
-    }
+    // 環境変数で無効な診断変数の除去 (旧: ここの先頭) は applyEnvGatedRemovals (output/outputFieldNames.cpp) へ移した。
+    // 呼び出し側 (main.cpp の initializeSimulation) が hostCellSet より前に済ませる (plan architecture-solver-host-memory §4.3)。
+    //
+    // ホストのセル変数: gpu: 1 では H (hostCells) の名前だけ nCells_all 長・0 初期化で確保し、他は長さ 0 のまま
+    // (キーは残す。ホストから触る経路は hostCell が名前と長さを検査して止める)。H の配列はゴーストを含めて nCells_all 長に保つ
+    // (H2D はゴースト部にもホストの 0 を写すので、縮めるとビット一致しなくなる。監査 §2 (v))。gpu: 0 は全部確保する。
+    this->nCellsAlloc = msh.nCells_all;
     for (auto& cellValName : cellValNames)
     {
         //this->c[cellValName].resize(msh.nCells);
         std::vector<flow_float>& cellValues = this->c.at(cellValName);
-        cellValues.resize(msh.nCells_all); // including ghost cells
+        if (useGPU != 1 || hostCells.count(cellValName) != 0)
+            cellValues.resize(msh.nCells_all); // including ghost cells
 
         if (useGPU == 1) 
         {
@@ -417,6 +367,37 @@ static void requireHostPlaneLength(const std::string& name, const std::vector<fl
 
 
 
+// ホストのセル配列への共通アクセサ (plan architecture-solver-host-memory §4 原則・§4.3)。gpu: 1 ではホスト確保集合 H の名前だけ
+// nCells_all 長で確保するので、ホスト側の値に触る経路 (転送・初期場の読込・出力・checkpoint・診断) は添字・イテレータ・.data() の
+// 前にここを通し、キーが無い・長さが nCellsAlloc と違う (H に無い = 長さ 0 を含む) ときは変数名と長さを出して止める
+// (黙って 0 長の配列を転送・出力しない。map::at はキーの有無しか見ないので保護にならない)。
+[[noreturn]] static void hostCellFail(const std::string& name, bool registered, size_t len, geom_int nCellsAlloc)
+{
+    std::cerr << "[variables] ERROR: host cell variable '" << name << "' ";
+    if (!registered) std::cerr << "is not registered";
+    else             std::cerr << "has length " << len << " but nCells_all = " << nCellsAlloc;
+    std::cerr << " (on the GPU path (gpu: 1) the host keeps only the names in the host set H"
+                 " = hostCellSet in output/outputFieldNames.cpp; nCells_all = -1 means the variables were not allocated)"
+              << std::endl;
+    std::exit(EXIT_FAILURE);
+}
+
+std::vector<flow_float>& variables::hostCell(const std::string& name)
+{
+    auto it = this->c.find(name);
+    if (it == this->c.end()) hostCellFail(name, false, 0, this->nCellsAlloc);
+    if (this->nCellsAlloc < 0 || it->second.size() != (size_t)this->nCellsAlloc) hostCellFail(name, true, it->second.size(), this->nCellsAlloc);
+    return it->second;
+}
+
+const std::vector<flow_float>& variables::hostCell(const std::string& name) const
+{
+    auto it = this->c.find(name);
+    if (it == this->c.end()) hostCellFail(name, false, 0, this->nCellsAlloc);
+    if (this->nCellsAlloc < 0 || it->second.size() != (size_t)this->nCellsAlloc) hostCellFail(name, true, it->second.size(), this->nCellsAlloc);
+    return it->second;
+}
+
 // 変換器専用の確保 (variables.hpp の宣言を参照)。
 void variables::allocVariablesConverter(const int &useGPU , mesh& msh, const std::list<std::string>& keep)
 {
@@ -427,6 +408,7 @@ void variables::allocVariablesConverter(const int &useGPU , mesh& msh, const std
         it = this->c.erase(it);
     }
     this->cellValNames.remove_if([&](const std::string& n) { return !kept(n); });
+    this->nCellsAlloc = msh.nCells_all;   // hostCell / copyVariables_cell_* の長さ検査の期待長
     for (auto& cellValName : cellValNames)
     {
         std::vector<flow_float>& cellValues = this->c.at(cellValName);
@@ -442,7 +424,7 @@ void variables::copyVariables_cell_plane_H2D_all()
 {
     for (auto& name : this->cellValNames)
     {
-        std::vector<flow_float>& cellValues = this->c.at(name);
+        std::vector<flow_float>& cellValues = this->hostCell(name);
         cudaWrapper::cudaMemcpy_H2D_wrapper(cellValues.data() , this->c_d.at(name), cellValues.size());
     }
     for (auto& name : this->planeValNames)
@@ -457,7 +439,7 @@ void variables::copyVariables_cell_plane_H2D_all()
 void variables::copyVariables_cell_H2D(std::list<std::string> names)
 {
     for (auto& name : names) {
-        std::vector<flow_float>& cellValues = this->c.at(name);
+        std::vector<flow_float>& cellValues = this->hostCell(name);
         cudaWrapper::cudaMemcpy_H2D_wrapper(cellValues.data() , this->c_d.at(name), cellValues.size());
     }
 }
@@ -474,7 +456,7 @@ void variables::copyVariables_cell_plane_D2H_all()
 {
     for (auto& name : this->cellValNames)
     {
-        std::vector<flow_float>& cellValues = this->c.at(name);
+        std::vector<flow_float>& cellValues = this->hostCell(name);
         cudaWrapper::cudaMemcpy_D2H_wrapper(this->c_d.at(name), cellValues.data() , cellValues.size());
     }
     for (auto& name : this->planeValNames)
@@ -488,7 +470,7 @@ void variables::copyVariables_cell_plane_D2H_all()
 void variables::copyVariables_cell_D2H(std::list<std::string> names)
 {
     for (auto& name : names) {
-        std::vector<flow_float>& cellValues = this->c.at(name);
+        std::vector<flow_float>& cellValues = this->hostCell(name);
         cudaWrapper::cudaMemcpy_D2H_wrapper(this->c_d.at(name), cellValues.data(), cellValues.size());
     }
 }
@@ -807,14 +789,14 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
     }
  
    
-    std::vector<flow_float>& v_ro = this->c.at("ro");
-    std::vector<flow_float>& v_roUx = this->c.at("roUx");
-    std::vector<flow_float>& v_roUy = this->c.at("roUy");
-    std::vector<flow_float>& v_roUz = this->c.at("roUz");
-    std::vector<flow_float>& v_roe = this->c.at("roe");
-    std::vector<flow_float>& v_wall_dist = this->c.at("wall_dist");
-    std::vector<flow_float>& v_roK = this->c.at("roK");
-    std::vector<flow_float>& v_roOmega = this->c.at("roOmega");
+    std::vector<flow_float>& v_ro = this->hostCell("ro");
+    std::vector<flow_float>& v_roUx = this->hostCell("roUx");
+    std::vector<flow_float>& v_roUy = this->hostCell("roUy");
+    std::vector<flow_float>& v_roUz = this->hostCell("roUz");
+    std::vector<flow_float>& v_roe = this->hostCell("roe");
+    std::vector<flow_float>& v_wall_dist = this->hostCell("wall_dist");
+    std::vector<flow_float>& v_roK = this->hostCell("roK");
+    std::vector<flow_float>& v_roOmega = this->hostCell("roOmega");
 
     for (geom_int i=0; i<msh.nCells; i++)
     {
@@ -859,8 +841,8 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
             const std::string si = std::to_string(s);
             const std::string roYname = "roY"+si;
             const std::string Yname    = "Y"+si;
-            std::vector<flow_float>& v_roY = this->c.at(roYname);
-            std::vector<flow_float>& v_Y   = this->c.at(Yname);
+            std::vector<flow_float>& v_roY = this->hostCell(roYname);
+            std::vector<flow_float>& v_Y   = this->hostCell(Yname);
 
             std::vector<geom_float> roY_in;
             bool has_roY = file.exist("/VALUE/"+roYname);
@@ -873,13 +855,13 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
                 file.getDataSet("/VALUE/"+Yname).read(Y_in);
                 roY_in.resize(Y_in.size());
                 for (std::size_t k = 0; k < Y_in.size(); k++) {
-                    roY_in[k] = static_cast<geom_float>(this->c.at("ro")[k]) * Y_in[k];
+                    roY_in[k] = static_cast<geom_float>(this->hostCell("ro")[k]) * Y_in[k];
                 }
                 has_roY = true;  // フォールバック成功
             }
 
             for (geom_int i=0; i<msh.nCells; i++) {
-                const flow_float roi = this->c.at("ro")[i];
+                const flow_float roi = this->hostCell("ro")[i];
                 flow_float roYi;
                 if (has_roY)        roYi = roY_in[i];
                 else if (s == 0)    roYi = roi;        // 既定: 第 1 化学種のみ
@@ -900,8 +882,8 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
             std::vector<geom_float> g, r;
             file.getDataSet("/VALUE/roGamma").read(g);
             file.getDataSet("/VALUE/roReth").read(r);
-            std::vector<flow_float>& vg = this->c.at("roGamma");
-            std::vector<flow_float>& vr = this->c.at("roReth");
+            std::vector<flow_float>& vg = this->hostCell("roGamma");
+            std::vector<flow_float>& vr = this->hostCell("roReth");
             for (geom_int i=0; i<msh.nCells; i++) { vg[i] = g[i]; vr[i] = r[i]; }
             this->copyVariables_cell_H2D({"roGamma", "roReth"});
         }
@@ -911,8 +893,8 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
 
     // --- 受動トレーサ: ρξ を読み込む (VALUE/roXi → VALUE/Xi×ρ → 0 の優先順) ---
     if (this->tracerRegistered != 0) {
-        std::vector<flow_float>& v_roXi = this->c.at("roXi");
-        std::vector<flow_float>& v_Xi   = this->c.at("Xi");
+        std::vector<flow_float>& v_roXi = this->hostCell("roXi");
+        std::vector<flow_float>& v_Xi   = this->hostCell("Xi");
         std::vector<geom_float> in;
         bool has = false;
         if (file.exist("/VALUE/roXi")) {
@@ -921,11 +903,11 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
             std::vector<geom_float> xi_in;
             file.getDataSet("/VALUE/Xi").read(xi_in);
             in.resize(xi_in.size());
-            for (std::size_t k = 0; k < xi_in.size(); k++) in[k] = static_cast<geom_float>(this->c.at("ro")[k]) * xi_in[k];
+            for (std::size_t k = 0; k < xi_in.size(); k++) in[k] = static_cast<geom_float>(this->hostCell("ro")[k]) * xi_in[k];
             has = true;
         }
         for (geom_int i=0; i<msh.nCells; i++) {
-            const flow_float roi = this->c.at("ro")[i];
+            const flow_float roi = this->hostCell("ro")[i];
             flow_float v = has ? static_cast<flow_float>(in[i]) : static_cast<flow_float>(0.0);
             if (v < 0.0) v = 0.0;
             if (v > roi) v = roi;
@@ -943,15 +925,15 @@ void variables::readValueHDF5(std::string fname , mesh& msh,
         std::list<std::string> cond_names;
         for (const auto& consName : this->condMomentConsNames) {
             const std::string primName = consName.substr(2);
-            std::vector<flow_float>& v_cons = this->c.at(consName);
-            std::vector<flow_float>& v_prim = this->c.at(primName);
+            std::vector<flow_float>& v_cons = this->hostCell(consName);
+            std::vector<flow_float>& v_prim = this->hostCell(primName);
 
             std::vector<geom_float> cons_in;
             const bool has = file.exist("/VALUE/"+consName);
             if (has) file.getDataSet("/VALUE/"+consName).read(cons_in);
 
             for (geom_int i=0; i<msh.nCells; i++) {
-                const flow_float roi = this->c.at("ro")[i];
+                const flow_float roi = this->hostCell("ro")[i];
                 const flow_float consi = has ? cons_in[i] : static_cast<flow_float>(0.0);
                 v_cons[i] = consi;
                 v_prim[i] = consi / std::max(roi, static_cast<flow_float>(1.0e-30));

@@ -1,0 +1,46 @@
+mesh:
+  meshFileName: "passive_solid.h5"
+  discretization: "node"
+  axisCentroidShift: 0
+  nodeWallViscGradFlux: 1
+  nodeWallDirichlet: 1   # node 壁 no-slip クロージャ (必須)
+  valueFileName: "passive_solid.h5"
+gpu: 1
+solver: "SLAU"
+physProp:
+  thermalMethod: 0
+  viscMethod: 1
+  visc : 1.8e-5
+  thermCond: 0.0257
+  cp : 1004.5
+  gamma : 1.4
+time:
+  unsteady: 0
+  dualTime: 0
+  last:
+    nStepOuter: 200
+    time: 1.0
+  deltaT:
+    control: 1
+    dt: 1.0e-7
+    cfl: 1.0
+    cfl_pseudo: 1.0
+    blockDPLUR: 1
+    implicitRelax: 1.0
+    detectNaN: 1
+    ducrosLimiter: 0
+    dt_min: 1.0e-10
+    dt_max: 1.0e-2
+  outStepInterval: 200
+  outStepStart: 0
+  timeIntegration: 11
+  nStepInner: 5
+space:
+  convMethod: 1   # node 初回は1次で安定確認 (MUSCL は後で)
+  limiter: 2
+turbulence:
+  model: "sst"   # 複製時に旧キー LESorRANS 2 / RANSmodel 1 から移行
+  scalarDiffusion: 1
+  dilatationCorrection: 2
+  wallTreatmentSST: 0   # 複製時に 1 (壁関数, 使用禁止) から変更
+initial: "passive_pseudoshock"

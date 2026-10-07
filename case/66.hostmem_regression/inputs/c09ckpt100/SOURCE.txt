@@ -1,0 +1,14 @@
+input: c09ckpt100
+src  : /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100/solverConfig.yaml (sha256 33cd7eb35e4fe550)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100/bcondConfig.yaml (sha256 f6e845e2d21f5424)
+copy  probe.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100/probe.yaml (sha256 7e9bf3d48de275e4)
+copy  species_db.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100/species_db.yaml (sha256 4992e37157b2d17a)
+copy  Taylor-Green.h5 <- /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100/Taylor-Green.h5 (sha256 f8d6d1fb1da091ae)
+copy  TG_stepxi_gaussY_seam.h5 <- /home/sano/work/forge/case/09.Taylor-Green/run_0160_passiveG_fct_ckpt100/TG_stepxi_gaussY_seam.h5 (sha256 c0542626895691d8)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 100' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 100' (1 件)
+
+nStepOuter = 100, outStepInterval = 100
+note : 無修正 (100 step、res_100 に /CHECKPOINT)

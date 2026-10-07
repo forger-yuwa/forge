@@ -1,0 +1,10 @@
+input: v09
+src  : /home/sano/work/forge/case/09.Taylor-Green
+
+derive solverConfig.yaml <- inputs/c09ckpt100/solverConfig.yaml
+derive bcondConfig.yaml <- inputs/c09ckpt100/bcondConfig.yaml
+derive species_db.yaml <- inputs/c09ckpt100/species_db.yaml
+copy  mesh.msh <- /home/sano/work/forge/case/09.Taylor-Green/mesh/Taylor-Green.msh (sha256 c49934fb50fd0308)
+
+nStepOuter = 100, outStepInterval = 100
+note : c09ckpt100 の config (node 周期・2 種・トレーサ) で mesh/Taylor-Green.msh を変換

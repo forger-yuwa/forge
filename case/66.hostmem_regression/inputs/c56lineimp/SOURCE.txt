@@ -1,0 +1,13 @@
+input: c56lineimp
+src  : /home/sano/work/forge/case/56.gap_tp1187/run_0019_lineimplicit
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/56.gap_tp1187/run_0019_lineimplicit/solverConfig.yaml (sha256 b92a35442712428a)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/56.gap_tp1187/run_0019_lineimplicit/bcondConfig.yaml (sha256 f1c53b600d54b6c0)
+copy  probe.yaml <- /home/sano/work/forge/case/56.gap_tp1187/run_0019_lineimplicit/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  mesh.h5 <- /home/sano/work/forge/case/56.gap_tp1187/run_0019_lineimplicit/mesh.h5 (sha256 ed5fad30fc02b3a2)
+seed  seed_src.h5 <- /home/sano/work/forge/case/56.gap_tp1187/run_0019_lineimplicit/res_100000.h5 (sha256 4a95ade51487290f) → AWS で restart_field.py を mesh.h5 へ
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 無修正 (res_100000 から restart)

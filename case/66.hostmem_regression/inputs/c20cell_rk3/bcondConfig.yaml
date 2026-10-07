@@ -1,0 +1,59 @@
+Inlet:
+  physID: 1
+  kind: inlet_Pressure_dir
+  outputHDFflg: 0
+  ints:
+  floats:
+    Ux: 1.0
+    Uy: 0.0
+    Uz: 0.0
+    Pt: 107853.3987
+    Tt: 293.3367
+
+Outlet:
+  physID: 2 
+  kind: outlet_statPress
+  outputHDFflg: 0
+  ints:
+  floats:
+    Ps: 101325.0
+
+top:
+  physID: 3
+  kind: slip
+  outputHDFflg: 0
+  ints:
+  floats:
+
+bot:
+  physID: 4
+  kind: slip
+  outputHDFflg: 0
+  ints:
+  floats:
+
+wall:
+  physID: 5 
+  kind: wall
+  outputHDFflg: 1
+  ints:
+  floats:
+    Ux: 0.0
+    Uy: 0.0
+    Uz: 0.0
+
+side1:
+  physID: 6
+  kind: slip
+  outputHDFflg: 0
+  ints:
+  floats:
+
+side2:
+  physID: 7
+  kind: slip
+  outputHDFflg: 0
+  ints:
+  floats:
+
+

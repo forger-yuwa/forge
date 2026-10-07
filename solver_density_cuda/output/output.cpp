@@ -1,6 +1,7 @@
 #include "cuda_forge/passiveTransport_d.cuh"
 #include <cstdio>
 #include "output.hpp"
+#include "output/outputFieldNames.hpp"
 #include "conjugateWall.hpp"
 #include "input/speciesDB.hpp"
 
@@ -61,64 +62,17 @@ flow_float outputTimeValue(const solverConfig& cfg, int iStep)
 
 }
 
-// 出力する場の量を config output.level で絞る (procedures/solver-settings.md「output」)。
-//   level 2: output_cellValNames 全部 (従来)。level 0/1: 下の基本集合 + extraFields を output_cellValNames の順で。
-//   h0 (全エンタルピー) は level>=1 で合成出力 (Ht [+k]) し、属性 h0_includes_k を付ける。
-// extraFields は確保済みの cell 変数なら何でも末尾に足す (extraOnly_cellValNames の wall_y_eff・dY{s}d* もこれで出る)。
-static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, const variables& var)
-{
-    // level 2 は output_cellValNames 全部、level 0/1 は基本集合。
-    // **extraFields はどの level でも効く** (2026-09-24, codex result m1): 以前は level>=2 で
-    // 即 return していたため、下の「確保済み変数を出力する」処理へ到達せず、`level: 2` の run では
-    // `res_ro` などを指定しても黙って出なかった。
-    std::vector<std::string> base;
-    if (cfg.outputLevel >= 2) {
-        for (const auto& n : var.output_cellValNames) base.push_back(n);
-    } else {
-        for (const char* n : {"ro","roUx","roUy","roUz","roe","roK","roOmega"}) base.push_back(n);
-        for (const auto& n : var.speciesVarNames) base.push_back(n);            // roY{s}
-        for (const auto& n : var.condMomentConsNames) base.push_back(n);        // 凝縮モーメント保存量
-        if (var.tracerRegistered != 0) base.push_back("roXi");                  // 受動トレーサ保存量 (restart 用)
-        if (var.transitionRegistered != 0) { base.push_back("roGamma"); base.push_back("roReth"); }   // 遷移モデル保存量 (restart 用)
-        if (cfg.outputLevel >= 1) {
-            if (var.tracerRegistered != 0) base.push_back("Xi");
-            if (var.transitionRegistered != 0) { for (const char* n : {"gammaTr","reTheta","gammaEff"}) base.push_back(n); }
-            for (const char* n : {"P","T","Ux","Uy","Uz","k","omega","sonic","vis_lam","vis_turb","wall_dist"}) base.push_back(n);
-            for (const auto& n : var.speciesVarNames) base.push_back(n.substr(2));   // Y{s}
-            for (const auto& n : var.condMomentConsNames) base.push_back(n.substr(2));
-        }
-    }
-    for (const auto& n : cfg.outputExtraFields) base.push_back(n);
-
-    std::list<std::string> out;
-    for (const auto& n : var.output_cellValNames) {
-        if (std::find(base.begin(), base.end(), n) != base.end()) out.push_back(n);
-    }
-    // **extraFields は確保済みの cell 変数なら何でも出せる** (2026-09-24)。
-    // 以前は `output_cellValNames` に入っているものしか受け付けず、`res_ro` のように
-    // `cellValNames` には在って出力候補に入っていない診断量を**指定しても黙って無視**していた。
-    // 丸めの内訳を場で測るのに残差そのものが要る (plan time_integration-fp64-accumulator §5.1 S6)。
-    for (const auto& n : cfg.outputExtraFields) {
-        if (std::find(out.begin(), out.end(), n) != out.end()) continue;
-        if (std::find(var.output_cellValNames.begin(), var.output_cellValNames.end(), n) != var.output_cellValNames.end()) continue;
-        if (var.c.count(n) != 0 || var.c_d.count(n) != 0) {
-            out.push_back(n);   // 確保済みの診断量 (res_* など)
-            continue;
-        }
-        static bool warned = false;
-        if (!warned) { std::cerr << "[output] extraFields: '" << n << "' は確保されていない変数なので無視する\n"; warned = true; }
-    }
-    return out;
-}
-
+// 出力する場の量 (output.level・extraFields・h0・/CHECKPOINT) は outputFieldPlan (output/outputFieldNames.cpp) が決める。
+// 確保側 (hostCellSet) と同じ関数なので、ここで読む名前はホストに確保されている (違えば hostCell が名前つきで止める)。
 static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep , const std::string& prefix)
 {
-    const std::list<std::string> outNames = effectiveOutputNames(cfg, var);
-    const bool writeH0 = (cfg.outputLevel >= 1) && var.c.count("Ht") && var.c.count("k");
+    const OutputFieldPlan plan = outputFieldPlan(cfg, var);
+    const std::list<std::string>& outNames = plan.solution;
+    const bool writeH0 = plan.h0;
     const bool h0IncludesK = (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1);
     if (cfg.gpu == 1) {
         std::list<std::string> d2h = outNames;
-        if (writeH0) { d2h.push_back("Ht"); d2h.push_back("k"); }
+        for (const auto& n : plan.h0Deps) d2h.push_back(n);   // Ht, k
         var.copyVariables_cell_D2H(d2h);
     }
 
@@ -202,9 +156,11 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
             continue; // notfound
         }
 
+        // 書込み順は var.c (名前順) のまま。名前で絞った後、範囲を読む前に長さを検査する
+        const std::vector<flow_float>& src = var.hostCell(name);
         std::vector<flow_float> vtemp;
         vtemp.resize(msh.nCells);
-        copy(v.second.begin(), v.second.begin()+msh.nCells, vtemp.begin());
+        copy(src.begin(), src.begin()+msh.nCells, vtemp.begin());
 
         //file.createDataSet("/VALUE/"+name , v.second);
         file.createDataSet("/VALUE/"+name , vtemp);
@@ -215,19 +171,15 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     // 前物理レベル Q^{n-1} (流れ *N, 化学種 roY{s}P, 受動種 <cons>P; 出力時点は物理 step 末尾なので ro=Q^n, roN=Q^{n-1})
     // と物理時刻・刻み・履歴有効数を /CHECKPOINT にまとめて書く。restart はこれが全部揃い layout が一致するときだけ復元する。
     if (cfg.unsteady == 1 && cfg.dualTime == 1) {
-        std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
-        for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
-        // 受動種の履歴は scheme 1 (BDF あり) のときだけ書く (scheme 0 はシフトしない = 無効な履歴; codex result M3)。
-        if (cfg.passiveScalarScheme == 1) {
-            if (var.tracerRegistered != 0) hist.push_back("roXiP");
-            for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
-        }
+        // 履歴の名前は復元側 (main.cpp の initDualTimeHistory) と同じ dualTimeHistoryNames。受動種は scheme 1 (BDF あり) のときだけ。
+        const std::list<std::string>& hist = plan.checkpoint;
         std::list<std::string> have;
         for (const auto& nm : hist) if (var.c.count(nm)) have.push_back(nm);
         if (cfg.gpu == 1) var.copyVariables_cell_D2H(have);
         HighFive::Group ck = file.createGroup("/CHECKPOINT");
         for (const auto& nm : have) {
-            std::vector<flow_float> vtemp(var.c.at(nm).begin(), var.c.at(nm).begin() + msh.nCells);
+            const std::vector<flow_float>& src = var.hostCell(nm);
+            std::vector<flow_float> vtemp(src.begin(), src.begin() + msh.nCells);
             ck.createDataSet("/CHECKPOINT/" + nm, vtemp);
         }
         // 受動種 FCT の流束形履歴 (§4.7 v4): G (面, 受動種ごと) と H (セル)。無ければ restart は局所形で代替する。
@@ -260,7 +212,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     }
     if (writeH0) {
         std::vector<flow_float> h0(msh.nCells);
-        const auto& Ht = var.c.at("Ht"); const auto& kk = var.c.at("k");
+        const auto& Ht = var.hostCell("Ht"); const auto& kk = var.hostCell("k");
         for (geom_int i = 0; i < msh.nCells; ++i) h0[i] = Ht[i] + (h0IncludesK ? std::max(kk[i], (flow_float)0.0) : (flow_float)0.0);
         auto ds = file.createDataSet("/VALUE/h0", h0);
         const int flag = h0IncludesK ? 1 : 0;

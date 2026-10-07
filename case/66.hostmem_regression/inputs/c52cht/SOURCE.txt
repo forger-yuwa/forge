@@ -1,0 +1,14 @@
+input: c52cht
+src  : /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf/solverConfig.yaml (sha256 c832108eccdef7b5)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf/bcondConfig.yaml (sha256 6268330d932c7578)
+copy  probe.yaml <- /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf/probe.yaml (sha256 d8bfab7deab85b01)
+copy  mesh.h5 <- /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf/mesh.h5 (sha256 dd6e14c8d0676501)
+copy  wall_profile_3.csv <- /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf/wall_profile_3.csv (sha256 d64d6dae3ba5ebe1)
+seed  seed_src.h5 <- /home/sano/work/forge/case/52.conjugate_slab/run_0007_fxhalf/res_8000.h5 (sha256 1509c831f7635610) → AWS で restart_field.py を mesh.h5 へ
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 無修正 (res_8000 から restart。CHT の内部状態は res に無いので界面は再初期化)

@@ -1,0 +1,12 @@
+input: c48absorb
+src  : /home/sano/work/forge/case/48.flat_plate_cooled_m4/run_0903_absorb2
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/48.flat_plate_cooled_m4/run_0903_absorb2/solverConfig.yaml (sha256 2859efc229782236)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/48.flat_plate_cooled_m4/run_0903_absorb2/bcondConfig.yaml (sha256 c3a8aa13d9746cd3)
+copy  probe.yaml <- /home/sano/work/forge/case/48.flat_plate_cooled_m4/run_0903_absorb2/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  mesh.h5 <- /home/sano/work/forge/case/48.flat_plate_cooled_m4/run_0903_absorb2/mesh.h5 (sha256 ce7b891653a75dec)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 無修正 (extraFields に roN.. と dq_block_old_*。元は 1 step → 200 step)

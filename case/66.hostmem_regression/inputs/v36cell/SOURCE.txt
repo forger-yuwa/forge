@@ -1,0 +1,9 @@
+input: v36cell
+src  : /home/sano/work/forge/case/36.passive_pseudoshock_control
+
+derive solverConfig.yaml <- inputs/c36cell/solverConfig.yaml
+derive bcondConfig.yaml <- inputs/c36cell/bcondConfig.yaml
+copy  mesh.msh <- /home/sano/work/forge/case/36.passive_pseudoshock_control/mesh/passive_solid.msh (sha256 b10e3400ecac9f62)
+
+nStepOuter = 200, outStepInterval = 200
+note : c36cell の config (cell) で mesh/passive_solid.msh を変換

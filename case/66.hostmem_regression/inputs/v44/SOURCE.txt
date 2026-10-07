@@ -1,0 +1,10 @@
+input: v44
+src  : /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX
+
+derive solverConfig.yaml <- inputs/c44steady/solverConfig.yaml
+derive bcondConfig.yaml <- inputs/c44steady/bcondConfig.yaml
+derive species_db.yaml <- inputs/c44steady/species_db.yaml
+copy  mesh.msh <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/nozzle.msh (sha256 f06f1d451cc2af81)
+
+nStepOuter = 200, outStepInterval = 200
+note : c44steady の config (軸対称・2 種・凝縮) で nozzle.msh を変換

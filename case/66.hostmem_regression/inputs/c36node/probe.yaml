@@ -1,0 +1,17 @@
+# case/66 で追加した点 probe (plan §6: case/36 に 2〜3 点を足す)。outStepInterval は 20 step ごと
+outStepInterval: 20
+outStepStart: 0
+points:
+  p0:
+    x: 0.10
+    y: 0.0
+    z: 0.0
+  p1:
+    x: 0.35
+    y: 0.005
+    z: 0.0
+  p2:
+    x: 0.60
+    y: -0.01
+    z: 0.0
+surfaces:

@@ -1,0 +1,16 @@
+input: c44dual_ckpt100
+src  : /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/solverConfig.yaml (sha256 9d9fb71dd3ed2543)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/bcondConfig.yaml (sha256 9d03d0ed4c686916)
+copy  probe.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  species_db.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/species_db.yaml (sha256 ee9cf4b629b7c4d7)
+copy  nozzle.h5 <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/nozzle.h5 (sha256 3d2be9def2474356)
+copy  ic.h5 <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/ic.h5 (sha256 03417b288b69586b)
+copy  inlet_profile_1.csv <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/inlet_profile_1.csv (sha256 9c78cf556e5eabe0)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 100' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 100' (1 件)
+edit  species_db.yaml: '(?ms)^"H2O":.*\\Z' -> '' (1 件)
+
+nStepOuter = 100, outStepInterval = 100
+note : species_db.yaml から H2O を外す (凝縮 ON は組込み H2O が必須)。run_0376 型 (plan §6) のうち推奨設定に合う run_0468 (run_0376 は dual-time で implicitRelax 0.7・SFR 2 なのに convMethod 0 で check_solver_config が FAIL)。200 step を 100 + 100 に分割 (前半)

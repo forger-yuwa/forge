@@ -1,0 +1,17 @@
+input: c36cell
+src  : /home/sano/work/forge/case/36.passive_pseudoshock_control/run_sym_H_2up_cell
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/36.passive_pseudoshock_control/run_sym_H_2up_cell/solverConfig.yaml (sha256 df0a5029bdb01b30)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/36.passive_pseudoshock_control/run_sym_H_2up_cell/bcondConfig.yaml (sha256 505c19c464950a01)
+copy  probe.yaml <- /home/sano/work/forge/case/36.passive_pseudoshock_control/run_sym_H_2up_cell/probe.yaml (sha256 6a1135963587bc9c)
+copy  passive_solid.h5 <- /home/sano/work/forge/case/36.passive_pseudoshock_control/run_sym_H_2up_cell/passive_solid.h5 (sha256 2275f72ebcb9aed9)
+seed  seed_src.h5 <- /home/sano/work/forge/case/36.passive_pseudoshock_control/run_sym_H_2up_cell/res_60000.h5 (sha256 8cfe12a2b1c3f4d9) → AWS で restart_field.py を passive_solid.h5 へ
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)LESorRANS:\\s*2\\b.*$' -> '\\g<1>model: "sst"   # 複製時に旧キー LESorRANS 2 / RANSmodel 1 から移行' (1 件)
+edit  solverConfig.yaml: '(?m)^\\s*LESmodel:\\s*\\d+.*\\n' -> '' (1 件)
+edit  solverConfig.yaml: '(?m)^\\s*RANSmodel:\\s*\\d+.*\\n' -> '' (1 件)
+edit  solverConfig.yaml: 'wallTreatmentSST:\\s*1\\b' -> 'wallTreatmentSST: 0   # 複製時に 1 (壁関数, 使用禁止) から変更' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 旧キー → `model: sst`、`wallTreatmentSST` 1→0

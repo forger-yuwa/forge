@@ -1,0 +1,15 @@
+input: c44steady
+src  : /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/solverConfig.yaml (sha256 05782fbc05087e72)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/bcondConfig.yaml (sha256 7308289220082bcc)
+copy  probe.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  species_db.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/species_db.yaml (sha256 ad6179013bcaa9e8)
+copy  nozzle.h5 <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/nozzle.h5 (sha256 65fa1686b343b26e)
+seed  seed_src.h5 <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX/res_24000.h5 (sha256 4d1df0387b15cde4) → AWS で restart_field.py を nozzle.h5 へ
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+edit  species_db.yaml: '(?ms)^"H2O":.*\\Z' -> '' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 無修正 (定常 active run、res_24000 から restart)。凝縮モーメント rog_0/roQ*_0 は変換直後の nozzle.h5 に無いので 0 で作ってから写す。種の記録が無い場なので restart_field は --force-species、solver は FORGE_ALLOW_UNVERIFIED_SPECIES=1。species_db.yaml から H2O を外す (凝縮 ON は組込み H2O が必須、現行 solver が拒否する)

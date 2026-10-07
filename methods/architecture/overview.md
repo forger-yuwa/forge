@@ -192,7 +192,10 @@
 GPU 経路 (`gpu: 1`) でも、`variables::allocVariables` (`variables.cpp`) は登録された**全セル変数・全面変数**をホストにも
 `nCells_all` / `nPlanes` 長で確保し、同じ長さをデバイスに `cudaMalloc` する。格子の構造体 (`mesh` の `nodes`・`planes`・`cells`、
 要素ごとに内側の `vector` を持つ) と、使っていない行列 `mat_ns` (`initMatrix`) も
-初期化の後までホストに残っていた (2026-10-07 から `gpu: 1` では `mat_ns` とホストの面変数 `p` を確保しない。起動ログは "Init Matrix: skipped")。2026-10-07 の計測 (生産 SERN 3D と同じ設定: node・SST・2 成分・陰解法 block-DPLUR、
+初期化の後までホストに残っていた (2026-10-07 から `gpu: 1` では `mat_ns` とホストの面変数 `p` を確保せず、ホストのセル変数 `c` は**ホストで読み書きする名前 H だけ**を確保する。
+H は `output/outputFieldNames.cpp` の `hostCellSet` が、出力・`h0` の依存・dual-time の checkpoint・初期場の読込・ホストで読む診断・`lineImplicit` から作り、
+出力側も同じ関数で名前を決める。H に無いセル変数はホストでは長さ 0 で、ホストから触ると `variables::hostCell` が変数名つきで停止する。
+起動ログに `[variables] host cell arrays (gpu: 1): N of M registered` が出る)。2026-10-07 の計測 (生産 SERN 3D と同じ設定: node・SST・2 成分・陰解法 block-DPLUR、
 `notes/investigations/2026-10-07-forge-memlog/`) では、ホストの常駐は約 2.6 kB/節点で、内訳は
 ホストの `c` 約 960 B (223 本)、`planes` 約 700 B、`mat_ns` 約 310 B、`cells` 約 250 B、ホストの `p` 約 195 B (16 本)、`nodes` 約 100 B。
 GPU は約 1.4 kB/節点 (`c_d` 223 本で約 960 B、`p_d` 約 195 B、格子マップ約 94 B ほか) + 定数。

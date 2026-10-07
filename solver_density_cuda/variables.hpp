@@ -3,6 +3,8 @@
 #include <iostream>
 #include <vector>
 #include <list>
+#include <set>
+#include <string>
 
 #include "flowFormat.hpp"
 #include "input/solverConfig.hpp"
@@ -19,7 +21,9 @@
 
 class variables {
 public:
-    std::map<std::string, std::vector<flow_float>> c; // host cell variables
+    // host cell variables。gpu: 1 ではホスト確保集合 H (output/outputFieldNames.hpp の hostCellSet) の名前だけ nCells_all 長で
+    // 確保し、それ以外は長さ 0 (キーは残る)。**ホスト側の値に触るときは hostCell(name) を通す** (plan architecture-solver-host-memory §4.3)。
+    std::map<std::string, std::vector<flow_float>> c;
     std::map<std::string, std::vector<flow_float>> p; // host plane variables (gpu: 1 では確保しない = 長さ 0)
     std::map<std::string, flow_float*> c_d; // device cell variables
     std::map<std::string, flow_float*> p_d; // device plane variables
@@ -27,6 +31,12 @@ public:
     // ホスト配列の長さがこれと違えば (gpu: 1 の未確保 = 長さ 0 を含む) 変数名と長さを出して止める
     // (plan architecture-solver-host-memory §4.2)。allocVariables の前と変換器 (allocVariablesConverter) では -1。
     geom_int nPlanesAlloc = -1;
+    // allocVariables / allocVariablesConverter が記録するセル数 (= msh.nCells_all。ホストのセル配列の期待長)。
+    // hostCell と copyVariables_cell_* はキーが無い・長さがこれと違う (gpu: 1 で H に無い = 長さ 0 を含む) とき
+    // 変数名と長さを出して止める。確保の前は -1。
+    geom_int nCellsAlloc = -1;
+    std::vector<flow_float>& hostCell(const std::string& name);
+    const std::vector<flow_float>& hostCell(const std::string& name) const;
 
     // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
     // c_d は flow_float* のマップなので double を入れられない → **型付きの専用領域**として持つ。
@@ -345,7 +355,10 @@ public:
     void registerTwoPhaseVaporResidual(int enabled);
 
     // useGPU == 1 のときホストの plane 変数 p は確保しない (読み書きするのは gpu: 0 の CPU 経路だけ。デバイス側 p_d は確保する)。
-    void allocVariables(const int &useGPU , mesh& msh);
+    // ホストの cell 変数 c は hostCells (hostCellSet が作る H) の名前だけ nCells_all 長・0 初期化で確保し、他は長さ 0。
+    // デバイス側 c_d は全部確保する。useGPU == 0 は hostCells に関係なく全部確保する。
+    // 環境変数で無効な診断変数の除去 (applyEnvGatedRemovals) は呼び出し側が先に済ませる。
+    void allocVariables(const int &useGPU , mesh& msh, const std::set<std::string>& hostCells);
     // 変換器 (convertGmshToForge) 専用: keep に含まれる cell 変数だけを確保し、それ以外の cell 変数は c / c_d /
     // cellValNames から登録ごと外す (未確保の変数に触れたら c に空エントリが増える・c_d.at が投げるので検出できる)。
     // plane 変数は確保しない。変換器は read_cellValNames だけを h5 に書くので、全変数の確保は不要

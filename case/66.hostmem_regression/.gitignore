@@ -1,0 +1,5 @@
+# AWS 上で作られる作業物 (ハーネスのリンク・ジョブ表・ロック)。run_* は上位の .gitignore で除外済み
+.bin/
+.jobs_*.json
+.registry.lock
+__pycache__/

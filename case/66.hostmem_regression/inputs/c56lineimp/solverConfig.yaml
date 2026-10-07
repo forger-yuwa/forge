@@ -1,0 +1,27 @@
+mesh: {discretization: "node", nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}
+gpu: 1
+solver: "SLAU"
+physProp:
+  thermalMethod: 0
+  viscMethod: 1
+  visc: 1.251515e-05
+  thermCond: 1.939242e-02
+  thermCondMethod: 1
+  prandtlLam: 0.68685
+  cp: 1064.282
+  gamma: 1.38564
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 200}
+  deltaT: {control: 1, dt: 1.0e-9, cfl: 1.5, cfl_pseudo: 1.5, implicitRelax: 1.0, blockDPLUR: 1, lineImplicit: 1,
+    dt_min: 1.0e-12, dt_max: 1.0, detectNaN: 1, monitorInterval: 100}
+  outStepStart: 0
+  outStepInterval: 200
+  timeIntegration: 11
+  nStepInner: 4
+space: {convMethod: 1, limiter: 2, limiterRoRef: 0.02836463, limiterPRef: 1738.2371, limiterARef: 291.40111}
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0,
+             wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 156.0306, omegaInit: 35363.15}
+initial: "uniform_p101325_u10"
+output: {level: 1, extraFields: [thermCond, vis_lam, vis_turb]}

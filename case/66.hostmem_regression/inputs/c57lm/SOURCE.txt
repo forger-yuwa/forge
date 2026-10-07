@@ -1,0 +1,12 @@
+input: c57lm
+src  : /home/sano/work/forge/case/57.transition_flat_plate/run_0014_t3a_lm_unitcheck
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/57.transition_flat_plate/run_0014_t3a_lm_unitcheck/solverConfig.yaml (sha256 8082bf4f25edd836)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/57.transition_flat_plate/run_0014_t3a_lm_unitcheck/bcondConfig.yaml (sha256 e2e7737a489a3596)
+copy  probe.yaml <- /home/sano/work/forge/case/57.transition_flat_plate/run_0014_t3a_lm_unitcheck/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  mesh.h5 <- /home/sano/work/forge/case/57.transition_flat_plate/run_0014_t3a_lm_unitcheck/mesh.h5 (sha256 0f8196f5fc4691f6)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : 無修正 (mesh.h5 は run_0011 の場を種にしたもの = roGamma を読む経路)

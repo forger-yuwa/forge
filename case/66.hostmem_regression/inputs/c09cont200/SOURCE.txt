@@ -1,0 +1,14 @@
+input: c09cont200
+src  : /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200/solverConfig.yaml (sha256 c57e446940514916)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200/bcondConfig.yaml (sha256 f6e845e2d21f5424)
+copy  probe.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200/probe.yaml (sha256 7e9bf3d48de275e4)
+copy  species_db.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200/species_db.yaml (sha256 4992e37157b2d17a)
+copy  Taylor-Green.h5 <- /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200/Taylor-Green.h5 (sha256 f8d6d1fb1da091ae)
+copy  TG_stepxi_gaussY_seam.h5 <- /home/sano/work/forge/case/09.Taylor-Green/run_0162_passiveG_fct_cont200/TG_stepxi_gaussY_seam.h5 (sha256 c0542626895691d8)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 100' (1 件)
+
+nStepOuter = 200, outStepInterval = 100
+note : 無修正 (連続 200 step、res_100/res_200)

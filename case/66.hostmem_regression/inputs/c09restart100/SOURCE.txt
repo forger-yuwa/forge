@@ -1,0 +1,14 @@
+input: c09restart100
+src  : /home/sano/work/forge/case/09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed/solverConfig.yaml (sha256 dec43a8f6f8b78a0)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed/bcondConfig.yaml (sha256 f6e845e2d21f5424)
+copy  probe.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed/probe.yaml (sha256 7e9bf3d48de275e4)
+copy  species_db.yaml <- /home/sano/work/forge/case/09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed/species_db.yaml (sha256 4992e37157b2d17a)
+copy  Taylor-Green.h5 <- /home/sano/work/forge/case/09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed/Taylor-Green.h5 (sha256 f8d6d1fb1da091ae)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 100' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 100' (1 件)
+
+nStepOuter = 100, outStepInterval = 100
+ckpt  ic_ckpt.h5 は AWS で置く: base r1 の c09ckpt100 の res_100.h5 (run_matrix.py set-ckpt)
+note : 無修正。`ic_ckpt.h5` = base r1 の c09ckpt100 の res_100.h5 (全ビルド・全反復で同じファイル)

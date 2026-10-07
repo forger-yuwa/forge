@@ -29,6 +29,7 @@
 #include "mesh/gmshReader.hpp"
 #include "mesh/memlog.hpp"
 #include "output/output.hpp"
+#include "output/outputFieldNames.hpp"
 #include "conjugateWall.hpp"
 #include "boundaryCond.hpp"
 
@@ -839,21 +840,20 @@ ResidualSnapshot gatherResidualSnapshot(solverConfig& cfg, mesh& msh, variables&
 
 ImplicitDiagSnapshot gatherImplicitDiagSnapshot(solverConfig& cfg, mesh& msh, variables& var)
 {
-    const std::list<std::string> variable_names = {
-        "ro", "Ux", "Uy", "Uz", "sonic", "vis_turb", "dt_local"
-    };
+    // 名前は確保側 (hostCellSet) と共用 (output/outputFieldNames.cpp)。ホスト側は hostCell で長さを検査してから読む。
+    const std::list<std::string> variable_names = implicitDiagCellNames();
 
     if (cfg.gpu == 1) {
         var.copyVariables_cell_D2H(variable_names);
     }
 
-    const std::vector<flow_float>& ro = var.c.at("ro");
-    const std::vector<flow_float>& ux = var.c.at("Ux");
-    const std::vector<flow_float>& uy = var.c.at("Uy");
-    const std::vector<flow_float>& uz = var.c.at("Uz");
-    const std::vector<flow_float>& sonic = var.c.at("sonic");
-    const std::vector<flow_float>& vis_turb = var.c.at("vis_turb");
-    const std::vector<flow_float>& dt_local = var.c.at("dt_local");
+    const std::vector<flow_float>& ro = var.hostCell("ro");
+    const std::vector<flow_float>& ux = var.hostCell("Ux");
+    const std::vector<flow_float>& uy = var.hostCell("Uy");
+    const std::vector<flow_float>& uz = var.hostCell("Uz");
+    const std::vector<flow_float>& sonic = var.hostCell("sonic");
+    const std::vector<flow_float>& vis_turb = var.hostCell("vis_turb");
+    const std::vector<flow_float>& dt_local = var.hostCell("dt_local");
 
     ImplicitDiagSnapshot snapshot;
     snapshot.min_pseudo_ratio = std::numeric_limits<double>::infinity();
@@ -1102,12 +1102,9 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     passiveInitDualTimeLevels_d_wrapper(cfg, cuda_cfg, msh, var);
     cfg.nHistoryValid = 0;
 
-    std::list<std::string> hist = {"roN", "roUxN", "roUyN", "roUzN", "roeN", "roKN", "roOmegaN"};
-    for (const auto& nm : var.speciesVarNames) hist.push_back(nm + "P");
-    if (cfg.passiveScalarScheme == 1) {   // scheme 0 の受動種は物理時間項を持たないので履歴は要らない (書きもしない)
-        if (var.tracerRegistered != 0) hist.push_back("roXiP");
-        for (const auto& nm : var.condMomentConsNames) hist.push_back(nm + "P");
-    }
+    // 履歴の名前は書出し側 (output.cpp の /CHECKPOINT) と確保側 (hostCellSet) と共用 (output/outputFieldNames.cpp)。
+    // scheme 0 の受動種は物理時間項を持たないので履歴は要らない (書きもしない)。
+    const std::list<std::string> hist = dualTimeHistoryNames(cfg, var);
     // 復元条件 (codex result M3): 配列構成に加え、履歴を生成した物理 dt (相対 1e-12)・bdfOrder・passiveScalarScheme・
     // speciesImplicitCoupling が一致すること。1 つでも違えば全系を BDF1 から再開する (刻み変更 restart は最初の step の時間微分が狂う)。
     char dtbuf[64]; std::snprintf(dtbuf, sizeof(dtbuf), "%.17g", (double)cfg.dt);
@@ -1145,7 +1142,7 @@ static void initDualTimeHistory(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
                 for (const auto& nm : hist) {
                     std::vector<geom_float> in; file.getDataSet("/CHECKPOINT/" + nm).read(in);
                     if ((geom_int)in.size() < msh.nCells) { why = "dataset /CHECKPOINT/" + nm + " too short"; break; }
-                    std::vector<flow_float>& v = var.c.at(nm);
+                    std::vector<flow_float>& v = var.hostCell(nm);   // 書く前に長さを検査する (H に無ければ名前つきで停止)
                     for (geom_int i = 0; i < msh.nCells; ++i) v[i] = static_cast<flow_float>(in[i]);
                     names.push_back(nm);
                 }
@@ -1719,7 +1716,19 @@ cudaConfig initializeSimulation(
     transitionValidateConfig(cfg);
     var.registerTransition(cfg.transitionEnabled() ? 1 : 0, (cfg.outputLevel >= 2) ? 1 : 0);
 
-    var.allocVariables(cfg.gpu , msh);
+    // 変数・診断の登録 → 出力と checkpoint が要る名前の確定 → H の構築 → 確保 (plan architecture-solver-host-memory §4・§4.3)。
+    // 環境変数による出力名の追加 (旧: main() の確保の後) と無効な診断変数の除去 (旧: allocVariables の先頭) を確保の前に済ませ、
+    // 出力側と同じ関数 (output/outputFieldNames.cpp) でホスト確保集合 H を作る。gpu: 1 ではホストのセル配列を H の名前だけ確保する。
+    registerOutputDiagnostics(var);
+    applyEnvGatedRemovals(var);
+    const std::set<std::string> hostCells = hostCellSet(cfg, var);
+    if (cfg.gpu == 1) {
+        std::ostringstream os;
+        os << "[variables] host cell arrays (gpu: 1): " << hostCells.size() << " of " << var.cellValNames.size() << " registered:";
+        for (const auto& n : hostCells) os << " " << n;
+        cout << os.str() << "\n";
+    }
+    var.allocVariables(cfg.gpu , msh, hostCells);
     MEMLOG_SOLVER("after allocVariables");
 
     // device roY[] ポインタ配列を構築 (c_d 確保後, dependentVariables より前)。
@@ -2210,17 +2219,14 @@ static bool pinDiagEnabled() {
 static void pinRowDiagnosticResidual(StepContext& s, int m)
 {
     if (!pinDiagEnabled() || s.cfg.discretization != "node") return;
-    std::list<std::string> names = {"scalarDirichletPin"};
-    for (int k = 0; k < s.var.nSpeciesRegistered; ++k) names.push_back("res_roY" + std::to_string(k));
-    if (s.var.tracerRegistered != 0) names.push_back("res_roXi");
-    for (const auto& nm : s.var.condMomentConsNames) names.push_back("res_" + nm);
+    const std::list<std::string> names = pinDiagResidualNames(s.var);   // 確保側 (hostCellSet) と共用
     s.var.copyVariables_cell_D2H(names);
-    const auto& pin = s.var.c.at("scalarDirichletPin");
+    const auto& pin = s.var.hostCell("scalarDirichletPin");
     geom_int nPin = 0; for (geom_int ic = 0; ic < s.msh.nCells; ++ic) if (pin[ic] == (flow_float)1.0) ++nPin;
     std::ostringstream os; os << "[pin-diag] step " << s.iStep + 1 << " subiter " << m << " pinned nodes " << nPin << " max|res| on pinned:";
     for (const auto& nm : names) {
         if (nm == "scalarDirichletPin") continue;
-        const auto& r = s.var.c.at(nm); double mx = 0.0;
+        const auto& r = s.var.hostCell(nm); double mx = 0.0;
         for (geom_int ic = 0; ic < s.msh.nCells; ++ic) if (pin[ic] == (flow_float)1.0) mx = std::max(mx, (double)std::abs(r[ic]));
         os << " " << nm << " " << std::scientific << std::setprecision(2) << mx;
     }
@@ -2229,10 +2235,7 @@ static void pinRowDiagnosticResidual(StepContext& s, int m)
 static void pinRowDiagnosticState(StepContext& s, int m)
 {
     if (!pinDiagEnabled() || s.cfg.discretization != "node") return;
-    std::list<std::string> names;
-    for (int k = 0; k < s.var.nSpeciesRegistered; ++k) names.push_back("Y" + std::to_string(k));
-    if (s.var.tracerRegistered != 0) names.push_back("Xi");
-    for (const auto& nm : s.var.condMomentConsNames) names.push_back(nm.substr(2));
+    const std::list<std::string> names = pinDiagStateNames(s.var);   // 確保側 (hostCellSet) と共用
     if (names.empty()) return;
     s.var.copyVariables_cell_D2H(names);
     std::ostringstream os; os << "[pin-diag] step " << s.iStep + 1 << " subiter " << m << " inlet-node values vs bvar:";
@@ -2242,7 +2245,7 @@ static void pinRowDiagnosticState(StepContext& s, int m)
         std::vector<geom_int> cell(nb);
         gpuErrchk( cudaMemcpy(cell.data(), bc.map_bplane_cell_d, nb*sizeof(geom_int), cudaMemcpyDeviceToHost) );
         for (const auto& nm : names) {
-            const auto& v = s.var.c.at(nm);
+            const auto& v = s.var.hostCell(nm);
             std::vector<flow_float> bv;
             const bool isMoment = std::find(s.var.condMomentConsNames.begin(), s.var.condMomentConsNames.end(), "ro" + nm) != s.var.condMomentConsNames.end();
             if (!isMoment) {
@@ -3418,26 +3421,7 @@ int main(int argc, char** argv) {
     if (const char* e = getenv("FORGE_TRANSPORT_TABLE_PROBE"); e != nullptr && *e != '\0') {
         return runTransportTableProbe(e);
     }
-    // 診断 (FORGE_OUT_RESIDUALS=1): 流れ残差場と陰的補正 dq を h5 出力へ追加する
-    // (サブ反復収縮の空間局在の測定用。既定 off = 出力不変)。書かれる値は「最終サブ反復・
-    // 最終 sweep 時点」の res_* (BDF 項込み R*) と dq_block_new_* (implicitRelax 適用後)。
-    // 注意: blockDPLURSolve は sweep 毎に new/old を swap するため、最終補正は dq_block_old_* に
-    // 残る (dq_block_new_* は 1 sweep 前 — 2026-09-03 Codex 指摘で修正)。
-    if (const char* e = getenv("FORGE_OUT_RESIDUALS"); e && atoi(e) != 0) {
-        for (const char* n : {"res_ro","res_roUx","res_roUy","res_roUz","res_roe",
-                              "dq_block_old_0","dq_block_old_1","dq_block_old_2",
-                              "dq_block_old_3","dq_block_old_4"})
-            var.output_cellValNames.push_back(n);
-        printf("[FORGE_OUT_RESIDUALS] residual/dq fields added to h5 outputs\n");
-    }
-    // FORGE_RESID_SNAP=1: dual-time の subiter 0 直後の res/dq を未使用スロット (res_*_m / dq_*_new
-    // スカラー枠) へ退避して出力に含める → 局所収縮率 g=|dq_final|/|dq_sub0| を場で測れる。
-    if (const char* e = getenv("FORGE_RESID_SNAP"); e != nullptr) {  // 値は退避 subiter 番号 ("0" も有効)
-        for (const char* n : {"res_ro_m","res_roUx_m","res_roUy_m","res_roUz_m","res_roe_m",
-                              "dq_ro_new","dq_roUx_new","dq_roUy_new","dq_roUz_new","dq_roe_new"})
-            var.output_cellValNames.push_back(n);
-        printf("[FORGE_RESID_SNAP] subiter-0 residual/dq snapshots added to h5 outputs\n");
-    }
+    // FORGE_OUT_RESIDUALS / FORGE_RESID_SNAP の出力名の登録は確保の前 (initializeSimulation の registerOutputDiagnostics) へ移した。
     // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.4)。
     // **非対応の経路で明示 ON されたら黙って劣化させず拒否する** (累積が消える経路があるため)。
     if (cfg.qAccumulatorFP64 == 1) {
@@ -3509,7 +3493,8 @@ int main(int argc, char** argv) {
             fprintf(stderr, "[lineImplicit] requires timeIntegration=11, blockDPLUR=1, lowMachPrecond<2\n");
             exit(1);
         }
-        msh.buildImplicitLines(var.c.at("ccx").data(), var.c.at("ccy").data(), var.c.at("ccz").data());
+        // ホストの ccx/ccy/ccz は GPU 経路では書かれない (0 のまま。node はノード座標を使う。監査 §5 危険 5、今の挙動のまま)
+        msh.buildImplicitLines(var.hostCell("ccx").data(), var.hostCell("ccy").data(), var.hostCell("ccz").data());
     } else if (cfg.lineKFreeze != 0 || cfg.lineViscCoupling != 0 ||
                cfg.lineViscousDtRelief != (flow_float)0.0 || cfg.lineDtDirectional != 0) {
         fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");

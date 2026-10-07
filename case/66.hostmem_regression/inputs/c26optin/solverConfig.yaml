@@ -1,0 +1,57 @@
+mesh:
+  discretization: "node"
+  axisCentroidShift: 0
+  nodeWallViscGradFlux: 1
+  nodeWallDirichlet: 1
+  meshFileName: "flat_plate_ny52_planar.h5"
+  valueFileName: "flat_plate_ny52_planar.h5"
+
+
+gpu: 1 # 0:off , 1:on
+
+solver: "SLAU" # SLAU, ROE, AUSM+, AUSM+UP, KEEP_SLAU
+
+physProp:
+  thermalMethod: 0 # 0:calorically perfect
+  viscMethod: 0 # 0:use visc , 1:sutherland
+  visc : 1.8e-5  # [Pa*s] 空気 (Re/m ~ 2.3e6, M=0.1 で乱流平板)
+  thermCond: 0.0251 # [W/(mK)] Pr=0.72 相当
+  cp : 1004.5 # [J/(kgK)]
+  gamma : 1.4 # [J/(kgK)]
+
+time:
+  unsteady: 0 # 0:steady , 1:unsteady
+  dualTime: 0 # 1:use pseudo time for unsteady
+  last:
+    nStepOuter: 200
+    time: 1.00 # [second]
+  deltaT:
+    control: 1 # 0:use dt , 1:use cfl
+    dt: 0.0001
+    cfl: 20.0
+    cfl_pseudo: 2.0
+    blockDPLUR: 1
+    implicitRelax: 0.5
+    dt_min: 0.000000001
+    dt_max: 1.0
+  outStepStart: 0
+  outStepInterval: 200
+  timeIntegration: 11  #1:Euler explicit, 3:3rd TVD Runge Explicit, 4:4th runge exp, 10:dual-exp, 11:implicit (block DPLUR)
+  nStepInner: 20
+
+space:
+  convMethod: 2
+  limiter: 2 # 1:barth 2:venkata
+
+turbulence:
+  model: "sst"
+  wallTreatmentSST: 0   # 複製時に 1 (壁関数, 使用禁止) から変更
+  nodeOmegaWfDirichlet: 0
+  scalarDiffusion: 1
+  dilatationCorrection: 0
+
+initial: "flat_plate"
+
+output:
+  level: 1
+  extraFields: [wf_pk, wi_ftan, wi_fnrm, wf_g, vis_turb]

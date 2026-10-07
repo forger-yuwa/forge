@@ -1,0 +1,36 @@
+mesh: {meshFileName: Taylor-Green.h5, valueFileName: TG_stepxi_gaussY_seam.h5, discretization: node}
+gpu: 1
+solver: SLAU
+physProp:
+  thermalMethod: 0
+  viscMethod: 0
+  visc: 0.0
+  thermCond: 0.0
+  cp: 1004.5
+  gamma: 1.4
+  tracer: exhaust
+  species: [N2, O2]
+  speciesDBFile: species_db.yaml
+time:
+  unsteady: 1
+  dualTime: 1
+  last: {nStepOuter: 100}
+  deltaT: {control: 0, dt: 0.002, cfl: 5.0, cfl_pseudo: 5.0, dt_min: 1e-9, dt_max: 1e-2, detectNaN: 1, passiveScalarScheme: 1, speciesFaceReconstruction: 2, blockDPLUR: 1, monitorInterval: 10, speciesImplicitCoupling: 1,
+    passiveImplicitCoupling: 1}
+  outStepStart: 0
+  outStepInterval: 100
+  timeIntegration: 11
+  nSubIterDualTime: 20
+  bdfOrder: 2
+space:
+  convMethod: 1
+  keepDissipation: 0
+  limiter: 1
+  pRef: 101325.0
+  roRef: 1.2
+  uRef: [10.0, 0.0, 0.0]
+turbulence: {model: none}
+initial: uniform_p101325_u10
+output:
+  level: 2
+  extraFields: [volume, limiter_Xi]

@@ -1,0 +1,13 @@
+input: c26optin
+src  : /home/sano/work/forge/case/26.flat_plate_sst/run_0086_optin_base
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/26.flat_plate_sst/run_0086_optin_base/solverConfig.yaml (sha256 1af8e50c05e9d4a0)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/26.flat_plate_sst/run_0086_optin_base/bcondConfig.yaml (sha256 a9eded83681b5588)
+copy  probe.yaml <- /home/sano/work/forge/case/26.flat_plate_sst/run_0086_optin_base/probe.yaml (sha256 baa30766b44e4dfa)
+copy  flat_plate_ny52_planar.h5 <- /home/sano/work/forge/case/26.flat_plate_sst/run_0086_optin_base/flat_plate_ny52_planar.h5 (sha256 655ecbae72617fd9)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 200' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 200' (1 件)
+edit  solverConfig.yaml: 'wallTreatmentSST:\\s*1\\b' -> 'wallTreatmentSST: 0   # 複製時に 1 (壁関数, 使用禁止) から変更' (1 件)
+
+nStepOuter = 200, outStepInterval = 200
+note : `wallTreatmentSST` 1→0 (env による名前の登録・除去は壁処理に依らない: variables.cpp:301-356)

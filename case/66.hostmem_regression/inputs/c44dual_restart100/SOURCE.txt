@@ -1,0 +1,17 @@
+input: c44dual_restart100
+src  : /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float
+
+copy  solverConfig.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/solverConfig.yaml (sha256 9d9fb71dd3ed2543)
+copy  bcondConfig.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/bcondConfig.yaml (sha256 9d03d0ed4c686916)
+copy  probe.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/probe.yaml (sha256 eab1dc9e2b6970bd)
+copy  species_db.yaml <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/species_db.yaml (sha256 ee9cf4b629b7c4d7)
+copy  nozzle.h5 <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/nozzle.h5 (sha256 3d2be9def2474356)
+copy  inlet_profile_1.csv <- /home/sano/work/forge/case/44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float/inlet_profile_1.csv (sha256 9c78cf556e5eabe0)
+edit  solverConfig.yaml: 'nStepOuter:\\s*\\d+' -> 'nStepOuter: 100' (1 件)
+edit  solverConfig.yaml: '(?m)^(\\s*)outStepInterval:\\s*\\d+' -> '\\g<1>outStepInterval: 100' (1 件)
+edit  solverConfig.yaml: 'valueFileName:\\s*ic\\.h5' -> 'valueFileName: ic_ckpt.h5' (1 件)
+edit  species_db.yaml: '(?ms)^"H2O":.*\\Z' -> '' (1 件)
+
+nStepOuter = 100, outStepInterval = 100
+ckpt  ic_ckpt.h5 は AWS で置く: base r1 の c44dual_ckpt100 の res_100.h5 (run_matrix.py set-ckpt)
+note : species_db.yaml から H2O を外す。後半。`valueFileName` を ic.h5 → ic_ckpt.h5 (= base r1 の c44dual_ckpt100 の res_100.h5)
