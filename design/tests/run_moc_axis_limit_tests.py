@@ -295,7 +295,7 @@ check("θ_r 組立: ν スプラインの経路は ½√(M²−1)·dν/dx (ν_M 
       float(np.max(np.abs(np.r_[thr_s[n_ax], thr_s[:n_ax][::-1]] - _ref))) < 1e-14)
 
 # --- 6. キーの検査 ---------------------------------------------------------------------------------
-check("キー: 無ければ既定 (legacy, fixed2)", _moc_keys({}) == ("legacy", "fixed2"))
+check("キー: 無ければ既定 (analytic, converge — 2026-10-07 ユーザ決定で切り替え)", _moc_keys({}) == ("analytic", "converge"))
 check("キー: analytic + converge", _moc_keys({"moc_axis_limit": "analytic", "moc_corrector": "converge"})
       == ("analytic", "converge"))
 for bad in (None, "Analytic", " analytic", "analytic ", "", True, 1, 0, 1e-12, ["analytic"], {"a": 1}, "legacy,converge",
@@ -315,14 +315,14 @@ _yaml_ok = {
 for lab, txt in _yaml_ok.items():
     check(f"キー (YAML {lab}): analytic + converge と読む", _moc_keys(yaml.safe_load(txt)) == ("analytic", "converge"))
 check("キー (YAML コメント行のキーは無いのと同じ = 既定)",
-      _moc_keys(yaml.safe_load("# moc_axis_limit: analytic\nR: 2.0\n")) == ("legacy", "fixed2"))
+      _moc_keys(yaml.safe_load("# moc_axis_limit: legacy\nR: 2.0\n")) == ("analytic", "converge"))
 for lab, txt in (("null", "moc_axis_limit: null\n"), ("~", "moc_axis_limit: ~\n"), ("空", "moc_axis_limit:\n"),
                  ("yes (YAML 1.1 の真偽値)", "moc_corrector: yes\n"), ("指数表記", "moc_corrector: 1e-12\n"),
                  ("リスト", "moc_axis_limit: [analytic]\n")):
     rejects(f"キー (YAML {lab})", lambda t=txt: _moc_keys(yaml.safe_load(t)))
 # 重複キーは PyYAML では後勝ち (probdef.load_problem は yaml.safe_load の直読み — 範囲外の既知の制約。事実だけ固定)
 check("キー (YAML 重複キー): 後勝ちで読まれる (probdef の既知の制約)",
-      _moc_keys(yaml.safe_load("moc_axis_limit: analytic\nmoc_axis_limit: legacy\n")) == ("legacy", "fixed2"))
+      _moc_keys(yaml.safe_load("moc_axis_limit: analytic\nmoc_axis_limit: legacy\n")) == ("legacy", "converge"))
 for bad in (0, -1, 1.5, True, "50"):
     rejects(f"InverseMOC(max_corr={bad!r})", lambda b=bad: InverseMOC(max_corr=b))
 for bad in (0.0, -1e-12, float("nan"), float("inf"), "1e-12", None):
@@ -384,6 +384,9 @@ if sys.argv[4] == "1":
     from forge_design.evaluate.runner_axismach import design_chain, load_problem
     p = load_problem(sys.argv[5])
     p.geometry["initial_line_run"] = sys.argv[6]
+    if len(sys.argv) > 7 and sys.argv[7] == "explicit_legacy":
+        # 2026-10-07 から既定は analytic + converge。旧方式はキーの明示で再現する (変更前のコードはキーを知らないので新しい側だけ)
+        p.geometry["moc_axis_limit"], p.geometry["moc_corrector"] = "legacy", "fixed2"
     d = design_chain(p)
     out.update(wall_inv=d["wall_inv"], c=d["wall"]._spl.c, t=d["wall"]._spl.t)
 np.savez(sys.argv[3], **out)
@@ -405,7 +408,7 @@ with tempfile.TemporaryDirectory() as td:
         for lab, pkg in (("base", td / "design"), ("new", ROOT / "design")):
             f = td / f"{lab}.npz"
             r = subprocess.run([py, str(td / "snip.py"), str(pkg), str(Path(__file__).resolve().parent), str(f),
-                                "1" if HAVE45 else "0", *args], capture_output=True, text=True)
+                                "1" if HAVE45 else "0", *args, *(["explicit_legacy"] if lab == "new" else [])], capture_output=True, text=True)
             if r.returncode != 0:
                 check(f"ビット同一: {lab} の計算が失敗 ({r.stderr[-300:]})", False)
             res_files[lab] = f
@@ -415,7 +418,7 @@ with tempfile.TemporaryDirectory() as td:
             check(f"ビット同一 (a): 放射源流の網 (fill_levels {a['lev'].shape}) が実装前と完全一致", same("lev"))
             check(f"ビット同一 (a): 放射源流の点群 (fill_arrays {a['pts'].shape}) が実装前と完全一致", same("pts"))
             if HAVE45:
-                check(f"ビット同一 (b): case/45 単調壁の MOC 点群 ({a['wall_inv'].shape}) が実装前と完全一致", same("wall_inv"))
+                check(f"ビット同一 (b): case/45 単調壁の MOC 点群 ({a['wall_inv'].shape}) が実装前と完全一致 (新しい側は legacy・fixed2 を明示)", same("wall_inv"))
                 check(f"ビット同一 (b): 当てはめ後の係数 ({a['c'].shape}) とノット ({a['t'].shape}) が完全一致",
                       same("c") and same("t"))
             else:
@@ -426,7 +429,7 @@ import types as _types
 import tempfile as _tempfile
 from forge_design.evaluate import runner_axismach as _RA
 _PC = _types.SimpleNamespace(geometry={"moc_corrector": "converge"})
-_PF = _types.SimpleNamespace(geometry={})
+_PF = _types.SimpleNamespace(geometry={"moc_corrector": "fixed2"})
 _ok = {"moc": {"gate": {"applicable": True, "pass": True, "reasons": []}}}
 _ng = {"moc": {"gate": {"applicable": True, "pass": False, "reasons": ["反復の失敗 1 対 (非有限 0・上限到達 1)"]}}}
 try:

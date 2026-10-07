@@ -5,6 +5,10 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 粘性壁 (δ\* 物理壁 + SST NS) までの検証。計画:
 [`plans/active/design-isobutane-m6-d155.md`](../../plans/active/design-isobutane-m6-d155.md)。
 
+- **現行の生産の問題 (2026-10-07 ユーザ決定)**: `problem_d155_ns_prod.yaml` (+ 凝縮 `problem_d155_ns_prod_cond.yaml`、`make_prod_problems.py` で N2 から生成)。
+  上流は 5 次多項式 (`pw_upstream: poly`)、MOC は analytic + converge、物理壁は全域 1 本の B スプライン (`physical_wall_repr: single_bspline`)。
+  較正値 6.8825162455159465e-06・r_t 0.07666536551630307 m・k_f 1.054129117086371。生産の run は dry `run_0167_ns_n012_N2` + 延長 `run_0179_ns_n012_N2_ext`、
+  凝縮 `run_0170_ns_n012_N2_cond`。旧生産 (`problem_d155_ns_finemesh_recal_final_mono.yaml`、run_0147+0149/0148) は置き換えた。
 - 最短探索: `search_shortest.py` → `search_shortest.json`
   (基準 = shortest-robust study: margin≥1°/topo≥0.02/hard gate/単峰、n1200 確認)。
   **勝者 R2 / L_c 39.3 / M_K 2.7 → x_F = 95.104 r_t** (R3: 39.7/2.8 → 95.433)。

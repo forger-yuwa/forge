@@ -231,12 +231,14 @@ def _bcond_with_species(txt: str, Ys) -> str:
 
 
 
-_MOC_KEYS = {"moc_axis_limit": ("legacy", "analytic"), "moc_corrector": ("fixed2", "converge")}
+# 問題 YAML のキーの選択肢。先頭が既定: 2026-10-07 ユーザ決定 (生産採用) で analytic・converge を既定にした (旧方式は legacy・fixed2 を
+# 明示して再現する。plan discretization-moc-axis-limit-and-corrector §9)。MOC の関数 (moc_kernel・moc_inverse) の引数の既定は legacy・fixed2 のまま
+_MOC_KEYS = {"moc_axis_limit": ("analytic", "legacy"), "moc_corrector": ("converge", "fixed2")}
 
 
 def _moc_keys(geometry: dict) -> tuple:
     """geometry.moc_axis_limit / geometry.moc_corrector を読む (plans/accepted/discretization-moc-axis-limit-and-corrector.md
-    §4.3)。キーが無ければ既定 (legacy, fixed2)。値は文字列で選択肢のどれかに完全一致すること — null・大文字違い・
+    §4.3)。キーが無ければ既定 (analytic, converge — 2026-10-07 から。それ以前は legacy, fixed2)。値は文字列で選択肢のどれかに完全一致すること — null・大文字違い・
     前後の空白・数値・真偽値は既定に読み替えず例外にする (黙って既定で設計しない)。"""
     out = []
     for key, choices in _MOC_KEYS.items():
@@ -487,7 +489,7 @@ def design_chain(p: Problem) -> dict:
 
     rF_pred = float(np.sqrt(area_ratio_isentropic(Md, g)))
     # 逆 MOC の単位過程 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §4.3):
-    # geometry.moc_axis_limit = legacy (既定、軸端点の sinθ/r は相手の値で代用) | analytic (軸則から解析極限 θ_r)
+    # geometry.moc_axis_limit = analytic (既定、軸則から解析極限 θ_r) | legacy (軸端点の sinθ/r は相手の値で代用)
     # geometry.moc_corrector = fixed2 (既定、予測 1 + 修正 2 回) | converge (更新量 ≤ 1e-12 まで、上限 50 回)
     # キーが無ければ従来とビット同一。キーの検査は design_chain の冒頭 (`_moc_keys`)
 

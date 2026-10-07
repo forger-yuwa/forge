@@ -687,13 +687,13 @@ case/45 の生産問題 n_axis 2400・n_start 41 でも 298 万対中 0 回、20
 詳細は [`plans/accepted/discretization-moc-axisymmetric-source-term.md`](../../plans/accepted/discretization-moc-axisymmetric-source-term.md)。
 
 **軸上の解析極限と予測修正の収束 (選択式、2026-10-07)**: 問題 YAML の 2 キーで単位過程を選ぶ
-(`InverseMOC` / `moc_kernel.interior_vec`。キーが無ければ従来とビット同一。計画
+(`InverseMOC` / `moc_kernel.interior_vec`。axis-Mach の問題でキーが無ければ analytic + converge (2026-10-07 から; それ以前はキー無し = 従来とビット同一の legacy + fixed2)。計画
 [discretization-moc-axis-limit-and-corrector](../../plans/accepted/discretization-moc-axis-limit-and-corrector.md))。
 
 | キー | 値 | 意味 |
 | --- | --- | --- |
-| `geometry.moc_axis_limit` | `legacy` (既定) / `analytic` | 軸上の端点の $\sin\theta/r$ を、相手の値で代用 / その点の解析極限 $\theta_r$ にする |
-| `geometry.moc_corrector` | `fixed2` (既定) / `converge` | 予測 1 回 + 修正 2 回 / θ・ν の更新量 $\le10^{-12}$ rad まで (上限 50 回) |
+| `geometry.moc_axis_limit` | `analytic` (既定、2026-10-07 から) / `legacy` | 軸上の端点の $\sin\theta/r$ を、その点の解析極限 $\theta_r$ にする / 相手の値で代用 |
+| `geometry.moc_corrector` | `converge` (既定、2026-10-07 から) / `fixed2` | θ・ν の更新量 $\le10^{-12}$ rad まで (上限 50 回) / 予測 1 回 + 修正 2 回 |
 
 不正値 (null・大文字違い・前後の空白・数値・真偽値) は既定に読み替えず例外にする。
 
@@ -737,7 +737,7 @@ case/45 の生産問題 n_axis 2400・n_start 41 でも 298 万対中 0 回、20
 修正子をそろえても (legacy+converge) 第 1 段の θ は 1/3 ずれたままで、軸端の源項を解析極限にすると
 $O(h^2)$ で消え、壁全体が 2 次になる。いずれも未収束の対 0 (修正子の回数 最大 31〜34、平均 3.6〜5.9)。
 case/45 の生産問題 (n_axis 2400・n_start 41) では analytic+converge の修正子は平均 1.99 回・最大 34 回、
-最終残差 5.0e-13 (適合式) / 2.2e-13 (幾何)。生産への採否は計画 §6 V4・V5 で決める (既定は legacy + fixed2 のまま)。
+最終残差 5.0e-13 (適合式) / 2.2e-13 (幾何)。2026-10-07 にユーザ決定で生産に採用し、axis-Mach の問題の既定を analytic + converge に切り替えた (V5d の保留を明示した限定採用。旧方式は `legacy`・`fixed2` の明示で再現。MOC の関数の引数の既定は legacy + fixed2 のまま)。
 
 **CFD 実測** (case/41。`wall_mode`・解像度・源項修正の有無以外は同一):
 
