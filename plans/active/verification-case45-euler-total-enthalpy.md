@@ -39,6 +39,13 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 
 - **E1 (最初の一手、CFD 0 step)**: ISEN の起動前の prep と soft 段の後の状態を、同じ保存量の復元 (V5c の経路 B、`moc_v5c_thermo_ab.path_b`) で比べ、超過が IC の生成で生じるのか、起動後に生じるのかを判別する。
 
+- **E3 以降の対処 (ユーザ決定 2026-10-07・諮問 `notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md`)**: Euler 専用の格子の設定を設ける。
+  - `prepare` (Euler) は新しいブロック `mesh_euler` を読み、`prepare_ns` (NS) は既存の `mesh` を読む。2 つのブロックを混ぜて補完しない (Euler への `mesh` の暗黙の継承を禁止)。
+  - `mesh_euler` の既定は全断面で `wall_first_frac` 0.005 の等比の配点、スロートの別指定なし、軸側の cap なし (標準と決めた方式を既定にする方針)。
+  - Euler の問題 YAML に `mesh` だけがあって `mesh_euler` が無い場合は、移行先を示して止める (黙って NS の配点を使わない・指定を無視して既定に落とさない)。両ブロックがある問題では、使ったブロックを `prepare_info.json` に記録する。`prepare_info.json` の mesh 欄に全 `Mesh2DParams`・採用元・座標と接続のハッシュを残す。
+  - case/45 の Euler の問題 YAML の `mesh_euler` には ni 2000 × nj 97・今の軸方向の配置・全域 0.005 を明示する (2000 × 97 は今回の評価条件で、全ケースの汎用の既定にする根拠はない)。
+  - `procedures/nozzle-design-workflow.md` の「NS と同じ格子で較正」を更新する。出口半径の表記は 0.775 m ± 0.1 mm。
+
 ## 5. 実装ステップ
 
 1. `case/45.isobutane_m6_d155/euler_t0_stage_ab.py` (新規): E1 の比較。V5c の `path_b` (保存量 → float64 の原始量と全温) を流用し、ファイルには書かない。
@@ -53,7 +60,9 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | 3 | ~~E1 の解釈と次の手~~ 完了 | 判断: 2026-10-07 codex (diagnose) — 半径方向の配点だけを変える E2 を新規に回す。既存の比較は交絡している | F |
 | 3b | ~~E2~~ 完了 (判別不能、§9) | | O |
 | 3c | ~~E2 の解釈と次の手~~ ユーザ決定 2026-10-07 | 「あなたの方針でよい」: Euler の格子を壁に寄せない配点に切り替え、出口較正と MOC の V5 をやり直す。単調壁の E′ は採用を取り消さない | ユーザ |
-| 4b | 切り替えとやり直しの登録 | Euler の格子の配点の既定・出口較正のやり直し・MOC の V5 のやり直し・NS の再評価との順序を §4・§6 に書き、上位に諮る | F |
+| 4b | ~~切り替えとやり直しの登録~~ 完了 | 判断: 2026-10-07 codex (diagnose) — `mesh_euler` を設けて Euler の既定を全域 0.005、E4 は legacy MOC で先に、順序は E3 → E4 → V5d → 較正値の確定 → NS の対照の更新 → U4 → V5′ | F |
+| 5a | E3 | `mesh_euler` の実装と case/45 の Euler の YAML の移行・手順書の更新。合格条件 §6 E3 | O |
+| 5b | E4 | 起動スクリプト・評価器 (M_common・前提・判定) を書き AWS で回す。合格条件 §6 E4 の判定を出す | O |
 | 4 | codex plan 段レビュー | 次の手の登録が揃った時点で `codex_review.py <本 plan> --stage plan` | O |
 | 5 | codex result 段レビュー | `--stage result` | O |
 
@@ -89,6 +98,18 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
     - 前提の未達・中間的な改善 → 判別不能。スロートだけが改善しても、下流を含めた単一の原因とは認定しない。窓の変更や自動の延長で救済しない。plateau を PASS と読み替えない。差が小さいことを「収束解が一致」と書かない。
   - **記録する実効のメッシュ**: 全 `Mesh2DParams` の解決済みの値 (両 `wall_first_frac`・前後のブレンドの 4 つの鍵・軸側の cap の有無)、変換後の `nozzle.h5` で測った断面ごとの x/r_t・r_w・壁側と軸側の間隔 (m と r_w 比)・隣り合う間隔の比・領域内の節点数、全座標と接続のハッシュ、全入力とバイナリのハッシュ。`prepare_info.json` の mesh 欄はこれらを記録しないので、別に保存する。
 
+- **E3 Euler 専用の格子の設定への移行** (2026-10-07 登録): 合格条件 = (1) Euler が E2 の B の実効の座標を再現する (同じ問題で `mesh_euler` を使ったとき、run_0162 の `nozzle.h5` の座標・接続とビット一致)、(2) NS は移行の前後で座標・接続がビット一致、(3) `mesh` だけの Euler の YAML は止まる、(4) design/tests の既存テスト FAIL 0。
+- **E4 出口較正のやり直し** (2026-10-07 登録、結果を見る前):
+  - 固定: 単調壁 (`wall_fit_mono_r2` [0, 1.5])・**MOC は legacy + fixed2** (E2 の B は analytic + converge だったので、較正の基準にしない)・凍結の初期線 run_0062 (変えない)・r_t・BC・熱物性・バイナリ。開始値 δ₀ = `Md_moc_offset` = +3.770e-4。
+  - 格子は E3 の `mesh_euler` (2000 × 97・全域 0.005)。IC は新しい格子の上で同じ手順で作る等エントロピー IC (G1 の異常な場を移さない)。起動前に全節点で \|T₀ − 1600\| ≤ 1 K。
+  - 長さ: soft 3000 + 本段 54000、出力 1000 ごと。判定窓は本段 42000〜54000 の 13 枚と 50000〜54000 の 5 枚 (予算であり収束の予測ではない)。
+  - 出口の評価量: 各設計の実際の最終断面で、η ∈ [0.05, 0.7] について既存の NS の基準格子 (G1) から取った固定の η の列に、同じ線形補間で移して単純平均した M_common。自格子の平均も別の列に残す。軸上の M や x_E の値に置き換えない。
+  - 前提: 本段区間の `check_convergence` が PASS、または全不合格列が停滞だけ (今回の実務の較正に限って許し、NOT CONVERGED は記録に残す。RISING・still converging・DIVERGED・入力不備は保留)。全温は E2 の健全性の条件 (全領域の \|T₀ − 1600\| と時間の幅の条件) を課す。出口 M は両窓で `check_quasisteady` が STEADY、かつ 13 枚の幅と「末尾 5 枚の平均 − その直前 5 枚の平均」がそれぞれ ≤ 5e-5。
+  - 判定: 13 枚すべてで \|M_common − 6\| ≤ 1e-4 なら δ₀ を据え置く。外れたら #11f と同じ係数 1 の式 δ₁ = δ₀ − (平均 M_common − 6) で 1 回だけ更新し、作り直した壁の独立の run で同じ条件を確かめる。そこで外れたら補正を重ねず保留。前提の未達は判別不能。
+  - 合格した場を新しい Euler 参照にし、δ_E の抽出・C2 の較正・報告の参照先を同期する。凍結の初期線 run_0062 は変えない。
+  - NS の出口の合否は NS で判定する (Euler の較正の合格を NS に移せるとは限らない。配点も粘性も違う)。
+  - やらないこと: G1 の異常な場の再利用、合格するまで窓や補正の回数を変えること。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -98,10 +119,11 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | diagnose (E2 の登録の穴) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-t0-e2-fix-diagnose.md`](../../notes/reviews/2026-10-07-euler-t0-e2-fix-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-t0-e2-fix.md`](../../notes/reviews/briefs/2026-10-07-euler-t0-e2-fix.md)) | M3/m2 | 採用: (a) B は両方の鍵を 0.005、(b) は却下 (M) / (c) は却下 (m) / 「1100 × 65 と同じ配点」は「同じ配点則」に訂正 (m) / 軸方向の区分を足し、共通の評価点の統計を主指標に (M) / 実効のメッシュの記録を拡充 (M)。収束の前提は次の行の諮問で確定 |
 | diagnose (E2 の収束の前提) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-t0-e2-convergence-precondition-diagnose.md`](../../notes/reviews/2026-10-07-euler-t0-e2-convergence-precondition-diagnose.md) | M3 | 採用: plateau は固定の予算の配点の感度の診断に限って認める (M) / STEADY だけで 1 K の整定は保証できない (合成 300→304 K が STEADY) ので、時間方向の幅 ≤ 0.1 K を追加 (M) / plateau の認定は全残差列の内訳で、停滞だけのときに限る (M)。§6 E2 の判定の前提と判定を確定 |
 | diagnose (E2 の穴 2 つ) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-t0-e2-holes2-diagnose.md`](../../notes/reviews/2026-10-07-euler-t0-e2-holes2-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-t0-e2-holes2.md`](../../notes/reviews/briefs/2026-10-07-euler-t0-e2-holes2.md)) | M3/m1 | 採用: 近零の主指標は偏差のまま、整定は絶対の幅 ≤ 0.1 K で判定し STEADY は記録だけ (M) / T₀ そのものへの置換・近零の列だけの例外は却下 (M) / 本段 54000 step・窓 42000〜54000、still converging は許さない (M) / 実装担当の読みを採用、ただし「スロートの 3 領域」は 3 領域を合わせた最大 > 100 K、割合は評価点の数の割合 (m) |
+| diagnose (切り替えの計画) | `2026-10-07` | [`notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md`](../../notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md) (ブリーフ [`briefs/2026-10-07-euler-grid-switch-plan.md`](../../notes/reviews/briefs/2026-10-07-euler-grid-switch-plan.md)) | M6/m1 | 全件採用: `mesh_euler` を設ける (YAML の値だけ直す案は却下) / E2 の B を「設計の評価量も準定常」と読まない (全温以外は未確認、B の正式な判定は DRIFTING 25 列・OSCILLATING 2 列) / E4 は legacy MOC で / 出口コア M は共通の η の列で、NS への移植は NS で判定 / V5d は両腕に同じ較正値 / 較正値が変わったら NS の対照 (N0) を更新してから U4 (N1)・V5′ (N2) / 実効の設定の記録と手順書の更新 (m) |
 
 ## 7. 影響範囲
 
-- 診断スクリプトの追加だけ。ソルバ・設計のコードは変えない (原因が分かって修正が要る場合は、改めて plan を書く)。
+- E1・E2 は診断スクリプトの追加だけ。E3 で `design/forge_design/evaluate/runner_axismach.py` (`prepare`・`mesh_params`・記録)・`probdef.py` (必要なら)・case/45 の Euler の問題 YAML・`procedures/nozzle-design-workflow.md` を変える (Euler の格子の既定が変わる)。ソルバは変えない。
 
 ## 8. 完了条件
 
@@ -132,3 +154,4 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
   - 窓 42000〜54000 の値 (判定ではない、前提が未達のため): A のスロートの異常 (3 領域を合わせた max\|偏差\|) は 13 枚の最小で 182.5 K (13 枚すべてで > 100 K)。B の全領域の最大偏差 0.103 K。\|A − B\| の最大 294.4 K。
   - 解釈は確定していない (A の異常は窓の中でも大きく動いており、登録の P2 を満たさない)。次の手はユーザ判断と上位への諮問で決める。
 - `2026-10-07` — **ユーザ決定「あなたの方針でよい」** (E2 の結果を受けた主セッションの推奨): (1) case/45 の Euler の格子を壁に寄せない配点 (E2 の B と同じ、全域で第 1 間隔の比 0.005) に切り替える。NS は今の G1 の壁際のまま。(2) G1 の Euler で決めた出口較正 (`Md_moc_offset` +3.770e-4、run_0113+0114 由来) と MOC の軸処理の V5 を、新しい Euler の格子でやり直す。(3) 単調壁の E′ (採用) は取り消さない。原因 (薄いセル・縦横比か、整定しない収束か) は厳密には切り分けていないが、Euler の設計の入力には B の配点の場が健全で整定する (E2) ことを根拠に切り替える。手順の登録と順序は諮問で決める (§5.1 #4b)。
+- `2026-10-07` — **codex (diagnose) に諮った (切り替えの計画)**: `notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md` — Euler 専用の格子の設定 `mesh_euler` を設け、legacy MOC・新しい配点で出口較正 E4 を先に行う。§4 (E3 以降の対処)・§6 E3・E4 を登録。E2 の B は全温が健全という意味で、流れや設計の評価量の準定常は未確認 (B の正式な準定常の判定は DRIFTING 25 列・OSCILLATING 2 列)。
