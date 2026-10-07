@@ -35,7 +35,7 @@ import numpy as np
 from ..geometry.axis_law import QuinticHermiteAxisLaw, KnotQuinticAxisLaw
 from ..geometry.moc_inverse import inverse_design
 from ..geometry.transonic import HallThroat
-from ..geometry.wall_axismach import (AxisMachCFDWall, area_ratio_isentropic,
+from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, AxisMachCFDWall, area_ratio_isentropic,
                                       wall_qa)
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
@@ -246,6 +246,19 @@ def _moc_keys(geometry: dict) -> tuple:
                              f"(受け取った値: {v!r}。既定にするならキーを書かない)")
         out.append(v)
     return tuple(out)
+
+
+def _physical_wall_repr(geometry: dict):
+    """geometry.physical_wall_repr を読む (plans/active/tooling-nozzle-wall-single-bspline.md §4.4)。キーが無ければ None
+    (既定 = 今の物理壁 `legacy`、壁ファイルを書かない — 変更前とビット同一)。値は 'legacy' / 'single_bspline' に完全一致
+    すること — null・大文字違い・前後の空白・数値・真偽値は既定に読み替えず例外にする。"""
+    if "physical_wall_repr" not in geometry:
+        return None
+    v = geometry["physical_wall_repr"]
+    if not isinstance(v, str) or v not in PHYSICAL_WALL_REPRS:
+        raise ValueError(f"geometry.physical_wall_repr は {' / '.join(repr(c) for c in PHYSICAL_WALL_REPRS)} のどれか "
+                         f"(受け取った値: {v!r}。既定にするならキーを書かない)")
+    return v
 
 
 def design_chain(p: Problem) -> dict:
@@ -601,6 +614,9 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    if _physical_wall_repr(p.geometry) == "single_bspline":
+        # 物理壁の表現 (plan tooling-nozzle-wall-single-bspline §4.2) は NS の物理壁 (prepare_ns) だけ。Euler の設計壁で黙って無視しない
+        raise ValueError("geometry.physical_wall_repr: single_bspline は prepare_ns (物理壁) 専用 — Euler の prepare には物理壁が無い")
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     d = design_chain(p)
@@ -929,6 +945,7 @@ def delta_r_from_table(x, d):
         return np.where((xq >= _lo) & (xq <= _hi), _s(np.clip(xq, _lo, _hi), deriv), 0.0)
     f.supports_deriv = True
     f.spline = spl          # ノット (区分の境界) を形状の厳密評価に渡すため (plan tooling-nozzle-throat-monotone-r2 §6 S6)
+    f.x_range = (lo, hi)    # 表の範囲 (1 本の B-spline の物理壁は、ランプ開始〜出口を覆うことを要求する; plan tooling-nozzle-wall-single-bspline §4.1)
     return f
 
 
@@ -992,12 +1009,22 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       半径方向補正 δ_r(x) [r_t] の CSV (列 x_rt, delta_r; `feedback.deltastar_loop` が作る
       `delta_r_next.csv`) を全域そのまま使い、`offset="radial"` で壁を作る。`dstar_csv`/`dstar_blend`
       (旧 v3 継ぎはぎ) とは排他。`euler_ref` (固定 Euler 参照 run) は帳簿用に prepare_info へ記録。
+    - **`geometry.physical_wall_repr`** (plans/active/tooling-nozzle-wall-single-bspline.md §4.4): 物理壁の表現。キー無し = 今の壁
+      (変更前とビット同一、壁ファイルを書かない) / `legacy` = 今の壁 + 壁ファイル (復元に要る全要素) / `single_bspline` = 入口から
+      出口まで 1 本の 5 次 B-spline に作り直した壁 (`SingleBSplinePhysicalWall`) + 壁ファイル。キーを書いたときは壁ファイル
+      `wall_repr.json` (形式の版・表現の種類・有効域・単位・設計壁と物理壁の係数) を run に置き、prepare_info.json の
+      `physical_wall` にも写す。joint 壁 + 物理壁の解析経路 (offset radial) 専用で、それ以外にキーを書いたら例外。
     """
     from ..feedback.deltastar import _sutherland
-    from ..geometry.wall_axismach import PhysicalNozzleWall
+    from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, save_wall_file
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    # 物理壁の表現 (§4.4): 不正値と未対応の設計壁は run dir を作る前・設計チェーンの前に例外
+    pw_repr = _physical_wall_repr(p.geometry)
+    if pw_repr is not None and str(p.geometry.get("wall_repr", "interp")) != "joint":
+        raise ValueError(f"geometry.physical_wall_repr: {pw_repr} は joint 壁 (wall_repr: joint) + 物理壁の解析経路専用 "
+                         f"(wall_repr = {p.geometry.get('wall_repr', 'interp')!r})")
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
     run_dir = Path(run_dir)
@@ -1043,6 +1070,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                               float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
                               offset=offset, delta_r_x=delta_r_x,
                               ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)))
+    if pw_repr == "single_bspline":
+        # 今の物理壁を全域 1 本の 5 次 B-spline に作り直す (設計の中身は変えない; 許容誤差・ランプのゲート不合格は例外)
+        wall = SingleBSplinePhysicalWall(wall)
     if init_info is not None:
         np.savetxt(run_dir / "delta_r_initial.csv",
                    np.c_[res_init["x"], res_init["delta_r"], res_init["dstar_n"], res_init["theta"] * scale,
@@ -1059,6 +1089,14 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     msgs = wall.validate()
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
+    pw_info = None
+    if pw_repr is not None:
+        # 壁ファイル (保存した壁の復元の取り決め §4.2): 書いて読み直し、復元した物理壁が今の壁と一致することを確かめる
+        wpath, wrec, wsha = save_wall_file(run_dir, wall, scale, pw_repr)
+        pw_info = {"repr": pw_repr, "file": wpath.name, "sha256": wsha,
+                   **{k: wrec[k] for k in ("format", "version", "units", "origin", "domain", "domain_m", "physical_wall")}}
+        if pw_repr == "single_bspline":
+            pw_info["fit"] = wall.fit_diag
     mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
@@ -1164,6 +1202,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if transport is not None:
         # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
         info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
+    if pw_info is not None:
+        # 物理壁の表現と係数 (キーを書いたときだけ。キー無しの prepare_info.json は変更前と同じ)
+        info["physical_wall"] = pw_info
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 

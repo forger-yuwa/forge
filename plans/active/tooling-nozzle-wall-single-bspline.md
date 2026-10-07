@@ -108,9 +108,9 @@
 | --- | --- | --- | --- |
 | 1 | ~~§4・§6 の諮問 (案 A への書き直し後)~~ 完了 | 判断: 2026-10-07 codex (diagnose) — 案 A は維持。W3 は「座標 ≤ 2 ulp」でなくソルバ入力のビット同一に、W5 は表現誤差と転送誤差を分ける、弦の記述を訂正。全件採用 (§6.1) | F |
 | 2 | ~~codex plan 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M1/m3、全件採用 (§6.1) | O |
-| 2b | 基準成果物の確保 (実装前) | 今の HEAD・固定入力 (case/45 の単調壁の生産問題、run_0147 の `delta_r_initial.csv`) で `legacy` の `prepare_ns` を回し、変換後のメッシュ・初期値・設定を保存してハッシュを記録する (W0・W3 の基準)。報告の統合検査 (W4) に使う既存結果 (run_0147 の `nozzle.h5`・`res_*.h5`、AWS) の取得元とハッシュも記録する | O |
-| 3 | 実装 | §5 の 1〜5。MOC の軸処理の実装が終わってから (同じ `runner_axismach.py` を触る)。合格条件: 新テスト FAIL 0、design/tests の既存テスト FAIL 0 | O |
-| 4 | 検証 (CFD 0 step) | §6 W0〜W5 | O (解釈は F) |
+| 2b | ~~基準成果物の確保~~ 完了 (2026-10-07) | `case/45.isobutane_m6_d155/_band_ab/wsb/base_legacy/` (HEAD 7a505415 の design/ の写し・キー無し・ローカルの変換器)、ハッシュ `base_legacy.hashes.json`、固定入力 `fixed_inputs.json`。W4 の統合検査に使う run_0147 の結果は AWS にあり未取得 | O |
+| 3 | ~~実装~~ 完了 (最小二乗の版、2026-10-07) | 壁クラス・壁ファイル・キー・報告・STEP・テスト (§9)。係数の求め方は上流の多項式化の plan §4.1b のノット挿入に置き換える (同 plan の §5.1 #3) | O |
+| 4 | 検証 (CFD 0 step) | 最小二乗の版で W0〜W5 済み (基盤の確認、§9)。**残り: W1・W5 をノット挿入の版でやり直す (上流の plan の U3 と合わせる)、W4 の統合検査 (run_0147 の結果を AWS から取る)** | O (解釈は F) |
 | 5 | codex result 段レビュー | `--stage result` (機能実装の完了でも必須) | O |
 | 6 | 生産への反映 | case/45 の問題 YAML にキーを入れるか (ユーザ判断)。W3 でソルバ入力がビット同一なら、表現の変更による CFD のやり直しは要らない。MOC の plan の変更に要る NS・凝縮の再評価は、本 plan の免除条件で省かない | ユーザ |
 
@@ -169,3 +169,10 @@
 - `2026-10-07` — **codex (diagnose) に諮った (案 A)**: `notes/reviews/2026-10-07-wall-single-bspline-repr-diagnose.md` — 案 A を維持し、W3 をソルバ入力のビット同一の判別 A/B に改訂する。全件採用し §3・§4.1〜§4.3・§5.1・§6 W3・W5 を改訂。初稿 §4.3 の「弦は内側・最大約 1 µm」は誤り: 全壁辺で −5.62 µm (縮流部 x = −7.71、内側) 〜 +1.15 µm (スロート x = 0.025、外側)。諮問の独立試算を主セッションで再計算して一致を確認 (`case/45.isobutane_m6_d155/wall_chord_deviation.py`)。ユーザへの先の回答も訂正する。
 - `2026-10-07` — **codex plan 段レビュー (案 A)**: `notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-plan-2.md` (GO-with-changes、C0/M1/m3)。全件採用し §4.1・§4.2・§4.3・§5.1 (#2b を追加)・§6 W0・W4・W5 を改訂。レビューの独立試算: 係数 1747・条件数 35、生成座標を float32 にした不一致 0/582,000 成分、`.10g` の文字列化では 3 成分が違う (W3 を変換後の入力で行う理由)。status を in_progress に。
 - `2026-10-07` — **ユーザ決定「今の壁の STEP はいらない、外していいよ」**: 最小二乗の版を外し、係数は上流の多項式化の plan §4.1b のノット挿入で求める。`ramp` の壁は 1 本にしない (例外)。最小二乗の版の W0〜W5 は基盤の確認として記録し、W1・W5 は代数的な版でやり直す。
+- `2026-10-07` — **§5.1 #2b・#3・#4 (最小二乗の版、implementer、主セッションで検証)**。この版の係数の求め方はユーザ決定で外すので、結果は「基盤の確認」(壁クラス・保存と復元・STEP・入力の同一性) として記録する。
+  - 基準: `case/45.isobutane_m6_d155/_band_ab/wsb/base_legacy/` (HEAD 7a505415 の design/ の写し、キー無し、ローカルの変換器 sha256 4c75820c…)。自己再現の対照で全データセット一致。
+  - 実装: `SingleBSplinePhysicalWall`・`check_required_attrs`・壁ファイル `wall_repr.json` (`save_wall_file`・`load_wall_file`、有効域の外は外挿しない)・キー `geometry.physical_wall_repr`・IC の物理壁のスロート属性の必須化・報告の保存係数の経路と旧 run の明示した旧経路・`design/forge_design/export/wall_step.py` (STEP、自前の de Boor、添え書き)・`design/tests/run_wall_single_bspline_tests.py` (62 項目)・`case/45.isobutane_m6_d155/wsb_prepare.py`・`wsb_verify.py`・`methods/design/overview.md` の節。
+  - テスト: 新テスト FAIL 0 (主セッションで再実行)。既存 30 本は、変更前の 7a505415 でも同じく失敗する 3 本 (`run_sern_gates`・`run_sern_moc`・forge バイナリが要る `run_species_attrs_ic`) を除き FAIL 0。判定スクリプトの負例 17 件はすべて検出。
+  - W0 PASS (キー無しで基準とビット同一。nozzle.h5 はデータセットと属性が同一)。W1 PASS (係数 1747、半径 1.35e-13 r_t・r′ 4.61e-12・r″ 7.31e-10、継ぎ目の跳び ≤ 8.9e-16、S6 3.25e-6、ランプ 3.15e-3)。W2 PASS (Δx 3.5e-12 r_t)。W3 PASS (ソルバ入力が全項目ビット同一、`.msh` の文字列は 2 行違う)。W4 単体・一般性 PASS、統合検査は判定不能 (run_0147 の結果がローカルに無い)。W5 PASS (転送誤差: 位置 4.96e-10 mm・角度 2.6e-11 rad・曲率 1.1e-11 /mm。STEP の実数は 13 桁。FreeCAD で回転面を作れる)。出力 `_band_ab/wsb/W0〜W5.json`。
+  - **未解決の観測**: ローカルで作り直した積分法の δ_r が run_0147 の `delta_r_initial.csv` と最大 2.9e-6 r_t (x = 70.95) 違った (M_e・Tw・Taw は同一、δ*・θ・H・N・Cf が違う)。原因は未確認 (計算環境の numpy・scipy の版の違いを疑うが確かめていない)。基準は「ローカルで作り直した固定入力」で、run_0147 の入力の再現ではない。
+  - IC の化学種の属性は付けていない (ローカルの forge が `--resolve-species` を持たない。全腕 `FORGE_ALLOW_UNVERIFIED_SPECIES=1`、CFD 0 step の比較には影響しない)。

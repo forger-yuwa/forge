@@ -42,6 +42,8 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 | `evaluate` | バッチ評価 CLI: run ディレクトリ準備 → forge 起動 → 収束/NaN 自動判定 |
 | `metrics` | `res_*.h5` からの目的関数抽出 (固定サンプリング格子補間) |
 | `feedback` | 帰還エンジン (**v1/v2 実装済み** — 親計画 §4.7): `deltastar` (δ* 経験式 = Eckert 参照温度 + 乱流平板相関) / `euler_loop` (v2: 凍結 C⁻ マップ + PM 換算 + trust-region ω + 同一トポロジ再メッシュ + warm restart。case/41 で 0.45% Md 収束実証)。`geometry/moc_inverse` (逆 MOC 三角充填 + 壁流線抽出) と `geometry/wall_modef` (モード F 複合壁)、`evaluate/runner_wt` (①評価: Euler cell/slip) が対 |
+| `report` | ノズル設計の標準出力 (図・評価量・条件表、`nozzle_report`) |
+| `export` | CAD 書き出し: 物理壁の STEP (`wall_step`、FreeCAD の `freecadcmd` で書き出し・読み直し・回転面の検査) |
 | `opt` | サロゲート MOO ループ (**実装済み**): `ehvi` (2目的 EHVI 閉形式・MC照合済) / `doe` (LHS) / `surrogate` (SMT KRG) / `moo` (NSGA-II+EHVI infill) / `driver` (バッチ評価: 2段起動・VERDICT/物理ゲート・warm seed) / `polish` (チャンク継続+ηドリフトゲート)。実行は `design/.venv-opt` |
 | `menu` | 特殊解析メニュー (凝縮・高度スイープ — Phase 3〜) |
 
@@ -851,6 +853,51 @@ $|r_W''-r_{\rm design}''|\le5\times10^{-3}$ かつ $r_W'<0$ でなければ例�
 (差分で代用しない)。物理スロート $(x_t, r_t, \kappa_t)$ は $r_W'=0$ の根 (IC の 1D 等エントロピー用)。
 $x=0$ では設計壁の $C^2$ がそのまま残り、$r_W''(0)=1/R+\delta_r''(0)$。非 joint の壁は従来経路のまま
 (`analytic=False` で joint にも従来経路を強制できる)。
+
+**物理壁の表現: 全域 1 本の 5 次 B-spline と STEP (`geometry.physical_wall_repr`, 2026-10-07 実装、生産未採用)**
+(計画: [`plans/active/tooling-nozzle-wall-single-bspline.md`](../../plans/active/tooling-nozzle-wall-single-bspline.md))。
+上の解析経路の物理壁は、区間ごとに別の式の和 (直管の定数・上流 Hermite・$s\,\delta_r$・S + $\delta_r$) である。これを、設計の中身
+(MOC・当てはめ・$\delta_r$ の平滑化・ランプ) を変えずに、入口から出口まで **1 本の $x$ の 5 次 B-spline** に作り直し、メッシュ・初期値・
+報告・CAD が同じものを使えるようにした (`SingleBSplinePhysicalWall`, `geometry/wall_axismach.py`)。
+
+- **キー**: 問題 YAML の `geometry.physical_wall_repr` = `legacy` | `single_bspline`。**キー無しは今の壁で、変更前とビット同一**
+  (壁ファイルも書かない)。`legacy` を明示すると今の壁のまま壁ファイルを書く。joint 壁 + 解析経路 (offset radial) 専用で、他の壁・
+  Euler の `prepare` に `single_bspline` を書くと例外。値は完全一致 (大文字・空白・null は例外)。
+- **作り直し**: 定義域 $[x_{in}, x_e]$ (壁の属性)、次数 5、両端のノットの重複度 6。継ぎ目 ($x=-L_U$、ランプの両端、設計スロート $x=0$)
+  は重複度 3 (元の壁と同じ $C^2$)、位置は壁の属性から取る。区間内のノット (重複度 1) は、その区間で効く成分のノットの和集合
+  ($\delta_r$ の補間スプライン [ランプ開始以降]、設計壁 S [$x\ge0$])。壁が使う $\delta_r$ は `delta_r_from_table` の $x$ の 5 次補間
+  スプラインなので、ランプ以外は元の壁を厳密に表せる空間で、ランプ $[x_{lo}, x_{hi}]$ の $s\,\delta_r$ (区間ごとに 10 次) だけが近似になる。
+  係数は全ノット区間の Gauss 点 (各 8 点、重みなし) の最小二乗 (特異値分解) — 最小化するのは採用点での離散二乗和。
+- **許容誤差** (元の壁との差、各ノット区間の内部の密な点と区間多項式の極値で検査): $|\Delta r|\le1.3\times10^{-7}\,r_t$、
+  $|\Delta r'|\le10^{-7}$、$|\Delta r''|\le10^{-5}$。超えたら例外 (ノットを足して合わせ込む処理は持たない)。$\delta_r$ の表
+  (`delta_r_from_table(...).x_range`) がランプ開始から出口までを覆わなければ例外 (表の外は端値延長で導関数 0、$C^2$ が壊れる)。
+  case/45 の単調壁で係数 1747・異なるノット 1735、差の最大は半径 $1.4\times10^{-13}$・$r'$ $4.6\times10^{-12}$・$r''$ $7.3\times10^{-10}$
+  (計画 §9 の W1)。
+- **スロートとランプのゲート**: 物理スロート ($r'=0$、囲い込み $(-0.3, 0.2)$ は解析経路と同じ) と曲率を 1 本の B-spline から求め直す。
+  ランプのゲート ($|r''-r''_{\rm design}|\le5\times10^{-3}$、$r'<0$) も 1 本で評価し直し、不合格なら例外。
+- **下流への属性**: `PhysicalNozzleWall` と同じ属性 (`x_in`・`x_e`・`r(x, deriv)`・`theta`・`validate()`・`x_throat`・`r_throat`・
+  `kappa_throat`・`offset_mode`・`ramp_gate`・`_dstar_hist` ほか) を必須属性 (`REQUIRED_ATTRS`) として構築時と `validate()` で検査する
+  (下流に `getattr(..., None)` で読まれて欠けても止まらない属性があるため)。`r(x)` は定義域の外を外挿しない (座標の float32 丸め分
+  だけ外れた点は端で評価、それより外は例外)。IC (`evaluate/ic.py`) は物理壁のスロート属性が欠けたら例外 (設計スロート (0, 1) に黙って戻さない)。
+- **保存した壁の復元 (壁ファイル `wall_repr.json`)**: キーを書いた run は、形式 (`forge_design.nozzle_wall`)・版・表現の種類・単位
+  (長さは $r_t$、`scale_m`)・定義域、設計壁 (直管 $r_U$・上流 Hermite の係数と区間 $[-L_U, 0]$・S のノットと係数と有効域 $[0, x_e]$)、
+  物理壁 (1 本の B-spline、`legacy` なら ランプと $\delta_r$ の B-spline と表の範囲) を書き、`prepare_info.json` の `physical_wall` にも写す。
+  読み込みは共通の `load_wall_file`: 要素の欠損・版・種類の違いは例外、復元した評価関数は有効域の外で例外 (scipy の BSpline の既定の
+  外挿をしない — 保存済みの `wall_fit.spline` は S だけで、上流で評価すると黙って誤った値を返す: case/45 で $x=-6$ が 10.0 $r_t$、正しくは
+  上流 Hermite の 4.8675)。
+- **報告** (`report/nozzle_report.py` の壁の図): 壁ファイルがあれば保存した係数から物理壁と設計壁 (直管 + 上流 Hermite + S) を復元して入口から
+  評価し、無い旧 run は旧経路 (`wall_physical.csv`・`wall_design.csv` の再補間) で図にその旨を書く。評価量 (2 階微分の高周波) の格子は
+  両経路で同じ (物理スロート〜出口)。
+- **STEP** (`export/wall_step.py`): 平面の B-spline 曲線 $C(u)=(x(u), r(u), 0)$ を 1 本だけ書く。助変数 $u=x$ [mm] (ノットも mm、
+  換算 $1000\cdot$`scale_m`)、制御点 $P_i=(\bar x_i, c_i)$ ($\bar x_i$ はグレビル点 — B-spline は 1 次関数を正確に表すので $x(u)=u$)、
+  次数 5・重み 1。原点は設計スロート、物理スロートの位置・入口端と出口端・全壁辺の「弦 − 曲線」の分布は添え書き (JSON) に書く。
+  書き出し・読み直し・回転面の作成は FreeCAD (`freecadcmd`) で行い、読み直した曲線を自前の de Boor (scipy を使わない) と比べる
+  (位置 $\le10^{-6}$ mm、接線方向の角度 $\le10^{-9}$ rad、曲率 $\le10^{-9}$/mm または相対 $10^{-9}$)。STEP の実数は 13 桁で書かれ、
+  case/45 の転送誤差は位置 $5\times10^{-10}$ mm。回転体 (内面) にするのは CAD 側の作業。
+- **CAD の形と CFD の形**: STEP の曲線と 1 本の B-spline は丸めの範囲で一致し、1 本の B-spline と今の物理壁の差は許容誤差 (半径
+  0.01 µm) まで。CFD が解くのは壁の上の節点を直線でつないだ多角形で、曲線との差 (弦 − 曲線) は case/45 の生産メッシュ
+  (ni 2000) で $-5.6$〜$+1.1$ µm (縮流部で内側、スロートで外側)。加工公差との比較は指定された公差で行う。
+- 試験: `design/tests/run_wall_single_bspline_tests.py`。
 
 **壁表現の A/B (A14, 2026-08-17)**: 制約付き最小二乗 B-spline (`LSQBsplineCFDWall`、
 拘束 $r,r',r''$@T + $r,r'$@F、弧長重み、KKT) を CFD で補間壁と比較。LSQ は曲率振動を

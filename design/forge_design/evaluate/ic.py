@@ -41,6 +41,22 @@ def invert_area_ratio(AR, supersonic, g):
     return 0.5 * (lo + hi)
 
 
+def _throat_of(wall) -> tuple:
+    """IC の 1D 等エントロピーが使うスロート (x, r) [r_t]。物理壁 (`PhysicalNozzleWall`・`SingleBSplinePhysicalWall`) は
+    属性 x_throat・r_throat が必須で、欠けていたり非有限なら例外 (黙って設計スロート (0, 1) に戻さない;
+    plan tooling-nozzle-wall-single-bspline §4.2)。設計壁など物理スロートを持たない壁は従来どおり (0, 1)。"""
+    from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall
+    if isinstance(wall, (PhysicalNozzleWall, SingleBSplinePhysicalWall)):
+        try:
+            x_thr, r_thr = float(wall.x_throat), float(wall.r_throat)
+        except AttributeError as e:
+            raise ValueError(f"paste_isentropic_ic: 物理壁 {type(wall).__name__} にスロート属性が無い ({e})") from e
+        if not (np.isfinite(x_thr) and np.isfinite(r_thr) and r_thr > 0.0):
+            raise ValueError(f"paste_isentropic_ic: 物理壁のスロートが不正 (x_throat={x_thr!r}, r_throat={r_thr!r})")
+        return x_thr, r_thr
+    return float(getattr(wall, "x_throat", 0.0)), float(getattr(wall, "r_throat", 1.0))
+
+
 def paste_isentropic_ic(h5path, wall, scale, Pt, Tt, gamma, cp,
                         k_init=1.0, omega_init=18000.0, gas=None,
                         h_ref_T: float | None = None,
@@ -65,8 +81,7 @@ def paste_isentropic_ic(h5path, wall, scale, Pt, Tt, gamma, cp,
         cc = f["/CELLS/centCoords"][:].reshape(-1, 3)
         xn = cc[:, 0] / scale  # 無次元軸位置
         # 物理壁 (A13) はスロートが (x_throat, r_throat) ≠ (0, 1) に動く
-        x_thr = float(getattr(wall, "x_throat", 0.0))
-        r_thr = float(getattr(wall, "r_throat", 1.0))
+        x_thr, r_thr = _throat_of(wall)
         AR = np.maximum(wall.r(xn) / r_thr, 1.0) ** 2
         if gas is not None and getattr(gas, "kind", "cpg") == "semiperfect":
             M = _invert_area_ratio_gas(AR, xn >= x_thr, gas)

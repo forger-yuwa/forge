@@ -483,9 +483,18 @@ def wall_resolution(run, F, over_frac=None):
 
 
 def fig_wall_shape(run, F, path):
-    """物理壁 r_w (wall_physical.csv) と設計壁 r_inv (wall_design.csv の逆 MOC 点列) の形と 1・2 階微分。
-    2 階微分の高周波 (0.5 r_t 移動平均の残差) を壁全体と δ_r 部分 (r_w − r_inv) に分けて出す。"""
+    """物理壁 r_w と設計壁の形と 1・2 階微分。2 階微分の高周波 (0.5 r_t 移動平均の残差) を壁全体と δ_r 部分 (r_w − 設計壁) に
+    分けて出す。
+
+    壁の出所 (plans/active/tooling-nozzle-wall-single-bspline.md §4.2「保存した壁の復元の取り決め」):
+    - run に壁ファイル (`wall_repr.json`) があれば、保存した係数・ノットから物理壁と設計壁 (直管・上流 Hermite・S) を復元して
+      評価する (`_fig_wall_shape_saved`、共通の読み込み関数 `load_wall_file`)。図は入口から出口まで。要素が欠けていたら例外。
+    - 壁ファイルの無い旧 run は旧経路: 物理壁 r_w (wall_physical.csv、物理スロート〜出口) と設計壁 r_inv (wall_design.csv の
+      逆 MOC 点列) を 5 次補間し直して評価する。図にその旨を書く。"""
+    from forge_design.geometry.wall_axismach import WALL_FILE
     run = Path(run); S = F["S"]
+    if (run / WALL_FILE).exists():
+        return _fig_wall_shape_saved(run, F, path)
     w = np.loadtxt(run / "wall_physical.csv", delimiter=",", skiprows=1)
     x, r = w[:, 0] / S, w[:, 1] / S
     sp = make_interp_spline(x, r, k=5)
@@ -507,17 +516,60 @@ def fig_wall_shape(run, F, path):
             axs[row, 1].plot(xs, sp(xs, der) - spi(np.clip(xs, xd[0], xd[-1]), der), lw=1.0)
         axs[row, 0].set_ylabel(lab); axs[row, 1].set_ylabel(lab.split(" [")[0] + " (r_w − r_inv)")
     lo, hi = np.percentile(sp(xs[xs > 2], 2), [0.5, 99.5]); axs[2, 0].set_ylim(lo - 0.2 * abs(lo), hi + 0.2 * abs(hi))
+    note = "旧経路: 壁ファイル無しの run — wall_physical.csv・wall_design.csv を 5 次補間し直して評価"
     axs[0, 0].legend(fontsize=8, frameon=False); axs[0, 0].set_title("壁の形と微分 (左: そのもの / 右: 設計壁との差 = 境界層の補正分)", fontsize=10)
+    fig.suptitle(note, fontsize=9, color="0.3")
     for a_ in axs[-1]:
         a_.set_xlabel("x / r_t")
     fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
     m = (xs > 2) & (xs < xs[-1] - 0.5)
-    out = dict(r2_highfreq_max_x_gt2=float(np.abs(hfun(sp(xs, 2))[m][k:-k]).max()), exit_radius_m=float(w[-1, 1]), x_F_rt=float(x[-1]))
+    out = dict(r2_highfreq_max_x_gt2=float(np.abs(hfun(sp(xs, 2))[m][k:-k]).max()), exit_radius_m=float(w[-1, 1]), x_F_rt=float(x[-1]),
+               wall_source="legacy_csv", wall_source_note=note)
     if spi is not None:
         dd = sp(xs, 2) - spi(np.clip(xs, xd[0], xd[-1]), 2)
         out["r2_highfreq_max_x_gt2_delta_part"] = float(np.abs(hfun(dd)[m][k:-k]).max())
         out["r2_highfreq_max_x_gt2_design_wall"] = float(np.abs(hfun(spi(np.clip(xs, xd[0], xd[-1]), 2))[m][k:-k]).max())
     return out
+
+
+def _fig_wall_shape_saved(run, F, path):
+    """`fig_wall_shape` の新経路: 壁ファイルの係数・ノットから物理壁と設計壁 (直管・上流 Hermite・S) を復元して評価する。
+    復元した評価関数は有効域の外で例外 (外挿しない)。図は入口から出口まで。評価量 (2 階微分の高周波) は旧経路と同じ格子
+    (物理スロート〜出口の 20001 点、0.5 r_t 移動平均の残差) で取る。"""
+    from forge_design.geometry.wall_axismach import WALL_FILE, load_wall_file
+    W = load_wall_file(Path(run) / WALL_FILE)
+    S = F["S"]
+    if abs(W["scale_m"] - S) > 1e-12 * S:
+        raise ValueError(f"{WALL_FILE} の scale_m {W['scale_m']!r} が prepare_info.json の scale_m {S!r} と違う")
+    phys, des = W["physical"], W["design"]
+    x_in, x_e = W["domain"]
+    xp = np.linspace(x_in, x_e, 20001)
+    xs = np.linspace(float(W["throat"]["x"]), x_e, 20001)
+    k = int(round(0.5 / (xs[1] - xs[0])))
+    hfun = lambda v: v - np.convolve(v, np.ones(k) / k, "same")
+    rec = W["record"]
+    note = (f"保存した係数から評価 ({WALL_FILE}: 物理壁の表現 {W['kind']}、版 {rec['version']}; "
+            "設計壁は直管 + 上流 Hermite + S、有効域の外は外挿しない)")
+    fig, axs = plt.subplots(3, 2, figsize=(13, 8.5), sharex=True)
+    for row, der, lab in ((0, 0, "r / r_t"), (1, 1, "dr/dx"), (2, 2, "d²r/dx² [1/r_t]")):
+        pv, dv = phys.r(xp, der), des.r(xp, der)
+        axs[row, 0].plot(xp, pv, lw=1.0, label="物理壁 r_w")
+        axs[row, 0].plot(xp, dv, lw=0.9, ls="--", color="k", label="設計壁 (直管 + 上流 Hermite + S)")
+        axs[row, 1].plot(xp, pv - dv, lw=1.0)
+        axs[row, 0].set_ylabel(lab); axs[row, 1].set_ylabel(lab.split(" [")[0] + " (r_w − 設計壁)")
+    lo, hi = np.percentile(phys.r(xp[xp > 2], 2), [0.5, 99.5]); axs[2, 0].set_ylim(lo - 0.2 * abs(lo), hi + 0.2 * abs(hi))
+    axs[0, 0].legend(fontsize=8, frameon=False); axs[0, 0].set_title("壁の形と微分 (左: そのもの / 右: 設計壁との差 = 境界層の補正分)", fontsize=10)
+    fig.suptitle(note, fontsize=9, color="0.3")
+    for a_ in axs[-1]:
+        a_.set_xlabel("x / r_t")
+    fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
+    m = (xs > 2) & (xs < xs[-1] - 0.5)
+    p2, d2 = phys.r(xs, 2), des.r(xs, 2)
+    return dict(r2_highfreq_max_x_gt2=float(np.abs(hfun(p2)[m][k:-k]).max()),
+                exit_radius_m=float(phys.r(np.array([x_e]))[0] * S), x_F_rt=float(x_e),
+                r2_highfreq_max_x_gt2_delta_part=float(np.abs(hfun(p2 - d2)[m][k:-k]).max()),
+                r2_highfreq_max_x_gt2_design_wall=float(np.abs(hfun(d2)[m][k:-k]).max()),
+                wall_source="saved_coefficients", wall_source_note=note, wall_file=W["path"], wall_repr=W["kind"])
 
 
 # ------------------------------------------------------------------ 本体
