@@ -32,3 +32,15 @@ FAIL のときは main へ入れない (原因を切り分ける)。main へは 
 5. **PASS**: MOC の既定の切り替えの波及 (`moc_default_sweep.py`): 計算できた 228 本は新しい既定のゲートに全部合格、例外の 25 本は旧方式でも同じく例外、新しい既定だけで止まる問題は 0 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §9)。ユーザに諮る事項は無い。
 
 → 事前登録の 5 項目すべて合格。統合ブランチ `integrate/main-2026-10-07` を作り、PR (merge commit) で main へ入れる。
+
+## 追加 (2026-10-07、PR #4 の作成後)
+PR #4 (integrate/main-2026-10-07) の作成後に feature へ積んだ commit を統合ブランチに追加で取り込む:
+- MOC の既定の切り替えの波及の確認の記録 (CFD 0 step、コードの変更なし)
+- 単調拘束の要否の試算と、ユーザ決定「残す」(コードの変更なし)
+- **ユーザ決定「既定にする」: `pw_upstream: poly` の物理壁はキー無しで全域 1 本の B-spline** (1 本で表せない構成は区分表現のまま理由を記録)。`design/forge_design/evaluate/runner_axismach.py`・`geometry/wall_axismach.py`・試験 6 件の追加。ソルバ入力は区分表現とビット同一 (W3・W4)。
+
+追加分の確認: design の試験 (`.venv-opt`、1 本ずつ) は 32 本中、非 0 が既知の 3 本だけ (main と同じ)。`check_plans.py` の FAIL 件数は 28 のまま (下の行)。Python のソルバ側の試験・生産の問題 (`physical_wall_repr: single_bspline` を明示済み) は変更の影響を受けない。
+`check_plans.py`: VERDICT: FAIL  (22/50 plans OK) — FAIL 28 件で main と同じ。
+- 追加 (2): `prepare_info.json` に計算環境 `environment` を記録 (`runner_axismach.environment_record`、記録だけで振る舞いは変えない) と手順書の「計算環境」。関連する design の試験 (`run_mesh_euler`・`run_pw_upstream_poly`・`run_wall_single_bspline`・`run_moc_axis_limit`) は rc 0。
+- 追加 (3) (2026-10-08): CAD 向けの成果物の道具 `cad_deliverables.py` と図 (case/45 のスクリプトだけ)、case/45 README のリンクの修正、M6 の検証の plan の棚卸し、`metrics.deltastar.massflow_ratio` の実寸化の r_t の 3 乗の修正 (診断の帳簿の値だけ; `run_deltastar_tests.py`・`run_deltastar_next_columns_tests.py` rc 0)。
+- **PR #4 は 2026-10-07 にマージ済み (main 23a7acfb、中身 = 16c46cfb)**。上の追加分は続きの PR で main へ入れる。

@@ -12,7 +12,15 @@
   (CFD ピン・当てはめ壁・細分格子・Euler 較正、§5.1 #11〜#11f)、
   [`plans/active/tooling-design-problem-campaign-recipe.md`](../plans/active/tooling-design-problem-campaign-recipe.md)
   (再現可能なパイプライン化、§4.9 C2 方式 — **未実装部分が多い**)。
-- コマンドは `design/` 直下で `.venv-opt/bin/python` (または `python3`) を使う。run は検証 run でも AWS で回す。
+- コマンドは `design/` 直下で `.venv-opt/bin/python` を使う。run は検証 run でも AWS で回す。
+- **計算環境 (2026-10-07)**: 積分法の δ_r (scipy の RK45) は numpy・scipy の版で 1e-6 r_t の桁 (case/45 の出口付近で約 0.5 µm) 動く。
+  設計として問題になる大きさではないが、壁・メッシュの**ビット同一を要する照合** (保存した壁の作り直し・W3/W4 型の入力の同一性・生産の
+  問題の準備が生産の run の入力を再現するかの確認) は、**照合する相手と同じ環境で**行う。
+  - 生産の準備と照合は、生産の run を回す AWS の環境で行う (例: `case/45.isobutane_m6_d155/prod_confirm.py`)。
+  - 手元では `design/.venv-opt` の Python を使う。システムの `python3` は numpy・scipy の版が違い (numpy 1.26 には `numpy.trapezoid` も無い)、
+    手元の過去の成果物とも一致しない。
+  - `prepare`・`prepare_ns` は `prepare_info.json` の `environment` (Python・numpy・scipy の版、実行ファイル、ホスト) に環境を残す。
+    照合が合わないときは、まず両方の `environment` を比べる。
 
 ## 0. 共通: problem YAML (契約書)
 

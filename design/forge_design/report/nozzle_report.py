@@ -223,7 +223,7 @@ def metrics(run, F, euler=None):
         try:
             from forge_design.metrics.deltastar import massflow_ratio
             # 無次元 (r_t 単位) の流量 2π∫ρU_x r dr を x∈(−2.5, x_E) の中央値で比べる (r_t が違う run 同士でも比べられる)。
-            # metrics.deltastar.massflow_ratio は実寸化で r_t を 3 乗で掛けており (正しくは 2 乗)、r_t が同じ run 同士でしか比が正しくない。
+            # (metrics.deltastar.massflow_ratio の実寸化の r_t の 3 乗は 2026-10-08 に直した。報告は従来どおり無次元の流量で比べる)
             from forge_design.metrics.deltastar import _load_structured
             md = []
             for rd in (run, euler):

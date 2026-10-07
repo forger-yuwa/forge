@@ -254,8 +254,9 @@ def _moc_keys(geometry: dict) -> tuple:
 
 
 def _physical_wall_repr(geometry: dict):
-    """geometry.physical_wall_repr を読む (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4)。キーが無ければ None
-    (既定 = 今の物理壁 `legacy`、壁ファイルを書かない — 変更前とビット同一)。値は 'legacy' / 'single_bspline' に完全一致
+    """geometry.physical_wall_repr を読む (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4)。明示の値だけを返し、キーが無ければ None。
+    キー無しの実効の表現は `build_physical_wall` が決める: poly の壁は 1 本で表せれば `single_bspline` (2026-10-07 ユーザ決定)、
+    それ以外は今の区分表現 (壁ファイルを書かない)。値は 'legacy' / 'single_bspline' に完全一致
     すること — null・大文字違い・前後の空白・数値・真偽値は既定に読み替えず例外にする。"""
     if "physical_wall_repr" not in geometry:
         return None
@@ -315,6 +316,17 @@ def _sizing_spec(spec: dict) -> dict | None:
     if isinstance(t, bool) or not isinstance(t, (int, float)) or not np.isfinite(float(t)) or float(t) <= 0.0:
         raise ValueError(f"spec.sizing.target_m は正の有限の数値 [m] (受け取った値: {t!r})")
     return {"method": s["method"], "target_m": float(t), "note": s.get("note")}
+
+
+def environment_record() -> dict:
+    """設計チェーンを回した Python の環境 (prepare_info.json の `environment`)。積分法の δ_r (scipy の RK45) は numpy・scipy の版で
+    1e-6 r_t の桁で動く (2026-10-07 実測: 同じ問題・同じコードで scipy 1.11.4 と 1.18.0 の差が出口付近で 7e-6 r_t)。壁・メッシュの
+    ビット同一を要する照合は同じ環境どうしで行う (procedures/nozzle-design-workflow.md「計算環境」)。"""
+    import platform
+    import sys as _sys
+    import scipy
+    return {"python": platform.python_version(), "executable": _sys.executable, "numpy": np.__version__, "scipy": scipy.__version__,
+            "host": platform.node()}
 
 
 def require_moc_gate(p: Problem, d: dict) -> None:
@@ -876,7 +888,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
             "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
-            "mesh": mesh_rec}
+            "mesh": mesh_rec, "environment": environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -1197,9 +1209,18 @@ def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar
                               offset=offset, delta_r_x=delta_r_x,
                               ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)),
                               upstream=pwu["value"])
-    if _physical_wall_repr(p.geometry) == "single_bspline":
+    req = _physical_wall_repr(p.geometry)
+    if req == "single_bspline":
         # 今の物理壁 (pw_upstream poly) を全域 1 本の 5 次 B-spline にノット挿入で作り直す (許容誤差・ゲート不合格は例外)
         wall = SingleBSplinePhysicalWall(wall)
+    elif req is None and pwu["value"] == "poly":
+        # キー無しの poly の壁は既定で 1 本の B-spline (2026-10-07 ユーザ決定、plan tooling-nozzle-wall-single-bspline §9)。
+        # 1 本で表せない構成なら区分表現のまま作り、理由を壁に残す (prepare_ns が prepare_info に記録する。黙って落とさない)
+        why = SingleBSplinePhysicalWall.applicability(wall)
+        if why is None:
+            wall = SingleBSplinePhysicalWall(wall)
+        else:
+            wall.single_bspline_default_skipped = why
     return wall
 
 
@@ -1223,9 +1244,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       半径方向補正 δ_r(x) [r_t] の CSV (列 x_rt, delta_r; `feedback.deltastar_loop` が作る
       `delta_r_next.csv`) を全域そのまま使い、`offset="radial"` で壁を作る。`dstar_csv`/`dstar_blend`
       (旧 v3 継ぎはぎ) とは排他。`euler_ref` (固定 Euler 参照 run) は帳簿用に prepare_info へ記録。
-    - **`geometry.physical_wall_repr`** (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4): 物理壁の表現。キー無し = 今の壁
-      (変更前とビット同一、壁ファイルを書かない) / `legacy` = 今の壁 + 壁ファイル (復元に要る全要素) / `single_bspline` = 入口から
-      出口まで 1 本の 5 次 B-spline に作り直した壁 (`SingleBSplinePhysicalWall`) + 壁ファイル。キーを書いたときは壁ファイル
+    - **`geometry.physical_wall_repr`** (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4): 物理壁の表現。キー無し = poly の壁は
+      1 本で表せれば `single_bspline` (2026-10-07 ユーザ決定の既定)、それ以外 (ramp・1 本で表せない構成) は今の区分表現で壁ファイルを書かない /
+      `legacy` = 今の区分表現 + 壁ファイル (復元に要る全要素) / `single_bspline` = 入口から出口まで 1 本の 5 次 B-spline に作り直した壁
+      (`SingleBSplinePhysicalWall`) + 壁ファイル。1 本の B-spline か明示のときは壁ファイル
       `wall_repr.json` (形式の版・表現の種類・有効域・単位・設計壁と物理壁の係数) を run に置き、prepare_info.json の
       `physical_wall` にも写す。joint 壁 + 物理壁の解析経路 (offset radial) 専用で、それ以外にキーを書いたら例外。
     - **`geometry.pw_upstream`** (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1): joint 壁の物理壁の上流の作り方。
@@ -1236,7 +1258,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       物理スロート半径・出口半径 [m] と目標との差を書く (キー無しは method = null = 未記録)。
     """
     from ..feedback.deltastar import _sutherland
-    from ..geometry.wall_axismach import PhysicalNozzleWall, check_required_attrs, save_wall_file
+    from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, check_required_attrs, save_wall_file
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
@@ -1311,13 +1333,19 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
     pw_info = None
+    # 実効の表現: 明示 (legacy / single_bspline) か、キー無しの poly の既定 (1 本で表せれば single_bspline)
+    pw_source = "explicit" if pw_repr is not None else None
+    if pw_repr is None and isinstance(wall, SingleBSplinePhysicalWall):
+        pw_repr, pw_source = "single_bspline", "default"
     if pw_repr is not None:
         # 壁ファイル (保存した壁の復元の取り決め §4.2): 書いて読み直し、復元した物理壁が今の壁と一致することを確かめる
         wpath, wrec, wsha = save_wall_file(run_dir, wall, scale, pw_repr)
-        pw_info = {"repr": pw_repr, "file": wpath.name, "sha256": wsha,
+        pw_info = {"repr": pw_repr, "source": pw_source, "file": wpath.name, "sha256": wsha,
                    **{k: wrec[k] for k in ("format", "version", "units", "origin", "domain", "domain_m", "physical_wall")}}
         if pw_repr == "single_bspline":
             pw_info["fit"] = wall.fit_diag
+    elif getattr(wall, "single_bspline_default_skipped", None):
+        pw_info = {"repr": None, "source": "default (1 本で表せないので区分表現のまま)", "reason": wall.single_bspline_default_skipped}
     mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
@@ -1425,12 +1453,13 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
         info["transport"] = {"source": "gas.transport", "viscMethod": 2, "models": transport}
     if pw_info is not None:
-        # 物理壁の表現と係数 (キーを書いたときだけ。キー無しの prepare_info.json は変更前と同じ)
+        # 物理壁の表現と係数 (明示、またはキー無しの poly の既定で 1 本にしたとき。1 本で表せず区分表現のままのときは理由)
         info["physical_wall"] = pw_info
     # 上流の作り方の解決済みの値とゲート、寸法の記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1・§4.2)
     info["pw_upstream"] = {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]}
     info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
     info["sizing"] = _sizing_record(sizing, wall, scale)
+    info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
