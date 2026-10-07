@@ -3,7 +3,7 @@
 Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 /
 **出口径 1.55 m は δ\* 込み物理壁で定義**。全長 (スロート→物理出口) の最短化と
 粘性壁 (δ\* 物理壁 + SST NS) までの検証。計画:
-[`plans/active/design-isobutane-m6-d155.md`](../../plans/active/design-isobutane-m6-d155.md)。
+[`plans/accepted/design-isobutane-m6-d155.md`](../../plans/accepted/design-isobutane-m6-d155.md)。
 
 - **現行の生産の問題 (2026-10-07 ユーザ決定)**: `problem_d155_ns_prod.yaml` (+ 凝縮 `problem_d155_ns_prod_cond.yaml`、`make_prod_problems.py` で N2 から生成)。
   上流は 5 次多項式 (`pw_upstream: poly`)、MOC は analytic + converge、物理壁は全域 1 本の B スプライン (`physical_wall_repr: single_bspline`)。
