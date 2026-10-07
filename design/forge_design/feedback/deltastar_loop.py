@@ -139,16 +139,38 @@ def _sizing_delta_supplier(p, init_cfg: dict, rtol: float | None = None):
     return supplier
 
 
-SIZING_TOL_M = 1e-9      # 寸法の逆算の数値解法の許容差 [m] (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2・U2b の合格条件と同じ値)
+SIZING_TOL_M = 1e-9      # 寸法の逆算の数値解法の許容差 [m] (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2・U2b の合格条件と同じ値)。
+                         # 既定で使うのは NS 後の `solve_rt_throat` (δ_E の全分布) と試験用の `_delta_supplier`。CFD 前の既定は下の 2 つ
 SIZING_MAX_ITER = 30
+# CFD 前の寸法 (積分法の δ_r) は**初期見積もり**: その既定の許容差 [m] (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2d、
+# 諮問 notes/reviews/2026-10-07-upoly-sizing-after-u2c-diagnose.md の P1)。CFD 前の δ_r は r_t に対して滑らかでなく、局所の散らばり
+# (rtol 1e-6: スロート半径 7.41e-9 m・出口半径 2.64e-6 m、U2c) が SIZING_TOL_M より大きくて届かないため。真値の誤差の保証ではなく、
+# 精密な寸法・感度の評価には未検証 (同 plan §6 既知の制約)。SIZING_TOL_M (共通) は変えない
+SIZING_TOL_PRE_CFD_THROAT_M = 1e-7
+SIZING_TOL_PRE_CFD_EXIT_M = 1e-5
+
+
+def _resolve_sizing_tol(tol_R_m, target: str, cfd_before: bool) -> tuple[float, str]:
+    """寸法の逆算の実効の許容差 [m] とその出典。明示 (tol_R_m) が優先。既定は CFD 前なら初期見積もりの定数 (target 別)、
+    それ以外 (NS 後・試験用の供給) は SIZING_TOL_M。"""
+    if tol_R_m is not None:
+        if isinstance(tol_R_m, bool) or not np.isfinite(float(tol_R_m)) or float(tol_R_m) <= 0.0:
+            raise ValueError(f"tol_R_m は正の有限の数値 [m] (受け取った値: {tol_R_m!r})")
+        return float(tol_R_m), "explicit"
+    if cfd_before:
+        if target == "exit":
+            return SIZING_TOL_PRE_CFD_EXIT_M, "default: SIZING_TOL_PRE_CFD_EXIT_M (CFD 前の初期見積もり)"
+        return SIZING_TOL_PRE_CFD_THROAT_M, "default: SIZING_TOL_PRE_CFD_THROAT_M (CFD 前の初期見積もり)"
+    return SIZING_TOL_M, "default: SIZING_TOL_M"
 
 
 class SizingNotConverged(RuntimeError):
-    """寸法の逆算が反復の上限で許容差に収まらなかった (不合格)。`history` に各反復の r_t・残差を持つ。"""
+    """寸法の逆算が反復の上限で許容差に収まらなかった (不合格)。`history` に各反復の r_t・残差、`tol_R_m` に実効の許容差を持つ。"""
 
-    def __init__(self, msg: str, history: list) -> None:
+    def __init__(self, msg: str, history: list, tol_R_m: float | None = None) -> None:
         super().__init__(msg)
         self.history = history
+        self.tol_R_m = tol_R_m
 
 
 def _fixed_point_rt(p, d, R_target_m: float, target: str, supplier, rt0: float, max_iter: int, tol_R_m: float) -> dict:
@@ -171,20 +193,22 @@ def _fixed_point_rt(p, d, R_target_m: float, target: str, supplier, rt0: float, 
                      "delta_r_x0_rt": float(drx(np.array([0.0]))[0])})
         if abs(res) <= tol_R_m:
             return {"r_t_m": rt, "residual_m": res, "wall": W, "delta_r_x": drx, "delta_r_source": src, "iters": hist,
-                    "n_iter": k + 1}
+                    "n_iter": k + 1, "tol_R_m": float(tol_R_m)}
         rt = R_target_m / r_val
     res = [h["residual_m"] for h in hist]
     raise SizingNotConverged(f"寸法の逆算 ({target}): {max_iter} 回で |r_t·r − R| ≤ {tol_R_m:g} m に収まらない "
                              f"(最後の残差 {res[-1]:.3e} m、後半の |残差| の範囲 {min(map(abs, res[len(res) // 2:])):.2e}〜"
                              f"{max(map(abs, res[len(res) // 2:])):.2e} m) — 不合格 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)",
-                             hist)
+                             hist, tol_R_m=float(tol_R_m))
 
 
-def _sizing_result(fp: dict, p, R_target_m: float, target: str) -> dict:
-    """`solve_rt`・`solve_rt_throat` の戻りの共通部分: 解いた r_t、最終の寸法での残差、物理スロートの位置と半径、出口半径、δ_r の出典。"""
+def _sizing_result(fp: dict, p, R_target_m: float, target: str, tol_source: str) -> dict:
+    """`solve_rt`・`solve_rt_throat` の戻りの共通部分: 解いた r_t、最終の寸法での残差、実効の許容差とその出典、物理スロートの位置と半径、
+    出口半径、δ_r の出典。"""
     W, rt = fp["wall"], fp["r_t_m"]
     x_e = float(W.x_e)
     return {"r_t_m": rt, "sizing": target, "target_m": R_target_m, "residual_m": fp["residual_m"], "n_iter": fp["n_iter"],
+            "tol_R_m": fp["tol_R_m"], "tol_R_m_source": tol_source,
             "pw_upstream": W.pw_upstream, "physical_wall_repr": type(W).__name__,
             "physical_throat": {"x_rt": float(W.x_throat), "r_rt": float(W.r_throat), "kappa_rt": float(W.kappa_throat),
                                 "x_m": float(W.x_throat) * rt, "r_m": float(W.r_throat) * rt},
@@ -193,22 +217,27 @@ def _sizing_result(fp: dict, p, R_target_m: float, target: str) -> dict:
 
 
 def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: int = 6,
-             max_iter: int = SIZING_MAX_ITER, tol_R_m: float = SIZING_TOL_M, integral_rtol: float | None = None) -> dict:
+             max_iter: int = SIZING_MAX_ITER, tol_R_m: float | None = None, integral_rtol: float | None = None) -> dict:
     r"""出口の物理半径 $R$ を仕様に合わせる **スロート半径 $r_t$ の 1 変数解**。
 
     設計は $r_t$ 無次元で不変なので $R = r_t\,r_W(x_e; r_t)$ の $r_t$ だけを解く。
     - prev_run なし (CFD 前): `prepare_ns` と同じ δ_r の経路 (`integral_delta_r`: problem の `deltastar_initializer` の k_f・熱条件・
       平滑化) と同じ壁の構築 (`build_physical_wall`、pw_upstream に従う) で、反復のたびに δ_r と物理壁を作り直し、
-      $r_t\,r_W(x_e) = R$ を |残差| ≤ tol_R_m (`SIZING_TOL_M`) まで解く (2026-10-07 変更、plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2:
+      $r_t\,r_W(x_e) = R$ を |残差| ≤ tol_R_m まで解く (2026-10-07 変更、plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2:
       以前は未較正・未平滑化の `integral_bl` を直接呼んでいて、生産の壁と δ_r が違った)。max_iter 回で収まらなければ例外
-      (`SizingNotConverged`)。注意 (2026-10-07 実測): `integral_bl` (RK45 rtol 1e-6) の δ_r(x_e) は r_t を 1e-12 m 変えただけで
-      ~1e-5 r_t 揺れ、出口半径の残差は ~1e-7 m の床より下がらない (`SIZING_TOL_M` には届かない)。
+      (`SizingNotConverged`)。tol_R_m の既定 (None) は `SIZING_TOL_PRE_CFD_EXIT_M` (1e-5 m)、明示で渡せる。
+      **CFD 前の寸法は初期見積もり。精密な寸法・感度の評価には未検証** (同 plan §6 U2d・既知の制約): `integral_bl` (RK45 rtol 1e-6) の
+      δ_r は r_t に対して滑らかでなく (r_t を 1e-12 m 変えただけで δ_r(x_e) が ~1e-5 r_t 揺れる)、r_t の ±1e-10 m の 11 点での出口半径の
+      局所の散らばりは 2.64e-6 m (1 次の傾向を除いた max − min、U2c `_band_ab/upoly/U2c.json`。rtol 1e-10 でも 5.09e-8 m)。
+      `SIZING_TOL_M` (1e-9 m) には届かない (U2b)。原因は未確定、真値の誤差は未評価。
     - prev_run あり (NS 後の最終補正、変えていない): その run の抽出 δ_r(x_F) を使い、$r_t$ 依存は $Re^{-0.2}$ で補正。n_iter 回の反復。
+      **この経路は固定回数 (n_iter) の反復で、tol_R_m も max_iter も判定しない** (渡しても使わない。残差も返さない)。NS 後の 1e-9 m の
+      保証は `solve_rt_throat` の δ_E の全分布の経路だけ (同 plan §6「NS 後の経路の保証の範囲の訂正」)。
     - integral_rtol: **診断用** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。CFD 前の経路の `integral_bl` の RK45 の
       相対許容差を明示の引数で注入する (None = 既定 1e-6、今の振る舞いのまま)。積分を使わない NS 後の経路で指定したら例外
       (渡っていない口を作らない)。実効値は戻りの `delta_r_source.integral_rtol` (solve_ivp に渡った値)。
-    戻り: dict(r_t_m, delta_exit_rt, source, delta_column [prev_run ありで読んだ列], iters, …)。CFD 前は残差・物理スロート・出口半径・
-    δ_r の出典も (`_sizing_result`)。"""
+    戻り: dict(r_t_m, delta_exit_rt, source, delta_column [prev_run ありで読んだ列], iters, …)。CFD 前は残差・実効の許容差
+    (`tol_R_m`・`tol_R_m_source`)・物理スロート・出口半径・δ_r の出典も (`_sizing_result`)。"""
     from ..probdef import load_problem
     from ..evaluate.runner_axismach import design_chain
     if integral_rtol is not None and prev_run is not None:
@@ -219,8 +248,9 @@ def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: in
     hist = []
     if prev_run is None:
         init = resolve_integral_initializer(problem)
-        fp = _fixed_point_rt(p, d, float(R_exit_m), "exit", _sizing_delta_supplier(p, init, rtol=integral_rtol), S0, max_iter, tol_R_m)
-        out = _sizing_result(fp, p, float(R_exit_m), "exit")
+        tol, tol_src = _resolve_sizing_tol(tol_R_m, "exit", cfd_before=True)
+        fp = _fixed_point_rt(p, d, float(R_exit_m), "exit", _sizing_delta_supplier(p, init, rtol=integral_rtol), S0, max_iter, tol)
+        out = _sizing_result(fp, p, float(R_exit_m), "exit", tol_src)
         last = fp["iters"][-1]
         out.update(r_t_prev_m=S0, delta_exit_rt=last["delta_r_exit_rt"], r_F_rt=rF, x_F_rt=xF, R_exit_m=R_exit_m,
                    source="integral_delta_r (prepare_ns と同じ経路: deltastar_initializer の k_f・熱条件・5 次 P-spline 平滑化) + "
@@ -256,7 +286,7 @@ def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: in
 
 
 def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None, delta_next=None,
-                    max_iter: int = SIZING_MAX_ITER, tol_R_m: float = SIZING_TOL_M, _delta_supplier=None) -> dict:
+                    max_iter: int = SIZING_MAX_ITER, tol_R_m: float | None = None, _delta_supplier=None) -> dict:
     r"""**物理スロート径から寸法を決める**: $r_t\cdot\min_x r_W(x; r_t) = R_{throat}$ を $r_t$ について解く
     (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2、ユーザ決定 2026-10-07)。$r_W$ は物理壁 (r_t 単位、pw_upstream に従う)、
     最小は物理壁の大域最小 (`wall_global_min`)。スロート径を固定するときは出口径を同時に固定条件にしない (出口半径は戻り値に記録するだけ)。
@@ -270,10 +300,14 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
       解いた r_t での補正関数の表を delta_r_out (必須) に書く — 次の壁はこの表を `prepare_ns(delta_r_csv=...)` に渡して作る
       (寸法と壁で同じ関数)。delta_r_next.csv が無ければ例外。
     - 反復: 各反復で今の r_t の残差 r_t·min r_W − R を評価し、|残差| ≤ tol_R_m で止める (返す残差 = 最終の寸法で評価し直した値)。
-      max_iter 回で収まらなければ例外 (`SizingNotConverged`、不合格)。注意 (2026-10-07 実測): CFD 前の δ_r (`integral_bl`、RK45
-      rtol 1e-6) は r_t を 1e-12 m 変えただけで出口で ~1e-5 r_t・スロートで ~1e-7 r_t 揺れるので、残差はその床より下がらない。
+      max_iter 回で収まらなければ例外 (`SizingNotConverged`、不合格)。tol_R_m の既定 (None) は経路で違う: CFD 前は
+      `SIZING_TOL_PRE_CFD_THROAT_M` (1e-7 m)、NS 後と `_delta_supplier` は `SIZING_TOL_M` (1e-9 m、今までどおり)。明示で渡せる。
+      **CFD 前の寸法は初期見積もり。精密な寸法・感度の評価には未検証** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2d・既知の
+      制約): CFD 前の δ_r (`integral_bl`、RK45 rtol 1e-6) は r_t を 1e-12 m 変えただけで出口で ~1e-5 r_t・スロートで ~1e-7 r_t 揺れ、
+      r_t の ±1e-10 m の 11 点での物理スロート半径の局所の散らばりは 7.41e-9 m (U2c)。1e-9 m には届かない。原因は未確定、真値の誤差は未評価。
     - `_delta_supplier` (試験用): supplier(d, rt) → (delta_r_x, 記録) で δ_r の供給経路だけを差し替える (判別 A/B の腕 A)。
-    戻り: r_t_m・残差・反復の履歴・δ_r の出典と設定・物理スロートの位置と半径・そのとき決まる出口半径 ほか。"""
+    戻り: r_t_m・残差・実効の許容差 (`tol_R_m`・`tol_R_m_source`)・反復の履歴・δ_r の出典と設定・物理スロートの位置と半径・
+    そのとき決まる出口半径 ほか。"""
     from ..probdef import load_problem
     from ..evaluate.runner_axismach import delta_r_from_table, design_chain
     p = load_problem(problem); d = design_chain(p)
@@ -283,11 +317,14 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
     if _delta_supplier is not None:
         supplier, rt0 = _delta_supplier, S0
         extra["delta_r_route"] = "test supplier (_delta_supplier)"
+        tol, tol_src = _resolve_sizing_tol(tol_R_m, "throat", cfd_before=False)
     elif prev_run is None:
         init = resolve_integral_initializer(problem)
         supplier, rt0 = _sizing_delta_supplier(p, init), S0
         extra.update(delta_r_route="cfd_before: integral_delta_r (prepare_ns と同じ経路)", initializer=init)
+        tol, tol_src = _resolve_sizing_tol(tol_R_m, "throat", cfd_before=True)
     else:
+        tol, tol_src = _resolve_sizing_tol(tol_R_m, "throat", cfd_before=False)
         prev_run = Path(prev_run)
         if delta_r_out is None:
             raise ValueError("solve_rt_throat (NS 後): delta_r_out (次の壁に渡す補正関数の表の出力先) が必要 — 寸法と壁を同じ関数で作るため")
@@ -313,8 +350,8 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
                 "delta_column": f"delta_E ({nx['header_kind']} header)", "S_prev_m": _S, "factor": fac, "table": str(_out)}
         rt0 = S_prev
         extra.update(delta_r_route="ns_after: delta_E 全分布", delta_r_out=str(out_csv))
-    fp = _fixed_point_rt(p, d, R, "throat", supplier, rt0, max_iter, tol_R_m)
-    out = _sizing_result(fp, p, R, "throat")
+    fp = _fixed_point_rt(p, d, R, "throat", supplier, rt0, max_iter, tol)
+    out = _sizing_result(fp, p, R, "throat", tol_src)
     out.update(r_t_problem_m=S0, R_throat_m=R, **extra)
     return out
 

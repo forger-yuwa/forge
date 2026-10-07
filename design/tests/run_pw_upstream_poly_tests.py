@@ -12,7 +12,8 @@
 3. 大域最小の探索器の負例: δ_r′(0) が正・0・負 (レビューの反例 x_t = +0.00155091)・下流に余分な極値・合成関数 (二つの最小・平らな底・
    区切り不足) — 位置は密な点の総当たりと比べる
 4. 寸法の逆算: CFD 前の δ_r の供給が prepare_ns の経路と同一 / solve_rt (CFD 前) の自明な目標 / solve_rt_throat (NS 後、合成の
-   δ_E の全分布) の往復 (書いた表から作り直した壁の最小半径と目標の差 ≤ 1e-9 m) / 反復の上限で不合格
+   δ_E の全分布) の往復 (書いた表から作り直した壁の最小半径と目標の差 ≤ 1e-9 m) / 反復の上限で不合格 /
+   許容差の既定 (CFD 前の初期見積もり: スロート 1e-7 m・出口 1e-5 m、NS 後と SIZING_TOL_M は 1e-9 m のまま、NS 後の solve_rt は判定しない)
 5. 一般性: 標準の L_U 3.5・r_U 2.5 の縮流部 (ゲートを通るかを記録; 自動で ramp に切り替えない)
 
 usage: design/.venv-opt/bin/python design/tests/run_pw_upstream_poly_tests.py   (所要 1〜2 分)
@@ -275,6 +276,41 @@ check("solve_rt_throat (NS 後): 表は δ_E × (r_t/S_prev)^−0.2", np.allclos
 e = raises(lambda: DL.solve_rt_throat(yp, 0.9 * R_t, prev_run=prev, delta_r_out=out_csv, max_iter=1), DL.SizingNotConverged)
 check(f"反復の上限 (1 回) で不合格 (SizingNotConverged: {(e or '')[:40]}…)", e is not None)
 check("NS 後で delta_r_out が無ければ例外 (寸法と壁を同じ関数で作るため)", raises(lambda: DL.solve_rt_throat(yp, R_t, prev_run=prev)) is not None)
+# 許容差 (plan §6 U2d・既知の制約、2026-10-07): CFD 前は初期見積もりの既定 (スロート 1e-7 m・出口 1e-5 m)、共通の SIZING_TOL_M と
+# NS 後の経路は 1e-9 m のまま。実効の許容差と出典を戻りに記録する
+check(f"定数: SIZING_TOL_M {DL.SIZING_TOL_M:g} (変えない)・CFD 前の既定 スロート {DL.SIZING_TOL_PRE_CFD_THROAT_M:g}・出口 {DL.SIZING_TOL_PRE_CFD_EXIT_M:g}",
+      DL.SIZING_TOL_M == 1e-9 and DL.SIZING_TOL_PRE_CFD_THROAT_M == 1e-7 and DL.SIZING_TOL_PRE_CFD_EXIT_M == 1e-5)
+check(f"solve_rt (CFD 前): 既定の許容差は SIZING_TOL_PRE_CFD_EXIT_M を記録 ({rs['tol_R_m']:g}、{rs['tol_R_m_source']})",
+      rs["tol_R_m"] == DL.SIZING_TOL_PRE_CFD_EXIT_M and rs["tol_R_m_source"].startswith("default: SIZING_TOL_PRE_CFD_EXIT_M"))
+R_throat0 = S0 * float(W0.r_throat)
+rth = DL.solve_rt_throat(yp, R_throat0)
+check(f"solve_rt_throat (CFD 前): 既定の許容差は SIZING_TOL_PRE_CFD_THROAT_M を記録 ({rth['tol_R_m']:g}、{rth['tol_R_m_source']})、"
+      f"今の壁の物理スロート半径を目標にすると r_t = S0 (残差 {rth['residual_m']:.1e})",
+      rth["tol_R_m"] == DL.SIZING_TOL_PRE_CFD_THROAT_M and rth["tol_R_m_source"].startswith("default: SIZING_TOL_PRE_CFD_THROAT_M")
+      and rth["r_t_m"] == S0 and rth["residual_m"] == 0.0)
+rth_x = DL.solve_rt_throat(yp, R_throat0, tol_R_m=1e-9)
+check(f"solve_rt_throat (CFD 前): 明示の許容差を受けて記録 ({rth_x['tol_R_m']:g}、{rth_x['tol_R_m_source']})",
+      rth_x["tol_R_m"] == 1e-9 and rth_x["tol_R_m_source"] == "explicit")
+check(f"solve_rt_throat (NS 後): 既定の許容差は SIZING_TOL_M のまま ({rt_['tol_R_m']:g}、{rt_['tol_R_m_source']})",
+      rt_["tol_R_m"] == DL.SIZING_TOL_M == 1e-9 and rt_["tol_R_m_source"] == "default: SIZING_TOL_M")
+try:
+    DL.solve_rt_throat(yp, 0.9 * R_t, prev_run=prev, delta_r_out=out_csv, max_iter=1)
+    e_tol = None
+except DL.SizingNotConverged as e_:
+    e_tol = e_.tol_R_m
+check(f"反復の上限の例外 (NS 後) が実効の許容差 1e-9 を持つ ({e_tol})", e_tol == 1e-9)
+check("_resolve_sizing_tol: 既定 (CFD 前の出口・スロート / NS 後) と明示",
+      DL._resolve_sizing_tol(None, "exit", True)[0] == 1e-5 and DL._resolve_sizing_tol(None, "throat", True)[0] == 1e-7
+      and DL._resolve_sizing_tol(None, "throat", False)[0] == 1e-9 and DL._resolve_sizing_tol(None, "exit", False)[0] == 1e-9
+      and DL._resolve_sizing_tol(3e-8, "exit", True) == (3e-8, "explicit"))
+check("_resolve_sizing_tol: 不正な許容差 (0・負・nan・inf・真偽値) は例外",
+      all(raises(lambda v=v: DL._resolve_sizing_tol(v, "exit", True)) is not None for v in (0.0, -1e-9, float("nan"), float("inf"), True)))
+# NS 後の solve_rt (prev_run あり) は固定回数の反復で tol_R_m を判定しない (振る舞いは変えない): 許容差を渡しても戻りが同じ・許容差の記録なし
+(prev / "delta_r_equiv.csv").write_text("")            # 存在の確認だけ (delta_r_next.csv があれば δ_E はそちらから読む)
+rn0 = DL.solve_rt(yp, 0.775, prev_run=prev)
+rn1 = DL.solve_rt(yp, 0.775, prev_run=prev, tol_R_m=1e-30)
+check(f"solve_rt (NS 後): tol_R_m を判定しない (1e-30 を渡しても r_t {rn1['r_t_m']!r} が同じ、反復 {len(rn0['iters'])} 回)、許容差の記録なし",
+      rn0 == rn1 and len(rn0["iters"]) == 6 and "tol_R_m" not in rn0)
 
 # --- 5. 一般性: 標準の L_U 3.5・r_U 2.5 ------------------------------------------------------------------------------
 p35 = load_problem(hall_yaml("lu35", lambda g, s: (g.__setitem__("L_U", 3.5), g.__setitem__("r_inlet", 2.5))))

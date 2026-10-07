@@ -68,8 +68,11 @@
    (`--euler-ref`/`--run-dir` は必須引数だがこのモードでは使われない。) CFD 前の δ は `prepare_ns` と同じ経路 (YAML の
    `deltastar_initializer` の k_f・熱条件・平滑化、2026-10-07 から。以前の `solve_rt` は未較正・未平滑化で、生産の壁と出口半径が 2.4 mm
    ずれた) で、物理壁も `prepare_ns` と同じ構築 (`pw_upstream` に従う)。**k_f を較正し直したら寸法も解き直す** (k_f はスロートの δ も変える)。
-   残差は `SIZING_TOL_M` (1e-9 m) で止め、30 回で収まらなければ不合格 (例外)。CFD 前の δ (積分法) は r_t に対して滑らかでなく
-   (r_t を 1e-12 m 変えるだけで出口の δ が ~1e-5 r_t 揺れる)、残差の床はスロートで ~1e-8 m、出口で ~1e-7 m (2026-10-07 実測)。
+   **CFD 前の寸法は初期見積もり**: 残差はスロート 1e-7 m・出口 1e-5 m (`SIZING_TOL_PRE_CFD_THROAT_M`・`SIZING_TOL_PRE_CFD_EXIT_M`、
+   引数 `tol_R_m` で明示も可) で止め、30 回で収まらなければ不合格 (例外)。CFD 前の δ (積分法) は r_t に対して滑らかでなく
+   (r_t を 1e-12 m 変えるだけで出口の δ が ~1e-5 r_t 揺れる)、局所の散らばりはスロート 7.4e-9 m・出口 2.6e-6 m (2026-10-07 U2c) で、
+   精密な寸法・感度の評価には未検証 (plan `tooling-nozzle-upstream-poly-and-throat-sizing` §6 U2d・既知の制約)。NS 後の `solve_rt_throat` は
+   `SIZING_TOL_M` (1e-9 m) で止め、NS 後の `solve_rt` (`--prev`) は固定回数の反復で許容差を判定しない。
    NS 後に物理スロート径から決め直すときは `--prev RUN --delta-next RUN/_extract_edge/delta_r_next.csv --delta-r-out FILE`
    (δ_E の全分布で寸法を決め、同じ補正の表を FILE に書く。次の壁は `prepare_ns(delta_r_csv=FILE)` でその表から作る)。
 5. **形を見る・出す** — 作図・CAD 用の全輪郭出力は case 側のスクリプトしかない

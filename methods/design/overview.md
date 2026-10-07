@@ -899,10 +899,15 @@ $Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、�
 - **NS 後**: `solve_rt` は抽出 $\delta_E(x_F)$ 1 点の $Re^{-0.2}$ 換算 (C2 方式、変えていない)。`solve_rt_throat` は
   `delta_r_next.csv` の **$\delta_E$ の全分布** から補正関数 $\delta(x; r_t)=\delta_E(x)(r_t/S_{prev})^{-0.2}$ を作り、同じ関数で寸法と壁を作る
   (解いた $r_t$ での表を `delta_r_out` に書き、次の壁は `prepare_ns(delta_r_csv=...)` でその表から作る)。$Re^{-0.2}$ は予測の近似。
-- **反復**: 各反復で今の $r_t$ の残差 $r_t\,r - R$ を評価し、$|{\rm 残差}|\le$ `SIZING_TOL_M` ($10^{-9}$ m) で止める (返す残差 = 最終の
-  寸法で評価し直した値)。30 回で収まらなければ `SizingNotConverged` (不合格)。**CFD 前の $\delta_r$ は $r_t$ に対して滑らかでない**
-  (`integral_bl` の RK45 rtol $10^{-6}$ 等: $r_t$ を $10^{-12}$ m 変えただけで $\delta_r(x_e)$ が $\sim10^{-5}\,r_t$、$\delta_r(0)$ が $\sim10^{-7}\,r_t$
-  揺れる、2026-10-07 実測) ので、残差はスロートで $\sim10^{-8}$ m、出口で $\sim10^{-7}$ m の床より下がらない。
+- **反復**: 各反復で今の $r_t$ の残差 $r_t\,r - R$ を評価し、\|残差\| ≤ 許容差で止める (返す残差 = 最終の寸法で評価し直した値)。
+  30 回で収まらなければ `SizingNotConverged` (不合格)。許容差は経路で違う (`deltastar_loop._resolve_sizing_tol`、引数 `tol_R_m` で明示も可):
+  CFD 前は**初期見積もり**として、スロート `SIZING_TOL_PRE_CFD_THROAT_M` ($10^{-7}$ m)・出口 `SIZING_TOL_PRE_CFD_EXIT_M` ($10^{-5}$ m)。
+  NS 後の `solve_rt_throat` は `SIZING_TOL_M` ($10^{-9}$ m)。NS 後の `solve_rt` は固定回数の反復で許容差を判定しない。
+- **CFD 前の寸法の既知の制約**: CFD 前の $\delta_r$ (`integral_bl` の RK45 rtol $10^{-6}$ → P-spline) は $r_t$ に対して滑らかでなく、
+  寸法を少し変えたときの物理半径の局所の散らばりはスロートで $7.4\times10^{-9}$ m、出口で $2.6\times10^{-6}$ m (2026-10-07、U2c)。
+  rtol を $10^{-10}$ にしても出口に $5\times10^{-8}$ m 残り (計算費は約 20 倍)、原因は確定していない。そのため $10^{-9}$ m では止まらず、
+  CFD 前の許容差を上のとおり初期見積もり用に分けた (未使用の目標で 3 評価で収まり、近傍 11 点でも許容差内、U2d)。
+  **CFD 前の寸法は初期見積もりで、精密な寸法・感度の評価には未検証**。計画 [tooling-nozzle-upstream-poly-and-throat-sizing](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §6 U2〜U2d。
 - 寸法の決め方は問題 YAML の `spec.sizing: {method: exit | throat, target_m}` (任意) に書くと、`prepare_ns` が `prepare_info.json` の `sizing` に
   実際の壁の物理スロート半径・出口半径と目標との差を並べる (無ければ `method: null` = 未記録)。
 - CLI: `python -m forge_design.feedback.deltastar_loop --problem P --euler-ref X --run-dir Y --solve-rt-throat R [--prev RUN --delta-next CSV --delta-r-out CSV]`。
