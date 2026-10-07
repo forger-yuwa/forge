@@ -67,7 +67,7 @@ limiter = (duc > 0.8) ? max(0.0, (1.0 - duc) * limiter) : limiter;
 node + SLAU の 2 次再構成で、後流側の面の速度の外挿 (例: 節点値 10 m/s → 再構成 1333 m/s) が高い全エンタルピーを運び出し、端の近くの内部節点を非物理に冷やすことが観測された
 (SERN m6_on で 95–105 K、m10_on で温度床 50 K に到達。診断の記録は `plans/active/tooling-nozzle-sern-3d.md` §4.35・§5.1 R5h)。
 **計画中の扱い** ([`plans/active/convection-zero-thickness-edge-reconstruction.md`](../../plans/active/convection-zero-thickness-edge-reconstruction.md)):
-自由端の節点集合 E から内部面の接続で距離 2 以下の節点集合 $S_2$ を作り、$S_2$ の節点に接する内部面で**その節点側の速度 3 成分だけ**再構成を節点値に戻す (面の速度を $\mathbf u_f = \mathbf u_i + \psi \nabla\mathbf u_i\cdot\mathbf r_{if}$ から $\mathbf u_f = \mathbf u_i$ に = 勾配の項を落とす。node モードでは双対 CV がコード上の「セル」なので、コードの「セル値」= 節点値)
+前処理の道具 (`tools/mark_zero_thickness_edges.py`) が入力 h5 に節点フィールド $w$ (0〜1) を書き、ソルバは面の速度の再構成を $\mathbf u_f = \mathbf u_i + w_i\,\psi\nabla\mathbf u_i\cdot\mathbf r_{if}$ にする。初版の道具は、自由端の節点集合 E から内部面の接続で距離 2 以下の節点集合 $S_2$ を作って $w = 0$ (他は 1) とし、$S_2$ の節点に接する内部面で**その節点側の速度 3 成分だけ**再構成を節点値に戻す (面の速度を $\mathbf u_f = \mathbf u_i + \psi \nabla\mathbf u_i\cdot\mathbf r_{if}$ から $\mathbf u_f = \mathbf u_i$ に = 勾配の項を落とす。node モードでは双対 CV がコード上の「セル」なので、コードの「セル値」= 節点値)
 (相手も $S_2$ なら両側)。勾配配列・粘性・壁 BC・密度/圧力/組成の再構成は変えない。速度二乗・面エンタルピー・質量流束を計算する前に適用し、面流束は両節点へ逆符号で加算する。
 明示 opt-in (node + SLAU・非周期・非軸対称のみ、他は起動時エラー)。無効なら旧経路 (ビット不変)、有効にして端の集合が空なら起動時エラー。**まだ実装していない** — 判別試験の結果で設計を決める。
 
