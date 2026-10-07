@@ -18,6 +18,10 @@ usage: python3 eval_wallfit_euler.py [case_dir] [--fixed-coef] [--pair=A,B (既�
   本段の連続 10 枚の窓で比べる (throat_mono_judge.judge_icab_quantity)。→ _band_ab/throat_mono_icab[_fixedcoef].json、
   各 run に wallfit_series_icab.csv・QUASISTEADY_wallfit_icab.txt。
   例: python3 eval_wallfit_euler.py . --fixed-coef --icab=run_0146_euler_icab_monoG1_nn,run_0143_euler_wallfit_monoG1_r1
+--series=RUN,… --geom-ref=RUN --tag=TAG (plan discretization-moc-axis-limit-and-corrector §6 V5、2026-10-07): 判定をせず、e3_run と同じ
+  評価量の時系列 (wallfit_series_<tag>.csv・QUASISTEADY_wallfit_<tag>.txt、末尾 5 枚) だけを書く。X_E・X_F は --geom-ref の run から取り
+  全 run に同じ値を使う。→ _band_ab/wallfit_series_<tag>.json (各 run の自身の X_E・X_F との差、CSV の sha256)。判定は moc_v5_euler_eval.py。
+  例: python3 eval_wallfit_euler.py . --fixed-coef --series=run_0143_…,run_0150_… --geom-ref=run_0143_euler_wallfit_monoG1_r1 --tag=v5
 """
 import json, re, subprocess, sys
 from pathlib import Path
@@ -439,7 +443,63 @@ def run_icab(alpha, beta):
     print(f"VERDICT: {ov['verdict']}  -> {dst}")
 
 
+def run_series(runs, geom_ref, tag):
+    """plan discretization-moc-axis-limit-and-corrector §6 V5 (2026-10-07): 評価量の時系列だけを書く (判定はしない;
+    判定は moc_v5_euler_eval.py)。--e3 と同じ e3_run で各 run に wallfit_series_<tag>.csv・QUASISTEADY_wallfit_<tag>.txt を書く。
+    X_E・X_F は geom_ref の run (腕 B の r1) から取り、全 run に同じ値を使う (窓・当てはめ区間を x で揃える)。--e3 の
+    e3_geometry は run 間の差 1e-9 r_t で止めるが、腕 M の X_F は腕 B と 1e-8 r_t 違う (MOC の点群が変わるため)。
+    各 run 自身の X_E・X_F と基準との差は記録し、許すかどうかは評価器が判定する。→ _band_ab/wallfit_series_<tag>.json"""
+    global X_E, X_F, WIN_T, WIN_O
+    import hashlib
+
+    def _sha(p):
+        return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+    X_E, X_F = e3_geometry([geom_ref])
+    WIN_T = (X_E + 2.0, X_F - 1.0); WIN_O = (X_E - 15.0, X_F)          # run_e3 と同じ取り方
+    F0 = load_field(C / geom_ref, snaps(geom_ref)[-1])                # 出口の共通標本 (記録用の出口変種だけが使う)
+    eta0 = F0["R"][-1] / F0["R"][-1, -1]
+    etaS = eta0[(eta0 >= EXIT_BAND[0]) & (eta0 <= EXIT_BAND[1])]
+    rec = {}
+    for run in runs:
+        csv_p = C / run / f"wallfit_series_{tag}.csv"
+        qs_p = C / run / f"QUASISTEADY_wallfit_{tag}.txt"
+        for p_ in (csv_p, qs_p):                                      # 前回の成果物を今回のものと取り違えない
+            p_.unlink(missing_ok=True)
+        try:
+            own = e3_geometry([run])
+            r = e3_run(run, "series", etaS, None, tag=tag)
+        except Exception as e:  # noqa: BLE001 — 評価できないことを記録する (評価器は保留にする)
+            own, r = (float("nan"), float("nan")), {"status": "error", "reason": f"{type(e).__name__}: {e}"}
+        r.pop("_dists", None)
+        rec[run] = {"status": r["status"], "reason": r.get("reason"), "own_X_E": own[0], "own_X_F": own[1],
+                    "dX_E": own[0] - X_E, "dX_F": own[1] - X_F, "n_snaps": r.get("n_snaps"), "last_step": r.get("last_step"),
+                    "csv": f"{run}/{csv_p.name}", "csv_sha256": _sha(csv_p), "quasisteady_file": f"{run}/{qs_p.name}",
+                    "quasisteady_sha256": _sha(qs_p), "quasisteady": r.get("quasisteady"), "segment": r.get("segment_convergence")}
+        print(f"{run}: {r['status']} {r.get('reason') or ''} dX_E {own[0] - X_E:+.3e} dX_F {own[1] - X_F:+.3e}")
+    out = {"plan": "plans/active/discretization-moc-axis-limit-and-corrector.md §6 V5", "tag": tag, "geom_ref": geom_ref,
+           "geometry": {"X_E": X_E, "X_F": X_F, "WIN_T": list(WIN_T), "WIN_O": list(WIN_O)}, "fixed_coef": FIXED,
+           "evaluator": Path(__file__).name, "evaluator_sha256": _sha(Path(__file__).resolve()), "runs": rec}
+    (C / "_band_ab").mkdir(exist_ok=True)
+    dst = C / f"_band_ab/wallfit_series_{tag}.json"
+    dst.write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+    print(f"SERIES: {sum(1 for v in rec.values() if v['status'] == 'ok')}/{len(rec)} ok -> {dst}")
+
+
 _ICAB = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--icab=")), None)
+# --series=RUN,… --geom-ref=RUN --tag=TAG (plan discretization-moc-axis-limit-and-corrector §6 V5): 時系列だけ (run_series)。
+# 既存の呼び方 (--e3・--icab・旧 A/B) の挙動は変えない
+_SERIES = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--series=")), None)
+if _SERIES is not None:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    _sr = [r for r in _SERIES.split(",") if r]
+    _gr = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--geom-ref=")), None)
+    _tg = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--tag=")), None)
+    if (not _sr or not _gr or not _tg or _tg in ("e3", "icab") or E3 or _ICAB
+            or not all((C / r).is_dir() for r in _sr + [_gr])):
+        raise SystemExit(f"--series=RUN,… は --geom-ref=RUN と --tag=TAG (e3・icab 以外) を明示し (--e3・--icab と併用しない)、"
+                         f"run dir がそろっていること: series {_sr}, geom-ref {_gr}, tag {_tg}")
+    run_series(_sr, _gr, _tg)
+    sys.exit(0)
 if E3 or _ICAB:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     if _ICAB:
