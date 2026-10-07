@@ -441,6 +441,13 @@ with tempfile.TemporaryDirectory() as tmp:
     (run / "residual_history_main.csv").unlink()
     o = NS.nan_scan(run)
     check("nan-scan: NaN なし → CLEAN", o["VERDICT"] == "CLEAN")
+    # 中間の場だけに NaN (最終は正常) → NAN (2026-10-07 result 段レビュー M2: 以前は最終の res だけを開いていた)
+    with h5py.File(run / "res_5000.h5", "w") as f:
+        f.create_dataset("VALUE/ro", data=np.array([1.0, np.nan, 1.0, 1.0])); f.create_dataset("VALUE/T", data=np.ones(4)); f.create_dataset("VALUE/P", data=np.ones(4))
+    o = NS.nan_scan(run)
+    check("nan-scan: 中間の場の NaN を検出 (最終は正常)", o["VERDICT"] == "NAN" and o["first_bad_field"]["file"] == "res_5000.h5"
+          and o["fields_scanned"] == ["res_5000.h5", "res_80000.h5"])
+    (run / "res_5000.h5").unlink()
     with h5py.File(run / "res_80000.h5", "r+") as f:
         f["VALUE/T"][1] = -1.0
     o = NS.nan_scan(run)

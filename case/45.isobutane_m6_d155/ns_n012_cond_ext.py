@@ -114,9 +114,59 @@ def concat_rows(a: list, b: list, offset: int) -> list:
     return out
 
 
+def residual_gate(cc_text: str, header: list) -> dict:
+    """連結した残差の check_convergence の出力の判定 (2026-10-07 result 段レビュー M1: 以前は見出しの有無と RISING の不在だけで
+    合格にし、「判定不能」を通していた)。ns_n012_eval と同じ throat_mono_judge.parse_segment_verdict で読み、SEG_OK だけを合格に、
+    それ以外 (rising・diverged・判定不能・missing・解釈できない) は不合格にする。さらに必要な列 (rms_* のうち rms_dq_* を除く全部)
+    がそれぞれ判定の行を持つこと (rms_roUz は inactive の skip を許す)。"""
+    from throat_mono_judge import parse_segment_verdict
+    st = parse_segment_verdict("  [segment] 判定区間 = 親 + 延長の連結 (ns_n012_cond_ext)\n" + cc_text)
+    need = [h for h in header if h.startswith("rms_") and not h.startswith("rms_dq_")]
+    lines = {h: next((l for l in cc_text.splitlines() if l.strip().startswith(h + " ") or l.strip().startswith(h + ":")), None) for h in need}
+    missing = [h for h, l in lines.items() if l is None or (("inactive" in l) and h != "rms_roUz")]
+    ok = st["status"] in EV.SEG_OK and not missing
+    return {"status": st["status"], "reason": st.get("reason"), "line": st.get("line"), "required_cols": need,
+            "missing_cols": missing, "ok": bool(ok)}
+
+
+def preconditions(src: Path, ext: Path) -> list:
+    """親子の対応と実行条件 (2026-10-07 result 段レビュー M1)。不成立の理由の一覧 (空 = 成立)。"""
+    why = []
+    srec, erec = NS.jload(src / NS.RECORD), NS.jload(ext / NS.RECORD)
+    if srec.get("role") != "cond":
+        why.append(f"親 {src.name} の role が cond でない ({srec.get('role')})")
+    if erec.get("role") != "cond_ext" or erec.get("parent") != src.name:
+        why.append(f"延長 {ext.name} の role・親が違う ({erec.get('role')}, {erec.get('parent')})")
+    src_h5 = src / f"res_{PARENT_STEPS}.h5"
+    if not src_h5.is_file() or erec.get("src_sha256") != NS.sha256_file(src_h5):
+        why.append("延長の元にした res_18000.h5 の sha256 が記録と違う")
+    for r in (src, ext):
+        rc = (r / "RUN_RC").read_text().strip() if (r / "RUN_RC").is_file() else None
+        if rc != "0":
+            why.append(f"{r.name} の RUN_RC が 0 でない ({rc})")
+        ns = NS.jload(r / NS.NAN_SCAN) if (r / NS.NAN_SCAN).is_file() else {}
+        if ns.get("VERDICT") != "CLEAN" or not ns.get("fields_scanned"):
+            why.append(f"{r.name} の NaN の全走査 (全場) が CLEAN でない・未実行 ({ns.get('VERDICT')}, 場 {len(ns.get('fields_scanned') or [])} 枚)")
+    ys = NS.yaml_strict()
+    dd = NS.MK.diff_paths(ys.load((src / "solverConfig.yaml").read_text()), ys.load((ext / "solverConfig.yaml").read_text()))
+    if set(dd) != {NS.NSTEP}:
+        why.append(f"親と延長の solverConfig の差が nStepOuter だけでない ({sorted(dd)})")
+    if (src / "bcondConfig.yaml").read_bytes() != (ext / "bcondConfig.yaml").read_bytes():
+        why.append("親と延長の bcondConfig.yaml が違う")
+
+    def fsha(r):
+        t = (r / "RUN_PROVENANCE.txt").read_text() if (r / "RUN_PROVENANCE.txt").is_file() else ""
+        return next((l.split(":", 1)[1].strip() for l in t.splitlines() if l.startswith("forge_sha256")), None)
+    if fsha(src) is None or fsha(src) != fsha(ext):
+        why.append(f"forge の sha256 が親と延長で違う・記録が無い ({fsha(src)}, {fsha(ext)})")
+    return why
+
+
 def judge(src: Path, ext: Path) -> dict:
     out = {"item": "N0 の凝縮の延長の判定 (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U4、2026-10-07 登録)",
            "parent": src.name, "ext": ext.name, "window_steps": list(range(PARENT_STEPS + EXT_STEPS - 4 * OUT, PARENT_STEPS + EXT_STEPS + 1, OUT))}
+    why = preconditions(src, ext)
+    out["preconditions"] = {"ok": not why, "failures": why}
     # 凝縮 4 量: 親 (cond_series.csv、1000〜18000) + 延長 (1000〜20000 → +18000)
     pa, pe = EV.read_rows(src / "cond_series.csv"), EV.read_rows(ext / "cond_series.csv")
     EV.expect_steps(pa, OUT, PARENT_STEPS, src.name)
@@ -128,7 +178,7 @@ def judge(src: Path, ext: Path) -> dict:
     win = {c: EV.window_stats(rows, c, out["window_steps"], "連結") for c in QS_COLS}
     out["quasisteady"] = qs
     out["window"] = {c: {k: win[c][k] for k in ("mean", "min", "max", "range", "finite")} for c in QS_COLS}
-    qs_ok = all(qs[c]["verdict"] == "STEADY" for c in QS_COLS)
+    qs_ok = all(qs[c]["verdict"] == "STEADY" for c in QS_COLS) and all(win[c]["finite"] for c in QS_COLS)
     # 残差: 親 (residual_history.csv) + 延長 (step を +18000) を連結した一時 dir で check_convergence (全列)
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
@@ -148,16 +198,19 @@ def judge(src: Path, ext: Path) -> dict:
         q = subprocess.run([sys.executable, str(NS.TOOLS / "check_convergence.py"), str(td)], capture_output=True, text=True)
         text = q.stdout + q.stderr
     (ext / "CONVERGENCE_VERDICT_concat.txt").write_text(f"# 親 {src.name} ({n1} 行) + 延長 {ext.name} ({n2} 行、step +{PARENT_STEPS}) を連結\n" + text)
-    head = next((l for l in text.splitlines() if l.startswith("===")), "")
-    rising = [l.strip() for l in text.splitlines() if "RISING" in l or "DIVERGED" in l]
-    out["convergence_concat"] = {"head": head, "rising_or_diverged": rising, "rows": [n1, n2]}
-    res_ok = bool(head) and not rising and "DIVERGED" not in head
-    out["checks"] = {"quasisteady_4_STEADY": qs_ok, "residual_no_rising": res_ok}
-    out["verdict"] = ("合格 (K: 4 量 STEADY・残差 RISING なし" + ("、plateau は収束ではない)" if "NOT CONVERGED" in head else ")")) if (qs_ok and res_ok) \
-        else "未達 — 再延長せず、未達のままユーザ判断 (登録)"
+    rg = residual_gate(text, h1)
+    out["convergence_concat"] = {**rg, "rows": [n1, n2]}
+    out["checks"] = {"preconditions": not why, "quasisteady_4_STEADY": qs_ok, "residual_gate": rg["ok"]}
+    if why:
+        out["verdict"] = "判定不能 (前提の不成立) — " + "; ".join(why)
+    elif qs_ok and rg["ok"]:
+        out["verdict"] = "合格 (K: 4 量 STEADY・残差 RISING なし" + ("、plateau は収束ではない)" if rg["status"] == "plateau" else ")")
+    else:
+        out["verdict"] = "未達 — 再延長せず、未達のままユーザ判断 (登録)"
     dst = HERE / "_band_ab" / f"ns_n012_cond_ext_{ext.name}.json"
     NS.jdump(dst, out)
-    print(json.dumps({"verdict": out["verdict"], "qs": {c: qs[c]["verdict"] for c in QS_COLS}, "conv": head, "rising": rising}, ensure_ascii=False, indent=1))
+    print(json.dumps({"verdict": out["verdict"], "qs": {c: qs[c]["verdict"] for c in QS_COLS}, "residual": rg["status"],
+                      "missing_cols": rg["missing_cols"], "preconditions": why}, ensure_ascii=False, indent=1))
     return out
 
 

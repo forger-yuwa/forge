@@ -852,10 +852,12 @@ def nan_scan(run: Path) -> dict:
         if bad and first is None:
             first = {"file": f.name, **bad}
     out["first_nonfinite"] = first
+    # 保存した全場 (res_0・中間・最終) の /VALUE を検査する (2026-10-07 result 段レビュー M2: 以前は最終の res だけを開いていた)
     rs = res_files(run)
-    if rs:
-        fr = {"file": rs[-1].name, "nonfinite": [], "nonpositive": []}
-        with h5py.File(rs[-1], "r") as h:
+    scanned, bad_fields = [], []
+    for f in rs:
+        fr = {"file": f.name, "nonfinite": [], "nonpositive": []}
+        with h5py.File(f, "r") as h:
             for k in h["VALUE"]:
                 a = np.array(h["VALUE"][k])
                 if a.dtype.kind == "f" and not np.all(np.isfinite(a)):
@@ -863,14 +865,22 @@ def nan_scan(run: Path) -> dict:
             for k in ("ro", "T", "P"):
                 if k in h["VALUE"] and not np.all(np.array(h["VALUE"][k]) > 0):
                     fr["nonpositive"].append(k)
-        out["final_res"] = fr
+        scanned.append(f.name)
+        if fr["nonfinite"] or fr["nonpositive"]:
+            bad_fields.append(fr)
+    out["fields_scanned"] = scanned
+    out["fields_bad"] = bad_fields
+    out["first_bad_field"] = bad_fields[0] if bad_fields else None
+    out["final_res"] = ({"file": rs[-1].name, **next(({k: b[k] for k in ("nonfinite", "nonpositive")} for b in bad_fields if b["file"] == rs[-1].name),
+                                                      {"nonfinite": [], "nonpositive": []})} if rs else None)
     nan_files = [p.name for p in run.glob("res_nan_*.h5")]
     out["res_nan_files"] = nan_files
-    ok = first is None and not nan_files and (out["final_res"] is None or not (out["final_res"]["nonfinite"] or out["final_res"]["nonpositive"]))
+    ok = first is None and not nan_files and bool(rs) and not bad_fields
     out["VERDICT"] = "CLEAN" if ok else "NAN"
     jdump(run / NAN_SCAN, out)
-    print(f"[nan-scan] {run.name}: {out['VERDICT']}" + (f" 最初の非有限 {first}" if first else "")
-          + (f" 最終 res {out['final_res']}" if out["final_res"] and not ok else ""))
+    print(f"[nan-scan] {run.name}: {out['VERDICT']} (場 {len(scanned)} 枚・残差 {len(out['residual'])} 本を検査)"
+          + (f" 最初の非有限 {first}" if first else "") + (f" 最初の異常な場 {out['first_bad_field']}" if bad_fields else "")
+          + ("" if rs else " 場が 1 枚も無い"))
     return out
 
 
