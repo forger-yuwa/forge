@@ -1,0 +1,89 @@
+=== 構成 c36cell
+  B1: run_0013_c36cell_base_r1
+  B2: run_0049_c36cell_base_r2
+  B3: run_0079_c36cell_base_r3
+  N1: run_0110_c36cell_new_r1
+  N2: run_0140_c36cell_new_r2
+  N3: run_0170_c36cell_new_r3
+
+[c] NaN/Inf (各 run)
+  B1: NANCHECK: PASS
+  B2: NANCHECK: PASS
+  B3: NANCHECK: PASS
+  N1: NANCHECK: PASS
+  N2: NANCHECK: PASS
+  N3: NANCHECK: PASS
+  >> NAN: PASS
+
+[構造] 出力ファイルの集合
+  3 ファイル: res_0.h5, res_200.h5, residual_history.csv
+
+[構造] h5 のデータセット集合・shape・dtype・属性
+  res_0.h5: 21 データセット
+  res_200.h5: 21 データセット
+  >> STRUCT: PASS
+
+[ログ] 名前登録・復元・初期化・警告の行
+    | 'output': level=1 extraFields=0 interfaceDiag=0
+  >> LOG: PASS
+
+[a] step 0 の残差行 (全列ビット一致; base で割れた列は new が base の観測値のどれか)
+  行 0 列 rms_ro: N1 0.0001512166054453701 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 0 列 rms_ro: N2 0.0001512166345492005 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 0 列 rms_ro: N3 0.0001512166054453701 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 0 列 rms_roUx: N2 0.2541055977344513 ∉ base ['0.2541055679321289'] (最近傍まで 1 ulp)
+  行 0 列 rms_roUy: N2 0.05985680967569351 ∉ base ['0.05985678359866142', '0.05985685810446739', '0.05985688790678978'] (最近傍まで 7 ulp)
+  行 0 列 rms_roUy: N3 0.05985681712627411 ∉ base ['0.05985678359866142', '0.05985685810446739', '0.05985688790678978'] (最近傍まで 9 ulp)
+  行 0 列 rms_roe: N1 44.11266326904297 ∉ base ['44.11267471313477', '44.11267852783203'] (最近傍まで 3 ulp)
+  行 1 列 rms_ro: N1 0.0001512166054453701 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 1 列 rms_ro: N2 0.0001512166345492005 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 1 列 rms_ro: N3 0.0001512166054453701 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 1 列 rms_roUx: N2 0.2541055977344513 ∉ base ['0.2541055679321289'] (最近傍まで 1 ulp)
+  行 1 列 rms_roUy: N2 0.05985680967569351 ∉ base ['0.05985678359866142', '0.05985685810446739', '0.05985688790678978'] (最近傍まで 7 ulp)
+  行 1 列 rms_roUy: N3 0.05985681712627411 ∉ base ['0.05985678359866142', '0.05985685810446739', '0.05985688790678978'] (最近傍まで 9 ulp)
+  行 1 列 rms_roe: N1 44.11266326904297 ∉ base ['44.11267471313477', '44.11267852783203'] (最近傍まで 3 ulp)
+  行 2 列 rms_ro: N1 0.0001512166054453701 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 2 列 rms_ro: N2 0.0001512166345492005 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 2 列 rms_ro: N3 0.0001512166054453701 ∉ base ['0.0001512166199972853'] (最近傍まで 1 ulp)
+  行 2 列 rms_roUx: N2 0.2541055977344513 ∉ base ['0.2541055679321289'] (最近傍まで 1 ulp)
+  行 2 列 rms_roUy: N2 0.05985680967569351 ∉ base ['0.05985678359866142', '0.05985685810446739', '0.05985688790678978'] (最近傍まで 7 ulp)
+  行 2 列 rms_roUy: N3 0.05985681712627411 ∉ base ['0.05985678359866142', '0.05985685810446739', '0.05985688790678978'] (最近傍まで 9 ulp)
+  行 2 列 rms_roe: N1 44.11266326904297 ∉ base ['44.11267471313477', '44.11267852783203'] (最近傍まで 3 ulp)
+  base で値が割れた (行, 列, 値の数): [(0, 'rms_roUy', 3), (0, 'rms_roe', 2), (1, 'rms_roUy', 3), (1, 'rms_roe', 2), (2, 'rms_roUy', 3), (2, 'rms_roe', 2)]
+  (情報) step 0 の行数 3、base 内の最大 ulp 幅 28、new の値と最近傍 base 値の最大 ulp 距離 9 (不一致 21 値)
+  >> STEP0: FAIL (21 値)
+
+[a] 初期出力 res_0.h5: 保存量・原始量・幾何量のビット一致 (他の量は情報として不一致の数だけ)
+  比べた量 18、比べない量 3
+  >> INIT_OUT: PASS
+
+[b] N step 後: m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S
+  ファイル                         量                                S_base      S_new          D  判定
+  residual_history.csv         rms_ro                        9.712e-02  8.926e-02  9.176e-02  PASS
+  residual_history.csv         rms_roe                       9.652e-02  8.921e-02  9.158e-02  PASS
+  residual_history.csv         rms_roUy                      6.648e-02  6.190e-02  5.581e-02  PASS
+  res_200.h5                   VALUE/Uy                      4.701e-03  3.627e-03  4.189e-03  PASS
+  residual_history.csv         rms_roUx                      4.404e-03  5.003e-03  4.193e-03  PASS
+  res_200.h5                   VALUE/k                       2.150e-03  2.236e-03  2.322e-03  PASS
+  residual_history.csv         rms_roK                       1.965e-03  1.381e-03  1.574e-03  PASS
+  res_200.h5                   VALUE/roUy                    1.922e-03  1.811e-03  2.110e-03  PASS
+  res_200.h5                   VALUE/roK                     1.472e-03  1.537e-03  1.522e-03  PASS
+  res_200.h5                   VALUE/roOmega                 1.361e-03  1.421e-03  1.377e-03  PASS
+  res_200.h5                   VALUE/omega                   1.299e-03  1.298e-03  1.508e-03  PASS
+  residual_history.csv         rms_roOmega                   7.484e-04  4.287e-04  6.889e-04  PASS
+  res_200.h5                   VALUE/P                       7.013e-04  6.513e-04  6.963e-04  PASS
+  res_200.h5                   VALUE/roe                     6.567e-04  5.696e-04  6.197e-04  PASS
+  res_200.h5                   VALUE/h0                      5.632e-04  5.094e-04  6.380e-04  PASS
+  res_200.h5                   VALUE/Ux                      5.362e-04  5.496e-04  5.957e-04  PASS
+  res_200.h5                   VALUE/T                       5.265e-04  4.799e-04  5.971e-04  PASS
+  res_200.h5                   VALUE/ro                      4.978e-04  4.203e-04  4.657e-04  PASS
+  res_200.h5                   VALUE/vis_lam                 4.160e-04  3.806e-04  4.739e-04  PASS
+  res_200.h5                   VALUE/roUx                    3.285e-04  3.179e-04  3.951e-04  PASS
+  res_200.h5                   VALUE/sonic                   2.672e-04  2.444e-04  3.043e-04  PASS
+  res_200.h5                   VALUE/vis_turb                8.618e-06  7.506e-06  1.029e-05  PASS
+  res_200.h5                   MESH/CONNE                    0.000e+00  0.000e+00  0.000e+00  PASS
+  res_200.h5                   MESH/COORD                    0.000e+00  0.000e+00  0.000e+00  PASS
+  res_200.h5                   VALUE/Uz                      0.000e+00  0.000e+00  0.000e+00  PASS
+  (33 量。base 内で差が 0 でない量 22)
+  主要量の S_base: VALUE/P=7.01e-04, VALUE/T=5.26e-04, VALUE/ro=4.98e-04, VALUE/roUx=3.28e-04, VALUE/roe=6.57e-04, csv:rms_ro=9.71e-02, csv:rms_roe=9.65e-02
+  >> NSTEP: PASS

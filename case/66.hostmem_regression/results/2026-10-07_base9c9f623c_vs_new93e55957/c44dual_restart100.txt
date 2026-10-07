@@ -1,0 +1,107 @@
+=== 構成 c44dual_restart100
+  B1: run_0034_c44dual_restart100_base_r1
+  B2: run_0039_c44dual_restart100_base_r2
+  B3: run_0069_c44dual_restart100_base_r3
+  N1: run_0107_c44dual_restart100_new_r1
+  N2: run_0137_c44dual_restart100_new_r2
+  N3: run_0167_c44dual_restart100_new_r3
+
+[c] NaN/Inf (各 run)
+  B1: NANCHECK: PASS
+  B2: NANCHECK: PASS
+  B3: NANCHECK: PASS
+  N1: NANCHECK: PASS
+  N2: NANCHECK: PASS
+  N3: NANCHECK: PASS
+  >> NAN: PASS
+
+[構造] 出力ファイルの集合
+  5 ファイル: res_0.h5, res_100.h5, res_outlet_2_100.h5, res_wall_3_100.h5, residual_history.csv
+
+[構造] h5 のデータセット集合・shape・dtype・属性
+  res_0.h5: 148 データセット
+  res_100.h5: 148 データセット
+  res_outlet_2_100.h5: 16 データセット
+  res_wall_3_100.h5: 16 データセット
+  >> STRUCT: PASS
+
+[ログ] 名前登録・復元・初期化・警告の行
+    | 'level' in 'output': 2
+    | 'output': level=2 extraFields=0 interfaceDiag=0
+    | registerSpecies: nSpecies=2 -> registered 20 cell variables
+    | registerCondensation: nCondSpecies=1 -> registered 76 cell variables
+    | [species] WARNING: input field species_hash matches (501bde067758ad4c); the input itself descends from an unverified start (mark inherited)
+    | [dual-time] passive FCT flux-form history (G/H/mEff) restored
+    | [dual-time] history restored from ic_ckpt.h5 (/CHECKPOINT: 13 levels, totalTime=0.000799999998, dt_file=7.99999998e-06, nHistoryValid=2)
+  >> LOG: PASS
+
+[a] step 0 の残差行 (全列ビット一致; base で割れた列は new が base の観測値のどれか)
+  行 0 列 rms_ro: N2 0.0001090017394744791 ∉ base ['0.000109001761302352', '0.0001090017758542672', '0.0001090018195100129'] (最近傍まで 3 ulp)
+  行 0 列 rms_ro: N3 0.0001090017685783096 ∉ base ['0.000109001761302352', '0.0001090017758542672', '0.0001090018195100129'] (最近傍まで 1 ulp)
+  行 0 列 rms_roUx: N1 0.114355593919754 ∉ base ['0.1143554896116257', '0.1143555268645287', '0.1143556088209152'] (最近傍まで 2 ulp)
+  行 0 列 rms_roUx: N3 0.1143554374575615 ∉ base ['0.1143554896116257', '0.1143555268645287', '0.1143556088209152'] (最近傍まで 7 ulp)
+  行 0 列 rms_roUy: N1 0.02718469500541687 ∉ base ['0.02718435786664486', '0.02718447335064411', '0.02718454785645008'] (最近傍まで 79 ulp)
+  行 0 列 rms_roUy: N2 0.02718446217477322 ∉ base ['0.02718435786664486', '0.02718447335064411', '0.02718454785645008'] (最近傍まで 6 ulp)
+  行 0 列 rms_roUy: N3 0.0271846167743206 ∉ base ['0.02718435786664486', '0.02718447335064411', '0.02718454785645008'] (最近傍まで 37 ulp)
+  行 0 列 rms_roe: N1 71.19486236572266 ∉ base ['71.19482421875', '71.19483947753906', '71.19484710693359'] (最近傍まで 2 ulp)
+  行 0 列 rms_roe: N2 71.19481658935547 ∉ base ['71.19482421875', '71.19483947753906', '71.19484710693359'] (最近傍まで 1 ulp)
+  行 0 列 rms_roe: N3 71.19480895996094 ∉ base ['71.19482421875', '71.19483947753906', '71.19484710693359'] (最近傍まで 2 ulp)
+  行 0 列 rms_roY0: N1 0.000104892096715048 ∉ base ['0.0001048921039910056', '0.0001048921476467513', '0.0001048922131303698'] (最近傍まで 1 ulp)
+  行 0 列 rms_roY0: N2 0.0001048921767505817 ∉ base ['0.0001048921039910056', '0.0001048921476467513', '0.0001048922131303698'] (最近傍まで 4 ulp)
+  行 0 列 rms_roQ0_0: N1 2125291585536 ∉ base ['2125291716608'] (最近傍まで 1 ulp)
+  行 0 列 rms_roQ0_0: N3 2125291585536 ∉ base ['2125291716608'] (最近傍まで 1 ulp)
+  行 1 列 rms_ro: N2 0.0001090017394744791 ∉ base ['0.000109001761302352', '0.0001090017758542672', '0.0001090018195100129'] (最近傍まで 3 ulp)
+  行 1 列 rms_ro: N3 0.0001090017685783096 ∉ base ['0.000109001761302352', '0.0001090017758542672', '0.0001090018195100129'] (最近傍まで 1 ulp)
+  行 1 列 rms_roUx: N1 0.114355593919754 ∉ base ['0.1143554896116257', '0.1143555268645287', '0.1143556088209152'] (最近傍まで 2 ulp)
+  行 1 列 rms_roUx: N3 0.1143554374575615 ∉ base ['0.1143554896116257', '0.1143555268645287', '0.1143556088209152'] (最近傍まで 7 ulp)
+  行 1 列 rms_roUy: N1 0.02718469500541687 ∉ base ['0.02718435786664486', '0.02718447335064411', '0.02718454785645008'] (最近傍まで 79 ulp)
+  行 1 列 rms_roUy: N2 0.02718446217477322 ∉ base ['0.02718435786664486', '0.02718447335064411', '0.02718454785645008'] (最近傍まで 6 ulp)
+  行 1 列 rms_roUy: N3 0.0271846167743206 ∉ base ['0.02718435786664486', '0.02718447335064411', '0.02718454785645008'] (最近傍まで 37 ulp)
+  行 1 列 rms_roe: N1 71.19486236572266 ∉ base ['71.19482421875', '71.19483947753906', '71.19484710693359'] (最近傍まで 2 ulp)
+  行 1 列 rms_roe: N2 71.19481658935547 ∉ base ['71.19482421875', '71.19483947753906', '71.19484710693359'] (最近傍まで 1 ulp)
+  行 1 列 rms_roe: N3 71.19480895996094 ∉ base ['71.19482421875', '71.19483947753906', '71.19484710693359'] (最近傍まで 2 ulp)
+  行 1 列 rms_roY0: N1 0.000104892096715048 ∉ base ['0.0001048921039910056', '0.0001048921476467513', '0.0001048922131303698'] (最近傍まで 1 ulp)
+  行 1 列 rms_roY0: N2 0.0001048921767505817 ∉ base ['0.0001048921039910056', '0.0001048921476467513', '0.0001048922131303698'] (最近傍まで 4 ulp)
+  行 1 列 rms_roQ0_0: N1 2125291585536 ∉ base ['2125291716608'] (最近傍まで 1 ulp)
+  行 1 列 rms_roQ0_0: N3 2125291585536 ∉ base ['2125291716608'] (最近傍まで 1 ulp)
+  行 2 列 rms_ro: N1 6.022934758220799e-05 ∉ base ['6.023004243616015e-05', '6.023011519573629e-05', '6.023030437063426e-05'] (最近傍まで 191 ulp)
+  行 2 列 rms_ro: N2 6.023010064382106e-05 ∉ base ['6.023004243616015e-05', '6.023011519573629e-05', '6.023030437063426e-05'] (最近傍まで 4 ulp)
+  base で値が割れた (行, 列, 値の数): [(0, 'rms_ro', 3), (0, 'rms_roUx', 3), (0, 'rms_roUy', 3), (0, 'rms_roe', 3), (0, 'rms_roY0', 3), (0, 'rms_roY1', 2), (0, 'rms_rog_0', 3), (0, 'rms_roQ2_0', 2), (0, 'rms_roQ1_0', 2), (1, 'rms_ro', 3), (1, 'rms_roUx', 3), (1, 'rms_roUy', 3)] …
+  (情報) step 0 の行数 22、base 内の最大 ulp 幅 1301738、new の値と最近傍 base 値の最大 ulp 距離 1454616 (不一致 628 値)
+  >> STEP0: FAIL (628 値)
+
+[a] 初期出力 res_0.h5: 保存量・原始量・幾何量のビット一致 (他の量は情報として不一致の数だけ)
+  比べた量 57、比べない量 91
+  >> INIT_OUT: PASS
+
+[b] N step 後: m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S
+  ファイル                         量                                S_base      S_new          D  判定
+  res_100.h5                   VALUE/condClampCorrQ_0        1.000e+00  1.000e+00  4.386e+03  FAIL
+  res_100.h5                   VALUE/passiveFloorCorr_g_0    2.000e+00  5.000e-01  1.000e+00  PASS
+  res_100.h5                   VALUE/res_roUx                1.748e+00  2.230e+00  1.584e+00  PASS
+  res_100.h5                   VALUE/res_roe                 1.734e+00  2.228e+00  1.603e+00  PASS
+  res_100.h5                   VALUE/res_ro                  1.676e+00  2.353e+00  1.548e+00  PASS
+  res_100.h5                   VALUE/res_roUy                1.543e+00  2.275e+00  1.525e+00  PASS
+  res_100.h5                   VALUE/limiter_P               1.000e+00  7.241e-01  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_Q0_0            1.000e+00  1.000e+00  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_Q1_0            1.000e+00  1.000e+00  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_Q2_0            1.000e+00  1.000e+00  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_Ux              1.000e+00  1.000e+00  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_Uy              1.000e+00  1.000e+00  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_g_0             1.000e+00  1.000e+00  1.000e+00  PASS
+  res_100.h5                   VALUE/limiter_ro              1.000e+00  1.000e+00  1.000e+00  PASS
+  residual_history.csv         rms_ro                        5.678e-01  4.664e-01  6.096e-01  PASS
+  residual_history.csv         rms_roY0                      5.678e-01  4.664e-01  6.096e-01  PASS
+  residual_history.csv         rms_roY1                      5.678e-01  4.664e-01  6.096e-01  PASS
+  residual_history.csv         rms_roUy                      5.631e-01  4.139e-01  5.434e-01  PASS
+  residual_history.csv         rms_roe                       5.526e-01  4.572e-01  6.115e-01  PASS
+  residual_history.csv         rms_roUx                      5.439e-01  4.694e-01  6.300e-01  PASS
+  res_100.h5                   VALUE/condDrdt_0              5.199e-01  3.615e-01  5.199e-01  PASS
+  res_100.h5                   VALUE/dUydx                   2.507e-01  1.711e-01  2.603e-01  PASS
+  res_100.h5                   VALUE/axisym_divU             2.045e-01  1.574e-01  2.712e-01  PASS
+  res_100.h5                   VALUE/dUydy                   1.833e-01  1.217e-01  2.205e-01  PASS
+  res_100.h5                   VALUE/passiveLimCorr_g_0      1.780e-01  1.316e-01  2.099e-01  PASS
+  (情報) FAIL res_100.h5:VALUE/condClampCorrQ_0: max|B1| 1.433e+10, max|N1| 7.900e+06, D の組 B3-N2 の max|A−B| 7.938e+06
+  (196 量。base 内で差が 0 でない量 121)
+  主要量の S_base: VALUE/P=4.34e-04, VALUE/T=5.17e-04, VALUE/ro=5.75e-04, VALUE/roUx=1.61e-03, VALUE/roe=7.30e-04, csv:rms_ro=5.68e-01, csv:rms_roe=5.53e-01
+  >> NSTEP: FAIL (1 量)

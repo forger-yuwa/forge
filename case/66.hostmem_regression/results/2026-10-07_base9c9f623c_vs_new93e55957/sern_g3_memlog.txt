@@ -1,0 +1,123 @@
+節点数 1920103
+工程                                                   |                 m_g3_base_r1 |                 m_g3_base_r2 |                 m_g3_base_r3 |                 hm_g3_new_r1 |                 hm_g3_new_r2 |                 hm_g3_new_r3
+                                                     |        RSS/HWM MB  GPU(Δ) MB |        RSS/HWM MB  GPU(Δ) MB |        RSS/HWM MB  GPU(Δ) MB |        RSS/HWM MB  GPU(Δ) MB |        RSS/HWM MB  GPU(Δ) MB |        RSS/HWM MB  GPU(Δ) MB
+start                                                |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0)
+after cfg.read                                       |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0) |    103/   103        258(+0)
+after thermo/chemistry init                          |    107/   107        260(+2) |    107/   107        260(+2) |    107/   107        260(+2) |    107/   107        260(+2) |    107/   107        260(+2) |    107/   107        260(+2)
+readMesh: after planes/cells (flat read buffers aliv |   2528/  2528              - |   2528/  2528              - |   2529/  2529              - |   2528/  2528              - |   2528/  2528              - |   2528/  2528              -
+readMesh: end (before local buffers are freed)       |   2614/  2614              - |   2614/  2614              - |   2615/  2615              - |   2614/  2614              - |   2614/  2614              - |   2614/  2614              -
+after readMesh                                       |   2143/  2614        260(+2) |   2143/  2614        260(+2) |   2143/  2614        260(+2) |   2143/  2614        260(+2) |   2143/  2614        260(+2) |   2143/  2614        260(+2)
+after initMatrix                                     |   2721/  2721        260(+2) |   2721/  2721        260(+2) |   2721/  2721        260(+2) |   2143/  2614        260(+2) |   2143/  2614        260(+2) |   2143/  2614        260(+2)
+after readBcondConfig                                |   2732/  2732       272(+14) |   2732/  2732       272(+14) |   2732/  2732       272(+14) |   2153/  2614       272(+14) |   2153/  2614       272(+14) |   2153/  2614       272(+14)
+after inlet/wall profiles, conjugate init            |   2732/  2732       272(+14) |   2732/  2732       272(+14) |   2732/  2732       272(+14) |   2153/  2614       272(+14) |   2153/  2614       272(+14) |   2153/  2614       272(+14)
+after allocVariables                                 |   4864/  4864    2440(+2182) |   4864/  4864    2440(+2182) |   4864/  4864    2440(+2182) |   2344/  2614    2440(+2182) |   2344/  2614    2440(+2182) |   2344/  2614    2440(+2182)
+after species/condensation/passive init_d            |   4865/  4865    2440(+2182) |   4865/  4865    2440(+2182) |   4865/  4865    2440(+2182) |   2345/  2614    2440(+2182) |   2345/  2614    2440(+2182) |   2345/  2614    2440(+2182)
+after readValueHDF5                                  |   4880/  4931    2440(+2182) |   4880/  4931    2440(+2182) |   4880/  4931    2440(+2182) |   2353/  2614    2440(+2182) |   2353/  2614    2440(+2182) |   2353/  2614    2440(+2182)
+after setMeshMap_d (mesh maps H2D)                   |   4887/  4931    2602(+2344) |   4887/  4931    2602(+2344) |   4887/  4931    2602(+2344) |   2360/  2614    2602(+2344) |   2360/  2614    2602(+2344) |   2360/  2614    2602(+2344)
+after setPeriodicPartner                             |   4887/  4931    2602(+2344) |   4887/  4931    2602(+2344) |   4887/  4931    2602(+2344) |   2360/  2614    2602(+2344) |   2360/  2614    2602(+2344) |   2360/  2614    2602(+2344)
+after setStructuralVariables                         |   4865/  5157    2602(+2344) |   4865/  5157    2602(+2344) |   4865/  5158    2602(+2344) |   2338/  2630    2602(+2344) |   2338/  2630    2602(+2344) |   2338/  2631    2602(+2344)
+after initial EOS/gasProperties                      |   4892/  5157    2726(+2468) |   4892/  5157    2726(+2468) |   4892/  5158    2726(+2468) |   2365/  2630    2726(+2468) |   2365/  2630    2726(+2468) |   2365/  2631    2726(+2468)
+after initial BC/gradient/updateOuter/setDT          |   4900/  5157    2858(+2600) |   4901/  5157    2858(+2600) |   4901/  5158    2858(+2600) |   2374/  2630    2858(+2600) |   2373/  2630    2858(+2600) |   2373/  2631    2858(+2600)
+after pprobes.init                                   |   4900/  5157    2858(+2600) |   4901/  5157    2858(+2600) |   4901/  5158    2858(+2600) |   2374/  2630    2858(+2600) |   2373/  2630    2858(+2600) |   2373/  2631    2858(+2600)
+end of initializeSimulation                          |   4922/  5157    2858(+2600) |   4923/  5157    2858(+2600) |   4923/  5158    2858(+2600) |   2396/  2630    2858(+2600) |   2395/  2630    2858(+2600) |   2395/  2631    2858(+2600)
+after lineImplicit/ResidualCsvLogger                 |   4922/  5157    2858(+2600) |   4923/  5157    2858(+2600) |   4923/  5158    2858(+2600) |   2396/  2630    2858(+2600) |   2395/  2630    2858(+2600) |   2395/  2631    2858(+2600)
+before writeInitialOutputs                           |   4922/  5157    2858(+2600) |   4923/  5157    2858(+2600) |   4923/  5158    2858(+2600) |   2396/  2630    2858(+2600) |   2395/  2630    2858(+2600) |   2395/  2631    2858(+2600)
+after writeInitialOutputs                            |   4933/  5157    2858(+2600) |   4933/  5157    2858(+2600) |   4933/  5158    2858(+2600) |   2406/  2630    2858(+2600) |   2406/  2630    2858(+2600) |   2406/  2631    2858(+2600)
+before writeStepOutputs                              |   4945/  5157    2982(+2724) |   4945/  5157    2982(+2724) |   4945/  5158    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2631    2982(+2724)
+after outputH5_XDMF                                  |   4945/  5157    2982(+2724) |   4945/  5157    2982(+2724) |   4945/  5158    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2631    2982(+2724)
+after outputBconds_H5_XDMF                           |   4945/  5157    2982(+2724) |   4945/  5157    2982(+2724) |   4945/  5158    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2631    2982(+2724)
+after step 1                                         |   4945/  5157    2982(+2724) |   4945/  5157    2982(+2724) |   4945/  5158    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2631    2982(+2724)
+after step 2                                         |   4945/  5157    2982(+2724) |   4945/  5157    2982(+2724) |   4945/  5158    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2630    2982(+2724) |   2418/  2631    2982(+2724)
+after main loop                                      |   5001/  5157    2982(+2724) |   5001/  5157    2982(+2724) |   5001/  5158    2982(+2724) |   2474/  2630    2982(+2724) |   2474/  2630    2982(+2724) |   2474/  2631    2982(+2724)
+end                                                  |   5001/  5157    2982(+2724) |   5001/  5157    2982(+2724) |   5001/  5158    2982(+2724) |   2474/  2630    2982(+2724) |   2474/  2630    2982(+2724) |   2474/  2631    2982(+2724)
+
+run_1072_hm_g3_base_r1: memlog VmHWM 最大 5157 MB (2816 B/節点)、GPU 増分最大 2724 MB; 採取 (1 s): VmHWM 5158 MB・VmRSS 最大 5002 MB・GPU (プロセス) 2974 MiB・GPU 合計 2983 MiB (33 点)
+    var.c(host)                             1774.3 MB
+    var.p(host)                              356.7 MB
+    msh.nodes                                190.4 MB
+    msh.planes                              1293.0 MB
+    msh.cells                                467.3 MB
+    msh.vizCONNE                              63.1 MB
+    bconds.idx                                 2.5 MB
+    bconds.vizBface                           10.2 MB
+    bconds.bvar+bint(host)                    10.6 MB
+    bconds.local(output)                      67.1 MB
+    mat_ns                                   571.8 MB
+    msh.periodicRoot+rEff                     14.6 MB
+    var.c_d(est)                            1774.3 MB
+    var.p_d(est)                             356.7 MB
+run_1073_hm_g3_base_r2: memlog VmHWM 最大 5157 MB (2816 B/節点)、GPU 増分最大 2724 MB; 採取 (1 s): VmHWM 5158 MB・VmRSS 最大 5001 MB・GPU (プロセス) 2974 MiB・GPU 合計 2983 MiB (34 点)
+    var.c(host)                             1774.3 MB
+    var.p(host)                              356.7 MB
+    msh.nodes                                190.4 MB
+    msh.planes                              1293.0 MB
+    msh.cells                                467.3 MB
+    msh.vizCONNE                              63.1 MB
+    bconds.idx                                 2.5 MB
+    bconds.vizBface                           10.2 MB
+    bconds.bvar+bint(host)                    10.6 MB
+    bconds.local(output)                      67.1 MB
+    mat_ns                                   571.8 MB
+    msh.periodicRoot+rEff                     14.6 MB
+    var.c_d(est)                            1774.3 MB
+    var.p_d(est)                             356.7 MB
+run_1074_hm_g3_base_r3: memlog VmHWM 最大 5158 MB (2817 B/節点)、GPU 増分最大 2724 MB; 採取 (1 s): VmHWM 5158 MB・VmRSS 最大 5001 MB・GPU (プロセス) 2974 MiB・GPU 合計 2983 MiB (34 点)
+    var.c(host)                             1774.3 MB
+    var.p(host)                              356.7 MB
+    msh.nodes                                190.4 MB
+    msh.planes                              1293.0 MB
+    msh.cells                                467.3 MB
+    msh.vizCONNE                              63.1 MB
+    bconds.idx                                 2.5 MB
+    bconds.vizBface                           10.2 MB
+    bconds.bvar+bint(host)                    10.6 MB
+    bconds.local(output)                      67.1 MB
+    mat_ns                                   571.8 MB
+    msh.periodicRoot+rEff                     14.6 MB
+    var.c_d(est)                            1774.3 MB
+    var.p_d(est)                             356.7 MB
+run_1075_hm_g3_new_r1: memlog VmHWM 最大 2630 MB (1436 B/節点)、GPU 増分最大 2724 MB; 採取 (1 s): VmHWM 2631 MB・VmRSS 最大 2428 MB・GPU (プロセス) 2974 MiB・GPU 合計 2983 MiB (34 点)
+    var.c(host)                              183.0 MB
+    var.p(host)                                0.0 MB
+    msh.nodes                                190.4 MB
+    msh.planes                              1293.0 MB
+    msh.cells                                467.3 MB
+    msh.vizCONNE                              63.1 MB
+    bconds.idx                                 2.5 MB
+    bconds.vizBface                           10.2 MB
+    bconds.bvar+bint(host)                    10.6 MB
+    bconds.local(output)                      67.1 MB
+    mat_ns                                     0.0 MB
+    msh.periodicRoot+rEff                     14.6 MB
+    var.c_d(est)                            1774.3 MB
+    var.p_d(est)                             356.7 MB
+run_1076_hm_g3_new_r2: memlog VmHWM 最大 2630 MB (1436 B/節点)、GPU 増分最大 2724 MB; 採取 (1 s): VmHWM 2631 MB・VmRSS 最大 2428 MB・GPU (プロセス) 2974 MiB・GPU 合計 2983 MiB (32 点)
+    var.c(host)                              183.0 MB
+    var.p(host)                                0.0 MB
+    msh.nodes                                190.4 MB
+    msh.planes                              1293.0 MB
+    msh.cells                                467.3 MB
+    msh.vizCONNE                              63.1 MB
+    bconds.idx                                 2.5 MB
+    bconds.vizBface                           10.2 MB
+    bconds.bvar+bint(host)                    10.6 MB
+    bconds.local(output)                      67.1 MB
+    mat_ns                                     0.0 MB
+    msh.periodicRoot+rEff                     14.6 MB
+    var.c_d(est)                            1774.3 MB
+    var.p_d(est)                             356.7 MB
+run_1077_hm_g3_new_r3: memlog VmHWM 最大 2631 MB (1437 B/節点)、GPU 増分最大 2724 MB; 採取 (1 s): VmHWM 2631 MB・VmRSS 最大 2428 MB・GPU (プロセス) 2974 MiB・GPU 合計 2983 MiB (32 点)
+    var.c(host)                              183.0 MB
+    var.p(host)                                0.0 MB
+    msh.nodes                                190.4 MB
+    msh.planes                              1293.0 MB
+    msh.cells                                467.3 MB
+    msh.vizCONNE                              63.1 MB
+    bconds.idx                                 2.5 MB
+    bconds.vizBface                           10.2 MB
+    bconds.bvar+bint(host)                    10.6 MB
+    bconds.local(output)                      67.1 MB
+    mat_ns                                     0.0 MB
+    msh.periodicRoot+rEff                     14.6 MB
+    var.c_d(est)                            1774.3 MB
+    var.p_d(est)                             356.7 MB

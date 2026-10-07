@@ -1,0 +1,62 @@
+=== 構成 v09
+  B1: run_0026_v09_base_r1
+  B2: run_0062_v09_base_r2
+  B3: run_0092_v09_base_r3
+  N1: run_0123_v09_new_r1
+  N2: run_0153_v09_new_r2
+  N3: run_0183_v09_new_r3
+
+[c] NaN/Inf (各 run)
+  B1: NANCHECK: PASS
+  B2: NANCHECK: PASS
+  B3: NANCHECK: PASS
+  N1: NANCHECK: PASS
+  N2: NANCHECK: PASS
+  N3: NANCHECK: PASS
+  >> NAN: PASS
+
+[構造] 出力ファイルの集合
+  1 ファイル: converted.h5
+
+[構造] h5 のデータセット集合・shape・dtype・属性
+  converted.h5: 133 データセット
+  >> STRUCT: PASS
+
+[ログ] 名前登録・復元・初期化・警告の行
+    | 'level' in 'output': 2
+    | 'output': level=2 extraFields=2 interfaceDiag=0
+  >> LOG: PASS
+
+[a] step 0 の残差行 (全列ビット一致; base で割れた列は new が base の観測値のどれか)
+  residual_history.csv が無い (変換器など)
+
+[b] N step 後: m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S
+  ファイル                         量                                S_base      S_new          D  判定
+  converted.h5                 BCONDS/1/VALUE/Ps             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/Pt             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/Ts             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/Tt             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/Ux             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/Uy             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/Uz             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/kb             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/omegab         0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/ro             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/roUx           0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/roUy           0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/roUz           0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/VALUE/roe            0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/iBPlanes             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/iCells               0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/iPlanes              0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/vizBfaceNodes        0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/1/vizBfaceSizes        0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/2/VALUE/Ps             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/2/VALUE/Pt             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/2/VALUE/Ts             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/2/VALUE/Tt             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/2/VALUE/Ux             0.000e+00  0.000e+00  0.000e+00  PASS
+  converted.h5                 BCONDS/2/VALUE/Uy             0.000e+00  0.000e+00  0.000e+00  PASS
+  (133 量。base 内で差が 0 でない量 0)
+  主要量の S_base: 
+  >> NSTEP: PASS

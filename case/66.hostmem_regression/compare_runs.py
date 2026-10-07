@@ -40,12 +40,16 @@ T0_VALUE = re.compile(
     r"P|T|Ux|Uy|Uz|k|omega|Y\d+|Xi|h0|[gQ][0-2]?_\d+|wall_dist|volume|ccx|ccy|ccz)$")
 # 比較対象のファイル (run が書いたもの)。入力 (INPUT_FILES) と xmf・ログは除く。
 OUT_GLOBS = ["*.h5", "*.csv", "*.out"]
-SKIP_FILES = {"residual_history.png"}
+# mem_samples.csv はハーネスの採取 (run_matrix.py --memwatch) で forge の出力ではない
+SKIP_FILES = {"residual_history.png", "mem_samples.csv"}
 # ログから拾う行 (時間・速度を含む行は拾わない)
 LOG_PAT = re.compile(r"(registered|restored|history|\[variables\]|snapshot:|\[FORGE_OUT_RESIDUALS\]|\[FORGE_RESID_SNAP\]|"
                      r"psi-dualeval\] ON|WARNING|warning|警告|ignored|無視|lineImplicit|line-implicit|"
                      r"\[transition\]|transition .* (read|initiali)|output: |'output')", re.I)
-LOG_DROP = re.compile(r"(ms/step|elapsed|eta |wall|Time = |sec|秒)", re.I)
+# 時間・速度の行と、FORGE_MEMLOG の計測行 ([memlog] は RSS/HWM の実測値が入り、"lineImplicit" 等で LOG_PAT に掛かる) は比べない
+LOG_DROP = re.compile(r"(ms/step|elapsed|eta |wall|Time = |sec|秒|\[memlog\])", re.I)
+# 変更後ビルドが設計どおり新しく出す情報行 (ログ一致の対象から外す。理由は README「判定」)
+LOG_NEW_INFO = re.compile(r"\[variables\] host cell arrays \(gpu: \d\): \d+ of \d+ registered")
 
 
 # ------------------------------------------------------------------ run の選択
@@ -155,9 +159,13 @@ def read_table(path):
         lines = [x.rstrip("\n") for x in f if x.strip()]
     if not lines:
         return {}, []
-    sep = ","
-    hdr = [h.strip() for h in lines[0].split(sep)]
-    rows = [[c.strip() for c in ln.split(sep)] for ln in lines[1:]]
+    # 区切りは ',' (残差・probe の ' , ' を含む)。',' の無い表 (conjugate_Tw_*.csv は空白区切り) は空白で切る
+    if "," in lines[0]:
+        hdr = [h.strip() for h in lines[0].split(",")]
+        rows = [[c.strip() for c in ln.split(",")] for ln in lines[1:]]
+    else:
+        hdr = lines[0].split()
+        rows = [ln.split() for ln in lines[1:]]
     keys = []
     cols = {h: [] for h in hdr}
     keycols = [i for i, h in enumerate(hdr) if h in ("step", "inner", "phase", "Step", "var", "physID")]
@@ -172,6 +180,19 @@ def read_table(path):
         except ValueError:
             out[h] = np.array(v, dtype=object)
     return out, keys
+
+
+def ulp_key(x):
+    """float32 の値を単調な整数に写す (ulp 距離 = 整数の差)。CSV の値は float32 を double で書いたもの。"""
+    i = int(np.array([float(x)], dtype=np.float32).view(np.int32)[0])
+    return i if i >= 0 else -(i & 0x7FFFFFFF)
+
+
+def ulp_dist(a, b):
+    try:
+        return abs(ulp_key(a) - ulp_key(b))
+    except ValueError:
+        return 0 if a == b else -1
 
 
 def step0_rows(path):
@@ -263,14 +284,16 @@ def compare(base, new, rep, cfgname=""):
         if os.path.exists(p):
             with open(p, errors="replace") as f:
                 for ln in f:
-                    if LOG_PAT.search(ln) and not LOG_DROP.search(ln):
+                    if LOG_PAT.search(ln) and not LOG_DROP.search(ln) and not LOG_NEW_INFO.search(ln):
                         x = ln.rstrip()
                         if x not in seen:
                             seen.append(x)
         logs[d] = seen
     lg_bad = 0
+    # 行の**集合**で比べる (順序は見ない): 変更後は環境変数の出力登録を確保の前へ移すので、
+    # [FORGE_OUT_RESIDUALS] 等の行の位置が変わるのは設計どおり (監査 §2 の (i))
     for d in allruns[1:]:
-        if logs[d] != logs[allruns[0]]:
+        if set(logs[d]) != set(logs[allruns[0]]):
             lg_bad += 1
             a, b = set(logs[allruns[0]]), set(logs[d])
             rep.p(f"  {tag[d]}: B1 に無い行 {sorted(b - a)[:5]} / B1 にだけある行 {sorted(a - b)[:5]}")
@@ -287,6 +310,8 @@ def compare(base, new, rep, cfgname=""):
         nrows = {len(v) for v in rows.values()}
         a_bad = 0
         split_cols = []
+        ulp_base = 0     # 情報: base 反復の間の最大 ulp 幅
+        ulp_new = 0      # 情報: new の値と最近傍の base 値の最大 ulp 距離
         if len(nrows) != 1:
             a_bad += 1
             rep.p(f"  step 0 の行数が違う: {[len(rows[d]) for d in allruns]}")
@@ -296,11 +321,22 @@ def compare(base, new, rep, cfgname=""):
                     bvals = {rows[d][i][j] for d in base}
                     if len(bvals) > 1:
                         split_cols.append((i, h, len(bvals)))
+                        bl = sorted(bvals)
+                        ulp_base = max(ulp_base, max(ulp_dist(x, y) for x in bl for y in bl))
                     for d in new:
                         if rows[d][i][j] not in bvals:
                             a_bad += 1
-                            rep.p(f"  行 {i} 列 {h}: {tag[d]} {rows[d][i][j]} ∉ base {sorted(bvals)}")
-        rep.p(f"  base で値が割れた (行, 列, 値の数): {split_cols if split_cols else 'なし (base 3 回でビット一致)'}")
+                            u = min(ulp_dist(rows[d][i][j], x) for x in bvals)
+                            ulp_new = max(ulp_new, u)
+                            if a_bad <= 30:
+                                rep.p(f"  行 {i} 列 {h}: {tag[d]} {rows[d][i][j]} ∉ base {sorted(bvals)} (最近傍まで {u} ulp)")
+        rep.p(f"  base で値が割れた (行, 列, 値の数): {split_cols[:12] if split_cols else 'なし (base 3 回でビット一致)'}"
+              f"{' …' if len(split_cols) > 12 else ''}")
+        rep.p(f"  (情報) step 0 の行数 {len(rows[allruns[0]])}、base 内の最大 ulp 幅 {ulp_base}"
+              + (f"、new の値と最近傍 base 値の最大 ulp 距離 {ulp_new} (不一致 {a_bad} 値)" if new else ""))
+        rep.ulp = (ulp_base, ulp_new)
+        if new:
+            rep.verdicts["STEP0_ULP"] = f"base 幅 {ulp_base} / new 最近傍 {ulp_new} ulp"
         rep.v("STEP0", ("PASS" if a_bad == 0 else f"FAIL ({a_bad} 値)") if new else
               f"BASE-ONLY (割れた列 {len(split_cols)})")
     else:
@@ -348,6 +384,7 @@ def compare(base, new, rep, cfgname=""):
     pairs_n = [(new[i], new[j]) for i in range(len(new)) for j in range(i + 1, len(new))]
     pairs_x = [(b, n) for b in base for n in new]
     rows_out = []   # (ファイル, 量, S_base, S_new, D, verdict)
+    absinfo = {}    # FAIL の読み解き用 (判定には使わない): (ファイル, 量) -> (max|B1|, max|N1|, D の組の max|A−B|)
 
     def eval_set(getter, names, fname):
         cache = {d: getter(d) for d in allruns}
@@ -364,6 +401,15 @@ def compare(base, new, rep, cfgname=""):
                 s = max(sb, sn)
                 ok = (dd == 0.0) if s == 0.0 else (dd <= 2.0 * s)
                 vd = "PASS" if ok else "FAIL"
+                if not ok:
+                    def amax(x):
+                        return float(np.max(np.abs(np.asarray(x, dtype=np.float64)))) if x is not None and np.size(x) else float("nan")
+                    worst = max(pairs_x, key=m)
+                    a, b = cache[worst[0]].get(n), cache[worst[1]].get(n)
+                    dabs = float(np.max(np.abs(np.asarray(a, dtype=np.float64) - np.asarray(b, dtype=np.float64)))) \
+                        if a is not None and b is not None and np.shape(a) == np.shape(b) else float("nan")
+                    absinfo[(fname, n)] = (amax(cache[base[0]].get(n)), amax(cache[new[0]].get(n)), dabs,
+                                           f"{tag[worst[0]]}-{tag[worst[1]]}")
             else:
                 vd = "-"
             rows_out.append((fname, n, sb, sn, dd, vd))
@@ -389,17 +435,25 @@ def compare(base, new, rep, cfgname=""):
         if r[5] == "FAIL" or shown < 25:
             rep.p(f"  {r[0][:28]:28s} {r[1][:28]:28s} {fmt(r[2])} {fmt(r[3])} {fmt(r[4])}  {r[5]}")
             shown += 1
+    for (fn_, n_), (ab, an, dabs, pr) in absinfo.items():
+        rep.p(f"  (情報) FAIL {fn_}:{n_}: max|B1| {ab:.3e}, max|N1| {an:.3e}, D の組 {pr} の max|A−B| {dabs:.3e}")
     nz = sum(1 for r in rows_out if r[2] == r[2] and r[2] > 0)
     rep.p(f"  ({len(rows_out)} 量。base 内で差が 0 でない量 {nz})")
     key = {}
     for r in rows_out:
-        if r[0].startswith("res_") and r[1] in ("VALUE/ro", "VALUE/roUx", "VALUE/roe", "VALUE/P", "VALUE/T"):
+        if re.match(r"res_\d+\.h5$", r[0]) and r[1] in ("VALUE/ro", "VALUE/roUx", "VALUE/roe", "VALUE/P", "VALUE/T"):
             key[r[1]] = r[2]
         if r[0] == "residual_history.csv" and r[1] in ("rms_ro", "rms_roe"):
             key["csv:" + r[1]] = r[2]
     rep.p("  主要量の S_base: " + ", ".join(f"{k}={v:.2e}" for k, v in key.items()))
     if new:
         rep.v("NSTEP", "PASS" if not b_fail else f"FAIL ({len(b_fail)} 量)")
+        # 情報: D/(2S) が最大のデータセット (1 を超えると FAIL)。S = 0 で D = 0 の量は除く
+        cand = [(r[4] / (2 * max(r[2], r[3])), r) for r in rows_out
+                if r[4] == r[4] and max(r[2], r[3]) > 0]
+        if cand:
+            q, r = max(cand, key=lambda x: x[0])
+            rep.verdicts["WORST"] = f"{r[0]}:{r[1]} D/2S={q:.2f} (D {r[4]:.2e}, S {max(r[2], r[3]):.2e})"
     else:
         smax = max((r[2] for r in rows_out if r[2] == r[2]), default=float("nan"))
         rep.v("NSTEP", f"BASE-ONLY (S_base 最大 {smax:.3e})")

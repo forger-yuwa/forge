@@ -235,7 +235,9 @@ def cmd_resume(a):
         if run_state(d) != "queued" or (a.runs and r["run"] not in a.runs):
             continue
         env = dict(kv.split("=", 1) for kv in r["env"].split()) if r["env"] else {}
-        jobs.append(dict(rundir=d, kind=r["kind"], bin=r["bin"], env=env, memwatch=False))
+        # forge は名前 `forge` のリンク経由で起動する (forge_alias。停止前に登録した run は実ファイルのパスを持っている)
+        b = forge_alias(r["bin"], r["build"]) if r["kind"] == "forge" else r["bin"]
+        jobs.append(dict(rundir=d, kind=r["kind"], bin=b, env=env, memwatch=False))
         print(f"[resume] {r['run']}  ({r['kind']}, env {r['env'] or '-'})")
     if jobs:
         spawn_worker(jobs, "resume_" + time.strftime("%Y%m%d_%H%M%S"))

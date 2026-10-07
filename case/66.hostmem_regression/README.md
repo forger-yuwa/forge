@@ -8,11 +8,15 @@ plan [architecture-solver-host-memory](../../plans/active/architecture-solver-ho
 `compare_runs.py` で判定する。
 
 - **base** = `9c9f623c` (AWS `~/bin-hostmem/forge_9c9f623c`、sha256 `c65dbb39f772…`、変換器 `~/bin-hostmem/convert_9c9f623c`)。
+- **new** = `93e55957` (R1–R3。AWS `~/bin-hostmem/forge_93e55957` sha256 `7121a8e51e7b…`、変換器 `~/bin-hostmem/convert_93e55957` `144db0f8b20f…`。
+  `~/forge-b4` を 93e55957 へ `git checkout -f` し、新しいビルドディレクトリ `solver_density_cuda/build_93e55957` でクリーンビルド。
+  base と同じ `RelWithDebInfo`・`CMAKE_CUDA_ARCHITECTURES=86`・`CMAKE_CXX_FLAGS=-I/usr/local/cuda/include -I/usr/local/cuda/include/cccl`)。
+  ハーネスはどちらも `.bin/<ビルド名>/forge` (シンボリックリンク) 経由で起動する。
 - **run の置き場所は AWS** `~/forge-b4/case/66.hostmem_regression/run_NNNN_<構成>_<ビルド>_r<k>/`。比較も AWS で行い、手元にはテキストだけを持ち帰る
   (ローカルでは forge を回さない。重い h5 を手元へ引かない)。このディレクトリ (ローカル) には入力 config・スクリプト・README だけを置く
   (h5 は `.gitignore` で追跡外)。
 - 元入力は別セッションのワークツリー `/home/sano/work/forge/case/...` にあり、**読むだけ**で複製して使う (`prepare_inputs.py`)。
-- SERN 3D (g3) は `case/46.sern_design` の `run_1072`〜`run_1074` (AWS `~/forge-r8/case/46.sern_design/`、[case/46 README](../46.sern_design/README.md) の run 一覧)。
+- SERN 3D (g3) は `case/46.sern_design` の base `run_1072`〜`run_1074`・new `run_1075`〜`run_1077` (AWS `~/forge-r8/case/46.sern_design/`、[case/46 README](../46.sern_design/README.md) の run 一覧)。
 
 ## ファイル
 
@@ -23,6 +27,8 @@ plan [architecture-solver-host-memory](../../plans/active/architecture-solver-ho
 | `run_matrix.py` | (AWS) `seed` (restart_field.py を種に掛ける)・`set-ckpt`・`launch` (run を作って 1 本ずつ順に回すワーカーを裏で起動)・`resume`・`status`・`verify` (RUN_PROVENANCE の forge_bin/sha256 照合)・`note` (README の状態・比較から除外)・`table` (下の run 一覧の行) |
 | `compare_runs.py` | (AWS) §6 の判定。`--cfg X` / `--all` (registry.tsv から run を選ぶ)、`--base … --new …` (直接指定)、`--diff2 A.h5 B.h5` (分割と連続など 2 ファイル) |
 | `memlog_summary.py` | (AWS) `FORGE_MEMLOG=1` の工程別 RSS/HWM/GPU と `--memwatch` の 1 s 採取 (`mem_samples.csv`) を表にする |
+| `split_vs_cont.py` | (AWS) dual-time の分割 (ckpt100 → 再開 100) と連続 200 の差を、ビルドごとに反復内の差と並べる (判定はしない) |
+| `results/<日付>_<base>_vs_<new>/` | AWS から持ち帰った判定のテキスト (`summary.txt`・構成ごとの報告・`sern_g3.txt`・`sern_g3_memlog.txt`・`split_vs_cont_c09.txt`・`registry.tsv`) |
 | `inputs/<入力名>/` | 入力テンプレート。`SOURCE.txt` (元・sha256・修正の全記録)、`FILES` (run に写すファイル)、AWS では `SEEDED.txt` (種の適用記録)・`CKPT_FROM.txt` |
 
 ## 構成表
@@ -88,6 +94,13 @@ N は入力の `nStepOuter`。出力は `outStepInterval = N` で初期出力 `r
 - **出力互換**: 出力ファイル集合、全 h5 のデータセット集合・shape・dtype・属性 (値まで) を全 run で比べる。
 - **ログ**: 名前登録・checkpoint 復元・遷移初期化・ψ 退避件数 (`snapshot: X of Y`)・警告の行が全 run で一致すること。
 
+**比較スクリプトの対象の直し (2026-10-07、new の比較で誤 FAIL・比較漏れが出た所。§6 の判定条件そのものは変えていない)**:
+- ログは**行の集合**で比べる (順序は見ない)。変更後は環境変数の出力登録を確保の前へ移すので、`[FORGE_OUT_RESIDUALS]` 等の行の位置が変わるのは設計どおり (監査 §2 (i))。
+- `[memlog]` 行 (FORGE_MEMLOG の計測値。"lineImplicit" で拾われ、RSS の実測値が run ごとに違う) と、変更後が設計どおり新しく出す
+  `[variables] host cell arrays (gpu: 1): N of M registered` 行はログ比較から外す (後者の N は下の「結果」に別表で載せる)。
+- 空白区切りの CSV (`conjugate_Tw_*.csv`) を列に分けられず比較から漏れていた → `,` が無い表は空白で切る。
+- `mem_samples.csv` (ハーネスの採取で forge の出力ではない) は比較しない。
+- 判定には使わない情報を足した: (a) の base 内 ulp 幅と new の最近傍 base 値までの ulp 距離、(b) の D/2S 最大のデータセット、FAIL の量の max|A|・max|A−B|。
 ## 使い方 (変更後のビルドで回す手順)
 
 前提: AWS が `running` (`bash solver_density_cuda/tools/aws_instance.sh status`、start/stop は自分でしない)、`pgrep -x forge` の cwd で他セッションを確認。
@@ -120,13 +133,105 @@ SERN g3 (メモリ): `case/46` に `run_1072` と同じ作り方で run を作�
 `python3 run_matrix.py launch-dir <run ...> --bin <bin> --label <ビルド名> --env FORGE_MEMLOG=1 --memwatch`、
 `python3 memlog_summary.py <run ...> --items` で工程別の表。比較は `compare_runs.py --base <base 3 本> --new <new 3 本>`。
 
+## 結果 (2026-10-07、base 9c9f623c 3 回 対 new 93e55957 3 回)
+
+原本: [`results/2026-10-07_base9c9f623c_vs_new93e55957/`](results/2026-10-07_base9c9f623c_vs_new93e55957/summary.txt)。全 run `VERIFY: PASS` (RUN_PROVENANCE の forge_bin・sha256 が登録どおり)。
+短い回帰 run なので収束の主張には使わない (全 forge run の check_convergence は NOT CONVERGED、回帰差の判定だけに使う)。
+
+| 構成 | (a) step 0 | step 0 の ulp (base 内の幅 / new の最近傍距離) | 初期出力 | (b) D ≤ 2S | (b) D/2S 最大のデータセット | (c) NaN | 出力互換 | ログ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `c36node` | FAIL (9 値) | 44 / 13 | PASS | PASS | `res_wall_4_200.h5:VALUE/utau` 0.67 (D 4.35e-04, S 3.27e-04) | PASS | PASS | PASS |
+| `c36node_impdiag` | FAIL (18 値) | 75 / 33 | PASS | PASS | `point_probe_2.out:T` 0.75 (D 3.22e-07, S 2.15e-07) | PASS | PASS | PASS |
+| `c36node_psidual` | FAIL (15 値) | 42 / 5 | PASS | PASS | `psi_dualeval.csv:S_ApmA` 0.92 (D 1.10e+00, S 5.97e-01) | PASS | PASS | PASS |
+| `c09ckpt100` | FAIL (300 値) | 4476783 / 3664948 | PASS | PASS | `res_100.h5:VALUE/dUydx` 0.60 (D 5.19e-01, S 4.32e-01) | PASS | PASS | PASS |
+| `c09restart100` | FAIL (315 値) | 3575316 / 3435028 | PASS | PASS | `residual_history.csv:rms_roUx` 0.55 (D 5.97e-02, S 5.46e-02) | PASS | PASS | PASS |
+| `c09cont200` | FAIL (316 値) | 3744452 / 3408329 | PASS | PASS | `residual_history.csv:rms_roXi` 0.75 (D 1.31e-07, S 8.75e-08) | PASS | PASS | PASS |
+| `c09ckpt100_outres` | FAIL (312 値) | 3952886 / 2146423 | PASS | PASS | `res_100.h5:VALUE/res_roUy` 0.75 (D 3.00e+00, S 2.00e+00) | PASS | PASS | PASS |
+| `c09ckpt100_rawdiag` | FAIL (311 値) | 4208959 / 2727567 | PASS | PASS | `res_100.h5:VALUE/res_roUy` 0.58 (D 1.75e+00, S 1.50e+00) | PASS | PASS | PASS |
+| `c09ckpt100_pindiag` | FAIL (315 値) | 3959569 / 2485060 | PASS | PASS | `res_100.h5:VALUE/res_roUy` 0.67 (D 2.00e+00, S 1.50e+00) | PASS | PASS | PASS |
+| `c44steady` | FAIL (54 値) | 13561 / 21961 | PASS | PASS | `res_200.h5:VALUE/res_ro` 0.95 (D 2.73e+00, S 1.43e+00) | PASS | PASS | PASS |
+| `c44dual_ckpt100` | FAIL (627 値) | 1850076 / 1176704 | PASS | FAIL (2 量) | `res_100.h5:VALUE/condClampCorrQ_0` 2016.58 (D 1.79e+05, S 4.45e+01) | PASS | PASS | PASS |
+| `c44dual_restart100` | FAIL (628 値) | 1301738 / 1454616 | PASS | FAIL (1 量) | `res_100.h5:VALUE/condClampCorrQ_0` 2192.98 (D 4.39e+03, S 1.00e+00) | PASS | PASS | PASS |
+| `c44dual_pindiag` | FAIL (626 値) | 2482237 / 1193940 | PASS | PASS | `res_100.h5:CHECKPOINT/rog_0_fctH` 0.87 (D 5.23e-04, S 3.02e-04) | PASS | PASS | PASS |
+| `c52cht` | FAIL (18 値) | 19 / 29 | PASS | PASS | `res_wall_bot_3_200.h5:VALUE/ifaceRro` 0.72 (D 4.82e-05, S 3.35e-05) | PASS | PASS | PASS |
+| `c36cell` | FAIL (21 値) | 28 / 9 | PASS | PASS | `res_200.h5:VALUE/roUx` 0.60 (D 3.95e-04, S 3.28e-04) | PASS | PASS | PASS |
+| `c20cell_rk3` | FAIL (14 値) | 18051 / 7617 | PASS | FAIL (1 量) | `residual_history.csv:rms_roUz` 4.00 (D 1.02e+03, S 1.28e+02) | PASS | PASS | PASS |
+| `c20cell_dual` | FAIL (172 値) | 1025677 / 984352 | PASS | FAIL (3 量) | `res_100.h5:VALUE/Uz` 1.68 (D 8.87e+01, S 2.65e+01) | PASS | PASS | PASS |
+| `c20cell_impdiag` | PASS | 0 / 0 | PASS | PASS | `residual_history.csv:rms_roUx` 0.61 (D 1.69e-06, S 1.39e-06) | PASS | PASS | PASS |
+| `c57lm` | FAIL (72 値) | 38642 / 24679 | PASS | PASS | `res_200.h5:VALUE/lmPgamma` 0.75 (D 2.10e-05, S 1.40e-05) | PASS | PASS | PASS |
+| `c57lm_fromsst` | FAIL (54 値) | 21209 / 15991 | PASS | PASS | `residual_history.csv:rms_roOmega` 0.65 (D 1.76e-01, S 1.35e-01) | PASS | PASS | PASS |
+| `c56lineimp` | FAIL (27 値) | 48 / 40 | PASS | PASS | `res_200.h5:VALUE/roOmega` 0.85 (D 2.35e-05, S 1.38e-05) | PASS | PASS | PASS |
+| `c56extra` | FAIL (27 値) | 66 / 33 | PASS | PASS | `res_200.h5:VALUE/roOmega` 0.76 (D 8.69e-06, S 5.72e-06) | PASS | PASS | PASS |
+| `c48absorb` | FAIL (54 値) | 4409 / 3672 | PASS | PASS | `residual_history.csv:rms_roK` 0.68 (D 4.41e-03, S 3.24e-03) | PASS | PASS | PASS |
+| `c26optin` | FAIL (21 値) | 199 / 239 | PASS | PASS | `res_200.h5:VALUE/k` 0.57 (D 1.83e-05, S 1.60e-05) | PASS | PASS | PASS |
+| `c26optin_env` | FAIL (24 値) | 94 / 146 | PASS | PASS | `res_200.h5:VALUE/roUy` 0.74 (D 1.44e-03, S 9.75e-04) | PASS | PASS | PASS |
+| `v36node` | - | - | - | PASS | - | PASS | PASS | PASS |
+| `v36cell` | - | - | - | PASS | - | PASS | PASS | PASS |
+| `v09` | - | - | - | PASS | - | PASS | PASS | PASS |
+| `v52` | - | - | - | PASS | - | PASS | PASS | PASS |
+| `v44` | - | - | - | PASS | - | PASS | PASS | PASS |
+| `SERN g3 (case/46 run_1072–1077)` | FAIL (45 値) | 52 / 15 | PASS | PASS | `res_vehicle_base_18_100.h5:VALUE/twall_z` 1.00 (D 4.11e-07, S 2.05e-07) | PASS | PASS | PASS |
+
+**まとめ**: 初期出力 (保存量・原始量・幾何量のビット一致)・(c) NaN・出力互換 (ファイル集合・データセット集合・shape・dtype・属性値)・ログ行は**全構成 PASS**。
+変換器 5 構成は出力 h5 が base 同士・new 同士・base 対 new とも全データセットで差 0。
+ψ 二重評価の退避件数は new 3 回とも `snapshot: 269 of 269 device arrays` (base と同じ = R2 の pdeSize の fallback 修正で面配列が漏れていない)。
+dual-time の再開 (c09restart100・c44dual_restart100) は new でも `history restored from ic_ckpt.h5 (/CHECKPOINT: 10 levels …)` と FCT 履歴の復元行が出る。
+
+**(a) step 0 は §6 の文言どおりでは c20cell_impdiag 以外の全構成 FAIL**。§6 の前提「既知の 1 ulp の非決定性で、変更前ビルド同士でも同じ 2 値が出る」が
+base 3 回の時点で成り立っていない: 最初の組立の残差でも 3 回で 3 値に割れる列があり、幅は 2D node 定常で 19〜75 ulp、SERN g3 で 52 ulp、
+dual-time は step 0 に内反復 (22 行) が入るので 10⁶ ulp 級。new の値と最近傍 base 値の距離は大半の構成で base 内の幅以下、
+上回るのは c44steady (21961 / 13561)・c52cht (29 / 19)・c26optin (239 / 199)・c26optin_env (146 / 94)・c44dual_restart100 (1454616 / 1301738)。
+c52cht の `rms_roUx` は base 3 回・new 3 回がそれぞれ揃って 1 ulp 違ったので、追加で base・new 各 4 回 (run_0186–0193、比較から除外) を回した:
+base 7 回中 4 回が new と同じ値を出す (= 系統差でなく 2 値の非決定性)。判定条件の扱い (ulp 幅で読み替えるか) は plan 側の決定事項 (ここでは変えない)。
+
+**(b) の FAIL (4 構成・7 量)** — いずれも名目上ゼロか疎な診断量で、base 自身の反復の間で桁が動いている:
+
+| 構成 | データセット | S (base / new) | D | run ごとの最大絶対値 (base r1–r3 / new r1–r3) |
+| --- | --- | --- | --- | --- |
+| c44dual_ckpt100 | `res_100:condClampCorrQ_0` (凝縮モーメントのクランプ補正、非零 ~1400 節点) | 44.5 / 1.0 | 1.79e5 | 8.2e17, 8.1e17, 3.6e19 / **1.5e23**, 8.1e17, 1.7e17 (c44dual_pindiag の base r3 も 1.45e23) |
+| c44dual_ckpt100 | `res_100:condR30_0` | 1.04 / 1.0 | 3.14 | 1.6e-5, 1.3e-5, 1.4e-5 / 4.2e-5, 2.5e-5, 1.3e-5 |
+| c44dual_restart100 | `res_100:condClampCorrQ_0` | 1.0 / 1.0 | 4.39e3 | 1.4e10, 8.0e6, 1.8e3 / 7.9e6, 7.9e6, 3.1e2 |
+| c20cell_rk3 | `residual_history.csv:rms_roUz` (擬似 2D の spanwise 残差、`rms_roUx` 6e-3 に対し 1e-9〜3e-7) | 1.0 / 128 | 1.02e3 | (残差履歴の列) |
+| c20cell_dual | `res_100:Uz`・`roUz`・`CHECKPOINT/roUzN` (擬似 2D の spanwise 速度) | 26.5 / 1.3 | 88.7 | roUz: 1.7e-8, **4.3e-7**, 5.7e-9 / **4.2e-7**, 5.8e-9, 5.7e-9 (roUx は 156) |
+
+保存量・原始量の主要データセット (ro・roUx・roe・P・T・ρY・凝縮モーメント・k/ω・γ/Re_θt) は全構成で D ≤ 2S。
+
+**dual-time の分割と連続** ([`split_vs_cont_c09.txt`](results/2026-10-07_base9c9f623c_vs_new93e55957/split_vs_cont_c09.txt)): c09 は一様流 (ro・roUx・roe・P・T・ρY は
+分割・連続・反復のどれでもビット一致) で、動くのはトレーサ roXi と名目ゼロの roUy・roUz。roXi の m (分割 vs 連続 / 連続内 / 分割内) は
+base 3.31e-6 / 2.81e-6 / 6.0e-7、new 2.71e-6 / 2.76e-6 / 6.0e-7 (checkpoint の roXiP も同程度) — 分割と連続の差は反復のばらつきと同じ大きさで、ビルド間で変わらない。
+
+**SERN g3 のメモリ** (192 万節点、本段設定 100 step、`FORGE_MEMLOG=1`、[`sern_g3_memlog.txt`](results/2026-10-07_base9c9f623c_vs_new93e55957/sern_g3_memlog.txt)。3 回とも工程別に同値):
+
+| 工程 | base RSS / HWM [MiB] | new RSS / HWM [MiB] | GPU 使用 [MiB] (両方) |
+| --- | --- | --- | --- |
+| readMesh 末尾 (平坦な読込配列が生存) | 2614 / 2614 | 2614 / 2614 | — |
+| initMatrix の後 | 2721 / 2721 | 2143 / 2614 | 260 |
+| allocVariables の後 | 4864 / 4864 | 2344 / 2614 | 2440 |
+| setStructuralVariables の後 | 4865 / **5157** | 2338 / **2630** | 2602 |
+| 主ループの後 / 終了 | 5001 / 5157 | 2474 / 2630 | 2982 |
+
+- ホスト VmHWM **5157 → 2630 MiB (2816 → 1436 B/節点、−49 %)**。終了時の内訳 (new): host `c` 23/223 本 183 MB (base 1774)、host `p` 0 (357)、`mat_ns` 0 (572)。
+  ピークは readMesh 末尾 (2614) のすぐ上の setStructuralVariables (2630) に移った。
+- GPU は工程別に base と同値 (プロセス 2974 MiB、初回 memlog から +2724 MB) → §6 の「GPU 傾き ±2 % 以内」を満たす。
+- ローカルの縮小格子 s070/s085 からの外挿 (HWM 傾き 2737 → 1371 B/節点、切片 163 → 133 MiB) では g3 で base 5175・new 2644 MiB の見込みで、
+  実測 5157・2630 MiB と −0.3 %・−0.5 % で合う。§6 の「ホスト VmHWM の傾き ≤ 1500 B/節点」は g3 単点の平均 1436 B/節点 (切片込み) で下回る
+  (傾きの判定は 2 格子が要り、g4 が無いので縮小格子の傾き 1371 を併用)。
+
+**new の host cell 確保数** (`[variables] host cell arrays (gpu: 1): N of M registered`、new r1 の起動ログ):
+c36node 19/191・impdiag 20/191・c09ckpt100 98/241 (outres 114/241・rawdiag 100/243・pindiag 102/241)・c44steady 120/303・c44dual 133/303 (pindiag 140/303)・
+c52cht・c36cell・c20cell_rk3 19/191・c20cell_dual 26/191・c57lm 92/211・c57lm_fromsst 24/202・c56lineimp 23/191・c56extra 25/191・c48absorb 29/191・
+c26optin 20/191 (env 23/212)・SERN g3 23/223。
+
 ## 既知の注意
 
 - **AWS の自動停止 (2026-10-07 01:05 UTC 頃 = JST 10:05、base 投入中に停止した)**: idle 自動停止 (`solver_density_cuda/tools/cloud/idle_autostop.sh`、5 分おき・6 回連続で停止) は
   「GPU 使用率 0・`pgrep -x forge` 0 件・ログイン 0・load < 1」を idle と数える。base は `forge_9c9f623c` という名前で起動していたので
   **`pgrep -x forge` に一致せず**、短い 2D run の合間 (GPU 使用率の瞬間値 0) と準備作業の時間で 30 分が数えられたと推定する (停止の記録は見ていない)。
   対策として `run_matrix.py` は `--bin` を `.bin/<ビルド名>/forge` というシンボリックリンク経由で起動するようにした (comm が `forge` になる)。
-  **この対策は AWS 停止後に入れたので未実行**。次回投入時に `pgrep -x forge` で見えることを確認すること。
+  再起動後の最初の投入で `pgrep -x forge` が自分の run に一致する (comm=forge、exe は実ファイル) ことを確認した (2026-10-07)。
+- **`~/forge-b4` の `git checkout -f` で `solver_density_cuda/third_party/HighFive` が空になった** (この worktree の HighFive は
+  `.git` ファイルがローカル PC のパスを指す複製だった)。同じ pin (`dfc06537`) の `~/forge-sern` から中身を複製して戻した
+  (`third_party/HighFive.COPIED_FROM.txt`)。次に checkout するときも空になったら同じ手順で戻す。
 - 変換器は終了時の `cudaFree` で GPUassert (invalid argument) を出して exit 1 になる既知の罠がある (出力 h5 は完全)。ワーカーは rc でなく
   出力 h5 が開けて `/VALUE`・`/MESH` を持つかで完了を判定する (`written=1`)。cell モードは `/VIZMESH` を書かない。
 - case/36 の c36node は 80223 節点・200 step で約 0.3 s、全 2D 構成で 1 本数秒〜十数秒。ワーカーは 1 本ずつ順に回す。
@@ -139,107 +244,207 @@ SERN g3 (メモリ): `case/46` に `run_1072` と同じ作り方で run を作�
   2 格子での傾きは 2026-10-07 の縮小格子 3 点 (`notes/investigations/2026-10-07-forge-memlog/`) でしか出せない。
 - **NaN ダンプ (表の P)**: 入力 (s050 縮小格子) が別セッションの scratch にあるので入れていない。
 - case/13 `run_slau` (cell) は入れていない (cell は case/36・case/20 の 3 構成で代表)。
-- **base の 3 回がそろっていない** (下の run 一覧): r1 は全構成完走 (NaN PASS)、r2/r3 と再開 r1 は投入直後に AWS が止まったので未確認。
-  同ビルド内ばらつき (§6 (b) の基準 S_base) はまだ出ていない。
+- (a) step 0 の判定条件の扱いと (b) の FAIL 7 量 (名目ゼロ・疎な診断量) の扱いは plan の決定事項 (上の「結果」)。
 
 ## 計算 run 一覧
 
-AWS `~/forge-b4/case/66.hostmem_regression/` (2026-10-07)。全部 base (`~/bin-hostmem/forge_9c9f623c`、`FORGE_CUDA_BLOCKSIZE=128`)。
-N step の短い回帰 run なので収束判定は NOT CONVERGED (回帰差の基準であって収束の主張には使わない)。
+AWS `~/forge-b4/case/66.hostmem_regression/` (2026-10-07)。base = `.bin/base/forge` → `~/bin-hostmem/forge_9c9f623c` (r1 の 34 本だけは実ファイル名のまま起動)、
+new = `.bin/new/forge` → `~/bin-hostmem/forge_93e55957`、全部 `FORGE_CUDA_BLOCKSIZE=128`。N step の短い回帰 run なので収束判定は NOT CONVERGED
+(回帰差の基準であって収束の主張には使わない)。判定済みの run からは入力 h5 の複製を削除した (`INPUTS_REMOVED.txt`、テンプレートは `inputs/` に残る)。
+出力は `res_0`・最終 `res_N`・境界出力・CSV だけなので消していない。表は `python3 run_matrix.py table` の出力。
 
 | run | 目的・設定差分 | 元の入力 | 主要結果 | 状態 |
 | --- | --- | --- | --- | --- |
-| `run_0001_c09ckpt100_base_r1` | dual-time 100 step (checkpoint 書出し) (base r1) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0002_c44dual_ckpt100_base_r1` | 軸対称・凝縮 dual-time 前半 (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
-| `run_0003_c36node_base_r1` | 2D node 標準 (base r1) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0004_c36node_impdiag_base_r1` | 2D node + 陰解法診断 CSV (表 M) (base r1) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0005_c36node_psidual_base_r1` | 2D node + ψ 二重評価 (R2 の pdeSize) (base r1) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0006_c09cont200_base_r1` | dual-time 連続 200 step (base r1) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0007_c09ckpt100_outres_base_r1` | dual-time + 残差出力 (表 K・L) (base r1) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0008_c09ckpt100_rawdiag_base_r1` | dual-time + roYraw (表 I) (base r1) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0009_c09ckpt100_pindiag_base_r1` | dual-time + ピン診断 (表 N) (base r1) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0010_c44steady_base_r1` | 軸対称・多成分・凝縮 (定常) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
-| `run_0011_c44dual_pindiag_base_r1` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
-| `run_0012_c52cht_base_r1` | 共役伝熱 (base r1) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0013_c36cell_base_r1` | cell 定常 SST (base r1) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0014_c20cell_rk3_base_r1` | cell RK3 (base r1) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0015_c20cell_dual_base_r1` | cell LES dual-time (base r1) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0016_c20cell_impdiag_base_r1` | cell 陰解法 + 診断 CSV (base r1) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0017_c57lm_base_r1` | 遷移 (roGamma を読む) (base r1) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0018_c57lm_fromsst_base_r1` | 遷移 (SST の場から初期化) (base r1) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0019_c56lineimp_base_r1` | line-implicit + extraFields (base r1) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0020_c56extra_base_r1` | extraFields (res_* を含む) + FP64 アキュムレータ (base r1) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0021_c48absorb_base_r1` | extraFields (roN・dq_block_old_*) (base r1) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0022_c26optin_base_r1` | env 診断なし (名前が消えて警告) (base r1) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0023_c26optin_env_base_r1` | env 診断 4 種 ON (表 I) (base r1) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0024_v36node_base_r1` | 変換器 node (base r1) | `inputs/v36node` ← `36.passive_pseudoshock_control` | 完了 (rc 1 = 終了時 cudaFree の GPUassert、既知の罠。h5 は完全)・NaN PASS | active |
-| `run_0025_v36cell_base_r1` | 変換器 cell (base r1) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | 完了 (rc 1 = 終了時 cudaFree の GPUassert、既知の罠。h5 は完全)・NaN PASS | active |
-| `run_0026_v09_base_r1` | 変換器 node 周期・種 (base r1) | `inputs/v09` ← `09.Taylor-Green` | 完了 (rc 1 = 終了時 cudaFree の GPUassert、既知の罠。h5 は完全)・NaN PASS | active |
-| `run_0027_v52_base_r1` | 変換器 node (CHT 用スラブ) (base r1) | `inputs/v52` ← `52.conjugate_slab` | 完了 (rc 1 = 終了時 cudaFree の GPUassert、既知の罠。h5 は完全)・NaN PASS | active |
-| `run_0028_v44_base_r1` | 変換器 軸対称・種・凝縮 (base r1) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
-| `run_0029_c44dual_ckpt100_base_r1` | 軸対称・凝縮 dual-time 前半 (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0030_c44steady_base_r1` | 軸対称・多成分・凝縮 (定常) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0031_c44dual_pindiag_base_r1` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 完走 rc 0・NaN PASS・NOT CONVERGED (短い回帰 run、収束の主張には使わない) | active |
-| `run_0032_v44_base_r1` | 変換器 軸対称・種・凝縮 (base r1) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 完了 (rc 1 = 終了時 cudaFree の GPUassert、既知の罠。h5 は完全)・NaN PASS | active |
-| `run_0033_c09restart100_base_r1` | dual-time 再開 100 step (checkpoint 復元) (base r1) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | 2026-10-07 01:04 投入直後に AWS が停止 (01:05 UTC 頃、自動停止と推定)。完了したか未確認 | 要確認 |
-| `run_0034_c44dual_restart100_base_r1` | 軸対称・凝縮 dual-time 後半 (再開) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 2026-10-07 01:04 投入直後に AWS が停止 (01:05 UTC 頃、自動停止と推定)。完了したか未確認 | 要確認 |
-| `run_0035_c09ckpt100_base_r2` | dual-time 100 step (checkpoint 書出し) (base r2) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0036_c09restart100_base_r2` | dual-time 再開 100 step (checkpoint 復元) (base r2) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0037_c09cont200_base_r2` | dual-time 連続 200 step (base r2) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0038_c44dual_ckpt100_base_r2` | 軸対称・凝縮 dual-time 前半 (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0039_c44dual_restart100_base_r2` | 軸対称・凝縮 dual-time 後半 (再開) (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0040_c36node_base_r2` | 2D node 標準 (base r2) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0041_c36node_impdiag_base_r2` | 2D node + 陰解法診断 CSV (表 M) (base r2) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0042_c36node_psidual_base_r2` | 2D node + ψ 二重評価 (R2 の pdeSize) (base r2) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0043_c09ckpt100_outres_base_r2` | dual-time + 残差出力 (表 K・L) (base r2) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0044_c09ckpt100_rawdiag_base_r2` | dual-time + roYraw (表 I) (base r2) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0045_c09ckpt100_pindiag_base_r2` | dual-time + ピン診断 (表 N) (base r2) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0046_c44steady_base_r2` | 軸対称・多成分・凝縮 (定常) (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0047_c44dual_pindiag_base_r2` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0048_c52cht_base_r2` | 共役伝熱 (base r2) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0049_c36cell_base_r2` | cell 定常 SST (base r2) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0050_c20cell_rk3_base_r2` | cell RK3 (base r2) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0051_c20cell_dual_base_r2` | cell LES dual-time (base r2) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0052_c20cell_impdiag_base_r2` | cell 陰解法 + 診断 CSV (base r2) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0053_c57lm_base_r2` | 遷移 (roGamma を読む) (base r2) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0054_c57lm_fromsst_base_r2` | 遷移 (SST の場から初期化) (base r2) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0055_c56lineimp_base_r2` | line-implicit + extraFields (base r2) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0056_c56extra_base_r2` | extraFields (res_* を含む) + FP64 アキュムレータ (base r2) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0057_c48absorb_base_r2` | extraFields (roN・dq_block_old_*) (base r2) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0058_c26optin_base_r2` | env 診断なし (名前が消えて警告) (base r2) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0059_c26optin_env_base_r2` | env 診断 4 種 ON (表 I) (base r2) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0060_v36node_base_r2` | 変換器 node (base r2) | `inputs/v36node` ← `36.passive_pseudoshock_control` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0061_v36cell_base_r2` | 変換器 cell (base r2) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0062_v09_base_r2` | 変換器 node 周期・種 (base r2) | `inputs/v09` ← `09.Taylor-Green` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0063_v52_base_r2` | 変換器 node (CHT 用スラブ) (base r2) | `inputs/v52` ← `52.conjugate_slab` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0064_v44_base_r2` | 変換器 軸対称・種・凝縮 (base r2) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0065_c09ckpt100_base_r3` | dual-time 100 step (checkpoint 書出し) (base r3) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0066_c09restart100_base_r3` | dual-time 再開 100 step (checkpoint 復元) (base r3) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0067_c09cont200_base_r3` | dual-time 連続 200 step (base r3) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0068_c44dual_ckpt100_base_r3` | 軸対称・凝縮 dual-time 前半 (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0069_c44dual_restart100_base_r3` | 軸対称・凝縮 dual-time 後半 (再開) (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0070_c36node_base_r3` | 2D node 標準 (base r3) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0071_c36node_impdiag_base_r3` | 2D node + 陰解法診断 CSV (表 M) (base r3) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0072_c36node_psidual_base_r3` | 2D node + ψ 二重評価 (R2 の pdeSize) (base r3) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0073_c09ckpt100_outres_base_r3` | dual-time + 残差出力 (表 K・L) (base r3) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0074_c09ckpt100_rawdiag_base_r3` | dual-time + roYraw (表 I) (base r3) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0075_c09ckpt100_pindiag_base_r3` | dual-time + ピン診断 (表 N) (base r3) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0076_c44steady_base_r3` | 軸対称・多成分・凝縮 (定常) (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0077_c44dual_pindiag_base_r3` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0078_c52cht_base_r3` | 共役伝熱 (base r3) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0079_c36cell_base_r3` | cell 定常 SST (base r3) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0080_c20cell_rk3_base_r3` | cell RK3 (base r3) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0081_c20cell_dual_base_r3` | cell LES dual-time (base r3) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0082_c20cell_impdiag_base_r3` | cell 陰解法 + 診断 CSV (base r3) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0083_c57lm_base_r3` | 遷移 (roGamma を読む) (base r3) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0084_c57lm_fromsst_base_r3` | 遷移 (SST の場から初期化) (base r3) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0085_c56lineimp_base_r3` | line-implicit + extraFields (base r3) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0086_c56extra_base_r3` | extraFields (res_* を含む) + FP64 アキュムレータ (base r3) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0087_c48absorb_base_r3` | extraFields (roN・dq_block_old_*) (base r3) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0088_c26optin_base_r3` | env 診断なし (名前が消えて警告) (base r3) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0089_c26optin_env_base_r3` | env 診断 4 種 ON (表 I) (base r3) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0090_v36node_base_r3` | 変換器 node (base r3) | `inputs/v36node` ← `36.passive_pseudoshock_control` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0091_v36cell_base_r3` | 変換器 cell (base r3) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0092_v09_base_r3` | 変換器 node 周期・種 (base r3) | `inputs/v09` ← `09.Taylor-Green` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0093_v52_base_r3` | 変換器 node (CHT 用スラブ) (base r3) | `inputs/v52` ← `52.conjugate_slab` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
-| `run_0094_v44_base_r3` | 変換器 軸対称・種・凝縮 (base r3) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | 投入済み・AWS 停止で中断 (未完了の可能性。`status` で running のまま/queued なら除外して再投入) | 要確認 |
+| `run_0001_c09ckpt100_base_r1` | dual-time 100 step (checkpoint 書出し) (base r1) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0002_c44dual_ckpt100_base_r1` | 軸対称・凝縮 dual-time 前半 (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 1, NaN PASS, ?。起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
+| `run_0003_c36node_base_r1` | 2D node 標準 (base r1) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0004_c36node_impdiag_base_r1` | 2D node + 陰解法診断 CSV (表 M) (base r1) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0005_c36node_psidual_base_r1` | 2D node + ψ 二重評価 (R2 の pdeSize) (base r1) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0006_c09cont200_base_r1` | dual-time 連続 200 step (base r1) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0007_c09ckpt100_outres_base_r1` | dual-time + 残差出力 (表 K・L) (base r1) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0008_c09ckpt100_rawdiag_base_r1` | dual-time + roYraw (表 I) (base r1) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0009_c09ckpt100_pindiag_base_r1` | dual-time + ピン診断 (表 N) (base r1) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0010_c44steady_base_r1` | 軸対称・多成分・凝縮 (定常) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS, ?。起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
+| `run_0011_c44dual_pindiag_base_r1` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 1, NaN PASS, ?。起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
+| `run_0012_c52cht_base_r1` | 共役伝熱 (base r1) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0013_c36cell_base_r1` | cell 定常 SST (base r1) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0014_c20cell_rk3_base_r1` | cell RK3 (base r1) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0015_c20cell_dual_base_r1` | cell LES dual-time (base r1) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0016_c20cell_impdiag_base_r1` | cell 陰解法 + 診断 CSV (base r1) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0017_c57lm_base_r1` | 遷移 (roGamma を読む) (base r1) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0018_c57lm_fromsst_base_r1` | 遷移 (SST の場から初期化) (base r1) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0019_c56lineimp_base_r1` | line-implicit + extraFields (base r1) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0020_c56extra_base_r1` | extraFields (res_* を含む) + FP64 アキュムレータ (base r1) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0021_c48absorb_base_r1` | extraFields (roN・dq_block_old_*) (base r1) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0022_c26optin_base_r1` | env 診断なし (名前が消えて警告) (base r1) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0023_c26optin_env_base_r1` | env 診断 4 種 ON (表 I) (base r1) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0024_v36node_base_r1` | 変換器 node (base r1) | `inputs/v36node` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0025_v36cell_base_r1` | 変換器 cell (base r1) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0026_v09_base_r1` | 変換器 node 周期・種 (base r1) | `inputs/v09` ← `09.Taylor-Green` | rc 1, NaN PASS | active |
+| `run_0027_v52_base_r1` | 変換器 node (CHT 用スラブ) (base r1) | `inputs/v52` ← `52.conjugate_slab` | rc 1, NaN PASS | active |
+| `run_0028_v44_base_r1` | 変換器 軸対称・種・凝縮 (base r1) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS。起動拒否: species_db.yaml の H2O が組込みと違い凝縮 ON で拒否 (入力修正前) | 破棄予定 |
+| `run_0029_c44dual_ckpt100_base_r1` | 軸対称・凝縮 dual-time 前半 (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0030_c44steady_base_r1` | 軸対称・多成分・凝縮 (定常) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0031_c44dual_pindiag_base_r1` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0032_v44_base_r1` | 変換器 軸対称・種・凝縮 (base r1) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS | active |
+| `run_0033_c09restart100_base_r1` | dual-time 再開 100 step (checkpoint 復元) (base r1) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0034_c44dual_restart100_base_r1` | 軸対称・凝縮 dual-time 後半 (再開) (base r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0035_c09ckpt100_base_r2` | dual-time 100 step (checkpoint 書出し) (base r2) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | done rc=? (中断) nan=-, NOT CONVERGED。AWS 停止 (2026-10-07 01:05 UTC 頃) で中断 | 破棄予定 |
+| `run_0036_c09restart100_base_r2` | dual-time 再開 100 step (checkpoint 復元) (base r2) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0037_c09cont200_base_r2` | dual-time 連続 200 step (base r2) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0038_c44dual_ckpt100_base_r2` | 軸対称・凝縮 dual-time 前半 (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0039_c44dual_restart100_base_r2` | 軸対称・凝縮 dual-time 後半 (再開) (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0040_c36node_base_r2` | 2D node 標準 (base r2) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0041_c36node_impdiag_base_r2` | 2D node + 陰解法診断 CSV (表 M) (base r2) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0042_c36node_psidual_base_r2` | 2D node + ψ 二重評価 (R2 の pdeSize) (base r2) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0043_c09ckpt100_outres_base_r2` | dual-time + 残差出力 (表 K・L) (base r2) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0044_c09ckpt100_rawdiag_base_r2` | dual-time + roYraw (表 I) (base r2) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0045_c09ckpt100_pindiag_base_r2` | dual-time + ピン診断 (表 N) (base r2) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0046_c44steady_base_r2` | 軸対称・多成分・凝縮 (定常) (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0047_c44dual_pindiag_base_r2` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0048_c52cht_base_r2` | 共役伝熱 (base r2) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0049_c36cell_base_r2` | cell 定常 SST (base r2) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0050_c20cell_rk3_base_r2` | cell RK3 (base r2) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0051_c20cell_dual_base_r2` | cell LES dual-time (base r2) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0052_c20cell_impdiag_base_r2` | cell 陰解法 + 診断 CSV (base r2) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0053_c57lm_base_r2` | 遷移 (roGamma を読む) (base r2) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0054_c57lm_fromsst_base_r2` | 遷移 (SST の場から初期化) (base r2) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0055_c56lineimp_base_r2` | line-implicit + extraFields (base r2) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0056_c56extra_base_r2` | extraFields (res_* を含む) + FP64 アキュムレータ (base r2) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0057_c48absorb_base_r2` | extraFields (roN・dq_block_old_*) (base r2) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0058_c26optin_base_r2` | env 診断なし (名前が消えて警告) (base r2) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0059_c26optin_env_base_r2` | env 診断 4 種 ON (表 I) (base r2) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0060_v36node_base_r2` | 変換器 node (base r2) | `inputs/v36node` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0061_v36cell_base_r2` | 変換器 cell (base r2) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0062_v09_base_r2` | 変換器 node 周期・種 (base r2) | `inputs/v09` ← `09.Taylor-Green` | rc 1, NaN PASS | active |
+| `run_0063_v52_base_r2` | 変換器 node (CHT 用スラブ) (base r2) | `inputs/v52` ← `52.conjugate_slab` | rc 1, NaN PASS | active |
+| `run_0064_v44_base_r2` | 変換器 軸対称・種・凝縮 (base r2) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS | active |
+| `run_0065_c09ckpt100_base_r3` | dual-time 100 step (checkpoint 書出し) (base r3) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0066_c09restart100_base_r3` | dual-time 再開 100 step (checkpoint 復元) (base r3) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0067_c09cont200_base_r3` | dual-time 連続 200 step (base r3) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0068_c44dual_ckpt100_base_r3` | 軸対称・凝縮 dual-time 前半 (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0069_c44dual_restart100_base_r3` | 軸対称・凝縮 dual-time 後半 (再開) (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0070_c36node_base_r3` | 2D node 標準 (base r3) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0071_c36node_impdiag_base_r3` | 2D node + 陰解法診断 CSV (表 M) (base r3) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0072_c36node_psidual_base_r3` | 2D node + ψ 二重評価 (R2 の pdeSize) (base r3) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0073_c09ckpt100_outres_base_r3` | dual-time + 残差出力 (表 K・L) (base r3) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0074_c09ckpt100_rawdiag_base_r3` | dual-time + roYraw (表 I) (base r3) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0075_c09ckpt100_pindiag_base_r3` | dual-time + ピン診断 (表 N) (base r3) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0076_c44steady_base_r3` | 軸対称・多成分・凝縮 (定常) (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0077_c44dual_pindiag_base_r3` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (base r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0078_c52cht_base_r3` | 共役伝熱 (base r3) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0079_c36cell_base_r3` | cell 定常 SST (base r3) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0080_c20cell_rk3_base_r3` | cell RK3 (base r3) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0081_c20cell_dual_base_r3` | cell LES dual-time (base r3) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0082_c20cell_impdiag_base_r3` | cell 陰解法 + 診断 CSV (base r3) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0083_c57lm_base_r3` | 遷移 (roGamma を読む) (base r3) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0084_c57lm_fromsst_base_r3` | 遷移 (SST の場から初期化) (base r3) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0085_c56lineimp_base_r3` | line-implicit + extraFields (base r3) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0086_c56extra_base_r3` | extraFields (res_* を含む) + FP64 アキュムレータ (base r3) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0087_c48absorb_base_r3` | extraFields (roN・dq_block_old_*) (base r3) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0088_c26optin_base_r3` | env 診断なし (名前が消えて警告) (base r3) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0089_c26optin_env_base_r3` | env 診断 4 種 ON (表 I) (base r3) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0090_v36node_base_r3` | 変換器 node (base r3) | `inputs/v36node` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0091_v36cell_base_r3` | 変換器 cell (base r3) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0092_v09_base_r3` | 変換器 node 周期・種 (base r3) | `inputs/v09` ← `09.Taylor-Green` | rc 1, NaN PASS | active |
+| `run_0093_v52_base_r3` | 変換器 node (CHT 用スラブ) (base r3) | `inputs/v52` ← `52.conjugate_slab` | rc 1, NaN PASS | active |
+| `run_0094_v44_base_r3` | 変換器 軸対称・種・凝縮 (base r3) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS | active |
+| `run_0095_c09ckpt100_base_r2` | dual-time 100 step (checkpoint 書出し) (base r2) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0096_c36node_new_r1` | 2D node 標準 (new r1) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0097_c36node_impdiag_new_r1` | 2D node + 陰解法診断 CSV (表 M) (new r1) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0098_c36node_psidual_new_r1` | 2D node + ψ 二重評価 (R2 の pdeSize) (new r1) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0099_c09ckpt100_new_r1` | dual-time 100 step (checkpoint 書出し) (new r1) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0100_c09restart100_new_r1` | dual-time 再開 100 step (checkpoint 復元) (new r1) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0101_c09cont200_new_r1` | dual-time 連続 200 step (new r1) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0102_c09ckpt100_outres_new_r1` | dual-time + 残差出力 (表 K・L) (new r1) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0103_c09ckpt100_rawdiag_new_r1` | dual-time + roYraw (表 I) (new r1) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0104_c09ckpt100_pindiag_new_r1` | dual-time + ピン診断 (表 N) (new r1) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0105_c44steady_new_r1` | 軸対称・多成分・凝縮 (定常) (new r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0106_c44dual_ckpt100_new_r1` | 軸対称・凝縮 dual-time 前半 (new r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0107_c44dual_restart100_new_r1` | 軸対称・凝縮 dual-time 後半 (再開) (new r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0108_c44dual_pindiag_new_r1` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (new r1) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0109_c52cht_new_r1` | 共役伝熱 (new r1) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0110_c36cell_new_r1` | cell 定常 SST (new r1) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0111_c20cell_rk3_new_r1` | cell RK3 (new r1) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0112_c20cell_dual_new_r1` | cell LES dual-time (new r1) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0113_c20cell_impdiag_new_r1` | cell 陰解法 + 診断 CSV (new r1) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0114_c57lm_new_r1` | 遷移 (roGamma を読む) (new r1) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0115_c57lm_fromsst_new_r1` | 遷移 (SST の場から初期化) (new r1) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0116_c56lineimp_new_r1` | line-implicit + extraFields (new r1) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0117_c56extra_new_r1` | extraFields (res_* を含む) + FP64 アキュムレータ (new r1) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0118_c48absorb_new_r1` | extraFields (roN・dq_block_old_*) (new r1) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0119_c26optin_new_r1` | env 診断なし (名前が消えて警告) (new r1) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0120_c26optin_env_new_r1` | env 診断 4 種 ON (表 I) (new r1) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0121_v36node_new_r1` | 変換器 node (new r1) | `inputs/v36node` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0122_v36cell_new_r1` | 変換器 cell (new r1) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0123_v09_new_r1` | 変換器 node 周期・種 (new r1) | `inputs/v09` ← `09.Taylor-Green` | rc 1, NaN PASS | active |
+| `run_0124_v52_new_r1` | 変換器 node (CHT 用スラブ) (new r1) | `inputs/v52` ← `52.conjugate_slab` | rc 1, NaN PASS | active |
+| `run_0125_v44_new_r1` | 変換器 軸対称・種・凝縮 (new r1) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS | active |
+| `run_0126_c36node_new_r2` | 2D node 標準 (new r2) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0127_c36node_impdiag_new_r2` | 2D node + 陰解法診断 CSV (表 M) (new r2) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0128_c36node_psidual_new_r2` | 2D node + ψ 二重評価 (R2 の pdeSize) (new r2) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0129_c09ckpt100_new_r2` | dual-time 100 step (checkpoint 書出し) (new r2) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0130_c09restart100_new_r2` | dual-time 再開 100 step (checkpoint 復元) (new r2) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0131_c09cont200_new_r2` | dual-time 連続 200 step (new r2) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0132_c09ckpt100_outres_new_r2` | dual-time + 残差出力 (表 K・L) (new r2) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0133_c09ckpt100_rawdiag_new_r2` | dual-time + roYraw (表 I) (new r2) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0134_c09ckpt100_pindiag_new_r2` | dual-time + ピン診断 (表 N) (new r2) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0135_c44steady_new_r2` | 軸対称・多成分・凝縮 (定常) (new r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0136_c44dual_ckpt100_new_r2` | 軸対称・凝縮 dual-time 前半 (new r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0137_c44dual_restart100_new_r2` | 軸対称・凝縮 dual-time 後半 (再開) (new r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0138_c44dual_pindiag_new_r2` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (new r2) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0139_c52cht_new_r2` | 共役伝熱 (new r2) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0140_c36cell_new_r2` | cell 定常 SST (new r2) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0141_c20cell_rk3_new_r2` | cell RK3 (new r2) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0142_c20cell_dual_new_r2` | cell LES dual-time (new r2) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0143_c20cell_impdiag_new_r2` | cell 陰解法 + 診断 CSV (new r2) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0144_c57lm_new_r2` | 遷移 (roGamma を読む) (new r2) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0145_c57lm_fromsst_new_r2` | 遷移 (SST の場から初期化) (new r2) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0146_c56lineimp_new_r2` | line-implicit + extraFields (new r2) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0147_c56extra_new_r2` | extraFields (res_* を含む) + FP64 アキュムレータ (new r2) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0148_c48absorb_new_r2` | extraFields (roN・dq_block_old_*) (new r2) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0149_c26optin_new_r2` | env 診断なし (名前が消えて警告) (new r2) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0150_c26optin_env_new_r2` | env 診断 4 種 ON (表 I) (new r2) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0151_v36node_new_r2` | 変換器 node (new r2) | `inputs/v36node` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0152_v36cell_new_r2` | 変換器 cell (new r2) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0153_v09_new_r2` | 変換器 node 周期・種 (new r2) | `inputs/v09` ← `09.Taylor-Green` | rc 1, NaN PASS | active |
+| `run_0154_v52_new_r2` | 変換器 node (CHT 用スラブ) (new r2) | `inputs/v52` ← `52.conjugate_slab` | rc 1, NaN PASS | active |
+| `run_0155_v44_new_r2` | 変換器 軸対称・種・凝縮 (new r2) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS | active |
+| `run_0156_c36node_new_r3` | 2D node 標準 (new r3) | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0157_c36node_impdiag_new_r3` | 2D node + 陰解法診断 CSV (表 M) (new r3) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0158_c36node_psidual_new_r3` | 2D node + ψ 二重評価 (R2 の pdeSize) (new r3) + `FORGE_DIAG_PSI_DUALEVAL=2,4` | `inputs/c36node` ← `36.passive_pseudoshock_control/run_sym_H_2up_node` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0159_c09ckpt100_new_r3` | dual-time 100 step (checkpoint 書出し) (new r3) | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0160_c09restart100_new_r3` | dual-time 再開 100 step (checkpoint 復元) (new r3) | `inputs/c09restart100` ← `09.Taylor-Green/run_0164_passiveG_fct_restart100_fixed` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0161_c09cont200_new_r3` | dual-time 連続 200 step (new r3) | `inputs/c09cont200` ← `09.Taylor-Green/run_0162_passiveG_fct_cont200` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0162_c09ckpt100_outres_new_r3` | dual-time + 残差出力 (表 K・L) (new r3) + `FORGE_OUT_RESIDUALS=1 FORGE_RESID_SNAP=0` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0163_c09ckpt100_rawdiag_new_r3` | dual-time + roYraw (表 I) (new r3) + `FORGE_SPECIES_RAW_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0164_c09ckpt100_pindiag_new_r3` | dual-time + ピン診断 (表 N) (new r3) + `FORGE_PIN_DIAG=1` | `inputs/c09ckpt100` ← `09.Taylor-Green/run_0160_passiveG_fct_ckpt100` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0165_c44steady_new_r3` | 軸対称・多成分・凝縮 (定常) (new r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44steady` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0166_c44dual_ckpt100_new_r3` | 軸対称・凝縮 dual-time 前半 (new r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0167_c44dual_restart100_new_r3` | 軸対称・凝縮 dual-time 後半 (再開) (new r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_restart100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0168_c44dual_pindiag_new_r3` | 軸対称・凝縮 dual-time + ピン診断 (入口あり) (new r3) + `FORGE_ALLOW_UNVERIFIED_SPECIES=1 FORGE_PIN_DIAG=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0169_c52cht_new_r3` | 共役伝熱 (new r3) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0170_c36cell_new_r3` | cell 定常 SST (new r3) | `inputs/c36cell` ← `36.passive_pseudoshock_control/run_sym_H_2up_cell` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0171_c20cell_rk3_new_r3` | cell RK3 (new r3) | `inputs/c20cell_rk3` ← `20.naca_ml/001.test/run_slau` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0172_c20cell_dual_new_r3` | cell LES dual-time (new r3) | `inputs/c20cell_dual` ← `20.naca_ml/001.test/run_case04_les_unsteady_dualtime` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0173_c20cell_impdiag_new_r3` | cell 陰解法 + 診断 CSV (new r3) + `FORGE_IMPLICIT_DIAG_CSV=diag.csv` | `inputs/c20cell_impl` ← `20.naca_ml/001.test/run_slau_20260511_003420_implicit_diag_cfl2_smoke` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0174_c57lm_new_r3` | 遷移 (roGamma を読む) (new r3) | `inputs/c57lm` ← `57.transition_flat_plate/run_0014_t3a_lm_unitcheck` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0175_c57lm_fromsst_new_r3` | 遷移 (SST の場から初期化) (new r3) | `inputs/c57lm_fromsst` ← `57.transition_flat_plate/run_0013_t3b_lm` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0176_c56lineimp_new_r3` | line-implicit + extraFields (new r3) | `inputs/c56lineimp` ← `56.gap_tp1187/run_0019_lineimplicit` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0177_c56extra_new_r3` | extraFields (res_* を含む) + FP64 アキュムレータ (new r3) | `inputs/c56extra` ← `56.gap_tp1187/run_0027_s6_f32_b` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0178_c48absorb_new_r3` | extraFields (roN・dq_block_old_*) (new r3) | `inputs/c48absorb` ← `48.flat_plate_cooled_m4/run_0903_absorb2` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0179_c26optin_new_r3` | env 診断なし (名前が消えて警告) (new r3) | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0180_c26optin_env_new_r3` | env 診断 4 種 ON (表 I) (new r3) + `FORGE_WI_FORCE_DIAG=1 FORGE_WF_CLOSURE_DIAG=1 FORGE_OMEGA_BUDGET=1 FORGE_WF_REP_DIAG=1` | `inputs/c26optin` ← `26.flat_plate_sst/run_0086_optin_base` | rc 0, NaN PASS, NOT CONVERGED | active |
+| `run_0181_v36node_new_r3` | 変換器 node (new r3) | `inputs/v36node` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0182_v36cell_new_r3` | 変換器 cell (new r3) | `inputs/v36cell` ← `36.passive_pseudoshock_control` | rc 1, NaN PASS | active |
+| `run_0183_v09_new_r3` | 変換器 node 周期・種 (new r3) | `inputs/v09` ← `09.Taylor-Green` | rc 1, NaN PASS | active |
+| `run_0184_v52_new_r3` | 変換器 node (CHT 用スラブ) (new r3) | `inputs/v52` ← `52.conjugate_slab` | rc 1, NaN PASS | active |
+| `run_0185_v44_new_r3` | 変換器 軸対称・種・凝縮 (new r3) | `inputs/v44` ← `44.vitiated_air_wt/run_0510_va3_M4.19_Lc8_noneq_lumpX` | rc 1, NaN PASS | active |
+| `run_0186_c52cht_base_r4` | 共役伝熱 (base r4) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0187_c52cht_base_r5` | 共役伝熱 (base r5) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0188_c52cht_base_r6` | 共役伝熱 (base r6) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0189_c52cht_base_r7` | 共役伝熱 (base r7) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0190_c52cht_new_r4` | 共役伝熱 (new r4) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0191_c52cht_new_r5` | 共役伝熱 (new r5) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0192_c52cht_new_r6` | 共役伝熱 (new r6) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
+| `run_0193_c52cht_new_r7` | 共役伝熱 (new r7) | `inputs/c52cht` ← `52.conjugate_slab/run_0007_fxhalf` | rc 0, NaN PASS, NOT CONVERGED。ノイズ確認の追加反復 (step 0 の rms_roUx が base でも 2 値に割れることの確認、判定に使わない) | ref |
