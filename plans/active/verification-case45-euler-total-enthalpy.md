@@ -61,8 +61,8 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | 3b | ~~E2~~ 完了 (判別不能、§9) | | O |
 | 3c | ~~E2 の解釈と次の手~~ ユーザ決定 2026-10-07 | 「あなたの方針でよい」: Euler の格子を壁に寄せない配点に切り替え、出口較正と MOC の V5 をやり直す。単調壁の E′ は採用を取り消さない | ユーザ |
 | 4b | ~~切り替えとやり直しの登録~~ 完了 | 判断: 2026-10-07 codex (diagnose) — `mesh_euler` を設けて Euler の既定を全域 0.005、E4 は legacy MOC で先に、順序は E3 → E4 → V5d → 較正値の確定 → NS の対照の更新 → U4 → V5′ | F |
-| 5a | E3 | `mesh_euler` の実装と case/45 の Euler の YAML の移行・手順書の更新。合格条件 §6 E3 | O |
-| 5b | E4 | 起動スクリプト・評価器 (M_common・前提・判定) を書き AWS で回す。合格条件 §6 E4 の判定を出す | O |
+| 5a | ~~E3~~ 完了 (commit 3a9bc9f8、(1) の run_0162 との直接の照合だけ AWS で残り) | §9 | O |
+| 5b | E4 | スクリプトは commit 3a9bc9f8。**AWS で回して判定を出す** | O |
 | 4 | codex plan 段レビュー | 次の手の登録が揃った時点で `codex_review.py <本 plan> --stage plan` | O |
 | 5 | codex result 段レビュー | `--stage result` | O |
 
@@ -155,3 +155,8 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
   - 解釈は確定していない (A の異常は窓の中でも大きく動いており、登録の P2 を満たさない)。次の手はユーザ判断と上位への諮問で決める。
 - `2026-10-07` — **ユーザ決定「あなたの方針でよい」** (E2 の結果を受けた主セッションの推奨): (1) case/45 の Euler の格子を壁に寄せない配点 (E2 の B と同じ、全域で第 1 間隔の比 0.005) に切り替える。NS は今の G1 の壁際のまま。(2) G1 の Euler で決めた出口較正 (`Md_moc_offset` +3.770e-4、run_0113+0114 由来) と MOC の軸処理の V5 を、新しい Euler の格子でやり直す。(3) 単調壁の E′ (採用) は取り消さない。原因 (薄いセル・縦横比か、整定しない収束か) は厳密には切り分けていないが、Euler の設計の入力には B の配点の場が健全で整定する (E2) ことを根拠に切り替える。手順の登録と順序は諮問で決める (§5.1 #4b)。
 - `2026-10-07` — **codex (diagnose) に諮った (切り替えの計画)**: `notes/reviews/2026-10-07-euler-grid-switch-plan-diagnose.md` — Euler 専用の格子の設定 `mesh_euler` を設け、legacy MOC・新しい配点で出口較正 E4 を先に行う。§4 (E3 以降の対処)・§6 E3・E4 を登録。E2 の B は全温が健全という意味で、流れや設計の評価量の準定常は未確認 (B の正式な準定常の判定は DRIFTING 25 列・OSCILLATING 2 列)。
+- `2026-10-07` — **E3 の実装** (commit 3a9bc9f8)。`prepare` は `mesh_euler` を読む (既定 321 × 65・全域 0.005・スロートの別指定なし・cap なし、未知のキーは例外)。`prepare_ns` は `mesh`。`mesh` だけの Euler の問題は移行先を示して止まる。`prepare_info.json` の mesh 欄に全 `Mesh2DParams`・採用元・座標と接続の sha256。case/45 の Euler の問題: 全域 0.005 に移したもの 4 本 (pin_G1_recal・_mono・_mono_moc・t0cluster_u5em3)、記録の格子を明示したもの 10 本 (G1 の t0cluster_g1・pin_G1、1100 × 65 の 8 本)、case/44 の va3 dry lumpX。case/41〜44 の `mesh_euler` の無い Euler の問題は止まる (移していない)。
+  - 合格条件: (1) ローカルで代わりに照合 (変更前のコード + E2 の B の `mesh` と、変更後のコード + `mesh_euler` で座標・接続・msh がビット一致、coord 44ddbcec…)。run_0162 との直接の照合は AWS で残り。(2) NS は変更前後でビット一致。(3) `mesh` だけの問題は止まる。(4) design/tests の FAIL は変更前からの 3 本だけ。
+  - 止まるようになったもの (検査を弱めないため直さない): `euler_t0_e2.py check-problems` (E2 の前提「A = 元の問題」が崩れた)、`throat_mono_ab.py prep` (IC の写像で拒否)、`moc_v5_euler.py prep` (同じ見込み)。
+  - 実装時の判断 (主セッションで採用): 1100 × 65 の旧 Euler の問題は記録の格子のまま明示 (記録の再現のため)。
+- `2026-10-07` — **E4 のスクリプト (投入前の記録)**: `case/45.isobutane_m6_d155/{run_e4_recal.sh, e4_recal.py, e4_recal_eval.py, test_e4_recal_eval.py, problem_d155_euler_e4_recal_d0.yaml}`。評価器の sha256 39722e1a6286c60c242189835119e4a1ed0b5d034f0289e85572e56f27974573 (登録 99431498)、commit 3a9bc9f8、試験 65 件 FAIL 0、乾式確認 OK (AR 最大 4.9、IC の max\|T₀ − 1600\| 0.0106 K)。実装時の読み (結果を見る前、主セッションで採用): δ₁ の「平均 M_common」は判定窓 13 枚の平均 (#11f は末尾 5 枚、その値も記録する) / float の ≤ はそのまま / 「末尾 5 枚 − 直前 5 枚 (45000〜49000)」の平均の差は絶対値 / M_common の η は G1 の最終断面の 12 点 (0.08876〜0.67224、sha 96a495c2…、AWS で run_0147 と照合) / 全温の評価点は自格子の節点。
