@@ -14,7 +14,7 @@
   tw (手元): CONTUR に NS の壁温 (ns_wall_T.csv) を与えた場合と断熱の式の場合を、k_f = 1 と出口合わせの k_f で比べる
     → fig4_wall_temperature.png・fig5_wall_T.png・tw_experiment.json。
   taw (手元): T_aw の式 (局所 γ_e の現行 / 全温基準) の違いが δ_r を動かす量を、断熱と等温 1000/600/300 K で → taw_sensitivity.json。
-  knobs (手元): 較正の係数 (k_f・k_N・a・Δm) と第 1 層の一部 (T_aw のエンタルピー化 + 混合気の μ) の効き方を、出口で合わせ直して比べる
+  knobs (手元): 較正の係数 (k_f・k_N・a・Δm) と第 1 層 (エンタルピー形の熱閉包 + 混合気の μ) の効き方を、出口で合わせ直して比べる
     → knobs.json・knobs_profiles.json (説明ページ用)。
   hform (手元): 熱閉包の A/B (温度形 / エンタルピー形、isothermal plan §5.1 #10a の事前登録) → hform_ab.json。
 
@@ -334,13 +334,13 @@ MU_RATIO = [0.956, 0.965, 0.973, 0.980, 1.007, 1.030, 1.050, 1.068, 1.084, 1.089
 def knobs():
     """較正の係数ごとの効き方 (説明用、手元、CFD 0 step)。生産の CONTUR (k_f 1.0541, k_N 1, a 1) を基準に、係数を 1 つ動かしたときの
     δ_r の変化を x に沿って出す。k_f 以外は出口の δ_r を基準と同じに戻すよう k_f を解き直す (生産の C2 と同じく出口で合わせる)。
-    Δm (C_f の Re 指数ずらし、#8d の案) と第 1 層 (T_aw のエンタルピー化 + 混合気の μ) は実装に無いので、ここで差し替えて試す。"""
+    Δm (C_f の Re 指数ずらし、#8d の案) と第 1 層 (エンタルピー形の熱閉包 = hform の B 腕 + 混合気の μ) は実装に無いので、ここで差し替えて試す。"""
     from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
     from forge_design.feedback import deltastar_integral as DI
     from forge_design.metrics.deltastar import smooth_delta_quintic
     p = load_problem(OUT / "prod_local.yaml"); d = design_chain(p); rt = float(p.spec["r_throat"]); Tt = float(p.spec["Tt"])
     k0 = float(p.raw["deltastar_initializer"]["cf_scale"])
-    orig_closure, orig_at, orig_mu = DI.closure_contur, DI.EdgeConditions.at, DI._sutherland
+    orig_closure, orig_at, orig_mu, orig_prof = DI.closure_contur, DI.EdgeConditions.at, DI._sutherland, DI._profile_integrals
     st = {"dm": 0.0, "re_ref": 1.0e4}
 
     def closure_dm(theta_m, e, Tw, a=1.0, cf_scale=1.0, n_scale=1.0):
@@ -349,13 +349,6 @@ def knobs():
             rei = max(c["F_Rdelta"] * c["Re_theta_c"], 300.0)
             c["Cf"] *= (rei / st["re_ref"]) ** (-st["dm"])
         return c
-    ec0 = DI.EdgeConditions(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), Tt, rt)
-    Tg = np.linspace(150.0, 1700.0, 6000); cpg = np.asarray(ec0.gas_obj.cp_mass(Tg))
-    hg = np.concatenate([[0.0], np.cumsum(0.5 * (cpg[1:] + cpg[:-1]) * np.diff(Tg))])
-
-    def at_h(self, x):
-        e = orig_at(self, x); he = np.interp(e["Te"], Tg, hg); h0 = np.interp(Tt, Tg, hg)
-        e["Taw"] = float(np.interp(he + self.Pr ** (1 / 3) * (h0 - he), hg, Tg)); return e
     mu_mix = lambda T: orig_mu(T) * np.interp(T, MU_RATIO_T, MU_RATIO)
     xF = float(d["wall_inv"][-1, 0])
 
@@ -363,21 +356,22 @@ def knobs():
         st["dm"] = dm
         DI.closure_contur = closure_dm
         if layer1:
-            DI.EdgeConditions.at = at_h; DI._sutherland = mu_mix
+            DI.EdgeConditions.at, DI._profile_integrals = hform_patches(DI, _gam_or_gas(p), float(p.cp), Tt)
+            DI._sutherland = mu_mix
         try:
             return DI.integral_bl(d["wall"], d["wall_inv"], _gam_or_gas(p), p.cp, float(p.spec["Pt"]), Tt, rt,
                                   thermal_bc={"mode": "adiabatic"}, a_crocco=a, cf_scale=kf, n_scale=kN)
         finally:
-            DI.closure_contur, DI.EdgeConditions.at, DI._sutherland = orig_closure, orig_at, orig_mu
+            DI.closure_contur, DI.EdgeConditions.at, DI._sutherland, DI._profile_integrals = orig_closure, orig_at, orig_mu, orig_prof
     base = run(k0); xs = base["x"]; dF0 = float(np.interp(xF, xs, base["delta_r"]))
 
     def pinned(**kw):
+        # 出口の δ_r を基準に戻す k_f を、挟み込み (brentq) で解く。δ_r は k_f に単調増加
+        from scipy.optimize import brentq
         g = lambda k: float(np.interp(xF, xs, run(k, **kw)["delta_r"])) / dF0 - 1.0
-        ka, kb = k0, k0 * 1.03; fa, fb = g(ka), g(kb)
-        for _ in range(5):
-            kc = kb - fb * (kb - ka) / (fb - fa); ka, fa, kb = kb, fb, kc; fb = g(kb)
-            if abs(fb) < 1e-7: break
-        return kb, run(kb, **kw)
+        lo, hi = 0.8 * k0, 1.25 * k0
+        k = brentq(g, lo, hi, xtol=1e-7)
+        return k, run(k, **kw)
     variants = {"kf_plus5": (k0 * 1.05, run(k0 * 1.05))}
     for lab, kw in (("kN_plus10", dict(kN=1.1)), ("a_0p5", dict(a=0.5)), ("dm_plus0p05", dict(dm=0.05)), ("dm_minus0p05", dict(dm=-0.05)),
                     ("layer1", dict(layer1=True))):
@@ -406,6 +400,37 @@ def knobs():
     print(json.dumps(out, indent=1, ensure_ascii=False))
 
 
+def hform_patches(DI, gas, cp_const: float, Tt: float):
+    """熱閉包のエンタルピー形 (isothermal plan §5.1 #10a の B 腕) に差し替える (EdgeConditions.at, _profile_integrals) の組を返す。
+    h(T) は気体の c_p(T) (CPG なら一定 c_p) の積分。h_aw = h_e + r(h_0 − h_e)、h(v) = h_w + a(h_aw − h_w)v + [h_e − a(h_aw − h_w) − h_w]v²。"""
+    orig_at = DI.EdgeConditions.at
+    Tg = np.linspace(100.0, 1800.0, 8000)
+    cp = np.asarray(gas.cp_mass(Tg)) if hasattr(gas, "cp_mass") else np.full_like(Tg, cp_const)
+    hg = np.concatenate([[0.0], np.cumsum(0.5 * (cp[1:] + cp[:-1]) * np.diff(Tg))])
+    H = lambda T: np.interp(T, Tg, hg)
+    Hinv = lambda h: np.interp(h, hg, Tg)
+
+    def at_h(self, x):
+        e = orig_at(self, x); he = H(e["Te"]); h0 = H(Tt)
+        e["Taw"] = float(Hinv(he + self.Pr ** (1.0 / 3.0) * (h0 - he)))
+        return e
+
+    def prof_h(delta, N, Tw, Taw, Te, rw, cos_phi, a):
+        u = DI._GL_U; w = DI._GL_W
+        hw, haw, he = H(Tw), H(Taw), H(Te)
+        T = Hinv(hw + a * (haw - hw) * u + (he - a * (haw - hw) - hw) * u ** 2)
+        rho_rel = Te / np.maximum(T, 1e-30)
+        z = delta * u ** N
+        dz = N * delta * u ** (N - 1.0)
+        curv = 1.0 - z * cos_phi / rw
+        theta = float(np.sum(w * curv * rho_rel * u * (1.0 - u) * dz))
+        dstar = float(np.sum(w * curv * (1.0 - rho_rel * u) * dz))
+        theta_c = float(np.sum(w * rho_rel * u * (1.0 - u) * dz))
+        Fc = float(np.sum(w * np.sqrt(rho_rel))) ** -2
+        return theta, dstar, theta_c, Fc
+    return at_h, prof_h
+
+
 def hform():
     """熱閉包の A/B (plan tooling-nozzle-isothermal-wall-chain §5.1 #10a、2026-10-08 事前登録、codex diagnose の判別 A/B)。CFD 0 step。
     A = 今の温度形 (Eq. 69 を T で、T_aw = T_e(1 + r(γ_e−1)/2 M²))。
@@ -420,38 +445,9 @@ def hform():
     orig_prof, orig_at = DI._profile_integrals, DI.EdgeConditions.at
     gas_sp = _gam_or_gas(p)
 
-    def h_table(gas):
-        Tg = np.linspace(100.0, 1800.0, 8000)
-        cp = np.asarray(gas.cp_mass(Tg)) if hasattr(gas, "cp_mass") else np.full_like(Tg, float(p.cp))
-        return Tg, np.concatenate([[0.0], np.cumsum(0.5 * (cp[1:] + cp[:-1]) * np.diff(Tg))])
-
-    def patches(Tg, hg):
-        H = lambda T: np.interp(T, Tg, hg)
-        Hinv = lambda h: np.interp(h, hg, Tg)
-
-        def at_h(self, x):
-            e = orig_at(self, x); he = H(e["Te"]); h0 = H(Tt)
-            e["Taw"] = float(Hinv(he + self.Pr ** (1.0 / 3.0) * (h0 - he)))
-            return e
-
-        def prof_h(delta, N, Tw, Taw, Te, rw, cos_phi, a):
-            u = DI._GL_U; w = DI._GL_W
-            hw, haw, he = H(Tw), H(Taw), H(Te)
-            T = Hinv(hw + a * (haw - hw) * u + (he - a * (haw - hw) - hw) * u ** 2)
-            rho_rel = Te / np.maximum(T, 1e-30)
-            z = delta * u ** N
-            dz = N * delta * u ** (N - 1.0)
-            curv = 1.0 - z * cos_phi / rw
-            theta = float(np.sum(w * curv * rho_rel * u * (1.0 - u) * dz))
-            dstar = float(np.sum(w * curv * (1.0 - rho_rel * u) * dz))
-            theta_c = float(np.sum(w * rho_rel * u * (1.0 - u) * dz))
-            Fc = float(np.sum(w * np.sqrt(rho_rel))) ** -2
-            return theta, dstar, theta_c, Fc
-        return at_h, prof_h
-
     def run(arm, tbc, gas=gas_sp, rtol=1e-6):
         if arm == "B":
-            DI.EdgeConditions.at, DI._profile_integrals = patches(*h_table(gas))
+            DI.EdgeConditions.at, DI._profile_integrals = hform_patches(DI, gas, float(p.cp), Tt)
         try:
             return DI.integral_bl(d["wall"], d["wall_inv"], gas, p.cp, float(p.spec["Pt"]), Tt, rt, thermal_bc=tbc, rtol=rtol)
         finally:
