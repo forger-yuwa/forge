@@ -23,3 +23,12 @@ feature 側は 2026-10-05 の統合ブランチ `integrate/main-2026-10-05` (fea
 5. MOC の既定の切り替えの波及 (`case/45.isobutane_m6_d155/moc_default_sweep.py`、CFD 0 step): MOC のキーを書いていない axis-Mach の問題 (case/41〜45) で新しい既定のゲートが不合格になるものがあれば、ユーザに諮ってから統合する (統合の前に問題 YAML に旧方式を明示するか、そのままにするか)。
 
 FAIL のときは main へ入れない (原因を切り分ける)。main へは PR (merge commit) で入れる。gh は未認証なので PR はブラウザで作る。
+
+## 結果 (2026-10-07)
+1. **PASS**: Python の単体試験 (`solver_density_cuda/tests/unit/test_*.py` 21 本、`solver_density_cuda/tools/test_*.py` 14 本) は、両方にある試験の判定がすべて main (77318d0e) と同じ。両方で非 0 のもの (化学種の記録・GPU 輸送・C++ の FEM などこの環境で回らない 13 本と、30 分で打ち切った `test_twophase_diffusion_harness.py`) は main でも同じ判定。feature で増えた `test_rerun_conditions.py` は rc 0。記録 `evidence/tests_main_77318d0e.txt`・`tests_feature.txt`。
+2. **PASS**: design の試験 (`.venv-opt`) は、両方にあるものの判定が同じ (非 0 は main でも非 0 の既知の 3 本 `run_sern_gates_tests.py`・`run_sern_moc_tests.py`・`run_species_attrs_ic_tests.py`)。feature で増えた 10 本 (`run_moc_axis_limit_tests.py`・`run_wall_single_bspline_tests.py`・`run_pw_upstream_poly_tests.py`・`run_mesh_euler_tests.py` など) は全部 rc 0。`run_opt_tests.py` は 2 つの木を同時に回した CPU の取り合いで 10 分を超えたので打ち切り (両方 rc 143)、1 本ずつ回し直して両方 ALL PASS (各 35 秒、`evidence/run_opt_tests_*.log`)。
+3. **PASS**: `check_plans.py` の FAIL は main 28 件 (21/49 OK)、feature 28 件 (22/50 OK)。増えていない。
+4. **PASS (引き継ぎ)**: 生産の問題の準備が run_0167 の入力を再現 (`prod_confirm.py`、AWS、c600b507、`case/45.isobutane_m6_d155/_band_ab/prod_confirm/PROD_CONFIRM.json`)。統合ブランチの中身が feature の先端と同一であることは下で確かめる。
+5. **PASS**: MOC の既定の切り替えの波及 (`moc_default_sweep.py`): 計算できた 228 本は新しい既定のゲートに全部合格、例外の 25 本は旧方式でも同じく例外、新しい既定だけで止まる問題は 0 (plans/accepted/discretization-moc-axis-limit-and-corrector.md §9)。ユーザに諮る事項は無い。
+
+→ 事前登録の 5 項目すべて合格。統合ブランチ `integrate/main-2026-10-07` を作り、PR (merge commit) で main へ入れる。
