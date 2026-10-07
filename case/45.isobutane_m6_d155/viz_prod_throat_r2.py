@@ -132,5 +132,66 @@ def main():
     print(json.dumps(summ, indent=1, ensure_ascii=False, default=float))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" and (len(sys.argv) == 1 or sys.argv[1] != "cad"):
     main()
+
+
+def fig_cad_overview():
+    """生産の壁の全体像 (半断面の寸法つきと、3/4 を切り欠いた 3D の内面)。出力 _band_ab/prod_confirm/viz/fig4_cad_overview.png。"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: F401
+    fp = Path.home() / ".fonts" / "NotoSansCJKjp-Regular.otf"
+    if fp.is_file():
+        font_manager.fontManager.addfont(str(fp))
+        plt.rcParams["font.family"] = font_manager.FontProperties(fname=str(fp)).get_name()
+    plt.rcParams["axes.unicode_minus"] = False
+    from forge_design.geometry.wall_axismach import load_wall_file
+    W = load_wall_file(HERE / "_band_ab" / "prod_confirm" / "prep")
+    s = float(W["scale_m"]) * 1000.0
+    x0, x1 = (float(v) for v in W["domain"])
+    x = np.linspace(x0, x1, 3000)
+    r = np.asarray(W["physical"].r(x)) * s
+    xm = x * s
+    th = W["throat"]
+    # (a) 半断面 (縦横同じ縮尺)
+    fig, a = plt.subplots(figsize=(12, 3.4), constrained_layout=True)
+    a.fill_between(xm, r, r.max() * 1.1, color="#d8dfda")
+    a.plot(xm, r, color="#0b6e4f", lw=1.6)
+    a.axhline(0, color="0.4", lw=0.8, ls="-.")
+    a.set_aspect("equal")
+    a.set_xlabel("x [mm] (原点 = 設計スロート)"); a.set_ylabel("r [mm]")
+    a.annotate(f"入口 r = {r[0]:.2f} mm", (xm[0], r[0]), (xm[0] + 300, r[0] + 120), arrowprops=dict(arrowstyle="->", lw=0.8), fontsize=10)
+    a.annotate(f"スロート r = {th['r'] * s:.3f} mm (x = {th['x'] * s:.2f} mm)", (th["x"] * s, th["r"] * s), (350, 260),
+               arrowprops=dict(arrowstyle="->", lw=0.8), fontsize=10)
+    a.annotate(f"出口 r = {r[-1]:.2f} mm", (xm[-1], r[-1]), (xm[-1] - 2000, r[-1] - 230), arrowprops=dict(arrowstyle="->", lw=0.8), fontsize=10)
+    a.annotate("", (xm[0], -90), (xm[-1], -90), arrowprops=dict(arrowstyle="<->", lw=0.8))
+    a.text(0.5 * (xm[0] + xm[-1]), -200, f"全長 {xm[-1] - xm[0]:.1f} mm (入口 → 出口)", ha="center", va="center", fontsize=10)
+    a.set_ylim(-260, r.max() * 1.1)
+    out = HERE / "_band_ab" / "prod_confirm" / "viz" / "fig4_section.png"
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    # (b) 内面 (見る側の 1/4 を切り欠いた回転面)
+    fig = plt.figure(figsize=(11, 5.2), constrained_layout=True)
+    b = fig.add_subplot(projection="3d")
+    xs = np.linspace(x0, x1, 260)
+    rs = np.asarray(W["physical"].r(xs)) * s
+    ph = np.linspace(np.pi, 2.5 * np.pi, 150)             # y < 0 かつ z > 0 の 1/4 (見る側) を除く
+    X, PH = np.meshgrid(xs * s, ph, indexing="ij")
+    R = np.repeat(rs[:, None], len(ph), axis=1)
+    b.plot_surface(X, R * np.cos(PH), R * np.sin(PH), color="#7fb8a3", alpha=0.95, linewidth=0, antialiased=True, shade=True)
+    b.set_box_aspect((xm[-1] - xm[0], 2 * r.max(), 2 * r.max()))
+    b.set_xlabel("x [mm]", labelpad=10)
+    b.set_yticks([-700, 0, 700]); b.set_zticks([-700, 0, 700])
+    b.tick_params(axis="y", labelsize=8); b.tick_params(axis="z", labelsize=8)
+    b.view_init(elev=24, azim=-58)
+    out2 = HERE / "_band_ab" / "prod_confirm" / "viz" / "fig5_inner_surface.png"
+    fig.savefig(out2, dpi=150)
+    plt.close(fig)
+    print(out, out2)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "cad":
+    fig_cad_overview()
