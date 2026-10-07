@@ -3,12 +3,12 @@
 ## メタ
 
 - **area**: `tooling`
-- **status**: `in_progress`
+- **status**: `done`  <!-- 2026-10-07 機能実装の完了 (生産採用はユーザ判断、§5.1 #6) -->
 - **related_docs**:
   - `methods/design/overview.md` (joint 壁、物理壁の解析経路)
 - **related_plans**:
   - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (現行の生産壁)
-  - [discretization-moc-axis-limit-and-corrector.md](discretization-moc-axis-limit-and-corrector.md) (並行する設計壁の変更。本 plan は設計を変えないので独立)
+  - [discretization-moc-axis-limit-and-corrector.md](../active/discretization-moc-axis-limit-and-corrector.md) (並行する設計壁の変更。本 plan は設計を変えないので独立)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`
 
@@ -44,6 +44,10 @@
 
 ### 4.1 1 本の B-spline への作り直し
 
+**現行仕様 (2026-10-07、ノット挿入の版)**: 対象は `pw_upstream: poly` の物理壁だけ (`ramp` との組み合わせは例外)。`poly` の物理壁は全区間が x の 5 次の区分多項式なので、当てはめをせず代数的に組む (上流の多項式化の plan §4.1b)。直管は定数の係数、上流の Q は [−L_U, 0] の Bézier を B-spline の係数へ直接変換、[0, x_e] は S と δ_r の補間スプラインのノットを和集合にそろえて係数を足す。継ぎ目 (−L_U・0) は重複度 3、定義域の両端は重複度 6。case/45 の単調壁 (U3) で係数 1588・異なるノット 1580・最小のノット間隔 7.6e-5 r_t、元の物理壁との差は半径 1.1e-14 r_t・1 階 1.0e-13・2 階 3.1e-11 (W1)。W0 の「既定不変」は、上流の方式などを固定したうえで表現のキーだけを足す範囲 (キー無し = 今の壁) を指し、`poly` を既定にした変更 (上流の多項式化の plan の U0・ユーザ決定) とは別に扱う。
+
+**以下は最小二乗の版の仕様 (外した。履歴として残す)。** ランプ両端の継ぎ目のノット・Gauss 点の最小二乗・δ_r の入力範囲の要求・事前試算 (係数 1747) は旧仕様の記述で、現行の実装には無い。
+
 - 定義域 [x_in, x_e] (= [−12.5, x_e])。次数 5。両端はノットの重複度 6。
 - **継ぎ目のノット**: 直管と上流 Hermite の接合 x = −L_U、実効ランプの両端 (`geometry.pw_ramp`、無ければ `default_pw_ramp` の値)、設計スロート x = 0 は、元の連続性 (2 階微分まで。3 階微分は元の壁でも跳ぶ) に合わせて重複度 3 のノットにする。位置は壁の属性から取り、ケースの定数を書かない (case/45 では −12・−11・−6・0)。重なった継ぎ目は 1 つにまとめる。定義域 [x_in, x_e] も壁の属性から取る。
 - **区間内のノット** (重複度 1): [−11, 0) は δ_r の補間スプラインの内部ノット、(0, x_e) は設計壁 S の内部ノットと δ_r の内部ノットの和集合。直管と [−12, −11) は内部ノットなし。
@@ -57,7 +61,7 @@
 - **形のゲートの維持**: 単調壁の形状ゲートのうち、物理壁にかかるもの (S6: 物理壁の r″ の最大増加 ≤ 0.002) と、ランプのゲート (`max|r″ − r″_design| ≤ 0.005`、`max r′ < 0`、`wall_axismach.py:399`) を、新しい 1 本でも満たすこと。
 - 係数の数・ノットの数・各区間の最大誤差を記録する。
 
-- **2026-10-07 ユーザ決定で係数の求め方を変更**: 上流を多項式にする plan ([tooling-nozzle-upstream-poly-and-throat-sizing.md](tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b) で壁の全区間が 5 次の区分多項式になるので、1 本の B-spline はノット挿入で代数的に組む。上の最小二乗の版は外す (「今の壁の STEP はいらない、外していいよ」)。最小二乗の版で行った W0〜W5 は、壁クラス・保存と復元・STEP・入力の同一性の検査の基盤の確認として記録に残し、W1・W5 は代数的な版で上流の plan の U3 と合わせてやり直す。
+- **2026-10-07 ユーザ決定で係数の求め方を変更**: 上流を多項式にする plan ([tooling-nozzle-upstream-poly-and-throat-sizing.md](../active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b) で壁の全区間が 5 次の区分多項式になるので、1 本の B-spline はノット挿入で代数的に組む。上の最小二乗の版は外す (「今の壁の STEP はいらない、外していいよ」)。最小二乗の版で行った W0〜W5 は、壁クラス・保存と復元・STEP・入力の同一性の検査の基盤の確認として記録に残し、W1・W5 は代数的な版で上流の plan の U3 と合わせてやり直す。
 
 ### 4.2 壁クラスと下流の道具
 
@@ -111,7 +115,8 @@
 | 2b | ~~基準成果物の確保~~ 完了 (2026-10-07) | `case/45.isobutane_m6_d155/_band_ab/wsb/base_legacy/` (HEAD 7a505415 の design/ の写し・キー無し・ローカルの変換器)、ハッシュ `base_legacy.hashes.json`、固定入力 `fixed_inputs.json`。W4 の統合検査に使う run_0147 の結果は AWS にあり未取得 | O |
 | 3 | ~~実装~~ 完了 (最小二乗の版、2026-10-07) | 壁クラス・壁ファイル・キー・報告・STEP・テスト (§9)。係数の求め方は上流の多項式化の plan §4.1b のノット挿入に置き換える (同 plan の §5.1 #3) | O |
 | 4 | ~~検証 (CFD 0 step)~~ 完了 (2026-10-07) | W0〜W5 PASS (ノット挿入の版で W1・W2・W3・W5 をやり直し、W4 の統合検査は run_0166 で PASS。§9) | O (解釈は F) |
-| 5 | codex result 段レビュー | `--stage result` (機能実装の完了でも必須) | O |
+| 5 | ~~codex result 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M1/m2、全件採用し対応済み (§6.1) | O |
+| 5b | δ_r の計算環境への依存 (引き継ぎ) | 同じ問題・同じコードでも、numpy・scipy の版が違うと積分法の δ_r が数 e-6 r_t 動く (2026-10-07 実測: ローカルの system python [numpy 1.26.4・scipy 1.11.4] と `.venv-opt` [numpy 2.5.2・scipy 1.18.0] で x = 90 で 7.17e-6 r_t。§9)。§9 の「未解決の観測」(run_0147 との 2.9e-6 r_t) もこの種類と見られる (AWS と手元の環境の違い。確かめてはいない)。ビット同一を要する比較は同じ環境で作る (W3・W4 はそうした)。δ_r の数値のノイズ床そのものは上流の多項式化の plan の既知の限界 (U2c・U2d) に引き継ぐ | O |
 | 6 | 生産への反映 | case/45 の問題 YAML にキーを入れるか (ユーザ判断)。W3 でソルバ入力がビット同一なら、表現の変更による CFD のやり直しは要らない。MOC の plan の変更に要る NS・凝縮の再評価は、本 plan の免除条件で省かない | ユーザ |
 
 ## 6. 検証
@@ -151,6 +156,7 @@
 | plan | `2026-10-07` | [`notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-plan.md`](../../notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-plan.md) (案 B に対して) | GO-with-changes, C0/M4/m2 | 案 B を取り下げ、案 A に書き直した (ユーザ決定)。M1 (W1 を満たす λ が 242 候補中 0) が取り下げの理由。M3 (壁クラスの属性・ic.py の黙った既定・報告の CSV 再補間) と m5 (量ごとの許容差・零曲率) は案 A の §4.2・§6 W4・W5 に反映。M2 (CSV の意味・二重平滑化) は平滑化を変えないので該当しない。M4 (IC の移送) は W3 でメッシュの差が丸めの範囲なら CFD を回さないので該当しない (不合格なら諮問)。m6 は §5.1 #5 に反映 |
 | diagnose (案 A) | `2026-10-07` | [`notes/reviews/2026-10-07-wall-single-bspline-repr-diagnose.md`](../../notes/reviews/2026-10-07-wall-single-bspline-repr-diagnose.md) (ブリーフ [`briefs/2026-10-07-wall-single-bspline-repr.md`](../../notes/reviews/briefs/2026-10-07-wall-single-bspline-repr.md)) | C0/M4/m2 | 全件採用: ③ W3 の「座標 ≤ 2 ulp なら CFD 不要」は却下 → ソルバ入力のビット同一の判別 A/B に改訂 (M) / ⑥ 弦の記述「内側・最大約 1 µm」は誤り → 全辺の符号付き実測 −5.62〜+1.15 µm に訂正、主セッションで再計算して一致 (`_band_ab/wall_chord_deviation.json`)、公差は指定値で比べる (M) / 旧 M2 の入力範囲を再採用: δ_r の表がランプ開始〜出口を覆わなければ例外 (M) / ⑤ W5 を転送誤差 (STEP↔保存スプライン) と元の壁との差 (W1 + 転送) に分ける、実寸・全制御点・回転体まで (M) / ① 最小二乗は離散二乗和で、ランプ外の一致は W1 で保証すると明記 (m) / ④ 診断属性を必須検査、差分図の設計壁も保存スプライン、スロート探索は今の囲い込み (m) / ② 許容誤差は据え置き、要求の上限と達成精度を別に記録 / ⑦ MOC と分離、両腕で MOC の版・設定を固定。ブリーフの「5 桁以上小さい」は誤り (r′ 4.3 桁、r″ 3.9 桁) / 原点は設計スロートと明記、ノットも mm に |
 | plan (案 A) | `2026-10-07` | [`notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-plan-2.md`](../../notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-plan-2.md) | GO-with-changes, C0/M1/m3 | 全件採用。M1 は主セッションでコードを確認 (`prepare_info.json` の `wall_fit.spline` のノットは [0, 95.245] だけ、報告は `wall_physical.csv`・`wall_design.csv` を読む `nozzle_report.py:485`)。Major の採否は上位に諮らずに決めた: レビュー自体が上位 (codex) の独立試算つきで、採用は検査の追加だけで設計方針を変えないため / M1 保存した壁の復元の取り決め (版・種類・有効域、設計壁に直管と上流 Hermite、域外は例外、旧 run は明示した旧経路) を §4.2 に、W4 に 4 種の単体検査 / m2 基準成果物を実装前に確保 (§5.1 #2b)、W0 は変更前後の比較、過去 run の再現は別項目、W4 を単体と統合に分ける / m3 継ぎ目・定義域・mm 換算を壁の属性と `scale_m` から決める、違うスケールと既定ランプの試験 / m4 W5 の表現誤差は接線角・曲率を直接比べ、角度は `atan2` |
+| result | `2026-10-07` | [`notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-result.md`](../../notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-result.md) | GO-with-changes, C0/M1/m2 | 全件採用。Major の採否は上位に諮らずに決めた (検査の追加だけで設計方針を変えないため)。M1 STEP 判定器: 位置を z を含む 3 次元に、平面性・辺の助変数の範囲・実際の端点 (頂点) を構造の検査に、CLI の終了判定に回転面の妥当性を追加 (`wall_step.py`・`freecad_wall_step_job.py`)。負例 5 件 (z に 1 mm・辺の終わりを中央・端点の不一致・頂点の欠落・回転面の不正) を `run_wall_single_bspline_tests.py` に追加、W5 を判定し直して PASS / m2 W4 の参照物のハッシュ (`_band_ab/wsb/W4_integration_hashes.json`、run_0166 139 件・run_0164 381 件・腕 A/B・写しの壁ファイル・両側の report.json) / m3 §4.1 に現行仕様をまとめ旧仕様を履歴と明示、W0 の範囲を限定、README を更新、δ_r の再現差を §5.1 #5b に |
 
 ## 7. 影響範囲
 
@@ -159,9 +165,9 @@
 
 ## 8. 完了条件
 
-- [ ] `methods/design/overview.md` を更新
-- [ ] §6 W0〜W5 の結果を §9 に記録し、完了の区分を明記する: **機能実装の完了** (生産の YAML は変えない) か **生産採用** (case/45 の YAML にキーを入れる、ユーザ判断)
-- [ ] codex レビュー 2 回 (plan / result) を §6.1 に記録
+- [x] `methods/design/overview.md` を更新 (STEP の検査の追加まで、2026-10-07)
+- [x] §6 W0〜W5 の結果を §9 に記録し、完了の区分を明記する: **機能実装の完了** (生産の YAML は変えない) か **生産採用** (case/45 の YAML にキーを入れる、ユーザ判断) — 2026-10-07 は「機能実装の完了」(§9)
+- [x] codex レビュー 2 回 (plan / result) を §6.1 に記録
 - [ ] `status: done` にして accepted へ移動し、`plans/README.md` を同期
 
 ## 9. 変更ログ
@@ -185,3 +191,7 @@
 - `2026-10-07` — **W4 の統合検査: PASS** (§6.0 W4 の 2026-10-07 改訂の登録、AWS、run_0166 と同じコード a6ce9390・同じ変換器、CFD 0 step)。出力 `case/45.isobutane_m6_d155/_band_ab/wsb/W4_integration.json`、図 `W4_integration_fig_wall_shape.png`、道具 `wsb_w4_integration.py`。
   - (1) N1 の問題で腕 A (キー無し)・腕 B (`single_bspline`) のソルバ入力が全項目ビット同一。(2) 腕 A が run_0166 の壁を再現 (`wall_physical.csv`・`wall_design.csv`・`delta_r_initial.csv` がバイト同一、`nozzle.h5` の幾何 30 データセットがビット同一、`throat_physical` 一致)。(3) run_0166 の結果に腕 B の壁ファイルを添えた写しの報告は `wall_source: saved_coefficients`・`wall_repr: single_bspline`、出口半径 0.7749987272573589 m が保存した係数の評価値と一致、壁形状以外の評価量が run_0166 自身の報告と一致。壁形状の図の r″ の高周波の最大 (x > 2) は CSV の再補間 1.72251e-4・保存した係数 1.72265e-4 (参考)。
   - **判定器の修正を 1 回した**: 初版の判定は FAIL。違いは場所のラベルの文字列 2 か所 (`metrics.wall_resolution.cmd` に入る run のパス、`conditions.case` の親ディレクトリ名) だけで、数値の評価量はすべて一致していた。登録の比較対象は「評価量」なので、判定器がパスの文字列まで比べていたのは実装の誤り。パスを元の run に置き換え、`case` を場所のラベルとして除く修正をして、判定だけをやり直した (prepare・報告は回し直していない)。初版の出力は `W4_integration_v1_pathlabels.json` に残した。
+- `2026-10-07` — **codex result 段レビュー**: `notes/reviews/2026-10-07-tooling-nozzle-wall-single-bspline-result.md` (GO-with-changes、C0/M1/m2)。全件採用 (§6.1)。
+  - **M1 の修正と W5 の再判定: PASS** (`case/45.isobutane_m6_d155/_band_ab/upoly/W5.json`、`.venv-opt` の Python で実行)。構造の検査に平面性・辺の範囲 [−958.17375, 7300.890608592] mm (= 定義域)・端点の誤差 2.5e-11 mm を追加して合格。転送誤差は位置 5.0e-10 mm (3 次元)・角度 2.6e-11 rad・曲率 7.4e-12 /mm。回転面は妥当 (面 1 枚、SurfaceOfRevolution)。作り直した壁と保存した壁は一致。`run_wall_single_bspline_tests.py` 87 項目 FAIL 0 (`.venv-opt`)。
+  - **再判定の途中の誤りの記録**: 最初に system python (numpy 1.26.4・scipy 1.11.4) で回し、「作り直した壁が保存した壁と 7.17e-6 r_t 違う」で FAIL になった (出力 `W5_v2_wrong_env_system_python.json`)。U3 の成果物は `.venv-opt` (numpy 2.5.2・scipy 1.18.0) で作っていた。U3 時点のコード (a382f37d) を取り出しても system python では同じ差が出るので、コードの変更ではなく環境の違い (積分法の δ_r の RK45) と判断し、同じ環境で回し直した。修正前の判定器の出力は `W5_v1_before_result_m1.json`。
+  - **完了の区分: 機能実装の完了**。生産の YAML にキーは入れていない (生産採用はユーザ判断、§5.1 #6)。

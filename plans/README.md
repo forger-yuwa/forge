@@ -25,7 +25,6 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
-| [tooling-nozzle-wall-single-bspline.md](active/tooling-nozzle-wall-single-bspline.md) | `tooling` | **in_progress 2026-10-07 (案 A)**: 設計の中身は変えず、物理壁を入口から出口まで 1 本の x の 5 次 B-spline (run_0147 で係数 1747、元の壁との差 1e-13 r_t) に作り直し、メッシュ生成・報告・CAD で共通に使う。CAD には STEP (平面の B-spline 曲線、mm) で渡す。CFD を省く条件はソルバ入力のビット同一。既定はビット同一。諮問・plan 段レビュー済み、実装待ち |
 | [discretization-moc-axis-limit-and-corrector.md](active/discretization-moc-axis-limit-and-corrector.md) | `discretization` | **in_progress 2026-10-07**: 逆 MOC の軸上の端点のソース項を、相手からの代用ではなく解析極限 θ_r = ½√(M²−1)·dν/dx (semi-perfect は ν(M) 表) にし、予測修正を収束まで回す。YAML キーで選び既定はビット同一。実装済み (V0 支持・V1 PASS・V4 候補の条件を満たす: case/45 で第 1 点の角度差 0.0219 → 0.0054°)。case/45 の生産候補 (2026-10-07 ユーザ決定)。V5・V5b は保留、V5c で Euler の全温の超過が保存状態にあると判明。生産採用の判断は Euler の異常の切り分け (verification-case45-euler-total-enthalpy) を待つ |
 | [verification-case45-euler-total-enthalpy.md](active/verification-case45-euler-total-enthalpy.md) | `verification` | **draft 2026-10-07 (診断中)**: case/45 の Euler (すべり壁・断熱) でスロート付近の壁際の全温が Tt を最大 +373 K 超える (保存状態にある、MOC の plan の V5c)。発生する段・原因・設計の入力 (初期線 run_0062・出口較正) への影響を切り分ける。最初は起動前の prep 対 soft 段の後の 0 step A/B (E1)。MOC の生産採用はこの結果を待つ |
 | [tooling-nozzle-upstream-poly-and-throat-sizing.md](active/tooling-nozzle-upstream-poly-and-throat-sizing.md) | `tooling` | **draft 2026-10-07**: 物理壁のスロートより上流に δ_r を足さず、配管〜スロートを 5 次多項式 1 本にする (`geometry.pw_upstream: poly` をコードの既定にする。今の作り方は `ramp` の明示で再現)。寸法を物理スロート径から逆算する `solve_rt_throat` を足す (出口径から決める今の方式と選択)。ユーザ決定、諮問待ち |
@@ -81,6 +80,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-nozzle-wall-single-bspline.md](accepted/tooling-nozzle-wall-single-bspline.md) | `tooling` | **done 2026-10-07 (機能実装の完了、生産未採用)**: `pw_upstream: poly` の物理壁を入口から出口まで 1 本の x の 5 次 B-spline にノット挿入で厳密に組み (case/45 で係数 1588、元の壁との差 1.1e-14 r_t)、壁ファイル (`wall_repr.json`、版 2) に保存して報告が係数から評価、CAD には STEP (平面の B-spline 曲線、mm) で渡す。キー `geometry.physical_wall_repr`。W0〜W5 PASS (W3 ソルバ入力のビット同一、W4 統合検査は run_0166)。最小二乗の版は外した。生産の YAML への反映はユーザ判断 |
 | [tooling-nozzle-throat-monotone-r2.md](accepted/tooling-nozzle-throat-monotone-r2.md) | `tooling` | **done 2026-10-07 (生産採用・限定)**: joint 壁に r‴ ≤ 0 の拘束 (`wall_fit_mono_r2`) を入れ、スロート直後の r″ の山 (0.5102) を消した。Euler は実務判定に合格、dry NS は全ゲート合格、凝縮 NS は 4 量 STEADY。生産入口 (deltastar_loop) が k_f を読まない欠陥を修正。将来課題: MOC 始点付近の誤差 (axis_dx0) |
 | [tooling-rerun-conditions.md](accepted/tooling-rerun-conditions.md) | `tooling` | **done 2026-10-06**: 既存 run の形状を固定して入口条件・背圧・H2O 分率だけ変えた run を作るツール (`solver_density_cuda/tools/rerun_conditions.py`)。Pt 変更は full + 本段 cfl 1 + scale-ic pt を推奨 (粗格子で検証)。残作業 #9・#11 は生産利用時に |
 | [tooling-nozzle-cfd-pinned-initial-line.md](accepted/tooling-nozzle-cfd-pinned-initial-line.md) | `tooling / nozzle design` | **done 2026-10-06** (実装・評価の完了; 性能の認定は保留): 生産レシピ = CFD ピン初期線 + 当てはめ壁 + 生産格子 (ni 2000 × nj 97) + 生産格子の Euler で出口較正 (+3.770e−4) + C2。最終 NS run_0117: 出口 M −0.019 % (下限境界上、ユーザ決定 B)・Mach 波 DRIFTING (ユーザ決定 A)。軸付近の半径方向格子に評価量が強く依存 (#11h)。未確認事項は campaign-recipe #16〜#19・verification-m6 #17 へ移管 |

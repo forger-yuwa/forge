@@ -1,4 +1,4 @@
-r"""物理壁の STEP の書き出しと読み直しの検査 (plans/active/tooling-nozzle-wall-single-bspline.md §4.3・§6 W5)。
+r"""物理壁の STEP の書き出しと読み直しの検査 (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.3・§6 W5)。
 
 run の壁ファイル (`wall_repr.json`、物理壁の表現 `single_bspline`) の 1 本の 5 次 B-spline $r(x)$ [r_t] を、平面の
 B-spline 曲線 $C(u) = (x(u), r(u), 0)$ として STEP (`B_SPLINE_CURVE_WITH_KNOTS`) に 1 本だけ書く。
@@ -171,8 +171,11 @@ def sample_params(data: dict, n_per_interval: int = 3, eps_rel: float = 1e-12) -
 
 def transfer_check(data: dict, rd: dict, pts: list) -> dict:
     """読み直した STEP (`read_step` の結果) と保存した B-spline (data) の構造と転送誤差 (plan §6 W5)。
-    構造: 次数・異なるノット (数と値; 値は STEP の実数の桁数で丸まるので位置の許容差 [mm] 以内)・重複度・制御点数・非有理・辺 1 本。
-    転送誤差: 各点の位置 [mm]・接線方向の角度 [rad]・曲率 (絶対 [1/mm] または相対)。保存した側は自前の de Boor (`DeBoor`) で評価する。"""
+    構造: 次数・異なるノット (数と値; 値は STEP の実数の桁数で丸まるので位置の許容差 [mm] 以内)・重複度・制御点数・非有理・辺 1 本・
+    平面性 (全制御点の |z| ≤ 位置の許容差)・辺が定義域の全体 (辺の助変数の範囲 = 最初と最後のノット)・実際の端点 (辺の頂点 2 つ) が
+    保存した曲線の両端と 3 次元で一致。
+    転送誤差: 各点の位置 [mm、z を含む 3 次元]・接線方向の角度 [rad]・曲率 (絶対 [1/mm] または相対)。保存した側は自前の de Boor
+    (`DeBoor`) で評価する (2026-10-07 result 段レビュー M1: z の移動・途中で切れた辺を検出していなかった)。"""
     tol = TRANSFER_TOL
     st = {"degree": rd.get("degree") == data["degree"],
           "n_poles": rd.get("n_poles") == data["n_poles"],
@@ -183,7 +186,19 @@ def transfer_check(data: dict, rd: dict, pts: list) -> dict:
     kn_rd = np.asarray(rd.get("knots", []), dtype=float)
     po_rd = np.asarray(rd.get("poles", []), dtype=float)
     st["knot_values"] = bool(len(kn_rd) == len(data["knots_mm"]) and np.abs(kn_rd - data["knots_mm"]).max() <= tol["pos_mm"])
+    st["planar"] = bool(po_rd.ndim == 2 and po_rd.shape[0] > 0 and po_rd.shape[1] == 3 and np.abs(po_rd[:, 2]).max() <= tol["pos_mm"])
+    k0, k1 = float(data["knots_mm"][0]), float(data["knots_mm"][-1])
+    ef, el = rd.get("edge_first"), rd.get("edge_last")
+    st["edge_full_range"] = bool(ef is not None and el is not None and abs(float(ef) - k0) <= tol["pos_mm"] and abs(float(el) - k1) <= tol["pos_mm"])
+    db_end = DeBoor(data["t_mm"], data["poles_mm"], data["degree"], nder=0)
+    ends = [np.r_[db_end(k0, "right")[0], 0.0], np.r_[db_end(k1, "left")[0], 0.0]]
+    vt = np.asarray(rd.get("vertices", []), dtype=float)
+    e_end = None
+    if vt.shape == (2, 3):
+        e_end = max(min(float(np.linalg.norm(v - e)) for v in vt) for e in ends)   # 頂点の順は問わない、両端それぞれに最も近い頂点
+    st["edge_endpoints"] = bool(e_end is not None and e_end <= tol["pos_mm"])
     out = {"structure": st,
+           "edge_range": [ef, el], "edge_endpoints_max_err_mm": e_end,
            "knots_max_abs_diff_mm": (float(np.abs(kn_rd - data["knots_mm"]).max()) if len(kn_rd) == len(data["knots_mm"]) else None),
            "poles_max_abs_diff_mm": (float(np.abs(po_rd[:, :2] - data["poles_mm"]).max()) if po_rd.shape[0] == data["n_poles"] else None),
            "poles_max_abs_z": (float(np.abs(po_rd[:, 2]).max()) if po_rd.size else None)}
@@ -196,7 +211,7 @@ def transfer_check(data: dict, rd: dict, pts: list) -> dict:
     pos, ang, kap, rows = [], [], [], []
     for (u, side, lab), (p0, d1, d2) in zip(pts, ev):
         ref = db(u, side)
-        e_pos = float(np.hypot(p0[0] - ref[0, 0], p0[1] - ref[0, 1]))
+        e_pos = float(np.linalg.norm(np.asarray(p0, dtype=float) - np.r_[ref[0, 0], ref[0, 1], 0.0]))   # z を含む 3 次元
         a_rd, k_rd = tangent_angle_curvature(np.array(d1[:2]), np.array(d2[:2]))
         a_rf, k_rf = tangent_angle_curvature(ref[1], ref[2])
         e_ang = float(abs(angle_diff(a_rd, a_rf)))
@@ -217,6 +232,12 @@ def transfer_check(data: dict, rd: dict, pts: list) -> dict:
     st_ok = all(st.values())
     out["pass"] = bool(st_ok and pos.max() <= tol["pos_mm"] and ang.max() <= tol["angle_rad"] and kap_ok.all())
     return out
+
+
+def revolve_ok(rv) -> bool:
+    """x 軸まわりの回転面 (内面) が作れたか: 妥当 (`isValid`)・面が 1 枚以上・面積が正 (2026-10-07 result 段レビュー M1:
+    CLI の終了判定に含めていなかった)。"""
+    return bool(isinstance(rv, dict) and rv.get("is_valid") is True and int(rv.get("n_faces") or 0) >= 1 and float(rv.get("area_mm2") or 0.0) > 0.0)
 
 
 def chord_deviation(rec: dict, run_dir) -> dict:
@@ -308,7 +329,7 @@ def export_run(run_dir, out_dir=None, freecadcmd: str | None = None, n_per_inter
     sc["step_file"] = step.name
     sc["write"] = wr
     sc["readback"] = {"transfer": transfer_check(data, rd, pts), "revolve": rd.get("revolve"),
-                      "freecad_version": rd.get("freecad_version")}
+                      "revolve_ok": revolve_ok(rd.get("revolve")), "freecad_version": rd.get("freecad_version")}
     (out_dir / "wall_physical_step.json").write_text(json.dumps(sc, indent=1, ensure_ascii=False, default=float))
     return sc
 
@@ -322,10 +343,11 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     sc = export_run(a.run_dir, a.out, a.freecadcmd)
     tr = sc["readback"]["transfer"]
+    rv_ok = revolve_ok(sc["readback"]["revolve"])
     print(json.dumps({"step": sc["step_file"], "transfer_pass": tr["pass"], "pos_max_mm": tr.get("pos_max_mm"),
                       "angle_max_rad": tr.get("angle_max_rad"), "kappa_abs_max_per_mm": tr.get("kappa_abs_max_per_mm"),
-                      "revolve": sc["readback"]["revolve"]}, indent=1, ensure_ascii=False))
-    return 0 if tr["pass"] else 1
+                      "revolve": sc["readback"]["revolve"], "revolve_ok": rv_ok}, indent=1, ensure_ascii=False))
+    return 0 if (tr["pass"] and rv_ok) else 1
 
 
 if __name__ == "__main__":

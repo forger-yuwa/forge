@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元・STEP の試験 (plans/active/tooling-nozzle-wall-single-bspline.md §4・§6 W4・W5、
+"""物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元・STEP の試験 (plans/accepted/tooling-nozzle-wall-single-bspline.md §4・§6 W4・W5、
 係数の求め方は plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1b のノット挿入 — 2026-10-07 に最小二乗の版から直した)。
 
 壁は case/45 の単調壁の生産問題 (`problem_d155_ns_finemesh_recal_final_mono.yaml`) の初期線だけ Hall に差し替え、`pw_ramp`・
@@ -300,6 +300,45 @@ with tempfile.TemporaryDirectory() as td:
               np.abs(ev[:, 0] - uu).max() <= 1e-9)
         check(f"STEP ({lab}): 自前の de Boor と保存した B-spline (scipy) の r が一致 (max {np.abs(ev[:, 1] - Bx_.spline(uu / s_) * s_).max():.1e} mm)",
               np.abs(ev[:, 1] - Bx_.spline(uu / s_) * s_).max() <= 1e-9)
+    # 判定器の負例 (FreeCAD 不要; 2026-10-07 result 段レビュー M1): 保存した曲線から作った「完全な読み直し」を基準に、
+    # z の移動・途中で切れた辺・頂点の欠落・回転面の不正を検出すること
+    import copy
+    from forge_design.export.wall_step import revolve_ok
+    dat = step_curve_data(Wsb["record"])
+    pts = sample_params(dat, 1)
+    dbp = DeBoor(dat["t_mm"], dat["poles_mm"], dat["degree"], nder=2)
+    k0, k1 = float(dat["knots_mm"][0]), float(dat["knots_mm"][-1])
+    e0, e1 = dbp(k0, "right")[0], dbp(k1, "left")[0]
+    rd0 = {"n_edges": 1, "curve_type": "BSplineCurve", "degree": dat["degree"], "n_poles": dat["n_poles"], "is_rational": False,
+           "knots": [float(v) for v in dat["knots_mm"]], "mults": [int(m) for m in dat["mults"]],
+           "poles": [[float(x), float(y), 0.0] for x, y in dat["poles_mm"]], "edge_first": k0, "edge_last": k1,
+           "vertices": [[float(e0[0]), float(e0[1]), 0.0], [float(e1[0]), float(e1[1]), 0.0]],
+           "eval": [[[*map(float, r[0]), 0.0], [*map(float, r[1]), 0.0], [*map(float, r[2]), 0.0]] for r in (dbp(u, sd) for u, sd, _ in pts)]}
+    check("STEP 判定器: 保存した曲線そのものの読み直しは合格", transfer_check(dat, rd0, pts)["pass"])
+    rz = copy.deepcopy(rd0)
+    for q in rz["poles"] + rz["vertices"]:
+        q[2] += 1.0
+    for ev_ in rz["eval"]:
+        ev_[0][2] += 1.0
+    trz = transfer_check(dat, rz, pts)
+    check(f"STEP 判定器 (負例): 全体を z に 1 mm 動かすと不合格 (平面性 {trz['structure']['planar']}・位置 {trz['pos_max_mm']:.2g} mm)",
+          (not trz["pass"]) and not trz["structure"]["planar"] and trz["pos_max_mm"] >= 0.999)
+    rm = copy.deepcopy(rd0)
+    rm["edge_last"] = 0.5 * (k0 + k1)
+    trm = transfer_check(dat, rm, pts)
+    check("STEP 判定器 (負例): 辺の終わりを定義域の中央にすると不合格", (not trm["pass"]) and not trm["structure"]["edge_full_range"])
+    rv_ = copy.deepcopy(rd0)
+    rv_["vertices"] = [rd0["vertices"][0], [0.5 * (k0 + k1), float(dbp(0.5 * (k0 + k1))[0][1]), 0.0]]
+    trv = transfer_check(dat, rv_, pts)
+    check("STEP 判定器 (負例): 実際の端点が曲線の端でないと不合格", (not trv["pass"]) and not trv["structure"]["edge_endpoints"])
+    rn = copy.deepcopy(rd0)
+    rn.pop("vertices")
+    check("STEP 判定器 (負例): 頂点が無ければ不合格", not transfer_check(dat, rn, pts)["pass"])
+    check("回転面の判定: 妥当・面 1 枚以上・面積 > 0 だけ合格",
+          revolve_ok({"is_valid": True, "n_faces": 1, "area_mm2": 1.0})
+          and not revolve_ok({"is_valid": False, "n_faces": 1, "area_mm2": 1.0})
+          and not revolve_ok({"is_valid": True, "n_faces": 0, "area_mm2": 1.0})
+          and not revolve_ok({"is_valid": True, "n_faces": 1, "area_mm2": 0.0}) and not revolve_ok(None))
     if Path(FREECADCMD).is_file():
         dat = step_curve_data(Wsb["record"])
         stp = td / "wall.step"
@@ -312,7 +351,7 @@ with tempfile.TemporaryDirectory() as td:
         check(f"STEP 転送誤差: 位置 {tr['pos_max_mm']:.1e} mm ≤ 1e-6、角度 {tr['angle_max_rad']:.1e} ≤ 1e-9、曲率 {tr['kappa_abs_max_per_mm']:.1e} /mm",
               tr["pass"])
         rv = rd.get("revolve") or {}
-        check(f"回転面 (内面) を作れる: {rv}", rv.get("is_valid") is True and rv.get("area_mm2", 0) > 0)
+        check(f"回転面 (内面) を作れる: {rv}", revolve_ok(rv))
     else:
         SKIPPED.append(f"STEP の FreeCAD 往復 ({FREECADCMD} が無い)")
 

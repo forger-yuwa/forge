@@ -5,8 +5,8 @@
 
 mode = write: 次数・制御点 (x, y) [mm]・異なるノット [mm]・重複度から `Part.BSplineCurve.buildFromPolesMultsKnots`
               (非周期・重み 1) で曲線を作り、辺 1 本だけを `exportStep` で書く。
-mode = read:  `Part.Shape().read()` で読み直し、辺の数・曲線の型・次数・ノット・重複度・制御点・重みと、指定した助変数 u での
-              位置・1 階・2 階微分 (`getD2`) を返す。`revolve` が真なら x 軸まわりに 360° 回して回転面 (内面) を作り、
+mode = read:  `Part.Shape().read()` で読み直し、辺の数・曲線の型・次数・ノット・重複度・制御点・重み・辺の助変数の範囲と
+              頂点の座標 (実際の端点) と、指定した助変数 u での位置・1 階・2 階微分 (`getD2`) を返す。`revolve` が真なら x 軸まわりに 360° 回して回転面 (内面) を作り、
               型・妥当性 (`isValid`)・面積を返す。
 """
 import json
@@ -43,7 +43,8 @@ def _read(job):
                 "mults": [int(m) for m in cc.getMultiplicities()],
                 "poles": [[p.x, p.y, p.z] for p in cc.getPoles()], "weights": [float(w) for w in cc.getWeights()],
                 "first": cc.FirstParameter, "last": cc.LastParameter,
-                "edge_first": e.FirstParameter, "edge_last": e.LastParameter})
+                "edge_first": e.FirstParameter, "edge_last": e.LastParameter,
+                "vertices": [[v.Point.x, v.Point.y, v.Point.z] for v in e.Vertexes]})
     ev = []
     for u in job.get("u", []):
         p0, d1, d2 = cc.getD2(float(u))

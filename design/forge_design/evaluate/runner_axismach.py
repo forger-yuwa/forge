@@ -252,7 +252,7 @@ def _moc_keys(geometry: dict) -> tuple:
 
 
 def _physical_wall_repr(geometry: dict):
-    """geometry.physical_wall_repr を読む (plans/active/tooling-nozzle-wall-single-bspline.md §4.4)。キーが無ければ None
+    """geometry.physical_wall_repr を読む (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4)。キーが無ければ None
     (既定 = 今の物理壁 `legacy`、壁ファイルを書かない — 変更前とビット同一)。値は 'legacy' / 'single_bspline' に完全一致
     すること — null・大文字違い・前後の空白・数値・真偽値は既定に読み替えず例外にする。"""
     if "physical_wall_repr" not in geometry:
@@ -1200,7 +1200,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       半径方向補正 δ_r(x) [r_t] の CSV (列 x_rt, delta_r; `feedback.deltastar_loop` が作る
       `delta_r_next.csv`) を全域そのまま使い、`offset="radial"` で壁を作る。`dstar_csv`/`dstar_blend`
       (旧 v3 継ぎはぎ) とは排他。`euler_ref` (固定 Euler 参照 run) は帳簿用に prepare_info へ記録。
-    - **`geometry.physical_wall_repr`** (plans/active/tooling-nozzle-wall-single-bspline.md §4.4): 物理壁の表現。キー無し = 今の壁
+    - **`geometry.physical_wall_repr`** (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.4): 物理壁の表現。キー無し = 今の壁
       (変更前とビット同一、壁ファイルを書かない) / `legacy` = 今の壁 + 壁ファイル (復元に要る全要素) / `single_bspline` = 入口から
       出口まで 1 本の 5 次 B-spline に作り直した壁 (`SingleBSplinePhysicalWall`) + 壁ファイル。キーを書いたときは壁ファイル
       `wall_repr.json` (形式の版・表現の種類・有効域・単位・設計壁と物理壁の係数) を run に置き、prepare_info.json の

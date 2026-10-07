@@ -486,7 +486,7 @@ def fig_wall_shape(run, F, path):
     """物理壁 r_w と設計壁の形と 1・2 階微分。2 階微分の高周波 (0.5 r_t 移動平均の残差) を壁全体と δ_r 部分 (r_w − 設計壁) に
     分けて出す。
 
-    壁の出所 (plans/active/tooling-nozzle-wall-single-bspline.md §4.2「保存した壁の復元の取り決め」):
+    壁の出所 (plans/accepted/tooling-nozzle-wall-single-bspline.md §4.2「保存した壁の復元の取り決め」):
     - run に壁ファイル (`wall_repr.json`) があれば、保存した係数・ノットから物理壁と設計壁 (直管・上流 Hermite・S) を復元して
       評価する (`_fig_wall_shape_saved`、共通の読み込み関数 `load_wall_file`)。図は入口から出口まで。要素が欠けていたら例外。
     - 壁ファイルの無い旧 run は旧経路: 物理壁 r_w (wall_physical.csv、物理スロート〜出口) と設計壁 r_inv (wall_design.csv の

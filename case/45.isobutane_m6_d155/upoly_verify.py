@@ -601,7 +601,7 @@ def run_w1w2():
 
 
 def run_w5():
-    from forge_design.export.wall_step import export_run, read_step, sample_params, step_curve_data
+    from forge_design.export.wall_step import export_run, read_step, revolve_ok, sample_params, step_curve_data
     from forge_design.geometry.wall_axismach import load_wall_file
     RB = UP / "u3_B_poly_single_bspline"
     outd = UP / "step"
@@ -621,7 +621,7 @@ def run_w5():
            "sidecar": str(outd / "wall_physical_step.json"), "same_as_rebuilt_wall": same,
            "structure": tr["structure"], "structure_pass": all(tr["structure"].values()),
            "transfer": {k: tr[k] for k in tr if k != "structure"}, "orig": orig,
-           "revolve": {**rv, "pass": bool(rv.get("is_valid") is True and rv.get("area_mm2", 0) > 0)},
+           "revolve": {**rv, "pass": revolve_ok(rv)},
            "freecad_version": sc["readback"].get("freecad_version"), "chord_minus_curve_um": sc["cad_vs_cfd"].get("chord_minus_curve"),
            "receiving_cad": "未確認 (受け取り側の CAD の種類・版での読み込みはユーザ側で確認)"}
     ok = out["structure_pass"] and tr["pass"] and orig["pass"] and orig["derivative_units_pass"] and out["revolve"]["pass"] and same

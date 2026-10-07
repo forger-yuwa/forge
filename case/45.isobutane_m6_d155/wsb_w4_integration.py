@@ -167,5 +167,35 @@ def judge():
     print(json.dumps({"verdict": out["verdict"], **{k: v["pass"] for k, v in ck.items()}}, ensure_ascii=False))
 
 
+def hashes():
+    """W4 の参照物の固定 (2026-10-07 result 段レビュー m2): 比べた run_0166・Euler 参照 run_0164 の全ファイル (報告の出力を除く)、
+    腕 A/B の成果物、写しの壁ファイル、両側の report.json の sha256 を _band_ab/wsb/W4_integration_hashes.json に残す。"""
+    import hashlib
+
+    def sha(p: Path) -> str:
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for b in iter(lambda: f.read(1 << 22), b""):
+                h.update(b)
+        return h.hexdigest()
+
+    def tree(d: Path, skip=("report",)) -> dict:
+        return {p.name: sha(p) for p in sorted(d.iterdir()) if p.is_file() and p.name not in skip}
+
+    R = OUT / "run_0166_sb"
+    from forge_design.geometry.wall_axismach import WALL_FILE
+    out = {"item": "W4 統合検査の参照物のハッシュ (plan §6.0 W4、2026-10-07 result 段レビュー m2)",
+           "run_0166_ns_n012_N1": tree(RUN), "run_0166_report_json": sha(RUN / "report" / "report.json"),
+           "run_0164_euler_e4_recal_d1": tree(EULER),
+           "copy_run_0166_sb": {"wall_file": sha(R / WALL_FILE), "report_json": sha(R / "report" / "report.json"),
+                                "symlinks": {p.name: str(p.resolve()) for p in sorted(R.iterdir()) if p.is_symlink()}},
+           "arm_A_key_absent": tree(OUT / "A_key_absent"), "arm_B_single_bspline": tree(OUT / "B_single_bspline"),
+           "W4_integration_json": sha(C / "_band_ab" / "wsb" / "W4_integration.json"),
+           "checker": {"wsb_w4_integration.py": sha(Path(__file__)), "wsb_verify.py": sha(C / "wsb_verify.py"), "wsb_prepare.py": sha(C / "wsb_prepare.py")}}
+    dst = C / "_band_ab" / "wsb" / "W4_integration_hashes.json"
+    dst.write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(f"[w4i] {dst}: run_0166 {len(out['run_0166_ns_n012_N1'])} 件・run_0164 {len(out['run_0164_euler_e4_recal_d1'])} 件")
+
+
 if __name__ == "__main__":
-    {"prepare": prepare, "judge": judge}[sys.argv[1]]()
+    {"prepare": prepare, "judge": judge, "hashes": hashes}[sys.argv[1]]()

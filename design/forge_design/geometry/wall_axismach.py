@@ -21,7 +21,7 @@ Hermite の端点条件 (同じ 0 と 1/R) の一致で C²。
 
 物理壁を入口から出口まで 1 本の 5 次 B-spline に作り直す `SingleBSplinePhysicalWall` と、run に保存した壁
 (`wall_repr.json`) の書き出し・復元 (`save_wall_file` / `load_wall_file`) は末尾
-(plans/active/tooling-nozzle-wall-single-bspline.md)。
+(plans/accepted/tooling-nozzle-wall-single-bspline.md)。
 
 joint 壁の物理壁の上流の作り方 (`geometry.pw_upstream`: `poly` = 配管〜設計スロートの 5 次多項式 [既定] / `ramp` = 旧来の
 δ_r ランプ) と、物理スロートを物理壁の大域最小として求める `wall_global_min` も末尾
@@ -1225,7 +1225,7 @@ class JointFitCFDWall(AxisMachCFDWall):
                          **fd}
 
 
-# --- 物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元 (plans/active/tooling-nozzle-wall-single-bspline.md) -----------
+# --- 物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元 (plans/accepted/tooling-nozzle-wall-single-bspline.md) -----------
 PHYSICAL_WALL_REPRS = ("legacy", "single_bspline")   # problem の geometry.physical_wall_repr (キー無し = legacy・壁ファイルなし)
 WALL_FILE = "wall_repr.json"                          # run_dir 直下の壁ファイル (保存した壁の復元の取り決め §4.2)
 WALL_FILE_FORMAT = "forge_design.nozzle_wall"

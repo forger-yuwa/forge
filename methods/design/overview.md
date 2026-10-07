@@ -916,7 +916,7 @@ $Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、�
 - CLI: `python -m forge_design.feedback.deltastar_loop --problem P --euler-ref X --run-dir Y --solve-rt-throat R [--prev RUN --delta-next CSV --delta-r-out CSV]`。
 
 **物理壁の表現: 全域 1 本の 5 次 B-spline と STEP (`geometry.physical_wall_repr`, 2026-10-07 実装、生産未採用)**
-(計画: [`plans/active/tooling-nozzle-wall-single-bspline.md`](../../plans/active/tooling-nozzle-wall-single-bspline.md)、係数の求め方は
+(計画: [`plans/accepted/tooling-nozzle-wall-single-bspline.md`](../../plans/accepted/tooling-nozzle-wall-single-bspline.md)、係数の求め方は
 [`tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b)。
 上の解析経路の `poly` の物理壁は、区間ごとに別の式 (直管の定数・$Q$・S + $\delta_r$) で、**全区間が $x$ の 5 次の区分多項式**である。
 これを、設計の中身を変えずに、入口から出口まで **1 本の $x$ の 5 次 B-spline** に**ノット挿入で代数的に**作り直し (当てはめなし)、
@@ -960,7 +960,10 @@ $Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、�
   換算 $1000\cdot$`scale_m`)、制御点 $P_i=(\bar x_i, c_i)$ ($\bar x_i$ はグレビル点 — B-spline は 1 次関数を正確に表すので $x(u)=u$)、
   次数 5・重み 1。原点は設計スロート、物理スロートの位置・入口端と出口端・全壁辺の「弦 − 曲線」の分布は添え書き (JSON) に書く。
   書き出し・読み直し・回転面の作成は FreeCAD (`freecadcmd`) で行い、読み直した曲線を自前の de Boor (scipy を使わない) と比べる
-  (位置 $\le10^{-6}$ mm、接線方向の角度 $\le10^{-9}$ rad、曲率 $\le10^{-9}$/mm または相対 $10^{-9}$)。STEP の実数は 13 桁で書かれ、
+  (位置は z を含む 3 次元で $\le10^{-6}$ mm、接線方向の角度 $\le10^{-9}$ rad、曲率 $\le10^{-9}$/mm または相対 $10^{-9}$)。構造の検査は
+  次数・ノット・重複度・制御点数・非有理・辺 1 本に加え、平面性 (全制御点の $|z|\le10^{-6}$ mm)・辺の助変数の範囲が定義域の全体・
+  辺の頂点 (実際の端点) が曲線の両端と一致すること (2026-10-07 result 段レビューで追加: z の移動と途中で切れた辺を検出していなかった)。
+  CLI の終了コードは転送の判定と回転面の妥当性 (`isValid`・面 1 枚以上・面積 > 0) の両方で決まる。STEP の実数は 13 桁で書かれ、
   case/45 の転送誤差は位置 $5\times10^{-10}$ mm。回転体 (内面) にするのは CAD 側の作業。
 - **CAD の形と CFD の形**: STEP の曲線と 1 本の B-spline は丸めの範囲で一致し、1 本の B-spline と今の物理壁の差は許容誤差 (半径
   0.01 µm) まで。CFD が解くのは壁の上の節点を直線でつないだ多角形で、曲線との差 (弦 − 曲線) は case/45 の生産メッシュ
