@@ -1,0 +1,155 @@
+=== 構成 c52cht (追加診断 B: d = max|A−B|、S_abs = 同ビルド内 6 対の最大、D_abs = ビルド間 9 対の最大、合格 D_abs ≤ 2·S_abs)
+  (情報) run_0186_c52cht_base_r4: 除外 (.exclude) — 比較に使わない
+  (情報) run_0187_c52cht_base_r5: 除外 (.exclude) — 比較に使わない
+  (情報) run_0188_c52cht_base_r6: 除外 (.exclude) — 比較に使わない
+  (情報) run_0189_c52cht_base_r7: 除外 (.exclude) — 比較に使わない
+  (情報) run_0190_c52cht_new_r4: 除外 (.exclude) — 比較に使わない
+  (情報) run_0191_c52cht_new_r5: 除外 (.exclude) — 比較に使わない
+  (情報) run_0192_c52cht_new_r6: 除外 (.exclude) — 比較に使わない
+  (情報) run_0193_c52cht_new_r7: 除外 (.exclude) — 比較に使わない
+[完全性] 予定: kind forge、反復 3 本 (base と new)、N 200、出力間隔 200、必要ファイル res_0.h5, res_200.h5, residual_history.csv, res_wall_bot_3_200.h5, res_wall_top_4_200.h5, conjugate_Tw_3.csv, conjugate_history.csv
+  run_0012_c52cht_base_r1: OK
+  run_0048_c52cht_base_r2: OK
+  run_0078_c52cht_base_r3: OK
+  run_0109_c52cht_new_r1: OK
+  run_0139_c52cht_new_r2: OK
+  run_0169_c52cht_new_r3: OK
+  最終出力の物理時刻・step の属性 (run_0012_c52cht_base_r1): res_wall_bot_3_200.h5:/@step=200, res_wall_bot_3_200.h5:/@step_abs=200, res_wall_top_4_200.h5:/@step=200, res_wall_top_4_200.h5:/@step_abs=200
+  >> COMPLETE: PASS
+  B1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0012_c52cht_base_r1
+  B2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0048_c52cht_base_r2
+  B3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0078_c52cht_base_r3
+  N1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0109_c52cht_new_r1
+  N2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0139_c52cht_new_r2
+  N3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0169_c52cht_new_r3
+
+  量 126、FAIL 0
+  自己検査: 126 量 × 並べ替え 36 通り = 4536 評価で判定・S_abs・D_abs が変わったもの 0、base/new 交換で変わったもの 0
+
+  ファイル                         量                                    S_abs       D_abs     D/2S  判定  理由
+  res_wall_bot_3_200.h5        VALUE/ifaceRro                   1.795e-15   2.586e-15    0.721  PASS  
+  res_wall_bot_3_200.h5        VALUE/ifaceRconv                 5.721e-10   8.245e-10    0.721  PASS  
+  res_wall_bot_3_200.h5        VALUE/ifaceRpre                  5.721e-10   8.245e-10    0.721  PASS  
+  res_wall_bot_3_200.h5        VALUE/twall_x                    6.622e-12   9.493e-12    0.717  PASS  
+  res_200.h5                   VALUE/roUy                       5.142e-12   7.170e-12    0.697  PASS  
+  res_200.h5                   VALUE/Uy                         4.211e-10   5.775e-10    0.686  PASS  
+  res_wall_bot_3_200.h5        VALUE/twall_y                    8.072e-12   1.071e-11    0.664  PASS  
+  res_wall_top_4_200.h5        VALUE/twall_x                    6.793e-12   8.271e-12    0.609  PASS  
+  res_wall_bot_3_200.h5        VALUE/utau                       6.706e-08   8.056e-08    0.601  PASS  
+  res_200.h5                   VALUE/Ux                         4.238e-10   4.751e-10    0.560  PASS  
+  res_wall_top_4_200.h5        VALUE/twall_y                    5.770e-12   6.395e-12    0.554  PASS  
+  res_200.h5                   VALUE/roUx                       4.984e-12   5.467e-12    0.548  PASS  
+  res_wall_top_4_200.h5        VALUE/utau                       6.147e-08   6.659e-08    0.542  PASS  
+  res_wall_top_4_200.h5        VALUE/ifaceRconv                 3.938e-10   4.238e-10    0.538  PASS  
+  res_wall_top_4_200.h5        VALUE/ifaceRpre                  3.938e-10   4.238e-10    0.538  PASS  
+  res_wall_top_4_200.h5        VALUE/ifaceRro                   1.124e-15   1.209e-15    0.538  PASS  
+  conjugate_history.csv        Tw_max                           1.800e-07   1.800e-07    0.500  PASS  
+  conjugate_history.csv        Tw_min                           1.700e-07   1.700e-07    0.500  PASS  
+  conjugate_history.csv        dTw_max                          1.751e-07   1.751e-07    0.500  PASS  
+  conjugate_history.csv        res_abs_Wm2                      7.629e-06   7.629e-06    0.500  PASS  
+  conjugate_history.csv        res_max_W                        7.629e-09   7.629e-09    0.500  PASS  
+  conjugate_history.csv        res_rel                          9.384e-08   9.384e-08    0.500  PASS  
+  residual_history.csv         rms_roUx                         1.776e-15   1.776e-15    0.500  PASS  
+  residual_history.csv         rms_roUy                         3.553e-15   3.553e-15    0.500  PASS  
+  residual_history.csv         rms_roe                          3.038e-10   2.747e-10    0.452  PASS  
+  residual_history.csv         rms_ro                           1.665e-16   1.388e-16    0.417  PASS  
+  conjugate_history.csv        q_total                          2.290e-08   1.530e-08    0.334  PASS  
+  conjugate_history.csv        Tw_mean                          3.000e-08   2.000e-08    0.333  PASS  
+  res_200.h5                   MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_200.h5                   MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/P                          0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/T                          0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/h0                         0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/k                          0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/omega                      0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/ro                         0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/roK                        0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/roOmega                    0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/roe                        0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/sonic                      0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/vis_lam                    0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/vis_turb                   0.000e+00   0.000e+00    0.000  PASS  
+  res_200.h5                   VALUE/wall_dist                  0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_wall_bot_3_200.h5        MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Ps                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Pt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Ts                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Tt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Ux                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Uy                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/ifaceFw                    0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/ifaceRraw                  0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_Qf_eff               0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_T1                   0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_T_node               0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_Tw_bc                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_align                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_d1                   0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_keff                 0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_ok                   0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_q_2nd                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_q_compact            0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_q_compact_Tnode      0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_q_eff                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_q_eff_raw            0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/iface_q_recon              0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/kb                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/omegab                     0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/qwall                      0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/ro                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/roUx                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/roUy                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/roe                        0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/twall_z                    0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_bot_3_200.h5        VALUE/ypls                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  res_wall_top_4_200.h5        MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Ps                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Pt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Ts                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Tt                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Ux                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Uy                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/Uz                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/ifaceFw                    0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/ifaceRraw                  0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_Qf_eff               0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_T1                   0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_T_node               0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_Tw_bc                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_align                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_d1                   0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_keff                 0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_ok                   0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_q_2nd                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_q_compact            0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_q_compact_Tnode      0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_q_eff                0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_q_eff_raw            0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/iface_q_recon              0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/kb                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/omegab                     0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/qwall                      0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/ro                         0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/roUx                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/roUy                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/roe                        0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/twall_z                    0.000e+00   0.000e+00    0.000  PASS  
+  res_wall_top_4_200.h5        VALUE/ypls                       0.000e+00   0.000e+00    0.000  PASS  
+  conjugate_Tw_3.csv           Ts                               0.000e+00   0.000e+00    0.000  PASS  
+  conjugate_Tw_3.csv           x                                0.000e+00   0.000e+00    0.000  PASS  
+  conjugate_Tw_3.csv           y                                0.000e+00   0.000e+00    0.000  PASS  
+  conjugate_Tw_3.csv           z                                0.000e+00   0.000e+00    0.000  PASS  
+  conjugate_history.csv        n                                0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_ro                        0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUx                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUy                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roUz                      0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_dq_roe                       0.000e+00   0.000e+00    0.000  PASS  
+  residual_history.csv         rms_roUz                         0.000e+00   0.000e+00    0.000  PASS  

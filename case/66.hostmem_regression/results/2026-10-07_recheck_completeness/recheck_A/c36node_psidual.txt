@@ -1,0 +1,97 @@
+=== 構成 c36node_psidual — 完全性検査 (比較の前。FAIL なら値の比較はしない)
+[完全性] 予定: kind forge、反復 3 本 (base と new)、N 200、出力間隔 200、必要ファイル res_0.h5, res_200.h5, residual_history.csv, res_wall_4_200.h5, point_probe_0.out, point_probe_1.out, point_probe_2.out, psi_dualeval.csv
+  run_0005_c36node_psidual_base_r1: OK
+  run_0042_c36node_psidual_base_r2: OK
+  run_0072_c36node_psidual_base_r3: OK
+  run_0098_c36node_psidual_new_r1: OK
+  run_0128_c36node_psidual_new_r2: OK
+  run_0158_c36node_psidual_new_r3: OK
+  最終出力の物理時刻・step の属性 (run_0005_c36node_psidual_base_r1): res_wall_4_200.h5:/@step=200, res_wall_4_200.h5:/@step_abs=200
+  >> COMPLETE: PASS
+
+=== 構成 c36node_psidual
+  B1: run_0005_c36node_psidual_base_r1
+  B2: run_0042_c36node_psidual_base_r2
+  B3: run_0072_c36node_psidual_base_r3
+  N1: run_0098_c36node_psidual_new_r1
+  N2: run_0128_c36node_psidual_new_r2
+  N3: run_0158_c36node_psidual_new_r3
+
+[c] NaN/Inf (各 run)
+  B1: NANCHECK: PASS
+  B2: NANCHECK: PASS
+  B3: NANCHECK: PASS
+  N1: NANCHECK: PASS
+  N2: NANCHECK: PASS
+  N3: NANCHECK: PASS
+  >> NAN: PASS
+
+[構造] 出力ファイルの集合
+  8 ファイル: point_probe_0.out, point_probe_1.out, point_probe_2.out, psi_dualeval.csv, res_0.h5, res_200.h5, res_wall_4_200.h5, residual_history.csv
+
+[構造] h5 のデータセット集合・shape・dtype・属性
+  res_0.h5: 21 データセット
+  res_200.h5: 21 データセット
+  res_wall_4_200.h5: 22 データセット
+  >> STRUCT: PASS
+
+[ログ] 名前登録・復元・初期化・警告の行
+    | 'output': level=1 extraFields=0 interfaceDiag=0
+    | [psi-dualeval] ON (branching): save psi at iStep 2, dual evaluation for iStep 3..4, xmax 1e+30 m, 80223 nodes in S
+    | [psi-dualeval] snapshot: 269 of 269 device arrays (69.5 MB)
+  >> LOG: PASS
+
+[a] step 0 の残差行 (全列ビット一致; base で割れた列は new が base の観測値のどれか)
+  行 0 列 rms_ro: N2 0.0005365842371247709 ∉ base ['0.00053658417891711'] (最近傍まで 1 ulp)
+  行 0 列 rms_ro: N3 0.0005365842371247709 ∉ base ['0.00053658417891711'] (最近傍まで 1 ulp)
+  行 0 列 rms_roUy: N1 0.06497601419687271 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 4 ulp)
+  行 0 列 rms_roUy: N2 0.06497602164745331 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 3 ulp)
+  行 0 列 rms_roUy: N3 0.06497621536254883 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 5 ulp)
+  行 1 列 rms_ro: N2 0.0005365842371247709 ∉ base ['0.00053658417891711'] (最近傍まで 1 ulp)
+  行 1 列 rms_ro: N3 0.0005365842371247709 ∉ base ['0.00053658417891711'] (最近傍まで 1 ulp)
+  行 1 列 rms_roUy: N1 0.06497601419687271 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 4 ulp)
+  行 1 列 rms_roUy: N2 0.06497602164745331 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 3 ulp)
+  行 1 列 rms_roUy: N3 0.06497621536254883 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 5 ulp)
+  行 2 列 rms_ro: N2 0.0005365842371247709 ∉ base ['0.00053658417891711'] (最近傍まで 1 ulp)
+  行 2 列 rms_ro: N3 0.0005365842371247709 ∉ base ['0.00053658417891711'] (最近傍まで 1 ulp)
+  行 2 列 rms_roUy: N1 0.06497601419687271 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 4 ulp)
+  行 2 列 rms_roUy: N2 0.06497602164745331 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 3 ulp)
+  行 2 列 rms_roUy: N3 0.06497621536254883 ∉ base ['0.06497593969106674', '0.0649760439991951', '0.06497625261545181'] (最近傍まで 5 ulp)
+  base で値が割れた (行, 列, 値の数): [(0, 'rms_roUy', 3), (1, 'rms_roUy', 3), (2, 'rms_roUy', 3)]
+  (情報) step 0 の行数 3、base 内の最大 ulp 幅 42、new の値と最近傍 base 値の最大 ulp 距離 5 (不一致 15 値)
+  >> STEP0: FAIL (15 値)
+
+[a] 初期出力 res_0.h5: 保存量・原始量・幾何量のビット一致 (他の量は情報として不一致の数だけ)
+  比べた量 18、比べない量 3
+  >> INIT_OUT: PASS
+
+[b] N step 後 (予定 N = 200): m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S
+  ファイル                         量                                S_base      S_new          D  判定
+  psi_dualeval.csv             S_ApmA                        3.624e-01  5.974e-01  1.104e+00  PASS
+  psi_dualeval.csv             all_ApmA                      3.624e-01  5.974e-01  1.104e+00  PASS
+  psi_dualeval.csv             S_AdotBmA                     2.734e-01  8.655e-02  2.256e-01  PASS
+  psi_dualeval.csv             all_AdotBmA                   2.734e-01  8.655e-02  2.256e-01  PASS
+  psi_dualeval.csv             S_BmA                         8.433e-02  3.864e-02  6.629e-02  PASS
+  psi_dualeval.csv             all_BmA                       8.433e-02  3.864e-02  6.629e-02  PASS
+  res_wall_4_200.h5            VALUE/twall_y                 1.393e-02  1.560e-02  1.715e-02  PASS
+  residual_history.csv         rms_ro                        7.031e-03  9.087e-03  9.311e-03  PASS
+  point_probe_0.out            Uy                            5.502e-03  6.066e-03  7.413e-03  PASS
+  residual_history.csv         rms_roe                       4.211e-03  5.002e-03  5.414e-03  PASS
+  residual_history.csv         rms_roUy                      3.382e-03  1.968e-03  3.392e-03  PASS
+  res_200.h5                   VALUE/Uy                      1.765e-03  1.559e-03  1.955e-03  PASS
+  res_wall_4_200.h5            VALUE/omegab                  1.409e-03  1.087e-03  1.374e-03  PASS
+  res_200.h5                   VALUE/k                       9.059e-04  7.885e-04  8.371e-04  PASS
+  res_200.h5                   VALUE/roUy                    7.431e-04  6.517e-04  1.168e-03  PASS
+  res_wall_4_200.h5            VALUE/Ps                      7.424e-04  5.315e-04  7.180e-04  PASS
+  res_wall_4_200.h5            VALUE/roe                     7.424e-04  5.315e-04  7.180e-04  PASS
+  res_200.h5                   VALUE/P                       7.223e-04  5.171e-04  6.986e-04  PASS
+  res_200.h5                   VALUE/omega                   6.890e-04  5.316e-04  6.719e-04  PASS
+  psi_dualeval.csv             S_A                           6.462e-04  3.765e-04  8.876e-04  PASS
+  psi_dualeval.csv             all_A                         6.462e-04  3.765e-04  8.876e-04  PASS
+  res_200.h5                   VALUE/T                       6.433e-04  5.148e-04  7.208e-04  PASS
+  res_wall_4_200.h5            VALUE/Ts                      6.433e-04  5.149e-04  7.209e-04  PASS
+  res_200.h5                   VALUE/h0                      6.370e-04  5.097e-04  7.137e-04  PASS
+  res_200.h5                   VALUE/roe                     5.730e-04  5.125e-04  5.677e-04  PASS
+  (86 量。base 内で差が 0 でない量 53)
+  主要量の S_base: VALUE/P=7.22e-04, VALUE/T=6.43e-04, VALUE/ro=4.29e-04, VALUE/roUx=1.22e-04, VALUE/roe=5.73e-04, csv:rms_ro=7.03e-03, csv:rms_roe=4.21e-03
+  >> NSTEP: PASS

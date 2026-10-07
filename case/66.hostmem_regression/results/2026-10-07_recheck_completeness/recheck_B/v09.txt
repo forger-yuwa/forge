@@ -1,0 +1,154 @@
+=== 構成 v09 (追加診断 B: d = max|A−B|、S_abs = 同ビルド内 6 対の最大、D_abs = ビルド間 9 対の最大、合格 D_abs ≤ 2·S_abs)
+[完全性] 予定: kind convert、反復 3 本 (base と new)、N None、出力間隔 None、必要ファイル converted.h5
+  run_0026_v09_base_r1: OK
+  run_0062_v09_base_r2: OK
+  run_0092_v09_base_r3: OK
+  run_0123_v09_new_r1: OK
+  run_0153_v09_new_r2: OK
+  run_0183_v09_new_r3: OK
+  最終出力の物理時刻・step の属性 (run_0026_v09_base_r1): (属性なし)
+  >> COMPLETE: PASS
+  B1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0026_v09_base_r1
+  B2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0062_v09_base_r2
+  B3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0092_v09_base_r3
+  N1: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0123_v09_new_r1
+  N2: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0153_v09_new_r2
+  N3: /home/ubuntu/forge-b4/case/66.hostmem_regression/run_0183_v09_new_r3
+
+  量 133、FAIL 0
+  自己検査: 133 量 × 並べ替え 36 通り = 4788 評価で判定・S_abs・D_abs が変わったもの 0、base/new 交換で変わったもの 0
+
+  ファイル                         量                                    S_abs       D_abs     D/2S  判定  理由
+  converted.h5                 BCONDS/1/VALUE/Ps                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/Pt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/Ts                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/Tt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/Ux                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/Uy                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/Uz                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/kb                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/omegab            0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/ro                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/roUx              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/roUy              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/roUz              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/VALUE/roe               0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/1/iBPlanes                0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/1/iCells                  0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/1/iPlanes                 0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/1/vizBfaceNodes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/1/vizBfaceSizes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/2/VALUE/Ps                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/Pt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/Ts                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/Tt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/Ux                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/Uy                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/Uz                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/kb                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/omegab            0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/ro                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/roUx              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/roUy              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/roUz              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/VALUE/roe               0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/2/iBPlanes                0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/2/iCells                  0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/2/iPlanes                 0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/2/vizBfaceNodes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/2/vizBfaceSizes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/3/VALUE/Ps                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/Pt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/Ts                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/Tt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/Ux                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/Uy                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/Uz                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/kb                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/omegab            0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/ro                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/roUx              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/roUy              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/roUz              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/VALUE/roe               0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/3/iBPlanes                0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/3/iCells                  0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/3/iPlanes                 0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/3/vizBfaceNodes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/3/vizBfaceSizes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/4/VALUE/Ps                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/Pt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/Ts                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/Tt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/Ux                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/Uy                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/Uz                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/kb                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/omegab            0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/ro                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/roUx              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/roUy              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/roUz              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/VALUE/roe               0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/4/iBPlanes                0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/4/iCells                  0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/4/iPlanes                 0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/4/vizBfaceNodes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/4/vizBfaceSizes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/5/VALUE/Ps                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/Pt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/Ts                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/Tt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/Ux                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/Uy                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/Uz                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/kb                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/omegab            0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/ro                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/roUx              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/roUy              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/roUz              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/VALUE/roe               0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/5/iBPlanes                0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/5/iCells                  0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/5/iPlanes                 0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/5/vizBfaceNodes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/5/vizBfaceSizes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/6/VALUE/Ps                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/Pt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/Ts                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/Tt                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/Ux                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/Uy                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/Uz                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/kb                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/omegab            0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/ro                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/roUx              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/roUy              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/roUz              0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/VALUE/roe               0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 BCONDS/6/iBPlanes                0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/6/iCells                  0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/6/iPlanes                 0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/6/vizBfaceNodes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 BCONDS/6/vizBfaceSizes           0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 CELLS/STRUCT                     0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 CELLS/centCoords                 0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 CELLS/regionId                   0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 CELLS/volume                     0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 MESH/CONNE                       0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 MESH/COORD                       0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 PLANES/STRUCT                    0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致
+  converted.h5                 PLANES/centCoords                0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 PLANES/surfArea                  0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 PLANES/surfVect                  0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/ro                         0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/roK                        0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/roOmega                    0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/roUx                       0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/roUy                       0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/roUz                       0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/roe                        0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VALUE/wall_dist                  0.000e+00   0.000e+00    0.000  PASS  
+  converted.h5                 VIZMESH/CONNE                    0.000e+00   0.000e+00    0.000  PASS  整数・文字列は厳密一致

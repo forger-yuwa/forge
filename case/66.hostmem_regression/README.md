@@ -2,7 +2,7 @@
 
 ## ケース概要
 
-plan [architecture-solver-host-memory](../../plans/active/architecture-solver-host-memory.md) §5.1 #3 (基準入力の確定と回帰ハーネス) の実体。
+plan [architecture-solver-host-memory](../../plans/accepted/architecture-solver-host-memory.md) §5.1 #3 (基準入力の確定と回帰ハーネス) の実体。
 §6 の構成表の各構成を、変更前ビルド (base) と変更後ビルド (new) で**同じ入力・同じ手順で 3 回ずつ**回し、
 §6 の (a) step 0 のビット一致・(b) N step 後の差が同ビルド内ばらつきの 2 倍以内・(c) NaN/Inf 無し・出力互換性 (データセット集合・shape・dtype・属性) を
 `compare_runs.py` で判定する。

@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`procedures/solver-settings.md`](../../procedures/solver-settings.md) (凝縮・受動種・dual-time の設定、`condLimiterMode`・`passiveScalarScheme`・`implicitRelax`)
 - **related_plans**:
-  - 起点: [`architecture-solver-host-memory.md`](architecture-solver-host-memory.md) §6.2–§6.4 (ホストメモリ削減の回帰で、この構成だけ変更前後を判別できなかった)
+  - 起点: [`architecture-solver-host-memory.md`](../accepted/architecture-solver-host-memory.md) §6.2–§6.4 (ホストメモリ削減の回帰で、この構成だけ変更前後を判別できなかった)
 - **created**: `2026-10-07`
 - **owner**: `CFD Dev (Claude セッション: SERN 3D)`
 

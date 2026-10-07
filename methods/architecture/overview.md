@@ -208,7 +208,7 @@ H は `output/outputFieldNames.cpp` の `hostCellSet` が、出力 (`output.leve
 
 `FORGE_MEMLOG=1` を付けて起動すると、変換器 (`convertGmshToForge`) と本体の工程の境目で `/proc/self/status` の VmRSS/VmHWM、主要コンテナの推定バイト、
 `cudaMemGetInfo` を `[memlog]` 行として出す (`mesh/memlog.hpp`、`main.cpp` の `MEMLOG_SOLVER`)。既定 (未設定) では何も出さず、計算にも触れない。
-経緯と検証は [`plans/active/architecture-solver-host-memory.md`](../../plans/active/architecture-solver-host-memory.md)。
+経緯と検証は [`plans/accepted/architecture-solver-host-memory.md`](../../plans/accepted/architecture-solver-host-memory.md)。
 
 ## 7. 設定ファイルの読み方
 

@@ -1,0 +1,3 @@
+sern_g3                base 3 new 3 | COMPLETE PASS | NAN PASS | STRUCT PASS | LOG PASS | STEP0_ULP base 幅 52 / new 最近傍 15 ulp | STEP0 FAIL (45 値) | INIT_OUT PASS | NSTEP PASS | WORST res_vehicle_base_18_100.h5:VALUE/twall_z D/2S=1.00 (D 4.11e-07, S 2.05e-07)
+
+完全性検査 (plan §5.1 #6): PASS 1 構成、FAIL 0 構成

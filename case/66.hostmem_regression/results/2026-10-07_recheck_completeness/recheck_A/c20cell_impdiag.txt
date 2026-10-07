@@ -1,0 +1,80 @@
+=== 構成 c20cell_impdiag — 完全性検査 (比較の前。FAIL なら値の比較はしない)
+[完全性] 予定: kind forge、反復 3 本 (base と new)、N 200、出力間隔 200、必要ファイル res_0.h5, res_200.h5, residual_history.csv, res_wall_5_200.h5, diag.csv
+  run_0016_c20cell_impdiag_base_r1: OK
+  run_0052_c20cell_impdiag_base_r2: OK
+  run_0082_c20cell_impdiag_base_r3: OK
+  run_0113_c20cell_impdiag_new_r1: OK
+  run_0143_c20cell_impdiag_new_r2: OK
+  run_0173_c20cell_impdiag_new_r3: OK
+  最終出力の物理時刻・step の属性 (run_0016_c20cell_impdiag_base_r1): res_wall_5_200.h5:/@step=200, res_wall_5_200.h5:/@step_abs=200
+  >> COMPLETE: PASS
+
+=== 構成 c20cell_impdiag
+  B1: run_0016_c20cell_impdiag_base_r1
+  B2: run_0052_c20cell_impdiag_base_r2
+  B3: run_0082_c20cell_impdiag_base_r3
+  N1: run_0113_c20cell_impdiag_new_r1
+  N2: run_0143_c20cell_impdiag_new_r2
+  N3: run_0173_c20cell_impdiag_new_r3
+
+[c] NaN/Inf (各 run)
+  B1: NANCHECK: PASS
+  B2: NANCHECK: PASS
+  B3: NANCHECK: PASS
+  N1: NANCHECK: PASS
+  N2: NANCHECK: PASS
+  N3: NANCHECK: PASS
+  >> NAN: PASS
+
+[構造] 出力ファイルの集合
+  5 ファイル: diag.csv, res_0.h5, res_200.h5, res_wall_5_200.h5, residual_history.csv
+
+[構造] h5 のデータセット集合・shape・dtype・属性
+  res_0.h5: 21 データセット
+  res_200.h5: 21 データセット
+  res_wall_5_200.h5: 22 データセット
+  >> STRUCT: PASS
+
+[ログ] 名前登録・復元・初期化・警告の行
+    | 'output': level=1 extraFields=0 interfaceDiag=0
+  >> LOG: PASS
+
+[a] step 0 の残差行 (全列ビット一致; base で割れた列は new が base の観測値のどれか)
+  base で値が割れた (行, 列, 値の数): なし (base 3 回でビット一致)
+  (情報) step 0 の行数 3、base 内の最大 ulp 幅 0、new の値と最近傍 base 値の最大 ulp 距離 0 (不一致 0 値)
+  >> STEP0: PASS
+
+[a] 初期出力 res_0.h5: 保存量・原始量・幾何量のビット一致 (他の量は情報として不一致の数だけ)
+  比べた量 18、比べない量 3
+  >> INIT_OUT: PASS
+
+[b] N step 後 (予定 N = 200): m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S
+  ファイル                         量                                S_base      S_new          D  判定
+  res_200.h5                   VALUE/roUz                    2.979e+02  9.159e+02  8.851e+02  PASS
+  res_200.h5                   VALUE/Uz                      2.964e+02  9.196e+02  8.866e+02  PASS
+  residual_history.csv         rms_roUz                      6.012e+00  1.101e+02  1.100e+02  PASS
+  res_wall_5_200.h5            VALUE/twall_z                 1.436e+00  1.876e+00  1.773e+00  PASS
+  res_200.h5                   VALUE/Uy                      2.601e-05  2.307e-05  2.672e-05  PASS
+  res_wall_5_200.h5            VALUE/twall_y                 2.519e-05  2.477e-05  2.528e-05  PASS
+  res_200.h5                   VALUE/roUy                    2.138e-05  1.810e-05  2.212e-05  PASS
+  res_200.h5                   VALUE/Ux                      1.814e-05  1.484e-05  1.826e-05  PASS
+  res_200.h5                   VALUE/roUx                    1.508e-05  1.223e-05  1.493e-05  PASS
+  res_wall_5_200.h5            VALUE/twall_x                 1.347e-05  8.964e-06  1.357e-05  PASS
+  res_wall_5_200.h5            VALUE/utau                    6.875e-06  6.875e-06  7.045e-06  PASS
+  res_wall_5_200.h5            VALUE/ypls                    6.376e-06  5.101e-06  6.376e-06  PASS
+  res_200.h5                   VALUE/ro                      5.905e-06  6.404e-06  6.321e-06  PASS
+  res_wall_5_200.h5            VALUE/Ps                      5.673e-06  5.798e-06  5.798e-06  PASS
+  res_wall_5_200.h5            VALUE/roe                     5.635e-06  5.785e-06  5.785e-06  PASS
+  res_200.h5                   VALUE/P                       5.633e-06  5.757e-06  5.757e-06  PASS
+  res_200.h5                   VALUE/roe                     5.532e-06  5.677e-06  5.628e-06  PASS
+  res_200.h5                   VALUE/h0                      5.363e-06  4.568e-06  5.562e-06  PASS
+  res_wall_5_200.h5            VALUE/ro                      5.274e-06  5.274e-06  5.274e-06  PASS
+  res_wall_5_200.h5            VALUE/Ts                      4.876e-06  4.279e-06  5.075e-06  PASS
+  res_200.h5                   VALUE/T                       4.871e-06  4.175e-06  5.169e-06  PASS
+  res_200.h5                   VALUE/sonic                   2.520e-06  2.259e-06  2.694e-06  PASS
+  residual_history.csv         rms_roUx                      1.394e-06  1.294e-06  1.693e-06  PASS
+  residual_history.csv         rms_roUy                      8.230e-07  5.291e-07  8.230e-07  PASS
+  residual_history.csv         rms_ro                        7.064e-07  9.183e-07  8.477e-07  PASS
+  (60 量。base 内で差が 0 でない量 33)
+  主要量の S_base: VALUE/P=5.63e-06, VALUE/T=4.87e-06, VALUE/ro=5.90e-06, VALUE/roUx=1.51e-05, VALUE/roe=5.53e-06, csv:rms_ro=7.06e-07, csv:rms_roe=6.89e-07
+  >> NSTEP: PASS

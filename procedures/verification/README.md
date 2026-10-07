@@ -79,7 +79,7 @@
 
 forge は GPU の加算順 (`atomicAdd`) で run ごとに値が揺れる。同じバイナリでも step 0 の残差が 1 ulp 以上割れ、
 凝縮 dual-time のように**少数節点の状態が run ごとに分かれる**構成もある。リファクタやメモリ削減のように「結果を変えないはずの変更」を
-確かめるときは、次を守る (2026-10-07、[`plans/active/architecture-solver-host-memory.md`](../../plans/active/architecture-solver-host-memory.md) §6.2–§6.4 の教訓)。
+確かめるときは、次を守る (2026-10-07、[`plans/accepted/architecture-solver-host-memory.md`](../../plans/accepted/architecture-solver-host-memory.md) §6.2–§6.4 の教訓)。
 
 - **判定を 3 つに分ける**: (1) 決定的な状態のビット一致 (初期化済みの保存量・原始量・幾何量、checkpoint の中身、変換器の出力、整数・構造)、
   (2) 許容差を定義した数値比較 (最初の組立後の残差は `(step, inner, phase)` を固定し、方程式別の絶対・相対許容差を事前に決める)、

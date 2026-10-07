@@ -1,0 +1,109 @@
+=== 構成 c52cht — 完全性検査 (比較の前。FAIL なら値の比較はしない)
+  (情報) run_0186_c52cht_base_r4: 除外 (.exclude) — 比較に使わない
+  (情報) run_0187_c52cht_base_r5: 除外 (.exclude) — 比較に使わない
+  (情報) run_0188_c52cht_base_r6: 除外 (.exclude) — 比較に使わない
+  (情報) run_0189_c52cht_base_r7: 除外 (.exclude) — 比較に使わない
+  (情報) run_0190_c52cht_new_r4: 除外 (.exclude) — 比較に使わない
+  (情報) run_0191_c52cht_new_r5: 除外 (.exclude) — 比較に使わない
+  (情報) run_0192_c52cht_new_r6: 除外 (.exclude) — 比較に使わない
+  (情報) run_0193_c52cht_new_r7: 除外 (.exclude) — 比較に使わない
+[完全性] 予定: kind forge、反復 3 本 (base と new)、N 200、出力間隔 200、必要ファイル res_0.h5, res_200.h5, residual_history.csv, res_wall_bot_3_200.h5, res_wall_top_4_200.h5, conjugate_Tw_3.csv, conjugate_history.csv
+  run_0012_c52cht_base_r1: OK
+  run_0048_c52cht_base_r2: OK
+  run_0078_c52cht_base_r3: OK
+  run_0109_c52cht_new_r1: OK
+  run_0139_c52cht_new_r2: OK
+  run_0169_c52cht_new_r3: OK
+  最終出力の物理時刻・step の属性 (run_0012_c52cht_base_r1): res_wall_bot_3_200.h5:/@step=200, res_wall_bot_3_200.h5:/@step_abs=200, res_wall_top_4_200.h5:/@step=200, res_wall_top_4_200.h5:/@step_abs=200
+  >> COMPLETE: PASS
+
+=== 構成 c52cht
+  B1: run_0012_c52cht_base_r1
+  B2: run_0048_c52cht_base_r2
+  B3: run_0078_c52cht_base_r3
+  N1: run_0109_c52cht_new_r1
+  N2: run_0139_c52cht_new_r2
+  N3: run_0169_c52cht_new_r3
+
+[c] NaN/Inf (各 run)
+  B1: NANCHECK: PASS
+  B2: NANCHECK: PASS
+  B3: NANCHECK: PASS
+  N1: NANCHECK: PASS
+  N2: NANCHECK: PASS
+  N3: NANCHECK: PASS
+  >> NAN: PASS
+
+[構造] 出力ファイルの集合
+  7 ファイル: conjugate_Tw_3.csv, conjugate_history.csv, res_0.h5, res_200.h5, res_wall_bot_3_200.h5, res_wall_top_4_200.h5, residual_history.csv
+
+[構造] h5 のデータセット集合・shape・dtype・属性
+  res_0.h5: 21 データセット
+  res_200.h5: 21 データセット
+  res_wall_bot_3_200.h5: 41 データセット
+  res_wall_top_4_200.h5: 41 データセット
+  >> STRUCT: PASS
+
+[ログ] 名前登録・復元・初期化・警告の行
+    | 'level' in 'output': 1
+    | 'interfaceDiag' in 'output': 1
+    | 'output': level=1 extraFields=0 interfaceDiag=1
+  >> LOG: PASS
+
+[a] step 0 の残差行 (全列ビット一致; base で割れた列は new が base の観測値のどれか)
+  行 0 列 rms_roUx: N1 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 0 列 rms_roUx: N2 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 0 列 rms_roUx: N3 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 0 列 rms_roe: N1 2.498610228940379e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 13 ulp)
+  行 0 列 rms_roe: N2 2.498607318557333e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 29 ulp)
+  行 0 列 rms_roe: N3 2.498610047041439e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 14 ulp)
+  行 1 列 rms_roUx: N1 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 1 列 rms_roUx: N2 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 1 列 rms_roUx: N3 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 1 列 rms_roe: N1 2.498610228940379e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 13 ulp)
+  行 1 列 rms_roe: N2 2.498607318557333e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 29 ulp)
+  行 1 列 rms_roe: N3 2.498610047041439e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 14 ulp)
+  行 2 列 rms_roUx: N1 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 2 列 rms_roUx: N2 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 2 列 rms_roUx: N3 6.135723595868114e-10 ∉ base ['6.135723040756602e-10'] (最近傍まで 1 ulp)
+  行 2 列 rms_roe: N1 2.498610228940379e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 13 ulp)
+  行 2 列 rms_roe: N2 2.498607318557333e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 29 ulp)
+  行 2 列 rms_roe: N3 2.498610047041439e-05 ∉ base ['2.498612593626603e-05', '2.498613866919186e-05', '2.49861604970647e-05'] (最近傍まで 14 ulp)
+  base で値が割れた (行, 列, 値の数): [(0, 'rms_roe', 3), (1, 'rms_roe', 3), (2, 'rms_roe', 3)]
+  (情報) step 0 の行数 3、base 内の最大 ulp 幅 19、new の値と最近傍 base 値の最大 ulp 距離 29 (不一致 18 値)
+  >> STEP0: FAIL (18 値)
+
+[a] 初期出力 res_0.h5: 保存量・原始量・幾何量のビット一致 (他の量は情報として不一致の数だけ)
+  比べた量 18、比べない量 3
+  >> INIT_OUT: PASS
+
+[b] N step 後 (予定 N = 200): m = max|A−B|/max|A|。S = 同ビルド内ペアの最大、D = base×new の最大、合格 D ≤ 2·S
+  ファイル                         量                                S_base      S_new          D  判定
+  conjugate_history.csv        res_max_W                     1.315e-04  0.000e+00  1.315e-04  PASS
+  conjugate_history.csv        dTw_max                       1.315e-04  0.000e+00  1.315e-04  PASS
+  conjugate_history.csv        res_abs_Wm2                   1.315e-04  0.000e+00  1.315e-04  PASS
+  conjugate_history.csv        res_rel                       1.315e-04  0.000e+00  1.314e-04  PASS
+  res_wall_bot_3_200.h5        VALUE/ifaceRconv              3.347e-05  2.341e-05  4.823e-05  PASS
+  res_wall_bot_3_200.h5        VALUE/ifaceRpre               3.347e-05  2.341e-05  4.823e-05  PASS
+  res_wall_bot_3_200.h5        VALUE/ifaceRro                3.346e-05  2.342e-05  4.822e-05  PASS
+  res_wall_bot_3_200.h5        VALUE/twall_y                 1.195e-05  9.454e-06  1.586e-05  PASS
+  res_200.h5                   VALUE/roUy                    1.135e-05  9.962e-06  1.583e-05  PASS
+  res_200.h5                   VALUE/Uy                      1.070e-05  1.001e-05  1.467e-05  PASS
+  res_wall_top_4_200.h5        VALUE/ifaceRro                7.754e-06  7.467e-06  8.340e-06  PASS
+  res_wall_top_4_200.h5        VALUE/ifaceRconv              7.742e-06  7.438e-06  8.332e-06  PASS
+  res_wall_top_4_200.h5        VALUE/ifaceRpre               7.742e-06  7.438e-06  8.332e-06  PASS
+  res_wall_top_4_200.h5        VALUE/twall_y                 7.509e-06  7.380e-06  8.323e-06  PASS
+  res_wall_top_4_200.h5        VALUE/twall_x                 7.395e-06  5.909e-06  9.003e-06  PASS
+  res_wall_bot_3_200.h5        VALUE/utau                    6.677e-06  7.284e-06  8.751e-06  PASS
+  res_wall_top_4_200.h5        VALUE/utau                    6.187e-06  5.390e-06  6.702e-06  PASS
+  res_200.h5                   VALUE/Ux                      5.611e-06  6.255e-06  7.012e-06  PASS
+  res_200.h5                   VALUE/roUx                    5.579e-06  6.625e-06  7.266e-06  PASS
+  res_wall_bot_3_200.h5        VALUE/twall_x                 5.519e-06  6.663e-06  9.551e-06  PASS
+  residual_history.csv         rms_roe                       3.135e-06  3.996e-06  3.614e-06  PASS
+  residual_history.csv         rms_ro                        3.320e-07  2.767e-07  2.767e-07  PASS
+  residual_history.csv         rms_roUx                      8.731e-08  8.731e-08  8.731e-08  PASS
+  residual_history.csv         rms_roUy                      1.679e-08  1.679e-08  1.679e-08  PASS
+  conjugate_history.csv        q_total                       1.410e-08  4.680e-09  9.422e-09  PASS
+  (127 量。base 内で差が 0 でない量 28)
+  主要量の S_base: VALUE/P=0.00e+00, VALUE/T=0.00e+00, VALUE/ro=0.00e+00, VALUE/roUx=5.58e-06, VALUE/roe=0.00e+00, csv:rms_ro=3.32e-07, csv:rms_roe=3.13e-06
+  >> NSTEP: PASS

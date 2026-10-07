@@ -1,0 +1,44 @@
+c36node                        base 3 new 3 | 完全性 PASS | 量   73 | FAIL   0 | 最大 res_wall_4_200.h5:VALUE/utau D/2S=0.666
+c36node_impdiag                base 3 new 3 | 完全性 PASS | 量   80 | FAIL   0 | 最大 point_probe_2.out:T D/2S=0.749
+c36node_psidual                base 3 new 3 | 完全性 PASS | 量   86 | FAIL   0 | 最大 res_200.h5:VALUE/roUy D/2S=0.786
+c09ckpt100                     base 3 new 3 | 完全性 PASS | 量  117 | FAIL   0 | 最大 res_100.h5:CHECKPOINT/roXi_fctG D/2S=0.570
+c09restart100                  base 3 new 3 | 完全性 PASS | 量  117 | FAIL   0 | 最大 residual_history.csv:rms_roUx D/2S=0.540
+c09cont200                     base 3 new 3 | 完全性 PASS | 量  117 | FAIL   0 | 最大 residual_history.csv:rms_roXi D/2S=0.750
+c09ckpt100_outres              base 3 new 3 | 完全性 PASS | 量  133 | FAIL   0 | 最大 res_100.h5:VALUE/dq_roUz_new D/2S=0.695
+c09ckpt100_rawdiag             base 3 new 3 | 完全性 PASS | 量  119 | FAIL   0 | 最大 res_100.h5:VALUE/res_roUy D/2S=0.583
+c09ckpt100_pindiag             base 3 new 3 | 完全性 PASS | 量  117 | FAIL   0 | 最大 res_100.h5:VALUE/limiter_Xi D/2S=0.571
+c44steady                      base 3 new 3 | 完全性 PASS | 量  170 | FAIL   0 | 最大 res_200.h5:VALUE/cfl D/2S=0.677
+c44dual_ckpt100                base 3 new 3 | 完全性 PASS | 量  196 | FAIL   0 | 最大 res_100.h5:VALUE/passiveLimCorr_Q2_0 D/2S=0.774
+c44dual_restart100             base 3 new 3 | 完全性 PASS | 量  196 | FAIL   0 | 最大 res_100.h5:VALUE/sonic D/2S=0.820
+c44dual_pindiag                base 3 new 3 | 完全性 PASS | 量  196 | FAIL   0 | 最大 res_100.h5:CHECKPOINT/rog_0_fctH D/2S=0.866
+c52cht                         base 3 new 3 | 完全性 PASS | 量  126 | FAIL   0 | 最大 res_wall_bot_3_200.h5:VALUE/ifaceRro D/2S=0.721
+c36cell                        base 3 new 3 | 完全性 PASS | 量   33 | FAIL   0 | 最大 res_200.h5:VALUE/roUx D/2S=0.601
+c20cell_rk3                    base 3 new 3 | 完全性 PASS | 量   53 | FAIL   0 | 最大 residual_history.csv:rms_ro D/2S=0.603
+c20cell_dual                   base 3 new 3 | 完全性 PASS | 量   60 | FAIL   0 | 最大 residual_history.csv:rms_ro D/2S=0.706
+c20cell_impdiag                base 3 new 3 | 完全性 PASS | 量   60 | FAIL   0 | 最大 residual_history.csv:rms_roUx D/2S=0.607
+c57lm                          base 3 new 3 | 完全性 PASS | 量  130 | FAIL   0 | 最大 res_200.h5:VALUE/lmPgamma D/2S=0.748
+c57lm_fromsst                  base 3 new 3 | 完全性 PASS | 量   62 | FAIL   0 | 最大 res_200.h5:VALUE/roe D/2S=0.643
+c56lineimp                     base 3 new 3 | 完全性 PASS | 量   88 | FAIL   0 | 最大 res_200.h5:VALUE/roOmega D/2S=0.850
+c56extra                       base 3 new 3 | 完全性 PASS | 量   93 | FAIL   0 | 最大 res_200.h5:VALUE/roOmega D/2S=0.760
+c48absorb                      base 3 new 3 | 完全性 PASS | 量   70 | FAIL   0 | 最大 residual_history.csv:rms_roK D/2S=0.680
+c26optin                       base 3 new 3 | 完全性 PASS | 量   56 | FAIL   0 | 最大 res_200.h5:VALUE/k D/2S=0.571
+c26optin_env                   base 3 new 3 | 完全性 PASS | 量   59 | FAIL   0 | 最大 res_200.h5:VALUE/roUy D/2S=0.738
+v36node                        base 3 new 3 | 完全性 PASS | 量  101 | FAIL   0 | 最大 converted.h5:BCONDS/1/VALUE/Ps D/2S=0.000
+v36cell                        base 3 new 3 | 完全性 PASS | 量   92 | FAIL   0 | 最大 converted.h5:BCONDS/1/VALUE/Ps D/2S=0.000
+v09                            base 3 new 3 | 完全性 PASS | 量  133 | FAIL   0 | 最大 converted.h5:BCONDS/1/VALUE/Ps D/2S=0.000
+v52                            base 3 new 3 | 完全性 PASS | 量  117 | FAIL   0 | 最大 converted.h5:BCONDS/1/VALUE/Ps D/2S=0.000
+v44                            base 3 new 3 | 完全性 PASS | 量   97 | FAIL   0 | 最大 converted.h5:BCONDS/1/VALUE/Ps D/2S=0.000
+
+完全性検査 (plan §5.1 #6): PASS 30 構成、FAIL 0 構成 (completeness.tsv)
+全体: 3147 量、FAIL 0 (完全性 FAIL の構成は値を比較せず 1 行の FAIL として数える)、所要 33 s
+D/2S の上位 10 (PASS の量):
+  c44dual_pindiag res_100.h5:CHECKPOINT/rog_0_fctH D/2S 0.866 (S_abs 1.177e-07, D_abs 2.039e-07)
+  c44dual_pindiag res_100.h5:CHECKPOINT/rog_0_fctHsrc D/2S 0.856 (S_abs 1.177e-07, D_abs 2.015e-07)
+  c56lineimp res_200.h5:VALUE/roOmega D/2S 0.850 (S_abs 3.196e+03, D_abs 5.434e+03)
+  c56lineimp res_gap_6_200.h5:VALUE/qwall D/2S 0.845 (S_abs 4.531e-01, D_abs 7.656e-01)
+  c44dual_restart100 res_100.h5:VALUE/sonic D/2S 0.820 (S_abs 2.759e-01, D_abs 4.525e-01)
+  c44dual_restart100 res_100.h5:VALUE/h0 D/2S 0.804 (S_abs 1.387e+03, D_abs 2.231e+03)
+  c44dual_pindiag res_100.h5:CHECKPOINT/roQ2_0_fctH D/2S 0.801 (S_abs 1.924e-04, D_abs 3.082e-04)
+  c44dual_pindiag res_outlet_2_100.h5:VALUE/Ts D/2S 0.801 (S_abs 6.042e-03, D_abs 9.674e-03)
+  c44dual_pindiag res_100.h5:CHECKPOINT/roQ2_0_fctHsrc D/2S 0.793 (S_abs 1.925e-04, D_abs 3.052e-04)
+  c36node_psidual res_200.h5:VALUE/roUy D/2S 0.786 (S_abs 1.108e+00, D_abs 1.741e+00)

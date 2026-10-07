@@ -1,6 +1,6 @@
 # ホストメモリ削減 R1–R3 のローカル証跡 (2026-10-07)
 
-plan [`plans/active/architecture-solver-host-memory.md`](../../../plans/active/architecture-solver-host-memory.md) §5.1 #4 の「傾き 2737 → 2227 → 1371 B/節点」と負例 2 つの原本
+plan [`plans/accepted/architecture-solver-host-memory.md`](../../../plans/accepted/architecture-solver-host-memory.md) §5.1 #4 の「傾き 2737 → 2227 → 1371 B/節点」と負例 2 つの原本
 (2026-10-07 result レビュー M2 で、plan から辿れるように scratchpad から移した)。実行はローカル WSL (RTX、sm_86)、`FORGE_MEMLOG=1`、`FORGE_ALLOW_UNVERIFIED_SPECIES=1`、10 step、`outStepInterval 5`。
 
 ## 入力

@@ -1,6 +1,6 @@
 > 2026-10-07、plan `architecture-solver-host-memory.md` §5.1 #2 の監査 (implementer、読むだけ、HEAD 9c9f623c)。行番号は 9c9f623c 時点。
 
-PLAN: plans/active/architecture-solver-host-memory.md §5.1 #2 (監査、読むだけ)
+PLAN: plans/accepted/architecture-solver-host-memory.md §5.1 #2 (監査、読むだけ)
 変更: なし (どのファイルも編集していない。commit もしていない)
 ビルド: 未実施 (読むだけの項目なので)
 確認: grep/目視による監査のみ。作業ツリーは /home/sano/work/forge-sern-design (HEAD 9c9f623c)。対象は forge_cppfiles (CMakeLists.txt:70-85) と cuda_forge/・probe/ のホスト側コード
