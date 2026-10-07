@@ -49,7 +49,7 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | ~~§4・§6 の諮問~~ 完了 | 判断: 2026-10-07 codex (diagnose) `notes/reviews/2026-10-07-moc-v5c-next-step-diagnose.md` — 別 plan に切り出し、E1 (起動前の prep 対 soft 段の後、0 step) を先に | F |
-| 2 | E1 | §5 の 1・2。合格条件: §6 E1 の判定を出す | O |
+| 2 | ~~E1~~ 完了 (2026-10-07) | 判定は §9 | O |
 | 3 | E1 の解釈と次の手 | 上位に諮る | F |
 | 4 | codex plan 段レビュー | 次の手の登録が揃った時点で `codex_review.py <本 plan> --stage plan` | O |
 | 5 | codex result 段レビュー | `--stage result` | O |
@@ -89,3 +89,8 @@ case/45 の生産 Euler 格子 G1 の run (非粘性・すべり壁・断熱) �
 ## 9. 変更ログ
 
 - `2026-10-07` — 起票 (MOC の plan の V5c と諮問 `notes/reviews/2026-10-07-moc-v5c-next-step-diagnose.md` を受けて)。E1 を登録。
+- `2026-10-07` — **E1 の判定: 「数百 K の超過を IC の生成だけで説明する」説を退ける** → 起動後の処理 (soft 段の計算・段の引き継ぎ・本段の起動) を対象にする。スクリプト `case/45.isobutane_m6_d155/euler_t0_stage_ab.py` (commit f89f2835)、出力 `_band_ab/euler_t0_stage_ab.json` (AWS で実行)。
+  - A (起動前の prep、等エントロピー IC。sha256 は IC_MAP.json の生成後の値と一致): 全温 1599.99〜1600.00 K、max\|T₀ − Tt\| 0.011 K。
+  - B (soft 段の後、1 次・cfl 0.5・3000 step): 全温 1245.18〜1915.38 K、max\|T₀ − Tt\| 354.8 K (x = 52.4 r_t、軸上)。+1 K を超える節点 95,983、−1 K を下回る節点 91,475、+100 K を超える節点 707。超過だけでなく、Tt を下回る側にも同じ程度に広がる。
+  - C (本段の res_0): 全温の統計は B と同じ。保存量は ro・roU* がビット一致、roe・roY0・roY1 は一致しない (本段の起動時に forge が何かを変える。差の大きさは記録していない)。
+  - 解釈 (どの処理で、なぜ生じるか) は確定していない。次の手は上位に諮る (§5.1 #3)。
