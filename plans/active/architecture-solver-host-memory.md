@@ -67,7 +67,7 @@ GPU 経路のホスト参照は、**変数名と期待長を検査する共通�
 ### 4.2 R2 ホストの面変数 `p` を確保しない (見込み −195 B/節点)
 
 `variables::allocVariables` (`variables.cpp`) で `useGPU == 1` のときホスト側の `p[name]` を resize しない (デバイス側 `p_d` は今までどおり)。
-確認: ホスト側の `p` を読むのは CPU 経路 (`variables::setStructuralVariables` の `gpu==0` 部、`setStructualVariables.cpp`、`gradient.cpp` の `gpu==0` 部)
+**例外 (監査 2026-10-07)**: 診断 `FORGE_DIAG_PSI_DUALEVAL` の退避 (`main.cpp:2293-2303` の `pdeSize(s.var.p, k, 0)`) はホスト `p` の長さをデバイス配列の長さとして使い、fallback が 0 — R2 で面配列が**黙って退避から外れる**ので、fallback を `msh.nPlanes` に直す (R2 に含める)。確認: ホスト側の `p` を読むのは CPU 経路 (`variables::setStructuralVariables` の `gpu==0` 部、`setStructualVariables.cpp`、`gradient.cpp` の `gpu==0` 部)
 とビルド対象外のファイルだけで、`copyVariables_plane_H2D/D2H` の呼び出し元は無い。ガード: `copyVariables_plane_*` は 0 長のホスト配列を受けたら停止。
 
 ### 4.3 R3 ホストのセル変数 `c` を必要な名前だけにする (見込み約 −850 B/節点)
@@ -84,7 +84,21 @@ H は起動時に設定から決める (固定リストにしない。出力・c
 **H に無い名前のホスト配列は長さ 0 のまま**にし、`copyVariables_cell_H2D/D2H` と `readValueHDF5` は長さが `nCells_all` でない配列を受けたら
 変数名つきで停止する (遅延確保はしない — どこで要るかを監査で確定させ、漏れは停止で見つける)。`gpu: 0` は今までどおり全確保。
 
-監査表は **名前・有効になる条件 (設定・環境変数)・最初の利用箇所 (ファイル:行)** を列にする。監査の方法: ビルド対象の全ソースで、ホスト側 `c` への参照 (`c[`・`c.at(`・`.c.count(`・`copyVariables_cell_*` の名前リスト・`output_cellValNames` 系) を列挙し、
+**監査の結果 (2026-10-07、全文 [`notes/investigations/2026-10-07-host-memory-audit.md`](../../notes/investigations/2026-10-07-host-memory-audit.md)、HEAD 9c9f623c の行番号)**:
+GPU 経路でホスト `c` を読み書きするのは 5 か所だけ — (1) 初期場の読込 `readValueHDF5` (保存量・`wall_dist`・k/ω・種・遷移・トレーサ・凝縮モーメントを書いて H2D、`variables.cpp:787-939`)、
+(2) dual-time の checkpoint 復元 (`main.cpp:1148`、書いて H2D) と書出し (`output.cpp:227`)、(3) 出力 (`output.cpp`: level 0/1/2・`extraFields`・`h0` の依存 `Ht`/`k`・`/CHECKPOINT`、NaN ダンプも同じ関数)、
+(4) 環境変数で有効な診断 2 つ (`FORGE_IMPLICIT_DIAG_CSV` の `main.cpp:847-856`、`FORGE_PIN_DIAG` の `main.cpp:2210-2238`)、(5) `lineImplicit` の `ccx/ccy/ccz` (`main.cpp:3503`)。
+probe・壁出力・CHT・残差/NaN 集計・入口分布・壁距離・種/凝縮/受動種の初期化は、デバイスか自前の局所バッファで済み**ホスト `c` を経由しない**
+(§4.3 当初の「probe が読む名前を H に入れる」は不要)。GPU 経路にホスト `c` の `operator[]` (暗黙生成) は無い。名前の集合を変える環境変数は 10 個
+(登録・除去: `FORGE_WI_FORCE_DIAG`・`FORGE_WF_OMEGA_SOURCE`・`FORGE_WF_CLOSURE_DIAG`・`FORGE_WF_REP_DIAG`・`FORGE_OMEGA_BUDGET`・`FORGE_SPECIES_RAW_DIAG`、出力名追加: `FORGE_OUT_RESIDUALS`・`FORGE_RESID_SNAP`、ホストで読む: `FORGE_IMPLICIT_DIAG_CSV`・`FORGE_PIN_DIAG`)。
+**共通関数の設計 (監査 §3 の案を採用)**: `output/outputFieldNames.hpp` (新規) に `outputFieldPlan` (出力名の列・`h0` 依存・checkpoint 履歴)、`dualTimeHistoryNames`、`initialValueNames`、
+`hostCellSet` (H = それらの和 ∪ 診断 ∪ lineImplicit)、`registerOutputDiagnostics` (`main.cpp:3417-3431` を確保の前へ移す)、`applyEnvGatedRemovals` (`variables.cpp:301-356` を切り出す)。
+アクセサ `variables::hostCell(name)` (キー無し・長さ違いで名前と長さを出して停止) を、`copyVariables_cell_*`・`output.cpp:207/230/263`・`variables.cpp:787-931`・`main.cpp:850-856/1148/2211-2238/3503` に通す。
+`output.cpp:196` の `for (auto& v : var.c)` は h5 の書込み順を変えないため残し、名前で絞った後に `hostCell` を通す。
+**守る順序依存**: H の配列は `nCells_all` 長で 0 初期化を保つ (H2D はゴーストを含めて写すので、縮めるとビット一致しない)。`FORGE_RESID_SNAP` の登録条件 (`e != nullptr`) は今のまま写す。
+`extraFields` の受付は「登録済み (cellValNames)」で判定 (`c_d` は実行中にキーが増えうる)。`variables.hpp` にメンバを足すとレイアウトが変わる — クリーンビルド。
+`sstF1 = 1` の H2D がループ内で繰り返される件 (`variables.cpp:381-384`、最終状態は同じ) は**ついでに直さない** (別件)。
+監査表は **名前・有効になる条件 (設定・環境変数)・最初の利用箇所 (ファイル:行)** を列にする (全文の §1)。監査の方法: ビルド対象の全ソースで、ホスト側 `c` への参照 (`c[`・`c.at(`・`.c.count(`・`copyVariables_cell_*` の名前リスト・`output_cellValNames` 系) を列挙し、
 GPU 経路で到達するものを H に入れる。列挙は試験 (§6) の構成行列で裏付ける (停止しなければ漏れなし、ではなく、構成ごとに出力・残差が一致すること)。
 
 ### 4.4 期待値
@@ -111,8 +125,8 @@ R1 → R2 → R3 の各段階で効果を測る。
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | ~~1~~ | ~~codex plan レビュー~~ (**済 2026-10-07**: GO-with-changes M5/m1、全件採用 — §6.1。エスカレーション条件 1 の諮問を兼ねた [設計の選択肢は計測で 1 つに絞れているため]。判断: 2026-10-07・R1–R3 の方針は維持、監査と受入条件を先に確定) | | F |
-| 2 | **監査** (M1・M2・M5) | ホスト側 `c`/`p` の全参照を、**名前・有効条件・最初の利用箇所 (ファイル:行)・書くか読むか・保護の要否**の表に (§4.3)。出力と checkpoint の依存名 (`h0` ← `Ht`/`k`、`/CHECKPOINT` 履歴、`FORGE_OUT_RESIDUALS`・`FORGE_RESID_SNAP` 等の環境変数) を含める。表の各行に対応する**試験 (入力・確認する成果物・判定)** を割り当てる (§6 の構成表の元)。触るファイル: なし (読むだけ)。合格: 表が本 plan に入り、§6 の構成表と対応している | O |
-| 3 | **基準入力の確定** (M3・M5) | 発散しない基準入力を固定し、恒久的な `run_*` と case README に残す: SERN 3D 生産設定 = AWS の g3 (`run_1068` の最終場から restart) と g4 (`run_1045`/`run_1046` の最終場) — 2 サイズでメモリの傾きも取る。2D node = `case/36` (手順書の標準)。軸対称・多成分・凝縮 = `case/44`。CHT = `case/52.conjugate_slab`。cell モード = `case/20` か `case/13` (全 run が cell)。dual-time (checkpoint 復元) = 監査で選ぶ。遷移モデル・probe・`output.level: 2`・`extraFields`・環境変数診断は、監査表で到達する構成に割り当てる。**他セッションの case ディレクトリには書かない** (入力を自分の run へ複製)。2026-10-07 の縮小格子 3 点は**発散前までのメモリ観測**として保持し、回帰の基準には使わない (`s050` は step 9 で `roe` 非有限、3 点とも `check_convergence` は NOT CONVERGED) | O |
+| ~~2~~ (**済 2026-10-07**: [監査全文](../../notes/investigations/2026-10-07-host-memory-audit.md)、要点は §4.3。R2 に `pdeSize` の fallback 修正を追加) | **監査** (M1・M2・M5) | ホスト側 `c`/`p` の全参照を、**名前・有効条件・最初の利用箇所 (ファイル:行)・書くか読むか・保護の要否**の表に (§4.3)。出力と checkpoint の依存名 (`h0` ← `Ht`/`k`、`/CHECKPOINT` 履歴、`FORGE_OUT_RESIDUALS`・`FORGE_RESID_SNAP` 等の環境変数) を含める。表の各行に対応する**試験 (入力・確認する成果物・判定)** を割り当てる (§6 の構成表の元)。触るファイル: なし (読むだけ)。合格: 表が本 plan に入り、§6 の構成表と対応している | O |
+| 3 | **基準入力の確定と回帰ハーネス** (M3・M5) | **専用 case `case/66.hostmem_regression/`** に、§6 の構成表の各構成の入力を (元 case から**複製して**。元の case・他セッションの作業ディレクトリには書かない) 置き、変更前バイナリ (AWS `~/bin-hostmem/forge_9c9f623c`) で各 3 回・N step を回すハーネス (投入と比較のスクリプト) を作る。各構成が現行バイナリで起動し NaN 無く N step 走ることを確認 (古い config の廃止キーは複製側だけ直し、直した内容を README に書く)。SERN g3/g4 は `case/46.sern_design` に run_1072 以降で。2026-10-07 の縮小格子 3 点は**発散前までのメモリ観測**として保持し、回帰の基準には使わない (`s050` は step 9 で `roe` 非有限、3 点とも `check_convergence` は NOT CONVERGED)。変更後も同じハーネスで回す | O |
 | 4 | R1–R3 の実装 | §5 の 2〜4。各段階でメモリを測る (g3/g4、`FORGE_MEMLOG=1`) | O |
 | 5 | 回帰 | §6 の全項目。負例 2 つ (出力用変数を H から外す・checkpoint 履歴変数を外す → いずれも書込み/転送の前に名前つきで停止) | O |
 
@@ -135,18 +149,21 @@ R1 → R2 → R3 の各段階で効果を測る。
   短い試験の合格は「回帰差が許容内」に限定し、収束の主張に使わない。非定常ケースは同じ物理時刻で比べる。
 - **構成** (監査表の到達分岐ごとに具体化する。下は初期の割り当て):
 
-  | 構成 | 入力 | 確認する成果物 |
+  | 構成 | 入力 (元。複製して使う) | 確認する成果物 |
   | --- | --- | --- |
-  | SERN 3D node 生産設定 | AWS g3 (`run_1068` 最終場から restart)、g4 | 残差 CSV・`res_*.h5`・力の時系列・メモリ |
-  | 2D node (標準) | `case/36` | 残差・出力 |
-  | 軸対称・多成分・凝縮 | `case/44` | 残差・出力・種/モーメント |
-  | 共役伝熱 | `case/52.conjugate_slab` | 残差・出力・CHT 出力 |
-  | cell モード | `case/20` または `case/13` | 残差・出力 (cell は毎回 `cells[].iNodes` で CONNE を組む) |
-  | dual-time の checkpoint | 監査で選ぶ非定常ケース | **連続実行と checkpoint 経由の分割実行**の一致、`/CHECKPOINT` の履歴属性 |
-  | `output.level: 2`・`extraFields`・`FORGE_OUT_RESIDUALS`・`FORGE_RESID_SNAP` | SERN 3D か `case/36` | 出力データセット集合・値 |
-  | probe・遷移モデル・その他の環境変数診断 | 監査表で割り当て | 該当成果物 |
+  | SERN 3D node 生産設定 + メモリ | AWS `case/46` g3 (`run_1068` 最終場から restart)、g4 (`run_1045`/`run_1046` 最終場) | 残差 CSV・`res_*.h5`・力の時系列・`FORGE_MEMLOG` |
+  | 2D node 標準 (A・G・H・probe・壁出力) | `case/36` `run_sym_H_2up_node` の最終場から (probe を 2〜3 点足す) | `res_*.h5` (集合・shape・dtype・属性 `h0_includes_k` 含む)、残差、壁 h5、probe 出力 |
+  | 同 + `FORGE_IMPLICIT_DIAG_CSV` / `FORGE_DIAG_PSI_DUALEVAL` | 同上 | `diag.csv`、`psi_dualeval.csv` と log の `snapshot: X of Y device arrays` (X が減ったら R2 の fallback 漏れ) |
+  | dual-time の checkpoint (F・I・J・K・L・B・D・N) | `case/09` `run_0160`/`0162`/`0164` 系 (node 周期・種・トレーサ・FCT・BDF2・level 2・extraFields)。100 + 再開 100 と連続 200。env 変種: `FORGE_OUT_RESIDUALS=1`+`FORGE_RESID_SNAP=0`、`FORGE_SPECIES_RAW_DIAG=1`、`FORGE_PIN_DIAG=1` | `/CHECKPOINT` の全データセットと属性、log の履歴復元行、`res_*_m`・`dq_*_new`・`roYraw*` の有無、分割と連続の差 |
+  | 軸対称・多成分・凝縮 | `case/44` の定常 active run と dual-time 版 (`run_0376` 型) | 種・モーメント、`/CHECKPOINT/<cons>P`、pin 診断 |
+  | 共役伝熱 | `case/52` `run_0007_fxhalf` (node・`interfaceDiag 1`) | 壁 h5 (`iface*`)・CHT の CSV |
+  | cell モード | `case/36` `run_sym_H_2up_cell`、`case/20` `001.test/run_slau`、cell dual-time `run_case04_les_unsteady_dualtime` | 出力・残差 (cell は CONNE を cells から組む) |
+  | 遷移モデル (C・lm*) | `case/57` `run_0014_t3a_lm_unitcheck` (roGamma を読む経路) と、SST だけの場から LM を始める経路 | `lm*`、log の遷移初期化行 |
+  | line-implicit と extraFields (O・J) | `case/56` `run_0019_lineimplicit`、`run_0027_s6_f32_b`、`case/48` `run_0903_absorb2` | 出力の集合、ライン構築の log |
+  | 環境変数で登録が変わる診断 (I) | `case/26` `run_0086_optin_base` を env 無しと `FORGE_WI_FORCE_DIAG`・`WF_CLOSURE_DIAG`・`OMEGA_BUDGET`・`WF_REP_DIAG`=1 で | データセット集合、警告行 |
+  | 変換器 | 上の各入力の msh (変換器も `variables.cpp` を共有する) | 変換結果のデータセット単位比較 |
 
-- **ガード (負例 2 つ)**: (1) 出力用の変数を H から外したビルド、(2) checkpoint 履歴変数を外したビルドで、いずれも**ホストへの書込み・転送の前に**変数名つきで停止すること (確認後に戻す)。
+- **ガード (負例 2 つ)**: (1) `case/36` で H から `P` を外したビルド → `writeInitialOutputs` の D2H より前で、(2) `case/09` の再開で H から `roN` を外したビルド → `main.cpp:1148` の書込みより前で、いずれも**変数名つきで停止**すること (確認後に戻す)。
 - **ビルド**: `forge`・`convertGmshToForge` とも成功、構造体レイアウトを変えたらクリーンビルド ([[stale-build-struct-layout-trap]])。
 
 ### 6.1 レビュー記録 (codex)
@@ -168,8 +185,12 @@ R1 → R2 → R3 の各段階で効果を測る。
 
 - 段階 2 (R4+R5、R6) に進むか — 段階 1 の結果と、SERN 全体の規模のユーザ判断を見て決める。
 - level 2 の初期出力に、確保時に 0 初期化されない平均流残差が書かれている (未定義値の出力。2026-10-07 plan レビュー M4 で判明、本 plan の範囲外の既存問題)。
+- 監査で見つかった既存の問題 (本 plan の範囲外、挙動は今のまま再現する): (a) `FORGE_OUT_RESIDUALS`/`FORGE_RESID_SNAP` は level < 2 では出力に効かない (printf は「追加した」と言う)、level 2 では `res_ro` 等が `output_cellValNames` と重複し XDMF の Attribute と D2H が二重になる。
+  (b) `lineImplicit` はホストの `ccx/ccy/ccz` を読むが GPU 経路では一度も書かれない (cell で `nodes.size() < nCells` のとき 0 座標を読む。node はノード座標を使うので影響なし)。
+  (c) `readValueHDF5` はファイル側のデータセット長を検査しない。(d) `sstF1 = 1` の H2D がループ内で繰り返される (時間の無駄、最終状態は同じ)。
 
 ## 9. 変更ログ
 
+- `2026-10-07` — §5.1 #2 監査済み (ホスト `c` の GPU 経路の参照は 5 か所、probe 等は不要、R2 に `pdeSize` の fallback 修正を追加、試験構成を具体化)。回帰は専用 case `case/66.hostmem_regression/` で。
 - `2026-10-07` — codex plan レビュー (GO-with-changes, M5/m1) を全件採用: 初期化の順序と出力/確保の共通関数、ホスト参照の共通アクセサ、正常な基準入力、比較時点の固定、構成表と VERDICT、工程別メモリモデル。
 - `2026-10-07` — 起票。ユーザ決定「forge 本体のメモリを小さくする余地を、計測から調べる」(tooling-sern-mesh-blocking §5.1 B4b-3) の計測結果を受け、段階 1 (R1–R3) を設計。
