@@ -188,7 +188,7 @@ def plot():
     a.plot(xC[xC >= 0.5], Z["cont_kprod_Cf"][xC >= 0.5] * 1e3, color=C_KP, lw=1.4, label=f"CONTUR の C_f 式 × k_f ({meta['k_f_prod']:.4f})")
     a.axvspan(*meta["test"], color="0.93", zorder=0)
     a.set_xlabel("x / r_t"); a.set_ylabel("C_f × 10³"); a.grid(alpha=0.3); a.legend(loc="upper right", frameon=False, fontsize=9)
-    a.set_yscale("log")
+    a.set_ylim(0, None)
     fig.savefig(OUT / "fig3_cf.png", dpi=150); plt.close(fig)
     xF = meta["x_F"]
     summ = {"test": meta["test"], "slope_per_rt": float(co[0]), "swing_end_to_end": float(swing), "criterion_swing": 0.003,
