@@ -25,7 +25,7 @@ Hermite の端点条件 (同じ 0 と 1/R) の一致で C²。
 
 joint 壁の物理壁の上流の作り方 (`geometry.pw_upstream`: `poly` = 配管〜設計スロートの 5 次多項式 [既定] / `ramp` = 旧来の
 δ_r ランプ) と、物理スロートを物理壁の大域最小として求める `wall_global_min` も末尾
-(plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。
+(plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。
 """
 from __future__ import annotations
 
@@ -823,7 +823,7 @@ def default_pw_ramp(design_wall, r1_on: float = -0.05) -> tuple:
     return (float(xs[i]), -0.5 * L_U)
 
 
-# --- 上流の作り方と物理スロートの大域最小 (plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1) -----------
+# --- 上流の作り方と物理スロートの大域最小 (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1) -----------
 PW_UPSTREAMS = ("ramp", "poly")      # problem の geometry.pw_upstream
 PW_UPSTREAM_DEFAULT = "poly"         # joint 壁の物理壁の解析経路の既定 (ユーザ決定 2026-10-07)。`ramp` は明示したときだけ
 POLY_SEAM_TOL = 1e-8                 # 継ぎ目 (−L_U・0) の値・1 階・2 階微分の跳びの上限 (左右の極限)

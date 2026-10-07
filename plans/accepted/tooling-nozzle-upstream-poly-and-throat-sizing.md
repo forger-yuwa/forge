@@ -3,13 +3,13 @@
 ## メタ
 
 - **area**: `tooling`
-- **status**: `in_progress`
+- **status**: `done`  <!-- 2026-10-07 機能実装の完了 (生産採用はユーザ判断、§5.1 #6) -->
 - **related_docs**:
   - `methods/design/overview.md` (joint 壁の物理壁の解析経路、ランプ、`solve_rt`)
   - `procedures/nozzle-design-workflow.md` (寸法の決め方、`pw_ramp`)
 - **related_plans**:
-  - [tooling-nozzle-wall-single-bspline.md](../accepted/tooling-nozzle-wall-single-bspline.md) (物理壁の表現。本 plan の上流多項式ではランプの当てはめが消え、全域が厳密になる)
-  - [discretization-moc-axis-limit-and-corrector.md](discretization-moc-axis-limit-and-corrector.md) (設計壁の変更。本 plan は設計壁を変えない)
+  - [tooling-nozzle-wall-single-bspline.md](tooling-nozzle-wall-single-bspline.md) (物理壁の表現。本 plan の上流多項式ではランプの当てはめが消え、全域が厳密になる)
+  - [discretization-moc-axis-limit-and-corrector.md](../active/discretization-moc-axis-limit-and-corrector.md) (設計壁の変更。本 plan は設計壁を変えない)
   - [tooling-nozzle-throat-monotone-r2.md](../accepted/tooling-nozzle-throat-monotone-r2.md) (現行の生産壁)
 - **created**: `2026-10-07`
 - **owner**: `Claude (Opus 5.5)`
@@ -116,13 +116,13 @@
 | 1 | ~~§4・§6 の諮問~~ 完了 | 判断: 2026-10-07 codex (diagnose) — x = 0 接続は採用、ゲートは全実根で判定、`solve_rt_throat` は生産と共通の δ_r 経路で往復検証、U4 は `poly` を MOC 固定で先に評価し cross-mesh 移送。採否は §6.1 | F |
 | 2 | ~~codex plan 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M4/m2、全件採用 (§6.1) | O |
 | 3 | ~~実装~~ 完了 (2026-10-07、commit a382f37d) | §5 の 1〜7 (§9) | O |
-| 4 | 検証 (CFD 0 step) | U0・U1・U3 と全域 1 本の W1・W2・W3・W5・往復は PASS (§9)。**U2b FAIL・U2 は判定として成り立たない: CFD 前の δ_r の雑音の床が 1e-9 m の許容差より大きい。扱いを諮る (4a)** | O (解釈は F) |
+| 4 | ~~検証 (CFD 0 step)~~ 完了 | U0・U1・U3 と全域 1 本の W1・W2・W3・W5・往復は PASS。U2b の FAIL と U2c の棄却は記録に残し、U2d で CFD 前の初期見積もりの用途 (スロート 1e-7 m・出口 1e-5 m) を支持 (§9)。δ_r の雑音の床 (P3) は既知の制約として残す (再調査の条件: NS 後の寸法の許容差 1e-9 m の経路で同じ雑音が問題になったとき) | O (解釈は F) |
 | 4a | ~~U2・U2b の扱いの諮問~~ 完了 | 判断: 2026-10-07 codex (diagnose) — 許容差は緩めず、例外と共通経路は保持。`rtol` だけを変える診断 U2c を先に (§6) | F |
 | 4b | ~~U2c~~ 完了 (棄却、commit f22520f0) | §9 | O |
 | 4c | ~~U2c の次の手~~ 完了 | 判断: 2026-10-07 codex (diagnose) — P1 を CFD 前の初期見積もりに限って採用 (スロート 1e-7 m・出口 1e-5 m を明示の許容差に、共通定数は変えない)、P2・P4 は却下、P3 は既知の制約として後回し。U2d で確かめる | F |
 | 4d | ~~U2d~~ 完了 (支持、commit 4f44b535) | §9 | O |
-| 5 | codex result 段レビュー | `--stage result` (機能実装の完了でも必須) | O |
-| 6 | case/45 の生産への反映 | §6 U4 (NS・凝縮)。MOC の plan の V5′ との順序・まとめ方は諮問で決める。採否はユーザ | ユーザ・O |
+| 5 | ~~codex result 段レビュー~~ 完了 | 2026-10-07、GO-with-changes C0/M2/m1、全件採用し対応済み (§6.1) | O |
+| 6 | case/45 の生産への反映 | U4 は完了 (N1 は dry・凝縮の登録のゲートに合格、N0 の凝縮も延長で合格。ユーザ決定 2 件を適用。§9)。N1 − N0 の差は参考値で、流れの同等性は主張しない。**生産採用 (case/45 の生産の問題 YAML を `poly` にするか) はユーザ判断** | ユーザ |
 
 ## 6. 検証
 
@@ -181,6 +181,7 @@
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | diagnose | `2026-10-07` | [`notes/reviews/2026-10-07-upstream-poly-throat-sizing-diagnose.md`](../../notes/reviews/2026-10-07-upstream-poly-throat-sizing-diagnose.md) (ブリーフ [`briefs/2026-10-07-upstream-poly-throat-sizing.md`](../../notes/reviews/briefs/2026-10-07-upstream-poly-throat-sizing.md)) | M5/m2 | 採用: 上流の多項式化は採用、流れへの影響は Euler で検出できないので NS で確かめる・初期線は固定した基準 (M) / x = 0 接続、接続点は設計スロートと明記 (m) / ゲートの量の訂正 (初稿 3.1e-3 は Q″ − 今の壁、Q″ − H″ は 1.184e-3。主セッションで再計算)、Q′ の全実根で一意な最小点と単調性、5e-3 は幾何の上限 (M) / `solve_rt_throat` は生産と共通の δ_r 経路、U2 を往復検証の判別 A/B に、NS 後は δ_E の全分布から作る補正関数で寸法と壁を作る、k_f 較正後に寸法を解き直す (M×2) / U4 は MOC 固定で `poly` を先に、cross-mesh 移送、N・K の条件を転記、追加量は記録のみ (M) / `poly` と `pw_ramp` の併記は例外、解決済みの値を保存 (m)。不要: 「コードの既定を `ramp` に残す」への回答 (ユーザ決定で既定は `poly`)。追加: 今の `solve_rt` の CFD 前の経路も同型の不一致なので共通経路に揃える |
+| result | `2026-10-07` | [`notes/reviews/2026-10-07-tooling-nozzle-upstream-poly-and-throat-sizing-result.md`](../../notes/reviews/2026-10-07-tooling-nozzle-upstream-poly-and-throat-sizing-result.md) | GO-with-changes, C0/M2/m1 | 全件採用。Major の採否は上位に諮らずに決めた (判定の道具の欠陥の修正と再検査で、設計方針を変えないため)。M1 凝縮の延長の判定器が「判定不能」を合格にしていた → `ns_n012_cond_ext.py` を `throat_mono_judge.parse_segment_verdict` と同じ読みにし (SEG_OK だけ合格)、必要な列 (rms_* の全部、rms_dq_* を除く) の行の存在と、親子の対応・RUN_RC・NaN の全走査・solverConfig の差・bcondConfig・forge の sha256 の前提を検査。試験 `test_ns_n012_cond_ext.py` (6 件 FAIL 0)。run_0168 + run_0180 を判定し直して合格 (前提成立・欠けた列なし・plateau) / M2 NaN の全走査が最終の res しか見ていなかった → `ns_n012.py nan_scan` を res_0・中間・最終の全場の検査に (検査した場の一覧と最初の異常を記録)、試験に中間の NaN の負例。U4 の 10 本 (0165〜0170・0177〜0180) を走査し直して全部 CLEAN (場 5〜21 枚) / m1 §5.1 と plans/README.md を現在の状態に更新、完了の区分は機能実装の完了 |
 | diagnose (U4・V5′ の結果の解釈) | `2026-10-07` | [`notes/reviews/2026-10-07-u4-v5prime-result-interpretation-diagnose.md`](../../notes/reviews/2026-10-07-u4-v5prime-result-interpretation-diagnose.md) (ブリーフ [`briefs/2026-10-07-u4-v5prime-result-interpretation.md`](../../notes/reviews/briefs/2026-10-07-u4-v5prime-result-interpretation.md)) | M4/m1 | 全件採用: H1 は「N1 は自身の dry・凝縮のゲートに合格、N0 との差は参考値」に限定 (凝縮の g の差 −2.26e-7 は幅 1.96e-7 を超え、N0 自身も未達。流れの同等性は主張しない) (M) / H2 は「N2 は登録のゲートに合格、差の向きと大きさは参考値」(時間の幅は信頼区間ではなく、K には開始位置・S_max の悪化の上限が無い) (M) / H3 却下: N0 の凝縮の未達は N1 − N0 の解釈に効き、§6 K は未達なら延長 1 回 → N0 の凝縮だけを 1 回延長 (M) / MOC の生産採用は V5d の保留を明示した限定採用として諮る (M) / 凝縮開始位置は 2401 点の抽出刻み (約 0.045 r_t) なので「同じ抽出点」「約 1 刻み上流」と書く (m) |
 | diagnose (NS の出口 M の未達) | `2026-10-07` | [`notes/reviews/2026-10-07-ns-n012-exitM-deficit-diagnose.md`](../../notes/reviews/2026-10-07-ns-n012-exitM-deficit-diagnose.md) (ブリーフ [`briefs/2026-10-07-ns-n012-exitM-deficit.md`](../../notes/reviews/briefs/2026-10-07-ns-n012-exitM-deficit.md)) | M5/m1 | 全件採用: 登録どおり 3 本を 20000 step ずつ 1 回延長 (較正値・k_f・r_t・判定条件は固定、判定窓は通算 80000〜100000 の 5 枚) / H1 の応答係数 0.93 は r_t の変更・初期化の違いと交絡しているので補正式に使わない (M) / NS の結果から較正値を補正する案は「NS では較正し直さない」の現行仕様の変更なので今は採らない (M) / C2 のやり直しは E5 を見てから、C2 で出口 M が戻ると先取りしない (M) / 準定常の未達は近零の平均での正規化が強く効くが、E2 の絶対幅の条件を事後に移植せず VERDICT を維持 (M) / 差が時間の幅以下でも U4・V5′ を採用しない、候補は維持・生産採用は保留 (M) / 値の合否と準定常の合否を分けて記録 (m) |
 | plan | `2026-10-07` | [`notes/reviews/2026-10-07-tooling-nozzle-upstream-poly-and-throat-sizing-plan.md`](../../notes/reviews/2026-10-07-tooling-nozzle-upstream-poly-and-throat-sizing-plan.md) | GO-with-changes, C0/M4/m2 | 全件採用: M1 壁ファイルに上流の方式と Q を保存・旧形式はランプとして読む・方式別の必須属性・両表現の往復試験と W3 のやり直し (§4.1・U3) / M2 物理スロートは Q と下流の全ノット区間で大域最小を判定、レビューの反例を負例に (§4.1・U1) / M3 U0 を明示 `ramp` と NS 後の経路に限定、CFD 前の `solve_rt` は U2b の往復検証、反復の上限で不合格 (§4.2・U0・U2・U2b) / M4 U4 に壁解像・RISING なし・出口半径・比較元と窓 (run_0147+0149 の 60000〜80000)・延長・段階起動と序盤の NaN 確認 (U4) / m5 `pw_ramp` を書いた YAML の移行 (§4.1・§5 の 7) / m6 断面積差の訂正 −0.270 → −0.247 % (主セッションで再計算) |
@@ -194,10 +195,10 @@
 
 ## 8. 完了条件
 
-- [ ] `methods/design/overview.md` を更新
-- [ ] §6 U0〜U3 の結果を §9 に記録し、完了の区分を明記する: **機能実装の完了** (case/45 の生産は変えない) か **生産採用** (U4 とユーザ判断)
-- [ ] codex レビュー 2 回 (plan / result) を §6.1 に記録
-- [ ] `status: done` にして accepted へ移動し、`plans/README.md` を同期
+- [x] `methods/design/overview.md` を更新 (poly・寸法の逆算・許容差・既知の限界)
+- [x] §6 U0〜U3 の結果を §9 に記録し、完了の区分を明記する: **機能実装の完了** (case/45 の生産は変えない) か **生産採用** (U4 とユーザ判断) — 2026-10-07 は機能実装の完了 (U4 も実施)
+- [x] codex レビュー 2 回 (plan / result) を §6.1 に記録
+- [x] `status: done` にして accepted へ移動し、`plans/README.md` を同期 (2026-10-07)
 
 ## 9. 変更ログ
 
@@ -296,3 +297,7 @@
   - 凝縮 4 量 (親 + 延長を連結した通算 34000〜38000 の 5 枚): 軸の凝縮開始 58.1513 (幅 0)・S_max 16.817 (幅 0.0031)・出口コア g 3.0119e-4 (幅 2.3e-7)・出口コア M 5.98647 (幅 1.3e-5)、4 量とも STEADY。
   - 残差 (親 + 延長を連結した全列、`CONVERGENCE_VERDICT_concat.txt`): NOT CONVERGED (stalled/plateau)、RISING・DIVERGED なし。`rms_rog_0` は fin 1.25e-10 (親の末尾 1.32e-10)、`rms_roQ2_0` 6.51e-8 で、どちらも STALLED。
   - これで 3 条件とも dry・凝縮が登録のゲートに合格 (ユーザ決定 2 件を適用)。延長後の N0 と 18000 step の N1 の差は同じ窓の比較ではないので、U4 の凝縮の差は前の表 (18000 step どうし) のまま参考値とする。
+- `2026-10-07` — **codex result 段レビュー**: `notes/reviews/2026-10-07-tooling-nozzle-upstream-poly-and-throat-sizing-result.md` (GO-with-changes、C0/M2/m1)。全件採用 (§6.1)。
+  - **判定の道具の修正と再検査** (commit 2393aa62。CFD は回し直していない): NaN の全走査を全場に広げ、U4 の 10 本を走査し直して全部 CLEAN (run_0165・0166・0167 は場 17 枚、延長 0177・0178・0179 は 5 枚、凝縮 0168・0169・0170 は 19 枚、凝縮の延長 0180 は 21 枚。旧の最終だけの記録は各 run の `NAN_SCAN_v1_final_only.json`)。凝縮の延長の判定器を強くして run_0168 + run_0180 を判定し直し、**合格** (前提の不成立なし、必要な列の欠けなし、連結した残差は plateau・RISING なし、4 量 STEADY)。弱い判定器の出力は `_band_ab/ns_n012_cond_ext_run_0180_v1_weak_judge.json` に残した。評価器の再実行の結果は前と同じ (dry 3 条件合格、凝縮は N1・N2 合格・N0 は 18000 step では未達で延長 run_0180 で合格)。
+  - 判定し直しの出力 (`_band_ab/ns_n012_cond_ext_run_0180_ns_n012_N0_cond_ext.json`・`ns_n012_eval.json`) は AWS 上にあり、手元への同期の前に AWS が idle で自動停止した。次の起動で同期する (手元の同名ファイルは弱い判定器の版と全走査の前の評価)。
+  - **完了の区分: 機能実装の完了**。上流の多項式化 (`pw_upstream: poly`、コードの既定) と寸法の逆算 (`solve_rt_throat`、CFD 前の許容差) は実装・検証済み。case/45 の NS・凝縮で N1 は登録のゲートに合格。N1 − N0 の差は参考値で、流れの同等性・性能の改善は主張しない。生産の問題 YAML への反映はユーザ判断 (§5.1 #6)。

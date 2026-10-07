@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """物理壁の全域 1 本の 5 次 B-spline と保存した壁の復元・STEP の試験 (plans/accepted/tooling-nozzle-wall-single-bspline.md §4・§6 W4・W5、
-係数の求め方は plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1b のノット挿入 — 2026-10-07 に最小二乗の版から直した)。
+係数の求め方は plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1b のノット挿入 — 2026-10-07 に最小二乗の版から直した)。
 
 壁は case/45 の単調壁の生産問題 (`problem_d155_ns_finemesh_recal_final_mono.yaml`) の初期線だけ Hall に差し替え、`pw_ramp`・
 `pw_upstream` を外して上流を既定の `poly` にして作る (CFD ピンの凍結源 run に依存しない)。δ_r は prepare_ns と同じ積分法の経路

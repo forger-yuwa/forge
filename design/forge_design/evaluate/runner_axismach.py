@@ -265,7 +265,7 @@ def _physical_wall_repr(geometry: dict):
 
 
 def _pw_upstream(geometry: dict) -> dict:
-    """geometry.pw_upstream を読んで検査する (plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。重い処理・
+    """geometry.pw_upstream を読んで検査する (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。重い処理・
     run dir を作る前に呼ぶ。戻り: {"value": 物理壁に渡す値 (None = 解析経路でない), "source": "explicit" | "default" | None,
     "requested": 書かれた値 (キー無しは None)}。
 
@@ -1205,7 +1205,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       出口まで 1 本の 5 次 B-spline に作り直した壁 (`SingleBSplinePhysicalWall`) + 壁ファイル。キーを書いたときは壁ファイル
       `wall_repr.json` (形式の版・表現の種類・有効域・単位・設計壁と物理壁の係数) を run に置き、prepare_info.json の
       `physical_wall` にも写す。joint 壁 + 物理壁の解析経路 (offset radial) 専用で、それ以外にキーを書いたら例外。
-    - **`geometry.pw_upstream`** (plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1): joint 壁の物理壁の上流の作り方。
+    - **`geometry.pw_upstream`** (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1): joint 壁の物理壁の上流の作り方。
       キー無し = `poly` (配管〜設計スロートの 5 次多項式、上流に δ_r を足さない) / `ramp` = 旧来の δ_r ランプ (`pw_ramp`)。
       `poly` と `pw_ramp` の併記・不正値・joint でない壁への `poly`・`ramp` + `single_bspline` は run dir を作る前に例外。
       解決済みの値は prepare_info.json の `pw_upstream` に、`poly` のゲートは `pw_upstream_gate` に書く。

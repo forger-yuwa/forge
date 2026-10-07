@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """物理壁の上流の多項式 (`geometry.pw_upstream: poly`) と寸法の逆算 (`solve_rt_throat`・CFD 前の `solve_rt`) の試験
-(plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1・§4.2・§5 の 5)。
+(plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1・§4.2・§5 の 5)。
 
 壁は case/45 の単調壁の生産問題 (`problem_d155_ns_finemesh_recal_final_mono.yaml`) の初期線だけ Hall に差し替えて作る (CFD ピンの
 凍結源 run に依存しない)。δ_r は prepare_ns と同じ積分法の経路 (`integral_delta_r`、YAML の deltastar_initializer)。

@@ -61,7 +61,7 @@
 - **形のゲートの維持**: 単調壁の形状ゲートのうち、物理壁にかかるもの (S6: 物理壁の r″ の最大増加 ≤ 0.002) と、ランプのゲート (`max|r″ − r″_design| ≤ 0.005`、`max r′ < 0`、`wall_axismach.py:399`) を、新しい 1 本でも満たすこと。
 - 係数の数・ノットの数・各区間の最大誤差を記録する。
 
-- **2026-10-07 ユーザ決定で係数の求め方を変更**: 上流を多項式にする plan ([tooling-nozzle-upstream-poly-and-throat-sizing.md](../active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b) で壁の全区間が 5 次の区分多項式になるので、1 本の B-spline はノット挿入で代数的に組む。上の最小二乗の版は外す (「今の壁の STEP はいらない、外していいよ」)。最小二乗の版で行った W0〜W5 は、壁クラス・保存と復元・STEP・入力の同一性の検査の基盤の確認として記録に残し、W1・W5 は代数的な版で上流の plan の U3 と合わせてやり直す。
+- **2026-10-07 ユーザ決定で係数の求め方を変更**: 上流を多項式にする plan ([tooling-nozzle-upstream-poly-and-throat-sizing.md](tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b) で壁の全区間が 5 次の区分多項式になるので、1 本の B-spline はノット挿入で代数的に組む。上の最小二乗の版は外す (「今の壁の STEP はいらない、外していいよ」)。最小二乗の版で行った W0〜W5 は、壁クラス・保存と復元・STEP・入力の同一性の検査の基盤の確認として記録に残し、W1・W5 は代数的な版で上流の plan の U3 と合わせてやり直す。
 
 ### 4.2 壁クラスと下流の道具
 

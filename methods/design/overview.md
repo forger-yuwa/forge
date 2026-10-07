@@ -859,7 +859,7 @@ $x=0$ では設計壁の $C^2$ がそのまま残り、$r_W''(0)=1/R+\delta_r''(
 (`analytic=False` で joint にも従来経路を強制できる)。
 
 **上流の作り方 `geometry.pw_upstream` (`poly` が既定、2026-10-07)**
-(計画: [`plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1)。
+(計画: [`plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1)。
 上のランプ式 (`ramp`) はスロートより上流の縮流部にも $\delta_r$ を足す。**既定の `poly` は上流に $\delta_r$ を足さず**、配管〜設計スロートを
 5 次多項式 $Q$ 1 本にする:
 
@@ -910,14 +910,14 @@ $Q$ は接続端の $\delta_r, \delta_r', \delta_r''$ に依存するので、�
   寸法を少し変えたときの物理半径の局所の散らばりはスロートで $7.4\times10^{-9}$ m、出口で $2.6\times10^{-6}$ m (2026-10-07、U2c)。
   rtol を $10^{-10}$ にしても出口に $5\times10^{-8}$ m 残り (計算費は約 20 倍)、原因は確定していない。そのため $10^{-9}$ m では止まらず、
   CFD 前の許容差を上のとおり初期見積もり用に分けた (未使用の目標で 3 評価で収まり、近傍 11 点でも許容差内、U2d)。
-  **CFD 前の寸法は初期見積もりで、精密な寸法・感度の評価には未検証**。計画 [tooling-nozzle-upstream-poly-and-throat-sizing](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §6 U2〜U2d。
+  **CFD 前の寸法は初期見積もりで、精密な寸法・感度の評価には未検証**。計画 [tooling-nozzle-upstream-poly-and-throat-sizing](../../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md) §6 U2〜U2d。
 - 寸法の決め方は問題 YAML の `spec.sizing: {method: exit | throat, target_m}` (任意) に書くと、`prepare_ns` が `prepare_info.json` の `sizing` に
   実際の壁の物理スロート半径・出口半径と目標との差を並べる (無ければ `method: null` = 未記録)。
 - CLI: `python -m forge_design.feedback.deltastar_loop --problem P --euler-ref X --run-dir Y --solve-rt-throat R [--prev RUN --delta-next CSV --delta-r-out CSV]`。
 
 **物理壁の表現: 全域 1 本の 5 次 B-spline と STEP (`geometry.physical_wall_repr`, 2026-10-07 実装、生産未採用)**
 (計画: [`plans/accepted/tooling-nozzle-wall-single-bspline.md`](../../plans/accepted/tooling-nozzle-wall-single-bspline.md)、係数の求め方は
-[`tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b)。
+[`tooling-nozzle-upstream-poly-and-throat-sizing.md`](../../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md) §4.1b)。
 上の解析経路の `poly` の物理壁は、区間ごとに別の式 (直管の定数・$Q$・S + $\delta_r$) で、**全区間が $x$ の 5 次の区分多項式**である。
 これを、設計の中身を変えずに、入口から出口まで **1 本の $x$ の 5 次 B-spline** に**ノット挿入で代数的に**作り直し (当てはめなし)、
 メッシュ・初期値・報告・CAD が同じものを使えるようにした (`SingleBSplinePhysicalWall`, `geometry/wall_axismach.py`)。

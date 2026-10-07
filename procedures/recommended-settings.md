@@ -243,7 +243,7 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 (既定。新しい YAML・テンプレートには明記する): スロートより上流に δ_r を足さず、配管〜設計スロートを 5 次多項式 1 本にする。
 `pw_ramp` は書かない (`poly` と併記すると例外)。寸法 (`spec.r_throat`) は出口径から (`solve_rt`) か物理スロート径から (`solve_rt_throat`)
 決め、`spec.sizing` に残す。手順は [`nozzle-design-workflow.md`](nozzle-design-workflow.md) §1 ④・§2 ⑤、仕様は
-`methods/design/overview.md`「上流の作り方」(plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
+`methods/design/overview.md`「上流の作り方」(plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
 
 ## 5. 軸対称 — 現行 (2026-08)
 
@@ -360,7 +360,7 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 
 ## 変更ログ
 
-- `2026-10-07` — §4 に軸対称ノズルの物理壁 (NS) の現行 (`geometry.pw_upstream: poly`、寸法は `solve_rt` / `solve_rt_throat`) を追加、§9 に `geometry.pw_ramp`・CFD 前の旧 `solve_rt` を旧設定として (plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/active/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
+- `2026-10-07` — §4 に軸対称ノズルの物理壁 (NS) の現行 (`geometry.pw_upstream: poly`、寸法は `solve_rt` / `solve_rt_throat`) を追加、§9 に `geometry.pw_ramp`・CFD 前の旧 `solve_rt` を旧設定として (plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
 
 - `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
 - `2026-09-25` — §1.0a に `space.slauWallNormalChi` の適用規則 (3D 側壁接続のみ 1、新構成は診断可能性の検査 + 3 条件) を追加 (plan [convection-slau-wall-normal-chi-usage-rule](../plans/accepted/convection-slau-wall-normal-chi-usage-rule.md))。
