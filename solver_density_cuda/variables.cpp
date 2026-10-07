@@ -384,15 +384,34 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
         }
 
     }
+    // 面変数: ホスト側 p を読み書きするのは gpu: 0 の CPU 経路 (setStructuralVariables・gradientGauss) だけなので、
+    // useGPU == 1 では確保しない (長さ 0 のまま。約 195 B/節点。plan architecture-solver-host-memory §4.2)。
+    // デバイス側 p_d は従来どおり確保する。ホスト側に触る転送は nPlanesAlloc で長さを検査して止める。
+    this->nPlanesAlloc = msh.nPlanes;
     for (auto& planeValName : planeValNames)
     {
         std::vector<flow_float>& planeValues = this->p.at(planeValName);
-        planeValues.resize(msh.nPlanes);
+        if (useGPU != 1) planeValues.resize(msh.nPlanes);
 
         if (useGPU == 1) 
         {
             gpuErrchk( cudaMalloc((void**) &(this->p_d.at(planeValName)), msh.nPlanes*sizeof(flow_float)) );
         }
+    }
+}
+
+// ホスト面配列の長さ検査 (copyVariables_plane_* と *_all の面部分)。gpu: 1 ではホスト面配列を確保しないので、
+// 長さが allocVariables の nPlanes と違う配列 (未確保の 0 長を含む) を黙って 0 要素転送せず、変数名と長さを出して止める
+// (plan architecture-solver-host-memory §4 原則・§4.2)。
+static void requireHostPlaneLength(const std::string& name, const std::vector<flow_float>& v, geom_int nPlanesAlloc,
+                                   const char* where)
+{
+    if (nPlanesAlloc < 0 || v.size() != (size_t)nPlanesAlloc) {
+        std::cerr << "[variables] ERROR: " << where << ": host plane variable '" << name << "' has length " << v.size()
+                  << " but nPlanes = " << nPlanesAlloc
+                  << " (host plane variables are not allocated on the GPU path (gpu: 1); nPlanes = -1 means allocVariables was not called)"
+                  << std::endl;
+        std::exit(EXIT_FAILURE);
     }
 }
 
@@ -429,6 +448,7 @@ void variables::copyVariables_cell_plane_H2D_all()
     for (auto& name : this->planeValNames)
     {
         std::vector<flow_float>& planeValues = this->p.at(name);
+        requireHostPlaneLength(name, planeValues, this->nPlanesAlloc, "copyVariables_cell_plane_H2D_all");
         cudaWrapper::cudaMemcpy_H2D_wrapper(planeValues.data() , this->p_d.at(name), planeValues.size());
     }
 }
@@ -445,6 +465,7 @@ void variables::copyVariables_plane_H2D(std::list<std::string> names)
 {
     for (auto& name : names) {
         std::vector<flow_float>& planeValues = this->p.at(name);
+        requireHostPlaneLength(name, planeValues, this->nPlanesAlloc, "copyVariables_plane_H2D");
         cudaWrapper::cudaMemcpy_H2D_wrapper(planeValues.data() , this->p_d.at(name), planeValues.size());
     }
 }
@@ -459,6 +480,7 @@ void variables::copyVariables_cell_plane_D2H_all()
     for (auto& name : this->planeValNames)
     {
         std::vector<flow_float>& planeValues = this->p.at(name);
+        requireHostPlaneLength(name, planeValues, this->nPlanesAlloc, "copyVariables_cell_plane_D2H_all");
         cudaWrapper::cudaMemcpy_D2H_wrapper(this->p_d.at(name), planeValues.data() , planeValues.size());
     }
 }
@@ -475,6 +497,7 @@ void variables::copyVariables_plane_D2H(std::list<std::string> names)
 {
     for (auto& name : names) {
         std::vector<flow_float>& planeValues = this->p.at(name);
+        requireHostPlaneLength(name, planeValues, this->nPlanesAlloc, "copyVariables_plane_D2H");
         cudaWrapper::cudaMemcpy_D2H_wrapper(this->p_d.at(name), planeValues.data(), planeValues.size());
     }
 }

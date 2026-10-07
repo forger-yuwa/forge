@@ -61,7 +61,7 @@ GPU 経路のホスト参照は、**変数名と期待長を検査する共通�
 
 `main.cpp` の `mat_ns.initMatrix(msh)` (起動ログ "Init Matrix (but not used now)") を `gpu: 1` では呼ばない。
 2026-10-07 の確認: ビルド対象 (`CMakeLists.txt` の `forge_cppfiles`) で `mat_ns` のメンバ (`structure`・`lhs`・`rhs`・`localPlnOfCell`) を読む箇所は無く
-(読むのはビルド対象外の `solvePoisson_amgx.cpp`・`solveNavierStokes.cpp` だけ)、各 wrapper は参照を受け渡すだけ。
+(読むのはビルド対象外の `solvePoisson_amgx.cpp`・`solvePoisson_amgcl.cpp` だけ。`solveNavierStokes.cpp` は参照を受け取るだけ — 2026-10-07 実装時の再確認で訂正)、各 wrapper は参照を受け渡すだけ。
 `matrix` オブジェクト自体は残す (関数の引数として渡っているため)。
 
 ### 4.2 R2 ホストの面変数 `p` を確保しない (見込み −195 B/節点)
@@ -127,7 +127,7 @@ R1 → R2 → R3 の各段階で効果を測る。
 | ~~1~~ | ~~codex plan レビュー~~ (**済 2026-10-07**: GO-with-changes M5/m1、全件採用 — §6.1。エスカレーション条件 1 の諮問を兼ねた [設計の選択肢は計測で 1 つに絞れているため]。判断: 2026-10-07・R1–R3 の方針は維持、監査と受入条件を先に確定) | | F |
 | ~~2~~ (**済 2026-10-07**: [監査全文](../../notes/investigations/2026-10-07-host-memory-audit.md)、要点は §4.3。R2 に `pdeSize` の fallback 修正を追加) | **監査** (M1・M2・M5) | ホスト側 `c`/`p` の全参照を、**名前・有効条件・最初の利用箇所 (ファイル:行)・書くか読むか・保護の要否**の表に (§4.3)。出力と checkpoint の依存名 (`h0` ← `Ht`/`k`、`/CHECKPOINT` 履歴、`FORGE_OUT_RESIDUALS`・`FORGE_RESID_SNAP` 等の環境変数) を含める。表の各行に対応する**試験 (入力・確認する成果物・判定)** を割り当てる (§6 の構成表の元)。触るファイル: なし (読むだけ)。合格: 表が本 plan に入り、§6 の構成表と対応している | O |
 | 3 | **基準入力の確定と回帰ハーネス** (M3・M5) | **専用 case `case/66.hostmem_regression/`** に、§6 の構成表の各構成の入力を (元 case から**複製して**。元の case・他セッションの作業ディレクトリには書かない) 置き、変更前バイナリ (AWS `~/bin-hostmem/forge_9c9f623c`) で各 3 回・N step を回すハーネス (投入と比較のスクリプト) を作る。各構成が現行バイナリで起動し NaN 無く N step 走ることを確認 (古い config の廃止キーは複製側だけ直し、直した内容を README に書く)。SERN g3/g4 は `case/46.sern_design` に run_1072 以降で。2026-10-07 の縮小格子 3 点は**発散前までのメモリ観測**として保持し、回帰の基準には使わない (`s050` は step 9 で `roe` 非有限、3 点とも `check_convergence` は NOT CONVERGED)。変更後も同じハーネスで回す | O |
-| 4 | R1–R3 の実装 | §5 の 2〜4。各段階でメモリを測る (g3/g4、`FORGE_MEMLOG=1`) | O |
+| 4 | R1–R3 の実装 (**R1・R2 は済 2026-10-07**: gpu: 1 で `mat_ns` とホスト `p` を確保しない、`pdeSize` の面 fallback を `nPlanes` に、面配列の長さガード `requireHostPlaneLength`。ローカル縮小格子 s070/s085 でホスト HWM の傾き 2737 → 2227 B/節点 [−510、期待 −507]、GPU は不変、s070 の step 0 は既知の 1 ulp 列を除き一致・`res_0.h5` は全 25 データセット一致、`FORGE_DIAG_PSI_DUALEVAL` の退避は 543/543 で base と同じ。`variables.hpp` にメンバ `nPlanesAlloc` を追加 = **構造体レイアウトが変わったので他のビルドはクリーンビルド**。本格回帰は #5 の AWS ハーネスで。残: R3) | §5 の 2〜4。各段階でメモリを測る (g3/g4、`FORGE_MEMLOG=1`) | O |
 | 5 | 回帰 | §6 の全項目。負例 2 つ (出力用変数を H から外す・checkpoint 履歴変数を外す → いずれも書込み/転送の前に名前つきで停止) | O |
 
 ## 6. 検証
@@ -191,6 +191,7 @@ R1 → R2 → R3 の各段階で効果を測る。
 
 ## 9. 変更ログ
 
+- `2026-10-07` — R1・R2 を実装 (ローカル計測でホスト HWM −510 B/節点、GPU 不変、step 0 と初期出力は一致)。本格回帰は AWS ハーネスで。
 - `2026-10-07` — §5.1 #2 監査済み (ホスト `c` の GPU 経路の参照は 5 か所、probe 等は不要、R2 に `pdeSize` の fallback 修正を追加、試験構成を具体化)。回帰は専用 case `case/66.hostmem_regression/` で。
 - `2026-10-07` — codex plan レビュー (GO-with-changes, M5/m1) を全件採用: 初期化の順序と出力/確保の共通関数、ホスト参照の共通アクセサ、正常な基準入力、比較時点の固定、構成表と VERDICT、工程別メモリモデル。
 - `2026-10-07` — 起票。ユーザ決定「forge 本体のメモリを小さくする余地を、計測から調べる」(tooling-sern-mesh-blocking §5.1 B4b-3) の計測結果を受け、段階 1 (R1–R3) を設計。

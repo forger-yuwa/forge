@@ -1634,8 +1634,15 @@ cudaConfig initializeSimulation(
     }
 
     MEMLOG_SOLVER("after readMesh");
-    cout << "Init Matrix (but not used now) \n";
-    mat_ns.initMatrix(msh);
+    // mat_ns のメンバ (structure/lhs/rhs/localPlnOfCell) を読むのはビルド対象外の solvePoisson_amgx.cpp・
+    // solvePoisson_amgcl.cpp だけで、GPU 経路は各 wrapper へ参照を渡すだけ。gpu: 1 では作らない
+    // (約 312 B/節点。plan architecture-solver-host-memory §4.1)。オブジェクト自体は引数として渡るので残す。
+    if (cfg.gpu == 0) {
+        cout << "Init Matrix (but not used now) \n";
+        mat_ns.initMatrix(msh);
+    } else {
+        cout << "Init Matrix: skipped (gpu: 1 does not use it) \n";
+    }
     MEMLOG_SOLVER("after initMatrix");
 
     cout << "Read Boundary Conditions \n";
@@ -2300,7 +2307,9 @@ static PdeSnap pdeSnapshot(StepContext& s)
     auto add = [&](flow_float* p, size_t n) { if (!p || n == 0) return; std::vector<flow_float> h(n);
         gpuErrchk( cudaMemcpy(h.data(), p, n*sizeof(flow_float), cudaMemcpyDeviceToHost) ); sn.arr.emplace_back(p, n, std::move(h)); };
     for (auto& kv : s.var.c_d) add(kv.second, pdeSize(s.var.c, kv.first, s.msh.nCells_all));
-    for (auto& kv : s.var.p_d) add(kv.second, pdeSize(s.var.p, kv.first, 0));   // host 側の大きさが分からない面配列は退避しない (件数をログ)
+    // 面配列: gpu: 1 ではホスト側を確保しない (長さ 0) ので、fallback は allocVariables の cudaMalloc と同じ nPlanes
+    // (0 にすると面配列が黙って退避から外れる。plan architecture-solver-host-memory §4.2)
+    for (auto& kv : s.var.p_d) add(kv.second, pdeSize(s.var.p, kv.first, s.msh.nPlanes));
     for (auto& bc : s.msh.bconds) for (auto& kv : bc.bvar_d) add(kv.second, pdeSize(bc.bvar, kv.first, 0));
     static bool logged = false;
     if (!logged) { logged = true; size_t nb = 0; for (auto& a : sn.arr) nb += std::get<1>(a);

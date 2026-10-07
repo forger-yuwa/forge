@@ -20,9 +20,13 @@
 class variables {
 public:
     std::map<std::string, std::vector<flow_float>> c; // host cell variables
-    std::map<std::string, std::vector<flow_float>> p; // host plane variables
+    std::map<std::string, std::vector<flow_float>> p; // host plane variables (gpu: 1 では確保しない = 長さ 0)
     std::map<std::string, flow_float*> c_d; // device cell variables
     std::map<std::string, flow_float*> p_d; // device plane variables
+    // allocVariables が記録する面数 (= msh.nPlanes。ホスト面配列の期待長)。copyVariables_plane_* と *_all の面部分は
+    // ホスト配列の長さがこれと違えば (gpu: 1 の未確保 = 長さ 0 を含む) 変数名と長さを出して止める
+    // (plan architecture-solver-host-memory §4.2)。allocVariables の前と変換器 (allocVariablesConverter) では -1。
+    geom_int nPlanesAlloc = -1;
 
     // 保存量の FP64 影アキュムレータ (plans/active/time_integration-fp64-accumulator.md §4.3)。
     // c_d は flow_float* のマップなので double を入れられない → **型付きの専用領域**として持つ。
@@ -340,6 +344,7 @@ public:
     // 二相拡散 (condTwoPhaseDiffusion, #4e) の蒸気残差 res_roYv (residual_history の rms_roYv 列)。enabled==0 で no-op。
     void registerTwoPhaseVaporResidual(int enabled);
 
+    // useGPU == 1 のときホストの plane 変数 p は確保しない (読み書きするのは gpu: 0 の CPU 経路だけ。デバイス側 p_d は確保する)。
     void allocVariables(const int &useGPU , mesh& msh);
     // 変換器 (convertGmshToForge) 専用: keep に含まれる cell 変数だけを確保し、それ以外の cell 変数は c / c_d /
     // cellValNames から登録ごと外す (未確保の変数に触れたら c に空エントリが増える・c_d.at が投げるので検出できる)。
