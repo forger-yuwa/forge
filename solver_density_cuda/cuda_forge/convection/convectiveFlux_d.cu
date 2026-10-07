@@ -414,7 +414,28 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             spA.Pface_out      = passive_Pface_alloc(msh.nPlanes);
         }
 
-        SLAU_d<<<dimGrid_normal_halo , cuda_cfg.dimBlock>>> (
+        // space.zeroThicknessEdgeVelocity (既定 無効): 処置を含む実体 SLAU_d<true> は無効時の SLAU_d<false> (旧カーネルと
+        // 同じ機械語) よりレジスタが多く、既定のブロック 512 では起動できない。カーネル属性の上限以下の 2 冪のブロックで起動する
+        // (面ごとの値・流束はブロックの大きさに依らない。残差の atomicAdd の加算順だけが変わる)。
+        dim3 slauGrid = dimGrid_normal_halo, slauBlock = cuda_cfg.dimBlock;
+        auto slauKernel = &SLAU_d<false>;
+        if (cfg.zeroThicknessEdgeVelocity == 1) {
+            static int s_zteBlock = 0;
+            if (s_zteBlock == 0) {
+                cudaFuncAttributes fa;
+                CHECK_CUDA_ERROR(cudaFuncGetAttributes(&fa, SLAU_d<true>));
+                const int cap = std::min(cuda_cfg.blocksize, fa.maxThreadsPerBlock);
+                int b = 1;   // cap 以下で最大の 2 冪
+                while (b * 2 <= cap) b *= 2;
+                s_zteBlock = b;
+                std::cout << "[zeroThicknessEdgeVelocity] SLAU_d<true>: レジスタ " << fa.numRegs << "/スレッド、ブロック上限 "
+                          << fa.maxThreadsPerBlock << " → ブロック " << s_zteBlock << " で起動 (既定 " << cuda_cfg.blocksize << ")" << std::endl;
+            }
+            slauKernel = &SLAU_d<true>;
+            slauBlock = dim3(s_zteBlock);
+            slauGrid = dim3(ceil(msh.nNormal_halo_Planes / (flow_float)s_zteBlock));
+        }
+        slauKernel<<<slauGrid , slauBlock>>> (
             cfg.convMethod, cfg.limiter, slauVariant, cfg.reconT,
             (cfg.slauWallNormalChi > 0 ? 1 : 0),   // 未解決の auto (-1) を有効扱いにしない
             cfg.slauContactFloor,
@@ -737,4 +758,20 @@ void ledgerFlushFaces()
     const unsigned int zero = 0;
     CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_ledgerFaceCount, &zero, sizeof(unsigned int)));
     std::cout << "[FORGE_DUMP_LEDGER] call " << L.call << ": " << n << " 面を記録\n";
+}
+
+// =============================================================================
+// 厚さ 0 の板の自由端の近傍の速度再構成の重み (space.zeroThicknessEdgeVelocity、plan
+// convection-zero-thickness-edge-reconstruction §4)。起動時に 1 回だけ呼ぶ: 検証済みの host の w [nCells] を device へ上げ、
+// SLAU_d が読む g_zteVelW に渡す。空 (無効) なら何もしない (g_zteVelW は nullptr のまま = 旧経路とビット同一)。
+// 読込・検証・起動ログは input/zeroThicknessEdge.cpp。
+// =============================================================================
+void zteSetVelocityWeightDevice(const std::vector<flow_float>& w)
+{
+    if (w.empty()) return;
+    flow_float* w_d = nullptr;   // run の終わりまで使うので解放しない (1 回だけの確保)
+    CHECK_CUDA_ERROR(cudaMalloc(&w_d, sizeof(flow_float) * w.size()));
+    CHECK_CUDA_ERROR(cudaMemcpy(w_d, w.data(), sizeof(flow_float) * w.size(), cudaMemcpyHostToDevice));
+    const flow_float* p = w_d;
+    CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_zteVelW, &p, sizeof(const flow_float*)));
 }

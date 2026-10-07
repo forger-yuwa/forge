@@ -181,4 +181,8 @@ void ledgerBeginAssemble(mesh& msh);
 void ledgerCapture(mesh& msh, variables& var, const char* tag, bool residual);
 void ledgerFlushFaces();
 
+// 厚さ 0 の板の自由端の近傍の速度再構成の重み w [nCells] を device へ上げる (space.zeroThicknessEdgeVelocity、起動時に 1 回)。
+// 空なら何もしない (無効 = 旧経路とビット同一)。plan convection-zero-thickness-edge-reconstruction §4
+void zteSetVelocityWeightDevice(const std::vector<flow_float>& w);
+
 #include "cuda_forge/convection/farfieldFace.hpp"   // 遠方境界 farfield の面の値配列

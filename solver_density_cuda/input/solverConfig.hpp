@@ -307,6 +307,13 @@ public:
     // W2 フォールバック (§4.23): 0 = OFF、N = 非物理な面を N 回の訪問だけ 1 次に落とす (SU2 相当は 20)。
     int badReconFallback = 0;
 
+    // 厚さ 0 の板の自由端の近傍で速度の再構成を節点値へ寄せる (space.zeroThicknessEdgeVelocity、既定 0 = 無効でビット不変)。
+    // 前処理 (tools/mark_zero_thickness_edges.py) がメッシュ h5 の /AUX/w_recon_vel に節点ごとの重み w∈[0,1] を書き、
+    // SLAU の内部面で節点 i 側の速度を u_f = u_i + w_i (u_f,旧 − u_i) にする (w=1 で従来、w=0 で節点値。ψ∇u·r だけを縮める)。
+    // node + SLAU/SLAU2・非周期・非軸対称のみ (他は起動時エラー)。plans/active/convection-zero-thickness-edge-reconstruction.md §4。
+    int zeroThicknessEdgeVelocity = 0;
+    std::string zeroThicknessEdgeVelocityField;   // /AUX 下のデータセット名 (有効時 "w_recon_vel" 固定、無効時は空)
+
     // free-stream 保存: 対流流束の圧力項を (p_tilde - pRef)*s で組み、非直交メッシュで
     // 大きな p*s を float32 加算する際の桁落ち(metric closure 由来の偽運動量源)を抑える。
     // 既定 0.0 で従来挙動(ビット不変)。一様基準(動作/フリーストリーム)静圧を入れる。

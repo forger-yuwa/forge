@@ -121,6 +121,177 @@ YAML_HARD_PATHS = [
 CHI_KEY = "space.slauWallNormalChi.effective"
 MANIFEST_VERSION = 2
 
+# 厚さ 0 の板の自由端の近傍で速度の再構成を節点値にする処置 (plan convection-zero-thickness-edge-reconstruction §4
+# 「設計チェーンへの配線」、codex plan レビュー 2026-10-08 M3、codex diagnose 2026-10-08 edge-weight-preprocessing)。
+# ソルバの設定は有効/無効とフィールド名だけ (`space.zeroThicknessEdgeVelocity: {field: w_recon_vel}`)。端の判定
+# (タグ・rings) は前処理の道具 (`tools/mark_zero_thickness_edges.py`) が **meshFileName の `/AUX/<field>`** に書いた
+# 節点の重み w とその属性にある。区間識別には有効状態・フィールド名・属性のタグ (並べ替え)・rings に加えて、
+# **その段の forge が読む meshFileName から再計算した格子署名と w のハッシュ**を入れる (属性に書かれたハッシュは
+# 転記しない。計算は道具の `mesh_signature(h5path)` / `field_hash(w)` を import して使い、同じ実装を二重に持たない)。
+# **キーが無い・明示の無効の段には何も足さない** (既存 run の stage_key は不変)。
+ZTE_CFG_KEY = "zeroThicknessEdgeVelocity"
+ZTE_PREFIX = "space." + ZTE_CFG_KEY
+ZTE_GROUP = "AUX"
+ZTE_TOOL_MODULE = "mark_zero_thickness_edges"
+
+
+ZTE_DEFAULT_FIELD = "w_recon_vel"
+
+
+def zte_config(cfg_text):
+    """solverConfig の `space.zeroThicknessEdgeVelocity` を読む (ソルバ solverConfig.cpp と同じ解釈)。
+    戻り: None (キーが無い・`{enabled: 0}` = 無効) か {"field": 名前 or None, "invalid": 理由 or None}。
+    有効は `{enabled: 1}` か `{field: ...}` (field の既定は w_recon_vel)。map でない値 (null・false・数・文字列)・未知キー・
+    enabled が 0/1/真偽値でないものはソルバが起動時に拒否するので、invalid の有効扱い (無効の段と黙って連結しない)。
+    YAML が読めないときも、キーの文字列が本文にあれば invalid の有効扱い。"""
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("stage_manifest: PyYAML が無いので段の区間を判定できない (pip install pyyaml)")
+    try:
+        doc = yaml.safe_load(cfg_text or "")
+    except Exception:
+        return {"field": None, "invalid": "yaml_unparsable"} if ZTE_CFG_KEY in (cfg_text or "") else None
+    sp = doc.get("space") if isinstance(doc, dict) else None
+    if not isinstance(sp, dict) or ZTE_CFG_KEY not in sp:
+        return None
+    v = sp[ZTE_CFG_KEY]
+    if not isinstance(v, dict):
+        return {"field": None, "invalid": "not_a_map:%r" % (v,)}
+    unknown = sorted(str(k) for k in v if k not in ("enabled", "field"))
+    if unknown:
+        return {"field": None, "invalid": "unknown_key:%s" % ",".join(unknown)}
+    en = v.get("enabled", 1)
+    if isinstance(en, bool):
+        en = int(en)
+    if en not in (0, 1) or isinstance(en, float):
+        return {"field": None, "invalid": "enabled:%r" % (en,)}
+    f = v.get("field", ZTE_DEFAULT_FIELD)
+    if not (isinstance(f, str) and re.match(r"^[A-Za-z0-9_.-]+$", f.strip())):
+        return {"field": None, "invalid": "field_not_a_name:%r" % (f,)}
+    if en == 0:
+        return None
+    return {"field": f.strip(), "invalid": None}
+
+
+def zte_signature(tags, rings):
+    """処置の識別子 (設計 DB・学習の採否で使う)。タグは並べ替えて重複を落とす。"""
+    return "tags=%s;rings=%d" % (",".join(sorted(set(str(t) for t in tags))), int(rings))
+
+
+def _zte_json(v):
+    """h5 の属性を JSON にできる値へ (来歴の記録用)。"""
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    if isinstance(v, bytes):
+        return v.decode(errors="replace")
+    if np is not None and isinstance(v, np.ndarray):
+        return [_zte_json(x) for x in v.tolist()] if v.size <= 64 else "array(%s, %d)" % (v.dtype, v.size)
+    if np is not None and isinstance(v, np.generic):
+        return v.item()
+    if isinstance(v, (list, tuple)):
+        return [_zte_json(x) for x in v]
+    return v
+
+
+def _zte_tags(v):
+    """属性のタグ (文字列 "a,b" / "a b"、または文字列の配列) を並べ替えたリストに。読めなければ None。"""
+    v = _zte_json(v)
+    if isinstance(v, str):
+        items = [s for s in re.split(r"[,\s]+", v) if s]
+    elif isinstance(v, list) and all(isinstance(s, str) for s in v):
+        items = [s.strip() for s in v if s.strip()]
+    else:
+        return None
+    return sorted(set(items)) or None
+
+
+def zte_tool():
+    """前処理の道具 `mark_zero_thickness_edges.py` (格子署名 `mesh_signature(h5path)` と w のハッシュ `field_hash(w)` の正本)。
+    import できない・関数が無いときは止める (有効の段を識別できないまま他の段と連結しない)。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    try:
+        import importlib
+        t = importlib.import_module(ZTE_TOOL_MODULE)
+    except ImportError as e:
+        raise SystemExit("stage_manifest: 処置の前処理の道具 %s.py を import できない (%s)。格子署名と w のハッシュを"
+                         "再計算できないので、処置を有効にした段を識別できない" % (ZTE_TOOL_MODULE, e))
+    for fn in ("mesh_signature", "field_hash"):
+        if not callable(getattr(t, fn, None)):
+            raise SystemExit("stage_manifest: %s.py に %s() が無い" % (ZTE_TOOL_MODULE, fn))
+    return t
+
+
+def zte_mesh_file(cfg_text, run_dir):
+    """処置の w を読む入力 h5 = **mesh.meshFileName** (valueFileName ではない)。決められなければ None。"""
+    if not run_dir:
+        return None
+    try:
+        import yaml
+        ms = (yaml.safe_load(cfg_text or "") or {}).get("mesh") or {}
+    except Exception:
+        return None
+    v = ms.get("meshFileName") if isinstance(ms, dict) else None
+    return os.path.join(str(run_dir), str(v)) if v else None
+
+
+def zte_identity(h5path, field):
+    """meshFileName の `/AUX/<field>` を読み、識別に要る量を返す。ファイル・フィールドが無ければ None。
+    戻り: {"path", "n" (長さ), "tags" (属性、並べ替え; 読めなければ None), "rings" (属性; int or None),
+           "mesh_signature" (道具で再計算), "field_hash" (道具で再計算), "attrs" (全属性、来歴用)}。
+    **ハッシュは属性から転記せず毎回再計算する** (同じ設定でも格子や w が変われば別物として扱うため)。"""
+    if not h5path or not os.path.exists(str(h5path)):
+        return None
+    try:
+        import h5py
+        import numpy as np
+    except ImportError:
+        raise SystemExit("stage_manifest: h5py / numpy が無いので処置のフィールドを照合できない")
+    path = "%s/%s" % (ZTE_GROUP, field)
+    with h5py.File(str(h5path), "r") as f:
+        if path not in f or not isinstance(f[path], h5py.Dataset):
+            return None
+        ds = f[path]
+        attrs = {k: _zte_json(v) for k, v in ds.parent.attrs.items()}
+        attrs.update({k: _zte_json(v) for k, v in ds.attrs.items()})
+        w = np.asarray(ds[...])
+    rings = attrs.get("rings")
+    try:
+        rings = int(rings) if rings is not None and float(rings) == int(rings) else None
+    except (TypeError, ValueError):
+        rings = None
+    t = zte_tool()
+    return {"path": path, "n": int(w.shape[0]) if w.shape else 0,
+            "tags": _zte_tags(attrs.get("tags")) if "tags" in attrs else None, "rings": rings,
+            "mesh_signature": str(t.mesh_signature(str(h5path))), "field_hash": str(t.field_hash(w)), "attrs": attrs}
+
+
+def _zte_stage_key(cfg_text, zc, run_dir):
+    """有効な段の区間識別 (zte_config が None でないときだけ呼ぶ)。h5 が読めないときは unknown / missing を値にして、
+    他の段と黙って連結しない。"""
+    out = {ZTE_PREFIX + ".enabled": "1",
+           ZTE_PREFIX + ".field": zc["field"] if zc["field"] else "invalid:" + str(zc["invalid"])}
+    names = ("tags", "rings", "mesh_signature", "field_hash")
+    if not zc["field"]:
+        val = dict.fromkeys(names, "invalid")
+    elif not run_dir:
+        val = dict.fromkeys(names, "unknown")
+    else:
+        a = zte_identity(zte_mesh_file(cfg_text, run_dir), zc["field"])
+        if a is None:
+            val = dict.fromkeys(names, "missing")
+        else:
+            val = {"tags": ",".join(a["tags"]) if a["tags"] else "missing",
+                   "rings": str(a["rings"]) if a["rings"] is not None else "missing",
+                   "mesh_signature": a["mesh_signature"], "field_hash": a["field_hash"]}
+    for k, v in val.items():
+        out[ZTE_PREFIX + "." + k] = v
+    return out
+
 
 def fnv1a64(data):
     """forge の appendLaunchRecord (main.cpp) と同じ FNV-1a 64。段と forge_launches.jsonl の起動を結び付ける。"""
@@ -284,6 +455,10 @@ def stage_key(cfg_text, bcond_text, run_dir=None):
     tp = _twophase_effective(cfg_text, bcond_text)
     if tp is not None:
         k["twophase_diffusion_effective"] = str(tp)   # 凝縮 run だけ (他の run の署名は従来どおり)
+    # 厚さ 0 の板の自由端の速度再構成の処置: 有効な段だけ (無効・キー無しの段の署名は従来どおり)
+    zc = zte_config(cfg_text)
+    if zc is not None:
+        k.update(_zte_stage_key(cfg_text, zc, run_dir))
     return k
 
 

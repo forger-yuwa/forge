@@ -4,8 +4,13 @@
 //     単一 TU を維持するため (rdc 不要 / __device__ グローバル・cudaMemcpyToSymbol の共有を保つ)、
 //     CMake の source には .cu/.cuh として足さないこと。
 //   - 参照する共通ヘルパ (interp_dispatch 等) と診断グローバルは include 元の上方で定義済み。
+//   - kZte (space.zeroThicknessEdgeVelocity): 厚さ 0 の板の自由端の近傍の速度再構成の処置を含む実体を別に作る。
+//     false (既定) の実体は処置のコードを持たない = 旧カーネルと同じ機械語 (レジスタ 122)。処置の分岐を同じ実体に
+//     足すとレジスタが 143 に増え、既定のブロック 512 で起動できなくなる (65536/143 = 458) ため実体を分けた。
+//     true の実体は wrapper がカーネル属性の上限以下のブロックで起動する。
 // =============================================================================
 
+template <bool kZte>
 __global__ void SLAU_d
 (
  int conv_scheme, int limit_scheme,
@@ -280,6 +285,32 @@ __global__ void SLAU_d
         if ((long long)ip == g_diagVelCellFace) {
             if ((long long)ic0 == g_diagVelCellNode) { Ux_L = Ux[ic0]; Uy_L = Uy[ic0]; Uz_L = Uz[ic0]; }
             if ((long long)ic1 == g_diagVelCellNode) { Ux_R = Ux[ic1]; Uy_R = Uy[ic1]; Uz_R = Uz[ic1]; }
+        }
+        // 厚さ 0 の板の自由端の近傍 (space.zeroThicknessEdgeVelocity。kZte=false の実体にはこのコードが無い = ビット不変):
+        // 節点側の再構成速度を u_f = u_i + w_i (u_f − u_i) に寄せる (w=1 の側は何もしない = 旧式のまま、w=0 は節点値)。
+        // 診断介入と同じ位置 (blend/Thornber/フォールバックの後、速度二乗・面エンタルピー・質量流束の前)。
+        // 密度・圧力・組成・勾配配列は変えない。node の主ループは内部面だけ (ic1 < nCells) だが範囲は見る。
+        if (kZte && g_zteVelW != nullptr) {
+            const flow_float wL = g_zteVelW[ic0];
+            if (wL < (flow_float)1.0) {
+                if (wL <= (flow_float)0.0) { Ux_L = Ux[ic0]; Uy_L = Uy[ic0]; Uz_L = Uz[ic0]; }
+                else {
+                    Ux_L = Ux[ic0] + wL*(Ux_L - Ux[ic0]);
+                    Uy_L = Uy[ic0] + wL*(Uy_L - Uy[ic0]);
+                    Uz_L = Uz[ic0] + wL*(Uz_L - Uz[ic0]);
+                }
+            }
+            if (ic1 < nCells) {
+                const flow_float wR = g_zteVelW[ic1];
+                if (wR < (flow_float)1.0) {
+                    if (wR <= (flow_float)0.0) { Ux_R = Ux[ic1]; Uy_R = Uy[ic1]; Uz_R = Uz[ic1]; }
+                    else {
+                        Ux_R = Ux[ic1] + wR*(Ux_R - Ux[ic1]);
+                        Uy_R = Uy[ic1] + wR*(Uy_R - Uy[ic1]);
+                        Uz_R = Uz[ic1] + wR*(Uz_R - Uz[ic1]);
+                    }
+                }
+            }
         }
         // velocity2_L / h_p はブレンド後に算出 (L 再構成直後から移動)。
         flow_float velocity2_L = Ux_L*Ux_L + Uy_L*Uy_L + Uz_L*Uz_L;

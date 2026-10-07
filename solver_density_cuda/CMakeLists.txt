@@ -81,6 +81,7 @@ file( GLOB forge_cppfiles
     convectiveFlux.cpp 
     input/solverConfig.cpp 
     input/calcWallDistance_kdtree.cpp 
+    input/zeroThicknessEdge.cpp 
     setStructualVariables.cpp 
     dependentVariables.cpp 
 )

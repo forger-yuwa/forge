@@ -53,6 +53,11 @@ __device__ unsigned int  g_ledgerFaceCap   = 0;
 // 指定面の指定節点側の再構成速度 3 成分だけをセル値に戻す (plan tooling-nozzle-sern-3d §5.1 R5h の 1 変数 A/B)。生産で使わない。
 __device__ long long g_diagVelCellFace = -1;
 __device__ long long g_diagVelCellNode = -1;
+// 厚さ 0 の板の自由端の近傍の速度再構成の重み w [nCells] (space.zeroThicknessEdgeVelocity、既定 nullptr = 無効でビット不変)。
+// SLAU の内部面で節点 i 側の速度を u_f = u_i + w_i (u_f^recon − u_i) にする。w=1 の側は分岐で素通り (旧式のまま)、
+// w=0 は節点値。値は前処理 (tools/mark_zero_thickness_edges.py) がメッシュ h5 の /AUX に書く。
+// plans/active/convection-zero-thickness-edge-reconstruction.md §4。
+__device__ const flow_float* g_zteVelW = nullptr;
 // speciesFaceReconstruction==1: Y_s を ρ/Y 勾配 + min(ψ_ρ,ψ_Y) で face へ再構成し thermo/species 流束で
 // 同一 face 組成を使う (proper S2/S3)。wrapper で cfg.speciesFaceReconstruction を設定。
 __device__ int g_speciesFaceRecon = 0;

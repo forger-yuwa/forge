@@ -710,6 +710,45 @@ void solverConfig::read(std::string fname)
         if (this->badReconFallback < 0 || this->badReconFallback > 100) {
             throw std::runtime_error("Key 'badReconFallback' in 'space' must be 0 (off) or 1..100 (hysteresis visits; SU2 uses 20).");
         }
+        // 厚さ 0 の板の自由端の近傍の速度再構成 (plan convection-zero-thickness-edge-reconstruction §4)。既定 = 無効。
+        // 書式: {enabled: 1} または {field: w_recon_vel} (有効) / {enabled: 0} (無効)。重みは**必ず** meshFileName の
+        // /AUX/w_recon_vel から読む (格子署名と結び付けるため名前は固定。field は書くなら w_recon_vel だけを受け付ける)。
+        // ここでは**書式だけ**を検査する: 同じ solverConfig を変換器 (品質チェック用の cell 変換) も読むので、
+        // node/SLAU/周期/軸対称の契約は solver の起動時に検査する (input/zeroThicknessEdge.cpp)。
+        // 端の判定 (E・S_2) はソルバでなく前処理の道具 (tools/mark_zero_thickness_edges.py) が節点の重みとして与える。
+        if (space["zeroThicknessEdgeVelocity"]) {
+            const YAML::Node z = space["zeroThicknessEdgeVelocity"];
+            const std::string fmt = "Key 'zeroThicknessEdgeVelocity' in 'space' must be a map {enabled: 1} (or {field: w_recon_vel}) "
+                                    "to enable, or {enabled: 0} to disable. The weight is read from /AUX/w_recon_vel of the mesh h5, "
+                                    "written by tools/mark_zero_thickness_edges.py (the solver does not build the edge set)";
+            if (!z.IsMap()) throw std::runtime_error(fmt + ".");
+            for (const auto& kv : z) {
+                const std::string k = kv.first.as<std::string>();
+                if (k != "enabled" && k != "field") {
+                    throw std::runtime_error("Unknown key '" + k + "' in 'space.zeroThicknessEdgeVelocity' (allowed: enabled, field). "
+                                             + fmt + " (tags/rings are options of that tool).");
+                }
+            }
+            int en = 1;
+            if (z["enabled"]) {
+                const YAML::Node e = z["enabled"];
+                int v = -1;
+                try { v = e.as<int>(); } catch (const YAML::Exception&) {
+                    try { v = e.as<bool>() ? 1 : 0; } catch (const YAML::Exception&) { v = -1; }
+                }
+                if (v != 0 && v != 1) throw std::runtime_error("Key 'enabled' in 'space.zeroThicknessEdgeVelocity' must be 0/1 (or false/true).");
+                en = v;
+            }
+            if (z["field"]) {
+                const std::string fld = z["field"].IsScalar() ? z["field"].as<std::string>() : std::string("(not a scalar)");
+                if (fld != "w_recon_vel") {
+                    throw std::runtime_error("Key 'field' in 'space.zeroThicknessEdgeVelocity' must be 'w_recon_vel' (the weight is always "
+                                             "read from /AUX/w_recon_vel of the mesh h5 so that it is bound to the mesh signature), got '" + fld + "'.");
+                }
+            }
+            this->zeroThicknessEdgeVelocity = en;
+            this->zeroThicknessEdgeVelocityField = (en == 1) ? std::string("w_recon_vel") : std::string();
+        }
         // 省略 = auto の解決 (plan convection-slau-wall-normal-chi-default §4.1)。明示 1 の検査は下で従来どおり。
         if (this->slauWallNormalChi < 0) {
             if (this->discretization != "node") {

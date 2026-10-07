@@ -68,6 +68,7 @@
 #include "cuda_forge/gasPhaseComposition_d.cuh"   // gasPhaseLiquid (transport probe の液)
 #include <highfive/H5File.hpp>
 #include "input/speciesDB.hpp"
+#include "input/zeroThicknessEdge.hpp"   // space.zeroThicknessEdgeVelocity の起動時検査・読込
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
@@ -113,6 +114,9 @@ static unsigned long long fnv1a64File(const std::string& path)
     return h;
 }
 
+// 起動記録の本体 (閉じ括弧の前まで)。厚さ 0 の板の自由端の処置の記録 (appendLaunchRecordZte) が同じ値で 2 行目を書くために残す。
+static std::string g_launchRecordBody;
+
 static void appendLaunchRecord(const solverConfig& cfg)
 {
     struct stat st{};
@@ -126,7 +130,27 @@ static void appendLaunchRecord(const solverConfig& cfg)
        << ", \"slauWallNormalChi\": " << cfg.slauWallNormalChi
        << ", \"slauWallNormalChi_source\": \"" << cfg.slauWallNormalChiReason << "\""
        << ", \"scalarGradient\": \"" << cfg.scalarGradient << "\""
-       << ", \"scalarGradient_source\": \"" << cfg.scalarGradientReason << "\"}";
+       << ", \"scalarGradient_source\": \"" << cfg.scalarGradientReason << "\"";
+    g_launchRecordBody = os.str();
+    std::ofstream out("forge_launches.jsonl", std::ios::app);
+    if (out) out << g_launchRecordBody << "}" << "\n";
+}
+
+// 厚さ 0 の板の自由端の速度再構成の処置 (space.zeroThicknessEdgeVelocity) の起動記録。appendLaunchRecord は格子を読む前に
+// 走るので、格子署名と w の照合が済んだ後に**同じ起動の 2 行目**として追記する (1 行目の形式は変えない)。2 行目は 1 行目と
+// 同じキー・同じ値 (最後の行を読む側が slauWallNormalChi 等を失わないため) に "record" と入れ子の処置の記録を足したもの。
+// 値は属性の転記でなく、ソルバが読み込んだ格子と w から再計算して照合した値。無効は {"enabled": 0} だけ。
+static void appendLaunchRecordZte(const ZteLaunchInfo& z)
+{
+    if (g_launchRecordBody.empty()) return;
+    std::ostringstream os;
+    os << g_launchRecordBody << ", \"record\": \"zeroThicknessEdgeVelocity\", \"zeroThicknessEdgeVelocity\": {\"enabled\": " << z.enabled;
+    if (z.enabled) {
+        os << ", \"field\": \"" << z.field << "\", \"mesh_signature\": \"" << z.meshSignature
+           << "\", \"mesh_signature_version\": \"" << z.meshSignatureVersion << "\", \"field_hash\": \"" << z.fieldSha256
+           << "\", \"n_w_zero\": " << z.nZero << ", \"n_w_lt1\": " << z.nLt1 << ", \"n_nodes\": " << z.nNodes;
+    }
+    os << "}}";
     std::ofstream out("forge_launches.jsonl", std::ios::app);
     if (out) out << os.str() << "\n";
 }
@@ -1645,6 +1669,15 @@ cudaConfig initializeSimulation(
     cout << "Read Boundary Conditions \n";
     readBcondConfig(cfg , msh.bconds);
     MEMLOG_SOLVER("after readBcondConfig");
+
+    // 厚さ 0 の板の自由端の近傍の速度再構成 (space.zeroThicknessEdgeVelocity、既定 無効)。bcond 種別 (周期の検査) が
+    // 揃った直後に、契約とメッシュ h5 の /AUX の重み w を検査して device へ上げる (無効なら起動エコー 1 行だけで何もしない)。
+    // plans/active/convection-zero-thickness-edge-reconstruction.md §4
+    {
+        ZteLaunchInfo zinfo;
+        zteSetVelocityWeightDevice(zteLoadVelocityWeight(cfg , msh , &zinfo));
+        appendLaunchRecordZte(zinfo);   // 照合済みの値を起動記録 forge_launches.jsonl に追記 (無効は enabled 0)
+    }
 
     // 凝縮セルの二相 frozen 音速 (condSonicModel) の自動解決: bcond 種別が揃った後に確定し理由をログに出す
     // (plans/active/condensation-kantrowitz-gamma-twophase-sonic.md §4.2)。
