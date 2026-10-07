@@ -1008,12 +1008,15 @@ def delta_r_from_table(x, d):
     return f
 
 
-def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = None):
+def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = None, rtol: float | None = None):
     """積分法初期壁の δ_r (`prepare_ns` の initializer 経路): `integral_bl` → 5 次 P-spline 平滑化 → 壁に渡す δ_r 関数。
     戻り: (res_init, delta_r_x, init_info)。`prepare_ns` から切り出したもの (振る舞いは同一; plan
     tooling-nozzle-throat-monotone-r2 §6 S6 の形状ゲートが同じ経路で物理壁を作るために共有する)。
     scale: スロート半径 r_t [m] (None = spec.r_throat)。寸法の逆算 (`deltastar_loop.solve_rt`・`solve_rt_throat`) が、反復のたびに
-    同じ経路 (k_f の cf_scale・熱条件・平滑化) で δ_r を作り直すために渡す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。"""
+    同じ経路 (k_f の cf_scale・熱条件・平滑化) で δ_r を作り直すために渡す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。
+    rtol: **診断用** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。`integral_bl` の RK45 の相対許容差を明示の引数で
+    注入する。None = 渡さない (`integral_bl` の既定 1e-6、今の振る舞いのまま)。YAML のキーにはしない。実効値は
+    `res_init["solve_ivp"]["rtol"]` (solve_ivp に渡した値) に残る。"""
     from ..feedback.deltastar_integral import integral_bl
     scale = float(p.spec["r_throat"]) if scale is None else float(scale)
     wall_inv = d["wall_inv"]
@@ -1029,7 +1032,8 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
                            scale, thermal_bc=tbc,
                            theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
                            a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
-                           cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)))
+                           cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)),
+                           **({} if rtol is None else {"rtol": float(rtol)}))
     # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
     from ..metrics.deltastar import smooth_delta_quintic
     f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,

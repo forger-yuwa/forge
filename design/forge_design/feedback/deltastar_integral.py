@@ -178,7 +178,9 @@ def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_
 
     cf_scale / n_scale: CFD 較正用の C_f 倍率と N 倍率 (既定 1 = CONTUR そのまま; plan verification-m6-axis-wave-mesh-su2 §5.1 #8b)。
     theta0_m: 入口の運動量厚さ [m]。None なら仮想発達長 x_virtual_m (None = 入口直管長) の乱流平板
-    θ0 = 0.036 x_v Re_{x_v}^{-0.2}。戻り値の x, δ 系は r_t 単位、θ 等の物理量は [m] も併記。"""
+    θ0 = 0.036 x_v Re_{x_v}^{-0.2}。戻り値の x, δ 系は r_t 単位、θ 等の物理量は [m] も併記。
+    rtol: RK45 の相対許容差。戻り値の `solve_ivp` に実際に渡した値と評価回数を残す (`settings` には入れない —
+    prepare_ns の `delta_r_initial.json` を変えないため; plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。"""
     if closure != "contur":
         raise NotImplementedError(f"closure={closure!r} は未実装 (contur のみ)")
     ec = EdgeConditions(design_wall, wall_tbl, gas, cp, Pt, Tt, rt_m)
@@ -207,8 +209,8 @@ def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_
             + e["drwdx"] / e["rw"]
         return [0.5 * c["Cf"] / e["cos_phi"] - theta_rt * term]
 
-    sol = solve_ivp(rhs, (x0, x1), [theta0_m / rt_m], method="RK45", rtol=rtol, atol=1e-14,
-                    dense_output=True, max_step=(x1 - x0) / 400.0)
+    ivp = dict(method="RK45", rtol=rtol, atol=1e-14, max_step=(x1 - x0) / 400.0)
+    sol = solve_ivp(rhs, (x0, x1), [theta0_m / rt_m], dense_output=True, **ivp)
     if not sol.success:
         raise RuntimeError(f"integral_bl: 積分失敗 ({sol.message})")
     xs = np.asarray(x_out, dtype=float) if x_out is not None else np.linspace(x0, x1, 1500)
@@ -228,6 +230,8 @@ def integral_bl(design_wall, wall_tbl, gas, cp: float, Pt: float, Tt: float, rt_
                            thermal_bc=(thermal_bc or {"mode": "adiabatic"}), theta0_m=float(theta0_m),
                            theta0_source=theta0_source, x_virtual_m=x_virtual_m, rt_m=rt_m, Pt=Pt, Tt=Tt,
                            gas=("semiperfect" if ec.gas_obj is not None else f"cpg gamma={ec.gamma_cpg}"))
+    # 積分の実効の設定 (solve_ivp に渡した値) と手間。settings とは分ける (上の docstring の rtol の項)
+    out["solve_ivp"] = dict(ivp, nfev=int(sol.nfev), n_steps=int(len(sol.t) - 1))
     return out
 
 

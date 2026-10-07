@@ -123,17 +123,19 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
     return summary
 
 
-def _sizing_delta_supplier(p, init_cfg: dict):
+def _sizing_delta_supplier(p, init_cfg: dict, rtol: float | None = None):
     """寸法の逆算の CFD 前の δ_r の供給: `prepare_ns` と同じ経路 (`integral_delta_r`: k_f の cf_scale・熱条件・5 次 P-spline の平滑化・
     `delta_r_from_table`) で、反復のたびに r_t を変えて作り直す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。
-    戻り: supplier(d, rt) → (delta_r_x, 記録)。"""
+    rtol: 診断用 (同 plan §6 U2c)。`integral_delta_r(rtol=...)` へそのまま渡す (None = `integral_bl` の既定)。
+    戻り: supplier(d, rt) → (delta_r_x, 記録)。記録の `integral_rtol` は solve_ivp に実際に渡った値。"""
     from ..evaluate.runner_axismach import integral_delta_r
 
     def supplier(d, rt):
-        _, drx, info = integral_delta_r(p, d, init_cfg, scale=rt)
+        res, drx, info = integral_delta_r(p, d, init_cfg, scale=rt, rtol=rtol)
         return drx, {"kind": "integral_delta_r (prepare_ns と同じ経路)", "settings": {k: info.get(k) for k in
                      ("model", "thermal_bc", "cf_scale", "n_scale", "a_crocco", "closure", "theta0_m", "x_virtual_m")},
-                     "smooth": info.get("smooth", {}).get("kind")}
+                     "smooth": info.get("smooth", {}).get("kind"),
+                     "integral_rtol": float(res["solve_ivp"]["rtol"]), "integral_rtol_injected": rtol is not None}
     return supplier
 
 
@@ -191,7 +193,7 @@ def _sizing_result(fp: dict, p, R_target_m: float, target: str) -> dict:
 
 
 def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: int = 6,
-             max_iter: int = SIZING_MAX_ITER, tol_R_m: float = SIZING_TOL_M) -> dict:
+             max_iter: int = SIZING_MAX_ITER, tol_R_m: float = SIZING_TOL_M, integral_rtol: float | None = None) -> dict:
     r"""出口の物理半径 $R$ を仕様に合わせる **スロート半径 $r_t$ の 1 変数解**。
 
     設計は $r_t$ 無次元で不変なので $R = r_t\,r_W(x_e; r_t)$ の $r_t$ だけを解く。
@@ -202,17 +204,22 @@ def solve_rt(problem, R_exit_m: float, prev_run=None, euler_run=None, n_iter: in
       (`SizingNotConverged`)。注意 (2026-10-07 実測): `integral_bl` (RK45 rtol 1e-6) の δ_r(x_e) は r_t を 1e-12 m 変えただけで
       ~1e-5 r_t 揺れ、出口半径の残差は ~1e-7 m の床より下がらない (`SIZING_TOL_M` には届かない)。
     - prev_run あり (NS 後の最終補正、変えていない): その run の抽出 δ_r(x_F) を使い、$r_t$ 依存は $Re^{-0.2}$ で補正。n_iter 回の反復。
+    - integral_rtol: **診断用** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。CFD 前の経路の `integral_bl` の RK45 の
+      相対許容差を明示の引数で注入する (None = 既定 1e-6、今の振る舞いのまま)。積分を使わない NS 後の経路で指定したら例外
+      (渡っていない口を作らない)。実効値は戻りの `delta_r_source.integral_rtol` (solve_ivp に渡った値)。
     戻り: dict(r_t_m, delta_exit_rt, source, delta_column [prev_run ありで読んだ列], iters, …)。CFD 前は残差・物理スロート・出口半径・
     δ_r の出典も (`_sizing_result`)。"""
     from ..probdef import load_problem
     from ..evaluate.runner_axismach import design_chain
+    if integral_rtol is not None and prev_run is not None:
+        raise ValueError("solve_rt: integral_rtol は CFD 前の経路 (prev_run なし) 専用 — NS 後の経路は積分法を使わない")
     p = load_problem(problem); d = design_chain(p)
     S0 = float(p.spec["r_throat"])
     rF = float(d["wall_inv"][-1, 1]); xF = float(d["wall_inv"][-1, 0])
     hist = []
     if prev_run is None:
         init = resolve_integral_initializer(problem)
-        fp = _fixed_point_rt(p, d, float(R_exit_m), "exit", _sizing_delta_supplier(p, init), S0, max_iter, tol_R_m)
+        fp = _fixed_point_rt(p, d, float(R_exit_m), "exit", _sizing_delta_supplier(p, init, rtol=integral_rtol), S0, max_iter, tol_R_m)
         out = _sizing_result(fp, p, float(R_exit_m), "exit")
         last = fp["iters"][-1]
         out.update(r_t_prev_m=S0, delta_exit_rt=last["delta_r_exit_rt"], r_F_rt=rF, x_F_rt=xF, R_exit_m=R_exit_m,
