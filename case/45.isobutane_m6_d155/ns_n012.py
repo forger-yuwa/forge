@@ -19,14 +19,16 @@
   - 新しい壁距離: 宛先の nozzle.msh を同じ変換器で変換し直した wall_dist と完全一致 (または相対 1e-6 以内) を必須にする。
 
 usage (case dir、引数の run は case dir からの相対):
-  python3 ns_n012.py prep-dry  <N0|N1|N2> <run> --md-offset V [--ic-src-run DIR (乾式のみ)] [--dry]
+  python3 ns_n012.py prep-dry  <N0|N1|N2> <run> --md-offset V [--r-throat R] [--ic-src-run DIR (乾式のみ)] [--dry]
   python3 ns_n012.py ic-check  <run> [--dry]
-  python3 ns_n012.py verify-set <run_N0> <run_N1> <run_N2> --md-offset V [--dry] [--out JSON]
-  python3 ns_n012.py prep-cond <N0|N1|N2> <src_dry_run> <cond_run> --md-offset V [--dry]
+  python3 ns_n012.py verify-set <run_N0> <run_N1> <run_N2> --md-offset V [--r-throat R] [--dry] [--out JSON]
+  python3 ns_n012.py prep-cond <N0|N1|N2> <src_dry_run> <cond_run> --md-offset V [--r-throat R] [--dry]
   python3 ns_n012.py prep-ext  <src_dry_run> <ext_run> [--dry]
   python3 ns_n012.py run       <run>
   python3 ns_n012.py nan-scan  <run>
   python3 ns_n012.py record-series <run> [--euler RUN] [--out CSV] [--nproc 3]
+--r-throat: make_ns_n012_problems.py --r-throat と同じ値 [m] (plan §6 U4「r_t の解き直し」)。省略時は元の YAML の r_t のまま。
+  問題の照合 (--check) に渡し、準備した run の実効の r_t (prepare_info.json の scale_m) がこの値 (省略時は元の r_t) と一致することを確かめる。
 --dry: ローカルの乾式確認。FORGE_BIN が存在しない道を指し FORGE_ALLOW_UNVERIFIED_SPECIES=1 であること (run_ns_n012.sh DRY=1 が設定)。
   乾式の準備は prepare_info.json と NS_N012.json に DRY の印が付き、run が拒否する。乾式の prep-cond は convert_species_field を
   回さない (両 run の解決済みの熱物性 = forge --resolve-species の記録が要るため。本番だけ)。
@@ -171,12 +173,25 @@ def k_f_checked(problem: Path) -> float:
     return kf
 
 
-def problems_ok(md_offset: str) -> dict:
-    """make_ns_n012_problems.py --check と同じ照合 (6 本の中身と記録が --md-offset の値・今の元の YAML と一致)。"""
-    rc = MK.main(["--md-offset", md_offset, "--check", "--out-dir", str(HERE)])
+def problems_ok(md_offset: str, r_throat: str | None = None) -> dict:
+    """make_ns_n012_problems.py --check と同じ照合 (6 本の中身と記録が --md-offset・--r-throat の値・今の元の YAML と一致)。"""
+    rc = MK.main(["--md-offset", md_offset, "--check", "--out-dir", str(HERE)] + (["--r-throat", r_throat] if r_throat is not None else []))
     if rc != 0:
-        raise SystemExit(f"問題 YAML が --md-offset {md_offset} と一致しない — make_ns_n012_problems.py を回し直すか較正値を確かめる。止める")
+        raise SystemExit(f"問題 YAML が --md-offset {md_offset}・--r-throat {r_throat} (None = 元の r_t) と一致しない — "
+                         "make_ns_n012_problems.py を回し直すか較正値・r_t を確かめる。止める")
     return jload(HERE / MK.RECORD)
+
+
+def expected_r_throat(rec_p: dict, r_throat: str | None) -> float:
+    """準備した run の実効の r_t (prepare_info.json の scale_m) が満たすべき値: --r-throat、省略時は元の YAML の r_t。"""
+    return MK.parse_r_throat(r_throat) if r_throat is not None else float(rec_p["base_r_throat"])
+
+
+def check_r_throat(run: Path, want: float) -> float:
+    got = jload(run / "prepare_info.json").get("scale_m")
+    if not isinstance(got, float) or got != want:
+        raise SystemExit(f"{run}: 実効の r_t (prepare_info.json の scale_m) {got!r} が {want!r} と違う — 止める")
+    return got
 
 
 def initializer(kf: float) -> dict:
@@ -214,7 +229,7 @@ def _prepare_ns(problem: Path, run: Path, **kw) -> dict:
 
 
 # --- prep-dry ------------------------------------------------------------------------------------------------------
-def prep_dry(cond: str, run: Path, md_offset: str, ic_src_run: str | None, dry: bool) -> dict:
+def prep_dry(cond: str, run: Path, md_offset: str, ic_src_run: str | None, dry: bool, r_throat: str | None = None) -> dict:
     check_dry_env(dry)
     if cond not in MK.CONDS:
         raise SystemExit(f"条件 {cond!r} は {MK.CONDS} のどれか")
@@ -224,8 +239,9 @@ def prep_dry(cond: str, run: Path, md_offset: str, ic_src_run: str | None, dry: 
         raise SystemExit(f"{run} が既にある — 止める (既存 run は消さない)")
     if ic_src_run and not dry:
         raise SystemExit("--ic-src-run は乾式確認だけ (本番の IC は登録どおり run_0149 の最終場)")
-    rec_p = problems_ok(md_offset)
+    rec_p = problems_ok(md_offset, r_throat)
     value = MK.parse_offset(md_offset)
+    rt_want = expected_r_throat(rec_p, r_throat)
     problem = HERE / MK.out_name(cond, "dry")
     kf = k_f_checked(problem)
     src_run = HERE / (ic_src_run or IC_SRC_RUN)
@@ -244,11 +260,12 @@ def prep_dry(cond: str, run: Path, md_offset: str, ic_src_run: str | None, dry: 
     if dry:
         info["DRY"] = True
     jdump(run / "prepare_info.json", info)
+    rt = check_r_throat(run, rt_want)
     mq = mesh_quality_ok(run)
     rec = {"plan": PLAN, "tool": "ns_n012.py prep-dry", "created": now(), "git_head": git_head(), "dry": bool(dry),
            "role": "dry", "condition": cond, "md_offset": value, "md_offset_token": rec_p["md_offset_token"],
            "problem": problem.name, "problem_sha256": sha256_file(problem), "problems_record_sha256": sha256_file(HERE / MK.RECORD),
-           "k_f": kf, "solve_json": SOLVE_JSON,
+           "k_f": kf, "solve_json": SOLVE_JSON, "r_throat": rt, "r_throat_requested": rec_p.get("r_throat"),
            "ic": {"src_run": src_run.name, "src_dir": os.path.relpath(src_run, HERE), "src_res": src_res.name, "src_res_sha256": src_sha,
                   "via": "prepare_ns(ic_from) → interp_field.py",
                   "registered": (src_run.name == IC_SRC_RUN and src_res.name == IC_SRC_RES)},
@@ -516,11 +533,23 @@ def ic_check(run: Path, dry: bool) -> dict:
 
 
 # --- verify-set (3 条件の固定) ----------------------------------------------------------------------------------------
-def verify_set(runs: list, md_offset: str, dry: bool, out_path: Path | None = None) -> dict:
-    """3 条件で較正値・k_f・r_t・NS の格子・実効の設定・IC・段が同じで、変えたのが条件のキーだけかを調べる。"""
+def verify_set(runs: list, md_offset: str, dry: bool, out_path: Path | None = None, r_throat: str | None = None,
+               problems_record: Path | None = None) -> dict:
+    """3 条件で較正値・k_f・r_t・NS の格子・実効の設定・IC・段が同じで、変えたのが条件のキーだけかを調べる。
+    r_t: 3 本の実効の r_t (prepare_info.json の scale_m) が同じで、--r-throat (省略時は問題の記録の元の r_t) と一致し、問題の記録の
+    r_throat が --r-throat と同じ (None = 元の r_t)。"""
     ys = yaml_strict()
     value = MK.parse_offset(md_offset)
     why, rows = [], {}
+    try:
+        rec_p = jload(problems_record or (HERE / MK.RECORD))
+        rt_want = expected_r_throat(rec_p, r_throat)
+        rt_req = MK.parse_r_throat(r_throat) if r_throat is not None else None
+        if rec_p.get("r_throat") != rt_req:
+            why.append(f"問題の記録の r_throat {rec_p.get('r_throat')!r} が --r-throat {rt_req!r} と違う (None = 元の r_t)")
+    except (OSError, ValueError, KeyError) as e:
+        why.append(f"問題の記録 {MK.RECORD} を読めない・--r-throat が不正: {e}")
+        rt_want = None
     recs = {}
     for cond, run in zip(MK.CONDS, runs):
         run = Path(run)
@@ -548,6 +577,8 @@ def verify_set(runs: list, md_offset: str, dry: bool, out_path: Path | None = No
                 why.append(f"{run.name}: prepare_info の moc.{k} = {moc.get(k)!r} ({v!r} であること)")
         if info.get("Md_moc_offset") != value:
             why.append(f"{run.name}: 実効の Md_moc_offset {info.get('Md_moc_offset')!r} ({value!r} であること)")
+        if rt_want is not None and info.get("scale_m") != rt_want:
+            why.append(f"{run.name}: 実効の r_t (scale_m) {info.get('scale_m')!r} ({rt_want!r} であること)")
     base_run, base_r, base_info = recs["N0"]
     for cond in ("N1", "N2"):
         run, r, info = recs[cond]
@@ -584,6 +615,7 @@ def verify_set(runs: list, md_offset: str, dry: bool, out_path: Path | None = No
     elif not dry:
         why.append(f"比較元 {REF_PROV_RUN} が無い")
     out = {"plan": PLAN, "tool": "ns_n012.py verify-set", "date": now(), "dry": bool(dry), "md_offset": value,
+           "r_throat": rt_want, "r_throat_requested": (r_throat if r_throat is None else MK.parse_r_throat(r_throat)),
            "runs": rows, "solverConfig_vs_" + REF_PROV_RUN: cmp_ref, "failures": why, "VERDICT": "OK" if not why else "NG"}
     p = out_path or (HERE / (SET_CHECK.replace(".json", "_dry.json") if dry else SET_CHECK))
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -615,7 +647,7 @@ def same_mesh(a: Path, b: Path) -> list:
     return why
 
 
-def prep_cond(cond: str, src_run: Path, run: Path, md_offset: str, dry: bool) -> dict:
+def prep_cond(cond: str, src_run: Path, run: Path, md_offset: str, dry: bool, r_throat: str | None = None) -> dict:
     """run_mono_ns_chain.sh の K と同じ手順 (prepare_ns: cfl 1・implicitRelax なし・18000 step、IC は src の最終場を
     convert_species_field で)。src は同じ条件の dry (本段か延長) の run。乾式では src の nozzle.h5 (移送後の IC) を使う。"""
     check_dry_env(dry)
@@ -623,8 +655,9 @@ def prep_cond(cond: str, src_run: Path, run: Path, md_offset: str, dry: bool) ->
         raise SystemExit(f"run 名 {run.name!r} が run_NNNN_<slug> でない")
     if run.exists():
         raise SystemExit(f"{run} が既にある — 止める (既存 run は消さない)")
-    rec_p = problems_ok(md_offset)
+    rec_p = problems_ok(md_offset, r_throat)
     value = MK.parse_offset(md_offset)
+    rt_want = expected_r_throat(rec_p, r_throat)
     srec = jload(src_run / RECORD)
     if srec.get("condition") != cond or srec.get("role") not in ("dry", "ext") or srec.get("md_offset") != value:
         raise SystemExit(f"src {src_run.name} の記録 ({srec.get('condition')}/{srec.get('role')}/{srec.get('md_offset')}) が "
@@ -649,6 +682,8 @@ def prep_cond(cond: str, src_run: Path, run: Path, md_offset: str, dry: bool) ->
     if dry:
         info["DRY"] = True
     jdump(run / "prepare_info.json", info)
+    rt = check_r_throat(run, rt_want)
+    check_r_throat(src_run, rt_want)                      # dry と凝縮で同じ r_t
     ys = yaml_strict()
     c = ys.load((run / "solverConfig.yaml").read_text())
     bad = [f"{'.'.join(k)} = {cfg_get(c, k)!r} ({v!r} であること)" for k, v in
@@ -678,6 +713,7 @@ def prep_cond(cond: str, src_run: Path, run: Path, md_offset: str, dry: bool) ->
     rec = {"plan": PLAN, "tool": "ns_n012.py prep-cond", "created": now(), "git_head": git_head(), "dry": bool(dry),
            "role": "cond", "condition": cond, "md_offset": value, "md_offset_token": rec_p["md_offset_token"],
            "problem": problem.name, "problem_sha256": sha256_file(problem), "k_f": kf,
+           "r_throat": rt, "r_throat_requested": rec_p.get("r_throat"),
            "parent": src_run.name, "parent_role": srec["role"], "src": src_h5.name, "src_sha256": sha256_file(src_h5),
            "stages": "none", "steps": COND_STEPS, "out_interval": COND_OUT, "mesh_quality": mq,
            "convert_species_field_tail": tail,
@@ -741,6 +777,7 @@ def prep_ext(src_run: Path, run: Path, dry: bool) -> dict:
     jdump(run / "prepare_info.json", info)
     rec = {**{k: srec[k] for k in ("plan", "condition", "md_offset", "md_offset_token", "problem", "problem_sha256", "k_f",
                                    "cfl_main", "implicit_relax", "out_interval")},
+           "r_throat": srec.get("r_throat"), "r_throat_requested": srec.get("r_throat_requested"),
            "tool": "ns_n012.py prep-ext", "created": now(), "git_head": git_head(), "dry": bool(dry), "role": "ext",
            "parent": src_run.name, "parent_end": MAIN_STEPS, "ext_steps": EXT_STEPS, "stages": "none",
            "src": src_h5.name, "src_sha256": sha256_file(src_h5), "copied": copied,
@@ -936,12 +973,12 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     a1 = sub.add_parser("prep-dry"); a1.add_argument("cond"); a1.add_argument("run"); a1.add_argument("--md-offset", required=True)
-    a1.add_argument("--ic-src-run"); a1.add_argument("--dry", action="store_true")
+    a1.add_argument("--ic-src-run"); a1.add_argument("--dry", action="store_true"); a1.add_argument("--r-throat")
     a2 = sub.add_parser("ic-check"); a2.add_argument("run"); a2.add_argument("--dry", action="store_true")
     a3 = sub.add_parser("verify-set"); a3.add_argument("runs", nargs=3); a3.add_argument("--md-offset", required=True)
-    a3.add_argument("--dry", action="store_true"); a3.add_argument("--out")
+    a3.add_argument("--dry", action="store_true"); a3.add_argument("--out"); a3.add_argument("--r-throat")
     a4 = sub.add_parser("prep-cond"); a4.add_argument("cond"); a4.add_argument("src"); a4.add_argument("run")
-    a4.add_argument("--md-offset", required=True); a4.add_argument("--dry", action="store_true")
+    a4.add_argument("--md-offset", required=True); a4.add_argument("--dry", action="store_true"); a4.add_argument("--r-throat")
     a5 = sub.add_parser("prep-ext"); a5.add_argument("src"); a5.add_argument("run"); a5.add_argument("--dry", action="store_true")
     a6 = sub.add_parser("run"); a6.add_argument("run")
     a7 = sub.add_parser("nan-scan"); a7.add_argument("run")
@@ -950,13 +987,14 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     P = lambda s: (HERE / s) if not os.path.isabs(s) else Path(s)  # noqa: E731
     if a.cmd == "prep-dry":
-        prep_dry(a.cond, P(a.run), a.md_offset, a.ic_src_run, a.dry)
+        prep_dry(a.cond, P(a.run), a.md_offset, a.ic_src_run, a.dry, a.r_throat)
     elif a.cmd == "ic-check":
         return 0 if ic_check(P(a.run), a.dry)["VERDICT"] == "OK" else 2
     elif a.cmd == "verify-set":
-        return 0 if verify_set([P(r) for r in a.runs], a.md_offset, a.dry, P(a.out) if a.out else None)["VERDICT"] == "OK" else 2
+        return 0 if verify_set([P(r) for r in a.runs], a.md_offset, a.dry, P(a.out) if a.out else None,
+                               a.r_throat)["VERDICT"] == "OK" else 2
     elif a.cmd == "prep-cond":
-        prep_cond(a.cond, P(a.src), P(a.run), a.md_offset, a.dry)
+        prep_cond(a.cond, P(a.src), P(a.run), a.md_offset, a.dry, a.r_throat)
     elif a.cmd == "prep-ext":
         prep_ext(P(a.src), P(a.run), a.dry)
     elif a.cmd == "run":

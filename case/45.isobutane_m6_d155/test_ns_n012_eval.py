@@ -94,7 +94,7 @@ def make_problem(case, cond):
 
 def make_dry(case, name, cond, md=MD, steps_end=80000, over=None, exit_r=0.7750001, rep_r=None, wall=("PASS", 3.5, 5.0),
              seg=SEG_PLATEAU, ic="OK", tags=("S1_soft", "S2_mid", "main"), rc="0", nan="CLEAN", fsha=FSHA, role="dry", parent=None,
-             rec_base=0.0, interval=5000):
+             rec_base=0.0, interval=5000, scale=0.0766539):
     d = case / name
     d.mkdir(parents=True)
     p, _ = make_problem(case, cond)
@@ -102,7 +102,7 @@ def make_dry(case, name, cond, md=MD, steps_end=80000, over=None, exit_r=0.77500
     if role == "ext":
         rec.update(parent=parent, parent_end=80000, ext_steps=20000)
     (d / E.RECORD).write_text(json.dumps(rec))
-    (d / "prepare_info.json").write_text(json.dumps({"scale_m": 0.0766539, "sizing": {"exit_radius_m": exit_r}}))
+    (d / "prepare_info.json").write_text(json.dumps({"scale_m": scale, "sizing": {"exit_radius_m": exit_r}}))
     rows = [{"step": s, **dry_values(s, **(over or {}))} for s in range(interval, steps_end + 1, interval)]
     write_csv(d / "quantities_series.csv", rows)
     write_csv(d / E.RECORD_CSV, [{"step": s, **record_values(s, rec_base)} for s in range(interval, steps_end + 1, interval)])
@@ -122,9 +122,10 @@ def make_dry(case, name, cond, md=MD, steps_end=80000, over=None, exit_r=0.77500
     return d
 
 
-def make_cond(case, name, cond, parent, over=None, seg=SEG_PLATEAU, md=MD):
+def make_cond(case, name, cond, parent, over=None, seg=SEG_PLATEAU, md=MD, scale=0.0766539):
     d = case / name
     d.mkdir(parents=True)
+    (d / "prepare_info.json").write_text(json.dumps({"scale_m": scale}))
     _, pk = make_problem(case, cond)
     (d / E.RECORD).write_text(json.dumps({"role": "cond", "condition": cond, "md_offset": md, "dry": False, "problem": pk.name,
                                           "problem_sha256": sha(pk), "parent": parent}))
@@ -159,9 +160,9 @@ def make_case(tmp, dry_kw=None, names=("run_0165_n0", "run_0166_n1", "run_0167_n
     return case
 
 
-def run_eval(case, sets=None, conds=None):
+def run_eval(case, sets=None, conds=None, r_throat=None):
     sets = sets or {"N0": ("run_0165_n0", None), "N1": ("run_0166_n1", None), "N2": ("run_0167_n2", None)}
-    return E.evaluate(case, MD, sets, conds or {}, False, case / "_band_ab/ns_n012_eval.json")
+    return E.evaluate(case, MD, sets, conds or {}, False, case / "_band_ab/ns_n012_eval.json", r_throat)
 
 
 def status_of(out, cond, key):
@@ -457,6 +458,110 @@ with tempfile.TemporaryDirectory() as tmp:
     check("同一格子の検査: 同じなら空", NS.same_mesh(a, b) == [])
     mini_mesh(b, np.arange(9.0) + 1e-9, np.array([1, 2, 3]))
     check("同一格子の検査: 座標が違えば検出", any("COORD" in w for w in NS.same_mesh(a, b)))
+
+# ===== 3b. r_t の解き直し (--r-throat; plan §6 U4「r_t の解き直し」) =====================================================
+RT = 0.07671234567891234
+texts_rt, rec_rt = MK.build(MD, C, RT)
+base_c = MK.yaml_load((C / MK.BASE["cond"]).read_text())
+docs_rt = {n: MK.yaml_load(t) for n, t in texts_rt.items()}
+check("r_t: 6 本すべての spec.r_throat が指定値の float", all(type(d["spec"]["r_throat"]) is float and d["spec"]["r_throat"] == RT
+                                                           for d in docs_rt.values()))
+for c in MK.CONDS:
+    dd = set(MK.diff_paths(base, docs_rt[MK.out_name(c, "dry")])) | set(MK.diff_paths(base_c, docs_rt[MK.out_name(c, "cond")]))
+    check(f"r_t {c}: 元との差に spec.r_throat が入り、許したパスだけ", MK.RT_PATH in dd and dd <= MK.ALLOWED | {MK.RT_PATH})
+check("r_t: 記録に r_throat・トークン・元の値", rec_rt["r_throat"] == RT and rec_rt["r_throat_token"] == repr(RT)
+      and rec_rt["base_r_throat"] == base["spec"]["r_throat"])
+texts0, rec0 = MK.build(MD, C)
+check("r_t 省略: 6 本の r_throat は元のまま・記録は None", all(MK.yaml_load(t)["spec"]["r_throat"] == base["spec"]["r_throat"]
+                                                         for t in texts0.values()) and rec0["r_throat"] is None)
+for v in (RT, 0.0766539, 0.05, 1.234e-2):
+    t = MK.float_token(v, "r_throat")
+    check(f"r_t のトークン {t!r} は float として往復", MK.yaml_load(f"v: {t}\n")["v"] == v and type(MK.yaml_load(f"v: {t}\n")["v"]) is float)
+for bad in ("abc", "76.7", "-0.0766", "nan", "0", "inf"):
+    try:
+        MK.parse_r_throat(bad)
+        check(f"不正な r_t {bad!r} は拒否", False)
+    except ValueError:
+        check(f"不正な r_t {bad!r} は拒否", True)
+t = texts_rt[MK.out_name("N1", "cond")].replace(f"r_throat: {RT!r}", "r_throat: 0.0767")
+try:
+    MK.check_generated(t, base_c, "N1", "cond", MD, RT)
+    check("r_t: 1 本だけ違う r_t を検出", False)
+except ValueError:
+    check("r_t: 1 本だけ違う r_t を検出", True)
+t = texts0[MK.out_name("N0", "dry")].replace("r_throat: 0.0766539", "r_throat: 0.0767")
+try:
+    MK.check_generated(t, base, "N0", "dry", MD)
+    check("r_t 省略時: r_throat の書き換えを検出 (差を許さない)", False)
+except ValueError:
+    check("r_t 省略時: r_throat の書き換えを検出 (差を許さない)", True)
+with tempfile.TemporaryDirectory() as tmp:
+    rcs = (MK.main(["--md-offset", repr(MD), "--r-throat", repr(RT), "--out-dir", tmp]),
+           MK.main(["--md-offset", repr(MD), "--r-throat", repr(RT), "--out-dir", tmp, "--check"]),
+           MK.main(["--md-offset", repr(MD), "--r-throat", "0.0767", "--out-dir", tmp, "--check"]),
+           MK.main(["--md-offset", repr(MD), "--out-dir", tmp, "--check"]),
+           MK.main(["--md-offset", repr(MD), "--out-dir", tmp]))
+    check(f"r_t: 生成 → 同じ r_t の --check OK、違う r_t・省略の --check は NG、省略での上書きは拒否 ({rcs})", rcs == (0, 0, 2, 2, 2))
+    rj = json.loads((Path(tmp) / MK.RECORD).read_text())
+    check("r_t: 記録の実効値 (runner の読み取り) が 6 本とも指定値", all(v["r_throat"] == RT for v in rj["effective"].values()))
+with tempfile.TemporaryDirectory() as tmp:
+    rcs = (MK.main(["--md-offset", repr(MD), "--out-dir", tmp]), MK.main(["--md-offset", repr(MD), "--r-throat", repr(RT), "--out-dir", tmp, "--check"]))
+    check("r_t: 元の r_t で作った 6 本に --r-throat の --check は NG", rcs == (0, 2))
+
+# verify-set の r_t (3 条件で同じ・指定値と一致・問題の記録と一致)。乾式の印つきの模擬 run で (forge・変換器は使わない)
+
+
+def fake_prep(root, name, cond, scale):
+    d = Path(root) / name
+    d.mkdir(parents=True)
+    sp = MK.SPEC[cond]
+    (d / NS.RECORD).write_text(json.dumps({"condition": cond, "role": "dry", "dry": True, "ic": {"src_run": "x"}, "stages": "full",
+                                            "main_steps": 80000, "out_interval": 5000, "cfl_main": 1.0, "implicit_relax": 0.7,
+                                            "k_f": 1.05, "md_offset": MD}))
+    (d / "prepare_info.json").write_text(json.dumps({"DRY": True, "pw_upstream": {"value": sp["pw_upstream"]},
+                                                     "moc": {"axis_limit": sp["moc_axis_limit"], "corrector": sp["moc_corrector"]},
+                                                     "Md_moc_offset": MD, "scale_m": scale, "initializer": {"cf_scale": 1.05},
+                                                     "mesh": {"ni": 2000, "nj": 97}}))
+    (d / NS.IC_CHECK).write_text(json.dumps({"VERDICT": "OK"}))
+    for f in ("solverConfig.yaml", "bcondConfig.yaml", "species_meta.yaml", "probe.yaml"):
+        (d / f).write_text("a: 1\n")
+    return d
+
+
+def vset(scales, rt_arg, rec_rt_val):
+    with tempfile.TemporaryDirectory() as tmp:
+        runs = [fake_prep(tmp, f"run_990{i}_x", c, sc) for i, (c, sc) in enumerate(zip(MK.CONDS, scales))]
+        recp = Path(tmp) / "rec.json"
+        recp.write_text(json.dumps({"r_throat": rec_rt_val, "base_r_throat": 0.0766539}))
+        return NS.verify_set(runs, repr(MD), True, Path(tmp) / "out.json", rt_arg, recp)
+
+
+check("verify-set: 3 本とも指定の r_t・記録も同じ → OK", vset([RT] * 3, repr(RT), RT)["VERDICT"] == "OK")
+check("verify-set: r_t 省略・3 本とも元の r_t → OK", vset([0.0766539] * 3, None, None)["VERDICT"] == "OK")
+check("verify-set: 1 本だけ r_t が違う → NG", vset([RT, RT, 0.0767], repr(RT), RT)["VERDICT"] == "NG")
+check("verify-set: 3 本同じだが指定値と違う → NG", vset([0.0767] * 3, repr(RT), RT)["VERDICT"] == "NG")
+check("verify-set: 問題の記録の r_t が指定値と違う → NG", vset([RT] * 3, repr(RT), None)["VERDICT"] == "NG")
+check("verify-set: r_t 省略なのに 3 本が元の r_t でない → NG", vset([RT] * 3, None, None)["VERDICT"] == "NG")
+
+# 評価器の前提の r_t
+with tempfile.TemporaryDirectory() as tmp:
+    case = make_case(tmp, {c: {"scale": RT} for c in E.CONDS})
+    make_cond(case, "run_0168_k0", "N0", "run_0165_n0", scale=RT)
+    out = run_eval(case, conds={"N0": "run_0168_k0"}, r_throat=RT)
+    check("評価器: 6 本の r_t が指定値と同じ → 合格", all(out["dry_gates"][c]["overall"] == E.PASS for c in E.CONDS)
+          and out["cond_gates"]["N0"]["overall"] == E.PASS)
+    out = run_eval(case, conds={"N0": "run_0168_k0"}, r_throat=0.0766539)
+    check("評価器: r_t が指定値と違う → 全条件判定不能", all(out["dry_gates"][c]["overall"] == E.UNDET for c in E.CONDS))
+with tempfile.TemporaryDirectory() as tmp:
+    case = make_case(tmp, {"N2": {"scale": RT}})
+    out = run_eval(case)
+    check("評価器: r_t 省略でも 3 本の r_t が違えば全条件判定不能", all(out["dry_gates"][c]["overall"] == E.UNDET for c in E.CONDS)
+          and out["r_throat"]["failures"])
+with tempfile.TemporaryDirectory() as tmp:
+    case = make_case(tmp)
+    make_cond(case, "run_0168_k0", "N0", "run_0165_n0", scale=RT)
+    out = run_eval(case, conds={"N0": "run_0168_k0"})
+    check("評価器: 凝縮だけ r_t が違う → 判定不能", out["cond_gates"]["N0"]["overall"] == E.UNDET)
 
 # ===== 4. 起動スクリプトの引数の検査 (forge を起動しない) ==================================================================
 sh = C / "run_ns_n012.sh"

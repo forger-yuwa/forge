@@ -19,6 +19,8 @@
 #        forge は起動しない (FORGE_BIN を存在しない道に、FORGE_ALLOW_UNVERIFIED_SPECIES=1)。変換器は起動する (REAL_CONVERTER)。
 #        DRY_IC_SRC_RUN (case dir からの相対) で IC のドナーを差し替えられる (乾式のみ。既定は run_0149)。
 # 環境変数:
+#   R_THROAT           r_t [m] (任意; make_ns_n012_problems.py --r-throat と同じ値。plan §6 U4「r_t の解き直し」)。問題の照合・準備・
+#                      固定の検査・評価器に渡す。省略時は元の YAML の r_t のまま (その 6 本を期待する)
 #   EULER_REF_LEGACY   N0・N1 の Euler 参照 (δ_E の抽出・報告; E4 で合格した run)。本番では必須
 #   EULER_REF_ANALYTIC N2 の Euler 参照 (V5d の腕 M、同じ較正値の run)。本番では必須
 #   COND=after|always|0  凝縮を続けて回す条件 (既定 after = dry の全ゲート合格の条件だけ。always は run_0147/0148 の投入と同じく判定を待たない)
@@ -44,6 +46,8 @@ REF_DRY_A=run_0147_ns_mono_final; REF_DRY_B=run_0149_ns_mono_final_ext; REF_EU=r
 SELF=$(basename "$0")
 case "$WATCH_SEC" in ''|*[!0-9]*) echo "WATCH_SEC は正の整数: $WATCH_SEC"; exit 2;; esac
 case "$COND" in after|always|0) ;; *) echo "COND は after / always / 0: $COND"; exit 2;; esac
+RTA=()                                      # --r-throat を渡すときの引数 (R_THROAT が空なら渡さない = 元の r_t)
+if [ -n "${R_THROAT:-}" ]; then RTA=(--r-throat "$R_THROAT"); fi
 MODE=${1:-}; [ $# -ge 1 ] && shift
 if [ -n "${DRY:-}" ]; then
   OUT=_dry_ns_n012; DRYF=--dry
@@ -103,6 +107,7 @@ launch_record() {   # $1 = mode, 残り = 引数
     echo "forge_bin   : $FORGE_BIN $( [ -f "$FORGE_BIN" ] && sha256sum "$FORGE_BIN" | awk '{print $1}' || echo '(無い)')"
     echo "converter   : $REAL_CONVERTER (FORGE_CONVERTER=$FORGE_CONVERTER)"
     echo "euler_ref   : legacy ${EULER_REF_LEGACY:-未設定} / analytic ${EULER_REF_ANALYTIC:-未設定}"
+    echo "r_throat    : ${R_THROAT:-元の YAML の r_t のまま}"
     echo "env         : COND=$COND WATCH_SEC=$WATCH_SEC FORGE_CUDA_BLOCKSIZE=$FORGE_CUDA_BLOCKSIZE"
     echo "disk        : $(df -h . | tail -1)"
   } > "$f"
@@ -232,7 +237,7 @@ mode_main() {
   [ "$NPAR" -ge 1 ] || die "NPAR は 1 以上"
   for r in "${D[@]}" "${K[@]}"; do check_new "$r"; done
   [ "$(printf '%s\n' "${D[@]}" "${K[@]}" | sort -u | wc -l)" -eq 6 ] || die "run 名が重複している"
-  python3 "$MK" --md-offset "$MD" --check || die "問題 YAML が較正値 $MD と一致しない (make_ns_n012_problems.py --md-offset $MD を先に)"
+  python3 "$MK" --md-offset "$MD" "${RTA[@]}" --check || die "問題 YAML が較正値 $MD と一致しない (make_ns_n012_problems.py --md-offset $MD を先に)"
   [ -f "$ICSRC/$IC_RES" ] || [ -n "${DRY:-}" ] || die "IC のドナー $ICSRC/$IC_RES が無い"
   [ -d "$ICSRC" ] || die "IC のドナー $ICSRC が無い"
   for c in "${C[@]}"; do check_euler "$c"; done
@@ -242,15 +247,15 @@ mode_main() {
   if [ -n "${DRY:-}" ]; then rm -rf "$OUT"; mkdir "$OUT"; fi
   # 1. dry 3 本の準備と検査 (1 本でも不成立なら forge を 1 本も起動しない)
   for i in 0 1 2; do
-    python3 "$H" prep-dry "${C[$i]}" "$OUT/${D[$i]}" --md-offset "$MD" $DRYF ${DRY:+--ic-src-run "$ICSRC"} \
+    python3 "$H" prep-dry "${C[$i]}" "$OUT/${D[$i]}" --md-offset "$MD" "${RTA[@]}" $DRYF ${DRY:+--ic-src-run "$ICSRC"} \
       || die "${D[$i]}: 準備に失敗 (forge は起動していない。作りかけの dir は消さない)"
     python3 "$H" ic-check "$OUT/${D[$i]}" $DRYF || die "${D[$i]}: IC の検査が不成立 ($OUT/${D[$i]}/IC_CHECK.json)"
   done
-  python3 "$H" verify-set "$OUT/${D[0]}" "$OUT/${D[1]}" "$OUT/${D[2]}" --md-offset "$MD" $DRYF || die "3 条件の固定の検査が不成立"
+  python3 "$H" verify-set "$OUT/${D[0]}" "$OUT/${D[1]}" "$OUT/${D[2]}" --md-offset "$MD" "${RTA[@]}" $DRYF || die "3 条件の固定の検査が不成立"
   if [ -n "${DRY:-}" ]; then
     # 乾式: 凝縮の準備 (dry の移送後の IC を src に、convert_species_field まで) を通す
     for i in 0 1 2; do
-      python3 "$H" prep-cond "${C[$i]}" "$OUT/${D[$i]}" "$OUT/${K[$i]}" --md-offset "$MD" --dry || die "${K[$i]}: 凝縮の準備に失敗"
+      python3 "$H" prep-cond "${C[$i]}" "$OUT/${D[$i]}" "$OUT/${K[$i]}" --md-offset "$MD" "${RTA[@]}" --dry || die "${K[$i]}: 凝縮の準備に失敗"
     done
     echo "DRY: 準備・IC の検査・固定の検査・凝縮の準備まで (forge は起動していない) — $OUT/"
     return 0
@@ -268,12 +273,12 @@ mode_main() {
   local -a KR=()
   if [ "$COND" != 0 ]; then
     for i in "${OKD[@]}"; do
-      if [ "$COND" = after ] && ! python3 "$EV" gate-dry --md-offset "$MD" --cond-name "${C[$i]}" --run "${D[$i]}"; then
+      if [ "$COND" = after ] && ! python3 "$EV" gate-dry --md-offset "$MD" "${RTA[@]}" --cond-name "${C[$i]}" --run "${D[$i]}"; then
         echo "${C[$i]}: dry が全ゲート合格でない — 凝縮は保留 (延長: bash $SELF ext $MD ${C[$i]} ${D[$i]} <ext_run>、その後 bash $SELF cond ...)"
         continue
       fi
       check_disk 2
-      python3 "$H" prep-cond "${C[$i]}" "${D[$i]}" "${K[$i]}" --md-offset "$MD" || { echo "${K[$i]}: 凝縮の準備に失敗 — この条件の凝縮は回さない"; continue; }
+      python3 "$H" prep-cond "${C[$i]}" "${D[$i]}" "${K[$i]}" --md-offset "$MD" "${RTA[@]}" || { echo "${K[$i]}: 凝縮の準備に失敗 — この条件の凝縮は回さない"; continue; }
       KR+=("$i")
     done
     local -a KD=()
@@ -286,7 +291,7 @@ mode_main() {
   # 4. 評価
   local -a ARGS=(--set "N0=${D[0]}" --set "N1=${D[1]}" --set "N2=${D[2]}")
   for i in "${KR[@]}"; do ARGS+=(--cond "${C[$i]}=${K[$i]}"); done
-  python3 "$EV" eval --md-offset "$MD" "${ARGS[@]}" > _band_ab/ns_n012_eval.log 2>&1 || echo "評価器が失敗 (rc $?) — _band_ab/ns_n012_eval.log"
+  python3 "$EV" eval --md-offset "$MD" "${RTA[@]}" "${ARGS[@]}" > _band_ab/ns_n012_eval.log 2>&1 || echo "評価器が失敗 (rc $?) — _band_ab/ns_n012_eval.log"
   tail -60 _band_ab/ns_n012_eval.log
   echo ALLDONE
 }
@@ -296,14 +301,14 @@ mode_ext() {
   local MD=$1 c=$2 src=$3 e=$4
   cond_of "$c"; check_name "$src"; check_new "$e" strict; check_euler "$c"; check_bin
   [ -n "${DRY:-}" ] || check_disk 1
-  python3 "$MK" --md-offset "$MD" --check || die "問題 YAML が較正値 $MD と一致しない"
+  python3 "$MK" --md-offset "$MD" "${RTA[@]}" --check || die "問題 YAML が較正値 $MD と一致しない"
   launch_record ext "$@"
   python3 "$H" prep-ext "$OUT/$src" "$OUT/$e" $DRYF || die "$e: 延長の準備に失敗"
   if [ -n "${DRY:-}" ]; then echo "DRY: 延長の準備まで — $OUT/$e"; return 0; fi
   run_many 1 "$e"
   ok_run "$e" || { post_common "$e" || true; die "$e が失敗・早期停止 (rc $(cat "$e/RUN_RC" 2>/dev/null))"; }
   post_dry "$e" "$c"
-  python3 "$EV" gate-dry --md-offset "$MD" --cond-name "$c" --run "$src" --ext "$e" || true
+  python3 "$EV" gate-dry --md-offset "$MD" "${RTA[@]}" --cond-name "$c" --run "$src" --ext "$e" || true
   echo "評価: bash $SELF eval $MD N0=...[+...] N1=... N2=... [K0=...]"
   echo ALLDONE
 }
@@ -313,9 +318,9 @@ mode_cond() {
   local MD=$1 c=$2 src=$3 k=$4
   cond_of "$c"; check_name "$src"; check_new "$k" strict; check_euler "$c"; check_bin
   [ -n "${DRY:-}" ] || check_disk 2
-  python3 "$MK" --md-offset "$MD" --check || die "問題 YAML が較正値 $MD と一致しない"
+  python3 "$MK" --md-offset "$MD" "${RTA[@]}" --check || die "問題 YAML が較正値 $MD と一致しない"
   launch_record cond "$@"
-  python3 "$H" prep-cond "$c" "$OUT/$src" "$OUT/$k" --md-offset "$MD" $DRYF || die "$k: 凝縮の準備に失敗"
+  python3 "$H" prep-cond "$c" "$OUT/$src" "$OUT/$k" --md-offset "$MD" "${RTA[@]}" $DRYF || die "$k: 凝縮の準備に失敗"
   if [ -n "${DRY:-}" ]; then echo "DRY: 凝縮の準備まで — $OUT/$k"; return 0; fi
   run_many 1 "$k"
   ok_run "$k" || { post_common "$k" || true; die "$k が失敗・早期停止"; }
@@ -330,7 +335,7 @@ mode_eval() {
   for a in "$@"; do
     case "$a" in N[012]=*) ARGS+=(--set "$a");; K[012]=*) ARGS+=(--cond "N${a:1}");; *) die "引数 '$a' は Nx=... か Kx=...";; esac
   done
-  python3 "$EV" eval --md-offset "$MD" "${ARGS[@]}" $DRYF
+  python3 "$EV" eval --md-offset "$MD" "${RTA[@]}" "${ARGS[@]}" $DRYF
 }
 
 case "$MODE" in

@@ -18,10 +18,13 @@
     本段と延長の両方に課す。
   - 前提 (満たさなければその条件は判定不能): 準備の記録 (較正値・問題の sha256・k_f)・IC の検査 OK・3 条件の固定の検査 OK・
     forge の sha256 が run_0147 と同じ・段の記録 (soft → mid → 本段)・RUN_RC 0・早期停止なし・NAN_SCAN CLEAN。
+  - r_t (plan §6 U4「r_t の解き直し」): 渡した run (dry 3 本・延長・凝縮) の実効の r_t (prepare_info.json の scale_m) がすべて同じで、
+    --r-throat を渡したときはその値とビット一致。どれかが違えば全条件を判定不能にする (r_t が違う比較は単独の変更にならない)。
 
 usage (case dir):
-  python3 ns_n012_eval.py eval --md-offset V --set N0=<dry>[+<ext>] --set N1=... --set N2=... [--cond N0=<cond> ...] [--out JSON] [--dry]
-  python3 ns_n012_eval.py gate-dry --md-offset V --cond-name N0 --run <dry> [--ext <ext>]   (終了コード 0 = dry の全ゲート合格)
+  python3 ns_n012_eval.py eval --md-offset V [--r-throat R] --set N0=<dry>[+<ext>] --set N1=... --set N2=... [--cond N0=<cond> ...]
+                                [--out JSON] [--dry]
+  python3 ns_n012_eval.py gate-dry --md-offset V [--r-throat R] --cond-name N0 --run <dry> [--ext <ext>]   (終了コード 0 = dry の全ゲート合格)
 出力: _band_ab/ns_n012_eval.json (既定) と、nozzle_report --verdicts 用の _band_ab/verdicts_<run_NNNN>_n012.json。
 """
 import argparse
@@ -221,6 +224,31 @@ def provenance_sha(run: Path) -> str | None:
         return None
     m = re.search(r"^forge_sha256:\s*(\S+)", p.read_text(), re.M)
     return m.group(1) if m else None
+
+
+def scale_of(run: Path):
+    """実効の r_t (prepare_info.json の scale_m)。読めなければ None。"""
+    try:
+        return jload(run / "prepare_info.json").get("scale_m")
+    except (OSError, ValueError):
+        return None
+
+
+def r_throat_failures(runs, r_throat: float | None) -> list:
+    """渡した run の実効の r_t がすべて同じで、r_throat (指定時) と一致するか。不成立の理由の list。"""
+    got = {Path(r).name: scale_of(Path(r)) for r in runs}
+    why = []
+    bad = {k: v for k, v in got.items() if not isinstance(v, float)}
+    if bad:
+        why.append(f"実効の r_t (scale_m) を読めない run: {bad}")
+    vals = {v for v in got.values() if isinstance(v, float)}
+    if len(vals) > 1:
+        why.append(f"実効の r_t が run で違う: {got}")
+    if r_throat is not None:
+        off = {k: v for k, v in got.items() if v != r_throat}
+        if off:
+            why.append(f"実効の r_t が指定値 {r_throat!r} と違う run: {off}")
+    return why
 
 
 def run_preconditions(case: Path, run: Path, role: str, cond: str, md_offset: float, dry: bool, ref_sha: str | None) -> list:
@@ -488,11 +516,14 @@ def parse_set(spec: str) -> tuple:
     return m.group(1), m.group(2), m.group(3)
 
 
-def evaluate(case: Path, md_offset: float, sets: dict, conds: dict, dry: bool, out_path: Path) -> dict:
-    """sets = {N0: (base, ext|None), ...}、conds = {N0: run, ...} (省略可)。"""
+def evaluate(case: Path, md_offset: float, sets: dict, conds: dict, dry: bool, out_path: Path, r_throat: float | None = None) -> dict:
+    """sets = {N0: (base, ext|None), ...}、conds = {N0: run, ...} (省略可)。r_throat = --r-throat (None = 同じことだけを要求)。"""
     ref_sha = provenance_sha(case / REF_PROV_RUN)
+    all_runs = [case / x for c in sets for x in sets[c] if x] + [case / conds[c] for c in conds]
+    rt_why = r_throat_failures(all_runs, r_throat)
     out = {"plan": PLAN, "tool": "ns_n012_eval.py", "tool_sha256": sha256_file(Path(__file__)), "date": now(), "dry": bool(dry),
            "md_offset": md_offset, "forge_sha256_ref": {"run": REF_PROV_RUN, "sha256": ref_sha},
+           "r_throat": {"requested": r_throat, "effective": {r.name: scale_of(r) for r in all_runs}, "failures": rt_why},
            "inputs": {c: {"dry": [sets[c][0]] + ([sets[c][1]] if sets[c][1] else []), "cond": conds.get(c)} for c in sets},
            "preconditions": {}, "dry_gates": {}, "cond_gates": {}, "record": {}, "diffs": {}, "cond_diffs": {}}
     band = case / "_band_ab"
@@ -503,6 +534,7 @@ def evaluate(case: Path, md_offset: float, sets: dict, conds: dict, dry: bool, o
         [jload(sc)["runs"][c]["run"] for c in CONDS if c in sets] == [sets[c][0] for c in CONDS if c in sets]
     for c, (b, e) in sets.items():
         why = [] if set_ok else [f"3 条件の固定の検査 ({sc.name}) が OK でない・run の組が違う"]
+        why += rt_why
         why += run_preconditions(case, case / b, "dry", c, md_offset, dry, ref_sha)
         if e:
             why += run_preconditions(case, case / e, "ext", c, md_offset, dry, ref_sha)
@@ -598,14 +630,18 @@ def main(argv=None) -> int:
     g.add_argument("--cond-name", required=True, choices=CONDS)
     g.add_argument("--run", required=True)
     g.add_argument("--ext")
+    g.add_argument("--r-throat", default=None)
+    e.add_argument("--r-throat", default=None, help="r_t [m] (make_ns_n012_problems.py --r-throat と同じ値)")
     a = ap.parse_args(argv)
     md = float(a.md_offset)
+    rt = float(a.r_throat) if a.r_throat is not None else None
     if a.cmd == "gate-dry":
         case = HERE
         res = gate_dry(case, a.cond_name, case / a.run, (case / a.ext) if a.ext else None, case / "_band_ab")
         why = run_preconditions(case, case / a.run, "dry", a.cond_name, md, False, provenance_sha(case / REF_PROV_RUN))
         if a.ext:
             why += run_preconditions(case, case / a.ext, "ext", a.cond_name, md, False, provenance_sha(case / REF_PROV_RUN))
+        why += r_throat_failures([case / a.run] + ([case / a.ext] if a.ext else []), rt)
         st = UNDET if why else res["overall"]
         print(f"[gate-dry] {a.cond_name} {a.run}{'+' + a.ext if a.ext else ''}: {st}"
               + (f" 前提不成立 {why}" if why else "") + (f" 未達 {res['unmet']}" if res["unmet"] else "")
@@ -623,7 +659,7 @@ def main(argv=None) -> int:
         conds[c] = r
     if sorted(sets) != list(CONDS):
         raise SystemExit(f"--set は N0・N1・N2 の 3 つ (受け取った {sorted(sets)})")
-    out = evaluate(HERE, md, sets, conds, a.dry, HERE / a.out)
+    out = evaluate(HERE, md, sets, conds, a.dry, HERE / a.out, rt)
     print_summary(out)
     print(f"→ {a.out}")
     return 0
