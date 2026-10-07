@@ -193,9 +193,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("生産の比較元が無ければ差の表に生産は出ない (エラーを記録)", "window_error" in out["reference_dry"])
 
 cases = [
-    ("出口コア M 5.9987 → 未達", {"N1": {"over": {"exitM_A": lambda s: 5.9987}}}, "N1", "出口コア M", E.FAIL),
-    ("出口コア M 6.0013 → 未達", {"N1": {"over": {"exitM_A": lambda s: 6.0013}}}, "N1", "出口コア M", E.FAIL),
-    ("出口コア M 5.9988 (下限ちょうど) → 合格", {"N1": {"over": {"exitM_A": lambda s: 5.9988}}}, "N1", "出口コア M", E.PASS),
+    ("出口コア M 5.9969 → 未達", {"N1": {"over": {"exitM_A": lambda s: 5.9969}}}, "N1", "出口コア M", E.FAIL),
+    ("出口コア M 6.0031 → 未達", {"N1": {"over": {"exitM_A": lambda s: 6.0031}}}, "N1", "出口コア M", E.FAIL),
+    ("出口コア M 5.997 (下限ちょうど) → 合格", {"N1": {"over": {"exitM_A": lambda s: 5.997}}}, "N1", "出口コア M", E.PASS),
+    ("出口コア M 5.9985 (旧ゲートでは未達、± 0.05 % では合格) → 合格", {"N1": {"over": {"exitM_A": lambda s: 5.9985}}}, "N1", "出口コア M", E.PASS),
     ("波 0.011 → 未達", {"N0": {"over": {"wave01": lambda s: 0.011}}}, "N0", "Mach 波 η0.1 [%]", E.FAIL),
     ("オーバーシュート 0.036 → 未達", {"N2": {"over": {"overshoot01": lambda s: 0.036}}}, "N2", "オーバーシュート η0.1 [%]", E.FAIL),
     ("δ_E/δ_C 1.006 → 未達", {"N0": {"over": {"dE_over_dC": lambda s: 1.006}}}, "N0", "δ_E/δ_C (x_F)", E.FAIL),

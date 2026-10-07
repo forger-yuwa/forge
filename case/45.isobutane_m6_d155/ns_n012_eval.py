@@ -1,6 +1,6 @@
 """plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U4「NS の 3 条件」(N0・N1・N2) の評価器。
 合否は plan tooling-nozzle-throat-monotone-r2 §6 N・K の転記 (U4 の登録):
-  dry: 出口コア M 5.9988〜6.0012・波 η0.1 ≤ 0.01 %・オーバーシュート η0.1 ≤ +0.035 %・δ_E/δ_C = 1 ± 0.5 %・出口半径 0.775 m ± 0.1 mm、
+  dry: 出口コア M 5.997〜6.003 (6.000 ± 0.05 %、2026-10-07 ユーザ決定。旧 ± 0.02 %)・波 η0.1 ≤ 0.01 %・オーバーシュート η0.1 ≤ +0.035 %・δ_E/δ_C = 1 ± 0.5 %・出口半径 0.775 m ± 0.1 mm、
        4 量 (出口コア M・オーバーシュート・δ_E/δ_C・波) が check_quasisteady --series-csv で STEADY、壁解像 PASS (y1+ > 1 の面積 ≤ 5 %)、
        check_convergence (--segment) は全残差で RISING なし (plateau の NOT CONVERGED は既知として記録)。
   凝縮: 凝縮 4 量 (cond_series.py: 軸の凝縮開始・S_max・出口コア g・出口コア M) が末尾 5 枚 STEADY、残差 RISING なし。
@@ -51,7 +51,9 @@ MAIN_STEPS, OUT_INT, EXT_STEPS = 80000, 5000, 20000
 COND_STEPS, COND_OUT = 18000, 1000
 WIN = 5
 # dry のゲート (monotone plan §6 N の転記)。値は判定窓 5 枚の平均
-EXIT_M_LO, EXIT_M_HI = 5.9988, 6.0012
+# 出口コア M: 6.000 ± 0.05 % (2026-10-07 ユーザ決定「プラマイ 0.05% にしようか」。NS の 3 条件の結果を見た後の決定で、
+# 旧の ± 0.02 % [5.9988〜6.0012] は 3e-4 ≈ スロート半径 10 µm 相当で物理的に細かすぎるため。plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U4)
+EXIT_M_LO, EXIT_M_HI = 5.997, 6.003
 WAVE_MAX = 0.01            # [%]
 OVERSHOOT_MAX = 0.035      # [%]
 DE_DC_TOL = 0.005          # |δ_E/δ_C − 1|

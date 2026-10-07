@@ -138,7 +138,7 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
    この壁に寄せた配点は NS 用で、Euler には使わない (Euler は `mesh_euler`、§0)。
    **細分格子の NS は本段 CFL 5 で発散する** — 段階起動 (soft → mid → 本段) + 本段 cfl 1・60000 step
    (累積 CFL を cfl 5 × 12000 にそろえる)。
-7. **最終判定** — 事前登録したゲート (case/45 の例: 出口半径 0.775 m ± 0.1 mm、δ_E/δ_C 1 ± 0.5 %、出口コア M 6.000 ± 0.02 %、
+7. **最終判定** — 事前登録したゲート (case/45 の例: 出口半径 0.775 m ± 0.1 mm、δ_E/δ_C 1 ± 0.5 %、出口コア M 6.000 ± 0.05 % [2026-10-07 ユーザ決定、旧 ± 0.02 %]、
    r/r_w = 0.1 の波 ≤ 0.01 %・オーバーシュート ≤ 0.035 %、壁解像 PASS) を、各量の時系列に
    `check_quasisteady.py --series-csv` をかけて判定する (`nozzle_report` の末尾幅は VERDICT の代わりにならない)。
    時系列は `case/45.isobutane_m6_d155/exitM_sampling_ab.py` (環境変数 `EULER_REF`・`SOLVE_JSON`・`FINAL_PROBLEM`)。
