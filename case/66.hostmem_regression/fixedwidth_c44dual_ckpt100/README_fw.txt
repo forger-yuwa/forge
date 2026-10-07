@@ -1,0 +1,5 @@
+このディレクトリ: plan architecture-solver-host-memory §6.3 固定幅の独立 A/B (構成 c44dual_ckpt100)
+  T_frozen.tsv / T_frozen.sha256  段階 1: 既存 base 3 本だけから凍結した診断幅 (投入前に commit する)
+  PLAN.txt / plan.json             段階 2 の投入計画 (run 名・順序・バイナリと入力の sha256・評価法・判定表)
+  notes.txt / record_extra.py      追加記録 (twall_z の最悪差・condClampCorrQ_0 の最大位置)
+  result/                          段階 2 の評価結果 (fixedwidth_eval.py eval が書く。段階 2 の後)

@@ -1,0 +1,114 @@
+{
+ "plan": "plans/active/architecture-solver-host-memory.md §6.3 (固定幅の独立 A/B)",
+ "cfg": "fw_c44dual",
+ "input": "c44dual_ckpt100",
+ "nStepOuter": 100,
+ "outStepInterval": 100,
+ "env": {
+  "FORGE_ALLOW_UNVERIFIED_SPECIES": "1",
+  "FORGE_CUDA_BLOCKSIZE": "128"
+ },
+ "bins": {
+  "base": {
+   "link": ".bin/base/forge",
+   "target": "/home/ubuntu/bin-hostmem/forge_9c9f623c",
+   "commit": "9c9f623c",
+   "sha256": "c65dbb39f77254151f411cbcb8de0fb10c9245aa381764eb26c34801658e8a7c"
+  },
+  "new": {
+   "link": ".bin/new/forge",
+   "target": "/home/ubuntu/bin-hostmem/forge_93e55957",
+   "commit": "93e55957",
+   "sha256": "7121a8e51e7b2cdf431efdd74188c62044f4a8567fb96ec0f871ffe2cff66006"
+  }
+ },
+ "input_sha256": {
+  "solverConfig.yaml": "9791cf84371fcbc327eb59cb2b3249e6c555d5bb544c4ec85baf4b49f5a1ee32",
+  "bcondConfig.yaml": "9d03d0ed4c6869163e1abc96602af5c9a8d3a8f1df3041b537bc57a22f73b199",
+  "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+  "species_db.yaml": "850e52a665f7b8f95b40d3a4eba3fbc2fb18acf850d9abb2e69b7c70b50262dd",
+  "nozzle.h5": "3d2be9def2474356fc006b479a14fe185160be62987252760eb74f995648c71a",
+  "ic.h5": "03417b288b69586b4a8e9500e73558926ad77853e5e4694d93d160b97db599a7",
+  "inlet_profile_1.csv": "9c78cf556e5eabe05f72f9a3367158e644296a18b88b6e23ce82495880aa4a0c"
+ },
+ "base_existing": [
+  "run_0029_c44dual_ckpt100_base_r1",
+  "run_0038_c44dual_ckpt100_base_r2",
+  "run_0068_c44dual_ckpt100_base_r3"
+ ],
+ "T_frozen_sha256": "45168ae5adf4f0f3896b1f85aa1aef110857bf30f4049b0818084be3b444451e",
+ "runs": [
+  {
+   "run": "run_0194_fw_c44dual_b1",
+   "group": "b",
+   "build": "base",
+   "rep": 1
+  },
+  {
+   "run": "run_0195_fw_c44dual_n1",
+   "group": "n",
+   "build": "new",
+   "rep": 1
+  },
+  {
+   "run": "run_0196_fw_c44dual_b2",
+   "group": "b",
+   "build": "base",
+   "rep": 2
+  },
+  {
+   "run": "run_0197_fw_c44dual_n2",
+   "group": "n",
+   "build": "new",
+   "rep": 2
+  },
+  {
+   "run": "run_0198_fw_c44dual_b3",
+   "group": "b",
+   "build": "base",
+   "rep": 3
+  },
+  {
+   "run": "run_0199_fw_c44dual_n3",
+   "group": "n",
+   "build": "new",
+   "rep": 3
+  },
+  {
+   "run": "run_0200_fw_c44dual_b4",
+   "group": "b",
+   "build": "base",
+   "rep": 4
+  },
+  {
+   "run": "run_0201_fw_c44dual_n4",
+   "group": "n",
+   "build": "new",
+   "rep": 4
+  },
+  {
+   "run": "run_0202_fw_c44dual_b5",
+   "group": "b",
+   "build": "base",
+   "rep": 5
+  },
+  {
+   "run": "run_0203_fw_c44dual_n5",
+   "group": "n",
+   "build": "new",
+   "rep": 5
+  },
+  {
+   "run": "run_0204_fw_c44dual_b6",
+   "group": "b",
+   "build": "base",
+   "rep": 6
+  },
+  {
+   "run": "run_0205_fw_c44dual_n6",
+   "group": "n",
+   "build": "new",
+   "rep": 6
+  }
+ ]
+}

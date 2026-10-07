@@ -227,6 +227,68 @@ def cmd_launch(a):
     spawn_worker(jobs, time.strftime("%Y%m%d_%H%M%S"))
 
 
+def cmd_launch_plan(a):
+    """事前に固定した投入計画 (plan.json: run 名・順序・ビルド・バイナリの sha256・入力の sha256・凍結した T の sha256) どおりに作って回す。
+    名前・順序は計画のまま (番号の振り直しはしない)。既にある名前・バイナリや入力の sha256 違い・T の sha256 違いは止める
+    (plan architecture-solver-host-memory §6.3: 固定幅の独立 A/B)。"""
+    plan = json.load(open(a.plan))
+    pdir = os.path.dirname(os.path.abspath(a.plan))
+    tp = os.path.join(pdir, "T_frozen.tsv")
+    if not os.path.exists(tp) or sha256(tp) != plan["T_frozen_sha256"]:
+        sys.exit("[launch-plan] T_frozen.tsv が無いか sha256 が計画と違う (T を凍結してから投入する)")
+    inp = os.path.join(HERE, "inputs", plan["input"])
+    for fn, h in plan["input_sha256"].items():
+        if sha256(os.path.join(inp, fn)) != h:
+            sys.exit(f"[launch-plan] 入力 {plan['input']}/{fn} の sha256 が計画と違う")
+    links = {}
+    for b, info in plan["bins"].items():
+        link = os.path.join(HERE, info["link"])
+        if not os.path.islink(link) or os.path.realpath(link) != os.path.realpath(info["target"]):
+            sys.exit(f"[launch-plan] {link} が {info['target']} を指していない")
+        if sha256(link) != info["sha256"]:
+            sys.exit(f"[launch-plan] {info['target']} の sha256 が計画と違う")
+        links[b] = link
+    if a.retry:
+        # インフラによる中断 (forge が終了しなかった run) だけの回し直し: 同じビルドで <run>_retry を 1 本 (PLAN.txt §9)
+        j0 = [j for j in plan["runs"] if j["run"] == a.retry]
+        if not j0 or not os.path.exists(os.path.join(HERE, a.retry, ".exclude")):
+            sys.exit("[launch-plan] --retry は計画の run で、note --exclude 済みのものだけ")
+        plan["runs"] = [dict(j0[0], run=a.retry + "_retry")]
+    names = {r["run"] for r in read_registry()}
+    for j in plan["runs"]:
+        if j["run"] in names or os.path.exists(os.path.join(HERE, j["run"])):
+            sys.exit(f"[launch-plan] {j['run']} は既にある (計画の名前は振り直さない)")
+    if a.dry_run:
+        for j in plan["runs"]:
+            print(f"[launch-plan] (dry-run) {j['run']}  {j['build']} → {plan['bins'][j['build']]['target']}")
+        return
+    jobs = []
+    lockf = open(os.path.join(HERE, ".registry.lock"), "w")
+    fcntl.flock(lockf, fcntl.LOCK_EX)
+    new_reg = not os.path.exists(REGISTRY)
+    with open(REGISTRY, "a", newline="") as rf:
+        w = csv.DictWriter(rf, fieldnames=REG_COLS, delimiter="\t")
+        if new_reg:
+            w.writeheader()
+        for j in plan["runs"]:
+            rundir = os.path.join(HERE, j["run"])
+            populate(rundir, plan["input"])
+            env = {k: v for k, v in plan["env"].items() if k != "FORGE_CUDA_BLOCKSIZE"}   # ワーカーが 128 を付ける
+            b = links[j["build"]]
+            rec = dict(run=j["run"], cfg=plan["cfg"], input=plan["input"], build=j["build"], rep=j["rep"], kind="forge",
+                       bin=b, bin_sha256=plan["bins"][j["build"]]["sha256"],
+                       env=" ".join(f"{k}={v}" for k, v in env.items()), created=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+            with open(os.path.join(rundir, "HARNESS.txt"), "w") as f:
+                f.write("\n".join(f"{k:10s}: {v}" for k, v in rec.items()) + f"\nplan      : {os.path.abspath(a.plan)}\n")
+            with open(os.path.join(rundir, ".state"), "w") as f:
+                f.write("queued\n")
+            w.writerow(rec)
+            jobs.append(dict(rundir=rundir, kind="forge", bin=b, env=env, memwatch=False))
+            print(f"[launch-plan] {j['run']}  ({j['build']})")
+    fcntl.flock(lockf, fcntl.LOCK_UN)
+    spawn_worker(jobs, "plan_" + time.strftime("%Y%m%d_%H%M%S"))
+
+
 def cmd_resume(a):
     """registry にあって .state が queued の run を (登録どおりの env・バイナリで) 回す。ワーカーが途中で止まったとき用。"""
     jobs = []
@@ -549,6 +611,10 @@ def main():
     s.add_argument("--label", default="dir", help="リンク .bin/<label>/forge の名前 (ビルドごとに変える)")
     s.add_argument("--env", nargs="*", default=[])
     s.add_argument("--memwatch", action="store_true")
+    s = sub.add_parser("launch-plan")
+    s.add_argument("plan")
+    s.add_argument("--retry", help="インフラ中断で除外した run を <run>_retry として 1 本だけ回し直す")
+    s.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("resume")
     s.add_argument("runs", nargs="*")
     s = sub.add_parser("worker")
@@ -567,7 +633,7 @@ def main():
     a = ap.parse_args()
     {"seed": cmd_seed, "set-ckpt": cmd_set_ckpt, "launch": cmd_launch, "launch-dir": cmd_launch_dir,
      "worker": cmd_worker, "status": cmd_status, "verify": cmd_verify, "table": cmd_table, "note": cmd_note,
-     "resume": cmd_resume}[a.cmd](a)
+     "resume": cmd_resume, "launch-plan": cmd_launch_plan}[a.cmd](a)
 
 
 if __name__ == "__main__":

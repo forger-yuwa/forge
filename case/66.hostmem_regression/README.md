@@ -26,6 +26,8 @@ plan [architecture-solver-host-memory](../../plans/active/architecture-solver-ho
 | `prepare_inputs.py` | (ローカル) 元 run から `inputs/<入力名>/` を作る。修正は正規表現 + 期待一致数で行い、PyYAML で期待値を検査。`mesh.bndFirstOrder`・`wallTreatmentSST: 1` が残れば失敗 |
 | `run_matrix.py` | (AWS) `seed` (restart_field.py を種に掛ける)・`set-ckpt`・`launch` (run を作って 1 本ずつ順に回すワーカーを裏で起動)・`resume`・`status`・`verify` (RUN_PROVENANCE の forge_bin/sha256 照合)・`note` (README の状態・比較から除外)・`table` (下の run 一覧の行) |
 | `compare_runs.py` | (AWS) §6 の判定 (登録判定 A、既定 `--metric m`)。`--cfg X` / `--all` (registry.tsv から run を選ぶ)、`--base … --new …` (直接指定)、`--diff2 A.h5 B.h5` (分割と連続など 2 ファイル)。`--metric abs` で追加診断 B (plan §6.2) |
+| `fixedwidth_eval.py` | 固定幅の独立 A/B (plan §6.3): `freeze` (既存 base 3 本から T = 2·S0 を凍結) と `eval` (段階 2 の 12 本を凍結した T で評価、§6.3 の判定表) |
+| `fixedwidth_c44dual_ckpt100/` | §6.3 の段階 1 の成果物 (`T_frozen.tsv`・`T_frozen.sha256`・`PLAN.txt`・`plan.json`・`notes.txt`)。段階 2 は `run_matrix.py launch-plan fixedwidth_c44dual_ckpt100/plan.json` |
 | `test_compare_abs.py` | 追加診断 B の判定関数 `judge_abs`・自己検査 `self_check_abs` の単体試験 (codex の最小再現 2 つを含む)。`python3 test_compare_abs.py` |
 | `memlog_summary.py` | (AWS) `FORGE_MEMLOG=1` の工程別 RSS/HWM/GPU と `--memwatch` の 1 s 採取 (`mem_samples.csv`) を表にする |
 | `split_vs_cont.py` | (AWS) dual-time の分割 (ckpt100 → 再開 100) と連続 200 の差を、ビルドごとに反復内の差と並べる (判定はしない) |
@@ -275,6 +277,15 @@ c26optin 20/191 (env 23/212)・SERN g3 23/223。
   SERN g3 `res_sidewall_in_11_100:omegab` 0.914、c44dual_pindiag `CHECKPOINT/rog_0_fctH` 0.866、c44dual_pindiag `CHECKPOINT/rog_0_fctHsrc` 0.856、
   c56lineimp `res_200:roOmega` 0.850、c56lineimp `res_gap_6_200:qwall` 0.845、SERN g3 `res_sidewall_out_12_100:twall_y` 0.827、
   c44dual_restart100 `res_100:sonic` 0.820。30 構成だけの上位と SERN の上位は `summary.txt`・`sern_g3/summary.txt`。
+
+### 固定幅の独立 A/B (plan §6.3、構成 c44dual_ckpt100)
+
+- **段階 1 (2026-10-07 済み、forge の実行なし)**: 既存 base 3 本 (run_0029・0038・0068) だけから $S_0 = \max_{i<j}\|B_i - B_j\|_\infty$、
+  $T = 2S_0$ を凍結した ([`fixedwidth_c44dual_ckpt100/T_frozen.tsv`](fixedwidth_c44dual_ckpt100/T_frozen.tsv)、sha256 `45168ae5adf4…`)。
+  最終出力の量 196 (幅 121、差 0 を要求 72、厳密一致 3) + 行キー 1 + 初期出力 44。new は使っていない。
+  段階 2 の投入計画 (run_0194–0205 を b,n 交互、バイナリ・入力の sha256、評価法、判定表) は [`PLAN.txt`](fixedwidth_c44dual_ckpt100/PLAN.txt)・`plan.json`。
+  追加記録 (twall_z の最悪差の位置と ULP、condClampCorrQ_0 の最大位置) は [`notes.txt`](fixedwidth_c44dual_ckpt100/notes.txt)。
+- **段階 2 は未投入** (T_frozen.tsv と PLAN を commit してから)。
 
 ## 既知の注意
 

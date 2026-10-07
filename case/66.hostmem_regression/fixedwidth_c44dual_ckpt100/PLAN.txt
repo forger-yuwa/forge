@@ -1,0 +1,96 @@
+固定幅の独立 A/B — 段階 2 の投入計画 (事前登録、2026-10-07)
+================================================================
+
+根拠: plans/active/architecture-solver-host-memory.md §6.3 (commit 93fc2ee5)。codex diagnose
+notes/reviews/2026-10-07-hostmem-result-interpretation-diagnose.md。機械可読の正本は同じディレクトリの plan.json
+(run_matrix.py launch-plan と fixedwidth_eval.py eval が読む)。この文書と plan.json は T_frozen.tsv とともに
+**投入前に commit する**。
+
+1. 変える因子
+   実行バイナリだけ。入力・設定・環境変数・ステップ数・出力間隔・GPU 設定は全 run で同じ。
+
+2. 診断幅 (凍結済み)
+   T_frozen.tsv  sha256 45168ae5adf4f0f3896b1f85aa1aef110857bf30f4049b0818084be3b444451e (T_frozen.sha256)
+   算定に使った既存 base 3 本 (new は使っていない):
+     B1 run_0029_c44dual_ckpt100_base_r1
+     B2 run_0038_c44dual_ckpt100_base_r2
+     B3 run_0068_c44dual_ckpt100_base_r3
+   S0 = max_{i<j} ||B_i − B_j||_∞ (float64 の絶対 L∞)、T = 2·S0。
+   最終出力の量 196 (幅 121、差 0 を要求 72、厳密一致[整数] 3) + 行キー 1 + 初期出力 44 (厳密一致)。
+   launch-plan と eval は T_frozen.tsv の sha256 を照合し、違えば止まる。
+   凍結は 2026-10-07 02:10 UTC に 1 回やり直した: 最初の凍結 (02:07、sha256 f5e265ea…) から、S0 = 0 の量の S0_pair 欄を
+   「全組で差 0」に直しただけ (同じ 3 本・同じ計算なので S0・T の値は変わらない)。commit するのは上の sha256 のもの。
+
+3. run (12 本、この順に 1 本ずつ、交互 b,n,b,n,… で固定。名前は振り直さない)
+     1  run_0194_fw_c44dual_b1   base
+     2  run_0195_fw_c44dual_n1   new
+     3  run_0196_fw_c44dual_b2   base
+     4  run_0197_fw_c44dual_n2   new
+     5  run_0198_fw_c44dual_b3   base
+     6  run_0199_fw_c44dual_n3   new
+     7  run_0200_fw_c44dual_b4   base
+     8  run_0201_fw_c44dual_n4   new
+     9  run_0202_fw_c44dual_b5   base
+    10  run_0203_fw_c44dual_n5   new
+    11  run_0204_fw_c44dual_b6   base
+    12  run_0205_fw_c44dual_n6   new
+   置き場所: AWS ~/forge-b4/case/66.hostmem_regression/<run>/ (registry.tsv に cfg fw_c44dual で登録)。
+
+4. バイナリ (ハーネスは名前 forge のリンク経由で起動する: idle 自動停止の pgrep -x forge に掛かるように)
+     base  .bin/base/forge → ~/bin-hostmem/forge_9c9f623c  commit 9c9f623c
+           sha256 c65dbb39f77254151f411cbcb8de0fb10c9245aa381764eb26c34801658e8a7c
+     new   .bin/new/forge  → ~/bin-hostmem/forge_93e55957  commit 93e55957 (R1–R3)
+           sha256 7121a8e51e7b2cdf431efdd74188c62044f4a8567fb96ec0f871ffe2cff66006
+   launch-plan はリンク先と sha256 を照合してから作る。投入後は run_matrix.py verify (RUN_PROVENANCE の forge_bin・sha256)。
+
+5. 入力 (既存の c44dual_ckpt100 と同じテンプレート inputs/c44dual_ckpt100/。launch-plan が sha256 を照合する)
+     solverConfig.yaml    9791cf84371fcbc327eb59cb2b3249e6c555d5bb544c4ec85baf4b49f5a1ee32
+     bcondConfig.yaml     9d03d0ed4c6869163e1abc96602af5c9a8d3a8f1df3041b537bc57a22f73b199
+     probe.yaml           eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170
+     species_db.yaml      850e52a665f7b8f95b40d3a4eba3fbc2fb18acf850d9abb2e69b7c70b50262dd
+     nozzle.h5            3d2be9def2474356fc006b479a14fe185160be62987252760eb74f995648c71a
+     ic.h5                03417b288b69586b4a8e9500e73558926ad77853e5e4694d93d160b97db599a7
+     inlet_profile_1.csv  9c78cf556e5eabe05f72f9a3367158e644296a18b88b6e23ce82495880aa4a0c
+   (元 case/44 run_0468_sweep_cflp12_nsub20_float。species_db.yaml から H2O を外したもの。solverConfig/bcond/species_db/probe/
+    inlet_profile は既存 base run_0029 の複製とバイト一致を確認、h5 はローカルの元複製と sha256 一致)
+   各 100 step (nStepOuter 100、outStepInterval 100 → res_0.h5 と res_100.h5、res_outlet_2_100.h5、res_wall_3_100.h5)。
+   環境変数: FORGE_ALLOW_UNVERIFIED_SPECIES=1 (既存と同じ)、FORGE_CUDA_BLOCKSIZE=128。
+
+6. 手順 (AWS、他セッションの forge には触らない)
+     cd ~/forge-b4/case/66.hostmem_regression
+     python3 run_matrix.py launch-plan fixedwidth_c44dual_ckpt100/plan.json --dry-run   # 照合だけ
+     python3 run_matrix.py launch-plan fixedwidth_c44dual_ckpt100/plan.json
+     python3 run_matrix.py status          # 12 本の done を待つ (1 本 6〜7 s)
+     python3 run_matrix.py verify
+     python3 fixedwidth_eval.py eval --plan fixedwidth_c44dual_ckpt100/plan.json
+       → fixedwidth_c44dual_ckpt100/result/fixedwidth_result.txt
+
+7. 評価法 (fixedwidth_eval.py eval)
+   新しい各 run X (b 6 本・n 6 本) について、既存 base 3 本 B1–B3 と比べる:
+   - 構造: 出力ファイル集合、各 h5 のデータセット集合・shape・dtype・属性 (/CHECKPOINT の totalTime・dt・nHistoryValid 等
+     = 物理時刻を含む) が B1 と厳密一致。
+   - 行キー: residual_history.csv の (step, inner, phase) の列が B1 と厳密一致。
+   - 初期出力 (res_0.h5) の保存量・原始量・幾何量、整数の量 (MESH/CONNE): B1 とビット一致。
+   - 幅の量: v = max_i ||X − B_i||_∞ ≤ T (同じ T を全 run に)。差 0 を要求する量は v = 0。
+   - 非有限・shape 違い・欠落は失敗 (PASS にしない)。NANCHECK.txt も PASS であること。
+   b と n を分けて集計し、下の判定表で決める。
+   評価スクリプトの確認 (段階 1、new は使っていない): 既存 base 3 本を評価対象にすると全量幅内・構造一致 (定義上そうなる)。
+   B1 の出力の複製に人工の差 (ro に +1、差 0 を要求する roK を変更、T に NaN、初期出力 P に 1 ULP) を入れると 4 件とも検出
+   (幅超過 2・比較不能 1・初期出力の不一致 1)。本数が b 6・n 6 でないときは「判定不能」を返す。
+
+8. 判定表 (plan §6.3)
+   | 結果                              | 判定                                                                             |
+   | 新規 base・new とも全量で幅内      | 「追加標本でもこの固定幅を超える差は検出されなかった」— 限定した支持材料として result レビューへ |
+   | 新規 base は幅内、new だけ超過     | 変更起因の差を優先して追う (諮る)                                                  |
+   | 新規 base も超過                   | 基準 3 本では再現性を捉えられていない → 判定不能 (その場で T や反復数を増やして合格にしない) |
+   全量が幅内でも包括的な同等性は宣言しない (物理的に許せる誤差の上限は未定義)。
+   事前の事実 (notes.txt §2(c)): condClampCorrQ_0 が 1.45〜1.46e23 になる節点 19954 の状態は、変更前バイナリの run_0077
+   (c44dual_pindiag base r3) にも出ている。凍結した T はこの状態を含まない base 3 本から決まっている。
+
+9. やらないこと (結果を見てから変えない)
+   - 段階 2 の結果を見てから T・本数・順序・対象の量・判定表を変えない。S が増えるまで反復を足さない。
+   - A の FAIL 7 量 (この構成では condClampCorrQ_0・condR30_0) を除外しない。condClampCorrQ_0 の分母床を変えて差を消さない。
+   - 未収束の 100 step 比較を定常解の一致と呼ばない。
+   - forge が rc ≠ 0 で終わった・NaN が出た run は**結果**として扱う (差し替えない。eval では失敗として数える)。
+   - 例外はインフラによる中断 (AWS の停止などで forge が終了しなかった run) だけ: その run を note --exclude で除外し、
+     同じ位置に同じビルドで <run>_retry の名前で回し直す (計画外の run は足さない)。中断の事実は README と返却に書く。
