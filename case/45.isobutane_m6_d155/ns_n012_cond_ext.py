@@ -64,6 +64,17 @@ def prep(src: Path, run: Path) -> dict:
         copied.append(p.name)
     (run / NS.RECORD).unlink(missing_ok=True)
     (run / "solverConfig.yaml").write_text(ctext)
+    # restart_field は DST にあるデータセットにしか書かない。凝縮の run の入力 h5 にはモーメント (rog_*・roQ*_*) が無いので
+    # (forge は無ければ 0 で始める)、src の保存量のうち DST に無いものを src と同じ型・形で先に作る (値は restart_field が書いて検査する)
+    import h5py
+    with h5py.File(rs[-1], "r") as h:
+        want = sorted(k for k in h["VALUE"] if NS.CONS_RE.match(k))
+        created = []
+        with h5py.File(run / "nozzle.h5", "r+") as d:
+            for k in want:
+                if k not in d["VALUE"]:
+                    d["VALUE"].create_dataset(k, data=h["VALUE"][k][()])
+                    created.append(k)
     log = run / "restart_field.log"
     cmd = [sys.executable, str(NS.TOOLS / "restart_field.py"), str(rs[-1]), str(run / "nozzle.h5"), "--dst-run", str(run)]
     r = subprocess.run(cmd, capture_output=True, text=True, env=NS.runner()._ENV)
@@ -73,9 +84,6 @@ def prep(src: Path, run: Path) -> dict:
         print(out[-3000:])
         raise SystemExit(f"restart_field がビット一致を確認していない (rc {r.returncode}) — 止める ({log})")
     # 移した量の数: 凝縮の run の /VALUE の保存量 (CONS_RE) の全部であること (化学種・モーメントを落とさない)
-    import h5py
-    with h5py.File(rs[-1], "r") as h:
-        want = sorted(k for k in h["VALUE"] if NS.CONS_RE.match(k))
     tail = [l for l in out.splitlines() if "VERDICT" in l]
     import re
     m = re.search(r"(\d+) 量を移した", " ".join(tail))
@@ -90,6 +98,7 @@ def prep(src: Path, run: Path) -> dict:
            "tool": "ns_n012_cond_ext.py prep", "created": NS.now(), "git_head": NS.git_head(), "dry": False, "role": "cond_ext",
            "parent": src.name, "parent_end": PARENT_STEPS, "ext_steps": EXT_STEPS, "stages": "none",
            "src": rs[-1].name, "src_sha256": NS.sha256_file(rs[-1]), "copied": copied, "conserved_moved": want,
+           "datasets_created_in_dst_before_restart": created,
            "restart_field_tail": tail[-1:], "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / NS.RECORD, rec)
     print(f"[prep-cond-ext] {run.name} ← {src.name}/{rs[-1].name}: {EXT_STEPS} step、{len(want)} 量、{rec['restart_field_tail']}")
