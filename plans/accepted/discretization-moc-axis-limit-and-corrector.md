@@ -260,3 +260,7 @@
 - `2026-10-07` — **codex result 段レビュー**: `notes/reviews/2026-10-07-discretization-moc-axis-limit-and-corrector-result.md` (GO-with-changes、C0/M1/m2)。全件採用 (§6.1)。レビューは V0・V2 (最細区間の次数 1.990)・V1 (変更前とビット同一)・V4・V6 (第 1 点の角度差 0.00544°、反復の最大 34) を独立に再現。
   - **完了の区分: 機能実装の完了**。`moc_axis_limit: analytic`・`moc_corrector: converge` は実装・検証済みの opt-in (コードの既定は legacy・fixed2 のまま)。V5d は保留 (前提不成立)、V5′ の N2 は登録のゲートに合格で N2 − N1 は参考値。生産採用とコードの既定の切り替えはユーザ判断 (§5.1 #5)。
 - `2026-10-07` — **ユーザ決定 (2026-10-07)「生産採用: 上流を多項式に (poly)・MOC の新方式・全域 1 本の B スプライン壁」**: MOC は `analytic`・`converge` を生産に採用 (V5d の保留を明示した限定採用。選択肢の説明に「採用ならコードの既定もこちらへ切り替える」と書いて諮った)。**コードの既定を `moc_axis_limit: analytic`・`moc_corrector: converge` に切り替える** (§5.1 #5、旧方式はキーの明示で再現)。
+- `2026-10-07` — **既定の切り替えの波及の確認** (`case/45.isobutane_m6_d155/moc_default_sweep.py`、CFD 0 step、出力 `_band_ab/moc_default_sweep.json`・`moc_default_sweep_errors_ab.json`): MOC のキーを書いていない axis-Mach の問題 257 本 (case/41〜45) を、A = legacy + fixed2 を明示、B = 新しい既定 (analytic + converge) の 2 通りで設計チェーンだけ流した。
+  - 計算できた 228 本は **B のゲートが全部合格** (case/41 18・case/42 78・case/43 1・case/44 90・case/45 41)。設計壁の A − B の差: 半径の最大 4.5e-4 r_t (case/44; 中央値は 1e-5〜1.8e-4)、壁角の最大 0.20° (case/44)、出口半径の相対の差の最大 7.4e-6 (case/41)。
+  - 例外の 25 本 (case/41 7・case/42 18: 壁の QA の不合格 — 半径の非単調・spline のリンギング・スロート曲率の不整合) は **A でも同じく例外** (もともと成り立たない設計点)。B だけで例外になる問題は 0。手元に初期線の run が無い 4 本 (case/41) は skip。
+  - したがって既定の切り替えで新たに止まる問題は無い。過去の問題 YAML を回し直すと設計壁が上の範囲で変わる (旧方式の再現は `legacy`・`fixed2` の明示で; ユーザ方針どおり過去 YAML にキーは足さない)。
