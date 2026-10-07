@@ -130,6 +130,11 @@
 - **W4 下流の道具**: `prepare_ns`・初期値 (`ic.py`)・報告 (`nozzle_report.py`) が新しい壁を使って動く。§4.2 の属性の表のすべてが埋まっていること。
   - **単体検査** (結果ファイル不要): 報告の壁の図の部分を、保存した係数から評価していることを確かめる。次の 4 つを検査する: 旧 run (壁ファイル無し → 旧経路で報告)、新しい形式 (保存した係数から評価)、係数の欠損 (例外)、上流を含む差分図 (設計壁を有効域の外で外挿しない。x = −6 で設計壁が上流 Hermite の値になる)。
   - **統合検査**: W3 で入力の同一性を確かめたうえで、既存の結果 (§5.1 #2b で取得元とハッシュを記録したもの) に新しい形式の壁ファイルを添えて報告を作り、図が保存した係数を使っていることを確かめる。
+    - **2026-10-07 改訂 (計算の前)**: 対象を run_0147 から `case/45.isobutane_m6_d155/run_0166_ns_n012_N1/` (上流の多項式化の plan の U4 の N1) に変える。理由: 1 本の B-spline はノット挿入の版になり `pw_upstream: poly` の壁だけを受け付ける (ランプは例外で止まる)。run_0147 はランプの壁なので新しい形式の壁ファイルを作れない。手順と合格条件 (すべて AWS 上、run_0166 と同じコード a6ce9390・同じ環境・同じ変換器、CFD 0 step):
+      1. N1 の問題 (`problem_d155_ns_n012_N1.yaml`) で `prepare_ns` を 2 腕で回す。腕 A はキー無し、腕 B は `physical_wall_repr: single_bspline` だけを足す。引数は `ns_n012.py prep-dry` と同じ (nsteps 12000・k_f の initializer・cfl_main 5.0・implicit_relax 同じ) だが IC は貼らない (`ic_from` 無し)。W3 の判定 (ソルバ入力のビット同一) を A/B に適用する。
+      2. 腕 A が run_0166 の壁を再現している: `wall_physical.csv`・`wall_design.csv`・`delta_r_initial.csv` がバイト同一、`nozzle.h5` の `/MESH` 以下のデータセットがビット同一、`prepare_info.json` の `throat_physical` が一致。
+      3. run_0166 の結果 (h5・CSV はシンボリックリンク、報告の出力は別ディレクトリ) に腕 B の壁ファイルを添えた写しで `nozzle_report` を回す (チェーンと同じ引数 `--no-pptx --wall-over-frac 5`、Euler 参照 run_0164)。`wall_source` が `saved_coefficients`・`wall_repr` が `single_bspline`、壁形状の図の出口半径が保存した係数の評価値と一致、壁形状の図以外の評価量 (報告の数値の JSON) が run_0166 自身の報告とビット同一。
+      - 3 つとも満たせば統合検査 PASS。1 つでも外れたら差の経路を特定して止める (諮問)。比較の道具は `case/45.isobutane_m6_d155/wsb_w4_integration.py`。
   - **一般性**: case/45 と違う `scale_m` と、既定のランプ (`pw_ramp` 無し) を使う問題で、継ぎ目の位置・mm 換算が壁の属性から決まることを試験する。
 - **W5 STEP**:
   - 書き出した STEP を OpenCascade (`freecadcmd`) で読み直し、曲線の次数・ノット・重複度・制御点数が書き出し時と一致すること。
