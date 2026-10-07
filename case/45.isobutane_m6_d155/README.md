@@ -9,6 +9,7 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
   上流は 5 次多項式 (`pw_upstream: poly`)、MOC は analytic + converge、物理壁は全域 1 本の B スプライン (`physical_wall_repr: single_bspline`)。
   較正値 6.8825162455159465e-06・r_t 0.07666536551630307 m・k_f 1.054129117086371。生産の run は dry `run_0167_ns_n012_N2` + 延長 `run_0179_ns_n012_N2_ext`、
   凝縮 `run_0170_ns_n012_N2_cond`。旧生産 (`problem_d155_ns_finemesh_recal_final_mono.yaml`、run_0147+0149/0148) は置き換えた。
+  生産の確認 (準備が run_0167 の入力をビット同一で再現) `_band_ab/prod_confirm/PROD_CONFIRM.json`、STEP `_band_ab/prod_confirm/step/wall_physical.step`、標準報告 `_band_ab/prod_confirm/reports/*/…_report.pptx`。
 - 最短探索: `search_shortest.py` → `search_shortest.json`
   (基準 = shortest-robust study: margin≥1°/topo≥0.02/hard gate/単峰、n1200 確認)。
   **勝者 R2 / L_c 39.3 / M_K 2.7 → x_F = 95.104 r_t** (R3: 39.7/2.8 → 95.433)。
