@@ -417,6 +417,11 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
     return coords, hexes, B, info, y_mid
 
 
+# 後縁下流の中間線の曲線の版 (来歴用、plan convection-zero-thickness-edge-reconstruction §4.2「来歴」)。
+# `_te_wake_midline` の式 (曲線・端点の条件・m0 の取り方) を変えたら版を上げる。有効時だけ info に入る (無効時の info・格子は不変)
+TE_WAKE_CURVE_VERSION = "hermite3-lower-tangent-v1"
+
+
 def _te_wake_midline(y_mid_line, xs, tk, i_te, L_cowl, y_te, x_out, prm):
     """後縁下流の中間線の局所変形 (plan convection-zero-thickness-edge-reconstruction §4.2)。戻り = (y_mid, info)。
 
@@ -466,7 +471,8 @@ def _te_wake_midline(y_mid_line, xs, tk, i_te, L_cowl, y_te, x_out, prm):
         t = (x - L_cowl) / L_b
         h = y_te + L_b * (m0 * t * (1.0 - t) ** 2 + m1 * t * t * (2.0 - t))
         return np.where((x > L_cowl) & (x < x1), h, y_mid_line(x))
-    info = {"te_wake_x_end": float(x1), "te_wake_slope_te_deg": float(np.degrees(np.arctan(m0))),
+    info = {"te_wake_curve_version": TE_WAKE_CURVE_VERSION,
+            "te_wake_x_end": float(x1), "te_wake_slope_te_deg": float(np.degrees(np.arctan(m0))),
             "te_wake_slope_end_deg": float(np.degrees(np.arctan(m1))), "te_wake_n_stations": int(inner.size),
             "te_wake_i_first": int(inner[0]), "te_wake_i_last": int(inner[-1])}
     return y_mid, info

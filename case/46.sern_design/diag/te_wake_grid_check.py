@@ -20,13 +20,53 @@ plan convection-zero-thickness-edge-reconstruction §4.2「投入前の格子の
   格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, n_dup_cowl) はメッシャの info から取る。節点番号はメッシャの順
   (base(i, j, k) = (i·NJ + j)·nz + k、その後にカウル上コピー・側壁外コピー・外部流ブロック) で、変換器はこの順を保つ
   (`mesh.renumber: rcm` で再番号付けした h5 は /MESH/RENUMBER_PERM でメッシャの番号に戻して読む)。
+  run ディレクトリの格子は solverConfig.yaml の `mesh.meshFileName` (無ければ sern.h5、それも無ければ sern.msh)。
 
 品質 (`check_mesh_quality.py`) と双対幾何 (`check_dual_closure.py`) の VERDICT は本道具では出さない。回し方は出力の末尾に書く。
+
+--admission (plan §6.0「投入条件 = 最終 node 格子の検査」の表を判定する。許容差は表のまま、測る前に固定):
+  python3 case/46.sern_design/diag/te_wake_grid_check.py A_run B_run --admission \\
+      [--quality-a MESH_QUALITY.txt] [--quality-b MESH_QUALITY.txt] --dual-closure-b CLOSURE_B.txt [--dual-closure-a CLOSURE_A.txt]
+
+  表の各行を PASS / FAIL / 判定不能 で出し (行ごとに測った値と閾値)、最後に `ADMISSION VERDICT: PASS|FAIL|UNDECIDABLE` を
+  1 行出す (終了コード 0 / 1 / 2)。1 つでも FAIL なら FAIL、FAIL が無く判定不能が 1 つでもあれば UNDECIDABLE
+  (AGENTS.md「判定ツールが判定不能を返したら、それは合格ではない」)。行の定義 (第 n 層 = 中間線から n 番目の j、全 span = 全 k):
+    前提            A・B とも最終 node 格子 (node 変換の h5)、L_b が A 0・B 1.0 H (事前登録の値)、格子の構造が同じ
+    最初の下流の辺  B の後縁の列 (i = i_te) の下側の第 1〜第 10 層 (j = jm−1..jm−10)・全 k で、辺 (i_te → i_te+1) の角度と
+                    下側の接線 m0 (B の info の te_wake_slope_te_deg) の差 ≤ 3°
+    後縁の折れ      B の i = i_te で上下の第 1〜第 10 層と共有の後縁節点 (j = jm)・全 k の折れ角 (下流の辺 − 同じ i 線の上流の辺)。
+                    後縁節点は下側壁面 (cowl_out、板の外は中間線) と上側壁面 (cowl_in) の上流の辺の両方に対して ≤ 3°
+    復帰区間の折れ  B の主ブロックの全 i 線 (全 j・全 k) で、節点 i_te < i ≤ i_last + 1 (= 最初の未変形の辺を含む) の折れ角 ≤ 6°
+    固定すべき量    節点数・x・z (全節点ビット一致)・ヘキサの接続・境界面の接続 (タグ別)・上流 (x ≤ 後縁の x) の座標・
+                    固体 (壁タグ) と外部境界 (sym・side_far 以外) の節点が不変。sym・side_far 上の面内 (y) の移動は数を記録
+    層の Δy         i = i_te .. i_last + 1 の列・上下・全 k。第 1 層 |Δy_B − Δy_A| ≤ 1e−8·Δy_A + r、第 1〜第 10 層 ≤ 0.05·Δy_A + r。
+                    r = 座標の丸めの上限 = 4·ε₃₂·max|対象の y| (float32 の h5)、0 (倍精度 = 変換前)。msh (10 桁) は判定不能
+    primal の品質   B の全ヘキサの 8 頂点のヤコビアン (corner_jacobians、向きは A の多数派) の非正・非有限 0、スケール済みの最小 ≥ 0.65、
+                    skew (check_mesh_quality.py の metrics_vectorized、3D の面ごとの equiangle skew) 最大 ≤ 0.9、A からの増加 ≤ 0.10
+    品質・双対      (a) MESH_QUALITY.txt の VERDICT が B ≥ A (PASS > SOFT-PASS > FAIL、閾値 AR・skew が同じ、cells が格子のヘキサ数)
+                    (b) 変形領域 (動いた節点を含むヘキサ) に新しい AR 閾値超過 (B で超過・A で非超過) が 0 (AR は check_mesh_quality と同じ定義を
+                        この道具で計算、閾値は MESH_QUALITY.txt の AR<=、無ければ --ar-max)
+                    (c) --dual-closure-b のファイル (check_dual_closure.py の出力) が VERDICT: PASS、tol 1e−5、CV 数 = B の節点数
+  入力が欠ける・読めない項目は判定不能 (合格扱いにしない)。
+
+--provenance-out FILE (plan §4.2「来歴」): A・B の実入力格子 (最終 node の h5) から再計算した格子署名
+  (`solver_density_cuda/tools/mark_zero_thickness_edges.py` の mesh_signature)、曲線版 (メッシャの info の te_wake_curve_version)、
+  te_wake_blend_H、生成コードの commit (prepare_info に記録があれば。無ければ --code-commit-a/-b の申告を「未検証」として)、
+  設定ファイル (run 直下の *.yaml・prepare_info.json・問題 YAML) の sha256、--attach-a/-b の記録 (初期場の転送ログ等) の sha256 を JSON で書く。
+  --admission と併用すると判定の行も入れる。
+
+--same-mesh A.h5 B.h5: 2 つの h5 (か run ディレクトリ) の格子署名を比べる (継続 run で格子が不変か)。
+  `SAME MESH: YES|NO|UNDECIDABLE` (終了コード 0 / 1 / 2)。
 """
 import argparse
+import datetime as _dt
+import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -36,6 +76,27 @@ PHYS_NAME = {1: "inlet_nozzle", 2: "inlet_ext", 3: "outlet", 4: "ramp", 5: "cowl
              9: "sym", 10: "side_far", 11: "sidewall_in", 12: "sidewall_out", 14: "vehicle", 15: "vehicle_top",
              16: "underside_far", 17: "vehicle_side", 18: "vehicle_base"}   # mesh_sern3d.PHYS_SERN3D
 IN_PLANE_TAGS = (9, 10)   # sym (z = 0)・side_far (z = Z_far): 節点が面内 (y) で動くのは形状の変更ではない
+PHYS_ID = {v: k for k, v in PHYS_NAME.items()}
+WALL_TAGS = (4, 5, 6, 11, 12, 14, 15, 17, 18)   # 固体形状: ramp・cowl_in・cowl_out・sidewall_*・vehicle*
+
+ROOT = Path(__file__).resolve().parents[3]
+TOOLS = ROOT / "solver_density_cuda" / "tools"
+DESIGN = ROOT / "design"
+
+# plan §6.0「投入条件 = 最終 node 格子の検査」の許容差 (事前登録 2026-10-08、codex diagnose te-wake-blend-length)。変えない
+ADM_LAYERS = 10                 # 第 1〜第 10 層
+ADM_FIRST_EDGE_DEG = 3.0        # 最初の下流の辺: m0 から 3° 以内
+ADM_TE_FOLD_DEG = 3.0           # 後縁の折れ ≤ 3°
+ADM_RETURN_FOLD_DEG = 6.0       # 復帰区間の折れ ≤ 6°
+ADM_DY_FIRST_REL = 1.0e-8       # 第 1 層の Δy の相対差
+ADM_DY_LAYERS_REL = 0.05        # 第 1〜第 10 層の各層厚
+ADM_ROUND_ULPS = 4.0            # 変換後の座標の丸めの上限 = 4·ε₃₂·max|対象座標|
+ADM_SCALED_JAC_MIN = 0.65
+ADM_SKEW_MAX = 0.9
+ADM_SKEW_INC_MAX = 0.10
+ADM_DUAL_TOL = 1.0e-5
+ADM_BLEND_H = 1.0               # 事前登録の L_b (§4.2: 1.0 H に固定。結果を見て変えない)
+EPS32 = float(np.finfo(np.float32).eps)
 
 
 # ---------------------------------------------------------------------------------------------- 読み込み
@@ -116,15 +177,42 @@ def _read_h5(path):
     return coords, hexes, bf
 
 
+def mesh_file_of(run_dir):
+    """run の solverConfig.yaml の `mesh.meshFileName` (forge が読む格子)。無ければ None。"""
+    p = os.path.join(run_dir, "solverConfig.yaml")
+    if not os.path.exists(p):
+        return None
+    m = re.search(r"meshFileName\s*:\s*[\"']?([^\"',}\s]+)", open(p).read())
+    return m.group(1) if m else None
+
+
+def grid_of(path):
+    """run ディレクトリなら forge が読む格子 (meshFileName → sern.h5 → sern.msh)、ファイルならそのまま。"""
+    if not os.path.isdir(path):
+        return path
+    for c in (mesh_file_of(path), "sern.h5", "sern.msh"):
+        if c and os.path.exists(os.path.join(path, c)):
+            return os.path.join(path, c)
+    return os.path.join(path, mesh_file_of(path) or "sern.h5")
+
+
+def _h5_meta(path):
+    """h5 の座標の型と、node (median-dual) 変換か (VIZMESH があり CV 数 = 節点数。mark_zero_thickness_edges と同じ判定)。"""
+    import h5py
+    with h5py.File(path, "r") as f:
+        dt = str(f["MESH/COORD"].dtype)
+        a = f["MESH"].attrs
+        node = "VIZMESH" in f and "nCells" in a and "nNodes" in a and int(a["nCells"]) == int(a["nNodes"])
+    return {"coord_dtype": dt, "node": bool(node)}
+
+
 def load(path, info_path=None):
-    """格子と構造情報。戻り = dict(coords [m], hexes, bfaces, info (メッシャ), H, label)。"""
-    if os.path.isdir(path):
-        grid = os.path.join(path, "sern.h5")
-        if not os.path.exists(grid):
-            grid = os.path.join(path, "sern.msh")
+    """格子と構造情報。戻り = dict(coords [m], hexes, bfaces, info (メッシャ), H, label, 入力の種別)。
+    入力の種別: source = h5 / msh、coord_repr = float32 (変換後の h5) / float64 / msh10g (msh の 10 桁)、node_h5 = node 変換の h5。"""
+    run_dir = path if os.path.isdir(path) else None
+    grid = grid_of(path)
+    if run_dir:
         info_path = info_path or os.path.join(path, "prepare_info.json")
-    else:
-        grid = path
     if not info_path or not os.path.exists(info_path):
         raise SystemExit(f"{path}: 構造情報 (prepare_info.json か --info-*) が無い")
     if not os.path.exists(grid):
@@ -132,10 +220,30 @@ def load(path, info_path=None):
     raw = json.load(open(info_path))
     info = raw["mesh"] if "mesh" in raw else raw
     H = float(raw.get("H_m", info.get("H_m", 1.0)))
-    coords, hexes, bf = _read_msh41(grid) if grid.endswith(".msh") else _read_h5(grid)
+    if grid.endswith(".msh"):
+        coords, hexes, bf = _read_msh41(grid)
+        kind = {"source": "msh", "coord_repr": "msh10g", "node_h5": False}
+    else:
+        coords, hexes, bf = _read_h5(grid)
+        meta = _h5_meta(grid)
+        kind = {"source": "h5", "coord_repr": "float32" if meta["coord_dtype"] == "float32" else "float64", "node_h5": meta["node"]}
     if coords.shape[0] != int(info["nodes"]):
         raise SystemExit(f"{grid}: 節点数 {coords.shape[0]} が info の {info['nodes']} と違う (別の格子の info)")
-    return {"coords": coords, "hexes": hexes, "bfaces": bf, "info": info, "H": H, "label": grid}
+    return {"coords": coords, "hexes": hexes, "bfaces": bf, "info": info, "H": H, "label": grid, **kind,
+            "grid_path": grid, "run_dir": run_dir, "info_path": info_path}
+
+
+def from_mesher(coords, hexes, B, info, H, label="(メモリ上の格子)"):
+    """メッシャの出力 (generate_sern_mesh3d の coords [m]・hexes・{タグ名: [(a, b, c, d), ...]}・info) を load() と同じ形にする。
+    座標は倍精度のまま (= plan §6.0 の「変換前」)。"""
+    bf = {}
+    for nm, q in B.items():
+        if len(q):
+            q = np.asarray(q, np.int64).reshape(-1, 4)
+            bf[int(PHYS_ID[nm])] = (np.full(len(q), 4, np.int64), q.reshape(-1))
+    return {"coords": np.asarray(coords, np.float64), "hexes": np.asarray(hexes, np.int64), "bfaces": bf, "info": info,
+            "H": float(H), "label": label, "source": "memory", "coord_repr": "float64", "node_h5": False,
+            "grid_path": None, "run_dir": None, "info_path": None}
 
 
 # ---------------------------------------------------------------------------------------------- 構造
@@ -327,14 +435,618 @@ def identity(A, B, S, ib):
     return r
 
 
+# ---------------------------------------------------------------------------------------------- --admission
+PASS, FAIL, UND = "PASS", "FAIL", "判定不能"
+VERDICT_WORD = {PASS: "PASS", FAIL: "FAIL", UND: "UNDECIDABLE"}
+EXIT_CODE = {PASS: 0, FAIL: 1, UND: 2}
+QUALITY_RANK = {"PASS": 2, "SOFT-PASS": 1, "FAIL": 0}
+
+
+def combine(statuses):
+    """1 つでも FAIL → FAIL、FAIL が無く判定不能が 1 つでもあれば 判定不能、全部 PASS → PASS (空は判定不能)。"""
+    s = list(statuses)
+    if FAIL in s:
+        return FAIL
+    if UND in s or not s:
+        return UND
+    return PASS
+
+
+class Rows:
+    """判定の行。row = §6.0 の表の行名、item = その中の確認項目。"""
+
+    def __init__(self):
+        self.rows = []
+
+    def add(self, row, item, status, value="", ref="", limit="", note="", num=None):
+        """num = 主な測定値 (B) の数値 (JSON・試験用)。"""
+        self.rows.append({"row": row, "item": item, "status": status, "value": value, "ref_A": ref, "limit": limit, "note": note,
+                          "num": None if num is None else float(num)})
+
+    def status_of(self, row):
+        return combine(r["status"] for r in self.rows if r["row"] == row)
+
+
+def _kind_str(g):
+    return {"h5": "h5 (" + ("node 変換" if g.get("node_h5") else "node 変換でない") + f", 座標 {g.get('coord_repr')})",
+            "msh": "msh (10 桁の text、変換前)", "memory": "メモリ上 (倍精度、変換前)"}.get(g.get("source"), str(g.get("source")))
+
+
+def _blend_of(info):
+    return float(info.get("te_wake_blend_H", 0.0) or 0.0)
+
+
+def parse_quality(path):
+    """check_mesh_quality.py の出力 (prepare の MESH_QUALITY.txt) → dict(verdict, ar_max, skew_max, cells) か、読めなければ (None, 理由)。
+    VERDICT 行が複数あれば `AR<=` を含む行 (成立性の FATAL のときは FATAL 直後の行) を使う。"""
+    if not path:
+        return None, "ファイルの指定が無い"
+    if not os.path.exists(path):
+        return None, f"{path} が無い"
+    lines = open(path, errors="replace").read().splitlines()
+    vlines = [l for l in lines if l.strip().startswith("VERDICT:")]
+    cand = [l for l in vlines if "AR<=" in l]
+    fatal = any(l.strip().startswith("FATAL:") for l in lines)
+    if not cand and fatal:
+        idx = next(i for i, l in enumerate(lines) if l.strip().startswith("FATAL:"))
+        cand = [l for l in lines[idx + 1:] if l.strip().startswith("VERDICT:")][:1]
+    if len(cand) != 1:
+        return None, f"{path}: check_mesh_quality の VERDICT 行が特定できない ({len(cand)} 行)"
+    m = re.match(r"\s*VERDICT:\s*(SOFT-PASS|PASS|FAIL)", cand[0])
+    if not m:
+        return None, f"{path}: VERDICT を読めない: {cand[0].strip()}"
+    out = {"verdict": m.group(1), "ar_max": None, "skew_max": None, "cells": None, "line": cand[0].strip()}
+    t = re.search(r"AR<=\s*([0-9.eE+\-]+),\s*skew<=\s*([0-9.eE+\-]+)", cand[0])
+    if t:
+        out["ar_max"], out["skew_max"] = float(t.group(1)), float(t.group(2))
+    c = [re.match(r"\s*cells:\s*(\d+)", l) for l in lines]
+    c = [int(x.group(1)) for x in c if x]
+    out["cells"] = c[0] if len(c) == 1 else None
+    return out, ""
+
+
+def parse_dual(path):
+    """check_dual_closure.py の出力 → dict(verdict, tol, n_cv) か (None, 理由)。VERDICT は「閉性」行より後の最初の行。"""
+    if not path:
+        return None, "ファイルの指定が無い (--dual-closure-b)"
+    if not os.path.exists(path):
+        return None, f"{path} が無い"
+    lines = open(path, errors="replace").read().splitlines()
+    out = {"verdict": None, "tol": None, "n_cv": None, "undecidable": False}
+    i_clo = next((i for i, l in enumerate(lines) if "閉性" in l and "|ΣS|" in l), None)
+    v = [l for l in (lines[i_clo + 1:] if i_clo is not None else lines) if l.strip().startswith("VERDICT:")]
+    if not v:
+        return None, f"{path}: VERDICT 行が無い"
+    m = re.match(r"\s*VERDICT:\s*(PASS|FAIL)", v[0])
+    if not m:
+        return None, f"{path}: VERDICT を読めない: {v[0].strip()}"
+    out["verdict"] = m.group(1)
+    out["undecidable"] = "判定不能" in v[0]
+    if i_clo is not None:
+        t = re.search(r"\(>\s*([0-9.eE+\-]+):", lines[i_clo])
+        out["tol"] = float(t.group(1)) if t else None
+    c = next((re.match(r"\s*CV\s+(\d+)\s*/", l) for l in lines if re.match(r"\s*CV\s+\d+\s*/", l)), None)
+    out["n_cv"] = int(c.group(1)) if c else None
+    return out, ""
+
+
+def _cmq():
+    """check_mesh_quality.py (skew・AR の定義をそのまま使う)。"""
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import check_mesh_quality
+    return check_mesh_quality
+
+
+def hex_quality(coords, hexes, sgn, chunk=400000):
+    """全ヘキサの (非正・非有限の頂点ヤコビアンの数, スケール済みの最小, AR (M,), skew (M,))。
+    ヤコビアン = corner_jacobians (各頂点で 3 方向の前進差分)、向きは sgn (A の多数派)。AR・skew = check_mesh_quality.metrics_vectorized (3D)。"""
+    cmq = _cmq()
+    M = hexes.shape[0]
+    nbad = 0; jmin = np.inf
+    ars = np.empty(M); skews = np.empty(M)
+    for s in range(0, M, chunk):
+        h = hexes[s:s + chunk]
+        J, Js = corner_jacobians(coords, h)
+        bad = ~np.isfinite(J) | ~np.isfinite(Js) | (sgn * J <= 0.0)
+        nbad += int(bad.sum())
+        good = (sgn * Js)[np.isfinite(Js)]
+        if good.size:
+            jmin = min(jmin, float(good.min()))
+        conn = h.reshape(-1); offs = 8 * np.arange(1, h.shape[0] + 1); types = np.full(h.shape[0], 12)
+        a, k = cmq.metrics_vectorized(coords, conn, offs, types, True)
+        ars[s:s + chunk] = a; skews[s:s + chunk] = k
+    return nbad, jmin, ars, skews
+
+
+def _fmt_loc(G, i, j, k):
+    p = G[i, j, k]
+    return f"(i,j,k)=({i},{j},{k}) x,y,z=({p[0]:.6f},{p[1]:.6f},{p[2]:.6f}) m"
+
+
+def _argmax_loc(arr, ii, jj):
+    """arr (len(ii), len(jj), nz) の最大とその (i, j, k)。非有限が 1 つでもあれば inf (= 閾値を満たさない) とその位置。"""
+    arr = np.asarray(arr, dtype=float)
+    bad = ~np.isfinite(arr)
+    if bad.any():
+        a, b, c = (int(x) for x in np.argwhere(bad)[0])
+        return float("inf"), (int(ii[a]), int(jj[b]), c)
+    a, b, c = np.unravel_index(int(np.argmax(arr)), arr.shape)
+    return float(arr[a, b, c]), (int(ii[a]), int(jj[b]), int(c))
+
+
+def admission(A, B, quality_a=None, quality_b=None, dual_b=None, dual_a=None, ar_max=None, expect_blend_H=ADM_BLEND_H):
+    """plan §6.0 の投入条件の表を判定する。A・B は load() / from_mesher() の戻り。戻り = (総合, Rows)。"""
+    R = Rows()
+    n = ADM_LAYERS
+    # ---- 前提
+    for lab, g in (("A", A), ("B", B)):
+        ok = g.get("source") == "h5" and bool(g.get("node_h5"))
+        R.add("前提", f"{lab} の入力が最終 node 格子", PASS if ok else UND, value=_kind_str(g), limit="node 変換の h5",
+              note="" if ok else "§6.0 は最終 node 格子の検査 (変換前の格子では投入条件を判定できない)")
+    LbA, LbB = _blend_of(A["info"]), _blend_of(B["info"])
+    R.add("前提", "L_b (te_wake_blend_H)", PASS if (LbA == 0.0 and LbB == float(expect_blend_H)) else FAIL,
+          value=f"A {LbA:g} H / B {LbB:g} H", limit=f"A 0 / B {expect_blend_H:g} H (事前登録、結果を見て変えない)")
+    try:
+        SA, SB = Struct(A["info"]), Struct(B["info"])
+    except SystemExit as e:
+        R.add("前提", "格子の構造 (info)", UND, note=str(e))
+        return combine(r["status"] for r in R.rows), R
+    keys = ("ni", "NJ", "nz", "jm", "i_te", "k_sw", "i_sw", "N_base")
+    diff = {k: (getattr(SA, k), getattr(SB, k)) for k in keys if getattr(SA, k) != getattr(SB, k)}
+    if SA.dup1 != SB.dup1:
+        diff["カウル上コピー"] = ("", "")
+    nA, nB = A["coords"].shape[0], B["coords"].shape[0]
+    R.add("前提", "格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ", PASS if not diff else FAIL,
+          value="同じ" if not diff else f"違う {diff}")
+    if diff or nA != nB:
+        R.add("固定すべき量", "節点数", PASS if nA == nB else FAIL, value=f"A {nA} / B {nB}", limit="同じ")
+        for row in ("最初の下流の辺", "後縁の折れ", "復帰区間の折れ", "層の Δy", "primal の品質", "品質・双対の判定"):
+            R.add(row, "(構造・節点数が違うので比べられない)", UND)
+        return combine(r["status"] for r in R.rows), R
+    S = SA
+    if S.jm < n or S.NJ - 1 - S.jm < n or S.i_te < 1 or S.i_te + 2 > S.ni - 1:
+        R.add("前提", f"上下に {n} 層・後縁の前後に辺がある", UND, value=f"jm {S.jm}, NJ {S.NJ}, i_te {S.i_te}, ni {S.ni}")
+        return combine(r["status"] for r in R.rows), R
+    GA, GB = S.grid(A["coords"]), S.grid(B["coords"])
+    it, jm = S.i_te, S.jm
+    ib = B["info"]
+    idn = identity(A, B, S, ib)
+    moved = idn.get("moved", np.zeros(0, np.int64))
+    mv_base = moved[moved < S.N_base]
+    mv_i = mv_base // (S.NJ * S.nz)
+    i_last = max(int(ib.get("te_wake_i_last", it)) if LbB > 0.0 else it, int(mv_i.max()) if mv_i.size else it)
+    i_ret = i_last + 1
+    lo = np.arange(jm - n, jm)            # 下側の第 n..第 1 層
+    up = np.arange(jm + 1, jm + 1 + n)    # 上側の第 1..第 n 層
+
+    def ang_d(G):
+        return _ang(G[it + 1] - G[it])          # (NJ, nz) 最初の下流の辺
+
+    def ang_u(G):
+        return _ang(G[it] - G[it - 1])          # (NJ, nz) 同じ i 線の最後の上流の辺 (j = jm は下側壁面 / 板の外は中間線)
+
+    def ang_u_upper(g, G):
+        return np.array([_ang(G[it, jm, k] - g["coords"][S.dup1.get((it - 1, k), S.base(it - 1, jm, k))]) for k in range(S.k_sw + 1)])
+
+    # ---- 最初の下流の辺
+    row = "最初の下流の辺"
+    m0_info = ib.get("te_wake_slope_te_deg")
+    m0_meas = float(_ang(GB[it, jm, 0] - GB[it - 1, jm, 0]))       # 下側壁面 (cowl_out) の最後の上流の辺、k = 0
+    if m0_info is None:
+        m0, src = m0_meas, "B の座標 (下側壁面の最後の上流の辺、k=0。info に te_wake_slope_te_deg が無い)"
+    else:
+        m0, src = float(m0_info), "B の info te_wake_slope_te_deg"
+    if m0_info is not None and abs(_wrap(m0_meas - float(m0_info))) > 0.01:
+        R.add(row, "m0 (info) と B の下側壁面の辺の一致", UND, value=f"info {float(m0_info):.4f}° / 座標 {m0_meas:.4f}°", limit="差 ≤ 0.01°",
+              note="info が別の格子のもの")
+    dB = np.abs(_wrap(ang_d(GB)[lo] - m0)); dA = np.abs(_wrap(ang_d(GA)[lo] - m0))
+    vB, lB = _argmax_loc(dB[None], [it], lo)
+    vA, _ = _argmax_loc(dA[None], [it], lo)
+    dte = float(np.max(np.abs(_wrap(ang_d(GB)[jm] - m0))))
+    R.add(row, f"下側の第 1〜第 {n} 層・全 span: max |θ(i_te→i_te+1) − m0|", PASS if vB <= ADM_FIRST_EDGE_DEG else FAIL,
+          value=f"{vB:.4f}° @ {_fmt_loc(GB, *lB)}  [B の辺 {float(ang_d(GB)[lo].min()):.4f}〜{float(ang_d(GB)[lo].max()):.4f}°]",
+          ref=f"{vA:.4f}°", limit=f"≤ {ADM_FIRST_EDGE_DEG:g}° (m0 = {m0:.4f}°: {src})",
+          note=f"参考 (判定外): 後縁節点 j=jm の最初の下流の辺と m0 の差 {dte:.4f}°", num=vB)
+
+    # ---- 後縁の折れ
+    row = "後縁の折れ"
+
+    def te_folds(g, G):
+        d, u = ang_d(G), ang_u(G)
+        f_lo = np.abs(_wrap(d[lo] - u[lo]))
+        f_up = np.abs(_wrap(d[up] - u[up]))
+        f_te_lo = np.abs(_wrap(d[jm] - u[jm]))                                       # (nz)
+        f_te_up = np.abs(_wrap(d[jm, :S.k_sw + 1] - ang_u_upper(g, G)))              # (k_sw+1)
+        return f_lo, f_up, f_te_lo, f_te_up
+    fB, fA = te_folds(B, GB), te_folds(A, GA)
+    labels = (f"下側の第 1〜第 {n} 層・全 span", f"上側の第 1〜第 {n} 層・全 span",
+              "共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線)", "共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in)")
+    for idx, lab in enumerate(labels):
+        b, a = fB[idx], fA[idx]
+        if idx < 2:
+            jj = lo if idx == 0 else up
+            v, loc = _argmax_loc(b[None], [it], jj); va = float(a.max())
+            where = _fmt_loc(GB, *loc)
+        else:
+            k = int(np.argmax(b)); v = float(b[k]); va = float(a.max())
+            where = _fmt_loc(GB, it, jm, k)
+        R.add(row, lab + ": max 折れ角", PASS if v <= ADM_TE_FOLD_DEG else FAIL, value=f"{v:.4f}° @ {where}", ref=f"{va:.4f}°",
+              limit=f"≤ {ADM_TE_FOLD_DEG:g}°", num=v)
+
+    # ---- 復帰区間の折れ
+    row = "復帰区間の折れ"
+    if LbB <= 0.0 and not mv_i.size:
+        R.add(row, "復帰区間", UND, note="B に変形区間が無い (te_wake_i_last も動いた節点も無い)")
+    elif i_ret > S.ni - 2:
+        R.add(row, "復帰区間", UND, note=f"最初の未変形の辺が無い (i_ret {i_ret}、ni {S.ni})")
+    else:
+        def turns(G):
+            th = _ang(np.diff(G, axis=0))                         # (ni-1, NJ, nz)
+            return np.abs(_wrap(np.diff(th, axis=0)))             # (ni-2, NJ, nz): 節点 i = 1..ni-2
+        ii = np.arange(it + 1, i_ret + 1)
+        tB = turns(GB)[ii - 1]; tA = turns(GA)[ii - 1]
+        v, loc = _argmax_loc(tB, ii, np.arange(S.NJ))
+        nonbase = int(moved.size - mv_base.size)
+        st = PASS if v <= ADM_RETURN_FOLD_DEG else FAIL
+        if nonbase:
+            st = combine([st, UND])
+        R.add(row, f"主ブロックの全 i 線・全 span、節点 i = {it + 1}..{i_ret} (最初の未変形の辺を含む): max 折れ角", st,
+              value=f"{v:.4f}° @ {_fmt_loc(GB, *loc)}", ref=f"{float(tA.max()):.4f}°", limit=f"≤ {ADM_RETURN_FOLD_DEG:g}°",
+              note=(f"主ブロック外で動いた節点 {nonbase} の i 線は測っていない" if nonbase else
+                    f"復帰区間 = info の te_wake_i_last {ib.get('te_wake_i_last')} と動いた節点の i の最大の大きい方 + 1"), num=v)
+
+    # ---- 固定すべき量
+    row = "固定すべき量"
+    R.add(row, "節点数", PASS, value=f"A {nA} / B {nB}", limit="同じ")
+    R.add(row, "x 座標 (全節点)", PASS if idn["x_equal"] else FAIL, value="ビット一致" if idn["x_equal"] else
+          f"相違 {int(np.sum(A['coords'][:, 0] != B['coords'][:, 0]))} 節点", limit="ビット一致")
+    R.add(row, "z 座標 (全節点)", PASS if idn["z_equal"] else FAIL, value="ビット一致" if idn["z_equal"] else
+          f"相違 {int(np.sum(A['coords'][:, 2] != B['coords'][:, 2]))} 節点", limit="ビット一致")
+    R.add(row, "ヘキサの接続", PASS if idn["hex_equal"] else FAIL, value="同一" if idn["hex_equal"] else "相違", limit="同一")
+    if idn["bface_equal"] is None:
+        R.add(row, "境界面の接続 (タグ別)", UND, value="境界面の接続が無い入力", limit="同一")
+    else:
+        R.add(row, "境界面の接続 (タグ別)", PASS if idn["bface_equal"] else FAIL, value="同一" if idn["bface_equal"] else "相違", limit="同一")
+    x_te = float(GA[it, jm, 0, 0])
+    ups = A["coords"][:, 0] <= x_te
+    nchg = int(np.sum(np.any(A["coords"][ups] != B["coords"][ups], axis=1)))
+    R.add(row, f"上流の座標 (x ≤ 後縁の x = {x_te:.6f} m の {int(ups.sum())} 節点、3 成分)", PASS if nchg == 0 else FAIL,
+          value=f"相違 {nchg} 節点", limit="0")
+    if A["bfaces"] is None or B["bfaces"] is None:
+        R.add(row, "固体形状・外部境界の形状", UND, value="境界面の接続が無い入力")
+    else:
+        mt = idn["moved_by_tag"]
+        walls = {PHYS_NAME.get(p, p): c for p, c in mt.items() if c and p in WALL_TAGS}
+        ext = {PHYS_NAME.get(p, p): c for p, c in mt.items() if c and p not in WALL_TAGS and p not in IN_PLANE_TAGS}
+        inpl = {PHYS_NAME.get(p, p): mt.get(p, 0) for p in IN_PLANE_TAGS}
+        R.add(row, "固体形状 (壁タグの節点が動かない)", PASS if not walls else FAIL, value=f"動いた {walls or 0}", limit="0")
+        R.add(row, "外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない)", PASS if not ext else FAIL,
+              value=f"動いた {ext or 0}", limit="0",
+              note=f"記録: sym・side_far 上の面内 (y) の移動 {inpl} (z は全節点ビット一致なので面内)、動いた節点の総数 {moved.size}"
+                   f" (主ブロック外 {int(moved.size - mv_base.size)})")
+
+    # ---- 層の Δy
+    row = "層の Δy"
+    rep = {A.get("coord_repr"), B.get("coord_repr")}
+    if "msh10g" in rep or len(rep) != 1:
+        R.add(row, "第 1 層・第 1〜第 10 層", UND, value=f"座標 A {A.get('coord_repr')} / B {B.get('coord_repr')}",
+              note="丸めの上限が事前登録にあるのは倍精度 (変換前) と float32 の h5 (変換後) だけ。A・B は同じ表現で比べる")
+    else:
+        rnd = ADM_ROUND_ULPS * EPS32 if rep == {"float32"} else 0.0
+        cols = np.arange(it, min(i_ret, S.ni - 1) + 1)
+        for side, lab in (("lo", "下側"), ("up", "上側")):
+            if side == "lo":
+                pa, pb = jm - np.arange(0, n), jm - np.arange(1, n + 1)
+            else:
+                pa, pb = jm + np.arange(1, n + 1), jm + np.arange(0, n)
+            yAa, yAb = GA[np.ix_(cols, pa)][..., 1], GA[np.ix_(cols, pb)][..., 1]        # (nc, n, nz)
+            yBa, yBb = GB[np.ix_(cols, pa)][..., 1], GB[np.ix_(cols, pb)][..., 1]
+            dyA, dyB = np.abs(yAa - yAb), np.abs(yBa - yBb)
+            ymax = np.max(np.abs(np.stack([yAa, yAb, yBa, yBb])), axis=0)
+            r_ = rnd * ymax
+            dd = np.abs(dyB - dyA)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rel = dd / dyA
+            use1 = dd[:, 0] / (ADM_DY_FIRST_REL * dyA[:, 0] + r_[:, 0])                 # ≤ 1 で合格
+            usen = dd / (ADM_DY_LAYERS_REL * dyA + r_)
+            ok1 = bool(np.all(dd[:, 0] <= ADM_DY_FIRST_REL * dyA[:, 0] + r_[:, 0]) and np.all(dyA[:, 0] > 0))
+            okn = bool(np.all(dd <= ADM_DY_LAYERS_REL * dyA + r_) and np.all(dyA > 0))
+            lim1 = f"|Δy_B − Δy_A| ≤ {ADM_DY_FIRST_REL:g}·Δy_A" + (f" + {ADM_ROUND_ULPS:g}·ε₃₂·max|y|" if rnd else "")
+            limn = f"|Δy_B − Δy_A| ≤ {ADM_DY_LAYERS_REL:g}·Δy_A" + (f" + {ADM_ROUND_ULPS:g}·ε₃₂·max|y|" if rnd else "")
+            R.add(row, f"{lab}の第 1 層 (列 i = {it}..{cols[-1]}・全 span)", PASS if ok1 else FAIL,
+                  value=f"max 相対差 {float(np.nanmax(rel[:, 0])):.3e}、許容の使用率 max {float(np.nanmax(use1)):.3g}", limit=lim1,
+                  num=float(np.nanmax(rel[:, 0])))
+            R.add(row, f"{lab}の第 1〜第 {n} 層の各層厚 (同)", PASS if okn else FAIL,
+                  value=f"max 相対差 {float(np.nanmax(rel)):.3e}、許容の使用率 max {float(np.nanmax(usen)):.3g}", limit=limn,
+                  num=float(np.nanmax(rel)))
+
+    # ---- primal の品質
+    row = "primal の品質"
+    JA_s, _ = corner_jacobians(A["coords"], A["hexes"][:min(200000, A["hexes"].shape[0])])
+    sgn = 1.0 if np.median(JA_s) > 0 else -1.0
+    nbA, jminA, arsA, skA = hex_quality(A["coords"], A["hexes"], sgn)
+    nbB, jminB, arsB, skB = hex_quality(B["coords"], B["hexes"], sgn)
+    R.add(row, "非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点)", PASS if nbB == 0 else FAIL, value=f"{nbB}", ref=f"{nbA}", limit="0",
+          note=f"向き = A の多数派 ({'正' if sgn > 0 else '負'})", num=nbB)
+    R.add(row, "スケール済みヤコビアンの最小 (B)", PASS if (np.isfinite(jminB) and jminB >= ADM_SCALED_JAC_MIN) else FAIL,
+          value=f"{jminB:.5f}", ref=f"{jminA:.5f}", limit=f"≥ {ADM_SCALED_JAC_MIN:g}", num=jminB)
+    skA_max, skB_max = float(np.nanmax(skA)), float(np.nanmax(skB))
+    sk_ok = np.all(np.isfinite(skB))
+    R.add(row, "skew 最大 (B、check_mesh_quality の 3D 定義)", PASS if (sk_ok and skB_max <= ADM_SKEW_MAX) else FAIL,
+          value=f"{skB_max:.5f}", ref=f"{skA_max:.5f}", limit=f"≤ {ADM_SKEW_MAX:g}", num=skB_max)
+    R.add(row, "skew 最大の A からの増加", PASS if (sk_ok and skB_max - skA_max <= ADM_SKEW_INC_MAX) else FAIL,
+          value=f"{skB_max - skA_max:+.5f}", limit=f"≤ {ADM_SKEW_INC_MAX:g}", num=skB_max - skA_max)
+
+    # ---- 品質・双対の判定
+    row = "品質・双対の判定"
+    qa, why_a = parse_quality(quality_a)
+    qb, why_b = parse_quality(quality_b)
+    MA, MB = A["hexes"].shape[0], B["hexes"].shape[0]
+    if qa is None or qb is None:
+        R.add(row, "(a) check_mesh_quality の VERDICT が A と同等以上", UND, note="; ".join(w for w in (f"A: {why_a}" if qa is None else "",
+                                                                                         f"B: {why_b}" if qb is None else "") if w))
+    elif qa["ar_max"] is None or qb["ar_max"] is None or (qa["ar_max"], qa["skew_max"]) != (qb["ar_max"], qb["skew_max"]):
+        R.add(row, "(a) check_mesh_quality の VERDICT が A と同等以上", UND, value=f"A「{qa['line']}」/ B「{qb['line']}」",
+              note="同じ閾値 (AR・skew) で比べられない")
+    elif qa["cells"] != MA or qb["cells"] != MB:
+        R.add(row, "(a) check_mesh_quality の VERDICT が A と同等以上", UND, value=f"cells A {qa['cells']} / B {qb['cells']}",
+              note=f"MESH_QUALITY のセル数が格子のヘキサ数 (A {MA} / B {MB}) と合わない (別の格子の出力)")
+    else:
+        ok = QUALITY_RANK[qb["verdict"]] >= QUALITY_RANK[qa["verdict"]]
+        R.add(row, "(a) check_mesh_quality の VERDICT が A と同等以上", PASS if ok else FAIL, value=f"B {qb['verdict']}", ref=qa["verdict"],
+              limit=f"B ≥ A (PASS > SOFT-PASS > FAIL)、閾値 AR<= {qb['ar_max']:g}・skew<= {qb['skew_max']:g}")
+    thr, thr_src = None, ""
+    if qb is not None and qb["ar_max"] is not None:
+        thr, thr_src = qb["ar_max"], "B の MESH_QUALITY"
+        if ar_max is not None and float(ar_max) != thr:
+            thr = None; thr_src = f"--ar-max {ar_max:g} と MESH_QUALITY の {qb['ar_max']:g} が違う"
+    elif ar_max is not None:
+        thr, thr_src = float(ar_max), "--ar-max"
+    touch = np.zeros(MB, bool)
+    if moved.size:
+        mset = np.zeros(nB, bool); mset[moved] = True
+        touch = mset[B["hexes"]].any(axis=1)
+    if thr is None:
+        R.add(row, "(b) 変形領域に新しい AR 閾値超過を作らない", UND, note=f"AR 閾値が無い ({thr_src or 'MESH_QUALITY も --ar-max も無い'})")
+    else:
+        new = touch & (arsB > thr) & ~(arsA > thr)
+        R.add(row, "(b) 変形領域に新しい AR 閾値超過を作らない", PASS if int(new.sum()) == 0 else FAIL,
+              value=f"新しい超過 {int(new.sum())} (変形領域 {int(touch.sum())} ヘキサ、B の超過 {int((touch & (arsB > thr)).sum())}・"
+                    f"A の超過 {int((touch & (arsA > thr)).sum())}、AR 最大 B {float(arsB[touch].max()) if touch.any() else 0.0:.1f}"
+                    f" / A {float(arsA[touch].max()) if touch.any() else 0.0:.1f})",
+              limit=f"0 (AR > {thr:g}、閾値は {thr_src})", note="AR は check_mesh_quality と同じ定義 (全辺の最長/最短) をこの道具で計算",
+              num=int(new.sum()))
+    db, why = parse_dual(dual_b)
+    if db is None:
+        R.add(row, "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS", UND, note=why)
+    elif db["undecidable"]:
+        R.add(row, "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS", UND, value="check_dual_closure が判定不能", note=dual_b)
+    elif db["tol"] is None or abs(db["tol"] - ADM_DUAL_TOL) > 1e-12 * ADM_DUAL_TOL + 1e-20:
+        R.add(row, "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS", UND, value=f"tol {db['tol']}", note="--tol 1e-5 の出力でない")
+    elif db["n_cv"] != nB:
+        R.add(row, "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS", UND, value=f"CV {db['n_cv']}",
+              note=f"CV 数が B の節点数 {nB} と合わない (別の格子の出力)")
+    else:
+        R.add(row, "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS", PASS if db["verdict"] == "PASS" else FAIL,
+              value=f"VERDICT {db['verdict']} (CV {db['n_cv']}, tol {db['tol']:g})", limit="PASS")
+    if dual_a:
+        da, why = parse_dual(dual_a)
+        R.rows[-1]["ref_A"] = (f"{da['verdict']} (tol {da['tol']})" if da else why)
+    return combine(r["status"] for r in R.rows), R
+
+
+def print_admission(verdict, R, A_label, B_label, out=print):
+    out(f"A: {A_label}")
+    out(f"B: {B_label}")
+    out("plan convection-zero-thickness-edge-reconstruction §6.0「投入条件 = 最終 node 格子の検査」(事前登録 2026-10-08)")
+    out(f"{'判定':6s} | {'行':14s} | 項目 | 測定 (B) | 参考 (A) | 閾値")
+    for r in R.rows:
+        out(f"{r['status']:6s} | {r['row']:14s} | {r['item']} | {r['value']} | {r['ref_A'] or '-'} | {r['limit'] or '-'}"
+            + (f"\n{'':6s}   └ {r['note']}" if r['note'] else ""))
+    out("")
+    out("行ごと: " + ", ".join(f"{row} {R.status_of(row)}" for row in dict.fromkeys(r["row"] for r in R.rows)))
+    out(f"ADMISSION VERDICT: {VERDICT_WORD[verdict]}")
+
+
+# ---------------------------------------------------------------------------------------------- 来歴 (--provenance-out・--same-mesh)
+def _sha256_file(path, chunk=1 << 20):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(chunk), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _mark():
+    """mark_zero_thickness_edges (格子署名 mesh_signature の正本)。"""
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import mark_zero_thickness_edges
+    return mark_zero_thickness_edges
+
+
+def signature_of(path):
+    """h5 (か run ディレクトリの格子) の格子署名を再計算する。戻り = (署名, 版, 格子のパス)。読めなければ例外。"""
+    grid = grid_of(path)
+    if not grid.endswith(".h5"):
+        raise ValueError(f"{grid}: h5 でない (格子署名は最終 node の h5 から作る)")
+    if not os.path.exists(grid):
+        raise FileNotFoundError(grid)
+    m = _mark()
+    return m.mesh_signature(grid), m.SIG_VERSION, grid
+
+
+def _mesher_curve_version():
+    try:
+        if str(DESIGN) not in sys.path:
+            sys.path.insert(0, str(DESIGN))
+        from forge_design.meshing import mesh_sern3d
+        return getattr(mesh_sern3d, "TE_WAKE_CURVE_VERSION", None)
+    except Exception as e:  # noqa: BLE001
+        return f"(取得不能: {type(e).__name__})"
+
+
+def _git_state():
+    def run(*a):
+        r = subprocess.run(["git", "-C", str(ROOT), *a], capture_output=True, text=True)
+        return r.stdout.rstrip() if r.returncode == 0 else None
+    head = run("rev-parse", "HEAD")
+    dirty = run("status", "--porcelain", "--untracked-files=no", "--", "case/46.sern_design/diag", "design/forge_design/meshing",
+                "design/forge_design/evaluate", "solver_density_cuda/tools/mark_zero_thickness_edges.py")
+    return {"head": head, "branch": run("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty_paths": (dirty.splitlines() if dirty else []) if dirty is not None else None,
+            "note": "この道具を回した作業ツリーの版 (格子を生成した版とは限らない)"}
+
+
+def provenance_entry(path, info_path=None, code_commit=None, attach=()):
+    """1 つの run (か格子) の来歴。値を転記せず、格子署名は実入力格子から再計算する。"""
+    e = {"input": str(path), "run_dir": str(path) if os.path.isdir(path) else None}
+    grid = grid_of(path)
+    e["grid"] = grid
+    e["grid_exists"] = os.path.exists(grid)
+    try:
+        sig, ver, _ = signature_of(path)
+        e["mesh_signature"], e["mesh_signature_version"] = sig, ver
+        meta = _h5_meta(grid)
+        e["grid_discretization"] = "node" if meta["node"] else "cell"
+        e["grid_coord_dtype"] = meta["coord_dtype"]
+    except Exception as ex:  # noqa: BLE001
+        e["mesh_signature"] = None
+        e["mesh_signature_error"] = f"{type(ex).__name__}: {ex}"
+    if os.path.isdir(path):
+        info_path = info_path or os.path.join(path, "prepare_info.json")
+    raw = None
+    if info_path and os.path.exists(info_path):
+        try:
+            raw = json.load(open(info_path))
+        except Exception as ex:  # noqa: BLE001
+            e["info_error"] = f"{type(ex).__name__}: {ex}"
+    e["info_path"] = info_path
+    info = (raw.get("mesh", raw) if isinstance(raw, dict) else {}) or {}
+    if raw is None:
+        e["te_wake_blend_H"] = None
+        e["te_wake_blend_H_source"] = "info が無い・読めない"
+    elif "te_wake_blend_H" in info:
+        e["te_wake_blend_H"] = float(info["te_wake_blend_H"] or 0.0)
+        e["te_wake_blend_H_source"] = "prepare_info の mesh"
+    else:
+        e["te_wake_blend_H"] = 0.0
+        e["te_wake_blend_H_source"] = "info にキー無し (オプション導入 [2d280bb1] 前の格子 = 変形なし)"
+    if e["te_wake_blend_H"]:
+        e["te_wake_curve_version"] = info.get("te_wake_curve_version")
+        e["te_wake_curve_version_source"] = "prepare_info の mesh" if "te_wake_curve_version" in info else \
+            "info に無い (曲線版の定数の導入前に作った格子。式は当時の mesh_sern3d._te_wake_midline)"
+    else:
+        e["te_wake_curve_version"] = None
+        e["te_wake_curve_version_source"] = "変形なし"
+    e["te_wake_info"] = {k: v for k, v in info.items() if str(k).startswith("te_wake_")}
+    cc = next(((k, raw[k]) for k in ("code_commit", "git_commit", "commit") if isinstance(raw, dict) and raw.get(k)), None)
+    if cc:
+        e["code_commit"], e["code_commit_source"] = cc[1], f"prepare_info の {cc[0]}"
+    elif code_commit:
+        e["code_commit"], e["code_commit_source"] = code_commit, "引数の申告 (未検証。prepare_info に記録が無い)"
+    else:
+        e["code_commit"], e["code_commit_source"] = None, "記録なし (prepare_info に無く、申告も無い)"
+    cfg = {}
+    if e["run_dir"]:
+        for f in sorted(os.listdir(path)):
+            fp = os.path.join(path, f)
+            if os.path.isfile(fp) and (f.endswith((".yaml", ".yml")) or f == "prepare_info.json"):
+                cfg[f] = _sha256_file(fp)
+    e["config_sha256"] = cfg
+    prob = raw.get("problem") if isinstance(raw, dict) else None
+    if prob:
+        cands = [Path(prob)] if os.path.isabs(prob) else [Path.cwd() / prob, ROOT / prob, ROOT / "design" / prob]
+        hit = next((c for c in cands if c.exists()), None)
+        e["problem_yaml"] = {"recorded": prob, "resolved": str(hit) if hit else None, "sha256": _sha256_file(hit) if hit else None,
+                             "note": "" if hit else "見つからない (この作業ツリーに無い)"}
+    e["attached"] = [{"path": str(p), "sha256": _sha256_file(p) if os.path.exists(p) else None,
+                      "bytes": os.path.getsize(p) if os.path.exists(p) else None} for p in attach]
+    return e
+
+
+def write_provenance(out_path, a_path, b_path, info_a=None, info_b=None, commit_a=None, commit_b=None, attach_a=(), attach_b=(),
+                     admission_result=None):
+    pa = provenance_entry(a_path, info_a, commit_a, attach_a)
+    pb = provenance_entry(b_path, info_b, commit_b, attach_b)
+    sa, sb = pa.get("mesh_signature"), pb.get("mesh_signature")
+    doc = {"tool": "case/46.sern_design/diag/te_wake_grid_check.py --provenance-out",
+           "plan": "plans/active/convection-zero-thickness-edge-reconstruction.md §4.2「来歴」・§6.0",
+           "created_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+           "design_db": "取り込まない (診断の A/B。plan §4.2)",
+           "checker_git": _git_state(), "mesher_curve_version_now": _mesher_curve_version(),
+           "runs": {"A": pa, "B": pb},
+           "A_B_same_mesh_signature": (sa == sb) if (sa and sb) else None}
+    if admission_result is not None:
+        v, R = admission_result
+        doc["admission"] = {"verdict": VERDICT_WORD[v], "rows": R.rows}
+    with open(out_path, "w") as f:
+        json.dump(doc, f, indent=1, ensure_ascii=False)
+    return doc
+
+
+def same_mesh(a, b, out=print):
+    try:
+        sa, ver, ga = signature_of(a)
+        sb, _, gb = signature_of(b)
+    except Exception as e:  # noqa: BLE001
+        out(f"格子署名を作れない: {type(e).__name__}: {e}")
+        out("SAME MESH: UNDECIDABLE")
+        return EXIT_CODE[UND]
+    out(f"A {ga}: {sa}")
+    out(f"B {gb}: {sb}")
+    out(f"(署名の版 {ver}: 離散化・次元・節点順の座標・内部面の接続・境界面の接続。/VALUE・/AUX は含まない)")
+    out("SAME MESH: " + ("YES" if sa == sb else "NO"))
+    return 0 if sa == sb else 1
+
+
 # ---------------------------------------------------------------------------------------------- 本体
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("A"); ap.add_argument("B")
+    ap.add_argument("A", nargs="?"); ap.add_argument("B", nargs="?")
     ap.add_argument("--info-a"); ap.add_argument("--info-b")
-    ap.add_argument("--n-layers", type=int, default=10, help="中間線から数える層の数 ((i)・(iii))")
+    ap.add_argument("--n-layers", type=int, default=10, help="中間線から数える層の数 ((i)・(iii))。--admission は表の 10 層で固定")
+    ap.add_argument("--admission", action="store_true", help="plan §6.0 の投入条件の表を判定する (ADMISSION VERDICT)")
+    ap.add_argument("--quality-a", help="A の check_mesh_quality の出力 (既定: A が run ディレクトリなら <A>/MESH_QUALITY.txt)")
+    ap.add_argument("--quality-b", help="B の check_mesh_quality の出力 (既定: <B>/MESH_QUALITY.txt)")
+    ap.add_argument("--dual-closure-b", help="B の最終 node 入力に対する check_dual_closure.py --tol 1e-5 の出力 (無ければ判定不能)")
+    ap.add_argument("--dual-closure-a", help="A の同じ出力 (参考として並べるだけ)")
+    ap.add_argument("--ar-max", type=float, help="変形領域の AR 閾値 (MESH_QUALITY.txt に AR<= が無いときだけ。あれば一致を要求)")
+    ap.add_argument("--expect-blend-H", type=float, default=ADM_BLEND_H, help="B の L_b の事前登録値 (既定 1.0。plan §4.2)")
+    ap.add_argument("--provenance-out", help="来歴 (格子署名・曲線版・L_b・commit・設定の sha256) を JSON で書く")
+    ap.add_argument("--code-commit-a", help="A を生成したコードの commit (prepare_info に記録が無いときの申告、未検証として記録)")
+    ap.add_argument("--code-commit-b", help="B の同上")
+    ap.add_argument("--attach-a", action="append", default=[], help="A の来歴に sha256 を残すファイル (繰り返し可)")
+    ap.add_argument("--attach-b", action="append", default=[], help="B の来歴に sha256 を残すファイル (初期場の転送ログ・動いた節点の一覧など)")
+    ap.add_argument("--same-mesh", nargs=2, metavar=("A_H5", "B_H5"), help="2 つの h5 (か run) の格子署名を比べる")
     a = ap.parse_args(argv)
-    return report(load(a.A, a.info_a), load(a.B, a.info_b), a.n_layers)
+    if a.same_mesh:
+        return same_mesh(*a.same_mesh)
+    if not (a.A and a.B):
+        ap.error("A と B (か --same-mesh) を指定する")
+    if not a.admission and not a.provenance_out:
+        return report(load(a.A, a.info_a), load(a.B, a.info_b), a.n_layers)
+    rc, result = 0, None
+    if a.admission:
+        def qdef(p, q):
+            return q if q else (os.path.join(p, "MESH_QUALITY.txt") if os.path.isdir(p) else None)
+        try:
+            A, B = load(a.A, a.info_a), load(a.B, a.info_b)
+        except SystemExit as e:         # 入力が読めない = 判定不能 (合格扱いにしない)
+            R = Rows(); R.add("前提", "A・B の格子と info を読む", UND, note=str(e))
+            result = (UND, R)
+            print_admission(UND, R, a.A, a.B)
+        else:
+            result = admission(A, B, qdef(a.A, a.quality_a), qdef(a.B, a.quality_b), a.dual_closure_b, a.dual_closure_a,
+                               a.ar_max, a.expect_blend_H)
+            print_admission(result[0], result[1], A["label"], B["label"])
+        rc = EXIT_CODE[result[0]]
+    if a.provenance_out:
+        doc = write_provenance(a.provenance_out, a.A, a.B, a.info_a, a.info_b, a.code_commit_a, a.code_commit_b, a.attach_a, a.attach_b,
+                               result)
+        print(f"来歴: {a.provenance_out}  (A 署名 {doc['runs']['A'].get('mesh_signature')}, B 署名 {doc['runs']['B'].get('mesh_signature')})")
+    return rc
 
 
 def report(A, B, n_layers=10):
