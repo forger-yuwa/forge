@@ -379,6 +379,7 @@ void solverConfig::read(std::string fname)
         this->lineViscCoupling = getOptionalValidatedValue<int>(deltaT, "lineViscCoupling", 0, "time.deltaT");
         this->lineViscousDtRelief = getOptionalValidatedValue<double>(deltaT, "lineViscousDtRelief", 0.0, "time.deltaT");
         this->lineDtDirectional = getOptionalValidatedValue<int>(deltaT, "lineDtDirectional", 0, "time.deltaT");
+        this->lineDtDirectionalCap = getOptionalValidatedValue<flow_float>(deltaT, "lineDtDirectionalCap", 0.0, "time.deltaT");
         this->blockDPLUR = getOptionalValidatedValue<int>(deltaT, "blockDPLUR", 0, "time.deltaT");
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
@@ -1412,6 +1413,12 @@ void solverConfig::initTimeIntegrationScheme(int timeIntegration){
     }
     if ((this->implicitThermalJacobian & 4) != 0 && (this->implicitThermalJacobian & 1) == 0) {
         throw std::runtime_error("implicitThermalJacobian bit 4 (keep the scalar on the energy row) requires bit 1.");
+    }
+    if (this->lineDtDirectionalCap < 0.0) {
+        throw std::runtime_error("lineDtDirectionalCap must be >= 0 (0 = no cap).");
+    }
+    if (this->lineDtDirectionalCap > 0.0 && (this->lineImplicit != 1 || this->lineDtDirectional == 0)) {
+        throw std::runtime_error("lineDtDirectionalCap > 0 requires lineImplicit 1 and lineDtDirectional 1.");
     }
     if (this->implicitThermalJacobian != 0) {
         if (this->discretization != "node")
