@@ -1,5 +1,5 @@
 """FP64 の変換器の座標読み込みの A/B (plan tooling-nozzle-isothermal-wall-chain §5.1 #16、2026-10-08 事前登録、CFD 0 step、AWS)。
-冷却壁の格子 (problem_d155_ns_prod_coldmesh.yaml の mesh、生産の物理壁 run_0167 の wall_repr.json) を mesh2d で倍精度に作り、msh (17 桁) に書き、
+冷却壁の格子 (problem_d155_ns_prod_coldmesh.yaml の mesh、生産の物理壁 = _band_ab/prod_confirm/prep/wall_repr.json) を mesh2d で倍精度に作り、msh (17 桁) に書き、
 A = stof の FP64 変換器、B = stod の FP64 変換器で変換して、生成時の倍精度座標と比べる。
 判定: B の第一層厚 (壁の各 station で壁節点と第一内部節点の距離) の相対誤差 ≤ 1e-6・非正の層厚なし → 採用。A は記録。
 品質は check_mesh_quality.py --ar-max 5000 の VERDICT (厳密に PASS) を両方で記録する。
@@ -25,7 +25,7 @@ TOL = 1e-6
 
 
 def main(conv_a: str, conv_b: str):
-    W = load_wall_file(HERE / "run_0167_ns_n012_N2")
+    W = load_wall_file(HERE / "_band_ab/prod_confirm/prep")   # 生産の問題の準備 (run_0167 の入力をビット同一で再現)
     ph = W["physical"]; d0, d1 = (float(v) for v in W["domain"]); rt = float(W["scale_m"])
 
     class Wall:
