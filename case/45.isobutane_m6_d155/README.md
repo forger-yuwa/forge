@@ -127,10 +127,10 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0192_ns_coldmesh_tw300_audit` / `run_0193_ns_coldmesh_ad_audit` | **質量の収支の監査** (§5.1 #27 (iv)): run_0183 / run_0181 の res_100000 からビット一致、cfl 1、基準値を親に固定、2 step・毎 step 出力・`FORGE_DUMP_MASSFLUX`。`cold_audit.py` | 完了。300 K の欠損 (入口 100.50 → 出口 98.47 kg/s) は数値流束でも同じで Σ res_ro と閉合 → 未収束の離散収支 (壁からの流出ではない)。断熱は 0.0025 %。`_band_ab/cold_pair/audit_*.json` | ref |
 | `run_0194_ns_coldmesh_cpg_ad_plain_cont` / `run_0195_ns_coldmesh_cpg_ad_dilat2_cont` | run_0184 / run_0186 (CPG 断熱) の続き: AWS の停止で 70500 step 付近で止まったので res_60000 から 40000 step (通算 100000)、20000 ごと、基準値を親に固定 | 22:03 にユーザ判断で停止 (GPU を 300 K の腕に回すため)。止めた時点で 39305 / 38950 step と完了の直前だった。残るのは res_20000 (通算 80000) | 中断 |
 | `run_0196_ns_coldmesh_tw300_ref0183` / `run_0197_ns_coldmesh_tw300_ref0182` | リミッタの基準値の感度 (§5.1 #27): run_0183 の res_100000 からビット一致、基準値だけを run_0183 / run_0182 の値に固定、2 step、`extraFields` に全保存量の残差 | 完了。残差の変化の RMS は残差の RMS の 2e-6 (ρ)〜3.5e-5 (ρe)、k/ω は 4e-8 以下。同じ基準値の再実行 (run_0192) とは 1e-16 で一致 | ref |
-| `run_0199_ns_coldmesh_tw300_cfl8` | 擬似 CFL 8 の試行 (§5.1 #27): run_0183 の res_100000 からビット一致、cfl 8 (relax 0.7)、基準値は run_0183 に固定、40000 step 予定・5000 ごと | **7786 step でユーザ判断により停止**。NaN なしだが残差が 60〜120 倍に跳ねて横ばい、スロートの壁から 7 層目で振動 (x_w −1.3〜3 の Σ|res| 70、CFL 4 は 0.34)。試験部の δ・θ が CFL 4 から ±1 % ずれる → 使わない | 破棄予定 |
-| `run_0200_ns_coldmesh_tw300_cfl4_line` | ライン陰解法の試行 (§5.1 #27): run_0183 の res_100000 から、cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、基準値は run_0183 に固定 | **65 step で発散** (`res_nan_66.h5`)。x_w −10.8〜−10.2 (列 39〜49) のライン 11 本で ρ が非有限 | 破棄予定 |
+| `run_0199_ns_coldmesh_tw300_cfl8` | 擬似 CFL 8 の試行 (§5.1 #27): run_0183 の res_100000 からビット一致、cfl 8 (relax 0.7)、基準値は run_0183 に固定、40000 step 予定・5000 ごと | **7786 step でユーザ判断により停止**。NaN なしだが残差が 60〜120 倍に跳ねて横ばい、スロートの壁から 7 層目で振動 (x_w −1.3〜3 の Σ|res| 70、CFL 4 は 0.34)。試験部の δ・θ が CFL 4 から ±1 % ずれる → 使わない | 削除済み (2026-10-09) |
+| `run_0200_ns_coldmesh_tw300_cfl4_line` | ライン陰解法の試行 (§5.1 #27): run_0183 の res_100000 から、cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、基準値は run_0183 に固定 | **65 step で発散** (`res_nan_66.h5`)。x_w −10.8〜−10.2 (列 39〜49) のライン 11 本で ρ が非有限 | 削除済み (2026-10-09) |
 | `run_0201_ns_coldmesh_tw300_cfl4_lineonly` | ライン陰解法だけ (方向別の dt なし)、cfl 4、10000 step・5000 ごと | 投入 2026-10-08 21:57 | 実行中 |
-| `run_0202_ns_coldmesh_tw300_cfl1_linedir` | ライン陰解法 + 方向別の dt、cfl 1、10000 step 予定 | **129 step で発散** (`res_nan_130.h5`)、run_0200 と同じ場所 → 方向別の dt はこの格子では使わない | 破棄予定 |
+| `run_0202_ns_coldmesh_tw300_cfl1_linedir` | ライン陰解法 + 方向別の dt、cfl 1、10000 step 予定 | **129 step で発散** (`res_nan_130.h5`)、run_0200 と同じ場所 → 方向別の dt はこの格子では使わない | 削除済み (2026-10-09) |
 | `run_0198_ns_coldmesh_tw300_cfl4_ext` | CFL 4 の延長 (§5.1 #27): run_0191 の res_40000 からビット一致、cfl 4、基準値は run_0183 の値 (親の設定のまま)、200000 step・10000 ごと、`extraFields: [res_ro, volume]` | 完走 (26 ms/step)。欠損 (Σ res_ro×2π) 1.398 → 0.331 (2 万 step ごと 0.86 倍)、θ_r は x = 40/94 で開始時の +12 % / +9.1 % でまだ増える、δ_loc は −0.3 %。NOT CONVERGED (stalled/plateau)、rms_roOmega は約 2000 と約 35 の 2 状態を数万 step ごとに行き来 (最大 3158) | ref (延長の親) |
 | `run_0203_ns_coldmesh_tw300_linedir_diag` | 方向別の dt の発散の観察 (ユーザ指示「なぜうまくいかないのか追求したい」): run_0183 の res_100000 から cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、70 step・20 ごと、全保存量の残差を出力、列 36〜52・壁から 0〜30 層目の 527 節点を `FORGE_DUMP_LEDGER` で毎 step 記録 | 66 step で発散 (run_0200 と同じ、決定的)。帳簿の解析は plan §5.1 #27 | ref |
 | `run_0204_ns_coldmesh_tw300_linedir_isp1` | run_0203 + `implicitSolvePrecision: 1` (行列を double)、200 step 予定 | 65 step で発散、壊れ方は run_0203 と同じ → 精度は主因でない | ref |
@@ -144,8 +144,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0211_ns_coldmesh_tw300_linedir_visc` | run_0203 + `lineViscCoupling: 1` | 20 step で発散 (悪化) | ref |
 | `run_0212_ns_coldmesh_tw300_linedir_tj1` | plan time_integration-implicit-thermal-jacobian V1: run_0203 + `implicitThermalJacobian: 1` (新バイナリ `~/forge-thermjac-fp64`、sha256 9ffc4d1e…; 準備の後に設定へキーを手で書き足したので COLD_PAIR.json の config_diff には載っていない) | 200 step まで有限だが残差が 1000 倍 (不合格)。1 層目の熱伝導の段の成長は止まり、60 step 以降は対流の段が育つ | ref |
 | `run_0213_ns_coldmesh_tw300_linedir_tj2` | 同 V1b: キー 2 (等温壁の拘束の行だけ)、同じく手で書き足し | 72 step で NaN (効果なし) | ref |
-| `run_0214_ns_coldmesh_tw300_linedir_tj1_cfl2` / `run_0215_ns_coldmesh_tw300_linedir_tj1_cfl1` | キー 1 + directional を cfl 2 / 1 で 2000 step 予定 (`cold_cfl.py --itj 1`) | 234 / 157 step で rms_ro が開始の 1300 倍 → 発散の途中で停止 | 破棄予定 |
+| `run_0214_ns_coldmesh_tw300_linedir_tj1_cfl2` / `run_0215_ns_coldmesh_tw300_linedir_tj1_cfl1` | キー 1 + directional を cfl 2 / 1 で 2000 step 予定 (`cold_cfl.py --itj 1`) | 234 / 157 step で rms_ro が開始の 1300 倍 → 発散の途中で停止 | 削除済み (2026-10-09) |
 | `run_0216_ns_coldmesh_tw300_cfl4_tj1` | 同 V3: point cfl 4 + キー 1、20000 step 予定 | 922 step で NaN (試験部 x_w ≈ 70 の超音速の中心部)。キー 0 (run_0191) は 40000 step 安定 → キー 1 は不安定化させる | ref |
+| `run_0218_ns_coldmesh_tw300_cfl4_tj1b` / `run_0219_ns_coldmesh_tw300_cfl4_tj5` | plan time_integration-implicit-thermal-jacobian の (b) A/B: 新バイナリ (06d1b149、sha256 985aca0f…) で point cfl 4 のキー 1 / キー 5 だけを変える、run_0183 の res_100000 から 2000 step・200 ごと、下流 (列 4295〜4320 × 76〜92 層) の帳簿 | 投入 2026-10-09 05:40 | 実行中 |
 | (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
@@ -192,5 +193,7 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 - 結果ページ: https://claude.ai/code/artifact/f1cfbdf8-2415-4bfc-ae2d-156793569bd0
 
 注: `run_0006_ns_trim` (旧設計 run_0004 の δ\* CSV を新設計に流用するショートカット) は物理壁フィルタ不合格 (スロート下流非単調) で prepare 段階に失敗し**削除済み**。トリム版も正規フロー (v1→抽出→v3) で回す。
+
+2026-10-09: AWS の空き不足 (98 %) のため、破棄予定の run_0199・0200・0202・0214・0215 を削除し、run_0191・0198・0208 の中間の全場スナップショット (res_0 と最終以外の `res_<n>.h5`) を削除した。欠損と θ_r の時系列の値は plan tooling-nozzle-isothermal-wall-chain §5.1 #27 と本表に記録済み。
 
 2026-10-07: run_0150〜0163 (V5・V5b・E2・E4 段 1、判定済み) の中間の全場スナップショット `res_<n>.h5` を AWS で削除した (res_0・最終の res・境界の出力・時系列・判定の記録は残した)。
