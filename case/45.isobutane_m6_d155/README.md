@@ -149,6 +149,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0218_ns_coldmesh_tw300_cfl4_tj1b` / `run_0219_ns_coldmesh_tw300_cfl4_tj5` | plan time_integration-implicit-thermal-jacobian の (b) A/B: 新バイナリ (06d1b149、sha256 985aca0f…) で point cfl 4 のキー 1 / キー 5 だけを変える、run_0183 の res_100000 から 2000 step・200 ごと、下流 (列 4295〜4320 × 76〜92 層) の帳簿 | run_0218 (キー 1) は 711 step で NaN、run_0219 (キー 5) は 2000 step で成長なし (NOT CONVERGED stalled/plateau、RISING なし) | ref |
 | `run_0220_ns_coldmesh_tw300_linedir_tj5` | directional cfl 4 + キー 5 (新バイナリ)、200 step・20 ごと、近壁の帳簿 | 有限、100 step で残差が下がった後 110 step から上がる。近壁は振動でなく単調に冷えて密度が上がる (point の遅い過渡と同じ向き)、欠損 2.03 → 1.42 | ref |
 | `run_0221_ns_coldmesh_tw300_linedir_tj5_long` | 同じ設定で 5000 step・500 ごと | NaN なし。500 step で残差が開始の 580 倍まで振れた後 3000 step で回復、5000 step で開始の約半分。欠損 2.03 → 4.88 (500) → 1.00 (5000) (point cfl 4 の約 9.5 万 step 相当を 5000 step で)。事前の基準 (100 倍以内) は不合格 | ref |
+| `run_0222_ns_coldmesh_tw300_linedir_tj5_freeze` | run_0221 と同じ + `FORGE_FREEZE_TURB=1`、1000 step・100 ごと | 110〜500 step の log10(rms_ro) の傾き +0.0052/step (run_0221 は +0.0086)、500 step の rms_ro 2.4e-4、欠損は単調に減る → SST と平均流の両方が寄与 | ref |
+| `run_0223_ns_coldmesh_tw300_linedir_tj5_cap50` | directional cfl 4 + キー 5 + `lineDtDirectionalCap: 50` (新バイナリ b4771052、sha256 35e498b1…)、15000 step・500 ごと | 残差は開始の 3.4 倍以内 (ω)、欠損 2.03 → 0.98 (7500) → 0.78 (15000)、近壁の ρ・T は反転なし。事前の 4 条件のうち (ii) だけ 1 回外れた (500 → 1000 step で +0.5 %)。欠損 1.0 までの壁時計は point cfl 4 の約 1/9 | ref |
+| `run_0224_ns_coldmesh_tw300_linedir_tj5_cap50_ext` | run_0223 の res_15000 から同じ設定で 60000 step・5000 ごと (定常の水準まで) | 投入 2026-10-09 | 実行中 |
 | (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
@@ -196,6 +199,6 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 
 注: `run_0006_ns_trim` (旧設計 run_0004 の δ\* CSV を新設計に流用するショートカット) は物理壁フィルタ不合格 (スロート下流非単調) で prepare 段階に失敗し**削除済み**。トリム版も正規フロー (v1→抽出→v3) で回す。
 
-2026-10-09: AWS の空き不足 (98 %) のため、破棄予定の run_0199・0200・0202・0214・0215 を削除し、run_0191・0198・0208 の中間の全場スナップショット (res_0 と最終以外の `res_<n>.h5`) を削除した。欠損と θ_r の時系列の値は plan tooling-nozzle-isothermal-wall-chain §5.1 #27 と本表に記録済み。
+2026-10-09: AWS の空き不足 (98 %) のため、run_0196・0197・0204〜0207・0209〜0211・0213・0216・0218 の場 (res_*・nozzle.h5) を削除した (残差の履歴・帳簿・ログは残す)。破棄予定の run_0199・0200・0202・0214・0215 を削除し、run_0191・0198・0208 の中間の全場スナップショット (res_0 と最終以外の `res_<n>.h5`) を削除した。欠損と θ_r の時系列の値は plan tooling-nozzle-isothermal-wall-chain §5.1 #27 と本表に記録済み。
 
 2026-10-07: run_0150〜0163 (V5・V5b・E2・E4 段 1、判定済み) の中間の全場スナップショット `res_<n>.h5` を AWS で削除した (res_0・最終の res・境界の出力・時系列・判定の記録は残した)。
