@@ -38,6 +38,7 @@
 #include "gradient.hpp"
 
 #include "dependentVariables.hpp"
+#include "eosDump.hpp"   // 診断 (FORGE_DUMP_EOS_STEP、既定 off・出力専用): EOS 1 回の前後の全 cell 配列
 //#include "solvePoisson_amgx.hpp"
 
 #include "convectiveFlux.hpp"
@@ -2038,7 +2039,9 @@ static void assembleResidualPre(StepContext& s)
         tracerPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);  // ξ = ρξ/ρ (スカラ移流の上流値)
     });
     s.profiler.measureWall(ProfileSection::DependentVariables, [&]() {
+        eosDumpBefore(s.cfg , s.cuda_cfg , s.msh , s.var , s.iStep + 1);         // 診断 (FORGE_DUMP_EOS_STEP、既定 off・出力専用)
         dependentVariables(s.cfg , s.cuda_cfg , s.msh , s.var, s.mat_ns);
+        eosDumpAfterAndExit(s.cfg , s.cuda_cfg , s.msh , s.var , s.iStep + 1);   // 同上: 書いたら終了 (既定 off では何もしない)
         transitionPrimitive_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // γ, Re_θt (初回初期化は Ux/k が要るのでここ)
     });
     s.profiler.measureCuda(ProfileSection::GasProperties, [&]() {

@@ -84,6 +84,7 @@ file( GLOB forge_cppfiles
     input/zeroThicknessEdge.cpp 
     setStructualVariables.cpp 
     dependentVariables.cpp 
+    eosDump.cpp 
 )
 
 add_executable(forge ${forge_cppfiles})
