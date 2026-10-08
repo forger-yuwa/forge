@@ -1,0 +1,1590 @@
+{
+ "old": {
+  "bin": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/build_old/forge",
+  "sha256": "3fb0e9e4b1b05b43dee4e97b536285676eb5be454ff19863f360a91f03f242ef"
+ },
+ "new": {
+  "bin": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/build_new/forge",
+  "sha256": "7ea2a8f900b7cde5023e660bb47decfc42aa4d26c4d27526efe528125dd03c76"
+ },
+ "inputs": {
+  "tp_dev": {
+   "note": "(ii) TP \u767a\u9054\u5834: regress_tp_dev \u306e\u7a2e (sern.h5 = restart_field(dev_tp/res_2000.h5))",
+   "input_log": [],
+   "input_files": {
+    "MESH_QUALITY.txt": "64875ec0adf2d2137dd957f610cd109e983591a8060b567ec6ff730f5da3c5d6",
+    "bcondConfig.yaml": "e67d297668054ae6bd72b5d15972c47278afff3af10550134b9afdab98ef6c3d",
+    "cowl_contour.csv": "9463308faffa218d9a588d2e20bbba2d4a6c54d15cd9a7e1acdfb7817179890a",
+    "prepare_info.json": "8ae1595b7d768b9b38fe7816b488f85525f85453d2d6b2dcbd79a2fe26f2ffc1",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "ramp_contour.csv": "a9f25501c90e7013de9bdfec9062bece412fb561d7fb26b2c398bc1bbf775347",
+    "resolved_species_b72ff462d242cc99.yaml": "7dd343d8d3d647c1dfad8b1ff20bf231f49aed3edbf562875148cf10c8693685",
+    "resolved_species_b72ff462d242cc99_89aa990a2e3f28ba.yaml": "89aa990a2e3f28ba9aa450e54a6adabf58b7af65343f565ff13f55795f3e33cf",
+    "sern.h5": "7b7285619d9e66825d3662a5931b9784345a5cfd62531d2e489e8ef738222ef9",
+    "solverConfig.yaml": "c639f7910afd5abea79ba5439aed1e4ebf37569e60b72c850f45aab804941bbb",
+    "solverConfig_main.yaml": "1721de2bbed286eeea021d3b14786e61ce39a0241d0a65e9646f00a79f08d7ab",
+    "species_meta.yaml": "1930a63f314d452d4437c542a4046b07d8f641e0aca0fd9c541ee346c836aab1"
+   },
+   "runs": {
+    "old_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_dev_old_r1/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0",
+     "input_files_identical": true
+    },
+    "old_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_dev_old_r2/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0",
+     "input_files_identical": true
+    },
+    "new_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_dev_new_r1/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,62067,2082,0,0,0,0,0,0,2082,0,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,62067,2082,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0 floorEvents=1",
+     "input_files_identical": true
+    },
+    "new_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_dev_new_r2/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,62067,2082,0,0,0,0,0,0,2082,0,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,62067,2082,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0 floorEvents=1",
+     "input_files_identical": true
+    }
+   },
+   "compare": {
+    "old_r1_vs_old_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "new_r1_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r1": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r1": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "roe",
+       "sonic"
+      ]
+     }
+    }
+   }
+  },
+  "cpg_c52cht": {
+   "note": "(iii) CPG c52cht: scratch \u306e\u65e2\u5b58\u306e\u69cb\u6210 (mesh.h5 \u306e\u521d\u671f\u5834\u305d\u306e\u307e\u307e\u3001regress_cpg \u3068\u540c\u3058)",
+   "input_log": [],
+   "input_files": {
+    "FILES": "df9dae39a7de818bfc5a2b0c658c7067d81b02d21db2cd543566b92aa70c8cf5",
+    "SOURCE.txt": "2762fe39ecffaefabe8fb7abb66992b4d881aad8995e7e6fa64b72aeb1c3722b",
+    "bcondConfig.yaml": "6268330d932c75783c5dcbdd1821099a6df6230c3c6097bc779dc5a5078844a8",
+    "mesh.h5": "dd6e14c8d0676501d1125a2480469dc8cf6b641f6c85b360cbe5a6c6df855418",
+    "probe.yaml": "d8bfab7deab85b01f8aa9355a99264ee9133dbddea888fbb1bb67046e72090ed",
+    "seed_src.h5": "1509c831f7635610247ec36f9a25ff6a0fa2f675a10204a36fc4d33054536dc2",
+    "solverConfig.yaml": "bfcaaba1c3b4f73b46530d18faaa6a635726ff836564b8c90f0ab554fd8ffce7",
+    "wall_profile_3.csv": "d64d6dae3ba5ebe1c0659b64789f8cce537cd1d6fdbc3fd84939182f186c1ed5"
+   },
+   "runs": {
+    "old_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_c52cht_old_r1/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1",
+     "input_files_identical": true
+    },
+    "old_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_c52cht_old_r2/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1",
+     "input_files_identical": true
+    },
+    "new_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_c52cht_new_r1/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,357,76,0,0,0,0,0,76,76,76,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,357,76,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1 floorEvents=1",
+     "input_files_identical": true
+    },
+    "new_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_c52cht_new_r2/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,357,76,0,0,0,0,0,76,76,76,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,357,76,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1 floorEvents=1",
+     "input_files_identical": true
+    }
+   },
+   "compare": {
+    "old_r1_vs_old_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "new_r1_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r1": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r1": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    }
+   }
+  },
+  "tp_abA": {
+   "note": "(iv) TP \u5c0f\u578b\u8a66\u9a13 A \u679d: ab_A/res_2.h5 + \u6ce8\u5165\u5f8c\u306e roe (\u7bc0\u70b9 18259\u3001\u5e8a\u306e\u4e0a)",
+   "input_log": [
+    "src /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/ab_tp_final/ab_A/res_2.h5 \u2192 roe[18259] 65564.47 \u2192 60518.48 (\u30ed\u30b0\u306e\u6ce8\u5165\u5f8c\u306e\u5024)",
+    "restart_field: rc=0 VERDICT: OK (9 \u91cf\u3092\u79fb\u3057\u305f\u3001SRC \u3068\u30d3\u30c3\u30c8\u4e00\u81f4)"
+   ],
+   "input_files": {
+    "MESH_QUALITY.txt": "64875ec0adf2d2137dd957f610cd109e983591a8060b567ec6ff730f5da3c5d6",
+    "bcondConfig.yaml": "e67d297668054ae6bd72b5d15972c47278afff3af10550134b9afdab98ef6c3d",
+    "cowl_contour.csv": "9463308faffa218d9a588d2e20bbba2d4a6c54d15cd9a7e1acdfb7817179890a",
+    "prepare_info.json": "8ae1595b7d768b9b38fe7816b488f85525f85453d2d6b2dcbd79a2fe26f2ffc1",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "ramp_contour.csv": "a9f25501c90e7013de9bdfec9062bece412fb561d7fb26b2c398bc1bbf775347",
+    "resolved_species_b72ff462d242cc99.yaml": "7dd343d8d3d647c1dfad8b1ff20bf231f49aed3edbf562875148cf10c8693685",
+    "resolved_species_b72ff462d242cc99_89aa990a2e3f28ba.yaml": "89aa990a2e3f28ba9aa450e54a6adabf58b7af65343f565ff13f55795f3e33cf",
+    "sern.h5": "735ef7558b3dc6e5cf9ded2310d1c46c63626889f4a7d4f714e78c53e048289e",
+    "solverConfig.yaml": "c639f7910afd5abea79ba5439aed1e4ebf37569e60b72c850f45aab804941bbb",
+    "solverConfig_main.yaml": "1721de2bbed286eeea021d3b14786e61ce39a0241d0a65e9646f00a79f08d7ab",
+    "species_meta.yaml": "1930a63f314d452d4437c542a4046b07d8f641e0aca0fd9c541ee346c836aab1"
+   },
+   "runs": {
+    "old_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abA_old_r1/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0",
+     "input_files_identical": true
+    },
+    "old_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abA_old_r2/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0",
+     "input_files_identical": true
+    },
+    "new_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abA_new_r1/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,62067,2082,0,0,0,0,0,0,2082,0,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,62067,2082,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0 floorEvents=1",
+     "input_files_identical": true
+    },
+    "new_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abA_new_r2/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,62067,2082,0,0,0,0,0,0,2082,0,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,62067,2082,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0 floorEvents=1",
+     "input_files_identical": true
+    }
+   },
+   "compare": {
+    "old_r1_vs_old_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "new_r1_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r1": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r1": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    }
+   }
+  },
+  "tp_abB": {
+   "note": "(iv) TP \u5c0f\u578b\u8a66\u9a13 B \u679d: ab_B/res_2.h5 + \u6ce8\u5165\u5f8c\u306e roe (\u7bc0\u70b9 18259\u3001\u5e8a\u306e\u4e0b)",
+   "input_log": [
+    "src /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/ab_tp_final/ab_B/res_2.h5 \u2192 roe[18259] 65564.47 \u2192 59619.0 (\u30ed\u30b0\u306e\u6ce8\u5165\u5f8c\u306e\u5024)",
+    "restart_field: rc=0 VERDICT: OK (9 \u91cf\u3092\u79fb\u3057\u305f\u3001SRC \u3068\u30d3\u30c3\u30c8\u4e00\u81f4)"
+   ],
+   "input_files": {
+    "MESH_QUALITY.txt": "64875ec0adf2d2137dd957f610cd109e983591a8060b567ec6ff730f5da3c5d6",
+    "bcondConfig.yaml": "e67d297668054ae6bd72b5d15972c47278afff3af10550134b9afdab98ef6c3d",
+    "cowl_contour.csv": "9463308faffa218d9a588d2e20bbba2d4a6c54d15cd9a7e1acdfb7817179890a",
+    "prepare_info.json": "8ae1595b7d768b9b38fe7816b488f85525f85453d2d6b2dcbd79a2fe26f2ffc1",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "ramp_contour.csv": "a9f25501c90e7013de9bdfec9062bece412fb561d7fb26b2c398bc1bbf775347",
+    "resolved_species_b72ff462d242cc99.yaml": "7dd343d8d3d647c1dfad8b1ff20bf231f49aed3edbf562875148cf10c8693685",
+    "resolved_species_b72ff462d242cc99_89aa990a2e3f28ba.yaml": "89aa990a2e3f28ba9aa450e54a6adabf58b7af65343f565ff13f55795f3e33cf",
+    "sern.h5": "f6dc3a6f2845a8992467a8d9c2aae4c4d535efd60a73a5fd757ec2bd2af0b39d",
+    "solverConfig.yaml": "c639f7910afd5abea79ba5439aed1e4ebf37569e60b72c850f45aab804941bbb",
+    "solverConfig_main.yaml": "1721de2bbed286eeea021d3b14786e61ce39a0241d0a65e9646f00a79f08d7ab",
+    "species_meta.yaml": "1930a63f314d452d4437c542a4046b07d8f641e0aca0fd9c541ee346c836aab1"
+   },
+   "runs": {
+    "old_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abB_old_r1/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0",
+     "input_files_identical": true
+    },
+    "old_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abB_old_r2/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0",
+     "input_files_identical": true
+    },
+    "new_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abB_new_r1/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,62067,2082,0,0,1,0,0,0,2082,0,0,0,1,449.74052632724073,449.74052632724073,0,0,0,0,18259,,,18259,,0,",
+      "eos,1,1,0,0,steady_implicit,62067,2082,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,,,,18259,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0 floorEvents=1",
+     "input_files_identical": true
+    },
+    "new_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/tp_abB_new_r2/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,62067,2082,0,0,1,0,0,0,2082,0,0,0,1,449.74052632724073,449.74052632724073,0,0,0,0,18259,,,18259,,0,",
+      "eos,1,1,0,0,steady_implicit,62067,2082,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,,,,18259,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=0 floorEvents=1",
+     "input_files_identical": true
+    }
+   },
+   "compare": {
+    "old_r1_vs_old_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "new_r1_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r1": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r1": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r2": {
+     "verdict": "INVALID",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 5388516,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [
+      "EOS \u306e\u5f15\u6570\u914d\u5217 cp \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}",
+      "EOS \u306e\u5f15\u6570\u914d\u5217 gamma \u306b\u975e\u6709\u9650 {'A:pre': 2082, 'A:post': 0, 'B:pre': 2082, 'B:post': 0}"
+     ],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "Rmix",
+       "T",
+       "Ux",
+       "Uy",
+       "cp",
+       "gamma",
+       "k",
+       "omega",
+       "sonic"
+      ]
+     }
+    }
+   }
+  },
+  "cpg_abA": {
+   "note": "(iv) CPG \u5c0f\u578b\u8a66\u9a13 A \u679d: ab_A/res_2.h5 + \u6ce8\u5165\u5f8c\u306e roe (\u7bc0\u70b9 154\u3001\u5e8a\u306e\u4e0a)",
+   "input_log": [
+    "src /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/ab_cpg_final/ab_A/res_2.h5 \u2192 roe[154] 2622.735 \u2192 109.739456 (\u30ed\u30b0\u306e\u6ce8\u5165\u5f8c\u306e\u5024)",
+    "restart_field: rc=0 VERDICT: OK (7 \u91cf\u3092\u79fb\u3057\u305f\u3001SRC \u3068\u30d3\u30c3\u30c8\u4e00\u81f4)"
+   ],
+   "input_files": {
+    "FILES": "df9dae39a7de818bfc5a2b0c658c7067d81b02d21db2cd543566b92aa70c8cf5",
+    "SOURCE.txt": "2762fe39ecffaefabe8fb7abb66992b4d881aad8995e7e6fa64b72aeb1c3722b",
+    "bcondConfig.yaml": "6268330d932c75783c5dcbdd1821099a6df6230c3c6097bc779dc5a5078844a8",
+    "mesh.h5": "55c1283be752d2d4d971c94de96fb65a0b9acf75e1079340ece12f403148660f",
+    "probe.yaml": "d8bfab7deab85b01f8aa9355a99264ee9133dbddea888fbb1bb67046e72090ed",
+    "seed_src.h5": "1509c831f7635610247ec36f9a25ff6a0fa2f675a10204a36fc4d33054536dc2",
+    "solverConfig.yaml": "bfcaaba1c3b4f73b46530d18faaa6a635726ff836564b8c90f0ab554fd8ffce7",
+    "wall_profile_3.csv": "d64d6dae3ba5ebe1c0659b64789f8cce537cd1d6fdbc3fd84939182f186c1ed5"
+   },
+   "runs": {
+    "old_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abA_old_r1/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1",
+     "input_files_identical": true
+    },
+    "old_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abA_old_r2/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1",
+     "input_files_identical": true
+    },
+    "new_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abA_new_r1/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,357,76,0,0,0,0,0,76,76,76,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,357,76,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1 floorEvents=1",
+     "input_files_identical": true
+    },
+    "new_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abA_new_r2/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,357,76,0,0,0,0,0,76,76,76,0,0,0,0,0,0,0,0,0,,,,,,0,",
+      "eos,1,1,0,0,steady_implicit,357,76,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,,,,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1 floorEvents=1",
+     "input_files_identical": true
+    }
+   },
+   "compare": {
+    "old_r1_vs_old_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "new_r1_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r1": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r1": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    }
+   }
+  },
+  "cpg_abB": {
+   "note": "(iv) CPG \u5c0f\u578b\u8a66\u9a13 B \u679d: ab_B/res_2.h5 + \u6ce8\u5165\u5f8c\u306e roe (\u7bc0\u70b9 154\u3001\u5e8a\u306e\u4e0b)",
+   "input_log": [
+    "src /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/ab_cpg_final/ab_B/res_2.h5 \u2192 roe[154] 2622.735 \u2192 -109.737885 (\u30ed\u30b0\u306e\u6ce8\u5165\u5f8c\u306e\u5024)",
+    "restart_field: rc=0 VERDICT: OK (7 \u91cf\u3092\u79fb\u3057\u305f\u3001SRC \u3068\u30d3\u30c3\u30c8\u4e00\u81f4)"
+   ],
+   "input_files": {
+    "FILES": "df9dae39a7de818bfc5a2b0c658c7067d81b02d21db2cd543566b92aa70c8cf5",
+    "SOURCE.txt": "2762fe39ecffaefabe8fb7abb66992b4d881aad8995e7e6fa64b72aeb1c3722b",
+    "bcondConfig.yaml": "6268330d932c75783c5dcbdd1821099a6df6230c3c6097bc779dc5a5078844a8",
+    "mesh.h5": "b07ad499c2047039401b985447f53aa883ba6cb6b514e3e46655f32481f115df",
+    "probe.yaml": "d8bfab7deab85b01f8aa9355a99264ee9133dbddea888fbb1bb67046e72090ed",
+    "seed_src.h5": "1509c831f7635610247ec36f9a25ff6a0fa2f675a10204a36fc4d33054536dc2",
+    "solverConfig.yaml": "bfcaaba1c3b4f73b46530d18faaa6a635726ff836564b8c90f0ab554fd8ffce7",
+    "wall_profile_3.csv": "d64d6dae3ba5ebe1c0659b64789f8cce537cd1d6fdbc3fd84939182f186c1ed5"
+   },
+   "runs": {
+    "old_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abB_old_r1/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1",
+     "input_files_identical": true
+    },
+    "old_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abB_old_r2/eos_dump.h5",
+     "floor_rows": [],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1",
+     "input_files_identical": true
+    },
+    "new_r1": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abB_new_r1/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,357,76,0,0,1,0,1,76,76,76,0,0,1,109.73867534776339,109.73867534776339,0,0,44.895153045654297,44.895153045654297,154,,154,154,,0,",
+      "eos,1,1,0,0,steady_implicit,357,76,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,,,,154,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1 floorEvents=1",
+     "input_files_identical": true
+    },
+    "new_r2": {
+     "rc": 0,
+     "wrote": true,
+     "dump": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_abB_new_r2/eos_dump.h5",
+     "floor_rows": [
+      "init,1,0,0,-1,steady_implicit,357,76,0,0,1,0,1,76,76,76,0,0,1,109.73867534776339,109.73867534776339,0,0,44.895153045654297,44.895153045654297,154,,154,154,,0,",
+      "eos,1,1,0,0,steady_implicit,357,76,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,,,,154,,0,"
+     ],
+     "floorEvents_line": "'output': level=1 extraFields=0 interfaceDiag=1 floorEvents=1",
+     "input_files_identical": true
+    }
+   },
+   "compare": {
+    "old_r1_vs_old_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "new_r1_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r1": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r1_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r1": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    },
+    "old_r2_vs_new_r2": {
+     "verdict": "IDENTICAL",
+     "eos_post_diff_bytes": 0,
+     "eos_pre_diff_bytes": 0,
+     "eos_bytes": 32908,
+     "other_pre_diff_bytes": 0,
+     "other_pre_mismatch": [],
+     "invalid": [],
+     "changed": {
+      "A": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ],
+      "B": [
+       "Ht",
+       "P",
+       "T",
+       "Ux",
+       "roe",
+       "sonic"
+      ]
+     }
+    }
+   }
+  }
+ }
+}

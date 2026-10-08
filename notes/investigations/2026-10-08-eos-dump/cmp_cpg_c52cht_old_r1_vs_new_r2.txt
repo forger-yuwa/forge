@@ -1,0 +1,31 @@
+A: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_c52cht_old_r1/eos_dump.h5
+B: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/runs/cpg_c52cht_new_r2/eos_dump.h5
+step 1  nCells 357  nCells_all 433  thermalMethod 0  nSpeciesRegistered 0  thermoFloat 1  discretization node
+配列 191 本 (EOS の引数 19 本・その他 172 本) × {pre, post}、物性 DB ['db/species_thermo', 'db/species_thermo_f']
+EOS の引数配列 (pre 差分バイト / post 差分バイト / 非有限 A:pre,A:post,B:pre,B:post):
+  ro                  0          0   0,0,0,0
+  roUx                0          0   0,0,0,0
+  roUy                0          0   0,0,0,0
+  roUz                0          0   0,0,0,0
+  roe                 0          0   0,0,0,0
+  roK                 0          0   0,0,0,0
+  roOmega             0          0   0,0,0,0
+  P                   0          0   0,0,0,0
+  Ht                  0          0   0,0,0,0
+  sonic               0          0   0,0,0,0
+  k                   0          0   0,0,0,0
+  omega               0          0   0,0,0,0
+  T                   0          0   0,0,0,0
+  Ux                  0          0   0,0,0,0
+  Uy                  0          0   0,0,0,0
+  Uz                  0          0   0,0,0,0
+  gamma               0          0   0,0,0,0
+  cp                  0          0   0,0,0,0
+  Rmix                0          0   0,0,0,0
+合計: EOS の引数 post 差分バイト 0 / 32908 バイト、pre 差分バイト 0; その他の配列 pre 差分 0・post 差分 0 (判定外、EOS が読まない)
+その他の配列で A/B の pre が異なるもの: なし
+その他の配列で非有限を含むもの: なし
+A: EOS の前後で変わった配列 ['Ht', 'P', 'T', 'Ux', 'roe', 'sonic']
+B: EOS の前後で変わった配列 ['Ht', 'P', 'T', 'Ux', 'roe', 'sonic']
+書き込み先の列挙 (dependentVariables_d.cu から): ['ro', 'roe', 'Ux', 'Uy', 'Uz', 'T', 'P', 'Ht', 'sonic', 'k', 'omega', 'Rmix']
+VERDICT: IDENTICAL
