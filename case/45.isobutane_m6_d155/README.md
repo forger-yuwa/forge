@@ -137,10 +137,15 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0205_ns_coldmesh_tw300_cfl4_isp1` | run_0191 の res_40000 から point・cfl 4・`implicitSolvePrecision: 1`、40000 step | 完走。欠損の減り方は run_0198 (float) と同じ (1.2940 / 1.2918 …) → 速さに効かない | ref |
 | `run_0206_ns_coldmesh_tw300_linedir_inner15` | run_0203 + `nStepInner: 15` | 65 step で発散 → sweep 不足でない | ref |
 | `run_0207_ns_coldmesh_tw300_linedir_conv0` | run_0203 + `convMethod: 0` (RHS 1 次) | 72 step で発散 → 再構成次数の不整合でない | ref |
-| `run_0208_ns_coldmesh_tw300_cfl4_ext2` | CFL 4 の延長の続き: run_0198 の res_200000 から 200000 step・10000 ごと (同じ設定) | 投入 2026-10-09 03:50 | 実行中 |
+| `run_0208_ns_coldmesh_tw300_cfl4_ext2` | CFL 4 の延長の続き: run_0198 の res_200000 から 200000 step・10000 ごと (同じ設定) | 完走。試行の開始から 44 万 step で欠損 0.0571 kg/s (入口の 0.058 %)、θ_r (x = 40/94) 0.07724 / 0.12691 でまだ +0.13〜0.16 %/2 万 step、δ_loc 0.5779 一定。NOT CONVERGED (stalled/plateau)、rms_roK RISING | ref (延長の親) |
+| `run_0217_ns_coldmesh_tw300_cfl4_ext3` | CFL 4 の延長の続き: run_0208 の res_200000 から 200000 step・10000 ごと (同じ設定) | 投入 2026-10-09 05:10 | 実行中 |
 | `run_0209_ns_coldmesh_tw300_linedir_adiab` | run_0203 の冷却壁の bcond だけを `wall` (断熱) に | 200 step まで有限、近壁の振動は減衰 (壁温 300 → 440 K の過渡を含む) | ref |
 | `run_0210_ns_coldmesh_tw300_linedir_freeze` | run_0203 + `FORGE_FREEZE_TURB=1` | 64 step で発散 → SST の結合は不要 | ref |
 | `run_0211_ns_coldmesh_tw300_linedir_visc` | run_0203 + `lineViscCoupling: 1` | 20 step で発散 (悪化) | ref |
+| `run_0212_ns_coldmesh_tw300_linedir_tj1` | plan time_integration-implicit-thermal-jacobian V1: run_0203 + `implicitThermalJacobian: 1` (新バイナリ `~/forge-thermjac-fp64`、sha256 9ffc4d1e…; 準備の後に設定へキーを手で書き足したので COLD_PAIR.json の config_diff には載っていない) | 200 step まで有限だが残差が 1000 倍 (不合格)。1 層目の熱伝導の段の成長は止まり、60 step 以降は対流の段が育つ | ref |
+| `run_0213_ns_coldmesh_tw300_linedir_tj2` | 同 V1b: キー 2 (等温壁の拘束の行だけ)、同じく手で書き足し | 72 step で NaN (効果なし) | ref |
+| `run_0214_ns_coldmesh_tw300_linedir_tj1_cfl2` / `run_0215_ns_coldmesh_tw300_linedir_tj1_cfl1` | キー 1 + directional を cfl 2 / 1 で 2000 step 予定 (`cold_cfl.py --itj 1`) | 234 / 157 step で rms_ro が開始の 1300 倍 → 発散の途中で停止 | 破棄予定 |
+| `run_0216_ns_coldmesh_tw300_cfl4_tj1` | 同 V3: point cfl 4 + キー 1、20000 step 予定 | 922 step で NaN (試験部 x_w ≈ 70 の超音速の中心部)。キー 0 (run_0191) は 40000 step 安定 → キー 1 は不安定化させる | ref |
 | (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
