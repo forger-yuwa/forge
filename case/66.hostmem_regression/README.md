@@ -587,3 +587,7 @@ new = `.bin/new/forge` → `~/bin-hostmem/forge_93e55957`、全部 `FORGE_CUDA_B
 | `run_0203_fw_c44dual_n5` | 固定幅の独立 A/B (plan §6.3) n5: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 4 量、`condClampCorrQ_0` 最大 **1.46e23** ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
 | `run_0204_fw_c44dual_b6` | 固定幅の独立 A/B (plan §6.3) b6: base (9c9f623c)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 0 量、`condClampCorrQ_0` 最大 1.32e17 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
 | `run_0205_fw_c44dual_n6` | 固定幅の独立 A/B (plan §6.3) n6: new (93e55957)、c44dual_ckpt100 と同じ入力・100 step + `FORGE_ALLOW_UNVERIFIED_SPECIES=1` | `inputs/c44dual_ckpt100` ← `44.vitiated_air_wt/run_0468_sweep_cflp12_nsub20_float` | rc 0、NaN PASS、幅超過 0 量、`condClampCorrQ_0` 最大 5.46e16 ([RESULT.txt](fixedwidth_c44dual_ckpt100/RESULT.txt)) | active |
+
+## 削除の記録
+
+- 2026-10-08 (ユーザ「まずデータ容量削減しなきゃ」): AWS `~/forge-b4/case/66.hostmem_regression/run_*` (206 run、約 3.9 GB) と `~/forge-b4/solver_density_cuda/build`・`build_93e55957` を削除。回帰の判定と結果は本ディレクトリの `results/` に回収済み (plan `architecture-solver-host-memory.md` は accepted)。入力 (`inputs/`) と比較のログは AWS に残した。基準・変更後のバイナリは AWS `~/bin-hostmem/`。
