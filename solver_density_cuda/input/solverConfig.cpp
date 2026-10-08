@@ -1406,8 +1406,12 @@ void solverConfig::initTimeIntegrationScheme(int timeIntegration){
 
     // implicitThermalJacobian (エネルギー行の熱伝導 Jacobian / 等温壁の拘束の行) の範囲チェック。
     // 実装したのは node の block DPLUR (非 precond) だけなので、他の経路では黙って効かない事故を防ぐため止める。
-    if (this->implicitThermalJacobian < 0 || this->implicitThermalJacobian > 3) {
-        throw std::runtime_error("implicitThermalJacobian must be 0..3 (bit 1: thermal Jacobian, bit 2: isothermal-wall constraint row).");
+    if (this->implicitThermalJacobian < 0 || this->implicitThermalJacobian > 7) {
+        throw std::runtime_error("implicitThermalJacobian must be 0..7 (bit 1: thermal Jacobian, bit 2: isothermal-wall constraint row, "
+                                 "bit 4: keep the scalar viscous diagonal on the energy row as well).");
+    }
+    if ((this->implicitThermalJacobian & 4) != 0 && (this->implicitThermalJacobian & 1) == 0) {
+        throw std::runtime_error("implicitThermalJacobian bit 4 (keep the scalar on the energy row) requires bit 1.");
     }
     if (this->implicitThermalJacobian != 0) {
         if (this->discretization != "node")

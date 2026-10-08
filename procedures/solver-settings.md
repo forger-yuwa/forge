@@ -94,6 +94,7 @@ block DPLUR の粘性の対角は 5 行に同じスカラー (2ν·δ/dcc) を�
 
 - **ビット 1**: 内部の node 間面でエネルギー行を熱伝導の Jacobian k_face·δ/dcc·(γ/c_p)·∂e/∂Q に置き換える (k_face は残差と同じ式)。
 - **ビット 2**: 等温壁の節点のエネルギー行を拘束の行 [−e_w, 0, 0, 0, 1] にする (原因の切り分け用)。
+- **ビット 4** (ビット 1 と併用、キー 5): エネルギー行にも従来のスカラーを残し、温度の項はその上に足す (ビット 1 だけは高速・高 μ_t の所で不安定化した)。
 
 node・`timeIntegration 11`・`blockDPLUR 1`・`lowMachPrecond < 2` 専用。`lineViscCoupling 1`・`mesh.nodeIsothermalEnergyBC 1` との併用は起動時に拒否する。
 LHS だけの変更なので定常解は変わらない。**検証中** (plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md)) で、既定化はしていない。

@@ -791,6 +791,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  // エネルギー行の熱伝導 Jacobian (plans/active/time_integration-implicit-thermal-jacobian.md、ビットマスク、0 で従来どおり):
  //   ビット 1: 内部の node 間面でエネルギー行の粘性対角を k_face·δ/dcc·(γ/cp)·∂e/∂Q に置き換える (k_face は残差と同じ式)。
  //   ビット 2: 等温壁の節点のエネルギー行を拘束の行 [−e_w,0,0,0,1] にする。
+ //   ビット 4 (ビット 1 と併用): 行 4 の従来のスカラー 2ν_eff·δ/dcc も残し、温度の項はその上に足す。
  // thermCondArr・cpArr・fxArr は thermalJac のビット 1 が立っているときだけ読む (それ以外は nullptr でよい)。
  int thermalJac,
  const flow_float* __restrict__ thermCondArr,
@@ -962,7 +963,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     // k_face は viscousFlux_d.cu の tc_face と同じ式 (f 補間の層流 k + 面 cp × 面 μ_t / Pr_t)、物性・γ は凍結。
                     // ∂e/∂ρ = −(e − ½|u|²)/ρ、∂e/∂(ρu_k) = −u_k/ρ、∂e/∂(ρE) = 1/ρ (e = ρE/ρ − ½|u|²; TP でも Y は正規化済みなので厳密)。
                     #pragma unroll
-                    for (int r = 0; r < 4; ++r) diag_block[r][r] += viscous_diag;
+                    // ビット 4: 行 4 にも従来のスカラー (スペクトル半径の近似) を残し、その上に温度の項を足す。
+                    // 行 0〜3 と同じ一律の減衰を行 4 にも保つので、行ごとに歩幅の縮め方が違う状態 (温度を変えない
+                    // 補正でエネルギー行だけ減衰が抜け、高速域で偽の ΔT を作る) を避ける (plan §4.3)。
+                    const int nScalarRows = ((thermalJac & 4) != 0) ? 5 : 4;
+                    for (int r = 0; r < nScalarRows; ++r) diag_block[r][r] += viscous_diag;
                     const ST f = static_cast<ST>(fxArr[ip]);
                     const ST omf = static_cast<ST>(1.0) - f;
                     const ST cp_face = f * static_cast<ST>(cpArr[ic0]) + omf * static_cast<ST>(cpArr[ic1]);

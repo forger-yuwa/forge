@@ -193,6 +193,8 @@ $k_f$ は熱伝導の残差 ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda
 $\partial T/\partial\mathbf Q=(\gamma/c_p)\,\partial e/\partial\mathbf Q$ は TP でも厳密 (T を求める前に Y を正規化するので、$\rho Y$ を凍結して $\rho$ が動いても Y は変わらない)。
 $e$ の基準点 (TP の `thermoHrefTemp`) によらず $\Lambda^{T}_f\,\Delta T$ の減衰になる。壁の節点と内部節点の間の面も node 間面なので、壁への熱伝導は 1 層目の対角に入る。
 
+**ビット 4 (ビット 1 と併用、キー 5)**: 行 4 にも従来のスカラー $\Lambda^{\nu}_f$ を残し、温度の項はその上に足す。ビット 1 だけだと、行 0〜3 (スカラー) と行 4 (温度) で減衰の基準が食い違い、温度を変えない補正で行 4 だけ減衰が抜けて高速域に偽の $\Delta T$ を作る (μ_t の大きい境界層の外側で point の cfl 4 が 922 step で発散した)。
+
 **ビット 2 (等温壁の拘束の行)**: 等温壁の節点の行 4 を単位行から $[-e_w,0,0,0,1]$ (rhs 0、$e_w=\rho E_w/\rho_w$) に替え、
 $\Delta(\rho E)_w=e_w\,\Delta\rho_w$ を線形系の中で満たす (後段の壁温のピン $\rho E=\rho\,e(T_w)$ と一致させる)。原因の切り分け用。
 

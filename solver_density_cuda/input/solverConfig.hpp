@@ -133,6 +133,7 @@ public:
     // block-DPLUR のエネルギー行の熱伝導 Jacobian (ビットマスク、既定 0 = 従来どおりビット同一)。
     //   ビット 1: 内部の node 間面でエネルギー行の粘性対角 (ρE にかかるスカラー) を k_face·δ/dcc·(γ/cp)·∂e/∂Q に置き換える。
     //   ビット 2: 等温壁の節点のエネルギー行を単位行から拘束の行 [−e_w,0,0,0,1] に替える (原因の切り分け用)。
+    //   ビット 4 (ビット 1 と併用): エネルギー行にも従来のスカラーを残し、温度の項はその上に足す (行ごとの減衰の基準をそろえる)。
     // node・timeIntegration 11・blockDPLUR 1・lowMachPrecond<2 専用。plans/active/time_integration-implicit-thermal-jacobian.md。
     int implicitThermalJacobian = 0;
     // 受動スカラ (排気トレーサ roXi・凝縮モーメント) の輸送経路 (plans/active/species-passive-scalar-unification.md §4.1)。
