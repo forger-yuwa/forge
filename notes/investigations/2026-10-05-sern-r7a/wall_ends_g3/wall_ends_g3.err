@@ -1,0 +1,23 @@
+	Command being timed: "python3 solver_density_cuda/tools/check_wall_end_geometry.py case/46.sern_design/run_1055_r7b_m10_A_c/sern.h5 --bcond-config case/46.sern_design/run_1055_r7b_m10_A_c/bcondConfig.yaml --pair cowl_in,cowl_out --pair sidewall_in,sidewall_out --layers 3 --top 40 --out-prefix /home/ubuntu/te_grad_diag/wall_ends_g3_run1055"
+	User time (seconds): 8.48
+	System time (seconds): 0.59
+	Percent of CPU this job got: 91%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:09.88
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1070136
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 16
+	Minor (reclaiming a frame) page faults: 107322
+	Voluntary context switches: 846
+	Involuntary context switches: 4128
+	Swaps: 0
+	File system inputs: 457376
+	File system outputs: 3256
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
