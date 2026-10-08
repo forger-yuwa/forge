@@ -13,6 +13,9 @@ CPG の定数は γ 1.27354、c_p 1360、R = c_p(γ−1)/γ。TP の run を読�
 usage:
   python3 cold_xcheck.py reduce-forge <run> [--last 5]      (AWS: 最後の 5 枚の res → _band_ab/cold_pair/xcheck_<run>.npz)
   python3 cold_xcheck.py reduce-su2 <run> [--last 5]        (手元: 最後の 5 つの restart_flow_<iter>.csv → 同上)
+  python3 cold_xcheck.py gates-forge <run>                   (AWS: NaN の全件検査 + check_convergence --segment → xcheck_gates_<run>.json)
+  python3 cold_xcheck.py gates-su2 <run>                     (手元: history.csv を forge の残差 CSV の列名に変換して check_convergence、
+                                                              履歴と restart の CSV の非有限値 → xcheck_gates_<run>.json)
   python3 cold_xcheck.py compare                             (手元: 判定 → _band_ab/cold_pair/xcheck.json)
 """
 import argparse
@@ -116,6 +119,66 @@ def load_su2(run, it):
     return xy, ro, ux, uy, e * (GAM - 1.0) / RGAS, A[:, 7]
 
 
+SU2_COLS = {"rms[Rho]": "rms_ro", "rms[RhoU]": "rms_roUx", "rms[RhoV]": "rms_roUy", "rms[RhoE]": "rms_roe", "rms[k]": "rms_roK", "rms[w]": "rms_roOmega"}
+
+
+def _conv(target: str, extra=()) -> dict:
+    import subprocess
+    tools = HERE.parents[1] / "solver_density_cuda/tools"
+    cc = subprocess.run([sys.executable, str(tools / "check_convergence.py"), target, *extra], capture_output=True, text=True)
+    lines = cc.stdout.splitlines()
+    verdict = [l for l in lines if "->" in l]
+    return {"cmd": f"check_convergence.py {target} {' '.join(extra)}".strip(), "rc": cc.returncode, "verdict": verdict[-1] if verdict else "(判定行なし)",
+            "rising": [l.strip() for l in lines if "RISING" in l], "diverged": any("DIVERGED" in l for l in lines), "tail": lines[-12:]}
+
+
+def gates_forge(run: Path) -> Path:
+    """AWS: 全段の残差と全スナップショットの NaN 検査 (ns_n012.nan_scan) と、本段区間の check_convergence。"""
+    import ns_n012 as NS
+    nan = NS.nan_scan(run)
+    NS.jdump(run / "NAN_SCAN.json", nan)
+    out = {"run": run.name, "kind": "forge", "nan_verdict": nan.get("VERDICT"), "nan_first": nan.get("first_nonfinite"),
+           "convergence": _conv(str(run), ("--segment",))}
+    p = OUTD / f"xcheck_gates_{run.name}.json"
+    p.write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+    return p
+
+
+def gates_su2(run: Path) -> Path:
+    """手元: SU2 の history.csv (log10 の rms) を forge の残差 CSV の列名・線形値に直して check_convergence にかける (2D なので
+    rms_roUz は 0)。履歴の非有限値と、全 restart の CSV の非有限値も数える。"""
+    import csv
+    with open(run / "history.csv") as fh:
+        rd = csv.reader(fh); head = [h.strip().strip('"') for h in next(rd)]; rows = [r for r in rd if r]
+    ic = {h: i for i, h in enumerate(head)}
+    it = [int(float(r[ic["Inner_Iter"]])) for r in rows]
+    cols = {dst: np.array([float(r[ic[src]]) for r in rows]) for src, dst in SU2_COLS.items()}
+    nonfin_hist = int(sum(np.count_nonzero(~np.isfinite(v)) for v in cols.values()))
+    conv_csv = run / "residual_history_su2.csv"
+    with open(conv_csv, "w") as fh:
+        fh.write("step," + ",".join(["rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"]) + "\n")
+        for n in range(len(it)):
+            v = [10.0 ** cols[c][n] for c in ("rms_ro", "rms_roUx", "rms_roUy")] + [0.0] + [10.0 ** cols[c][n] for c in ("rms_roe", "rms_roK", "rms_roOmega")]
+            fh.write(f"{it[n]}," + ",".join(f"{x:.9e}" for x in v) + "\n")
+    nf = {}
+    for f in sorted(run.glob("restart_flow_[0-9]*.csv")):
+        A = np.loadtxt(f, delimiter=",", skiprows=1)
+        nf[f.name] = int(np.count_nonzero(~np.isfinite(A)))
+    itmax = None
+    for line in (run / "sst.cfg").read_text().splitlines():
+        if line.strip().startswith("ITER="):
+            itmax = int(line.split("=")[1])
+    out = {"run": run.name, "kind": "su2", "last_iter": it[-1], "ITER": itmax, "reached_ITER": itmax is not None and it[-1] >= itmax - 1,
+           "nonfinite_history": nonfin_hist, "nonfinite_restart": nf,
+           "nan_verdict": "CLEAN" if nonfin_hist == 0 and not any(nf.values()) else "NONFINITE",
+           "convergence": _conv(str(conv_csv))}
+    p = OUTD / f"xcheck_gates_{run.name}.json"
+    p.write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+    return p
+
+
 def reduce_run(run: Path, kind: str, last: int = 5) -> Path:
     yb_x, yb = common_yb()
     if kind == "forge":
@@ -127,6 +190,7 @@ def reduce_run(run: Path, kind: str, last: int = 5) -> Path:
     rec = {}
     for k, st in enumerate(steps):
         xy, ro, ux, uy, T, tke = loader(st)
+        rec[f"s{k}_nonfinite"] = np.array(int(sum(np.count_nonzero(~np.isfinite(a)) for a in (ro, ux, uy, T, tke))))
         ni, nj, S = mesh_info(len(ro))
         o = reduce_fields(xy, ro, ux, uy, T, tke, kind == "su2", ni, nj, S, yb_x, yb)   # SU2 のエネルギーは k を含む
         for key, v in o.items():
@@ -148,6 +212,7 @@ def summarize(name):
     for key in ("mdot_in", "mdot_out", "Hdot_in", "Hdot_out"):
         d[key] = np.array([float(Z[f"s{k}_{key}"]) for k in range(n)])
     d["steps"] = np.array(Z["steps"], dtype=float)
+    d["nonfinite"] = np.array([int(Z[f"s{k}_nonfinite"]) for k in range(n)])
     return d
 
 
@@ -179,8 +244,15 @@ def compare() -> dict:
                 bad.append(f"Q_w {v}")
         mb = float(np.mean(d["mdot_in"] - d["mdot_out"]) / np.mean(d["mdot_in"]))
         hb = float(np.mean(d["Hdot_in"] - d["Hdot_out"] - d["Q_w"]) / np.mean(d["Hdot_in"]))
-        out["gates"][k] = {"not_steady": bad, "mass_balance": mb, "enthalpy_balance": hb,
-                           "ok": (not bad) and abs(mb) <= 1e-3 and abs(hb) <= 1e-3}
+        gp = OUTD / f"xcheck_gates_{runs[k]}.json"
+        g = json.loads(gp.read_text()) if gp.is_file() else None
+        nonfin = int(sum(int(Z) for Z in d["nonfinite"]))
+        g_ok = (g is not None and g["nan_verdict"] == "CLEAN" and not g["convergence"]["diverged"] and not g["convergence"]["rising"]
+                and nonfin == 0 and (g["kind"] == "forge" or g["reached_ITER"]))
+        out["gates"][k] = {"not_steady": bad, "mass_balance": mb, "enthalpy_balance": hb, "nonfinite_window": nonfin,
+                           "gates_file": gp.name if g else "(無い → 判定不能)", "nan": g and g["nan_verdict"],
+                           "convergence": g and g["convergence"]["verdict"], "rising": g and g["convergence"]["rising"],
+                           "ok": g_ok and (not bad) and abs(mb) <= 1e-3 and abs(hb) <= 1e-3}
     m = lambda k, key: D[k][key].mean(0)  # noqa: E731
     t = (XE >= 40) & (XE <= 94)
     if all(k in D for k in ("forge_plain_ad", "forge_plain_tw", "su2_ad", "su2_tw")):
@@ -216,11 +288,18 @@ if __name__ == "__main__":
     sp = ap.add_subparsers(dest="cmd", required=True)
     for c in ("reduce-forge", "reduce-su2"):
         p = sp.add_parser(c); p.add_argument("run"); p.add_argument("--last", type=int, default=5)
+    for c in ("gates-forge", "gates-su2"):
+        p = sp.add_parser(c); p.add_argument("run")
     sp.add_parser("compare")
     a = ap.parse_args()
     if a.cmd == "reduce-forge":
         print(reduce_run(HERE / a.run, "forge", a.last))
     elif a.cmd == "reduce-su2":
         print(reduce_run(HERE / a.run, "su2", a.last))
+    elif a.cmd == "gates-forge":
+        sys.path.insert(0, str(HERE))
+        print(gates_forge(HERE / a.run))
+    elif a.cmd == "gates-su2":
+        print(gates_su2(HERE / a.run))
     else:
         compare()
