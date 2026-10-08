@@ -6,7 +6,7 @@ SU2 は forge と同じ節点 (格子の節点の順番 = msh の順番 = forge 
     (cold_pair.theta_diag と同じ式)。y_b = 各 x で TP の断熱 (run_0181) と 300 K (run_0183) の抽出の band_y_b の大きい方、感度に ×1.25。
   - 壁の τ_w・q_w: 壁の法線に沿った壁節点・第 1・第 2 内部節点から 2 次の片側差分で ∂u_t/∂n・∂T/∂n、μ は Sutherland
     (1.716e-5/273/111)、λ = μ c_p/Pr (Pr 0.72)。q_w は流体から壁へ向かう向きを正。Q_w = Σ q_w 2π r ds (台形)。
-  - 入口・出口の質量流量と全エンタルピー流量 (h0 = c_p T + ½|u|²、k は含めない): 列 i = 0 と i = ni−1 で 2π∫ρu_x (·) r dr。
+  - 入口・出口の質量流量と全エンタルピー流量: forge の h0 は VALUE/h0、SU2 は c_p T + ½|u|² + k (SU2 のエネルギーは k を含む)。列の折れ線を通る流束。
   - x = 40・70・94 の断面の ρu・T の分布。
 CPG の定数は γ 1.27354、c_p 1360、R = c_p(γ−1)/γ。TP の run を読むと h0 は CPG の式になるので、収支は CPG の run だけで見る。
 
@@ -52,9 +52,9 @@ def common_yb():
     return x, yb
 
 
-def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb):
+def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb, h0=None):
     x = xy[:, 0].reshape(ni, nj) / S; r = xy[:, 1].reshape(ni, nj) / S
-    RO = ro.reshape(ni, nj); UX = ux.reshape(ni, nj); UY = uy.reshape(ni, nj); TT = T.reshape(ni, nj); KK = k.reshape(ni, nj)
+    RO = ro.reshape(ni, nj); UX = ux.reshape(ni, nj); UY = uy.reshape(ni, nj); TT = T.reshape(ni, nj); KK = k.reshape(ni, nj); H0 = None if h0 is None else h0.reshape(ni, nj)
     xt = x[:, 0].copy()
     R = np.empty_like(r); Q = {"ro": np.empty_like(RO), "ux": np.empty_like(UX), "T": np.empty_like(TT)}
     for j in range(nj):
@@ -94,7 +94,7 @@ def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb):
     # 入口・出口の流量: 列の折れ線を通る流束 2π∫(F_x dr − F_r dx) r (出口の列は壁法線の層で一定 x でない)
     for i, tag in ((0, "in"), (ni - 1, "out")):
         xx = x[i] * S; rr = r[i] * S
-        h0 = CP * TT[i] + 0.5 * (UX[i] ** 2 + UY[i] ** 2) + (KK[i] if h0_with_k else 0.0)
+        h0 = H0[i] if H0 is not None else CP * TT[i] + 0.5 * (UX[i] ** 2 + UY[i] ** 2) + (KK[i] if h0_with_k else 0.0)
         fl = lambda q: 2 * np.pi * float(np.sum(0.5 * ((RO[i] * q * UX[i] * rr)[1:] + (RO[i] * q * UX[i] * rr)[:-1]) * np.diff(rr)  # noqa: E731
                                                 - 0.5 * ((RO[i] * q * UY[i] * rr)[1:] + (RO[i] * q * UY[i] * rr)[:-1]) * np.diff(xx)))
         out["mdot_" + tag] = np.array(fl(1.0)); out["Hdot_" + tag] = np.array(fl(h0)); out["Kdot_" + tag] = np.array(fl(KK[i]))
@@ -104,12 +104,20 @@ def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb):
     return out
 
 
-def load_forge(run, step):
+def load_forge(run, step, with_h0=False):
+    """forge の res。with_h0 なら全エンタルピー VALUE/h0 も返す (AGENTS.md: 全温・全圧は VALUE/h0 から作る)。"""
     import h5py
     with h5py.File(run / "nozzle.h5", "r") as h:
         xy = np.array(h["MESH/COORD"], dtype=float).reshape(-1, 3)[:, :2]
     with h5py.File(run / f"res_{step}.h5", "r") as h:
-        return xy, *(np.array(h["VALUE/" + k], dtype=float) for k in ("ro", "Ux", "Uy", "T", "k"))
+        v = [np.array(h["VALUE/" + k], dtype=float) for k in ("ro", "Ux", "Uy", "T", "k")]
+        if with_h0:
+            if "VALUE/h0" not in h:
+                raise SystemExit(f"{run.name}/res_{step}.h5 に VALUE/h0 が無い")
+            if bool(h["VALUE/h0"].attrs.get("h0_includes_k", 0)):
+                raise SystemExit("h0 が k を含む run は想定していない (CPG の照合の forge は sstEnergyIncludesK 0)")
+            v.append(np.array(h["VALUE/h0"], dtype=float))
+    return (xy, *v)
 
 
 def load_su2(run, it):
@@ -183,16 +191,18 @@ def reduce_run(run: Path, kind: str, last: int = 5) -> Path:
     yb_x, yb = common_yb()
     if kind == "forge":
         steps = sorted(int(re.match(r"res_(\d+)\.h5$", p.name).group(1)) for p in run.glob("res_[0-9]*.h5"))[-last:]
-        loader = lambda s: load_forge(run, s)  # noqa: E731
+        loader = lambda s: load_forge(run, s, with_h0=True)  # noqa: E731
     else:
         steps = sorted(int(re.match(r"restart_flow_(\d+)\.csv$", p.name).group(1)) for p in run.glob("restart_flow_[0-9]*.csv"))[-last:]
         loader = lambda s: load_su2(run, s)  # noqa: E731
     rec = {}
     for k, st in enumerate(steps):
-        xy, ro, ux, uy, T, tke = loader(st)
-        rec[f"s{k}_nonfinite"] = np.array(int(sum(np.count_nonzero(~np.isfinite(a)) for a in (ro, ux, uy, T, tke))))
+        xy, ro, ux, uy, T, tke, *h0 = loader(st)
+        h0 = h0[0] if h0 else None
+        rec[f"s{k}_nonfinite"] = np.array(int(sum(np.count_nonzero(~np.isfinite(a)) for a in (ro, ux, uy, T, tke, *([h0] if h0 is not None else [])))))
         ni, nj, S = mesh_info(len(ro))
-        o = reduce_fields(xy, ro, ux, uy, T, tke, kind == "su2", ni, nj, S, yb_x, yb)   # SU2 のエネルギーは k を含む
+        # forge は VALUE/h0、SU2 は c_p T + ½|u|² + k (SU2 のエネルギーは k を含む)
+        o = reduce_fields(xy, ro, ux, uy, T, tke, kind == "su2", ni, nj, S, yb_x, yb, h0=h0)
         for key, v in o.items():
             rec[f"s{k}_{key}"] = np.asarray(v)
         print(f"[reduce] {run.name} {st}: Q_w {float(o['Q_w']) / 1e6:.4f} MW、ṁ 入口 {float(o['mdot_in']):.4f} 出口 {float(o['mdot_out']):.4f}", flush=True)
@@ -247,7 +257,12 @@ def compare() -> dict:
         gp = OUTD / f"xcheck_gates_{runs[k]}.json"
         g = json.loads(gp.read_text()) if gp.is_file() else None
         nonfin = int(sum(int(Z) for Z in d["nonfinite"]))
-        g_ok = (g is not None and g["nan_verdict"] == "CLEAN" and not g["convergence"]["diverged"] and not g["convergence"]["rising"]
+        # 受理する収束判定 (plan #26 の前提「RISING/DIVERGED なし」+ codex 2026-10-08 M6): PASS・stalled/plateau・still converging。
+        # 判定行が無い・判定不能・DIVERGED・RISING・NO residual は不合格。
+        cv = g["convergence"]["verdict"] if g else ""
+        conv_ok = (g is not None and "->" in cv and "判定不能" not in cv and "DIVERGED" not in cv and "NO residual" not in cv
+                   and any(t in cv for t in ("PASS", "stalled/plateau", "still converging")))
+        g_ok = (g is not None and g["nan_verdict"] == "CLEAN" and conv_ok and not g["convergence"]["diverged"] and not g["convergence"]["rising"]
                 and nonfin == 0 and (g["kind"] == "forge" or g["reached_ITER"]))
         out["gates"][k] = {"not_steady": bad, "mass_balance": mb, "enthalpy_balance": hb, "nonfinite_window": nonfin,
                            "gates_file": gp.name if g else "(無い → 判定不能)", "nan": g and g["nan_verdict"],
@@ -266,6 +281,8 @@ def compare() -> dict:
                 good = t & np.isfinite(a) & np.isfinite(b) & (np.abs(b) > 0)
                 met[f"{key}_{arm}_max_rel"] = float(np.max(np.abs(a[good] / b[good] - 1.0))) if good.any() else None
         met["Q_w_tw_rel"] = float(np.mean(D["forge_plain_tw"]["Q_w"]) / np.mean(D["su2_tw"]["Q_w"]) - 1.0)
+        a = m("forge_plain_ad", "T_w"); b = m("su2_ad", "T_w")              # 記録のみ (判定に使わない)
+        met["T_w_ad_max_rel_record"] = float(np.max(np.abs(a / b - 1.0)[t]))
         lim = {"R_loc_max_rel": 0.02, "delta_loc_ad_max_rel": 0.03, "delta_loc_tw_max_rel": 0.03, "theta_r_ad_max_rel": 0.03,
                "theta_r_tw_max_rel": 0.03, "c_f_ad_max_rel": 0.03, "c_f_tw_max_rel": 0.03, "q_w_tw_max_rel": 0.05}
         met["pass"] = {k2: (met[k2] is not None and met[k2] <= v) for k2, v in lim.items()}
