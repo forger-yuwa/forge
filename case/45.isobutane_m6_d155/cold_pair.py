@@ -541,6 +541,60 @@ def ab_compare(ad_name: str, tw_name: str) -> dict:
     return out
 
 
+def theta_diag(run: Path, step: int | None = None) -> Path:
+    """AWS: NS の θ の抽出 (plan §5.1 #24、記録)。δ_E と同じ抽出 (帯 E、一定 x の断面) から帯の外縁 y_b を取り、断面の NS の分布で
+    外縁の値 (ρ_e, u_e) を縁として、面積で等価な厚さを作る:
+      質量: 2π∫_{r_w−y_b}^{r_w} (ρ_e u_e − ρu) r dr = π(r_w² − (r_w − δ_loc)²) ρ_e u_e
+      運動量: 2π∫ ρu (u_e − u) r dr = π(r_w² − (r_w − θ_r)²) ρ_e u_e²
+    比 (300 K/断熱) だけを CONTUR と比べる (δ_loc/θ_r は CONTUR の H と定義が違う)。→ _band_ab/cold_pair/theta_<run>_<step>.npz"""
+    import os
+    import shutil
+    import tempfile
+    import h5py
+    from forge_design.metrics.deltastar import deltastar_from_core_matched_euler
+    info = NS.jload(run / "prepare_info.json"); S = float(info["scale_m"]); ni, nj = int(info["mesh"]["ni"]), int(info["mesh"]["nj"])
+    if step is None:
+        step = sorted(NS.step_of(f) for f in NS.res_files(run))[-1]
+    with tempfile.TemporaryDirectory() as td:
+        dd = Path(td) / "ns"; dd.mkdir()
+        for f in ("bcondConfig.yaml", "solverConfig.yaml", "prepare_info.json"):
+            shutil.copy(run / f, dd / f)
+        os.symlink((run / "nozzle.h5").resolve(), dd / "nozzle.h5")
+        os.symlink((run / f"res_{step}.h5").resolve(), dd / f"res_{step}.h5")
+        ex = deltastar_from_core_matched_euler(dd, HERE / EULER_REF, band_select="edge", remap_constant_x=True)
+    with h5py.File(run / "nozzle.h5") as h:
+        nc = h["/MESH/COORD"][:].reshape(-1, 3)
+    with h5py.File(run / f"res_{step}.h5") as h:
+        ro = h["/VALUE/ro"][:].astype(float); ux = h["/VALUE/Ux"][:].astype(float)
+    x = nc[:, 0].reshape(ni, nj) / S; r = nc[:, 1].reshape(ni, nj) / S
+    ro = ro.reshape(ni, nj); ux = ux.reshape(ni, nj)
+    xt = x[:, 0].copy()
+    R = np.empty_like(r); RO = np.empty_like(ro); UX = np.empty_like(ux)
+    for j in range(nj):                                   # 一定 x の断面 (抽出の B 腕と同じ)
+        R[:, j] = np.interp(xt, x[:, j], r[:, j]); RO[:, j] = np.interp(xt, x[:, j], ro[:, j]); UX[:, j] = np.interp(xt, x[:, j], ux[:, j])
+    xs = np.asarray(ex["x"]); yb = np.asarray(ex["band_y_b"], dtype=float)
+    th = np.full(len(xs), np.nan); dl = np.full(len(xs), np.nan)
+    for i, xv in enumerate(xs):
+        k = int(np.argmin(np.abs(xt - xv)))
+        if not np.isfinite(yb[i]) or abs(xt[k] - xv) > 1e-9:
+            continue
+        rr = R[k]; rw = rr[-1]; rb = rw - yb[i]
+        if rb <= rr[0]:
+            continue
+        rf = np.linspace(rb, rw, 4001)
+        rho = np.interp(rf, rr, RO[k]); u = np.interp(rf, rr, UX[k])
+        re_, ue_ = rho[0], u[0]
+        qm = np.trapezoid((re_ * ue_ - rho * u) * rf, rf)
+        qq = np.trapezoid(rho * u * (ue_ - u) * rf, rf)
+        dl[i] = rw - np.sqrt(max(rw ** 2 - 2.0 * qm / (re_ * ue_), 0.0))
+        th[i] = rw - np.sqrt(max(rw ** 2 - 2.0 * qq / (re_ * ue_ ** 2), 0.0))
+    OUTD.mkdir(parents=True, exist_ok=True)
+    p = OUTD / f"theta_{run.name}_{step}.npz"
+    np.savez(p, x=xs, theta_r=th, delta_loc=dl, delta_r_raw=np.asarray(ex["delta_r_raw"]), band_y_b=yb, step=np.array(step), scale=np.array(S))
+    print(f"[theta] {run.name} res_{step}: θ の有効点 {int(np.isfinite(th).sum())}/{len(th)}")
+    return p
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -550,6 +604,7 @@ if __name__ == "__main__":
     p = sp.add_parser("prep-ext"); p.add_argument("src"); p.add_argument("run"); p.add_argument("steps", type=int)
     p = sp.add_parser("extract"); p.add_argument("run")
     p = sp.add_parser("extract-b"); p.add_argument("run")
+    p = sp.add_parser("theta"); p.add_argument("run"); p.add_argument("--step", type=int, default=None)
     p = sp.add_parser("ab-compare"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("gates"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("judge"); p.add_argument("ad"); p.add_argument("tw")
@@ -562,6 +617,8 @@ if __name__ == "__main__":
         prep_ext(HERE / a.src, HERE / a.run, a.steps)
     elif a.cmd == "extract":
         print(extract(HERE / a.run))
+    elif a.cmd == "theta":
+        print(theta_diag(HERE / a.run, a.step))
     elif a.cmd == "extract-b":
         print(extract_b(HERE / a.run))
     elif a.cmd == "ab-compare":
