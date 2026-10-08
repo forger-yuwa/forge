@@ -1,0 +1,29 @@
+# 再生の起動時検査 (不一致は exit 2、ダンプ無し、残差の行 0)。入力 cpg_c52cht、FORGE_DUMP_EOS_STEP=3 (drop_roe の旧版は 1)
+--- run_drop_roe: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: 再生ファイル /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/drop_roe.h5 が var.c_d と一致しない (1 件)
+  配列が無い: roe
+rc=2
+--- run_extra: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: 再生ファイル /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/extra.h5 が var.c_d と一致しない (1 件)
+  var.c_d に無い (または null の) 配列: bogus
+rc=2
+--- run_f64_P: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: 再生ファイル /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/f64_P.h5 が var.c_d と一致しない (1 件)
+  dtype が float32 でない (Float64): P
+rc=2
+--- run_nopre: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: 再生ファイル /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/nopre.h5 が var.c_d と一致しない (1 件)
+  /pre が無い
+rc=2
+--- run_nostep: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: FORGE_EOS_REPLAY_FILE は FORGE_DUMP_EOS_STEP・FORGE_DUMP_EOS_FILE と併用する (再生した EOS をダンプして終了するため)
+--- run_old_drop_roe: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: 再生ファイル /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/drop_roe.h5 が var.c_d と一致しない (1 件)
+  配列が無い: roe
+rc=2
+--- run_samepath: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: FORGE_EOS_REPLAY_FILE と FORGE_DUMP_EOS_FILE が同じ (/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/same.h5)。出力で入力を潰す
+--- run_short_T: rc=2 dump 無し 残差行 0
+[eos-dump] 拒否: 再生ファイル /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/neg/short_T.h5 が var.c_d と一致しない (1 件)
+  長さが nCells_all (433) でない: T
+rc=2

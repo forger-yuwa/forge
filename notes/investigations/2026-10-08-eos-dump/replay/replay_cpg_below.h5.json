@@ -1,0 +1,23 @@
+{
+ "base": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/base_cpg_c52cht.h5",
+ "base_sha256": "06628e8033ff0b8a03d54260d0f500eecddcc7250bba693a041c207bf75d1f14",
+ "node": 154,
+ "de_J_per_kg": -10000.0,
+ "roe_old": 2622.735107421875,
+ "roe_new": -109.73788452148438,
+ "e_in": -9999.9287109375,
+ "e_floor": 0.07174999818744254,
+ "margin": -10000.000460935687,
+ "cv_Tmin": 717.5,
+ "rho": 0.010973867028951645,
+ "ek": 9.814625501203267e-11,
+ "ulp_roe": 7.62939453125e-06,
+ "T_min": 9.999999747378752e-05,
+ "checks": {
+  "only_roe_at_node_changed": true,
+  "abs_margin_ge_cv_1K": true,
+  "rho_abs_margin_ge_64ulp": true,
+  "side": true
+ },
+ "out_sha256": "296ca45800423d0294709db9c3725be1eec72eb958170644d55af11856701ad4"
+}

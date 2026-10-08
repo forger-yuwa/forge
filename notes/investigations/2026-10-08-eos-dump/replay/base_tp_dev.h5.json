@@ -1,0 +1,16 @@
+{
+ "input": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/inputs/tp_dev",
+ "old": {
+  "bin": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/build_old_replay/forge",
+  "sha256": "51e52e7ad23ca560982baee620248ba290ecd6fe6460c78ad92efeb56f2bbf75",
+  "dump_sha256": "5349f74db2cd6bea1a8f84827252243264536e8c0270ce5683ba7911dca8cae6"
+ },
+ "new": {
+  "bin": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/build_new_replay/forge",
+  "sha256": "b409c5c116ef951f9936a7886897550c432845c8170c0a320e18716de720f8c3",
+  "dump_sha256": "5349f74db2cd6bea1a8f84827252243264536e8c0270ce5683ba7911dca8cae6"
+ },
+ "pre_arrays": 223,
+ "pre_diff_arrays": [],
+ "out": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/base_tp_dev.h5"
+}

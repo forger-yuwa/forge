@@ -1,0 +1,1752 @@
+{
+ "rule_version": 2,
+ "source": "notes/investigations/2026-10-08-eos-dump/cmp_*.txt に対応する比較 JSON (scratch の work/cmp_*.json)",
+ "rejudged": {
+  "cpg_abA_new_r1_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abA_old_r1_vs_new_r1": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abA_old_r1_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abA_old_r1_vs_old_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abA_old_r2_vs_new_r1": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abA_old_r2_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abB_new_r1_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abB_old_r1_vs_new_r1": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abB_old_r1_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abB_old_r1_vs_old_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abB_old_r2_vs_new_r1": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_abB_old_r2_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_c52cht_new_r1_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_c52cht_old_r1_vs_new_r1": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_c52cht_old_r1_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_c52cht_old_r1_vs_old_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_c52cht_old_r2_vs_new_r1": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "cpg_c52cht_old_r2_vs_new_r2": {
+   "stored_verdict": "IDENTICAL",
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [],
+   "eos_branches": [
+    "cpg_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abA_new_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abA_old_r1_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abA_old_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abA_old_r1_vs_old_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abA_old_r2_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abA_old_r2_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abB_new_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abB_old_r1_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abB_old_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abB_old_r1_vs_old_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abB_old_r2_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_abB_old_r2_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_dev_new_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_dev_old_r1_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_dev_old_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_dev_old_r1_vs_old_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_dev_old_r2_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_dev_old_r2_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_init_new_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_init_old_r1_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_init_old_r1_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_init_old_r1_vs_old_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_init_old_r2_vs_new_r1": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  },
+  "tp_init_old_r2_vs_new_r2": {
+   "stored_verdict": "INVALID",
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 cp の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 2082・B 2082 (判定外。無害の認定ではない)"
+   ],
+   "eos_branches": [
+    "tp_1ph"
+   ],
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_bytes": 5388516,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "reason": null
+  }
+ }
+}

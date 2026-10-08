@@ -1,0 +1,24 @@
+# 両版のパッチ (フック + 診断専用の再生) の同一性 (2026-10-08)
+新 = HEAD 30f86067 の作業ツリー (基準 f8e6d547 = フック導入前), 旧 = /home/sano/work/forge-eos-old (9f35e3e7 + 同じパッチ)
+e0be5dceb64b39833542a661df3ed0d645ba2ca3b8bb74c07f8851399468188d  hook_replay_new.patch
+611cde181db82b1d410303fdb170d11776320e54d33e6e2f4f3347fcebfb5e9e  hook_replay_old.patch
+index 行と hunk の行番号を除いた diff:
+  差なし (PATCH IDENTICAL)
+生の diff (旧 < / 新 >):
+14c14
+< index 78f57022..893e5f4a 100755
+---
+> index 2b9837f3..3930786b 100755
+25c25
+< @@ -2029,7 +2030,9 @@ static void assembleResidualPre(StepContext& s)
+---
+> @@ -2038,7 +2039,9 @@ static void assembleResidualPre(StepContext& s)
+eosDump.{hpp,cpp} の sha256 (両ツリー):
+f0caddc4d6e5f7da8929e0b86241d659b1b1502837fa3aeb9b50af48cbabc662  /home/sano/work/forge-eos-old/solver_density_cuda/eosDump.hpp
+f0caddc4d6e5f7da8929e0b86241d659b1b1502837fa3aeb9b50af48cbabc662  /home/sano/work/forge-sern-design/solver_density_cuda/eosDump.hpp
+dd37b919c032f36bc76191d7ab8d343437c34f76cf8e01f6ece4164fccade9de  /home/sano/work/forge-eos-old/solver_density_cuda/eosDump.cpp
+dd37b919c032f36bc76191d7ab8d343437c34f76cf8e01f6ece4164fccade9de  /home/sano/work/forge-sern-design/solver_density_cuda/eosDump.cpp
+バイナリ (クリーンビルド、CUDA arch 86):
+51e52e7ad23ca560982baee620248ba290ecd6fe6460c78ad92efeb56f2bbf75  build_old_replay/forge
+b409c5c116ef951f9936a7886897550c432845c8170c0a320e18716de720f8c3  build_new_replay/forge
+9c69d9ff365831c422765df6720b7edbe7e5950991484567bfb175bcbc73261a  build_headref/forge

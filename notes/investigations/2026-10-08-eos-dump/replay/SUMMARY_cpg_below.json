@@ -1,0 +1,405 @@
+{
+ "input": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/work/inputs/cpg_c52cht",
+ "old": {
+  "bin": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/build_old_replay/forge",
+  "sha256": "51e52e7ad23ca560982baee620248ba290ecd6fe6460c78ad92efeb56f2bbf75"
+ },
+ "new": {
+  "bin": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/build_new_replay/forge",
+  "sha256": "b409c5c116ef951f9936a7886897550c432845c8170c0a320e18716de720f8c3"
+ },
+ "env": {},
+ "step": 1,
+ "replay": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5",
+ "replay_sha256": "296ca45800423d0294709db9c3725be1eec72eb958170644d55af11856701ad4",
+ "node": 154,
+ "expect_floor": 1,
+ "runs": {
+  "old_r1": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "4236c1af5525f526cd0f9caaef5eb0b1bacc1fa2b0c0e299df7444f713be5c94",
+   "dump_bytes": 823936,
+   "floor_rows": [],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/old_r1/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 191 cell arrays from /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/old_r1/eos_dump.h5 (step 1, 433 cells incl. ghost, 191 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "new_r1": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "4236c1af5525f526cd0f9caaef5eb0b1bacc1fa2b0c0e299df7444f713be5c94",
+   "dump_bytes": 823936,
+   "floor_rows": [
+    {
+     "kind": "init",
+     "session": "1",
+     "step": "0",
+     "inner": "0",
+     "q_index": "-1",
+     "path": "steady_implicit",
+     "n_real": "357",
+     "n_ghost": "76",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "76",
+     "nRho_ghost": "76",
+     "nP_ghost": "76",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    },
+    {
+     "kind": "eos",
+     "session": "1",
+     "step": "1",
+     "inner": "0",
+     "q_index": "0",
+     "path": "steady_implicit",
+     "n_real": "357",
+     "n_ghost": "76",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "1",
+     "nRho_real": "0",
+     "nP_real": "1",
+     "nT_ghost": "0",
+     "nRho_ghost": "0",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "1",
+     "dRhoE_T_sum": "109.73867534776339",
+     "dRhoE_T_max": "109.73867534776339",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "44.895153045654297",
+     "dP_max": "44.895153045654297",
+     "ids_T": "154",
+     "ids_Rho": "",
+     "ids_P": "154",
+     "ids_near": "154",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    }
+   ],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/new_r1/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 191 cell arrays from /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/new_r1/eos_dump.h5 (step 1, 433 cells incl. ghost, 191 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "old_r2": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "4236c1af5525f526cd0f9caaef5eb0b1bacc1fa2b0c0e299df7444f713be5c94",
+   "dump_bytes": 823936,
+   "floor_rows": [],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/old_r2/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 191 cell arrays from /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/old_r2/eos_dump.h5 (step 1, 433 cells incl. ghost, 191 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "new_r2": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "6de78221087799cd41bee26c4e94c863680f2587f1476ff63caad8c1e33b6c22",
+   "dump_bytes": 823936,
+   "floor_rows": [
+    {
+     "kind": "init",
+     "session": "1",
+     "step": "0",
+     "inner": "0",
+     "q_index": "-1",
+     "path": "steady_implicit",
+     "n_real": "357",
+     "n_ghost": "76",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "76",
+     "nRho_ghost": "76",
+     "nP_ghost": "76",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    },
+    {
+     "kind": "eos",
+     "session": "1",
+     "step": "1",
+     "inner": "0",
+     "q_index": "0",
+     "path": "steady_implicit",
+     "n_real": "357",
+     "n_ghost": "76",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "1",
+     "nRho_real": "0",
+     "nP_real": "1",
+     "nT_ghost": "0",
+     "nRho_ghost": "0",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "1",
+     "dRhoE_T_sum": "109.73867534776339",
+     "dRhoE_T_max": "109.73867534776339",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "44.895153045654297",
+     "dP_max": "44.895153045654297",
+     "ids_T": "154",
+     "ids_Rho": "",
+     "ids_P": "154",
+     "ids_near": "154",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    }
+   ],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/new_r2/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 191 cell arrays from /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/ab_cpg_below/new_r2/eos_dump.h5 (step 1, 433 cells incl. ghost, 191 cell arrays x {pre, post}); exiting"
+   ]
+  }
+ },
+ "compare": {
+  "old_r1_vs_new_r1": {
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [],
+   "invalid_v2": [],
+   "info_v2": [],
+   "different": []
+  },
+  "old_r1_vs_old_r2": {
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [],
+   "invalid_v2": [],
+   "info_v2": [],
+   "different": []
+  },
+  "old_r2_vs_new_r1": {
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [],
+   "invalid_v2": [],
+   "info_v2": [],
+   "different": []
+  },
+  "new_r1_vs_new_r2": {
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [],
+   "invalid_v2": [],
+   "info_v2": [],
+   "different": []
+  },
+  "old_r1_vs_new_r2": {
+   "verdict_v1": "IDENTICAL",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 32908,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [],
+   "invalid_v2": [],
+   "info_v2": [],
+   "different": []
+  }
+ },
+ "replay_checks": {
+  "old_r1": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "state": {
+    "ro": 0.010973867028951645,
+    "ro_temp": 0.010973867028951645,
+    "ek": 9.814625501203267e-11,
+    "roe": -109.73788452148438,
+    "e_in": -9999.9287109375,
+    "ulp_roe": 7.62939453125e-06,
+    "T_min": 9.999999747378752e-05,
+    "e_floor": 0.07174999818744254,
+    "cv_Tmin": 717.5,
+    "feTq": -13.937182426452637,
+    "margin": -10000.000460935687
+   },
+   "post_T_node": 9.999999747378752e-05,
+   "post_T_node_hex": "0x38d1b717",
+   "replay_attrs": [
+    1,
+    "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5"
+   ]
+  },
+  "new_r1": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "state": {
+    "ro": 0.010973867028951645,
+    "ro_temp": 0.010973867028951645,
+    "ek": 9.814625501203267e-11,
+    "roe": -109.73788452148438,
+    "e_in": -9999.9287109375,
+    "ulp_roe": 7.62939453125e-06,
+    "T_min": 9.999999747378752e-05,
+    "e_floor": 0.07174999818744254,
+    "cv_Tmin": 717.5,
+    "feTq": -13.937182426452637,
+    "margin": -10000.000460935687
+   },
+   "post_T_node": 9.999999747378752e-05,
+   "post_T_node_hex": "0x38d1b717",
+   "replay_attrs": [
+    1,
+    "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5"
+   ]
+  },
+  "old_r2": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "state": {
+    "ro": 0.010973867028951645,
+    "ro_temp": 0.010973867028951645,
+    "ek": 9.814625501203267e-11,
+    "roe": -109.73788452148438,
+    "e_in": -9999.9287109375,
+    "ulp_roe": 7.62939453125e-06,
+    "T_min": 9.999999747378752e-05,
+    "e_floor": 0.07174999818744254,
+    "cv_Tmin": 717.5,
+    "feTq": -13.937182426452637,
+    "margin": -10000.000460935687
+   },
+   "post_T_node": 9.999999747378752e-05,
+   "post_T_node_hex": "0x38d1b717",
+   "replay_attrs": [
+    1,
+    "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5"
+   ]
+  },
+  "new_r2": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "state": {
+    "ro": 0.010973867028951645,
+    "ro_temp": 0.010973867028951645,
+    "ek": 9.814625501203267e-11,
+    "roe": -109.73788452148438,
+    "e_in": -9999.9287109375,
+    "ulp_roe": 7.62939453125e-06,
+    "T_min": 9.999999747378752e-05,
+    "e_floor": 0.07174999818744254,
+    "cv_Tmin": 717.5,
+    "feTq": -13.937182426452637,
+    "margin": -10000.000460935687
+   },
+   "post_T_node": 9.999999747378752e-05,
+   "post_T_node_hex": "0x38d1b717",
+   "replay_attrs": [
+    1,
+    "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/replay_cpg_below.h5"
+   ]
+  }
+ },
+ "replay_record": {
+  "base": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/eosdump/replay/base_cpg_c52cht.h5",
+  "base_sha256": "06628e8033ff0b8a03d54260d0f500eecddcc7250bba693a041c207bf75d1f14",
+  "node": 154,
+  "de_J_per_kg": -10000.0,
+  "roe_old": 2622.735107421875,
+  "roe_new": -109.73788452148438,
+  "e_in": -9999.9287109375,
+  "e_floor": 0.07174999818744254,
+  "margin": -10000.000460935687,
+  "cv_Tmin": 717.5,
+  "rho": 0.010973867028951645,
+  "ek": 9.814625501203267e-11,
+  "ulp_roe": 7.62939453125e-06,
+  "T_min": 9.999999747378752e-05,
+  "checks": {
+   "only_roe_at_node_changed": true,
+   "abs_margin_ge_cv_1K": true,
+   "rho_abs_margin_ge_64ulp": true,
+   "side": true
+  }
+ },
+ "replay_verdict": "PASS",
+ "replay_reasons": [
+  "new_r1: eos 行 step 1 inner 0 q_index 0: nT_real 1 ids_T '154' nRho_real 0 nP_real 1 ids_P '154' dRhoE_T_sum 109.73867534776339 n_near_real 1 ids_near '154' nT_mismatch_real 0 overflow 0",
+  "new_r2: eos 行 step 1 inner 0 q_index 0: nT_real 1 ids_T '154' nRho_real 0 nP_real 1 ids_P '154' dRhoE_T_sum 109.73867534776339 n_near_real 1 ids_near '154' nT_mismatch_real 0 overflow 0"
+ ]
+}
