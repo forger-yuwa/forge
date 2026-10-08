@@ -35,6 +35,8 @@ PYTHONPATH=. .venv-opt/bin/python -m forge_design.evaluate.runner_sern \
 
 ## 計算 run 一覧
 
+> **ローカルの削除 (2026-10-08、ユーザ「まずデータ容量削減しなきゃ」)**: `/home/sano/work/forge/case/46.sern_design/` の 222 run で、中間の全場スナップショット (`res_<n>.h5`/`.xmf` のうち `res_0` と最後の n 以外) と段出力 (`_<段名>_res_*`) を削除 (9545 ファイル、77.3 GB)。最終場・`res_0`・壁面出力・残差・VERDICT・ログは残した。更新が 24 時間以内の run は対象外 (該当 0)。一覧 `notes/investigations/2026-10-08-prune-case46-local.log.gz`。
+>
 > **AWS の大規模削除 (2026-10-05、ユーザ「容量削減のためガンガン消して」)**: `~/forge-r8`・`~/forge-pgrad-new`・`~/forge-sern` の case/46 run から、全場 (`res_<n>.h5`)・壁面出力の時系列・段出力・`sern.h5`/`sern.msh` を削除 (case/58 と合わせて約 44 GB)。残したもの: CSV (力・残差)・ログ・VERDICT・`metrics.json`・config・帳簿 (小)。最終場と `sern.h5` を残したのは exact A 形状の 3 作動点の起点 `run_1050_r7b_x_lsw08` (m6_on)・`run_1055_r7b_m10_A_c` (m10_on)・`run_1058_r7b_m4_A_c` (m4_off) だけ。以前に残していた run_1017・run_1021・run_1034・run_1040・run_0971–0973 の場も消した (以後の SERN 3D は有限厚カウルの新形状で取り直すため)。
 
 > **AWS の全場削除 (2026-10-03、ディスク逼迫でユーザ指示)**: `~/forge-pgrad-new` と `~/forge-r8` の case/46 run から全場 (`res_<n>.h5`)・段出力・`sern.h5`/`sern.msh` を削除 (case/58 と合わせて 39.8 GB)。残したもの: 力係数・残差の CSV、VERDICT、`metrics.json`、config、壁面出力の時系列。最終場と `sern.h5` を残したのは継続の起点 `run_1017_ff4f_g3_2p50` (g3)・`run_1021_ff4f_g4_2p50_cont20k` (g4)・`run_0971`/`0972`/`0973` (g3/g4/g1 の旧系列) だけ。他の run の場が要るときは起点から回し直す。
