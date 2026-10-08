@@ -602,7 +602,7 @@ CPG_PHYS = ("physProp: {thermalMethod: 0, viscMethod: 1, visc: 1.8e-5, thermCond
 TURB_PLAIN = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0, wallTreatmentSST: 0, turbulentPrandtl: 0.9}'
 
 
-def prep_cpg(mesh_run: Path, field_res: Path, run: Path, variant: str, main_steps: int = 100000, out_int: int = 10000) -> dict:
+def prep_cpg(mesh_run: Path, field_res: Path, run: Path, variant: str, main_steps: int = 100000, out_int: int = 20000) -> dict:
     """準備済みの TP の run (mesh_run: 格子・壁・BC) を複製して CFD を CPG に書き換える。初期値は field_res (収束した TP の解) の
     ρ・U・P・k・ω を CPG の保存量 (roe = P/(γ−1) + ½ρ|U|²) に組み直したもの。variant: plain (dilat 0・KL 0) / dilat2 (生産と同じ)。"""
     import re as _re
@@ -634,6 +634,16 @@ def prep_cpg(mesh_run: Path, field_res: Path, run: Path, variant: str, main_step
     cfg = _re.sub(r"outStepInterval: *\d+", f"outStepInterval: {int(out_int)}", cfg, count=1)
     if "thermalMethod: 0" not in cfg or ("dilatationCorrection: 0" in cfg) != (variant == "plain"):
         raise SystemExit("solverConfig の書き換えの検査が不成立 — 止める")
+    # 物性の検査 (codex diagnose 2026-10-08 Major): 実効の physProp が Sutherland (1.716e-5/273/111) + 定 Pr 0.72 で、
+    # 化学種・transport が無いこと。λ(T) = μ(T)·c_p/Pr を SU2 の CONSTANT_PRANDTL と同じ式で照合する
+    import yaml as _yaml
+    php = _yaml.safe_load(cfg)["physProp"]
+    need = {"thermalMethod": 0, "viscMethod": 1, "thermCondMethod": 1, "prandtlLam": 0.72, "cp": CPG_CP, "gamma": CPG_GAMMA}
+    bad = {k: php.get(k) for k, v in need.items() if php.get(k) != v}
+    if bad or "species" in php or "transport" in php:
+        raise SystemExit(f"physProp が CPG の照合の条件と違う ({bad}、species/transport の有無 {'species' in php}/{'transport' in php}) — 止める")
+    mu = lambda T: 1.716e-5 * (T / 273.0) ** 1.5 * (273.0 + 111.0) / (T + 111.0)  # noqa: E731  (forge viscMethod 1 = SU2 の指定)
+    lam = {T: mu(T) * CPG_CP / 0.72 for T in (300.0, 1500.0)}
     (run / "solverConfig.yaml").write_text(cfg)
     bc = (run / "bcondConfig.yaml").read_text()
     bc2 = _re.sub(r"Y0: *[0-9.eE+-]+, *Y1: *[0-9.eE+-]+, *", "", bc)
@@ -663,6 +673,7 @@ def prep_cpg(mesh_run: Path, field_res: Path, run: Path, variant: str, main_step
            "field_res_sha256": NS.sha256_file(field_res), "gas": {"gamma": CPG_GAMMA, "cp": CPG_CP, "R": CPG_CP * (CPG_GAMMA - 1) / CPG_GAMMA,
            "mu": "Sutherland 1.716e-5/273/111", "Pr": 0.72, "Prt": 0.9}, "variant": variant, "stages": STAGES, "main_steps": int(main_steps),
            "out_interval": int(out_int), "bcond_wall": next(l for l in bc2.splitlines() if "physID: 3" in l).strip(),
+           "physProp_effective": php, "lambda_W_mK": {str(k): v for k, v in lam.items()},
            "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / RECORD, rec)
     print(f"[prep-cpg] {run.name}: {variant}、格子 {mesh_run.name}、初期値 {field_res.parent.name}/{field_res.name}、{rec['bcond_wall']}")
