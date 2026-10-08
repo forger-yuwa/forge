@@ -1,0 +1,54 @@
+{
+ "floor_ref": {
+  "rms_ro": 3.3674723454169e-07,
+  "rms_roUx": 0.00027930403302889317,
+  "rms_roUy": 0.00020154948288109154,
+  "rms_roe": 0.544877678155899,
+  "rms_roK": 6.517839574371465e-05,
+  "rms_roOmega": 29.803104400634766
+ },
+ "run_0181_ns_coldmesh_ad": {
+  "convergence": [
+   "  [segment] 判定区間 = main  (300000 行) -> /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0181_ns_coldmesh_ad/residual_history_segment.csv",
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0181_ns_coldmesh_ad  [last step 99999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ==="
+  ],
+  "convergence_rc": 1,
+  "floor": {
+   "rms_ro": 6.998611814471096e-06,
+   "rms_roUx": 0.0033213101614651477,
+   "rms_roUy": 0.001015203737088164,
+   "rms_roe": 10.158674318859925,
+   "rms_roK": 2.877997311346059e-05,
+   "rms_roOmega": 572.7077051974079
+  },
+  "floor_ok": false,
+  "wall_resolution": [
+   "  wall         step 100000  y1 = 1.105e-07 m  y1+ 平均   0.086 / p99   0.093 / 最大   0.169",
+   "               評価できた面積割合 100.0 % ; y1+ > 1 が面積割合 0.0 % ; 最大の位置 index 0 (x -0.9583, y 0.4972)  ; ソルバ ypls 平均 0.03376",
+   "最大 y1+ = 0.169 (幾何的特異点では収束しないので判定には使わない) ; **目標 1 を超える面積割合 最大 0.0 % (許容 5 %)**",
+   "VERDICT: PASS (壁解像)"
+  ]
+ },
+ "run_0182_ns_coldmesh_tw300": {
+  "convergence": [
+   "  [segment] 判定区間 = main  (300000 行) -> /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0182_ns_coldmesh_tw300/residual_history_segment.csv",
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0182_ns_coldmesh_tw300  [last step 99999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ==="
+  ],
+  "convergence_rc": 1,
+  "floor": {
+   "rms_ro": 9.115730683595653e-06,
+   "rms_roUx": 0.0033227893438407476,
+   "rms_roUy": 0.0010227939038231085,
+   "rms_roe": 10.509184564623709,
+   "rms_roK": 0.0008498867846434039,
+   "rms_roOmega": 1229.9244099147786
+  },
+  "floor_ok": false,
+  "wall_resolution": [
+   "  wall         step 100000  y1 = 1.105e-07 m  y1+ 平均   0.783 / p99   0.995 / 最大   1.537",
+   "               評価できた面積割合 100.0 % ; y1+ > 1 が面積割合 1.8 % ; 最大の位置 index 0 (x -0.9583, y 0.4972)  ; ソルバ ypls 平均 0.3295",
+   "最大 y1+ = 1.537 (幾何的特異点では収束しないので判定には使わない) ; **目標 1 を超える面積割合 最大 1.8 % (許容 5 %)**",
+   "VERDICT: PASS (壁解像)"
+  ]
+ }
+}
