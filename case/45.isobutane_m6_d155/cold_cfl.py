@@ -7,7 +7,7 @@ usage (AWS の case dir):
   python3 cold_cfl.py prep <src_run> <run> --steps N --cfl C [--out 5000] [--extra res_ro,volume] [--limiter-ref-from <run>]
     --limiter-ref-from: リミッタの基準値 (limiterRoRef・limiterPRef・limiterARef) を指定した run の forge_run.log の値に固定する。
       既定 (自動) では開始場から決まるので、restart した run は親と別の作用素になる (forge の警告; run_0182 → run_0183 で a_ref が 1.6 % 違った)。
-    --line: 壁法線のライン陰解法 (lineImplicit 1) と方向別の擬似 dt (lineDtDirectional 1) を足す (§5.1 #27 の試行)。
+    --line dir|only: 壁法線のライン陰解法 (lineImplicit 1)。dir は方向別の擬似 dt (lineDtDirectional 1) も足す (§5.1 #27 の試行)。
   python3 cold_pair.py run <run>       (投入は既存の run_one; FORGE_DUMP_MASSFLUX は投入側の環境変数で渡す)
 """
 import argparse
@@ -36,7 +36,7 @@ def limiter_refs(run: Path) -> dict:
 
 
 def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list[str], ref_from: Path | None = None,
-         line: bool = False) -> dict:
+         line: str = "") -> dict:
     NS.check_dry_env(False)
     binrec = CP.binary_record()
     if not NS.RUN_RE.match(run.name) or run.exists():
@@ -62,7 +62,8 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         if ctext.count("space: {") != 1:
             raise SystemExit("space が 1 行のフロー形式でない — 基準値の足し方を決めていないので止める")
         ctext = ctext.replace("space: {", "space: {" + ", ".join(f"{k}: {v}" for k, v in refs.items()) + ", ")
-    line_keys = {"lineImplicit": 1, "lineDtDirectional": 1} if line else {}
+    # line: "" = なし、"dir" = lineImplicit + lineDtDirectional、"only" = lineImplicit だけ (方向別の擬似 dt なし)
+    line_keys = {"dir": {"lineImplicit": 1, "lineDtDirectional": 1}, "only": {"lineImplicit": 1}, "": {}}[line]
     if line_keys:                           # 壁法線のライン陰解法 + 方向別の擬似 dt (procedures/solver-settings.md「lineImplicit」)
         dt = pcfg["time"]["deltaT"]
         if int(dt.get("blockDPLUR", 0)) != 1 or int(pcfg["time"].get("timeIntegration", 0)) != 11 or int(dt.get("lowMachPrecond", 0)) >= 2:
@@ -115,7 +116,8 @@ if __name__ == "__main__":
     p.add_argument("--steps", type=int, required=True); p.add_argument("--cfl", type=float, required=True)
     p.add_argument("--out", type=int, default=5000); p.add_argument("--extra", default="")
     p.add_argument("--limiter-ref-from", default=None)
-    p.add_argument("--line", action="store_true", help="lineImplicit: 1・lineDtDirectional: 1 を足す")
+    p.add_argument("--line", choices=("dir", "only"), default="",
+                   help="dir = lineImplicit 1 + lineDtDirectional 1、only = lineImplicit 1 だけ")
     a = ap.parse_args()
     prep(HERE / a.src, HERE / a.run, a.steps, a.cfl, a.out, [s for s in a.extra.split(",") if s],
          HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line)
