@@ -3,13 +3,14 @@ cold_pair.py の prep_ext (延長) と同じ手順 (restart_field でビット�
 nStepOuter・cfl・cfl_pseudo・outStepInterval と output.extraFields に限る (implicitRelax は変えない — codex 2026-10-08)。
 走行中の run が cold_pair.py を使っているので、cold_pair.py は書き換えずにここで包む。
 
-usage (AWS の case dir):
+usage (AWS の case dir、別バイナリは COLD_ALT_BINARY=<キー> を前に付ける):
   python3 cold_cfl.py prep <src_run> <run> --steps N --cfl C [--out 5000] [--extra res_ro,volume] [--limiter-ref-from <run>]
     --limiter-ref-from: リミッタの基準値 (limiterRoRef・limiterPRef・limiterARef) を指定した run の forge_run.log の値に固定する。
       既定 (自動) では開始場から決まるので、restart した run は親と別の作用素になる (forge の警告; run_0182 → run_0183 で a_ref が 1.6 % 違った)。
     --line dir|only: 壁法線のライン陰解法 (lineImplicit 1)。dir は方向別の擬似 dt (lineDtDirectional 1) も足す (§5.1 #27 の試行)。
     --isp 0|1: time.deltaT.implicitSolvePrecision (陰解法の行列の組立て・解法の精度。既定 0 = float は FP64 のビルドでも float)。
   python3 cold_pair.py run <run>       (投入は既存の run_one; FORGE_DUMP_MASSFLUX は投入側の環境変数で渡す)
+  python3 cold_cfl.py run <run>        (同じ run_one を、COLD_ALT_BINARY の登録を効かせて呼ぶ)
 """
 import argparse
 import shutil
@@ -21,6 +22,27 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import cold_pair as CP  # noqa: E402
 NS = CP.NS
+
+# 別バイナリの登録 (plan time_integration-implicit-thermal-jacobian §6 の検証用)。環境変数 COLD_ALT_BINARY にキーを書くと、
+# cold_pair.binary_record の照合 (FORGE_SHA・FP64_TREE) をこの登録値に差し替える。変換器は従来の FP64 のもの (CONV_SHA) のまま。
+ALT_BINARIES = {
+    # キー: (forge の sha256, ソースの作業ツリー)
+    # implicitThermalJacobian の検証用: commit 1ad0b9bb + typedef double (座標の stod は HEAD に入っている)、2026-10-09 AWS でビルド
+    "thermjac_fp64": ("9ffc4d1efcec6ca4799f4026ef418931cf99bd27ad61f29d264cbfc4639018b7", "~/forge-thermjac-fp64"),
+}
+
+
+def _use_alt_binary():
+    import os
+    k = os.environ.get("COLD_ALT_BINARY", "")
+    if not k:
+        return None
+    if k not in ALT_BINARIES:
+        raise SystemExit(f"COLD_ALT_BINARY={k} は登録されていない ({sorted(ALT_BINARIES)}) — 止める")
+    sha, tree = ALT_BINARIES[k]
+    CP.FORGE_SHA = sha
+    CP.FP64_TREE = Path(tree).expanduser()
+    return k
 
 
 def limiter_refs(run: Path) -> dict:
@@ -37,7 +59,7 @@ def limiter_refs(run: Path) -> dict:
 
 
 def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list[str], ref_from: Path | None = None,
-         line: str = "", isp: int | None = None, inner: int | None = None, conv: int | None = None) -> dict:
+         line: str = "", isp: int | None = None, inner: int | None = None, conv: int | None = None, itj: int | None = None) -> dict:
     NS.check_dry_env(False)
     binrec = CP.binary_record()
     if not NS.RUN_RE.match(run.name) or run.exists():
@@ -77,6 +99,10 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         if "implicitSolvePrecision" in pcfg["time"]["deltaT"] or ctext.count("deltaT: {") != 1:
             raise SystemExit("deltaT に既に implicitSolvePrecision があるか、deltaT が 1 つのフロー形式でない — 止める")
         ctext = ctext.replace("deltaT: {", f"deltaT: {{implicitSolvePrecision: {int(isp)}, ")
+    if itj is not None:                     # implicitThermalJacobian (plan time_integration-implicit-thermal-jacobian、別バイナリ)
+        if "implicitThermalJacobian" in pcfg["time"]["deltaT"] or ctext.count("deltaT: {") != 1:
+            raise SystemExit("deltaT に既に implicitThermalJacobian があるか、deltaT が 1 つのフロー形式でない — 止める")
+        ctext = ctext.replace("deltaT: {", f"deltaT: {{implicitThermalJacobian: {int(itj)}, ")
     one = {}
     if inner is not None:
         one[("time", "nStepInner")] = str(int(inner))
@@ -86,7 +112,8 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         ctext = ys.replace_scalars(ctext, one)
     allowed = ({NS.NSTEP, NS.CFL, NS.CFLP, NS.OUTINT} | set(one) | ({("output",)} if extra else set())
                | {("space", k) for k in refs} | {("time", "deltaT", k) for k in line_keys}
-               | ({("time", "deltaT", "implicitSolvePrecision")} if isp is not None else set()))
+               | ({("time", "deltaT", "implicitSolvePrecision")} if isp is not None else set())
+               | ({("time", "deltaT", "implicitThermalJacobian")} if itj is not None else set()))
     diff = set(NS.MK.diff_paths(pcfg, ys.load(ctext)))
     if not diff <= allowed:
         raise SystemExit(f"許していない設定の差がある: {sorted(diff - allowed)} — 止める")
@@ -114,7 +141,7 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
            "tool": "cold_cfl.py prep", "plan_item": "§5.1 #27", "created": NS.now(), "git_head": NS.git_head(), "binary": binrec,
            "stages": "none", "parent": src.name, "parent_res": src_h5.name, "parent_res_sha256": NS.sha256_file(src_h5),
            "ext_steps": int(steps), "cfl_main": float(cfl), "cfl_parent": srec.get("cfl_main"), "out_interval": int(out_int),
-           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv,
+           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv, "implicit_thermal_jacobian": itj,
            "config_diff": sorted("/".join(p) for p in diff),
            "restart_field_tail": (r.stdout + r.stderr).strip().splitlines()[-1:], "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / CP.RECORD, rec)
@@ -124,8 +151,10 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
 
 
 if __name__ == "__main__":
+    alt = _use_alt_binary()
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
+    p = sp.add_parser("run"); p.add_argument("run")
     p = sp.add_parser("prep"); p.add_argument("src"); p.add_argument("run")
     p.add_argument("--steps", type=int, required=True); p.add_argument("--cfl", type=float, required=True)
     p.add_argument("--out", type=int, default=5000); p.add_argument("--extra", default="")
@@ -135,6 +164,9 @@ if __name__ == "__main__":
     p.add_argument("--isp", type=int, choices=(0, 1), default=None, help="time.deltaT.implicitSolvePrecision を書く")
     p.add_argument("--inner", type=int, default=None, help="time.nStepInner を変える")
     p.add_argument("--conv", type=int, default=None, help="space.convMethod を変える (0 = 1 次)")
+    p.add_argument("--itj", type=int, default=None, help="time.deltaT.implicitThermalJacobian を書く (別バイナリ COLD_ALT_BINARY が要る)")
     a = ap.parse_args()
+    if a.cmd == "run":                      # cold_pair.run_one を (別バイナリの登録を効かせて) 呼ぶ
+        sys.exit(CP.run_one(HERE / a.run))
     prep(HERE / a.src, HERE / a.run, a.steps, a.cfl, a.out, [s for s in a.extra.split(",") if s],
-         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv)
+         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv, a.itj)
