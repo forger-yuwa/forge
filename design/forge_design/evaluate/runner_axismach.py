@@ -692,7 +692,9 @@ def _mesh_params_from(m: dict, scale, ni, nj, wall_first_frac) -> Mesh2DParams:
                         wall_first_blend_x0=float(m.get("wall_first_blend_x0", 0.5)),
                         wall_first_blend_x1=float(m.get("wall_first_blend_x1", 6.0)),
                         wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
-                        axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"), scale=scale)
+                        axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"),
+                        wall_first_frac_table=m.get("wall_first_frac_table"), x_density_table=m.get("x_density_table"),
+                        scale=scale)
 
 
 def mesh_params(p, scale, ni, nj, wall_first_frac):

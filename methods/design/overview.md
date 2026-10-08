@@ -1231,6 +1231,17 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 **x 依存の第一セル**: `mesh2d.Mesh2DParams.wall_first_frac_throat` (+ `wall_first_blend_x0/x1`, `wall_first_up_x0/x1`) でスロート近傍だけ
 第一セルを詰める (問題 YAML の `mesh:` に同名キー)。case/44 冷却壁の実例: ni 4001 / nj 113 / 1.8e-5 / 2.5e-6 / throat_refine 30 で AR max 846。
 平板の実測 (case/48): 冷却で y₁⁺ は ×5.7、δ\*/θ は y₁⁺ ≤ 3.6 で 2 % 内、$q_w$ は y₁⁺ ≤ 1 で 1.5 % 内。
+**表で与える第一セルと x 方向の密度** (2026-10-08、plan §5.1 #13): `wall_first_frac_table` ([[x, 第一セル厚/局所半径], ...]、log 線形) と
+`x_density_table` ([[x, 相対密度], ...]、スロート細分・局所細分の密度に掛ける)。どちらも opt-in で、表が格子の x 範囲を覆わなければ例外
+(端値で外挿しない)。指定しなければ既存の格子はビット同一。case/45 (燃焼ガス M6、$T_w/T_{aw}$ ≈ 0.2) の 300 K では y₁⁺ が断熱の 8.5〜9.4 倍になり、
+必要な第一セルが入口直管・スロートと試験部で 40 倍違うため、smoothstep 1 本では y₁⁺ ≤ 1 と AR ≤ 5000 を同時に満たせなかった。
+設計は `case/45.isobutane_m6_d155/cold_pair_mesh.py` (断熱 NS の y₁⁺ 分布 × 局所の冷却倍率 → 第一セルの表、AR の上限 → 密度の表、ni 4496 × nj 121)。
+
+**積分法 (CONTUR) の熱力学・輸送の整合** (2026-10-08、plan §4.7、実装中): 今の CONTUR は温度分布 (Eq. 69) を温度で書き、断熱壁温を
+一定 γ の式に縁の局所 γ_e を入れて作り (燃焼ガスでは全温を超える)、粘性は空気の Sutherland、運動量式の加速の項も一定 γ の式である。
+`closure_version: contur_v2` では、温度分布をエンタルピーで書き ($h(v)$ の 2 次式 → $T = h^{-1}$)、$h_{aw} = h_e + r(h_0 - h_e)$、
+粘性を NS と同じ輸送物性に、加速の項を $(2 + H - M^2)\,d\ln u_e/dx$ にする。CPG + Sutherland では `contur_v1` と一致する。
+熱閉包の書き方だけで 300 K の δ_r が断熱比で最大 2.8 % 変わる (plan §5.1 #10a)。どちらが NS の冷却の効果に合うかは plan §6 V-c45 で決める。
 
 **検証の物差し** (plan §4.3): 摩擦は van Driest II ($C_f(Re_\theta; M_e, T_w/T_{aw})$、非圧縮基準 Kármán–Schoenherr)、
 熱流束は Reynolds アナロジー係数 $2St/C_f$ 1.0–1.2、積分厚さは CONTUR 積分法 (同じ $T_w$) と Crocco–Busemann 温度–速度関係、

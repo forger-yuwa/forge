@@ -214,6 +214,9 @@ def main():
                     help="壁ダンプを使わず**メッシュだけ**から壁ごとの y1 を出す (y1+ は出さない)。"
                          "メッシュ設計を回すとき、変換直後に第一層厚を実測で確かめるための入口。"
                          "`run` にはメッシュ h5 を置いたディレクトリか h5 そのものを渡す")
+    ap.add_argument("--profile-csv", default=None,
+                    help="壁の各点の x,y,z・y1・y1+・ρ・接線せん断・μ・T_s を CSV に書く (壁群ごとに <名前>_<群>.csv)。"
+                         "冷却壁のメッシュ設計 (局所の第一層厚を y1+ の分布から決める) に使う。判定は変えない")
     ap.add_argument("--bcond", default=None,
                     help="--geometry-only のとき壁名を引く bcondConfig.yaml (既定は run の中)")
     a = ap.parse_args()
@@ -365,6 +368,12 @@ def main():
         if not good.any():
             print("  %-12s 評価できた点が無い -> 判定不能" % name); fails.append(name); continue
         any_eval = True
+        if a.profile_csv:
+            root, ext = os.path.splitext(a.profile_csv)
+            out = "%s_%s%s" % (root, name, ext or ".csv")
+            np.savetxt(out, np.c_[wxyz, y1, yp, ro, tt, mu, V["Ts"].astype(float)], delimiter=",", comments="",
+                       header="x,y,z,y1_m,y1plus,rho_w,tau_t,mu_w,T_w")
+            print("  %-12s 分布 -> %s" % (name, out))
         frac = 100.0 * good.sum() / len(yp)
         over = 100.0 * np.count_nonzero(yp[good] > a.target) / good.sum()
         imax = int(np.nanargmax(np.where(good, yp, -np.inf)))

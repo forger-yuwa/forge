@@ -138,6 +138,25 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 4. **CHT が要るのはいつか**: $T_w(x)$ が未知で、しかも δ\*・$q_w$ が $T_w(x)$ の分布形に敏感なとき (薄肉・再生冷却・局所ホットスポット)。その場合も**フル CHT (固体伝導ソルバの連成) の前に「弱 CHT ループ」** — NS の $q_w(x)$ → 1D 壁伝導 + 冷却剤熱伝達モデル → $T_w(x)$ → `wallProfile` で NS 再実行 — を推奨する。等温壁機構と積分法の `Tw_table` がそのまま使え、固体側は解析式なので実装コストが小さい。フル CHT へ進む判断は**反復の収束/不収束では決めない** (反復が収束しないことからモデル不足は判定できない — codex 2026-09-19)。判断基準は [boundary-conjugate-heat-transfer](boundary-conjugate-heat-transfer.md) §4.8 の**モデル感度と厚さ方向近似の評価** (`local1d` vs `shell2d` の差、$\mathrm{Bi}_t=ht/k_s>0.1$、角部の熱橋) に置く。
 5. **台帳の標準項目** (全チェーン共通): `wall_thermal` / 実測 y₁⁺ (max) / $Q_w$ / $q_w$ ピーク位置 / δ\*_exit / 目的量の断熱比。
 
+### 4.7 CONTUR の熱力学・輸送の整合 (第 1 層、2026-10-08 起案)
+
+背景と諮問: §5.1 #10 (壁温が頻繁に変わる前提、§8-4)。codex diagnose 2026-10-08 ([記録](../../notes/reviews/2026-10-08-contur-property-temperature-diagnose.md)) の 2 層分離に従う。
+第 1 層は「NS と同じ気体・同じ輸送物性で書く」整合で、選択の余地を持たせない。第 2 層 (圧縮性変換の参照温度、h(v) の 2 次分布・r・a・N の閉包) は今の van Driest II 型を基準に据え置く。
+§5.1 #10a の A/B で、熱閉包の書き方だけで冷却壁の δ_r が最大 2.8 % 動くことを確かめた (第 1 仮説を支持)。
+
+1. **熱閉包をエンタルピーで書く**: $h(v) = h_w + a(h_{aw}-h_w)v + [h_e - a(h_{aw}-h_w) - h_w]v^2$、$T = h^{-1}(h)$、$\rho/\rho_e = T_e/T$ (境界層内で圧力・組成が一定)。
+   $h(T)$ は縁の状態と同じ気体 (semi-perfect なら NASA-9 の $c_p(T)$ の積分)。CPG では今の温度形と式として一致する。
+2. **断熱壁の回復をエンタルピーで**: $h_{aw} = h_e + r(h_0 - h_e)$、$r = 0.72^{1/3}$。r は「NS の断熱壁温に合う回復の閉包」として記録し、分子 Pr とは呼ばない (#10d)。
+3. **粘性を NS と同じにする** (#10c): `gas.transport` があれば NS の viscMethod 2 と同じ CEA の種ごとの粘性と混合則 (データは `solver_density_cuda/data/species/forge_transport_v1.yaml`)。
+   TP で `gas.transport` が無ければ止める。CPG と明示した旧方式だけ Sutherland。効く場所は μ_e・μ_w (F_Rδ)・N の R_δ・入口 θ₀・R_θi の床。
+4. **運動量式の加速の項を気体に整合させる** (#10b): Eq. 61 の $(2 - M^2 + H)/(M(1 + (\gamma-1)M^2/2))\,dM/dx$ を
+   $(2 + H - M^2)\,d\ln u_e/dx$ に置き換える (等エントロピー・組成一定なら $d\ln\rho_e = -M^2 d\ln u_e$)。
+   上流の亜音速枝は面積から $d\ln u_e/dx = -(2 r_w'/r_w)/(1 - M^2)$ (γ を使わない)、下流は縁の $u_e(M)$ を気体から作って微分する。CPG では今と一致する。
+5. **版で切り替える**: `deltastar_initializer.closure_version` (`contur_v1` = 今 / `contur_v2` = 1〜4)。既定は当面 `contur_v1` のまま
+   (今の生産の壁をビット同一で再現できる)。既定を `contur_v2` に替えるのは §6 V-c45 で熱閉包の形が NS で裏付けられた後に、ユーザの決定で行う
+   (そのとき生産の YAML は `contur_v1` を明示して再現性を残す)。版は `delta_r_initial.json` の settings と prepare_info に残す。
+6. **較正の流用の制限** (#11) は別項目。`contur_v2` で較正し直した k_f は `contur_v1` の k_f と混ぜない。
+
 ## 5. 実装ステップ
 
 1. **S1 配管** — `design/forge_design/probdef.py` (`spec.wall_thermal` 既定・検証)、`evaluate/runner_wt.py::_bcond` (+ 共通ヘルパ `wall_bcond_line`)、`evaluate/runner_sern.py` L169/L181、`feedback/deltastar_loop.py` (initializer 既定を spec から)、`evaluate/runner_axismach.py::prepare_ns/collect` (帳簿: `wall_thermal`, y₁⁺, $Q_w$)。
@@ -173,6 +192,8 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 | 10f | **θ の抽出の単位の誤り (codex Major、採用、修正済み 2026-10-08)** | `delta_contur_compare.py extract` が CONTUR の θ (既に θ/r_t) をさらに r_t で割っていた (13.04 倍)。δ 比・C_f 比の集計には使っていない。コードは直した。既存の `extract.npz` の `cont_*_theta_rt` は読むときに r_t を掛けて戻す |
 | 11 | **較正の壁温条件の記録とガード (2026-10-08 起票、担当 F)** | `deltastar_initializer` (k_f 等) は較正した壁温条件でしか意味を持たない (case/45 で NS の壁温を与えるだけで出口合わせの k_f が 1.0565 → 1.0682)。較正時の `wall_thermal` を記録し、prepare で `spec.wall_thermal` と照合する案。**判断: 2026-10-08 codex diagnose — 修正付き採用**: 壁温だけの照合は弱く、全 prepare を一律に止めるのは強すぎる。較正係数の**流用と生産採用**を、熱条件・組成と物性 DB・輸送モデル・熱閉包の版・入口 θ₀・検証済みの作動範囲に結びつけて制限する。較正していない初期壁での検証計算はできるようにする。壁温を変えた後の NS 1 回は再評価の開始であって、再較正の完了の保証ではない |
 | 12 | **壁温分布の単一ソース (2026-10-08 起票、担当 O、#10 の後)** | `spec.wall_thermal` に分布 (表) を足し、NS の `wallProfile` CSV (ソルバは実装済み、`methods/boundary.md`「壁温分布の入力」) と CONTUR の `Tw_table` の両方をそこから作る。**判断: 2026-10-08 codex diagnose — 採用**: 物理長 [m] (スロート原点) を正本にし、CONTUR に渡すときだけ x/r_t に変換する。同じ条件かの判定は平均温度でなく、座標原点・単位・補間/外挿の規則を含む区分関数の一致で行う。表が範囲を覆わないときに `np.interp` の端値保持で黙って外挿しない。`Tw_table` は局所の T_w を代入するだけで熱境界層の発達の履歴を持たないので、急な冷却の開始や加熱への切り替えでの妥当性は別に確かめる |
+| 13 | **冷却壁用の格子の表 (2026-10-08、担当 O)** | `meshing/mesh2d.py` に `wall_first_frac_table` (第一セル厚/局所半径を log 線形の表で) と `x_density_table` (x 方向の相対密度の表) を追加 (どちらも opt-in、表が範囲を覆わなければ例外)。既存の格子はビット同一 (4 構成で確認: 生産の throat/blend・一様・axis_cap・axis_gap)。`runner_axismach._mesh_params_from` が NS の mesh ブロックから渡す。冷却で y1+ は断熱の 8.5〜9.4 倍 (case/45、case/44 の 5〜5.4 倍より大きい) で、smoothstep 1 本の第一セルでは y1+ ≤ 1 と AR ≤ 5000 を同時に満たせなかった (AR 最大の見込み 19000) |
+| 14 | **冷却壁の NS の対 (2026-10-08、担当 O、判定は F)** | §6 V-c45。`case/45.isobutane_m6_d155/cold_pair_mesh.py` (格子の設計: 断熱 NS run_0179 の y1+ 分布 × 局所の冷却倍率 → y1+_cold ≤ 0.8・AR ≤ 4500 の見込み、ni 4496 × nj 121)、`cold_pair.py`・`run_cold_pair.sh` (準備・実行)。run: `run_0181_ns_coldmesh_ad`・`run_0182_ns_coldmesh_tw300` |
 
 ## 6. 検証
 
@@ -186,7 +207,19 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
   - 全 run: `check_convergence.py` / `check_quasisteady.py --quantity theta,cf_retheta` / `cooled_plate_eval.py --series` / `check_mesh_quality.py` の VERDICT を README に貼る (§4.3-6 の定量条件)。
 - **ノズル CPG (S3)**: δ\* ≤3 %・θ ≤1 %・$q_w$ ≤5 % (4 ステーション)。壁温 = 300 K がノード値で再現 (ピン)。
 - **生産 TP (S4)**: 生産ゲート (ṁ 比 ≤0.3 %、出口面コア M ±0.1 %) 達成、`check_quasisteady --series` STEADY、壁温感度台帳。
-- **判定に使う run パスは case README の run 一覧に同期** (AGENTS.md)。
+- **V-c45 冷却壁の NS の対 (2026-10-08 事前登録、§5.1 #14)**: case/45 の生産の壁 (run_0167 と同じ物理壁) を冷却壁用の格子
+  (`cold_pair_mesh.py`、ni 4496 × nj 121) に載せ、断熱 (`run_0181_ns_coldmesh_ad`) と 300 K (`run_0182_ns_coldmesh_tw300`) を回す (`run_cold_pair.sh`)。
+  - **投入の前提 (不成立なら回さない)**: メッシュ品質 `VERDICT: PASS` (`--ar-max 5000`)、物理壁の差 |Δr| ≤ 1e-8 r_t (run_0167 の `wall_repr.json` と密な x で比較)、
+    壁距離が変換し直した値と相対 1e-6 以内、壁の bcond が断熱 `wall` / 300 K `wall_isothermal` Ts 300、forge の sha256 が run_0167 と同じ。
+  - **結果を使う前提 (ゲート)**: NaN・Inf なし (全段の残差と全 res)。`check_convergence.py --segment` で RISING・DIVERGED なし (plateau は生産と同じく可)。
+    判定窓 80000〜100000 の 5 枚で δ_E (帯 E) の比 R_NS(x) = δ_E(300 K)/δ_E(断熱) の x = 40・70・94 が `check_quasisteady` で STEADY (許容 0.1 %)。
+    壁解像: 300 K の run で `check_wall_resolution.py` の y1+ > 1 の面積 ≤ 5 % (断熱の run も記録)。どれかが不成立なら下の判定は「判定不能」とし、延長や格子の見直しを先にする。
+  - **判定 (熱閉包の形)**: CONTUR の予測 R_A (温度形、`contur_v1`) と R_B (エンタルピー形) は、生産の k_f (1.0541) で `delta_contur_compare.py hform` と同じ経路で作る (同じ壁)。
+    e_A = max_{x∈[40,94]} |R_A/R_NS − 1|、e_B も同じ。u = 判定窓 5 枚の R_NS の幅 (max − min) の試験部での最大。
+    **e_B < e_A かつ e_A − e_B > 2u ならエンタルピー形を支持**、e_A < e_B かつ e_B − e_A > 2u なら温度形を支持、それ以外は判定保留。
+    k_f = 1 でも同じ計算をし、k_f で判定が入れ替わるなら保留にする。勝った側の e が 1 % 以下なら「冷却の効果を当てる」、1 % を超えるなら
+    「どちらも冷却の効果を当てない (壁温を変えたら NS の δ* 反復が要る)」と記録する。
+  - **記録のみ**: θ・H・C_f・q_w の 300 K/断熱の比 (NS と CONTUR A/B)、NS の断熱壁温と CONTUR の T_aw (A/B)、断熱の run と生産 (run_0179) の δ_E の差 (格子の感度)。
 
 ### 6.1 レビュー記録 (codex)
 
