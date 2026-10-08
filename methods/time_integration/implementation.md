@@ -161,6 +161,37 @@ $\Delta\mathbf Q_{\text{new}} = D_i^{-1}\,\text{RHS}$ を解く。`cfg.implicitR
 > precond (`implicit_defect_correction_block_precond_d`) の 3 箇所。**LHS のみの変更**で defect-correction の
 > 定常解は不変（planar 回帰 bump で base/fix 場が $L2\sim10^{-5}$ 一致・RANS で残差レベル同一を確認）。
 
+#### エネルギー行の熱伝導 Jacobian (`implicitThermalJacobian`、2026-10-09、既定 0 = 従来どおり)
+
+上の粘性対角 $\Lambda^{\nu}_f I$ はエネルギー行にも同じスカラーを $\Delta(\rho E)$ に掛ける。熱伝導の残差
+$k_f\,(T_j-T_i)\,\delta/|\Delta\mathbf{cc}|$ が反応するのは $T$ なので、$\rho E$ がほとんど動かずに $\rho$ と $T$ が入れ替わる
+等圧のエントロピーのモードをこの対角は抑えない。普段は $V/\Delta\tau$ がそれを隠すが、方向別の擬似 dt
+(`lineDtDirectional`) で $V/\Delta\tau$ が縦横比の分だけ小さくなると、300 K の等温壁の 1 層目でこのモードが育つ
+(plan [tooling-nozzle-isothermal-wall-chain](../../plans/active/tooling-nozzle-isothermal-wall-chain.md) §5.1 #27)。
+
+`time.deltaT.implicitThermalJacobian: 1` のとき、block DPLUR (`implicit_defect_correction_block_d`、float/double とも) の
+**内部の node 間面**について、エネルギー行 (行 4) の $\Lambda^{\nu}_f$ を熱伝導の Jacobian に置き換える (運動量の行は従来どおり):
+
+$$
+D_i[4,:] \mathrel{+}= \Lambda^{T}_f\,\frac{\partial e}{\partial \mathbf Q_i},\qquad
+\Lambda^{T}_f=\gamma_i\left(\frac{\mu_{\rm lam}}{Pr}+\frac{\mu_t}{Pr_t}\right)\frac{\delta}{|\Delta\mathbf{cc}|},
+$$
+
+$$
+e=\frac{\rho E}{\rho}-\tfrac12|\mathbf u|^2,\quad
+\frac{\partial e}{\partial\rho}=-\frac{e-\tfrac12|\mathbf u|^2}{\rho},\quad
+\frac{\partial e}{\partial(\rho u_k)}=-\frac{u_k}{\rho},\quad
+\frac{\partial e}{\partial(\rho E)}=\frac1\rho .
+$$
+
+$k\,\partial T/\partial\mathbf Q=(k/c_v)\,\partial e/\partial\mathbf Q$ と $k/c_v=\gamma\,(\mu/Pr+\mu_t/Pr_t)$ (凍結 γ) を使うので、
+$T$・$c_v$・気体定数を陽に持たずに組める。$e$ の基準点 (TP の `thermoHrefTemp`) によらない
+($\partial e/\partial\rho$ はコードが $T$ を $\rho E$ から求めるのと同じ $e$ で評価する)。
+$(4,4)$ 成分は $(\gamma/Pr)\,\nu\,\delta/|\Delta\mathbf{cc}|$ で、従来の $2\nu\,\delta/|\Delta\mathbf{cc}|$ と同程度。
+$\mu_{\rm lam}$ は従来の粘性対角と同じ `physProp.visc` (定数、剛性の見積もり) を使う。
+近傍との熱伝導の結合 (非対角) は入れない (従来の粘性対角と同じく対角だけ)。
+**LHS だけの変更なので定常解は変わらない**。`lineViscCoupling`・`lowMachPrecond>=2`・`blockDPLUR 0` との併用は起動時に拒否する。
+
 > **2026-06 修正**: 旧コードは対角に $A^{+}$ ではなく $|\widetilde A|$ を、近傍に $-A^{-}$ ではなく $+|\widetilde A|$ を
 > 使っていた（符号付き分割でなく絶対値の誤用）。対角が upwind 自己 Jacobian と不一致・近傍結合が逆符号となり、
 > block DPLUR は収束せず発散していた。`build_jacobian_split` による $A^{+}/{-}A^{-}$ 分割でこれを修正。
