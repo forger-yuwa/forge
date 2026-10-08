@@ -131,8 +131,16 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0200_ns_coldmesh_tw300_cfl4_line` | ライン陰解法の試行 (§5.1 #27): run_0183 の res_100000 から、cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、基準値は run_0183 に固定 | **65 step で発散** (`res_nan_66.h5`)。x_w −10.8〜−10.2 (列 39〜49) のライン 11 本で ρ が非有限 | 破棄予定 |
 | `run_0201_ns_coldmesh_tw300_cfl4_lineonly` | ライン陰解法だけ (方向別の dt なし)、cfl 4、10000 step・5000 ごと | 投入 2026-10-08 21:57 | 実行中 |
 | `run_0202_ns_coldmesh_tw300_cfl1_linedir` | ライン陰解法 + 方向別の dt、cfl 1、10000 step 予定 | **129 step で発散** (`res_nan_130.h5`)、run_0200 と同じ場所 → 方向別の dt はこの格子では使わない | 破棄予定 |
-| `run_0198_ns_coldmesh_tw300_cfl4_ext` | CFL 4 の延長 (§5.1 #27): run_0191 の res_40000 からビット一致、cfl 4、基準値は run_0183 の値 (親の設定のまま)、200000 step・10000 ごと、`extraFields: [res_ro, volume]` | 投入 2026-10-08 22:03 | 実行中 |
-| `run_0203_ns_coldmesh_tw300_linedir_diag` | 方向別の dt の発散の観察 (ユーザ指示「なぜうまくいかないのか追求したい」): run_0183 の res_100000 から cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、70 step・20 ごと、全保存量の残差を出力、列 36〜52・壁から 0〜30 層目の 527 節点を `FORGE_DUMP_LEDGER` で毎 step 記録 | 投入 2026-10-08 22:04 | 実行中 |
+| `run_0198_ns_coldmesh_tw300_cfl4_ext` | CFL 4 の延長 (§5.1 #27): run_0191 の res_40000 からビット一致、cfl 4、基準値は run_0183 の値 (親の設定のまま)、200000 step・10000 ごと、`extraFields: [res_ro, volume]` | 完走 (26 ms/step)。欠損 (Σ res_ro×2π) 1.398 → 0.331 (2 万 step ごと 0.86 倍)、θ_r は x = 40/94 で開始時の +12 % / +9.1 % でまだ増える、δ_loc は −0.3 %。NOT CONVERGED (stalled/plateau)、rms_roOmega は約 2000 と約 35 の 2 状態を数万 step ごとに行き来 (最大 3158) | ref (延長の親) |
+| `run_0203_ns_coldmesh_tw300_linedir_diag` | 方向別の dt の発散の観察 (ユーザ指示「なぜうまくいかないのか追求したい」): run_0183 の res_100000 から cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、70 step・20 ごと、全保存量の残差を出力、列 36〜52・壁から 0〜30 層目の 527 節点を `FORGE_DUMP_LEDGER` で毎 step 記録 | 66 step で発散 (run_0200 と同じ、決定的)。帳簿の解析は plan §5.1 #27 | ref |
+| `run_0204_ns_coldmesh_tw300_linedir_isp1` | run_0203 + `implicitSolvePrecision: 1` (行列を double)、200 step 予定 | 65 step で発散、壊れ方は run_0203 と同じ → 精度は主因でない | ref |
+| `run_0205_ns_coldmesh_tw300_cfl4_isp1` | run_0191 の res_40000 から point・cfl 4・`implicitSolvePrecision: 1`、40000 step | 完走。欠損の減り方は run_0198 (float) と同じ (1.2940 / 1.2918 …) → 速さに効かない | ref |
+| `run_0206_ns_coldmesh_tw300_linedir_inner15` | run_0203 + `nStepInner: 15` | 65 step で発散 → sweep 不足でない | ref |
+| `run_0207_ns_coldmesh_tw300_linedir_conv0` | run_0203 + `convMethod: 0` (RHS 1 次) | 72 step で発散 → 再構成次数の不整合でない | ref |
+| `run_0208_ns_coldmesh_tw300_cfl4_ext2` | CFL 4 の延長の続き: run_0198 の res_200000 から 200000 step・10000 ごと (同じ設定) | 投入 2026-10-09 03:50 | 実行中 |
+| `run_0209_ns_coldmesh_tw300_linedir_adiab` | run_0203 の冷却壁の bcond だけを `wall` (断熱) に | 200 step まで有限、近壁の振動は減衰 (壁温 300 → 440 K の過渡を含む) | ref |
+| `run_0210_ns_coldmesh_tw300_linedir_freeze` | run_0203 + `FORGE_FREEZE_TURB=1` | 64 step で発散 → SST の結合は不要 | ref |
+| `run_0211_ns_coldmesh_tw300_linedir_visc` | run_0203 + `lineViscCoupling: 1` | 20 step で発散 (悪化) | ref |
 | (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
