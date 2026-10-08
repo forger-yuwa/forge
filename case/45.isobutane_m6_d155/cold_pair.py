@@ -17,7 +17,9 @@ usage (AWS の case dir、FORGE_BIN 等は run_cold_pair.sh が設定する):
   python3 cold_pair.py nan-scan <run>
   python3 cold_pair.py extract <run>            (AWS: 判定窓の δ_E・感度・壁温・Q_w → _band_ab/cold_pair/extract_<run>.npz)
   python3 cold_pair.py gates <ad_run> <tw_run>  (AWS: check_convergence・残差の床・壁解像 → gates_aws.json、y1p_<run>_wall.csv)
-  python3 cold_pair.py judge <ad_run> <tw_run>  (手元: V-c45 の判定 → V_c45.json)
+  python3 cold_pair.py judge <ad_run> <tw_run>  (手元: V-c45 の判定 → V_c45.json; NaN 検査は _band_ab/cold_pair/NAN_SCAN_<run>.json に写しておく)
+  python3 cold_pair.py extract-b <run>          (AWS: 抽出の A/B の B 腕 = 一定 x 断面 → extractB_<run>.npz)
+  python3 cold_pair.py ab-compare <ad> <tw>     (手元: 抽出の A/B の判定 → extract_ab.json)
 """
 import argparse
 import json
@@ -333,7 +335,26 @@ def judge(ad_name: str, tw_name: str) -> dict:
     out["gates"]["convergence"] = {k: {"lines": G[k]["convergence"], "floor": G[k]["floor"], "floor_ok": G[k]["floor_ok"]}
                                    for k in (ad_name, tw_name)}
     out["gates"]["convergence"]["floor_ref_run_0179"] = G["floor_ref"]
-    conv_ok = all(G[k]["floor_ok"] and not any("RISING" in l or "DIVERGED" in l for l in G[k]["convergence"]) for k in (ad_name, tw_name))
+    def conv_one(k):
+        lines = G[k].get("convergence") or []
+        txt = " ".join(lines)
+        if not lines or "->" not in txt:
+            return False                                           # 判定の記録が無い = 不合格
+        if any(w in txt for w in ("RISING", "DIVERGED", "INDETERMINATE", "判定不能")):
+            return False
+        allowed = ("PASS" in txt) or ("stalled/plateau" in txt)     # plateau は許す (VERDICT の文言はそのまま残す)
+        return bool(allowed and G[k]["floor_ok"])
+    conv_ok = all(conv_one(k) for k in (ad_name, tw_name))
+    # ゲート 1: NaN 検査 (各 run の NAN_SCAN.json を手元に写したもの; 無ければ不合格)
+    nan_ok = True; nan_rec = {}
+    for k in (ad_name, tw_name):
+        pth = OUTD / f"NAN_SCAN_{k}.json"
+        if not pth.is_file():
+            nan_ok = False; nan_rec[k] = "記録なし (不合格)"; continue
+        z = json.loads(pth.read_text())
+        ok = z.get("first_nonfinite") is None and z.get("first_bad_field") is None and bool(z.get("fields_scanned"))
+        nan_ok &= ok; nan_rec[k] = {"ok": ok, "fields": len(z.get("fields_scanned") or [])}
+    out["gates"]["nan"] = nan_rec
     wr = {}
     for run_name in (ad_name, tw_name):
         P = np.loadtxt(OUTD / f"y1p_{run_name}_wall.csv", delimiter=",", skiprows=1)
@@ -365,7 +386,8 @@ def judge(ad_name: str, tw_name: str) -> dict:
         return np.max(d, axis=0)
     u_ext_raw = ext_rel(A) + ext_rel(B)
     win = int(round(2.0 / 0.25))
-    u_ext = np.convolve(u_ext_raw, np.ones(win + 1) / (win + 1), mode="same")
+    ker = np.ones(win + 1)
+    u_ext = np.convolve(u_ext_raw, ker, mode="same") / np.convolve(np.ones_like(u_ext_raw), ker, mode="same")   # 端は有効点数で割る
     u_c = 0.001
     U = u_t + u_ext + u_c
     out.update(u_t=u_t.tolist(), u_ext=u_ext.tolist(), u_c=u_c, U=U.tolist())
@@ -392,14 +414,14 @@ def judge(ad_name: str, tw_name: str) -> dict:
         dec[f"kf{kf:.6f}"] = {"e": e, "verdict": v, "winner": win_, "fit": fit}
     out["decision_by_kf"] = dec
     wins = {d["winner"] for d in dec.values()}
-    gates_ok = out["gates"]["quasisteady"]["ok"] and conv_ok and wall_ok
+    gates_ok = nan_ok and out["gates"]["quasisteady"]["ok"] and conv_ok and wall_ok
     if not gates_ok:
         final = "判定不能 (ゲート不成立)"
     elif len(wins) == 1 and None not in wins:
         final = next(iter(dec.values()))["verdict"]
     else:
         final = "判定保留 (k_f で判定が違う、または区間が分離しない)"
-    out["gates_ok"] = {"quasisteady": out["gates"]["quasisteady"]["ok"], "convergence": conv_ok, "wall_resolution": wall_ok}
+    out["gates_ok"] = {"nan": nan_ok, "quasisteady": out["gates"]["quasisteady"]["ok"], "convergence": conv_ok, "wall_resolution": wall_ok}
     out["VERDICT"] = final
     # 記録のみ: 格子・精度を替えた感度 (この格子の断熱 vs 生産の FP32)
     prod = HERE / "_band_ab/delta_contur/extract.npz"
@@ -463,6 +485,62 @@ def prep_ext(src: Path, run: Path, steps: int) -> dict:
     return rec
 
 
+def extract_b(run: Path) -> Path:
+    """AWS: 抽出の A/B の B 腕 (plan §5.1 #21、codex diagnose 2026-10-08): 判定窓の 5 枚で、列を一定 x の断面に補間してから
+    同じ抽出 (帯 E、extract_and_merge の delta_E) を行う。A 腕は extract() の結果 (列をそのまま使う)。
+    → _band_ab/cold_pair/extractB_<run>.npz (s{k}_mx, s{k}_dE)。"""
+    import os
+    import shutil
+    import tempfile
+    from forge_design.feedback.deltastar_loop import extract_and_merge, read_delta_r_next
+    out = {}
+    steps_all = sorted(NS.step_of(f) for f in NS.res_files(run))
+    window = tuple(steps_all[-5:])
+    for k, step in enumerate(window):
+        with tempfile.TemporaryDirectory() as td:
+            dd = Path(td) / "ns"; dd.mkdir()
+            for f in ("bcondConfig.yaml", "solverConfig.yaml", "prepare_info.json"):
+                shutil.copy(run / f, dd / f)
+            os.symlink((run / "nozzle.h5").resolve(), dd / "nozzle.h5")
+            os.symlink((run / f"res_{step}.h5").resolve(), dd / f"res_{step}.h5")
+            extract_and_merge(dd, HERE / EULER_REF, band_select="edge", remap_constant_x=True)
+            nx = read_delta_r_next(dd / "delta_r_next.csv")
+        out[f"s{k}_mx"] = np.asarray(nx["x_rt"]); out[f"s{k}_dE"] = np.asarray(nx["delta_E"])
+        print(f"[extract-B] {run.name} res_{step}", flush=True)
+    OUTD.mkdir(parents=True, exist_ok=True)
+    p = OUTD / f"extractB_{run.name}.npz"
+    np.savez(p, steps=np.array(window), **out)
+    return p
+
+
+def ab_compare(ad_name: str, tw_name: str) -> dict:
+    """手元: 抽出の A/B の判定 (事前登録 §5.1 #21): 各 5 枚の対で R = δ_E(300 K)/δ_E(断熱) を A・B で作り、試験部 [40, 94] (0.25 刻み) の
+    max |R_B/R_A − 1| が 1 % 以上なら「抽出の座標の不整合の寄与を支持」、1 % 未満なら棄却。各腕の δ_E の A/B の差も記録する。"""
+    A = {lab: np.load(OUTD / f"extract_{n}.npz") for lab, n in (("ad", ad_name), ("tw", tw_name))}
+    B = {lab: np.load(OUTD / f"extractB_{n}.npz") for lab, n in (("ad", ad_name), ("tw", tw_name))}
+    nA = len(A["ad"]["steps"])
+    d = lambda Z, k: np.interp(XE, Z[f"s{k}_mx"], Z[f"s{k}_dE"])  # noqa: E731
+    rel = []; arm = {"ad": [], "tw": []}
+    for k in range(nA):
+        RA = d(A["tw"], k) / d(A["ad"], k); RB = d(B["tw"], k) / d(B["ad"], k)
+        rel.append(np.abs(RB / RA - 1.0))
+        for lab in ("ad", "tw"):
+            arm[lab].append(np.abs(d(B[lab], k) / d(A[lab], k) - 1.0))
+    rel = np.array(rel)
+    mx = float(rel.max()); i = np.unravel_index(int(np.argmax(rel)), rel.shape)
+    out = {"criterion": "max |R_B/R_A − 1| (5 枚・試験部) ≥ 1 % で支持", "max_rel_R": mx, "at": {"snapshot": int(i[0]), "x": float(XE[i[1]])},
+           "mean_rel_R_by_snapshot": rel.mean(1).tolist(),
+           "delta_E_AB_max_rel": {lab: float(np.max(arm[lab])) for lab in arm},
+           "delta_E_AB_mean_rel": {lab: float(np.mean(arm[lab])) for lab in arm},
+           "R_A_mean": (np.mean([d(A["tw"], k) / d(A["ad"], k) for k in range(nA)], axis=0)[[0, 80, 160, 216]]).tolist(),
+           "R_B_mean": (np.mean([d(B["tw"], k) / d(B["ad"], k) for k in range(nA)], axis=0)[[0, 80, 160, 216]]).tolist(),
+           "x_report": [float(XE[j]) for j in (0, 80, 160, 216)],
+           "VERDICT": ("抽出の座標の不整合の寄与を支持 (≥ 1 %)" if mx >= 0.01 else "第 1 仮説を棄却 (< 1 %)")}
+    NS.jdump(OUTD / "extract_ab.json", out)
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+    return out
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -471,6 +549,8 @@ if __name__ == "__main__":
     p = sp.add_parser("nan-scan"); p.add_argument("run")
     p = sp.add_parser("prep-ext"); p.add_argument("src"); p.add_argument("run"); p.add_argument("steps", type=int)
     p = sp.add_parser("extract"); p.add_argument("run")
+    p = sp.add_parser("extract-b"); p.add_argument("run")
+    p = sp.add_parser("ab-compare"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("gates"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("judge"); p.add_argument("ad"); p.add_argument("tw")
     a = ap.parse_args()
@@ -482,6 +562,10 @@ if __name__ == "__main__":
         prep_ext(HERE / a.src, HERE / a.run, a.steps)
     elif a.cmd == "extract":
         print(extract(HERE / a.run))
+    elif a.cmd == "extract-b":
+        print(extract_b(HERE / a.run))
+    elif a.cmd == "ab-compare":
+        ab_compare(a.ad, a.tw)
     elif a.cmd == "gates":
         gates_aws(HERE / a.ad, HERE / a.tw)
     elif a.cmd == "judge":
