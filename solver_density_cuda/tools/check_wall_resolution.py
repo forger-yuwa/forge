@@ -87,6 +87,48 @@ def face_centroids(xyz, conne):
     return np.array(out) if out else None
 
 
+def element_areas(xyz, conne, axisym: bool):
+    """XDMF Mixed の CONNE (壁ダンプ) を要素ごとに読み、(要素の面積, 要素の節点の配列) のリストを返す。読めなければ None。
+    2D の線分 (Polyline, code 2: [2, 節点数, 節点...]) は長さ、軸対称なら 2π r_mid を掛けた面積 (r = y 座標)、平面なら単位奥行きあたり。
+    3D の多角形 (三角形 4・四角形 5・多角形 3: [3, 節点数, ...]) はベクトル面積の大きさ。"""
+    out, i, n = [], 0, len(conne)
+    while i < n:
+        code = int(conne[i])
+        if code == 2 or code == 3:
+            k = int(conne[i + 1]); idx = np.asarray(conne[i + 2:i + 2 + k], dtype=int); i += 2 + k
+        elif code in (4, 5):
+            k = 3 if code == 4 else 4; idx = np.asarray(conne[i + 1:i + 1 + k], dtype=int); i += 1 + k
+        else:
+            return None
+        P = xyz[idx].astype(float)
+        if code == 2:
+            seg = np.linalg.norm(np.diff(P, axis=0), axis=1)
+            rm = 0.5 * (np.abs(P[1:, 1]) + np.abs(P[:-1, 1]))
+            a = float(np.sum(seg * (2.0 * np.pi * rm if axisym else 1.0)))
+        else:
+            c = P.mean(axis=0)
+            a = 0.5 * float(np.linalg.norm(sum(np.cross(P[j] - c, P[(j + 1) % len(P)] - c) for j in range(len(P)))))
+        out.append((a, idx))
+    return out
+
+
+def point_weights(xyz, conne, n_values: int, per_face: bool, axisym: bool):
+    """値ごとの面積の重み。節点の値 (node 方式) は要素の面積を節点に等分、面ごとの値は要素の面積そのもの。作れなければ None。"""
+    el = element_areas(xyz, conne, axisym) if conne is not None else None
+    if el is None:
+        return None
+    if per_face:
+        if len(el) != n_values:
+            return None
+        return np.array([a for a, _ in el])
+    w = np.zeros(n_values)
+    for a, idx in el:
+        if idx.max() >= n_values:
+            return None
+        w[idx] += a / len(idx)
+    return w
+
+
 def dof_neighbors(mesh):
     """PLANES/STRUCT から DOF -> 隣接 DOF のリストを作る。"""
     with h5py.File(mesh, "r") as f:
@@ -205,7 +247,7 @@ def main():
     ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は壁ダンプ全部)")
     ap.add_argument("--target", type=float, default=1.0, help="低 Re の局所 y1+ 目標 (既定 1)")
     ap.add_argument("--over-frac", type=float, default=2.0,
-                    help="目標超過を許す面積割合 [%%] (既定 2)。**判定はここで行う**: "
+                    help="目標超過を許す割合 [%%] (既定 2、数え方は --weight)。**判定はここで行う**: "
                          "前縁や鋭角エッジなど幾何的特異点では traction が発散し最大値は"
                          "格子収束しないので、最大値では判定しない")
     ap.add_argument("--align-min", type=float, default=0.5,
@@ -214,6 +256,9 @@ def main():
                     help="壁ダンプを使わず**メッシュだけ**から壁ごとの y1 を出す (y1+ は出さない)。"
                          "メッシュ設計を回すとき、変換直後に第一層厚を実測で確かめるための入口。"
                          "`run` にはメッシュ h5 を置いたディレクトリか h5 そのものを渡す")
+    ap.add_argument("--weight", choices=("point", "area"), default="point",
+                    help="超過率・評価率の数え方。point (既定、従来どおり点数の割合) / area (壁の面積の割合: 節点に要素の面積を等分、"
+                         "軸対称は 2πr を掛ける)。2026-10-08 追加 (codex plan M3: 点数の割合を面積と表示していた)")
     ap.add_argument("--profile-csv", default=None,
                     help="壁の各点の x,y,z・y1・y1+・ρ・接線せん断・μ・T_s を CSV に書く (壁群ごとに <名前>_<群>.csv)。"
                          "冷却壁のメッシュ設計 (局所の第一層厚を y1+ の分布から決める) に使う。判定は変えない")
@@ -243,6 +288,7 @@ def main():
         print("mesh h5 が無い (config の mesh.meshFileName も見た): %s" % (mesh or a.run))
         return 2
     wt = int(((cfg or {}).get("turbulence", {}) or {}).get("wallTreatmentSST", 0))
+    axisym = bool(int(((cfg or {}).get("mesh", {}) or {}).get("isAxisymmetric", 0) or 0))
 
     if a.geometry_only:
         return geometry_only(mesh, a)
@@ -368,26 +414,34 @@ def main():
         if not good.any():
             print("  %-12s 評価できた点が無い -> 判定不能" % name); fails.append(name); continue
         any_eval = True
+        wgt = point_weights(wxyz, wconn, len(yp), per_face, axisym)
         if a.profile_csv:
             root, ext = os.path.splitext(a.profile_csv)
             out = "%s_%s%s" % (root, name, ext or ".csv")
-            np.savetxt(out, np.c_[wxyz, y1, yp, ro, tt, mu, V["Ts"].astype(float)], delimiter=",", comments="",
-                       header="x,y,z,y1_m,y1plus,rho_w,tau_t,mu_w,T_w")
+            np.savetxt(out, np.c_[wxyz, y1, yp, ro, tt, mu, V["Ts"].astype(float), (wgt if wgt is not None else np.full(len(yp), np.nan))],
+                       delimiter=",", comments="", header="x,y,z,y1_m,y1plus,rho_w,tau_t,mu_w,T_w,area_weight")
             print("  %-12s 分布 -> %s" % (name, out))
-        frac = 100.0 * good.sum() / len(yp)
-        over = 100.0 * np.count_nonzero(yp[good] > a.target) / good.sum()
+        if a.weight == "area":
+            if wgt is None or not np.all(np.isfinite(wgt)) or wgt.sum() <= 0:
+                print("  %-12s 面積の重みを作れない (壁ダンプの CONNE) -> 判定不能" % name); fails.append(name); continue
+            frac = 100.0 * wgt[good].sum() / wgt.sum()
+            over = 100.0 * wgt[good & (yp > a.target)].sum() / wgt[good].sum()
+        else:
+            frac = 100.0 * good.sum() / len(yp)
+            over = 100.0 * np.count_nonzero(yp[good] > a.target) / good.sum()
+        unit = "面積" if a.weight == "area" else "点数"
         imax = int(np.nanargmax(np.where(good, yp, -np.inf)))
         sol = V.get("ypls")
         print("  %-12s step %6d  y1 = %.3e m  y1+ 平均 %7.3f / p99 %7.3f / 最大 %7.3f"
               % (name, step, np.nanmedian(y1[good]), np.nanmean(yp[good]),
                  np.nanpercentile(yp[good], 99), np.nanmax(yp[good])))
-        print("               評価できた面積割合 %.1f %% ; y1+ > %.3g が %.1f %% ; 最大の位置 index %d%s"
-              % (frac, a.target, over, imax,
+        print("               評価できた%s割合 %.1f %% ; y1+ > %.3g が%s割合 %.1f %% ; 最大の位置 index %d (x %.4g, y %.4g)%s"
+              % (unit, frac, a.target, unit, over, imax, wxyz[imax, 0], wxyz[imax, 1],
                  ("  ; ソルバ ypls 平均 %.4g" % float(np.mean(sol)) if sol is not None else "")))
         worst = max(worst, float(np.nanmax(yp[good])))
         worst_over = max(worst_over, over)
         if frac < 90.0:
-            fails.append("%s (評価できた面積 %.1f %%)" % (name, frac))
+            fails.append("%s (評価できた%s %.1f %%)" % (name, unit, frac))
 
     if not any_eval:
         print("\nVERDICT: INDETERMINATE (評価できた壁が無い)"); return 2
@@ -396,8 +450,8 @@ def main():
     if wt == 0:
         ok = worst_over <= a.over_frac
         print("\n最大 y1+ = %.3f (幾何的特異点では収束しないので判定には使わない) ; "
-              "**目標 %.3g を超える面積 最大 %.1f %% (許容 %.3g %%)**"
-              % (worst, a.target, worst_over, a.over_frac))
+              "**目標 %.3g を超える%s割合 最大 %.1f %% (許容 %.3g %%)**"
+              % (worst, a.target, "面積" if a.weight == "area" else "点数", worst_over, a.over_frac))
         print("VERDICT: %s" % ("PASS (壁解像)" if ok else
                                "FAIL (目標超過の面積が許容を上回る — 位置を上に示した)"))
         return 0 if ok else 1

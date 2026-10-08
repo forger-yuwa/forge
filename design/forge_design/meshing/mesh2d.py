@@ -57,6 +57,12 @@ class Mesh2DParams:
     # どちらも None なら従来どおり (既存の格子はビット同一)。
     wall_first_frac_table: tuple | list | None = None
     x_density_table: tuple | list | None = None
+    # --- 壁法線に沿った近壁層 (2026-10-08, plan tooling-nozzle-isothermal-wall-chain §5.1 #15) ---
+    # None なら従来どおり (j 方向の線は半径方向)。[d_n, d_b] (局所半径比) を指定すると、壁からの距離 d (= r_w − 半径方向の配置の r) が
+    # d ≤ d_n の節点を壁の法線上 (壁点 + d·内向き法線) に置き、d_n〜d_b で半径方向の配置へ smoothstep で戻す (d ≥ d_b と軸は従来の位置)。
+    # 傾斜壁 (縮流部で最大 40°) では半径方向の線が壁と直交せず、AR の大きい近壁セルにスキューが入る (AGENTS.md の AR ≤ 5000 の例外の外)。
+    # 壁の第一セル厚は法線距離 = d になる (半径方向の配置では法線距離 = d·cos θ_w)。
+    wall_normal_layer: tuple | list | None = None
 
 
 def _check_table(name: str, tbl, x0: float, x1: float, positive: bool = True) -> np.ndarray:
@@ -218,6 +224,27 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
         R = np.empty((ni, nj))
         for i in range(ni):
             R[i, :] = rw[i] * _radial_fracs(nj, float(fr[i]))
+    if prm.wall_normal_layer is not None:
+        dn, db = (float(v) for v in prm.wall_normal_layer)
+        if not (0.0 < dn < db < 1.0):
+            raise ValueError(f"wall_normal_layer: 0 < d_n < d_b < 1 にする ({dn}, {db})")
+        try:
+            drw = np.asarray(wall.r(xs, 1), dtype=float)       # 壁の解析的な傾き (物理壁は導関数を返す)
+        except TypeError:
+            drw = None
+        if drw is None or drw.shape != xs.shape:
+            drw = np.gradient(rw, xs)
+        nrm = np.sqrt(1.0 + drw ** 2)
+        d = rw[:, None] - R                                  # 壁からの (半径方向の配置での) 距離 [r*]
+        t = np.clip((d / rw[:, None] - dn) / (db - dn), 0.0, 1.0)
+        beta = 1.0 - t * t * (3.0 - 2.0 * t)                 # 1 (d ≤ d_n) → 0 (d ≥ d_b)
+        Xn = xs[:, None] + d * (drw / nrm)[:, None]          # 壁点 + d·内向き法線 (r′, −1)/√(1 + r′²)
+        Rn = rw[:, None] - d / nrm[:, None]
+        X = X + beta * (Xn - X)
+        R = R + beta * (Rn - R)
+        # 格子の線が交差していないこと (各 j で x が単調、各 i で r が単調)
+        if not (np.all(np.diff(X, axis=0) > 0) and np.all(np.diff(R, axis=1) > 0)):
+            raise ValueError("wall_normal_layer: 格子の線が交差する (d_n・d_b を小さくする)")
     coords = np.zeros((ni * nj, 3))
     coords[:, 0] = X.ravel() * prm.scale
     coords[:, 1] = R.ravel() * prm.scale
@@ -240,7 +267,7 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
     return coords, quads, bedges
 
 
-def write_msh41_2d(path, coords, quads, bedges) -> None:
+def write_msh41_2d(path, coords, quads, bedges, digits: int = 10) -> None:
     """2D 平面メッシュを gmsh msh4.1 テキストで書く (決定的)。"""
     curve_order = ["inlet", "outlet", "wall", "axis"]
     n_nodes = coords.shape[0]
@@ -266,7 +293,8 @@ def write_msh41_2d(path, coords, quads, bedges) -> None:
     ap(f"1 {n_nodes} 1 {n_nodes}")
     ap(f"2 1 0 {n_nodes}")
     ap("\n".join(str(i + 1) for i in range(n_nodes)))
-    ap("\n".join(f"{c[0]:.10g} {c[1]:.10g} {c[2]:.10g}" for c in coords))
+    # digits: 座標の有効桁数 (既定 10 = 従来どおり)。冷却壁の格子 (第一層厚 / 半径 3e-7) は 10 桁だと第一層厚が 0.2 % 動くので 17 にする
+    ap("\n".join(f"{c[0]:.{digits}g} {c[1]:.{digits}g} {c[2]:.{digits}g}" for c in coords))
     ap("$EndNodes")
     ap("$Elements")
     ap(f"{1 + len(curve_order)} {n_elems} 1 {n_elems}")

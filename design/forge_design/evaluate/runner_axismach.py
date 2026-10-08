@@ -694,7 +694,7 @@ def _mesh_params_from(m: dict, scale, ni, nj, wall_first_frac) -> Mesh2DParams:
                         wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
                         axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"),
                         wall_first_frac_table=m.get("wall_first_frac_table"), x_density_table=m.get("x_density_table"),
-                        scale=scale)
+                        wall_normal_layer=m.get("wall_normal_layer"), scale=scale)
 
 
 def mesh_params(p, scale, ni, nj, wall_first_frac):
@@ -1350,7 +1350,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         pw_info = {"repr": None, "source": "default (1 本で表せないので区分表現のまま)", "reason": wall.single_bspline_default_skipped}
     mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
-    write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
+    # msh の座標の桁数 (mesh.msh_digits、既定 10 = 従来どおり; 冷却壁の薄い第一層は 17、plan tooling-nozzle-isothermal-wall-chain §5.1 #16)
+    write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges, digits=int(p.mesh.get("msh_digits", 10)))
     law = d["law"]
     xs = np.linspace(d["x0"], d["x_E"], 400)
     tgt = [float(law(x)) if x >= d["x_A"] else float("nan") for x in xs]

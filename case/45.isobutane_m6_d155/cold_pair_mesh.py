@@ -7,8 +7,8 @@
   ../delta_contur/hform_ab_profiles.json : CONTUR の C_f (断熱 / 300 K、エンタルピー形) — 冷却での摩擦の増え方に使う
 冷却の y1+ の見積もり: y1+ ∝ y1·√(ρ_w τ_w)/μ_w。同じ圧力で ρ_w ∝ 1/T_w、τ_w は CONTUR の C_f 比、μ_w は混合気の μ(T)
   (NS と同じ CEA 輸送物性の値; MU_T・MU)。局所の倍率は 8.5〜9.4 (case/44 の空気 1060 K では 5〜5.4)。
-設計: 第一セル厚 / 局所半径 = 0.8 / (局所の冷却 y1+ / 第一セル比) を表にする (入口の角 0.05 r_t は幾何的特異点として除く)。
-  x 方向の密度は h ≤ min(0.06 r_t, 4500 · 第一セル厚) (AR ≤ 4500 の見込み、判定は check_mesh_quality --ar-max 5000)。
+設計: 第一セル厚 (壁法線の距離) / 局所半径 = 0.8 / (局所の冷却 y1+ / 第一セル比) を表にする。近壁の層は壁法線に沿わせる (WALL_NORMAL) (入口の角 0.05 r_t は幾何的特異点として除く)。
+  x 方向の密度は h ≤ min(0.06 r_t, 4500 · 第一セル厚 / √(1 + r′²)) (AR ≤ 4500 の見込み、判定は check_mesh_quality --ar-max 5000)。
   ni はその密度の積分の 1.05 倍、nj 121 (半径方向の等比 ≤ 1.11、今の生産と同程度)。
 出力: _band_ab/cold_pair/mesh_cold_tables.json、problem_d155_ns_prod_coldmesh.yaml (断熱)、problem_d155_ns_prod_coldmesh_tw300.yaml (300 K)。
 usage: /home/sano/work/forge/design/.venv-opt/bin/python cold_pair_mesh.py
@@ -28,6 +28,10 @@ OUT = HERE / "_band_ab" / "cold_pair"
 SRC = "problem_d155_ns_prod.yaml"
 RT = 0.07666536551630307
 TARGET, AR_T, H_FAR, NJ, TW = 0.8, 4500.0, 0.06, 121, 300.0
+# 近壁の層を壁法線に沿わせる (局所半径比 d_n まで法線、d_b で半径方向へ戻す)。傾斜壁でも近壁の高 AR セルがスキュー無しになり、
+# AGENTS.md の AR ≤ 5000 の例外 (壁法線・スキュー無しの層) に入る (codex plan 2026-10-08 M1)。第一セル厚は法線距離になる
+WALL_NORMAL = [0.02, 0.8]   # [0.01, 0.05] はつなぎ目で skew 0.72、[0.02, 0.8] で 0.46 (生産の格子 0.44 と同程度)
+MSH_DIGITS = 17   # 座標の有効桁 (10 桁だと第一層厚が 0.2 % 動く、codex diagnose 2026-10-08)
 MU_T = [250, 300, 350, 400, 600, 800, 1000, 1200, 1400, 1470, 1600]
 MU = [15.281, 17.804, 20.166, 22.398, 30.376, 37.332, 43.613, 49.387, 54.804, 56.638, 59.975]   # μ_mix [µPa·s] (transport_reference.py)
 
@@ -54,7 +58,10 @@ def design():
     fr_tab[0][0], fr_tab[-1][0] = x0 - 1e-6, x1 + 1e-6              # 丸めで範囲を外さない
     xd = np.linspace(x0, x1, 4001)
     tf = np.array(fr_tab)
-    h = np.minimum(H_FAR, AR_T * np.exp(np.interp(xd, tf[:, 0], np.log(tf[:, 1]))) * np.interp(xd, x, rw))
+    # 壁沿いの辺は dx·√(1 + r′²) (縮流部で長くなる)、第一セルの辺は半径方向の frac·r_w → AR = dx·√(1 + r′²)/(frac·r_w)
+    # (2026-10-08: 初版は傾きを見ず、縮流部 x −9〜−1 で AR 5488 (倍精度) になった)
+    slope = np.sqrt(1.0 + np.gradient(rw, x) ** 2)
+    h = np.minimum(H_FAR, AR_T * np.exp(np.interp(xd, tf[:, 0], np.log(tf[:, 1]))) * np.interp(xd, x, rw) / np.interp(xd, x, slope))
     dens = 1.0 / h
     ni = int(np.ceil(1.05 * np.trapezoid(dens, xd))) + 1
     xdt = np.unique(np.r_[np.arange(x0, x1, 0.25), x1])
@@ -63,11 +70,11 @@ def design():
     den_tab = [[round(float(a), 6), float(f"{b:.4f}")] for a, b in zip(xdt, dt)]
     den_tab[0][0], den_tab[-1][0] = x0 - 1e-6, x1 + 1e-6
     # 見積もりの検査 (格子の節点で)
-    prm = Mesh2DParams(ni=ni, nj=NJ, wall_first_frac_table=fr_tab, x_density_table=den_tab)
+    prm = Mesh2DParams(ni=ni, nj=NJ, wall_first_frac_table=fr_tab, x_density_table=den_tab, wall_normal_layer=WALL_NORMAL)
     xs = _x_stations(x0, x1, ni, 1.0, 1.0, density_table=den_tab)
     fr = _first_frac_profile(xs, prm)
     rws = np.interp(xs, x, rw)
-    ar = np.gradient(xs) / (fr * rws)
+    ar = np.gradient(xs) * np.interp(xs, x, np.sqrt(1.0 + np.gradient(rw, x) ** 2)) / (fr * rws)
     ypc = np.interp(xs, x, k) * fr
     area = np.gradient(xs) * rws
     g = np.diff(_radial_fracs(NJ, float(fr.min())))[::-1]
@@ -97,6 +104,8 @@ def write_problems(fr_tab, den_tab, est):
              f"  wall_first_frac: {fr_tab[-1][1]}\n"
              f"  wall_first_frac_table: {flow(fr_tab)}\n"
              f"  x_density_table: {flow(den_tab)}\n"
+             f"  wall_normal_layer: {WALL_NORMAL}   # 近壁を壁法線に (局所半径比 d_n, d_b)\n"
+             f"  msh_digits: {MSH_DIGITS}\n"
              "  throat_refine: 1.0\n  throat_width: 1.0\n  ar_max: 5000\n\n")
     base = src[:m.start()] + block + src[m.end():]
     base = base.replace("name: problem_d155_ns_prod\n", "name: problem_d155_ns_prod_coldmesh\n", 1)

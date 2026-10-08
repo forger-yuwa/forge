@@ -6,6 +6,7 @@
 #include <array>
 #include <map>
 #include <algorithm>
+#include <type_traits>
 
 #include <flowFormat.hpp>
 #include <mesh/elementType.hpp>
@@ -501,9 +502,16 @@ public:
             {
                 getline(inputFile, line);
                 splitOnSpace(l_str, line);
-                geom_float x = stof(l_str[0]);
-                geom_float y = stof(l_str[1]);
-                geom_float z = stof(l_str[2]);
+                // 節点座標は geom_float の精度で読む (2026-10-08、plan tooling-nozzle-isothermal-wall-chain §5.1 #16):
+                // double のビルドで stof を使うと、座標が float に丸められてから double に入る (冷却壁の第一層厚 / 半径 3.4e-7 が
+                // float の数 ulp になり 25 % ずれた)。float のビルドは従来どおり stof (変換結果はビット同一)。
+                auto parse_coord = [](const std::string& s) -> geom_float {
+                    if constexpr (std::is_same<geom_float, double>::value) { return std::stod(s); }
+                    else { return std::stof(s); }
+                };
+                geom_float x = parse_coord(l_str[0]);
+                geom_float y = parse_coord(l_str[1]);
+                geom_float z = parse_coord(l_str[2]);
 
                 node node_temp = node(x, y, z);
                 this->nodes.push_back(node_temp);
