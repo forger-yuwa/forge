@@ -130,6 +130,11 @@ public:
                                      //    sweep で ρY_s を緩和し、要因2 の擬似時間緩和ミスマッチを解消)。
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
+    // block-DPLUR のエネルギー行の熱伝導 Jacobian (ビットマスク、既定 0 = 従来どおりビット同一)。
+    //   ビット 1: 内部の node 間面でエネルギー行の粘性対角 (ρE にかかるスカラー) を k_face·δ/dcc·(γ/cp)·∂e/∂Q に置き換える。
+    //   ビット 2: 等温壁の節点のエネルギー行を単位行から拘束の行 [−e_w,0,0,0,1] に替える (原因の切り分け用)。
+    // node・timeIntegration 11・blockDPLUR 1・lowMachPrecond<2 専用。plans/active/time_integration-implicit-thermal-jacobian.md。
+    int implicitThermalJacobian = 0;
     // 受動スカラ (排気トレーサ roXi・凝縮モーメント) の輸送経路 (plans/active/species-passive-scalar-unification.md §4.1)。
     //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; A/B 用・旧挙動とビット不変)
     //   1: 化学種経路 (species カーネルの受動種: S3 面再構成 [speciesFaceReconstruction>=2, SLAU]・トレーサ Fick 拡散・

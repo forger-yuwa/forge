@@ -82,6 +82,23 @@ time:
 を 8 まで引き上げ、`cfl_pseudo 4 + nSub 13-15` で現行比 ~13% 高速・ωバースト低減** — 採用候補
 (長時間 run でのバースト余裕検証は未了)。
 
+## implicitThermalJacobian — エネルギー行の熱伝導 Jacobian (opt-in、2026-10-09)
+
+```yaml
+time:
+  deltaT: {..., blockDPLUR: 1, implicitThermalJacobian: 1}
+```
+
+block DPLUR の粘性の対角は 5 行に同じスカラー (2ν·δ/dcc) を保存量に掛けるので、エネルギー行では ρE にかかり、
+ρE がほとんど動かずに ρ と T が入れ替わる等圧のエントロピーのモードを抑えない。ビットマスク (既定 0 = 従来どおりビット同一):
+
+- **ビット 1**: 内部の node 間面でエネルギー行を熱伝導の Jacobian k_face·δ/dcc·(γ/c_p)·∂e/∂Q に置き換える (k_face は残差と同じ式)。
+- **ビット 2**: 等温壁の節点のエネルギー行を拘束の行 [−e_w, 0, 0, 0, 1] にする (原因の切り分け用)。
+
+node・`timeIntegration 11`・`blockDPLUR 1`・`lowMachPrecond < 2` 専用。`lineViscCoupling 1`・`mesh.nodeIsothermalEnergyBC 1` との併用は起動時に拒否する。
+LHS だけの変更なので定常解は変わらない。**検証中** (plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md)) で、既定化はしていない。
+式は [`methods/time_integration/implementation.md`](../methods/time_integration/implementation.md) の「エネルギー行の熱伝導 Jacobian」。
+
 ## bodyForce — 一様体積力 (周期チャネル駆動)
 
 ```yaml

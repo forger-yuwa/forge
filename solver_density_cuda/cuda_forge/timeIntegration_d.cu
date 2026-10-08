@@ -787,7 +787,16 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  // dq_new と同じ値を書く。SoA の dq_new_* も従来どおり書く (commit・周期ミラー・診断が読む)。
  // line-implicit / node 周期 (SoA だけを書き換える経路) では呼び出し側が nullptr を渡す。
  const flow_float* __restrict__ dq_pack_old,
- flow_float* dq_pack_new
+ flow_float* dq_pack_new,
+ // エネルギー行の熱伝導 Jacobian (plans/active/time_integration-implicit-thermal-jacobian.md、ビットマスク、0 で従来どおり):
+ //   ビット 1: 内部の node 間面でエネルギー行の粘性対角を k_face·δ/dcc·(γ/cp)·∂e/∂Q に置き換える (k_face は残差と同じ式)。
+ //   ビット 2: 等温壁の節点のエネルギー行を拘束の行 [−e_w,0,0,0,1] にする。
+ // thermCondArr・cpArr・fxArr は thermalJac のビット 1 が立っているときだけ読む (それ以外は nullptr でよい)。
+ int thermalJac,
+ const flow_float* __restrict__ thermCondArr,
+ const flow_float* __restrict__ cpArr,
+ const flow_float* __restrict__ fxArr,
+ flow_float Prt
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -947,6 +956,27 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                         for (int i = 0; i < 5; ++i)
                             if (!rowDec[i]) Kdst[(size_t)ic * 25 + i * 5 + i] += static_cast<flow_float>(alpha);
                     }
+                } else if ((thermalJac & 1) != 0 && isNode != 0 && has_nbr) {
+                    // 熱伝導の Jacobian (implicitThermalJacobian ビット 1): 連続・運動量の行は従来どおりスカラー、
+                    // エネルギー行は熱伝導の残差 k_face·(T_j − T_i)·δ/dcc の Q_i による微分の符号反転 = Λ^T·(γ/cp)·∂e/∂Q。
+                    // k_face は viscousFlux_d.cu の tc_face と同じ式 (f 補間の層流 k + 面 cp × 面 μ_t / Pr_t)、物性・γ は凍結。
+                    // ∂e/∂ρ = −(e − ½|u|²)/ρ、∂e/∂(ρu_k) = −u_k/ρ、∂e/∂(ρE) = 1/ρ (e = ρE/ρ − ½|u|²; TP でも Y は正規化済みなので厳密)。
+                    #pragma unroll
+                    for (int r = 0; r < 4; ++r) diag_block[r][r] += viscous_diag;
+                    const ST f = static_cast<ST>(fxArr[ip]);
+                    const ST omf = static_cast<ST>(1.0) - f;
+                    const ST cp_face = f * static_cast<ST>(cpArr[ic0]) + omf * static_cast<ST>(cpArr[ic1]);
+                    const ST mut_face = f * static_cast<ST>(vis_turb[ic0]) + omf * static_cast<ST>(vis_turb[ic1]);
+                    const ST k_face = f * static_cast<ST>(thermCondArr[ic0]) + omf * static_cast<ST>(thermCondArr[ic1])
+                                    + cp_face * mut_face / static_cast<ST>(Prt);
+                    const ST q2 = velocity_x * velocity_x + velocity_y * velocity_y + velocity_z * velocity_z;
+                    const ST e_int = static_cast<ST>(roe[ic]) / density - static_cast<ST>(0.5) * q2;
+                    const ST cfac = (k_face * delta / dcc) * (gamma / max(static_cast<ST>(cpArr[ic]), static_cast<ST>(1.0e-30))) / density;
+                    diag_block[4][0] += -cfac * (e_int - static_cast<ST>(0.5) * q2);
+                    diag_block[4][1] += -cfac * velocity_x;
+                    diag_block[4][2] += -cfac * velocity_y;
+                    diag_block[4][3] += -cfac * velocity_z;
+                    diag_block[4][4] += cfac;
                 } else {
                     block_dplur::add_identity_scaled(diag_block, viscous_diag);
                     // **診断専用 A/B** (codex 2026-09-21、既定はコンパイルから除外されビット不変)。
@@ -1056,6 +1086,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             if (!cached) {
                 for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
                 diag_block[4][4] = static_cast<ST>(1.0);
+                // implicitThermalJacobian ビット 2: 拘束の行 Δ(ρE)_w − e_w·Δρ_w = 0 (壁温のピン ρE = ρ·e(T_w) と一致、壁は u = 0)。
+                if ((thermalJac & 2) != 0) diag_block[4][0] = -static_cast<ST>(roe[ic]) / density;
             }
             rhs[4] = static_cast<ST>(0.0);
         }
@@ -1517,7 +1549,12 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.lineImplicit == 1) ? msh.line_next_d : nullptr), \
                 msh.line_Kprev_d, msh.line_Knext_d, (((loop == 0) && (lineStoreK != 0)) ? 1 : 0), cfg.lineViscCoupling,  /* line-implicit */ \
                 ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0),  /* useDiagCache: float・point 経路のみ */ \
-                (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr)  /* 近傍 dq の AoS 版 */
+                (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr),  /* 近傍 dq の AoS 版 */ \
+                cfg.implicitThermalJacobian,  /* エネルギー行の熱伝導 Jacobian / 等温壁の拘束の行 (ビットマスク) */ \
+                ((cfg.implicitThermalJacobian & 1) ? var.c_d["thermCond"] : nullptr), \
+                ((cfg.implicitThermalJacobian & 1) ? var.c_d["cp"] : nullptr), \
+                ((cfg.implicitThermalJacobian & 1) ? var.p_d["fx"] : nullptr), \
+                cfg.turbulentPrandtl
             // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
             const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&
                                  !(cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers > 0);

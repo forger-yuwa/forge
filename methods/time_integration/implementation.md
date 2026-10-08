@@ -169,12 +169,16 @@ $k_f\,(T_j-T_i)\,\delta/|\Delta\mathbf{cc}|$ が反応するのは $T$ なので
 (`lineDtDirectional`) で $V/\Delta\tau$ が縦横比の分だけ小さくなると、300 K の等温壁の 1 層目でこのモードが育つ
 (plan [tooling-nozzle-isothermal-wall-chain](../../plans/active/tooling-nozzle-isothermal-wall-chain.md) §5.1 #27)。
 
-`time.deltaT.implicitThermalJacobian: 1` のとき、block DPLUR (`implicit_defect_correction_block_d`、float/double とも) の
-**内部の node 間面**について、エネルギー行 (行 4) の $\Lambda^{\nu}_f$ を熱伝導の Jacobian に置き換える (運動量の行は従来どおり):
+`time.deltaT.implicitThermalJacobian` はビットマスク (既定 0 = 従来どおり、ビット同一)。block DPLUR (`implicit_defect_correction_block_d`、ST = float/double とも)、
+node 離散化だけで効く。
+
+**ビット 1 (熱伝導の Jacobian)**: 内部の node 間面について、エネルギー行 (行 4) の $\Lambda^{\nu}_f$ を熱伝導の Jacobian に置き換える
+(連続・運動量の行は従来どおり $\Lambda^{\nu}_f$):
 
 $$
-D_i[4,:] \mathrel{+}= \Lambda^{T}_f\,\frac{\partial e}{\partial \mathbf Q_i},\qquad
-\Lambda^{T}_f=\gamma_i\left(\frac{\mu_{\rm lam}}{Pr}+\frac{\mu_t}{Pr_t}\right)\frac{\delta}{|\Delta\mathbf{cc}|},
+D_i[4,:] \mathrel{+}= \Lambda^{T}_f\,\frac{\gamma_i}{c_{p,i}}\,\frac{\partial e}{\partial \mathbf Q_i},\qquad
+\Lambda^{T}_f=k_f\,\frac{\delta}{|\Delta\mathbf{cc}|},\qquad
+k_f = f\,k_0+(1-f)\,k_1+\bigl(f\,c_{p,0}+(1-f)\,c_{p,1}\bigr)\frac{f\,\mu_{t,0}+(1-f)\,\mu_{t,1}}{Pr_t},
 $$
 
 $$
@@ -184,13 +188,17 @@ e=\frac{\rho E}{\rho}-\tfrac12|\mathbf u|^2,\quad
 \frac{\partial e}{\partial(\rho E)}=\frac1\rho .
 $$
 
-$k\,\partial T/\partial\mathbf Q=(k/c_v)\,\partial e/\partial\mathbf Q$ と $k/c_v=\gamma\,(\mu/Pr+\mu_t/Pr_t)$ (凍結 γ) を使うので、
-$T$・$c_v$・気体定数を陽に持たずに組める。$e$ の基準点 (TP の `thermoHrefTemp`) によらない
-($\partial e/\partial\rho$ はコードが $T$ を $\rho E$ から求めるのと同じ $e$ で評価する)。
-$(4,4)$ 成分は $(\gamma/Pr)\,\nu\,\delta/|\Delta\mathbf{cc}|$ で、従来の $2\nu\,\delta/|\Delta\mathbf{cc}|$ と同程度。
-$\mu_{\rm lam}$ は従来の粘性対角と同じ `physProp.visc` (定数、剛性の見積もり) を使う。
-近傍との熱伝導の結合 (非対角) は入れない (従来の粘性対角と同じく対角だけ)。
-**LHS だけの変更なので定常解は変わらない**。`lineViscCoupling`・`lowMachPrecond>=2`・`blockDPLUR 0` との併用は起動時に拒否する。
+$k_f$ は熱伝導の残差 ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) の `tc_face`) と同じ式 ($k$ = `thermCond`、$c_p$ = `cp`、$f$ = `fx`)。
+物性と $\gamma$ は凍結し ($c_v=c_p/\gamma$)、熱伝導の非直交補正と近傍との結合 (非対角) は従来どおり入れない。
+$\partial T/\partial\mathbf Q=(\gamma/c_p)\,\partial e/\partial\mathbf Q$ は TP でも厳密 (T を求める前に Y を正規化するので、$\rho Y$ を凍結して $\rho$ が動いても Y は変わらない)。
+$e$ の基準点 (TP の `thermoHrefTemp`) によらず $\Lambda^{T}_f\,\Delta T$ の減衰になる。壁の節点と内部節点の間の面も node 間面なので、壁への熱伝導は 1 層目の対角に入る。
+
+**ビット 2 (等温壁の拘束の行)**: 等温壁の節点の行 4 を単位行から $[-e_w,0,0,0,1]$ (rhs 0、$e_w=\rho E_w/\rho_w$) に替え、
+$\Delta(\rho E)_w=e_w\,\Delta\rho_w$ を線形系の中で満たす (後段の壁温のピン $\rho E=\rho\,e(T_w)$ と一致させる)。原因の切り分け用。
+
+**LHS だけの変更なので定常解 (不動点) は変わらない** (到達の保証ではない)。`lineViscCoupling: 1`・`nodeIsothermalEnergyBC: 1`・`lowMachPrecond>=2`・`blockDPLUR 0`・
+`timeIntegration` ≠ 11・cell 離散化との併用は起動時に拒否する。検証と経緯は plan
+[time_integration-implicit-thermal-jacobian](../../plans/active/time_integration-implicit-thermal-jacobian.md)。
 
 > **2026-06 修正**: 旧コードは対角に $A^{+}$ ではなく $|\widetilde A|$ を、近傍に $-A^{-}$ ではなく $+|\widetilde A|$ を
 > 使っていた（符号付き分割でなく絶対値の誤用）。対角が upwind 自己 Jacobian と不一致・近傍結合が逆符号となり、

@@ -434,6 +434,8 @@ void solverConfig::read(std::string fname)
         this->axisTimestepBeta = getOptionalValidatedValue<flow_float>(deltaT, "axisTimestepBeta", 0.0, "time.deltaT");
         // block-DPLUR 線形 solve の内部精度: 既定 0 (float・従来高速)。1 で double 化 (軸対称近軸の根治用)。
         this->implicitSolvePrecision = getOptionalValidatedValue<int>(deltaT, "implicitSolvePrecision", 0, "time.deltaT");
+        // エネルギー行の熱伝導 Jacobian (ビットマスク、既定 0)。plans/active/time_integration-implicit-thermal-jacobian.md。
+        this->implicitThermalJacobian = getOptionalValidatedValue<int>(deltaT, "implicitThermalJacobian", 0, "time.deltaT");
         // Ducros リミタ 1 次化: 既定 0 (off・使わない; MUSCL 2 次のまま)。1 で衝撃近傍の強制 1 次化 (従来挙動)。
         this->ducrosLimiter = getOptionalValidatedValue<int>(deltaT, "ducrosLimiter", 0, "time.deltaT");
         // NaN 検知診断モード: 既定 0 で従来挙動 (検査なし・ビット不変)。1 で検査 (fused device フラグ)。
@@ -1400,6 +1402,24 @@ void solverConfig::initTimeIntegrationScheme(int timeIntegration){
                 "implicitSolvePrecision==1 (double solve) is not supported with lowMachPrecond>=2 "
                 "(preconditioned block DPLUR: 2=RHS+LHS, 3=LHS-only). Use lowMachPrecond 0 or 1.");
         }
+    }
+
+    // implicitThermalJacobian (エネルギー行の熱伝導 Jacobian / 等温壁の拘束の行) の範囲チェック。
+    // 実装したのは node の block DPLUR (非 precond) だけなので、他の経路では黙って効かない事故を防ぐため止める。
+    if (this->implicitThermalJacobian < 0 || this->implicitThermalJacobian > 3) {
+        throw std::runtime_error("implicitThermalJacobian must be 0..3 (bit 1: thermal Jacobian, bit 2: isothermal-wall constraint row).");
+    }
+    if (this->implicitThermalJacobian != 0) {
+        if (this->discretization != "node")
+            throw std::runtime_error("implicitThermalJacobian!=0 requires mesh.discretization node.");
+        if (timeIntegration != 11 || this->blockDPLUR != 1)
+            throw std::runtime_error("implicitThermalJacobian!=0 requires timeIntegration==11 and blockDPLUR==1.");
+        if (this->lowMachPrecond >= 2)
+            throw std::runtime_error("implicitThermalJacobian!=0 is not supported with lowMachPrecond>=2.");
+        if (this->lineViscCoupling != 0)
+            throw std::runtime_error("implicitThermalJacobian!=0 cannot be combined with lineViscCoupling (the line viscous coupling acts on rho*E).");
+        if (this->nodeIsothermalEnergyBC == 1)
+            throw std::runtime_error("implicitThermalJacobian!=0 cannot be combined with mesh.nodeIsothermalEnergyBC 1 (weak isothermal diagonal).");
     }
 
 }
