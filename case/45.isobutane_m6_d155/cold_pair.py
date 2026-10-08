@@ -435,8 +435,8 @@ def prep_ext(src: Path, run: Path, steps: int) -> dict:
     ys = NS.yaml_strict()
     ptext = (src / "solverConfig.yaml").read_text()
     ctext = ys.replace_scalars(ptext, {NS.NSTEP: str(int(steps))})
-    if set(NS.MK.diff_paths(ys.load(ptext), ys.load(ctext))) != {NS.NSTEP}:
-        raise SystemExit("延長の solverConfig の差が nStepOuter だけでない — 止める")
+    if not set(NS.MK.diff_paths(ys.load(ptext), ys.load(ctext))) <= {NS.NSTEP}:   # 同じ step 数なら差は空
+        raise SystemExit("延長の solverConfig に nStepOuter 以外の差がある — 止める")
     run.mkdir(parents=True)
     for fn in NS.EXT_COPY + ("wall_repr.json", "bcondConfig.yaml", "species_meta.yaml"):
         if (src / fn).is_file():
