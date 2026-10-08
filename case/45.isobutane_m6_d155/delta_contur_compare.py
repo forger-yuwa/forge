@@ -554,6 +554,16 @@ def predict():
                 ch["table_32000"] = float(np.max(np.abs((Rt["Tw300"]["delta_r"] / Rt["adiabatic"]["delta_r"]) / ratio - 1.0)[t]))
             ch["ok"] = bool(max(ch.values()) < 1e-3)
             out["precision"][f"{arm}_kf{kf:.6f}"] = ch
+    # 記録のみ (判定に使わない): contur_v2 全体 (熱閉包 + NS と同じ粘性 + 加速の項、plan §4.7・§5.1 #19)
+    from forge_design.evaluate.runner_axismach import contur_mu_fn
+    mu = contur_mu_fn(p)
+    for kf in (1.0, kprod):
+        R = {w: DI.integral_bl(d["wall"], d["wall_inv"], gas, p.cp, float(p.spec["Pt"]), Tt, rt, thermal_bc=tbc, cf_scale=kf,
+                               closure_version="contur_v2", mu_fn=mu) for w, tbc in walls.items()}
+        out["arms"][f"V2_kf{kf:.6f}"] = {"k_f": kf, "arm": "contur_v2 (記録のみ)", "delta_r_ad": R["adiabatic"]["delta_r"].tolist(),
+                                         "delta_r_tw300": R["Tw300"]["delta_r"].tolist(),
+                                         "R": (R["Tw300"]["delta_r"] / R["adiabatic"]["delta_r"]).tolist(),
+                                         "Taw_ad": R["adiabatic"]["Taw"].tolist()}
     out["x"] = xs.tolist()
     out["precision_ok"] = bool(all(v["ok"] for v in out["precision"].values()))
     (OUT / "cooling_ratio_predictions.json").write_text(json.dumps(out, ensure_ascii=False))

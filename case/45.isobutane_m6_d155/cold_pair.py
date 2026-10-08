@@ -234,7 +234,9 @@ def extract(run: Path) -> Path:
     from forge_design.metrics.deltastar import deltastar_from_core_matched_euler
     info = NS.jload(run / "prepare_info.json"); scale = float(info["scale_m"])
     out = {}
-    for k, step in enumerate(WINDOW):
+    steps_all = sorted(NS.step_of(f) for f in NS.res_files(run))
+    window = tuple(steps_all[-5:])                     # 判定窓 = その run の最後の 5 枚 (本段 80000〜100000、延長は延長の最後の 5 枚)
+    for k, step in enumerate(window):
         with tempfile.TemporaryDirectory() as td:
             dd = Path(td) / "ns"; dd.mkdir()
             for f in ("bcondConfig.yaml", "solverConfig.yaml", "prepare_info.json"):
@@ -253,7 +255,7 @@ def extract(run: Path) -> Path:
         print(f"[extract] {run.name} res_{step}: δ 列 {len(x['x'])}、sens {sens.shape}、Q_w {float(out[f's{k}_Qw']):.4g} W", flush=True)
     OUTD.mkdir(parents=True, exist_ok=True)
     p = OUTD / f"extract_{run.name}.npz"
-    np.savez(p, steps=np.array(WINDOW), scale=np.array(scale), **out)
+    np.savez(p, steps=np.array(window), scale=np.array(scale), **out)
     return p
 
 
@@ -305,7 +307,7 @@ def judge(ad_name: str, tw_name: str) -> dict:
     ji = [int(np.argmin(np.abs(XE - x))) for x in XJ]
     def qs(series, name):
         # 5 枚すべて (tail_frac 1.0)、drift・osc の許容 0.1 %、最少 5 枚 (plan §6 V-c45 ゲート 3)
-        return classify(np.array(WINDOW, dtype=float), np.asarray(series, dtype=float), 1.0, 0.001, 0.001, 5)
+        return classify(np.array(B["steps"], dtype=float), np.asarray(series, dtype=float), 1.0, 0.001, 0.001, 5)
     bad = []
     for lab in ("ad", "tw"):
         for i in ji:
@@ -416,12 +418,58 @@ def judge(ad_name: str, tw_name: str) -> dict:
     return out
 
 
+def prep_ext(src: Path, run: Path, steps: int) -> dict:
+    """延長 (plan §6 V-c45「延長の決め方」2026-10-08): src の最後の res から restart_field (同一格子、ビット一致、FP64 の型のまま) で
+    新しい run に継ぎ、設定は nStepOuter だけを変えて steps step (5000 ごと)、段なし。"""
+    import shutil
+    import subprocess
+    NS.check_dry_env(False)
+    binrec = binary_record()
+    if not RUN_RE.match(run.name) or run.exists():
+        raise SystemExit(f"{run} の名前が不正か既にある — 止める")
+    srec = NS.jload(src / RECORD)
+    rs = NS.res_files(src)
+    if not rs:
+        raise SystemExit(f"{src} に res が無い")
+    src_h5 = rs[-1]
+    ys = NS.yaml_strict()
+    ptext = (src / "solverConfig.yaml").read_text()
+    ctext = ys.replace_scalars(ptext, {NS.NSTEP: str(int(steps))})
+    if set(NS.MK.diff_paths(ys.load(ptext), ys.load(ctext))) != {NS.NSTEP}:
+        raise SystemExit("延長の solverConfig の差が nStepOuter だけでない — 止める")
+    run.mkdir(parents=True)
+    for fn in NS.EXT_COPY + ("wall_repr.json", "bcondConfig.yaml", "species_meta.yaml"):
+        if (src / fn).is_file():
+            shutil.copy2(src / fn, run / fn)
+    for p in sorted(src.glob("resolved_species_*.yaml")):
+        shutil.copy2(p, run / p.name)
+    (run / "solverConfig.yaml").write_text(ctext)
+    cmd = [sys.executable, str(NS.TOOLS / "restart_field.py"), str(src_h5), str(run / "nozzle.h5"), "--dst-run", str(run), "--keep-src-dtype"]
+    r = subprocess.run(cmd, capture_output=True, text=True, env=NS.runner()._ENV)
+    (run / "restart_field.log").write_text(r.stdout + r.stderr)
+    if r.returncode != 0 or "ビット一致" not in (r.stdout + r.stderr):
+        print((r.stdout + r.stderr)[-3000:])
+        raise SystemExit(f"restart_field がビット一致を確認していない (rc {r.returncode}) — 止める")
+    info = NS.jload(run / "prepare_info.json")
+    info.update(stages={"stages": "none", "ramp": None, "ramp_steps": 1000}, extends=src.name, restart_from=f"{src.name}/{src_h5.name}")
+    NS.jdump(run / "prepare_info.json", info)
+    rec = {**{k: srec[k] for k in ("plan", "kind", "problem", "problem_sha256", "delta_r_csv", "euler_ref", "cfl_main", "implicit_relax",
+                                   "out_interval", "mesh_checks", "geometry_vs_production", "wall_thermal", "bcond_wall")},
+           "tool": "cold_pair.py prep-ext", "created": NS.now(), "git_head": NS.git_head(), "binary": binrec, "stages": "none",
+           "parent": src.name, "parent_res": src_h5.name, "parent_res_sha256": NS.sha256_file(src_h5), "ext_steps": int(steps),
+           "restart_field_tail": (r.stdout + r.stderr).strip().splitlines()[-1:], "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
+    NS.jdump(run / RECORD, rec)
+    print(f"[cold_pair prep-ext] {run.name} ← {src.name}/{src_h5.name}: {rec['restart_field_tail']}")
+    return rec
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
     p = sp.add_parser("prep"); p.add_argument("kind"); p.add_argument("run")
     p = sp.add_parser("run"); p.add_argument("run")
     p = sp.add_parser("nan-scan"); p.add_argument("run")
+    p = sp.add_parser("prep-ext"); p.add_argument("src"); p.add_argument("run"); p.add_argument("steps", type=int)
     p = sp.add_parser("extract"); p.add_argument("run")
     p = sp.add_parser("gates"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("judge"); p.add_argument("ad"); p.add_argument("tw")
@@ -430,6 +478,8 @@ if __name__ == "__main__":
         prep(a.kind, HERE / a.run)
     elif a.cmd == "run":
         sys.exit(run_one(HERE / a.run))
+    elif a.cmd == "prep-ext":
+        prep_ext(HERE / a.src, HERE / a.run, a.steps)
     elif a.cmd == "extract":
         print(extract(HERE / a.run))
     elif a.cmd == "gates":
