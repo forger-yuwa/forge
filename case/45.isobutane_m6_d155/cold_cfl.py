@@ -64,7 +64,8 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
             raise SystemExit("space が 1 行のフロー形式でない — 基準値の足し方を決めていないので止める")
         ctext = ctext.replace("space: {", "space: {" + ", ".join(f"{k}: {v}" for k, v in refs.items()) + ", ")
     # line: "" = なし、"dir" = lineImplicit + lineDtDirectional、"only" = lineImplicit だけ (方向別の擬似 dt なし)
-    line_keys = {"dir": {"lineImplicit": 1, "lineDtDirectional": 1}, "only": {"lineImplicit": 1}, "": {}}[line]
+    line_keys = {"dir": {"lineImplicit": 1, "lineDtDirectional": 1}, "only": {"lineImplicit": 1},
+                 "dirvisc": {"lineImplicit": 1, "lineDtDirectional": 1, "lineViscCoupling": 1}, "": {}}[line]
     if line_keys:                           # 壁法線のライン陰解法 + 方向別の擬似 dt (procedures/solver-settings.md「lineImplicit」)
         dt = pcfg["time"]["deltaT"]
         if int(dt.get("blockDPLUR", 0)) != 1 or int(pcfg["time"].get("timeIntegration", 0)) != 11 or int(dt.get("lowMachPrecond", 0)) >= 2:
@@ -129,8 +130,8 @@ if __name__ == "__main__":
     p.add_argument("--steps", type=int, required=True); p.add_argument("--cfl", type=float, required=True)
     p.add_argument("--out", type=int, default=5000); p.add_argument("--extra", default="")
     p.add_argument("--limiter-ref-from", default=None)
-    p.add_argument("--line", choices=("dir", "only"), default="",
-                   help="dir = lineImplicit 1 + lineDtDirectional 1、only = lineImplicit 1 だけ")
+    p.add_argument("--line", choices=("dir", "only", "dirvisc"), default="",
+                   help="dir = lineImplicit 1 + lineDtDirectional 1、only = lineImplicit 1 だけ、dirvisc = dir + lineViscCoupling 1")
     p.add_argument("--isp", type=int, choices=(0, 1), default=None, help="time.deltaT.implicitSolvePrecision を書く")
     p.add_argument("--inner", type=int, default=None, help="time.nStepInner を変える")
     p.add_argument("--conv", type=int, default=None, help="space.convMethod を変える (0 = 1 次)")
