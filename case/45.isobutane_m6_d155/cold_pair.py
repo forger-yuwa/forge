@@ -595,6 +595,80 @@ def theta_diag(run: Path, step: int | None = None) -> Path:
     return p
 
 
+# --- SU2 との照合 (plan §5.1 #26): 壁・格子は TP の対と同じ、CFD だけ CPG -------------------------------------------
+CPG_GAMMA, CPG_CP = 1.27354, 1360.0
+CPG_PHYS = ("physProp: {thermalMethod: 0, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, thermCondMethod: 1, prandtlLam: 0.72, "
+            f"cp: {CPG_CP}, gamma: {CPG_GAMMA}}}")
+TURB_PLAIN = 'turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaunder: 0, wallTreatmentSST: 0, turbulentPrandtl: 0.9}'
+
+
+def prep_cpg(mesh_run: Path, field_res: Path, run: Path, variant: str, main_steps: int = 100000, out_int: int = 10000) -> dict:
+    """準備済みの TP の run (mesh_run: 格子・壁・BC) を複製して CFD を CPG に書き換える。初期値は field_res (収束した TP の解) の
+    ρ・U・P・k・ω を CPG の保存量 (roe = P/(γ−1) + ½ρ|U|²) に組み直したもの。variant: plain (dilat 0・KL 0) / dilat2 (生産と同じ)。"""
+    import re as _re
+    import shutil
+    import h5py
+    NS.check_dry_env(False)
+    binrec = binary_record()
+    if variant not in ("plain", "dilat2"):
+        raise SystemExit("variant は plain | dilat2")
+    if not RUN_RE.match(run.name) or run.exists():
+        raise SystemExit(f"{run} の名前が不正か既にある — 止める")
+    run.mkdir(parents=True)
+    for fn in ("bcondConfig.yaml", "solverConfig.yaml", "nozzle.h5", "nozzle.msh", "prepare_info.json", "probe.yaml", "wall_repr.json",
+               "wall_physical.csv", "wall_design.csv", "target_axis_M.csv", "MESH_QUALITY.txt"):
+        if (mesh_run / fn).is_file():
+            shutil.copy2(mesh_run / fn, run / fn)
+    cfg = (run / "solverConfig.yaml").read_text()
+    i0 = cfg.index("physProp: {"); depth = 0
+    for k in range(i0, len(cfg)):
+        if cfg[k] == "{": depth += 1
+        elif cfg[k] == "}":
+            depth -= 1
+            if depth == 0:
+                i1 = k + 1; break
+    cfg = cfg[:i0] + CPG_PHYS + cfg[i1:]
+    if variant == "plain":
+        cfg = _re.sub(r"^turbulence: \{.*\}$", TURB_PLAIN, cfg, count=1, flags=_re.M)
+    cfg = _re.sub(r"nStepOuter: *\d+", f"nStepOuter: {int(main_steps)}", cfg, count=1)
+    cfg = _re.sub(r"outStepInterval: *\d+", f"outStepInterval: {int(out_int)}", cfg, count=1)
+    if "thermalMethod: 0" not in cfg or ("dilatationCorrection: 0" in cfg) != (variant == "plain"):
+        raise SystemExit("solverConfig の書き換えの検査が不成立 — 止める")
+    (run / "solverConfig.yaml").write_text(cfg)
+    bc = (run / "bcondConfig.yaml").read_text()
+    bc2 = _re.sub(r"Y0: *[0-9.eE+-]+, *Y1: *[0-9.eE+-]+, *", "", bc)
+    if "Y0" in bc2 or bc2 == bc:
+        raise SystemExit("bcond の入口から化学種を外せない — 止める")
+    (run / "bcondConfig.yaml").write_text(bc2)
+    # 初期値: TP の収束解 → CPG の保存量
+    with h5py.File(field_res, "r") as h:
+        V = {k: np.array(h["VALUE/" + k], dtype=float) for k in ("ro", "Ux", "Uy", "Uz", "P", "k", "omega")}
+    roe = V["P"] / (CPG_GAMMA - 1.0) + 0.5 * V["ro"] * (V["Ux"] ** 2 + V["Uy"] ** 2 + V["Uz"] ** 2)
+    new = {"ro": V["ro"], "roUx": V["ro"] * V["Ux"], "roUy": V["ro"] * V["Uy"], "roUz": V["ro"] * V["Uz"], "roe": roe,
+           "roK": V["ro"] * V["k"], "roOmega": V["ro"] * V["omega"]}
+    with h5py.File(run / "nozzle.h5", "r+") as h:
+        for k, v in new.items():
+            ds = h["VALUE/" + k]
+            if ds.shape != v.shape:
+                raise SystemExit(f"{k} の長さが違う ({ds.shape} vs {v.shape})")
+            ds[...] = v.astype(ds.dtype)
+        for k in ("roY0", "roY1"):
+            if "VALUE/" + k in h:
+                del h["VALUE/" + k]
+    info = NS.jload(run / "prepare_info.json")
+    info.update(stages={"stages": STAGES, "ramp": None, "ramp_steps": 1000}, cfd_gas="cpg (#26: 設定を書き換え)", turbulence_variant=variant)
+    NS.jdump(run / "prepare_info.json", info)
+    rec = {"plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #26", "tool": "cold_pair.py prep-cpg", "created": NS.now(),
+           "git_head": NS.git_head(), "binary": binrec, "kind": "cpg_" + variant, "mesh_run": mesh_run.name, "field_res": str(field_res),
+           "field_res_sha256": NS.sha256_file(field_res), "gas": {"gamma": CPG_GAMMA, "cp": CPG_CP, "R": CPG_CP * (CPG_GAMMA - 1) / CPG_GAMMA,
+           "mu": "Sutherland 1.716e-5/273/111", "Pr": 0.72, "Prt": 0.9}, "variant": variant, "stages": STAGES, "main_steps": int(main_steps),
+           "out_interval": int(out_int), "bcond_wall": next(l for l in bc2.splitlines() if "physID: 3" in l).strip(),
+           "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
+    NS.jdump(run / RECORD, rec)
+    print(f"[prep-cpg] {run.name}: {variant}、格子 {mesh_run.name}、初期値 {field_res.parent.name}/{field_res.name}、{rec['bcond_wall']}")
+    return rec
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -605,6 +679,7 @@ if __name__ == "__main__":
     p = sp.add_parser("extract"); p.add_argument("run")
     p = sp.add_parser("extract-b"); p.add_argument("run")
     p = sp.add_parser("theta"); p.add_argument("run"); p.add_argument("--step", type=int, default=None)
+    p = sp.add_parser("prep-cpg"); p.add_argument("mesh_run"); p.add_argument("field_res"); p.add_argument("run"); p.add_argument("variant")
     p = sp.add_parser("ab-compare"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("gates"); p.add_argument("ad"); p.add_argument("tw")
     p = sp.add_parser("judge"); p.add_argument("ad"); p.add_argument("tw")
@@ -617,6 +692,8 @@ if __name__ == "__main__":
         prep_ext(HERE / a.src, HERE / a.run, a.steps)
     elif a.cmd == "extract":
         print(extract(HERE / a.run))
+    elif a.cmd == "prep-cpg":
+        prep_cpg(HERE / a.mesh_run, HERE / a.field_res, HERE / a.run, a.variant)
     elif a.cmd == "theta":
         print(theta_diag(HERE / a.run, a.step))
     elif a.cmd == "extract-b":
