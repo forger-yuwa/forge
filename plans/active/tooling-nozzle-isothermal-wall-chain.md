@@ -213,19 +213,32 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
   - 全 run: `check_convergence.py` / `check_quasisteady.py --quantity theta,cf_retheta` / `cooled_plate_eval.py --series` / `check_mesh_quality.py` の VERDICT を README に貼る (§4.3-6 の定量条件)。
 - **ノズル CPG (S3)**: δ\* ≤3 %・θ ≤1 %・$q_w$ ≤5 % (4 ステーション)。壁温 = 300 K がノード値で再現 (ピン)。
 - **生産 TP (S4)**: 生産ゲート (ṁ 比 ≤0.3 %、出口面コア M ±0.1 %) 達成、`check_quasisteady --series` STEADY、壁温感度台帳。
-- **V-c45 冷却壁の NS の対 (2026-10-08 事前登録、§5.1 #14)**: case/45 の生産の壁 (run_0167 と同じ物理壁) を冷却壁用の格子
-  (`cold_pair_mesh.py`、ni 4496 × nj 121) に載せ、断熱 (`run_0181_ns_coldmesh_ad`) と 300 K (`run_0182_ns_coldmesh_tw300`) を回す (`run_cold_pair.sh`)。
-  - **投入の前提 (不成立なら回さない)**: メッシュ品質 `VERDICT: PASS` (`--ar-max 5000`)、物理壁の差 |Δr| ≤ 1e-8 r_t (run_0167 の `wall_repr.json` と密な x で比較)、
-    壁距離が変換し直した値と相対 1e-6 以内、壁の bcond が断熱 `wall` / 300 K `wall_isothermal` Ts 300、forge の sha256 が run_0167 と同じ。
-  - **結果を使う前提 (ゲート)**: NaN・Inf なし (全段の残差と全 res)。`check_convergence.py --segment` で RISING・DIVERGED なし (plateau は生産と同じく可)。
-    判定窓 80000〜100000 の 5 枚で δ_E (帯 E) の比 R_NS(x) = δ_E(300 K)/δ_E(断熱) の x = 40・70・94 が `check_quasisteady` で STEADY (許容 0.1 %)。
-    壁解像: 300 K の run で `check_wall_resolution.py` の y1+ > 1 の面積 ≤ 5 % (断熱の run も記録)。どれかが不成立なら下の判定は「判定不能」とし、延長や格子の見直しを先にする。
-  - **判定 (熱閉包の形)**: CONTUR の予測 R_A (温度形、`contur_v1`) と R_B (エンタルピー形) は、生産の k_f (1.0541) で `delta_contur_compare.py hform` と同じ経路で作る (同じ壁)。
-    e_A = max_{x∈[40,94]} |R_A/R_NS − 1|、e_B も同じ。u = 判定窓 5 枚の R_NS の幅 (max − min) の試験部での最大。
-    **e_B < e_A かつ e_A − e_B > 2u ならエンタルピー形を支持**、e_A < e_B かつ e_B − e_A > 2u なら温度形を支持、それ以外は判定保留。
-    k_f = 1 でも同じ計算をし、k_f で判定が入れ替わるなら保留にする。勝った側の e が 1 % 以下なら「冷却の効果を当てる」、1 % を超えるなら
-    「どちらも冷却の効果を当てない (壁温を変えたら NS の δ* 反復が要る)」と記録する。
-  - **記録のみ**: θ・H・C_f・q_w の 300 K/断熱の比 (NS と CONTUR A/B)、NS の断熱壁温と CONTUR の T_aw (A/B)、断熱の run と生産 (run_0179) の δ_E の差 (格子の感度)。
+- **V-c45 冷却壁の NS の対 (2026-10-08 事前登録、§5.1 #14・#15〜#19 で改訂、投入前)**: case/45 の生産の壁 (`_band_ab/prod_confirm/prep/wall_repr.json`、run_0167 の入力をビット同一で再現した準備) を
+  冷却壁用の格子 (`cold_pair_mesh.py`、ni 4719 × nj 121、近壁は壁法線 `wall_normal_layer [0.02, 0.8]`、msh 17 桁) に載せ、FP64 のビルドで断熱 (`run_0181_ns_coldmesh_ad`) と 300 K (`run_0182_ns_coldmesh_tw300`) を回す。
+  **この判定は「この格子・FP64」の条件での比較**であり、生産の FP32 の格子に対する予測精度の主張ではない (codex diagnose 2026-10-08)。
+  - **バイナリ**: ソース = 生産のバイナリの commit e2696d8f0 + `flowFormat.hpp` の typedef 4 行 (double) + `mesh/gmshReader.hpp` の座標読み込み (double のビルドは `stod`、c096d66c と同じ差分)。
+    Release・CUDA arch 86・CXX flags は生産と同じ。forge sha256 65be5e28ca1aed9f…、変換器 sha256 ac88861fa04ebdf4…。両 run で同じものを使い、run の記録に全差分と sha256 を残す。
+  - **投入の前提 (不成立なら回さない)**: 品質は厳密な `VERDICT: PASS` (`--ar-max 5000`、SOFT-PASS 不可)。スキュー > 0.1 かつ AR > 1000 のセルが 0。
+    変換後の座標の第一層厚が生成時の倍精度座標と相対 1e-6 以内 (`fp64_reader_ab.py` で B 腕は誤差 0 を確認済み)。物理壁の差 |Δr| ≤ 1e-8 r_t。壁距離が変換し直しと相対 1e-6 以内。
+    壁の bcond が断熱 `wall` / 300 K `wall_isothermal` Ts 300。熱境界条件以外 (格子・物性 DB・実効設定) が 2 本で同じ。
+  - **ゲート (結果を使う前提、不成立なら判定不能として延長・見直し)**:
+    1. NaN・Inf なし (全段の残差と全 res)。
+    2. `check_convergence.py --segment` で RISING・DIVERGED なし。plateau は許すが VERDICT の文言をそのまま残し「収束」と書かない。
+       残差の床の上限: 本段の最後の 5000 step の rms_ro・rms_roUx・rms_roUy・rms_roe・rms_roK・rms_roOmega の中央値が、生産の run_0179 の同じ量以下。
+    3. 準定常: 判定窓 80000〜100000 の 5 枚すべてで、x = 40, 41, …, 94 (1 r_t ごと) の両腕の δ_E、R_NS、断熱の壁温、300 K の壁の熱流束の積分 Q_w を
+       `check_quasisteady.classify` (5 枚全部、drift ≤ 0.1 %・osc ≤ 0.1 %) で STEADY。
+    4. 壁解像 (`check_wall_resolution.py --weight area`、300 K の run、断熱も記録): y1+ > 1 の面積割合が全壁で ≤ 5 %、試験部 [40, 94] で ≤ 1 %、x ∈ [−1, 40) で ≤ 5 %、
+       縮流部 x < −1 で ≤ 10 % (入口の角 0.05 r_t は別に記録)。超過位置を記録する。
+  - **判定の量**: R_NS(x) = (5 枚平均の δ_E,300 K) / (5 枚平均の δ_E,断熱)、δ_E は生産の抽出の経路 (`extract_and_merge`、帯 E、300 K は符号付き) の平滑後の値、x は [40, 94] の 0.25 r_t 刻み。
+    CONTUR の予測 R_A (温度形)・R_B (エンタルピー形) は熱閉包だけを替えた `delta_contur_compare.py hform` の経路で、同じ壁・同じ k_f を両腕に使う。k_f は診断用の固定値として 1 と 1.0541 の両方。
+  - **不確かさ U(x) (相対、線形和)**: u_t = 5 枚それぞれの比 R_k/R_NS − 1 の最大の絶対値。u_ext = 抽出の感度 (`delta_r_sens`、帯の係数 1.125 / 2.25) による δ_E の相対の振れの最大を、
+    2 本で足したもの (2 r_t の移動平均)。u_c = 0.001 (CONTUR の積分・表、A/B の前提で ≤ 0.1 %)。U = u_t + u_ext + u_c。格子・精度を替えた感度
+    (この格子の断熱の δ_E と生産の FP32 の δ_E の比) は記録するが U には入れない (判定の範囲を「この格子・FP64」に限るため)。
+  - **判定**: 各 x で R_NS が [R_NS(1 − U), R_NS(1 + U)] を動くときの |R_m/R − 1| の下限・上限を取り、e_m の下限 = 下限の最大、上限 = 上限の最大 (m = A, B)。
+    **e_B の上限 < e_A の下限ならエンタルピー形を支持**、e_A の上限 < e_B の下限なら温度形を支持、それ以外は判定保留。k_f の 2 値で判定が違えば保留。
+    勝った側の e の上限が 1 % 以下なら「この格子で冷却の効果を 1 % 以内で当てる」、超えるなら「冷却の効果は当てきれない (壁温を変えたら NS の δ* 反復が要る)」と記録する。
+  - **記録のみ**: θ・H・C_f・q_w の 300 K/断熱の比 (NS と CONTUR A/B)、NS の断熱壁温と CONTUR の T_aw、断熱の run と生産 (run_0179、FP32・別格子) の δ_E の差、
+    contur_v2 全体 (熱閉包 + 粘性 + 加速の項) の予測 (§5.1 #19、判定には使わない)。
 
 ### 6.1 レビュー記録 (codex)
 

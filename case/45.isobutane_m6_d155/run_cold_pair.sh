@@ -2,13 +2,13 @@
 # 冷却壁の NS の対 (plan tooling-nozzle-isothermal-wall-chain §5.1 #14、§6 V-c45) の投入 (AWS の case dir で実行)。
 # usage: bash run_cold_pair.sh <ad_run> <tw300_run>
 #   2 本を準備 (cold_pair.py prep) してから並列に回す (cold_pair.py run → runner_axismach.run_staged_ns → run_case.sh)。
-#   forge の sha256 は生産の run_0167 の RUN_PROVENANCE と同じであること (別のバイナリで回さない)。
+#   forge と変換器は FP64 のビルド (sha256 は cold_pair.py の FORGE_SHA・CONV_SHA と一致すること、plan §5.1 #16)。
 #   残差の rms_* (rms_dq_* を除く) に NaN・Inf が出たら、その run の forge (cwd がその run の forge のうち、このスクリプトが起動したもの) を止める。
 # **実行中にこのファイル・cold_pair.py を編集しないこと**。
 set -euo pipefail
-: "${FORGE_BIN:=$HOME/forge-wallfit-bin/solver_density_cuda/build/forge}"
-: "${REAL_CONVERTER:=$HOME/forge-wallfit-bin/solver_density_cuda/build/convertGmshToForge}"
-: "${FORGE_CUDA_BLOCKSIZE:=128}"; : "${MIN_FREE_GB:=8}"; : "${WATCH_SEC:=10}"
+: "${FORGE_BIN:=$HOME/forge-wallfit-bin-fp64/solver_density_cuda/build/forge}"        # FP64 (plan §5.1 #16)
+: "${REAL_CONVERTER:=$HOME/forge-wallfit-bin-fp64/solver_density_cuda/build/convertGmshToForge}"
+: "${FORGE_CUDA_BLOCKSIZE:=128}"; : "${MIN_FREE_GB:=12}"; : "${WATCH_SEC:=10}"
 export FORGE_BIN REAL_CONVERTER FORGE_CUDA_BLOCKSIZE
 unset FORGE_ALLOW_UNVERIFIED_SPECIES
 cd "$(dirname "$0")"
@@ -17,9 +17,8 @@ die() { echo "止める: $*"; exit 2; }
 [ $# -eq 2 ] || die "usage: bash run_cold_pair.sh <ad_run> <tw300_run>"
 AD=$1; TW=$2
 for r in "$AD" "$TW"; do [[ "$r" =~ ^run_[0-9]{4}_[A-Za-z0-9_.-]+$ ]] || die "run 名 '$r'"; [ ! -e "$r" ] || die "$r が既にある"; done
-want=$(awk -F': ' '/^forge_sha256/{print $2; exit}' run_0167_ns_n012_N2/RUN_PROVENANCE.txt)
+# バイナリの照合は cold_pair.py (binary_record: FP64 の forge と変換器の sha256 が登録値と一致) が準備と実行の直前に行う
 have=$(sha256sum "$FORGE_BIN" | awk '{print $1}')
-[ -n "$want" ] && [ "$want" = "$have" ] || die "forge の sha256 が run_0167 と違う ($have vs $want)"
 free=$(df -BG --output=avail . | tail -1 | tr -dc 0-9)
 [ "$free" -ge "$MIN_FREE_GB" ] || die "空き容量 ${free} GB < ${MIN_FREE_GB} GB"
 echo "forge $FORGE_BIN ($have)  空き ${free} GB"

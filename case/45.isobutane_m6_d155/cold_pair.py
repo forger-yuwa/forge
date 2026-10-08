@@ -9,6 +9,8 @@
   本段 : 生産と同じ 2 次 convMethod 1・cfl 1・implicitRelax 0.7。100000 step・5000 ごと。判定窓は 80000〜100000 の 5 枚。
   検査 : メッシュ品質 PASS (--ar-max 5000)・壁距離の変換し直しと一致 (相対 1e-6)・壁の bcond (断熱 wall / 300 K wall_isothermal Ts 300)。
 
+バイナリ: FP64 のビルド (~/forge-wallfit-bin-fp64; sha256 は FORGE_SHA・CONV_SHA、plan §5.1 #16)。
+
 usage (AWS の case dir、FORGE_BIN 等は run_cold_pair.sh が設定する):
   python3 cold_pair.py prep <ad|tw300> <run>
   python3 cold_pair.py run <run>
@@ -39,6 +41,11 @@ MAIN_STEPS, OUT_INT, CFL_MAIN, RELAX = 100000, 5000, 1.0, 0.7
 STAGES = "full"
 WALL_TOL_RT = 1e-8
 RECORD = "COLD_PAIR.json"
+# FP64 のビルド (plan §5.1 #16、§6 V-c45): 生産のバイナリの commit e2696d8f0 + typedef 4 行 + 座標読み込み (stod)
+FP64_TREE = Path.home() / "forge-wallfit-bin-fp64"
+FORGE_SHA = "65be5e28ca1aed9f7683f0ae390adaa103488a39859ca522c2460e9cb71154ea"
+CONV_SHA = "ac88861fa04ebdf41e3949fe7c871e12f7356ee59d239bd0c7c204b16d4df872"
+FIRST_LAYER_TOL = 1e-6
 RUN_RE = re.compile(r"^run_\d{4}_[A-Za-z0-9_.-]+$")
 
 
@@ -52,6 +59,59 @@ def geom_check(run: Path, scale: float) -> dict:
     out = {"domain": [lo, hi], "domains": [list(map(float, A["domain"])), list(map(float, B["domain"]))],
            "max_abs_dr_rt": float(d.max()), "x_at_max": float(x[np.argmax(d)]), "max_abs_dr_m": float(d.max() * scale),
            "tol_rt": WALL_TOL_RT, "ok": bool(d.max() <= WALL_TOL_RT and A["domain"] == B["domain"])}
+    return out
+
+
+def binary_record() -> dict:
+    """FP64 の forge と変換器の sha256 を登録値と照合し、ソースの commit と全差分を記録する。"""
+    import os
+    import subprocess
+    fb = Path(os.environ.get("FORGE_BIN", "")); cv = Path(os.environ.get("REAL_CONVERTER", ""))
+    have = {"forge": NS.sha256_file(fb) if fb.is_file() else None, "converter": NS.sha256_file(cv) if cv.is_file() else None}
+    if have["forge"] != FORGE_SHA or have["converter"] != CONV_SHA:
+        raise SystemExit(f"FP64 のバイナリが登録と違う ({have}; forge {FORGE_SHA[:16]}…、変換器 {CONV_SHA[:16]}…) — 止める")
+    head = subprocess.run(["git", "-C", str(FP64_TREE), "log", "--oneline", "-1"], capture_output=True, text=True).stdout.strip()
+    diff = subprocess.run(["git", "-C", str(FP64_TREE), "diff"], capture_output=True, text=True).stdout
+    return {"forge_bin": str(fb), "forge_sha256": have["forge"], "converter": str(cv), "converter_sha256": have["converter"],
+            "source_head": head, "source_diff": diff}
+
+
+def mesh_checks(run: Path, problem: Path) -> dict:
+    """変換後の格子 (nozzle.h5) の検査: スキュー > 0.1 かつ AR > 1000 のセルが 0、第一層厚が生成時の倍精度座標と相対 1e-6 以内。"""
+    import h5py
+    import yaml
+    from forge_design.geometry.wall_axismach import load_wall_file
+    from forge_design.meshing.mesh2d import Mesh2DParams, generate_axisym_mesh
+    W = load_wall_file(HERE / WALL_REF); ph = W["physical"]; d0, d1 = (float(v) for v in W["domain"]); rt = float(W["scale_m"])
+
+    class Wall:
+        x_in, x_e = d0, d1
+
+        def r(self, x, d=0):
+            return ph.r(np.asarray(x), d) if d else ph.r(np.asarray(x))
+    m = yaml.safe_load(open(problem))["mesh"]
+    prm = Mesh2DParams(ni=m["ni"], nj=m["nj"], wall_first_frac=m["wall_first_frac"], throat_refine=m["throat_refine"],
+                       throat_width=m["throat_width"], wall_first_frac_table=m["wall_first_frac_table"],
+                       x_density_table=m["x_density_table"], wall_normal_layer=m["wall_normal_layer"], scale=rt)
+    coords, quads, _ = generate_axisym_mesh(Wall(), prm)
+    with h5py.File(run / "nozzle.h5", "r") as h:
+        C = np.array(h["MESH/COORD"]).reshape(-1, 3); dt = str(h["MESH/COORD"].dtype)
+    out = {"coord_dtype": dt}
+    if C.shape != coords.shape or not np.allclose(C[:, :2], coords[:, :2], rtol=0, atol=1e-6):
+        raise SystemExit(f"{run}: nozzle.h5 の節点が生成時の格子と対応しない — 止める")
+    ni, nj = prm.ni, prm.nj
+    G = coords[:, :2].reshape(ni, nj, 2); H = C[:, :2].reshape(ni, nj, 2)
+    rel = np.abs(np.linalg.norm(H[:, -1] - H[:, -2], axis=1) / np.linalg.norm(G[:, -1] - G[:, -2], axis=1) - 1.0)
+    P = C[quads][:, :, :2]
+    e = np.linalg.norm(np.roll(P, -1, axis=1) - P, axis=2); ar = e.max(1) / e.min(1)
+    v1 = np.roll(P, -1, axis=1) - P; v0 = P - np.roll(P, 1, axis=1)
+    c = np.sum(-v0 * v1, axis=2) / (np.linalg.norm(v0, axis=2) * np.linalg.norm(v1, axis=2))
+    ang = np.degrees(np.arccos(np.clip(c, -1, 1))); sk = np.maximum((ang.max(1) - 90) / 90, (90 - ang.min(1)) / 90)
+    bad = int(np.sum((sk > 0.1) & (ar > 1000)))
+    out.update(first_layer_rel_err_max=float(rel.max()), ar_max=float(ar.max()), skew_max=float(sk.max()),
+               n_skewed_high_ar=bad, ar_max_skewed=float(ar[sk > 0.1].max()))
+    if rel.max() > FIRST_LAYER_TOL or bad or dt != "float64":
+        raise SystemExit(f"{run}: 格子の検査が不成立 ({out}) — 止める")
     return out
 
 
@@ -76,6 +136,7 @@ def bcond_check(run: Path, kind: str) -> str:
 
 def prep(kind: str, run: Path) -> dict:
     NS.check_dry_env(False)
+    binrec = binary_record()
     if kind not in PROBLEMS:
         raise SystemExit(f"kind は {list(PROBLEMS)} のどれか")
     if not RUN_RE.match(run.name):
@@ -95,6 +156,7 @@ def prep(kind: str, run: Path) -> dict:
     info["stages"] = {"stages": STAGES, "ramp": None, "ramp_steps": 1000}
     NS.jdump(run / "prepare_info.json", info)
     mq = mesh_quality_strict(run)
+    mck = mesh_checks(run, problem)
     scale = float(info["scale_m"])
     geo = geom_check(run, scale)
     if not geo["ok"]:
@@ -115,10 +177,11 @@ def prep(kind: str, run: Path) -> dict:
            "ic": {"src_run": src.name, "src_res": IC_RES, "src_res_sha256": NS.sha256_file(rs[-1]), "via": "prepare_ns(ic_from) → interp_field.py"},
            "euler_ref": EULER_REF, "stages": STAGES, "main_steps": MAIN_STEPS, "out_interval": OUT_INT, "cfl_main": CFL_MAIN,
            "implicit_relax": RELAX, "mesh_quality": mq, "mesh": info.get("mesh"), "wall_thermal": info.get("wall_thermal"),
-           "geometry_vs_production": geo, "wall_dist_rel_max": wd_rel, "converter": conv, "bcond_wall": bl,
+           "binary": binrec, "mesh_checks": mck, "geometry_vs_production": geo, "wall_dist_rel_max": wd_rel, "converter": conv, "bcond_wall": bl,
            "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / RECORD, rec)
-    print(f"[cold_pair prep] {kind} {run.name}: {mq}; 壁の差 {geo['max_abs_dr_rt']:.2e} r_t; wall_dist 相対 {wd_rel:.1e}; {bl}")
+    print(f"[cold_pair prep] {kind} {run.name}: {mq}; 第一層 {mck['first_layer_rel_err_max']:.1e}; 高 AR のスキュー {mck['n_skewed_high_ar']}; "
+          f"壁の差 {geo['max_abs_dr_rt']:.2e} r_t; wall_dist 相対 {wd_rel:.1e}; {bl}")
     return rec
 
 
@@ -129,6 +192,7 @@ def run_one(run: Path) -> int:
         raise SystemExit(f"{run}: 既に出力がある — 回さない")
     if NS.sha256_file(run / "nozzle.h5") != rec.get("nozzle_sha256_after_prep"):
         raise SystemExit(f"{run}: nozzle.h5 が準備の後に変わった — 回さない")
+    binary_record()                                   # 回す直前にもバイナリを照合
     rc = NS.runner().run_staged_ns(run, stages=rec.get("stages", STAGES))
     last = NS.res_files(run)
     print(f"forge exit={rc} last_res={last[-1].name if last else None}")
