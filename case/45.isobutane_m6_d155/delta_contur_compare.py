@@ -17,9 +17,10 @@
   knobs (手元): 較正の係数 (k_f・k_N・a・Δm) と第 1 層 (エンタルピー形の熱閉包 + 混合気の μ) の効き方を、出口で合わせ直して比べる
     → knobs.json・knobs_profiles.json (説明ページ用)。
   hform (手元): 熱閉包の A/B (温度形 / エンタルピー形、isothermal plan §5.1 #10a の事前登録) → hform_ab.json。
+  predict (手元): V-c45 の CONTUR の予測 (300 K/断熱 の δ_r の比、k_f 1 と 1.0541、両腕の精度の検査) → cooling_ratio_predictions.json。
 
 usage: python3 delta_contur_compare.py extract   (AWS の case dir)
-       /home/sano/work/forge/design/.venv-opt/bin/python delta_contur_compare.py {plot|tw|taw|knobs|hform}   (手元)
+       /home/sano/work/forge/design/.venv-opt/bin/python delta_contur_compare.py {plot|tw|taw|knobs|hform|predict}   (手元)
 """
 import json
 import os
@@ -400,15 +401,24 @@ def knobs():
     print(json.dumps(out, indent=1, ensure_ascii=False))
 
 
-def hform_patches(DI, gas, cp_const: float, Tt: float):
+def hform_patches(DI, gas, cp_const: float, Tt: float, n_table: int = 8000, T_range=(100.0, 1800.0)):
     """熱閉包のエンタルピー形 (isothermal plan §5.1 #10a の B 腕) に差し替える (EdgeConditions.at, _profile_integrals) の組を返す。
     h(T) は気体の c_p(T) (CPG なら一定 c_p) の積分。h_aw = h_e + r(h_0 − h_e)、h(v) = h_w + a(h_aw − h_w)v + [h_e − a(h_aw − h_w) − h_w]v²。"""
     orig_at = DI.EdgeConditions.at
-    Tg = np.linspace(100.0, 1800.0, 8000)
+    Tg = np.linspace(float(T_range[0]), float(T_range[1]), int(n_table))
     cp = np.asarray(gas.cp_mass(Tg)) if hasattr(gas, "cp_mass") else np.full_like(Tg, cp_const)
     hg = np.concatenate([[0.0], np.cumsum(0.5 * (cp[1:] + cp[:-1]) * np.diff(Tg))])
-    H = lambda T: np.interp(T, Tg, hg)
-    Hinv = lambda h: np.interp(h, hg, Tg)
+    def H(T):
+        T = np.asarray(T, dtype=float)
+        if np.any(T < Tg[0]) or np.any(T > Tg[-1]):
+            raise ValueError(f"hform: 温度 {float(np.min(T)):.1f}〜{float(np.max(T)):.1f} K が表の範囲 {Tg[0]}〜{Tg[-1]} K の外 (端値で外挿しない)")
+        return np.interp(T, Tg, hg)
+
+    def Hinv(h):
+        h = np.asarray(h, dtype=float)
+        if np.any(h < hg[0]) or np.any(h > hg[-1]):
+            raise ValueError("hform: エンタルピーが表の範囲の外 (端値で外挿しない)")
+        return np.interp(h, hg, Tg)
 
     def at_h(self, x):
         e = orig_at(self, x); he = H(e["Te"]); h0 = H(Tt)
@@ -506,5 +516,50 @@ def hform():
     print(json.dumps(out, indent=1, ensure_ascii=False))
 
 
+def predict():
+    """V-c45 (plan tooling-nozzle-isothermal-wall-chain §6) の CONTUR の予測: 冷却 300 K / 断熱 の δ_r の比 R_A (温度形)・R_B (エンタルピー形)。
+    熱閉包だけを替える (hform と同じ経路、同じ壁)。k_f は診断用の固定値として 1 と生産の 1.0541 を両腕に同じく使う (§5.1 #19)。
+    両腕の数値精度 (codex plan m8): RK45 の rtol 1e-6 → 1e-8、B 腕のエンタルピー表 8000 → 32000 点で、試験部の R の変化 < 0.1 % を確かめる。
+    出力: _band_ab/delta_contur/cooling_ratio_predictions.json (x、各 k_f・各腕の δ_r と R、精度の検査)。"""
+    from forge_design.evaluate.runner_axismach import design_chain, load_problem, _gam_or_gas
+    from forge_design.feedback import deltastar_integral as DI
+    p = load_problem(OUT / "prod_local.yaml"); d = design_chain(p); rt = float(p.spec["r_throat"]); Tt = float(p.spec["Tt"])
+    kprod = float(p.raw["deltastar_initializer"]["cf_scale"])
+    orig_at, orig_prof = DI.EdgeConditions.at, DI._profile_integrals
+    gas = _gam_or_gas(p)
+    walls = {"adiabatic": {"mode": "adiabatic"}, "Tw300": {"mode": "prescribed_temperature", "Tw": 300.0}}
+
+    def run(arm, tbc, kf, rtol=1e-6, n_table=8000):
+        if arm == "B":
+            DI.EdgeConditions.at, DI._profile_integrals = hform_patches(DI, gas, float(p.cp), Tt, n_table=n_table)
+        try:
+            return DI.integral_bl(d["wall"], d["wall_inv"], gas, p.cp, float(p.spec["Pt"]), Tt, rt, thermal_bc=tbc, cf_scale=kf, rtol=rtol)
+        finally:
+            DI.EdgeConditions.at, DI._profile_integrals = orig_at, orig_prof
+    out = {"k_f": [1.0, kprod], "test": list(TEST), "arms": {}, "precision": {}}
+    xs = None
+    for kf in (1.0, kprod):
+        for arm in ("A", "B"):
+            R = {w: run(arm, tbc, kf) for w, tbc in walls.items()}
+            xs = R["adiabatic"]["x"]
+            ratio = R["Tw300"]["delta_r"] / R["adiabatic"]["delta_r"]
+            out["arms"][f"{arm}_kf{kf:.6f}"] = {"k_f": kf, "arm": arm, "delta_r_ad": R["adiabatic"]["delta_r"].tolist(),
+                                                 "delta_r_tw300": R["Tw300"]["delta_r"].tolist(), "R": ratio.tolist()}
+            # 精度: rtol と (B は) 表の細分
+            t = (xs >= TEST[0]) & (xs <= TEST[1])
+            Rf = {w: run(arm, tbc, kf, rtol=1e-8) for w, tbc in walls.items()}
+            ch = {"rtol_1e-8": float(np.max(np.abs((Rf["Tw300"]["delta_r"] / Rf["adiabatic"]["delta_r"]) / ratio - 1.0)[t]))}
+            if arm == "B":
+                Rt = {w: run(arm, tbc, kf, n_table=32000) for w, tbc in walls.items()}
+                ch["table_32000"] = float(np.max(np.abs((Rt["Tw300"]["delta_r"] / Rt["adiabatic"]["delta_r"]) / ratio - 1.0)[t]))
+            ch["ok"] = bool(max(ch.values()) < 1e-3)
+            out["precision"][f"{arm}_kf{kf:.6f}"] = ch
+    out["x"] = xs.tolist()
+    out["precision_ok"] = bool(all(v["ok"] for v in out["precision"].values()))
+    (OUT / "cooling_ratio_predictions.json").write_text(json.dumps(out, ensure_ascii=False))
+    print(json.dumps({"precision": out["precision"], "precision_ok": out["precision_ok"]}, indent=1, ensure_ascii=False))
+
+
 if __name__ == "__main__":
-    {"extract": extract, "plot": plot, "tw": tw_experiment, "taw": taw_sensitivity, "knobs": knobs, "hform": hform}[sys.argv[1]]()
+    {"extract": extract, "plot": plot, "tw": tw_experiment, "taw": taw_sensitivity, "knobs": knobs, "hform": hform,
+     "predict": predict}[sys.argv[1]]()

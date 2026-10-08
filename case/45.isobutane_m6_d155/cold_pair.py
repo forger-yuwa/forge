@@ -15,6 +15,9 @@ usage (AWS の case dir、FORGE_BIN 等は run_cold_pair.sh が設定する):
   python3 cold_pair.py prep <ad|tw300> <run>
   python3 cold_pair.py run <run>
   python3 cold_pair.py nan-scan <run>
+  python3 cold_pair.py extract <run>            (AWS: 判定窓の δ_E・感度・壁温・Q_w → _band_ab/cold_pair/extract_<run>.npz)
+  python3 cold_pair.py gates <ad_run> <tw_run>  (AWS: check_convergence・残差の床・壁解像 → gates_aws.json、y1p_<run>_wall.csv)
+  python3 cold_pair.py judge <ad_run> <tw_run>  (手元: V-c45 の判定 → V_c45.json)
 """
 import argparse
 import json
@@ -200,17 +203,239 @@ def run_one(run: Path) -> int:
     return rc
 
 
+# --- 判定 (plan §6 V-c45) --------------------------------------------------------------------------------------------
+WINDOW = (80000, 85000, 90000, 95000, 100000)
+XJ = np.arange(40.0, 94.0 + 1e-9, 1.0)                 # 定常性の評価点 (1 r_t ごと)
+XE = np.arange(40.0, 94.0 + 1e-9, 0.25)                # 判定の評価点 (0.25 r_t ごと)
+OUTD = HERE / "_band_ab" / "cold_pair"
+RES_COLS = ("rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega")
+
+
+def _wall_dump(run: Path, step: int, scale: float, axisym: bool = True):
+    """res_wall_3_<step>.h5 → x [r_t] 順の (x, T_w, q_w, 面積の重み)。"""
+    import h5py
+    sys.path.insert(0, str(HERE.parents[1] / "solver_density_cuda/tools"))
+    from check_wall_resolution import point_weights
+    with h5py.File(run / f"res_wall_3_{step}.h5", "r") as h:
+        xyz = np.array(h["MESH/COORD"]).reshape(-1, 3).astype(float); conne = np.array(h["MESH/CONNE"])
+        Ts = np.array(h["VALUE/Ts"]).astype(float); qw = np.array(h["VALUE/qwall"]).astype(float)
+    w = point_weights(xyz, conne, len(Ts), False, axisym)
+    o = np.argsort(xyz[:, 0])
+    return xyz[o, 0] / scale, Ts[o], qw[o], (w[o] if w is not None else None)
+
+
+def extract(run: Path) -> Path:
+    """AWS: 判定窓の 5 枚から δ_E (帯 E、extract_and_merge の delta_E = 未緩和の平滑化抽出、300 K は符号付き)、抽出の感度、
+    壁温、壁の熱流束の積分 Q_w を取り出して _band_ab/cold_pair/extract_<run>.npz に保存する。"""
+    import os
+    import shutil
+    import tempfile
+    from forge_design.feedback.deltastar_loop import extract_and_merge, read_delta_r_next
+    from forge_design.metrics.deltastar import deltastar_from_core_matched_euler
+    info = NS.jload(run / "prepare_info.json"); scale = float(info["scale_m"])
+    out = {}
+    for k, step in enumerate(WINDOW):
+        with tempfile.TemporaryDirectory() as td:
+            dd = Path(td) / "ns"; dd.mkdir()
+            for f in ("bcondConfig.yaml", "solverConfig.yaml", "prepare_info.json"):
+                shutil.copy(run / f, dd / f)
+            os.symlink((run / "nozzle.h5").resolve(), dd / "nozzle.h5")
+            os.symlink((run / f"res_{step}.h5").resolve(), dd / f"res_{step}.h5")
+            x = deltastar_from_core_matched_euler(dd, HERE / EULER_REF, band_select="edge")
+            extract_and_merge(dd, HERE / EULER_REF, band_select="edge")
+            nx = read_delta_r_next(dd / "delta_r_next.csv")
+        sens = np.asarray(x["delta_r_sens"], dtype=float)
+        out[f"s{k}_x"] = np.asarray(x["x"]); out[f"s{k}_raw"] = np.asarray(x["delta_r_raw"]); out[f"s{k}_sens"] = sens
+        out[f"s{k}_ok"] = np.asarray(x["ok"]); out[f"s{k}_mx"] = np.asarray(nx["x_rt"]); out[f"s{k}_dE"] = np.asarray(nx["delta_E"])
+        wx, Tw, qw, ww = _wall_dump(run, step, scale)
+        out[f"s{k}_wx"] = wx; out[f"s{k}_Tw"] = Tw; out[f"s{k}_qw"] = qw
+        out[f"s{k}_Qw"] = np.array(float(np.sum(qw * ww)) if ww is not None else np.nan)
+        print(f"[extract] {run.name} res_{step}: δ 列 {len(x['x'])}、sens {sens.shape}、Q_w {float(out[f's{k}_Qw']):.4g} W", flush=True)
+    OUTD.mkdir(parents=True, exist_ok=True)
+    p = OUTD / f"extract_{run.name}.npz"
+    np.savez(p, steps=np.array(WINDOW), scale=np.array(scale), **out)
+    return p
+
+
+def residual_floor(run: Path, last_steps: int = 5000) -> dict:
+    import csv
+    f = run / "residual_history.csv"
+    rows = [r for r in csv.DictReader(open(f)) if r.get("phase", "").strip() == "outer_end"]
+    smax = max(int(r["step"]) for r in rows)
+    sel = [r for r in rows if int(r["step"]) > smax - last_steps]
+    return {c: float(np.median([float(r[c]) for r in sel])) for c in RES_COLS if c in rows[0]}
+
+
+def gates_aws(ad: Path, tw: Path) -> dict:
+    """AWS: check_convergence --segment、残差の床 (生産の run_0179 との比較)、壁解像 (面積、領域別の分布 CSV)。"""
+    import subprocess
+    tools = HERE.parents[1] / "solver_density_cuda/tools"
+    out = {"floor_ref": residual_floor(HERE / IC_SRC)}
+    for run in (ad, tw):
+        r = {}
+        cc = subprocess.run([sys.executable, str(tools / "check_convergence.py"), str(run), "--segment"], capture_output=True, text=True)
+        r["convergence"] = [l for l in cc.stdout.splitlines() if "->" in l or "VERDICT" in l or "RISING" in l][-6:]
+        r["convergence_rc"] = cc.returncode
+        r["floor"] = residual_floor(run)
+        r["floor_ok"] = all(r["floor"][c] <= out["floor_ref"][c] for c in r["floor"] if c in out["floor_ref"])
+        wr = subprocess.run([sys.executable, str(tools / "check_wall_resolution.py"), str(run), "--groups", "wall", "--weight", "area",
+                             "--over-frac", "5", "--profile-csv", str(OUTD / f"y1p_{run.name}.csv")], capture_output=True, text=True)
+        r["wall_resolution"] = [l for l in wr.stdout.splitlines() if l.strip()][-4:]
+        out[run.name] = r
+    NS.jdump(OUTD / "gates_aws.json", out)
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+    return out
+
+
+def judge(ad_name: str, tw_name: str) -> dict:
+    """手元: 抽出 (extract_*.npz)・ゲート (gates_aws.json、y1p_*.csv)・CONTUR の予測 (../delta_contur/cooling_ratio_predictions.json) から
+    V-c45 を判定して _band_ab/cold_pair/V_c45.json に書く。"""
+    sys.path.insert(0, str(HERE.parents[1] / "solver_density_cuda/tools"))
+    from check_quasisteady import classify
+    A = np.load(OUTD / f"extract_{ad_name}.npz"); B = np.load(OUTD / f"extract_{tw_name}.npz")
+    rt_mm = float(A["scale"]) * 1e3
+    n = len(A["steps"])
+    dE = {}
+    for lab, Z in (("ad", A), ("tw", B)):
+        dE[lab] = np.array([np.interp(XE, Z[f"s{k}_mx"], Z[f"s{k}_dE"]) for k in range(n)])
+    Rk = dE["tw"] / dE["ad"]                                       # 各枚の比
+    R = dE["tw"].mean(0) / dE["ad"].mean(0)                        # 5 枚平均の比
+    out = {"x": XE.tolist(), "R_NS": R.tolist(), "gates": {}}
+    # --- ゲート 3: 準定常 (classify、5 枚全部、drift・osc ≤ 0.1 %) ---
+    ji = [int(np.argmin(np.abs(XE - x))) for x in XJ]
+    def qs(series, name):
+        # 5 枚すべて (tail_frac 1.0)、drift・osc の許容 0.1 %、最少 5 枚 (plan §6 V-c45 ゲート 3)
+        return classify(np.array(WINDOW, dtype=float), np.asarray(series, dtype=float), 1.0, 0.001, 0.001, 5)
+    bad = []
+    for lab in ("ad", "tw"):
+        for i in ji:
+            v = qs(dE[lab][:, i], f"dE_{lab}")
+            if v[0] != "STEADY":
+                bad.append((f"δ_E {lab} x={XE[i]:.0f}", v[0]))
+    for i in ji:
+        v = qs(Rk[:, i], "R")
+        if v[0] != "STEADY":
+            bad.append((f"R x={XE[i]:.0f}", v[0]))
+    TwA = np.array([np.interp(XJ, A[f"s{k}_wx"], A[f"s{k}_Tw"]) for k in range(n)])
+    for j, x in enumerate(XJ):
+        v = qs(TwA[:, j], "Tw")
+        if v[0] != "STEADY":
+            bad.append((f"断熱壁温 x={x:.0f}", v[0]))
+    Qw = np.array([float(B[f"s{k}_Qw"]) for k in range(n)])
+    vq = qs(Qw, "Qw")
+    if vq[0] != "STEADY":
+        bad.append(("Q_w (300 K)", vq[0]))
+    out["gates"]["quasisteady"] = {"ok": not bad, "not_steady": bad[:40], "n_not_steady": len(bad), "Qw_W": Qw.tolist(), "Qw_verdict": vq[0]}
+    # --- ゲート 2・4 (AWS の結果) ---
+    G = json.loads((OUTD / "gates_aws.json").read_text())
+    out["gates"]["convergence"] = {k: {"lines": G[k]["convergence"], "floor": G[k]["floor"], "floor_ok": G[k]["floor_ok"]}
+                                   for k in (ad_name, tw_name)}
+    out["gates"]["convergence"]["floor_ref_run_0179"] = G["floor_ref"]
+    conv_ok = all(G[k]["floor_ok"] and not any("RISING" in l or "DIVERGED" in l for l in G[k]["convergence"]) for k in (ad_name, tw_name))
+    wr = {}
+    for run_name in (ad_name, tw_name):
+        P = np.loadtxt(OUTD / f"y1p_{run_name}_wall.csv", delimiter=",", skiprows=1)
+        x = P[:, 0] / (rt_mm * 1e-3); yp = P[:, 4]; w = P[:, 9]
+        regs = {"all": np.ones_like(x, bool), "test[40,94]": (x >= 40) & (x <= 94), "[-1,40)": (x >= -1) & (x < 40),
+                "contraction x<-1 (入口の角を除く)": (x < -1) & (x > x.min() + 0.05), "入口の角 0.05 r_t": x <= x.min() + 0.05}
+        lim = {"all": 5.0, "test[40,94]": 1.0, "[-1,40)": 5.0, "contraction x<-1 (入口の角を除く)": 10.0, "入口の角 0.05 r_t": None}
+        rr = {}
+        for k, m in regs.items():
+            good = m & np.isfinite(yp)
+            pct = float(100 * w[good & (yp > 1)].sum() / w[good].sum()) if w[good].sum() > 0 else float("nan")
+            rr[k] = {"over1_area_pct": pct, "limit_pct": lim[k], "ok": (lim[k] is None) or pct <= lim[k],
+                     "y1p_max": float(np.nanmax(yp[m])) if m.any() else None,
+                     "x_of_max": float(x[m][np.nanargmax(yp[m])]) if m.any() else None}
+        wr[run_name] = rr
+    out["gates"]["wall_resolution"] = wr
+    wall_ok = all(v["ok"] for v in wr[tw_name].values())
+    # --- 判定の量と不確かさ ---
+    u_t = np.max(np.abs(Rk / R - 1.0), axis=0)
+    def ext_rel(Z):
+        d = []
+        for k in range(n):
+            raw = np.interp(XE, Z[f"s{k}_x"], Z[f"s{k}_raw"])
+            sens = np.atleast_2d(Z[f"s{k}_sens"])
+            if sens.shape[0] != len(Z[f"s{k}_x"]):
+                sens = sens.T
+            dev = np.max(np.abs(np.array([np.interp(XE, Z[f"s{k}_x"], sens[:, j]) for j in range(sens.shape[1])]) / raw - 1.0), axis=0)
+            d.append(dev)
+        return np.max(d, axis=0)
+    u_ext_raw = ext_rel(A) + ext_rel(B)
+    win = int(round(2.0 / 0.25))
+    u_ext = np.convolve(u_ext_raw, np.ones(win + 1) / (win + 1), mode="same")
+    u_c = 0.001
+    U = u_t + u_ext + u_c
+    out.update(u_t=u_t.tolist(), u_ext=u_ext.tolist(), u_c=u_c, U=U.tolist())
+    pred = json.loads((HERE / "_band_ab/delta_contur/cooling_ratio_predictions.json").read_text())
+    px = np.array(pred["x"])
+    dec = {}
+    for kf in pred["k_f"]:
+        e = {}
+        for arm in ("A", "B"):
+            Rm = np.interp(XE, px, np.array(pred["arms"][f"{arm}_kf{kf:.6f}"]["R"]))
+            lo_R, hi_R = R * (1 - U), R * (1 + U)
+            c1, c2 = Rm / hi_R - 1.0, Rm / lo_R - 1.0                    # R が区間を動くときの R_m/R − 1 の範囲
+            lo = np.where(c1 * c2 <= 0, 0.0, np.minimum(np.abs(c1), np.abs(c2)))
+            hi = np.maximum(np.abs(c1), np.abs(c2))
+            e[arm] = {"lo": float(lo.max()), "hi": float(hi.max()), "point": float(np.max(np.abs(Rm / R - 1.0))),
+                      "x_at_point_max": float(XE[np.argmax(np.abs(Rm / R - 1.0))])}
+        if e["B"]["hi"] < e["A"]["lo"]:
+            v = "エンタルピー形を支持"; win_ = "B"
+        elif e["A"]["hi"] < e["B"]["lo"]:
+            v = "温度形を支持"; win_ = "A"
+        else:
+            v = "判定保留 (区間が分離しない)"; win_ = None
+        fit = None if win_ is None else ("この格子で冷却の効果を 1 % 以内で当てる" if e[win_]["hi"] <= 0.01 else "冷却の効果は当てきれない (1 % 超)")
+        dec[f"kf{kf:.6f}"] = {"e": e, "verdict": v, "winner": win_, "fit": fit}
+    out["decision_by_kf"] = dec
+    wins = {d["winner"] for d in dec.values()}
+    gates_ok = out["gates"]["quasisteady"]["ok"] and conv_ok and wall_ok
+    if not gates_ok:
+        final = "判定不能 (ゲート不成立)"
+    elif len(wins) == 1 and None not in wins:
+        final = next(iter(dec.values()))["verdict"]
+    else:
+        final = "判定保留 (k_f で判定が違う、または区間が分離しない)"
+    out["gates_ok"] = {"quasisteady": out["gates"]["quasisteady"]["ok"], "convergence": conv_ok, "wall_resolution": wall_ok}
+    out["VERDICT"] = final
+    # 記録のみ: 格子・精度を替えた感度 (この格子の断熱 vs 生産の FP32)
+    prod = HERE / "_band_ab/delta_contur/extract.npz"
+    if prod.is_file():
+        Z = np.load(prod); nps = len(json.loads((HERE / "_band_ab/delta_contur/extract.json").read_text())["snaps"])
+        dprod = np.array([np.interp(XE, Z[f"snap{i}_merged_x"], Z[f"snap{i}_merged_dE"]) for i in range(nps)]).mean(0)
+        out["grid_precision_sensitivity_ad"] = {"max_rel": float(np.max(np.abs(dE["ad"].mean(0) / dprod - 1.0))),
+                                                "test_mean_rel": float(np.mean(dE["ad"].mean(0) / dprod - 1.0))}
+    out["delta_E_mean_mm"] = {"ad": (dE["ad"].mean(0) * rt_mm).tolist(), "tw": (dE["tw"].mean(0) * rt_mm).tolist()}
+    NS.jdump(OUTD / "V_c45.json", out)
+    brief = {k: out[k] for k in ("VERDICT", "gates_ok")}
+    brief["decision_by_kf"] = dec
+    brief["n_not_steady"] = out["gates"]["quasisteady"]["n_not_steady"]
+    brief["U_range"] = [float(U.min()), float(U.max())]
+    print(json.dumps(brief, indent=1, ensure_ascii=False))
+    return out
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
     p = sp.add_parser("prep"); p.add_argument("kind"); p.add_argument("run")
     p = sp.add_parser("run"); p.add_argument("run")
     p = sp.add_parser("nan-scan"); p.add_argument("run")
+    p = sp.add_parser("extract"); p.add_argument("run")
+    p = sp.add_parser("gates"); p.add_argument("ad"); p.add_argument("tw")
+    p = sp.add_parser("judge"); p.add_argument("ad"); p.add_argument("tw")
     a = ap.parse_args()
     if a.cmd == "prep":
         prep(a.kind, HERE / a.run)
     elif a.cmd == "run":
         sys.exit(run_one(HERE / a.run))
+    elif a.cmd == "extract":
+        print(extract(HERE / a.run))
+    elif a.cmd == "gates":
+        gates_aws(HERE / a.ad, HERE / a.tw)
+    elif a.cmd == "judge":
+        judge(a.ad, a.tw)
     elif a.cmd == "nan-scan":
         out = NS.nan_scan(HERE / a.run)
         NS.jdump(HERE / a.run / "NAN_SCAN.json", out)
