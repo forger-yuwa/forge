@@ -411,6 +411,35 @@ output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
   Python からは `total_state(run_dir, res_path)`。
 - 原則: **後処理で導出できる量はソルバから出さない**。勾配・リミッタ・診断は必要な run だけ level 2 で取る。
 
+### output.floorEvents — 毎更新の EOS 床事象のカウンタ (2026-10-08)
+
+```yaml
+output: {floorEvents: 1}   # 既定 0 = 数えない・ファイルも作らない
+```
+
+- **出力専用** (有効にしても数値は変えない)。GPU (`gpu: 1`) のみ。run ディレクトリの `floor_events.csv` に**追記**する
+  (forge の起動ごとに `session_begin` 行。段階起動の各段・restart の痕跡を消さない)。定義の正本は
+  [`plans/active/tooling-sern-te-wake-grid.md`](../plans/active/tooling-sern-te-wake-grid.md) §4「床の判定」、書式は
+  `cuda_forge/floorEvents_d.cu` 冒頭。
+- **数えるのは「EOS の床を必要とした事象」**。定常陰解法 (と陽解法) では EOS の床は作業配列だけに入り、commit は床前の基準
+  `roN/roeN + dq` なので、「保存量に残った補正」を数えると構造上 0 件になる。床の種類別の述語で、実節点 (ghost は別列) ごとに:
+  温度 = EOS と同じ密度・組成で $e_{in} < e_{mix}(T_{min})$ (TP は `DEPVAR_TMIN` 50 K、CPG は `tMin`)、
+  密度 = $\rho_{in} <$ `roMin`、圧力 = クランプ直前の $P_{raw} <$ `pMin` (TP の圧力床は P だけを書き換えるので直接の $\Delta(\rho E)$ は 0)。
+  補正量 ($\rho(e_{mix}(T_{min}) - e_{in})$・$\Delta\rho$・$\Delta P$) は付帯情報で、補正量による足切りはしない。
+  床近傍 ($T \le T_{min} + 1$ K) は別列 (補助)。温度反転の反復中のクランプは数えない。
+- **時点**: 判定はすべて「境界ピン (no-slip・軸・等温壁) の後・EOS の床の前」の状態。定常陰解法では外側 step k の EOS が
+  直前の更新の結果 $Q_{k-1}$ を判定し (`q_index = k−1`)、最後の更新の結果 $Q_N$ は**終了時の監査** (コピー上で同じ前処理と
+  同じ EOS、通常の配列には触れない) が判定する。初期化の EOS (`init`)・時間ステップ外の EOS (`aux`) は別枠。
+  `nStepInner` の sweep は保存量を更新しないので更新として数えない。
+- **判定は `solver_density_cuda/tools/check_floor_events.py RUN_DIR [--window-steps N | --tail 0.5]`** (VERDICT
+  `PASS / FAIL / INDETERMINATE`)。記録が無い・step が欠けた・`session_end` や監査が無い・区間が最後の session (restart 後) の
+  始まりより前に及ぶ・未検証の経路 (`dual_time`・`explicit`)・温度の述語を評価しない節点 (二相・`condEquilibrium 2`) は
+  **判定不能 = 合格ではない**。設計チェーン (SERN) では問題 YAML の `evaluate.floor_events: 1` (+ 任意で
+  `evaluate.floor_events_window_steps`) で runner が config に書き、`sern_gates.evaluate_gates` が必須ゲートにする。
+- 適用範囲: 時点の契約を検証したのは node・定常陰解法 (block-DPLUR) だけ。周期の節点は root と member を別々に数える
+  (0 件かどうかは変わらない)。軸対称は軸ピンの後の状態を数える (未検証)。凝縮の二相セルは温度を「未評価」として数え、
+  `condEquilibrium 2` は終了時の監査が未対応 (いずれも判定不能)。cell の実行回帰は無い (未検証)。
+
 ## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)
 
 ```yaml

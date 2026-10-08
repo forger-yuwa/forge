@@ -46,3 +46,6 @@ __global__ void dependentVariables_d
 );
 
 void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
+
+// TP / 凝縮の温度反転の下限 DEPVAR_TMIN [K] (床事象のカウンタが記録・判定に使う; floorEvents_d.cu)
+double dependentVariablesTminTP();

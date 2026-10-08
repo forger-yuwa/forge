@@ -526,9 +526,12 @@ void solverConfig::read(std::string fname)
             if (this->interfaceDiag != 0 && this->interfaceDiag != 1) throw std::runtime_error("Key 'interfaceDiag' in 'output' must be 0 or 1.");
             this->interfaceDiagAlignMin = getOptionalValidatedValue<double>(out, "interfaceDiagAlignMin", 0.5, "output");
             if (!(this->interfaceDiagAlignMin > 0.0 && this->interfaceDiagAlignMin <= 1.0)) throw std::runtime_error("Key 'interfaceDiagAlignMin' in 'output' must be in (0, 1].");
+            // 毎更新の EOS 床事象のカウンタ (出力専用、floor_events.csv; plans/active/tooling-sern-te-wake-grid.md §4)
+            this->floorEvents = getOptionalValidatedValue<int>(out, "floorEvents", 0, "output");
+            if (this->floorEvents != 0 && this->floorEvents != 1) throw std::runtime_error("Key 'floorEvents' in 'output' must be 0 or 1.");
         }
         std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size()
-                  << " interfaceDiag=" << this->interfaceDiag << "\n";
+                  << " interfaceDiag=" << this->interfaceDiag << " floorEvents=" << this->floorEvents << "\n";
 
         // ソルバ内 CHT (`conjugate:` ブロック, 既定 無効)
         if (config["conjugate"]) {

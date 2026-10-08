@@ -43,6 +43,10 @@ public:
     // iface_T1 / iface_d1 / iface_keff / iface_q_compact / iface_q_recon / iface_ok / iface_align を追加する。
     // 定義と符号は conjugateWall.hpp と methods/boundary.md「共役熱伝達 (CHT)」が正本。
     int interfaceDiag = 0;
+    // 毎更新の EOS 床事象のカウンタ (output: {floorEvents: 1}, 既定 0 = 数えない・ファイルも作らない)。出力専用で、
+    // 有効にしても数値は変えない。記録は run ディレクトリの floor_events.csv (追記)。定義と記録形式は
+    // cuda_forge/floorEvents_d.cuh・floorEvents_d.cu、plans/active/tooling-sern-te-wake-grid.md §4「床の判定」。
+    int floorEvents = 0;
     // ソルバ内 CHT (Phase 2a, `conjugate:` ブロック + bcond `ints: {conjugate: 1}`)。
     // 初版は node 限定・定常陰解法限定・薄肉の点ごと 1 次元抵抗 (local1d) のみ。
     // 仕様は methods/boundary.md「共役熱伝達 (CHT)」、符号は conjugateWall.hpp。

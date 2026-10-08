@@ -92,6 +92,7 @@
 #include "cuda_forge/setDT_d.cuh"
 #include "cuda_forge/periodicNode_d.cuh"
 #include "cuda_forge/qAccumulator.hpp"
+#include "cuda_forge/floorEvents_d.cuh"   // 毎更新の EOS 床事象のカウンタ (output.floorEvents、出力専用)
 
 #include <cuda_runtime.h>
 #include <sys/stat.h>
@@ -1834,7 +1835,15 @@ cudaConfig initializeSimulation(
     speciesPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // Y_s = ρY_s/ρ (roY を読込済)
     condensationPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // φ = ρφ/ρ (液相モーメント読込済)
     tracerPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);  // ξ = ρξ/ρ (トレーサ読込済)
+    // 毎更新の EOS 床事象のカウンタ (output.floorEvents、既定 off): 記録を開き、初期化の EOS は更新事象と別枠 (init) で数える
+    // (初期化では EOS の後に updateVariablesOuter が走るので、ここでの床は基準状態へ入る。plan tooling-sern-te-wake-grid §4)
+    {
+        std::ostringstream fnv; fnv << std::hex << fnv1a64File("solverConfig.yaml");
+        floorEventsOpen(cfg, msh, fnv.str());
+    }
+    floorEventsSetPhase(FloorEventPhase::Init, 0);
     dependentVariables(cfg , cuda_cfg , msh , var, mat_ns);
+    floorEventsSetPhase(FloorEventPhase::Aux, 0);
     // node-centered 壁 Dirichlet: IC の壁ノード速度を厳密 0 に初期化 (KE を roe から除去)。
     // この後 gasProperties が補正 roe から P/T を再計算する。cell/非 node では no-op。
     enforceWallNoSlip_d_wrapper(cfg , cuda_cfg , msh , var);
@@ -2922,6 +2931,9 @@ void advanceOneStep(
     // ステップ内 (RK 段・dual-time サブ反復) は固定値として扱う。
     bodyForceCtrlUpdate(cfg , msh , var , iStep);
 
+    // 床事象のカウンタ: この step の中の EOS を step 番号 (1 起点) で数える (無効なら何もしない)
+    floorEventsSetPhase(FloorEventPhase::Step, iStep + 1);
+
     profiler.measureWall(ProfileSection::StepTotal, [&]() {
         if (cfg.isImplicit == 1) {
             if (cfg.unsteady == 1) {
@@ -2933,6 +2945,8 @@ void advanceOneStep(
             advanceExplicitRK(s);
         }
     });
+
+    floorEventsSetPhase(FloorEventPhase::Aux, iStep + 1);   // step の外で呼ばれる EOS は更新事象と別枠
 
     // ソルバ内 CHT: ステップ完了後に壁温を更新する (次ステップの残差組立ての前に効く)。
     // 行番号でなく「完了した定常ステップ数」で interval を数える (advanceImplicitSteady 経路が主対象)。
@@ -3567,6 +3581,7 @@ int main(int argc, char** argv) {
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
+        floorEventsTestInject(cfg , cuda_cfg , msh , var , iStep + 1);   // 試験用 (FORGE_FLOOR_TEST_INJECT、既定 off)
         monitor.report(iStep);
         // 受動種経路の補正収支 (floor による保存量補正の体積積分; monitorInterval ごと)。scheme 0 / 受動種なしでは no-op。
         if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
@@ -3577,6 +3592,9 @@ int main(int argc, char** argv) {
         if (iStep == 1) MEMLOG_SOLVER("after step 2");
     }
     MEMLOG_SOLVER("after main loop");
+    // 床事象のカウンタ: 最後の更新の結果 Q_N は次の EOS が無いので、コピー上で同じ前処理・同じ EOS にかけて監査する
+    // (通常の配列には触れない。二相の残差監査など通常の配列で EOS を回す処理より前に置く)
+    floorEventsAudit(cfg , cuda_cfg , msh , var , cfg.mainLoopCount());
     // 終了時に受動種の収支を必ず出す (最終 step が monitorInterval に乗らないと末尾の補正が記録されない; plan-8 M1)
     if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) {
         passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
@@ -3593,6 +3611,7 @@ int main(int argc, char** argv) {
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
            monitor.elapsedSeconds() * 1.0e3 / std::max(1, cfg.mainLoopCount())); 
     profiler.printSummary();
+    floorEventsClose(cfg.mainLoopCount());   // 正常終了の印 (session_end) を書いて閉じる
     MEMLOG_SOLVER("end");
 
 	return 0;

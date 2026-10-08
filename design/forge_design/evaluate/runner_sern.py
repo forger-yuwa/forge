@@ -24,6 +24,7 @@ from ..geometry.rao_planar import ideal_gross_thrust
 from ..meshing.mesh_sern import PHYS_SERN, SernMeshParams, generate_sern_mesh, write_msh41_named
 from ..metrics.sern_forces import force_history, write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
+from ..metrics.sern_gates import floor_events_config_line, floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
 from ..probdef import Problem, dv_value, load_problem
 from .ic import _forge_species
 
@@ -666,7 +667,7 @@ time:
   nStepInner: 5
 space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, venkatK: {_vk}{_wnc_key}{_zte_key}}}
 {turb}
-initial: "uniform_p101325_u10"
+{floor_events_config_line(p.evaluate)}initial: "uniform_p101325_u10"
 """
 
 
@@ -1352,10 +1353,11 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
-                           p_min=float(p.evaluate.get("p_min", 1.0)))
+                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
            "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
-           "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"]}
+           "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],
+           "floor_events": floor_events_summary(gates.get("floor_events"))}
     if hist:
         last = hist[-1]
         out.update({k: last[k] for k in ("step", "C_T", "C_T_wall", "C_L", "C_M", "T_wall", "L", "M_noseup")})

@@ -26,6 +26,7 @@ _TOOLS = str(_FORGE_ROOT / "solver_density_cuda" / "tools")
 if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
 import check_convergence as _cc  # noqa: E402
+import check_floor_events as _cfe  # noqa: E402
 
 FIELD_VARS = ("ro", "roUx", "roUy", "roUz", "roe", "P", "T", "roK", "roOmega")
 POSITIVE_VARS = ("ro", "P", "T")
@@ -234,6 +235,59 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict
             "reasons": [] if not bad else ["床/下限に張り付き: " + ", ".join(f"{k} {v} ノード" for k, v in bad.items())]}
 
 
+# --- 毎更新の EOS 床事象 (plan tooling-sern-te-wake-grid §4「床の判定」、codex plan レビュー M1・M2) -------------
+# `floor_gate()` は最後の HDF5 だけを見るので、判定区間中に床を使い最終場で回復した評価が通る。生産系列は forge の
+# `output: {floorEvents: 1}` が毎更新に書く floor_events.csv を必須入力にし、判定区間の全更新で床事象 0 を要求する。
+# 判定の正本は solver_density_cuda/tools/check_floor_events.py (記録の欠落・区間の欠落・未検証の経路は判定不能 = 不合格)。
+# 有効にする経路: 問題 YAML の `evaluate.floor_events: 1` (runner が config に書き、collect がゲートを必須にする)。
+# 判定区間は `evaluate.floor_events_window_steps` (末尾の step 数)。省略時は最後の session の末尾 50 % (plan §6)。
+FLOOR_EVENTS_KEY = "floor_events"
+FLOOR_EVENTS_WINDOW_KEY = "floor_events_window_steps"
+
+
+def floor_events_options(evaluate) -> dict:
+    """問題 YAML の evaluate 節から evaluate_gates の床事象ゲートの引数を作る。キーが無ければ必須にしない (既存の挙動)。"""
+    ev = evaluate or {}
+    req = ev.get(FLOOR_EVENTS_KEY, 0)
+    if req not in (0, 1, True, False, None):
+        raise ValueError(f"evaluate.{FLOOR_EVENTS_KEY} は 0 か 1: {req!r}")
+    w = ev.get(FLOOR_EVENTS_WINDOW_KEY)
+    if w is not None and (not isinstance(w, int) or isinstance(w, bool) or w <= 0):
+        raise ValueError(f"evaluate.{FLOOR_EVENTS_WINDOW_KEY} は正の整数 [step]: {w!r}")
+    return {"require_floor_events": bool(req), "floor_window_steps": w}
+
+
+def floor_events_config_line(evaluate) -> str:
+    """solverConfig.yaml に足す行 (evaluate.floor_events: 1 のとき `output: {floorEvents: 1}`、それ以外は空)。"""
+    return "output: {floorEvents: 1}\n" if floor_events_options(evaluate)["require_floor_events"] else ""
+
+
+def floor_event_gate(run_dir, required: bool = False, window_steps: int | None = None, tail: float = 0.5) -> dict:
+    """floor_events.csv の判定 (check_floor_events.judge)。`required=False` (既定) では結果を載せるだけで合否に使わない。
+    必須のときは PASS 以外を不合格にする: 区間内の床事象は FLOOR_EVENT、判定不能 (記録の欠落・区間の欠落・restart 後の
+    区間の不足・未検証の経路・監査なし・食い違い) は FLOOR_UNVERIFIABLE。"""
+    res = _cfe.judge(run_dir, window_steps=window_steps, tail=tail)
+    fc = None if res["ok"] else ("FLOOR_EVENT" if res["verdict"] == "FAIL" else "FLOOR_UNVERIFIABLE")
+    return {"ok": bool(res["ok"] or not required), "required": bool(required), "verdict": res["verdict"],
+            "fail_class": fc if required else None, "window": res["window"], "path": res["path"],
+            "last_step": res["last_step"], "session": res["session"], "n_updates_checked": res["n_updates_checked"],
+            "events": res["events"], "first_events": res["first_events"], "entry": res["entry"], "init": res["init"],
+            "aux": res["aux"], "near_window": res["near_window"], "ghost_window": res["ghost_window"],
+            "reasons": list(res["reasons"]) if (required and not res["ok"]) else [],
+            "notes": [] if (required and not res["ok"]) else list(res["reasons"])}
+
+
+def floor_events_summary(fev: dict | None) -> dict | None:
+    """metrics.json の上位と台帳に載せる要約 (必須か・判定・区間・種類別の件数・理由)。"""
+    if not fev:
+        return None
+    return {"required": fev.get("required"), "verdict": fev.get("verdict"), "fail_class": fev.get("fail_class"),
+            "window": fev.get("window"), "n_updates_checked": fev.get("n_updates_checked"),
+            "n_events": {k: v.get("n_events") for k, v in (fev.get("events") or {}).items()},
+            "first_events": (fev.get("first_events") or [])[:2],
+            "reasons": (fev.get("reasons") or fev.get("notes") or [])[:3]}
+
+
 def residual_scale_gate(run_dir, ratio: float = 1.0e6, gate: bool = False) -> dict:
     """残差列の**桁の揃い**を見る **補助警報** (2026-09-19, codex plan レビュー M3 で受理条件から降格)。
 
@@ -270,13 +324,17 @@ def residual_scale_gate(run_dir, ratio: float = 1.0e6, gate: bool = False) -> di
 
 
 def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
-                   p_min: float | None = None, require_residual_plateau: bool = False) -> dict:
+                   p_min: float | None = None, require_residual_plateau: bool = False,
+                   require_floor_events: bool = False, floor_window_steps: int | None = None, floor_tail: float = 0.5) -> dict:
     """全ゲートを評価して verdict / fail_class を返す。fail_class は数値失敗の種別:
     DIVERGED (rc≠0 / 発散ダンプ / 非有限・非正の場 / 残差 NaN), RESIDUAL_RISING, NOT_CONVERGED (require 時のみ),
-    NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない)。物理的 INFEASIBLE はここでは出さない。"""
+    NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない),
+    FLOOR_EVENT / FLOOR_UNVERIFIABLE (`require_floor_events` のときだけ: 判定区間の毎更新の床事象 / その記録が判定不能)。
+    物理的 INFEASIBLE はここでは出さない。"""
     field = field_health(run_dir)
     resid = residual_health(run_dir)
     floors = floor_gate(run_dir, p_min)
+    fevents = floor_event_gate(run_dir, required=require_floor_events, window_steps=floor_window_steps, tail=floor_tail)
     rscale = residual_scale_gate(run_dir)
     stead = steadiness_gate(hist, obj) if hist else {"ok": False, "objective": obj or objective_key(hist), "series": {}, "unsteady": [],
                                                     "reasons": ["no force history (no wall output)"]}
@@ -301,6 +359,8 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
         fail = fail or "NOT_PLATEAU"
     if not floors["ok"]:
         reasons += floors["reasons"]; fail = fail or "FLOOR_STUCK"
+    if not fevents["ok"]:
+        reasons += ["床事象: " + r for r in fevents["reasons"]]; fail = fail or fevents["fail_class"]
     if not rscale["ok"]:
         reasons += rscale["reasons"]; fail = fail or "RESIDUAL_UNBALANCED"
     if not hist:
@@ -309,7 +369,7 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
         reasons += stead["reasons"]; fail = fail or "UNSTEADY"
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
-            "floors": floors, "residual_scale": rscale,
+            "floors": floors, "residual_scale": rscale, "floor_events": fevents,
             # プラトー到達は**診断**として常に載せる (受理条件ではない)
             "plateau": {"all_flat": not resid.get("converging") and not resid.get("rising"),
                         "falling": resid.get("converging", []), "rising": resid.get("rising", []),

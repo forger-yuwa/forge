@@ -247,8 +247,116 @@ def main():
         "none=%s sst=%s" % (sm.stage_key(sq_l, "").get("turbulence.model"),
                             sm.stage_key(sq_s, "").get("turbulence.model")))
 
+    floor_events_bad_input()
+
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
+
+
+def write_floor_csv(d, N, path="steady_implicit", events=None, drop=(), end=True, audit="done", sessions=None,
+                    overflow_q=None, uneval_q=None, mismatch_q=None, truncate_last=False):
+    """check_floor_events の合成記録。events = {q_index: (nT, nRho, nP)}、drop = 欠けさせる q_index、
+    sessions = 先に置く (完走した) session の step 数のリスト (restart / 段階起動の前段)。"""
+    import check_floor_events as fe
+    cols = fe.COLUMNS
+    lines = [",".join(cols)]
+
+    def row(kind, sess, step, inner, q, ev=(0, 0, 0), ovf=0, unev=0, mis=0, note=""):
+        r = {c: "0" for c in cols}
+        r.update(kind=kind, session=str(sess), step=str(step), inner=str(inner), q_index=str(q), path=path,
+                 n_real="100", n_ghost="10", ids_T="", ids_Rho="", ids_P="", ids_near="", ids_truncated="",
+                 overflow=str(ovf), note=note)
+        r["nT_real"], r["nRho_real"], r["nP_real"] = (str(v) for v in ev)
+        r["nT_uneval_real"], r["nT_mismatch_real"] = str(unev), str(mis)
+        if ev[0]:
+            r["ids_T"] = "7"
+        return ",".join(r[c] for c in cols)
+
+    allsess = list(sessions or []) + [N]
+    for si, n in enumerate(allsess, start=1):
+        last = (si == len(allsess))
+        lines.append(row("session_begin", si, 0, -1, -1, note="format=1;path=%s;prior_sessions=%d" % (path, si - 1)))
+        lines.append(row("init", si, 0, 0, -1))
+        for k in range(1, n + 1):
+            q = k - 1
+            if last and q in drop:
+                continue
+            lines.append(row("eos", si, k, 0, q, (events or {}).get(q, (0, 0, 0)) if last else (0, 0, 0),
+                             ovf=int(last and q == overflow_q), unev=int(last and q == uneval_q), mis=int(last and q == mismatch_q)))
+        if last and not end:
+            break
+        if audit == "done" and not (last and n in drop):
+            lines.append(row("audit", si, n, 0, n, (events or {}).get(n, (0, 0, 0)) if last else (0, 0, 0)))
+        lines.append(row("session_end", si, n, -1, -1, note="audit=%s" % audit))
+    if truncate_last:
+        lines[-1] = lines[-1][:len(lines[-1]) // 2]
+    with open(os.path.join(d, "floor_events.csv"), "w") as f:
+        f.write("\n".join(lines) + ("" if truncate_last else "\n"))
+
+
+def floor_events_bad_input():
+    """毎更新の床事象の判定 (check_floor_events.judge) が **記録の欠け・区間の欠け・未検証の経路を合格にしない** こと
+    (plans/active/tooling-sern-te-wake-grid.md §4「床の判定」、§5.1 #2)。記録が無いことを 0 件として扱わない。"""
+    import shutil
+    import check_floor_events as fe
+    print("=== check_floor_events: 不正入力 ===")
+    N = 40
+    cases = [
+        ("全更新 0 件 → PASS (対照)", {}, "PASS"),
+        ("記録ファイルが無い → 判定不能", {"_nofile": True}, "INDETERMINATE"),
+        ("途中で 1 件 (q 25)・最終場 (監査) は正常 → FAIL", {"events": {25: (1, 0, 0)}}, "FAIL"),
+        ("最後の更新 (監査行) だけ 1 件 → FAIL", {"events": {N: (0, 0, 1)}}, "FAIL"),
+        ("区間の step が 1 つ欠けた → 判定不能 (欠落 ≠ 0 件)", {"drop": (30,)}, "INDETERMINATE"),
+        ("監査行が欠けた → 判定不能", {"drop": (N,)}, "INDETERMINATE"),
+        ("区間の入口 (q = a) が欠けた → 判定不能", {"drop": (20,)}, "INDETERMINATE"),
+        ("session_end が無い (異常終了) → 判定不能", {"end": False}, "INDETERMINATE"),
+        ("最後の行が書きかけ → 判定不能", {"truncate_last": True}, "INDETERMINATE"),
+        ("監査が未対応 (audit=unsupported) → 判定不能", {"audit": "unsupported:condEquilibrium2"}, "INDETERMINATE"),
+        ("未検証の経路 (dual_time) → 判定不能", {"path": "dual_time"}, "INDETERMINATE"),
+        ("件数の整合が取れない (overflow) → 判定不能", {"overflow_q": 33}, "INDETERMINATE"),
+        ("温度の述語を評価していない節点 (二相) → 判定不能", {"uneval_q": 33}, "INDETERMINATE"),
+        ("述語と EOS の最終温度が食い違う → 判定不能", {"mismatch_q": 33}, "INDETERMINATE"),
+        ("区間の外 (q 5) の事象は合否に使わない → PASS", {"events": {5: (3, 0, 0)}}, "PASS"),
+        ("入口 Q_a (q 20) の事象は別枠 → PASS", {"events": {20: (1, 0, 0)}}, "PASS"),
+    ]
+    for name, kw, want in cases:
+        d = tempfile.mkdtemp()
+        kw = dict(kw)
+        if not kw.pop("_nofile", False):
+            write_floor_csv(d, N, **kw)
+        r = fe.judge(d, tail=0.5)
+        chk(name, r["verdict"] == want and (r["ok"] == (want == "PASS")), "%s %s" % (r["verdict"], (r["reasons"] or [""])[0][:60]))
+        shutil.rmtree(d, ignore_errors=True)
+    # restart: 前の session (完走 40 step) の後に restart した session が 15 step しかない。判定区間 20 step は
+    # restart 後の session の始まりより前に及ぶ → 前の session の記録で埋めずに判定不能
+    d = tempfile.mkdtemp()
+    write_floor_csv(d, 15, sessions=[40])
+    r = fe.judge(d, window_steps=20)
+    chk("restart 後の区間の不足 (前の session で埋めない) → 判定不能", r["verdict"] == "INDETERMINATE" and not r["ok"], (r["reasons"] or [""])[0][:60])
+    r = fe.judge(d, window_steps=10)
+    chk("restart 後の session の中に区間が収まれば判定する → PASS", r["verdict"] == "PASS", r["verdict"])
+    shutil.rmtree(d, ignore_errors=True)
+    # 記録と res_*.h5 の最終 step が違う (古い記録の取り違え)
+    d = tempfile.mkdtemp()
+    write_floor_csv(d, N)
+    open(os.path.join(d, "res_%d.h5" % (N + 10)), "w").close()
+    r = fe.judge(d, tail=0.5)
+    chk("記録の最終 step と res_*.h5 が違う → 判定不能", r["verdict"] == "INDETERMINATE", (r["reasons"] or [""])[0][:60])
+    shutil.rmtree(d, ignore_errors=True)
+    # 見出し違い
+    d = tempfile.mkdtemp()
+    write_floor_csv(d, N)
+    txt = open(os.path.join(d, "floor_events.csv")).read().replace("kind,session", "kind,sess", 1)
+    open(os.path.join(d, "floor_events.csv"), "w").write(txt)
+    chk("見出しが違う → 判定不能", fe.judge(d)["verdict"] == "INDETERMINATE", "")
+    shutil.rmtree(d, ignore_errors=True)
+    # CLI は PASS 以外で非ゼロ終了
+    import subprocess
+    d = tempfile.mkdtemp()
+    write_floor_csv(d, N, drop=(30,))
+    rr = subprocess.run([sys.executable, os.path.join(HERE, "check_floor_events.py"), d], capture_output=True, text=True)
+    chk("CLI: 判定不能は非ゼロ終了で VERDICT: INDETERMINATE", rr.returncode != 0 and "VERDICT: INDETERMINATE" in rr.stdout, "rc=%d" % rr.returncode)
+    shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":

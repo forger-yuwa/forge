@@ -46,6 +46,7 @@ GATE_KEYS = ("C_T", "C_L", "C_M")
 from ..evaluate.runner_sern import FLAG_POLICY  # noqa: E402
 # 処置の識別 (import 時に束縛する: 試験は R を偽の runner に差し替えてからキャンペーンを作る)
 from ..evaluate.runner_sern import ZTE_EFFECTIVE, zte_signature_of, zte_spec_from_evaluate  # noqa: E402
+from ..metrics.sern_gates import floor_events_summary  # noqa: E402  毎更新の床事象の要約 (te-wake-grid §5.1 #2)
 
 class DesignInfeasible(ValueError):
     """物理的に成立しない候補 (逆設計不成立 / L_ramp_max 超過)。数値失敗と区別する (R1)。"""
@@ -241,6 +242,8 @@ class SernCampaign:
                 "zero_thickness_edge_velocity_mesh_signature": (out.get("zero_thickness_edge_velocity") or {}).get("mesh_signature"),
                 "zero_thickness_edge_velocity_field_hash": (out.get("zero_thickness_edge_velocity") or {}).get("field_hash"),
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
+                # 毎更新の EOS 床事象 (必須か・判定・区間・件数)。必須で不合格なら gate_fail_class が FLOOR_EVENT / FLOOR_UNVERIFIABLE
+                "floor_events": floor_events_summary(g.get("floor_events")),
                 "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
 
     def _cm_check(self, row: dict) -> None:

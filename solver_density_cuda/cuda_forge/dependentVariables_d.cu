@@ -3,6 +3,7 @@
 #include "speciesTransport_d.cuh"  // species_roY_device_ptr() (多成分 thermalMethod==2)
 #include "condensationTransport_d.cuh"  // cond_rog_device_ptr() (二相 EOS)
 #include "condensationEOS_d.cuh"        // cond_T_from_e_onetemp (一温度 二相 温度反転)
+#include "floorEvents_d.cuh"            // 床事象のカウンタ (出力専用; output.floorEvents)
 
 // 温度反転のクランプ範囲 (NASA-9 の有効域より広めに取り, 範囲外は外挿)
 #define DEPVAR_TMIN 50.0
@@ -57,7 +58,10 @@ __global__ void dependentVariables_d
  // thermally-perfect 用に毎ステップ更新する per-cell 物性
  flow_float* gam_array ,
  flow_float* cp_array ,
- flow_float* Rmix_array   // M6: 混合比気体定数 R[ic] (SLAU 面エンタルピーが毎面再計算するのを回避)
+ flow_float* Rmix_array , // M6: 混合比気体定数 R[ic] (SLAU 面エンタルピーが毎面再計算するのを回避)
+
+ // 床事象のカウンタ (出力専用)。fe.acc == nullptr で計数しない。数えるだけで、下の EOS の値には触れない。
+ FloorEventDev fe
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -70,6 +74,12 @@ __global__ void dependentVariables_d
     flow_float P_temp;
 
     if (ic < nCells_all) {
+        // 床事象のカウンタ: 入力 (境界ピンの後・床の前の保存量) の有限性と密度床 ρ_in < roMin を先に見る。
+        // 非有限の入力は床の述語から外して別に数える (fmaxf は NaN を roMin に置き換えるので、密度床に混ぜない)。
+        const bool feReal = (ic < nCells);
+        const bool feOn = (fe.acc != nullptr)
+                          && feInputAndDensity(fe, ic, feReal, ro[ic], roUx[ic], roUy[ic], roUz[ic], roe[ic], roMin);
+
         // 密度・圧力フロア: 膨張領域で非物理的な ro→0, P→0 が生じても速度爆発を防ぐ。
         // 既定 ro_min=1e-4 kg/m³, P_min=1.0 Pa は大気スケール想定。無次元・低圧ケースでは
         // config (physProp.pMin/roMin/tMin) で下げる (既定値は従来ハードコードと同一)。
@@ -200,6 +210,21 @@ __global__ void dependentVariables_d
                 oneMg = 1.0f - g_liq;
                 Pnew  = (double)ro_temp * oneMg * Rmix * Tnew;
             }
+            if (feOn) {
+                // 床事象 (TP): 温度は EOS と同じ密度 (床後)・組成での e_in < e_mix(T_min) = Σ Y_s h_s(T_min)/MW_s − R_mix T_min。
+                // 二相・EOS 拘束形平衡は e_mix(T) の形が違うので評価しない (未評価として数える)。圧力はクランプ直前の P_raw。
+                if ((condensation == 1 && condEquilibrium == 2 && rog != nullptr) || g_liq > 1.0e-12) {
+                    feTemperatureUnevaluated(fe, feReal);
+                } else {
+                    const int nsp = (nSpecies <= 1 || roY == nullptr) ? 1 : nSpecies;
+                    double hs = 0.0;
+                    for (int s = 0; s < nsp; ++s) hs += Y[s]*fe.hTminMass[s];
+                    const double eFloor = hs - Rmix*fe.tFloorTP;
+                    feTemperature(fe, ic, feReal, (e_in < eFloor), (Tnew <= fe.tFloorTP), Tnew, fe.tFloorTP,
+                                  (double)ro_temp*(eFloor - e_in));
+                }
+                fePressure(fe, ic, feReal, Pnew, (double)pMin);
+            }
             if (Pnew < (double)pMin) Pnew = (double)pMin;
 
             T[ic]         = (flow_float)Tnew;
@@ -264,6 +289,7 @@ __global__ void dependentVariables_d
                 const double Tguess = ((double)T[ic] > 1.0) ? (double)T[ic] : (double)max(intE/(cp/gamma), tMin);
                 bool ok = true;
                 const double Tn = eq2 ? Tn_eq : cond_T_from_e_cpg(e_in, g_liq, cv, Rw, Tguess, cpropsCpg, &ok);
+                if (feOn) feTemperatureUnevaluated(fe, feReal);   // 床事象 (CPG 二相): 温度の述語は評価しない
                 if (!ok) {
                     // 反転が収束しなかったセル: T,P,sonic,Ht は前ステップ値のまま残し、roe を反転結果で上書きしない (密度床・速度は上で更新済み)。診断カウンタに数える
                     // (codex 2026-09-12 M2 / 2026-09-13 M1: 失敗した温度で流束・核生成を評価しない)。密度床だけ反映。
@@ -275,6 +301,7 @@ __global__ void dependentVariables_d
                 const double e_mix = (cv + g_liq*Rw)*Tn - g_liq*L;   // = e_in
                 const double Reff = carrierCpg ? (Rgas - g_liq*Rw) : ((1.0 - g_liq)*Rgas);
                 double Pn = (double)ro_temp*Reff*Tn;
+                if (feOn) fePressure(fe, ic, feReal, Pn, (double)pMin);   // 床事象 (CPG 二相): クランプ直前の P_raw
                 if (Pn < (double)pMin) Pn = (double)pMin;
 
                 T[ic]   = (flow_float)Tn;
@@ -287,6 +314,14 @@ __global__ void dependentVariables_d
                 }
             } else {
                 // 単相 CPG (従来経路, フロア未指定ならビット不変)
+                if (feOn) {
+                    // 床事象 (CPG 単相): 温度は EOS と同じ式 intE/c_v < tMin (= e_in < c_v T_min)、圧力はクランプ直前の P_raw。
+                    const flow_float feTq = intE/(cp/gamma);
+                    const double cvF = (double)(cp/gamma);
+                    feTemperature(fe, ic, feReal, (feTq < tMin), (max(feTq, tMin) <= tMin), (double)max(feTq, tMin), (double)tMin,
+                                  (double)ro_temp*(cvF*(double)tMin - (double)intE));
+                    fePressure(fe, ic, feReal, (double)((gamma-1.0f)*(roe[ic]-ro_temp*ek)), (double)pMin);
+                }
                 T_temp = max(intE/(cp/gamma), tMin);
                 P_temp = max((gamma-1.0f)*(roe[ic]-ro_temp*ek), pMin);
 
@@ -342,10 +377,14 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         var.c_d["P"]   , var.c_d["Ht"]  , var.c_d["sonic"], var.c_d["k"], var.c_d["omega"], var.c_d["T"],
         var.c_d["Ux"]  , var.c_d["Uy"]  , var.c_d["Uz"] ,
 
-        var.c_d["gamma"] , var.c_d["cp"] , var.c_d["Rmix"]
+        var.c_d["gamma"] , var.c_d["cp"] , var.c_d["Rmix"] ,
+
+        // 床事象のカウンタ (無効なら acc == nullptr)。集計は呼ぶたびに 0 へ戻る
+        floorEventsKernelArgs()
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    floorEventsAfterEos();   // 有効なら集計を読んで floor_events.csv に 1 行 (無効なら何もしない)
     // 二相の温度反転失敗セル数 (診断; CPG と TP 一温度二相の両方)。0 でなければ警告 (roe を保持したセルがある; plan condensation-float-speedup §5.1 #9)。
     if (cfg.condensation == 1) {
         unsigned int nfail = 0u;
@@ -361,3 +400,5 @@ void dependentVariables_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mes
         condensationPrimitive_d_wrapper(cfg , cuda_cfg , msh , var);
     }
 }
+
+double dependentVariablesTminTP() { return DEPVAR_TMIN; }

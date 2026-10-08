@@ -24,6 +24,8 @@ add_library(cuda_forge STATIC
     calcStructualVariables_d.cuh
     dependentVariables_d.cu
     dependentVariables_d.cuh
+    floorEvents_d.cu
+    floorEvents_d.cuh
     update_d.cu
     update_d.cuh
     qAccumulator_d.cu
