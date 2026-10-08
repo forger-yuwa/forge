@@ -29,6 +29,8 @@ ALT_BINARIES = {
     # キー: (forge の sha256, ソースの作業ツリー)
     # implicitThermalJacobian の検証用: commit 1ad0b9bb + typedef double (座標の stod は HEAD に入っている)、2026-10-09 AWS でビルド
     "thermjac_fp64": ("9ffc4d1efcec6ca4799f4026ef418931cf99bd27ad61f29d264cbfc4639018b7", "~/forge-thermjac-fp64"),
+    # 06d1b149 (ビット 4 を追加) + typedef double、2026-10-09 に同じ作業ツリーで再ビルド (上のバイナリは上書きされて残っていない)
+    "thermjac5_fp64": ("985aca0f2ebba912851042ec9abc8b7deab9707b20f19f757641dc9b3521215e", "~/forge-thermjac-fp64"),
 }
 
 
