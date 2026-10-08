@@ -146,6 +146,15 @@ check("(c) Problem.mesh_euler に YAML の mesh_euler が入る", pp.mesh_euler 
 
 # --- (d) NS は mesh だけを読み、変更前と同じ ----------------------------------------------------------------------------
 ns_files = sorted(f for f in C45.glob("problem_d155*.yaml") if "_ns" in f.name)
+# 2026-10-08 に足した opt-in の格子のキー (表の第一層・x 密度・壁法線の近壁層) を使う問題は「変更前と同一」の対象外 (変更前の関数はこれらを知らない)。
+# 代わりに、そのキーが Mesh2DParams に入ることを別に確かめる (plan tooling-nozzle-isothermal-wall-chain §5.1 #13・#15)
+NEW_MESH_KEYS = ("wall_first_frac_table", "x_density_table", "wall_normal_layer")
+new_key_files = [f for f in ns_files if any(k in (load_problem(f).mesh or {}) for k in NEW_MESH_KEYS)]
+ns_files = [f for f in ns_files if f not in new_key_files]
+for f in new_key_files:
+    p = load_problem(f); mp = RA.mesh_params(p, 0.0768075, 561, 97, 4.5e-5)
+    check(f"(d) 新しい格子のキーが Mesh2DParams に入る ({f.name})",
+          all((getattr(mp, k) is not None) == (k in p.mesh) for k in NEW_MESH_KEYS))
 nbad = []
 for f in ns_files:
     p = load_problem(f)

@@ -1150,6 +1150,29 @@ def delta_r_from_table(x, d):
     return f
 
 
+def _closure_kw(p: Problem, init_cfg: dict) -> dict:
+    """deltastar_initializer.closure_version (既定 contur_v1 = 従来どおり、何も渡さない)。contur_v2 は版と NS と同じ μ(T) を渡す。"""
+    v = str(init_cfg.get("closure_version", "contur_v1"))
+    if v == "contur_v1":
+        return {}
+    if v != "contur_v2":
+        raise ValueError(f"deltastar_initializer.closure_version {v!r} は contur_v1 | contur_v2")
+    return {"closure_version": v, "mu_fn": contur_mu_fn(p)}
+
+
+def contur_mu_fn(p: Problem):
+    """積分法 `contur_v2` の粘性 μ(T): NS と同じ輸送物性 (plan tooling-nozzle-isothermal-wall-chain §4.7-3)。
+    多成分 TP の CFD (viscMethod 2) なら gas.transport の混合気 (無ければ例外)、それ以外は NS の Sutherland (1.716e-5, 273, 111)。"""
+    if p.uses_tp_cfd:
+        tr = p.gas_transport
+        if not tr:
+            raise ValueError("contur_v2: TP の問題は gas.transport (NS と同じ輸送物性) が要る — Sutherland に落とさない")
+        from ..gas.transport import MixtureViscosity
+        Y = p.gas_composition[0]
+        return MixtureViscosity({str(k).upper(): float(v) for k, v in Y.items()}, tr)
+    return lambda T: 1.716e-5 * (np.asarray(T, dtype=float) / 273.0) ** 1.5 * (273.0 + 111.0) / (np.asarray(T, dtype=float) + 111.0)
+
+
 def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = None, rtol: float | None = None):
     """積分法初期壁の δ_r (`prepare_ns` の initializer 経路): `integral_bl` → 5 次 P-spline 平滑化 → 壁に渡す δ_r 関数。
     戻り: (res_init, delta_r_x, init_info)。`prepare_ns` から切り出したもの (振る舞いは同一; plan
@@ -1175,7 +1198,7 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
                            theta0_m=init_cfg.get("theta0_m"), x_virtual_m=init_cfg.get("x_virtual_m"),
                            a_crocco=float(init_cfg.get("a_crocco", 1.0)), closure=str(init_cfg.get("closure", "contur")),
                            cf_scale=float(init_cfg.get("cf_scale", 1.0)), n_scale=float(init_cfg.get("n_scale", 1.0)),
-                           **({} if rtol is None else {"rtol": float(rtol)}))
+                           **({} if rtol is None else {"rtol": float(rtol)}), **_closure_kw(p, init_cfg))
     # 積分法の出力も同じ 5 次 P-spline で平滑化 (N(Re) テーブルの折れ目などを壁曲率に持ち込まない)
     from ..metrics.deltastar import smooth_delta_quintic
     f_s, sm_diag = smooth_delta_quintic(res_init["x"], res_init["delta_r"], knot_spacing=2.0, lam=1.0,
