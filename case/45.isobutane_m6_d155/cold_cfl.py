@@ -37,7 +37,7 @@ def limiter_refs(run: Path) -> dict:
 
 
 def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list[str], ref_from: Path | None = None,
-         line: str = "", isp: int | None = None) -> dict:
+         line: str = "", isp: int | None = None, inner: int | None = None, conv: int | None = None) -> dict:
     NS.check_dry_env(False)
     binrec = CP.binary_record()
     if not NS.RUN_RE.match(run.name) or run.exists():
@@ -76,7 +76,14 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         if "implicitSolvePrecision" in pcfg["time"]["deltaT"] or ctext.count("deltaT: {") != 1:
             raise SystemExit("deltaT に既に implicitSolvePrecision があるか、deltaT が 1 つのフロー形式でない — 止める")
         ctext = ctext.replace("deltaT: {", f"deltaT: {{implicitSolvePrecision: {int(isp)}, ")
-    allowed = ({NS.NSTEP, NS.CFL, NS.CFLP, NS.OUTINT} | ({("output",)} if extra else set())
+    one = {}
+    if inner is not None:
+        one[("time", "nStepInner")] = str(int(inner))
+    if conv is not None:
+        one[NS.CONVP] = str(int(conv))
+    if one:                                  # 単因子の切り分け用 (nStepInner・convMethod)
+        ctext = ys.replace_scalars(ctext, one)
+    allowed = ({NS.NSTEP, NS.CFL, NS.CFLP, NS.OUTINT} | set(one) | ({("output",)} if extra else set())
                | {("space", k) for k in refs} | {("time", "deltaT", k) for k in line_keys}
                | ({("time", "deltaT", "implicitSolvePrecision")} if isp is not None else set()))
     diff = set(NS.MK.diff_paths(pcfg, ys.load(ctext)))
@@ -106,7 +113,7 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
            "tool": "cold_cfl.py prep", "plan_item": "§5.1 #27", "created": NS.now(), "git_head": NS.git_head(), "binary": binrec,
            "stages": "none", "parent": src.name, "parent_res": src_h5.name, "parent_res_sha256": NS.sha256_file(src_h5),
            "ext_steps": int(steps), "cfl_main": float(cfl), "cfl_parent": srec.get("cfl_main"), "out_interval": int(out_int),
-           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp,
+           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv,
            "config_diff": sorted("/".join(p) for p in diff),
            "restart_field_tail": (r.stdout + r.stderr).strip().splitlines()[-1:], "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / CP.RECORD, rec)
@@ -125,6 +132,8 @@ if __name__ == "__main__":
     p.add_argument("--line", choices=("dir", "only"), default="",
                    help="dir = lineImplicit 1 + lineDtDirectional 1、only = lineImplicit 1 だけ")
     p.add_argument("--isp", type=int, choices=(0, 1), default=None, help="time.deltaT.implicitSolvePrecision を書く")
+    p.add_argument("--inner", type=int, default=None, help="time.nStepInner を変える")
+    p.add_argument("--conv", type=int, default=None, help="space.convMethod を変える (0 = 1 次)")
     a = ap.parse_args()
     prep(HERE / a.src, HERE / a.run, a.steps, a.cfl, a.out, [s for s in a.extra.split(",") if s],
-         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp)
+         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv)
