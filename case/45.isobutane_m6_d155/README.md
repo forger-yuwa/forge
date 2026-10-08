@@ -128,6 +128,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0194_ns_coldmesh_cpg_ad_plain_cont` / `run_0195_ns_coldmesh_cpg_ad_dilat2_cont` | run_0184 / run_0186 (CPG 断熱) の続き: AWS の停止で 70500 step 付近で止まったので res_60000 から 40000 step (通算 100000)、20000 ごと、基準値を親に固定 | 投入 2026-10-08 21:10 | 実行中 |
 | `run_0196_ns_coldmesh_tw300_ref0183` / `run_0197_ns_coldmesh_tw300_ref0182` | リミッタの基準値の感度 (§5.1 #27): run_0183 の res_100000 からビット一致、基準値だけを run_0183 / run_0182 の値に固定、2 step、`extraFields` に全保存量の残差 | 完了。残差の変化の RMS は残差の RMS の 2e-6 (ρ)〜3.5e-5 (ρe)、k/ω は 4e-8 以下。同じ基準値の再実行 (run_0192) とは 1e-16 で一致 | ref |
 | `run_0199_ns_coldmesh_tw300_cfl8` | 擬似 CFL 8 の試行 (§5.1 #27): run_0183 の res_100000 からビット一致、cfl 8 (relax 0.7)、基準値は run_0183 に固定、40000 step 予定・5000 ごと | **7786 step でユーザ判断により停止**。NaN なしだが残差が 60〜120 倍に跳ねて横ばい、スロートの壁から 7 層目で振動 (x_w −1.3〜3 の Σ|res| 70、CFL 4 は 0.34)。試験部の δ・θ が CFL 4 から ±1 % ずれる → 使わない | 破棄予定 |
+| `run_0200_ns_coldmesh_tw300_cfl4_line` | ライン陰解法の試行 (§5.1 #27): run_0183 の res_100000 から、cfl 4・`lineImplicit 1`・`lineDtDirectional 1`、基準値は run_0183 に固定 | **65 step で発散** (`res_nan_66.h5`)。x_w −10.8〜−10.2 (列 39〜49) のライン 11 本で ρ が非有限 | 破棄予定 |
+| `run_0201_ns_coldmesh_tw300_cfl4_lineonly` | ライン陰解法だけ (方向別の dt なし)、cfl 4、10000 step・5000 ごと | 投入 2026-10-08 21:57 | 実行中 |
+| `run_0202_ns_coldmesh_tw300_cfl1_linedir` | ライン陰解法 + 方向別の dt、cfl 1、10000 step 予定 | **129 step で発散** (`res_nan_130.h5`)、run_0200 と同じ場所 → 方向別の dt はこの格子では使わない | 破棄予定 |
 | (注) | 2026-10-05: AWS の空き不足のため run_0053〜0105 の中間 `res_<n>.h5` を削除 (res_0・最終場・`delta_E_series.csv` は残る) | — | — |
 | `run_0008_ns_trim_cond` | 凝縮 ON restart (`problem_d155_trim_ns_cond.yaml`: Kw+HK condModel1+Kantrowitz, 蒸発 ON, IC=run_0007, 12000 step) | 完走・NaN 0・**STEADY** (4k/8k/12k で M_exit 差 5e-4)。軸 onset x≈69 r_t、出口 g 0.20 % (H₂O の 2 %)、**出口軸 M 5.9273 (−1.2 %)**・試験区間に M 低下勾配 (x60→96 で 6.00→5.93)。dry の軸は x≈24 r_t (M5.5) で飽和線越え S≈14 (`axis_values.csv` の Tsat_post) | active (**凝縮評価の正本**) |
 
