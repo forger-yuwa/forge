@@ -6,6 +6,7 @@ A = stof の FP64 変換器、B = stod の FP64 変換器で変換して、生�
 usage (AWS の case dir): python3 fp64_reader_ab.py <変換器 A> <変換器 B>  → _band_ab/cold_pair/fp64_reader_ab.json
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -50,7 +51,9 @@ def main(conv_a: str, conv_b: str):
             shutil.copy2(td / "nozzle.msh", wd / "nozzle.msh")
             for f in (HERE / "run_0179_ns_n012_N2_ext").glob("*.yaml"):
                 shutil.copy2(f, wd / f.name)
-            r = subprocess.run([conv, "nozzle.msh", "nozzle.h5"], cwd=wd, capture_output=True, text=True)
+            # 生産と同じく conv_tolerant.sh 経由 (AWS g5 の変換器の終了時 GPUassert だけを許容、出力 h5 の完全性は wrapper が確かめる)
+            r = subprocess.run([str(HERE / "conv_tolerant.sh"), "nozzle.msh", "nozzle.h5"], cwd=wd, capture_output=True, text=True,
+                               env={**os.environ, "REAL_CONVERTER": conv})
             rec = {"converter": conv, "rc": r.returncode}
             if r.returncode != 0 or not (wd / "nozzle.h5").is_file():
                 rec["error"] = (r.stdout + r.stderr)[-1500:]; out["arms"][arm] = rec; continue
