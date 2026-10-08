@@ -31,6 +31,8 @@ ALT_BINARIES = {
     "thermjac_fp64": ("9ffc4d1efcec6ca4799f4026ef418931cf99bd27ad61f29d264cbfc4639018b7", "~/forge-thermjac-fp64"),
     # 06d1b149 (ビット 4 を追加) + typedef double、2026-10-09 に同じ作業ツリーで再ビルド (上のバイナリは上書きされて残っていない)
     "thermjac5_fp64": ("985aca0f2ebba912851042ec9abc8b7deab9707b20f19f757641dc9b3521215e", "~/forge-thermjac-fp64"),
+    # b4771052 (lineDtDirectionalCap を追加) + typedef double、2026-10-09 に同じ作業ツリーで再ビルド
+    "thermjac_cap_fp64": ("35e498b14b5f3cdaa09b754f7bbaa6455f54631fd2edf1ad4929964e8828d4bc", "~/forge-thermjac-fp64"),
 }
 
 
@@ -61,7 +63,8 @@ def limiter_refs(run: Path) -> dict:
 
 
 def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list[str], ref_from: Path | None = None,
-         line: str = "", isp: int | None = None, inner: int | None = None, conv: int | None = None, itj: int | None = None) -> dict:
+         line: str = "", isp: int | None = None, inner: int | None = None, conv: int | None = None, itj: int | None = None,
+         cap: float | None = None) -> dict:
     NS.check_dry_env(False)
     binrec = CP.binary_record()
     if not NS.RUN_RE.match(run.name) or run.exists():
@@ -105,6 +108,10 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         if "implicitThermalJacobian" in pcfg["time"]["deltaT"] or ctext.count("deltaT: {") != 1:
             raise SystemExit("deltaT に既に implicitThermalJacobian があるか、deltaT が 1 つのフロー形式でない — 止める")
         ctext = ctext.replace("deltaT: {", f"deltaT: {{implicitThermalJacobian: {int(itj)}, ")
+    if cap is not None:                     # 方向別 dt の伸びの上限 R (lineDtDirectionalCap、line dir が要る)
+        if not line_keys.get("lineDtDirectional"):
+            raise SystemExit("--cap は --line dir と一緒に使う — 止める")
+        ctext = ctext.replace("deltaT: {", f"deltaT: {{lineDtDirectionalCap: {float(cap)!r}, ")
     one = {}
     if inner is not None:
         one[("time", "nStepInner")] = str(int(inner))
@@ -115,7 +122,8 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
     allowed = ({NS.NSTEP, NS.CFL, NS.CFLP, NS.OUTINT} | set(one) | ({("output",)} if extra else set())
                | {("space", k) for k in refs} | {("time", "deltaT", k) for k in line_keys}
                | ({("time", "deltaT", "implicitSolvePrecision")} if isp is not None else set())
-               | ({("time", "deltaT", "implicitThermalJacobian")} if itj is not None else set()))
+               | ({("time", "deltaT", "implicitThermalJacobian")} if itj is not None else set())
+               | ({("time", "deltaT", "lineDtDirectionalCap")} if cap is not None else set()))
     diff = set(NS.MK.diff_paths(pcfg, ys.load(ctext)))
     if not diff <= allowed:
         raise SystemExit(f"許していない設定の差がある: {sorted(diff - allowed)} — 止める")
@@ -143,7 +151,7 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
            "tool": "cold_cfl.py prep", "plan_item": "§5.1 #27", "created": NS.now(), "git_head": NS.git_head(), "binary": binrec,
            "stages": "none", "parent": src.name, "parent_res": src_h5.name, "parent_res_sha256": NS.sha256_file(src_h5),
            "ext_steps": int(steps), "cfl_main": float(cfl), "cfl_parent": srec.get("cfl_main"), "out_interval": int(out_int),
-           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv, "implicit_thermal_jacobian": itj,
+           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv, "implicit_thermal_jacobian": itj, "line_dt_directional_cap": cap,
            "config_diff": sorted("/".join(p) for p in diff),
            "restart_field_tail": (r.stdout + r.stderr).strip().splitlines()[-1:], "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / CP.RECORD, rec)
@@ -167,8 +175,9 @@ if __name__ == "__main__":
     p.add_argument("--inner", type=int, default=None, help="time.nStepInner を変える")
     p.add_argument("--conv", type=int, default=None, help="space.convMethod を変える (0 = 1 次)")
     p.add_argument("--itj", type=int, default=None, help="time.deltaT.implicitThermalJacobian を書く (別バイナリ COLD_ALT_BINARY が要る)")
+    p.add_argument("--cap", type=float, default=None, help="time.deltaT.lineDtDirectionalCap を書く (別バイナリが要る)")
     a = ap.parse_args()
     if a.cmd == "run":                      # cold_pair.run_one を (別バイナリの登録を効かせて) 呼ぶ
         sys.exit(CP.run_one(HERE / a.run))
     prep(HERE / a.src, HERE / a.run, a.steps, a.cfl, a.out, [s for s in a.extra.split(",") if s],
-         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv, a.itj)
+         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv, a.itj, a.cap)
