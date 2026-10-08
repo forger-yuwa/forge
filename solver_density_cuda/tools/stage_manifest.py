@@ -293,6 +293,121 @@ def _zte_stage_key(cfg_text, zc, run_dir):
     return out
 
 
+# 格子の来歴 (plan tooling-sern-te-wake-grid §4「格子の来歴と評価方式の識別を分ける」、codex plan レビュー 2026-10-08 M3)。
+# 実入力格子 (meshFileName) から**再計算した**格子署名 (`mark_zero_thickness_edges.mesh_signature`: 座標・接続) と
+# **双対幾何のハッシュ** (`dual_geometry_hash`)。署名だけでは変換器の修正 (ef74e342) のような双対幾何の変更を検出できない
+# (case/46.sern_design の run_1055 と run_1078 は署名が同じで check_dual_closure が FAIL / PASS)。
+# stage_key に入れるのは、meshFileName のルート属性が後縁下流の中間線の局所変形 (`te_wake_blend_H` > 0) を宣言する段だけ
+# (属性は runner_sern3d.prepare が最終の格子に書く)。**属性が無い・0 の段には何も足さない** (既存 run の stage_key は不変)。
+# 学習可否 (設計 DB) に使う評価方式の識別は別物で、design/forge_design/evaluate/runner_sern.py の eval_method_*。
+DUAL_HASH_VERSION = "dual-geom-v1"
+# (データセット, 列数)。node は双対 (median-dual)、cell は primal の面・セル。ソルバ (mesh.cpp の readMesh) が読む幾何量
+DUAL_DATASETS = (("PLANES/surfVect", 3), ("PLANES/surfArea", 1), ("PLANES/centCoords", 3),
+                 ("CELLS/volume", 1), ("CELLS/centCoords", 3))
+TE_WAKE_ATTR = "te_wake_blend_H"                # 格子のルート属性 (L_b / H、0 = 無効)
+TE_WAKE_CURVE_ATTR = "te_wake_curve_version"    # 同 (mesh_sern3d.TE_WAKE_CURVE_VERSION)
+MESH_PREFIX = "mesh.provenance"
+
+
+def _hash_line(name, dtype, shape, data):
+    """mark_zero_thickness_edges の格子署名と同じ行の形: "<名前> <型> <形> <バイト列の SHA-256>\\n"。"""
+    return "%s %s %s %s\n" % (name, dtype, shape, hashlib.sha256(data).hexdigest())
+
+
+def dual_geometry_hash(h5):
+    """双対幾何のハッシュ (版 dual-geom-v1、16 進 64 桁)。h5 はパスか開いた h5py.File。
+
+    項目 (DUAL_DATASETS の順)。各行 = "<名前> <型> <形> <little-endian の値のバイト列の SHA-256>\\n" (格子署名と同じ流儀):
+      PLANES/surfVect   f8 (n,3)   面積ベクトル (倍精度にしたもの、面の順)
+      PLANES/surfArea   f8 (n)
+      PLANES/centCoords f8 (n,3)   面の重心
+      CELLS/volume      f8 (n)     CV の体積
+      CELLS/centCoords  f8 (n,3)   CV の重心
+    無い項目は "<名前> absent 0 <空列の SHA-256>"。ハッシュ = SHA-256("dual-geom-v1\\n" + 全行)。
+    格納の型 (float32/64)・圧縮・チャンク配置では変わらない。/VALUE・/AUX・属性・ファイルのバイト列は使わないので、
+    restart_field / interp_field で場を写しても、属性を書いても変わらない。"""
+    import h5py
+    import numpy as np
+    if not isinstance(h5, h5py.File):
+        with h5py.File(str(h5), "r") as f:
+            return dual_geometry_hash(f)
+    text = DUAL_HASH_VERSION + "\n"
+    for name, cols in DUAL_DATASETS:
+        if name not in h5 or not isinstance(h5[name], h5py.Dataset):
+            text += _hash_line(name, "absent", "0", b"")
+            continue
+        a = np.asarray(h5[name][()], dtype="<f8").reshape(-1)
+        if a.size % cols:
+            raise ValueError("%s の長さ %d が列数 %d の倍数でない" % (name, a.size, cols))
+        shape = "%d,%d" % (a.size // cols, cols) if cols > 1 else str(a.size)
+        text += _hash_line(name, "f8", shape, a.tobytes())
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def mesh_identity(h5path):
+    """実入力格子の来歴 (すべて再計算): {"h5", "mesh_signature", "mesh_signature_version", "dual_hash", "dual_hash_version",
+    "discretization"}。ファイルが無ければ None。格子署名は前処理の道具 (mark_zero_thickness_edges) の関数を使う
+    (import できなければ止める: 識別できないまま他の段と連結しない)。"""
+    if not h5path or not os.path.exists(str(h5path)):
+        return None
+    try:
+        import h5py
+    except ImportError:
+        raise SystemExit("stage_manifest: h5py が無いので格子の来歴を再計算できない")
+    t = zte_tool()
+    sig = str(t.mesh_signature(str(h5path)))
+    disc = getattr(t, "discretization_of", None)
+    with h5py.File(str(h5path), "r") as f:
+        return {"h5": os.path.basename(str(h5path)), "mesh_signature": sig,
+                "mesh_signature_version": getattr(t, "SIG_VERSION", None),
+                "dual_hash": dual_geometry_hash(f), "dual_hash_version": DUAL_HASH_VERSION,
+                "discretization": disc(f) if callable(disc) else None}
+
+
+def te_wake_declared(h5path):
+    """meshFileName のルート属性が宣言する後縁下流の中間線の局所変形。戻り: None (ファイルが無い・HDF5 として読めない・
+    属性が無い・0 = 無効) か {"te_wake_blend_H": 値 (文字列), "te_wake_curve_version": 文字列 or "missing"}。
+    数でない・負・非有限の値は "invalid:<値>" の有効扱い (無効の段と黙って連結しない)。"""
+    if not h5path or not os.path.exists(str(h5path)):
+        return None
+    try:
+        import h5py
+    except ImportError:
+        raise SystemExit("stage_manifest: h5py が無いので格子の宣言 (%s) を読めない" % TE_WAKE_ATTR)
+    try:
+        with h5py.File(str(h5path), "r") as f:
+            if TE_WAKE_ATTR not in f.attrs:
+                return None
+            v = _zte_json(f.attrs[TE_WAKE_ATTR])
+            cv = _zte_json(f.attrs[TE_WAKE_CURVE_ATTR]) if TE_WAKE_CURVE_ATTR in f.attrs else None
+    except OSError:          # HDF5 でない (ソルバも読めない)。宣言は読めないので従来どおり何も足さない
+        return None
+    try:
+        x = float(v)
+        ok = not isinstance(v, (bool, str)) and x == x and abs(x) != float("inf") and x >= 0.0
+    except (TypeError, ValueError):
+        ok = False
+    if ok and x == 0.0:
+        return None
+    return {"te_wake_blend_H": repr(x) if ok else "invalid:%r" % (v,),
+            "te_wake_curve_version": str(cv) if cv not in (None, "") else "missing"}
+
+
+def _mesh_stage_key(cfg_text, run_dir):
+    """格子の来歴の区間識別 (後縁下流の格子変形を宣言した格子の段だけ)。宣言 (属性) と、meshFileName から再計算した
+    格子署名・双対幾何のハッシュ。宣言が無い段は空 (従来の stage_key のまま)。"""
+    if not run_dir:
+        return {}
+    h5 = zte_mesh_file(cfg_text, run_dir)       # meshFileName (処置の w と同じ入力 h5)
+    d = te_wake_declared(h5)
+    if d is None:
+        return {}
+    a = mesh_identity(h5)
+    return {MESH_PREFIX + "." + TE_WAKE_ATTR: d["te_wake_blend_H"],
+            MESH_PREFIX + "." + TE_WAKE_CURVE_ATTR: d["te_wake_curve_version"],
+            MESH_PREFIX + ".mesh_signature": a["mesh_signature"], MESH_PREFIX + ".dual_hash": a["dual_hash"]}
+
+
 def fnv1a64(data):
     """forge の appendLaunchRecord (main.cpp) と同じ FNV-1a 64。段と forge_launches.jsonl の起動を結び付ける。"""
     h = 14695981039346656037
@@ -459,6 +574,8 @@ def stage_key(cfg_text, bcond_text, run_dir=None):
     zc = zte_config(cfg_text)
     if zc is not None:
         k.update(_zte_stage_key(cfg_text, zc, run_dir))
+    # 格子の来歴: 後縁下流の格子変形を宣言した格子の段だけ (宣言の無い段の署名は従来どおり)
+    k.update(_mesh_stage_key(cfg_text, run_dir))
     return k
 
 

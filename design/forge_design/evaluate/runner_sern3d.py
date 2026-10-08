@@ -126,6 +126,31 @@ def paste_region_ic3d(h5path, y_mid, scale, half_W_m, st, gamma, minfo=None):
         R2.write_ic_arrays(f["/VALUE"], R2.region_ic_arrays(upper, st, gamma))   # cpg / frozen_tp (R3) 共通
 
 
+def sern_mesh3d_params(p, interface_angle: float, top_ext_angle: float) -> SernMesh3DParams:
+    """問題 YAML の mesh3d 節 (と mesh 節) → 3D メッシャの格子パラメータ (prepare と評価方式の識別
+    runner_sern.eval_method_required で共用)。interface_angle [rad]・top_ext_angle [rad] は mesh 節に無いときの値
+    (設計の MOC の θ_b・θ_e)。"""
+    H = float(p.spec["H_m"]); m = p.raw.get("mesh3d", {}); m2 = p.mesh
+    return SernMesh3DParams(ni_up=int(m.get("ni_up", 10)), ni_noz=int(m.get("ni_noz", 60)), ni_plume=int(m.get("ni_plume", 110)),
+                            nj_top=int(m.get("nj_top", 49)), nj_bot=int(m.get("nj_bot", 31)), nz_in=int(m.get("nz_in", 25)), nz_out=int(m.get("nz_out", 17)),
+                            W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), z_append=float(m.get("z_append", 0.0)), L_sw=m.get("L_sw"), L_sw_exact=bool(m.get("L_sw_exact", False)), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
+                            x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
+                            first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
+                            # 壁が終わった下流の第一層厚 (0 = ブレンドしない = 既定・挙動不変。plan sern-3d §4.41)
+                            first_wall_frac_far=float(m.get("first_wall_frac_far", 0.0)),
+                            wall_frac_blend_len=float(m.get("wall_frac_blend_len", 0.5)),
+                            cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
+                            ext_top=bool(int(m2.get("ext_top", 0))),
+                            vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
+                            vehicle_clearance=float(m2.get("vehicle_clearance", 0.06)), t_base=float(m2.get("t_base", 0.02)), first_wake_frac=float(m.get("first_wake_frac", m2.get("first_wake_frac", 0.0))), first_top_frac=float(m2.get("first_top_frac", 0.02)),
+                            vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
+                            ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
+                            interface_angle=float(m2.get("interface_angle_rad", interface_angle)),
+                            # 後縁下流の中間線の局所変形の長さ L_b / H (0 = 無効 = 旧格子。plan convection-zero-thickness-edge-reconstruction §4.2)
+                            te_wake_blend_H=float(m.get("te_wake_blend_H", 0.0)),
+                            top_ext_angle=float(np.deg2rad(m2.get("top_ext_angle_deg", np.rad2deg(top_ext_angle)))), scale=H)
+
+
 def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     p = load_problem(problem_path)
     # 厚さ 0 の板の自由端の処置 (plan convection-zero-thickness-edge-reconstruction §4): 指定の検査を格子を作る前に済ませる
@@ -136,25 +161,8 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     run_dir = Path(run_dir); run_dir.mkdir(parents=True, exist_ok=False)
     d0 = R2.design_snapshot(p); opinfo = R2.select_operating_point(p, op); st = R2.gas_states(p)
     kern, design, fr_moc, theta_b = R2.design_from_problem(p, design=d0)
-    H = float(p.spec["H_m"]); m = p.raw.get("mesh3d", {}); m2 = p.mesh
-    prm = SernMesh3DParams(ni_up=int(m.get("ni_up", 10)), ni_noz=int(m.get("ni_noz", 60)), ni_plume=int(m.get("ni_plume", 110)),
-                           nj_top=int(m.get("nj_top", 49)), nj_bot=int(m.get("nj_bot", 31)), nz_in=int(m.get("nz_in", 25)), nz_out=int(m.get("nz_out", 17)),
-                           W=float(m.get("W", 2.0)), Z_ext=float(m.get("Z_ext", 1.5)), z_append=float(m.get("z_append", 0.0)), L_sw=m.get("L_sw"), L_sw_exact=bool(m.get("L_sw_exact", False)), W_vehicle=m.get("W_vehicle"), L_up=float(m2.get("L_up", 0.5)),
-                           x_out_extra=float(m2.get("x_out_extra", 2.0)), bot_depth=float(m2.get("bot_depth", 3.0)),
-                           first_wall_frac=float(m.get("first_wall_frac", m2.get("first_wall_frac", 4e-3))), first_z_frac=float(m.get("first_z_frac", 4e-3)),
-                           # 壁が終わった下流の第一層厚 (0 = ブレンドしない = 既定・挙動不変。plan sern-3d §4.41)
-                           first_wall_frac_far=float(m.get("first_wall_frac_far", 0.0)),
-                           wall_frac_blend_len=float(m.get("wall_frac_blend_len", 0.5)),
-                           cowl_thickness=float(m.get("cowl_thickness", m2.get("cowl_thickness", 0.0))),
-                           ext_top=bool(int(m2.get("ext_top", 0))),
-                           vehicle_side=bool(m.get("vehicle_side", True)), nj_vside=int(m.get("nj_vside", 17)), top_depth=float(m2.get("top_depth", 2.0)), nj_ext_top=int(m2.get("nj_ext_top", 41)),
-                           vehicle_clearance=float(m2.get("vehicle_clearance", 0.06)), t_base=float(m2.get("t_base", 0.02)), first_wake_frac=float(m.get("first_wake_frac", m2.get("first_wake_frac", 0.0))), first_top_frac=float(m2.get("first_top_frac", 0.02)),
-                           vehicle_taper=float(m2.get("vehicle_taper", 0.0)), vehicle_wedge_deg=float(m2.get("vehicle_wedge_deg", 3.0)),
-                           ramp_fillet=float(m2.get("ramp_fillet", 0.0)),
-                           interface_angle=float(m2.get("interface_angle_rad", theta_b)),
-                           # 後縁下流の中間線の局所変形の長さ L_b / H (0 = 無効 = 旧格子。plan convection-zero-thickness-edge-reconstruction §4.2)
-                           te_wake_blend_H=float(m.get("te_wake_blend_H", 0.0)),
-                           top_ext_angle=float(np.deg2rad(m2.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))), scale=H)
+    H = float(p.spec["H_m"]); m = p.raw.get("mesh3d", {})
+    prm = sern_mesh3d_params(p, theta_b, design.info["theta_e"])
     coords, hexes, B, minfo, y_mid = generate_sern_mesh3d(design, prm)
     write_msh41_3d(run_dir / "sern.msh", coords, hexes, B, PHYS_SERN3D)
     np.savetxt(run_dir / "ramp_contour.csv", design.ramp_xy * H, delimiter=",", header="x_m,y_m", comments="")
@@ -170,7 +178,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     # 壁距離・品質判定は同じ。node の本変換の前に元の bcond に戻す
     _bc = (run_dir / "bcondConfig.yaml").read_text()
     (run_dir / "bcondConfig.yaml").write_text(_bc.replace("kind: farfield", "kind: slip"))
-    R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
+    conv = R2.convert_mesh(run_dir, "sern.msh", "sern_qc.h5")      # cell はこの格子をそのまま使う
     (run_dir / "bcondConfig.yaml").write_text(_bc)
     # AR 上限は問題 YAML の `mesh.ar_max` で緩められる (既定 1000)。**壁法線に沿った構造格子の
     # 境界層セルに限り 5000 まで** (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
@@ -184,10 +192,13 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
         (run_dir / "sern_qc.h5").rename(run_dir / MESH)
     else:
         (run_dir / "sern_qc.h5").unlink(); (run_dir / "solverConfig.yaml").write_text(cfg)
-        R2.convert_mesh(run_dir, "sern.msh", MESH)
+        conv = R2.convert_mesh(run_dir, "sern.msh", MESH)
     for f in run_dir.glob("sern_qc.xmf"):
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg); (run_dir / "solverConfig_main.yaml").write_text(cfg)
+    # 後縁下流の格子変形を入れた格子 (L_b > 0) だけ、最終の格子のルート属性に L_b と曲線版を書く (stage_key が読む宣言。
+    # plan tooling-sern-te-wake-grid §4)。無効の格子には何も書かない
+    te_wake_attrs = R2.write_te_wake_attrs(run_dir / MESH, minfo)
     if zte is not None:      # 処置の重み w を最終の node 格子に書く (品質確認用の cell 格子ではない。格子を作るたびに作り直す)
         R2.mark_zte_field(run_dir, zte)
     paste_region_ic3d(run_dir / MESH, y_mid, H, 0.5 * prm.W * H, st, p.gamma, minfo=minfo if disc == "node" else None)
@@ -204,6 +215,9 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
         info["zero_thickness_edge_velocity"] = {"requested": zte, "signature": R2.zte_signature_of(zte), "field": R2.ZTE_FIELD,
                                                 "identity": R2.verify_zte_field(run_dir, zte)}
     R2.check_zte_stage(cfg, (run_dir / "bcondConfig.yaml").read_text(), run_dir)     # 本段の起動条件 (無効なら何もしない)
+    # 格子の来歴 (最終の格子から再計算した格子署名・双対幾何のハッシュ) と評価方式の識別 (plan tooling-sern-te-wake-grid §4)
+    info["mesh_provenance"] = {**R2.prepare_mesh_provenance(run_dir), "te_wake_attrs": te_wake_attrs}
+    info["eval_method"] = R2.eval_method_record(p, 3, prm, minfo, info["mesh_provenance"]["discretization"], conv)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -376,6 +390,12 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     _zp = R2.zte_provenance(run_dir)      # 厚さ 0 の板の自由端の処置 (2D runner と同じ関数)
     out["zero_thickness_edge_velocity"] = _zp
     out[R2.ZTE_EFFECTIVE] = _zp["effective"]
+    # 格子の来歴と評価方式の識別 (2D runner と同じ関数)
+    out["mesh_provenance"] = R2.mesh_provenance(run_dir)
+    _em = R2.eval_method_provenance(run_dir, out["mesh_provenance"])
+    out["eval_method"] = _em
+    out[R2.EVAL_METHOD_ID] = _em[R2.EVAL_METHOD_ID]
+    out[R2.TE_WAKE_EFFECTIVE] = _em[R2.TE_WAKE_EFFECTIVE]
     out["flag_policy"] = R2.FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -47,6 +48,8 @@ from ..evaluate.runner_sern import FLAG_POLICY  # noqa: E402
 # 処置の識別 (import 時に束縛する: 試験は R を偽の runner に差し替えてからキャンペーンを作る)
 from ..evaluate.runner_sern import ZTE_EFFECTIVE, zte_signature_of, zte_spec_from_evaluate  # noqa: E402
 from ..metrics.sern_gates import floor_events_summary  # noqa: E402  毎更新の床事象の要約 (te-wake-grid §5.1 #2)
+# 評価方式の識別 (plan tooling-sern-te-wake-grid §4、codex plan レビュー 2026-10-08 M3。import 時に束縛する)
+from ..evaluate.runner_sern import EVAL_METHOD_ID, TE_WAKE_EFFECTIVE, eval_method_required, te_wake_effective_of, te_wake_spec  # noqa: E402
 
 class DesignInfeasible(ValueError):
     """物理的に成立しない候補 (逆設計不成立 / L_ramp_max 超過)。数値失敗と区別する (R1)。"""
@@ -106,14 +109,95 @@ def _zte_row_ok(r: dict, zte_required: str = "off", zte_carry_over=()) -> bool:
     return bool(ops) and all(_zte_compatible(name, o, zte_required, zte_carry_over) for name, o in ops.items())
 
 
-def _learnable(r: dict, zte_required: str = "off", zte_carry_over=()) -> bool:
-    """学習・Pareto に使ってよい行 = 処置以外の採否 (_learnable_base) かつ処置の一致 (_zte_row_ok)。"""
-    return _learnable_base(r) and _zte_row_ok(r, zte_required, zte_carry_over)
+# --- 評価方式の識別 (plan tooling-sern-te-wake-grid §4「格子の来歴と評価方式の識別を分ける」、codex plan レビュー 2026-10-08 M3) ---
+# 学習可否は**評価方式の識別** (runner_sern.eval_method_*: 離散化・格子生成のレシピ・メッシャの版・後縁下流の格子変形 L_b と
+# 曲線版・変換器の版) で決める。実格子の署名・双対幾何のハッシュは設計点ごとに変わるので来歴として残すだけで照合しない。
+#   - 後縁下流の格子変形を要求しないキャンペーン (基準 YAML の te_wake_blend_H が無い・0 = 修正前の系列): 従来どおりで、
+#     変形を入れた評価・実効値が不明な評価だけを外す (識別の導入前の行は変形なし = off)
+#   - 要求するキャンペーン (> 0 = 修正後の学習系列): 全作動点の評価方式の id がキャンペーンの要求 (基準 YAML・現在のコード・
+#     現在の変換器) と一致する行だけ。旧方式・変換器の版違い・来歴不明 (識別の無い旧行・None) は外す (台帳には残す)
+# 旧評価の持ち越しは**識別の一致とは独立の承認**: `opt.eval_method_carry_over` に作動点・持ち越す旧評価の評価方式
+# (id か識別の導入前を表す "legacy")・plan §6 #6 (旧評価の持ち越し) と §6 #7 (設計差) の判定・根拠を書いた項目のうち、
+# 両判定が PASS のものだけが効く。承認は処置以外の採否 (_learnable_base) と処置の一致 (_zte_row_ok) を緩めない
+EVAL_METHOD_CARRY_OVER_KEY = "eval_method_carry_over"
+_CARRY_KEYS = ("op", "from_eval_method", "check_6", "check_7", "evidence")
+_CARRY_VERDICTS = ("PASS", "FAIL", "UNDECIDABLE")
+LEGACY_METHOD = "legacy"
+
+
+def _te_wake_of(o: dict):
+    """作動点要約の後縁下流の格子変形の実効値。キーが無い行 (識別の導入前の評価) は "off"、キーがあって None なら不明。"""
+    return o[TE_WAKE_EFFECTIVE] if TE_WAKE_EFFECTIVE in o else "off"
+
+
+def _method_carried(op: str, o: dict, approved=()) -> bool:
+    """承認済みの持ち越し (両判定 PASS の項目だけが approved に入っている) に当たるか。"""
+    for a in approved:
+        if a["op"] != op:
+            continue
+        if a["from_eval_method"] == LEGACY_METHOD:
+            if EVAL_METHOD_ID not in o:          # 識別の導入前の評価 (None = 記録はあるが不明、は持ち越さない)
+                return True
+        elif o.get(EVAL_METHOD_ID) == a["from_eval_method"]:
+            return True
+    return False
+
+
+def _method_row_ok(r: dict, te_wake_required: str = "off", method_required=None, approved=()) -> bool:
+    """評価方式の一致。要求なし (off) は格子変形を入れた評価・不明だけを外す。要求あり は全作動点の id が一致
+    (または承認済みの持ち越し)。要求ありで要求の id が不明 (None) なら、持ち越し以外は採らない。"""
+    ops = r.get("ops") or {}
+    if not ops:
+        return False
+    if te_wake_required == "off":
+        return all(_te_wake_of(o) == "off" for o in ops.values())
+    return all((method_required is not None and o.get(EVAL_METHOD_ID) == method_required) or _method_carried(name, o, approved)
+               for name, o in ops.items())
+
+
+def _learnable(r: dict, zte_required: str = "off", zte_carry_over=(), method=None) -> bool:
+    """学習・Pareto に使ってよい行 = 処置以外の採否 (_learnable_base) かつ処置の一致 (_zte_row_ok) かつ評価方式の一致
+    (_method_row_ok)。method = (格子変形の要求, 評価方式の id の要求, 承認済みの持ち越し)、None は要求なし。"""
+    return _learnable_base(r) and _zte_row_ok(r, zte_required, zte_carry_over) and _method_row_ok(r, *(method or ("off", None, ())))
 
 
 def _zte_policy(obj):
     """キャンペーン (または試験の偽物) の処置の要求と持ち越し指定。属性が無ければ処置なし・持ち越しなし。"""
     return getattr(obj, "zte_required", "off"), tuple(getattr(obj, "zte_carry_over", ()))
+
+
+def _method_policy(obj):
+    """キャンペーン (または試験の偽物) の評価方式の要求: (格子変形の要求, 評価方式の id の要求, 承認済みの持ち越し)。
+    属性が無ければ要求なし (off)。"""
+    return (getattr(obj, "te_wake_required", "off"), getattr(obj, "eval_method_required", None),
+            tuple(getattr(obj, "eval_method_carry_over", ())))
+
+
+def parse_eval_method_carry_over(items, op_names, te_wake_required: str) -> tuple:
+    """`opt.eval_method_carry_over` を検査する。戻り = (全項目, 承認済み [check_6・check_7 とも PASS] の項目)。
+    項目 = {op, from_eval_method (16 進 64 桁か "legacy"), check_6 (plan §6 #6 旧評価の持ち越し), check_7 (§6 #7 設計差),
+    evidence (判定の記録の所在)}。判定は PASS / FAIL / UNDECIDABLE。格子変形を要求しないキャンペーンでは書けない。"""
+    items = items or []
+    if not isinstance(items, list) or not all(isinstance(a, dict) for a in items):
+        raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY} は項目 (dict) のリスト: {items!r}")
+    if items and te_wake_required == "off":
+        raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY} は後縁下流の格子変形を要求するキャンペーン (te_wake_blend_H > 0) でだけ意味がある")
+    for a in items:
+        unknown, missing = sorted(set(a) - set(_CARRY_KEYS)), [k for k in _CARRY_KEYS if k not in a]
+        if unknown or missing:
+            raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY} の項目のキー (未知 {unknown}・欠け {missing}): {a!r}")
+        if a["op"] not in op_names:
+            raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY}: 無い作動点 {a['op']!r}")
+        fm = a["from_eval_method"]
+        if not (fm == LEGACY_METHOD or (isinstance(fm, str) and re.fullmatch(r"[0-9a-f]{64}", fm))):
+            raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY}: from_eval_method は評価方式の id (16 進 64 桁) か {LEGACY_METHOD!r}: {fm!r}")
+        for k in ("check_6", "check_7"):
+            if a[k] not in _CARRY_VERDICTS:
+                raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY}: {k} は {_CARRY_VERDICTS} のどれか: {a[k]!r}")
+        if not (isinstance(a["evidence"], str) and a["evidence"].strip()):
+            raise ValueError(f"opt.{EVAL_METHOD_CARRY_OVER_KEY}: evidence (判定の記録の所在) が空: {a!r}")
+    items = [dict(a) for a in items]
+    return items, tuple(a for a in items if a["check_6"] == "PASS" and a["check_7"] == "PASS")
 
 
 class SernCampaign:
@@ -137,6 +221,15 @@ class SernCampaign:
         if _co and self.zte_required == "off":
             raise ValueError(f"opt.{ZTE_CARRY_OVER_KEY} は処置ありのキャンペーン (evaluate.zero_thickness_edge_velocity) でだけ意味がある")
         self.zte_carry_over = tuple(_co)
+        # 評価方式の要求 (driver は 2D runner)。後縁下流の格子変形を要求するときだけ id を照合する (修正後の学習系列)
+        self.te_wake_required = te_wake_effective_of(*te_wake_spec(self.base_raw, 2))
+        self.eval_method_required = None
+        if self.te_wake_required != "off":
+            self.eval_method_required = eval_method_required(load_problem(self.base_yaml), 2)[EVAL_METHOD_ID]
+            if self.eval_method_required is None:
+                print("[campaign] 要求する評価方式の id を作れない (変換器が無い等)。承認済みの持ち越し以外は学習しない", flush=True)
+        self.eval_method_carry_over_records, self.eval_method_carry_over = parse_eval_method_carry_over(
+            self.optcfg.get(EVAL_METHOD_CARRY_OVER_KEY), {o["name"] for o in self.ops}, self.te_wake_required)
         _old = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") != FLAG_POLICY)
         if _old:
             print(f"[campaign] flag_policy が {FLAG_POLICY} でない PASS 行 {_old} 件を学習から除外 "
@@ -148,6 +241,11 @@ class SernCampaign:
         if _nozte:
             print(f"[campaign] 処置 (zero_thickness_edge_velocity) の実効値が要求 {self.zte_required} と違う・不明な PASS 行 {_nozte} 件を学習から除外"
                   f" (持ち越し指定: {list(self.zte_carry_over) or 'なし'})", flush=True)
+        _nometh = sum(1 for r in self.rows if _learnable_base(r) and _zte_row_ok(r, self.zte_required, self.zte_carry_over)
+                      and not _method_row_ok(r, *_method_policy(self)))
+        if _nometh:
+            print(f"[campaign] 評価方式 (格子変形 {self.te_wake_required}・id {self.eval_method_required}) が要求と違う・不明な PASS 行 "
+                  f"{_nometh} 件を学習から除外 (承認済みの持ち越し: {[a['op'] for a in self.eval_method_carry_over] or 'なし'})", flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))
@@ -244,7 +342,13 @@ class SernCampaign:
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
                 # 毎更新の EOS 床事象 (必須か・判定・区間・件数)。必須で不合格なら gate_fail_class が FLOOR_EVENT / FLOOR_UNVERIFIABLE
                 "floor_events": floor_events_summary(g.get("floor_events")),
-                "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()}}
+                "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()},
+                # 評価方式の識別 (学習可否) と格子の来歴 (照合しない)。collect が出さない評価 (識別の導入前) はキーを作らない
+                **({TE_WAKE_EFFECTIVE: out[TE_WAKE_EFFECTIVE]} if TE_WAKE_EFFECTIVE in out else {}),
+                **({EVAL_METHOD_ID: out[EVAL_METHOD_ID], "eval_method": (out.get("eval_method") or {}).get("eval_method"),
+                    "eval_method_reason": (out.get("eval_method") or {}).get("reason")} if EVAL_METHOD_ID in out else {}),
+                **({"mesh_signature": ((out.get("mesh_provenance") or {}).get("now") or {}).get("mesh_signature"),
+                    "dual_hash": ((out.get("mesh_provenance") or {}).get("now") or {}).get("dual_hash")} if "mesh_provenance" in out else {})}
 
     def _cm_check(self, row: dict) -> None:
         """C_M 制約: 加重平均の窓 (`cm_min/cm_max`) と作動点別の窓 (`cm_window: {op: [lo, hi]}`, R6(d))。物理的 INFEASIBLE。"""
@@ -264,7 +368,8 @@ class SernCampaign:
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time(); prob = self._write_problem(x, self.dir / f"{tag}.yaml")
         row = {"tag": tag, "x": x, "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
-               "flag_policy": FLAG_POLICY, "zero_thickness_edge_velocity": self.zte_required}
+               "flag_policy": FLAG_POLICY, "zero_thickness_edge_velocity": self.zte_required,
+               "te_wake": self.te_wake_required, "eval_method_required": self.eval_method_required}
         try:
             ct_w, L_ramp, cm_w, wsum = 0.0, None, 0.0, 0.0
             for o in self.ops:
@@ -312,7 +417,7 @@ class SernCampaign:
         # convection-slau-wall-normal-chi-default §4.4、codex plan M3)。flag_policy の無い旧行と不一致の行は除外する。
         # さらに mesh.scalarGradient の node 既定 lsq 化 (2026-09-27) 以降は、**全作動点の実効値が lsq と確認できた行だけ**を使う
         # (日付の一致だけでは gg 評価・不明が混ざる。codex diagnose 2026-09-27、plan gradient-scalar-lsq-unification #6)。
-        ok = [r for r in self.rows if _learnable(r, *_zte_policy(self))]
+        ok = [r for r in self.rows if _learnable(r, *_zte_policy(self), method=_method_policy(self))]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         return X, F
 
@@ -349,7 +454,7 @@ class SernCampaign:
         """Pareto 要約。**degraded / tag / 作動点ごとのゲート要約を落とさない** (R1: pareto.json でも追える)。"""
         rows = self.rows if rows is None else rows
         # Pareto・HV の母集団も学習と同じ選別 (codex result 2026-09-27 M2: 学習から外した gg・旧方針の行が Pareto に混ざっていた)
-        ok = [r for r in rows if _learnable(r, *_zte_policy(self))]
+        ok = [r for r in rows if _learnable(r, *_zte_policy(self), method=_method_policy(self))]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         pareto = []
         if len(ok):
@@ -359,7 +464,8 @@ class SernCampaign:
                                "C_M_w": r["C_M_w"], "degraded": bool(r.get("degraded")), "degraded_ops": r.get("degraded_ops", []),
                                "flag_policy": r.get("flag_policy"),
                                "ops": {op: {**{k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness", "scalar_gradient_effective")},
-                                            ZTE_EFFECTIVE: _zte_effective_of(v)}
+                                            ZTE_EFFECTIVE: _zte_effective_of(v), TE_WAKE_EFFECTIVE: _te_wake_of(v),
+                                            EVAL_METHOD_ID: v.get(EVAL_METHOD_ID)}
                                        for op, v in r.get("ops", {}).items()}})
         pareto.sort(key=lambda r: r["L_ramp"])
         classes = {}
@@ -370,6 +476,8 @@ class SernCampaign:
         return {"n_eval": len(rows), "n_pass": int(len(ok)), "n_pass_excluded_by_policy": int(n_status_pass - len(ok)),
                 "flag_policy": FLAG_POLICY, "required_scalar_gradient": REQUIRED_SCALAR_GRADIENT,
                 "required_zero_thickness_edge_velocity": _zte_policy(self)[0], ZTE_CARRY_OVER_KEY: list(_zte_policy(self)[1]),
+                "required_te_wake": _method_policy(self)[0], "required_eval_method_id": _method_policy(self)[1],
+                EVAL_METHOD_CARRY_OVER_KEY: list(getattr(self, "eval_method_carry_over_records", ())),
                 "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
                 "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,
                 "gate_policy": "R1: rc==0 + finite field + residual no NaN/rising + objective & C_T/C_L/C_M STEADY (no divergent adoption)",
@@ -386,7 +494,8 @@ class SernCampaign:
             row = {"tag": tag, "x": r0["x"], "status": "FAIL", "fail_class": None, "ops": {}, "note": "", "degraded": False, "degraded_ops": [],
                    "old_status": r0["status"], "old_fail_class": r0.get("fail_class"), "old_C_T_w": r0.get("C_T_w"),
                    "flag_policy": r0.get("flag_policy"),   # 評価時の方針を引き継ぐ (再判定で現行方針に書き換えない)
-                   "zero_thickness_edge_velocity": r0.get("zero_thickness_edge_velocity", "off")}   # 同上 (処置の導入前の行は off)
+                   "zero_thickness_edge_velocity": r0.get("zero_thickness_edge_velocity", "off"),   # 同上 (処置の導入前の行は off)
+                   "te_wake": r0.get("te_wake", "off"), "eval_method_required": r0.get("eval_method_required")}   # 同上 (評価方式)
             try:
                 if not prob.exists():
                     raise EvalFailure("ERROR", "problem yaml missing")

@@ -7,6 +7,8 @@ plan: plans/active/tooling-nozzle-sern-chain.md §4.2, §4.7。問題型 `sern_2
 """
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import os
 import re
@@ -377,6 +379,212 @@ def zte_provenance(run_dir) -> dict:
         out["reason"] = "ソルバが記録した格子署名または w のハッシュが再計算と違う"
     else:
         out["effective"] = sm.zte_signature(a["tags"], a["rings"])
+    return out
+
+
+# --- 格子の来歴と評価方式の識別 (plan tooling-sern-te-wake-grid §4、codex plan レビュー 2026-10-08 M3) -----------------------
+# **来歴** (prepare_info.json・metrics.json、stage_key は tools/stage_manifest.py): 実入力格子 (meshFileName) から再計算した
+# 格子署名 (座標・接続) と双対幾何のハッシュ。設計点ごとに変わるので学習条件には使わない。
+# **評価方式の識別** (設計 DB の学習可否、driver_sern): 離散化・格子生成のレシピ (設計に依らない格子パラメータ)・メッシャの版
+# (ソースの sha256)・後縁下流の格子変形 (L_b・曲線版)・変換器の版。変換器は版の文字列・git 版を h5 に書かない
+# (mesh/gmshReader.hpp の書き出しに経路が無い) ので、**実行した変換器のバイナリの sha256** を版とする
+# (cuda_forge を静的に含むので、再ビルドでバイナリが変われば別の版 = 分けすぎる側)。
+EVAL_METHOD_VERSION = "sern-eval-method-v1"
+EVAL_METHOD_ID = "eval_method_id"             # 設計 DB の作動点要約で評価方式の照合に使うキー (16 進 64 桁、None = 不明)
+TE_WAKE_EFFECTIVE = "te_wake_effective"       # 同じく後縁下流の格子変形の実効値 ("off" / "L_b=...;curve=..."、None = 不明)
+CONVERTER = FORGE_BUILD / "convertGmshToForge"
+MESHING_DIR = Path(__file__).resolve().parents[1] / "meshing"
+# メッシャのソース (import の閉包)。2D = mesh_sern (+ mesh2d)、3D = mesh_sern3d (+ mesh_sern・mesh2d)
+_MESHER_SOURCES = {2: ("mesh2d.py", "mesh_sern.py"), 3: ("mesh2d.py", "mesh_sern.py", "mesh_sern3d.py")}
+# 設計点ごとに変わる格子パラメータ (問題 YAML の mesh 節で明示しなければ設計の MOC の θ_b・θ_e から決まる)。
+# レシピでは値でなく "design" と書く (同じ方式の別設計点を同じレシピにする)
+_DESIGN_DERIVED = {"interface_angle": "interface_angle_rad", "top_ext_angle": "top_ext_angle_deg"}
+_SHA_CACHE: dict = {}
+
+
+def file_sha256(path) -> str:
+    """ファイルの SHA-256 (16 進 64 桁)。同じ (パス・大きさ・mtime) は使い回す。"""
+    st = os.stat(path)
+    key = (str(Path(path).resolve()), st.st_size, st.st_mtime_ns)
+    if key not in _SHA_CACHE:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for b in iter(lambda: f.read(1 << 20), b""):
+                h.update(b)
+        _SHA_CACHE[key] = h.hexdigest()
+    return _SHA_CACHE[key]
+
+
+def converter_identity(path=None) -> dict | None:
+    """変換器の識別 (評価方式の「変換器の版」)。バイナリが無ければ None。"""
+    path = Path(path or CONVERTER)
+    if not path.exists():
+        return None
+    st = path.stat()
+    return {"path": str(path), "sha256": file_sha256(path), "bytes": int(st.st_size), "mtime": int(st.st_mtime)}
+
+
+def mesher_version(dim: int) -> dict:
+    """メッシャの版 = ソース (import の閉包) の sha256。どれかの変更 (コメントを含む) で別の版になる (分けすぎる側)。"""
+    files = _MESHER_SOURCES[int(dim)]
+    text = "".join(f"{f} {file_sha256(MESHING_DIR / f)}\n" for f in files)
+    return {"modules": list(files), "source_sha256": hashlib.sha256(text.encode()).hexdigest()}
+
+
+def mesh_recipe(prm, mesh_yaml: dict) -> dict:
+    """格子生成のレシピ = メッシャに渡す格子パラメータ (dataclass) の全項目。設計から決まる項目は、問題 YAML の mesh 節で
+    明示していなければ "design" に置き換える (設計点に依らない)。runner の既定値の変更もここに現れる。"""
+    d = dataclasses.asdict(prm)
+    for fld, key in _DESIGN_DERIVED.items():
+        if fld in d and key not in (mesh_yaml or {}):
+            d[fld] = "design"
+    return d
+
+
+def _canon_sha(obj) -> str:
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                                     default=lambda v: v.item() if hasattr(v, "item") else str(v)).encode()).hexdigest()
+
+
+def te_wake_effective_of(L_b, curve) -> str:
+    """後縁下流の格子変形の識別子。L_b = 0 (無効) は "off"。"""
+    L_b = float(L_b or 0.0)
+    return "off" if L_b == 0.0 else f"L_b={L_b!r};curve={curve}"
+
+
+def eval_method_of(dim: int, discretization, recipe: dict, mesher: dict, te_wake_blend_H, te_wake_curve_version,
+                   converter_sha256) -> tuple:
+    """評価方式の識別 (dict と、その正準 JSON の sha256 = id)。変換器の版が不明なら id は None (不明)。"""
+    L_b = float(te_wake_blend_H or 0.0)
+    em = {"version": EVAL_METHOD_VERSION, "dim": int(dim), "discretization": discretization,
+          "mesh_recipe_sha256": _canon_sha(recipe), "mesher_source_sha256": mesher["source_sha256"],
+          "te_wake_blend_H": L_b, "te_wake_curve_version": te_wake_curve_version if L_b else None,
+          "converter_sha256": converter_sha256}
+    return em, (_canon_sha(em) if converter_sha256 and discretization else None)
+
+
+def eval_method_record(p: Problem, dim: int, prm, minfo: dict, discretization, converter: dict | None) -> dict:
+    """prepare が格子を作った時点の評価方式 (prepare_info.json の eval_method)。L_b・曲線版はメッシャの出力 (minfo) の実効値。"""
+    L_b = float(minfo.get("te_wake_blend_H", 0.0) or 0.0)
+    curve = minfo.get("te_wake_curve_version")
+    recipe = mesh_recipe(prm, p.mesh)
+    mesher = mesher_version(dim)
+    em, eid = eval_method_of(dim, discretization, recipe, mesher, L_b, curve, (converter or {}).get("sha256"))
+    return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve),
+            "mesh_recipe": recipe, "mesher": mesher, "converter": converter}
+
+
+def te_wake_spec(raw: dict, dim: int) -> tuple:
+    """問題 YAML (読み込んだ dict) が要求する後縁下流の格子変形 (L_b, 曲線版)。3D は mesh3d.te_wake_blend_H と現行の曲線版、
+    2D は mesh.te_wake_blend_H (2D メッシャは未対応 [plan §5.1 #5] なので曲線版は None。2D で指定すると評価の実効値
+    (メッシャの出力 = off) と食い違い、学習から外れる)。"""
+    sec = ((raw or {}).get("mesh3d") or {}) if int(dim) == 3 else ((raw or {}).get("mesh") or {})
+    L_b = float(sec.get("te_wake_blend_H", 0.0) or 0.0)
+    if L_b == 0.0 or int(dim) != 3:
+        return L_b, None
+    from ..meshing.mesh_sern3d import TE_WAKE_CURVE_VERSION
+    return L_b, TE_WAKE_CURVE_VERSION
+
+
+def eval_method_required(p: Problem, dim: int = 2, converter: dict | None = None) -> dict:
+    """キャンペーンが要求する評価方式 (問題 YAML・現在のコード・現在の変換器)。設計 (MOC) を解かない: 設計から決まる格子
+    パラメータはレシピで "design" になるので、仮の角度で格子パラメータを組む。"""
+    if int(dim) == 3:
+        from .runner_sern3d import sern_mesh3d_params
+        prm = sern_mesh3d_params(p, 0.0, 0.0)
+    else:
+        prm = sern_mesh_params(p, 0.0, 0.0)
+    # 変換器は run の solverConfig の discretization (_solver_config の既定 cell) で変換する。評価の記録は h5 から再計算した値
+    disc = str(p.mesh.get("discretization", "cell"))
+    L_b, curve = te_wake_spec(p.raw, dim)
+    conv = converter if converter is not None else converter_identity()
+    em, eid = eval_method_of(dim, disc, mesh_recipe(prm, p.mesh), mesher_version(dim), L_b, curve, (conv or {}).get("sha256"))
+    return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve), "converter": conv}
+
+
+def write_te_wake_attrs(h5path, minfo: dict) -> dict | None:
+    """後縁下流の格子変形を入れた格子 (L_b > 0) だけ、meshFileName のルート属性に L_b と曲線版を書く
+    (stage_manifest の stage_key が読む宣言。無効の格子には何も書かない = ファイルは変換器の出力のまま)。"""
+    L_b = float(minfo.get("te_wake_blend_H", 0.0) or 0.0)
+    if L_b == 0.0:
+        return None
+    sm = _stage_manifest()
+    curve = str(minfo.get("te_wake_curve_version") or "")
+    with h5py.File(h5path, "r+") as f:
+        f.attrs[sm.TE_WAKE_ATTR] = np.float64(L_b)
+        f.attrs[sm.TE_WAKE_CURVE_ATTR] = curve
+    return {sm.TE_WAKE_ATTR: L_b, sm.TE_WAKE_CURVE_ATTR: curve}
+
+
+def _mesh_identity_now(h5) -> dict:
+    """格子の来歴を再計算する (道具・h5py が無い・読めないときは理由だけ返す: collect・再判定を止めない)。"""
+    try:
+        a = _stage_manifest().mesh_identity(h5)
+    except SystemExit as e:
+        return {"error": str(e)}
+    except Exception as e:  # noqa: BLE001
+        return {"error": f"{type(e).__name__}: {e}"}
+    return a if a is not None else {"error": f"{h5} が無い"}
+
+
+def prepare_mesh_provenance(run_dir, mesh: str = MESH) -> dict:
+    """prepare の終わりに最終の格子から再計算した来歴 (prepare_info.json の mesh_provenance)。再計算できなければ止める
+    (driver では ERROR)。"""
+    a = _mesh_identity_now(Path(run_dir) / mesh)
+    if "error" in a:
+        raise RuntimeError(f"格子の来歴 (格子署名・双対幾何のハッシュ) を再計算できない: {a['error']}")
+    return a
+
+
+def mesh_provenance(run_dir) -> dict:
+    """評価の来歴: 本段の config (solverConfig_main) の meshFileName から**いま**再計算した格子署名・双対幾何のハッシュと、
+    prepare の時点の記録。same_as_prepare = 両方一致 (記録が無い旧 run は None)。"""
+    sm = _stage_manifest()
+    rd = Path(run_dir)
+    cfgp = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
+    h5 = sm.zte_mesh_file(cfgp.read_text(), rd) if cfgp.exists() else None
+    now = _mesh_identity_now(h5) if h5 else {"error": "solverConfig (meshFileName) が無い"}
+    try:
+        pre = json.loads((rd / "prepare_info.json").read_text()).get("mesh_provenance")
+    except Exception:  # noqa: BLE001
+        pre = None
+    same = None
+    if isinstance(pre, dict) and "error" not in now:
+        same = all(pre.get(k) == now.get(k) for k in ("mesh_signature", "dual_hash"))
+    return {"now": now, "prepare": pre, "same_as_prepare": same}
+
+
+def eval_method_provenance(run_dir, mesh_prov: dict | None = None) -> dict:
+    """評価の評価方式の識別 (設計 DB の学習可否)。確定する条件: prepare の記録 (prepare_info.json の eval_method) があり、
+    変換器の版が分かり、いまの meshFileName の格子署名・双対幾何のハッシュが prepare の時点と同じで、離散化が h5 と一致。
+    どれかが欠けたら id は None (不明 = 学習しない)。記録の無い旧 run は L_b を info の mesh から読む
+    (3D のオプション導入 [2d280bb1] 前・2D は変形なし = off)。"""
+    rd = Path(run_dir)
+    out = {"eval_method": None, EVAL_METHOD_ID: None, TE_WAKE_EFFECTIVE: None, "reason": ""}
+    try:
+        info = json.loads((rd / "prepare_info.json").read_text())
+    except Exception as e:  # noqa: BLE001
+        out["reason"] = f"prepare_info.json が読めない ({type(e).__name__})"
+        return out
+    rec = info.get("eval_method")
+    mi = info.get("mesh") or {}
+    if not isinstance(rec, dict):
+        out[TE_WAKE_EFFECTIVE] = te_wake_effective_of(mi.get("te_wake_blend_H", 0.0), mi.get("te_wake_curve_version"))
+        out["reason"] = "prepare の記録が無い (評価方式の識別の導入前の run)"
+        return out
+    out["eval_method"] = rec.get("eval_method")
+    out[TE_WAKE_EFFECTIVE] = rec.get(TE_WAKE_EFFECTIVE)
+    mp = mesh_prov if mesh_prov is not None else mesh_provenance(rd)
+    em = rec.get("eval_method") or {}
+    if not rec.get(EVAL_METHOD_ID):
+        out["reason"] = "prepare の時点で評価方式を確定できなかった (変換器の版が不明など)"
+    elif mp.get("same_as_prepare") is not True:
+        out["reason"] = ("prepare の後に格子 (署名・双対幾何) が変わった" if mp.get("same_as_prepare") is False
+                         else f"いまの格子の来歴を再計算できない ({(mp.get('now') or {}).get('error', '記録なし')})")
+    elif (mp.get("now") or {}).get("discretization") != em.get("discretization"):
+        out["reason"] = f"離散化が h5 ({(mp.get('now') or {}).get('discretization')}) と記録 ({em.get('discretization')}) で違う"
+    else:
+        out[EVAL_METHOD_ID] = rec[EVAL_METHOD_ID]
     return out
 
 
@@ -882,16 +1090,38 @@ def stamp_region_ic_species(h5path, run_dir, st: dict, gases: dict | None) -> st
                                             gases["href_T"], mixes, tool="paste_region_ic")
 
 
-def convert_mesh(run_dir, msh: str, out: str) -> None:
+def convert_mesh(run_dir, msh: str, out: str) -> dict | None:
     """gmsh msh → forge h5。**exit code で判定しない**: 一部の環境 (AWS g5 / CUDA 13) で converter は
     h5 を書き切ってから終了時に `GPUassert: invalid argument` を出して非零で抜ける (既知・無害)。
-    成否は出力ファイルの存在とサイズで見る。"""
+    成否は出力ファイルの存在とサイズで見る。戻り = 実行した変換器の識別 (converter_identity、評価方式の「変換器の版」)。"""
+    conv = converter_identity()
     r = subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), msh, out], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
     f = Path(run_dir) / out
     if not f.exists() or f.stat().st_size < 1024:
         raise RuntimeError(f"convertGmshToForge が {out} を作れなかった (rc={r.returncode})\n"
                            + (r.stdout or "")[-1500:] + (r.stderr or "")[-1500:])
+    return conv
+
+
+def sern_mesh_params(p: Problem, interface_angle: float, top_ext_angle: float) -> SernMeshParams:
+    """問題 YAML の mesh 節 → 2D メッシャの格子パラメータ (prepare と評価方式の識別 eval_method_required で共用)。
+    interface_angle [rad]・top_ext_angle [rad] は mesh 節に無いときの値 (設計の MOC の θ_b・θ_e)。"""
+    m = p.mesh
+    H = float(p.spec["H_m"])
+    return SernMeshParams(ni_up=int(m.get("ni_up", 16)), ni_noz=int(m.get("ni_noz", 120)), ni_plume=int(m.get("ni_plume", 220)),
+                          nj_top=int(m.get("nj_top", 101)), nj_bot=int(m.get("nj_bot", 61)), L_up=float(m.get("L_up", 0.5)),
+                          x_out_extra=float(m.get("x_out_extra", 2.0)), bot_depth=float(m.get("bot_depth", 3.0)),
+                          first_wall_frac=float(m.get("first_wall_frac", 2e-3)),
+                          cowl_thickness=float(m.get("cowl_thickness", 2e-3 if m.get("discretization", "cell") == "node" else 0.0)),
+                          interface_angle=float(m.get("interface_angle_rad", interface_angle)),
+                          top_ext_angle=float(np.deg2rad(m.get("top_ext_angle_deg", np.rad2deg(top_ext_angle)))),
+                          ext_top=bool(int(m.get("ext_top", 0))), top_depth=float(m.get("top_depth", 2.0)),
+                          nj_ext_top=int(m.get("nj_ext_top", 41)), nj_wake=int(m.get("nj_wake", 9)),
+                          vehicle_clearance=float(m.get("vehicle_clearance", 0.06)), first_top_frac=float(m.get("first_top_frac", 0.02)),
+                          vehicle_taper=float(m.get("vehicle_taper", 0.0)), t_base=float(m.get("t_base", 0.0)), first_wake_frac=float(m.get("first_wake_frac", 0.0)), split_plume_at_te=bool(m.get("split_plume_at_te", False)),
+                          vehicle_wedge_deg=float(m.get("vehicle_wedge_deg", 3.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
+                          scale=H)
 
 
 def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offset=None) -> dict:
@@ -911,20 +1141,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     st = gas_states(p)
     kern, design, fr_moc, theta_b = design_from_problem(p, design=d0)
     H = float(p.spec["H_m"])
-    m = p.mesh
-    mp = SernMeshParams(ni_up=int(m.get("ni_up", 16)), ni_noz=int(m.get("ni_noz", 120)), ni_plume=int(m.get("ni_plume", 220)),
-                        nj_top=int(m.get("nj_top", 101)), nj_bot=int(m.get("nj_bot", 61)), L_up=float(m.get("L_up", 0.5)),
-                        x_out_extra=float(m.get("x_out_extra", 2.0)), bot_depth=float(m.get("bot_depth", 3.0)),
-                        first_wall_frac=float(m.get("first_wall_frac", 2e-3)),
-                        cowl_thickness=float(m.get("cowl_thickness", 2e-3 if m.get("discretization", "cell") == "node" else 0.0)),
-                        interface_angle=float(m.get("interface_angle_rad", theta_b)),
-                        top_ext_angle=float(np.deg2rad(m.get("top_ext_angle_deg", np.rad2deg(design.info["theta_e"])))),
-                        ext_top=bool(int(m.get("ext_top", 0))), top_depth=float(m.get("top_depth", 2.0)),
-                        nj_ext_top=int(m.get("nj_ext_top", 41)), nj_wake=int(m.get("nj_wake", 9)),
-                        vehicle_clearance=float(m.get("vehicle_clearance", 0.06)), first_top_frac=float(m.get("first_top_frac", 0.02)),
-                        vehicle_taper=float(m.get("vehicle_taper", 0.0)), t_base=float(m.get("t_base", 0.0)), first_wake_frac=float(m.get("first_wake_frac", 0.0)), split_plume_at_te=bool(m.get("split_plume_at_te", False)),
-                        vehicle_wedge_deg=float(m.get("vehicle_wedge_deg", 3.0)), ramp_fillet=float(m.get("ramp_fillet", 0.0)),
-                        scale=H)
+    mp = sern_mesh_params(p, theta_b, design.info["theta_e"])
     if wall_offset:
         design = apply_wall_offset(design, wall_offset, H)
     coords, quads, bedges, minfo, y_mid, y_top = generate_sern_mesh(design, mp)
@@ -946,7 +1163,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     # 壁距離・品質判定は同じ。node の本変換の前に元の bcond に戻す
     _bc = (run_dir / "bcondConfig.yaml").read_text()
     (run_dir / "bcondConfig.yaml").write_text(_bc.replace("kind: farfield", "kind: slip"))
-    convert_mesh(run_dir, "sern.msh", "sern_qc.h5")
+    conv = convert_mesh(run_dir, "sern.msh", "sern_qc.h5")      # cell はこの格子をそのまま使う
     (run_dir / "bcondConfig.yaml").write_text(_bc)
     # AR 上限は問題 YAML の `mesh.ar_max` で緩められる (既定 1000)。**壁法線に沿った構造格子の
     # 境界層セルに限り 5000 まで** (AGENTS.md「メッシュ品質チェック」2026-09-12 ユーザ決定)。
@@ -961,7 +1178,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
     else:
         (run_dir / "sern_qc.h5").unlink()
         (run_dir / "solverConfig.yaml").write_text(cfg)
-        convert_mesh(run_dir, "sern.msh", MESH)
+        conv = convert_mesh(run_dir, "sern.msh", MESH)
     for f in run_dir.glob("sern_qc.xmf"):
         f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg)
@@ -990,6 +1207,9 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
         info["zero_thickness_edge_velocity"] = {"requested": zte, "signature": zte_signature_of(zte), "field": ZTE_FIELD,
                                                 "identity": verify_zte_field(run_dir, zte)}
     check_zte_stage(cfg, (run_dir / "bcondConfig.yaml").read_text(), run_dir)     # 本段の起動条件 (無効なら何もしない)
+    # 格子の来歴 (最終の格子から再計算した格子署名・双対幾何のハッシュ) と評価方式の識別 (plan tooling-sern-te-wake-grid §4)
+    info["mesh_provenance"] = prepare_mesh_provenance(run_dir)
+    info["eval_method"] = eval_method_record(p, 2, mp, minfo, info["mesh_provenance"]["discretization"], conv)
     (run_dir / "solverConfig_main.yaml").write_text(cfg)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
@@ -1384,6 +1604,12 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     _zp = zte_provenance(run_dir)
     out["zero_thickness_edge_velocity"] = _zp
     out[ZTE_EFFECTIVE] = _zp["effective"]
+    # 格子の来歴 (いま再計算した格子署名・双対幾何のハッシュと prepare の記録) と評価方式の識別 (設計 DB の学習可否)
+    out["mesh_provenance"] = mesh_provenance(run_dir)
+    _em = eval_method_provenance(run_dir, out["mesh_provenance"])
+    out["eval_method"] = _em
+    out[EVAL_METHOD_ID] = _em[EVAL_METHOD_ID]
+    out[TE_WAKE_EFFECTIVE] = _em[TE_WAKE_EFFECTIVE]
     out["flag_policy"] = FLAG_POLICY
     (out_dir / "metrics.json").write_text(json.dumps(out, indent=1))
     return out

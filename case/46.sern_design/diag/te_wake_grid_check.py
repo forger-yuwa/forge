@@ -50,12 +50,14 @@ plan convection-zero-thickness-edge-reconstruction §4.2「投入前の格子の
   入力が欠ける・読めない項目は判定不能 (合格扱いにしない)。
 
 --provenance-out FILE (plan §4.2「来歴」): A・B の実入力格子 (最終 node の h5) から再計算した格子署名
-  (`solver_density_cuda/tools/mark_zero_thickness_edges.py` の mesh_signature)、曲線版 (メッシャの info の te_wake_curve_version)、
+  (`solver_density_cuda/tools/mark_zero_thickness_edges.py` の mesh_signature) と双対幾何のハッシュ (`stage_manifest.dual_geometry_hash`、
+  署名に入らない変換器の違いを検出する。plan tooling-sern-te-wake-grid §4)、曲線版 (メッシャの info の te_wake_curve_version)、
   te_wake_blend_H、生成コードの commit (prepare_info に記録があれば。無ければ --code-commit-a/-b の申告を「未検証」として)、
   設定ファイル (run 直下の *.yaml・prepare_info.json・問題 YAML) の sha256、--attach-a/-b の記録 (初期場の転送ログ等) の sha256 を JSON で書く。
   --admission と併用すると判定の行も入れる。
 
---same-mesh A.h5 B.h5: 2 つの h5 (か run ディレクトリ) の格子署名を比べる (継続 run で格子が不変か)。
+--same-mesh A.h5 B.h5: 2 つの h5 (か run ディレクトリ) の格子署名と双対幾何のハッシュを比べる (継続 run で格子が不変か)。
+  両方が同じときだけ YES (署名が同じでも変換器の違いで双対幾何が違えば NO。plan tooling-sern-te-wake-grid §4)。
   `SAME MESH: YES|NO|UNDECIDABLE` (終了コード 0 / 1 / 2)。
 """
 import argparse
@@ -877,6 +879,20 @@ def signature_of(path):
     return m.mesh_signature(grid), m.SIG_VERSION, grid
 
 
+def _stage_manifest():
+    """stage_manifest (双対幾何のハッシュ dual_geometry_hash の正本)。"""
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import stage_manifest
+    return stage_manifest
+
+
+def dual_of(grid):
+    """h5 の双対幾何のハッシュを再計算する (plan tooling-sern-te-wake-grid §4)。戻り = (ハッシュ, 版)。読めなければ例外。"""
+    sm = _stage_manifest()
+    return sm.dual_geometry_hash(grid), sm.DUAL_HASH_VERSION
+
+
 def _mesher_curve_version():
     try:
         if str(DESIGN) not in sys.path:
@@ -908,11 +924,16 @@ def provenance_entry(path, info_path=None, code_commit=None, attach=()):
     try:
         sig, ver, _ = signature_of(path)
         e["mesh_signature"], e["mesh_signature_version"] = sig, ver
+        try:                    # 署名に入らない双対幾何 (変換器の違いを検出する。plan tooling-sern-te-wake-grid §4)
+            e["dual_hash"], e["dual_hash_version"] = dual_of(grid)
+        except Exception as ex:  # noqa: BLE001
+            e["dual_hash"], e["dual_hash_error"] = None, f"{type(ex).__name__}: {ex}"
         meta = _h5_meta(grid)
         e["grid_discretization"] = "node" if meta["node"] else "cell"
         e["grid_coord_dtype"] = meta["coord_dtype"]
     except Exception as ex:  # noqa: BLE001
         e["mesh_signature"] = None
+        e.setdefault("dual_hash", None)
         e["mesh_signature_error"] = f"{type(ex).__name__}: {ex}"
     if os.path.isdir(path):
         info_path = info_path or os.path.join(path, "prepare_info.json")
@@ -977,7 +998,8 @@ def write_provenance(out_path, a_path, b_path, info_a=None, info_b=None, commit_
            "design_db": "取り込まない (診断の A/B。plan §4.2)",
            "checker_git": _git_state(), "mesher_curve_version_now": _mesher_curve_version(),
            "runs": {"A": pa, "B": pb},
-           "A_B_same_mesh_signature": (sa == sb) if (sa and sb) else None}
+           "A_B_same_mesh_signature": (sa == sb) if (sa and sb) else None,
+           "A_B_same_dual_hash": (pa.get("dual_hash") == pb.get("dual_hash")) if (pa.get("dual_hash") and pb.get("dual_hash")) else None}
     if admission_result is not None:
         v, R = admission_result
         doc["admission"] = {"verdict": VERDICT_WORD[v], "rows": R.rows}
@@ -990,15 +1012,21 @@ def same_mesh(a, b, out=print):
     try:
         sa, ver, ga = signature_of(a)
         sb, _, gb = signature_of(b)
+        da, dver = dual_of(ga)
+        db, _ = dual_of(gb)
     except Exception as e:  # noqa: BLE001
-        out(f"格子署名を作れない: {type(e).__name__}: {e}")
+        out(f"格子署名・双対幾何のハッシュを作れない: {type(e).__name__}: {e}")
         out("SAME MESH: UNDECIDABLE")
         return EXIT_CODE[UND]
-    out(f"A {ga}: {sa}")
-    out(f"B {gb}: {sb}")
-    out(f"(署名の版 {ver}: 離散化・次元・節点順の座標・内部面の接続・境界面の接続。/VALUE・/AUX は含まない)")
-    out("SAME MESH: " + ("YES" if sa == sb else "NO"))
-    return 0 if sa == sb else 1
+    out(f"A {ga}: 署名 {sa}  双対 {da}")
+    out(f"B {gb}: 署名 {sb}  双対 {db}")
+    out(f"(署名の版 {ver}: 離散化・次元・節点順の座標・内部面の接続・境界面の接続。双対の版 {dver}: 面積ベクトル・面積・面重心・"
+        f"CV 体積・CV 重心。/VALUE・/AUX は含まない)")
+    if sa == sb and da != db:
+        out("署名は同じで双対幾何だけが違う (変換器の違いなど)")
+    same = sa == sb and da == db
+    out("SAME MESH: " + ("YES" if same else "NO"))
+    return 0 if same else 1
 
 
 # ---------------------------------------------------------------------------------------------- 本体
