@@ -1,0 +1,12 @@
+date        : 2026-10-08T06:23:45+00:00
+forge_bin   : /home/ubuntu/forge-r8/solver_density_cuda/build/forge
+forge_mtime : 2026-10-08T05:50:53+00:00
+forge_sha256: 1985bf2a8ccc167dcafde3682bafb43582e545b0b2aed45570e6b4100d306688
+git_head    : fbd85c21d3db9984c2e65553d32d2b470781dce7
+git_dirty   : 0 件
+host        : ip-172-31-5-94
+env         : FORGE_CUDA_BLOCKSIZE=128
+cfg         : lowMachPrecond=0 (要求値)
+cfg         : wallTreatmentSST=0 (要求値)
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)
+'scalarGradient' effective: lsq (default)

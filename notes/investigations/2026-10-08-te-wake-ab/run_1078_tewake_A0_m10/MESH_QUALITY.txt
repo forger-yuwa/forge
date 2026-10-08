@@ -1,0 +1,6 @@
+mode: 3D (per-face skew / edge AR)
+cell volume  : |V| min=1.083e-13  median=8.078e-09  max=2.273e-04  (0 or 非有限: 0)
+cells: 1838592
+aspect ratio : max=4212.9  p99=991.8  mean=84.3  >5000: 0 (0.00%)
+skewness     : max=0.449  p99=0.447  mean=0.152  >0.90: 0 (0.00%)
+VERDICT: PASS (AR<= 5000, skew<= 0.90)

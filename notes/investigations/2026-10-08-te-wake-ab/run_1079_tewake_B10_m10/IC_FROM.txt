@@ -1,0 +1,1 @@
+IC: restart_field_deformed run_1055_r7b_m10_A_c res_20000 → B (不動節点は index コピー、動いた節点は原始量補間、--src-mesh = run_1078 の sern.h5)。plan §6.0 の B (te_wake_blend_H 1.0)

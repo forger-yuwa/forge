@@ -1,0 +1,8 @@
+
+=== case/46.sern_design/run_1078_tewake_A0_m10/force_history.csv  [40 rows, steps 500..20000]  -> STEADY ===
+  C_T             : tail mean=0.9163  drift=0.0%/tail  fluct=0.0%           STEADY
+  C_T_with_shear  : tail mean=0.897  drift=0.0%/tail  fluct=0.0%            STEADY
+  C_L             : tail mean=0.06728  drift=0.0%/tail  fluct=0.0%          STEADY
+  C_M             : tail mean=-1.778  drift=0.0%/tail  fluct=0.0%           STEADY
+
+OVERALL: ALL STEADY

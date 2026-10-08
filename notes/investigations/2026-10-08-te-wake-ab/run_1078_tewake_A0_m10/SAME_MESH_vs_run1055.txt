@@ -1,0 +1,4 @@
+A case/46.sern_design/run_1055_r7b_m10_A_c/sern.h5: daa5e21f1d8f576dbe8827819cd11ef9439419d71ab045c03f6af02b6da979ae
+B case/46.sern_design/run_1078_tewake_A0_m10/sern.h5: daa5e21f1d8f576dbe8827819cd11ef9439419d71ab045c03f6af02b6da979ae
+(署名の版 zte-mesh-sig-v1: 離散化・次元・節点順の座標・内部面の接続・境界面の接続。/VALUE・/AUX は含まない)
+SAME MESH: YES

@@ -1,0 +1,106 @@
+{
+ "tool": "case/46.sern_design/diag/te_wake_grid_check.py --provenance-out",
+ "plan": "plans/active/convection-zero-thickness-edge-reconstruction.md §4.2「来歴」・§6.0",
+ "created_utc": "2026-10-08T06:02:57+00:00",
+ "design_db": "取り込まない (診断の A/B。plan §4.2)",
+ "checker_git": {
+  "head": "fbd85c21d3db9984c2e65553d32d2b470781dce7",
+  "branch": "HEAD",
+  "dirty_paths": [],
+  "note": "この道具を回した作業ツリーの版 (格子を生成した版とは限らない)"
+ },
+ "mesher_curve_version_now": "hermite3-lower-tangent-v1",
+ "runs": {
+  "A": {
+   "input": "case/46.sern_design/run_1055_r7b_m10_A_c",
+   "run_dir": "case/46.sern_design/run_1055_r7b_m10_A_c",
+   "grid": "case/46.sern_design/run_1055_r7b_m10_A_c/sern.h5",
+   "grid_exists": true,
+   "mesh_signature": "daa5e21f1d8f576dbe8827819cd11ef9439419d71ab045c03f6af02b6da979ae",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "grid_discretization": "node",
+   "grid_coord_dtype": "float32",
+   "info_path": "case/46.sern_design/run_1055_r7b_m10_A_c/prepare_info.json",
+   "te_wake_blend_H": 0.0,
+   "te_wake_blend_H_source": "info にキー無し (オプション導入 [2d280bb1] 前の格子 = 変形なし)",
+   "te_wake_curve_version": null,
+   "te_wake_curve_version_source": "変形なし",
+   "te_wake_info": {},
+   "code_commit": null,
+   "code_commit_source": "記録なし (prepare_info に無く、申告も無い)",
+   "config_sha256": {
+    "bcondConfig.yaml": "973e2c0c4a487b81564a61cbdcbd584e1b301b6d683b78f8a523208125eedd45",
+    "prepare_info.json": "0dcb9bee106d5f585fc2f876d7afcbfe2d4cd73c4e549aa0e7401f2a906db150",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "resolved_species_cbcea534f1aa58eb.yaml": "907c34b490087f09af643ea0ad5074fe2cc5b251c488aa79c08d98f8ae120b9f",
+    "resolved_species_cbcea534f1aa58eb_3025fbe62ed62e6b.yaml": "3025fbe62ed62e6b534c8888e0556f7528ae18385c3b8f64d5dd49c416dcfef2",
+    "solverConfig.yaml": "cdafda3e467cb469703560536f93e0e08f540ffcb01c13fb3c82e28e556e029e",
+    "species_meta.yaml": "ca7eec3c828b63531a2b4200876b3f4102fec2b366fb2bff08d061a9191cd747"
+   },
+   "problem_yaml": {
+    "recorded": "../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08.yaml",
+    "resolved": "/home/ubuntu/forge-r8/design/../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08.yaml",
+    "sha256": "4c76b5e7a07081fdc3a4cae4fb5a0875488bb9767e8dede670aa062f8cbc600c",
+    "note": ""
+   },
+   "attached": []
+  },
+  "B": {
+   "input": "case/46.sern_design/run_1079_tewake_B10_m10",
+   "run_dir": "case/46.sern_design/run_1079_tewake_B10_m10",
+   "grid": "case/46.sern_design/run_1079_tewake_B10_m10/sern.h5",
+   "grid_exists": true,
+   "mesh_signature": "a822d456462cbc808f12dffb6eb9f99cb25fa21a6e8199425f2e35dbc5443da7",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "grid_discretization": "node",
+   "grid_coord_dtype": "float32",
+   "info_path": "case/46.sern_design/run_1079_tewake_B10_m10/prepare_info.json",
+   "te_wake_blend_H": 1.0,
+   "te_wake_blend_H_source": "prepare_info の mesh",
+   "te_wake_curve_version": "hermite3-lower-tangent-v1",
+   "te_wake_curve_version_source": "prepare_info の mesh",
+   "te_wake_info": {
+    "te_wake_blend_H": 1.0,
+    "te_wake_curve_version": "hermite3-lower-tangent-v1",
+    "te_wake_x_end": 2.2,
+    "te_wake_slope_te_deg": -4.407187551085547,
+    "te_wake_slope_end_deg": -40.23544491658127,
+    "te_wake_n_stations": 16,
+    "te_wake_i_first": 105,
+    "te_wake_i_last": 120,
+    "te_wake_max_dy": 0.11387103581928237
+   },
+   "code_commit": "fbd85c21d3db9984c2e65553d32d2b470781dce7",
+   "code_commit_source": "引数の申告 (未検証。prepare_info に記録が無い)",
+   "config_sha256": {
+    "bcondConfig.yaml": "973e2c0c4a487b81564a61cbdcbd584e1b301b6d683b78f8a523208125eedd45",
+    "prepare_info.json": "8c2780681f591be44b3ef6df162dcb143ca3e8b2b973228ed980fe0e241eb445",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "resolved_species_cbcea534f1aa58eb.yaml": "907c34b490087f09af643ea0ad5074fe2cc5b251c488aa79c08d98f8ae120b9f",
+    "resolved_species_cbcea534f1aa58eb_3025fbe62ed62e6b.yaml": "3025fbe62ed62e6b534c8888e0556f7528ae18385c3b8f64d5dd49c416dcfef2",
+    "solverConfig.yaml": "cdafda3e467cb469703560536f93e0e08f540ffcb01c13fb3c82e28e556e029e",
+    "solverConfig_main.yaml": "da8f800f81d7e6a0e504a68d327670c8bc0152932f7d36a2c0aa11073151fa66",
+    "species_meta.yaml": "ca7eec3c828b63531a2b4200876b3f4102fec2b366fb2bff08d061a9191cd747"
+   },
+   "problem_yaml": {
+    "recorded": "../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_B10.yaml",
+    "resolved": "/home/ubuntu/forge-r8/design/../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_B10.yaml",
+    "sha256": "5dfaeff95a26ea829da98ad71d168511d670b69b5d3fec97ee31bcfe634a5fe2",
+    "note": ""
+   },
+   "attached": [
+    {
+     "path": "case/46.sern_design/run_1079_tewake_B10_m10/IC_TRANSFER.txt",
+     "sha256": "4f1e35e9dc17c0f865b673a381735815ab12d7cf1c3e33c1ea7b1d4022177a18",
+     "bytes": 1649
+    },
+    {
+     "path": "case/46.sern_design/run_1079_tewake_B10_m10/MOVED_NODES.csv",
+     "sha256": "22f2f7ce34ebf8899744d7803c2b48d2ee2d57194e7d45cd7db9daafcd367b27",
+     "bytes": 7959241
+    }
+   ]
+  }
+ },
+ "A_B_same_mesh_signature": false
+}

@@ -1,0 +1,10 @@
+[restart_field_deformed] species: SRC species_hash cbcea534f1aa58eb = destination species_hash cbcea534f1aa58eb (forge --resolve-species); SRC descends from an unverified start -> inherit the hash and the mark (species_input_unverified=1; record of SRC resolved_species_cbcea534f1aa58eb_3025fbe62ed62e6b.yaml)
+[restart_field_deformed] SRC の化学種署名が解決できない (/home/ubuntu/forge-r8/case/46.sern_design/run_1055_r7b_m10_A_c): 'species H2: MW が species_db.yaml にも内蔵表にも無い' — 互換性ハッシュは plan_inherit で一致を確認済みなので続ける
+[restart_field_deformed] 節点 1920103: 接続同一・境界面の接続同一 (15 群)、座標が一致 1842922、**動いた 77181**
+[restart_field_deformed] 動いた節点の範囲 (DST): x 0.12255..0.215005  y -1.04739..0.157574  z 0..0.25
+[restart_field_deformed] 最大移動量: |Δx| 0.0000e+00  |Δy| 1.1387e-02  |Δz| 0.0000e+00
+[restart_field_deformed] 最寄りの SRC 節点までの距離: max 8.7224e-03 (DST 555204 -> SRC 550251)、median 3.7155e-04、距離 0 0、使った SRC 節点 54288、双子 0
+[restart_field_deformed] 動いた節点の一覧: case/46.sern_design/run_1079_tewake_B10_m10/MOVED_NODES.csv
+[restart_field_deformed] 移す量: ['ro', 'roUx', 'roUy', 'roUz', 'roe', 'roK', 'roOmega', 'roY0', 'roY1']  /  DST を残す: ['wall_dist']
+[restart_field_deformed] species 属性: 継承 (species_input_unverified=1)
+VERDICT: OK (9 量: 不動節点 1842922 は index コピーで SRC とビット一致、動いた節点 77181 は interp_field と同じ原始量の最近傍補間; wall_dist・/AUX は DST のまま)

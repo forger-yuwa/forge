@@ -1,0 +1,389 @@
+{
+ "tool": "case/46.sern_design/diag/te_wake_grid_check.py --provenance-out",
+ "plan": "plans/active/convection-zero-thickness-edge-reconstruction.md §4.2「来歴」・§6.0",
+ "created_utc": "2026-10-08T06:01:41+00:00",
+ "design_db": "取り込まない (診断の A/B。plan §4.2)",
+ "checker_git": {
+  "head": "fbd85c21d3db9984c2e65553d32d2b470781dce7",
+  "branch": "HEAD",
+  "dirty_paths": [],
+  "note": "この道具を回した作業ツリーの版 (格子を生成した版とは限らない)"
+ },
+ "mesher_curve_version_now": "hermite3-lower-tangent-v1",
+ "runs": {
+  "A": {
+   "input": "case/46.sern_design/run_1078_tewake_A0_m10",
+   "run_dir": "case/46.sern_design/run_1078_tewake_A0_m10",
+   "grid": "case/46.sern_design/run_1078_tewake_A0_m10/sern.h5",
+   "grid_exists": true,
+   "mesh_signature": "daa5e21f1d8f576dbe8827819cd11ef9439419d71ab045c03f6af02b6da979ae",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "grid_discretization": "node",
+   "grid_coord_dtype": "float32",
+   "info_path": "case/46.sern_design/run_1078_tewake_A0_m10/prepare_info.json",
+   "te_wake_blend_H": 0.0,
+   "te_wake_blend_H_source": "prepare_info の mesh",
+   "te_wake_curve_version": null,
+   "te_wake_curve_version_source": "変形なし",
+   "te_wake_info": {
+    "te_wake_blend_H": 0.0
+   },
+   "code_commit": "fbd85c21d3db9984c2e65553d32d2b470781dce7",
+   "code_commit_source": "引数の申告 (未検証。prepare_info に記録が無い)",
+   "config_sha256": {
+    "bcondConfig.yaml": "973e2c0c4a487b81564a61cbdcbd584e1b301b6d683b78f8a523208125eedd45",
+    "prepare_info.json": "1c164d8f54afa2e9c277815cf2b4c27f76378a84db040c016dcc154ab0a2fc06",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "solverConfig.yaml": "cdafda3e467cb469703560536f93e0e08f540ffcb01c13fb3c82e28e556e029e",
+    "solverConfig_main.yaml": "da8f800f81d7e6a0e504a68d327670c8bc0152932f7d36a2c0aa11073151fa66",
+    "species_meta.yaml": "ca7eec3c828b63531a2b4200876b3f4102fec2b366fb2bff08d061a9191cd747"
+   },
+   "problem_yaml": {
+    "recorded": "../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_A0.yaml",
+    "resolved": "/home/ubuntu/forge-r8/design/../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_A0.yaml",
+    "sha256": "cfaa2820b84b18e1c6a70cb1fa2d770aefdca47773889ed85b5613f3074809f7",
+    "note": ""
+   },
+   "attached": []
+  },
+  "B": {
+   "input": "case/46.sern_design/run_1079_tewake_B10_m10",
+   "run_dir": "case/46.sern_design/run_1079_tewake_B10_m10",
+   "grid": "case/46.sern_design/run_1079_tewake_B10_m10/sern.h5",
+   "grid_exists": true,
+   "mesh_signature": "a822d456462cbc808f12dffb6eb9f99cb25fa21a6e8199425f2e35dbc5443da7",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "grid_discretization": "node",
+   "grid_coord_dtype": "float32",
+   "info_path": "case/46.sern_design/run_1079_tewake_B10_m10/prepare_info.json",
+   "te_wake_blend_H": 1.0,
+   "te_wake_blend_H_source": "prepare_info の mesh",
+   "te_wake_curve_version": "hermite3-lower-tangent-v1",
+   "te_wake_curve_version_source": "prepare_info の mesh",
+   "te_wake_info": {
+    "te_wake_blend_H": 1.0,
+    "te_wake_curve_version": "hermite3-lower-tangent-v1",
+    "te_wake_x_end": 2.2,
+    "te_wake_slope_te_deg": -4.407187551085547,
+    "te_wake_slope_end_deg": -40.23544491658127,
+    "te_wake_n_stations": 16,
+    "te_wake_i_first": 105,
+    "te_wake_i_last": 120,
+    "te_wake_max_dy": 0.11387103581928237
+   },
+   "code_commit": "fbd85c21d3db9984c2e65553d32d2b470781dce7",
+   "code_commit_source": "引数の申告 (未検証。prepare_info に記録が無い)",
+   "config_sha256": {
+    "bcondConfig.yaml": "973e2c0c4a487b81564a61cbdcbd584e1b301b6d683b78f8a523208125eedd45",
+    "prepare_info.json": "8c2780681f591be44b3ef6df162dcb143ca3e8b2b973228ed980fe0e241eb445",
+    "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+    "solverConfig.yaml": "cdafda3e467cb469703560536f93e0e08f540ffcb01c13fb3c82e28e556e029e",
+    "solverConfig_main.yaml": "da8f800f81d7e6a0e504a68d327670c8bc0152932f7d36a2c0aa11073151fa66",
+    "species_meta.yaml": "ca7eec3c828b63531a2b4200876b3f4102fec2b366fb2bff08d061a9191cd747"
+   },
+   "problem_yaml": {
+    "recorded": "../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_B10.yaml",
+    "resolved": "/home/ubuntu/forge-r8/design/../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_B10.yaml",
+    "sha256": "5dfaeff95a26ea829da98ad71d168511d670b69b5d3fec97ee31bcfe634a5fe2",
+    "note": ""
+   },
+   "attached": []
+  }
+ },
+ "A_B_same_mesh_signature": false,
+ "admission": {
+  "verdict": "PASS",
+  "rows": [
+   {
+    "row": "前提",
+    "item": "A の入力が最終 node 格子",
+    "status": "PASS",
+    "value": "h5 (node 変換, 座標 float32)",
+    "ref_A": "",
+    "limit": "node 変換の h5",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "前提",
+    "item": "B の入力が最終 node 格子",
+    "status": "PASS",
+    "value": "h5 (node 変換, 座標 float32)",
+    "ref_A": "",
+    "limit": "node 変換の h5",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "前提",
+    "item": "L_b (te_wake_blend_H)",
+    "status": "PASS",
+    "value": "A 0 H / B 1 H",
+    "ref_A": "",
+    "limit": "A 0 / B 1 H (事前登録、結果を見て変えない)",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "前提",
+    "item": "格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ",
+    "status": "PASS",
+    "value": "同じ",
+    "ref_A": "",
+    "limit": "",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "最初の下流の辺",
+    "item": "下側の第 1〜第 10 層・全 span: max |θ(i_te→i_te+1) − m0|",
+    "status": "PASS",
+    "value": "2.1975° @ (i,j,k)=(104,52,0) x,y,z=(0.120000,-0.010534,0.000000) m  [B の辺 -6.6047〜-6.6044°]",
+    "ref_A": "35.8283°",
+    "limit": "≤ 3° (m0 = -4.4072°: B の info te_wake_slope_te_deg)",
+    "note": "参考 (判定外): 後縁節点 j=jm の最初の下流の辺と m0 の差 2.1975°",
+    "num": 2.197509464022346
+   },
+   {
+    "row": "後縁の折れ",
+    "item": "下側の第 1〜第 10 層・全 span: max 折れ角",
+    "status": "PASS",
+    "value": "2.1975° @ (i,j,k)=(104,52,0) x,y,z=(0.120000,-0.010534,0.000000) m",
+    "ref_A": "35.8283°",
+    "limit": "≤ 3°",
+    "note": "",
+    "num": 2.1975036139205315
+   },
+   {
+    "row": "後縁の折れ",
+    "item": "上側の第 1〜第 10 層・全 span: max 折れ角",
+    "status": "PASS",
+    "value": "1.6046° @ (i,j,k)=(104,56,24) x,y,z=(0.120000,-0.010463,0.100000) m",
+    "ref_A": "35.2353°",
+    "limit": "≤ 3°",
+    "note": "",
+    "num": 1.6046481717108634
+   },
+   {
+    "row": "後縁の折れ",
+    "item": "共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線): max 折れ角",
+    "status": "PASS",
+    "value": "2.1975° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010499,0.000000) m",
+    "ref_A": "35.8283°",
+    "limit": "≤ 3°",
+    "note": "",
+    "num": 2.1975036139205315
+   },
+   {
+    "row": "後縁の折れ",
+    "item": "共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in): max 折れ角",
+    "status": "PASS",
+    "value": "1.6047° @ (i,j,k)=(104,54,24) x,y,z=(0.120000,-0.010499,0.100000) m",
+    "ref_A": "35.2354°",
+    "limit": "≤ 3°",
+    "note": "",
+    "num": 1.6046710882280308
+   },
+   {
+    "row": "復帰区間の折れ",
+    "item": "主ブロックの全 i 線・全 span、節点 i = 105..121 (最初の未変形の辺を含む): max 折れ角",
+    "status": "PASS",
+    "value": "5.0794° @ (i,j,k)=(110,56,0) x,y,z=(0.140444,-0.017810,0.000000) m",
+    "ref_A": "0.0815°",
+    "limit": "≤ 6°",
+    "note": "復帰区間 = info の te_wake_i_last 120 と動いた節点の i の最大の大きい方 + 1",
+    "num": 5.079447723288524
+   },
+   {
+    "row": "固定すべき量",
+    "item": "節点数",
+    "status": "PASS",
+    "value": "A 1920103 / B 1920103",
+    "ref_A": "",
+    "limit": "同じ",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "x 座標 (全節点)",
+    "status": "PASS",
+    "value": "ビット一致",
+    "ref_A": "",
+    "limit": "ビット一致",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "z 座標 (全節点)",
+    "status": "PASS",
+    "value": "ビット一致",
+    "ref_A": "",
+    "limit": "ビット一致",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "ヘキサの接続",
+    "status": "PASS",
+    "value": "同一",
+    "ref_A": "",
+    "limit": "同一",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "境界面の接続 (タグ別)",
+    "status": "PASS",
+    "value": "同一",
+    "ref_A": "",
+    "limit": "同一",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "上流の座標 (x ≤ 後縁の x = 0.120000 m の 784711 節点、3 成分)",
+    "status": "PASS",
+    "value": "相違 0 節点",
+    "ref_A": "",
+    "limit": "0",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "固体形状 (壁タグの節点が動かない)",
+    "status": "PASS",
+    "value": "動いた 0",
+    "ref_A": "",
+    "limit": "0",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "固定すべき量",
+    "item": "外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない)",
+    "status": "PASS",
+    "value": "動いた 0",
+    "ref_A": "",
+    "limit": "0",
+    "note": "記録: sym・side_far 上の面内 (y) の移動 {'sym': 1979, 'side_far': 1979} (z は全節点ビット一致なので面内)、動いた節点の総数 77181 (主ブロック外 0)",
+    "num": null
+   },
+   {
+    "row": "層の Δy",
+    "item": "下側の第 1 層 (列 i = 104..121・全 span)",
+    "status": "PASS",
+    "value": "max 相対差 4.655e-04、許容の使用率 max 0.218",
+    "ref_A": "",
+    "limit": "|Δy_B − Δy_A| ≤ 1e-08·Δy_A + 4·ε₃₂·max|y|",
+    "note": "",
+    "num": 0.0004655493482309125
+   },
+   {
+    "row": "層の Δy",
+    "item": "下側の第 1〜第 10 層の各層厚 (同)",
+    "status": "PASS",
+    "value": "max 相対差 1.816e-03、許容の使用率 max 0.0361",
+    "ref_A": "",
+    "limit": "|Δy_B − Δy_A| ≤ 0.05·Δy_A + 4·ε₃₂·max|y|",
+    "note": "",
+    "num": 0.0018159520777321825
+   },
+   {
+    "row": "層の Δy",
+    "item": "上側の第 1 層 (列 i = 104..121・全 span)",
+    "status": "PASS",
+    "value": "max 相対差 4.658e-04、許容の使用率 max 0.218",
+    "ref_A": "",
+    "limit": "|Δy_B − Δy_A| ≤ 1e-08·Δy_A + 4·ε₃₂·max|y|",
+    "note": "",
+    "num": 0.0004657661853749418
+   },
+   {
+    "row": "層の Δy",
+    "item": "上側の第 1〜第 10 層の各層厚 (同)",
+    "status": "PASS",
+    "value": "max 相対差 1.938e-02、許容の使用率 max 0.387",
+    "ref_A": "",
+    "limit": "|Δy_B − Δy_A| ≤ 0.05·Δy_A + 4·ε₃₂·max|y|",
+    "note": "",
+    "num": 0.019380857525389414
+   },
+   {
+    "row": "primal の品質",
+    "item": "非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点)",
+    "status": "PASS",
+    "value": "0",
+    "ref_A": "0",
+    "limit": "0",
+    "note": "向き = A の多数派 (正)",
+    "num": 0.0
+   },
+   {
+    "row": "primal の品質",
+    "item": "スケール済みヤコビアンの最小 (B)",
+    "status": "PASS",
+    "value": "0.67245",
+    "ref_A": "0.76115",
+    "limit": "≥ 0.65",
+    "note": "",
+    "num": 0.6724489032867876
+   },
+   {
+    "row": "primal の品質",
+    "item": "skew 最大 (B、check_mesh_quality の 3D 定義)",
+    "status": "PASS",
+    "value": "0.53048",
+    "ref_A": "0.44927",
+    "limit": "≤ 0.9",
+    "note": "",
+    "num": 0.5304849459964446
+   },
+   {
+    "row": "primal の品質",
+    "item": "skew 最大の A からの増加",
+    "status": "PASS",
+    "value": "+0.08121",
+    "ref_A": "",
+    "limit": "≤ 0.1",
+    "note": "",
+    "num": 0.08121008360107757
+   },
+   {
+    "row": "品質・双対の判定",
+    "item": "(a) check_mesh_quality の VERDICT が A と同等以上",
+    "status": "PASS",
+    "value": "B PASS",
+    "ref_A": "PASS",
+    "limit": "B ≥ A (PASS > SOFT-PASS > FAIL)、閾値 AR<= 5000・skew<= 0.9",
+    "note": "",
+    "num": null
+   },
+   {
+    "row": "品質・双対の判定",
+    "item": "(b) 変形領域に新しい AR 閾値超過を作らない",
+    "status": "PASS",
+    "value": "新しい超過 0 (変形領域 80636 ヘキサ、B の超過 0・A の超過 0、AR 最大 B 2886.8 / A 2886.8)",
+    "ref_A": "",
+    "limit": "0 (AR > 5000、閾値は B の MESH_QUALITY)",
+    "note": "AR は check_mesh_quality と同じ定義 (全辺の最長/最短) をこの道具で計算",
+    "num": 0.0
+   },
+   {
+    "row": "品質・双対の判定",
+    "item": "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS",
+    "status": "PASS",
+    "value": "VERDICT PASS (CV 1920103, tol 1e-05)",
+    "ref_A": "PASS (tol 1e-05)",
+    "limit": "PASS",
+    "note": "",
+    "num": null
+   }
+  ]
+ }
+}

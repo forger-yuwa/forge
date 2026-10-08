@@ -1,0 +1,1 @@
+GATES FAIL FLOOR_STUCK ['床/下限に張り付き: T<=50 1 ノード']

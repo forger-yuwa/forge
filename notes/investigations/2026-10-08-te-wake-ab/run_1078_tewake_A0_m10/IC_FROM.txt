@@ -1,0 +1,1 @@
+IC: restart_field run_1055_r7b_m10_A_c res_20000 (床到達場 = 診断用の継続元、収束済み場ではない)。plan convection-zero-thickness-edge-reconstruction §6.0 の対照 A′ (現行コードで作り直した格子、te_wake_blend_H 0)
