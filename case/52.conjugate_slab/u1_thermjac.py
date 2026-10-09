@@ -3,7 +3,9 @@
 (plan time_integration-implicit-thermal-jacobian §6 U1)。U2・U3 (plan time_integration-line-viscous-jacobian §6) も同じ板で回す:
 U2 = ライン陰解法 + 方向別の擬似 dt + `lineViscCoupling` 0/2 の純伝導、U3 = 側面を周期にして上壁を x 方向に U で動かす Couette (両壁 300 K)。
 U3 の解析解 (定数 μ・k、圧力一様): u_x = U y/H、T = T_w + (μU²/2k)(y/H)(1 − y/H)。
-(最初の U3 は上壁を z 方向に動かしたが、2D の格子では壁の Uz が効かず u_z が立たなかった — run_0012〜0015、判定不能)
+(最初の U3 は上壁を z 方向に動かしたが、2D の格子では壁の Uz が効かず u_z が立たなかった — run_0012〜0015、判定不能。
+ 側面を周期にして x 方向に動かした版 (run_0016〜0019) も、node の壁は no-slip に固定されるので u が立たなかった。
+ → U3 は壁を止めたまま体積力で押す Poiseuille にした: u = (f/2μ) y (H − y)、T = T_w + (f²/192μk)(H⁴ − (H − 2y)⁴)、--poiseuille <中央の速度>)
 
 case/52 の流体の板 (一様 20×16 quad、H 0.01 m、W 0.02 m、空気 CPG、定数 k 0.0241、静止、低圧 1013.25 Pa) の
 下壁 300 K・上壁 350 K の等温壁で、初期の一様 300 K から回す。解析解は直線 T(y) = 300 + 50·y/H (q = kΔT/H = 120.5 W/m²)。
@@ -89,7 +91,7 @@ space: {{convMethod: 2, limiter: 2}}
 turbulence: {{model: "none"}}
 output: {{level: 1}}
 initial: "uniform_p101325_u10"
-"""
+{bodyforce}"""
 
 
 def cmd_mesh():
@@ -101,7 +103,7 @@ def cmd_mesh():
 
 
 def cmd_prep(run: Path, key: int, cfl: float, steps: int, out: int, conv: str, line: int = 0, ddir: int = 0, lvc: int = 0,
-             couette: float = 0.0):
+             couette: float = 0.0, poiseuille: float = 0.0):
     import h5py
     if run.exists():
         sys.exit(f"{run} が既にある — 止める")
@@ -110,8 +112,10 @@ def cmd_prep(run: Path, key: int, cfl: float, steps: int, out: int, conv: str, l
     keytxt = f", implicitThermalJacobian: {key}" if key else ""
     if line:
         keytxt += ", lineImplicit: 1" + (", lineDtDirectional: 1" if ddir else "") + (f", lineViscCoupling: {lvc}" if lvc else "")
-    (run / "solverConfig.yaml").write_text(SOLVER.format(steps=steps, cfl=cfl, out=out, key=keytxt))
-    if couette:
+    fpo = 8.0 * MU * poiseuille / H ** 2 if poiseuille else 0.0     # Poiseuille の体積力 [N/m³] (中央の速度 = poiseuille)
+    (run / "solverConfig.yaml").write_text(SOLVER.format(steps=steps, cfl=cfl, out=out, key=keytxt,
+                                                         bodyforce=(f"bodyForce: [{fpo!r}, 0.0, 0.0]\n" if poiseuille else "")))
+    if couette or poiseuille:
         (run / "bcondConfig.yaml").write_text(BCOND_COUETTE.replace("{w}", repr(W)).replace("{ux_top}", repr(float(couette))))
     else:
         (run / "bcondConfig.yaml").write_text(BCOND.replace("{uz_top}", "0.0").replace("{t_top}", repr(T_TOP)))
@@ -131,9 +135,9 @@ def cmd_prep(run: Path, key: int, cfl: float, steps: int, out: int, conv: str, l
                 del g[name]
             g.create_dataset(name, data=np.full(n, val, dtype=dt))
     json.dump({"key": key, "cfl": cfl, "steps": steps, "out": out, "converter": conv, "ic_dtype": str(dt),
-               "line": line, "dir": ddir, "lvc": lvc, "couette": couette},
+               "line": line, "dir": ddir, "lvc": lvc, "couette": couette, "poiseuille": poiseuille},
               open(run / "U1_PREP.json", "w"), indent=1)
-    print(f"[u1 prep] {run.name}: key {key}, cfl {cfl}, line {line} dir {ddir} lvc {lvc} couette {couette}, {steps} step, 出力 {out} ごと、IC {dt}")
+    print(f"[u1 prep] {run.name}: key {key}, cfl {cfl}, line {line} dir {ddir} lvc {lvc} couette {couette} poiseuille {poiseuille}, {steps} step, 出力 {out} ごと、IC {dt}")
 
 
 def cmd_eval(runs):
@@ -143,7 +147,13 @@ def cmd_eval(runs):
             y = np.asarray(f["MESH/COORD"][:], float).reshape(-1, 3)[:, 1]
         prep = json.load(open(run / "U1_PREP.json"))
         U = float(prep.get("couette", 0.0))
-        if U:
+        UP = float(prep.get("poiseuille", 0.0))
+        if UP:   # Poiseuille: u = (f/2μ) y (H − y)、T = T_w + (f²/192μk)(H⁴ − (H − 2y)⁴)、中央で u = UP、ΔT = μ UP²/(3k)
+            fpo = 8.0 * MU * UP / H ** 2
+            uexact = fpo / (2 * MU) * y * (H - y)
+            texact = T_BOT + fpo ** 2 / (192 * MU * K) * (H ** 4 - (H - 2 * y) ** 4)
+            U = UP
+        elif U:
             texact = T_BOT + (MU * U * U / (2 * K)) * (y / H) * (1 - y / H)
             uexact = U * y / H
         else:
@@ -156,7 +166,10 @@ def cmd_eval(runs):
                 uz = np.asarray(f["VALUE/Ux"][:], float) if U else None   # U3 は x 方向の Couette (周期の側面)
             eu = float(np.max(np.abs(uz - uexact))) / U if U else 0.0
             rows.append((st, float(np.max(np.abs(T - texact))), bool(np.all(np.isfinite(T))), eu))
-        if U:   # U3: u の L∞ < 0.1 % U かつ T の L∞ < 1 % (T − T_w の最大)
+        if UP:  # U3 (Poiseuille): u の L∞ < 0.1 % (中央の速度) かつ T の L∞ < 5 % (中央の温度上昇 μU²/3k、離散化の誤差 約 1.6 % の見積もりより大きく取る)
+            tol_t = 0.05 * MU * UP * UP / (3 * K)
+            hit = next((st for st, e, fin, eu in rows if fin and e < tol_t and eu < 1e-3), None)
+        elif U:   # U3 (Couette、node では成立しない): u の L∞ < 0.1 % U かつ T の L∞ < 1 % (T − T_w の最大)
             tol_t = 0.01 * MU * U * U / (8 * K)
             hit = next((st for st, e, fin, eu in rows if fin and e < tol_t and eu < 1e-3), None)
         else:
@@ -176,11 +189,12 @@ if __name__ == "__main__":
     p.add_argument("--steps", type=int, default=20000); p.add_argument("--out", type=int, default=500); p.add_argument("--conv", required=True)
     p.add_argument("--line", type=int, default=0); p.add_argument("--dir", type=int, default=0); p.add_argument("--lvc", type=int, default=0)
     p.add_argument("--couette", type=float, default=0.0)
+    p.add_argument("--poiseuille", type=float, default=0.0, help="周期の側面 + 体積力の Poiseuille (中央の速度 [m/s])")
     p = sp.add_parser("eval"); p.add_argument("runs", nargs="+")
     a = ap.parse_args()
     if a.cmd == "mesh":
         cmd_mesh()
     elif a.cmd == "prep":
-        cmd_prep(HERE / a.run, a.key, a.cfl, a.steps, a.out, a.conv, a.line, a.dir, a.lvc, a.couette)
+        cmd_prep(HERE / a.run, a.key, a.cfl, a.steps, a.out, a.conv, a.line, a.dir, a.lvc, a.couette, a.poiseuille)
     else:
         cmd_eval([HERE / r for r in a.runs])
