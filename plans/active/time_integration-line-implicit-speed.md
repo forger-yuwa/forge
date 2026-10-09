@@ -172,7 +172,7 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
   演算や除算より、メモリの読み方が律速の主因である可能性が高い → §5.1 #10 (配列の並べ替え) の候補。
 - 中間の res は判定の後に削除 (AWS のディスクが 99 % になったため。欠損・θ_r の時系列は `_band_ab/cold_pair/series_run_033{5,6}_*.json` に残る)。
 
-### 6.4 事前登録: §5.1 #8 Thomas を float に (`FORGE_LINE_F32=1/2`、2026-10-09)
+### 6.4 事前登録: §5.1 #8 Thomas を float に (`FORGE_LINE_F32=1/2`、2026-10-09、codex plan 段 [記録](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan-3.md) の反映後)
 
 - **精度の組み合わせ** (ISP 0 = 既定。D・K・rhs は float で組み、flow_float (この build では double) に保存するので値は float で表せる):
 
@@ -183,18 +183,22 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
   | Thomas の分解 (M̃ = D − Kprev W、LU、W) の演算 | double | **float** | **float** |
   | W・LU・y の保存 | double | double | **float** |
   | 代入 (前進・後退) の演算 | double | **float** | **float** |
-  | dq の保存 | double の配列 | 同じ | 同じ |
+  | 緩和 (relax × 解) と dq の保存 | double (flow_float) | 同じ | 同じ |
 
-  実装は既定の経路と別のカーネル (`lineThomasFactorT_d<T,S>`・`lineThomasSolveT_d<T,S>`、`line_implicit_t::lu5_*<T>`)。ピボットの規則・失敗の判定 (|pivot| < 1e-30、NaN も失敗) は double 版と同じ。
+  実装は既定の経路と別のカーネル (`lineThomasFactorT_d<T,S>`・`lineThomasSolveT_d<T,S>`、`line_implicit_t::lu5_*<T>`)。ピボットの規則は double 版と同じ。失敗の判定は double の既定版が |pivot| < 1e-30 だけ (変えない) なのに対し、float 版はそれに加えてピボットと分解後の因子の非有限 (NaN・Inf) も失敗にする。
   既定 (変数なし) の経路は変えない。`FORGE_LINE_INV`・`PAR`・`MONO`・`DEBUG_POINT`・`NOOP` とは組み合わせない (最初の呼び出しで止める)。
 - **バイナリ**: lineJ = この節を書いた commit + typedef double。設定・初期場・尺度は §6.2 と同じ (run_0223 の設定、run_0183 の res_100000)。
 - **(1) 全ラインの照合** `run_0339_f32c_cmp`・`run_0340_f32cs_cmp`: `FORGE_LINE_COMPARE=1` + `FORGE_LINE_F32=1`/`2` で 20 step。従来の double の LU を別のバッファで解き、float の解で進める。
-  合格 (腕ごと): 非有限 0 件、分解の失敗 0 本・不一致 0、float の η ≤ 1e-5 (評価した全ライン・全 solve。従来の η も 1e-11 を超えた solve は判別不能として別に数える)。
+  判定は `line_cmp_judge.py` (PASS / FAIL / INDETERMINATE、終了コード 0 / 1 / 2)。そろい: factor 1..20・solve 1..100 がちょうど 1 回ずつ、各 solve に腕と従来の η の行が 1 本ずつで評価本数 4719 (欠け・重複は INDETERMINATE)。
+  FAIL: 非有限 1 件以上 (実際に使った因子 LU・W と前進の中間 y を腕・従来とも数える `[lineNonfinite]`、比較の差の非有限、η の非有限)、分解の失敗 (どちらかの腕で 1 本以上) か不一致、
+  腕の η > 1e-5 で従来の η ≤ 1e-11。INDETERMINATE: 腕の η > 1e-5 で従来の η も 1e-11 超。PASS の腕だけが (3) へ進む。
   成分ごとの max|Δdq_c|/尺度_c と max|Δdq_c|/max|dq_c| は記録だけ (float の解の差は丸めの桁で出る前提)。
 - **(2) 性能** `run_0341〜0343_*`: 1000 step を従来・F32c・F32cs の順に 3 組 (計 9 本、`run_0341_time3_{LU,F32c,F32cs}_1` のように同じ番号に 3 腕)。量と判定は §6.2 (3) と同じ (101〜999 step の 1 step ごとの ms の平均、組ごとの差が 3 組とも同じ符号でその中央値の大きさが従来の 3 本の幅を超える → 速い / 遅い、ほかは判別不能)。
-  律速の切り分け (記録、判定には使わない): F32c の短縮が F32cs の大半なら演算 (FP64) が主、F32cs だけが大きく短いならメモリが主 (§5.1 #10 の根拠になる)。
-- **(3) 途中の到達** (2) で「速い」の腕だけ: `run_0344_qualLU2` (同じ新バイナリの従来) と `run_0345_qualF32cs`・`run_0346_qualF32c` を 10000 step・1000 ごと (extraFields `res_ro`)。
-  判定は §6.2 (4) と同じ (|2πΣres_ro| ≤ 1.0 が step 0 を除く出力で 2 回続く最初の区間の補間、累積壁時計はログの各 step の ms の和)。
+  各 run のログで step 101..999 がちょうど 1 回ずつ現れなければ判定不能。F32c・F32cs の短縮は各変更の実効の短縮量として記録する (演算の型・変換・一時変数の幅も変わるので、
+  律速が演算かメモリかの解釈は仮説に留める。§5.1 #10 は配列の変更そのものの A/B で決める)。
+- **(3) 途中の到達** (1) が PASS かつ (2) で「速い」の腕だけ: `run_0344_qualLU2` (同じ新バイナリの従来) と `run_0345_qualF32cs`・`run_0346_qualF32c` を 10000 step・1000 ごと (extraFields `res_ro`)。
+  判定は §6.2 (4) と同じ (|2πΣres_ro| ≤ 1.0 が step 0 を除く出力で 2 回続く最初の区間の補間、累積壁時計はログの各 step の ms の和)。時系列に非有限、または `check_convergence` が DIVERGED なら失格 (NOT CONVERGED は許す)。
+  `jf32.sh` は forge・判定器・時系列の失敗で止め、古い判定の JSON は最初に消す。
 - **分岐**: (1) を外す腕 → 不採用。(2) で「遅い」・「判別不能」の腕 → 不採用 (速さの根拠なし)。(1) 合格・(2) で速い・(3) で到達の差 ±10 % 以内かつ累積壁時計が短い → **#9 の比較でラインの腕に使う候補** (既定は double のまま、#9 の後に決める)。
   (3) の到達の差が 10 % を超える → 判別不能。中間の res は判定と監査の後に消し、README に書く。
 
@@ -202,6 +206,7 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#8 の事前登録) | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan-3.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan-3.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 腕の名前の代入 (`jf32.sh`、`set -u` で模擬確認)、M2 実際に使った float の因子・y の非有限を数え float の分解は非有限も失敗に、M3 PASS/FAIL/INDETERMINATE の分離、M4 そろいの検査 (factor・solve・評価本数・step 101..999)、M5 判定器の失敗で止める・古い JSON を消す・DIVERGED は失格、m6 律速の解釈は仮説 (§6.4) |
 | plan (#7 の事前登録) | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan-2.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan-2.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 非有限の数え上げ、M2 全ラインの η を比較の経路で、M3 到達を |Σ|・2 回連続・step 0 除外・500 ごと、M4 (4) は予備の選別で品質は #9、M5 時計を 1 step ごとの ms (101〜999) と組ごとの差で、m6 スイッチの併用を止める (§6.2) |
 | plan | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 B は double・LU のまま並列化し逆行列化を分離、後退誤差 η で判定 (§6)。M2 既定 double 維持、float は opt-in (§4.3 末尾、§5.1 #7)。M3 短期の一致と長期の品質を別ゲート (§6)。M4 他経路の表 (§5.1 #5)、A の契約を onLine && !storeLU と明記。M5 採否は profiler なしの反復計測 (§6)。m6 影響範囲と粘性 Jacobian plan との統合順 (§5.1 #6、§7) |
 

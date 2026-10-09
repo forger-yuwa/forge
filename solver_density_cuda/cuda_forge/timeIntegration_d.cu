@@ -2171,7 +2171,7 @@ __device__ __forceinline__ bool lu5_factor(T A[5][5], int piv[5])
     for (int col = 0; col < 5; ++col) {
         int pv = col; T pa = fabs(A[col][col]);
         for (int r = col + 1; r < 5; ++r) { const T c = fabs(A[r][col]); if (c > pa) { pv = r; pa = c; } }
-        if (!(pa >= (T)1.0e-30)) return false;          // NaN も失敗にする
+        if (!(pa >= (T)1.0e-30) || !isfinite(pa)) return false;   // NaN・Inf のピボットも失敗にする (float 版だけ、codex 2026-10-09 M2)
         piv[col] = pv;
         if (pv != col) for (int k = 0; k < 5; ++k) { const T tmp = A[col][k]; A[col][k] = A[pv][k]; A[pv][k] = tmp; }
         const T inv = (T)1.0 / A[col][col];
@@ -2181,6 +2181,7 @@ __device__ __forceinline__ bool lu5_factor(T A[5][5], int piv[5])
             for (int k = col + 1; k < 5; ++k) A[r][k] -= f * A[col][k];
         }
     }
+    for (int i = 0; i < 5; ++i) for (int k = 0; k < 5; ++k) if (!isfinite(A[i][k])) return false;   // 消去で溢れた因子も失敗にする
     return true;
 }
 template<typename T>
@@ -2605,6 +2606,8 @@ static void ensure(mesh& msh) {
     gpuErrchk(cudaMalloc((void**)&LU, sizeof(float) * 25 * n));
     gpuErrchk(cudaMalloc((void**)&y, sizeof(float) * 5 * n));
     gpuErrchk(cudaMemset(W, 0, sizeof(float) * 25 * n));
+    gpuErrchk(cudaMemset(LU, 0, sizeof(float) * 25 * n));   // ライン外 (ゴースト等) の要素が未初期化のまま非有限の検査に入らないように
+    gpuErrchk(cudaMemset(y, 0, sizeof(float) * 5 * n));
 }
 } // namespace line_f32
 // 実効のモードを記録する (factor・solve の 1 回目と 1000 回ごと)
@@ -2650,6 +2653,21 @@ __global__ void diff_d(size_t n, const T* x, const T* ref, unsigned long long* r
     }
 }
 static unsigned long long nonfiniteTotal = 0;   // 比較の全体で見つけた非有限の件数 (1 件でも比較は失格)
+// 実際に使った因子・中間 (float の版は float のバッファ) の非有限を数える (codex 2026-10-09 M2: 比較の差だけでは使っていない double の配列を見てしまう)
+template<typename S>
+__global__ void nonfinite_d(size_t n, const S* x, unsigned long long* cnt) {
+    for (size_t i = blockDim.x * (size_t)blockIdx.x + threadIdx.x; i < n; i += (size_t)blockDim.x * gridDim.x)
+        if (!isfinite((double)x[i])) atomicAdd(cnt, 1ULL);
+}
+template<typename S>
+static unsigned long long countNonfinite(size_t n, const S* x) {
+    gpuErrchk(cudaMemset(a.red, 0, sizeof(unsigned long long)));
+    nonfinite_d<S><<<256, 256>>>(n, x, a.red);
+    gpuErrchk(cudaPeekAtLastError());
+    unsigned long long h = 0;
+    gpuErrchk(cudaMemcpy(&h, a.red, sizeof(h), cudaMemcpyDeviceToHost));
+    return h;
+}
 template<typename T>
 static void diff(const char* what, size_t n, const T* x, const T* ref, double& md, double& mx, unsigned long long& nd) {
     gpuErrchk(cudaMemset(a.red, 0, sizeof(unsigned long long) * 4));
@@ -2814,6 +2832,12 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     gpuErrchk(cudaMemset(msh.line_W_d, 0, sizeof(double) * 25 * n)); gpuErrchk(cudaMemset(line_cmp::a.W, 0, sizeof(double) * 25 * n));
     gpuErrchk(cudaMemset(msh.line_LU_d, 0, sizeof(double) * 25 * n)); gpuErrchk(cudaMemset(line_cmp::a.LU, 0, sizeof(double) * 25 * n));
     gpuErrchk(cudaMemset(msh.line_piv_d, 0, 5 * n)); gpuErrchk(cudaMemset(line_cmp::a.piv, 0, 5 * n));
+    gpuErrchk(cudaMemset(msh.line_y_d, 0, sizeof(double) * 5 * n)); gpuErrchk(cudaMemset(line_cmp::a.y, 0, sizeof(double) * 5 * n));
+    if (cmpF32 == 2) {
+        line_f32::ensure(msh);
+        gpuErrchk(cudaMemset(line_f32::W, 0, sizeof(float) * 25 * n)); gpuErrchk(cudaMemset(line_f32::LU, 0, sizeof(float) * 25 * n));
+        gpuErrchk(cudaMemset(line_f32::y, 0, sizeof(float) * 5 * n));
+    }
     launchLineFactor(false, false, 0, msh, var, line_cmp::a.W, line_cmp::a.LU, line_cmp::a.piv, line_cmp::a.fail);
     launchLineFactor(!cmpInv && cmpF32 == 0, cmpInv, cmpF32, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d);
     double dLU = 0, mLU = 0, dW = 0, mW = 0, dp = 0, mp = 0, df = 0, mf = 0; unsigned long long nLU = 0, nW = 0, np = 0, nf = 0;
@@ -2824,6 +2848,13 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     printf("[lineCompare] factor %d%s: LU 最大差 %.3e / 最大 %.3e (不一致 %llu)、W %.3e / %.3e (不一致 %llu)、ピボットの不一致 %llu、失敗の不一致 %llu\n",
            ++line_cmp::factorCalls, cmpF32 == 2 ? " (F32cs: 因子は float のバッファにあるので LU・W・ピボットの差は意味がない)" : cmpF32 == 1 ? " (F32c: 因子は float で計算して double に保存)" :
            cmpInv ? " (逆行列 vs LU: LU・ピボットは中身が違うので比べない)" : "", dLU, mLU, nLU, dW, mW, nW, np, nf);
+    {   // 実際に使った因子の非有限 (腕と従来の両方)
+        const unsigned long long aLU = (cmpF32 == 2) ? line_cmp::countNonfinite(25 * n, line_f32::LU) : line_cmp::countNonfinite(25 * n, (const double*)msh.line_LU_d);
+        const unsigned long long aW  = (cmpF32 == 2) ? line_cmp::countNonfinite(25 * n, line_f32::W)  : line_cmp::countNonfinite(25 * n, (const double*)msh.line_W_d);
+        const unsigned long long rLU = line_cmp::countNonfinite(25 * n, (const double*)line_cmp::a.LU);
+        const unsigned long long rW  = line_cmp::countNonfinite(25 * n, (const double*)line_cmp::a.W);
+        printf("[lineNonfinite] factor %d: 腕 LU %llu・W %llu、従来 LU %llu・W %llu\n", line_cmp::factorCalls, aLU, aW, rLU, rW);
+    }
 }
 
 void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
@@ -2876,6 +2907,11 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
             }
             printf("[lineCompare] solve %d: dq 最大差 %.3e / 最大 %.3e (不一致 %llu); 成分ごと 差/最大 = %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e (非有限の累計 %llu)\n",
                    ++line_cmp::solveCalls, d, m, nd, dk[0], mk[0], dk[1], mk[1], dk[2], mk[2], dk[3], mk[3], dk[4], mk[4], line_cmp::nonfiniteTotal);
+            {   // 実際に使った前進の中間 y の非有限 (腕と従来の両方)
+                const unsigned long long ay = (cmpF32 == 2) ? line_cmp::countNonfinite(5 * n, line_f32::y) : line_cmp::countNonfinite(5 * n, (const double*)msh.line_y_d);
+                const unsigned long long ry = line_cmp::countNonfinite(5 * n, (const double*)line_cmp::a.y);
+                printf("[lineNonfinite] solve %d: 腕 y %llu、従来 y %llu\n", line_cmp::solveCalls, ay, ry);
+            }
             if (cmpInv || cmpF32 != 0) {               // 後退誤差は比べる版 (本来のバッファ) と従来の LU (別のバッファ) の両方
                 line_cmp::eta(cmpF32 == 1 ? "F32c" : cmpF32 == 2 ? "F32cs" : "INV", line_cmp::solveCalls, cfg, msh, var, dqn, msh.line_fail_d);
                 line_cmp::eta("LU", line_cmp::solveCalls, cfg, msh, var, line_cmp::a.dq, line_cmp::a.fail);

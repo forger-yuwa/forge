@@ -21,7 +21,13 @@ def reach(run):
             wall = sum(ms.get(k, 0.0) for k in range(1, n + 1)) + frac * ms.get(n + 1, 0.0)
             rec.update(reach_step=st, wall_ms=wall); return rec
     rec.update(reach_step=None, wall_ms=None, note="10000 step で到達しない (打ち切り)"); return rec
+for r in sys.argv[1:3]:      # 非有限・DIVERGED は失格 (NOT CONVERGED は短い試験なので許す、codex 2026-10-09 plan-3 M5)
+    v = (HERE / r / "CONVERGENCE_VERDICT.txt")
+    if not v.exists() or "DIVERGED" in v.read_text(errors="replace"):
+        print(f"{r}: VERDICT が無いか DIVERGED — 失格"); sys.exit(1)
 lu, inv = reach(sys.argv[1]), reach(sys.argv[2])
+if lu["nonfinite"] or inv["nonfinite"]:
+    print("時系列に非有限がある — 失格"); sys.exit(1)
 out = {"LU": lu, "INV": inv}
 if lu["reach_step"] and inv["reach_step"]:
     out["reach_step_rel_diff"] = (inv["reach_step"] - lu["reach_step"]) / lu["reach_step"]
@@ -30,5 +36,5 @@ if lu["reach_step"] and inv["reach_step"]:
                       else ("逆行列の累積壁時計が短い" if inv["wall_ms"] < lu["wall_ms"] else "逆行列の累積壁時計が短くない"))
 else:
     out["verdict"] = "打ち切り (片方または両方が未到達) — 採用の候補の判定は保留"
-(OUTD / "inv_qual_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+(OUTD / (sys.argv[3] if len(sys.argv) > 3 else "inv_qual_judge.json")).write_text(json.dumps(out, indent=1, ensure_ascii=False))
 print(json.dumps({k: v for k, v in out.items() if k not in ("LU", "INV")} | {"LU_reach": lu["reach_step"], "INV_reach": inv["reach_step"], "LU_wall_s": (lu["wall_ms"] or 0) / 1e3, "INV_wall_s": (inv["wall_ms"] or 0) / 1e3}, indent=1, ensure_ascii=False))
