@@ -1573,7 +1573,7 @@ static void atFactor(solverConfig& cfg, mesh& msh, variables& var) {
     putAoS25("Knext", msh.line_Knext_d, n);
     put<flow_float>("scalar_visc_line", {g.viscBuf}, n);
     put<flow_float>("dt_vol", {var.c_d["dt_local"], var.c_d["volume"]}, n);
-    put<geom_int>("flags_wall_iso_axis", {msh.wall_flag_d, msh.iso_wall_flag_d, msh.axis_flag_d}, n);
+    put<geom_int>("flags_wall_iso_axis", {msh.wall_flag_d, msh.iso_wall_flag_d, msh.axis_flag_d}, (size_t)msh.nCells);   // フラグは節点の範囲 (nCells) で確保
     put<flow_float>("state_ro_roU_roe_cp_gamma", {var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"], var.c_d["cp"], var.c_d["gamma"]}, n);
     printf("[lineDump] factor の直前を書いた (%zu 節点)\n", g.nodes.size());
 }
@@ -2116,6 +2116,12 @@ namespace line_implicit_par {
 constexpr int TILE = 8;
 }
 
+// レーンの行に対応するポインタを 1 回だけ選ぶ (実行時の添字で引くポインタの配列はローカルメモリに置かれて遅い)
+template<typename P>
+__device__ __forceinline__ P linePick5(int r, P a0, P a1, P a2, P a3, P a4) {
+    return (r == 0) ? a0 : (r == 1) ? a1 : (r == 2) ? a2 : (r == 3) ? a3 : a4;
+}
+
 __global__ void lineThomasFactorPar_d
 (
  geom_int nLines,
@@ -2137,16 +2143,18 @@ __global__ void lineThomasFactorPar_d
     const int r = (int)tile.thread_rank();
     const bool act = (r < 5);
     const int rr = act ? r : 0;                    // 補助レーンは行 0 の値を持つだけ
-    const flow_float* const D[25] = {d00, d01, d02, d03, d04, d10, d11, d12, d13, d14, d20, d21, d22, d23, d24,
-                                     d30, d31, d32, d33, d34, d40, d41, d42, d43, d44};
+    const flow_float* const D0 = linePick5(rr, d00, d10, d20, d30, d40);
+    const flow_float* const D1 = linePick5(rr, d01, d11, d21, d31, d41);
+    const flow_float* const D2 = linePick5(rr, d02, d12, d22, d32, d42);
+    const flow_float* const D3 = linePick5(rr, d03, d13, d23, d33, d43);
+    const flow_float* const D4 = linePick5(rr, d04, d14, d24, d34, d44);
     const geom_int b = line_offsets[l];
     const geom_int e = line_offsets[l + 1];
     if (r == 0) faild[l] = 0;
     double Wc[5] = {0.0, 0.0, 0.0, 0.0, 0.0};      // 前の節点の W の列 (レーン j が W[:, j])
     for (geom_int p = b; p < e; ++p) {
         const geom_int ic = line_cells[p];
-        double M[5];
-        for (int k = 0; k < 5; ++k) M[k] = (double)D[rr * 5 + k][ic];
+        double M[5] = {(double)D0[ic], (double)D1[ic], (double)D2[ic], (double)D3[ic], (double)D4[ic]};
         if (p > b) {                               // M_i −= Σ_m Kprev[i][m] W_{k−1}[m][j] (v2 と同じ順序)
             double Kp[5];
             for (int m = 0; m < 5; ++m) Kp[m] = (double)Kprev[(size_t)ic * 25 + rr * 5 + m];
@@ -2191,13 +2199,44 @@ __global__ void lineThomasFactorPar_d
             double Mf[5][5];
             for (int q = 0; q < 5; ++q)
                 for (int k = 0; k < 5; ++k) Mf[q][k] = tile.shfl(M[k], q);
-            double col[5];
-            for (int q = 0; q < 5; ++q) col[q] = (double)Knext[(size_t)ic * 25 + q * 5 + rr];
-            line_implicit::lu5_solve(Mf, piv, col);
-            for (int q = 0; q < 5; ++q) Wc[q] = col[q];
-            if (act) for (int q = 0; q < 5; ++q) Wd[(size_t)ic * 25 + q * 5 + r] = col[q];
+            if (act) {
+                double col[5];
+                for (int q = 0; q < 5; ++q) col[q] = (double)Knext[(size_t)ic * 25 + q * 5 + r];
+                line_implicit::lu5_solve(Mf, piv, col);
+                for (int q = 0; q < 5; ++q) { Wc[q] = col[q]; Wd[(size_t)ic * 25 + q * 5 + r] = col[q]; }
+            }
         }
     }
+}
+
+// 行を分担した LU の代入 (line_implicit::lu5_solve と同じ演算・同じ順序): レーン r は U/L の行 r と x_r を持つ。
+// ① 行交換を全て先に (LASWP) ② 単位下三角の前進 ③ 上三角の後退 (行 r は x_{r+1..4} を昇順で引いてから U_rr で割る)。
+__device__ __forceinline__ double line_lu5_solve_rows(cooperative_groups::thread_block_tile<line_implicit_par::TILE>& tile,
+                                                      int r, const double Lr[5], const int piv[5], double x)
+{
+    for (int col = 0; col < 5; ++col) {
+        const int pc = piv[col];
+        if (pc != col) {
+            const double xc = tile.shfl(x, col);
+            const double xp = tile.shfl(x, pc);
+            if (r == col) x = xp; else if (r == pc) x = xc;
+        }
+    }
+    for (int col = 0; col < 4; ++col) {
+        const double xc = tile.shfl(x, col);
+        if (r > col && r < 5) x -= Lr[col] * xc;
+    }
+    double xs[5];
+    for (int row = 4; row >= 0; --row) {
+        double s = x;
+        if (row < 4) {
+            for (int c = row + 1; c < 5; ++c) xs[c] = tile.shfl(x, c);
+            if (r == row) for (int c = row + 1; c < 5; ++c) s -= Lr[c] * xs[c];
+        }
+        if (r == row) x = s / Lr[row];
+        // 行 row の x が確定したので、次の行 (row−1) は shfl で読む (shfl は全レーンで実行する)
+    }
+    return x;
 }
 
 __global__ void lineThomasSolvePar_d
@@ -2221,50 +2260,46 @@ __global__ void lineThomasSolvePar_d
     const int r = (int)tile.thread_rank();
     const bool act = (r < 5);
     const int rr = act ? r : 0;
-    const flow_float* const RHS[5] = {rhs0, rhs1, rhs2, rhs3, rhs4};
-    const flow_float* const DQO[5] = {dq_old_0, dq_old_1, dq_old_2, dq_old_3, dq_old_4};
-    flow_float* const DQN[5] = {dq_new_0, dq_new_1, dq_new_2, dq_new_3, dq_new_4};
+    const flow_float* const RHS = linePick5(rr, rhs0, rhs1, rhs2, rhs3, rhs4);
+    const flow_float* const DQO = linePick5(rr, dq_old_0, dq_old_1, dq_old_2, dq_old_3, dq_old_4);
+    flow_float* const DQN = linePick5(rr, dq_new_0, dq_new_1, dq_new_2, dq_new_3, dq_new_4);
     const geom_int b = line_offsets[l];
     const geom_int e = line_offsets[l + 1];
     if (faild[l] != 0) {
-        if (act) for (geom_int p = b; p < e; ++p) { const geom_int ic = line_cells[p]; DQN[r][ic] = DQO[r][ic]; }
+        if (act) for (geom_int p = b; p < e; ++p) { const geom_int ic = line_cells[p]; DQN[ic] = DQO[ic]; }
         return;
     }
-    // ---- 前進 (保存因子で代入のみ、全レーンが同じ y を持つ) ----
-    double y[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    // ---- 前進 (保存因子で代入のみ) ----
+    double y[5] = {0.0, 0.0, 0.0, 0.0, 0.0};      // 前の節点の y (全レーンが全成分を持つ)
     for (geom_int p = b; p < e; ++p) {
         const geom_int ic = line_cells[p];
-        double bkr = (double)RHS[rr][ic];
+        double x = (double)RHS[ic];
         if (p > b) {
             double bacc = 0.0;
             for (int m = 0; m < 5; ++m) bacc += (double)Kprev[(size_t)ic * 25 + rr * 5 + m] * y[m];
-            bkr += bacc;
+            x += bacc;
         }
-        double bk[5];
-        for (int q = 0; q < 5; ++q) bk[q] = tile.shfl(bkr, q);
-        double Mf[5][5];
+        double Lr[5];
         int piv[5];
-        for (int q = 0; q < 5; ++q) {
-            piv[q] = (int)pivd[(size_t)ic * 5 + q];
-            for (int k = 0; k < 5; ++k) Mf[q][k] = LUd[(size_t)ic * 25 + q * 5 + k];
-        }
-        line_implicit::lu5_solve(Mf, piv, bk);
-        for (int q = 0; q < 5; ++q) y[q] = bk[q];
-        if (act) yd[(size_t)ic * 5 + r] = y[r];
+        for (int k = 0; k < 5; ++k) Lr[k] = LUd[(size_t)ic * 25 + rr * 5 + k];
+        for (int q = 0; q < 5; ++q) piv[q] = (int)pivd[(size_t)ic * 5 + q];
+        x = line_lu5_solve_rows(tile, r, Lr, piv, x);
+        for (int q = 0; q < 5; ++q) y[q] = tile.shfl(x, q);
+        if (act) yd[(size_t)ic * 5 + r] = x;
     }
     // ---- 後退代入 (relax を掛けて dq_new へ) ----
     double dq[5];
     for (int q = 0; q < 5; ++q) dq[q] = y[q];
     {
         const geom_int ic = line_cells[e - 1];
-        if (act) DQN[r][ic] = (flow_float)(implicit_relax * dq[r]);
+        if (act) DQN[ic] = (flow_float)(implicit_relax * dq[r]);
     }
     for (geom_int p = e - 1; p > b; --p) {
         const geom_int ic = line_cells[p - 1];
         double acc = yd[(size_t)ic * 5 + rr];
         for (int m = 0; m < 5; ++m) acc += Wd[(size_t)ic * 25 + rr * 5 + m] * dq[m];
         for (int q = 0; q < 5; ++q) dq[q] = tile.shfl(acc, q);
-        if (act) DQN[r][ic] = (flow_float)(implicit_relax * dq[r]);
+        if (act) DQN[ic] = (flow_float)(implicit_relax * dq[r]);
     }
 }
 
