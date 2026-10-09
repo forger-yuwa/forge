@@ -207,13 +207,14 @@ def cmd_compare(dirdump: Path, tag: str, eps: float, ops: dict, runs: dict):
                  "finite_vs_linear": _rel(fin[ok, r], relax * Jt[ok, r])}
             for k in Ja:
                 a = Ja[k][ok, r]
+                x[f"op{k}_secant_rel"] = _rel(relax * a, fin[ok, r])      # 実際に掛けた補正での残差の変化と近似の予測 (relax·J_a p) の差
                 x[f"op{k}_rel"] = _rel(a, Jt[ok, r])
                 x[f"op{k}_norm_ratio"] = float(np.linalg.norm(a) / nt)
                 x[f"op{k}_cos"] = float(a @ Jt[ok, r] / max(np.linalg.norm(a) * nt, 1e-300))
                 x[f"op{k}_worst_k"] = int(np.flatnonzero(ok)[np.argmax(np.abs(a - Jt[ok, r]))] - np.flatnonzero(m)[0])
             rec[nm] = x
             print(f"  {nm:6s}: 差分 ε/ε/2 {x['fd_eps_vs_half']:.1e}・再評価のノイズ {x['rerun_noise_over_true']:.1e}・有限振幅 {x['finite_vs_linear']:.3f} | "
-                  + " | ".join(f"作用素 {k}: 相対差 {x[f'op{k}_rel']:.3f}・大きさ {x[f'op{k}_norm_ratio']:.3f}・cos {x[f'op{k}_cos']:+.3f}・最悪 k={x[f'op{k}_worst_k']}" for k in Ja))
+                  + " | ".join(f"作用素 {k}: 相対差 {x[f'op{k}_rel']:.3f}・大きさ {x[f'op{k}_norm_ratio']:.3f}・cos {x[f'op{k}_cos']:+.3f}・最悪 k={x[f'op{k}_worst_k']}・実補正の予測差 {x[f'op{k}_secant_rel']:.3f}" for k in Ja))
         if heat is not None:
             okE = m & ~dec[:, 4]
             nE = max(np.linalg.norm(Jt[okE, 4]), 1e-300)
