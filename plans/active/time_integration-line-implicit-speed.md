@@ -89,7 +89,7 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
 | 6 | 粘性 Jacobian plan との統合の後の再検証 | [time_integration-line-viscous-jacobian](time_integration-line-viscous-jacobian.md) は同じ D/K の組立を変える。速度の A/B では D/K の仕様を固定し、統合後に §6 を回し直す。2026-10-09: 粘性 Jacobian は本線不採用 (値 2・3 は診断として保留、既定 0 の D/K は不変) なので、既定の経路の再検証は不要 | O |
 | 7 | 逆行列の保存 (double、別の opt-in 実験) | 判断: 2026-10-09 codex 諮問 — 次の候補は double の逆行列の保存、C (float) は後回し。部分ピボット付き double LU から逆行列を作り、代入だけを行列ベクトル積に替える (D/K の組立と保存の精度は固定)。候補の基準 (実装前に確定): 緩和前のスケーリングした後退誤差 η ≤ 1e-11、物理尺度で正規化した補正の差 ≤ 1e-8、新しい分解の失敗 0。性能は逆行列の生成の費用を含め、native・専有 GPU・profiler なしの反復計測と、同じ品質までの総時間。B の失敗は「その実装の不採用」で、律速の原因の確定ではない | F |
 | 8 | C (Thomas を float、別の opt-in 実験) | #7 の後。精度の組み合わせの表と、線形残差・長期の収束性能で採否 | F |
-| 9 | 本線の評価 (方向別 dt + 上限 + point 仕上げの総壁時計) | 粘性 Jacobian の探索を終えた後の本線 (codex 2026-10-09)。ライン陰解法の速度の改善はこの総壁時計で採否を決める。残差の停滞に面エンタルピーの精度が効くかの監査は [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 (未着手) | F |
+| 9 | 本線の評価 (方向別 dt + 上限 + point 仕上げの総壁時計) | 粘性 Jacobian の探索を終えた後の本線 (codex 2026-10-09)。ライン陰解法の速度の改善はこの総壁時計で採否を決める。**粘性入りの腕を加える (2026-10-09、ユーザの指摘「粘性をライン向けのヤコビアンに入れたほうが良くね？」を受けた方針)**: ノズルで 2000 step 壊れなかった唯一の粘性入りの形 (値 3・マスク 5 = 運動量の薄層の結合と仕事を入れ、熱伝導の近傍 K を外す) を、値 0 と point だけの腕と同じ終了条件・総壁時計で比べる (viscous-jacobian plan §6.12 の条件: 仕上げ込みで速くなければ終える)。§6 に事前登録し codex plan 段に諮ってから回す。残差の停滞に面エンタルピーの精度が効くかの監査は [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 (未着手) | F |
 
 ## 6. 検証 (codex plan 段の反映後、2026-10-09)
 
