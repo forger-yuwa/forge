@@ -120,7 +120,7 @@ def finish(status, **kw):
     st.update(status=status, **kw); save(); print(f"[m9_watch] {run.name}: {status} {kw}", flush=True)
 def cleanup(keep_extra=()):
     done = sorted(r["step"] for r in st["rows"] if r["step"] > 0 and not r.get("inherited"))
-    keep = set(done[-5:]) | {d for d in done if d % 50000 == 0} | set(keep_extra)
+    keep = set(done[-1:]) | set(keep_extra)               # 最新と到達の出力だけ残す (準定常は系列から判定するので不要、ディスクのため。2026-10-10)
     for m in done:
         if m in keep: continue
         for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
