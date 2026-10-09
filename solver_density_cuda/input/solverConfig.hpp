@@ -106,7 +106,7 @@ public:
     int qAccumulatorFP64 = 0;
     // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md)。lineImplicit==1 専用。
     int lineKFreeze = 0;              // 1: dual-time サブ反復間で K/diag/LU を凍結 (subiter 0 のみ構築)
-    int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
+    int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α) / 2: 薄層の粘性・熱伝導の Jacobian (K と対角)
     flow_float lineViscousDtRelief = 0.0;  // θ: on-line セルの擬似 dt 粘性項を (1−θ) 倍
     int lineDtDirectional = 0;        // 1: 方向別 dt — line 面の λ (音響込み) を CFL の max から除外
     flow_float lineDtDirectionalCap = 0.0;  // 方向別 dt の伸びの上限 R (Δτ ≤ R·Δτ_point)。0 = 上限なし (従来どおり)。plan time_integration-implicit-thermal-jacobian §4.4

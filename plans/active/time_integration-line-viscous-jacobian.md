@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `time_integration`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - `methods/time_integration/implementation.md` の「line-implicit」「v2」(`lineViscCoupling`) と「エネルギー行の熱伝導 Jacobian」
 - **related_plans**:
@@ -54,49 +54,75 @@
 - ライン面では従来のスカラー 2ν δ/dcc (全行) を入れない (上の式で置き換える)。ライン外の面は従来どおり (キー `implicitThermalJacobian` のビットもライン外の面にだけ効く)。
 - 物性 (μ、k、c_p、γ) は凍結する。勾配の項 (転置・発散・非直交) は入れない (薄層近似)。
 
+**codex の反映 (2026-10-09、§6.1)**: P = I + ⅓ n̂ n̂ᵀ は現在の離散残差の「勾配を凍結した厳密な微分」ではない (残差の直接の速度差の項は βI で、
+転置・発散は面の勾配から入る)。**薄層近似の前処理行列**として採用する。粘性の仕事は τ = β P Δu の薄層の流束モデルの微分で組む
+(残差の τ を使う積の微分 (βPδΔu)·ū + τ_res·δū は採らない — 面の応力を LHS に渡す経路がないため。選んだ流束モデルに対して単体照合する)。
+等温壁: **値 2 では強制の等温壁の節点の行 4 を Δ(ρE)_w − e_w Δρ_w = 0 (ΔT_w = 0、キーのビット 2 と同じ行) にする**。この拘束の下で、隣が等温壁のときの熱伝導の K を消す。
+キー 5 の壁の行 (Δ(ρE)_w = 0) のままでは、静止壁で ΔT_w = −e_w Δρ_w/(ρ_w c_v) (CPG 300 K・Δρ/ρ 1 % で −3 K) が線形系の中に残る。
+速度の Dirichlet の壁では Δ(ρu)_w = 0 かつ u_w = 0 なので、運動量・仕事の K の寄与は消さなくても 0 になる (消しても同じ)。
+
 ### 4.2 予想される危険
 
 - 連続の行はライン面の粘性の減衰を失う (物理として正しいが、従来は 2α の人工の減衰があった)。V/Δτ が小さい方向別では ρ の行は対流 (音波) の結合と A⁺ だけになる。
-- k・ω は従来どおり分離した点陰解法で同じ Δτ を使うので、上限 R を外すと SST 側の不安定 (run_0222 で寄与を確認) は残る可能性がある。
+  提案の粘性の行列は各節点の速度・温度を保つ密度の補正 δQ = δρ(1, u, v, w, E) を全行で消す (codex が独立のモデルで確認) ので、キー 1 の「行ごとの減衰の基準の食い違い」とは違う。
+  ただし人工の減衰を除いた結果、既存の対流・境界・ライン外の結合の誤差が育つ可能性は残る。
+- k・ω は従来どおり分離した点陰解法で同じ Δτ を使う。SST の更新を止めた試行 (run_0222) で増幅が弱まったが、凍結の実効性の確認 (壁・入口のピンを除いた roK・roOmega・μ_t) は未完了で、寄与の分離はできていない。
 - 勾配の項を入れないので、非直交が強い面や軸対称の τ_θθ では LHS と残差の差が残る。
 
 ### 4.3 実装
 
-`timeIntegration_d.cu` の粘性の対角のブロック (`isLineFace && lineViscCoupling != 0` の分岐) に値 2 の経路を足す。K は `storeLU` の sweep で `Kprev`/`Knext` に書き、
-対角は D に足す。設定の検査 (`solverConfig.cpp`): 値 0〜2、2 は node・`lineImplicit 1`・`blockDPLUR 1`・`timeIntegration 11`・`lowMachPrecond < 2` を要求、
-`implicitThermalJacobian` との併用は許す (値 1 の併用拒否は残す)。
+- 共通関数 `block_dplur::accumulate_thinlayer_visc_jacobian` (`block_dplur_jacobian_d.cuh`、host/device) が面 1 つ分の D_i と K_ij を組む (単体試験と同じ関数)。
+- `implicit_defect_correction_block_d` に節点ごとの層流粘性 `vis_lam` を渡す引数を足し、値 2 のときは `thermCond`・`cp`・`fx` も (キーのビット 1 によらず) 渡す (wrapper の `FORGE_BDPLUR_ARGS`)。
+- ライン面 (`isLineFace`) で値 2 なら従来のスカラー 2ν δ/dcc の代わりに共通関数の D を足し、`storeLU` の sweep で K を `Kprev`/`Knext` に足す (`rowDec` の行は 0)。
+- 強制の等温壁の節点の行 4 は値 2 のとき [−e_w, 0, 0, 0, 1] (§4.1)。
+- 設定の検査 (`solverConfig.cpp`): 値 0〜2。2 は node・`lineImplicit 1`・`blockDPLUR 1`・`timeIntegration 11`・`lowMachPrecond < 2`・`heatCorrSU2 0`・
+  `nodeIsothermalEnergyBC 0`・(SST のとき) `wallTreatmentSST 0` を要求し、それ以外は起動時に拒否する。`implicitThermalJacobian` との併用は許す (値 1 との併用拒否は残す)。
 
 ## 5. 実装ステップ
 
-1. `solverConfig.cpp` の検査と `methods/time_integration/implementation.md` の追記。
-2. カーネル (§4.3)。FP64 ビルド (AWS) と FP32 ビルドのコンパイル。
+1. 共通関数と host の単体試験 (`solver_density_cuda/tools/test_line_visc_jacobian.cpp`)。
+2. カーネル・wrapper・設定の検査・`methods/time_integration/implementation.md`。FP64 (AWS) と FP32 のビルド。
 3. §6 の検証。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | codex plan 段と諮問 | §4.1 の式・符号・壁の扱い、§6 の判定 | F |
-| 2 | 実装 (§4.3) | 合格: FP64・FP32 のビルドが通る、`lineViscCoupling 0/1` の経路は不変 (U0) | O |
-| 3 | U2・V-n1・V-n2 (§6) | | O |
-| 4 | result 段のレビューと採否 | | F |
+| 1 | codex plan 段と諮問の採否 | 判断: 2026-10-09 plan 段 GO-with-changes (C0/M5/m2) と諮問 (diagnose) を全件採用 (§6.1)。等温壁の拘束、入力経路と対応範囲、単体試験、判定の分離、同じ水準までの壁時計 | F |
+| 2 | 共通関数と単体試験 (U-J) | 合格は §6 U-J | O |
+| 3 | 実装 (§4.3) とビルド | 合格: FP64・FP32 のビルドが通る、値 2 + キー 0 で起動する | O |
+| 4 | U0・U2・U3・FP32 (§6) | | O |
+| 5 | V-n1 (上限なし 2000 step の A/B)・V-n2 (上限 50 の同じ水準までの壁時計) | | O |
+| 6 | result 段のレビューと採否 | | F |
 
-## 6. 検証 (事前登録の案)
+## 6. 検証 (事前登録、2026-10-09、codex 反映後)
 
-- **U0 (既定で不変)**: `lineViscCoupling 0` で旧・新バイナリの 1 step・20 step の場の差が、同じバイナリの再実行の差 (V0_repeat.json) と同じ幅。
-- **U2 (純伝導、Jacobian が効くか)**: case/52 の流体の板 (U1 と同じ、下 300 K・上 350 K、静止) をライン陰解法 + 方向別で回す。
-  比較: (a) `lineViscCoupling 0`、(b) 2、ともに cfl 5 と 50。合格: (b) が L∞ < 0.05 K に入る step 数が point キー 0 cfl 20 の最良 (2500 step) の 1/10 以下、NaN なし。
-  (a) より少ない step で入ること。
-- **V-n1 (元の発散が止まるか)**: run_0183 の res_100000 から directional cfl 4・上限なし・キー 5 + `lineViscCoupling 2`、2000 step・200 ごと。
-  合格: NaN なし、全残差列の最大が開始の 10 倍以内 (run_0203 は 66 step で発散、run_0221 は 580 倍)。
-- **V-n2 (速さ)**: run_0223 と同じ (上限 50・キー 5、15000 step・500 ごと) + `lineViscCoupling 2`。合格: 欠損が run_0223 の同じ step 以下 (7500・15000)、
-  θ_r(70) が run_0223 より point の水準 (run_0217、0.11477) に近い、ms/step の増分 10 % 以内。
-- V-n1 が合格したら上限なしで 15000 step (V-n3) を回し、V-n2 と同じ量で比べる。最終の判断 (本線に使うか) は thermal-jacobian plan §6.0 と同じ条件 (状態の水準・切り戻し) で行う。
+- **U-J (Jacobian の単体照合、host)**: 共通関数の D = −∂R_i/∂Q_i・K = ∂R_i/∂Q_j を、同じ薄層の流束モデル R (τ = βPΔu、q = κΔT、仕事 τ·ū) の中心差分と照合する。
+  状態は CPG・TP 相当 (節点ごとの γ・c_p)、高速の接線流 (|u| 1700 m/s)、異なる密度、f_i = f と 1 − f の両方向、壁の拘束 (速度・温度) を含む 200 組。
+  合格: 列ごとの相対誤差 ≤ 1e-6 (double)、零空間 δQ = δρ(1, u, v, w, E) で D・K の作用 ≤ 1e-12 (相対)、等温壁の行の拘束で ΔT_w = 0 (≤ 1e-12)。
+  短いライン (8 節点) を組んで block-Thomas の前進消去・後退代入 (host の写し) と密行列の解の差 ≤ 1e-10。実装した CUDA の K の配置 (Kprev/Knext の符号) は U2・U3 で確かめる。
+- **U0 (既定と値 1 が不変)**: `lineViscCoupling 0` と 1 で、旧 (4d394a71 の linespeed) と新のバイナリの 1 step・20 step の場の差が、同じバイナリの再実行の最大の 3 倍以内 (速度の plan §6 と同じ形)。
+- **U2 (純伝導)**: case/52 の流体の板 (U1 と同じ、下 300 K・上 350 K、静止)、ライン + 方向別。値 0 と 2 を cfl 5・50 で。
+  合格: 値 2 が L∞ < 0.05 K に 250 step 以内 (point キー 0 cfl 20 の 2500 step の 1/10)、NaN・非物理値なし。
+- **U3 (Couette、せん断と粘性の仕事)**: 同じ板の上壁を Ux = 100 m/s で動かす (両壁 300 K、空気 CPG、1013 Pa、定数 μ・k)。解析解 u = U y/H、T = T_w + (Pr U²/2c_p)(y/H)(1 − y/H)。
+  合格: 値 2 で u の L∞ < 0.1 % U・T の L∞ < 1 % (T − T_w の最大) に、値 0 より少ない step で入る。NaN なし。
+- **FP32**: U2 と U3 を FP32 のビルドで 1 本ずつ。合格: NaN なし、線形解の失敗 0 件。
+- **V-n1 (十分性の試験、診断の A/B)**: run_0183 の res_100000 から、同じ新バイナリで `lineViscCoupling` 0 と 2 だけを変える (キー 5・方向別・上限なし・cfl 4、2000 step)。
+  全残差を毎 step、場を 200 step ごと。短期合格 (B = 値 2): 非有限・非物理値なし、線形解の失敗 0、全残差の最大が開始の 10 倍以内、
+  末尾 500 step の log10(rms) の傾きが正で有意でない (`check_convergence` の rising 判定に掛からない)。
+  A (値 0) で成長が再現し B で止まれば第 1 仮説を支持。B でも同じモードが育てば「この変更だけで十分」を棄却。A が再現しなければ判別不能。2000 step の合格は短期安定の判定に限る。
+- **V-n2 (速さ)**: 上限 50 で値 0 と 2 を同じ新バイナリ・同じ IC (run_0183 の res_100000) で回し、**事前登録の同じ状態の水準 (欠損 |Σ| ≤ 0.1 kg/s と |res_ro| の局所ノルムの減少、
+  θ_r の `check_quasisteady` STEADY (末尾 2 万 step、4 点以上、drift 0.0005))** に達するまでの step 数と、専有 GPU・profiler なしの ms/step の積 (壁時計) で比べる。
+  固定 step の比較は途中の診断。ms/step の増分の上限 10 %。V-n2 は値 2 の上限なしの安定 (V-n1) の結果を見てから上限なしでも行う。
+- **判定の分離**: 短期安定 (上記)、収束 (`check_convergence --segment`、区間を応答に書く)、採用 (状態の水準と切り戻し、thermal-jacobian plan §6.0) を別に書く。
+  Q_w は `cold_series.py` (CPG の定数で再構成した共通の後処理の指標) なので、MW の値や熱収支の根拠に使わない。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan | 2026-10-09 | [2026-10-09-time_integration-line-viscous-jacobian-plan.md](../../notes/reviews/2026-10-09-time_integration-line-viscous-jacobian-plan.md) | GO-with-changes, C0/M5/m2 | 全件採用: M1 等温壁の行を ΔT_w = 0 の拘束に (§4.1)、M2 入力経路と対応範囲の限定 (§4.3)、M3 単体照合 U-J・U3・FP32 (§6)、M4 判定の分離と `check_quasisteady` (§6)、M5 同じ水準までの壁時計 (V-n2)、m6 P は薄層の前処理行列と明記 (§4.1)、m7 SST の寄与を未分離と修正 (§4.2) |
+| plan (諮問) | 2026-10-09 | [2026-10-09-line-viscous-jacobian-and-v0-diagnose.md](../../notes/reviews/2026-10-09-line-viscous-jacobian-and-v0-diagnose.md) | 式・符号は採用 (独立モデルで数値微分と 3.6e-15)、壁拘束は条件付き、検証は修正 | 全件採用: 仕事の微分のモデルを固定 (§4.1)、V-n1 を同じ新バイナリの値 0/2 の上限なし 2000 step の A/B に (§6)、run_0211 の発散を ρ の人工拡散だけに帰さない。実残差との差の測定は未実施 (CFD の挙動で間接に見るだけ) |
 
 ## 7. 影響範囲
 
@@ -105,3 +131,4 @@
 ## 変更ログ
 
 - 2026-10-09: 起票 (draft)。
+- 2026-10-09: codex plan 段と諮問を全件採用して in_progress (§4.1・§4.3・§6 を改訂)。

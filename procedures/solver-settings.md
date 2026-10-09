@@ -75,7 +75,10 @@ time:
 - **`lineDtDirectional: 1`**: 方向別 dt — 内部 line 面の λ (音響込み) を擬似 dt の CFL max から除外。
 - **`lineDtDirectionalCap: R`** (2026-10-09、既定 0 = 上限なし): 方向別 dt の伸びを Δτ ≤ R·Δτ_point に抑える (平均流と SST の両方に効く)。検証中 — plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md) §4.4。
   壁ノードの境界半割面は除外されない (壁 CV 自身の Δτ は境界面律速のまま) 点に注意。
-- `lineViscCoupling` / `lineViscousDtRelief`: line 面のスカラー粘性結合と粘性 CFL 割引。
+- `lineViscCoupling` / `lineViscousDtRelief`: line 面の粘性結合と粘性 CFL 割引。`lineViscCoupling` は 0 (結合なし、既定) / 1 (スカラー α I を 5 行すべて) /
+  2 (薄層の粘性・熱伝導の Jacobian をライン面の K と対角に。連続の行 0、運動量は速度、エネルギーは T と粘性の仕事。等温壁の行は ΔT_w = 0 の拘束)。
+  2 は node・`lineImplicit 1`・`blockDPLUR 1`・`timeIntegration 11`・`lowMachPrecond < 2`・`heatCorrSU2 0`・`nodeIsothermalEnergyBC 0`・`wallTreatmentSST 0` 専用 (それ以外は起動時に拒否)。
+  検証中 (plan [time_integration-line-viscous-jacobian](../plans/active/time_integration-line-viscous-jacobian.md))。
   圧縮性の壁法線 pseudo-dt 律速は音響 (λ_visc/λ_ac=2ν/(Δn·c)≪1) なので通常は効果僅差 — 既定 off で可。
 
 **使い分け (2026-09-03 実測)**: 定常 M6 ノズル (case/45) では cfl 上限を上げない (streamwise
@@ -97,7 +100,7 @@ block DPLUR の粘性の対角は 5 行に同じスカラー (2ν·δ/dcc) を�
 - **ビット 2**: 等温壁の節点のエネルギー行を拘束の行 [−e_w, 0, 0, 0, 1] にする (原因の切り分け用)。
 - **ビット 4** (ビット 1 と併用、キー 5): エネルギー行にも従来のスカラーを残し、温度の項はその上に足す (ビット 1 だけは高速・高 μ_t の所で不安定化した)。
 
-node・`timeIntegration 11`・`blockDPLUR 1`・`lowMachPrecond < 2` 専用。`lineViscCoupling 1`・`mesh.nodeIsothermalEnergyBC 1` との併用は起動時に拒否する。
+node・`timeIntegration 11`・`blockDPLUR 1`・`lowMachPrecond < 2` 専用。`lineViscCoupling 1`・`mesh.nodeIsothermalEnergyBC 1` との併用は起動時に拒否する (`lineViscCoupling 2` とは併用できる)。
 LHS だけの変更なので定常解は変わらない。**検証中** (plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md)) で、既定化はしていない。
 式は [`methods/time_integration/implementation.md`](../methods/time_integration/implementation.md) の「エネルギー行の熱伝導 Jacobian」。
 

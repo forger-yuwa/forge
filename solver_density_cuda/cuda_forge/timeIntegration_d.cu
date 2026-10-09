@@ -797,7 +797,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  const flow_float* __restrict__ thermCondArr,
  const flow_float* __restrict__ cpArr,
  const flow_float* __restrict__ fxArr,
- flow_float Prt
+ flow_float Prt,
+ const flow_float* __restrict__ visLamArr    // 節点ごとの層流粘性 (lineViscCoupling 2 のときだけ非 nullptr)
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -948,7 +949,41 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 // 粘性対角は residual の粘性流束 Jacobian (2ν·ss²/dcc_dot_s = 2ν·delta/dcc) と整合させる
                 // (旧 face_area·(2ν/delta) は ≈2ν に潰れ近軸で r 重み喪失・ゼロ面積面にスプリアス。詳細は site1 コメント)。
                 const ST viscous_diag = static_cast<ST>(2.0) * nu_eff * delta / dcc;
-                if (isLineFace && lineViscCoupling != 0) {
+                if (isLineFace && lineViscCoupling == 2) {
+                    // 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian §4.1)。ライン面では従来の
+                    // スカラー 2ν·δ/dcc の代わりに、残差と同じ面の μ_f・k_f で D (自節点) と K (ライン上の隣) を組む。
+                    const ST f0 = static_cast<ST>(fxArr[ip]);
+                    const ST fi = (ic0 == ic) ? f0 : static_cast<ST>(1.0) - f0;    // 自節点の補間の重み
+                    const ST omfi = static_cast<ST>(1.0) - fi;
+                    const ST mlam_i = (visLamArr != nullptr) ? static_cast<ST>(visLamArr[ic]) : static_cast<ST>(laminar_visc);
+                    const ST mlam_j = (visLamArr != nullptr) ? static_cast<ST>(visLamArr[other_ic]) : static_cast<ST>(laminar_visc);
+                    const ST mut_i = static_cast<ST>(vis_turb[ic]);
+                    const ST mut_j = static_cast<ST>(vis_turb[other_ic]);
+                    const ST cp_i = static_cast<ST>(cpArr[ic]);
+                    const ST cp_j = static_cast<ST>(cpArr[other_ic]);
+                    const ST mu_f = fi * (mlam_i + mut_i) + omfi * (mlam_j + mut_j);
+                    const ST k_f = fi * static_cast<ST>(thermCondArr[ic]) + omfi * static_cast<ST>(thermCondArr[other_ic])
+                                 + (fi * cp_i + omfi * cp_j) * (fi * mut_i + omfi * mut_j) / static_cast<ST>(Prt);
+                    const ST beta = max(mu_f, static_cast<ST>(0.0)) * delta / dcc;
+                    const ST kappa = max(k_f, static_cast<ST>(0.0)) * delta / dcc;
+                    const bool jVel = (wall_flag != nullptr && wall_flag[other_ic] == 1);
+                    const bool jTemp = (iso_wall_flag != nullptr && iso_wall_flag[other_ic] == 1);
+                    ST Kv[5][5];
+                    block_dplur::zero5x5(Kv);
+                    block_dplur::accumulate_thinlayer_visc_jacobian<ST>(
+                        beta, kappa, nx, ny, nz, fi,
+                        density, velocity_x, velocity_y, velocity_z, static_cast<ST>(roe[ic]), gamma, max(cp_i, static_cast<ST>(1.0e-30)),
+                        max(static_cast<ST>(ro[other_ic]), static_cast<ST>(1.0e-30)),
+                        static_cast<ST>(Ux[other_ic]), static_cast<ST>(Uy[other_ic]), static_cast<ST>(Uz[other_ic]),
+                        static_cast<ST>(roe[other_ic]), static_cast<ST>(gamma_arr[other_ic]), max(cp_j, static_cast<ST>(1.0e-30)),
+                        jVel, jTemp, diag_block, (storeLU != 0) ? Kv : nullptr);
+                    if (storeLU != 0) {
+                        flow_float* Kdst = (other_ic == lp) ? Kprev : Knext;
+                        for (int i = 0; i < 5; ++i)
+                            if (!rowDec[i])
+                                for (int j = 0; j < 5; ++j) Kdst[(size_t)ic * 25 + i * 5 + j] += static_cast<flow_float>(Kv[i][j]);
+                    }
+                } else if (isLineFace && lineViscCoupling == 1) {
                     // v2 (plans/active/time_integration-line-implicit-viscous-v2.md): line 面は
                     // スカラー粘性結合 K += α·I (α=ν_eff·δ/dcc) と対にし、対角は 2α→α に置換して
                     // 真の 1D 拡散行 [−α, 2α, −α] を line 内で完成させる (off-line 面は従来 2α のまま)。
@@ -1095,7 +1130,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
                 diag_block[4][4] = static_cast<ST>(1.0);
                 // implicitThermalJacobian ビット 2: 拘束の行 Δ(ρE)_w − e_w·Δρ_w = 0 (壁温のピン ρE = ρ·e(T_w) と一致、壁は u = 0)。
-                if ((thermalJac & 2) != 0) diag_block[4][0] = -static_cast<ST>(roe[ic]) / density;
+                // lineViscCoupling 2 も同じ拘束の行にする (隣の熱伝導の K を消す前提の ΔT_w = 0、plan time_integration-line-viscous-jacobian §4.1)。
+                if ((thermalJac & 2) != 0 || lineViscCoupling == 2) diag_block[4][0] = -static_cast<ST>(roe[ic]) / density;
             }
             rhs[4] = static_cast<ST>(0.0);
         }
@@ -1559,10 +1595,11 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0),  /* useDiagCache: float・point 経路のみ */ \
                 (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr),  /* 近傍 dq の AoS 版 */ \
                 cfg.implicitThermalJacobian,  /* エネルギー行の熱伝導 Jacobian / 等温壁の拘束の行 (ビットマスク) */ \
-                ((cfg.implicitThermalJacobian & 1) ? var.c_d["thermCond"] : nullptr), \
-                ((cfg.implicitThermalJacobian & 1) ? var.c_d["cp"] : nullptr), \
-                ((cfg.implicitThermalJacobian & 1) ? var.p_d["fx"] : nullptr), \
-                cfg.turbulentPrandtl
+                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling == 2) ? var.c_d["thermCond"] : nullptr), \
+                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling == 2) ? var.c_d["cp"] : nullptr), \
+                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling == 2) ? var.p_d["fx"] : nullptr), \
+                cfg.turbulentPrandtl, \
+                ((cfg.lineViscCoupling == 2) ? var.c_d["vis_lam"] : nullptr)  /* 節点ごとの層流粘性 (残差の μ_f と揃える) */
             // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
             const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&
                                  !(cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers > 0);

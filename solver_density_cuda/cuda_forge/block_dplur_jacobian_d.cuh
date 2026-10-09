@@ -89,4 +89,88 @@ BLKDPLUR_HD void accumulate_split_jacobian_cf(
     }
 }
 
+// 薄層の粘性・熱伝導の Jacobian (ライン面 1 つ分、`lineViscCoupling: 2`、plan time_integration-line-viscous-jacobian §4.1)。
+// 流束モデル (自節点 i の残差への寄与、隣 j): R_i ⊃ [0, βPΔu, κΔT + (βPΔu)·ū]、Δ(·) = (·)_j − (·)_i、ū = f_i u_i + (1 − f_i) u_j、
+// P = I + n̂n̂ᵀ/3 (薄層の応力の法線成分 4/3。現在の離散残差の厳密な微分ではなく前処理行列としての近似)。
+// D += −∂R_i/∂Q_i、K += ∂R_i/∂Q_j (符号系は D ΔQ_i − K ΔQ_j = rhs)。K == nullptr なら K を組まない。
+// ∂u/∂Q = (1/ρ)[−u, I, 0]、∂T/∂Q = (γ/c_p)(1/ρ)[−(e − ½|u|²), −uᵀ, 1] (e = ρE/ρ − ½|u|²、物性と γ は凍結)。
+// jVelFixed: 隣 j の速度が Dirichlet なら運動量・仕事の K を 0、jTempFixed: 隣 j の温度が固定 (等温壁の拘束の行) なら熱伝導の K を 0。
+// 連続の行には何も足さない (粘性の流束がない)。δQ = δρ(1, u, v, w, E) (速度・温度を保つ密度の補正) に対して D・K の作用は 0。
+template<typename T>
+BLKDPLUR_HD void accumulate_thinlayer_visc_jacobian(
+    T beta, T kappa, T nx, T ny, T nz, T fi,
+    T rho_i, T u_i, T v_i, T w_i, T rhoE_i, T gam_i, T cp_i,
+    T rho_j, T u_j, T v_j, T w_j, T rhoE_j, T gam_j, T cp_j,
+    bool jVelFixed, bool jTempFixed,
+    T D[5][5], T (*K)[5])
+{
+    const T third = static_cast<T>(1.0) / static_cast<T>(3.0);
+    const T n[3] = {nx, ny, nz};
+    const T ua[3] = {u_i, v_i, w_i};
+    const T ub[3] = {u_j, v_j, w_j};
+    T P[3][3];
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b)
+            P[a][b] = ((a == b) ? static_cast<T>(1.0) : static_cast<T>(0.0)) + third * n[a] * n[b];
+    const T inv_ri = static_cast<T>(1.0) / rho_i;
+    const T inv_rj = static_cast<T>(1.0) / rho_j;
+    // 運動量の行: β P ∂u/∂Q
+    for (int a = 0; a < 3; ++a) {
+        for (int b = 0; b < 3; ++b) {
+            const T pb = beta * P[a][b];
+            D[1 + a][0] += -pb * ua[b] * inv_ri;
+            D[1 + a][1 + b] += pb * inv_ri;
+            if (K != nullptr && !jVelFixed) {
+                K[1 + a][0] += -pb * ub[b] * inv_rj;
+                K[1 + a][1 + b] += pb * inv_rj;
+            }
+        }
+    }
+    // エネルギーの行 (熱伝導): κ ∂T/∂Q
+    {
+        const T q2 = u_i * u_i + v_i * v_i + w_i * w_i;
+        const T e = rhoE_i * inv_ri - static_cast<T>(0.5) * q2;
+        const T c = kappa * (gam_i / cp_i) * inv_ri;
+        D[4][0] += -c * (e - static_cast<T>(0.5) * q2);
+        for (int b = 0; b < 3; ++b) D[4][1 + b] += -c * ua[b];
+        D[4][4] += c;
+    }
+    if (K != nullptr && !jTempFixed) {
+        const T q2 = u_j * u_j + v_j * v_j + w_j * w_j;
+        const T e = rhoE_j * inv_rj - static_cast<T>(0.5) * q2;
+        const T c = kappa * (gam_j / cp_j) * inv_rj;
+        K[4][0] += -c * (e - static_cast<T>(0.5) * q2);
+        for (int b = 0; b < 3; ++b) K[4][1 + b] += -c * ub[b];
+        K[4][4] += c;
+    }
+    // エネルギーの行 (粘性の仕事 (βPΔu)·ū): −∂/∂u_i = β(Pū − f_i PΔu)、∂/∂u_j = β(Pū + (1 − f_i) PΔu)
+    T Pu[3], Pd[3];
+    for (int a = 0; a < 3; ++a) {
+        Pu[a] = static_cast<T>(0.0); Pd[a] = static_cast<T>(0.0);
+        for (int b = 0; b < 3; ++b) {
+            const T ubar = fi * ua[b] + (static_cast<T>(1.0) - fi) * ub[b];
+            Pu[a] += P[a][b] * ubar;
+            Pd[a] += P[a][b] * (ub[b] - ua[b]);
+        }
+    }
+    {
+        T wu = static_cast<T>(0.0);
+        for (int b = 0; b < 3; ++b) {
+            const T wb = beta * (Pu[b] - fi * Pd[b]);
+            D[4][1 + b] += wb * inv_ri;
+            wu += wb * ua[b];
+        }
+        D[4][0] += -wu * inv_ri;
+    }
+    if (K != nullptr && !jVelFixed) {
+        T wu = static_cast<T>(0.0);
+        for (int b = 0; b < 3; ++b) {
+            const T wb = beta * (Pu[b] + (static_cast<T>(1.0) - fi) * Pd[b]);
+            K[4][1 + b] += wb * inv_rj;
+            wu += wb * ub[b];
+        }
+        K[4][0] += -wu * inv_rj;
+    }
+}
+
 }  // namespace block_dplur
