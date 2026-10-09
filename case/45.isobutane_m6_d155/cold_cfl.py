@@ -33,6 +33,8 @@ ALT_BINARIES = {
     "thermjac5_fp64": ("985aca0f2ebba912851042ec9abc8b7deab9707b20f19f757641dc9b3521215e", "~/forge-thermjac-fp64"),
     # b4771052 (lineDtDirectionalCap を追加) + typedef double、2026-10-09 に同じ作業ツリーで再ビルド
     "thermjac_cap_fp64": ("35e498b14b5f3cdaa09b754f7bbaa6455f54631fd2edf1ad4929964e8828d4bc", "~/forge-thermjac-fp64"),
+    # 4d394a71 (ライン上の節点の対角を storeLU の sweep 以外で組まない、plan time_integration-line-implicit-speed 案 A) + typedef double、2026-10-09 AWS で新しい作業ツリーにビルド
+    "linespeed_fp64": ("d8b06ebcb91cfc3151cfcedf441b3e79f20f4c3702aa89e287801cb1c4f1d10b", "~/forge-linespeed-fp64"),
 }
 
 

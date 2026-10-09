@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `time_integration`
-- **status**: `draft`
+- **status**: `in_progress`
 - **related_docs**:
   - `methods/time_integration/implementation.md` の「line-implicit (`lineImplicit`, 2026-09-02)」と「v2」
 - **related_plans**:
@@ -66,38 +66,54 @@ case/45 の冷却ノズル (FP64 ビルド、AWS g5 の A10G) で、ライン陰
 | C | Thomas の内部精度を `implicitSolvePrecision` に従わせる (0 = float で演算・LU/W/K を float で保存、1 = 従来の double) | 既定の ISP 0 で丸めが float になる (sweep の点解は ISP 0 で既に float) | B と合わせて約 2〜2.5 |
 | D | K を単位ベクトルで 5 回呼んで列を抜く代わりに、閉形式 −A⁻ = n₂I + n_a1 r₁⊗l₁ + n_a5 r₅⊗l₅ を 1 回で 25 成分組む | 不変 (同じ式、丸めの順序が変わる) | loop 0 だけなので小 |
 
-A〜D をすべて入れると、ラインの 1 step は 37 ms → 22〜24 ms (point 19 ms の約 1.2 倍) の見込み。A は数値を変えないので先に入れられる。
+A〜D をすべて入れると、ラインの 1 step は 37 ms → 22〜24 ms (point 19 ms の約 1.2 倍) の見込み (未検証の目標)。
+
+**codex plan 段 (2026-10-09、§6.1) の反映**: 順序は A → D → B (double・部分ピボット付き LU のまま並列化)。**Thomas の既定は double を維持**し、
+float (C) と逆行列の保存は別の opt-in の実験に分ける (組立・係数保存・因子・前進代入の精度の組み合わせを表で定義してから)。
+A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RHS の拘束 (壁・軸の rhs 0) は毎 sweep 残す」(`lineKFreeze 1` の後続 subiteration は sweep 0 でも `storeLU 0`)。
 
 ## 5. 実装ステップ
 
-1. A (sweep カーネル)。2. B (`lineThomasFactor_d`・`lineThomasSolve_d` の書き直し、旧版は退避スイッチで残す)。3. C (精度のテンプレート化)。4. D。
-各段で §6 の計測と一致の確認を行う。
+1. A (sweep カーネル、4d394a71 で実装済み)。2. D。3. B (`lineThomasFactor_d`・`lineThomasSolve_d` の並列化、double・LU のまま、旧版は退避スイッチで残す)。
+4. (別の実験) C と逆行列の保存。各段で §6 の確認を行う。
 
 ### 5.1 残作業 (優先順)
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | 方針の決定 (ユーザ) と codex plan 段 | A〜D のどこまでやるか。cuda_forge の数値カーネルの変更なので plan 段のレビューと諮問を経てから実装する | F |
-| 2 | A の実装と確認 | `timeIntegration_d.cu` の sweep。合格: 1 step・20 step の場の差が同じバイナリの再実行の差 (V0_repeat.json の幅) に入る、block カーネルの ms/step の減少を nsys で確認 | O |
-| 3 | B・C・D | 合格は §6 | O |
+| 1 | codex plan 段の採否 | 判断: 2026-10-09 GO-with-changes (C0/M5/m1) を全件採用 (§6.1)。順序 A → D → B、既定 double 維持 | F |
+| 2 | A の確認 | `ab_lineA.sh` (run_0254〜0259)。合格は §6 の短期の一致 (A)。速さは §6 の性能の判定 | O |
+| 3 | D | 閉形式の K。合格: 面積係数・TP の固有ベクトル・`rowDec`・既存の粘性の加算を含めて、旧の列抽出の K と同じ状態で成分の相対差 ≤ 1e-12 (FP64) | O |
+| 4 | B (double・LU) | 合格: §6 の線形解の後退誤差と短期の一致、性能の判定 | O |
+| 5 | 検証の表 (§6) の他経路 | `lineImplicit 0`・部分被覆・可変長・`lineKFreeze 0/1`・周期ミラー・軸と壁の拘束行 (node のみ、cell は未検証と明記) | O |
+| 6 | 粘性 Jacobian plan との統合の後の再検証 | [time_integration-line-viscous-jacobian](time_integration-line-viscous-jacobian.md) は同じ D/K の組立を変える。速度の A/B では D/K の仕様を固定し、統合後に §6 を回し直す | O |
+| 7 | C・逆行列の保存 (別の opt-in 実験) | 精度の組み合わせの表と、線形残差・長期の収束性能で採否 | F |
 
-## 6. 検証 (案)
+## 6. 検証 (codex plan 段の反映後、2026-10-09)
 
-- **一致**: 旧 (現行) と新で、run_0183 の res_100000 から 1 step と 20 step の場の差の相対 RMS を、同じバイナリの再実行の差
-  (`_band_ab/cold_pair/V0_repeat.json`、directional・20 step の ρ で 0.85〜1.2e-7) と比べる。C (float) は丸めが変わるので別の基準
-  (同じ状態でのライン解の相対差と、run_0223 の設定で 5000 step の欠損・θ_r の軌道) を事前に決める。
-- **速さ**: §4.1 と同じ手順 (nsys、GPU 専有、500 step) でカーネル別の ms/step。
-- **他のケース**: ライン陰解法を使う case/39 (DDES、dual-time) の FP32 ビルドでも 1 本確かめる。
+- **短期の一致 (数値を変えない A・D)**: 旧 (現行、sha256 35e498b1…) と新で、run_0183 の res_100000 から run_0223 の設定 (ライン + 方向別 + キー 5 + 上限 50) を
+  1 step と 20 step。旧・新それぞれ 2 本 (20 step) と 1 本 (1 step)。量: ρ・ρu・ρv・ρE・ρk・ρω・P・T の場の差の相対 RMS と最大絶対差。
+  **合格: 旧 × 新の各量の相対 RMS・最大絶対差が、同じ設定の同じバイナリの再実行 (旧 × 旧・新 × 新) の最大の 3 倍以内** (1 step は再実行の差が丸めの桁なので、
+  実装の誤りは桁違いの差として出る)。短期の一致は「収束解の一致」の証拠にしない。
+- **線形解 (B)**: 凍結した実際の D・K・rhs から、緩和前のライン解の成分別にスケーリングした後退誤差 η = ‖b − Ax‖∞/(‖A‖∞‖x‖∞ + ‖b‖∞) と、
+  独立した倍精度の解との差、行交換の回数、分解の失敗の件数を旧・新で比べる (合格値は B の実装前に登録する)。
+- **長期の品質 (B 以降)**: run_0223 の設定で同じ step 数を回し、全残差の `check_convergence` と θ_r・Q_w・欠損の `check_quasisteady` を旧・新で比べる。
+- **性能**: カーネルの内訳は nsys (§4.1)。**採否は native・専有 GPU・`FORGE_PROFILE` なし・profiler なしの壁時計**で、初期化と出力を除いた区間の
+  ms/step を 3 回以上測って中央値とばらつきを出す。
+- **他の経路**: §5.1 #5。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 B は double・LU のまま並列化し逆行列化を分離、後退誤差 η で判定 (§6)。M2 既定 double 維持、float は opt-in (§4.3 末尾、§5.1 #7)。M3 短期の一致と長期の品質を別ゲート (§6)。M4 他経路の表 (§5.1 #5)、A の契約を onLine && !storeLU と明記。M5 採否は profiler なしの反復計測 (§6)。m6 影響範囲と粘性 Jacobian plan との統合順 (§5.1 #6、§7) |
 
 ## 7. 影響範囲
 
-- `solver_density_cuda/cuda_forge/timeIntegration_d.cu`、`block_dplur_jacobian_d.cuh`。`lineImplicit 0` の経路は変えない。
+- `solver_density_cuda/cuda_forge/timeIntegration_d.cu` (sweep・Thomas・wrapper)、`block_dplur_jacobian_d.cuh` (D)、`solver_density_cuda/mesh/mesh.hpp`・`mesh.cpp` (因子の型と確保、C のとき)、
+  `solver_density_cuda/input/solverConfig.*` (C の opt-in のとき)。`lineImplicit 0` の経路は変えない。
 
 ## 変更ログ
 
 - 2026-10-09: 起票 (計測と候補の整理、draft)。
+- 2026-10-09: codex plan 段 (GO-with-changes) を全件採用し in_progress。A を実装 (4d394a71)。
