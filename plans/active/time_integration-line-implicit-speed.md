@@ -127,31 +127,39 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
   run: `case/45.isobutane_m6_d155/run_0275_cmpB`・`run_0276〜0281_abB_*` (短期の一致、1 step の ρ の RMS 1.2e-14)・`run_0283〜0285_timeB_*`・`run_0286_prof_lineB`・`run_0287_cmpB2`・`run_0289〜0291_timeB2_*`・
   `run_0292_cmpB3`・`run_0293〜0295_timeB3_*`・`run_0296_timeA_recheck`・`run_0297_prof_lineB3`・`run_0298・0299_timeD_*`。
 
-### 6.2 事前登録: §5.1 #7 逆行列の保存 (`FORGE_LINE_INV=1`、2026-10-09)
+### 6.2 事前登録: §5.1 #7 逆行列の保存 (`FORGE_LINE_INV=1`、2026-10-09、codex plan 段 [記録](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan-2.md) の反映後)
 
 - **実装**: `lineThomasFactor_d<true>` が部分ピボット付き double LU (従来と同じ `lu5_factor`) から単位ベクトルの代入 5 回で M̃⁻¹ を作り、LU の代わりに保存する。
   W_k = M̃⁻¹Knext_k は従来どおり LU の代入 (不変)。`lineThomasSolve_d<true>` の前進は `lu5_solve` の代わりに 5×5 の行列ベクトル積。後退代入・D/K の組立・保存の精度は不変。
-  既定 (変数なし) の経路は変えない。並列版 (`FORGE_LINE_PAR=1`) とは組み合わせない (起動時に止める)。
-- **バイナリ**: lineI = この commit + typedef double (AWS、`~/forge-linevisc-fp64` を上書き)。設定は run_0223 と同じ (値 0・方向別・キー 5・上限 50・cfl 4・緩和 0.7・sweep 5・ISP 0)、
+  既定 (変数なし) の経路は変えない。`FORGE_LINE_PAR`・`FORGE_LINE_MONO`・`FORGE_LINE_DEBUG_POINT`・`FORGE_LINE_NOOP` とは組み合わせない (最初の呼び出しで止める)。
+  実効のモード (LU / INV / PAR / …) を factor・solve の 1 回目と 1000 回ごとにログへ書く。
+- **バイナリ**: lineI = この節を書いた commit + typedef double (AWS、`~/forge-linevisc-fp64` を上書き)。設定は run_0223 と同じ (値 0・方向別・キー 5・上限 50・cfl 4・緩和 0.7・sweep 5・ISP 0)、
   初期場は run_0183 の res_100000。尺度は run_0183 のリミッタの基準値 (ρ_ref 0.8740、a_ref 359.77 m/s): ρ → ρ_ref、ρu → ρ_ref·a_ref = 314.4、ρE → ρ_ref·a_ref² = 1.131e5。
-- **(1) 全ラインの照合** `run_0324_invcmp`: `FORGE_LINE_COMPARE=1` + `FORGE_LINE_INV=1` で 20 step (従来の LU を別のバッファで解き、逆行列の解で進める)。
-  合格: 全 solve で成分ごとの max|Δdq_c| / 尺度_c ≤ 1e-8 (dq は緩和後)、W の差 0 (同じ演算)、分解の失敗の不一致 0。成分ごとの max|Δdq_c| / max|dq_c| も記録する。
-- **(2) 後退誤差** `run_0325_invdump_c1`・`run_0326_invdump_c20` (逆行列) と `run_0327_ludump_c1`・`run_0328_ludump_c20` (従来、参照): factor の 1・20 回目の書き出し
-  (ライン 12・33・43・65・1640・2183)。緩和前の解 x = dq_new/0.7 について、尺度で無次元化した系 (Â = S⁻¹AS、x̂ = S⁻¹x、b̂ = S⁻¹b) の
-  η = ‖b̂ − Âx̂‖∞ / (‖Â‖∞‖x̂‖∞ + ‖b̂‖∞) をライン・sweep ごとに出す。合格: 逆行列の η ≤ 1e-11 (全ライン・全 sweep)。従来の η も並べる。
-- **(3) 性能** `run_0329〜0331_timeLU_*`・`run_0332〜0334_timeINV_*`: 1000 step、出力なし (最後だけ)、他の forge が無いこと (`pgrep -x forge`) を確かめて交互に、
-  `forge_run.log` の Time から ms/step の中央値と幅。
-- **(4) 同じ品質までの総時間** `run_0335_qualLU`・`run_0336_qualINV`: 10000 step・1000 ごと (extraFields `res_ro`)、欠損 2π Σ res_ro が初めて 1.0 kg/s 以下になる step (隣の出力の線形補間)
-  × (3) の中央値 ms/step。両方の run で非有限・非物理値なし、`check_convergence` の VERDICT を記録 (短い試験の NOT CONVERGED は許す)。
-- **分岐**: (1) か (2) を外れる → 不採用 (逆行列の精度が足りない)。(3) で逆行列の中央値が従来以上 → 不採用。
-  (4) で到達 step の差が ±10 % 以内かつ総時間が短い → **採用の候補** (既定にするかは別の判断。数値は丸めの順序で変わる)。到達 step の差が 10 % を超える → 判別不能 (1 本ずつでは軌道の違いが性能差を上回る、
-  再実行で揃えるかを決める)。どちらも 10000 step で 1.0 に届かない → 末尾の欠損 × 時間で比べ、届かなかったと書く。
-- 監査: 中間の res は欠損の時系列を `cold_series.py` で取り終えたら消す (res_0・最終・時系列の JSON は残す)。
+- **(1) 全ラインの照合と後退誤差** `run_0324_invcmp`: `FORGE_LINE_COMPARE=1` + `FORGE_LINE_INV=1` で 20 step (factor 20 回・solve 100 回)。従来の LU を別のバッファで解き、逆行列の解で進める。
+  各 solve の直後に、保存した D・K・rhs と緩和前の解から、**全ライン**の η = ‖b̂ − Âx̂‖∞ / (‖Â‖∞‖x̂‖∞ + ‖b̂‖∞) (尺度で無次元化) を逆行列・従来の両方で出す (`[lineEta]` の行: 最大・ライン・評価本数・1e-11 超の本数・分解の失敗の本数)。
+  合格 (すべて): 両方の腕の係数・因子・補正に非有限 0 件、全 solve で成分ごとの max|Δdq_c| / 尺度_c ≤ 1e-8 (dq は緩和後)、W の差 0、分解の失敗の不一致 0 (各腕の失敗の本数も記録)、
+  逆行列の η ≤ 1e-11 (評価した全ライン・全 solve)。**従来の η も 1e-11 を超える solve があれば**、逆行列の精度不足とは断定せず、その solve は共通の系の問題として判別不能とする。
+  成分ごとの max|Δdq_c| / max|dq_c| も記録する。
+- **(2) 独立の照合 (CPU)** `run_0325_invdump_c1`・`run_0326_invdump_c20` (逆行列) と `run_0327_ludump_c1`・`run_0328_ludump_c20` (従来): factor の 1・20 回目の書き出し。
+  `FORGE_LINE_DUMP_NODES` は節点番号で、節点 1572・4113・5321・7985・198560・264263 を含むライン (S0 の書き出しでライン 12・33・43・65・1640・2183) を選ぶ。
+  `line_eta.py` (密行列の CPU 計算) の η が (1) の GPU の η と桁で一致することを確かめる (独立した実装の照合。合否は (1) で決める)。
+- **(3) 性能** `run_0329〜0331_timeLU_*`・`run_0332〜0334_timeINV_*`: 1000 step、交互に 3 組。比較・書き出し・profiler の環境変数は無効。投入前に GPU 上の計算プロセス
+  (`nvidia-smi --query-compute-apps`) が自分のもの以外に無いことを記録する。量は各 run の **101〜999 step の 1 step ごとの ms の平均** (暖機と最後の出力の step を除く、ログの各 step の行から)。
+  判定: 組ごとの差 (INV − LU) が 3 組とも負で、その中央値の大きさが従来の 3 本の幅 (最大 − 最小) を超える → 速い。3 組とも正で同じ条件 → 遅い。それ以外 → 判別不能。
+- **(4) 途中の到達時間 (予備の選別)** `run_0335_qualLU`・`run_0336_qualINV`: 10000 step・500 ごと (extraFields `res_ro`)。到達 = |2π Σ res_ro| ≤ 1.0 kg/s が step 0 を除く出力で
+  **2 回続けて**成り立つ最初の区間で、その手前の出力との線形補間の step。到達までの累積壁時計はログの各 step の ms の和で直接出す (単価 × step の推定にしない)。
+  片方・両方が届かなければ打ち切りとして記録し、採用の候補の判定は保留。非有限・非物理値なし、`check_convergence` の VERDICT を記録 (短い試験の NOT CONVERGED は許す)。
+  **これは品質の判定ではない**: 全残差・θ_r・Q_w を含む品質と、point 仕上げまでの総壁時計は §5.1 #9 で判定する。
+- **分岐**: (1) の合格条件を外す → 不採用 (従来の η も超えた solve は判別不能として別に書く)。(3) で「遅い」→ 不採用、「判別不能」→ 速さの根拠なしとして保留。
+  (1) 合格・(3) で速い・(4) で両方到達して到達の差が ±10 % 以内かつ累積壁時計が短い → **#9 の比較に逆行列の腕を使う候補** (既定にするかは #9 の後)。
+  (4) の到達の差が 10 % を超える → 判別不能 (1 本ずつでは軌道の違いが性能差を上回る)。
+- 監査: 中間の res は判定と監査が終わるまで残す。消すときは README に書く。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#7 の事前登録) | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan-2.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan-2.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 非有限の数え上げ、M2 全ラインの η を比較の経路で、M3 到達を |Σ|・2 回連続・step 0 除外・500 ごと、M4 (4) は予備の選別で品質は #9、M5 時計を 1 step ごとの ms (101〜999) と組ごとの差で、m6 スイッチの併用を止める (§6.2) |
 | plan | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 B は double・LU のまま並列化し逆行列化を分離、後退誤差 η で判定 (§6)。M2 既定 double 維持、float は opt-in (§4.3 末尾、§5.1 #7)。M3 短期の一致と長期の品質を別ゲート (§6)。M4 他経路の表 (§5.1 #5)、A の契約を onLine && !storeLU と明記。M5 採否は profiler なしの反復計測 (§6)。m6 影響範囲と粘性 Jacobian plan との統合順 (§5.1 #6、§7) |
 
 ## 7. 影響範囲

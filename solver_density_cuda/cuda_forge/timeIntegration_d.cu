@@ -4,6 +4,8 @@
 #include "cuda_forge/eos_jacobian_d.cuh"  // 一般EOS固有系 (eos_split_jacobian_general_closed)。precond 経路で使用
 #include "cuda_forge/block_dplur_jacobian_d.cuh"  // block_dplur::accumulate_split_jacobian_cf (共有ヘッダ)
 #include <cstdlib>
+#include <cmath>
+#include <cstdio>
 #include <cooperative_groups.h>
 #include <cstring>
 #include <string>
@@ -2396,26 +2398,38 @@ static bool lineSerialEnabled() {
     static const bool v = [](){ const char* e = getenv("FORGE_LINE_PAR"); return !(e && atoi(e) != 0); }();
     return v;
 }
+static bool lineCompareEnabled() {
+    static const bool v = [](){ const char* e = getenv("FORGE_LINE_COMPARE"); return e && atoi(e) != 0; }();
+    return v;
+}
 // FORGE_LINE_INV=1 (plan time_integration-line-implicit-speed §5.1 #7、opt-in の実験): 1 ライン 1 スレッドの factor で逆行列を保存し、solve の前進を行列ベクトル積にする。
 // 並列版 (FORGE_LINE_PAR=1) とは組み合わせない (起動時に止める)。FORGE_LINE_COMPARE=1 と組むと、従来の LU (別のバッファ) と逆行列 (本来のバッファ) を比べる。
 static bool lineInvEnabled() {
     static const bool v = [](){
         const char* e = getenv("FORGE_LINE_INV"); const bool on = e && atoi(e) != 0;
-        if (on) {
-            const char* p = getenv("FORGE_LINE_PAR");
-            if (p && atoi(p) != 0) { fprintf(stderr, "[line] FORGE_LINE_INV と FORGE_LINE_PAR は組み合わせない — 止める\n"); exit(EXIT_FAILURE); }
+        if (on) {   // 逆行列の経路を通らない診断の経路とは組み合わせない (codex 2026-10-09 m6: 黙って無効になるのを防ぐ)
+            for (const char* k : {"FORGE_LINE_PAR", "FORGE_LINE_MONO", "FORGE_LINE_DEBUG_POINT", "FORGE_LINE_NOOP"}) {
+                const char* p = getenv(k);
+                if (p && atoi(p) != 0) { fprintf(stderr, "[line] FORGE_LINE_INV と %s は組み合わせない — 止める\n", k); exit(EXIT_FAILURE); }
+            }
             printf("[line] FORGE_LINE_INV=1: 逆行列を保存して前進の代入を行列ベクトル積にする (opt-in の実験)\n");
         }
         return on; }();
     return v;
 }
-static bool lineCompareEnabled() {
-    static const bool v = [](){ const char* e = getenv("FORGE_LINE_COMPARE"); return e && atoi(e) != 0; }();
-    return v;
+// 実効のモードを記録する (factor・solve の 1 回目と 1000 回ごと)
+static void lineModeNote(const char* phase, long& count) {
+    ++count;
+    if (count == 1 || count % 1000 == 0) {
+        const char* m = getenv("FORGE_LINE_MONO"); const char* dp = getenv("FORGE_LINE_DEBUG_POINT"); const char* nn = getenv("FORGE_LINE_NOOP");
+        const char* mode = (nn && atoi(nn)) ? "NOOP" : (dp && atoi(dp)) ? "DEBUG_POINT" : (m && atoi(m)) ? "MONO" :
+                           lineInvEnabled() ? "INV" : (!lineSerialEnabled() ? "PAR" : "LU");
+        printf("[line] %s %ld 回目: モード %s%s\n", phase, count, mode, lineCompareEnabled() ? " (比較あり)" : "");
+    }
 }
 namespace line_cmp {
 struct Alt { double* W = nullptr; double* LU = nullptr; double* y = nullptr; signed char* piv = nullptr; unsigned char* fail = nullptr;
-             flow_float* dq[5] = {nullptr, nullptr, nullptr, nullptr, nullptr}; unsigned long long* red = nullptr; };
+             flow_float* dq[5] = {nullptr, nullptr, nullptr, nullptr, nullptr}; unsigned long long* red = nullptr; double* eta = nullptr; };
 static Alt a;
 static int factorCalls = 0, solveCalls = 0;
 static void ensure(mesh& msh) {
@@ -2427,29 +2441,99 @@ static void ensure(mesh& msh) {
     gpuErrchk(cudaMalloc((void**)&a.piv, sizeof(signed char) * 5 * n));
     gpuErrchk(cudaMalloc((void**)&a.fail, sizeof(unsigned char) * std::max(msh.nImplicitLines, (geom_int)1)));
     for (int k = 0; k < 5; ++k) gpuErrchk(cudaMalloc((void**)&a.dq[k], sizeof(flow_float) * n));
-    gpuErrchk(cudaMalloc((void**)&a.red, sizeof(unsigned long long) * 3));
+    gpuErrchk(cudaMalloc((void**)&a.red, sizeof(unsigned long long) * 4));
+    gpuErrchk(cudaMalloc((void**)&a.eta, sizeof(double) * std::max(msh.nImplicitLines, (geom_int)1)));
 }
-// 最大絶対差・最大絶対値 (非負の double のビット列は大小の順を保つので unsigned long long の atomicMax で取る)・一致しない件数
+// 最大絶対差・最大絶対値 (非負の double のビット列は大小の順を保つので unsigned long long の atomicMax で取る)・一致しない件数・非有限の件数
+// (codex 2026-10-09 M1: NaN は atomicMax・std::max の比較で落ちるので、非有限は別に数えて比較の失格にする)
 template<typename T>
 __global__ void diff_d(size_t n, const T* x, const T* ref, unsigned long long* red) {
     for (size_t i = blockDim.x * (size_t)blockIdx.x + threadIdx.x; i < n; i += (size_t)blockDim.x * gridDim.x) {
-        const double d = fabs((double)x[i] - (double)ref[i]);
-        const double m = fabs((double)ref[i]);
+        const double xv = (double)x[i], rv = (double)ref[i];
+        if (!isfinite(xv) || !isfinite(rv)) { atomicAdd(&red[3], 1ULL); atomicAdd(&red[2], 1ULL); continue; }
+        const double d = fabs(xv - rv);
+        const double m = fabs(rv);
         atomicMax(&red[0], (unsigned long long)__double_as_longlong(d));
         atomicMax(&red[1], (unsigned long long)__double_as_longlong(m));
         if (x[i] != ref[i]) atomicAdd(&red[2], 1ULL);
     }
 }
+static unsigned long long nonfiniteTotal = 0;   // 比較の全体で見つけた非有限の件数 (1 件でも比較は失格)
 template<typename T>
 static void diff(const char* what, size_t n, const T* x, const T* ref, double& md, double& mx, unsigned long long& nd) {
-    gpuErrchk(cudaMemset(a.red, 0, sizeof(unsigned long long) * 3));
+    gpuErrchk(cudaMemset(a.red, 0, sizeof(unsigned long long) * 4));
     diff_d<T><<<256, 256>>>(n, x, ref, a.red);
     gpuErrchk(cudaPeekAtLastError());
-    unsigned long long h[3];
+    unsigned long long h[4];
     gpuErrchk(cudaMemcpy(h, a.red, sizeof(h), cudaMemcpyDeviceToHost));
     double d, m; memcpy(&d, &h[0], 8); memcpy(&m, &h[1], 8);
     md = std::max(md, d); mx = std::max(mx, m); nd += h[2];
-    (void)what;
+    if (h[3] != 0) { nonfiniteTotal += h[3]; printf("[lineCompare] 非有限 %llu 件 (%s)\n", h[3], what); }
+}
+// 全ラインの後退誤差 (plan time_integration-line-implicit-speed §6.2 (2)、codex 2026-10-09 M2): 保存した D (storeLU の sweep の値が残る)・Kprev・Knext・rhs と
+// 緩和前の解 x = dq/relax から、尺度 S = diag(ρ_ref, ρ_ref a_ref ×3, ρ_ref a_ref²) で無次元化した η = ‖b̂ − Âx̂‖∞ / (‖Â‖∞‖x̂‖∞ + ‖b̂‖∞) をラインごとに出す。
+// 分解に失敗したラインは −1 (評価しない)、非有限は +inf。
+struct EtaArgs { const flow_float* d[25]; const flow_float* rhs[5]; const flow_float* dq[5]; };
+__global__ void eta_d(geom_int nLines, const geom_int* off, const geom_int* cells, const flow_float* Kprev, const flow_float* Knext,
+                      EtaArgs A, const unsigned char* fail, double relax, double sc0, double sc1, double sc4, double* eta)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    if (fail[l] != 0) { eta[l] = -1.0; return; }
+    const double sc[5] = {sc0, sc1, sc1, sc1, sc4};
+    const geom_int b = off[l], e = off[l + 1];
+    double mA = 0.0, mX = 0.0, mB = 0.0, mR = 0.0;
+    bool bad = false;
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int ic = cells[p];
+        double x[5], xm[5], xp[5];
+        for (int j = 0; j < 5; ++j) {
+            x[j]  = (double)A.dq[j][ic] / relax;
+            xm[j] = (p > b)     ? (double)A.dq[j][cells[p - 1]] / relax : 0.0;
+            xp[j] = (p + 1 < e) ? (double)A.dq[j][cells[p + 1]] / relax : 0.0;
+        }
+        for (int i = 0; i < 5; ++i) {
+            double r = (double)A.rhs[i][ic], rowA = 0.0;
+            for (int j = 0; j < 5; ++j) {
+                const double dij = (double)A.d[i * 5 + j][ic];
+                r -= dij * x[j]; rowA += fabs(dij) * sc[j];
+                if (p > b)     { const double k = (double)Kprev[(size_t)ic * 25 + i * 5 + j]; r += k * xm[j]; rowA += fabs(k) * sc[j]; }
+                if (p + 1 < e) { const double k = (double)Knext[(size_t)ic * 25 + i * 5 + j]; r += k * xp[j]; rowA += fabs(k) * sc[j]; }
+            }
+            const double rh = fabs(r) / sc[i], bh = fabs((double)A.rhs[i][ic]) / sc[i], xh = fabs(x[i]) / sc[i], ah = rowA / sc[i];
+            if (!isfinite(rh) || !isfinite(bh) || !isfinite(xh) || !isfinite(ah)) bad = true;
+            mR = fmax(mR, rh); mB = fmax(mB, bh); mX = fmax(mX, xh); mA = fmax(mA, ah);
+        }
+    }
+    const double den = mA * mX + mB;
+    eta[l] = bad ? INFINITY : (den > 0.0 ? mR / den : 0.0);
+}
+static void eta(const char* arm, int call, solverConfig& cfg, mesh& msh, variables& var, flow_float* const dq[5], const unsigned char* fail) {
+    EtaArgs A;
+    static const char* dn[25] = {"diag_block_00","diag_block_01","diag_block_02","diag_block_03","diag_block_04","diag_block_10","diag_block_11","diag_block_12","diag_block_13","diag_block_14",
+                                 "diag_block_20","diag_block_21","diag_block_22","diag_block_23","diag_block_24","diag_block_30","diag_block_31","diag_block_32","diag_block_33","diag_block_34",
+                                 "diag_block_40","diag_block_41","diag_block_42","diag_block_43","diag_block_44"};
+    for (int k = 0; k < 25; ++k) A.d[k] = var.c_d[dn[k]];
+    static const char* rn[5] = {"rhs_block_0","rhs_block_1","rhs_block_2","rhs_block_3","rhs_block_4"};
+    for (int k = 0; k < 5; ++k) { A.rhs[k] = var.c_d[rn[k]]; A.dq[k] = dq[k]; }
+    const double ro = cfg.limiterRoRef > 0.0 ? cfg.limiterRoRef : 1.0, ar = cfg.limiterARef > 0.0 ? cfg.limiterARef : 1.0;
+    const int threads = 64, grid = (int)((msh.nImplicitLines + threads - 1) / threads);
+    eta_d<<<grid, threads>>>(msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, msh.line_Kprev_d, msh.line_Knext_d, A, fail,
+                             (double)cfg.implicitRelax, ro, ro * ar, ro * ar * ar, a.eta);
+    gpuErrchk(cudaPeekAtLastError());
+    std::vector<double> h(msh.nImplicitLines);
+    gpuErrchk(cudaMemcpy(h.data(), a.eta, sizeof(double) * h.size(), cudaMemcpyDeviceToHost));
+    double mx = 0.0; long arg = -1; size_t nEval = 0, nFail = 0, nOver = 0, nBad = 0;
+    for (size_t i = 0; i < h.size(); ++i) {
+        if (h[i] < 0.0) { ++nFail; continue; }
+        ++nEval;
+        if (!std::isfinite(h[i])) { ++nBad; continue; }
+        if (h[i] > 1.0e-11) ++nOver;
+        if (h[i] > mx) { mx = h[i]; arg = (long)i; }
+    }
+    printf("[lineEta] solve %d %s: η 最大 %.3e (ライン %ld)、評価 %zu 本、1e-11 超 %zu 本、非有限 %zu 本、分解の失敗 %zu 本 (尺度 ρ_ref %.6g・a_ref %.6g)\n",
+           call, arm, mx, arg, nEval, nOver, nBad, nFail, ro, ar);
+    if (nBad) nonfiniteTotal += nBad;
 }
 } // namespace line_cmp
 
@@ -2495,6 +2579,9 @@ static void launchLineSolve(bool par, bool inv, solverConfig& cfg, mesh& msh, va
 void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (msh.nImplicitLines <= 0) return;
+    static long nFactorCalls = 0;
+    (void)lineInvEnabled();                 // スイッチの整合を最初の呼び出しで検査する (診断の早期 return より前)
+    lineModeNote("factor", nFactorCalls);
     if (lineMonoEnabled()) return;   // モノリシック時は毎 sweep の lineThomas_d が全てやる
     static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
     static const bool dbgNoop = [](){ const char* e = getenv("FORGE_LINE_NOOP"); return e && atoi(e) != 0; }();
@@ -2526,6 +2613,9 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
 void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
 {
     if (msh.nImplicitLines <= 0) return;
+    static long nSolveCalls = 0;
+    (void)lineInvEnabled();
+    lineModeNote("solve", nSolveCalls);
     static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
     static const bool dbgNoop = [](){ const char* e = getenv("FORGE_LINE_NOOP"); return e && atoi(e) != 0; }();
     if (dbgNoop) return;   // 切り分け: ライン CV は dq 据え置き (sweep 内 placeholder のまま)
@@ -2567,8 +2657,12 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
                 line_cmp::diff("dq", n, dqn[k], (const flow_float*)line_cmp::a.dq[k], d1, m1, n1);
                 dk[k] = d1; mk[k] = m1; d = std::max(d, d1); m = std::max(m, m1); nd += n1;
             }
-            printf("[lineCompare] solve %d: dq 最大差 %.3e / 最大 %.3e (不一致 %llu); 成分ごと 差/最大 = %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e\n",
-                   ++line_cmp::solveCalls, d, m, nd, dk[0], mk[0], dk[1], mk[1], dk[2], mk[2], dk[3], mk[3], dk[4], mk[4]);
+            printf("[lineCompare] solve %d: dq 最大差 %.3e / 最大 %.3e (不一致 %llu); 成分ごと 差/最大 = %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e (非有限の累計 %llu)\n",
+                   ++line_cmp::solveCalls, d, m, nd, dk[0], mk[0], dk[1], mk[1], dk[2], mk[2], dk[3], mk[3], dk[4], mk[4], line_cmp::nonfiniteTotal);
+            if (cmpInv) {                              // 後退誤差は逆行列 (本来のバッファ) と従来の LU (別のバッファ) の両方
+                line_cmp::eta("INV", line_cmp::solveCalls, cfg, msh, var, dqn, msh.line_fail_d);
+                line_cmp::eta("LU", line_cmp::solveCalls, cfg, msh, var, line_cmp::a.dq, line_cmp::a.fail);
+            }
         }
         line_dump::afterSolve(msh, var);
         return;
