@@ -63,8 +63,8 @@ ALT_BINARIES = {
     "lineH_fp64": ("561813b3564473420824ccca302b795bf9c344f69776f6381a43cb23e0ee6456", "~/forge-linevisc-fp64"),
     # 270f1d75 (opt-in の逆行列の保存 FORGE_LINE_INV と比較の経路の非有限・全ラインの η、plan time_integration-line-implicit-speed §6.2) + typedef double、~/forge-linevisc-fp64 を上書き (lineH は残っていない)
     "lineI_fp64": ("b467c3d7a1b32b595ac0ed8cc5db33f434329ef39865d727abfd11ef835b7661", "~/forge-linevisc-fp64"),
-    # 84fe2cee (opt-in の float の Thomas FORGE_LINE_F32=1/2、plan time_integration-line-implicit-speed §6.4) + typedef double、~/forge-linevisc-fp64 を上書き (lineI は残っていない)
-    "lineJ_fp64": ("9406d22cd16505553b0b440e7bb0d702378186e7eb27eeaab80d39fa5f8d0009", "~/forge-linevisc-fp64"),
+    # d1d0de7c (opt-in の float の Thomas FORGE_LINE_F32=1/2 と比較の経路の非有限の検査、plan time_integration-line-implicit-speed §6.4) + typedef double、~/forge-linevisc-fp64 を上書き (lineI は残っていない)
+    "lineJ_fp64": ("3d045221b8677ca108af365a4012010c3e8f0e65e5d9e3ef53827d9cef963c0f", "~/forge-linevisc-fp64"),
 }
 
 
