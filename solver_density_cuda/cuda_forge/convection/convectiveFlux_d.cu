@@ -211,6 +211,10 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             int fthy = 0;
             if (const char* e = getenv("FORGE_FACE_THERMOY"))      fthy = atoi(e);
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_faceThermoY,      &fthy, sizeof(int)));
+            int fhd = 0;
+            if (const char* e = getenv("FORGE_DIAG_FACE_H_DOUBLE")) fhd = atoi(e);
+            if (fhd) printf("[DIAG] FORGE_DIAG_FACE_H_DOUBLE: SLAU の TP 多成分の面エンタルピーを double で評価する (診断)\n");
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_faceHDouble,      &fhd,  sizeof(int)));
             const int rem = (cfg.discretization == "node") ? 1 : 0;   // node は常にエッジ中点再構成
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_reconEdgeMid,     &rem,  sizeof(int)));
             const int sfr = cfg.speciesFaceReconstruction;   // config 由来 (env でない)

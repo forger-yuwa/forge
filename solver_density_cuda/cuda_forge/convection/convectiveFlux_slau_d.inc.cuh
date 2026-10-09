@@ -398,8 +398,15 @@ __global__ void SLAU_d
                 }
                 const flow_float Tl = P_L/(ro_L*RgL);
                 const flow_float Tr = P_R/(ro_R*RgR);
-                h_p = thermo_h_mix_f(spf, nSpecies, YL, Tl) + 0.5f*velocity2_L;
-                h_m = thermo_h_mix_f(spf, nSpecies, YR, Tr) + 0.5f*velocity2_R;
+                if (g_faceHDouble) {   // 診断 (§6.15、既定 off): 同じ係数・datum の double 版
+                    double YLd[THERMO_MAX_SPECIES], YRd[THERMO_MAX_SPECIES];
+                    for (int s=0;s<nSpecies;s++){ YLd[s]=(double)YL[s]; YRd[s]=(double)YR[s]; }
+                    h_p = (flow_float)thermo_h_mix(sp, nSpecies, YLd, (double)Tl) + 0.5f*velocity2_L;
+                    h_m = (flow_float)thermo_h_mix(sp, nSpecies, YRd, (double)Tr) + 0.5f*velocity2_R;
+                } else {
+                    h_p = thermo_h_mix_f(spf, nSpecies, YL, Tl) + 0.5f*velocity2_L;
+                    h_m = thermo_h_mix_f(spf, nSpecies, YR, Tr) + 0.5f*velocity2_R;
+                }
             } else {
                 const flow_float Rg = spf[0].R;
                 flow_float RgL1 = Rg, RgR1 = Rg;
