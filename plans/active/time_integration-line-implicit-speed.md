@@ -86,9 +86,10 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
 | 3 | D | 閉形式の K。合格: 面積係数・TP の固有ベクトル・`rowDec`・既存の粘性の加算を含めて、旧の列抽出の K と同じ状態で成分の相対差 ≤ 1e-12 (FP64) | O |
 | 4 | B (double・LU) | 不採用 (2026-10-09、§6.0): 3 つの書き方とも案 A より遅い。並列版は opt-in で残す | O |
 | 5 | 検証の表 (§6) の他経路 | `lineImplicit 0`・部分被覆・可変長・`lineKFreeze 0/1`・周期ミラー・軸と壁の拘束行 (node のみ、cell は未検証と明記) | O |
-| 6 | 粘性 Jacobian plan との統合の後の再検証 | [time_integration-line-viscous-jacobian](time_integration-line-viscous-jacobian.md) は同じ D/K の組立を変える。速度の A/B では D/K の仕様を固定し、統合後に §6 を回し直す | O |
+| 6 | 粘性 Jacobian plan との統合の後の再検証 | [time_integration-line-viscous-jacobian](time_integration-line-viscous-jacobian.md) は同じ D/K の組立を変える。速度の A/B では D/K の仕様を固定し、統合後に §6 を回し直す。2026-10-09: 粘性 Jacobian は本線不採用 (値 2・3 は診断として保留、既定 0 の D/K は不変) なので、既定の経路の再検証は不要 | O |
 | 7 | 逆行列の保存 (double、別の opt-in 実験) | 判断: 2026-10-09 codex 諮問 — 次の候補は double の逆行列の保存、C (float) は後回し。部分ピボット付き double LU から逆行列を作り、代入だけを行列ベクトル積に替える (D/K の組立と保存の精度は固定)。候補の基準 (実装前に確定): 緩和前のスケーリングした後退誤差 η ≤ 1e-11、物理尺度で正規化した補正の差 ≤ 1e-8、新しい分解の失敗 0。性能は逆行列の生成の費用を含め、native・専有 GPU・profiler なしの反復計測と、同じ品質までの総時間。B の失敗は「その実装の不採用」で、律速の原因の確定ではない | F |
 | 8 | C (Thomas を float、別の opt-in 実験) | #7 の後。精度の組み合わせの表と、線形残差・長期の収束性能で採否 | F |
+| 9 | 本線の評価 (方向別 dt + 上限 + point 仕上げの総壁時計) | 粘性 Jacobian の探索を終えた後の本線 (codex 2026-10-09)。ライン陰解法の速度の改善はこの総壁時計で採否を決める。残差の停滞に面エンタルピーの精度が効くかの監査は [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 (未着手) | F |
 
 ## 6. 検証 (codex plan 段の反映後、2026-10-09)
 
