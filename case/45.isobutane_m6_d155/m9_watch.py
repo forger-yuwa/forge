@@ -16,13 +16,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import cold_series as CS  # noqa: E402
 import cold_xcheck as XC  # noqa: E402
-ap = argparse.ArgumentParser(); ap.add_argument("run"); ap.add_argument("--phase", choices=("line", "point"), required=True); ap.add_argument("--budget", type=int, required=True)
+ap = argparse.ArgumentParser(); ap.add_argument("run"); ap.add_argument("--phase", choices=("line", "point", "line_e2"), required=True)   # line_e2 = ラインのまま E (水準 + E2) まで (§6.11 の追加の腕); ap.add_argument("--budget", type=int, required=True)
 a = ap.parse_args()
 run = HERE / a.run
 SF = run / "m9_watch.json"
 KEYS = ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")
 REF = None
-if a.phase == "point":                                  # E2 の参照は数値 4 つだけ (説明の文字列は使わない、codex plan-3 M2)
+if a.phase in ("point", "line_e2"):                    # E2 の参照は数値 4 つだけ (説明の文字列は使わない、codex plan-3 M2)
     _r = json.loads((HERE / "m9_ref.json").read_text())
     REF = {k: float(_r[k]) for k in KEYS}
     if not all(np.isfinite(v) and v > 0 for v in REF.values()): print("[m9_watch] 参照が有限・正でない — 止める"); sys.exit(2)
