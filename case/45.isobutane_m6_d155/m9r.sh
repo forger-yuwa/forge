@@ -21,23 +21,33 @@ modes_ok() {   # modes_ok <run> <P|L0|L5> <relax>
     L5) grep -q "^\[line\] factor 1 回目: モード LU$" $f && grep -q "FORGE_LVC_TERMS=5" $f && grep -q "lineViscCoupling: 3" $1/solverConfig.yaml ;;
   esac
 }
-phase() {   # phase <run> <line|point> <L0|L5|P> <relax> <prep の追加引数...>  → 0 = 見張りが最終の状態まで進んだ
+phase() {   # phase <run> <line|point> <L0|L5|P> <relax> <prep の追加引数...>
   local r=$1 ph=$2 m=$3 rx=$4; shift 4
   if [ -f $r/m9_watch.json ] && grep -q '"status": "\(REACHED\|CENSORED\|DIVERGED\|EXEC_ERROR\|DATA_ERROR\)"' $r/m9_watch.json; then return 0; fi
+  local free; free=$(df --output=avail -BG ~ | tail -1 | tr -dc 0-9)
+  [ "$free" -ge 2 ] || { echo "$r: ディスクの空き ${free} GB < 2 GB — 起動しない" >> $LOG; return 1; }
   if [ ! -d $r ]; then python3 cold_cfl.py prep $SRC $r --steps 200000 --out 5000 $REF --extra res_ro "$@" > /dev/null || { echo "$r prep 失敗" >> $LOG; return 1; }; rm -f $r/nozzle.msh; fi
+  CUR=$r
   ( [ $m = L5 ] && export FORGE_LVC_TERMS=5; python3 cold_cfl.py run $r > $r/cold_pair_run_stdout.log 2>&1; echo $? > $r/forge_rc ) &
   local job=$!
+  python3 m9_watch.py $r --phase $ph --budget 200000 >> $LOG 2>&1 &     # 見張りは起動直後から (codex plan-5 M2)
+  local wjob=$!
   sleep 180
-  if ! modes_ok $r $m $rx; then echo "$r: 実効のモード・緩和が期待と違う — 止める" >> $LOG; python3 m9_stop.py $r; wait $job; return 1; fi
-  python3 m9_watch.py $r --phase $ph --budget 200000 >> $LOG 2>&1; local wrc=$?
+  if ! modes_ok $r $m $rx; then echo "$r: 実効のモード・緩和が期待と違う — 止める" >> $LOG; python3 m9_stop.py $r; fi
+  wait $wjob; local wrc=$?
   [ $wrc -eq 0 ] || { python3 m9_stop.py $r; echo "$r: 見張りが rc=$wrc で終わった — forge を止めた" >> $LOG; }
   wait $job
+  CUR=""
   echo "$r 見張り rc=$wrc、forge rc=$(cat $r/forge_rc 2>/dev/null)、状態 $(python3 -c "import json;print(json.load(open('$r/m9_watch.json'))['status'])" 2>/dev/null)" >> $LOG
   python3 ../../solver_density_cuda/tools/check_convergence.py $r > $r/CONVERGENCE_VERDICT.txt 2>&1; echo "$r check_convergence rc=$? $(grep -o 'NOT CONVERGED\|DIVERGED\|PASS' $r/CONVERGENCE_VERDICT.txt | head -1)" >> $LOG
+  rm -f $r/nozzle.h5 $r/res_0.h5                                        # 段が終わったら入力の写しを消す (ディスク、codex plan-5 M3)
   return 0
 }
 arm() {   # arm <line の run> <point の run> <L0|L5> <relax> <line の構成...>
   local rl=$1 rp=$2 m=$3 rx=$4; shift 4
+  CUR=""
+  trap '[ -n "$CUR" ] && python3 m9_stop.py $CUR; exit 1' TERM INT HUP   # 台本が止められても forge を残さない (codex plan-5 M2)
+  trap '[ -n "$CUR" ] && python3 m9_stop.py $CUR' EXIT
   phase $rl line $m $rx "$@" --relax $rx || { echo "$rl: 失敗" >> $LOG; return; }
   grep -q '"status": "REACHED"' $rl/m9_watch.json || { echo "$rl: ライン段は水準に届かず" >> $LOG; return; }
   local n sha last
@@ -48,7 +58,19 @@ arm() {   # arm <line の run> <point の run> <L0|L5> <relax> <line の構成..
   [ "$(sha256sum $rl/res_$n.h5 | cut -d' ' -f1)" = "$sha" ] || { echo "$rl: 到達の出力の sha256 が違う" >> $LOG; return; }
   phase $rp point P 0.7 --field-from $rl || echo "$rp: 失敗" >> $LOG
 }
+diskguard() {   # 空きが 1 GB を切ったら自分の 8 段の forge を止める (codex plan-5 M3)
+  while [ ! -f m9r.done ]; do
+    local free; free=$(df --output=avail -BG ~ | tail -1 | tr -dc 0-9)
+    if [ "$free" -lt 1 ]; then
+      echo "ディスクの空き ${free} GB < 1 GB — 自分の run の forge を止める $(date -Is)" >> $LOG
+      for r in run_036[4-9]_m9r_* run_037[01]_m9r_*; do [ -d $r ] && python3 m9_stop.py $r; done
+      break
+    fi
+    sleep 60
+  done
+}
 echo "== 開始 $(date -Is)" >> $LOG
+diskguard &
 OPT_L0="--line dir --itj 5 --cap 50"; OPT_L5="--line dir --itj 5 --lvc 3"
 arm run_0364_m9r_L0_r085 run_0365_m9r_L0_r085cut L0 0.85 $OPT_L0 &
 sleep 240

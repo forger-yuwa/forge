@@ -374,11 +374,13 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
   緩和を変えると定常の結果が動く可能性 (SERN で 0.7 が 0.05 %) があるが、終わりを参照からの差で決めるので総時間の比較には入る。
 - **並行の影響**: GPU は 1 本で使用率 99 % なので、§6.11 と合わせて最大 6 本を同時に回すと 1 本ずつが遅くなる (総時間は専有の単価で換算するので比較は変わらない。終わりは全体で 5〜6 時間後の見込み)。
   見張りが残す出力は最新と到達だけにした (ディスクの空き 7.6 GB)。
+- **点検の反映 (codex plan-5、投入前)**: 判定器は両腕に §6.11 と同じ前提 (総時間・準定常の正常終了・新しい段の VERDICT があり DIVERGED でない) を課す (M1)。各腕の台本は forge を止める trap (TERM・INT・HUP・EXIT) を持ち、見張りは forge の起動と同時に始める (起動の猶予 10 分、M2)。段が終わるたびに `nozzle.h5`・`res_0.h5` を消し、段の起動前に空き 2 GB 以上を確かめ、走行中に空きが 1 GB を切ったら自分の 8 段の forge を止める (M3)。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#19 緩和の 4 腕) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-5.md) | GO-with-changes, C0/M3/m0 | 全件採用 (投入前): M1 判定器の前提の検査、M2 trap と見張りの同時起動 (起動の猶予を足した)、M3 段ごとの入力の写しの削除・空きの下限で停止 (§6.13) |
 | plan (#9 の追加の腕 L5L) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-4.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-4.md) | GO-with-changes, C0/M3/m1 | 全件採用 (分岐の前に反映): M1 `--budget` の登録がコメントに入っていた不具合を直し、初期化の失敗でも forge を止める、M2 分岐元の系列を引き継いで判定 (追加 0 step もありうる)、M3 腕ごとに独立に集計、m4 NOT CONVERGED の注記 (§6.11) |
 | plan (#9 の事前登録 v2) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-3.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-3.md) | GO-with-changes, C0/M4/m1 | 全件採用: M1 GPU の件数と取得の失敗を分け 0 本でなければ測らない、M2 E2 は数値 4 つ・見張りの例外とモード不一致でも共通の停止、M3 比較の前提 (到達の再計算の一致・VERDICT・準定常の正常終了)、M4 再開時の再判定と専有時間の run の使い直し、m5 `--tail 1.0` (§6.11)。参照の変更と前回 M2 の却下は妥当と確認された |
 | plan (#9 の事前登録 v1) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-2.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-2.md) | GO-with-changes, C0/M7/m1 | M1 採用 (v1 を撤回し参照を定常な point の窓に替えた v2、§6.9・§6.11)、M2 **却下** (出力の費用は表示の step 1000 に入ることを実測: run_0349 で 999 = 34.65 ms、1000 = 274.75 ms。出力の費用は別に測って足す形には採用)、M3〜M7・m8 採用 (単価・出力・起動の分離と検査、品質の判定、見張りの状態・停止・原子的な保存・再開、許した環境変数とモードの確認、step 0 の扱い) |

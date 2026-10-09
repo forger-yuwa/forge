@@ -154,6 +154,7 @@ if _d is not None:
     if _d[0] == "DIV": stop(); finish("DIVERGED", fail_step=_d[1]); sys.exit(0)
     conclude(_d[1])
 
+T0 = time.time()
 def main_loop():
   while True:
       alive = bool(pids())
@@ -180,7 +181,8 @@ def main_loop():
           if lvl and (e2 is None or all(abs(v) <= 0.1 for v in e2.values())):
               save(); conclude(n)
           save(); cleanup()
-      if not progressed and not alive and not [n for n in steps() if n > 0 and n not in {r["step"] for r in st["rows"]}]:
+      started = (run / "RUN_RC").exists() or time.time() - T0 > 600     # forge の起動前に見張りが始まっても待つ (起動の猶予 10 分)
+      if started and not progressed and not alive and not [n for n in steps() if n > 0 and n not in {r["step"] for r in st["rows"]}]:
           rcf = run / "RUN_RC"; rc = rcf.read_text().strip() if rcf.exists() else "?"
           last = max((r["step"] for r in st["rows"]), default=0)
           if rc == "0" and last >= a.budget: finish("CENSORED", last_step=last)

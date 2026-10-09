@@ -57,12 +57,23 @@ for k, (rl, rp, m, rx) in ARMS.items():
         a["status"] = f"状態ファイルなし ({e.filename})"
     out[k] = a
 base = json.loads((D / "m9_judge.json").read_text()) if (D / "m9_judge.json").exists() else {}
+def evidence(a, phases):
+    """比較の前提 (§6.11 と同じ、codex plan-5 M1): 総時間があり、準定常の判定が正常に終わり、新しい段の VERDICT があって DIVERGED でない。"""
+    if not isinstance(a, dict) or "total_s" not in a: return "未到達・失敗・未集計"
+    qs_ = a.get("quasisteady")
+    if not qs_ or not qs_.get("ok"): return "準定常の判定が正常に終わらない"
+    for ph in phases:
+        c = a.get(ph, {}).get("convergence")
+        if c in (None, "記録なし"): return f"{ph} の段の check_convergence が無い"
+        if c == "DIVERGED": return f"{ph} の段が DIVERGED"
+    return None
 def cmp(a, b, name_b):
-    if "total_s" not in a or not isinstance(b, dict) or "total_s" not in b: return f"判別不能 (どちらかが未到達・失敗・未集計: {name_b})"
-    if not a["quasisteady"]["ok"] or (b.get("quasisteady") and not b["quasisteady"].get("ok", True)): return "比較不可 (準定常の判定が正常に終わらない)"
-    if any(x.get("convergence") == "DIVERGED" for x in (a.get("line", {}), a.get("point", {}))): return "比較不可 (DIVERGED)"
+    ea = evidence(a, ("line", "point"))
+    eb = evidence(b, ("line", "point") if name_b.endswith("L5") else ())   # L0・P の基準は既存の系列 (VERDICT は問わない)
+    if ea or eb: return f"比較不可 ({'この腕: ' + ea if ea else ''}{' / ' if ea and eb else ''}{name_b + ': ' + eb if eb else ''})"
     d = a["total_s"] - b["total_s"]; u = a["uncert_s"] + b["uncert_s"]
-    note = "" if ("NOT ALL" not in (a["quasisteady"]["overall"] or "") and all(x.get("convergence") == "PASS" for x in (a["line"], a["point"]))) else " [水準と E2 への到達時間の比較に限る]"
+    note = "" if ("NOT ALL" not in (a["quasisteady"]["overall"] or "") and "NOT ALL" not in ((b.get("quasisteady") or {}).get("overall") or "")
+                  and all(x.get("convergence") == "PASS" for x in (a["line"], a["point"]))) else " [水準と E2 への到達時間の比較に限る]"
     return (f"速い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d < -u else f"遅い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d > u else "判別不能 (差が分解能以内)") + note
 out["compare"] = {}
 for k, a in out.items():
