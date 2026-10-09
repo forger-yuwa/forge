@@ -1594,7 +1594,7 @@ static void afterSolve(mesh& msh, variables& var) {
 // 診断: 値 2/3 の薄層の項のマスク (FORGE_LVC_TERMS、既定 7 = 全部。plan time_integration-line-viscous-jacobian §6.8)
 static int lineViscTermsEnv() {
     static const int v = [](){ const char* e = getenv("FORGE_LVC_TERMS"); const int t = (e && *e) ? atoi(e) : 7;
-                               if (t != 7) printf("[lineViscCoupling] 診断のマスク FORGE_LVC_TERMS=%d (1 運動量 D/K、2 熱伝導の近傍 K、4 仕事 D/K)\n", t);
+                               if (t != 7) printf("[lineViscCoupling] 診断のマスク FORGE_LVC_TERMS=%d (1 運動量 D/K、2 熱伝導の近傍 K、4 仕事 D/K、8 熱伝導の K の密度の列を外す)\n", t);
                                return t; }();
     return v;
 }
