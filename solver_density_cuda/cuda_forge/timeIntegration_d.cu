@@ -1825,16 +1825,29 @@ namespace line_implicit {
 
 __device__ __forceinline__ bool lu5_factor(double A[5][5], int piv[5])
 {
+    // 行の入れ替えは添字を静的に保つ書き方 (A[pv][k] の実行時の添字で A がローカルメモリへ追い出されないよう、
+    // 候補の行 q を全部展開して q == pv のときだけ入れ替える)。演算 (比較・積和・除算) の順序は従来と同じ。
+    // plan time_integration-line-implicit-speed §4.3 (2026-10-09)。
+    #pragma unroll
     for (int col = 0; col < 5; ++col) {
         int pv = col; double pa = fabs(A[col][col]);
+        #pragma unroll
         for (int r = col + 1; r < 5; ++r) { const double c = fabs(A[r][col]); if (c > pa) { pv = r; pa = c; } }
         if (pa < 1.0e-30) return false;
         piv[col] = pv;
-        if (pv != col) for (int k = 0; k < 5; ++k) { const double tmp = A[col][k]; A[col][k] = A[pv][k]; A[pv][k] = tmp; }
+        #pragma unroll
+        for (int q = col + 1; q < 5; ++q) {
+            if (q == pv) {
+                #pragma unroll
+                for (int k = 0; k < 5; ++k) { const double tmp = A[col][k]; A[col][k] = A[q][k]; A[q][k] = tmp; }
+            }
+        }
         const double inv = 1.0 / A[col][col];
+        #pragma unroll
         for (int r = col + 1; r < 5; ++r) {
             const double f = A[r][col] * inv;
             A[r][col] = f;                      // L を下三角に格納
+            #pragma unroll
             for (int k = col + 1; k < 5; ++k) A[r][k] -= f * A[col][k];
         }
     }
@@ -1846,14 +1859,24 @@ __device__ __forceinline__ void lu5_solve(const double A[5][5], const int piv[5]
     // LAPACK getrs 流: ① 行交換を全て先に適用 (LASWP) ② 単位下三角 L 前進代入 ③ U 後退代入。
     // 交換と代入をインタリーブする書き方は、後段ピボットが L 部分も行交換する getrf 形格納と
     // 非整合で誤解を返す (2026-09-02 に numpy 照合で確認済みの罠)。
+    // 行交換は添字を静的に保つ書き方 (x[piv[col]] の実行時の添字で x がローカルメモリへ追い出されないよう)。
+    #pragma unroll
     for (int col = 0; col < 5; ++col) {
-        if (piv[col] != col) { const double tmp = x[col]; x[col] = x[piv[col]]; x[piv[col]] = tmp; }
+        const int pc = piv[col];
+        #pragma unroll
+        for (int q = col + 1; q < 5; ++q) {
+            if (q == pc) { const double tmp = x[col]; x[col] = x[q]; x[q] = tmp; }
+        }
     }
+    #pragma unroll
     for (int col = 0; col < 5; ++col) {
+        #pragma unroll
         for (int r = col + 1; r < 5; ++r) x[r] -= A[r][col] * x[col];
     }
+    #pragma unroll
     for (int r = 4; r >= 0; --r) {
         double s = x[r];
+        #pragma unroll
         for (int c = r + 1; c < 5; ++c) s -= A[r][c] * x[c];
         x[r] = s / A[r][r];
     }
@@ -2351,10 +2374,13 @@ static bool lineMonoEnabled() {
 }
 
 // ---- v3 の切り替えと判定の経路 (plan time_integration-line-implicit-speed §4.3 案 B・§6) ----
-// 既定はライン内の並列化 (lineThomasFactorPar_d / lineThomasSolvePar_d)。FORGE_LINE_SERIAL=1 で v2 (1 ライン 1 スレッド)。
-// FORGE_LINE_COMPARE=1: v2 を別のバッファで同じ入力から解き、因子 (LU・W・ピボット・失敗) と補正 dq の新旧の差を出力する (判定用で遅い。解は v3 を使う)。
+// 既定は 1 ライン 1 スレッド (lineThomasFactor_d / lineThomasSolve_d)、FORGE_LINE_PAR=1 でライン内の並列化 (lineThomasFactorPar_d / lineThomasSolvePar_d)。
+// FORGE_LINE_COMPARE=1: 1 ライン 1 スレッドを別のバッファで、並列版を本来のバッファで同じ入力から解き、因子 (LU・W・ピボット・失敗) と補正 dq の差を出力する
+// (判定用で遅い。解は並列版を使う。2 つは独立に書いた実装なので、片方を変えたときの照合に使う)。
+// 2026-10-09: 並列版は 1 ライン 1 スレッドより遅かった (case/45、40.5 / 37.8 ms/step vs 35.0、plan §6.0) ので既定は 1 ライン 1 スレッド、
+// 並列版は FORGE_LINE_PAR=1 の opt-in。lineSerialEnabled() は「1 ライン 1 スレッドを使う」の意味のまま残す。
 static bool lineSerialEnabled() {
-    static const bool v = [](){ const char* e = getenv("FORGE_LINE_SERIAL"); return e && atoi(e) != 0; }();
+    static const bool v = [](){ const char* e = getenv("FORGE_LINE_PAR"); return !(e && atoi(e) != 0); }();
     return v;
 }
 static bool lineCompareEnabled() {
@@ -2492,7 +2518,7 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
     const int threads = 64;
     const int grid = (int)((msh.nImplicitLines + threads - 1) / threads);
     if (!lineMonoEnabled()) {
-        // 保存済み LU/piv/W での代入のみ (factor は lineThomasFactor_d_wrapper が実施済み)。既定は v3 (並列)、FORGE_LINE_SERIAL=1 で v2。
+        // 保存済み LU/piv/W での代入のみ (factor は lineThomasFactor_d_wrapper が実施済み)。既定は 1 ライン 1 スレッド、FORGE_LINE_PAR=1 で並列版。
         flow_float* const dqn[5] = {var.c_d["dq_block_new_0"], var.c_d["dq_block_new_1"], var.c_d["dq_block_new_2"], var.c_d["dq_block_new_3"], var.c_d["dq_block_new_4"]};
         if (!lineCompareEnabled()) {
             launchLineSolve(!lineSerialEnabled(), cfg, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, msh.line_y_d, dqn);
