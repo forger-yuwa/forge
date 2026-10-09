@@ -36,7 +36,10 @@ ALT_BINARIES = {
     # 4d394a71 (ライン上の節点の対角を storeLU の sweep 以外で組まない、plan time_integration-line-implicit-speed 案 A) + typedef double、2026-10-09 AWS で新しい作業ツリーにビルド
     "linespeed_fp64": ("d8b06ebcb91cfc3151cfcedf441b3e79f20f4c3702aa89e287801cb1c4f1d10b", "~/forge-linespeed-fp64"),
     # 5ab83056 (lineViscCoupling 2 = 薄層の粘性・熱伝導の Jacobian、案 A を含む) + typedef double、2026-10-09 AWS でビルド
+    # (上のバイナリは 2026-10-09 に下の lineB で上書きされて残っていない)
     "linevisc_fp64": ("6631a87eb1279b2fa4eff22080378ac12db4937890ac4470cf0d9185daf55653", "~/forge-linevisc-fp64"),
+    # 64ed2cd6 (ライン内で並列にした Thomas・新旧の比較モード・ライン行列の書き出し、値 2 と案 A を含む) + typedef double、~/forge-linevisc-fp64 を上書きしてビルド
+    "lineB_fp64": ("7a7e9eb9150104babc5b1c9877e15eb826eaa46fde8f2fe96dce74b65ad61f6d", "~/forge-linevisc-fp64"),
 }
 
 
