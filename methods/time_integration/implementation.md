@@ -525,6 +525,12 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
 - **`lineViscCoupling: 1`**: line 面にスカラー粘性結合 K += α·I (α=ν_eff·δ/dcc)、対角は
   2α→α で line 内に真の拡散行 [−α, 2α, −α] を完成。**圧縮性 pseudo-dt の壁法線律速は音響
   (λ_visc/λ_ac = 2ν/(Δn·c) ≪ 1) なので効果は僅差** — 意味を持つのは Δn < 2ν/c の超極薄セルのみ。
+  ただしこの見積もりは擬似 dt が壁法線の音響で決まる場合 (point と同じ Δτ) のもので、`lineDtDirectional` で Δτ が縦横比の分だけ伸びると
+  1 層目の拡散数 νΔτ/Δn² は O(10) になる (case/45 で約 23)。
+- **`lineViscCoupling: 2` (計画中、plan [time_integration-line-viscous-jacobian](../../plans/active/time_integration-line-viscous-jacobian.md))**: ライン面の K と対角に
+  薄層の粘性・熱伝導の Jacobian を入れる (連続の行 0、運動量の行は速度の微分に $P=I+\tfrac13\hat n\hat n^{\mathsf T}$、エネルギーの行は温度の微分と粘性の仕事)。
+  K = −A⁻ の固有値はせん断・エントロピーで $V$ (面の法線速度) なので、壁際 ($V\approx0$) のラインではこれらのモードが対流の Jacobian では結合しない。値 1 との違いは、
+  連続の行に拡散を入れないことと、エネルギーの行を ρE でなく T で結合すること。
 - **`lineViscousDtRelief: θ`**: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍 (`setDT_d`
   で面ごとに割引、対流+音響分は残す)。θ=1 でも安定 (上と同じ理由で利得も僅差)。
 - **`lineDtDirectional: 1`**: 方向別 dt — line 面 (Thomas が厳密に解く結合) の λ を音響込みで

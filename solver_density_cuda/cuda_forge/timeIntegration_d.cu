@@ -819,8 +819,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         const bool onLine = (lp >= 0) || (ln_ >= 0);
         // 対角キャッシュを読む sweep か (loop>0 かつ line に載らない CV)。
         const bool cached = (useDiagCache != 0) && (loop > 0) && !onLine;
+        // ライン上の節点の対角は storeLU の sweep (Thomas の因子を作る sweep) でしか使わない。それ以外の sweep では
+        // 組んでも捨てるだけなので組まない (plan time_integration-line-implicit-speed §4.3 案 A、数値は不変)。
+        const bool skipDiag = cached || (onLine && storeLU == 0);
         ST nu_eff = static_cast<ST>(0.0);
-        if (!cached) nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
+        if (!skipDiag) nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
         bool rowDec[5] = {false, false, false, false, false};
         if (onLine) {
             if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) rowDec[2] = true;
@@ -833,7 +836,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 
         ST diag_block[5][5];
         block_dplur::zero5x5(diag_block);
-        if (!cached) {
+        if (!skipDiag) {
             block_dplur::add_identity_scaled(diag_block, static_cast<ST>(v / max(dt_l, static_cast<ST>(1.0e-30))));
             // dual-time: 物理時間項 a·V/Δt を対角へ（定常は unsteady_diag==0）。
             block_dplur::add_identity_scaled(diag_block, v * static_cast<ST>(unsteady_diag));
@@ -890,7 +893,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
                 }
             }
-            if (cached) {
+            if (skipDiag) {
                 block_dplur::accumulate_split_jacobian_cf<ST, false>(
                     gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
                     local_sonic, local_Ht, thermallyPerfect != 0,
@@ -932,7 +935,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             // 退化 (dcc≈0) し 2ν·delta/dcc が爆発→対角巨大→dq≈0 で境界ノードが凍結する (出口 BL 崩壊・残差
             // プラトーの真因)。境界粘性は弱形式カーネルが残差側で担う。内部 node-to-node 面のみ粘性対角を課す。
             // cell モード (isNode=0) は境界ゴーストが法線方向に正しく置かれ非退化なので従来どおり境界面も課す。
-            if (!cached && !(isNode != 0 && !has_nbr)) {
+            if (!skipDiag && !(isNode != 0 && !has_nbr)) {
                 const ST dcc_x = static_cast<ST>(ccx[other_ic]) - static_cast<ST>(ccx[ic]);
                 const ST dcc_y = static_cast<ST>(ccy[other_ic]) - static_cast<ST>(ccy[ic]);
                 const ST dcc_z = static_cast<ST>(ccz[other_ic]) - static_cast<ST>(ccz[ic]);
@@ -1007,7 +1010,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 
         // 軸対称ソース項のヤコビアンを対角ブロックに加える（roUy 行 = index 2）。詳細は実装ドキュメント参照。
         // axisRFloor 帯 (r 床, ソース不課) は Jacobian も課さない。
-        if (!cached && isAxisymmetric == 1 &&
+        if (!skipDiag && isAxisymmetric == 1 &&
             !(static_cast<ST>(axisRFloor) > static_cast<ST>(0.0) && static_cast<ST>(ccy[ic]) < static_cast<ST>(axisRFloor))) {
             const ST A_pl = static_cast<ST>(A_planar[ic]);
             const ST r_eff = max(v / max(A_pl, static_cast<ST>(1.0e-30)), static_cast<ST>(1.0e-30));
@@ -1022,7 +1025,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             diag_block[2][4] += -A_pl * g1;
             // 診断: 近軸半径音響スペクトル半径 α·A_pl·c を roUy 対角に補う (FORGE_AXIS_DIAG_ALPHA>0 のみ)。
             diag_block[2][2] += static_cast<ST>(g_axisDiagAlpha) * A_pl * local_sonic;
-        } else if (!cached && isAxisymmetric == 2) {
+        } else if (!skipDiag && isAxisymmetric == 2) {
             // SU2 流 (axisymMethod==1) 非粘性軸対称ソースの解析 Jacobian (CSourceAxisymmetric_Flow 移植,
             // 行/列 = [ro, roUx, roUy, roe] → forge [0,1,2,4])。forge 対角は -∂S/∂U = +SU2 jacobian。
             // 軸ノード (axis_flag_src==1) と y≤eps はソース 0 のためスキップ。γ は frozen (gamma_arr)。
@@ -1054,7 +1057,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 
         // node × 軸対称: 軸ノードの半径運動量行のみ decouple (dq_roUy=0)。状態は enforceAxisSymmetry がピン。
         if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) {
-            if (!cached) {
+            if (!skipDiag) {
                 for (int jj = 0; jj < 5; ++jj) diag_block[2][jj] = static_cast<ST>(0.0);
                 diag_block[2][2] = static_cast<ST>(1.0);
             }
@@ -1067,7 +1070,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         // 壁運動量を連成し dq≠0 を返して壁速度が drift する問題を Jacobian 整合で根治する。
         if (wall_flag != nullptr && wall_flag[ic] == 1) {
             for (int row = 1; row <= 3; ++row) {
-                if (!cached) {
+                if (!skipDiag) {
                     for (int jj = 0; jj < 5; ++jj) diag_block[row][jj] = static_cast<ST>(0.0);
                     diag_block[row][row] = static_cast<ST>(1.0);
                 }
@@ -1077,7 +1080,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 
         // 弱形式の等温壁 (nodeIsothermalEnergyBC=1): エネルギー行は残したまま、壁寄与の近似対角を足す。
         // iso_wall_flag が nullptr になっているので下の単位行化とは排他。
-        if (weakIsoDiag != nullptr && !cached) {
+        if (weakIsoDiag != nullptr && !skipDiag) {
             const ST g = static_cast<ST>(weakIsoDiag[ic]);
             if (g > static_cast<ST>(0.0)) {
                 const ST rho = static_cast<ST>(max(ro[ic], (flow_float)1.0e-30));
@@ -1088,7 +1091,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         // 等温壁ノード: エネルギー行 (4) も単位行に置換し dq_roe=0 → 壁ノード T は pin (applyBconds 位相) が
         // 一意に決める。連続 (0) 行は保持 (ρ は保存式で発展し P=ρRTw が追従)。
         if (iso_wall_flag != nullptr && iso_wall_flag[ic] == 1) {
-            if (!cached) {
+            if (!skipDiag) {
                 for (int jj = 0; jj < 5; ++jj) diag_block[4][jj] = static_cast<ST>(0.0);
                 diag_block[4][4] = static_cast<ST>(1.0);
                 // implicitThermalJacobian ビット 2: 拘束の行 Δ(ρE)_w − e_w·Δρ_w = 0 (壁温のピン ρE = ρ·e(T_w) と一致、壁は u = 0)。
