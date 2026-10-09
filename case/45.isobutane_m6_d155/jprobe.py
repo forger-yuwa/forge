@@ -225,6 +225,48 @@ def cmd_compare(dirdump: Path, tag: str, eps: float, ops: dict, runs: dict):
     (OUT / f"{tag}_compare.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
 
 
+def cmd_fhjudge():
+    """§6.15 の判定: ライン 2183 のエネルギーの行 (拘束の行を除く) で A (float の面エンタルピー) と B (double) の方向微分を比べる。"""
+    dump = load_dump(HERE / "run_0313_e1bdump_m7_linedump")
+    nodes, lines = dump["_nodes"], dump["_lines"]
+    eps = 1e-6
+    m = (lines == 2183) & (dump["flags_wall_iso_axis"][:, 1] != 1)
+    x = nodes[m]
+    p = direction(dump, 4)
+    L = lambda r: np.load(OUT / "npz" / f"{r}.npz")
+    Jt, ok = {}, {}
+    out = {"line": 2183, "row": "energy", "eps": eps}
+    for side in ("a", "b"):
+        c = json.loads((OUT / f"s0p7h{side}_compare.json").read_text())
+        e = next(l for l in c["lines"] if l["line"] == 2183)["energy"]
+        R = {k: L(f"run_0323_jph_{side}_{k}") for k in ("q0", "q0b", "pe", "me")}
+        Jt[side] = -(R["pe"]["res_roe"][x] - R["me"]["res_roe"][x]) / (2 * eps)
+        ok[side] = e["fd_eps_vs_half"] <= 0.01 and e["rerun_noise_over_true"] <= 1e-3
+        Ja = apply_op(dump, p, lines)[m, 4]
+        Ja_ns = Ja - dump["scalar_visc_line"][m, 0] * p[m, 4]          # 探索: 値 3 が足したライン面のスカラーを除いた作用
+        out[side] = {"fd_eps_vs_half": e["fd_eps_vs_half"], "rerun_noise_over_true": e["rerun_noise_over_true"], "valid": ok[side],
+                     "op7_rel": e["op7_rel"], "op7_norm_ratio": e["op7_norm_ratio"], "op7_cos": e["op7_cos"],
+                     "op7_noscalar_rel_exploratory": _rel(Ja_ns, Jt[side]), "norm_Jt": float(np.linalg.norm(Jt[side]))}
+    qa, qb = L("run_0323_jph_a_q0"), L("run_0323_jph_b_q0")
+    g = L("run_0317_jp_s0_q0")
+    out["a_q0_vs_lineG_q0_max_abs"] = {c: float(np.max(np.abs(qa[c] - g[c]))) for c in RES}
+    out["b_q0_minus_a_q0_rel"] = {c: _rel(qb[c], qa[c]) for c in RES}
+    if not (ok["a"] and ok["b"]):
+        verdict = "判別不能 (有効の条件を満たさない側がある)"
+    else:
+        ch = _rel(Jt["b"], Jt["a"])
+        out["Jt_change_B_vs_A"] = ch
+        if ch >= 0.1:
+            verdict = "面の熱力学の精度に依存することを支持"
+            verdict += ("; 近似作用素との相対差が半分以下になったので H-c の説明としても支持" if out["b"]["op7_rel"] <= 0.5 * out["a"]["op7_rel"]
+                        else "; 近似作用素との相対差は半分以下にならない (H-c の説明としては支持しない)")
+        else:
+            verdict = "棄却 (J_t p の変化が 10 % 未満)"
+    out["verdict"] = verdict
+    (OUT / "fh_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    print(json.dumps(out, indent=1, ensure_ascii=False))
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -232,6 +274,7 @@ if __name__ == "__main__":
     a.add_argument("--eps", type=float, required=True); a.add_argument("--sweep", type=int, default=4); a.add_argument("--no-pp", action="store_true")
     a = sp.add_parser("extract"); a.add_argument("run")
     a = sp.add_parser("locate"); a.add_argument("run")
+    a = sp.add_parser("fhjudge")
     a = sp.add_parser("compare"); a.add_argument("dump"); a.add_argument("tag"); a.add_argument("--eps", type=float, required=True)
     a.add_argument("--ops", required=True, help="7=<dump>,5=<dump>")
     a.add_argument("--runs", required=True, help="q0=run,q0b=run,pe=run,me=run,ph=run,mh=run,pp=run")
@@ -243,5 +286,7 @@ if __name__ == "__main__":
         cmd_extract(HERE / g.run)
     elif g.cmd == "locate":
         cmd_locate(HERE / g.run)
+    elif g.cmd == "fhjudge":
+        cmd_fhjudge()
     else:
         cmd_compare(HERE / g.dump, g.tag, g.eps, {k: HERE / v for k, v in kv(g.ops).items()}, kv(g.runs))

@@ -58,6 +58,9 @@ ALT_BINARIES = {
     "lineF_fp64": ("89ea94385435c16babde906465b58a54748d0e4b2d50b5edc661b46903ae19b0", "~/forge-linevisc-fp64"),
     # 846727be (マスクのビット 8 = 熱伝導の K の密度の列を外す) + typedef double、~/forge-linevisc-fp64 を上書き
     "lineG_fp64": ("c0b649052fdcf6092c7c73317563d77b570df60aca31e1bf709cf47586000c8c", "~/forge-linevisc-fp64"),
+    # 5197e00e (診断の FORGE_DIAG_FACE_H_DOUBLE = TP の面エンタルピーを double で、plan time_integration-line-viscous-jacobian §6.15) + typedef double、
+    # ~/forge-linevisc-fp64 を上書き (上の lineG は残っていない。切替なしの残差が lineG と同じことは run_0323_jph_a_q0 で確かめる)
+    "lineH_fp64": ("561813b3564473420824ccca302b795bf9c344f69776f6381a43cb23e0ee6456", "~/forge-linevisc-fp64"),
 }
 
 
