@@ -39,7 +39,10 @@ ALT_BINARIES = {
     # (上のバイナリは 2026-10-09 に下の lineB で上書きされて残っていない)
     "linevisc_fp64": ("6631a87eb1279b2fa4eff22080378ac12db4937890ac4470cf0d9185daf55653", "~/forge-linevisc-fp64"),
     # 64ed2cd6 (ライン内で並列にした Thomas・新旧の比較モード・ライン行列の書き出し、値 2 と案 A を含む) + typedef double、~/forge-linevisc-fp64 を上書きしてビルド
+    # (上の lineB は下の lineB2 で上書きされて残っていない)
     "lineB_fp64": ("7a7e9eb9150104babc5b1c9877e15eb826eaa46fde8f2fe96dce74b65ad61f6d", "~/forge-linevisc-fp64"),
+    # 874ae90a (並列 Thomas の代入を行の分担に、行のポインタを 1 回だけ選ぶ、書き出しのフラグの修正) + typedef double、~/forge-linevisc-fp64 を上書き
+    "lineB2_fp64": ("f3765961a601cff3f63e5ed86e0f0cf84d62138f504ba4a03dc317330ea45fad", "~/forge-linevisc-fp64"),
 }
 
 
