@@ -64,8 +64,11 @@ def main(d: Path, nsweep: int):
             U_, s_, Vt = np.linalg.svd(Mn)
             vmin = Vt[-1].reshape(n, 5)
             dens_share_mode = float((vmin[:, 0] ** 2).sum() / (vmin ** 2).sum())
+            tot = max((vmin ** 2).sum(), 1e-300)
             res = {"sigma_min": float(s_[-1]), "sigma_max": float(s_[0]), "cond": float(s_[0] / s_[-1]), "weak_mode_density_share": dens_share_mode,
-                   "weak_mode_peak_node_index": int(np.argmax((vmin ** 2).sum(1)))}
+                   "weak_mode_component_share": {k: float((vmin[:, j] ** 2).sum() / tot) for j, k in enumerate(("rho", "rhou", "rhov", "rhow", "rhoE"))},
+                   "weak_mode_peak_node_index": int(np.argmax((vmin ** 2).sum(1))),
+                   "sigma_smallest5": [float(v) for v in s_[-5:]]}
             sweeps = []
             for s in range(nsweep):
                 if f"rhs_s{s}" not in A:
@@ -77,7 +80,10 @@ def main(d: Path, nsweep: int):
                 X = x.reshape(n, 5)
                 du = (X[:, 1:4] - u * X[:, :1]) / rho[:, None]
                 dT = (X[:, 4] - (u * X[:, 1:4]).sum(1) + (0.5 * q2 - e) * X[:, 0]) / (rho * cv)
+                tn = max((xn ** 2).sum(), 1e-300)
                 sw = {"sweep": s, "rhs_proj_on_weak_mode": proj,
+                      "corr_component_share": {k: float((xn[:, j] ** 2).sum() / tn) for j, k in enumerate(("rho", "rhou", "rhov", "rhow", "rhoE"))},
+                      "corr_peak_node_index": int(np.argmax((xn ** 2).sum(1))),
                       "corr_density_share": float((xn[:, 0] ** 2).sum() / max((xn ** 2).sum(), 1e-300)),
                       "max_abs_drho_over_rho": float(np.max(np.abs(X[:, 0] / rho))), "max_abs_du": float(np.max(np.abs(du))), "max_abs_dT": float(np.max(np.abs(dT))),
                       "norm_scaled_corr": float(np.linalg.norm(xn))}
