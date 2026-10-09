@@ -54,7 +54,10 @@ ALT_BINARIES = {
     # (上の lineE は下の lineF で上書きされて残っていない)
     "lineE_fp64": ("8e989dc688b7ccef70c444aecf06fb9ec406fa0a7f4d2ad0dc8158cef7851178", "~/forge-linevisc-fp64"),
     # 4fdc2c0e (診断のマスク FORGE_LVC_TERMS) + typedef double、~/forge-linevisc-fp64 を上書き
+    # (上の lineF は下の lineG で上書きされて残っていない)
     "lineF_fp64": ("89ea94385435c16babde906465b58a54748d0e4b2d50b5edc661b46903ae19b0", "~/forge-linevisc-fp64"),
+    # 846727be (マスクのビット 8 = 熱伝導の K の密度の列を外す) + typedef double、~/forge-linevisc-fp64 を上書き
+    "lineG_fp64": ("c0b649052fdcf6092c7c73317563d77b570df60aca31e1bf709cf47586000c8c", "~/forge-linevisc-fp64"),
 }
 
 
