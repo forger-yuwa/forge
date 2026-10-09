@@ -66,7 +66,7 @@ for k, r in E[a.arm].items():
         lu = E["LU"].get(k)
         if lu is not None and lu["max"] > 1e-11: I.append(f"solve {k}: 腕の η {r['max']:.3e} > 上限、従来も {lu['max']:.3e} > 1e-11")
         else: F.append(f"solve {k}: 腕の η {r['max']:.3e} > {a.eta_limit:.0e}")
-if a.bitwise and a.arm == "LAYOUT":
+if a.bitwise and a.arm in ("LAYOUT", "LAYOUT2"):
     lay = one(r"^\[lineLayoutCmp\] factor (\d+): LU 不一致 (\d+)・W 不一致 (\d+)・ピボット 不一致 (\d+)・失敗 不一致 (\d+)$", a.factors, "並べ替えた因子の比較の行")
     bad = {k: [int(g) for g in m.groups()[1:]] for k, m in lay.items() if any(int(g) for g in m.groups()[1:])}
     if bad: F.append(f"並べ替えた因子が従来の因子とビットで一致しない factor {sorted(bad)[:5]} (最初: {bad[min(bad)]})")

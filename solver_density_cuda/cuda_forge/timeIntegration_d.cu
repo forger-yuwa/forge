@@ -2300,6 +2300,146 @@ __global__ void lineThomasSolveL_d
     }
 }
 
+// ---- 並べ替え版 + 連鎖の短縮 (plan time_integration-line-implicit-speed §5.1 #12、FORGE_LINE_LAYOUT=2 の opt-in) ----
+// lineThomasFactorL_d / lineThomasSolveL_d と同じ並び・同じ演算 (読む値・積和の順序・ピボットの規則) で、次の 3 点だけを変える:
+//   (1) 前の節点の W (分解) と y (代入の前進) を書いてから読み直さず、レジスタに持ち回す (値は書いたものと同じ)
+//   (2) ポインタに __restrict__ を付け、別名の可能性で次の読みが書きの後ろへ下がらないようにする
+//   (3) 節点のループを 2 回ずつ展開し、次の節点の読みを早く出せるようにする
+// 補正はビットで一致するはず (§6.7 と同じ照合で確かめる)。
+__global__ void lineThomasFactorLP_d
+(
+ geom_int nLines, const geom_int* __restrict__ line_offsets, const geom_int* __restrict__ line_cells,
+ const flow_float* __restrict__ Kprev, const flow_float* __restrict__ Knext,
+ const flow_float* __restrict__ d00, const flow_float* __restrict__ d01, const flow_float* __restrict__ d02, const flow_float* __restrict__ d03, const flow_float* __restrict__ d04,
+ const flow_float* __restrict__ d10, const flow_float* __restrict__ d11, const flow_float* __restrict__ d12, const flow_float* __restrict__ d13, const flow_float* __restrict__ d14,
+ const flow_float* __restrict__ d20, const flow_float* __restrict__ d21, const flow_float* __restrict__ d22, const flow_float* __restrict__ d23, const flow_float* __restrict__ d24,
+ const flow_float* __restrict__ d30, const flow_float* __restrict__ d31, const flow_float* __restrict__ d32, const flow_float* __restrict__ d33, const flow_float* __restrict__ d34,
+ const flow_float* __restrict__ d40, const flow_float* __restrict__ d41, const flow_float* __restrict__ d42, const flow_float* __restrict__ d43, const flow_float* __restrict__ d44,
+ double* __restrict__ Wt, double* __restrict__ LUt, signed char* __restrict__ pivt, double* __restrict__ Kpt, unsigned char* __restrict__ faild
+)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    const geom_int b = line_offsets[l];
+    const geom_int e = line_offsets[l + 1];
+    faild[l] = 0;
+    double Wp[5][5];                                       // 前の節点の W (レジスタに持ち回す)
+    #pragma unroll 2
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int k = p - b;
+        const geom_int ic = line_cells[p];
+        double M[5][5] = {
+            {(double)d00[ic],(double)d01[ic],(double)d02[ic],(double)d03[ic],(double)d04[ic]},
+            {(double)d10[ic],(double)d11[ic],(double)d12[ic],(double)d13[ic],(double)d14[ic]},
+            {(double)d20[ic],(double)d21[ic],(double)d22[ic],(double)d23[ic],(double)d24[ic]},
+            {(double)d30[ic],(double)d31[ic],(double)d32[ic],(double)d33[ic],(double)d34[ic]},
+            {(double)d40[ic],(double)d41[ic],(double)d42[ic],(double)d43[ic],(double)d44[ic]}};
+        if (p > b) {
+            double Kp[5][5];
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j) {
+                    Kp[i][j] = (double)Kprev[(size_t)ic * 25 + i * 5 + j];
+                    Kpt[lineLIdx(k, i * 5 + j, 25, nLines, l)] = Kp[i][j];
+                }
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j) {
+                    double macc = 0.0;
+                    for (int m = 0; m < 5; ++m) macc += Kp[i][m] * Wp[m][j];
+                    M[i][j] -= macc;
+                }
+        }
+        int piv[5];
+        if (!line_implicit::lu5_factor(M, piv)) { faild[l] = 1; return; }
+        for (int i = 0; i < 5; ++i) {
+            pivt[lineLIdx(k, i, 5, nLines, l)] = (signed char)piv[i];
+            for (int j = 0; j < 5; ++j) LUt[lineLIdx(k, i * 5 + j, 25, nLines, l)] = M[i][j];
+        }
+        if (p + 1 < e) {
+            for (int j = 0; j < 5; ++j) {
+                double col[5];
+                for (int i = 0; i < 5; ++i) col[i] = (double)Knext[(size_t)ic * 25 + i * 5 + j];
+                line_implicit::lu5_solve(M, piv, col);
+                for (int i = 0; i < 5; ++i) { Wt[lineLIdx(k, i * 5 + j, 25, nLines, l)] = col[i]; Wp[i][j] = col[i]; }
+            }
+        }
+    }
+}
+
+__global__ void lineThomasSolveLP_d
+(
+ geom_int nLines, const geom_int* __restrict__ line_offsets, const geom_int* __restrict__ line_cells,
+ const double* __restrict__ Kpt, const double* __restrict__ Wt, const double* __restrict__ LUt, const signed char* __restrict__ pivt, const unsigned char* __restrict__ faild,
+ const flow_float* __restrict__ rhs0, const flow_float* __restrict__ rhs1, const flow_float* __restrict__ rhs2, const flow_float* __restrict__ rhs3, const flow_float* __restrict__ rhs4,
+ const flow_float* __restrict__ dq_old_0, const flow_float* __restrict__ dq_old_1, const flow_float* __restrict__ dq_old_2, const flow_float* __restrict__ dq_old_3, const flow_float* __restrict__ dq_old_4,
+ flow_float* __restrict__ dq_new_0, flow_float* __restrict__ dq_new_1, flow_float* __restrict__ dq_new_2, flow_float* __restrict__ dq_new_3, flow_float* __restrict__ dq_new_4,
+ flow_float implicit_relax,
+ double* __restrict__ yt
+)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    const geom_int b = line_offsets[l];
+    const geom_int e = line_offsets[l + 1];
+    if (faild[l] != 0) {
+        for (geom_int p = b; p < e; ++p) {
+            const geom_int ic = line_cells[p];
+            dq_new_0[ic] = dq_old_0[ic]; dq_new_1[ic] = dq_old_1[ic]; dq_new_2[ic] = dq_old_2[ic];
+            dq_new_3[ic] = dq_old_3[ic]; dq_new_4[ic] = dq_old_4[ic];
+        }
+        return;
+    }
+    double yp[5] = {0.0, 0.0, 0.0, 0.0, 0.0};              // 前の節点の y (レジスタに持ち回す)
+    #pragma unroll 2
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int k = p - b;
+        const geom_int ic = line_cells[p];
+        double bk[5] = {(double)rhs0[ic],(double)rhs1[ic],(double)rhs2[ic],(double)rhs3[ic],(double)rhs4[ic]};
+        if (p > b) {
+            for (int i = 0; i < 5; ++i) {
+                double bacc = 0.0;
+                for (int m = 0; m < 5; ++m) bacc += Kpt[lineLIdx(k, i * 5 + m, 25, nLines, l)] * yp[m];
+                bk[i] += bacc;
+            }
+        }
+        double M[5][5];
+        int piv[5];
+        for (int i = 0; i < 5; ++i) {
+            piv[i] = (int)pivt[lineLIdx(k, i, 5, nLines, l)];
+            for (int j = 0; j < 5; ++j) M[i][j] = LUt[lineLIdx(k, i * 5 + j, 25, nLines, l)];
+        }
+        line_implicit::lu5_solve(M, piv, bk);
+        for (int i = 0; i < 5; ++i) { yt[lineLIdx(k, i, 5, nLines, l)] = bk[i]; yp[i] = bk[i]; }
+    }
+    double dq[5];
+    {
+        const geom_int ic = line_cells[e - 1];
+        for (int i = 0; i < 5; ++i) dq[i] = yp[i];
+        dq_new_0[ic] = (flow_float)(implicit_relax * dq[0]);
+        dq_new_1[ic] = (flow_float)(implicit_relax * dq[1]);
+        dq_new_2[ic] = (flow_float)(implicit_relax * dq[2]);
+        dq_new_3[ic] = (flow_float)(implicit_relax * dq[3]);
+        dq_new_4[ic] = (flow_float)(implicit_relax * dq[4]);
+    }
+    #pragma unroll 2
+    for (geom_int p = e - 2; p >= b; --p) {
+        const geom_int k = p - b;
+        const geom_int ic = line_cells[p];
+        double nx[5];
+        for (int i = 0; i < 5; ++i) {
+            double acc = yt[lineLIdx(k, i, 5, nLines, l)];
+            for (int m = 0; m < 5; ++m) acc += Wt[lineLIdx(k, i * 5 + m, 25, nLines, l)] * dq[m];
+            nx[i] = acc;
+        }
+        for (int i = 0; i < 5; ++i) dq[i] = nx[i];
+        dq_new_0[ic] = (flow_float)(implicit_relax * dq[0]);
+        dq_new_1[ic] = (flow_float)(implicit_relax * dq[1]);
+        dq_new_2[ic] = (flow_float)(implicit_relax * dq[2]);
+        dq_new_3[ic] = (flow_float)(implicit_relax * dq[3]);
+        dq_new_4[ic] = (flow_float)(implicit_relax * dq[4]);
+        if (p == b) break;
+    }
+}
+
 // ---- Thomas の float 版 (plan time_integration-line-implicit-speed §5.1 #8・§6.4、FORGE_LINE_F32=1/2 の opt-in 実験) ----
 // 既定の経路 (lineThomasFactor_d / lineThomasSolve_d、double) とは別のカーネル。演算の型 T と、Thomas の中だけで使う W・LU・y の保存の型 S を選ぶ:
 //   FORGE_LINE_F32=1: T = float、S = double (演算だけ float。律速が演算かメモリかの切り分け用)
@@ -2740,9 +2880,11 @@ static int lineF32Mode() {
 }
 // FORGE_LINE_LAYOUT=1 (plan time_integration-line-implicit-speed §5.1 #10・§6.7、opt-in): Thomas の中の配列をラインが隣り合う並びに置く (数値は不変)。
 // 逆行列・float・並列版・診断の経路とは組み合わせない (最初の呼び出しで止める)。FORGE_LINE_COMPARE=1 と組むと従来の並び (別のバッファ) と比べる。
+static int lineLayoutMode() { const char* e = getenv("FORGE_LINE_LAYOUT"); return e ? atoi(e) : 0; }   // 1 = 並べ替え、2 = 並べ替え + 連鎖の短縮 (#12)
 static bool lineLayoutEnabled() {
     static const bool v = [](){
         const char* e = getenv("FORGE_LINE_LAYOUT"); const bool on = e && atoi(e) != 0;
+        if (on && atoi(e) != 1 && atoi(e) != 2) { fprintf(stderr, "[line] FORGE_LINE_LAYOUT=%s は 1/2 のどれか — 止める\n", e); exit(EXIT_FAILURE); }
         if (on) {
             for (const char* k : {"FORGE_LINE_INV", "FORGE_LINE_F32", "FORGE_LINE_PAR", "FORGE_LINE_MONO", "FORGE_LINE_DEBUG_POINT", "FORGE_LINE_NOOP"}) {
                 const char* q = getenv(k);
@@ -2809,7 +2951,7 @@ static void lineModeNote(const char* phase, long& count) {
     if (count == 1 || count % 1000 == 0) {
         const char* m = getenv("FORGE_LINE_MONO"); const char* dp = getenv("FORGE_LINE_DEBUG_POINT"); const char* nn = getenv("FORGE_LINE_NOOP");
         const char* mode = (nn && atoi(nn)) ? "NOOP" : (dp && atoi(dp)) ? "DEBUG_POINT" : (m && atoi(m)) ? "MONO" :
-                           lineLayoutEnabled() ? "LAYOUT" : lineF32Mode() == 1 ? "F32c" : lineF32Mode() == 2 ? "F32cs" :
+                           lineLayoutEnabled() ? (lineLayoutMode() == 2 ? "LAYOUT2" : "LAYOUT") : lineF32Mode() == 1 ? "F32c" : lineF32Mode() == 2 ? "F32cs" :
                            lineInvEnabled() ? "INV" : (!lineSerialEnabled() ? "PAR" : "LU");
         printf("[line] %s %ld 回目: モード %s%s\n", phase, count, mode, lineCompareEnabled() ? " (比較あり)" : "");
     }
@@ -2958,7 +3100,15 @@ static void launchLineFactor(bool par, bool inv, int f32, mesh& msh, variables& 
         W, LU, piv, fail
     if (layout) {
         line_layout::ensure(msh);
-        lineThomasFactorL_d<<<grid, threads>>>(
+        if (lineLayoutMode() == 2) lineThomasFactorLP_d<<<grid, threads>>>(
+            msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, msh.line_Kprev_d, msh.line_Knext_d,
+            var.c_d["diag_block_00"], var.c_d["diag_block_01"], var.c_d["diag_block_02"], var.c_d["diag_block_03"], var.c_d["diag_block_04"],
+            var.c_d["diag_block_10"], var.c_d["diag_block_11"], var.c_d["diag_block_12"], var.c_d["diag_block_13"], var.c_d["diag_block_14"],
+            var.c_d["diag_block_20"], var.c_d["diag_block_21"], var.c_d["diag_block_22"], var.c_d["diag_block_23"], var.c_d["diag_block_24"],
+            var.c_d["diag_block_30"], var.c_d["diag_block_31"], var.c_d["diag_block_32"], var.c_d["diag_block_33"], var.c_d["diag_block_34"],
+            var.c_d["diag_block_40"], var.c_d["diag_block_41"], var.c_d["diag_block_42"], var.c_d["diag_block_43"], var.c_d["diag_block_44"],
+            line_layout::W, line_layout::LU, line_layout::piv, line_layout::Kp, fail);
+        else lineThomasFactorL_d<<<grid, threads>>>(
             msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, msh.line_Kprev_d, msh.line_Knext_d,
             var.c_d["diag_block_00"], var.c_d["diag_block_01"], var.c_d["diag_block_02"], var.c_d["diag_block_03"], var.c_d["diag_block_04"],
             var.c_d["diag_block_10"], var.c_d["diag_block_11"], var.c_d["diag_block_12"], var.c_d["diag_block_13"], var.c_d["diag_block_14"],
@@ -3001,7 +3151,12 @@ static void launchLineSolve(bool par, bool inv, int f32, solverConfig& cfg, mesh
         dqn[0], dqn[1], dqn[2], dqn[3], dqn[4], cfg.implicitRelax, y
     if (layout) {
         line_layout::ensure(msh);
-        lineThomasSolveL_d<<<grid, threads>>>(
+        if (lineLayoutMode() == 2) lineThomasSolveLP_d<<<grid, threads>>>(
+            msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, line_layout::Kp, line_layout::W, line_layout::LU, line_layout::piv, fail,
+            var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"],
+            var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"],
+            dqn[0], dqn[1], dqn[2], dqn[3], dqn[4], cfg.implicitRelax, line_layout::y);
+        else lineThomasSolveL_d<<<grid, threads>>>(
             msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, line_layout::Kp, line_layout::W, line_layout::LU, line_layout::piv, fail,
             var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"],
             var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"],
@@ -3144,7 +3299,7 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
                 printf("[lineNonfinite] solve %d: 腕 y %llu、従来 y %llu\n", line_cmp::solveCalls, ay, ry);
             }
             if (cmpInv || cmpF32 != 0 || cmpLay) {     // 後退誤差は比べる版 (本来のバッファ) と従来の LU (別のバッファ) の両方
-                line_cmp::eta(cmpLay ? "LAYOUT" : cmpF32 == 1 ? "F32c" : cmpF32 == 2 ? "F32cs" : "INV", line_cmp::solveCalls, cfg, msh, var, dqn, msh.line_fail_d);
+                line_cmp::eta(cmpLay ? (lineLayoutMode() == 2 ? "LAYOUT2" : "LAYOUT") : cmpF32 == 1 ? "F32c" : cmpF32 == 2 ? "F32cs" : "INV", line_cmp::solveCalls, cfg, msh, var, dqn, msh.line_fail_d);
                 line_cmp::eta("LU", line_cmp::solveCalls, cfg, msh, var, line_cmp::a.dq, line_cmp::a.fail);
             }
         }

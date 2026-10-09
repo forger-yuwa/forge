@@ -1,9 +1,9 @@
 #!/bin/bash
-# plan time_integration-line-implicit-speed §6.9 (2026-10-10): 仕上げまでの総時間。(1) 1 step の専有時間 (P・L0・L5 × 3)、(2) L5 のライン段 → (3) point の段、(4) 判定。バイナリ lineK。
+# plan time_integration-line-implicit-speed §6.9 (2026-10-10): 仕上げまでの総時間。(1) 1 step の専有時間 (P・L0・L5 × 3)、(2) L5 のライン段 → (3) point の段、(4) 判定。バイナリ lineL。
 set -uo pipefail
 cd "$(dirname "$0")"
 export FORGE_CUDA_BLOCKSIZE=128 REAL_CONVERTER=$HOME/forge-wallfit-bin-fp64/solver_density_cuda/build/convertGmshToForge FORGE_CONVERTER=$PWD/conv_tolerant.sh
-export FORGE_BIN=$(cat prof_target_linevisc.txt) COLD_ALT_BINARY=lineK_fp64
+export FORGE_BIN=$(cat prof_target_linevisc.txt) COLD_ALT_BINARY=lineL_fp64
 unset FORGE_ALLOW_UNVERIFIED_SPECIES FORGE_PROFILE FORGE_LINE_COMPARE FORGE_LINE_DUMP_DIR FORGE_DUMP_LEDGER FORGE_LVC_TERMS FORGE_WI_FORCE_DIAG FORGE_DIAG_FACE_H_DOUBLE FORGE_LINE_INV FORGE_LINE_PAR FORGE_LINE_F32 FORGE_LINE_LAYOUT
 SRC=run_0183_ns_coldmesh_tw300_ext
 REF="--cfl 4 --limiter-ref-from $SRC"
