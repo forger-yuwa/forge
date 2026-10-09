@@ -20,7 +20,12 @@ ap = argparse.ArgumentParser(); ap.add_argument("run"); ap.add_argument("--phase
 a = ap.parse_args()
 run = HERE / a.run
 SF = run / "m9_watch.json"
-REF = json.loads((HERE / "m9_ref.json").read_text()) if a.phase == "point" else None
+KEYS = ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")
+REF = None
+if a.phase == "point":                                  # E2 の参照は数値 4 つだけ (説明の文字列は使わない、codex plan-3 M2)
+    _r = json.loads((HERE / "m9_ref.json").read_text())
+    REF = {k: float(_r[k]) for k in KEYS}
+    if not all(np.isfinite(v) and v > 0 for v in REF.values()): print("[m9_watch] 参照が有限・正でない — 止める"); sys.exit(2)
 FINAL = ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR")
 st = json.loads(SF.read_text()) if SF.exists() else {"run": run.name, "phase": a.phase, "budget": a.budget, "status": "running", "rows": [], "tries": {}}
 if st["status"] in FINAL:
@@ -73,41 +78,71 @@ def cleanup(keep_extra=()):
         if m in keep: continue
         for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
 
-while True:
-    alive = bool(pids())
-    have = {r["step"] for r in st["rows"]}
-    new = [n for n in steps() if n > 0 and n not in have and (not alive or time.time() - (run / f"res_{n}.h5").stat().st_mtime > 60)]
-    progressed = False
-    for n in new:
-        try:
-            rec = CS.snapshot(run, n, yb_x, yb); rec["nonfinite_all"] = nonfinite_all(n)
-        except Exception as e:
-            st["tries"][str(n)] = st["tries"].get(str(n), 0) + 1; save()
-            print(f"[m9_watch] {run.name} {n}: 読めない ({e}) — {st['tries'][str(n)]} 回目", flush=True)
-            if st["tries"][str(n)] >= 3: finish("DATA_ERROR", step=n); stop(); sys.exit(1)
-            break
-        st["rows"].append(rec); st["rows"].sort(key=lambda r: r["step"]); progressed = True
-        rows = st["rows"]
-        dr = [drift(rows, k) for k in ("theta_r_40", "theta_r_70", "theta_r_94")]
-        e2 = {k: 100 * (rec[k] / REF[k] - 1) for k in REF} if REF else None
-        rec["drift"] = dr; rec["e2"] = e2
-        print(f"[m9_watch] {run.name} {n}: 欠損 {rec['deficit']:.4f}、ドリフト {dr}、E2 {e2}、非有限 {rec['nonfinite']}/{rec['nonfinite_all']}", flush=True)
-        if rec["nonfinite"] or rec["nonfinite_all"]:
-            save(); ok = stop(); finish("DIVERGED", fail_step=n, stopped=ok); sys.exit(0)
-        lvl = rec["deficit"] is not None and None not in dr and abs(rec["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr)
-        if lvl and (e2 is None or all(abs(v) <= 0.1 for v in e2.values())):
-            save(); ok = stop()
-            if not ok: finish("EXEC_ERROR", note="forge を止められない", step=n); sys.exit(1)
-            for m in steps():
-                if m > n:
-                    for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
-            sha = hashlib.sha256((run / f"res_{n}.h5").read_bytes()).hexdigest()
-            finish("REACHED", reach_step=n, reach_sha256=sha); cleanup(keep_extra=(n,)); sys.exit(0)
-        save(); cleanup()
-    if not progressed and not alive and not [n for n in steps() if n > 0 and n not in {r["step"] for r in st["rows"]}]:
-        rcf = run / "RUN_RC"; rc = rcf.read_text().strip() if rcf.exists() else "?"
-        last = max((r["step"] for r in st["rows"]), default=0)
-        if rc == "0" and last >= a.budget: finish("CENSORED", last_step=last)
-        else: finish("EXEC_ERROR", rc=rc, last_step=last)
-        sys.exit(0)
-    time.sleep(30)
+def done_at(rows):
+    """保存済みの系列の最初の終わりの出力 (水準 [+ E2]) を返す。非有限があればその step を負で返す。"""
+    for n_ in range(len(rows)):
+        r_ = rows[n_]
+        if r_.get("nonfinite") or r_.get("nonfinite_all"): return -r_["step"]
+        dr_ = [drift(rows[: n_ + 1], k) for k in KEYS[:3]]
+        e2_ = {k: 100 * (r_[k] / REF[k] - 1) for k in KEYS} if REF else None
+        if r_.get("deficit") is not None and None not in dr_ and abs(r_["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr_) \
+           and (e2_ is None or all(abs(v) <= 0.1 for v in e2_.values())):
+            return r_["step"]
+    return None
+def conclude(n):
+    """終わりの出力 n で止める (何度呼んでも同じ結果): forge を止め、後の出力を消し、sha256 を記録して REACHED。"""
+    ok = stop()
+    if not ok: finish("EXEC_ERROR", note="forge を止められない", step=n); sys.exit(1)
+    for m in steps():
+        if m > n:
+            for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
+    if not (run / f"res_{n}.h5").exists(): finish("DATA_ERROR", note=f"到達の出力 res_{n}.h5 が無い", step=n); sys.exit(1)
+    sha = hashlib.sha256((run / f"res_{n}.h5").read_bytes()).hexdigest()
+    finish("REACHED", reach_step=n, reach_sha256=sha); cleanup(keep_extra=(n,)); sys.exit(0)
+# 再開: 保存済みの系列で先に判定し直す (codex plan-3 M4)
+_d = done_at(st["rows"])
+if _d is not None:
+    if _d < 0: stop(); finish("DIVERGED", fail_step=-_d); sys.exit(0)
+    conclude(_d)
+
+def main_loop():
+  while True:
+      alive = bool(pids())
+      have = {r["step"] for r in st["rows"]}
+      new = [n for n in steps() if n > 0 and n not in have and (not alive or time.time() - (run / f"res_{n}.h5").stat().st_mtime > 60)]
+      progressed = False
+      for n in new:
+          try:
+              rec = CS.snapshot(run, n, yb_x, yb); rec["nonfinite_all"] = nonfinite_all(n)
+          except Exception as e:
+              st["tries"][str(n)] = st["tries"].get(str(n), 0) + 1; save()
+              print(f"[m9_watch] {run.name} {n}: 読めない ({e}) — {st['tries'][str(n)]} 回目", flush=True)
+              if st["tries"][str(n)] >= 3: finish("DATA_ERROR", step=n); stop(); sys.exit(1)
+              break
+          st["rows"].append(rec); st["rows"].sort(key=lambda r: r["step"]); progressed = True
+          rows = st["rows"]
+          dr = [drift(rows, k) for k in ("theta_r_40", "theta_r_70", "theta_r_94")]
+          e2 = {k: 100 * (rec[k] / REF[k] - 1) for k in KEYS} if REF else None
+          rec["drift"] = dr; rec["e2"] = e2
+          print(f"[m9_watch] {run.name} {n}: 欠損 {rec['deficit']:.4f}、ドリフト {dr}、E2 {e2}、非有限 {rec['nonfinite']}/{rec['nonfinite_all']}", flush=True)
+          if rec["nonfinite"] or rec["nonfinite_all"]:
+              save(); ok = stop(); finish("DIVERGED", fail_step=n, stopped=ok); sys.exit(0)
+          lvl = rec["deficit"] is not None and None not in dr and abs(rec["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr)
+          if lvl and (e2 is None or all(abs(v) <= 0.1 for v in e2.values())):
+              save(); conclude(n)
+          save(); cleanup()
+      if not progressed and not alive and not [n for n in steps() if n > 0 and n not in {r["step"] for r in st["rows"]}]:
+          rcf = run / "RUN_RC"; rc = rcf.read_text().strip() if rcf.exists() else "?"
+          last = max((r["step"] for r in st["rows"]), default=0)
+          if rc == "0" and last >= a.budget: finish("CENSORED", last_step=last)
+          else: finish("EXEC_ERROR", rc=rc, last_step=last)
+          sys.exit(0)
+      time.sleep(30)
+
+try:
+    main_loop()
+except SystemExit:
+    raise
+except Exception as e:                                   # 見張りの例外でも forge を止めて状態を残す (codex plan-3 M2)
+    import traceback; traceback.print_exc()
+    ok = stop(); finish("EXEC_ERROR", note=f"見張りの例外: {e!r}", stopped=ok); sys.exit(1)

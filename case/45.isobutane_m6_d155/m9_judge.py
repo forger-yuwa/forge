@@ -5,7 +5,9 @@
 分解能 = Σ 段 (出力の間隔 × 1 step の時間) + Σ 段 (step 数 × 単価の 3 本の幅)。
 P・L0 は既存の系列の事後の集計 (古いバイナリの step 数を新しいバイナリでも同じと見なす、という仮定)。L5 は run_0353_m9_L5・run_0354_m9_L5cut の見張りの状態。
 品質: 新しい段の check_convergence (DIVERGED は比較不可、NOT CONVERGED は「水準への到達の比較」に限る) と、到達の窓 [N − 2 万, N] の θ_r・Q_w の
-check_quasisteady (系列 CSV、--tail 20000 --drift 0.0005 --min-snaps 5) を記録する。
+check_quasisteady (系列 CSV を窓で切り出して --tail 1.0 --drift 0.0005 --min-snaps 5) を記録する。
+比較の前提 (codex plan-3 M3): 見張りの到達の step と系列からの再計算が一致、新しい段の check_convergence の VERDICT がある (DIVERGED でない)、準定常の判定が正常に終わる
+(OVERALL の行がある)。どれかが欠けたら比較不可。NOT CONVERGED・NOT ALL STEADY は「水準と E2 への到達時間」の比較に限って扱う。
 usage (AWS の case dir): python3 m9_judge.py → _band_ab/cold_pair/m9_judge.json"""
 import csv, json, math, subprocess, sys
 from pathlib import Path
@@ -41,12 +43,14 @@ def qs(window, tag):
         w = csv.writer(f); w.writerow(["step"] + list(KEYS))
         for x in window: w.writerow([x["abs"]] + [x[k] for k in KEYS])
     o = subprocess.run([sys.executable, str(HERE / "../../solver_density_cuda/tools/check_quasisteady.py"), "--series-csv", str(p), "--series-cols", ",".join(KEYS),
-                        "--tail", "20000", "--drift", "0.0005", "--min-snaps", "5"], capture_output=True, text=True)
-    return {"rc": o.returncode, "tail": (o.stdout + o.stderr).strip().splitlines()[-6:]}
+                        "--tail", "1.0", "--drift", "0.0005", "--min-snaps", "5"], capture_output=True, text=True)
+    txt = (o.stdout + o.stderr).strip()
+    ov = [l for l in txt.splitlines() if "OVERALL" in l]
+    return {"rc": o.returncode, "overall": ov[-1] if ov else None, "ok": bool(ov), "tail": txt.splitlines()[-6:]}
 def conv(run):
     v = HERE / run / "CONVERGENCE_VERDICT.txt"
     t = v.read_text(errors="replace") if v.exists() else ""
-    return "DIVERGED" if "DIVERGED" in t else "NOT CONVERGED" if "NOT CONVERGED" in t else "PASS" if "PASS" in t else "記録なし"
+    return "DIVERGED" if "DIVERGED" in t else "NOT CONVERGED" if "NOT CONVERGED" in t else "PASS" if "-> PASS" in t else "記録なし"
 def total(phases, restarts):
     t = sum(ph["steps"] * U[ph["mode"]]["median_ms"] / 1000 + ph["outputs"] * U[ph["mode"]]["median_output_ms"] / 1000 for ph in phases)
     t += sum(U[m]["median_startup_s"] for m in restarts)
@@ -75,13 +79,28 @@ if s5["status"] == "REACHED":
         n1, n2 = s5["reach_step"], c5["reach_step"]
         t5, u5 = total([{"mode": "L5", "steps": n1, "outputs": n1 // 5000, "interval": 5000}, {"mode": "P", "steps": n2, "outputs": n2 // 5000, "interval": 5000}], ["L5", "P"])
         rows = chain([("run_0354_m9_L5cut", 0)]); r5 = reach(rows)
-        out["L5"].update(total_s=t5, uncert_s=u5, e2=r5["e2"] if r5 and "e2" in r5 else None, quasisteady=qs(r5["window"], "L5") if r5 and "window" in r5 else None)
+        out["L5"]["recheck"] = {"reach_from_series": r5.get("abs") if r5 else None, "watch_reach": n2, "match": bool(r5 and r5.get("abs") == n2)}
+        if out["L5"]["recheck"]["match"]:
+            out["L5"].update(total_s=t5, uncert_s=u5, e2=r5["e2"], quasisteady=qs(r5["window"], "L5"))
+def evidence(k):
+    """比較の前提がそろっているか (codex plan-3 M3)。欠けていればその理由を返す。"""
+    a = out.get(k, {})
+    if "total_s" not in a: return "未到達・失敗・到達の再計算の不一致"
+    if a.get("quasisteady") is None or not a["quasisteady"]["ok"]: return "準定常の判定が正常に終わらない"
+    if k == "L5":
+        for ph in ("line", "point"):
+            c = a.get(ph, {}).get("convergence")
+            if c in (None, "記録なし"): return f"{ph} の段の check_convergence が無い"
+            if c == "DIVERGED": return f"{ph} の段が DIVERGED"
+    return None
 def cmp(x, y):
     a, b = out.get(x, {}), out.get(y, {})
-    if "total_s" not in a or "total_s" not in b: return "判別不能 (どちらかが未到達・失敗)"
-    if any(out[k].get(ph, {}).get("convergence") == "DIVERGED" for k in (x, y) for ph in ("line", "point")): return "比較不可 (DIVERGED)"
+    for k in (x, y):
+        e = evidence(k)
+        if e: return f"比較不可 ({k}: {e})"
     d = a["total_s"] - b["total_s"]; u = a["uncert_s"] + b["uncert_s"]
-    return f"{x} が速い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d < -u else f"{x} が遅い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d > u else "判別不能 (差が分解能以内)"
+    note = "" if all("ALL STEADY" in (out[k]["quasisteady"]["overall"] or "") and "NOT ALL" not in (out[k]["quasisteady"]["overall"] or "") for k in (x, y)) else " [到達の窓の準定常は未確認 = 水準と E2 への到達時間の比較に限る]"
+    return (f"{x} が速い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d < -u else f"{x} が遅い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d > u else "判別不能 (差が分解能以内)") + note
 out["compare"] = {"L5_vs_L0": cmp("L5", "L0"), "L0_vs_P": cmp("L0", "P"), "L5_vs_P": cmp("L5", "P")}
 (D / "m9_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
 print(json.dumps({k: ({kk: vv for kk, vv in v.items() if kk not in ("window",)} if isinstance(v, dict) else v) for k, v in out.items()}, indent=1, ensure_ascii=False, default=float))

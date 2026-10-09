@@ -92,7 +92,8 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
 | 9 | 本線の評価 (方向別 dt + 上限 + point 仕上げの総壁時計) | 事前登録 v2 (§6.11、2026-10-10。v1 の §6.9 は撤回): 同じ出発点から point で水準に入るまでの総時間を、P (point だけ)・L0 (ライン 値 0 → point)・L5 (粘性入り: 値 3・マスク 5 → point、ユーザの指摘「粘性をライン向けのヤコビアンに入れたほうが良くね？」を受けた腕) で比べる。P・L0 は既存の系列の事後の集計 (v2 の規則で P 61.0 万 step、L0 ライン 13.5 万 + point 3.5 万)、L5 を新しく回す。残差の停滞に面エンタルピーの精度が効くかの監査は [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 (未着手) | F |
 | 10 | Thomas の配列の並べ替え (`FORGE_LINE_LAYOUT=1`) | 結果 (2026-10-10、§6.8): ビット一致・−0.47 ms/step (−1.4 %、代入 −19 %・分解 +24 %)。opt-in のまま、#12 と組み合わせて既定化を判断 | O |
 | 11 | Thomas の律速の計測 (`ncu`) | 完了 (2026-10-10、§6.6): DRAM の帯域 74 %・1 回の読み込み命令が約 31 セクタに散る・ワープはメモリの読みを待つ → まとまらないアクセスを有力な原因として #10 で確かめる | O |
-| 12 | 連鎖の短縮 (数値は不変、提案 2026-10-09、§6.8 で具体化) | 並べ替えた並び (#10) の上で、前の節点の y (代入)・W (分解) をレジスタに持ち、次の節点の LU・K・ピボットを先に読む (二重の持ち回し)。あわせて Kprev (と D・Knext) を block カーネルが並べ替えた並びで直接書き、分解の写しを無くす。数値は不変 (§6.7 と同じビット一致の照合)。設計は §6 に書いて codex に諮ってから | F |
+| 12 | 連鎖の短縮 (`FORGE_LINE_LAYOUT=2`) | 結果 (2026-10-10、§6.12): ビット一致・−2.65 ms/step (−7.6 %)。分解 −15 %・代入 −19 % (従来比) | O |
+| 13 | LAYOUT2 の既定化の前の確認 | §5.1 #5 の他の経路 (可変長のライン・部分被覆・`lineKFreeze 0/1`・周期のミラー・軸と壁の拘束の行) でビット一致を確かめ、メモリ +365 MB を記録してから既定にするか決める。Kprev・D・Knext を block カーネルが並べ替えた並びで直接書く改良 (分解の読みのまとまり) はその後 | O |
 
 ## 6. 検証 (codex plan 段の反映後、2026-10-09)
 
@@ -327,20 +328,34 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
   見張り `m9_watch.py` v2 の状態は REACHED / CENSORED (上限まで正常に回って届かず) / DIVERGED (VALUE の全量の非有限) / EXEC_ERROR (上限前の異常終了・止められない) / DATA_ERROR (3 回読めない)。
   止めるときは SIGTERM → 180 s 待って SIGKILL → 終了を確かめてから後の出力を消す。状態と系列は 1 つの JSON に原子的に保存してから出力を消す (残すのは 5 万 step ごと・最新 5 つ・到達の出力)。
   起動後 120 s で実効のモード (ログの `[line] … モード LU`・`FORGE_LVC_TERMS=5`・設定の `lineViscCoupling: 3`、point は `[line]` の行が無いこと、比較・診断なし) を確かめ、外れれば止める。
-  許した `FORGE_*` (`FORGE_CUDA_BLOCKSIZE`・`FORGE_BIN`・`FORGE_CONVERTER`) 以外の環境変数は消してから起動する。
+  許した `FORGE_*` (`FORGE_CUDA_BLOCKSIZE`・`FORGE_BIN`・`FORGE_CONVERTER`) 以外の環境変数は消してから起動する。モードが外れたときも同じ停止の手順 (`m9_stop.py`) を使う。
+  見張りは E2 に参照の数値 4 つだけを使い (起動前に有限・正を確かめる)、見張り自身の例外でも forge を止めて EXEC_ERROR を残す。再開時は保存済みの系列で終わりを判定し直す (何度呼んでも同じ結果)。
+  専有時間の run は、既にあればバイナリ (lineL の sha256)・終了コード 0・モード OK のときだけ使い直す。投入前に GPU の他の計算プロセスが 0 本でなければ測らない (取得の失敗は別に止める)。
 - **総時間 (推定、共通の環境の単価で換算)** = Σ 段 (step 数 × 1 step の時間) + 出力の回数 × 出力 1 回の費用 + 起動の回数 × 起動と終了の時間 (腕・段ごとの構成の値)。
   単価は lineL で P・L0・L5 の構成ごとに 1000 step × 3 本 (`m9_unit.py`): 1 step = 表示の 101〜999 step の平均、出力 1 回 = 表示の step 1000 の ms − 1 step
   (実測で出力は表示の 1000 に入る: run_0349 で 999 は 34.65 ms、1000 は 274.75 ms)、起動と終了 = 壁時計 − 全 step の和。有限・非負・step のそろい・専有 (nvidia-smi の失敗は別扱い)・実効のモードを確かめる。
   P・L0 の step 数は古いバイナリの系列から取る (point の経路は不変、ラインの既定の経路は §6.0 で再実行の差の範囲の一致。長い軌道のビット一致は示していない = **モデルの仮定**)。
   分解能 = Σ 段 (出力の間隔 × 1 step) + Σ 段 (step 数 × 単価の 3 本の幅)。
 - **品質**: 新しい段の `check_convergence` (DIVERGED → 比較不可、NOT CONVERGED → 比較は「登録した水準と E2 への到達」に限る) と、各腕の到達の窓 [N − 2 万, N] の θ_r・Q_w の
-  `check_quasisteady --series-csv` (`--tail 20000 --drift 0.0005 --min-snaps 5`) を記録する (P は 1 万 step ごとで窓に 3 点しかないので標本不足になる見込み = そのまま書く)。
+  `check_quasisteady --series-csv` (窓を切り出して `--tail 1.0 --drift 0.0005 --min-snaps 5`) を記録する (P は 1 万 step ごとで窓に 3 点しかないので標本不足、L0 の窓は θ_r が TRANSIENT-UNSETTLED = そのまま書く)。
+  比較の前提 (codex plan-3 M3): 見張りの到達の step と系列からの再計算が一致、L5 の両段の `check_convergence` の VERDICT があり DIVERGED でない、準定常の判定が正常に終わる (OVERALL の行がある)。
+  欠けたら比較不可。NOT CONVERGED・NOT ALL STEADY は「水準と E2 への到達時間」の比較に限って扱う (判定の文にそう付記する)。
 - **判定** (`m9_judge.py` v2): L5 と L0、L0 と P、L5 と P を、総時間の差が分解能の和を超えるかで「速い / 遅い / 判別不能」。未到達・失敗・DIVERGED は比較しない。
+
+### 6.12 §6.10 の結果 (2026-10-10、バイナリ lineL = f9be0c4f + typedef double、sha256 e10a195d…)
+
+- **(1) 照合** (`case/45.isobutane_m6_d155/run_0358_lay2_cmp`、`_band_ab/cold_pair/cmp_judge_LAYOUT2.json`): **PASS**。20 回の分解・100 回の代入のすべてで dq と並べ替えた因子が従来とビット列で一致、非有限 0。
+- **(2) 性能** (`run_0359〜0361_timeLAY2_*`、`lay2_time_judge.json`、実効のモード・専有を確認済み): 従来 34.79 / 34.79 / 34.79、LAYOUT2 32.15 / 32.11 / 32.14 ms/step
+  → 組の差 −2.64 / −2.68 / −2.65 ms (−7.6 %)、従来の幅 0.006 ms → **速い**。
+- **(3) 内訳** (`run_0362_ncu_lay2`、`_band_ab/cold_pair/ncu/run_0362_raw.csv`): 分解 5.41 (従来) → 6.73 (LAYOUT) → **4.58 ms** (LAYOUT2、前の節点の W をレジスタに持った効果)、
+  代入 1.98 → 1.61 → **1.60 ms** (並べ替えの効果。y をレジスタに持っても変わらない)。Thomas の合計 15.3 → 12.6 ms/step。分解の読み込み命令はまだ 31.4 セクタ/命令 (D・Knext は節点番号の並び)。
+- **既定化**: 数値は不変 (ビット一致) で 7.6 % 速い。メモリ +365 MB。§6.8 の注記どおり、既定にする前に §5.1 #5 の他の経路 (可変長・部分被覆・`lineKFreeze`・周期・拘束の行) を確かめる (§5.1 #13)。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#9 の事前登録 v2) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-3.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-3.md) | GO-with-changes, C0/M4/m1 | 全件採用: M1 GPU の件数と取得の失敗を分け 0 本でなければ測らない、M2 E2 は数値 4 つ・見張りの例外とモード不一致でも共通の停止、M3 比較の前提 (到達の再計算の一致・VERDICT・準定常の正常終了)、M4 再開時の再判定と専有時間の run の使い直し、m5 `--tail 1.0` (§6.11)。参照の変更と前回 M2 の却下は妥当と確認された |
 | plan (#9 の事前登録 v1) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-2.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-2.md) | GO-with-changes, C0/M7/m1 | M1 採用 (v1 を撤回し参照を定常な point の窓に替えた v2、§6.9・§6.11)、M2 **却下** (出力の費用は表示の step 1000 に入ることを実測: run_0349 で 999 = 34.65 ms、1000 = 274.75 ms。出力の費用は別に測って足す形には採用)、M3〜M7・m8 採用 (単価・出力・起動の分離と検査、品質の判定、見張りの状態・停止・原子的な保存・再開、許した環境変数とモードの確認、step 0 の扱い) |
 | plan (#10 の事前登録・ncu の読み) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan.md) | GO-with-changes, C0/M2/m4 | 全件採用: M1 判定器の行のそろい・有限性・η を 6 桁、M2 §6.6 の block を測定 ID ごとに分けた、m3 dq の不一致をビット列で数え並べ替えた因子も節点ごとに比べる、m4 因果の主張を弱めた、m5 実効のモード・専有・ms の検査、m6 ncu の失敗で止める (§6.6・§6.7) |
 | plan (#8 の事前登録) | 2026-10-09 | [2026-10-09-time_integration-line-implicit-speed-plan-3.md](../../notes/reviews/2026-10-09-time_integration-line-implicit-speed-plan-3.md) | GO-with-changes, C0/M5/m1 | 全件採用: M1 腕の名前の代入 (`jf32.sh`、`set -u` で模擬確認)、M2 実際に使った float の因子・y の非有限を数え float の分解は非有限も失敗に、M3 PASS/FAIL/INDETERMINATE の分離、M4 そろいの検査 (factor・solve・評価本数・step 101..999)、M5 判定器の失敗で止める・古い JSON を消す・DIVERGED は失格、m6 律速の解釈は仮説 (§6.4) |

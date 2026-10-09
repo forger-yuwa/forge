@@ -13,7 +13,7 @@ OPT_P=""; OPT_L0="--line dir --itj 5 --cap 50"; OPT_L5="--line dir --itj 5 --lvc
 LOG=$PWD/m9.log
 fail() { echo "失敗: $*" | tee -a $LOG; exit 1; }
 prep() { python3 cold_cfl.py prep $SRC "$@" > /dev/null || return 1; rm -f $1/nozzle.msh; }
-gpu_others() { local n; n=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader) || return 1; echo "$n" | grep -c . ; }
+gpu_others() { local n; n=$(nvidia-smi --query-compute-apps=pid --format=csv,noheader) || return 1; echo "$n" | awk 'NF' | wc -l; return 0; }   # 取得の失敗 (rc 1) と件数を分ける
 modes_ok() {   # modes_ok <run> <P|L0|L5>: ログから実効のモードを確かめる
   local r=$1 m=$2 f=$1/forge_run.log
   grep -q "比較あり" $f && return 1
@@ -24,15 +24,20 @@ modes_ok() {   # modes_ok <run> <P|L0|L5>: ログから実効のモードを確�
   esac
 }
 echo "== 開始 $(date -Is)" >> $LOG
-# (1) 専有時間
-rm -f _band_ab/cold_pair/m9_unit.json
+# (1) 専有時間 (再開: 既にある run は、バイナリが lineL で、終了コード 0・モード OK なら使い直す。そうでなければ止める)
+SHA=$(python3 -c "import cold_cfl as C;print(C.ALT_BINARIES['lineL_fp64'][0])")
 for i in 1 2 3; do
   for m in P L0 L5; do
     r=run_035$((4 + i))_m9unit_${m}_$i
-    [ -e $r ] && fail "$r が既にある"
+    if [ -e $r ]; then
+      if [ "$(cat $r/RUN_RC 2>/dev/null)" = 0 ] && [ "$(cat $r/m9_modes.txt 2>/dev/null)" = OK ] && grep -q "$SHA" $r/COLD_PAIR.json; then echo "$r は使い直す" >> $LOG; continue; fi
+      fail "$r が既にあり、使い直せない"
+    fi
     eval opt=\$OPT_$m
+    g=$(gpu_others) || fail "nvidia-smi が失敗"
+    [ "$g" = 0 ] || fail "GPU に他の計算プロセスが $g 本ある — 専有でないので測らない"
     prep $r --steps 1000 --out 1000 $REF $opt || fail "prep $r"
-    g=$(gpu_others) || fail "nvidia-smi が失敗"; echo $g > $r/gpu_procs.txt
+    echo $g > $r/gpu_procs.txt
     t0=$(python3 -c "import time;print(time.time())")
     ( [ $m = L5 ] && export FORGE_LVC_TERMS=5; python3 cold_cfl.py run $r > $r/cold_pair_run_stdout.log 2>&1 ); rc=$?
     python3 -c "import time;print(time.time()-$t0)" > $r/wall.txt
@@ -53,9 +58,7 @@ phase() {   # phase <run> <line|point> <prep の追加引数...>
   sleep 120
   if ! modes_ok $r $([ $ph = line ] && echo L5 || echo P); then
     echo "$r: 実効のモードが期待と違う — 止める" >> $LOG
-    python3 -c "import os,signal,subprocess
-for p in subprocess.run(['pgrep','-x','forge'],capture_output=True,text=True).stdout.split():
-    if os.path.realpath(f'/proc/{p}/cwd')==os.path.realpath('$r'): os.kill(int(p),signal.SIGTERM)"
+    python3 m9_stop.py $r || echo "$r: forge を止められない" >> $LOG
     wait $job; fail "$r のモード"
   fi
   python3 m9_watch.py $r --phase $ph --budget 200000 >> $LOG 2>&1; local wrc=$?
