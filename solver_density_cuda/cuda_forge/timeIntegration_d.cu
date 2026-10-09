@@ -805,7 +805,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  const flow_float* __restrict__ fxArr,
  flow_float Prt,
  const flow_float* __restrict__ visLamArr,   // 節点ごとの層流粘性 (lineViscCoupling 2 のときだけ非 nullptr)
- flow_float* dbgLineVisc                     // デバッグ (FORGE_LINE_DUMP_DIR): ライン面のスカラー 2ν_eff·δ/dcc の和を storeLU の sweep で書く。通常 nullptr
+ flow_float* dbgLineVisc,                    // デバッグ (FORGE_LINE_DUMP_DIR): ライン面のスカラー 2ν_eff·δ/dcc の和を storeLU の sweep で書く。通常 nullptr
+ int lineViscTerms                           // 診断 (FORGE_LVC_TERMS、既定 7): 値 2/3 の薄層の項のマスク (plan time_integration-line-viscous-jacobian §6.8)
 )
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
@@ -987,7 +988,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                         max(static_cast<ST>(ro[other_ic]), static_cast<ST>(1.0e-30)),
                         static_cast<ST>(Ux[other_ic]), static_cast<ST>(Uy[other_ic]), static_cast<ST>(Uz[other_ic]),
                         static_cast<ST>(roe[other_ic]), static_cast<ST>(gamma_arr[other_ic]), max(cp_j, static_cast<ST>(1.0e-30)),
-                        jVel, jTemp, diag_block, (storeLU != 0) ? Kv : nullptr);
+                        jVel, jTemp, diag_block, (storeLU != 0) ? Kv : nullptr, lineViscTerms);
                     if (storeLU != 0) {
                         flow_float* Kdst = (other_ic == lp) ? Kprev : Knext;
                         for (int i = 0; i < 5; ++i)
@@ -1590,6 +1591,14 @@ static void afterSolve(mesh& msh, variables& var) {
 }
 } // namespace line_dump
 
+// 診断: 値 2/3 の薄層の項のマスク (FORGE_LVC_TERMS、既定 7 = 全部。plan time_integration-line-viscous-jacobian §6.8)
+static int lineViscTermsEnv() {
+    static const int v = [](){ const char* e = getenv("FORGE_LVC_TERMS"); const int t = (e && *e) ? atoi(e) : 7;
+                               if (t != 7) printf("[lineViscCoupling] 診断のマスク FORGE_LVC_TERMS=%d (1 運動量 D/K、2 熱伝導の近傍 K、4 仕事 D/K)\n", t);
+                               return t; }();
+    return v;
+}
+
 static flow_float* lineDumpViscBuf(mesh& msh) {
     line_dump::initOnce(msh);
     return line_dump::g.on ? line_dump::g.viscBuf : nullptr;
@@ -1719,7 +1728,8 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling >= 2) ? var.p_d["fx"] : nullptr), \
                 cfg.turbulentPrandtl, \
                 ((cfg.lineViscCoupling >= 2) ? var.c_d["vis_lam"] : nullptr),  /* 節点ごとの層流粘性 (残差の μ_f と揃える) */ \
-                lineDumpViscBuf(msh)  /* デバッグの書き出し (FORGE_LINE_DUMP_DIR のときだけ非 nullptr) */
+                lineDumpViscBuf(msh),  /* デバッグの書き出し (FORGE_LINE_DUMP_DIR のときだけ非 nullptr) */ \
+                lineViscTermsEnv()     /* 診断のマスク (FORGE_LVC_TERMS、既定 7) */
             // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
             const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&
                                  !(cfg.discretization == "node" && msh.periodicRoot_d != nullptr && msh.nPeriodicMembers > 0);

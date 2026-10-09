@@ -102,8 +102,10 @@ BLKDPLUR_HD void accumulate_thinlayer_visc_jacobian(
     T rho_i, T u_i, T v_i, T w_i, T rhoE_i, T gam_i, T cp_i,
     T rho_j, T u_j, T v_j, T w_j, T rhoE_j, T gam_j, T cp_j,
     bool jVelFixed, bool jTempFixed,
-    T D[5][5], T (*K)[5])
+    T D[5][5], T (*K)[5], int terms = 7)
 {
+    // terms (診断のマスク、plan §6.8): ビット 1 = 運動量の D/K、ビット 2 = 熱伝導の近傍 K、ビット 4 = 粘性の仕事の D/K。熱伝導の D は常に入れる。
+    const bool tMom = (terms & 1) != 0, tHeatK = (terms & 2) != 0, tWork = (terms & 4) != 0;
     const T third = static_cast<T>(1.0) / static_cast<T>(3.0);
     const T n[3] = {nx, ny, nz};
     const T ua[3] = {u_i, v_i, w_i};
@@ -115,7 +117,7 @@ BLKDPLUR_HD void accumulate_thinlayer_visc_jacobian(
     const T inv_ri = static_cast<T>(1.0) / rho_i;
     const T inv_rj = static_cast<T>(1.0) / rho_j;
     // 運動量の行: β P ∂u/∂Q
-    for (int a = 0; a < 3; ++a) {
+    for (int a = 0; a < 3 && tMom; ++a) {
         for (int b = 0; b < 3; ++b) {
             const T pb = beta * P[a][b];
             D[1 + a][0] += -pb * ua[b] * inv_ri;
@@ -135,7 +137,7 @@ BLKDPLUR_HD void accumulate_thinlayer_visc_jacobian(
         for (int b = 0; b < 3; ++b) D[4][1 + b] += -c * ua[b];
         D[4][4] += c;
     }
-    if (K != nullptr && !jTempFixed) {
+    if (K != nullptr && !jTempFixed && tHeatK) {
         const T q2 = u_j * u_j + v_j * v_j + w_j * w_j;
         const T e = rhoE_j * inv_rj - static_cast<T>(0.5) * q2;
         const T c = kappa * (gam_j / cp_j) * inv_rj;
@@ -144,6 +146,7 @@ BLKDPLUR_HD void accumulate_thinlayer_visc_jacobian(
         K[4][4] += c;
     }
     // エネルギーの行 (粘性の仕事 (βPΔu)·ū): −∂/∂u_i = β(Pū − f_i PΔu)、∂/∂u_j = β(Pū + (1 − f_i) PΔu)
+    if (!tWork) return;
     T Pu[3], Pd[3];
     for (int a = 0; a < 3; ++a) {
         Pu[a] = static_cast<T>(0.0); Pd[a] = static_cast<T>(0.0);
