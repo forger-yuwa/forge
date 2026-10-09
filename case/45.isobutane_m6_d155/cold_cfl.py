@@ -48,7 +48,10 @@ ALT_BINARIES = {
     # (上の lineB3 は下の lineD で上書きされて残っていない)
     "lineB3_fp64": ("9a094160caa9b3a68cbad20cd7b035a529f8f31a3de34fcf82590039040f6d3f", "~/forge-linevisc-fp64"),
     # d5538001 (lu5 を元に戻す。既定 = 案 A + 値 2 の経路 + 並列 Thomas は FORGE_LINE_PAR=1 + 比較・書き出しのデバッグ) + typedef double
+    # (上の lineD は下の lineE で上書きされて残っていない)
     "lineD_fp64": ("9ef80d5f148f73b1ee330a141a6f5fde31737a996ea0b5611e749e79b9442e8d", "~/forge-linevisc-fp64"),
+    # 6d49738e (診断用の lineViscCoupling 3 を追加) + typedef double、~/forge-linevisc-fp64 を上書き
+    "lineE_fp64": ("8e989dc688b7ccef70c444aecf06fb9ec406fa0a7f4d2ad0dc8158cef7851178", "~/forge-linevisc-fp64"),
 }
 
 
