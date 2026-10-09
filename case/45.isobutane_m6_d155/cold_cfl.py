@@ -35,6 +35,8 @@ ALT_BINARIES = {
     "thermjac_cap_fp64": ("35e498b14b5f3cdaa09b754f7bbaa6455f54631fd2edf1ad4929964e8828d4bc", "~/forge-thermjac-fp64"),
     # 4d394a71 (ライン上の節点の対角を storeLU の sweep 以外で組まない、plan time_integration-line-implicit-speed 案 A) + typedef double、2026-10-09 AWS で新しい作業ツリーにビルド
     "linespeed_fp64": ("d8b06ebcb91cfc3151cfcedf441b3e79f20f4c3702aa89e287801cb1c4f1d10b", "~/forge-linespeed-fp64"),
+    # 5ab83056 (lineViscCoupling 2 = 薄層の粘性・熱伝導の Jacobian、案 A を含む) + typedef double、2026-10-09 AWS でビルド
+    "linevisc_fp64": ("6631a87eb1279b2fa4eff22080378ac12db4937890ac4470cf0d9185daf55653", "~/forge-linevisc-fp64"),
 }
 
 
@@ -66,7 +68,7 @@ def limiter_refs(run: Path) -> dict:
 
 def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list[str], ref_from: Path | None = None,
          line: str = "", isp: int | None = None, inner: int | None = None, conv: int | None = None, itj: int | None = None,
-         cap: float | None = None) -> dict:
+         cap: float | None = None, lvc: int | None = None, field_from: Path | None = None) -> dict:
     NS.check_dry_env(False)
     binrec = CP.binary_record()
     if not NS.RUN_RE.match(run.name) or run.exists():
@@ -76,6 +78,11 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
     if not rs:
         raise SystemExit(f"{src} に res が無い")
     src_h5 = rs[-1]
+    if field_from is not None:              # 設定は src、場は別の run の最終の res (同じ格子。切り戻し試験用)
+        fr = NS.res_files(field_from)
+        if not fr:
+            raise SystemExit(f"{field_from} に res が無い")
+        src_h5 = fr[-1]
     ys = NS.yaml_strict()
     ptext = (src / "solverConfig.yaml").read_text()
     ctext = ys.replace_scalars(ptext, {NS.NSTEP: str(int(steps)), NS.CFL: repr(float(cfl)), NS.CFLP: repr(float(cfl)),
@@ -114,6 +121,10 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         if not line_keys.get("lineDtDirectional"):
             raise SystemExit("--cap は --line dir と一緒に使う — 止める")
         ctext = ctext.replace("deltaT: {", f"deltaT: {{lineDtDirectionalCap: {float(cap)!r}, ")
+    if lvc is not None:                     # lineViscCoupling (2 = 薄層の粘性 Jacobian、plan time_integration-line-viscous-jacobian、line が要る)
+        if not line_keys.get("lineImplicit") or "lineViscCoupling" in pcfg["time"]["deltaT"]:
+            raise SystemExit("--lvc は --line と一緒に使う (親に lineViscCoupling があっても止める) — 止める")
+        ctext = ctext.replace("deltaT: {", f"deltaT: {{lineViscCoupling: {int(lvc)}, ")
     one = {}
     if inner is not None:
         one[("time", "nStepInner")] = str(int(inner))
@@ -125,7 +136,8 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
                | {("space", k) for k in refs} | {("time", "deltaT", k) for k in line_keys}
                | ({("time", "deltaT", "implicitSolvePrecision")} if isp is not None else set())
                | ({("time", "deltaT", "implicitThermalJacobian")} if itj is not None else set())
-               | ({("time", "deltaT", "lineDtDirectionalCap")} if cap is not None else set()))
+               | ({("time", "deltaT", "lineDtDirectionalCap")} if cap is not None else set())
+               | ({("time", "deltaT", "lineViscCoupling")} if lvc is not None else set()))
     diff = set(NS.MK.diff_paths(pcfg, ys.load(ctext)))
     if not diff <= allowed:
         raise SystemExit(f"許していない設定の差がある: {sorted(diff - allowed)} — 止める")
@@ -145,15 +157,15 @@ def prep(src: Path, run: Path, steps: int, cfl: float, out_int: int, extra: list
         print((r.stdout + r.stderr)[-3000:])
         raise SystemExit(f"restart_field がビット一致を確認していない (rc {r.returncode}) — 止める")
     info = NS.jload(run / "prepare_info.json")
-    info.update(stages={"stages": "none", "ramp": None, "ramp_steps": 1000}, extends=src.name, restart_from=f"{src.name}/{src_h5.name}")
+    info.update(stages={"stages": "none", "ramp": None, "ramp_steps": 1000}, extends=src.name, restart_from=f"{src_h5.parent.name}/{src_h5.name}")
     NS.jdump(run / "prepare_info.json", info)
     keep = ("plan", "kind", "problem", "problem_sha256", "delta_r_csv", "euler_ref", "implicit_relax", "mesh_checks",
             "geometry_vs_production", "wall_thermal", "bcond_wall")
     rec = {**{k: srec[k] for k in keep if k in srec},
            "tool": "cold_cfl.py prep", "plan_item": "§5.1 #27", "created": NS.now(), "git_head": NS.git_head(), "binary": binrec,
-           "stages": "none", "parent": src.name, "parent_res": src_h5.name, "parent_res_sha256": NS.sha256_file(src_h5),
+           "stages": "none", "parent": src.name, "field_from": field_from.name if field_from is not None else None, "parent_res": src_h5.name, "parent_res_sha256": NS.sha256_file(src_h5),
            "ext_steps": int(steps), "cfl_main": float(cfl), "cfl_parent": srec.get("cfl_main"), "out_interval": int(out_int),
-           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv, "implicit_thermal_jacobian": itj, "line_dt_directional_cap": cap,
+           "extra_fields": extra, "limiter_ref_from": ref_from.name if ref_from is not None else None, "limiter_refs": refs, "line_keys": line_keys, "implicit_solve_precision": isp, "n_step_inner": inner, "conv_method": conv, "implicit_thermal_jacobian": itj, "line_dt_directional_cap": cap, "line_visc_coupling": lvc,
            "config_diff": sorted("/".join(p) for p in diff),
            "restart_field_tail": (r.stdout + r.stderr).strip().splitlines()[-1:], "nozzle_sha256_after_prep": NS.sha256_file(run / "nozzle.h5")}
     NS.jdump(run / CP.RECORD, rec)
@@ -178,8 +190,10 @@ if __name__ == "__main__":
     p.add_argument("--conv", type=int, default=None, help="space.convMethod を変える (0 = 1 次)")
     p.add_argument("--itj", type=int, default=None, help="time.deltaT.implicitThermalJacobian を書く (別バイナリ COLD_ALT_BINARY が要る)")
     p.add_argument("--cap", type=float, default=None, help="time.deltaT.lineDtDirectionalCap を書く (別バイナリが要る)")
+    p.add_argument("--field-from", default=None, help="場だけをこの run の最終の res から取る (設定は src、切り戻し試験用)")
+    p.add_argument("--lvc", type=int, default=None, help="time.deltaT.lineViscCoupling を書く (2 = 薄層の粘性 Jacobian、別バイナリが要る)")
     a = ap.parse_args()
     if a.cmd == "run":                      # cold_pair.run_one を (別バイナリの登録を効かせて) 呼ぶ
         sys.exit(CP.run_one(HERE / a.run))
     prep(HERE / a.src, HERE / a.run, a.steps, a.cfl, a.out, [s for s in a.extra.split(",") if s],
-         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv, a.itj, a.cap)
+         HERE / a.limiter_ref_from if a.limiter_ref_from else None, a.line, a.isp, a.inner, a.conv, a.itj, a.cap, a.lvc, HERE / a.field_from if a.field_from else None)
