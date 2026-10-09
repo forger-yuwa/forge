@@ -374,7 +374,8 @@ void solverConfig::read(std::string fname)
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
         //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
         //   lineViscCoupling: 1 = line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)、
-        //                     2 = 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian)。
+        //                     2 = 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian)、
+        //                     3 = 2 + スカラーの対角も残す (診断)。
         //   lineViscousDtRelief: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍に割引 (θ∈[0,1])。
         this->lineKFreeze = getOptionalValidatedValue<int>(deltaT, "lineKFreeze", 0, "time.deltaT");
         this->lineViscCoupling = getOptionalValidatedValue<int>(deltaT, "lineViscCoupling", 0, "time.deltaT");
@@ -1423,10 +1424,11 @@ void solverConfig::initTimeIntegrationScheme(int timeIntegration){
     }
     // lineViscCoupling 2 (薄層の粘性・熱伝導の Jacobian をライン面の K と対角に、plan time_integration-line-viscous-jacobian §4.3)。
     // 導出した組み合わせ (node・block DPLUR・heatCorrSU2 0・強制の等温壁・低 Re の壁) だけを許す。
-    if (this->lineViscCoupling < 0 || this->lineViscCoupling > 2) {
-        throw std::runtime_error("lineViscCoupling must be 0, 1 or 2.");
+    // 3 = 2 + ライン面のスカラー 2ν·δ/dcc を全行の対角にも残す (診断用、plan §6.4)。
+    if (this->lineViscCoupling < 0 || this->lineViscCoupling > 3) {
+        throw std::runtime_error("lineViscCoupling must be 0, 1, 2 or 3.");
     }
-    if (this->lineViscCoupling == 2) {
+    if (this->lineViscCoupling >= 2) {
         if (this->discretization != "node" || this->lineImplicit != 1)
             throw std::runtime_error("lineViscCoupling 2 requires mesh.discretization node and lineImplicit 1.");
         if (timeIntegration != 11 || this->blockDPLUR != 1)

@@ -958,9 +958,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 // (旧 face_area·(2ν/delta) は ≈2ν に潰れ近軸で r 重み喪失・ゼロ面積面にスプリアス。詳細は site1 コメント)。
                 const ST viscous_diag = static_cast<ST>(2.0) * nu_eff * delta / dcc;
                 if (isLineFace) dbgLineViscSum += viscous_diag;
-                if (isLineFace && lineViscCoupling == 2) {
+                if (isLineFace && lineViscCoupling >= 2) {
                     // 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian §4.1)。ライン面では従来の
                     // スカラー 2ν·δ/dcc の代わりに、残差と同じ面の μ_f・k_f で D (自節点) と K (ライン上の隣) を組む。
+                    // 値 3 (診断、§6.4): 従来のスカラーも全行の対角に残す (拘束の行は後で単位行に上書きされる)。
+                    if (lineViscCoupling == 3) block_dplur::add_identity_scaled(diag_block, viscous_diag);
                     const ST f0 = static_cast<ST>(fxArr[ip]);
                     const ST fi = (ic0 == ic) ? f0 : static_cast<ST>(1.0) - f0;    // 自節点の補間の重み
                     const ST omfi = static_cast<ST>(1.0) - fi;
@@ -1141,7 +1143,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 diag_block[4][4] = static_cast<ST>(1.0);
                 // implicitThermalJacobian ビット 2: 拘束の行 Δ(ρE)_w − e_w·Δρ_w = 0 (壁温のピン ρE = ρ·e(T_w) と一致、壁は u = 0)。
                 // lineViscCoupling 2 も同じ拘束の行にする (隣の熱伝導の K を消す前提の ΔT_w = 0、plan time_integration-line-viscous-jacobian §4.1)。
-                if ((thermalJac & 2) != 0 || lineViscCoupling == 2) diag_block[4][0] = -static_cast<ST>(roe[ic]) / density;
+                if ((thermalJac & 2) != 0 || lineViscCoupling >= 2) diag_block[4][0] = -static_cast<ST>(roe[ic]) / density;
             }
             rhs[4] = static_cast<ST>(0.0);
         }
@@ -1712,11 +1714,11 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 ((cfg.implicitSolvePrecision == 0 && cfg.lineImplicit == 0 && cfg.blockDPLURDiagCache != 0) ? 1 : 0),  /* useDiagCache: float・point 経路のみ */ \
                 (usePack ? (const flow_float*)g_dqPackOld : nullptr), (usePack ? g_dqPackNew : nullptr),  /* 近傍 dq の AoS 版 */ \
                 cfg.implicitThermalJacobian,  /* エネルギー行の熱伝導 Jacobian / 等温壁の拘束の行 (ビットマスク) */ \
-                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling == 2) ? var.c_d["thermCond"] : nullptr), \
-                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling == 2) ? var.c_d["cp"] : nullptr), \
-                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling == 2) ? var.p_d["fx"] : nullptr), \
+                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling >= 2) ? var.c_d["thermCond"] : nullptr), \
+                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling >= 2) ? var.c_d["cp"] : nullptr), \
+                (((cfg.implicitThermalJacobian & 1) || cfg.lineViscCoupling >= 2) ? var.p_d["fx"] : nullptr), \
                 cfg.turbulentPrandtl, \
-                ((cfg.lineViscCoupling == 2) ? var.c_d["vis_lam"] : nullptr),  /* 節点ごとの層流粘性 (残差の μ_f と揃える) */ \
+                ((cfg.lineViscCoupling >= 2) ? var.c_d["vis_lam"] : nullptr),  /* 節点ごとの層流粘性 (残差の μ_f と揃える) */ \
                 lineDumpViscBuf(msh)  /* デバッグの書き出し (FORGE_LINE_DUMP_DIR のときだけ非 nullptr) */
             // 近傍 dq の AoS 経路: line-implicit と node 周期 (SoA だけを直接書き換える) では使わない。
             const bool usePack = (cfg.lineImplicit == 0) && (cfg.blockDPLURDqPack != 0) &&

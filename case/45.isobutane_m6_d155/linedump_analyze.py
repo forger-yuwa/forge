@@ -64,11 +64,42 @@ def main(d: Path, nsweep: int):
             U_, s_, Vt = np.linalg.svd(Mn)
             vmin = Vt[-1].reshape(n, 5)
             dens_share_mode = float((vmin[:, 0] ** 2).sum() / (vmin ** 2).sum())
+            # 拘束の自由度を消去した系 (codex 2026-10-09): 壁の運動量 0、等温壁 δ(ρE) = e_w δρ、軸の半径運動量 0。拘束の行は外す。
+            Tm, keep = [], []
+            fidx = 0
+            colmap = {}
+            for k in range(n):
+                for cc in range(5):
+                    fixed = (cc in (1, 2, 3) and fl[idx[k], 0] == 1) or (cc == 2 and fl[idx[k], 2] == 1)
+                    dep = (cc == 4 and fl[idx[k], 1] == 1)
+                    if not (fixed or dep):
+                        colmap[(k, cc)] = fidx; fidx += 1; keep.append(5 * k + cc)
+            Tr = np.zeros((5 * n, fidx))
+            for (k, cc), f in colmap.items():
+                Tr[5 * k + cc, f] = 1.0
+            for k in range(n):
+                if fl[idx[k], 1] == 1 and (k, 0) in colmap:
+                    Tr[5 * k + 4, colmap[(k, 0)]] = E[k]           # δ(ρE)_w = e_w δρ_w (壁は u = 0 なので e_w = ρE/ρ)
+            Mr = M[keep, :] @ Tr
+            scf = sc[keep]
+            Mrn = (Mr * scf[None, :]) / scf[:, None]
+            _, sr, Vtr = np.linalg.svd(Mrn)
+            vfull = (Tr @ (Vtr[-1] * scf)).reshape(n, 5)           # 消去した系の弱いモードを全保存量へ戻す (物理単位)
+            def prim_share(X):
+                dr = X[:, 0] / rho
+                duv = (X[:, 1:4] - u * X[:, :1]) / rho[:, None] / 300.0
+                dTT = (X[:, 4] - (u * X[:, 1:4]).sum(1) + (0.5 * q2 - e) * X[:, 0]) / (rho * cv) / 300.0
+                a, b, c_ = (dr ** 2).sum(), (duv ** 2).sum(), (dTT ** 2).sum()
+                t = max(a + b + c_, 1e-300)
+                return {"drho_over_rho": float(a / t), "du_over_300": float(b / t), "dT_over_300K": float(c_ / t)}
             tot = max((vmin ** 2).sum(), 1e-300)
             res = {"sigma_min": float(s_[-1]), "sigma_max": float(s_[0]), "cond": float(s_[0] / s_[-1]), "weak_mode_density_share": dens_share_mode,
                    "weak_mode_component_share": {k: float((vmin[:, j] ** 2).sum() / tot) for j, k in enumerate(("rho", "rhou", "rhov", "rhow", "rhoE"))},
                    "weak_mode_peak_node_index": int(np.argmax((vmin ** 2).sum(1))),
-                   "sigma_smallest5": [float(v) for v in s_[-5:]]}
+                   "sigma_smallest5": [float(v) for v in s_[-5:]],
+                   "reduced_sigma_min": float(sr[-1]), "reduced_cond": float(sr[0] / sr[-1]),
+                   "reduced_weak_mode_primitive_share": prim_share(vfull),
+                   "reduced_weak_mode_peak_node_index": int(np.argmax((vfull / sc.reshape(n, 5)) ** 2 @ np.ones(5)))}
             sweeps = []
             for s in range(nsweep):
                 if f"rhs_s{s}" not in A:
@@ -84,6 +115,7 @@ def main(d: Path, nsweep: int):
                 sw = {"sweep": s, "rhs_proj_on_weak_mode": proj,
                       "corr_component_share": {k: float((xn[:, j] ** 2).sum() / tn) for j, k in enumerate(("rho", "rhou", "rhov", "rhow", "rhoE"))},
                       "corr_peak_node_index": int(np.argmax((xn ** 2).sum(1))),
+                      "corr_primitive_share": prim_share(X),
                       "corr_density_share": float((xn[:, 0] ** 2).sum() / max((xn ** 2).sum(), 1e-300)),
                       "max_abs_drho_over_rho": float(np.max(np.abs(X[:, 0] / rho))), "max_abs_du": float(np.max(np.abs(du))), "max_abs_dT": float(np.max(np.abs(dT))),
                       "norm_scaled_corr": float(np.linalg.norm(xn))}
