@@ -61,6 +61,8 @@ ALT_BINARIES = {
     # 5197e00e (診断の FORGE_DIAG_FACE_H_DOUBLE = TP の面エンタルピーを double で、plan time_integration-line-viscous-jacobian §6.15) + typedef double、
     # ~/forge-linevisc-fp64 を上書き (上の lineG は残っていない。切替なしの残差が lineG と同じことは run_0323_jph_a_q0 で確かめる)
     "lineH_fp64": ("561813b3564473420824ccca302b795bf9c344f69776f6381a43cb23e0ee6456", "~/forge-linevisc-fp64"),
+    # 270f1d75 (opt-in の逆行列の保存 FORGE_LINE_INV と比較の経路の非有限・全ラインの η、plan time_integration-line-implicit-speed §6.2) + typedef double、~/forge-linevisc-fp64 を上書き (lineH は残っていない)
+    "lineI_fp64": ("b467c3d7a1b32b595ac0ed8cc5db33f434329ef39865d727abfd11ef835b7661", "~/forge-linevisc-fp64"),
 }
 
 
