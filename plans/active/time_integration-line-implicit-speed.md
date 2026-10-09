@@ -446,16 +446,26 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
   - S3 / S2: `nStepInner` 5 → 3 / 2 (§5.1 #16、`cold_cfl.py prep --inner`)。
   - 分解の使い回し (§5.1 #17) は入れない。定常では `lineKFreeze` が効かず (dual-time のサブ反復の間だけ、`main.cpp:2070`)、step をまたぐ使い回しにはコードの変更が要る。
 - **(1) 照合** `run_0372_ml64_cmp`: ライン長 64 (部分被覆) で LAYOUT2 と従来の dq・並べ替えた因子のビット一致 (`line_cmp_judge.py --arm LAYOUT2 --bitwise`、20 回の分解・100 回の代入、非有限 0)。§5.1 #13 の「部分被覆」の確認を兼ねる。FAIL でも (2) は記録として回すが、M 系を総時間へ進めない。
-- **(2) 1 step の時間** `run_0373〜0375_scr_{B0,M100,M64,M48,S3,S2}_{1,2,3}`: 3 巡、各巡で B0 と 5 案を交互に回す。
+- **(2) 1 step の時間** `run_0373〜0375_scr_*` (並びと判定は下の「点検の反映」で置き換えた): 3 巡。
   - 各 run で実効の設定を確かめる: ログの被覆と最長、設定の `nStepInner`、`[line]` のモード LAYOUT2・比較なし、投入前の GPU の計算プロセス 0 本。
   - 組の判定は `time_pairs_judge.py` (§6.7 と同じ規則: 3 組の差が同符号で中央値の大きさが B0 の 3 本の幅を超える)。
   - **合格 (総時間へ進む)** は組の判定が「速い」**かつ**差の中央値が B0 の中央値の −5 % 以下 (`scr_judge.py`)。それ以外は捨てる。確認が欠けた案は判定不能で、進めない。
+- **点検の反映 (codex plan-6、投入前、全件採用)**:
+  - (M1) M 系は `run_0372_ml64_cmp/cmp_judge_LAYOUT2.json` が PASS のときだけ進める (欠け・判定不能・FAIL は進めない)。
+  - (M2) 投入前の GPU の照会の成功と 0 本を別々に確かめ、計測中も 5 s ごとに照会する。照会の失敗 0 回・最大 1 本 (自分だけ) でない run は無効。
+  - (M3) 出力を消す前に、全 `rms_*` 列の全行と最終場の VALUE の有限性を確かめる (`scr_check.py`)。
+  - (M4) 各巡を `B0 v B0 v … B0` (11 本) に並べ、案を前後の B0 の平均と比べる。案の順は巡ごとに変える。
+    - 雑音の尺度は、隣り合う B0 どうしの差の最大。3 巡の差が同符号で中央値の大きさが雑音を超えれば「速い / 遅い」、それ以外は「判別不能 (再測定の対象)」(`scr_judge.py` を置き換え、`time_pairs_judge.py` は使わない)。
+  - (m1) 各 prep の前に出力先の空き ≥ 3 GiB をバイト単位で確かめる。
+  - (m2) 5 % は計算予算の優先の基準である。通らない案は「総時間は未評価」と書き、効果なしとは判定しない (step 数が減れば単価 −4 % でも総時間は縮みうる)。
+  - run 名は `run_0373〜0375_scr_r{巡}_{位置 01〜11}_{案}` に変える。
 - **進んだ案の総時間** (別途登録する): `run_0183` の res_100000 から水準 (§6.15) まで、見張り `m9_watch.py --phase line`、最大 20 万 step。総時間 = step 数 × その案の単価 + 出力 + 起動。B0 の水準の到達 (L0 の 12.0 万 step は古いバイナリ・LU の系列) と比べる。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#16・#20 の 1 step のふるい) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-6.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-6.md) | GO-with-changes, C0/M4/m2 | 全件採用 (§6.16 の「点検の反映」): 照合の PASS を M 系の前提に、GPU の照会の失敗と計測中の競合を検出、残差と最終場の有限性、B0 で挟む並びと巡ごとの順の入れ替え、バイト単位の空きの確認、5 % は予算の基準と明記。部分被覆の経路 (point の節点) は問題なしとの確認 |
 | plan (#19 緩和の 4 腕) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-5.md) | GO-with-changes, C0/M3/m0 | 全件採用 (投入前): M1 判定器の前提の検査、M2 trap と見張りの同時起動 (起動の猶予を足した)、M3 段ごとの入力の写しの削除・空きの下限で停止 (§6.13) |
 | plan (#9 の追加の腕 L5L) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-4.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-4.md) | GO-with-changes, C0/M3/m1 | 全件採用 (分岐の前に反映): M1 `--budget` の登録がコメントに入っていた不具合を直し、初期化の失敗でも forge を止める、M2 分岐元の系列を引き継いで判定 (追加 0 step もありうる)、M3 腕ごとに独立に集計、m4 NOT CONVERGED の注記 (§6.11) |
 | plan (#9 の事前登録 v2) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-3.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-3.md) | GO-with-changes, C0/M4/m1 | 全件採用: M1 GPU の件数と取得の失敗を分け 0 本でなければ測らない、M2 E2 は数値 4 つ・見張りの例外とモード不一致でも共通の停止、M3 比較の前提 (到達の再計算の一致・VERDICT・準定常の正常終了)、M4 再開時の再判定と専有時間の run の使い直し、m5 `--tail 1.0` (§6.11)。参照の変更と前回 M2 の却下は妥当と確認された |
