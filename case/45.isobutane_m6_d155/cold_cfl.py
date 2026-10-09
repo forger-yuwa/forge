@@ -42,7 +42,10 @@ ALT_BINARIES = {
     # (上の lineB は下の lineB2 で上書きされて残っていない)
     "lineB_fp64": ("7a7e9eb9150104babc5b1c9877e15eb826eaa46fde8f2fe96dce74b65ad61f6d", "~/forge-linevisc-fp64"),
     # 874ae90a (並列 Thomas の代入を行の分担に、行のポインタを 1 回だけ選ぶ、書き出しのフラグの修正) + typedef double、~/forge-linevisc-fp64 を上書き
+    # (上の lineB2 は下の lineB3 で上書きされて残っていない)
     "lineB2_fp64": ("f3765961a601cff3f63e5ed86e0f0cf84d62138f504ba4a03dc317330ea45fad", "~/forge-linevisc-fp64"),
+    # 3764852d (lu5 の行の入れ替えを静的な添字にしてレジスタに置く、既定は 1 ライン 1 スレッド、並列は FORGE_LINE_PAR=1) + typedef double
+    "lineB3_fp64": ("9a094160caa9b3a68cbad20cd7b035a529f8f31a3de34fcf82590039040f6d3f", "~/forge-linevisc-fp64"),
 }
 
 
