@@ -26,16 +26,27 @@ for i in 1 2 3; do
   for v in LU LAY; do
     r=run_03$((48 + i))_timeLAY_${v}_$i
     prep $r --steps 1000 --out 1000 $B || fail "prep $r"
-    echo "$r 投入前の GPU の計算プロセス: $(nvidia-smi --query-compute-apps=pid --format=csv,noheader | wc -l) 本、forge $(pgrep -x forge | wc -l) 本" >> $LOG
+    nvidia-smi --query-compute-apps=pid --format=csv,noheader | wc -l > $r/gpu_procs.txt
+    echo "$r 投入前の GPU の計算プロセス: $(cat $r/gpu_procs.txt) 本、forge $(pgrep -x forge | wc -l) 本" >> $LOG
     if [ $v = LAY ]; then run $r FORGE_LINE_LAYOUT=1 || fail $r; else run $r || fail $r; fi
     rm -f $r/nozzle.h5 $r/res_1000.h5
   done
 done
-python3 time_pairs_judge.py _band_ab/cold_pair/lay_time_judge.json run_0349_timeLAY_LU_1 run_0349_timeLAY_LAY_1 run_0350_timeLAY_LU_2 run_0350_timeLAY_LAY_2 run_0351_timeLAY_LU_3 run_0351_timeLAY_LAY_3 >> $LOG 2>&1 || fail "(2) の判定器 (rc $?)"
+python3 time_pairs_judge.py _band_ab/cold_pair/lay_time_judge.json LU LAYOUT run_0349_timeLAY_LU_1 run_0349_timeLAY_LAY_1 run_0350_timeLAY_LU_2 run_0350_timeLAY_LAY_2 run_0351_timeLAY_LU_3 run_0351_timeLAY_LAY_3 >> $LOG 2>&1 || fail "(2) の判定器 (rc $?)"
 # (3) ncu の内訳 (並べ替え版、記録)
 r=run_0352_ncu_lay
 prep $r --steps 6 --out 6 $B || fail "prep $r"
-( export FORGE_LINE_LAYOUT=1; FORGE_BIN=$PWD/ncu_wrap_lay.sh bash $HOME/forge-wallfit/solver_density_cuda/tools/run_case.sh $r > $r/run_case_stdout.log 2>&1 ); echo "$r rc=$?" >> $LOG
-sudo chown -R ubuntu:ubuntu $r; rm -f $r/nozzle.h5 $r/res_6.h5
+( export FORGE_LINE_LAYOUT=1; FORGE_BIN=$PWD/ncu_wrap_lay.sh bash $HOME/forge-wallfit/solver_density_cuda/tools/run_case.sh $r > $r/run_case_stdout.log 2>&1 ); rc=$?; echo "$r rc=$rc" >> $LOG
+sudo chown -R ubuntu:ubuntu $r
+[ $rc -eq 0 ] && [ -f $r/ncu_prof.ncu-rep ] || fail "$r: ncu が失敗したかレポートが無い"
+grep -q "モード LAYOUT" $r/forge_run.log || fail "$r: 実効のモードが LAYOUT でない"
+/usr/local/cuda/bin/ncu --import $r/ncu_prof.ncu-rep --page raw --csv --metrics gpu__time_duration.sum > $r/ncu_kernels.csv 2>/dev/null || fail "$r: レポートを読めない"
+cnt=$(python3 -c "
+import csv; rows=list(csv.DictReader(open('$r/ncu_kernels.csv')))[1:]
+n=lambda s: sum(1 for x in rows if s in x['Kernel Name'])
+print(n('lineThomasFactorL_d'), n('lineThomasSolveL_d'), n('implicit_defect_correction_block_d'))")
+echo "$r ncu の対象: 分解・代入・block = $cnt" >> $LOG
+[ "$cnt" = "1 5 5" ] || fail "$r: ncu の対象のカーネルの内訳が 1・5・5 でない ($cnt)"
+rm -f $r/nozzle.h5 $r/res_6.h5
 echo "== 終了 $(date -Is)" >> $LOG
 touch jlay.done

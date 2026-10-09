@@ -2771,6 +2771,24 @@ static void ensure(mesh& msh) {
     printf("[line] FORGE_LINE_LAYOUT: 最長 %ld 節点 × %ld 本 = %zu 区画 (%.1f MB)\n", (long)maxLen, (long)msh.nImplicitLines, slots,
            (double)slots * (25 * 3 + 5) * sizeof(double) / 1.0e6);
 }
+// 比較 (FORGE_LINE_COMPARE=1): 並べ替えた因子 (LU・W・ピボット) を従来の節点番号の並びの因子とビット列で比べる (codex 2026-10-10 m3)
+__global__ void cmp_d(geom_int nLines, const geom_int* off, const geom_int* cells, const double* LUt, const double* Wt, const signed char* pivt,
+                      const double* LU, const double* W, const signed char* piv, const unsigned char* fail, const unsigned char* failRef,
+                      unsigned long long* cnt)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    if (fail[l] != 0 || failRef[l] != 0) { if (fail[l] != failRef[l]) atomicAdd(&cnt[3], 1ULL); return; }
+    const geom_int b = off[l], e = off[l + 1];
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int k = p - b, ic = cells[p];
+        for (int q = 0; q < 25; ++q) {
+            if (__double_as_longlong(LUt[lineLIdx(k, q, 25, nLines, l)]) != __double_as_longlong(LU[(size_t)ic * 25 + q])) atomicAdd(&cnt[0], 1ULL);
+            if (p + 1 < e && __double_as_longlong(Wt[lineLIdx(k, q, 25, nLines, l)]) != __double_as_longlong(W[(size_t)ic * 25 + q])) atomicAdd(&cnt[1], 1ULL);
+        }
+        for (int q = 0; q < 5; ++q) if (pivt[lineLIdx(k, q, 5, nLines, l)] != piv[(size_t)ic * 5 + q]) atomicAdd(&cnt[2], 1ULL);
+    }
+}
 } // namespace line_layout
 namespace line_f32 {
 static float* W = nullptr; static float* LU = nullptr; static float* y = nullptr;
@@ -2824,7 +2842,11 @@ __global__ void diff_d(size_t n, const T* x, const T* ref, unsigned long long* r
         const double m = fabs(rv);
         atomicMax(&red[0], (unsigned long long)__double_as_longlong(d));
         atomicMax(&red[1], (unsigned long long)__double_as_longlong(m));
-        if (x[i] != ref[i]) atomicAdd(&red[2], 1ULL);
+        bool ne = false;                                   // ビット列で比べる (+0 と −0 も区別する、codex 2026-10-10 m3)
+        const unsigned char* px = reinterpret_cast<const unsigned char*>(&x[i]);
+        const unsigned char* pr = reinterpret_cast<const unsigned char*>(&ref[i]);
+        for (size_t b = 0; b < sizeof(T); ++b) ne |= (px[b] != pr[b]);
+        if (ne) atomicAdd(&red[2], 1ULL);
     }
 }
 static unsigned long long nonfiniteTotal = 0;   // 比較の全体で見つけた非有限の件数 (1 件でも比較は失格)
@@ -2915,7 +2937,7 @@ static void eta(const char* arm, int call, solverConfig& cfg, mesh& msh, variabl
         if (h[i] > 1.0e-11) ++nOver;
         if (h[i] > mx) { mx = h[i]; arg = (long)i; }
     }
-    printf("[lineEta] solve %d %s: η 最大 %.3e (ライン %ld)、評価 %zu 本、1e-11 超 %zu 本、非有限 %zu 本、分解の失敗 %zu 本 (尺度 ρ_ref %.6g・a_ref %.6g)\n",
+    printf("[lineEta] solve %d %s: η 最大 %.6e (ライン %ld)、評価 %zu 本、1e-11 超 %zu 本、非有限 %zu 本、分解の失敗 %zu 本 (尺度 ρ_ref %.6g・a_ref %.6g)\n",
            call, arm, mx, arg, nEval, nOver, nBad, nFail, ro, ar);
     if (nBad) nonfiniteTotal += nBad;
 }
@@ -3052,6 +3074,15 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         const unsigned long long rLU = line_cmp::countNonfinite(25 * n, (const double*)line_cmp::a.LU);
         const unsigned long long rW  = line_cmp::countNonfinite(25 * n, (const double*)line_cmp::a.W);
         printf("[lineNonfinite] factor %d: 腕 LU %llu・W %llu、従来 LU %llu・W %llu\n", line_cmp::factorCalls, aLU, aW, rLU, rW);
+    }
+    if (cmpLay) {   // 並べ替えた因子と従来の因子のビット列の比較
+        unsigned long long* cnt = nullptr; gpuErrchk(cudaMalloc((void**)&cnt, sizeof(unsigned long long) * 4)); gpuErrchk(cudaMemset(cnt, 0, sizeof(unsigned long long) * 4));
+        const int th = 64, gr = (int)((msh.nImplicitLines + th - 1) / th);
+        line_layout::cmp_d<<<gr, th>>>(msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, line_layout::LU, line_layout::W, line_layout::piv,
+                                       line_cmp::a.LU, line_cmp::a.W, line_cmp::a.piv, msh.line_fail_d, line_cmp::a.fail, cnt);
+        gpuErrchk(cudaPeekAtLastError());
+        unsigned long long h[4]; gpuErrchk(cudaMemcpy(h, cnt, sizeof(h), cudaMemcpyDeviceToHost)); gpuErrchk(cudaFree(cnt));
+        printf("[lineLayoutCmp] factor %d: LU 不一致 %llu・W 不一致 %llu・ピボット 不一致 %llu・失敗 不一致 %llu\n", line_cmp::factorCalls, h[0], h[1], h[2], h[3]);
     }
 }
 
