@@ -51,7 +51,10 @@ ALT_BINARIES = {
     # (上の lineD は下の lineE で上書きされて残っていない)
     "lineD_fp64": ("9ef80d5f148f73b1ee330a141a6f5fde31737a996ea0b5611e749e79b9442e8d", "~/forge-linevisc-fp64"),
     # 6d49738e (診断用の lineViscCoupling 3 を追加) + typedef double、~/forge-linevisc-fp64 を上書き
+    # (上の lineE は下の lineF で上書きされて残っていない)
     "lineE_fp64": ("8e989dc688b7ccef70c444aecf06fb9ec406fa0a7f4d2ad0dc8158cef7851178", "~/forge-linevisc-fp64"),
+    # 4fdc2c0e (診断のマスク FORGE_LVC_TERMS) + typedef double、~/forge-linevisc-fp64 を上書き
+    "lineF_fp64": ("89ea94385435c16babde906465b58a54748d0e4b2d50b5edc661b46903ae19b0", "~/forge-linevisc-fp64"),
 }
 
 
