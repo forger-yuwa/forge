@@ -185,7 +185,9 @@ def main_loop():
       if started and not progressed and not alive and not [n for n in steps() if n > 0 and n not in {r["step"] for r in st["rows"]}]:
           rcf = run / "RUN_RC"; rc = rcf.read_text().strip() if rcf.exists() else "?"
           last = max((r["step"] for r in st["rows"]), default=0)
+          nan = sorted(run.glob("res_nan_*.h5"))
           if rc == "0" and last >= a.budget: finish("CENSORED", last_step=last)
+          elif nan: finish("DIVERGED", fail_step=int(nan[0].stem.split("_")[-1]), note="forge の detectNaN が止めた")
           else: finish("EXEC_ERROR", rc=rc, last_step=last)
           sys.exit(0)
       time.sleep(30)

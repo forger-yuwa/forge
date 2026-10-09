@@ -42,6 +42,9 @@ for k, (rl, rp, m, rx) in ARMS.items():
     a = {"line_run": rl, "point_run": rp, "mode": m, "relax": rx}
     try:
         sl = json.loads((HERE / rl / "m9_watch.json").read_text()); a["line"] = {"status": sl["status"], "reach": sl.get("reach_step"), "fail_step": sl.get("fail_step"), "convergence": conv(rl)}
+        nan = sorted(HERE.joinpath(rl).glob("res_nan_*.h5"))
+        if sl["status"] == "EXEC_ERROR" and nan:          # forge の detectNaN が最初の出力の前に止めた = 発散 (2026-10-10、run_0370 で発生)
+            a["line"].update(status="DIVERGED (detectNaN)", fail_step=int(nan[0].stem.split("_")[-1]))
         if sl["status"] == "REACHED":
             sp = json.loads((HERE / rp / "m9_watch.json").read_text()); a["point"] = {"status": sp["status"], "reach": sp.get("reach_step"), "convergence": conv(rp)}
             if sp["status"] == "REACHED":
