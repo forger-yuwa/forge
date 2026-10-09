@@ -56,7 +56,7 @@ def sha256(p: Path) -> str:
     return h.hexdigest()
 
 
-def cmd_fields(state: Path, dumpdir: Path, tag: str, eps: float, sweep: int):
+def cmd_fields(state: Path, dumpdir: Path, tag: str, eps: float, sweep: int, no_pp: bool = False):
     dump = load_dump(dumpdir)
     p = direction(dump, sweep)
     nodes = dump["_nodes"]
@@ -68,6 +68,8 @@ def cmd_fields(state: Path, dumpdir: Path, tag: str, eps: float, sweep: int):
         Y = {k: np.asarray(h["VALUE"][k][:])[nodes] / ro0 for k in ys}
     OUT.mkdir(exist_ok=True)
     cases = {"pe": eps, "me": -eps, "ph": 0.5 * eps, "mh": -0.5 * eps, "pp": dump["_relax"]}
+    if no_pp:                                   # ε の再試行・診断では実補正の場 (pp) を作り直さない
+        cases.pop("pp")
     rec = {"state": str(state), "state_sha256": sha256(state), "dump": str(dumpdir), "eps": eps, "sweep": sweep,
            "relax": dump["_relax"], "species_fixed_Y": ys, "fields": {}}
     for name, s in cases.items():
@@ -76,6 +78,8 @@ def cmd_fields(state: Path, dumpdir: Path, tag: str, eps: float, sweep: int):
             raise SystemExit(f"{d} が既にある — 止める")
         d.mkdir()
         shutil.copy(state, d / "res_0.h5")
+        for y in state.parent.glob("resolved_species_*.yaml"):     # restart_field が場の化学種の記録を照合する
+            shutil.copy2(y, d / y.name)
         with h5py.File(d / "res_0.h5", "a") as h:
             V = h["VALUE"]
             for j, k in enumerate(CONS):
@@ -224,7 +228,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
     a = sp.add_parser("fields"); a.add_argument("state"); a.add_argument("dump"); a.add_argument("tag")
-    a.add_argument("--eps", type=float, required=True); a.add_argument("--sweep", type=int, default=4)
+    a.add_argument("--eps", type=float, required=True); a.add_argument("--sweep", type=int, default=4); a.add_argument("--no-pp", action="store_true")
     a = sp.add_parser("extract"); a.add_argument("run")
     a = sp.add_parser("locate"); a.add_argument("run")
     a = sp.add_parser("compare"); a.add_argument("dump"); a.add_argument("tag"); a.add_argument("--eps", type=float, required=True)
@@ -233,7 +237,7 @@ if __name__ == "__main__":
     g = ap.parse_args()
     kv = lambda s: dict(t.split("=", 1) for t in s.split(","))
     if g.cmd == "fields":
-        cmd_fields(HERE / g.state, HERE / g.dump, g.tag, g.eps, g.sweep)
+        cmd_fields(HERE / g.state, HERE / g.dump, g.tag, g.eps, g.sweep, g.no_pp)
     elif g.cmd == "extract":
         cmd_extract(HERE / g.run)
     elif g.cmd == "locate":

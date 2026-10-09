@@ -20,6 +20,7 @@ fail() { echo "失敗: $*" | tee -a $LOG; touch jprobe.done; exit 1; }
 probe() {
   local r=$1 ff=$2 keep=${3:-}
   local opt=""; [ "$ff" != "-" ] && opt="--field-from $ff"
+  if [ -f _jprobe/npz/$r.npz ] && [ -d $r ]; then echo "$r は抜き出し済み — 飛ばす" >> $LOG; return 0; fi
   python3 cold_cfl.py prep $SRC $r --steps 1 --out 1 $B --extra $EXTRA $opt > _jprobe/logs/$r.prep.log 2>&1 || return 1
   rm -f $r/nozzle.msh
   local t0; t0=$(date +%s)
@@ -43,8 +44,8 @@ family() {
 
 echo "== 開始 $(date -Is)" >> $LOG
 # ---- S0 ----
-python3 jprobe.py fields $SRC/res_100000.h5 run_0313_e1bdump_m7_linedump s0p7 --eps $EPS >> $LOG 2>&1 || fail "fields s0p7"
-python3 jprobe.py fields $SRC/res_100000.h5 run_0315_e1bdump_m5_linedump s0p5 --eps $EPS >> $LOG 2>&1 || fail "fields s0p5"
+[ -f _jprobe/s0p7_fields.json ] || python3 jprobe.py fields $SRC/res_100000.h5 run_0313_e1bdump_m7_linedump s0p7 --eps $EPS >> $LOG 2>&1 || fail "fields s0p7"
+[ -f _jprobe/s0p5_fields.json ] || python3 jprobe.py fields $SRC/res_100000.h5 run_0315_e1bdump_m5_linedump s0p5 --eps $EPS >> $LOG 2>&1 || fail "fields s0p5"
 probe run_0317_jp_s0_q0 - keep || fail q0
 probe run_0317_jp_s0_q0b - || fail q0b
 family run_0317_jp_s0p7 s0p7
