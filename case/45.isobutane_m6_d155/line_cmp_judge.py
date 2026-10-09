@@ -11,6 +11,7 @@ from collections import Counter
 from pathlib import Path
 ap = argparse.ArgumentParser(); ap.add_argument("run"); ap.add_argument("--arm", required=True); ap.add_argument("--eta-limit", type=float, required=True)
 ap.add_argument("--dq-limit", type=float, default=-1.0); ap.add_argument("--factors", type=int, default=20); ap.add_argument("--solves", type=int, default=100)
+ap.add_argument("--bitwise", action="store_true", help="全 solve で dq の差 0・不一致 0 (ビット一致) を要求する");
 ap.add_argument("--lines", type=int, default=4719); ap.add_argument("--ro-ref", type=float, default=0.8739869154); ap.add_argument("--a-ref", type=float, default=359.7712185)
 a = ap.parse_args()
 run = Path(a.run); log = (run / "forge_run.log").read_text(errors="replace")
@@ -52,6 +53,11 @@ for s in sol:
     for c in range(5):
         wp[c] = max(wp[c], v[2 * c] / sc[c]); wr[c] = max(wr[c], v[2 * c] / v[2 * c + 1] if v[2 * c + 1] > 0 else 0.0)
 if a.dq_limit >= 0 and max(wp) > a.dq_limit: reasons_fail.append(f"補正の差 {max(wp):.2e} > {a.dq_limit:.0e}")
+if a.bitwise:
+    bw = re.findall(r"\[lineCompare\] solve (\d+): dq 最大差 " + num + " / 最大 " + num + r" \(不一致 (\d+)\)", log)
+    if len(bw) != a.solves: reasons_ind.append(f"ビット一致の行が {len(bw)} 本 ≠ {a.solves}")
+    bad = [(int(k), float(d), int(nm)) for k, d, _, nm in bw if float(d) != 0.0 or int(nm) != 0]
+    if bad: reasons_fail.append(f"ビット一致しない solve {len(bad)} 回 (最初: solve {bad[0][0]}・最大差 {bad[0][1]:.2e}・不一致 {bad[0][2]})")
 verdict = "FAIL" if reasons_fail else ("INDETERMINATE" if reasons_ind else "PASS")
 out = {"run": run.name, "arm": a.arm, "verdict": verdict, "fail": reasons_fail, "indeterminate": reasons_ind, "nonfinite": nf,
        "eta_arm_max": max((r["max"] for r in E[a.arm].values()), default=None), "eta_LU_max": max((r["max"] for r in E["LU"].values()), default=None),

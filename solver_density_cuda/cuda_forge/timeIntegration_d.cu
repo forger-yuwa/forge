@@ -5,6 +5,7 @@
 #include "cuda_forge/block_dplur_jacobian_d.cuh"  // block_dplur::accumulate_split_jacobian_cf (共有ヘッダ)
 #include <cstdlib>
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <cooperative_groups.h>
 #include <cstring>
@@ -2159,6 +2160,146 @@ __device__ __forceinline__ P linePick5(int r, P a0, P a1, P a2, P a3, P a4) {
     return (r == 0) ? a0 : (r == 1) ? a1 : (r == 2) ? a2 : (r == 3) ? a3 : a4;
 }
 
+// ---- Thomas の並べ替え版 (plan time_integration-line-implicit-speed §5.1 #10・§6.7、FORGE_LINE_LAYOUT=1 の opt-in) ----
+// ncu (§6.6): 既定の Thomas は隣のスレッド (隣のライン) が 121 節点離れた番地を読み、1 回の読み込み命令が約 31 セクタに散る。
+// Thomas の中だけで使う W・LU・ピボット・y と、代入で毎 sweep 読む Kprev の写しを (ライン内の位置 k, 成分 e, ライン l) の並び
+//   idx = (k·B + e)·nLines + l   (B = 25 / 5)
+// に置き、同じ k・e を読む隣のスレッドが隣の番地を読むようにする。D・Knext (分解で 1 回)・rhs・dq (毎 sweep 5 個ずつ) は節点番号の並びのまま。
+// 演算 (読む値・積和の順序・ピボットの規則) は既定の lineThomasFactor_d<false> / lineThomasSolve_d<false> と要素ごとに同じなので、解はビットで一致するはず。
+__device__ __forceinline__ size_t lineLIdx(geom_int k, int e, int B, geom_int nLines, geom_int l) {
+    return ((size_t)k * B + e) * (size_t)nLines + (size_t)l;
+}
+__global__ void lineThomasFactorL_d
+(
+ geom_int nLines, const geom_int* line_offsets, const geom_int* line_cells,
+ const flow_float* Kprev, const flow_float* Knext,
+ const flow_float* d00, const flow_float* d01, const flow_float* d02, const flow_float* d03, const flow_float* d04,
+ const flow_float* d10, const flow_float* d11, const flow_float* d12, const flow_float* d13, const flow_float* d14,
+ const flow_float* d20, const flow_float* d21, const flow_float* d22, const flow_float* d23, const flow_float* d24,
+ const flow_float* d30, const flow_float* d31, const flow_float* d32, const flow_float* d33, const flow_float* d34,
+ const flow_float* d40, const flow_float* d41, const flow_float* d42, const flow_float* d43, const flow_float* d44,
+ double* Wt, double* LUt, signed char* pivt, double* Kpt, unsigned char* faild
+)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    const geom_int b = line_offsets[l];
+    const geom_int e = line_offsets[l + 1];
+    faild[l] = 0;
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int k = p - b;
+        const geom_int ic = line_cells[p];
+        double M[5][5] = {
+            {(double)d00[ic],(double)d01[ic],(double)d02[ic],(double)d03[ic],(double)d04[ic]},
+            {(double)d10[ic],(double)d11[ic],(double)d12[ic],(double)d13[ic],(double)d14[ic]},
+            {(double)d20[ic],(double)d21[ic],(double)d22[ic],(double)d23[ic],(double)d24[ic]},
+            {(double)d30[ic],(double)d31[ic],(double)d32[ic],(double)d33[ic],(double)d34[ic]},
+            {(double)d40[ic],(double)d41[ic],(double)d42[ic],(double)d43[ic],(double)d44[ic]}};
+        if (p > b) {
+            double Kp[5][5];
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j) {
+                    Kp[i][j] = (double)Kprev[(size_t)ic * 25 + i * 5 + j];
+                    Kpt[lineLIdx(k, i * 5 + j, 25, nLines, l)] = Kp[i][j];          // 代入で毎 sweep 読む写し
+                }
+            for (int i = 0; i < 5; ++i)
+                for (int j = 0; j < 5; ++j) {
+                    double macc = 0.0;
+                    for (int m = 0; m < 5; ++m) macc += Kp[i][m] * Wt[lineLIdx(k - 1, m * 5 + j, 25, nLines, l)];
+                    M[i][j] -= macc;
+                }
+        }
+        int piv[5];
+        if (!line_implicit::lu5_factor(M, piv)) { faild[l] = 1; return; }
+        for (int i = 0; i < 5; ++i) {
+            pivt[lineLIdx(k, i, 5, nLines, l)] = (signed char)piv[i];
+            for (int j = 0; j < 5; ++j) LUt[lineLIdx(k, i * 5 + j, 25, nLines, l)] = M[i][j];
+        }
+        if (p + 1 < e) {
+            for (int j = 0; j < 5; ++j) {
+                double col[5];
+                for (int i = 0; i < 5; ++i) col[i] = (double)Knext[(size_t)ic * 25 + i * 5 + j];
+                line_implicit::lu5_solve(M, piv, col);
+                for (int i = 0; i < 5; ++i) Wt[lineLIdx(k, i * 5 + j, 25, nLines, l)] = col[i];
+            }
+        }
+    }
+}
+
+__global__ void lineThomasSolveL_d
+(
+ geom_int nLines, const geom_int* line_offsets, const geom_int* line_cells,
+ const double* Kpt, const double* Wt, const double* LUt, const signed char* pivt, const unsigned char* faild,
+ const flow_float* rhs0, const flow_float* rhs1, const flow_float* rhs2, const flow_float* rhs3, const flow_float* rhs4,
+ const flow_float* dq_old_0, const flow_float* dq_old_1, const flow_float* dq_old_2, const flow_float* dq_old_3, const flow_float* dq_old_4,
+ flow_float* dq_new_0, flow_float* dq_new_1, flow_float* dq_new_2, flow_float* dq_new_3, flow_float* dq_new_4,
+ flow_float implicit_relax,
+ double* yt
+)
+{
+    const geom_int l = blockDim.x * blockIdx.x + threadIdx.x;
+    if (l >= nLines) return;
+    const geom_int b = line_offsets[l];
+    const geom_int e = line_offsets[l + 1];
+    if (faild[l] != 0) {
+        for (geom_int p = b; p < e; ++p) {
+            const geom_int ic = line_cells[p];
+            dq_new_0[ic] = dq_old_0[ic]; dq_new_1[ic] = dq_old_1[ic]; dq_new_2[ic] = dq_old_2[ic];
+            dq_new_3[ic] = dq_old_3[ic]; dq_new_4[ic] = dq_old_4[ic];
+        }
+        return;
+    }
+    for (geom_int p = b; p < e; ++p) {
+        const geom_int k = p - b;
+        const geom_int ic = line_cells[p];
+        double bk[5] = {(double)rhs0[ic],(double)rhs1[ic],(double)rhs2[ic],(double)rhs3[ic],(double)rhs4[ic]};
+        if (p > b) {
+            for (int i = 0; i < 5; ++i) {
+                double bacc = 0.0;
+                for (int m = 0; m < 5; ++m)
+                    bacc += Kpt[lineLIdx(k, i * 5 + m, 25, nLines, l)] * yt[lineLIdx(k - 1, m, 5, nLines, l)];
+                bk[i] += bacc;
+            }
+        }
+        double M[5][5];
+        int piv[5];
+        for (int i = 0; i < 5; ++i) {
+            piv[i] = (int)pivt[lineLIdx(k, i, 5, nLines, l)];
+            for (int j = 0; j < 5; ++j) M[i][j] = LUt[lineLIdx(k, i * 5 + j, 25, nLines, l)];
+        }
+        line_implicit::lu5_solve(M, piv, bk);
+        for (int i = 0; i < 5; ++i) yt[lineLIdx(k, i, 5, nLines, l)] = bk[i];
+    }
+    double dq[5];
+    {
+        const geom_int k = e - 1 - b;
+        const geom_int ic = line_cells[e - 1];
+        for (int i = 0; i < 5; ++i) dq[i] = yt[lineLIdx(k, i, 5, nLines, l)];
+        dq_new_0[ic] = (flow_float)(implicit_relax * dq[0]);
+        dq_new_1[ic] = (flow_float)(implicit_relax * dq[1]);
+        dq_new_2[ic] = (flow_float)(implicit_relax * dq[2]);
+        dq_new_3[ic] = (flow_float)(implicit_relax * dq[3]);
+        dq_new_4[ic] = (flow_float)(implicit_relax * dq[4]);
+    }
+    for (geom_int p = e - 2; p >= b; --p) {
+        const geom_int k = p - b;
+        const geom_int ic = line_cells[p];
+        double nx[5];
+        for (int i = 0; i < 5; ++i) {
+            double acc = yt[lineLIdx(k, i, 5, nLines, l)];
+            for (int m = 0; m < 5; ++m) acc += Wt[lineLIdx(k, i * 5 + m, 25, nLines, l)] * dq[m];
+            nx[i] = acc;
+        }
+        for (int i = 0; i < 5; ++i) dq[i] = nx[i];
+        dq_new_0[ic] = (flow_float)(implicit_relax * dq[0]);
+        dq_new_1[ic] = (flow_float)(implicit_relax * dq[1]);
+        dq_new_2[ic] = (flow_float)(implicit_relax * dq[2]);
+        dq_new_3[ic] = (flow_float)(implicit_relax * dq[3]);
+        dq_new_4[ic] = (flow_float)(implicit_relax * dq[4]);
+        if (p == b) break;
+    }
+}
+
 // ---- Thomas の float 版 (plan time_integration-line-implicit-speed §5.1 #8・§6.4、FORGE_LINE_F32=1/2 の opt-in 実験) ----
 // 既定の経路 (lineThomasFactor_d / lineThomasSolve_d、double) とは別のカーネル。演算の型 T と、Thomas の中だけで使う W・LU・y の保存の型 S を選ぶ:
 //   FORGE_LINE_F32=1: T = float、S = double (演算だけ float。律速が演算かメモリかの切り分け用)
@@ -2597,6 +2738,40 @@ static int lineF32Mode() {
         return m; }();
     return v;
 }
+// FORGE_LINE_LAYOUT=1 (plan time_integration-line-implicit-speed §5.1 #10・§6.7、opt-in): Thomas の中の配列をラインが隣り合う並びに置く (数値は不変)。
+// 逆行列・float・並列版・診断の経路とは組み合わせない (最初の呼び出しで止める)。FORGE_LINE_COMPARE=1 と組むと従来の並び (別のバッファ) と比べる。
+static bool lineLayoutEnabled() {
+    static const bool v = [](){
+        const char* e = getenv("FORGE_LINE_LAYOUT"); const bool on = e && atoi(e) != 0;
+        if (on) {
+            for (const char* k : {"FORGE_LINE_INV", "FORGE_LINE_F32", "FORGE_LINE_PAR", "FORGE_LINE_MONO", "FORGE_LINE_DEBUG_POINT", "FORGE_LINE_NOOP"}) {
+                const char* q = getenv(k);
+                if (q && atoi(q) != 0) { fprintf(stderr, "[line] FORGE_LINE_LAYOUT と %s は組み合わせない — 止める\n", k); exit(EXIT_FAILURE); }
+            }
+            printf("[line] FORGE_LINE_LAYOUT=1: Thomas の W・LU・ピボット・y・Kprev の写しを (位置, 成分, ライン) の並びに置く (opt-in)\n");
+        }
+        return on; }();
+    return v;
+}
+namespace line_layout {
+static double* W = nullptr; static double* LU = nullptr; static double* Kp = nullptr; static double* y = nullptr; static signed char* piv = nullptr;
+static size_t slots = 0;   // maxLen · nLines
+static void ensure(mesh& msh) {
+    if (W) return;
+    std::vector<geom_int> off(msh.nImplicitLines + 1);
+    gpuErrchk(cudaMemcpy(off.data(), msh.line_offsets_d, sizeof(geom_int) * off.size(), cudaMemcpyDeviceToHost));
+    geom_int maxLen = 0;
+    for (geom_int l = 0; l < msh.nImplicitLines; ++l) maxLen = std::max(maxLen, off[l + 1] - off[l]);
+    slots = (size_t)maxLen * (size_t)msh.nImplicitLines;
+    gpuErrchk(cudaMalloc((void**)&W, sizeof(double) * 25 * slots));  gpuErrchk(cudaMemset(W, 0, sizeof(double) * 25 * slots));
+    gpuErrchk(cudaMalloc((void**)&LU, sizeof(double) * 25 * slots)); gpuErrchk(cudaMemset(LU, 0, sizeof(double) * 25 * slots));
+    gpuErrchk(cudaMalloc((void**)&Kp, sizeof(double) * 25 * slots)); gpuErrchk(cudaMemset(Kp, 0, sizeof(double) * 25 * slots));
+    gpuErrchk(cudaMalloc((void**)&y, sizeof(double) * 5 * slots));   gpuErrchk(cudaMemset(y, 0, sizeof(double) * 5 * slots));
+    gpuErrchk(cudaMalloc((void**)&piv, 5 * slots));                  gpuErrchk(cudaMemset(piv, 0, 5 * slots));
+    printf("[line] FORGE_LINE_LAYOUT: 最長 %ld 節点 × %ld 本 = %zu 区画 (%.1f MB)\n", (long)maxLen, (long)msh.nImplicitLines, slots,
+           (double)slots * (25 * 3 + 5) * sizeof(double) / 1.0e6);
+}
+} // namespace line_layout
 namespace line_f32 {
 static float* W = nullptr; static float* LU = nullptr; static float* y = nullptr;
 static void ensure(mesh& msh) {
@@ -2616,7 +2791,7 @@ static void lineModeNote(const char* phase, long& count) {
     if (count == 1 || count % 1000 == 0) {
         const char* m = getenv("FORGE_LINE_MONO"); const char* dp = getenv("FORGE_LINE_DEBUG_POINT"); const char* nn = getenv("FORGE_LINE_NOOP");
         const char* mode = (nn && atoi(nn)) ? "NOOP" : (dp && atoi(dp)) ? "DEBUG_POINT" : (m && atoi(m)) ? "MONO" :
-                           lineF32Mode() == 1 ? "F32c" : lineF32Mode() == 2 ? "F32cs" :
+                           lineLayoutEnabled() ? "LAYOUT" : lineF32Mode() == 1 ? "F32c" : lineF32Mode() == 2 ? "F32cs" :
                            lineInvEnabled() ? "INV" : (!lineSerialEnabled() ? "PAR" : "LU");
         printf("[line] %s %ld 回目: モード %s%s\n", phase, count, mode, lineCompareEnabled() ? " (比較あり)" : "");
     }
@@ -2746,7 +2921,7 @@ static void eta(const char* arm, int call, solverConfig& cfg, mesh& msh, variabl
 }
 } // namespace line_cmp
 
-static void launchLineFactor(bool par, bool inv, int f32, mesh& msh, variables& var, double* W, double* LU, signed char* piv, unsigned char* fail)
+static void launchLineFactor(bool par, bool inv, int f32, mesh& msh, variables& var, double* W, double* LU, signed char* piv, unsigned char* fail, bool layout = false)
 {
     const int threads = 64;
     const int grid = par ? (int)(((size_t)msh.nImplicitLines * line_implicit_par::TILE + threads - 1) / threads)
@@ -2759,7 +2934,18 @@ static void launchLineFactor(bool par, bool inv, int f32, mesh& msh, variables& 
         var.c_d["diag_block_30"], var.c_d["diag_block_31"], var.c_d["diag_block_32"], var.c_d["diag_block_33"], var.c_d["diag_block_34"], \
         var.c_d["diag_block_40"], var.c_d["diag_block_41"], var.c_d["diag_block_42"], var.c_d["diag_block_43"], var.c_d["diag_block_44"], \
         W, LU, piv, fail
-    if (f32 == 1)      lineThomasFactorT_d<float, double><<<grid, threads>>>(FORGE_LINE_FACTOR_ARGS);
+    if (layout) {
+        line_layout::ensure(msh);
+        lineThomasFactorL_d<<<grid, threads>>>(
+            msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, msh.line_Kprev_d, msh.line_Knext_d,
+            var.c_d["diag_block_00"], var.c_d["diag_block_01"], var.c_d["diag_block_02"], var.c_d["diag_block_03"], var.c_d["diag_block_04"],
+            var.c_d["diag_block_10"], var.c_d["diag_block_11"], var.c_d["diag_block_12"], var.c_d["diag_block_13"], var.c_d["diag_block_14"],
+            var.c_d["diag_block_20"], var.c_d["diag_block_21"], var.c_d["diag_block_22"], var.c_d["diag_block_23"], var.c_d["diag_block_24"],
+            var.c_d["diag_block_30"], var.c_d["diag_block_31"], var.c_d["diag_block_32"], var.c_d["diag_block_33"], var.c_d["diag_block_34"],
+            var.c_d["diag_block_40"], var.c_d["diag_block_41"], var.c_d["diag_block_42"], var.c_d["diag_block_43"], var.c_d["diag_block_44"],
+            line_layout::W, line_layout::LU, line_layout::piv, line_layout::Kp, fail);
+    }
+    else if (f32 == 1) lineThomasFactorT_d<float, double><<<grid, threads>>>(FORGE_LINE_FACTOR_ARGS);
     else if (f32 == 2) {
         line_f32::ensure(msh);
         #define FORGE_LINE_FACTOR_ARGS_F \
@@ -2781,7 +2967,7 @@ static void launchLineFactor(bool par, bool inv, int f32, mesh& msh, variables& 
 }
 
 static void launchLineSolve(bool par, bool inv, int f32, solverConfig& cfg, mesh& msh, variables& var, double* W, double* LU, signed char* piv,
-                            unsigned char* fail, double* y, flow_float* const dqn[5])
+                            unsigned char* fail, double* y, flow_float* const dqn[5], bool layout = false)
 {
     const int threads = 64;
     const int grid = par ? (int)(((size_t)msh.nImplicitLines * line_implicit_par::TILE + threads - 1) / threads)
@@ -2791,7 +2977,15 @@ static void launchLineSolve(bool par, bool inv, int f32, solverConfig& cfg, mesh
         var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"], \
         var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"], \
         dqn[0], dqn[1], dqn[2], dqn[3], dqn[4], cfg.implicitRelax, y
-    if (f32 == 1)      lineThomasSolveT_d<float, double><<<grid, threads>>>(FORGE_LINE_SOLVE_ARGS);
+    if (layout) {
+        line_layout::ensure(msh);
+        lineThomasSolveL_d<<<grid, threads>>>(
+            msh.nImplicitLines, msh.line_offsets_d, msh.line_cells_d, line_layout::Kp, line_layout::W, line_layout::LU, line_layout::piv, fail,
+            var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"],
+            var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"],
+            dqn[0], dqn[1], dqn[2], dqn[3], dqn[4], cfg.implicitRelax, line_layout::y);
+    }
+    else if (f32 == 1) lineThomasSolveT_d<float, double><<<grid, threads>>>(FORGE_LINE_SOLVE_ARGS);
     else if (f32 == 2) {
         line_f32::ensure(msh);
         lineThomasSolveT_d<float, float><<<grid, threads>>>(
@@ -2812,7 +3006,7 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
 {
     if (msh.nImplicitLines <= 0) return;
     static long nFactorCalls = 0;
-    (void)lineInvEnabled(); (void)lineF32Mode();                 // スイッチの整合を最初の呼び出しで検査する (診断の早期 return より前)
+    (void)lineInvEnabled(); (void)lineF32Mode(); (void)lineLayoutEnabled();                 // スイッチの整合を最初の呼び出しで検査する (診断の早期 return より前)
     lineModeNote("factor", nFactorCalls);
     if (lineMonoEnabled()) return;   // モノリシック時は毎 sweep の lineThomas_d が全てやる
     static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
@@ -2820,12 +3014,13 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
     if (dbgNoop || dbgPoint) return;
     line_dump::atFactor(cfg, msh, var);
     if (!lineCompareEnabled()) {
-        launchLineFactor(!lineSerialEnabled(), lineInvEnabled(), lineF32Mode(), msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d);
+        launchLineFactor(!lineSerialEnabled(), lineInvEnabled(), lineF32Mode(), msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, lineLayoutEnabled());
         return;
     }
     // 比較の相手: FORGE_LINE_F32=1/2 なら float 版、FORGE_LINE_INV=1 なら逆行列 (1 ライン 1 スレッド)、どちらでもなければ並列版。基準は常に従来の LU (1 ライン 1 スレッド) を別のバッファで
     const bool cmpInv = lineInvEnabled();
     const int cmpF32 = lineF32Mode();
+    const bool cmpLay = lineLayoutEnabled();
     // 比較: 書かれない要素 (各ラインの最後の節点の W、失敗したラインの残り) で差が出ないよう、両方のバッファを 0 にしてから解く
     line_cmp::ensure(msh);
     const size_t n = msh.nCells_all;
@@ -2839,18 +3034,21 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
         gpuErrchk(cudaMemset(line_f32::y, 0, sizeof(float) * 5 * n));
     }
     launchLineFactor(false, false, 0, msh, var, line_cmp::a.W, line_cmp::a.LU, line_cmp::a.piv, line_cmp::a.fail);
-    launchLineFactor(!cmpInv && cmpF32 == 0, cmpInv, cmpF32, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d);
+    launchLineFactor(!cmpInv && cmpF32 == 0 && !cmpLay, cmpInv, cmpF32, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, cmpLay);
     double dLU = 0, mLU = 0, dW = 0, mW = 0, dp = 0, mp = 0, df = 0, mf = 0; unsigned long long nLU = 0, nW = 0, np = 0, nf = 0;
     line_cmp::diff("LU", 25 * n, msh.line_LU_d, (const double*)line_cmp::a.LU, dLU, mLU, nLU);
     line_cmp::diff("W", 25 * n, msh.line_W_d, (const double*)line_cmp::a.W, dW, mW, nW);
     line_cmp::diff("piv", 5 * n, msh.line_piv_d, (const signed char*)line_cmp::a.piv, dp, mp, np);
     line_cmp::diff("fail", (size_t)msh.nImplicitLines, msh.line_fail_d, (const unsigned char*)line_cmp::a.fail, df, mf, nf);
     printf("[lineCompare] factor %d%s: LU 最大差 %.3e / 最大 %.3e (不一致 %llu)、W %.3e / %.3e (不一致 %llu)、ピボットの不一致 %llu、失敗の不一致 %llu\n",
-           ++line_cmp::factorCalls, cmpF32 == 2 ? " (F32cs: 因子は float のバッファにあるので LU・W・ピボットの差は意味がない)" : cmpF32 == 1 ? " (F32c: 因子は float で計算して double に保存)" :
+           ++line_cmp::factorCalls, cmpLay ? " (LAYOUT: 因子は並べ替えたバッファにあるので LU・W・ピボットの差は意味がない)" :
+           cmpF32 == 2 ? " (F32cs: 因子は float のバッファにあるので LU・W・ピボットの差は意味がない)" : cmpF32 == 1 ? " (F32c: 因子は float で計算して double に保存)" :
            cmpInv ? " (逆行列 vs LU: LU・ピボットは中身が違うので比べない)" : "", dLU, mLU, nLU, dW, mW, nW, np, nf);
     {   // 実際に使った因子の非有限 (腕と従来の両方)
-        const unsigned long long aLU = (cmpF32 == 2) ? line_cmp::countNonfinite(25 * n, line_f32::LU) : line_cmp::countNonfinite(25 * n, (const double*)msh.line_LU_d);
-        const unsigned long long aW  = (cmpF32 == 2) ? line_cmp::countNonfinite(25 * n, line_f32::W)  : line_cmp::countNonfinite(25 * n, (const double*)msh.line_W_d);
+        const unsigned long long aLU = cmpLay ? line_cmp::countNonfinite(25 * line_layout::slots, (const double*)line_layout::LU) :
+                                       (cmpF32 == 2) ? line_cmp::countNonfinite(25 * n, line_f32::LU) : line_cmp::countNonfinite(25 * n, (const double*)msh.line_LU_d);
+        const unsigned long long aW  = cmpLay ? line_cmp::countNonfinite(25 * line_layout::slots, (const double*)line_layout::W) :
+                                       (cmpF32 == 2) ? line_cmp::countNonfinite(25 * n, line_f32::W)  : line_cmp::countNonfinite(25 * n, (const double*)msh.line_W_d);
         const unsigned long long rLU = line_cmp::countNonfinite(25 * n, (const double*)line_cmp::a.LU);
         const unsigned long long rW  = line_cmp::countNonfinite(25 * n, (const double*)line_cmp::a.W);
         printf("[lineNonfinite] factor %d: 腕 LU %llu・W %llu、従来 LU %llu・W %llu\n", line_cmp::factorCalls, aLU, aW, rLU, rW);
@@ -2861,7 +3059,7 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
 {
     if (msh.nImplicitLines <= 0) return;
     static long nSolveCalls = 0;
-    (void)lineInvEnabled(); (void)lineF32Mode();
+    (void)lineInvEnabled(); (void)lineF32Mode(); (void)lineLayoutEnabled();
     lineModeNote("solve", nSolveCalls);
     static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
     static const bool dbgNoop = [](){ const char* e = getenv("FORGE_LINE_NOOP"); return e && atoi(e) != 0; }();
@@ -2888,7 +3086,7 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
         // 保存済み LU/piv/W での代入のみ (factor は lineThomasFactor_d_wrapper が実施済み)。既定は 1 ライン 1 スレッド、FORGE_LINE_PAR=1 で並列版。
         flow_float* const dqn[5] = {var.c_d["dq_block_new_0"], var.c_d["dq_block_new_1"], var.c_d["dq_block_new_2"], var.c_d["dq_block_new_3"], var.c_d["dq_block_new_4"]};
         if (!lineCompareEnabled()) {
-            launchLineSolve(!lineSerialEnabled(), lineInvEnabled(), lineF32Mode(), cfg, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, msh.line_y_d, dqn);
+            launchLineSolve(!lineSerialEnabled(), lineInvEnabled(), lineF32Mode(), cfg, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, msh.line_y_d, dqn, lineLayoutEnabled());
         } else {
             // 比較: ライン外の CV の dq_new (点解) を写してから v2 を別のバッファへ、v3 を本来のバッファへ解き、dq_new の 5 成分を比べる
             line_cmp::ensure(msh);
@@ -2896,8 +3094,9 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
             for (int k = 0; k < 5; ++k) gpuErrchk(cudaMemcpy(line_cmp::a.dq[k], dqn[k], sizeof(flow_float) * n, cudaMemcpyDeviceToDevice));
             const bool cmpInv = lineInvEnabled();
             const int cmpF32 = lineF32Mode();
+            const bool cmpLay = lineLayoutEnabled();
             launchLineSolve(false, false, 0, cfg, msh, var, line_cmp::a.W, line_cmp::a.LU, line_cmp::a.piv, line_cmp::a.fail, line_cmp::a.y, line_cmp::a.dq);
-            launchLineSolve(!cmpInv && cmpF32 == 0, cmpInv, cmpF32, cfg, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, msh.line_y_d, dqn);
+            launchLineSolve(!cmpInv && cmpF32 == 0 && !cmpLay, cmpInv, cmpF32, cfg, msh, var, msh.line_W_d, msh.line_LU_d, msh.line_piv_d, msh.line_fail_d, msh.line_y_d, dqn, cmpLay);
             double d = 0, m = 0; unsigned long long nd = 0;
             double dk[5], mk[5];                       // 成分ごと (緩和後の dq_new の最大絶対差と最大絶対値)
             for (int k = 0; k < 5; ++k) {
@@ -2908,12 +3107,13 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
             printf("[lineCompare] solve %d: dq 最大差 %.3e / 最大 %.3e (不一致 %llu); 成分ごと 差/最大 = %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e %.3e/%.3e (非有限の累計 %llu)\n",
                    ++line_cmp::solveCalls, d, m, nd, dk[0], mk[0], dk[1], mk[1], dk[2], mk[2], dk[3], mk[3], dk[4], mk[4], line_cmp::nonfiniteTotal);
             {   // 実際に使った前進の中間 y の非有限 (腕と従来の両方)
-                const unsigned long long ay = (cmpF32 == 2) ? line_cmp::countNonfinite(5 * n, line_f32::y) : line_cmp::countNonfinite(5 * n, (const double*)msh.line_y_d);
+                const unsigned long long ay = cmpLay ? line_cmp::countNonfinite(5 * line_layout::slots, (const double*)line_layout::y) :
+                                              (cmpF32 == 2) ? line_cmp::countNonfinite(5 * n, line_f32::y) : line_cmp::countNonfinite(5 * n, (const double*)msh.line_y_d);
                 const unsigned long long ry = line_cmp::countNonfinite(5 * n, (const double*)line_cmp::a.y);
                 printf("[lineNonfinite] solve %d: 腕 y %llu、従来 y %llu\n", line_cmp::solveCalls, ay, ry);
             }
-            if (cmpInv || cmpF32 != 0) {               // 後退誤差は比べる版 (本来のバッファ) と従来の LU (別のバッファ) の両方
-                line_cmp::eta(cmpF32 == 1 ? "F32c" : cmpF32 == 2 ? "F32cs" : "INV", line_cmp::solveCalls, cfg, msh, var, dqn, msh.line_fail_d);
+            if (cmpInv || cmpF32 != 0 || cmpLay) {     // 後退誤差は比べる版 (本来のバッファ) と従来の LU (別のバッファ) の両方
+                line_cmp::eta(cmpLay ? "LAYOUT" : cmpF32 == 1 ? "F32c" : cmpF32 == 2 ? "F32cs" : "INV", line_cmp::solveCalls, cfg, msh, var, dqn, msh.line_fail_d);
                 line_cmp::eta("LU", line_cmp::solveCalls, cfg, msh, var, line_cmp::a.dq, line_cmp::a.fail);
             }
         }
