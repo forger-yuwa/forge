@@ -1,58 +1,87 @@
-"""§6.9 の判定 (plan time_integration-line-implicit-speed、2026-10-10): 3 腕の到達の step・総時間・E2・分解能。
-P・L0 は既存の系列 (事後の集計)、L5 は run_0353_m9_L5 (ライン) と run_0354_m9_L5cut (point) の見張りの系列。
-usage: python3 m9_judge.py → _band_ab/cold_pair/m9_judge.json"""
-import json, sys
+"""§6.11 の判定 v2 (plan time_integration-line-implicit-speed、2026-10-10、codex plan-2 の反映)。
+終わり E = point の段の出力で (水準: |欠損| ≤ 0.1 kg/s かつ θ_r(40/70/94) のドリフト ≤ 0.05 %/2 万 step、窓はその段の中、step 0 は使わない)
+           かつ θ_r(40/70/94)・Q_w が参照 R (m9_ref.json) から相対 0.1 % 以内、を初めて満たした出力。
+総時間 (推定、共通の環境の単価で換算) = Σ 段 (step 数 × 1 step の時間) + 出力の回数 × 出力 1 回の費用 + 起動の回数 × 起動と終了の時間 (各段の構成の値)。
+分解能 = Σ 段 (出力の間隔 × 1 step の時間) + Σ 段 (step 数 × 単価の 3 本の幅)。
+P・L0 は既存の系列の事後の集計 (古いバイナリの step 数を新しいバイナリでも同じと見なす、という仮定)。L5 は run_0353_m9_L5・run_0354_m9_L5cut の見張りの状態。
+品質: 新しい段の check_convergence (DIVERGED は比較不可、NOT CONVERGED は「水準への到達の比較」に限る) と、到達の窓 [N − 2 万, N] の θ_r・Q_w の
+check_quasisteady (系列 CSV、--tail 20000 --drift 0.0005 --min-snaps 5) を記録する。
+usage (AWS の case dir): python3 m9_judge.py → _band_ab/cold_pair/m9_judge.json"""
+import csv, json, math, subprocess, sys
 from pathlib import Path
 import numpy as np
 HERE = Path(__file__).resolve().parent; D = HERE / "_band_ab" / "cold_pair"
-U = json.loads((D / "m9_unit.json").read_text())
-def load(chain):
-    rows = []
-    for r, base in chain:
-        for x in json.loads((D / f"series_{r}.json").read_text())["rows"]:
-            if x["step"] == 0 and rows: continue
-            y = dict(x); y["abs"] = base + x["step"]; rows.append(y)
-    return rows
+U = json.loads((D / "m9_unit.json").read_text()); R = json.loads((HERE / "m9_ref.json").read_text())
+KEYS = ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")
+def series(r):
+    p = HERE / r / "m9_watch.json"
+    rows = json.loads(p.read_text())["rows"] if p.exists() else json.loads((D / f"series_{r}.json").read_text())["rows"]
+    return [x for x in rows if x["step"] > 0]
+def chain(parts):
+    out = []
+    for r, base in parts:
+        for x in series(r): y = dict(x); y["abs"] = base + x["step"]; out.append(y)
+    return out
 def drift(rows, key):
-    st = np.array([r["abs"] for r in rows], float); v = np.array([r[key] for r in rows], float)
-    if st[-1] - st[0] < 20000: return None
-    j = int(np.searchsorted(st, st[-1] - 20000)); return 100 * (v[-1] / v[j] - 1) * 20000 / (st[-1] - st[j])
+    s_ = np.array([r["abs"] for r in rows], float); v = np.array([r[key] for r in rows], float)
+    if s_[-1] - s_[0] < 20000: return None
+    j = int(np.searchsorted(s_, s_[-1] - 20000)); return 100 * (v[-1] / v[j] - 1) * 20000 / (s_[-1] - s_[j])
 def reach(rows):
     for n in range(len(rows)):
         pre = rows[: n + 1]; r = pre[-1]
-        dr = [drift(pre, k) for k in ("theta_r_40", "theta_r_70", "theta_r_94")]
-        if r.get("deficit") is not None and None not in dr and abs(r["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr):
-            return r
+        if r.get("nonfinite") or r.get("nonfinite_all"): return {"diverged_at": r["abs"]}
+        dr = [drift(pre, k) for k in KEYS[:3]]
+        e2 = {k: 100 * (r[k] / R[k] - 1) for k in KEYS}
+        if r.get("deficit") is not None and None not in dr and abs(r["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr) and all(abs(v) <= 0.1 for v in e2.values()):
+            return {"abs": r["abs"], "drift": dr, "e2": e2, "window": [x for x in pre if x["abs"] >= r["abs"] - 20000]}
     return None
-out = {}
-P = reach(load([("run_0217_ns_coldmesh_tw300_cfl4_ext3", 440000), ("run_0263_ns_coldmesh_tw300_cfl4_ext4", 640000)]))
-out["P"] = {"source": "既存の系列 (事後の集計)", "reach": P["abs"], "res_steps": 10000,
-            "phases": [{"mode": "P", "steps": P["abs"]}], "restarts": 4}
-L0l = reach(load([("run_0223_ns_coldmesh_tw300_linedir_tj5_cap50", 0), ("run_0224_ns_coldmesh_tw300_linedir_tj5_cap50_ext", 15000), ("run_0252_ns_coldmesh_tw300_linedir_tj5_cap50_ext2", 75000)]))
-L0c = reach(load([("run_0262_ns_coldmesh_tw300_cutback_point", 0)]))
-out["L0"] = {"source": "既存の系列 (事後の集計)", "line_reach": L0l["abs"], "switch_at": 135000, "cut_reach_point_steps": L0c["abs"], "res_steps": 5000,
-             "phases": [{"mode": "L0", "steps": 135000}, {"mode": "P", "steps": L0c["abs"]}], "restarts": 4, "final": L0c}
-st5 = json.loads((HERE / "run_0353_m9_L5" / "m9_watch.json").read_text())
-out["L5"] = {"source": "新しい run (事前登録)", "line_status": st5["status"], "line_reach": st5.get("reach_step"), "res_steps": 5000}
-if st5["status"] == "REACHED":
-    stc = json.loads((HERE / "run_0354_m9_L5cut" / "m9_watch.json").read_text())
-    out["L5"].update(cut_status=stc["status"], cut_reach_point_steps=stc.get("reach_step"))
-    if stc["status"] == "REACHED":
-        c = [r for r in json.loads((D / "series_run_0354_m9_L5cut.json").read_text())["rows"] if r["step"] == stc["reach_step"]][0]
-        out["L5"].update(phases=[{"mode": "L5", "steps": st5["reach_step"]}, {"mode": "P", "steps": stc["reach_step"]}], restarts=2, final=c)
-for k, a in out.items():
-    if "phases" not in a: a["verdict"] = "未到達・失敗"; continue
-    a["total_s"] = sum(ph["steps"] * U[ph["mode"]]["median_ms"] / 1000 for ph in a["phases"]) + a["restarts"] * U["P"]["median_startup_s"]
-    a["uncert_s"] = sum(a["res_steps"] * U[ph["mode"]]["median_ms"] / 1000 for ph in a["phases"])
-    if k != "P":
-        f = a["final"]
-        a["E2"] = {key: (f[key] / P[key] - 1) * 100 for key in ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")}
-        a["E2_pass"] = all(abs(v) <= 0.1 for v in a["E2"].values())
+def qs(window, tag):
+    p = D / f"m9_qs_{tag}.csv"
+    with open(p, "w", newline="") as f:
+        w = csv.writer(f); w.writerow(["step"] + list(KEYS))
+        for x in window: w.writerow([x["abs"]] + [x[k] for k in KEYS])
+    o = subprocess.run([sys.executable, str(HERE / "../../solver_density_cuda/tools/check_quasisteady.py"), "--series-csv", str(p), "--series-cols", ",".join(KEYS),
+                        "--tail", "20000", "--drift", "0.0005", "--min-snaps", "5"], capture_output=True, text=True)
+    return {"rc": o.returncode, "tail": (o.stdout + o.stderr).strip().splitlines()[-6:]}
+def conv(run):
+    v = HERE / run / "CONVERGENCE_VERDICT.txt"
+    t = v.read_text(errors="replace") if v.exists() else ""
+    return "DIVERGED" if "DIVERGED" in t else "NOT CONVERGED" if "NOT CONVERGED" in t else "PASS" if "PASS" in t else "記録なし"
+def total(phases, restarts):
+    t = sum(ph["steps"] * U[ph["mode"]]["median_ms"] / 1000 + ph["outputs"] * U[ph["mode"]]["median_output_ms"] / 1000 for ph in phases)
+    t += sum(U[m]["median_startup_s"] for m in restarts)
+    u = sum(ph["interval"] * U[ph["mode"]]["median_ms"] / 1000 + ph["steps"] * U[ph["mode"]]["spread_ms"] / 1000 for ph in phases)
+    return t, u
+out = {"ref": R}
+# P (事後の集計): run_0183 res_100000 → 0191 (4 万) → 0198 → 0208 → 0217 (各 20 万、1 万ごと)。系列は 0217 (通算 44 万〜) と 0263 だけ。
+rP = reach(chain([("run_0217_ns_coldmesh_tw300_cfl4_ext3", 440000), ("run_0263_ns_coldmesh_tw300_cfl4_ext4", 640000)]))
+if rP and "abs" in rP:
+    nP = rP["abs"]; tP, uP = total([{"mode": "P", "steps": nP, "outputs": nP // 10000, "interval": 10000}], ["P"] * (4 if nP <= 640000 else 5))
+    out["P"] = {"source": "既存の系列 (事後の集計)", "reach": nP, "e2": rP["e2"], "total_s": tP, "uncert_s": uP, "quasisteady": qs(rP["window"], "P")}
+# L0 (事後の集計): ライン 13.5 万 step (0223・0224・0252) → point の run_0262。
+rC = reach(chain([("run_0262_ns_coldmesh_tw300_cutback_point", 0)]))
+if rC and "abs" in rC:
+    tL, uL = total([{"mode": "L0", "steps": 135000, "outputs": 6 + 12 + 12, "interval": 5000}, {"mode": "P", "steps": rC["abs"], "outputs": rC["abs"] // 5000, "interval": 5000}], ["L0", "L0", "L0", "P"])
+    out["L0"] = {"source": "既存の系列 (事後の集計)", "line_steps": 135000, "point_steps": rC["abs"], "e2": rC["e2"], "total_s": tL, "uncert_s": uL, "quasisteady": qs(rC["window"], "L0")}
+else:
+    out["L0"] = {"source": "既存の系列 (事後の集計)", "status": "point の段で未到達"}
+# L5 (事前登録)
+s5 = json.loads((HERE / "run_0353_m9_L5" / "m9_watch.json").read_text())
+out["L5"] = {"source": "新しい run (事前登録)", "line": {"status": s5["status"], "reach_step": s5.get("reach_step"), "convergence": conv("run_0353_m9_L5")}}
+if s5["status"] == "REACHED":
+    c5 = json.loads((HERE / "run_0354_m9_L5cut" / "m9_watch.json").read_text())
+    out["L5"]["point"] = {"status": c5["status"], "reach_step": c5.get("reach_step"), "convergence": conv("run_0354_m9_L5cut")}
+    if c5["status"] == "REACHED":
+        n1, n2 = s5["reach_step"], c5["reach_step"]
+        t5, u5 = total([{"mode": "L5", "steps": n1, "outputs": n1 // 5000, "interval": 5000}, {"mode": "P", "steps": n2, "outputs": n2 // 5000, "interval": 5000}], ["L5", "P"])
+        rows = chain([("run_0354_m9_L5cut", 0)]); r5 = reach(rows)
+        out["L5"].update(total_s=t5, uncert_s=u5, e2=r5["e2"] if r5 and "e2" in r5 else None, quasisteady=qs(r5["window"], "L5") if r5 and "window" in r5 else None)
 def cmp(x, y):
-    a, b = out[x], out[y]
-    if "total_s" not in a or "total_s" not in b: return "判別不能 (未到達)"
-    if a.get("E2_pass") is False or b.get("E2_pass") is False: return "比べない (別の解)"
+    a, b = out.get(x, {}), out.get(y, {})
+    if "total_s" not in a or "total_s" not in b: return "判別不能 (どちらかが未到達・失敗)"
+    if any(out[k].get(ph, {}).get("convergence") == "DIVERGED" for k in (x, y) for ph in ("line", "point")): return "比較不可 (DIVERGED)"
     d = a["total_s"] - b["total_s"]; u = a["uncert_s"] + b["uncert_s"]
-    return f"{x} が速い" if d < -u else f"{x} が遅い" if d > u else "判別不能 (差が分解能以内)"
+    return f"{x} が速い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d < -u else f"{x} が遅い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d > u else "判別不能 (差が分解能以内)"
 out["compare"] = {"L5_vs_L0": cmp("L5", "L0"), "L0_vs_P": cmp("L0", "P"), "L5_vs_P": cmp("L5", "P")}
-(D / "m9_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float)); print(json.dumps({k: {kk: vv for kk, vv in v.items() if kk not in ("final",)} if isinstance(v, dict) else v for k, v in out.items()}, indent=1, ensure_ascii=False, default=float))
+(D / "m9_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+print(json.dumps({k: ({kk: vv for kk, vv in v.items() if kk not in ("window",)} if isinstance(v, dict) else v) for k, v in out.items()}, indent=1, ensure_ascii=False, default=float))
