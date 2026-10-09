@@ -344,6 +344,7 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
   欠けたら比較不可。NOT CONVERGED・NOT ALL STEADY は「水準と E2 への到達時間」の比較に限って扱う (判定の文にそう付記する)。
 - **判定** (`m9_judge.py` v2): L5 と L0、L0 と P、L5 と P を、総時間の差が分解能の和を超えるかで「速い / 遅い / 判別不能」。未到達・失敗・DIVERGED は比較しない。
 - **追加の腕 L5L (2026-10-10、L5 のライン段が水準に到達する前に登録。ユーザの問い「point のほうが粘性込み line より収束は早いと思ってるの？」)**: point で仕上げる設計は値 0 のラインが頭打ちになった観測から決めたもので、粘性入りのラインが頭打ちになるかは分かっていない。そこで `run_0353_m9_L5` の水準の出力から、同じ構成のラインのまま `run_0363_m9_L5line` (最大 20 万 step・5000 ごと) を E (水準 + 参照から 0.1 % 以内、ラインの段のまま) まで回し (`m9_branch.sh`、見張りの `--phase line_e2`)、point の仕上げ (L5) と同時に走らせる。総時間 = ライン段 (run_0353 の到達まで) + ラインの続き (run_0363 の到達まで) を L5 の単価で換算、起動 2 回。判定は L5L と L5・L0・P を同じ規則で比べる。`m9.sh` は走行中なので書き換えず、別の台本と、後から読まれる見張り・判定器の拡張で入れる。
+  **修正 (codex plan-4、分岐の前に反映)**: L5L はラインの同じ構成の続きなので、`run_0353` の到達の出力までの系列を step − 到達 (≤ 0) で引き継いで判定する (`m9_watch.py --phase line_e2 --inherit`)。分岐点で既に E (水準 + E2) を満たせば追加 0 step で到達とする。判定器は `run_0353` (通算) と `run_0363` (通算 = 分岐の step + 局所 step) をつないで再計算し、総時間はライン 1 段 (分岐の step + 追加 step) を L5 の単価で換算、起動 2 回。point の腕の失敗に関わらず各腕を独立に集計する。比べる段に NOT CONVERGED があれば「水準と E2 への到達時間の比較に限る」と付記する。見張りは引数の解釈や初期化の失敗でも forge を止めて EXEC_ERROR を残す。
 
 ### 6.12 §6.10 の結果 (2026-10-10、バイナリ lineL = f9be0c4f + typedef double、sha256 e10a195d…)
 
@@ -358,6 +359,7 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#9 の追加の腕 L5L) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-4.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-4.md) | GO-with-changes, C0/M3/m1 | 全件採用 (分岐の前に反映): M1 `--budget` の登録がコメントに入っていた不具合を直し、初期化の失敗でも forge を止める、M2 分岐元の系列を引き継いで判定 (追加 0 step もありうる)、M3 腕ごとに独立に集計、m4 NOT CONVERGED の注記 (§6.11) |
 | plan (#9 の事前登録 v2) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-3.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-3.md) | GO-with-changes, C0/M4/m1 | 全件採用: M1 GPU の件数と取得の失敗を分け 0 本でなければ測らない、M2 E2 は数値 4 つ・見張りの例外とモード不一致でも共通の停止、M3 比較の前提 (到達の再計算の一致・VERDICT・準定常の正常終了)、M4 再開時の再判定と専有時間の run の使い直し、m5 `--tail 1.0` (§6.11)。参照の変更と前回 M2 の却下は妥当と確認された |
 | plan (#9 の事前登録 v1) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-2.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-2.md) | GO-with-changes, C0/M7/m1 | M1 採用 (v1 を撤回し参照を定常な point の窓に替えた v2、§6.9・§6.11)、M2 **却下** (出力の費用は表示の step 1000 に入ることを実測: run_0349 で 999 = 34.65 ms、1000 = 274.75 ms。出力の費用は別に測って足す形には採用)、M3〜M7・m8 採用 (単価・出力・起動の分離と検査、品質の判定、見張りの状態・停止・原子的な保存・再開、許した環境変数とモードの確認、step 0 の扱い) |
 | plan (#10 の事前登録・ncu の読み) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan.md) | GO-with-changes, C0/M2/m4 | 全件採用: M1 判定器の行のそろい・有限性・η を 6 桁、M2 §6.6 の block を測定 ID ごとに分けた、m3 dq の不一致をビット列で数え並べ替えた因子も節点ごとに比べる、m4 因果の主張を弱めた、m5 実効のモード・専有・ms の検査、m6 ncu の失敗で止める (§6.6・§6.7) |

@@ -16,22 +16,69 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import cold_series as CS  # noqa: E402
 import cold_xcheck as XC  # noqa: E402
-ap = argparse.ArgumentParser(); ap.add_argument("run"); ap.add_argument("--phase", choices=("line", "point", "line_e2"), required=True)   # line_e2 = ラインのまま E (水準 + E2) まで (§6.11 の追加の腕); ap.add_argument("--budget", type=int, required=True)
-a = ap.parse_args()
-run = HERE / a.run
-SF = run / "m9_watch.json"
-KEYS = ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")
-REF = None
-if a.phase in ("point", "line_e2"):                    # E2 の参照は数値 4 つだけ (説明の文字列は使わない、codex plan-3 M2)
-    _r = json.loads((HERE / "m9_ref.json").read_text())
-    REF = {k: float(_r[k]) for k in KEYS}
-    if not all(np.isfinite(v) and v > 0 for v in REF.values()): print("[m9_watch] 参照が有限・正でない — 止める"); sys.exit(2)
-FINAL = ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR")
-st = json.loads(SF.read_text()) if SF.exists() else {"run": run.name, "phase": a.phase, "budget": a.budget, "status": "running", "rows": [], "tries": {}}
-if st["status"] in FINAL:
-    print(f"[m9_watch] {run.name}: 既に {st['status']}"); sys.exit(0)
-if st.get("phase") != a.phase or st.get("budget") != a.budget:
-    print(f"[m9_watch] {run.name}: 状態の phase/budget が違う — 止める"); sys.exit(2)
+def _emergency_stop(run_name, why):
+    """初期化の失敗でも、cwd がその run の forge を止めて状態を残す (codex plan-4 M1)。"""
+    import signal as _sg, subprocess as _sp, time as _t
+    rd = os.path.realpath(str(HERE / run_name))
+    def _p():
+        r_ = []
+        for q in _sp.run(["pgrep", "-x", "forge"], capture_output=True, text=True).stdout.split():
+            try:
+                if os.path.realpath(f"/proc/{q}/cwd") == rd: r_.append(int(q))
+            except OSError: pass
+        return r_
+    for sig_, w_ in ((_sg.SIGTERM, 180), (_sg.SIGKILL, 60)):
+        for q in _p():
+            try: os.kill(q, sig_)
+            except OSError: pass
+        t0_ = _t.time()
+        while _p() and _t.time() - t0_ < w_: _t.sleep(3)
+    try:
+        sf_ = HERE / run_name / "m9_watch.json"
+        st_ = json.loads(sf_.read_text()) if sf_.exists() else {"run": run_name, "rows": []}
+        st_.update(status="EXEC_ERROR", note=f"見張りの初期化の失敗: {why}")
+        sf_.write_text(json.dumps(st_, indent=1, ensure_ascii=False))
+    except Exception: pass
+    print(f"[m9_watch] {run_name}: 初期化の失敗 ({why}) — forge を止めた", flush=True); sys.exit(1)
+
+ap = argparse.ArgumentParser(); ap.add_argument("run")
+ap.add_argument("--phase", choices=("line", "point", "line_e2"), required=True)   # line_e2 = ラインのまま E (水準 + E2) まで (§6.11 の追加の腕 L5L)
+ap.add_argument("--budget", type=int, required=True)
+ap.add_argument("--inherit", default=None, help="line_e2: 同じ構成の分岐元の run。その到達の出力までの系列を step − 到達 (≤ 0) で引き継ぐ (codex plan-4 M2)")
+try:
+    a = ap.parse_args()
+except SystemExit:
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"): _emergency_stop(sys.argv[1], "引数の解釈")
+    raise
+try:
+    run = HERE / a.run
+    SF = run / "m9_watch.json"
+    KEYS = ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")
+    REF = None
+    if a.phase in ("point", "line_e2"):                    # E2 の参照は数値 4 つだけ (説明の文字列は使わない、codex plan-3 M2)
+        _r = json.loads((HERE / "m9_ref.json").read_text())
+        REF = {k: float(_r[k]) for k in KEYS}
+        if not all(np.isfinite(v) and v > 0 for v in REF.values()): raise ValueError("参照が有限・正でない")
+    if (a.phase == "line_e2") != (a.inherit is not None): raise ValueError("--inherit は line_e2 のときだけ、必ず付ける")
+    FINAL = ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR")
+    if SF.exists():
+        st = json.loads(SF.read_text())
+    else:
+        st = {"run": run.name, "phase": a.phase, "budget": a.budget, "status": "running", "rows": [], "tries": {}}
+        if a.inherit:
+            src = json.loads((HERE / a.inherit / "m9_watch.json").read_text())
+            if src.get("status") != "REACHED": raise ValueError(f"分岐元 {a.inherit} が REACHED でない")
+            nb = int(src["reach_step"])
+            st["inherit"] = {"run": a.inherit, "reach_step": nb, "reach_sha256": src.get("reach_sha256")}
+            st["rows"] = [dict(r, step=r["step"] - nb, inherited=True) for r in src["rows"] if 0 < r["step"] <= nb]
+    if st["status"] in FINAL:
+        print(f"[m9_watch] {run.name}: 既に {st['status']}"); sys.exit(0)
+    if st.get("phase") != a.phase or st.get("budget") != a.budget:
+        raise ValueError("状態の phase/budget が違う")
+except SystemExit:
+    raise
+except Exception as e:
+    _emergency_stop(a.run, repr(e))
 yb_x, yb = XC.common_yb()
 
 def save():
@@ -72,22 +119,22 @@ def nonfinite_all(n):
 def finish(status, **kw):
     st.update(status=status, **kw); save(); print(f"[m9_watch] {run.name}: {status} {kw}", flush=True)
 def cleanup(keep_extra=()):
-    done = sorted(r["step"] for r in st["rows"])
+    done = sorted(r["step"] for r in st["rows"] if r["step"] > 0 and not r.get("inherited"))
     keep = set(done[-5:]) | {d for d in done if d % 50000 == 0} | set(keep_extra)
     for m in done:
         if m in keep: continue
         for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
 
 def done_at(rows):
-    """保存済みの系列の最初の終わりの出力 (水準 [+ E2]) を返す。非有限があればその step を負で返す。"""
+    """保存済みの系列の最初の終わりを ("REACH", step) か ("DIV", step) で返す (引き継いだ行の step は ≤ 0)。無ければ None。"""
     for n_ in range(len(rows)):
         r_ = rows[n_]
-        if r_.get("nonfinite") or r_.get("nonfinite_all"): return -r_["step"]
+        if r_.get("nonfinite") or r_.get("nonfinite_all"): return ("DIV", r_["step"])
         dr_ = [drift(rows[: n_ + 1], k) for k in KEYS[:3]]
         e2_ = {k: 100 * (r_[k] / REF[k] - 1) for k in KEYS} if REF else None
         if r_.get("deficit") is not None and None not in dr_ and abs(r_["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr_) \
            and (e2_ is None or all(abs(v) <= 0.1 for v in e2_.values())):
-            return r_["step"]
+            return ("REACH", r_["step"])
     return None
 def conclude(n):
     """終わりの出力 n で止める (何度呼んでも同じ結果): forge を止め、後の出力を消し、sha256 を記録して REACHED。"""
@@ -96,14 +143,16 @@ def conclude(n):
     for m in steps():
         if m > n:
             for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
+    if n <= 0:                                           # 分岐点 (引き継いだ行) で既に E を満たす: 追加の step は 0
+        finish("REACHED", reach_step=0, note="分岐点で既に E を満たす (追加 0 step)"); sys.exit(0)
     if not (run / f"res_{n}.h5").exists(): finish("DATA_ERROR", note=f"到達の出力 res_{n}.h5 が無い", step=n); sys.exit(1)
     sha = hashlib.sha256((run / f"res_{n}.h5").read_bytes()).hexdigest()
     finish("REACHED", reach_step=n, reach_sha256=sha); cleanup(keep_extra=(n,)); sys.exit(0)
 # 再開: 保存済みの系列で先に判定し直す (codex plan-3 M4)
 _d = done_at(st["rows"])
 if _d is not None:
-    if _d < 0: stop(); finish("DIVERGED", fail_step=-_d); sys.exit(0)
-    conclude(_d)
+    if _d[0] == "DIV": stop(); finish("DIVERGED", fail_step=_d[1]); sys.exit(0)
+    conclude(_d[1])
 
 def main_loop():
   while True:

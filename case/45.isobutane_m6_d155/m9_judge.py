@@ -72,8 +72,11 @@ else:
 # L5 (事前登録)
 s5 = json.loads((HERE / "run_0353_m9_L5" / "m9_watch.json").read_text())
 out["L5"] = {"source": "新しい run (事前登録)", "line": {"status": s5["status"], "reach_step": s5.get("reach_step"), "convergence": conv("run_0353_m9_L5")}}
-if s5["status"] == "REACHED":
-    c5 = json.loads((HERE / "run_0354_m9_L5cut" / "m9_watch.json").read_text())
+p54 = HERE / "run_0354_m9_L5cut" / "m9_watch.json"
+if s5["status"] == "REACHED" and not p54.exists():
+    out["L5"]["point"] = {"status": "状態ファイルなし (起動・見張りの失敗)"}
+if s5["status"] == "REACHED" and p54.exists():
+    c5 = json.loads(p54.read_text())
     out["L5"]["point"] = {"status": c5["status"], "reach_step": c5.get("reach_step"), "convergence": conv("run_0354_m9_L5cut")}
     if c5["status"] == "REACHED":
         n1, n2 = s5["reach_step"], c5["reach_step"]
@@ -82,19 +85,25 @@ if s5["status"] == "REACHED":
         out["L5"]["recheck"] = {"reach_from_series": r5.get("abs") if r5 else None, "watch_reach": n2, "match": bool(r5 and r5.get("abs") == n2)}
         if out["L5"]["recheck"]["match"]:
             out["L5"].update(total_s=t5, uncert_s=u5, e2=r5["e2"], quasisteady=qs(r5["window"], "L5"))
-# L5L (追加の腕、§6.11 の追記): run_0353 の水準の出力から、ラインのまま (同じ構成) run_0363_m9_L5line で E (水準 + E2) まで
+# L5L (追加の腕、§6.11 の追記、codex plan-4 M2・M3): run_0353 の水準の出力から同じ構成のラインのまま run_0363_m9_L5line で E まで。
+# 系列は run_0353 (通算) に run_0363 (通算 = 分岐の step + 局所 step) をつないで判定し、分岐点で既に E なら追加 0 step。point の腕の失敗に関わらず独立に集計する。
 pL = HERE / "run_0363_m9_L5line" / "m9_watch.json"
-if s5["status"] == "REACHED" and pL.exists():
-    cL = json.loads(pL.read_text())
-    out["L5L"] = {"source": "新しい run (追加の腕、到達の前に登録)", "line": out["L5"]["line"],
-                  "line2": {"status": cL["status"], "reach_step": cL.get("reach_step"), "convergence": conv("run_0363_m9_L5line")}}
-    if cL["status"] == "REACHED":
-        n1, n3 = s5["reach_step"], cL["reach_step"]
-        rowsL = chain([("run_0363_m9_L5line", 0)]); rL = reach(rowsL)
-        out["L5L"]["recheck"] = {"reach_from_series": rL.get("abs") if rL else None, "watch_reach": n3, "match": bool(rL and rL.get("abs") == n3)}
-        if out["L5L"]["recheck"]["match"]:
-            tL5, uL5 = total([{"mode": "L5", "steps": n1, "outputs": n1 // 5000, "interval": 5000}, {"mode": "L5", "steps": n3, "outputs": n3 // 5000, "interval": 5000}], ["L5", "L5"])
-            out["L5L"].update(total_s=tL5, uncert_s=uL5, e2=rL["e2"], quasisteady=qs(rL["window"], "L5L"))
+if s5["status"] == "REACHED":
+    try:
+        cL = json.loads(pL.read_text())
+        n1 = int(s5["reach_step"])
+        out["L5L"] = {"source": "新しい run (追加の腕、到達の前に登録)", "line": out["L5"]["line"],
+                      "line2": {"status": cL["status"], "reach_step": cL.get("reach_step"), "convergence": conv("run_0363_m9_L5line")}}
+        if cL["status"] == "REACHED":
+            n3 = int(cL["reach_step"])
+            rowsL = chain([("run_0353_m9_L5", 0), ("run_0363_m9_L5line", n1)]); rL = reach(rowsL)
+            ok = bool(rL and rL.get("abs") == n1 + n3)
+            out["L5L"]["recheck"] = {"reach_from_series": rL.get("abs") if rL else None, "watch_reach_total": n1 + n3, "match": ok}
+            if ok:
+                tL5, uL5 = total([{"mode": "L5", "steps": n1 + n3, "outputs": (n1 + n3) // 5000, "interval": 5000}], ["L5", "L5"])
+                out["L5L"].update(total_s=tL5, uncert_s=uL5, e2=rL["e2"], quasisteady=qs(rL["window"], "L5L"))
+    except Exception as e:
+        out["L5L"] = {"source": "新しい run (追加の腕)", "status": f"集計できない ({e!r})"}
 def evidence(k):
     """比較の前提がそろっているか (codex plan-3 M3)。欠けていればその理由を返す。"""
     a = out.get(k, {})
@@ -112,7 +121,9 @@ def cmp(x, y):
         e = evidence(k)
         if e: return f"比較不可 ({k}: {e})"
     d = a["total_s"] - b["total_s"]; u = a["uncert_s"] + b["uncert_s"]
-    note = "" if all("ALL STEADY" in (out[k]["quasisteady"]["overall"] or "") and "NOT ALL" not in (out[k]["quasisteady"]["overall"] or "") for k in (x, y)) else " [到達の窓の準定常は未確認 = 水準と E2 への到達時間の比較に限る]"
+    steady = all("ALL STEADY" in (out[k]["quasisteady"]["overall"] or "") and "NOT ALL" not in (out[k]["quasisteady"]["overall"] or "") for k in (x, y))
+    notconv = any(out[k].get(ph, {}).get("convergence") == "NOT CONVERGED" for k in (x, y) for ph in ("line", "point", "line2"))
+    note = "" if (steady and not notconv) else " [到達の窓の準定常が未確認か NOT CONVERGED の段がある = 水準と E2 への到達時間の比較に限る]"
     return (f"{x} が速い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d < -u else f"{x} が遅い ({a['total_s']/3600:.2f} h vs {b['total_s']/3600:.2f} h)" if d > u else "判別不能 (差が分解能以内)") + note
 out["compare"] = {"L5_vs_L0": cmp("L5", "L0"), "L0_vs_P": cmp("L0", "P"), "L5_vs_P": cmp("L5", "P"),
                   "L5L_vs_L5": cmp("L5L", "L5"), "L5L_vs_L0": cmp("L5L", "L0"), "L5L_vs_P": cmp("L5L", "P")}

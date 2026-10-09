@@ -32,7 +32,8 @@ f=$b/forge_run.log
 if grep -q "比較あり" $f || ! grep -q "^\[line\] factor 1 回目: モード LU$" $f || ! grep -q "FORGE_LVC_TERMS=5" $f || ! grep -q "lineViscCoupling: 3" $b/solverConfig.yaml; then
   python3 m9_stop.py $b; wait $job; fail "$b の実効のモードが期待と違う"
 fi
-python3 m9_watch.py $b --phase line_e2 --budget 200000 >> $LOG 2>&1; wrc=$?
+python3 m9_watch.py $b --phase line_e2 --budget 200000 --inherit $r >> $LOG 2>&1; wrc=$?
+[ $wrc -eq 0 ] || { python3 m9_stop.py $b; echo "$b: 見張りが rc=$wrc で終わった — forge を止めた" >> $LOG; }
 wait $job
 echo "$b 見張り rc=$wrc、forge rc=$(cat $b/forge_rc 2>/dev/null)、状態 $(python3 -c "import json;print(json.load(open('$b/m9_watch.json'))['status'])")" >> $LOG
 python3 ../../solver_density_cuda/tools/check_convergence.py $b > $b/CONVERGENCE_VERDICT.txt 2>&1; echo "$b check_convergence rc=$? $(grep -o 'NOT CONVERGED\|DIVERGED\|PASS' $b/CONVERGENCE_VERDICT.txt | head -1)" >> $LOG
