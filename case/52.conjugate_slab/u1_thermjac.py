@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """U1: エネルギー行の熱伝導 Jacobian (`implicitThermalJacobian`) の純伝導の試験
 (plan time_integration-implicit-thermal-jacobian §6 U1)。U2・U3 (plan time_integration-line-viscous-jacobian §6) も同じ板で回す:
-U2 = ライン陰解法 + 方向別の擬似 dt + `lineViscCoupling` 0/2 の純伝導、U3 = 上壁を z 方向に U で動かす Couette (両壁 300 K)。
-U3 の解析解 (定数 μ・k、圧力一様): u_z = U y/H、T = T_w + (μU²/2k)(y/H)(1 − y/H)。
+U2 = ライン陰解法 + 方向別の擬似 dt + `lineViscCoupling` 0/2 の純伝導、U3 = 側面を周期にして上壁を x 方向に U で動かす Couette (両壁 300 K)。
+U3 の解析解 (定数 μ・k、圧力一様): u_x = U y/H、T = T_w + (μU²/2k)(y/H)(1 − y/H)。
+(最初の U3 は上壁を z 方向に動かしたが、2D の格子では壁の Uz が効かず u_z が立たなかった — run_0012〜0015、判定不能)
 
 case/52 の流体の板 (一様 20×16 quad、H 0.01 m、W 0.02 m、空気 CPG、定数 k 0.0241、静止、低圧 1013.25 Pa) の
 下壁 300 K・上壁 350 K の等温壁で、初期の一様 300 K から回す。解析解は直線 T(y) = 300 + 50·y/H (q = kΔT/H = 120.5 W/m²)。
@@ -55,6 +56,13 @@ wall_bot:   {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: 
 wall_top:   {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: {uz_top}, Ts: {t_top}}}
 """
 
+# U3 (2026-10-09 に組み直し): 2D の格子では壁の Uz が効かない (u_z が立たない) ので、側面を周期にして上壁を x 方向に動かす
+BCOND_COUETTE = """side_left:  {physID: 1, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 2}, floats: {dx: {w}, dy: 0.0, dz: 0.0}}
+side_right: {physID: 2, kind: periodic, outputHDFflg: 0, ints: {type: 0, partnerBCID: 1}, floats: {dx: -{w}, dy: 0.0, dz: 0.0}}
+wall_bot:   {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+wall_top:   {physID: 4, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Ux: {ux_top}, Uy: 0.0, Uz: 0.0, Ts: 300.0}}
+"""
+
 SOLVER = """# U1 (plan time_integration-implicit-thermal-jacobian §6): 純伝導、下 300 K / 上 350 K。case/52 template と同じ数値設定。
 mesh: {{discretization: "node", nodeWallDirichlet: 1, meshFileName: "mesh.h5", valueFileName: "mesh.h5"}}
 gpu: 1
@@ -103,8 +111,10 @@ def cmd_prep(run: Path, key: int, cfl: float, steps: int, out: int, conv: str, l
     if line:
         keytxt += ", lineImplicit: 1" + (", lineDtDirectional: 1" if ddir else "") + (f", lineViscCoupling: {lvc}" if lvc else "")
     (run / "solverConfig.yaml").write_text(SOLVER.format(steps=steps, cfl=cfl, out=out, key=keytxt))
-    (run / "bcondConfig.yaml").write_text(BCOND.replace("{uz_top}", repr(float(couette)))
-                                          .replace("{t_top}", repr(T_BOT if couette else T_TOP)))
+    if couette:
+        (run / "bcondConfig.yaml").write_text(BCOND_COUETTE.replace("{w}", repr(W)).replace("{ux_top}", repr(float(couette))))
+    else:
+        (run / "bcondConfig.yaml").write_text(BCOND.replace("{uz_top}", "0.0").replace("{t_top}", repr(T_TOP)))
     (run / "probe.yaml").write_text("outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n")   # 無いと forge が止まる
     r = subprocess.run([conv, "u1_slab.msh", "mesh.h5"], cwd=run, capture_output=True, text=True)
     (run / "convert.log").write_text(r.stdout + r.stderr)
@@ -143,7 +153,7 @@ def cmd_eval(runs):
             st = int(re.findall(r"res_(\d+)", p.name)[0])
             with h5py.File(p, "r") as f:
                 T = np.asarray(f["VALUE/T"][:], float)
-                uz = np.asarray(f["VALUE/Uz"][:], float) if U else None
+                uz = np.asarray(f["VALUE/Ux"][:], float) if U else None   # U3 は x 方向の Couette (周期の側面)
             eu = float(np.max(np.abs(uz - uexact))) / U if U else 0.0
             rows.append((st, float(np.max(np.abs(T - texact))), bool(np.all(np.isfinite(T))), eu))
         if U:   # U3: u の L∞ < 0.1 % U かつ T の L∞ < 1 % (T − T_w の最大)
