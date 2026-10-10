@@ -818,7 +818,7 @@
  "ic_from": "/home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/run_0183_ns_coldmesh_tw300_ext",
  "mesh": {
   "ni": 4719,
-  "nj": 75,
+  "nj": 92,
   "wall_first_frac": 1.5263e-05,
   "source": "mesh",
   "blocks_present": {
@@ -828,7 +828,7 @@
   "block": {
    "discretization": "node",
    "ni": 4719,
-   "nj": 75,
+   "nj": 92,
    "axis_cap_frac": 0.03,
    "wall_first_frac": 1.5263e-05,
    "wall_first_frac_table": [
@@ -3166,7 +3166,7 @@
   },
   "params": {
    "ni": 4719,
-   "nj": 75,
+   "nj": 92,
    "wall_first_frac": 1.5263e-05,
    "throat_refine": 1.0,
    "throat_width": 1.0,
@@ -5511,9 +5511,9 @@
    ]
   },
   "hashes": {
-   "coord_sha256": "9bff0e0f4524de9439f63bc21d27ea5e49c3cb8251a54fcfe6346771e98f30a8",
+   "coord_sha256": "06e615d59fb83c8dd2ebdeb8f5cf9cdfe0b1b7250b6325ac90730ccb256d635f",
    "coord_dtype": "float64",
-   "topology_sha256": "3326d266e2292ef36b579fcd57e6fcf46eca0692c6cc07ed56a6733080cf5bb3",
+   "topology_sha256": "46654fc88b058059f351e67360c04fde42ebbe7e864810ced562cd4ab212ffea",
    "topology_datasets": [
     "MESH/CONNE",
     "VIZMESH/CONNE",
@@ -5541,8 +5541,8 @@
     "BCONDS/4/vizBfaceNodes",
     "BCONDS/4/vizBfaceSizes"
    ],
-   "msh_sha256": "116ae0caafdf90a1fb5536538b3d256aa7354bc46e2ceb9ab17a2a555ad1c58b",
-   "generator_sha256": "dbfac633fb54d2e1738071511fc3283b7b7c879a43ba0401a64d8c497db3585c"
+   "msh_sha256": "eed2af0eb6a045703430de54ef01756b65f08e5f03a7840335633500c38c143f",
+   "generator_sha256": "e05d1c3f76a6b1d381b1e652677968d82d87d6ca5fe500cbc9aaa3f2cb5f4cf6"
   },
   "axis_gap_frac": null
  },
@@ -9023,7 +9023,7 @@
     "r": 1.7763568394002505e-15,
     "kappa": -1.7763568394002505e-14
    },
-   "build_seconds": 0.9180700200013234
+   "build_seconds": 1.3740111429997341
   }
  },
  "pw_upstream": {

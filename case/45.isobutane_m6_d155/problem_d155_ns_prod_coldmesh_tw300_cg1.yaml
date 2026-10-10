@@ -1,6 +1,6 @@
-# plan tooling-nozzle-core-grid §4.3・§4.4 の格子 G1 (c 0.03・q_max 1.2・nj 92)。core_grid_mesh.py yaml が
+# plan tooling-nozzle-core-grid §4.3・§4.4 の格子 G1 (c 0.03・q_max 1.3・nj 75)。core_grid_mesh.py yaml が
 # problem_d155_ns_prod_coldmesh_tw300.yaml から作る (手で編集しない)。違いは name・mesh.nj・mesh.axis_cap_frac だけ。
-# axis_cap_frac は変形前の分布のパラメータ (壁法線の層のつなぎ目では物理の間隔が最大 25 % 超える)。nj は全列で比 ≤ 1.2 になる最小値
+# axis_cap_frac は変形前の分布のパラメータ (壁法線の層のつなぎ目では物理の間隔が最大 25 % 超える)。nj は全列で比 ≤ 1.3 になる最小値
 # 冷却壁の NS の対 (plan tooling-nozzle-isothermal-wall-chain §5.1 #14、§6 V-c45) の 300 K 側 (spec.wall_thermal だけが断熱側と違う)。cold_pair_mesh.py が生産の
 # problem_d155_ns_prod.yaml から作る: 違いは name と mesh ブロック (冷却壁用の格子) だけ。壁は生産と同じ (delta_r_csv = run_0167 の delta_r_initial.csv)。
 # case/45 の生産の問題 (2026-10-07 ユーザ決定「生産採用: 上流を多項式に・MOC の新方式・全域 1 本の B スプライン壁」)。
@@ -84,7 +84,7 @@ geometry:
 mesh:
   discretization: node
   ni: 4719
-  nj: 92
+  nj: 75
   axis_cap_frac: 0.03   # 主流と軸付近の間隔 (/局所半径) の上限 (plan tooling-nozzle-core-grid §4.2)
   # 冷却壁 (300 K) 用 (cold_pair_mesh.py、plan tooling-nozzle-isothermal-wall-chain §5.1 #13・#14): 第一セル厚の表 (局所半径比、log 線形) と
   # x 方向の相対密度の表。断熱 NS の y1+ × 局所の冷却倍率 8.5〜9.4 から y1+_cold ≤ 0.8、AR ≤ 4500 の見込みで決めた。

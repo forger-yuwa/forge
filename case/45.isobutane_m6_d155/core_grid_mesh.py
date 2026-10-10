@@ -40,7 +40,7 @@ from forge_design.meshing import mesh2d  # noqa: E402
 PROBLEM = HERE / "problem_d155_ns_prod_coldmesh_tw300.yaml"
 WALL_REF = HERE / "_band_ab" / "prod_confirm" / "prep"
 OUT = HERE / "_band_ab" / "core_grid"
-ARMS = {"G1": (0.03, 1.2, 92), "Gc": (0.015, 1.2, 122), "G2": (0.015, 1.1, 170)}   # (c, q_max, 見積もりの nj)
+ARMS = {"G1": (0.03, 1.3, 75), "Gc": (0.015, 1.2, 122), "G2": (0.015, 1.1, 170)}   # (c, q_max, 見積もりの nj)。G1 は 2026-10-10 に比 1.2 → 1.3 (ユーザ「壁際の比も 1.2〜1.3」)
 KINK_DEG = 2.0          # §4.9 の事前基準 (格子の幾何の比較の基準で、CFD 精度の保証ではない)
 
 
@@ -180,6 +180,7 @@ def cmd_select(a):
 
 def cmd_geom_ab(a):
     wall = Wall(Path(a.wall_ref)); out = {}
+    # 2026-10-10 の記録 (旧 G1 = c 0.03・比 ≤ 1.2・nj 92 で、分布の形だけを替えた比較)。今の G1 (比 ≤ 1.3・nj 75) ではない
     P, _ = generate(wall, mesh_block(92, 0.03)); out["B_G1"] = metrics(P)
     orig = mesh2d._radial_fracs_capfixed
     try:
@@ -205,7 +206,7 @@ def cmd_metric_ab(a):
     f = PchipInterpolator(Rx / Rx[-1], np.hypot(V["Ux"], V["Uy"]) / V["sonic"])
     e = np.linspace(0.05, 0.7, 200001); true = float(np.trapezoid(f(e), e) / 0.65)
     out = {"true_mean": true}
-    for name, nj, c in (("G0", None, None), ("G1", 92, 0.03), ("Gc", 122, 0.015), ("G2", 170, 0.015)):
+    for name, nj, c in grid_list():
         P, _ = generate(wall, mesh_block(nj, c))
         eta = P[-1, :, 1] / P[-1, -1, 1]; M = f(eta); core = (eta >= 0.05) & (eta <= 0.7)
         ee = np.unique(np.concatenate([[0.05], eta[core], [0.7]]))
@@ -229,7 +230,7 @@ def cmd_bl_count(a):
         if len(out):
             delta[i] = dist0[i, out.max()]
     xw = C[:, -1, 0]; res = {"defined_columns": int(np.isfinite(delta).sum())}
-    for name, nj, c in (("G0", None, None), ("G1", 92, 0.03), ("Gc", 122, 0.015), ("G2", 170, 0.015)):
+    for name, nj, c in grid_list():
         P, _ = generate(wall, mesh_block(nj, c))
         d = np.linalg.norm(P - P[:, -1:, :], axis=2)
         n = np.where(np.isfinite(delta), (d <= delta[:, None]).sum(1), -1)
@@ -285,7 +286,7 @@ def cmd_post_ab(a):
     x_E = float(json.loads((Path(a.wall_ref) / "prepare_info.json").read_text())["x_E"])
     out = {"x_E": x_E, "ref": {"nj": GREF[0], "c": GREF[1]}, "truth": a.truth}
     arrays = {}
-    for name, nj, c in (("G0", None, None), ("G1", 92, 0.03), ("Gc", 122, 0.015), ("G2", 170, 0.015), ("Gref",) + GREF):
+    for name, nj, c in grid_list(ref=True):
         m = mesh_block(nj, c); P, prm = generate(wall, m)
         S, q = radial_fracs_all(prm, wall)
         d = rw[:, None] * (1.0 - S)
@@ -345,7 +346,12 @@ def cmd_post_ab(a):
 
 
 YAML_NAMES = {"G1": "cg1", "Gc": "cgc", "G2": "cg2"}
-YAML_NJ = {"G1": 92, "Gc": 122, "G2": 170}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
+YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
+
+
+def grid_list(ref=False):
+    g = [("G0", None, None)] + [(a, YAML_NJ[a], ARMS[a][0]) for a in ("G1", "Gc", "G2")]
+    return g + [("Gref",) + GREF] if ref else g
 
 
 def cmd_yaml(a):
