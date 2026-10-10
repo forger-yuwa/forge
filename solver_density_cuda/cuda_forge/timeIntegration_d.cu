@@ -666,6 +666,22 @@ __global__ void implicit_defect_correction_d
 // テンプレート化。残差/状態 (flow_float=float) を ST へキャストして取り込み、R/L を作らず閉形式で
 // diag/nbr を畳み、ST で in-place 5×5 solve、補正を float dq_new へ書戻す (混合精度 iterative refinement)。
 // 詳細: plans/archived/precision-mixed-axisym.md。
+#if defined(FORGE_LINE_AUDIT)
+// ---- 製品の経路の照合 (plan time_integration-line-viscous-jacobian-faceh §6.7、監査用のビルド -DFORGE_LINE_AUDIT だけ) ----
+// FORGE_LINE_DUMP_DIR の書き出しの対象の節点について、storeLU の sweep で面ごとの入力・係数・寄与と、節点の D の段ごとの値を書く。
+// 通常のビルドでは本ブロックとカーネル内の同じ #if の部分はコンパイルされない (コードは一行も変わらない)。
+#define AUDIT_NF   12     // 1 節点あたりの面の枠
+#define AUDIT_FREC 200    // 面の記録の長さ (double)。0-21 面・節点・生の幾何・ST の面積と法線、22-29 粘性の幾何 (ST)、30-44 薄層の入力と β・κ・フラグ、45 粘性の枝
+                          // (0 なし・1 薄層・2 値 1・3 熱伝導の Jacobian・4 スカラー)、46-47 k_face・cfac、48-56 マスク・値 3・Pr_t・隣の生の状態、
+                          // 57-81 この面の前の D、82-106 対流の K、107-131 薄層の K、132-156 薄層の D (零から)、157-181 この面の後の D、
+                          // 182-189 両端の生の μ_t・c_p・k と層流 μ、190 スカラーの行の数 (枝 3)、191 枠の番号、192 plane_offset
+#define AUDIT_NREC 160    // 節点の記録の長さ (double)。0-23 スカラー、24-48 D (時間項の後)、49-73 D (面のループの後)、74-98 D (軸対称の後・拘束の前)、
+                          // 99-123 D (拘束の後)、124-132 軸対称 (枝・A_pl・hoop・α・生の A・r_eff・μ_total・層流の μ・生の μ_t)、
+                          // 133-148 生の体積・dt_local・unsteady・storeLU・loop・sizeof(ST)・軸対称の符号・r 床・TP・値・キー・マスク・node・面の数・型の幅
+__device__ const int* g_auditIdx = nullptr;   // 節点 → 記録の番号 (対象外は −1)
+__device__ double* g_auditFace = nullptr;     // [記録][AUDIT_NF][AUDIT_FREC]
+__device__ double* g_auditNode = nullptr;     // [記録][AUDIT_NREC]
+#endif
 template<typename ST>
 __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) implicit_defect_correction_block_d
 (
@@ -853,6 +869,26 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             // dual-time: 物理時間項 a·V/Δt を対角へ（定常は unsteady_diag==0）。
             block_dplur::add_identity_scaled(diag_block, v * static_cast<ST>(unsteady_diag));
         }
+#if defined(FORGE_LINE_AUDIT)
+        double* aNode = nullptr;
+        if (storeLU != 0 && g_auditIdx != nullptr && g_auditIdx[ic] >= 0) aNode = g_auditNode + (size_t)g_auditIdx[ic] * AUDIT_NREC;
+        if (aNode != nullptr) {
+            aNode[0] = (double)ic; aNode[1] = (double)lp; aNode[2] = (double)ln_; aNode[3] = onLine ? 1.0 : 0.0;
+            aNode[4] = 0.0; aNode[5] = 0.0; aNode[6] = (double)v; aNode[7] = (double)dt_l; aNode[8] = (double)(v * static_cast<ST>(unsteady_diag));
+            aNode[9] = (double)density; aNode[10] = (double)velocity_x; aNode[11] = (double)velocity_y; aNode[12] = (double)velocity_z;
+            aNode[13] = (double)local_sonic; aNode[14] = (double)local_Ht; aNode[15] = (double)gamma; aNode[16] = (double)roe[ic]; aNode[17] = (double)ro[ic];
+            aNode[18] = (double)((rowDec[0] ? 1 : 0) + (rowDec[1] ? 2 : 0) + (rowDec[2] ? 4 : 0) + (rowDec[3] ? 8 : 0) + (rowDec[4] ? 16 : 0));
+            aNode[19] = (wall_flag != nullptr) ? (double)wall_flag[ic] : -1.0; aNode[20] = (iso_wall_flag != nullptr) ? (double)iso_wall_flag[ic] : -1.0;
+            aNode[21] = (axis_ur_flag != nullptr) ? (double)axis_ur_flag[ic] : -1.0; aNode[22] = skipDiag ? 1.0 : 0.0; aNode[23] = (double)nu_eff;
+            for (int q = 124; q < AUDIT_NREC; ++q) aNode[q] = 0.0;
+            aNode[131] = (double)laminar_visc; aNode[132] = (double)vis_turb[ic]; aNode[133] = (double)vol[ic]; aNode[134] = (double)dt_local[ic];
+            aNode[135] = (double)unsteady_diag; aNode[136] = (double)storeLU; aNode[137] = (double)loop; aNode[138] = (double)sizeof(ST);
+            aNode[139] = (double)isAxisymmetric; aNode[140] = (double)axisRFloor; aNode[141] = (double)thermallyPerfect; aNode[142] = (double)lineViscCoupling;
+            aNode[143] = (double)thermalJac; aNode[144] = (double)lineViscTerms; aNode[145] = (double)isNode; aNode[146] = (double)(cell_planes_index[ic + 1] - cell_planes_index[ic]);
+            aNode[147] = (double)sizeof(flow_float); aNode[148] = (double)sizeof(geom_float);
+            for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) aNode[24 + r * 5 + c] = (double)diag_block[r][c];   // D: 時間項の後
+        }
+#endif
 
         ST rhs[5] = {
             static_cast<ST>(res_ro[ic]),
@@ -887,6 +923,36 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             const bool has_nbr = (other_ic < nCells);
             // ライン面: dq_old の lag 参照をスキップ (Thomas が厳密連成) — sdq=0 で対角 A⁺ だけ積む
             const bool isLineFace = onLine && has_nbr && (other_ic == lp || other_ic == ln_);
+#if defined(FORGE_LINE_AUDIT)
+            double* aFace = nullptr;
+            if (aNode != nullptr) {
+                const geom_int slot = plane_offset - plane_begin;
+                if (slot < AUDIT_NF) aFace = g_auditFace + ((size_t)g_auditIdx[ic] * AUDIT_NF + slot) * AUDIT_FREC;
+                else aNode[5] += 1.0;
+                aNode[4] += 1.0;
+            }
+            if (aFace != nullptr) {
+                for (int q = 0; q < AUDIT_FREC; ++q) aFace[q] = 0.0;
+                aFace[0] = (double)ip; aFace[1] = (double)ic0; aFace[2] = (double)ic1; aFace[3] = (double)other_ic;
+                aFace[4] = has_nbr ? 1.0 : 0.0; aFace[5] = isLineFace ? 1.0 : 0.0; aFace[6] = isLineFace ? ((other_ic == lp) ? 0.0 : 1.0) : -1.0;
+                aFace[7] = (fxArr != nullptr) ? (double)fxArr[ip] : -1.0;
+                aFace[8] = (double)sx[ip]; aFace[9] = (double)sy[ip]; aFace[10] = (double)sz[ip]; aFace[11] = (double)ss[ip];
+                aFace[12] = (double)ccx[ic]; aFace[13] = (double)ccy[ic]; aFace[14] = (double)ccz[ic];
+                if (has_nbr) { aFace[15] = (double)ccx[other_ic]; aFace[16] = (double)ccy[other_ic]; aFace[17] = (double)ccz[other_ic]; }
+                aFace[18] = (double)face_area; aFace[19] = (double)nx; aFace[20] = (double)ny; aFace[21] = (double)nz;
+                aFace[191] = (double)(plane_offset - plane_begin); aFace[192] = (double)plane_offset;
+                if (has_nbr && cpArr != nullptr && thermCondArr != nullptr) {
+                    aFace[182] = (double)vis_turb[ic0]; aFace[183] = (double)vis_turb[ic1]; aFace[184] = (double)cpArr[ic0]; aFace[185] = (double)cpArr[ic1];
+                    aFace[186] = (double)thermCondArr[ic0]; aFace[187] = (double)thermCondArr[ic1];
+                }
+                if (has_nbr && visLamArr != nullptr) { aFace[188] = (double)visLamArr[ic]; aFace[189] = (double)visLamArr[other_ic]; }
+                if (has_nbr) {
+                    aFace[51] = (double)gamma_arr[other_ic]; aFace[52] = (double)ro[other_ic]; aFace[53] = (double)Ux[other_ic]; aFace[54] = (double)Uy[other_ic];
+                    aFace[55] = (double)Uz[other_ic]; aFace[56] = (double)roe[other_ic];
+                }
+                for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) aFace[57 + r * 5 + c] = (double)diag_block[r][c];   // この面の前の D
+            }
+#endif
             ST sdq[5] = {static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0), static_cast<ST>(0.0)};
             // loop==0 は dq_old≡0 (blockDPLURSolve の memset) なので gather を省く (寄与は厳密に 0 = ビット同一)。
             if (has_nbr && !isLineFace && loop > 0) {
@@ -940,6 +1006,9 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     for (int i = 0; i < 5; ++i)
                         Kdst[(size_t)ic * 25 + i * 5 + j] =
                             rowDec[i] ? (flow_float)0.0 : static_cast<flow_float>(kcol[i]);
+#if defined(FORGE_LINE_AUDIT)
+                    if (aFace != nullptr) for (int i = 0; i < 5; ++i) aFace[82 + i * 5 + j] = (double)kcol[i];   // 対流の K (行を消す前)
+#endif
                 }
             }
 
@@ -962,6 +1031,13 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 // (旧 face_area·(2ν/delta) は ≈2ν に潰れ近軸で r 重み喪失・ゼロ面積面にスプリアス。詳細は site1 コメント)。
                 const ST viscous_diag = static_cast<ST>(2.0) * nu_eff * delta / dcc;
                 if (isLineFace) dbgLineViscSum += viscous_diag;
+#if defined(FORGE_LINE_AUDIT)
+                if (aFace != nullptr) {
+                    aFace[22] = (double)dcc_x; aFace[23] = (double)dcc_y; aFace[24] = (double)dcc_z; aFace[25] = (double)dcc;
+                    aFace[26] = (double)dcc_dot_s; aFace[27] = (double)delta; aFace[28] = (double)viscous_diag; aFace[29] = (double)nu_eff;
+                    aFace[45] = 4.0;   // 粘性の枝: 既定はスカラー (下で上書き)
+                }
+#endif
                 if (isLineFace && lineViscCoupling >= 2) {
                     // 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian §4.1)。ライン面では従来の
                     // スカラー 2ν·δ/dcc の代わりに、残差と同じ面の μ_f・k_f で D (自節点) と K (ライン上の隣) を組む。
@@ -998,7 +1074,28 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                             if (!rowDec[i])
                                 for (int j = 0; j < 5; ++j) Kdst[(size_t)ic * 25 + i * 5 + j] += static_cast<flow_float>(Kv[i][j]);
                     }
+#if defined(FORGE_LINE_AUDIT)
+                    if (aFace != nullptr) {
+                        aFace[45] = 1.0; aFace[30] = (double)fi; aFace[31] = (double)mlam_i; aFace[32] = (double)mlam_j; aFace[33] = (double)mut_i; aFace[34] = (double)mut_j;
+                        aFace[35] = (double)cp_i; aFace[36] = (double)cp_j; aFace[37] = (double)thermCondArr[ic]; aFace[38] = (double)thermCondArr[other_ic];
+                        aFace[39] = (double)mu_f; aFace[40] = (double)k_f; aFace[41] = (double)beta; aFace[42] = (double)kappa; aFace[43] = jVel ? 1.0 : 0.0; aFace[44] = jTemp ? 1.0 : 0.0;
+                        aFace[48] = (double)lineViscTerms; aFace[49] = (lineViscCoupling == 3) ? 1.0 : 0.0; aFace[50] = (double)Prt;
+                        for (int i = 0; i < 5; ++i) for (int j = 0; j < 5; ++j) aFace[107 + i * 5 + j] = (double)Kv[i][j];   // 薄層の K (行を消す前)
+                        ST Dt[5][5]; block_dplur::zero5x5(Dt);   // 薄層の D だけ (同じ引数で別に組む)
+                        block_dplur::accumulate_thinlayer_visc_jacobian<ST>(
+                            beta, kappa, nx, ny, nz, fi,
+                            density, velocity_x, velocity_y, velocity_z, static_cast<ST>(roe[ic]), gamma, max(cp_i, static_cast<ST>(1.0e-30)),
+                            max(static_cast<ST>(ro[other_ic]), static_cast<ST>(1.0e-30)),
+                            static_cast<ST>(Ux[other_ic]), static_cast<ST>(Uy[other_ic]), static_cast<ST>(Uz[other_ic]),
+                            static_cast<ST>(roe[other_ic]), static_cast<ST>(gamma_arr[other_ic]), max(cp_j, static_cast<ST>(1.0e-30)),
+                            jVel, jTemp, Dt, nullptr, lineViscTerms);
+                        for (int i = 0; i < 5; ++i) for (int j = 0; j < 5; ++j) aFace[132 + i * 5 + j] = (double)Dt[i][j];
+                    }
+#endif
                 } else if (isLineFace && lineViscCoupling == 1) {
+#if defined(FORGE_LINE_AUDIT)
+                    if (aFace != nullptr) aFace[45] = 2.0;
+#endif
                     // v2 (plans/active/time_integration-line-implicit-viscous-v2.md): line 面は
                     // スカラー粘性結合 K += α·I (α=ν_eff·δ/dcc) と対にし、対角は 2α→α に置換して
                     // 真の 1D 拡散行 [−α, 2α, −α] を line 内で完成させる (off-line 面は従来 2α のまま)。
@@ -1035,6 +1132,9 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     diag_block[4][2] += -cfac * velocity_y;
                     diag_block[4][3] += -cfac * velocity_z;
                     diag_block[4][4] += cfac;
+#if defined(FORGE_LINE_AUDIT)
+                    if (aFace != nullptr) { aFace[45] = 3.0; aFace[46] = (double)k_face; aFace[47] = (double)cfac; aFace[190] = (double)nScalarRows; aFace[50] = (double)Prt; }
+#endif
                 } else {
                     block_dplur::add_identity_scaled(diag_block, viscous_diag);
                     // **診断専用 A/B** (codex 2026-09-21、既定はコンパイルから除外されビット不変)。
@@ -1051,7 +1151,13 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
 #endif
                 }
             }
+#if defined(FORGE_LINE_AUDIT)
+            if (aFace != nullptr) for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) aFace[157 + r * 5 + c] = (double)diag_block[r][c];   // この面の後の D
+#endif
         }
+#if defined(FORGE_LINE_AUDIT)
+        if (aNode != nullptr) for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) aNode[49 + r * 5 + c] = (double)diag_block[r][c];   // D: 面のループの後
+#endif
 
         #pragma unroll
         for (int i = 0; i < 5; ++i) {
@@ -1076,6 +1182,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             diag_block[2][4] += -A_pl * g1;
             // 診断: 近軸半径音響スペクトル半径 α·A_pl·c を roUy 対角に補う (FORGE_AXIS_DIAG_ALPHA>0 のみ)。
             diag_block[2][2] += static_cast<ST>(g_axisDiagAlpha) * A_pl * local_sonic;
+#if defined(FORGE_LINE_AUDIT)
+            if (aNode != nullptr) { aNode[124] = 1.0; aNode[125] = (double)A_pl; aNode[126] = (double)hoop; aNode[127] = (double)g_axisDiagAlpha;
+                                    aNode[128] = (double)A_planar[ic]; aNode[129] = (double)r_eff; aNode[130] = (double)mu_total; }
+#endif
         } else if (!skipDiag && isAxisymmetric == 2) {
             // SU2 流 (axisymMethod==1) 非粘性軸対称ソースの解析 Jacobian (CSourceAxisymmetric_Flow 移植,
             // 行/列 = [ro, roUx, roUy, roe] → forge [0,1,2,4])。forge 対角は -∂S/∂U = +SU2 jacobian。
@@ -1106,6 +1216,9 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             }
         }
 
+#if defined(FORGE_LINE_AUDIT)
+        if (aNode != nullptr) for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) aNode[74 + r * 5 + c] = (double)diag_block[r][c];   // D: 軸対称の後・拘束の前
+#endif
         // node × 軸対称: 軸ノードの半径運動量行のみ decouple (dq_roUy=0)。状態は enforceAxisSymmetry がピン。
         if (axis_ur_flag != nullptr && axis_ur_flag[ic] == 1) {
             if (!skipDiag) {
@@ -1152,6 +1265,9 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             rhs[4] = static_cast<ST>(0.0);
         }
 
+#if defined(FORGE_LINE_AUDIT)
+        if (aNode != nullptr) for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) aNode[99 + r * 5 + c] = (double)diag_block[r][c];   // D: 拘束の後 (格納の前)
+#endif
         // 対角キャッシュ: loop>0 は保存値を読む / loop==0 (useDiagCache かつ line 外) は組んだ対角を保存する。
         // ST=float・point 経路に限定して呼ばれる (呼び出し側ゲート) ので、保存/読込で丸めは発生しない (ビット同一)。
         if (cached) {
@@ -1504,6 +1620,9 @@ struct State {
     std::vector<int> nodes;          // 書き出す節点 (ラインの順)
     std::vector<int> lineOf;         // 各節点のライン番号
     flow_float* viscBuf = nullptr;
+#if defined(FORGE_LINE_AUDIT)
+    int* auditIdx = nullptr; double* auditFace = nullptr; double* auditNode = nullptr;   // 製品の経路の照合 (§6.7)
+#endif
 };
 static State g;
 static void initOnce(mesh& msh) {
@@ -1532,6 +1651,22 @@ static void initOnce(mesh& msh) {
     gpuErrchk(cudaMalloc((void**)&g.viscBuf, sizeof(flow_float) * msh.nCells_all));
     gpuErrchk(cudaMemset(g.viscBuf, 0, sizeof(flow_float) * msh.nCells_all));
     printf("[lineDump] %s: factor %d 回目、%zu 節点 (要求 %zu 節点を含むライン)\n", g.dir.c_str(), g.targetCall, g.nodes.size(), want.size());
+#if defined(FORGE_LINE_AUDIT)
+    {   // 書き出す節点だけに記録の番号を振る (他は −1)。記録は storeLU の sweep ごとに上書きされ、対象の factor の直前に書き出す
+        std::vector<int> idx(msh.nCells_all, -1);
+        for (size_t k = 0; k < g.nodes.size(); ++k) idx[g.nodes[k]] = (int)k;
+        const size_t nf = g.nodes.size() * AUDIT_NF * AUDIT_FREC, nn = g.nodes.size() * AUDIT_NREC;
+        gpuErrchk(cudaMalloc((void**)&g.auditIdx, sizeof(int) * msh.nCells_all));
+        gpuErrchk(cudaMemcpy(g.auditIdx, idx.data(), sizeof(int) * msh.nCells_all, cudaMemcpyHostToDevice));
+        gpuErrchk(cudaMalloc((void**)&g.auditFace, sizeof(double) * nf)); gpuErrchk(cudaMemset(g.auditFace, 0, sizeof(double) * nf));
+        gpuErrchk(cudaMalloc((void**)&g.auditNode, sizeof(double) * nn)); gpuErrchk(cudaMemset(g.auditNode, 0, sizeof(double) * nn));
+        const int* pi = g.auditIdx;
+        gpuErrchk(cudaMemcpyToSymbol(g_auditIdx, &pi, sizeof(pi)));
+        gpuErrchk(cudaMemcpyToSymbol(g_auditFace, &g.auditFace, sizeof(g.auditFace)));
+        gpuErrchk(cudaMemcpyToSymbol(g_auditNode, &g.auditNode, sizeof(g.auditNode)));
+        printf("[lineAudit] 製品の経路の照合の記録を有効にした (節点 %zu、面の枠 %d、記録の長さ 面 %d・節点 %d)\n", g.nodes.size(), AUDIT_NF, AUDIT_FREC, AUDIT_NREC);
+    }
+#endif
 }
 template<typename T>
 static void put(const std::string& name, const std::vector<const T*>& cols, size_t nAll) {
@@ -1581,6 +1716,27 @@ static void atFactor(solverConfig& cfg, mesh& msh, variables& var) {
     put<flow_float>("dt_vol", {var.c_d["dt_local"], var.c_d["volume"]}, n);
     put<geom_int>("flags_wall_iso_axis", {msh.wall_flag_d, msh.iso_wall_flag_d, msh.axis_flag_d}, (size_t)msh.nCells);   // フラグは節点の範囲 (nCells) で確保
     put<flow_float>("state_ro_roU_roe_cp_gamma", {var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"], var.c_d["cp"], var.c_d["gamma"]}, n);
+#if defined(FORGE_LINE_AUDIT)
+    {   // 製品の経路の照合の記録 (§6.7) と、照合に使う節点の量
+        const size_t nf = g.nodes.size() * AUDIT_NF * AUDIT_FREC, nn = g.nodes.size() * AUDIT_NREC;
+        std::vector<double> hf(nf), hn(nn);
+        gpuErrchk(cudaMemcpy(hf.data(), g.auditFace, sizeof(double) * nf, cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(hn.data(), g.auditNode, sizeof(double) * nn, cudaMemcpyDeviceToHost));
+        { std::ofstream f(g.dir + "/audit_face.f64", std::ios::binary); f.write((const char*)hf.data(), sizeof(double) * nf); }
+        { std::ofstream f(g.dir + "/audit_node.f64", std::ios::binary); f.write((const char*)hn.data(), sizeof(double) * nn); }
+        std::ofstream m(g.dir + "/meta.txt", std::ios::app);
+        m << "audit_face " << g.nodes.size() * AUDIT_NF << " " << AUDIT_FREC << "\n" << "audit_node " << g.nodes.size() << " " << AUDIT_NREC << "\n";
+        put<flow_float>("node_vel_props", {var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["vis_lam"], var.c_d["vis_turb"], var.c_d["thermCond"], var.c_d["sonic"], var.c_d["Ht"]}, n);
+        put<flow_float>("node_cc", {var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"]}, n);
+        const char* lvcEnv = getenv("FORGE_LVC_TERMS"); const int lvcMask = (lvcEnv && *lvcEnv) ? atoi(lvcEnv) : 7;
+        m << "# audit_cfg implicitSolvePrecision " << cfg.implicitSolvePrecision << " lineViscCoupling " << cfg.lineViscCoupling << " implicitThermalJacobian " << cfg.implicitThermalJacobian
+          << " lineViscTerms " << lvcMask << " factorCall " << g.factorCalls << " targetCall " << g.targetCall << " sizeof_flow_float " << sizeof(flow_float)
+          << " sizeof_geom_float " << sizeof(geom_float) << " visc " << cfg.visc << " turbulentPrandtl " << cfg.turbulentPrandtl << " lineImplicit " << cfg.lineImplicit
+          << " lineDtDirectional " << cfg.lineDtDirectional << " lineDtDirectionalCap " << cfg.lineDtDirectionalCap << " implicitRelax " << cfg.implicitRelax
+          << " isAxisymmetric " << cfg.isAxisymmetric << " axisymMethod " << cfg.axisymMethod << " thermalMethod " << cfg.thermalMethod << "\n";
+        printf("[lineAudit] 記録を書いた (implicitSolvePrecision %d、Pr_t %g、visc %g)\n", cfg.implicitSolvePrecision, (double)cfg.turbulentPrandtl, (double)cfg.visc);
+    }
+#endif
     printf("[lineDump] factor の直前を書いた (%zu 節点)\n", g.nodes.size());
 }
 static void afterSolve(mesh& msh, variables& var) {
