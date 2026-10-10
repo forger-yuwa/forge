@@ -91,6 +91,9 @@ add_library(cuda_forge STATIC
     # 段 ② の診断 FORGE_DIAG_GEOM_STAGE2_DUMP (同 plan §6.3、既定 off。読み込み時の量と接続を書いて終了する)
     geomStage2Dump.cpp
     geomStage2Dump.hpp
+    # 閉性の照合の診断 FORGE_DIAG_HOOP_CLOSURE (plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 の 3・5、既定 off。書いて計算は続ける)
+    hoopClosureDiag.cpp
+    hoopClosureDiag.hpp
     # 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録、既定 off。定常の陰解法の commit で丸めで消えた更新を数える)
     commitLossDiag.cu
     commitLossDiag.hpp

@@ -439,6 +439,13 @@ public:
     // axisRFloor>0 のときは従来どおり (床の閉性補正が同じ配列を使うため) 常に有効。
     int hoopAreaFromClosure = 0;
 
+    // 軸対称 r 重み (axisymMethod 0) の面ベクトルを、区間ごとに半径を掛けて足した W_f = Σ_k r_k S_k
+    // (変換器の /PLANES/rSurfVect) にする (1: 既定) / 今の r̄_f·S_f (0: A/B と古い run の再現用)。
+    // 折れた双対面を 1 本にまとめてから重心の半径を掛けると Σ r_k S_k と食い違い、FP64 でも軸の近くに偽の半径力が立つ
+    // (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。使うのは /PLANES/rSurfVect があり、node・平面の 2D・
+    // isAxisymmetric 1・axisymMethod 0・axisRFloor 0 のときだけ。それ以外は 1 でも今の r̄_f·S_f のまま (起動時に 1 行出す)。
+    int axisSegmentRWeight = 1;
+
     // 離散化レイアウト。"cell": cell-centered FVM (既定・従来)、"node": node-centered
     // (中点双対 median-dual) FVM。methods/discretization/ 参照。
     std::string discretization = "cell";

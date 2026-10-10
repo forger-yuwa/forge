@@ -289,6 +289,17 @@ void mesh::readMesh(string fname)
     file.getDataSet("/PLANES/surfVect").read(this->surfVect64);
     file.getDataSet("/PLANES/surfArea").read(this->surfArea64);
     file.getDataSet("/PLANES/centCoords").read(this->planeCent64);
+    // 区間ごとの r 重みの面ベクトル (あれば。plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。
+    // 読むだけで、使うかどうかは setStructuralVariables_d が設定と格子の条件で決める。
+    this->rSurfVect64.clear();
+    if (file.exist("/PLANES/rSurfVect")) {
+        file.getDataSet("/PLANES/rSurfVect").read(this->rSurfVect64);
+        if (this->rSurfVect64.size() != 3*(size_t)this->nPlanes) {
+            std::cerr << "[mesh] ERROR: /PLANES/rSurfVect has " << this->rSurfVect64.size()
+                      << " values, expected 3*nPlanes = " << 3*(size_t)this->nPlanes << std::endl;
+            exit(EXIT_FAILURE);
+        }
+    }
 
     geom_int ipp = 0;
     for (geom_int ip=0; ip<this->nPlanes; ip++)

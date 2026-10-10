@@ -367,3 +367,9 @@ public:
     void readValueHDF5(std::string fname , mesh& msh,
                        flow_float kInit = 0.0, flow_float omegaInit = 0.0);
 };
+
+// 軸対称 r 重みの面ベクトルに区間ごとの W_f = Σ_k r_k S_k (/PLANES/rSurfVect) を使うか
+// (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。条件: mesh.axisSegmentRWeight 1、/PLANES/rSurfVect と
+// double の写しがある、node、平面の 2D (全節点の z が同じ・全面ベクトルの z 成分が 0)、isAxisymmetric 1、axisymMethod 0、
+// axisRFloor 0。偽のとき reason (nullptr でなければ) に最初に外れた条件を入れる。setStructuralVariables_d と診断が使う。
+bool axisSegmentRWeightApplies(const solverConfig& cfg, const mesh& msh, std::string* reason = nullptr);

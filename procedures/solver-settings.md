@@ -453,6 +453,10 @@ node (median-dual) で入口 (`inlet_*`) と no-slip 壁が角ノードを共有
 ([methods/discretization.md](../methods/discretization.md) §7.2 (D))。solver 実行時には読むだけで挙動は変わらない (メッシュに焼き込まれる)。
 既定 0。入口壁角を slip で逃がす旧回避 (case/47 run_0006–0008) は不要になる。2D/3D とも対応 (3D は 2026-09-07)。
 
+## mesh.axisSegmentRWeight — 軸対称 r 重みを区間ごとに掛ける (2026-10-10)
+
+既定 1: 軸対称 (`axisymMethod: 0`) の面ベクトルを、変換器が書く区間ごとの $W_f=\sum_k r_k S_k$ (`/PLANES/rSurfVect`、**`isAxisymmetric: 1` の solverConfig で 2D の node を変換したときだけ書かれる**) にし、0 で旧来の $\bar r_f S_f$ (A/B・古い run の再現。古い run の再現は保存した旧 HDF5 + 0)。node・平面の 2D・`axisRFloor: 0` 以外とデータセットの無い格子では 1 でも旧来のまま (起動時に `[axisym] axisSegmentRWeight: ON/OFF` を 1 行出す)。plan [axisymmetric-freestream-hoop-gauge](../plans/active/axisymmetric-freestream-hoop-gauge.md) §4.5。
+
 ## discretization / bndFirstOrder — 離散化レイアウト (node-centered)
 
 `mesh.discretization` (任意, 既定 `"cell"`)。`"node"` で node-centered (中点双対 median-dual) 化。

@@ -47,6 +47,7 @@ int main(int argc , char *argv[])
         cout << "-------------------------------- \n";
         gmsh.axisCentroidShift = (cfg.axisCentroidShift != 0);
         gmsh.inletCornerWall   = (cfg.nodeInletCornerWall != 0);
+        gmsh.axisymRWeight     = (cfg.isAxisymmetric == 1);   // 2D は /PLANES/rSurfVect を書く (plan axisymmetric-freestream-hoop-gauge §4.5)
         gmsh.buildMedianDual();
         gmsh.replacePrimalWithDual();
     }

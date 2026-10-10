@@ -222,6 +222,12 @@ void solverConfig::read(std::string fname)
         if (config["mesh"]["hoopAreaFromClosure"]) {
             this->hoopAreaFromClosure = config["mesh"]["hoopAreaFromClosure"].as<int>();
         }
+        if (config["mesh"]["axisSegmentRWeight"]) {
+            this->axisSegmentRWeight = config["mesh"]["axisSegmentRWeight"].as<int>();
+            if (this->axisSegmentRWeight != 0 && this->axisSegmentRWeight != 1) {
+                throw std::runtime_error("'axisSegmentRWeight' in 'mesh' must be 0 (r̄_f·S_f) or 1 (Σ r_k S_k, default).");
+            }
+        }
         for (const char* k : {"nodeAxisDirichlet", "nodeMidpointFx", "nodeValueAtNode", "nodeReconEdgeMidpoint", "nodeAxisUrDirichlet"}) {
             if (config["mesh"][k]) {
                 std::cerr << "[config] mesh." << k << " は撤去されました (node の整合セットは常時 ON, "

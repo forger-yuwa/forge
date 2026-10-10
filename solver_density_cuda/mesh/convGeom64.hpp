@@ -24,6 +24,10 @@ struct convGeom64
     std::vector<double> planeCent;     // [3*nPlanes] 面重心 (/PLANES/centCoords)
     std::vector<double> cellVolume;    // [nCells]    体積 (/CELLS/volume)
     std::vector<double> cellCent;      // [3*nCells]  セル (CV) 重心 (/CELLS/centCoords)
+    // 区間ごとの r 重みの面ベクトル W_f = Σ_k r_k S_k (/PLANES/rSurfVect、向きは planeSurfVect と同じ)。
+    // 2D の node の格子で、変換の solverConfig が isAxisymmetric 1 のときだけ持つ (それ以外は空で、書かない)。
+    // plans/active/axisymmetric-freestream-hoop-gauge.md §4.5。共用の plane へは渡さない (ソルバが HDF5 から読む)。
+    std::vector<double> planeRSurfVect; // [3*nPlanes] または空
 
     // 共用の plane へ一方向に丸めて渡す (面ベクトル・面積・面重心)。
     void roundToShared(std::vector<plane>& planes) const

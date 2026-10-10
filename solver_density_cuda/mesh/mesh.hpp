@@ -196,6 +196,10 @@ public:
     std::vector<double> surfVect64;   // [3*nPlanes] /PLANES/surfVect (半径の重みを掛ける前)
     std::vector<double> surfArea64;   // [nPlanes]   /PLANES/surfArea
     std::vector<double> cellCent64;   // [3*nCells]  /CELLS/centCoords (ファイルの値。node でも節点座標への置換前)
+    // 区間ごとの r 重みの面ベクトル W_f = Σ_k r_k S_k [3*nPlanes] (/PLANES/rSurfVect。2D の node の軸対称の格子だけが持つ。
+    // 無ければ空)。使うかどうかは variables.cpp の axisSegmentRWeightApplies が決める
+    // (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。
+    std::vector<double> rSurfVect64;
     // 値の位置の double 版 [3*nCells_all]。ソルバの ccx..ccz と同じ規則で作る
     // (node = 節点座標、cell = セル重心、ゴースト = 面に対する鏡映。式は readMesh のゴースト生成と同じ)。
     std::vector<double> cc64;

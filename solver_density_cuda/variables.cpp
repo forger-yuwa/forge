@@ -678,6 +678,30 @@ void variables::setStructuralVariables(solverConfig& cfg , cudaConfig& cuda_cfg 
     fillGeomDiffR(msh, *this);
 }
 
+// 区間ごとの r 重みの面ベクトルを使うか (宣言の説明は variables.hpp)。plans/active/axisymmetric-freestream-hoop-gauge.md §4.5:
+// データセットの有無だけでは有効にせず、設定と格子の条件をすべて満たすときだけ使う。
+bool axisSegmentRWeightApplies(const solverConfig& cfg, const mesh& msh, std::string* reason)
+{
+    auto no = [reason](const char* r) { if (reason) *reason = r; return false; };
+    if (cfg.axisSegmentRWeight != 1)        return no("mesh.axisSegmentRWeight 0");
+    if (cfg.isAxisymmetric != 1)            return no("isAxisymmetric 0");
+    if (cfg.axisymMethod != 0)              return no("axisymMethod 1");
+    if (cfg.axisRFloor > (flow_float)0.0)   return no("axisRFloor > 0");
+    if (cfg.discretization != "node")       return no("not node");
+    if (msh.rSurfVect64.empty())            return no("no /PLANES/rSurfVect in the mesh (reconvert with isAxisymmetric 1 to use it)");
+    if (msh.rSurfVect64.size() != 3*(size_t)msh.nPlanes || msh.surfVect64.size() != 3*(size_t)msh.nPlanes
+     || msh.planeCent64.size() != 3*(size_t)msh.nPlanes || msh.coord64.size() < 3*msh.nodes.size() || msh.nodes.empty())
+        return no("double geometry copies missing or of the wrong size");
+    // 平面の 2D (true 2D): 全節点の z が同じで、全面ベクトルの z 成分が 0 (押し出しの疑似 2D や 3D を除く)
+    const double z0 = msh.coord64[2];
+    for (size_t i = 0; i < msh.nodes.size(); ++i)
+        if (msh.coord64[3*i + 2] != z0) return no("not planar 2D (node z differs)");
+    for (geom_int ip = 0; ip < msh.nPlanes; ++ip)
+        if (msh.surfVect64[3*(size_t)ip + 2] != 0.0) return no("not planar 2D (face vector has a z component)");
+    if (reason) reason->clear();
+    return true;
+}
+
 void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh )
 {
     geom_float* sx;
@@ -739,6 +763,12 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         A_planar_h[ic] = 0.0;
     }
 
+    // 区間ごとの r 重みの面ベクトル (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5) を使うか。起動時に 1 行出す。
+    std::string segRWReason;
+    const bool segRW = axisSegmentRWeightApplies(cfg, msh, &segRWReason);
+    if (!segRW && (cfg.isAxisymmetric == 1 || !msh.rSurfVect64.empty()))
+        printf("[axisym] axisSegmentRWeight: OFF (%s) -> face vectors r̄_f·S_f as before\n", segRWReason.c_str());
+
     if (cfg.isAxisymmetric == 1 && cfg.axisymMethod == 0) {
         // B 流儀: 幾何量に r 重み付け、半径方向の圧力ソース用に planar 面積を保存。
         // 軸 (r=0) 上の face で S を厳密に 0 にすると、下流の flux/BC カーネルで
@@ -749,12 +779,50 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         // 別途 ccy < axisRFloor で skip する (ソース・ヤコビアンも入れない)。
         const geom_float r_floor = (cfg.axisRFloor > (flow_float)0.0)
             ? (geom_float)cfg.axisRFloor : (geom_float)1.0e-20;
-        for (geom_int ip=0; ip<msh.nPlanes; ip++) {
-            const geom_float r_face = (pcy[ip] > r_floor) ? pcy[ip] : r_floor;
-            sx[ip] *= r_face;
-            sy[ip] *= r_face;
-            sz[ip] *= r_face;
-            ss[ip] *= r_face;
+        if (segRW) {
+            // 区間ごとの r 重み W_f = Σ_k r_k S_k (変換器が double で作った /PLANES/rSurfVect)。折れた双対面を 1 本にまとめてから
+            // 重心の半径 r̄_f を掛けると Σ r_k S_k と食い違い、FP64 でも軸の近くに偽の半径力が立つ (§4.1 #2)。
+            // sx..sz = W_f を丸めたもの、ss = ‖W_f‖ (double で取ってから丸める。法線 sx/ss の整合)。
+            // 軸の上の面 (double の面重心の半径 ≤ 1e-20、幾何の条件) は今と同じく S·r_floor で向きを保つ (床の後のベクトルの
+            // ノルムを double で取る)。axisRFloor 0 が条件なので床の値は 1e-20。
+            const double rFloor64 = 1.0e-20;
+            geom_int nAxisFace = 0;
+            for (geom_int ip=0; ip<msh.nPlanes; ip++) {
+                const size_t p = 3*(size_t)ip;
+                double wx, wy, wz;
+                if (msh.planeCent64[p + 1] <= rFloor64) {
+                    wx = msh.surfVect64[p + 0]*rFloor64;
+                    wy = msh.surfVect64[p + 1]*rFloor64;
+                    wz = msh.surfVect64[p + 2]*rFloor64;
+                    ++nAxisFace;
+                } else {
+                    wx = msh.rSurfVect64[p + 0];
+                    wy = msh.rSurfVect64[p + 1];
+                    wz = msh.rSurfVect64[p + 2];
+                }
+                const double wn = std::sqrt(wx*wx + wy*wy + wz*wz);
+                sx[ip] = (geom_float)wx;
+                sy[ip] = (geom_float)wy;
+                sz[ip] = (geom_float)wz;
+                ss[ip] = (geom_float)wn;
+                if (!(std::isfinite((double)ss[ip]) && ss[ip] > (geom_float)0.0 && std::isfinite((double)sx[ip])
+                      && std::isfinite((double)sy[ip]) && std::isfinite((double)sz[ip]))) {
+                    fprintf(stderr, "[axisym] ERROR: axisSegmentRWeight: face %lld has a non-finite or non-positive area after "
+                            "rounding (W = %.17g %.17g %.17g, |W| = %.17g, ss = %.9g, face centroid r = %.17g)\n",
+                            (long long)ip, wx, wy, wz, wn, (double)ss[ip], msh.planeCent64[p + 1]);
+                    exit(EXIT_FAILURE);
+                }
+            }
+            printf("[axisym] axisSegmentRWeight: ON -> face vectors W_f = sum_k r_k S_k from /PLANES/rSurfVect "
+                   "(%lld faces, %lld axis faces at r = 1e-20)\n", (long long)msh.nPlanes, (long long)nAxisFace);
+        } else {
+            for (geom_int ip=0; ip<msh.nPlanes; ip++) {
+                const geom_float r_face = (pcy[ip] > r_floor) ? pcy[ip] : r_floor;
+                sx[ip] *= r_face;
+                sy[ip] *= r_face;
+                sz[ip] *= r_face;
+                ss[ip] *= r_face;
+            }
         }
         // nodeValueAtNode: 実 CV (ic<nCells) の回転半径は双対重心 r̄ (mesh::rEff)。ccy はノード座標 (軸で 0)。
         const bool useREff = (msh.nodeValueAtNode == 1 && (geom_int)msh.rEff.size() == msh.nCells);

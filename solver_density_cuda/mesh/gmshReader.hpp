@@ -7,6 +7,7 @@
 #include <map>
 #include <algorithm>
 #include <type_traits>
+#include <limits>
 
 #include <flowFormat.hpp>
 #include <mesh/elementType.hpp>
@@ -71,6 +72,12 @@ public:
     // 入口∩壁コーナー (node): 壁ノードに属する inlet_* 側の半割面を壁 bcond へ帰属させる (mesh.nodeInletCornerWall)。
     // 壁ノードは u=0 に Dirichlet されるため入口半割面から質量が入ると角 CV に溜まり P が暴走する (case/47 2026-09-04)。
     bool inletCornerWall = false;
+    // 軸対称 (2D の node): 区間ごとの r 重みの面ベクトル W_f = Σ_k r_k S_k を作り /PLANES/rSurfVect に書く
+    // (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。convertGmshToForge が cfg.isAxisymmetric == 1 で立てる。
+    // 3D (buildMedianDual3D) と cell では作らない。
+    bool axisymRWeight = false;
+    std::vector<double>     dualFaceRVect;  // [nDualFaces*3] 内部双対面の Σ_k r_k S_k (r_k = 区間 M̃→G の中点の y、n0->n1 向き)
+    std::vector<double>     dualBnodeRVect; // [nBHalf*3]     境界半割面の Σ_k r_k S_k (r_k = 区間 N→M̃ の中点の y、外向き)
 
     class lineEnt
     {
@@ -1466,6 +1473,10 @@ public:
         dualFaceVect.assign(nP * 3, 0.0);
         dualFaceArea.assign(nP, 0.0);
         dualFaceCent.assign(nP * 3, 0.0);
+        // 軸対称の区間ごとの r 重み (axisymRWeight のときだけ作る。plan axisymmetric-freestream-hoop-gauge §4.5)
+        const bool wantRW = this->axisymRWeight;
+        dualFaceRVect.assign(wantRW ? nP * 3 : 0, 0.0);
+        dualBnodeRVect.clear();
 
         // 入力の幾何は正本 geo64 (double) から読み、生成物も double で持つ (plan architecture-float-state-double-geometry
         // §4.6)。式と演算の順序は旧 (geom_float 版) と同じなので、FP64 のビルドでは旧と同じ値になる。
@@ -1497,6 +1508,7 @@ public:
 
             double vx = 0.0, vy = 0.0;       // 集約面ベクトル
             double cx = 0.0, cy = 0.0, wsum = 0.0; // 面積加重重心 (M 相対)
+            double rwx = 0.0, rwy = 0.0;     // 区間ごとの r 重みの面ベクトル Σ_k r_k S_k (wantRW のときだけ)
 
             for (const geom_int ic : this->planes[ip].iCells)
             {
@@ -1516,11 +1528,21 @@ public:
                 cx += 0.5*(Gx - Mx) * seglen;   // 重心も M 相対で蓄積し最後に M を足す
                 cy += 0.5*(Gy - My) * seglen;
                 wsum += seglen;
+                if (wantRW) {
+                    // 区間の中点の半径 (y) を、区間ごとに掛けてから足す (r̄·ΣS_k ≠ Σ r_k S_k、§4.5)
+                    const double rk = My + 0.5*sy;
+                    rwx += rk*nx; rwy += rk*ny;
+                }
             }
 
             dualFaceVect[3*ip + 0] = vx;
             dualFaceVect[3*ip + 1] = vy;
             dualFaceVect[3*ip + 2] = 0.0;
+            if (wantRW) {
+                dualFaceRVect[3*ip + 0] = rwx;
+                dualFaceRVect[3*ip + 1] = rwy;
+                dualFaceRVect[3*ip + 2] = 0.0;
+            }
             dualFaceArea[ip] = std::sqrt(vx*vx + vy*vy);
             if (wsum > 0.0) {
                 dualFaceCent[3*ip + 0] = Mx + cx / wsum;
@@ -1625,6 +1647,7 @@ public:
         // 蓄積も double で行い、格納も double (§4.6 の正本へ移す)。
         std::vector<std::map<geom_int, std::array<double,3>>> halfByOwner(nBc);
         std::vector<std::map<geom_int, std::array<double,4>>> hcentByOwner(nBc);
+        std::vector<std::map<geom_int, std::array<double,3>>> halfRByOwner(nBc); // Σ_k r_k S_k (wantRW のときだけ)
         // 入口∩壁コーナー所有 (inletCornerWall): 壁ノード → その壁 bcond index (最初に見つかった壁)。
         // inlet_* の境界エッジの半割面のうち、壁ノード側の半割面は壁 bcond に計上する (u=0 ピンと整合、流入なし)。
         std::vector<geom_int> wallOwnerOf(nN, -1);
@@ -1647,18 +1670,29 @@ public:
                 const geom_int B = this->planes[ip].iNodes[1];
                 const double ex = xc(B,0) - xc(A,0);
                 const double ey = xc(B,1) - xc(A,1);
-                double sv0 = ey;    // rotate(-90): エッジ (A->B) の法線 (単位厚み 2D)
+                double sv0 = ey;    // rotate(-90): エッジ (A->B) の法線 (単位厚み 2D)。外向きの判定にだけ使う
                 double sv1 = -ex;
-                const double sv2 = 0.0;
                 // 外向き (makeMesh で整向済の surfVect と同符号に合わせる)
                 if (sv0*this->geo64.planeSurfVect[3*(size_t)ip + 0]
                   + sv1*this->geo64.planeSurfVect[3*(size_t)ip + 1] < 0.0) { sv0 = -sv0; sv1 = -sv1; }
-                const double hx = 0.5*sv0;
-                const double hy = 0.5*sv1;
-                const double hz = 0.5*sv2;
-                const double w = 0.5*std::sqrt(sv0*sv0 + sv1*sv1 + sv2*sv2); // 各ノードの半割面積
+                // 半割面はエッジの丸めた中点 M̃ = fl(0.5·(x_A + x_B)) で終える (plan axisymmetric-freestream-hoop-gauge
+                // §4.8・§4.9)。内部の双対面の区間 (M̃→G) と双対体積の多角形は同じ演算の M̃ から始まるので、端点が一致して
+                // CV の多角形が丸めの範囲で閉じる。旧版はベクトル 0.5·(B−A)・重心 (3N+O)/4 (厳密な中点) で終えていて、
+                // M̃ との食い違い (|M̃ − M| ≤ u·|M|) のぶん壁などの薄い CV の閉性が崩れていた (§4.7)。
+                const double Mx = 0.5*(xc(A,0) + xc(B,0));
+                const double My = 0.5*(xc(A,1) + xc(B,1));
+                const double Mz = 0.5*(xc(A,2) + xc(B,2));
                 for (const geom_int N : {A, B}) {
-                    const geom_int O = (N == A) ? B : A;
+                    // 区間 N → M̃。面ベクトルは rotate(-90) を、エッジの外向きの法線 sv と同じ向きにそろえる。
+                    double hx = My - xc(N,1);
+                    double hy = -(Mx - xc(N,0));
+                    const double hz = 0.0;
+                    if (hx*sv0 + hy*sv1 < 0.0) { hx = -hx; hy = -hy; }
+                    const double w = std::sqrt(hx*hx + hy*hy + hz*hz); // 区間の長さ |M̃ − N| (単位厚みの半割面積)
+                    // 区間の中点 (N + M̃)/2 (重心の重みと、軸対称の r_k)
+                    const double cxk = 0.5*(xc(N,0) + Mx);
+                    const double cyk = 0.5*(xc(N,1) + My);
+                    const double czk = 0.5*(xc(N,2) + Mz);
                     // 閉性は全半割面を集計 (幾何、所有に依らない)
                     bnodeAccum[3*N + 0] += hx; bnodeAccum[3*N + 1] += hy; bnodeAccum[3*N + 2] += hz;
                     // 寄与はこの境界面が属する bcond へ (マルチマーカ: コーナーは各 incident bcond に計上)。
@@ -1667,12 +1701,16 @@ public:
                     if (inletCornerWall && isInlet && wallOwnerOf[N] >= 0) { ow = wallOwnerOf[N]; ++nCornerReassigned; }
                     auto& h = halfByOwner[ow][N];
                     h[0] += hx; h[1] += hy; h[2] += hz;
-                    // ノード N の半割 (N→エッジ中点 M) の重心 = (3N+O)/4
+                    // ノード N の半割 (N→M̃) の重心 = 区間の中点、重みは区間の長さ
                     auto& c = hcentByOwner[ow][N];
-                    c[0] += w * (3.0*xc(N,0) + xc(O,0)) * 0.25;
-                    c[1] += w * (3.0*xc(N,1) + xc(O,1)) * 0.25;
-                    c[2] += w * (3.0*xc(N,2) + xc(O,2)) * 0.25;
+                    c[0] += w * cxk;
+                    c[1] += w * cyk;
+                    c[2] += w * czk;
                     c[3] += w;
+                    if (wantRW) {
+                        auto& rw = halfRByOwner[ow][N];
+                        rw[0] += cyk*hx; rw[1] += cyk*hy; rw[2] += cyk*hz;
+                    }
                 }
             }
         }
@@ -1698,6 +1736,12 @@ public:
                 dualBnodeCent.push_back(c[0]*invw);
                 dualBnodeCent.push_back(c[1]*invw);
                 dualBnodeCent.push_back(c[2]*invw);
+                if (wantRW) {
+                    const auto& rw = halfRByOwner[ib].at(nd);
+                    dualBnodeRVect.push_back(rw[0]);
+                    dualBnodeRVect.push_back(rw[1]);
+                    dualBnodeRVect.push_back(rw[2]);
+                }
             }
             dualBcondOffset[ib + 1] = (geom_int)dualBnodeId.size();
         }
@@ -1711,6 +1755,37 @@ public:
         const double volErr = std::fabs(sumDual - sumPrimal) / std::max(sumPrimal, 1e-30);
         cout << "[buildMedianDual] volume sum: dual=" << sumDual << " primal=" << sumPrimal
              << " relErr=" << volErr << "\n";
+
+        // 軸対称の区間ごとの r 重みの閉性 (記録だけ、止めない。plan axisymmetric-freestream-hoop-gauge §4.8 の判定量):
+        //   E_x = |Σ±W_x|/A、E_y = |Σ±W_y − A|/A (A = 双対体積 = A_planar)。超過数は 100·ε64·(A + Σ|W の成分|) との比較。
+        //   向きは内部面が n0 に +、n1 に −、境界半割面 (外向き) は所有によらず全部を +。
+        if (wantRW) {
+            std::vector<double> wsx(nN, 0.0), wsy(nN, 0.0), wax(nN, 0.0), way(nN, 0.0);
+            for (geom_int ip = 0; ip < nP; ++ip) {
+                const geom_int A = dualFaceCells[2*ip + 0], B = dualFaceCells[2*ip + 1];
+                const double fx = dualFaceRVect[3*ip + 0], fy = dualFaceRVect[3*ip + 1];
+                wsx[A] += fx; wsy[A] += fy; wsx[B] -= fx; wsy[B] -= fy;
+                wax[A] += std::fabs(fx); way[A] += std::fabs(fy); wax[B] += std::fabs(fx); way[B] += std::fabs(fy);
+            }
+            for (size_t k = 0; k < dualBnodeId.size(); ++k) {
+                const geom_int nd = dualBnodeId[k];
+                const double fx = dualBnodeRVect[3*k + 0], fy = dualBnodeRVect[3*k + 1];
+                wsx[nd] += fx; wsy[nd] += fy; wax[nd] += std::fabs(fx); way[nd] += std::fabs(fy);
+            }
+            const double eps64 = std::numeric_limits<double>::epsilon();
+            double exMax = 0.0, eyMax = 0.0;
+            long long nOverX = 0, nOverY = 0;
+            for (geom_int in = 0; in < nN; ++in) {
+                const double Ap = dualVolume[in];
+                if (!(Ap > 0.0)) continue;
+                exMax = std::max(exMax, std::fabs(wsx[in]) / Ap);
+                eyMax = std::max(eyMax, std::fabs(wsy[in] - Ap) / Ap);
+                if (std::fabs(wsx[in])      > 100.0*eps64*(Ap + wax[in])) ++nOverX;
+                if (std::fabs(wsy[in] - Ap) > 100.0*eps64*(Ap + way[in])) ++nOverY;
+            }
+            cout << "[buildMedianDual] axisymmetric per-segment r-weight (Σ r_k S_k): max E_x=" << exMax
+                 << " max E_y=" << eyMax << ", CVs over 100·eps64·(A+Σ|W|): x " << nOverX << " y " << nOverY << "\n";
+        }
 
         // 負体積チェック
         geom_int nNeg = 0;
@@ -2301,11 +2376,26 @@ public:
                 // 軸近傍 corner CV に届く (旧 node+h·n_out 便宜は pcy≈0/<0 で BC を r 重み消失させていた)。
                 for (int d = 0; d < 3; ++d) pc[3*gp + d] = dualBnodeCent[3*(size_t)k + d];
             }
+            // 区間ごとの r 重みの面ベクトル (2D の軸対称だけ。plan axisymmetric-freestream-hoop-gauge §4.5)。
+            // 並び・向きは sv と同じ (内部面 n0->n1、境界半割面は外向き)。buildMedianDual (2D) が作っていなければ空のまま
+            // (3D・軸対称でない格子は /PLANES/rSurfVect を書かない)。
+            std::vector<double> rsv;
+            if (this->axisymRWeight && !this->is3D
+             && this->dualFaceRVect.size() == 3*(size_t)nDualInternal && this->dualBnodeRVect.size() == 3*(size_t)nBHalf) {
+                rsv.assign(this->dualFaceRVect.begin(), this->dualFaceRVect.end());
+                rsv.insert(rsv.end(), this->dualBnodeRVect.begin(), this->dualBnodeRVect.end());
+                cout << "[replacePrimalWithDual] axisymmetric: per-segment r-weighted face vectors for " << nPNew
+                     << " faces (written to /PLANES/rSurfVect)\n";
+            } else if (this->axisymRWeight) {
+                cout << "[replacePrimalWithDual] axisymmetric: /PLANES/rSurfVect not written ("
+                     << (this->is3D ? "3D mesh" : "per-segment vectors not built") << ")\n";
+            }
             this->geo64.cellVolume.swap(cellVolume);
             this->geo64.cellCent.swap(cellCent);
             this->geo64.planeSurfVect.swap(sv);
             this->geo64.planeSurfArea.swap(sa);
             this->geo64.planeCent.swap(pc);
+            this->geo64.planeRSurfVect.swap(rsv);
         }
 
         // ---- 新 cells (CV = ノード) ----
@@ -2422,7 +2512,8 @@ public:
          || this->geo64.planeSurfArea.size() !=   this->planes.size()
          || this->geo64.planeCent.size()     != 3*this->planes.size()
          || this->geo64.cellVolume.size()    !=   this->cells.size()
-         || this->geo64.cellCent.size()      != 3*this->cells.size()) {
+         || this->geo64.cellCent.size()      != 3*this->cells.size()
+         || (!this->geo64.planeRSurfVect.empty() && this->geo64.planeRSurfVect.size() != 3*this->planes.size())) {
             cerr << "[writeInputH5] ERROR: double geometry (geo64) does not match the mesh sizes"
                  << " (nodes " << this->nodes.size() << ", planes " << this->planes.size()
                  << ", cells " << this->cells.size() << ")\n";
@@ -2511,6 +2602,9 @@ public:
         file.createDataSet("/PLANES/surfVect",surfVect);
         file.createDataSet("/PLANES/surfArea",surfArea);
         file.createDataSet("/PLANES/centCoords",centCoords);
+        // 区間ごとの r 重みの面ベクトル (2D の node の軸対称だけ。plan axisymmetric-freestream-hoop-gauge §4.5)
+        if (!this->geo64.planeRSurfVect.empty())
+            file.createDataSet("/PLANES/rSurfVect", this->geo64.planeRSurfVect);
 
         // write cells (幾何は正本 geo64 から)
         vector<geom_int> cells_struct;

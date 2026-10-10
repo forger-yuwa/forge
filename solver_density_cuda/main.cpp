@@ -69,6 +69,7 @@
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/geomAbDiag.hpp"   // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / _REF; plan architecture-float-state-double-geometry §4.2c)
 #include "cuda_forge/geomStage2Dump.hpp"   // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP; 同 plan §6.3)
+#include "cuda_forge/hoopClosureDiag.hpp"  // 診断 FORGE_DIAG_HOOP_CLOSURE (plan axisymmetric-freestream-hoop-gauge §4.6 の 3・5)
 #include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
@@ -3450,6 +3451,9 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");
         exit(1);
     }
+    // 診断 FORGE_DIAG_HOOP_CLOSURE=<h5> (既定 off): デバイスに渡した最終の面ベクトル・面積・A_planar から、壁・軸の射影と独立に
+    // 各 CV の閉性を double で計算して書く (起動時に 1 回。計算は続ける)。plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 の 3・5。
+    hoopClosureDiag::runIfRequested(cfg, msh, var);
     // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP=<h5>; 既定 off): 読み込み時に作った量と接続 (ラインの接続・周期の相手・LSQ の係数・
     // 壁の代表内点・軸対称の closure・d1/d2・delta_les) を、本番の値と段 ① までの作り方の作り直しの両方で書いて終了する
     // (時間更新・res_0 出力なし)。float と FP64 のビルドの出力を突き合わせる。plans/active/architecture-float-state-double-geometry.md §6.3。
