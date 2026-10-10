@@ -495,6 +495,11 @@ __global__ void implicit_defect_correction_d
  geom_float* ccx,
  geom_float* ccy,
  geom_float* ccz,
+ // 面ごとの差 e = cc[ic1] − cc[ic0] (ic0/ic1 = plane_cells[2*ip+0/1]、double の座標から 1 回だけ丸めた値、var.p_d["ge_*"]。
+ // plans/active/architecture-float-state-double-geometry.md §4.2a、段 ③)。粘性の対角の cc[other] − cc[ic] に使う。
+ const flow_float* ge_x,
+ const flow_float* ge_y,
+ const flow_float* ge_z,
  geom_float* sx,
  geom_float* sy,
  geom_float* sz,
@@ -584,9 +589,10 @@ __global__ void implicit_defect_correction_d
             const geom_int ic0 = plane_cells[2 * ip + 0];
             const geom_int ic1 = plane_cells[2 * ip + 1];
             const geom_int other_ic = (ic0 == ic) ? ic1 : ic0;
-            const flow_float dcc_x = ccx[other_ic] - ccx[ic];
-            const flow_float dcc_y = ccy[other_ic] - ccy[ic];
-            const flow_float dcc_z = ccz[other_ic] - ccz[ic];
+            // cc[other] − cc[ic]: ic が ic0 側なら e、ic1 側なら −e (符号反転は厳密。§4.2a、段 ③)
+            const flow_float dcc_x = (ic0 == ic) ? ge_x[ip] : -ge_x[ip];
+            const flow_float dcc_y = (ic0 == ic) ? ge_y[ip] : -ge_y[ip];
+            const flow_float dcc_z = (ic0 == ic) ? ge_z[ip] : -ge_z[ip];
             const flow_float dcc = max(
                 sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z),
                 static_cast<flow_float>(1.0e-30)
@@ -684,6 +690,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
  const geom_float* __restrict__ ccx,
  const geom_float* __restrict__ ccy,
  const geom_float* __restrict__ ccz,
+ // 面ごとの差 e = cc[ic1] − cc[ic0] (ic0/ic1 = plane_cells[2*ip+0/1]、double の座標から 1 回だけ丸めた値、var.p_d["ge_*"]。
+ // plans/active/architecture-float-state-double-geometry.md §4.2a、段 ③)。粘性の対角の cc[other] − cc[ic] に使う。
+ const flow_float* __restrict__ ge_x,
+ const flow_float* __restrict__ ge_y,
+ const flow_float* __restrict__ ge_z,
  const geom_float* __restrict__ sx,
  const geom_float* __restrict__ sy,
  const geom_float* __restrict__ sz,
@@ -949,9 +960,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             // プラトーの真因)。境界粘性は弱形式カーネルが残差側で担う。内部 node-to-node 面のみ粘性対角を課す。
             // cell モード (isNode=0) は境界ゴーストが法線方向に正しく置かれ非退化なので従来どおり境界面も課す。
             if (!skipDiag && !(isNode != 0 && !has_nbr)) {
-                const ST dcc_x = static_cast<ST>(ccx[other_ic]) - static_cast<ST>(ccx[ic]);
-                const ST dcc_y = static_cast<ST>(ccy[other_ic]) - static_cast<ST>(ccy[ic]);
-                const ST dcc_z = static_cast<ST>(ccz[other_ic]) - static_cast<ST>(ccz[ic]);
+                // cc[other] − cc[ic]: ic が ic0 側なら e、ic1 側なら −e を ST にする (§4.2a、段 ③)。旧は ST にしてから
+                // 座標の差を取っていたので、ST = float (implicitSolvePrecision 0) では FP64 のビルドでも値が変わる (左辺だけ)。
+                const ST dcc_x = static_cast<ST>((ic0 == ic) ? ge_x[ip] : -ge_x[ip]);
+                const ST dcc_y = static_cast<ST>((ic0 == ic) ? ge_y[ip] : -ge_y[ip]);
+                const ST dcc_z = static_cast<ST>((ic0 == ic) ? ge_z[ip] : -ge_z[ip]);
                 const ST dcc = max(sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z), static_cast<ST>(1.0e-30));
                 const ST dcc_dot_s = max(
                     fabs(dcc_x * static_cast<ST>(sx[ip]) + dcc_y * static_cast<ST>(sy[ip]) + dcc_z * static_cast<ST>(sz[ip])),
@@ -1250,6 +1263,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
  geom_int* cell_planes_index,
  geom_int* cell_planes,
  geom_float* ccx, geom_float* ccy, geom_float* ccz,
+ // 面ごとの差 e = cc[ic1] − cc[ic0] (var.p_d["ge_*"]、plans/active/architecture-float-state-double-geometry.md §4.2a、段 ③)
+ const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
  geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
 
  flow_float* ro, flow_float* roUx, flow_float* roUy, flow_float* roUz, flow_float* roe,
@@ -1324,9 +1339,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS) implicit_defect_correctio
                                               local_enthalpy, local_sonic, a_plus, k_off);
             block_dplur::add_scaled_5x5(D0, a_plus, face_area);
 
-            const flow_float dcc_x = ccx[other_ic] - ccx[ic];
-            const flow_float dcc_y = ccy[other_ic] - ccy[ic];
-            const flow_float dcc_z = ccz[other_ic] - ccz[ic];
+            // cc[other] − cc[ic]: ic が ic0 側なら e、ic1 側なら −e (§4.2a、段 ③)
+            const flow_float dcc_x = (ic0 == ic) ? ge_x[ip] : -ge_x[ip];
+            const flow_float dcc_y = (ic0 == ic) ? ge_y[ip] : -ge_y[ip];
+            const flow_float dcc_z = (ic0 == ic) ? ge_z[ip] : -ge_z[ip];
             const flow_float dcc = max(sqrt(dcc_x*dcc_x + dcc_y*dcc_y + dcc_z*dcc_z), static_cast<flow_float>(1.0e-30));
             const flow_float dcc_dot_s = max(fabs(dcc_x*sx[ip] + dcc_y*sy[ip] + dcc_z*sz[ip]), static_cast<flow_float>(1.0e-30));
             const flow_float delta = max(dcc * face_area * face_area / dcc_dot_s, static_cast<flow_float>(1.0e-30));
@@ -1677,6 +1693,7 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 msh.nCells_all, msh.nCells, var.c_d["volume"],
                 msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d,
                 var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
+                var.p_d["ge_x"], var.p_d["ge_y"], var.p_d["ge_z"],
                 var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
                 var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"],
                 cfg.visc, var.c_d["vis_turb"], var.c_d["sonic"],
@@ -1698,6 +1715,7 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 msh.nCells_all, msh.nCells, var.c_d["volume"], \
                 msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d, \
                 var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], \
+                var.p_d["ge_x"], var.p_d["ge_y"], var.p_d["ge_z"],  /* 面ごとの差 e (段 ③) */ \
                 var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"], \
                 var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"], \
                 cfg.visc, var.c_d["vis_turb"], var.c_d["sonic"], \
@@ -1765,6 +1783,9 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
                 var.c_d["ccx"],
                 var.c_d["ccy"],
                 var.c_d["ccz"],
+                var.p_d["ge_x"],
+                var.p_d["ge_y"],
+                var.p_d["ge_z"],
                 var.p_d["sx"],
                 var.p_d["sy"],
                 var.p_d["sz"],

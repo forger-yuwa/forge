@@ -68,6 +68,9 @@
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/geomAbDiag.hpp"   // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / _REF; plan architecture-float-state-double-geometry §4.2c)
+#include "cuda_forge/geomStage2Dump.hpp"   // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP; 同 plan §6.3)
+#include "cuda_forge/hoopClosureDiag.hpp"  // 診断 FORGE_DIAG_HOOP_CLOSURE (plan axisymmetric-freestream-hoop-gauge §4.6 の 3・5)
+#include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2512,7 +2515,11 @@ void advanceExplicitRK(StepContext& s)
 void advanceImplicitSteady(StepContext& s)
 {
     // baseline (roN) は前ステップ末尾 / 初期化の updateVariablesOuter で設定済み（ro == roN）。
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): step 番号を知らせ、計る step なら commit の直後の集計を 1 行にする。
+    const bool commitLoss = commitLossDiag::enabled();
+    if (commitLoss) commitLossDiag::beginStep(s.iStep);
     implicitNonlinearUpdate(s, 0);
+    if (commitLoss) commitLossDiag::endStep();
 
     // **最後の更新のあとにもピンを当てる**: dq_roe=0 なので更新は roe を step 冒頭の値へ戻す。
     // ここで当てないと、出力される保存量と次ステップの基準 (roN) が等温条件を満たさず、
@@ -3444,6 +3451,15 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");
         exit(1);
     }
+    // 診断 FORGE_DIAG_HOOP_CLOSURE=<h5> (既定 off): デバイスに渡した最終の面ベクトル・面積・A_planar から、壁・軸の射影と独立に
+    // 各 CV の閉性を double で計算して書く (起動時に 1 回。計算は続ける)。plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 の 3・5。
+    hoopClosureDiag::runIfRequested(cfg, msh, var);
+    // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP=<h5>; 既定 off): 読み込み時に作った量と接続 (ラインの接続・周期の相手・LSQ の係数・
+    // 壁の代表内点・軸対称の closure・d1/d2・delta_les) を、本番の値と段 ① までの作り方の作り直しの両方で書いて終了する
+    // (時間更新・res_0 出力なし)。float と FP64 のビルドの出力を突き合わせる。plans/active/architecture-float-state-double-geometry.md §6.3。
+    if (const char* e = getenv("FORGE_DIAG_GEOM_STAGE2_DUMP"); e != nullptr && *e != '\0') {
+        return geomStage2Dump::run(e, cfg, cuda_cfg, msh, var);
+    }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
 
     // 診断 D1 (FORGE_DIAG_TP_FACES=<出力 h5>; 既定 off): 組立を 1 回だけ通した状態の面作用素 A/B を書いて終了する (時間更新・res_0 出力なし)。
@@ -3478,6 +3494,9 @@ int main(int argc, char** argv) {
         twoPhaseAudit_d_wrapper(cfg, cuda_cfg, msh, var, iStepAudit, final);
     };
     twoPhaseAudit(0, false);
+    // 診断 FORGE_DIAG_COMMIT_LOSS=<N> (既定 off): 定常の陰解法の commit で丸めで消えた更新を N step ごとに数える
+    // (plan architecture-float-state-double-geometry §4.5・§6 V4 の記録)。未設定なら何も確保しない。
+    commitLossDiag::init(cfg, msh, var);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -3498,6 +3517,7 @@ int main(int argc, char** argv) {
     twoPhaseCorrGateLog(cfg, cfg.mainLoopCount(), true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
     twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
+    commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),

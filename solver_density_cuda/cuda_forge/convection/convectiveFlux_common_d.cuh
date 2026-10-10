@@ -286,6 +286,12 @@ struct FaceGeom {
     // node の壁ノードフラグ [nCells] (cell 方式・未設定では nullptr)。space.slauWallNormalChi が読む。
     // ゴースト index (>= nCells) には無いので参照前に範囲で弾くこと。
     geom_int*   wall_flag = nullptr;
+    // 再構成の座標の差 (plans/active/architecture-float-state-double-geometry.md §4.2a、段 ④)。double の値の位置で引いて
+    // 1 回だけ flow_float に丸めた面の配列 (var.p_d["ge_*"/"gr0_*"/"gr1_*"])。カーネルは cc1 − cc0・pc − cc0・pc − cc1 の
+    // 引き算の代わりにこれを読む。brace 初期化の位置引数順を壊さないよう末尾に置き、構築後に代入する (本番では必ず非 nullptr)。
+    flow_float *ge_x  = nullptr, *ge_y  = nullptr, *ge_z  = nullptr;   // e  = cc[ic1] − cc[ic0]
+    flow_float *gr0_x = nullptr, *gr0_y = nullptr, *gr0_z = nullptr;   // r0 = pc[ip] − cc[ic0]
+    flow_float *gr1_x = nullptr, *gr1_y = nullptr, *gr1_z = nullptr;   // r1 = pc[ip] − cc[ic1]
 };
 struct PrimState {
     flow_float *ro, *roUx, *roUy, *roUz, *roe;

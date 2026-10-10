@@ -88,6 +88,18 @@ add_library(cuda_forge STATIC
     # V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 off。ホスト側の段取りと h5 の書き出し)
     geomAbDiag.cpp
     geomAbDiag.hpp
+    # 段 ② の診断 FORGE_DIAG_GEOM_STAGE2_DUMP (同 plan §6.3、既定 off。読み込み時の量と接続を書いて終了する)
+    geomStage2Dump.cpp
+    geomStage2Dump.hpp
+    # 閉性の照合の診断 FORGE_DIAG_HOOP_CLOSURE (plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 の 3・5、既定 off。書いて計算は続ける)
+    hoopClosureDiag.cpp
+    hoopClosureDiag.hpp
+    # 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録、既定 off。定常の陰解法の commit で丸めで消えた更新を数える)
+    commitLossDiag.cu
+    commitLossDiag.hpp
+    # node の壁関数・WMLES の代表内点 (境界面ごと、読み込み後に double の値の位置から 1 回作る。同 plan §4.2 3.)
+    wallRepPoint_d.cu
+    wallRepPoint_d.cuh
 
     implicitCorrection_d.cu
     implicitCorrection_d.cuh

@@ -17,8 +17,11 @@ __global__ void limiter_r1_scaled_d
  geom_int nCells,
  geom_int nNormalPlanes, geom_int* plane_cells,
  geom_int* cell_planes_index, geom_int* cell_planes,
- geom_float* vol, geom_float* ccx, geom_float* ccy, geom_float* ccz,
- geom_float* pcx, geom_float* pcy, geom_float* pcz,
+ geom_float* vol,
+ // 面の両側の pc − cc: r0 = pc − cc[plane_cells の 0 番目]、r1 = pc − cc[1 番目] (double の値の位置で引いて 1 回だけ丸めた値、
+ // var.p_d["gr0_*"/"gr1_*"]、plans/active/architecture-float-state-double-geometry.md §4.2a、段 ④)
+ const flow_float* gr0_x, const flow_float* gr0_y, const flow_float* gr0_z,
+ const flow_float* gr1_x, const flow_float* gr1_y, const flow_float* gr1_z,
  flow_float phi_floor,
  flow_float* Q, flow_float* limiter_Q,
  flow_float* dQdx, flow_float* dQdy, flow_float* dQdz
@@ -51,9 +54,11 @@ __global__ void limiter_r1_scaled_d
     for (geom_int ilp = index_st; ilp < index_en; ++ilp) {
         const geom_int ip = cell_planes[ilp];
         if (ip >= nNormalPlanes) continue;
-        const flow_float dcp_x = pcx[ip] - ccx[ic0];
-        const flow_float dcp_y = pcy[ip] - ccy[ic0];
-        const flow_float dcp_z = pcz[ip] - ccz[ic0];
+        // pc − cc[ic0] は ic0 の側の r を読む (段 ④): ic0 が plane_cells の 0 番目なら r0、そうでなければ r1
+        const bool side0 = (plane_cells[2*ip+0] == ic0);
+        const flow_float dcp_x = side0 ? gr0_x[ip] : gr1_x[ip];
+        const flow_float dcp_y = side0 ? gr0_y[ip] : gr1_y[ip];
+        const flow_float dcp_z = side0 ? gr0_z[ip] : gr1_z[ip];
         const flow_float delta_m = (gx*dcp_x + gy*dcp_y + gz*dcp_z) * inv_ref;   // (Qt − Qc)/φ_ref
         flow_float l;
         if (limiter_scheme == 1) l = barth_Jespersen_limiter(dp_max, dp_min, delta_m, volume);

@@ -92,9 +92,10 @@ __global__ void viscousFlux_d
  // 1 = SU2 の corrected-gradient (a=(d.S)/|d|^2)。運動量の tau には適用しない。
  // 壁熱流束の 2 節点交番の切り分け用 (plan boundary-conjugate-heat-transfer §5.1 #43)。
  int heatCorrSU2,
- // V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 nullptr = 従来経路):
+ // 面ごとの差 e と V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2a・§4.2c):
  //   ge_x/y/z: 面ごとの e = cc1 − cc0 (double の座標から 1 回だけ丸めた値)。非 nullptr のとき置き換えるのは
  //             ccx_1 − ccx_0 の引き算だけで、以降の式・型・ガード・面の選択・向きは変えない (§4.2a)。
+ //             本番 (viscousFlux_d_wrapper) は段 ③ から e を渡す。nullptr (座標の差) は V0 の診断の旧腕だけが使う。
  //   faceFlux: atomicAdd の直前の面の流束を面の番号で書く [6*nPlanes]。成分 c は faceFlux[c*nPlanes+ip]:
  //             0..2 = 運動量 (res_roU{x,y,z} へ足す値)、3 = エネルギー (res_roe へ足す値)、
  //             4 = その内の熱 (heatflux。Taw/Qw の置換後、k 拡散の前)、5 = 仕事 (tau·U_f)。
@@ -907,7 +908,8 @@ static bool sstEnergyWfNodeActive(const solverConfig& cfg, const mesh& msh)
 // 内部面の粘性流束カーネル (viscousFlux_d) の起動。本番 (viscousFlux_d_wrapper) と V0 の評価の経路
 // (plans/active/architecture-float-state-double-geometry.md §4.2c) が同じ引数で起動するために切り出した。
 // res[5] = {ro, roUx, roUy, roUz, roe} の残差の書き先、wiOn = W-I 実力診断 (FORGE_WI_FORCE_DIAG)、
-// ge_x/y/z・faceFlux は本番では nullptr (従来経路)。同期はしない。
+// ge_x/y/z は本番では面ごとの差 e (var.p_d["ge_*"]、段 ③)、V0 の診断の旧腕では nullptr (座標の差)。
+// faceFlux は本番では nullptr。同期はしない。
 static void launchViscousFluxInternal(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var ,
                                       flow_float* const res[5], bool wiOn,
                                       const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
@@ -1003,7 +1005,7 @@ static void launchViscousFluxInternal(solverConfig& cfg , cudaConfig& cuda_cfg ,
         cfg.sstSigmaBlend,
         (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0,
         cfg.heatCorrSU2,
-        // V0 の評価の経路 (§4.2c): 本番は 4 つとも nullptr
+        // 面ごとの差 e (§4.2a) と V0 の評価の経路 (§4.2c): 本番は e と faceFlux = nullptr
         ge_x, ge_y, ge_z, faceFlux
     ) ;
 }
@@ -1096,7 +1098,10 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
     {
         flow_float* const resReal[5] = {var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"],
                                         var.c_d["res_roUz"], var.c_d["res_roe"]};
-        launchViscousFluxInternal(cfg, cuda_cfg, msh, var, resReal, wiDiagOn, nullptr, nullptr, nullptr, nullptr);
+        // 座標の差 cc1 − cc0 は面ごとの差 e = fl(cc64[ic1] − cc64[ic0]) を読む (plan architecture-float-state-double-geometry
+        // §4.2a、段 ③)。V0 の診断の旧腕 (geomAbDiag) は nullptr で座標の差のまま評価する。
+        launchViscousFluxInternal(cfg, cuda_cfg, msh, var, resReal, wiDiagOn,
+                                  var.p_d["ge_x"], var.p_d["ge_y"], var.p_d["ge_z"], nullptr);
     }
 
     gpuErrchk( cudaPeekAtLastError() );

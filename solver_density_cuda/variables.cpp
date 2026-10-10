@@ -6,6 +6,9 @@
 #include <array>
 #include <algorithm>
 #include <limits>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
 
 #include "flowFormat.hpp"
 #include "mesh/mesh.hpp"
@@ -487,6 +490,123 @@ static void fillGeomDiffE(mesh& msh, variables& v)
     }
 }
 
+// 面の両側の pc − cc を double の値の位置 (面重心 mesh::planeCent64、値の位置 mesh::cc64) で引き、1 回だけ flow_float に丸めて
+// ホストの p["gr0_*"] (= pc[ip] − cc[ic0]) と p["gr1_*"] (= pc[ip] − cc[ic1]) に入れる
+// (plans/active/architecture-float-state-double-geometry.md §4.2a、段 ④)。ic0/ic1 は fillGeomDiffE と同じ planes[ip].iCells。
+// 全面 (内部面・周期面・境界面のゴースト側) が対象。デバイスの pcx..pcz は planes[].centCoords (= planeCent64 を geom_float に
+// 丸めた値) なので、FP64 のビルドでは今の pcx − ccx と同じ値になる。double の写しが無い mesh では NaN を入れる。
+static void fillGeomDiffR(mesh& msh, variables& v)
+{
+    std::vector<flow_float>* r[2][3] = {
+        {&v.p.at("gr0_x"), &v.p.at("gr0_y"), &v.p.at("gr0_z")},
+        {&v.p.at("gr1_x"), &v.p.at("gr1_y"), &v.p.at("gr1_z")} };
+    for (int s = 0; s < 2; ++s) for (int k = 0; k < 3; ++k) r[s][k]->resize(msh.nPlanes);
+    const bool has64 = (msh.cc64.size() == 3*(size_t)msh.nCells_all) && (msh.planeCent64.size() == 3*(size_t)msh.nPlanes);
+    if (!has64) {
+        std::cout << "[variables] gr0_*/gr1_*: mesh has no double copy (cc64/planeCent64); filled with NaN" << std::endl;
+    }
+    const flow_float nan = std::numeric_limits<flow_float>::quiet_NaN();
+    for (geom_int ip = 0; ip < msh.nPlanes; ip++) {
+        const auto& pc = msh.planes[ip].iCells;
+        for (int s = 0; s < 2; ++s) {
+            if (!has64 || pc.size() < 2) { for (int k = 0; k < 3; ++k) (*r[s][k])[ip] = nan; continue; }
+            const size_t c = 3*(size_t)pc[s], p = 3*(size_t)ip;
+            for (int k = 0; k < 3; ++k) {
+                const double d = msh.planeCent64[p+k] - msh.cc64[c+k];
+                (*r[s][k])[ip] = (flow_float)d;
+            }
+        }
+    }
+}
+
+// 診断 (環境変数 FORGE_DIAG_GEOM_STAGE4_CHECK=1 のときだけ、既定 off で何もしない。plan §6.6 の 2):
+// 段 ④ で再構成とリミタが読む値と、今のカーネルが作っていた座標の差のビット不一致の件数を数えて印字する。
+// 今の差はデバイスの配列 (ccx..ccz・pcx..pcz・plane_cells) を写して flow_float で引く (カーネルと同じ 1 回の引き算)。
+//   e      : ge  対 ccx[ic1] − ccx[ic0]
+//   e_side1: 0 − ge 対 ccx[ic0] − ccx[ic1] (リミタが ic1 側のセルから見る辺中点。符号付きゼロも比べる)
+//   r0 / r1: gr0 対 pcx − ccx[ic0]、gr1 対 pcx − ccx[ic1]
+//   bnd_r0 : 境界カーネル (convectiveFlux_boundary_d) の ic = bc.iCells[ib] で作る pcx − ccx[ic] 対 gr0
+//            (と、ic ≠ plane_cells[2ip+0] の件数)
+// 内部面 (ip < nNormalPlanes) とそれ以外を分けて数える。FP64 のビルドでは全項目 0 になるはず。
+// float のビルドでは、double の写しで引いた値が float の座標の差と違う面が数えられる (それが段 ④ の目的)。
+static void checkGeomStage4(mesh& msh, variables& v)
+{
+    const char* env = std::getenv("FORGE_DIAG_GEOM_STAGE4_CHECK");
+    if (env == nullptr || *env == '\0' || std::string(env) == "0") return;
+
+    const size_t nP = (size_t)msh.nPlanes, nCa = (size_t)msh.nCells_all;
+    auto d2h = [](const flow_float* d, size_t n) {
+        std::vector<flow_float> h(n);
+        cudaMemcpy(h.data(), d, n*sizeof(flow_float), cudaMemcpyDeviceToHost);
+        return h;
+    };
+    std::vector<geom_int> pc(2*nP);
+    cudaMemcpy(pc.data(), msh.map_plane_cells_d, 2*nP*sizeof(geom_int), cudaMemcpyDeviceToHost);
+    const std::vector<flow_float> cc[3] = {d2h(v.c_d.at("ccx"), nCa), d2h(v.c_d.at("ccy"), nCa), d2h(v.c_d.at("ccz"), nCa)};
+    const std::vector<flow_float> pcc[3] = {d2h(v.p_d.at("pcx"), nP), d2h(v.p_d.at("pcy"), nP), d2h(v.p_d.at("pcz"), nP)};
+    const std::vector<flow_float> ge[3] = {d2h(v.p_d.at("ge_x"), nP), d2h(v.p_d.at("ge_y"), nP), d2h(v.p_d.at("ge_z"), nP)};
+    const std::vector<flow_float> r0[3] = {d2h(v.p_d.at("gr0_x"), nP), d2h(v.p_d.at("gr0_y"), nP), d2h(v.p_d.at("gr0_z"), nP)};
+    const std::vector<flow_float> r1[3] = {d2h(v.p_d.at("gr1_x"), nP), d2h(v.p_d.at("gr1_y"), nP), d2h(v.p_d.at("gr1_z"), nP)};
+
+    auto sameBits = [](flow_float a, flow_float b) { return std::memcmp(&a, &b, sizeof(flow_float)) == 0; };
+    // 項目ごと・面の種類ごと (0 = 内部面、1 = それ以外) の件数と、ベクトルの相対差 ‖new − old‖/‖new‖ の最大
+    enum { kE = 0, kE1, kR0, kR1, kN };
+    const char* names[kN] = {"e", "e_side1", "r0", "r1"};
+    unsigned long long mis[kN][2] = {}, nonfin[kN][2] = {}, nface[2] = {0, 0};
+    double maxRel[kN][2] = {};
+    for (size_t ip = 0; ip < nP; ++ip) {
+        const int cls = (ip < (size_t)msh.nNormalPlanes) ? 0 : 1;
+        const geom_int i0 = pc[2*ip+0], i1 = pc[2*ip+1];
+        if (i0 < 0 || i1 < 0 || (size_t)i0 >= nCa || (size_t)i1 >= nCa) continue;
+        ++nface[cls];
+        for (int it = 0; it < kN; ++it) {
+            flow_float nw[3], od[3];
+            for (int k = 0; k < 3; ++k) {
+                switch (it) {
+                case kE:  nw[k] = ge[k][ip];                   od[k] = cc[k][i1] - cc[k][i0];   break;
+                case kE1: nw[k] = (flow_float)0.0 - ge[k][ip]; od[k] = cc[k][i0] - cc[k][i1];   break;
+                case kR0: nw[k] = r0[k][ip];                   od[k] = pcc[k][ip] - cc[k][i0];  break;
+                default:  nw[k] = r1[k][ip];                   od[k] = pcc[k][ip] - cc[k][i1];  break;
+                }
+            }
+            bool bad = false, fin = true;
+            double dn = 0.0, nn = 0.0;
+            for (int k = 0; k < 3; ++k) {
+                if (!sameBits(nw[k], od[k])) bad = true;
+                if (!std::isfinite((double)nw[k])) fin = false;
+                dn += ((double)nw[k] - (double)od[k])*((double)nw[k] - (double)od[k]);
+                nn += (double)nw[k]*(double)nw[k];
+            }
+            if (bad) ++mis[it][cls];
+            if (!fin) { ++nonfin[it][cls]; continue; }
+            if (nn > 0.0) maxRel[it][cls] = std::max(maxRel[it][cls], std::sqrt(dn/nn));
+        }
+    }
+    // 境界カーネルの ic (= bc.iCells[ib]) で作る差と gr0 の照合
+    unsigned long long bndN = 0, bndCellMis = 0, bndR0Mis = 0;
+    for (const bcond& bc : msh.bconds) {
+        for (size_t ib = 0; ib < bc.iPlanes.size() && ib < bc.iCells.size(); ++ib) {
+            const geom_int ip = bc.iPlanes[ib], ic = bc.iCells[ib];
+            if (ip < 0 || (size_t)ip >= nP || ic < 0 || (size_t)ic >= nCa) continue;
+            ++bndN;
+            if (ic != pc[2*(size_t)ip+0]) ++bndCellMis;
+            bool bad = false;
+            for (int k = 0; k < 3; ++k) if (!sameBits(r0[k][ip], (flow_float)(pcc[k][ip] - cc[k][ic]))) bad = true;
+            if (bad) ++bndR0Mis;
+        }
+    }
+    printf("[geomStage4] FORGE_DIAG_GEOM_STAGE4_CHECK: sizeof(flow_float)=%zu, has_geom64=%s, faces internal=%llu other=%llu\n",
+           sizeof(flow_float), msh.hasGeom64() ? "yes" : "NO", nface[0], nface[1]);
+    for (int it = 0; it < kN; ++it) {
+        printf("[geomStage4]   %-8s bit-mismatch internal=%llu other=%llu  nonfinite internal=%llu other=%llu"
+               "  max|new-old|/|new| internal=%.3e other=%.3e\n",
+               names[it], mis[it][0], mis[it][1], nonfin[it][0], nonfin[it][1], maxRel[it][0], maxRel[it][1]);
+    }
+    printf("[geomStage4]   bnd_r0   boundary faces=%llu  bc.iCells != plane_cells[2ip+0]: %llu  bit-mismatch vs pcx-ccx[bc.iCells]=%llu\n",
+           bndN, bndCellMis, bndR0Mis);
+    fflush(stdout);
+}
+
 void variables::setStructuralVariables(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh)
 {
     if (cfg.gpu==1) {
@@ -554,6 +674,32 @@ void variables::setStructuralVariables(solverConfig& cfg , cudaConfig& cuda_cfg 
 
     // 面ごとの差 e (double の座標から作る、§4.2a)。段 ① では読む経路なし。
     fillGeomDiffE(msh, *this);
+    // 面の両側の pc − cc (同、段 ④)
+    fillGeomDiffR(msh, *this);
+}
+
+// 区間ごとの r 重みの面ベクトルを使うか (宣言の説明は variables.hpp)。plans/active/axisymmetric-freestream-hoop-gauge.md §4.5:
+// データセットの有無だけでは有効にせず、設定と格子の条件をすべて満たすときだけ使う。
+bool axisSegmentRWeightApplies(const solverConfig& cfg, const mesh& msh, std::string* reason)
+{
+    auto no = [reason](const char* r) { if (reason) *reason = r; return false; };
+    if (cfg.axisSegmentRWeight != 1)        return no("mesh.axisSegmentRWeight 0");
+    if (cfg.isAxisymmetric != 1)            return no("isAxisymmetric 0");
+    if (cfg.axisymMethod != 0)              return no("axisymMethod 1");
+    if (cfg.axisRFloor > (flow_float)0.0)   return no("axisRFloor > 0");
+    if (cfg.discretization != "node")       return no("not node");
+    if (msh.rSurfVect64.empty())            return no("no /PLANES/rSurfVect in the mesh (reconvert with isAxisymmetric 1 to use it)");
+    if (msh.rSurfVect64.size() != 3*(size_t)msh.nPlanes || msh.surfVect64.size() != 3*(size_t)msh.nPlanes
+     || msh.planeCent64.size() != 3*(size_t)msh.nPlanes || msh.coord64.size() < 3*msh.nodes.size() || msh.nodes.empty())
+        return no("double geometry copies missing or of the wrong size");
+    // 平面の 2D (true 2D): 全節点の z が同じで、全面ベクトルの z 成分が 0 (押し出しの疑似 2D や 3D を除く)
+    const double z0 = msh.coord64[2];
+    for (size_t i = 0; i < msh.nodes.size(); ++i)
+        if (msh.coord64[3*i + 2] != z0) return no("not planar 2D (node z differs)");
+    for (geom_int ip = 0; ip < msh.nPlanes; ++ip)
+        if (msh.surfVect64[3*(size_t)ip + 2] != 0.0) return no("not planar 2D (face vector has a z component)");
+    if (reason) reason->clear();
+    return true;
 }
 
 void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh )
@@ -617,6 +763,12 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         A_planar_h[ic] = 0.0;
     }
 
+    // 区間ごとの r 重みの面ベクトル (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5) を使うか。起動時に 1 行出す。
+    std::string segRWReason;
+    const bool segRW = axisSegmentRWeightApplies(cfg, msh, &segRWReason);
+    if (!segRW && (cfg.isAxisymmetric == 1 || !msh.rSurfVect64.empty()))
+        printf("[axisym] axisSegmentRWeight: OFF (%s) -> face vectors r̄_f·S_f as before\n", segRWReason.c_str());
+
     if (cfg.isAxisymmetric == 1 && cfg.axisymMethod == 0) {
         // B 流儀: 幾何量に r 重み付け、半径方向の圧力ソース用に planar 面積を保存。
         // 軸 (r=0) 上の face で S を厳密に 0 にすると、下流の flux/BC カーネルで
@@ -627,12 +779,50 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         // 別途 ccy < axisRFloor で skip する (ソース・ヤコビアンも入れない)。
         const geom_float r_floor = (cfg.axisRFloor > (flow_float)0.0)
             ? (geom_float)cfg.axisRFloor : (geom_float)1.0e-20;
-        for (geom_int ip=0; ip<msh.nPlanes; ip++) {
-            const geom_float r_face = (pcy[ip] > r_floor) ? pcy[ip] : r_floor;
-            sx[ip] *= r_face;
-            sy[ip] *= r_face;
-            sz[ip] *= r_face;
-            ss[ip] *= r_face;
+        if (segRW) {
+            // 区間ごとの r 重み W_f = Σ_k r_k S_k (変換器が double で作った /PLANES/rSurfVect)。折れた双対面を 1 本にまとめてから
+            // 重心の半径 r̄_f を掛けると Σ r_k S_k と食い違い、FP64 でも軸の近くに偽の半径力が立つ (§4.1 #2)。
+            // sx..sz = W_f を丸めたもの、ss = ‖W_f‖ (double で取ってから丸める。法線 sx/ss の整合)。
+            // 軸の上の面 (double の面重心の半径 ≤ 1e-20、幾何の条件) は今と同じく S·r_floor で向きを保つ (床の後のベクトルの
+            // ノルムを double で取る)。axisRFloor 0 が条件なので床の値は 1e-20。
+            const double rFloor64 = 1.0e-20;
+            geom_int nAxisFace = 0;
+            for (geom_int ip=0; ip<msh.nPlanes; ip++) {
+                const size_t p = 3*(size_t)ip;
+                double wx, wy, wz;
+                if (msh.planeCent64[p + 1] <= rFloor64) {
+                    wx = msh.surfVect64[p + 0]*rFloor64;
+                    wy = msh.surfVect64[p + 1]*rFloor64;
+                    wz = msh.surfVect64[p + 2]*rFloor64;
+                    ++nAxisFace;
+                } else {
+                    wx = msh.rSurfVect64[p + 0];
+                    wy = msh.rSurfVect64[p + 1];
+                    wz = msh.rSurfVect64[p + 2];
+                }
+                const double wn = std::sqrt(wx*wx + wy*wy + wz*wz);
+                sx[ip] = (geom_float)wx;
+                sy[ip] = (geom_float)wy;
+                sz[ip] = (geom_float)wz;
+                ss[ip] = (geom_float)wn;
+                if (!(std::isfinite((double)ss[ip]) && ss[ip] > (geom_float)0.0 && std::isfinite((double)sx[ip])
+                      && std::isfinite((double)sy[ip]) && std::isfinite((double)sz[ip]))) {
+                    fprintf(stderr, "[axisym] ERROR: axisSegmentRWeight: face %lld has a non-finite or non-positive area after "
+                            "rounding (W = %.17g %.17g %.17g, |W| = %.17g, ss = %.9g, face centroid r = %.17g)\n",
+                            (long long)ip, wx, wy, wz, wn, (double)ss[ip], msh.planeCent64[p + 1]);
+                    exit(EXIT_FAILURE);
+                }
+            }
+            printf("[axisym] axisSegmentRWeight: ON -> face vectors W_f = sum_k r_k S_k from /PLANES/rSurfVect "
+                   "(%lld faces, %lld axis faces at r = 1e-20)\n", (long long)msh.nPlanes, (long long)nAxisFace);
+        } else {
+            for (geom_int ip=0; ip<msh.nPlanes; ip++) {
+                const geom_float r_face = (pcy[ip] > r_floor) ? pcy[ip] : r_floor;
+                sx[ip] *= r_face;
+                sy[ip] *= r_face;
+                sz[ip] *= r_face;
+                ss[ip] *= r_face;
+            }
         }
         // nodeValueAtNode: 実 CV (ic<nCells) の回転半径は双対重心 r̄ (mesh::rEff)。ccy はノード座標 (軸で 0)。
         const bool useREff = (msh.nodeValueAtNode == 1 && (geom_int)msh.rEff.size() == msh.nCells);
@@ -665,16 +855,24 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         if (cfg.axisRFloor > (flow_float)0.0 || cfg.hoopAreaFromClosure == 1) {
             // 面の向き規約: planes[ip].iCells[0] にとって外向き (+S)、iCells[1] にとって内向き (-S)。
             // (solver 側 mesh は iPlanesDir を持たないため plane 走査で集計する。)
-            std::vector<geom_float> aclx(msh.nCells_all, 0.0), acly(msh.nCells_all, 0.0);
+            // 足し上げるのはデバイスに渡す最終の面ベクトル (半径の重みを掛けて geom_float に丸めた sx/sy) のまま。
+            // 和は double に貯め、最後に 1 回だけ丸める (plans/active/architecture-float-state-double-geometry.md §4.2b、段 ②。
+            // 薄い半径方向のセルでは S·r_top − S·r_bot が打ち消し合うので、float の和では丸めが残る。FP64 のビルドでは従来と同じ)。
+            std::vector<double> aclx64(msh.nCells_all, 0.0), acly64(msh.nCells_all, 0.0);
             for (geom_int ip = 0; ip < msh.nPlanes; ++ip) {
                 const auto& pc = msh.planes[ip].iCells;
                 if (pc.empty()) continue;
                 const geom_int ic0 = pc[0];
-                if (ic0 >= 0 && ic0 < msh.nCells) { aclx[ic0] += sx[ip]; acly[ic0] += sy[ip]; }
+                if (ic0 >= 0 && ic0 < msh.nCells) { aclx64[ic0] += (double)sx[ip]; acly64[ic0] += (double)sy[ip]; }
                 if (pc.size() > 1) {
                     const geom_int ic1 = pc[1];
-                    if (ic1 >= 0 && ic1 < msh.nCells) { aclx[ic1] -= sx[ip]; acly[ic1] -= sy[ip]; }
+                    if (ic1 >= 0 && ic1 < msh.nCells) { aclx64[ic1] -= (double)sx[ip]; acly64[ic1] -= (double)sy[ip]; }
                 }
+            }
+            std::vector<geom_float> aclx(msh.nCells_all), acly(msh.nCells_all);
+            for (geom_int ic = 0; ic < msh.nCells_all; ++ic) {
+                aclx[ic] = (geom_float)aclx64[ic];
+                acly[ic] = (geom_float)acly64[ic];
             }
             // A_planar (勾配分母) は不変のまま、閉性面積は専用配列へ (hoop ソース/Jacobian が参照)。
             cudaMemcpy(this->c_d.at("A_closure_x"), aclx.data(), msh.nCells_all*sizeof(geom_float), cudaMemcpyHostToDevice);
@@ -733,29 +931,53 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
     // 実行時の重心 (ccx/ccy/ccz = CV 中心) と面接続のみから計算するので、node-centered (median-dual)
     // でも双対 CV の Δ が自動的に得られる (plan §5.6: primal mesh の volume を直接参照しない)。
     // 静的量ゆえ幾何セットアップ時に host で 1 回計算し H2D 転送する。
+    // 段 ② (plans/active/architecture-float-state-double-geometry.md §4.2 3.): 重心間の差と距離・最大は double の値の位置
+    // (mesh::cc64) で取り、最後に 1 回だけ丸める (丸めは単調なので、丸めた値の最大と同じ順序になる。FP64 のビルドでは従来と同じ)。
+    // double の写しを持たない mesh は従来の geom_float の差。
     {
+        const bool use64 = msh.hasGeom64();
+        std::vector<double> delta_les64(msh.nCells_all, 0.0);
         geom_float* delta_les_h = (geom_float*)malloc(sizeof(geom_float)*msh.nCells_all);
         for (geom_int ic=0; ic<msh.nCells_all; ic++) delta_les_h[ic] = 0.0;
         for (geom_int ip=0; ip<msh.nPlanes; ip++) {
             const geom_int ic1 = msh.planes[ip].iCells[0];
             const geom_int ic2 = msh.planes[ip].iCells[1];
-            const geom_float dx = ccx[ic1] - ccx[ic2];
-            const geom_float dy = ccy[ic1] - ccy[ic2];
-            const geom_float dz = ccz[ic1] - ccz[ic2];
-            const geom_float d  = sqrt(dx*dx + dy*dy + dz*dz);
-            if (ic1 < msh.nCells && d > delta_les_h[ic1]) delta_les_h[ic1] = d;
-            if (ic2 < msh.nCells && d > delta_les_h[ic2]) delta_les_h[ic2] = d;
+            if (use64) {
+                const double dx = msh.cc64[3*(size_t)ic1 + 0] - msh.cc64[3*(size_t)ic2 + 0];
+                const double dy = msh.cc64[3*(size_t)ic1 + 1] - msh.cc64[3*(size_t)ic2 + 1];
+                const double dz = msh.cc64[3*(size_t)ic1 + 2] - msh.cc64[3*(size_t)ic2 + 2];
+                const double d  = sqrt(dx*dx + dy*dy + dz*dz);
+                if (ic1 < msh.nCells && d > delta_les64[ic1]) delta_les64[ic1] = d;
+                if (ic2 < msh.nCells && d > delta_les64[ic2]) delta_les64[ic2] = d;
+            } else {
+                const geom_float dx = ccx[ic1] - ccx[ic2];
+                const geom_float dy = ccy[ic1] - ccy[ic2];
+                const geom_float dz = ccz[ic1] - ccz[ic2];
+                const geom_float d  = sqrt(dx*dx + dy*dy + dz*dz);
+                if (ic1 < msh.nCells && d > delta_les_h[ic1]) delta_les_h[ic1] = d;
+                if (ic2 < msh.nCells && d > delta_les_h[ic2]) delta_les_h[ic2] = d;
+            }
+        }
+        if (use64) {
+            for (geom_int ic=0; ic<msh.nCells_all; ic++) delta_les_h[ic] = (geom_float)delta_les64[ic];
         }
         cudaMemcpy(this->c_d.at("delta_les"), delta_les_h, msh.nCells_all*sizeof(geom_float), cudaMemcpyHostToDevice);
         free(delta_les_h);
     }
 
     // 面ごとの差 e = fl(cc64[ic1] − cc64[ic0]) (plans/active/architecture-float-state-double-geometry.md §4.2a、段 ①)。
-    // 本番のカーネルはまだ読まない (V0 の評価の経路 §4.2c の新腕だけが読む)。
+    // 段 ③ から粘性・拡散・陰解法の対角、段 ④ から再構成の辺中点 (±0.5·e) とリミタが読む。
     fillGeomDiffE(msh, *this);
     this->copyVariables_plane_H2D({"ge_x", "ge_y", "ge_z"});
+    // 面の両側の pc − cc: r0 = fl(pc64 − cc64[ic0])、r1 = fl(pc64 − cc64[ic1]) (同 plan §4.2a、段 ④)。
+    // 再構成 (辺中点でない面・cell の双対面重心・境界面) とリミタが読む。
+    fillGeomDiffR(msh, *this);
+    this->copyVariables_plane_H2D({"gr0_x", "gr0_y", "gr0_z", "gr1_x", "gr1_y", "gr1_z"});
 
     calcStructualVariables_d_wrapper(cfg , cuda_cfg , msh , *this);
+
+    // 診断 (FORGE_DIAG_GEOM_STAGE4_CHECK=1、既定 off): e・r0・r1 と今の座標の差のビット不一致の件数を印字する (plan §6.6 の 2)。
+    checkGeomStage4(msh, *this);
 
     free(sx) ; free(sy) ; free(sz) ; free(ss);
     free(sx_planar) ; free(sy_planar) ; free(sz_planar) ; free(ss_planar);

@@ -47,6 +47,7 @@ int main(int argc , char *argv[])
         cout << "-------------------------------- \n";
         gmsh.axisCentroidShift = (cfg.axisCentroidShift != 0);
         gmsh.inletCornerWall   = (cfg.nodeInletCornerWall != 0);
+        gmsh.axisymRWeight     = (cfg.isAxisymmetric == 1);   // 2D は /PLANES/rSurfVect を書く (plan axisymmetric-freestream-hoop-gauge §4.5)
         gmsh.buildMedianDual();
         gmsh.replacePrimalWithDual();
     }
@@ -58,10 +59,19 @@ int main(int argc , char *argv[])
     var.allocVariables(cfg.gpu , gmsh);
     setInitial(cfg , gmsh , var);
 
+    // 壁距離の正本 (double)。幾何の正本 gmsh.geo64 の位置から double で計算し、/VALUE/wall_dist はこれから書く
+    // (plan architecture-float-state-double-geometry §4.6)。setInitial が var.c["wall_dist"] に入れた値は
+    // 共用の mesh (geom_float) の位置から作ったソルバ用の写しで、HDF5 には書かない。
+    WallDistPositions64 wallPos;
+    wallPos.nodeCoord = gmsh.geo64.nodeCoord.data();
+    wallPos.cellCent  = gmsh.geo64.cellCent.data();
+    wallPos.planeCent = gmsh.geo64.planeCent.data();
+    const std::vector<double> wallDist64 = calcWallDistance64(cfg , gmsh , wallPos);
+
     cout << "------------------------ \n";
     cout << "*** Write Input HDF5 *** \n";
     cout << "------------------------ \n";
-    gmsh.writeInputH5(argv[2] , var);
+    gmsh.writeInputH5(argv[2] , var , &wallDist64);
 
     return 0;
 }

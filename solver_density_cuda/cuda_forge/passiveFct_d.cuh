@@ -17,17 +17,19 @@
 #include "flowFormat.hpp"
 
 // トレーサ Fick 拡散の面係数 c_f (passive_diffusion_d と同じ float32 評価): J = c_f (φ1 − φ0)。
+// ge_x/y/z: 面ごとの差 e = cc[ic1] − cc[ic0] (double の座標から 1 回だけ丸めた値、plans/active/
+// architecture-float-state-double-geometry.md §4.2a、段 ③)。
 __device__ __forceinline__ flow_float passive_fct_diff_coef(
     geom_int ip, geom_int ic0, geom_int ic1,
-    const geom_float* ccx, const geom_float* ccy, const geom_float* ccz,
+    const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
     const geom_float* fx, const geom_float* sx, const geom_float* sy, const geom_float* sz, const geom_float* ss,
     const flow_float* ro, const flow_float* vis_lam, const flow_float* vis_turb, flow_float Sc, flow_float Sc_t)
 {
     const flow_float f = fx[ip], g = 1.0f - f;
     const flow_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
-    const flow_float dccx = ccx[ic1] - ccx[ic0];
-    const flow_float dccy = ccy[ic1] - ccy[ic0];
-    const flow_float dccz = ccz[ic1] - ccz[ic0];
+    const flow_float dccx = ge_x[ip];   // 座標の差 cc[ic1] − cc[ic0] の代わりに e (同じ向き、段 ③)
+    const flow_float dccy = ge_y[ip];
+    const flow_float dccz = ge_z[ip];
     const flow_float dcc  = sqrtf(dccx*dccx + dccy*dccy + dccz*dccz);
     const flow_float denom = dccx*sxx + dccy*syy + dccz*szz;
     const flow_float Dsafe = (fabsf(denom) < 1.0e-30f) ? ((denom>=0.0f)?1.0e-30f:-1.0e-30f) : denom;
@@ -86,7 +88,7 @@ __global__ void passive_fct_rh_norm_d(
 __global__ void passive_fct_lo_diag_d(
     geom_int nCells, geom_int nNormalPlanes, geom_int nNormalHaloPlanes, const geom_int* normal_halo_planes, const geom_int* plane_cells,
     const flow_float* ro, const flow_float* meffFace, int isNode,
-    int haveDiff, const geom_float* ccx, const geom_float* ccy, const geom_float* ccz,
+    int haveDiff, const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,   // 面ごとの差 e (段 ③)
     const geom_float* fx, const geom_float* sx, const geom_float* sy, const geom_float* sz, const geom_float* ss,
     const flow_float* vis_lam, const flow_float* vis_turb, flow_float Sc, flow_float Sc_t,
     flow_float* diagAdv, flow_float* diagDiff, flow_float* cdiff)
@@ -101,7 +103,7 @@ __global__ void passive_fct_lo_diag_d(
         if (mdot >= 0.0f) atomicAdd(&diagAdv[ic0],  mdot / max(ro[ic0], (flow_float)1.0e-30));
         else              atomicAdd(&diagAdv[ic1], -mdot / max(ro[ic1], (flow_float)1.0e-30));
         if (haveDiff != 0 && ip < nNormalPlanes) {
-            const flow_float c = passive_fct_diff_coef(ip, ic0, ic1, ccx, ccy, ccz, fx, sx, sy, sz, ss, ro, vis_lam, vis_turb, Sc, Sc_t);
+            const flow_float c = passive_fct_diff_coef(ip, ic0, ic1, ge_x, ge_y, ge_z, fx, sx, sy, sz, ss, ro, vis_lam, vis_turb, Sc, Sc_t);
             cdiff[ip] = c;
             atomicAdd(&diagDiff[ic0], c / max(ro[ic0], (flow_float)1.0e-30));
             atomicAdd(&diagDiff[ic1], c / max(ro[ic1], (flow_float)1.0e-30));

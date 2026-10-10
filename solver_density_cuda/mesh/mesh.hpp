@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <list>
+#include <map>
 #include <string>
 //#include <Eigen/Dense>
 #include "flowFormat.hpp"
@@ -186,16 +187,30 @@ public:
 
     // 幾何の倍精度の写し (plans/active/architecture-float-state-double-geometry.md §4.2 1.、段 ①)。
     // readMesh が geom_float の配列とは別に、HDF5 の型によらず double で読む (ファイルが float32 なら広げるだけ)。
-    // 段 ① では既存の経路はどれも読まない (面ごとの差 e を作る variables::setStructuralVariables と V0 の診断だけが使う)。
+    // 段 ① では面ごとの差 e (variables::setStructuralVariables) と V0 の診断だけが使う。段 ② で読み込み時の量と接続
+    // (周期の相手・ラインの接続・壁関数の代表点・弱形式の等温壁の d1/d2・delta_les。LSQ の係数は e 経由) もここから作る
+    // (軸対称の closure はデバイスの最終の面ベクトルを double で足すので、ここは読まない)。
     // 並びはファイルと同じ [3*i+k]。変換器など readMesh を通らない mesh では空のまま。
     std::vector<double> coord64;      // [3*nNodes]  /MESH/COORD
     std::vector<double> planeCent64;  // [3*nPlanes] /PLANES/centCoords
     std::vector<double> surfVect64;   // [3*nPlanes] /PLANES/surfVect (半径の重みを掛ける前)
     std::vector<double> surfArea64;   // [nPlanes]   /PLANES/surfArea
     std::vector<double> cellCent64;   // [3*nCells]  /CELLS/centCoords (ファイルの値。node でも節点座標への置換前)
+    // 区間ごとの r 重みの面ベクトル W_f = Σ_k r_k S_k [3*nPlanes] (/PLANES/rSurfVect。2D の node の軸対称の格子だけが持つ。
+    // 無ければ空)。使うかどうかは variables.cpp の axisSegmentRWeightApplies が決める
+    // (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。
+    std::vector<double> rSurfVect64;
     // 値の位置の double 版 [3*nCells_all]。ソルバの ccx..ccz と同じ規則で作る
     // (node = 節点座標、cell = セル重心、ゴースト = 面に対する鏡映。式は readMesh のゴースト生成と同じ)。
     std::vector<double> cc64;
+    // 上の写しがそろっているか (readMesh を通った mesh)。段 ② の各所は、そろっていれば double の写しから作り、
+    // そろっていなければ旧来の geom_float の座標に退避する。
+    bool hasGeom64() const
+    {
+        return cc64.size() == 3*(size_t)nCells_all && coord64.size() >= 3*nodes.size()
+            && planeCent64.size() == 3*(size_t)nPlanes && surfVect64.size() == 3*(size_t)nPlanes
+            && surfArea64.size() == (size_t)nPlanes;
+    }
 
     // 壁 CV フラグ [nCells] (wall 種別 bcond の CV=1)。node-centered 壁 Dirichlet で、壁ノード速度を
     // 厳密に 0 に固定する (state 初期化 + 運動量残差射影) のに使う。壁ゴーストを撤廃する代替。
@@ -218,6 +233,12 @@ public:
     unsigned char* line_fail_d = nullptr; // [nLines]    v2: factor 失敗フラグ (solve は dq 据え置き)
     unsigned char* plane_wall_flag_d = nullptr; // [nPlanes] wall 種 bcond の境界面フラグ (lineDtWallRelief 診断用)
     void buildImplicitLines(const flow_float* ccx, const flow_float* ccy, const flow_float* ccz);
+    // ラインの接続 (トポロジー) だけを作る。buildImplicitLines の本体で、デバイスへは上げない。
+    // useDouble = true: 節点座標は double の写し coord64 (段 ②、本番)。false: 旧来の geom_float の節点座標
+    // (診断 FORGE_DIAG_GEOM_STAGE2_DUMP が段 ① までとの一致を数えるため)。選び方は両者で同じ。
+    void implicitLineTopology(bool useDouble, const flow_float* ccx, const flow_float* ccy, const flow_float* ccz,
+                              std::vector<geom_int>& offsets, std::vector<geom_int>& cells,
+                              std::vector<geom_int>& prevArr, std::vector<geom_int>& nextArr, geom_int& lenMax) const;
 
     // 等温壁 CV フラグ [nCells] (wall_isothermal bcond の CV=1)。node-centered 等温壁の壁ノード
     // T ピン (applyNodeIsothermalWallPin / WMLES pin) と対で、block-DPLUR のエネルギー行 (row4) を
@@ -249,6 +270,10 @@ public:
     void readMesh(std::string);
 
     void setPeriodicPartner();
+    // 周期の相手の対応付けを、座標の出どころを選んでやり直して返す (bint は書かず、検査でも止めない)。
+    // 診断 FORGE_DIAG_GEOM_STAGE2_DUMP が段 ① まで (useDouble = false、geom_float の面重心) との一致を数えるため。
+    // 戻り値: periodic bcond の physID → partnerPlnID (その bcond の境界面の並び。setPeriodicPartner の bint と同じ意味)。
+    std::map<int, std::vector<geom_int>> periodicPartnerPlanes(bool useDouble);
     void setMeshMap_d();
     // node モード: setPeriodicPartner の partnerCellID から周期ノード group(union-find) を構築し
     // periodicRoot/periodicRoot_d を埋め、各 group の合併体積を var_volume へ書き戻す (§4.5.3)。
