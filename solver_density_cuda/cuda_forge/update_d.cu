@@ -1,6 +1,7 @@
 #include "dependentVariables_d.cuh"
 #include "qAccumulator_d.cuh"
 #include "commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (plan architecture-float-state-double-geometry §4.5、既定 off)
+#include "stageDumpDiag.hpp"    // 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30、既定 off)
 
 __global__ void updateVariablesOuter_d
 ( 
@@ -225,6 +226,11 @@ void applyScalarImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cud
                                    var.c_d["dq_roUz_old"], var.c_d["dq_roe_old"]};
         commitLossDiag::flowCommit(cfg, msh, var, dq, static_cast<flow_float>(0.0));
     }
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): 対象の step だけ、commit の直後に b = roN..roeN・d = dq_*_old・q = ro..roe を読む (読むだけ)
+    if (stageDumpDiag::active()) {
+        static const char* const dqn[5] = {"dq_ro_old", "dq_roUx_old", "dq_roUy_old", "dq_roUz_old", "dq_roe_old"};
+        stageDumpDiag::afterCommit(cfg, msh, var, "applyScalarImplicitCorrection_d", dqn, static_cast<flow_float>(0.0));
+    }
 }
 
 // 陰的更新の正値性ガード (plans/active/time_integration-update-positivity-guard.md):
@@ -352,6 +358,12 @@ void applyBlockImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cuda
         flow_float* const dq[5] = {var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"],
                                    var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"]};
         commitLossDiag::flowCommit(cfg, msh, var, dq, cfg.updateGuardAlpha);
+    }
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): 対象の step だけ、commit の直後に b = roN..roeN・d = dq_block_old_k (最後の swap 後)・
+    // q = ro..roe を読む (読むだけ)。qAccumulatorFP64 と updateGuardAlpha > 0 は未対応 (commitLossDiag と同じ)。
+    if (stageDumpDiag::active()) {
+        static const char* const dqn[5] = {"dq_block_old_0", "dq_block_old_1", "dq_block_old_2", "dq_block_old_3", "dq_block_old_4"};
+        stageDumpDiag::afterCommit(cfg, msh, var, "applyBlockImplicitCorrection_d", dqn, cfg.updateGuardAlpha);
     }
 }
 

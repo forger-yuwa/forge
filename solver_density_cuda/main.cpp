@@ -71,6 +71,7 @@
 #include "cuda_forge/geomStage2Dump.hpp"   // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP; 同 plan §6.3)
 #include "cuda_forge/hoopClosureDiag.hpp"  // 診断 FORGE_DIAG_HOOP_CLOSURE (plan axisymmetric-freestream-hoop-gauge §4.6 の 3・5)
 #include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
+#include "cuda_forge/stageDumpDiag.hpp"    // 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2364,6 +2365,8 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     }
 
     passiveSaveRhoPre_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 受動種の φ_N δρ 項用に更新前 ρ を退避 (#19)
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): 対象の step だけ、solve の直前の ro..roe (Q_asm) と res_ro..res_roe (R) を読む (読むだけ)
+    if (stageDumpDiag::active()) stageDumpDiag::beforeSolve(s.cfg , s.msh , s.var);
     blockDPLURSolve(s);
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
         if (s.cfg.blockDPLUR == 1) {
@@ -2518,6 +2521,8 @@ void advanceImplicitSteady(StepContext& s)
     // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): step 番号を知らせ、計る step なら commit の直後の集計を 1 行にする。
     const bool commitLoss = commitLossDiag::enabled();
     if (commitLoss) commitLossDiag::beginStep(s.iStep);
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): 対象の step なら step の頭の ro..roe (Q0) を読む (読むだけ)
+    if (stageDumpDiag::enabled()) stageDumpDiag::beginStep(s.cfg , s.msh , s.var , s.iStep);
     implicitNonlinearUpdate(s, 0);
     if (commitLoss) commitLossDiag::endStep();
 
@@ -2547,6 +2552,8 @@ void advanceImplicitSteady(StepContext& s)
     // 再計算され、ここで計算した cfl/dt_local は使われる前に上書きされる純粋な無駄 (~80µs/step の setCFL
     // カーネル×3)。cfg.dt も dt_local に効かず cosmetic。max cfl/dt 表示は冒頭 setDT が monitorInterval ごとに行う。
     s.residual_logger.logOuterEnd(s.iStep);
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): step の末尾の ro..roe (q_final) を読み、h5 を書く (読むだけ)
+    if (stageDumpDiag::active()) stageDumpDiag::endStep(s.cfg , s.msh , s.var);
 }
 
 // 非定常 dual-time 陰解法。1 物理ステップ = 時間レベルシフト → 擬似時間サブ反復（BDF 物理時間項つき
@@ -3497,6 +3504,9 @@ int main(int argc, char** argv) {
     // 診断 FORGE_DIAG_COMMIT_LOSS=<N> (既定 off): 定常の陰解法の commit で丸めで消えた更新を N step ごとに数える
     // (plan architecture-float-state-double-geometry §4.5・§6 V4 の記録)。未設定なら何も確保しない。
     commitLossDiag::init(cfg, msh, var);
+    // 診断 FORGE_DIAG_STAGE_DUMP=<h5> (+ FORGE_DIAG_STAGE_STEP=<n>、既定 1。既定 off): 定常の陰解法の 1 step の更新を段ごとに
+    // (Q0・Q_asm・R・b・d・q・q_final) 節点ごとに double で書く (plan architecture-float-state-double-geometry §5.1 #17・§6.30)。
+    stageDumpDiag::init(cfg, msh);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -3518,6 +3528,7 @@ int main(int argc, char** argv) {
     twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
     commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
+    stageDumpDiag::finalize();   // 対象の step に達しなかったらその旨を出す (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
