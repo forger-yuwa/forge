@@ -186,6 +186,33 @@ def cmd_select_g1x(a):
     return out
 
 
+REF_CAP = 0.015          # Gref の主流の上限 (plan §4.16)
+
+
+def cmd_select_ref(a):
+    """Gref (plan §4.16): 主流の上限 0.015 r_w、壁際の比は各列で G0 のその列の比以下 (境界層は G0 と同じかそれより細かい)。条件を満たす最小の nj。"""
+    wall = Wall(Path(a.wall_ref))
+    prm0 = _mesh_params_from(mesh_block(), wall.scale, 4719, 121, 1.0)
+    _, _, q0 = column_ratio_max(prm0, wall)
+    def ok(nj):
+        prm = _mesh_params_from(mesh_block(nj, REF_CAP), wall.scale, 4719, nj, 1.0)
+        try:
+            q = column_ratio_max(prm, wall)[2]
+        except ValueError:
+            return False, None
+        return bool(np.all(q <= q0 + 1e-12)), q
+    nj = 160
+    while not ok(nj)[0]:
+        nj += 1
+    while ok(nj - 1)[0]:
+        nj -= 1
+    _, q = ok(nj)
+    P, _ = generate(wall, mesh_block(nj, REF_CAP)); m = metrics(P)
+    m.update(nj=nj, c=REF_CAP, q_col_min=float(q.min()), q_col_max=float(q.max()), q_over_G0_max=float((q / q0).max()))
+    print(f"[select-ref] Gref: nj {nj}、節点 {m['nodes']}、列の比 {q.min():.4f}〜{q.max():.4f} (G0 比の最大 {m['q_over_G0_max']:.4f})、折れ角 {m['kink_max_deg']:.2f}°、AR {m['ar_max']:.0f}、skew {m['skew_max']:.3f}", flush=True)
+    return {"Gref": m}
+
+
 def cmd_select(a):
     wall = Wall(Path(a.wall_ref)); out = {}
     P0, prm0 = generate(wall, mesh_block()); out["G0"] = metrics(P0)
@@ -377,8 +404,8 @@ def cmd_post_ab(a):
     return out
 
 
-YAML_NAMES = {"G1": "cg1", "Gc": "cgc", "G2": "cg2"}
-YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
+YAML_NAMES = {"G1": "cg1", "Gc": "cgc", "G2": "cg2", "Gref": "cgref"}
+YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170, "Gref": 160}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
 
 
 def grid_list(ref=False):
@@ -394,7 +421,7 @@ def cmd_yaml(a):
         raise SystemExit("生産の YAML に axis_cap_frac がある — 想定と違うので止める")
     out = {}
     for arm, tag in YAML_NAMES.items():
-        c, qmax, _ = ARMS[arm]; nj = YAML_NJ[arm]
+        c, qmax, _ = ARMS[arm] if arm in ARMS else (REF_CAP, "各列で G0 以下", None); nj = YAML_NJ[arm]
         name = f"{base['name']}_{tag}"
         head = (f"# plan tooling-nozzle-core-grid §4.3・§4.4 の格子 {arm} (c {c}・q_max {qmax}・nj {nj})。core_grid_mesh.py yaml が\n"
                 f"# {PROBLEM.name} から作る (手で編集しない)。違いは name・mesh.nj・mesh.axis_cap_frac だけ。\n"
@@ -677,13 +704,13 @@ def cmd_view(a):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view"])
+    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view", "select-ref"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
-    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x"], help="prep: 格子")
+    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref"], help="prep: 格子")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()
-    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x, "view": cmd_view}[a.cmd](a)
+    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x, "view": cmd_view, "select-ref": cmd_select_ref}[a.cmd](a)
     out["problem"] = PROBLEM.name; out["wall_ref"] = a.wall_ref
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))

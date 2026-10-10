@@ -1,0 +1,44 @@
+{
+ "Gref": {
+  "nj": 160,
+  "nodes": 755040,
+  "kink_max_deg": 1.533591267181625,
+  "kink_at": [
+   -11.985552046593488,
+   67
+  ],
+  "kink_p999_deg": 0.31629830654431623,
+  "kink_over_2deg": 0,
+  "kink_band_max_deg": 1.533591267181625,
+  "kink_band_over_2deg": 0,
+  "band": [
+   -12.5,
+   -4.0
+  ],
+  "ar_max": 4572.885268422694,
+  "ar_p99": 3535.619428277047,
+  "skew_max": 0.4580925370512554,
+  "area_min_rt2": 5.527022191968034e-10,
+  "lines_cross": 0,
+  "radial_edge_over_rw_max": 0.018759233489951135,
+  "radial_edge_over_rw_axis5_max": 0.015000000000000017,
+  "wall_ratio_phys": {
+   "x0": 1.1110623284852488,
+   "x40": 1.0726639725902003,
+   "x94": 1.066274464277249,
+   "max": 1.1111870854544466
+  },
+  "axis_gap_rt": {
+   "x0": 0.015020840477802921,
+   "x40": 0.12566669508519487,
+   "x94": 0.15153486983267103
+  },
+  "axis_dr_over_dx_max": 10.829679637816996,
+  "c": 0.015,
+  "q_col_min": 1.06625701469404,
+  "q_col_max": 1.1111870836081206,
+  "q_over_G0_max": 0.9996975247632816
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

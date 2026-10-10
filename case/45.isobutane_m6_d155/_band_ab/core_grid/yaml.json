@@ -17,6 +17,12 @@
   "axis_cap_frac": 0.015,
   "identical_except_name_nj_cap": true
  },
+ "Gref": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgref.yaml",
+  "nj": 160,
+  "axis_cap_frac": 0.015,
+  "identical_except_name_nj_cap": true
+ },
  "G1x": {
   "file": "problem_d155_ns_prod_coldmesh_tw300_cg1x.yaml",
   "ni": 3086,
