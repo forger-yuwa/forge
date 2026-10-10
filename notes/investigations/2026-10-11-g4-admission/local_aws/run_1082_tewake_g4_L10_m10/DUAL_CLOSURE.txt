@@ -1,0 +1,9 @@
+CV 3221994 / 双対面 9767438 (内部 9566065, 境界 201373)
+体積: min 1.747e-14  max 6.097e-05  非正または非有限 0
+閉性 |ΣS|/Σ|S|: median 1.28e-09  p99 2.52e-08  max 5.71e-08   (> 1e-05: 0 CV, 面の無い CV: 0)
+   worst CV 1902152  closure 5.71e-08  vol 4.433e-09  faces 6  at (1.00924, -0.99458, 0.00372)
+   worst CV 3006375  closure 5.65e-08  vol 1.091e-08  faces 6  at (1.00941, 0.34378, 0.21607)
+   worst CV 2117407  closure 5.64e-08  vol 1.544e-11  faces 6  at (0.08197, -0.00692, 0.07734)
+   worst CV 588065  closure 5.64e-08  vol 1.544e-11  faces 6  at (0.08197, -0.00742, 0.07734)
+   worst CV 2127915  closure 5.64e-08  vol 5.791e-11  faces 6  at (0.08197, 0.27466, 0.07734)
+VERDICT: PASS

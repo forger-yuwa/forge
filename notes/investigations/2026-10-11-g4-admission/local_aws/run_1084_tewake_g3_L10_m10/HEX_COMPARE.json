@@ -1,0 +1,77 @@
+{
+ "A": "case/46.sern_design/run_1083_tewake_g3_A0_ref",
+ "B": "case/46.sern_design/run_1084_tewake_g3_L10_m10",
+ "thr": 0.65,
+ "ar_max": 5000.0,
+ "same_hexes": true,
+ "same_n_nodes": true,
+ "n_hex": 1838592,
+ "n_moved_nodes": 38727,
+ "n_region_hex": 40774,
+ "min_A": 0.7611452217259475,
+ "min_B": 0.6724489032867876,
+ "n_lt_thr_A": 0,
+ "n_lt_thr_B": 0,
+ "region_n_lt_thr_A": 0,
+ "region_n_lt_thr_B": 0,
+ "region_min_A": 0.7633959091600395,
+ "region_min_B": 0.6724489032867876,
+ "new_lt_thr": 0,
+ "worsened_existing_lt_thr": 0,
+ "outside_region_changed_hex": 0,
+ "ar_gt5000_A": 0,
+ "ar_gt5000_B": 0,
+ "ar_max_A": 4212.919876575466,
+ "ar_max_B": 4212.919876575466,
+ "new_ar_gt_max": 0,
+ "region_ar_max_B": 2886.8122962272937,
+ "nonpos_jac_hex_A": 0,
+ "nonpos_jac_hex_B": 0,
+ "orientation_sign_A": 1.0,
+ "examples_new_lt_thr": [],
+ "examples_worsened": [],
+ "support": {
+  "applicable": true,
+  "mode_version_B": "local-0.02-0.30-quintic-v1",
+  "mode_version_mesher": "local-0.02-0.30-quintic-v1",
+  "d_zero_H": 0.3,
+  "tol_H": 1e-06,
+  "n_support_nodes": 38727,
+  "n_moved": 38727,
+  "n_moved_outside_support": 0,
+  "status": "PASS"
+ },
+ "te_wake_local_rows": [
+  {
+   "row": "(1) 0 格子との対応比較: 新しく 0.65 未満",
+   "status": "PASS",
+   "value": 0
+  },
+  {
+   "row": "(1) 既存の 0.65 未満の悪化",
+   "status": "PASS",
+   "value": 0
+  },
+  {
+   "row": "(1) 新しい AR 超過 (> 5000)",
+   "status": "PASS",
+   "value": 0
+  },
+  {
+   "row": "(2) B の変形領域の最小スケール済みヤコビアン ≥ 0.65",
+   "status": "PASS",
+   "value": 0.6724489032867876
+  },
+  {
+   "row": "(2) 全域の非正/非有限の頂点ヤコビアンを持つヘキサ (B)",
+   "status": "PASS",
+   "value": 0
+  },
+  {
+   "row": "(4) 支持領域の外の座標のビット不変",
+   "status": "PASS",
+   "value": 0
+  }
+ ],
+ "te_wake_local_verdict": "PASS"
+}

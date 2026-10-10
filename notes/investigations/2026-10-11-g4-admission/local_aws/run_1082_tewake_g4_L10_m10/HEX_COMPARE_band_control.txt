@@ -1,0 +1,43 @@
+A: case/46.sern_design/run_1080_tewake_g4_A0_m10
+B: case/46.sern_design/run_1081_tewake_g4_B10_m10
+thr: 0.65
+ar_max: 5000.0
+same_hexes: True
+same_n_nodes: True
+n_hex: 3122688
+n_moved_nodes: 127848
+n_region_hex: 134750
+min_A: 0.45234992285341735
+min_B: 0.45234992285341735
+n_lt_thr_A: 40700
+n_lt_thr_B: 44880
+region_n_lt_thr_A: 6105
+region_n_lt_thr_B: 10285
+region_min_A: 0.5264462965318051
+region_min_B: 0.5174910492757351
+new_lt_thr: 4180
+worsened_existing_lt_thr: 6105
+outside_region_changed_hex: 0
+ar_gt5000_A: 691
+ar_gt5000_B: 691
+ar_max_A: 12865.632730871052
+ar_max_B: 12865.632730871052
+new_ar_gt_max: 0
+region_ar_max_B: 4578.218080149115
+nonpos_jac_hex_A: 0
+nonpos_jac_hex_B: 0
+orientation_sign_A: 1.0
+ar_gt5000_A_in_region: 0
+examples_new_lt_thr: [{'hex': 927116, 'A': 0.6513527488692096, 'B': 0.5810917083805346, 'centroid_over_H': [1.80807, -1.36447, 1.00627]}, {'hex': 926094, 'A': 0.6513527488692096, 'B': 0.5810917083805346, 'centroid_over_H': [1.80807, -1.36447, 0.96753]}, {'hex': 930766, 'A': 0.6513527488692095, 'B': 0.5810917083805346, 'centroid_over_H': [1.80807, -1.36447, 1.83425]}]
+examples_worsened: [{'hex': 934709, 'A': 0.6473445428910651, 'B': 0.5754186978345911, 'centroid_over_H': [1.88407, -1.34764, 0.99366]}, {'hex': 936169, 'A': 0.6473445428910651, 'B': 0.5754186978345911, 'centroid_over_H': [1.88407, -1.34764, 1.05769]}, {'hex': 935585, 'A': 0.6473445428910651, 'B': 0.5754186978345911, 'centroid_over_H': [1.88407, -1.34764, 1.0229]}]
+ar_gt5000_A_xH_hist: [(-1.0, 251), (0.0, 0), (0.5, 0), (1.2, 0), (1.5, 0), (2.2, 0), (5.0, 440)]
+support: {"applicable": false, "status": "判定不能", "note": "B の te_wake_mode が local でない (None)"}
+HEX_COMPARE VERDICT: LOCAL_DEGRADATION
+plan tooling-sern-te-wake-grid §5.1 #4c (この道具の行。(3) と (4) の品質・双対は te_wake_grid_check.py --admission):
+  FAIL   | (1) 0 格子との対応比較: 新しく 0.65 未満 | 4180
+  FAIL   | (1) 既存の 0.65 未満の悪化 | 6105
+  PASS   | (1) 新しい AR 超過 (> 5000) | 0
+  FAIL   | (2) B の変形領域の最小スケール済みヤコビアン ≥ 0.65 | 0.5174910492757351
+  PASS   | (2) 全域の非正/非有限の頂点ヤコビアンを持つヘキサ (B) | 0
+  判定不能   | (4) 支持領域の外の座標のビット不変 | B の te_wake_mode が local でない (None)
+TE_WAKE_LOCAL VERDICT: FAIL
