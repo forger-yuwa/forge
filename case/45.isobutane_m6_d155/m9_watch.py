@@ -44,6 +44,7 @@ def _emergency_stop(run_name, why):
 ap = argparse.ArgumentParser(); ap.add_argument("run")
 ap.add_argument("--phase", choices=("line", "point", "line_e2"), required=True)   # line_e2 = ラインのまま E (水準 + E2) まで (§6.11 の追加の腕 L5L)
 ap.add_argument("--budget", type=int, required=True)
+ap.add_argument("--consec", type=int, default=1, help="水準 (point と line_e2 は E2 も) を何出力続けて満たしたら到達とするか (既定 1 = 従来。§6.18 は 2、diagnostician 2026-10-10)")
 ap.add_argument("--inherit", default=None, help="line_e2: 同じ構成の分岐元の run。その到達の出力までの系列を step − 到達 (≤ 0) で引き継ぐ (codex plan-4 M2)")
 try:
     a = ap.parse_args()
@@ -64,7 +65,7 @@ try:
     if SF.exists():
         st = json.loads(SF.read_text())
     else:
-        st = {"run": run.name, "phase": a.phase, "budget": a.budget, "status": "running", "rows": [], "tries": {}}
+        st = {"run": run.name, "phase": a.phase, "budget": a.budget, "consec": a.consec, "status": "running", "rows": [], "tries": {}}
         if a.inherit:
             src = json.loads((HERE / a.inherit / "m9_watch.json").read_text())
             if src.get("status") != "REACHED": raise ValueError(f"分岐元 {a.inherit} が REACHED でない")
@@ -73,8 +74,9 @@ try:
             st["rows"] = [dict(r, step=r["step"] - nb, inherited=True) for r in src["rows"] if 0 < r["step"] <= nb]
     if st["status"] in FINAL:
         print(f"[m9_watch] {run.name}: 既に {st['status']}"); sys.exit(0)
-    if st.get("phase") != a.phase or st.get("budget") != a.budget:
-        raise ValueError("状態の phase/budget が違う")
+    if st.get("phase") != a.phase or st.get("budget") != a.budget or st.get("consec", 1) != a.consec:
+        raise ValueError("状態の phase/budget/consec が違う")
+    if a.consec < 1: raise ValueError("--consec は 1 以上")
 except SystemExit:
     raise
 except Exception as e:
@@ -126,14 +128,18 @@ def cleanup(keep_extra=()):
         for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
 
 def done_at(rows):
-    """保存済みの系列の最初の終わりを ("REACH", step) か ("DIV", step) で返す (引き継いだ行の step は ≤ 0)。無ければ None。"""
+    """保存済みの系列の最初の終わりを ("REACH", step) か ("DIV", step) で返す (引き継いだ行の step は ≤ 0)。無ければ None。
+    REACH は水準 (と E2) を --consec 個の連続した出力で満たした、その最後の出力 (§6.18)。"""
+    run_ok = 0
     for n_ in range(len(rows)):
         r_ = rows[n_]
         if r_.get("nonfinite") or r_.get("nonfinite_all"): return ("DIV", r_["step"])
         dr_ = [drift(rows[: n_ + 1], k) for k in KEYS[:3]]
         e2_ = {k: 100 * (r_[k] / REF[k] - 1) for k in KEYS} if REF else None
-        if r_.get("deficit") is not None and None not in dr_ and abs(r_["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr_) \
-           and (e2_ is None or all(abs(v) <= 0.1 for v in e2_.values())):
+        ok_ = r_.get("deficit") is not None and None not in dr_ and abs(r_["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr_) \
+              and (e2_ is None or all(abs(v) <= 0.1 for v in e2_.values()))
+        run_ok = run_ok + 1 if ok_ else 0
+        if run_ok >= a.consec:
             return ("REACH", r_["step"])
     return None
 def conclude(n):
@@ -177,9 +183,9 @@ def main_loop():
           print(f"[m9_watch] {run.name} {n}: 欠損 {rec['deficit']:.4f}、ドリフト {dr}、E2 {e2}、非有限 {rec['nonfinite']}/{rec['nonfinite_all']}", flush=True)
           if rec["nonfinite"] or rec["nonfinite_all"]:
               save(); ok = stop(); finish("DIVERGED", fail_step=n, stopped=ok); sys.exit(0)
-          lvl = rec["deficit"] is not None and None not in dr and abs(rec["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr)
-          if lvl and (e2 is None or all(abs(v) <= 0.1 for v in e2.values())):
-              save(); conclude(n)
+          _dn = done_at(st["rows"])                       # 連続の数え方は再開時と同じ関数で (§6.18 の --consec)
+          if _dn is not None and _dn[0] == "REACH":
+              save(); conclude(_dn[1])
           save(); cleanup()
       started = (run / "RUN_RC").exists() or time.time() - T0 > 600     # forge の起動前に見張りが始まっても待つ (起動の猶予 10 分)
       if started and not progressed and not alive and not [n for n in steps() if n > 0 and n not in {r["step"] for r in st["rows"]}]:
