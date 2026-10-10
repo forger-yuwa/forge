@@ -71,6 +71,9 @@ ALT_BINARIES = {
     "lineL_fp64": ("e10a195dbbec9bd4b67650348985d68d6a5354e1f6884ab5e73f11974f085e3d", "~/forge-linevisc-fp64"),
     # LAYOUT2 を既定にしたコミット (plan time_integration-line-implicit-speed §6.21) + typedef double、~/forge-linespeed-fp64 (f9be0c4f に timeIntegration_d.cu を入れてビルド)
     "lineM_fp64": ("05ad8bdf6100874f39ae39a5d9ea08613223e87e1e4fdc5270baaeaad5206b11", "~/forge-linespeed-fp64"),
+    # 2d58b457 + typedef double、製品の経路の照合 (plan time_integration-line-viscous-jacobian-faceh §6.7)。監査用 (-DFORGE_LINE_AUDIT) と同じソースの通常のビルド
+    "faceh_audit_fp64": ("eb45557958c6547f9ab7b29e17bdec7f82dc94466736b7c02e708efb5ae6452a", "~/forge-faceh-audit"),
+    "faceh_ctrl_fp64": ("4910b74d0e7c6ae62644f2a7262578f8aab7388cdacfbb842d66be919291391b", "~/forge-faceh-ctrl"),
 }
 
 
