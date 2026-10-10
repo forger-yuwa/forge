@@ -1,3 +1,168 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-10-lvc75-result.md`)
+
+# ブリーフ: 値 3 のマスク 7/5 の比較 (plan time_integration-line-viscous-jacobian-faceh §6.11・§6.12) の結果の解釈と、この plan の次
+
+諮問の目的: 登録の VERDICT は「支持」だった。結果が予想どおりに見えるので、解釈を確定する前に点検を受ける (AGENTS.md のエスカレーション条件 7)。
+あわせて、全部入り (熱伝導の近傍 K を入れたマスク 7) を成り立たせる方向で、次に何を調べるべきかを相談したい。
+ユーザの方針は「速度でなく筋のいい手法」。マスク 5 は温度をライン内で結合しないので、全部入りの代わりにはならない。
+
+## 1. 観測事実
+
+### 1.1 事前のゲート (2 回目の登録、§6.12)
+
+- 書き出し `run_0577_lvc75_m7_dump_r2`・`run_0578_lvc75_m5_dump_r2`・`run_0579_lvc75_m7_dump2_r2` (AWS `~/forge-faceh-audit/case/45.isobutane_m6_d155/`)。
+- VERDICT は `PASS`。I 75・R 9・S 3・V 5 項目で外れ 0 (`case/45.isobutane_m6_d155/_band_ab/cold_pair/lvc75_pregate.json`)。
+  - S: 3 本とも `rhs_s0` = 拘束の処理をした float(残差) が全 5 行で不一致 0。
+  - V: D と K の行 0〜3 は 7 と 5 でビット一致した。K の行 4 の変化は、1200 面すべてで独立に計算した熱伝導の項と許容の 0.033 倍以内で一致した。
+  - `rhs_s0` の差 (記録だけ): 5 − 7 は 25 要素・最大 8 ulp・最大の絶対差 2.9e-11。再実行 − 7 は 25 要素・最大 16 ulp・最大の絶対差 4.66e-10。
+    1 回目 (`lvc75_pregate_r1.json`) では大きい要素の反転が 5 − 7 の側に出ていたが、今回は再実行の側に出た。
+- 腕の前の `--verify` は 53 ファイルの照合で OK だった。
+
+### 1.2 本判定 (`lvc75_judge.py`、`_band_ab/cold_pair/lvc75_judge.json`)
+
+- VERDICT は `主 (値 3): 支持 — この条件・期間では、熱伝導の近傍 K を外すと非有限化を回避できることを支持 (K の式の誤り・マスク 5 の長期の安定性・収束は言わない); マスク 7 は全部 DIVERGED、マスク 5 は全部 FINITE`。
+  ゲート 59 項目はすべて合格し、INVALID は無かった。
+
+| run | マスク | 分類 | 最初の非有限 (ログ / CSV) | `check_convergence --segment` |
+| --- | --- | --- | --- | --- |
+| `run_0570_lvc75_m7_a1` | 7 | DIVERGED | 348 / 347 (`ro`) | — |
+| `run_0571_lvc75_m5_b1` | 5 | FINITE (2000 step) | — | NOT CONVERGED (`rms_roK` は RISING、他は falling・0.3〜0.7 桁) |
+| `run_0572_lvc75_m7_a2` | 7 | DIVERGED | 280 / 279 (`ro`) | — |
+| `run_0573_lvc75_m5_b2` | 5 | FINITE (2000 step) | — | NOT CONVERGED |
+
+### 1.3 軌道 (`rms_ro`。スクリプト `notes/reviews/briefs/2026-10-10-lvc75-result-summary.py`)
+
+| step | 0 | 20 | 50 | 100 | 200 | 300 | 500 | 1000 | 1500 | 1999 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A1 (7) | 7.97e-6 | 5.72e-5 | 3.83e-3 | 1.38e-2 | 1.13e-2 | 1.20e-2 | — | — | — | — |
+| B1 (5) | 7.97e-6 | 5.74e-6 | 4.81e-6 | 5.93e-6 | 2.17e-4 | 3.22e-3 | 4.47e-3 | 2.07e-3 | 1.52e-3 | 1.47e-3 |
+| A2 (7) | 7.97e-6 | 5.72e-5 | 3.83e-3 | 1.38e-2 | 1.09e-2 | — | — | — | — | — |
+| B2 (5) | 7.97e-6 | 5.74e-6 | 4.81e-6 | 5.90e-6 | 2.18e-4 | 2.74e-3 | 4.09e-3 | 2.02e-3 | 5.73e-4 | 6.59e-6 |
+
+- マスク 7: `rms_ro` は step 16 で出発の 10 倍を超え、step 100 で最大 1.38e-2。step 50 までの値は §6.9 の段 ③ の 2 本と同じだった。
+- マスク 5: step 100 までは出発より下がった (`rms_roe` も 10.4 → 6.0)。その後、step 169・174 で出発の 10 倍を超え、step 316〜317 で最大 (5.5e-3・5.1e-3) になって下がった。
+  B2 は step 1999 で 6.6e-6 (出発付近) まで戻ったが、B1 は 1.47e-3 だった。マスク 5 の 2 本は step 1000 の後で分かれた。
+
+### 1.4 場の変化の位置 (記録のための観測。判定には使っていない)
+
+- マスク 7 の step 100 では、T の相対変化が 10 % を超える節点が約 3400 あった。列は 1〜143 (x −0.955〜−0.513) で、最大は壁際 (wall_dist 1e-6) の 1.29。
+  上位の節点の組は §6.9 の段 ③ の 2 本と同じ (4838・7016 など)。
+- マスク 7 の非有限は 2 本とも、隣り合う 11 列 (41〜51、x −0.817〜−0.772) の全 1331 節点で、列も同じだった。
+- マスク 5 では、T の相対変化 (出発との差) の最大が次のように動いた。
+  - step 100: 最大 0.024、10 % を超える節点 0。
+  - step 500: 10 % を超える節点 約 800、列 22〜61 (x −0.90〜−0.73)。最大 0.51 で、壁際 (wall_dist 2〜3e-5)。
+  - step 1000: 約 4500 節点 (列 8〜197)。
+  - step 2000: 約 8700 節点 (列 3〜271)。最大 0.31〜0.41。
+  - step 500 で大きく変わった位置は、マスク 7 の step 100 で大きく変わった位置と同じ縮流部の壁際である。
+- 出発の場 (`run_0183` の res_100000) は、親 plan で NOT CONVERGED と記録されている。
+
+## 2. 期待値と出典
+
+- §6.11 の分岐 1: A (マスク 7) が 2 本とも DIVERGED、B (マスク 5) が 2 本とも FINITE → この条件・期間では、熱伝導の近傍 K を外すと非有限化を回避できることを支持。K の式の誤り・マスク 5 の長期の安定性・収束は示さない。
+- §6.11 の「言えること」: 支持でも「この条件・2000 step で非有限化を避けた」まで。マスク 5 は全部入りの代わりにならない。
+
+## 3. 再現条件
+
+- 段 ③ の FP64 (sha256 129de3f4…)、`run_0183` の res_100000、値 3・キー 5・方向別・上限なし・cfl 4・緩和 0.7・sweep 5・ISP 0。腕の違いは `FORGE_LVC_TERMS` (7/5) だけ。
+- 台本 `lvc75.sh` (commit 511cc614、運用の追記 95710032)。
+
+## 4. 実施済みの操作と結果 (この plan の中)
+
+| 節 | 内容 | VERDICT |
+| --- | --- | --- |
+| §6.2 | 面エンタルピーの精度の切替 | 棄却 |
+| §6.3〜§6.6 | 共通関数の U-J の列ごとの照合 | 多倍長の参照で PASS |
+| §6.7〜§6.8 | 製品の経路の照合 | FAIL (段 C)・T 保留。壁際の β・κ が float の座標で最大 10.8 % ずれる |
+| §6.9〜§6.10 | LHS の座標の差だけを変える (段 ②/③) | 棄却 (4 本とも DIVERGED) |
+| §6.11〜§6.12 | マスク 7/5 (今回) | 事前のゲート 1 回目は判別不能・2 回目は PASS、本判定は支持 |
+
+共通関数の熱伝導の近傍 K の式: `block_dplur_jacobian_d.cuh` の `accumulate_thinlayer_visc_jacobian`。
+`K[4][:] += κ (γ_j/c_p,j)/ρ_j · [−(e_j − ½|u_j|²), −u_j, −v_j, −w_j, 1]` (隣が温度固定なら 0)。
+符号系は `D ΔQ_i − K ΔQ_j = rhs`。熱伝導の D は自節点の同じ形の項で、マスクに関係なく常に入る。
+
+## 5. 仮説 (呼び出し側のもので、確かめていない)
+
+- **H1**: 熱伝導の近傍 K を入れると、縮流部の冷却壁際で外側の反復の増幅が強くなり (step 16 で 10 倍)、非有限に至る。
+  外すと、同じ場所の乱れが遅れて (step 170 前後から) 現れ、2000 step 以内では有界にとどまる。
+  同じ場所に出ることから、出発の場の未収束な部分 (壁際の熱の過渡) を、近傍 K の有無で違う速さで動かしている可能性がある。
+- **H2**: 熱伝導の近傍 K 自体は正しい (共通関数の U-J は PASS、K の行 4 は独立の式と一致) が、組み合わせ方に問題がある。候補は次の 2 つ:
+  - 方向別 dt (壁法線のラインの dt を大きくする) と組み合わせると、ライン内の熱の結合が強すぎて過大な補正になる。
+  - ライン外のキー 5 の熱伝導 (スカラー + 温度の項) との釣り合いが崩れる (ライン方向だけ陰的に強く、横方向は遅れる)。
+- **H3**: 熱伝導の近傍 K は、実残差の熱流束の微分と一致していない (面の k_f の補間・TP の c_p(T)・壁の弱形式)。親 plan §6.16 の局所の応答の精度依存とも関係する。
+
+## 6. 聞きたいこと
+
+1. 「支持」の解釈と言える範囲。特にマスク 5 についてどう書くべきか。マスク 5 も残差が 3 桁上がって下がった (B1 は 1.47e-3 で止まった) ので、「マスク 5 は安定」とは書けないと考えている。
+2. 全部入りを成り立たせる方向で、H1〜H3 を判別する次の一手を 1〜2 個に絞ってほしい。候補は次の 4 つ:
+   - (a) マスク 7 で方向別 dt を外す (`lineDtDirectional 0`) 対照
+   - (b) マスク 7 で cfl を下げる対照
+   - (c) 実残差の熱流束の応答 (有限差) と、熱伝導の近傍 K の列を、同じ凍結状態・同じ節点で比べる (親 plan §6.16 の続き)
+   - (d) 収束した出発の場 (別の run) から 7/5 をやり直す
+3. この plan (faceh) をどこで閉じるべきか。§5.1 #8・#9 と今回の結果を、残作業に残すか、後継の plan に移すか。
+
+## 読んでよいファイル
+
+- `plans/active/time_integration-line-viscous-jacobian-faceh.md` (§1・§3・§5.1・§6.9〜§6.12)
+- `plans/accepted/time_integration-line-viscous-jacobian.md` (親 plan、§4.1・§6.9・§6.16・§6.17)
+- `case/45.isobutane_m6_d155/_band_ab/cold_pair/lvc75_judge.json`・`lvc75_pregate.json`・`lvc75_pregate_r1.json`
+- `solver_density_cuda/cuda_forge/block_dplur_jacobian_d.cuh`・`timeIntegration_d.cu` (860〜1290 行付近)
+- `notes/reviews/2026-10-10-lvcgeom-result-diagnose.md`・`notes/reviews/2026-10-10-lvc75-pregate-rhs-diagnose.md`
+
+## 関連 plan 全文 (`plans/active/time_integration-line-viscous-jacobian-faceh.md`)
+
+```markdown
 # 熱伝導の近傍 K を入れたライン粘性 Jacobian の破綻は、面エンタルピーの float の評価が要るか (粘性ヤコビアン plan の再開)
 
 ## メタ
@@ -62,10 +227,9 @@
 | 4 | U-J の列ごと・壁拘束の照合 (**完了 2026-10-10、§6.3〜§6.6**: §6.3 は FAIL (原文保存)、§6.5 の多倍長の参照で PASS・丸めの仮説を支持。判断: codex 諮問 — 限定付きの PASS、第 2 仮説はこの範囲で退く) | 諮問の判別 A/B: 同じ状態・同じ薄層の流束モデルで、A = 製品の共通関数 `accumulate_thinlayer_visc_jacobian` の D/K、B = 独立な流束の実装の中心差分。host 上の 200 組と短いライン。列ごとに正規化して double で相対誤差 ≤ 1e-6、差分幅 h と h/2 の再現を確かめ、零列は事前に固定した無次元の絶対誤差、解像できない列は判別不能。両向きの面・異なる密度・高速流・速度固定・温度固定を含め、壁拘束は自由度を消去した系でも照合。零空間 ≤ 1e-12・壁温拘束 ≤ 1e-12・短いラインの解の差 ≤ 1e-10 を維持。触るファイルは `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (試験だけ、ソルバは変えない)。全列で整合 → 第 1 仮説 (実残差・境界・分離更新との不整合) の確認へ、再現する不一致 → 第 2 仮説 (小さい列・面の向き・壁拘束の実装の不整合) を優先 | F |
 | 5 | 製品の経路の照合 (**ユーザの選択 2026-10-10「1」、§6.7 に事前登録**。**完了 2026-10-10 §6.8: 登録の VERDICT は FAIL (段 C、対流の K の相殺)・T 保留、A で壁際の LHS の β・κ が float の座標で最大 10.8 % ずれる**) | 諮問 (2026-10-10 uj-mp-result) の判別 A/B: 同じ凍結状態から、A = CUDA の実際の組立、B = 元の入力から host で独立に組む参照。`run_0183` の res_100000 から値 3・マスク 7・ISP 0 の新しい診断の run で 1 step (最初の factor と 5 sweep)、既存の 5 本のラインを全節点・両向きで採取 (壁・軸・内部を含む)。書き出しに足すもの (cuda_forge の出力だけの変更、既定はビット不変): 面の番号・両端・`line_prev/next`・生の座標・面積ベクトル・`fx`・両端の速度・`vis_lam`・`vis_turb`・`thermCond`・`Prt`・実効のフラグと精度・実際に渡した β・κ・法線・f_i・状態・薄層の各寄与・拘束の前後の D/K。照合は二段: 元の入力から係数を独立に計算 (誤った β を共有して合格するのを防ぐ) → 製品の `ST = float`・加算の順序・格納の変換を再現して面の寄与から最終の行列まで。接続・格納先・拘束のフラグは完全一致、数値は列ごとに尺度化し float の丸めを含む許容を採取の前に登録。注目点: ISP 0 では `dcc` を float にした座標の差で作る (`timeIntegration_d.cu` 952 行付近) が、残差は double の座標 (FP64 ビルド)。冷却壁の第一層は float32 の座標で数 ulp。整合すれば第 2 段 (実残差の応答、9 評価・幅の再現 ≤ 1 %・ノイズ ≤ 1e-3) へ | F |
 | 6 | LHS の座標の差だけを変える A/B (§6.9、ユーザ 2026-10-10「すすめてもらって OK」。**完了 2026-10-10 §6.10: 事前のゲート PASS、本判定は棄却 (4 本とも DIVERGED)**。判断: 2026-10-10 codex 諮問 — 棄却を「この修復だけでは回避できない」に限って採用) | 元のセッションの段 ② (float の座標の差) と段 ③ (double の座標の差 ge_x) の FP64 のバイナリで、値 3・マスク 7 を各 2 本・最大 2000 step。先に 1 step の書き出し 3 本 (旧・新・旧の再実行) と事前のゲート `lvcgeom_pregate.py` (入力の一致・残差の不変・係数の水準での介入の成立、plan-5 レビューの採用) を回し、PASS のときだけ腕へ。台本 `lvcgeom.sh`、本判定 `lvcgeom_judge.py`。合格条件: 事前のゲートが PASS、本判定のゲートが全部通る、§6.9 の分岐で判定 | F |
-| 7 | マスク 7/5 の比較 (§6.10 の次の一手、ユーザ 2026-10-10「いいよ」、**§6.11 に事前登録**。1 回目の事前のゲートは `rhs_s0` の規則で判別不能、§6.12 で新しく登録し直した。**完了 2026-10-10 §6.13: 支持 (マスク 7 は 2 本とも DIVERGED、マスク 5 は 2 本とも 2000 step 有限・未収束)**。判断: 2026-10-10 codex 諮問 — 支持は限定付きで採用、マスク 5 は安定と書かない) | 段 ③ の FP64 (129de3f4…)・`run_0183` の res_100000・値 3・キー 5・方向別・cfl 4 で、`FORGE_LVC_TERMS` 7 と 5 だけを変え、各 2 本・最大 2000 step。事前のゲート (7・5・7 の再実行の 1 step の書き出し: 入力の一致・残差の不変・K の変化が自由なエネルギー行の熱伝導の項だけで κ∂T_j/∂Q_j と一致) を PASS してから腕へ。§6.11 に事前登録し、codex plan 段を通してから回す | F |
+| 7 | マスク 7/5 の比較 (§6.10 の次の一手、ユーザ 2026-10-10「いいよ」、**§6.11 に事前登録**。1 回目の事前のゲートは `rhs_s0` の規則で判別不能、§6.12 で新しく登録し直した) | 段 ③ の FP64 (129de3f4…)・`run_0183` の res_100000・値 3・キー 5・方向別・cfl 4 で、`FORGE_LVC_TERMS` 7 と 5 だけを変え、各 2 本・最大 2000 step。事前のゲート (7・5・7 の再実行の 1 step の書き出し: 入力の一致・残差の不変・K の変化が自由なエネルギー行の熱伝導の項だけで κ∂T_j/∂Q_j と一致) を PASS してから腕へ。§6.11 に事前登録し、codex plan 段を通してから回す | F |
 | 8 | §6.8 の未解決の処置 | 段 C の不一致 (対流の K の相殺)・D の判別不能 3 件・対照 T の保留 (同じソースの監査のビルドと通常のビルドで D が 1 ulp 違う)。§6.9 は係数の変更の成立を示すだけで、これらを解消していない。閉じる前に残すか後継に移すかを決める | F |
-| 9 | 実残差・更新の写像との整合 | 共通関数は実残差の厳密な微分ではない (`block_dplur_jacobian_d.cuh` 94 行付近)。実残差の微小応答と有限の補正の応答を、同じ評価の経路で測る (親 plan §6.16 の続き)。マスク 5 が有限でも全部入りの整合の確認は要るので、着手条件 (「#7 で熱伝導の K なしでも壊れたら」) は外した (§6.13、諮問)。測る成分・凍結の範囲・拘束の向きを先に決める | F |
-| 10 | マスク 7 で方向別 dt の 1/0 だけを変える A/B (§6.13 の次の一手、**ユーザの判断待ち**) | 段 ③ の FP64・`run_0183` の res_100000・値 3・マスク 7・キー 5・cfl 4 で、`lineDtDirectional` 1 と 0 を各 2 本・最大 2000 step。介入のゲートは残差・物性・拘束・K の不変と `dt_local` の変化、D の差が時間項の変更で説明できること。事前登録と codex plan 段の後に回す。この plan を閉じるなら後継の plan に移す | F |
+| 9 | 実残差・更新の写像との整合 | 共通関数は実残差の厳密な微分ではない (`block_dplur_jacobian_d.cuh` 94 行付近)。#7 で熱伝導の K なしでも壊れたら、実残差の微小応答と有限の補正の応答を同じ評価の経路で測る (親 plan §6.16 の続き) | F |
 
 ## 6. 検証 (事前登録、2026-10-10、run の前。codex 諮問 [記録](../../notes/reviews/2026-10-10-lvc-faceh-design-diagnose.md) の採否を反映)
 
@@ -471,50 +635,6 @@
   - 改訂した判定器を 1 回目の書き出しで回した確認 (行 3 を除く・出力は一時ファイル、旧の JSON は上書きしていない): I 74・R 8・S 3・V 5 項目で外れ 0。
     `rhs_s0` の記録は 5 − 7 が 19 要素・4 ulp、再実行 − 7 が 25 要素・4 ulp。これは判定器の動作の確認であって、新しい事前のゲートの合格ではない。
 
-### 6.13 §6.11・§6.12 の結果 (2026-10-10、段 ③ の FP64 129de3f4…、codex 諮問 [記録](../../notes/reviews/2026-10-10-lvc75-result-diagnose.md))
-
-- **事前のゲート (2 回目)**: `PASS`。I 75・R 9・S 3・V 5 項目、外れ 0 (`case/45.isobutane_m6_d155/_band_ab/cold_pair/lvc75_pregate.json`)。
-  - S: 3 本とも `rhs_s0` = 拘束の処理をした float(残差) が全 5 行で不一致 0。
-  - V: D と K の行 0〜3 はビット一致した。K の行 4 の変化は、1200 面で熱伝導の項と許容の 0.033 倍以内で一致した。
-  - `rhs_s0` の差 (記録だけ): 5 − 7 は 25 要素・最大 8 ulp・最大の絶対差 2.9e-11、再実行 − 7 は 25 要素・最大 16 ulp・4.66e-10。
-    1 回目では大きい値の要素での 1 ulp の反転が 5 − 7 の側に出たが、今回は再実行の側に出た。
-  - 腕の前の `--verify` は 53 ファイルの照合で OK。
-- **本判定 (`lvc75_judge.py`、`_band_ab/cold_pair/lvc75_judge.json`)**: `主 (値 3): 支持 — この条件・期間では、熱伝導の近傍 K を外すと非有限化を回避できることを支持`。
-  ゲート 59 項目すべて合格、INVALID なし。
-
-  | run (AWS `~/forge-faceh-audit/case/45.isobutane_m6_d155/`) | マスク | 分類 | 最初の非有限 (ログ / CSV) | `rms_ro`: step 20 / 100 / 316 前後の最大 / 1999 |
-  | --- | --- | --- | --- | --- |
-  | `run_0570_lvc75_m7_a1` | 7 | DIVERGED | 348 / 347 (`ro`) | 5.72e-5 / 1.38e-2 / — / — |
-  | `run_0571_lvc75_m5_b1` | 5 | FINITE (NOT CONVERGED) | — | 5.74e-6 / 5.93e-6 / 5.5e-3 / 1.47e-3 |
-  | `run_0572_lvc75_m7_a2` | 7 | DIVERGED | 280 / 279 (`ro`) | 5.72e-5 / 1.38e-2 / — / — |
-  | `run_0573_lvc75_m5_b2` | 5 | FINITE (NOT CONVERGED) | — | 5.74e-6 / 5.90e-6 / 5.1e-3 / 6.6e-6 |
-
-- **主張の範囲 (諮問の採否を反映)**: この条件・2000 step 以内では、熱伝導の近傍 K を外す介入で非有限化を避けた、まで。
-  - マスク 5 については「2000 step 有限、2 本とも未収束 (`check_convergence --segment` 区間 0〜1999 で NOT CONVERGED、末尾 500 step の `rms_roK` の傾き × 500 が +0.18・+0.23 桁)、長期の挙動は未確認」と書く。
-    「マスク 5 は安定」とは書かない。マスク 5 でも `rms_ro` は step 100 まで下がった後、step 170 前後から上がって step 316 付近で最大 5e-3 になった。
-  - 「K が強すぎる」「K の式が誤り」「K 自体は正しく組み合わせだけが問題」は、どれも確定しない。D を残して K を外すと、隣の補正との相殺も失われるため。
-    共通関数の PASS (§6.6) は凍結した物性・薄層モデルの微分についての結果で、実残差の厳密な微分ではない。
-- **観測 (記録だけ)**:
-  - マスク 7 の step 50 までの `rms_ro` は §6.9 の段 ③ の 2 本と同じ値だった。非有限は 2 本とも、隣り合う 11 列 (41〜51、x −0.817〜−0.772) の全 1331 節点。
-  - マスク 5 で T が大きく変わった位置は、step 500 で列 22〜61 (x −0.90〜−0.73) の壁際 (wall_dist 2〜3e-5)、step 2000 で列 3〜271 (約 8700 節点、最大 0.31〜0.41)。
-  - マスク 5 で大きく変わった位置は、マスク 7 の step 100 で大きく変わった位置と同じ縮流部の壁際だった。
-    同じ場所に出ることは、共通の原因や同じモードを示さない。K を変えると補正の空間構造も変わり、出発の場も未収束なので、「同じ熱の過渡を違う速さで動かした」という解釈は保留し、局在は観測点の選定に使う。
-  - 要約のスクリプト: `notes/reviews/briefs/2026-10-10-lvc75-result-summary.py`。
-- **諮問の採否** (全件採用):
-  - (M) 「支持」は限定付きで採る (上の主張の範囲)。
-  - (M) 「マスク 5 は安定」「B1 は定常値で止まった」は却下。
-  - (M) 局在からの熱の過渡の解釈は要再検証。
-  - (M) 「K 自体は正しい」は、薄層モデルの中の照合の範囲を超えるので要再検証。
-  - (m) この plan は「診断の区切り」として閉じ、§5.1 #8・#9 と次の判別 A/B を後継の active plan へ明示して移す。#9 の着手条件「マスク 5 でも壊れたら」は外す (マスク 5 が有限でも、全部入りの整合の確認は要る)。
-- **次の一手 (諮問の推奨、§5.1 #10、着手はユーザの判断の後)**: マスク 7 のまま、`time.deltaT.lineDtDirectional` の 1/0 だけを変える A/B。
-  - 第 1 仮説 (中、dt との因果は未確認): 方向別 dt による大きな擬似時間の刻みが、全部入りの更新で過大な補正を許している。方向別 dt を外すだけで、2000 step 以内の非有限化を避けられる。
-  - 反証条件: 方向別 dt ありで破綻を再現した対照に対して、なしも各 2 本とも非有限化する。
-  - 介入のゲート: 残差・物性・拘束・K が不変で、実際の `dt_local` が変わったこと。D の差は拘束の前では時間項 `V/Δτ` の変更から丸めの範囲で再現し、拘束の行では上書きされることを確かめる (§6.11 の「D 不変」は流用しない)。
-  - 方向別 dt を外すと同じ step 数でも擬似時間の進み方が変わるので、B の温度の変化が小さいことだけで「熱の過渡が解消した」とは判定しない。
-  - やらないこと: マスク 5 の本番化、K の列の追加の削除、CFL・拘束・精度の同時の変更、別の出発の場への変更。候補 (c) (実残差の応答と K の列の比較) は、測る成分・凍結の範囲・拘束の向きを決めるまで先行させない。
-- **証拠の場所**: AWS `~/forge-faceh-audit/case/45.isobutane_m6_d155/` の `run_0570`〜`run_0579`、台本のログ `lvc75.log` (1 回目は `lvc75_r1.log`)、`lvc75_pregate.stdout`・`lvc75_judge.stdout`。
-  result 段のレビューまで残す (AWS のディスクの具合で手元の `~/forge-evidence/` へ移すことがある)。
-
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -532,7 +652,6 @@
 | 諮問 (§6.9 の結果) | 2026-10-10 | [2026-10-10-lvcgeom-result-diagnose.md](../../notes/reviews/2026-10-10-lvcgeom-result-diagnose.md) | 棄却は「この修復だけでは十分でない」に限って採用、Major 5 (「精度は主因でない」は却下、1331 節点 = 1 列は要再検証、step 0 の D/K からの増幅評価は不可、拘束 × dt の 2×2 は不可、§6.8・§6.9 で組立・精度を除外済みとしない) | 全件採用: §6.10 に限定した主張を記録、非有限の節点を変数別・列別に再抽出して「隣り合う 11 列」と訂正 (ブリーフの誤り)、案 (ii)(iv) を採らない理由を記録、§5.1 に #7 (マスク 7/5 の比較、ユーザの判断待ち)・#8 (§6.8 の未解決)・#9 (実残差との整合) を足した |
 | plan (§6.11 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md) | GO-with-changes, C0/M3/m0 | 全件採用 (§6.11 に記録、人工入力で確認): M1 非有限の参照値・残差・比を即 INVALID に、最終の判定で I も必須、M2 V(c) を期待の接続の全部で比べ、接続・往復の面・拘束の行を先に照合、M3 証拠と設定のハッシュを記録して `--verify` で腕の起動と本判定に結び付け、腕と書き出しの設定を全項目で照合。同型の欠陥を §6.9 のゲートでも直し、既存の書き出しで結果が同じことを確認 |
 | 諮問 (§6.11 の事前のゲートの判別不能) | 2026-10-10 | [2026-10-10-lvc75-pregate-rhs-diagnose.md](../../notes/reviews/2026-10-10-lvc75-pregate-rhs-diagnose.md) | 旧の INDETERMINATE を保存し、構造の照合を入れた新しい登録で書き出しを一度だけ取り直す、Major 3・Minor 1 | 全件採用: 改めた規則で旧の判定を置き換えない、構造の照合 (`rhs_s0` = 拘束の処理をした float(残差)、行 3 を含む全行) を必須に、ulp・要素数の 3 倍の案は記録だけ、`res_roUz` を出力に足して行 3 を照合。§6.12 に記録 |
-| 諮問 (§6.11・§6.12 の結果) | 2026-10-10 | [2026-10-10-lvc75-result-diagnose.md](../../notes/reviews/2026-10-10-lvc75-result-diagnose.md) | 支持は限定付きで採用、Major 4・Minor 1 (マスク 5 は安定でない、局在からの熱の過渡の解釈と「K 自体は正しい」は要再検証、この plan は後継へ移して閉じる)、次は方向別 dt の 1/0 の A/B | 全件採用: §6.13 に限定した主張と観測を記録、§5.1 #9 の着手条件を外し、#10 (方向別 dt の A/B、ユーザの判断待ち) を足した |
 
 ## 7. 影響範囲
 
@@ -545,3 +664,702 @@
 - 2026-10-10: 設計の諮問と codex plan 段を全件採用して in_progress (§1・§4・§6 を改訂、判定器を書き直し)。主の 4 本 (`run_0540`〜`run_0543`) を投入する。
 - 2026-10-10: 主の 4 本 (`run_0540`〜`run_0543`) を回し、VERDICT 棄却 (§6.2)。codex 諮問を全件採用し、次は U-J の列ごと・壁拘束の照合 (§5.1 #4、未着手)。
 - 2026-10-10: U-J の列ごとの照合 (§6.3 は FAIL・原文保存、§6.5 の多倍長の参照で PASS・丸めの仮説を支持、§6.6)。codex 諮問を採用し、次は製品の経路の照合 (§5.1 #5、未着手)。
+```
+
+## 参考: `case/45.isobutane_m6_d155/_band_ab/cold_pair/lvc75_judge.json`
+
+```
+{
+ "plan": "time_integration-line-viscous-jacobian-faceh §6.11",
+ "pregate": {
+  "VERDICT": "PASS (本試験へ進む)",
+  "residual": {
+   "res_ro": {
+    "rerun_bit": false,
+    "new_vs_old": 1.5265566588595902e-16,
+    "rerun": 1.3010426069826053e-16
+   },
+   "res_roUx": {
+    "rerun_bit": false,
+    "new_vs_old": 3.637978807091713e-12,
+    "rerun": 3.637978807091713e-12
+   },
+   "res_roUy": {
+    "rerun_bit": false,
+    "new_vs_old": 1.8189895119660737e-12,
+    "rerun": 1.818989620386291e-12
+   },
+   "res_roUz": {
+    "rerun_bit": true,
+    "new_vs_old": 0.0,
+    "rerun": 0.0
+   },
+   "res_roe": {
+    "rerun_bit": false,
+    "new_vs_old": 2.302159018974237e-10,
+    "rerun": 2.3078428057488054e-10
+   },
+   "res_roK": {
+    "rerun_bit": false,
+    "new_vs_old": 1.1188272530660015e-13,
+    "rerun": 1.127986593019159e-13
+   },
+   "res_roOmega": {
+    "rerun_bit": false,
+    "new_vs_old": 9.5367431640625e-07,
+    "rerun": 9.5367431640625e-07
+   },
+   "res_roY0": {
+    "rerun_bit": false,
+    "new_vs_old": 1.5785983631388945e-16,
+    "rerun": 1.5785983631388945e-16
+   },
+   "res_roY1": {
+    "rerun_bit": false,
+    "new_vs_old": 1.3742262536253769e-17,
+    "rerun": 1.3742262536253769e-17
+   },
+   "rhs_s0_record_only": {
+    "m5_vs_m7": {
+     "n_diff": 25,
+     "max_ulp": 8.0,
+     "max_abs": 2.9103830456733704e-11
+    },
+    "rerun_vs_m7": {
+     "n_diff": 25,
+     "max_ulp": 16.0,
+     "max_abs": 4.656612873077393e-10
+    }
+   }
+  },
+  "struct_rhs": {
+   "run_0577_lvc75_m7_dump_r2": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   },
+   "run_0579_lvc75_m7_dump2_r2": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   },
+   "run_0578_lvc75_m5_dump_r2": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   }
+  },
+  "same_D_K03": {
+   "D": {
+    "rerun_bit": true,
+    "m5_vs_m7": 0.0,
+    "rerun": 0.0
+   },
+   "Kprev_rows0to3": {
+    "rerun_bit": true,
+    "m5_vs_m7": 0.0,
+    "rerun": 0.0
+   },
+   "Knext_rows0to3": {
+    "rerun_bit": true,
+    "m5_vs_m7": 0.0,
+    "rerun": 0.0
+   }
+  },
+  "heatK": {
+   "expected_connections": 1210,
+   "compared_line_faces": 1200,
+   "resolved_faces": 613,
+   "max_err_over_tol": 0.03320551893375731,
+   "connection_problems": [],
+   "n_connection_problems": 0,
+   "first_bad": []
+  }
+ },
+ "gates": [
+  {
+   "check": "出発の場の sha256 が事前に固定した値",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: マスクの表示が 7 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: マスクの表示が 5 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 台本が渡した FORGE_LVC_TERMS = 5",
+   "ok": true,
+   "value": "5"
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: マスクの表示が 7 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: マスクの表示が 5 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 台本が渡した FORGE_LVC_TERMS = 5",
+   "ok": true,
+   "value": "5"
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "事前のゲートの記録が PASS で、記録した証拠のハッシュ (書き出し・監査の記録・ゲート自身) が今のファイルと同じ",
+   "ok": true,
+   "value": "照合 OK: 53 ファイル"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "事前のゲートの VERDICT が PASS",
+   "ok": true,
+   "value": "PASS (本試験へ進む)"
+  },
+  {
+   "check": "事前のゲートの項目がすべて合格",
+   "ok": true,
+   "value": 0
+  },
+  {
+   "check": "run_0577_lvc75_m7_dump_r2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0578_lvc75_m5_dump_r2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0579_lvc75_m7_dump2_r2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  }
+ ],
+ "gates_ok": true,
+ "runs": {
+  "a1": {
+   "class": "DIVERGED",
+   "run": "run_0570_lvc75_m7_a1",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    348
+   ],
+   "last_step": 347,
+   "csv_first_nonfinite": 347,
+   "diverged_step": 347,
+   "steps_log_csv": [
+    348,
+    347
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1728.8056688450145,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 290.96393089751166,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3404.654087176196,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 439.6282668754772,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 34.6099847303782,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2193.617816398384,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1728.813708317872,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1728.805527925182,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "b1": {
+   "class": "FINITE",
+   "run": "run_0571_lvc75_m5_b1",
+   "run_rc": "0",
+   "detectNaN": null,
+   "last_step": 1999,
+   "csv_first_nonfinite": null,
+   "segment_verdict": "NOT CONVERGED",
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 690.9406826937666,
+     "first_step_over_3x": 141,
+     "tail_slope500": -0.013926724656462258
+    },
+    "rms_roUx": {
+     "max_over_start": 100.13494119993959,
+     "first_step_over_3x": 193,
+     "tail_slope500": 0.014781734894231758
+    },
+    "rms_roUy": {
+     "max_over_start": 1131.9378772601392,
+     "first_step_over_3x": 120,
+     "tail_slope500": -0.011681592503661069
+    },
+    "rms_roe": {
+     "max_over_start": 96.84094101905043,
+     "first_step_over_3x": 189,
+     "tail_slope500": -0.028688082654441376
+    },
+    "rms_roK": {
+     "max_over_start": 10.628291219949867,
+     "first_step_over_3x": 271,
+     "tail_slope500": 0.17927940282408422
+    },
+    "rms_roOmega": {
+     "max_over_start": 410.4302863238998,
+     "first_step_over_3x": 2,
+     "tail_slope500": -0.03693164117491862
+    },
+    "rms_roY0": {
+     "max_over_start": 690.9509441634484,
+     "first_step_over_3x": 141,
+     "tail_slope500": -0.01392689518756546
+    },
+    "rms_roY1": {
+     "max_over_start": 690.9143001240834,
+     "first_step_over_3x": 141,
+     "tail_slope500": -0.013928836781974168
+    }
+   }
+  },
+  "a2": {
+   "class": "DIVERGED",
+   "run": "run_0572_lvc75_m7_a2",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    280
+   ],
+   "last_step": 279,
+   "csv_first_nonfinite": 279,
+   "diverged_step": 279,
+   "steps_log_csv": [
+    280,
+    279
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1729.629730888317,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 291.25111821553327,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3406.2224331584343,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 248.73841359697536,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 29.095373231329372,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2258.9303328374563,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1729.6379335482009,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1729.6297321994805,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "b2": {
+   "class": "FINITE",
+   "run": "run_0573_lvc75_m5_b2",
+   "run_rc": "0",
+   "detectNaN": null,
+   "last_step": 1999,
+   "csv_first_nonfinite": null,
+   "segment_verdict": "NOT CONVERGED",
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 641.6387164989826,
+     "first_step_over_3x": 142,
+     "tail_slope500": -1.636056220082082
+    },
+    "rms_roUx": {
+     "max_over_start": 89.6825555676999,
+     "first_step_over_3x": 193,
+     "tail_slope500": -1.2567205241641273
+    },
+    "rms_roUy": {
+     "max_over_start": 1073.66627829945,
+     "first_step_over_3x": 120,
+     "tail_slope500": -1.607295399518064
+    },
+    "rms_roe": {
+     "max_over_start": 86.87891256381654,
+     "first_step_over_3x": 189,
+     "tail_slope500": -1.2514007521804615
+    },
+    "rms_roK": {
+     "max_over_start": 7.702929833581726,
+     "first_step_over_3x": 271,
+     "tail_slope500": 0.22828379945130314
+    },
+    "rms_roOmega": {
+     "max_over_start": 384.5778225436718,
+     "first_step_over_3x": 2,
+     "tail_slope500": -1.5295410157197498
+    },
+    "rms_roY0": {
+     "max_over_start": 641.6481877020611,
+     "first_step_over_3x": 142,
+     "tail_slope500": -1.6360565982780861
+    },
+    "rms_roY1": {
+     "max_over_start": 641.6147308923648,
+     "first_step_over_3x": 142,
+     "tail_slope500": -1.6360589703132726
+    }
+   }
+  }
+ },
+ "main_v3": {
+  "verdict": "支持",
+  "detail": "マスク 7 は全部 DIVERGED、マスク 5 は全部 FINITE"
+ },
+ "VERDICT": "主 (値 3): 支持 — この条件・期間では、熱伝導の近傍 K を外すと非有限化を回避できることを支持 (K の式の誤り・マスク 5 の長期の安定性・収束は言わない); マスク 7 は全部 DIVERGED、マスク 5 は全部 FINITE"
+}
+```
+
+## 参考: `notes/reviews/briefs/2026-10-10-lvc75-result-summary.py`
+
+```
+# マスク 7/5 の腕の観測の要約 (記録用)
+import csv, glob, h5py, numpy as np
+runs = ["run_0570_lvc75_m7_a1", "run_0571_lvc75_m5_b1", "run_0572_lvc75_m7_a2", "run_0573_lvc75_m5_b2"]
+for r in runs:
+    rows = [x for x in csv.DictReader(open(r + "/residual_history.csv")) if x[list(x.keys())[2]] == "outer_begin"]
+    c0 = list(rows[0].keys())[0]; d = {int(x[c0]): x for x in rows}
+    print(r, "rms_ro", " ".join("%d:%.2e" % (s, float(d[s]["rms_ro"])) for s in (0, 20, 50, 100, 200, 300, 500, 1000, 1500, 1999) if s in d))
+    print("   rms_roe", " ".join("%d:%.2e" % (s, float(d[s]["rms_roe"])) for s in (0, 20, 50, 100, 200, 300, 500, 1000, 1500, 1999) if s in d))
+    s_ = sorted(d); ro = np.array([float(d[s]["rms_ro"]) for s in s_])
+    m = int(np.argmax(np.where(np.isfinite(ro), ro, -1)))
+    print(f"   rms_ro の最大 {ro[m]:.2e} (step {s_[m]})、最初に 10 倍を超えた step {next((s for s in s_ if float(d[s]['rms_ro']) > 10 * ro[0]), None)}")
+with h5py.File(runs[0] + "/res_0.h5", "r") as h:
+    X = h["MESH"]["COORD"][...].reshape(-1, 3); wd = h["VALUE"]["wall_dist"][...]
+    T0, r0 = h["VALUE"]["T"][...], h["VALUE"]["ro"][...]
+def top(r, step):
+    with h5py.File(f"{r}/res_{step}.h5", "r") as h:
+        T, ro = h["VALUE"]["T"][...], h["VALUE"]["ro"][...]
+    rt = np.abs(T - T0) / T0; rr = np.abs(ro - r0) / r0
+    it = np.argsort(-rt)[:5]
+    cols = sorted(set((np.where(rt > 0.1)[0] // 121).tolist()))
+    return (f"T の相対変化 >0.1: {int(np.sum(rt > 0.1))} 節点、最大 {rt.max():.2f}、列の範囲 {cols[:3]}…{cols[-3:]} (x {X[cols[0]*121,0]:.3f}〜{X[cols[-1]*121,0]:.3f})" if cols else f"T の相対変化 >0.1: 0、最大 {rt.max():.3f}") + \
+           f"; 上位 {[(int(i), round(float(X[i,0]),3), round(float(X[i,1]),4), '%.1e' % wd[i], round(float(rt[i]),2)) for i in it[:3]]}"
+for r in runs:
+    for st in (100, 500, 1000, 2000):
+        try: print(r, st, top(r, st))
+        except Exception as e: pass
+    nf = sorted(glob.glob(r + "/res_nan_*.h5"))
+    if nf:
+        with h5py.File(nf[0], "r") as h:
+            bad = np.unique(np.concatenate([np.where(~np.isfinite(h["VALUE"][k][...]))[0] for k in h["VALUE"].keys() if h["VALUE"][k].shape == wd.shape]))
+        cols = np.unique(bad // 121)
+        print(r, "非有限:", bad.size, "節点、列", cols.tolist(), "x", [round(float(X[c*121, 0]), 3) for c in cols[[0, -1]]] if cols.size else None)
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。

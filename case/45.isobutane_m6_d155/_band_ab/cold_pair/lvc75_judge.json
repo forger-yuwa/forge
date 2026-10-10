@@ -1,0 +1,641 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-faceh §6.11",
+ "pregate": {
+  "VERDICT": "PASS (本試験へ進む)",
+  "residual": {
+   "res_ro": {
+    "rerun_bit": false,
+    "new_vs_old": 1.5265566588595902e-16,
+    "rerun": 1.3010426069826053e-16
+   },
+   "res_roUx": {
+    "rerun_bit": false,
+    "new_vs_old": 3.637978807091713e-12,
+    "rerun": 3.637978807091713e-12
+   },
+   "res_roUy": {
+    "rerun_bit": false,
+    "new_vs_old": 1.8189895119660737e-12,
+    "rerun": 1.818989620386291e-12
+   },
+   "res_roUz": {
+    "rerun_bit": true,
+    "new_vs_old": 0.0,
+    "rerun": 0.0
+   },
+   "res_roe": {
+    "rerun_bit": false,
+    "new_vs_old": 2.302159018974237e-10,
+    "rerun": 2.3078428057488054e-10
+   },
+   "res_roK": {
+    "rerun_bit": false,
+    "new_vs_old": 1.1188272530660015e-13,
+    "rerun": 1.127986593019159e-13
+   },
+   "res_roOmega": {
+    "rerun_bit": false,
+    "new_vs_old": 9.5367431640625e-07,
+    "rerun": 9.5367431640625e-07
+   },
+   "res_roY0": {
+    "rerun_bit": false,
+    "new_vs_old": 1.5785983631388945e-16,
+    "rerun": 1.5785983631388945e-16
+   },
+   "res_roY1": {
+    "rerun_bit": false,
+    "new_vs_old": 1.3742262536253769e-17,
+    "rerun": 1.3742262536253769e-17
+   },
+   "rhs_s0_record_only": {
+    "m5_vs_m7": {
+     "n_diff": 25,
+     "max_ulp": 8.0,
+     "max_abs": 2.9103830456733704e-11
+    },
+    "rerun_vs_m7": {
+     "n_diff": 25,
+     "max_ulp": 16.0,
+     "max_abs": 4.656612873077393e-10
+    }
+   }
+  },
+  "struct_rhs": {
+   "run_0577_lvc75_m7_dump_r2": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   },
+   "run_0579_lvc75_m7_dump2_r2": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   },
+   "run_0578_lvc75_m5_dump_r2": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   }
+  },
+  "same_D_K03": {
+   "D": {
+    "rerun_bit": true,
+    "m5_vs_m7": 0.0,
+    "rerun": 0.0
+   },
+   "Kprev_rows0to3": {
+    "rerun_bit": true,
+    "m5_vs_m7": 0.0,
+    "rerun": 0.0
+   },
+   "Knext_rows0to3": {
+    "rerun_bit": true,
+    "m5_vs_m7": 0.0,
+    "rerun": 0.0
+   }
+  },
+  "heatK": {
+   "expected_connections": 1210,
+   "compared_line_faces": 1200,
+   "resolved_faces": 613,
+   "max_err_over_tol": 0.03320551893375731,
+   "connection_problems": [],
+   "n_connection_problems": 0,
+   "first_bad": []
+  }
+ },
+ "gates": [
+  {
+   "check": "出発の場の sha256 が事前に固定した値",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: マスクの表示が 7 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: マスクの表示が 5 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 台本が渡した FORGE_LVC_TERMS = 5",
+   "ok": true,
+   "value": "5"
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: マスクの表示が 7 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: マスクの表示が 5 の腕と合う (7 は表示なし)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 台本が渡した FORGE_LVC_TERMS = 5",
+   "ok": true,
+   "value": "5"
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "事前のゲートの記録が PASS で、記録した証拠のハッシュ (書き出し・監査の記録・ゲート自身) が今のファイルと同じ",
+   "ok": true,
+   "value": "照合 OK: 53 ファイル"
+  },
+  {
+   "check": "run_0570_lvc75_m7_a1: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0571_lvc75_m5_b1: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0572_lvc75_m7_a2: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0573_lvc75_m5_b2: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "事前のゲートの VERDICT が PASS",
+   "ok": true,
+   "value": "PASS (本試験へ進む)"
+  },
+  {
+   "check": "事前のゲートの項目がすべて合格",
+   "ok": true,
+   "value": 0
+  },
+  {
+   "check": "run_0577_lvc75_m7_dump_r2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0578_lvc75_m5_dump_r2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0579_lvc75_m7_dump2_r2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  }
+ ],
+ "gates_ok": true,
+ "runs": {
+  "a1": {
+   "class": "DIVERGED",
+   "run": "run_0570_lvc75_m7_a1",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    348
+   ],
+   "last_step": 347,
+   "csv_first_nonfinite": 347,
+   "diverged_step": 347,
+   "steps_log_csv": [
+    348,
+    347
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1728.8056688450145,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 290.96393089751166,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3404.654087176196,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 439.6282668754772,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 34.6099847303782,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2193.617816398384,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1728.813708317872,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1728.805527925182,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "b1": {
+   "class": "FINITE",
+   "run": "run_0571_lvc75_m5_b1",
+   "run_rc": "0",
+   "detectNaN": null,
+   "last_step": 1999,
+   "csv_first_nonfinite": null,
+   "segment_verdict": "NOT CONVERGED",
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 690.9406826937666,
+     "first_step_over_3x": 141,
+     "tail_slope500": -0.013926724656462258
+    },
+    "rms_roUx": {
+     "max_over_start": 100.13494119993959,
+     "first_step_over_3x": 193,
+     "tail_slope500": 0.014781734894231758
+    },
+    "rms_roUy": {
+     "max_over_start": 1131.9378772601392,
+     "first_step_over_3x": 120,
+     "tail_slope500": -0.011681592503661069
+    },
+    "rms_roe": {
+     "max_over_start": 96.84094101905043,
+     "first_step_over_3x": 189,
+     "tail_slope500": -0.028688082654441376
+    },
+    "rms_roK": {
+     "max_over_start": 10.628291219949867,
+     "first_step_over_3x": 271,
+     "tail_slope500": 0.17927940282408422
+    },
+    "rms_roOmega": {
+     "max_over_start": 410.4302863238998,
+     "first_step_over_3x": 2,
+     "tail_slope500": -0.03693164117491862
+    },
+    "rms_roY0": {
+     "max_over_start": 690.9509441634484,
+     "first_step_over_3x": 141,
+     "tail_slope500": -0.01392689518756546
+    },
+    "rms_roY1": {
+     "max_over_start": 690.9143001240834,
+     "first_step_over_3x": 141,
+     "tail_slope500": -0.013928836781974168
+    }
+   }
+  },
+  "a2": {
+   "class": "DIVERGED",
+   "run": "run_0572_lvc75_m7_a2",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    280
+   ],
+   "last_step": 279,
+   "csv_first_nonfinite": 279,
+   "diverged_step": 279,
+   "steps_log_csv": [
+    280,
+    279
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1729.629730888317,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 291.25111821553327,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3406.2224331584343,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 248.73841359697536,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 29.095373231329372,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2258.9303328374563,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1729.6379335482009,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1729.6297321994805,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "b2": {
+   "class": "FINITE",
+   "run": "run_0573_lvc75_m5_b2",
+   "run_rc": "0",
+   "detectNaN": null,
+   "last_step": 1999,
+   "csv_first_nonfinite": null,
+   "segment_verdict": "NOT CONVERGED",
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 641.6387164989826,
+     "first_step_over_3x": 142,
+     "tail_slope500": -1.636056220082082
+    },
+    "rms_roUx": {
+     "max_over_start": 89.6825555676999,
+     "first_step_over_3x": 193,
+     "tail_slope500": -1.2567205241641273
+    },
+    "rms_roUy": {
+     "max_over_start": 1073.66627829945,
+     "first_step_over_3x": 120,
+     "tail_slope500": -1.607295399518064
+    },
+    "rms_roe": {
+     "max_over_start": 86.87891256381654,
+     "first_step_over_3x": 189,
+     "tail_slope500": -1.2514007521804615
+    },
+    "rms_roK": {
+     "max_over_start": 7.702929833581726,
+     "first_step_over_3x": 271,
+     "tail_slope500": 0.22828379945130314
+    },
+    "rms_roOmega": {
+     "max_over_start": 384.5778225436718,
+     "first_step_over_3x": 2,
+     "tail_slope500": -1.5295410157197498
+    },
+    "rms_roY0": {
+     "max_over_start": 641.6481877020611,
+     "first_step_over_3x": 142,
+     "tail_slope500": -1.6360565982780861
+    },
+    "rms_roY1": {
+     "max_over_start": 641.6147308923648,
+     "first_step_over_3x": 142,
+     "tail_slope500": -1.6360589703132726
+    }
+   }
+  }
+ },
+ "main_v3": {
+  "verdict": "支持",
+  "detail": "マスク 7 は全部 DIVERGED、マスク 5 は全部 FINITE"
+ },
+ "VERDICT": "主 (値 3): 支持 — この条件・期間では、熱伝導の近傍 K を外すと非有限化を回避できることを支持 (K の式の誤り・マスク 5 の長期の安定性・収束は言わない); マスク 7 は全部 DIVERGED、マスク 5 は全部 FINITE"
+}
