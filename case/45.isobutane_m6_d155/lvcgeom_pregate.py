@@ -174,7 +174,9 @@ def main():
         rec["residual_optional_used"] = opt
         for f in RES_FIELDS + opt:
             o, o2, n = (res_field(DUMPS[k][0], f) for k in ("old", "old2", "new"))
-            ok("I", f"{f}: 3 本で有限", bool(np.all(np.isfinite(o)) and np.all(np.isfinite(o2)) and np.all(np.isfinite(n))), None)
+            if not (np.all(np.isfinite(o)) and np.all(np.isfinite(o2)) and np.all(np.isfinite(n))):
+                raise ValueError(f"{f} に非有限がある (出発の状態の残差)")   # 2026-10-10 plan-6 レビュー M1 の同型の修正
+            ok("I", f"{f}: 3 本で有限", True, None)
             rep_bit = bool(np.array_equal(o.view(np.int64), o2.view(np.int64)))
             d_no, d_oo = float(np.max(np.abs(n - o))), float(np.max(np.abs(o2 - o)))
             cond = bool(np.array_equal(n.view(np.int64), o.view(np.int64))) if rep_bit else d_no <= 3 * d_oo
@@ -217,7 +219,10 @@ def main():
                 # 旧の式 (座標を float にしてから差) を再計算し、記録された GPU の値と合うこと (この再計算の式の検証)
                 co = coef(fr, nd, stA[k, 5], f32(fr[15]) - f32(fr[12]), f32(fr[16]) - f32(fr[13]), f32(fr[17]) - f32(fr[14]))
                 for q, v in co.items():
-                    old_ulp = max(old_ulp, abs(float(v) - fr[q]) / max(float(np.spacing(np.float32(abs(fr[q])))), float(np.finfo(np.float32).tiny)))
+                    ru = abs(float(v) - fr[q]) / max(float(np.spacing(np.float32(abs(fr[q])))), float(np.finfo(np.float32).tiny))
+                    if not np.isfinite(ru):
+                        raise ValueError(f"旧の式の再計算に非有限 (節点 {k} 面 {s})")
+                    old_ulp = max(old_ulp, ru)
                 # 新の式 (double の差 other − ic = ±ge を float に 1 回丸める)
                 e = np.array([fr[15] - fr[12], fr[16] - fr[13], fr[17] - fr[14]])
                 dx, dy, dz = f32(e[0]), f32(e[1]), f32(e[2])
@@ -231,6 +236,8 @@ def main():
         rec["recompute_old_formula_max_ulp"] = old_ulp
         ok("V", "(0) 旧の式の再計算が記録された GPU の dcc・δ・粘性の対角・β・κ・cfac と ≤ 8 ulp (式の検証)", old_ulp <= 8, old_ulp)
         rec["intervention_new_coef_max_rel_vs_double"] = max(beta_err) if beta_err else None
+        if not all(np.isfinite(x) for x in beta_err):
+            raise ValueError("β・κ の参照との比に非有限")
         ok("V", "(a) 新の方式の薄層の β・κ が double の参照と ≤ 1e-5", bool(beta_err) and max(beta_err) <= 1e-5, max(beta_err) if beta_err else None)
         # helper で旧・新の面の加算を再現 (時間項の後から連ねる)
         with tempfile.TemporaryDirectory() as td:
@@ -257,7 +264,10 @@ def main():
                 pred = np.where(np.array([[(rd >> i) & 1 for _ in range(5)] for i in range(5)]) == 1, 0.0, kv_new - kv_old)
                 scale = np.broadcast_to(np.maximum(np.max(np.abs(kv_new), axis=0), np.max(np.abs(kv_old), axis=0)), (5, 5))
                 u = np.maximum(ulp32(scale), np.finfo(np.float32).tiny)
-                worst_k = max(worst_k, float(np.max(np.abs(dK_dump - pred) / u))); nk += 1
+                rk = float(np.max(np.abs(dK_dump - pred) / u))
+                if not np.isfinite(rk):
+                    raise ValueError(f"K の比較に非有限 (節点 {k} 面 {s})")
+                worst_k = max(worst_k, rk); nk += 1
         rec["intervention_K"] = {"faces": nk, "max_ulp": worst_k}
         ok("V", "(b) 薄層の K の変化が Kv(新) − Kv(旧) と ≤ 64 ulp", nk > 0 and worst_k <= 64, [nk, worst_k])
         # (c) D の変化 (拘束の前の面の和の再現の差を、書き出しの D の差と比べる。拘束の行は変化 0 を要求)
@@ -277,12 +287,17 @@ def main():
             hs = np.maximum(np.max(outs["old"][k, :nfc, 50:75], axis=0), np.max(outs["new"][k, :nfc, 50:75], axis=0))
             scale = np.maximum(np.maximum(np.abs(Do[k]), np.abs(Dn[k])), hs).reshape(5, 5)   # 面の途中の和の大きさも含める
             u = np.maximum(ulp32(scale), np.finfo(np.float32).tiny)
-            worst_d = max(worst_d, float(np.max(np.abs(ddump - dpred) / u)))
+            rd_ = float(np.max(np.abs(ddump - dpred) / u))
+            if not np.isfinite(rd_):
+                raise ValueError(f"D の比較に非有限 (節点 {k})")
+            worst_d = max(worst_d, rd_)
         rec["intervention_D"] = {"max_ulp": worst_d}
         ok("V", "(c) D の変化が係数の変更の再現と ≤ 64 ulp", worst_d <= 64, worst_d)
         # 記録: 旧の書き出しと監査の記録の D・K が一致するか (別のバイナリ)
         rec["old_dump_vs_audit_bit"] = {n: bool(np.array_equal(arrays["old"][n].view(np.int64), aud[n].view(np.int64))) for n in ("D", "Kprev", "Knext")}
         rec["near_wall_K_change_max_rel"] = float(np.max(np.abs(Kn["Kprev"] - Ko["Kprev"]) / np.maximum(np.abs(Ko["Kprev"]), 1e-300)))
+        if not all(c[2] for c in checks if c[0] == "I"):
+            raise ValueError("入力のゲートに外れがある")
         r_ok = all(c[2] for c in checks if c[0] == "R")
         v_ok = all(c[2] for c in checks if c[0] == "V")
         verdict = "PASS (本試験へ進む)" if (r_ok and v_ok) else "INDETERMINATE (残差の変化か介入の不成立: 本試験へ進まない)"
