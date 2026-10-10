@@ -175,6 +175,16 @@
 
 `output_cellValNames` に含まれる変数だけが標準出力の対象になる。
 
+### 6.2a 幾何の量の精度 (2026-10-10 時点の現状)
+
+- 型は `flowFormat.hpp` の `flow_float` (状態) と `geom_float` (幾何) に分かれているが、幾何の配列 (`volume`・`ccx..ccz`・`sx..ss`・`pcx..pcz`・`fx`・`A_planar` など) も `variables` の `flow_float` の表 (`c`/`p`/`c_d`/`p_d`) に入っている。
+  - カーネルは `geom_float*` として受けるので、`geom_float` と `flow_float` を別の型にするとビルドが通らない。既定のビルドは両方 float、FP64 のビルドは両方 double。
+- 座標は、メッシュ HDF5 が double でも、読み込みで `geom_float` に丸める (`mesh.cpp` の読み込み)。
+- 節点間ベクトル `dcc = cc_j − cc_i`、面重心からの再構成ベクトル `pc − cc`、壁関数の代表点からの距離などは、**毎 step カーネルの中で、丸めた絶対座標の差として作る**。
+  - 対象: 粘性・拡散 (k/ω・化学種・受動種)、MUSCL / 辺中点の再構成、リミタ、DPLUR の粘性の対角、壁関数 y。LSQ 勾配の係数は読み込み時に作るが、元は丸めた座標。
+- 第一層厚 / 局所座標 が 1e-7〜1e-6 の冷却壁の格子では、float の座標で第一層が数 ulp になり、第一層厚が最大 28 % ずれた (2026-10-08、case/45)。そのため case/45 は FP64 のビルド (typedef 4 行 + `gmshReader` の `stod`) で回している (float の約 1.6〜2 倍遅い)。
+- 差を取る量を double の座標から作って float で渡し、状態だけを float にする計画: [`plans/active/architecture-float-state-double-geometry.md`](../../plans/active/architecture-float-state-double-geometry.md)。
+
 ### 6.3 `bcond`
 
 `bcond` は境界条件 1 種類分の情報を持つ。
