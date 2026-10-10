@@ -654,6 +654,14 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
   - `check_convergence` は記録する。NOT CONVERGED なら「同じ定常解に収束」「FP64 を全面的にやめられる」とは書かない。
 - **記録**: 実効設定の起動時の出力、je の範囲、各 run の準定常の詳細、`check_convergence`。再実行の差の物差しとして `run_0028/0029` (CHT)・`run_0030/0031` (層流)・S2 (gg/lsq の設定差) の数値は使わない (codex の異議を採用)。
 
+### 6.22 §6.21 の結果 (2026-10-10)
+
+- run (AWS `~/forge-wallfit/case/48.flat_plate_cooled_m4/`): float `run_0057_pv_f32a`・`run_0058_pv_f32b`、FP64 `run_0059_pv_f64a`・`run_0060_pv_f64b`。4 本とも 48,000 step を完走し、残差の全期間が有限、系列 24 点がそろった。起動時の出力で `scalarGradient: lsq (explicit)`・`slauWallNormalChi 1`。`check_convergence` は 4 本とも CHECK FAILURES (case/48 の既知の残差の床)。判定 `c48_prec_judge.json`。
+- **判定 (事前登録のとおり): 判別不能** (窓の対象量が 4 本すべてで STEADY でない)。FP64 の 2 本は全量 ALL STEADY。float の 2 本は閾値 1e-4 の組で NOT ALL STEADY: θ(0.3)・δ*(0.3) が OSCILLATING (両方)、δ*(0.6) が DRIFTING (`run_0057` だけ。縁の点 je が窓の中で 74〜76 を行き来した)。閾値 2e-4 の組 (Cf・q_w・CD・HF) は 4 本とも ALL STEADY。
+- 量ごとの D・E: δ*(0.6) は D 3.5e-5・E 8.0e-4 で判別不能、ほかの 13 量は D + E ≤ τ。D の最大は δ*(0.3) の 4.0e-5。
+- 記録: 窓の中の揺れの幅は、float が θ・δ*・q_w で相対 0.7〜2.0e-4、FP64 が 1e-7 程度 (3 桁小さい)。FP64 の 2 本は窓の平均で 1e-14 まで一致した。float の窓の平均と FP64 の差は、全量で 7e-5 以下。
+- **解釈は上位に諮っている** (`notes/reviews/briefs/2026-10-10-c48-precision-result.md`)。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -694,3 +702,4 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 - `2026-10-10` — ユーザ決定: r0・r1 のメモリの増加を受け入れる (§5.1 #12)。
 - `2026-10-10` — codex diagnose (V6 の改訂、C0/M6/m1) を全件採用。§6.21 に case/48 の float と FP64 の比較を事前登録し、`fl1_judge.py` を結果の前に直した (V4 の再評価は同じ判定)。§6.19 の Q_w の理由を訂正。
 - `2026-10-10` — 粘性 Jacobian plan の返却を反映した (§5.1 #15 の先行の証拠、#16 の条件)。
+- `2026-10-10` — §6.21 (case/48 の float と FP64 の比較) を回した (§6.22): 判別不能 (float の時間の揺れ 1e-4 が準定常の閾値を超えた)。解釈は諮問中。
