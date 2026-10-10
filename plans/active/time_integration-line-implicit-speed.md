@@ -86,7 +86,7 @@ A の契約は「`onLine && storeLU == 0` の節点は対角を組まない、RH
 | 3 | D | 閉形式の K。合格: 面積係数・TP の固有ベクトル・`rowDec`・既存の粘性の加算を含めて、旧の列抽出の K と同じ状態で成分の相対差 ≤ 1e-12 (FP64) | O |
 | 4 | B (double・LU) | 不採用 (2026-10-09、§6.0): 3 つの書き方とも案 A より遅い。並列版は opt-in で残す | O |
 | 5 | 検証の表 (§6) の他経路 | `lineImplicit 0`・部分被覆・可変長・`lineKFreeze 0/1`・周期ミラー・軸と壁の拘束行 (node のみ、cell は未検証と明記) | O |
-| 6 | 粘性 Jacobian plan との統合の後の再検証 | [time_integration-line-viscous-jacobian](time_integration-line-viscous-jacobian.md) は同じ D/K の組立を変える。速度の A/B では D/K の仕様を固定し、統合後に §6 を回し直す。2026-10-09: 粘性 Jacobian は本線不採用 (値 2・3 は診断として保留、既定 0 の D/K は不変) なので、既定の経路の再検証は不要 | O |
+| 6 | 粘性 Jacobian plan との統合の後の再検証 | [time_integration-line-viscous-jacobian](time_integration-line-viscous-jacobian.md) は同じ D/K の組立を変える。速度の A/B では D/K の仕様を固定し、統合後に §6 を回し直す。2026-10-09: 粘性 Jacobian は本線不採用 (値 2・3 は診断として保留、既定 0 の D/K は不変) なので、既定の経路の再検証は不要。**2026-10-10 の返却** (`forge-faceh` の `notes/sessions/2026-10-10-return-viscous-jacobian-close.md` (ブランチ `feature/faceh-audit-viscjac-close`)): 粘性 Jacobian plan は faceh ブランチで status done・`plans/accepted/` へ移した (本線不採用・診断として残置、codex result 段 GO-with-changes)。このブランチにはまだ移動が入っていないので、faceh ブランチをマージするときに上のリンクを `../accepted/time_integration-line-viscous-jacobian.md` に直す。U0 は未実施のまま閉じた (値 0 は §6.0 の B1 の短期の一致 `run_0276`〜`run_0281_abB_*` を補助証拠に引用。値 1・point・ISP 1 は 5ab83056 以降の不変を確かめていない) | O |
 | 7 | 逆行列の保存 (double、別の opt-in 実験) | **不採用 (2026-10-09、§6.3)**: 精度は LU と同等 (全ラインの η 2.3e-14) だが 1 step 34.64 → 41.13 ms (+19 %)。コードは opt-in のまま残す。実装: `FORGE_LINE_INV=1` (§6.2 に事前登録)。判断: 2026-10-09 codex 諮問 — 次の候補は double の逆行列の保存、C (float) は後回し。部分ピボット付き double LU から逆行列を作り、代入だけを行列ベクトル積に替える (D/K の組立と保存の精度は固定)。候補の基準 (実装前に確定): 緩和前のスケーリングした後退誤差 η ≤ 1e-11、物理尺度で正規化した補正の差 ≤ 1e-8、新しい分解の失敗 0。性能は逆行列の生成の費用を含め、native・専有 GPU・profiler なしの反復計測と、同じ品質までの総時間。B の失敗は「その実装の不採用」で、律速の原因の確定ではない | F |
 | 8 | C (Thomas を float、別の opt-in 実験) | **不採用 (2026-10-09、§6.5)**: η が上限 1e-5 を超えた (1.9e-5・1.5e-5)。速さも −0.8 / −1.8 ms/step (−2 / −5 %) と小さい。コードは opt-in のまま残す。実装: `FORGE_LINE_F32=1/2` (§6.4 に事前登録)。#7 の後。精度の組み合わせの表と、線形残差・長期の収束性能で採否。#10 の結果を見てから (演算でなくメモリが律速なら float の効果は小さい) | F |
 | 9 | 本線の評価 (方向別 dt + 上限 + point 仕上げの総壁時計) | 事前登録 v2 (§6.11、2026-10-10。v1 の §6.9 は撤回): 同じ出発点から point で水準に入るまでの総時間を、P (point だけ)・L0 (ライン 値 0 → point)・L5 (粘性入り: 値 3・マスク 5 → point、ユーザの指摘「粘性をライン向けのヤコビアンに入れたほうが良くね？」を受けた腕) で比べる。P・L0 は既存の系列の事後の集計 (v2 の規則で P 61.0 万 step、L0 ライン 13.5 万 + point 3.5 万)、L5 を新しく回す。残差の停滞に面エンタルピーの精度が効くかの監査は [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 (未着手)。**判定器の結果 (§6.14、2026-10-10)**: L5 1.38 ± 0.08 h・L0 1.49 ± 0.08 h・P 3.03 ± 0.05 h、L5 と L0 は判別不能 (水準と E2 への到達時間の比較に限る)。**判断: 2026-10-10 ユーザ決定 (§6.15)** — 終わりは水準だけ (E2 を外す)、P は測り直さない。水準だけでは L0 ライン 12.0 万・L5 ライン 11.5 万 step (≈ 1.16 / 1.18 h、判別不能)。本番はラインで水準まで (point 仕上げなし、値 0 を既定)。result 段の codex レビューは plan を閉じる前に回す | F |
@@ -433,6 +433,7 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
 
   - 差は約 70 s で、出力の間隔 1 回ぶん (約 180 s) より小さい。したがって判別不能。
   - LAYOUT2 (§6.12) を使えば、L0 は 120000 × 32.14 ms ≈ 1.07 h の見積もりになる (L5 での LAYOUT2 は未測定)。
+  - 引用の留保 (2026-10-10、粘性 Jacobian plan §6.17 が本節の L5 1.18 h 対 L0 1.16 h を「判別不能」として結論に使った、`forge-faceh` の `notes/sessions/2026-10-10-return-viscous-jacobian-close.md` (ブランチ `feature/faceh-audit-viscjac-close`)): 時間は専有の単価からの推定、両方とも `check_convergence` は NOT CONVERGED、θ_r の系列は TRANSIENT-UNSETTLED を含み、B0 (L0) は到達の条件が違う。
 - **本番の手順として残す形**: ラインで水準まで回して終える (point の仕上げはしない)。値 0 と粘性入りは総時間で区別できない。粘性入りは診断用の環境変数 `FORGE_LVC_TERMS=5` に頼っているので、本番は値 0 (`lineViscCoupling: 0`) を既定に残す。これは提案であり、§5.1 #9 の判断欄に書く。
 
 ### 6.16 事前登録: 1 step の時間のふるい (ライン長の上限・sweep の回数) と部分被覆での LAYOUT2 の照合 (2026-10-10)
@@ -701,3 +702,4 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
 - 2026-10-10: #22 はユーザ判断で確認しない (引き継ぎメモを取り下げ)。
 - 2026-10-10: §6.23 を事前登録した (float 化 plan の静止場の試験で、軸の近くに `hoopAreaFromClosure 0` 由来の偽の半径方向の力が見つかった。codex diagnose の勧めで、B0 の保存場から 0/1 の 2000 step の短い比較)。
 - 2026-10-10: §6.23 を回した (§6.24)。事前登録の判定は棄却 (closure の補正で床は短い時間では下がらない)。j 3 の局所の床だけ下がり、Q_w に −0.11 % のフラグ。延長しない。
+- `2026-10-10` — 粘性 Jacobian plan の返却を反映した (§5.1 #6 のリンクの移動と U0、§6.15 の引用の留保)。
