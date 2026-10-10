@@ -193,11 +193,35 @@ mesh::mesh(geom_int& nNodes,geom_int& nPlanes,geom_int& nCells, geom_int& nNorma
     this->bconds = bconds;
 }
 
+// 幾何のデータセットの型の確認 (plans/active/architecture-float-state-double-geometry.md §4.6 2.)。
+// readMesh が読む幾何のデータセットのうち、binary64 でない浮動小数点 (float32) のものを集めて 1 行の警告にまとめる。
+// 座標だけ double で他が float32 の混在の格子も拾う。止めはしない (既存の float32 の格子でも回せるように)。
+// 後から double に変換した格子は精度を回復しないので、この確認は生成時の精度の証明にはならない。
+static void warnFloat32Geometry(File& file)
+{
+    static const char* geomSets[] = { "/MESH/COORD", "/PLANES/surfVect", "/PLANES/surfArea", "/PLANES/centCoords",
+                                      "/CELLS/volume", "/CELLS/centCoords" };
+    string f32;
+    for (const char* name : geomSets) {
+        if (!file.exist(name)) continue;   // 欠損は下の読み込みで止まる
+        const DataType dt = file.getDataSet(name).getDataType();
+        if (dt.getClass() == DataTypeClass::Float && dt.getSize() < sizeof(double)) {
+            if (!f32.empty()) f32 += ", ";
+            f32 += name;
+        }
+    }
+    if (!f32.empty())
+        cout << "[mesh] WARNING: geometry datasets stored as float32 (" << f32 << "): geometric precision lost at "
+                "conversion cannot be recovered; reconvert with the current converter" << endl;
+}
+
 void mesh::readMesh(string fname)
 {
     File file(fname, File::ReadOnly);
 
-    // read basic 
+    warnFloat32Geometry(file);
+
+    // read basic
     Group group = file.getGroup("/MESH");
 
     Attribute a = group.getAttribute("nNodes");

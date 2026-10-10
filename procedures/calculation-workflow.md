@@ -73,6 +73,14 @@ run_0004_roe_baseline
 
 重要なのは、`solverConfig.yaml` がある新しい `run_*` ディレクトリを起点に変換と実行を行うことです。
 
+> **変換器の幾何の精度 (2026-10-10、plan `architecture-float-state-double-geometry` §4.6)**: `convertGmshToForge` は
+> どのビルド (float / FP64) でも、座標・面ベクトル・面積・面重心・体積・CV 重心・壁距離を double で計算し、
+> binary64 で HDF5 に書く (それ以前の float のビルドの変換器は float32 で書いていた)。幾何が float32 の古い格子では、
+> `forge` が起動時に `[mesh] WARNING: geometry datasets stored as float32 (...)` を 1 行出す (止まらない)。
+> **冷却壁など第一層が薄い格子** (例: case/45 の第一層厚 / 半径 ≈ 1e-7〜1e-6 は float32 では数 ulp) は、
+> 現行の変換器で `.msh` から変換し直すこと (float32 の h5 を後から double にしても失われた精度は戻らない)。
+> 2 つの変換結果の比較は `python3 solver_density_cuda/tools/compare_mesh_h5.py A.h5 B.h5 [--geometry-only]`。
+
 ## 実行前のバイナリ鮮度チェック (重要)
 
 `forge` を実行するコマンドは `solver_density_cuda/build/forge` を直接呼ぶだけで、**ソースの再ビルドを自動では行わない**。`cuda_forge/*.cu` などを編集した後に古い `build/forge` のまま計算すると、現行ソースと無関係な **stale バイナリの結果が silently に出る** (例: ソース側で実装した乱流モデルが反映されず、結果が壊れて見える)。

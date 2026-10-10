@@ -11,6 +11,7 @@
 #include <flowFormat.hpp>
 #include <mesh/elementType.hpp>
 #include <mesh/mesh.hpp>
+#include "mesh/convGeom64.hpp"
 #include <common/stringUtil.hpp>
 #include "common/vectorUtil.hpp"
 #include "variables.hpp"
@@ -36,24 +37,31 @@ class gmshReader : public mesh
 public:
     bool is3D;
 
+    // 幾何の正本 (double)。plan architecture-float-state-double-geometry §4.6: ビルドの型 (geom_float) に依らず、
+    // 座標・primal の幾何・双対の幾何・境界の半割面をここで double で計算して持ち、writeInputH5 はここから書く。
+    // 共用の mesh (nodes/planes/cells の geom_float) へは geo64.roundToShared で一方向に丸めて渡すだけ
+    // (初期値の設定・境界条件の読み込みなどが使う)。丸めた共用の値から幾何を計算し直して書くことはしない。
+    convGeom64 geo64;
+
     // ---- median-dual (node-centered) 前処理の生成物 ----
     // buildMedianDual() で構築。空なら writeInputH5 は /DUAL を書かない (cell モード)。
     // CV = ノード、双対面 = primal エッジ (2D では plane と 1:1)、CV 重心 = ノード座標。
     bool dualBuilt = false;
     bool axisCentroidShift = true;  // true: CV 面積加重重心を cell 中心に (軸 R=0 のゼロ体積回避)。
                                     // false: node 座標 (軸 R=0)。軸ソース OFF と併用前提。convertGmshToForge が cfg から設定。
-    std::vector<geom_float> dualVolume;     // [nNodes] 各ノードの双対 CV 体積 (2D は面積×単位厚み)
-    std::vector<geom_float> dualCentroid;   // [nNodes*3] 双対 CV の面積加重重心 (FV セル中心)。
+    // 幾何の量 (体積・重心・面ベクトル・面積・面重心) はビルドの型に依らず double (§4.6、正本 geo64 へ移す前の作業配列)。
+    std::vector<double>     dualVolume;     // [nNodes] 各ノードの双対 CV 体積 (2D は面積×単位厚み)
+    std::vector<double>     dualCentroid;   // [nNodes*3] 双対 CV の面積加重重心 (FV セル中心)。
                                             // 軸対称で重要: 軸上ノード(R=0)でも CV 重心 R>0 となり
                                             // 回転体積 volume=A_planar*r が非ゼロになる (theory §3.4)。
     std::vector<geom_int>   dualFaceCells;  // [nDualFaces*2] 双対面が繋ぐ 2 ノード {n0,n1}
-    std::vector<geom_float> dualFaceVect;   // [nDualFaces*3] 双対面ベクトル (n0->n1 向き)
-    std::vector<geom_float> dualFaceArea;   // [nDualFaces]   |dualFaceVect|
-    std::vector<geom_float> dualFaceCent;   // [nDualFaces*3] 双対面重心 (面積加重)
+    std::vector<double>     dualFaceVect;   // [nDualFaces*3] 双対面ベクトル (n0->n1 向き)
+    std::vector<double>     dualFaceArea;   // [nDualFaces]   |dualFaceVect|
+    std::vector<double>     dualFaceCent;   // [nDualFaces*3] 双対面重心 (面積加重)
     // 境界半割双対面: 境界ノードに割り当てる外向き面ベクトル (bcond ごと)。
     std::vector<geom_int>   dualBnodeId;    // [nBHalf]   境界ノード id (bcond 境界順に連結)
-    std::vector<geom_float> dualBnodeVect;  // [nBHalf*3] 外向き半割面ベクトル
-    std::vector<geom_float> dualBnodeCent;  // [nBHalf*3] 半割面の面積加重重心 (境界上, R≥0)。
+    std::vector<double>     dualBnodeVect;  // [nBHalf*3] 外向き半割面ベクトル
+    std::vector<double>     dualBnodeCent;  // [nBHalf*3] 半割面の面積加重重心 (境界上, R≥0)。
                                             // 軸対称 r 重みを正しくし、入口/出口 BC が軸近傍 corner CV に届くようにする。
     std::vector<geom_int>   dualBcondOffset;// [nBconds+1] bcond ごとの dualBnode* (emit 済=非壁) への CSR オフセット
     std::vector<geom_int>   dualBcondPhysID;// [nBconds]   各 bcond の physID (順序対応)
@@ -254,6 +262,13 @@ public:
         vector<node> newNodes(n);
         for (geom_int i = 0; i < n; ++i) newNodes[i] = this->nodes[order[i]];
         this->nodes.swap(newNodes);
+        // 座標の正本 (double) も同じ順に並べ替える
+        {
+            std::vector<double> newCoord(3*(size_t)n);
+            for (geom_int i = 0; i < n; ++i)
+                for (int k = 0; k < 3; ++k) newCoord[3*(size_t)i + k] = this->geo64.nodeCoord[3*(size_t)order[i] + k];
+            this->geo64.nodeCoord.swap(newCoord);
+        }
         for (auto& ent : elements_summary)
             for (auto& ele : ent.elements)
                 for (auto& id : ele.iNodes) id = inv[id];
@@ -484,6 +499,7 @@ public:
         }
 
         geom_int id_now = 0;
+        this->geo64.nodeCoord.reserve(3*(size_t)this->nNodes);
 
         while (id_now < this->nNodes)
         {
@@ -502,16 +518,19 @@ public:
             {
                 getline(inputFile, line);
                 splitOnSpace(l_str, line);
-                // 節点座標は geom_float の精度で読む (2026-10-08、plan tooling-nozzle-isothermal-wall-chain §5.1 #16):
-                // double のビルドで stof を使うと、座標が float に丸められてから double に入る (冷却壁の第一層厚 / 半径 3.4e-7 が
-                // float の数 ulp になり 25 % ずれた)。float のビルドは従来どおり stof (変換結果はビット同一)。
-                auto parse_coord = [](const std::string& s) -> geom_float {
-                    if constexpr (std::is_same<geom_float, double>::value) { return std::stod(s); }
-                    else { return std::stof(s); }
-                };
-                geom_float x = parse_coord(l_str[0]);
-                geom_float y = parse_coord(l_str[1]);
-                geom_float z = parse_coord(l_str[2]);
+                // 節点座標はビルドの型に依らず double (stod) で読み、正本 geo64 に置く (plan architecture-float-state-double-geometry
+                // §4.6)。旧は geom_float の精度 (float のビルドは stof) で読んでいたので、float のビルドの変換器は冷却壁の第一層
+                // (厚さ / 半径 ~1e-7) を数 ulp に丸めていた (tooling-nozzle-isothermal-wall-chain §5.1 #16)。
+                // 共用の node には丸めた値を渡す (FP64 のビルドでは丸めは恒等)。
+                const double xd = std::stod(l_str[0]);
+                const double yd = std::stod(l_str[1]);
+                const double zd = std::stod(l_str[2]);
+                this->geo64.nodeCoord.push_back(xd);
+                this->geo64.nodeCoord.push_back(yd);
+                this->geo64.nodeCoord.push_back(zd);
+                geom_float x = static_cast<geom_float>(xd);
+                geom_float y = static_cast<geom_float>(yd);
+                geom_float z = static_cast<geom_float>(zd);
 
                 node node_temp = node(x, y, z);
                 this->nodes.push_back(node_temp);
@@ -975,30 +994,42 @@ public:
         // ------------------------------------------------
         // *** calculate surface vector & area & center ***
         // ------------------------------------------------
-        for (auto& pln : planes)
+        // 幾何はビルドの型に依らず double の正本 geo64 で計算する (plan architecture-float-state-double-geometry §4.6)。
+        // 式と演算の順序は旧 (geom_float で計算していた版) と同じなので、FP64 のビルドでは旧と同じ値になる。
+        // 共用の planes/cells へは、下で向きをそろえた後に geo64.roundToShared で一方向に丸めて渡す。
+        const std::vector<double>& X = this->geo64.nodeCoord;   // 節点座標 [3*iNode + k]
+        auto xc = [&X](geom_int n, int k) -> double { return X[3*(size_t)n + k]; };
+        const size_t nPl = this->planes.size();
+        this->geo64.planeSurfVect.assign(3*nPl, 0.0);
+        this->geo64.planeSurfArea.assign(nPl, 0.0);
+        this->geo64.planeCent.assign(3*nPl, 0.0);
+        for (size_t ipl = 0; ipl < nPl; ++ipl)
         {
+            const auto& pln = this->planes[ipl];
+            double* sv = &this->geo64.planeSurfVect[3*ipl];
+            double& sa = this->geo64.planeSurfArea[ipl];
+            double* pc = &this->geo64.planeCent[3*ipl];
+
             if (pln.iNodes.size() == 3) // triangle
             {
                 geom_int n0 = pln.iNodes[0];
                 geom_int n1 = pln.iNodes[1];
                 geom_int n2 = pln.iNodes[2];
 
-                geom_float r01x = nodes[n1].coords[0] - nodes[n0].coords[0];
-                geom_float r01y = nodes[n1].coords[1] - nodes[n0].coords[1];
-                geom_float r01z = nodes[n1].coords[2] - nodes[n0].coords[2];
+                double r01x = xc(n1,0) - xc(n0,0);
+                double r01y = xc(n1,1) - xc(n0,1);
+                double r01z = xc(n1,2) - xc(n0,2);
 
-                geom_float r02x = nodes[n2].coords[0] - nodes[n0].coords[0];
-                geom_float r02y = nodes[n2].coords[1] - nodes[n0].coords[1];
-                geom_float r02z = nodes[n2].coords[2] - nodes[n0].coords[2];
+                double r02x = xc(n2,0) - xc(n0,0);
+                double r02y = xc(n2,1) - xc(n0,1);
+                double r02z = xc(n2,2) - xc(n0,2);
 
-                pln.surfVect.resize(3);
-
-                pln.surfVect[0] = -0.5*(r01y*r02z -r01z*r02y);
-                pln.surfVect[1] = -0.5*(r01z*r02x -r01x*r02z);
-                pln.surfVect[2] = -0.5*(r01x*r02y -r01y*r02x);
-                pln.surfArea = std::sqrt(  std::pow(pln.surfVect[0] , 2.0) 
-                                         + std::pow(pln.surfVect[1] , 2.0)
-                                         + std::pow(pln.surfVect[2] , 2.0) );
+                sv[0] = -0.5*(r01y*r02z -r01z*r02y);
+                sv[1] = -0.5*(r01z*r02x -r01x*r02z);
+                sv[2] = -0.5*(r01x*r02y -r01y*r02x);
+                sa = std::sqrt(  std::pow(sv[0] , 2.0) 
+                               + std::pow(sv[1] , 2.0)
+                               + std::pow(sv[2] , 2.0) );
 
             } else if (pln.iNodes.size() == 4) { // quad 
 
@@ -1007,77 +1038,75 @@ public:
                 geom_int n2 = pln.iNodes[2];
                 geom_int n3 = pln.iNodes[3];
 
-                geom_float r02x = nodes[n2].coords[0] - nodes[n0].coords[0];
-                geom_float r02y = nodes[n2].coords[1] - nodes[n0].coords[1];
-                geom_float r02z = nodes[n2].coords[2] - nodes[n0].coords[2];
+                double r02x = xc(n2,0) - xc(n0,0);
+                double r02y = xc(n2,1) - xc(n0,1);
+                double r02z = xc(n2,2) - xc(n0,2);
 
-                geom_float r13x = nodes[n1].coords[0] - nodes[n3].coords[0];
-                geom_float r13y = nodes[n1].coords[1] - nodes[n3].coords[1];
-                geom_float r13z = nodes[n1].coords[2] - nodes[n3].coords[2];
+                double r13x = xc(n1,0) - xc(n3,0);
+                double r13y = xc(n1,1) - xc(n3,1);
+                double r13z = xc(n1,2) - xc(n3,2);
 
-                pln.surfVect.resize(3);
-
-                pln.surfVect[0] = -0.5*(r02y*r13z -r02z*r13y);
-                pln.surfVect[1] = -0.5*(r02z*r13x -r02x*r13z);
-                pln.surfVect[2] = -0.5*(r02x*r13y -r02y*r13x);
-                pln.surfArea = std::sqrt(  std::pow(pln.surfVect[0] , 2.0) 
-                                         + std::pow(pln.surfVect[1] , 2.0)
-                                         + std::pow(pln.surfVect[2] , 2.0) );
+                sv[0] = -0.5*(r02y*r13z -r02z*r13y);
+                sv[1] = -0.5*(r02z*r13x -r02x*r13z);
+                sv[2] = -0.5*(r02x*r13y -r02y*r13x);
+                sa = std::sqrt(  std::pow(sv[0] , 2.0) 
+                               + std::pow(sv[1] , 2.0)
+                               + std::pow(sv[2] , 2.0) );
 
             } else if (pln.iNodes.size() == 2) { // line (2D)
 
                 geom_int n0 = pln.iNodes[0];
                 geom_int n1 = pln.iNodes[1];
 
-                geom_float r01x = nodes[n1].coords[0] - nodes[n0].coords[0];
-                geom_float r01y = nodes[n1].coords[1] - nodes[n0].coords[1];
-                geom_float r01z = nodes[n1].coords[2] - nodes[n0].coords[2];
-
-                pln.surfVect.resize(3);
+                double r01x = xc(n1,0) - xc(n0,0);
+                double r01y = xc(n1,1) - xc(n0,1);
 
                 // For CCW-wound 2D cells (Gmsh default), edges traverse the cell
                 // counter-clockwise; rotating the edge vector by -90 deg gives the
                 // outward normal (consistent with the c0->c1 sv convention used by
                 // the flux/BC kernels).
-                pln.surfVect[0] =+r01y;
-                pln.surfVect[1] =-r01x;
-                pln.surfVect[2] = 0.0;
-                pln.surfArea = std::sqrt(  std::pow(pln.surfVect[0] , 2.0) 
-                                         + std::pow(pln.surfVect[1] , 2.0)
-                                         + std::pow(pln.surfVect[2] , 2.0) );
+                sv[0] =+r01y;
+                sv[1] =-r01x;
+                sv[2] = 0.0;
+                sa = std::sqrt(  std::pow(sv[0] , 2.0) 
+                               + std::pow(sv[1] , 2.0)
+                               + std::pow(sv[2] , 2.0) );
 
             }
             // set face center
-            pln.centCoords.resize(3);
-
-            pln.centCoords[0] = 0.0;
-            pln.centCoords[1] = 0.0;
-            pln.centCoords[2] = 0.0;
+            pc[0] = 0.0;
+            pc[1] = 0.0;
+            pc[2] = 0.0;
             for (auto &n : pln.iNodes)
             {
-                pln.centCoords[0] += nodes[n].coords[0];
-                pln.centCoords[1] += nodes[n].coords[1];
-                pln.centCoords[2] += nodes[n].coords[2];
+                pc[0] += xc(n,0);
+                pc[1] += xc(n,1);
+                pc[2] += xc(n,2);
             }
-            pln.centCoords[0] = pln.centCoords[0]/pln.iNodes.size();
-            pln.centCoords[1] = pln.centCoords[1]/pln.iNodes.size();
-            pln.centCoords[2] = pln.centCoords[2]/pln.iNodes.size();
+            pc[0] = pc[0]/pln.iNodes.size();
+            pc[1] = pc[1]/pln.iNodes.size();
+            pc[2] = pc[2]/pln.iNodes.size();
         }
 
         cout << "calculate volume" << endl;
         // ------------------------
         // *** calculate volume ***
         // ------------------------
-        for (auto &icell : cells)
+        const size_t nCl = this->cells.size();
+        this->geo64.cellVolume.assign(nCl, 0.0);
+        this->geo64.cellCent.assign(3*nCl, 0.0);
+        for (size_t icl = 0; icl < nCl; ++icl)
         {
-            geom_float volume = 0.0 ;
+            const auto& icell = this->cells[icl];
+            double volume = 0.0 ;
+            double& cellVol = this->geo64.cellVolume[icl];
 
             elementTypeFormat eleType;
             eleType = this->eleTypeMap.mapElementFromGmshID[icell.ieleType];
 
             if (eleType.name == "tetra") // tetra (elementType.hpp の登録名は "tetra")
             {
-                icell.volume = tetraVolume(icell);
+                cellVol = tetraVolume(icell);
             }
 
             if (eleType.name == "hex") // hexahedral
@@ -1109,7 +1138,7 @@ public:
                 vector<geom_int> iNodes_temp6 = {n2, n4, n7, n5};
                 volume += tetraVolume(cell(iNodes_temp6));
 
-                icell.volume = volume;
+                cellVol = volume;
             }
 
             if (eleType.name == "prism") 
@@ -1130,7 +1159,7 @@ public:
                 vector<geom_int> iNodes_temp3 = {n0, n2, n1, n5};
                 volume += tetraVolume(cell(iNodes_temp3));
 
-                icell.volume = volume;
+                cellVol = volume;
             }
 
             if (eleType.name == "pyramid") 
@@ -1147,7 +1176,7 @@ public:
                 vector<geom_int> iNodes_temp2 = {n0, n3, n2, n4};
                 volume += tetraVolume(cell(iNodes_temp2));
 
-                icell.volume = volume;
+                cellVol = volume;
             }
 
             if (eleType.name == "quad") 
@@ -1157,23 +1186,22 @@ public:
                 geom_int n2 = icell.iNodes[2];
                 geom_int n3 = icell.iNodes[3];
 
-                geom_float r02x = nodes[n2].coords[0] - nodes[n0].coords[0];
-                geom_float r02y = nodes[n2].coords[1] - nodes[n0].coords[1];
-                geom_float r02z = nodes[n2].coords[2] - nodes[n0].coords[2];
+                double r02x = xc(n2,0) - xc(n0,0);
+                double r02y = xc(n2,1) - xc(n0,1);
+                double r02z = xc(n2,2) - xc(n0,2);
 
-                geom_float r13x = nodes[n1].coords[0] - nodes[n3].coords[0];
-                geom_float r13y = nodes[n1].coords[1] - nodes[n3].coords[1];
-                geom_float r13z = nodes[n1].coords[2] - nodes[n3].coords[2];
+                double r13x = xc(n1,0) - xc(n3,0);
+                double r13y = xc(n1,1) - xc(n3,1);
 
 
-                geom_float sv1 = -0.5*(          -r02z*r13y);
-                geom_float sv2 = -0.5*(r02z*r13x           );
-                geom_float sv3 = -0.5*(r02x*r13y -r02y*r13x);
-                geom_float ss  = std::sqrt(  std::pow(sv1 , 2.0) 
-                                           + std::pow(sv2 , 2.0)
-                                           + std::pow(sv3 , 2.0) );
+                double sv1 = -0.5*(          -r02z*r13y);
+                double sv2 = -0.5*(r02z*r13x           );
+                double sv3 = -0.5*(r02x*r13y -r02y*r13x);
+                double ss  = std::sqrt(  std::pow(sv1 , 2.0) 
+                                       + std::pow(sv2 , 2.0)
+                                       + std::pow(sv3 , 2.0) );
 
-                icell.volume = ss;
+                cellVol = ss;
             }
 
             if (eleType.name == "triangle") 
@@ -1182,39 +1210,38 @@ public:
                 geom_int n1 = icell.iNodes[1];
                 geom_int n2 = icell.iNodes[2];
 
-                geom_float r01x = nodes[n1].coords[0] - nodes[n0].coords[0];
-                geom_float r01y = nodes[n1].coords[1] - nodes[n0].coords[1];
-                geom_float r01z = nodes[n1].coords[2] - nodes[n0].coords[2];
+                double r01x = xc(n1,0) - xc(n0,0);
+                double r01y = xc(n1,1) - xc(n0,1);
+                double r01z = xc(n1,2) - xc(n0,2);
 
-                geom_float r02x = nodes[n2].coords[0] - nodes[n0].coords[0];
-                geom_float r02y = nodes[n2].coords[1] - nodes[n0].coords[1];
-                geom_float r02z = nodes[n2].coords[2] - nodes[n0].coords[2];
+                double r02x = xc(n2,0) - xc(n0,0);
+                double r02y = xc(n2,1) - xc(n0,1);
+                double r02z = xc(n2,2) - xc(n0,2);
 
-                geom_float sv1 = -0.5*(r01y*r02z -r01z*r02y);
-                geom_float sv2 = -0.5*(r01z*r02x -r01x*r02z);
-                geom_float sv3 = -0.5*(r01x*r02y -r01y*r02x);
-                geom_float ss  = std::sqrt(  std::pow(sv1 , 2.0) 
-                                           + std::pow(sv2 , 2.0)
-                                           + std::pow(sv3 , 2.0) );
+                double sv1 = -0.5*(r01y*r02z -r01z*r02y);
+                double sv2 = -0.5*(r01z*r02x -r01x*r02z);
+                double sv3 = -0.5*(r01x*r02y -r01y*r02x);
+                double ss  = std::sqrt(  std::pow(sv1 , 2.0) 
+                                       + std::pow(sv2 , 2.0)
+                                       + std::pow(sv3 , 2.0) );
 
-                icell.volume = ss;
+                cellVol = ss;
             }
 
             // set volume center
-            icell.centCoords.resize(3);
-
-            icell.centCoords[0] = 0.0;
-            icell.centCoords[1] = 0.0;
-            icell.centCoords[2] = 0.0;
+            double* cc = &this->geo64.cellCent[3*icl];
+            cc[0] = 0.0;
+            cc[1] = 0.0;
+            cc[2] = 0.0;
             for (auto &n : icell.iNodes)
             {
-                icell.centCoords[0] += nodes[n].coords[0];
-                icell.centCoords[1] += nodes[n].coords[1];
-                icell.centCoords[2] += nodes[n].coords[2];
+                cc[0] += xc(n,0);
+                cc[1] += xc(n,1);
+                cc[2] += xc(n,2);
             }
-            icell.centCoords[0] = icell.centCoords[0]/icell.iNodes.size();
-            icell.centCoords[1] = icell.centCoords[1]/icell.iNodes.size();
-            icell.centCoords[2] = icell.centCoords[2]/icell.iNodes.size();
+            cc[0] = cc[0]/icell.iNodes.size();
+            cc[1] = cc[1]/icell.iNodes.size();
+            cc[2] = cc[2]/icell.iNodes.size();
         }
 
         // 面法線 (surfVect) の向きをそろえる。
@@ -1225,19 +1252,21 @@ public:
         // CW 判定はセル断面が XY 平面に乗る Z 押し出し以外の 3D セルで破綻し、
         // 境界面・内部面の法線を誤って反転させて偽の勾配を生むため使わない。
         // 2D メッシュは従来どおり CW(shoelace) ベースの判定を維持する (回帰防止)。
+        // 判定も反転も正本 geo64 (double) の上で行う (§4.6)。
+        std::vector<double>& SV = this->geo64.planeSurfVect;   // [3*iPlane + k]
         if (is3D)
         {
             // 桁落ち対策 (§2.5.6, plan discretization-median-dual-2d-facevect-precision 残件消化):
-            // 整向内積 Db/D を float 絶対座標 (格納 centCoords) で評価すると、薄セルでは
+            // 整向内積 Db/D を絶対座標 (格納 centCoords) で評価すると、薄セルでは
             // 面重心−セル重心 (~セル半厚) が座標丸めに埋まり符号が誤反転し得る (2D CW 判定と同根)。
             // 面の先頭ノードをローカル原点に取り、面重心・セル重心 (=ノード算術平均、makeMesh の
             // centCoords と同定義) を double で再構成して評価する。
             auto cellCentRel = [&](geom_int ic, const double o[3], double out[3]) {
                 out[0] = out[1] = out[2] = 0.0;
                 for (geom_int nn : cells[ic].iNodes) {
-                    out[0] += (double)nodes[nn].coords[0] - o[0];
-                    out[1] += (double)nodes[nn].coords[1] - o[1];
-                    out[2] += (double)nodes[nn].coords[2] - o[2];
+                    out[0] += xc(nn,0) - o[0];
+                    out[1] += xc(nn,1) - o[1];
+                    out[2] += xc(nn,2) - o[2];
                 }
                 const double inv = 1.0 / (double)cells[ic].iNodes.size();
                 out[0] *= inv; out[1] *= inv; out[2] *= inv;
@@ -1247,10 +1276,11 @@ public:
             for (geom_int i = 0; i < (geom_int)planes.size(); ++i)
             {
                 auto& pln = planes[i];
+                double* sv = &SV[3*(size_t)i];
                 geom_int ic0 = pln.iCells[0];
-                const double o[3] = { nodes[pln.iNodes[0]].coords[0],
-                                      nodes[pln.iNodes[0]].coords[1],
-                                      nodes[pln.iNodes[0]].coords[2] };
+                const double o[3] = { xc(pln.iNodes[0],0),
+                                      xc(pln.iNodes[0],1),
+                                      xc(pln.iNodes[0],2) };
                 double c0[3]; cellCentRel(ic0, o, c0);
 
                 if (pln.iCells.size() == 1)
@@ -1259,20 +1289,20 @@ public:
                     double fx = 0.0, fy = 0.0, fz = 0.0;
                     for (geom_int nn : pln.iNodes)
                     {
-                        fx += (double)nodes[nn].coords[0] - o[0];
-                        fy += (double)nodes[nn].coords[1] - o[1];
-                        fz += (double)nodes[nn].coords[2] - o[2];
+                        fx += xc(nn,0) - o[0];
+                        fy += xc(nn,1) - o[1];
+                        fz += xc(nn,2) - o[2];
                     }
                     const double inv = 1.0 / (double)pln.iNodes.size();
                     fx *= inv; fy *= inv; fz *= inv;
-                    const double Db = (fx - c0[0])*(double)pln.surfVect[0]
-                                    + (fy - c0[1])*(double)pln.surfVect[1]
-                                    + (fz - c0[2])*(double)pln.surfVect[2];
+                    const double Db = (fx - c0[0])*sv[0]
+                                    + (fy - c0[1])*sv[1]
+                                    + (fz - c0[2])*sv[2];
                     if (Db < 0.0)
                     {
-                        pln.surfVect[0] = -pln.surfVect[0];
-                        pln.surfVect[1] = -pln.surfVect[1];
-                        pln.surfVect[2] = -pln.surfVect[2];
+                        sv[0] = -sv[0];
+                        sv[1] = -sv[1];
+                        sv[2] = -sv[2];
                         nFixedBnd += 1;
                     }
                     continue;
@@ -1280,14 +1310,14 @@ public:
 
                 // 内部面: ic0 -> ic1 方向にそろえる
                 double c1[3]; cellCentRel(pln.iCells[1], o, c1);
-                const double D = (c1[0]-c0[0])*(double)pln.surfVect[0]
-                               + (c1[1]-c0[1])*(double)pln.surfVect[1]
-                               + (c1[2]-c0[2])*(double)pln.surfVect[2];
+                const double D = (c1[0]-c0[0])*sv[0]
+                               + (c1[1]-c0[1])*sv[1]
+                               + (c1[2]-c0[2])*sv[2];
                 if (D < 0.0)
                 {
-                    pln.surfVect[0] = -pln.surfVect[0];
-                    pln.surfVect[1] = -pln.surfVect[1];
-                    pln.surfVect[2] = -pln.surfVect[2];
+                    sv[0] = -sv[0];
+                    sv[1] = -sv[1];
+                    sv[2] = -sv[2];
                     nFixed += 1;
                 }
             }
@@ -1308,15 +1338,15 @@ public:
                 const auto& cel = cells[ic];
                 geom_int nn = (geom_int)cel.iNodes.size();
                 if (nn < 3) continue; // 辺要素はスキップ
-                const double ox = nodes[cel.iNodes[0]].coords[0];
-                const double oy = nodes[cel.iNodes[0]].coords[1];
+                const double ox = xc(cel.iNodes[0],0);
+                const double oy = xc(cel.iNodes[0],1);
                 double signedArea = 0.0;
                 for (geom_int k = 0; k < nn; ++k)
                 {
-                    const auto& n0 = nodes[cel.iNodes[k]].coords;
-                    const auto& n1 = nodes[cel.iNodes[(k+1)%nn]].coords;
-                    const double x0 = (double)n0[0] - ox, y0 = (double)n0[1] - oy;
-                    const double x1 = (double)n1[0] - ox, y1 = (double)n1[1] - oy;
+                    const geom_int m0 = cel.iNodes[k];
+                    const geom_int m1 = cel.iNodes[(k+1)%nn];
+                    const double x0 = xc(m0,0) - ox, y0 = xc(m0,1) - oy;
+                    const double x1 = xc(m1,0) - ox, y1 = xc(m1,1) - oy;
                     signedArea += x0*y1 - x1*y0;
                 }
                 isCW[ic] = (signedArea < 0.0);
@@ -1331,6 +1361,7 @@ public:
             for (geom_int i = 0; i < (geom_int)planes.size(); ++i)
             {
                 auto& pln = planes[i];
+                double* sv = &SV[3*(size_t)i];
                 geom_int ic0 = pln.iCells[0];
 
                 if (pln.iCells.size() == 1)
@@ -1338,9 +1369,9 @@ public:
                     // 境界面: ic0 が CW なら sv が内向きなので反転する
                     if (isCW[ic0])
                     {
-                        pln.surfVect[0] = -pln.surfVect[0];
-                        pln.surfVect[1] = -pln.surfVect[1];
-                        pln.surfVect[2] = -pln.surfVect[2];
+                        sv[0] = -sv[0];
+                        sv[1] = -sv[1];
+                        sv[2] = -sv[2];
                         nFixedBnd += 1;
                     }
                     continue;
@@ -1350,18 +1381,18 @@ public:
                 geom_int ic1 = pln.iCells[1];
                 if (isCW[ic0])
                 {
-                    pln.surfVect[0] = -pln.surfVect[0];
-                    pln.surfVect[1] = -pln.surfVect[1];
-                    pln.surfVect[2] = -pln.surfVect[2];
+                    sv[0] = -sv[0];
+                    sv[1] = -sv[1];
+                    sv[2] = -sv[2];
                     nFixed += 1;
                 }
                 else
                 {
-                    const auto& cc0 = cells[ic0].centCoords;
-                    const auto& cc1 = cells[ic1].centCoords;
-                    const geom_float D = (cc1[0]-cc0[0])*pln.surfVect[0]
-                                       + (cc1[1]-cc0[1])*pln.surfVect[1]
-                                       + (cc1[2]-cc0[2])*pln.surfVect[2];
+                    const double* cc0 = &this->geo64.cellCent[3*(size_t)ic0];
+                    const double* cc1 = &this->geo64.cellCent[3*(size_t)ic1];
+                    const double D = (cc1[0]-cc0[0])*sv[0]
+                                   + (cc1[1]-cc0[1])*sv[1]
+                                   + (cc1[2]-cc0[2])*sv[2];
                     if (D < 0.0) nSkipped += 1;
                 }
             }
@@ -1370,29 +1401,34 @@ public:
                 cout << "WARNING: " << nSkipped << " internal faces have D<0 but ic0 is CCW (skewed mesh)\n";
         }
 
+        // 共用の planes/cells へ一方向に丸めて渡す (向きをそろえた後の正本から)。
+        this->geo64.roundToShared(this->planes);
+        this->geo64.roundToShared(this->cells);
+
     }
 
-    geom_float tetraVolume(const cell &tetra)
+    // 四面体の体積 (正本 geo64 の double の座標から)。式は旧 (geom_float 版) と同じ。
+    double tetraVolume(const cell &tetra)
     {
-        node n0 = nodes[tetra.iNodes[0]];
-        node n1 = nodes[tetra.iNodes[1]];
-        node n2 = nodes[tetra.iNodes[2]];
-        node n3 = nodes[tetra.iNodes[3]];
+        const double* p0 = &this->geo64.nodeCoord[3*(size_t)tetra.iNodes[0]];
+        const double* p1 = &this->geo64.nodeCoord[3*(size_t)tetra.iNodes[1]];
+        const double* p2 = &this->geo64.nodeCoord[3*(size_t)tetra.iNodes[2]];
+        const double* p3 = &this->geo64.nodeCoord[3*(size_t)tetra.iNodes[3]];
 
-        geom_float ax = n2.coords[0] - n0.coords[0]; 
-        geom_float ay = n2.coords[1] - n0.coords[1];
-        geom_float az = n2.coords[2] - n0.coords[2];
+        double ax = p2[0] - p0[0]; 
+        double ay = p2[1] - p0[1];
+        double az = p2[2] - p0[2];
 
-        geom_float bx = n1.coords[0] - n0.coords[0]; 
-        geom_float by = n1.coords[1] - n0.coords[1];
-        geom_float bz = n1.coords[2] - n0.coords[2];
+        double bx = p1[0] - p0[0]; 
+        double by = p1[1] - p0[1];
+        double bz = p1[2] - p0[2];
 
-        geom_float cx = n3.coords[0] - n0.coords[0]; 
-        geom_float cy = n3.coords[1] - n0.coords[1];
-        geom_float cz = n3.coords[2] - n0.coords[2];
+        double cx = p3[0] - p0[0]; 
+        double cy = p3[1] - p0[1];
+        double cz = p3[2] - p0[2];
 
-        geom_float volume = ((ay*bz -az*by)*cx +(az*bx -ax*bz)*cy +(ax*by -ay*bx)*cz)/6.0;
-        volume = abs(volume);
+        double volume = ((ay*bz -az*by)*cx +(az*bx -ax*bz)*cy +(ax*by -ay*bx)*cz)/6.0;
+        volume = std::fabs(volume);
 
         if (volume < 1.0e-20) cout << "WARNING : Too small volume\n" ;
 
@@ -1431,6 +1467,12 @@ public:
         dualFaceArea.assign(nP, 0.0);
         dualFaceCent.assign(nP * 3, 0.0);
 
+        // 入力の幾何は正本 geo64 (double) から読み、生成物も double で持つ (plan architecture-float-state-double-geometry
+        // §4.6)。式と演算の順序は旧 (geom_float 版) と同じなので、FP64 のビルドでは旧と同じ値になる。
+        const std::vector<double>& X  = this->geo64.nodeCoord;   // [3*iNode + k]
+        const std::vector<double>& CC = this->geo64.cellCent;    // [3*iCell + k]
+        auto xc = [&X](geom_int n, int k) -> double { return X[3*(size_t)n + k]; };
+
         // ---- 双対面: primal エッジ ip ごとに 1 枚。隣接セルの (midpoint -> centroid)
         //      区間を集約。法線は n0->n1 向きに統一 (cell-centered 規約と同型)。
         for (geom_int ip = 0; ip < nP; ++ip)
@@ -1445,8 +1487,8 @@ public:
             // (第一セル数 μm 級) では丸めが領域寸法で増幅され**内積の符号が誤反転**して
             // 面 1 枚が逆向きに入り閉性が壊れる (M6 NS 2.4 μm で normalized 0.099 の実害)。
             // エッジ中点 M 相対 + double で評価する (平行移動不変なので厳密演算では同値)。
-            const double Axd = nodes[A].coords[0], Ayd = nodes[A].coords[1];
-            const double Bxd = nodes[B].coords[0], Byd = nodes[B].coords[1];
+            const double Axd = xc(A,0), Ayd = xc(A,1);
+            const double Bxd = xc(B,0), Byd = xc(B,1);
             const double Mx = 0.5*(Axd + Bxd);
             const double My = 0.5*(Ayd + Byd);
 
@@ -1458,8 +1500,8 @@ public:
 
             for (const geom_int ic : this->planes[ip].iCells)
             {
-                const double Gx = cells[ic].centCoords[0];
-                const double Gy = cells[ic].centCoords[1];
+                const double Gx = CC[3*(size_t)ic + 0];
+                const double Gy = CC[3*(size_t)ic + 1];
 
                 // 区間 midpoint(M) -> centroid(G)。単位厚みの面ベクトルは rotate(-90)。
                 const double sx = Gx - Mx;
@@ -1476,16 +1518,16 @@ public:
                 wsum += seglen;
             }
 
-            dualFaceVect[3*ip + 0] = static_cast<geom_float>(vx);
-            dualFaceVect[3*ip + 1] = static_cast<geom_float>(vy);
+            dualFaceVect[3*ip + 0] = vx;
+            dualFaceVect[3*ip + 1] = vy;
             dualFaceVect[3*ip + 2] = 0.0;
-            dualFaceArea[ip] = static_cast<geom_float>(std::sqrt(vx*vx + vy*vy));
+            dualFaceArea[ip] = std::sqrt(vx*vx + vy*vy);
             if (wsum > 0.0) {
-                dualFaceCent[3*ip + 0] = static_cast<geom_float>(Mx + cx / wsum);
-                dualFaceCent[3*ip + 1] = static_cast<geom_float>(My + cy / wsum);
+                dualFaceCent[3*ip + 0] = Mx + cx / wsum;
+                dualFaceCent[3*ip + 1] = My + cy / wsum;
             } else {
-                dualFaceCent[3*ip + 0] = static_cast<geom_float>(Mx);
-                dualFaceCent[3*ip + 1] = static_cast<geom_float>(My);
+                dualFaceCent[3*ip + 0] = Mx;
+                dualFaceCent[3*ip + 1] = My;
             }
             dualFaceCent[3*ip + 2] = 0.0;
         }
@@ -1494,13 +1536,13 @@ public:
         //      M1,M2 = そのセルで A に接する 2 エッジの中点。
         for (geom_int ic = 0; ic < this->nCells; ++ic)
         {
-            const geom_float Gx = cells[ic].centCoords[0];
-            const geom_float Gy = cells[ic].centCoords[1];
+            const double Gx = CC[3*(size_t)ic + 0];
+            const double Gy = CC[3*(size_t)ic + 1];
 
             for (const geom_int A : cells[ic].iNodes)
             {
                 // A に接する 2 エッジの中点を集める
-                geom_float mid[2][2];
+                double mid[2][2];
                 int nmid = 0;
                 for (const geom_int ip : cells[ic].iPlanes)
                 {
@@ -1508,8 +1550,8 @@ public:
                     const geom_int e1 = this->planes[ip].iNodes[1];
                     if (e0 != A && e1 != A) continue;
                     if (nmid < 2) {
-                        mid[nmid][0] = 0.5*(nodes[e0].coords[0] + nodes[e1].coords[0]);
-                        mid[nmid][1] = 0.5*(nodes[e0].coords[1] + nodes[e1].coords[1]);
+                        mid[nmid][0] = 0.5*(xc(e0,0) + xc(e1,0));
+                        mid[nmid][1] = 0.5*(xc(e0,1) + xc(e1,1));
                     }
                     nmid++;
                 }
@@ -1525,8 +1567,8 @@ public:
                 // 体積を %級・重心を ~100 μm 級 (CV 外に出る) に誤る。これが wall_dist
                 // (centCoords 最近傍)・軸対称 r̄ 体積・cross-mesh interp を毒するため、
                 // A 相対座標 + double で計算する (厳密演算では従来と同値)。
-                const double ax = static_cast<double>(nodes[A].coords[0]);
-                const double ay = static_cast<double>(nodes[A].coords[1]);
+                const double ax = xc(A,0);
+                const double ay = xc(A,1);
                 const double px[4] = { 0.0, mid[0][0] - ax, Gx - ax, mid[1][0] - ax };
                 const double py[4] = { 0.0, mid[0][1] - ay, Gy - ay, mid[1][1] - ay };
                 double area2 = 0.0, cx2 = 0.0, cy2 = 0.0;
@@ -1538,27 +1580,27 @@ public:
                     cy2 += (py[k] + py[kn]) * cross;
                 }
                 const double subArea = 0.5 * std::fabs(area2);
-                dualVolume[A] += static_cast<geom_float>(subArea);
+                dualVolume[A] += subArea;
                 // ポリゴン重心 = (1/6A)Σ(p_k+p_{k+1})cross (A 相対) + A。subArea 加重。
                 if (std::fabs(area2) > 0.0) {
-                    dualCentroid[3*A + 0] += static_cast<geom_float>(subArea * (ax + cx2 / (3.0 * area2)));
-                    dualCentroid[3*A + 1] += static_cast<geom_float>(subArea * (ay + cy2 / (3.0 * area2)));
+                    dualCentroid[3*A + 0] += subArea * (ax + cx2 / (3.0 * area2));
+                    dualCentroid[3*A + 1] += subArea * (ay + cy2 / (3.0 * area2));
                     // z は 2D で node 値 (押し出し厚みの中央)。
-                    dualCentroid[3*A + 2] += static_cast<geom_float>(subArea * nodes[A].coords[2]);
+                    dualCentroid[3*A + 2] += subArea * xc(A,2);
                 }
             }
         }
         // 面積加重重心を正規化 (= 双対 CV の FV セル中心)。
         for (geom_int in = 0; in < nN; ++in) {
-            const geom_float v = dualVolume[in];
+            const double v = dualVolume[in];
             if (v > 0.0) {
                 dualCentroid[3*in + 0] /= v;
                 dualCentroid[3*in + 1] /= v;
                 dualCentroid[3*in + 2] /= v;
             } else {
-                dualCentroid[3*in + 0] = nodes[in].coords[0];
-                dualCentroid[3*in + 1] = nodes[in].coords[1];
-                dualCentroid[3*in + 2] = nodes[in].coords[2];
+                dualCentroid[3*in + 0] = xc(in,0);
+                dualCentroid[3*in + 1] = xc(in,1);
+                dualCentroid[3*in + 2] = xc(in,2);
             }
         }
 
@@ -1580,7 +1622,7 @@ public:
         // 所有 bcond ごとに半割面ベクトル+面積加重重心を集計。
         // 桁落ち対策 (§2.5.6 の 2D 適用): makeMesh の surfVect (float 絶対座標差) を読む代わりに
         // エッジ座標から double で法線を再構成し、外向き符号だけ整向済み surfVect に合わせる。
-        // 蓄積も double で行い、格納時に geom_float へ cast する。
+        // 蓄積も double で行い、格納も double (§4.6 の正本へ移す)。
         std::vector<std::map<geom_int, std::array<double,3>>> halfByOwner(nBc);
         std::vector<std::map<geom_int, std::array<double,4>>> hcentByOwner(nBc);
         // 入口∩壁コーナー所有 (inletCornerWall): 壁ノード → その壁 bcond index (最初に見つかった壁)。
@@ -1603,14 +1645,14 @@ public:
             {
                 const geom_int A = this->planes[ip].iNodes[0];
                 const geom_int B = this->planes[ip].iNodes[1];
-                const double ex = (double)nodes[B].coords[0] - (double)nodes[A].coords[0];
-                const double ey = (double)nodes[B].coords[1] - (double)nodes[A].coords[1];
+                const double ex = xc(B,0) - xc(A,0);
+                const double ey = xc(B,1) - xc(A,1);
                 double sv0 = ey;    // rotate(-90): エッジ (A->B) の法線 (単位厚み 2D)
                 double sv1 = -ex;
                 const double sv2 = 0.0;
                 // 外向き (makeMesh で整向済の surfVect と同符号に合わせる)
-                if (sv0*(double)this->planes[ip].surfVect[0]
-                  + sv1*(double)this->planes[ip].surfVect[1] < 0.0) { sv0 = -sv0; sv1 = -sv1; }
+                if (sv0*this->geo64.planeSurfVect[3*(size_t)ip + 0]
+                  + sv1*this->geo64.planeSurfVect[3*(size_t)ip + 1] < 0.0) { sv0 = -sv0; sv1 = -sv1; }
                 const double hx = 0.5*sv0;
                 const double hy = 0.5*sv1;
                 const double hz = 0.5*sv2;
@@ -1627,9 +1669,9 @@ public:
                     h[0] += hx; h[1] += hy; h[2] += hz;
                     // ノード N の半割 (N→エッジ中点 M) の重心 = (3N+O)/4
                     auto& c = hcentByOwner[ow][N];
-                    c[0] += w * (3.0*nodes[N].coords[0] + nodes[O].coords[0]) * 0.25;
-                    c[1] += w * (3.0*nodes[N].coords[1] + nodes[O].coords[1]) * 0.25;
-                    c[2] += w * (3.0*nodes[N].coords[2] + nodes[O].coords[2]) * 0.25;
+                    c[0] += w * (3.0*xc(N,0) + xc(O,0)) * 0.25;
+                    c[1] += w * (3.0*xc(N,1) + xc(O,1)) * 0.25;
+                    c[2] += w * (3.0*xc(N,2) + xc(O,2)) * 0.25;
                     c[3] += w;
                 }
             }
@@ -1648,14 +1690,14 @@ public:
                 const geom_int nd = kv.first;
                 dualBcondNodes[ib].push_back(nd);
                 dualBnodeId.push_back(nd);
-                dualBnodeVect.push_back(static_cast<geom_float>(kv.second[0]));
-                dualBnodeVect.push_back(static_cast<geom_float>(kv.second[1]));
-                dualBnodeVect.push_back(static_cast<geom_float>(kv.second[2]));
+                dualBnodeVect.push_back(kv.second[0]);
+                dualBnodeVect.push_back(kv.second[1]);
+                dualBnodeVect.push_back(kv.second[2]);
                 const auto& c = hcentByOwner[ib].at(nd);
                 const double invw = (c[3] > 0.0) ? 1.0/c[3] : 0.0;
-                dualBnodeCent.push_back(static_cast<geom_float>(c[0]*invw));
-                dualBnodeCent.push_back(static_cast<geom_float>(c[1]*invw));
-                dualBnodeCent.push_back(static_cast<geom_float>(c[2]*invw));
+                dualBnodeCent.push_back(c[0]*invw);
+                dualBnodeCent.push_back(c[1]*invw);
+                dualBnodeCent.push_back(c[2]*invw);
             }
             dualBcondOffset[ib + 1] = (geom_int)dualBnodeId.size();
         }
@@ -1665,7 +1707,7 @@ public:
         // ① 体積総和
         double sumDual = 0.0, sumPrimal = 0.0;
         for (geom_int in = 0; in < nN; ++in) sumDual += dualVolume[in];
-        for (geom_int ic = 0; ic < this->nCells; ++ic) sumPrimal += cells[ic].volume;
+        for (geom_int ic = 0; ic < this->nCells; ++ic) sumPrimal += this->geo64.cellVolume[ic];
         const double volErr = std::fabs(sumDual - sumPrimal) / std::max(sumPrimal, 1e-30);
         cout << "[buildMedianDual] volume sum: dual=" << sumDual << " primal=" << sumPrimal
              << " relErr=" << volErr << "\n";
@@ -1703,9 +1745,9 @@ public:
         // ③ 境界半割面積 == primal 境界面積 (bcond ごと)
         for (geom_int ib = 0; ib < nBc; ++ib)
         {
-            geom_float primalA = 0.0;
-            for (const geom_int ip : this->bconds[ib].iPlanes) primalA += this->planes[ip].surfArea;
-            geom_float halfA = 0.0;
+            double primalA = 0.0;
+            for (const geom_int ip : this->bconds[ib].iPlanes) primalA += this->geo64.planeSurfArea[ip];
+            double halfA = 0.0;
             for (geom_int k = dualBcondOffset[ib]; k < dualBcondOffset[ib+1]; ++k) {
                 halfA += std::sqrt(dualBnodeVect[3*k+0]*dualBnodeVect[3*k+0]
                                  + dualBnodeVect[3*k+1]*dualBnodeVect[3*k+1]
@@ -1747,8 +1789,8 @@ public:
             for (size_t k = 0; k < nShow; ++k) {
                 const geom_int in = bad[k].second;
                 cerr << "[buildMedianDual]     " << bad[k].first
-                     << "  (" << this->nodes[in].coords[0] << ", " << this->nodes[in].coords[1]
-                     << ", " << this->nodes[in].coords[2] << ")  "
+                     << "  (" << xc(in,0) << ", " << xc(in,1)
+                     << ", " << xc(in,2) << ")  "
                      << (onBc[in] ? "bcond有" : "bcond無") << "\n";
             }
         };
@@ -1789,6 +1831,12 @@ public:
         const geom_int nN = this->nNodes;
         dualVolume.assign(nN, 0.0);
         dualCentroid.assign(nN * 3, 0.0);
+
+        // 入力の幾何は正本 geo64 (double) から読み、生成物も double で持つ (plan architecture-float-state-double-geometry
+        // §4.6)。式と演算の順序は旧 (geom_float 版) と同じなので、FP64 のビルドでは旧と同じ値になる。
+        const std::vector<double>& X  = this->geo64.nodeCoord;   // [3*iNode + k]
+        const std::vector<double>& CC = this->geo64.cellCent;    // [3*iCell + k]
+        auto xc = [&X](geom_int n, int k) -> double { return X[3*(size_t)n + k]; };
 
         // Newell 法による多角形 (非平面可) の面積ベクトル (平行移動不変)。
         auto newell = [](const std::vector<std::array<double,3>>& p, double out[3]) {
@@ -1866,7 +1914,7 @@ public:
             const auto& ele   = this->eleTypeMap.mapElementFromGmshID[cells[ic].ieleType];
             const auto& faces = ele.nodesOrderPlanes;     // 局所面 (周回ノード)
             const auto& cn    = cells[ic].iNodes;
-            const double G[3] = { cells[ic].centCoords[0], cells[ic].centCoords[1], cells[ic].centCoords[2] };
+            const double G[3] = { CC[3*(size_t)ic + 0], CC[3*(size_t)ic + 1], CC[3*(size_t)ic + 2] };
 
             // 局所面重心 (cell.iNodes から直接計算; primal plane 参照不要)
             std::vector<std::array<double,3>> Fc(faces.size());
@@ -1874,7 +1922,7 @@ public:
                 double cx=0, cy=0, cz=0; const auto& L = faces[lf];
                 for (int lid : L) {
                     const geom_int g = cn[lid];
-                    cx += nodes[g].coords[0]; cy += nodes[g].coords[1]; cz += nodes[g].coords[2];
+                    cx += xc(g,0); cy += xc(g,1); cz += xc(g,2);
                 }
                 const double inv = 1.0 / (double)L.size();
                 Fc[lf] = { cx*inv, cy*inv, cz*inv };
@@ -1885,8 +1933,8 @@ public:
             {
                 geom_int A = cn[e[0]], B = cn[e[1]];
                 if (A > B) std::swap(A, B);
-                const double Ac[3] = { nodes[A].coords[0], nodes[A].coords[1], nodes[A].coords[2] };
-                const double Bc[3] = { nodes[B].coords[0], nodes[B].coords[1], nodes[B].coords[2] };
+                const double Ac[3] = { xc(A,0), xc(A,1), xc(A,2) };
+                const double Bc[3] = { xc(B,0), xc(B,1), xc(B,2) };
                 const double M[3]  = { 0.5*(Ac[0]+Bc[0]), 0.5*(Ac[1]+Bc[1]), 0.5*(Ac[2]+Bc[2]) };
                 const auto& F1 = Fc[e[2]];
                 const auto& F2 = Fc[e[3]];
@@ -1916,7 +1964,7 @@ public:
                 // 双対体積: 端点 {A,B} × 面 {F1,F2} の 4 四面体 (端点,M,F,G)。
                 const std::array<const double*,2> Fs = { F1.data(), F2.data() };
                 for (const geom_int endp : { A, B }) {
-                    const double P[3] = { nodes[endp].coords[0], nodes[endp].coords[1], nodes[endp].coords[2] };
+                    const double P[3] = { xc(endp,0), xc(endp,1), xc(endp,2) };
                     for (const double* Ff : Fs) {
                         const double vol = std::fabs(tetVol(P, M, Ff, G));
                         dualVolume[endp] += vol;
@@ -1949,9 +1997,9 @@ public:
                     dualFaceCent[3*idf+1] = a.c[1]/a.w;
                     dualFaceCent[3*idf+2] = a.c[2]/a.w;
                 } else {
-                    dualFaceCent[3*idf+0] = 0.5*(nodes[keyA].coords[0]+nodes[keyB].coords[0]);
-                    dualFaceCent[3*idf+1] = 0.5*(nodes[keyA].coords[1]+nodes[keyB].coords[1]);
-                    dualFaceCent[3*idf+2] = 0.5*(nodes[keyA].coords[2]+nodes[keyB].coords[2]);
+                    dualFaceCent[3*idf+0] = 0.5*(xc(keyA,0)+xc(keyB,0));
+                    dualFaceCent[3*idf+1] = 0.5*(xc(keyA,1)+xc(keyB,1));
+                    dualFaceCent[3*idf+2] = 0.5*(xc(keyA,2)+xc(keyB,2));
                 }
             }
             std::vector<DFA>().swap(dfa);
@@ -1960,13 +2008,13 @@ public:
 
         // 面積加重重心を正規化 (= 双対 CV の FV セル中心)。
         for (geom_int in = 0; in < nN; ++in) {
-            const geom_float v = dualVolume[in];
+            const double v = dualVolume[in];
             if (v > 0.0) {
                 dualCentroid[3*in+0] /= v; dualCentroid[3*in+1] /= v; dualCentroid[3*in+2] /= v;
             } else {
-                dualCentroid[3*in+0] = nodes[in].coords[0];
-                dualCentroid[3*in+1] = nodes[in].coords[1];
-                dualCentroid[3*in+2] = nodes[in].coords[2];
+                dualCentroid[3*in+0] = xc(in,0);
+                dualCentroid[3*in+1] = xc(in,1);
+                dualCentroid[3*in+2] = xc(in,2);
             }
         }
 
@@ -1979,7 +2027,7 @@ public:
         // 桁落ち対策 (plan architecture-median-dual-3d-double-geometry): 境界半割面は
         // サブ四角 Newell をローカル原点 N 相対で評価し、蓄積 (bnodeAccum/halfByOwner/
         // hcentByOwner) も double で行う (スリバー面の小さい寄与同士の float32 加算で
-        // 相対誤差が積むのを防ぐ)。平坦化時に geom_float へ cast。
+        // 相対誤差が積むのを防ぐ)。平坦化後も double で持つ (§4.6)。
         std::vector<double> bnodeAccum(nN * 3, 0.0);
 
         std::vector<std::map<geom_int, std::array<double,3>>> halfByOwner(nBc);
@@ -2004,20 +2052,20 @@ public:
             {
                 const auto& fn = this->planes[ip].iNodes;       // 周回ノード (surfVect と整合)
                 const int mf = (int)fn.size();
-                const double Fcen[3] = { this->planes[ip].centCoords[0],
-                                         this->planes[ip].centCoords[1],
-                                         this->planes[ip].centCoords[2] };
-                const double S[3] = { this->planes[ip].surfVect[0],   // 外向き (makeMesh で整向済)
-                                      this->planes[ip].surfVect[1],
-                                      this->planes[ip].surfVect[2] };
+                const double Fcen[3] = { this->geo64.planeCent[3*(size_t)ip + 0],
+                                         this->geo64.planeCent[3*(size_t)ip + 1],
+                                         this->geo64.planeCent[3*(size_t)ip + 2] };
+                const double S[3] = { this->geo64.planeSurfVect[3*(size_t)ip + 0],   // 外向き (makeMesh で整向済)
+                                      this->geo64.planeSurfVect[3*(size_t)ip + 1],
+                                      this->geo64.planeSurfVect[3*(size_t)ip + 2] };
                 for (int k = 0; k < mf; ++k)
                 {
                     const geom_int N  = fn[k];
                     const geom_int Pp = fn[(k-1+mf)%mf];
                     const geom_int Nx = fn[(k+1)%mf];
-                    const double Nc[3]  = { nodes[N].coords[0],  nodes[N].coords[1],  nodes[N].coords[2]  };
-                    const double Mn[3]  = { 0.5*(Nc[0]+nodes[Nx].coords[0]), 0.5*(Nc[1]+nodes[Nx].coords[1]), 0.5*(Nc[2]+nodes[Nx].coords[2]) };
-                    const double Mp[3]  = { 0.5*(Nc[0]+nodes[Pp].coords[0]), 0.5*(Nc[1]+nodes[Pp].coords[1]), 0.5*(Nc[2]+nodes[Pp].coords[2]) };
+                    const double Nc[3]  = { xc(N,0),  xc(N,1),  xc(N,2)  };
+                    const double Mn[3]  = { 0.5*(Nc[0]+xc(Nx,0)), 0.5*(Nc[1]+xc(Nx,1)), 0.5*(Nc[2]+xc(Nx,2)) };
+                    const double Mp[3]  = { 0.5*(Nc[0]+xc(Pp,0)), 0.5*(Nc[1]+xc(Pp,1)), 0.5*(Nc[2]+xc(Pp,2)) };
                     // median サブ四角 (N, Mn, Fcen, Mp)。外向き (S と同符号) に整える。
                     // Newell は N 相対 (平行移動不変; float32 絶対座標の丸め増幅を防ぐ)。
                     const std::vector<std::array<double,3>> sub = {
@@ -2051,14 +2099,14 @@ public:
                 const geom_int nd = kv.first;
                 dualBcondNodes[ib].push_back(nd);
                 dualBnodeId.push_back(nd);
-                dualBnodeVect.push_back((geom_float)kv.second[0]);
-                dualBnodeVect.push_back((geom_float)kv.second[1]);
-                dualBnodeVect.push_back((geom_float)kv.second[2]);
+                dualBnodeVect.push_back(kv.second[0]);
+                dualBnodeVect.push_back(kv.second[1]);
+                dualBnodeVect.push_back(kv.second[2]);
                 const auto& c = hcentByOwner[ib].at(nd);
                 const double invw = (c[3] > 0.0) ? 1.0/c[3] : 0.0;
-                dualBnodeCent.push_back((geom_float)(c[0]*invw));
-                dualBnodeCent.push_back((geom_float)(c[1]*invw));
-                dualBnodeCent.push_back((geom_float)(c[2]*invw));
+                dualBnodeCent.push_back(c[0]*invw);
+                dualBnodeCent.push_back(c[1]*invw);
+                dualBnodeCent.push_back(c[2]*invw);
             }
             dualBcondOffset[ib + 1] = (geom_int)dualBnodeId.size();
         }
@@ -2066,7 +2114,7 @@ public:
         // ---- 整合チェック (double 集計) ----
         double sumDual = 0.0, sumPrimal = 0.0;
         for (geom_int in = 0; in < nN; ++in) sumDual += dualVolume[in];
-        for (geom_int ic = 0; ic < this->nCells; ++ic) sumPrimal += cells[ic].volume;
+        for (geom_int ic = 0; ic < this->nCells; ++ic) sumPrimal += this->geo64.cellVolume[ic];
         const double volErr = std::fabs(sumDual - sumPrimal) / std::max(sumPrimal, 1e-30);
         cout << "[buildMedianDual] volume sum: dual=" << sumDual << " primal=" << sumPrimal
              << " relErr=" << volErr << "\n";
@@ -2097,9 +2145,9 @@ public:
              << " (ref face area=" << refArea << ", normalized=" << maxClos/std::max(refArea,1e-30) << ")\n";
 
         for (geom_int ib = 0; ib < nBc; ++ib) {
-            geom_float primalA = 0.0;
-            for (const geom_int ip : this->bconds[ib].iPlanes) primalA += this->planes[ip].surfArea;
-            geom_float halfA = 0.0;
+            double primalA = 0.0;
+            for (const geom_int ip : this->bconds[ib].iPlanes) primalA += this->geo64.planeSurfArea[ip];
+            double halfA = 0.0;
             for (geom_int k = dualBcondOffset[ib]; k < dualBcondOffset[ib+1]; ++k) {
                 halfA += std::sqrt(dualBnodeVect[3*k+0]*dualBnodeVect[3*k+0]
                                  + dualBnodeVect[3*k+1]*dualBnodeVect[3*k+1]
@@ -2138,8 +2186,8 @@ public:
             for (size_t k = 0; k < nShow; ++k) {
                 const geom_int in = bad[k].second;
                 cerr << "[buildMedianDual]     " << bad[k].first
-                     << "  (" << this->nodes[in].coords[0] << ", " << this->nodes[in].coords[1]
-                     << ", " << this->nodes[in].coords[2] << ")  "
+                     << "  (" << xc(in,0) << ", " << xc(in,1)
+                     << ", " << xc(in,2) << ")  "
                      << (onBc[in] ? "bcond有" : "bcond無") << "\n";
             }
         };
@@ -2220,16 +2268,50 @@ public:
             for (const geom_int nod : cel.iNodes) this->vizCONNE.push_back(nod);
         }
 
+        // ---- 幾何の正本 (double) を双対の量で置き換える (plan architecture-float-state-double-geometry §4.6) ----
+        // CV = 節点、面 = 内部双対面 [0,nDualInternal) + 境界半割面 [nDualInternal, +nBHalf)。
+        // 共用の cells/planes へは、下で組み立てた後に geo64.roundToShared で丸めて渡す。
+        {
+            std::vector<double> cellVolume(nN), cellCent(3*(size_t)nN);
+            for (geom_int i = 0; i < nN; ++i) {
+                // CV 重心: axisCentroidShift=true なら双対 CV の面積加重重心 (軸上でも R>0 で回転体積を稼ぐ)、
+                // false なら node 座標 (軸上は R=0)。後者は軸ソース OFF と併用前提 (ソースが唯一の r 非重み項)。
+                for (int k = 0; k < 3; ++k)
+                    cellCent[3*(size_t)i + k] = this->axisCentroidShift ? dualCentroid[3*(size_t)i + k]
+                                                                        : this->geo64.nodeCoord[3*(size_t)i + k];
+                cellVolume[i] = dualVolume[i];
+            }
+            const size_t nPNew = (size_t)nDualInternal + (size_t)nBHalf;
+            std::vector<double> sv(3*nPNew), sa(nPNew), pc(3*nPNew);
+            for (geom_int f = 0; f < nDualInternal; ++f) {
+                for (int k = 0; k < 3; ++k) {
+                    sv[3*(size_t)f + k] = dualFaceVect[3*(size_t)f + k];
+                    pc[3*(size_t)f + k] = dualFaceCent[3*(size_t)f + k];
+                }
+                sa[f] = dualFaceArea[f];
+            }
+            for (geom_int k = 0; k < nBHalf; ++k) {
+                const double vx = dualBnodeVect[3*(size_t)k+0];
+                const double vy = dualBnodeVect[3*(size_t)k+1];
+                const double vz = dualBnodeVect[3*(size_t)k+2];
+                const size_t gp = (size_t)nDualInternal + (size_t)k;
+                sv[3*gp + 0] = vx; sv[3*gp + 1] = vy; sv[3*gp + 2] = vz;
+                sa[gp] = std::sqrt(vx*vx + vy*vy + vz*vz);
+                // pc = 半割面の真の面積加重重心 (境界上, R≥0)。軸対称 r 重みが正しくなり、入口/出口 BC が
+                // 軸近傍 corner CV に届く (旧 node+h·n_out 便宜は pcy≈0/<0 で BC を r 重み消失させていた)。
+                for (int d = 0; d < 3; ++d) pc[3*gp + d] = dualBnodeCent[3*(size_t)k + d];
+            }
+            this->geo64.cellVolume.swap(cellVolume);
+            this->geo64.cellCent.swap(cellCent);
+            this->geo64.planeSurfVect.swap(sv);
+            this->geo64.planeSurfArea.swap(sa);
+            this->geo64.planeCent.swap(pc);
+        }
+
         // ---- 新 cells (CV = ノード) ----
         std::vector<cell> newCells(nN);
         for (geom_int i = 0; i < nN; ++i) {
-            // CV 重心: axisCentroidShift=true なら双対 CV の面積加重重心 (軸上でも R>0 で回転体積を稼ぐ)、
-            // false なら node 座標 (軸上は R=0)。後者は軸ソース OFF と併用前提 (ソースが唯一の r 非重み項)。
-            if (this->axisCentroidShift)
-                newCells[i].centCoords = { dualCentroid[3*i+0], dualCentroid[3*i+1], dualCentroid[3*i+2] };
-            else
-                newCells[i].centCoords = nodes[i].coords;
-            newCells[i].volume     = dualVolume[i];
+            // centCoords・volume は下の geo64.roundToShared で正本から入れる
             newCells[i].ieleType   = 2;                     // placeholder (output CONNE 用, viz は M4)
             newCells[i].iNodes      = { i };
             newCells[i].regionId    = 0;
@@ -2245,25 +2327,15 @@ public:
             plane p;
             p.iNodes = { A, B };
             p.iCells = { A, B };
-            p.surfVect = { dualFaceVect[3*f+0], dualFaceVect[3*f+1], dualFaceVect[3*f+2] };
-            p.surfArea = dualFaceArea[f];
-            p.centCoords = { dualFaceCent[3*f+0], dualFaceCent[3*f+1], dualFaceCent[3*f+2] };
+            // surfVect・surfArea・centCoords は下の geo64.roundToShared で正本から入れる
             newPlanes.push_back(std::move(p));
         }
         for (geom_int k = 0; k < nBHalf; ++k) {
             const geom_int nd = dualBnodeId[k];
-            const geom_float vx = dualBnodeVect[3*k+0];
-            const geom_float vy = dualBnodeVect[3*k+1];
-            const geom_float vz = dualBnodeVect[3*k+2];
-            const geom_float area = std::sqrt(vx*vx + vy*vy + vz*vz);
             plane p;
             p.iNodes = { nd };
             p.iCells = { nd };  // 1 セルのみ → solver readMesh がゴーストを追加
-            p.surfVect = { vx, vy, vz };
-            p.surfArea = area;
-            // pc = 半割面の真の面積加重重心 (境界上, R≥0)。軸対称 r 重みが正しくなり、入口/出口 BC が
-            // 軸近傍 corner CV に届く (旧 node+h·n_out 便宜は pcy≈0/<0 で BC を r 重み消失させていた)。
-            p.centCoords = { dualBnodeCent[3*k+0], dualBnodeCent[3*k+1], dualBnodeCent[3*k+2] };
+            // surfVect・surfArea・centCoords (半割面の重心) は下の geo64.roundToShared で正本から入れる
             newPlanes.push_back(std::move(p));
         }
 
@@ -2284,6 +2356,9 @@ public:
 
         this->cells  = std::move(newCells);
         this->planes = std::move(newPlanes);
+        // 共用の cells/planes へ正本から一方向に丸めて渡す
+        this->geo64.roundToShared(this->cells);
+        this->geo64.roundToShared(this->planes);
 
         // ---- bconds を双対境界半割面で更新 (bcondKind / physID / 入力値は保持) ----
         const geom_int nBc = (geom_int)this->bconds.size();
@@ -2319,7 +2394,9 @@ public:
              << " nPlanes=" << this->nPlanes << "\n";
     }
 
-    void writeInputH5(const string outFileName ,variables var)
+    // wallDist64: 壁距離の正本 (double、calcWallDistance64 の戻り値)。与えられれば /VALUE/wall_dist はこれから
+    // double で書く (var.c["wall_dist"] はソルバ用の写しで、ここでは使わない)。nullptr なら従来どおり var.c から書く。
+    void writeInputH5(const string outFileName ,variables var, const std::vector<double>* wallDist64 = nullptr)
     {
         // ------------
         // *** HDF5 *** 
@@ -2337,16 +2414,25 @@ public:
             exit(EXIT_FAILURE);
         }
 
+        // 幾何のデータセットは正本 geo64 (double) から、ビルドの型に依らず double (binary64) で書く
+        // (plan architecture-float-state-double-geometry §4.6)。正本と共用の mesh の大きさが食い違っていれば止める
+        // (丸めた共用の値を代わりに書くことはしない)。
+        if (this->geo64.nodeCoord.size()     != 3*this->nodes.size()
+         || this->geo64.planeSurfVect.size() != 3*this->planes.size()
+         || this->geo64.planeSurfArea.size() !=   this->planes.size()
+         || this->geo64.planeCent.size()     != 3*this->planes.size()
+         || this->geo64.cellVolume.size()    !=   this->cells.size()
+         || this->geo64.cellCent.size()      != 3*this->cells.size()) {
+            cerr << "[writeInputH5] ERROR: double geometry (geo64) does not match the mesh sizes"
+                 << " (nodes " << this->nodes.size() << ", planes " << this->planes.size()
+                 << ", cells " << this->cells.size() << ")\n";
+            exit(EXIT_FAILURE);
+        }
+
         File file(outFileName, File::ReadWrite | File::Truncate);
 
         // write mesh structure
-        vector<geom_float> COORD;
-        for (auto& nod : this->nodes)
-        {
-            COORD.push_back(nod.coords[0]);
-            COORD.push_back(nod.coords[1]);
-            COORD.push_back(nod.coords[2]);
-        }
+        const vector<double>& COORD = this->geo64.nodeCoord;
 
         Group group = file.createGroup("/MESH");
         Attribute a = group.createAttribute<geom_int>( "nCells", DataSpace::From(this->cells.size()));
@@ -2397,11 +2483,11 @@ public:
         }
         file.createDataSet("/MESH/CONNE",CONNE);
 
-        // write planes
+        // write planes (幾何は正本 geo64 から)
         vector<geom_int> planes_struct;
-        vector<geom_float> surfVect;
-        vector<geom_float> surfArea;
-        vector<geom_float> centCoords;
+        const vector<double>& surfVect   = this->geo64.planeSurfVect;
+        const vector<double>& surfArea   = this->geo64.planeSurfArea;
+        const vector<double>& centCoords = this->geo64.planeCent;
 
 
         for (auto& pln : this->planes)
@@ -2420,23 +2506,16 @@ public:
             {
                 planes_struct.push_back(pln.iCells[in]);
             }
-            surfVect.push_back(pln.surfVect[0]);
-            surfVect.push_back(pln.surfVect[1]);
-            surfVect.push_back(pln.surfVect[2]);
-            surfArea.push_back(pln.surfArea);
-            centCoords.push_back(pln.centCoords[0]);
-            centCoords.push_back(pln.centCoords[1]);
-            centCoords.push_back(pln.centCoords[2]);
         }
         file.createDataSet("/PLANES/STRUCT",planes_struct);
         file.createDataSet("/PLANES/surfVect",surfVect);
         file.createDataSet("/PLANES/surfArea",surfArea);
         file.createDataSet("/PLANES/centCoords",centCoords);
 
-        // write cells
+        // write cells (幾何は正本 geo64 から)
         vector<geom_int> cells_struct;
-        vector<geom_float> volume;
-        vector<geom_float> centCoords2;
+        const vector<double>& volume      = this->geo64.cellVolume;
+        const vector<double>& centCoords2 = this->geo64.cellCent;
 
         for (auto& cel: this->cells)
         {
@@ -2461,11 +2540,6 @@ public:
                 cells_struct.push_back(cel.iPlanesDir[in]);
             }
             cells_struct.push_back(cel.ieleType);
-
-            volume.push_back(cel.volume);
-            centCoords2.push_back(cel.centCoords[0]);
-            centCoords2.push_back(cel.centCoords[1]);
-            centCoords2.push_back(cel.centCoords[2]);
         }
         file.createDataSet("/CELLS/STRUCT",cells_struct);
         file.createDataSet("/CELLS/volume",volume);
@@ -2529,6 +2603,16 @@ public:
             auto itr = std::find(var.read_cellValNames.begin(), var.read_cellValNames.end(), name);
             if (itr == var.read_cellValNames.end()) {
                 continue; // notfound
+            }
+
+            // 壁距離は幾何なので正本 (double) から書く (§4.6)。正本が var の配列より長いとき (calcWallDistance_kdtree も
+            // 写さない場合。変換器では起きない) は、従来どおり var の値を double で書く。
+            if (name == "wall_dist" && wallDist64 != nullptr) {
+                std::vector<double> wd(v.second.begin(), v.second.end());
+                if (wd.size() >= wallDist64->size())
+                    std::copy(wallDist64->begin(), wallDist64->end(), wd.begin());
+                file.createDataSet("/VALUE/"+name , wd);
+                continue;
             }
 
             file.createDataSet("/VALUE/"+name , v.second);
