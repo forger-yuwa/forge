@@ -213,3 +213,44 @@ for jj in (2, 3, 4):
     s = np.where(j == jj)[0]
     n = s[np.argmax(np.abs(a_ax[s] / Ap[s]))]
     print(f'j={jj} axial-max node i={i[n]} x/rt={x[n]/RT:+.3f}: ax={a_ax[n]/Ap[n]:+.3e} bnd={a_bd[n]/Ap[n]:+.3e} total agg={agg[n]/Ap[n]:+.3e} def_cur={def_cur[n]/Ap[n]:+.3e}')
+
+# ==== plan axisymmetric-freestream-hoop-gauge §4.3 (事前登録): 面のメトリックの A/B (x・y 両成分) ====
+# A: 今の r̄_f·ΣS_k、B: 区間ごとの W_f = Σ_k r_k S_k。接続・向き・境界の所属・A_planar は共通。
+exact_fx = np.bincount(seg_ip, rk * nx, nInt)                     # Σ_k r_k S_{k,x} (内部面)
+bexact_x = np.zeros(nP - nInt)
+for b in f['BCONDS']:
+    g = f['BCONDS'][b]
+    ipl = g['iPlanes'][:]; ipl = ipl[ipl >= 0]
+    node2hp = {int(pA[i]): int(i - nInt) for i in ipl}
+    for (a, bb) in g['vizBfaceNodes'][:].reshape(-1, 2):
+        k = min(a, bb) * nN + max(a, bb)
+        jq = np.searchsorted(key_sorted, k); q = gq[qkey_order[jq]]
+        ex = x[bb] - x[a]; ey = y[bb] - y[a]; s0, s1 = ey, -ex
+        mx, my = 0.5 * (x[a] + x[bb]), 0.5 * (y[a] + y[bb])
+        if s0 * (mx - G[q, 0]) + s1 * (my - G[q, 1]) < 0: s0, s1 = -s0, -s1
+        for N, O in ((a, bb), (bb, a)):
+            bexact_x[node2hp[int(N)]] += 0.25 * (3 * y[N] + y[O]) * 0.5 * s0
+def node_sum(fi, fb):
+    return np.bincount(pA[:nInt], fi, nN) - np.bincount(pB[:nInt], fi, nN) + np.bincount(bnode_of, fb, nN)
+def node_abs(fi, fb):
+    return np.bincount(pA[:nInt], np.abs(fi), nN) + np.bincount(pB[:nInt], np.abs(fi), nN) + np.bincount(bnode_of, np.abs(fb), nN)
+curx_f = SV[:nInt, 0] * rface[:nInt]; curx_b = SV[nInt:, 0] * rface[nInt:]
+M = {"A (r̄·ΣS)": (curx_f, curx_b, cur_f, cur_b), "B (Σ r_k S_k)": (exact_fx, bexact_x, exact_f, bexact)}
+eps = np.finfo(np.float64).eps
+print("\n== §4.3 の A/B: E_x = |Σ±W_x|/A_planar、E_y = |Σ±W_y − A_planar|/A_planar")
+res43 = {}
+for name, (fx_, bx_, fy_, by_) in M.items():
+    Sx = node_sum(fx_, bx_); Sy = node_sum(fy_, by_); Ax = node_abs(fx_, bx_); Ay = node_abs(fy_, by_)
+    Ex = np.abs(Sx) / Ap; Ey = np.abs(Sy - Ap) / Ap
+    m28 = (j >= 2) & (j <= 8)
+    tolx = 100 * eps * (Ap + Ax); toly = 100 * eps * (Ap + Ay)
+    gx = int(np.count_nonzero(np.abs(Sx) > tolx)); gy = int(np.count_nonzero(np.abs(Sy - Ap) > toly))
+    print(f"  {name}: j 2〜8 の最大 E_x {Ex[m28].max():.3e}・E_y {Ey[m28].max():.3e} | 全域の最大 E_x {Ex.max():.3e} (j {j[np.argmax(Ex)]})・E_y {Ey.max():.3e} (j {j[np.argmax(Ey)]})"
+          f" | 100·ε64·(A + Σ|W|) を超える CV: x {gx}・y {gy}")
+    for jj in (0, 1, 2, 3, 4, 8, 60, 119, 120):
+        s_ = j == jj
+        print(f"     j {jj:3d}: max E_x {Ex[s_].max():.3e}  max E_y {Ey[s_].max():.3e}  一定の U の質量の残差 max|Σ±W_x|/Σ|W_x| {np.max(np.abs(Sx[s_]) / np.maximum(Ax[s_], 1e-300)):.3e}")
+    res43[name] = dict(Ex28=float(Ex[m28].max()), Ey28=float(Ey[m28].max()), over_x=gx, over_y=gy)
+b = res43["B (Σ r_k S_k)"]
+ok = b["Ex28"] <= 1e-10 and b["Ey28"] <= 1e-10 and b["over_x"] == 0 and b["over_y"] == 0
+print(f"== VERDICT §4.3: {'B が合格 (j 2〜8 の E_x・E_y ≤ 1e-10、全域で丸めの規模以内)' if ok else 'B が不合格 (集約の誤差だけという仮説を棄却、境界の所属・向き・面積を点検し直す)'}")
