@@ -1,6 +1,6 @@
 #!/bin/bash
-# plan architecture-float-state-double-geometry §6.28: 乱流を凍結した (FORGE_FREEZE_TURB=1) 軌跡の A/B。
-# §6.26 と同じ共通の Q32 の起点 (_tr/q32_init.h5) から、A = FP64、B = float、B' = float の再実行、各 30,000 step・500 ごと。インスタンス B で 3 本同時。判定は fz_an.py (tr_an.py と同じ式)。
+# plan architecture-float-state-double-geometry §6.28: SST の輸送の更新を止めた (FORGE_FREEZE_TURB=1) 軌跡の A/B。
+# §6.26 と同じ共通の Q32 の起点 (_tr/q32_init.h5) から、A = FP64、B = float、B' = float の再実行、各 30,000 step・500 ごと。インスタンス B で 3 本同時。判定は fz_an.py (凍結した FP64 の動きを差し引いた δ = ΔB − ΔA で判定、§6.28)。
 set -uo pipefail
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
 [ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0ba2b91ba659254c4" ] || { echo "B ではない。中止"; exit 1; }
