@@ -3,7 +3,9 @@
 - 再実行の差 N_arm = max(‖R32a − R32b‖, ‖R64a − R64b‖) / ‖R64‖ (腕・量・領域ごと)。
 - 悪化しない: E_new ≤ 1.1·E_old + 10·N_new。改善: 熱・運動量・乱流で E_old > 10·N_old なら E_new ≤ 0.5·E_old。
 - 記録: 最大の誤差の位置、粘性の面の流束の誤差 (GEOMAB の新腕 − REF) を節点に集めたものの大きさ (§6.5 の H3 の切り分け)。
-欠損・非有限は判定不能。結果を標準出力と v3_verdict.json に書く。"""
+欠損・非有限は判定不能。結果を標準出力と v3_verdict.json に書く。
+2026-10-10 (codex diagnose) の修正: 参照のノルム 0 は除外せず判定不能、面の流束の非有限は既知の未評価の境界面 (ip ≥ nNormalPlanes) だけを除き、
+内部面にあれば判定不能。残差の改善の判定 (総合) と、内訳の記録を分けて出す (内訳の失敗で総合が PASS にならないように)。"""
 import json, h5py, numpy as np
 from pathlib import Path
 C = Path("/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155"); NJ = 121; RT = 0.076807
@@ -25,7 +27,8 @@ print("量          領域       E_old      E_new      N_old      N_new      新
 for k in RK:
     for rg, m in REG.items():
         nr = np.linalg.norm(R["ref64a"][k][m])
-        if nr == 0: print(f"{k:12s} {rg}: 参照が 0 で比較外"); continue
+        if nr == 0:
+            print(f"{k:12s} {rg}: 参照のノルムが 0 — 判定不能"); V["fail"].append(f"{k} {rg} (判定不能: 参照のノルム 0)"); continue
         Eo = np.linalg.norm(R["old32a"][k][m] - R["ref64a"][k][m]) / nr; En = np.linalg.norm(R["new32a"][k][m] - R["ref64a"][k][m]) / nr
         n64 = np.linalg.norm(R["ref64b"][k][m] - R["ref64a"][k][m]) / nr
         No = max(np.linalg.norm(R["old32b"][k][m] - R["old32a"][k][m]) / nr, n64); Nn = max(np.linalg.norm(R["new32b"][k][m] - R["new32a"][k][m]) / nr, n64)
@@ -46,7 +49,9 @@ try:
     d = h5py.File(C / "run_0446_v3_dump32/geomab.h5", "r"); rf = h5py.File(C / "run_0446_v3_dump32/geomab_ref.h5", "r")
     pc = np.asarray(d["/mesh/plane_cells"][:]).reshape(-1, 2); nN = int(d.attrs["nNormalPlanes"])
     Fn = np.asarray(d["/viscous/new/face_flux"][:], np.float64); Fr = np.asarray(rf["/viscous/ref/face_flux"][:], np.float64)
-    dF = np.where(np.isfinite(Fn) & np.isfinite(Fr), Fn - Fr, 0.0)
+    Fn = Fn.reshape(6, -1); Fr = Fr.reshape(6, -1)
+    if not (np.all(np.isfinite(Fn[:, :nN])) and np.all(np.isfinite(Fr[:, :nN]))): raise ValueError("内部面の面の流束に非有限")
+    dF = np.zeros_like(Fn); dF[:, :nN] = Fn[:, :nN] - Fr[:, :nN]
     for comp, k in ((0, "res_roUx"), (1, "res_roUy"), (3, "res_roe")):
         acc = np.zeros(n)
         a, b = pc[:nN, 0], pc[:nN, 1]
@@ -56,6 +61,9 @@ try:
             nr = np.linalg.norm(R["ref64a"][k][m])
             print(f"  {k:9s} {rg:10s}: 粘性の面の流束の誤差を集めた大きさ / ‖R64‖ = {np.linalg.norm(acc[m]) / nr:.3e}、残差全体の誤差 E_new = {np.linalg.norm(R['new32a'][k][m] - R['ref64a'][k][m]) / nr:.3e}")
 except Exception as e:
-    print(f"  (集計できない: {e})")
+    print(f"  [内訳: 判定不能] {e}"); V["breakdown"] = f"判定不能: {e}"
 json.dump(V, open(C / "v3_verdict.json", "w"), ensure_ascii=False, indent=1, default=float)
-print("== 総合:", "PASS" if not V["fail"] else f"FAIL {V['fail']}")
+n_rows = len(V["rows"])
+if n_rows != len(RK) * len(REG): V["fail"].append(f"評価した量・領域が {n_rows} 件 (必要 {len(RK) * len(REG)})")
+print("== 総合 (残差の改善の判定):", "PASS" if not V["fail"] else f"PASS でない {V['fail']}")
+print("== 内訳 (記録):", V.get("breakdown", "集計した (上の表)"))

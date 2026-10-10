@@ -45,6 +45,9 @@ ap = argparse.ArgumentParser(); ap.add_argument("run")
 ap.add_argument("--phase", choices=("line", "point", "line_e2"), required=True)   # line_e2 = ラインのまま E (水準 + E2) まで (§6.11 の追加の腕 L5L)
 ap.add_argument("--budget", type=int, required=True)
 ap.add_argument("--consec", type=int, default=1, help="水準 (point と line_e2 は E2 も) を何出力続けて満たしたら到達とするか (既定 1 = 従来。§6.18 は 2、diagnostician 2026-10-10)")
+ap.add_argument("--interval", type=int, default=0, help="出力の間隔 [step]。>0 なら、系列の step がこの間隔でそろっていることを確かめ、崩れたら DATA_ERROR (float 化 plan §6.11、codex 2026-10-10: 3 点でも REACH を返した欠陥の修正)")
+ap.add_argument("--min-points", type=int, default=0, help="到達の出力までの末尾 2 万 step に要る出力の数 (§6.11 は 9)。足りなければ到達としない")
+ap.add_argument("--keep-tail", type=int, default=1, help="消さずに残す最新の出力の数 (既定 1 = 従来。§6.11 は 9)")
 ap.add_argument("--inherit", default=None, help="line_e2: 同じ構成の分岐元の run。その到達の出力までの系列を step − 到達 (≤ 0) で引き継ぐ (codex plan-4 M2)")
 try:
     a = ap.parse_args()
@@ -73,6 +76,9 @@ try:
             st["inherit"] = {"run": a.inherit, "reach_step": nb, "reach_sha256": src.get("reach_sha256")}
             st["rows"] = [dict(r, step=r["step"] - nb, inherited=True) for r in src["rows"] if 0 < r["step"] <= nb]
     if a.consec < 1: raise ValueError("--consec は 1 以上")
+    if a.interval < 0 or a.min_points < 0 or a.keep_tail < 1: raise ValueError("--interval・--min-points は 0 以上、--keep-tail は 1 以上")
+    for k_, v_ in (("interval", a.interval), ("min_points", a.min_points), ("keep_tail", a.keep_tail)):
+        if st.setdefault(k_, v_) != v_: raise ValueError(f"状態の {k_} が違う ({st[k_]} ≠ {v_})")
     if st.get("phase") != a.phase or st.get("budget") != a.budget or st.get("consec", 1) != a.consec:   # 終端の状態でも先に照合する (codex plan-7 M3)
         raise ValueError("状態の phase/budget/consec が違う")
     if st["status"] in FINAL:
@@ -122,11 +128,20 @@ def finish(status, **kw):
     st.update(status=status, **kw); save(); print(f"[m9_watch] {run.name}: {status} {kw}", flush=True)
 def cleanup(keep_extra=()):
     done = sorted(r["step"] for r in st["rows"] if r["step"] > 0 and not r.get("inherited"))
-    keep = set(done[-1:]) | set(keep_extra)               # 最新と到達の出力だけ残す (準定常は系列から判定するので不要、ディスクのため。2026-10-10)
+    keep = set(done[-a.keep_tail:]) | set(keep_extra)     # 最新 keep_tail 個と到達の出力だけ残す (既定 1。§6.11 は末尾 9 出力を残す)
     for m in done:
         if m in keep: continue
         for f in list(run.glob(f"res_{m}.h5")) + list(run.glob(f"res_*_{m}.h5")) + list(run.glob(f"res*_{m}.xmf")): f.unlink()
 
+def spacing_ok(rows):
+    """--interval > 0 のとき、引き継いでいない行の step が interval, 2·interval, … とそろっているか。"""
+    if a.interval <= 0: return True
+    s_ = [r["step"] for r in rows if r["step"] > 0 and not r.get("inherited")]
+    return all(x == a.interval * (i + 1) for i, x in enumerate(s_))
+def window_points(rows, n_):
+    """rows[n_] の step までの末尾 2 万 step (両端を含む) にある出力の数。"""
+    e_ = rows[n_]["step"]
+    return sum(1 for r in rows[: n_ + 1] if e_ - 20000 <= r["step"] <= e_)
 def done_at(rows):
     """保存済みの系列の最初の終わりを ("REACH", step) か ("DIV", step) で返す (引き継いだ行の step は ≤ 0)。無ければ None。
     REACH は水準 (と E2) を --consec 個の連続した出力で満たした、その最後の出力 (§6.18)。"""
@@ -137,7 +152,7 @@ def done_at(rows):
         dr_ = [drift(rows[: n_ + 1], k) for k in KEYS[:3]]
         e2_ = {k: 100 * (r_[k] / REF[k] - 1) for k in KEYS} if REF else None
         ok_ = r_.get("deficit") is not None and None not in dr_ and abs(r_["deficit"]) <= 0.1 and all(abs(x) <= 0.05 for x in dr_) \
-              and (e2_ is None or all(abs(v) <= 0.1 for v in e2_.values()))
+              and (e2_ is None or all(abs(v) <= 0.1 for v in e2_.values())) and window_points(rows, n_) >= a.min_points
         run_ok = run_ok + 1 if ok_ else 0
         if run_ok >= a.consec:
             return ("REACH", r_["step"])
@@ -155,6 +170,8 @@ def conclude(n):
     sha = hashlib.sha256((run / f"res_{n}.h5").read_bytes()).hexdigest()
     finish("REACHED", reach_step=n, reach_sha256=sha); cleanup(keep_extra=(n,)); sys.exit(0)
 # 再開: 保存済みの系列で先に判定し直す (codex plan-3 M4)
+if not spacing_ok(st["rows"]):
+    stop(); finish("DATA_ERROR", note=f"保存済みの系列の出力の間隔が --interval {a.interval} とそろっていない"); sys.exit(1)
 _d = done_at(st["rows"])
 if _d is not None:
     if _d[0] == "DIV": stop(); finish("DIVERGED", fail_step=_d[1]); sys.exit(0)
@@ -176,6 +193,8 @@ def main_loop():
               if st["tries"][str(n)] >= 3: finish("DATA_ERROR", step=n); stop(); sys.exit(1)
               break
           st["rows"].append(rec); st["rows"].sort(key=lambda r: r["step"]); progressed = True
+          if not spacing_ok(st["rows"]):
+              save(); stop(); finish("DATA_ERROR", note=f"出力の間隔が --interval {a.interval} とそろっていない", step=n); sys.exit(1)
           rows = st["rows"]
           dr = [drift(rows, k) for k in ("theta_r_40", "theta_r_70", "theta_r_94")]
           e2 = {k: 100 * (rec[k] / REF[k] - 1) for k in KEYS} if REF else None
