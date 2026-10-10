@@ -1,0 +1,275 @@
+{
+ "g3": "case/46.sern_design/run_1079_tewake_B10_m10/sern.h5",
+ "g4": "case/46.sern_design/run_1081_tewake_g4_B10_m10/sern.h5",
+ "g3_truth": {
+  "pairs": 5110,
+  "by_category": {
+   "カウル": 0,
+   "側壁": 5040,
+   "角 (カウル∩側壁)": 70
+  },
+  "undecided": [],
+  "n_undecided": 0,
+  "shared_single": 131,
+  "wall_nodes": 15212
+ },
+ "g4_truth": {
+  "pairs": 5810,
+  "by_category": {
+   "カウル": 0,
+   "側壁": 5740,
+   "角 (カウル∩側壁)": 70
+  },
+  "undecided": [],
+  "n_undecided": 0,
+  "shared_single": 141,
+  "wall_nodes": 16612
+ },
+ "g3_struct": {
+  "dup1": 2566,
+  "dup1_coincident": 70,
+  "dup2": 5040,
+  "dup2_coincident": 5040,
+  "coincident_not_structural": 0
+ },
+ "g4_struct": {
+  "dup1": 2566,
+  "dup1_coincident": 70,
+  "dup2": 5740,
+  "dup2_coincident": 5740,
+  "coincident_not_structural": 0
+ },
+ "A": {
+  "カウル": {
+   "n": 0
+  },
+  "側壁": {
+   "n": 11480,
+   "wrong": 5740,
+   "opposite": 5740,
+   "shared": 0,
+   "unknown": 0,
+   "donor_wall": 11334,
+   "same_donor_pairs": 5740,
+   "pairs": 5740
+  },
+  "角 (カウル∩側壁)": {
+   "n": 140,
+   "wrong": 70,
+   "opposite": 70,
+   "shared": 0,
+   "unknown": 0,
+   "donor_wall": 140,
+   "same_donor_pairs": 70,
+   "pairs": 70
+  },
+  "struct_noncoincident": {
+   "pairs": 2496,
+   "same_donor_pairs": 0
+  },
+  "twins_total": {
+   "n": 11620,
+   "wrong": 5810,
+   "opposite": 5810,
+   "shared": 0,
+   "unknown": 0,
+   "donor_wall": 11474,
+   "same_donor_pairs": 5810
+  },
+  "wall_total": {
+   "n": 16612,
+   "wrong": 5810,
+   "opposite": 5810,
+   "shared": 0,
+   "unknown": 0,
+   "donor_wall": 16466
+  }
+ },
+ "A_examples": [
+  {
+   "g4_node": 2115873,
+   "xyz": [
+    0.0,
+    0.0,
+    0.10000000149011612
+   ],
+   "truth": "排気側",
+   "g3_donor": 46707,
+   "donor_xyz": [
+    0.0,
+    0.0,
+    0.10000000149011612
+   ],
+   "donor_label": "外気側",
+   "dist_m": 0.0
+  },
+  {
+   "g4_node": 2118962,
+   "xyz": [
+    0.0,
+    0.021923542022705078,
+    0.10000000149011612
+   ],
+   "truth": "外気側",
+   "g3_donor": 47877,
+   "donor_xyz": [
+    0.0,
+    0.02301253192126751,
+    0.10000000149011612
+   ],
+   "donor_label": "排気側",
+   "dist_m": 0.0010889898985624313
+  },
+  {
+   "g4_node": 2118994,
+   "xyz": [
+    0.0,
+    0.09969904273748398,
+    0.10000000149011612
+   ],
+   "truth": "外気側",
+   "g3_donor": 49164,
+   "donor_xyz": [
+    0.0,
+    0.09972129762172699,
+    0.10000000149011612
+   ],
+   "donor_label": "排気側",
+   "dist_m": 2.2254884243011475e-05
+  },
+  {
+   "g4_node": 2118970,
+   "xyz": [
+    0.0,
+    0.06048966571688652,
+    0.10000000149011612
+   ],
+   "truth": "外気側",
+   "g3_donor": 48189,
+   "donor_xyz": [
+    0.0,
+    0.05998760834336281,
+    0.10000000149011612
+   ],
+   "donor_label": "排気側",
+   "dist_m": 0.0005020573735237122
+  },
+  {
+   "g4_node": 79096,
+   "xyz": [
+    0.0,
+    0.0032526873983442783,
+    0.10000000149011612
+   ],
+   "truth": "排気側",
+   "g3_donor": 1276153,
+   "donor_xyz": [
+    0.0,
+    0.003107501659542322,
+    0.10000000149011612
+   ],
+   "donor_label": "外気側",
+   "dist_m": 0.00014518573880195618
+  },
+  {
+   "g4_node": 2118987,
+   "xyz": [
+    0.0,
+    0.09834487736225128,
+    0.10000000149011612
+   ],
+   "truth": "外気側",
+   "g3_donor": 48891,
+   "donor_xyz": [
+    0.0,
+    0.09839439392089844,
+    0.10000000149011612
+   ],
+   "donor_label": "排気側",
+   "dist_m": 4.951655864715576e-05
+  },
+  {
+   "g4_node": 80888,
+   "xyz": [
+    0.0,
+    0.09683435410261154,
+    0.10000000149011612
+   ],
+   "truth": "排気側",
+   "g3_donor": 1276187,
+   "donor_xyz": [
+    0.0,
+    0.0969795361161232,
+    0.10000000149011612
+   ],
+   "donor_label": "外気側",
+   "dist_m": 0.00014518201351165771
+  },
+  {
+   "g4_node": 79376,
+   "xyz": [
+    0.0,
+    0.008863949216902256,
+    0.10000000149011612
+   ],
+   "truth": "排気側",
+   "g3_donor": 1276158,
+   "donor_xyz": [
+    0.0,
+    0.008165041916072369,
+    0.10000000149011612
+   ],
+   "donor_label": "外気側",
+   "dist_m": 0.0006989073008298874
+  }
+ ],
+ "B": {
+  "カウル": {
+   "n": 0,
+   "wrong": 0,
+   "wrong_B2": 0
+  },
+  "側壁": {
+   "n": 11480,
+   "wrong": 0,
+   "wrong_B2": 0
+  },
+  "角 (カウル∩側壁)": {
+   "n": 140,
+   "wrong": 0,
+   "wrong_B2": 0
+  },
+  "双子 (計)": {
+   "n": 11620,
+   "wrong": 0,
+   "wrong_B2": 0
+  },
+  "壁節点": {
+   "n": 16612,
+   "wrong": 0,
+   "wrong_B2": 0
+  },
+  "B2_available": true,
+  "B2_mismatch": 0,
+  "info": {
+   "keys": [
+    "ro",
+    "roK",
+    "roOmega",
+    "roUx",
+    "roY0",
+    "roY1"
+   ],
+   "disc": "node",
+   "sig": "格子署名一致 (65e8d0753e82…)",
+   "gas_model": "frozen_tp",
+   "ic_ro": {
+    "exhaust": 0.06668546795845032,
+    "ext": 0.015708336606621742
+   }
+  }
+ },
+ "B_examples": [],
+ "reasons": [],
+ "verdict": "B_OK (A 5810 件誤り)"
+}
