@@ -38,7 +38,17 @@ def mu_suth(T):
     return 1.716e-5 * (T / 273.0) ** 1.5 * (273.0 + 111.0) / (T + 111.0)
 
 
-def mesh_info(n_nodes):
+def mesh_info(n_nodes, run=None):
+    """(ni, nj, スケール)。run を渡し、その run の prepare_info.json に格子の ni と scale_m があれば、それを使う
+    (plan tooling-nozzle-core-grid の格子 G1x は ni 3086 で、冷却壁の格子の ni 4719 と違う)。無ければ従来どおり冷却壁の格子の npz から。"""
+    if run is not None:
+        pi = Path(run) / "prepare_info.json"
+        if pi.is_file():
+            info = json.loads(pi.read_text()); ni = int((info.get("mesh") or {}).get("ni", 0)); S = info.get("scale_m")
+            if ni > 0 and S is not None:
+                if n_nodes % ni:
+                    raise SystemExit(f"節点数 {n_nodes} が {pi} の ni {ni} で割り切れない (格子が違う)")
+                return ni, n_nodes // ni, float(S)
     z = np.load(OUTD / "theta_run_0181_ns_coldmesh_ad_100000.npz")
     ni = len(z["x"]); S = float(z["scale"])
     if n_nodes % ni:

@@ -24,7 +24,7 @@ DRIFT_WIN = 20000
 
 def snapshot(run: Path, st: int, yb_x, yb):
     xy, ro, ux, uy, T, tke = XC.load_forge(run, st)
-    ni, nj, S = XC.mesh_info(len(ro))
+    ni, nj, S = XC.mesh_info(len(ro), run)
     o = XC.reduce_fields(xy, ro, ux, uy, T, tke, False, ni, nj, S, yb_x, yb)
     rec = {"step": st, "nonfinite": int(sum(np.count_nonzero(~np.isfinite(a)) for a in (ro, ux, uy, T, tke))),
            "Q_w": float(o["Q_w"]), "mdot_in": float(o["mdot_in"]), "mdot_out": float(o["mdot_out"])}
