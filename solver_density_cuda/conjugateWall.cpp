@@ -56,6 +56,23 @@ inline void dofCoords(const mesh& msh, bool nodeMode, geom_int ic, double xyz[3]
     }
 }
 
+// dofCoords の double 版 (段 ②、plans/active/architecture-float-state-double-geometry.md §4.2 3.)。選ぶ条件は dofCoords と同じで、
+// 値は geom_float に丸める前の写し (node = coord64、それ以外 = cc64。cc64 は cells[].centCoords と同じ規則) から取る。
+// FP64 のビルドでは dofCoords と同じ値。差を取る第一内部点の d1/d2 だけが使う。写しの無い mesh は dofCoords に退避する。
+inline void dofCoords64(const mesh& msh, bool nodeMode, geom_int ic, double xyz[3])
+{
+    if (!msh.hasGeom64()) { dofCoords(msh, nodeMode, ic, xyz); return; }
+    if (nodeMode && (geom_int)msh.nodes.size() > ic && msh.nodes[ic].coords.size() >= 3) {
+        xyz[0] = msh.coord64[3*(size_t)ic + 0];
+        xyz[1] = msh.coord64[3*(size_t)ic + 1];
+        xyz[2] = msh.coord64[3*(size_t)ic + 2];
+    } else {
+        xyz[0] = msh.cc64[3*(size_t)ic + 0];
+        xyz[1] = msh.cc64[3*(size_t)ic + 1];
+        xyz[2] = msh.cc64[3*(size_t)ic + 2];
+    }
+}
+
 std::vector<flow_float> pullField(const solverConfig& cfg, variables& var, const std::string& name, geom_int n)
 {
     std::vector<flow_float> h(n, (flow_float)0.0);
@@ -73,26 +90,35 @@ std::vector<flow_float> pullField(const solverConfig& cfg, variables& var, const
 
 } // namespace
 
-const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, const bcond& bc)
+namespace {
+
+// 第一内部点マップの本体 (firstInterior がキャッシュし、診断 firstInteriorForDiag が作り直す)。
+// use64 = true: 面ベクトルと値の位置は double の写し (段 ②)。false: 従来の geom_float (写しの無い mesh・診断の旧版)。
+FirstInterior buildFirstInterior(const solverConfig& cfg, const mesh& msh, const bcond& bc, bool use64)
 {
     const bool nodeMode  = (cfg.discretization == "node");
     const double alignMin = cfg.interfaceDiagAlignMin;
-    static std::map<geom_int, FirstInterior> cache;
-    const auto it = cache.find(bc.physID);
-    if (it != cache.end()) return it->second;
 
     const auto& nb = dofNeighbors(msh);
     const geom_int nbp = (geom_int)bc.iPlanes.size();
 
     // 壁 DOF ごとの法線 = 属する境界面ベクトルの合算 (角では平均法線)。
+    // 段 ② (plans/active/architecture-float-state-double-geometry.md §4.2 3.): 面ベクトルと値の位置は double の写し
+    // (surfVect64・dofCoords64) から取る。FP64 のビルドでは従来と同じ値。
     std::unordered_map<geom_int, std::array<double,3>> nrm;
     for (geom_int ib = 0; ib < nbp; ib++) {
         const geom_int ic = bc.iCells[ib];
         const geom_int ip = bc.iPlanes[ib];
         auto& v = nrm[ic];
-        v[0] += msh.planes[ip].surfVect[0];
-        v[1] += msh.planes[ip].surfVect[1];
-        v[2] += msh.planes[ip].surfVect[2];
+        if (use64) {
+            v[0] += msh.surfVect64[3*(size_t)ip + 0];
+            v[1] += msh.surfVect64[3*(size_t)ip + 1];
+            v[2] += msh.surfVect64[3*(size_t)ip + 2];
+        } else {
+            v[0] += msh.planes[ip].surfVect[0];
+            v[1] += msh.planes[ip].surfVect[1];
+            v[2] += msh.planes[ip].surfVect[2];
+        }
     }
 
     FirstInterior fi;
@@ -113,10 +139,10 @@ const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, con
         const double nh[3] = { v[0]/ln, v[1]/ln, v[2]/ln };
         fi.nx[ib] = nh[0]; fi.ny[ib] = nh[1]; fi.nz[ib] = nh[2];
 
-        double xw[3]; dofCoords(msh, nodeMode, ic, xw);
+        double xw[3]; if (use64) dofCoords64(msh, nodeMode, ic, xw); else dofCoords(msh, nodeMode, ic, xw);
         double bestAl = -1.0, bestD = 0.0; geom_int bestJ = -1;
         for (const geom_int j : nb[ic]) {
-            double xj[3]; dofCoords(msh, nodeMode, j, xj);
+            double xj[3]; if (use64) dofCoords64(msh, nodeMode, j, xj); else dofCoords(msh, nodeMode, j, xj);
             const double d[3] = { xj[0]-xw[0], xj[1]-xw[1], xj[2]-xw[2] };
             const double dn = std::sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
             if (!(dn > 0.0)) continue;
@@ -133,7 +159,7 @@ const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, con
             double best2Al = -1.0, best2D = 0.0; geom_int best2J = -1;
             for (const geom_int j2 : nb[bestJ]) {
                 if (j2 == ic) continue;
-                double x2[3]; dofCoords(msh, nodeMode, j2, x2);
+                double x2[3]; if (use64) dofCoords64(msh, nodeMode, j2, x2); else dofCoords(msh, nodeMode, j2, x2);
                 const double d2v[3] = { x2[0]-xw[0], x2[1]-xw[1], x2[2]-xw[2] };
                 const double dn2 = std::sqrt(d2v[0]*d2v[0] + d2v[1]*d2v[1] + d2v[2]*d2v[2]);
                 if (!(dn2 > 0.0)) continue;
@@ -146,6 +172,21 @@ const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, con
         }
     }
 
+    return fi;
+}
+
+} // namespace
+
+const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, const bcond& bc)
+{
+    const double alignMin = cfg.interfaceDiagAlignMin;
+    static std::map<geom_int, FirstInterior> cache;
+    const auto it = cache.find(bc.physID);
+    if (it != cache.end()) return it->second;
+
+    const geom_int nbp = (geom_int)bc.iPlanes.size();
+    FirstInterior fi = buildFirstInterior(cfg, msh, bc, msh.hasGeom64());
+
     geom_int nok = 0;
     for (geom_int ib = 0; ib < nbp; ib++) nok += (fi.ok[ib] ? 1 : 0);
     std::cout << "[interfaceDiag] physID=" << bc.physID << " (" << bc.physName << "): "
@@ -153,6 +194,11 @@ const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, con
               << " wall DOFs (alignMin=" << alignMin << ")" << std::endl;
 
     return cache.emplace(bc.physID, std::move(fi)).first->second;
+}
+
+FirstInterior firstInteriorForDiag(const solverConfig& cfg, const mesh& msh, const bcond& bc, bool legacy)
+{
+    return buildFirstInterior(cfg, msh, bc, !legacy && msh.hasGeom64());
 }
 
 void fillInterfaceDiagnostics(const solverConfig& cfg, const mesh& msh, variables& var, bcond& bc)

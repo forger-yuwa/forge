@@ -665,16 +665,24 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         if (cfg.axisRFloor > (flow_float)0.0 || cfg.hoopAreaFromClosure == 1) {
             // 面の向き規約: planes[ip].iCells[0] にとって外向き (+S)、iCells[1] にとって内向き (-S)。
             // (solver 側 mesh は iPlanesDir を持たないため plane 走査で集計する。)
-            std::vector<geom_float> aclx(msh.nCells_all, 0.0), acly(msh.nCells_all, 0.0);
+            // 足し上げるのはデバイスに渡す最終の面ベクトル (半径の重みを掛けて geom_float に丸めた sx/sy) のまま。
+            // 和は double に貯め、最後に 1 回だけ丸める (plans/active/architecture-float-state-double-geometry.md §4.2b、段 ②。
+            // 薄い半径方向のセルでは S·r_top − S·r_bot が打ち消し合うので、float の和では丸めが残る。FP64 のビルドでは従来と同じ)。
+            std::vector<double> aclx64(msh.nCells_all, 0.0), acly64(msh.nCells_all, 0.0);
             for (geom_int ip = 0; ip < msh.nPlanes; ++ip) {
                 const auto& pc = msh.planes[ip].iCells;
                 if (pc.empty()) continue;
                 const geom_int ic0 = pc[0];
-                if (ic0 >= 0 && ic0 < msh.nCells) { aclx[ic0] += sx[ip]; acly[ic0] += sy[ip]; }
+                if (ic0 >= 0 && ic0 < msh.nCells) { aclx64[ic0] += (double)sx[ip]; acly64[ic0] += (double)sy[ip]; }
                 if (pc.size() > 1) {
                     const geom_int ic1 = pc[1];
-                    if (ic1 >= 0 && ic1 < msh.nCells) { aclx[ic1] -= sx[ip]; acly[ic1] -= sy[ip]; }
+                    if (ic1 >= 0 && ic1 < msh.nCells) { aclx64[ic1] -= (double)sx[ip]; acly64[ic1] -= (double)sy[ip]; }
                 }
+            }
+            std::vector<geom_float> aclx(msh.nCells_all), acly(msh.nCells_all);
+            for (geom_int ic = 0; ic < msh.nCells_all; ++ic) {
+                aclx[ic] = (geom_float)aclx64[ic];
+                acly[ic] = (geom_float)acly64[ic];
             }
             // A_planar (勾配分母) は不変のまま、閉性面積は専用配列へ (hoop ソース/Jacobian が参照)。
             cudaMemcpy(this->c_d.at("A_closure_x"), aclx.data(), msh.nCells_all*sizeof(geom_float), cudaMemcpyHostToDevice);
@@ -733,18 +741,35 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
     // 実行時の重心 (ccx/ccy/ccz = CV 中心) と面接続のみから計算するので、node-centered (median-dual)
     // でも双対 CV の Δ が自動的に得られる (plan §5.6: primal mesh の volume を直接参照しない)。
     // 静的量ゆえ幾何セットアップ時に host で 1 回計算し H2D 転送する。
+    // 段 ② (plans/active/architecture-float-state-double-geometry.md §4.2 3.): 重心間の差と距離・最大は double の値の位置
+    // (mesh::cc64) で取り、最後に 1 回だけ丸める (丸めは単調なので、丸めた値の最大と同じ順序になる。FP64 のビルドでは従来と同じ)。
+    // double の写しを持たない mesh は従来の geom_float の差。
     {
+        const bool use64 = msh.hasGeom64();
+        std::vector<double> delta_les64(msh.nCells_all, 0.0);
         geom_float* delta_les_h = (geom_float*)malloc(sizeof(geom_float)*msh.nCells_all);
         for (geom_int ic=0; ic<msh.nCells_all; ic++) delta_les_h[ic] = 0.0;
         for (geom_int ip=0; ip<msh.nPlanes; ip++) {
             const geom_int ic1 = msh.planes[ip].iCells[0];
             const geom_int ic2 = msh.planes[ip].iCells[1];
-            const geom_float dx = ccx[ic1] - ccx[ic2];
-            const geom_float dy = ccy[ic1] - ccy[ic2];
-            const geom_float dz = ccz[ic1] - ccz[ic2];
-            const geom_float d  = sqrt(dx*dx + dy*dy + dz*dz);
-            if (ic1 < msh.nCells && d > delta_les_h[ic1]) delta_les_h[ic1] = d;
-            if (ic2 < msh.nCells && d > delta_les_h[ic2]) delta_les_h[ic2] = d;
+            if (use64) {
+                const double dx = msh.cc64[3*(size_t)ic1 + 0] - msh.cc64[3*(size_t)ic2 + 0];
+                const double dy = msh.cc64[3*(size_t)ic1 + 1] - msh.cc64[3*(size_t)ic2 + 1];
+                const double dz = msh.cc64[3*(size_t)ic1 + 2] - msh.cc64[3*(size_t)ic2 + 2];
+                const double d  = sqrt(dx*dx + dy*dy + dz*dz);
+                if (ic1 < msh.nCells && d > delta_les64[ic1]) delta_les64[ic1] = d;
+                if (ic2 < msh.nCells && d > delta_les64[ic2]) delta_les64[ic2] = d;
+            } else {
+                const geom_float dx = ccx[ic1] - ccx[ic2];
+                const geom_float dy = ccy[ic1] - ccy[ic2];
+                const geom_float dz = ccz[ic1] - ccz[ic2];
+                const geom_float d  = sqrt(dx*dx + dy*dy + dz*dz);
+                if (ic1 < msh.nCells && d > delta_les_h[ic1]) delta_les_h[ic1] = d;
+                if (ic2 < msh.nCells && d > delta_les_h[ic2]) delta_les_h[ic2] = d;
+            }
+        }
+        if (use64) {
+            for (geom_int ic=0; ic<msh.nCells_all; ic++) delta_les_h[ic] = (geom_float)delta_les64[ic];
         }
         cudaMemcpy(this->c_d.at("delta_les"), delta_les_h, msh.nCells_all*sizeof(geom_float), cudaMemcpyHostToDevice);
         free(delta_les_h);

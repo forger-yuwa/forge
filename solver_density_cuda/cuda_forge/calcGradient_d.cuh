@@ -91,6 +91,19 @@ struct LsqCoefView {
 };
 LsqCoefView lsq_coef_view();
 
+// 段 ② の診断 (FORGE_DIAG_GEOM_STAGE2_DUMP、plans/active/architecture-float-state-double-geometry.md §6.3) 用の LSQ の係数の作り直し。
+// 本番の係数・勾配は触らない。legacy = false は本番と同じ変位 (面ごとの差 ge_x..ge_z = double の値の位置の差を 1 回丸めた値)、
+// true は段 ① までの変位 (flow_float の座標 ccx..ccz の差)。node の gradLSQ 1/2 だけ (それ以外は空)。
+struct LsqDiagCoef {
+    int gradLSQ = 0;
+    std::vector<flow_float> cInt;       // gradLSQ=2: [3*nInc] (cell_planes CSR の incidence ごと。境界 incidence は 0)
+    std::vector<int> seamGroup;         // gradLSQ=2: [nInc] 継ぎ目の group の root (継ぎ目でない incidence は -1)
+    std::vector<int> seamClass;         // gradLSQ=2: [nInc] group 内の同値類の番号 (同上 -1)
+    int nDegen = 0;                     // gradLSQ=2: スペクトル打ち切りした節点・group の数
+    std::vector<flow_float> M6;         // gradLSQ=1: [6*nCells] Mxx,Mxy,Mxz,Myy,Myz,Mzz の順に nCells ずつ (flow_float に格納した値)
+};
+void lsqCoefForDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, bool legacy, LsqDiagCoef& out);
+
 // スカラー勾配の LSQ 経路 (mesh.scalarGradient: lsq、node のみ)。
 inline bool scalarGradientLsqActive(const solverConfig& cfg)
 {

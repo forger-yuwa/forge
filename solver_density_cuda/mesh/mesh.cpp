@@ -556,26 +556,100 @@ void mesh::readMesh(string fname)
 }
 
 
-void mesh::setPeriodicPartner()
+// 周期の相手の最近傍探索 (setPeriodicPartner の本体)。T は座標の型: 本番は double の写し (段 ②、plans/active/
+// architecture-float-state-double-geometry.md §4.2 3.)、診断の旧版は geom_float。c0/c1 は bc0/bc1 の面重心 [3*n]、
+// a0 は bc0 の面積 [n0]。nearest[ib0] = bc1 の局所番号。演算の並び (平行移動・回転 → pow で距離の 2 乗 → 最初の最小)
+// は従来のまま。T = geom_float は従来の式とビット単位で同じで、FP64 のビルドでは両方とも double で同じになる。
+template <typename T>
+static void periodicNearest(const std::vector<T>& c0, const std::vector<T>& c1, const std::vector<T>& a0,
+                            int type, T dx, T dy, T dz, T dtheta,
+                            std::vector<geom_int>& nearest, T& pair_dist2_max, T& face_size_min)
 {
+    const size_t n0 = a0.size();
+    const size_t n1 = c1.size()/3;
+    std::vector<T> partnerX(n1), partnerY(n1), partnerZ(n1);
+    for (size_t ib1 = 0; ib1 < n1; ib1++) {
+        const T x1 = c1[3*ib1 + 0];
+        const T y1 = c1[3*ib1 + 1];
+        const T z1 = c1[3*ib1 + 2];
+        T x1_r1 = x1, y1_r1 = y1, z1_r1 = z1;
+        if (type == 0) {
+            x1_r1 = x1 - dx;
+            y1_r1 = y1 - dy;
+            z1_r1 = z1 - dz;
+        } else if (type == 1) {
+            x1_r1 = x1;
+            y1_r1 = cos(-dtheta)*y1 -sin(-dtheta)*z1;
+            z1_r1 = sin(-dtheta)*y1 +cos(-dtheta)*z1;
+        }
+        partnerX[ib1] = x1_r1;
+        partnerY[ib1] = y1_r1;
+        partnerZ[ib1] = z1_r1;
+    }
+
+    nearest.assign(n0, -1);
+    pair_dist2_max = 0.0;
+    face_size_min  = 1e+30;
+    for (size_t ib0 = 0; ib0 < n0; ib0++) {
+        const T x0 = c0[3*ib0 + 0];
+        const T y0 = c0[3*ib0 + 1];
+        const T z0 = c0[3*ib0 + 2];
+        T dist2 = 1e+30;
+        T dist2_temp;
+        geom_int index = -1;
+        for (size_t ib1 = 0; ib1 < n1; ib1++) {
+            const T x1 = partnerX[ib1];
+            const T y1 = partnerY[ib1];
+            const T z1 = partnerZ[ib1];
+            dist2_temp = pow((x1-x0),2) +pow((y1-y0),2) +pow((z1-z0),2);
+            if (dist2>dist2_temp) {
+                dist2 = dist2_temp;
+                index = (geom_int)ib1;
+            }
+        }
+        nearest[ib0] = index;
+        if (dist2 > pair_dist2_max) pair_dist2_max = dist2;
+        const T fs = std::sqrt(a0[ib0]);
+        if (fs < face_size_min) face_size_min = fs;
+    }
+}
+
+// 周期 bcond の組 (bc0 → 相手 bc1) ごとの最近傍の対応。setPeriodicPartner と診断 (periodicPartnerPlanes) が共有する。
+namespace {
+struct PeriodicPairMatch {
+    bcond* bc0 = nullptr;
+    bcond* bc1 = nullptr;
+    std::vector<geom_int> nearest;      // [bc0 の面数] bc1 の局所番号 (-1 = 相手なし)
+    double pair_dist_max = 0.0;         // 平行移動後の残差距離の最大 (T の精度で求めて広げた値)
+    double face_size_min = 1e+30;       // bc0 の面寸法 √|S| の最小
+    flow_float dx = 0.0, dy = 0.0, dz = 0.0;
+};
+}  // namespace
+
+// 組の作り方 (未処理の bcond を順に取り、相手 partnerBCID とまとめて 1 回だけ) と inputInts/inputFloats の引き方は従来のまま。
+// useDouble = true: 面重心・面積は double の写し planeCent64/surfArea64 (段 ②)。false: 従来の geom_float の planes[]。
+static std::vector<PeriodicPairMatch> periodicPairMatches(mesh& m, bool useDouble)
+{
+    std::vector<PeriodicPairMatch> out;
     std::list<int> checked_bcIDs;
 
-    for (auto& bc0 : this->bconds) {
+    for (auto& bc0 : m.bconds) {
         if (bc0.bcondKind == "periodic") {
             int bcID         = bc0.physID;
             int bcID_partner = bc0.inputInts["partnerBCID"];
 
-            flow_float dx;
-            flow_float dy;
-            flow_float dz;
-            flow_float dtheta;
+            flow_float dx = 0.0;
+            flow_float dy = 0.0;
+            flow_float dz = 0.0;
+            flow_float dtheta = 0.0;
 
-            if (bc0.inputInts["type"] == 0) { // Cartesian
+            const int type = bc0.inputInts["type"];
+            if (type == 0) { // Cartesian
                 dx = bc0.inputFloats["dx"];
                 dy = bc0.inputFloats["dy"];
                 dz = bc0.inputFloats["dz"];
 
-            } else if (bc0.inputInts["type"] == 1) { // rotation
+            } else if (type == 1) { // rotation
                 dtheta = bc0.inputFloats["dtheta"];
             }
 
@@ -583,148 +657,138 @@ void mesh::setPeriodicPartner()
                 checked_bcIDs.push_back(bcID);
                 checked_bcIDs.push_back(bcID_partner);
 
-                std::vector<geom_int> map_ib1_iplane;
-
                 // find nearest planes of partner
-                for (auto& bc1 : this->bconds) {
+                for (auto& bc1 : m.bconds) {
                     if (bc1.physID != bcID_partner) continue;
 
-                    //Eigen::VectorXd XYZ(3);
-                    //Eigen::MatrixXd partnerXYZ(3, bc1.iPlanes.size());
-                    //Eigen::MatrixXd::Index index;
-
-                    vector<geom_float> XYZ(3);
-                    vector<vector<geom_float>> partnerXYZ;
-                    geom_float index;
-
-                    partnerXYZ.resize(3);
-                    partnerXYZ[0].resize(bc1.iPlanes.size());
-                    partnerXYZ[1].resize(bc1.iPlanes.size());
-                    partnerXYZ[2].resize(bc1.iPlanes.size());
-
-                    geom_float x1;
-                    geom_float y1;
-                    geom_float z1;
-
-                    geom_float x1_r1;
-                    geom_float y1_r1;
-                    geom_float z1_r1;
-
-                    geom_int ib1_local = 0;
-                    for (geom_int& ip1 : bc1.iPlanes) {
-                        x1 = this->planes[ip1].centCoords[0];
-                        y1 = this->planes[ip1].centCoords[1];
-                        z1 = this->planes[ip1].centCoords[2];
-
-                        if (bc0.inputInts["type"] == 0) {
-                            x1_r1 = x1 - dx;
-                            y1_r1 = y1 - dy;
-                            z1_r1 = z1 - dz;
-
-                        } else if (bc0.inputInts["type"] == 1) {
-                            x1_r1 = x1;
-                            y1_r1 = cos(-dtheta)*y1 -sin(-dtheta)*z1;
-                            z1_r1 = sin(-dtheta)*y1 +cos(-dtheta)*z1;
+                    PeriodicPairMatch r;
+                    r.bc0 = &bc0; r.bc1 = &bc1; r.dx = dx; r.dy = dy; r.dz = dz;
+                    const size_t n0 = bc0.iPlanes.size(), n1 = bc1.iPlanes.size();
+                    if (useDouble) {
+                        std::vector<double> c0(3*n0), c1(3*n1), a0(n0);
+                        for (size_t i = 0; i < n0; i++) {
+                            const size_t ip = (size_t)bc0.iPlanes[i];
+                            for (int k = 0; k < 3; k++) c0[3*i + k] = m.planeCent64[3*ip + k];
+                            a0[i] = m.surfArea64[ip];
                         }
-
-                        partnerXYZ[0][ib1_local] = x1_r1;
-                        partnerXYZ[1][ib1_local] = y1_r1;
-                        partnerXYZ[2][ib1_local] = z1_r1;
-
-                        map_ib1_iplane.push_back(ip1);
-
-                        ib1_local++;
-                    }
-
-                    // **対応の検査用**: 最近傍探索は距離を見ないので、平行移動量 (dx,dy,dz) が
-                    // 間違っていても「一番近い面」を黙って選んでしまう。実例 (2026-09-20):
-                    // 翼列ピッチを m でなく cm 換算で書き、dy が 100 倍小さかったが、
-                    // 変換も計算もエラーを出さず「完走したが M=1264・P=1 Pa」の場になった。
-                    geom_float pair_dist2_max = 0.0;
-                    geom_float face_size_min  = 1e+30;
-                    std::vector<int> partner_use(bc1.iPlanes.size(), 0);
-
-                    geom_int ib0_local = 0;
-                    for (geom_int& ip0 : bc0.iPlanes) {
-                        geom_float x0 = this->planes[ip0].centCoords[0];
-                        geom_float y0 = this->planes[ip0].centCoords[1];
-                        geom_float z0 = this->planes[ip0].centCoords[2];
-
-                        XYZ[0] = x0;
-                        XYZ[1] = y0;
-                        XYZ[2] = z0;
-
-                        geom_float dist2 = 1e+30;
-                        geom_float dist2_temp;
-                        geom_int ib1_local = 0;
-                        for (geom_int& ip1 : bc1.iPlanes) {
-                            x1 = partnerXYZ[0][ib1_local] ;
-                            y1 = partnerXYZ[1][ib1_local] ;
-                            z1 = partnerXYZ[2][ib1_local] ;
-
-                            dist2_temp = pow((x1-x0),2) +pow((y1-y0),2) +pow((z1-z0),2);
-
-                            if (dist2>dist2_temp) {
-                                dist2 = dist2_temp;
-                                index = ib1_local;
-                            }
-
-                            ib1_local++;
+                        for (size_t i = 0; i < n1; i++) {
+                            const size_t ip = (size_t)bc1.iPlanes[i];
+                            for (int k = 0; k < 3; k++) c1[3*i + k] = m.planeCent64[3*ip + k];
                         }
-
-                        // don't use eigen because too many warnings
-                        //(partnerXYZ.colwise() - XYZ).colwise().squaredNorm().minCoeff(&index);
-
-                        geom_int ip1 = map_ib1_iplane[index];
-
-                        geom_int ic0 = this->planes[ip0].iCells[0];
-                        geom_int ic1 = this->planes[ip1].iCells[0];
-
-                        bc0.bint["partnerPlnID"][ib0_local] = ip1;
-                        bc1.bint["partnerPlnID"][index]     = ip0;
-
-                        bc0.bint["partnerCellID"][ib0_local] = ic1;
-                        bc1.bint["partnerCellID"][index]     = ic0;
-
-                        if (dist2 > pair_dist2_max) pair_dist2_max = dist2;
-                        const geom_float fs = std::sqrt(this->planes[ip0].surfArea);
-                        if (fs < face_size_min) face_size_min = fs;
-                        partner_use[index] += 1;
-
-                        ib0_local++;
+                        double pd2 = 0.0, fsm = 0.0;
+                        periodicNearest<double>(c0, c1, a0, type, (double)dx, (double)dy, (double)dz, (double)dtheta,
+                                                r.nearest, pd2, fsm);
+                        r.pair_dist_max = std::sqrt(pd2);
+                        r.face_size_min = fsm;
+                    } else {
+                        std::vector<geom_float> c0(3*n0), c1(3*n1), a0(n0);
+                        for (size_t i = 0; i < n0; i++) {
+                            const geom_int ip = bc0.iPlanes[i];
+                            for (int k = 0; k < 3; k++) c0[3*i + k] = m.planes[ip].centCoords[k];
+                            a0[i] = m.planes[ip].surfArea;
+                        }
+                        for (size_t i = 0; i < n1; i++) {
+                            const geom_int ip = bc1.iPlanes[i];
+                            for (int k = 0; k < 3; k++) c1[3*i + k] = m.planes[ip].centCoords[k];
+                        }
+                        geom_float pd2 = 0.0, fsm = 0.0;
+                        periodicNearest<geom_float>(c0, c1, a0, type, (geom_float)dx, (geom_float)dy, (geom_float)dz, (geom_float)dtheta,
+                                                    r.nearest, pd2, fsm);
+                        r.pair_dist_max = (double)std::sqrt(pd2);
+                        r.face_size_min = (double)fsm;
                     }
-
-                    // 検査 1: 残差距離が面寸法に対して小さいこと (平行移動量の取り違え検出)
-                    const geom_float pair_dist_max = std::sqrt(pair_dist2_max);
-                    if (pair_dist_max > 0.25*face_size_min) {
-                        std::cerr << "Mesh Error: periodic pairing for bcond physID " << bcID
-                                  << " <-> " << bcID_partner << " does not close.\n"
-                                  << "  max residual distance after translation = " << pair_dist_max
-                                  << " m, smallest face size = " << face_size_min << " m.\n"
-                                  << "  given translation (dx,dy,dz) = (" << dx << ", " << dy
-                                  << ", " << dz << ") m. Check the units and the sign.\n";
-                        throw std::runtime_error("periodic boundary translation does not match the mesh");
-                    }
-                    // 検査 2: 1 対 1 であること (同じ相手に 2 面が付くのは対応が崩れている)
-                    int n_unused = 0, n_multi = 0;
-                    for (int u : partner_use) { if (u == 0) ++n_unused; else if (u > 1) ++n_multi; }
-                    if (n_unused || n_multi) {
-                        std::cerr << "Mesh Error: periodic pairing for bcond physID " << bcID
-                                  << " <-> " << bcID_partner << " is not one-to-one ("
-                                  << n_unused << " unmatched, " << n_multi
-                                  << " matched more than once).\n";
-                        throw std::runtime_error("periodic boundary pairing is not one-to-one");
-                    }
-                    std::cout << "[setPeriodicPartner] physID " << bcID << " <-> " << bcID_partner
-                              << ": " << bc0.iPlanes.size() << " faces, max residual "
-                              << pair_dist_max << " m (face size " << face_size_min << " m)\n";
-                } 
+                    out.push_back(std::move(r));
+                }
             }else {
                 continue; // already added bc
             }
         }
     }
+    return out;
+}
+
+void mesh::setPeriodicPartner()
+{
+    // 面重心・面積は double の写しから (段 ②: 対応が FP64 のビルドと同じになるように)。写しの無い mesh は従来の geom_float。
+    const std::vector<PeriodicPairMatch> matches = periodicPairMatches(*this, this->hasGeom64());
+
+    for (const PeriodicPairMatch& r : matches) {
+        bcond& bc0 = *r.bc0;
+        bcond& bc1 = *r.bc1;
+        const int bcID = bc0.physID;
+        const int bcID_partner = bc1.physID;
+
+        // **対応の検査用**: 最近傍探索は距離を見ないので、平行移動量 (dx,dy,dz) が
+        // 間違っていても「一番近い面」を黙って選んでしまう。実例 (2026-09-20):
+        // 翼列ピッチを m でなく cm 換算で書き、dy が 100 倍小さかったが、
+        // 変換も計算もエラーを出さず「完走したが M=1264・P=1 Pa」の場になった。
+        std::vector<int> partner_use(bc1.iPlanes.size(), 0);
+
+        for (size_t ib0_local = 0; ib0_local < bc0.iPlanes.size(); ib0_local++) {
+            const geom_int ip0 = bc0.iPlanes[ib0_local];
+            const geom_int index = r.nearest[ib0_local];
+            if (index < 0) continue;   // 相手の bcond に面が無い (下の検査 2 で止まる)
+
+            geom_int ip1 = bc1.iPlanes[index];
+
+            geom_int ic0 = this->planes[ip0].iCells[0];
+            geom_int ic1 = this->planes[ip1].iCells[0];
+
+            bc0.bint["partnerPlnID"][ib0_local] = ip1;
+            bc1.bint["partnerPlnID"][index]     = ip0;
+
+            bc0.bint["partnerCellID"][ib0_local] = ic1;
+            bc1.bint["partnerCellID"][index]     = ic0;
+
+            partner_use[index] += 1;
+        }
+
+        // 検査 1: 残差距離が面寸法に対して小さいこと (平行移動量の取り違え検出)
+        const double pair_dist_max = r.pair_dist_max;
+        const double face_size_min = r.face_size_min;
+        if (pair_dist_max > 0.25*face_size_min) {
+            std::cerr << "Mesh Error: periodic pairing for bcond physID " << bcID
+                      << " <-> " << bcID_partner << " does not close.\n"
+                      << "  max residual distance after translation = " << pair_dist_max
+                      << " m, smallest face size = " << face_size_min << " m.\n"
+                      << "  given translation (dx,dy,dz) = (" << r.dx << ", " << r.dy
+                      << ", " << r.dz << ") m. Check the units and the sign.\n";
+            throw std::runtime_error("periodic boundary translation does not match the mesh");
+        }
+        // 検査 2: 1 対 1 であること (同じ相手に 2 面が付くのは対応が崩れている)
+        int n_unused = 0, n_multi = 0;
+        for (int u : partner_use) { if (u == 0) ++n_unused; else if (u > 1) ++n_multi; }
+        if (n_unused || n_multi) {
+            std::cerr << "Mesh Error: periodic pairing for bcond physID " << bcID
+                      << " <-> " << bcID_partner << " is not one-to-one ("
+                      << n_unused << " unmatched, " << n_multi
+                      << " matched more than once).\n";
+            throw std::runtime_error("periodic boundary pairing is not one-to-one");
+        }
+        std::cout << "[setPeriodicPartner] physID " << bcID << " <-> " << bcID_partner
+                  << ": " << bc0.iPlanes.size() << " faces, max residual "
+                  << pair_dist_max << " m (face size " << face_size_min << " m)\n";
+    }
 };
+
+std::map<int, std::vector<geom_int>> mesh::periodicPartnerPlanes(bool useDouble)
+{
+    std::map<int, std::vector<geom_int>> out;
+    const std::vector<PeriodicPairMatch> matches = periodicPairMatches(*this, useDouble && this->hasGeom64());
+    for (const PeriodicPairMatch& r : matches) {
+        std::vector<geom_int>& p0 = out[r.bc0->physID];
+        std::vector<geom_int>& p1 = out[r.bc1->physID];
+        p0.assign(r.bc0->iPlanes.size(), -1);
+        if (p1.size() != r.bc1->iPlanes.size()) p1.assign(r.bc1->iPlanes.size(), -1);
+        for (size_t ib0 = 0; ib0 < r.bc0->iPlanes.size(); ib0++) {
+            const geom_int index = r.nearest[ib0];
+            if (index < 0) continue;
+            p0[ib0] = r.bc1->iPlanes[index];
+            p1[index] = r.bc0->iPlanes[ib0];
+        }
+    }
+    return out;
+}
 
 
 // node-centered 周期境界 DOF 同一視 (median-dual M4, §4.5)。
@@ -1089,7 +1153,9 @@ void matrix::initMatrix(mesh& msh)
 // 壁 CV を種に「最初は最近接隣 (壁法線 = 最短エッジ)、以降は前進方向と最も揃う隣」へ
 // greedy に鎖を伸ばす。構造化 TFI/積層メッシュでは j 列がそのまま再構成される。
 // 載らない CV は line_prev/next = -1 のまま point-DPLUR fallback。
-void mesh::buildImplicitLines(const flow_float* ccx, const flow_float* ccy, const flow_float* ccz)
+void mesh::implicitLineTopology(bool useDouble, const flow_float* ccx, const flow_float* ccy, const flow_float* ccz,
+                                std::vector<geom_int>& offsets, std::vector<geom_int>& cells,
+                                std::vector<geom_int>& prevArr, std::vector<geom_int>& nextArr, geom_int& lenMax) const
 {
     const geom_int n = this->nCells;
     // 内部面の隣接リスト (両側とも実 CV の面のみ)
@@ -1106,20 +1172,30 @@ void mesh::buildImplicitLines(const flow_float* ccx, const flow_float* ccy, cons
     std::vector<geom_int> seeds;
     {
         std::vector<char> isWall(n, 0);
-        for (bcond& bc : this->bconds)
+        for (const bcond& bc : this->bconds)
             if (bc.bcondKind == "wall" || bc.bcondKind == "wall_isothermal")
                 for (geom_int ic : bc.iCells)
                     if (ic >= 0 && ic < n && !isWall[ic]) { isWall[ic] = 1; seeds.push_back(ic); }
     }
     // 座標: node モードは nodes[ic].coords (CV=節点) を正とする。host の ccx 配列は
     // 初期化順によって未充填 (全ゼロ) のことがある (2026-09-02 実測) ため信用しない。
+    // 段 ② (plans/active/architecture-float-state-double-geometry.md §4.2 3.): 節点座標は double の写し coord64 を読む
+    // (geom_float に丸める前の値。FP64 のビルドでは同じ値)。useDouble = false は従来の geom_float (診断の旧版)。
+    // 選ぶ条件 (nodes の数・coords の成分数) は従来のまま。
+    const bool use64 = useDouble && this->coord64.size() >= 3*this->nodes.size();
     std::vector<double> px(n), py(n), pz(n);
     const bool useNodes = ((geom_int)this->nodes.size() >= n);
     for (geom_int ic = 0; ic < n; ++ic) {
         if (useNodes && this->nodes[ic].coords.size() >= 2) {
-            px[ic] = (double)this->nodes[ic].coords[0];
-            py[ic] = (double)this->nodes[ic].coords[1];
-            pz[ic] = (this->nodes[ic].coords.size() >= 3) ? (double)this->nodes[ic].coords[2] : 0.0;
+            if (use64) {
+                px[ic] = this->coord64[3*(size_t)ic + 0];
+                py[ic] = this->coord64[3*(size_t)ic + 1];
+                pz[ic] = (this->nodes[ic].coords.size() >= 3) ? this->coord64[3*(size_t)ic + 2] : 0.0;
+            } else {
+                px[ic] = (double)this->nodes[ic].coords[0];
+                py[ic] = (double)this->nodes[ic].coords[1];
+                pz[ic] = (this->nodes[ic].coords.size() >= 3) ? (double)this->nodes[ic].coords[2] : 0.0;
+            }
         } else {
             px[ic] = (double)ccx[ic]; py[ic] = (double)ccy[ic]; pz[ic] = (double)ccz[ic];
         }
@@ -1131,13 +1207,13 @@ void mesh::buildImplicitLines(const flow_float* ccx, const flow_float* ccy, cons
         return dx*dx + dy*dy + dz*dz;
     };
     std::vector<char> visited(n, 0);
-    std::vector<geom_int> prevArr(n, -1), nextArr(n, -1);
-    std::vector<geom_int> offsets(1, 0), cells;
+    prevArr.assign(n, -1); nextArr.assign(n, -1);
+    offsets.assign(1, 0); cells.clear();
     const double cosMin = 0.7;   // 前進方向との整列条件 (45°)
     // 実験用: ライン長上限 (FORGE_LINE_MAXLEN, 既定 0 = 無制限)。壁側から数えて打ち切る。
     long maxLen_env = 0;
     if (const char* e = getenv("FORGE_LINE_MAXLEN")) maxLen_env = atol(e);
-    geom_int nLines = 0, lenMax = 0;
+    lenMax = 0;
     for (geom_int seed : seeds) {
         if (visited[seed]) continue;
         std::vector<geom_int> line;
@@ -1185,8 +1261,17 @@ void mesh::buildImplicitLines(const flow_float* ccx, const flow_float* ccy, cons
         }
         offsets.push_back((geom_int)cells.size());
         lenMax = std::max(lenMax, (geom_int)line.size());
-        ++nLines;
     }
+}
+
+void mesh::buildImplicitLines(const flow_float* ccx, const flow_float* ccy, const flow_float* ccz)
+{
+    const geom_int n = this->nCells;
+    std::vector<geom_int> prevArr, nextArr, offsets, cells;
+    geom_int lenMax = 0;
+    // 接続は double の写しから作る (段 ②: FP64 のビルドと同じ接続にする)。写しの無い mesh は従来の geom_float。
+    this->implicitLineTopology(true, ccx, ccy, ccz, offsets, cells, prevArr, nextArr, lenMax);
+    const geom_int nLines = (geom_int)offsets.size() - 1;
     this->nImplicitLines = nLines;
     const geom_int nOn = (geom_int)cells.size();
     printf("[lineImplicit] lines=%d  covered CVs=%d/%d (%.1f%%)  maxLen=%d\n",

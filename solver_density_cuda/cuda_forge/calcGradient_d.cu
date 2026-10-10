@@ -505,11 +505,34 @@ __device__ __forceinline__ void lsq_solve_sym3(
     }
 }
 
+// LSQ の変位 d = x[jc] − x[ic] (ic から内部面 ip の相手 jc へ)。
+// gex != nullptr: 面ごとの差 e = x[ic1] − x[ic0] (double の値の位置で引いて 1 回だけ flow_float に丸めた値、variables の
+//   ge_x..ge_z) に向きを付けて使う (plans/active/architecture-float-state-double-geometry.md §4.2 3.・§4.2a、段 ②)。
+//   ±1 を掛けるだけなので、FP64 のビルドでは旧来の ccx[jc] − ccx[ic] とビット単位で同じ。
+// gex == nullptr: 旧来の座標の差 (double で引くが、座標は flow_float に丸めた後)。診断 (FORGE_DIAG_GEOM_STAGE2_DUMP) の旧版と、
+//   double の値の位置を持たない mesh の退避だけが使う。
+__host__ __device__ __forceinline__ static void lsq_disp(
+    geom_int ic, geom_int ip, geom_int ic0, geom_int jc,
+    const flow_float* gex, const flow_float* gey, const flow_float* gez,
+    const flow_float* ccx, const flow_float* ccy, const flow_float* ccz,
+    double cx, double cy, double cz,
+    double& dx, double& dy, double& dz)
+{
+    if (gex != nullptr) {
+        const double sg = (ic0 == ic) ? 1.0 : -1.0;
+        dx = sg*(double)gex[ip]; dy = sg*(double)gey[ip]; dz = sg*(double)gez[ip];
+    } else {
+        dx = ccx[jc]-cx; dy = ccy[jc]-cy; dz = ccz[jc]-cz;
+    }
+}
+
 // 内部面 (ip<nNormalPlanes) について per-cell gather で M と b を貯める。
+// 変位は lsq_disp (gex = 面ごとの差 ge_x..ge_z。nullptr なら旧来の座標の差)。
 __global__ void lsqGrad_accumInternal_d(
     geom_int nCells, geom_int* plane_cells,
     geom_int* cell_planes_index, geom_int* cell_planes, geom_int nNormalPlanes,
     geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    const flow_float* gex, const flow_float* gey, const flow_float* gez,
     flow_float* ro, flow_float* Ux, flow_float* Uy, flow_float* Uz, flow_float* P, flow_float* T,
     flow_float* Mxx, flow_float* Mxy, flow_float* Mxz, flow_float* Myy, flow_float* Myz, flow_float* Mzz,
     flow_float* drodx, flow_float* drody, flow_float* drodz,
@@ -531,7 +554,8 @@ __global__ void lsqGrad_accumInternal_d(
         if (ip>=nNormalPlanes) continue;          // 境界・periodic は LSQ 点にしない (§7.3)
         const geom_int ic0=plane_cells[2*ip+0], ic1=plane_cells[2*ip+1];
         const geom_int jc=(ic0==ic)?ic1:ic0;
-        const double dx=ccx[jc]-cx, dy=ccy[jc]-cy, dz=ccz[jc]-cz;
+        double dx, dy, dz;
+        lsq_disp(ic, ip, ic0, jc, gex, gey, gez, ccx, ccy, ccz, cx, cy, cz, dx, dy, dz);
         const double w=1.0/fmax(dx*dx+dy*dy+dz*dz,1.0e-300);
         mxx+=w*dx*dx; mxy+=w*dx*dy; mxz+=w*dx*dz; myy+=w*dy*dy; myz+=w*dy*dz; mzz+=w*dz*dz;
         const double dr=ro[jc]-r0, dux=Ux[jc]-ux0, duy=Uy[jc]-uy0, duz=Uz[jc]-uz0, dp=P[jc]-p0, dt=T[jc]-t0;
@@ -696,10 +720,12 @@ __host__ __device__ static void lsqPre_pinv(
 // 非 periodic 境界半割面重心を LSQ 点として加える旧処理を撤去 — ジャンプが常に 0 の疑似点でも
 // M に入れば「その方向の勾配をゼロへ向かわせる」暗黙の正則化になるため)。境界・periodic とも
 // `ip>=nNormalPlanes` は一様に skip する (`planePeriodic`/`pcx,pcy,pcz` 引数は不要になった)。
+// 変位は lsq_disp (gex = 面ごとの差 ge_x..ge_z、段 ②。nullptr なら旧来の座標の差)。係数の式・精度は変えない。
 __global__ void lsqPre_setup_d(
     geom_int nCells, geom_int* plane_cells,
     geom_int* cell_planes_index, geom_int* cell_planes, geom_int nNormalPlanes,
     flow_float* ccx, flow_float* ccy, flow_float* ccz,
+    const flow_float* gex, const flow_float* gey, const flow_float* gez,
     double thresh,
     double* Minv6, int* degenCount)
 {
@@ -713,7 +739,8 @@ __global__ void lsqPre_setup_d(
         if (ip >= nNormalPlanes) continue;   // 境界・periodic は LSQ 点にしない
         const geom_int ic0=plane_cells[2*ip+0], ic1=plane_cells[2*ip+1];
         const geom_int jc=(ic0==ic)?ic1:ic0;
-        const double dx=ccx[jc]-cx, dy=ccy[jc]-cy, dz=ccz[jc]-cz;
+        double dx, dy, dz;
+        lsq_disp(ic, ip, ic0, jc, gex, gey, gez, ccx, ccy, ccz, cx, cy, cz, dx, dy, dz);
         const double w=1.0/fmax(dx*dx+dy*dy+dz*dz,1.0e-300);
         m00+=w*dx*dx; m01+=w*dx*dy; m02+=w*dx*dz; m11+=w*dy*dy; m12+=w*dy*dz; m22+=w*dz*dz;
     }
@@ -730,7 +757,11 @@ __global__ void lsqPre_setup_d(
 // 同じ物理隣接 (隣接の periodicRoot が同じ ∧ Δx が 1e-4 h_min 以内) を同値類 E にまとめ、
 // M_r = Σ_E w_E d_E d_E^T (打ち切りは M_r に 1 回) から c_mj = M_r^+ (w_E d_E / n_E) を各 incidence に焼き込む。
 // 毎 step の gather (部分和) は変えない → 部分和 = 合併 stencil の LSQ。並進周期のみ (d はそのまま共通座標)。
-static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, double thresh, int& nDegen)
+// 変位は lsq_disp (legacy = false: 面ごとの差 ge_x..ge_z、段 ②。true: 旧来の座標の差 (診断の旧版・double の値の位置を持たない mesh))。
+// 同値類の判定 (同じ物理隣接) もこの変位で行う。seamGroup/seamClass (nullptr 可、[nInc]) には incidence ごとの group の root と
+// group 内の同値類の番号を書く (継ぎ目の group に属さない incidence は -1。診断 FORGE_DIAG_GEOM_STAGE2_DUMP 用)。
+static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, double thresh, int& nDegen,
+                                bool legacy = false, std::vector<int>* seamGroup = nullptr, std::vector<int>* seamClass = nullptr)
 {
     const geom_int n = msh.nCells;
     std::vector<geom_int> idx(n + 1);
@@ -744,6 +775,19 @@ static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, d
     gpuErrchk(cudaMemcpy(cy.data(), var.c_d["ccy"], sizeof(flow_float)*n, cudaMemcpyDeviceToHost));
     gpuErrchk(cudaMemcpy(cz.data(), var.c_d["ccz"], sizeof(flow_float)*n, cudaMemcpyDeviceToHost));
     gpuErrchk(cudaMemcpy(cInt.data(), cInt_d, sizeof(flow_float)*3*(size_t)nInc, cudaMemcpyDeviceToHost));
+    std::vector<flow_float> gx, gy, gz;
+    if (!legacy) {
+        const size_t nP = (size_t)msh.nPlanes;
+        gx.resize(nP); gy.resize(nP); gz.resize(nP);
+        gpuErrchk(cudaMemcpy(gx.data(), var.p_d.at("ge_x"), sizeof(flow_float)*nP, cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(gy.data(), var.p_d.at("ge_y"), sizeof(flow_float)*nP, cudaMemcpyDeviceToHost));
+        gpuErrchk(cudaMemcpy(gz.data(), var.p_d.at("ge_z"), sizeof(flow_float)*nP, cudaMemcpyDeviceToHost));
+    }
+    const flow_float* pgx = legacy ? nullptr : gx.data();
+    const flow_float* pgy = legacy ? nullptr : gy.data();
+    const flow_float* pgz = legacy ? nullptr : gz.data();
+    if (seamGroup) seamGroup->assign((size_t)nInc, -1);
+    if (seamClass) seamClass->assign((size_t)nInc, -1);
     const auto& root = msh.periodicRoot;
 
     // group (root → members)。member が 2 以上の group だけ
@@ -763,7 +807,9 @@ static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, d
                 if (ip >= msh.nNormalPlanes) continue;
                 const geom_int ic0 = pc[2*ip], ic1 = pc[2*ip + 1];
                 const geom_int jc = (ic0 == m) ? ic1 : ic0;
-                Inc e{ilp, root[jc], (double)cx[jc] - (double)cx[m], (double)cy[jc] - (double)cy[m], (double)cz[jc] - (double)cz[m], -1};
+                Inc e{ilp, root[jc], 0.0, 0.0, 0.0, -1};
+                lsq_disp(m, ip, ic0, jc, pgx, pgy, pgz, cx.data(), cy.data(), cz.data(),
+                         (double)cx[m], (double)cy[m], (double)cz[m], e.dx, e.dy, e.dz);
                 const double L = std::sqrt(e.dx*e.dx + e.dy*e.dy + e.dz*e.dz);
                 if (L > 0 && L < hmin) hmin = L;
                 incs.push_back(e);
@@ -780,6 +826,8 @@ static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, d
             }
             if (found < 0) { cls.push_back(Cls{e.jroot, e.dx, e.dy, e.dz, 0}); found = (int)cls.size() - 1; }
             cls[found].count += 1; e.cls = found;
+            if (seamGroup) (*seamGroup)[(size_t)e.ilp] = (int)g.first;
+            if (seamClass) (*seamClass)[(size_t)e.ilp] = found;
         }
         // 行列と係数には**各 incidence の実変位**を使い、同値類は重複数 α=1/count の決定にだけ使う (codex 実装レビュー M1:
         // 代表変位に置き換えると float32 座標の丸め差 (≲1e-4 h_min) が実行時の場の差分と食い違い、線形精度を壊す)。
@@ -807,10 +855,12 @@ static int lsqPre_mergePeriodic(mesh& msh, variables& var, flow_float* cInt_d, d
 }
 
 // setup 2/3: 内部双対面 incidence の係数 c = M⁺·(w d) を cell_planes CSR 位置に float32 で格納。
+// 変位は lsq_disp (lsqPre_setup_d と同じ出どころを渡す)。
 __global__ void lsqPre_coefInternal_d(
     geom_int nCells, geom_int* plane_cells,
     geom_int* cell_planes_index, geom_int* cell_planes, geom_int nNormalPlanes,
     flow_float* ccx, flow_float* ccy, flow_float* ccz,
+    const flow_float* gex, const flow_float* gey, const flow_float* gez,
     const double* Minv6, flow_float* cInt)
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -824,13 +874,57 @@ __global__ void lsqPre_coefInternal_d(
         if (ip >= nNormalPlanes) { cInt[3*ilp+0]=0; cInt[3*ilp+1]=0; cInt[3*ilp+2]=0; continue; }
         const geom_int ic0=plane_cells[2*ip+0], ic1=plane_cells[2*ip+1];
         const geom_int jc=(ic0==ic)?ic1:ic0;
-        const double dx=ccx[jc]-cx, dy=ccy[jc]-cy, dz=ccz[jc]-cz;
+        double dx, dy, dz;
+        lsq_disp(ic, ip, ic0, jc, gex, gey, gez, ccx, ccy, ccz, cx, cy, cz, dx, dy, dz);
         const double w=1.0/fmax(dx*dx+dy*dy+dz*dz,1.0e-300);
         const double bx=w*dx, by=w*dy, bz=w*dz;
         cInt[3*ilp+0]=(flow_float)(i00*bx+i01*by+i02*bz);
         cInt[3*ilp+1]=(flow_float)(i01*bx+i11*by+i12*bz);
         cInt[3*ilp+2]=(flow_float)(i02*bx+i12*by+i22*bz);
     }
+}
+
+// gradLSQ=2 の係数を cInt (device、[3*nInc]) に作る (setup 1/3 → 2/3 → 継ぎ目の合併)。本番の初回と診断の作り直しが共有する。
+// legacy = false: 変位は面ごとの差 ge_x..ge_z (段 ②)。true: 旧来の座標の差 (診断の旧版・double の写しを持たない mesh)。
+// verbose = true のときだけ従来の起動ログ 2 行を出す。seamGroup/seamClass/nDegenOut は診断用 (nullptr 可)。
+static void lsqPreBuildCoef(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, bool legacy,
+                            flow_float* cInt, bool verbose,
+                            std::vector<int>* seamGroup, std::vector<int>* seamClass, int* nDegenOut)
+{
+    const flow_float* gex = legacy ? nullptr : var.p_d.at("ge_x");
+    const flow_float* gey = legacy ? nullptr : var.p_d.at("ge_y");
+    const flow_float* gez = legacy ? nullptr : var.p_d.at("ge_z");
+    double* Minv6=nullptr; int* degD=nullptr;
+    gpuErrchk(cudaMalloc(&Minv6, sizeof(double)*6*msh.nCells));
+    gpuErrchk(cudaMalloc(&degD, sizeof(int)));
+    CHECK_CUDA_ERROR(cudaMemset(degD, 0, sizeof(int)));
+    lsqPre_setup_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
+        msh.nCells, msh.map_plane_cells_d,
+        msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes,
+        var.c_d["ccx"],var.c_d["ccy"],var.c_d["ccz"], gex, gey, gez,
+        (double)cfg.gradLSQDegenThresh, Minv6, degD);
+    lsqPre_coefInternal_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
+        msh.nCells, msh.map_plane_cells_d,
+        msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes,
+        var.c_d["ccx"],var.c_d["ccy"],var.c_d["ccz"], gex, gey, gez, Minv6, cInt);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchkKernelSync();
+    int degH=0;
+    CHECK_CUDA_ERROR(cudaMemcpy(&degH, degD, sizeof(int), cudaMemcpyDeviceToHost));
+    if (verbose) {
+        printf("gradLSQ=2 precomp: %d/%lld nodes spectral-truncated (thresh=%.2e)\n",
+               degH, (long long)msh.nCells, (double)cfg.gradLSQDegenThresh);
+    }
+    int nDegP = 0;
+    if (periodicSeamMergeActive(cfg, msh)) {
+        const int nG = lsqPre_mergePeriodic(msh, var, cInt, (double)cfg.gradLSQDegenThresh, nDegP, legacy, seamGroup, seamClass);
+        if (verbose) {
+            printf("gradLSQ=2 periodic seam: %d groups re-fitted on the merged stencil (%d truncated) "
+                   "(plan boundary-node-periodic-gradient-fix)\n", nG, nDegP);
+        }
+    }
+    cudaFree(Minv6); cudaFree(degD);
+    if (nDegenOut) *nDegenOut = degH + nDegP;
 }
 
 // runtime 1/2: 内部 incidence の gather (per-node, atomic なし)。6 変数 × 3 成分を直接書く。
@@ -1058,32 +1152,8 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
             gpuErrchk(cudaMalloc(&cInt, sizeof(flow_float)*3*nInc));
             g_lsqNInc = nInc;
             g_lsqMesh = &msh;
-            double* Minv6=nullptr; int* degD=nullptr;
-            gpuErrchk(cudaMalloc(&Minv6, sizeof(double)*6*msh.nCells));
-            gpuErrchk(cudaMalloc(&degD, sizeof(int)));
-            CHECK_CUDA_ERROR(cudaMemset(degD, 0, sizeof(int)));
-            lsqPre_setup_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
-                msh.nCells, msh.map_plane_cells_d,
-                msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes,
-                var.c_d["ccx"],var.c_d["ccy"],var.c_d["ccz"],
-                (double)cfg.gradLSQDegenThresh, Minv6, degD);
-            lsqPre_coefInternal_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
-                msh.nCells, msh.map_plane_cells_d,
-                msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes,
-                var.c_d["ccx"],var.c_d["ccy"],var.c_d["ccz"], Minv6, cInt);
-            gpuErrchk( cudaPeekAtLastError() );
-            gpuErrchkKernelSync();
-            int degH=0;
-            CHECK_CUDA_ERROR(cudaMemcpy(&degH, degD, sizeof(int), cudaMemcpyDeviceToHost));
-            printf("gradLSQ=2 precomp: %d/%lld nodes spectral-truncated (thresh=%.2e)\n",
-                   degH, (long long)msh.nCells, (double)cfg.gradLSQDegenThresh);
-            if (periodicSeamMergeActive(cfg, msh)) {
-                int nDegP = 0;
-                const int nG = lsqPre_mergePeriodic(msh, var, cInt, (double)cfg.gradLSQDegenThresh, nDegP);
-                printf("gradLSQ=2 periodic seam: %d groups re-fitted on the merged stencil (%d truncated) "
-                       "(plan boundary-node-periodic-gradient-fix)\n", nG, nDegP);
-            }
-            cudaFree(Minv6); cudaFree(degD);
+            // 変位は面ごとの差 ge_x..ge_z (double の値の位置から、段 ②)。double の写しを持たない mesh だけ旧来の座標の差。
+            lsqPreBuildCoef(cfg, cuda_cfg, msh, var, !msh.hasGeom64(), cInt, true, nullptr, nullptr, nullptr);
             pre_n = msh.nCells;
         }
         // 原始量 AoS パックを組む (applyBconds 後 = 壁ノードのピン込みの最新値)。LSQ 勾配とリミッタが読む。
@@ -1125,9 +1195,12 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
             gpuErrchk(cudaMalloc(&Myy,sz)); gpuErrchk(cudaMalloc(&Myz,sz)); gpuErrchk(cudaMalloc(&Mzz,sz));
             M_n=msh.nCells;
         }
+        // 変位は面ごとの差 ge_x..ge_z (double の値の位置から、段 ②)。double の写しを持たない mesh だけ旧来の座標の差 (nullptr)。
+        const bool useE = msh.hasGeom64();
         lsqGrad_accumInternal_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
             msh.nCells, msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes,
             var.c_d["ccx"],var.c_d["ccy"],var.c_d["ccz"],
+            useE ? var.p_d["ge_x"] : nullptr, useE ? var.p_d["ge_y"] : nullptr, useE ? var.p_d["ge_z"] : nullptr,
             var.c_d["ro"],var.c_d["Ux"],var.c_d["Uy"],var.c_d["Uz"],var.c_d["P"],var.c_d["T"],
             Mxx,Mxy,Mxz,Myy,Myz,Mzz,
             var.c_d["drodx"],var.c_d["drody"],var.c_d["drodz"],
@@ -1255,4 +1328,43 @@ void calcGradient_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
 
+}
+// 段 ② の診断 (FORGE_DIAG_GEOM_STAGE2_DUMP、plans/active/architecture-float-state-double-geometry.md §6.3 の 1・2)。
+// 本番の係数・勾配の配列は触らない (作り直しは別のバッファ。gradLSQ=1 の M も別のバッファで 1 回組み立てる)。
+void lsqCoefForDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var, bool legacy, LsqDiagCoef& out)
+{
+    out = LsqDiagCoef{};
+    out.gradLSQ = cfg.gradLSQ;
+    if (cfg.discretization != "node") return;
+    const size_t n = (size_t)msh.nCells;
+    if (cfg.gradLSQ == 2) {
+        geom_int nInc = 0;
+        CHECK_CUDA_ERROR(cudaMemcpy(&nInc, msh.map_cell_planes_index_d + msh.nCells, sizeof(geom_int), cudaMemcpyDeviceToHost));
+        flow_float* c = nullptr;
+        gpuErrchk(cudaMalloc(&c, sizeof(flow_float)*3*(size_t)nInc));
+        lsqPreBuildCoef(cfg, cuda_cfg, msh, var, legacy, c, false, &out.seamGroup, &out.seamClass, &out.nDegen);
+        out.cInt.resize(3*(size_t)nInc);
+        gpuErrchk(cudaMemcpy(out.cInt.data(), c, sizeof(flow_float)*3*(size_t)nInc, cudaMemcpyDeviceToHost));
+        cudaFree(c);
+        if (out.seamGroup.empty()) out.seamGroup.assign((size_t)nInc, -1);   // 継ぎ目の合併なし
+        if (out.seamClass.empty()) out.seamClass.assign((size_t)nInc, -1);
+    } else if (cfg.gradLSQ == 1) {
+        // M (flow_float に格納、Mxx,Mxy,Mxz,Myy,Myz,Mzz) と、使わない b (18 本) の書き先を 1 つのバッファに取る
+        flow_float* s = nullptr;
+        gpuErrchk(cudaMalloc(&s, sizeof(flow_float)*24*n));
+        flow_float* p[24];
+        for (int k = 0; k < 24; ++k) p[k] = s + (size_t)k*n;
+        lsqGrad_accumInternal_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
+            msh.nCells, msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.nNormalPlanes,
+            var.c_d["ccx"],var.c_d["ccy"],var.c_d["ccz"],
+            legacy ? nullptr : var.p_d["ge_x"], legacy ? nullptr : var.p_d["ge_y"], legacy ? nullptr : var.p_d["ge_z"],
+            var.c_d["ro"],var.c_d["Ux"],var.c_d["Uy"],var.c_d["Uz"],var.c_d["P"],var.c_d["T"],
+            p[0],p[1],p[2],p[3],p[4],p[5],
+            p[6],p[7],p[8], p[9],p[10],p[11], p[12],p[13],p[14], p[15],p[16],p[17], p[18],p[19],p[20], p[21],p[22],p[23]);
+        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchkKernelSync();
+        out.M6.resize(6*n);
+        gpuErrchk(cudaMemcpy(out.M6.data(), s, sizeof(flow_float)*6*n, cudaMemcpyDeviceToHost));
+        cudaFree(s);
+    }
 }

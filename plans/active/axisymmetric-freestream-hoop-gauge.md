@@ -55,7 +55,25 @@ $$\mathrm{res}_{\rho u_r}=-\sum_f p_f\,r_f S_{f,y} \;+\; p\,A$$
 - `axisymMethod: 1` (SU2 流 planar+1/y ソース) は hoop 源を持たないので本問題自体が無いが、別の未解決
   (喉部リミットサイクル) がある。
 - 既定化は生産系列 (case/41) の再収束確認後に判断する。
+- **2026-10-10 の観察** ([architecture-float-state-double-geometry](architecture-float-state-double-geometry.md) §6.5): case/45 の B0 (`hoopAreaFromClosure 0`・`pRef 0`) の一様な静止場で、**FP64 でも**軸の近く (j 2〜4) に `3.3e-3·P·A_planar` の偽の半径方向の力が出る。`hoopAreaFromClosure 1` で丸めの水準まで消える。float32 のメトリックだけの問題ではない。
+  - codex の第 1 仮説 (確度 中): 変換器が折れた双対面の区間を 1 本の面ベクトルにまとめ、その重心の半径を掛ける (r̄·Σ S_k ≠ Σ r_k S_k)。§1 の「多角形では厳密」は、区間ごとに半径を掛けた場合に限る。
+  - B0 の残差の床への影響は、[time_integration-line-implicit-speed](time_integration-line-implicit-speed.md) §6.23 の短い比較で確かめる。
+
+### 4.1 残作業 (優先順)
+
+| # | 項目 | 内容 | 担当 |
+| --- | --- | --- | --- |
+| 1 | case/45 の B0 での効き | line-implicit-speed §6.23 (`hoopAreaFromClosure` 0/1 の 2000 step、事前登録済み) の結果で、床への影響と解への影響のフラグを見る | O |
+| 2 | FP64 でも残る閉性の欠損の原因 | 実メッシュの双対区間から Σ r_k S_k を作り直し、今の r̄·Σ S_k との差が j 2〜4 の欠損の符号・大きさを説明するか確かめる (codex の反証条件)。説明しなければ面積・向き・まとめ方を点検する | F |
+| 3 | 既定化の判断 | 1・2 の後。生産系列 (case/41・case/45) の再収束の確認を含む | F |
+
+### 4.2 レビュー記録 (codex)
+
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| plan 免除 | 2026-08-16 | — | — | 2026-09-09 以前に起票・実装済み (AGENTS.md の codex レビュー節の経過措置) |
 
 ## 5. 変更ログ
 
 - `2026-08-16` — 起案 + 実装 + case/43 で検証 (上表)。`pRef` 整合はバグ修正、`hoopAreaFromClosure` は既定 0 の新フラグ。
+- `2026-10-10` — §4 に case/45 の観察と codex の第 1 仮説を追記し、残作業表 (§4.1) とレビュー記録 (§4.2) を足した。

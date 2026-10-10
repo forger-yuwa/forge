@@ -88,6 +88,12 @@ add_library(cuda_forge STATIC
     # V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 off。ホスト側の段取りと h5 の書き出し)
     geomAbDiag.cpp
     geomAbDiag.hpp
+    # 段 ② の診断 FORGE_DIAG_GEOM_STAGE2_DUMP (同 plan §6.3、既定 off。読み込み時の量と接続を書いて終了する)
+    geomStage2Dump.cpp
+    geomStage2Dump.hpp
+    # node の壁関数・WMLES の代表内点 (境界面ごと、読み込み後に double の値の位置から 1 回作る。同 plan §4.2 3.)
+    wallRepPoint_d.cu
+    wallRepPoint_d.cuh
 
     implicitCorrection_d.cu
     implicitCorrection_d.cuh

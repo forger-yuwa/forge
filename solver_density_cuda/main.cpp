@@ -68,6 +68,7 @@
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/geomAbDiag.hpp"   // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / _REF; plan architecture-float-state-double-geometry §4.2c)
+#include "cuda_forge/geomStage2Dump.hpp"   // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP; 同 plan §6.3)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -3443,6 +3444,12 @@ int main(int argc, char** argv) {
                cfg.lineViscousDtRelief != (flow_float)0.0 || cfg.lineDtDirectional != 0) {
         fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");
         exit(1);
+    }
+    // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP=<h5>; 既定 off): 読み込み時に作った量と接続 (ラインの接続・周期の相手・LSQ の係数・
+    // 壁の代表内点・軸対称の closure・d1/d2・delta_les) を、本番の値と段 ① までの作り方の作り直しの両方で書いて終了する
+    // (時間更新・res_0 出力なし)。float と FP64 のビルドの出力を突き合わせる。plans/active/architecture-float-state-double-geometry.md §6.3。
+    if (const char* e = getenv("FORGE_DIAG_GEOM_STAGE2_DUMP"); e != nullptr && *e != '\0') {
+        return geomStage2Dump::run(e, cfg, cuda_cfg, msh, var);
     }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
 
