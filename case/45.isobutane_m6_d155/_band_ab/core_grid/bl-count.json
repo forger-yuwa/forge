@@ -1,0 +1,41 @@
+{
+ "defined_columns": 4336,
+ "G0": {
+  "x-2": 85,
+  "x0": 89,
+  "x5": 91,
+  "x40": 93,
+  "x94": 101,
+  "min": 84,
+  "max": 101
+ },
+ "G1": {
+  "x-2": 53,
+  "x0": 55,
+  "x5": 57,
+  "x40": 61,
+  "x94": 66,
+  "min": 53,
+  "max": 66
+ },
+ "Gc": {
+  "x-2": 53,
+  "x0": 55,
+  "x5": 58,
+  "x40": 63,
+  "x94": 71,
+  "min": 53,
+  "max": 71
+ },
+ "G2": {
+  "x-2": 93,
+  "x0": 97,
+  "x5": 102,
+  "x40": 108,
+  "x94": 119,
+  "min": 92,
+  "max": 119
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

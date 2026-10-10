@@ -1,0 +1,43 @@
+{
+ "max_abs_diff_rt": 0.0,
+ "first_layer_rel_err_max": 0.0,
+ "g0_res": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/run_0353_m9_L5/res_115000.h5",
+ "metrics": {
+  "nj": 121,
+  "nodes": 570999,
+  "kink_max_deg": 7.665486732913924,
+  "kink_at": [
+   -11.985552046593488,
+   11
+  ],
+  "kink_p999_deg": 0.43752417529736104,
+  "kink_over_2deg": 171,
+  "kink_band_max_deg": 7.665486732913924,
+  "kink_band_over_2deg": 171,
+  "band": [
+   -12.5,
+   -4.0
+  ],
+  "ar_max": 4572.885268422694,
+  "ar_p99": 3697.614038465599,
+  "skew_max": 0.45747552896605,
+  "area_min_rt2": 5.527022195497051e-10,
+  "lines_cross": 0,
+  "radial_edge_over_rw_max": 0.10033405244122671,
+  "radial_edge_over_rw_axis5_max": 0.10033405244122671,
+  "wall_ratio_phys": {
+   "x0": 1.111418943435108,
+   "x40": 1.0787835668229944,
+   "x94": 1.0731984961554923,
+   "max": 1.1115232932815091
+  },
+  "axis_gap_rt": {
+   "x0": 0.10038887070926093,
+   "x40": 0.6118975939832875,
+   "x94": 0.6891818565545459
+  },
+  "axis_dr_over_dx_max": 71.8599508915198
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}
