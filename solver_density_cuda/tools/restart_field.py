@@ -72,7 +72,15 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
         sys.exit(f"セル数が違う (SRC {n_src} != DST {n_dst})。"
                  " 同一メッシュでないので interp_field.py を使うこと")
     if "MESH/COORD" in s and "MESH/COORD" in d:
-        if not np.array_equal(np.asarray(s["MESH/COORD"]), np.asarray(d["MESH/COORD"])):
+        sc, dc = np.asarray(s["MESH/COORD"]), np.asarray(d["MESH/COORD"])
+        if sc.dtype != dc.dtype and sc.dtype.kind == "f" and dc.dtype.kind == "f" and sc.dtype.itemsize < dc.dtype.itemsize:
+            # float のビルドの res は座標を float32 で書くが、格子は double のことがある (変換器は 2026-10-10 から常に double の幾何を書く)。
+            # 同じ格子なら、DST の座標を SRC の精度に丸めたものと一致する (plan architecture-float-state-double-geometry §6.18)。
+            same = np.array_equal(sc, dc.astype(sc.dtype))
+            print(f"[restart_field] MESH/COORD: SRC {sc.dtype} / DST {dc.dtype} — DST を {sc.dtype} に丸めて照合: {'一致' if same else '不一致'}")
+        else:
+            same = np.array_equal(sc, dc)
+        if not same:
             sys.exit("MESH/COORD が一致しない。同一メッシュでないので interp_field.py を使うこと")
         print(f"同一メッシュを確認 (MESH/COORD 一致, {n_dst} cells)")
     else:
