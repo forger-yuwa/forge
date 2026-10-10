@@ -1,0 +1,391 @@
+{
+ "input": "/home/ubuntu/eosdump_g3/in",
+ "old": {
+  "bin": "/home/ubuntu/eosdump_g3/build_old/forge",
+  "sha256": "ea2d101da5a4ba69afd303c2aced8841b878458d88fde65c30cff3ae4d827595"
+ },
+ "new": {
+  "bin": "/home/ubuntu/forge-r8/solver_density_cuda/build/forge",
+  "sha256": "61cf8f4fc64125cd5aa30cfef1439882c671156f5c1826baaa7578e3782131c2"
+ },
+ "env": {
+  "FORGE_CUDA_BLOCKSIZE": "128"
+ },
+ "step": 1,
+ "replay": null,
+ "replay_sha256": null,
+ "node": null,
+ "expect_floor": null,
+ "runs": {
+  "old_r1": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "40a346dc688a2fed6cd899498ac3783dbe73891475e0cb98e9faf99858dfec07",
+   "dump_bytes": 3721183616,
+   "floor_rows": [],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/w/old_r1/eos_dump.h5 に書いて終了する",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/w/old_r1/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "new_r1": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "1684cb19aafa9f290fa53c5ca68df4d817289f58ee8fea4552510302806bad83",
+   "dump_bytes": 3721183616,
+   "floor_rows": [
+    {
+     "kind": "init",
+     "session": "1",
+     "step": "0",
+     "inner": "0",
+     "q_index": "-1",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "165659",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    },
+    {
+     "kind": "eos",
+     "session": "1",
+     "step": "1",
+     "inner": "0",
+     "q_index": "0",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "51143",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "0",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    }
+   ],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/w/new_r1/eos_dump.h5 に書いて終了する",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/w/new_r1/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "old_r2": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "f0165cb48df36bfcaa3581573169e041f2d7d2f48014d6777addcb3d58545610",
+   "dump_bytes": 3721183616,
+   "floor_rows": [],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/w/old_r2/eos_dump.h5 に書いて終了する",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/w/old_r2/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "new_r2": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "e8bee026ae4aca1342f05ceec402a62df3f95231fe89bbd8654450da9bc68084",
+   "dump_bytes": 3721183616,
+   "floor_rows": [
+    {
+     "kind": "init",
+     "session": "1",
+     "step": "0",
+     "inner": "0",
+     "q_index": "-1",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "165659",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    },
+    {
+     "kind": "eos",
+     "session": "1",
+     "step": "1",
+     "inner": "0",
+     "q_index": "0",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "51143",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "0",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    }
+   ],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/w/new_r2/eos_dump.h5 に書いて終了する",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/w/new_r2/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  }
+ },
+ "compare": {
+  "old_r1_vs_new_r1": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "INVALID",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 T に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 roe に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}"
+   ],
+   "invalid_v2": [
+    "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+   ],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "old_r1_vs_old_r2": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "INVALID",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 T に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 roe に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}"
+   ],
+   "invalid_v2": [
+    "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+   ],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "old_r2_vs_new_r1": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "INVALID",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 T に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 roe に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}"
+   ],
+   "invalid_v2": [
+    "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+   ],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "new_r1_vs_new_r2": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "INVALID",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 T に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 roe に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}"
+   ],
+   "invalid_v2": [
+    "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+   ],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "old_r1_vs_new_r2": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "INVALID",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 T に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+    "EOS の引数配列 roe に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}"
+   ],
+   "invalid_v2": [
+    "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+    "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+    "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+   ],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  }
+ },
+ "replay_checks": {}
+}

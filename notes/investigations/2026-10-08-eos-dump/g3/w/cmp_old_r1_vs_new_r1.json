@@ -1,0 +1,2879 @@
+{
+ "A": "/home/ubuntu/eosdump_g3/w/old_r1/eos_dump.h5",
+ "B": "/home/ubuntu/eosdump_g3/w/new_r1/eos_dump.h5",
+ "rule_version": 2,
+ "structural_invalid": [],
+ "different": [],
+ "notes": [],
+ "datasets": {
+  "db/species_thermo": {
+   "diff_bytes": 0,
+   "nbytes": 584
+  },
+  "db/species_thermo_f": {
+   "diff_bytes": 0,
+   "nbytes": 296
+  },
+  "A_closure_x": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "A_closure_y": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "A_planar": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Ht": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "P": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "Pk_diag": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Qw_Wall": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Rmix": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "T": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "TN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Tau_Wall": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Taw_HTnx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Taw_HTny": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Taw_HTnz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Taw_Prim_Overlay": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Taw_diag": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Ux": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "UxN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Uy": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "UyN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Uz": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "UzN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Y0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "Y1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "axisym_aux0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "axisym_aux1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "axisym_aux2": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "axisym_divU": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "axisym_uy_over_r": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "ccx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "ccy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "ccz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "cfl": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "cfl_pseudo": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "cp": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 165659,
+    "A:post": 51143,
+    "B:pre": 165659,
+    "B:post": 51143
+   }
+  },
+  "dAux0dx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dAux0dy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dAux1dy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dAux2dx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dKdx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dKdy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dKdz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dOmegadx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dOmegady": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dOmegadz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dPdx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dPdy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dPdz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dTdx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dTdy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dTdz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUxdx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUxdy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUxdz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUydx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUydy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUydz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUzdx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUzdy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dUzdz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dY0dx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dY0dy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dY0dz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dY1dx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dY1dy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dY1dz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "deltaP": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "delta_les": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_00": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_01": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_02": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_03": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_04": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_10": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_11": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_12": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_13": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_14": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_20": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_21": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_22": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_23": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_24": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_30": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_31": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_32": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_33": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_34": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_40": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_41": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_42": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_43": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "diag_block_44": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "divU": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "divU*vol": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "divU_star": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_new_0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_new_1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_new_2": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_new_3": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_new_4": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_old_0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_old_1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_old_2": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_old_3": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_block_old_4": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roUx_new": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roUx_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roUy_new": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roUy_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roUz_new": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roUz_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roY0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roY0_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roY1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roY1_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_ro_new": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_ro_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roe_new": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dq_roe_old": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "drodx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "drody": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "drodz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "dt_local": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "ducros": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "fd_shield": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "fe_iddes": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "gamma": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 165659,
+    "A:post": 51143,
+    "B:pre": 165659,
+    "B:post": 51143
+   }
+  },
+  "k": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "l_des": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_P": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_T": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_Ux": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_Uy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_Uz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_Y0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_Y1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "limiter_ro": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "omega": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "rd_des": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_ro": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roK": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roK_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roOmega": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roOmega_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roUx": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roUx_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roUy": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roUy_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roUz": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roUz_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roY0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roY0_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roY1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roY1_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_ro_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roe": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "res_roe_m": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "rhs_block_0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "rhs_block_1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "rhs_block_2": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "rhs_block_3": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "rhs_block_4": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "ro": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roK": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roKM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roKN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roKNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roK_wf": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roOmega": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roOmegaM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roOmegaN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roOmegaNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roOmega_wf": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUx": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUxM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUxN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUxNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUy": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUyM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUyN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUyNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUz": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUzM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUzN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roUzNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY0": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY0M": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY0N": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY0P": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY0PP": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY1": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY1M": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY1N": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY1P": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roY1PP": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "roe": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "roeM": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "roeN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "roeNN": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "ros": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "scalarDirichletPin": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "sonic": {
+   "class": "eos_arg",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 51143,
+    "A:post": 51143,
+    "B:pre": 51143,
+    "B:post": 51143
+   }
+  },
+  "src_jac_Y0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "src_jac_Y1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "src_jac_k": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "src_jac_omega": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "sstF1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "thermCond": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "transport_diag_Y0": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "transport_diag_Y1": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "transport_diag_k": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "transport_diag_omega": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "vis_lam": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "vis_turb": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "volume": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "wall_dist": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "wall_y_eff": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "wf_irep_flag": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  },
+  "wf_pk": {
+   "class": "other",
+   "dtype": "<f4",
+   "pre_diff_bytes": 0,
+   "post_diff_bytes": 0,
+   "nonfinite": {
+    "A:pre": 0,
+    "A:post": 0,
+    "B:pre": 0,
+    "B:post": 0
+   }
+  }
+ },
+ "facts_complete": true,
+ "meta": {
+  "blocksize": 128,
+  "condEquilibrium": 0,
+  "condFloat": 1,
+  "condGasSpecies": -1,
+  "condModel": 0,
+  "condSonicModel": 0,
+  "condensation": 0,
+  "cp": 1925.0,
+  "db_n_species": 2,
+  "discretization": "node",
+  "dualTime": 0,
+  "gamma": 1.2548999786376953,
+  "isImplicit": 1,
+  "nCells": 1920103,
+  "nCells_all": 2085762,
+  "nCondSpeciesRegistered": 0,
+  "nSpecies": 2,
+  "nSpeciesRegistered": 2,
+  "pMin": 20.0,
+  "roMin": 9.999999747378752e-05,
+  "sizeof_flow_float": 4,
+  "step": 1,
+  "tMin": 9.999999747378752e-05,
+  "thermalMethod": 2,
+  "thermoFloat": 1,
+  "unsteady": 0
+ },
+ "eos_args": [
+  "ro",
+  "roUx",
+  "roUy",
+  "roUz",
+  "roe",
+  "roK",
+  "roOmega",
+  "P",
+  "Ht",
+  "sonic",
+  "k",
+  "omega",
+  "T",
+  "Ux",
+  "Uy",
+  "Uz",
+  "gamma",
+  "cp",
+  "Rmix",
+  "roY0",
+  "roY1"
+ ],
+ "eos_writes": [
+  "ro",
+  "roe",
+  "Ux",
+  "Uy",
+  "Uz",
+  "T",
+  "P",
+  "Ht",
+  "sonic",
+  "k",
+  "omega",
+  "gamma",
+  "cp",
+  "Rmix"
+ ],
+ "eos_branches": [
+  "tp_1ph"
+ ],
+ "eos_reads_v2": [
+  "ro",
+  "roUx",
+  "roUy",
+  "roUz",
+  "roe",
+  "roK",
+  "roOmega",
+  "roY0",
+  "roY1",
+  "T"
+ ],
+ "eos_writes_v2": [
+  "Ux",
+  "Uy",
+  "Uz",
+  "ro",
+  "k",
+  "omega",
+  "T",
+  "P",
+  "roe",
+  "Ht",
+  "sonic",
+  "gamma",
+  "cp",
+  "Rmix"
+ ],
+ "totals": {
+  "eos_args_post_diff_bytes": 0,
+  "eos_args_pre_diff_bytes": 0,
+  "other_pre_diff_bytes": 0,
+  "other_post_diff_bytes": 0,
+  "eos_args_bytes": 175204008,
+  "all_bytes": 3720999408
+ },
+ "changed_by_eos": {
+  "A": [
+   "Ht",
+   "P",
+   "Rmix",
+   "T",
+   "Ux",
+   "Uy",
+   "Uz",
+   "cp",
+   "gamma",
+   "k",
+   "omega",
+   "roe",
+   "sonic"
+  ],
+  "B": [
+   "Ht",
+   "P",
+   "Rmix",
+   "T",
+   "Ux",
+   "Uy",
+   "Uz",
+   "cp",
+   "gamma",
+   "k",
+   "omega",
+   "roe",
+   "sonic"
+  ]
+ },
+ "other_pre_mismatch": [],
+ "other_nonfinite": [
+  "roeM",
+  "roeN"
+ ],
+ "verdict_v1": "INVALID",
+ "invalid_v1": [
+  "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+  "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+  "EOS の引数配列 T に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+  "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+  "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 51143, 'B:pre': 165659, 'B:post': 51143}",
+  "EOS の引数配列 roe に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}",
+  "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 51143, 'B:pre': 51143, 'B:post': 51143}"
+ ],
+ "verdict_v2": "INVALID",
+ "invalid_v2": [
+  "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+  "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+  "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+ ],
+ "info_v2": [
+  "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+  "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+  "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+  "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+  "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+ ],
+ "verdict": "INVALID",
+ "invalid": [
+  "EOS の書き込み先 Ht の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 P の post に非有限 (A 51143, B 51143)",
+  "EOS が読む入力 T の pre に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 T の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 cp の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 gamma の post に非有限 (A 51143, B 51143)",
+  "EOS が読む入力 roe の pre に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 roe の post に非有限 (A 51143, B 51143)",
+  "EOS の書き込み先 sonic の post に非有限 (A 51143, B 51143)"
+ ]
+}
