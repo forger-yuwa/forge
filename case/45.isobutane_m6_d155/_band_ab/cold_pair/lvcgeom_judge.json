@@ -1,0 +1,543 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-faceh §6.9",
+ "pregate": {
+  "VERDICT": "PASS (本試験へ進む)",
+  "residual": {
+   "res_ro": {
+    "rerun_bit": false,
+    "new_vs_old": 1.7694179454963432e-16,
+    "rerun": 1.7694179454963432e-16
+   },
+   "res_roUx": {
+    "rerun_bit": false,
+    "new_vs_old": 3.637978807091713e-12,
+    "rerun": 3.637978807091713e-12
+   },
+   "res_roUy": {
+    "rerun_bit": false,
+    "new_vs_old": 1.818989620386291e-12,
+    "rerun": 1.8189895119660737e-12
+   },
+   "res_roe": {
+    "rerun_bit": false,
+    "new_vs_old": 2.3110935387649079e-10,
+    "rerun": 2.3078428057488054e-10
+   },
+   "res_roK": {
+    "rerun_bit": false,
+    "new_vs_old": 1.2789769243681803e-13,
+    "rerun": 1.1368683772161603e-13
+   },
+   "res_roOmega": {
+    "rerun_bit": false,
+    "new_vs_old": 9.5367431640625e-07,
+    "rerun": 9.5367431640625e-07
+   },
+   "res_roY0": {
+    "rerun_bit": false,
+    "new_vs_old": 1.1752751549742868e-16,
+    "rerun": 1.1102230246251565e-16
+   },
+   "res_roY1": {
+    "rerun_bit": false,
+    "new_vs_old": 1.3742262536253769e-17,
+    "rerun": 1.37287100090977e-17
+   },
+   "rhs_s0": {
+    "rerun_bit": false,
+    "new_vs_old": 1.4551915228366852e-11,
+    "rerun": 2.9103830456733704e-11
+   }
+  },
+  "intervention_new_coef_max_rel_vs_double": 3.103856132113947e-07,
+  "recompute_old_formula_max_ulp": 4.0,
+  "intervention_K": {
+   "faces": 1200,
+   "max_ulp": 5.0
+  },
+  "intervention_D": {
+   "max_ulp": 5.0
+  },
+  "near_wall_K_change_max_rel": 0.7640579335623973
+ },
+ "gates": [
+  {
+   "check": "出発の場の sha256 が事前に固定した値",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "1b8590e84ece63ae"
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: マスクの表示が無い (= 既定 7)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0560_lvcgeom_old_a1: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: マスクの表示が無い (= 既定 7)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0561_lvcgeom_new_b1: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "1b8590e84ece63ae"
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: マスクの表示が無い (= 既定 7)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0562_lvcgeom_old_a2: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: forge の sha256 が腕のバイナリ",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 出発の場が run_0183_ns_coldmesh_tw300_ext/res_100000.h5",
+   "ok": true,
+   "value": [
+    "run_0183_ns_coldmesh_tw300_ext",
+    "res_100000.h5",
+    "207d39f0e7f4aa03"
+   ]
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 格子の実体が出発 run と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 入力ファイルが出発 run と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: メッシュ品質の VERDICT が PASS",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 設定が §6 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 設定が a1 と一致",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 起動ログの lineViscCoupling = 3",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 切替の表示 = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: マスクの表示が無い (= 既定 7)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0563_lvcgeom_new_b2: 実効の並びが LAYOUT2",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "事前のゲートの VERDICT が PASS",
+   "ok": true,
+   "value": "PASS (本試験へ進む)"
+  },
+  {
+   "check": "事前のゲートの項目がすべて合格",
+   "ok": true,
+   "value": 0
+  },
+  {
+   "check": "run_0564_lvcgeom_old_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0565_lvcgeom_new_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0566_lvcgeom_old_dump2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  }
+ ],
+ "gates_ok": true,
+ "runs": {
+  "a1": {
+   "class": "DIVERGED",
+   "run": "run_0560_lvcgeom_old_a1",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    293
+   ],
+   "last_step": 292,
+   "csv_first_nonfinite": 292,
+   "diverged_step": 292,
+   "steps_log_csv": [
+    293,
+    292
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1667.3478539056305,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 290.404626455926,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3241.0493652605,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 1071.5435675638796,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 30.45031288797037,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2132.9001915679737,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1667.3536905021426,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1667.345701400656,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "b1": {
+   "class": "DIVERGED",
+   "run": "run_0561_lvcgeom_new_b1",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    357
+   ],
+   "last_step": 356,
+   "csv_first_nonfinite": 356,
+   "diverged_step": 356,
+   "steps_log_csv": [
+    357,
+    356
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1730.0425040274158,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 291.02895537174567,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 5618.570895916687,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 712.6133124744545,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 37.57453689612042,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 3126.4678117598896,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1730.051145738359,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1730.0429114396559,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "a2": {
+   "class": "DIVERGED",
+   "run": "run_0562_lvcgeom_old_a2",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    199
+   ],
+   "last_step": 198,
+   "csv_first_nonfinite": 198,
+   "diverged_step": 198,
+   "steps_log_csv": [
+    199,
+    198
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1668.5182859344739,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 290.5849679608641,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3413.1933801983096,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 1374.8575143380535,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 27.13207178114482,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2154.059363648072,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1668.524123016309,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1668.515827301481,
+     "first_step_over_3x": 3
+    }
+   }
+  },
+  "b2": {
+   "class": "DIVERGED",
+   "run": "run_0563_lvcgeom_new_b2",
+   "run_rc": "1",
+   "detectNaN": [
+    "ro",
+    235
+   ],
+   "last_step": 234,
+   "csv_first_nonfinite": 234,
+   "diverged_step": 234,
+   "steps_log_csv": [
+    235,
+    234
+   ],
+   "evidence_problems": [],
+   "records": {
+    "rms_ro": {
+     "max_over_start": 1729.4296570902216,
+     "first_step_over_3x": 3
+    },
+    "rms_roUx": {
+     "max_over_start": 291.0340222141446,
+     "first_step_over_3x": 29
+    },
+    "rms_roUy": {
+     "max_over_start": 3407.204225721024,
+     "first_step_over_3x": 2
+    },
+    "rms_roe": {
+     "max_over_start": 228.7689031946266,
+     "first_step_over_3x": 22
+    },
+    "rms_roK": {
+     "max_over_start": 30.85019411673602,
+     "first_step_over_3x": 48
+    },
+    "rms_roOmega": {
+     "max_over_start": 2142.4475066340938,
+     "first_step_over_3x": 1
+    },
+    "rms_roY0": {
+     "max_over_start": 1729.4375050099973,
+     "first_step_over_3x": 3
+    },
+    "rms_roY1": {
+     "max_over_start": 1729.4293721552567,
+     "first_step_over_3x": 3
+    }
+   }
+  }
+ },
+ "main_v3": {
+  "verdict": "棄却",
+  "detail": "新でも全部 DIVERGED。新の破綻 step [356, 234]、旧の最大 292"
+ },
+ "VERDICT": "主 (値 3): 棄却 — この修復だけで十分という仮説を棄却 (精度の不整合の寄与をゼロとは言わない); 新でも全部 DIVERGED。新の破綻 step [356, 234]、旧の最大 292"
+}

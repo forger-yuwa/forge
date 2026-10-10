@@ -1,0 +1,738 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-faceh §6.9 (事前のゲート)",
+ "residual_optional_used": [
+  "res_roY0",
+  "res_roY1"
+ ],
+ "residual": {
+  "res_ro": {
+   "rerun_bit": false,
+   "new_vs_old": 1.7694179454963432e-16,
+   "rerun": 1.7694179454963432e-16
+  },
+  "res_roUx": {
+   "rerun_bit": false,
+   "new_vs_old": 3.637978807091713e-12,
+   "rerun": 3.637978807091713e-12
+  },
+  "res_roUy": {
+   "rerun_bit": false,
+   "new_vs_old": 1.818989620386291e-12,
+   "rerun": 1.8189895119660737e-12
+  },
+  "res_roe": {
+   "rerun_bit": false,
+   "new_vs_old": 2.3110935387649079e-10,
+   "rerun": 2.3078428057488054e-10
+  },
+  "res_roK": {
+   "rerun_bit": false,
+   "new_vs_old": 1.2789769243681803e-13,
+   "rerun": 1.1368683772161603e-13
+  },
+  "res_roOmega": {
+   "rerun_bit": false,
+   "new_vs_old": 9.5367431640625e-07,
+   "rerun": 9.5367431640625e-07
+  },
+  "res_roY0": {
+   "rerun_bit": false,
+   "new_vs_old": 1.1752751549742868e-16,
+   "rerun": 1.1102230246251565e-16
+  },
+  "res_roY1": {
+   "rerun_bit": false,
+   "new_vs_old": 1.3742262536253769e-17,
+   "rerun": 1.37287100090977e-17
+  },
+  "rhs_s0": {
+   "rerun_bit": false,
+   "new_vs_old": 1.4551915228366852e-11,
+   "rerun": 2.9103830456733704e-11
+  }
+ },
+ "recompute_old_formula_max_ulp": 4.0,
+ "intervention_new_coef_max_rel_vs_double": 3.103856132113947e-07,
+ "intervention_K": {
+  "faces": 1200,
+  "max_ulp": 5.0
+ },
+ "intervention_D": {
+  "max_ulp": 5.0
+ },
+ "old_dump_vs_audit_bit": {
+  "D": false,
+  "Kprev": true,
+  "Knext": true
+ },
+ "near_wall_K_change_max_rel": 0.7640579335623973,
+ "checks": [
+  {
+   "stage": "I",
+   "check": "line_audit_helper の引数",
+   "ok": true,
+   "value": "/home/ubuntu/forge-faceh-audit/case/45.isobutane_m6_d155/_lvcgeom_lah"
+  },
+  {
+   "stage": "I",
+   "check": "出発の場の sha256",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: バイナリの sha256",
+   "ok": true,
+   "value": "1b8590e84ece63ae"
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 設定 (本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 起動ログ (値 3・マスクの表示なし・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: バイナリの sha256",
+   "ok": true,
+   "value": "1b8590e84ece63ae"
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 設定 (本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 起動ログ (値 3・マスクの表示なし・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: バイナリの sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 設定 (本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 起動ログ (値 3・マスクの表示なし・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "node_line: 旧・旧の再実行・新の 3 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "state_ro_roU_roe_cp_gamma: 旧・旧の再実行・新の 3 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "dt_vol: 旧・旧の再実行・新の 3 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "flags_wall_iso_axis: 旧・旧の再実行・新の 3 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "res_0.h5 の全データセット (保存量・k・ω・組成・μ・壁距離など) が 3 本でビット一致",
+   "ok": true,
+   "value": [
+    "P",
+    "T",
+    "Ux",
+    "Uy",
+    "Uz",
+    "Y0",
+    "Y1",
+    "h0",
+    "k",
+    "omega",
+    "res_ro",
+    "res_roK",
+    "res_roOmega",
+    "res_roUx",
+    "res_roUy",
+    "res_roY0",
+    "res_roY1",
+    "res_roe",
+    "ro",
+    "roK",
+    "roOmega",
+    "roUx",
+    "roUy",
+    "roUz",
+    "roY0",
+    "roY1",
+    "roe",
+    "sonic",
+    "vis_lam",
+    "vis_turb",
+    "volume",
+    "wall_dist"
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_0.h5 に保存量・乱流・組成がある",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: node_line が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: state_ro_roU_roe_cp_gamma が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: dt_vol が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0564_lvcgeom_old_dump: flags_wall_iso_axis が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: node_line が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: state_ro_roU_roe_cp_gamma が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: dt_vol が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0566_lvcgeom_old_dump2: flags_wall_iso_axis が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: node_line が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: state_ro_roU_roe_cp_gamma が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: dt_vol が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0565_lvcgeom_new_dump: flags_wall_iso_axis が監査の記録とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "監査の記録: 記録の節点番号 = 書き出しの順、面の数が枠に入る、skipDiag なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "res_ro: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_ro: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.7694179454963432e-16,
+    1.7694179454963432e-16
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roUx: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roUx: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    3.637978807091713e-12,
+    3.637978807091713e-12
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roUy: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roUy: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.818989620386291e-12,
+    1.8189895119660737e-12
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roe: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roe: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    2.3110935387649079e-10,
+    2.3078428057488054e-10
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roK: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roK: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.2789769243681803e-13,
+    1.1368683772161603e-13
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roOmega: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roOmega: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    9.5367431640625e-07,
+    9.5367431640625e-07
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roY0: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roY0: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.1752751549742868e-16,
+    1.1102230246251565e-16
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roY1: 3 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roY1: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.3742262536253769e-17,
+    1.37287100090977e-17
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "rhs_s0: 新と旧の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.4551915228366852e-11,
+    2.9103830456733704e-11
+   ]
+  },
+  {
+   "stage": "V",
+   "check": "(0) 旧の式の再計算が記録された GPU の dcc・δ・粘性の対角・β・κ・cfac と ≤ 8 ulp (式の検証)",
+   "ok": true,
+   "value": 4.0
+  },
+  {
+   "stage": "V",
+   "check": "(a) 新の方式の薄層の β・κ が double の参照と ≤ 1e-5",
+   "ok": true,
+   "value": 3.103856132113947e-07
+  },
+  {
+   "stage": "V",
+   "check": "(b) 薄層の K の変化が Kv(新) − Kv(旧) と ≤ 64 ulp",
+   "ok": true,
+   "value": [
+    1200,
+    5.0
+   ]
+  },
+  {
+   "stage": "V",
+   "check": "(c) D の変化が係数の変更の再現と ≤ 64 ulp",
+   "ok": true,
+   "value": 5.0
+  }
+ ],
+ "VERDICT": "PASS (本試験へ進む)"
+}

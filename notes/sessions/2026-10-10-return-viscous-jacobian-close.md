@@ -48,3 +48,14 @@ codex 諮問: [`notes/reviews/2026-10-10-faceh-floor-result-diagnose.md`](../rev
 - 監査用のビルド (`-DFORGE_LINE_AUDIT`、`~/forge-faceh-audit`) と対照の通常のビルド (`~/forge-faceh-ctrl`) は、このブランチの 2d58b457 + typedef double。
 - メッシュの座標の精度: `run_0183` の `nozzle.h5` の `MESH/COORD` は float64 で、書き出した 605 節点の座標は float32 に丸めると変わる (x 0/605、y 5/605 が一致) = double の精度を持っている。
   今回のずれは LHS で float に落としてから引くことから来ていて、メッシュの側ではない。
+
+### 結果 (2026-10-10、plan §6.10)
+
+- 段 ② と段 ③ の FP64 のバイナリで、値 3・マスク 7 を各 2 本 (case/45 の `run_0560`〜`run_0563`、AWS `~/forge-faceh-audit/case/45.isobutane_m6_d155/`)。
+  4 本とも `ro` が非有限になった (段 ② 293・199 step、段 ③ 357・235 step)。LHS の座標の差を e に直すだけでは、この破綻は避けられない。
+  「精度の不整合は主因でない」とまでは言えない (codex 諮問 [`notes/reviews/2026-10-10-lvcgeom-result-diagnose.md`](../reviews/2026-10-10-lvcgeom-result-diagnose.md))。
+- 同じ凍結入力での段 ② と段 ③ の比較 (`run_0564`〜`run_0566`、事前のゲート `lvcgeom_pregate.py`):
+  - 残差 (全節点の 8 場と `rhs_s0`) の新 − 旧は、段 ② の再実行の揺れと同じ大きさだった。FP64 では、段 ③ で残差は変わらない。
+  - LHS の K・D の変化は、e による係数の変更から 5 ulp 以内で再現した。β・κ と double の参照の差は最大 3.1e-7。
+  - 段 ③ の LHS の変更は、意図どおりに入っていることを確認した。
+
