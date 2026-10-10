@@ -12,13 +12,29 @@
 
 床の下の入力の直接比較 (plan §5.1 #2 の追加の試験 (3)、診断専用の再生 FORGE_EOS_REPLAY_FILE):
   base: 旧版 1 回・新版 1 回を再生なしでダンプし、/pre の全配列が両版でビット一致することを確かめて新版のダンプを BASE に残す。
-      python3 eos_ab_dir.py base --input IN --work W --old OLDBIN --new NEWBIN --out BASE.h5
+      python3 eos_ab_dir.py base --input IN --work W --old OLDBIN --new NEWBIN --out BASE.h5 [--env FORGE_CUDA_BLOCKSIZE=128]
+      (--env は run と同じ値を渡す: 再生の run と同じ環境で BASE を作る)
   make-replay: BASE の /pre を写し、指定内部節点の roe だけを e_in = e_mix(T_min) + DE [J/kg] になる値にした再生ファイルを作る
        (DE < 0 = 床の下、DE > 0 = 床の上の対照)。余裕 (|DE| ≥ c_v(T_min)·1 K かつ ρ|DE| ≥ 64 ULP(格納 ρE)) と内部節点を確かめる。
       python3 eos_ab_dir.py make-replay --base BASE.h5 --input IN --node 18259 --de -10000 --out R.h5
   run --replay R.h5 --node N --expect-floor 1|0: 再生ありで旧版 2 回・新版 2 回。各ダンプの /pre が R の /pre とビット一致すること、
        実際の pre (ダンプの /pre) で床の条件と余裕、新版の floor_events.csv の step の eos 行で指定節点の温度床の件数を確かめ、
        REPLAY_VERDICT (PASS / FAIL / 試験不成立) を SUMMARY.json と標準出力に出す。
+
+farfield の ghost を owner の状態で一括充填した共通の再生入力 (plan §5.1 #2 の追加の受入れ試験 (5)、
+codex diagnose notes/reviews/2026-10-10-eos-g3-farfield-ghost-diagnose.md):
+  make-replay-fill-ghosts: 入力 h5 の BCONDS から対象の境界 (既定 bcondKind farfield、--pid で指定) の ghost と owner を対応付け
+       (ghost_owner_map: forge の割り当てをコードから再現し、owner を 2 経路で照合)、BASE の /pre で EOS が読む入力
+       (compare_eos_dump.eos_sets の読む集合) の非有限の index 集合が対象の ghost の集合と**完全一致**することを確かめ
+       (件数一致では足りない。一致しなければ試験不成立で止まる)、対象 ghost の読む入力一式を対応する owner の値で上書きした
+       再生ファイルを書く。書いた後に読み直して、読む集合以外の配列・読む集合の対象 ghost 以外の要素がビット不変、
+       対象 ghost が owner とビット一致、読む入力が全節点で有限であることを確かめて記録する (R.h5.json と R.h5 の /replay_info)。
+       --forge-log に base の新版の forge_run.log を渡すと、readMesh が実際に回った境界条件の順と面の範囲も照合する。
+      python3 eos_ab_dir.py make-replay-fill-ghosts --base BASE.h5 --input IN --tools TOOLS --out R.h5 [--forge-log W/base_new/forge_run.log]
+  run --replay R.h5 (--node・--expect-floor は付けない): 再生ありで旧版 2 回・新版 2 回。判定は v2 の比較のまま
+       (読む入力の有限性・同一性、全書き込み先の post の有限性、差分 0 バイト、未変更入力の不変、腕内再現) +
+       各ダンプの /pre が R の /pre とビット一致 + 新版が床事象のカウンタ有効の腕であること (step の eos 行が 1 行)。
+       REPLAY_VERDICT: PASS (5 組とも v2 IDENTICAL) / FAIL (旧版と新版の間で再現する差) / 試験不成立 (入力不一致・非有限・腕内の非再現)。
 """
 import argparse
 import csv
@@ -340,8 +356,9 @@ def base(a):
     import h5py
     inp = os.path.abspath(a.input)
     files = input_files(inp)
-    d_old, i_old = run_one(a, inp, files, "base_old", a.old, {})
-    d_new, i_new = run_one(a, inp, files, "base_new", a.new, {})
+    extra = dict(kv.split("=", 1) for kv in (a.env or []))
+    d_old, i_old = run_one(a, inp, files, "base_old", a.old, extra)
+    d_new, i_new = run_one(a, inp, files, "base_new", a.new, extra)
     with h5py.File(d_old, "r") as fo, h5py.File(d_new, "r") as fn:
         no, nn = set(fo["pre"]), set(fn["pre"])
         diff = {k: int(np.count_nonzero(fo["pre"][k][()].view(np.uint8) != fn["pre"][k][()].view(np.uint8))) for k in no & nn}
@@ -353,7 +370,7 @@ def base(a):
     os.remove(d_old)
     json.dump({"input": inp, "old": {"bin": a.old, "sha256": sha(a.old), "dump_sha256": i_old["dump_sha256"]},
                "new": {"bin": a.new, "sha256": sha(a.new), "dump_sha256": i_new["dump_sha256"]},
-               "pre_arrays": len(no), "pre_diff_arrays": bad, "out": os.path.abspath(a.out)},
+               "env": extra, "pre_arrays": len(no), "pre_diff_arrays": bad, "out": os.path.abspath(a.out)},
               open(a.out + ".json", "w"), indent=1)
     print(f"base: 新版のダンプを {a.out} に残した (旧版のダンプは消した)")
 
@@ -403,11 +420,19 @@ def run(a):
             if ra.get("thermalMethod") == 2:
                 db = thermo_db(bytes(r["db/species_thermo"][()]), int(ra.get("db_n_species", 0)))
             S["replay_record"] = json.loads(r["replay_info"].attrs["record_json"]) if "replay_info" in r else None
+    # 再生の種類: make-replay-fill-ghosts の記録は kind = fill_ghosts、make-replay (床の下・上の 1 節点) の記録は kind を持たない
+    S["replay_kind"] = (S.get("replay_record") or {}).get("kind", "floor_node") if replay else None
+    ced = load_ced(a.tools) if S["replay_kind"] == "fill_ghosts" else None
 
     def one(name, binp):
         dump, info = run_one(a, inp, files, name, binp, extra, replay)
         S["runs"][name] = info
-        if replay:
+        if replay and S["replay_kind"] == "fill_ghosts":
+            S["replay_checks"][name] = c = check_fill_dump(dump, replay, S["replay_record"], ced)
+            print(f"     /pre = 再生ファイル: {c['pre_equals_replay']} (差分バイト {c['pre_diff_bytes_vs_replay']})  "
+                  f"読む入力の pre の非有限 {c['reads_pre_nonfinite_total']}  書き込み先の post の非有限 {c['writes_post_nonfinite_total']}  "
+                  f"対象 ghost の post T {c['target_post'].get('T')}")
+        elif replay:
             S["replay_checks"][name] = c = check_replay_dump(dump, replay, a.node, db)
             st = c["state"]
             print(f"     /pre = 再生ファイル: {c['pre_equals_replay']} (差分バイト {c['pre_diff_bytes_vs_replay']})  実際の pre の節点 {a.node}: "
@@ -432,7 +457,8 @@ def run(a):
     v = {k: (c["verdict_v1"], c["verdict_v2"]) for k, c in S["compare"].items()}
     print("SUMMARY (v1, v2):", v)
     if replay:
-        S["replay_verdict"], S["replay_reasons"] = replay_verdict(a, S)
+        S["replay_verdict"], S["replay_reasons"] = (fill_replay_verdict(a, S) if S["replay_kind"] == "fill_ghosts"
+                                                    else replay_verdict(a, S))
         print(f"REPLAY_VERDICT: {S['replay_verdict']}")
         for s in S["replay_reasons"]:
             print("   ", s)
@@ -480,6 +506,429 @@ def replay_verdict(a, S):
     return verdict, inval + fail + notes
 
 
+# ---------------- ghost を owner の状態で一括充填した再生 (plan §5.1 #2 の追加の受入れ試験 (5)) ----------------
+
+def load_ced(tools):
+    """比較器 compare_eos_dump (v2) を tools ディレクトリから読み込む。EOS が読む集合・書く集合は比較器の eos_sets から取る
+    (集合を二重に持たない)。"""
+    tools = os.path.abspath(tools)
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import compare_eos_dump
+    return compare_eos_dump
+
+
+def replay_kind(path):
+    """再生ファイルの種類 (/replay_info の record_json の kind)。make-replay の記録は kind を持たない (= floor_node)。"""
+    import h5py
+    with h5py.File(path, "r") as r:
+        if "replay_info" not in r:
+            return "floor_node"
+        return json.loads(r["replay_info"].attrs["record_json"]).get("kind", "floor_node")
+
+
+def _str(v):
+    return v.decode() if isinstance(v, bytes) else str(v)
+
+
+def bcond_order(names):
+    """forge が BCONDS/<名前> を回る順 = 名前のバイト列の昇順 (数値順ではない: "10" は "2" より前)。
+    根拠: mesh/mesh.cpp:392 `for (string oname : grp.listObjectNames())`。HighFive の listObjectNames の既定は IndexType::NAME
+    (third_party/HighFive/include/highfive/bits/H5Node_traits.hpp:146) で、H5_ITER_INC で回す (H5Node_traits_misc.hpp:168-177)。
+    実際に回った順は forge_run.log の "in mesh.cpp  physID=" (mesh/mesh.cpp:399) で照合できる (check_forge_log_order)。"""
+    return sorted(names, key=lambda s: s.encode())
+
+
+def _plane_cells(strct, n_planes, want):
+    """PLANES/STRUCT から面 want (index の集合) の iCells を返す。STRUCT は面の順に [nn, iNodes × nn, nc, iCells × nc] を
+    連結したもの (mesh/mesh.cpp:266-280 の読み方)。末尾まで読んで長さが合うことも確かめる。"""
+    mv = memoryview(np.ascontiguousarray(strct))
+    wm = np.zeros(n_planes, dtype=bool)
+    if want:
+        wm[np.fromiter(want, dtype=np.int64)] = True
+    wl = wm.tolist()
+    out = {}
+    p = 0
+    for ip in range(n_planes):
+        p += 1 + mv[p]
+        nc = mv[p]
+        if wl[ip]:
+            out[ip] = [mv[p + 1 + j] for j in range(nc)]
+        p += 1 + nc
+    if p != len(mv):
+        raise SystemExit(f"PLANES/STRUCT の長さ {len(mv)} が面 {n_planes} 枚の読み取り位置 {p} と合わない")
+    return out
+
+
+def ghost_owner_map(mesh_h5, pid=None, kind="farfield"):
+    """入力 h5 (変換済みの格子) の境界 BCONDS/<pid> (pid 省略時は bcondKind == kind がちょうど 1 つ) の各 ghost の index と
+    owner (内部の実節点) の index を、forge の割り当てどおりに求める。返り値の ghost[k]・owner[k] が k 番目の境界面の組。
+
+    forge の割り当て (コードから):
+      1. ghost の数 = 境界面の数: nCells_ghst = nBPlanes、nCells_all = nCells + nCells_ghst (mesh/mesh.cpp:227-228)。
+      2. BCONDS を名前のバイト列の昇順に回り (mesh/mesh.cpp:392、bcond_order)、各境界条件の ibl = 0..len(iBPlanes)-1 に
+         ghost = nCells + nGhost を割り当てる。nGhost は全境界条件を通した通し番号 (mesh/mesh.cpp:391 で 0、:452-459 で代入、
+         :502 で nGhost++)。よって BCONDS/<pid> の ghost は [nCells + off, nCells + off + len(iBPlanes)) の連続区間で、off は
+         回る順でそれより前の境界条件の len(iBPlanes) の和。iBPlanes の**値**は使わない (変換器の面の並びは physID の数値順なので、
+         値から作ると "1" "10" "11" … "2" の順とずれて別の境界の ghost を指す)。
+      3. owner: ghost ibl の面は ip = iPlanes[ibl] (mesh/mesh.cpp:454)。readMesh は面の cell がちょうど 1 つであることを要求し、
+         その planes[ip].iCells[0] を ghost の幾何 (鏡映重心・体積) の owner にする (mesh/mesh.cpp:460-464)。境界カーネルが使う
+         owner は device の写像 map_bplane_cell_d[ibl] = BCONDS/<pid>/iCells[ibl]、ghost は map_bplane_cell_ghst_d[ibl] =
+         iCells_ghst[ibl] (mesh/mesh.cpp:938-939)。例: 化学種の Neumann 充填 roY[ig] = roY[ic] (cuda_forge/speciesTransport_d.cu:110-112、
+         初期化で main.cpp:1868 から呼ばれる)。node の変換器は iCells[k] を半割面 iPlanes[k] の節点として 1:1 に並べる
+         (mesh/gmshReader.hpp:2111/2122・2397-2405)。
+    この関数は 2 つの owner (iCells[ibl] と PLANES/STRUCT の planes[iPlanes[ibl]].iCells[0]) が全 ibl で一致し、内部の実節点
+    (0 ≤ owner < nCells) であることを確かめる。他に: 全境界条件の len(iBPlanes) の和 = nBPlanes、対象の
+    len(iPlanes) = len(iBPlanes) = len(iCells) > 0。どれかが成り立たなければ止める (SystemExit)。"""
+    import h5py
+    with h5py.File(mesh_h5, "r") as f:
+        ma = f["MESH"].attrs
+        nCells, nBPlanes, nPlanes = int(ma["nCells"]), int(ma["nBPlanes"]), int(ma["nPlanes"])
+        names = bcond_order(list(f["BCONDS"].keys()))
+        order, cand, off = [], [], 0
+        for nm in names:
+            g = f["BCONDS"][nm]
+            k = _str(g.attrs["bcondKind"])
+            ip, ib, ic = g["iPlanes"][()], g["iBPlanes"][()], g["iCells"][()]
+            order.append({"name": nm, "kind": k, "n_bplanes": int(len(ib)), "n_planes": int(len(ip)), "n_cells": int(len(ic)),
+                          "ghost_first": nCells + off, "ghost_end": nCells + off + int(len(ib)),
+                          "ip_first": int(ip[0]) if len(ip) else None, "ip_last": int(ip[-1]) if len(ip) else None})
+            if (pid is not None and nm == str(pid)) or (pid is None and k == kind):
+                cand.append((nm, k, off, ip.astype(np.int64), ib, ic.astype(np.int64)))
+            off += int(len(ib))
+        if off != nBPlanes:
+            raise SystemExit(f"全境界条件の len(iBPlanes) の和 {off} が MESH の nBPlanes {nBPlanes} と違う (ghost の通し番号が組めない)")
+        if len(cand) != 1:
+            raise SystemExit(f"対象の境界が 1 つに決まらない (pid {pid}, bcondKind {kind}): 候補 {[c[0] for c in cand]}"
+                             + ("。--pid で指定する" if len(cand) > 1 else ""))
+        nm, k, off, ip, ib, ic = cand[0]
+        if k != kind:
+            raise SystemExit(f"BCONDS/{nm} の bcondKind は {k} で、指定の {kind} と違う")
+        if not (len(ip) == len(ib) == len(ic) > 0):
+            raise SystemExit(f"BCONDS/{nm}: len(iPlanes) {len(ip)}・len(iBPlanes) {len(ib)}・len(iCells) {len(ic)} が等しくない (または 0)")
+        pc = _plane_cells(f["PLANES/STRUCT"][()], nPlanes, set(ip.tolist()))
+    one = np.array([len(pc[int(p)]) == 1 for p in ip])
+    if not one.all():
+        raise SystemExit(f"BCONDS/{nm}: 境界面の cell が 1 つでない面が {int((~one).sum())} 枚 (readMesh は exit 3 にする)")
+    plane_owner = np.array([pc[int(p)][0] for p in ip], dtype=np.int64)
+    agree = plane_owner == ic
+    if not agree.all():
+        j = int(np.flatnonzero(~agree)[0])
+        raise SystemExit(f"BCONDS/{nm}: iCells と PLANES/STRUCT の owner が {int((~agree).sum())} 面で食い違う "
+                         f"(最初 ibl {j}: iCells {int(ic[j])}, 面 {int(ip[j])} の cell {int(plane_owner[j])})")
+    if ic.min() < 0 or ic.max() >= nCells:
+        raise SystemExit(f"BCONDS/{nm}: owner が実節点の範囲 [0, {nCells}) の外 (min {int(ic.min())}, max {int(ic.max())})")
+    ghost = nCells + off + np.arange(len(ib), dtype=np.int64)
+    return {"pid": nm, "kind": k, "nCells": nCells, "nBPlanes": nBPlanes, "nCells_all": nCells + nBPlanes, "offset": off,
+            "n": int(len(ib)), "ghost": ghost, "owner": ic, "n_owner_unique": int(len(np.unique(ic))),
+            "owner_sources_agree": True, "order": order}
+
+
+def check_forge_log_order(log_path, gm):
+    """forge_run.log の readMesh の出力 (mesh/mesh.cpp:399-400 の physID・bcondKind、:423 の "ip min=…, ip max=…"
+    = iPlanes の先頭・末尾、:230 の "Number of Ghost Cells") が ghost_owner_map の順・種類・面の範囲・ghost 数と一致するか。"""
+    ent, ng = [], None
+    for line in open(log_path, errors="replace"):
+        m = re.search(r"in mesh\.cpp  physID=(\S+)", line)
+        if m:
+            ent.append({"name": m.group(1), "kind": None, "ip": None})
+            continue
+        m = re.search(r"in mesh\.cpp  bcondKind=(\S+)", line)
+        if m and ent:
+            ent[-1]["kind"] = m.group(1)
+            continue
+        m = re.search(r"ip min=(-?\d+), ip max=(-?\d+)", line)
+        if m and ent:
+            ent[-1]["ip"] = [int(m.group(1)), int(m.group(2))]
+            continue
+        m = re.search(r"Number of Ghost Cells: (\d+)", line)
+        if m:
+            ng = int(m.group(1))
+    want = [{"name": r["name"], "kind": r["kind"], "ip": [r["ip_first"], r["ip_last"]] if r["ip_first"] is not None else None}
+            for r in gm["order"]]
+    mism = []
+    if [e["name"] for e in ent] != [w["name"] for w in want]:
+        mism.append(f"境界条件の順: ログ {[e['name'] for e in ent]} / 格子から {[w['name'] for w in want]}")
+    else:
+        for e, w in zip(ent, want):
+            if e["kind"] != w["kind"] or e["ip"] != w["ip"]:
+                mism.append(f"BCONDS/{w['name']}: ログ kind {e['kind']} ip {e['ip']} / 格子から kind {w['kind']} ip {w['ip']}")
+    if ng != gm["nBPlanes"]:
+        mism.append(f"Number of Ghost Cells: ログ {ng} / nBPlanes {gm['nBPlanes']}")
+    return {"ok": not mism, "log": os.path.abspath(log_path), "order_log": [e["name"] for e in ent], "ghost_cells_log": ng,
+            "mismatch": mism}
+
+
+def _where(idx, gm):
+    """index の所在 (実節点 / どの境界条件の ghost) の内訳。"""
+    idx = np.asarray(idx, dtype=np.int64)
+    out = {"real": int((idx < gm["nCells"]).sum())}
+    for r in gm["order"]:
+        c = int(((idx >= r["ghost_first"]) & (idx < r["ghost_end"])).sum())
+        if c:
+            out[f"ghost BCONDS/{r['name']} ({r['kind']})"] = c
+    return out
+
+
+def _bits_eq(x, y):
+    """float32 配列の要素ごとのビット一致 (NaN も同じビットなら一致)。"""
+    return x.view(np.uint32) == y.view(np.uint32)
+
+
+def make_replay_fill_ghosts(a):
+    """BASE の /pre を写し、対象の境界の ghost の EOS が読む入力一式を対応する owner の値で上書きした再生ファイルを書く
+    (plan §5.1 #2 の追加の受入れ試験 (5))。前提の検査 (非有限の index 集合 = 対象 ghost の集合、owner の有限性) が
+    成り立たなければ書かずに止める (試験不成立)。書いた後に読み直して充填の範囲をビット比較で確かめ、記録を残す。"""
+    import h5py
+    ced = load_ced(a.tools)
+    if os.path.exists(a.out) or os.path.exists(a.out + ".partial"):
+        raise SystemExit(f"{a.out} (または .partial) は既にある (上書きしない)")
+    mesh_path = os.path.join(a.input, mesh_file(a.input))
+    gm = ghost_owner_map(mesh_path, pid=a.pid, kind=a.bcond_kind)
+    ghost, owner = gm["ghost"], gm["owner"]
+    print(f"格子 {mesh_path}: nCells {gm['nCells']}  nBPlanes {gm['nBPlanes']}  境界条件を回る順 {[r['name'] for r in gm['order']]}")
+    print(f"対象 BCONDS/{gm['pid']} ({gm['kind']}): ghost {gm['n']} 個 = [{int(ghost[0])}, {int(ghost[-1]) + 1})  "
+          f"owner の種類 {gm['n_owner_unique']}  owner の 2 経路 (iCells・PLANES/STRUCT) 一致")
+    log_chk = check_forge_log_order(a.forge_log, gm) if a.forge_log else None
+    if log_chk is not None:
+        print(f"forge_run.log の照合: {'一致' if log_chk['ok'] else '不一致'} (順 {log_chk['order_log']}, ghost {log_chk['ghost_cells_log']})")
+        if not log_chk["ok"]:
+            raise SystemExit("forge_run.log の readMesh の順・面の範囲が格子から組んだ対応と違う: " + "; ".join(log_chk["mismatch"]))
+    rec = {"kind": "fill_ghosts", "base": os.path.abspath(a.base), "base_sha256": sha(a.base), "mesh": os.path.abspath(mesh_path),
+           "mesh_sha256": sha(mesh_path), "pid": gm["pid"], "bcondKind": gm["kind"], "n_ghost": gm["n"], "ghost_first": int(ghost[0]),
+           "ghost_end": int(ghost[-1]) + 1, "n_owner_unique": gm["n_owner_unique"], "owner_sources_agree": gm["owner_sources_agree"],
+           "bcond_order": [{k: r[k] for k in ("name", "kind", "n_bplanes", "ghost_first", "ghost_end")} for r in gm["order"]],
+           "forge_log_check": log_chk}
+    with h5py.File(a.base, "r") as b:
+        attrs = {k: (v.decode() if isinstance(v, bytes) else (v.item() if isinstance(v, np.generic) else v)) for k, v in b.attrs.items()}
+        if attrs.get("replay"):
+            raise SystemExit("BASE が再生のダンプ (replay 属性あり)。base サブコマンドの出力 (再生なし) を渡す")
+        if attrs.get("nCells") != gm["nCells"] or attrs.get("nCells_all") != gm["nCells_all"]:
+            raise SystemExit(f"BASE の nCells {attrs.get('nCells')}・nCells_all {attrs.get('nCells_all')} が格子 "
+                             f"({gm['nCells']}, {gm['nCells_all']}) と違う")
+        branches, reads, writes, unsup = ced.eos_sets(attrs)
+        if unsup or not reads:
+            raise SystemExit(f"EOS の読む集合を決められない経路: {unsup}")
+        names = sorted(b["pre"])
+        miss = [r for r in reads if r not in names]
+        if miss:
+            raise SystemExit(f"BASE の /pre に EOS が読む配列が無い {miss}")
+        n_all = gm["nCells_all"]
+        # 1. 読む入力の非有限の index 集合 = 対象 ghost の集合 (完全一致)
+        union = np.zeros(n_all, dtype=bool)
+        per = {}
+        for r in reads:
+            x = b["pre"][r][()]
+            if x.shape != (n_all,) or x.dtype != np.float32:
+                raise SystemExit(f"/pre/{r} の形 {x.shape}・dtype {x.dtype} が (nCells_all,) float32 でない")
+            m = ~np.isfinite(x)
+            per[r] = {"n": int(m.sum()), "in_target_ghost": int(m[ghost].sum()), "where": _where(np.flatnonzero(m), gm)}
+            union |= m
+        nf = np.flatnonzero(union)
+        extra, lack = np.setdiff1d(nf, ghost), np.setdiff1d(ghost, nf)
+        exact = len(extra) == 0 and len(lack) == 0
+        rec.update(eos_branches=branches, fill_arrays=reads, nonfinite_before=per, nonfinite_union=int(len(nf)),
+                   nonfinite_union_where=_where(nf, gm), nonfinite_equals_target_ghosts=bool(exact),
+                   nonfinite_extra=int(len(extra)), nonfinite_extra_where=_where(extra, gm), target_ghost_finite=int(len(lack)),
+                   nonfinite_extra_first=[int(i) for i in extra[:10]], target_ghost_finite_first=[int(i) for i in lack[:10]])
+        print(f"読む入力 {reads} の pre の非有限: 和集合 {len(nf)} 個 {_where(nf, gm)}")
+        for r in reads:
+            if per[r]["n"]:
+                print(f"    {r:8s} {per[r]['n']} 個 {per[r]['where']}")
+        if not exact:
+            json.dump(rec, open(a.out + ".invalid.json", "w"), indent=1, ensure_ascii=False)
+            raise SystemExit(f"試験不成立: 読む入力の非有限の index 集合が BCONDS/{gm['pid']} の ghost の集合と一致しない "
+                             f"(対象外の非有限 {len(extra)} 個 {_where(extra, gm)}、対象 ghost のうち有限 {len(lack)} 個)。"
+                             f"記録 {a.out}.invalid.json")
+        # 2. owner の有限性
+        own_bad = {r: int((~np.isfinite(b["pre"][r][()][owner])).sum()) for r in reads}
+        rec["owner_nonfinite"] = own_bad
+        if any(own_bad.values()):
+            json.dump(rec, open(a.out + ".invalid.json", "w"), indent=1, ensure_ascii=False)
+            raise SystemExit(f"試験不成立: owner に非有限がある {own_bad} (記録 {a.out}.invalid.json)")
+        # 情報: forge 自身の Neumann 充填 (化学種、初期化) で ghost = owner になっている配列で、この対応がそれを再現するか。
+        # 対照 = owner を 1 つずらした対応 (一致が自明でないことの確認)
+        neu = {}
+        for k in names:
+            if re.fullmatch(r"(roY|Y)\d+", k):
+                x = b["pre"][k][()]
+                neu[k] = {"ghost_eq_owner": int(_bits_eq(x[ghost], x[owner]).sum()),
+                          "control_shifted_owner": int(_bits_eq(x[ghost], x[np.roll(owner, 1)]).sum()),
+                          "owner_distinct_values": int(len(np.unique(x[owner].view(np.uint32)))), "n": gm["n"]}
+        rec["neumann_evidence"] = neu
+        for k, v in neu.items():
+            print(f"    情報 (forge の Neumann 充填との照合) {k}: ghost = owner {v['ghost_eq_owner']}/{v['n']}  "
+                  f"対照 (1 つずらす) {v['control_shifted_owner']}/{v['n']}  owner の値の種類 {v['owner_distinct_values']}")
+        # 情報: BASE の /post で書き込み先に非有限がある位置。対象 ghost の外にあれば、読む入力が有限でも出力が非有限になる
+        # 節点で、充填しても再生の post に残る見込み (= 再生の run が v2 で試験不成立にする候補。判定はここではしない)
+        if "post" in b:
+            pw = np.zeros(n_all, dtype=bool)
+            for k in writes:
+                if k in b["post"]:
+                    pw |= ~np.isfinite(b["post"][k][()])
+            rec["base_post_writes_nonfinite_where"] = _where(np.flatnonzero(pw), gm)
+            rec["base_post_writes_nonfinite_outside_target"] = int(len(np.setdiff1d(np.flatnonzero(pw), ghost)))
+            print(f"    情報 BASE の post の書き込み先の非有限 {rec['base_post_writes_nonfinite_where']} "
+                  f"(対象 ghost の外 {rec['base_post_writes_nonfinite_outside_target']} 個: 充填しても残る見込み)")
+        # 3. 書く (配列ごとに流す)
+        tmp = a.out + ".partial"
+        with h5py.File(tmp, "w") as o:
+            for k, v in b.attrs.items():
+                o.attrs[k] = v
+            gp = o.create_group("pre")
+            for k, v in b["pre"].attrs.items():
+                gp.attrs[k] = v
+            if "db" in b:
+                for k in b["db"]:
+                    o.create_dataset(f"db/{k}", data=b["db"][k][()])
+            for k in names:
+                x = b["pre"][k][()]
+                if k in reads:
+                    x = x.copy()
+                    x[ghost] = x[owner]
+                gp.create_dataset(k, data=x)
+            o.create_group("replay_info")
+        # 4. 読み直して BASE とビット比較: 読む集合以外の配列は全要素、読む集合は対象 ghost 以外の要素が不変、対象 ghost は owner と一致
+        changed, bad = {}, []
+        with h5py.File(tmp, "r") as o:
+            if sorted(o["pre"]) != names:
+                bad.append("配列の名前の集合が BASE と違う")
+            for k, v in b.attrs.items():
+                if k not in o.attrs or not np.array_equal(np.asarray(o.attrs[k]), np.asarray(v)):
+                    bad.append(f"ルートの属性 {k} が BASE と違う")
+            for k in (b["db"] if "db" in b else []):
+                if bytes(o["db"][k][()]) != bytes(b["db"][k][()]):
+                    bad.append(f"物性 DB {k} が BASE と違う")
+            for k, v in b["pre"].attrs.items():
+                w = o["pre"].attrs.get(k)
+                if w is None or not np.array_equal(np.asarray(w), np.asarray(v)):
+                    bad.append(f"/pre の属性 {k} が BASE と違う ({w!r})")
+            n_bytes = 0
+            for k in names:
+                x, y = b["pre"][k][()], o["pre"][k][()]
+                n_bytes += x.nbytes
+                if x.shape != y.shape or x.dtype != y.dtype:
+                    bad.append(f"{k}: 形・dtype が BASE と違う")
+                    continue
+                neq = np.flatnonzero(~_bits_eq(x, y))
+                if k in reads:
+                    out_of = np.setdiff1d(neq, ghost)
+                    if len(out_of):
+                        bad.append(f"{k}: 対象 ghost の外の {len(out_of)} 要素が変わった {_where(out_of, gm)}")
+                    if not _bits_eq(y[ghost], x[owner]).all():
+                        bad.append(f"{k}: 対象 ghost が owner とビット一致しない")
+                    if not np.isfinite(y).all():
+                        bad.append(f"{k}: 充填後も非有限が {int((~np.isfinite(y)).sum())} 個 {_where(np.flatnonzero(~np.isfinite(y)), gm)}")
+                    changed[k] = int(len(neq))
+                elif len(neq):
+                    bad.append(f"{k}: 読む集合でないのに {len(neq)} 要素が変わった")
+        rec.update(changed_elements=changed, arrays_total=len(names), arrays_unchanged=len(names) - len(reads), bytes_compared=int(n_bytes),
+                   checks={"names_attrs_db_same": not any(s.startswith(("配列の名前", "ルートの属性", "物性 DB", "/pre の属性")) for s in bad),
+                           "other_arrays_bit_identical": not any("読む集合でないのに" in s for s in bad),
+                           "fill_arrays_outside_target_bit_identical": not any("対象 ghost の外" in s for s in bad),
+                           "target_ghost_equals_owner_bits": not any("owner とビット一致しない" in s for s in bad),
+                           "reads_finite_after_fill": not any("充填後も非有限" in s for s in bad),
+                           "nonfinite_equals_target_ghosts": True, "owner_finite": True},
+                   check_failures=bad)
+    if bad:
+        json.dump(rec, open(a.out + ".invalid.json", "w"), indent=1, ensure_ascii=False)
+        os.remove(tmp)
+        raise SystemExit("再生ファイルの検査に失敗 (書いたファイルは消した): " + "; ".join(bad[:6]))
+    with h5py.File(tmp, "r+") as o:
+        o["replay_info"].attrs["record_json"] = json.dumps(rec, ensure_ascii=False)
+    os.replace(tmp, a.out)
+    rec["out_sha256"] = sha(a.out)
+    json.dump(rec, open(a.out + ".json", "w"), indent=1, ensure_ascii=False)
+    print(f"充填: {changed} 要素を owner の値に (読む集合 {len(reads)} 本、それ以外の {len(names) - len(reads)} 本はビット不変)")
+    print("検査:", rec["checks"])
+    print(f"再生ファイル {a.out} ({os.path.getsize(a.out) / 2**20:.1f} MiB, sha256 {rec['out_sha256'][:16]}…)、記録 {a.out}.json")
+
+
+def check_fill_dump(dump, replay, rec, ced):
+    """fill-ghosts の再生で書かれたダンプの検査: /pre が再生ファイルの /pre とビット一致するか、EOS が読む入力の pre・
+    書き込み先の post の非有限の数 (全節点・対象 ghost)、対象 ghost の post の T・P・ro の範囲 (情報)。"""
+    import h5py
+    ghost = np.arange(rec["ghost_first"], rec["ghost_end"], dtype=np.int64)
+    with h5py.File(dump, "r") as d, h5py.File(replay, "r") as r:
+        nd, nr = set(d["pre"]), set(r["pre"])
+        mism = sorted(nd ^ nr)
+        nbytes = 0
+        for k in sorted(nd & nr):
+            x, y = d["pre"][k][()], r["pre"][k][()]
+            if x.shape != y.shape or x.dtype != y.dtype:
+                mism.append(k)
+                continue
+            c = ced.nbytes_diff(x, y)
+            nbytes += c
+            if c:
+                mism.append(k)
+        attrs = {k: (v.decode() if isinstance(v, bytes) else (v.item() if isinstance(v, np.generic) else v)) for k, v in d.attrs.items()}
+        _, reads, writes, unsup = ced.eos_sets(attrs)
+        missing = [k for k in reads if k not in d["pre"]] + [k for k in writes if k not in d["post"]]
+        rnf = {k: int((~np.isfinite(d["pre"][k][()])).sum()) for k in reads if k in d["pre"]}
+        wnf, wnf_t = {}, {}
+        for k in writes:
+            if k in d["post"]:
+                v = d["post"][k][()]
+                wnf[k] = int((~np.isfinite(v)).sum())
+                wnf_t[k] = int((~np.isfinite(v[ghost])).sum())
+        tp = {}
+        for k in ("T", "P", "ro"):
+            if k in d["post"]:
+                v = d["post"][k][()][ghost]
+                fin = v[np.isfinite(v)]
+                tp[k] = [float(fin.min()), float(fin.max())] if len(fin) else None
+    return {"pre_equals_replay": not mism, "pre_mismatch_arrays": mism, "pre_diff_bytes_vs_replay": nbytes,
+            "reads_pre_nonfinite": rnf, "reads_pre_nonfinite_total": sum(rnf.values()),
+            "writes_post_nonfinite": wnf, "writes_post_nonfinite_total": sum(wnf.values()), "writes_post_nonfinite_target": wnf_t,
+            "target_post": tp, "missing_arrays": missing, "unsupported": unsup,
+            "replay_attrs": [attrs.get("replay"), attrs.get("replay_file")]}
+
+
+def fill_replay_verdict(a, S):
+    """合否 (plan §5.1 #2 の追加の受入れ試験 (5)。判定は v2 のまま): 試験不成立 = ダンプの /pre が再生ファイルと違う (入力不一致)・
+    読む入力の pre / 書き込み先の post に非有限が残る・v2 INVALID・腕内の非再現 (同じ版どうしの v2 DIFFERENT)・新版が床事象の
+    カウンタ有効の腕になっていない (step の eos 行が 1 行でない)・比較の組が 5 でない。FAIL = 旧版と新版の間で再現する差
+    (異なる版どうしの v2 DIFFERENT)。PASS = 5 組とも v2 IDENTICAL (差分 0 バイト)。床事象の件数は情報 (判定に入れない)。"""
+    inval, fail, notes = [], [], []
+    for name, c in S["replay_checks"].items():
+        if not c["pre_equals_replay"]:
+            inval.append(f"{name}: ダンプの /pre が再生ファイルと違う {c['pre_mismatch_arrays'][:6]} (入力不一致)")
+        if c["reads_pre_nonfinite_total"]:
+            inval.append(f"{name}: 読む入力の pre に非有限 {c['reads_pre_nonfinite']}")
+        if c["writes_post_nonfinite_total"]:
+            inval.append(f"{name}: 書き込み先の post に非有限 {c['writes_post_nonfinite']} (対象 ghost {c['writes_post_nonfinite_target']})")
+        if c["missing_arrays"] or c["unsupported"]:
+            inval.append(f"{name}: 読み書きの集合の配列が無い {c['missing_arrays']} / 未対応の経路 {c['unsupported']}")
+        notes.append(f"{name}: 対象 ghost の post {c['target_post']}")
+    if len(S["compare"]) != 5:
+        inval.append(f"比較の組が {len(S['compare'])} (5 組のはず)")
+    for k, c in S["compare"].items():
+        same_arm = k.split("_")[0] == k.split("_vs_")[1].split("_")[0]
+        if c["verdict_v2"] == "INVALID":
+            inval.append(f"{k}: v2 INVALID {(c['invalid_v2'] or [''])[0][:120]}")
+        elif c["verdict_v2"] == "DIFFERENT":
+            (inval if same_arm else fail).append(f"{k}: v2 DIFFERENT {c['different']} ({'腕内の非再現' if same_arm else '旧版と新版の出力差'})")
+        elif c["verdict_v2"] != "IDENTICAL":
+            inval.append(f"{k}: v2 の判定が {c['verdict_v2']}")
+        else:
+            notes.append(f"{k}: v2 IDENTICAL、EOS の配列の post 差分 {c['eos_args_post_diff_bytes']} / {c['eos_args_bytes']} バイト・"
+                         f"pre 差分 {c['eos_args_pre_diff_bytes']}")
+    for name in ("new_r1", "new_r2"):
+        rows = [r for r in S["runs"][name]["floor_rows"] if r["kind"] == "eos" and int(r["step"]) == a.step]
+        if len(rows) != 1:
+            inval.append(f"{name}: floor_events.csv に step {a.step} の eos 行が 1 行でない ({len(rows)} 行): 新版がカウンタ有効の腕になっていない")
+            continue
+        r = rows[0]
+        notes.append(f"{name}: 情報 eos 行 step {r['step']} inner {r['inner']} q_index {r['q_index']}: nT_real {r['nT_real']} ids_T '{r['ids_T']}' "
+                     f"nRho_real {r['nRho_real']} nP_real {r['nP_real']} n_near_real {r['n_near_real']} overflow {r['overflow']}")
+    for name in ("old_r1", "old_r2"):
+        if S["runs"][name]["floor_rows"]:
+            notes.append(f"{name}: 旧版に floor_events.csv の行がある (想定外: 旧版はカウンタを持たない)")
+    verdict = "試験不成立" if inval else ("FAIL" if fail else "PASS")
+    return verdict, inval + fail + notes
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -496,13 +945,13 @@ def main():
         r.add_argument("--old", required=True)
         r.add_argument("--new", required=True)
         r.add_argument("--step", type=int, default=1)
+        r.add_argument("--env", action="append", help="KEY=VALUE (両版に同じ値を渡す。例 FORGE_CUDA_BLOCKSIZE=128)")
         if name == "run":
             r.add_argument("--tools", required=True, help="compare_eos_dump.py のある tools ディレクトリ")
-            r.add_argument("--env", action="append", help="KEY=VALUE (両版に同じ値を渡す。例 FORGE_CUDA_BLOCKSIZE=128)")
             r.add_argument("--keep-dumps", action="store_true")
-            r.add_argument("--replay", default=None, help="再生ファイル (make-replay の出力)。両版に FORGE_EOS_REPLAY_FILE で渡す")
-            r.add_argument("--node", type=int, default=None, help="再生で roe を変えた節点")
-            r.add_argument("--expect-floor", type=int, choices=(0, 1), default=None, help="新版の対象 EOS 行で期待する温度床の件数")
+            r.add_argument("--replay", default=None, help="再生ファイル (make-replay / make-replay-fill-ghosts の出力)。両版に FORGE_EOS_REPLAY_FILE で渡す")
+            r.add_argument("--node", type=int, default=None, help="再生で roe を変えた節点 (make-replay のみ)")
+            r.add_argument("--expect-floor", type=int, choices=(0, 1), default=None, help="新版の対象 EOS 行で期待する温度床の件数 (make-replay のみ)")
         else:
             r.add_argument("--out", required=True)
     m = sub.add_parser("make-replay")
@@ -511,10 +960,23 @@ def main():
     m.add_argument("--node", type=int, required=True)
     m.add_argument("--de", type=float, required=True, help="e_in − e_mix(T_min) [J/kg] (負 = 床の下)")
     m.add_argument("--out", required=True)
+    g = sub.add_parser("make-replay-fill-ghosts")
+    g.add_argument("--base", required=True, help="base の出力 (新版・再生なしの step の /pre)")
+    g.add_argument("--input", required=True, help="格子 (BCONDS・PLANES) を読む入力ディレクトリ (solverConfig.yaml の meshFileName)")
+    g.add_argument("--tools", required=True, help="compare_eos_dump.py のある tools ディレクトリ (EOS が読む集合 eos_sets を使う)")
+    g.add_argument("--out", required=True)
+    g.add_argument("--bcond-kind", default="farfield", help="対象の境界の bcondKind (既定 farfield。同じ種類が複数あれば --pid が要る)")
+    g.add_argument("--pid", default=None, help="対象の境界の BCONDS の名前 (physID)。指定すると bcondKind も照合する")
+    g.add_argument("--forge-log", default=None, help="base の新版の forge_run.log (readMesh が回った境界条件の順・面の範囲を照合する)")
     a = ap.parse_args()
-    if a.cmd == "run" and a.replay and (a.node is None or a.expect_floor is None):
-        ap.error("--replay には --node と --expect-floor が要る")
-    return {"prepare": prepare, "run": run, "base": base, "make-replay": make_replay}[a.cmd](a)
+    if a.cmd == "run" and a.replay:
+        if replay_kind(a.replay) == "fill_ghosts":
+            if a.node is not None or a.expect_floor is not None:
+                ap.error("make-replay-fill-ghosts の再生には --node・--expect-floor を付けない (判定は v2 の比較と /pre の一致)")
+        elif a.node is None or a.expect_floor is None:
+            ap.error("--replay には --node と --expect-floor が要る")
+    return {"prepare": prepare, "run": run, "base": base, "make-replay": make_replay,
+            "make-replay-fill-ghosts": make_replay_fill_ghosts}[a.cmd](a)
 
 
 if __name__ == "__main__":

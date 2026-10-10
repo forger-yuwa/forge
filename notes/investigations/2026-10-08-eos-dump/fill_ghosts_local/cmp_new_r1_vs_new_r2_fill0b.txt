@@ -1,0 +1,46 @@
+A: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/wfill0b/new_r1/eos_dump.h5
+B: /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/wfill0b/new_r2/eos_dump.h5
+step 1  nCells 165327  nCells_all 231273  thermalMethod 2  nSpeciesRegistered 2  thermoFloat 1  discretization node  replay /tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/replay_fill0b.h5
+配列 223 本 (判定する EOS の配列 21 本・その他 202 本) × {pre, post}、物性 DB ['db/species_thermo', 'db/species_thermo_f']
+v2 の分岐 ['tp_1ph']  読む ['ro', 'roUx', 'roUy', 'roUz', 'roe', 'roK', 'roOmega', 'roY0', 'roY1', 'T']
+  書く ['Ux', 'Uy', 'Uz', 'ro', 'k', 'omega', 'T', 'P', 'roe', 'Ht', 'sonic', 'gamma', 'cp', 'Rmix']
+EOS の配列 (pre 差分バイト / post 差分バイト / 非有限 A:pre,A:post,B:pre,B:post / v2 の分類):
+  ro                  0          0   0,0,0,0   読む・書く
+  roUx                0          0   0,0,0,0   読む
+  roUy                0          0   0,0,0,0   読む
+  roUz                0          0   0,0,0,0   読む
+  roe                 0          0   0,0,0,0   読む・書く
+  roK                 0          0   0,0,0,0   読む
+  roOmega             0          0   0,0,0,0   読む
+  P                   0          0   27383,0,27383,0   書く
+  Ht                  0          0   27383,0,27383,0   書く
+  sonic               0          0   27383,0,27383,0   書く
+  k                   0          0   0,0,0,0   書く
+  omega               0          0   0,0,0,0   書く
+  T                   0          0   0,0,0,0   読む・書く
+  Ux                  0          0   0,0,0,0   書く
+  Uy                  0          0   0,0,0,0   書く
+  Uz                  0          0   0,0,0,0   書く
+  gamma               0          0   65946,0,65946,0   書く
+  cp                  0          0   65946,0,65946,0   書く
+  Rmix                0          0   0,0,0,0   書く
+  roY0                0          0   0,0,0,0   読む
+  roY1                0          0   0,0,0,0   読む
+合計: EOS の配列の post 差分バイト 0 / 19426932 バイト、pre 差分バイト 0; その他の配列 pre 差分 0・post 差分 0 (判定外、EOS が読まない)
+その他の配列で A/B の pre が異なるもの: なし
+その他の配列で非有限を含むもの: ['roeM', 'roeN']
+A: EOS の前後で変わった配列 ['Ht', 'P', 'Rmix', 'T', 'Ux', 'Uy', 'cp', 'gamma', 'k', 'omega', 'sonic']
+B: EOS の前後で変わった配列 ['Ht', 'P', 'Rmix', 'T', 'Ux', 'Uy', 'cp', 'gamma', 'k', 'omega', 'sonic']
+v1 の書き込み先の列挙: ['ro', 'roe', 'Ux', 'Uy', 'Uz', 'T', 'P', 'Ht', 'sonic', 'k', 'omega', 'gamma', 'cp', 'Rmix']
+不成立 (v1): EOS の引数配列 Ht に非有限 {'A:pre': 27383, 'A:post': 0, 'B:pre': 27383, 'B:post': 0}
+不成立 (v1): EOS の引数配列 P に非有限 {'A:pre': 27383, 'A:post': 0, 'B:pre': 27383, 'B:post': 0}
+不成立 (v1): EOS の引数配列 cp に非有限 {'A:pre': 65946, 'A:post': 0, 'B:pre': 65946, 'B:post': 0}
+不成立 (v1): EOS の引数配列 gamma に非有限 {'A:pre': 65946, 'A:post': 0, 'B:pre': 65946, 'B:post': 0}
+不成立 (v1): EOS の引数配列 sonic に非有限 {'A:pre': 27383, 'A:post': 0, 'B:pre': 27383, 'B:post': 0}
+情報 (v2): 書き込み専用 Ht の pre に非有限 A 27383・B 27383 (判定外。無害の認定ではない)
+情報 (v2): 書き込み専用 P の pre に非有限 A 27383・B 27383 (判定外。無害の認定ではない)
+情報 (v2): 書き込み専用 cp の pre に非有限 A 65946・B 65946 (判定外。無害の認定ではない)
+情報 (v2): 書き込み専用 gamma の pre に非有限 A 65946・B 65946 (判定外。無害の認定ではない)
+情報 (v2): 書き込み専用 sonic の pre に非有限 A 27383・B 27383 (判定外。無害の認定ではない)
+VERDICT_v1: INVALID  (旧規則: EOS の引数配列の pre・post 全部に有限性。記録用)
+VERDICT_v2: IDENTICAL  (改訂規則: 有限性は読む入力の pre と書き込み先の post。採用中・終了コード)

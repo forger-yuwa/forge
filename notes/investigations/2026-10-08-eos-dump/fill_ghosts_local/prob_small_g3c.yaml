@@ -1,0 +1,179 @@
+dv:
+  L_cowl: 1.2
+  M_c: 2.9
+  f: 0.45
+  theta_c0_deg: 5.0
+  theta_r0_deg: 15.0
+evaluate:
+  cfl_main: 0.25
+  floor_events: 1
+  floor_events_window_steps: 10000
+  limiter_ref:
+    a: 368.6412254
+    length: 2.136214053
+    p: 4411.497933
+    ro: 0.04544068206
+  model: sst
+  nStepOuter: 4000
+  outStepInterval: 500
+  p_min: 20.0
+  side_far_kind: farfield
+  top_out_kind: slip
+gas:
+  cp: 1718.5
+  gamma: 1.247
+  model: frozen_tp
+  thermo_href_temp: 298.15
+  transport:
+    AR: cea
+    CO: cea
+    CO2: cea
+    H: cea
+    H2: cea
+    H2O: custom:h2o_iapws_cea_v1
+    N2: cea
+    'NO': cea
+    O: cea
+    O2: cea
+    OH: cea
+geometry:
+  L_ramp_max: 20.0
+  dx_moc: 0.002
+  dx_moc_probe: 0.004
+  nj_moc: 301
+  nj_moc_probe: 151
+  x_max_kernel: 20.0
+mesh:
+  L_up: 0.5
+  ar_max: 5000
+  bot_depth: 3.0
+  cowl_thickness: 0.005
+  discretization: node
+  ext_top: 1
+  first_top_frac: 0.004
+  first_wall_frac: 0.004
+  ni_noz: 160
+  ni_plume: 180
+  ni_up: 16
+  nj_bot: 51
+  nj_ext_top: 9
+  nj_top: 81
+  nj_wake: 9
+  ramp_fillet: 0.1
+  top_depth: 2.0
+  vehicle_clearance: 0.06
+  vehicle_taper: 0.35
+  x_out_extra: 2.0
+mesh3d:
+  L_sw: 0.8
+  L_sw_exact: true
+  W: 2.0
+  Z_ext: 1.5
+  first_wake_frac: 0.004
+  first_wall_frac: 0.00256
+  first_z_frac: 0.02
+  ni_noz: 30
+  ni_plume: 153
+  ni_up: 10
+  nj_bot: 55
+  nj_top: 73
+  nj_vside: 5
+  nz_in: 4
+  nz_out: 3
+  te_wake_blend_H: 1.0
+name: sern_3d_prod_3op_wallres_lswx08_tewake_g3_B10
+opt:
+  cm_min: -7.0
+  mid_steps: 2000
+  soft_cfl: 0.2
+  soft_steps: 2000
+  warm_adapt_steps: 500
+  warm_lam_cfl: 0.2
+  warm_lam_steps: 2000
+spec:
+  H_m: 0.1
+  external:
+    M_inf: 6.0
+    T_inf: 220.8
+    p_inf: 2851.0
+  inflow:
+    M_in: 1.6308
+    T_in: 2328.0
+    mode: supersonic
+    p_in: 101027.0
+  moment_ref:
+  - -20.0
+  - 0.0
+  operating_points:
+  - external:
+      M_inf: 6.0
+      T_inf: 220.8
+      p_inf: 2851.0
+    gas:
+      composition:
+        Ar: 0.00767
+        CO: 5.0e-05
+        CO2: 0.00021
+        H: 0.00125
+        H2: 0.01251
+        H2O: 0.32695
+        N2: 0.6389
+        'NO': 0.00206
+        O: 0.00037
+        O2: 0.00398
+        OH: 0.00604
+      cp: 1718.5
+      gamma: 1.247
+    inflow:
+      M_in: 1.6308
+      T_in: 2328.0
+      p_in: 101027.0
+    name: m6_on
+    weight: 1.0
+  - external:
+      M_inf: 10.0
+      T_inf: 227.5
+      p_inf: 1026.0
+    gas:
+      composition:
+        Ar: 0.00659
+        CO: 0.00016
+        CO2: 6.0e-05
+        H: 0.0032
+        H2: 0.14592
+        H2O: 0.2937
+        N2: 0.54922
+        'NO': 8.0e-05
+        O: 1.0e-05
+        O2: 1.0e-05
+        OH: 0.00104
+      cp: 1925.0
+      gamma: 1.2549
+    inflow:
+      M_in: 2.7171
+      T_in: 2222.0
+      p_in: 57935.0
+    name: m10_on
+    weight: 1.0
+  - external:
+      M_inf: 4.0
+      T_inf: 216.7
+      p_inf: 6415.0
+    gas:
+      composition:
+        Ar: 0.00936
+        CO2: 0.00032
+        N2: 0.78084
+        O2: 0.20948
+      cp: 1007.2
+      gamma: 1.3986
+    inflow:
+      M_in: 2.9101
+      T_in: 338.0
+      p_in: 17888.0
+    name: m4_off
+    weight: 1.0
+  wall_thermal:
+    Tw: 1000.0
+    mode: isothermal
+type: sern_2d

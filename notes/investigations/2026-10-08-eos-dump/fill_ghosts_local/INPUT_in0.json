@@ -1,0 +1,19 @@
+{
+ "src_run": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/seed",
+ "res": "res_0.h5",
+ "restart_field": "VERDICT: OK (9 \u91cf\u3092\u79fb\u3057\u305f\u3001SRC \u3068\u30d3\u30c3\u30c8\u4e00\u81f4)",
+ "files": {
+  "MESH_QUALITY.txt": "99d5639f8ce62e904fd82a30254a2ce0a60743296f7481b5ad9f91ad55cc0548",
+  "bcondConfig.yaml": "973e2c0c4a487b81564a61cbdcbd584e1b301b6d683b78f8a523208125eedd45",
+  "cowl_contour.csv": "9463308faffa218d9a588d2e20bbba2d4a6c54d15cd9a7e1acdfb7817179890a",
+  "prepare_info.json": "4173e33776997cc6e6f4a8e1eda202f0ab0e028e73998e274825f1575e98f7eb",
+  "probe.yaml": "eab1dc9e2b6970bda23b2d7856a7ffc7cdadf4dc7109499e7d9177b06d4cc170",
+  "ramp_contour.csv": "a9f25501c90e7013de9bdfec9062bece412fb561d7fb26b2c398bc1bbf775347",
+  "resolved_species_24f33bea2e2df2f1.yaml": "122d76bc907c2387f452ae305409292e96dbac6f1905abcde45b27a3a411d4a9",
+  "resolved_species_24f33bea2e2df2f1_e892080f18669e1a.yaml": "e892080f18669e1a03d85462a6de474aebb1bf49dabf041367164cd31549b511",
+  "sern.h5": "1edf87b1a80a3d52515f6575fb4984ba7fcc3980ef5a40906e638c8347cdf56b",
+  "solverConfig.yaml": "bd93a2be413c30d9d01490e8e7ce423594f7ea3028081291a58e97200464f111",
+  "solverConfig_main.yaml": "968e803e52a3524ac839afae9dd256e7d792e17577da7be7c1e355c28dc49c7e",
+  "species_meta.yaml": "39b186df383fd3a6396f77000fdd7129878bd48670061a7916fe7601d3b7b583"
+ }
+}

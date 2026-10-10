@@ -1,0 +1,315 @@
+{
+ "kind": "fill_ghosts",
+ "base": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/base_small.h5",
+ "base_sha256": "79539dfba1126afb8bc7a5b5dbbe7f18ddfa11cc8d0845d4b53d738d41100f66",
+ "mesh": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/in/sern.h5",
+ "mesh_sha256": "a5a11758d82e2e5821401379ac41e54586f0c4662195b9d3d3294a1ed182dbe6",
+ "pid": "10",
+ "bcondKind": "farfield",
+ "n_ghost": 27383,
+ "ghost_first": 165619,
+ "ghost_end": 193002,
+ "n_owner_unique": 27383,
+ "owner_sources_agree": true,
+ "bcond_order": [
+  {
+   "name": "1",
+   "kind": "inlet_uniformVelocity",
+   "n_bplanes": 292,
+   "ghost_first": 165327,
+   "ghost_end": 165619
+  },
+  {
+   "name": "10",
+   "kind": "farfield",
+   "n_bplanes": 27383,
+   "ghost_first": 165619,
+   "ghost_end": 193002
+  },
+  {
+   "name": "11",
+   "kind": "wall_isothermal",
+   "n_bplanes": 2482,
+   "ghost_first": 193002,
+   "ghost_end": 195484
+  },
+  {
+   "name": "12",
+   "kind": "wall_isothermal",
+   "n_bplanes": 2482,
+   "ghost_first": 195484,
+   "ghost_end": 197966
+  },
+  {
+   "name": "15",
+   "kind": "wall_isothermal",
+   "n_bplanes": 676,
+   "ghost_first": 197966,
+   "ghost_end": 198642
+  },
+  {
+   "name": "17",
+   "kind": "wall_isothermal",
+   "n_bplanes": 845,
+   "ghost_first": 198642,
+   "ghost_end": 199487
+  },
+  {
+   "name": "18",
+   "kind": "wall_isothermal",
+   "n_bplanes": 20,
+   "ghost_first": 199487,
+   "ghost_end": 199507
+  },
+  {
+   "name": "2",
+   "kind": "inlet_uniformVelocity",
+   "n_bplanes": 609,
+   "ghost_first": 199507,
+   "ghost_end": 200116
+  },
+  {
+   "name": "3",
+   "kind": "outflow",
+   "n_bplanes": 834,
+   "ghost_first": 200116,
+   "ghost_end": 200950
+  },
+  {
+   "name": "4",
+   "kind": "wall_isothermal",
+   "n_bplanes": 676,
+   "ghost_first": 200950,
+   "ghost_end": 201626
+  },
+  {
+   "name": "5",
+   "kind": "wall_isothermal",
+   "n_bplanes": 180,
+   "ghost_first": 201626,
+   "ghost_end": 201806
+  },
+  {
+   "name": "6",
+   "kind": "wall_isothermal",
+   "n_bplanes": 180,
+   "ghost_first": 201806,
+   "ghost_end": 201986
+  },
+  {
+   "name": "7",
+   "kind": "outflow",
+   "n_bplanes": 1182,
+   "ghost_first": 201986,
+   "ghost_end": 203168
+  },
+  {
+   "name": "8",
+   "kind": "slip",
+   "n_bplanes": 1182,
+   "ghost_first": 203168,
+   "ghost_end": 204350
+  },
+  {
+   "name": "9",
+   "kind": "slip",
+   "n_bplanes": 26923,
+   "ghost_first": 204350,
+   "ghost_end": 231273
+  }
+ ],
+ "forge_log_check": {
+  "ok": true,
+  "log": "/tmp/claude-1000/-home-sano-work-forge/60a080db-fad5-4e19-bdaa-3590a1035176/scratchpad/fillghost/w/base_new/forge_run.log",
+  "order_log": [
+   "1",
+   "10",
+   "11",
+   "12",
+   "15",
+   "17",
+   "18",
+   "2",
+   "3",
+   "4",
+   "5",
+   "6",
+   "7",
+   "8",
+   "9"
+  ],
+  "ghost_cells_log": 65946,
+  "mismatch": []
+ },
+ "eos_branches": [
+  "tp_1ph"
+ ],
+ "fill_arrays": [
+  "ro",
+  "roUx",
+  "roUy",
+  "roUz",
+  "roe",
+  "roK",
+  "roOmega",
+  "roY0",
+  "roY1",
+  "T"
+ ],
+ "nonfinite_before": {
+  "ro": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roUx": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roUy": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roUz": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roe": {
+   "n": 27383,
+   "in_target_ghost": 27383,
+   "where": {
+    "real": 0,
+    "ghost BCONDS/10 (farfield)": 27383
+   }
+  },
+  "roK": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roOmega": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roY0": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roY1": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "T": {
+   "n": 27383,
+   "in_target_ghost": 27383,
+   "where": {
+    "real": 0,
+    "ghost BCONDS/10 (farfield)": 27383
+   }
+  }
+ },
+ "nonfinite_union": 27383,
+ "nonfinite_union_where": {
+  "real": 0,
+  "ghost BCONDS/10 (farfield)": 27383
+ },
+ "nonfinite_equals_target_ghosts": true,
+ "nonfinite_extra": 0,
+ "nonfinite_extra_where": {
+  "real": 0
+ },
+ "target_ghost_finite": 0,
+ "nonfinite_extra_first": [],
+ "target_ghost_finite_first": [],
+ "owner_nonfinite": {
+  "ro": 0,
+  "roUx": 0,
+  "roUy": 0,
+  "roUz": 0,
+  "roe": 0,
+  "roK": 0,
+  "roOmega": 0,
+  "roY0": 0,
+  "roY1": 0,
+  "T": 0
+ },
+ "neumann_evidence": {
+  "Y0": {
+   "ghost_eq_owner": 27383,
+   "control_shifted_owner": 27383,
+   "owner_distinct_values": 1,
+   "n": 27383
+  },
+  "Y1": {
+   "ghost_eq_owner": 0,
+   "control_shifted_owner": 0,
+   "owner_distinct_values": 1,
+   "n": 27383
+  },
+  "roY0": {
+   "ghost_eq_owner": 27383,
+   "control_shifted_owner": 27383,
+   "owner_distinct_values": 1,
+   "n": 27383
+  },
+  "roY1": {
+   "ghost_eq_owner": 27383,
+   "control_shifted_owner": 18449,
+   "owner_distinct_values": 597,
+   "n": 27383
+  }
+ },
+ "base_post_writes_nonfinite_where": {
+  "real": 2,
+  "ghost BCONDS/10 (farfield)": 27383
+ },
+ "base_post_writes_nonfinite_outside_target": 2,
+ "changed_elements": {
+  "T": 27383,
+  "ro": 27383,
+  "roK": 27383,
+  "roOmega": 27383,
+  "roUx": 27383,
+  "roUy": 27383,
+  "roUz": 27383,
+  "roY0": 0,
+  "roY1": 0,
+  "roe": 27383
+ },
+ "arrays_total": 223,
+ "arrays_unchanged": 213,
+ "bytes_compared": 206295516,
+ "checks": {
+  "names_attrs_db_same": true,
+  "other_arrays_bit_identical": true,
+  "fill_arrays_outside_target_bit_identical": true,
+  "target_ghost_equals_owner_bits": true,
+  "reads_finite_after_fill": true,
+  "nonfinite_equals_target_ghosts": true,
+  "owner_finite": true
+ },
+ "check_failures": [],
+ "out_sha256": "a6cc1300927240106af0d402f55d2f1f2260adf8fbb8e3fcd801d1fab9b95222"
+}
