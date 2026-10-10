@@ -1,3 +1,126 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-10-lvc75-pregate-rhs.md`)
+
+# ブリーフ: マスク 7/5 の比較 (plan time_integration-line-viscous-jacobian-faceh §6.11) の事前のゲートが `rhs_s0` の規則だけで判別不能になった
+
+諮問の目的: 事前登録した規則で判別不能 (INDETERMINATE) になったので、規則を改めて腕を回してよいかを決める前に点検を受ける (AGENTS.md のエスカレーション条件 3・4)。
+
+## 1. 観測事実
+
+- 事前のゲート `case/45.isobutane_m6_d155/lvc75_pregate.py` (commit 2a048022、運用の追記 95710032) の VERDICT は `INDETERMINATE (残差の変化か介入の不成立: 本試験へ進まない)`。台本は腕を回さずに止まった。
+  - I (入力): 74 項目、外れ 0。
+  - R (残差の不変): 9 項目、外れ 1。外れたのは `rhs_s0: マスク 5 と 7 の差 (≤ 3 × 再実行の差)` で、値は max|5 − 7| = 4.657e-10、max|7 の再実行 − 7| = 1.455e-11 (32 倍)。
+  - V (介入): 5 項目、外れ 0。D と K の行 0〜3 はビット一致 (7 の再実行どうしもビット一致)。K の行 4 の変化は、1200 面すべてで独立に計算した熱伝導の項と許容の 0.033 倍以内で一致した (解像 613 面、接続の不整合 0)。
+- 全節点の残差の場の R (倍精度、どれも合格):
+
+  | 場 | max|5 − 7| | max|7 の再実行 − 7| |
+  | --- | --- | --- |
+  | `res_ro` | 1.77e-16 | 1.54e-16 |
+  | `res_roUx` | 3.52e-12 | 3.52e-12 |
+  | `res_roUy` | 1.82e-12 | 1.82e-12 |
+  | `res_roe` | 2.302e-10 | 2.310e-10 |
+  | `res_roK` | 1.11e-13 | 1.13e-13 |
+  | `res_roOmega` | 9.54e-7 | 9.54e-7 |
+  | `res_roY0` | 1.58e-16 | 1.11e-16 |
+  | `res_roY1` | 1.374e-17 | 1.373e-17 |
+
+- 外れの中身 (ゲートの後に確かめた。スクリプトはこのブリーフの §4):
+  - `rhs_s0` は 3 本とも、出力 step 1 の残差 (`res_ro`・`res_roUx`・`res_roUy`・`res_roe`) を float に丸めた値と、ライン上の 605 節点・全行で完全に一致した (拘束の行は 0、行 3 は 0)。
+  - 5 − 7: 差のある要素は 19。最大の絶対差 4.657e-10 は、節点 264146 の行 4 (値 4.164e-3) で、float の 1 ulp。要素ごとの差を ulp で数えた最大は 4 ulp。
+  - 7 の再実行 − 7: 差のある要素は 25。最大の絶対差 1.455e-11 は、節点 4095 の行 2 (値 2.095e-4) で、1 ulp。ulp で数えた最大は 4 ulp。
+- §6.9 の同じ規則では、`rhs_s0` は 1.46e-11 / 2.91e-11 で合格していた。
+
+## 2. 期待値と出典
+
+- §6.11 の R: 「7 の再実行どうしがビット一致なら 5 もビット一致、そうでなければ max|5 − 7| ≤ 3 × max|7 の再実行 − 7|。対象は出発の状態の残差 (全節点の 6〜8 場) と `rhs_s0`」。
+- §6.11: 「規則・閾値を書き出しを見た後に変えない (コードの不具合で評価できなかったときは、規則を変えずに直したことを書く)」。
+
+## 3. 再現条件
+
+- AWS `~/forge-faceh-audit/case/45.isobutane_m6_d155/` の `run_0574_lvc75_m7_dump`・`run_0575_lvc75_m5_dump`・`run_0576_lvc75_m7_dump2`。
+- 段 ③ の FP64 (sha256 129de3f4…)、`run_0183` の res_100000、値 3・キー 5・方向別・cfl 4、1 step。
+
+## 4. 実施済みの操作と結果
+
+- 上の外れの中身を調べたスクリプト (`notes/reviews/briefs/2026-10-10-lvc75-pregate-rhs-diag.py`、AWS 上の case/45 で実行):
+  - 3 本の `rhs_s0` の差を要素ごとに float の ulp で数えた。
+  - `res_1.h5` の残差を float に丸め、拘束の行を 0 にした値と `rhs_s0` を照合した。
+- メモリの既知の罠: 「新旧差 ≤ 旧の再実行の範囲」の規則は、同じ分布でも大半が外れる (forge は同じ入力でも再実行で揺れる)。今回の `rhs_s0` は float に丸めた値で、最大の絶対差が「どの大きさの要素で丸めが反転したか」で決まる。
+
+## 5. 仮説 (呼び出し側のもので、確かめていない)
+
+- `rhs_s0` の外れは、倍精度の残差の揺れ (再実行と同じ大きさ) が float の丸めを 1〜4 ulp 反転させたもので、マスクの影響ではない。根拠は次の 2 つ: `rhs_s0` = float(残差) が 3 本とも完全に成り立つこと、倍精度の残差の場が R に合格していること。
+- 規則の改め案 (§6.11 に日付つきで書き、事前のゲートを同じ書き出しで回し直してから腕へ):
+  - (i) 各書き出しで `rhs_s0` = float(出力 step 1 の残差) が全要素で完全に成り立つことを要求する (構造の照合。成り立てば、`rhs_s0` は倍精度の残差の場の R に含まれる情報しか持たない)。
+  - (ii) `rhs_s0` の 5 − 7 の差は、float の ulp で数えた要素ごとの最大が 7 の再実行の最大の 3 倍以内、差のある要素の数が再実行の 3 倍以内であること。
+  - 残差の場の規則 (倍精度) は変えない。
+
+## 6. 聞きたいこと
+
+1. この外れを「規則の弱さ (丸めの反転の大きさで決まる最大値の比較)」とみて規則を改めるのは妥当か。それとも登録どおり判別不能として止め、別の設計で登録し直すべきか。
+2. 改め案の (i)・(ii) は妥当か。(ii) は要るか (要るなら閾値は)。ほかに足すべき照合はあるか。
+3. 改めた規則で同じ書き出しに対してゲートを回し直し、PASS なら腕へ進む手順でよいか。書き出しから取り直すべきか。
+
+## 読んでよいファイル
+
+- `plans/active/time_integration-line-viscous-jacobian-faceh.md` (§6.9〜§6.11、§6.1)
+- `case/45.isobutane_m6_d155/lvc75_pregate.py`・`lvc75.sh`・`lvc75_judge.py`
+- `notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md`
+
+## 関連 plan 全文 (`plans/active/time_integration-line-viscous-jacobian-faceh.md`)
+
+```markdown
 # 熱伝導の近傍 K を入れたライン粘性 Jacobian の破綻は、面エンタルピーの float の評価が要るか (粘性ヤコビアン plan の再開)
 
 ## メタ
@@ -62,7 +185,7 @@
 | 4 | U-J の列ごと・壁拘束の照合 (**完了 2026-10-10、§6.3〜§6.6**: §6.3 は FAIL (原文保存)、§6.5 の多倍長の参照で PASS・丸めの仮説を支持。判断: codex 諮問 — 限定付きの PASS、第 2 仮説はこの範囲で退く) | 諮問の判別 A/B: 同じ状態・同じ薄層の流束モデルで、A = 製品の共通関数 `accumulate_thinlayer_visc_jacobian` の D/K、B = 独立な流束の実装の中心差分。host 上の 200 組と短いライン。列ごとに正規化して double で相対誤差 ≤ 1e-6、差分幅 h と h/2 の再現を確かめ、零列は事前に固定した無次元の絶対誤差、解像できない列は判別不能。両向きの面・異なる密度・高速流・速度固定・温度固定を含め、壁拘束は自由度を消去した系でも照合。零空間 ≤ 1e-12・壁温拘束 ≤ 1e-12・短いラインの解の差 ≤ 1e-10 を維持。触るファイルは `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (試験だけ、ソルバは変えない)。全列で整合 → 第 1 仮説 (実残差・境界・分離更新との不整合) の確認へ、再現する不一致 → 第 2 仮説 (小さい列・面の向き・壁拘束の実装の不整合) を優先 | F |
 | 5 | 製品の経路の照合 (**ユーザの選択 2026-10-10「1」、§6.7 に事前登録**。**完了 2026-10-10 §6.8: 登録の VERDICT は FAIL (段 C、対流の K の相殺)・T 保留、A で壁際の LHS の β・κ が float の座標で最大 10.8 % ずれる**) | 諮問 (2026-10-10 uj-mp-result) の判別 A/B: 同じ凍結状態から、A = CUDA の実際の組立、B = 元の入力から host で独立に組む参照。`run_0183` の res_100000 から値 3・マスク 7・ISP 0 の新しい診断の run で 1 step (最初の factor と 5 sweep)、既存の 5 本のラインを全節点・両向きで採取 (壁・軸・内部を含む)。書き出しに足すもの (cuda_forge の出力だけの変更、既定はビット不変): 面の番号・両端・`line_prev/next`・生の座標・面積ベクトル・`fx`・両端の速度・`vis_lam`・`vis_turb`・`thermCond`・`Prt`・実効のフラグと精度・実際に渡した β・κ・法線・f_i・状態・薄層の各寄与・拘束の前後の D/K。照合は二段: 元の入力から係数を独立に計算 (誤った β を共有して合格するのを防ぐ) → 製品の `ST = float`・加算の順序・格納の変換を再現して面の寄与から最終の行列まで。接続・格納先・拘束のフラグは完全一致、数値は列ごとに尺度化し float の丸めを含む許容を採取の前に登録。注目点: ISP 0 では `dcc` を float にした座標の差で作る (`timeIntegration_d.cu` 952 行付近) が、残差は double の座標 (FP64 ビルド)。冷却壁の第一層は float32 の座標で数 ulp。整合すれば第 2 段 (実残差の応答、9 評価・幅の再現 ≤ 1 %・ノイズ ≤ 1e-3) へ | F |
 | 6 | LHS の座標の差だけを変える A/B (§6.9、ユーザ 2026-10-10「すすめてもらって OK」。**完了 2026-10-10 §6.10: 事前のゲート PASS、本判定は棄却 (4 本とも DIVERGED)**。判断: 2026-10-10 codex 諮問 — 棄却を「この修復だけでは回避できない」に限って採用) | 元のセッションの段 ② (float の座標の差) と段 ③ (double の座標の差 ge_x) の FP64 のバイナリで、値 3・マスク 7 を各 2 本・最大 2000 step。先に 1 step の書き出し 3 本 (旧・新・旧の再実行) と事前のゲート `lvcgeom_pregate.py` (入力の一致・残差の不変・係数の水準での介入の成立、plan-5 レビューの採用) を回し、PASS のときだけ腕へ。台本 `lvcgeom.sh`、本判定 `lvcgeom_judge.py`。合格条件: 事前のゲートが PASS、本判定のゲートが全部通る、§6.9 の分岐で判定 | F |
-| 7 | マスク 7/5 の比較 (§6.10 の次の一手、ユーザ 2026-10-10「いいよ」、**§6.11 に事前登録**。1 回目の事前のゲートは `rhs_s0` の規則で判別不能、§6.12 で新しく登録し直した) | 段 ③ の FP64 (129de3f4…)・`run_0183` の res_100000・値 3・キー 5・方向別・cfl 4 で、`FORGE_LVC_TERMS` 7 と 5 だけを変え、各 2 本・最大 2000 step。事前のゲート (7・5・7 の再実行の 1 step の書き出し: 入力の一致・残差の不変・K の変化が自由なエネルギー行の熱伝導の項だけで κ∂T_j/∂Q_j と一致) を PASS してから腕へ。§6.11 に事前登録し、codex plan 段を通してから回す | F |
+| 7 | マスク 7/5 の比較 (§6.10 の次の一手、ユーザ 2026-10-10「いいよ」、**§6.11 に事前登録**) | 段 ③ の FP64 (129de3f4…)・`run_0183` の res_100000・値 3・キー 5・方向別・cfl 4 で、`FORGE_LVC_TERMS` 7 と 5 だけを変え、各 2 本・最大 2000 step。事前のゲート (7・5・7 の再実行の 1 step の書き出し: 入力の一致・残差の不変・K の変化が自由なエネルギー行の熱伝導の項だけで κ∂T_j/∂Q_j と一致) を PASS してから腕へ。§6.11 に事前登録し、codex plan 段を通してから回す | F |
 | 8 | §6.8 の未解決の処置 | 段 C の不一致 (対流の K の相殺)・D の判別不能 3 件・対照 T の保留 (同じソースの監査のビルドと通常のビルドで D が 1 ulp 違う)。§6.9 は係数の変更の成立を示すだけで、これらを解消していない。閉じる前に残すか後継に移すかを決める | F |
 | 9 | 実残差・更新の写像との整合 | 共通関数は実残差の厳密な微分ではない (`block_dplur_jacobian_d.cuh` 94 行付近)。#7 で熱伝導の K なしでも壊れたら、実残差の微小応答と有限の補正の応答を同じ評価の経路で測る (親 plan §6.16 の続き) | F |
 
@@ -435,41 +558,6 @@
   判定の規則は変えていない。§6.7・§6.9 の判定済みの証拠 (`run_0550`〜`0552`・`run_0560`〜`0566`) は手元の `~/forge-evidence/2026-10-10-faceh/` へ移し (532 ファイルの sha256 が AWS と一致)、AWS からは消した。
   `run_0550` の `linedump/` (このゲートが読む) だけは AWS に残した。`nozzle.h5` の複製は運ばず、sha を `nozzle_copies_sha.tsv` に残した (格子は `run_0183` と同じ、`MESH_SHA`)。記録は AWS の `_disk_cleanup_2026-10-10_faceh.tsv`。
 
-### 6.12 §6.11 の事前のゲートの 1 回目 (判別不能) と、新しい登録 (2026-10-10、codex 諮問 [記録](../../notes/reviews/2026-10-10-lvc75-pregate-rhs-diagnose.md))
-
-- **1 回目の結果 (保存)**: `run_0574_lvc75_m7_dump`・`run_0575_lvc75_m5_dump`・`run_0576_lvc75_m7_dump2` (AWS `~/forge-faceh-audit/case/45.isobutane_m6_d155/`)。
-  VERDICT は `INDETERMINATE (残差の変化か介入の不成立: 本試験へ進まない)` で、腕は回していない。
-  記録は `case/45.isobutane_m6_d155/_band_ab/cold_pair/lvc75_pregate_r1.json` (AWS では `lvc75_pregate_r1.stdout`・`lvc75_r1.log` も)。
-  - I 74・V 5 項目は外れ 0。D と K の行 0〜3 は 7 と 5 でビット一致した。K の行 4 の変化は 1200 面すべてで熱伝導の項と許容の 0.033 倍以内で一致した (解像 613 面)。
-  - R は 9 項目のうち `rhs_s0` だけが外れた。max|5 − 7| = 4.657e-10、max|7 の再実行 − 7| = 1.455e-11 で、比は 32 倍。全節点の倍精度の残差の場 8 つは合格した。
-  - ゲートの後に調べたこと (`notes/reviews/briefs/2026-10-10-lvc75-pregate-rhs-diag.py`):
-    - 3 本とも `rhs_s0` = 拘束の処理をした float(出力 step 1 の残差) が、行 0・1・2・4 で完全に成り立った (行 3 は 0)。
-    - 5 − 7 の差は 19 要素で最大 4 ulp。最大の絶対差は、節点 264146 の行 4 (値 4.164e-3) の 1 ulp。
-    - 7 の再実行 − 7 の差は 25 要素で最大 4 ulp。最大の絶対差は、節点 4095 の行 2 (値 2.095e-4) の 1 ulp。
-- **諮問の採否** (全件採用):
-  - (M) 旧の判定を改めた規則で合格に置き換えることはしない。1 回目の INDETERMINATE は実装の不具合でなく登録した規則どおりの結果として残し、新しい登録で構造の照合を入れる。
-  - (M) 構造の照合「`rhs_s0` = 拘束の処理をした float(残差)」を、行 3 (`res_roUz`) を含めて全 5 行で必須にする。
-    ただし、成り立っても「マスクの影響ではない」とまでは言わない (残差自体のマスク依存を否定しない)。結論は「指定した許容内」に限る。
-  - (M) ulp の最大・差のある要素の数を「再実行の 3 倍以内」とする案は採らない。再実行の対照が 1 組で閾値の裏付けがなく、どちらも丸めの境界をまたいだ要素の位置で決まるため。記録だけにする。
-  - (m) 「全行を照合済み」は行 0・1・2・4 だけだったので、行 3 は `res_roUz` を出力に足して照合する。欠けを 0 として通さない。
-  - 第 1 仮説 (中): `rhs_s0` の外れは、倍精度の残差の微小な差が、違う大きさの要素で float の丸めの境界をまたいだため。旧の規則がこの理由で外れうることは、codex が人工入力で再現した。実 run の差の原因の再現ではない。
-  - 第 2 仮説 (低・未確認): マスクに依存する微小な残差の差があり、全節点の最大値の比較では隠れている。構造の照合だけでは除外できない。
-- **新しい登録 (2 回目、書き出しを新しい run で一度だけ取り直す。PASS が出るまで繰り返さない)**:
-  - 書き出し: `run_0577_lvc75_m7_dump_r2`・`run_0578_lvc75_m5_dump_r2`・`run_0579_lvc75_m7_dump2_r2`。出力の残差の場に `res_roUz` を足す。それ以外は §6.11 と同じ。
-  - 事前のゲート `lvc75_pregate.py` (改訂版) の項目:
-    - **I**: §6.11 と同じ。
-    - **R**: 全節点の倍精度の残差の場 (`res_roUz` を足した 7〜9 場) に §6.11 と同じ規則。
-    - **S (新)**: 3 本それぞれで、`rhs_s0` (605 節点 × 5 行) = 拘束の処理をした float(出力 step 1 の残差) が完全に一致すること。拘束の処理は、壁 → 行 1〜3 を 0、軸 → 行 2 を 0、等温壁 → 行 4 を 0。不一致 0 件を要求し、残差・変換後の値が非有限なら INVALID。
-    - **V**: §6.11 と同じ。
-  - `rhs_s0` の 5 − 7・再実行 − 7 の差 (差のある要素の数・ulp の最大・絶対値の最大) は記録だけにする。
-  - 分岐:
-    - I・R・S・V がすべて合格 → 採取の範囲で RHS に追加の不整合は無いとみて、腕 (`run_0570`〜`0573`、§6.11 のまま) へ進む。
-    - S が外れる → 「丸めだけ」という第 1 仮説を棄却し、残差の採取の時点・拘束・転送を調べる (腕は回さない)。
-    - R だけが外れる → 残差の不変を確かめられないので止める。
-  - 本判定 `lvc75_judge.py` と台本の `--verify` は、2 回目の書き出しと記録に結び付ける。
-  - 改訂した判定器を 1 回目の書き出しで回した確認 (行 3 を除く・出力は一時ファイル、旧の JSON は上書きしていない): I 74・R 8・S 3・V 5 項目で外れ 0。
-    `rhs_s0` の記録は 5 − 7 が 19 要素・4 ulp、再実行 − 7 が 25 要素・4 ulp。これは判定器の動作の確認であって、新しい事前のゲートの合格ではない。
-
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -486,7 +574,6 @@
 | plan (§6.9 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-5.md) | GO-with-changes, C0/M3/m1 | 全件採用 (段 ②・段 ③ のバイナリの組は維持): M1 `run_0419` の記述を「段 ③ の中の旧式・新式の比較」に訂正し、今回と同じ凍結入力での残差の不変 (旧の再実行で揺れを測り、ビット一致か 3 倍以内) を事前のゲートに、M2 介入の成立を K の差から係数の水準へ (新の β・κ が double の参照と ≤ 1e-5、K・D の変化が係数の変更の再現と ≤ 64 ulp、旧の式の再計算で式自体を検証)、K の差は補助の記録に、M3 書き出しにも共通の入力のゲート (設定・格子・出発の場・形・5 節点・有限・正値、状態・dt・フラグ・出力 step 0 の全場のビット一致)、m4 事前のゲートを腕の前に回し PASS のときだけ腕へ、INVALID と判別不能を分ける。実装は `lvcgeom_pregate.py`・`lvcgeom.sh`・`lvcgeom_judge.py` |
 | 諮問 (§6.9 の結果) | 2026-10-10 | [2026-10-10-lvcgeom-result-diagnose.md](../../notes/reviews/2026-10-10-lvcgeom-result-diagnose.md) | 棄却は「この修復だけでは十分でない」に限って採用、Major 5 (「精度は主因でない」は却下、1331 節点 = 1 列は要再検証、step 0 の D/K からの増幅評価は不可、拘束 × dt の 2×2 は不可、§6.8・§6.9 で組立・精度を除外済みとしない) | 全件採用: §6.10 に限定した主張を記録、非有限の節点を変数別・列別に再抽出して「隣り合う 11 列」と訂正 (ブリーフの誤り)、案 (ii)(iv) を採らない理由を記録、§5.1 に #7 (マスク 7/5 の比較、ユーザの判断待ち)・#8 (§6.8 の未解決)・#9 (実残差との整合) を足した |
 | plan (§6.11 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md) | GO-with-changes, C0/M3/m0 | 全件採用 (§6.11 に記録、人工入力で確認): M1 非有限の参照値・残差・比を即 INVALID に、最終の判定で I も必須、M2 V(c) を期待の接続の全部で比べ、接続・往復の面・拘束の行を先に照合、M3 証拠と設定のハッシュを記録して `--verify` で腕の起動と本判定に結び付け、腕と書き出しの設定を全項目で照合。同型の欠陥を §6.9 のゲートでも直し、既存の書き出しで結果が同じことを確認 |
-| 諮問 (§6.11 の事前のゲートの判別不能) | 2026-10-10 | [2026-10-10-lvc75-pregate-rhs-diagnose.md](../../notes/reviews/2026-10-10-lvc75-pregate-rhs-diagnose.md) | 旧の INDETERMINATE を保存し、構造の照合を入れた新しい登録で書き出しを一度だけ取り直す、Major 3・Minor 1 | 全件採用: 改めた規則で旧の判定を置き換えない、構造の照合 (`rhs_s0` = 拘束の処理をした float(残差)、行 3 を含む全行) を必須に、ulp・要素数の 3 倍の案は記録だけ、`res_roUz` を出力に足して行 3 を照合。§6.12 に記録 |
 
 ## 7. 影響範囲
 
@@ -499,3 +586,407 @@
 - 2026-10-10: 設計の諮問と codex plan 段を全件採用して in_progress (§1・§4・§6 を改訂、判定器を書き直し)。主の 4 本 (`run_0540`〜`run_0543`) を投入する。
 - 2026-10-10: 主の 4 本 (`run_0540`〜`run_0543`) を回し、VERDICT 棄却 (§6.2)。codex 諮問を全件採用し、次は U-J の列ごと・壁拘束の照合 (§5.1 #4、未着手)。
 - 2026-10-10: U-J の列ごとの照合 (§6.3 は FAIL・原文保存、§6.5 の多倍長の参照で PASS・丸めの仮説を支持、§6.6)。codex 諮問を採用し、次は製品の経路の照合 (§5.1 #5、未着手)。
+```
+
+## 参考: `case/45.isobutane_m6_d155/lvc75_pregate.py`
+
+```
+#!/usr/bin/env python3
+"""値 3 のマスク 7/5 の比較 (plan time_integration-line-viscous-jacobian-faceh §6.11) の事前のゲート。本試験 (run_0570〜0573) の前に回し、合格したときだけ本試験へ進む。
+
+同じ状態 (run_0183 の res_100000) から段 ③ の FP64 で 1 step の書き出しを 3 本読む:
+  m7  = run_0574_lvc75_m7_dump  (FORGE_LVC_TERMS=7、既定の全部入り)
+  m5  = run_0575_lvc75_m5_dump  (FORGE_LVC_TERMS=5、熱伝導の近傍 K を外す)
+  m7b = run_0576_lvc75_m7_dump2 (7 の再実行、atomicAdd による揺れを測る)
+と、§6.7 の監査の記録 (run_0550_lvcaudit、同じ状態・同じ 605 節点) の面ごとの生の入力を使い、
+  I  入力のゲート (§6.9 の lvcgeom_pregate.py と同じ項目に、マスクの表示と台本が渡した値を足したもの)
+  R  残差の不変: 出発の状態の残差 (全節点) と rhs_s0 が、7 の再実行どうしでビット一致なら 5 もビット一致、そうでなければ ≤ 3 × 再実行の差
+  V  介入の成立: (a) D と (b) K の行 0〜3 が 7 と 5 で不変 (R と同じ規則)、
+     (c) K の行 4 の変化 (7 − 5) が、生の double の入力から独立に計算した熱伝導の近傍 K の項 κ ∂T_j/∂Q_j と許容内 (要素ごとに 1e-5 × |h| + 64 ulp)、
+     (c') 変化が解像される面が 100 面以上
+を判定する。出力は _band_ab/cold_pair/lvc75_pregate.json。終了コード: 0 = 合格 (本試験へ)、1 = INVALID (入力・証拠の不備)、2 = 判別不能 (残差の変化・介入の不成立)。
+使い方: lvc75_pregate.py
+"""
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import h5py
+import numpy as np
+import yaml
+
+HERE = Path(__file__).resolve().parent
+SRC, SRC_RES, SRC_SHA16 = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5", "207d39f0e7f4aa03"
+SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"
+DUMPS = {"m7": ("run_0574_lvc75_m7_dump", SHA_NEW), "m7b": ("run_0576_lvc75_m7_dump2", SHA_NEW), "m5": ("run_0575_lvc75_m5_dump", SHA_NEW)}
+MASK = {"m7": 7, "m7b": 7, "m5": 5}
+AUDIT = "run_0550_lvcaudit"
+WANT_NODES = [1572, 4113, 7985, 198560, 264263]
+RES_FIELDS = ["res_ro", "res_roUx", "res_roUy", "res_roe", "res_roK", "res_roOmega"]
+RES_OPT = ["res_roY0", "res_roY1"]          # 化学種の残差 (3 本ともにあれば R に含める)
+EXTRA = RES_FIELDS + RES_OPT + ["volume"]
+SAME_FILES = ["bcondConfig.yaml", "probe.yaml", "species_meta.yaml", "wall_design.csv", "wall_physical.csv", "target_axis_M.csv", "wall_repr.json", "MESH_QUALITY.txt"]
+EXPECT = {"time/deltaT/cfl": 4.0, "time/deltaT/cfl_pseudo": 4.0, "time/deltaT/implicitRelax": 0.7, "time/deltaT/implicitThermalJacobian": 5,
+          "time/deltaT/lineDtDirectional": 1, "time/deltaT/lineImplicit": 1, "time/deltaT/lineViscCoupling": 3, "time/deltaT/blockDPLUR": 1,
+          "time/deltaT/detectNaN": 1, "time/timeIntegration": 11, "time/nStepInner": 5, "time/last/nStepOuter": 1,
+          "time/deltaT/lineDtDirectionalCap": None, "time/deltaT/implicitSolvePrecision": None, "time/outStepInterval": 1,
+          "output/extraFields": EXTRA}
+NF, FREC, NREC, HF = 12, 200, 160, 150
+f32 = np.float32
+
+
+def sha(p):
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+def meshsha(p):
+    h = hashlib.sha256()
+
+    def visit(name, obj):
+        if isinstance(obj, h5py.Dataset):
+            h.update(name.encode()); h.update(obj[...].tobytes())
+    with h5py.File(p, "r") as f:
+        f["MESH"].visititems(visit)
+    return h.hexdigest()
+
+
+def flat(d, p=""):
+    out = {}
+    for k, v in d.items():
+        kk = f"{p}/{k}" if p else str(k)
+        out.update(flat(v, kk) if isinstance(v, dict) else {kk: v})
+    return out
+
+
+def dump(run, name):
+    d = HERE / run / "linedump"
+    meta = {l.split()[0]: (int(l.split()[1]), int(l.split()[2])) for l in (d / "meta.txt").read_text().splitlines() if l.strip() and not l.startswith("#")}
+    r, c = meta[name]
+    a = np.fromfile(d / f"{name}.f64", dtype=np.float64)
+    if a.size != r * c:
+        raise ValueError(f"{run}/{name}: 大きさが違う")
+    return a.reshape(r, c)
+
+
+EVIDENCE_FILES = ["linedump/meta.txt", "linedump/D.f64", "linedump/Kprev.f64", "linedump/Knext.f64", "linedump/state_ro_roU_roe_cp_gamma.f64",
+                  "linedump/dt_vol.f64", "linedump/flags_wall_iso_axis.f64", "linedump/node_line.f64", "linedump/rhs_s0.f64",
+                  "res_0.h5", "res_1.h5", "solverConfig.yaml", "LVC_TERMS.txt", "forge_run.log", "RUN_PROVENANCE.txt"]
+AUDIT_FILES = ["linedump/audit_face.f64", "linedump/audit_node.f64", "linedump/meta.txt", "linedump/node_line.f64",
+               "linedump/state_ro_roU_roe_cp_gamma.f64", "linedump/dt_vol.f64", "linedump/flags_wall_iso_axis.f64"]
+
+
+def evidence():
+    """事前のゲートが読んだ証拠と、このスクリプト自身・書き出しの設定のハッシュ (本試験の起動と本判定で照合する)"""
+    ev = {f"{run}/{fn}": sha(HERE / run / fn) for run, _ in DUMPS.values() for fn in EVIDENCE_FILES}
+    ev.update({f"{AUDIT}/{fn}": sha(HERE / AUDIT / fn) for fn in AUDIT_FILES})
+    ev["lvc75_pregate.py"] = sha(Path(__file__).resolve())
+    return ev
+
+
+def verify():
+    """--verify: 記録が PASS で、記録したハッシュが今のファイルと同じなら 0、そうでなければ 1"""
+    rec = json.loads((HERE / "_band_ab" / "cold_pair" / "lvc75_pregate.json").read_text())
+    if not str(rec.get("VERDICT", "")).startswith("PASS"):
+        print("事前のゲートの記録が PASS でない:", rec.get("VERDICT")); return 1
+    ev = rec.get("evidence_sha256") or {}
+    if not ev:
+        print("証拠のハッシュが記録に無い"); return 1
+    now = evidence()
+    bad = sorted(k for k in set(ev) | set(now) if ev.get(k) != now.get(k))
+    if bad:
+        print("記録と違う証拠:", bad[:10]); return 1
+    print(f"照合 OK: {len(ev)} ファイル"); return 0
+
+
+def ulp32(x):
+    return np.spacing(np.abs(np.asarray(x, dtype=np.float32))).astype(np.float64)
+
+
+def main():
+    out = HERE / "_band_ab" / "cold_pair" / "lvc75_pregate.json"
+    rec = {"plan": "time_integration-line-viscous-jacobian-faceh §6.11 (事前のゲート)"}
+    checks = []                 # (段, 名前, ok, 値)
+
+    def ok(stage, name, cond, val=None):
+        checks.append((stage, name, bool(cond), val))
+    verdict = None
+    try:
+        # ---- I: 入力 ----
+        src_full = sha(HERE / SRC / SRC_RES)
+        ok("I", "出発の場の sha256", src_full.startswith(SRC_SHA16), src_full[:16])
+        mref = meshsha(HERE / SRC / "nozzle.h5")
+        for key, (run, bsha) in DUMPS.items():
+            d = HERE / run
+            prov = (d / "RUN_PROVENANCE.txt").read_text(errors="replace")
+            ok("I", f"{run}: バイナリの sha256", bsha in prov, bsha[:16])
+            cp = json.loads((d / "COLD_PAIR.json").read_text())
+            ok("I", f"{run}: 出発の場", cp["parent"] == SRC and cp["parent_res"] == SRC_RES and cp["parent_res_sha256"] == src_full, cp["parent_res_sha256"][:16])
+            m = meshsha(d / "nozzle.h5")
+            ok("I", f"{run}: 格子の実体", m == mref and (d / "MESH_SHA.txt").read_text().strip() == m, m[:16])
+            ok("I", f"{run}: 入力ファイル", all((d / fn).is_file() and sha(d / fn) == sha(HERE / SRC / fn) for fn in SAME_FILES), None)
+            c = flat(yaml.safe_load((d / "solverConfig.yaml").read_text()))
+            bad = {k: c.get(k) for k, v in EXPECT.items() if (k in c if v is None else c.get(k) != v)}
+            ok("I", f"{run}: 設定 (本試験との差は step 数・出力の間隔・extraFields だけ)", bad == {}, bad)
+            log = (d / "forge_run.log").read_text(errors="replace")
+            mk = MASK[key]
+            shown = ("FORGE_LVC_TERMS=" not in log) if mk == 7 else (f"診断のマスク FORGE_LVC_TERMS={mk} " in log)
+            ok("I", f"{run}: 起動ログ (値 3・マスク {mk} の表示・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+               "'lineViscCoupling' in 'time.deltaT': 3" in log and shown and "Thomas の配列の並び: LAYOUT2" in log
+               and "FORGE_DIAG_FACE_H_DOUBLE" not in log and "[lineDump] factor の直前を書いた" in log, None)
+            lt = (d / "LVC_TERMS.txt").read_text().strip() if (d / "LVC_TERMS.txt").is_file() else None
+            ok("I", f"{run}: 台本が渡した FORGE_LVC_TERMS = {mk}", lt == str(mk), lt)
+            ok("I", f"{run}: RUN_RC = 0", (d / "RUN_RC").read_text().strip() == "0", None)
+            ok("I", f"{run}: extraFields の無視の警告なし", "は確保されていない変数なので無視する" not in log, None)
+        cfgs = {k: flat(yaml.safe_load((HERE / DUMPS[k][0] / "solverConfig.yaml").read_text())) for k in DUMPS}
+        ok("I", "3 本の書き出しの設定が完全に同じ (マスクは環境変数)", all(cfgs[k] == cfgs["m7"] for k in DUMPS), None)
+        rec["dump_config"] = cfgs["m7"]
+        # 書き出しの形・節点
+        arrays = {}
+        for key, (run, _) in DUMPS.items():
+            d = HERE / run
+            a = {n: dump(run, n) for n in ("node_line", "D", "Kprev", "Knext", "state_ro_roU_roe_cp_gamma", "dt_vol", "flags_wall_iso_axis", "rhs_s0")}
+            nn = a["node_line"].shape[0]
+            shapes = {"node_line": 2, "D": 25, "Kprev": 25, "Knext": 25, "state_ro_roU_roe_cp_gamma": 7, "dt_vol": 2, "flags_wall_iso_axis": 3, "rhs_s0": 5}
+            ok("I", f"{run}: 配列の形", nn > 0 and all(a[n].shape == (nn, w) for n, w in shapes.items()), {n: a[n].shape for n in shapes})
+            nodes = [int(x) for x in a["node_line"][:, 0]]
+            ok("I", f"{run}: 要求した 5 節点・5 本のライン・重複なし", all(w in nodes for w in WANT_NODES) and len(set(a["node_line"][:, 1])) == 5 and len(set(nodes)) == nn, None)
+            ok("I", f"{run}: 有限", all(bool(np.all(np.isfinite(a[n]))) for n in shapes), None)
+            st = a["state_ro_roU_roe_cp_gamma"]
+            ok("I", f"{run}: ρ・c_p・dt・体積 > 0、γ > 1", bool(np.all(st[:, 0] > 0) and np.all(st[:, 5] > 0) and np.all(st[:, 6] > 1) and np.all(a["dt_vol"] > 0)), None)
+            with h5py.File(d / "res_1.h5", "r") as h:
+                have = set(h["VALUE"].keys())
+                r0 = h["VALUE"]["res_ro"][...] if "res_ro" in have else None
+            ok("I", f"{run}: res_1.h5 に残差の場がそろう", all(f in have for f in RES_FIELDS), sorted(set(RES_FIELDS) - have))
+            # 1 step の出力の残差が出発の状態の残差であること (rhs_s0 の行 0 = float(res_ro)、loop 0 は隣の寄与 0)
+            ok("I", f"{run}: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+               r0 is not None and np.array_equal(r0[[int(x) for x in a["node_line"][:, 0]]].astype(np.float32).astype(np.float64), a["rhs_s0"][:, 0]), None)
+            arrays[key] = a
+            arrays[key]["_have"] = have
+        for n in ("node_line", "state_ro_roU_roe_cp_gamma", "dt_vol", "flags_wall_iso_axis"):
+            ok("I", f"{n}: 7・7 の再実行・5 の 3 本でビット一致 (同じ入力)",
+               all(arrays[k][n].shape == arrays["m7"][n].shape and np.array_equal(arrays[k][n].view(np.int64), arrays["m7"][n].view(np.int64)) for k in DUMPS), None)
+        # 場全体の入力 (保存量・乱流・組成・物性・壁距離): 出力 step 0 の全データセットが 3 本でビット一致
+        def h5vals(run):
+            with h5py.File(HERE / run / "res_0.h5", "r") as h:
+                return {k: h["VALUE"][k][...] for k in h["VALUE"].keys()}
+        v0 = {k: h5vals(DUMPS[k][0]) for k in DUMPS}
+        keys0 = sorted(v0["m7"].keys())
+        ok("I", "res_0.h5 の全データセット (保存量・k・ω・組成・μ・壁距離など) が 3 本でビット一致",
+           len(keys0) > 0 and all(sorted(v0[k].keys()) == keys0 and all(np.array_equal(v0[k][n], v0["m7"][n]) for n in keys0) for k in DUMPS), keys0)
+        ok("I", "res_0.h5 に保存量・乱流・組成がある", all(n in keys0 for n in ("ro", "roUx", "roUy", "roe", "roK", "roOmega")), None)
+        del v0
+        aud = {n: dump(AUDIT, n) for n in ("node_line", "state_ro_roU_roe_cp_gamma", "dt_vol", "flags_wall_iso_axis", "D", "Kprev", "Knext")}
+        for key in DUMPS:
+            for n in ("node_line", "state_ro_roU_roe_cp_gamma", "dt_vol", "flags_wall_iso_axis"):
+                ok("I", f"{DUMPS[key][0]}: {n} が監査の記録とビット一致 (同じ入力・同じ節点)",
+                   arrays[key][n].shape == aud[n].shape and np.array_equal(arrays[key][n].view(np.int64), aud[n].view(np.int64)), None)
+        Nchk = np.fromfile(HERE / AUDIT / "linedump" / "audit_node.f64").reshape(aud["node_line"].shape[0], NREC)
+        ok("I", "監査の記録: 記録の節点番号 = 書き出しの順、面の数が枠に入る、skipDiag なし",
+           np.array_equal(Nchk[:, 0], aud["node_line"][:, 0]) and bool(np.all(Nchk[:, 5] == 0)) and bool(np.all(Nchk[:, 4] <= NF)) and bool(np.all(Nchk[:, 22] == 0)), None)
+        if not all(c[2] for c in checks):
+            raise ValueError("入力のゲートが不合格")
+
+        # ---- R: 残差の不変 ----
+        def res_field(run, f):
+            with h5py.File(HERE / run / "res_1.h5", "r") as h:
+                return h["VALUE"][f][...].astype(np.float64)
+        resv = {}
+        opt = [f for f in RES_OPT if all(f in arrays[k]["_have"] for k in DUMPS)]
+        rec["residual_optional_used"] = opt
+        for f in RES_FIELDS + opt:
+            o, o2, n = (res_field(DUMPS[k][0], f) for k in ("m7", "m7b", "m5"))
+            if not (np.all(np.isfinite(o)) and np.all(np.isfinite(o2)) and np.all(np.isfinite(n))):
+                raise ValueError(f"{f} に非有限がある (出発の状態の残差)")
+            ok("I", f"{f}: 3 本で有限", True, None)
+            rep_bit = bool(np.array_equal(o.view(np.int64), o2.view(np.int64)))
+            d_no, d_oo = float(np.max(np.abs(n - o))), float(np.max(np.abs(o2 - o)))
+            cond = bool(np.array_equal(n.view(np.int64), o.view(np.int64))) if rep_bit else d_no <= 3 * d_oo
+            ok("R", f"{f}: マスク 5 と 7 の差 ({'ビット一致を要求' if rep_bit else '≤ 3 × 再実行の差'})", cond, [d_no, d_oo])
+            resv[f] = {"rerun_bit": rep_bit, "new_vs_old": d_no, "rerun": d_oo}
+        o, o2, n = arrays["m7"]["rhs_s0"], arrays["m7b"]["rhs_s0"], arrays["m5"]["rhs_s0"]
+        rep_bit = bool(np.array_equal(o.view(np.int64), o2.view(np.int64)))
+        d_no, d_oo = float(np.max(np.abs(n - o))), float(np.max(np.abs(o2 - o)))
+        ok("R", f"rhs_s0: マスク 5 と 7 の差 ({'ビット一致' if rep_bit else '≤ 3 × 再実行の差'})", bool(np.array_equal(n.view(np.int64), o.view(np.int64))) if rep_bit else d_no <= 3 * d_oo, [d_no, d_oo])
+        resv["rhs_s0"] = {"rerun_bit": rep_bit, "new_vs_old": d_no, "rerun": d_oo}
+        rec["residual"] = resv
+
+        # ---- V: 介入の成立 (マスクのビット 2 は熱伝導の近傍 K だけを切り替える: block_dplur_jacobian_d.cuh) ----
+        ad = HERE / AUDIT / "linedump"
+        nn = aud["node_line"].shape[0]
+        F = np.fromfile(ad / "audit_face.f64").reshape(nn, NF, FREC)
+        N = np.fromfile(ad / "audit_node.f64").reshape(nn, NREC)
+        st = arrays["m7"]["state_ro_roU_roe_cp_gamma"]
+        nodes = [int(x) for x in arrays["m7"]["node_line"][:, 0]]
+        pos = {n: k for k, n in enumerate(nodes)}
+        flags = arrays["m7"]["flags_wall_iso_axis"]
+
+        def same_or_noise(name, sl):
+            """7 と 7 の再実行がビット一致ならビット一致を、そうでなければ ≤ 3 × 再実行の差を要求する (sl: 列の範囲)"""
+            a, a2, b = (arrays[k][name][:, sl] for k in ("m7", "m7b", "m5"))
+            rbit = bool(np.array_equal(a.view(np.int64), a2.view(np.int64)))
+            d_ba, d_rr = float(np.max(np.abs(b - a))), float(np.max(np.abs(a2 - a)))
+            return (bool(np.array_equal(b.view(np.int64), a.view(np.int64))) if rbit else d_ba <= 3 * d_rr), {"rerun_bit": rbit, "m5_vs_m7": d_ba, "rerun": d_rr}
+        same = {}
+        okD, same["D"] = same_or_noise("D", slice(0, 25))
+        ok("V", "(a) D が 7 と 5 で不変 (熱伝導の D は常に入る)", okD, same["D"])
+        for nm in ("Kprev", "Knext"):
+            okK, same[nm + "_rows0to3"] = same_or_noise(nm, slice(0, 20))
+            ok("V", f"(b) {nm} の行 0〜3 が 7 と 5 で不変", okK, same[nm + "_rows0to3"])
+        rec["same_D_K03"] = same
+        # (c) K の行 4 の変化 (7 − 5) = 熱伝導の近傍 K を、生の double の入力から独立に計算した h と比べる
+        #     h = κ (γ_j / c_p,j) / ρ_j · [−(e_j − ½|u_j|²), −u_j, −v_j, −w_j, 1]、κ = max(k_f, 0)·|S|²/|e·S|、
+        #     k_f = f0·k0 + (1 − f0)·k1 + (f0·c_p0 + (1 − f0)·c_p1)(f0·μt0 + (1 − f0)·μt1)/Pr_t (面の両端 ic0・ic1 の生の値、f0 = fx)
+        #     自節点の行 4 が拘束 (等温壁) か、隣が等温壁 (温度固定) なら h = 0。
+        #     比べる対象は記録の側でなく、書き出しのラインの並びから作った期待の接続 (節点 k と向き 0 = prev / 1 = next) の全部 (plan-6 レビュー M2)。
+        nl = arrays["m7"]["node_line"]
+        exp_conn = []                                  # (k, 向き, 隣の節点番号 or −1)
+        for k in range(nn):
+            same_prev = k > 0 and nl[k - 1, 1] == nl[k, 1]
+            same_next = k + 1 < nn and nl[k + 1, 1] == nl[k, 1]
+            exp_conn.append((k, 0, nodes[k - 1] if same_prev else -1))
+            exp_conn.append((k, 1, nodes[k + 1] if same_next else -1))
+        conn_bad, worst, nres, ncmp, detail = [], 0.0, 0, 0, []
+        for k, side, nb in exp_conn:
+            nd = N[k]
+            if int(nd[0]) != nodes[k] or int(nd[1 + side]) != nb:
+                conn_bad.append((nodes[k], side, "記録の line_prev/next が並びと違う", int(nd[1 + side]), nb))
+                continue
+            # 拘束の行は書き出しのフラグから独立に (壁 → 行 1〜3、等温壁 → 行 4、軸 → 行 2)
+            wall, iso, ax = int(flags[k, 0]), int(flags[k, 1]), int(flags[k, 2])
+            exp_dec = (14 if wall == 1 else 0) | (16 if iso == 1 else 0) | (4 if ax == 1 else 0)
+            if int(nd[18]) != exp_dec:
+                conn_bad.append((nodes[k], side, "拘束の行のビットがフラグと違う", int(nd[18]), exp_dec))
+                continue
+            nm = "Kprev" if side == 0 else "Knext"
+            d7, d5 = arrays["m7"][nm][k, 20:25], arrays["m5"][nm][k, 20:25]
+            dK = d7 - d5
+            if nb < 0:                                 # ラインの端: K は 7・5 とも 0 のはず
+                if not (np.all(d7 == 0) and np.all(d5 == 0)):
+                    conn_bad.append((nodes[k], side, "ラインの端なのに K の行 4 が 0 でない", d7.tolist(), d5.tolist()))
+                continue
+            fs = [s_ for s_ in range(int(min(nd[4], NF))) if F[k, s_, 5] != 0 and int(F[k, s_, 3]) == nb]
+            if len(fs) != 1:
+                conn_bad.append((nodes[k], side, "期待の接続にライン面がちょうど 1 つでない", len(fs), nb))
+                continue
+            fr = F[k, fs[0]]
+            kb = pos.get(nb)
+            back = [s_ for s_ in range(int(min(N[kb, 4], NF))) if F[kb, s_, 5] != 0 and int(F[kb, s_, 3]) == nodes[k]] if kb is not None else []
+            if not (int(fr[6]) == side and int(fr[45]) == 1 and {int(fr[1]), int(fr[2])} == {nodes[k], nb} and kb is not None
+                    and len(back) == 1 and int(F[kb, back[0], 0]) == int(fr[0]) and int(F[kb, back[0], 6]) == 1 - side):
+                conn_bad.append((nodes[k], side, "面の向き・枝・両端・往復の面が合わない", None, nb))
+                continue
+            if bool(fr[44] != 0) != (int(flags[kb, 1]) == 1):
+                conn_bad.append((nodes[k], side, "隣の温度固定のフラグが書き出しのフラグと違う", fr[44], flags[kb, 1]))
+                continue
+            f0 = fr[7]
+            kf = f0 * fr[186] + (1 - f0) * fr[187] + (f0 * fr[184] + (1 - f0) * fr[185]) * (f0 * fr[182] + (1 - f0) * fr[183]) / fr[50]
+            e = np.array([fr[15] - fr[12], fr[16] - fr[13], fr[17] - fr[14]])
+            kap = max(kf, 0.0) * fr[11] ** 2 / abs(float(e @ fr[8:11]))
+            rj, uj, vj, wj, rEj, gj = fr[52], fr[53], fr[54], fr[55], fr[56], fr[51]
+            cpj = max(st[kb, 5], 1e-30)
+            q2 = uj * uj + vj * vj + wj * wj
+            ej = rEj / rj - 0.5 * q2
+            c = kap * (gj / cpj) / rj
+            h = c * np.array([-(ej - 0.5 * q2), -uj, -vj, -wj, 1.0])
+            if iso == 1 or int(flags[kb, 1]) == 1:
+                h = np.zeros(5)
+            scale = np.maximum(np.maximum(np.abs(d7), np.abs(d5)), np.abs(h))
+            floor = 64 * np.maximum(ulp32(scale), np.finfo(np.float32).tiny)
+            tol = 1e-5 * np.abs(h) + floor   # 要素ごと
+            ratio = np.abs(dK - h) / tol
+            if not (np.isfinite(kf) and np.isfinite(kap) and np.all(np.isfinite(h)) and np.all(np.isfinite(tol)) and np.all(np.isfinite(ratio))):
+                raise ValueError(f"節点 {nodes[k]} 向き {side}: κ・h・許容・比に非有限 (入力の不備)")
+            ncmp += 1
+            r = float(np.max(ratio))
+            worst = max(worst, r)
+            if float(np.max(np.abs(h))) > 1e3 * float(np.max(floor)):
+                nres += 1
+            if r > 1 and len(detail) < 5:
+                detail.append({"node": nodes[k], "side": nm, "dK": dK.tolist(), "h": h.tolist()})
+        rec["heatK"] = {"expected_connections": len(exp_conn), "compared_line_faces": ncmp, "resolved_faces": nres, "max_err_over_tol": worst,
+                        "connection_problems": conn_bad[:10], "n_connection_problems": len(conn_bad), "first_bad": detail}
+        if conn_bad:
+            raise ValueError(f"期待の接続と監査の記録が合わない ({len(conn_bad)} 件、最初 {conn_bad[0]})")
+        ok("V", "(c) 期待の接続の全部で、K の行 4 の変化 (7 − 5) が独立に計算した熱伝導の項と許容内 (要素ごとに 1e-5 × |h| + 64 ulp)、端は 0",
+           ncmp > 0 and worst <= 1.0, [ncmp, worst])
+        ok("V", "(c') 変化が解像される面 (熱伝導の項が許容の床の 1000 倍超) が 100 面以上", nres >= 100, nres)
+        i_ok = all(c[2] for c in checks if c[0] == "I")
+        r_ok = all(c[2] for c in checks if c[0] == "R")
+        v_ok = all(c[2] for c in checks if c[0] == "V")
+        if not i_ok:
+            raise ValueError("入力のゲートに外れがある")
+        verdict = "PASS (本試験へ進む)" if (r_ok and v_ok) else "INDETERMINATE (残差の変化か介入の不成立: 本試験へ進まない)"
+        if verdict.startswith("PASS"):
+            rec["evidence_sha256"] = evidence()       # 本試験・本判定がこの記録と照合する (M3)
+    except Exception as e:
+        verdict = f"INVALID ({type(e).__name__}: {e})"
+    rec["checks"] = [{"stage": a, "check": b, "ok": c, "value": d} for a, b, c, d in checks]
+    rec["VERDICT"] = verdict
+    out.write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str))
+    for st in ("I", "R", "V"):
+        lst = [c for c in checks if c[0] == st]
+        bad = [c for c in lst if not c[2]]
+        print(f"{st}: {len(lst)} 項目、外れ {len(bad)}  {[(c[1], c[3]) for c in bad[:3]]}")
+    for k in ("residual", "same_D_K03", "heatK"):
+        if k in rec:
+            print(k, rec[k])
+    print("VERDICT:", verdict)
+    return 0 if verdict.startswith("PASS") else (1 if verdict.startswith("INVALID") else 2)
+
+
+if __name__ == "__main__":
+    sys.exit(verify() if sys.argv[1:] == ["--verify"] else main())
+```
+
+## 参考: `notes/reviews/briefs/2026-10-10-lvc75-pregate-rhs-diag.py`
+
+```
+# rhs_s0 の外れの中身 (記録用): どの節点・行か、値の大きさと float の ulp、rhs_s0 = float(残差) が各書き出しで成り立つか
+import numpy as np, h5py
+runs = {"m7": "run_0574_lvc75_m7_dump", "m7b": "run_0576_lvc75_m7_dump2", "m5": "run_0575_lvc75_m5_dump"}
+def A(r, n):
+    d = r + "/linedump"
+    meta = {l.split()[0]: (int(l.split()[1]), int(l.split()[2])) for l in open(d + "/meta.txt") if l.strip() and not l.startswith("#")}
+    return np.fromfile(d + "/" + n + ".f64").reshape(*meta[n])
+rhs = {k: A(r, "rhs_s0") for k, r in runs.items()}
+nl = A(runs["m7"], "node_line"); idx = nl[:, 0].astype(int); fl = A(runs["m7"], "flags_wall_iso_axis")
+for a, b in (("m5", "m7"), ("m7b", "m7")):
+    d = np.abs(rhs[a] - rhs[b]); k, r = np.unravel_index(np.argmax(d), d.shape)
+    v = rhs[b][k, r]
+    print(f"{a}−{b}: 最大 {d[k, r]:.3e} 節点 {idx[k]} 行 {r} 値 {v:.6e} ulp32 {np.spacing(np.float32(abs(v))):.3e} → {d[k, r] / np.spacing(np.float32(abs(v))):.1f} ulp; "
+          f"非零の差の要素 {int(np.sum(d > 0))}; 差/ulp32 の最大 {float(np.max(d / np.maximum(np.spacing(np.abs(rhs[b]).astype(np.float32)).astype(float), 1e-45))):.1f}")
+# rhs_s0 = float(残差) の照合 (行 0..4 = res_ro, res_roUx, res_roUy, res_roUz?, res_roe)。拘束の行は 0
+for k_, r_ in runs.items():
+    with h5py.File(r_ + "/res_1.h5", "r") as h:
+        R = {f: h["VALUE"][f][...][idx] for f in ("res_ro", "res_roUx", "res_roUy", "res_roe") if f in h["VALUE"]}
+    out = []
+    for row, f in ((0, "res_ro"), (1, "res_roUx"), (2, "res_roUy"), (4, "res_roe")):
+        exp = R[f].astype(np.float32).astype(np.float64)
+        if row in (1, 2, 3):
+            exp = np.where(fl[:, 0] == 1, 0.0, exp)
+        if row == 2:
+            exp = np.where(fl[:, 2] == 1, 0.0, exp)
+        if row == 4:
+            exp = np.where(fl[:, 1] == 1, 0.0, exp)
+        out.append((row, int(np.sum(rhs[k_][:, row] != exp))))
+    print(k_, "rhs_s0 と float(残差) の不一致の数 (行, 数):", out, " 行 3 の非零", int(np.sum(rhs[k_][:, 3] != 0)))
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。

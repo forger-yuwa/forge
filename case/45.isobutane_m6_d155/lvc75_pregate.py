@@ -7,7 +7,9 @@
   m7b = run_0576_lvc75_m7_dump2 (7 の再実行、atomicAdd による揺れを測る)
 と、§6.7 の監査の記録 (run_0550_lvcaudit、同じ状態・同じ 605 節点) の面ごとの生の入力を使い、
   I  入力のゲート (§6.9 の lvcgeom_pregate.py と同じ項目に、マスクの表示と台本が渡した値を足したもの)
-  R  残差の不変: 出発の状態の残差 (全節点) と rhs_s0 が、7 の再実行どうしでビット一致なら 5 もビット一致、そうでなければ ≤ 3 × 再実行の差
+  R  残差の不変: 出発の状態の残差 (全節点、倍精度) が、7 の再実行どうしでビット一致なら 5 もビット一致、そうでなければ ≤ 3 × 再実行の差
+  S  構造の照合 (2026-10-10 改訂、§6.12): 各書き出しで rhs_s0 (605 節点 × 5 行) = 拘束の処理をした float(出力 step 1 の残差) が全要素で完全に一致。
+     rhs_s0 の 5 − 7・再実行 − 7 の差 (ulp の最大・差のある要素の数) は記録だけ (1 回目の規則 max|5 − 7| ≤ 3 × 再実行は、丸めの反転の位置で決まるので外した)
   V  介入の成立: (a) D と (b) K の行 0〜3 が 7 と 5 で不変 (R と同じ規則)、
      (c) K の行 4 の変化 (7 − 5) が、生の double の入力から独立に計算した熱伝導の近傍 K の項 κ ∂T_j/∂Q_j と許容内 (要素ごとに 1e-5 × |h| + 64 ulp)、
      (c') 変化が解像される面が 100 面以上
@@ -29,11 +31,11 @@ import yaml
 HERE = Path(__file__).resolve().parent
 SRC, SRC_RES, SRC_SHA16 = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5", "207d39f0e7f4aa03"
 SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"
-DUMPS = {"m7": ("run_0574_lvc75_m7_dump", SHA_NEW), "m7b": ("run_0576_lvc75_m7_dump2", SHA_NEW), "m5": ("run_0575_lvc75_m5_dump", SHA_NEW)}
+DUMPS = {"m7": ("run_0577_lvc75_m7_dump_r2", SHA_NEW), "m7b": ("run_0579_lvc75_m7_dump2_r2", SHA_NEW), "m5": ("run_0578_lvc75_m5_dump_r2", SHA_NEW)}   # 2 回目の登録 (§6.12)
 MASK = {"m7": 7, "m7b": 7, "m5": 5}
 AUDIT = "run_0550_lvcaudit"
 WANT_NODES = [1572, 4113, 7985, 198560, 264263]
-RES_FIELDS = ["res_ro", "res_roUx", "res_roUy", "res_roe", "res_roK", "res_roOmega"]
+RES_FIELDS = ["res_ro", "res_roUx", "res_roUy", "res_roUz", "res_roe", "res_roK", "res_roOmega"]   # res_roUz は rhs_s0 の行 3 の照合に使う (§6.12)
 RES_OPT = ["res_roY0", "res_roY1"]          # 化学種の残差 (3 本ともにあれば R に含める)
 EXTRA = RES_FIELDS + RES_OPT + ["volume"]
 SAME_FILES = ["bcondConfig.yaml", "probe.yaml", "species_meta.yaml", "wall_design.csv", "wall_physical.csv", "target_axis_M.csv", "wall_repr.json", "MESH_QUALITY.txt"]
@@ -214,11 +216,38 @@ def main():
             cond = bool(np.array_equal(n.view(np.int64), o.view(np.int64))) if rep_bit else d_no <= 3 * d_oo
             ok("R", f"{f}: マスク 5 と 7 の差 ({'ビット一致を要求' if rep_bit else '≤ 3 × 再実行の差'})", cond, [d_no, d_oo])
             resv[f] = {"rerun_bit": rep_bit, "new_vs_old": d_no, "rerun": d_oo}
-        o, o2, n = arrays["m7"]["rhs_s0"], arrays["m7b"]["rhs_s0"], arrays["m5"]["rhs_s0"]
-        rep_bit = bool(np.array_equal(o.view(np.int64), o2.view(np.int64)))
-        d_no, d_oo = float(np.max(np.abs(n - o))), float(np.max(np.abs(o2 - o)))
-        ok("R", f"rhs_s0: マスク 5 と 7 の差 ({'ビット一致' if rep_bit else '≤ 3 × 再実行の差'})", bool(np.array_equal(n.view(np.int64), o.view(np.int64))) if rep_bit else d_no <= 3 * d_oo, [d_no, d_oo])
-        resv["rhs_s0"] = {"rerun_bit": rep_bit, "new_vs_old": d_no, "rerun": d_oo}
+        # ---- S: 構造の照合 (§6.12): rhs_s0 = 拘束の処理をした float(残差) が全要素で完全に一致 ----
+        rows = [(0, "res_ro"), (1, "res_roUx"), (2, "res_roUy"), (3, "res_roUz"), (4, "res_roe")]
+        struct = {}
+        for key, (run, _) in DUMPS.items():
+            a = arrays[key]
+            idx = [int(x) for x in a["node_line"][:, 0]]
+            fl = a["flags_wall_iso_axis"]
+            with h5py.File(HERE / run / "res_1.h5", "r") as h:
+                R = {f: h["VALUE"][f][...] for _, f in rows}
+            mism = {}
+            for row, f in rows:
+                raw = R[f][idx]
+                if not np.all(np.isfinite(raw)):
+                    raise ValueError(f"{run}: {f} の書き出しの節点に非有限")
+                exp = raw.astype(np.float32).astype(np.float64)
+                if row in (1, 2, 3):
+                    exp = np.where(fl[:, 0] == 1, 0.0, exp)       # 壁: 運動量の 3 行
+                if row == 2:
+                    exp = np.where(fl[:, 2] == 1, 0.0, exp)       # 軸: 半径の運動量の行
+                if row == 4:
+                    exp = np.where(fl[:, 1] == 1, 0.0, exp)       # 等温壁: エネルギーの行
+                mism[row] = int(np.sum(a["rhs_s0"][:, row] != exp))
+            struct[run] = mism
+            ok("S", f"{run}: rhs_s0 = 拘束の処理をした float(残差) が 605 節点 × 5 行で完全に一致", sum(mism.values()) == 0, mism)
+        rec["struct_rhs"] = struct
+        # 記録だけ: rhs_s0 の差の ulp の最大と差のある要素の数
+        def ulp_stats(x, ref):
+            d = np.abs(x - ref)
+            u = np.maximum(np.spacing(np.abs(ref).astype(np.float32)).astype(np.float64), float(np.finfo(np.float32).tiny))
+            return {"n_diff": int(np.sum(d > 0)), "max_ulp": float(np.max(d / u)), "max_abs": float(np.max(d))}
+        resv["rhs_s0_record_only"] = {"m5_vs_m7": ulp_stats(arrays["m5"]["rhs_s0"], arrays["m7"]["rhs_s0"]),
+                                      "rerun_vs_m7": ulp_stats(arrays["m7b"]["rhs_s0"], arrays["m7"]["rhs_s0"])}
         rec["residual"] = resv
 
         # ---- V: 介入の成立 (マスクのビット 2 は熱伝導の近傍 K だけを切り替える: block_dplur_jacobian_d.cuh) ----
@@ -322,11 +351,11 @@ def main():
            ncmp > 0 and worst <= 1.0, [ncmp, worst])
         ok("V", "(c') 変化が解像される面 (熱伝導の項が許容の床の 1000 倍超) が 100 面以上", nres >= 100, nres)
         i_ok = all(c[2] for c in checks if c[0] == "I")
-        r_ok = all(c[2] for c in checks if c[0] == "R")
+        r_ok = all(c[2] for c in checks if c[0] in ("R", "S"))
         v_ok = all(c[2] for c in checks if c[0] == "V")
         if not i_ok:
             raise ValueError("入力のゲートに外れがある")
-        verdict = "PASS (本試験へ進む)" if (r_ok and v_ok) else "INDETERMINATE (残差の変化か介入の不成立: 本試験へ進まない)"
+        verdict = "PASS (本試験へ進む)" if (r_ok and v_ok) else "INDETERMINATE (残差の変化・構造の照合の外れ・介入の不成立のどれか: 本試験へ進まない)"
         if verdict.startswith("PASS"):
             rec["evidence_sha256"] = evidence()       # 本試験・本判定がこの記録と照合する (M3)
     except Exception as e:
@@ -334,11 +363,11 @@ def main():
     rec["checks"] = [{"stage": a, "check": b, "ok": c, "value": d} for a, b, c, d in checks]
     rec["VERDICT"] = verdict
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str))
-    for st in ("I", "R", "V"):
+    for st in ("I", "R", "S", "V"):
         lst = [c for c in checks if c[0] == st]
         bad = [c for c in lst if not c[2]]
         print(f"{st}: {len(lst)} 項目、外れ {len(bad)}  {[(c[1], c[3]) for c in bad[:3]]}")
-    for k in ("residual", "same_D_K03", "heatK"):
+    for k in ("residual", "struct_rhs", "same_D_K03", "heatK"):
         if k in rec:
             print(k, rec[k])
     print("VERDICT:", verdict)

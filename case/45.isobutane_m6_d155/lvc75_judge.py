@@ -3,7 +3,7 @@
 §6.9 の lvcgeom_judge.py と同じ分類・ゲートで、腕の違いを `FORGE_LVC_TERMS` (7 = 既定の全部入り、5 = 熱伝導の近傍 K を外す) だけにしたもの。
 バイナリは 4 本とも段 ③ の FP64 (~/forge-fgeom3-fp64)。
 
-lvc75.sh の run_0570〜0573 (腕) と事前のゲートの記録 (lvc75_pregate.json、run_0574〜0576 の 1 step の書き出しから) を読み、
+lvc75.sh の run_0570〜0573 (腕) と事前のゲートの記録 (lvc75_pregate.json、2 回目の登録 §6.12 の run_0577〜0579 の 1 step の書き出しから) を読み、
   (1) 入力のゲート (バイナリ・出発の場・格子の実体・入力ファイル・§6 の期待どおりの設定・起動ログ・腕ごとのマスクの表示)、
   (2) 証拠のゲート (初期場・破綻前の場・res_nan・帳簿・FINITE 側の区間付き収束 VERDICT)、
   (3) 各 run の分類 (DIVERGED / FINITE / INVALID)
@@ -31,7 +31,7 @@ SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"   #
 RUNS = {"a1": ("run_0570_lvc75_m7_a1", 0, SHA_NEW), "b1": ("run_0571_lvc75_m5_b1", 0, SHA_NEW),
         "a2": ("run_0572_lvc75_m7_a2", 0, SHA_NEW), "b2": ("run_0573_lvc75_m5_b2", 0, SHA_NEW)}
 MASK = {"a1": 7, "b1": 5, "a2": 7, "b2": 5}   # FORGE_LVC_TERMS (台本が run ごとに LVC_TERMS.txt に書く)
-DUMPS = ["run_0574_lvc75_m7_dump", "run_0575_lvc75_m5_dump", "run_0576_lvc75_m7_dump2"]   # 事前のゲートが読む 1 step の書き出し
+DUMPS = ["run_0577_lvc75_m7_dump_r2", "run_0578_lvc75_m5_dump_r2", "run_0579_lvc75_m7_dump2_r2"]   # 事前のゲート (2 回目の登録、§6.12) が読む 1 step の書き出し
 SRC, SRC_RES = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5"
 SRC_SHA16 = "207d39f0e7f4aa03"
 SAME_FILES = ["bcondConfig.yaml", "probe.yaml", "species_meta.yaml", "wall_design.csv", "wall_physical.csv",
@@ -303,7 +303,7 @@ def input_gates():
 
 def intervention(rec):
     """介入の成立と残差の不変は事前のゲート (lvc75_pregate.py、plan §6.11) が判定する。ここではその記録が
-    PASS で、ゲートが読んだ書き出し (run_0574・0575・0576) が今もあることだけを確かめ、要点を写す。"""
+    PASS で、ゲートが読んだ書き出し (run_0577・0578・0579) が今もあることだけを確かめ、要点を写す。"""
     g = []
     try:
         vr = subprocess.run([sys.executable, str(HERE / "lvc75_pregate.py"), "--verify"], capture_output=True, text=True)
@@ -317,7 +317,7 @@ def intervention(rec):
             c = cfg(run)
             dd = sorted(k for k in set(c) | set(dc) if k not in allowed and c.get(k) != dc.get(k))
             g.append((f"{run}: 設定が事前のゲートの書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)", bool(dc) and dd == [], dd[:10]))
-        rec["pregate"] = {k: pg.get(k) for k in ("VERDICT", "residual", "same_D_K03", "heatK")}
+        rec["pregate"] = {k: pg.get(k) for k in ("VERDICT", "residual", "struct_rhs", "same_D_K03", "heatK")}
         g.append(("事前のゲートの VERDICT が PASS", str(pg.get("VERDICT", "")).startswith("PASS"), pg.get("VERDICT")))
         g.append(("事前のゲートの項目がすべて合格", bool(pg.get("checks")) and all(c["ok"] for c in pg["checks"]), sum(not c["ok"] for c in pg.get("checks", []))))
         for run in DUMPS:

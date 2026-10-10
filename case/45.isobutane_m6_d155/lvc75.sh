@@ -18,7 +18,7 @@ TOOLS=$(cd ../../solver_density_cuda/tools && pwd)
 SRC=run_0183_ns_coldmesh_tw300_ext
 LOG=$PWD/lvc75.log
 NODES=1572,4113,7985,198560,264263
-EXTRA=res_ro,res_roUx,res_roUy,res_roe,res_roK,res_roOmega,res_roY0,res_roY1,volume   # 書き出しの run だけ (残差の不変を全節点で見る)
+EXTRA=res_ro,res_roUx,res_roUy,res_roUz,res_roe,res_roK,res_roOmega,res_roY0,res_roY1,volume   # 書き出しの run だけ (残差の不変を全節点で見る)
 
 echo "== 開始 $(date -Is)" >> $LOG
 [ "$(sha256sum $BIN | cut -c1-16)" = 129de3f4e7f67aa3 ] || { echo "バイナリの sha256 が登録と違う — 止める" >> $LOG; exit 1; }
@@ -87,9 +87,11 @@ arm() {  # arm <run> <マスク>
 
 MODE=${1:-all}
 if [ $MODE = all ] || [ $MODE = dumps ]; then
-dump1 run_0574_lvc75_m7_dump 7 || exit 1
-dump1 run_0575_lvc75_m5_dump 5 || exit 1
-dump1 run_0576_lvc75_m7_dump2 7 || exit 1
+# 2 回目の登録 (plan §6.12): 1 回目 (run_0574〜0576) は rhs_s0 の規則で INDETERMINATE。記録は lvc75_pregate_r1.json に残し、書き出しは新しい run で一度だけ取り直す
+[ -e _band_ab/cold_pair/lvc75_pregate_r1.json ] || { echo "1 回目の記録 lvc75_pregate_r1.json が無い — 止める" >> $LOG; exit 1; }
+dump1 run_0577_lvc75_m7_dump_r2 7 || exit 1
+dump1 run_0578_lvc75_m5_dump_r2 5 || exit 1
+dump1 run_0579_lvc75_m7_dump2_r2 7 || exit 1
 python3 lvc75_pregate.py > lvc75_pregate.stdout 2>&1; prc=$?
 echo "事前のゲート rc=$prc $(date -Is) $(grep '^VERDICT' lvc75_pregate.stdout)" >> $LOG
 [ $prc = 0 ] || { echo "事前のゲートが不合格 (1 = INVALID / 2 = 判別不能) — 腕を回さずに止める" >> $LOG; touch lvc75.done; exit 1; }
