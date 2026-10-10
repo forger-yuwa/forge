@@ -166,7 +166,9 @@ __global__ void passive_limit_increment_d(
 // (受動種は熱力学に入らない)。node 境界半割面は skip (species と同方針: Dirichlet はピン、Neumann は流束 0)。
 __global__ void passive_diffusion_d(
     geom_int nCells, geom_int nNormalHaloPlanes, geom_int* normal_halo_planes, geom_int* plane_cells,
-    geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    // 面ごとの差 e = cc[ic1] − cc[ic0] (double の座標から 1 回だけ丸めた値、var.p_d["ge_*"]、
+    // plans/active/architecture-float-state-double-geometry.md §4.2a、段 ③)
+    const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
     geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
     flow_float* phi, flow_float* res, flow_float* transport_diag,
     flow_float* ro, flow_float* vis_lam, flow_float* vis_turb,
@@ -181,9 +183,9 @@ __global__ void passive_diffusion_d(
 
     const flow_float f = fx[ip], g = 1.0f - f;
     const flow_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
-    const flow_float dccx = ccx[ic1] - ccx[ic0];
-    const flow_float dccy = ccy[ic1] - ccy[ic0];
-    const flow_float dccz = ccz[ic1] - ccz[ic0];
+    const flow_float dccx = ge_x[ip];   // 座標の差 cc[ic1] − cc[ic0] の代わりに e (同じ向き、段 ③)
+    const flow_float dccy = ge_y[ip];
+    const flow_float dccz = ge_z[ip];
     const flow_float dcc  = sqrtf(dccx*dccx + dccy*dccy + dccz*dccz);
     const flow_float denom = dccx*sxx + dccy*syy + dccz*szz;
     const flow_float Dsafe = (fabsf(denom) < 1.0e-30f) ? ((denom>=0.0f)?1.0e-30f:-1.0e-30f) : denom;

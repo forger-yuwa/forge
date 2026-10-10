@@ -59,9 +59,11 @@ __global__ void scalar_diffusion_first_order_d(
     int isNode,
     geom_int* normal_halo_planes,
     geom_int* plane_cells,
-    geom_float* ccx,
-    geom_float* ccy,
-    geom_float* ccz,
+    // 面ごとの差 e = cc[ic1] − cc[ic0] (double の座標から 1 回だけ丸めた値、var.p_d["ge_*"]、
+    // plans/active/architecture-float-state-double-geometry.md §4.2a、段 ③)
+    const flow_float* ge_x,
+    const flow_float* ge_y,
+    const flow_float* ge_z,
     geom_float* fx,
     geom_float* sx,
     geom_float* sy,
@@ -105,9 +107,10 @@ __global__ void scalar_diffusion_first_order_d(
             return;
         }
 
-        const flow_float dcc_x = ccx[ic1] - ccx[ic0];
-        const flow_float dcc_y = ccy[ic1] - ccy[ic0];
-        const flow_float dcc_z = ccz[ic1] - ccz[ic0];
+        // 座標の差 cc[ic1] − cc[ic0] の代わりに面ごとの差 e (同じ向き) を読む (§4.2a、段 ③)
+        const flow_float dcc_x = ge_x[ip];
+        const flow_float dcc_y = ge_y[ip];
+        const flow_float dcc_z = ge_z[ip];
         const flow_float dcc = sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z);
 
         const flow_float denom = dcc_x * sxx + dcc_y * syy + dcc_z * szz;
@@ -193,9 +196,10 @@ __global__ void scalar_diffusion_multi_d(
     geom_float* ccx, geom_float* ccy, geom_float* ccz,
     geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
     flow_float* ro, flow_float* vis_lam, flow_float* vis_turb, MultiScalarPtrs P,
-    // V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 nullptr = 従来経路):
+    // 面ごとの差 e と V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2a・§4.2c):
     //   ge_x/y/z: 面ごとの e = cc1 − cc0 (double の座標から 1 回だけ丸めた値)。非 nullptr のとき置き換えるのは
     //             ccx[ic1] − ccx[ic0] の引き算だけで、以降の式・型・ガード・面の選択・向きは変えない (§4.2a)。
+    //             本番は段 ③ から e を渡す。nullptr (座標の差) は V0 の診断の旧腕だけが使う。
     //   faceFlux: atomicAdd の直前の面の流束 flux を面の番号で書く ([N*nPlanes]、スカラー s は faceFlux[s*nPlanes+ip])。
     const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
     flow_float* faceFlux, geom_int nPlanes)
@@ -326,8 +330,9 @@ bool fillMultiScalarPtrs(const solverConfig& cfg, const ScalarTransportDesc* des
     return anyDiff;
 }
 
-// 融合拡散カーネルの起動。本番は ge_* と faceFlux を nullptr で呼ぶ (従来経路)。
-// V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c) は P の書き先と ge_*・faceFlux を差し替えて呼ぶ。
+// 融合拡散カーネルの起動。本番は ge_* に面ごとの差 e (var.p_d["ge_*"]、段 ③)、faceFlux に nullptr を渡す。
+// V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c) は P の書き先と ge_*・faceFlux を差し替えて呼ぶ
+// (旧腕は ge_* = nullptr で座標の差)。
 void launchScalarDiffusionMulti(cudaConfig& cuda_cfg, mesh& msh, variables& var, int isNode, int n, const MultiScalarPtrs& P,
                                 const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z, flow_float* faceFlux)
 {
@@ -372,9 +377,9 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
             (cfg.discretization == "node") ? 1 : 0,
             msh.normal_halo_planes_d,
             msh.map_plane_cells_d,
-            var.c_d["ccx"],
-            var.c_d["ccy"],
-            var.c_d["ccz"],
+            var.p_d["ge_x"],
+            var.p_d["ge_y"],
+            var.p_d["ge_z"],
             var.p_d["fx"],
             var.p_d["sx"],
             var.p_d["sy"],
@@ -423,7 +428,8 @@ void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mes
         // 旧腕・新腕 (DUMP) / 参照腕 (REF) を別の書き先で評価し、直後に本番の寄与と照合する。
         const bool geomAb = geomAbHook && geomAbDiag::armed();
         if (geomAb) geomAbDiag::scalarBefore(cfg, cuda_cfg, msh, var, descs, n, &scalarDiffusionMultiArm_d);
-        launchScalarDiffusionMulti(cuda_cfg, msh, var, isNode, n, P, nullptr, nullptr, nullptr, nullptr);
+        // 座標の差は面ごとの差 e を読む (§4.2a、段 ③)。k/ω・トレーサ・遷移・凝縮モーメント・化学種のスカラー経路すべて。
+        launchScalarDiffusionMulti(cuda_cfg, msh, var, isNode, n, P, var.p_d["ge_x"], var.p_d["ge_y"], var.p_d["ge_z"], nullptr);
         if (geomAb) geomAbDiag::scalarAfter(cfg, cuda_cfg, msh, var, descs, n);
     }
 }
