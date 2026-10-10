@@ -10,7 +10,7 @@ c48_prec.sh の後に AWS の case/48 で回す。結果は標準出力と case/
 - 判定: 各量で μ32・μ64 = 2 本・全窓点の平均、D = |μ32 − μ64|/|μ64|、b = 各精度内で平均からの最大偏差、E = (b32 + b64)/|μ64|。
   τ = 0.0005 (θ・δ*)、0.001 (Cf・q_w・CD・HF)。全量で D + E ≤ τ → 「登録窓の対象量は許容内」。いずれかで D − E > τ → 「許容外の精度差を検出」。
   それ以外は判別不能。D − E ≥ 0.005 は「0.5 % 以上の明瞭な差」と追加表示する。観測した 4 本の変動幅による判定で、統計的信頼区間ではない。"""
-import csv, json, math, subprocess, sys
+import argparse, csv, json, math, subprocess, sys
 from pathlib import Path
 import numpy as np
 HERE = Path(__file__).resolve().parents[1]
@@ -22,7 +22,10 @@ OTHER = [f"{q}_{x}" for x in XS for q in ("Cf", "qw")] + ["CD", "HF"]
 TAU = {**{k: 5e-4 for k in THICK}, **{k: 1e-3 for k in OTHER}}
 NEED = ("rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega")
 W0, W1 = 24000, 48000
-OUT = {"undecidable": [], "runs": {}}
+ap = argparse.ArgumentParser(); ap.add_argument("--series", default="prec_series.csv"); ap.add_argument("--out", default="c48_prec_judge.json")
+ap.add_argument("--window-only", action="store_true", help="系列が窓 (24,000〜48,000 step) だけのとき (§6.23 の再集計: 窓の前の場は消してある)")
+A = ap.parse_args()
+OUT = {"undecidable": [], "runs": {}, "series": A.series}
 def und(msg): OUT["undecidable"].append(msg); print("  [判定不能]", msg)
 series = {}
 for arm, runs in ARMS.items():
@@ -40,17 +43,19 @@ for arm, runs in ARMS.items():
         nf = [(x["step"], c) for x in hr for c in cols if not math.isfinite(float(x[c]))]
         if nf: und(f"{r}: 残差に非有限 (最初 {nf[0]})")
         # 判定量の系列
-        sc = run / "prec_series.csv"
-        if not sc.exists(): und(f"{r}: prec_series.csv が無い"); continue
+        sc = run / A.series
+        if not sc.exists(): und(f"{r}: {A.series} が無い"); continue
         S = list(csv.DictReader(open(sc)))
         steps = [int(x["step"]) for x in S]
-        if steps != list(range(2000, W1 + 1, 2000)): und(f"{r}: 系列の step がそろわない ({len(steps)} 点)"); continue
+        if steps != list(range(W0 if A.window_only else 2000, W1 + 1, 2000)): und(f"{r}: 系列の step がそろわない ({len(steps)} 点)"); continue
+        nfa = [x["step"] for x in S for k in THICK + OTHER if not math.isfinite(float(x[k]))]   # 系列の全体の有限性 (§6.23、codex Major 4)
+        if nfa: und(f"{r}: 系列に非有限 (最初の step {nfa[0]})"); continue
         win = [x for x in S if W0 <= int(x["step"]) <= W1]
         vals = {k: np.array([float(x[k]) for x in win]) for k in THICK + OTHER}
         if any(not np.all(np.isfinite(v)) for v in vals.values()): und(f"{r}: 判定量に非有限"); continue
         series[r] = vals
         rec["je_range"] = {f"je_{x}": [int(min(float(w[f'je_{x}']) for w in win)), int(max(float(w[f'je_{x}']) for w in win))] for x in XS}
-        wc = run / "prec_window.csv"
+        wc = run / (Path(A.series).stem + "_window.csv")
         with open(wc, "w", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=["step"] + THICK + OTHER); w.writeheader()
             for x in win: w.writerow({k: x[k] for k in ["step"] + THICK + OTHER})
@@ -67,6 +72,7 @@ for arm, runs in ARMS.items():
         p = subprocess.run([sys.executable, str(TOOLS / "check_convergence.py"), str(run)], capture_output=True, text=True)
         ov = [l for l in (p.stdout + p.stderr).splitlines() if "OVERALL" in l or "VERDICT" in l]
         rec["check_convergence"] = ov[-1] if ov else f"(行なし) rc={p.returncode}"
+        if not ov: und(f"{r}: check_convergence が実行できない (rc {p.returncode})")   # NOT CONVERGED は記録だけ、実行の失敗は判定不能 (§6.23)
         log = (run / "forge_run.log").read_text(errors="replace") if (run / "forge_run.log").exists() else ""
         rec["settings_echo"] = sorted({l.strip()[:160] for l in log.splitlines() if any(k in l for k in ("scalarGradient", "slauWallNormalChi", "limiterScaled", "venkatK", "implicitSolvePrecision"))})[:12]
         print(f"== {r}: 最後の step {last}、準定常 {'ALL STEADY' if steady else 'NOT ALL STEADY'}、check_convergence: {rec['check_convergence']}")
@@ -86,7 +92,8 @@ steady_all = all(OUT["runs"].get(r, {}).get("all_steady") for runs in ARMS.value
 if OUT["undecidable"]:
     verdict = "判定不能: " + "; ".join(OUT["undecidable"])
 elif not steady_all:
-    verdict = "判別不能 (窓の対象量が 4 本すべてで STEADY でない)"
+    rest = [k for k, v in res.items() if v["cls"] != "許容内"]
+    verdict = "判別不能 (窓の対象量が 4 本すべてで STEADY でない" + (f"。D + E でも許容内に入らない量: {rest}" if rest else "") + ")"
 elif any(v["cls"] == "許容外" for v in res.values()):
     verdict = "許容外の精度差を検出: " + ", ".join(f"{k} (D {v['D']:.2e}, E {v['E']:.2e})" for k, v in res.items() if v["cls"] == "許容外")
     if any(v["D"] - v["E"] >= 0.005 for v in res.values()): verdict += " — 0.5 % 以上の明瞭な差あり"
@@ -96,5 +103,5 @@ else:
     verdict = "判別不能: " + ", ".join(k for k, v in res.items() if v["cls"] == "判別不能")
 OUT["verdict"] = verdict
 print(f"== VERDICT §6.21: {verdict}")
-(HERE / "c48_prec_judge.json").write_text(json.dumps(OUT, indent=1, ensure_ascii=False, default=float))
-print("→", HERE / "c48_prec_judge.json")
+(HERE / A.out).write_text(json.dumps(OUT, indent=1, ensure_ascii=False, default=float))
+print("→", HERE / A.out)
