@@ -527,16 +527,27 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
   - 診断のスイッチ (逆行列・float・並列版・一体型・点の診断・NOOP) が立っていて `FORGE_LINE_LAYOUT` が無いときは、止めずに従来の並びにする (明示の 1/2 との組み合わせは従来どおり止める)。
   - 並べ替えた配列は「最長 × 本数」の区画を取るので、区画の数が被覆 CV の 1.5 倍を超えるメッシュでは従来の並びにする (長さのばらつきによるメモリの無駄を避ける)。どの並びかは起動時に 1 行で表示する。
   - 従来の並びの配列 (節点番号の並び) の確保はそのまま残す (比較・診断で使う。メモリは case/45 で +365 MB、§6.12)。
+- **点検の反映 (codex plan-8、全件採用)**:
+  - (M1) 台本は判定を集約して終了コードに出す (`lay3_judge.py`。判定 JSON がその run の開始より新しいことも確かめる)。η の例外は、fail が空・非有限 0・判定不能の理由がすべて η の行のときだけにする。失敗した run の成果物は消さない。
+  - (M2) 実効の並びは、メモリを確保する前に、メッシュの情報 (区画の数と被覆) も含めて一度だけ決める (`lineLayoutResolve`)。factor・solve・比較・表示はその値を共有する。
+  - (M3) 自動で選んだとき (環境変数なし) は、並べ替えた配列の確保に失敗したら、確保済みの分を解放して従来の並びに戻す。明示の 1/2 では従来どおり止める。
+  - (m1) η の例外は「並びの違いの同値性の確認」としての扱いで、線形解の精度の合格ではない。float のビルドでは、`flow_float` に保存した緩和後の補正から dq/relax を戻して η を測るので、その丸めだけでも 1e-11 を超えうる。
 - **既定化の後の確認** (新しいバイナリ):
   - 既定の経路で case/45 値 0 の 20 step の比較が PASS (`[line] … モード LAYOUT2` が出ること)。
   - `FORGE_LINE_LAYOUT=0` で従来の並び (`モード LU`)。
   - 1000 step の 1 step の時間が LAYOUT2 の値 (32.1 ms) と同程度。
   - ラインなし (`lineImplicit 0`) の run で並べ替えの表示と確保が出ないこと。
+  - 従来へ戻る分岐 (codex plan-8 M2・M3):
+    - 診断のスイッチ (`FORGE_LINE_INV`・`F32`・`PAR`・`MONO`・`DEBUG_POINT`・`NOOP`) を立てて `FORGE_LINE_LAYOUT` を付けない → 従来の並び。明示の `FORGE_LINE_LAYOUT=2` と組む → 起動時に止まる。
+    - 区画比の上限を超える → 従来 (試験用の `FORGE_LINE_LAYOUT_SLOT_RATIO` で上限を下げて確かめる)。
+    - 確保の失敗 → 従来 (試験用の `FORGE_LINE_LAYOUT_FAKE_OOM=1` で模擬)。
+    - `lineImplicit 1` でライン 0 本 → 何も確保・表示しない。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#13 LAYOUT2 の既定化 §6.19) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-8.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-8.md) | GO-with-changes, C0/M3/m1 | 全件採用 (§6.19 の「点検の反映」): 台本の判定の集約と終了コード・失敗時の成果物の保持、実効の並びを確保の前に一度だけ決めて共有、自動選択時の確保の失敗で従来へ、η の例外は同値性の確認に限ると明記。従来へ戻る分岐の確認を追加 |
 | plan (#16・#20 の総時間 §6.18) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-7.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-7.md) | GO-with-changes, C0/M3/m0 | 全件採用: (M1) ディスクの見張りをバイト単位・最初の腕の前から・取得失敗でも止める、(M2) 判定器は発散・記録なし・判定不能と見張りの設定の不一致を先に比較不可にしてから到達・打ち切りを分類、(M3) 見張りは終端の状態でも phase/budget/consec を先に照合。`--consec 1` が従来と同じこと・B0 の 2 出力連続が 125000 になることは点検側で確認済み |
 | plan (#16・#20 の 1 step のふるい) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-6.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-6.md) | GO-with-changes, C0/M4/m2 | 全件採用 (§6.16 の「点検の反映」): 照合の PASS を M 系の前提に、GPU の照会の失敗と計測中の競合を検出、残差と最終場の有限性、B0 で挟む並びと巡ごとの順の入れ替え、バイト単位の空きの確認、5 % は予算の基準と明記。部分被覆の経路 (point の節点) は問題なしとの確認 |
 | plan (#19 緩和の 4 腕) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-5.md) | GO-with-changes, C0/M3/m0 | 全件採用 (投入前): M1 判定器の前提の検査、M2 trap と見張りの同時起動 (起動の猶予を足した)、M3 段ごとの入力の写しの削除・空きの下限で停止 (§6.13) |
