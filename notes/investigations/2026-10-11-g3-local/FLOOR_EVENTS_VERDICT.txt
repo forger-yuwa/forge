@@ -1,0 +1,9 @@
+floor events: case/46.sern_design/run_1084_tewake_g3_L10_m10/floor_events.csv
+  session 1 (prior 0), path steady_implicit, last step 20000, window [10000, 20000]
+  T  : 0 件 / 0 更新 (Σ 0, max 0)
+  Rho: 0 件 / 0 更新 (Σ 0, max 0)
+  P  : 0 件 / 0 更新 (Σ 0, max 0)
+  入口 Q_a (別枠): {'q_index': 10000, 'step': 10001, 'nT': 0, 'nRho': 0, 'nP': 0, 'n_nonfinite': 0, 'n_near': 0}
+  床近傍 T ≤ T_min + 1 K (補助、区間内の延べ): 0、ghost (別集計): {'T': 0, 'Rho': 0, 'P': 0, 'nonfinite': 511430000}
+  初期化の EOS (別枠): {'n_rows': 1, 'nT': 1, 'nRho': 0, 'nP': 0, 'n_nonfinite': 0, 'nT_ghost': 0, 'nRho_ghost': 165659, 'nP_ghost': 0}、時間ステップ外の EOS (別枠): {'n_rows': 0, 'nT': 0, 'nRho': 0, 'nP': 0, 'n_nonfinite': 0, 'nT_ghost': 0, 'nRho_ghost': 0, 'nP_ghost': 0}
+VERDICT: PASS

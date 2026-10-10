@@ -1,0 +1,42 @@
+A: case/46.sern_design/run_1083_tewake_g3_A0_ref/sern.h5
+B: case/46.sern_design/run_1084_tewake_g3_L10_m10/sern.h5
+plan convection-zero-thickness-edge-reconstruction §6.0「投入条件 = 最終 node 格子の検査」(事前登録 2026-10-08)
+判定     | 行              | 項目 | 測定 (B) | 参考 (A) | 閾値
+PASS   | 前提             | A の入力が最終 node 格子 | h5 (node 変換, 座標 float32) | - | node 変換の h5
+PASS   | 前提             | B の入力が最終 node 格子 | h5 (node 変換, 座標 float32) | - | node 変換の h5
+PASS   | 前提             | L_b (te_wake_blend_H) | A 0 H / B 1 H | - | A 0 / B 1 H (事前登録、結果を見て変えない)
+PASS   | 前提             | 格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ | 同じ | - | -
+PASS   | 最初の下流の辺        | 下側の第 1〜第 10 層・全 span: max |θ(i_te→i_te+1) − m0| | 2.1975° @ (i,j,k)=(104,53,0) x,y,z=(0.120000,-0.010515,0.000000) m  [B の辺 -6.6047〜-6.6027°] | 35.8283° | ≤ 3° (m0 = -4.4072°: B の info te_wake_slope_te_deg)
+         └ 参考 (判定外): 後縁節点 j=jm の最初の下流の辺と m0 の差 2.1975°
+PASS   | 後縁の折れ          | 下側の第 1〜第 10 層・全 span: max 折れ角 | 2.1975° @ (i,j,k)=(104,53,0) x,y,z=(0.120000,-0.010515,0.000000) m | 35.8283° | ≤ 3°
+PASS   | 後縁の折れ          | 上側の第 1〜第 10 層・全 span: max 折れ角 | 1.6046° @ (i,j,k)=(104,55,24) x,y,z=(0.120000,-0.010483,0.100000) m | 35.2353° | ≤ 3°
+PASS   | 後縁の折れ          | 共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線): max 折れ角 | 2.1975° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010499,0.000000) m | 35.8283° | ≤ 3°
+PASS   | 後縁の折れ          | 共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in): max 折れ角 | 1.6047° @ (i,j,k)=(104,54,24) x,y,z=(0.120000,-0.010499,0.100000) m | 35.2354° | ≤ 3°
+PASS   | 復帰区間の折れ        | 主ブロックの全 i 線・全 span、節点 i = 105..121 (最初の未変形の辺を含む): max 折れ角 | 5.1331° @ (i,j,k)=(110,73,0) x,y,z=(0.140444,-0.013935,0.000000) m | 0.0815° | ≤ 6°
+         └ 復帰区間 = info の te_wake_i_last 120 と動いた節点の i の最大の大きい方 + 1
+PASS   | 固定すべき量         | 節点数 | A 1920103 / B 1920103 | - | 同じ
+PASS   | 固定すべき量         | x 座標 (全節点) | ビット一致 | - | ビット一致
+PASS   | 固定すべき量         | z 座標 (全節点) | ビット一致 | - | ビット一致
+PASS   | 固定すべき量         | ヘキサの接続 | 同一 | - | 同一
+PASS   | 固定すべき量         | 境界面の接続 (タグ別) | 同一 | - | 同一
+PASS   | 固定すべき量         | 上流の座標 (x ≤ 後縁の x = 0.120000 m の 784711 節点、3 成分) | 相違 0 節点 | - | 0
+PASS   | 固定すべき量         | 固体形状 (壁タグの節点が動かない) | 動いた 0 | - | 0
+PASS   | 固定すべき量         | 外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない) | 動いた 0 | - | 0
+         └ 記録: sym・side_far 上の面内 (y) の移動 {'sym': 993, 'side_far': 993} (z は全節点ビット一致なので面内)、動いた節点の総数 38727 (主ブロック外 0)
+PASS   | 層の Δy          | 下側の第 1 層 (列 i = 104..121・全 span) | max 相対差 4.655e-04、許容の使用率 max 0.218 | - | |Δy_B − Δy_A| ≤ 1e-08·Δy_A + 4·ε₃₂·max|y|
+PASS   | 層の Δy          | 下側の第 1〜第 10 層の各層厚 (同) | max 相対差 4.655e-04、許容の使用率 max 0.00893 | - | |Δy_B − Δy_A| ≤ 0.05·Δy_A + 4·ε₃₂·max|y|
+PASS   | 層の Δy          | 上側の第 1 層 (列 i = 104..121・全 span) | max 相対差 4.658e-04、許容の使用率 max 0.218 | - | |Δy_B − Δy_A| ≤ 1e-08·Δy_A + 4·ε₃₂·max|y|
+PASS   | 層の Δy          | 上側の第 1〜第 10 層の各層厚 (同) | max 相対差 4.658e-04、許容の使用率 max 0.00893 | - | |Δy_B − Δy_A| ≤ 0.05·Δy_A + 4·ε₃₂·max|y|
+PASS   | primal の品質     | 非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点) | 0 | 0 | 0
+         └ 向き = A の多数派 (正)
+PASS   | primal の品質     | スケール済みヤコビアンの最小 (B) | 0.67245 | 0.76115 | ≥ 0.65
+PASS   | primal の品質     | skew 最大 (B、check_mesh_quality の 3D 定義) | 0.53048 | 0.44927 | ≤ 0.9
+PASS   | primal の品質     | skew 最大の A からの増加 | +0.08121 | - | ≤ 0.1
+PASS   | 品質・双対の判定       | (a) check_mesh_quality の VERDICT が A と同等以上 | B PASS | PASS | B ≥ A (PASS > SOFT-PASS > FAIL)、閾値 AR<= 5000・skew<= 0.9
+PASS   | 品質・双対の判定       | (b) 変形領域に新しい AR 閾値超過を作らない | 新しい超過 0 (変形領域 40774 ヘキサ、B の超過 0・A の超過 0、AR 最大 B 2886.8 / A 2886.8) | - | 0 (AR > 5000、閾値は B の MESH_QUALITY)
+         └ AR は check_mesh_quality と同じ定義 (全辺の最長/最短) をこの道具で計算
+PASS   | 品質・双対の判定       | (c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS | VERDICT PASS (CV 1920103, tol 1e-05) | PASS (tol 1e-05) | PASS
+
+行ごと: 前提 PASS, 最初の下流の辺 PASS, 後縁の折れ PASS, 復帰区間の折れ PASS, 固定すべき量 PASS, 層の Δy PASS, primal の品質 PASS, 品質・双対の判定 PASS
+ADMISSION VERDICT: PASS
+来歴: case/46.sern_design/run_1084_tewake_g3_L10_m10/TE_WAKE_PROVENANCE.json  (A 署名 daa5e21f1d8f576dbe8827819cd11ef9439419d71ab045c03f6af02b6da979ae, B 署名 1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40)

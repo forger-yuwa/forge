@@ -1,0 +1,1 @@
+IC: restart_field_deformed run_1055_r7b_m10_A_c res_20000 (冷点を含む床到達場、診断用の継続元) → run_1084 (局所化格子)、--src-mesh run_1083 (0 格子、座標署名 = run_1055)。plan tooling-sern-te-wake-grid §5.1 #4d
