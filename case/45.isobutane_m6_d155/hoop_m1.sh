@@ -10,7 +10,13 @@ HERE=$(cd $(dirname $0) && pwd)
 echo "== $(date -Is) 変換器 $(sha256sum $CONV | cut -c1-16)" > $W/hoop_m1.log
 for T in T1_tri_curved T2_mixed T3_step_multicorner; do
   d=$W/$T; rm -rf $d; mkdir -p $d; cp $M/$T.msh $d/
-  sed 's#^mesh: {.*#mesh: {discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: "m.h5", valueFileName: "m.h5"}#' $SC > $d/solverConfig.yaml
+  python3 - $SC $d/solverConfig.yaml <<'PY' || { echo "$T: solverConfig の書き換えに失敗" >> $W/hoop_m1.log; continue; }
+import re, sys
+s = open(sys.argv[1]).read()   # case/48 の mesh: は複数行にまたがる (1 行目だけ替えると YAML が壊れる)
+t = re.sub(r"^mesh:\s*\{.*?\}", 'mesh: {discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: "m.h5", valueFileName: "m.h5"}', s, count=1, flags=re.S | re.M)
+assert t != s, "mesh: が見つからない"
+open(sys.argv[2], "w").write(t)
+PY
   cat > $d/bcondConfig.yaml <<'EOF'
 inlet:  {physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {Pt: 200000.0, Tt: 300.0, k: 1.0, omega: 1000.0}}
 outlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 0, ints: , floats: {Ps: 100000.0, Pt: 100000.0, Tt: 300.0}}
