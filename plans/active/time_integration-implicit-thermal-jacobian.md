@@ -116,7 +116,7 @@ cfl = max(cfl_方向別, cfl_全面/R) とする (Δτ ∝ 1/cfl なので Δτ 
 | 2 | 実装 (§5 の 1〜3、§4.1・§4.2) | 合格: FP32・FP64 ともビルドが通る、`-Xptxas -v` のレジスタ・スピルを前後で記録、既定 0 で V0 がビット同一 | O |
 | 3 | 検証 U1・V0〜V4 (§6) | U1・V1・V1b・ノズルの cfl 2/1・V3 は不合格 (§6.0)。V0 は判定不能 (forge 自体が再実行でビット一致しない、§6.0)。代わりの基準 (同じバイナリの再実行の差の分布と比べる) の採否を codex 諮問で決める | F |
 | 4 | result 段のレビューと採否 (不採用で閉じる案)、コードを残すか戻すかの判断 (ユーザ) | | F |
-| 5 | point 仕上げにおける残差評価の精度の監査 (移管、2026-10-09) | [time_integration-line-viscous-jacobian](../accepted/time_integration-line-viscous-jacobian.md) §6.16 で、TP の SLAU の面エンタルピーを double にすると同じ状態のエネルギーの残差の評価が ‖R_B − R_A‖/‖R_A‖ = 5.5e-3 変わった。停滞への寄与を測るなら (codex 2026-10-09): 同じ point 仕上げの保存状態・同じバイナリ (lineH 以降)・同じ設定から A = 既定、B = `FORGE_DIAG_FACE_H_DOUBLE=1` だけを変えて各 2000 step (全残差は毎 step、開始・1000・1500・2000 step の状態を保存)。末尾 500 step の全残差の水準・傾きに加え、保存した状態を共通の評価の精度で再評価する。B だけで共通の評価のエネルギーの残差が 10 % 以上下がり再評価のノイズを十分上回る → この期間の停滞への寄与を支持、自方式の表示だけが変わり共通の評価で 10 % 未満 → 主要因説を支持しない、まだ減衰中 → 床の判定は不能 (自動で延長しない)。回すかは本線の評価の後に決める (未着手)。**別のセッションへ引き継ぎ (2026-10-10)**: [`notes/sessions/2026-10-10-handoff-face-enthalpy-audit.md`](../../notes/sessions/2026-10-10-handoff-face-enthalpy-audit.md) (float 化の判断材料)。**2026-10-10 着手**: §6.2 に事前登録 (出発 run_0354 の res_40000、各腕 3 本、共通の評価は評価器 d)、codex plan 段の後に回す | F |
+| 5 | point 仕上げにおける残差評価の精度の監査 (移管、2026-10-09) | [time_integration-line-viscous-jacobian](../accepted/time_integration-line-viscous-jacobian.md) §6.16 で、TP の SLAU の面エンタルピーを double にすると同じ状態のエネルギーの残差の評価が ‖R_B − R_A‖/‖R_A‖ = 5.5e-3 変わった。停滞への寄与を測るなら (codex 2026-10-09): 同じ point 仕上げの保存状態・同じバイナリ (lineH 以降)・同じ設定から A = 既定、B = `FORGE_DIAG_FACE_H_DOUBLE=1` だけを変えて各 2000 step (全残差は毎 step、開始・1000・1500・2000 step の状態を保存)。末尾 500 step の全残差の水準・傾きに加え、保存した状態を共通の評価の精度で再評価する。B だけで共通の評価のエネルギーの残差が 10 % 以上下がり再評価のノイズを十分上回る → この期間の停滞への寄与を支持、自方式の表示だけが変わり共通の評価で 10 % 未満 → 主要因説を支持しない、まだ減衰中 → 床の判定は不能 (自動で延長しない)。回すかは本線の評価の後に決める (未着手)。**別のセッションへ引き継ぎ (2026-10-10)**: [`notes/sessions/2026-10-10-handoff-face-enthalpy-audit.md`](../../notes/sessions/2026-10-10-handoff-face-enthalpy-audit.md) (float 化の判断材料)。**2026-10-10 着手**: §6.2 に事前登録 (出発 run_0354 の res_40000、各腕 3 本、共通の評価は評価器 d)、codex plan 段の後に回す。**判断: 2026-10-10 codex 諮問 — 登録の判定 `NOT_SUPPORT` (評価器 d の比 0.990、低下 + u 5.3 % < 10 %) を限定つきで記録し、追加の run なしで「探索試験の判定済み」として閉じる (§6.3)。約 1 % の差は登録外の観測、FP32 への一般化はしない** | F |
 
 ## 6. 検証 (事前登録、2026-10-09、レビュー反映後)
 
@@ -314,6 +314,28 @@ e2696d8f0 + 同じ 2 つの手の変更で、HEAD との solver の差は `gmshR
   場は判定の後に消す: 評価 run は h5 をすべて、軌道 run は途中の場と `nozzle.h5` を消し、res_2000 は A1・B1 だけ残す。
 - **やらないこと**: 自動の延長、面エンタルピーの double を既定にすること (速度・回帰への影響を測っていない)、この A/B だけで float 化の範囲を決めること。
 
+### 6.3 §6.2 の結果 (2026-10-10、バイナリ lineM_fp64 = sha256 05ad8bdf…、codex 諮問 [記録](../../notes/reviews/2026-10-10-faceh-floor-result-diagnose.md))
+
+- **VERDICT (`fh_floor_judge.py`、`case/45.isobutane_m6_d155/_band_ab/cold_pair/fh_floor_judge.json`)**: `NOT_SUPPORT` (この期間の主要因説を支持しない)。ゲート 315 項目はすべて合格
+  (自己一致は A1 2.5e-14、B1 3.3e-15)。評価器 f でも同じ判定。
+- 2000 step の状態の共通の評価 (評価器 d の `rms_roe`): A 6.5124 / 6.4988 / 6.4876、B 6.4769 / 6.3845 / 6.4449。比 B/A 0.9901 (低下 0.99 %)、3 本の幅は A 0.38 %・B 1.44 %、
+  u = 4.3 %、低下 + u = 5.3 % < 10 %。評価器 f の比は 0.9902。
+- ドリフト: 6 本とも、`rms_roe` について末尾 500 step で登録の閾値 (±0.01 桁) を超えるドリフトを検出しなかった (傾き × 500 は −0.0073〜+0.0075 桁)。
+  これは統計検定の結果ではなく、全残差・目的量の定常性や残差の床への到達も示さない。`check_convergence --segment` (区間 main、0〜1999) は 6 本とも NOT CONVERGED (stalled/plateau)。
+- **主張の範囲**: 出発 run_0354 の res_40000・point・cfl 4・キー 0・FP64 ビルド (lineM_fp64)・2000 step・各腕 3 本の探索試験で、面エンタルピーの double の評価が
+  エネルギーの残差を 10 % 以上下げることを支持しなかった。10 % 以上の真の効果を統計的に棄却したのではない。面エンタルピーの精度の影響がゼロであること、長期の残差の床、
+  FP32 の状態のビルドでの妥当性、物理の精度・速度は判定していない。他の混合精度の経路 (`thermoFloat` の γ・音速、輸送物性の表引き) も除外していない。
+- **観測 (登録の判定には使わない)**: B の 3 本の水準は共通の評価 d でも A より約 1 % 低く (B の最大 6.4769 < A の最小 6.4876)、自方式の表示でも比 0.987 で範囲が分かれた。
+  保存した終状態の差は表示の評価器の切替だけでは説明できない。ただし「今回の標本では B が低かった。切替による再現可能な改善かは未確定」にとどめる。
+  k・ω の残差は B のほうが約 0.96 %・1.65 % 高く、全残差の改善とも呼べない。
+- 同じ状態での E_d/E_f (`rms_roe`) は 0.99985〜1.00001 (S で 0.999977、B1 の 2000 step で 0.999854)。これは RMS の比で、残差のベクトルの差 ‖R_d − R_f‖/‖R_f‖ ではない。
+  RMS の比が 1 に近くても、反復を駆動する残差のベクトルの差が小さいとは言えない (諮問の指摘で、呼び出し側の「RMS 差が小さいから主要因ではない」という補助の根拠は撤回した)。
+- **証拠の場所** (AWS `~/forge-wallfit/case/45.isobutane_m6_d155/`): 軌道 `run_0500_fh_a1`〜`run_0505_fh_b3` と評価 `run_0510`〜`run_0537_fhe_*` の
+  `residual_history.csv`・`solverConfig.yaml`・`COLD_PAIR.json`・`forge_run.log`・`CONVERGENCE_SEGMENT.txt`、`_fh_states/` (状態の sha256)、台本のログ `fh_floor.log`。
+  場は A1・B1 の res_1000・1500・2000 と全軌道の res_2000・壁/出口の出力だけを残し、他は判定後に消した (判定器を再実行するには評価 run の CSV と軌道の res_2000 が要る)。
+- **処置**: 追加の run は行わない。§5.1 #5 は「登録した 2000 step の探索試験の判定済み」として閉じる。残差の床の原因の解明・FP32 での検証・本 plan 全体の完了とは分ける。
+  float 化を担当するセッションへの申し送りは [`notes/sessions/2026-10-10-return-viscous-jacobian-close.md`](../../notes/sessions/2026-10-10-return-viscous-jacobian-close.md) の ③ の節。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -321,6 +343,7 @@ e2696d8f0 + 同じ 2 つの手の変更で、HEAD との solver の差は `gmshR
 | plan | 2026-10-09 | [2026-10-09-time_integration-implicit-thermal-jacobian-plan.md](../../notes/reviews/2026-10-09-time_integration-implicit-thermal-jacobian-plan.md) | GO-with-changes, C0/M4/m1 | 全件採用: M1 係数を残差と同じ面の k_face と c_p/γ に (§4.1)、M2 node 限定 (`isNode && has_nbr` と設定の検査)、M3 U1 (純伝導)・V0 の範囲の拡大・線形解の失敗 0 件を §6 に、M4 欠損の大きさ/ṁ_in・局所ノルム・同じ水準までの壁時計で判定 (§6 V2)、m5 原因の書き方を仮説に・V1c で熱伝導と粘性仕事を分ける |
 | plan (上位の諮問) | 2026-10-09 | diagnostician (Fable、本節に要約) | 式は残差と符号・幾何で整合、Major 2 (k の定義 = codex M1 と同じ、Jacobian 単体の検査が無い = U1)・Minor 3 | 全件採用: ∂T/∂ρ は厳密と書き直し (§4.1)、V1b (拘束の行、ビット 2) を事前登録、V2 の主比較を V3 に、V0 に run_0203 の設定と ST 1 を追加、レジスタ・スピルを記録、`nodeIsothermalEnergyBC` を併用拒否。係数は diagnostician の自節点の値でなく codex の面の値 (残差の式そのもの) を採る |
 | plan (§6.2 の追加) | 2026-10-10 | [2026-10-10-time_integration-implicit-thermal-jacobian-plan.md](../../notes/reviews/2026-10-10-time_integration-implicit-thermal-jacobian-plan.md) | GO-with-changes, C0/M5/m1 | 全件採用 (根拠の箇所を確かめ、判定器は人工入力で再試験): M1 終了コード・行の連続性・全行の有限性・最終場の全保存量のゲートを追加し、外れたら INVALID、評価 run の場は判定後に消す。M2 軌道も `_fh_states/s0` から始め、出発の場の sha256・境界条件などの入力・格子のハッシュを run_0354 と照合。M3 床の判定を各反復の「減衰・増加・許容内・混在」と窓の水準の差に分け、「許容内」でも「有意なドリフトを検出せず」までに限定。M4 不確かさの幅 u = 3 × noise を「支持しない」側にも課し、10 % の境界をまたげば判別不能。M5 「表示の定義の違いだけ」は、共通の評価の差がノイズ内かつ同じ状態の f/d の差で表示の差を説明できるときに限る。m6 各軌道の `check_convergence --segment` を台本で保存し判定器が記録。d を主の評価器にする方針は codex も妥当とした |
+| 諮問 (§6.2 の結果) | 2026-10-10 | [2026-10-10-faceh-floor-result-diagnose.md](../../notes/reviews/2026-10-10-faceh-floor-result-diagnose.md) | 登録の判定 NOT_SUPPORT は採用 (JSON から独立に再計算)、H1 の補助の根拠 (同じ状態の RMS 比) は Major で却下、ドリフトの文言を限定、約 1 % の差は観測として記録、FP32 への一般化は Major で却下、追加の run なしで §5.1 #5 を閉じる | 全件採用 (B1 の 2000 step の E_d/E_f 0.99985 を JSON で確かめた): §6.3 に結果・主張の範囲・観測・証拠の場所を記録、§5.1 #5 を閉じた、float 化の担当への申し送りの文面を諮問のとおりにした |
 
 ## 7. 影響範囲
 
@@ -343,3 +366,4 @@ e2696d8f0 + 同じ 2 つの手の変更で、HEAD との solver の差は `gmshR
 - `2026-10-09` — codex plan 段のレビューと diagnostician の諮問を反映 (§4・§6 改訂、ビットマスク化と V1b・U1・V1c の追加)。status in_progress。
 - `2026-10-09` — 実装 (1ad0b9bb)、FP64 ビルド (sha256 9ffc4d1e…)。U1・V1・V1b・ノズルの cfl 2/1・V3 はいずれも不合格 (§6.0)。キー 1 はノズルを不安定化させる → 不採用の方向。
 - `2026-10-10` — §5.1 #5 (point 仕上げでの面エンタルピーの精度の A/B) を引き継いで §6.2 に事前登録。codex plan 段 (GO-with-changes、C0/M5/m1) を全件採用してゲートと判定の分岐を直した。台本 `fh_floor.sh`・判定 `fh_floor_judge.py` は run の前に commit。粘性 Jacobian plan の accepted への移動に合わせてリンクを更新。
+- `2026-10-10` — §6.2 の A/B を実行 (case/45 の run_0500〜0505・run_0510〜0537、lineM_fp64)。VERDICT NOT_SUPPORT。codex 諮問を全件採用して §6.3 に記録し、§5.1 #5 を探索試験の判定済みとして閉じた。

@@ -1,0 +1,2876 @@
+{
+ "plan": "time_integration-implicit-thermal-jacobian §6.2",
+ "quantity": "rms_roe",
+ "gates": [
+  {
+   "check": "S の sha256 が run_0354/res_40000.h5 と一致",
+   "ok": true,
+   "value": "4118dc99ce143303"
+  },
+  {
+   "check": "run_0500_fh_a1: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0500_fh_a1: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0500_fh_a1: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0500_fh_a1: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0500_fh_a1: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0500_fh_a1: outer_begin の行が step 0〜1999 で一意・連続",
+   "ok": true,
+   "value": [
+    0,
+    1999,
+    2000,
+    []
+   ]
+  },
+  {
+   "check": "run_0500_fh_a1: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0500_fh_a1: 切替の表示 = 0",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0500_fh_a1: res_2000 の保存量・P・T が有限",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0500_fh_a1: res_2000 の ρ・P・T が正",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0501_fh_b1: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0501_fh_b1: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0501_fh_b1: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0501_fh_b1: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0501_fh_b1: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0501_fh_b1: outer_begin の行が step 0〜1999 で一意・連続",
+   "ok": true,
+   "value": [
+    0,
+    1999,
+    2000,
+    []
+   ]
+  },
+  {
+   "check": "run_0501_fh_b1: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0501_fh_b1: 切替の表示 = 1",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0501_fh_b1: res_2000 の保存量・P・T が有限",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0501_fh_b1: res_2000 の ρ・P・T が正",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0502_fh_a2: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0502_fh_a2: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0502_fh_a2: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0502_fh_a2: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0502_fh_a2: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0502_fh_a2: outer_begin の行が step 0〜1999 で一意・連続",
+   "ok": true,
+   "value": [
+    0,
+    1999,
+    2000,
+    []
+   ]
+  },
+  {
+   "check": "run_0502_fh_a2: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0502_fh_a2: 切替の表示 = 0",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0502_fh_a2: res_2000 の保存量・P・T が有限",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0502_fh_a2: res_2000 の ρ・P・T が正",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0503_fh_b2: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0503_fh_b2: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0503_fh_b2: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0503_fh_b2: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0503_fh_b2: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0503_fh_b2: outer_begin の行が step 0〜1999 で一意・連続",
+   "ok": true,
+   "value": [
+    0,
+    1999,
+    2000,
+    []
+   ]
+  },
+  {
+   "check": "run_0503_fh_b2: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0503_fh_b2: 切替の表示 = 1",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0503_fh_b2: res_2000 の保存量・P・T が有限",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0503_fh_b2: res_2000 の ρ・P・T が正",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0504_fh_a3: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0504_fh_a3: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0504_fh_a3: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0504_fh_a3: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0504_fh_a3: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0504_fh_a3: outer_begin の行が step 0〜1999 で一意・連続",
+   "ok": true,
+   "value": [
+    0,
+    1999,
+    2000,
+    []
+   ]
+  },
+  {
+   "check": "run_0504_fh_a3: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0504_fh_a3: 切替の表示 = 0",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0504_fh_a3: res_2000 の保存量・P・T が有限",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0504_fh_a3: res_2000 の ρ・P・T が正",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0505_fh_b3: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0505_fh_b3: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0505_fh_b3: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0505_fh_b3: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0505_fh_b3: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0505_fh_b3: outer_begin の行が step 0〜1999 で一意・連続",
+   "ok": true,
+   "value": [
+    0,
+    1999,
+    2000,
+    []
+   ]
+  },
+  {
+   "check": "run_0505_fh_b3: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0505_fh_b3: 切替の表示 = 1",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0505_fh_b3: res_2000 の保存量・P・T が有限",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0505_fh_b3: res_2000 の ρ・P・T が正",
+   "ok": true,
+   "value": {
+    "ro": 0,
+    "P": 0,
+    "T": 0
+   }
+  },
+  {
+   "check": "run_0510_fhe_s0_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0510_fhe_s0_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0510_fhe_s0_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0510_fhe_s0_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0510_fhe_s0_f: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0510_fhe_s0_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0510_fhe_s0_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0510_fhe_s0_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0510_fhe_s0_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.538800870347329
+  },
+  {
+   "check": "run_0511_fhe_s0_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0511_fhe_s0_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0511_fhe_s0_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0511_fhe_s0_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0511_fhe_s0_d: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0511_fhe_s0_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0511_fhe_s0_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0511_fhe_s0_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0511_fhe_s0_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.538648285965989
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: 出発の場が状態 a1k1000",
+   "ok": true,
+   "value": [
+    "a1k1000",
+    "res_1000.h5",
+    "9b47db7a07bdb472"
+   ]
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0512_fhe_a1k1000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.635434953120642
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: 出発の場が状態 a1k1000",
+   "ok": true,
+   "value": [
+    "a1k1000",
+    "res_1000.h5",
+    "9b47db7a07bdb472"
+   ]
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0513_fhe_a1k1000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.635502449588447
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: 出発の場が状態 a1k1500",
+   "ok": true,
+   "value": [
+    "a1k1500",
+    "res_1500.h5",
+    "b6b495c034e96d5c"
+   ]
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0514_fhe_a1k1500_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.516350494521116
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: 出発の場が状態 a1k1500",
+   "ok": true,
+   "value": [
+    "a1k1500",
+    "res_1500.h5",
+    "b6b495c034e96d5c"
+   ]
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0515_fhe_a1k1500_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.516568875096715
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: 出発の場が状態 a1k2000",
+   "ok": true,
+   "value": [
+    "a1k2000",
+    "res_2000.h5",
+    "ebe7e7a270378444"
+   ]
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0516_fhe_a1k2000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.512654161893749
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: 出発の場が状態 a1k2000",
+   "ok": true,
+   "value": [
+    "a1k2000",
+    "res_2000.h5",
+    "ebe7e7a270378444"
+   ]
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0517_fhe_a1k2000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.512400268351112
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: 出発の場が状態 b1k1000",
+   "ok": true,
+   "value": [
+    "b1k1000",
+    "res_1000.h5",
+    "9e8c8bf45b17a82a"
+   ]
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0518_fhe_b1k1000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.533379514685974
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: 出発の場が状態 b1k1000",
+   "ok": true,
+   "value": [
+    "b1k1000",
+    "res_1000.h5",
+    "9e8c8bf45b17a82a"
+   ]
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0519_fhe_b1k1000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.533289979154832
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: 出発の場が状態 b1k1500",
+   "ok": true,
+   "value": [
+    "b1k1500",
+    "res_1500.h5",
+    "66ccf5edd30556e2"
+   ]
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0520_fhe_b1k1500_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.368478885485925
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: 出発の場が状態 b1k1500",
+   "ok": true,
+   "value": [
+    "b1k1500",
+    "res_1500.h5",
+    "66ccf5edd30556e2"
+   ]
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0521_fhe_b1k1500_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.367791335071682
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: 出発の場が状態 b1k2000",
+   "ok": true,
+   "value": [
+    "b1k2000",
+    "res_2000.h5",
+    "a3aa192d5c0a72d8"
+   ]
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0522_fhe_b1k2000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.477839300828546
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: 出発の場が状態 b1k2000",
+   "ok": true,
+   "value": [
+    "b1k2000",
+    "res_2000.h5",
+    "a3aa192d5c0a72d8"
+   ]
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0523_fhe_b1k2000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.476892277117087
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: 出発の場が状態 a2k2000",
+   "ok": true,
+   "value": [
+    "a2k2000",
+    "res_2000.h5",
+    "0ce8c2c64d5da252"
+   ]
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0524_fhe_a2k2000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.499090431533056
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: 出発の場が状態 a2k2000",
+   "ok": true,
+   "value": [
+    "a2k2000",
+    "res_2000.h5",
+    "0ce8c2c64d5da252"
+   ]
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0525_fhe_a2k2000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.498760427167691
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: 出発の場が状態 a3k2000",
+   "ok": true,
+   "value": [
+    "a3k2000",
+    "res_2000.h5",
+    "c6547a9058102336"
+   ]
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0526_fhe_a3k2000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.487879493511477
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: 出発の場が状態 a3k2000",
+   "ok": true,
+   "value": [
+    "a3k2000",
+    "res_2000.h5",
+    "c6547a9058102336"
+   ]
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0527_fhe_a3k2000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.487647427214041
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: 出発の場が状態 b2k2000",
+   "ok": true,
+   "value": [
+    "b2k2000",
+    "res_2000.h5",
+    "5600200b9d3bcbd0"
+   ]
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0528_fhe_b2k2000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.384635482129856
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: 出発の場が状態 b2k2000",
+   "ok": true,
+   "value": [
+    "b2k2000",
+    "res_2000.h5",
+    "5600200b9d3bcbd0"
+   ]
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0529_fhe_b2k2000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.38448525790721
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: 出発の場が状態 b3k2000",
+   "ok": true,
+   "value": [
+    "b3k2000",
+    "res_2000.h5",
+    "14e1a88b8076e75a"
+   ]
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0530_fhe_b3k2000_f: 判定に使う値が正",
+   "ok": true,
+   "value": 6.445575039217898
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: 出発の場が状態 b3k2000",
+   "ok": true,
+   "value": [
+    "b3k2000",
+    "res_2000.h5",
+    "14e1a88b8076e75a"
+   ]
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0531_fhe_b3k2000_d: 判定に使う値が正",
+   "ok": true,
+   "value": 6.444935810214566
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0532_fhe_s0_fr: 判定に使う値が正",
+   "ok": true,
+   "value": 6.538800870347452
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: 出発の場が状態 s0",
+   "ok": true,
+   "value": [
+    "s0",
+    "res_40000.h5",
+    "4118dc99ce143303"
+   ]
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0533_fhe_s0_dr: 判定に使う値が正",
+   "ok": true,
+   "value": 6.538648285966021
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: 出発の場が状態 a1k2000",
+   "ok": true,
+   "value": [
+    "a1k2000",
+    "res_2000.h5",
+    "ebe7e7a270378444"
+   ]
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0534_fhe_a1k2000_fr: 判定に使う値が正",
+   "ok": true,
+   "value": 6.512654161893741
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: 出発の場が状態 a1k2000",
+   "ok": true,
+   "value": [
+    "a1k2000",
+    "res_2000.h5",
+    "ebe7e7a270378444"
+   ]
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0535_fhe_a1k2000_dr: 判定に使う値が正",
+   "ok": true,
+   "value": 6.512400268350982
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: 出発の場が状態 b1k2000",
+   "ok": true,
+   "value": [
+    "b1k2000",
+    "res_2000.h5",
+    "a3aa192d5c0a72d8"
+   ]
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: 切替の表示 = f",
+   "ok": true,
+   "value": false
+  },
+  {
+   "check": "run_0536_fhe_b1k2000_fr: 判定に使う値が正",
+   "ok": true,
+   "value": 6.477839300828452
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: RUN_RC = 0",
+   "ok": true,
+   "value": "0"
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: solverConfig が run_0354 と同じ (出力の間隔・step 数を除く)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: 境界条件・化学種・壁などの入力が run_0354 と同じ",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: 格子 (MESH) が run_0354 と同じ",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: 出発の場が状態 b1k2000",
+   "ok": true,
+   "value": [
+    "b1k2000",
+    "res_2000.h5",
+    "a3aa192d5c0a72d8"
+   ]
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: step 0 の outer_begin が 1 行",
+   "ok": true,
+   "value": [
+    [
+     0
+    ],
+    []
+   ]
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: 全行の rms_* が有限・非負",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: 切替の表示 = d",
+   "ok": true,
+   "value": true
+  },
+  {
+   "check": "run_0537_fhe_b1k2000_dr: 判定に使う値が正",
+   "ok": true,
+   "value": 6.47689227711699
+  },
+  {
+   "check": "A1 の step 0 の表示と E_f(S) の相対差 ≤ 1e-6",
+   "ok": true,
+   "value": 2.4585592550271594e-14
+  },
+  {
+   "check": "B1 の step 0 の表示と E_d(S) の相対差 ≤ 1e-6",
+   "ok": true,
+   "value": 3.2600441468238118e-15
+  }
+ ],
+ "gates_ok": true,
+ "E": {
+  "s0|f|1": {
+   "rms_ro": 3.69970431394538e-06,
+   "rms_roUx": 0.003121715636196732,
+   "rms_roUy": 0.0003868401681075493,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.538800870347329,
+   "rms_roK": 0.0002899758303757727,
+   "rms_roOmega": 3251.612630613857,
+   "rms_roY0": 3.382192595459101e-06,
+   "rms_roY1": 3.174273951971575e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "s0|d|1": {
+   "rms_ro": 3.699704313945344e-06,
+   "rms_roUx": 0.003121715636196659,
+   "rms_roUy": 0.0003868401681075231,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.538648285965989,
+   "rms_roK": 0.0002899758303757726,
+   "rms_roOmega": 3251.612630613712,
+   "rms_roY0": 3.382192595459111e-06,
+   "rms_roY1": 3.174273951971492e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k1000|f|1": {
+   "rms_ro": 3.755429566987045e-06,
+   "rms_roUx": 0.003160963918424999,
+   "rms_roUy": 0.0003914697495266336,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.635434953120642,
+   "rms_roK": 0.0002881543423578108,
+   "rms_roOmega": 3288.772626339693,
+   "rms_roY0": 3.433136327965832e-06,
+   "rms_roY1": 3.222085943315155e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k1000|d|1": {
+   "rms_ro": 3.755429566986994e-06,
+   "rms_roUx": 0.003160963918425157,
+   "rms_roUy": 0.0003914697495266874,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.635502449588447,
+   "rms_roK": 0.0002881543423578109,
+   "rms_roOmega": 3288.772626339244,
+   "rms_roY0": 3.433136327965841e-06,
+   "rms_roY1": 3.22208594331518e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k1500|f|1": {
+   "rms_ro": 3.686598714338017e-06,
+   "rms_roUx": 0.003122656457294422,
+   "rms_roUy": 0.0003985235225601041,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.516350494521116,
+   "rms_roK": 0.0002882781684617978,
+   "rms_roOmega": 3231.960456931614,
+   "rms_roY0": 3.370212722178093e-06,
+   "rms_roY1": 3.163030535563602e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k1500|d|1": {
+   "rms_ro": 3.686598714338038e-06,
+   "rms_roUx": 0.003122656457294405,
+   "rms_roUy": 0.0003985235225601257,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.516568875096715,
+   "rms_roK": 0.0002882781684617991,
+   "rms_roOmega": 3231.9604569316,
+   "rms_roY0": 3.370212722178132e-06,
+   "rms_roY1": 3.163030535563595e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k2000|f|1": {
+   "rms_ro": 3.674254260713269e-06,
+   "rms_roUx": 0.003113306827588208,
+   "rms_roUy": 0.0003924010156009334,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.512654161893749,
+   "rms_roK": 0.0002871064075878131,
+   "rms_roOmega": 3276.54771178772,
+   "rms_roY0": 3.358925580652281e-06,
+   "rms_roY1": 3.152437265569644e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k2000|d|1": {
+   "rms_ro": 3.674254260713299e-06,
+   "rms_roUx": 0.003113306827588387,
+   "rms_roUy": 0.0003924010156009257,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.512400268351112,
+   "rms_roK": 0.0002871064075878134,
+   "rms_roOmega": 3276.5477117876,
+   "rms_roY0": 3.358925580652279e-06,
+   "rms_roY1": 3.152437265569583e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k1000|f|1": {
+   "rms_ro": 3.650048441134663e-06,
+   "rms_roUx": 0.003144080062173102,
+   "rms_roUy": 0.0003853327938060909,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.533379514685974,
+   "rms_roK": 0.0002892383130284789,
+   "rms_roOmega": 3297.266485590319,
+   "rms_roY0": 3.336796497166009e-06,
+   "rms_roY1": 3.131668556718653e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k1000|d|1": {
+   "rms_ro": 3.650048441134652e-06,
+   "rms_roUx": 0.003144080062172927,
+   "rms_roUy": 0.0003853327938060475,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.533289979154832,
+   "rms_roK": 0.0002892383130284795,
+   "rms_roOmega": 3297.266485590329,
+   "rms_roY0": 3.33679649716603e-06,
+   "rms_roY1": 3.131668556718618e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k1500|f|1": {
+   "rms_ro": 3.553368270255621e-06,
+   "rms_roUx": 0.003089676429589154,
+   "rms_roUy": 0.0003808002146701567,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.368478885485925,
+   "rms_roK": 0.0002902154549669925,
+   "rms_roOmega": 3242.096624600204,
+   "rms_roY0": 3.248406473211662e-06,
+   "rms_roY1": 3.04871226645922e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k1500|d|1": {
+   "rms_ro": 3.553368270255678e-06,
+   "rms_roUx": 0.00308967642958931,
+   "rms_roUy": 0.0003808002146702004,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.367791335071682,
+   "rms_roK": 0.0002902154549669916,
+   "rms_roOmega": 3242.096624600061,
+   "rms_roY0": 3.248406473211661e-06,
+   "rms_roY1": 3.048712266459239e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k2000|f|1": {
+   "rms_ro": 3.643390393577328e-06,
+   "rms_roUx": 0.003102712452654722,
+   "rms_roUy": 0.000393774213941897,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.477839300828546,
+   "rms_roK": 0.0002896141351855703,
+   "rms_roOmega": 3320.033940488261,
+   "rms_roY0": 3.330706552599267e-06,
+   "rms_roY1": 3.125952988530733e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k2000|d|1": {
+   "rms_ro": 3.643390393577253e-06,
+   "rms_roUx": 0.003102712452654942,
+   "rms_roUy": 0.0003937742139419189,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.476892277117087,
+   "rms_roK": 0.0002896141351855706,
+   "rms_roOmega": 3320.033940488263,
+   "rms_roY0": 3.330706552599231e-06,
+   "rms_roY1": 3.125952988530696e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a2k2000|f|1": {
+   "rms_ro": 3.671892928482832e-06,
+   "rms_roUx": 0.003104443272456606,
+   "rms_roUy": 0.0003908087683983788,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.499090431533056,
+   "rms_roK": 0.0002867848204002292,
+   "rms_roOmega": 3256.191270929935,
+   "rms_roY0": 3.356766150863537e-06,
+   "rms_roY1": 3.150410585676603e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a2k2000|d|1": {
+   "rms_ro": 3.671892928482853e-06,
+   "rms_roUx": 0.003104443272456765,
+   "rms_roUy": 0.0003908087683984255,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.498760427167691,
+   "rms_roK": 0.0002867848204002285,
+   "rms_roOmega": 3256.191270930059,
+   "rms_roY0": 3.356766150863552e-06,
+   "rms_roY1": 3.150410585676629e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a3k2000|f|1": {
+   "rms_ro": 3.655313429217482e-06,
+   "rms_roUx": 0.003109620264185232,
+   "rms_roUy": 0.0003865463649431292,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.487879493511477,
+   "rms_roK": 0.0002867768792274841,
+   "rms_roOmega": 3257.612928234795,
+   "rms_roY0": 3.341610769315766e-06,
+   "rms_roY1": 3.136186873832958e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a3k2000|d|1": {
+   "rms_ro": 3.655313429217531e-06,
+   "rms_roUx": 0.003109620264185058,
+   "rms_roUy": 0.0003865463649431234,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.487647427214041,
+   "rms_roK": 0.0002867768792274836,
+   "rms_roOmega": 3257.612928234576,
+   "rms_roY0": 3.341610769315745e-06,
+   "rms_roY1": 3.136186873832961e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b2k2000|f|1": {
+   "rms_ro": 3.561443180723182e-06,
+   "rms_roUx": 0.00308066760545585,
+   "rms_roUy": 0.000373848255826916,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.384635482129856,
+   "rms_roK": 0.0002897123690935014,
+   "rms_roOmega": 3315.785139385565,
+   "rms_roY0": 3.255789156902594e-06,
+   "rms_roY1": 3.055641103266747e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b2k2000|d|1": {
+   "rms_ro": 3.561443180723226e-06,
+   "rms_roUx": 0.003080667605455897,
+   "rms_roUy": 0.0003738482558269107,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.38448525790721,
+   "rms_roK": 0.0002897123690935012,
+   "rms_roOmega": 3315.785139385651,
+   "rms_roY0": 3.255789156902654e-06,
+   "rms_roY1": 3.055641103266682e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b3k2000|f|1": {
+   "rms_ro": 3.606417022007553e-06,
+   "rms_roUx": 0.003102863486896804,
+   "rms_roUy": 0.0003819059308616188,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.445575039217898,
+   "rms_roK": 0.0002896236169893312,
+   "rms_roOmega": 3316.392468541205,
+   "rms_roY0": 3.296907916003194e-06,
+   "rms_roY1": 3.094232106667142e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b3k2000|d|1": {
+   "rms_ro": 3.606417022007517e-06,
+   "rms_roUx": 0.00310286348689687,
+   "rms_roUy": 0.0003819059308615966,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.444935810214566,
+   "rms_roK": 0.0002896236169893315,
+   "rms_roOmega": 3316.392468540863,
+   "rms_roY0": 3.296907916003145e-06,
+   "rms_roY1": 3.094232106667199e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "s0|f|2": {
+   "rms_ro": 3.699704313945355e-06,
+   "rms_roUx": 0.0031217156361968,
+   "rms_roUy": 0.000386840168107559,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.538800870347452,
+   "rms_roK": 0.0002899758303757734,
+   "rms_roOmega": 3251.612630613906,
+   "rms_roY0": 3.382192595459116e-06,
+   "rms_roY1": 3.17427395197152e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "s0|d|2": {
+   "rms_ro": 3.699704313945307e-06,
+   "rms_roUx": 0.003121715636196435,
+   "rms_roUy": 0.0003868401681075276,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.538648285966021,
+   "rms_roK": 0.0002899758303757733,
+   "rms_roOmega": 3251.612630613606,
+   "rms_roY0": 3.382192595459142e-06,
+   "rms_roY1": 3.174273951971615e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k2000|f|2": {
+   "rms_ro": 3.674254260713308e-06,
+   "rms_roUx": 0.003113306827588162,
+   "rms_roUy": 0.000392401015600953,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.512654161893741,
+   "rms_roK": 0.0002871064075878133,
+   "rms_roOmega": 3276.547711787721,
+   "rms_roY0": 3.358925580652271e-06,
+   "rms_roY1": 3.152437265569585e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "a1k2000|d|2": {
+   "rms_ro": 3.674254260713288e-06,
+   "rms_roUx": 0.003113306827588372,
+   "rms_roUy": 0.0003924010156009615,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.512400268350982,
+   "rms_roK": 0.0002871064075878137,
+   "rms_roOmega": 3276.547711787603,
+   "rms_roY0": 3.3589255806523e-06,
+   "rms_roY1": 3.152437265569699e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k2000|f|2": {
+   "rms_ro": 3.643390393577298e-06,
+   "rms_roUx": 0.003102712452654819,
+   "rms_roUy": 0.0003937742139419386,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.477839300828452,
+   "rms_roK": 0.0002896141351855706,
+   "rms_roOmega": 3320.033940488188,
+   "rms_roY0": 3.330706552599263e-06,
+   "rms_roY1": 3.125952988530732e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "b1k2000|d|2": {
+   "rms_ro": 3.64339039357735e-06,
+   "rms_roUx": 0.003102712452654885,
+   "rms_roUy": 0.0003937742139418812,
+   "rms_roUz": 0.0,
+   "rms_roe": 6.47689227711699,
+   "rms_roK": 0.0002896141351855707,
+   "rms_roOmega": 3320.033940488143,
+   "rms_roY0": 3.330706552599271e-06,
+   "rms_roY1": 3.125952988530762e-07,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  }
+ },
+ "sigma_eval": {
+  "f": 1.8880648422584315e-14,
+  "d": 2.0048249848895883e-14
+ },
+ "eval_effect_d_over_f": {
+  "s0": {
+   "rms_ro": 0.9999999999999902,
+   "rms_roUx": 0.9999999999999766,
+   "rms_roUy": 0.9999999999999322,
+   "rms_roe": 0.999976664776254,
+   "rms_roK": 0.9999999999999997,
+   "rms_roOmega": 0.9999999999999554,
+   "rms_roY0": 1.0000000000000029,
+   "rms_roY1": 0.999999999999974
+  },
+  "a1k1000": {
+   "rms_ro": 0.9999999999999865,
+   "rms_roUx": 1.00000000000005,
+   "rms_roUy": 1.0000000000001374,
+   "rms_roe": 1.0000101721241006,
+   "rms_roK": 1.0000000000000002,
+   "rms_roOmega": 0.9999999999998636,
+   "rms_roY0": 1.0000000000000027,
+   "rms_roY1": 1.0000000000000078
+  },
+  "a1k1500": {
+   "rms_ro": 1.0000000000000056,
+   "rms_roUx": 0.9999999999999946,
+   "rms_roUy": 1.0000000000000542,
+   "rms_roe": 1.0000335127117215,
+   "rms_roK": 1.0000000000000044,
+   "rms_roOmega": 0.9999999999999958,
+   "rms_roY0": 1.0000000000000115,
+   "rms_roY1": 0.9999999999999978
+  },
+  "a1k2000": {
+   "rms_ro": 1.0000000000000082,
+   "rms_roUx": 1.0000000000000573,
+   "rms_roUy": 0.9999999999999802,
+   "rms_roe": 0.999961015350067,
+   "rms_roK": 1.000000000000001,
+   "rms_roOmega": 0.9999999999999634,
+   "rms_roY0": 0.9999999999999993,
+   "rms_roY1": 0.9999999999999806
+  },
+  "b1k1000": {
+   "rms_ro": 0.999999999999997,
+   "rms_roUx": 0.9999999999999444,
+   "rms_roUy": 0.9999999999998873,
+   "rms_roe": 0.999986295678838,
+   "rms_roK": 1.000000000000002,
+   "rms_roOmega": 1.000000000000003,
+   "rms_roY0": 1.0000000000000064,
+   "rms_roY1": 0.9999999999999889
+  },
+  "b1k1500": {
+   "rms_ro": 1.000000000000016,
+   "rms_roUx": 1.0000000000000504,
+   "rms_roUy": 1.0000000000001148,
+   "rms_roe": 0.9998920385186783,
+   "rms_roK": 0.999999999999997,
+   "rms_roOmega": 0.9999999999999559,
+   "rms_roY0": 0.9999999999999998,
+   "rms_roY1": 1.000000000000006
+  },
+  "b1k2000": {
+   "rms_ro": 0.9999999999999795,
+   "rms_roUx": 1.0000000000000708,
+   "rms_roUy": 1.0000000000000555,
+   "rms_roe": 0.9998538056182811,
+   "rms_roK": 1.0000000000000009,
+   "rms_roOmega": 1.0000000000000004,
+   "rms_roY0": 0.9999999999999892,
+   "rms_roY1": 0.9999999999999881
+  },
+  "a2k2000": {
+   "rms_ro": 1.0000000000000056,
+   "rms_roUx": 1.0000000000000513,
+   "rms_roUy": 1.0000000000001195,
+   "rms_roe": 0.9999492229922261,
+   "rms_roK": 0.9999999999999976,
+   "rms_roOmega": 1.0000000000000382,
+   "rms_roY0": 1.0000000000000044,
+   "rms_roY1": 1.0000000000000082
+  },
+  "a3k2000": {
+   "rms_ro": 1.0000000000000135,
+   "rms_roUx": 0.999999999999944,
+   "rms_roUy": 0.999999999999985,
+   "rms_roe": 0.9999642307941032,
+   "rms_roK": 0.9999999999999983,
+   "rms_roOmega": 0.9999999999999327,
+   "rms_roY0": 0.9999999999999937,
+   "rms_roY1": 1.000000000000001
+  },
+  "b2k2000": {
+   "rms_ro": 1.0000000000000122,
+   "rms_roUx": 1.000000000000015,
+   "rms_roUy": 0.9999999999999858,
+   "rms_roe": 0.9999764709789515,
+   "rms_roK": 0.9999999999999994,
+   "rms_roOmega": 1.000000000000026,
+   "rms_roY0": 1.0000000000000184,
+   "rms_roY1": 0.9999999999999787
+  },
+  "b3k2000": {
+   "rms_ro": 0.99999999999999,
+   "rms_roUx": 1.0000000000000213,
+   "rms_roUy": 0.9999999999999419,
+   "rms_roe": 0.999900826691266,
+   "rms_roK": 1.000000000000001,
+   "rms_roOmega": 0.9999999999998969,
+   "rms_roY0": 0.9999999999999852,
+   "rms_roY1": 1.0000000000000182
+  }
+ },
+ "by_evaluator": {
+  "f": {
+   "A": [
+    6.512654161893749,
+    6.499090431533056,
+    6.487879493511477
+   ],
+   "B": [
+    6.477839300828546,
+    6.384635482129856,
+    6.445575039217898
+   ],
+   "mean_A": 6.499874695646095,
+   "mean_B": 6.436016607392101,
+   "ratio": 0.9901754893372376,
+   "decrease": 0.009824510662762354,
+   "w_A": 0.003811560921146116,
+   "w_B": 0.01448160009277177,
+   "noise": 0.01448160009277177,
+   "u": 0.04344480027831531,
+   "verdict": "NOT_SUPPORT",
+   "all_cols_ratio": {
+    "rms_ro": 0.9827104755720203,
+    "rms_roUx": 0.9955907380519177,
+    "rms_roUy": 0.9827077221775691,
+    "rms_roe": 0.9901754893372376,
+    "rms_roK": 1.009622773265842,
+    "rms_roOmega": 1.0165325658295805,
+    "rms_roY0": 0.9827091931149381,
+    "rms_roY1": 0.9827091931147427
+   }
+  },
+  "d": {
+   "A": [
+    6.512400268351112,
+    6.498760427167691,
+    6.487647427214041
+   ],
+   "B": [
+    6.476892277117087,
+    6.38448525790721,
+    6.444935810214566
+   ],
+   "mean_A": 6.4996027075776155,
+   "mean_B": 6.4354377817462876,
+   "ratio": 0.9901278695455461,
+   "decrease": 0.009872130454453898,
+   "w_A": 0.0038083621800780424,
+   "w_B": 0.014359088277099594,
+   "noise": 0.014359088277099594,
+   "u": 0.043077264831298784,
+   "verdict": "NOT_SUPPORT",
+   "all_cols_ratio": {
+    "rms_ro": 0.9827104755720051,
+    "rms_roUx": 0.9955907380519359,
+    "rms_roUy": 0.9827077221775365,
+    "rms_roe": 0.9901278695455461,
+    "rms_roK": 1.0096227732658436,
+    "rms_roOmega": 1.0165325658295767,
+    "rms_roY0": 0.9827091931149364,
+    "rms_roY1": 0.982709193114741
+   }
+  }
+ },
+ "f_d_concordant": true,
+ "display": {
+  "a1": {
+   "tail_median": {
+    "rms_ro": 3.6690747416727567e-06,
+    "rms_roUx": 0.003124426454908325,
+    "rms_roUy": 0.00039039660814514556,
+    "rms_roe": 6.510580831571201,
+    "rms_roK": 0.0002876444957581432,
+    "rms_roOmega": 3242.9910822935162,
+    "rms_roY0": 3.3541747409175627e-06,
+    "rms_roY1": 3.147978481406638e-07
+   },
+   "step0": {
+    "rms_ro": 3.699704313945369e-06,
+    "rms_roUx": 0.003121715636196634,
+    "rms_roUy": 0.0003868401681075896,
+    "rms_roUz": 0.0,
+    "rms_roe": 6.538800870347489,
+    "rms_roK": 0.0002899758303757728,
+    "rms_roOmega": 3251.612630613622,
+    "rms_roY0": 3.382192595459102e-06,
+    "rms_roY1": 3.174273951971518e-07,
+    "rms_dq_ro": 0.0,
+    "rms_dq_roUx": 0.0,
+    "rms_dq_roUy": 0.0,
+    "rms_dq_roUz": 0.0,
+    "rms_dq_roe": 0.0
+   },
+   "drift": {
+    "slope500": -0.0042474834957147625,
+    "level_tail_vs_prev": -0.0011149984271937856,
+    "osc_rel": 0.009355134016451229,
+    "class": "許容内"
+   },
+   "segment_verdict": "NOT CONVERGED"
+  },
+  "b1": {
+   "tail_median": {
+    "rms_ro": 3.608519895553817e-06,
+    "rms_roUx": 0.0031135299139064187,
+    "rms_roUy": 0.0003820761302702006,
+    "rms_roe": 6.4585530237904845,
+    "rms_roK": 0.0002898589099890644,
+    "rms_roOmega": 3262.1831909451967,
+    "rms_roY0": 3.298815075452476e-06,
+    "rms_roY1": 3.0960220244218096e-07
+   },
+   "step0": {
+    "rms_ro": 3.699704313945344e-06,
+    "rms_roUx": 0.003121715636196673,
+    "rms_roUy": 0.0003868401681075867,
+    "rms_roUz": 0.0,
+    "rms_roe": 6.53864828596601,
+    "rms_roK": 0.0002899758303757733,
+    "rms_roOmega": 3251.612630613771,
+    "rms_roY0": 3.382192595459139e-06,
+    "rms_roY1": 3.174273951971508e-07,
+    "rms_dq_ro": 0.0,
+    "rms_dq_roUx": 0.0,
+    "rms_dq_roUy": 0.0,
+    "rms_dq_roUz": 0.0,
+    "rms_dq_roe": 0.0
+   },
+   "drift": {
+    "slope500": 0.007503492490443751,
+    "level_tail_vs_prev": 0.001773268121701624,
+    "osc_rel": 0.008373954047622206,
+    "class": "許容内"
+   },
+   "segment_verdict": "NOT CONVERGED"
+  },
+  "a2": {
+   "tail_median": {
+    "rms_ro": 3.7011609836723416e-06,
+    "rms_roUx": 0.0031312214004866725,
+    "rms_roUy": 0.0003944853672363632,
+    "rms_roe": 6.55352307290419,
+    "rms_roK": 0.00028760775364448064,
+    "rms_roOmega": 3243.551863139194,
+    "rms_roY0": 3.383539491433139e-06,
+    "rms_roY1": 3.175538048170959e-07
+   },
+   "step0": {
+    "rms_ro": 3.699704313945341e-06,
+    "rms_roUx": 0.003121715636196654,
+    "rms_roUy": 0.0003868401681075663,
+    "rms_roUz": 0.0,
+    "rms_roe": 6.538800870347448,
+    "rms_roK": 0.0002899758303757731,
+    "rms_roOmega": 3251.612630613924,
+    "rms_roY0": 3.38219259545906e-06,
+    "rms_roY1": 3.174273951971506e-07,
+    "rms_dq_ro": 0.0,
+    "rms_dq_roUx": 0.0,
+    "rms_dq_roUy": 0.0,
+    "rms_dq_roUz": 0.0,
+    "rms_dq_roe": 0.0
+   },
+   "drift": {
+    "slope500": -0.0035374968553794914,
+    "level_tail_vs_prev": 0.003221514883109167,
+    "osc_rel": 0.010102050208697293,
+    "class": "許容内"
+   },
+   "segment_verdict": "NOT CONVERGED"
+  },
+  "b2": {
+   "tail_median": {
+    "rms_ro": 3.5993377400110187e-06,
+    "rms_roUx": 0.0031098127644034043,
+    "rms_roUy": 0.00038477356511000587,
+    "rms_roe": 6.4367300198328135,
+    "rms_roK": 0.0002898735348027722,
+    "rms_roOmega": 3262.8818747312694,
+    "rms_roY0": 3.2904513347177282e-06,
+    "rms_roY1": 3.088172440572918e-07
+   },
+   "step0": {
+    "rms_ro": 3.699704313945342e-06,
+    "rms_roUx": 0.003121715636196844,
+    "rms_roUy": 0.0003868401681075219,
+    "rms_roUz": 0.0,
+    "rms_roe": 6.538648285966071,
+    "rms_roK": 0.0002899758303757732,
+    "rms_roOmega": 3251.612630613714,
+    "rms_roY0": 3.382192595459121e-06,
+    "rms_roY1": 3.174273951971554e-07,
+    "rms_dq_ro": 0.0,
+    "rms_dq_roUx": 0.0,
+    "rms_dq_roUy": 0.0,
+    "rms_dq_roUz": 0.0,
+    "rms_dq_roe": 0.0
+   },
+   "drift": {
+    "slope500": -0.007293884640044055,
+    "level_tail_vs_prev": 0.0006239438567942884,
+    "osc_rel": 0.008501549390896944,
+    "class": "許容内"
+   },
+   "segment_verdict": "NOT CONVERGED"
+  },
+  "a3": {
+   "tail_median": {
+    "rms_ro": 3.6898812521424957e-06,
+    "rms_roUx": 0.003132324730023873,
+    "rms_roUy": 0.000396492658662321,
+    "rms_roe": 6.544462431357358,
+    "rms_roK": 0.0002874449031480455,
+    "rms_roOmega": 3241.853540742747,
+    "rms_roY0": 3.3732206900899795e-06,
+    "rms_roY1": 3.1658535901201596e-07
+   },
+   "step0": {
+    "rms_ro": 3.699704313945389e-06,
+    "rms_roUx": 0.003121715636196416,
+    "rms_roUy": 0.0003868401681075653,
+    "rms_roUz": 0.0,
+    "rms_roe": 6.538800870347385,
+    "rms_roK": 0.0002899758303757726,
+    "rms_roOmega": 3251.612630613772,
+    "rms_roY0": 3.382192595459088e-06,
+    "rms_roY1": 3.174273951971519e-07,
+    "rms_dq_ro": 0.0,
+    "rms_dq_roUx": 0.0,
+    "rms_dq_roUy": 0.0,
+    "rms_dq_roUz": 0.0,
+    "rms_dq_roe": 0.0
+   },
+   "drift": {
+    "slope500": -0.0033009628212249263,
+    "level_tail_vs_prev": 0.002373503791957498,
+    "osc_rel": 0.009428386397529302,
+    "class": "許容内"
+   },
+   "segment_verdict": "NOT CONVERGED"
+  },
+  "b3": {
+   "tail_median": {
+    "rms_ro": 3.6153348402757703e-06,
+    "rms_roUx": 0.0031138186827136677,
+    "rms_roUy": 0.00038642467718558166,
+    "rms_roe": 6.45617069506297,
+    "rms_roK": 0.00028978987380676527,
+    "rms_roOmega": 3262.2903321500253,
+    "rms_roY0": 3.305068709265736e-06,
+    "rms_roY1": 3.1018912191398485e-07
+   },
+   "step0": {
+    "rms_ro": 3.699704313945329e-06,
+    "rms_roUx": 0.003121715636196766,
+    "rms_roUy": 0.0003868401681075565,
+    "rms_roUz": 0.0,
+    "rms_roe": 6.538648285966008,
+    "rms_roK": 0.0002899758303757728,
+    "rms_roOmega": 3251.612630613823,
+    "rms_roY0": 3.38219259545911e-06,
+    "rms_roY1": 3.17427395197153e-07,
+    "rms_dq_ro": 0.0,
+    "rms_dq_roUx": 0.0,
+    "rms_dq_roUy": 0.0,
+    "rms_dq_roUz": 0.0,
+    "rms_dq_roe": 0.0
+   },
+   "drift": {
+    "slope500": -0.002186187349652276,
+    "level_tail_vs_prev": 0.0015769558813011177,
+    "osc_rel": 0.009352723094224346,
+    "class": "許容内"
+   },
+   "segment_verdict": "NOT CONVERGED"
+  }
+ },
+ "display_ratio_B_over_A": 0.9868877411666435,
+ "eval_effect_at_A2000": 0.9999581563787988,
+ "drift": {
+  "a": {
+   "classes": [
+    "許容内",
+    "許容内",
+    "許容内"
+   ],
+   "class": "許容内",
+   "text": "この窓で有意なドリフトを検出せず"
+  },
+  "b": {
+   "classes": [
+    "許容内",
+    "許容内",
+    "許容内"
+   ],
+   "class": "許容内",
+   "text": "この窓で有意なドリフトを検出せず"
+  }
+ },
+ "series_vs_S": {
+  "a1": {
+   "f": {
+    "1000": 1.0147785633313193,
+    "1500": 0.9965665912953516,
+    "2000": 0.9960012991721231
+   },
+   "d": {
+    "1000": 1.0148125666631034,
+    "1500": 0.996623245370658,
+    "2000": 0.9959857119595784
+   }
+  },
+  "b1": {
+   "f": {
+    "1000": 0.9991708945158523,
+    "1500": 0.9739521070852925,
+    "2000": 0.9906769496842708
+   },
+   "d": {
+    "1000": 0.9991805176579603,
+    "1500": 0.973869683240033,
+    "2000": 0.9905552331081258
+   }
+  }
+ },
+ "VERDICT": "NOT_SUPPORT: この期間の主要因説を支持しない; ドリフト: A この窓で有意なドリフトを検出せず・B この窓で有意なドリフトを検出せず; f と d の判定の一致: True"
+}
