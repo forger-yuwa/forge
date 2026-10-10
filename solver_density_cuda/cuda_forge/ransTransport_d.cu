@@ -144,7 +144,8 @@ void ransTransport_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& ms
     const auto scalar_descs = buildScalarDescs(var, cfg, cuda_cfg, msh.nCells);
 
     // k/ω を 1 面ループで融合 (面幾何・massflux・μ の読みを共有)。面ごとの式は単一版と同一。
-    scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, scalar_descs.data(), 2);
+    // 最後の true は V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c) の印。診断が無効なら従来どおり。
+    scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, scalar_descs.data(), 2, true);
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

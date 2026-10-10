@@ -49,3 +49,12 @@ __global__ void viscousFlux_d
 );
 
 void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_ns);
+
+// V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c) 用: 内部面の粘性流束カーネルを、
+// 本番 (viscousFlux_d_wrapper) と同じ引数の組み立てで 1 回起動する。残差の書き先を res[5] = {ro, roUx, roUy, roUz, roe}
+// に差し替え、ge_x/y/z が非 nullptr なら面ごとの差 e を cc1 − cc0 の引き算の代わりに読む。faceFlux (非 nullptr、
+// [6*nPlanes]) には atomicAdd の直前の面の流束を書く (成分の並びは viscousFlux_d の引数の説明)。W-I 実力診断は渡さない。起動後に同期する。
+void viscousFluxInternalArm_d(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var ,
+                              flow_float* const res[5],
+                              const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
+                              flow_float* faceFlux);

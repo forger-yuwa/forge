@@ -2,6 +2,7 @@
 #include "cuda_forge/cudaWrapper.cuh"
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace std;
@@ -235,6 +236,8 @@ void mesh::readMesh(string fname)
     this->nodes.resize(this->nNodes);
     std::vector<geom_float> coord;
     file.getDataSet("/MESH/COORD").read(coord);
+    // 倍精度の写し (plan architecture-float-state-double-geometry §4.2 1.)。geom_float の経路とは独立に double で読む。
+    file.getDataSet("/MESH/COORD").read(this->coord64);
 
     geom_int ii = 0;
     for (geom_int i=0; i<(this->nNodes); i++)
@@ -258,6 +261,10 @@ void mesh::readMesh(string fname)
     file.getDataSet("/PLANES/surfVect").read(surfVect);
     file.getDataSet("/PLANES/surfArea").read(surfArea);
     file.getDataSet("/PLANES/centCoords").read(centCoords);
+    // 倍精度の写し (§4.2 1.、codex Major 2: 面ベクトルと面積も double で持つ)
+    file.getDataSet("/PLANES/surfVect").read(this->surfVect64);
+    file.getDataSet("/PLANES/surfArea").read(this->surfArea64);
+    file.getDataSet("/PLANES/centCoords").read(this->planeCent64);
 
     geom_int ipp = 0;
     for (geom_int ip=0; ip<this->nPlanes; ip++)
@@ -305,6 +312,7 @@ void mesh::readMesh(string fname)
     std::vector<geom_float> centCoords2;
     file.getDataSet("/CELLS/volume").read(volume);
     file.getDataSet("/CELLS/centCoords").read(centCoords2);
+    file.getDataSet("/CELLS/centCoords").read(this->cellCent64);   // 倍精度の写し (§4.2 1.)
 
     std::vector<geom_int> regionIds;
     if (file.exist("/CELLS/regionId")) {
@@ -372,6 +380,20 @@ void mesh::readMesh(string fname)
         }
         cout << "[mesh] nodeValueAtNode: centCoords <- node coords for " << nswap
              << " CVs (max centroid shift " << maxShift << "), dual-centroid r kept in rEff" << endl;
+    }
+
+    // 値の位置の double 版 (plan architecture-float-state-double-geometry §4.2 1.)。上の置換と同じ条件で、
+    // node は節点座標、それ以外はファイルのセル重心。ゴーストは下のゴースト生成が同じ式を double で評価して埋める。
+    this->cc64.assign(3*(size_t)this->nCells_all, std::numeric_limits<double>::quiet_NaN());
+    {
+        const bool nodeSwap = (this->nodeValueAtNode == 1 && (geom_int)this->nodes.size() >= this->nCells);
+        for (geom_int ic = 0; ic < this->nCells; ic++) {
+            const bool useNode = nodeSwap && this->nodes[ic].coords.size() >= 3;
+            for (int k = 0; k < 3; k++) {
+                this->cc64[3*(size_t)ic + k] = useNode ? this->coord64[3*(size_t)ic + k]
+                                                       : this->cellCent64[3*(size_t)ic + k];
+            }
+        }
     }
 
     // boundary conditions
@@ -491,6 +513,31 @@ void mesh::readMesh(string fname)
             this->cells[nCells+nGhost].centCoords[0] = xc + 2*dnx;
             this->cells[nCells+nGhost].centCoords[1] = yc + 2*dny;
             this->cells[nCells+nGhost].centCoords[2] = zc + 2*dnz;
+
+            // 倍精度の写しのゴースト中心 (§4.2 1.): 上と同じ式を double の入力で評価する。
+            {
+                const size_t c = 3*(size_t)ic, p = 3*(size_t)ip, g = 3*(size_t)(nCells+nGhost);
+                const double xc64 = this->cc64[c+0];
+                const double yc64 = this->cc64[c+1];
+                const double zc64 = this->cc64[c+2];
+
+                const double dx64 = this->planeCent64[p+0] - xc64;
+                const double dy64 = this->planeCent64[p+1] - yc64;
+                const double dz64 = this->planeCent64[p+2] - zc64;
+
+                const double ss64 = this->surfArea64[ip];
+                const double nx64 = this->surfVect64[p+0]/ss64;
+                const double ny64 = this->surfVect64[p+1]/ss64;
+                const double nz64 = this->surfVect64[p+2]/ss64;
+
+                const double dnx64 = (dx64*nx64 +dy64*ny64 + dz64*nz64)*nx64;
+                const double dny64 = (dx64*nx64 +dy64*ny64 + dz64*nz64)*ny64;
+                const double dnz64 = (dx64*nx64 +dy64*ny64 + dz64*nz64)*nz64;
+
+                this->cc64[g+0] = xc64 + 2*dnx64;
+                this->cc64[g+1] = yc64 + 2*dny64;
+                this->cc64[g+2] = zc64 + 2*dnz64;
+            }
             nGhost++;
         }
 //ghst<

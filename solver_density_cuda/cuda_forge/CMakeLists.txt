@@ -85,6 +85,9 @@ add_library(cuda_forge STATIC
     #convection/AUSM_d.cuh
     viscousFlux_d.cu
     viscousFlux_d.cuh
+    # V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 off。ホスト側の段取りと h5 の書き出し)
+    geomAbDiag.cpp
+    geomAbDiag.hpp
 
     implicitCorrection_d.cu
     implicitCorrection_d.cuh

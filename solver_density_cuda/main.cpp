@@ -67,6 +67,7 @@
 #include <highfive/H5File.hpp>
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
+#include "cuda_forge/geomAbDiag.hpp"   // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / _REF; plan architecture-float-state-double-geometry §4.2c)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2940,6 +2941,23 @@ static int runTpFacesDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_
     return 0;
 }
 
+// ---- 診断 V0 (plans/active/architecture-float-state-double-geometry.md §4.2c; FORGE_DIAG_GEOMAB_DUMP / _REF=<h5>, 既定 off) -------
+// 組立 (assembleResidualPre + Post) を 1 回だけ通す (= 1 step 目の組立)。粘性 (viscousFlux_d) と SST k/ω の拡散
+// (scalar_diffusion_multi_d) の本番の起動の直前・直後で geomAbDiag のフックが、入力の記録と旧腕・新腕 (DUMP) /
+// 入力の上書きと参照腕 (REF) の評価、旧腕と本番の寄与の照合を行う。境界条件・EOS・勾配・乱流モデル・commit は
+// 腕ごとにやり直さない。h5 を書いて、時間更新へ進まず終了する (res_0 出力なし)。詳細は cuda_forge/geomAbDiag.hpp。
+static int runGeomAbDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                         fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                         ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    if (!geomAbDiag::begin(cfg, msh, var)) return EXIT_FAILURE;
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+    geomAbDiag::arm(true);
+    assembleResidual(s, 1);
+    geomAbDiag::arm(false);
+    return geomAbDiag::finish(cfg, msh, var);
+}
+
 // ---- 診断 G3-b (plans/active/condensation-two-phase-default.md §5.1 #4g3; FORGE_DIAG_TP_UPDATE=<出力 h5>, 既定 off) ---------------
 // 更新写像の収支: 再開状態から組立を 1 回 (前処理・後処理) 通し、前処理の格納差 (射影・クランプ・境界の上書き) を「前処理収支」として記録する。
 // 続けて本番と同じ設定で**外側の陰的更新を 1 回だけ**行い (implicitNonlinearUpdate; 組立は上で済んでいるので飛ばす)、
@@ -3439,6 +3457,12 @@ int main(int argc, char** argv) {
     // 診断 G3-b (FORGE_DIAG_TP_UPDATE=<出力 h5>; 既定 off): 組立 1 回 + 外側の陰的更新 1 回の更新写像の記録を書いて終了する (res_0 出力なし)。
     if (const char* e = getenv("FORGE_DIAG_TP_UPDATE"); e != nullptr && *e != '\0') {
         return runTpUpdateDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
+    // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / FORGE_DIAG_GEOMAB_REF=<h5>; 既定 off): 組立 1 回の粘性・k/ω 拡散の面の流束を
+    // 旧腕・新腕 (DUMP、float のビルド) / 参照腕 (REF、FP64 のビルド) で書いて終了する (更新・res_0 出力なし)。
+    // plans/active/architecture-float-state-double-geometry.md §4.2c。
+    if (geomAbDiag::mode() != 0) {
+        return runGeomAbDiag(cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
     }
 
     writeInitialOutputs(cfg , msh , var);

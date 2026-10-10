@@ -5,6 +5,7 @@
 #include <string>
 #include <array>
 #include <algorithm>
+#include <limits>
 
 #include "flowFormat.hpp"
 #include "mesh/mesh.hpp"
@@ -458,6 +459,34 @@ void variables::copyVariables_plane_D2H(std::list<std::string> names)
     }
 }
 
+// 面ごとの差 e = cc[ic1] − cc[ic0] を double の値の位置 (mesh::cc64) で引き、1 回だけ flow_float に丸めて
+// ホストの p["ge_x"/"ge_y"/"ge_z"] に入れる (plans/active/architecture-float-state-double-geometry.md §4.2a)。
+// 全面 (内部面・周期面・境界面のゴースト側) が対象。段 ① では本番のカーネルは読まない。
+// cc64 が無い mesh (readMesh を通らない) では NaN を入れる (誤って使えば見えるように)。
+static void fillGeomDiffE(mesh& msh, variables& v)
+{
+    std::vector<flow_float>& ex = v.p.at("ge_x");
+    std::vector<flow_float>& ey = v.p.at("ge_y");
+    std::vector<flow_float>& ez = v.p.at("ge_z");
+    ex.resize(msh.nPlanes); ey.resize(msh.nPlanes); ez.resize(msh.nPlanes);
+    const bool has64 = (msh.cc64.size() == 3*(size_t)msh.nCells_all);
+    if (!has64) {
+        std::cout << "[variables] ge_x/ge_y/ge_z: mesh has no double centre copy (cc64); filled with NaN" << std::endl;
+    }
+    const flow_float nan = std::numeric_limits<flow_float>::quiet_NaN();
+    for (geom_int ip = 0; ip < msh.nPlanes; ip++) {
+        const auto& pc = msh.planes[ip].iCells;
+        if (!has64 || pc.size() < 2) { ex[ip] = nan; ey[ip] = nan; ez[ip] = nan; continue; }
+        const size_t c0 = 3*(size_t)pc[0], c1 = 3*(size_t)pc[1];
+        const double dx = msh.cc64[c1+0] - msh.cc64[c0+0];
+        const double dy = msh.cc64[c1+1] - msh.cc64[c0+1];
+        const double dz = msh.cc64[c1+2] - msh.cc64[c0+2];
+        ex[ip] = (flow_float)dx;
+        ey[ip] = (flow_float)dy;
+        ez[ip] = (flow_float)dz;
+    }
+}
+
 void variables::setStructuralVariables(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh)
 {
     if (cfg.gpu==1) {
@@ -523,6 +552,8 @@ void variables::setStructuralVariables(solverConfig& cfg , cudaConfig& cuda_cfg 
         vccz[ic] = c1cent[2];
     }
 
+    // 面ごとの差 e (double の座標から作る、§4.2a)。段 ① では読む経路なし。
+    fillGeomDiffE(msh, *this);
 }
 
 void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh )
@@ -718,6 +749,11 @@ void variables::setStructuralVariables_d(solverConfig& cfg , cudaConfig& cuda_cf
         cudaMemcpy(this->c_d.at("delta_les"), delta_les_h, msh.nCells_all*sizeof(geom_float), cudaMemcpyHostToDevice);
         free(delta_les_h);
     }
+
+    // 面ごとの差 e = fl(cc64[ic1] − cc64[ic0]) (plans/active/architecture-float-state-double-geometry.md §4.2a、段 ①)。
+    // 本番のカーネルはまだ読まない (V0 の評価の経路 §4.2c の新腕だけが読む)。
+    fillGeomDiffE(msh, *this);
+    this->copyVariables_plane_H2D({"ge_x", "ge_y", "ge_z"});
 
     calcStructualVariables_d_wrapper(cfg , cuda_cfg , msh , *this);
 

@@ -1,6 +1,7 @@
 #include "convection/convectiveFlux_d.cuh"
 #include "cuda_forge/wmlesWallModel_d.cuh"   // wmlesActiveForBcond / wmlesNodeActive (WMLES ゲート)
 #include "cuda_forge/weakIsothermalWall_d.cuh"   // 等温壁エネルギー境界の弱形式 (SU2 型) の幾何
+#include "cuda_forge/geomAbDiag.hpp"   // V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c、既定 off)
 #include <cstdlib>
 #include <cstdio>
 #include <vector>
@@ -90,7 +91,15 @@ __global__ void viscousFlux_d
  // 内部面の**熱伝導だけ**の非直交補正の形: 0 = forge の over-relaxed (a=|S|^2/|d.S|),
  // 1 = SU2 の corrected-gradient (a=(d.S)/|d|^2)。運動量の tau には適用しない。
  // 壁熱流束の 2 節点交番の切り分け用 (plan boundary-conjugate-heat-transfer §5.1 #43)。
- int heatCorrSU2
+ int heatCorrSU2,
+ // V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 nullptr = 従来経路):
+ //   ge_x/y/z: 面ごとの e = cc1 − cc0 (double の座標から 1 回だけ丸めた値)。非 nullptr のとき置き換えるのは
+ //             ccx_1 − ccx_0 の引き算だけで、以降の式・型・ガード・面の選択・向きは変えない (§4.2a)。
+ //   faceFlux: atomicAdd の直前の面の流束を面の番号で書く [6*nPlanes]。成分 c は faceFlux[c*nPlanes+ip]:
+ //             0..2 = 運動量 (res_roU{x,y,z} へ足す値)、3 = エネルギー (res_roe へ足す値)、
+ //             4 = その内の熱 (heatflux。Taw/Qw の置換後、k 拡散の前)、5 = 仕事 (tau·U_f)。
+ //             3 は k 拡散のエネルギー流束 (energyK) と mode 3 の置換を含むので、4 + 5 と一致しないことがある。
+ const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z, flow_float* faceFlux
 )
 {
     geom_int ip = blockDim.x*blockIdx.x + threadIdx.x;
@@ -110,6 +119,13 @@ __global__ void viscousFlux_d
         geom_float szz = sz[ip];
         geom_float sss = ss[ip];
 
+        flow_float dcc_x, dcc_y, dcc_z;
+        if (ge_x != nullptr) {
+            // V0 の新腕・参照腕: double の座標から作った e (§4.2a)
+            dcc_x = ge_x[ip];
+            dcc_y = ge_y[ip];
+            dcc_z = ge_z[ip];
+        } else {
         flow_float ccx_0 = ccx[ic0];
         flow_float ccy_0 = ccy[ic0];
         flow_float ccz_0 = ccz[ic0];
@@ -118,9 +134,10 @@ __global__ void viscousFlux_d
         flow_float ccy_1 = ccy[ic1];
         flow_float ccz_1 = ccz[ic1];
 
-        flow_float dcc_x = ccx_1 - ccx_0;
-        flow_float dcc_y = ccy_1 - ccy_0;
-        flow_float dcc_z = ccz_1 - ccz_0;
+        dcc_x = ccx_1 - ccx_0;
+        dcc_y = ccy_1 - ccy_0;
+        dcc_z = ccz_1 - ccz_0;
+        }
         flow_float dcc   = sqrt(dcc_x*dcc_x +dcc_y*dcc_y +dcc_z*dcc_z) ;
 
         flow_float Uxf = f*Ux[ic0] + (1.0f-f)*Ux[ic1];
@@ -334,6 +351,7 @@ __global__ void viscousFlux_d
         flow_float res_roUy_temp = tau_y;
         flow_float res_roUz_temp = tau_z;
         flow_float res_roe_temp  = tau_x*Uxf +tau_y*Uyf +tau_z*Uzf;
+        const flow_float work_face = res_roe_temp;   // V0 の診断 (faceFlux) 用の写し。値は変えない
         if (wi_eheat != nullptr) {          // 診断のみ (res_* は触らない)
             atomicAdd(&wi_ework[ic0],  res_roe_temp); atomicAdd(&wi_ework[ic1], -res_roe_temp);
             atomicAdd(&wi_eheat[ic0],  heatflux);     atomicAdd(&wi_eheat[ic1], -heatflux);
@@ -374,6 +392,16 @@ __global__ void viscousFlux_d
                 // res_roe[ic0] += temp / res_roe[ic1] -= temp の符号系で W が +Fin を受ける形に置換
                 res_roe_temp = sgnW * Fin;
             }
+        }
+
+        // V0 の診断 (§4.2c、既定 nullptr): atomicAdd の直前の面の流束
+        if (faceFlux != nullptr) {
+            faceFlux[(size_t)0*nPlanes + ip] = res_roUx_temp;
+            faceFlux[(size_t)1*nPlanes + ip] = res_roUy_temp;
+            faceFlux[(size_t)2*nPlanes + ip] = res_roUz_temp;
+            faceFlux[(size_t)3*nPlanes + ip] = res_roe_temp;
+            faceFlux[(size_t)4*nPlanes + ip] = heatflux;
+            faceFlux[(size_t)5*nPlanes + ip] = work_face;
         }
 
         atomicAdd(&res_ro[ic0]  , res_ro_temp);
@@ -876,6 +904,121 @@ static bool sstEnergyWfNodeActive(const solverConfig& cfg, const mesh& msh)
     return false;
 }
 
+// 内部面の粘性流束カーネル (viscousFlux_d) の起動。本番 (viscousFlux_d_wrapper) と V0 の評価の経路
+// (plans/active/architecture-float-state-double-geometry.md §4.2c) が同じ引数で起動するために切り出した。
+// res[5] = {ro, roUx, roUy, roUz, roe} の残差の書き先、wiOn = W-I 実力診断 (FORGE_WI_FORCE_DIAG)、
+// ge_x/y/z・faceFlux は本番では nullptr (従来経路)。同期はしない。
+static void launchViscousFluxInternal(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var ,
+                                      flow_float* const res[5], bool wiOn,
+                                      const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
+                                      flow_float* faceFlux)
+{
+    viscousFlux_d<<<cuda_cfg.dimGrid_plane , cuda_cfg.dimBlock>>> ( 
+        // mesh structure
+        msh.nCells,
+        msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d,
+        var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
+        var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
+        var.p_d["sx"]    , var.p_d["sy"] , var.p_d["sz"] , var.p_d["ss"],  
+
+        cfg.visc , cfg.turbulentPrandtl , var.c_d["cp"] , var.c_d["thermCond"],
+        var.c_d["vis_lam"], var.c_d["vis_turb"],
+
+        // basic variables
+        var.c_d["ro"] ,
+        var.c_d["roUx"] ,
+        var.c_d["roUy"] ,
+        var.c_d["roUz"] ,
+        var.c_d["roe"] ,
+        var.c_d["Ux"]  , 
+        var.c_d["Uy"]  , 
+        var.c_d["Uz"]  , 
+        var.c_d["P"]  , 
+        var.c_d["Ht"]  , 
+        var.c_d["sonic"]  , 
+        var.c_d["T"]  , 
+
+        res[0] ,
+        res[1] ,
+        res[2] ,
+        res[3] ,
+        res[4]  ,
+       
+        // gradient
+        var.c_d["dUxdx"] , var.c_d["dUxdy"] , var.c_d["dUxdz"],
+        var.c_d["dUydx"] , var.c_d["dUydy"] , var.c_d["dUydz"],
+        var.c_d["dUzdx"] , var.c_d["dUzdy"] , var.c_d["dUzdz"],
+        var.c_d["dTdx"] , var.c_d["dTdy"] , var.c_d["dTdz"],
+        cfg.isAxisymmetric, var.c_d["axisym_divU"],
+        // node SST 壁関数 / node WMLES のとき Tau_Wall を渡し AddTauWall 再スケール。
+        // それ以外は nullptr (Tau_Wall 未初期化のため)。
+        ((cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1)
+         || wmlesNodeActive(cfg, msh))
+            ? var.c_d["Tau_Wall"] : nullptr,
+        // 診断 (§4.2): W-I 実力集計。毎ステップ 0 クリアしてから渡す。
+        (wiOn && var.c_d.count("wi_ftan"))     ? var.c_d["wi_ftan"]     : nullptr,
+        (wiOn && var.c_d.count("wi_fnrm"))     ? var.c_d["wi_fnrm"]     : nullptr,
+        (wiOn && var.c_d.count("wi_fnrm_abs")) ? var.c_d["wi_fnrm_abs"] : nullptr,
+        (wiOn && var.c_d.count("wi_ftan_res")) ? var.c_d["wi_ftan_res"] : nullptr,
+        (wiOn && var.c_d.count("wi_eheat"))    ? var.c_d["wi_eheat"]    : nullptr,
+        (wiOn && var.c_d.count("wi_ework"))    ? var.c_d["wi_ework"]    : nullptr,
+        // node WMLES 等温壁 / node SST エネルギー壁関数 (§6.5(g)) のとき Qw_Wall を渡し
+        // AddQWall (W-I 熱流束置換)。それ以外は nullptr (Qw_Wall 未初期化のため)。
+        (wmlesNodeIsothermalActive(cfg, msh) || sstEnergyWfNodeActive(cfg, msh))
+            ? var.c_d["Qw_Wall"] : nullptr,
+        // SST 断熱壁 SU2 式熱結合 (experimental mode 2) のときのみ overlay を渡す。
+        // mode 0/1 は nullptr (従来経路ビット不変)。
+        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
+         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 2)
+            ? var.c_d["Taw_Prim_Overlay"] : nullptr,
+        // 【実験専用】overlay 辺の壁側 μt スケール (FORGE_TAW_WALL_MUT_SCALE, 既定 1.0)
+        [] {
+            static const flow_float v = [] {
+                const char* s = std::getenv("FORGE_TAW_WALL_MUT_SCALE");
+                const flow_float x = s ? static_cast<flow_float>(std::atof(s)) : static_cast<flow_float>(1.0);
+                if (s) printf("[EXPERIMENT] taw wall mut scale = %g (FORGE_TAW_WALL_MUT_SCALE)\n", (double)x);
+                return x;
+            }();
+            return v;
+        }(),
+        // SST 断熱壁 defect-flux 閉包 (experimental mode 3) のときのみ H⃗/Taw を渡す。
+        // mode 0/1/2 は nullptr (従来経路ビット不変)。
+        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
+         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
+            ? var.c_d["Taw_HTnx"] : nullptr,
+        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
+         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
+            ? var.c_d["Taw_HTny"] : nullptr,
+        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
+         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
+            ? var.c_d["Taw_HTnz"] : nullptr,
+        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
+         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
+            ? var.c_d["Taw_diag"] : nullptr,
+        (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && var.c_d.count("k")) ? var.c_d["k"] : nullptr,
+        cfg.sstIsotropicStress,
+        // sstEnergyIncludesK: k 拡散のエネルギー流束 (SST のときのみ)
+        var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
+        var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
+        cfg.sstSigmaBlend,
+        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0,
+        cfg.heatCorrSU2,
+        // V0 の評価の経路 (§4.2c): 本番は 4 つとも nullptr
+        ge_x, ge_y, ge_z, faceFlux
+    ) ;
+}
+
+void viscousFluxInternalArm_d(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var ,
+                              flow_float* const res[5],
+                              const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
+                              flow_float* faceFlux)
+{
+    // W-I 実力診断は渡さない (腕の評価が本番の診断の集計を二重に積まないように)
+    launchViscousFluxInternal(cfg, cuda_cfg, msh, var, res, false, ge_x, ge_y, ge_z, faceFlux);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
+}
+
 void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var , matrix& mat_ns)
 {
     // W-I 実力診断 (§4.2): env FORGE_WI_FORCE_DIAG=1 のときだけ有効 (通常経路の性能を変えない)。
@@ -946,100 +1089,19 @@ void viscousFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh 
     // ------------------------------
     // *** sum over normal planes ***
     // ------------------------------
-    viscousFlux_d<<<cuda_cfg.dimGrid_plane , cuda_cfg.dimBlock>>> ( 
-        // mesh structure
-        msh.nCells,
-        msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d,
-        var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
-        var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
-        var.p_d["sx"]    , var.p_d["sy"] , var.p_d["sz"] , var.p_d["ss"],  
-
-        cfg.visc , cfg.turbulentPrandtl , var.c_d["cp"] , var.c_d["thermCond"],
-        var.c_d["vis_lam"], var.c_d["vis_turb"],
-
-        // basic variables
-        var.c_d["ro"] ,
-        var.c_d["roUx"] ,
-        var.c_d["roUy"] ,
-        var.c_d["roUz"] ,
-        var.c_d["roe"] ,
-        var.c_d["Ux"]  , 
-        var.c_d["Uy"]  , 
-        var.c_d["Uz"]  , 
-        var.c_d["P"]  , 
-        var.c_d["Ht"]  , 
-        var.c_d["sonic"]  , 
-        var.c_d["T"]  , 
-
-        var.c_d["res_ro"] ,
-        var.c_d["res_roUx"] ,
-        var.c_d["res_roUy"] ,
-        var.c_d["res_roUz"] ,
-        var.c_d["res_roe"]  ,
-       
-        // gradient
-        var.c_d["dUxdx"] , var.c_d["dUxdy"] , var.c_d["dUxdz"],
-        var.c_d["dUydx"] , var.c_d["dUydy"] , var.c_d["dUydz"],
-        var.c_d["dUzdx"] , var.c_d["dUzdy"] , var.c_d["dUzdz"],
-        var.c_d["dTdx"] , var.c_d["dTdy"] , var.c_d["dTdz"],
-        cfg.isAxisymmetric, var.c_d["axisym_divU"],
-        // node SST 壁関数 / node WMLES のとき Tau_Wall を渡し AddTauWall 再スケール。
-        // それ以外は nullptr (Tau_Wall 未初期化のため)。
-        ((cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && cfg.wallTreatmentSST == 1)
-         || wmlesNodeActive(cfg, msh))
-            ? var.c_d["Tau_Wall"] : nullptr,
-        // 診断 (§4.2): W-I 実力集計。毎ステップ 0 クリアしてから渡す。
-        (wiDiagOn && var.c_d.count("wi_ftan"))     ? var.c_d["wi_ftan"]     : nullptr,
-        (wiDiagOn && var.c_d.count("wi_fnrm"))     ? var.c_d["wi_fnrm"]     : nullptr,
-        (wiDiagOn && var.c_d.count("wi_fnrm_abs")) ? var.c_d["wi_fnrm_abs"] : nullptr,
-        (wiDiagOn && var.c_d.count("wi_ftan_res")) ? var.c_d["wi_ftan_res"] : nullptr,
-        (wiDiagOn && var.c_d.count("wi_eheat"))    ? var.c_d["wi_eheat"]    : nullptr,
-        (wiDiagOn && var.c_d.count("wi_ework"))    ? var.c_d["wi_ework"]    : nullptr,
-        // node WMLES 等温壁 / node SST エネルギー壁関数 (§6.5(g)) のとき Qw_Wall を渡し
-        // AddQWall (W-I 熱流束置換)。それ以外は nullptr (Qw_Wall 未初期化のため)。
-        (wmlesNodeIsothermalActive(cfg, msh) || sstEnergyWfNodeActive(cfg, msh))
-            ? var.c_d["Qw_Wall"] : nullptr,
-        // SST 断熱壁 SU2 式熱結合 (experimental mode 2) のときのみ overlay を渡す。
-        // mode 0/1 は nullptr (従来経路ビット不変)。
-        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
-         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 2)
-            ? var.c_d["Taw_Prim_Overlay"] : nullptr,
-        // 【実験専用】overlay 辺の壁側 μt スケール (FORGE_TAW_WALL_MUT_SCALE, 既定 1.0)
-        [] {
-            static const flow_float v = [] {
-                const char* s = std::getenv("FORGE_TAW_WALL_MUT_SCALE");
-                const flow_float x = s ? static_cast<flow_float>(std::atof(s)) : static_cast<flow_float>(1.0);
-                if (s) printf("[EXPERIMENT] taw wall mut scale = %g (FORGE_TAW_WALL_MUT_SCALE)\n", (double)x);
-                return x;
-            }();
-            return v;
-        }(),
-        // SST 断熱壁 defect-flux 閉包 (experimental mode 3) のときのみ H⃗/Taw を渡す。
-        // mode 0/1/2 は nullptr (従来経路ビット不変)。
-        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
-         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
-            ? var.c_d["Taw_HTnx"] : nullptr,
-        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
-         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
-            ? var.c_d["Taw_HTny"] : nullptr,
-        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
-         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
-            ? var.c_d["Taw_HTnz"] : nullptr,
-        (cfg.discretization == "node" && cfg.LESorRANS == 2 && cfg.RANSmodel == 1
-         && cfg.wallTreatmentSST == 1 && cfg.sstThermalWallFunction == 3)
-            ? var.c_d["Taw_diag"] : nullptr,
-        (cfg.LESorRANS == 2 && cfg.RANSmodel == 1 && var.c_d.count("k")) ? var.c_d["k"] : nullptr,
-        cfg.sstIsotropicStress,
-        // sstEnergyIncludesK: k 拡散のエネルギー流束 (SST のときのみ)
-        var.c_d["dKdx"], var.c_d["dKdy"], var.c_d["dKdz"],
-        var.c_d.count("sstF1") ? var.c_d["sstF1"] : nullptr,
-        cfg.sstSigmaBlend,
-        (cfg.sstEnergyIncludesK != 0 && cfg.LESorRANS == 2 && cfg.RANSmodel == 1) ? 1 : 0,
-        cfg.heatCorrSU2
-    ) ;
+    // V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c、既定 off): 本番の起動の直前に入力の記録と
+    // 旧腕・新腕 (DUMP) / 参照腕 (REF) を別の書き先で評価し、直後に本番の寄与と照合する。
+    const bool geomAb = geomAbDiag::armed();
+    if (geomAb) geomAbDiag::viscousBefore(cfg, cuda_cfg, msh, var, &viscousFluxInternalArm_d);
+    {
+        flow_float* const resReal[5] = {var.c_d["res_ro"], var.c_d["res_roUx"], var.c_d["res_roUy"],
+                                        var.c_d["res_roUz"], var.c_d["res_roe"]};
+        launchViscousFluxInternal(cfg, cuda_cfg, msh, var, resReal, wiDiagOn, nullptr, nullptr, nullptr, nullptr);
+    }
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    if (geomAb) geomAbDiag::viscousAfter(cfg, cuda_cfg, msh, var);
 
     if (weakIsoWall::active(cfg, msh)) weakIsoWall::diagReset(msh);
 

@@ -229,7 +229,12 @@ public:
         "pcx" , "pcy" , "pcz" ,
         "fx"  , 
         "massflux" ,
-        "dcc"   // dcc: distance between two cell centers
+        "dcc" , // dcc: distance between two cell centers
+        // 面ごとの差 e = cc[ic1] − cc[ic0] (ic0/ic1 = plane_cells の 0/1 番目、境界面はゴースト側が ic1)。
+        // double の座標 (mesh::cc64) で引いて 1 回だけ flow_float に丸めた値 (plans/active/
+        // architecture-float-state-double-geometry.md §4.2a)。段 ① では本番のカーネルは読まない
+        // (V0 の評価の経路 §4.2c の新腕だけが読む)。
+        "ge_x" , "ge_y" , "ge_z"
     };
 
     // output.extraFields で**だけ**出せる量 (level 2 の既定出力には入れないので、既存 run の res_*.h5 の中身は変わらない)。

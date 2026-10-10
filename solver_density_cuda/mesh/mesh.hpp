@@ -184,6 +184,19 @@ public:
     int nodeValueAtNode = 0;
     std::vector<geom_float> rEff;
 
+    // 幾何の倍精度の写し (plans/active/architecture-float-state-double-geometry.md §4.2 1.、段 ①)。
+    // readMesh が geom_float の配列とは別に、HDF5 の型によらず double で読む (ファイルが float32 なら広げるだけ)。
+    // 段 ① では既存の経路はどれも読まない (面ごとの差 e を作る variables::setStructuralVariables と V0 の診断だけが使う)。
+    // 並びはファイルと同じ [3*i+k]。変換器など readMesh を通らない mesh では空のまま。
+    std::vector<double> coord64;      // [3*nNodes]  /MESH/COORD
+    std::vector<double> planeCent64;  // [3*nPlanes] /PLANES/centCoords
+    std::vector<double> surfVect64;   // [3*nPlanes] /PLANES/surfVect (半径の重みを掛ける前)
+    std::vector<double> surfArea64;   // [nPlanes]   /PLANES/surfArea
+    std::vector<double> cellCent64;   // [3*nCells]  /CELLS/centCoords (ファイルの値。node でも節点座標への置換前)
+    // 値の位置の double 版 [3*nCells_all]。ソルバの ccx..ccz と同じ規則で作る
+    // (node = 節点座標、cell = セル重心、ゴースト = 面に対する鏡映。式は readMesh のゴースト生成と同じ)。
+    std::vector<double> cc64;
+
     // 壁 CV フラグ [nCells] (wall 種別 bcond の CV=1)。node-centered 壁 Dirichlet で、壁ノード速度を
     // 厳密に 0 に固定する (state 初期化 + 運動量残差射影) のに使う。壁ゴーストを撤廃する代替。
     geom_int* wall_flag_d = nullptr;

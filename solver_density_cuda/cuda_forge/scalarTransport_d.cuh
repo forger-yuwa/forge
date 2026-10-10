@@ -43,8 +43,20 @@ struct ScalarTransportDesc {
 // 面ループ融合)。面幾何・massflux・ρ・μ を 1 度だけ読み、各スカラーは φ の gather と atomicAdd だけ増える。
 // 面ごとの演算は単一版 (scalar_advection_first_order_d / scalar_diffusion_first_order_d) と同一順序。
 #define SCALAR_MULTI_MAX 4
+// geomAbHook: V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c) を掛ける呼び出しの印。
+// SST k/ω (ransTransport_d_wrapper) だけが true で呼ぶ。診断が無効なら何もしない (既定 false = 従来経路)。
 void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
-                                    const ScalarTransportDesc* descs, int n);
+                                    const ScalarTransportDesc* descs, int n, bool geomAbHook = false);
+
+// V0 の評価の経路 (§4.2c) 用: 融合拡散カーネル (本番と同じ面ループ・同じ式・同じ起動の形) を 1 回起動する。
+// 残差と輸送対角の書き先を resAlt[s] / diagAlt[s] (各 n 本) に差し替え、ge_x/y/z が非 nullptr なら面ごとの差 e を
+// cc1 − cc0 の引き算の代わりに読む。faceFlux (非 nullptr、[n*nPlanes]) には atomicAdd の直前の面の流束を書く。
+// 起動後に同期する。拡散を使うスカラーが無ければ何もしない。
+void scalarDiffusionMultiArm_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                               const ScalarTransportDesc* descs, int n,
+                               flow_float* const* resAlt, flow_float* const* diagAlt,
+                               const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
+                               flow_float* faceFlux);
 
 // 1 変数ぶんの移流 + (任意) 拡散残差を組み立てる。
 // res_rho_phi / transport_diag は呼び出し側でゼロ初期化済みであること。同期は行わない。
