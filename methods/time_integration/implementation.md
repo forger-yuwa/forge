@@ -527,7 +527,12 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
   (λ_visc/λ_ac = 2ν/(Δn·c) ≪ 1) なので効果は僅差** — 意味を持つのは Δn < 2ν/c の超極薄セルのみ。
   ただしこの見積もりは擬似 dt が壁法線の音響で決まる場合 (point と同じ Δτ) のもので、`lineDtDirectional` で Δτ が縦横比の分だけ伸びると
   1 層目の拡散数 νΔτ/Δn² は O(10) になる (case/45 で約 23)。
-- **`lineViscCoupling: 2` (2026-10-09 実装・検証中、plan [time_integration-line-viscous-jacobian](../../plans/active/time_integration-line-viscous-jacobian.md))**: ライン面の K と対角に
+- **`lineViscCoupling: 2`・`3` (診断用。本線には採らない、2026-10-10。plan [time_integration-line-viscous-jacobian](../../plans/accepted/time_integration-line-viscous-jacobian.md) §6.17)**:
+  case/45 の方向別 dt では値 2 は 29 step、値 3 は 122 step で非有限になった。熱伝導の近傍 K を外した値 3 (`FORGE_LVC_TERMS=5`) は水準まで回ったが、値 0 のラインと総時間で判別できなかった。
+  既定は 0 のままで、本番の設定には 2・3 も下の診断の環境変数も書かない。値 2・3 の動作は FP64 ビルドでだけ確かめた。
+  値 3 は値 2 の D にライン面のスカラー 2ν_eff·δ/dcc も足す。`FORGE_LVC_TERMS` は値 2・3 の項のマスク (ビット 1 = 運動量の D/K、2 = 熱伝導の近傍 K、4 = 粘性の仕事の D/K、8 = 熱伝導の K の密度の列を外す、既定 7)。
+  `FORGE_LINE_DUMP_DIR`・`_CALL`・`_NODES` はライン行列の書き出し、`FORGE_DIAG_FACE_H_DOUBLE=1` は TP の SLAU の面エンタルピーを double で評価する診断。以下は値 2 の中身。
+  ライン面の K と対角に
   薄層の粘性・熱伝導の Jacobian を入れる (連続の行 0、運動量の行は速度の微分に $P=I+\tfrac13\hat n\hat n^{\mathsf T}$、エネルギーの行は温度の微分と粘性の仕事)。
   K = −A⁻ の固有値はせん断・エントロピーで $V$ (面の法線速度) なので、壁際 ($V\approx0$) のラインではこれらのモードが対流の Jacobian では結合しない。値 1 との違いは、
   連続の行に拡散を入れないことと、エネルギーの行を ρE でなく T で結合すること。
@@ -535,7 +540,7 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
   $\beta=\mu_f\delta/|\Delta\mathbf{cc}|$・$\kappa=k_f\delta/|\Delta\mathbf{cc}|$ (残差と同じ面の値、層流は節点の `vis_lam`)、$\bar u=f_iu_i+(1-f_i)u_j$ から
   $D\mathrel{+}=-\partial R_i/\partial Q_i$、$K\mathrel{+}=\partial R_i/\partial Q_j$。$P$ は現在の離散残差の厳密な微分ではなく前処理行列としての近似。
   隣が速度の Dirichlet の壁なら運動量・仕事の K を、等温壁なら熱伝導の K を 0 にし、等温壁の節点の行 4 は $\Delta(\rho E)_w-e_w\Delta\rho_w=0$ (ΔT_w = 0)。
-  単体照合 `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (中心差分・零空間 $\delta\rho(1,u,v,w,E)$・等温壁の拘束・短いラインの解)。
+  単体照合 `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (中心差分・零空間 $\delta\rho(1,u,v,w,E)$・等温壁の拘束・短いラインの解。中心差分との差は D・K の行列全体の最大値で割って判定するので、列ごとの相対誤差は保証しない)。
 - **`lineViscousDtRelief: θ`**: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍 (`setDT_d`
   で面ごとに割引、対流+音響分は残す)。θ=1 でも安定 (上と同じ理由で利得も僅差)。
 - **`lineDtDirectional: 1`**: 方向別 dt — line 面 (Thomas が厳密に解く結合) の λ を音響込みで

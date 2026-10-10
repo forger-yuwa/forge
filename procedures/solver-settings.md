@@ -79,7 +79,9 @@ time:
 - `lineViscCoupling` / `lineViscousDtRelief`: line 面の粘性結合と粘性 CFL 割引。`lineViscCoupling` は 0 (結合なし、既定) / 1 (スカラー α I を 5 行すべて) /
   2 (薄層の粘性・熱伝導の Jacobian をライン面の K と対角に。連続の行 0、運動量は速度、エネルギーは T と粘性の仕事。等温壁の行は ΔT_w = 0 の拘束)。
   2 は node・`lineImplicit 1`・`blockDPLUR 1`・`timeIntegration 11`・`lowMachPrecond < 2`・`heatCorrSU2 0`・`nodeIsothermalEnergyBC 0`・`wallTreatmentSST 0` 専用 (それ以外は起動時に拒否)。
-  検証中 (plan [time_integration-line-viscous-jacobian](../plans/active/time_integration-line-viscous-jacobian.md))。
+  3 は 2 にライン面のスカラー対角を足した診断用の値 (条件は 2 と同じ)。**2・3 は本番に使わない** (2026-10-10 に本線不採用で閉じた。case/45 の方向別 dt で発散し、
+  熱伝導の近傍 K を外した版も値 0 と総時間で判別できなかった。FP64 ビルドでしか確かめていない。plan [time_integration-line-viscous-jacobian](../plans/accepted/time_integration-line-viscous-jacobian.md) §6.17)。
+  **1 は 2026-10-09 の値 2 の実装 (5ab83056) 以降、旧バイナリとの一致を確かめていない** (値 0 はキー 5・方向別・上限 50 の設定でだけ確かめた)。1 を使うときは先に旧バイナリとの短期の一致を取る。
   圧縮性の壁法線 pseudo-dt 律速は音響 (λ_visc/λ_ac=2ν/(Δn·c)≪1) なので通常は効果僅差 — 既定 off で可。
 
 **使い分け (2026-09-03 実測)**: 定常 M6 ノズル (case/45) では cfl 上限を上げない (streamwise

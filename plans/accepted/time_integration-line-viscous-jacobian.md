@@ -3,14 +3,14 @@
 ## メタ
 
 - **area**: `time_integration`
-- **status**: `in_progress` (2026-10-09 に §6.7 で保留したが、同日ユーザ指示「つづけて」で原因の切り分けを再開: §6.8)
+- **status**: `done` (2026-10-10。結論は「本線不採用・診断として残置」、§6.17。2026-10-09 に §6.7 で保留し、同日ユーザ指示「つづけて」で原因の切り分けを再開した: §6.8〜§6.16)
 - **related_docs**:
   - `methods/time_integration/implementation.md` の「line-implicit」「v2」(`lineViscCoupling`) と「エネルギー行の熱伝導 Jacobian」
 - **related_plans**:
-  - [`time_integration-implicit-thermal-jacobian.md`](time_integration-implicit-thermal-jacobian.md) (キー 5 と上限 R、§6.0 の run_0223/0224)
-  - [`time_integration-line-implicit-speed.md`](time_integration-line-implicit-speed.md) (同じカーネルの速度の改善)
-  - [`../accepted/time_integration-line-implicit-viscous-v2.md`](../accepted/time_integration-line-implicit-viscous-v2.md) (`lineViscCoupling: 1` = スカラーの結合)
-  - [`tooling-nozzle-isothermal-wall-chain.md`](tooling-nozzle-isothermal-wall-chain.md) §5.1 #27 (冷却壁の遅い過渡)
+  - [`time_integration-implicit-thermal-jacobian.md`](../active/time_integration-implicit-thermal-jacobian.md) (キー 5 と上限 R、§6.0 の run_0223/0224)
+  - [`time_integration-line-implicit-speed.md`](../active/time_integration-line-implicit-speed.md) (同じカーネルの速度の改善)
+  - [`time_integration-line-implicit-viscous-v2.md`](time_integration-line-implicit-viscous-v2.md) (`lineViscCoupling: 1` = スカラーの結合)
+  - [`tooling-nozzle-isothermal-wall-chain.md`](../active/tooling-nozzle-isothermal-wall-chain.md) §5.1 #27 (冷却壁の遅い過渡)
 - **created**: `2026-10-09`
 - **owner**: Claude (ユーザ指示 2026-10-09「K_ij に粘性の寄与は入れたほうがいいんじゃない」「プラン書いて諮っていいよ」「まずは粘性込みのヤコビアンを試してほしい」)
 
@@ -25,7 +25,7 @@
 ## 2. スコープ
 
 - **やる**: ライン面 (Thomas が厳密に解く面) の粘性・熱伝導の薄層 Jacobian (`lineViscCoupling: 2`)、純伝導の試験 (U2)、case/45 の A/B。
-- **やらない**: ライン外の面 (従来のスカラーのまま)、SST の k・ω のライン化 (別議題)、Thomas の速度 ([time_integration-line-implicit-speed](time_integration-line-implicit-speed.md))。
+- **やらない**: ライン外の面 (従来のスカラーのまま)、SST の k・ω のライン化 (別議題)、Thomas の速度 ([time_integration-line-implicit-speed](../active/time_integration-line-implicit-speed.md))。
 
 ## 3. 関連 docs と前提
 
@@ -89,24 +89,24 @@
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | codex plan 段と諮問の採否 | 判断: 2026-10-09 plan 段 GO-with-changes (C0/M5/m2) と諮問 (diagnose) を全件採用 (§6.1)。等温壁の拘束、入力経路と対応範囲、単体試験、判定の分離、同じ水準までの壁時計 | F |
-| 2 | 共通関数と単体試験 (U-J) | 合格は §6 U-J | O |
+| 2 | 共通関数と単体試験 (U-J) | 合格は §6 U-J。**2026-10-10 訂正 (codex result M1)**: 実装した試験は差を行列全体の最大値で割る判定で PASS。登録した列ごとの相対誤差 ≤ 1e-6 は未確認 (再開の課題、§6.17) | O |
 | 3 | 実装 (§4.3) とビルド | 合格: FP64・FP32 のビルドが通る、値 2 + キー 0 で起動する | O |
-| 4 | U0・U2・U3・FP32 (§6) | U2 不合格 (950 step)・U3 は Couette が判定不能 (node で壁を動かせない) で Poiseuille に組み直して不合格 (収束が遅い)、§6.0。U0・FP32 は未実施 | O |
+| 4 | U0・U2・U3・FP32 (§6) | U2 不合格 (950 step)・U3 は Couette が判定不能 (node で壁を動かせない) で Poiseuille に組み直して不合格 (収束が遅い)、§6.0。U0・FP32 は未実施。**処置 (2026-10-10、§6.17)**: 不合格・判定不能は閾値を変えずに残す。U0 は未実施のまま閉じる (値 0 の一部の条件だけ、速度 plan の B1 の短期の一致が代わりの証拠になる)。FP32 は未実施のまま閉じ、値 2・3 の動作確認は FP64 ビルドに限ると適用範囲を書く | O |
 | 5 | V-n1 (上限なし 2000 step の A/B)・V-n2 (上限 50 の同じ水準までの壁時計) | V-n1 は B 不合格 (29 step で発散)、上限 50 でも成長 (§6.0)。判断: 2026-10-09 codex 諮問 — 値 2 は本線に使わない、V-n2 へ進む条件を満たさない | F |
 | 5b | 実ライン行列の host 再解 A/B (§6.2) | 完了 (§6.3): CUDA の解は書き出した行列の解と一致 (≤ 4e-12; 行列が残差の Jacobian として正しいことは示していない、§6.14)、密度が主の仮説は棄却、弱いモードは壁の近くの ρE が主、σ = 1 で全成分が約 1/25 | O |
 | 5c | 次の一手 (値 2 の扱い) | 判断: 2026-10-09 codex 諮問 — 全行のスカラー対角を戻す診断の A/B (§6.4)。エネルギーの行だけの正則化・熱伝導 K の除去を先にしない、値 2 の系統はまだ閉じない | F |
 | 5d | 値 3 (診断) の実装と §6.4 の A/B | 完了 (§6.5): B 不合格 → 十分性を棄却 | O |
 | 5e | 次の一手 | 判断: 2026-10-09 codex 諮問 — 値 0 でキー 5/7 だけを変える A/B を一組 (§6.6) 行い、その後は値 2・3 を保留して本線の評価に戻る | F |
 | 5f | §6.6 の A/B | 完了 (§6.7): 分岐 2 (壁の拘束の変更だけでは壊れない)。値 2・3 は保留 | O |
-| 5g | E1 (§6.8 改訂): マスク 7/5 の A/B と事前の行列の確認 | 完了 (§6.9): 熱伝導の近傍 K を除くと 2000 step 有限 (分岐 1)。マスク 0 の事前確認は float の約 2 ulp で許容外 (設定の誤り) | O |
+| 5g | E1 (§6.8 改訂): マスク 7/5 の A/B と事前の行列の確認 | 完了 (§6.9): 熱伝導の近傍 K を除くと 2000 step 有限。観測は分岐 1 の形だが、マスク 0 の事前確認が float の約 2 ulp で許容外 (許容を double の前提で置いた設定の誤り) なので、**登録上は比較無効・探索的な観測** (2026-10-10 に要約を訂正。旧要約「(分岐 1)」は誤り) | O |
 | 5h | 次の一手 (熱伝導の K の何が効くか) | 判断: 2026-10-09 codex 諮問 — §6.9 は探索的な観測に格下げ、密度の列だけの A/B (§6.10) を先に、ゲートを直す | F |
-| 5i | §6.10 の A/B | 完了 (§6.11): 分岐 2 = 密度の列は必要でない (無くても 566 step で壊れる) | O |
+| 5i | §6.10 の A/B | 完了 (§6.11): 分岐 2 = 密度の列を除いても 566 step で非有限。同じ破綻の機構にとって必要かは未確定 (2026-10-10 に要約を訂正、codex result M3) | O |
 | 5j | 次の一手 | 判断: 2026-10-09 codex 諮問 — 列の切り分けをやめ作用素の切り分け (方向微分) の一組で区切る、またはマスク 5 の加速の評価へ (§6.12)。ユーザの選択 (2026-10-09): 方向微分で作用素を確かめてから区切る | F |
 | 5k | 方向微分による作用素の確認 (§6.13) | 完了 (§6.14): S0・S1 とも分岐 (d) 判別不能。判断: 2026-10-09 codex 諮問 — (d) で閉じ、追加は面エンタルピーの float/double の A/B 一組だけ、その後は本線へ | O |
 | 5l | 面エンタルピーの精度の A/B (§6.15) | 完了 (§6.16): 精度依存を支持・H-c の説明としても支持 (S0・p7・ライン 2183・エネルギーの行・ε = 1e-6 に限る)。探索はここで終える | O |
 | 5m | 本線へ戻る | 判断: 2026-10-09 codex 諮問 — 面エンタルピーは既定の精度のまま、本線へ戻る。値 2・3 は保留のまま (既定 0)。マスク 5 の長期評価・熱伝導 K の列の削除は続けない。速度は plan time_integration-line-implicit-speed の本線 (方向別 dt + 上限・point 仕上げを含む総壁時計) で評価する。2026-10-09 追記: ユーザの指摘を受け、マスク 5 は本 plan では追わず、速度 plan §5.1 #9 の比較の腕としてだけ総壁時計で評価する | F |
-| 5n | 残差評価の精度の監査 (移管) | point 仕上げで面エンタルピーの float/double が残差の停滞に効くかの A/B は [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 へ移した (本 plan では回さない) | — |
-| 6 | result 段のレビューと採否 | 閉じ方 (codex 2026-10-09): 本線不採用・値 2・3 と診断の切替 (`FORGE_LVC_TERMS`・`FORGE_LINE_DUMP_*`・`FORGE_DIAG_FACE_H_DOUBLE`) は診断として残置の判断文書として accepted へ。U0・FP32 は未実施のまま (完了扱いにしない)、§6.13 の (d)・各試験の不合格・判定不能を残す | F |
+| 5n | 残差評価の精度の監査 (移管) | point 仕上げで面エンタルピーの float/double が残差の停滞に効くかの A/B は [time_integration-implicit-thermal-jacobian](../active/time_integration-implicit-thermal-jacobian.md) §5.1 #5 へ移した (本 plan では回さない) | — |
+| 6 | result 段のレビューと採否 | 閉じ方 (codex 2026-10-09): 本線不採用・値 2・3 と診断の切替 (`FORGE_LVC_TERMS`・`FORGE_LINE_DUMP_*`・`FORGE_DIAG_FACE_H_DOUBLE`) は診断として残置の判断文書として accepted へ。U0・FP32 は未実施のまま (完了扱いにしない)、§6.13 の (d)・各試験の不合格・判定不能を残す。判断: 2026-10-10 codex result 段 GO-with-changes (C0/M3/m1) を全件採用 (§6.1) — U-J の合格範囲、U2 の「収束」、E1・密度の列の要約を訂正し、総時間の引用に留保を足して accepted へ移した | F |
 
 ## 6. 検証 (事前登録、2026-10-09、codex 反映後)
 
@@ -143,8 +143,9 @@
 ### 6.0 結果 (2026-10-09)
 
 - **U-J**: PASS (中心差分との差 2.3e-8、零空間 2.5e-16、等温壁の拘束 1.5e-16、8 節点ラインの解 1.6e-15、float と double 1.3e-5)。
+  **訂正 (2026-10-10、codex result M1)**: 実装した試験 (`test_line_visc_jacobian.cpp`) は中心差分との差を D・K それぞれの行列全体の最大値で割って判定している。事前登録した「列ごとの相対誤差 ≤ 1e-6」は確かめていない (小さい列の相対誤差はこの判定では保証されない)。PASS は全行列の最大値で正規化した判定に限る。
 - **U2** (`case/52.conjugate_slab/run_0008〜0011`): 値 0 cfl 5 は 5000 step で L∞ 0.198 K、値 2 cfl 5 は 0.094 K、値 0 cfl 50 は非有限、**値 2 cfl 50 は 950 step で 0.05 K、5000 step で 1.4e-6 K**。
-  熱伝導の項のライン内の結合は効いている (値 0 が壊れる cfl で値 2 は収束) が、事前登録の「250 step 以内」は**不合格**。静止流なので運動量・仕事の項は試していない。
+  値 0 が壊れる cfl 50 で、値 2 は温度の解析解誤差がこの水準まで下がった (熱伝導の項のライン内の結合は効いている、という観測) が、事前登録の「250 step 以内」は**不合格**。残差の収束は確かめていない (`check_convergence` の VERDICT なし。2026-10-10 に「収束」の表現を訂正、codex result M2)。静止流なので運動量・仕事の項は試していない。
 - **U3**: 判定不能。z 方向に壁を動かす版 (`run_0012〜0015`) も、側面を周期にして x 方向に動かす版 (`run_0016〜0019`、事後に組み直した) も、壁の節点の速度が 0 のまま。
   node の壁は `nodeWallDirichlet` で no-slip に固定する作りで、bcond の Ux/Uz は node では効かない。せん断・仕事の項は**未検証**。
 - **U3 (Poiseuille、`case/52.conjugate_slab/run_0020〜0023_u3p_*`)**: 5000 step の速度の L∞ (中央の速度に対する比) は値 0 cfl 5 で 0.276、値 2 cfl 5 で 0.259、値 0 cfl 50 は非有限、
@@ -181,7 +182,8 @@
 
 採取: `case/45.isobutane_m6_d155/run_0288_dump_lvc2` (lineB2 のバイナリ、値 2・キー 5・方向別・上限なし・1 step、`run_0288_dump_lvc2_linedump/`)、
 列 12・33・65・1640・2183 の壁の節点を含むライン 5 本 × 121 節点、5 sweep。解析 `linedump_analyze.py` → `_band_ab/cold_pair/linedump_run_0288_analysis.json`。
-- **実装の経路**: host の再解 (σ = 0) × implicitRelax と CUDA の dq の相対差は 2e-13〜4e-12 → 実装経路の誤りは無い。
+- **実装の経路**: host の再解 (σ = 0) × implicitRelax と CUDA の dq の相対差は 2e-13〜4e-12 → 書き出した D・K・rhs の系を CUDA の Thomas が正しく解いている
+  (2026-10-10 訂正: 当初「実装経路の誤りは無い」と書いたが、示したのは解法の整合だけ。D/K の組立・物性の入力・実残差の Jacobian との整合は示していない。末尾と §6.14)。
 - **大きな補正は 1 回目の sweep から** (入口寄りの 3 本で |δρ/ρ| 0.97〜1.3 %、|δu| 0.8〜1.0 m/s、|δT| 7.8〜9.9 K が sweep 0〜4 でほぼ一定) → 後の sweep の lag の増幅ではない。
 - **弱いモードは密度が主ではない**: 無次元化した行列の最小の右特異ベクトルの成分は ρE 94 %・ρ 5 %・ρv 1 % (入口寄りの 3 本)、位置は壁から 6〜12 節点目。
   1 回目の補正の成分も ρE 94 %。→ 事前登録の分岐で**「密度が主の準特異」の狭い仮説は棄却**。
@@ -410,14 +412,67 @@
   「h が凍結して ṁ·∂h が抜けた」という機構は面ごとの Δh を測っていないため未確定。B でも相対差 38.9 % が残る (ライン面のスカラーを D から除いても 0.389 のまま = この対象ではスカラーが主因ではない)。
 - 切替なし (A) の q0 の残差は旧バイナリ lineG と同じ入力の再評価の差の桁で一致 (res_roe 最大 2.3e-10)。B の q0 は A の q0 から ‖R_B − R_A‖/‖R_A‖ = 5.5e-3 (エネルギー、他の行は ≤ 6e-11)。
   これは「同じ状態で残差の評価が変わる」ことまでで、残差のノルムが 0.55 % 増減した意味ではない。**S0 (`run_0183`) は収束済みではない** (`check_convergence` NOT CONVERGED、stalled/plateau、rms_roOmega RISING; `_band_ab/cold_pair/gates_aws.json`)。
-  ブリーフの「収束した S0」は誤り。残差の床・ライン陰解法の破綻との因果は測っていない → point 仕上げでの A/B を [time_integration-implicit-thermal-jacobian](time_integration-implicit-thermal-jacobian.md) §5.1 #5 に登録 (本 plan では回さない)。
+  ブリーフの「収束した S0」は誤り。残差の床・ライン陰解法の破綻との因果は測っていない → point 仕上げでの A/B を [time_integration-implicit-thermal-jacobian](../active/time_integration-implicit-thermal-jacobian.md) §5.1 #5 に登録 (本 plan では回さない)。
 - **無効にした数字**: B 側の「有限振幅」「実補正の予測差」は pp に旧 float 経路の `run_0317_jp_s0p7_pp` を使ったので A と B の評価の経路が混ざっている。掲載しない (正式判定は参照していない)。
 - **やらないこと** (codex): 面エンタルピーの double を既定にする、値 2・3 を本線に戻す、熱伝導の K の列の削除を続ける、datum の大きさを測らずに原因とする。
+
+### 6.17 閉じるときの処置 (2026-10-10、諮問 [記録](../../notes/reviews/2026-10-09-line-viscous-faceh-diagnose.md) の「plan を閉じる際」の要求に沿って書く)
+
+**結論**: 値 2・3 は本線に採らない。既定 (`lineViscCoupling: 0`) を維持する。値 2・3 と診断の切替は、診断用としてコードに残す。
+
+**総時間の結果** (速度 plan [time_integration-line-implicit-speed](../active/time_integration-line-implicit-speed.md) の測定の引用):
+
+- §6.15 (終わりの基準は水準だけ、事後の集計): 粘性入りのライン L5 (値 3・`FORGE_LVC_TERMS=5` = 熱伝導の近傍 K なし・上限なし、`case/45.isobutane_m6_d155/run_0353_m9_L5`) は 115000 step・約 1.18 h。
+  値 0・キー 5・上限 50 のライン L0 (`run_0223` → `run_0224` → `run_0252`、古いバイナリ) は 120000 step・約 1.16 h。差は約 70 s で、出力の間隔 1 回ぶん (約 180 s) より小さいので**判別不能**。
+- §6.14 (その後に外した E2 の基準): L5 1.38 ± 0.08 h、L0 1.49 ± 0.08 h で、こちらも判別不能。
+- §6.20: 値 0 の全長ライン B0 (LAYOUT2 の単価) は 125000 step・1.119 ± 0.049 h。
+- 速度 plan §6.15 は「本番は値 0。粘性入りは診断用の環境変数に頼る経路なので本番に置かない」とした。本 plan の結論もこれに従う。
+- 留保 (codex result m4): 上の時間は専有の単価で換算した到達時間の推定で、収束解どうしの比較ではない。L5 のライン段・point 段とも `check_convergence` は NOT CONVERGED、到達の窓の θ_r は TRANSIENT-UNSETTLED だった (速度 plan §6.14)。§6.20 の B0 は「2 出力連続」の到達条件で数えたので、§6.15 の L0・L5 と到達条件が違う。
+
+**試験ごとの処置** (不合格・判定不能・未実施を消さない):
+
+| 試験 | 結果 | 処置 |
+| --- | --- | --- |
+| U-J | PASS (§6.0)。ただし行列全体の最大値で正規化した判定 | 薄層の流束モデルに対する単体照合で、差を D・K の全体の最大値で割った判定の合格にとどまる。登録した列ごとの相対誤差 ≤ 1e-6 は未確認 (再開の課題)。実残差の Jacobian との整合も示していない (§6.14 は判別不能) |
+| U0 | 未実施 | 未実施のまま閉じる。**代わりの証拠** (事後に見つけたもの。事前登録の条件とは違う): 速度 plan §6.0 の B1 の短期の一致 (`run_0276`〜`run_0281_abB_*`、`_band_ab/cold_pair/AB_abB.json`) は、5ab83056 より前の 4d394a71 (forge の sha256 d8b06ebc…) と 5ab83056 を含む 64ed2cd6 (7a7e9eb9…) を、値 0・キー 5・方向別・上限 50 で比べている。20 step の 8 量の相対 RMS・最大絶対差は、同じバイナリの再実行の最大の 3 倍以内だった (再実行は各側 1 組だけ)。**範囲**: 値 0 のこの設定に限る。値 1・point・ISP 1 は確かめていない。**移管先**: 値 1 は [`procedures/solver-settings.md`](../../procedures/solver-settings.md) に「5ab83056 以降の不変を確かめていない」と書き、使う前に旧バイナリとの短期の一致を取る。値 0 の他の経路は main へ統合するときの回帰で見る |
+| U2 | 不合格 (0.05 K まで 950 step、基準は 250 step 以内) | 記録のまま。値 0 が壊れる cfl 50 で値 2 は温度の解析解誤差が 5000 step で 1.4e-6 K まで下がった、という観測も残す (残差の収束は未確認) |
+| U3 | Couette は判定不能、Poiseuille は不合格 | 記録のまま。せん断・粘性の仕事の項は未検証 |
+| FP32 | 未実施 | 未実施のまま閉じる。**適用範囲**: 値 2・3 の動作は FP64 ビルド (typedef double) でだけ確かめた。FP32 ビルドでは起動も確かめていない。再開するときの最初の試験に入れる (下の再開の条件) |
+| V-n1 | B 不合格 (29 step で非有限) | 記録のまま |
+| V-n2 | 未実施 | 事前の条件 (V-n1 の合格) を満たさないので回さない。代わりに値 3・マスク 5 を速度 plan の総時間で評価し、判別不能だった (上) |
+| §6.2・§6.3 (host の再解) | 解法の整合を確認、密度が主の準特異の仮説は棄却 | 記録のまま。「実装経路の誤りは無い」の表現は 2026-10-10 に訂正した |
+| §6.4・§6.5 (値 3) | B 不合格 (十分性を棄却) | 記録のまま |
+| §6.6・§6.7 (壁の拘束) | 分岐 2 | 記録のまま |
+| §6.8・§6.9 (E1) | 事前確認が許容外のため比較無効 (探索的な観測) | 記録のまま。§5.1 #5g の旧要約「(分岐 1)」を訂正した |
+| E2 (平板) | 未実施 (後回し) | 未実施のまま閉じる。準備の穴 (restart の終了コードを確かめずに起動できる) も直していない |
+| §6.10・§6.11 (密度の列) | 分岐 2 | 記録のまま。除いても 566 step で非有限だったが、同じ破綻の機構にとって必要かは未確定 |
+| §6.13・§6.14 (方向微分) | S0・S1 とも (d) 判別不能 | 記録のまま。§6.16 の結果で上書きしない |
+| §6.15・§6.16 (面エンタルピー) | 限定付きの支持 (S0・p7・ライン 2183・自由なエネルギーの行・ε = 1e-6) | 記録のまま。機構 (ṁ·∂h の欠落) は未確定。B 側の有限振幅の指標は無効 |
+| 残差評価の精度の監査 | — | [time_integration-implicit-thermal-jacobian](../active/time_integration-implicit-thermal-jacobian.md) §5.1 #5 へ移した (本 plan では回さない) |
+
+**診断コードの残置の範囲** (コードは変えない):
+
+- `lineViscCoupling` 2・3 と、その設定の検査 (`solverConfig.cpp`)。値 3 は値 2 にライン面のスカラー対角を足した診断用の値。
+- `FORGE_LVC_TERMS`: 値 2・3 の項のマスク。ビット 1 = 運動量の D/K、2 = 熱伝導の近傍 K、4 = 粘性の仕事の D/K、8 = 熱伝導の K の密度の列を外す。既定は 7。
+- `FORGE_LINE_DUMP_DIR`・`FORGE_LINE_DUMP_CALL`・`FORGE_LINE_DUMP_NODES`: ライン行列の書き出し。
+- `FORGE_DIAG_FACE_H_DOUBLE`: TP の SLAU の面エンタルピーを double で評価する。
+- 単体試験 `solver_density_cuda/tools/test_line_visc_jacobian.cpp`。case/45 の解析スクリプト `linedump_analyze.py`・`e1_compare.py`・`e1b_gate.py`・`jprobe.py`・`jprobe.sh`・`jprobe_fh.sh`。
+- 既定の経路 (値 0、診断の環境変数なし) について確かめた範囲: 値 0 は上の B1 の短期の一致、`FORGE_DIAG_FACE_H_DOUBLE` なしは §6.16 の q0 (旧バイナリ lineG と、同じ入力の再評価の差の桁で一致)。
+  ビット一致は確かめていない (forge は同じバイナリの再実行でもビット一致しない。thermal-jacobian plan §6.0 の V0)。
+- 本番の設定に値 2・3 と診断の環境変数を書かない。速度 plan の L5 の腕は `FORGE_LVC_TERMS=5` に頼っていた。
+- 残る不整合 (今回は直さない): `solverConfig.cpp` の `implicitThermalJacobian` と値 1 の併用を拒否するメッセージは「use lineViscCoupling 2」と値 2 を勧めている。値 2 は本線に採らないので、次にこのファイルを触るときに直す。
+
+**再開の条件** (どれかに当たったら新しい plan を起こして再開する。本 plan は判断文書として accepted に残す):
+
+1. 値 0 のライン + 方向別 dt の総時間が、ライン内で結合していないせん断・エントロピーのモード (§1) の遅さで律速されていると測定で示されたとき。
+2. 残差の評価の精度を上げた経路 (面エンタルピーの double など) が既定になったとき。§6.16 の限定付きの支持があるので、§6.13 の作用素の確認をその経路で取り直す意味がある。
+3. 再開したら、次を先に行う: 単因子の切り分け (運動量・仕事・熱伝導の K のどれが破綻に要るか、§6.7 の候補)、U-J の列ごとの照合、FP32 ビルドでの起動と U2・U3、値 1 の U0、E2 の準備の穴の修正。
 
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-result.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-result.md) | GO-with-changes, C0/M3/m1 | 全件採用 (根拠の箇所を確かめた): M1 U-J の試験は行列全体の最大値で正規化しており、登録した列ごとの判定は未確認 → §5.1 #2・§6.0・§6.17・methods を訂正し再開の課題に。M2 U2 の「収束」は温度の解析解誤差だけが根拠 → §6.0・§6.17・case/52 README を「誤差が下がった・残差の収束は未確認」に。M3 E1 は比較無効、密度の列は「除いても壊れる・同じ機構に必要かは未確定」→ §5.1 #5i・§6.17・case/45 README を訂正。m4 総時間の引用に「専有単価の推定・NOT CONVERGED・TRANSIENT-UNSETTLED・B0 は到達条件が違う」の留保を §6.17 に追加。B1 を U0 の補助証拠とする扱いは codex も可 (U0 未実施は維持) |
 | plan | 2026-10-09 | [2026-10-09-time_integration-line-viscous-jacobian-plan.md](../../notes/reviews/2026-10-09-time_integration-line-viscous-jacobian-plan.md) | GO-with-changes, C0/M5/m2 | 全件採用: M1 等温壁の行を ΔT_w = 0 の拘束に (§4.1)、M2 入力経路と対応範囲の限定 (§4.3)、M3 単体照合 U-J・U3・FP32 (§6)、M4 判定の分離と `check_quasisteady` (§6)、M5 同じ水準までの壁時計 (V-n2)、m6 P は薄層の前処理行列と明記 (§4.1)、m7 SST の寄与を未分離と修正 (§4.2) |
 | 諮問 (面エンタルピーの A/B) | 2026-10-09 | [2026-10-09-line-viscous-faceh-diagnose.md](../../notes/reviews/2026-10-09-line-viscous-faceh-diagnose.md) | 限定付きの支持として記録、機構 (ṁ·∂h の欠落) は未確定、S0 は収束済みでない、B の有限振幅の指標は無効、本線へ戻る、Major 3 | 全件採用: §6.16、§5.1 #5l〜#5n・#6、残差評価の精度の監査を implicit-thermal-jacobian §5.1 #5 へ |
 | 諮問 (方向微分の結果) | 2026-10-09 | [2026-10-09-line-viscous-jprobe-diagnose.md](../../notes/reviews/2026-10-09-line-viscous-jprobe-diagnose.md) | (d) で閉じる、H-a の原因の説明は却下、H-b は呼び方を限定、面エンタルピーの float の経路の A/B 一組だけ、その後は本線、Major 4・Minor 2 | 全件採用: §6.14 に結果と訂正、§6.15 に A/B を事前登録、§5.1 #5l・#5m |
@@ -438,3 +493,5 @@
 - 2026-10-09: 起票 (draft)。
 - 2026-10-09: codex plan 段と諮問を全件採用して in_progress (§4.1・§4.3・§6 を改訂)。
 - 2026-10-09: 実装 (5ab83056)、U2・U3・V-n1 (§6.0)、実ライン行列の解析 (§6.3)、値 3 の A/B (§6.5)、壁の拘束の A/B (§6.7)。値 2・3 は発散し、薄層の結合が要因と分かったところで保留。
+- 2026-10-09: E1 (§6.9、比較無効・探索的な観測)、密度の列の A/B (§6.11、分岐 2)、方向微分による作用素の確認 (§6.14、(d) 判別不能)、面エンタルピーの精度の A/B (§6.16、限定付きの支持)。変更ログの前行の「薄層の結合が要因と分かった」は、§6.7 の帰属の範囲 (値 2・3 の早期の発散には薄層の D/K、またはそれと壁の拘束の相互作用が要る) に限る。
+- 2026-10-10: 閉じるときの処置を §6.17 に記録 (試験ごとの処置・診断コードの残置の範囲・再開の条件・U0 と FP32 の扱い・総時間の引用)。§5.1 #4・#5g・§6.3 の古い要約を訂正。codex result 段 (GO-with-changes、C0/M3/m1) を全件採用して訂正し、status done (本線不採用・診断として残置) で `plans/accepted/` へ移した。コードは変えていない。methods/time_integration/implementation.md と procedures/solver-settings.md の `lineViscCoupling` の記述を同期。
