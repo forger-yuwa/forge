@@ -6,7 +6,7 @@
 # 順序: ① 1 step の書き出しを A・B・A の再実行・C で 4 本 (残差の場つき) → ② 事前のゲート lvcdt_pregate.py → 合格 (終了コード 0) のときだけ
 # ③ A1・B1・A2・B2 を最大 2000 step・100 ごと、序盤 200 step は 112 節点の帳簿。ゲートが INVALID (1) か判別不能 (2) なら腕を回さずに止める。
 # 本判定は lvcdt_judge.py (この台本は判定しない)。引数: なし = ①〜③、dumps = ①② だけ、arms = ③ だけ (lvcdt_pregate.py --verify が通るときだけ)、
-# armsC = C1・C2 だけ (本判定の記録が分岐 2「棄却」で、--verify が通るときだけ)。
+# armsC = C1・C2 だけ (A/B だけの再判定 lvcdt_judge.py --ab-only が分岐 2「回避せず」で、--verify が通るときだけ)。
 # AWS の自分の作業ツリー (~/forge-faceh-audit/case/45.isobutane_m6_d155) で動かす。run_0183 は ~/forge-wallfit の run へのリンク。
 # 発散 (detectNaN で止まる、RUN_RC 1) は結果なので台本は止めずに次へ進む。起動の失敗・表示の不一致では止める。
 set -uo pipefail
@@ -104,8 +104,9 @@ fi
 python3 lvcdt_pregate.py --verify >> $LOG 2>&1 \
   || { echo "事前のゲートの記録が PASS でないか、証拠が記録と違う — 腕を回さずに止める" >> $LOG; touch lvcdt.done; exit 1; }
 if [ $MODE = armsC ]; then
-  python3 -c 'import json,sys; v=json.load(open("_band_ab/cold_pair/lvcdt_judge.json"))["main_v3"]["verdict"]; sys.exit(0 if v == "棄却" else 1)' \
-    || { echo "本判定の記録が分岐 2 (棄却) でない — C を回さずに止める" >> $LOG; touch lvcdt.done; exit 1; }
+  # C の起動の直前に、今の証拠で A/B だけを判定し直す (ゲート合格・INVALID なし・主判定「回避せず」のときだけ終了コード 0。plan-dt レビュー M5)
+  python3 lvcdt_judge.py --ab-only > lvcdt_judge_ab.stdout 2>&1 \
+    || { echo "A/B の再判定が分岐 2 (回避せず) でないか、ゲートが外れた — C を回さずに止める" >> $LOG; touch lvcdt.done; exit 1; }
   arm run_0588_lvcdt_c1 c || exit 1
   arm run_0589_lvcdt_c2 c || exit 1
   echo "== C の終了 $(date -Is)" >> $LOG

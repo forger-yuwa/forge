@@ -11,7 +11,7 @@
   R  残差の不変: 出発の状態の残差 (全節点、倍精度) が、a の再実行どうしでビット一致なら b・c もビット一致、そうでなければ ≤ 3 × 再実行の差
   S  構造の照合: 各書き出しで rhs_s0 = 拘束の処理をした float(出力 step 1 の残差) が全要素で完全に一致
   V  介入の成立 (b・c のそれぞれを a に対して): (a) Kprev・Knext が不変、(b) r = Δτ_a/Δτ_x が全節点で ≥ 1 − 4 ulp、縮流部の第一内部節点 (1571・4112・7984) で ≥ 10、
-     全節点で r = 1 なら INVALID、r_c ≥ r_b、(c) D の対角以外と拘束の行はビット一致、拘束の無い行の対角は時間項 V/Δτ の差と 64 ulp 以内、(c') 第一内部節点で時間項の差が、拘束の無い行のどれかで許容の 100 倍超
+     全節点で r = 1 なら INVALID、r_c ≥ r_b、上限 50 の用量 Δτ_B = min(Δτ_A, 50 Δτ_C) が全 605 節点で相対 1e-12、(c) D の対角以外と拘束の行はビット一致、拘束の無い行の対角は時間項 V/Δτ の差と 64 ulp 以内、(c') 第一内部節点で時間項の差が、拘束の無い行のどれかで許容の 100 倍超
 を判定する。出力は _band_ab/cold_pair/lvcdt_pregate.json。終了コード: 0 = 合格 (本試験へ)、1 = INVALID (入力・証拠の不備)、2 = 判別不能 (残差の変化・構造の外れ・介入の不成立)。
 使い方: lvcdt_pregate.py [--verify]
 """
@@ -47,7 +47,8 @@ EXPECT = {"time/deltaT/cfl": 4.0, "time/deltaT/cfl_pseudo": 4.0, "time/deltaT/im
           "time/deltaT/lineDtDirectional": 1, "time/deltaT/lineImplicit": 1, "time/deltaT/lineViscCoupling": 3, "time/deltaT/blockDPLUR": 1,
           "time/deltaT/detectNaN": 1, "time/timeIntegration": 11, "time/nStepInner": 5, "time/last/nStepOuter": 1,
           "time/deltaT/lineDtDirectionalCap": None, "time/deltaT/implicitSolvePrecision": None, "time/outStepInterval": 1,
-          "output/extraFields": EXTRA}
+          "output/extraFields": EXTRA,
+          "time/deltaT/axisTimestepBeta": None, "time/deltaT/lineViscousDtRelief": None}   # Δτ_B = min(Δτ_A, 50 Δτ_C) の前提 (plan-dt レビュー M2)
 NF, FREC, NREC, HF = 12, 200, 160, 150
 f32 = np.float32
 
@@ -322,6 +323,16 @@ def main():
             info["D_max_err_over_tol"] = worst
             info["resolved_over_tol"] = resolved
             vinfo[x] = info
+        # 上限 50 の用量 (plan-dt レビュー M2): 同じ状態の C (全面の λ = point の dt) を基準に、全 605 節点で Δτ_B = min(Δτ_A, 50 Δτ_C)
+        #   (setDT_d.cu: cfl_B = max(cfl_A, cfl_全面/50)、Δτ = cfl_pseudo / (cfl/dt)。近軸の項と粘性の割引は設定で 0 を確認済み。FP64 なので相対 1e-12)
+        dB, dCc = arrays["b"]["dt_vol"][:, 0], arrays["c"]["dt_vol"][:, 0]
+        pred = np.minimum(dtA, 50.0 * dCc)
+        rel = np.abs(dB - pred) / pred
+        if not np.all(np.isfinite(rel)):
+            raise ValueError("上限 50 の用量の比較に非有限")
+        ok("V", "(b) B: 全 605 節点で Δτ_B = min(Δτ_A, 50 Δτ_C) (相対 1e-12)", bool(np.all(rel <= 1e-12)), float(np.max(rel)))
+        vinfo["cap_dose"] = {"max_rel_err": float(np.max(rel)), "capped_nodes": int(np.sum(dB < dtA * (1 - 1e-12))), "of": int(nn),
+                             "wall_first_capped": {n: bool(dB[pos[n]] < dtA[pos[n]] * (1 - 1e-12)) for n in WALL_FIRST}}
         # C は B より縮む (point の dt は上限 50 の dt 以下)
         rB, rC = dtA / arrays["b"]["dt_vol"][:, 0], dtA / arrays["c"]["dt_vol"][:, 0]
         ok("V", "(b) C: 全節点で r_C ≥ r_B − 4 ulp", bool(np.all(rC >= rB * (1 - 4 * np.spacing(np.float64(1.0))))), float(np.min(rC / rB)))

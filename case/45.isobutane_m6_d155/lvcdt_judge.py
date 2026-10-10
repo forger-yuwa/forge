@@ -8,8 +8,10 @@ lvcdt.sh の run_0580〜0583 (A・B の腕)、あれば run_0588・0589 (条件�
   (2) 証拠のゲート (初期場・破綻前の場・res_nan・帳簿・FINITE 側の区間付き収束 VERDICT)、
   (3) 各 run の分類 (DIVERGED / FINITE / INVALID)
   (4) 事前のゲートが PASS で、記録した証拠のハッシュと腕の設定 (同じ水準の書き出しと、step 数・出力の間隔・extraFields 以外で同じ) が合う
-  (5) 支持の追加条件: 序盤 200 呼び出しの帳簿で、第一内部節点 4959・6169・4112・7984 の |Δρ/ρ| の最大が B では A の 1/10 以下
-を行い、§6 の分岐どおりに判定する。出力は _band_ab/cold_pair/lvcdt_judge.json (異常でも必ず書く)。
+  (5) 記録だけ: 序盤 200 呼び出しの帳簿の第一内部節点の |Δρ/ρ| の最大、各残差の列が出発の 10 倍に達した step
+を行い、§6 の分岐どおりに判定する (主判定は「上限 50 で 2000 step 以内の非有限化を回避したか」に限る。plan-dt レビュー M3)。
+--ab-only: C を除いて A/B だけを判定し、_band_ab/cold_pair/lvcdt_judge_ab.json に書く。条件付きの C の起動の直前に台本が呼ぶ
+(ゲートが全部合格・INVALID なし・主判定が「回避せず」のときだけ終了コード 0。plan-dt レビュー M5)。出力は _band_ab/cold_pair/lvcdt_judge.json (異常でも必ず書く)。
 ゲートの不合格か INVALID の run があれば判定せず、終了コード 1。規則を変えるときは plan §6 を先に改訂する。
 """
 import csv
@@ -32,13 +34,14 @@ SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"   #
 RUNS = {"a1": ("run_0580_lvcdt_a1", 0, SHA_NEW), "b1": ("run_0581_lvcdt_b1", 0, SHA_NEW),
         "a2": ("run_0582_lvcdt_a2", 0, SHA_NEW), "b2": ("run_0583_lvcdt_b2", 0, SHA_NEW)}
 RUNS_C = {"c1": ("run_0588_lvcdt_c1", 0, SHA_NEW), "c2": ("run_0589_lvcdt_c2", 0, SHA_NEW)}   # 条件付き (分岐 2 のときだけ回す)
-if any((Path(__file__).resolve().parent / r).exists() for r, _, _ in RUNS_C.values()):
+AB_ONLY = sys.argv[1:] == ["--ab-only"]
+if not AB_ONLY and any((Path(__file__).resolve().parent / r).exists() for r, _, _ in RUNS_C.values()):
     RUNS.update(RUNS_C)                       # C を回したら 2 本とも判定に入れる (片方だけなら INVALID になる)
 ARM = {"a1": "a", "a2": "a", "b1": "b", "b2": "b", "c1": "c", "c2": "c"}
 ARM_CFG = {"a": {}, "b": {"time/deltaT/lineDtDirectionalCap": 50.0}, "c": {"time/deltaT/lineDtDirectional": None}}
 DT_KEYS = {"time/deltaT/lineDtDirectional", "time/deltaT/lineDtDirectionalCap"}
 MASK = {k: 7 for k in ARM}                    # FORGE_LVC_TERMS (台本が run ごとに LVC_TERMS.txt に書く)
-LEDGER_FIRST = [4959, 6169, 4112, 7984]       # 支持の追加条件を見る第一内部節点 (帳簿の 112 節点に入っている)
+LEDGER_FIRST = [1571, 4112, 7984, 4959, 6169]   # 記録だけ: 帳簿の第一内部節点 (前の 3 つは書き出しの r の節点と同じ列、後の 2 つは §6.10 で壊れた列 35〜52 をはさむ列 40・50)
 DUMPS = ["run_0584_lvcdt_a_dump", "run_0585_lvcdt_b_dump", "run_0586_lvcdt_a_dump2", "run_0587_lvcdt_c_dump"]   # 事前のゲートが読む 1 step の書き出し
 SRC, SRC_RES = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5"
 SRC_SHA16 = "207d39f0e7f4aa03"
@@ -60,7 +63,8 @@ EXPECT = {"time/deltaT/cfl": 4.0, "time/deltaT/cfl_pseudo": 4.0, "time/deltaT/im
           "time/deltaT/lineViscCoupling": 3, "time/deltaT/blockDPLUR": 1, "time/deltaT/detectNaN": 1,
           "time/timeIntegration": 11, "time/nStepInner": 5, "time/last/nStepOuter": NSTEP, "time/outStepInterval": OUT,
           "time/deltaT/lineDtDirectionalCap": None, "time/deltaT/implicitSolvePrecision": None,
-          "output/extraFields": ["res_ro", "volume"]}
+          "output/extraFields": ["res_ro", "volume"],
+          "time/deltaT/axisTimestepBeta": None, "time/deltaT/lineViscousDtRelief": None}
 DELAY = 2.0      # 「遅らせる」の記録の倍率 (判定には使わない)
 
 
@@ -247,7 +251,8 @@ def records(run):
             continue
         vals = [o[s][col] for s in steps]
         rec[col] = {"max_over_start": max(vals) / s0,
-                    "first_step_over_3x": next((s for s in steps if o[s][col] > 3 * s0), None)}
+                    "first_step_over_3x": next((s for s in steps if o[s][col] > 3 * s0), None),
+                    "first_step_over_10x": next((s for s in steps if o[s][col] > 10 * s0), None)}
         if len(steps) == NSTEP:
             x = np.arange(NSTEP - 500, NSTEP, dtype=float)
             rec[col]["tail_slope500"] = float(np.polyfit(x, np.log10([o[int(k)][col] for k in x]), 1)[0] * 500)
@@ -255,26 +260,29 @@ def records(run):
 
 
 def ledger_drho(run, last_call):
-    """帳簿の第一内部節点の |ρ(call) − ρ(call 1 の入口)| / ρ(call 1 の入口) の最大 (call 1〜last_call、tag after_eos_bc)"""
-    base, mx = {}, 0.0
-    rows = []
+    """帳簿の第一内部節点の |ρ(call) − ρ(call 1 の入口)| / ρ(call 1 の入口) の最大 (call 1〜last_call、tag after_eos_bc)。
+    対象の (call, node, tag) が欠け・重複・非有限・基準 ≤ 0 なら ValueError (判定を INVALID にする。plan-dt レビュー M1)"""
+    want = {(1, "entry", n) for n in LEDGER_FIRST} | {(c, "after_eos_bc", n) for c in range(1, last_call + 1) for n in LEDGER_FIRST}
+    got = {}
     with open(HERE / run / "ledger.csv", newline="") as f:
         for r in csv.DictReader(f):
-            n = int(r["node"])
-            if n in LEDGER_FIRST and r["field"] == "ro":
-                rows.append((int(r["call"]), r["tag"], n, float(r["value"])))
-    for c, t, n, v in rows:
-        if c == 1 and t == "entry":
-            base[n] = v
-    if set(base) != set(LEDGER_FIRST):
-        raise ValueError(f"{run}: 帳簿に第一内部節点の入口の ρ が無い {sorted(set(LEDGER_FIRST) - set(base))}")
-    for c, t, n, v in rows:
-        if t == "after_eos_bc" and c <= last_call:
-            x = abs(v - base[n]) / base[n]
-            if not math.isfinite(x):
-                return float("inf")
-            mx = max(mx, x)
-    return mx
+            if r["field"] != "ro":
+                continue
+            key = (int(r["call"]), r["tag"], int(r["node"]))
+            if key in want:
+                if key in got:
+                    raise ValueError(f"{run}: 帳簿の行が重複 {key}")
+                got[key] = float(r["value"])
+    miss = sorted(want - set(got))
+    if miss:
+        raise ValueError(f"{run}: 帳簿に必要な行が無い ({len(miss)} 件、最初 {miss[0]})")
+    if not all(math.isfinite(v) for v in got.values()):
+        raise ValueError(f"{run}: 帳簿の値に非有限")
+    base = {n: got[(1, "entry", n)] for n in LEDGER_FIRST}
+    if not all(v > 0 for v in base.values()):
+        raise ValueError(f"{run}: 帳簿の基準の ρ が正でない")
+    per = {n: max(abs(got[(c, "after_eos_bc", n)] - base[n]) / base[n] for c in range(1, last_call + 1)) for n in LEDGER_FIRST}
+    return {"max": max(per.values()), "per_node": per, "calls": last_call}
 
 
 def decide(cls):
@@ -284,26 +292,27 @@ def decide(cls):
     ca, cb, cc = [v[0] for v in A.values()], [v[0] for v in B.values()], [v[0] for v in C.values()]
     if any(x == "INVALID" for x in ca + cb + cc):
         return "INVALID", "INVALID の run がある", {}
+    # 記録だけ: 帳簿の第一層の |Δρ/ρ| (窓は 1〜200 呼び出し。破綻した run は 1〜min(200, 破綻の step − 2)。plan §6 に登録) — 欠けは INVALID
+    led = {}
+    for k in list(A) + list(B) + list(C):
+        ds = cls[k][1].get("diverged_step")
+        led[k] = ledger_drho(RUNS[k][0], min(LEDGER_CALLS, ds - 2) if ds is not None else LEDGER_CALLS)
     if any(x == "FINITE" for x in ca):
-        return "帰属不能", "A (上限なし) が既知の破綻を再現しない", {}
+        return "帰属不能", "A (上限なし) が既知の破綻を再現しない", led
     if all(x == "FINITE" for x in cb):
-        led = {k: ledger_drho(RUNS[k][0], min(LEDGER_CALLS, (A.get(k) or B.get(k))[1].get("diverged_step") or LEDGER_CALLS)) for k in ("a1", "a2", "b1", "b2")}
-        cond = max(led["b1"], led["b2"]) <= 0.1 * min(led["a1"], led["a2"])
-        if cond:
-            return "支持", "A は全部 DIVERGED、B (上限 50) は全部 FINITE、帳簿の第一層の |Δρ/ρ| の最大が B で A の 1/10 以下", led
-        return "判別不能", "B は全部 FINITE だが帳簿の条件を満たさない (同じ過渡を遅く通っただけかもしれない、支持しない)", led
+        return "回避", "A は全部 DIVERGED、B (上限 50) は全部 FINITE", led
     if all(x == "DIVERGED" for x in cb):
         sb = [v[1]["diverged_step"] for v in B.values()]
         if not C:
-            return "棄却", f"B (上限 50) でも全部 DIVERGED (破綻 step {sb})。C (方向別なし) を 2 本回す", {}
+            return "回避せず", f"B (上限 50) でも全部 DIVERGED (破綻 step {sb})。C (方向別なし) を 2 本回す", led
         if len(C) != 2:
-            return "INVALID", "C が 2 本そろっていない", {}
+            return "INVALID", "C が 2 本そろっていない", led
         if all(x == "FINITE" for x in cc):
-            return "棄却・C 有限", f"B でも全部 DIVERGED (step {sb})、C (point の dt) は全部 FINITE → H3 (ライン行列の性質) を優先", {}
+            return "回避せず・C 有限", f"B でも全部 DIVERGED (step {sb})、C (point の dt) は全部 FINITE", led
         if all(x == "DIVERGED" for x in cc):
-            return "棄却・C 発散", f"B でも全部 DIVERGED (step {sb})、C も全部 DIVERGED → H2 (実残差との整合) を優先", {}
-        return "判別不能", "C の run が分かれた", {}
-    return "判別不能", "B の run が分かれた", {}
+            return "回避せず・C 発散", f"B でも全部 DIVERGED (step {sb})、C も全部 DIVERGED", led
+        return "判別不能", "C の run が分かれた", led
+    return "判別不能", "B の run が分かれた", led
 
 
 def input_gates():
@@ -374,8 +383,8 @@ def intervention(rec):
 
 
 def main():
-    rec = {"plan": "time_integration-line-viscous-jacobian-dt §6"}
-    out = HERE / "_band_ab" / "cold_pair" / "lvcdt_judge.json"
+    rec = {"plan": "time_integration-line-viscous-jacobian-dt §6", "ab_only": AB_ONLY}
+    out = HERE / "_band_ab" / "cold_pair" / ("lvcdt_judge_ab.json" if AB_ONLY else "lvcdt_judge.json")
     try:
         gates = input_gates()
     except Exception as e:
@@ -398,11 +407,11 @@ def main():
             v3 = decide(cls)
         except Exception as e:
             v3 = ("INVALID", f"判定で例外 {type(e).__name__}: {e}", {})
-        txt = {"支持": "H1 をこの条件・2000 step・上限 50 で支持 (全部入りが成り立った・収束したとは言わない)",
-               "棄却": "H1 (熱拡散数 ≫ 1 の形) を棄却。C を回す",
-               "棄却・C 有限": "H1 を棄却、C の有限は H1 の支持にしない。H3 を優先",
-               "棄却・C 発散": "H1 を棄却。H2 を優先"}.get(v3[0], v3[0])
-        rec["main_v3"] = {"verdict": v3[0], "detail": v3[1], "ledger_first_layer_max_drho": v3[2]}
+        txt = {"回避": "この条件・2000 step では、上限 50 で全部入りの非有限化を避けた (全部入りが成り立った・収束した・H1 の機構が正しいとは言わない)",
+               "回避せず": "上限 50 でも全部入りの非有限化を避けられない。C を回す",
+               "回避せず・C 有限": "point の dt では有限 (H1 の支持にはしない)。次の調査の順は H3 (反復の写像をスケーリングして見る) から",
+               "回避せず・C 発散": "point の dt でも非有限。次の調査の順は H2 (実残差との整合) から"}.get(v3[0], v3[0])
+        rec["main_v3"] = {"verdict": v3[0], "detail": v3[1], "ledger_first_layer_drho_record_only": v3[2]}
         rec["VERDICT"] = f"主 (値 3・マスク 7): {v3[0]} — {txt}; {v3[1]}"
         if v3[0] == "INVALID":
             invalid = invalid or ["decide"]
@@ -415,6 +424,8 @@ def main():
         print(f"{name} {RUNS[name][0]}: {r['class']} step={r.get('diverged_step', r.get('last_step'))} "
               f"log/csv={r.get('steps_log_csv')} nan={r.get('detectNaN')} {r.get('why', '')} {r.get('evidence_problems', '')}")
     print(rec["VERDICT"])
+    if AB_ONLY:                                 # C の起動の条件: ゲート合格・INVALID なし・主判定が「回避せず」
+        return 0 if rec["gates_ok"] and not invalid and rec.get("main_v3", {}).get("verdict") == "回避せず" else 1
     return 0 if rec["gates_ok"] and not invalid else 1
 
 
