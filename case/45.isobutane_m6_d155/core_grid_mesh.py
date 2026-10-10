@@ -42,6 +42,10 @@ WALL_REF = HERE / "_band_ab" / "prod_confirm" / "prep"
 OUT = HERE / "_band_ab" / "core_grid"
 ARMS = {"G1": (0.03, 1.3, 75), "Gc": (0.015, 1.2, 122), "G2": (0.015, 1.1, 170)}   # (c, q_max, 見積もりの nj)。G1 は 2026-10-10 に比 1.2 → 1.3 (ユーザ「壁際の比も 1.2〜1.3」)
 KINK_DEG = 2.0          # §4.9 の事前基準 (格子の幾何の比較の基準で、CFD 精度の保証ではない)
+# G1x (2026-10-10 ユーザ決定「1 万上限にしましょう」): 壁際の AR の上限 1 万。今の格子の x の間隔は AR の目標 4500 (上限 5000) で決まっているので、
+# 同じ余裕で目標 9000 にする = AR で決まっている範囲の密度を 1/2 にする (今の表の相対密度 d に対し max(1, d/XFACTOR); 1 は試験部の上限 0.06 r_t)
+XFACTOR = 2.0
+AR_MAX_G1X = 10000
 
 
 class Wall:
@@ -55,12 +59,25 @@ class Wall:
         return self.ph.r(np.asarray(x), d) if d else self.ph.r(np.asarray(x))
 
 
-def mesh_block(nj=None, cap=None):
+def x_table_coarse(m, factor=XFACTOR):
+    """今の x_density_table を、AR で決まっている範囲 (相対密度 > 1) だけ 1/factor にした表と、密度の積分から決め直した ni。"""
+    t = np.asarray(m["x_density_table"], dtype=float)
+    new = np.c_[t[:, 0], np.maximum(1.0, t[:, 1] / factor)]
+    xs = np.linspace(t[0, 0], t[-1, 0], 200001)
+    ratio = np.trapezoid(np.interp(xs, new[:, 0], new[:, 1]), xs) / np.trapezoid(np.interp(xs, t[:, 0], t[:, 1]), xs)
+    ni = int(np.ceil((int(m["ni"]) - 1) * ratio)) + 1
+    return [[float(a), float(f"{b:.6g}")] for a, b in new], ni
+
+
+def mesh_block(nj=None, cap=None, xcoarse=False):
     m = dict(yaml.safe_load(open(PROBLEM))["mesh"])
     if nj is not None:
         m["nj"] = int(nj)
     if cap is not None:
         m["axis_cap_frac"] = float(cap)
+    if xcoarse:
+        m["x_density_table"], m["ni"] = x_table_coarse(m)
+        m["ar_max"] = AR_MAX_G1X
     return m
 
 
@@ -151,6 +168,20 @@ def cmd_check_g0(a):
     out = {"max_abs_diff_rt": float(d.max()), "first_layer_rel_err_max": float(np.max(np.abs(
         np.linalg.norm(C[:, -1] - C[:, -2], axis=1) / np.linalg.norm(P[:, -1] - P[:, -2], axis=1) - 1))), "g0_res": str(a.g0_res)}
     out["metrics"] = metrics(P)
+    return out
+
+
+def cmd_select_g1x(a):
+    """G1x (G1 の半径方向 + x 方向を粗く) の格子の指標。列の比 ≤ q_max と AR ≤ 1 万を確かめる。"""
+    wall = Wall(Path(a.wall_ref)); c, qmax, _ = ARMS["G1"]; nj = YAML_NJ["G1"]
+    m = mesh_block(nj, c, xcoarse=True)
+    prm = _mesh_params_from(m, wall.scale, int(m["ni"]), nj, 1.0)
+    xs, fr, q = column_ratio_max(prm, wall)
+    P, _ = generate(wall, m); out = {"G1x": metrics(P)}
+    out["G1x"].update(ni=int(m["ni"]), nj=nj, c=c, q_col_min=float(q.min()), q_col_max=float(q.max()), xfactor=XFACTOR,
+                      ar_ok=bool(out["G1x"]["ar_max"] <= AR_MAX_G1X), q_ok=bool(q.max() <= qmax + 1e-12))
+    dx = np.diff(P[:, -1, 0]); xw = P[:-1, -1, 0]
+    out["G1x"]["dx_wall_rt"] = {f"x{v:g}": float(dx[int(np.argmin(np.abs(xw - v)))]) for v in (-8.0, -5.0, -2.0, 0.0, 2.0, 5.0, 12.0, 40.0)}
     return out
 
 
@@ -385,6 +416,36 @@ def cmd_yaml(a):
             raise SystemExit(f"{arm}: 生産の YAML との差が name・nj・axis_cap_frac 以外にもある — 止める")
         dst = HERE / f"{name}.yaml"; dst.write_text(text)
         out[arm] = {"file": dst.name, "nj": nj, "axis_cap_frac": c, "identical_except_name_nj_cap": True}
+    # G1x: G1 の半径方向 + x 方向を粗く (ni・x_density_table・ar_max も変える)
+    c, qmax, _ = ARMS["G1"]; nj = YAML_NJ["G1"]; mx = mesh_block(nj, c, xcoarse=True); name = f"{base['name']}_cg1x"
+    head = (f"# plan tooling-nozzle-core-grid §5.1 #10 の格子 G1x (G1 = c {c}・q_max {qmax}・nj {nj} に加え、x 方向を粗く: 壁際の AR の上限 1 万・目標 9000、"
+            f"AR で決まる範囲の x の密度を 1/{XFACTOR:g}、ni {mx['ni']})。\n# core_grid_mesh.py yaml が {PROBLEM.name} から作る (手で編集しない)。"
+            f"違いは name・mesh.ni・nj・axis_cap_frac・x_density_table・ar_max だけ。AR ≤ 1 万は 2026-10-10 ユーザ決定 (本 plan の試験に限る)\n")
+    body = []; cnt = {"name": 0, "ni": 0, "nj": 0, "xd": 0, "ar": 0}
+    for ln in src.splitlines():
+        if ln.startswith("name: "):
+            ln = f"name: {name}"; cnt["name"] += 1
+        elif ln.startswith("  ni: "):
+            ln = f"  ni: {mx['ni']}"; cnt["ni"] += 1
+        elif ln.startswith("  nj: "):
+            body.append(f"  nj: {nj}"); ln = f"  axis_cap_frac: {c}   # 主流と軸付近の間隔 (/局所半径) の上限 (plan tooling-nozzle-core-grid §4.2)"; cnt["nj"] += 1
+        elif ln.startswith("  x_density_table: "):
+            ln = "  x_density_table: " + json.dumps(mx["x_density_table"]); cnt["xd"] += 1
+        elif ln.startswith("  ar_max: "):
+            ln = f"  ar_max: {AR_MAX_G1X}"; cnt["ar"] += 1
+        body.append(ln)
+    if any(v != 1 for v in cnt.values()):
+        raise SystemExit(f"G1x: 置き換える行の数が 1 でない {cnt} — 止める")
+    text = head + "\n".join(body) + "\n"; new = yaml.safe_load(text)
+    b = json.loads(json.dumps(base)); nn = json.loads(json.dumps(new))
+    for d in (b, nn):
+        d.pop("name")
+        for k in ("ni", "nj", "axis_cap_frac", "x_density_table", "ar_max"):
+            d["mesh"].pop(k, None)
+    if b != nn or new["mesh"]["ni"] != mx["ni"] or new["mesh"]["x_density_table"] != mx["x_density_table"]:
+        raise SystemExit("G1x: 生産の YAML との差が想定のキー以外にもある — 止める")
+    (HERE / f"{name}.yaml").write_text(text)
+    out["G1x"] = {"file": f"{name}.yaml", "ni": mx["ni"], "nj": nj, "axis_cap_frac": c, "ar_max": AR_MAX_G1X, "xfactor": XFACTOR}
     return out
 
 
@@ -410,7 +471,7 @@ def cmd_prep(a):
     if not conv.is_file() or NS.sha256_file(conv) != CP.CONV_SHA:
         raise SystemExit(f"REAL_CONVERTER ({conv}) が FP64 の変換器 (sha256 {CP.CONV_SHA[:16]}…) でない — 止める")
     arm = a.arm
-    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES[arm]}.yaml"
+    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES.get(arm, 'cg1x')}.yaml"
     out = OUT / f"prep_{arm}"
     if out.exists():
         raise SystemExit(f"{out} が既にある — 止める")
@@ -450,12 +511,27 @@ def cmd_prep(a):
     rec["wall_dist_reconvert_rel_max"] = float(np.max(np.abs(wd - wd_new) / np.maximum(np.abs(wd_new), 1e-30))) if np.array_equal(coord0, coord_new) else None
     # G0 (今の格子) との照合: x の station・壁節点・第一内部節点・壁の法線・壁距離 (壁と第一内部節点)
     C0, wd0 = _h5(HERE / G0_MESH_RUN / "nozzle.h5", "MESH/COORD", "VALUE/wall_dist")
-    C0 = C0.reshape(prm.ni, -1, 3)[..., :2] / wall.scale; nj0 = C0.shape[1]; wd0 = wd0.reshape(prm.ni, nj0); wdn = wd.reshape(prm.ni, prm.nj)
-    rel = lambda A, B: float(np.max(np.abs(A - B) / np.maximum(np.abs(B), 1e-30)))  # noqa: E731
-    t = np.gradient(C[:, -1], axis=0); t /= np.linalg.norm(t, axis=1)[:, None]; t0 = np.gradient(C0[:, -1], axis=0); t0 /= np.linalg.norm(t0, axis=1)[:, None]
-    rec["vs_G0"] = {"wall_nodes_rel_max": rel(C[:, -1], C0[:, -1]), "first_interior_rel_max": rel(C[:, -2], C0[:, -2]),
-                    "x_station_rel_max": rel(C[:, -1, 0], C0[:, -1, 0]), "wall_tangent_max_abs_diff": float(np.abs(t - t0).max()),
-                    "wall_dist_first_interior_rel_max": rel(wdn[:, -2], wd0[:, -2])}
+    if C0.size // 3 % prm.ni or (C0.size // 3) // prm.ni not in (121,) or prm.ni != 4719:
+        # G1x: x の station が G0 と違う → 節点の一致ではなく、両方の格子の第一層の厚さ (壁節点と第一内部節点の距離) が
+        # 同じ設計の関数 f(x)·r_w(x) (第一セルの表 × 局所半径) に一致することを見る (G0 の列から補間すると表の折れ点で 0.4 % ずれる)
+        C0 = C0.reshape(4719, -1, 3)[..., :2] / wall.scale
+        def d1_vs_design(Cg, m_):
+            prm_ = _mesh_params_from(m_, wall.scale, int(m_["ni"]), int(m_["nj"]), float(m_["wall_first_frac"]))
+            xs_ = mesh2d._x_stations(wall.x_in, wall.x_e, prm_.ni, prm_.throat_refine, prm_.throat_width, density_table=prm_.x_density_table)
+            fr_ = mesh2d._first_frac_profile(xs_, prm_)
+            d1_ = np.linalg.norm(Cg[:, -1] - Cg[:, -2], axis=1)
+            return float(np.max(np.abs(d1_ / (fr_ * wall.r(xs_)) - 1.0)))
+        rec["vs_G0"] = {"note": "x の station が違うので節点の一致は見ない",
+                        "first_layer_vs_design_rel_max": d1_vs_design(C, m), "G0_first_layer_vs_design_rel_max": d1_vs_design(C0, mesh_block())}
+    else:
+        rec["vs_G0"] = None
+    if rec["vs_G0"] is None:
+      C0 = C0.reshape(prm.ni, -1, 3)[..., :2] / wall.scale; nj0 = C0.shape[1]; wd0 = wd0.reshape(prm.ni, nj0); wdn = wd.reshape(prm.ni, prm.nj)
+      rel = lambda A, B: float(np.max(np.abs(A - B) / np.maximum(np.abs(B), 1e-30)))  # noqa: E731
+      t = np.gradient(C[:, -1], axis=0); t /= np.linalg.norm(t, axis=1)[:, None]; t0 = np.gradient(C0[:, -1], axis=0); t0 /= np.linalg.norm(t0, axis=1)[:, None]
+      rec["vs_G0"] = {"wall_nodes_rel_max": rel(C[:, -1], C0[:, -1]), "first_interior_rel_max": rel(C[:, -2], C0[:, -2]),
+                      "x_station_rel_max": rel(C[:, -1, 0], C0[:, -1, 0]), "wall_tangent_max_abs_diff": float(np.abs(t - t0).max()),
+                      "wall_dist_first_interior_rel_max": rel(wdn[:, -2], wd0[:, -2])}
     # 初期値 (移送後の nozzle.h5 の VALUE): 非有限・物理性
     rec["ic_values"] = {k: {"nonfinite": int(np.count_nonzero(~np.isfinite(v))), "min": float(np.nanmin(v)), "max": float(np.nanmax(v))} for k, v in V.items()}
     ok = {
@@ -464,9 +540,10 @@ def cmd_prep(a):
         "matches_generated": rec["vs_generated"]["max_abs_diff_rt"] <= 1e-9,
         "wall_same_as_production": bool(rec["geometry_vs_production"]["ok"]),
         "wall_dist_reconvert": rec["wall_dist_reconvert_rel_max"] is not None and rec["wall_dist_reconvert_rel_max"] <= NS.WALLDIST_RTOL,
-        "same_wall_and_first_layer_as_G0": max(rec["vs_G0"]["wall_nodes_rel_max"], rec["vs_G0"]["first_interior_rel_max"], rec["vs_G0"]["x_station_rel_max"]) <= SAME_RTOL
-                                           and rec["vs_G0"]["wall_tangent_max_abs_diff"] <= SAME_RTOL,
-        "wall_dist_first_interior_as_G0": rec["vs_G0"]["wall_dist_first_interior_rel_max"] <= NS.WALLDIST_RTOL,
+        "same_wall_and_first_layer_as_G0": (max(rec["vs_G0"]["first_layer_vs_design_rel_max"], rec["vs_G0"]["G0_first_layer_vs_design_rel_max"]) <= 1e-9) if "note" in rec["vs_G0"] else
+                                           (max(rec["vs_G0"]["wall_nodes_rel_max"], rec["vs_G0"]["first_interior_rel_max"], rec["vs_G0"]["x_station_rel_max"]) <= SAME_RTOL
+                                            and rec["vs_G0"]["wall_tangent_max_abs_diff"] <= SAME_RTOL),
+        "wall_dist_first_interior_as_G0": True if "note" in rec["vs_G0"] else rec["vs_G0"]["wall_dist_first_interior_rel_max"] <= NS.WALLDIST_RTOL,
         "kinks_le_2deg": rec["vs_generated"]["metrics"]["kink_over_2deg"] == 0,
         # CFD ピンの初期線が生産の準備と同じ (run_0062 の nozzle.h5 は AWS で消されたので手元の複製を使う。初期線のハッシュで同一性を確かめる)
         "initial_line_same_as_production": (info.get("initial_line") or {}).get("sha256_16") == json.loads(
@@ -499,8 +576,8 @@ def cmd_prep_ic(a):
     sys.path.insert(0, str(HERE))
     import cold_xcheck as XC
     yb_x, yb = XC.common_yb(); scale = Wall(OUT / "prep_G1").scale; NI = 4719
-    def reduce(xy, ro, ux, uy, k, nj):
-        o = XC.reduce_fields(xy, ro, ux, uy, np.ones_like(ro), k, False, NI, nj, scale, yb_x, yb, profile="pchip")
+    def reduce(xy, ro, ux, uy, k, nj, ni=NI):
+        o = XC.reduce_fields(xy, ro, ux, uy, np.ones_like(ro), k, False, ni, nj, scale, yb_x, yb, profile="pchip")
         r = {}
         for (lo, hi) in WINDOWS:
             w = (o["x"] >= lo) & (o["x"] <= hi)
@@ -516,13 +593,13 @@ def cmd_prep_ic(a):
         r = D["ro"]
         return {"ro": r, "u": D["roUx"] / r, "v": D["roUy"] / r, "e": D["roe"] / r, "k": D["roK"] / r, "omega": D["roOmega"] / r}
     P0 = prim(S); nj0 = len(S["ro"]) // NI
-    def wall_omega(P, nj):
-        w = P["omega"].reshape(NI, nj)
+    def wall_omega(P, nj, ni=NI):
+        w = P["omega"].reshape(ni, nj)
         return {"wall_median": float(np.median(w[:, -1])), "wall_max": float(w[:, -1].max()),
                 "first_interior_median": float(np.median(w[:, -2])), "max_excl_wall": float(w[:, :-1].max())}
     out["G0_res_100000_omega"] = wall_omega(P0, nj0)
     out["G0_res_100000"] = reduce(xy, g0["ro"], g0["Ux"], g0["Uy"], g0["k"], len(g0["ro"]) // NI)
-    for arm in ("G1", "Gc", "G2"):
+    for arm in [a_ for a_ in ("G1", "Gc", "G2", "G1x") if (OUT / f"prep_{a_}" / "nozzle.h5").is_file()]:
         with h5py.File(OUT / f"prep_{arm}" / "nozzle.h5", "r") as h:
             keys = [k for k in h["VALUE"].keys() if h["VALUE/" + k].shape and h["VALUE/" + k].ndim == 1]
             V = {k: np.array(h["VALUE/" + k], dtype=float) for k in keys}
@@ -532,28 +609,29 @@ def cmd_prep_ic(a):
         # roe は燃焼ガスのエネルギーの基準 (生成エンタルピー) で負になりうる (G0 の res_100000 でも最小 −5.4e6) ので正値は見ない。
         # interp_field は原始量を最近傍で移して ρ を掛け直すので、保存量 (ρ × 別の節点の量) は元の値域を超えうる → 原始量の値域で見る。
         # ω は prepare_ns が移送の後に近壁の下限 6ν/(β₁ d²) を掛ける (runner_axismach.py:1443–1454) ので、壁節点を除いて見る。
+        ni_a = int(json.loads((OUT / f"prep_{arm}" / "prepare_info.json").read_text())["mesh"]["ni"])
         P = prim({k: V[k] for k in S}); excess = {}
         for k in P:
-            lo, hi = P0[k].min(), P0[k].max(); x = P[k] if k != "omega" else P[k].reshape(NI, -1)[:, :-1].ravel()
+            lo, hi = P0[k].min(), P0[k].max(); x = P[k] if k != "omega" else P[k].reshape(ni_a, -1)[:, :-1].ravel()
             excess[k] = float(max(lo - x.min(), x.max() - hi, 0.0) / (hi - lo))
         rec = {"value_keys": sorted(V), "nonfinite": nonf, "min": pos, "primitive_excess_over_range": excess,
-               "omega": wall_omega(P, n // NI),
+               "omega": wall_omega(P, n // ni_a, ni_a),
                "ok": all(v == 0 for v in nonf.values()) and pos.get("ro", 1) > 0 and pos.get("roK", 0) >= 0 and pos.get("roOmega", 1) > 0
                      and all(v <= 1e-6 for v in excess.values())}
-        ro = V["ro"]; rec["reduce"] = reduce(xy, ro, V["roUx"] / ro, V["roUy"] / ro, V["roK"] / ro, n // NI)
+        ro = V["ro"]; rec["reduce"] = reduce(xy, ro, V["roUx"] / ro, V["roUy"] / ro, V["roK"] / ro, n // ni_a, ni_a)
         rec["reduce_rel_vs_G0_pct"] = {k: 100 * (rec["reduce"][k] / out["G0_res_100000"][k] - 1) for k in rec["reduce"]}
         out[arm] = rec
     return out
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic"])
+    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
-    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2"], help="prep: 格子")
+    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x"], help="prep: 格子")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()
-    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic}[a.cmd](a)
+    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x}[a.cmd](a)
     out["problem"] = PROBLEM.name; out["wall_ref"] = a.wall_ref
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
