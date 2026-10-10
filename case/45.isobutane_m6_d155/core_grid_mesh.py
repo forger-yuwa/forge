@@ -406,6 +406,8 @@ def cmd_post_ab(a):
 
 YAML_NAMES = {"G1": "cg1", "Gc": "cgc", "G2": "cg2", "Gref": "cgref"}
 YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170, "Gref": 160}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
+# x 方向を粗くした格子: 名前 → (YAML の tag, c, q_max の説明, nj, 半径方向の元, plan の節)
+XARMS = {"G1x": ("cg1x", 0.03, 1.3, 75, "G1", "§5.1 #10"), "Grefx": ("cgrefx", 0.015, "各列で G0 以下", 160, "Gref", "§4.21")}
 
 
 def grid_list(ref=False):
@@ -444,36 +446,37 @@ def cmd_yaml(a):
             raise SystemExit(f"{arm}: 生産の YAML との差が name・nj・axis_cap_frac 以外にもある — 止める")
         dst = HERE / f"{name}.yaml"; dst.write_text(text)
         out[arm] = {"file": dst.name, "nj": nj, "axis_cap_frac": c, "identical_except_name_nj_cap": True}
-    # G1x: G1 の半径方向 + x 方向を粗く (ni・x_density_table・ar_max も変える)
-    c, qmax, _ = ARMS["G1"]; nj = YAML_NJ["G1"]; mx = mesh_block(nj, c, xcoarse=True); name = f"{base['name']}_cg1x"
-    head = (f"# plan tooling-nozzle-core-grid §5.1 #10 の格子 G1x (G1 = c {c}・q_max {qmax}・nj {nj} に加え、x 方向を粗く: 壁際の AR の上限 1 万・目標 9000、"
-            f"AR で決まる範囲の x の密度を 1/{XFACTOR:g}、ni {mx['ni']})。\n# core_grid_mesh.py yaml が {PROBLEM.name} から作る (手で編集しない)。"
-            f"違いは name・mesh.ni・nj・axis_cap_frac・x_density_table・ar_max だけ。AR ≤ 1 万は 2026-10-10 ユーザ決定 (本 plan の試験に限る)\n")
-    body = []; cnt = {"name": 0, "ni": 0, "nj": 0, "xd": 0, "ar": 0}
-    for ln in src.splitlines():
-        if ln.startswith("name: "):
-            ln = f"name: {name}"; cnt["name"] += 1
-        elif ln.startswith("  ni: "):
-            ln = f"  ni: {mx['ni']}"; cnt["ni"] += 1
-        elif ln.startswith("  nj: "):
-            body.append(f"  nj: {nj}"); ln = f"  axis_cap_frac: {c}   # 主流と軸付近の間隔 (/局所半径) の上限 (plan tooling-nozzle-core-grid §4.2)"; cnt["nj"] += 1
-        elif ln.startswith("  x_density_table: "):
-            ln = "  x_density_table: " + json.dumps(mx["x_density_table"]); cnt["xd"] += 1
-        elif ln.startswith("  ar_max: "):
-            ln = f"  ar_max: {AR_MAX_G1X}"; cnt["ar"] += 1
-        body.append(ln)
-    if any(v != 1 for v in cnt.values()):
-        raise SystemExit(f"G1x: 置き換える行の数が 1 でない {cnt} — 止める")
-    text = head + "\n".join(body) + "\n"; new = yaml.safe_load(text)
-    b = json.loads(json.dumps(base)); nn = json.loads(json.dumps(new))
-    for d in (b, nn):
-        d.pop("name")
-        for k in ("ni", "nj", "axis_cap_frac", "x_density_table", "ar_max"):
-            d["mesh"].pop(k, None)
-    if b != nn or new["mesh"]["ni"] != mx["ni"] or new["mesh"]["x_density_table"] != mx["x_density_table"]:
-        raise SystemExit("G1x: 生産の YAML との差が想定のキー以外にもある — 止める")
-    (HERE / f"{name}.yaml").write_text(text)
-    out["G1x"] = {"file": f"{name}.yaml", "ni": mx["ni"], "nj": nj, "axis_cap_frac": c, "ar_max": AR_MAX_G1X, "xfactor": XFACTOR}
+    # x 方向を粗くした格子 (ni・x_density_table・ar_max も変える): G1x = G1 の半径方向 (§5.1 #10)、Grefx = Gref の半径方向 (§4.21)
+    for arm, (tag, c, qmax, nj, base_arm, sec) in XARMS.items():
+      mx = mesh_block(nj, c, xcoarse=True); name = f"{base['name']}_{tag}"
+      head = (f"# plan tooling-nozzle-core-grid {sec} の格子 {arm} ({base_arm} = c {c}・q_max {qmax}・nj {nj} に加え、x 方向を粗く: 壁際の AR の上限 1 万・目標 9000、"
+              f"AR で決まる範囲の x の密度を 1/{XFACTOR:g}、ni {mx['ni']})。\n# core_grid_mesh.py yaml が {PROBLEM.name} から作る (手で編集しない)。"
+              f"違いは name・mesh.ni・nj・axis_cap_frac・x_density_table・ar_max だけ。AR ≤ 1 万は 2026-10-10 ユーザ決定 (本 plan の試験に限る)\n")
+      body = []; cnt = {"name": 0, "ni": 0, "nj": 0, "xd": 0, "ar": 0}
+      for ln in src.splitlines():
+          if ln.startswith("name: "):
+              ln = f"name: {name}"; cnt["name"] += 1
+          elif ln.startswith("  ni: "):
+              ln = f"  ni: {mx['ni']}"; cnt["ni"] += 1
+          elif ln.startswith("  nj: "):
+              body.append(f"  nj: {nj}"); ln = f"  axis_cap_frac: {c}   # 主流と軸付近の間隔 (/局所半径) の上限 (plan tooling-nozzle-core-grid §4.2)"; cnt["nj"] += 1
+          elif ln.startswith("  x_density_table: "):
+              ln = "  x_density_table: " + json.dumps(mx["x_density_table"]); cnt["xd"] += 1
+          elif ln.startswith("  ar_max: "):
+              ln = f"  ar_max: {AR_MAX_G1X}"; cnt["ar"] += 1
+          body.append(ln)
+      if any(v != 1 for v in cnt.values()):
+          raise SystemExit(f"{arm}: 置き換える行の数が 1 でない {cnt} — 止める")
+      text = head + "\n".join(body) + "\n"; new = yaml.safe_load(text)
+      b = json.loads(json.dumps(base)); nn = json.loads(json.dumps(new))
+      for d in (b, nn):
+          d.pop("name")
+          for k in ("ni", "nj", "axis_cap_frac", "x_density_table", "ar_max"):
+              d["mesh"].pop(k, None)
+      if b != nn or new["mesh"]["ni"] != mx["ni"] or new["mesh"]["x_density_table"] != mx["x_density_table"]:
+          raise SystemExit(f"{arm}: 生産の YAML との差が想定のキー以外にもある — 止める")
+      (HERE / f"{name}.yaml").write_text(text)
+      out[arm] = {"file": f"{name}.yaml", "ni": mx["ni"], "nj": nj, "axis_cap_frac": c, "ar_max": AR_MAX_G1X, "xfactor": XFACTOR}
     return out
 
 
@@ -499,7 +502,7 @@ def cmd_prep(a):
     if not conv.is_file() or NS.sha256_file(conv) != CP.CONV_SHA:
         raise SystemExit(f"REAL_CONVERTER ({conv}) が FP64 の変換器 (sha256 {CP.CONV_SHA[:16]}…) でない — 止める")
     arm = a.arm
-    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES.get(arm, 'cg1x')}.yaml"
+    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES[arm] if arm in YAML_NAMES else XARMS[arm][0]}.yaml"
     out = OUT / f"prep_{arm}"
     if out.exists():
         raise SystemExit(f"{out} が既にある — 止める")
@@ -706,7 +709,7 @@ def cmd_view(a):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view", "select-ref"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
-    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref"], help="prep: 格子 / prep-ic: その格子だけを見る (出力 prep-ic_<格子>.json)")
+    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref", "Grefx"], help="prep: 格子 / prep-ic: その格子だけを見る (出力 prep-ic_<格子>.json)")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()

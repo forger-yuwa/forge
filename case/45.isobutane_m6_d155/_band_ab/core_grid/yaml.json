@@ -31,6 +31,14 @@
   "ar_max": 10000,
   "xfactor": 2.0
  },
+ "Grefx": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgrefx.yaml",
+  "ni": 3086,
+  "nj": 160,
+  "axis_cap_frac": 0.015,
+  "ar_max": 10000,
+  "xfactor": 2.0
+ },
  "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
- "wall_ref": "/home/sano/work/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
 }
