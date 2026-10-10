@@ -1,3 +1,41 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 計画立案時レビュー (stage = plan)
+
+対象の plan は下に全文を貼る (`plans/active/time_integration-line-viscous-jacobian-faceh.md`)。これから実装に入る前の段階なので、次を順に評価せよ。
+
+1. **目的とスコープ** (§1, §2): 解こうとしている課題は正しく同定されているか。既に解決済み/別 plan と重複していないか
+   (`plans/README.md` と `plans/accepted/` を確認)。
+2. **設計方針** (§4): 数学的・数値的に健全か。forge の既存構造 (`methods/architecture/overview.md`、該当 `methods/<area>/`)
+   と整合するか。node/cell 両離散化、float32、陰解法 (block-DPLUR)、周期・軸対称などの既知の落とし穴に抵触しないか。
+   代替案と比べて費用対効果は妥当か。
+3. **実装ステップと残作業表** (§5, §5.1): 順序・粒度は妥当か。抜けている前提 (メッシュ品質、IC、段階起動) はないか。
+4. **検証計画** (§6): 判定基準は定量的か。検証ケースの選択は `procedures/verification/README.md` と整合するか。
+   「収束」「一致」を何で判定するかが書かれているか。
+5. **見落としているリスク**: 我々が気づいていない構造的問題があれば挙げよ。
+
+最後に「この計画で実装に進んでよいか」を **GO / GO-with-changes / NO-GO** の 1 語で判定し、
+GO-with-changes なら実装前に直すべき点を優先順で列挙すること。
+
+## 重点
+
+§6.9 (2026-10-10 に追加した、LHS の座標の差だけを変える A/B の事前登録) と、台本 lvcgeom.sh・判定 lvcgeom_judge.py (作業ツリーの未 commit の新規ファイル) だけを点検する。諮問 (lvcaudit-result-diagnose) は同じバイナリに診断の切替を足す形を勧めたが、元のセッションの float 化の段 ② (LHS は ST(ccx[o]) − ST(ccx[ic])、952 行) と段 ③ (ST(±ge_x)、965 行) の FP64 のバイナリの組で行うことにした (段 ③ が本番に入る変更そのもの、元のセッションの記録で FP64 の残差の面の流束が段 ② と段 ③ でビット一致)。この置き換えが判別 A/B として妥当か、抜けている確認は何か。介入の成立の確認 (1 step の書き出しで状態のビット一致と壁際の K の差 > 1e-3) が十分か。ほかは §6.2 の判定器と同じ分類・ゲート。元のセッションのソースは /home/sano/work/forge-integ-1005 (ブランチ feature/nozzle-wall-fit-and-pipeline) にあり、float 化の plan は plans/active/architecture-float-state-double-geometry.md の §6.5・§6.7 (段 ②・段 ③ の結果)。
+
+## plan 全文 (`plans/active/time_integration-line-viscous-jacobian-faceh.md`)
+
+```markdown
 # 熱伝導の近傍 K を入れたライン粘性 Jacobian の破綻は、面エンタルピーの float の評価が要るか (粘性ヤコビアン plan の再開)
 
 ## メタ
@@ -61,7 +99,7 @@
 | 3 | 結果の解釈と次の一手 | §6 の分岐で判定し、諮問の後に §6.2 へ。**判断: 2026-10-10 codex 諮問 — 棄却 (A・B とも 4 本 DIVERGED) を「切替だけでは回避できない」に限って記録。精度依存の不在・同じ機構・増幅率の同一は主張しない。次は U-J の列ごと・壁拘束の照合 (#4)。値 2 の対は回さない** | F |
 | 4 | U-J の列ごと・壁拘束の照合 (**完了 2026-10-10、§6.3〜§6.6**: §6.3 は FAIL (原文保存)、§6.5 の多倍長の参照で PASS・丸めの仮説を支持。判断: codex 諮問 — 限定付きの PASS、第 2 仮説はこの範囲で退く) | 諮問の判別 A/B: 同じ状態・同じ薄層の流束モデルで、A = 製品の共通関数 `accumulate_thinlayer_visc_jacobian` の D/K、B = 独立な流束の実装の中心差分。host 上の 200 組と短いライン。列ごとに正規化して double で相対誤差 ≤ 1e-6、差分幅 h と h/2 の再現を確かめ、零列は事前に固定した無次元の絶対誤差、解像できない列は判別不能。両向きの面・異なる密度・高速流・速度固定・温度固定を含め、壁拘束は自由度を消去した系でも照合。零空間 ≤ 1e-12・壁温拘束 ≤ 1e-12・短いラインの解の差 ≤ 1e-10 を維持。触るファイルは `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (試験だけ、ソルバは変えない)。全列で整合 → 第 1 仮説 (実残差・境界・分離更新との不整合) の確認へ、再現する不一致 → 第 2 仮説 (小さい列・面の向き・壁拘束の実装の不整合) を優先 | F |
 | 5 | 製品の経路の照合 (**ユーザの選択 2026-10-10「1」、§6.7 に事前登録**。**完了 2026-10-10 §6.8: 登録の VERDICT は FAIL (段 C、対流の K の相殺)・T 保留、A で壁際の LHS の β・κ が float の座標で最大 10.8 % ずれる**) | 諮問 (2026-10-10 uj-mp-result) の判別 A/B: 同じ凍結状態から、A = CUDA の実際の組立、B = 元の入力から host で独立に組む参照。`run_0183` の res_100000 から値 3・マスク 7・ISP 0 の新しい診断の run で 1 step (最初の factor と 5 sweep)、既存の 5 本のラインを全節点・両向きで採取 (壁・軸・内部を含む)。書き出しに足すもの (cuda_forge の出力だけの変更、既定はビット不変): 面の番号・両端・`line_prev/next`・生の座標・面積ベクトル・`fx`・両端の速度・`vis_lam`・`vis_turb`・`thermCond`・`Prt`・実効のフラグと精度・実際に渡した β・κ・法線・f_i・状態・薄層の各寄与・拘束の前後の D/K。照合は二段: 元の入力から係数を独立に計算 (誤った β を共有して合格するのを防ぐ) → 製品の `ST = float`・加算の順序・格納の変換を再現して面の寄与から最終の行列まで。接続・格納先・拘束のフラグは完全一致、数値は列ごとに尺度化し float の丸めを含む許容を採取の前に登録。注目点: ISP 0 では `dcc` を float にした座標の差で作る (`timeIntegration_d.cu` 952 行付近) が、残差は double の座標 (FP64 ビルド)。冷却壁の第一層は float32 の座標で数 ulp。整合すれば第 2 段 (実残差の応答、9 評価・幅の再現 ≤ 1 %・ノイズ ≤ 1e-3) へ | F |
-| 6 | LHS の座標の差だけを変える A/B (§6.9、ユーザ 2026-10-10「すすめてもらって OK」) | 元のセッションの段 ② (float の座標の差) と段 ③ (double の座標の差 ge_x) の FP64 のバイナリで、値 3・マスク 7 を各 2 本・最大 2000 step。先に 1 step の書き出し 3 本 (旧・新・旧の再実行) と事前のゲート `lvcgeom_pregate.py` (入力の一致・残差の不変・係数の水準での介入の成立、plan-5 レビューの採用) を回し、PASS のときだけ腕へ。台本 `lvcgeom.sh`、本判定 `lvcgeom_judge.py`。合格条件: 事前のゲートが PASS、本判定のゲートが全部通る、§6.9 の分岐で判定 | F |
+| 6 | LHS の座標の差だけを変える A/B (§6.9、ユーザ 2026-10-10「すすめてもらって OK」) | 元のセッションの段 ② (float の座標の差) と段 ③ (double の座標の差 ge_x) の FP64 のバイナリで、値 3・マスク 7 を各 2 本・最大 2000 step。先に 1 step の書き出しで介入の成立 (壁際の K の差・状態のビット一致) を確かめる。合格条件: §6.9 の分岐で判定、ゲートが全部通る | F |
 
 ## 6. 検証 (事前登録、2026-10-10、run の前。codex 諮問 [記録](../../notes/reviews/2026-10-10-lvc-faceh-design-diagnose.md) の採否を反映)
 
@@ -299,41 +337,19 @@
 
 - **腕**: A = 元のセッションの float 化の段 ② の FP64 のバイナリ (`~/forge-fgeom2-fp64`、sha256 1b8590e8…)。block DPLUR の LHS は `ST(ccx[o]) − ST(ccx[ic])` (952 行)。
   B = 段 ③ の FP64 のバイナリ (`~/forge-fgeom3-fp64`、sha256 129de3f4…)。LHS は `ST(±ge_x[ip])` (965 行)。ge_x は double の座標の差 (FP64 では double の引き算 1 回)。
-  元のセッションの記録 (float 化の plan §6.7、`run_0419`) は**段 ③ のバイナリの中で旧式・新式の面の流束を比べたもの**で (粘性 6,881,028・スカラー 2,293,676 値がビット一致)、
-  別のバイナリの間のビット一致も、今回の入力 (`run_0183` の res_100000) での一致も示していない (plan-5 レビュー M1 で訂正)。ソースの差分 (2026-10-10 に AWS 上で確認) では、
-  段 ③ の変更は粘性流束・k/ω と化学種の拡散・受動スカラーの FCT・陰解法の座標の差を、double の座標から 1 回で引いた e (`ge_*`、`variables.cpp` の `fillGeomDiffE`) に置き換えるだけで、
-  FP64 では `flow_float` = double なので残差の側は同じ double の引き算になる。float に落とすのは block DPLUR の 963 行 (`ST(±ge)`) だけ。`setDT_d.cu` と `block_dplur_jacobian_d.cuh` は同一。
-  残差の不変は、この記述に頼らず下の事前のゲートで測る。
+  元のセッションの記録 (float 化の plan §6.7) では、FP64 で段 ② と段 ③ の残差の面の流束はビット一致し (粘性 6,881,028・スカラー 2,293,676 値、`run_0419`)、違いは LHS に入る値だけ。
   **諮問は同じバイナリに切替を足す形を勧めた**が、段 ③ はこの変更がそのまま本番に入る実装なので、本番の変更そのものの効果を見るためにこの組を使う。
   バイナリの組なので、段 ③ で LHS 以外に入った変更 (スカラー版・前処理版の DPLUR など、この構成では通らない経路) も含む。それは残差のビット一致で押さえる範囲に限って許す。
 - **設定**: §6.2 の a と同じ (`run_0183` の res_100000、値 3・マスク 7・キー 5・方向別・上限なし・cfl 4・緩和 0.7・sweep 5・ISP 0・面エンタルピーは既定)。最大 2000 step、場は 100 ごと。
   各腕 2 本を A1・B1・A2・B2 の順に逐次。run は case/45 の `run_0560_lvcgeom_old_a1`・`run_0561_lvcgeom_new_b1`・`run_0562_lvcgeom_old_a2`・`run_0563_lvcgeom_new_b2`
-  (AWS の自分の作業ツリー `~/forge-faceh-audit` の case/45、`run_0183` はリンク)。台本 `lvcgeom.sh`、本判定 `lvcgeom_judge.py` (§6.2 の判定器 `lvcfh_judge.py` と同じ分類・ゲートに、腕ごとのバイナリの sha256 と、事前のゲートの記録が PASS であることを足したもの)。
-- **事前のゲート (腕の前に回し、PASS のときだけ腕へ。plan-5 レビュー M1〜M3・m4 の採用)**: 同じ状態から 1 step のライン行列の書き出しを 3 本
-  (`run_0564_lvcgeom_old_dump` = 段 ②、`run_0565_lvcgeom_new_dump` = 段 ③、`run_0566_lvcgeom_old_dump2` = 段 ② の再実行。5 本のライン、出力に残差の場
-  `res_ro`・`res_roUx`・`res_roUy`・`res_roe`・`res_roK`・`res_roOmega`・(あれば `res_roY0`・`res_roY1`) を足す)。判定 `lvcgeom_pregate.py` (終了コード 0 = PASS、1 = INVALID、2 = 判別不能):
-  - **I 入力** (M3): 各書き出しのバイナリの sha256・出発の場・格子の実体・入力ファイル・設定 (§6.2 の a と同じ。差は step 数・出力の間隔・`extraFields` だけ)・起動ログ (値 3・マスクの表示なし・LAYOUT2・面エンタルピーの切替なし)・終了コード、
-    書き出しの配列の形 (`N×2`・`N×7`・`N×25` など)・要求した 5 節点と 5 本のライン・重複なし・有限・ρ, c_p, dt, 体積 > 0・γ > 1。
-    3 本の書き出しの状態・dt・拘束のフラグ・節点がビット一致し、出力 step 0 の全データセット (保存量・k・ω・組成・μ・壁距離) もビット一致 (同じ入力)。
-    さらに §6.8 の監査の記録 (`run_0550_lvcaudit`、同じ状態・同じ 605 節点) とも状態・dt・フラグ・節点がビット一致 (下の V の前提)。
-    1 step の出力の `res_ro` が書き出しの `rhs_s0` の行 0 と float で一致すること (出力の残差が出発の状態の残差であること。`run_0551` で確認済み) も確かめる。
-  - **R 残差の不変** (M1): 出発の状態の残差 (上の 6〜8 場の全節点) と `rhs_s0` (ライン上の節点・5 行) について、旧と旧の再実行がビット一致なら新もビット一致を要求し、
-    そうでなければ max|新 − 旧| ≤ 3 × max|旧の再実行 − 旧| を要求する。
-  - **V 係数の水準での介入の成立** (M2): 監査の記録の面ごとの生の入力 (double の座標・面積ベクトル・物性・状態) から、製品の式を float32 で組み直す。
-    (0) 旧の式 (座標を float にしてから引く) の再計算が、記録された GPU の dcc・dds・δ・粘性の対角・β・κ・cfac と ≤ 8 ulp (この再計算の式の検証。2026-10-10 の試行で最大 4 ulp)、
-    (a) 新の式 (double の差を float に 1 回丸める) のライン面の β・κ が、double の参照 μ_f·|S|²/|e·S| と相対 ≤ 1e-5 (諮問の成立条件。試行で最大 3.1e-7)、
-    (b) 書き出しの薄層の K の変化 (新 − 旧) が、共通関数で組んだ Kv(新) − Kv(旧) と要素ごとに ≤ 64 ulp (Kv の列の大きさで尺度化。拘束の行は変化 0)、
-    (c) 書き出しの D の変化 (新 − 旧) が、`line_audit_helper` で製品と同じ順序の float の加算を時間項の後から連ねた D(新) − D(旧) と要素ごとに ≤ 64 ulp
-    (D・面の途中の和の大きさで尺度化。拘束の行は変化 0)。(b)(c) は薄層の D・値 3 のスカラーの対角・ライン外のキー 5 の熱伝導の対角 (枝 3) をすべて含む。
-    試行 (旧の記録を新とみなした場合) では、予測される変化が 64 ulp を超える要素が D で 2232・K で 5759 あり、介入が入っていなければ (b)(c) は外れる。
-  - K の相対差 (壁際) は補助の記録だけにし、成立条件にしない (plan-5 レビュー M2: K の差は向きも由来も見ない)。
-  - 分類: 入力・証拠の不備は INVALID、正常な証拠で R か V が外れたら判別不能。どちらでも腕は回さない (台本が止まる)。
-    台本は `lvcgeom.sh dumps` (書き出しと事前のゲート) と `lvcgeom.sh arms` (記録が PASS のときだけ腕) に分けて呼べる。事前のゲートの規則・閾値は書き出しを見た後に変えない
-    (コードの不具合で評価できなかったときは、規則を変えずに直したことを §6.10 に書く)。
+  (AWS の自分の作業ツリー `~/forge-faceh-audit` の case/45、`run_0183` はリンク)。台本 `lvcgeom.sh`、判定 `lvcgeom_judge.py` (§6.2 の判定器 `lvcfh_judge.py` と同じ分類・ゲートに、腕ごとのバイナリの sha256 を足したもの)。
+- **介入の成立の確認 (先に回す)**: 同じ状態から各バイナリで 1 step のライン行列の書き出し (`run_0564_lvcgeom_old_dump`・`run_0565_lvcgeom_new_dump`、5 本のライン)。
+  (i) 新旧の Kprev・Knext が、壁から 0〜15 番目の節点のどれかで列ごとの相対差 1e-3 を超えて違う (A で測った係数の差 3〜11 % が入ったこと)、
+  (ii) 新旧の状態 (書き出しの ρ・ρu・ρE・c_p・γ) がビット一致 (同じ入力)。満たさなければ介入が成立していないので判別不能。
 - **分類と分岐** (§6.2 と同じ): DIVERGED (detectNaN か残差の非有限) / FINITE (2000 step、全行が有限・非負、100 step ごとの場の保存量・P・T が有限で ρ・P・T が正) / INVALID。
   1. A が 2 本とも DIVERGED、B が 2 本とも FINITE → この条件・期間では、LHS の座標の差の丸めを直すだけで非有限化を回避できることを支持。
   2. A・B とも 2 本とも DIVERGED → 「この修復だけで十分」を棄却 (精度の不整合の寄与をゼロとは言わない)。
-  3. A のどちらかが FINITE → 既知の破綻を再現しないので帰属不能。B が分かれる → 判別不能。事前のゲートが外れる → 腕を回さず判別不能 (INVALID なら証拠の不備として記録)。
+  3. A のどちらかが FINITE → 既知の破綻を再現しないので帰属不能。B が分かれる → 判別不能。介入の成立の確認が外れる → 判別不能。
 - **ゲート**: 腕ごとのバイナリの sha256、出発の場の sha256 (207d39f0…)、設定が §6.2 の a と同じ (値 3・キー 5・方向別・上限なし・cfl 4・ISP なし)、起動ログの値 3・`FORGE_LVC_TERMS` の表示なし・LAYOUT2・
   面エンタルピーの切替の表示なし、必須の残差の列・全行の有限・非負、終了コード。
 - **言えること・言えないこと**: 支持でも「この条件・2000 step で非有限化を避けた」まで。収束・安定・速さ・B0 (値 0) への影響は言わない。
@@ -353,7 +369,6 @@
 | 諮問 (§6.5 の結果と次の一手) | 2026-10-10 | [2026-10-10-uj-mp-result-diagnose.md](../../notes/reviews/2026-10-10-uj-mp-result-diagnose.md) | 限定付きの PASS と丸めの仮説は採用、Major 2 (既存の書き出しだけでは製品の経路を照合できない、η だけでは実残差の方向微分を解像できない)・Minor 2 (η の非有限の優先順、η の下限の訂正) | 全件採用: §6.6 に限定付きの解釈と訂正、試験の η の扱いを修正 (記録と完全一致を確認)、§5.1 #5 に製品の経路の照合の組み方を記録 (着手はユーザの判断の後) |
 | plan (§6.7 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-4.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-4.md) | GO-with-changes, C0/M5/m2 | 全件採用 (根拠の箇所を確かめ、判定器を人工入力で確認): M1 採取のゲート (設定・型の幅・sha256・5 本のライン・sweep・有限性) を足し、空や NaN は INVALID、M2 接続を向きごとに 1 面・往復の面で確かめ、速度/温度固定のフラグと隣の状態を元の配列から独立に照合、M3 ライン外の面・軸対称・時間項の係数も float で再現 (層流 μ はスカラー側 `cfg.visc`)、M4 差ではなく面の前後の D を記録し、製品と同じ順序の float の加算を host で再現、許容は ulp で 3 段、M5 同じソースで監査の有無だけが違う 2 本をビット一致で対照に、m6 A の分類を大きさだけの名前に、結論を対象の係数に限り再現の PASS と両立と明記、m7 §2・§7 を改訂 |
 | 諮問 (§6.7 の結果) | 2026-10-10 | [2026-10-10-lvcaudit-result-diagnose.md](../../notes/reviews/2026-10-10-lvcaudit-result-diagnose.md) | FAIL は原文保存、H1 (C は相殺) は要再検証 (相殺は V の内積)、H3 (D の 1 ulp は無害) は却下、A の幾何の不整合は採用・因果は未確認、次は (a) LHS の座標の差だけの A/B、Major 4・Minor 2 | 全件採用し §6.8 に記録。(a) は、諮問の勧めた同じバイナリの切替ではなく、元のセッションの段 ②・段 ③ の FP64 のバイナリの組で行う (段 ③ が本番に入る変更そのもの、FP64 の残差はビット一致) — 理由と範囲を §6.9 に書き、plan 段で点検を受ける |
-| plan (§6.9 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-5.md) | GO-with-changes, C0/M3/m1 | 全件採用 (段 ②・段 ③ のバイナリの組は維持): M1 `run_0419` の記述を「段 ③ の中の旧式・新式の比較」に訂正し、今回と同じ凍結入力での残差の不変 (旧の再実行で揺れを測り、ビット一致か 3 倍以内) を事前のゲートに、M2 介入の成立を K の差から係数の水準へ (新の β・κ が double の参照と ≤ 1e-5、K・D の変化が係数の変更の再現と ≤ 64 ulp、旧の式の再計算で式自体を検証)、K の差は補助の記録に、M3 書き出しにも共通の入力のゲート (設定・格子・出発の場・形・5 節点・有限・正値、状態・dt・フラグ・出力 step 0 の全場のビット一致)、m4 事前のゲートを腕の前に回し PASS のときだけ腕へ、INVALID と判別不能を分ける。実装は `lvcgeom_pregate.py`・`lvcgeom.sh`・`lvcgeom_judge.py` |
 
 ## 7. 影響範囲
 
@@ -366,3 +381,548 @@
 - 2026-10-10: 設計の諮問と codex plan 段を全件採用して in_progress (§1・§4・§6 を改訂、判定器を書き直し)。主の 4 本 (`run_0540`〜`run_0543`) を投入する。
 - 2026-10-10: 主の 4 本 (`run_0540`〜`run_0543`) を回し、VERDICT 棄却 (§6.2)。codex 諮問を全件採用し、次は U-J の列ごと・壁拘束の照合 (§5.1 #4、未着手)。
 - 2026-10-10: U-J の列ごとの照合 (§6.3 は FAIL・原文保存、§6.5 の多倍長の参照で PASS・丸めの仮説を支持、§6.6)。codex 諮問を採用し、次は製品の経路の照合 (§5.1 #5、未着手)。
+```
+
+## 参考: `case/45.isobutane_m6_d155/lvcgeom.sh`
+
+```
+#!/bin/bash
+# plan time_integration-line-viscous-jacobian-faceh §6.9 (2026-10-10): 値 3・マスク 7 の破綻と LHS の座標の差の A/B。
+# A = 元のセッションの float 化の段 ② の FP64 (~/forge-fgeom2-fp64、LHS は ST(ccx[o]) − ST(ccx[ic]))、B = 段 ③ の FP64 (~/forge-fgeom3-fp64、LHS は ST(±ge_x))。
+# run_0183 の res_100000 から、値 3・キー 5・方向別・上限なし・cfl 4 (§6.2 の a と同じ)。先に 1 step の書き出し (介入の成立の確認) を旧・新で 1 本ずつ、
+# その後に A1・B1・A2・B2 を最大 2000 step・100 ごと、序盤 200 step は 112 節点の帳簿。判定は lvcgeom_judge.py (この台本は判定しない)。
+# AWS の自分の作業ツリー (~/forge-faceh-audit/case/45.isobutane_m6_d155) で動かす。run_0183 は ~/forge-wallfit の run へのリンク。元のセッションのバイナリは読むだけ。
+# 発散 (detectNaN で止まる、RUN_RC 1) は結果なので台本は止めずに次へ進む。起動の失敗・表示の不一致では止める。
+set -uo pipefail
+cd "$(dirname "$0")"
+export FORGE_CUDA_BLOCKSIZE=128
+for v in $(compgen -e | grep '^FORGE_'); do case $v in FORGE_CUDA_BLOCKSIZE) ;; *) unset $v;; esac; done
+export REAL_CONVERTER=$HOME/forge-wallfit-bin-fp64/solver_density_cuda/build/convertGmshToForge FORGE_CONVERTER=$PWD/conv_tolerant.sh
+OLD_BIN=$HOME/forge-fgeom2-fp64/solver_density_cuda/build/forge
+NEW_BIN=$HOME/forge-fgeom3-fp64/solver_density_cuda/build/forge
+TOOLS=$(cd ../../solver_density_cuda/tools && pwd)
+SRC=run_0183_ns_coldmesh_tw300_ext
+LOG=$PWD/lvcgeom.log
+NODES=1572,4113,7985,198560,264263
+
+echo "== 開始 $(date -Is)" >> $LOG
+[ "$(sha256sum $OLD_BIN | cut -c1-16)" = 1b8590e84ece63ae ] && [ "$(sha256sum $NEW_BIN | cut -c1-16)" = 129de3f4e7f67aa3 ] || { echo "バイナリの sha256 が登録と違う — 止める" >> $LOG; exit 1; }
+[ -e $SRC ] || ln -s $HOME/forge-wallfit/case/45.isobutane_m6_d155/$SRC $SRC
+# 出発の場: prep は $SRC の最後の res を取るので、それが res_100000.h5 で事前に固定した sha256 であることを先に確かめる
+last=$(ls $SRC | grep -E '^res_[0-9]+\.h5$' | sort -t_ -k2 -n | tail -1)
+[ "$last" = res_100000.h5 ] && [ "$(sha256sum $SRC/res_100000.h5 | cut -c1-16)" = 207d39f0e7f4aa03 ] || { echo "出発の場が res_100000.h5 (207d39f0…) でない ($last) — 止める" >> $LOG; exit 1; }
+LEDGER_NODES=1572,1571,1570,1569,1568,1567,1566,1565,1564,1563,1562,1561,1560,1559,1558,1557,4113,4112,4111,4110,4109,4108,4107,4106,4105,4104,4103,4102,4101,4100,4099,4098,4960,4959,4958,4957,4956,4955,4954,4953,4952,4951,4950,4949,4948,4947,4946,4945,6170,6169,6168,6167,6166,6165,6164,6163,6162,6161,6160,6159,6158,6157,6156,6155,7985,7984,7983,7982,7981,7980,7979,7978,7977,7976,7975,7974,7973,7972,7971,7970,198560,198559,198558,198557,198556,198555,198554,198553,198552,198551,198550,198549,198548,198547,198546,198545,264263,264262,264261,264260,264259,264258,264257,264256,264255,264254,264253,264252,264251,264250,264249,264248
+
+meshsha() {  # meshsha <nozzle.h5> → stdout (MESH の全データセットのハッシュ、場は含めない)
+  python3 -c '
+import h5py, hashlib, sys
+h = hashlib.sha256()
+def visit(name, obj):
+    if isinstance(obj, h5py.Dataset):
+        h.update(name.encode()); h.update(obj[...].tobytes())
+with h5py.File(sys.argv[1], "r") as f:
+    f["MESH"].visititems(visit)
+print(h.hexdigest())' "$1"
+}
+
+dump1() {  # dump1 <run> <bin> <キー>: 1 step のライン行列の書き出し (介入の成立の確認)
+  local r=$1 bin=$2 key=$3
+  ( export FORGE_BIN=$bin COLD_ALT_BINARY=$key
+    python3 cold_cfl.py prep $SRC $r --steps 1 --out 1 --cfl 4 --limiter-ref-from $SRC --line dir --extra res_ro,volume --itj 5 --lvc 3 >> $LOG 2>&1 ) \
+    || { echo "prep $r 失敗 — 止める" >> $LOG; return 1; }
+  rm -f $r/nozzle.msh; mkdir -p $r/linedump
+  ( export FORGE_BIN=$bin COLD_ALT_BINARY=$key FORGE_LINE_DUMP_DIR=$PWD/$r/linedump FORGE_LINE_DUMP_CALL=1 FORGE_LINE_DUMP_NODES=$NODES
+    python3 cold_cfl.py run $r > $r/cold_pair_run_stdout.log 2>&1 ); local rc=$?
+  echo "$r rc=$rc $(date -Is) $(grep -c '\[lineDump\] factor の直前を書いた' $r/forge_run.log)" >> $LOG
+  [ $rc = 0 ] && grep -q '\[lineDump\] factor の直前を書いた' $r/forge_run.log || { echo "$r: 書き出しが無いか失敗 — 止める" >> $LOG; return 1; }
+}
+
+arm() {  # arm <run> <値 3> <fh 0> <bin> <キー>
+  local r=$1 v=$2 fh=$3 bin=$4 key=$5
+  export FORGE_BIN=$bin COLD_ALT_BINARY=$key
+  python3 cold_cfl.py prep $SRC $r --steps 2000 --out 100 --cfl 4 --limiter-ref-from $SRC --line dir --extra res_ro,volume --itj 5 --lvc $v >> $LOG 2>&1 \
+    || { echo "prep $r 失敗 — 止める" >> $LOG; return 1; }
+  rm -f $r/nozzle.msh
+  meshsha $r/nozzle.h5 > $r/MESH_SHA.txt || { echo "$r: 格子のハッシュに失敗 — 止める" >> $LOG; return 1; }
+  ( export FORGE_DUMP_LEDGER=$PWD/$r/ledger.csv FORGE_DUMP_LEDGER_NODES=$LEDGER_NODES FORGE_DUMP_LEDGER_CALLS=200
+    [ "$fh" = 1 ] && export FORGE_DIAG_FACE_H_DOUBLE=1; python3 cold_cfl.py run $r > $r/cold_pair_run_stdout.log 2>&1 ); local rc=$?
+  local nan=$(grep -m1 -o "Non-finite value detected in '[A-Za-z0-9_]*' at step [0-9]*" $r/forge_run.log)
+  echo "$r v=$v fh=$fh rc=$rc $(date -Is) last=$(awk -F, '$3=="outer_begin"{s=$1} END{print s}' $r/residual_history.csv 2>/dev/null) ${nan:-有限}" >> $LOG
+  [ -s $r/residual_history.csv ] && grep -q "'lineViscCoupling' in 'time.deltaT': $v" $r/forge_run.log \
+    || { echo "$r: 起動していないか値の表示が違う — 止める" >> $LOG; return 1; }
+  if [ "$fh" = 1 ]; then grep -q "FORGE_DIAG_FACE_H_DOUBLE" $r/forge_run.log || { echo "$r: 切替の表示が無い — 止める" >> $LOG; return 1; }
+  else ! grep -q "FORGE_DIAG_FACE_H_DOUBLE" $r/forge_run.log || { echo "$r: 切替が入っている — 止める" >> $LOG; return 1; }; fi
+  if [ -z "$nan" ] && [ $rc = 0 ]; then
+    ( cd $r && python3 $TOOLS/check_convergence.py . --segment > CONVERGENCE_SEGMENT.txt 2>&1 ); echo "$r check_convergence --segment rc=$?" >> $LOG
+  fi
+}
+
+dump1 run_0564_lvcgeom_old_dump $OLD_BIN fgeom2_fp64 || exit 1
+dump1 run_0565_lvcgeom_new_dump $NEW_BIN fgeom3_fp64 || exit 1
+arm run_0560_lvcgeom_old_a1 3 0 $OLD_BIN fgeom2_fp64 || exit 1
+arm run_0561_lvcgeom_new_b1 3 0 $NEW_BIN fgeom3_fp64 || exit 1
+arm run_0562_lvcgeom_old_a2 3 0 $OLD_BIN fgeom2_fp64 || exit 1
+arm run_0563_lvcgeom_new_b2 3 0 $NEW_BIN fgeom3_fp64 || exit 1
+echo "== 終了 $(date -Is)" >> $LOG
+touch lvcgeom.done
+```
+
+## 参考: `case/45.isobutane_m6_d155/lvcgeom_judge.py`
+
+```
+#!/usr/bin/env python3
+"""値 3・マスク 7 の破綻と LHS の座標の差 (float の座標の差 / double の座標の差) の A/B の判定
+(plan time_integration-line-viscous-jacobian-faceh §6.9、2026-10-10 事前登録)。§6.2 の lvcfh_judge.py と同じ分類・ゲートに、腕ごとのバイナリと介入の成立の確認を足したもの。
+A = 元のセッションの float 化の段 ② の FP64 (LHS は ST(ccx[o]) − ST(ccx[ic]))、B = 段 ③ の FP64 (LHS は ST(±ge_x))。
+
+lvcgeom.sh の run_0560〜0563 (腕) と run_0564・0565 (1 step の書き出し) を読み、
+  (1) 入力のゲート (バイナリ・出発の場・格子の実体・入力ファイル・§6 の期待どおりの設定・起動ログ)、
+  (2) 証拠のゲート (初期場・破綻前の場・res_nan・帳簿・FINITE 側の区間付き収束 VERDICT)、
+  (3) 各 run の分類 (DIVERGED / FINITE / INVALID)
+  (4) 介入の成立 (1 step の書き出しで状態がビット一致し、壁から 0〜15 番目の節点の Kprev・Knext が列ごとの相対差 1e-3 を超えて違う)
+を行い、§6.9 の分岐どおりに判定する。出力は _band_ab/cold_pair/lvcgeom_judge.json (異常でも必ず書く)。
+ゲートの不合格か INVALID の run があれば判定せず、終了コード 1。規則を変えるときは plan §6.9 を先に改訂する。
+"""
+import csv
+import hashlib
+import json
+import math
+import re
+import sys
+import traceback
+from pathlib import Path
+
+import h5py
+import numpy as np
+import yaml
+
+HERE = Path(__file__).resolve().parent
+SHA_OLD = "1b8590e84ece63ae50a05cd2d6934440be5f90cbf7f7723a40cd6776ee7285a1"   # 段 ② の FP64 (~/forge-fgeom2-fp64)
+SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"   # 段 ③ の FP64 (~/forge-fgeom3-fp64)
+# (run, 面エンタルピーの切替 (常に 0)、期待のバイナリ)
+RUNS = {"a1": ("run_0560_lvcgeom_old_a1", 0, SHA_OLD), "b1": ("run_0561_lvcgeom_new_b1", 0, SHA_NEW),
+        "a2": ("run_0562_lvcgeom_old_a2", 0, SHA_OLD), "b2": ("run_0563_lvcgeom_new_b2", 0, SHA_NEW)}
+DUMP_OLD, DUMP_NEW = "run_0564_lvcgeom_old_dump", "run_0565_lvcgeom_new_dump"
+SRC, SRC_RES = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5"
+SRC_SHA16 = "207d39f0e7f4aa03"
+SAME_FILES = ["bcondConfig.yaml", "probe.yaml", "species_meta.yaml", "wall_design.csv", "wall_physical.csv",
+              "target_axis_M.csv", "wall_repr.json", "MESH_QUALITY.txt"]
+REQ_COLS = ["rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega", "rms_roY0", "rms_roY1"]
+CONS = ["ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega", "roY0", "roY1", "P", "T"]
+NSTEP, OUT, LEDGER_CALLS = 2000, 100, 200
+LEDGER_NODES = [int(x) for x in (
+    "1572,1571,1570,1569,1568,1567,1566,1565,1564,1563,1562,1561,1560,1559,1558,1557,4113,4112,4111,4110,4109,4108,4107,4106,"
+    "4105,4104,4103,4102,4101,4100,4099,4098,4960,4959,4958,4957,4956,4955,4954,4953,4952,4951,4950,4949,4948,4947,4946,4945,"
+    "6170,6169,6168,6167,6166,6165,6164,6163,6162,6161,6160,6159,6158,6157,6156,6155,7985,7984,7983,7982,7981,7980,7979,7978,"
+    "7977,7976,7975,7974,7973,7972,7971,7970,198560,198559,198558,198557,198556,198555,198554,198553,198552,198551,198550,"
+    "198549,198548,198547,198546,198545,264263,264262,264261,264260,264259,264258,264257,264256,264255,264254,264253,264252,"
+    "264251,264250,264249,264248").split(",")]
+# §6 の期待の設定 (平坦化したキー → 値)。None は「書いていない」ことを要求する
+EXPECT = {"time/deltaT/cfl": 4.0, "time/deltaT/cfl_pseudo": 4.0, "time/deltaT/implicitRelax": 0.7,
+          "time/deltaT/implicitThermalJacobian": 5, "time/deltaT/lineDtDirectional": 1, "time/deltaT/lineImplicit": 1,
+          "time/deltaT/lineViscCoupling": 3, "time/deltaT/blockDPLUR": 1, "time/deltaT/detectNaN": 1,
+          "time/timeIntegration": 11, "time/nStepInner": 5, "time/last/nStepOuter": NSTEP, "time/outStepInterval": OUT,
+          "time/deltaT/lineDtDirectionalCap": None, "time/deltaT/implicitSolvePrecision": None,
+          "output/extraFields": ["res_ro", "volume"]}
+DELAY = 2.0      # 「遅らせる」の記録の倍率 (判定には使わない)
+
+
+def sha(p):
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+def meshsha(p):
+    h = hashlib.sha256()
+
+    def visit(name, obj):
+        if isinstance(obj, h5py.Dataset):
+            h.update(name.encode())
+            h.update(obj[...].tobytes())
+    with h5py.File(p, "r") as f:
+        f["MESH"].visititems(visit)
+    return h.hexdigest()
+
+
+def flat(d, p=""):
+    out = {}
+    for k, v in d.items():
+        kk = f"{p}/{k}" if p else str(k)
+        out.update(flat(v, kk) if isinstance(v, dict) else {kk: v})
+    return out
+
+
+def cfg(run):
+    return flat(yaml.safe_load((HERE / run / "solverConfig.yaml").read_text()))
+
+
+def read_csv(run):
+    """残差の CSV を厳密に読む。問題は reason に書く (読めた範囲の値も返す)。"""
+    p = HERE / run / "residual_history.csv"
+    if not p.is_file():
+        return None, "残差の CSV が無い"
+    with open(p, newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        return None, "残差の CSV が空"
+    hdr = rows[0]
+    need = ["step", "inner", "phase"] + REQ_COLS
+    if len(set(hdr)) != len(hdr):
+        return None, "ヘッダーに重複がある"
+    miss = [c for c in need if c not in hdr]
+    if miss:
+        return None, f"必須の列が無い {miss}"
+    ix = {c: hdr.index(c) for c in hdr}
+    cols = [c for c in hdr if c.startswith("rms_") and not c.startswith("rms_dq")]
+    outer, dup, broken, nonfin, neg = {}, [], [], None, None
+    for n, r in enumerate(rows[1:], start=2):
+        if len(r) != len(hdr):
+            broken.append(n)
+            continue
+        try:
+            s = int(r[ix["step"]])
+            v = {c: float(r[ix[c]]) for c in cols}
+        except ValueError:
+            broken.append(n)
+            continue
+        if nonfin is None and any(not math.isfinite(x) for x in v.values()):
+            nonfin = s
+        if neg is None and any(math.isfinite(x) and x < 0 for x in v.values()):
+            neg = s
+        if r[ix["phase"]] == "outer_begin":
+            if s in outer:
+                dup.append(s)
+            outer[s] = v
+    return {"outer": outer, "dup": dup, "broken": broken, "first_nonfinite": nonfin, "first_negative": neg, "cols": cols}, None
+
+
+def field_ok(p, require_finite=True):
+    """場を読めるか、保存量・P・T が有限で ρ・P・T が正か。問題を文字列で返す (問題なしなら None)。"""
+    try:
+        with h5py.File(p, "r") as h:
+            bad = {}
+            for v in CONS:
+                a = h["VALUE"][v][...]
+                if require_finite:
+                    n = int(np.sum(~np.isfinite(a))) + (int(np.sum(a <= 0)) if v in ("ro", "P", "T") else 0)
+                    if n:
+                        bad[v] = n
+    except (OSError, KeyError) as e:
+        return f"{p.name} が読めない ({e})"
+    return f"{p.name} に非有限・非正 {bad}" if bad else None
+
+
+def ledger_check(run, last_call):
+    """帳簿のヘッダー・節点の集合・呼び出しの連続 (1〜last_call) を確かめる。問題を返す。"""
+    p = HERE / run / "ledger.csv"
+    if not p.is_file():
+        return "帳簿が無い"
+    nodes, calls = set(), set()
+    with open(p, newline="") as f:
+        rd = csv.reader(f)
+        hdr = next(rd, None)
+        if hdr != ["call", "tag", "node", "field", "value"]:
+            return f"帳簿のヘッダーが違う {hdr}"
+        for r in rd:
+            if len(r) != 5:
+                return "帳簿に列数の違う行がある"
+            calls.add(int(r[0]))
+            nodes.add(int(r[2]))
+    if nodes != set(LEDGER_NODES):
+        return f"帳簿の節点が違う (記録 {len(nodes)}、期待 {len(LEDGER_NODES)})"
+    if calls != set(range(1, last_call + 1)):
+        return f"帳簿の呼び出しが 1〜{last_call} でない (記録 {min(calls, default=None)}〜{max(calls, default=None)}、{len(calls)} 回)"
+    return None
+
+
+def assess(run, fh):
+    """1 本の run の分類と証拠の確認。例外は INVALID に変える。"""
+    d = HERE / run
+    info = {"run": run}
+    try:
+        log = (d / "forge_run.log").read_text(errors="replace")
+        m = re.search(r"Non-finite value detected in '([A-Za-z0-9_]+)' at step (\d+)", log)
+        rc = (d / "RUN_RC").read_text().strip() if (d / "RUN_RC").is_file() else None
+        info.update(run_rc=rc, detectNaN=[m.group(1), int(m.group(2))] if m else None)
+        c, why = read_csv(run)
+        if c is None:
+            return "INVALID", {**info, "why": why}
+        o = c["outer"]
+        info.update(last_step=max(o) if o else None, csv_first_nonfinite=c["first_nonfinite"])
+        if c["broken"] or c["dup"] or c["first_negative"] is not None:
+            return "INVALID", {**info, "why": f"読めない行 {c['broken'][:3]}・重複 {c['dup'][:3]}・負の値 (step {c['first_negative']})"}
+        if sorted(o) != list(range(len(o))):
+            return "INVALID", {**info, "why": "outer_begin の行が 0 から連続していない"}
+        ev = []                                   # 証拠のゲート
+        q = field_ok(d / "res_0.h5")
+        if q:
+            ev.append(f"初期場: {q}")
+        if not (d / "nozzle.h5").is_file():
+            ev.append("格子 (nozzle.h5) が無い")
+        if m or c["first_nonfinite"] is not None:
+            steps = [s for s in (int(m.group(2)) if m else None, c["first_nonfinite"]) if s is not None]
+            n = min(steps)
+            info.update(diverged_step=n, steps_log_csv=[int(m.group(2)) if m else None, c["first_nonfinite"]])
+            for k in range(OUT, n, OUT):          # 破綻より前に保存されるはずの場
+                q = field_ok(d / f"res_{k}.h5")
+                if q:
+                    ev.append(f"破綻前の場: {q}")
+            if m:
+                q = field_ok(d / f"res_nan_{int(m.group(2))}.h5", require_finite=False)
+                if q:
+                    ev.append(f"res_nan: {q}")
+            q = ledger_check(run, min(LEDGER_CALLS, int(m.group(2)) if m else n))
+            if q:
+                ev.append(q)
+            info["evidence_problems"] = ev
+            return ("INVALID", {**info, "why": "証拠の欠け"}) if ev else ("DIVERGED", info)
+        if sorted(o) != list(range(NSTEP)) or rc != "0":
+            return "INVALID", {**info, "why": f"2000 step に届いていないのに非有限が無い (行 {len(o)}、RUN_RC {rc})"}
+        for k in range(OUT, NSTEP + 1, OUT):
+            q = field_ok(d / f"res_{k}.h5")
+            if q:
+                ev.append(q)
+        q = ledger_check(run, LEDGER_CALLS)
+        if q:
+            ev.append(q)
+        seg = d / "CONVERGENCE_SEGMENT.txt"
+        st = seg.read_text(errors="replace") if seg.is_file() else ""
+        mm = re.search(r"->\s*([A-Z][A-Z ]+[A-Z])", st)
+        if not (mm and "判定区間" in st):
+            ev.append("区間付きの収束 VERDICT が無い")
+        else:
+            info["segment_verdict"] = mm.group(1)
+        info["evidence_problems"] = ev
+        return ("INVALID", {**info, "why": "証拠の欠け"}) if ev else ("FINITE", info)
+    except Exception as e:                        # 想定外の入力も理由付きの INVALID にする
+        return "INVALID", {**info, "why": f"例外 {type(e).__name__}: {e}", "trace": traceback.format_exc(limit=3)}
+
+
+def records(run):
+    c, _ = read_csv(run)
+    if c is None:
+        return {}
+    o = c["outer"]
+    steps = sorted(s for s in o if all(math.isfinite(x) for x in o[s].values()))
+    rec = {}
+    for col in c["cols"]:
+        s0 = o[steps[0]][col] if steps else float("nan")
+        if not (s0 > 0):
+            continue
+        vals = [o[s][col] for s in steps]
+        rec[col] = {"max_over_start": max(vals) / s0,
+                    "first_step_over_3x": next((s for s in steps if o[s][col] > 3 * s0), None)}
+        if len(steps) == NSTEP:
+            x = np.arange(NSTEP - 500, NSTEP, dtype=float)
+            rec[col]["tail_slope500"] = float(np.polyfit(x, np.log10([o[int(k)][col] for k in x]), 1)[0] * 500)
+    return rec
+
+
+def pair(A, B):
+    ca, cb = [A[k][0] for k in A], [B[k][0] for k in B]
+    if any(x == "INVALID" for x in ca + cb):
+        return "INVALID", "INVALID の run がある"
+    if any(x == "FINITE" for x in ca):
+        return "帰属不能", "旧 (段 ②) が既知の破綻を再現しない"
+    if all(x == "FINITE" for x in cb):
+        return "支持", "旧 (段 ②) は全部 DIVERGED、新 (段 ③) は全部 FINITE"
+    if all(x == "DIVERGED" for x in cb):
+        sa = max(A[k][1]["diverged_step"] for k in A)
+        sb = [B[k][1]["diverged_step"] for k in B]
+        note = "遅らせる (記録だけ)" if all(s > DELAY * sa for s in sb) else ""
+        return "棄却", f"新でも全部 DIVERGED。新の破綻 step {sb}、旧の最大 {sa} {note}".strip()
+    return "判別不能", "新の run が分かれた"
+
+
+def input_gates():
+    gates = []
+    src_full = sha(HERE / SRC / SRC_RES)
+    gates.append(("出発の場の sha256 が事前に固定した値", src_full.startswith(SRC_SHA16), src_full[:16]))
+    ref_mesh = meshsha(HERE / SRC / "nozzle.h5")
+    first = RUNS["a1"][0]
+    for name, (run, fh, binsha) in RUNS.items():
+        d = HERE / run
+        try:
+            prov = (d / "RUN_PROVENANCE.txt").read_text(errors="replace")
+            gates.append((f"{run}: forge の sha256 が腕のバイナリ", binsha in prov, binsha[:16]))
+            cp = json.loads((d / "COLD_PAIR.json").read_text())
+            gates.append((f"{run}: 出発の場が {SRC}/{SRC_RES}", cp["parent"] == SRC and cp["parent_res"] == SRC_RES and cp["parent_res_sha256"] == src_full,
+                          [cp["parent"], cp["parent_res"], cp["parent_res_sha256"][:16]]))
+            m = meshsha(d / "nozzle.h5")
+            gates.append((f"{run}: 格子の実体が出発 run と同じ", m == ref_mesh and (d / "MESH_SHA.txt").read_text().strip() == m, m[:16]))
+            diff_in = [fn for fn in SAME_FILES if not (d / fn).is_file() or not (HERE / SRC / fn).is_file() or sha(HERE / SRC / fn) != sha(d / fn)]
+            gates.append((f"{run}: 入力ファイルが出発 run と同じ", diff_in == [], diff_in))
+            mq = (d / "MESH_QUALITY.txt").read_text(errors="replace")
+            gates.append((f"{run}: メッシュ品質の VERDICT が PASS", "VERDICT: PASS" in mq, None))
+            c = cfg(run)
+            bad = {k: c.get(k) for k, v in EXPECT.items() if (k in c if v is None else c.get(k) != v)}
+            gates.append((f"{run}: 設定が §6 の期待どおり", bad == {}, bad))
+            dd = sorted(k for k in set(c) | set(cfg(first)) if c.get(k) != cfg(first).get(k))
+            gates.append((f"{run}: 設定が a1 と一致", dd == [], dd))
+            log = (d / "forge_run.log").read_text(errors="replace")
+            gates.append((f"{run}: 起動ログの lineViscCoupling = 3", "'lineViscCoupling' in 'time.deltaT': 3" in log, None))
+            gates.append((f"{run}: 切替の表示 = {fh}", ("FORGE_DIAG_FACE_H_DOUBLE" in log) == bool(fh), None))
+            gates.append((f"{run}: マスクの表示が無い (= 既定 7)", "FORGE_LVC_TERMS=" not in log, None))
+            gates.append((f"{run}: 実効の並びが LAYOUT2", "Thomas の配列の並び: LAYOUT2" in log, None))
+        except Exception as e:
+            gates.append((f"{run}: 入力のゲートを評価できない", False, f"{type(e).__name__}: {e}"))
+    return gates
+
+
+def intervention(rec):
+    """1 step の書き出し (旧・新) で、状態がビット一致し、壁から 0〜15 番目の節点の Kprev・Knext が列ごとの相対差 1e-3 を超えて違うか。"""
+    def dump_arr(run, name):
+        d = HERE / run / "linedump"
+        meta = {l.split()[0]: (int(l.split()[1]), int(l.split()[2])) for l in (d / "meta.txt").read_text().splitlines() if l.strip() and not l.startswith("#")}
+        r, c = meta[name]
+        a = np.fromfile(d / f"{name}.f64", dtype=np.float64)
+        if a.size != r * c:
+            raise ValueError(f"{run}/{name} の大きさ")
+        return a.reshape(r, c)
+    g = []
+    try:
+        for run, binsha in ((DUMP_OLD, SHA_OLD), (DUMP_NEW, SHA_NEW)):
+            prov = (HERE / run / "RUN_PROVENANCE.txt").read_text(errors="replace")
+            g.append((f"{run}: forge の sha256", binsha in prov, binsha[:16]))
+        nlo, nln = dump_arr(DUMP_OLD, "node_line"), dump_arr(DUMP_NEW, "node_line")
+        sto, stn = dump_arr(DUMP_OLD, "state_ro_roU_roe_cp_gamma"), dump_arr(DUMP_NEW, "state_ro_roU_roe_cp_gamma")
+        same_nodes = bool(nlo.size > 0 and np.array_equal(nlo, nln))
+        same_state = bool(sto.shape == stn.shape and np.array_equal(sto.view(np.int64), stn.view(np.int64)))
+        first = {}
+        for k in range(nlo.shape[0]):
+            first.setdefault(int(nlo[k, 1]), k)
+        near = [k for k in range(nlo.shape[0]) if k - first[int(nlo[k, 1])] <= 15]
+        rel, finite = 0.0, True
+        for nm in ("Kprev", "Knext"):
+            ko, kn = dump_arr(DUMP_OLD, nm).reshape(-1, 5, 5), dump_arr(DUMP_NEW, nm).reshape(-1, 5, 5)
+            finite = finite and bool(np.all(np.isfinite(ko)) and np.all(np.isfinite(kn)))
+            for k in near:
+                sc = np.max(np.abs(ko[k]), axis=0)
+                dd = np.max(np.abs(kn[k] - ko[k]), axis=0)
+                rel = max(rel, float(np.max(np.where(sc > 0, dd / np.where(sc > 0, sc, 1.0), 0.0))))
+        iv = {"same_nodes": same_nodes, "same_state_bits": same_state, "finite": finite, "near_wall_nodes": len(near), "near_wall_K_max_rel_diff": rel}
+        rec["intervention"] = iv
+        g.append(("介入: 書き出しの節点と順が同じ", same_nodes, None))
+        g.append(("介入: 旧・新の状態がビット一致 (同じ入力)", same_state, None))
+        g.append(("介入: K が有限", finite, None))
+        g.append(("介入: 壁から 0〜15 番目の節点の K が列ごとの相対差 1e-3 を超えて違う", rel > 1e-3, rel))
+    except Exception as e:
+        g.append(("介入の成立を評価できない", False, f"{type(e).__name__}: {e}"))
+    return g
+
+
+def main():
+    rec = {"plan": "time_integration-line-viscous-jacobian-faceh §6.9"}
+    out = HERE / "_band_ab" / "cold_pair" / "lvcgeom_judge.json"
+    try:
+        gates = input_gates()
+    except Exception as e:
+        gates = [("入力のゲートを評価できない", False, f"{type(e).__name__}: {e}")]
+    gates += intervention(rec)
+    cls = {name: assess(run, fh) for name, (run, fh, binsha) in RUNS.items()}
+    rec["gates"] = [{"check": g[0], "ok": bool(g[1]), "value": g[2]} for g in gates]
+    rec["gates_ok"] = all(g[1] for g in gates)
+    rec["runs"] = {}
+    for name, (run, fh, binsha) in RUNS.items():
+        r = {"class": cls[name][0], **cls[name][1]}
+        if cls[name][0] != "INVALID":
+            r["records"] = records(run)
+        rec["runs"][name] = r
+    invalid = [n for n in RUNS if cls[n][0] == "INVALID"]
+    if not rec["gates_ok"] or invalid:
+        rec["VERDICT"] = f"INVALID (ゲート不合格 {sum(not g[1] for g in gates)} 件、INVALID の run {invalid}): 判定しない"
+    else:
+        v3 = pair({k: cls[k] for k in ("a1", "a2")}, {k: cls[k] for k in ("b1", "b2")})
+        txt = {"支持": "この条件・期間では、LHS の座標の差の丸めを直すだけで非有限化を回避できることを支持 (収束・安定・速さ・B0 への影響は言わない)",
+               "棄却": "この修復だけで十分という仮説を棄却 (精度の不整合の寄与をゼロとは言わない)"}.get(v3[0], v3[0])
+        rec["main_v3"] = {"verdict": v3[0], "detail": v3[1]}
+        rec["VERDICT"] = f"主 (値 3): {v3[0]} — {txt}; {v3[1]}"
+    out.write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str))
+    for g in gates:
+        if not g[1]:
+            print("ゲート不合格:", g[0], g[2])
+    for name in RUNS:
+        r = rec["runs"][name]
+        print(f"{name} {RUNS[name][0]}: {r['class']} step={r.get('diverged_step', r.get('last_step'))} "
+              f"log/csv={r.get('steps_log_csv')} nan={r.get('detectNaN')} {r.get('why', '')} {r.get('evidence_problems', '')}")
+    print(rec["VERDICT"])
+    return 0 if rec["gates_ok"] and not invalid else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+## 参考: `notes/reviews/2026-10-10-lvcaudit-result-diagnose.md`
+
+```
+# codex 諮問 (diagnose): lvcaudit-result
+
+- **brief**: [`notes/reviews/briefs/2026-10-10-lvcaudit-result.md`](../../notes/reviews/briefs/2026-10-10-lvcaudit-result.md)
+- **plan**: [`plans/active/time_integration-line-viscous-jacobian-faceh.md`](../../plans/active/time_integration-line-viscous-jacobian-faceh.md)
+- **date**: 2026-10-10
+- **commit**: `fe878c4b` (feature/faceh-audit-viscjac-close)
+- **codex**: effort `high`, 3.7 min, rc=0
+- **結論**: ?
+- **extra**: `case/45.isobutane_m6_d155/lvcaudit_judge.py`, `solver_density_cuda/tools/line_audit_helper.cpp`
+
+本文は codex の最終メッセージをそのまま転記。結論は**仮説**であり、提案 A/B で確かめる。採否・反映は plan 側 (§5.1 担当列 F の判断欄) に書く。
+
+---
+
+採否表です。コードは直接確認しましたが、`run_0540`〜`0543`・`run_0550`〜`0552` の実データはこの作業ツリーにありません。以下の run 数値は plan §6.8 の記録に基づき、再計測した値ではありません。
+
+| 重大度 | 対象 | 採否・根拠・対案 |
+|---|---|---|
+| Major | 登録の `FAIL` | **採用、原文保存**。C の不一致だけでなく、D の判別不能 3 件と T の不合格も残るため、C の尺度を説明できても総合を `PASS` に読み替えられない。[plan:268](/home/sano/work/forge-faceh/plans/active/time_integration-line-viscous-jacobian-faceh.md:268)。追加調査は別欄に記録する。 |
+| Major | H1「C は相殺によるもので組立の誤りではない」 | **要再検証**。特に「V と音速の相殺」という説明は、`w = nz = 0` ならコードと合わない。音響固有ベクトルの z 成分が零となり、対流 `K[3][3] = S·max(−V, 0)` に簡約される。[共通関数:62](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/block_dplur_jacobian_d.cuh:62)、[同:82](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/block_dplur_jacobian_d.cuh:82)。まず既存記録で `w,nz` と `u·nx,v·ny` を確認する。相殺候補は **V の内積評価**であり、両者が double から外れるだけでは CUDA–host 間の差を説明したことにならない。 |
+| Major | H3「D の 1 ulp 差は FMA で、数値の性質を変えない」 | **コード生成差は仮説として採用、無害という結論は却下**。記録上、通常ビルドの再実行では D が一致し、監査用だけ異なる。これは計装による差を疑う根拠だが、FMA の特定や補正への影響の小ささは未証明。さらに rhs も異なるので、dq の差を D だけに帰属できない。[判定器:369](/home/sano/work/forge-faceh/case/45.isobutane_m6_d155/lvcaudit_judge.py:369)。T の保留を維持する。 |
+| Major | A の意味と次の一手 | **幾何精度の不整合は採用、破綻への因果は要再検証。候補 (a) を推奨**。LHS は座標を ST に落としてから引き、残差は FP64 ビルドで double の座標差を使う。[LHS:1021](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/timeIntegration_d.cu:1021)、[残差:137](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/viscousFlux_d.cu:137)。候補 (b) は対流 Jacobian・粘性 Jacobian・sweep の演算精度まで変えるため、この原因の切り分けには広すぎる。[精度分岐:1902](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/timeIntegration_d.cu:1902)。 |
+| Minor | 元 plan の対象範囲 | **「LHS を対象へ追加してもらう」は不要**。元 plan §4.2a は ISP 0 の LHS が FP64 ビルドでも変わることを明記し、段③に `timeIntegration_d.cu` を含めている。[元 plan:71](/home/sano/work/forge-faceh/plans/active/architecture-float-state-double-geometry.md:71)、[同:141](/home/sano/work/forge-faceh/plans/active/architecture-float-state-double-geometry.md:141)。申し送りは対象追加ではなく、観測と検証条件の共有にする。 |
+| Minor | S の「sweep の有限性も合格」 | **記述補正と検査追加を採用**。`rhs/dqnew/dqold` は存在確認されるが、S の有限性検査の対象に入っていない。[判定器:137](/home/sano/work/forge-faceh/case/45.isobutane_m6_d155/lvcaudit_judge.py:137)、[同:156](/home/sano/work/forge-faceh/case/45.isobutane_m6_d155/lvcaudit_judge.py:156)。同じ NaN は T のビット比較を通ることも確認した。各 sweep の形・有限性を明示的に検査する。今回の記録が非有限だったという指摘ではない。 |
+
+**結論:** 候補 **(a)**、すなわち **LHS の座標差だけを double で引いてから ST に丸める診断切替**を別登録し、値 3・マスク 7 の早期非有限化を回避できるかを確かめる。
+
+**第 1 仮説:** 座標差の量子化による LHS 係数のずれが今回の早期非有限化を支配し、その修復だけで登録期間内の非有限化を回避できる。  
+**確度: 低**。精度不整合の存在はコードで確認できるが、破綻との因果は未確認。
+
+- **根拠:** `timeIntegration_d.cu:1021` の変換順序と、`case/45.isobutane_m6_d155/run_0550_lvcaudit/` の記録。β・κ の差が 1e-3 超の面寄与は 294 件、最大 10.8 %。ただし係数は `δ/dcc` に依存し、ガード非作動時には `S²/|e·S|` となるため、**dcc の長さだけでなく e·S の誤差**として扱う。
+- **反証条件:** 変更後に対象係数の幾何由来の誤差が解消したことを確認しても、変更腕が再実行を含め非有限化するなら、「この修復だけで回避できる」は棄却する。精度不整合の寄与自体をゼロとは結論しない。
+
+**第 2 仮説:** 幾何を修復しても、薄層近似と実残差・境界・分離更新との不整合が残り、破綻する。確度: 中。共通関数自身も実残差の厳密な微分ではなく前処理近似と定義されている。[共通関数:94](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/block_dplur_jacobian_d.cuh:94)。
+
+**第 3 仮説:** C・T の外れには演算順序やコード生成の違いが寄与する。確度: 中。ただし、原因の特定と「無害」の証明は別であり、現時点ではどちらも未完了。
+
+**判別 A/B:** 同じ FP64 バイナリの診断切替で、次の **座標差の評価方法だけ**を変える。
+
+- **A:** `ST(cc[o]) − ST(cc[i])`
+- **B:** `ST(double(cc[o]) − double(cc[i]))`
+
+x・y・z の3成分を一組として切り替え、その後の ST 演算・ガード・面の対象・物性・加算順序は固定する。`β,κ` だけでなく、同じ幾何を使うスカラー対角と熱伝導対角にも一貫して効かせる。ISP 0、値 3、マスク 7、キー 5、方向別 dt、上限なし、CFL 4、緩和 0.7、5 sweep、面エンタルピーの既定評価を固定する。
+
+同じ `run_0183` の保存場から、**各腕2本、最大2000 step、非有限検出で終了**とする。最初の factor で、対象係数の double 参照に対する差が **1e-5 以下**へ減ることを介入の成立条件として登録する。監査ビルドの時間発展を通常経路の代用にせず、変更したバイナリの A 腕で既知の破綻を再現する。
+
+見る量は全残差列の有限性、最初の非有限 step、保存場の有限性・ρ/P/T の正値。収束判定の VERDICT も区間付きで残すが、2000 step 有限を「収束」と呼ばない。
+
+→ **A が2本とも非有限、B が2本とも2000 step 有限:** この条件・期間では座標差修復だけによる回避を支持。  
+→ **A・B がともに2本非有限:** 修復だけで十分という第1仮説を棄却。  
+→ A が再現しない、B の結果が分かれる、係数修復の成立条件を満たさない場合は判別不能。事後延長や閾値変更はしない。
+
+**やらない方がよいこと:** C の許容を広げて元の `FAIL` を消すこと、音速の大きさを根拠に `K[3][3]` の誤差を許容すること、ISP 1 の成功から座標差を原因と断定すること、マスク 5 への退避や既定値変更を同時に行うこと。
+
+**呼び出し側の前提への異議:** B の合格が示すのは「記録された入力から float の式を再現できた」ことであり、その式が実残差に十分整合することではない。また、本線 B0 への影響はスカラー対角だけではない。**キー 5 の熱伝導対角も同じ `δ/dcc` を使う**。[実装:1120](/home/sano/work/forge-faceh/solver_density_cuda/cuda_forge/timeIntegration_d.cu:1120)。
+
+元セッションへの申し送り案:
+
+> FP64 ビルドでも ISP 0 の block DPLUR は、座標を float にしてから差を取ります。case/45 の監査記録では壁法線ライン面の β・κ に最大10.8 %の差がありました。同じ幾何は B0 のスカラー対角とキー5の熱伝導対角にも使われます。元 plan §4.2a・段③の対象には既に含まれています。今回の発散への因果と B0 の収束挙動への影響は未確定です。LHS の座標差だけを変える診断結果を共有します。残差の固定状態での不変性と、LHS・更新履歴の変化を分けて検証してください。
+
+**不足情報:** `run_0550`〜`0552` の `linedump`・判定 JSON・ビルド条件、および登録外の `convk_probe.cpp` が必要。特に不一致125件の `w,nz,V` と内積の各項がないため、C の相殺機構は確定できない。
+
+ファイル変更・forge 起動は行っていません。**plan 未反映**。提案と採否の反映は、依頼どおり呼び出し側が行う前提です。
+```
+
+## 出力形式
+
+1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。
+2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。
+3. 推奨 (1 つに絞る)。
+4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。

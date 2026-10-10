@@ -1,3 +1,99 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 診断・設計判断の諮問 (stage = diagnose)
+
+あなたは forge の**診断・設計判断係**である。呼び出し側は実装と run を進めている別のモデル (Claude) で、
+**もっともらしい真因に飛びつく前に**あなたに諮っている。仕事は手を動かすことではなく、**次の一手を 1 つに絞ること**。
+
+### 前提
+- あなたは呼び出し側の会話を見ていない。下のブリーフと、自分で読んだファイルだけが根拠になる。
+  足りなければ推測で埋めずに「何が足りないか」を返す。
+- ブリーフは「観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説」に分かれて渡される約束である。
+  **観測事実と呼び出し側の解釈が混ざっていたら、まず分け直す**。呼び出し側の要約より、run の数値・コード・
+  設定ファイルを自分で確かめた内容を優先する。
+- forge を起動しない。`python3` による `residual_history.csv` / `res_*.h5` の読み取りは**統計量だけ**を出す
+  (全量ダンプ・長いログ全文をコンテキストに流さない。`*.log`・`*.vtu`・`plans/README.md` は読まない)。
+
+### 診断の作法
+1. **「除外済み」というラベルを信用せず、潰した証拠を確認する** (run パス・設定差分・判定区間・VERDICT)。
+   証拠が足りない・判定期間が短い・変えた設定が実際には効いていない (YAML の階層違い等) なら**候補へ戻す**。
+   証拠が十分な候補は出し直さない。
+2. **症状と原因を分ける**。`detectNaN` が指す変数は結果であって原因ではない (EOS 床 → 負密度 → 圧力暴走 → ω の実績)。
+   後処理のアーチファクト (2 列混在の抽出、`centCoords` の置換、ソルバ `ypls` の退化) を先に疑う。
+3. **このリポジトリで繰り返された真因**を照合する: 投入設定の不整合 (IC と BC、亜音速に超音速 BC)、
+   押し出し 2 ノード spanwise、float32 桁落ち (双対幾何・r 重み)、stale build、cross-mesh IC の基底不一致、
+   絶対値のゼロ割ガード、境界ノードの凍結、YAML キーの階層違いで黙って無視される設定。
+4. 仮説は**確度順に最大 3 つ**。第 1 仮説には根拠を `ファイル:行` か run の数値で付ける。示せないものは「未確認」と明記。
+5. **判別する A/B を 1 つだけ**提案する。安く短く回せて、結果がどちらに出ても仮説が 1 つ消えるもの。
+   「A なら仮説 1、B なら仮説 2」を先に書く (結果を見てから解釈を作らない)。
+6. 少数点の一致・短い窓の値・未収束のトランジェント同士の比較を根拠にしない。
+
+### 設計判断 (plan §4・§6、codex 指摘の採否、result 段の解釈) を諮られたとき
+- 採否は指摘ごとに「採用 / 却下 / 要再検証」と理由。根拠が示されていない指摘は自分で該当箇所を読んでから判定する。
+- 検証計画は「何が出たら方針が誤りと言えるか」が定量的に書かれているかを見る。
+- 既定値の変更・opt-in 機能の削除は、plan の処置欄とユーザ決定の履歴を確認してから判断する
+  (「opt-in 残置」は削除対象でない)。
+- result 段の解釈は、主張ごとに根拠 run・判定ツールの VERDICT・判定区間が揃っているかを確かめる
+  (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
+
+あなたの結論は**仮説**であって確定ではない。呼び出し側はこの A/B を回して確かめ、plan への反映も呼び出し側が行う。
+
+## ブリーフ (`notes/reviews/briefs/2026-10-10-lvcaudit-result.md`)
+
+# 諮問ブリーフ: 製品の経路の照合 (plan time_integration-line-viscous-jacobian-faceh §6.7) の結果の解釈と次の一手 (2026-10-10)
+
+日付 2026-10-10。諮問先 codex (diagnose)。AGENTS.md の条件 3 (事前登録の比較が FAIL)・7 (result の解釈を確定する前)・1 (次の §6 を書く)。
+plan: `plans/active/time_integration-line-viscous-jacobian-faceh.md` §6.7 (事前登録)・§6.8 (結果)。コード: `solver_density_cuda/cuda_forge/timeIntegration_d.cu` (監査の塊)、
+`solver_density_cuda/tools/line_audit_helper.cpp`、`case/45.isobutane_m6_d155/lvcaudit_judge.py` (commit 732270b4・fe878c4b で採取の前に commit)。
+
+## 観測事実
+
+§6.8 の表のとおり。要点:
+- VERDICT: `FAIL (最初に外れる段 C); 対照とのビット一致が成り立たないので、通常の経路への結論は保留`。S・G・B は不一致 0 (B は 47645 項目)。D は不一致 0・判別不能 3。
+- C の不一致 125 はすべて対流の K の `K[3][3]` (2D の z 方向)。登録外の調査で、double に対して CUDA も host の float も数百 ulp ずれる (大きな項の相殺)。
+- T: D が監査用と通常のビルドで最大 9.5e-7 (float の 1 ulp) 違う。Kprev・Knext・状態・dt・フラグ・スカラーの粘性の和は再実行どうしも監査用もビット一致。rhs は再実行でも揺れ、監査用との差はその範囲。dq は D の差の結果として違う。
+- A: 壁法線のライン面 294 面で β・κ が double の幾何の係数と 1e-3 以上違う。最大 10.8 %、壁から 0〜15 番目の節点で 3〜11 %、52 番目まで 1e-3 超。
+  原因の経路は ISP 0 で dcc を float にした座標の差で作ること (`timeIntegration_d.cu` の粘性の幾何)。例: 壁の隣の dcc が double 2.679e-8・float 3.003e-8 (y の ulp 7.5e-9)。
+  B が合格しているので、製品は float の式どおりに計算していて、ずれは float の座標から来る (式の誤りではない)。
+- この dcc は、値 0 (本線 B0) のスカラーの粘性の対角 2ν·δ/dcc にも同じ幾何で使われている。残差 (FP64 ビルドの `viscousFlux_d.cu`) は double の座標の差を使う。
+- 既往: 値 3・マスク 7 は case/45 の方向別 dt で約 122 step で非有限 (§6.2)。共通関数は多倍長の参照で全列合格 (§6.6)。
+
+## 期待値と出典
+
+- §6.7 の分岐: B・C・D に不一致 → FAIL。T が成り立たない → 通常の経路への結論は保留。A は別に書き、再現の PASS と両立、破綻の原因の断定にも係数の生成の問題の除外にも使わない。
+- 元の float 化の plan (`architecture-float-state-double-geometry`、元のセッションの担当) は、残差側の幾何を double の差のベクトルにする段を進めている (stage 1: `ge_x` 等)。LHS (陰解法の係数) の幾何はその対象か、私は確かめていない。
+
+## 仮説 (呼び出し側の読み)
+
+- H1: 登録の FAIL (段 C) は、対流の K の float の相殺に対して許容の尺度 (結果の列の大きさ) を誤って選んだことによるもので、製品の組立の誤りではない。
+- H2: A の壁際の β・κ の最大 11 % のずれ (面ごとにばらつく) は、薄層の熱伝導・粘性の K と D を壁際で実残差と食い違わせる。値 3・マスク 7 の破綻に寄与しているかもしれない (未確認)。
+- H3: T の D の 1 ulp の違いは、監査の書き込みがコンパイラの命令の組み方 (FMA の縮約など) を変えたもので、数値の性質は変えない。
+
+## 問い
+
+1. 登録の FAIL と、登録外の調査の記録の書き方。H1・H3 はどこまで言えるか。
+2. A の発見 (壁際の LHS の係数が float の座標で最大 11 % ずれる) の意味と、次の一手。候補:
+   (a) LHS の幾何の差だけを double の座標で取る診断の切替 (例: `dcc_x = ST(ccx[o] − ccx[ic])` を double で引いてから ST へ、既定はビット不変) を足し、値 3・マスク 7 で破綻が止まるかの A/B (cuda_forge の数値の変更、別に登録)。
+   (b) `implicitSolvePrecision 1` (LHS 全体を double) で値 3・マスク 7 を回す A/B (コードは変えない、精度をまとめて変える)。
+   (c) 先に元のセッションの float 化の plan に申し送り、LHS の幾何もその対象に入れてもらう。
+   長い run を使わずに、筋のいい手法 (全部入り) に向けて判断に要る最小の組を示してほしい。
+3. 値 0 (本線) のスカラーの対角も同じ幾何を使う。本線への影響をどう扱うべきか (元のセッションへの申し送りの文面)。
+
+## 関連 plan 全文 (`plans/active/time_integration-line-viscous-jacobian-faceh.md`)
+
+```markdown
 # 熱伝導の近傍 K を入れたライン粘性 Jacobian の破綻は、面エンタルピーの float の評価が要るか (粘性ヤコビアン plan の再開)
 
 ## メタ
@@ -60,8 +156,7 @@
 | 2 | 台本・判定の実装と主の 4 本の run | `lvcfh.sh`・`lvcfh_judge.py`、case/45 の `run_0540`〜`run_0543`。合格条件: 判定器のゲートが全部通り INVALID の run が無い。**完了 (2026-10-10、§6.2)**: ゲート 45 項目合格、INVALID なし | O |
 | 3 | 結果の解釈と次の一手 | §6 の分岐で判定し、諮問の後に §6.2 へ。**判断: 2026-10-10 codex 諮問 — 棄却 (A・B とも 4 本 DIVERGED) を「切替だけでは回避できない」に限って記録。精度依存の不在・同じ機構・増幅率の同一は主張しない。次は U-J の列ごと・壁拘束の照合 (#4)。値 2 の対は回さない** | F |
 | 4 | U-J の列ごと・壁拘束の照合 (**完了 2026-10-10、§6.3〜§6.6**: §6.3 は FAIL (原文保存)、§6.5 の多倍長の参照で PASS・丸めの仮説を支持。判断: codex 諮問 — 限定付きの PASS、第 2 仮説はこの範囲で退く) | 諮問の判別 A/B: 同じ状態・同じ薄層の流束モデルで、A = 製品の共通関数 `accumulate_thinlayer_visc_jacobian` の D/K、B = 独立な流束の実装の中心差分。host 上の 200 組と短いライン。列ごとに正規化して double で相対誤差 ≤ 1e-6、差分幅 h と h/2 の再現を確かめ、零列は事前に固定した無次元の絶対誤差、解像できない列は判別不能。両向きの面・異なる密度・高速流・速度固定・温度固定を含め、壁拘束は自由度を消去した系でも照合。零空間 ≤ 1e-12・壁温拘束 ≤ 1e-12・短いラインの解の差 ≤ 1e-10 を維持。触るファイルは `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (試験だけ、ソルバは変えない)。全列で整合 → 第 1 仮説 (実残差・境界・分離更新との不整合) の確認へ、再現する不一致 → 第 2 仮説 (小さい列・面の向き・壁拘束の実装の不整合) を優先 | F |
-| 5 | 製品の経路の照合 (**ユーザの選択 2026-10-10「1」、§6.7 に事前登録**。**完了 2026-10-10 §6.8: 登録の VERDICT は FAIL (段 C、対流の K の相殺)・T 保留、A で壁際の LHS の β・κ が float の座標で最大 10.8 % ずれる**) | 諮問 (2026-10-10 uj-mp-result) の判別 A/B: 同じ凍結状態から、A = CUDA の実際の組立、B = 元の入力から host で独立に組む参照。`run_0183` の res_100000 から値 3・マスク 7・ISP 0 の新しい診断の run で 1 step (最初の factor と 5 sweep)、既存の 5 本のラインを全節点・両向きで採取 (壁・軸・内部を含む)。書き出しに足すもの (cuda_forge の出力だけの変更、既定はビット不変): 面の番号・両端・`line_prev/next`・生の座標・面積ベクトル・`fx`・両端の速度・`vis_lam`・`vis_turb`・`thermCond`・`Prt`・実効のフラグと精度・実際に渡した β・κ・法線・f_i・状態・薄層の各寄与・拘束の前後の D/K。照合は二段: 元の入力から係数を独立に計算 (誤った β を共有して合格するのを防ぐ) → 製品の `ST = float`・加算の順序・格納の変換を再現して面の寄与から最終の行列まで。接続・格納先・拘束のフラグは完全一致、数値は列ごとに尺度化し float の丸めを含む許容を採取の前に登録。注目点: ISP 0 では `dcc` を float にした座標の差で作る (`timeIntegration_d.cu` 952 行付近) が、残差は double の座標 (FP64 ビルド)。冷却壁の第一層は float32 の座標で数 ulp。整合すれば第 2 段 (実残差の応答、9 評価・幅の再現 ≤ 1 %・ノイズ ≤ 1e-3) へ | F |
-| 6 | LHS の座標の差だけを変える A/B (§6.9、ユーザ 2026-10-10「すすめてもらって OK」) | 元のセッションの段 ② (float の座標の差) と段 ③ (double の座標の差 ge_x) の FP64 のバイナリで、値 3・マスク 7 を各 2 本・最大 2000 step。先に 1 step の書き出し 3 本 (旧・新・旧の再実行) と事前のゲート `lvcgeom_pregate.py` (入力の一致・残差の不変・係数の水準での介入の成立、plan-5 レビューの採用) を回し、PASS のときだけ腕へ。台本 `lvcgeom.sh`、本判定 `lvcgeom_judge.py`。合格条件: 事前のゲートが PASS、本判定のゲートが全部通る、§6.9 の分岐で判定 | F |
+| 5 | 製品の経路の照合 (**ユーザの選択 2026-10-10「1」、§6.7 に事前登録**。順序: 記録・判定器の確認 (済) → 同じ版の監査の有無の 2 本のビルドと採取 → 判定) | 諮問 (2026-10-10 uj-mp-result) の判別 A/B: 同じ凍結状態から、A = CUDA の実際の組立、B = 元の入力から host で独立に組む参照。`run_0183` の res_100000 から値 3・マスク 7・ISP 0 の新しい診断の run で 1 step (最初の factor と 5 sweep)、既存の 5 本のラインを全節点・両向きで採取 (壁・軸・内部を含む)。書き出しに足すもの (cuda_forge の出力だけの変更、既定はビット不変): 面の番号・両端・`line_prev/next`・生の座標・面積ベクトル・`fx`・両端の速度・`vis_lam`・`vis_turb`・`thermCond`・`Prt`・実効のフラグと精度・実際に渡した β・κ・法線・f_i・状態・薄層の各寄与・拘束の前後の D/K。照合は二段: 元の入力から係数を独立に計算 (誤った β を共有して合格するのを防ぐ) → 製品の `ST = float`・加算の順序・格納の変換を再現して面の寄与から最終の行列まで。接続・格納先・拘束のフラグは完全一致、数値は列ごとに尺度化し float の丸めを含む許容を採取の前に登録。注目点: ISP 0 では `dcc` を float にした座標の差で作る (`timeIntegration_d.cu` 952 行付近) が、残差は double の座標 (FP64 ビルド)。冷却壁の第一層は float32 の座標で数 ulp。整合すれば第 2 段 (実残差の応答、9 評価・幅の再現 ≤ 1 %・ノイズ ≤ 1e-3) へ | F |
 
 ## 6. 検証 (事前登録、2026-10-10、run の前。codex 諮問 [記録](../../notes/reviews/2026-10-10-lvc-faceh-design-diagnose.md) の採否を反映)
 
@@ -283,62 +378,7 @@
 - **登録外の調査 (判定には使わない、AWS `~/faceh_probe/convk_probe.cpp`)**: C の不一致 125 はすべて対流の K の `K[3][3]` (2D の z 方向、値 2e-8〜6e-6) で、
   壁際の V ≈ 0 (−5e-5〜−5e-3) と音速 370〜770 の大きな項の相殺で計算される。double を基準にすると、CUDA も host の float も数百 ulp ずれる (最大で CUDA 25.8 万 ulp、host 58.9 万 ulp)。
   外れは float の相殺の大きさで、製品の経路と host の再現の食い違いを示すものではない、と読める。結果の列の大きさを ulp の尺度にした登録の選び方が、この関数には合っていなかった。
-- **解釈 (codex 諮問 [記録](../../notes/reviews/2026-10-10-lvcaudit-result-diagnose.md) を採用)**:
-  - 登録の FAIL は原文のまま保存する。C の尺度を説明できても、D の判別不能 3 と T の外れが残るので PASS に読み替えない。
-  - C の機構の説明を訂正する: 2D (w = nz = 0) では対流の `K[3][3]` は S·max(−V, 0) に簡約されるので、相殺が起きるのは「V と音速」ではなく **V の内積 (u·nx + v·ny) の評価**である。
-    CUDA と host が double から外れることだけでは、CUDA と host の差を説明したことにならない。C が組立の誤りではないという H1 は要再検証のまま残す。
-  - T の D の 1 ulp は、監査の書き込みでコードの生成が変わったという仮説にとどめ、「無害」とは言わない (rhs も違うので dq の差を D だけに帰さない)。通常の経路への結論は保留のまま。
-  - A (壁際の LHS の係数の float の座標による最大 10.8 % のずれ) は、幾何の精度の不整合として採用する。破綻への因果は未確認。係数は δ/dcc = S²/|e·S| に依存するので、dcc の長さだけでなく e·S の誤差として扱う。
-    同じ幾何は B0 のスカラーの対角と、**キー 5 の熱伝導の対角**にも使われる。
-  - 判定器の小さな抜け: S は sweep の配列 (rhs・dq) の存在だけを見て有限性を検査していなかった。今回の記録に非有限は無いが、次から検査する。
-  - 元のセッションの float 化の plan (§4.2a・段 ③) は、ISP 0 の LHS の座標の差を既に対象にしている。申し送りは対象の追加ではなく、観測と検証条件の共有にする。
-
-### 6.9 事前登録: LHS の座標の差だけを変える A/B (§5.1 #6、2026-10-10、回す前。諮問の判別 A/B を、元のセッションの段 ②・段 ③ のバイナリの組で行う)
-
-**目的**: 値 3・マスク 7 の早期の非有限化 (§6.2) が、ISP 0 の LHS の座標の差の float の丸め (§6.8 の A) を直すだけで避けられるかを確かめる。
-
-- **腕**: A = 元のセッションの float 化の段 ② の FP64 のバイナリ (`~/forge-fgeom2-fp64`、sha256 1b8590e8…)。block DPLUR の LHS は `ST(ccx[o]) − ST(ccx[ic])` (952 行)。
-  B = 段 ③ の FP64 のバイナリ (`~/forge-fgeom3-fp64`、sha256 129de3f4…)。LHS は `ST(±ge_x[ip])` (965 行)。ge_x は double の座標の差 (FP64 では double の引き算 1 回)。
-  元のセッションの記録 (float 化の plan §6.7、`run_0419`) は**段 ③ のバイナリの中で旧式・新式の面の流束を比べたもの**で (粘性 6,881,028・スカラー 2,293,676 値がビット一致)、
-  別のバイナリの間のビット一致も、今回の入力 (`run_0183` の res_100000) での一致も示していない (plan-5 レビュー M1 で訂正)。ソースの差分 (2026-10-10 に AWS 上で確認) では、
-  段 ③ の変更は粘性流束・k/ω と化学種の拡散・受動スカラーの FCT・陰解法の座標の差を、double の座標から 1 回で引いた e (`ge_*`、`variables.cpp` の `fillGeomDiffE`) に置き換えるだけで、
-  FP64 では `flow_float` = double なので残差の側は同じ double の引き算になる。float に落とすのは block DPLUR の 963 行 (`ST(±ge)`) だけ。`setDT_d.cu` と `block_dplur_jacobian_d.cuh` は同一。
-  残差の不変は、この記述に頼らず下の事前のゲートで測る。
-  **諮問は同じバイナリに切替を足す形を勧めた**が、段 ③ はこの変更がそのまま本番に入る実装なので、本番の変更そのものの効果を見るためにこの組を使う。
-  バイナリの組なので、段 ③ で LHS 以外に入った変更 (スカラー版・前処理版の DPLUR など、この構成では通らない経路) も含む。それは残差のビット一致で押さえる範囲に限って許す。
-- **設定**: §6.2 の a と同じ (`run_0183` の res_100000、値 3・マスク 7・キー 5・方向別・上限なし・cfl 4・緩和 0.7・sweep 5・ISP 0・面エンタルピーは既定)。最大 2000 step、場は 100 ごと。
-  各腕 2 本を A1・B1・A2・B2 の順に逐次。run は case/45 の `run_0560_lvcgeom_old_a1`・`run_0561_lvcgeom_new_b1`・`run_0562_lvcgeom_old_a2`・`run_0563_lvcgeom_new_b2`
-  (AWS の自分の作業ツリー `~/forge-faceh-audit` の case/45、`run_0183` はリンク)。台本 `lvcgeom.sh`、本判定 `lvcgeom_judge.py` (§6.2 の判定器 `lvcfh_judge.py` と同じ分類・ゲートに、腕ごとのバイナリの sha256 と、事前のゲートの記録が PASS であることを足したもの)。
-- **事前のゲート (腕の前に回し、PASS のときだけ腕へ。plan-5 レビュー M1〜M3・m4 の採用)**: 同じ状態から 1 step のライン行列の書き出しを 3 本
-  (`run_0564_lvcgeom_old_dump` = 段 ②、`run_0565_lvcgeom_new_dump` = 段 ③、`run_0566_lvcgeom_old_dump2` = 段 ② の再実行。5 本のライン、出力に残差の場
-  `res_ro`・`res_roUx`・`res_roUy`・`res_roe`・`res_roK`・`res_roOmega`・(あれば `res_roY0`・`res_roY1`) を足す)。判定 `lvcgeom_pregate.py` (終了コード 0 = PASS、1 = INVALID、2 = 判別不能):
-  - **I 入力** (M3): 各書き出しのバイナリの sha256・出発の場・格子の実体・入力ファイル・設定 (§6.2 の a と同じ。差は step 数・出力の間隔・`extraFields` だけ)・起動ログ (値 3・マスクの表示なし・LAYOUT2・面エンタルピーの切替なし)・終了コード、
-    書き出しの配列の形 (`N×2`・`N×7`・`N×25` など)・要求した 5 節点と 5 本のライン・重複なし・有限・ρ, c_p, dt, 体積 > 0・γ > 1。
-    3 本の書き出しの状態・dt・拘束のフラグ・節点がビット一致し、出力 step 0 の全データセット (保存量・k・ω・組成・μ・壁距離) もビット一致 (同じ入力)。
-    さらに §6.8 の監査の記録 (`run_0550_lvcaudit`、同じ状態・同じ 605 節点) とも状態・dt・フラグ・節点がビット一致 (下の V の前提)。
-    1 step の出力の `res_ro` が書き出しの `rhs_s0` の行 0 と float で一致すること (出力の残差が出発の状態の残差であること。`run_0551` で確認済み) も確かめる。
-  - **R 残差の不変** (M1): 出発の状態の残差 (上の 6〜8 場の全節点) と `rhs_s0` (ライン上の節点・5 行) について、旧と旧の再実行がビット一致なら新もビット一致を要求し、
-    そうでなければ max|新 − 旧| ≤ 3 × max|旧の再実行 − 旧| を要求する。
-  - **V 係数の水準での介入の成立** (M2): 監査の記録の面ごとの生の入力 (double の座標・面積ベクトル・物性・状態) から、製品の式を float32 で組み直す。
-    (0) 旧の式 (座標を float にしてから引く) の再計算が、記録された GPU の dcc・dds・δ・粘性の対角・β・κ・cfac と ≤ 8 ulp (この再計算の式の検証。2026-10-10 の試行で最大 4 ulp)、
-    (a) 新の式 (double の差を float に 1 回丸める) のライン面の β・κ が、double の参照 μ_f·|S|²/|e·S| と相対 ≤ 1e-5 (諮問の成立条件。試行で最大 3.1e-7)、
-    (b) 書き出しの薄層の K の変化 (新 − 旧) が、共通関数で組んだ Kv(新) − Kv(旧) と要素ごとに ≤ 64 ulp (Kv の列の大きさで尺度化。拘束の行は変化 0)、
-    (c) 書き出しの D の変化 (新 − 旧) が、`line_audit_helper` で製品と同じ順序の float の加算を時間項の後から連ねた D(新) − D(旧) と要素ごとに ≤ 64 ulp
-    (D・面の途中の和の大きさで尺度化。拘束の行は変化 0)。(b)(c) は薄層の D・値 3 のスカラーの対角・ライン外のキー 5 の熱伝導の対角 (枝 3) をすべて含む。
-    試行 (旧の記録を新とみなした場合) では、予測される変化が 64 ulp を超える要素が D で 2232・K で 5759 あり、介入が入っていなければ (b)(c) は外れる。
-  - K の相対差 (壁際) は補助の記録だけにし、成立条件にしない (plan-5 レビュー M2: K の差は向きも由来も見ない)。
-  - 分類: 入力・証拠の不備は INVALID、正常な証拠で R か V が外れたら判別不能。どちらでも腕は回さない (台本が止まる)。
-    台本は `lvcgeom.sh dumps` (書き出しと事前のゲート) と `lvcgeom.sh arms` (記録が PASS のときだけ腕) に分けて呼べる。事前のゲートの規則・閾値は書き出しを見た後に変えない
-    (コードの不具合で評価できなかったときは、規則を変えずに直したことを §6.10 に書く)。
-- **分類と分岐** (§6.2 と同じ): DIVERGED (detectNaN か残差の非有限) / FINITE (2000 step、全行が有限・非負、100 step ごとの場の保存量・P・T が有限で ρ・P・T が正) / INVALID。
-  1. A が 2 本とも DIVERGED、B が 2 本とも FINITE → この条件・期間では、LHS の座標の差の丸めを直すだけで非有限化を回避できることを支持。
-  2. A・B とも 2 本とも DIVERGED → 「この修復だけで十分」を棄却 (精度の不整合の寄与をゼロとは言わない)。
-  3. A のどちらかが FINITE → 既知の破綻を再現しないので帰属不能。B が分かれる → 判別不能。事前のゲートが外れる → 腕を回さず判別不能 (INVALID なら証拠の不備として記録)。
-- **ゲート**: 腕ごとのバイナリの sha256、出発の場の sha256 (207d39f0…)、設定が §6.2 の a と同じ (値 3・キー 5・方向別・上限なし・cfl 4・ISP なし)、起動ログの値 3・`FORGE_LVC_TERMS` の表示なし・LAYOUT2・
-  面エンタルピーの切替の表示なし、必須の残差の列・全行の有限・非負、終了コード。
-- **言えること・言えないこと**: 支持でも「この条件・2000 step で非有限化を避けた」まで。収束・安定・速さ・B0 (値 0) への影響は言わない。
-  2000 step 有限を「収束」と呼ばない。`check_convergence --segment` の VERDICT は FINITE の run の記録として残す。
-- **やらないこと**: 事後の延長・閾値の変更、マスク 5 への退避や既定の変更を同時に行うこと、ISP 1 の結果から座標の差を原因と断定すること。
+- 解釈は上位に諮ってから確定する (§6.1 の諮問の行)。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -352,8 +392,6 @@
 | plan (§6.5 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-3.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-3.md) | GO-with-changes, C0/M3/m3 | 全件採用 (根拠の箇所を確かめ、人工入力で確認): M1 基準の Q・差分幅・方向の刻みを double で作って A と B で共通にし B は持ち上げて使う、M2 η の非有限を「差分が非有限」にし、§6.5 では非有限を 1 % の枠から外す、M3 総合の VERDICT と旧不一致 13 列ごとの原因の判定を分け、1 回の実行で A と B を同じ列で計算、m4 ulp を隣の表現可能な値との差に (多倍長は比まで多倍長)、m5 引数の重複・不正な --eta を拒む、m6 全列を %.17g で A・B の η の前後の分類つきで書き出し書き込みの失敗を検出 |
 | 諮問 (§6.5 の結果と次の一手) | 2026-10-10 | [2026-10-10-uj-mp-result-diagnose.md](../../notes/reviews/2026-10-10-uj-mp-result-diagnose.md) | 限定付きの PASS と丸めの仮説は採用、Major 2 (既存の書き出しだけでは製品の経路を照合できない、η だけでは実残差の方向微分を解像できない)・Minor 2 (η の非有限の優先順、η の下限の訂正) | 全件採用: §6.6 に限定付きの解釈と訂正、試験の η の扱いを修正 (記録と完全一致を確認)、§5.1 #5 に製品の経路の照合の組み方を記録 (着手はユーザの判断の後) |
 | plan (§6.7 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-4.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-4.md) | GO-with-changes, C0/M5/m2 | 全件採用 (根拠の箇所を確かめ、判定器を人工入力で確認): M1 採取のゲート (設定・型の幅・sha256・5 本のライン・sweep・有限性) を足し、空や NaN は INVALID、M2 接続を向きごとに 1 面・往復の面で確かめ、速度/温度固定のフラグと隣の状態を元の配列から独立に照合、M3 ライン外の面・軸対称・時間項の係数も float で再現 (層流 μ はスカラー側 `cfg.visc`)、M4 差ではなく面の前後の D を記録し、製品と同じ順序の float の加算を host で再現、許容は ulp で 3 段、M5 同じソースで監査の有無だけが違う 2 本をビット一致で対照に、m6 A の分類を大きさだけの名前に、結論を対象の係数に限り再現の PASS と両立と明記、m7 §2・§7 を改訂 |
-| 諮問 (§6.7 の結果) | 2026-10-10 | [2026-10-10-lvcaudit-result-diagnose.md](../../notes/reviews/2026-10-10-lvcaudit-result-diagnose.md) | FAIL は原文保存、H1 (C は相殺) は要再検証 (相殺は V の内積)、H3 (D の 1 ulp は無害) は却下、A の幾何の不整合は採用・因果は未確認、次は (a) LHS の座標の差だけの A/B、Major 4・Minor 2 | 全件採用し §6.8 に記録。(a) は、諮問の勧めた同じバイナリの切替ではなく、元のセッションの段 ②・段 ③ の FP64 のバイナリの組で行う (段 ③ が本番に入る変更そのもの、FP64 の残差はビット一致) — 理由と範囲を §6.9 に書き、plan 段で点検を受ける |
-| plan (§6.9 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-5.md) | GO-with-changes, C0/M3/m1 | 全件採用 (段 ②・段 ③ のバイナリの組は維持): M1 `run_0419` の記述を「段 ③ の中の旧式・新式の比較」に訂正し、今回と同じ凍結入力での残差の不変 (旧の再実行で揺れを測り、ビット一致か 3 倍以内) を事前のゲートに、M2 介入の成立を K の差から係数の水準へ (新の β・κ が double の参照と ≤ 1e-5、K・D の変化が係数の変更の再現と ≤ 64 ulp、旧の式の再計算で式自体を検証)、K の差は補助の記録に、M3 書き出しにも共通の入力のゲート (設定・格子・出発の場・形・5 節点・有限・正値、状態・dt・フラグ・出力 step 0 の全場のビット一致)、m4 事前のゲートを腕の前に回し PASS のときだけ腕へ、INVALID と判別不能を分ける。実装は `lvcgeom_pregate.py`・`lvcgeom.sh`・`lvcgeom_judge.py` |
 
 ## 7. 影響範囲
 
@@ -366,3 +404,596 @@
 - 2026-10-10: 設計の諮問と codex plan 段を全件採用して in_progress (§1・§4・§6 を改訂、判定器を書き直し)。主の 4 本 (`run_0540`〜`run_0543`) を投入する。
 - 2026-10-10: 主の 4 本 (`run_0540`〜`run_0543`) を回し、VERDICT 棄却 (§6.2)。codex 諮問を全件採用し、次は U-J の列ごと・壁拘束の照合 (§5.1 #4、未着手)。
 - 2026-10-10: U-J の列ごとの照合 (§6.3 は FAIL・原文保存、§6.5 の多倍長の参照で PASS・丸めの仮説を支持、§6.6)。codex 諮問を採用し、次は製品の経路の照合 (§5.1 #5、未着手)。
+```
+
+## 参考: `case/45.isobutane_m6_d155/lvcaudit_judge.py`
+
+```
+#!/usr/bin/env python3
+"""製品の経路の照合 (plan time_integration-line-viscous-jacobian-faceh §6.7、2026-10-10 事前登録、codex plan-4 の採否を反映) の判定。
+
+監査用のビルド (-DFORGE_LINE_AUDIT) が FORGE_LINE_DUMP_DIR に書いた記録と、同じソース・同じコンパイル条件で監査なしの通常のビルドの書き出し (対照) を読み、
+  S  採取のゲート: 型の幅 (FP64)・実効の設定・バイナリと出発の場の sha256・5 本のラインの全節点・sweep 0〜4・必須の配列の形と有限性・正値
+  G  構造: 面の接続 (lp/ln の向きごとにちょうど 1 面、往復の対応)・ライン上の並び・拘束のフラグ・隣の生の状態と物性・速度/温度固定の隣のフラグを、
+     書き出した元の配列から独立に照合 (完全一致)
+  B  係数の float の再現: 生の入力から製品と同じ ST = float の式を numpy の float32 で再現 (全面の面積・法線・dcc・δ・ν_eff・スカラーの粘性の対角、
+     薄層の f_i・μ_f・k_f・β・κ、熱伝導の Jacobian の k_face・cfac、軸対称の A_pl・r_eff・μ_total・hoop、時間項の v・dt)。相対 ≤ 1e-6 合格、≤ 1e-4 判別不能、それより大きい = 不一致
+  C  面ごとの寄与: line_audit_helper が記録の「この面の前の D」から製品と同じ順序の float の加算で再現した「この面の後の D」、対流の K、薄層の D・K と CUDA の値。
+     要素ごとに ulp (丸めの尺度の float の ulp) で ≤ 8 合格、≤ 64 判別不能、それより大きい = 不一致
+  D  組立: 時間項 (生の体積・dt_local から)、面の連なり (前の D = 一つ前の面の後の D、最初 = 時間項の後、最後 = 面のループの後: 完全一致)、
+     時間項から連ねた再現と面のループの後の D (ulp)、軸対称 (ulp)、拘束の後の D・格納の D・Kprev/Knext の値と置き場所 (完全一致)
+  A  元の入力から double で独立に計算した係数と、CUDA が使った ST の値の相対差 (特性の記録): 薄層の面の β・κ、ほかの面のスカラーの粘性の対角・熱伝導の k_face·δ/dcc。
+     別に dcc・δ/dcc・法線の差も記録する。差 ≤ 1e-5 / ≤ 1e-3 / > 1e-3 に分ける
+  T  対照: 監査用のビルドと通常のビルドの D・Kprev・Knext・状態・rhs・dq (sweep 0〜4) など。forge は atomicAdd で再実行でもビット一致しない配列があるので、
+     通常のビルドの再実行 (--ctrl2) と比べ、再実行どうしでビット一致する配列はビット一致 (整数の表現)、しない配列は差の最大が再実行の差の最大の 3 倍以内を要求する
+を判定し、<dump>/lvcaudit_judge.json と標準出力に書く。規則を変えるときは plan §6.7 を先に改訂する。
+使い方: lvcaudit_judge.py <dump> <line_audit_helper> --run <run dir> --expect-sha <監査用のビルドの forge の sha256> --ctrl <対照の dump> --ctrl-run <対照の run dir> --ctrl-sha <通常のビルドの sha256>
+        --ctrl2 <対照の再実行の dump>
+"""
+import json
+import math
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+
+NF, FREC, NREC, HF, HN = 12, 200, 160, 150, 75
+SRC_SHA16 = "207d39f0e7f4aa03"
+WANT_NODES = [1572, 4113, 7985, 198560, 264263]
+EXPECT_CFG = {"implicitSolvePrecision": "0", "lineViscCoupling": "3", "implicitThermalJacobian": "5", "lineViscTerms": "7", "factorCall": "1",
+              "targetCall": "1", "sizeof_flow_float": "8", "sizeof_geom_float": "8", "lineImplicit": "1", "lineDtDirectional": "1",
+              "lineDtDirectionalCap": "0", "isAxisymmetric": "1", "axisymMethod": "0", "thermalMethod": "2"}
+B_PASS, B_IND = 1e-6, 1e-4
+ULP_PASS, ULP_IND = 8, 64
+A1, A2 = 1e-5, 1e-3
+CTRL_ARRAYS = ["D", "Kprev", "Knext", "state_ro_roU_roe_cp_gamma", "dt_vol", "scalar_visc_line", "flags_wall_iso_axis"] + \
+              [f"{p}_s{k}" for p in ("rhs", "dqnew", "dqold") for k in range(5)]
+f32 = np.float32
+
+
+class Checks:
+    def __init__(self):
+        self.items = {}
+
+    def add(self, stage, name, cls, val=None):
+        """cls: 'pass' / 'ind' / 'fail'"""
+        self.items.setdefault(stage, []).append((name, cls, val))
+
+    def ok(self, stage, name, cond, val=None):
+        self.add(stage, name, "pass" if cond else "fail", val)
+
+    def summary(self, stage):
+        lst = self.items.get(stage, [])
+        out = {"n": len(lst), "fail": sum(c == "fail" for _, c, _ in lst), "ind": sum(c == "ind" for _, c, _ in lst)}
+        out["first_fail"] = [[n, v] for n, c, v in lst if c == "fail"][:10]
+        out["first_ind"] = [[n, v] for n, c, v in lst if c == "ind"][:10]
+        return out
+
+
+def load_meta(d):
+    meta, cfg = {}, {}
+    for line in (d / "meta.txt").read_text().splitlines():
+        if line.startswith("# audit_cfg"):
+            toks = line.split()[2:]
+            cfg = {toks[i]: toks[i + 1] for i in range(0, len(toks) - 1, 2)}
+            continue
+        if line.startswith("#") or not line.strip():
+            continue
+        name, r, c = line.split()
+        meta[name] = (int(r), int(c))
+    return meta, cfg
+
+
+def arr(d, meta, name):
+    r, c = meta[name]
+    a = np.fromfile(d / f"{name}.f64", dtype=np.float64)
+    if a.size != r * c:
+        raise ValueError(f"{name}: 大きさが違う ({a.size} != {r}×{c})")
+    return a.reshape(r, c)
+
+
+def ulp32(x):
+    return np.spacing(np.abs(np.asarray(x, dtype=np.float32))).astype(np.float64)
+
+
+def ulp_class(dev, host, scale):
+    """要素ごとに |dev − host| / ulp_float(scale) の最大で分類する。"""
+    dev, host, scale = (np.asarray(x, dtype=np.float64) for x in (dev, host, scale))
+    u = np.maximum(ulp32(np.maximum(np.abs(scale), np.abs(dev))), np.finfo(np.float32).tiny)
+    m = float(np.max(np.abs(dev - host) / u)) if dev.size else 0.0
+    return ("pass" if m <= ULP_PASS else "ind" if m <= ULP_IND else "fail"), m
+
+
+def rel_class(dev, ref):
+    dev, ref = float(dev), float(ref)
+    e = abs(dev - ref) / abs(ref) if ref != 0 else abs(dev)
+    return ("pass" if e <= B_PASS else "ind" if e <= B_IND else "fail"), e
+
+
+def sha_of(run):
+    p = Path(run) / "RUN_PROVENANCE.txt"
+    m = re.search(r"forge_sha256\s*:\s*([0-9a-f]{64})", p.read_text()) if p.is_file() else None
+    return m.group(1) if m else None
+
+
+def main():
+    a = sys.argv[1:]
+    if len(a) < 2:
+        raise SystemExit(__doc__)
+    opt = lambda k: a[a.index(k) + 1] if k in a else None
+    d, helper = Path(a[0]), a[1]
+    run, ctrl, ctrl_run, ctrl2 = opt("--run"), opt("--ctrl"), opt("--ctrl-run"), opt("--ctrl2")
+    exp_sha, ctrl_sha = opt("--expect-sha"), opt("--ctrl-sha")
+    out = d / "lvcaudit_judge.json"
+    rec = {"plan": "time_integration-line-viscous-jacobian-faceh §6.7", "dump": str(d)}
+    ch = Checks()
+    try:
+        meta, cfg = load_meta(d)
+        rec["audit_cfg"] = cfg
+        # ---- S: 採取のゲート ----
+        for k, v in EXPECT_CFG.items():
+            ch.ok("S", f"設定 {k} = {v}", cfg.get(k) == v, cfg.get(k))
+        ch.ok("S", "引数 --run・--expect-sha・--ctrl・--ctrl-run・--ctrl-sha・--ctrl2 がある", all([run, exp_sha, ctrl, ctrl_run, ctrl_sha, ctrl2]), None)
+        if run:
+            ch.ok("S", "監査用のビルドの sha256", sha_of(run) == exp_sha, sha_of(run))
+            cp = json.loads((Path(run) / "COLD_PAIR.json").read_text())
+            ch.ok("S", "出発の場が run_0183 の res_100000 (sha256 固定)", cp.get("parent_res") == "res_100000.h5" and cp.get("parent_res_sha256", "").startswith(SRC_SHA16),
+                  [cp.get("parent_res"), cp.get("parent_res_sha256", "")[:16]])
+        if ctrl_run:
+            ch.ok("S", "通常のビルドの sha256", sha_of(ctrl_run) == ctrl_sha, sha_of(ctrl_run))
+            cpc = json.loads((Path(ctrl_run) / "COLD_PAIR.json").read_text())
+            ch.ok("S", "対照の出発の場が同じ", cpc.get("parent_res_sha256") == cp.get("parent_res_sha256") if run else False, cpc.get("parent_res_sha256", "")[:16])
+        need = ["node_line", "D", "Kprev", "Knext", "flags_wall_iso_axis", "state_ro_roU_roe_cp_gamma", "dt_vol", "node_vel_props", "node_cc",
+                "audit_face", "audit_node"] + [f"{p}_s{k}" for p in ("rhs", "dqnew", "dqold") for k in range(5)]
+        miss = [n for n in need if n not in meta]
+        ch.ok("S", "必須の配列がそろう (sweep 0〜4 を含む)", not miss, miss)
+        if miss:
+            raise ValueError(f"必須の配列が無い {miss}")
+        nl = arr(d, meta, "node_line"); nn = nl.shape[0]
+        ch.ok("S", "節点が 0 でない", nn > 0, nn)
+        nodes = [int(x) for x in nl[:, 0]]
+        pos = {n: k for k, n in enumerate(nodes)}
+        ch.ok("S", "節点の重複なし", len(pos) == nn, nn - len(pos))
+        lines = sorted(set(int(x) for x in nl[:, 1]))
+        ch.ok("S", "要求した 5 節点がすべて含まれる", all(w in pos for w in WANT_NODES), [w for w in WANT_NODES if w not in pos])
+        ch.ok("S", "ラインが 5 本", len(lines) == 5, len(lines))
+        D, Kp, Kn = arr(d, meta, "D"), arr(d, meta, "Kprev"), arr(d, meta, "Knext")
+        flags, st, dtv = arr(d, meta, "flags_wall_iso_axis"), arr(d, meta, "state_ro_roU_roe_cp_gamma"), arr(d, meta, "dt_vol")
+        props, cc = arr(d, meta, "node_vel_props"), arr(d, meta, "node_cc")
+        F = arr(d, meta, "audit_face").reshape(nn, NF, FREC)
+        N = arr(d, meta, "audit_node")
+        for name, x in (("D", D), ("Kprev", Kp), ("Knext", Kn), ("状態", st), ("dt_vol", dtv), ("物性", props), ("座標", cc), ("節点の記録", N)):
+            ch.ok("S", f"{name} が有限", bool(np.all(np.isfinite(x))), int(np.sum(~np.isfinite(x))))
+        ch.ok("S", "ρ・dt・体積・c_p > 0、γ > 1", bool(np.all(st[:, 0] > 0) and np.all(dtv > 0) and np.all(st[:, 5] > 0) and np.all(st[:, 6] > 1)), None)
+        for k in range(nn):
+            nd = N[k]
+            ch.ok("S", f"節点 {k}: 記録の節点番号・storeLU・loop 0・ST = float・型の幅 8", int(nd[0]) == nodes[k] and nd[136] == 1 and nd[137] == 0 and nd[138] == 4
+                  and nd[147] == 8 and nd[148] == 8, [nd[0], nd[136], nd[137], nd[138], nd[147], nd[148]])
+            ch.ok("S", f"節点 {k}: 面の数が枠に入る (あふれ 0、数 = plane の数)", nd[5] == 0 and nd[4] == nd[146] and nd[4] <= NF, [nd[4], nd[5], nd[146]])
+            for s in range(int(min(nd[4], NF))):
+                fr = F[k, s]
+                ch.ok("S", f"節点 {k} 面 {s}: 枠の番号・既知の粘性の枝・有限", int(fr[191]) == s and int(fr[45]) in (0, 1, 3, 4) and bool(np.all(np.isfinite(fr))),
+                      [fr[191], fr[45]])
+        if any(c == "fail" for _, c, _ in ch.items["S"]):
+            raise ValueError("採取のゲートが不合格")
+
+        # ---- G: 構造 (元の配列から独立に) ----
+        def face_of(k, other):
+            return [s for s in range(int(min(N[k, 4], NF))) if F[k, s, 5] != 0 and int(F[k, s, 3]) == other]
+        for k in range(nn):
+            nd = N[k]
+            ic, lp, ln = nodes[k], int(nd[1]), int(nd[2])
+            for side, nb in ((0, lp), (1, ln)):
+                if nb < 0:
+                    continue
+                fs = face_of(k, nb)
+                ch.ok("G", f"節点 {k}: 向き {side} の隣 {nb} にちょうど 1 面", len(fs) == 1, len(fs))
+                if len(fs) != 1:
+                    continue
+                fr = F[k, fs[0]]
+                ch.ok("G", f"節点 {k}: 向き {side} のフラグ", int(fr[6]) == side, fr[6])
+                ch.ok("G", f"節点 {k}: 面の両端が自分と隣", {int(fr[1]), int(fr[2])} == {ic, nb}, [fr[1], fr[2]])
+                ch.ok("G", f"節点 {k}: 隣 {nb} が書き出しの中", nb in pos, None)
+                if nb in pos:
+                    kb = pos[nb]
+                    back = face_of(kb, ic)
+                    ch.ok("G", f"節点 {k}: 隣から見た往復の面 (同じ面の番号・逆向き)", len(back) == 1 and int(F[kb, back[0], 0]) == int(fr[0])
+                          and int(N[kb, 2 if side == 0 else 1]) == ic, [len(back)])
+                    # 隣の生の状態・物性は元の配列と完全一致
+                    ch.ok("G", f"節点 {k}: 隣の生の状態 (γ・ρ・u・ρE)", fr[51] == st[kb, 6] and fr[52] == st[kb, 0] and fr[53] == props[kb, 0] and fr[54] == props[kb, 1]
+                          and fr[55] == props[kb, 2] and fr[56] == st[kb, 4], None)
+                    if int(fr[45]) == 1:
+                        ch.ok("G", f"節点 {k}: 隣の速度固定のフラグ = 隣の壁のフラグ", (fr[43] != 0) == (flags[kb, 0] == 1), [fr[43], flags[kb, 0]])
+                        ch.ok("G", f"節点 {k}: 隣の温度固定のフラグ = 隣の等温壁のフラグ", (fr[44] != 0) == (flags[kb, 1] == 1), [fr[44], flags[kb, 1]])
+                        ch.ok("G", f"節点 {k}: マスク・値 3", fr[48] == 7 and fr[49] == 1, [fr[48], fr[49]])
+                        ch.ok("G", f"節点 {k}: 両端の生の層流 μ が元の配列", fr[188] == props[k, 3] and fr[189] == props[kb, 3], None)
+            nlines = sum(1 for s in range(int(min(nd[4], NF))) if F[k, s, 5] != 0)
+            ch.ok("G", f"節点 {k}: ライン面の数 = 隣の数", nlines == (lp >= 0) + (ln >= 0), [nlines, lp, ln])
+            if k + 1 < nn and nl[k + 1, 1] == nl[k, 1]:
+                ch.ok("G", f"節点 {k}: 書き出しの次の節点がライン上の次 (ln)", nodes[k + 1] == ln, [nodes[k + 1], lp, ln])
+            wall, iso, ax = int(flags[k, 0]), int(flags[k, 1]), int(flags[k, 2])
+            exp = (14 if wall == 1 else 0) | (16 if iso == 1 else 0) | (4 if ax == 1 else 0)
+            ch.ok("G", f"節点 {k}: 拘束の行のビット = 元のフラグ", int(nd[18]) == exp and nd[19] == wall and nd[20] == iso and nd[21] == ax, [nd[18], exp])
+            ch.ok("G", f"節点 {k}: 生の ρ・ρE・体積・dt が元の配列", nd[17] == st[k, 0] and nd[16] == st[k, 4] and nd[133] == dtv[k, 1] and nd[134] == dtv[k, 0], None)
+            ch.ok("G", f"節点 {k}: 生の μ_t が元の配列", nd[132] == props[k, 4], None)
+        if any(c == "fail" for _, c, _ in ch.items.get("G", [])):
+            raise ValueError("構造の照合が不合格")
+
+        # ---- helper ----
+        r = subprocess.run([helper, str(d), str(nn), "1"], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise ValueError(f"line_audit_helper が失敗: {r.stderr}")
+        HFc = np.fromfile(d / "audit_host_face.f64", dtype=np.float64).reshape(nn, NF, HF)
+        HNn = np.fromfile(d / "audit_host_node.f64", dtype=np.float64).reshape(nn, HN)
+
+        Arows = []
+        visc = float(cfg["visc"])
+        for k in range(nn):
+            nd = N[k]
+            ic = nodes[k]
+            rho = max(f32(st[k, 0]), f32(1e-30)); g_i = f32(st[k, 6])
+            ux, uy, uz = f32(props[k, 0]), f32(props[k, 1]), f32(props[k, 2])
+            # B: 節点の量
+            for name, dev, ref in (("ρ", nd[9], rho), ("γ", nd[15], g_i), ("u", nd[10], ux), ("v", nd[11], uy), ("w", nd[12], uz),
+                                   ("音速", nd[13], max(f32(props[k, 6]), f32(1e-8))), ("H_t", nd[14], f32(props[k, 7])), ("体積", nd[6], f32(dtv[k, 1])), ("dt", nd[7], f32(dtv[k, 0]))):
+                ch.add("B", f"節点 {k}: {name}", *rel_class(dev, ref))
+            nu_eff = (f32(visc) + max(f32(props[k, 4]), f32(0))) / rho
+            ch.add("B", f"節点 {k}: ν_eff", *rel_class(nd[23], nu_eff))
+            if nd[124] == 1:
+                A = f32(nd[128]); v = f32(dtv[k, 1])
+                r_eff = max(v / max(A, f32(1e-30)), f32(1e-30))
+                mu_t = f32(visc) + max(f32(props[k, 4]), f32(0))
+                hoop = f32(2) * mu_t / (rho * r_eff)
+                for name, dev, ref in (("A_pl", nd[125], A), ("r_eff", nd[129], r_eff), ("μ_total", nd[130], mu_t), ("hoop", nd[126], hoop)):
+                    ch.add("B", f"節点 {k}: 軸対称 {name}", *rel_class(dev, ref))
+            ch.ok("B", f"節点 {k}: 軸対称の枝が r 重み (1) か、軸対称の対象外 (0)", nd[124] in (0, 1), nd[124])
+            for s in range(int(min(nd[4], NF))):
+                fr = F[k, s]; br = int(fr[45]); has_nbr = fr[4] != 0
+                ic0, ic1, o = int(fr[1]), int(fr[2]), int(fr[3])
+                sgn = f32(1) if ic0 == ic else f32(-1)
+                fa = max(f32(fr[11]), f32(1e-30))
+                nf = (sgn * f32(fr[8]) / fa, sgn * f32(fr[9]) / fa, sgn * f32(fr[10]) / fa)
+                ch.add("B", f"節点 {k} 面 {s}: 面積", *rel_class(fr[18], fa))
+                for q in range(3):
+                    cls, e = rel_class(fr[19 + q], nf[q]) if nf[q] != 0 else (("pass" if fr[19 + q] == 0 else "fail"), abs(fr[19 + q]))
+                    ch.add("B", f"節点 {k} 面 {s}: 法線 {q}", cls, e)
+                if not has_nbr:
+                    ch.ok("B", f"節点 {k} 面 {s}: 境界の半割面は粘性の枝なし", br == 0, br)
+                    continue
+                dx, dy, dz = f32(fr[15]) - f32(fr[12]), f32(fr[16]) - f32(fr[13]), f32(fr[17]) - f32(fr[14])
+                dcc = max(np.sqrt(dx * dx + dy * dy + dz * dz), f32(1e-30))
+                dds = max(abs(dx * f32(fr[8]) + dy * f32(fr[9]) + dz * f32(fr[10])), f32(1e-30))
+                delta = max(dcc * fa * fa / dds, f32(1e-30))
+                vd = f32(2) * nu_eff * delta / dcc
+                for name, dev, ref in (("dcc", fr[25], dcc), ("dcc·s", fr[26], dds), ("δ", fr[27], delta), ("スカラーの粘性の対角", fr[28], vd), ("ν_eff", fr[29], nu_eff)):
+                    ch.add("B", f"節点 {k} 面 {s}: {name}", *rel_class(dev, ref))
+                # A: 元の入力から double で
+                dxd = np.array([fr[15] - fr[12], fr[16] - fr[13], fr[17] - fr[14]])
+                dccd = float(np.linalg.norm(dxd)); ddsd = abs(float(dxd @ fr[8:11])); dod = fr[11] ** 2 / ddsd
+                nud = (visc + max(props[k, 4], 0.0)) / st[k, 0]
+                arow = {"node": k, "ic": ic, "other": o, "slot": s, "line": int(nl[k, 1]), "branch": br, "isLine": bool(fr[5] != 0),
+                        "rel_dcc": abs(fr[25] / dccd - 1), "rel_delta_over_dcc": abs((fr[27] / fr[25]) / dod - 1),
+                        "rel_normal": float(np.max(np.abs(fr[19:22] - (1 if ic0 == ic else -1) * fr[8:11] / fr[11]))),
+                        "y_i": fr[13], "y_o": fr[16], "dcc_double": dccd, "dcc_float": fr[25], "ulp_y": float(np.spacing(np.float32(max(abs(fr[13]), abs(fr[16])))))}
+                if br == 1:
+                    kb = pos.get(o)
+                    fi = f32(fr[7]) if ic0 == ic else f32(1) - f32(fr[7]); omf = f32(1) - fi
+                    mli, mlj = f32(fr[188]), f32(fr[189]); mti, mtj = f32(props[k, 4]), f32(props[kb, 4])
+                    cpi, cpj = f32(st[k, 5]), f32(st[kb, 5]); tci, tcj = f32(props[k, 5]), f32(props[kb, 5])
+                    muf = fi * (mli + mti) + omf * (mlj + mtj)
+                    kf = fi * tci + omf * tcj + (fi * cpi + omf * cpj) * (fi * mti + omf * mtj) / f32(fr[50])
+                    beta, kappa = max(muf, f32(0)) * delta / dcc, max(kf, f32(0)) * delta / dcc
+                    for name, dev, ref in (("f_i", fr[30], fi), ("μ_f", fr[39], muf), ("k_f", fr[40], kf), ("β", fr[41], beta), ("κ", fr[42], kappa),
+                                           ("層流 μ_i", fr[31], mli), ("層流 μ_j", fr[32], mlj), ("μ_t,i", fr[33], mti), ("μ_t,j", fr[34], mtj), ("c_p,i", fr[35], cpi), ("c_p,j", fr[36], cpj)):
+                        ch.add("B", f"節点 {k} 面 {s}: {name}", *rel_class(dev, ref))
+                    fid = fr[7] if ic0 == ic else 1 - fr[7]
+                    mufd = fid * (props[k, 3] + props[k, 4]) + (1 - fid) * (props[kb, 3] + props[kb, 4])
+                    kfd = fid * props[k, 5] + (1 - fid) * props[kb, 5] + (fid * st[k, 5] + (1 - fid) * st[kb, 5]) * (fid * props[k, 4] + (1 - fid) * props[kb, 4]) / fr[50]
+                    arow["rel_beta"] = abs(fr[41] / (max(mufd, 0) * dod) - 1); arow["rel_kappa"] = abs(fr[42] / (max(kfd, 0) * dod) - 1)
+                    arow["coef"] = max(arow["rel_beta"], arow["rel_kappa"])
+                elif br == 3:
+                    f = f32(fr[7]); omf = f32(1) - f
+                    cpf = f * f32(fr[184]) + omf * f32(fr[185]); mtf = f * f32(fr[182]) + omf * f32(fr[183])
+                    kface = f * f32(fr[186]) + omf * f32(fr[187]) + cpf * mtf / f32(fr[50])
+                    cfac = (kface * delta / dcc) * (g_i / max(f32(st[k, 5]), f32(1e-30))) / rho
+                    ch.add("B", f"節点 {k} 面 {s}: k_face", *rel_class(fr[46], kface))
+                    ch.add("B", f"節点 {k} 面 {s}: cfac", *rel_class(fr[47], cfac))
+                    ch.ok("B", f"節点 {k} 面 {s}: スカラーの行の数 = 5 (キー 5)", fr[190] == 5, fr[190])
+                    kfd = fr[7] * fr[186] + (1 - fr[7]) * fr[187] + (fr[7] * fr[184] + (1 - fr[7]) * fr[185]) * (fr[7] * fr[182] + (1 - fr[7]) * fr[183]) / fr[50]
+                    arow["rel_vd"] = abs(fr[28] / (2 * nud * dod) - 1); arow["rel_kface_dod"] = abs((fr[46] * fr[27] / fr[25]) / (kfd * dod) - 1)
+                    arow["coef"] = max(arow["rel_vd"], arow["rel_kface_dod"])
+                else:
+                    arow["rel_vd"] = abs(fr[28] / (2 * nud * dod) - 1); arow["coef"] = arow["rel_vd"]
+                Arows.append(arow)
+                # C: 面ごとの寄与
+                hh = HFc[k, s]
+                cls, m = ulp_class(fr[157:182], hh[0:25], hh[50:75])
+                ch.add("C", f"節点 {k} 面 {s} (枝 {br}): この面の後の D (前の D から再現)", cls, m)
+                if fr[5] != 0:
+                    kc_dev, kc_h = fr[82:107].reshape(5, 5), hh[75:100].reshape(5, 5)
+                    cls, m = ulp_class(kc_dev, kc_h, np.broadcast_to(np.max(np.abs(kc_h), axis=0), (5, 5)))
+                    ch.add("C", f"節点 {k} 面 {s}: 対流の K", cls, m)
+                    if br == 1:
+                        for nm, dv, hv in (("薄層の D", fr[132:157], hh[100:125]), ("薄層の K", fr[107:132], hh[125:150])):
+                            dv5, hv5 = dv.reshape(5, 5), hv.reshape(5, 5)
+                            cls, m = ulp_class(dv5, hv5, np.broadcast_to(np.max(np.abs(hv5), axis=0), (5, 5)))
+                            ch.add("C", f"節点 {k} 面 {s}: {nm}", cls, m)
+
+        # ---- D: 組立 ----
+        for k in range(nn):
+            nd = N[k]; nfc = int(min(nd[4], NF)); hn = HNn[k]
+            cls, m = ulp_class(nd[24:49], hn[0:25], nd[24:49]); ch.add("D", f"節点 {k}: D (時間項)", cls, m)
+            if nfc:
+                ch.ok("D", f"節点 {k}: 最初の面の前の D = 時間項の後の D", bool(np.array_equal(F[k, 0, 57:82], nd[24:49])), None)
+                for s in range(1, nfc):
+                    ch.ok("D", f"節点 {k}: 面 {s} の前の D = 面 {s - 1} の後の D", bool(np.array_equal(F[k, s, 57:82], F[k, s - 1, 157:182])), None)
+                ch.ok("D", f"節点 {k}: 最後の面の後の D = 面のループの後の D", bool(np.array_equal(F[k, nfc - 1, 157:182], nd[49:74])), None)
+                scale = np.max(np.stack([HFc[k, s, 50:75] for s in range(nfc)]), axis=0)
+                cls, m = ulp_class(nd[49:74], HFc[k, nfc - 1, 25:50], scale)
+                ch.add("D", f"節点 {k}: 面のループの後の D (時間項から連ねて再現)", cls, m)
+            cls, m = ulp_class(nd[74:99], hn[25:50], hn[50:75]); ch.add("D", f"節点 {k}: D (軸対称の後)", cls, m)
+            Dc = nd[74:99].reshape(5, 5).copy()
+            if nd[21] == 1:
+                Dc[2, :] = 0; Dc[2, 2] = 1
+            if nd[19] == 1:
+                for row in (1, 2, 3):
+                    Dc[row, :] = 0; Dc[row, row] = 1
+            if nd[20] == 1:
+                Dc[4, :] = 0; Dc[4, 4] = 1; Dc[4, 0] = float(-f32(nd[16]) / max(f32(nd[17]), f32(1e-30)))
+            ch.ok("D", f"節点 {k}: 拘束の後の D (完全一致)", bool(np.array_equal(Dc.ravel(), nd[99:124])), float(np.max(np.abs(Dc.ravel() - nd[99:124]))))
+            ch.ok("D", f"節点 {k}: 格納の D = 拘束の後の D (完全一致)", bool(np.array_equal(D[k], nd[99:124])), None)
+            rd = int(nd[18])
+            for side, nb, K in ((0, int(nd[1]), Kp), (1, int(nd[2]), Kn)):
+                if nb < 0:
+                    continue
+                s = [x for x in range(nfc) if F[k, x, 5] != 0 and int(F[k, x, 3]) == nb][0]
+                fr = F[k, s]
+                exp = np.zeros(25)
+                for i in range(5):
+                    if rd & (1 << i):
+                        continue
+                    for j in range(5):
+                        v = float(np.float64(np.float32(fr[82 + i * 5 + j])))
+                        if fr[45] == 1:
+                            v = v + float(np.float64(np.float32(fr[107 + i * 5 + j])))
+                        exp[i * 5 + j] = v
+                ch.ok("D", f"節点 {k}: {'Kprev' if side == 0 else 'Knext'} の値と置き場所 (完全一致)", bool(np.array_equal(K[k].view(np.int64), exp.view(np.int64))),
+                      float(np.max(np.abs(K[k] - exp))))
+
+        # ---- T: 対照 (同じソース・監査なしの通常のビルド) とのビット一致 ----
+        bit = {}
+        if ctrl and ctrl2:
+            mc, _ = load_meta(Path(ctrl)); m2, _ = load_meta(Path(ctrl2))
+            for nm, mm, dd in (("対照", mc, Path(ctrl)), ("対照の再実行", m2, Path(ctrl2))):
+                ch.ok("T", f"{nm}の書き出しの節点と順が同じ", bool(np.array_equal(arr(dd, mm, "node_line"), nl)), None)
+            for name in CTRL_ARRAYS:
+                if name not in meta or name not in mc or name not in m2:
+                    ch.ok("T", f"{name} が 3 つともある", False, None); continue
+                x, y, z = arr(d, meta, name), arr(Path(ctrl), mc, name), arr(Path(ctrl2), m2, name)
+                if not (x.shape == y.shape == z.shape):
+                    ch.ok("T", f"{name} の形が同じ", False, [x.shape, y.shape, z.shape]); continue
+                rep_bit = bool(np.array_equal(y.view(np.int64), z.view(np.int64)))
+                d_ay = float(np.max(np.abs(x - y))) if x.size else 0.0
+                d_yz = float(np.max(np.abs(y - z))) if y.size else 0.0
+                if rep_bit:
+                    eq = bool(np.array_equal(x.view(np.int64), y.view(np.int64)))
+                    ch.ok("T", f"{name}: 再実行でビット一致なので、監査用もビット一致", eq, d_ay)
+                else:
+                    eq = d_ay <= 3 * d_yz
+                    ch.ok("T", f"{name}: 再実行で揺れるので、監査用との差 ≤ 再実行の差 × 3", eq, [d_ay, d_yz])
+                bit[name] = {"rerun_bit_identical": rep_bit, "audit_vs_ctrl_max_abs": d_ay, "rerun_max_abs": d_yz, "ok": eq}
+        rec["control"] = bit
+
+        # ---- A の分類 ----
+        classes = {"≤1e-5": 0, "≤1e-3": 0, ">1e-3": 0}
+        for row in Arows:
+            c = "≤1e-5" if row["coef"] <= A1 else ("≤1e-3" if row["coef"] <= A2 else ">1e-3")
+            row["class"] = c; classes[c] += 1
+        Arows.sort(key=lambda r: -r["coef"])
+        rec["A"] = {"n_faces": len(Arows), "classes": classes, "worst": Arows[:40],
+                    "line_faces": {"n": sum(r["isLine"] for r in Arows), "gt_1e-3": sum(r["isLine"] and r["coef"] > A2 for r in Arows),
+                                   "max_rel_beta": max((r.get("rel_beta", 0) for r in Arows), default=0), "max_rel_kappa": max((r.get("rel_kappa", 0) for r in Arows), default=0)},
+                    "max_rel_dcc": max((r["rel_dcc"] for r in Arows), default=0), "max_rel_delta_over_dcc": max((r["rel_delta_over_dcc"] for r in Arows), default=0),
+                    "max_abs_normal": max((r["rel_normal"] for r in Arows), default=0)}
+        stages = {s: ch.summary(s) for s in ("S", "G", "B", "C", "D", "T")}
+        rec.update(stages)
+        if any(stages[s]["n"] == 0 for s in ("S", "G", "B", "C", "D")):
+            verdict = "INVALID (照合の項目が 0 の段がある)"
+        elif any(stages[s]["fail"] for s in ("B", "C", "D")):
+            first = next(s for s in ("B", "C", "D") if stages[s]["fail"])
+            verdict = f"FAIL (製品の組立が記録の入力からの再現と許容外: 最初に外れる段 {first})"
+        elif any(stages[s]["ind"] for s in ("B", "C", "D")):
+            verdict = "INDETERMINATE (丸めの差で説明できる範囲の外れがあり、合格とも不一致とも言えない)"
+        else:
+            verdict = "PASS (製品の組立は、記録の入力からの再現と許容内)"
+        if stages["T"]["n"] == 0 or stages["T"]["fail"]:
+            verdict += "; 対照とのビット一致が成り立たないので、通常の経路への結論は保留"
+        rec["VERDICT"] = verdict
+        rec["A_VERDICT"] = (f"元の入力から double で計算した係数との差 (面 {len(Arows)}): ≤1e-5 {classes['≤1e-5']}・≤1e-3 {classes['≤1e-3']}・>1e-3 {classes['>1e-3']}"
+                            f" (ライン面の β・κ で >1e-3 は {rec['A']['line_faces']['gt_1e-3']})。再現の PASS と両立しうる。破綻の原因の断定には使わない")
+    except Exception as e:   # 採取・構造の不備は理由付きの INVALID
+        rec["VERDICT"] = f"INVALID ({type(e).__name__}: {e})"
+        for s in ("S", "G"):
+            if s in ch.items:
+                rec[s] = ch.summary(s)
+    out.write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=float))
+    for s in ("S", "G", "B", "C", "D", "T"):
+        if s in rec:
+            x = rec[s]
+            print(f"{s}: {x['n']} 項目、不一致 {x['fail']}、判別不能 {x['ind']}  {x['first_fail'][:3]} {x['first_ind'][:2]}")
+    if "A" in rec:
+        print("A:", rec["A_VERDICT"])
+        for row in rec["A"]["worst"][:8]:
+            print(f"  ライン {row['line']} 節点 {row['node']} ({row['ic']}→{row['other']}、枝 {row['branch']}{'・ライン面' if row['isLine'] else ''}): 係数 {row['coef']:.2e}、"
+                  f"dcc {row['rel_dcc']:.2e}、δ/dcc {row['rel_delta_over_dcc']:.2e} (dcc double {row['dcc_double']:.3e} / float {row['dcc_float']:.3e}、y の ulp {row['ulp_y']:.1e})")
+    print("VERDICT:", rec["VERDICT"])
+    return 0 if rec["VERDICT"].startswith("PASS") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+## 参考: `solver_density_cuda/tools/line_audit_helper.cpp`
+
+```
+// 製品の経路の照合 (plan time_integration-line-viscous-jacobian-faceh §6.7) の補助: 監査用のビルド (-DFORGE_LINE_AUDIT) が書いた
+// audit_face.f64・audit_node.f64 を読み、記録された ST (float) の入力から、製品と同じ共通関数・同じ加算の順序を host の float で再現する。
+//   面ごと <dir>/audit_host_face.f64: [節点][AUDIT_NF][HF]
+//     0-24   この面の後の D (記録された「この面の前の D」から再現)
+//     25-49  この面の後の D (時間項の後の D から面の順に連ねて再現)
+//     50-74  丸めの尺度 (前の D・後の D・対流の増分・粘性の増分の絶対値の最大、要素ごと)
+//     75-99  対流の K (列の抽出)、100-124 薄層の D (零から)、125-149 薄層の K
+//   節点ごと <dir>/audit_host_node.f64: [節点][HN]
+//     0-24   D (時間項の後、生の体積と dt_local から)、25-49 D (軸対称の後、記録された面のループの後の D から)、50-74 軸対称の丸めの尺度
+// 製品の加算の順序 (timeIntegration_d.cu の implicit_defect_correction_block_d、factor の sweep は sdq = 0):
+//   面ごとに 対流 (accumulate_split_jacobian_cf) → 粘性 (has_nbr のとき): 枝 1 = [値 3 ならスカラーを単位行列で] + 薄層 / 枝 3 = スカラーを
+//   行 0..nScalarRows−1 の対角 + 行 4 の温度の項 / 枝 4 = スカラーを単位行列で。軸対称 (r 重み) は面のループの後。
+// 使い方: line_audit_helper <dir> <nNodes> <thermallyPerfect 0|1>
+// ビルド: g++ -O2 -std=c++17 -Wno-unknown-pragmas -I solver_density_cuda solver_density_cuda/tools/line_audit_helper.cpp -o /tmp/lah
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <algorithm>
+#include "../cuda_forge/block_dplur_jacobian_d.cuh"
+
+static const int NF = 12, FREC = 200, NREC = 160, HF = 150, HN = 75;
+
+static std::vector<double> load(const std::string& path, size_t n) {
+    std::vector<double> v(n);
+    std::ifstream f(path, std::ios::binary);
+    if (!f.read((char*)v.data(), sizeof(double) * n)) { std::fprintf(stderr, "%s を読めない (%zu 個)\n", path.c_str(), n); std::exit(3); }
+    return v;
+}
+static void add_id(float m[5][5], float s) { for (int r = 0; r < 5; ++r) m[r][r] += s; }   // add_identity_scaled と同じ
+static void put25(double* o, const float m[5][5]) { for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) o[r * 5 + c] = m[r][c]; }
+static void get25(float m[5][5], const double* in) { for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) m[r][c] = (float)in[r * 5 + c]; }
+
+struct NodeS { float rho, u, v, w, c, Ht, gamma, roe; };
+
+// 面 1 枚の寄与を D に足す (製品と同じ順序)。conv_inc・visc_inc には増分 (零から) を返す
+static void apply_face(float D[5][5], const double* fr, const NodeS& s, bool tp, float conv_inc[5][5], float visc_inc[5][5], float Dthin[5][5], float Kthin[5][5]) {
+    const float fa = (float)fr[18], nx = (float)fr[19], ny = (float)fr[20], nz = (float)fr[21];
+    const bool has_nbr = fr[4] != 0.0;
+    const int br = (int)fr[45];
+    const float sdq0[5] = {0, 0, 0, 0, 0};
+    float nbr[5] = {};
+    for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) { conv_inc[r][c] = 0; visc_inc[r][c] = 0; Dthin[r][c] = 0; Kthin[r][c] = 0; }
+    block_dplur::accumulate_split_jacobian_cf<float>(s.gamma, nx, ny, nz, s.u, s.v, s.w, s.c, s.Ht, tp, fa, has_nbr, sdq0, D, nbr);
+    float nb2[5] = {};
+    block_dplur::accumulate_split_jacobian_cf<float>(s.gamma, nx, ny, nz, s.u, s.v, s.w, s.c, s.Ht, tp, fa, has_nbr, sdq0, conv_inc, nb2);
+    if (!has_nbr) return;                       // node: 境界半割面は粘性の対角を課さない
+    const float vd = (float)fr[28];
+    if (br == 1) {
+        const float cp_i = std::max((float)fr[35], 1.0e-30f), cp_j = std::max((float)fr[36], 1.0e-30f);
+        auto thin = [&](float M[5][5], float (*K)[5]) {
+            block_dplur::accumulate_thinlayer_visc_jacobian<float>(
+                (float)fr[41], (float)fr[42], nx, ny, nz, (float)fr[30],
+                s.rho, s.u, s.v, s.w, s.roe, s.gamma, cp_i,
+                std::max((float)fr[52], 1.0e-30f), (float)fr[53], (float)fr[54], (float)fr[55], (float)fr[56], (float)fr[51], cp_j,
+                fr[43] != 0.0, fr[44] != 0.0, M, K, (int)fr[48]);
+        };
+        if (fr[49] != 0.0) { add_id(D, vd); add_id(visc_inc, vd); }
+        thin(D, nullptr);
+        thin(visc_inc, nullptr);
+        thin(Dthin, Kthin);
+    } else if (br == 3) {
+        const int nsr = (int)fr[190];
+        const float cfac = (float)fr[47];
+        for (int r = 0; r < nsr; ++r) { D[r][r] += vd; visc_inc[r][r] += vd; }
+        const float q2 = s.u * s.u + s.v * s.v + s.w * s.w;
+        const float e_int = s.roe / s.rho - 0.5f * q2;
+        const float t0 = -cfac * (e_int - 0.5f * q2), t1 = -cfac * s.u, t2 = -cfac * s.v, t3 = -cfac * s.w;
+        D[4][0] += t0; D[4][1] += t1; D[4][2] += t2; D[4][3] += t3; D[4][4] += cfac;
+        visc_inc[4][0] += t0; visc_inc[4][1] += t1; visc_inc[4][2] += t2; visc_inc[4][3] += t3; visc_inc[4][4] += cfac;
+    } else if (br == 4) {
+        add_id(D, vd); add_id(visc_inc, vd);
+    }
+}
+
+int main(int argc, char** argv) {
+    if (argc != 4) { std::fprintf(stderr, "使い方: %s <dir> <nNodes> <thermallyPerfect>\n", argv[0]); return 3; }
+    const std::string dir = argv[1];
+    const size_t nn = std::strtoul(argv[2], nullptr, 10);
+    const bool tp = std::atoi(argv[3]) != 0;
+    if (nn == 0) { std::fprintf(stderr, "節点が 0\n"); return 3; }
+    const auto F = load(dir + "/audit_face.f64", nn * NF * FREC);
+    const auto N = load(dir + "/audit_node.f64", nn * NREC);
+    std::vector<double> of(nn * NF * HF, 0.0), on(nn * HN, 0.0);
+    long nface = 0;
+    for (size_t k = 0; k < nn; ++k) {
+        const double* nd = &N[k * NREC];
+        const int nfaces = std::min((int)nd[4], NF);
+        const NodeS s{(float)nd[9], (float)nd[10], (float)nd[11], (float)nd[12], (float)nd[13], (float)nd[14], (float)nd[15], (float)nd[16]};
+        // 時間項 (生の体積と dt_local から)
+        float Dt[5][5] = {};
+        const float v = (float)nd[133], dt_l = (float)nd[134];
+        add_id(Dt, v / std::max(dt_l, 1.0e-30f));
+        add_id(Dt, v * (float)nd[135]);
+        put25(&on[k * HN + 0], Dt);
+        // 面: 記録の前の D から (局所) と、時間項の後の D から連ねて (全体)
+        float Dchain[5][5]; get25(Dchain, &nd[24]);
+        for (int sl = 0; sl < nfaces; ++sl) {
+            const double* fr = &F[(k * NF + sl) * FREC];
+            double* o = &of[(k * NF + sl) * HF];
+            ++nface;
+            float Dloc[5][5], ci[5][5], vi[5][5], dth[5][5], kth[5][5];
+            get25(Dloc, &fr[57]);
+            apply_face(Dloc, fr, s, tp, ci, vi, dth, kth);
+            float c2[5][5], v2[5][5], d2[5][5], k2[5][5];
+            apply_face(Dchain, fr, s, tp, c2, v2, d2, k2);
+            put25(o + 0, Dloc); put25(o + 25, Dchain);
+            for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c)
+                o[50 + r * 5 + c] = std::max({std::fabs(fr[57 + r * 5 + c]), std::fabs(fr[157 + r * 5 + c]), (double)std::fabs(ci[r][c]), (double)std::fabs(vi[r][c])});
+            if (fr[5] != 0.0) {   // ライン面: 対流の K を列の抽出で
+                const float fa = (float)fr[18], nx = (float)fr[19], ny = (float)fr[20], nz = (float)fr[21];
+                for (int j = 0; j < 5; ++j) {
+                    float dd[5][5] = {}, kc[5] = {}, ev[5] = {0, 0, 0, 0, 0}; ev[j] = fa;
+                    block_dplur::accumulate_split_jacobian_cf<float>(s.gamma, nx, ny, nz, s.u, s.v, s.w, s.c, s.Ht, tp, fa, true, ev, dd, kc);
+                    for (int i = 0; i < 5; ++i) o[75 + i * 5 + j] = kc[i];
+                }
+            }
+            put25(o + 100, dth); put25(o + 125, kth);
+        }
+        // 軸対称 (r 重み、枝 1): 記録された面のループの後の D から
+        float Da[5][5]; get25(Da, &nd[49]);
+        float sc[5][5]; for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) sc[r][c] = std::fabs(Da[r][c]);
+        if ((int)nd[124] == 1) {
+            const float A = (float)nd[125], hoop = (float)nd[126], al = (float)nd[127];
+            const float g1 = s.gamma - 1.0f, q2 = s.u * s.u + s.v * s.v + s.w * s.w;
+            const float t0 = -A * (0.5f * g1 * q2 + hoop * s.v), t1 = A * (g1 * s.u), t2 = A * (g1 * s.v + hoop), t3 = A * (g1 * s.w), t4 = -A * g1, t5 = al * A * s.c;
+            Da[2][0] += t0; Da[2][1] += t1; Da[2][2] += t2; Da[2][3] += t3; Da[2][4] += t4; Da[2][2] += t5;
+            sc[2][0] = std::max(sc[2][0], std::fabs(t0)); sc[2][1] = std::max(sc[2][1], std::fabs(t1)); sc[2][2] = std::max({sc[2][2], std::fabs(t2), std::fabs(t5)});
+            sc[2][3] = std::max(sc[2][3], std::fabs(t3)); sc[2][4] = std::max(sc[2][4], std::fabs(t4));
+        }
+        for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) sc[r][c] = std::max(sc[r][c], std::fabs(Da[r][c]));
+        put25(&on[k * HN + 25], Da);
+        for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) on[k * HN + 50 + r * 5 + c] = sc[r][c];
+    }
+    std::ofstream f1(dir + "/audit_host_face.f64", std::ios::binary); f1.write((const char*)of.data(), sizeof(double) * of.size());
+    std::ofstream f2(dir + "/audit_host_node.f64", std::ios::binary); f2.write((const char*)on.data(), sizeof(double) * on.size());
+    if (!f1 || !f2) { std::fprintf(stderr, "出力を書けない\n"); return 3; }
+    std::printf("line_audit_helper: 節点 %zu、面 %ld を再現した\n", nn, nface);
+    return 0;
+}
+```
+
+## 出力形式 (この形のまま)
+
+```
+結論: <次にやる一手を 1 文で>
+第 1 仮説: <内容>  確度: <高/中/低>
+  根拠: <ファイル:行 / run パスと数値>
+  反証条件: <何が観測されたらこの仮説は誤りか>
+第 2・第 3 仮説: <あれば 1 行ずつ>
+判別 A/B: <変える設定 1 点、回す長さ、見る量>  → A なら … / B なら …
+やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
+呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
+不足情報: <あれば>
+```
+設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。

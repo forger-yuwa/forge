@@ -74,6 +74,9 @@ ALT_BINARIES = {
     # 2d58b457 + typedef double、製品の経路の照合 (plan time_integration-line-viscous-jacobian-faceh §6.7)。監査用 (-DFORGE_LINE_AUDIT) と同じソースの通常のビルド
     "faceh_audit_fp64": ("eb45557958c6547f9ab7b29e17bdec7f82dc94466736b7c02e708efb5ae6452a", "~/forge-faceh-audit"),
     "faceh_ctrl_fp64": ("4910b74d0e7c6ae62644f2a7262578f8aab7388cdacfbb842d66be919291391b", "~/forge-faceh-ctrl"),
+    # 元のセッションの float 化の段 ② と段 ③ の FP64 (plan architecture-float-state-double-geometry §6.5・§6.7)。LHS の座標の差の A/B (plan time_integration-line-viscous-jacobian-faceh §6.9) で読むだけ
+    "fgeom2_fp64": ("1b8590e84ece63ae50a05cd2d6934440be5f90cbf7f7723a40cd6776ee7285a1", "~/forge-fgeom2-fp64"),
+    "fgeom3_fp64": ("129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec", "~/forge-fgeom3-fp64"),
 }
 
 

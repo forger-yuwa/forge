@@ -29,3 +29,22 @@ codex 諮問: [`notes/reviews/2026-10-10-faceh-floor-result-diagnose.md`](../rev
 - 補足: B の水準は 3 本とも約 1 % 低かった (共通の評価でも範囲が分かれた) が、登録外の観測で、切替による再現可能な改善かは未確定。k・ω の残差は B のほうが約 1〜1.7 % 高い。
 - FP32 のビルドでは、診断の切替の戻り値が `flow_float` (float) に丸められるので、今回の介入と同じにはならない。今回の結果を FP32 の精度の配分にそのまま使わない。
 - run: AWS `~/forge-wallfit/case/45.isobutane_m6_d155/` の `run_0500`〜`run_0505` (軌道)・`run_0510`〜`run_0537` (評価)、判定 `_band_ab/cold_pair/fh_floor_judge.json`。
+
+## ④ の続き: 粘性ヤコビアン plan の再開 (plan `time_integration-line-viscous-jacobian-faceh`) からの申し送り (2026-10-10)
+
+ユーザの方針「速度でなく筋のいい手法」で、全部入り (値 3・マスク 7) が case/45 で壊れる理由を切り分けている。float 化の段 ③ に関わる観測があるので共有する
+(codex 諮問 [`notes/reviews/2026-10-10-lvcaudit-result-diagnose.md`](../reviews/2026-10-10-lvcaudit-result-diagnose.md) の申し送り案を元にした文面)。
+
+> FP64 ビルドでも ISP 0 の block DPLUR は、座標を float にしてから差を取ります (段 ③ の前の経路)。case/45 の監査の記録 (`run_0183` の res_100000、5 本の壁法線のライン、
+> `run_0550_lvcaudit`、plan §6.8) では、壁法線のライン面の β・κ に、double の座標から計算した係数との差が最大 10.8 % ありました (壁から 0〜15 番目の節点で 3〜11 %、52 番目まで 1e-3 超、294 面)。
+> 例: 壁の隣の dcc が double 2.679e-8 に対し float の座標の差で 3.003e-8 (y の float の ulp 7.5e-9)。ライン外の面は 1e-3 以内。
+> 同じ幾何は B0 のスカラーの対角と、キー 5 の熱伝導の対角にも使われます。元の plan §4.2a・段 ③ の対象には既に含まれています。
+> 今回の発散への因果と B0 の収束の挙動への影響は未確定です。段 ② と段 ③ の FP64 のバイナリで、LHS の座標の差だけを変えた値 3・マスク 7 の A/B を回します (plan §6.9、run は case/45 の 0560〜0566)。
+> 腕の前に、同じ凍結入力で段 ② と段 ③ の残差 (全節点の 6〜8 場と `rhs_s0`) が変わらないことと、係数の変化が double の差 e で説明できることを事前のゲート (`lvcgeom_pregate.py`) で確かめます。
+> 訂正: そちらの `run_0419` のビット一致は段 ③ の中の旧式・新式の比較で、段 ② と段 ③ のバイナリの間の比較ではないと理解しました (codex plan-5 レビュー M1)。
+> 結果は共有します。残差の固定状態での不変性と、LHS・更新の履歴の変化を分けて検証してください。
+
+- 段 ② と段 ③ のバイナリ (`~/forge-fgeom2-fp64`・`~/forge-fgeom3-fp64`) は読むだけで、再ビルドしない。run は AWS の自分の作業ツリー `~/forge-faceh-audit/case/45.isobutane_m6_d155/` に置く (`~/forge-wallfit` は触らない、`run_0183` はリンク)。
+- 監査用のビルド (`-DFORGE_LINE_AUDIT`、`~/forge-faceh-audit`) と対照の通常のビルド (`~/forge-faceh-ctrl`) は、このブランチの 2d58b457 + typedef double。
+- メッシュの座標の精度: `run_0183` の `nozzle.h5` の `MESH/COORD` は float64 で、書き出した 605 節点の座標は float32 に丸めると変わる (x 0/605、y 5/605 が一致) = double の精度を持っている。
+  今回のずれは LHS で float に落としてから引くことから来ていて、メッシュの側ではない。
