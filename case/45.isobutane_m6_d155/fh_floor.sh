@@ -47,6 +47,7 @@ state() {  # state <名前> <run> <res>: 状態だけを置いたディレクト
   mkdir -p $ST/$1
   [ -f $2/$3 ] || { echo "状態 $2/$3 が無い" >> $LOG; return 1; }
   ln -sfn ../../$2/$3 $ST/$1/$3
+  for y in $2/resolved_species_*.yaml; do ln -sfn ../../$y $ST/$1/$(basename $y); done   # restart_field は場の隣に化学種の記録を要る
   sha256sum $2/$3 | cut -d' ' -f1 > $ST/$1/SHA256
 }
 
