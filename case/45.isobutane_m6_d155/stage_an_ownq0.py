@@ -1,4 +1,5 @@
-"""plan architecture-float-state-double-geometry §6.30 (事前登録) の判定: 共通の Q32 の状態からの最初の 1 回の更新の段ごとの差。stage.sh の後に B で回す。
+"""(登録外の記録) §6.30 の分解を、各 run 自身の Q0 を起点にして計算する変種。前提の「Q0 の一致」は ρE で満たさない (初期化の ρE の組み直しが精度ごとに違う) ので、判定ではなく記録。元の説明:
+plan architecture-float-state-double-geometry §6.30 (事前登録) の判定: 共通の Q32 の状態からの最初の 1 回の更新の段ごとの差。stage.sh の後に B で回す。
 FP64 = run_0494〜0496、float = run_0497〜0499 (各 stage.h5)。保存量 ρ・ρu・ρv・ρE (ρw は 2D で全て 0 なら外す)。
   a = q − Q0、bb = b − Q0、e = q − b − d (double)。精度の間の差 Δx = mean_float(x) − mean_FP64(x) で Δa = Δbb + Δd + Δe を照合する。
   領域: 収縮部の内部 (x/r_t ∈ [−5, −1)・j 20〜60)、軸の近く (j 0〜8)、壁の近く (j 117〜120)。L2 は領域の節点で取る。
@@ -38,7 +39,7 @@ if not OUT["undecidable"]:
         if int(at.get("FORGE_FREEZE_TURB", 0)) != 1: und(f"{r}: SST を止めていない")
     r0 = F64[0]
     for r in S:
-        if any(not np.array_equal(S[r]["Q0"][q], S[r0]["Q0"][q]) for q in Q): und(f"{r}: Q0 が {r0} と違う")
+        pass   # 変種: Q0 の一致は求めない (各 run の Q0 を起点にする)
     print("前提:", json.dumps(OUT["pre"], ensure_ascii=False))
 if not OUT["undecidable"]:
     cc = S[F64[0]]["cc"]; n = len(S[F64[0]]["Q0"]["ro"]); jj = np.arange(n) % NJ; xr = cc[:n, 0] / RT
@@ -46,7 +47,7 @@ if not OUT["undecidable"]:
     qs = [q for q in Q if not (q == "roUz" and all(np.all(S[r]["q"][q] == 0) for r in S))]
     Q0 = S[F64[0]]["Q0"]
     def parts(r, q):
-        d = S[r]; return {"a": d["q"][q] - Q0[q], "bb": d["b"][q] - Q0[q], "d": d["d"][q], "e": d["q"][q] - d["b"][q] - d["d"][q],
+        d = S[r]; return {"a": d["q"][q] - d["Q0"][q], "bb": d["b"][q] - d["Q0"][q], "d": d["d"][q], "e": d["q"][q] - d["b"][q] - d["d"][q],
                           "R": d["R"][q], "asm": d["Q_asm"][q] - d["b"][q]}
     P = {r: {q: parts(r, q) for q in qs} for r in S}
     l2 = lambda v, m: float(np.sqrt(np.mean(v[m] ** 2)))
@@ -77,7 +78,7 @@ if not OUT["undecidable"]:
 else:
     verdict = "判定不能: " + "; ".join(OUT["undecidable"][:4])
 OUT["verdict"] = verdict
-print(f"== VERDICT §6.30: {verdict}")
+print(f"== (記録・登録外、各 run の Q0 起点) 分類: {verdict}")
 # 診断の有無の確認
 chk = {}
 for prec, on, offs in (("FP64", F64[0], ("_stage/off_f64_1", "_stage/off_f64_2")), ("float", F32[0], ("_stage/off_f32_1", "_stage/off_f32_2"))):
@@ -90,4 +91,4 @@ for prec, on, offs in (("FP64", F64[0], ("_stage/off_f64_1", "_stage/off_f64_2")
     except Exception as ex:
         chk[prec] = dict(error=str(ex)); print(f"  診断の有無 {prec}: 確認できない ({ex})")
 OUT["diag_on_off"] = chk
-(HERE / "_band_ab/cold_pair/stage_judge.json").write_text(json.dumps(OUT, indent=1, ensure_ascii=False, default=float)); print("→ _band_ab/cold_pair/stage_judge.json")
+(HERE / "_band_ab/cold_pair/stage_ownq0_record.json").write_text(json.dumps(OUT, indent=1, ensure_ascii=False, default=float)); print("→ _band_ab/cold_pair/stage_ownq0_record.json")
