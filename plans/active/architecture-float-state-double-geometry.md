@@ -801,6 +801,19 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 - **書いてよい範囲**: 共通の入力からの最初の 1 回の更新の精度の差は、atomicAdd の順番による再実行の揺れと同じ桁で、この 1 step の診断では差の発生の段を分けられない。ずれ (§6.27) は多くの step にわたる積み重ねで育つ。初期化で ρE を組み直す往復が精度ごとに違うこと自体は、丸めの水準 (相対の大きいところは ρE ≈ 0 の節点)。
 - 次の段は諮ってから。
 
+### 6.32 事前登録: block の系の組み立ての精度の感度試験 (2026-10-11、codex diagnose、実行前)
+
+- **codex (diagnose) に諮った**: `notes/reviews/2026-10-11-double-solve-trajectory-diagnose.md` — 追加の比較は採用。ただし「線形の解き全体の double 化」ではなく「block の系の組み立ての精度の感度試験」と定義し直す。採否は §6.1。
+  - **範囲の訂正 (Major 1)**: `time.deltaT.implicitSolvePrecision: 1` は `implicit_defect_correction_block_d<ST>` の演算 (対角・ライン外の近傍の寄与・右辺の組み立て) を double にするが、`diag`・`rhs`・`K` の保存は `flow_float` のまま (`timeIntegration_d.cu:952, 1184`)。ライン Thomas の分解と代入は別のカーネルで、既定で double (`:2339, 2417`)。
+  - **結論の範囲 (Major 2)**: 「登録の窓の偏りを、この設定の変更で抑えられた/抑えられなかった」まで。発生源・必要性・固定点の偏りは言わない。
+- **腕**: §6.26 の float の腕 B = `run_0488_tr_f32`・B′ = `run_0489_tr_f32b` を対照に、同じバイナリ (`~/forge-fgeom7-f32`)・入力 (`_tr/q32_init.h5`)・環境変数 (`FORGE_CUDA_BLOCKSIZE=128`・`FORGE_OMEGA_BUDGET=1`・`FORGE_DIAG_COMMIT_LOSS=500`)・設定で、`implicitSolvePrecision` だけを 0 → 1 にした C = `run_0590_ds_f32`・C′ = `run_0591_ds_f32b`。各 30,000 step・500 ごと、インスタンス B。A = `run_0487_tr_fp64` は参照の軌跡。台本 `ds.sh`、判定 `ds_an.py`。
+- **前提** (Major 4、総合の判定の前に確かめる。欠ければ判定不能): C・C′ の全期間の残差・全出力の有限性と 61 出力、`check_convergence` の実行。C と B の設定の差が `implicitSolvePrecision` の 1 行だけ。バイナリの sha256 が §6.26 の float と同じ。初期化後の保存量 (res_0) が B・B′・C・C′ でビット一致 (§6.31 の ρE の組み直しは同じ float のビルドなら同じはず)。
+- **判定** (Major 3、θ_r の 3 断面・W1・W2、Δ と D は §6.26 と同じ): mB = mean(ΔB, ΔB′)、mC = mean(ΔC, ΔC′)、N_B = |ΔB − ΔB′|、N_C = |ΔC − ΔC′|。
+  - 結果 A「抑制」: max(|ΔC − ΔA|, |ΔC′ − ΔA|) + 10N_C ≤ 0.1|D|、かつ sign(D)·(mB − mC) ≥ 0.5|D|、かつ |mB − mC| > 10·max(N_B, N_C) → 「block の系の組み立ての丸めが偏りを増幅しており、この部分の double 化だけで登録の窓の偏りを 9 割以上抑えられる」(第 1 仮説) を支持。
+  - 結果 B「抑制不十分」: C・C′ がそれぞれ A から D の向きへ 0.5|D| 以上、かつ |mC − ΔA| > 10N_C → 第 1 仮説の「この変更だけで十分」を棄却。
+  - 両窓・3 断面で揃わなければ判別不能。Q_w は副判定として記録。暫定の診断の基準で、信頼区間ではない。
+- やらない: ライン Thomas の double 化を新しく実装すること、差が残っただけで左辺を候補から外すこと、差が縮んだだけで根治とすること、窓の延長・選び直し。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -812,6 +825,7 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 | diagnose | 2026-10-11 | [2026-10-11-float-cause-step2-design-diagnose.md](../../notes/reviews/2026-10-11-float-cause-step2-design-diagnose.md) | C0/M4/m1 | 全件採用。M1 SST の commit に原因を絞らない。M2 V3 の PASS を残差の一致と読まない (作用素の差を候補に残す)。M3 軌跡の診断は共通の Q32 の起点で (§6.26)。M4 一部だけ double にする A/B は後回し。m1 所要の見積もりを直した。解析領域の短縮は後回し (§6.26) |
 | diagnose | 2026-10-11 | [2026-10-11-next-step-fluct-and-float-diagnose.md](../../notes/reviews/2026-10-11-next-step-fluct-and-float-diagnose.md) | C0/M4/m1 | 全件採用。M1 凍結の定義を「SST の輸送の更新を止める試験」に直す。M2 差が消えたときの結論を「SST の更新・フィードバックが要った」までに限る。M3 §6.27 を全期間の有限性とツールの実行で確かめ直した (確定)。M4 G1・G1x の揺れを格子の性質と言わない (hoop plan 側)。m1 キーを戻す試験は骨格を採用し後回し (hoop plan 側) |
 | diagnose | 2026-10-11 | [2026-10-11-float-after-freeze-diagnose.md](../../notes/reviews/2026-10-11-float-after-freeze-diagnose.md) | C0/M4/m1 | 全件採用。M1 §6.29 の失敗の理由と Δ/δ の書き方を訂正、両仮説とも未確定。M2 系列の有限性・座標・準定常を確かめ直した (`fz_recheck.py`)。M3 次は最初の 1 回の更新の段ごとの診断 (§6.30、§5.1 #17)、double の commit は保留。M4 B − B′ の符号反転を判定に使わない。m1 記録の文を直した |
+| diagnose | 2026-10-11 | [2026-10-11-double-solve-trajectory-diagnose.md](../../notes/reviews/2026-10-11-double-solve-trajectory-diagnose.md) | C0/M4 | 全件採用。M1 `implicitSolvePrecision` の範囲は block の系の組み立て (Thomas は既に double、保存は float) → 感度試験と呼ぶ。M2 結論の範囲を限る。M3 再実行の差を含む判定の式に直した。M4 同じ float のビルドの B 対 C を主の対照とし、ハッシュ・設定・初期化後の保存量を前提で確かめる (§6.32) |
 
 ## 7. 影響範囲
 
@@ -858,3 +872,4 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 - `2026-10-11` — §6.29 の解釈を codex に諮り全件採用 (訂正と確かめ直し)。§6.30 に最初の 1 回の更新の段ごとの診断を事前登録し、実装を §5.1 #17 に入れた。
 - `2026-10-11` — §5.1 #17 (段ごとの更新の診断 `FORGE_DIAG_STAGE_DUMP`) を実装した (implementer)。float・FP64 ともビルド可、`update_d.cu` の SASS は HEAD と一致。§6.30 の記録の時点を実装に合わせて訂正。
 - `2026-10-11` — §6.30 を回した (§6.31): 判定不能 (初期化で ρE が精度ごとに組み直され Q0 がそろわない)。登録外の記録では 1 step の差は再実行の揺れと同じ桁で、段を分けられない。
+- `2026-10-11` — §6.32 に block の系の組み立ての精度の感度試験 (`implicitSolvePrecision` 0 → 1) を事前登録した (codex diagnose)。
