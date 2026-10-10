@@ -41,7 +41,19 @@ struct Ring {
         for (int ic = 0; ic < n; ++ic) ccx[ic] = (ic+0.5f)*h;
         pcx.resize(n); pcy.assign(n, 0.f); pcz.assign(n, 0.f); fx.assign(n, 0.5f);
         for (int ip = 0; ip < n; ++ip) pcx[ip] = (ip+1)*h;
+        // 面の両側の pc − cc (plans/active/architecture-float-state-double-geometry.md 段 ④ でリミタが読む形):
+        // r0 = pc − cc[ic0]、r1 = pc − cc[ic1]。試験の座標は float なので、従来の float の引き算と同じ値。
+        const std::vector<geom_float>* cc[3] = {&ccx, &ccy, &ccz};
+        const std::vector<geom_float>* pcv[3] = {&pcx, &pcy, &pcz};
+        for (int k = 0; k < 3; ++k) {
+            r0[k].resize(n); r1[k].resize(n);
+            for (int ip = 0; ip < n; ++ip) {
+                r0[k][ip] = (*pcv[k])[ip] - (*cc[k])[plane_cells[2*ip]];
+                r1[k][ip] = (*pcv[k])[ip] - (*cc[k])[plane_cells[2*ip+1]];
+            }
+        }
     }
+    std::vector<geom_float> r0[3], r1[3];
 };
 
 __global__ void face_recon_d(int nPlanes, int nCells, const geom_int* plane_cells, const geom_float* ccx, const geom_float* pcx,
@@ -176,6 +188,7 @@ static Case run_case(const Ring& m, int profile, float cfl, int bdf, int nStep, 
     float *dphi=up(phi),*dgx=up(gx),*dgy=up(std::vector<float>(n,0.f)),*dgz=up(std::vector<float>(n,0.f)),*dlim=up(lim),*dres=up(res),*dtd=up(td),*dmf=up(mflux),*dPface=up(std::vector<float>(n,0.f));
     std::vector<float*> hres={dres}, htd={dtd}; float **dres2=up(hres), **dtd2=up(htd);
     double* drn=up(std::vector<double>(1,0.0));
+    geom_float *dr0x=up(m.r0[0]),*dr0y=up(m.r0[1]),*dr0z=up(m.r0[2]),*dr1x=up(m.r1[0]),*dr1y=up(m.r1[1]),*dr1z=up(m.r1[2]);
     Case C; std::vector<float> Pface_h, G_h, H_h;
     for (int step = 0; step < nStep; ++step) {
         cudaMemcpy(D.dqPP, D.dqP, n*sizeof(float), cudaMemcpyDeviceToDevice);
@@ -187,7 +200,7 @@ static Case run_case(const Ring& m, int profile, float cfl, int bdf, int nStep, 
             for (int i = 0; i < n; ++i) phi[i] = qh[i]/ro[i];
             for (int i = 0; i < n; ++i) gx[i] = (phi[(i+1)%n]-phi[(i+n-1)%n])/(2.f*h);
             cudaMemcpy(dphi, phi.data(), n*sizeof(float), cudaMemcpyHostToDevice); cudaMemcpy(dgx, gx.data(), n*sizeof(float), cudaMemcpyHostToDevice);
-            limiter_r1_scaled_d<<<(n+127)/128,128>>>(2, n, n, dpc, dcpi, dcp, dvol, dccx, dccy, dccz, dpcx, dpcy, dpcz, 1.0e-30f, dphi, dlim, dgx, dgy, dgz);
+            limiter_r1_scaled_d<<<(n+127)/128,128>>>(2, n, n, dpc, dcpi, dcp, dvol, dr0x, dr0y, dr0z, dr1x, dr1y, dr1z, 1.0e-30f, dphi, dlim, dgx, dgy, dgz);
             face_recon_d<<<(n+127)/128,128>>>(n, n, dpc, dccx, dpcx, dphi, dgx, dlim, dmf, dPface);
             cudaMemset(dres, 0, n*sizeof(float)); cudaMemset(dtd, 0, n*sizeof(float)); cudaMemset(drn, 0, sizeof(double));
             species_advection_faceY_d<<<(n+127)/128,128>>>(n, n, dnhp, dpc, D.dro, dmf, 1, dPface, dres2, dtd2, 0, D.pq, 1);
@@ -199,7 +212,7 @@ static Case run_case(const Ring& m, int profile, float cfl, int bdf, int nStep, 
         // 終了状態で P_face を再評価 (本番の assembleResidual 相当)
         { auto qh = down(D.dq, (size_t)n); for (int i = 0; i < n; ++i) phi[i] = qh[i]/ro[i]; for (int i = 0; i < n; ++i) gx[i] = (phi[(i+1)%n]-phi[(i+n-1)%n])/(2.f*h);
           cudaMemcpy(dphi, phi.data(), n*sizeof(float), cudaMemcpyHostToDevice); cudaMemcpy(dgx, gx.data(), n*sizeof(float), cudaMemcpyHostToDevice);
-          limiter_r1_scaled_d<<<(n+127)/128,128>>>(2, n, n, dpc, dcpi, dcp, dvol, dccx, dccy, dccz, dpcx, dpcy, dpcz, 1.0e-30f, dphi, dlim, dgx, dgy, dgz);
+          limiter_r1_scaled_d<<<(n+127)/128,128>>>(2, n, n, dpc, dcpi, dcp, dvol, dr0x, dr0y, dr0z, dr1x, dr1y, dr1z, 1.0e-30f, dphi, dlim, dgx, dgy, dgz);
           face_recon_d<<<(n+127)/128,128>>>(n, n, dpc, dccx, dpcx, dphi, dgx, dlim, dmf, dPface); cudaDeviceSynchronize(); }
         C.qH = down(D.dq, (size_t)n); Pface_h = down(dPface, (size_t)n); C.qP = down(D.dqP, (size_t)n);
         G_h = down(D.dG, (size_t)n); H_h = down(D.dH, (size_t)n);
@@ -220,6 +233,7 @@ static Case run_case(const Ring& m, int profile, float cfl, int bdf, int nStep, 
         }
         D.finish(dt);
     }
+    cudaFree(dr0x); cudaFree(dr0y); cudaFree(dr0z); cudaFree(dr1x); cudaFree(dr1y); cudaFree(dr1z);
     return C;
 }
 

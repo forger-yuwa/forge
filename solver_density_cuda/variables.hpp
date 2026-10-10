@@ -232,9 +232,14 @@ public:
         "dcc" , // dcc: distance between two cell centers
         // 面ごとの差 e = cc[ic1] − cc[ic0] (ic0/ic1 = plane_cells の 0/1 番目、境界面はゴースト側が ic1)。
         // double の座標 (mesh::cc64) で引いて 1 回だけ flow_float に丸めた値 (plans/active/
-        // architecture-float-state-double-geometry.md §4.2a)。段 ① では本番のカーネルは読まない
-        // (V0 の評価の経路 §4.2c の新腕だけが読む)。
-        "ge_x" , "ge_y" , "ge_z"
+        // architecture-float-state-double-geometry.md §4.2a)。段 ③ から粘性・拡散・陰解法の対角、段 ④ から再構成
+        // (辺中点の ±0.5·e) とリミタが読む。
+        "ge_x" , "ge_y" , "ge_z" ,
+        // 面の両側の pc − cc: r0 = pc[ip] − cc[ic0]、r1 = pc[ip] − cc[ic1] (ic0/ic1 は plane_cells の 0/1 番目)。
+        // double の値の位置 (mesh::planeCent64・mesh::cc64) で引いて 1 回だけ flow_float に丸めた値 (同 plan §4.2a、段 ④)。
+        // 再構成 (辺中点でない面) とリミタが読む。全面 (ゴースト側を含む)。
+        "gr0_x" , "gr0_y" , "gr0_z" ,
+        "gr1_x" , "gr1_y" , "gr1_z"
     };
 
     // output.extraFields で**だけ**出せる量 (level 2 の既定出力には入れないので、既存 run の res_*.h5 の中身は変わらない)。

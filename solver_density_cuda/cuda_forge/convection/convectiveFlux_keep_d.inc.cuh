@@ -232,8 +232,10 @@ __global__ void KEEP_d
             flow_float p0j  = Ps[ic0], p1j  = Ps[ic1];
             bool cbRecon = false;   // cb 補正の有効面フラグ (内部面かつ両側再構成成功のみ)
             if (keepDissJump >= 1 && ip < geom.nNormalPlanes) {
-                const geom_float d0x = geom.pcx[ip]-geom.ccx[ic0], d0y = geom.pcy[ip]-geom.ccy[ic0], d0z = geom.pcz[ip]-geom.ccz[ic0];
-                const geom_float d1x = geom.pcx[ip]-geom.ccx[ic1], d1y = geom.pcy[ip]-geom.ccy[ic1], d1z = geom.pcz[ip]-geom.ccz[ic1];
+                // pc − cc[ic0] / pc − cc[ic1] は double の値の位置で引いて 1 回だけ丸めた r0 / r1 を読む (段 ④、plan
+                // architecture-float-state-double-geometry §4.2a)
+                const geom_float d0x = geom.gr0_x[ip], d0y = geom.gr0_y[ip], d0z = geom.gr0_z[ip];
+                const geom_float d1x = geom.gr1_x[ip], d1y = geom.gr1_y[ip], d1z = geom.gr1_z[ip];
                 const flow_float roL = ro[ic0] + grd.drodx[ic0]*d0x + grd.drody[ic0]*d0y + grd.drodz[ic0]*d0z;
                 const flow_float roR = ro[ic1] + grd.drodx[ic1]*d1x + grd.drody[ic1]*d1y + grd.drodz[ic1]*d1z;
                 const flow_float pL  = Ps[ic0] + grd.dPdx[ic0]*d0x + grd.dPdy[ic0]*d0y + grd.dPdz[ic0]*d0z;
@@ -414,8 +416,9 @@ __global__ void KEEP_d
             if (keepDissCbCoeff > 0.0 && cbRecon) {
                 // δp^HF は**差分形**で組む: (Ps1−Ps0) + (g1·d1 − g0·d0)。絶対圧力の再構成
                 // pR−pL (数学的に同値) は float32 で p~1e5 の量子化ノイズを拾う。
-                const geom_float e0x = geom.pcx[ip]-geom.ccx[ic0], e0y = geom.pcy[ip]-geom.ccy[ic0], e0z = geom.pcz[ip]-geom.ccz[ic0];
-                const geom_float e1x = geom.pcx[ip]-geom.ccx[ic1], e1y = geom.pcy[ip]-geom.ccy[ic1], e1z = geom.pcz[ip]-geom.ccz[ic1];
+                // pc − cc は r0 / r1 を読む (段 ④、上と同じ)
+                const geom_float e0x = geom.gr0_x[ip], e0y = geom.gr0_y[ip], e0z = geom.gr0_z[ip];
+                const geom_float e1x = geom.gr1_x[ip], e1y = geom.gr1_y[ip], e1z = geom.gr1_z[ip];
                 const flow_float dpRaw = Ps[ic1] - Ps[ic0];
                 const flow_float dpRec = dpRaw
                                        + (grd.dPdx[ic1]*e1x + grd.dPdy[ic1]*e1y + grd.dPdz[ic1]*e1z)

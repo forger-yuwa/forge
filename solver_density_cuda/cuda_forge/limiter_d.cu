@@ -78,8 +78,10 @@ static void limiter_periodic_merged
     limiter_psi_merged_d<SCALED><<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>>(
         cfg.limiter, msh.nCells, msh.nNormalPlanes, msh.map_plane_cells_d,
         msh.map_cell_planes_index_d, msh.map_cell_planes_d,
-        var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
-        var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
+        var.c_d["volume"],
+        var.p_d["ge_x"] , var.p_d["ge_y"] , var.p_d["ge_z"],    // 座標の差 e・r0・r1 (段 ④)
+        var.p_d["gr0_x"], var.p_d["gr0_y"], var.p_d["gr0_z"],
+        var.p_d["gr1_x"], var.p_d["gr1_y"], var.p_d["gr1_z"],
         phi_floor, Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
         matchRecon, (cfg.discretization == "node" ? 1 : 0), cfg.convMethod,
         limScaled, qRef,
@@ -102,8 +104,9 @@ static void limiter_periodic_merged
         limiter_g1_check_periodic_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>>(
             msh.nCells, msh.nNormalPlanes, msh.map_plane_cells_d,
             msh.map_cell_planes_index_d, msh.map_cell_planes_d,
-            var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
-            var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
+            var.p_d["ge_x"] , var.p_d["ge_y"] , var.p_d["ge_z"],    // 座標の差 e・r0・r1 (段 ④)
+            var.p_d["gr0_x"], var.p_d["gr0_y"], var.p_d["gr0_z"],
+            var.p_d["gr1_x"], var.p_d["gr1_y"], var.p_d["gr1_z"],
             Q, s_lim_qmax, s_lim_qmin, limiter_Q, dQdx, dQdy, dQdz,
             (cfg.discretization == "node" ? 1 : 0), cfg.convMethod, kVar, qRefDiag,
             g1_d, nf_d, mx_d, sd_d);
@@ -138,8 +141,12 @@ __global__ void limiter_r1_d
  geom_int nPlanes, geom_int nNormalPlanes, geom_int* plane_cells, 
  geom_int* cell_planes_index, geom_int* cell_planes,  
 
- geom_float* vol ,  geom_float* ccx ,  geom_float* ccy, geom_float* ccz,
- geom_float* pcx ,  geom_float* pcy ,  geom_float* pcz, geom_float* fx,
+ geom_float* vol ,
+ // 面の両側の pc − cc: r0 = pc − cc[plane_cells の 0 番目]、r1 = pc − cc[1 番目] (double の値の位置で引いて 1 回だけ丸めた値、
+ // var.p_d["gr0_*"/"gr1_*"]、plans/active/architecture-float-state-double-geometry.md §4.2a、段 ④)
+ const flow_float* gr0_x, const flow_float* gr0_y, const flow_float* gr0_z,
+ const flow_float* gr1_x, const flow_float* gr1_y, const flow_float* gr1_z,
+ geom_float* fx,
 
  // variables
  flow_float* Q  ,
@@ -217,9 +224,11 @@ __global__ void limiter_r1_d
 
             ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] -ic0;
 
-            dcp_x = pcx[ip] - ccx[ic0];
-            dcp_y = pcy[ip] - ccy[ic0];
-            dcp_z = pcz[ip] - ccz[ic0];
+            // pc − cc[ic0] は ic0 の側の r を読む (段 ④): ic0 が plane_cells の 0 番目なら r0、そうでなければ r1
+            const bool side0 = (plane_cells[2*ip+0] == ic0);
+            dcp_x = side0 ? gr0_x[ip] : gr1_x[ip];
+            dcp_y = side0 ? gr0_y[ip] : gr1_y[ip];
+            dcp_z = side0 ? gr0_z[ip] : gr1_z[ip];
 
             // K9: dcp2_*, ri, rk, rik は未使用（dead）。compute律速の limiter から sqrt 2回/面/変数を除去。
 
@@ -267,8 +276,13 @@ __global__ void limiter_r1_fused5_d
  geom_int nCells,
  geom_int nPlanes, geom_int nNormalPlanes, geom_int* plane_cells,
  geom_int* cell_planes_index, geom_int* cell_planes,
- geom_float* vol, geom_float* ccx, geom_float* ccy, geom_float* ccz,
- geom_float* pcx, geom_float* pcy, geom_float* pcz, geom_float* fx,
+ geom_float* vol,
+ // 座標の差 (double の値の位置で引いて 1 回だけ丸めた面の配列、plans/active/architecture-float-state-double-geometry.md
+ // §4.2a、段 ④): e = cc[plane_cells の 1 番目] − cc[0 番目]、r0 = pc − cc[0 番目]、r1 = pc − cc[1 番目]
+ const flow_float* ge_x,  const flow_float* ge_y,  const flow_float* ge_z,
+ const flow_float* gr0_x, const flow_float* gr0_y, const flow_float* gr0_z,
+ const flow_float* gr1_x, const flow_float* gr1_y, const flow_float* gr1_z,
+ geom_float* fx,
  flow_float* Q0, flow_float* Q1, flow_float* Q2, flow_float* Q3, flow_float* Q4,
  flow_float* L0, flow_float* L1, flow_float* L2, flow_float* L3, flow_float* L4,
  flow_float* d0x, flow_float* d0y, flow_float* d0z,
@@ -311,7 +325,7 @@ __global__ void limiter_r1_fused5_d
     const geom_int index_st = cell_planes_index[ic0];
     const geom_int index_en = cell_planes_index[ic0+1];
     const flow_float volume  = vol[ic0];
-    const geom_float cx0 = ccx[ic0], cy0 = ccy[ic0], cz0 = ccz[ic0];
+    // 座標の差は ge・gr0・gr1 (段 ④) を ic0 の側に合わせて読む (下の side0)。
 
     flow_float qc[5], qmax[5], qmin[5], gx[5], gy[5], gz[5], ltmp[5];
     #pragma unroll
@@ -341,11 +355,13 @@ __global__ void limiter_r1_fused5_d
     for (geom_int ilp=index_st; ilp<index_en; ilp++) {
         geom_int ip = cell_planes[ilp];
         if (ip >= nNormalPlanes) continue;
+        // ic0 が plane_cells の 0 番目か (段 ④): pc − cc[ic0] は r0 / r1、cc[ic1] − cc[ic0] は e / 0 − e
+        const bool side0 = (plane_cells[2*ip+0] == ic0);
         if (matchRecon == 0) {
             // 従来経路 (式は変更前と同一): 双対面重心で g·d を評価し、Qt を作ってから差を取る
-            flow_float dcp_x = pcx[ip]-cx0;
-            flow_float dcp_y = pcy[ip]-cy0;
-            flow_float dcp_z = pcz[ip]-cz0;
+            flow_float dcp_x = side0 ? gr0_x[ip] : gr1_x[ip];
+            flow_float dcp_y = side0 ? gr0_y[ip] : gr1_y[ip];
+            flow_float dcp_z = side0 ? gr0_z[ip] : gr1_z[ip];
             #pragma unroll
             for (int k=0;k<5;k++){
                 flow_float Qt = qc[k] + gx[k]*dcp_x + gy[k]*dcp_y + gz[k]*dcp_z;
@@ -360,11 +376,14 @@ __global__ void limiter_r1_fused5_d
             const geom_int ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
             flow_float dcp_x, dcp_y, dcp_z;
             if (edgeMid != 0) {                      // node: 目標点 = エッジ中点 (g_reconEdgeMid と同じ)
-                dcp_x = (flow_float)0.5*(ccx[ic1]-cx0);
-                dcp_y = (flow_float)0.5*(ccy[ic1]-cy0);
-                dcp_z = (flow_float)0.5*(ccz[ic1]-cz0);
+                // cc[ic1] − cc[ic0]: 0 番目の側は e、1 番目の側は 0 − e (−e と同じ値で、差が 0 のときも従来どおり +0)
+                dcp_x = (flow_float)0.5*(side0 ? ge_x[ip] : (flow_float)0.0 - ge_x[ip]);
+                dcp_y = (flow_float)0.5*(side0 ? ge_y[ip] : (flow_float)0.0 - ge_y[ip]);
+                dcp_z = (flow_float)0.5*(side0 ? ge_z[ip] : (flow_float)0.0 - ge_z[ip]);
             } else {                                  // cell: 双対面重心のままで流束と整合している
-                dcp_x = pcx[ip]-cx0; dcp_y = pcy[ip]-cy0; dcp_z = pcz[ip]-cz0;
+                dcp_x = side0 ? gr0_x[ip] : gr1_x[ip];
+                dcp_y = side0 ? gr0_y[ip] : gr1_y[ip];
+                dcp_z = side0 ? gr0_z[ip] : gr1_z[ip];
             }
             #pragma unroll
             for (int k=0;k<5;k++){
@@ -409,11 +428,15 @@ __global__ void limiter_r1_fused5_d
             // `convectiveFlux_slau_d.inc.cuh:134`)。診断を `matchRecon` で分岐させると
             // `mr0` の構成だけ双対面重心を測ることになり、A/B が別々の点の比較になる。
             // 増分の形 (convM) も流束と同じにする。
+            // 座標の差は pass2 と同じく e・r0・r1 を ic0 の側に合わせて読む (段 ④)
+            const bool side0 = (plane_cells[2*ip+0] == ic0);
             flow_float dx, dy, dz;
             if (edgeMid != 0) {
-                dx = (flow_float)0.5*(ccx[ic1]-cx0); dy = (flow_float)0.5*(ccy[ic1]-cy0); dz = (flow_float)0.5*(ccz[ic1]-cz0);
+                dx = (flow_float)0.5*(side0 ? ge_x[ip] : (flow_float)0.0 - ge_x[ip]);
+                dy = (flow_float)0.5*(side0 ? ge_y[ip] : (flow_float)0.0 - ge_y[ip]);
+                dz = (flow_float)0.5*(side0 ? ge_z[ip] : (flow_float)0.0 - ge_z[ip]);
             } else {
-                dx = pcx[ip]-cx0; dy = pcy[ip]-cy0; dz = pcz[ip]-cz0;
+                dx = side0 ? gr0_x[ip] : gr1_x[ip]; dy = side0 ? gr0_y[ip] : gr1_y[ip]; dz = side0 ? gr0_z[ip] : gr1_z[ip];
             }
             atomicAdd(&g_limSides, 1ULL);
             #pragma unroll
@@ -508,8 +531,11 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
         msh.nCells, \
         msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d, \
         msh.map_cell_planes_index_d , msh.map_cell_planes_d , \
-        var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], \
-        var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"], \
+        var.c_d["volume"], \
+        var.p_d["ge_x"] , var.p_d["ge_y"] , var.p_d["ge_z"], \
+        var.p_d["gr0_x"], var.p_d["gr0_y"], var.p_d["gr0_z"], \
+        var.p_d["gr1_x"], var.p_d["gr1_y"], var.p_d["gr1_z"], \
+        var.p_d["fx"], \
         var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], \
         var.c_d["limiter_ro"], var.c_d["limiter_Ux"], var.c_d["limiter_Uy"], var.c_d["limiter_Uz"], var.c_d["limiter_P"], \
         var.c_d["drodx"], var.c_d["drody"], var.c_d["drodz"], \
@@ -625,8 +651,10 @@ void limiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , va
             limiter_r1_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (
                 cfg.limiter, msh.nCells, msh.nPlanes , msh.nNormalPlanes , msh.map_plane_cells_d,
                 msh.map_cell_planes_index_d , msh.map_cell_planes_d ,
-                var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
-                var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
+                var.c_d["volume"],
+                var.p_d["gr0_x"], var.p_d["gr0_y"], var.p_d["gr0_z"],   // pc − cc の r0・r1 (段 ④)
+                var.p_d["gr1_x"], var.p_d["gr1_y"], var.p_d["gr1_z"],
+                var.p_d["fx"],
                 var.c_d["Y"+i] , var.c_d["limiter_Y"+i] ,
                 var.c_d["dY"+i+"dx"] , var.c_d["dY"+i+"dy"] , var.c_d["dY"+i+"dz"]
             ) ;
@@ -662,8 +690,9 @@ void passiveLimiter_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         limiter_r1_scaled_d<<<cuda_cfg.dimGrid_normalcell_small , cuda_cfg.dimBlock_small>>> (
             cfg.limiter, msh.nCells, msh.nNormalPlanes, msh.map_plane_cells_d,
             msh.map_cell_planes_index_d, msh.map_cell_planes_d,
-            var.c_d["volume"], var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
-            var.p_d["pcx"], var.p_d["pcy"], var.p_d["pcz"],
+            var.c_d["volume"],
+            var.p_d["gr0_x"], var.p_d["gr0_y"], var.p_d["gr0_z"],   // pc − cc の r0・r1 (段 ④)
+            var.p_d["gr1_x"], var.p_d["gr1_y"], var.p_d["gr1_z"],
             static_cast<flow_float>(1.0e-30),
             var.c_d[pn], var.c_d["limiter_"+pn],
             var.c_d["d"+pn+"dx"], var.c_d["d"+pn+"dy"], var.c_d["d"+pn+"dz"]);

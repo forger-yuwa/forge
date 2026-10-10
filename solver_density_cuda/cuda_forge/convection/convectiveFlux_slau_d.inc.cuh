@@ -126,25 +126,21 @@ __global__ void SLAU_d
         geom_float szz = sz[ip];
         geom_float sss = ss[ip];
 
-        flow_float ccx_0 = ccx[ic0];
-        flow_float ccy_0 = ccy[ic0];
-        flow_float ccz_0 = ccz[ic0];
+        // 座標の差は double の値の位置で引いて 1 回だけ丸めた面の配列を読む (plans/active/
+        // architecture-float-state-double-geometry.md §4.2a、段 ④。向きは従来と同じ):
+        //   dcc = e = cc[ic1] − cc[ic0]、dc0p = r0 = pc − cc[ic0]、dc1p = r1 = pc − cc[ic1]
+        // 化学種・受動種の面の再構成も下で同じ dcc・dc0p・dc1p を使う。
+        flow_float dcc_x = geom.ge_x[ip];
+        flow_float dcc_y = geom.ge_y[ip];
+        flow_float dcc_z = geom.ge_z[ip];
 
-        flow_float ccx_1 = ccx[ic1];
-        flow_float ccy_1 = ccy[ic1];
-        flow_float ccz_1 = ccz[ic1];
+        flow_float dc0p_x = geom.gr0_x[ip];
+        flow_float dc0p_y = geom.gr0_y[ip];
+        flow_float dc0p_z = geom.gr0_z[ip];
 
-        flow_float dcc_x = ccx_1 - ccx_0;
-        flow_float dcc_y = ccy_1 - ccy_0;
-        flow_float dcc_z = ccz_1 - ccz_0;
-
-        flow_float dc0p_x = pcx[ip] - ccx_0;
-        flow_float dc0p_y = pcy[ip] - ccy_0;
-        flow_float dc0p_z = pcz[ip] - ccz_0;
-
-        flow_float dc1p_x = pcx[ip] - ccx_1;
-        flow_float dc1p_y = pcy[ip] - ccy_1;
-        flow_float dc1p_z = pcz[ip] - ccz_1;
+        flow_float dc1p_x = geom.gr1_x[ip];
+        flow_float dc1p_y = geom.gr1_y[ip];
+        flow_float dc1p_z = geom.gr1_z[ip];
         if (g_reconEdgeMid == 1 && ip < nNormalPlanes) {   // node: 目標点 = エッジ中点 (SU2 流)
             dc0p_x = 0.5f*dcc_x; dc0p_y = 0.5f*dcc_y; dc0p_z = 0.5f*dcc_z;
             dc1p_x = -0.5f*dcc_x; dc1p_y = -0.5f*dcc_y; dc1p_z = -0.5f*dcc_z;

@@ -16,6 +16,7 @@
 #include "renormGate_d.cuh"              // 再正規化の受入ゲートの計測 (#1b-pre)
 #include "twoPhaseUpdateDiag_d.cuh"      // 診断 G3-b の記録スロット (FORGE_DIAG_TP_UPDATE; plan condensation-two-phase-default #4g3)
 #include "twoPhaseOperatorDiag_d.cuh"    // 診断 G3-a の面の記録 (FORGE_DIAG_TP_OPERATOR; plan condensation-two-phase-default #4g3・#4pjg)
+#include "commitLossDiag.hpp"            // 診断 FORGE_DIAG_COMMIT_LOSS (plan architecture-float-state-double-geometry §4.5、既定 off)
 
 #include <cmath>
 #include <iostream>
@@ -1018,9 +1019,16 @@ void speciesTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& c
     // speciesImplicitRelax (既定 1.0 = 現行と同じ写像) と scalarCflMax は timeIntegration 11 の point-implicit 経路にだけ効く。
     const flow_float relax = static_cast<flow_float>(cfg.speciesImplicitRelax);
     const flow_float dts   = scalarDtScale(cfg);
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): 計る step だけ、point-implicit のカーネルに relax·δ の書き先を渡し、
+    // commit の直後 (再正規化の前) に Q_before = roY{s}N・Q_after = roY{s} と比べる。off では nullptr のまま。
+    const bool commitLoss = commitLossDiag::active() && cfg.timeIntegration == 11;
+    double* diagDq = commitLoss ? commitLossDiag::speciesDqBuffer() : nullptr;
     for (int s = 0; s < var.nSpeciesRegistered; s++) {
         const ScalarTransportDesc desc = buildSpeciesDesc(var, s);
-        scalarTimeIntegration_d(loop, cfg, cuda_cfg, msh, var, desc, relax, dts);
+        scalarTimeIntegration_d(loop, cfg, cuda_cfg, msh, var, desc, relax, dts, diagDq);
+        if (commitLoss)
+            commitLossDiag::speciesCommitPointImplicit(msh, s, desc.rho_phi_N, desc.rho_phi, diagDq,
+                                                       static_cast<double>(desc.floor));
     }
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
@@ -1109,6 +1117,10 @@ void speciesImplicitDPLURSolve_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg
             var.c_d["roY"+i+"N"],
             var.c_d["dq_roY"+i+"_old"],
             (s == cfg.condGasSpecies) ? tpuSlots() : nullptr);   // 診断 G3-b (既定 nullptr)
+        // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): commit の直後に Q_before = roY{s}N・dq_req = dq_roY{s}_old・Q_after = roY{s}
+        // (床 0 は species_commit_correction_d の max(·, 0))
+        if (commitLossDiag::active())
+            commitLossDiag::speciesCommitDPLUR(msh, s, var.c_d["roY"+i+"N"], var.c_d["roY"+i], var.c_d["dq_roY"+i+"_old"], 0.0);
     }
 
     gpuErrchk( cudaPeekAtLastError() );
