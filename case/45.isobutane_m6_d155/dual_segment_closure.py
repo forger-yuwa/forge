@@ -254,3 +254,38 @@ for name, (fx_, bx_, fy_, by_) in M.items():
 b = res43["B (Σ r_k S_k)"]
 ok = b["Ex28"] <= 1e-10 and b["Ey28"] <= 1e-10 and b["over_x"] == 0 and b["over_y"] == 0
 print(f"== VERDICT §4.3: {'B が合格 (j 2〜8 の E_x・E_y ≤ 1e-10、全域で丸めの規模以内)' if ok else 'B が不合格 (集約の誤差だけという仮説を棄却、境界の所属・向き・面積を点検し直す)'}")
+
+# ==== plan axisymmetric-freestream-hoop-gauge §4.8 (事前登録): 境界の半割面の端点を丸めた中点 M̃ にそろえる CPU の A/B ====
+# A: 今の半割面 (ベクトル 0.5·(B−A)、r = (3N+O)/4 の y) = §4.3 の B。B: N → M̃ = fl(0.5·(x_a + x_b)) の区間、S = rot(M̃ − N) を外向き、r = (N_y + M̃_y)/2。
+bal_x = np.zeros(nP - nInt); bal_y = np.zeros(nP - nInt); dSmax = 0.0
+for b in f['BCONDS']:
+    g = f['BCONDS'][b]
+    ipl = g['iPlanes'][:]; ipl = ipl[ipl >= 0]
+    node2hp = {int(pA[i]): int(i - nInt) for i in ipl}
+    for (a, bb) in g['vizBfaceNodes'][:].reshape(-1, 2):
+        k = min(a, bb) * nN + max(a, bb)
+        jq = np.searchsorted(key_sorted, k); q = gq[qkey_order[jq]]
+        ex = x[bb] - x[a]; ey = y[bb] - y[a]; s0, s1 = ey, -ex
+        mxe, mye = 0.5 * (x[a] + x[bb]), 0.5 * (y[a] + y[bb])            # 丸めた中点 M̃ (内部の区間と同じ演算)
+        outward = (s0 * (mxe - G[q, 0]) + s1 * (mye - G[q, 1])) >= 0
+        for N in (a, bb):
+            dx_, dy_ = mxe - x[N], mye - y[N]
+            h0, h1 = dy_, -dx_
+            if (h0 * s0 + h1 * s1 >= 0) != outward: h0, h1 = -h0, -h1   # 辺の外向きの法線と同じ向きに
+            r_ = 0.5 * (y[N] + mye)
+            hp = node2hp[int(N)]
+            bal_x[hp] += r_ * h0; bal_y[hp] += r_ * h1
+print("\n== §4.8 の A/B: 境界の半割面の端点 (A 今 / B 丸めた中点にそろえる)。内部の面はどちらも区間ごとの W")
+ver48 = {}
+for name, (bx_, by_) in (("A (今の半割面)", (bexact_x, bexact)), ("B (M̃ にそろえる)", (bal_x, bal_y))):
+    Sx = node_sum(exact_fx, bx_); Sy = node_sum(exact_f, by_); Ax = node_abs(exact_fx, bx_); Ay = node_abs(exact_f, by_)
+    Ex = np.abs(Sx) / Ap; Ey = np.abs(Sy - Ap) / Ap; m28 = (j >= 2) & (j <= 8)
+    ox = int(np.count_nonzero(np.abs(Sx) > 100 * eps * (Ap + Ax))); oy = int(np.count_nonzero(np.abs(Sy - Ap) > 100 * eps * (Ap + Ay)))
+    print(f"  {name}: 超えた CV x {ox}・y {oy} | j 2〜8 の最大 E_x {Ex[m28].max():.3e}・E_y {Ey[m28].max():.3e} | 全域の最大 E_x {Ex.max():.3e}・E_y {Ey.max():.3e}")
+    ver48[name] = (ox, oy, float(Ex[m28].max()), float(Ey[m28].max()))
+print(f"  (記録) 半割面の W の変化の最大 |ΔW|/|W_A|: x {np.max(np.abs(bal_x - bexact_x) / np.maximum(np.abs(bexact_x), 1e-300)):.3e}・y {np.max(np.abs(bal_y - bexact) / np.maximum(np.abs(bexact), 1e-300)):.3e}")
+a_, b_ = ver48["A (今の半割面)"], ver48["B (M̃ にそろえる)"]
+if (a_[0], a_[1]) != (2664, 1534): v = f"比較は無効 (A が §4.4 の FAIL を再現しない: {a_[:2]})"
+elif b_[0] == 0 and b_[1] == 0 and b_[2] <= 1e-10 and b_[3] <= 1e-10: v = "支持 (端点をそろえると全 CV で今の閾値に収まる)"
+else: v = "棄却 (B にも超過が残る)"
+print(f"== VERDICT §4.8: {v}")
