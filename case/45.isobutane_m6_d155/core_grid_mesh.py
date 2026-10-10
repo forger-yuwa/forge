@@ -16,6 +16,7 @@ usage (design/.venv-opt の python):
                                      _band_ab/core_grid/prep_<格子>/ に作り、品質・第一層・壁・法線・壁距離・初期値を検査する
                                      (FORGE_BIN・REAL_CONVERTER・FORGE_CONVERTER は run_cold_pair.sh と同じに設定して呼ぶ)
   python core_grid_mesh.py prep-compare                                  (AWS) prep_Gc と prep_G2 で座標が一致する範囲 (列ごと)
+  python core_grid_mesh.py view [--g0-res RES_H5]                       ParaView で見る表示用ファイル (G0・G1・G1x) を _band_ab/core_grid/view/ に書く
   python core_grid_mesh.py prep-ic                                       (AWS) 移送後の初期値 (nozzle.h5 の保存量) の非有限・正値と、
                                      新しい nj で reduce_fields が通ること (θ_r・δ_loc を G0 の res_100000 と並べる)
   python core_grid_mesh.py post-ab   [--wall-ref DIR] [--g0-res RES_H5] [--band-dir DIR]
@@ -624,14 +625,65 @@ def cmd_prep_ic(a):
     return out
 
 
+def cmd_view(a):
+    """ParaView 用の表示ファイル (mesh_view.py と同じ形式: XDMF + HDF5、四角形の一次要素)。座標は物理壁から生成 (準備の nozzle.h5 と差 0)。
+    節点: y_over_rt (列の壁節点までの直線距離 / r_t)、y_plus_est (G0 の解の壁の u_τ/ν_w を同じ x に補間した見積もり)、eta (r/r_w)。
+    セル: aspect_ratio、skew、dr_over_dx、dx_over_rt、dr_over_rt。"""
+    import csv
+    import h5py
+    wall = Wall(Path(a.wall_ref)); RT = wall.scale
+    rows = list(csv.DictReader(open(Path(a.g0_res).parent / "y1p_115000_wall.csv")))
+    xw0 = np.array([float(r["x"]) for r in rows]) / RT
+    ut = np.array([np.sqrt(abs(float(r["tau_t"])) / float(r["rho_w"])) for r in rows]); nu = np.array([float(r["mu_w"]) / float(r["rho_w"]) for r in rows])
+    o = np.argsort(xw0); xw0, ut_nu = xw0[o], (ut / nu)[o]
+    vdir = OUT / "view"; vdir.mkdir(parents=True, exist_ok=True); out = {}
+    c1, _, _ = ARMS["G1"]; nj1 = YAML_NJ["G1"]
+    for name, m in (("G0", mesh_block()), ("G1", mesh_block(nj1, c1)), ("G1x", mesh_block(nj1, c1, xcoarse=True))):
+        P, prm = generate(wall, m); ni, nj = P.shape[:2]
+        X = np.concatenate([P.reshape(-1, 2), np.zeros((ni * nj, 1))], 1) * RT
+        y = np.linalg.norm(P - P[:, -1:, :], axis=2)                                  # [r_t]
+        yplus = y * RT * np.interp(P[:, -1, 0], xw0, ut_nu)[:, None]
+        I, J = np.meshgrid(np.arange(ni - 1), np.arange(nj - 1), indexing="ij")
+        n00 = (I * nj + J).ravel(); quad = np.stack([n00, n00 + nj, n00 + nj + 1, n00 + 1], 1).astype(np.int32)
+        Pq = P.reshape(-1, 2)[quad]
+        e = [np.linalg.norm(Pq[:, (k + 1) % 4] - Pq[:, k], axis=1) for k in range(4)]
+        E = np.stack(e, 1); ar = E.max(1) / E.min(1)
+        ang = []
+        for k in range(4):
+            u = Pq[:, (k - 1) % 4] - Pq[:, k]; v = Pq[:, (k + 1) % 4] - Pq[:, k]
+            ang.append(np.degrees(np.arccos(np.clip((u * v).sum(1) / (np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1)), -1, 1))))
+        A = np.stack(ang, 1); skew = np.maximum((A.max(1) - 90) / 90, (90 - A.min(1)) / 90)
+        dx = 0.5 * (e[0] + e[2]); dr = 0.5 * (e[1] + e[3])
+        h5 = vdir / f"meshview_{name}.h5"
+        with h5py.File(h5, "w") as h:
+            h["geom/xyz"] = X; h["topo/quad"] = quad
+            h["node/y_over_rt"] = y.ravel(); h["node/y_plus_est"] = yplus.ravel(); h["node/eta"] = (P[..., 1] / P[:, -1:, 1]).ravel()
+            h["cell/aspect_ratio"] = ar; h["cell/skew"] = skew; h["cell/dr_over_dx"] = dr / dx; h["cell/dx_over_rt"] = dx; h["cell/dr_over_rt"] = dr
+        nn, nc = X.shape[0], quad.shape[0]
+        def attr(nm, center, n):
+            grp = "node" if center == "Node" else "cell"
+            return (f'      <Attribute Name="{nm}" AttributeType="Scalar" Center="{center}">\n'
+                    f'        <DataItem Dimensions="{n}" NumberType="Float" Precision="8" Format="HDF">{h5.name}:/{grp}/{nm}</DataItem>\n      </Attribute>\n')
+        xmf = ('<?xml version="1.0" ?>\n<Xdmf Version="3.0">\n  <Domain>\n    <Grid Name="case45_' + name + '" GridType="Uniform">\n'
+               f'      <Topology TopologyType="Quadrilateral" NumberOfElements="{nc}">\n        <DataItem Dimensions="{nc} 4" NumberType="Int" Precision="4" Format="HDF">{h5.name}:/topo/quad</DataItem>\n      </Topology>\n'
+               f'      <Geometry GeometryType="XYZ">\n        <DataItem Dimensions="{nn} 3" NumberType="Float" Precision="8" Format="HDF">{h5.name}:/geom/xyz</DataItem>\n      </Geometry>\n'
+               + "".join(attr(k, "Node", nn) for k in ("y_over_rt", "y_plus_est", "eta"))
+               + "".join(attr(k, "Cell", nc) for k in ("aspect_ratio", "skew", "dr_over_dx", "dx_over_rt", "dr_over_rt"))
+               + "    </Grid>\n  </Domain>\n</Xdmf>\n")
+        (vdir / f"meshview_{name}.xmf").write_text(xmf)
+        out[name] = {"file": str(vdir / f"meshview_{name}.xmf"), "ni": ni, "nj": nj, "nodes": nn, "cells": nc, "ar_max": float(ar.max()), "skew_max": float(skew.max())}
+        print(f"[view] {name}: {vdir / f'meshview_{name}.xmf'} (節点 {nn}、セル {nc})", flush=True)
+    return out
+
+
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x"])
+    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
     ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x"], help="prep: 格子")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()
-    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x}[a.cmd](a)
+    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x, "view": cmd_view}[a.cmd](a)
     out["problem"] = PROBLEM.name; out["wall_ref"] = a.wall_ref
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
