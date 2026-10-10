@@ -1,0 +1,1635 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-dt §6 (事前のゲート)",
+ "dump_config": {
+  "a": {
+   "mesh/discretization": "node",
+   "mesh/isAxisymmetric": 1,
+   "mesh/axisCentroidShift": 1,
+   "mesh/nodeWallDirichlet": 1,
+   "mesh/meshFileName": "nozzle.h5",
+   "mesh/valueFileName": "nozzle.h5",
+   "gpu": 1,
+   "solver": "SLAU",
+   "physProp/thermalMethod": 2,
+   "physProp/viscMethod": 2,
+   "physProp/visc": 1.8e-05,
+   "physProp/thermCond": 0.0257,
+   "physProp/prandtlLam": 0.72,
+   "physProp/cp": 1360.0,
+   "physProp/gamma": 1.27354,
+   "physProp/species": [
+    {
+     "name": "MIXDRY",
+     "lump": {
+      "CO2": 0.12550903682310086,
+      "O2": 0.022645262404230745,
+      "N2": 0.8518457007726683
+     },
+     "basis": "mole"
+    },
+    "H2O"
+   ],
+   "physProp/transport/CO2": "cea",
+   "physProp/transport/O2": "cea",
+   "physProp/transport/N2": "cea",
+   "physProp/transport/H2O": "custom:h2o_iapws_cea_v1",
+   "physProp/thermoHrefTemp": 298.15,
+   "time/unsteady": 0,
+   "time/dualTime": 0,
+   "time/last/nStepOuter": 1,
+   "time/deltaT/lineViscCoupling": 3,
+   "time/deltaT/implicitThermalJacobian": 5,
+   "time/deltaT/lineImplicit": 1,
+   "time/deltaT/lineDtDirectional": 1,
+   "time/deltaT/control": 1,
+   "time/deltaT/dt": "1e-8",
+   "time/deltaT/cfl": 4.0,
+   "time/deltaT/cfl_pseudo": 4.0,
+   "time/deltaT/dt_min": "1e-9",
+   "time/deltaT/dt_max": 0.001,
+   "time/deltaT/blockDPLUR": 1,
+   "time/deltaT/implicitRelax": 0.7,
+   "time/deltaT/lowMachPrecond": 0,
+   "time/deltaT/detectNaN": 1,
+   "time/outStepStart": 0,
+   "time/outStepInterval": 1,
+   "time/timeIntegration": 11,
+   "time/nStepInner": 5,
+   "space/limiterRoRef": 0.8739869154,
+   "space/limiterPRef": 387491.0573,
+   "space/limiterARef": 359.7712185,
+   "space/convMethod": 1,
+   "space/limiter": 2,
+   "turbulence/model": "sst",
+   "turbulence/scalarDiffusion": 1,
+   "turbulence/dilatationCorrection": 2,
+   "turbulence/katoLaunder": 1,
+   "turbulence/wallTreatmentSST": 0,
+   "turbulence/turbulentPrandtl": 0.9,
+   "initial": "uniform_p101325_u10",
+   "output/level": 1,
+   "output/extraFields": [
+    "res_ro",
+    "res_roUx",
+    "res_roUy",
+    "res_roUz",
+    "res_roe",
+    "res_roK",
+    "res_roOmega",
+    "res_roY0",
+    "res_roY1",
+    "volume"
+   ]
+  },
+  "a2": {
+   "mesh/discretization": "node",
+   "mesh/isAxisymmetric": 1,
+   "mesh/axisCentroidShift": 1,
+   "mesh/nodeWallDirichlet": 1,
+   "mesh/meshFileName": "nozzle.h5",
+   "mesh/valueFileName": "nozzle.h5",
+   "gpu": 1,
+   "solver": "SLAU",
+   "physProp/thermalMethod": 2,
+   "physProp/viscMethod": 2,
+   "physProp/visc": 1.8e-05,
+   "physProp/thermCond": 0.0257,
+   "physProp/prandtlLam": 0.72,
+   "physProp/cp": 1360.0,
+   "physProp/gamma": 1.27354,
+   "physProp/species": [
+    {
+     "name": "MIXDRY",
+     "lump": {
+      "CO2": 0.12550903682310086,
+      "O2": 0.022645262404230745,
+      "N2": 0.8518457007726683
+     },
+     "basis": "mole"
+    },
+    "H2O"
+   ],
+   "physProp/transport/CO2": "cea",
+   "physProp/transport/O2": "cea",
+   "physProp/transport/N2": "cea",
+   "physProp/transport/H2O": "custom:h2o_iapws_cea_v1",
+   "physProp/thermoHrefTemp": 298.15,
+   "time/unsteady": 0,
+   "time/dualTime": 0,
+   "time/last/nStepOuter": 1,
+   "time/deltaT/lineViscCoupling": 3,
+   "time/deltaT/implicitThermalJacobian": 5,
+   "time/deltaT/lineImplicit": 1,
+   "time/deltaT/lineDtDirectional": 1,
+   "time/deltaT/control": 1,
+   "time/deltaT/dt": "1e-8",
+   "time/deltaT/cfl": 4.0,
+   "time/deltaT/cfl_pseudo": 4.0,
+   "time/deltaT/dt_min": "1e-9",
+   "time/deltaT/dt_max": 0.001,
+   "time/deltaT/blockDPLUR": 1,
+   "time/deltaT/implicitRelax": 0.7,
+   "time/deltaT/lowMachPrecond": 0,
+   "time/deltaT/detectNaN": 1,
+   "time/outStepStart": 0,
+   "time/outStepInterval": 1,
+   "time/timeIntegration": 11,
+   "time/nStepInner": 5,
+   "space/limiterRoRef": 0.8739869154,
+   "space/limiterPRef": 387491.0573,
+   "space/limiterARef": 359.7712185,
+   "space/convMethod": 1,
+   "space/limiter": 2,
+   "turbulence/model": "sst",
+   "turbulence/scalarDiffusion": 1,
+   "turbulence/dilatationCorrection": 2,
+   "turbulence/katoLaunder": 1,
+   "turbulence/wallTreatmentSST": 0,
+   "turbulence/turbulentPrandtl": 0.9,
+   "initial": "uniform_p101325_u10",
+   "output/level": 1,
+   "output/extraFields": [
+    "res_ro",
+    "res_roUx",
+    "res_roUy",
+    "res_roUz",
+    "res_roe",
+    "res_roK",
+    "res_roOmega",
+    "res_roY0",
+    "res_roY1",
+    "volume"
+   ]
+  },
+  "b": {
+   "mesh/discretization": "node",
+   "mesh/isAxisymmetric": 1,
+   "mesh/axisCentroidShift": 1,
+   "mesh/nodeWallDirichlet": 1,
+   "mesh/meshFileName": "nozzle.h5",
+   "mesh/valueFileName": "nozzle.h5",
+   "gpu": 1,
+   "solver": "SLAU",
+   "physProp/thermalMethod": 2,
+   "physProp/viscMethod": 2,
+   "physProp/visc": 1.8e-05,
+   "physProp/thermCond": 0.0257,
+   "physProp/prandtlLam": 0.72,
+   "physProp/cp": 1360.0,
+   "physProp/gamma": 1.27354,
+   "physProp/species": [
+    {
+     "name": "MIXDRY",
+     "lump": {
+      "CO2": 0.12550903682310086,
+      "O2": 0.022645262404230745,
+      "N2": 0.8518457007726683
+     },
+     "basis": "mole"
+    },
+    "H2O"
+   ],
+   "physProp/transport/CO2": "cea",
+   "physProp/transport/O2": "cea",
+   "physProp/transport/N2": "cea",
+   "physProp/transport/H2O": "custom:h2o_iapws_cea_v1",
+   "physProp/thermoHrefTemp": 298.15,
+   "time/unsteady": 0,
+   "time/dualTime": 0,
+   "time/last/nStepOuter": 1,
+   "time/deltaT/lineViscCoupling": 3,
+   "time/deltaT/lineDtDirectionalCap": 50.0,
+   "time/deltaT/implicitThermalJacobian": 5,
+   "time/deltaT/lineImplicit": 1,
+   "time/deltaT/lineDtDirectional": 1,
+   "time/deltaT/control": 1,
+   "time/deltaT/dt": "1e-8",
+   "time/deltaT/cfl": 4.0,
+   "time/deltaT/cfl_pseudo": 4.0,
+   "time/deltaT/dt_min": "1e-9",
+   "time/deltaT/dt_max": 0.001,
+   "time/deltaT/blockDPLUR": 1,
+   "time/deltaT/implicitRelax": 0.7,
+   "time/deltaT/lowMachPrecond": 0,
+   "time/deltaT/detectNaN": 1,
+   "time/outStepStart": 0,
+   "time/outStepInterval": 1,
+   "time/timeIntegration": 11,
+   "time/nStepInner": 5,
+   "space/limiterRoRef": 0.8739869154,
+   "space/limiterPRef": 387491.0573,
+   "space/limiterARef": 359.7712185,
+   "space/convMethod": 1,
+   "space/limiter": 2,
+   "turbulence/model": "sst",
+   "turbulence/scalarDiffusion": 1,
+   "turbulence/dilatationCorrection": 2,
+   "turbulence/katoLaunder": 1,
+   "turbulence/wallTreatmentSST": 0,
+   "turbulence/turbulentPrandtl": 0.9,
+   "initial": "uniform_p101325_u10",
+   "output/level": 1,
+   "output/extraFields": [
+    "res_ro",
+    "res_roUx",
+    "res_roUy",
+    "res_roUz",
+    "res_roe",
+    "res_roK",
+    "res_roOmega",
+    "res_roY0",
+    "res_roY1",
+    "volume"
+   ]
+  },
+  "c": {
+   "mesh/discretization": "node",
+   "mesh/isAxisymmetric": 1,
+   "mesh/axisCentroidShift": 1,
+   "mesh/nodeWallDirichlet": 1,
+   "mesh/meshFileName": "nozzle.h5",
+   "mesh/valueFileName": "nozzle.h5",
+   "gpu": 1,
+   "solver": "SLAU",
+   "physProp/thermalMethod": 2,
+   "physProp/viscMethod": 2,
+   "physProp/visc": 1.8e-05,
+   "physProp/thermCond": 0.0257,
+   "physProp/prandtlLam": 0.72,
+   "physProp/cp": 1360.0,
+   "physProp/gamma": 1.27354,
+   "physProp/species": [
+    {
+     "name": "MIXDRY",
+     "lump": {
+      "CO2": 0.12550903682310086,
+      "O2": 0.022645262404230745,
+      "N2": 0.8518457007726683
+     },
+     "basis": "mole"
+    },
+    "H2O"
+   ],
+   "physProp/transport/CO2": "cea",
+   "physProp/transport/O2": "cea",
+   "physProp/transport/N2": "cea",
+   "physProp/transport/H2O": "custom:h2o_iapws_cea_v1",
+   "physProp/thermoHrefTemp": 298.15,
+   "time/unsteady": 0,
+   "time/dualTime": 0,
+   "time/last/nStepOuter": 1,
+   "time/deltaT/lineViscCoupling": 3,
+   "time/deltaT/implicitThermalJacobian": 5,
+   "time/deltaT/lineImplicit": 1,
+   "time/deltaT/control": 1,
+   "time/deltaT/dt": "1e-8",
+   "time/deltaT/cfl": 4.0,
+   "time/deltaT/cfl_pseudo": 4.0,
+   "time/deltaT/dt_min": "1e-9",
+   "time/deltaT/dt_max": 0.001,
+   "time/deltaT/blockDPLUR": 1,
+   "time/deltaT/implicitRelax": 0.7,
+   "time/deltaT/lowMachPrecond": 0,
+   "time/deltaT/detectNaN": 1,
+   "time/outStepStart": 0,
+   "time/outStepInterval": 1,
+   "time/timeIntegration": 11,
+   "time/nStepInner": 5,
+   "space/limiterRoRef": 0.8739869154,
+   "space/limiterPRef": 387491.0573,
+   "space/limiterARef": 359.7712185,
+   "space/convMethod": 1,
+   "space/limiter": 2,
+   "turbulence/model": "sst",
+   "turbulence/scalarDiffusion": 1,
+   "turbulence/dilatationCorrection": 2,
+   "turbulence/katoLaunder": 1,
+   "turbulence/wallTreatmentSST": 0,
+   "turbulence/turbulentPrandtl": 0.9,
+   "initial": "uniform_p101325_u10",
+   "output/level": 1,
+   "output/extraFields": [
+    "res_ro",
+    "res_roUx",
+    "res_roUy",
+    "res_roUz",
+    "res_roe",
+    "res_roK",
+    "res_roOmega",
+    "res_roY0",
+    "res_roY1",
+    "volume"
+   ]
+  }
+ },
+ "residual_optional_used": [
+  "res_roY0",
+  "res_roY1"
+ ],
+ "struct_rhs": {
+  "run_0584_lvcdt_a_dump": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 0,
+   "4": 0
+  },
+  "run_0586_lvcdt_a_dump2": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 0,
+   "4": 0
+  },
+  "run_0585_lvcdt_b_dump": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 0,
+   "4": 0
+  },
+  "run_0587_lvcdt_c_dump": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 0,
+   "4": 0
+  }
+ },
+ "residual": {
+  "res_ro": {
+   "rerun_bit": false,
+   "rerun": 1.9255430583342559e-16,
+   "b_vs_a": 1.3010426069826053e-16,
+   "c_vs_a": 1.7694179454963432e-16
+  },
+  "res_roUx": {
+   "rerun_bit": false,
+   "rerun": 3.524291969370097e-12,
+   "b_vs_a": 3.637979240772582e-12,
+   "c_vs_a": 3.637978807091713e-12
+  },
+  "res_roUy": {
+   "rerun_bit": false,
+   "rerun": 1.8189895661761823e-12,
+   "b_vs_a": 1.8189894306509108e-12,
+   "c_vs_a": 1.818989444203438e-12
+  },
+  "res_roUz": {
+   "rerun_bit": true,
+   "rerun": 0.0,
+   "b_vs_a": 0.0,
+   "c_vs_a": 0.0
+  },
+  "res_roe": {
+   "rerun_bit": false,
+   "rerun": 2.3110935387649079e-10,
+   "b_vs_a": 2.3078428057488054e-10,
+   "c_vs_a": 2.3110935387649079e-10
+  },
+  "res_roK": {
+   "rerun_bit": false,
+   "rerun": 1.1379786002407855e-13,
+   "b_vs_a": 1.1368683772161603e-13,
+   "c_vs_a": 1.1368683772161603e-13
+  },
+  "res_roOmega": {
+   "rerun_bit": false,
+   "rerun": 9.5367431640625e-07,
+   "b_vs_a": 9.5367431640625e-07,
+   "c_vs_a": 9.5367431640625e-07
+  },
+  "res_roY0": {
+   "rerun_bit": false,
+   "rerun": 1.1102230246251565e-16,
+   "b_vs_a": 1.5785983631388945e-16,
+   "c_vs_a": 1.5785983631388945e-16
+  },
+  "res_roY1": {
+   "rerun_bit": false,
+   "rerun": 1.3742262536253769e-17,
+   "b_vs_a": 1.3742262536253769e-17,
+   "c_vs_a": 1.3742262536253769e-17
+  },
+  "rhs_s0_record_only": {
+   "a2_vs_a": {
+    "n_diff": 20,
+    "max_ulp": 4.0,
+    "max_abs": 2.9103830456733704e-11
+   },
+   "b_vs_a": {
+    "n_diff": 31,
+    "max_ulp": 16.0,
+    "max_abs": 4.656612873077393e-10
+   },
+   "c_vs_a": {
+    "n_diff": 26,
+    "max_ulp": 16.0,
+    "max_abs": 4.656612873077393e-10
+   }
+  }
+ },
+ "intervention": {
+  "b": {
+   "Kprev": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   },
+   "Knext": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   },
+   "r": {
+    "min": 1.0,
+    "median": 1.0,
+    "max": 213.90698358881497,
+    "wall_first": {
+     "1571": 183.6624899445079,
+     "4112": 170.78899916162473,
+     "7984": 171.57620354852264
+    }
+   },
+   "D_max_err_over_tol": 0.041015625,
+   "resolved_over_tol": {
+    "1571": 91008.74212646484,
+    "4112": 153236.8305053711,
+    "7984": 111470.35858154297
+   }
+  },
+  "c": {
+   "Kprev": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   },
+   "Knext": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   },
+   "r": {
+    "min": 1.0,
+    "median": 12.408471586664138,
+    "max": 10695.349179440747,
+    "wall_first": {
+     "1571": 9183.124497225397,
+     "4112": 8539.449958081237,
+     "7984": 8578.81017742613
+    }
+   },
+   "D_max_err_over_tol": 0.046875,
+   "resolved_over_tol": {
+    "1571": 142964.0864238739,
+    "4112": 240814.51521110535,
+    "7984": 175173.0939693451
+   }
+  },
+  "cap_dose": {
+   "max_rel_err": 3.0417991610698885e-16,
+   "capped_nodes": 231,
+   "of": 605,
+   "wall_first_capped": {
+    "1571": true,
+    "4112": true,
+    "7984": true
+   }
+  }
+ },
+ "evidence_sha256": {
+  "run_0584_lvcdt_a_dump/linedump/meta.txt": "53d8208eb239ae6e3e5b76a49ba7cfd357a5ece5f5ae53a6d0b8325f5849952c",
+  "run_0584_lvcdt_a_dump/linedump/D.f64": "92868d7c58e9e5fe01756e0e71b5f8ecc887648b1d5e322da2113f74fd79d147",
+  "run_0584_lvcdt_a_dump/linedump/Kprev.f64": "a20cdd9bc2dfdb431b80261eb86c5d43d535e44ccfbd62f65b6aad31c1011b9a",
+  "run_0584_lvcdt_a_dump/linedump/Knext.f64": "2e9bba22164416b3226df8a6b7519c78e09977c4b68a829fcb4290b292e6e4cc",
+  "run_0584_lvcdt_a_dump/linedump/state_ro_roU_roe_cp_gamma.f64": "b43f72f3b3fed963bc737760390b01f0856067f63e99680fbbfae65b1f1c0f54",
+  "run_0584_lvcdt_a_dump/linedump/dt_vol.f64": "bdd601dbb46aca523707483d3396862bcf5a55ee2988fb0236ccbded1b287394",
+  "run_0584_lvcdt_a_dump/linedump/flags_wall_iso_axis.f64": "abc533890f4aeb48c8d5e2344eedadaed12b63f2e5db0cc6af478f250fd42458",
+  "run_0584_lvcdt_a_dump/linedump/node_line.f64": "43cc737af8cab0e3b48ab722c38dc8872381ff59ca09e7e515668eb597abb10a",
+  "run_0584_lvcdt_a_dump/linedump/rhs_s0.f64": "17063cae59bdaf1b385e48fd29fc28012fda80d431cdeb72e02f3ea0c10610b3",
+  "run_0584_lvcdt_a_dump/res_0.h5": "42498b8723cb708b7fdf54c1c4a3a972339856137144b5e618366c63962f2161",
+  "run_0584_lvcdt_a_dump/res_1.h5": "d0eb366c4883b8ef81fe307d68bfdc3bc40bf17cd3953bd31e7ed5f4f8925770",
+  "run_0584_lvcdt_a_dump/solverConfig.yaml": "f56e788bc6694a2ffca4a240cd8bb8d23d638f966aec5aee3f4eb29bc5d0f69c",
+  "run_0584_lvcdt_a_dump/LVC_TERMS.txt": "10159baf262b43a92d95db59dae1f72c645127301661e0a3ce4e38b295a97c58",
+  "run_0584_lvcdt_a_dump/forge_run.log": "e5cf00873a5e3b00d2d5e85453fff016449934a269c1cb0e5c12333f7181edaa",
+  "run_0584_lvcdt_a_dump/RUN_PROVENANCE.txt": "6a20b275120708070d2c078c3a325a0c3288079489c94bf4bf48d9f8708fb18f",
+  "run_0586_lvcdt_a_dump2/linedump/meta.txt": "53d8208eb239ae6e3e5b76a49ba7cfd357a5ece5f5ae53a6d0b8325f5849952c",
+  "run_0586_lvcdt_a_dump2/linedump/D.f64": "92868d7c58e9e5fe01756e0e71b5f8ecc887648b1d5e322da2113f74fd79d147",
+  "run_0586_lvcdt_a_dump2/linedump/Kprev.f64": "a20cdd9bc2dfdb431b80261eb86c5d43d535e44ccfbd62f65b6aad31c1011b9a",
+  "run_0586_lvcdt_a_dump2/linedump/Knext.f64": "2e9bba22164416b3226df8a6b7519c78e09977c4b68a829fcb4290b292e6e4cc",
+  "run_0586_lvcdt_a_dump2/linedump/state_ro_roU_roe_cp_gamma.f64": "b43f72f3b3fed963bc737760390b01f0856067f63e99680fbbfae65b1f1c0f54",
+  "run_0586_lvcdt_a_dump2/linedump/dt_vol.f64": "bdd601dbb46aca523707483d3396862bcf5a55ee2988fb0236ccbded1b287394",
+  "run_0586_lvcdt_a_dump2/linedump/flags_wall_iso_axis.f64": "abc533890f4aeb48c8d5e2344eedadaed12b63f2e5db0cc6af478f250fd42458",
+  "run_0586_lvcdt_a_dump2/linedump/node_line.f64": "43cc737af8cab0e3b48ab722c38dc8872381ff59ca09e7e515668eb597abb10a",
+  "run_0586_lvcdt_a_dump2/linedump/rhs_s0.f64": "bb7e8093ce5ea443a7d9f7520ea67fc11c667d52074f83c81af9dbd46701ed9f",
+  "run_0586_lvcdt_a_dump2/res_0.h5": "808be83b7fa0a7bd094d8c4ead6867929f984d93b8547e92e1de08d92eea8aaa",
+  "run_0586_lvcdt_a_dump2/res_1.h5": "46630dca077b54fa8a7372f259f1ea081fb933b73c88e12a2bfda0d24fac894c",
+  "run_0586_lvcdt_a_dump2/solverConfig.yaml": "f56e788bc6694a2ffca4a240cd8bb8d23d638f966aec5aee3f4eb29bc5d0f69c",
+  "run_0586_lvcdt_a_dump2/LVC_TERMS.txt": "10159baf262b43a92d95db59dae1f72c645127301661e0a3ce4e38b295a97c58",
+  "run_0586_lvcdt_a_dump2/forge_run.log": "e37dbca1c61c131d38c4d0e3c59b9ffb262940ae3aa49106bd21bdceb5f32e88",
+  "run_0586_lvcdt_a_dump2/RUN_PROVENANCE.txt": "1d40cffa96756fc5fe900a48ce4112bdeb469dc97791180b4612fe05f6c70a70",
+  "run_0585_lvcdt_b_dump/linedump/meta.txt": "53d8208eb239ae6e3e5b76a49ba7cfd357a5ece5f5ae53a6d0b8325f5849952c",
+  "run_0585_lvcdt_b_dump/linedump/D.f64": "135cde2265456c3016d4f7f6ff1fcc0964bbedd812bd0b4b674292a7f41c9699",
+  "run_0585_lvcdt_b_dump/linedump/Kprev.f64": "a20cdd9bc2dfdb431b80261eb86c5d43d535e44ccfbd62f65b6aad31c1011b9a",
+  "run_0585_lvcdt_b_dump/linedump/Knext.f64": "2e9bba22164416b3226df8a6b7519c78e09977c4b68a829fcb4290b292e6e4cc",
+  "run_0585_lvcdt_b_dump/linedump/state_ro_roU_roe_cp_gamma.f64": "b43f72f3b3fed963bc737760390b01f0856067f63e99680fbbfae65b1f1c0f54",
+  "run_0585_lvcdt_b_dump/linedump/dt_vol.f64": "076b7794d1d5a03bbb809410fca36bce42fa9b3342faf76ec111e3d66b25c2ea",
+  "run_0585_lvcdt_b_dump/linedump/flags_wall_iso_axis.f64": "abc533890f4aeb48c8d5e2344eedadaed12b63f2e5db0cc6af478f250fd42458",
+  "run_0585_lvcdt_b_dump/linedump/node_line.f64": "43cc737af8cab0e3b48ab722c38dc8872381ff59ca09e7e515668eb597abb10a",
+  "run_0585_lvcdt_b_dump/linedump/rhs_s0.f64": "3cdd2b6a9d3adcabadcf440b4fcd631bb54a3b0617a7e1531e95483163627ca1",
+  "run_0585_lvcdt_b_dump/res_0.h5": "4e9a87aeafccd92d137115f3c0053f14cf9702f92d7dff87b8ebd7b2030d143e",
+  "run_0585_lvcdt_b_dump/res_1.h5": "73c5d9f208f026a30a68e6cfe3b45c60ea69bad0f5245523c6bfeaecc65f5fb6",
+  "run_0585_lvcdt_b_dump/solverConfig.yaml": "f318762f754e511428d7d385e819bdc2d8a218cc6135bac6366e1607b6951312",
+  "run_0585_lvcdt_b_dump/LVC_TERMS.txt": "10159baf262b43a92d95db59dae1f72c645127301661e0a3ce4e38b295a97c58",
+  "run_0585_lvcdt_b_dump/forge_run.log": "6dbdc9d5ab2e98ec5b1ad8e401bd34e67fb0460ed6ca73cdb79d812cf128f3b3",
+  "run_0585_lvcdt_b_dump/RUN_PROVENANCE.txt": "c0ecb4dd7fb2f3143c2fb389d457cbca213eea52d8eb4b87220883ac67fa241b",
+  "run_0587_lvcdt_c_dump/linedump/meta.txt": "53d8208eb239ae6e3e5b76a49ba7cfd357a5ece5f5ae53a6d0b8325f5849952c",
+  "run_0587_lvcdt_c_dump/linedump/D.f64": "96f17e1efe64754082f9ceee864bca92533cf69ed8f72fc878f5ad69334e0103",
+  "run_0587_lvcdt_c_dump/linedump/Kprev.f64": "a20cdd9bc2dfdb431b80261eb86c5d43d535e44ccfbd62f65b6aad31c1011b9a",
+  "run_0587_lvcdt_c_dump/linedump/Knext.f64": "2e9bba22164416b3226df8a6b7519c78e09977c4b68a829fcb4290b292e6e4cc",
+  "run_0587_lvcdt_c_dump/linedump/state_ro_roU_roe_cp_gamma.f64": "b43f72f3b3fed963bc737760390b01f0856067f63e99680fbbfae65b1f1c0f54",
+  "run_0587_lvcdt_c_dump/linedump/dt_vol.f64": "677fcf75e169575d3796fd0a9e85d2d905418221fe02951f3645a342a8a6fc57",
+  "run_0587_lvcdt_c_dump/linedump/flags_wall_iso_axis.f64": "abc533890f4aeb48c8d5e2344eedadaed12b63f2e5db0cc6af478f250fd42458",
+  "run_0587_lvcdt_c_dump/linedump/node_line.f64": "43cc737af8cab0e3b48ab722c38dc8872381ff59ca09e7e515668eb597abb10a",
+  "run_0587_lvcdt_c_dump/linedump/rhs_s0.f64": "900cdac34a84c3677da9df20a7aa2c1629e3c6a31327f6d1af976915e030c752",
+  "run_0587_lvcdt_c_dump/res_0.h5": "4d92e11afb0431ce7dbb49b3e73d811a89fd774edd9e28b64d7065de0d974b2f",
+  "run_0587_lvcdt_c_dump/res_1.h5": "546cfc59c4fc68a7d6d963e28f3001d737c17fefd1f6129c8ea10bf03a7d170a",
+  "run_0587_lvcdt_c_dump/solverConfig.yaml": "3441ccacf7cdaa49fd066728697c0db1d560e8c0496bc17bf9e9adbe1440ef34",
+  "run_0587_lvcdt_c_dump/LVC_TERMS.txt": "10159baf262b43a92d95db59dae1f72c645127301661e0a3ce4e38b295a97c58",
+  "run_0587_lvcdt_c_dump/forge_run.log": "c68b222b5e7dd466aaaa517a381582a92df1fe451938568f7a493f2ce564468e",
+  "run_0587_lvcdt_c_dump/RUN_PROVENANCE.txt": "9d50a6e1b1104b02bf21eeca02ebf58065fe272cc7fbeeee0a2b7edb06ee0a88",
+  "run_0550_lvcaudit/linedump/audit_face.f64": "cf49d115667b46896fb173635139a261b4ed7abc0126136cc8632200ca55dacd",
+  "run_0550_lvcaudit/linedump/audit_node.f64": "4c56061a5debe9f9e27ab9cceb6b770bd9c8dab5d53fb458d1c0508b38769165",
+  "run_0550_lvcaudit/linedump/meta.txt": "a8ddb5f7d8078e8045ef9d355ffe0f5bde2d7f2e0c4bace0a36a4d2855144ec1",
+  "run_0550_lvcaudit/linedump/node_line.f64": "43cc737af8cab0e3b48ab722c38dc8872381ff59ca09e7e515668eb597abb10a",
+  "run_0550_lvcaudit/linedump/state_ro_roU_roe_cp_gamma.f64": "b43f72f3b3fed963bc737760390b01f0856067f63e99680fbbfae65b1f1c0f54",
+  "run_0550_lvcaudit/linedump/dt_vol.f64": "bdd601dbb46aca523707483d3396862bcf5a55ee2988fb0236ccbded1b287394",
+  "run_0550_lvcaudit/linedump/flags_wall_iso_axis.f64": "abc533890f4aeb48c8d5e2344eedadaed12b63f2e5db0cc6af478f250fd42458",
+  "lvcdt_pregate.py": "06c033f6b1c4caa1287a1fd7aed1a1530f312a1b73d51a5190d31ec5ef8363b8"
+ },
+ "checks": [
+  {
+   "stage": "I",
+   "check": "出発の場の sha256",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: バイナリの sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 設定 (腕ごとの期待どおり。本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 起動ログ (値 3・マスク 7 の表示・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: バイナリの sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 設定 (腕ごとの期待どおり。本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 起動ログ (値 3・マスク 7 の表示・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: バイナリの sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 設定 (腕ごとの期待どおり。本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 起動ログ (値 3・マスク 7 の表示・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: バイナリの sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 入力ファイル",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 設定 (腕ごとの期待どおり。本試験との差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 起動ログ (値 3・マスク 7 の表示・LAYOUT2・面エンタルピーの切替なし・書き出しあり)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: RUN_RC = 0",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: extraFields の無視の警告なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "4 本の書き出しの設定が lineDtDirectional・lineDtDirectionalCap 以外で完全に同じ",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "A と A の再実行の設定が完全に同じ",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 配列の形",
+   "ok": true,
+   "value": {
+    "node_line": [
+     605,
+     2
+    ],
+    "D": [
+     605,
+     25
+    ],
+    "Kprev": [
+     605,
+     25
+    ],
+    "Knext": [
+     605,
+     25
+    ],
+    "state_ro_roU_roe_cp_gamma": [
+     605,
+     7
+    ],
+    "dt_vol": [
+     605,
+     2
+    ],
+    "flags_wall_iso_axis": [
+     605,
+     3
+    ],
+    "rhs_s0": [
+     605,
+     5
+    ]
+   }
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 要求した 5 節点・5 本のライン・重複なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: 有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: ρ・c_p・dt・体積 > 0、γ > 1",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: res_1.h5 に残差の場がそろう",
+   "ok": true,
+   "value": []
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: res_1 の res_ro が書き出しの rhs_s0 の行 0 と float で一致 (出発の状態の残差)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "node_line: 4 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "state_ro_roU_roe_cp_gamma: 4 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "flags_wall_iso_axis: 4 本でビット一致 (同じ入力)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "dt_vol: A と A の再実行でビット一致、体積の列は 4 本でビット一致",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "res_0.h5 の全データセット (保存量・k・ω・組成・μ・壁距離など) が 4 本でビット一致",
+   "ok": true,
+   "value": [
+    "P",
+    "T",
+    "Ux",
+    "Uy",
+    "Uz",
+    "Y0",
+    "Y1",
+    "h0",
+    "k",
+    "omega",
+    "res_ro",
+    "res_roK",
+    "res_roOmega",
+    "res_roUx",
+    "res_roUy",
+    "res_roUz",
+    "res_roY0",
+    "res_roY1",
+    "res_roe",
+    "ro",
+    "roK",
+    "roOmega",
+    "roUx",
+    "roUy",
+    "roUz",
+    "roY0",
+    "roY1",
+    "roe",
+    "sonic",
+    "vis_lam",
+    "vis_turb",
+    "volume",
+    "wall_dist"
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_0.h5 に保存量・乱流・組成がある",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: node_line が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: state_ro_roU_roe_cp_gamma が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: flags_wall_iso_axis が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0584_lvcdt_a_dump: dt_vol が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: node_line が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: state_ro_roU_roe_cp_gamma が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: flags_wall_iso_axis が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0586_lvcdt_a_dump2: dt_vol が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: node_line が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: state_ro_roU_roe_cp_gamma が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0585_lvcdt_b_dump: flags_wall_iso_axis が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: node_line が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: state_ro_roU_roe_cp_gamma が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "run_0587_lvcdt_c_dump: flags_wall_iso_axis が監査の記録 (上限なしの方向別 dt) とビット一致 (同じ入力・同じ節点)",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "監査の記録: 記録の節点番号 = 書き出しの順、面の数が枠に入る、skipDiag なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "I",
+   "check": "res_ro: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_ro: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.3010426069826053e-16,
+    1.9255430583342559e-16
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_ro: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.7694179454963432e-16,
+    1.9255430583342559e-16
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roUx: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roUx: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    3.637979240772582e-12,
+    3.524291969370097e-12
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roUx: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    3.637978807091713e-12,
+    3.524291969370097e-12
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roUy: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roUy: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.8189894306509108e-12,
+    1.8189895661761823e-12
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roUy: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.818989444203438e-12,
+    1.8189895661761823e-12
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roUz: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roUz: B と A の差 (ビット一致を要求)",
+   "ok": true,
+   "value": [
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roUz: C と A の差 (ビット一致を要求)",
+   "ok": true,
+   "value": [
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roe: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roe: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    2.3078428057488054e-10,
+    2.3110935387649079e-10
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roe: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    2.3110935387649079e-10,
+    2.3110935387649079e-10
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roK: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roK: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.1368683772161603e-13,
+    1.1379786002407855e-13
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roK: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.1368683772161603e-13,
+    1.1379786002407855e-13
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roOmega: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roOmega: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    9.5367431640625e-07,
+    9.5367431640625e-07
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roOmega: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    9.5367431640625e-07,
+    9.5367431640625e-07
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roY0: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roY0: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.5785983631388945e-16,
+    1.1102230246251565e-16
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roY0: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.5785983631388945e-16,
+    1.1102230246251565e-16
+   ]
+  },
+  {
+   "stage": "I",
+   "check": "res_roY1: 4 本で有限",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "R",
+   "check": "res_roY1: B と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.3742262536253769e-17,
+    1.3742262536253769e-17
+   ]
+  },
+  {
+   "stage": "R",
+   "check": "res_roY1: C と A の差 (≤ 3 × 再実行の差)",
+   "ok": true,
+   "value": [
+    1.3742262536253769e-17,
+    1.3742262536253769e-17
+   ]
+  },
+  {
+   "stage": "S",
+   "check": "run_0584_lvcdt_a_dump: rhs_s0 = 拘束の処理をした float(残差) が 605 節点 × 5 行で完全に一致",
+   "ok": true,
+   "value": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   }
+  },
+  {
+   "stage": "S",
+   "check": "run_0586_lvcdt_a_dump2: rhs_s0 = 拘束の処理をした float(残差) が 605 節点 × 5 行で完全に一致",
+   "ok": true,
+   "value": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   }
+  },
+  {
+   "stage": "S",
+   "check": "run_0585_lvcdt_b_dump: rhs_s0 = 拘束の処理をした float(残差) が 605 節点 × 5 行で完全に一致",
+   "ok": true,
+   "value": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   }
+  },
+  {
+   "stage": "S",
+   "check": "run_0587_lvcdt_c_dump: rhs_s0 = 拘束の処理をした float(残差) が 605 節点 × 5 行で完全に一致",
+   "ok": true,
+   "value": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(a) B: Kprev が A と不変 (K は dt に依らない)",
+   "ok": true,
+   "value": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(a) B: Knext が A と不変 (K は dt に依らない)",
+   "ok": true,
+   "value": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(b) B: 全節点で r = Δτ_A/Δτ_B ≥ 1 − 4 ulp (縮む向きだけ)",
+   "ok": true,
+   "value": 1.0
+  },
+  {
+   "stage": "V",
+   "check": "(b) B: 縮流部の第一内部節点 [1571, 4112, 7984] で r ≥ 10",
+   "ok": true,
+   "value": {
+    "1571": 183.6624899445079,
+    "4112": 170.78899916162473,
+    "7984": 171.57620354852264
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(c) B: D の対角以外と拘束の行が A とビット一致",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "V",
+   "check": "(c) B: 拘束の無い行の対角で D_X − D_A = V/Δτ_X − V/Δτ_A が 64 ulp 以内",
+   "ok": true,
+   "value": 0.041015625
+  },
+  {
+   "stage": "V",
+   "check": "(c') B: 第一内部節点 [1571, 4112, 7984] のそれぞれで、拘束の無い行のどれかの時間項の差が許容の 100 倍超",
+   "ok": true,
+   "value": {
+    "1571": 91008.74212646484,
+    "4112": 153236.8305053711,
+    "7984": 111470.35858154297
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(a) C: Kprev が A と不変 (K は dt に依らない)",
+   "ok": true,
+   "value": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(a) C: Knext が A と不変 (K は dt に依らない)",
+   "ok": true,
+   "value": {
+    "rerun_bit": true,
+    "x_vs_a": 0.0,
+    "rerun": 0.0
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(b) C: 全節点で r = Δτ_A/Δτ_C ≥ 1 − 4 ulp (縮む向きだけ)",
+   "ok": true,
+   "value": 1.0
+  },
+  {
+   "stage": "V",
+   "check": "(b) C: 縮流部の第一内部節点 [1571, 4112, 7984] で r ≥ 10",
+   "ok": true,
+   "value": {
+    "1571": 9183.124497225397,
+    "4112": 8539.449958081237,
+    "7984": 8578.81017742613
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(c) C: D の対角以外と拘束の行が A とビット一致",
+   "ok": true,
+   "value": null
+  },
+  {
+   "stage": "V",
+   "check": "(c) C: 拘束の無い行の対角で D_X − D_A = V/Δτ_X − V/Δτ_A が 64 ulp 以内",
+   "ok": true,
+   "value": 0.046875
+  },
+  {
+   "stage": "V",
+   "check": "(c') C: 第一内部節点 [1571, 4112, 7984] のそれぞれで、拘束の無い行のどれかの時間項の差が許容の 100 倍超",
+   "ok": true,
+   "value": {
+    "1571": 142964.0864238739,
+    "4112": 240814.51521110535,
+    "7984": 175173.0939693451
+   }
+  },
+  {
+   "stage": "V",
+   "check": "(b) B: 全 605 節点で Δτ_B = min(Δτ_A, 50 Δτ_C) (相対 1e-12)",
+   "ok": true,
+   "value": 3.0417991610698885e-16
+  },
+  {
+   "stage": "V",
+   "check": "(b) C: 全節点で r_C ≥ r_B − 4 ulp",
+   "ok": true,
+   "value": 1.0
+  }
+ ],
+ "VERDICT": "PASS (本試験へ進む)"
+}
