@@ -4,7 +4,8 @@
 # 格子 G1 / G1x の上でキー mesh.axisSegmentRWeight 0 と 1 を回す。格子の比較の G0′ は別セッションの run_0483_hp7_k1 (G0・キー 1)。
 # hp7.sh との違い: 格子が違うので、場は restart_field ではなく interp_field (run_0183 の res_100000 から、roY* は interp_field が作る。移した量 9 を検査)、
 # prepare_info.json の格子の情報を新しい格子のものに替える (見張りの cold_series が ni を読む)。
-# usage (AWS の ~/forge-coregrid/case/45.isobutane_m6_d155): bash cg_runs.sh <run> <G1|G1x> <キー 0|1> [<run> <格子> <キー> ...]
+# usage (AWS の ~/forge-coregrid/case/45.isobutane_m6_d155): bash cg_runs.sh <G1|G1x> <キー 1 の run> <キー 0 の run> [<格子> <run_k1> <run_k0> ...]
+# 格子ごとに移送は 1 回 (キー 1 の run で行う)。キー 0 の run はその複製で、初期 HDF5 の sha256 の一致を確かめる (codex 諮問 2026-10-10)。全腕を準備してから一斉に起動する。
 # **実行中にこのファイルを編集しないこと**。
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -21,7 +22,7 @@ echo "== 開始 $(date -Is) F7_64 $(sha256sum $F7_64 | cut -c1-16)" >> $LOG
 free_gb() { df --output=avail -B1G . | tail -1 | tr -dc 0-9; }
 [ "$(free_gb)" -ge $MIN_START_GB ] || { echo "ディスクの空きが ${MIN_START_GB} GB 未満 (中止)" >> $LOG; exit 1; }
 PIDS=()
-arm() {   # arm <run> <格子> <キー>
+prep_arm() {   # prep_arm <run> <格子> <キー>  (準備だけ、起動しない)
   local r=$1 g=$2 k=$3 mesh=$C45/_band_ab/core_grid/prep_$2/new64/nozzle.h5
   [ -e $r ] && { echo "$r: 既にある (中止)" >> $LOG; return 1; }
   [ -f $mesh ] || { echo "$r: 格子 $mesh が無い (中止)" >> $LOG; return 1; }
@@ -46,13 +47,31 @@ EOF
   grep -c '^mesh: {' $r/solverConfig.yaml | grep -qx 1 || { echo "$r: mesh の形が想定外" >> $LOG; return 1; }
   sed -i "s/^mesh: {/mesh: {axisSegmentRWeight: $k, /" $r/solverConfig.yaml
   grep -n '^mesh\|nStepOuter\|outStepInterval\|lineImplicit\|implicitRelax\|extraFields' $r/solverConfig.yaml | sed "s#^#  $r: #" >> $LOG
+}
+copy_arm() {   # copy_arm <元の run> <新しい run> <キー>  (同じ初期 HDF5 でキーだけ替える)
+  local a=$1 b=$2 k=$3
+  [ -e $b ] && { echo "$b: 既にある (中止)" >> $LOG; return 1; }
+  mkdir $b; for f in $a/*; do case $(basename $f) in *.log|RUN_*|forge_*|residual_*|m9_watch*) ;; *) cp -a $f $b/;; esac; done
+  sed -i "s/^mesh: {axisSegmentRWeight: [01], /mesh: {axisSegmentRWeight: $k, /" $b/solverConfig.yaml
+  grep -q "^mesh: {axisSegmentRWeight: $k, " $b/solverConfig.yaml || { echo "$b: キーの書き換えに失敗" >> $LOG; return 1; }
+  [ "$(sha256sum < $a/nozzle.h5)" = "$(sha256sum < $b/nozzle.h5)" ] || { echo "$b: 初期 HDF5 が $a と違う" >> $LOG; return 1; }
+  diff <(sed 's/axisSegmentRWeight: [01], //' $a/solverConfig.yaml) <(sed 's/axisSegmentRWeight: [01], //' $b/solverConfig.yaml) > /dev/null || { echo "$b: キー以外の設定が違う" >> $LOG; return 1; }
+  echo "$b: $a の複製 (初期 HDF5 の sha256 一致、キー $k)" >> $LOG
+}
+launch() {   # launch <run>
+  local r=$1
   ( export FORGE_BIN=$F7_64; bash $RC $C45/$r > $r/run_case_stdout.log 2>&1; echo $? > $r/RUN_RC ) &
   PIDS+=($!)
   python3 m9_watch.py $r --phase line --budget 200000 --consec 2 --interval 2500 --min-points 9 --keep-tail 9 >> $r/m9_watch.log 2>&1 &
-  echo "$r 起動 $(date -Is) 格子 $g キー $k" >> $LOG
+  echo "$r 起動 $(date -Is) $(grep -o 'axisSegmentRWeight: [01]' $r/solverConfig.yaml)" >> $LOG
 }
 RUNS=()
-while [ $# -ge 3 ]; do arm $1 $2 $3 || exit 1; RUNS+=($1); shift 3; done
+while [ $# -ge 3 ]; do
+  prep_arm $2 $1 1 || exit 1
+  copy_arm $2 $3 0 || exit 1
+  RUNS+=($2 $3); shift 3
+done
+for r in "${RUNS[@]}"; do launch $r; done
 sleep 150
 for r in "${RUNS[@]}"; do echo "$r 起動の確認: $(grep -h 'axisSegmentRWeight' $r/forge_run.log | head -1 | cut -c1-140)" >> $LOG; done
 # ディスクの見張り: 空きが MIN_RUN_GB を切ったら、自分の run の forge だけを止める (cwd が自分の run のもの)
