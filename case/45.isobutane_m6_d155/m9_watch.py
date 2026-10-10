@@ -72,11 +72,11 @@ try:
             nb = int(src["reach_step"])
             st["inherit"] = {"run": a.inherit, "reach_step": nb, "reach_sha256": src.get("reach_sha256")}
             st["rows"] = [dict(r, step=r["step"] - nb, inherited=True) for r in src["rows"] if 0 < r["step"] <= nb]
+    if a.consec < 1: raise ValueError("--consec は 1 以上")
+    if st.get("phase") != a.phase or st.get("budget") != a.budget or st.get("consec", 1) != a.consec:   # 終端の状態でも先に照合する (codex plan-7 M3)
+        raise ValueError("状態の phase/budget/consec が違う")
     if st["status"] in FINAL:
         print(f"[m9_watch] {run.name}: 既に {st['status']}"); sys.exit(0)
-    if st.get("phase") != a.phase or st.get("budget") != a.budget or st.get("consec", 1) != a.consec:
-        raise ValueError("状態の phase/budget/consec が違う")
-    if a.consec < 1: raise ValueError("--consec は 1 以上")
 except SystemExit:
     raise
 except Exception as e:

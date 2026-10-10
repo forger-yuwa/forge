@@ -69,23 +69,25 @@ arm() {   # arm <run> <案>
   python3 ../../solver_density_cuda/tools/check_convergence.py $r > $r/CONVERGENCE_VERDICT.txt 2>&1; echo "$r check_convergence rc=$? $(grep -o 'NOT CONVERGED\|DIVERGED\|PASS' $r/CONVERGENCE_VERDICT.txt | head -1)" >> $LOG
   rm -f $r/nozzle.h5 $r/res_0.h5
 }
-diskguard() {   # 空きが 1 GB を切ったら自分の 3 腕の forge を止める。arm が全部終わったら自分で抜ける (m9r.sh の wait の欠陥を避ける)
-  while :; do
-    local alive=0; for p in "$@"; do kill -0 $p 2>/dev/null && alive=1; done
-    [ $alive = 1 ] || return 0
-    if [ "$(df --output=avail -BG . | tail -1 | tr -dc 0-9)" -lt 1 ]; then
-      echo "ディスクの空き < 1 GB — 自分の run の forge を止める $(date -Is)" >> $LOG
+diskguard() {   # 空きが 1 GiB を切る・取得に失敗したら自分の 3 腕の forge を止める。tt.arms_done で抜ける (m9r.sh の wait の欠陥を避ける、codex plan-7 M1)
+  while [ ! -f tt.arms_done ]; do
+    local fr; fr=$(df --output=avail -B1 . 2>/dev/null | tail -1 | tr -dc 0-9)
+    if [ -z "$fr" ] || [ "$fr" -lt 1073741824 ]; then
+      echo "ディスクの空き ${fr:-取得失敗} B < 1 GiB — 自分の run の forge を止める $(date -Is)" >> $LOG
       for r in run_0377_tt_S2 run_0378_tt_M64 run_0379_tt_M64S2; do [ -d $r ] && python3 m9_stop.py $r; done; return 0
     fi
-    sleep 60
+    sleep 30
   done
 }
+rm -f tt.arms_done
+diskguard &
+DG=$!
+trap 'touch tt.arms_done' EXIT   # 途中で失敗しても見張りを残さない
 arm run_0377_tt_S2 S2 & PIDS+=($!); sleep 240
 arm run_0378_tt_M64 M64 & PIDS+=($!); sleep 240
 arm run_0379_tt_M64S2 M64S2 & PIDS+=($!)
-diskguard "${PIDS[@]}" &
-DG=$!
 for p in "${PIDS[@]}"; do wait $p; done
+touch tt.arms_done
 wait $DG
 # (4) 判定
 python3 tt_judge.py final >> $LOG 2>&1 || echo "tt_judge rc=$?" >> $LOG

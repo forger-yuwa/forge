@@ -508,6 +508,7 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
   - M100・S3・M48 の単独 run (差が分解能に埋もれる)
   - 途中の場からの出発・序盤の欠損を代理にする
   - 格子の変更を混ぜる (§5.1 #21 で別に立てる)
+- **点検の反映 (codex plan-7、投入前、全件採用)**: ディスクの見張り (バイト単位・最初の腕の前から・取得失敗も停止)、判定の順序 (比較不可を先に)、見張りの設定の照合 (終端の状態でも)。
 - **見込み**: 3 本の GPU 合計 ≤ 予算 (各 ≤ 1.1 h 専有換算)。同時に回すので壁時計は 2.5〜3 h。台本 `tt.sh` は m9r.sh の `wait` の欠陥 (ディスク見張りを待って返らない) を避け、腕の PID だけを待つ。
 - **H5 の判別に挙げた `run_0370` の発散位置** (記録): 非有限は x/r_t −11.2〜−10.6 (入口のすぐ下流) の列の全節点。T は 50 K の床が壁の 1 つ内側に出ていた。判別条件 (軸際の膨張域 / 縮流部の壁際) のどちらでもない。原因は未特定。
 
@@ -515,6 +516,7 @@ run_0223 の設定で 3 step 目の 1 step ぶん (分解 1・代入 5・block 5
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan (#16・#20 の総時間 §6.18) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-7.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-7.md) | GO-with-changes, C0/M3/m0 | 全件採用: (M1) ディスクの見張りをバイト単位・最初の腕の前から・取得失敗でも止める、(M2) 判定器は発散・記録なし・判定不能と見張りの設定の不一致を先に比較不可にしてから到達・打ち切りを分類、(M3) 見張りは終端の状態でも phase/budget/consec を先に照合。`--consec 1` が従来と同じこと・B0 の 2 出力連続が 125000 になることは点検側で確認済み |
 | plan (#16・#20 の 1 step のふるい) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-6.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-6.md) | GO-with-changes, C0/M4/m2 | 全件採用 (§6.16 の「点検の反映」): 照合の PASS を M 系の前提に、GPU の照会の失敗と計測中の競合を検出、残差と最終場の有限性、B0 で挟む並びと巡ごとの順の入れ替え、バイト単位の空きの確認、5 % は予算の基準と明記。部分被覆の経路 (point の節点) は問題なしとの確認 |
 | plan (#19 緩和の 4 腕) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-5.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-5.md) | GO-with-changes, C0/M3/m0 | 全件採用 (投入前): M1 判定器の前提の検査、M2 trap と見張りの同時起動 (起動の猶予を足した)、M3 段ごとの入力の写しの削除・空きの下限で停止 (§6.13) |
 | plan (#9 の追加の腕 L5L) | 2026-10-10 | [2026-10-10-time_integration-line-implicit-speed-plan-4.md](../../notes/reviews/2026-10-10-time_integration-line-implicit-speed-plan-4.md) | GO-with-changes, C0/M3/m1 | 全件採用 (分岐の前に反映): M1 `--budget` の登録がコメントに入っていた不具合を直し、初期化の失敗でも forge を止める、M2 分岐元の系列を引き継いで判定 (追加 0 step もありうる)、M3 腕ごとに独立に集計、m4 NOT CONVERGED の注記 (§6.11) |

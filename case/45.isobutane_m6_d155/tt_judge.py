@@ -67,9 +67,15 @@ def final():
     out = {"B0": {"steps": B0_STEPS, "total_s": tb0, "res_s": rb0, "theta_q": {k: b0[k] for k in ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")}, "res_ro_dist_135000": b0_dist, "tail_rms": b0_tail}, "arms": {}}
     for k, run in (("S2", "run_0377_tt_S2"), ("M64", "run_0378_tt_M64"), ("M64S2", "run_0379_tt_M64S2")):
         w = json.loads((HERE / run / "m9_watch.json").read_text()); a = {"run": run, "status": w["status"], "budget": B[k]["budget"]}
-        conv = (HERE / run / "CONVERGENCE_VERDICT.txt"); a["convergence"] = ("DIVERGED" if "DIVERGED" in conv.read_text() else "NOT CONVERGED" if "NOT CONVERGED" in conv.read_text() else "PASS" if "-> PASS" in conv.read_text() else "記録なし") if conv.exists() else "記録なし"
-        if w["status"] == "CENSORED": a["verdict"] = "遅い (損益分岐の予算で打ち切り)"
-        elif w["status"] != "REACHED" or a["convergence"] in ("DIVERGED", "記録なし"): a["verdict"] = f"比較不可 ({w['status']}・{a['convergence']})"
+        conv = HERE / run / "CONVERGENCE_VERDICT.txt"; ct = conv.read_text(errors="replace") if conv.exists() else ""
+        a["convergence"] = ("記録なし" if not ct else "判定不能" if "判定不能" in ct else "DIVERGED" if "DIVERGED" in ct
+                            else "NOT CONVERGED" if "NOT CONVERGED" in ct else "PASS" if "-> PASS" in ct else "記録なし")
+        cfg_ok = (w.get("phase") == "line" and w.get("consec") == 2 and w.get("budget") == B[k]["budget"])
+        # 比較不可を先に除外してから到達・打ち切りを分類する (codex plan-7 M2・M3)
+        if not cfg_ok: a["verdict"] = f"比較不可 (見張りの設定が登録と違う: phase {w.get('phase')}・consec {w.get('consec')}・budget {w.get('budget')})"
+        elif a["convergence"] in ("DIVERGED", "記録なし", "判定不能"): a["verdict"] = f"比較不可 (check_convergence: {a['convergence']})"
+        elif w["status"] == "CENSORED": a["verdict"] = "遅い (損益分岐の予算で打ち切り)"
+        elif w["status"] != "REACHED": a["verdict"] = f"比較不可 ({w['status']})"
         else:
             n = int(w["reach_step"]); um = u[k]["median"]; t = total(n, um, ARM_OUT_INT); r = ARM_OUT_INT * um / 1000 + n * u[k]["spread"] / 1000
             a.update(steps=n, total_s=t, res_s=r, step_ratio=n / B0_STEPS)
