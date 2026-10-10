@@ -22,6 +22,7 @@ echo "== 開始 $(date -Is)" >> $LOG
 # (1) 単価 (§6.16 と同じ手順・確認)
 unit() {   # unit <run> <案>
   local r=$1 v=$2 n
+  if [ -f $r/scr_check.json ] && grep -q '"ok": true' $r/scr_check.json; then echo "$r は確認済み — 使い直す" >> $LOG; return 0; fi   # 再投入 (2026-10-10 の自動停止の後)
   diskok || fail "ディスクの空きが 3 GiB 未満"
   python3 cold_cfl.py prep $SRC $r --steps 1000 --out 1000 $B ${OPTS[$v]} > /dev/null || fail "prep $r"; rm -f $r/nozzle.msh
   n=$(gpucount) && echo "ok $n" > $r/gpu_pre.txt || echo "fail" > $r/gpu_pre.txt
