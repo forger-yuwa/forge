@@ -13,9 +13,11 @@
      時間項から連ねた再現と面のループの後の D (ulp)、軸対称 (ulp)、拘束の後の D・格納の D・Kprev/Knext の値と置き場所 (完全一致)
   A  元の入力から double で独立に計算した係数と、CUDA が使った ST の値の相対差 (特性の記録): 薄層の面の β・κ、ほかの面のスカラーの粘性の対角・熱伝導の k_face·δ/dcc。
      別に dcc・δ/dcc・法線の差も記録する。差 ≤ 1e-5 / ≤ 1e-3 / > 1e-3 に分ける
-  T  対照: 監査用のビルドと通常のビルドの D・Kprev・Knext・状態・rhs・dq (sweep 0〜4) などのビット一致 (整数の表現で比べる)
+  T  対照: 監査用のビルドと通常のビルドの D・Kprev・Knext・状態・rhs・dq (sweep 0〜4) など。forge は atomicAdd で再実行でもビット一致しない配列があるので、
+     通常のビルドの再実行 (--ctrl2) と比べ、再実行どうしでビット一致する配列はビット一致 (整数の表現)、しない配列は差の最大が再実行の差の最大の 3 倍以内を要求する
 を判定し、<dump>/lvcaudit_judge.json と標準出力に書く。規則を変えるときは plan §6.7 を先に改訂する。
 使い方: lvcaudit_judge.py <dump> <line_audit_helper> --run <run dir> --expect-sha <監査用のビルドの forge の sha256> --ctrl <対照の dump> --ctrl-run <対照の run dir> --ctrl-sha <通常のビルドの sha256>
+        --ctrl2 <対照の再実行の dump>
 """
 import json
 import math
@@ -111,7 +113,7 @@ def main():
         raise SystemExit(__doc__)
     opt = lambda k: a[a.index(k) + 1] if k in a else None
     d, helper = Path(a[0]), a[1]
-    run, ctrl, ctrl_run = opt("--run"), opt("--ctrl"), opt("--ctrl-run")
+    run, ctrl, ctrl_run, ctrl2 = opt("--run"), opt("--ctrl"), opt("--ctrl-run"), opt("--ctrl2")
     exp_sha, ctrl_sha = opt("--expect-sha"), opt("--ctrl-sha")
     out = d / "lvcaudit_judge.json"
     rec = {"plan": "time_integration-line-viscous-jacobian-faceh §6.7", "dump": str(d)}
@@ -122,7 +124,7 @@ def main():
         # ---- S: 採取のゲート ----
         for k, v in EXPECT_CFG.items():
             ch.ok("S", f"設定 {k} = {v}", cfg.get(k) == v, cfg.get(k))
-        ch.ok("S", "引数 --run・--expect-sha・--ctrl・--ctrl-run・--ctrl-sha がある", all([run, exp_sha, ctrl, ctrl_run, ctrl_sha]), None)
+        ch.ok("S", "引数 --run・--expect-sha・--ctrl・--ctrl-run・--ctrl-sha・--ctrl2 がある", all([run, exp_sha, ctrl, ctrl_run, ctrl_sha, ctrl2]), None)
         if run:
             ch.ok("S", "監査用のビルドの sha256", sha_of(run) == exp_sha, sha_of(run))
             cp = json.loads((Path(run) / "COLD_PAIR.json").read_text())
@@ -351,19 +353,27 @@ def main():
 
         # ---- T: 対照 (同じソース・監査なしの通常のビルド) とのビット一致 ----
         bit = {}
-        if ctrl:
-            mc, _ = load_meta(Path(ctrl))
-            ncl = arr(Path(ctrl), mc, "node_line")
-            same_nodes = bool(np.array_equal(ncl, nl))
-            ch.ok("T", "対照の書き出しの節点と順が同じ", same_nodes, None)
+        if ctrl and ctrl2:
+            mc, _ = load_meta(Path(ctrl)); m2, _ = load_meta(Path(ctrl2))
+            for nm, mm, dd in (("対照", mc, Path(ctrl)), ("対照の再実行", m2, Path(ctrl2))):
+                ch.ok("T", f"{nm}の書き出しの節点と順が同じ", bool(np.array_equal(arr(dd, mm, "node_line"), nl)), None)
             for name in CTRL_ARRAYS:
-                if name not in meta or name not in mc:
-                    ch.ok("T", f"{name} が両方にある", False, None); continue
-                x, y = arr(d, meta, name), arr(Path(ctrl), mc, name)
-                eq = x.shape == y.shape and bool(np.array_equal(x.view(np.int64), y.view(np.int64)))
-                bit[name] = eq
-                ch.ok("T", f"{name} がビット一致", eq, None)
-        rec["bit_identical_vs_ctrl"] = bit
+                if name not in meta or name not in mc or name not in m2:
+                    ch.ok("T", f"{name} が 3 つともある", False, None); continue
+                x, y, z = arr(d, meta, name), arr(Path(ctrl), mc, name), arr(Path(ctrl2), m2, name)
+                if not (x.shape == y.shape == z.shape):
+                    ch.ok("T", f"{name} の形が同じ", False, [x.shape, y.shape, z.shape]); continue
+                rep_bit = bool(np.array_equal(y.view(np.int64), z.view(np.int64)))
+                d_ay = float(np.max(np.abs(x - y))) if x.size else 0.0
+                d_yz = float(np.max(np.abs(y - z))) if y.size else 0.0
+                if rep_bit:
+                    eq = bool(np.array_equal(x.view(np.int64), y.view(np.int64)))
+                    ch.ok("T", f"{name}: 再実行でビット一致なので、監査用もビット一致", eq, d_ay)
+                else:
+                    eq = d_ay <= 3 * d_yz
+                    ch.ok("T", f"{name}: 再実行で揺れるので、監査用との差 ≤ 再実行の差 × 3", eq, [d_ay, d_yz])
+                bit[name] = {"rerun_bit_identical": rep_bit, "audit_vs_ctrl_max_abs": d_ay, "rerun_max_abs": d_yz, "ok": eq}
+        rec["control"] = bit
 
         # ---- A の分類 ----
         classes = {"≤1e-5": 0, "≤1e-3": 0, ">1e-3": 0}
