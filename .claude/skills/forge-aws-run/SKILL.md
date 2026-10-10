@@ -1,11 +1,11 @@
 ---
 name: forge-aws-run
-description: 共有 AWS GPU インスタンスで forge の run を投入・継続・待ち合わせ・後片付けするときの手順と、踏んだ罠の一覧。起動確認・ssh 越しの完了判定 (pgrep の自己一致)・インスタンス停止の検知・ディスク逼迫・restart の型と化学種・実行中スクリプトの編集禁止を扱う。「AWS で回して」「延長して」「終わったら知らせて」「ディスク空けて」と言われたとき、または AWS 上で run を起動・監視するときに使う。
+description: 共有 AWS GPU インスタンスで forge の run を投入・継続・待ち合わせ・後片付けするときの手順と、踏んだ罠の一覧。起動確認・ssh 越しの完了判定 (pgrep の自己一致)・インスタンス停止の検知・ディスク逼迫・restart の型と化学種・実行中スクリプトの編集禁止、複数セッションでの調整 (調整板・SendMessage・2 台の使い分け) を扱う。「AWS で回して」「延長して」「終わったら知らせて」「ディスク空けて」と言われたとき、または AWS 上で run を起動・監視するときに使う。
 ---
 
 # /forge-aws-run — 共有 AWS で run を回す
 
-前提: ローカル PC はユーザ作業で使うので、検証 run は小さくても AWS で回す。インスタンスは 1 台を**他セッションと共有**している。
+前提: ローカル PC はユーザ作業で使うので、検証 run は小さくても AWS で回す。インスタンスは**他セッションと共有**している (共有の規則は AGENTS.md「複数セッションの協調」、手順は §7)。
 接続・起動は `solver_density_cuda/tools/aws_instance.sh {status|ip|start|stop|ssh}` (別ブランチにしか無いときは
 `git show <commit>:solver_density_cuda/tools/aws_instance.sh` で取り出す)。鍵は `~/.ssh/test.pem`、認証情報は `~/.aws-wsl/`。
 
@@ -20,12 +20,24 @@ description: 共有 AWS GPU インスタンスで forge の run を投入・継�
 
 - `nohup` で起動し、**stdin を `/dev/null` にする** (`(... &)` + `< /dev/null`)。そうしないと ssh がプロセス終了まで戻らない。
 - `FORGE_CUDA_BLOCKSIZE=128` を必ず付ける (既定 512 は node SLAU のレジスタ上限を超えて起動できない。値は結果に効く)。
+- **同時に回す forge の本数はホストのメモリで決める** (2026-10-08): g5.xlarge は 16 GB・スワップなし。FP64・57 万節点の forge は初期化中に 1 本約 2.5 GB を使う。
+  走行中の 4 本に 4 本を足して 8 本にしたら OS ごと応答しなくなり (ssh の banner で timeout、journal が途切れ、OOM の記録なし)、強制停止 (`stop-instances --force`、ユーザ承認) するしかなかった。
+  投入前に `free -m` の available と「本数 × 1 本あたり」を比べる。走行中の run があるときに足すなら、空きが 1 本ぶん + 2 GB 以上あるときだけ。reboot と状態検査・コンソール出力の権限は無い (IAM)。
 - 起動後に `RUN_PROVENANCE.txt` の `forge_bin` を確認する (倍精度ビルドなど別バイナリを使うとき)。
+- **別バイナリは実行ファイル名を `forge` のままにする** (`.bin/<ビルド名>/forge` のようなディレクトリで分ける)。idle 自動停止
+  (`tools/cloud/idle_autostop.sh`) は `pgrep -x forge` で稼働中かを見るので、`forge_9c9f623c` のような名前で回すと「forge 0 件」と数えられる。
+  数秒で終わる run を連続で回すと GPU 使用率 0 の合間も重なり、30 分で止められる (2026-10-07: 回帰の base r2/r3 が途中で停止)。
+- **自動停止の数え方は「直前まで続いた空き」を引き継ぐ** (2026-10-10): `/usr/local/bin/forge-idle-autostop` は 5 分おきに
+  GPU 0・forge なし・ログインなし・load < 1 を数え、6 回連続 (30 分) で shutdown する。GPU を 25 分以上空けたあとにバッチを起動すると、
+  起動後の最初の 1 回の判定が準備の隙間 (prep 中で forge なし) に当たっただけで 6 回目になり、止まる
+  (2026-10-10 00:45: 単価の 1000 step を 7 本並べた台本の 7 本目の prep 中に停止、ログ `/var/log/forge-idle-autostop.log` に `idle x6`)。
+  長い空きの後に投入するときは、最初の forge が 5 分以内に走り出し、隙間の長い準備を後ろに回す並びにする。止まったら `aws_instance.sh status` で
+  `stopping` を確かめ、再起動 (回数は 0 に戻る) してから、確認済みの run を使い直せる台本で再投入する。
 - 別バイナリ (例: 全域 FP64) は同じ commit の worktree を作り、`flowFormat.hpp` の typedef だけを変えて native build する。
   サブモジュール (HighFive 等) は元の checkout のものをシンボリックリンクで流用する。
 - 既存のビルド済みツリーを複製して別バイナリを作るときは `build/` を持ち込まず新規に cmake する (CMakeCache が元の絶対パスを指す)。
   AWS では `-DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_CXX_FLAGS="-I/usr/local/cuda/include -I/usr/local/cuda/include/cccl"` が要る
-  (CXX_FLAGS が無いと `speciesDB.cpp` 等で `vector_types.h: No such file` になる)。元の CMakeCache と CMAKE_CXX_FLAGS を突き合わせて確認する。
+  (CXX_FLAGS が無いと `speciesDB.cpp` 等で `vector_types.h: No such file`、`main.cpp` で `thrust/extrema.h: No such file` になる)。元の CMakeCache と CMAKE_CXX_FLAGS を突き合わせて確認する。
 
 ## 3. 継続・引き継ぎ (restart)
 
@@ -57,6 +69,11 @@ description: 共有 AWS GPU インスタンスで forge の run を投入・継�
 ## 5. ディスク
 
 - 共有ディスクは他セッションが使うので急に減る。投入前と長時間 run の途中で `df -h ~` を見る。
+- **ひっ迫したら、まず大きいものの正体を測る** (2026-10-10、空き 2.7 GB → 67 GB):
+  - `sudo du -xsh /* | sort -rh` と `swapon --show` を見る。使われていない 17 GB のスワップファイルが 2 つ (`/swapfile`・`/swapfile2`、9 月に作られて fstab に未登録) で 34 GB を食っていた。
+  - 自分の case の run が、途中の全場と入力の複製を抱えたまま残っていた (case/45 で 114 run・26.8 GB)。**判定が済んだ run は、その日のうちに途中の場と `nozzle.h5` を消す**。
+  - 出発点に使う run (`cold_cfl.py prep` は親の `nozzle.h5` を複製する) は消す対象から外す。
+  - 消したものは tsv に残す (`<case>/_disk_cleanup_<日付>.tsv`、`~/disk_cleanup_<日付>_oldtrees.tsv`)。
 - **満杯になると forge は `HighFive::DataSetException ... Write failed` で落ち、その後 idle 自動停止する** (2026-09-27: 自分の run の段出力 `_<段名>_res_*` と
   中間スナップショットで case/59 が 11 GB になり、A/B 2 本が step 1900 で死んだ)。待ち合わせは空き容量と `Write failed` も監視する。
 - 段階起動の生成器が残す段出力 (`_<段名>_res_*`) と、継続 run の `res_0` (引き継ぎ元の最終場の複製) も判定後に消してよい。
@@ -70,3 +87,32 @@ description: 共有 AWS GPU インスタンスで forge の run を投入・継�
 
 - 判定ツール (`check_convergence.py`・`check_quasisteady.py`・壁解像) は AWS 上で回し、結果と run パスを case README の run 一覧に書く。
 - 事前登録した比較 (acceptance.json) は、run を回す前に commit しておく。
+- **rsync のフィルタは最初に一致した規則が勝つ**。`--include='*.csv'` の後に `--exclude='residual_history.csv'` と書くと除外が効かず、
+  数百 MB の残差履歴・界面ログを手元へ引いてしまう (2026-09-28・09-30 の 2 回)。**除外を先に書く**:
+  `--exclude='conjugate_iface_log_*' --exclude='residual_history.csv' --include='run_*/' --include='*.txt' --include='*.csv' --exclude='*'`。
+- **見張りスクリプトで `pkill -x forge` / `pgrep -x forge` を使わない** (2026-10-01): 共有インスタンスでは他セッションの forge も一致する。ディスク見張りで `pkill -STOP -x forge` と書き、他セッションの run を止めかけた (発火前に気付いて差し替え)。STOP/CONT・生存確認は**自分が起動した PID を引数で渡して** `kill -0 "$@"` / `kill -STOP "$@"` で行う。投入前の `pgrep -ax forge` で他セッションの run があれば GPU を共有する旨を把握しておく。
+
+## 7. 複数セッション (2026-10-10)
+
+規則の本文は AGENTS.md「複数セッションの協調」。ここは手順。
+
+- **調整板** `/home/sano/work/forge-coord/BOARD.md` の節: 「セッション」(名前・題・作業ツリー / ブランチ・AWS の作業ディレクトリ・いまの作業と更新日時)、
+  「AWS の使い方の約束」、「GPU の予定」(セッション・中身・本数と長さ・どのインスタンス・状態)、「インスタンス」、「依存関係」、「連絡」(日時・名前・本文を 1 行)。
+  自分の行と自分の予定だけを書き換え、ほかは「連絡」に追記する。
+- **相手を探す**: `ListAgents` の名前は `forge-25` のような自動の名前で、ユーザが呼ぶ題とは違う。対応は
+  `~/.claude/sessions/<pid>.json` (`name`・`sessionId`・`cwd`) と、`~/.claude/projects/-home-sano-work-forge/<sessionId>.jsonl` の `"aiTitle"` で取る。
+- **送る**: `SendMessage` (deferred なので `ToolSearch` の `select:SendMessage` で読み込む)。相手の画面には 1 行目しか出ないので、1 行目に要件を書く
+  (例「【引き継ぎ】…」「【お知らせ】…」「【回答】…」)。中身は、相手がこちらの文脈なしで動ける形にする: 対象の plan・節、commit、run のパス、
+  罠、判定の条件。相手は次の操作の合間に受け取る。返事は自分のメッセージとして届く。
+- **待ち合わせ**: 相手の結果を待つときは、待っていることを調整板の「依存関係」に書き、相手が送ってくるのを待つ (調整板や相手のディレクトリを
+  繰り返し覗かない)。
+- **ディスクの整理を頼まれたとき・するとき**: 自分が今後読むもの (出発点の run・参照の run・走行中の run・相手に約束したもの) を挙げて返す。
+  消す側は対象・除外・記録先 (tsv) を先に知らせる。
+- **インスタンスが 2 台のとき**: 2 台目は 1 台目の AMI の複製なので、複製した時点より後に片方で作ったものはもう片方に無い。run を出す前に
+  調整板の「インスタンス」でどちらに出すかを決めて書き、case README の run 一覧の行に「AWS-B」のように書く。同じ case の連続した run
+  (出発点と継続) は同じインスタンスにまとめる。
+  - こちらの IAM ユーザ `forge-ec2-ops` は起動・停止・describe-instances だけで、インスタンスの作成・イメージの作成・ボリュームの変更は
+    できない (2026-10-10 に dry-run で確認)。2 台目を作る・ディスクを広げるのはユーザがコンソールで行う。G 系のオンデマンドの vCPU の上限は 8
+    (g5.xlarge 2 台まで)。G 系に GPU 2 枚の機種は無い (1・4・8 枚)。
+  - 起動はシャットダウン動作を「停止」にする (自動停止の cron が `shutdown` するので、「終了」だとディスクごと消える)。
+  - `aws_instance.sh` は `FORGE_AWS_INSTANCE=<ID>` で 2 台目を指す。
