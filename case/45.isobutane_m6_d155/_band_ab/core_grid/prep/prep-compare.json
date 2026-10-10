@@ -1,0 +1,36 @@
+{
+ "x-8": {
+  "common_from_axis": 55,
+  "Gc_nj": 122,
+  "G2_nj": 170
+ },
+ "x-2": {
+  "common_from_axis": 57,
+  "Gc_nj": 122,
+  "G2_nj": 170
+ },
+ "x0": {
+  "common_from_axis": 57,
+  "Gc_nj": 122,
+  "G2_nj": 170
+ },
+ "x5": {
+  "common_from_axis": 55,
+  "Gc_nj": 122,
+  "G2_nj": 170
+ },
+ "x40": {
+  "common_from_axis": 52,
+  "Gc_nj": 122,
+  "G2_nj": 170
+ },
+ "x94": {
+  "common_from_axis": 50,
+  "Gc_nj": 122,
+  "G2_nj": 170
+ },
+ "min_common": 50,
+ "max_common": 57,
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

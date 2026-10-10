@@ -12,6 +12,12 @@ usage (design/.venv-opt の python):
   python core_grid_mesh.py metric-ab [--wall-ref DIR] [--g0-res RES_H5]  §4.6 の出口の主流 M の指標の 0 step の A/B
   python core_grid_mesh.py bl-count  [--wall-ref DIR] [--g0-res RES_H5]  G0 の解の境界層の外縁 (μt/μ が最大の 1 %) より内側の節点数
   python core_grid_mesh.py yaml                                          G1・Gc・G2 の問題 YAML (problem_d155_ns_prod_coldmesh_tw300_cg{1,c,2}.yaml) を書く
+  python core_grid_mesh.py prep <G1|Gc|G2>                              (AWS) §5.1 #3: _prepare_ns で格子・変換・初期値の移送を
+                                     _band_ab/core_grid/prep_<格子>/ に作り、品質・第一層・壁・法線・壁距離・初期値を検査する
+                                     (FORGE_BIN・REAL_CONVERTER・FORGE_CONVERTER は run_cold_pair.sh と同じに設定して呼ぶ)
+  python core_grid_mesh.py prep-compare                                  (AWS) prep_Gc と prep_G2 で座標が一致する範囲 (列ごと)
+  python core_grid_mesh.py prep-ic                                       (AWS) 移送後の初期値 (nozzle.h5 の保存量) の非有限・正値と、
+                                     新しい nj で reduce_fields が通ること (θ_r・δ_loc を G0 の res_100000 と並べる)
   python core_grid_mesh.py post-ab   [--wall-ref DIR] [--g0-res RES_H5] [--band-dir DIR]
                                      §5.1 #2(c) の 0 step の後処理の A/B: G0 の場を列ごとに壁からの距離 d の PCHIP にし、
                                      各格子と参照の細かい格子 Gref に載せて、判定の量の後処理だけの差を測る
@@ -376,16 +382,175 @@ def cmd_yaml(a):
     return out
 
 
+IC_RUN, IC_RES = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5"    # §4.4 の初期値 (B0 と同じ出発点)
+G0_MESH_RUN = "run_0183_ns_coldmesh_tw300_ext"                        # 今の格子 G0 の nozzle.h5 (照合の基準)
+SAME_RTOL = 1e-12
+
+
+def _h5(path, *keys):
+    import h5py
+    with h5py.File(path, "r") as h:
+        return [np.array(h[k]) for k in keys]
+
+
+def cmd_prep(a):
+    """§5.1 #3。cold_pair.prep と同じ _prepare_ns (300 K の問題 YAML・同じ壁の δ_r・同じ Euler 参照) で、run ではない準備のディレクトリを作る。"""
+    import os
+    sys.path.insert(0, str(HERE))
+    import cold_pair as CP
+    import ns_n012 as NS
+    NS.check_dry_env(False)
+    conv = Path(os.environ.get("REAL_CONVERTER", ""))
+    if not conv.is_file() or NS.sha256_file(conv) != CP.CONV_SHA:
+        raise SystemExit(f"REAL_CONVERTER ({conv}) が FP64 の変換器 (sha256 {CP.CONV_SHA[:16]}…) でない — 止める")
+    arm = a.arm
+    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES[arm]}.yaml"
+    out = OUT / f"prep_{arm}"
+    if out.exists():
+        raise SystemExit(f"{out} が既にある — 止める")
+    src = HERE / IC_RUN; rs = NS.res_files(src)
+    if not rs or rs[-1].name != IC_RES:
+        raise SystemExit(f"IC のドナー {src.name} の最後の res が {rs[-1].name if rs else None} ({IC_RES} であること) — 止める")
+    dr_csv = HERE / CP.WALL_REF / "delta_r_initial.csv"
+    info = NS._prepare_ns(problem, out, nsteps=12000, ic_from=src, delta_r_csv=str(dr_csv), offset="radial",
+                          euler_ref=str(HERE / CP.EULER_REF), cfl_main=5.0, implicit_relax=CP.RELAX)
+    NS.jdump(out / "prepare_info.json", info)
+    rec = {"plan": "plans/active/tooling-nozzle-core-grid.md §5.1 #3", "tool": "core_grid_mesh.py prep", "created": NS.now(),
+           "arm": arm, "problem": problem.name, "problem_sha256": NS.sha256_file(problem),
+           "code_commit": (HERE.parents[1] / "COMMIT").read_text().strip() if (HERE.parents[1] / "COMMIT").is_file() else None,
+           "forge_bin": os.environ.get("FORGE_BIN"), "forge_sha256": NS.sha256_file(Path(os.environ["FORGE_BIN"])),
+           "converter": str(conv), "converter_sha256": CP.CONV_SHA,
+           "ic": {"src_run": src.name, "src_res": IC_RES, "src_res_sha256": NS.sha256_file(rs[-1])},
+           "delta_r_csv_sha256": NS.sha256_file(dr_csv)}
+    rec["mesh_quality"] = CP.mesh_quality_strict(out)
+    # 生成時の倍精度座標との照合 (cold_pair.mesh_checks は Mesh2DParams を決め打ちのキーで組むので、ここは _mesh_params_from で組む)
+    wall = Wall(out); m = yaml.safe_load(problem.read_text())["mesh"]
+    P, prm = generate(wall, m)
+    C, dt = _h5(out / "nozzle.h5", "MESH/COORD")[0], None
+    import h5py
+    with h5py.File(out / "nozzle.h5", "r") as h:
+        dt = str(h["MESH/COORD"].dtype); wd = np.array(h["VALUE/wall_dist"])
+        V = {k: np.array(h["VALUE/" + k]) for k in ("ro", "Ux", "Uy", "T", "P", "k", "omega") if "VALUE/" + k in h}
+    C = C.reshape(prm.ni, prm.nj, 3)[..., :2] / wall.scale
+    rel1 = np.abs(np.linalg.norm(C[:, -1] - C[:, -2], axis=1) / np.linalg.norm(P[:, -1] - P[:, -2], axis=1) - 1.0)
+    rec["vs_generated"] = {"coord_dtype": dt, "max_abs_diff_rt": float(np.abs(C - P).max()), "first_layer_rel_err_max": float(rel1.max())}
+    rec["vs_generated"]["metrics"] = metrics(C)
+    # 物理壁 (wall_repr.json) が生産の壁と一致
+    rec["geometry_vs_production"] = CP.geom_check(out, wall.scale)
+    # 壁距離を変換し直して一致
+    wd_new, coord_new, _ = NS.reconvert_wall_dist(out)
+    with h5py.File(out / "nozzle.h5", "r") as h:
+        coord0 = np.array(h["MESH/COORD"])
+    rec["wall_dist_reconvert_rel_max"] = float(np.max(np.abs(wd - wd_new) / np.maximum(np.abs(wd_new), 1e-30))) if np.array_equal(coord0, coord_new) else None
+    # G0 (今の格子) との照合: x の station・壁節点・第一内部節点・壁の法線・壁距離 (壁と第一内部節点)
+    C0, wd0 = _h5(HERE / G0_MESH_RUN / "nozzle.h5", "MESH/COORD", "VALUE/wall_dist")
+    C0 = C0.reshape(prm.ni, -1, 3)[..., :2] / wall.scale; nj0 = C0.shape[1]; wd0 = wd0.reshape(prm.ni, nj0); wdn = wd.reshape(prm.ni, prm.nj)
+    rel = lambda A, B: float(np.max(np.abs(A - B) / np.maximum(np.abs(B), 1e-30)))  # noqa: E731
+    t = np.gradient(C[:, -1], axis=0); t /= np.linalg.norm(t, axis=1)[:, None]; t0 = np.gradient(C0[:, -1], axis=0); t0 /= np.linalg.norm(t0, axis=1)[:, None]
+    rec["vs_G0"] = {"wall_nodes_rel_max": rel(C[:, -1], C0[:, -1]), "first_interior_rel_max": rel(C[:, -2], C0[:, -2]),
+                    "x_station_rel_max": rel(C[:, -1, 0], C0[:, -1, 0]), "wall_tangent_max_abs_diff": float(np.abs(t - t0).max()),
+                    "wall_dist_first_interior_rel_max": rel(wdn[:, -2], wd0[:, -2])}
+    # 初期値 (移送後の nozzle.h5 の VALUE): 非有限・物理性
+    rec["ic_values"] = {k: {"nonfinite": int(np.count_nonzero(~np.isfinite(v))), "min": float(np.nanmin(v)), "max": float(np.nanmax(v))} for k, v in V.items()}
+    ok = {
+        "mesh_quality_pass": rec["mesh_quality"].startswith("VERDICT: PASS"),
+        "coord_float64": dt == "float64", "first_layer_exact": rec["vs_generated"]["first_layer_rel_err_max"] <= CP.FIRST_LAYER_TOL,
+        "matches_generated": rec["vs_generated"]["max_abs_diff_rt"] <= 1e-9,
+        "wall_same_as_production": bool(rec["geometry_vs_production"]["ok"]),
+        "wall_dist_reconvert": rec["wall_dist_reconvert_rel_max"] is not None and rec["wall_dist_reconvert_rel_max"] <= NS.WALLDIST_RTOL,
+        "same_wall_and_first_layer_as_G0": max(rec["vs_G0"]["wall_nodes_rel_max"], rec["vs_G0"]["first_interior_rel_max"], rec["vs_G0"]["x_station_rel_max"]) <= SAME_RTOL
+                                           and rec["vs_G0"]["wall_tangent_max_abs_diff"] <= SAME_RTOL,
+        "wall_dist_first_interior_as_G0": rec["vs_G0"]["wall_dist_first_interior_rel_max"] <= NS.WALLDIST_RTOL,
+        "kinks_le_2deg": rec["vs_generated"]["metrics"]["kink_over_2deg"] == 0,
+        # CFD ピンの初期線が生産の準備と同じ (run_0062 の nozzle.h5 は AWS で消されたので手元の複製を使う。初期線のハッシュで同一性を確かめる)
+        "initial_line_same_as_production": (info.get("initial_line") or {}).get("sha256_16") == json.loads(
+            (HERE / CP.WALL_REF / "prepare_info.json").read_text())["initial_line"]["sha256_16"],
+        "ic_finite": all(v["nonfinite"] == 0 for v in rec["ic_values"].values()),
+        "ic_positive": all(rec["ic_values"][k]["min"] > 0 for k in ("ro", "T", "P") if k in rec["ic_values"]),
+    }
+    rec["checks"] = ok; rec["VERDICT"] = "PASS" if all(ok.values()) else "FAIL"
+    rec["nozzle_sha256"] = NS.sha256_file(out / "nozzle.h5")
+    NS.jdump(out / "CORE_GRID_PREP.json", rec)
+    return rec
+
+
+def cmd_prep_compare(a):
+    """prep_Gc と prep_G2 の節点座標が軸側から一致する範囲 (列ごとの本数)。上限 c に達した区間が共通なら一致する。"""
+    out = {}
+    A = _h5(OUT / "prep_Gc" / "nozzle.h5", "MESH/COORD")[0].reshape(4719, -1, 3)[..., :2]
+    B = _h5(OUT / "prep_G2" / "nozzle.h5", "MESH/COORD")[0].reshape(4719, -1, 3)[..., :2]
+    n = min(A.shape[1], B.shape[1]); same = np.all(np.isclose(A[:, :n], B[:, :n], rtol=0, atol=1e-12), axis=2)
+    cnt = np.argmin(np.concatenate([same, np.zeros((same.shape[0], 1), bool)], 1), axis=1)   # 軸から連続して一致する本数
+    xw = A[:, -1, 0] / Wall(Path(a.wall_ref)).scale
+    for xq in (-8.0, -2.0, 0.0, 5.0, 40.0, 94.0):
+        i = int(np.argmin(np.abs(xw - xq))); out[f"x{xq:g}"] = {"common_from_axis": int(cnt[i]), "Gc_nj": A.shape[1], "G2_nj": B.shape[1]}
+    out["min_common"] = int(cnt.min()); out["max_common"] = int(cnt.max())
+    return out
+
+
+def cmd_prep_ic(a):
+    import h5py
+    sys.path.insert(0, str(HERE))
+    import cold_xcheck as XC
+    yb_x, yb = XC.common_yb(); scale = Wall(OUT / "prep_G1").scale; NI = 4719
+    def reduce(xy, ro, ux, uy, k, nj):
+        o = XC.reduce_fields(xy, ro, ux, uy, np.ones_like(ro), k, False, NI, nj, scale, yb_x, yb, profile="pchip")
+        r = {}
+        for (lo, hi) in WINDOWS:
+            w = (o["x"] >= lo) & (o["x"] <= hi)
+            for q in ("theta_r", "delta_loc"):
+                r[f"{q}_w{int(lo)}_{int(hi)}"] = float(np.trapezoid(o[q][w], o["x"][w]) / (o["x"][w][-1] - o["x"][w][0]))
+        return r
+    out = {}
+    with h5py.File(HERE / IC_RUN / IC_RES, "r") as h:
+        xy = np.array(h["MESH/COORD"], dtype=float).reshape(-1, 3)[:, :2]
+        g0 = {k: np.array(h["VALUE/" + k], dtype=float) for k in ("ro", "Ux", "Uy", "k")}
+        S = {k: np.array(h["VALUE/" + k], dtype=float) for k in ("ro", "roUx", "roUy", "roe", "roK", "roOmega")}
+    def prim(D):
+        r = D["ro"]
+        return {"ro": r, "u": D["roUx"] / r, "v": D["roUy"] / r, "e": D["roe"] / r, "k": D["roK"] / r, "omega": D["roOmega"] / r}
+    P0 = prim(S); nj0 = len(S["ro"]) // NI
+    def wall_omega(P, nj):
+        w = P["omega"].reshape(NI, nj)
+        return {"wall_median": float(np.median(w[:, -1])), "wall_max": float(w[:, -1].max()),
+                "first_interior_median": float(np.median(w[:, -2])), "max_excl_wall": float(w[:, :-1].max())}
+    out["G0_res_100000_omega"] = wall_omega(P0, nj0)
+    out["G0_res_100000"] = reduce(xy, g0["ro"], g0["Ux"], g0["Uy"], g0["k"], len(g0["ro"]) // NI)
+    for arm in ("G1", "Gc", "G2"):
+        with h5py.File(OUT / f"prep_{arm}" / "nozzle.h5", "r") as h:
+            keys = [k for k in h["VALUE"].keys() if h["VALUE/" + k].shape and h["VALUE/" + k].ndim == 1]
+            V = {k: np.array(h["VALUE/" + k], dtype=float) for k in keys}
+            xy = np.array(h["MESH/COORD"], dtype=float).reshape(-1, 3)[:, :2]
+        n = len(V["ro"]); nonf = {k: int(np.count_nonzero(~np.isfinite(v))) for k, v in V.items() if len(v) == n}
+        pos = {k: float(V[k].min()) for k in ("ro", "roe", "roK", "roOmega") if k in V}
+        # roe は燃焼ガスのエネルギーの基準 (生成エンタルピー) で負になりうる (G0 の res_100000 でも最小 −5.4e6) ので正値は見ない。
+        # interp_field は原始量を最近傍で移して ρ を掛け直すので、保存量 (ρ × 別の節点の量) は元の値域を超えうる → 原始量の値域で見る。
+        # ω は prepare_ns が移送の後に近壁の下限 6ν/(β₁ d²) を掛ける (runner_axismach.py:1443–1454) ので、壁節点を除いて見る。
+        P = prim({k: V[k] for k in S}); excess = {}
+        for k in P:
+            lo, hi = P0[k].min(), P0[k].max(); x = P[k] if k != "omega" else P[k].reshape(NI, -1)[:, :-1].ravel()
+            excess[k] = float(max(lo - x.min(), x.max() - hi, 0.0) / (hi - lo))
+        rec = {"value_keys": sorted(V), "nonfinite": nonf, "min": pos, "primitive_excess_over_range": excess,
+               "omega": wall_omega(P, n // NI),
+               "ok": all(v == 0 for v in nonf.values()) and pos.get("ro", 1) > 0 and pos.get("roK", 0) >= 0 and pos.get("roOmega", 1) > 0
+                     and all(v <= 1e-6 for v in excess.values())}
+        ro = V["ro"]; rec["reduce"] = reduce(xy, ro, V["roUx"] / ro, V["roUy"] / ro, V["roK"] / ro, n // NI)
+        rec["reduce_rel_vs_G0_pct"] = {k: 100 * (rec["reduce"][k] / out["G0_res_100000"][k] - 1) for k in rec["reduce"]}
+        out[arm] = rec
+    return out
+
+
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml"])
+    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
+    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2"], help="prep: 格子")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()
-    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml}[a.cmd](a)
+    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic}[a.cmd](a)
     out["problem"] = PROBLEM.name; out["wall_ref"] = a.wall_ref
     OUT.mkdir(parents=True, exist_ok=True)
-    p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
     print(json.dumps({k: v for k, v in out.items() if k != "metrics"}, ensure_ascii=False, indent=1)[:6000])
     print(f"[core_grid_mesh] {p}")
 

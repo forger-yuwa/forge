@@ -1,0 +1,114 @@
+{
+ "plan": "plans/active/tooling-nozzle-core-grid.md §5.1 #3",
+ "tool": "core_grid_mesh.py prep",
+ "created": "2026-10-10T05:46:51+00:00",
+ "arm": "G1",
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "problem_sha256": "af3aecc2c2692502dc994029cba8abae11dc638149cb33e941fb0c99653276fa",
+ "code_commit": "013fef05c8a195a8d364d0f93cce7ad4738baaac\n未 commit の変更:  M case/45.isobutane_m6_d155/core_grid_mesh.py ?? COMMIT",
+ "forge_bin": "/home/ubuntu/forge-linespeed-fp64/solver_density_cuda/build/forge",
+ "forge_sha256": "05ad8bdf6100874f39ae39a5d9ea08613223e87e1e4fdc5270baaeaad5206b11",
+ "converter": "/home/ubuntu/forge-wallfit-bin-fp64/solver_density_cuda/build/convertGmshToForge",
+ "converter_sha256": "ac88861fa04ebdf41e3949fe7c871e12f7356ee59d239bd0c7c204b16d4df872",
+ "ic": {
+  "src_run": "run_0183_ns_coldmesh_tw300_ext",
+  "src_res": "res_100000.h5",
+  "src_res_sha256": "207d39f0e7f4aa033f605519010d029e5b4f3f1aaa45b3b080e44bcb232bad69"
+ },
+ "delta_r_csv_sha256": "0bc9da5b6e8f0197c8ca74d9468beadb137b80ab89dc01ec885638f8a212290d",
+ "mesh_quality": "VERDICT: PASS (AR<= 5000, skew<= 0.90)",
+ "vs_generated": {
+  "coord_dtype": "float64",
+  "max_abs_diff_rt": 0.0,
+  "first_layer_rel_err_max": 0.0,
+  "metrics": {
+   "nj": 92,
+   "nodes": 434148,
+   "kink_max_deg": 1.6741970718474395,
+   "kink_at": [
+    -11.985552046593488,
+    33
+   ],
+   "kink_p999_deg": 0.31621138443751057,
+   "kink_over_2deg": 0,
+   "kink_band_max_deg": 1.6741970718474395,
+   "kink_band_over_2deg": 0,
+   "band": [
+    -12.5,
+    -4.0
+   ],
+   "ar_max": 4572.885268422694,
+   "ar_p99": 3664.107823952114,
+   "skew_max": 0.46083648062359955,
+   "area_min_rt2": 5.527022193734098e-10,
+   "lines_cross": 0,
+   "radial_edge_over_rw_max": 0.03749886007885816,
+   "radial_edge_over_rw_axis5_max": 0.030000000000000044,
+   "wall_ratio_phys": {
+    "x0": 1.1987937888472535,
+    "x40": 1.132925888708713,
+    "x94": 1.1220910598207219,
+    "max": 1.1990111671181258
+   },
+   "axis_gap_rt": {
+    "x0": 0.030041680955605877,
+    "x40": 0.25133339017039,
+    "x94": 0.30306973966534295
+   },
+   "axis_dr_over_dx_max": 21.65935927563402
+  }
+ },
+ "geometry_vs_production": {
+  "domain": [
+   -12.5,
+   95.22757793472597
+  ],
+  "domains": [
+   [
+    -12.5,
+    95.22757793472597
+   ],
+   [
+    -12.5,
+    95.22757793472597
+   ]
+  ],
+  "max_abs_dr_rt": 0.0,
+  "x_at_max": -12.5,
+  "max_abs_dr_m": 0.0,
+  "tol_rt": 1e-08,
+  "ok": true
+ },
+ "wall_dist_reconvert_rel_max": 0.0,
+ "vs_G0": {
+  "wall_nodes_rel_max": 0.0,
+  "first_interior_rel_max": 2.721990784431461e-16,
+  "x_station_rel_max": 0.0,
+  "wall_tangent_max_abs_diff": 0.0,
+  "wall_dist_first_interior_rel_max": 1.0723915445577473e-09
+ },
+ "ic_values": {
+  "ro": {
+   "nonfinite": 0,
+   "min": 0.013835130982734062,
+   "max": 62.770946370699086
+  }
+ },
+ "checks": {
+  "mesh_quality_pass": true,
+  "coord_float64": true,
+  "first_layer_exact": true,
+  "matches_generated": true,
+  "wall_same_as_production": true,
+  "wall_dist_reconvert": true,
+  "same_wall_and_first_layer_as_G0": true,
+  "wall_dist_first_interior_as_G0": true,
+  "kinks_le_2deg": true,
+  "initial_line_same_as_production": true,
+  "ic_finite": true,
+  "ic_positive": true
+ },
+ "VERDICT": "PASS",
+ "nozzle_sha256": "63e5b51c7f01a2cec00ad2f9e9ee823a834da12f84ed220af2230b9e372f82fb",
+ "wall_ref": "/home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}
