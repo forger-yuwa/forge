@@ -1,3 +1,6 @@
+// 調査用 (登録外、2026-10-10、plan time_integration-line-viscous-jacobian-faceh §6.4): test_line_visc_jacobian.cpp (b196885b) の写しに、
+// long double の流束 fluxL と差分 fdL を足し、全列について J と long double の差分 (h = 1e-7) の差を 'LD <集合> <標本> <D/K> <列> <分類> <差>' で出す。
+// 判定には使わない。ビルド: g++ -O2 -std=c++17 -Wno-unknown-pragmas -I solver_density_cuda -I solver_density_cuda/tools solver_density_cuda/tools/probe_line_visc_jacobian_ld.cpp -o /tmp/p && /tmp/p | grep '^LD'
 // U-J (plan time_integration-line-viscous-jacobian §6、拡張は plan time_integration-line-viscous-jacobian-faceh §6.3): 薄層の粘性・熱伝導の Jacobian
 // (block_dplur::accumulate_thinlayer_visc_jacobian、`lineViscCoupling: 2`) の単体照合。A = 共通関数の D・K、B = 試験の中の独立な流束 `flux` の中心差分。
 //   (1)  D = −∂R_i/∂Q_i・K = ∂R_i/∂Q_j と中心差分の差を行列の最大値で正規化 (記録だけ。次元の違う小さい列の誤差を保証しない)
@@ -15,12 +18,6 @@
 //   (4)  8 節点のラインを組み、block-Thomas (lineThomas_d と同じ前進消去・後退代入の host の写し) と密行列の解の差 (≤ 1e-10、相対)
 //   (5)  float 版と double 版の差 (≤ 1e-4、行列の最大で正規化)。列ごとの値は記録だけ
 //   判定に使う量に非有限が 1 件でもあれば PASS にしない。FAIL は失敗の項目を分けて書く (微分の不一致だけが微分の実装への反証)。
-// 引数 (plan time_integration-line-viscous-jacobian-faceh §6.5、既定では何も変わらない):
-//   --ref double|mp100  (1′)・(3′) の参照の差分 (独立な流束とその差分) の演算精度。mp100 は boost の cpp_bin_float_100 (10 進 100 桁)。標本・J・差分幅は同じ
-//   --eta X             量子化の指標 η_c = max_{幅, r} [ulp(R⁺_r) + ulp(R⁻_r)] / (2h·s_c) (零列は無次元化の係数を掛ける) が X (零列は X·1e-4) を超える列を「解像しない」にする。
-//                       η の入力・値が非有限なら「差分が非有限」。--ref mp100 には必須。--ref mp100 では A (double の参照) と B (多倍長) を同じ列で両方計算し、
-//                       判定は B、§6.3 の旧不一致 (A の η の前の不一致) の列ごとに原因を判定する (CAUSE の行)。基準の Q・差分幅・刻みは double で作って共通にする
-//   --dump PATH         全列の記録 (A・B の η の前後の分類、e(h)・e(h/2)・再現・η、零列、熱伝導 |κΔT|・粘性の仕事 |τ·ū|) を %.17g で書き出す。書き込みの失敗は終了コード 3
 // ビルド: g++ -O2 -std=c++17 -Wno-unknown-pragmas -I solver_density_cuda solver_density_cuda/tools/test_line_visc_jacobian.cpp -o /tmp/tlvj && /tmp/tlvj
 #include <cstdio>
 #include <cmath>
@@ -29,12 +26,7 @@
 #include <array>
 #include <string>
 #include <algorithm>
-#include <cstring>
-#include <boost/multiprecision/cpp_bin_float.hpp>
-#include <boost/math/special_functions/next.hpp>
-#include <cstdlib>
 #include "../cuda_forge/block_dplur_jacobian_d.cuh"
-using MP = boost::multiprecision::cpp_bin_float_100;
 
 struct Face { double beta, kappa, n[3], fi; };
 struct Node { double rho, u[3], rhoE, gam, cp; };
@@ -91,77 +83,10 @@ static void dir_fd(const Face& f, const Node& i, const Node& j, const double dq[
     for (int r = 0; r < 5; ++r) out[r] = (Rp[r] - Rm[r]) / (2 * hs);
 }
 
-// ---- 参照の差分の精度の切替 (§6.5): 多倍長の独立な流束と差分。式は flux と同じ ----
-// 基準の Q・差分幅 h・方向の刻み hs·dq は double で作って A と B で共通にし、B はそれを多倍長に持ち上げて Q ± h 以降を多倍長で計算する
-struct NodeMP { MP rho, u[3], rhoE; double gam, cp; };
-static NodeMP mp_from_q(const MP q[5], double gam, double cp) { NodeMP s; s.rho = q[0]; for (int a = 0; a < 3; ++a) s.u[a] = q[1 + a] / q[0]; s.rhoE = q[4]; s.gam = gam; s.cp = cp; return s; }
-static MP mp_temp(const NodeMP& s) { const MP q2 = s.u[0]*s.u[0] + s.u[1]*s.u[1] + s.u[2]*s.u[2]; return (MP(s.gam) / MP(s.cp)) * (s.rhoE / s.rho - MP(0.5) * q2); }
-static void mp_flux(const Face& f, const NodeMP& i, const NodeMP& j, MP R[5]) {
-    MP P[3][3];
-    for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) P[a][b] = MP(a == b ? 1.0 : 0.0) + MP(f.n[a]) * MP(f.n[b]) / MP(3);
-    MP tau[3], ub[3];
-    for (int a = 0; a < 3; ++a) { tau[a] = 0; for (int b = 0; b < 3; ++b) tau[a] += MP(f.beta) * P[a][b] * (j.u[b] - i.u[b]); ub[a] = MP(f.fi) * i.u[a] + (MP(1) - MP(f.fi)) * j.u[a]; }
-    R[0] = 0; for (int a = 0; a < 3; ++a) R[1 + a] = tau[a];
-    R[4] = MP(f.kappa) * (mp_temp(j) - mp_temp(i)) + tau[0] * ub[0] + tau[1] * ub[1] + tau[2] * ub[2];
-}
-// ulp: 隣の表現可能な値との差 (非有限はそのまま非有限を返す)
-static double ulp_d(double x) { x = std::fabs(x); return std::nextafter(x, INFINITY) - x; }
-static MP ulp_mp(const MP& x) { const MP a = abs(x); return boost::math::float_next(a) - a; }
-// 差分の Jacobian (side は fd_jac と同じ) と、各列の行ごとの [ulp(R⁺_r) + ulp(R⁻_r)] / (2h) (η の分子)
-static void fd_jac_mp(const Face& f, const Node& i, const Node& j, int side, double hs, double J[5][5], double U2h[5][5]) {
-    double qd[5]; to_q(side ? j : i, qd);
-    double qo[5]; to_q(side ? i : j, qo);
-    for (int c = 0; c < 5; ++c) {
-        const double h = hs * std::max(std::fabs(qd[c]), 1e-3);      // fd_jac と同じ double の差分幅
-        MP qp[5], qm[5], qx[5];
-        for (int k = 0; k < 5; ++k) { qp[k] = qd[k]; qm[k] = qd[k]; qx[k] = qo[k]; }
-        qp[c] += MP(h); qm[c] -= MP(h);
-        MP Rp[5], Rm[5];
-        const NodeMP nx = mp_from_q(qx, side ? i.gam : j.gam, side ? i.cp : j.cp);
-        if (side) { mp_flux(f, nx, mp_from_q(qp, j.gam, j.cp), Rp); mp_flux(f, nx, mp_from_q(qm, j.gam, j.cp), Rm); }
-        else      { mp_flux(f, mp_from_q(qp, i.gam, i.cp), nx, Rp); mp_flux(f, mp_from_q(qm, i.gam, i.cp), nx, Rm); }
-        for (int r = 0; r < 5; ++r) {
-            J[r][c] = static_cast<double>((side ? MP(1) : MP(-1)) * (Rp[r] - Rm[r]) / (MP(2) * MP(h)));
-            U2h[r][c] = static_cast<double>((ulp_mp(Rp[r]) + ulp_mp(Rm[r])) / (MP(2) * MP(h)));
-        }
-    }
-}
-static void ulp_jac_d(const Face& f, const Node& i, const Node& j, int side, double hs, double U2h[5][5]) {   // double の差分の η の分子 (fd_jac と同じ点で評価)
-    double q[5]; to_q(side ? j : i, q);
-    for (int c = 0; c < 5; ++c) {
-        const double h = hs * std::max(std::fabs(q[c]), 1e-3);
-        double qp[5], qm[5], Rp[5], Rm[5];
-        std::copy(q, q + 5, qp); std::copy(q, q + 5, qm); qp[c] += h; qm[c] -= h;
-        if (side) { flux(f, i, from_q(qp, j.gam, j.cp), Rp); flux(f, i, from_q(qm, j.gam, j.cp), Rm); }
-        else      { flux(f, from_q(qp, i.gam, i.cp), j, Rp); flux(f, from_q(qm, i.gam, i.cp), j, Rm); }
-        for (int r = 0; r < 5; ++r) U2h[r][c] = (ulp_d(Rp[r]) + ulp_d(Rm[r])) / (2 * h);
-    }
-}
-static void dir_fd_mp(const Face& f, const Node& i, const Node& j, const double dq[5], double hs, double out[5], double u2h[5]) {
-    double qi[5], qj[5]; to_q(i, qi); to_q(j, qj);
-    MP mi[5], qp[5], qm[5], Rp[5], Rm[5];
-    for (int c = 0; c < 5; ++c) { const double st = hs * dq[c]; mi[c] = qi[c]; qp[c] = MP(qj[c]) + MP(st); qm[c] = MP(qj[c]) - MP(st); }   // 刻みは dir_fd と同じ double の hs·dq
-    const NodeMP ni = mp_from_q(mi, i.gam, i.cp);
-    mp_flux(f, ni, mp_from_q(qp, j.gam, j.cp), Rp); mp_flux(f, ni, mp_from_q(qm, j.gam, j.cp), Rm);
-    for (int r = 0; r < 5; ++r) { out[r] = static_cast<double>((Rp[r] - Rm[r]) / (MP(2) * MP(hs))); u2h[r] = static_cast<double>((ulp_mp(Rp[r]) + ulp_mp(Rm[r])) / (MP(2) * MP(hs))); }
-}
-static void ulp_dir_d(const Face& f, const Node& i, const Node& j, const double dq[5], double hs, double u2h[5]) {
-    double q[5], qp[5], qm[5], Rp[5], Rm[5]; to_q(j, q);
-    for (int c = 0; c < 5; ++c) { qp[c] = q[c] + hs * dq[c]; qm[c] = q[c] - hs * dq[c]; }
-    flux(f, i, from_q(qp, j.gam, j.cp), Rp); flux(f, i, from_q(qm, j.gam, j.cp), Rm);
-    for (int r = 0; r < 5; ++r) u2h[r] = (ulp_d(Rp[r]) + ulp_d(Rm[r])) / (2 * hs);
-}
-// 基準の状態の R4 の内訳 (記録だけ): 熱伝導 |κΔT| と粘性の仕事 |τ·ū|
-static void r4_parts(const Face& f, const Node& i, const Node& j, double& heat, double& work) {
-    double R[5]; flux(f, i, j, R); heat = std::fabs(f.kappa * (temp(j) - temp(i))); work = std::fabs(R[4] - f.kappa * (temp(j) - temp(i)));
-}
-
 // 列の分類 (§6.3 (1′))
 enum ColClass { C_PASS = 0, C_FAIL, C_UNRES, C_STRADDLE, C_NF_J, C_NF_FD, C_NCLS };
 static const char* CLS_NAME[C_NCLS] = {"合格", "不一致", "解像しない", "閾値をまたぐ", "J が非有限", "差分が非有限"};
-struct ColRec { int sample; std::string set; char side; int col; ColClass cls; double e1, e2, rep; bool zero; double eta = 0, heat = 0, work = 0;
-                // §6.5: A = double の参照 (η の前・後)、B = 多倍長の参照 (η の前・後)。cls は判定に使う分類 (B > A(η) > A の順)
-                ColClass clsA_raw = C_PASS, clsA = C_PASS, clsB_raw = C_PASS, clsB = C_PASS; double eA1 = 0, eA2 = 0, repA = 0, etaA = 0, eB1 = 0, eB2 = 0, repB = 0, etaB = 0; };
+struct ColRec { int sample; std::string set; char side; int col; ColClass cls; double e1, e2, rep; bool zero; };
 // Jc・F1c (幅 h)・F2c (幅 h/2) は列ベクトル。zs[r] は零列のときの無次元化の係数 q_ref,c / R_ref,r
 static ColClass classify(const double Jc[5], const double F1c[5], const double F2c[5], const double zs[5], double& e1, double& e2, double& rep, bool& zero) {
     e1 = e2 = rep = 0; zero = false;
@@ -190,40 +115,24 @@ static void zero_scale(const Face& f, const Node& i, const Node& j, const Node& 
     zs[4] = qref / Re;
 }
 
-// η による「解像しない」への読み替え (§6.5)。分類が非有限・解像しないのときは変えない。η の入力・値が非有限なら「差分が非有限」
-static ColClass apply_eta(ColClass cls, const double Jc[5], const double u2h1[5], const double u2h2[5], const double zs[5], double thr, double& eta) {
-    double s = 0; for (int r = 0; r < 5; ++r) s = std::max(s, std::fabs(Jc[r]));
-    eta = 0; bool nf = false;
-    for (int r = 0; r < 5; ++r) {
-        if (!std::isfinite(u2h1[r]) || !std::isfinite(u2h2[r])) { nf = true; continue; }
-        const double v = std::max(u2h1[r], u2h2[r]), x = s > 0 ? v / s : v * zs[r];
-        if (!std::isfinite(x)) { nf = true; continue; }
-        if (x > eta) eta = x;
-    }
-    if (cls == C_NF_J || cls == C_NF_FD || cls == C_UNRES) return cls;
-    if (nf) return C_NF_FD;
-    if (eta > (s > 0 ? thr : thr * 1e-4)) return C_UNRES;
-    return cls;
+
+// ---- 調査用 (scratch): long double の流束 ----
+static long double tempL(const Node& s, long double rhoE, long double rho, const long double u[3]) { long double q2 = u[0]*u[0]+u[1]*u[1]+u[2]*u[2]; return ((long double)s.gam/(long double)s.cp)*(rhoE/rho - 0.5L*q2); }
+static void fluxL(const Face& f, const Node& i, const Node& j, const long double qi[5], const long double qj[5], long double R[5]) {
+    long double ui[3], uj[3]; for (int a=0;a<3;++a){ ui[a]=qi[1+a]/qi[0]; uj[a]=qj[1+a]/qj[0]; }
+    long double P[3][3]; for (int a=0;a<3;++a) for (int b=0;b<3;++b) P[a][b]=(a==b?1.0L:0.0L)+(long double)f.n[a]*(long double)f.n[b]/3.0L;
+    long double tau[3], ub[3]; for (int a=0;a<3;++a){ tau[a]=0; for (int b=0;b<3;++b) tau[a]+=(long double)f.beta*P[a][b]*(uj[b]-ui[b]); ub[a]=(long double)f.fi*ui[a]+(1.0L-(long double)f.fi)*uj[a]; }
+    R[0]=0; for (int a=0;a<3;++a) R[1+a]=tau[a];
+    R[4]=(long double)f.kappa*(tempL(j,qj[4],qj[0],uj)-tempL(i,qi[4],qi[0],ui))+tau[0]*ub[0]+tau[1]*ub[1]+tau[2]*ub[2];
+}
+static void fdL(const Face& f, const Node& i, const Node& j, int side, long double hs, long double J[5][5]) {
+    double qd[5], qe[5]; to_q(i, qd); to_q(j, qe); long double qi[5], qj[5]; for (int c=0;c<5;++c){ qi[c]=qd[c]; qj[c]=qe[c]; }
+    for (int c=0;c<5;++c){ long double* q = side? qj: qi; long double h = hs*std::max(fabsl(q[c]), 1e-3L); long double s0=q[c];
+        long double Rp[5], Rm[5]; q[c]=s0+h; fluxL(f,i,j,qi,qj,Rp); q[c]=s0-h; fluxL(f,i,j,qi,qj,Rm); q[c]=s0;
+        for (int r=0;r<5;++r) J[r][c]=(side?1.0L:-1.0L)*(Rp[r]-Rm[r])/(2*h); }
 }
 
-int main(int argc, char** argv) {
-    bool ref_mp = false; double eta_thr = 0; const char* dump = nullptr;
-    bool seen_ref = false, seen_eta = false;
-    for (int a = 1; a < argc; ++a) {
-        if (!std::strcmp(argv[a], "--ref") && a + 1 < argc) {
-            if (seen_ref) { std::fprintf(stderr, "--ref が重複\n"); return 3; } seen_ref = true; ++a;
-            if (!std::strcmp(argv[a], "mp100")) ref_mp = true; else if (std::strcmp(argv[a], "double")) { std::fprintf(stderr, "--ref は double か mp100\n"); return 3; }
-        } else if (!std::strcmp(argv[a], "--eta") && a + 1 < argc) {
-            if (seen_eta) { std::fprintf(stderr, "--eta が重複\n"); return 3; } seen_eta = true;
-            char* end = nullptr; eta_thr = std::strtod(argv[++a], &end);
-            if (end == argv[a] || *end != '\0' || !std::isfinite(eta_thr) || eta_thr <= 0) { std::fprintf(stderr, "--eta は有限の正の数\n"); return 3; }
-        } else if (!std::strcmp(argv[a], "--dump") && a + 1 < argc) {
-            if (dump) { std::fprintf(stderr, "--dump が重複\n"); return 3; } dump = argv[++a];
-        } else { std::fprintf(stderr, "不明な引数 %s\n", argv[a]); return 3; }
-    }
-    if (ref_mp && eta_thr <= 0) { std::fprintf(stderr, "--ref mp100 には --eta が要る (§6.5)\n"); return 3; }
-    const bool newreg = ref_mp || eta_thr > 0;   // §6.5 の登録 (非有限を 1 % の枠に入れない、原因の判定を出す)
-    if (ref_mp || eta_thr > 0) std::printf("参照の差分: %s、η の閾値 %.1e (零列は ×1e-4)\n", ref_mp ? "mp100 (cpp_bin_float_100)" : "double", eta_thr);
+int main() {
     std::mt19937_64 g(20261009);
     auto U = [&](double a, double b) { return std::uniform_real_distribution<double>(a, b)(g); };
     auto rnd_node = [&](bool wall) {
@@ -306,45 +215,31 @@ int main(int argc, char** argv) {
     }
     std::vector<ColRec> recs;
     double e_orient = 0;
-    // 1 列の評価。A1・A2 = double の参照 (幅 h・h/2)、uA = その η の分子、B・uB = 多倍長 (ref_mp のときだけ)
-    auto eval_col = [&](int id, const std::string& set, char side, int c, const double Jc[5], const double A1[5], const double A2[5],
-                        const double uA1[5], const double uA2[5], const double B1[5], const double B2[5], const double uB1[5], const double uB2[5],
-                        const double zs[5], double heat, double work) {
-        ColRec rc{id, set, side, c, C_PASS, 0, 0, 0, false};
-        rc.clsA_raw = classify(Jc, A1, A2, zs, rc.eA1, rc.eA2, rc.repA, rc.zero);
-        rc.clsA = eta_thr > 0 ? apply_eta(rc.clsA_raw, Jc, uA1, uA2, zs, eta_thr, rc.etaA) : rc.clsA_raw;
-        rc.cls = rc.clsA; rc.e1 = rc.eA1; rc.e2 = rc.eA2; rc.rep = rc.repA; rc.eta = rc.etaA;
-        if (ref_mp) {
-            bool z; rc.clsB_raw = classify(Jc, B1, B2, zs, rc.eB1, rc.eB2, rc.repB, z);
-            rc.clsB = apply_eta(rc.clsB_raw, Jc, uB1, uB2, zs, eta_thr, rc.etaB);
-            rc.cls = rc.clsB; rc.e1 = rc.eB1; rc.e2 = rc.eB2; rc.rep = rc.repB; rc.eta = rc.etaB;
-        }
-        rc.heat = heat; rc.work = work; recs.push_back(rc);
-    };
-    // 参照の差分の行列 (side・幅): A は登録の試験と同じ fd_jac、η の分子は --eta のときだけ。B は ref_mp のときだけ
-    struct RefJ { double A[5][5], uA[5][5], B[5][5], uB[5][5]; };
-    auto ref_jac = [&](const Face& f, const Node& i, const Node& j, int side, double hs, RefJ& R) {
-        fd_jac(f, i, j, side, hs, R.A);
-        if (eta_thr > 0) ulp_jac_d(f, i, j, side, hs, R.uA); else for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) R.uA[r][c] = 0;
-        if (ref_mp) fd_jac_mp(f, i, j, side, hs, R.B, R.uB); else for (int r = 0; r < 5; ++r) for (int c = 0; c < 5; ++c) R.B[r][c] = R.uB[r][c] = 0;
-    };
-    auto add_cols = [&](int id, const std::string& set, char side, const double J[5][5], const RefJ& R1, const RefJ& R2, const Face& f, const Node& i, const Node& j,
-                        std::initializer_list<int> cols) {
-        double heat, work; r4_parts(f, i, j, heat, work);
-        for (int c : cols) {
-            double Jc[5], a1[5], a2[5], ua1[5], ua2[5], b1[5], b2[5], ub1[5], ub2[5], zs[5];
-            for (int r = 0; r < 5; ++r) { Jc[r] = J[r][c]; a1[r] = R1.A[r][c]; a2[r] = R2.A[r][c]; ua1[r] = R1.uA[r][c]; ua2[r] = R2.uA[r][c];
-                                          b1[r] = R1.B[r][c]; b2[r] = R2.B[r][c]; ub1[r] = R1.uB[r][c]; ub2[r] = R2.uB[r][c]; }
+    auto add_cols = [&](int id, const std::string& set, char side, const double J[5][5], const double F1[5][5], const double F2[5][5], const Face& f, const Node& i, const Node& j) {
+        for (int c = 0; c < 5; ++c) {
+            double Jc[5], F1c[5], F2c[5], zs[5];
+            for (int r = 0; r < 5; ++r) { Jc[r] = J[r][c]; F1c[r] = F1[r][c]; F2c[r] = F2[r][c]; }
             zero_scale(f, i, j, side == 'D' ? i : j, c, zs);
-            eval_col(id, set, side, c, Jc, a1, a2, ua1, ua2, b1, b2, ub1, ub2, zs, heat, work);
+            ColRec rc{id, set, side, c, C_PASS, 0, 0, 0, false};
+            rc.cls = classify(Jc, F1c, F2c, zs, rc.e1, rc.e2, rc.rep, rc.zero);
+            { long double JL[5][5]; fdL(f, i, j, side == 'D' ? 0 : 1, 1e-7L, JL);
+                double s = 0, e = 0; for (int r = 0; r < 5; ++r) s = std::max(s, std::fabs(Jc[r]));
+                if (s > 0) { for (int r = 0; r < 5; ++r) e = std::max(e, (double)fabsl(JL[r][c] - (long double)Jc[r]) / s); }
+                std::printf("LD %s %d %c %d %s %.3e\n", set.c_str(), id, side, c, CLS_NAME[rc.cls], s > 0 ? e : -1.0); }
+            if (false) {
+                long double JL[5][5]; fdL(f, i, j, side == 'D' ? 0 : 1, 1e-7L, JL);
+                double R[5]; flux(f, i, j, R);
+                std::printf("DBG [%s] 標本 %d %c 列 %d: β %.2e κ %.2e |u_i| %.0f |u_j| %.0f ρ_i %.3f ρ_j %.3f R4 %.3e\n", set.c_str(), id, side, c, f.beta, f.kappa, speed(i), speed(j), i.rho, j.rho, R[4]);
+                for (int r = 0; r < 5; ++r) std::printf("     行 %d: J %.12e  FD(h) %.12e  FD(h/2) %.12e  FD(long double) %.12Le\n", r, Jc[r], F1c[r], F2c[r], JL[r][c]);
+            }
+            recs.push_back(rc);
         }
     };
     for (size_t k = 0; k < trials.size(); ++k) {
         const Trial& x = trials[k];
-        double D[5][5], K[5][5]; jac<double>(x.f, x.i, x.j, false, false, D, K);
-        RefJ R1, R2;
-        ref_jac(x.f, x.i, x.j, 0, 1e-6, R1); ref_jac(x.f, x.i, x.j, 0, 5e-7, R2); add_cols((int)k, x.set, 'D', D, R1, R2, x.f, x.i, x.j, {0, 1, 2, 3, 4});
-        ref_jac(x.f, x.i, x.j, 1, 1e-6, R1); ref_jac(x.f, x.i, x.j, 1, 5e-7, R2); add_cols((int)k, x.set, 'K', K, R1, R2, x.f, x.i, x.j, {0, 1, 2, 3, 4});
+        double D[5][5], K[5][5], F1[5][5], F2[5][5]; jac<double>(x.f, x.i, x.j, false, false, D, K);
+        fd_jac(x.f, x.i, x.j, 0, 1e-6, F1); fd_jac(x.f, x.i, x.j, 0, 5e-7, F2); add_cols((int)k, x.set, 'D', D, F1, F2, x.f, x.i, x.j);
+        fd_jac(x.f, x.i, x.j, 1, 1e-6, F1); fd_jac(x.f, x.i, x.j, 1, 5e-7, F2); add_cols((int)k, x.set, 'K', K, F1, F2, x.f, x.i, x.j);
         // (1″) 面の向き: (j, i, 1 − f_i) の D・K は (i, j, f_i) の K・D
         Face fr = x.f; fr.fi = 1.0 - x.f.fi;
         double Dr[5][5], Kr[5][5]; jac<double>(fr, x.j, x.i, false, false, Dr, Kr);
@@ -361,9 +256,18 @@ int main(int argc, char** argv) {
         const Face f = rnd_face(); const Node i = rnd_node(false);
         {   // 速度だけ固定 (u_j = 0): 自由な列 (ρ, ρE)。ρu_j = 0 を保つので u_j = 0 のまま
             const Node j = rnd_node(true);
-            double D[5][5], K[5][5]; jac<double>(f, i, j, true, false, D, K);
-            RefJ R1, R2; ref_jac(f, i, j, 1, 1e-6, R1); ref_jac(f, i, j, 1, 5e-7, R2);
-            add_cols(t, "vfix", 'K', K, R1, R2, f, i, j, {0, 4});
+            double D[5][5], K[5][5], F1[5][5], F2[5][5]; jac<double>(f, i, j, true, false, D, K);
+            fd_jac(f, i, j, 1, 1e-6, F1); fd_jac(f, i, j, 1, 5e-7, F2);
+            for (int c : {0, 4}) {
+                double Jc[5], F1c[5], F2c[5], zs[5];
+                for (int r = 0; r < 5; ++r) { Jc[r] = K[r][c]; F1c[r] = F1[r][c]; F2c[r] = F2[r][c]; }
+                zero_scale(f, i, j, j, c, zs);
+                ColRec rc{t, "vfix", 'K', c, C_PASS, 0, 0, 0, false};
+                rc.cls = classify(Jc, F1c, F2c, zs, rc.e1, rc.e2, rc.rep, rc.zero); recs.push_back(rc);
+                { long double JL[5][5]; fdL(f, i, j, 1, 1e-7L, JL); double s = 0, e = 0; for (int r = 0; r < 5; ++r) s = std::max(s, std::fabs(Jc[r]));
+                  if (s > 0) for (int r = 0; r < 5; ++r) e = std::max(e, (double)fabsl(JL[r][c] - (long double)Jc[r]) / s);
+                  std::printf("LD vfix %d K %d %s %.3e\n", t, c, CLS_NAME[rc.cls], s > 0 ? e : -1.0); }
+            }
         }
         {   // 温度だけ固定: 自由な列 (ρ, ρu, ρv, ρw)、δ(ρE) = (e_j − ½|u_j|²)δρ + u_j·δ(ρu) (e_j は内部エネルギー) で δT_j = 0
             const Node j = rnd_node(false);
@@ -375,16 +279,19 @@ int main(int argc, char** argv) {
                 else { const double m = j.rho * std::max(speed(j), 100.0); dq[b] = m; dq[4] = j.u[b - 1] * m; }
                 double Jc[5], F1c[5], F2c[5], zs[5];
                 for (int r = 0; r < 5; ++r) { Jc[r] = 0; for (int c = 0; c < 5; ++c) Jc[r] += K[r][c] * dq[c]; }
-                double u1[5] = {}, u2[5] = {}, B1[5] = {}, B2[5] = {}, v1[5] = {}, v2[5] = {};
                 dir_fd(f, i, j, dq, 1e-6, F1c); dir_fd(f, i, j, dq, 5e-7, F2c);
-                if (eta_thr > 0) { ulp_dir_d(f, i, j, dq, 1e-6, u1); ulp_dir_d(f, i, j, dq, 5e-7, u2); }
-                if (ref_mp) { dir_fd_mp(f, i, j, dq, 1e-6, B1, v1); dir_fd_mp(f, i, j, dq, 5e-7, B2, v2); }
                 // 零列の尺度: dq はすでに状態の大きさなので q_ref = 1
                 const double Um = std::max({speed(i), speed(j), 100.0}), Tm = std::max(temp(i), temp(j));
                 for (int r = 0; r < 4; ++r) zs[r] = 1.0 / (std::max(f.beta, 1e-12) * Um);
                 zs[4] = 1.0 / (f.kappa * Tm + std::max(f.beta, 1e-12) * Um * Um);
-                double heat, work; r4_parts(f, i, j, heat, work);
-                eval_col(t, "tfix", 'K', b, Jc, F1c, F2c, u1, u2, B1, B2, v1, v2, zs, heat, work);
+                ColRec rc{t, "tfix", 'K', b, C_PASS, 0, 0, 0, false};
+                rc.cls = classify(Jc, F1c, F2c, zs, rc.e1, rc.e2, rc.rep, rc.zero); recs.push_back(rc);
+                { double qd[5], qe[5]; to_q(i, qd); to_q(j, qe); long double qi[5], qj[5], qp[5], qm[5], Rp[5], Rm[5]; for (int c = 0; c < 5; ++c) { qi[c] = qd[c]; qj[c] = qe[c]; }
+                  const long double hs = 1e-7L; for (int c = 0; c < 5; ++c) { qp[c] = qj[c] + hs * dq[c]; qm[c] = qj[c] - hs * dq[c]; }
+                  fluxL(f, i, j, qi, qp, Rp); fluxL(f, i, j, qi, qm, Rm);
+                  double s = 0, e = 0; for (int r = 0; r < 5; ++r) s = std::max(s, std::fabs(Jc[r]));
+                  if (s > 0) for (int r = 0; r < 5; ++r) e = std::max(e, (double)fabsl((Rp[r] - Rm[r]) / (2 * hs) - (long double)Jc[r]) / s);
+                  std::printf("LD tfix %d K %d %s %.3e\n", t, b, CLS_NAME[rc.cls], s > 0 ? e : -1.0); }
             }
         }
     }
@@ -447,10 +354,8 @@ int main(int argc, char** argv) {
     const char* SETN[4] = {"rand", "edge", "zero", "拘束 (vfix・tfix)"};
     bool fail_deriv = false, nf_j = false;
     for (int k = 0; k < 4; ++k) { if (cnt[k][C_FAIL]) fail_deriv = true; if (cnt[k][C_NF_J]) nf_j = true; }
-    // §6.5 の登録では差分・η の非有限を 1 % の枠に入れない (1 件でも判別不能)。既定は §6.3 のまま
-    const long bad_rand = cnt[0][C_UNRES] + cnt[0][C_STRADDLE] + (newreg ? 0 : cnt[0][C_NF_FD]);
+    const long bad_rand = cnt[0][C_UNRES] + cnt[0][C_STRADDLE] + cnt[0][C_NF_FD];
     bool indet = bad_rand > ncols[0] / 100 || g_nonfinite > 0;
-    if (newreg) for (int k = 0; k < 4; ++k) if (cnt[k][C_NF_FD]) indet = true;
     for (int k = 1; k < 4; ++k) if (cnt[k][C_UNRES] + cnt[k][C_STRADDLE] + cnt[k][C_NF_FD]) indet = true;
     if (nzero == 0) indet = true;                         // 零列の判定が一度も通っていない
     std::vector<std::string> fails;
@@ -473,52 +378,19 @@ int main(int argc, char** argv) {
     for (const ColRec& r : recs) if (r.cls != C_PASS && shown < 40) {
         ++shown; std::printf("     [%s] 標本 %d・%c・列 %d: %s (e(h) %.3e、e(h/2) %.3e、再現 %.3e%s)\n", r.set.c_str(), r.sample, r.side, r.col, CLS_NAME[r.cls], r.e1, r.e2, r.rep, r.zero ? "、零列" : "");
     }
-    if (newreg) {   // §6.5: A と B の分類の集計 (記録) と、§6.3 の旧不一致の列 (A の η の前の不一致) ごとの原因の判定
-        long ca[C_NCLS] = {}, caR[C_NCLS] = {}, cb[C_NCLS] = {};
-        for (const ColRec& r : recs) { ++caR[r.clsA_raw]; ++ca[r.clsA]; if (ref_mp) ++cb[r.clsB]; }
-        std::printf("     全集合の分類: A (η の前)"); for (int c = 0; c < C_NCLS; ++c) std::printf(" %s %ld", CLS_NAME[c], caR[c]); std::printf("\n");
-        std::printf("                   A (η の後)"); for (int c = 0; c < C_NCLS; ++c) std::printf(" %s %ld", CLS_NAME[c], ca[c]); std::printf("\n");
-        if (ref_mp) { std::printf("                   B (η の後)"); for (int c = 0; c < C_NCLS; ++c) std::printf(" %s %ld", CLS_NAME[c], cb[c]); std::printf("\n"); }
-    }
-    if (dump) {
-        FILE* fp = std::fopen(dump, "w");
-        if (!fp) { std::fprintf(stderr, "--dump %s を開けない\n", dump); return 3; }
-        bool ok_w = std::fprintf(fp, "set,sample,side,col,class,zero,clsA_raw,clsA,eA_h,eA_h2,repA,etaA,clsB_raw,clsB,eB_h,eB_h2,repB,etaB,heat,work\n") > 0;
-        for (const ColRec& r : recs)
-            ok_w = ok_w && std::fprintf(fp, "%s,%d,%c,%d,%s,%d,%s,%s,%.17g,%.17g,%.17g,%.17g,%s,%s,%.17g,%.17g,%.17g,%.17g,%.17g,%.17g\n",
-                                        r.set.c_str(), r.sample, r.side, r.col, CLS_NAME[r.cls], (int)r.zero, CLS_NAME[r.clsA_raw], CLS_NAME[r.clsA],
-                                        r.eA1, r.eA2, r.repA, r.etaA, ref_mp ? CLS_NAME[r.clsB_raw] : "-", ref_mp ? CLS_NAME[r.clsB] : "-",
-                                        r.eB1, r.eB2, r.repB, r.etaB, r.heat, r.work) > 0;
-        if (std::fclose(fp) != 0 || !ok_w) { std::fprintf(stderr, "--dump %s の書き込みに失敗\n", dump); return 3; }
-        std::printf("     全列の記録: %s (%zu 列)\n", dump, recs.size());
-    }
     std::printf("(1″) 面の向きの整合 %.3e (≤ 1e-12)\n", e_orient);
     std::printf("(2)  零空間 δρ(1,u,v,w,E) の作用 %.3e (≤ 1e-12)\n", e_null);
     std::printf("(3)  等温壁の拘束で ΔT_w の作用 %.3e (≤ 1e-12)、壁のフラグで K の該当行の最大 %.3e (= 0)\n", e_wallT, e_flag);
     std::printf("(4)  8 節点のライン: Thomas と密行列の解の差 %.3e (≤ 1e-10)\n", e_line);
     std::printf("(5)  float と double の差 %.3e (≤ 1e-4)、列ごと (記録だけ) %.3e\n", e_f32, e_f32_col);
     std::printf("     判定に使う量の非有限 %ld 件\n", g_nonfinite);
-    if (ref_mp) {   // §6.5 の原因の判定: 旧不一致 = A の η の前の分類が不一致の列
-        long n_old = 0, n_old_bpass = 0, n_old_bfail = 0, n_old_eta = 0;
-        for (const ColRec& r : recs) if (r.clsA_raw == C_FAIL) {
-            ++n_old; if (r.clsB == C_PASS) ++n_old_bpass; if (r.clsB == C_FAIL) ++n_old_bfail; if (r.etaA > (r.zero ? eta_thr * 1e-4 : eta_thr)) ++n_old_eta;
-            std::printf("     旧不一致 [%s] 標本 %d・%c・列 %d: A e(h) %.3e・e(h/2) %.3e・η %.3e → A(η) %s / B e(h) %.3e・e(h/2) %.3e・再現 %.3e → B %s (|κΔT| %.3e、|τ·ū| %.3e)\n",
-                        r.set.c_str(), r.sample, r.side, r.col, r.eA1, r.eA2, r.etaA, CLS_NAME[r.clsA], r.eB1, r.eB2, r.repB, CLS_NAME[r.clsB], r.heat, r.work);
-        }
-        const bool overall_pass = fails.empty() && !indet;
-        const char* cause = n_old == 0 ? "判別不能 (A で旧不一致が再現しない)"
-                          : n_old_bfail > 0 ? "丸めだけの説明を棄却 (旧不一致の列に B でも解像した不一致が残る)"
-                          : (n_old_bpass == n_old && overall_pass) ? "丸めの仮説を支持 (旧不一致の列はすべて B で解像して合格し、B の総合も PASS)"
-                          : "判別不能 (旧不一致の列に B で解像しない列がある、または B の総合が PASS でない)";
-        std::printf("CAUSE: %s — 旧不一致 %ld 列、B で合格 %ld・不一致 %ld、A の η が閾値を超えた列 %ld\n", cause, n_old, n_old_bpass, n_old_bfail, n_old_eta);
-    }
     if (!fails.empty()) {
         std::printf("VERDICT: FAIL (");
         for (size_t k = 0; k < fails.size(); ++k) std::printf("%s%s", k ? "、" : "", fails[k].c_str());
         std::printf(")\n");
         return 1;
     }
-    if (indet) { std::printf("VERDICT: INDETERMINATE (edge・zero・拘束の未解像、rand の未解像 %ld > 1 %%、非有限%s、または零列の判定が無い)\n", bad_rand, newreg ? " (差分・η の非有限を含む)" : ""); return 2; }
+    if (indet) { std::printf("VERDICT: INDETERMINATE (edge・zero・拘束の未解像、rand の未解像 %ld > 1 %%、非有限、または零列の判定が無い)\n", bad_rand); return 2; }
     std::printf("VERDICT: PASS (解像した対象で不一致を検出しなかった。rand の未解像 %ld 列は保留)\n", bad_rand);
     return 0;
 }
