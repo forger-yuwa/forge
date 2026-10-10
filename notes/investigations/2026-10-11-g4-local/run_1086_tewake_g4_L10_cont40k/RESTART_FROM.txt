@@ -1,0 +1,6 @@
+[restart_field] species: SRC species_hash cbcea534f1aa58eb = destination species_hash cbcea534f1aa58eb (forge --resolve-species); SRC descends from an unverified start -> inherit the hash and the mark (species_input_unverified=1; record of SRC resolved_species_cbcea534f1aa58eb_3025fbe62ed62e6b.yaml)
+同一メッシュを確認 (MESH/COORD 一致, 3221994 cells)
+移した保存量  : ['ro', 'roK', 'roOmega', 'roUx', 'roUy', 'roUz', 'roY0', 'roY1', 'roe']
+DST を残す    : ['wall_dist']
+species 属性  : 継承 (species_input_unverified=1)
+VERDICT: OK (9 量を移した、SRC とビット一致)

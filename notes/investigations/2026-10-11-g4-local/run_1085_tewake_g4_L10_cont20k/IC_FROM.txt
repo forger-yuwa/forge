@@ -1,0 +1,1 @@
+IC: restart_field run_1082_tewake_g4_L10_m10 res_4000 (段階起動の本段の最終場、同一設定で判定区間 20000)。plan tooling-sern-te-wake-grid §5.1 #4
