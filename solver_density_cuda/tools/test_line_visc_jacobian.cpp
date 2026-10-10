@@ -200,8 +200,9 @@ static ColClass apply_eta(ColClass cls, const double Jc[5], const double u2h1[5]
         if (!std::isfinite(x)) { nf = true; continue; }
         if (x > eta) eta = x;
     }
-    if (cls == C_NF_J || cls == C_NF_FD || cls == C_UNRES) return cls;
-    if (nf) return C_NF_FD;
+    if (cls == C_NF_J) return cls;                 // J の非有限を最優先
+    if (nf || cls == C_NF_FD) return C_NF_FD;       // η の非有限は「解像しない」より先に扱う (1 % の枠に紛れ込ませない)
+    if (cls == C_UNRES) return cls;
     if (eta > (s > 0 ? thr : thr * 1e-4)) return C_UNRES;
     return cls;
 }
