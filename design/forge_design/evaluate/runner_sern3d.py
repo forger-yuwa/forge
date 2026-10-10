@@ -148,6 +148,8 @@ def sern_mesh3d_params(p, interface_angle: float, top_ext_angle: float) -> SernM
                             interface_angle=float(m2.get("interface_angle_rad", interface_angle)),
                             # 後縁下流の中間線の局所変形の長さ L_b / H (0 = 無効 = 旧格子。plan convection-zero-thickness-edge-reconstruction §4.2)
                             te_wake_blend_H=float(m.get("te_wake_blend_H", 0.0)),
+                            # 中間線の変位の伝え方 ("band" = 現行・既定 / "local" = 変形前の格子に局所の変位を足す。plan tooling-sern-te-wake-grid §5.1 #4c)
+                            te_wake_mode=str(m.get("te_wake_mode", "band")),
                             top_ext_angle=float(np.deg2rad(m2.get("top_ext_angle_deg", np.rad2deg(top_ext_angle)))), scale=H)
 
 

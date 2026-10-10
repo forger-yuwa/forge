@@ -446,31 +446,39 @@ def _canon_sha(obj) -> str:
                                      default=lambda v: v.item() if hasattr(v, "item") else str(v)).encode()).hexdigest()
 
 
-def te_wake_effective_of(L_b, curve) -> str:
-    """後縁下流の格子変形の識別子。L_b = 0 (無効) は "off"。"""
+def te_wake_effective_of(L_b, curve, mode_version=None) -> str:
+    """後縁下流の格子変形の識別子。L_b = 0 (無効) は "off"。変位の伝え方が "local" なら版 (mode_version) を足す
+    ("band" = 現行は版なし = 従来の文字列のまま)。"""
     L_b = float(L_b or 0.0)
-    return "off" if L_b == 0.0 else f"L_b={L_b!r};curve={curve}"
+    if L_b == 0.0:
+        return "off"
+    return f"L_b={L_b!r};curve={curve}" + (f";mode={mode_version}" if mode_version else "")
 
 
 def eval_method_of(dim: int, discretization, recipe: dict, mesher: dict, te_wake_blend_H, te_wake_curve_version,
-                   converter_sha256) -> tuple:
-    """評価方式の識別 (dict と、その正準 JSON の sha256 = id)。変換器の版が不明なら id は None (不明)。"""
+                   converter_sha256, te_wake_mode_version=None) -> tuple:
+    """評価方式の識別 (dict と、その正準 JSON の sha256 = id)。変換器の版が不明なら id は None (不明)。
+    te_wake_mode_version は変位の伝え方 "local" の版 (mesh_sern3d.TE_WAKE_MODE_VERSION)。"local" のときだけ項目を足す
+    ("band" = 現行の dict の項目は変えない。方式の名前はレシピ [格子パラメータの te_wake_mode] にも入る)。"""
     L_b = float(te_wake_blend_H or 0.0)
     em = {"version": EVAL_METHOD_VERSION, "dim": int(dim), "discretization": discretization,
           "mesh_recipe_sha256": _canon_sha(recipe), "mesher_source_sha256": mesher["source_sha256"],
           "te_wake_blend_H": L_b, "te_wake_curve_version": te_wake_curve_version if L_b else None,
           "converter_sha256": converter_sha256}
+    if L_b and te_wake_mode_version:
+        em["te_wake_mode_version"] = te_wake_mode_version
     return em, (_canon_sha(em) if converter_sha256 and discretization else None)
 
 
 def eval_method_record(p: Problem, dim: int, prm, minfo: dict, discretization, converter: dict | None) -> dict:
-    """prepare が格子を作った時点の評価方式 (prepare_info.json の eval_method)。L_b・曲線版はメッシャの出力 (minfo) の実効値。"""
+    """prepare が格子を作った時点の評価方式 (prepare_info.json の eval_method)。L_b・曲線版・変位の伝え方の版はメッシャの出力 (minfo) の実効値。"""
     L_b = float(minfo.get("te_wake_blend_H", 0.0) or 0.0)
     curve = minfo.get("te_wake_curve_version")
+    mode_v = minfo.get("te_wake_mode_version")
     recipe = mesh_recipe(prm, p.mesh)
     mesher = mesher_version(dim)
-    em, eid = eval_method_of(dim, discretization, recipe, mesher, L_b, curve, (converter or {}).get("sha256"))
-    return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve),
+    em, eid = eval_method_of(dim, discretization, recipe, mesher, L_b, curve, (converter or {}).get("sha256"), mode_v)
+    return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve, mode_v),
             "mesh_recipe": recipe, "mesher": mesher, "converter": converter}
 
 
@@ -486,6 +494,21 @@ def te_wake_spec(raw: dict, dim: int) -> tuple:
     return L_b, TE_WAKE_CURVE_VERSION
 
 
+def te_wake_mode_spec(raw: dict, dim: int):
+    """問題 YAML が要求する中間線の変位の伝え方の版 (plan tooling-sern-te-wake-grid §5.1 #4c)。3D の mesh3d.te_wake_mode が
+    "local" で L_b > 0 のときだけ mesh_sern3d.TE_WAKE_MODE_VERSION、"band" (既定)・L_b 0・2D は None (メッシャの info と同じ規則)。"""
+    if int(dim) != 3:
+        return None
+    sec = (raw or {}).get("mesh3d") or {}
+    if float(sec.get("te_wake_blend_H", 0.0) or 0.0) == 0.0:
+        return None
+    from ..meshing.mesh_sern3d import TE_WAKE_MODE_VERSION, TE_WAKE_MODES
+    mode = str(sec.get("te_wake_mode", "band"))
+    if mode not in TE_WAKE_MODES:
+        raise ValueError(f"mesh3d.te_wake_mode は {TE_WAKE_MODES} のどれか ({mode!r})")
+    return TE_WAKE_MODE_VERSION if mode == "local" else None
+
+
 def eval_method_required(p: Problem, dim: int = 2, converter: dict | None = None) -> dict:
     """キャンペーンが要求する評価方式 (問題 YAML・現在のコード・現在の変換器)。設計 (MOC) を解かない: 設計から決まる格子
     パラメータはレシピで "design" になるので、仮の角度で格子パラメータを組む。"""
@@ -497,9 +520,10 @@ def eval_method_required(p: Problem, dim: int = 2, converter: dict | None = None
     # 変換器は run の solverConfig の discretization (_solver_config の既定 cell) で変換する。評価の記録は h5 から再計算した値
     disc = str(p.mesh.get("discretization", "cell"))
     L_b, curve = te_wake_spec(p.raw, dim)
+    mode_v = te_wake_mode_spec(p.raw, dim)
     conv = converter if converter is not None else converter_identity()
-    em, eid = eval_method_of(dim, disc, mesh_recipe(prm, p.mesh), mesher_version(dim), L_b, curve, (conv or {}).get("sha256"))
-    return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve), "converter": conv}
+    em, eid = eval_method_of(dim, disc, mesh_recipe(prm, p.mesh), mesher_version(dim), L_b, curve, (conv or {}).get("sha256"), mode_v)
+    return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve, mode_v), "converter": conv}
 
 
 def write_te_wake_attrs(h5path, minfo: dict) -> dict | None:
@@ -569,7 +593,8 @@ def eval_method_provenance(run_dir, mesh_prov: dict | None = None) -> dict:
     rec = info.get("eval_method")
     mi = info.get("mesh") or {}
     if not isinstance(rec, dict):
-        out[TE_WAKE_EFFECTIVE] = te_wake_effective_of(mi.get("te_wake_blend_H", 0.0), mi.get("te_wake_curve_version"))
+        out[TE_WAKE_EFFECTIVE] = te_wake_effective_of(mi.get("te_wake_blend_H", 0.0), mi.get("te_wake_curve_version"),
+                                                      mi.get("te_wake_mode_version"))
         out["reason"] = "prepare の記録が無い (評価方式の識別の導入前の run)"
         return out
     out["eval_method"] = rec.get("eval_method")

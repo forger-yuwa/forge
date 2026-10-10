@@ -1,0 +1,1196 @@
+{
+ "g4": {
+  "label": "g4",
+  "H_m": 0.1,
+  "clear_top_H": 1.4549292803810703,
+  "clear_bot_H": 11.411843580735336,
+  "band": {
+   "n_lt_thr_A": 40700,
+   "n_lt_thr_B": 44880,
+   "new_lt_thr": 4180,
+   "worsened_existing_lt_thr": 6105,
+   "min_A": 0.45234992285341735,
+   "min_B": 0.45234992285341735,
+   "region_min_A": 0.5264462965318051,
+   "region_min_B": 0.5174910492757351,
+   "n_region_hex": 134750,
+   "n_moved_nodes": 127848,
+   "new_ar_gt_max": 0,
+   "ar_gt5000_A": 691,
+   "ar_gt5000_B": 691,
+   "region_ar_max_B": 4578.218080149115,
+   "nonpos_jac_hex_B": 0,
+   "outside_region_changed_hex": 0,
+   "support": {
+    "applicable": false,
+    "status": "判定不能",
+    "note": "B の te_wake_mode が local でない ('band')"
+   },
+   "rows_4c": [
+    [
+     "(1) 0 格子との対応比較: 新しく 0.65 未満",
+     "FAIL",
+     4180
+    ],
+    [
+     "(1) 既存の 0.65 未満の悪化",
+     "FAIL",
+     6105
+    ],
+    [
+     "(1) 新しい AR 超過 (> 5000)",
+     "PASS",
+     0
+    ],
+    [
+     "(2) B の変形領域の最小スケール済みヤコビアン ≥ 0.65",
+     "FAIL",
+     0.5174910492757351
+    ],
+    [
+     "(2) 全域の非正/非有限の頂点ヤコビアンを持つヘキサ (B)",
+     "PASS",
+     0
+    ],
+    [
+     "(4) 支持領域の外の座標のビット不変",
+     "判定不能",
+     "B の te_wake_mode が local でない ('band')"
+    ]
+   ],
+   "verdict_4c": "FAIL",
+   "admission_rows": [
+    {
+     "row": "前提",
+     "item": "A の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "B の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "L_b (te_wake_blend_H)",
+     "status": "PASS",
+     "value": "A 0 H / B 1 H",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ",
+     "status": "PASS",
+     "value": "同じ",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "最初の下流の辺",
+     "item": "下側の第 1〜第 10 層・全 span: max |θ(i_te→i_te+1) − m0|",
+     "status": "PASS",
+     "value": "2.1994° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010596,0.000000) m  [B の辺 -6.6066〜-6.6048°]",
+     "ref_A": "35.8292°",
+     "num": 2.199368198649239
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "下側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "2.1994° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010596,0.000000) m",
+     "ref_A": "35.8292°",
+     "num": 2.199362348547396
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "上側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "1.6047° @ (i,j,k)=(104,65,24) x,y,z=(0.120000,-0.010495,0.100000) m",
+     "ref_A": "35.2354°",
+     "num": 1.6046710882280308
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線): max 折れ角",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,64,0) x,y,z=(0.120000,-0.010499,0.000000) m",
+     "ref_A": "35.8283°",
+     "num": 2.1975036139205315
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in): max 折れ角",
+     "status": "PASS",
+     "value": "1.6047° @ (i,j,k)=(104,64,24) x,y,z=(0.120000,-0.010499,0.100000) m",
+     "ref_A": "35.2354°",
+     "num": 1.6046710882280308
+    },
+    {
+     "row": "復帰区間の折れ",
+     "item": "主ブロックの全 i 線・全 span、節点 i = 105..121 (最初の未変形の辺を含む): max 折れ角",
+     "status": "PASS",
+     "value": "5.9999° @ (i,j,k)=(110,8,0) x,y,z=(0.140444,-0.329631,0.000000) m",
+     "ref_A": "2.5935°",
+     "num": 5.999850829970171
+    },
+    {
+     "row": "固定すべき量",
+     "item": "節点数",
+     "status": "PASS",
+     "value": "A 3221994 / B 3221994",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "x 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "z 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "ヘキサの接続",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "境界面の接続 (タグ別)",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "上流の座標 (x ≤ 後縁の x = 0.120000 m の 1317026 節点、3 成分)",
+     "status": "PASS",
+     "value": "相違 0 節点",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "固体形状 (壁タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 8.340e-04、許容の使用率 max 0.225",
+     "ref_A": "",
+     "num": 0.0008340283569641367
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 1.481e-03、許容の使用率 max 0.0291",
+     "ref_A": "",
+     "num": 0.0014805782964640306
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 1.866e-03、許容の使用率 max 0.172",
+     "ref_A": "",
+     "num": 0.0018656716417910447
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 1.651e-02、許容の使用率 max 0.327",
+     "ref_A": "",
+     "num": 0.01650943396226415
+    },
+    {
+     "row": "primal の品質",
+     "item": "非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点)",
+     "status": "PASS",
+     "value": "0",
+     "ref_A": "0",
+     "num": 0.0
+    },
+    {
+     "row": "primal の品質",
+     "item": "スケール済みヤコビアンの最小 (B)",
+     "status": "FAIL",
+     "value": "0.45235",
+     "ref_A": "0.45235",
+     "num": 0.45234992285341735
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大 (B、check_mesh_quality の 3D 定義)",
+     "status": "PASS",
+     "value": "0.70117",
+     "ref_A": "0.70117",
+     "num": 0.7011716354256894
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大の A からの増加",
+     "status": "PASS",
+     "value": "+0.00000",
+     "ref_A": "",
+     "num": 0.0
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(a) check_mesh_quality の VERDICT が A と同等以上",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(b) 変形領域に新しい AR 閾値超過を作らない",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    }
+   ],
+   "return_fold_deg": 5.999850829970171
+  },
+  "local": {
+   "n_lt_thr_A": 40700,
+   "n_lt_thr_B": 40700,
+   "new_lt_thr": 0,
+   "worsened_existing_lt_thr": 0,
+   "min_A": 0.45234992285341735,
+   "min_B": 0.45234992285341735,
+   "region_min_A": 0.6720625024131931,
+   "region_min_B": 0.6519086254689991,
+   "n_region_hex": 71555,
+   "n_moved_nodes": 67592,
+   "new_ar_gt_max": 0,
+   "ar_gt5000_A": 691,
+   "ar_gt5000_B": 691,
+   "region_ar_max_B": 4578.218080149115,
+   "nonpos_jac_hex_B": 0,
+   "outside_region_changed_hex": 0,
+   "support": {
+    "applicable": true,
+    "mode_version_B": "local-0.02-0.30-quintic-v1",
+    "mode_version_mesher": "local-0.02-0.30-quintic-v1",
+    "d_zero_H": 0.3,
+    "tol_H": 1e-06,
+    "n_support_nodes": 67592,
+    "n_moved": 67592,
+    "n_moved_outside_support": 0,
+    "status": "PASS"
+   },
+   "rows_4c": [
+    [
+     "(1) 0 格子との対応比較: 新しく 0.65 未満",
+     "PASS",
+     0
+    ],
+    [
+     "(1) 既存の 0.65 未満の悪化",
+     "PASS",
+     0
+    ],
+    [
+     "(1) 新しい AR 超過 (> 5000)",
+     "PASS",
+     0
+    ],
+    [
+     "(2) B の変形領域の最小スケール済みヤコビアン ≥ 0.65",
+     "PASS",
+     0.6519086254689991
+    ],
+    [
+     "(2) 全域の非正/非有限の頂点ヤコビアンを持つヘキサ (B)",
+     "PASS",
+     0
+    ],
+    [
+     "(4) 支持領域の外の座標のビット不変",
+     "PASS",
+     0
+    ]
+   ],
+   "verdict_4c": "PASS",
+   "admission_rows": [
+    {
+     "row": "前提",
+     "item": "A の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "B の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "L_b (te_wake_blend_H)",
+     "status": "PASS",
+     "value": "A 0 H / B 1 H",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ",
+     "status": "PASS",
+     "value": "同じ",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "最初の下流の辺",
+     "item": "下側の第 1〜第 10 層・全 span: max |θ(i_te→i_te+1) − m0|",
+     "status": "PASS",
+     "value": "2.1990° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010596,0.000000) m  [B の辺 -6.6062〜-6.6048°]",
+     "ref_A": "35.8292°",
+     "num": 2.1990377579585356
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "下側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "2.1990° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010596,0.000000) m",
+     "ref_A": "35.8292°",
+     "num": 2.1990319078566927
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "上側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "1.6047° @ (i,j,k)=(104,65,24) x,y,z=(0.120000,-0.010495,0.100000) m",
+     "ref_A": "35.2354°",
+     "num": 1.6046710882280308
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線): max 折れ角",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,64,0) x,y,z=(0.120000,-0.010499,0.000000) m",
+     "ref_A": "35.8283°",
+     "num": 2.1975036139205315
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in): max 折れ角",
+     "status": "PASS",
+     "value": "1.6047° @ (i,j,k)=(104,64,24) x,y,z=(0.120000,-0.010499,0.100000) m",
+     "ref_A": "35.2354°",
+     "num": 1.6046710882280308
+    },
+    {
+     "row": "復帰区間の折れ",
+     "item": "主ブロックの全 i 線・全 span、節点 i = 105..121 (最初の未変形の辺を含む): max 折れ角",
+     "status": "PASS",
+     "value": "5.1710° @ (i,j,k)=(110,33,0) x,y,z=(0.140444,-0.022318,0.000000) m",
+     "ref_A": "2.5935°",
+     "num": 5.170985780754364
+    },
+    {
+     "row": "固定すべき量",
+     "item": "節点数",
+     "status": "PASS",
+     "value": "A 3221994 / B 3221994",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "x 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "z 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "ヘキサの接続",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "境界面の接続 (タグ別)",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "上流の座標 (x ≤ 後縁の x = 0.120000 m の 1317026 節点、3 成分)",
+     "status": "PASS",
+     "value": "相違 0 節点",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "固体形状 (壁タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 8.340e-04、許容の使用率 max 0.225",
+     "ref_A": "",
+     "num": 0.0008340283569641367
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 8.340e-04、許容の使用率 max 0.0154",
+     "ref_A": "",
+     "num": 0.0008340283569641367
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 1.866e-03、許容の使用率 max 0.172",
+     "ref_A": "",
+     "num": 0.0018656716417910447
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 1.866e-03、許容の使用率 max 0.0307",
+     "ref_A": "",
+     "num": 0.0018656716417910447
+    },
+    {
+     "row": "primal の品質",
+     "item": "非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点)",
+     "status": "PASS",
+     "value": "0",
+     "ref_A": "0",
+     "num": 0.0
+    },
+    {
+     "row": "primal の品質",
+     "item": "スケール済みヤコビアンの最小 (B)",
+     "status": "FAIL",
+     "value": "0.45235",
+     "ref_A": "0.45235",
+     "num": 0.45234992285341735
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大 (B、check_mesh_quality の 3D 定義)",
+     "status": "PASS",
+     "value": "0.70117",
+     "ref_A": "0.70117",
+     "num": 0.7011716354256894
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大の A からの増加",
+     "status": "PASS",
+     "value": "+0.00000",
+     "ref_A": "",
+     "num": 0.0
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(a) check_mesh_quality の VERDICT が A と同等以上",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(b) 変形領域に新しい AR 閾値超過を作らない",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    }
+   ],
+   "return_fold_deg": 5.170985780754364
+  },
+  "layer_ratio_min": 0.24948647203784988,
+  "layer_ratio_max": 1.7551316402062451,
+  "layers_1_10_max_dist_H": 0.002962648868560791
+ },
+ "g3": {
+  "label": "g3",
+  "H_m": 0.1,
+  "clear_top_H": 1.4549292803810703,
+  "clear_bot_H": 11.411843580735336,
+  "band": {
+   "n_lt_thr_A": 0,
+   "n_lt_thr_B": 0,
+   "new_lt_thr": 0,
+   "worsened_existing_lt_thr": 0,
+   "min_A": 0.7611452217259475,
+   "min_B": 0.6724489032867876,
+   "region_min_A": 0.7633959091600395,
+   "region_min_B": 0.6724489032867876,
+   "n_region_hex": 80636,
+   "n_moved_nodes": 77181,
+   "new_ar_gt_max": 0,
+   "ar_gt5000_A": 0,
+   "ar_gt5000_B": 0,
+   "region_ar_max_B": 2886.8122962272937,
+   "nonpos_jac_hex_B": 0,
+   "outside_region_changed_hex": 0,
+   "support": {
+    "applicable": false,
+    "status": "判定不能",
+    "note": "B の te_wake_mode が local でない ('band')"
+   },
+   "rows_4c": [
+    [
+     "(1) 0 格子との対応比較: 新しく 0.65 未満",
+     "PASS",
+     0
+    ],
+    [
+     "(1) 既存の 0.65 未満の悪化",
+     "PASS",
+     0
+    ],
+    [
+     "(1) 新しい AR 超過 (> 5000)",
+     "PASS",
+     0
+    ],
+    [
+     "(2) B の変形領域の最小スケール済みヤコビアン ≥ 0.65",
+     "PASS",
+     0.6724489032867876
+    ],
+    [
+     "(2) 全域の非正/非有限の頂点ヤコビアンを持つヘキサ (B)",
+     "PASS",
+     0
+    ],
+    [
+     "(4) 支持領域の外の座標のビット不変",
+     "判定不能",
+     "B の te_wake_mode が local でない ('band')"
+    ]
+   ],
+   "verdict_4c": "判定不能",
+   "admission_rows": [
+    {
+     "row": "前提",
+     "item": "A の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "B の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "L_b (te_wake_blend_H)",
+     "status": "PASS",
+     "value": "A 0 H / B 1 H",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ",
+     "status": "PASS",
+     "value": "同じ",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "最初の下流の辺",
+     "item": "下側の第 1〜第 10 層・全 span: max |θ(i_te→i_te+1) − m0|",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,52,0) x,y,z=(0.120000,-0.010534,0.000000) m  [B の辺 -6.6047〜-6.6044°]",
+     "ref_A": "35.8283°",
+     "num": 2.197509464022346
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "下側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,52,0) x,y,z=(0.120000,-0.010534,0.000000) m",
+     "ref_A": "35.8283°",
+     "num": 2.1975036139205315
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "上側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "1.6046° @ (i,j,k)=(104,56,24) x,y,z=(0.120000,-0.010463,0.100000) m",
+     "ref_A": "35.2353°",
+     "num": 1.6046481717108634
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線): max 折れ角",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010499,0.000000) m",
+     "ref_A": "35.8283°",
+     "num": 2.1975036139205315
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in): max 折れ角",
+     "status": "PASS",
+     "value": "1.6047° @ (i,j,k)=(104,54,24) x,y,z=(0.120000,-0.010499,0.100000) m",
+     "ref_A": "35.2354°",
+     "num": 1.6046710882280308
+    },
+    {
+     "row": "復帰区間の折れ",
+     "item": "主ブロックの全 i 線・全 span、節点 i = 105..121 (最初の未変形の辺を含む): max 折れ角",
+     "status": "PASS",
+     "value": "5.0794° @ (i,j,k)=(110,56,0) x,y,z=(0.140444,-0.017810,0.000000) m",
+     "ref_A": "0.0815°",
+     "num": 5.079447723288524
+    },
+    {
+     "row": "固定すべき量",
+     "item": "節点数",
+     "status": "PASS",
+     "value": "A 1920103 / B 1920103",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "x 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "z 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "ヘキサの接続",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "境界面の接続 (タグ別)",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "上流の座標 (x ≤ 後縁の x = 0.120000 m の 784711 節点、3 成分)",
+     "status": "PASS",
+     "value": "相違 0 節点",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "固体形状 (壁タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 4.655e-04、許容の使用率 max 0.218",
+     "ref_A": "",
+     "num": 0.0004655493482309125
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 1.816e-03、許容の使用率 max 0.0361",
+     "ref_A": "",
+     "num": 0.0018159520777321825
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 4.658e-04、許容の使用率 max 0.218",
+     "ref_A": "",
+     "num": 0.0004657661853749418
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 1.938e-02、許容の使用率 max 0.387",
+     "ref_A": "",
+     "num": 0.019380857525389414
+    },
+    {
+     "row": "primal の品質",
+     "item": "非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点)",
+     "status": "PASS",
+     "value": "0",
+     "ref_A": "0",
+     "num": 0.0
+    },
+    {
+     "row": "primal の品質",
+     "item": "スケール済みヤコビアンの最小 (B)",
+     "status": "PASS",
+     "value": "0.67245",
+     "ref_A": "0.76115",
+     "num": 0.6724489032867876
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大 (B、check_mesh_quality の 3D 定義)",
+     "status": "PASS",
+     "value": "0.53048",
+     "ref_A": "0.44927",
+     "num": 0.5304849459964446
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大の A からの増加",
+     "status": "PASS",
+     "value": "+0.08121",
+     "ref_A": "",
+     "num": 0.08121008360107757
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(a) check_mesh_quality の VERDICT が A と同等以上",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(b) 変形領域に新しい AR 閾値超過を作らない",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    }
+   ],
+   "return_fold_deg": 5.079447723288524
+  },
+  "local": {
+   "n_lt_thr_A": 0,
+   "n_lt_thr_B": 0,
+   "new_lt_thr": 0,
+   "worsened_existing_lt_thr": 0,
+   "min_A": 0.7611452217259475,
+   "min_B": 0.6724489032867876,
+   "region_min_A": 0.7633959091600395,
+   "region_min_B": 0.6724489032867876,
+   "n_region_hex": 40774,
+   "n_moved_nodes": 38727,
+   "new_ar_gt_max": 0,
+   "ar_gt5000_A": 0,
+   "ar_gt5000_B": 0,
+   "region_ar_max_B": 2886.8122962272937,
+   "nonpos_jac_hex_B": 0,
+   "outside_region_changed_hex": 0,
+   "support": {
+    "applicable": true,
+    "mode_version_B": "local-0.02-0.30-quintic-v1",
+    "mode_version_mesher": "local-0.02-0.30-quintic-v1",
+    "d_zero_H": 0.3,
+    "tol_H": 1e-06,
+    "n_support_nodes": 38727,
+    "n_moved": 38727,
+    "n_moved_outside_support": 0,
+    "status": "PASS"
+   },
+   "rows_4c": [
+    [
+     "(1) 0 格子との対応比較: 新しく 0.65 未満",
+     "PASS",
+     0
+    ],
+    [
+     "(1) 既存の 0.65 未満の悪化",
+     "PASS",
+     0
+    ],
+    [
+     "(1) 新しい AR 超過 (> 5000)",
+     "PASS",
+     0
+    ],
+    [
+     "(2) B の変形領域の最小スケール済みヤコビアン ≥ 0.65",
+     "PASS",
+     0.6724489032867876
+    ],
+    [
+     "(2) 全域の非正/非有限の頂点ヤコビアンを持つヘキサ (B)",
+     "PASS",
+     0
+    ],
+    [
+     "(4) 支持領域の外の座標のビット不変",
+     "PASS",
+     0
+    ]
+   ],
+   "verdict_4c": "PASS",
+   "admission_rows": [
+    {
+     "row": "前提",
+     "item": "A の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "B の入力が最終 node 格子",
+     "status": "判定不能",
+     "value": "メモリ上 (倍精度、変換前)",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "L_b (te_wake_blend_H)",
+     "status": "PASS",
+     "value": "A 0 H / B 1 H",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "前提",
+     "item": "格子の構造 (ni, NJ, nz, jm, i_te, k_sw, i_sw, カウル上コピー) が同じ",
+     "status": "PASS",
+     "value": "同じ",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "最初の下流の辺",
+     "item": "下側の第 1〜第 10 層・全 span: max |θ(i_te→i_te+1) − m0|",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,53,0) x,y,z=(0.120000,-0.010515,0.000000) m  [B の辺 -6.6047〜-6.6027°]",
+     "ref_A": "35.8283°",
+     "num": 2.197509464022346
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "下側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,53,0) x,y,z=(0.120000,-0.010515,0.000000) m",
+     "ref_A": "35.8283°",
+     "num": 2.1975036139205315
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "上側の第 1〜第 10 層・全 span: max 折れ角",
+     "status": "PASS",
+     "value": "1.6046° @ (i,j,k)=(104,55,24) x,y,z=(0.120000,-0.010483,0.100000) m",
+     "ref_A": "35.2353°",
+     "num": 1.6045700886351995
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・全 span (上流 = 下側壁面 cowl_out、板の外 z>W/2 は中間線): max 折れ角",
+     "status": "PASS",
+     "value": "2.1975° @ (i,j,k)=(104,54,0) x,y,z=(0.120000,-0.010499,0.000000) m",
+     "ref_A": "35.8283°",
+     "num": 2.1975036139205315
+    },
+    {
+     "row": "後縁の折れ",
+     "item": "共有の後縁節点・z≤W/2 (上流 = 上側壁面 cowl_in): max 折れ角",
+     "status": "PASS",
+     "value": "1.6047° @ (i,j,k)=(104,54,24) x,y,z=(0.120000,-0.010499,0.100000) m",
+     "ref_A": "35.2354°",
+     "num": 1.6046710882280308
+    },
+    {
+     "row": "復帰区間の折れ",
+     "item": "主ブロックの全 i 線・全 span、節点 i = 105..121 (最初の未変形の辺を含む): max 折れ角",
+     "status": "PASS",
+     "value": "5.1331° @ (i,j,k)=(110,73,0) x,y,z=(0.140444,-0.013935,0.000000) m",
+     "ref_A": "0.0815°",
+     "num": 5.133144784075768
+    },
+    {
+     "row": "固定すべき量",
+     "item": "節点数",
+     "status": "PASS",
+     "value": "A 1920103 / B 1920103",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "x 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "z 座標 (全節点)",
+     "status": "PASS",
+     "value": "ビット一致",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "ヘキサの接続",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "境界面の接続 (タグ別)",
+     "status": "PASS",
+     "value": "同一",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "上流の座標 (x ≤ 後縁の x = 0.120000 m の 784711 節点、3 成分)",
+     "status": "PASS",
+     "value": "相違 0 節点",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "固体形状 (壁タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "固定すべき量",
+     "item": "外部境界の形状 (sym・side_far 以外の境界タグの節点が動かない)",
+     "status": "PASS",
+     "value": "動いた 0",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 4.655e-04、許容の使用率 max 0.218",
+     "ref_A": "",
+     "num": 0.0004655493482309125
+    },
+    {
+     "row": "層の Δy",
+     "item": "下側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 4.655e-04、許容の使用率 max 0.00893",
+     "ref_A": "",
+     "num": 0.0004655493482309125
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1 層 (列 i = 104..121・全 span)",
+     "status": "PASS",
+     "value": "max 相対差 4.658e-04、許容の使用率 max 0.218",
+     "ref_A": "",
+     "num": 0.0004657661853749418
+    },
+    {
+     "row": "層の Δy",
+     "item": "上側の第 1〜第 10 層の各層厚 (同)",
+     "status": "PASS",
+     "value": "max 相対差 4.658e-04、許容の使用率 max 0.00893",
+     "ref_A": "",
+     "num": 0.0004657661853749418
+    },
+    {
+     "row": "primal の品質",
+     "item": "非正・非有限の頂点ヤコビアン (B、全ヘキサの 8 頂点)",
+     "status": "PASS",
+     "value": "0",
+     "ref_A": "0",
+     "num": 0.0
+    },
+    {
+     "row": "primal の品質",
+     "item": "スケール済みヤコビアンの最小 (B)",
+     "status": "PASS",
+     "value": "0.67245",
+     "ref_A": "0.76115",
+     "num": 0.6724489032867876
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大 (B、check_mesh_quality の 3D 定義)",
+     "status": "PASS",
+     "value": "0.53048",
+     "ref_A": "0.44927",
+     "num": 0.5304849459964446
+    },
+    {
+     "row": "primal の品質",
+     "item": "skew 最大の A からの増加",
+     "status": "PASS",
+     "value": "+0.08121",
+     "ref_A": "",
+     "num": 0.08121008360107757
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(a) check_mesh_quality の VERDICT が A と同等以上",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(b) 変形領域に新しい AR 閾値超過を作らない",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    },
+    {
+     "row": "品質・双対の判定",
+     "item": "(c) 最終 node 入力で check_dual_closure.py --tol 1e-5 が PASS",
+     "status": "判定不能",
+     "value": "",
+     "ref_A": "",
+     "num": null
+    }
+   ],
+   "return_fold_deg": 5.133144784075768
+  },
+  "layer_ratio_min": 0.24503459570719188,
+  "layer_ratio_max": 1.7551361983376839,
+  "layers_1_10_max_dist_H": 0.0055983662605285645
+ }
+}

@@ -88,6 +88,13 @@ class SernMesh3DParams:
     # 約 36° 折れていた (下側壁面 −4.4° → 中間線 θ_b −40.2°)。x・z 配列・接続・節点数・上流形状・板厚・外部境界
     # (`y_bot` は旧中間線の x_out の値) は変えない。**0 = 無効 (既定・旧格子とビット一致)**
     te_wake_blend_H: float = 0.0
+    # 中間線の変位の伝え方 (plan tooling-sern-te-wake-grid §5.1 #4c、codex diagnose 2026-10-11 g4-grid-redesign)。
+    # "band" (既定・現行): 変形後の中間線で下・上の帯の分布を作り直す。下の帯の分布 s_bot が帯の高さ h_lo に依存するので、
+    #   中間線から遠い下側の層まで動く (g4 で 0.65 未満のスケール済みヤコビアンを新しく 4,180 個作った)。
+    # "local": te_wake_blend_H 0 の格子 (変形前) を固定し、変形区間の station の y に δ(x)·φ(d) を足す。δ = 変形後と旧の中間線の差、
+    #   d = 旧中間線からの鉛直距離 (変形後に再評価しない)。φ の幅は固定の定数 (TE_WAKE_LOCAL_D_FULL_H・TE_WAKE_LOCAL_D_ZERO_H、
+    #   問題 YAML からは変えない)。te_wake_blend_H 0 ではどちらの方式も何もしない (旧格子とビット一致)
+    te_wake_mode: str = "band"
     top_ext_angle: float = 0.0
     scale: float = 1.0
     cowl_thickness: float = 0.0  # カウル板厚 /H (0 = 厚さ 0 のスリット)。2D と同じ x 分布で TE に向け 0 に絞る。
@@ -200,13 +207,24 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
         return np.where(x < 0.0, 0.0, np.where(x <= L_cowl, -x * tan_c, y_te + (x - L_cowl) * np.tan(prm.interface_angle)))
     # 外部領域の下端は**旧中間線**の x_out の値で決める (後縁下流の局所変形では動かさない。plan §4.2)
     y_bot = float(y_mid_line(x_out)) - prm.bot_depth
+    te_mode = str(getattr(prm, "te_wake_mode", "band"))
+    if te_mode not in TE_WAKE_MODES:
+        raise ValueError(f"mesh_sern3d: te_wake_mode は {TE_WAKE_MODES} のどれか ({te_mode!r})")
     y_mid, te_wake = _te_wake_midline(y_mid_line, xs, tk, i_te, L_cowl, y_te, x_out, prm)
     yt, ym = y_top(xs), y_mid(xs)
+    te_dlt = None
     if te_wake:
         _iw = np.arange(te_wake["te_wake_i_first"], te_wake["te_wake_i_last"] + 1)
         if np.any(ym[_iw] >= yt[_iw]) or np.any(ym[_iw] <= y_bot):
             raise ValueError("mesh_sern3d: te_wake_blend_H の中間線が上線 (ランプ/プルーム線) か下端を越える")
         te_wake["te_wake_max_dy"] = float(np.max(np.abs(ym[_iw] - y_mid_line(xs[_iw]))))
+        te_wake["te_wake_mode"] = te_mode
+        if te_mode == "local":
+            # 帯の分布は**変形前の中間線** (te_wake_blend_H 0 の格子と同じ値) で作り、変位 δ(x)·φ(d) は分布を作った後で足す
+            # (下の _te_wake_local_displace)。δ は変形区間の station だけ (区間外は足さない = ビット不変)
+            _ym_old = y_mid_line(xs)
+            te_dlt = ym[_iw] - _ym_old[_iw]
+            ym = _ym_old
     ni, njt, njb = len(xs), prm.nj_top, prm.nj_bot
     NJ = njb + njt - 1; jm = njb - 1
     # z 分布: [0, W/2] は側壁側 (z=W/2) にクラスタ、(W/2, Z_far] は側壁側にクラスタ
@@ -278,6 +296,11 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
             # **厚さ 0 スリット**。`cowl_thickness` が 3D で効いていなかった。2026-09-20 修正)。
             # 代入は `lo` **そのもの** (`y_bot + 1.0*(lo-y_bot)` は丸めで一致しない)。
             Y[i, jm] = lo
+    if te_dlt is not None:
+        # te_wake_mode "local": 変形前の断面に変位を足す。変形区間の station は板の下流 (tk = 0) なので Yin = Y2 で、
+        # 座標は全 z で Y2 (現方式の変形と同じ範囲: 主ブロックの base 節点だけ。カウル上コピー・側壁外コピーは区間に無く、
+        # 外部流ブロック・機体側面バンドは上線より上なので触らない)
+        te_wake.update(_te_wake_local_displace((Y2, Yin), ym, te_dlt, _iw))
     # --- ノード番号 ---
     N_base = ni * NJ * nz
     def base(i, j, k): return (i * NJ + j) * nz + k
@@ -420,6 +443,46 @@ def generate_sern_mesh3d(design, prm: SernMesh3DParams):
 # 後縁下流の中間線の曲線の版 (来歴用、plan convection-zero-thickness-edge-reconstruction §4.2「来歴」)。
 # `_te_wake_midline` の式 (曲線・端点の条件・m0 の取り方) を変えたら版を上げる。有効時だけ info に入る (無効時の info・格子は不変)
 TE_WAKE_CURVE_VERSION = "hermite3-lower-tangent-v1"
+
+# 中間線の変位の伝え方 (SernMesh3DParams.te_wake_mode) と "local" の定数・版 (plan tooling-sern-te-wake-grid §5.1 #4c、
+# codex diagnose 2026-10-11 g4-grid-redesign)。**定数は事前登録の固定値** (結果を見て幅を継ぎ足さない) で問題 YAML からは変えない。
+# "local" の式・定数を変えたら版を上げる。有効 (te_wake_blend_H > 0) かつ "local" のときだけ info に版が入る
+TE_WAKE_MODES = ("band", "local")
+TE_WAKE_LOCAL_D_FULL_H = 0.02      # 旧中間線からの鉛直距離 d ≤ これ (/H) で φ = 1 (中間線と同じだけ動く)
+TE_WAKE_LOCAL_D_ZERO_H = 0.30      # d ≥ これ (/H) で φ = 0 (動かない)
+TE_WAKE_MODE_VERSION = "local-0.02-0.30-quintic-v1"
+
+
+def te_wake_local_weight(d):
+    """te_wake_mode "local" の重み φ(d)。d = 旧中間線からの鉛直距離 /H (配列可)。d ≤ 0.02 で 1、d ≥ 0.30 で 0、間は
+    t = (d − 0.02)/0.28 として φ = 1 − 10t³ + 15t⁴ − 6t⁵ (両端で 1 階・2 階の導関数が 0)。"""
+    t = np.clip((np.asarray(d, dtype=float) - TE_WAKE_LOCAL_D_FULL_H) / (TE_WAKE_LOCAL_D_ZERO_H - TE_WAKE_LOCAL_D_FULL_H), 0.0, 1.0)
+    return 1.0 - 10.0 * t ** 3 + 15.0 * t ** 4 - 6.0 * t ** 5
+
+
+def _te_wake_local_displace(Ys, ym_old, dlt, iw):
+    """te_wake_mode "local": 変形前の断面 Ys (各 (ni, NJ)) の変形区間の station iw に y += δ·φ(d) を足す (その場で書き換える)。
+    dlt = 各 station の中間線の変位 (変形後 − 旧、iw と同じ長さ)、d = |y − 旧中間線| /H (変形前の値で測り、足した後に測り直さない)。
+    φ = 0 (d ≥ 0.30 H) の節点には何も足さない (ビット不変)。**上線 (j = NJ−1: ランプ・機体の下面・プルーム線 = 外部流ブロックとの
+    共有節点) と下端 (j = 0) は動かしてはいけない**ので、どちらかが 0.30 H より近い station があれば生成を失敗させる。戻り = info に足す記録。"""
+    n_moved = 0
+    clr_top = clr_bot = np.inf
+    for n, i in enumerate(iw):
+        for s, Y in enumerate(Ys):
+            d = np.abs(Y[i] - ym_old[i])
+            if s == 0:
+                clr_top, clr_bot = min(clr_top, float(d[-1])), min(clr_bot, float(d[0]))
+            if not (d[0] >= TE_WAKE_LOCAL_D_ZERO_H and d[-1] >= TE_WAKE_LOCAL_D_ZERO_H):
+                raise ValueError(
+                    f"mesh_sern3d: te_wake_mode local の支持領域 (旧中間線から {TE_WAKE_LOCAL_D_ZERO_H} H) に上線 (ランプ・機体・プルーム線) "
+                    f"か下端が入る (station {i}: 上線 {float(d[-1]):.4g} H、下端 {float(d[0]):.4g} H)。壁・外部境界を動かさないために止める")
+            sup = d < TE_WAKE_LOCAL_D_ZERO_H
+            Y[i, sup] = Y[i, sup] + dlt[n] * te_wake_local_weight(d[sup])
+            if s == 0:
+                n_moved += int(np.count_nonzero(sup))
+    return {"te_wake_mode_version": TE_WAKE_MODE_VERSION, "te_wake_local_d_full_H": TE_WAKE_LOCAL_D_FULL_H,
+            "te_wake_local_d_zero_H": TE_WAKE_LOCAL_D_ZERO_H, "te_wake_local_n_section_nodes": int(n_moved),
+            "te_wake_local_clear_top_H": float(clr_top), "te_wake_local_clear_bot_H": float(clr_bot)}
 
 
 def _te_wake_midline(y_mid_line, xs, tk, i_te, L_cowl, y_te, x_out, prm):
