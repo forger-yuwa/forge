@@ -1,0 +1,315 @@
+{
+ "kind": "fill_ghosts",
+ "base": "/home/ubuntu/eosdump_g3/base_g3.h5",
+ "base_sha256": "42b6438896fe8c76e2d4fd1205c0d64d78e229e0534896d923c5291e03da7458",
+ "mesh": "/home/ubuntu/eosdump_g3/in/sern.h5",
+ "mesh_sha256": "6fbc857e39cb7acb0fb85a3bec44f6fbef3d508ad113abfe045dccd8f41e3e8b",
+ "pid": "10",
+ "bcondKind": "farfield",
+ "n_ghost": 51143,
+ "ghost_first": 1921928,
+ "ghost_end": 1973071,
+ "n_owner_unique": 51143,
+ "owner_sources_agree": true,
+ "bcond_order": [
+  {
+   "name": "1",
+   "kind": "inlet_uniformVelocity",
+   "n_bplanes": 1825,
+   "ghost_first": 1920103,
+   "ghost_end": 1921928
+  },
+  {
+   "name": "10",
+   "kind": "farfield",
+   "n_bplanes": 51143,
+   "ghost_first": 1921928,
+   "ghost_end": 1973071
+  },
+  {
+   "name": "11",
+   "kind": "wall_isothermal",
+   "n_bplanes": 5183,
+   "ghost_first": 1973071,
+   "ghost_end": 1978254
+  },
+  {
+   "name": "12",
+   "kind": "wall_isothermal",
+   "n_bplanes": 5183,
+   "ghost_first": 1978254,
+   "ghost_end": 1983437
+  },
+  {
+   "name": "15",
+   "kind": "wall_isothermal",
+   "n_bplanes": 5725,
+   "ghost_first": 1983437,
+   "ghost_end": 1989162
+  },
+  {
+   "name": "17",
+   "kind": "wall_isothermal",
+   "n_bplanes": 3893,
+   "ghost_first": 1989162,
+   "ghost_end": 1993055
+  },
+  {
+   "name": "18",
+   "kind": "wall_isothermal",
+   "n_bplanes": 425,
+   "ghost_first": 1993055,
+   "ghost_end": 1993480
+  },
+  {
+   "name": "2",
+   "kind": "inlet_uniformVelocity",
+   "n_bplanes": 5673,
+   "ghost_first": 1993480,
+   "ghost_end": 1999153
+  },
+  {
+   "name": "3",
+   "kind": "outflow",
+   "n_bplanes": 7761,
+   "ghost_first": 1999153,
+   "ghost_end": 2006914
+  },
+  {
+   "name": "4",
+   "kind": "wall_isothermal",
+   "n_bplanes": 5725,
+   "ghost_first": 2006914,
+   "ghost_end": 2012639
+  },
+  {
+   "name": "5",
+   "kind": "wall_isothermal",
+   "n_bplanes": 2625,
+   "ghost_first": 2012639,
+   "ghost_end": 2015264
+  },
+  {
+   "name": "6",
+   "kind": "wall_isothermal",
+   "n_bplanes": 2625,
+   "ghost_first": 2015264,
+   "ghost_end": 2017889
+  },
+  {
+   "name": "7",
+   "kind": "outflow",
+   "n_bplanes": 10023,
+   "ghost_first": 2017889,
+   "ghost_end": 2027912
+  },
+  {
+   "name": "8",
+   "kind": "slip",
+   "n_bplanes": 10023,
+   "ghost_first": 2027912,
+   "ghost_end": 2037935
+  },
+  {
+   "name": "9",
+   "kind": "slip",
+   "n_bplanes": 47827,
+   "ghost_first": 2037935,
+   "ghost_end": 2085762
+  }
+ ],
+ "forge_log_check": {
+  "ok": true,
+  "log": "/home/ubuntu/eosdump_g3/wfill_base/base_new/forge_run.log",
+  "order_log": [
+   "1",
+   "10",
+   "11",
+   "12",
+   "15",
+   "17",
+   "18",
+   "2",
+   "3",
+   "4",
+   "5",
+   "6",
+   "7",
+   "8",
+   "9"
+  ],
+  "ghost_cells_log": 165659,
+  "mismatch": []
+ },
+ "eos_branches": [
+  "tp_1ph"
+ ],
+ "fill_arrays": [
+  "ro",
+  "roUx",
+  "roUy",
+  "roUz",
+  "roe",
+  "roK",
+  "roOmega",
+  "roY0",
+  "roY1",
+  "T"
+ ],
+ "nonfinite_before": {
+  "ro": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roUx": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roUy": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roUz": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roe": {
+   "n": 51143,
+   "in_target_ghost": 51143,
+   "where": {
+    "real": 0,
+    "ghost BCONDS/10 (farfield)": 51143
+   }
+  },
+  "roK": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roOmega": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roY0": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "roY1": {
+   "n": 0,
+   "in_target_ghost": 0,
+   "where": {
+    "real": 0
+   }
+  },
+  "T": {
+   "n": 51143,
+   "in_target_ghost": 51143,
+   "where": {
+    "real": 0,
+    "ghost BCONDS/10 (farfield)": 51143
+   }
+  }
+ },
+ "nonfinite_union": 51143,
+ "nonfinite_union_where": {
+  "real": 0,
+  "ghost BCONDS/10 (farfield)": 51143
+ },
+ "nonfinite_equals_target_ghosts": true,
+ "nonfinite_extra": 0,
+ "nonfinite_extra_where": {
+  "real": 0
+ },
+ "target_ghost_finite": 0,
+ "nonfinite_extra_first": [],
+ "target_ghost_finite_first": [],
+ "owner_nonfinite": {
+  "ro": 0,
+  "roUx": 0,
+  "roUy": 0,
+  "roUz": 0,
+  "roe": 0,
+  "roK": 0,
+  "roOmega": 0,
+  "roY0": 0,
+  "roY1": 0,
+  "T": 0
+ },
+ "neumann_evidence": {
+  "Y0": {
+   "ghost_eq_owner": 28596,
+   "control_shifted_owner": 28271,
+   "owner_distinct_values": 22548,
+   "n": 51143
+  },
+  "Y1": {
+   "ghost_eq_owner": 0,
+   "control_shifted_owner": 0,
+   "owner_distinct_values": 8317,
+   "n": 51143
+  },
+  "roY0": {
+   "ghost_eq_owner": 51143,
+   "control_shifted_owner": 28271,
+   "owner_distinct_values": 22546,
+   "n": 51143
+  },
+  "roY1": {
+   "ghost_eq_owner": 51143,
+   "control_shifted_owner": 1097,
+   "owner_distinct_values": 12527,
+   "n": 51143
+  }
+ },
+ "base_post_writes_nonfinite_where": {
+  "real": 0,
+  "ghost BCONDS/10 (farfield)": 51143
+ },
+ "base_post_writes_nonfinite_outside_target": 0,
+ "changed_elements": {
+  "T": 51143,
+  "ro": 51143,
+  "roK": 51143,
+  "roOmega": 51143,
+  "roUx": 51143,
+  "roUy": 51143,
+  "roUz": 51143,
+  "roY0": 0,
+  "roY1": 0,
+  "roe": 51143
+ },
+ "arrays_total": 223,
+ "arrays_unchanged": 213,
+ "bytes_compared": 1860499704,
+ "checks": {
+  "names_attrs_db_same": true,
+  "other_arrays_bit_identical": true,
+  "fill_arrays_outside_target_bit_identical": true,
+  "target_ghost_equals_owner_bits": true,
+  "reads_finite_after_fill": true,
+  "nonfinite_equals_target_ghosts": true,
+  "owner_finite": true
+ },
+ "check_failures": [],
+ "out_sha256": "d4251f29fcd3556872c5dd330ed7cb4895b5aa6e8c0febf82bd1a8a1cf767aab"
+}

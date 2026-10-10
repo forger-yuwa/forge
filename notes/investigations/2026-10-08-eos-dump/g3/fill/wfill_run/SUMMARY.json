@@ -1,0 +1,957 @@
+{
+ "input": "/home/ubuntu/eosdump_g3/in",
+ "old": {
+  "bin": "/home/ubuntu/eosdump_g3/build_old/forge",
+  "sha256": "ea2d101da5a4ba69afd303c2aced8841b878458d88fde65c30cff3ae4d827595"
+ },
+ "new": {
+  "bin": "/home/ubuntu/forge-r8/solver_density_cuda/build/forge",
+  "sha256": "61cf8f4fc64125cd5aa30cfef1439882c671156f5c1826baaa7578e3782131c2"
+ },
+ "env": {
+  "FORGE_CUDA_BLOCKSIZE": "128"
+ },
+ "step": 1,
+ "replay": "/home/ubuntu/eosdump_g3/replay_fill_g3.h5",
+ "replay_sha256": "d4251f29fcd3556872c5dd330ed7cb4895b5aa6e8c0febf82bd1a8a1cf767aab",
+ "node": null,
+ "expect_floor": null,
+ "runs": {
+  "old_r1": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "f72418d2eff59343b244c1ce839b9529a6ced49d8aae4cecfd62f62ed1aab8c6",
+   "dump_bytes": 3721183616,
+   "floor_rows": [],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/wfill_run/old_r1/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 223 cell arrays from /home/ubuntu/eosdump_g3/replay_fill_g3.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/wfill_run/old_r1/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "new_r1": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "1903d1025b3ad95a3699030bc332922efe7e92321ea145e8b4c5317780bd2387",
+   "dump_bytes": 3721183616,
+   "floor_rows": [
+    {
+     "kind": "init",
+     "session": "1",
+     "step": "0",
+     "inner": "0",
+     "q_index": "-1",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "165659",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    },
+    {
+     "kind": "eos",
+     "session": "1",
+     "step": "1",
+     "inner": "0",
+     "q_index": "0",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "0",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    }
+   ],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/wfill_run/new_r1/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 223 cell arrays from /home/ubuntu/eosdump_g3/replay_fill_g3.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/wfill_run/new_r1/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "old_r2": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "f64ccb6c4b036949455bc44ec08bae9ec364578511aa3319474509b18269fca0",
+   "dump_bytes": 3721183616,
+   "floor_rows": [],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/wfill_run/old_r2/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 223 cell arrays from /home/ubuntu/eosdump_g3/replay_fill_g3.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/wfill_run/old_r2/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  },
+  "new_r2": {
+   "rc": 0,
+   "ok": true,
+   "dump_sha256": "0b6641c875e7c2144e6a0ea7730394d75a01b183f49e47a1518bfec2f0d39c4e",
+   "dump_bytes": 3721183616,
+   "floor_rows": [
+    {
+     "kind": "init",
+     "session": "1",
+     "step": "0",
+     "inner": "0",
+     "q_index": "-1",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "165659",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    },
+    {
+     "kind": "eos",
+     "session": "1",
+     "step": "1",
+     "inner": "0",
+     "q_index": "0",
+     "path": "steady_implicit",
+     "n_real": "1920103",
+     "n_ghost": "165659",
+     "n_nonfinite_real": "0",
+     "n_nonfinite_ghost": "0",
+     "nT_real": "0",
+     "nRho_real": "0",
+     "nP_real": "0",
+     "nT_ghost": "0",
+     "nRho_ghost": "0",
+     "nP_ghost": "0",
+     "nT_uneval_real": "0",
+     "nT_mismatch_real": "0",
+     "n_near_real": "0",
+     "dRhoE_T_sum": "0",
+     "dRhoE_T_max": "0",
+     "dRho_sum": "0",
+     "dRho_max": "0",
+     "dP_sum": "0",
+     "dP_max": "0",
+     "ids_T": "",
+     "ids_Rho": "",
+     "ids_P": "",
+     "ids_near": "",
+     "ids_truncated": "",
+     "overflow": "0",
+     "note": ""
+    }
+   ],
+   "replay_log": [
+    "[eos-dump] armed: step 1 の EOS の前後の全 cell 配列を /home/ubuntu/eosdump_g3/wfill_run/new_r2/eos_dump.h5 に書いて終了する",
+    "[eos-dump] replay armed (診断専用・状態を書き換える): step 1 の EOS の直前に /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre/* を var.c_d へ読み込む",
+    "[eos-dump] replay file checked: /home/ubuntu/eosdump_g3/replay_fill_g3.h5 の /pre は var.c_d と名前・長さ・dtype が一致",
+    "[eos-dump] replay: loaded 223 cell arrays from /home/ubuntu/eosdump_g3/replay_fill_g3.h5 into var.c_d at step 1 (no re-pin, no other EOS before this EOS)",
+    "[eos-dump] wrote /home/ubuntu/eosdump_g3/wfill_run/new_r2/eos_dump.h5 (step 1, 2085762 cells incl. ghost, 223 cell arrays x {pre, post}); exiting"
+   ]
+  }
+ },
+ "compare": {
+  "old_r1_vs_new_r1": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}"
+   ],
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "old_r1_vs_old_r2": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}"
+   ],
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "old_r2_vs_new_r1": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}"
+   ],
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "new_r1_vs_new_r2": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}"
+   ],
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  },
+  "old_r1_vs_new_r2": {
+   "verdict_v1": "INVALID",
+   "verdict_v2": "IDENTICAL",
+   "eos_args_post_diff_bytes": 0,
+   "eos_args_pre_diff_bytes": 0,
+   "eos_args_bytes": 175204008,
+   "other_pre_diff_bytes": 0,
+   "other_post_diff_bytes": 0,
+   "invalid_v1": [
+    "EOS の引数配列 Ht に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 P に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}",
+    "EOS の引数配列 cp に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 gamma に非有限 {'A:pre': 165659, 'A:post': 0, 'B:pre': 165659, 'B:post': 0}",
+    "EOS の引数配列 sonic に非有限 {'A:pre': 51143, 'A:post': 0, 'B:pre': 51143, 'B:post': 0}"
+   ],
+   "invalid_v2": [],
+   "info_v2": [
+    "書き込み専用 Ht の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 P の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)",
+    "書き込み専用 cp の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 gamma の pre に非有限 A 165659・B 165659 (判定外。無害の認定ではない)",
+    "書き込み専用 sonic の pre に非有限 A 51143・B 51143 (判定外。無害の認定ではない)"
+   ],
+   "different": []
+  }
+ },
+ "replay_checks": {
+  "old_r1": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "reads_pre_nonfinite_total": 0,
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "writes_post_nonfinite_total": 0,
+   "writes_post_nonfinite_target": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "target_post": {
+    "T": [
+     222.4984130859375,
+     1036.25927734375
+    ],
+    "P": [
+     948.7854614257812,
+     5330.458984375
+    ],
+    "ro": [
+     0.005865660961717367,
+     0.03752964362502098
+    ]
+   },
+   "missing_arrays": [],
+   "unsupported": [],
+   "replay_attrs": [
+    1,
+    "/home/ubuntu/eosdump_g3/replay_fill_g3.h5"
+   ]
+  },
+  "new_r1": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "reads_pre_nonfinite_total": 0,
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "writes_post_nonfinite_total": 0,
+   "writes_post_nonfinite_target": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "target_post": {
+    "T": [
+     222.4984130859375,
+     1036.25927734375
+    ],
+    "P": [
+     948.7854614257812,
+     5330.458984375
+    ],
+    "ro": [
+     0.005865660961717367,
+     0.03752964362502098
+    ]
+   },
+   "missing_arrays": [],
+   "unsupported": [],
+   "replay_attrs": [
+    1,
+    "/home/ubuntu/eosdump_g3/replay_fill_g3.h5"
+   ]
+  },
+  "old_r2": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "reads_pre_nonfinite_total": 0,
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "writes_post_nonfinite_total": 0,
+   "writes_post_nonfinite_target": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "target_post": {
+    "T": [
+     222.4984130859375,
+     1036.25927734375
+    ],
+    "P": [
+     948.7854614257812,
+     5330.458984375
+    ],
+    "ro": [
+     0.005865660961717367,
+     0.03752964362502098
+    ]
+   },
+   "missing_arrays": [],
+   "unsupported": [],
+   "replay_attrs": [
+    1,
+    "/home/ubuntu/eosdump_g3/replay_fill_g3.h5"
+   ]
+  },
+  "new_r2": {
+   "pre_equals_replay": true,
+   "pre_mismatch_arrays": [],
+   "pre_diff_bytes_vs_replay": 0,
+   "reads_pre_nonfinite": {
+    "ro": 0,
+    "roUx": 0,
+    "roUy": 0,
+    "roUz": 0,
+    "roe": 0,
+    "roK": 0,
+    "roOmega": 0,
+    "roY0": 0,
+    "roY1": 0,
+    "T": 0
+   },
+   "reads_pre_nonfinite_total": 0,
+   "writes_post_nonfinite": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "writes_post_nonfinite_total": 0,
+   "writes_post_nonfinite_target": {
+    "Ux": 0,
+    "Uy": 0,
+    "Uz": 0,
+    "ro": 0,
+    "k": 0,
+    "omega": 0,
+    "T": 0,
+    "P": 0,
+    "roe": 0,
+    "Ht": 0,
+    "sonic": 0,
+    "gamma": 0,
+    "cp": 0,
+    "Rmix": 0
+   },
+   "target_post": {
+    "T": [
+     222.4984130859375,
+     1036.25927734375
+    ],
+    "P": [
+     948.7854614257812,
+     5330.458984375
+    ],
+    "ro": [
+     0.005865660961717367,
+     0.03752964362502098
+    ]
+   },
+   "missing_arrays": [],
+   "unsupported": [],
+   "replay_attrs": [
+    1,
+    "/home/ubuntu/eosdump_g3/replay_fill_g3.h5"
+   ]
+  }
+ },
+ "replay_record": {
+  "kind": "fill_ghosts",
+  "base": "/home/ubuntu/eosdump_g3/base_g3.h5",
+  "base_sha256": "42b6438896fe8c76e2d4fd1205c0d64d78e229e0534896d923c5291e03da7458",
+  "mesh": "/home/ubuntu/eosdump_g3/in/sern.h5",
+  "mesh_sha256": "6fbc857e39cb7acb0fb85a3bec44f6fbef3d508ad113abfe045dccd8f41e3e8b",
+  "pid": "10",
+  "bcondKind": "farfield",
+  "n_ghost": 51143,
+  "ghost_first": 1921928,
+  "ghost_end": 1973071,
+  "n_owner_unique": 51143,
+  "owner_sources_agree": true,
+  "bcond_order": [
+   {
+    "name": "1",
+    "kind": "inlet_uniformVelocity",
+    "n_bplanes": 1825,
+    "ghost_first": 1920103,
+    "ghost_end": 1921928
+   },
+   {
+    "name": "10",
+    "kind": "farfield",
+    "n_bplanes": 51143,
+    "ghost_first": 1921928,
+    "ghost_end": 1973071
+   },
+   {
+    "name": "11",
+    "kind": "wall_isothermal",
+    "n_bplanes": 5183,
+    "ghost_first": 1973071,
+    "ghost_end": 1978254
+   },
+   {
+    "name": "12",
+    "kind": "wall_isothermal",
+    "n_bplanes": 5183,
+    "ghost_first": 1978254,
+    "ghost_end": 1983437
+   },
+   {
+    "name": "15",
+    "kind": "wall_isothermal",
+    "n_bplanes": 5725,
+    "ghost_first": 1983437,
+    "ghost_end": 1989162
+   },
+   {
+    "name": "17",
+    "kind": "wall_isothermal",
+    "n_bplanes": 3893,
+    "ghost_first": 1989162,
+    "ghost_end": 1993055
+   },
+   {
+    "name": "18",
+    "kind": "wall_isothermal",
+    "n_bplanes": 425,
+    "ghost_first": 1993055,
+    "ghost_end": 1993480
+   },
+   {
+    "name": "2",
+    "kind": "inlet_uniformVelocity",
+    "n_bplanes": 5673,
+    "ghost_first": 1993480,
+    "ghost_end": 1999153
+   },
+   {
+    "name": "3",
+    "kind": "outflow",
+    "n_bplanes": 7761,
+    "ghost_first": 1999153,
+    "ghost_end": 2006914
+   },
+   {
+    "name": "4",
+    "kind": "wall_isothermal",
+    "n_bplanes": 5725,
+    "ghost_first": 2006914,
+    "ghost_end": 2012639
+   },
+   {
+    "name": "5",
+    "kind": "wall_isothermal",
+    "n_bplanes": 2625,
+    "ghost_first": 2012639,
+    "ghost_end": 2015264
+   },
+   {
+    "name": "6",
+    "kind": "wall_isothermal",
+    "n_bplanes": 2625,
+    "ghost_first": 2015264,
+    "ghost_end": 2017889
+   },
+   {
+    "name": "7",
+    "kind": "outflow",
+    "n_bplanes": 10023,
+    "ghost_first": 2017889,
+    "ghost_end": 2027912
+   },
+   {
+    "name": "8",
+    "kind": "slip",
+    "n_bplanes": 10023,
+    "ghost_first": 2027912,
+    "ghost_end": 2037935
+   },
+   {
+    "name": "9",
+    "kind": "slip",
+    "n_bplanes": 47827,
+    "ghost_first": 2037935,
+    "ghost_end": 2085762
+   }
+  ],
+  "forge_log_check": {
+   "ok": true,
+   "log": "/home/ubuntu/eosdump_g3/wfill_base/base_new/forge_run.log",
+   "order_log": [
+    "1",
+    "10",
+    "11",
+    "12",
+    "15",
+    "17",
+    "18",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9"
+   ],
+   "ghost_cells_log": 165659,
+   "mismatch": []
+  },
+  "eos_branches": [
+   "tp_1ph"
+  ],
+  "fill_arrays": [
+   "ro",
+   "roUx",
+   "roUy",
+   "roUz",
+   "roe",
+   "roK",
+   "roOmega",
+   "roY0",
+   "roY1",
+   "T"
+  ],
+  "nonfinite_before": {
+   "ro": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roUx": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roUy": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roUz": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roe": {
+    "n": 51143,
+    "in_target_ghost": 51143,
+    "where": {
+     "real": 0,
+     "ghost BCONDS/10 (farfield)": 51143
+    }
+   },
+   "roK": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roOmega": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roY0": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "roY1": {
+    "n": 0,
+    "in_target_ghost": 0,
+    "where": {
+     "real": 0
+    }
+   },
+   "T": {
+    "n": 51143,
+    "in_target_ghost": 51143,
+    "where": {
+     "real": 0,
+     "ghost BCONDS/10 (farfield)": 51143
+    }
+   }
+  },
+  "nonfinite_union": 51143,
+  "nonfinite_union_where": {
+   "real": 0,
+   "ghost BCONDS/10 (farfield)": 51143
+  },
+  "nonfinite_equals_target_ghosts": true,
+  "nonfinite_extra": 0,
+  "nonfinite_extra_where": {
+   "real": 0
+  },
+  "target_ghost_finite": 0,
+  "nonfinite_extra_first": [],
+  "target_ghost_finite_first": [],
+  "owner_nonfinite": {
+   "ro": 0,
+   "roUx": 0,
+   "roUy": 0,
+   "roUz": 0,
+   "roe": 0,
+   "roK": 0,
+   "roOmega": 0,
+   "roY0": 0,
+   "roY1": 0,
+   "T": 0
+  },
+  "neumann_evidence": {
+   "Y0": {
+    "ghost_eq_owner": 28596,
+    "control_shifted_owner": 28271,
+    "owner_distinct_values": 22548,
+    "n": 51143
+   },
+   "Y1": {
+    "ghost_eq_owner": 0,
+    "control_shifted_owner": 0,
+    "owner_distinct_values": 8317,
+    "n": 51143
+   },
+   "roY0": {
+    "ghost_eq_owner": 51143,
+    "control_shifted_owner": 28271,
+    "owner_distinct_values": 22546,
+    "n": 51143
+   },
+   "roY1": {
+    "ghost_eq_owner": 51143,
+    "control_shifted_owner": 1097,
+    "owner_distinct_values": 12527,
+    "n": 51143
+   }
+  },
+  "base_post_writes_nonfinite_where": {
+   "real": 0,
+   "ghost BCONDS/10 (farfield)": 51143
+  },
+  "base_post_writes_nonfinite_outside_target": 0,
+  "changed_elements": {
+   "T": 51143,
+   "ro": 51143,
+   "roK": 51143,
+   "roOmega": 51143,
+   "roUx": 51143,
+   "roUy": 51143,
+   "roUz": 51143,
+   "roY0": 0,
+   "roY1": 0,
+   "roe": 51143
+  },
+  "arrays_total": 223,
+  "arrays_unchanged": 213,
+  "bytes_compared": 1860499704,
+  "checks": {
+   "names_attrs_db_same": true,
+   "other_arrays_bit_identical": true,
+   "fill_arrays_outside_target_bit_identical": true,
+   "target_ghost_equals_owner_bits": true,
+   "reads_finite_after_fill": true,
+   "nonfinite_equals_target_ghosts": true,
+   "owner_finite": true
+  },
+  "check_failures": []
+ },
+ "replay_kind": "fill_ghosts",
+ "replay_verdict": "PASS",
+ "replay_reasons": [
+  "old_r1: 対象 ghost の post {'T': [222.4984130859375, 1036.25927734375], 'P': [948.7854614257812, 5330.458984375], 'ro': [0.005865660961717367, 0.03752964362502098]}",
+  "new_r1: 対象 ghost の post {'T': [222.4984130859375, 1036.25927734375], 'P': [948.7854614257812, 5330.458984375], 'ro': [0.005865660961717367, 0.03752964362502098]}",
+  "old_r2: 対象 ghost の post {'T': [222.4984130859375, 1036.25927734375], 'P': [948.7854614257812, 5330.458984375], 'ro': [0.005865660961717367, 0.03752964362502098]}",
+  "new_r2: 対象 ghost の post {'T': [222.4984130859375, 1036.25927734375], 'P': [948.7854614257812, 5330.458984375], 'ro': [0.005865660961717367, 0.03752964362502098]}",
+  "old_r1_vs_new_r1: v2 IDENTICAL、EOS の配列の post 差分 0 / 175204008 バイト・pre 差分 0",
+  "old_r1_vs_old_r2: v2 IDENTICAL、EOS の配列の post 差分 0 / 175204008 バイト・pre 差分 0",
+  "old_r2_vs_new_r1: v2 IDENTICAL、EOS の配列の post 差分 0 / 175204008 バイト・pre 差分 0",
+  "new_r1_vs_new_r2: v2 IDENTICAL、EOS の配列の post 差分 0 / 175204008 バイト・pre 差分 0",
+  "old_r1_vs_new_r2: v2 IDENTICAL、EOS の配列の post 差分 0 / 175204008 バイト・pre 差分 0",
+  "new_r1: 情報 eos 行 step 1 inner 0 q_index 0: nT_real 0 ids_T '' nRho_real 0 nP_real 0 n_near_real 0 overflow 0",
+  "new_r2: 情報 eos 行 step 1 inner 0 q_index 0: nT_real 0 ids_T '' nRho_real 0 nP_real 0 n_near_real 0 overflow 0"
+ ]
+}
