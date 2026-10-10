@@ -302,7 +302,7 @@ def cmd_bl_count(a):
     return res
 
 
-GREF = (560, 0.004)     # 後処理の A/B の参照格子 (nj, c)。比 ≤ 約 1.03
+GPOST = (560, 0.004)    # 後処理の A/B の真値の格子 Gpost (nj, c)。比 ≤ 約 1.03。2026-10-11 に Gref から改名 (§4.16 の参照の格子 Gref = nj 160 と別物)
 WINDOWS = ((40.0, 50.0), (65.0, 75.0), (84.0, 94.0))   # θ_r・δ_loc の x の窓 (plan tooling-nozzle-core-grid §4.10)
 
 
@@ -343,7 +343,7 @@ def cmd_post_ab(a):
     d0 = (rw[:, None] * (1.0 - S0))[:, ::-1]                  # 壁 (d = 0) から軸へ増える
     interp = [{k: Truth(d0[i], V0[k][i, ::-1]) for k in keys} for i in range(NI)]
     x_E = float(json.loads((Path(a.wall_ref) / "prepare_info.json").read_text())["x_E"])
-    out = {"x_E": x_E, "ref": {"nj": GREF[0], "c": GREF[1]}, "truth": a.truth}
+    out = {"x_E": x_E, "ref": {"name": "Gpost", "nj": GPOST[0], "c": GPOST[1]}, "truth": a.truth}
     arrays = {}
     for name, nj, c in grid_list(ref=True):
         m = mesh_block(nj, c); P, prm = generate(wall, m)
@@ -381,8 +381,8 @@ def cmd_post_ab(a):
             rec[f"eta{et}_overshoot_pct"] = float(dd[(xq >= x_E - 15)].max())
         out[name] = rec
         print(f"[post-ab] {name} nj {prm.nj}: Q_w {rec['Q_w']:.6e}、θ_r(70) {rec['theta_r_70']:.6e}、出口 M (線) {rec['exit_M_line_mean']:.7f}", flush=True)
-    ref = out["Gref"]; tab = {}
-    for name in ("G0", "G1", "Gc", "G2"):
+    ref = out["Gpost"]; tab = {}
+    for name in ("G0", "G1", "Gc", "G2", "Gref"):
         r = out[name]; tab[name] = {}
         wk = [f"{k}_w{int(lo)}_{int(hi)}{sfx}" for sfx in ("", "_pchip") for k in ("theta_r", "delta_loc") for (lo, hi) in WINDOWS]
         for k in ["Q_w", "theta_r_40", "theta_r_70", "theta_r_94", "delta_loc_40", "delta_loc_70", "delta_loc_94",
@@ -393,11 +393,11 @@ def cmd_post_ab(a):
             tab[name][k + "_diff_pctpt"] = r[k] - ref[k]
     out["vs_ref"] = tab
     # x 方向の誤差の分布 (試験部 [40, 94]、Gref 比): 中央値と最大
-    xr = arrays[("Gref", "linear")][0]; w = (xr >= 40) & (xr <= 94); px = {}
-    for name in ("G0", "G1", "Gc", "G2"):
+    xr = arrays[("Gpost", "linear")][0]; w = (xr >= 40) & (xr <= 94); px = {}
+    for name in ("G0", "G1", "Gc", "G2", "Gref"):
         for prof in ("linear", "pchip"):
             for k, idx in (("theta_r", 1), ("delta_loc", 2)):
-                e = 100 * (arrays[(name, prof)][idx][w] / arrays[("Gref", prof)][idx][w] - 1)
+                e = 100 * (arrays[(name, prof)][idx][w] / arrays[("Gpost", prof)][idx][w] - 1)
                 px[f"{name}_{prof}_{k}"] = {"median_pct": float(np.median(e)), "max_abs_pct": float(np.abs(e).max()),
                                             "x_at_max": float(xr[w][np.argmax(np.abs(e))])}
     out["x_profile_error"] = px
@@ -410,7 +410,7 @@ YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170, "Gref": 160}      # select.json の�
 
 def grid_list(ref=False):
     g = [("G0", None, None)] + [(a, YAML_NJ[a], ARMS[a][0]) for a in ("G1", "Gc", "G2")]
-    return g + [("Gref",) + GREF] if ref else g
+    return g + [("Gref", YAML_NJ["Gref"], REF_CAP), ("Gpost",) + GPOST] if ref else g   # ref: 後処理の A/B 用 (Gref = §4.16 の nj 160、Gpost = 真値の nj 560)
 
 
 def cmd_yaml(a):
@@ -627,7 +627,7 @@ def cmd_prep_ic(a):
                 "first_interior_median": float(np.median(w[:, -2])), "max_excl_wall": float(w[:, :-1].max())}
     out["G0_res_100000_omega"] = wall_omega(P0, nj0)
     out["G0_res_100000"] = reduce(xy, g0["ro"], g0["Ux"], g0["Uy"], g0["k"], len(g0["ro"]) // NI)
-    for arm in [a_ for a_ in ("G1", "Gc", "G2", "G1x") if (OUT / f"prep_{a_}" / "nozzle.h5").is_file()]:
+    for arm in [a_ for a_ in ((a.arm,) if a.arm else ("G1", "Gc", "G2", "G1x")) if (OUT / f"prep_{a_}" / "nozzle.h5").is_file()]:
         with h5py.File(OUT / f"prep_{arm}" / "nozzle.h5", "r") as h:
             keys = [k for k in h["VALUE"].keys() if h["VALUE/" + k].shape and h["VALUE/" + k].ndim == 1]
             V = {k: np.array(h["VALUE/" + k], dtype=float) for k in keys}
@@ -706,14 +706,14 @@ def cmd_view(a):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view", "select-ref"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
-    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref"], help="prep: 格子")
+    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref"], help="prep: 格子 / prep-ic: その格子だけを見る (出力 prep-ic_<格子>.json)")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()
     out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x, "view": cmd_view, "select-ref": cmd_select_ref}[a.cmd](a)
     out["problem"] = PROBLEM.name; out["wall_ref"] = a.wall_ref
     OUT.mkdir(parents=True, exist_ok=True)
-    p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"prep-ic_{a.arm}.json" if a.cmd == "prep-ic" and a.arm else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
     print(json.dumps({k: v for k, v in out.items() if k != "metrics"}, ensure_ascii=False, indent=1)[:6000])
     print(f"[core_grid_mesh] {p}")
 

@@ -250,9 +250,9 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 
 - **方法**: G0 の場 (`run_0353_m9_L5` res_115000) を、列ごとに壁からの距離 d (変形前の配置で d = r_w(1 − s)) の補間で連続の場にした。どの格子でも列 i の節点は、壁法線の層の変形 (d だけの関数) で同じ曲線の上に乗るので、d の 1 次元の補間で同じ場を標本化できる。
   - 真の分布は 2 通り: PCHIP と Akima (再構成の方式と同じ補間だと有利に出るので、別の補間でも確かめる)。
-  - 各格子 (G0・G1・Gc・G2) と参照の細かい格子 Gref (`axis_cap_frac` 0.004・nj 560、列の比 ≤ 1.0275) に載せ、`cold_xcheck.reduce_fields` で量を出して Gref と比べた。
+  - 各格子 (G0・G1・Gc・G2) と真値の細かい格子 Gpost (`axis_cap_frac` 0.004・nj 560、列の比 ≤ 1.0275。2026-10-11 に Gref から改名: §4.16 の参照の格子 Gref (nj 160) とは別物) に載せ、`cold_xcheck.reduce_fields` で量を出して Gpost と比べた。
   - `core_grid_mesh.py post-ab --truth pchip|akima` → `_band_ab/core_grid/post-ab_{pchip,akima}.json`。
-- **結果** (Gref 比の相対差 [%]、真の分布 2 通りの絶対値の最大):
+- **結果** (Gpost 比の相対差 [%]、真の分布 2 通りの絶対値の最大):
 
 | 格子 | θ_r 点 (40/70/94)、折れ線 | θ_r 窓の平均、折れ線 | θ_r 窓の平均、PCHIP | δ_loc 点、折れ線 | δ_loc 窓の平均、折れ線 | δ_loc 窓の平均、PCHIP | Q_w |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -409,6 +409,44 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
   - 許容差は、ユーザから指定があるまで §4.5 の値を仮に使う (θ_r・δ・Q_w 1 %、出口の主流 M 0.02 %、軸・η 0.1 の M 0.02 %pt)。
   - 投入は、G0 の揺れの原因 (変換器の A/B、§5.1 #12) が分かってから。停止の規則 (揺れのある場で何を終わりとするか) と判定の式は、そのときに上位に諮って登録し直す (エスカレーション条件 1)。
 
+### 4.17 G0 の変換器の A/B の結果の受け取り (2026-10-11)
+
+- **記録の場所**: 別セッション (M6 ノズルの設計) の hoop plan `plans/active/axisymmetric-freestream-hoop-gauge.md` §4.13〜§4.15 (ブランチ `feature/nozzle-wall-fit-and-pipeline`、commit `461963f4`)。判定の JSON は AWS A の `~/forge-wallfit/case/45.isobutane_m6_d155/_band_ab/cold_pair/cv_judge.json`・`kab_judge.json`。数値は commit の本文から写した (こちらで再計算はしていない)。
+- **変換の A/B (hoop plan §4.14)**: 旧 `run_0490_cv_old_k0` (A) 対 新 `run_0486_kab_k0` (B)、G0・fgeom7・キー 0・`run_0483` の res_140000 から各 6 万 step。**判定 (事前登録のとおり): 退ける**。Q_w の J の新/旧は 1.05 (20〜40k)・0.92 (40〜60k) で、両区間とも ≤ 1.25。境界の半割面の端点の変更は揺れの主因ではない。窓の平均も旧と新でほぼ同じ (Q_w 9.3215 / 9.3218 MW、θ_r(40) 0.077647 / 0.077655、20〜40k)。
+- **キーだけの A/B (hoop plan §4.13)**: `run_0485_kab_k1` 対 `run_0486_kab_k0` (同じ新しい変換の G0)。**判定 (事前登録のとおり): 支持しない** (Q_w の B/A が 3 窓で揃わない: 主 0.54・前半 0.75・後半 0.29)。記録 (判定ではない): 後半 40〜60k の Q_w の J はキー 0 が 0.017 %、キー 1 が 0.059 %。キー 0 は切り替え直後に Q_w が −0.30 % 動いたあと静まり、キー 1 は揺れ続ける。両腕とも `check_convergence` CHECK FAILURES、主窓の系列の `check_quasisteady` は ALL STEADY (既定の閾値)。解釈は M6 のセッションが上位に諮る。
+- **本 plan への影響**:
+  - 旧い変換器で G1 を作り直す A/B は要らない (変換器の変更は揺れの主因ではない)。
+  - 揺れの原因は未確定。G0 ではキー 1 との関係が残るが、事前登録の規則では支持されていない。G1・G1x はキー 0 でも揺れが大きかった (§4.15: Q_w 0.22・0.30 %)。ただし G1・G1x は interp_field の移送から 18〜20 万 step、G0 はキー 0 に切り替えてから 4〜6 万 step の窓で、起点と窓が違うので同じ物差しではない。格子の粗さで揺れが増えるのか、キーなのかは分けられていない。
+  - Gref の投入の構成 (キー)・停止の規則・判定の式を上位に諮って登録する (§5.1 #13 (c))。
+
+### 4.18 Gref の投入と判定の事前登録 (2026-10-11、codex 諮問、実行前)
+
+- **諮問**: codex (diagnose) [`notes/reviews/2026-10-11-core-grid-gref-registration-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-gref-registration-diagnose.md) — 結論「Gref をキー 1・既存と同じ FP64/B0 構成で 20 万 step 回す 1 本に絞り、固定長を予算上限、末尾の自己変化を判定資格、反復感度を最終採否の条件として分離して登録する」。ブリーフは `notes/reviews/briefs/2026-10-11-core-grid-gref-registration.md`。採否:
+
+| 指摘 | 重さ | 採否 | 反映 |
+| --- | --- | --- | --- |
+| (a) Gref はキー 1。G0・G1・G1x のキー 1 の腕と離散化をそろえる。既定化の検証の完了を意味しない | Minor | 採用 | 下の「構成」 |
+| (b) 20 万 step の固定長は予算の上限として採る。同じ起点・同じ長さでも過渡の消失は保証しない。完走を「収束」「準定常」と呼ばない | Major | 採用 | 下の「停止」 |
+| `m9_watch.py` は水準で止め、途中の出力を消すので使わない | Major | 採用。台本 `cg_gref.sh` は水準で止めず、160k 未満の場だけを次の出力が出てから消す | 下の「構成」 |
+| (c) 9 出力の平均の標準誤差で合格させない (現状は NOT ALL STEADY・CHECK FAILURES で、標本の独立性も示されていない)。観測の幅と窓の移動で見る | Major | 採用 | 下の「式」 |
+| (d) 反復条件の感度 s は省略しない。ただし測るのは、Gref で候補が残った格子と Gref だけ。今は全格子に point の継続を足さない | Major | 採用 | 下の「採否」 |
+| Gref の後処理の予算 p_ref を既存の表から流用しない。同じ連続の場の検査に nj 160 を加えて測る | Major | 採用。測った (下の「p」) | `post-ab_{pchip,akima}.json` |
+
+- **構成**: `run_0607_cg_gref_k1` (AWS A の `~/forge-coregrid/case/45.isobutane_m6_d155/`)。格子は `_band_ab/core_grid/prep_Gref/new64/nozzle.h5` (sha256 11903e57…、§5.1 #13 (b) の検査に合格)。`run_0183` の res_100000 から `interp_field.py` で 9 量を移し、この起点を step 0 とする。バイナリは `~/forge-fgeom7-fp64` (sha256 7e95e5bb…)、準備は `cold_cfl.py prep` (G1・G1x の `cg_runs.sh` と同じ引数: cfl 4・ライン dir・キー 5・上限 50・`extraFields: [res_ro]`)、`mesh.axisSegmentRWeight: 1`、2500 step ごとの出力。台本 `cg_gref.sh`。
+- **停止**: 水準で止めず、20 万 step で止める。20 万 step より前の非有限・異常終了は別に扱う (判定不能)。ディスクの空きが 3 GB を切ったら自分の forge だけを止める。
+- **残すもの**: 160k〜200k の 17 出力の場、残差の履歴、ログ。160k 未満の場は消す。
+- **集計** (`cg_gref_judge.py series` → `judge`): 各出力で §4.5 の量 (θ_r・δ_loc は PCHIP でつないだ x の窓の平均、Q_w、出口の主流 M の線平均、軸と η 0.1 の試験部の平均 [%pt]) を出す。腕は Gref (`run_0607`)、G0 (`run_0485_kab_k1` の 20k〜60k = 通算 160k〜200k、別セッションの run、オフセット 140000)、G1 (`run_0603`)、G1x (`run_0605`)。
+- **式** (量ごと、相対量は共通の分母 D = |μ_ref| で %、M の %pt の量はそのまま):
+  - μ_G = 180k〜200k の時間窓平均 (台形積分 / 窓長)、d_G = |平均(160k〜180k) − μ_G|、U_G = max_{160k〜200k} |q_G − μ_G|
+  - E_G = |μ_G − μ_ref|、B_G = E_G + U_G + U_ref + s_G + s_ref + p_G + p_ref
+- **判定の資格** (Gref と各格子に同じものを当てる): 非有限 0。`check_quasisteady.py` の系列モード (160k〜200k、`--tail 1.0`、drift/osc は θ・δ 1e-4、Q_w 2e-4、M の量 2e-5 (軸・η 0.1 は M/6 の比の系列)) で全量 STEADY。`DRIFTING`・`TRANSIENT-UNSETTLED` は判定不能、`OSCILLATING` は平均 ± 振幅を報告するが採否には通さない。全量で d_G ≤ τ/8・U_G ≤ τ/4 (新しい運用上の予算であり、誤差の上限や信頼区間ではない)。単調な STEADY は漸近値を併記し、最終の窓平均との差が τ/8 を超えたら保留。`check_convergence.py` は数値設定が同じ区間 (run 全体) で回し、NOT CONVERGED は明記する。
+- **Gref の窓の A/B** (追加の run なし): Gref の 160k〜180k と 180k〜200k で、両窓の資格と平均の差 ≤ τ/8 → 「この 4 万 step の中で予算を超える平均のドリフト」の仮説を退けて比較へ進む。どちらかが外れる → 「20 万 step の時点の窓で採否を決められる」方針を退け、判定不能とする (窓の長さの検査であり、揺れの原因や初期値の依存を分ける実験ではない)。
+- **採否**: 資格を満たし、全量で B_G ≤ τ、壁解像 (§4.5 の J1 の条件) を満たす → 「暫定の許容差での候補」。s が未測定なら、E + U + U_ref + p + p_ref が τ 以内でも合格にしない (保留) — 残った格子と Gref に point の継続を登録し直す。予算を超えても、真の格子誤差が τ の外とは断定しない。E_G は Gref との差であって真値への誤差ではない。G1・G1x は 160k〜180k の登録量の系列が残っていない (180k〜200k の 9 出力だけ) ので、資格を満たせず**暫定の比較に限る** (既存の格子の再投入はしない — 諮問)。
+- **p** (§4.10 と同じ検査、真の分布 PCHIP・Akima の最大、Gpost 比): Gref は θ_r 0.010 %・δ_loc 0.023 %・Q_w 0.009 %・出口の主流 M 0.0001 %・軸と η 0.1 0.0005 %pt。G0・G1 は §4.10 の値 (G0 θ_r 0.006・δ 0.026・Q_w 0.009 %、G1 0.147・0.225・0.028 %)、G1x は §4.5 (θ・δ は G1、Q_w 0.06 %)、M の量はどの格子も 0.0006 % / 0.0014 %pt。p の再計算で G0〜G2 と Gpost の値は改名の前と同一 (`post-ab_{pchip,akima}.json`)。
+- **τ**: ユーザ未確認。§4.5 の値を仮に使う (θ_r・δ・Q_w 1 %、出口の主流 M 0.02 %、軸・η 0.1 の M 0.02 %pt)。通っても「暫定の許容差での候補」とする。
+- **やらないこと** (諮問): 既存の格子の再投入、全格子への point の継続、キー 0 への変更、`mesh.axisSegmentRWeight` の既定の変更。
+- **費用の見込み**: G0 の B0 の 1 step 3.2e-2 s (単独) × 節点 1.32 倍 → 20 万 step で約 2.3 時間 (単独)。A のディスクは最大でおよそ 5 GB。
+
 ## 5. 実装ステップ
 
 1. `case/45.isobutane_m6_d155/core_grid_mesh.py` (済み: `check-g0`・`select`・`geom-ab`)。これに、300 K の生産の YAML から mesh ブロックの nj・`axis_cap_frac`・name だけを変えた YAML を作る `yaml` を足す。
@@ -437,8 +475,8 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 | 9 | 準備の近壁の ω の下限 (別件の記録) | `runner_axismach.prepare_ns` の下限 6ν/(β₁d²) は、T を完全気体の式で作るので燃焼ガス (roe < 0) では 50 K の床に張り付き、壁節点の d (双対 CV の重心までの距離) で ω を 1e13〜1e16 にする (§4.11)。本 plan では直さない。設計チェーンの持ち主に伝える (直すなら全 case の cross-mesh の準備に効く) | O |
 | 10 | ~~x 方向を粗くした G1x~~ | 判断: 2026-10-10 ユーザ「1 万上限にしましょう」。G1x (AR 上限 1 万・目標 9000、ni 3086 × nj 75、節点 0.41 倍) を作り、準備の全検査に合格 (§4.12)。fx の懸念はユーザの指摘で取り下げた (fx = 0.5 固定で恒久化済み)。3 本目として §5.1 #4 で回す。判定の手順の変更 (2 本 → 3 本) は、hoop の決定で数値の構成を書き直すときにまとめて上位に諮る (§6) | F |
 | 11 | 起動の A/B と本番の run (§4.13) | (a) ~~起動の A/B~~ 済み (2026-10-10、両腕が通過 → 本段から直接始める、§4.13)。(b) **投入済み** (2026-10-10 19:01、`run_0603_cg_g1_k1`・`run_0604_cg_g1_k0`・`run_0605_cg_g1x_k1`・`run_0606_cg_g1x_k0`、AWS の `~/forge-coregrid/case/45.isobutane_m6_d155/`)。投入前にユーザ承認のうえ case/45 の古い run の途中の場を 12.5 GB 消した (`~/forge-wallfit/case/45.isobutane_m6_d155/_disk_cleanup_2026-10-10b.tsv`)。(c) 到達後の継続 (4 万 step → point 4 万 step) の台本。(d) 判定の台本 (格子の比較は §4.5、キーの比較は hoop plan §4.6 の 7。nj を格子から読む)。投入前に `nvidia-smi`・`pgrep -x forge`・ディスクの空き (8 GB 以上で開始、3 GB 未満で自分の run を止める) を確かめる | O |
-| 12 | 揺れの原因の待ち合わせと次の試験 (§4.15) | 別セッションの G0 の変換器の A/B (旧い/新しい変換の HDF5、fgeom7・キー 0・同じ保存量、各 6 万 step) の結果を受け取る。**投入済み (2026-10-11 01:25、別セッション)**: 事前登録は hoop plan §4.14 (commit 3a25c3b3、台本 `cv.sh`・判定 `cv_an.py`)。新 = `run_0486_kab_k0` (インスタンス B)、旧 = `run_0490_cv_old_k0` (A、旧い変換の格子は `run_0452_v4_fp64` の nozzle.h5)、どちらも `run_0483` の res_140000 から。それまで G1・G1x に run を足さない。結果を見て、壁際の比 (1.3) と主流の上限 (0.03 r_w) の効き方を分ける試験を上位に諮って登録し直す (nj 133 の格子を今出すのは諮問で却下) | F |
-| 13 | 参照の格子 Gref (§4.16) | (a) 物理壁で nj を決める (各列で壁際の比 ≤ G0、主流の上限 0.015 r_w)、YAML `problem_d155_ns_prod_coldmesh_tw300_cgref.yaml`。(b) AWS で準備と検査 (新しい変換器で変換し直し、rSurfVect と §4.11 と同じ検査)。(c) 投入と停止の規則・判定の式は #12 の結果を見てから上位に諮って登録 | O (a・b) / F (c) |
+| 12 | ~~揺れの原因の待ち合わせ~~ | 判断: 2026-10-11 別セッションの G0 の A/B (hoop plan §4.14・§4.15、commit 461963f4) — 変換の A/B は「退ける」(変換器の変更は揺れの主因ではない)、キーだけの A/B は「支持しない」(後半はキー 0 0.017 %・キー 1 0.059 % だが 3 窓で揃わない)。旧い変換器で G1 を作り直す A/B は不要。受け取りは §4.17。壁際の比と主流の上限の効き方を分ける試験は、Gref (#13) の結果を見てから登録し直す (nj 133 の格子は出さない) | F |
+| 13 | 参照の格子 Gref (§4.16) | (a) ~~物理壁で nj を決める~~ 済み (2026-10-11、`select-ref.json`: nj 160・節点 75.5 万、列の比 1.066〜1.111 で各列 G0 以下 (G0 比の最大 0.9997)、主流の上限 0.015 r_w、AR 最大 4573 (壁法線の構造層、AGENTS.md の AR ≤ 5000 の緩和)、skew 最大 0.46、折れ角 2° 超 0)、YAML `problem_d155_ns_prod_coldmesh_tw300_cgref.yaml`。(b) ~~AWS A で準備と検査~~ 済み (2026-10-11、台本 `_band_ab/core_grid_prep_gref.sh`): `CORE_GRID_PREP.json` VERDICT PASS (全 12 項目、メッシュ品質 PASS (AR ≤ 5000)、生成座標との差 0、壁・第一内部節点・x の station が G0 と一致 (相対 ≤ 2.7e-16)、壁距離の変換し直し差 0)、移送の初期値 (`prep-ic_Gref.json`) は非有限 0・原始量の値域の超過 ≤ 6.1e-8。新しい変換器 (sha256 711f4438…) で `prep_Gref/new64/nozzle.h5` (sha256 11903e57…): 座標・壁距離は旧変換と一致、`rSurfVect` は独立な作り直しとビット一致、r 重みの閉性 E_x ≤ 9.2e-10・E_y ≤ 2.3e-9 (100·ε64 の超過 0)。準備の ω は壁節点で 1e13〜1e16 (§5.1 #9 の既知の下限の件。run では interp_field で G0 の場を移し直すので使わない)。(c) ~~投入の構成・停止の規則・判定の式~~ 判断: 2026-10-11 codex diagnose — 「キー 1・20 万 step を予算上限とする 1 本、末尾の自己変化を資格、s を最終採否の条件として分離」。登録は §4.18。(d) **投入** `run_0607_cg_gref_k1` (A、台本 `cg_gref.sh`)。(e) 判定 `cg_gref_judge.py` (G0 の系列は別セッションの `run_0485` を B で読むので、相手の了解を取る)。(f) 候補が残ったら、その格子と Gref の s (point の継続) を登録し直す | O (a・b・d・e) / F (c・f) |
 
 ## 6. 検証
 
@@ -453,6 +491,7 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 | diagnose | `2026-10-10` | [`notes/reviews/2026-10-10-core-grid-family-switch-diagnose.md`](../../notes/reviews/2026-10-10-core-grid-family-switch-diagnose.md) | G1A 系を採用。M3/m1 | §4.9。形の切り替えと系列を採用、「主流が同一」「c を物理の上限とする」の 2 件の却下を受けて §4.2・§4.4 を修正 |
 | diagnose | `2026-10-10` | [`notes/reviews/2026-10-10-core-grid-runs-with-hoop-diagnose.md`](../../notes/reviews/2026-10-10-core-grid-runs-with-hoop-diagnose.md) | 共用を採用、まず起動の A/B。Major 6 | §4.13。全件採用 |
 | diagnose | `2026-10-11` | [`notes/reviews/2026-10-11-core-grid-results-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-results-diagnose.md) | run を足さず G0 の変換器の A/B を先に。Major 5・Minor 2 | §4.15。全件採用 (J1 不合格の主張を取り下げ、判定不能に) |
+| diagnose | `2026-10-11` | [`notes/reviews/2026-10-11-core-grid-gref-registration-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-gref-registration-diagnose.md) | Gref はキー 1・20 万 step を予算上限の 1 本、自己変化を資格、s を採否の条件に。Major 5・Minor 1 | §4.18。全件採用 (p_ref は測った) |
 
 ## 7. 影響範囲
 

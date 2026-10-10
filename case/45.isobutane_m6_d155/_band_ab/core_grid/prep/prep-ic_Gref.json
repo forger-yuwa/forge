@@ -1,0 +1,81 @@
+{
+ "G0_res_100000_omega": {
+  "wall_median": 99274105185.37486,
+  "wall_max": 747524738756.3639,
+  "first_interior_median": 11613437371.162361,
+  "max_excl_wall": 86893324150.26572
+ },
+ "G0_res_100000": {
+  "theta_r_w40_50": 0.07328178706332132,
+  "delta_loc_w40_50": 0.2124549594890515,
+  "theta_r_w65_75": 0.10058171797905625,
+  "delta_loc_w65_75": 0.40350513545014766,
+  "theta_r_w84_94": 0.11092873597393405,
+  "delta_loc_w84_94": 0.5525912946627459
+ },
+ "Gref": {
+  "value_keys": [
+   "ro",
+   "roK",
+   "roOmega",
+   "roUx",
+   "roUy",
+   "roUz",
+   "roY0",
+   "roY1",
+   "roe",
+   "wall_dist"
+  ],
+  "nonfinite": {
+   "ro": 0,
+   "roK": 0,
+   "roOmega": 0,
+   "roUx": 0,
+   "roUy": 0,
+   "roUz": 0,
+   "roY0": 0,
+   "roY1": 0,
+   "roe": 0,
+   "wall_dist": 0
+  },
+  "min": {
+   "ro": 0.013833933693453593,
+   "roe": -5374470.7256014515,
+   "roK": 0.0,
+   "roOmega": 9.101343049505537
+  },
+  "primitive_excess_over_range": {
+   "ro": 0.0,
+   "u": 2.579791464554583e-09,
+   "v": 0.0,
+   "e": 0.0,
+   "k": 6.05699137573425e-08,
+   "omega": 0.0
+  },
+  "omega": {
+   "wall_median": 21911445019032.113,
+   "wall_max": 1.0467993233998662e+16,
+   "first_interior_median": 11613437858.605595,
+   "max_excl_wall": 86893327979.71907
+  },
+  "ok": true,
+  "reduce": {
+   "theta_r_w40_50": 0.0731084831314032,
+   "delta_loc_w40_50": 0.2129823286120621,
+   "theta_r_w65_75": 0.1002517897293693,
+   "delta_loc_w65_75": 0.4033476147687158,
+   "theta_r_w84_94": 0.11122161382727709,
+   "delta_loc_w84_94": 0.553537970127226
+  },
+  "reduce_rel_vs_G0_pct": {
+   "theta_r_w40_50": -0.23648977305694707,
+   "delta_loc_w40_50": 0.24822631784116034,
+   "theta_r_w65_75": -0.3280200978031167,
+   "delta_loc_w65_75": -0.03903808591089186,
+   "theta_r_w84_94": 0.26402342979177096,
+   "delta_loc_w84_94": 0.1713156674062244
+  }
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

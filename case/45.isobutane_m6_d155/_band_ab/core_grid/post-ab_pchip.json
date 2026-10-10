@@ -1,6 +1,7 @@
 {
  "x_E": 39.80895834812345,
  "ref": {
+  "name": "Gpost",
   "nj": 560,
   "c": 0.004
  },
@@ -150,6 +151,42 @@
   "eta0.1_overshoot_pct": 0.46913629073730423
  },
  "Gref": {
+  "nj": 160,
+  "q_col_max": 1.1111870836081206,
+  "Q_w": 9294366.880189907,
+  "theta_r_40": 0.07790063982494999,
+  "delta_loc_40": 0.17411257674332603,
+  "theta_r_70": 0.11493424739639835,
+  "delta_loc_70": 0.40107591740149573,
+  "theta_r_94": 0.12771019931445693,
+  "delta_loc_94": 0.5776833560237975,
+  "theta_r_w40_50": 0.08525651532296287,
+  "delta_loc_w40_50": 0.2079698117107964,
+  "theta_r_w65_75": 0.11484306326585818,
+  "delta_loc_w65_75": 0.40122025306277215,
+  "theta_r_w84_94": 0.12539876755870347,
+  "delta_loc_w84_94": 0.5508541866239762,
+  "Q_w_pchip": 9294366.880189907,
+  "theta_r_40_pchip": 0.07781789588574028,
+  "delta_loc_40_pchip": 0.1740368154530234,
+  "theta_r_70_pchip": 0.11483037653603745,
+  "delta_loc_70_pchip": 0.4007307306571768,
+  "theta_r_94_pchip": 0.12758493883287336,
+  "delta_loc_94_pchip": 0.5772879868340546,
+  "theta_r_w40_50_pchip": 0.08517767164381106,
+  "delta_loc_w40_50_pchip": 0.20775558822993231,
+  "theta_r_w65_75_pchip": 0.11473767777950232,
+  "delta_loc_w65_75_pchip": 0.40087803487922224,
+  "theta_r_w84_94_pchip": 0.12527734574363836,
+  "delta_loc_w84_94_pchip": 0.5504818198867316,
+  "exit_M_node_mean": 6.027588928533018,
+  "exit_M_line_mean": 6.027601271299615,
+  "eta0.0_mean_pct": 0.582309448880784,
+  "eta0.0_overshoot_pct": 0.6670890904535653,
+  "eta0.1_mean_pct": 0.38452217930513655,
+  "eta0.1_overshoot_pct": 0.46913629073730423
+ },
+ "Gpost": {
   "nj": 560,
   "q_col_max": 1.0274691750362592,
   "Q_w": 9295162.561828133,
@@ -317,6 +354,39 @@
    "eta0.0_overshoot_pct_diff_pctpt": 0.0,
    "eta0.1_mean_pct_diff_pctpt": 8.488379518295508e-05,
    "eta0.1_overshoot_pct_diff_pctpt": 1.2953849060082234e-05
+  },
+  "Gref": {
+   "Q_w_rel_pct": -0.00856016915178337,
+   "theta_r_40_rel_pct": 0.1371326611067536,
+   "theta_r_70_rel_pct": 0.09781291981236784,
+   "theta_r_94_rel_pct": 0.08463676068597437,
+   "delta_loc_40_rel_pct": -0.13299672307232058,
+   "delta_loc_70_rel_pct": 0.0791632471551118,
+   "delta_loc_94_rel_pct": 0.05295402080616185,
+   "theta_r_40_pchip_rel_pct": 0.03840191568755813,
+   "theta_r_70_pchip_rel_pct": 0.012348617058366429,
+   "theta_r_94_pchip_rel_pct": -0.00811187892916232,
+   "delta_loc_40_pchip_rel_pct": -0.17794371063308834,
+   "delta_loc_70_pchip_rel_pct": -0.002431964429172595,
+   "delta_loc_94_pchip_rel_pct": -0.011970089892920921,
+   "exit_M_node_mean_rel_pct": -1.1577720337996311e-06,
+   "exit_M_line_mean_rel_pct": 5.8890275256295865e-05,
+   "theta_r_w40_50_rel_pct": 0.08475690382323542,
+   "theta_r_w65_75_rel_pct": 0.09707693987139887,
+   "theta_r_w84_94_rel_pct": 0.08403588358518732,
+   "delta_loc_w40_50_rel_pct": 0.11476706478312781,
+   "delta_loc_w65_75_rel_pct": 0.08054608641654415,
+   "delta_loc_w84_94_rel_pct": 0.07146735897374246,
+   "theta_r_w40_50_pchip_rel_pct": -0.0027778987093052265,
+   "theta_r_w65_75_pchip_rel_pct": 0.010468083952419605,
+   "theta_r_w84_94_pchip_rel_pct": -0.0075560642974425996,
+   "delta_loc_w40_50_pchip_rel_pct": 0.01966080103557033,
+   "delta_loc_w65_75_pchip_rel_pct": -0.00022690009018333512,
+   "delta_loc_w84_94_pchip_rel_pct": 0.007641113958634094,
+   "eta0.0_mean_pct_diff_pctpt": 0.0,
+   "eta0.0_overshoot_pct_diff_pctpt": 0.0,
+   "eta0.1_mean_pct_diff_pctpt": 8.488379518295508e-05,
+   "eta0.1_overshoot_pct_diff_pctpt": 1.2953849060082234e-05
   }
  },
  "x_profile_error": {
@@ -399,6 +469,26 @@
    "median_pct": 0.0013607437488794005,
    "max_abs_pct": 0.2555663557858301,
    "x_at_max": 44.7515398615372
+  },
+  "Gref_linear_theta_r": {
+   "median_pct": 0.08716043321150835,
+   "max_abs_pct": 0.16417746059000926,
+   "x_at_max": 41.27674013910753
+  },
+  "Gref_linear_delta_loc": {
+   "median_pct": 0.08030040999071897,
+   "max_abs_pct": 0.4542904078297383,
+   "x_at_max": 45.726922239763056
+  },
+  "Gref_pchip_theta_r": {
+   "median_pct": -0.0004817733206152752,
+   "max_abs_pct": 0.0844151811696392,
+   "x_at_max": 45.30019244928922
+  },
+  "Gref_pchip_delta_loc": {
+   "median_pct": 0.004378952899619648,
+   "max_abs_pct": 0.3705984835473908,
+   "x_at_max": 45.42211524656746
   }
  },
  "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
