@@ -396,13 +396,29 @@ $(\rho v)_{\rm top}$ を過小評価する。fx=0.5 単独や LSQ 単独では +
 対応: `variables.cpp` の r 重みで**ゴースト CV は所有 CV の r̄ を使う** (bcond の `iCells`/`iCells_ghst` から写像)。
 根治は ghost 撤廃 (plan §5 Step 1)。
 
-**r 重みメトリックの自由流閉性 (float32 由来・要注意)**: 一様圧の整合条件は
-$\sum_f r_f\mathbf S_f=(0,\;A_{\rm planar})$ (多角形では厳密) だが、**float32 メトリック
-(`geom_float = float`) では高 AR 壁 CV で桁落ちして崩れる**。実測 (case/43): 生産 NS メッシュ (y+1.5) の
-壁 CV で最大 **59%** (1e-3 超が 3597/54417)、Euler メッシュで 0.34%。合成 AR スイープでは
-誤差 ≈ 5 ulp × 打ち消し比 (∝ AR)・壁テーパ非依存。**`nodeValueAtNode` とは無関係で生産 Dirichlet 経路も同じ**。
-一様圧で壁 CV に偽半径力が立つ。対策は metric の FP64 化か、hoop 面積の離散閉性置換 (`axisRFloor` 経路)。
-なお**保存則は崩れない** (内部面は 1 本の $r_f\mathbf S_f$ を符号反転で共有 → telescoping)。体積 $V=\bar r A_{\rm planar}$
+**r 重みメトリックの自由流閉性**: 一様圧の整合条件は $\sum_f \mathbf W_f=(0,\;A_{\rm planar})$
+($\mathbf W_f$ は CV の境界の各区間に $r$ を掛けて足した面ベクトル) である。これが崩れる原因は 2 つあり、別物として扱う。
+
+1. **双対面の区間をまとめてから $r$ を掛ける誤差 (FP64 でも残る、2026-10-10 に修正)**。median-dual の面
+   (中点 $M$ → 三角形の重心 $G$) は折れ線なので、1 本の面は 2 区間 $k$ から成る。旧来の実装は
+   $\bar r_f\sum_k\mathbf S_k$ (まとめた面ベクトルにその重心の半径を掛ける) で、
+   $\sum_k r_k\mathbf S_k$ とは区間の半径の差だけずれる。多角形の恒等式 $\oint r\,\mathbf n\,dl=(0,A)$ が成り立つのは
+   区間ごとに掛けた場合だけである。軸の近くの行は半径方向に長いので差が大きく、case/45 では j 2〜4 の CV に
+   $3.3\times10^{-3}\,P A_{\rm planar}$ の偽の半径方向の力が出ていた (収縮部では軸へ向かう)。
+   変換器は `isAxisymmetric: 1` の 2D node の変換で区間ごとの $\mathbf W_f$ を `/PLANES/rSurfVect` に書き、
+   境界の半割面を内部の区間と同じ丸めた中点 $\tilde M=\mathrm{fl}(0.5(x_A+x_B))$ で終える (端点がずれると
+   壁・入口の CV が丸めの規模で閉じない)。ソルバは `mesh.axisSegmentRWeight: 1` (既定) でこれを使い、
+   `ss` $=\|\mathbf W_f\|$ とする。FP64 の case/45 の静止場で、j 2〜8 の残差は $5\times10^{-14}\,P A$、
+   10 step 後の最大流速は 0.257 → $6.4\times10^{-5}$ m/s になった (plan
+   [axisymmetric-freestream-hoop-gauge](../../plans/active/axisymmetric-freestream-hoop-gauge.md) §4.4〜§4.10)。
+   適用は node・平面の 2D・`axisymMethod: 0`・`axisRFloor: 0`・データセットがある格子に限る。
+2. **float32 メトリックの桁落ち**。`geom_float = float` では高 AR の壁 CV で打ち消しが大きく崩れる。
+   実測 (case/43): 生産 NS メッシュ (y+1.5) の壁 CV で最大 **59%** (1e-3 超が 3597/54417)、Euler メッシュで 0.34%。
+   合成 AR スイープでは誤差 ≈ 5 ulp × 打ち消し比 (∝ AR)・壁テーパ非依存。**`nodeValueAtNode` とは無関係で
+   生産 Dirichlet 経路も同じ**。対策は幾何の倍精度化 (変換器は 2026-10-10 から常に double の幾何を書く) か、
+   hoop 面積の離散閉性置換 (`hoopAreaFromClosure`・`axisRFloor` の経路)。
+
+なお**保存則はどちらでも崩れない** (内部面は 1 本の面ベクトルを符号反転で共有 → telescoping)。体積 $V=\bar r A_{\rm planar}$
 は $\int r\,dA$ に厳密一致するので `rEff` は近似ではない。保存を破るのは `nodeAxisDirichlet` (状態上書き+残差 0 化) の方。
 
 **自由流の回復 (倍精度不要, 2026-08-16)** — plan [axisymmetric-freestream-hoop-gauge](../../plans/active/axisymmetric-freestream-hoop-gauge.md):
