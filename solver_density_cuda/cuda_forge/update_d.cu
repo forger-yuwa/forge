@@ -1,5 +1,6 @@
 #include "dependentVariables_d.cuh"
 #include "qAccumulator_d.cuh"
+#include "commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (plan architecture-float-state-double-geometry §4.5、既定 off)
 
 __global__ void updateVariablesOuter_d
 ( 
@@ -218,6 +219,12 @@ void applyScalarImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cud
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): commit の直後に Q_before = roN・dq_req = dq_*_old・Q_after = ro.. を読んで集計する
+    if (commitLossDiag::active()) {
+        flow_float* const dq[5] = {var.c_d["dq_ro_old"], var.c_d["dq_roUx_old"], var.c_d["dq_roUy_old"],
+                                   var.c_d["dq_roUz_old"], var.c_d["dq_roe_old"]};
+        commitLossDiag::flowCommit(cfg, msh, var, dq, static_cast<flow_float>(0.0));
+    }
 }
 
 // 陰的更新の正値性ガード (plans/active/time_integration-update-positivity-guard.md):
@@ -339,6 +346,13 @@ void applyBlockImplicitCorrection_d_wrapper(solverConfig& cfg , cudaConfig& cuda
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): commit の直後に Q_before = roN・dq_req = dq_block_old_k (implicitRelax 込み、
+    // 最後の swap 後)・Q_after = ro.. を読んで集計する。qAccumulatorFP64 と updateGuardAlpha > 0 は計らない (flowCommit の説明)。
+    if (commitLossDiag::active()) {
+        flow_float* const dq[5] = {var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"],
+                                   var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"]};
+        commitLossDiag::flowCommit(cfg, msh, var, dq, cfg.updateGuardAlpha);
+    }
 }
 
 // SST (k-ω) の segregated point-implicit 更新。
@@ -370,7 +384,11 @@ __global__ void applySSTPointImplicit_d
  // node-centered k Dirichlet (SU2 SetTurbVars_WF 流): roK_wf[ic]>=0 の第一内層ノードで roK=roK_wf に固定
  // (dk=0)。near-wall k 蓄積 (再付着 μ_t ピーク) を断つ。nullptr/全-1 で無効 (cell 不変)。
  flow_float* roK_wf,
- flow_float* roOmega_wf
+ flow_float* roOmega_wf,
+ // 診断 FORGE_DIAG_COMMIT_LOSS (既定 nullptr): 足そうとした増分 dk・dw の写し (ピンで上書きする節点は 0 = 増分なし)。
+ // 書くだけで、dk・dw と roK・roOmega の式は変えない。
+ flow_float* diag_dk,
+ flow_float* diag_dw
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -390,6 +408,10 @@ __global__ void applySSTPointImplicit_d
         // 壁 ω decouple: 壁ノードでは dω=0 とし、ピンした roOmega=ρ·ω_w を保つ (k はノイマンで通常更新)。
         const flow_float dw = omegaWall ? static_cast<flow_float>(0.0)
                                         : implicit_relax * res_roOmega[ic] / max(Dw, static_cast<flow_float>(1.0e-30));
+        if (diag_dk != nullptr) {
+            diag_dk[ic] = kPinned     ? static_cast<flow_float>(0.0) : dk;
+            diag_dw[ic] = omgPinnedWf ? static_cast<flow_float>(0.0) : dw;
+        }
 
         // realizability: ρk ≥ 0, ρω > 0。dual-time でも正しいよう現在反復値への in-place 加算
         // （定常では roKN==roK のため roKN+dk と等価）。dual-time の roKN/roKNN は BDF 残差項側で使用。
@@ -402,6 +424,12 @@ __global__ void applySSTPointImplicit_d
 
 void applySSTPointImplicit_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var)
 {
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): 計る step だけ、カーネルの直前の roK・roOmega (= その場で足す基準) を写し、
+    // カーネルに dk・dw の書き先を渡す。off では nullptr のまま。
+    const bool commitLoss = commitLossDiag::active();
+    flow_float* diagDk = nullptr;
+    flow_float* diagDw = nullptr;
+    if (commitLoss) commitLossDiag::sstBefore(msh, var, &diagDk, &diagDw);
     applySSTPointImplicit_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(
         msh.nCells,
         var.c_d["volume"],
@@ -423,11 +451,13 @@ void applySSTPointImplicit_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
         // k Dirichlet は wallTreatmentSST==1 && nodeKwfDirichlet==1 の node のみ。それ以外は nullptr で無効化
         // (roK_wf が init されない経路で誤発火しないよう堅牢化)。
         (cfg.discretization == "node" && cfg.wallTreatmentSST == 1 && cfg.nodeKwfDirichlet == 1) ? var.c_d["roK_wf"] : nullptr,
-        (cfg.discretization == "node" && cfg.wallTreatmentSST == 1 && cfg.nodeOmegaWfDirichlet == 1) ? var.c_d["roOmega_wf"] : nullptr
+        (cfg.discretization == "node" && cfg.wallTreatmentSST == 1 && cfg.nodeOmegaWfDirichlet == 1) ? var.c_d["roOmega_wf"] : nullptr,
+        diagDk, diagDw
     );
 
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();
+    if (commitLoss) commitLossDiag::sstAfter(msh, var);
 }
 
 // dual-time: 物理時間 BDF 項を残差に加える（assembleResidual の末尾で呼ぶ）。

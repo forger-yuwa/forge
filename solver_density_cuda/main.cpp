@@ -69,6 +69,7 @@
 #include "cuda_forge/viscousFlux_d.cuh"
 #include "cuda_forge/geomAbDiag.hpp"   // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / _REF; plan architecture-float-state-double-geometry §4.2c)
 #include "cuda_forge/geomStage2Dump.hpp"   // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP; 同 plan §6.3)
+#include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2513,7 +2514,11 @@ void advanceExplicitRK(StepContext& s)
 void advanceImplicitSteady(StepContext& s)
 {
     // baseline (roN) は前ステップ末尾 / 初期化の updateVariablesOuter で設定済み（ro == roN）。
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): step 番号を知らせ、計る step なら commit の直後の集計を 1 行にする。
+    const bool commitLoss = commitLossDiag::enabled();
+    if (commitLoss) commitLossDiag::beginStep(s.iStep);
     implicitNonlinearUpdate(s, 0);
+    if (commitLoss) commitLossDiag::endStep();
 
     // **最後の更新のあとにもピンを当てる**: dq_roe=0 なので更新は roe を step 冒頭の値へ戻す。
     // ここで当てないと、出力される保存量と次ステップの基準 (roN) が等温条件を満たさず、
@@ -3485,6 +3490,9 @@ int main(int argc, char** argv) {
         twoPhaseAudit_d_wrapper(cfg, cuda_cfg, msh, var, iStepAudit, final);
     };
     twoPhaseAudit(0, false);
+    // 診断 FORGE_DIAG_COMMIT_LOSS=<N> (既定 off): 定常の陰解法の commit で丸めで消えた更新を N step ごとに数える
+    // (plan architecture-float-state-double-geometry §4.5・§6 V4 の記録)。未設定なら何も確保しない。
+    commitLossDiag::init(cfg, msh, var);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -3505,6 +3513,7 @@ int main(int argc, char** argv) {
     twoPhaseCorrGateLog(cfg, cfg.mainLoopCount(), true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
     twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
+    commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
