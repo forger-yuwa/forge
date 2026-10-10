@@ -2878,41 +2878,105 @@ static int lineF32Mode() {
         return m; }();
     return v;
 }
-// FORGE_LINE_LAYOUT=1 (plan time_integration-line-implicit-speed §5.1 #10・§6.7、opt-in): Thomas の中の配列をラインが隣り合う並びに置く (数値は不変)。
-// 逆行列・float・並列版・診断の経路とは組み合わせない (最初の呼び出しで止める)。FORGE_LINE_COMPARE=1 と組むと従来の並び (別のバッファ) と比べる。
-static int lineLayoutMode() { const char* e = getenv("FORGE_LINE_LAYOUT"); return e ? atoi(e) : 0; }   // 1 = 並べ替え、2 = 並べ替え + 連鎖の短縮 (#12)
-static bool lineLayoutEnabled() {
-    static const bool v = [](){
-        const char* e = getenv("FORGE_LINE_LAYOUT"); const bool on = e && atoi(e) != 0;
-        if (on && atoi(e) != 1 && atoi(e) != 2) { fprintf(stderr, "[line] FORGE_LINE_LAYOUT=%s は 1/2 のどれか — 止める\n", e); exit(EXIT_FAILURE); }
-        if (on) {
-            for (const char* k : {"FORGE_LINE_INV", "FORGE_LINE_F32", "FORGE_LINE_PAR", "FORGE_LINE_MONO", "FORGE_LINE_DEBUG_POINT", "FORGE_LINE_NOOP"}) {
-                const char* q = getenv(k);
-                if (q && atoi(q) != 0) { fprintf(stderr, "[line] FORGE_LINE_LAYOUT と %s は組み合わせない — 止める\n", k); exit(EXIT_FAILURE); }
-            }
-            printf("[line] FORGE_LINE_LAYOUT=1: Thomas の W・LU・ピボット・y・Kprev の写しを (位置, 成分, ライン) の並びに置く (opt-in)\n");
-        }
-        return on; }();
-    return v;
+// Thomas の配列の並び (plan time_integration-line-implicit-speed §5.1 #10・#12・#13、§6.7・§6.10・§6.19)。数値は不変 (ビット一致を確認済み)。
+//   0 = 従来 (節点番号の並び)、1 = (位置, 成分, ライン) の並び、2 = 1 + 前の節点の W・y をレジスタに持つ (既定)。
+// 実効の並びは、メモリを確保する前に、環境変数・診断のスイッチ・メッシュ (区画の数と被覆) から一度だけ決め (lineLayoutResolve)、
+// factor・solve・比較・表示で共有する (codex plan-8 M2)。
+//   FORGE_LINE_LAYOUT=0/1/2: 明示。1・2 と診断のスイッチ (逆行列・float・並列版・一体型・点の診断・NOOP) の組み合わせは止める。確保の失敗も止める。
+//   未指定: 診断のスイッチがあれば 0。区画 (最長 × 本数) が被覆 CV の 1.5 倍を超えれば 0 (長さのばらつきによる無駄を避ける)。
+//           並べ替えた配列の確保に失敗すれば、確保済みの分を解放して 0 (codex plan-8 M3)。それ以外は 2。
+//   試験用: FORGE_LINE_LAYOUT_SLOT_RATIO (区画比の上限、既定 1.5)、FORGE_LINE_LAYOUT_FAKE_OOM=1 (確保の失敗を模擬)。
+namespace line_layout { static int mode = -1; }   // −1 = 未決定
+static bool lineLayoutDiagSwitch(const char** which) {
+    for (const char* k : {"FORGE_LINE_INV", "FORGE_LINE_F32", "FORGE_LINE_PAR", "FORGE_LINE_MONO", "FORGE_LINE_DEBUG_POINT", "FORGE_LINE_NOOP"}) {
+        const char* q = getenv(k);
+        if (q && atoi(q) != 0) { if (which) *which = k; return true; }
+    }
+    return false;
 }
+static int lineLayoutMode() { return line_layout::mode < 0 ? 0 : line_layout::mode; }
+static bool lineLayoutEnabled() { return lineLayoutMode() != 0; }
 namespace line_layout {
 static double* W = nullptr; static double* LU = nullptr; static double* Kp = nullptr; static double* y = nullptr; static signed char* piv = nullptr;
 static size_t slots = 0;   // maxLen · nLines
-static void ensure(mesh& msh) {
-    if (W) return;
+static void geometry(mesh& msh, geom_int& maxLen, geom_int& nOn) {
     std::vector<geom_int> off(msh.nImplicitLines + 1);
     gpuErrchk(cudaMemcpy(off.data(), msh.line_offsets_d, sizeof(geom_int) * off.size(), cudaMemcpyDeviceToHost));
-    geom_int maxLen = 0;
+    maxLen = 0;
     for (geom_int l = 0; l < msh.nImplicitLines; ++l) maxLen = std::max(maxLen, off[l + 1] - off[l]);
-    slots = (size_t)maxLen * (size_t)msh.nImplicitLines;
-    gpuErrchk(cudaMalloc((void**)&W, sizeof(double) * 25 * slots));  gpuErrchk(cudaMemset(W, 0, sizeof(double) * 25 * slots));
-    gpuErrchk(cudaMalloc((void**)&LU, sizeof(double) * 25 * slots)); gpuErrchk(cudaMemset(LU, 0, sizeof(double) * 25 * slots));
-    gpuErrchk(cudaMalloc((void**)&Kp, sizeof(double) * 25 * slots)); gpuErrchk(cudaMemset(Kp, 0, sizeof(double) * 25 * slots));
-    gpuErrchk(cudaMalloc((void**)&y, sizeof(double) * 5 * slots));   gpuErrchk(cudaMemset(y, 0, sizeof(double) * 5 * slots));
-    gpuErrchk(cudaMalloc((void**)&piv, 5 * slots));                  gpuErrchk(cudaMemset(piv, 0, 5 * slots));
-    printf("[line] FORGE_LINE_LAYOUT: 最長 %ld 節点 × %ld 本 = %zu 区画 (%.1f MB)\n", (long)maxLen, (long)msh.nImplicitLines, slots,
-           (double)slots * (25 * 3 + 5) * sizeof(double) / 1.0e6);
+    nOn = off[msh.nImplicitLines];
 }
+static void release() {
+    for (double** q : {&W, &LU, &Kp, &y}) { if (*q) cudaFree(*q); *q = nullptr; }
+    if (piv) cudaFree(piv);
+    piv = nullptr; slots = 0;
+}
+// 確保できれば true。失敗したら確保済みの分を解放し、CUDA のエラー状態を消して false (自動選択の退避用)。
+static bool tryEnsure(mesh& msh) {
+    if (W) return true;
+    geom_int maxLen = 0, nOn = 0;
+    geometry(msh, maxLen, nOn);
+    const size_t s = (size_t)maxLen * (size_t)msh.nImplicitLines;
+    const char* fake = getenv("FORGE_LINE_LAYOUT_FAKE_OOM");
+    const bool fakeOOM = fake && atoi(fake) != 0;
+    bool ok = cudaMalloc((void**)&W, sizeof(double) * 25 * s) == cudaSuccess;
+    ok = ok && !fakeOOM;                                               // 試験: 1 つ目を確保した後で失敗したことにする (部分の解放を通す)
+    ok = ok && cudaMalloc((void**)&LU, sizeof(double) * 25 * s) == cudaSuccess;
+    ok = ok && cudaMalloc((void**)&Kp, sizeof(double) * 25 * s) == cudaSuccess;
+    ok = ok && cudaMalloc((void**)&y, sizeof(double) * 5 * s) == cudaSuccess;
+    ok = ok && cudaMalloc((void**)&piv, 5 * s) == cudaSuccess;
+    if (!ok) { release(); (void)cudaGetLastError(); return false; }
+    gpuErrchk(cudaMemset(W, 0, sizeof(double) * 25 * s));  gpuErrchk(cudaMemset(LU, 0, sizeof(double) * 25 * s));
+    gpuErrchk(cudaMemset(Kp, 0, sizeof(double) * 25 * s)); gpuErrchk(cudaMemset(y, 0, sizeof(double) * 5 * s));
+    gpuErrchk(cudaMemset(piv, 0, 5 * s));
+    slots = s;
+    printf("[line] Thomas の並べ替えた配列: 最長 %ld 節点 × %ld 本 = %zu 区画 (被覆 %ld CV、%.1f MB)\n", (long)maxLen, (long)msh.nImplicitLines, slots,
+           (long)nOn, (double)slots * (25 * 3 + 5) * sizeof(double) / 1.0e6);
+    return true;
+}
+static void ensure(mesh& msh) {
+    if (!tryEnsure(msh)) { fprintf(stderr, "[line] Thomas の並べ替えた配列を確保できない (FORGE_LINE_LAYOUT 明示) — 止める\n"); exit(EXIT_FAILURE); }
+}
+} // namespace line_layout
+static void lineLayoutResolve(mesh& msh) {
+    if (line_layout::mode >= 0) return;
+    const char* which = nullptr;
+    const bool diag = lineLayoutDiagSwitch(&which);
+    const char* e = getenv("FORGE_LINE_LAYOUT");
+    if (e) {
+        const int v = atoi(e);
+        if (v < 0 || v > 2) { fprintf(stderr, "[line] FORGE_LINE_LAYOUT=%s は 0/1/2 のどれか — 止める\n", e); exit(EXIT_FAILURE); }
+        if (v != 0 && diag) { fprintf(stderr, "[line] FORGE_LINE_LAYOUT=%d と %s は組み合わせない — 止める\n", v, which); exit(EXIT_FAILURE); }
+        line_layout::mode = v;
+        if (v != 0) line_layout::ensure(msh);
+        printf("[line] Thomas の配列の並び: %s (FORGE_LINE_LAYOUT=%d、明示)\n", v == 2 ? "LAYOUT2" : v == 1 ? "LAYOUT" : "従来 (節点番号の並び)", v);
+        return;
+    }
+    if (diag) {
+        line_layout::mode = 0;
+        printf("[line] Thomas の配列の並び: 従来 (診断のスイッチ %s があるので既定の LAYOUT2 を使わない)\n", which);
+        return;
+    }
+    geom_int maxLen = 0, nOn = 0;
+    line_layout::geometry(msh, maxLen, nOn);
+    const char* rl = getenv("FORGE_LINE_LAYOUT_SLOT_RATIO");
+    const double limit = rl ? atof(rl) : 1.5;
+    const double ratio = (double)maxLen * (double)msh.nImplicitLines / (double)std::max(nOn, (geom_int)1);
+    if (ratio > limit) {
+        line_layout::mode = 0;
+        printf("[line] Thomas の配列の並び: 従来 (区画 %ld × %ld が被覆 %ld CV の %.2f 倍 > %.2f、ラインの長さのばらつきが大きい)\n",
+               (long)maxLen, (long)msh.nImplicitLines, (long)nOn, ratio, limit);
+        return;
+    }
+    if (!line_layout::tryEnsure(msh)) {
+        line_layout::mode = 0;
+        printf("[line] Thomas の配列の並び: 従来 (並べ替えた配列を確保できない)\n");
+        return;
+    }
+    line_layout::mode = 2;
+    printf("[line] Thomas の配列の並び: LAYOUT2 (既定。区画比 %.2f、FORGE_LINE_LAYOUT=0 で従来)\n", ratio);
+}
+namespace line_layout {
 // 比較 (FORGE_LINE_COMPARE=1): 並べ替えた因子 (LU・W・ピボット) を従来の節点番号の並びの因子とビット列で比べる (codex 2026-10-10 m3)
 __global__ void cmp_d(geom_int nLines, const geom_int* off, const geom_int* cells, const double* LUt, const double* Wt, const signed char* pivt,
                       const double* LU, const double* W, const signed char* piv, const unsigned char* fail, const unsigned char* failRef,
@@ -3183,7 +3247,7 @@ void lineThomasFactor_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& m
 {
     if (msh.nImplicitLines <= 0) return;
     static long nFactorCalls = 0;
-    (void)lineInvEnabled(); (void)lineF32Mode(); (void)lineLayoutEnabled();                 // スイッチの整合を最初の呼び出しで検査する (診断の早期 return より前)
+    (void)lineInvEnabled(); (void)lineF32Mode(); lineLayoutResolve(msh);                   // スイッチの整合と並びを最初の呼び出しで決める (診断の早期 return より前)
     lineModeNote("factor", nFactorCalls);
     if (lineMonoEnabled()) return;   // モノリシック時は毎 sweep の lineThomas_d が全てやる
     static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
@@ -3245,7 +3309,7 @@ void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, va
 {
     if (msh.nImplicitLines <= 0) return;
     static long nSolveCalls = 0;
-    (void)lineInvEnabled(); (void)lineF32Mode(); (void)lineLayoutEnabled();
+    (void)lineInvEnabled(); (void)lineF32Mode(); lineLayoutResolve(msh);
     lineModeNote("solve", nSolveCalls);
     static const bool dbgPoint = [](){ const char* e = getenv("FORGE_LINE_DEBUG_POINT"); return e && atoi(e) != 0; }();
     static const bool dbgNoop = [](){ const char* e = getenv("FORGE_LINE_NOOP"); return e && atoi(e) != 0; }();

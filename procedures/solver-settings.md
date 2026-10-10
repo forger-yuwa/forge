@@ -74,6 +74,7 @@ time:
 - (削除済 2026-09-18) `lineDtWallRelief`: 壁境界半割面の λ も CFL max から除外する診断スイッチ。発散したので削除した (plan config-key-pruning §5.2)。
 - **`lineDtDirectional: 1`**: 方向別 dt — 内部 line 面の λ (音響込み) を擬似 dt の CFL max から除外。
 - **`lineDtDirectionalCap: R`** (2026-10-09、既定 0 = 上限なし): 方向別 dt の伸びを Δτ ≤ R·Δτ_point に抑える (平均流と SST の両方に効く)。検証中 — plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md) §4.4。
+- **Thomas の配列の並び** (環境変数、2026-10-10): 既定は LAYOUT2 (ラインが隣り合う並び + 前の節点の値をレジスタに持つ。数値は従来とビット一致、case/45 で −7.6 %/step)。`FORGE_LINE_LAYOUT=0` で従来の並び。起動ログの `[line] Thomas の配列の並び: …` で実効の並びを確かめる。詳細は [methods/time_integration/implementation.md](../methods/time_integration/implementation.md) の「Thomas の配列の並び」。
   壁ノードの境界半割面は除外されない (壁 CV 自身の Δτ は境界面律速のまま) 点に注意。
 - `lineViscCoupling` / `lineViscousDtRelief`: line 面の粘性結合と粘性 CFL 割引。`lineViscCoupling` は 0 (結合なし、既定) / 1 (スカラー α I を 5 行すべて) /
   2 (薄層の粘性・熱伝導の Jacobian をライン面の K と対角に。連続の行 0、運動量は速度、エネルギーは T と粘性の仕事。等温壁の行は ΔT_w = 0 の拘束)。

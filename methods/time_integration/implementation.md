@@ -549,6 +549,23 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
   サブ反復収縮の残る律速候補は off-line lag / segregated SST / 2次 KEEP RHS×1次 FVS LHS の
   defect-correction 不整合の 3 者。
 
+### Thomas の配列の並び (LAYOUT2 が既定、2026-10-10)
+
+計画: [`plans/active/time_integration-line-implicit-speed.md`](../../plans/active/time_integration-line-implicit-speed.md) §5.1 #10・#12・#13、§6.7〜§6.19。
+
+block Thomas は 1 ライン 1 スレッドで壁から順に解く逐次計算なので、ライン数が少ない (case/45 で 4719 本、SM あたり 2 warp) とメモリの読み込み待ちが律速になる。
+従来は因子 (LU・W = M̃⁻¹K⁺・ピボット) と中間解 y を節点番号の並び (`節点 × 25 + 成分`) に置いていたため、同じ段の節点を読む 32 本のラインの読み込みがメモリ上で離れ、1 命令あたり約 31 セクタを取りに行っていた (ncu)。
+
+- **LAYOUT2 (既定)**: 因子・y・K⁻ の写しを `(段 k × 成分数 + 成分) × ライン数 + ライン` の並びに置き (隣のラインが隣り合う)、さらに前の節点の W と y をレジスタに持って次の節点へ渡す (逐次の連鎖からメモリ待ちを 1 段減らす)。カーネルは `lineThomasFactorLP_d`・`lineThomasSolveLP_d`。
+  - 数値は従来とビット単位で一致する (case/45 全被覆・部分被覆・粘性入り、case/56 の長さがばらつくライン、case/39 の 3D・周期・dual-time・`lineKFreeze` 0/1、FP64 と float の両ビルド)。
+  - case/45 で 1 step 34.79 → 32.14 ms (−7.6 %)。分解 5.41 → 4.58 ms、代入 1.98 → 1.60 ms/回。
+  - 並べ替えた配列は「最長のライン × 本数」の区画を取る (1 区画 645 B、case/45 で +365 MB)。従来の並びの配列も比較・診断のために残る。
+- **並びの決め方** (`lineLayoutResolve`、最初の factor/solve で一度だけ、確保の前に決めて共有する):
+  - `FORGE_LINE_LAYOUT=0/1/2` で明示。`0` = 従来、`1` = 並べ替えだけ。明示の 1・2 と診断のスイッチ (`FORGE_LINE_INV`・`F32`・`PAR`・`MONO`・`DEBUG_POINT`・`NOOP`) の組み合わせ、明示時の確保の失敗は起動時に止める。
+  - 未指定なら LAYOUT2。ただし、診断のスイッチがある・区画が被覆 CV の 1.5 倍を超える (ラインの長さのばらつきが大きい)・並べ替えた配列を確保できない、のどれかなら従来の並びに戻す。
+  - どれを選んだかは起動ログの `[line] Thomas の配列の並び: …` の 1 行に出る。試験用に `FORGE_LINE_LAYOUT_SLOT_RATIO` (区画比の上限) と `FORGE_LINE_LAYOUT_FAKE_OOM=1` (確保の失敗の模擬) がある。
+- 比較 (`FORGE_LINE_COMPARE=1`) は、既定では LAYOUT2 と従来の LU を別のバッファで解いてビット列で比べる。並列版と比べるときは `FORGE_LINE_LAYOUT=0 FORGE_LINE_PAR=1`。
+
 ## 既知の TODO / 注意点
 
 - 非定常 dual-time 陰解法（`tI==11 && unsteady==1 && dualTime==1`）は実装済（2026-06、`blockDPLUR==1` のみ、物理 $\Delta t$ 固定 `control=0`）。`implicitCorrection_d.cu` の `dualtime_explicit_d` は SLAU/Roe 用の別系統補助で本流とは独立（未使用）。

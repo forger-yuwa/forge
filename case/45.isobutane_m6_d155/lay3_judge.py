@@ -2,7 +2,7 @@
 PASS か、「判定不能の理由が η の行だけ (腕の η > 上限で従来の η も 1e-11 超) で fail が空・非有限 0・factor と solve の本数がそろう」なら合格。
 判定 JSON が無い・run の開始より古い・FAIL・ほかの判定不能 → 不合格。結果は _band_ab/cold_pair/lay3_judge.json、全件合格で終了コード 0。
 usage: python3 lay3_judge.py <run> <開始時刻 epoch> [<run> <開始時刻> ...]"""
-import json, re, sys
+import json, os, re, sys
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ETA = re.compile(r"^solve \d+: 腕の η \S+ > 上限、従来も \S+ > 1e-11$")
@@ -19,5 +19,5 @@ for run, t0 in zip(args[0::2], args[1::2]):
     else: v = f"不合格 ({j['verdict']})"; ok_all = False
     out[run] = {"verdict": v, "judge": j["verdict"], "fail": j["fail"][:3], "indeterminate": j["indeterminate"][:3], "eta_arm_max": j.get("eta_arm_max"), "n_factor": j.get("n_factor"), "n_solve": j.get("n_solve")}
 out["all_pass"] = ok_all
-(HERE / "_band_ab" / "cold_pair" / "lay3_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out, indent=1, ensure_ascii=False))
+(Path(os.environ["LAY3_JUDGE_OUT"]) if os.environ.get("LAY3_JUDGE_OUT") else HERE / "_band_ab" / "cold_pair" / "lay3_judge.json").write_text(json.dumps(out, indent=1, ensure_ascii=False)); print(json.dumps(out, indent=1, ensure_ascii=False))
 sys.exit(0 if ok_all else 1)

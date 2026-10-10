@@ -69,6 +69,8 @@ ALT_BINARIES = {
     "lineK_fp64": ("c62eaf5a3910f9b1573ebbb1e740727d3c81b0a356a9352ae167ed67e93eec27", "~/forge-linevisc-fp64"),
     # f9be0c4f (opt-in の並べ替え + 連鎖の短縮 FORGE_LINE_LAYOUT=2、plan time_integration-line-implicit-speed §6.10) + typedef double、~/forge-linevisc-fp64 を上書き (lineK は残っていない)
     "lineL_fp64": ("e10a195dbbec9bd4b67650348985d68d6a5354e1f6884ab5e73f11974f085e3d", "~/forge-linevisc-fp64"),
+    # LAYOUT2 を既定にしたコミット (plan time_integration-line-implicit-speed §6.21) + typedef double、~/forge-linespeed-fp64 (f9be0c4f に timeIntegration_d.cu を入れてビルド)
+    "lineM_fp64": ("05ad8bdf6100874f39ae39a5d9ea08613223e87e1e4fdc5270baaeaad5206b11", "~/forge-linespeed-fp64"),
 }
 
 
