@@ -40,8 +40,14 @@ with h5py.File(sys.argv[1], "r") as f:
 print(h.hexdigest())' "$1"
 }
 
+disk_ok() {  # 共有ディスクの空きが 4 GB 未満なら止める (2026-10-10: 他のセッションの run で 1 時間に 17 GB 減った。FINITE の腕 1 本は約 3.3 GB)
+  local free=$(df --output=avail -B1G ~ | tail -1 | tr -d ' ')
+  [ "$free" -ge 4 ] || { echo "ディスクの空き ${free} GB < 4 GB — $1 の前で止める" >> $LOG; return 1; }
+}
+
 dump1() {  # dump1 <run> <マスク>: 1 step のライン行列の書き出し (介入の成立の確認)
   local r=$1 mk=$2 bin=$BIN key=fgeom3_fp64
+  disk_ok $r || return 1
   ( export FORGE_BIN=$bin COLD_ALT_BINARY=$key
     python3 cold_cfl.py prep $SRC $r --steps 1 --out 1 --cfl 4 --limiter-ref-from $SRC --line dir --extra $EXTRA --itj 5 --lvc 3 >> $LOG 2>&1 ) \
     || { echo "prep $r 失敗 — 止める" >> $LOG; return 1; }
@@ -56,6 +62,7 @@ dump1() {  # dump1 <run> <マスク>: 1 step のライン行列の書き出し (
 
 arm() {  # arm <run> <マスク>
   local r=$1 mk=$2 v=3 fh=0 bin=$BIN key=fgeom3_fp64
+  disk_ok $r || return 1
   export FORGE_BIN=$bin COLD_ALT_BINARY=$key
   python3 cold_cfl.py prep $SRC $r --steps 2000 --out 100 --cfl 4 --limiter-ref-from $SRC --line dir --extra res_ro,volume --itj 5 --lvc $v >> $LOG 2>&1 \
     || { echo "prep $r 失敗 — 止める" >> $LOG; return 1; }
@@ -64,6 +71,7 @@ arm() {  # arm <run> <マスク>
   echo $mk > $r/LVC_TERMS.txt
   ( export FORGE_LVC_TERMS=$mk FORGE_DUMP_LEDGER=$PWD/$r/ledger.csv FORGE_DUMP_LEDGER_NODES=$LEDGER_NODES FORGE_DUMP_LEDGER_CALLS=200
     [ "$fh" = 1 ] && export FORGE_DIAG_FACE_H_DOUBLE=1; python3 cold_cfl.py run $r > $r/cold_pair_run_stdout.log 2>&1 ); local rc=$?
+  grep -q "Write failed" $r/forge_run.log && { echo "$r: 書き込みに失敗 (ディスク) — 止める" >> $LOG; return 1; }
   local nan=$(grep -m1 -o "Non-finite value detected in '[A-Za-z0-9_]*' at step [0-9]*" $r/forge_run.log)
   echo "$r v=$v mask=$mk rc=$rc $(date -Is) last=$(awk -F, '$3=="outer_begin"{s=$1} END{print s}' $r/residual_history.csv 2>/dev/null) ${nan:-有限}" >> $LOG
   [ -s $r/residual_history.csv ] && grep -q "'lineViscCoupling' in 'time.deltaT': $v" $r/forge_run.log \
