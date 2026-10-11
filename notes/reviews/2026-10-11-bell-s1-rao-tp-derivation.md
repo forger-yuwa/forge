@@ -18,6 +18,7 @@
 - kernel: κ(s) = 1/R_t + (κ_B − 1/R_t)·S(s/s_B) (既定 S(u) = u)、θ_B で s_B が閉じた形。古典円弧は `kind="arc"`。B の先は直線延長。
 - kernel 場は `forward_moc` (analytic・converge)。**BD は B から下流へ出る C⁻ を net 場の補間で追跡する** (Rao の作動域 θ_B > μ_B では net の前線は逆向きで BD に使えない)。BD は軸まで (ε 50 で x ≈ 10–15 r_t)。
 - DE: M をパラメータに θ(M) = μ − σ_D arccos(Φ₂ cos μ / V)、r(M) = Φ₃/(ρV² sin²θ tan μ)、流量が ṁ_BD(s_D) に達する点を E。折り返し (dr/dM ≤ 0) と |c| > 1 は解なし。
+  - **撤回 (2026-10-11、[生成器の穴の諮問](2026-10-11-bell-s1-generator-holes-diagnostician.md))**: DE 上で c = cos(θ−μ) ≤ 1 が恒等的に成り立ち、c = 1 (θ = μ) は M の極値で線の折り返しにすぎない。「|c| > 1 は解なし」と「折り返し (dr/dM ≤ 0) は解なし」は誤り。DE は r (弧長) をパラメータに引き、解なしは θ ≤ 0・θ+μ ≥ 90°・M が表の外・流量に達しない、の 4 条件とする。
 - 入れ子の根: 内 s_D (r_E = √ε)、中 θ_B (z_E = L)、外 κ_B (C2)。全符号変化を候補にし、複数なら MOC 推力最大。
 - **C2 の根の関数は g̃(κ_B) = (dθ/dσ)_{DE, D} − (dθ/dσ)_{kernel C⁺, D}** (弱不連続の輸送で B の曲率連続と等価)。plan の κ_Rao(B⁺) − κ_B は根の後の検算。
 - 領域 BDE は Goursat 問題で `interior_vec` (符号付きなので C⁻ を逆向きに積分してよい)、壁流線は質量流量 (`moc_inverse.py` の `fill_levels`・`wall_streamline` が手本)。
