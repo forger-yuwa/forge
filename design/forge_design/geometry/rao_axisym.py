@@ -1438,7 +1438,9 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "a
     `gas`: γ・`GasCPG`・`GasSemiPerfect`・`Isentrope`。`kernel`: **既定 `"arc"`** (古典、曲率半径 $R_t$ の円弧 = $c=0$。
     (M) の標準 — plan §4.4「(M) は円弧 kernel・B で C1」) / `"linear"` (曲率 $1/R_t+cs$ の kernel、`c` を明示して与える。
     C2 の根は取らない [撤回] — 記録用)。`line`: 初期線 (既定 Hall の $n$ 点。$R_t\le1$ は $n\le321$)。
-    `m`・`q`: Goursat の BD・DE の点数 (既定 n/2)、`dr`: DE の r 格子 (既定 3.2/n — n 161 で 0.02)。
+    `m`・`q`: Goursat の BD・DE の点数 (**既定 n** — 2026-10-12 に n/2 から変更、plan §5.1 #5 (g1): T6 で m・q 倍は
+    費用 2 s で推力 2 会計の差を約 1/3 にし、θ_max・F_wall・Δκ_B は m に律速されていた。根 [θ_B・θ_E・η_D] は m・q に
+    依らない)、`dr`: DE の r 格子 (既定 3.2/n — n 161 で 0.02)。
     中の根の受理条件は $\det_D>0$ (`solve_thetaB`)。B で C1 (接線連続) で、曲率の跳び `dkappa_B` $=\kappa_W(B^+)-\kappa_B$
     (円弧では $\kappa_W(B^+)-1/R_t$) と C2 の判定量 `g_tilde` を記録する。
     戻り dict: `status` (`ok` / `infeasible`)、`why`、`wall` (kernel + BE の [x, r, θ, M])、`theta_B`・`theta_max`・`theta_E`
@@ -1462,8 +1464,8 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "a
         line = _hall_line(R_t, ig, n)
     n = len(line["x"])
     dr = dr if dr is not None else 3.2 / n
-    m = m if m is not None else max(n // 2, 20)
-    q = q if q is not None else max(n // 2, 20)
+    m = m if m is not None else max(n, 20)
+    q = q if q is not None else max(n, 20)
     base = {"R_t": R_t, "L": L, "eps": eps, "kernel": kernel, "c": c, "n": n, "p_a": p_a, "dr": dr, "m": m, "q": q,
             "gas": ig.kind, "gamma_star": ig.gamma_star, "accept_rule": "det_D > 0"}
     ko = solve_kappaB(ig, R_t, L, c=c, eps=eps, line=line, p_a=p_a, dr=dr, L_march=L_march, n_scan_sb=n_scan_sb,
@@ -1518,4 +1520,344 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "a
     out["F_1D"] = F1["F"]
     out["CF"] = best["thrust"]["F_cs"] / (np.pi * ig.p0)
     out["isp_ratio"] = (best["thrust"]["F_cs"] / best["thrust"]["mdot_line"]) / (F1["F"] / F1["mdot"])
+    return out
+
+
+# ================================================================================================
+# 与えた壁の推力 (前進 MOC で場を解き直す) — T4 停留性・T1a′ (plan §5.1 #5 (g)・§6 V1)
+class ExtendedWall:
+    r"""壁 `wall` (`r(x, deriv)`、$x\le L$) を $x>L$ で接線に延ばしたもの。前進 MOC を $L$ より先まで回して出口 $x=L$ を
+    跨ぐ壁点を得るために使う ($x\le L$ の場は延長に依らない — 依存は下流へしか伝わらない)。"""
+
+    def __init__(self, wall, L: float):
+        self.w, self.L = wall, float(L)
+        self.rL = float(np.asarray(wall.r(np.array([self.L]), 0), dtype=float).ravel()[0])
+        self.rpL = float(np.asarray(wall.r(np.array([self.L]), 1), dtype=float).ravel()[0])
+
+    def r(self, x, deriv: int = 0):
+        x = np.asarray(x, dtype=float)
+        xa = np.atleast_1d(x)
+        out = np.empty_like(xa)
+        ins = xa <= self.L
+        if np.any(ins):
+            out[ins] = np.asarray(self.w.r(xa[ins], deriv), dtype=float).ravel()
+        if np.any(~ins):
+            out[~ins] = (self.rL + self.rpL * (xa[~ins] - self.L)) if deriv == 0 else self.rpL
+        return out.reshape(np.shape(x))
+
+
+def _pspline_fit(x, r, start: tuple, end: tuple, n_int: int, lam: float | None, deg: int = 5):
+    r"""罰則付き最小二乗の 5 次 B-spline (`RaoWall` の `"pspline"`): 節点は折れ線 $(x_i,r_i)$ の弧長に等間隔の `n_int` 区間、
+    罰則 $\lambda\int(r''')^2dx$、端の拘束 $r(x_0),r'(x_0)$ = `start`・$r(x_N),r'(x_N)$ = `end` (拘束の零空間で解く)。
+    `lam` が None なら GCV ($n\,\mathrm{RSS}/(n-\mathrm{edf})^2$ 最小) で $10^{-12}$〜$10^{2}$ の 1/4 桁刻みから選ぶ。
+    戻り (BSpline, 記録 dict)。"""
+    from scipy.interpolate import BSpline
+    from scipy.linalg import null_space
+    x, r = np.asarray(x, dtype=float), np.asarray(r, dtype=float)
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(x), np.diff(r)))])
+    xb = np.interp(np.linspace(0.0, s[-1], n_int + 1), s, x)
+    xb[0], xb[-1] = x[0], x[-1]
+    t = np.concatenate([[x[0]] * deg, xb, [x[-1]] * deg])
+    nc = len(t) - deg - 1
+    basis = BSpline(t, np.eye(nc), deg, extrapolate=False)
+    Bm = basis(x)
+    gx, gw = np.polynomial.legendre.leggauss(8)
+    xg = (0.5 * (xb[:-1] + xb[1:])[:, None] + 0.5 * (xb[1:] - xb[:-1])[:, None] * gx).ravel()
+    wg = (0.5 * (xb[1:] - xb[:-1])[:, None] * gw).ravel()
+    D3 = basis.derivative(3)(xg)
+    Om = D3.T @ (D3 * wg[:, None])
+    C = np.vstack([basis(np.array([x[0]])), basis.derivative(1)(np.array([x[0]])),
+                   basis(np.array([x[-1]])), basis.derivative(1)(np.array([x[-1]]))])
+    dv = np.array([start[0], start[1], end[0], end[1]], dtype=float)
+    c0 = np.linalg.lstsq(C, dv, rcond=None)[0]
+    Z = null_space(C)
+    BZ = Bm @ Z
+    G = BZ.T @ BZ
+    W = Z.T @ Om @ Z
+    y = r - Bm @ c0
+    n = len(r)
+
+    def solve(lm):
+        A = G + lm * W
+        a = np.linalg.solve(A, BZ.T @ y - lm * (Z.T @ Om @ c0))
+        c = c0 + Z @ a
+        res = Bm @ c - r
+        edf = float(np.trace(BZ @ np.linalg.solve(A, BZ.T))) + C.shape[0]
+        return c, res, edf, n * float(np.sum(res * res)) / (n - edf) ** 2
+    if lam is None:
+        grid = 10.0 ** np.arange(-12.0, 2.0 + 1e-9, 0.25)
+        gcv = [solve(lm)[3] for lm in grid]
+        lam = float(grid[int(np.argmin(gcv))])
+        how = "gcv"
+    else:
+        how = "given"
+    c, res, edf, g = solve(float(lam))
+    sp = BSpline(t, c, deg, extrapolate=False)
+    return sp, {"fit": "pspline", "deg": deg, "n_int": int(n_int), "n_points": int(n), "lam": float(lam), "lam_how": how,
+                "edf": edf, "gcv": g, "resid_max": float(np.max(np.abs(res))), "resid_rms": float(np.sqrt(np.mean(res * res)))}
+
+
+class RaoWall:
+    r"""(M) の壁 $r(x)$: 円弧 kernel (曲率半径 $R_t$、$0\le x\le x_B$、閉じた式) + BE (生成器の壁点列の表現) + 終点の先は接線。
+
+    `BE_xr`: B → E の壁点 (x, r)。先頭は厳密な B ($x_B=R_t\sin\theta_B$、$r_B=1+R_t(1-\cos\theta_B)$) に置き換え、末尾は
+    呼び出し側が渡した終点をそのまま使う (生成器の E [DE の流量の根] を渡せば $(L,\sqrt\varepsilon)$ が厳密)。
+    `x_end`: 壁の終わり (既定は点列の末尾。負対照のように点列の途中で切るときに与える)。
+
+    BE の表現 (`fit`):
+
+    - `"pspline"` (既定): 5 次 B-spline (節点は点列の折れ線の弧長に等間隔の `n_int` 区間) の罰則付き最小二乗
+      $\sum_i(r(x_i)-r_i)^2+\lambda\int(r''')^2dx$ を、端の拘束 [$r(x_B)=r_B$・$r'(x_B)=\tan\theta_B$ (B で C1)、点列の末尾で
+      終点の $r$ と勾配 $\tan\theta_E$] の下で解く ($\lambda$ は GCV で $10^{-12}$〜$10^{2}$ の 1/4 桁刻みから)。
+      生成器の壁点は C⁺ 線上の流量の線形補間 (`wall_from_massflow`) なので位置に $O(h^2)$ の雑音 (n 121 で rms 1e-5) があり、
+      B の近くの密な点 (間隔 0.015) をそのまま補間すると曲率が ±0.1 振動し、前進 MOC が BDE の中で C⁻ 前線の交差を出す
+      (2026-10-12 実測。生成器の Goursat 網には反転なし)。当てはめの記録は `fit_info` (λ・有効自由度・残差・曲率の範囲)。
+      最終の物理壁の当てはめ (plan §5.1 #7) とは別物 (T4・T1a′ の評価用の滑らかな表現)。
+    - `"interp"`: 点列を通る 3 次スプライン (両端の勾配を固定)。比較用。
+
+    摂動 (`PerturbedWall`) のために BE の弧長 $s(x)$ ($x_B\to x_{end}$) を 3 次 Hermite の表で持つ ($ds/dx=\sqrt{1+r'^2}$ は厳密)。"""
+
+    def __init__(self, R_t: float, theta_B: float, BE_xr, theta_E: float, x_end: float | None = None,
+                 fit: str = "pspline", n_int: int = 48, lam: float | None = None, h_tab: float = 2e-3):
+        from scipy.interpolate import CubicHermiteSpline
+        self.R_t, self.theta_B, self.theta_E = float(R_t), float(theta_B), float(theta_E)
+        self.x_B = self.R_t * np.sin(self.theta_B)
+        self.r_B = 1.0 + self.R_t * (1.0 - np.cos(self.theta_B))
+        P = np.array(BE_xr, dtype=float)[:, :2].copy()
+        self.B_replaced = (float(P[0, 0] - self.x_B), float(P[0, 1] - self.r_B))
+        P[0] = (self.x_B, self.r_B)
+        if np.any(np.diff(P[:, 0]) <= 0.0):
+            raise ValueError("RaoWall: BE の x が単調増加でない")
+        self.fit = fit
+        if fit == "interp":
+            self.spl = CubicSpline(P[:, 0], P[:, 1], bc_type=((1, np.tan(self.theta_B)), (1, np.tan(self.theta_E))))
+            self.fit_info = {"fit": "interp", "n_points": int(len(P))}
+        elif fit == "pspline":
+            self.spl, self.fit_info = _pspline_fit(P[:, 0], P[:, 1], (self.r_B, np.tan(self.theta_B)),
+                                                   (float(P[-1, 1]), np.tan(self.theta_E)), int(n_int), lam)
+        else:
+            raise ValueError(f"RaoWall: fit は 'pspline' か 'interp' ({fit!r})")
+        self.dspl = self.spl.derivative()
+        self.x_end = float(x_end) if x_end is not None else float(P[-1, 0])
+        if not self.x_B < self.x_end <= P[-1, 0] + 1e-12:
+            raise ValueError(f"RaoWall: x_end {self.x_end} が (x_B, 点列の末尾] の外")
+        self.r_end = float(self.spl(self.x_end))
+        self.rp_end = float(self.dspl(self.x_end))
+        self.theta_end = float(np.arctan(self.rp_end))
+        # BE の弧長の表
+        nt = max(int(np.ceil((self.x_end - self.x_B) / h_tab)), 16)
+        xt = np.linspace(self.x_B, self.x_end, nt + 1)
+        xg, wg = _gl(xt[:-1], xt[1:])
+        ds = np.sum(np.sqrt(1.0 + self.dspl(xg) ** 2) * wg, axis=-1)
+        st = np.concatenate([[0.0], np.cumsum(ds)])
+        self.S = float(st[-1])
+        self._s = CubicHermiteSpline(xt, st, np.sqrt(1.0 + self.dspl(xt) ** 2))
+        xs = np.linspace(self.x_B, self.x_end, 20001)
+        rp, rpp = self.dspl(xs), self.spl.derivative(2)(xs)
+        kap = rpp / (1.0 + rp * rp) ** 1.5
+        dk = np.diff(kap)
+        self.fit_info.update({"kappa_B_plus": float(kap[0]), "kappa_min": float(kap.min()), "kappa_max": float(kap.max()),
+                              "n_dkappa_sign_changes": int(np.sum(np.diff(np.sign(dk[np.abs(dk) > 1e-10])) != 0)),
+                              "theta_max_BE_deg": float(np.rad2deg(np.arctan(rp.max()))),
+                              "end_r_minus_point": float(self.spl(P[-1, 0]) - P[-1, 1])})
+
+    def r(self, x, deriv: int = 0):
+        x = np.asarray(x, dtype=float)
+        xa = np.atleast_1d(x)
+        out = np.empty_like(xa)
+        R = self.R_t
+        k = xa <= self.x_B
+        if np.any(k):
+            xk = xa[k]
+            root = np.sqrt(np.maximum(R * R - xk * xk, 0.0))
+            out[k] = (1.0 + R - root) if deriv == 0 else xk / root
+        b = (~k) & (xa <= self.x_end)
+        if np.any(b):
+            out[b] = self.spl(xa[b]) if deriv == 0 else self.dspl(xa[b])
+        e = xa > self.x_end
+        if np.any(e):
+            out[e] = (self.r_end + self.rp_end * (xa[e] - self.x_end)) if deriv == 0 else self.rp_end
+        if deriv not in (0, 1):
+            raise ValueError("RaoWall.r: deriv は 0 か 1")
+        return out.reshape(np.shape(x))
+
+    def t_of_x(self, x):
+        """BE の弧長の正規化 t ∈ [0, 1] (B → 終点)。"""
+        return np.asarray(self._s(np.clip(np.asarray(x, dtype=float), self.x_B, self.x_end)), dtype=float) / self.S
+
+    def dt_dx(self, x):
+        return np.sqrt(1.0 + self.dspl(np.asarray(x, dtype=float)) ** 2) / self.S
+
+
+def perturbation_family(name: str, k: int):
+    r"""摂動の族 $\eta_k(t)$ と $\eta_k'(t)$ ($t\in[0,1]$、両端で 0)。`"sin"`: $\sin(k\pi t)$ (端で勾配が変わる — B に角が
+    できる)。`"sin_c1"`: $\sin(\pi t)\sin(k\pi t)$ (端で勾配も 0 — B・E の接線連続を保つ)。"""
+    k = int(k)
+    if name == "sin":
+        return (lambda t: np.sin(k * np.pi * t)), (lambda t: k * np.pi * np.cos(k * np.pi * t))
+    if name == "sin_c1":
+        return ((lambda t: np.sin(np.pi * t) * np.sin(k * np.pi * t)),
+                (lambda t: np.pi * np.cos(np.pi * t) * np.sin(k * np.pi * t) + k * np.pi * np.sin(np.pi * t) * np.cos(k * np.pi * t)))
+    raise ValueError(f"perturbation_family: {name!r} は 'sin' か 'sin_c1'")
+
+
+class PerturbedWall:
+    r"""(M) の壁 BE に $\epsilon\,\eta_k(t(x))$ を半径方向 ($x$ 一定) に足した壁。B・終点 ($t=0,1$) で $\eta_k=0$ なので
+    B と終点の位置 (したがって $L$・$\varepsilon$) は変わらず、kernel と初期線 (流量) も同じ。終点の先は元の壁の接線。"""
+
+    def __init__(self, base: RaoWall, family: str, k: int, eps: float):
+        self.base, self.family, self.k, self.eps = base, family, int(k), float(eps)
+        self.eta, self.deta = perturbation_family(family, k)
+        self.x_B, self.x_end = base.x_B, base.x_end
+
+    def r(self, x, deriv: int = 0):
+        x = np.asarray(x, dtype=float)
+        xa = np.atleast_1d(x)
+        out = np.asarray(self.base.r(xa, deriv), dtype=float).copy()
+        m = (xa > self.x_B) & (xa < self.x_end)
+        if np.any(m) and self.eps != 0.0:
+            t = self.base.t_of_x(xa[m])
+            if deriv == 0:
+                out[m] += self.eps * self.eta(t)
+            else:
+                out[m] += self.eps * self.deta(t) * self.base.dt_dx(xa[m])
+        return out.reshape(np.shape(x))
+
+
+N_BEYOND = 2                          # forward_thrust: 出口 x = L の先で補間に使う壁点の数
+
+
+def _wall_dod_check(res: dict, x_last: float) -> dict:
+    r"""前進 MOC の網で、推力に使った壁点 ($x\le$ `x_last`) の依存域に網の反転・単位過程の失敗が無いか。
+    点 $(k,j)$ は $A=(k-1,j-1)$ (同じ C⁺ の対角線 $a=k-j$) と $B=(k,j+1)$ ($a-1$) に依るので、壁点 $(K,n)$ の依存域は
+    添字で $\{k'\le K,\ k'-j'\le K-n\}$。$K$ は使った最後の壁点の前線。反転の定義は `moc_forward` のゲートと同じ
+    (C⁺ 沿い・C⁻ 沿いの符号付きの長さ ≤ 0)。軸の近くの内部衝撃波 (DE より下で C⁻ が軸へ集まる — Rao 輪郭の場で x 15〜18 r_t)
+    は壁の依存域の外なので、ゲートが不受理でも壁の圧力は使える — その区別をここで記録する。"""
+    from .moc_forward import FAIL_STATES, ST_OK, _signed_len
+    net = res["net"]
+    n = res["n"]
+    X, R, TH, MM = (net.a[f] for f in ("x", "r", "th", "M"))
+    S = net.status
+    ok = S == ST_OK
+    MU = mu_vec(np.where(np.isfinite(MM), MM, 1.0))
+    kw = np.flatnonzero(ok[:, n] & (X[:, n] <= x_last + 1e-12))
+    K = int(kw[-1])
+    kk, jj = np.meshgrid(np.arange(S.shape[0]), np.arange(S.shape[1]), indexing="ij")
+    D = (kk <= K) & (kk - jj <= K - n)
+    both_p = ok[1:, 1:] & ok[:-1, :-1]
+    d_p = np.where(both_p, _signed_len(X[1:, 1:], X[:-1, :-1], 0.5 * (TH[:-1, :-1] + TH[1:, 1:]) + 0.5 * (MU[:-1, :-1] + MU[1:, 1:])),
+                   np.nan)
+    rev_p = np.zeros(S.shape, dtype=bool)
+    rev_p[1:, 1:] = both_p & ~(d_p > 0.0)
+    both_m = ok[:, 1:] & ok[:, :-1]
+    e_m = np.where(both_m, _signed_len(X[:, :-1], X[:, 1:], 0.5 * (TH[:, 1:] + TH[:, :-1]) - 0.5 * (MU[:, 1:] + MU[:, :-1])), np.nan)
+    rev_m = np.zeros(S.shape, dtype=bool)
+    rev_m[:, :-1] = both_m & ~(e_m > 0.0)
+    fail = np.isin(S, FAIL_STATES)
+    bad = (rev_p | rev_m | fail) & D
+    allbad = rev_p | rev_m | fail
+    out = {"clean": not bool(np.any(bad)), "K_front": K, "n_bad_in_dod": int(np.sum(bad)), "n_bad_total": int(np.sum(allbad)),
+           "n_missing_in_dod": int(np.sum(D & (S == 1)))}
+    if np.any(allbad):
+        xb = np.where(allbad, X, np.nan)
+        out["bad_x_min"] = float(np.nanmin(xb))
+        out["bad_r_max"] = float(np.nanmax(np.where(allbad, R, np.nan)))
+    if np.any(bad):
+        ib = np.argwhere(bad)[:5]
+        out["bad_in_dod"] = [{"k": int(a), "j": int(b), "x": float(X[a, b]), "r": float(R[a, b])} for a, b in ib]
+    return out
+
+
+def forward_thrust(wall, L: float, gas, line: dict, *, p_a: float = 0.0, splits=(), ext_frac: float = 0.1,
+                   gate: bool = True) -> dict:
+    r"""与えた壁の推力を、壁を与えた前進 MOC (`moc_forward.forward_moc`、analytic・converge) で場を解き直して求める:
+    $F$ = 初期線を横切る運動量 + 圧力 (`line_integrals`、生成器の `thrust_accounts` の `T_line` と同じ) +
+    壁の圧力の軸力 $\int_{x_0}^L(p-p_a)\,2\pi r\,r'\,dx$ ($x_0$ = 初期線の壁点、スロートなら 0)。
+
+    壁の圧力は前進 MOC の壁点の $p$ (等エントロピー、`Isentrope.state`) を $x$ の 3 次スプラインにし、壁の幾何 $r(x)$・$r'(x)$ は
+    与えた壁の式のまま、壁点の間ごとの Gauss–Legendre で積分する。`splits` ($x$ の列) で区間を分け、区間ごとに別の
+    スプラインにする (壁の勾配・曲率が跳ぶ点 — (M) の B — を跨いで補間しない。区間の端は各側の点列からの外挿)。
+    出口 $x=L$ を跨ぐ壁点を得るため、前進 MOC は壁を接線で延ばして $L(1+$`ext_frac`$)$ まで回す ($x\le L$ の場は延長に
+    依らない。出口近くの壁点の間隔は数 $r_t$ になるので、跨ぐ壁点が無ければ延長を倍にして回し直す。補間に使う $L$ の先の
+    壁点は `N_BEYOND` 個まで)。`gate` なら同じ壁・初期線で $L$ までの前進 MOC をもう 1 本回してゲートの判定 (`gate_record`)
+    を返し、$x\le L$ の壁点が 2 本で一致するか (`nodes_max_abs_diff`) も記録する。
+
+    推力に使った壁点の依存域に網の反転・失敗が無いかを `dod_clean` (`_wall_dod_check`) に返す (ゲートの不受理が壁の依存域の
+    外 [軸の近くの内部衝撃波] だけなら、壁の圧力は使える)。
+    戻り dict: `ok`・`why`、`F` (= `T_line` + `T_wall`)、`T_line`・`mdot_line`・`T_wall`・`T_wall_seg` (区間ごと)・
+    `T_wall_trap` (壁点の台形 [r で] の検算、出口は補間点)、`n_nodes_le_L`・`x_last_node_le_L`・`gate` (dict)・
+    `mdot_err_max`・`end_reason`・`time_s`。"""
+    from .moc_forward import forward_moc, gate_record, wall_points
+    t0 = time.time()
+    ig = as_isentrope(gas)
+    L = float(L)
+    ew = ExtendedWall(wall, L)
+    ext = float(ext_frac)
+    for _ in range(6):                      # 出口近くの壁点の間隔は数 r_t になるので、L を跨ぐ壁点が取れるまで延長を倍に
+        Lx = L * (1.0 + ext)
+        res = forward_moc(ew, Lx, ig.moc, line)
+        out = {"ok": False, "L": L, "L_eval": Lx, "end_reason": (res.get("end") or {}).get("reason")}
+        if res.get("net") is None:
+            out["why"] = f"前進 MOC が初期線で止まった ({res['gate'].get('reasons')})"
+            return out
+        w = wall_points(res)
+        w = w[np.argsort(w[:, 0])]
+        if len(w) >= 8 and w[-1, 0] > L:
+            break
+        if out["end_reason"] != "exit_reached":
+            break
+        ext *= 2.0
+    if not (len(w) >= 8 and w[-1, 0] > L):
+        out["why"] = (f"壁点が x = L を越えない (壁点 {len(w)}、最後 x {w[-1, 0] if len(w) else np.nan:.6g}、"
+                      f"終わり {res.get('end')})")
+        return out
+    p = ig.state(np.maximum(w[:, 4], 1.0))["p"]
+    x0 = float(line["x"][-1])                     # 初期線の壁点 (スロートの壁なら 0)
+    edges = [x0] + sorted(float(s) for s in splits if x0 < float(s) < L) + [L]
+    # 最後の区間のスプラインに使う L より先の壁点は N_BEYOND 個まで (それより先は延長の場で、x ≤ L の補間に要らない)
+    i_beyond = np.flatnonzero(w[:, 0] > L)
+    use = np.ones(len(w), dtype=bool)
+    use[i_beyond[N_BEYOND:]] = False
+    w, p = w[use], p[use]
+    segs = []
+    T_wall = 0.0
+    for a, b in zip(edges[:-1], edges[1:]):
+        last = b >= L
+        sel = (w[:, 0] >= a - 1e-14) & ((w[:, 0] <= b) if not last else np.ones(len(w), dtype=bool))
+        xs, ps = w[sel, 0], p[sel]
+        if len(xs) < 4:
+            out["why"] = f"区間 [{a:.5g}, {b:.5g}] の壁点が {len(xs)} 個 (4 個以上要る)"
+            return out
+        sp = CubicSpline(xs, ps)
+        knots = np.concatenate([[a], xs[(xs > a) & (xs < b)], [b]])
+        xg, wg = _gl(knots[:-1], knots[1:])
+        rr = np.asarray(wall.r(xg.ravel(), 0), dtype=float).reshape(xg.shape)
+        rp = np.asarray(wall.r(xg.ravel(), 1), dtype=float).reshape(xg.shape)
+        Ts = float(np.sum((sp(xg) - p_a) * TWO_PI * rr * rp * wg))
+        segs.append({"a": a, "b": b, "n_nodes": int(np.sum((xs >= a) & (xs <= b))), "T": Ts,
+                     "p_a_end": float(sp(a)), "p_b_end": float(sp(b))})
+        T_wall += Ts
+    m_line, T_line = line_integrals(ig, line["x"], line["r"], line["theta"], line["M"], p_a, spline=True)
+    # 検算: 壁点の台形 (r で、出口は最後の区間のスプラインで補間した点)
+    inL = w[:, 0] <= L
+    rr_t = np.append(w[inL, 1], float(np.asarray(wall.r(np.array([L]), 0)).ravel()[0]))
+    pp = np.append(p[inL], segs[-1]["p_b_end"])
+    T_trap = float(np.sum(0.5 * ((pp[1:] - p_a) * rr_t[1:] + (pp[:-1] - p_a) * rr_t[:-1]) * TWO_PI * np.diff(rr_t)))
+    dod = _wall_dod_check(res, float(w[-1, 0]))
+    out.update({"ok": True, "why": None, "F": T_line + T_wall, "T_line": T_line, "mdot_line": m_line, "T_wall": T_wall,
+                "dod_clean": dod["clean"], "dod": dod,
+                "T_wall_seg": segs, "T_wall_trap": T_trap, "F_trap": T_line + T_trap, "n_nodes_le_L": int(np.sum(inL)),
+                "x_last_node_le_L": float(w[inL, 0][-1]), "n_fronts_eval": res.get("n_fronts"),
+                "mdot_err_max_eval": res["gate"]["indicators"].get("mdot_err_max")})
+    if gate:
+        rg = forward_moc(ew, L, ig.moc, line)
+        out["gate"] = gate_record(rg)
+        out["mdot_err_max"] = rg["gate"]["indicators"].get("mdot_err_max") if rg.get("net") is not None else None
+        if rg.get("net") is not None:
+            wg_ = wall_points(rg)
+            wg_ = wg_[np.argsort(wg_[:, 0])]
+            ne = min(len(wg_), int(np.sum(inL)))
+            out["nodes_max_abs_diff"] = float(np.max(np.abs(wg_[:ne] - w[:ne]))) if ne else None
+            out["n_nodes_gate_run"] = int(len(wg_))
+    out["time_s"] = time.time() - t0
     return out
