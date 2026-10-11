@@ -875,6 +875,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         ST neighbor_accum[5];
         block_dplur::zero5(neighbor_accum);
         ST dbgLineViscSum = static_cast<ST>(0.0);   // デバッグ: ライン面のスカラー粘性の対角の和 (値 2 で外した量)
+        ST dbgOffViscSum = static_cast<ST>(0.0);    // デバッグ: ライン外の面のスカラー粘性の対角の和 (plan tooling-nozzle-core-grid §4.50)
 
         const geom_int plane_begin = cell_planes_index[ic];
         const geom_int plane_end = cell_planes_index[ic + 1];
@@ -974,7 +975,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 // 粘性対角は residual の粘性流束 Jacobian (2ν·ss²/dcc_dot_s = 2ν·delta/dcc) と整合させる
                 // (旧 face_area·(2ν/delta) は ≈2ν に潰れ近軸で r 重み喪失・ゼロ面積面にスプリアス。詳細は site1 コメント)。
                 const ST viscous_diag = static_cast<ST>(2.0) * nu_eff * delta / dcc;
-                if (isLineFace) dbgLineViscSum += viscous_diag;
+                if (isLineFace) dbgLineViscSum += viscous_diag; else dbgOffViscSum += viscous_diag;
                 if (isLineFace && lineViscCoupling >= 2) {
                     // 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian §4.1)。ライン面では従来の
                     // スカラー 2ν·δ/dcc の代わりに、残差と同じ面の μ_f・k_f で D (自節点) と K (ライン上の隣) を組む。
@@ -1070,7 +1071,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         for (int i = 0; i < 5; ++i) {
             rhs[i] += neighbor_accum[i];
         }
-        if (dbgLineVisc != nullptr && storeLU != 0) dbgLineVisc[ic] = static_cast<flow_float>(dbgLineViscSum);
+        if (dbgLineVisc != nullptr && storeLU != 0) {
+            dbgLineVisc[ic] = static_cast<flow_float>(dbgLineViscSum);
+            dbgLineVisc[(size_t)nCells_all + ic] = static_cast<flow_float>(dbgOffViscSum);   // 後半はライン外の面の和 (確保は 2·nCells_all)
+        }
 
         // 軸対称ソース項のヤコビアンを対角ブロックに加える（roUy 行 = index 2）。詳細は実装ドキュメント参照。
         // axisRFloor 帯 (r 床, ソース不課) は Jacobian も課さない。
@@ -1545,8 +1549,8 @@ static void initOnce(mesh& msh) {
         if (!hit) continue;
         for (geom_int p = off[l]; p < off[l + 1]; ++p) { g.nodes.push_back(cells[p]); g.lineOf.push_back(l); }
     }
-    gpuErrchk(cudaMalloc((void**)&g.viscBuf, sizeof(flow_float) * msh.nCells_all));
-    gpuErrchk(cudaMemset(g.viscBuf, 0, sizeof(flow_float) * msh.nCells_all));
+    gpuErrchk(cudaMalloc((void**)&g.viscBuf, sizeof(flow_float) * 2 * msh.nCells_all));   // 前半: ライン面、後半: ライン外の面のスカラー粘性の対角の和
+    gpuErrchk(cudaMemset(g.viscBuf, 0, sizeof(flow_float) * 2 * msh.nCells_all));
     printf("[lineDump] %s: factor %d 回目、%zu 節点 (要求 %zu 節点を含むライン)\n", g.dir.c_str(), g.targetCall, g.nodes.size(), want.size());
 }
 template<typename T>
@@ -1594,6 +1598,7 @@ static void atFactor(solverConfig& cfg, mesh& msh, variables& var) {
     putAoS25("Kprev", msh.line_Kprev_d, n);
     putAoS25("Knext", msh.line_Knext_d, n);
     put<flow_float>("scalar_visc_line", {g.viscBuf}, n);
+    put<flow_float>("scalar_visc_off", {g.viscBuf + n}, n);
     put<flow_float>("dt_vol", {var.c_d["dt_local"], var.c_d["volume"]}, n);
     put<geom_int>("flags_wall_iso_axis", {msh.wall_flag_d, msh.iso_wall_flag_d, msh.axis_flag_d}, (size_t)msh.nCells);   // フラグは節点の範囲 (nCells) で確保
     put<flow_float>("state_ro_roU_roe_cp_gamma", {var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"], var.c_d["cp"], var.c_d["gamma"]}, n);
