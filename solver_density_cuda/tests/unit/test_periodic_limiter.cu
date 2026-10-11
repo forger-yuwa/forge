@@ -118,12 +118,28 @@ struct Chain {
 
 struct DevChain {
     geom_int *pc, *cpi, *cp; geom_float *vol, *ccx, *ccy, *ccz, *pcx, *pcy, *pcz;
+    // 座標の差の面の配列 (plans/active/architecture-float-state-double-geometry.md 段 ④ でカーネルが読む形):
+    // ge = cc[ic1] − cc[ic0]、r0 = pc − cc[ic0]、r1 = pc − cc[ic1]。試験の座標は float なので、従来の float の引き算と同じ値。
+    geom_float *ge[3], *r0[3], *r1[3];
     DevChain(const Chain& m, float volume) {
         std::vector<geom_float> v(m.nc, volume);
         pc = up(m.plane_cells); cpi = up(m.cpi); cp = up(m.cp); vol = up(v);
         ccx = up(m.ccx); ccy = up(m.ccy); ccz = up(m.ccz); pcx = up(m.pcx); pcy = up(m.pcy); pcz = up(m.pcz);
+        const std::vector<geom_float>* cc[3] = {&m.ccx, &m.ccy, &m.ccz};
+        const std::vector<geom_float>* pcv[3] = {&m.pcx, &m.pcy, &m.pcz};
+        for (int k = 0; k < 3; ++k) {
+            std::vector<geom_float> e(m.nNormal), a(m.nNormal), b(m.nNormal);
+            for (int ip = 0; ip < m.nNormal; ++ip) {
+                const geom_int i0 = m.plane_cells[2*ip], i1 = m.plane_cells[2*ip+1];
+                e[ip] = (*cc[k])[i1] - (*cc[k])[i0];
+                a[ip] = (*pcv[k])[ip] - (*cc[k])[i0];
+                b[ip] = (*pcv[k])[ip] - (*cc[k])[i1];
+            }
+            ge[k] = up(e); r0[k] = up(a); r1[k] = up(b);
+        }
     }
-    ~DevChain() { cudaFree(pc); cudaFree(cpi); cudaFree(cp); cudaFree(vol); cudaFree(ccx); cudaFree(ccy); cudaFree(ccz); cudaFree(pcx); cudaFree(pcy); cudaFree(pcz); }
+    ~DevChain() { cudaFree(pc); cudaFree(cpi); cudaFree(cp); cudaFree(vol); cudaFree(ccx); cudaFree(ccy); cudaFree(ccz); cudaFree(pcx); cudaFree(pcy); cudaFree(pcz);
+                  for (int k = 0; k < 3; ++k) { cudaFree(ge[k]); cudaFree(r0[k]); cudaFree(r1[k]); } }
 };
 
 // 2 段 (極値 → group gather → ψ (合併極値) → group min) を鎖に掛ける。root==identity なら 1 段と同義。
@@ -141,7 +157,8 @@ static std::vector<float> two_stage(const Chain& m, const DevChain& d, const std
     gather_max(n, droot, dmax); gather_min(n, droot, dmin);
     // 現行カーネルは limScaled/qRef/eps2Coef/lenArea/A_planar も取る (plan §4.32)。
     // 平面でない試験鎖なので lenArea=0 (cbrt(volume)) を使い、A_planar には volume を渡す。
-    limiter_psi_merged_d<SCALED><<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.pc, d.cpi, d.cp, d.vol, d.ccx, d.ccy, d.ccz, d.pcx, d.pcy, d.pcz,
+    limiter_psi_merged_d<SCALED><<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.pc, d.cpi, d.cp, d.vol,
+        d.ge[0], d.ge[1], d.ge[2], d.r0[0], d.r0[1], d.r0[2], d.r1[0], d.r1[1], d.r1[2],
         1.0e-30f, dQ, dmax, dmin, dlim, dgx, dgy, dgz,
         matchRecon, 1 /*edgeMid*/, convM,
         limScaled, qRef, eps2Coef, 0 /*lenArea*/, d.vol);
@@ -158,7 +175,8 @@ static std::vector<float> one_stage_scaled(const Chain& m, const DevChain& d, in
     const int n = m.nc;
     std::vector<float> zero(n, 0.f), one(n, 1.f);
     float *dQ = up(Q), *dgx = up(gx), *dgy = up(zero), *dgz = up(zero), *dlim = up(one);
-    limiter_r1_scaled_d<<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.pc, d.cpi, d.cp, d.vol, d.ccx, d.ccy, d.ccz, d.pcx, d.pcy, d.pcz,
+    limiter_r1_scaled_d<<<(n+127)/128,128>>>(scheme, n, m.nNormal, d.pc, d.cpi, d.cp, d.vol,
+        d.r0[0], d.r0[1], d.r0[2], d.r1[0], d.r1[1], d.r1[2],
         1.0e-30f, dQ, dlim, dgx, dgy, dgz);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
     auto out = down(dlim, n);

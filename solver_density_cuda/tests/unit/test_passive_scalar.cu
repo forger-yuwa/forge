@@ -47,7 +47,19 @@ struct Chain {
         pcx.resize(nPlanes); pcy.assign(nPlanes, 0.f); pcz.assign(nPlanes, 0.f); fx.assign(nPlanes, 0.5f);
         for (int ip = 0; ip < nNormal; ++ip) pcx[ip] = (ip+1)*h;
         pcx[nNormal] = 0.f; pcx[nNormal+1] = n*h;
+        // 面の両側の pc − cc (plans/active/architecture-float-state-double-geometry.md 段 ④ でリミタが読む形):
+        // r0 = pc − cc[ic0]、r1 = pc − cc[ic1]。試験の座標は float なので、従来の float の引き算と同じ値。
+        const std::vector<geom_float>* cc[3] = {&ccx, &ccy, &ccz};
+        const std::vector<geom_float>* pcv[3] = {&pcx, &pcy, &pcz};
+        for (int k = 0; k < 3; ++k) {
+            r0[k].resize(nPlanes); r1[k].resize(nPlanes);
+            for (int ip = 0; ip < nPlanes; ++ip) {
+                r0[k][ip] = (*pcv[k])[ip] - (*cc[k])[plane_cells[2*ip]];
+                r1[k][ip] = (*pcv[k])[ip] - (*cc[k])[plane_cells[2*ip+1]];
+            }
+        }
     }
+    std::vector<geom_float> r0[3], r1[3];
 };
 
 // (a) リミッタ: 指定分布 Q (nCells 実セル) と勾配 (中心差分) で ψ を計算。
@@ -60,12 +72,14 @@ static std::vector<float> run_limiter(const Chain& m, const std::vector<float>& 
     geom_int *dpc=up(m.plane_cells),*dcpi=up(m.cpi),*dcp=up(m.cp);
     geom_float *dvol=up(vol),*dccx=up(m.ccx),*dccy=up(m.ccy),*dccz=up(m.ccz),*dpcx=up(m.pcx),*dpcy=up(m.pcy),*dpcz=up(m.pcz);
     float *dQ=up(Q),*dgx=up(gx),*dgy=up(gy),*dgz=up(gz),*dlim=up(lim);
-    limiter_r1_scaled_d<<<(m.n+127)/128,128>>>(scheme, m.n, m.nNormal, dpc, dcpi, dcp, dvol, dccx, dccy, dccz, dpcx, dpcy, dpcz,
+    geom_float *dr0x=up(m.r0[0]),*dr0y=up(m.r0[1]),*dr0z=up(m.r0[2]),*dr1x=up(m.r1[0]),*dr1y=up(m.r1[1]),*dr1z=up(m.r1[2]);
+    limiter_r1_scaled_d<<<(m.n+127)/128,128>>>(scheme, m.n, m.nNormal, dpc, dcpi, dcp, dvol, dr0x, dr0y, dr0z, dr1x, dr1y, dr1z,
         1.0e-30f, dQ, dlim, dgx, dgy, dgz);
     cudaError_t e = cudaDeviceSynchronize(); if (e != cudaSuccess) { printf("CUDA error %s\n", cudaGetErrorString(e)); ++g_fail; }
     auto out = down(dlim, (size_t)m.n);
     cudaFree(dpc); cudaFree(dcpi); cudaFree(dcp); cudaFree(dvol); cudaFree(dccx); cudaFree(dccy); cudaFree(dccz); cudaFree(dpcx); cudaFree(dpcy); cudaFree(dpcz);
     cudaFree(dQ); cudaFree(dgx); cudaFree(dgy); cudaFree(dgz); cudaFree(dlim);
+    cudaFree(dr0x); cudaFree(dr0y); cudaFree(dr0z); cudaFree(dr1x); cudaFree(dr1y); cudaFree(dr1z);
     return out;
 }
 
@@ -162,6 +176,7 @@ static AdvResult run_advection(const Chain& m, int order, int nStep, float cfl)
     geom_float *dvol=up(m.vol),*dccx=up(m.ccx),*dccy=up(m.ccy),*dccz=up(m.ccz),*dpcx=up(m.pcx),*dpcy=up(m.pcy),*dpcz=up(m.pcz);
     float *dro=up(ro),*drophi=up(rophi),*drophiN=up(rophiN),*dphi=up(phi),*dgx=up(gx),*dgy=up(std::vector<float>(n+2,0.f)),*dgz=up(std::vector<float>(n+2,0.f)),*dlim=up(lim),*dres=up(res),*dtd=up(td),*dcorr=up(corr),*dmf=up(mflux);
     float *dPface=up(std::vector<float>(m.nPlanes,0.f));
+    geom_float *dr0x=up(m.r0[0]),*dr0y=up(m.r0[1]),*dr0z=up(m.r0[2]),*dr1x=up(m.r1[0]),*dr1y=up(m.r1[1]),*dr1z=up(m.r1[2]);
     std::vector<float*> hres={dres}, htd={dtd}, hro={drophi}; float **dres2=up(hres), **dtd2=up(htd), **drophi2=up(hro);
     std::vector<double> stats(4,0.0); double* dstats=up(stats);
     double massRaw = mass0;
@@ -171,7 +186,7 @@ static AdvResult run_advection(const Chain& m, int order, int nStep, float cfl)
         auto rh = down(drophi, (size_t)n+2); for (int i = 0; i < n+2; ++i) phi[i] = rh[i]/ro[i];
         for (int i = 0; i < n; ++i) { const float ql=(i>0)?phi[i-1]:phi[n], qr=(i<n-1)?phi[i+1]:phi[n+1]; gx[i]=(qr-ql)/(2.f*h); }
         cudaMemcpy(dphi, phi.data(), (n+2)*sizeof(float), cudaMemcpyHostToDevice); cudaMemcpy(dgx, gx.data(), (n+2)*sizeof(float), cudaMemcpyHostToDevice);
-        if (order == 2) limiter_r1_scaled_d<<<(n+127)/128,128>>>(2, n, m.nNormal, dpc, dcpi, dcp, dvol, dccx, dccy, dccz, dpcx, dpcy, dpcz, 1.0e-30f, dphi, dlim, dgx, dgy, dgz);
+        if (order == 2) limiter_r1_scaled_d<<<(n+127)/128,128>>>(2, n, m.nNormal, dpc, dcpi, dcp, dvol, dr0x, dr0y, dr0z, dr1x, dr1y, dr1z, 1.0e-30f, dphi, dlim, dgx, dgy, dgz);
         face_recon_d<<<(m.nPlanes+127)/128,128>>>(m.nPlanes, n, dpc, dccx, dpcx, dphi, dgx, dlim, dmf, order, dPface);
         cudaMemset(dres, 0, n*sizeof(float)); cudaMemset(dtd, 0, n*sizeof(float));
         species_advection_faceY_d<<<(m.nPlanes+127)/128,128>>>(n, m.nPlanes, dnhp, dpc, dro, dmf, 1, dPface, dres2, dtd2, 0, drophi2, 1);
@@ -195,6 +210,7 @@ static AdvResult run_advection(const Chain& m, int order, int nStep, float cfl)
     cudaFree(dpc); cudaFree(dcpi); cudaFree(dcp); cudaFree(dnhp); cudaFree(dvol); cudaFree(dccx); cudaFree(dccy); cudaFree(dccz); cudaFree(dpcx); cudaFree(dpcy); cudaFree(dpcz);
     cudaFree(dro); cudaFree(drophi); cudaFree(drophiN); cudaFree(dphi); cudaFree(dgx); cudaFree(dgy); cudaFree(dgz); cudaFree(dlim); cudaFree(dres); cudaFree(dtd); cudaFree(dcorr); cudaFree(dmf); cudaFree(dPface);
     cudaFree(dres2); cudaFree(dtd2); cudaFree(drophi2); cudaFree(dstats);
+    cudaFree(dr0x); cudaFree(dr0y); cudaFree(dr0z); cudaFree(dr1x); cudaFree(dr1y); cudaFree(dr1z);
     return R;
 }
 

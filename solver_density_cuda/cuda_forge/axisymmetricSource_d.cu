@@ -1,5 +1,6 @@
 #include "axisymmetricSource_d.cuh"
 #include "cuda_forge/cudaWrapper.cuh"
+#include "cuda_forge/axisSymmetryPin_d.cuh"   // 軸ノード 1 つの状態ピン (enforceAxisSymmetry_d の本体)
 
 
 // 軸対称 (B 流儀) — 半径方向運動量の圧力・粘性ソース項を residual に加算する。
@@ -299,28 +300,20 @@ void axisymmetricSourceSU2_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , 
 
 // node-centered 軸対称: 軸上 CV (R=0) で半径方向運動量を 0 に (軸対称の対称条件)。
 // エネルギー整合のため、除去する半径方向運動エネルギー 0.5*roUy^2/ro を roe からも引く
-// (これを怠ると内部エネルギー=圧力が過大になり発散する)。
+// (これを怠ると内部エネルギー=圧力が過大になり発散する)。1 節点分の処理は axisSymmetryPin_d.cuh。
 __global__ void enforceAxisSymmetry_d
 (
     geom_int nCells, geom_int* axis_flag,
     flow_float* ro, flow_float* roUy, flow_float* roe, flow_float* Uy,
     // 擬似時間ステップ開始値も同時にピン (implicit commit ro=roN+dq が stale roUyN を巻き戻さないため)。nullptr 可。
-    flow_float* roUyN, flow_float* roeN, flow_float* roN
+    flow_float* roUyN, flow_float* roeN, flow_float* roN,
+    // qAccumulatorFP64 の正本 (commit の基準)。Q_N と同じ射影を当てる。nullptr = OFF (OFF の演算列は従来と同一)。
+    double* qacc_roUy, double* qacc_roe
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
-    if (ic < nCells && axis_flag[ic] == 1) {
-        const flow_float r = ro[ic];
-        if (r > (flow_float)0.0) {
-            roe[ic] -= (flow_float)0.5 * roUy[ic] * roUy[ic] / r; // 半径方向 KE を除去
-        }
-        roUy[ic] = (flow_float)0.0;
-        Uy[ic]   = (flow_float)0.0;
-        if (roUyN != nullptr) {
-            const flow_float rN = roN[ic];
-            if (rN > (flow_float)0.0) roeN[ic] -= (flow_float)0.5 * roUyN[ic] * roUyN[ic] / rN;
-            roUyN[ic] = (flow_float)0.0;
-        }
+    if (ic < nCells) {
+        axisSymmetryPinCell(ic, axis_flag, ro, roUy, roe, Uy, roUyN, roeN, roN, qacc_roUy, qacc_roe);
     }
 }
 
@@ -362,7 +355,10 @@ void enforceAxisSymmetry_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , me
         var.c_d["ro"], var.c_d["roUy"], var.c_d["roe"], var.c_d["Uy"],
         var.c_d.count("roUyN") ? var.c_d["roUyN"] : nullptr,
         var.c_d.count("roeN") ? var.c_d["roeN"] : nullptr,
-        var.c_d.count("roN") ? var.c_d["roN"] : nullptr
+        var.c_d.count("roN") ? var.c_d["roN"] : nullptr,
+        // qAccumulatorFP64 の正本 (確保されていなければ nullptr = OFF)。軸対称での ON は FORGE_QACC_AXISYM_DIAG=1 の
+        // 診断用だけ (main の拒否、plan architecture-float-state-double-geometry §5.1 #18)。
+        var.qacc_d[2], var.qacc_d[4]
     );
     gpuErrchk( cudaPeekAtLastError() );
     gpuErrchkKernelSync();

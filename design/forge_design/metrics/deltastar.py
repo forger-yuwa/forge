@@ -71,8 +71,13 @@ def deltastar_from_run(mesh_h5, res_h5, wall_xy, scale: float,
 
 
 # --- 固定 Euler 基準のコア整合質量欠損抽出 (plans/active/tooling-nozzle-deltastar-core-matched-euler.md) ----
-def _load_structured(run_dir):
-    """node 構造格子 run (index = i*nj + j) を (info, x[ni,nj], r[ni,nj], q=ρUx[ni,nj]) で返す (r_t 単位)。"""
+def _load_structured(run_dir, remap_constant_x: bool = False):
+    """node 構造格子 run (index = i*nj + j) を (info, x[ni,nj], r[ni,nj], q=ρUx[ni,nj]) で返す (r_t 単位)。
+
+    remap_constant_x (2026-10-08, plan tooling-nozzle-isothermal-wall-chain §5.1 #21、codex diagnose): 近壁を壁法線に沿わせた格子
+    (`mesh2d.wall_normal_layer`) では列 i の中で x が変わる (x ≈ 40 で列内の幅 0.15 r_t)。True なら各行 j に沿って x 方向に線形補間し、
+    列 i を壁の station の x (= 軸の x、x[i, 0]) の一定 x の断面にそろえる。行の x の範囲の外は端値 (両端の数列だけ)。
+    False (既定) は従来どおり列をそのまま使う (列内で x が一定の格子では両者は一致する)。"""
     import json
     from pathlib import Path
     run_dir = Path(run_dir)
@@ -86,8 +91,21 @@ def _load_structured(run_dir):
         q = f["/VALUE/ro"][:] * f["/VALUE/Ux"][:]
     if len(q) != ni * nj or len(nc) != ni * nj:
         raise ValueError(f"{run_dir}: node 構造格子 run でない (VALUE {len(q)}, COORD {len(nc)}, ni*nj {ni*nj})")
-    return dict(info=info, S=S, res=res.name,
-                x=nc[:, 0].reshape(ni, nj) / S, r=nc[:, 1].reshape(ni, nj) / S, q=q.reshape(ni, nj))
+    x = nc[:, 0].reshape(ni, nj) / S; r = nc[:, 1].reshape(ni, nj) / S; q = q.reshape(ni, nj)
+    out = dict(info=info, S=S, res=res.name, x=x, r=r, q=q)
+    if remap_constant_x:
+        xt = x[:, 0].copy()                                  # 列の目標の x (軸の節点 = 壁の station の x)
+        rr = np.empty_like(r); qq = np.empty_like(q)
+        clamped = 0
+        for j in range(nj):
+            xj = x[:, j]
+            if not np.all(np.diff(xj) > 0):
+                raise ValueError(f"{run_dir}: 行 {j} の x が単調でない (remap_constant_x)")
+            clamped += int(np.sum((xt < xj[0]) | (xt > xj[-1])))
+            rr[:, j] = np.interp(xt, xj, r[:, j]); qq[:, j] = np.interp(xt, xj, q[:, j])
+        out.update(x=np.repeat(xt[:, None], nj, axis=1), r=rr, q=qq, remap_constant_x=True, remap_clamped_points=clamped,
+                   remap_max_column_dx=float(np.max(np.ptp(x, axis=1))))
+    return out
 
 
 def massflow_ratio(ns_run, euler_run) -> dict:
@@ -387,7 +405,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       edge_eps: float = 0.003, edge_c: float = 1.25, edge_window: float = 3.0,
                                       edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.125, edge_y0_fac: float = 1.2,
                                       edge_min_frac: float = 0.016, edge_ymax_frac: float = 0.5, edge_ref_min_frac: float = 0.0133,
-                                      edge_y0_shift: float = 1.0, return_ladders: bool = False) -> dict:
+                                      edge_y0_shift: float = 1.0, return_ladders: bool = False,
+                                      remap_constant_x: bool = False) -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
 
     定義 (plan §4.2–4.4):
@@ -419,7 +438,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     import json
     from pathlib import Path
     from scipy.interpolate import make_smoothing_spline
-    N = _load_structured(ns_run)
+    N = _load_structured(ns_run, remap_constant_x=remap_constant_x)
     E = _load_structured(euler_run)
     xE = E["x"][:, 0]
     rwE_col = E["r"][:, -1]
@@ -618,6 +637,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                              outer_frac=outer_frac, smooth_lam=smooth_lam, gate_core_rms=gate_core_rms,
                              gate_sens=gate_sens, gate_sens_floor=gate_sens_floor, refine=refine,
                              ns_res=N["res"], euler_res=E["res"],
+                             **({"remap_constant_x": True, "remap_max_column_dx": N["remap_max_column_dx"],
+                                 "remap_clamped_points": N["remap_clamped_points"]} if remap_constant_x else {}),
                              ns_run=str(ns_run), euler_run=str(euler_run)))
     out["massflow"] = massflow_ratio(ns_run, euler_run)
     if edge is not None:

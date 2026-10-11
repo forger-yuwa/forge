@@ -132,8 +132,9 @@ def _sizing_delta_supplier(p, init_cfg: dict, rtol: float | None = None):
 
     def supplier(d, rt):
         res, drx, info = integral_delta_r(p, d, init_cfg, scale=rt, rtol=rtol)
-        return drx, {"kind": "integral_delta_r (prepare_ns と同じ経路)", "settings": {k: info.get(k) for k in
+        return drx, {"kind": "integral_delta_r (prepare_ns と同じ経路)", "settings": {**{k: info.get(k) for k in
                      ("model", "thermal_bc", "cf_scale", "n_scale", "a_crocco", "closure", "theta0_m", "x_virtual_m")},
+                     **({"closure_version": info["closure_version"]} if "closure_version" in info else {})},
                      "smooth": info.get("smooth", {}).get("kind"),
                      "integral_rtol": float(res["solve_ivp"]["rtol"]), "integral_rtol_injected": rtol is not None}
     return supplier

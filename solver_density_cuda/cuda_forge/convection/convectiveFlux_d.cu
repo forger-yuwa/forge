@@ -211,6 +211,10 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             int fthy = 0;
             if (const char* e = getenv("FORGE_FACE_THERMOY"))      fthy = atoi(e);
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_faceThermoY,      &fthy, sizeof(int)));
+            int fhd = 0;
+            if (const char* e = getenv("FORGE_DIAG_FACE_H_DOUBLE")) fhd = atoi(e);
+            if (fhd) printf("[DIAG] FORGE_DIAG_FACE_H_DOUBLE: SLAU の TP 多成分の面エンタルピーを double で評価する (診断)\n");
+            CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_faceHDouble,      &fhd,  sizeof(int)));
             const int rem = (cfg.discretization == "node") ? 1 : 0;   // node は常にエッジ中点再構成
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_reconEdgeMid,     &rem,  sizeof(int)));
             const int sfr = cfg.speciesFaceReconstruction;   // config 由来 (env でない)
@@ -366,6 +370,10 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
         var.p_d["sx"]    , var.p_d["sy"] , var.p_d["sz"] , var.p_d["ss"],
         var.p_d["massflux"],
         msh.wall_flag_d };
+    // 再構成の座標の差 e・r0・r1 (plans/active/architecture-float-state-double-geometry.md §4.2a、段 ④)
+    geom.ge_x  = var.p_d["ge_x"];  geom.ge_y  = var.p_d["ge_y"];  geom.ge_z  = var.p_d["ge_z"];
+    geom.gr0_x = var.p_d["gr0_x"]; geom.gr0_y = var.p_d["gr0_y"]; geom.gr0_z = var.p_d["gr0_z"];
+    geom.gr1_x = var.p_d["gr1_x"]; geom.gr1_y = var.p_d["gr1_y"]; geom.gr1_z = var.p_d["gr1_z"];
     PrimState st {
         var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"],
         var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["P"], var.c_d["Ht"], var.c_d["sonic"],
@@ -517,6 +525,8 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             var.p_d["pcx"]   , var.p_d["pcy"], var.p_d["pcz"], var.p_d["fx"],
             var.p_d["sx"]    , var.p_d["sy"] , var.p_d["sz"] , var.p_d["ss"],
             (nodeMode ? var.p_d["massflux"] : nullptr),   // node 弱形式境界のみ massflux 書き戻し (cell は主ループが書く)
+            // 面の内部側の pc − cc (r0、段 ④)
+            var.p_d["gr0_x"], var.p_d["gr0_y"], var.p_d["gr0_z"],
 
             // basic variables
             var.c_d["ro"] ,

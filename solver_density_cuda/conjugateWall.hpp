@@ -64,6 +64,9 @@ struct FirstInterior {
 
 // 第一内部点マップを作る (physID ごとにキャッシュ。メッシュは実行中に変わらない)。
 const FirstInterior& firstInterior(const solverConfig& cfg, const mesh& msh, const bcond& bc);
+// 診断用 (FORGE_DIAG_GEOM_STAGE2_DUMP、plans/active/architecture-float-state-double-geometry.md §6.3): キャッシュせず作り直す。
+// legacy = false は firstInterior と同じ (double の写しから)、true は段 ① まで (geom_float の座標と面ベクトル)。ログは出さない。
+FirstInterior firstInteriorForDiag(const solverConfig& cfg, const mesh& msh, const bcond& bc, bool legacy);
 
 // 壁面ダンプ用の界面診断を bc.diagVar に詰める (host のみ。デバイス bvar は触らない)。
 // 呼び出しは bc.copyVariables_bplane_D2H() の**後**。cfg.interfaceDiag != 1 なら何もしない。
