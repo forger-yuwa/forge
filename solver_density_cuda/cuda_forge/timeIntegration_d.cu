@@ -1610,6 +1610,26 @@ static void afterSolve(mesh& msh, variables& var) {
 }
 } // namespace line_dump
 
+// 確定する補正に対する右辺の書き出し (診断、既定 off。plan tooling-nozzle-core-grid §4.48、codex 2026-10-11 mismatch):
+// FORGE_LINE_DUMP_FINAL=1 のとき、書き出し中の外反復で sweep の輪が終わった後 (最後の swap の後) に、dq_block_old (= 確定する補正 δ_K) を
+// 近傍の補正として右辺 b(δ_K) = R − Nδ_K を 1 回だけ組み直し、rhs_final・dqold_final を書く。状態・係数は変えず、solve・swap・commit はしない
+// (dq_block_new は作業領域として上書きされるが、確定は dq_block_old を使うので結果に影響しない。line の K の格納は loop > 0 なので起きない)。
+static bool lineDumpFinalEnabled() {
+    static const bool v = [](){ const char* e = getenv("FORGE_LINE_DUMP_FINAL"); return e && atoi(e) != 0; }();
+    return v;
+}
+void lineDumpFinalRhs_wrapper(int nSweep, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!lineDumpFinalEnabled() || !line_dump::g.on || line_dump::g.sweep < 0) return;
+    timeIntegration_d_wrapper(nSweep, cfg, cuda_cfg, msh, var, 0);
+    gpuErrchk(cudaDeviceSynchronize());
+    const size_t n = msh.nCells_all;
+    line_dump::put<flow_float>("rhs_final", {var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"]}, n);
+    line_dump::put<flow_float>("dqold_final", {var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"]}, n);
+    printf("[lineDump] 確定する補正に対する右辺を書いた (sweep %d の後)\n", nSweep);
+    line_dump::g.sweep = -1;   // この外反復の書き出しを閉じる
+}
+
 // 診断: 値 2/3 の薄層の項のマスク (FORGE_LVC_TERMS、既定 7 = 全部。plan time_integration-line-viscous-jacobian §6.8)
 static int lineViscTermsEnv() {
     static const int v = [](){ const char* e = getenv("FORGE_LVC_TERMS"); const int t = (e && *e) ? atoi(e) : 7;
