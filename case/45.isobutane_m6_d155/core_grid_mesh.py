@@ -189,6 +189,35 @@ def cmd_select_g1x(a):
 REF_CAP = 0.015          # Gref の主流の上限 (plan §4.16)
 
 
+def cmd_yaml_grefc(a):
+    """Grefc (§4.36) の YAML: Gref の YAML から name・ni・ar_max だけを変える。station は core_grid_mesh.py の
+    use_grefc_stations で縮流部 x∈[−8, −2] r_t だけを並べ直す (YAML だけでは再現できないので、準備はこの道具で行う)。"""
+    wall = Wall(Path(a.wall_ref)); m0 = mesh_block(YAML_NJ["Gref"], REF_CAP)
+    prm0 = _mesh_params_from(m0, wall.scale, int(m0["ni"]), int(m0["nj"]), float(m0["wall_first_frac"]))
+    xs, (ia, ib, nseg) = grefc_stations(wall.x_in, wall.x_e, prm0.throat_refine, prm0.throat_width, prm0.local_center,
+                                        prm0.local_refine, prm0.local_width, prm0.x_density_table)
+    ni = len(xs); base = yaml.safe_load(PROBLEM.read_text()); name = f"{base['name']}_cgrefc"
+    src = (HERE / f"{base['name']}_cgref.yaml").read_text()
+    head = (f"# plan tooling-nozzle-core-grid §4.36 の格子 Grefc (Gref = c {REF_CAP}・nj {YAML_NJ['Gref']} に加え、縮流部 x∈[{GREFC_SEG[0]:g}, {GREFC_SEG[3]:g}] r_t だけ\n"
+            f"# 流れ方向の密度を max(1, d/2) に並べ直す。区間の外の列は Gref とビット単位で同じ。区間の列 {ib - ia} → {nseg}、ni {ni})。\n"
+            f"# **station は YAML の x_density_table では決まらない**: core_grid_mesh.py の use_grefc_stations を有効にして生成する (prep Grefc)。\n")
+    body = []; cnt = {"name": 0, "ni": 0, "ar": 0}
+    for ln in src.splitlines():
+        if ln.startswith("#"):
+            continue
+        if ln.startswith("name: "):
+            ln = f"name: {name}"; cnt["name"] += 1
+        elif ln.startswith("  ni: "):
+            ln = f"  ni: {ni}"; cnt["ni"] += 1
+        elif ln.startswith("  ar_max: "):
+            ln = f"  ar_max: {AR_MAX_G1X}"; cnt["ar"] += 1
+        body.append(ln)
+    if any(v != 1 for v in cnt.values()):
+        raise SystemExit(f"Grefc: 置き換える行の数が 1 でない {cnt} — 止める")
+    (HERE / f"{name}.yaml").write_text(head + "\n".join(body) + "\n")
+    return {"Grefc": {"file": f"{name}.yaml", "ni": ni, "seg_cols_ref": ib - ia, "seg_cols_new": nseg, "seg_x": [float(xs[ia]), float(xs[ia + nseg])]}}
+
+
 def cmd_select_ref(a):
     """Gref (plan §4.16): 主流の上限 0.015 r_w、壁際の比は各列で G0 のその列の比以下 (境界層は G0 と同じかそれより細かい)。条件を満たす最小の nj。"""
     wall = Wall(Path(a.wall_ref))
@@ -419,6 +448,29 @@ def cmd_post_ab(a):
 
 YAML_NAMES = {"G1": "cg1", "Gc": "cgc", "G2": "cg2", "Gref": "cgref"}
 YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170, "Gref": 160}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
+# Grefc (plan §4.36): Gref の station を保ったまま、縮流部 x∈[−8, −2] r_t の区間だけを並べ直す (密度を max(1, d/2) に、
+# 端の 0.5 r_t でなめらかにつなぐ)。区間の外の列は Gref とビット単位で同じ。メッシャの _x_stations を Grefc の準備のときだけ差し替える。
+GREFC_SEG = (-8.0, -7.5, -2.5, -2.0)     # (区間の始め, 1/2 になり始め, 1/2 の終わり, 区間の終わり) [r_t]
+_ORIG_X_STATIONS = mesh2d._x_stations
+def grefc_stations(x0, x1, refine, width, local_center, local_refine, local_width, table, ni_ref=4719):
+    xs = _ORIG_X_STATIONS(x0, x1, ni_ref, refine, width, local_center, local_refine, local_width, table)
+    t = np.asarray(table, float); a0, a1, b1, b0 = GREFC_SEG
+    ia = int(np.argmin(np.abs(xs - a0))); ib = int(np.argmin(np.abs(xs - b0))); xa, xb = float(xs[ia]), float(xs[ib])
+    xf = np.linspace(xa, xb, 20001); d = np.interp(xf, t[:, 0], t[:, 1])
+    w = np.clip((xf - xa) / (a1 - xa), 0, 1) * np.clip((xb - xf) / (xb - b1), 0, 1)        # 0 → 1 → 0 (端でなめらかに)
+    w = w * w * (3 - 2 * w)                                                                   # smoothstep
+    dn = d * (1 - w * (1 - np.maximum(1.0, d / 2) / d))
+    cr = np.concatenate([[0], np.cumsum(0.5 * (d[1:] + d[:-1]) * np.diff(xf))]); cn = np.concatenate([[0], np.cumsum(0.5 * (dn[1:] + dn[:-1]) * np.diff(xf))])
+    nseg = int(round((ib - ia) * cn[-1] / cr[-1]))
+    seg = np.interp(np.linspace(0, cn[-1], nseg + 1), cn, xf); seg[0], seg[-1] = xa, xb
+    return np.concatenate([xs[:ia], seg, xs[ib + 1:]]), (ia, ib, nseg)
+def _grefc_x_stations(x0, x1, ni, refine, width, local_center=0.0, local_refine=1.0, local_width=0.75, density_table=None):
+    xs, _ = grefc_stations(x0, x1, refine, width, local_center, local_refine, local_width, density_table)
+    if len(xs) != ni:      # Grefc の ni でない呼び出し (G0 との照合など) は元の関数で作る
+        return _ORIG_X_STATIONS(x0, x1, ni, refine, width, local_center, local_refine, local_width, density_table)
+    return xs
+def use_grefc_stations(on=True):
+    mesh2d._x_stations = _grefc_x_stations if on else _ORIG_X_STATIONS
 KINK_EXCEPT = {"Grefx": 2.01}   # 準備の検査の折れ角の上限 2° の例外 (ユーザ決定 2026-10-11、plan §4.21: 入口付近の 1 か所 2.002°)
 # x 方向を粗くした格子: 名前 → (YAML の tag, c, q_max の説明, nj, 半径方向の元, plan の節)
 XARMS = {"G1x": ("cg1x", 0.03, 1.3, 75, "G1", "§5.1 #10"), "Grefx": ("cgrefx", 0.015, "各列で G0 以下", 160, "Gref", "§4.21")}
@@ -516,7 +568,8 @@ def cmd_prep(a):
     if not conv.is_file() or NS.sha256_file(conv) != CP.CONV_SHA:
         raise SystemExit(f"REAL_CONVERTER ({conv}) が FP64 の変換器 (sha256 {CP.CONV_SHA[:16]}…) でない — 止める")
     arm = a.arm
-    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES[arm] if arm in YAML_NAMES else XARMS[arm][0]}.yaml"
+    problem = HERE / f"{yaml.safe_load(PROBLEM.read_text())['name']}_{YAML_NAMES[arm] if arm in YAML_NAMES else XARMS[arm][0] if arm in XARMS else 'cgrefc'}.yaml"
+    use_grefc_stations(arm == "Grefc")      # Grefc は縮流部だけ並べ直した station (§4.36)。他の格子では元の関数
     out = OUT / f"prep_{arm}"
     if out.exists():
         raise SystemExit(f"{out} が既にある — 止める")
@@ -724,13 +777,13 @@ def cmd_view(a):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view", "select-ref"])
+    ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["check-g0", "select", "geom-ab", "metric-ab", "bl-count", "post-ab", "yaml", "prep", "prep-compare", "prep-ic", "select-g1x", "view", "select-ref", "yaml-grefc"])
     ap.add_argument("--wall-ref", default=str(WALL_REF)); ap.add_argument("--g0-res", default=str(HERE / "run_0353_m9_L5" / "res_115000.h5"))
-    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref", "Grefx"], help="prep: 格子 / prep-ic: その格子だけを見る (出力 prep-ic_<格子>.json)")
+    ap.add_argument("arm", nargs="?", choices=["G1", "Gc", "G2", "G1x", "Gref", "Grefx", "Grefc"], help="prep: 格子 / prep-ic: その格子だけを見る (出力 prep-ic_<格子>.json)")
     ap.add_argument("--truth", choices=["pchip", "akima"], default="pchip", help="post-ab: 連続の場の作り方 (G0 の節点の補間)")
     ap.add_argument("--band-dir", default=str(HERE / "_band_ab" / "cold_pair"), help="帯の外縁の npz (theta_run_0181/0183_*.npz) の場所")
     a = ap.parse_args()
-    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x, "view": cmd_view, "select-ref": cmd_select_ref}[a.cmd](a)
+    out = {"check-g0": cmd_check_g0, "select": cmd_select, "geom-ab": cmd_geom_ab, "metric-ab": cmd_metric_ab, "bl-count": cmd_bl_count, "post-ab": cmd_post_ab, "yaml": cmd_yaml, "prep": cmd_prep, "prep-compare": cmd_prep_compare, "prep-ic": cmd_prep_ic, "select-g1x": cmd_select_g1x, "view": cmd_view, "select-ref": cmd_select_ref, "yaml-grefc": cmd_yaml_grefc}[a.cmd](a)
     out["problem"] = PROBLEM.name; out["wall_ref"] = a.wall_ref
     OUT.mkdir(parents=True, exist_ok=True)
     p = OUT / (f"{a.cmd}_{a.truth}.json" if a.cmd == "post-ab" else f"prep_{a.arm}.json" if a.cmd == "prep" else f"prep-ic_{a.arm}.json" if a.cmd == "prep-ic" and a.arm else f"{a.cmd}.json"); p.write_text(json.dumps(out, ensure_ascii=False, indent=1))
