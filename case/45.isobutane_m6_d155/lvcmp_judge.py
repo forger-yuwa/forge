@@ -43,6 +43,7 @@ EXPECT = {"time/deltaT/cfl": 4.0, "time/deltaT/cfl_pseudo": 4.0, "time/deltaT/im
           "time/deltaT/implicitSolvePrecision": None, "time/deltaT/axisTimestepBeta": None, "time/deltaT/lineViscousDtRelief": None,
           "output/extraFields": ["res_ro"]}
 ARM_CFG = {"L7": {"time/deltaT/lineViscCoupling": 3}, "L5": {"time/deltaT/lineViscCoupling": 3}, "L0": {"time/deltaT/lineViscCoupling": None}}
+KIND = {"L7": "L7", "L5": "L5", "L0": "L0"}   # 腕の名前 → 構成の種類 (§6.5 の再実行 L7r は L7 の構成。codex plan-3 M1)
 KEYS = ("theta_r_40", "theta_r_70", "theta_r_94", "Q_w")
 
 
@@ -142,7 +143,7 @@ def input_gates():
             diff_in = [fn for fn in SAME_FILES if not (d / fn).is_file() or sha(HERE / SRC / fn) != sha(d / fn)]
             g.append((f"{run}: 入力ファイル", diff_in == [], diff_in))
             c = cfg(run)
-            exp_ = {**EXPECT, **ARM_CFG[name]}
+            exp_ = {**EXPECT, **ARM_CFG[KIND[name]]}
             bad = {k: c.get(k) for k, v in exp_.items() if (k in c if v is None else c.get(k) != v)}
             g.append((f"{run}: 設定が腕 {name} の期待どおり", bad == {}, bad))
             log = (d / "forge_run.log").read_text(errors="replace")
@@ -150,7 +151,7 @@ def input_gates():
             g.append((f"{run}: 面エンタルピーの切替なし", "FORGE_DIAG_FACE_H_DOUBLE" not in log, None))
             vshow = "'lineViscCoupling' in 'time.deltaT': 3" in log
             mshow = "診断のマスク FORGE_LVC_TERMS=5 " in log
-            okv = {"L7": vshow and "FORGE_LVC_TERMS=" not in log, "L5": vshow and mshow, "L0": ("'lineViscCoupling' in 'time.deltaT'" not in log) and "FORGE_LVC_TERMS=" not in log}[name]
+            okv = {"L7": vshow and "FORGE_LVC_TERMS=" not in log, "L5": vshow and mshow, "L0": ("'lineViscCoupling' in 'time.deltaT'" not in log) and "FORGE_LVC_TERMS=" not in log}[KIND[name]]
             g.append((f"{run}: 値とマスクの表示が腕 {name} と合う", okv, None))
             lt = (d / "LVC_TERMS.txt").read_text().strip() if (d / "LVC_TERMS.txt").is_file() else None
             g.append((f"{run}: 台本が渡した FORGE_LVC_TERMS = {mk}", lt == mk, lt))
@@ -188,6 +189,21 @@ def assess(name):
     rows = sorted([x for x in (w.get("rows") or []) if x["step"] > 0], key=lambda x: x["step"])
     steps = [x["step"] for x in rows]
     info["n_rows"] = len(rows)
+    if st == "DIVERGED":                           # 初回の出力 (2500 step) の前の発散は系列が空 (codex plan-3 M5)
+        nf_rows = [x["step"] for x in rows if x.get("nonfinite") or x.get("nonfinite_all")]
+        nan = sorted((HERE / run).glob("res_nan_*.h5"))
+        logp = HERE / run / "forge_run.log"
+        log = logp.read_text(errors="replace") if logp.is_file() else ""
+        fs = w.get("fail_step")
+        if not (nf_rows or (nan and "Non-finite value detected" in log)):
+            return "INVALID", {**info, "why": "DIVERGED の証拠 (非有限の出力の行、res_nan と detectNaN のログ) が無い"}
+        fin = [n for n in steps if n not in nf_rows]
+        if fin and fin != list(range(OUT, fin[-1] + 1, OUT)):
+            return "INVALID", {**info, "why": "発散の前の系列が 2500 step ごとにそろっていない"}
+        if not fin and not (fs is not None and int(fs) <= OUT + OUT):
+            return "INVALID", {**info, "why": f"系列が空なのに失敗の step ({fs}) が初回の出力の前でない"}
+        info["diverged_at"] = fs
+        return "DIVERGED", info
     if not steps or len(set(steps)) != len(steps) or steps != list(range(OUT, steps[-1] + 1, OUT)):
         return "INVALID", {**info, "why": f"系列が {OUT} step ごとに欠け・重複なくそろっていない (行 {len(steps)}、最後 {steps[-1] if steps else None})"}
     # 記録係: 系列の全出力について sha256・全保存量の有限・ρ/P/T > 0 (見張りが消した出力の代わりの証拠、codex plan-2 m5)
@@ -212,8 +228,12 @@ def assess(name):
         yb_x, yb = XC.common_yb()
         again = CS.snapshot(HERE / run, int(n), yb_x, yb)
         row = rows[-1]
+        import math
+        vals = [(again.get(k), row.get(k)) for k in ("deficit",) + KEYS]
+        if not all(a_ is not None and b_ is not None and math.isfinite(float(a_)) and math.isfinite(float(b_)) for a_, b_ in vals):
+            return "INVALID", {**info, "why": "到達の出力の量 (記録・計算し直し) に欠けか非有限がある (codex plan-3 M3)"}
         diff = {k: (again.get(k), row.get(k)) for k in ("deficit",) + KEYS
-                if again.get(k) is None or row.get(k) is None or abs(float(again[k]) - float(row[k])) > 1e-12 * max(abs(float(again[k])), abs(float(row[k])), 1e-300)}
+                if abs(float(again[k]) - float(row[k])) > 1e-12 * max(abs(float(again[k])), abs(float(row[k])), 1e-300)}
         if diff:
             return "INVALID", {**info, "why": f"到達の出力から計算し直した量が系列の行と違う {diff}"}
         if seg is None or seg.startswith("DIVERGED"):

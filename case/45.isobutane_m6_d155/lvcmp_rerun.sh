@@ -116,10 +116,8 @@ python3 lvcmp_pregate.py --verify >> $LOG 2>&1 \
   || { echo "事前のゲートの記録が PASS でないか、証拠が記録と違う — 回さずに止める" >> $LOG; exit 1; }
 python3 -c "import sys; sys.path.insert(0, '.'); import cold_xcheck as XC; XC.common_yb()" >> $LOG 2>&1 \
   || { echo "見張りの初期化ができない — 回さずに止める" >> $LOG; exit 1; }
-others() {   # 他のセッションの forge の本数 (cwd が自分の作業ツリーの外)
-  local n=0
-  for p in $(pgrep -x forge); do case "$(readlink /proc/$p/cwd 2>/dev/null)" in $HOME/forge-faceh-audit/*) ;; *) n=$((n+1));; esac; done
-  echo $n
+others() {   # 起動の前なので、B の forge は全部他の run (自分の作業ツリーの別の case も数える。codex plan-3 m6)
+  pgrep -x forge | wc -l
 }
 t0=$(date +%s)
 while [ "$(others)" -gt 0 ]; do
