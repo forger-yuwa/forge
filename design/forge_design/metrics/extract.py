@@ -7,7 +7,8 @@
 - 全指標は最小化形でなく生値も併記 (η は最大化量なので optimizer へは -η)。
 
 TP (③ベルの燃焼ガス) の推力は `thrust_cv` (閉じた CV の壁会計・出口面会計と CV 残差、plan
-tooling-nozzle-bell-two-mode §4.1・§5.1 #2b)。`thrust_metrics` (CPG の出口面法) は従来どおり。
+tooling-nozzle-bell-two-mode §4.1・§5.1 #2b。Euler の slip 壁は `wall_model="slip"`、同 §5.1 #6 (W1))。
+`thrust_metrics` (CPG の出口面法) は従来どおり。
 """
 from __future__ import annotations
 
@@ -67,7 +68,12 @@ def thrust_metrics(mesh_h5, res_h5, gamma, Pt, p_ambient, r_throat,
 # 内壁の粘性 traction は forge の twall_* から作る。forge の規約は離散化で逆 (metrics/sern_forces.py:73 と
 # viscousFlux_d.cu): cell は `tau = 面の粘性流束` を残差に足す = **流体に働く** traction、node (既定の
 # `wallStressForOutput_node_d`) は内部双対面から壁 CV に入る粘性運動量 = **壁に働く**力 (流体に働く traction の逆符号)。
+# Euler (slip 壁、2026-10-12 plan bell-two-mode §5.1 #6 (W1)): 式は同じで粘性応力が 0。forge の slip 境界は twall_* を持たない
+# (boundaryCond.hpp の slip の valueTypes) ので、呼び出し側が `wall_model="slip"` を明示したときだけ内壁の traction を 0 とし
+# 壁ダンプを読まない (NS で twall が欠けていたら止める — 黙って 0 にしない)。開境界の粘性項は式のまま (viscMethod 0 は
+# vis_lam = visc = 0 なので 0 になる)。slip は場の μ_eff (vis_lam + vis_turb) が境界の DOF で 0 であることを確かめてから使う。
 CV_IDS = {"inlet": 1, "outlet": 2, "wall": 3, "axis": 4}   # meshing.mesh2d.PHYS と同じ
+WALL_MODELS = ("viscous", "slip")                           # thrust_cv の内壁の扱い (既定 viscous = 従来の NS)
 
 
 def _step_of(path) -> int:
@@ -184,6 +190,9 @@ def _wall_traction_on_fluid(wall_dump, dof_xyz, wall_dofs, node_mode: bool) -> t
     返す (node: −twall、cell: +twall; 本節冒頭の規約)。戻り値 (traction (n,2) — wall_dofs の順, 規約の文字列)。"""
     from scipy.spatial import cKDTree
     with h5py.File(wall_dump, "r") as f:
+        if "VALUE/twall_x" not in f or "VALUE/twall_y" not in f:
+            raise ValueError(f"{wall_dump}: 壁ダンプに VALUE/twall_x・twall_y が無い (slip 壁のダンプ?) — 摩擦を 0 とみなさない。"
+                             "Euler (slip 壁) の run なら thrust_cv(..., wall_model='slip') を明示する")
         wxyz = f["MESH/COORD"][:].reshape(-1, 3)[:, :2].astype(float)
         tw = np.column_stack([f["VALUE/twall_x"][:], f["VALUE/twall_y"][:]]).astype(float)
         if not node_mode:
@@ -203,7 +212,8 @@ def _wall_traction_on_fluid(wall_dump, dof_xyz, wall_dofs, node_mode: bool) -> t
 
 
 def thrust_cv(mesh_h5, res_h5, p_ambient: float, F_ideal: float, *, wall_dump=None, gas=None, gamma=None,
-              iso_k: bool = False, ids: dict | None = None, mdot_ideal: float | None = None) -> dict:
+              iso_k: bool = False, ids: dict | None = None, mdot_ideal: float | None = None,
+              wall_model: str = "viscous") -> dict:
     r"""閉じた CV の 2 会計 (壁会計・出口面会計) と CV 残差 (本節冒頭の定義)。
 
     - 状態は境界の DOF 値 (node: 半辺の所有節点、cell: 面の owner セル)。P は `VALUE/P` を優先 (`_pressure`)。
@@ -213,7 +223,12 @@ def thrust_cv(mesh_h5, res_h5, p_ambient: float, F_ideal: float, *, wall_dump=No
       $\tau_{xr}=\mu_{eff}(\partial_r u+\partial_x v)$。`iso_k` (`sstIsotropicStress: 1`) なら $-\tfrac23\rho k$ を足す。
       勾配が res に無いときは開境界の粘性項を評価せず `open_viscous: "missing"`・`cv_closable: False` にする。
     - `F_ideal`: η と CV 残差の分母 (TP: 同じ凍結 TP の $F_{1D}(\varepsilon;p_a)$)。`mdot_ideal` は ṁ/ṁ_1D 用 (任意)。
+    - `wall_model`: `"viscous"` (既定、従来どおり。壁ダンプに twall_* が無ければ ValueError) / `"slip"` (Euler の slip 壁:
+      内壁の traction を 0 とし壁ダンプを読まない。場の μ_eff = vis_lam + vis_turb が境界の全 DOF で 0 でなければ ValueError —
+      粘性の場で摩擦を黙って 0 にしない)。使った経路は戻り値の `wall_model` と `wall_traction_convention` に残す。
     戻り値の推力は [N] (2π を含む全周)。η は出口面会計 `eta_exit` と壁会計 `eta_wall` の両方を返す。"""
+    if wall_model not in WALL_MODELS:
+        raise ValueError(f"thrust_cv: wall_model '{wall_model}' は未知 ({list(WALL_MODELS)})")
     ids = {**CV_IDS, **(ids or {})}
     with h5py.File(mesh_h5, "r") as m, h5py.File(res_h5, "r") as f:
         V = f["VALUE"]
@@ -236,11 +251,20 @@ def thrust_cv(mesh_h5, res_h5, p_ambient: float, F_ideal: float, *, wall_dump=No
         G = {g: V[g][:].astype(float) for g in grads} if have_grad else None
         mu = (V["vis_lam"][:].astype(float) + V["vis_turb"][:].astype(float)) if have_grad else None
         rk = (ro * V["k"][:].astype(float)) if (iso_k and "k" in V) else None
+        if wall_model == "slip":
+            # slip (Euler) の前提: 境界の全 DOF で μ_eff = 0 (viscMethod 0・visc 0・乱流なし)。粘性の場なら止める
+            if "vis_lam" not in V or "vis_turb" not in V:
+                raise ValueError("thrust_cv(wall_model='slip'): res に vis_lam・vis_turb が無く、μ_eff = 0 (非粘性) を確かめられない")
+            mu_b = V["vis_lam"][:][allidx].astype(float) + V["vis_turb"][:][allidx].astype(float)
+            if not np.all(mu_b == 0.0):
+                raise ValueError(f"thrust_cv(wall_model='slip'): 境界の μ_eff が 0 でない (最大 {float(np.max(np.abs(mu_b))):.3e} Pa·s) — "
+                                 "粘性の場で壁の摩擦を 0 にしない (slip は Euler の run だけ)")
     if iso_k and rk is None:
         raise ValueError("iso_k (sstIsotropicStress: 1) だが res に VALUE/k が無い")
     two_pi = 2.0 * np.pi
     out = {"res": str(res_h5), "node_mode": bool(node_mode), "p_ambient": float(p_ambient), "F_ideal": float(F_ideal),
-           "pressure_source": p_src, "open_viscous": "evaluated" if have_grad else "missing", "iso_k": bool(iso_k)}
+           "pressure_source": p_src, "open_viscous": "evaluated" if have_grad else "missing", "iso_k": bool(iso_k),
+           "wall_model": wall_model}
 
     def open_face(key):
         g = geo[key]; o = g["owner"]; n = g["n"]; dA = two_pi * g["rds"]
@@ -268,23 +292,35 @@ def thrust_cv(mesh_h5, res_h5, p_ambient: float, F_ideal: float, *, wall_dump=No
         raise ValueError("内壁の半辺の所有 DOF が壁 bcond の DOF に無い (メッシュの境界構成が想定外)")
     w_prs = float(np.sum((P[o] - p_ambient) * n[:, 0] * dA))
     w_un = float(np.max(np.abs(ux[o] * n[:, 0] + ur[o] * n[:, 1]))) if len(o) else 0.0
-    if wall_dump is None:
-        cand = Path(res_h5).parent / f"res_wall_{ids['wall']}_{_step_of(res_h5)}.h5"
-        wall_dump = cand if cand.exists() else None
-    if wall_dump is not None:
-        trac, conv = _wall_traction_on_fluid(wall_dump, dof_xyz, wall_dofs, node_mode)
-        tmap = np.full((n_val, 2), np.nan); tmap[wall_dofs] = trac
-        w_vis = float(np.sum(tmap[o, 0] * dA))      # ∫ (τ n)_x dA (twall は traction ベクトルそのもの: その x 成分)
-        out["wall_traction_convention"] = conv
-        out["wall_dump"] = str(wall_dump)
+    if wall_model == "slip":
+        # Euler の slip 壁: 内壁の粘性 traction は 0 (壁ダンプは読まない — slip の壁ダンプに twall は無い)。運動量流束は no-slip と
+        # 同じく積まない (slip の数値流束は圧力だけ。壁 DOF の |u·n| の最大は記録)
+        w_vis = 0.0
+        out["wall_traction_convention"] = "slip (Euler): 内壁の粘性 traction = 0 (壁ダンプを読まない、μ_eff = 0 を確認)"
     else:
-        w_vis = None
-        out["wall_traction_convention"] = "壁面ダンプ無し (摩擦を評価できない)"
+        if wall_dump is None:
+            cand = Path(res_h5).parent / f"res_wall_{ids['wall']}_{_step_of(res_h5)}.h5"
+            wall_dump = cand if cand.exists() else None
+        if wall_dump is not None:
+            trac, conv = _wall_traction_on_fluid(wall_dump, dof_xyz, wall_dofs, node_mode)
+            tmap = np.full((n_val, 2), np.nan); tmap[wall_dofs] = trac
+            w_vis = float(np.sum(tmap[o, 0] * dA))      # ∫ (τ n)_x dA (twall は traction ベクトルそのもの: その x 成分)
+            out["wall_traction_convention"] = conv
+            out["wall_dump"] = str(wall_dump)
+        else:
+            w_vis = None
+            out["wall_traction_convention"] = "壁面ダンプ無し (摩擦を評価できない)"
     wal = {"Pi_x": w_prs - (w_vis if w_vis is not None else 0.0), "pressure": w_prs, "viscous_tau_n_x": w_vis,
            "area": float(np.sum(dA)), "n_faces": gw["n_edges"], "max_abs_u_n": w_un}
     F_exit = ext["Pi_x"]
     F_wall = -inl["Pi_x"] - wal["Pi_x"]
-    closable = have_grad and (w_vis is not None)
+    if wall_model == "slip":
+        # μ_eff = 0 を確かめたので、開境界の粘性項も勾配の有無に依らず 0 (勾配があれば式で評価した値 = 0 を記録)
+        closable = True
+        if not have_grad:
+            out["open_viscous"] = "zero (μ_eff = 0、勾配は res に無い)"
+    else:
+        closable = have_grad and (w_vis is not None)
     mdot_in = -inl["mdot_out"]
     out.update({
         "groups": {"inlet": inl, "outlet": ext, "wall": wal},

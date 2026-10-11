@@ -24,6 +24,13 @@ AR ≤ 5000 の例外の条件 (AR > 1000 の全セルでスキュー ≤ 0.1、
 MESH_AR_RELAX.json に残す。(D) 直接モード (同 §5.1 #3f): `geometry.bell_mode: direct_bspline` (dv: L_over_rt・theta_e_deg・
 theta_max_deg) で `wall_bell_c2.design_bell_c2` の壁を使い、成立しなければ `WallInfeasible` (理由つき)、前進 MOC ゲートの指標を
 MOC_GATE.json と metrics に記録する (制約にしない)。TOP・hermite (bell_mode 無し) の経路は変えない。
+(M) 特性曲線モード (2026-10-12, 同 plan §4.4・§5.1 #6 (W1)): `geometry.bell_mode: moc_rao` + `geometry.rao_wall_file` (生成器の
+壁ファイル `<tag>_wall.npz`; 生成器は回さない) で `rao_axisym.load_rao_wall` の壁 (円弧 kernel + BE の 5 次 B-spline、B で C1) に
+(D) と同じ収縮部・入口直管をつなぐ (`geometry.wall.RaoBellWall`、スロートで C2)。L・ε・R_t・ガスが問題と合わなければ止める。
+壁の来歴と生成器の推力 (N・η に換算) を WALL_DESIGN.json に残す。
+Euler (同 §4.1「Euler の設定」): `evaluate.model: euler` (既定 ns) で `viscMethod: 0`・`visc: 0.0`・`thermCond: 0.0`・
+`turbulence: none`・物理壁 slip。格子は壁際を細分しない (`_check_euler_mesh`)。推力の CV 会計は同じ式で、内壁の traction を 0 と
+する `thrust_cv(..., wall_model="slip")` (slip の壁ダンプには twall が無い)。
 """
 from __future__ import annotations
 
@@ -112,7 +119,12 @@ class WallInfeasible(ValueError):
 # TOP・hermite のキー (bell_type・Ru・Rd・phi_u_deg・r_inlet・L_contract) は効かないので書いたら止める (黙って無視しない)
 DIRECT_GEOMETRY_KEYS = ("bell_mode", "R_t", "contraction_ratio", "L_U", "L_pipe")
 DIRECT_DV = ("theta_max_deg", "theta_e_deg", "L_over_rt")
-BELL_MODES = ("direct_bspline",)            # geometry.bell_mode (無し = 従来の bell_type の経路)
+BELL_MODES = ("direct_bspline", "moc_rao")  # geometry.bell_mode (無し = 従来の bell_type の経路)
+# (M) 特性曲線モード (plan bell-two-mode §4.4・§5.1 #6 (W1)): geometry に書けるキー (寸法 spec は (D) と同じ `BellC2Spec`) と dv。
+# L は生成器の壁ファイルが決めるので dv の L_over_rt は照合用 (壁の終点 x_E と相対 RAO_SPEC_RTOL で一致しなければ止める)
+RAO_GEOMETRY_KEYS = ("bell_mode", "rao_wall_file", "R_t", "contraction_ratio", "L_U", "L_pipe")
+RAO_DV = ("L_over_rt",)
+RAO_SPEC_RTOL = 1.0e-9                      # 壁ファイルの L・ε・R_t と問題の spec の一致 (相対)
 
 
 def bell_mode(p: Problem) -> str | None:
@@ -155,9 +167,96 @@ def _build_wall_direct(p: Problem) -> tuple:
     return DirectBellWall(d.wall), d
 
 
+def rao_bell_spec(p: Problem):
+    """(M) の寸法 spec (`BellC2Spec`; 収縮部・入口直管は (D) と同じ部品): ε は spec.eps、他は geometry (既定は plan §8-1 の仮値)。"""
+    from ..geometry.wall_bell_c2 import BellC2Spec
+    g = p.geometry
+    bad = [k for k in g if k not in RAO_GEOMETRY_KEYS]
+    if bad:
+        raise ValueError(f"geometry.bell_mode moc_rao では {bad} は効かない (書けるのは {list(RAO_GEOMETRY_KEYS)})")
+    d = BellC2Spec()
+    return BellC2Spec(eps=float(p.spec["eps"]), R_t=float(g.get("R_t", d.R_t)),
+                      contraction_ratio=float(g.get("contraction_ratio", d.contraction_ratio)),
+                      L_U=float(g.get("L_U", d.L_U)), L_pipe=float(g.get("L_pipe", d.L_pipe)))
+
+
+def _rao_exhaust_check(p: Problem, setup: dict | None) -> dict:
+    """壁ファイルを作ったときの排気ファイル (キャンペーンの要約の setup.exhaust、リポジトリ基準) と問題の gas.exhaust が同じ
+    ファイル (同じ場所か同じ中身) かを確かめる。違えば ValueError (別のガスで作った壁を黙って使わない)。記録が無ければ未確認と返す。"""
+    import hashlib
+    gpath = (p.raw.get("gas") or {}).get("exhaust")
+    if not setup or not setup.get("exhaust"):
+        return {"verified": False, "why": "壁ファイルのキャンペーンの要約に排気ファイルの記録が無い"}
+    if gpath is None:
+        raise ValueError("geometry.bell_mode moc_rao: 問題に gas.exhaust が無い (壁ファイルは排気ファイル "
+                         f"{setup['exhaust']} の凍結 TP で作られている)")
+    mine = Path(str(gpath))
+    if not mine.is_absolute() and p.path:
+        mine = Path(p.path).resolve().parent / mine
+    theirs = FORGE_ROOT / str(setup["exhaust"])
+    same = theirs.exists() and (theirs.resolve() == mine.resolve()
+                                or hashlib.sha256(theirs.read_bytes()).digest() == hashlib.sha256(mine.read_bytes()).digest())
+    if not same:
+        raise ValueError(f"geometry.bell_mode moc_rao: 壁ファイルを作った排気ファイル {setup['exhaust']} と問題の gas.exhaust "
+                         f"{gpath} が違う (同じガスの壁だけを使う)")
+    return {"verified": True, "generator_exhaust": str(setup["exhaust"]), "problem_exhaust": str(gpath)}
+
+
+def _build_wall_rao(p: Problem) -> tuple:
+    """(M) の壁 (plan §4.4・§5.1 #6 (W1)): `geometry.rao_wall_file` (生成器の壁ファイル) を `rao_axisym.load_rao_wall` で読み、
+    (D) と同じ収縮部・入口直管につなぐ (`RaoBellWall`、スロートで C2・B で C1)。壁ファイルの L (= 終点 x_E)・ε (= r_E²)・R_t
+    (= 1/κ_B)・ガス・p_a (0) が問題 (dv.L_over_rt・spec.eps・geometry.R_t・gas.exhaust) と合わなければ ValueError
+    (黙って合わせない)。戻り (RaoBellWall, 記録 dict = load_rao_wall の記録 + 照合 `checks` + 接合 `joints` + 寸法 spec)。"""
+    from ..geometry.rao_axisym import load_rao_wall
+    from ..geometry.wall import RaoBellWall
+    missing = [k for k in RAO_DV if k not in p.dv]
+    extra = [k for k in p.dv if k not in RAO_DV]
+    if missing or extra:
+        raise ValueError(f"geometry.bell_mode moc_rao の dv は {list(RAO_DV)} (L は壁ファイルとの照合用; 欠け {missing}・余分 {extra})")
+    spec = rao_bell_spec(p)
+    pth = p.rao_wall_file
+    if pth is None:
+        raise ValueError("geometry.bell_mode moc_rao は geometry.rao_wall_file (生成器の壁ファイル <tag>_wall.npz) が必要")
+    rw, rec = load_rao_wall(pth)
+    L = dv_value(p, "L_over_rt")
+    eps = float(spec.eps)
+    setup = (rec.get("campaign") or {}).get("setup") or {}
+    chk = {"L_problem": L, "L_wall": float(rw.x_end), "L_rel_diff": (float(rw.x_end) - L) / L,
+           "eps_problem": eps, "eps_wall": float(rw.r_end) ** 2, "eps_rel_diff": (float(rw.r_end) ** 2 - eps) / eps,
+           "R_t_problem": float(spec.R_t), "R_t_wall": float(rw.R_t), "rtol": RAO_SPEC_RTOL}
+    errs = []
+    if abs(chk["L_rel_diff"]) > RAO_SPEC_RTOL:
+        errs.append(f"L: 壁ファイルの終点 x_E {chk['L_wall']!r} と dv.L_over_rt {L!r} (相対 {chk['L_rel_diff']:+.2e})")
+    if abs(chk["eps_rel_diff"]) > RAO_SPEC_RTOL:
+        errs.append(f"ε: 壁ファイルの r_E² {chk['eps_wall']!r} と spec.eps {eps!r} (相対 {chk['eps_rel_diff']:+.2e})")
+    if abs(float(rw.R_t) - float(spec.R_t)) > RAO_SPEC_RTOL * float(spec.R_t):
+        errs.append(f"R_t: 壁ファイル {float(rw.R_t)!r} と geometry.R_t {float(spec.R_t)!r}")
+    for k, mine in (("eps", eps), ("R_t", float(spec.R_t))):
+        if setup.get(k) is not None and abs(float(setup[k]) - mine) > RAO_SPEC_RTOL * abs(mine):
+            errs.append(f"{k}: 壁ファイルのキャンペーンの setup.{k} {setup[k]!r} と問題 {mine!r}")
+    if setup.get("p_a") is not None and float(setup["p_a"]) != 0.0:
+        errs.append(f"生成器の p_a {setup['p_a']!r} ≠ 0 (推力の換算は真空の生成器の値を前提にする)")
+    if errs:
+        raise ValueError("geometry.bell_mode moc_rao: 壁ファイル " + str(pth) + " が問題と合わない — " + "; ".join(errs))
+    chk["gas"] = _rao_exhaust_check(p, setup)
+    wall = RaoBellWall(rw, spec)
+    msgs = wall.validate()
+    if msgs:
+        raise ValueError("(M) の壁の検査に不合格: " + "; ".join(msgs))
+    tj, bj = wall.throat_jump(), wall.B_jump()
+    rec = {**rec, "checks": chk,
+           "joints": {"throat_jump_r_rp_rpp": [tj[0], tj[1], tj[2]], "B_jump_r_rp": [bj[0], bj[1]], "B_jump_rpp": bj[2],
+                      "B_kappa_left": bj["kappa_left"], "B_kappa_right": bj["kappa_right"], "B_dkappa": bj["dkappa"],
+                      "contraction_mu": float(wall.up.mu)},
+           "spec": {k: getattr(spec, k) for k in ("eps", "R_t", "contraction_ratio", "L_U", "L_pipe")}}
+    return wall, rec
+
+
 def build_wall(p: Problem) -> tuple:
     if bell_mode(p) == "direct_bspline":
         return _build_wall_direct(p)
+    if bell_mode(p) == "moc_rao":
+        return _build_wall_rao(p)
     g = p.geometry
     theta_a = np.deg2rad(dv_value(p, "theta_a_deg"))
     L_div = dv_value(p, "L_over_rt")
@@ -253,6 +352,15 @@ TP_STAGES = {
     "main": {"convMethod": 1, "limiter": 2, "cfl": None, "nStepInner": 4},
 }
 TP_NODE_KEYS = ", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeInletCornerWall: 1"
+# Euler の node のキー (runner_wt._config_euler_node と同じ)。nodeWallDirichlet・nodeInletCornerWall は slip 壁では効かないので書かない:
+# どちらも bcondKind が wall / wall_isothermal の節点にだけ作用する (mesh/mesh.cpp の wall_flag、gmshReader.hpp の wallOwnerOf)
+TP_NODE_KEYS_EULER = ", isAxisymmetric: 1, axisCentroidShift: 1"
+# 流れのモデル (`evaluate.model`; plan bell-two-mode §4.1「Euler の設定」、名前は SERN の runner と同じキー)。既定 ns = 従来の NS/SST
+FLOW_MODELS = ("ns", "euler")
+# Euler で書けない格子のキー: 壁際の細分 (スロートだけ第一セルを詰める・壁法線の近壁層) は NS 用 (case/45 で NS 用の壁際細分化格子の
+# Euler はスロート付近の全温が Tt を数百 K 外れて整定しなかった — plan verification-case45-euler-total-enthalpy §4)
+EULER_MESH_BANNED = ("wall_normal_layer", "wall_normal_end_stations", "wall_first_frac_throat", "wall_first_blend_x0",
+                     "wall_first_blend_x1", "wall_first_up_x0", "wall_first_up_x1")
 TP_K_INIT, TP_OMEGA_INIT = 1.0, 18000.0     # IC・入口の k/ω (CPG 経路と同じ値)
 # 推力の CV 会計 (metrics.extract.thrust_cv) が入口・出口面の粘性応力に使うソルバの勾配 (output.extraFields; 場は不変)
 TP_EXTRA_FIELDS = ("dUxdx", "dUxdy", "dUydx", "dUydy", "axisym_divU")
@@ -283,6 +391,37 @@ def _outlet_kind(p: Problem) -> str:
     return k
 
 
+def flow_model(p: Problem) -> str:
+    """`evaluate.model`: ns (既定 = 従来の NS: SST 低 Re・断熱 no-slip 壁) | euler (plan bell-two-mode §4.1「Euler の設定」:
+    `viscMethod: 0`・`visc: 0.0`・`thermCond: 0.0`・`turbulence: none`・物理壁はすべて slip)。Euler に NS の指定
+    (`evaluate.turbulence` が none 以外・`wall_treatment_sst`・等温壁 `spec.wall_thermal`) を書いたら止める (黙って無視しない)。"""
+    m = str(p.evaluate.get("model", "ns"))
+    if m not in FLOW_MODELS:
+        raise ValueError(f"evaluate.model '{m}' は未知 ({list(FLOW_MODELS)})")
+    if m == "euler":
+        bad = []
+        if p.evaluate.get("turbulence") is not None and str(p.evaluate["turbulence"]) != "none":
+            bad.append(f"evaluate.turbulence {p.evaluate['turbulence']!r}")
+        if "wall_treatment_sst" in p.evaluate:
+            bad.append("evaluate.wall_treatment_sst")
+        if p.wall_thermal["mode"] != "adiabatic":
+            bad.append("spec.wall_thermal (等温壁)")
+        if bad:
+            raise ValueError(f"evaluate.model euler (壁は slip、乱流なし) と併用できない: {bad}")
+    return m
+
+
+def _check_euler_mesh(p: Problem) -> None:
+    """Euler の格子の検査 (plan bell-two-mode §5.1 #6 (W1)): 壁際を細分するキー (`EULER_MESH_BANNED`) と AR 緩和
+    (`mesh.ar_max` > 1000; 壁法線の構造層の例外は NS 用) を書いたら止める。第一セル厚は全断面一様の `wall_first_frac` だけ。"""
+    bad = [k for k in EULER_MESH_BANNED if p.mesh.get(k) is not None]
+    if int(p.mesh.get("ar_max", 1000)) > AR_RELAX_AR:
+        bad.append(f"ar_max {p.mesh['ar_max']}")
+    if bad:
+        raise ValueError(f"Euler (evaluate.model euler) の格子は壁際を細分しない・AR 緩和を使わない: {bad} は書けない "
+                         "(case/45 で NS 用の壁際細分化格子の Euler はスロートの全温が整定しなかった)")
+
+
 def tp_gas_record(p: Problem) -> dict:
     """TP の気体の来歴と CFD の参照値 (prepare_info.json・config 用)。cp・gamma は燃焼室温度の凍結値
     (TP では NASA-9 が優先され、R = cp(γ−1)/γ が混合気の気体定数に一致するように置く参照値)。
@@ -301,33 +440,46 @@ def _solver_config_tp(p: Problem, nsteps: int, out_interval: int, stage: str = "
     """TP (凍結組成の lump 擬似種 EXH) の solverConfig。推奨レシピ: §1 (node・SLAU・陰解法 + implicitRelax 0.7・
     output level 1)、§1.2 (段)、§2 (SST、`wallTreatmentSST: 0`)、§3 (`thermalMethod: 2`・`thermoHrefTemp`)、
     `viscMethod: 2` + `physProp.transport` (solver-settings)。`mesh.bndFirstOrder` は書かない。
-    `discretization="cell"` は品質検査用の一時変換だけに使う (node 専用キーを落とす)。"""
+    `discretization="cell"` は品質検査用の一時変換だけに使う (node 専用キーを落とす)。
+    `evaluate.model: euler` (`flow_model`; plan bell-two-mode §4.1「Euler の設定」) は `viscMethod: 0`・`visc: 0.0`・
+    `thermCond: 0.0` (`viscMethod: 0` は定数粘性なので係数も 0 にする)・`turbulence: none`・node は `TP_NODE_KEYS_EULER`。
+    `physProp.transport`・`prandtlLam`・SST の項は書かない。段・陰解法・出力は NS と同じ。"""
     from ..gas.composition import physprop_species_flow, physprop_transport_flow, solver_species_config
     if stage not in TP_STAGES:
         raise ValueError(f"stage '{stage}' は未知 ({list(TP_STAGES)})")
     disc = discretization or p.mesh.get("discretization", "node")
     if disc != "node" and discretization is None:
         raise ValueError("③ベルの TP は node (median-dual) のみ (recommended-settings §1)")
+    euler = flow_model(p) == "euler"
     if int(p.evaluate.get("wall_treatment_sst", 0)) != 0:
         raise ValueError("③ベルの TP は低 Re 壁 (wallTreatmentSST: 0) のみ。壁関数は使わない (recommended-settings §2)")
     layout = p.species_layout()
     items, external = solver_species_config(layout)
     _db = ', speciesDBFile: "species_db_external.yaml"' if external else ""
-    transport = p.transport_for_ns(layout)
     rec = tp_gas_record(p)
-    sst = p.evaluate.get("turbulence", "sst") == "sst"
     st = TP_STAGES[stage]
     cfl = float(p.evaluate.get("cfl_main", 4.0)) if st["cfl"] is None else st["cfl"]
-    node_keys = TP_NODE_KEYS if disc == "node" else ", isAxisymmetric: 1"
-    turb = ('turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, '
-            f'turbulentPrandtl: 0.9, kInit: {TP_K_INIT}, omegaInit: {TP_OMEGA_INIT}}}' if sst else 'turbulence: {model: "none"}')
+    if euler:
+        node_keys = TP_NODE_KEYS_EULER if disc == "node" else ", isAxisymmetric: 1"
+        turb = 'turbulence: {model: "none"}'
+        phys = (f"physProp: {{thermalMethod: 2, viscMethod: 0, visc: 0.0, thermCond: 0.0,\n"
+                f"           cp: {rec['cp_ref']!r}, gamma: {rec['gamma_ref']!r},\n"
+                f"           species: {physprop_species_flow(items)}{_db}, thermoHrefTemp: {rec['thermoHrefTemp']!r}}}")
+    else:
+        transport = p.transport_for_ns(layout)
+        sst = p.evaluate.get("turbulence", "sst") == "sst"
+        node_keys = TP_NODE_KEYS if disc == "node" else ", isAxisymmetric: 1"
+        turb = ('turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, '
+                f'turbulentPrandtl: 0.9, kInit: {TP_K_INIT}, omegaInit: {TP_OMEGA_INIT}}}' if sst else 'turbulence: {model: "none"}')
+        phys = (f"physProp: {{thermalMethod: 2, viscMethod: 2, visc: {rec['visc_ref']!r}, thermCond: {rec['thermCond_ref']!r}, "
+                f"prandtlLam: 0.72,\n"
+                f"           cp: {rec['cp_ref']!r}, gamma: {rec['gamma_ref']!r},\n"
+                f"           species: {physprop_species_flow(items)}{_db}, thermoHrefTemp: {rec['thermoHrefTemp']!r},\n"
+                f"           transport: {physprop_transport_flow(transport)}}}")
     return f"""mesh: {{discretization: "{disc}"{node_keys}, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}}
 gpu: 1
 solver: "SLAU"
-physProp: {{thermalMethod: 2, viscMethod: 2, visc: {rec['visc_ref']!r}, thermCond: {rec['thermCond_ref']!r}, prandtlLam: 0.72,
-           cp: {rec['cp_ref']!r}, gamma: {rec['gamma_ref']!r},
-           species: {physprop_species_flow(items)}{_db}, thermoHrefTemp: {rec['thermoHrefTemp']!r},
-           transport: {physprop_transport_flow(transport)}}}
+{phys}
 time:
   unsteady: 0
   dualTime: 0
@@ -347,7 +499,9 @@ initial: "uniform_p101325_u10"
 
 def _bcond_config_tp(p: Problem) -> str:
     """TP の bcondConfig。入口 = 燃焼室のよどみ (Pt = Pc, Tt = Tc; 排気ファイル)、壁 = spec.wall_thermal (既定 断熱 wall)、
-    出口 = `_outlet_kind` (既定 outflow)。単一輸送種 (EXH) なので入口の Y は書かない (多種なら Y0.. を足す)。"""
+    出口 = `_outlet_kind` (既定 outflow)。単一輸送種 (EXH) なので入口の Y は書かない (多種なら Y0.. を足す)。
+    Euler (`evaluate.model: euler`) の壁は slip (`Problem.wall_bcond_line(euler=True)`)。入口の k・ω は既存の Euler の経路
+    (runner_wt._bcond) と同じく残す (forge が読むのは RANS のときだけ — boundaryCond.cpp の LESorRANS == 2 の検査)。"""
     Pt, Tt = float(p.spec["Pt"]), float(p.spec["Tt"])
     layout = p.species_layout()
     ys = "" if layout.n == 1 else "".join(f"Y{i}: {y!r}, " for i, y in enumerate(layout.Y_transport("inflow")))
@@ -358,7 +512,7 @@ def _bcond_config_tp(p: Problem) -> str:
         outlet = f"{{physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {{Ps: {pa}, Pt: {pa}, Tt: 300.0}}}}"
     return f"""inlet:  {{physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {{{ys}Pt: {Pt!r}, Tt: {Tt!r}, k: {TP_K_INIT}, omega: {TP_OMEGA_INIT}}}}}
 outlet: {outlet}
-wall:   {p.wall_bcond_line(False, phys_id=3, output=1)}
+wall:   {p.wall_bcond_line(flow_model(p) == "euler", phys_id=3, output=1)}
 axis:   {{physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }}
 """
 
@@ -429,9 +583,18 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
     if bell_mode(p) == "direct_bspline" and not tp:
         raise ValueError("geometry.bell_mode direct_bspline は TP 経路 (gas.model: semiperfect + gas.exhaust) だけで使う "
                          "(plan bell-two-mode §5.1 #3f)")
+    if bell_mode(p) == "moc_rao" and not tp:
+        raise ValueError("geometry.bell_mode moc_rao は TP 経路 (gas.model: semiperfect + gas.exhaust) だけで使う "
+                         "(壁ファイルは凍結 TP の MOC で作られている; plan bell-two-mode §5.1 #6)")
+    if not tp and str(p.evaluate.get("model", "ns")) != "ns":
+        raise ValueError("evaluate.model は ③ベルの TP 経路だけで効く (CPG の thruster_bell は NS の 1 段 config)")
+    if tp and flow_model(p) == "euler":
+        _check_euler_mesh(p)
+    # (M): 壁ファイルと問題 (L・ε・R_t・ガス) の照合は run dir を作る前に (合わなければ止める)
+    pre = build_wall(p) if bell_mode(p) == "moc_rao" else None
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
-    wall, wp = build_wall(p)
+    wall, wp = pre if pre is not None else build_wall(p)
     scale = float(p.spec["r_throat"])
 
     mp = mesh_params(p, scale)
@@ -445,6 +608,8 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
         extra = {}
         if bell_mode(p) == "direct_bspline":
             extra = _direct_wall_records(p, run_dir, wall, wp)
+        elif bell_mode(p) == "moc_rao":
+            extra = _rao_wall_records(p, run_dir, wall, wp)
         return _prepare_tp(p, problem_path, run_dir, wall, scale, mp, quads, nsteps, warm_from, stage,
                            coords=coords, bedges=bedges, extra_info=extra)
 
@@ -552,6 +717,64 @@ def moc_gate_summary(gate: dict) -> dict:
     return {k: gate.get(k) for k in MOC_GATE_KEYS}
 
 
+def rao_moc_reference(p: Problem, rec: dict) -> dict:
+    r"""(M) の生成器の推力 (制御面 `F_cs` と壁 `F_wall` の 2 会計; 単位 $\rho^*a^{*2}r_t^2$、$2\pi$ 込み、真空) を runner の推力の
+    単位 (N、$\eta=F/F_{1D}$) に換算する (plan bell-two-mode §6 V2 の参照値)。
+
+    $F\,[\mathrm N]=F_{nd}\,\rho^*a^{*2}r_t^2-p_a\,\pi(r_Er_t)^2$。$\rho^*$・$a^*$ は runner の 1D 理想値 (`ideal_1d_tp` = 同じ凍結 TP を
+    燃焼室 $(P_c,T_c)$ から凍結音速まで等エントロピー膨張したスロートの密度・音速) で、$r_t$ = `spec.r_throat` [m]。
+    $p_a$ の項は制御面・壁の投影面積 $\pi r_E^2$ の背圧 (生成器は $p_a=0$)。$\eta=F/F_{1D}$ ($F_{1D}$ = `ideal_1d_tp` の `F`)。
+    照合 (真空のとき): MOC の気体の表 (`Isentrope`) だけで正規化した $\eta_{MOC}=F_{nd}/(\pi F_{1D,nd})$ ($F_{1D,nd}$ は同じ表の
+    `ideal_1d(ε)`、$A^*=1$ の単位) と、$\rho^*a^{*2}$ の 2 通り ($\rho^*a^{*2}$ [1D 理想値] と $P_c/(p_0/\rho^*a^{*2})$ [表]) の差。
+    MOC の流量 $\dot m_{line}$ は記録に無いので `isp_ratio` $=(F_{cs}/\dot m_{line})/(F_{1D,nd}/1)$ から逆算し、$\dot m/\dot m_{1D}=\dot m_{line}/\pi$。"""
+    from ..geometry.rao_axisym import as_isentrope
+    res = rec["result"]
+    ideal = ideal_1d_tp(p)
+    rt, pa, eps = float(p.spec["r_throat"]), float(p.spec["p_ambient"]), float(p.spec["eps"])
+    q_1d = float(ideal["rho_star"]) * float(ideal["a_star"]) ** 2 * rt * rt
+    A_e = float(np.pi * (float(res["r_E"]) * rt) ** 2)
+    F_1D = float(ideal["F"])
+    out = {"formula": "F[N] = F_nd·ρ*·a*²·r_t² − p_a·π(r_E·r_t)²;  η = F/F_1D (F_1D = runner.ideal_1d_tp の F)",
+           "rho_star_kg_m3": float(ideal["rho_star"]), "a_star_m_s": float(ideal["a_star"]), "r_throat_m": rt,
+           "p_ambient_Pa": pa, "scale_N_per_nd": q_1d, "exit_area_m2": A_e, "F_1D_N": F_1D,
+           "mdot_1D_kg_s": float(ideal["mdot"])}
+    for k in ("F_cs", "F_wall"):
+        F = float(res[k]) * q_1d - pa * A_e
+        out[f"{k}_N"] = F
+        out[f"eta_{k}"] = F / F_1D
+    out["accounts_rel_diff"] = (out["F_cs_N"] - out["F_wall_N"]) / F_1D
+    ig = as_isentrope(p.gas_model)
+    i1 = ig.ideal_1d(eps, 0.0)
+    q_ig = float(p.spec["Pt"]) / float(ig.p0) * rt * rt
+    out["check"] = {"scale_N_per_nd_isentrope": q_ig, "scale_rel_diff": q_ig / q_1d - 1.0,
+                    "F1D_nd_isentrope": float(i1["F"]), "F_1D_N_isentrope": float(np.pi * i1["F"]) * q_ig}
+    if pa == 0.0:
+        out["check"]["eta_F_cs_isentrope"] = float(res["F_cs"]) / (np.pi * float(i1["F"]))
+        out["check"]["eta_rel_diff"] = out["check"]["eta_F_cs_isentrope"] / out["eta_F_cs"] - 1.0
+    if res.get("isp_ratio"):
+        mdot_line = float(res["F_cs"]) / (float(res["isp_ratio"]) * float(i1["F"]))
+        out["mdot_line_nd"] = mdot_line
+        out["mdot_ratio_1d"] = mdot_line / np.pi
+    return out
+
+
+def _rao_wall_records(p: Problem, run_dir: Path, wall, rec: dict) -> dict:
+    """(M) の壁の記録 (plan bell-two-mode §5.1 #6 (W1)): `WALL_DESIGN.json` に壁ファイルの来歴 (ファイルと記録の sha256・生成条件・
+    キャンペーンの setup/commit)・照合 (L・ε・R_t・ガス)・接合 (スロートの C2・B の C1 と曲率の跳び)・BE の当てはめ
+    (`RaoWall.fit_info`) と、生成器の推力を N・η に換算した V2 の参照値 (`rao_moc_reference`) を書く。前進 MOC ゲートは回さない
+    ((M) の輪郭は DE の下の軸近くで C⁻ が交差する — plan §4.5 の所見)。戻りは prepare_info に足す要約。"""
+    res = rec["result"]
+    ref = rao_moc_reference(p, rec)
+    out = {"bell_mode": "moc_rao", "design_status": "OK", "L": float(wall.x_e), "theta_B_deg": res["theta_B_deg"],
+           "theta_e_deg": res["theta_E_deg"], "theta_max_deg": res["theta_max_deg"], **rec, "moc_reference": ref}
+    (run_dir / "WALL_DESIGN.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+    summ = {k: out[k] for k in ("bell_mode", "design_status", "L", "theta_B_deg", "theta_e_deg", "theta_max_deg")}
+    summ.update({"wall_file": rec["wall_file"], "wall_file_sha256": rec["wall_file_sha256"], "checks": rec["checks"],
+                 "joints": rec["joints"]})
+    return {"wall_design": summ,
+            "moc_reference": {k: ref[k] for k in ("F_cs_N", "F_wall_N", "eta_F_cs", "eta_F_wall", "F_1D_N")}}
+
+
 # AGENTS.md の AR ≤ 5000 の例外の条件 (plan bell-two-mode §4.1 (v)): AR > 1000 の全セルでスキュー ≤ 0.1、入口・出口面は平面。
 # check_mesh_quality.py --ar-max 5000 は全域一律なので、条件はここで自前で検査して run に残す (MESH_AR_RELAX.json)。
 AR_RELAX_AR, AR_RELAX_SKEW = 1000.0, 0.1
@@ -621,7 +844,8 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
     stage = _tp_stage(stage, warm_from)
     ex = p.exhaust
     layout = p.species_layout()
-    transport = p.transport_for_ns(layout)
+    euler = flow_model(p) == "euler"
+    transport = None if euler else p.transport_for_ns(layout)       # Euler は輸送物性を使わない (viscMethod 0・visc 0)
     _, external = solver_species_config(layout)
     write_species_meta(layout, run_dir, transport)
     if external:
@@ -682,8 +906,8 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
                      **({"ar_relax": {k: relax[k] for k in ("ok", "required", "n_high_ar", "max_skew_high_ar",
                                                             "n_violations", "inlet_planar", "outlet_planar")}}
                         if relax is not None else {})},
-            **({"bell_mode": bell_mode(p)} if bell_mode(p) else {}), **(extra_info or {}),
-            "environment": _environment_record()}
+            **({"bell_mode": bell_mode(p)} if bell_mode(p) else {}), **({"flow_model": "euler"} if euler else {}),
+            **(extra_info or {}), "environment": _environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
     return info
 
@@ -918,20 +1142,30 @@ THRUST_QS_MDOT_COLS = ("mdot_exit_kg_s",)
 
 def thrust_history_tp(p: Problem, run_dir) -> list:
     """本段の全スナップショット (res_<step>.h5 と同じ step の壁ダンプがあるもの) で推力の CV 会計を出す。
-    壁ダンプの無い step (forge は step 0 の境界ダンプを書かない) は摩擦が評価できないので時系列に入れない。"""
+    壁ダンプの無い step (forge は step 0 の境界ダンプを書かない) は摩擦が評価できないので時系列に入れない。
+    Euler (`evaluate.model: euler`、plan bell-two-mode §5.1 #6 (W1)): `thrust_cv(..., wall_model="slip")` (内壁の traction 0・
+    壁ダンプを読まない・場の μ_eff = 0 を確認)。時系列の点は NS と同じ step の集合にそろえる (step 0 を入れない: NS は step 0 の
+    壁ダンプが無いので入らない)。"""
     from ..metrics.extract import CV_IDS, thrust_cv
     run_dir = Path(run_dir)
+    euler = flow_model(p) == "euler"
     ideal = ideal_1d_tp(p)
     gas = p.exhaust.frozen_gas()
     iso_k = tp_iso_k(run_dir)
     rows = []
     for r in _res_sorted(run_dir):
         step = int(r.stem.split("_")[1])
-        wd = run_dir / f"res_wall_{CV_IDS['wall']}_{step}.h5"     # bcondConfig の壁 (名前 wall・physID 3)
-        if not wd.exists():
-            continue
-        o = thrust_cv(run_dir / "nozzle.h5", r, float(p.spec["p_ambient"]), float(ideal["F"]), wall_dump=wd, gas=gas,
-                      iso_k=iso_k, mdot_ideal=float(ideal["mdot"]))
+        if euler:
+            if step == 0:
+                continue
+            o = thrust_cv(run_dir / "nozzle.h5", r, float(p.spec["p_ambient"]), float(ideal["F"]), gas=gas,
+                          iso_k=iso_k, mdot_ideal=float(ideal["mdot"]), wall_model="slip")
+        else:
+            wd = run_dir / f"res_wall_{CV_IDS['wall']}_{step}.h5"     # bcondConfig の壁 (名前 wall・physID 3)
+            if not wd.exists():
+                continue
+            o = thrust_cv(run_dir / "nozzle.h5", r, float(p.spec["p_ambient"]), float(ideal["F"]), wall_dump=wd, gas=gas,
+                          iso_k=iso_k, mdot_ideal=float(ideal["mdot"]))
         o["step"] = step
         o["eta"] = o["eta_exit"]
         rows.append(o)
@@ -968,6 +1202,8 @@ def collect(problem_path, run_dir) -> dict:
         write_thrust_history(run_dir / "thrust_history.csv", rows)
         out["res_file"] = res[-1].name
         out["ideal_1d"] = ideal_1d_tp(p)
+        if flow_model(p) == "euler":
+            out["flow_model"] = "euler"
         if not rows or rows[-1]["step"] != int(res[-1].stem.split("_")[1]):
             out["thrust"] = f"最終 step {res[-1].name} の壁ダンプが無く推力の CV 会計を出せない"
         else:
@@ -976,6 +1212,8 @@ def collect(problem_path, run_dir) -> dict:
                                              "cv_residual", "cv_closable", "mdot_exit_kg_s", "mdot_in_kg_s",
                                              "mass_imbalance", "mdot_ratio_1d", "pressure_source", "open_viscous",
                                              "wall_traction_convention", "exit_area_m2")})
+            if last.get("wall_model", "viscous") != "viscous":
+                out["wall_model"] = last["wall_model"]          # Euler の slip 壁 (NS の metrics には足さない)
             out["eta_cf"] = last["eta_exit"]
             out["thrust_N"] = last["thrust_exit_N"]
             out["mdot_kg_s"] = last["mdot_exit_kg_s"]
@@ -988,6 +1226,18 @@ def collect(problem_path, run_dir) -> dict:
         if (run_dir / "WALL_DESIGN.json").exists():
             wd = json.loads((run_dir / "WALL_DESIGN.json").read_text())
             out["wall_design"] = {k: wd.get(k) for k in ("design_status", "x_m", "L", "theta_e_deg", "theta_max_deg")}
+            if "moc_reference" in wd:
+                # (M): 生成器の推力を N・η に換算した V2 の参照値 (plan §6 V2; runner の η と比べる) と、CFD との差
+                # (η − η_cs: 出口面会計・壁会計とも生成器の制御面会計 F_cs と比べる。V2 の線は推力の相対差 0.2 %)
+                ref = {k: wd["moc_reference"].get(k)
+                       for k in ("F_cs_N", "F_wall_N", "eta_F_cs", "eta_F_wall", "F_1D_N", "mdot_ratio_1d")}
+                if out.get("eta_exit") is not None and ref.get("eta_F_cs") is not None:
+                    ref["eta_exit_minus_eta_cs"] = out["eta_exit"] - ref["eta_F_cs"]
+                    ref["eta_wall_minus_eta_cs"] = out["eta_wall"] - ref["eta_F_cs"]
+                    ref["thrust_exit_rel_diff_cs"] = out["thrust_exit_N"] / ref["F_cs_N"] - 1.0
+                    if out.get("mdot_ratio_1d") is not None and ref.get("mdot_ratio_1d") is not None:
+                        ref["mdot_ratio_1d_minus_moc"] = out["mdot_ratio_1d"] - ref["mdot_ratio_1d"]
+                out["moc_reference"] = ref
     elif res:
         out["res_file"] = res[-1].name
         out.update(thrust_metrics(run_dir / "nozzle.h5", res[-1], p.gamma,

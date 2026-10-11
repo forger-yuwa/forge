@@ -42,8 +42,10 @@ TP 経路 (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1・§5.1 #2b; 問�
   漸近値の最終比も閾値以内、末尾窓に 8 点以上 (cv_residual は列にしない)、(iii) Phase 2 の物理ゲート (ṁ/ṁ_1D・η)、
   (iv) 最終スナップショットの |CV 残差| ≤ 1e-4、(v) メッシュ品質 PASS (AR > 1000 の格子は AR ≤ 5000 の例外の条件も) と
   局所 y1+ (`check_wall_resolution.py`) PASS。η は出口面会計を主、壁会計を照合 (台帳には両方と cv)。
-- 評価ごとの問題 YAML は campaign_dir に書くので、問題 YAML 基準の相対パス (`gas.exhaust`・`gas.species_db`) は
-  書き出す前に絶対パスへ直す (以前は切れていた; 引き継ぎ (b))。
+  Euler (`evaluate.model: euler`、slip 壁; plan bell-two-mode §5.1 #6 (W1)) の run では局所 y1+ を回さず、GATES.json に
+  「対象外」の理由を書いて ok 扱い ((i)〜(iv)・メッシュ品質は同じ)。
+- 評価ごとの問題 YAML は campaign_dir に書くので、問題 YAML 基準の相対パス (`gas.exhaust`・`gas.species_db`・
+  `geometry.rao_wall_file`) は書き出す前に絶対パスへ直す (以前は切れていた; 引き継ぎ (b))。
 CPG 経路 (既定) の挙動は変えない。
 """
 from __future__ import annotations
@@ -80,8 +82,9 @@ def dv_order_of(raw: dict) -> tuple:
         return DV_ORDER_DIRECT
     raise ValueError(f"geometry.bell_mode '{mode}' の設計変数の並びは未定義")
 
-# 問題 YAML の所在を基準に解決する相対パスのキー (probdef: gas.species_db・gas.exhaust)
-PROBLEM_PATH_KEYS = (("gas", "exhaust"), ("gas", "species_db"))
+# 問題 YAML の所在を基準に解決する相対パスのキー (probdef: gas.species_db・gas.exhaust・geometry.rao_wall_file [(M) の壁ファイル、
+# plan bell-two-mode §5.1 #6])
+PROBLEM_PATH_KEYS = (("gas", "exhaust"), ("gas", "species_db"), ("geometry", "rao_wall_file"))
 
 
 def absolutize_problem_paths(raw: dict, base_dir) -> dict:
@@ -319,16 +322,35 @@ def combine_tp_gates(g: dict) -> tuple:
     return "FAIL", "INFEASIBLE", note
 
 
+# Euler (slip 壁) の run で壁解像ゲート (v-b) を対象外にする理由 (plan bell-two-mode §5.1 #6 (W1)、GATES.json に残す)
+EULER_WALL_RESOLUTION_SKIP = ("対象外: Euler (evaluate.model euler、slip 壁) は粘性・境界層が無く、y1+ (第一内部ノード距離 × 壁の接線応力) "
+                              "が定義されない (slip の壁ダンプには twall も無い)")
+
+
+def gate_wall_resolution_skipped(reason: str = EULER_WALL_RESOLUTION_SKIP) -> dict:
+    """(v-b) を回さない run の記録 (ok 扱い・`skipped` True・理由)。check_wall_resolution.py は起動しない。"""
+    return {"ok": True, "skipped": True, "verdict": reason, "detail": None, "file": None}
+
+
 def tp_gates(run_dir, metrics: dict, qs: dict | None = None, cv_tol: float = TP_CV_TOL,
-             phys_bounds: dict | None = None) -> dict:
-    """TP の評価 1 点の受理判定 (i)〜(v)。各ゲートの結果と総合 (status・fail_class・note) を返し、GATES.json に残す。"""
+             phys_bounds: dict | None = None, flow_model: str = "ns") -> dict:
+    """TP の評価 1 点の受理判定 (i)〜(v)。各ゲートの結果と総合 (status・fail_class・note) を返し、GATES.json に残す。
+    `flow_model` (`runner.flow_model` の値): `"euler"` (slip 壁) では (v-b) 壁解像を回さず、理由つきで ok 扱いにする
+    (`gate_wall_resolution_skipped`)。(i)〜(iv)・(v-a) は NS と同じ。metrics の `wall_model` (推力の会計の内壁の扱い) と
+    `flow_model` が食い違えば ValueError (Euler の run を NS として、またはその逆で判定しない)。推力の会計が無い metrics
+    (最終 step の会計が出せなかった run) は照合せず、(iii)(iv) が欠損で落とす。"""
+    if flow_model not in runner.FLOW_MODELS:
+        raise ValueError(f"tp_gates: flow_model '{flow_model}' は未知 ({list(runner.FLOW_MODELS)})")
+    wm = metrics.get("wall_model", "viscous" if "eta_exit" in metrics else None)
+    if wm is not None and (flow_model == "euler") != (wm == "slip"):
+        raise ValueError(f"tp_gates: flow_model {flow_model} と推力の会計の内壁の扱い wall_model {wm} が食い違う")
     run_dir = Path(run_dir)
     g = {"convergence": gate_convergence(run_dir),
          "quasisteady": gate_quasisteady(run_dir / "thrust_history.csv", qs=qs),
          "physics": gate_physics(metrics, phys_bounds),
          "cv": gate_cv(metrics, cv_tol),
          "mesh_quality": gate_mesh_quality(run_dir),
-         "wall_resolution": gate_wall_resolution(run_dir)}
+         "wall_resolution": (gate_wall_resolution_skipped() if flow_model == "euler" else gate_wall_resolution(run_dir))}
     status, fc, note = combine_tp_gates(g)
     # 残差の VERDICT は合格でも併記する (NOT CONVERGED (stalled) を GATES.json の上位に残す; plan §4.1 (i))
     rnote = g["convergence"].get("note") or ""
@@ -336,6 +358,8 @@ def tp_gates(run_dir, metrics: dict, qs: dict | None = None, cv_tol: float = TP_
            "residual_verdict": g["convergence"]["verdict"], "residual_class": g["convergence"]["class"],
            "eta_primary": "exit (出口面会計; 壁会計は照合)", "gates": g,
            "thresholds": {"cv_tol": cv_tol, "quasisteady": g["quasisteady"]["thresholds"]}}
+    if flow_model != "ns":
+        out["flow_model"] = flow_model                       # NS の GATES.json の中身は従来どおり
     (run_dir / "GATES.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
     return out
 
@@ -544,7 +568,7 @@ class Campaign:
             runner.run_staged_tp(prob, run_dir, warm_from=None)
             out = runner.collect(prob, run_dir)
             qs = (self.base_raw.get("evaluate") or {}).get("quasisteady")
-            g = tp_gates(run_dir, out, qs=qs)
+            g = tp_gates(run_dir, out, qs=qs, flow_model=runner.flow_model(load_problem(prob)))
             row.update(eta_cf=out.get("eta_cf"), eta_wall=out.get("eta_wall"), mdot=out.get("mdot_kg_s"),
                        mdot_ratio_1d=out.get("mdot_ratio_1d"), thrust_N=out.get("thrust_N"),
                        thrust_wall_N=out.get("thrust_wall_N"), cv_residual=out.get("cv_residual"),
@@ -672,7 +696,7 @@ def gate_run(problem, run_dir) -> dict:
     if not runner._is_tp(p):
         raise ValueError("gate_run は TP 経路 (gas.model: semiperfect + gas.exhaust) の run 専用")
     out = runner.collect(problem, run_dir)
-    return tp_gates(run_dir, out, qs=(p.raw.get("evaluate") or {}).get("quasisteady"))
+    return tp_gates(run_dir, out, qs=(p.raw.get("evaluate") or {}).get("quasisteady"), flow_model=runner.flow_model(p))
 
 
 def main(argv=None) -> int:

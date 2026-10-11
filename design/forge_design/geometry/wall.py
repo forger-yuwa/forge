@@ -199,3 +199,99 @@ class DirectBellWall:
 
     def drdx(self, x):
         return self.r(x, 1)
+
+
+class RaoBellWall:
+    r"""③ベル (M) 特性曲線モードの壁 (plan tooling-nozzle-bell-two-mode §4.2・§4.4・§5.1 #6 (W1))。runner の壁の口
+    (`x_in`・`x_e`・`r(x)`・`r(x, 1)`・`drdx`・スロート `(x_throat, r_throat)` = (0, 1)) に合わせる。
+
+    - 入口直管 ($x<-L_U$、半径 $r_U=\sqrt{CR}$) → 収縮部 ($-L_U\le x<0$、U→T 5 次 Hermite `wall_walldriven.UpstreamThroatPoly`;
+      (D) の `BellC2Wall` と同じ部品・同じ寸法 spec `BellC2Spec`) → 拡大部 ($0\le x\le x_e$、`rao_axisym.RaoWall`: 円弧 kernel
+      [曲率半径 $R_t$、閉じた式] + BE [生成器の壁点列の罰則付き 5 次 B-spline])。
+    - **スロートで C2**: 収縮部の終端 $(1, 0, 1/R_t)$ と円弧の始端 $(1, 0, 1/R_t)$ が一致する (構成上。`throat_jump` で検査)。
+    - **B で C1**: 円弧の終端と BE の始端で $r$・$r'$ が一致 (BE の当てはめの拘束)。曲率は跳ぶ ($\Delta\kappa_B$、`B_jump`) —
+      (M) は古典どおり円弧 kernel (plan §4.4「(M) は円弧 kernel・B で C1」)。
+    - 出口 $x_e$ = BE の終点 (生成器の E)。$x_e$ より先 (`RaoWall` の接線の延長) は使わない。
+
+    `r(x, deriv)` は deriv 0..2 ($r''$ は記録と試験用: 円弧は閉じた式、BE は B-spline の 2 階微分)。$[x_{in},x_e]$ の外は
+    `ValueError` (端から `END_TOL` 以内の丸めだけ端へ寄せる — `DirectBellWall` と同じ)。"""
+
+    END_TOL = 1.0e-9
+
+    def __init__(self, rao_wall, spec) -> None:
+        from .wall_walldriven import UpstreamThroatPoly
+        spec.check()
+        if abs(float(rao_wall.R_t) - float(spec.R_t)) > 1e-9 * float(spec.R_t):
+            raise ValueError(f"RaoBellWall: 壁の R_t {rao_wall.R_t} と寸法 spec の R_t {spec.R_t} が違う (スロートで C2 にならない)")
+        self.rao, self.spec = rao_wall, spec
+        self.up = UpstreamThroatPoly(r_U=spec.r_U, R_t=spec.R_t, L_U=spec.L_U, r_t=1.0)
+        self.x_in = -float(spec.L_U) - float(spec.L_pipe)
+        self.x_e = float(rao_wall.x_end)
+        self.x_B = float(rao_wall.x_B)
+        self.x_throat, self.r_throat = 0.0, 1.0
+        self._d2spl = rao_wall.spl.derivative(2)
+
+    def _clip(self, x):
+        x = np.asarray(x, dtype=float)
+        tol = self.END_TOL * max(1.0, abs(self.x_in), abs(self.x_e))
+        if np.any(x < self.x_in - tol) or np.any(x > self.x_e + tol) or not np.all(np.isfinite(x)):
+            raise ValueError(f"RaoBellWall: x が [{self.x_in}, {self.x_e}] の外 (端の許容 {tol:.1e}) または非有限")
+        return np.clip(x, self.x_in, self.x_e)
+
+    def _expansion(self, x, deriv: int):
+        """拡大部 $[0, x_e]$ の $r^{(deriv)}$ (deriv 0..2)。"""
+        if deriv in (0, 1):
+            return np.asarray(self.rao.r(x, deriv), dtype=float)
+        R = float(self.rao.R_t)
+        out = np.empty_like(x)
+        k = x <= self.x_B
+        out[k] = R * R / np.maximum(R * R - x[k] * x[k], 1e-300) ** 1.5
+        out[~k] = self._d2spl(x[~k])
+        return out
+
+    def r(self, x, deriv: int = 0):
+        if deriv not in (0, 1, 2):
+            raise ValueError("RaoBellWall.r: deriv は 0..2")
+        x = np.asarray(x, dtype=float)
+        xa = np.atleast_1d(self._clip(x))
+        out = np.empty_like(xa)
+        m_pipe = xa < -self.spec.L_U
+        m_con = (xa >= -self.spec.L_U) & (xa < 0.0)
+        m_exp = xa >= 0.0
+        out[m_pipe] = self.spec.r_U if deriv == 0 else 0.0
+        if np.any(m_con):
+            out[m_con] = self.up.r(xa[m_con], deriv)
+        if np.any(m_exp):
+            out[m_exp] = self._expansion(xa[m_exp], deriv)
+        return out.reshape(np.shape(x))
+
+    def drdx(self, x):
+        return self.r(x, 1)
+
+    def throat_jump(self) -> dict:
+        """スロート $x=0$ での収縮部 (左) と円弧 (右) の $r$・$r'$・$r''$ の差 (C2 なら丸めの範囲で 0)。"""
+        z = np.array([0.0])
+        return {k: float(self._expansion(z, k)[0] - self.up.r(z, k)[0]) for k in (0, 1, 2)}
+
+    def B_jump(self) -> dict:
+        r"""B での BE (右) と円弧 (左) の差: $r$・$r'$ (C1 なら丸めの範囲で 0) と $r''$・曲率 $\kappa$ の跳び (円弧 kernel では非零)。"""
+        R, xB = float(self.rao.R_t), self.x_B
+        left = (1.0 + R - np.sqrt(R * R - xB * xB), xB / np.sqrt(R * R - xB * xB), R * R / (R * R - xB * xB) ** 1.5)
+        right = (float(self.rao.spl(xB)), float(self.rao.dspl(xB)), float(self._d2spl(xB)))
+        kap = lambda rp, rpp: rpp / (1.0 + rp * rp) ** 1.5  # noqa: E731
+        return {0: right[0] - left[0], 1: right[1] - left[1], 2: right[2] - left[2],
+                "kappa_left": kap(left[1], left[2]), "kappa_right": kap(right[1], right[2]),
+                "dkappa": kap(right[1], right[2]) - kap(left[1], left[2])}
+
+    def validate(self, n: int = 4001) -> list:
+        """壁の破綻の検査 (空なら OK): 収縮部の単調性 (`UpstreamThroatPoly.validate`)、拡大部で $r'\\ge0$ (最小半径がスロート)、
+        半径が正。"""
+        msgs = [f"収縮部: {m}" for m in self.up.validate()]
+        xs = np.linspace(0.0, self.x_e, int(n))
+        rp = self.r(xs, 1)
+        if float(rp.min()) < -1e-12:
+            msgs.append(f"拡大部で r' < 0 (最小 {float(rp.min()):.3e} @ x = {float(xs[int(np.argmin(rp))]):.4g})")
+        rr = self.r(np.r_[np.linspace(self.x_in, self.x_e, int(n)), 0.0])
+        if float(rr.min()) < 1.0 - 1e-12:
+            msgs.append(f"最小半径 {float(rr.min()):.12g} がスロートの 1 を下回る")
+        return msgs

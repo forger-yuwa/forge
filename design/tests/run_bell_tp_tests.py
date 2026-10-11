@@ -8,7 +8,12 @@
 変更前と文字単位で同じこと、TP の壁の平滑化 (P 不変・TP の内部エネルギー)。
 
 CEA2 (FCEA2) が見つかれば排気ファイルを作り直して照合し (保存ファイルとの一致も確かめる)、無ければ case/68 の保存ファイルの
-CEA 参照表で照合する。実行: design/.venv-opt の Python で `python design/tests/run_bell_tp_tests.py`。
+CEA 参照表で照合する。
+Euler の設定 (plan §4.1「Euler の設定」・§5.1 #6 (W1)、`evaluate.model: euler`): config が viscMethod 0・visc 0・thermCond 0・
+turbulence none で SST・輸送物性・no-slip のキーを書かないこと、壁が slip、NS の指定 (turbulence sst・wall_treatment_sst・等温壁)・
+壁際を細分する格子のキー・AR 緩和との併用を止めること (推力の会計とゲートは run_bell_cv_gate_tests)。NS の TP config は
+Euler の追加の前と文字単位で同じ (sha256)。
+実行: design/.venv-opt の Python で `python design/tests/run_bell_tp_tests.py`。
 """
 import hashlib
 import sys
@@ -257,6 +262,86 @@ with tempfile.TemporaryDirectory() as td:
           float(np.max(np.abs(np.diff(T2[3:-3], 2)))) < 0.1 * 4 * 300.0, f"{float(np.max(np.abs(np.diff(T2[3:-3], 2)))):.1f} K")
     check("TP 平滑化: 壁列の運動量 0・壁外は不変",
           float(np.max(np.abs(rux2[:nw]))) == 0.0 and np.array_equal(ro2[nw:], ro[nw:].astype(np.float32).astype(float)))
+
+# ---------------------------------------------------------------- NS の TP config が (M)・Euler の追加の前と文字単位で同じ
+# (plan §5.1 #6 (W1)、2026-10-12: HEAD 8774cbf1 の _solver_config_tp(p, 1000, 250, 段) と _bcond_config(p) の sha256、
+#  case/68 problem_bell_tp_top.yaml。TOP・(D) の NS は同じ config — (D) の格子・壁は run_bell_cv_gate_tests の (D) の節)
+p_ns = load_problem(PROBLEM)
+TP_NS_SHA = {"soft": "cb4a75e424ab6fc8393fd8bfb5b2a0f7ff01d4951e5de6b02bce84a5b209e9b0",
+             "mid": "dc45ef8e7e470471181a3bef4e9d6d548e1bc34c9288cc098d6e379c40c41af3",
+             "main": "859081471fe6034aafd46b73daf38bca647ac795808f8ec0b14fb07dbdd0fc56"}
+for stage, want in TP_NS_SHA.items():
+    got = hashlib.sha256(R._solver_config_tp(p_ns, 1000, 250, stage).encode()).hexdigest()
+    check(f"TP NS config [{stage}]: Euler の追加の前と同一 (sha256)", got == want, got[:16])
+got = hashlib.sha256(R._solver_config_tp(p_ns, 1000, 250, "soft", discretization="cell").encode()).hexdigest()
+check("TP NS config [品質検査用の cell]: 同一 (sha256)", got == "05c657cd28be5550fa5f517a7b17fc630535b04b86559ac5ffe1ee2b63c08fb5", got[:16])
+got = hashlib.sha256(R._bcond_config(p_ns).encode()).hexdigest()
+check("TP NS bcond: 同一 (sha256; 壁は断熱 wall)", got == "dd81c3446fc47bcc993b3b6f73b623294773901677203bcb1c5ad740b65dee9a", got[:16])
+check("TP NS: evaluate.model を書かなければ ns", R.flow_model(p_ns) == "ns")
+
+# ---------------------------------------------------------------- Euler の設定 (plan §4.1「Euler の設定」・§5.1 #6 (W1))
+PROBLEM_EU = CASE68 / "problem_bell_tp_m_euler_l100.yaml"
+pe = load_problem(PROBLEM_EU)
+check("Euler: 問題 YAML (M L100) は evaluate.model euler", R.flow_model(pe) == "euler")
+SST_TERMS = ("sst", "wallTreatmentSST", "kInit", "omegaInit", "katoLaunder", "scalarDiffusion", "dilatationCorrection",
+             "turbulentPrandtl", "transport", "prandtlLam", "nodeWallDirichlet", "nodeInletCornerWall")
+for stage, want in (("soft", (0, 0, 10, 0.5)), ("mid", (0, 0, 10, 1.0)), ("main", (1, 2, 4, 4.0))):
+    txt = R._solver_config_tp(pe, 1000, 250, stage)
+    c = yaml.safe_load(txt)
+    pp, dt = c["physProp"], c["time"]["deltaT"]
+    check(f"Euler config [{stage}]: viscMethod 0・visc 0.0・thermCond 0.0・turbulence none",
+          pp["viscMethod"] == 0 and pp["visc"] == 0.0 and pp["thermCond"] == 0.0 and c["turbulence"] == {"model": "none"})
+    check(f"Euler config [{stage}]: SST・輸送物性・no-slip 用の項を書かない", not any(t in txt for t in SST_TERMS),
+          str([t for t in SST_TERMS if t in txt]))
+    check(f"Euler config [{stage}]: TP は NS と同じ (thermalMethod 2・thermoHrefTemp 298.15・lump EXH・参照 cp/γ が R を与える)",
+          pp["thermalMethod"] == 2 and pp["thermoHrefTemp"] == 298.15 and pp["species"][0]["name"] == "EXH"
+          and abs(pp["cp"] * (pp["gamma"] - 1) / pp["gamma"] / fg.R - 1) < 1e-12)
+    check(f"Euler config [{stage}]: 段・陰解法・出力は NS と同じ (convMethod, limiter, nStepInner, cfl; relax 0.7・level 1・勾配)",
+          (c["space"]["convMethod"], c["space"]["limiter"], c["time"]["nStepInner"], dt["cfl_pseudo"]) == want
+          and dt["implicitRelax"] == 0.7 and dt["blockDPLUR"] == 1 and c["output"]["level"] == 1
+          and list(c["output"]["extraFields"]) == list(R.TP_EXTRA_FIELDS))
+    check(f"Euler config [{stage}]: node・軸対称・axisCentroidShift (slip では効かない no-slip のキーは書かない)",
+          c["mesh"] == {"discretization": "node", "isAxisymmetric": 1, "axisCentroidShift": 1, "meshFileName": "nozzle.h5",
+                        "valueFileName": "nozzle.h5"})
+    check(f"Euler config [{stage}]: 廃止・禁止キーを含まない", not any(b in txt for b in BANNED))
+check("Euler config: 品質検査用の cell 変換は node 専用キーを落とす",
+      "axisCentroidShift" not in R._solver_config_tp(pe, 10, 10, "soft", discretization="cell"))
+bce = yaml.safe_load(R._bcond_config(pe))
+check("Euler bcond: 物理壁は slip、入口 Pt = Pc・Tt = Tc、出口 outflow (真空)",
+      bce["wall"]["kind"] == "slip" and bce["inlet"]["floats"]["Pt"] == ch["Pc_Pa"] and bce["inlet"]["floats"]["Tt"] == ch["Tc_K"]
+      and bce["outlet"]["kind"] == "outflow")
+
+
+def _eu(mut_eval=None, mut_spec=None, mut_mesh=None):
+    q = load_problem(PROBLEM_EU)
+    if mut_eval:
+        q.evaluate = {**q.evaluate, **mut_eval}
+    if mut_spec:
+        q.spec = {**q.spec, **mut_spec}
+    if mut_mesh:
+        q.mesh = {**q.mesh, **mut_mesh}
+    return q
+
+
+check("Euler: evaluate.model の未知の値は拒否", raises(lambda: R.flow_model(_eu({"model": "rans"})), ValueError) is not None)
+check("Euler: turbulence sst との併用は拒否 (黙って無視しない)",
+      raises(lambda: R._solver_config_tp(_eu({"turbulence": "sst"}), 10, 10), ValueError) is not None)
+check("Euler: wall_treatment_sst との併用は拒否", raises(lambda: R._solver_config_tp(_eu({"wall_treatment_sst": 0}), 10, 10), ValueError) is not None)
+check("Euler: 等温壁 (spec.wall_thermal) との併用は拒否",
+      raises(lambda: R._bcond_config(_eu(mut_spec={"wall_thermal": {"mode": "isothermal", "Tw": 600.0}})), ValueError) is not None)
+check("Euler: turbulence none は書いてもよい", R.flow_model(_eu({"turbulence": "none"})) == "euler")
+for k, v in (("wall_normal_layer", [0.02, 0.8]), ("wall_first_frac_throat", 3.5e-6), ("ar_max", 5000)):
+    m = raises(lambda: R._check_euler_mesh(_eu(mut_mesh={k: v})), ValueError)
+    check(f"Euler 格子: {k} (壁際の細分・AR 緩和) は拒否", m is not None and k in m, (m or "")[:80])
+check("Euler 格子: 問題 YAML (全断面一様の wall_first_frac 0.005) は通る", R._check_euler_mesh(pe) is None)
+# Euler の推力の CV 会計 (thrust_cv の wall_model="slip") と時系列・ゲートの試験は run_bell_cv_gate_tests の (4) と「Euler の run」の節
+with tempfile.TemporaryDirectory() as td:
+    d = yaml.safe_load(CPG_YAML)
+    d["evaluate"]["model"] = "euler"
+    (Path(td) / "cpg_eu.yaml").write_text(yaml.safe_dump(d))
+    m = raises(lambda: R.prepare(Path(td) / "cpg_eu.yaml", Path(td) / "x"), ValueError)
+    check("CPG: evaluate.model euler は拒否 (TP 経路だけ; run dir を作る前)", m is not None and "evaluate.model" in m
+          and not (Path(td) / "x").exists(), (m or "")[:80])
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)

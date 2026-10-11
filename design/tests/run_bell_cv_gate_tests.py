@@ -6,6 +6,8 @@ forge を起動しない単体試験 (全流れ解での確認は case/68 の ru
   静止気体の閉曲面で Σ(p − p_a) n_x dA = 0 (CV 残差 0、p_a に依らない)、面積 πr²、外向き法線の向き、一様流の直管で
   壁会計 = 出口面会計・ṁ_in = ṁ_out、twall の規約 (node: 流体に働く traction = −twall、cell: +twall) と摩擦の推力寄与の符号、
   P の出所 (VALUE/P 優先、無ければ TP は e_sens(T) の逆算・CPG は γ)、粘性応力・壁ダンプが無いときは閉じない扱い。
+  Euler (slip 壁、§5.1 #6 (W1)): `wall_model="slip"` で内壁の traction 0・壁ダンプを読まない・μ_eff = 0 の確認、開境界の粘性項が
+  viscMethod 0 (vis_lam = 0) で 0、NS で壁ダンプに twall が無ければ止める、粘性の場に slip を使えば止める。
 - `opt.driver` のゲート (i)〜(v) (2026-10-11 組み替え、plan §4.1・§5.1 #2c'): 合成した残差履歴 + StageManifest で (i) は PASS・
   STALLED・still converging を通し (STALLED は併記)、DIVERGED・有意な末尾上昇 (rising)・manifest 無し (判定不能) を落とす、
   (ii) 推力系 4 列 (1.5e-4) の DRIFTING・振動・単調で漸近値が離れた列・NONFINITE・列欠損・末尾窓 8 点未満を落とし、ṁ は 1e-3 で判定、
@@ -15,6 +17,11 @@ forge を起動しない単体試験 (全流れ解での確認は case/68 の ru
   `mesh_ar_relax_check` (AR > 1000 のスキュー・面の平面性) の負例。
 - (D) 直接モード (#3f): `geometry.bell_mode: direct_bspline` の壁 (`DirectBellWall`)、成立しない点の `WallInfeasible` (理由つき)、
   TOP のキー・dv の誤りを止める、driver の設計変数の並び。
+- (M) 特性曲線モード (#6 (W1)): `geometry.bell_mode: moc_rao` の壁 (`RaoBellWall` = 生成器の壁ファイルの `RaoWall` + (D) と同じ
+  収縮部) が npz の壁点を通る (kernel は円弧の上、B・E は厳密、BE の内点は当てはめの残差以内)、T4 の評価と同じ作り方、スロートで C2・
+  B で C1、L・ε・R_t・排気ファイルの不一致で止める、prepare の変換器の手前まで (偽の変換器) で Euler 格子の品質 PASS と
+  WALL_DESIGN.json の V2 参照値 (生成器の推力を N・η に換算)。合成の Euler run で推力の時系列・metrics (η − η_cs)・ゲート
+  (壁解像は対象外と書いて ok、他は NS と同じ)、geometry.rao_wall_file の相対パスの書き換え。
 - 引き継ぎ (b): 評価ごとに書き出す問題 YAML の相対パス (gas.exhaust・gas.species_db) を絶対パスに直す。
 - runner: TP の段の計画 (`tp_stage_plan`) の検査、TP の config の出力 (勾配の extraFields・pRef を書かない)、
   格子のスロート細分キー (`mesh_params`) は書いたときだけ渡る。
@@ -276,6 +283,60 @@ with h5py.File(tmp / "res_400.h5", "r") as f:
     check("(3) CPG は (γ−1)(ρE − ρu²/2)", "CPG" in srcc and np.allclose(Pc_, 0.4 * (roe - 0.5 * rho * uu * uu)))
     check("(3) 気体も γ も無ければ例外", raises(lambda: EX._pressure(f["VALUE"], np.arange(3))) is not None)
 
+
+# ---- (4) Euler (slip 壁) の会計 (plan §5.1 #6 (W1)): wall_model="slip" は内壁の traction 0・壁ダンプを読まない・μ_eff = 0 を確認
+def write_slip_dump(path, coords, wall_nodes):
+    """forge の slip 境界のダンプと同じく twall_* が無い (case/45 run_0001_euler_shortest_dry/res_wall_3_12000.h5 の VALUE と同じ並び)。"""
+    wn = np.array(wall_nodes)
+    with h5py.File(path, "w") as f:
+        f["MESH/COORD"] = coords[wn].astype(np.float64).ravel()
+        for k in ("Ps", "Pt", "Ts", "Tt", "Ux", "Uy", "Uz", "ro", "roUx", "roUy", "roUz", "roe"):
+            f[f"VALUE/{k}"] = np.zeros(len(wn))
+
+
+def write_euler_res(path, n, ro, ux, ur, P, grad=0.0, grads=True):
+    """Euler の res: vis_lam = vis_turb = 0 (forge の viscMethod 0 は vis_lam = visc = 0、乱流なし)。勾配は `grad` (非零でも粘性項は 0)。"""
+    write_res_h5(path, n, ro, ux, ur, P=P, grads=grads)
+    with h5py.File(path, "r+") as f:
+        if grads:
+            f["VALUE/vis_lam"][:] = 0.0
+            for g in ("dUxdx", "dUxdy", "dUydx", "dUydy", "axisym_divU"):
+                f[f"VALUE/{g}"][:] = grad
+        else:
+            f["VALUE/vis_lam"] = np.zeros(n)
+            f["VALUE/vis_turb"] = np.zeros(n)
+
+
+write_euler_res(tmp / "res_500.h5", NP, ro, u, 0.0, P, grad=1.0e4)
+write_slip_dump(tmp / "res_wall_3_500.h5", pc, pwall)
+o = EX.thrust_cv(tmp / "pipe.h5", tmp / "res_500.h5", 0.0, F_id, wall_model="slip")
+check("(4) Euler (slip): 直管の一様流で壁会計 = 出口面会計 (CV 残差 0)・出口面会計 = (ρu² + p)A",
+      abs(o["cv_residual"]) < 1e-12 and math.isclose(o["thrust_exit_N"], (ro * u * u + P) * A, rel_tol=1e-12), f"{o['cv_residual']:.1e}")
+check("(4) Euler (slip): 摩擦 0・cv_closable True・使った経路 (wall_model slip、規約の文字列) を戻り値に残す",
+      o["friction_N"] == 0.0 and o["cv_closable"] and o["wall_model"] == "slip" and "slip" in o["wall_traction_convention"]
+      and "wall_dump" not in o, o["wall_traction_convention"])
+check("(4) Euler: 勾配が非零 (1e4) でも開境界の粘性項は 0 (viscMethod 0 の vis_lam = visc = 0)",
+      o["groups"]["outlet"]["viscous_tau_n_x"] == 0.0 and o["groups"]["inlet"]["viscous_tau_n_x"] == 0.0 and o["open_viscous"] == "evaluated")
+m = raises(lambda: EX.thrust_cv(tmp / "pipe.h5", tmp / "res_500.h5", 0.0, F_id), ValueError) or ""
+check("(4) NS (既定 wall_model viscous) で壁ダンプに twall_x が無ければ止める (摩擦を黙って 0 にしない)", "twall" in m, m[:90])
+m = raises(lambda: EX.thrust_cv(tmp / "pipe.h5", tmp / "res_500.h5", 0.0, F_id, wall_dump=tmp / "res_wall_3_500.h5"), ValueError) or ""
+check("(4) NS で壁ダンプを明示しても twall_x が無ければ止める", "twall" in m, m[:90])
+m = raises(lambda: EX.thrust_cv(tmp / "pipe.h5", tmp / "res_200.h5", 0.0, F_id, wall_model="slip"), ValueError) or ""
+check("(4) 粘性の場 (vis_lam 2e-4) に slip を使うと止める (μ_eff ≠ 0 — 壁の摩擦を黙って 0 にしない)", "μ_eff" in m, m[:90])
+write_res_h5(tmp / "res_600.h5", NP, ro, u, 0.0, P=P, grads=False)
+m = raises(lambda: EX.thrust_cv(tmp / "pipe.h5", tmp / "res_600.h5", 0.0, F_id, wall_model="slip"), ValueError) or ""
+check("(4) vis_lam・vis_turb の無い res に slip を使うと止める (μ_eff = 0 を確かめられない)", "vis_lam" in m, m[:90])
+write_euler_res(tmp / "res_700.h5", NP, ro, u, 0.0, P, grads=False)
+o = EX.thrust_cv(tmp / "pipe.h5", tmp / "res_700.h5", 0.0, F_id, wall_model="slip")
+check("(4) Euler で勾配が res に無くても μ_eff = 0 なので閉じる会計 (open_viscous に理由)",
+      o["cv_closable"] and o["open_viscous"].startswith("zero") and abs(o["cv_residual"]) < 1e-12, o["open_viscous"])
+check("(4) 未知の wall_model は止める",
+      raises(lambda: EX.thrust_cv(tmp / "pipe.h5", tmp / "res_500.h5", 0.0, F_id, wall_model="inviscid"), ValueError) is not None)
+write_euler_res(tmp / "res_800.h5", N, 1.0, 0.0, 0.0, p0)
+for pa in (0.0, p0 / 3.0):
+    o = EX.thrust_cv(tmp / "bell.h5", tmp / "res_800.h5", pa, F_id, wall_model="slip")
+    check(f"(4) Euler (slip): TOP ベルの静止気体 p_a={pa:g} で CV 残差 0・出口面会計 = (p−p_a)A_e",
+          abs(o["cv_residual"]) < 1e-12 and math.isclose(o["thrust_exit_N"], (p0 - pa) * math.pi * r_e ** 2, rel_tol=1e-12))
 
 # ---------------------------------------------------------------- ゲート (i): 合成の残差履歴 + StageManifest
 def make_run(d: Path, main_hist, pre_hist=None, manifest=True):
@@ -596,7 +657,7 @@ pd_bad = load_problem(PROBLEM_D)
 pd_bad.dv = {**pd.dv, "theta_a_deg": {"value": 30.0, "min": 20.0, "max": 40.0}}
 check("(D): dv の余分 (theta_a_deg) は止める", raises(lambda: runner.build_wall(pd_bad), ValueError) is not None)
 pd_bad = load_problem(PROBLEM_D)
-pd_bad.geometry = {**pd.geometry, "bell_mode": "moc_rao"}
+pd_bad.geometry = {**pd.geometry, "bell_mode": "tic"}          # moc_rao は 2026-10-12 に実装 (下の (M) の節)
 check("(D): 未実装の bell_mode は止める", "未実装" in (raises(lambda: runner.build_wall(pd_bad), ValueError) or ""))
 check("(D): TOP の問題 (bell_mode 無し) は従来の NozzleWall のまま", type(runner.build_wall(p)[0]).__name__ == "NozzleWall")
 check("driver: 設計変数の並び (TOP は θ_a・θ_e・L、(D) は θ_max・θ_e・L)", DR.dv_order_of(p.raw) == DR.DV_ORDER
@@ -611,6 +672,268 @@ check("driver: (D) の成立しない点の評価は INFEASIBLE・理由 (note)�
       and row.get("wall_design", {}).get("design_status") == "INFEASIBLE"
       and json.loads((tmp / "camp_d" / "ledger.jsonl").read_text().splitlines()[-1])["fail_class"] == "INFEASIBLE",
       row["note"][:120])
+
+# ---------------------------------------------------------------- (M) 特性曲線モード (plan §4.4・§5.1 #6 (W1))
+# geometry.bell_mode moc_rao: 生成器の壁ファイル (rao_m/rao_t6_parts/*_n321_mq2_wall.npz) を読み、(D) と同じ収縮部につなぐ。
+# Euler の問題 YAML (problem_bell_tp_m_euler_l100/l70.yaml) で、壁・照合・接合・prepare の変換器の手前まで (変換器は偽物で止める)
+from forge_design.geometry import rao_axisym as RA  # noqa: E402
+from forge_design.geometry.wall import RaoBellWall  # noqa: E402
+from forge_design.meshing.mesh2d import write_msh41_2d  # noqa: E402
+
+RAO_DIR = CASE68 / "rao_m" / "rao_t6_parts"
+
+
+class _StopAtConverter(Exception):
+    pass
+
+
+def _yaml_abs(src: Path, dst: Path, mut=None) -> Path:
+    """問題 YAML を別の場所へ写す (gas.exhaust・geometry.rao_wall_file を絶対パスに)。`mut(d)` で中身を変える。"""
+    d = yaml.safe_load(src.read_text())
+    d["gas"]["exhaust"] = str((src.parent / d["gas"]["exhaust"]).resolve())
+    d["geometry"]["rao_wall_file"] = str((src.parent / d["geometry"]["rao_wall_file"]).resolve())
+    if mut:
+        mut(d)
+    dst.write_text(yaml.safe_dump(d, allow_unicode=True))
+    return dst
+
+
+for tag, lab, Lfrac in (("l100", "L100_n321_mq2", 1.0), ("l70", "L70_n321_mq2", 0.7)):
+    PROBLEM_M = CASE68 / f"problem_bell_tp_m_euler_{tag}.yaml"
+    pm = load_problem(PROBLEM_M)
+    wm, recm = runner.build_wall(pm)
+    jrec = json.loads((RAO_DIR / f"{lab}.json").read_text())
+    with np.load(RAO_DIR / f"{lab}_wall.npz") as z:
+        BE, KW = np.asarray(z["BE"]), np.asarray(z["kernel_wall"])
+    check(f"(M) {lab}: bell_mode moc_rao は RaoBellWall (x_in −L_U−L_pipe・x_e = 壁ファイルの L・スロート (0, 1))",
+          isinstance(wm, RaoBellWall) and wm.x_in == -4.0 and abs(wm.x_e - Lfrac * Lc) <= 1e-9 * Lc
+          and (wm.x_throat, wm.r_throat) == (0.0, 1.0) and wm.validate() == [], f"x_e {wm.x_e!r}")
+    # 同じ作り方 (run_rao_t4h.py の _rao_wall: BE の末尾を記録の E に、RaoWall の pspline) と係数・節点がビット一致
+    P = BE[:, :2].copy()
+    P[-1] = (jrec["x_E"], jrec["r_E"])
+    ref_w = RA.RaoWall(1.0, np.deg2rad(jrec["theta_B_deg"]), P, np.deg2rad(jrec["theta_E_deg"]))
+    check(f"(M) {lab}: 壁は T4 の評価 (run_rao_t4h) と同じ作り方で B-spline の係数・節点がビット一致",
+          np.array_equal(ref_w.spl.c, wm.rao.spl.c) and np.array_equal(ref_w.spl.t, wm.rao.spl.t))
+    # npz の壁点を通る: kernel の点は円弧 (閉じた式) の上、B と E は厳密、BE の内点は当てはめの残差 (記録の resid_max) 以内
+    fi = recm["fit_info"]
+    dk = float(np.max(np.abs(wm.r(KW[:, 0]) - KW[:, 1])))
+    dBE = np.abs(wm.r(BE[1:-1, 0]) - BE[1:-1, 1])
+    eB = abs(float(wm.r(np.array([wm.x_B]))[0]) - jrec["r_B"])
+    eE = abs(float(wm.r(np.array([wm.x_e]))[0]) - jrec["r_E"])
+    check(f"(M) {lab}: npz の kernel の壁点 (801 点) が円弧の上 (≤ 1e-9 r_t)", dk <= 1e-9, f"{dk:.2e}")
+    check(f"(M) {lab}: 記録の B と E を通る (≤ 1e-12 r_t)", eB <= 1e-12 and eE <= 1e-12, f"B {eB:.1e}・E {eE:.1e}")
+    check(f"(M) {lab}: npz の BE の内点を当てはめの残差以内で通る (最大 ≤ resid_max ≤ 1e-4 r_t)",
+          float(dBE.max()) <= fi["resid_max"] + 1e-15 and fi["resid_max"] <= 1e-4,
+          f"最大 {float(dBE.max()):.2e}・rms {float(np.sqrt(np.mean(dBE ** 2))):.2e} r_t")
+    # 接合: スロートで C2、B で C1 (曲率は跳ぶ)。式の検算と、片側の値による独立の検算
+    tj, bj = wm.throat_jump(), wm.B_jump()
+    check(f"(M) {lab}: スロートで C2 (収縮部と円弧の r・r′・r″ の差 ≤ 1e-12)", max(abs(tj[k]) for k in (0, 1, 2)) <= 1e-12,
+          f"{[f'{tj[k]:.1e}' for k in (0, 1, 2)]}")
+    check(f"(M) {lab}: B で C1 (円弧と BE の r・r′ の差 ≤ 1e-12)", max(abs(bj[0]), abs(bj[1])) <= 1e-12,
+          f"{bj[0]:.1e}・{bj[1]:.1e}")
+    h = 1e-7
+    dl, dr_ = (float(wm.r(np.array([v]), 1)[0]) for v in (wm.x_B - h, wm.x_B + h))
+    sl, sr = (float(wm.r(np.array([v]), 2)[0]) for v in (wm.x_B - h, wm.x_B + h))
+    t0l, t0r = (float(wm.r(np.array([v]), 2)[0]) for v in (-h, h))
+    check(f"(M) {lab}: 片側の値で検算 (B の r′ の差 ≤ 1e-5・r″ の跳びが B_jump と 1e-5 以内、スロートの r″ の差 ≤ 1e-5)",
+          abs(dr_ - dl) <= 1e-5 and abs((sr - sl) - bj[2]) <= 1e-5 and abs(t0r - t0l) <= 1e-5,
+          f"Δr′ {dr_ - dl:.1e}・Δr″ {sr - sl:+.4f} (B_jump {bj[2]:+.4f})・スロート Δr″ {t0r - t0l:.1e}")
+    check(f"(M) {lab}: 曲率の跳び Δκ_B < 0 を記録 (生成器の 6 点当てはめの dkappa_B と 5e-3 以内)",
+          bj["dkappa"] < 0 and abs(bj["dkappa"] - jrec["dkappa_B"]) <= 5e-3, f"{bj['dkappa']:+.5f} / 記録 {jrec['dkappa_B']:+.5f}")
+    ck = recm["checks"]
+    check(f"(M) {lab}: 照合 (L・ε・R_t・排気ファイル) の記録", abs(ck["L_rel_diff"]) <= 1e-9 and abs(ck["eps_rel_diff"]) <= 1e-9
+          and ck["R_t_wall"] == 1.0 and ck["gas"]["verified"], f"L {ck['L_rel_diff']:+.1e}・ε {ck['eps_rel_diff']:+.1e}")
+    check(f"(M) {lab}: 来歴 (壁ファイル・記録の sha256、生成条件 n 321・m = q = 320・円弧・det_D > 0、キャンペーンの commit)",
+          len(recm["wall_file_sha256"]) == 64 and len(recm["record_sha256"]) == 64 and recm["generator"]["n"] == 321
+          and recm["generator"]["m"] == 320 and recm["generator"]["q"] == 320 and recm["generator"]["kernel"] == "arc"
+          and recm["generator"]["accept_rule"] == "det_D > 0" and bool((recm["campaign"] or {}).get("commit")))
+
+    # 照合の負例 (黙って合わせない)
+    def _bad_m(_pm=PROBLEM_M, **kw):
+        q = load_problem(_pm)
+        for k, v in kw.items():
+            setattr(q, k, v)
+        return raises(lambda: runner.build_wall(q), (ValueError, FileNotFoundError)) or ""
+    m = _bad_m(dv={"L_over_rt": {"value": Lfrac * Lc * (1 + 1e-6), "fixed": True}})
+    check(f"(M) {lab}: L の不一致 (相対 1e-6) で止める", "L:" in m, m[:100])
+    m = _bad_m(spec={**pm.spec, "eps": 49.0})
+    check(f"(M) {lab}: ε の不一致で止める", "ε:" in m, m[:100])
+    m = _bad_m(geometry={**pm.geometry, "R_t": 0.9})
+    check(f"(M) {lab}: R_t の不一致で止める", "R_t" in m, m[:100])
+    other = "L70_n321_mq2_wall.npz" if tag == "l100" else "L100_n321_mq2_wall.npz"
+    m = _bad_m(geometry={**pm.geometry, "rao_wall_file": f"rao_m/rao_t6_parts/{other}"})
+    check(f"(M) {lab}: 別の長さの壁ファイルは L で止める", "L:" in m, m[:100])
+    m = _bad_m(geometry={k: v for k, v in pm.geometry.items() if k != "rao_wall_file"})
+    check(f"(M) {lab}: rao_wall_file が無ければ止める", "rao_wall_file" in m, m[:100])
+    m = _bad_m(geometry={**pm.geometry, "rao_wall_file": "rao_m/rao_t6_parts/missing_wall.npz"})
+    check(f"(M) {lab}: 壁ファイルが無ければ止める", "無い" in m, m[:100])
+    m = _bad_m(geometry={**pm.geometry, "Rd": 0.4})
+    check(f"(M) {lab}: TOP のキー (Rd) を書いたら止める", "効かない" in m, m[:100])
+    m = _bad_m(dv={**pm.dv, "theta_e_deg": {"value": 10.0, "min": 2.0, "max": 20.0}})
+    check(f"(M) {lab}: dv の余分 (theta_e_deg) は止める", "dv" in m, m[:100])
+
+# 排気ファイルが違う (中身の違うファイル) なら止める / 照合に落ちたら run dir を作らない / CPG では止める
+dd = tmp / "m_gas"
+dd.mkdir()
+ex_other = dd / "exhaust_other.yaml"
+ex_other.write_text((CASE68 / "exhaust_lox_lh2_pc100_of6.yaml").read_text() + "\n# 別のファイル (中身が違う)\n")
+y = _yaml_abs(CASE68 / "problem_bell_tp_m_euler_l100.yaml", dd / "p.yaml", lambda d: d["gas"].update(exhaust=str(ex_other)))
+m = raises(lambda: runner.build_wall(load_problem(y)), ValueError) or ""
+check("(M): 壁ファイルを作った排気ファイルと問題の gas.exhaust が違えば止める", "排気ファイル" in m, m[:100])
+y = _yaml_abs(CASE68 / "problem_bell_tp_m_euler_l100.yaml", dd / "p_L.yaml",
+              lambda d: d["dv"]["L_over_rt"].update(value=0.9 * Lc))
+m = raises(lambda: runner.prepare(y, dd / "run_bad"), ValueError) or ""
+check("(M): 照合に落ちたら run dir を作らない (prepare)", "L:" in m and not (dd / "run_bad").exists(), m[:100])
+y = _yaml_abs(CASE68 / "problem_bell_tp_m_euler_l100.yaml", dd / "p_cpg.yaml",
+              lambda d: (d["gas"].pop("exhaust"), d["gas"].update(model="cpg", gamma=1.2, cp=3700.0),
+                         d["spec"].update(Pt=1.0e7, Tt=3500.0), d["evaluate"].pop("model")))
+m = raises(lambda: runner.prepare(y, dd / "run_cpg"), ValueError) or ""
+check("(M): CPG (TP でない) の moc_rao は止める", "moc_rao" in m and not (dd / "run_cpg").exists(), m[:100])
+
+# prepare の変換器の手前まで (変換器は偽物: 品質検査用の cell 変換は生成した格子の四角形の h5 を書き、本変換で止める)。
+# 品質の判定は本物の check_mesh_quality.py (既定 AR ≤ 1000・skew ≤ 0.9、AR 緩和なし)
+_orig_conv = runner._run_converter
+for tag, lab in (("l100", "L100_n321_mq2"), ("l70", "L70_n321_mq2")):
+    PROBLEM_M = CASE68 / f"problem_bell_tp_m_euler_{tag}.yaml"
+    pm = load_problem(PROBLEM_M)
+    wm, recm = runner.build_wall(pm)
+    mpm = runner.mesh_params(pm, 0.14)
+    cm, qm, bm = generate_axisym_mesh(wm, mpm)
+    seen = []
+
+    def _fake_conv(conv, msh, out, run_dir, _c=cm, _q=qm, _seen=seen):
+        _seen.append((out, (Path(run_dir) / "solverConfig.yaml").read_text()))
+        if out == "nozzle_qc.h5":
+            write_qc_h5(Path(run_dir) / out, _c, _q)
+            return
+        raise _StopAtConverter(out)
+    runner._run_converter = _fake_conv
+    rd = tmp / f"prep_m_{tag}"
+    try:
+        e = raises(lambda: runner.prepare(PROBLEM_M, rd), _StopAtConverter)
+    finally:
+        runner._run_converter = _orig_conv
+    check(f"(M) prepare {tag}: 変換器の手前まで通る (品質検査用の cell 変換 → 本変換で停止)",
+          e == "nozzle.h5" and [s[0] for s in seen] == ["nozzle_qc.h5", "nozzle.h5"], str(e))
+    write_msh41_2d(tmp / f"ref_{tag}.msh", cm, qm, bm)
+    check(f"(M) prepare {tag}: nozzle.msh は壁と mesh_params の格子 (バイト一致)",
+          (rd / "nozzle.msh").read_bytes() == (tmp / f"ref_{tag}.msh").read_bytes())
+    mq = (rd / "MESH_QUALITY.txt").read_text()
+    vq = [ln for ln in mq.splitlines() if ln.startswith("VERDICT")]
+    check(f"(M) prepare {tag}: Euler 格子の品質 PASS (check_mesh_quality.py 既定 AR ≤ 1000・skew ≤ 0.9)",
+          bool(vq) and vq[-1].startswith("VERDICT: PASS") and "AR<=1000" in vq[-1].replace(" ", ""), vq[-1] if vq else mq[:200])
+    rx = json.loads((rd / "MESH_AR_RELAX.json").read_text())
+    check(f"(M) prepare {tag}: AR 緩和は使わない (required False・AR > 1000 のセル 0)",
+          (not rx["required"]) and rx["n_high_ar"] == 0 and rx["inlet_planar"] and rx["outlet_planar"],
+          f"AR 最大 {rx['max_ar']:.2f}・skew 最大 {rx['max_skew']:.3f}")
+    Rg = cm[:, 1].reshape(mpm.ni, mpm.nj) / 0.14
+    Xg = cm[:, 0].reshape(mpm.ni, mpm.nj)
+    fr = (Rg[:, -1] - Rg[:, -2]) / Rg[:, -1]
+    check(f"(M) prepare {tag}: 壁際を細分しない (全断面で第一セル / 局所半径 = 0.005、j 方向の線は x 一定)",
+          float(np.max(np.abs(fr - 0.005))) <= 1e-12 and float(np.max(np.ptp(Xg, axis=1))) == 0.0,
+          f"第一セル比 {fr.min():.6f}〜{fr.max():.6f}")
+    sc = yaml.safe_load(seen[-1][1])
+    check(f"(M) prepare {tag}: 本変換の solverConfig は Euler の node の soft 段 (viscMethod 0・turbulence none)",
+          sc["mesh"]["discretization"] == "node" and sc["physProp"]["viscMethod"] == 0 and sc["turbulence"]["model"] == "none"
+          and sc["space"]["convMethod"] == 0 and "transport" not in sc["physProp"])
+    check(f"(M) prepare {tag}: 品質検査用の変換は cell", yaml.safe_load(seen[0][1])["mesh"]["discretization"] == "cell")
+    check(f"(M) prepare {tag}: bcondConfig の物理壁は slip",
+          yaml.safe_load((rd / "bcondConfig.yaml").read_text())["wall"]["kind"] == "slip")
+    wdj = json.loads((rd / "WALL_DESIGN.json").read_text())
+    ref = wdj["moc_reference"]
+    i1 = pm.exhaust.ideal_1d(50.0, A_t=np.pi * 0.14 ** 2)
+    jr = json.loads((RAO_DIR / f"{lab}.json").read_text())
+    F_cs_N = jr["F_cs"] * i1["rho_star"] * i1["a_star"] ** 2 * 0.14 ** 2
+    check(f"(M) prepare {tag}: WALL_DESIGN.json の V2 参照値 F_cs [N] = F_cs·ρ*a*²r_t² (相対 1e-12)、η = F/F_1D",
+          abs(ref["F_cs_N"] / F_cs_N - 1) <= 1e-12 and abs(ref["eta_F_cs"] - F_cs_N / i1["F"]) <= 1e-12
+          and wdj["bell_mode"] == "moc_rao" and wdj["wall_file_sha256"] == recm["wall_file_sha256"],
+          f"F_cs {ref['F_cs_N']:.1f} N・η {ref['eta_F_cs']:.6f}・F_wall {ref['F_wall_N']:.1f} N・η {ref['eta_F_wall']:.6f}")
+    check(f"(M) prepare {tag}: 換算の検算 (MOC の気体の表だけの η と相対 1e-6、ρ*a*² の 2 通りが相対 1e-6)",
+          abs(ref["check"]["eta_rel_diff"]) <= 1e-6 and abs(ref["check"]["scale_rel_diff"]) <= 1e-6,
+          f"η {ref['check']['eta_rel_diff']:+.1e}・ρ*a*² {ref['check']['scale_rel_diff']:+.1e}")
+    check(f"(M) prepare {tag}: 変換器の前に止めたので nozzle.h5・prepare_info.json は無い",
+          not (rd / "nozzle.h5").exists() and not (rd / "prepare_info.json").exists())
+
+# ---------------------------------------------------------------- Euler の run の推力の時系列・metrics・ゲート (plan §5.1 #6 (W1))
+# 合成の Euler run (直管の格子・一様流、ṁ/ṁ_1D ≈ 0.99・η ≈ 0.98 になる状態) を problem_bell_tp_m_euler_l100.yaml で集計し、
+# runner.collect → driver.tp_gates (flow_model euler) を通す。forge・変換器は使わない
+PROBLEM_EU = CASE68 / "problem_bell_tp_m_euler_l100.yaml"
+pe = load_problem(PROBLEM_EU)
+id_e = runner.ideal_1d_tp(pe)
+A_p = math.pi * 0.5 ** 2
+u_e = 4000.0
+ro_e = 0.99 * id_e["mdot"] / (u_e * A_p)                          # ṁ/ṁ_1D = 0.99
+P_e = 0.98 * id_e["F"] / A_p - ro_e * u_e * u_e                   # η = 0.98
+eu = tmp / "eu_run"
+eu.mkdir()
+cols_e = ["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe"]   # Euler: k・ω の列なし
+sm_e = StageManifest(eu)
+for tag_e, st_e, hist_e in (("S1_soft", "soft", pre), ("S2_mid", "mid", pre), ("S3_main", "main", falling)):
+    with open(eu / f"residual_history_{tag_e}.csv", "w", newline="") as fh:
+        w_ = csv.writer(fh); w_.writerow(cols_e)
+        for s_, v_ in enumerate(hist_e):
+            w_.writerow([s_, 4, "outer_end", v_, 1e3 * v_, 5e2 * v_, 0.0, 1e7 * v_])
+    sm_e.add(tag_e, runner._solver_config_tp(pe, len(hist_e), len(hist_e) // 20 or 1, st_e), runner._bcond_config_tp(pe),
+             history=f"residual_history_{tag_e}.csv")
+sm_e.write()
+(eu / "solverConfig.yaml").write_text(runner._solver_config_tp(pe, 20000, 1000, "main"))
+write_mesh_h5(eu / "nozzle.h5", pc, pq, pb)
+for st_ in range(0, 20001, 1000):
+    write_euler_res(eu / f"res_{st_}.h5", NP, ro_e, u_e, 0.0, P_e, grad=1.0e3)
+    if st_ > 0:
+        write_slip_dump(eu / f"res_wall_3_{st_}.h5", pc, pwall)
+(eu / "MESH_QUALITY.txt").write_text("(primal/cell 変換で検査)\nVERDICT: PASS (AR<= 1000, skew<= 0.90)\n")
+(eu / "WALL_DESIGN.json").write_text((tmp / "prep_m_l100" / "WALL_DESIGN.json").read_text())    # 上の prepare が書いたもの
+rows_e = runner.thrust_history_tp(pe, eu)
+check("Euler run: 推力の時系列は step 0 を除く全スナップショット (NS と同じ step の集合)・全行 slip",
+      [r_["step"] for r_ in rows_e] == list(range(1000, 20001, 1000)) and all(r_["wall_model"] == "slip" for r_ in rows_e))
+check("Euler run: 合成の一様流で推力の 2 会計が閉じる (|cv| < 1e-12)・η 0.98・ṁ/ṁ_1D 0.99",
+      max(abs(r_["cv_residual"]) for r_ in rows_e) < 1e-12 and math.isclose(rows_e[-1]["eta_exit"], 0.98, rel_tol=1e-12)
+      and math.isclose(rows_e[-1]["mdot_ratio_1d"], 0.99, rel_tol=1e-12))
+me = runner.collect(PROBLEM_EU, eu)
+mr = me.get("moc_reference", {})
+check("Euler run: metrics に flow_model euler・wall_model slip・cv_closable True・thrust_history (20 点)",
+      me.get("flow_model") == "euler" and me.get("wall_model") == "slip" and me.get("cv_closable") is True
+      and me.get("thrust_history", {}).get("n") == 20 and (eu / "thrust_history.csv").exists(), str({k: me.get(k) for k in ("flow_model", "wall_model", "cv_closable")}))
+check("Euler run: metrics に MOC の参照値との差 η − η_cs (出口面・壁) と推力の相対差・ṁ/ṁ_1D の差",
+      math.isclose(mr.get("eta_exit_minus_eta_cs", 1.0), me["eta_exit"] - mr["eta_F_cs"], rel_tol=0, abs_tol=0)
+      and math.isclose(mr["eta_wall_minus_eta_cs"], me["eta_wall"] - mr["eta_F_cs"], rel_tol=0, abs_tol=0)
+      and math.isclose(mr["thrust_exit_rel_diff_cs"], me["thrust_exit_N"] / mr["F_cs_N"] - 1.0, rel_tol=0, abs_tol=0)
+      and math.isclose(mr["mdot_ratio_1d_minus_moc"], me["mdot_ratio_1d"] - mr["mdot_ratio_1d"], rel_tol=0, abs_tol=0),
+      f"η − η_cs {mr.get('eta_exit_minus_eta_cs', float('nan')):+.6f}")
+ge = DR.tp_gates(eu, me, flow_model="euler")
+gj = json.loads((eu / "GATES.json").read_text())
+wr_e = gj["gates"]["wall_resolution"]
+check("Euler の GATES: 壁解像 (y1+) は回さず対象外と理由を書いて ok (WALL_RESOLUTION_VERDICT.txt を作らない)",
+      wr_e["ok"] and wr_e["skipped"] and "対象外" in wr_e["verdict"] and "Euler" in wr_e["verdict"]
+      and not (eu / "WALL_RESOLUTION_VERDICT.txt").exists() and gj.get("flow_model") == "euler", wr_e["verdict"][:60])
+check("Euler の GATES: (i) 残差 (k・ω の列なし)・(ii) 準定常・(iii) 物理・(iv) CV・(v) メッシュ品質は NS と同じ判定で通り PASS",
+      ge["status"] == "PASS" and all(ge["gates"][k]["ok"] for k in ("convergence", "quasisteady", "physics", "cv", "mesh_quality")),
+      f"{ge['status']} {ge['note']} {ge['gates']['convergence'].get('verdict')}")
+m = raises(lambda: DR.tp_gates(eu, me, flow_model="ns"), ValueError) or ""
+check("Euler の run を NS として判定しようとすると止める (wall_model と flow_model の食い違い)", "食い違う" in m, m[:80])
+m = raises(lambda: DR.tp_gates(eu, {**me, "wall_model": "viscous"}, flow_model="euler"), ValueError) or ""
+check("NS の会計 (viscous) を Euler として判定しようとすると止める", "食い違う" in m, m[:80])
+check("tp_gates: 未知の flow_model は止める", raises(lambda: DR.tp_gates(eu, me, flow_model="rans"), ValueError) is not None)
+me_nothrust = {k: v for k, v in me.items() if k not in ("eta_exit", "wall_model", "eta_cf", "cv_residual", "cv_closable")}
+ge2 = DR.tp_gates(eu, me_nothrust, flow_model="euler")
+check("tp_gates: 推力の会計が無い Euler の metrics は照合せず、(iii)(iv) が欠損で落とす (例外にしない)",
+      ge2["status"] == "FAIL" and not ge2["gates"]["physics"]["ok"] and not ge2["gates"]["cv"]["ok"]
+      and ge2["gates"]["wall_resolution"]["skipped"], ge2["note"])
+
+# 評価ごとの YAML の相対パス: geometry.rao_wall_file も直す (PROBLEM_PATH_KEYS)
+check("(b) geometry.rao_wall_file も問題 YAML の所在で絶対パスに",
+      DR.absolutize_problem_paths({"geometry": {"rao_wall_file": "rao_m/x_wall.npz"}}, "/a/b")["geometry"]["rao_wall_file"]
+      == "/a/b/rao_m/x_wall.npz")
+raw_m = yaml.safe_load(PROBLEM_EU.read_text())
+ab_m = DR.absolutize_problem_paths(raw_m, PROBLEM_EU.parent)
+(tmp / "elsewhere").mkdir()
+(tmp / "elsewhere" / "m.yaml").write_text(yaml.safe_dump(ab_m, allow_unicode=True))
+wm2, rec2 = runner.build_wall(load_problem(tmp / "elsewhere" / "m.yaml"))
+check("(b) 書き出した (M) の問題 YAML を別ディレクトリから読める (壁ファイル・排気ファイルが解決し、同じ壁)",
+      Path(ab_m["geometry"]["rao_wall_file"]).is_absolute() and Path(ab_m["geometry"]["rao_wall_file"]).exists()
+      and rec2["wall_file_sha256"] == json.loads((tmp / "prep_m_l100" / "WALL_DESIGN.json").read_text())["wall_file_sha256"]
+      and np.array_equal(wm2.rao.spl.c, runner.build_wall(load_problem(PROBLEM_EU))[0].rao.spl.c))
 
 # ---------------------------------------------------------------- driver: TP は全点冷間・停止規則 (2026-10-11 diagnostician)
 _seen = {}

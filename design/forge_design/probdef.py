@@ -115,6 +115,19 @@ class Problem:
         return ResolvedSpeciesDB.from_file(pth)
 
     @property
+    def rao_wall_file(self):
+        """`geometry.rao_wall_file` (③ベル (M) の生成器の壁ファイル `<tag>_wall.npz`; 問題 YAML の所在基準の相対パス可) を解決した
+        Path (書いていなければ None)。ファイルの有無と中身の検査は読む側 (`rao_axisym.load_rao_wall`; plan bell-two-mode §5.1 #6)。"""
+        v = self.geometry.get("rao_wall_file")
+        if v is None:
+            return None
+        from pathlib import Path
+        pth = Path(str(v))
+        if not pth.is_absolute() and self.path:
+            pth = Path(self.path).resolve().parent / pth
+        return pth
+
+    @property
     def composition_basis(self) -> str:
         return str(self.raw.get("gas", {}).get("composition_basis", "mass")).lower()
 

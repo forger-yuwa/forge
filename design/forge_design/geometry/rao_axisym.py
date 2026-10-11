@@ -1915,3 +1915,92 @@ def resampled_front_line(net, k0: int, N: int) -> dict:
                 "front_dr_min": float(dr.min()), "front_dr_max": float(dr.max()), "x_wall": float(x[-1]), "r_wall": float(r[-1]),
                 "x_axis": float(x[0])})
     return out
+
+
+# ================================================================================================
+# 生成器の壁ファイルの読み込み — runner の (M) 経路 `geometry.bell_mode: moc_rao` (plan §5.1 #6 (W1))
+RAO_WALL_SUFFIX = "_wall.npz"
+RAO_WALL_B_TOL = 1e-8                 # 記録の B (x_B, r_B) と円弧の閉じた式の B の一致 [r_t]
+# 記録 `<tag>.json` から WALL_DESIGN.json へ写す生成条件 (`run_rao_t6.py` の `_record`)
+RAO_WALL_GEN_KEYS = ("tag", "L_frac", "L_rt", "n", "variant", "dr", "m", "q", "kernel", "c", "accept_rule", "status",
+                     "eta_D", "det_D", "de", "branch", "goursat_nfail", "n_wall_missing", "streamline_resid_max", "note")
+# 同じく生成器の結果 (角度は度、長さは r_t、推力・流量は ρ*a*²r_t²・ρ*a*r_t² の単位で 2π を含む、p_a は生成器の値)
+RAO_WALL_RESULT_KEYS = ("theta_B_deg", "theta_E_deg", "theta_max_deg", "s_B", "x_B", "r_B", "x_D", "r_D", "M_D", "theta_D_deg",
+                        "x_E", "r_E", "M_E", "x_E_minus_L", "F_cs", "F_wall", "thrust_rel_diff", "mdot_rel_diff", "T_line",
+                        "T_kernel", "T_BE", "T_closure", "T_DE", "CF", "isp_ratio", "closure_norm", "kappa_B", "kappaW_B",
+                        "dkappa_B", "g_tilde")
+
+
+def _sha256_file(path) -> str:
+    import hashlib
+    from pathlib import Path
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def load_rao_wall(path, *, fit: str = "pspline", n_int: int = 48, lam: float | None = None) -> tuple:
+    r"""生成器の壁ファイル `<tag>_wall.npz` (`case/68.bell_two_mode/rao_m/run_rao_t6.py` の形式: `BE` [x, r, θ, M] の点列・
+    `kernel_wall`・`wall`) と、同じディレクトリの記録 `<tag>.json` から (M) の壁 `RaoWall` を作る (生成器は回さない)。
+
+    作り方は T4 の評価 (`run_rao_t4h.py` の `_rao_wall`) と同じ: BE の点列の末尾を記録の E (`x_E`・`r_E` — DE の流量の根で
+    $(L,\sqrt\varepsilon)$ が厳密) に置き換え、$\theta_B$・$\theta_E$ は記録の値、BE は `RaoWall` の表現 (`fit`・`n_int`・`lam`; 既定は
+    罰則付き 5 次 B-spline・48 区間・λ は GCV、B で $r$・$r'$、E で $r$・$r'$ を拘束)。
+    kernel は円弧 (`kernel: arc`、`c` = 0) だけを受ける: $R_t$ は記録の $\kappa_B$ (円弧では $1/R_t$) から決め、記録の
+    $(x_B, r_B)$ が円弧の閉じた式 $(R_t\sin\theta_B,\ 1+R_t(1-\cos\theta_B))$ と `RAO_WALL_B_TOL` 以内で一致することを確かめる。
+    記録の `status` が `ok` でない・kernel が円弧でない・B が合わない・npz に `BE` が無いときは `ValueError`
+    (黙って作らない)。
+
+    キャンペーンの要約 (`<prefix>_parts/` の親の `<prefix>.json`。`run_rao_t6.py` の `rao_t6.json`) があれば、その `setup`
+    (ガス・排気ファイル・$R_t$・$\varepsilon$・$p_a$・初期線)・`commit`・ソースの sha を来歴に写す。
+
+    戻り (`RaoWall`, 記録 dict)。記録: `wall_file`・`record_file` とその sha256、`generator` (生成条件 `RAO_WALL_GEN_KEYS`)、
+    `result` (生成器の結果 `RAO_WALL_RESULT_KEYS`。推力・流量は $\rho^*a^{*2}r_t^2$・$\rho^*a^*r_t^2$ の単位で $2\pi$ を含む)、`R_t`、
+    `B_replaced` (BE の先頭と閉じた式の B の差)・`last_point_minus_E` (BE の末尾と E の差 = 生成器の閉合)・`fit_info`、`campaign`。"""
+    import json
+    from pathlib import Path
+    path = Path(path)
+    if not path.name.endswith(RAO_WALL_SUFFIX):
+        raise ValueError(f"load_rao_wall: 壁ファイルは <tag>{RAO_WALL_SUFFIX} ({path.name})")
+    if not path.exists():
+        raise FileNotFoundError(f"load_rao_wall: 壁ファイル {path} が無い")
+    tag = path.name[:-len(RAO_WALL_SUFFIX)]
+    jpath = path.with_name(f"{tag}.json")
+    if not jpath.exists():
+        raise FileNotFoundError(f"load_rao_wall: 壁ファイルの記録 {jpath} が無い (θ_B・E・生成条件はそこから読む)")
+    rec = json.loads(jpath.read_text())
+    if rec.get("status") != "ok":
+        raise ValueError(f"load_rao_wall: {jpath.name} の status が ok でない ({rec.get('status')}: {rec.get('why')})")
+    if rec.get("kernel") != "arc" or float(rec.get("c", 0.0)) != 0.0:
+        raise ValueError(f"load_rao_wall: kernel は円弧 (arc, c = 0) だけ ({rec.get('kernel')}, c = {rec.get('c')})")
+    with np.load(path) as z:
+        if "BE" not in z.files:
+            raise ValueError(f"load_rao_wall: {path.name} に BE が無い ({z.files})")
+        BE = np.asarray(z["BE"], dtype=float)
+    kB = float(rec["kappa_B"])
+    if not (np.isfinite(kB) and kB > 0.0):
+        raise ValueError(f"load_rao_wall: 記録の κ_B = {kB} (円弧の 1/R_t) が正でない")
+    R_t = 1.0 / kB
+    thB = np.deg2rad(float(rec["theta_B_deg"]))
+    thE = np.deg2rad(float(rec["theta_E_deg"]))
+    xB_c, rB_c = R_t * np.sin(thB), 1.0 + R_t * (1.0 - np.cos(thB))
+    dB = (float(rec["x_B"]) - xB_c, float(rec["r_B"]) - rB_c)
+    if max(abs(dB[0]), abs(dB[1])) > RAO_WALL_B_TOL:
+        raise ValueError(f"load_rao_wall: 記録の B ({rec['x_B']}, {rec['r_B']}) が R_t = {R_t} の円弧の B ({xB_c}, {rB_c}) と "
+                         f"{RAO_WALL_B_TOL:g} を超えて違う (差 {dB})")
+    P = BE[:, :2].copy()
+    E = (float(rec["x_E"]), float(rec["r_E"]))
+    last_gap = (float(P[-1, 0] - E[0]), float(P[-1, 1] - E[1]))
+    P[-1] = E
+    wall = RaoWall(R_t, thB, P, thE, fit=fit, n_int=n_int, lam=lam)
+    camp = None
+    if path.parent.name.endswith("_parts"):
+        cpath = path.parent.parent / (path.parent.name[:-len("_parts")] + ".json")
+        if cpath.exists():
+            c = json.loads(cpath.read_text())
+            camp = {"file": str(cpath), "sha256": _sha256_file(cpath), "setup": c.get("setup"), "commit": c.get("commit"),
+                    "design_tree_dirty": c.get("design_tree_dirty"), "source_sha256_16": c.get("source_sha256_16")}
+    out = {"wall_file": str(path), "wall_file_sha256": _sha256_file(path), "record_file": str(jpath),
+           "record_sha256": _sha256_file(jpath), "generator": {k: rec.get(k) for k in RAO_WALL_GEN_KEYS},
+           "result": {k: rec.get(k) for k in RAO_WALL_RESULT_KEYS}, "R_t": R_t, "n_BE": int(len(BE)),
+           "B_record_minus_closed_form": dB, "B_replaced": wall.B_replaced, "last_point_minus_E": last_gap,
+           "fit_info": dict(wall.fit_info), "campaign": camp}
+    return wall, out
