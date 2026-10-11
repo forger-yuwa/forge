@@ -19,6 +19,11 @@ TP 経路 (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1・§5.1 #2a): 問
 TP の段階起動・同一メッシュの継続・推力の CV 会計 (2026-10-11, 同 plan §5.1 #2b): `run_staged_tp` (soft → mid → 本段を同じ run・
 同じメッシュで、段の間は restart_field.py、stage_manifest.json)、`continue_tp` (本段の継続 = polish)、`collect` が本段の全スナップショットで
 `metrics.extract.thrust_cv` を出して thrust_history.csv を書く。CLI は `--staged` / `--continue-from <run>`。
+壁法線の近壁層 (2026-10-11, 同 plan §4.1 (v)・§5.1 #2d): mesh の `wall_normal_layer`・`wall_normal_end_stations` を mesh2d に渡し、
+AR ≤ 5000 の例外の条件 (AR > 1000 の全セルでスキュー ≤ 0.1、入口・出口面は平面) を `mesh_ar_relax_check` で検査して
+MESH_AR_RELAX.json に残す。(D) 直接モード (同 §5.1 #3f): `geometry.bell_mode: direct_bspline` (dv: L_over_rt・theta_e_deg・
+theta_max_deg) で `wall_bell_c2.design_bell_c2` の壁を使い、成立しなければ `WallInfeasible` (理由つき)、前進 MOC ゲートの指標を
+MOC_GATE.json と metrics に記録する (制約にしない)。TOP・hermite (bell_mode 無し) の経路は変えない。
 """
 from __future__ import annotations
 
@@ -55,7 +60,66 @@ def converter_path() -> Path:
     return FORGE_BUILD / "convertGmshToForge"
 
 
+class WallInfeasible(ValueError):
+    """壁が作れない (設計空間の中だが成立条件を満たさない) ことを理由つきで返す。`ValueError` の派生なので、driver の
+    「幾何構築失敗 = INFEASIBLE」の経路にそのまま入る。`record` は壁の設計の記録 (例: `BellC2Design.record()`)。"""
+
+    def __init__(self, reason: str, record: dict | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.record = record or {}
+
+
+# (D) 直接モード (plan tooling-nozzle-bell-two-mode §4.2・§4.3・§5.1 #3f): geometry に書けるキー (寸法 spec、§8-1 の仮値が既定)。
+# TOP・hermite のキー (bell_type・Ru・Rd・phi_u_deg・r_inlet・L_contract) は効かないので書いたら止める (黙って無視しない)
+DIRECT_GEOMETRY_KEYS = ("bell_mode", "R_t", "contraction_ratio", "L_U", "L_pipe")
+DIRECT_DV = ("theta_max_deg", "theta_e_deg", "L_over_rt")
+BELL_MODES = ("direct_bspline",)            # geometry.bell_mode (無し = 従来の bell_type の経路)
+
+
+def bell_mode(p: Problem) -> str | None:
+    """`geometry.bell_mode` (無ければ None = 従来の TOP・hermite の経路)。未実装の値は ValueError。"""
+    m = p.geometry.get("bell_mode")
+    if m is None:
+        return None
+    if m not in BELL_MODES:
+        raise ValueError(f"geometry.bell_mode '{m}' は未実装 ({list(BELL_MODES)}; 書かなければ bell_type の TOP・hermite)")
+    return str(m)
+
+
+def direct_bell_spec(p: Problem):
+    """(D) の寸法 spec (`BellC2Spec`): ε は spec.eps、他は geometry (既定は plan §8-1 の仮値 = `BellC2Spec` の既定)。"""
+    from ..geometry.wall_bell_c2 import BellC2Spec
+    g = p.geometry
+    bad = [k for k in g if k not in DIRECT_GEOMETRY_KEYS]
+    if bad:
+        raise ValueError(f"geometry.bell_mode direct_bspline では {bad} は効かない (書けるのは {list(DIRECT_GEOMETRY_KEYS)})")
+    d = BellC2Spec()
+    return BellC2Spec(eps=float(p.spec["eps"]), R_t=float(g.get("R_t", d.R_t)),
+                      contraction_ratio=float(g.get("contraction_ratio", d.contraction_ratio)),
+                      L_U=float(g.get("L_U", d.L_U)), L_pipe=float(g.get("L_pipe", d.L_pipe)))
+
+
+def _build_wall_direct(p: Problem) -> tuple:
+    """(D) の壁 (`wall_bell_c2.design_bell_c2`: C2 スロート・U→T Hermite の収縮部・拡大部の 5 次 B-spline、x_m は内部決定)。
+    設計変数は dv の L_over_rt・theta_e_deg・theta_max_deg。成立区間が空 (INFEASIBLE) なら `WallInfeasible` (理由と設計の記録つき)。
+    戻り (DirectBellWall, BellC2Design)。"""
+    from ..geometry.wall import DirectBellWall
+    from ..geometry.wall_bell_c2 import design_bell_c2
+    missing = [k for k in DIRECT_DV if k not in p.dv]
+    extra = [k for k in p.dv if k not in DIRECT_DV]
+    if missing or extra:
+        raise ValueError(f"geometry.bell_mode direct_bspline の dv は {list(DIRECT_DV)} (欠け {missing}・余分 {extra})")
+    spec = direct_bell_spec(p)
+    d = design_bell_c2(dv_value(p, "L_over_rt"), dv_value(p, "theta_e_deg"), dv_value(p, "theta_max_deg"), spec)
+    if not d.ok:
+        raise WallInfeasible(f"(D) の壁が成立しない: {d.reason}", d.record())
+    return DirectBellWall(d.wall), d
+
+
 def build_wall(p: Problem) -> tuple:
+    if bell_mode(p) == "direct_bspline":
+        return _build_wall_direct(p)
     g = p.geometry
     theta_a = np.deg2rad(dv_value(p, "theta_a_deg"))
     L_div = dv_value(p, "L_over_rt")
@@ -155,8 +219,10 @@ TP_K_INIT, TP_OMEGA_INIT = 1.0, 18000.0     # IC・入口の k/ω (CPG 経路と
 # 推力の CV 会計 (metrics.extract.thrust_cv) が入口・出口面の粘性応力に使うソルバの勾配 (output.extraFields; 場は不変)
 TP_EXTRA_FIELDS = ("dUxdx", "dUxdy", "dUydx", "dUydy", "axisym_divU")
 # 段階起動の既定の step 数 (recommended-settings §1.2: soft 2000 → mid 2000 → 本段 8000〜12000)。evaluate.stage_steps で上書き。
-# 本段は evaluate.nStepOuter、res の間隔は evaluate.outStepInterval (既定は本段の 1/12 — 推力の時系列の準定常判定に 4 点以上)
+# 本段は evaluate.nStepOuter、res の間隔は evaluate.outStepInterval (既定は本段の 1/TP_MAIN_OUT_DIV)
 TP_STAGE_STEPS = {"soft": 2000, "mid": 2000}
+# 本段の res の既定の間隔 = 本段長 / TP_MAIN_OUT_DIV (plan §4.1 (ii): 本段の出力間隔は本段長の 1/20 以下 = 末尾窓 4 割に 8 点以上)
+TP_MAIN_OUT_DIV = 20
 
 
 def _is_tp(p: Problem) -> bool:
@@ -269,14 +335,31 @@ PROBE_STUB = "outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n"
 
 # 第一セル厚の x 依存 (スロートだけ詰める) と細分幅のキー (meshing.mesh2d.Mesh2DParams)。**書いてあるときだけ**渡す
 # (書いていない問題は従来の 4 キーだけの格子とビット同一; plan bell-two-mode §5.1 #2b 引き継ぎ (c): スロートの y1+ ≤ 1)。
+# 壁法線の近壁層 (2026-10-11, plan bell-two-mode §4.1 (v)・§5.1 #2d): `wall_normal_layer` [d_n, d_b] (mesh2d の既存の層) と、
+# 入口・出口の面を平面に保つため両端の断面で層を半径方向へ戻す `wall_normal_end_stations` (整数)。
 MESH_OPTIONAL_KEYS = ("throat_width", "wall_first_frac_throat", "wall_first_blend_x0", "wall_first_blend_x1",
-                      "wall_first_up_x0", "wall_first_up_x1")
+                      "wall_first_up_x0", "wall_first_up_x1", "wall_normal_layer", "wall_normal_end_stations")
+_MESH_PAIR_KEYS = ("wall_normal_layer",)
+_MESH_INT_KEYS = ("wall_normal_end_stations",)
+
+
+def _mesh_key_value(k: str, v):
+    """`MESH_OPTIONAL_KEYS` の値を Mesh2DParams の型に (組は 2 数の tuple、整数は int、他は float)。型が違えば ValueError。"""
+    if k in _MESH_PAIR_KEYS:
+        if not (isinstance(v, (list, tuple)) and len(v) == 2):
+            raise ValueError(f"mesh.{k} は 2 数の組 [d_n, d_b] (受け取った値 {v!r})")
+        return tuple(float(a) for a in v)
+    if k in _MESH_INT_KEYS:
+        if isinstance(v, bool) or not float(v).is_integer():
+            raise ValueError(f"mesh.{k} は整数 (受け取った値 {v!r})")
+        return int(v)
+    return float(v)
 
 
 def mesh_params(p: Problem, scale: float) -> Mesh2DParams:
     """問題の mesh ブロック → Mesh2DParams。ni・nj・wall_first_frac・throat_refine は従来の既定、`MESH_OPTIONAL_KEYS` は
     書いてあるときだけ渡す (以前は黙って無視していた)。"""
-    kw = {k: float(p.mesh[k]) for k in MESH_OPTIONAL_KEYS if p.mesh.get(k) is not None}
+    kw = {k: _mesh_key_value(k, p.mesh[k]) for k in MESH_OPTIONAL_KEYS if p.mesh.get(k) is not None}
     return Mesh2DParams(
         ni=int(p.mesh.get("ni", 241)),
         nj=int(p.mesh.get("nj", 81)),
@@ -305,6 +388,9 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
         raise ValueError("stage は TP 経路 (gas.model: semiperfect + gas.exhaust) だけで指定できる")
     if tp:
         stage = _tp_stage(stage, warm_from)     # run dir を作る前に段を検査する
+    if bell_mode(p) == "direct_bspline" and not tp:
+        raise ValueError("geometry.bell_mode direct_bspline は TP 経路 (gas.model: semiperfect + gas.exhaust) だけで使う "
+                         "(plan bell-two-mode §5.1 #3f)")
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=False)
     wall, wp = build_wall(p)
@@ -318,7 +404,11 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
     np.savetxt(run_dir / "contour.csv", np.c_[xs * scale, wall.r(xs) * scale],
                delimiter=",", header="x_m,r_m", comments="")
     if tp:
-        return _prepare_tp(p, problem_path, run_dir, wall, scale, mp, quads, nsteps, warm_from, stage)
+        extra = {}
+        if bell_mode(p) == "direct_bspline":
+            extra = _direct_wall_records(p, run_dir, wall, wp)
+        return _prepare_tp(p, problem_path, run_dir, wall, scale, mp, quads, nsteps, warm_from, stage,
+                           coords=coords, bedges=bedges, extra_info=extra)
 
     n = nsteps or int(p.evaluate.get("nStepOuter", 12000))
     (run_dir / "solverConfig.yaml").write_text(_solver_config(p, n, int(p.evaluate.get("outStepInterval", max(n // 3, 1)))))
@@ -393,11 +483,103 @@ def _environment_record() -> dict:
             "forge_bin": os.environ.get("FORGE_BIN"), "converter": str(converter_path())}
 
 
-def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp, quads, nsteps, warm_from, stage) -> dict:
+def _direct_wall_records(p: Problem, run_dir: Path, wall, design) -> dict:
+    """(D) の壁の記録 (plan bell-two-mode §5.1 #3f): 設計の記録 `WALL_DESIGN.json` (x_m・成立区間・J など) と、前進 MOC ゲートの
+    指標 `MOC_GATE.json` (`moc_forward.forward_moc`、Hall のスロート特性線 n `MOC_GATE_N`、R = R_t、ガスは評価器と同じ凍結 TP
+    `p.gas_model`)。**ゲートは記録だけで受理の制約にしない** (③の真空の比較; 制約に使うのは④の MOO から、#3e の後)。
+    戻りは prepare_info に足す要約。"""
+    import time as _time
+
+    from ..geometry.moc_forward import forward_moc, gate_record, hall_initial_line
+    rec = {**design.record(), "L": design.L, "theta_e_deg": design.theta_e_deg, "theta_max_deg": design.theta_max_deg,
+           "spec": {k: getattr(design.spec, k) for k in ("eps", "R_t", "contraction_ratio", "L_U", "L_pipe")}}
+    (run_dir / "WALL_DESIGN.json").write_text(json.dumps(rec, indent=1, ensure_ascii=False, default=float))
+    t0 = _time.time()
+    gas = p.gas_model
+    line = hall_initial_line(float(design.spec.R_t), gas, MOC_GATE_N)
+    gr = gate_record(forward_moc(design.wall, float(design.L), gas, line))
+    gate = {"constraint": False, "initial_line": f"hall_initial_line (R = R_t = {design.spec.R_t:g}, n {MOC_GATE_N})",
+            "axis_limit": "analytic", "corrector": "converge", **gr, "wall_s": round(_time.time() - t0, 2)}
+    (run_dir / "MOC_GATE.json").write_text(json.dumps(gate, indent=1, ensure_ascii=False, default=float))
+    return {"wall_design": {k: rec[k] for k in ("design_status", "x_m", "xm_over_L", "J_rppp2", "intervals", "L",
+                                               "theta_e_deg", "theta_max_deg", "spec")},
+            "moc_gate": moc_gate_summary(gate)}
+
+
+MOC_GATE_N = 321              # 前進 MOC ゲートの Hall 初期線の点数 (V0 の主設定; R_t ≤ 1 では 321 が上限 — moc_forward のガード)
+MOC_GATE_KEYS = ("verdict", "gate_pass", "undecidable_kind", "codes", "cminus_sep_ratio_min", "cminus_sep_x",
+                 "cplus_sep_ratio_min", "reversal_onset_x", "n_reversal_cplus_step", "n_reversal_cminus_step",
+                 "n_crossing_cminus_sampled", "n_crossing_cplus_sampled", "end_reason")
+
+
+def moc_gate_summary(gate: dict) -> dict:
+    """台帳 (metrics・ledger) に載せる前進 MOC ゲートの指標 (C⁻ 間隔比の最小・反転・交差・verdict)。"""
+    return {k: gate.get(k) for k in MOC_GATE_KEYS}
+
+
+# AGENTS.md の AR ≤ 5000 の例外の条件 (plan bell-two-mode §4.1 (v)): AR > 1000 の全セルでスキュー ≤ 0.1、入口・出口面は平面。
+# check_mesh_quality.py --ar-max 5000 は全域一律なので、条件はここで自前で検査して run に残す (MESH_AR_RELAX.json)。
+AR_RELAX_AR, AR_RELAX_SKEW = 1000.0, 0.1
+
+
+def mesh_ar_relax_check(qc_h5, coords, bedges, scale: float, ar_max: float) -> dict:
+    """primal (cell 変換) の h5 で、AR > `AR_RELAX_AR` の全セルのスキューが ≤ `AR_RELAX_SKEW` か、入口・出口面が平面 (節点の x が
+    一致) かを検査する。AR・スキューの定義は check_mesh_quality.py の関数そのもの (同じ定義で測る)。`required` は ar_max > 1000
+    (例外を使う格子) のとき True。戻りの `ok` は条件をすべて満たすこと。"""
+    import h5py
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    import check_mesh_quality as cmq
+    from res_h5_to_vtu import parse_conne
+    with h5py.File(qc_h5, "r") as f:
+        coord3 = np.asarray(f["MESH/COORD"][:], dtype=float).reshape(-1, 3)
+        if "VIZMESH/CONNE" in f:
+            conne, ncells = np.asarray(f["VIZMESH/CONNE"]), int(f["VIZMESH"].attrs["nVizCells"])
+        else:
+            conne, ncells = np.asarray(f["MESH/CONNE"]), int(f["VALUE/ro"].shape[0])
+    conn, offs, types = parse_conne(conne, ncells)
+    conn, offs, types = np.asarray(conn), np.asarray(offs), np.asarray(types)
+    ars, skews = cmq.metrics_vectorized(coord3[:, :2], conn, offs, types, False)
+    starts = np.r_[0, offs[:-1]]
+    cen = np.array([coord3[conn[a:b], :2].mean(0) for a, b in zip(starts, offs)]) / scale
+    hi = ars > AR_RELAX_AR
+    bad = hi & (skews > AR_RELAX_SKEW)
+    out = {"ar_threshold": AR_RELAX_AR, "skew_max": AR_RELAX_SKEW, "ar_max_allowed": float(ar_max),
+           "required": bool(ar_max > AR_RELAX_AR), "source": str(Path(qc_h5).name) + " (primal/cell 変換)",
+           "n_cells": int(ncells), "max_ar": float(ars.max()), "max_skew": float(skews.max()),
+           "n_high_ar": int(hi.sum()), "max_skew_high_ar": float(skews[hi].max()) if hi.any() else None,
+           "n_violations": int(bad.sum())}
+    if hi.any():
+        w = int(np.argmax(np.where(hi, skews, -1.0)))
+        out["worst_high_ar"] = {"x_over_rt": float(cen[w, 0]), "r_over_rt": float(cen[w, 1]), "ar": float(ars[w]),
+                                "skew": float(skews[w])}
+        out["high_ar_x_range_over_rt"] = [float(cen[hi, 0].min()), float(cen[hi, 0].max())]
+    for face in ("inlet", "outlet"):
+        nodes = sorted({int(n) for e in bedges[face] for n in e})
+        spread = float(np.ptp(coords[nodes, 0]))
+        out[f"{face}_x_spread_m"] = spread
+        out[f"{face}_planar"] = bool(spread <= 1e-12 * max(1.0, float(np.abs(coords[:, 0]).max())))
+    out["ok"] = bool(out["n_violations"] == 0 and out["inlet_planar"] and out["outlet_planar"])
+    return out
+
+
+def _ar_relax_line(c: dict) -> str:
+    """MESH_QUALITY.txt に足す 1 行 (VERDICT 行の後。gate_mesh_quality は最後の VERDICT 行を読むので VERDICT で始めない)。"""
+    return (f"AR_RELAX: {'PASS' if c['ok'] else 'FAIL'} (AR > {c['ar_threshold']:.0f} の {c['n_high_ar']} セルでスキュー最大 "
+            f"{format(c['max_skew_high_ar'], '.4g') if c['max_skew_high_ar'] is not None else '-'} ≤ {c['skew_max']} が条件、"
+            f"違反 {c['n_violations']}; "
+            f"入口面 {'平面' if c['inlet_planar'] else '非平面'}・出口面 {'平面' if c['outlet_planar'] else '非平面'}; "
+            f"適用 {'あり (ar_max ' + format(c['ar_max_allowed'], '.0f') + ')' if c['required'] else 'なし (ar_max ≤ 1000)'})")
+
+
+def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp, quads, nsteps, warm_from, stage,
+                coords=None, bedges=None, extra_info: dict | None = None) -> dict:
     """TP 経路の prepare (メッシュ生成の後; plan bell-two-mode §4.1 #2a)。config は `_solver_config_tp`、BC は
     `_bcond_config_tp`、IC は排気の契約の気体 (`p.gas_model` = `RocketExhaust.moc_gas`) で `thermoHrefTemp` の基準の
     内部エネルギー、新規 IC の化学種属性は宛先の `forge --resolve-species` と照合して付ける。変換器は `converter_path()`
-    (FORGE_BIN と同じビルド; lump 記法の physProp.species を読める変換器が要る)。"""
+    (FORGE_BIN と同じビルド; lump 記法の physProp.species を読める変換器が要る)。
+    格子の検査: check_mesh_quality.py (--ar-max は mesh.ar_max) に加え、AR ≤ 5000 の例外の条件 (`mesh_ar_relax_check`) を
+    MESH_AR_RELAX.json に残し、ar_max > 1000 のときは条件を満たさなければ RuntimeError (§4.1 (v))。"""
     from ..gas.composition import species_db_raw_yaml, solver_species_config, write_species_meta
     from .ic import stamp_isentropic_ic_species
 
@@ -423,12 +605,20 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
     subprocess.run([conv, "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "nozzle_qc.h5", "--ar-max", str(ar_max)],
                        cwd=run_dir, env=_ENV, capture_output=True, text=True)
-    (run_dir / "MESH_QUALITY.txt").write_text("(primal/cell 変換で検査)\n" + q.stdout + q.stderr)
+    relax = None
+    if coords is not None and bedges is not None and q.returncode == 0:
+        relax = mesh_ar_relax_check(run_dir / "nozzle_qc.h5", coords, bedges, scale, ar_max)
+        (run_dir / "MESH_AR_RELAX.json").write_text(json.dumps(relax, indent=1, ensure_ascii=False))
+    (run_dir / "MESH_QUALITY.txt").write_text("(primal/cell 変換で検査)\n" + q.stdout + q.stderr
+                                              + (_ar_relax_line(relax) + "\n" if relax is not None else ""))
     (run_dir / "nozzle_qc.h5").unlink()
     for f in run_dir.glob("nozzle_qc.xmf"):
         f.unlink()
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
+    if relax is not None and relax["required"] and not relax["ok"]:
+        raise RuntimeError("AR ≤ 5000 の例外の条件 (AR > 1000 の全セルでスキュー ≤ 0.1、入口・出口面は平面) を満たさない: "
+                           + _ar_relax_line(relax))
     (run_dir / "solverConfig.yaml").write_text(_solver_config_tp(p, n, out_int, stage))
     subprocess.run([conv, "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
 
@@ -453,7 +643,11 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
             "gas": {**rec, "species": species, "transport": transport, "mode": layout.mode},
             "ideal_1d": ideal_1d_tp(p), "outlet_kind": _outlet_kind(p),
             "mesh": {"ni": mp.ni, "nj": mp.nj, "cells": int(quads.shape[0]), "wall_first_frac": mp.wall_first_frac,
-                     "ar_max": ar_max, **{k: getattr(mp, k) for k in MESH_OPTIONAL_KEYS if p.mesh.get(k) is not None}},
+                     "ar_max": ar_max, **{k: getattr(mp, k) for k in MESH_OPTIONAL_KEYS if p.mesh.get(k) is not None},
+                     **({"ar_relax": {k: relax[k] for k in ("ok", "required", "n_high_ar", "max_skew_high_ar",
+                                                            "n_violations", "inlet_planar", "outlet_planar")}}
+                        if relax is not None else {})},
+            **({"bell_mode": bell_mode(p)} if bell_mode(p) else {}), **(extra_info or {}),
             "environment": _environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
     return info
@@ -535,7 +729,8 @@ def _res_sorted(run_dir) -> list:
 def tp_stage_plan(p: Problem, stages=None) -> list:
     """TP の段の計画 [(tag, 段, step 数, outStepInterval)]。段は `stages` > `evaluate.stages` > (soft, mid, main)。
     soft・mid の step 数は `evaluate.stage_steps` (既定 TP_STAGE_STEPS)、本段は `evaluate.nStepOuter` (既定 12000) で
-    res を `evaluate.outStepInterval` (既定は本段の 1/12) ごとに書く。前段は最終 step だけを書く。最後の段は main、
+    res を `evaluate.outStepInterval` (既定は本段の 1/`TP_MAIN_OUT_DIV` = 1/20 — 推力の準定常ゲート (ii) の末尾窓 (4 割) に 8 点以上;
+    plan §4.1 (ii)、2026-10-11) ごとに書く。前段は最終 step だけを書く。最後の段は main、
     本段の step 数が outStepInterval の倍数でなければ ValueError (最終 step の res が書かれず判定がずれるため; 黙って直さない)。"""
     stages = tuple(stages or p.evaluate.get("stages") or ("soft", "mid", "main"))
     bad = [s for s in stages if s not in TP_STAGES]
@@ -543,7 +738,7 @@ def tp_stage_plan(p: Problem, stages=None) -> list:
         raise ValueError(f"TP の段 {stages}: 段は {list(TP_STAGES)} から選び、main で終える (main は最後の 1 回だけ)")
     steps = {**TP_STAGE_STEPS, **(p.evaluate.get("stage_steps") or {})}
     n_main = int(p.evaluate.get("nStepOuter", 12000))
-    out_main = int(p.evaluate.get("outStepInterval", max(n_main // 12, 1)))
+    out_main = int(p.evaluate.get("outStepInterval", max(n_main // TP_MAIN_OUT_DIV, 1)))
     if n_main <= 0 or out_main <= 0 or n_main % out_main:
         raise ValueError(f"本段の nStepOuter {n_main} が outStepInterval {out_main} の正の倍数でない")
     plan = []
@@ -613,7 +808,8 @@ def run_staged_tp(problem_path, run_dir, warm_from=None, stages=None) -> dict:
 
 # 同一メッシュの継続で親 run から写すもの (メッシュと入力・化学種の記録・段の記録)。res・ログ・VERDICT は写さない
 TP_CONTINUE_COPY = ("nozzle.h5", "nozzle.xmf", "nozzle.msh", "contour.csv", "bcondConfig.yaml", "probe.yaml",
-                    "species_meta.yaml", "species_db_external.yaml", "MESH_QUALITY.txt", "forge_launches.jsonl")
+                    "species_meta.yaml", "species_db_external.yaml", "MESH_QUALITY.txt", "MESH_AR_RELAX.json",
+                    "WALL_DESIGN.json", "MOC_GATE.json", "forge_launches.jsonl")
 
 
 def continue_tp(problem_path, src_run, new_run, nsteps=None) -> dict:
@@ -679,8 +875,10 @@ def tp_iso_k(run_dir) -> bool:
 
 THRUST_HISTORY_COLS = ("thrust_exit_N", "thrust_wall_N", "eta", "eta_wall", "mdot_exit_kg_s", "mdot_in_kg_s",
                        "mdot_ratio_1d", "cv_residual", "friction_N")
-# 準定常ゲート (ii) で判定する列 (両推力会計・η・ṁ・CV 残差; plan §4.1)
-THRUST_QS_COLS = ("thrust_exit_N", "thrust_wall_N", "eta", "mdot_exit_kg_s", "cv_residual")
+# 準定常ゲート (ii) で判定する列 (plan §4.1 (ii)、2026-10-11 diagnostician の組み替え): 推力系 4 列 (両推力会計・η の出口面と壁) と
+# ṁ は閾値が違うので分ける。cv_residual は 0 を横切る (相対ドリフトが意味を持たない) ので列から外し、(iv) の最終値で見る
+THRUST_QS_COLS = ("thrust_exit_N", "thrust_wall_N", "eta", "eta_wall")
+THRUST_QS_MDOT_COLS = ("mdot_exit_kg_s",)
 
 
 def thrust_history_tp(p: Problem, run_dir) -> list:
@@ -749,6 +947,12 @@ def collect(problem_path, run_dir) -> dict:
             out["cv_groups"] = last["groups"]
             out["thrust_history"] = {"file": "thrust_history.csv", "n": len(rows),
                                      "steps": [rows[0]["step"], rows[-1]["step"]]}
+        # (D) の前進 MOC ゲートの指標 (記録だけ・制約にしない; plan §5.1 #3f) と壁の設計の記録
+        if (run_dir / "MOC_GATE.json").exists():
+            out["moc_gate"] = moc_gate_summary(json.loads((run_dir / "MOC_GATE.json").read_text()))
+        if (run_dir / "WALL_DESIGN.json").exists():
+            wd = json.loads((run_dir / "WALL_DESIGN.json").read_text())
+            out["wall_design"] = {k: wd.get(k) for k in ("design_status", "x_m", "L", "theta_e_deg", "theta_max_deg")}
     elif res:
         out["res_file"] = res[-1].name
         out.update(thrust_metrics(run_dir / "nozzle.h5", res[-1], p.gamma,

@@ -1,0 +1,55 @@
+# forge_design 問題定義 — ③ベル (D) 直接モードを TP の評価器で回す確認用 (plan tooling-nozzle-bell-two-mode §4.2・§4.3・§5.1 #3f)。
+# 壁は geometry.bell_mode: direct_bspline (`geometry/wall_bell_c2.design_bell_c2`): 入口直管 → 収縮部 (U→T 5 次 Hermite) → C2 スロート
+# (曲率 1/R_t) → 拡大部の 5 次 B-spline (設計変数 L・θ_e・θ_max、x_m は内部決定)。寸法 spec は plan §8-1 の仮値
+# (r_t 0.14 m・R_t 1.0・収縮比 3・L_U 3.0・L_pipe 1.0・ε 50; `BellC2Spec` の既定と同じ)。
+# 点は V0-b で前進 MOC ゲートを通過した D_L80_tm25_te10 (L = 15° 円錐長の 80 %・θ_max 25°・θ_e 10°)。前進 MOC ゲートの指標は
+# MOC_GATE.json と metrics に記録するだけで、受理の制約にしない (③の真空の比較)。
+# ガス・作動点・格子規約 (壁法線の近壁層・AR ≤ 5000) と段は problem_bell_tp_top_wn.yaml と同じ。
+# python -m forge_design.evaluate.runner <この YAML> <run> --staged (継続は --continue-from <run>)、
+# ゲートは python -m forge_design.opt.driver <この YAML> <run> --gate-only。
+name: bell_tp_d_eps50_L80_tm25_te10_wn
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  theta_max_deg: {value: 25.0, min: 20.0, max: 45.0}
+  theta_e_deg:   {value: 10.0, min: 2.0,  max: 20.0}
+  L_over_rt:     {value: 18.126026824062375, min: 13.594520118046779, max: 22.657533530077966}   # 15° 円錐長 22.6575 の 80 % (範囲 60〜100 %)
+
+geometry:
+  bell_mode: direct_bspline
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 2.5e-5          # 下流 (x ≥ wall_first_blend_x1) の第一セル厚 / 局所半径
+  wall_first_frac_throat: 3.5e-6   # x ≤ wall_first_blend_x0 (上流は全域この値): スロートで 0.49 µm、入口直管で 0.85 µm
+  wall_first_blend_x0: 0.3
+  wall_first_blend_x1: 14.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  wall_normal_layer: [0.02, 0.8]   # 近壁を壁法線に (局所半径比 d_n, d_b)
+  wall_normal_end_stations: 20     # 入口・出口の 20 断面で半径方向の配置へ戻す (面を平面に保つ)
+  ar_max: 5000                     # AR 緩和 (≤5000): 壁法線の構造層 (AGENTS.md の例外)
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 60000          # 本段
+  outStepInterval: 3000      # 本段の res の間隔 = 本段長の 1/20 (推力の時系列 20 点、末尾窓 8 点)
+  cfl_main: 4.0
+  objectives: [eta_cf, length]

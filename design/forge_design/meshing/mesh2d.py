@@ -63,6 +63,12 @@ class Mesh2DParams:
     # 傾斜壁 (縮流部で最大 40°) では半径方向の線が壁と直交せず、AR の大きい近壁セルにスキューが入る (AGENTS.md の AR ≤ 5000 の例外の外)。
     # 壁の第一セル厚は法線距離 = d になる (半径方向の配置では法線距離 = d·cos θ_w)。
     wall_normal_layer: tuple | list | None = None
+    # --- 壁法線の層を入口・出口の断面で半径方向の配置へ戻す (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1 (v)・§5.1 #2d) ---
+    # None なら従来どおり (壁法線の層は全断面)。整数 n を指定すると、両端の n 断面で層の重み beta を smoothstep で 0 へ落とし、
+    # 端の断面 (入口 i = 0・出口 i = ni − 1) を x 一定の平面に保つ。出口の壁角が 0 でないベル (θ_e ≠ 0) では、法線の層のままだと
+    # 出口の節点が下流へずれて出口面が平面でなくなる。戻す区間の近壁セルは半径方向の線になるので、AR の大きいセルが無い位置で戻すこと
+    # (AGENTS.md の AR ≤ 5000 の例外は AR > 1000 のセルのスキュー ≤ 0.1 が条件。呼び出し側が検査する)。
+    wall_normal_end_stations: int | None = None
 
 
 def _check_table(name: str, tbl, x0: float, x1: float, positive: bool = True) -> np.ndarray:
@@ -224,6 +230,8 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
         R = np.empty((ni, nj))
         for i in range(ni):
             R[i, :] = rw[i] * _radial_fracs(nj, float(fr[i]))
+    if prm.wall_normal_end_stations is not None and prm.wall_normal_layer is None:
+        raise ValueError("wall_normal_end_stations は wall_normal_layer と組で指定する")
     if prm.wall_normal_layer is not None:
         dn, db = (float(v) for v in prm.wall_normal_layer)
         if not (0.0 < dn < db < 1.0):
@@ -238,6 +246,13 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
         d = rw[:, None] - R                                  # 壁からの (半径方向の配置での) 距離 [r*]
         t = np.clip((d / rw[:, None] - dn) / (db - dn), 0.0, 1.0)
         beta = 1.0 - t * t * (3.0 - 2.0 * t)                 # 1 (d ≤ d_n) → 0 (d ≥ d_b)
+        if prm.wall_normal_end_stations is not None:
+            ne = prm.wall_normal_end_stations
+            if isinstance(ne, bool) or int(ne) != ne or not (1 <= int(ne) <= (ni - 1) // 2):
+                raise ValueError(f"wall_normal_end_stations: 1 以上 (ni − 1)/2 以下の整数にする ({ne!r}, ni {ni})")
+            ii = np.arange(ni)
+            te = np.clip(np.minimum(ii, ni - 1 - ii) / float(ne), 0.0, 1.0)
+            beta = beta * (te * te * (3.0 - 2.0 * te))[:, None]  # 端の断面 (i = 0, ni − 1) で 0 = 半径方向の配置
         Xn = xs[:, None] + d * (drw / nrm)[:, None]          # 壁点 + d·内向き法線 (r′, −1)/√(1 + r′²)
         Rn = rw[:, None] - d / nrm[:, None]
         X = X + beta * (Xn - X)

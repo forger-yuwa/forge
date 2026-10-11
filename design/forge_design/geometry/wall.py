@@ -169,3 +169,33 @@ class NozzleWall:
         if np.any(d[m_con] > 1e-9):
             msgs.append("収縮区間で半径が増加")
         return msgs
+
+
+class DirectBellWall:
+    r"""③ベル (D) 直接モードの壁 (`wall_bell_c2.BellC2Wall`) を runner の壁の口 (`x_in`・`x_e`・`r(x)`・`r(x, 1)`・`drdx`) に
+    合わせる薄い包み (plan tooling-nozzle-bell-two-mode §5.1 #3f)。値は `BellC2Wall.r` そのまま (C2 スロート・U→T Hermite の収縮部・
+    拡大部の 5 次 B-spline)。スロートは $(0, 1)$ (IC の `_throat_of` の既定と同じ)。
+
+    `BellC2Wall.r` は $[x_{in}, L]$ の外で `ValueError` にする。格子座標を書き戻した節点・双対重心は丸めで端をわずかに出るので、
+    端から `END_TOL` ($r_t$ 単位) 以内だけ端へ寄せて評価する (それより外は従来どおり例外: 黙って外挿しない)。"""
+
+    END_TOL = 1.0e-9
+
+    def __init__(self, c2wall) -> None:
+        self.c2 = c2wall
+        self.x_in = float(c2wall.x_in)
+        self.x_e = float(c2wall.L)
+        self.x_throat, self.r_throat = 0.0, 1.0
+
+    def _clip(self, x):
+        x = np.asarray(x, dtype=float)
+        tol = self.END_TOL * max(1.0, abs(self.x_in), abs(self.x_e))
+        if np.any(x < self.x_in - tol) or np.any(x > self.x_e + tol):
+            raise ValueError(f"DirectBellWall: x が [{self.x_in}, {self.x_e}] の外 (端の許容 {tol:.1e})")
+        return np.clip(x, self.x_in, self.x_e)
+
+    def r(self, x, deriv: int = 0):
+        return np.asarray(self.c2.r(self._clip(x), deriv), dtype=float)
+
+    def drdx(self, x):
+        return self.r(x, 1)

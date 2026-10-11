@@ -6,9 +6,15 @@ forge を起動しない単体試験 (全流れ解での確認は case/68 の ru
   静止気体の閉曲面で Σ(p − p_a) n_x dA = 0 (CV 残差 0、p_a に依らない)、面積 πr²、外向き法線の向き、一様流の直管で
   壁会計 = 出口面会計・ṁ_in = ṁ_out、twall の規約 (node: 流体に働く traction = −twall、cell: +twall) と摩擦の推力寄与の符号、
   P の出所 (VALUE/P 優先、無ければ TP は e_sens(T) の逆算・CPG は γ)、粘性応力・壁ダンプが無いときは閉じない扱い。
-- `opt.driver` のゲート (i)〜(v): 合成した残差履歴 + StageManifest で (i) が STALLED・未収束・manifest 無しを落とし
-  PASS を通す、(ii) 推力の時系列の DRIFTING・NONFINITE・列欠損を落とす、(iii) 物理範囲、(iv) CV 残差超過・閉じない会計を落とす、
-  (v) メッシュ品質の VERDICT の読み、総合の分類 (RETRYABLE / SUSPECT / INFEASIBLE)。
+- `opt.driver` のゲート (i)〜(v) (2026-10-11 組み替え、plan §4.1・§5.1 #2c'): 合成した残差履歴 + StageManifest で (i) は PASS・
+  STALLED・still converging を通し (STALLED は併記)、DIVERGED・有意な末尾上昇 (rising)・manifest 無し (判定不能) を落とす、
+  (ii) 推力系 4 列 (1.5e-4) の DRIFTING・振動・単調で漸近値が離れた列・NONFINITE・列欠損・末尾窓 8 点未満を落とし、ṁ は 1e-3 で判定、
+  cv_residual は列にしない、(iii) 物理範囲、(iv) 最終 |CV 残差| 1e-4 超過・閉じない会計を落とす、(v) メッシュ品質の VERDICT の読みと
+  AR > 1000 の格子の例外の条件 (MESH_AR_RELAX.json)、総合の分類 (RETRYABLE / SUSPECT / INFEASIBLE)。
+- 壁法線の近壁層 (#2d): mesh2d の `wall_normal_end_stations` (入口・出口面を平面に)、runner の格子キーの受け渡し、
+  `mesh_ar_relax_check` (AR > 1000 のスキュー・面の平面性) の負例。
+- (D) 直接モード (#3f): `geometry.bell_mode: direct_bspline` の壁 (`DirectBellWall`)、成立しない点の `WallInfeasible` (理由つき)、
+  TOP のキー・dv の誤りを止める、driver の設計変数の並び。
 - 引き継ぎ (b): 評価ごとに書き出す問題 YAML の相対パス (gas.exhaust・gas.species_db) を絶対パスに直す。
 - runner: TP の段の計画 (`tp_stage_plan`) の検査、TP の config の出力 (勾配の extraFields・pRef を書かない)、
   格子のスロート細分キー (`mesh_params`) は書いたときだけ渡る。
@@ -16,6 +22,7 @@ forge を起動しない単体試験 (全流れ解での確認は case/68 の ru
 実行: design/.venv-opt の Python で `python design/tests/run_bell_cv_gate_tests.py`。
 """
 import csv
+import json
 import math
 import sys
 import tempfile
@@ -304,9 +311,17 @@ check("(i) 本段で 4 桁落ちる履歴は PASS (前段の別区間を基準�
 check("(i) 判定区間は本段 (S3_main) だけ", g["segment"] is not None and "S3_main" in g["segment"] and "S1_soft" not in g["segment"],
       g["segment"])
 g = DR.gate_convergence(make_run(tmp / "conv_stall", stalled, pre))
-check("(i) STALLED (1.5 桁で横ばい) を落とす", (not g["ok"]) and g["class"] == "STALLED", g["verdict"])
+check("(i) STALLED (1.5 桁で横ばい) は記録して通す (FAIL は DIVERGED と有意な末尾上昇だけ; §4.1 (i))",
+      g["ok"] and g["class"] == "STALLED" and "併記" in g["note"], g["verdict"])
+slow = list(3e-4 * 10 ** (-1.5 * s / n))                                              # 1.5 桁、末尾まで低下中
+g = DR.gate_convergence(make_run(tmp / "conv_slow", slow, pre))
+check("(i) まだ低下中 (still converging) も通す", g["ok"] and g["class"] == "CONVERGING", g["verdict"])
+rise = list(np.where(s < 0.6 * n, 3e-4 * 10 ** (-3.0 * s / (0.6 * n)), 3e-7 * 10 ** (1.0 * (s - 0.6 * n) / (0.4 * n))))
+g = DR.gate_convergence(make_run(tmp / "conv_rise", rise, pre))
+check("(i) 有意な末尾上昇 (3 桁落ちてから 1 桁戻る) は RISING で落とす", (not g["ok"]) and g["class"] == "RISING"
+      and "rms_ro" in g["rising"], f"{g['verdict']} rising={g['rising']}")
 g = DR.gate_convergence(make_run(tmp / "conv_nomani", falling, pre, manifest=False))
-check("(i) stage_manifest.json が無ければ判定不能 = 不合格", not g["ok"], g["verdict"])
+check("(i) stage_manifest.json が無ければ判定不能 = 不合格", (not g["ok"]) and g["class"] == "UNDECIDABLE", g["verdict"])
 nanh = falling[:-5] + [float("nan")] * 5
 g = DR.gate_convergence(make_run(tmp / "conv_nan", nanh, pre))
 check("(i) NaN は DIVERGED で落とす", (not g["ok"]) and g["class"] == "DIVERGED", g["verdict"])
@@ -320,32 +335,51 @@ def write_series(path, rows):
             w.writerow([r["step"]] + [repr(float(r.get(c, 1.0))) for c in runner.THRUST_HISTORY_COLS])
 
 
-steps = np.arange(1, 13) * 1000
+def qs_case(name, rows):
+    (tmp / name).mkdir()
+    write_series(tmp / name / "thrust_history.csv", rows)
+    return DR.gate_quasisteady(tmp / name / "thrust_history.csv")
+
+
+steps = np.arange(1, 21) * 3000                                                     # 本段の 1/20 ごと (末尾窓 8 点)
 base = dict(thrust_exit_N=1.135e6, thrust_wall_N=1.135e6, eta=0.9792, eta_wall=0.9792, mdot_exit_kg_s=268.8,
-            mdot_in_kg_s=268.8, mdot_ratio_1d=0.9925, cv_residual=4.0e-4, friction_N=-1.18e4)
+            mdot_in_kg_s=268.8, mdot_ratio_1d=0.9925, cv_residual=4.0e-5, friction_N=-1.18e4)
 steady = [{"step": int(st), **{k: v * (1 + 1e-6 * math.sin(i)) for k, v in base.items()}} for i, st in enumerate(steps)]
-(tmp / "qs_ok").mkdir()
-write_series(tmp / "qs_ok" / "thrust_history.csv", steady)
-gq = DR.gate_quasisteady(tmp / "qs_ok" / "thrust_history.csv")
-check("(ii) 平坦な系列は ALL STEADY で通る", gq["ok"] and set(gq["per_column"].values()) == {"STEADY"}, gq["overall"])
-drift = [{"step": int(st), **base, "thrust_exit_N": base["thrust_exit_N"] * (1 + 0.03 * i), "eta": base["eta"] * (1 + 0.03 * i)}
+gq = qs_case("qs_ok", steady)
+check("(ii) 平坦な系列 (20 点) は ALL STEADY で通る (推力系 4 列 + ṁ)", gq["ok"] and set(gq["per_column"].values()) == {"STEADY"}
+      and set(gq["per_column"]) == set(runner.THRUST_QS_COLS + runner.THRUST_QS_MDOT_COLS) and gq["n_tail"] == 8, gq["overall"])
+check("(ii) cv_residual は列にしない (0 を横切る; iv で見る)", "cv_residual" not in gq["per_column"])
+gq = qs_case("qs_short", steady[:12])
+check("(ii) 末尾窓 8 点未満 (12 点 → 5 点) は落とす (本段の出力間隔は本段長の 1/20 以下)", (not gq["ok"]) and gq["n_tail"] == 5
+      and any("末尾窓" in x for x in gq["problems"]), gq["overall"])
+drift = [{"step": int(st), **base, "thrust_exit_N": base["thrust_exit_N"] * (1 + 1e-3 * i), "eta": base["eta"] * (1 + 1e-3 * i)}
          for i, st in enumerate(steps)]
-(tmp / "qs_drift").mkdir()
-write_series(tmp / "qs_drift" / "thrust_history.csv", drift)
-gq = DR.gate_quasisteady(tmp / "qs_drift" / "thrust_history.csv")
-check("(ii) DRIFTING (推力が単調に 33 % 動く; 末尾窓で 9 %) を落とす", (not gq["ok"]) and gq["per_column"].get("thrust_exit_N") == "DRIFTING",
+gq = qs_case("qs_drift", drift)
+check("(ii) DRIFTING (推力が単調に 1e-3/点 動く) を落とす", (not gq["ok"]) and gq["per_column"].get("thrust_exit_N") == "DRIFTING",
       str(gq["per_column"]))
-cvd = [{"step": int(st), **base, "cv_residual": 4.0e-4 * (1 + 0.2 * i)} for i, st in enumerate(steps)]
-(tmp / "qs_cv").mkdir()
-write_series(tmp / "qs_cv" / "thrust_history.csv", cvd)
-gq = DR.gate_quasisteady(tmp / "qs_cv" / "thrust_history.csv")
-check("(ii) CV 残差の時系列の DRIFTING も落とす", (not gq["ok"]) and gq["per_column"].get("cv_residual") == "DRIFTING",
+ew = [{"step": int(st), **base, "eta_wall": base["eta_wall"] * (1 + 2e-4 * (-1) ** i)} for i, st in enumerate(steps)]
+gq = qs_case("qs_etawall", ew)
+check("(ii) η (壁会計) の振動 ±2e-4 (> 1.5e-4) も落とす (壁会計の η も列)", (not gq["ok"]) and gq["per_column"].get("eta_wall") == "OSCILLATING",
       str(gq["per_column"]))
+cvd = [{"step": int(st), **base, "cv_residual": 4.0e-5 * (1 + 0.5 * i)} for i, st in enumerate(steps)]
+gq = qs_case("qs_cv", cvd)
+check("(ii) CV 残差の時系列が動いても (ii) は落とさない (列でない)", gq["ok"], gq["overall"])
+mo = [{"step": int(st), **base, "mdot_exit_kg_s": base["mdot_exit_kg_s"] * (1 + 4e-4 * math.sin(1.3 * i))} for i, st in enumerate(steps)]
+gq = qs_case("qs_mdot_ok", mo)
+check("(ii) ṁ の振動 ±4e-4 は ṁ の閾値 1e-3 で通る", gq["ok"] and gq["per_column"].get("mdot_exit_kg_s") == "STEADY", gq["overall"])
+mo2 = [{"step": int(st), **base, "thrust_exit_N": base["thrust_exit_N"] * (1 + 4e-4 * math.sin(1.3 * i))} for i, st in enumerate(steps)]
+gq = qs_case("qs_thrust_osc", mo2)
+check("(ii) 同じ ±4e-4 の振動が推力にあれば 1.5e-4 で落とす", (not gq["ok"]) and gq["per_column"].get("thrust_exit_N") == "OSCILLATING",
+      str(gq["per_column"]))
+# 単調で増分がゆっくり減衰 (r 0.98): 末尾窓のドリフトは 6e-5 (< 実効の単調許容 7.5e-5) で STEADY だが、漸近値は最終値から 3.3e-4
+asy = [{"step": int(st), **base, "eta": base["eta"] * (1 - 5e-4 * 0.98 ** i)} for i, st in enumerate(steps)]
+gq = qs_case("qs_asym", asy)
+check("(ii) 単調列は漸近値の最終比も 1.5e-4 以内 (STEADY でも漸近値が離れていれば落とす)", (not gq["ok"])
+      and gq["per_column"].get("eta") == "STEADY" and not gq["asymptote"]["eta"]["ok"]
+      and abs(gq["asymptote"]["eta"]["final_ratio"]) > 1.5e-4, str(gq["asymptote"].get("eta")))
 nanr = [dict(r) for r in steady]
 nanr[-1]["thrust_wall_N"] = float("nan")
-(tmp / "qs_nan").mkdir()
-write_series(tmp / "qs_nan" / "thrust_history.csv", nanr)
-gq = DR.gate_quasisteady(tmp / "qs_nan" / "thrust_history.csv")
+gq = qs_case("qs_nan", nanr)
 check("(ii) 非有限値は NONFINITE で落とす", (not gq["ok"]) and gq["per_column"].get("thrust_wall_N") == "NONFINITE",
       str(gq["per_column"]))
 (tmp / "qs_cols").mkdir()
@@ -357,15 +391,16 @@ gq = DR.gate_quasisteady(tmp / "qs_ok" / "thrust_history.csv", qs={"drift": 1e-9
 check("(ii) evaluate.quasisteady の閾値を渡せる (極端に厳しくすれば落ちる)", not gq["ok"])
 
 # ---------------------------------------------------------------- ゲート (iii)(iv)(v) と総合の分類
-m_ok = {"eta_cf": 0.979, "mdot_ratio_1d": 0.9925, "cv_residual": 4e-4, "cv_closable": True}
+m_ok = {"eta_cf": 0.979, "mdot_ratio_1d": 0.9925, "cv_residual": 4e-5, "cv_closable": True}
 check("(iii) 物理範囲内は通る", DR.gate_physics(m_ok)["ok"])
 check("(iii) ṁ/ṁ_1D 0.90 (不始動の偽アトラクタ) を落とす", not DR.gate_physics({**m_ok, "mdot_ratio_1d": 0.90})["ok"])
 check("(iii) η 1.05 を落とす", not DR.gate_physics({**m_ok, "eta_cf": 1.05})["ok"])
 check("(iii) 欠損・非有限は落とす", not DR.gate_physics({**m_ok, "eta_cf": None})["ok"]
       and not DR.gate_physics({**m_ok, "mdot_ratio_1d": float("nan")})["ok"])
-check("(iv) |CV 残差| 4e-4 は通る", DR.gate_cv(m_ok)["ok"])
-check("(iv) |CV 残差| 2e-3 (> 0.1 %) を落とす", not DR.gate_cv({**m_ok, "cv_residual": -2e-3})["ok"])
-check("(iv) ちょうど 1e-3 は通る (≤)", DR.gate_cv({**m_ok, "cv_residual": 1e-3})["ok"])
+check("(iv) 最終 |CV 残差| 4e-5 は通る", DR.gate_cv(m_ok)["ok"] and DR.gate_cv(m_ok)["tol"] == 1e-4)
+check("(iv) |CV 残差| 2e-4 (> 1e-4) を落とす (旧 1e-3 では通っていた)", not DR.gate_cv({**m_ok, "cv_residual": -2e-4})["ok"])
+check("(iv) run_0002 の最終値 −6.6e-4 は落とす", not DR.gate_cv({**m_ok, "cv_residual": -6.6e-4})["ok"])
+check("(iv) ちょうど 1e-4 は通る (≤)", DR.gate_cv({**m_ok, "cv_residual": 1e-4})["ok"])
 check("(iv) 閉じない会計 (cv_closable False) は落とす", not DR.gate_cv({**m_ok, "cv_closable": False})["ok"])
 check("(iv) NaN は落とす", not DR.gate_cv({**m_ok, "cv_residual": float("nan")})["ok"])
 (tmp / "mq").mkdir()
@@ -374,6 +409,16 @@ check("(v) MESH_QUALITY の PASS を読む", DR.gate_mesh_quality(tmp / "mq")["o
 (tmp / "mq" / "MESH_QUALITY.txt").write_text("VERDICT: FAIL (AR 1200 > 1000)\n")
 check("(v) MESH_QUALITY の FAIL を落とす", not DR.gate_mesh_quality(tmp / "mq")["ok"])
 check("(v) MESH_QUALITY.txt が無ければ落とす", not DR.gate_mesh_quality(tmp / "nonexistent")["ok"])
+(tmp / "mq" / "MESH_QUALITY.txt").write_text("max AR 2700\nVERDICT: PASS (AR<= 5000, skew<= 0.90)\nAR_RELAX: PASS (...)\n")
+gm = DR.gate_mesh_quality(tmp / "mq")
+check("(v) AR ≤ 5000 の格子で MESH_AR_RELAX.json が無ければ判定不能 = 不合格", (not gm["ok"]) and gm["ar_limit"] == 5000.0
+      and "判定不能" in str(gm.get("ar_relax")), str(gm))
+(tmp / "mq" / "MESH_AR_RELAX.json").write_text('{"ok": false, "n_high_ar": 10, "max_skew_high_ar": 0.3, "n_violations": 4, '
+                                              '"inlet_planar": true, "outlet_planar": true}')
+check("(v) 例外の条件 (AR > 1000 のスキュー ≤ 0.1) を満たさない格子は落とす", not DR.gate_mesh_quality(tmp / "mq")["ok"])
+(tmp / "mq" / "MESH_AR_RELAX.json").write_text('{"ok": true, "n_high_ar": 10, "max_skew_high_ar": 0.004, "n_violations": 0, '
+                                              '"inlet_planar": true, "outlet_planar": true}')
+check("(v) 例外の条件を満たせば AR ≤ 5000 の格子を通す", DR.gate_mesh_quality(tmp / "mq")["ok"])
 (tmp / "wr").mkdir()
 gw = DR.gate_wall_resolution(tmp / "wr")
 check("(v) 壁ダンプの無い run の y1+ は判定不能 = 不合格", not gw["ok"], gw["verdict"])
@@ -427,6 +472,9 @@ p_bad.evaluate = {**p.evaluate, "stage_steps": {"soft": 0}}
 check("runner: 0 step の段は例外", raises(lambda: runner.tp_stage_plan(p_bad), ValueError) is not None)
 p_bad.evaluate = {**p.evaluate, "stage_steps": {"mid": 500}}
 check("runner: stage_steps で前段の step 数を上書き", runner.tp_stage_plan(p_bad)[1][2] == 500)
+p_bad.evaluate = {k: v for k, v in p.evaluate.items() if k != "outStepInterval"}
+p_bad.evaluate["nStepOuter"] = 60000
+check("runner: 本段の出力間隔の既定は本段長の 1/20 (準定常ゲートの末尾窓 8 点)", runner.tp_stage_plan(p_bad)[-1][3] == 3000)
 cfg = runner._solver_config_tp(p, 12000, 1000, "main")
 doc = yaml.safe_load(cfg)
 check("runner: TP の config は推力の粘性応力用の勾配を extraFields で出す (level 1 のまま)",
@@ -442,6 +490,127 @@ p_m.mesh = {**p.mesh, "wall_first_frac_throat": 3.0e-6, "wall_first_blend_x1": 8
 mp1 = runner.mesh_params(p_m, 0.14)
 check("runner: wall_first_frac_throat・ブレンドのキーを読む (引き継ぎ (c))", mp1.wall_first_frac_throat == 3.0e-6
       and mp1.wall_first_blend_x1 == 8.0 and mp1.wall_first_up_x0 == -3.0 and mp1.wall_first_up_x1 == -1.0)
+
+p_m.mesh = {**p.mesh, "wall_normal_layer": [0.02, 0.8], "wall_normal_end_stations": 20}
+mp2 = runner.mesh_params(p_m, 0.14)
+check("runner: wall_normal_layer (組)・wall_normal_end_stations (整数) を渡す (#2d)", mp2.wall_normal_layer == (0.02, 0.8)
+      and mp2.wall_normal_end_stations == 20 and isinstance(mp2.wall_normal_end_stations, int))
+p_m.mesh = {**p.mesh, "wall_normal_layer": 0.02}
+check("runner: wall_normal_layer が組でなければ例外", raises(lambda: runner.mesh_params(p_m, 0.14), ValueError) is not None)
+p_m.mesh = {**p.mesh, "wall_normal_layer": [0.02, 0.8], "wall_normal_end_stations": 2.5}
+check("runner: wall_normal_end_stations が整数でなければ例外", raises(lambda: runner.mesh_params(p_m, 0.14), ValueError) is not None)
+
+
+# ---------------------------------------------------------------- 壁法線の近壁層 (#2d): mesh2d の端の断面・AR ≤ 5000 の例外の条件
+def write_qc_h5(path, coords, quads):
+    """primal の四角形 (VIZMESH/CONNE、XDMF の四角形 = 5) と座標だけの h5 (mesh_ar_relax_check が読む分)。"""
+    with h5py.File(path, "w") as f:
+        f["MESH/COORD"] = coords.astype(np.float64).ravel()
+        f["VIZMESH/CONNE"] = np.column_stack([np.full(len(quads), 5), quads]).astype(np.int32).ravel()
+        f["VIZMESH"].attrs["nVizCells"] = len(quads)
+
+
+wn_base = dict(ni=241, nj=61, wall_first_frac=2.5e-5, wall_first_frac_throat=3.5e-6, wall_first_blend_x0=0.3,
+               wall_first_blend_x1=14.0, throat_refine=8.0, throat_width=3.0, scale=0.14)
+c_r, q_r, b_r = generate_axisym_mesh(wall, Mesh2DParams(**wn_base))
+c_n, q_n, b_n = generate_axisym_mesh(wall, Mesh2DParams(**wn_base, wall_normal_layer=(0.02, 0.8)))
+c_e, q_e, b_e = generate_axisym_mesh(wall, Mesh2DParams(**wn_base, wall_normal_layer=(0.02, 0.8), wall_normal_end_stations=8))
+oute = lambda c, b: float(np.ptp(c[sorted({n for e in b["outlet"] for n in e}), 0]))  # noqa: E731
+check("mesh2d: 法線の層だけだと θ_e ≠ 0 の出口面は平面でない (節点が下流へずれる)", oute(c_n, b_n) > 1e-3, f"{oute(c_n, b_n):.3e} m")
+check("mesh2d: wall_normal_end_stations で入口・出口面が平面 (x 一定) に戻る", oute(c_e, b_e) == 0.0
+      and float(np.ptp(c_e[sorted({n for e in b_e['inlet'] for n in e}), 0])) == 0.0)
+ni_, nj_ = 241, 61
+mid = slice(20, ni_ - 20)
+check("mesh2d: 端の断面の外 (内部) は法線の層と同じ節点", np.array_equal(c_e.reshape(ni_, nj_, 3)[mid], c_n.reshape(ni_, nj_, 3)[mid]))
+check("mesh2d: wall_normal_end_stations だけ (層なし) は例外", raises(lambda: generate_axisym_mesh(
+    wall, Mesh2DParams(**wn_base, wall_normal_end_stations=8)), ValueError) is not None)
+check("mesh2d: wall_normal_end_stations の範囲外は例外", raises(lambda: generate_axisym_mesh(
+    wall, Mesh2DParams(**wn_base, wall_normal_layer=(0.02, 0.8), wall_normal_end_stations=0)), ValueError) is not None)
+c_0, _, _ = generate_axisym_mesh(wall, Mesh2DParams(**wn_base, wall_normal_layer=None, wall_normal_end_stations=None))
+check("mesh2d: 新しいキーを書かなければ従来の格子とビット同一", np.array_equal(c_0, c_r))
+# 例外の条件の合格例は ni 481 (出口近くの AR を 1000 未満にして、半径方向へ戻す端の断面に AR > 1000 のセルを置かない)
+c_g, q_g, b_g = generate_axisym_mesh(wall, Mesh2DParams(**{**wn_base, "ni": 481}, wall_normal_layer=(0.02, 0.8),
+                                                        wall_normal_end_stations=10))
+write_qc_h5(tmp / "qc_r.h5", c_r, q_r)
+write_qc_h5(tmp / "qc_e.h5", c_e, q_e)
+write_qc_h5(tmp / "qc_n.h5", c_n, q_n)
+write_qc_h5(tmp / "qc_g.h5", c_g, q_g)
+ck_r = runner.mesh_ar_relax_check(tmp / "qc_r.h5", c_r, b_r, 0.14, 5000.0)
+ck_e = runner.mesh_ar_relax_check(tmp / "qc_e.h5", c_e, b_e, 0.14, 5000.0)
+ck_n = runner.mesh_ar_relax_check(tmp / "qc_n.h5", c_n, b_n, 0.14, 5000.0)
+ck_g = runner.mesh_ar_relax_check(tmp / "qc_g.h5", c_g, b_g, 0.14, 5000.0)
+check("AR 緩和の条件: 半径方向の線の格子は AR > 1000 のセルにスキューがあり不合格 (違反を数える)",
+      ck_r["n_high_ar"] > 0 and ck_r["n_violations"] > 0 and not ck_r["ok"] and ck_r["required"],
+      f"AR>1000 {ck_r['n_high_ar']}・違反 {ck_r['n_violations']}・最大スキュー {ck_r['max_skew_high_ar']:.3f}")
+check("AR 緩和の条件: 壁法線の層 + 端の断面で合格 (AR > 1000 のスキュー ≤ 0.1・面は平面)",
+      ck_g["ok"] and ck_g["n_high_ar"] > 0 and ck_g["max_skew_high_ar"] <= 0.1 and ck_g["inlet_planar"] and ck_g["outlet_planar"],
+      f"AR>1000 {ck_g['n_high_ar']}・最大スキュー {ck_g['max_skew_high_ar']:.4f}")
+check("AR 緩和の条件: 半径方向へ戻す端の断面に AR > 1000 のセルがあれば不合格 (ni 241: 出口近くで AR 1400・スキュー 0.101)",
+      (not ck_e["ok"]) and ck_e["n_violations"] > 0 and ck_e["outlet_planar"] and ck_e["worst_high_ar"]["x_over_rt"] > 17.0,
+      f"違反 {ck_e['n_violations']}・最悪 x {ck_e['worst_high_ar']['x_over_rt']:.2f} スキュー {ck_e['max_skew_high_ar']:.4f}")
+check("AR 緩和の条件: 出口面が平面でなければ不合格", (not ck_n["ok"]) and not ck_n["outlet_planar"] and ck_n["n_violations"] == 0)
+check("AR 緩和の条件: ar_max ≤ 1000 なら適用なし (required False)",
+      not runner.mesh_ar_relax_check(tmp / "qc_g.h5", c_g, b_g, 0.14, 1000.0)["required"])
+
+# ---------------------------------------------------------------- (D) 直接モード (#3f)
+from forge_design.geometry.wall import DirectBellWall  # noqa: E402
+from forge_design.geometry.wall_bell_c2 import BellC2Spec, cone15_length, design_bell_c2  # noqa: E402
+
+PROBLEM_D = CASE68 / "problem_bell_tp_d_wn.yaml"
+pd = load_problem(PROBLEM_D)
+wd, des = runner.build_wall(pd)
+Lc = cone15_length(50.0)
+ref = design_bell_c2(0.8 * Lc, 10.0, 25.0, BellC2Spec())
+check("(D): bell_mode direct_bspline は design_bell_c2 の壁 (同じ入力で同じ x_m・係数)", isinstance(wd, DirectBellWall)
+      and des.ok and des.x_m == ref.x_m and np.array_equal(des.wall.coef, ref.wall.coef), f"x_m {des.x_m}")
+check("(D): 壁の口 (x_in −L_U−L_pipe・x_e = L・スロート (0, 1)・r(x, 1))", wd.x_in == -4.0 and wd.x_e == pd.dv["L_over_rt"]["value"]
+      and abs(float(wd.r(np.array([0.0]))[0]) - 1.0) < 1e-12 and abs(float(wd.r(np.array([0.0]), 1)[0])) < 1e-12
+      and (wd.x_throat, wd.r_throat) == (0.0, 1.0)
+      and np.array_equal(wd.drdx(np.array([1.0, 5.0])), des.wall.r(np.array([1.0, 5.0]), 1)))
+check("(D): 端の丸め (1e-12) は端の値、端から大きく外れた x は例外",
+      float(wd.r(np.array([wd.x_e + 1e-12]))[0]) == float(wd.r(np.array([wd.x_e]))[0])
+      and raises(lambda: wd.r(np.array([wd.x_e + 1e-3])), ValueError) is not None)
+cdd, _, _ = generate_axisym_mesh(wd, Mesh2DParams(**wn_base, wall_normal_layer=(0.02, 0.8), wall_normal_end_stations=8))
+check("(D): mesh2d が (D) の壁で格子を作れる (壁の節点は壁の上)",
+      np.allclose(cdd.reshape(ni_, nj_, 3)[:, -1, 1] / 0.14, wd.r(cdd.reshape(ni_, nj_, 3)[:, -1, 0] / 0.14), atol=1e-12))
+pd_bad = load_problem(PROBLEM_D)
+pd_bad.dv = {**pd.dv, "theta_max_deg": {**pd.dv["theta_max_deg"], "value": 20.0},
+             "theta_e_deg": {**pd.dv["theta_e_deg"], "value": 5.0},
+             "L_over_rt": {**pd.dv["L_over_rt"], "value": 0.6 * Lc}}
+dbad = design_bell_c2(0.6 * Lc, 5.0, 20.0, BellC2Spec())   # V0-b の D_L60_tm20_te5 (成立区間が空)
+e = None
+try:
+    runner.build_wall(pd_bad)
+except runner.WallInfeasible as ex:
+    e = ex
+if dbad.ok:
+    check("(D): 成立しない点の負例 (θ_max 20°・θ_e 5°・L60 が成立してしまった — 負例を選び直す)", False, f"x_m {dbad.x_m}")
+else:
+    check("(D): 成立区間が空の点は WallInfeasible (ValueError の派生) で理由と設計の記録を返す",
+          e is not None and isinstance(e, ValueError) and "成立しない" in e.reason and e.record.get("design_status") == "INFEASIBLE",
+          (e.reason[:120] if e else "例外なし"))
+pd_bad = load_problem(PROBLEM_D)
+pd_bad.geometry = {**pd.geometry, "Rd": 0.4}
+check("(D): TOP のキー (Rd) を書いたら止める (黙って無視しない)", "効かない" in (raises(lambda: runner.build_wall(pd_bad), ValueError) or ""))
+pd_bad = load_problem(PROBLEM_D)
+pd_bad.dv = {**pd.dv, "theta_a_deg": {"value": 30.0, "min": 20.0, "max": 40.0}}
+check("(D): dv の余分 (theta_a_deg) は止める", raises(lambda: runner.build_wall(pd_bad), ValueError) is not None)
+pd_bad = load_problem(PROBLEM_D)
+pd_bad.geometry = {**pd.geometry, "bell_mode": "moc_rao"}
+check("(D): 未実装の bell_mode は止める", "未実装" in (raises(lambda: runner.build_wall(pd_bad), ValueError) or ""))
+check("(D): TOP の問題 (bell_mode 無し) は従来の NozzleWall のまま", type(runner.build_wall(p)[0]).__name__ == "NozzleWall")
+check("driver: 設計変数の並び (TOP は θ_a・θ_e・L、(D) は θ_max・θ_e・L)", DR.dv_order_of(p.raw) == DR.DV_ORDER
+      and DR.dv_order_of(pd.raw) == ("theta_max_deg", "theta_e_deg", "L_over_rt"))
+campd = DR.Campaign(PROBLEM_D, tmp / "camp_d", None)
+check("driver: (D) の Campaign は dv の範囲を (D) の並びで読む", campd.dv_order == DR.DV_ORDER_DIRECT
+      and campd.bounds[0].tolist() == [20.0, 45.0] and campd.feasible([25.0, 10.0, 0.8 * Lc]))
+check("driver: (D) の成立しない点は事前フィルタで落ちる", (not dbad.ok) and not campd.feasible([20.0, 5.0, 0.6 * Lc]))
+row = campd.evaluate([20.0, 5.0, 0.6 * Lc], "d_infeasible")          # forge は起動しない (壁の構築で止まる)
+check("driver: (D) の成立しない点の評価は INFEASIBLE・理由 (note)・設計の記録 (wall_design) を台帳に返す",
+      row["status"] == "FAIL" and row["fail_class"] == "INFEASIBLE" and "成立しない" in row["note"]
+      and row.get("wall_design", {}).get("design_status") == "INFEASIBLE"
+      and json.loads((tmp / "camp_d" / "ledger.jsonl").read_text().splitlines()[-1])["fail_class"] == "INFEASIBLE",
+      row["note"][:120])
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)
