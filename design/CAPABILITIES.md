@@ -15,7 +15,9 @@
 | type | runner | 状態 | 備考 |
 | --- | --- | --- | --- |
 | `thruster_bell` | `evaluate/runner.py` | ✅ | MOO ドライバ ([`opt/driver.py`](forge_design/opt/driver.py)) の対象。case/40 run_0074 で 69/70 PASS |
-| `thruster_bell` (TP 排気) | `evaluate/runner.py` (`gas.model: semiperfect` + `gas.exhaust`) | 🔧 | ロケット排気の凍結 TP (CEA2 の燃焼室平衡組成を lump `EXH` に、`gas/rocket_exhaust.py`)。1D 理想値は CEA 凍結と 2.1e-5 以内、起動確認まで (case/68 run_0001)。推力の CV 会計・ゲート・収束は未 (plan [tooling-nozzle-bell-two-mode](../plans/active/tooling-nozzle-bell-two-mode.md) §5.1 #2b) |
+| `thruster_bell` (TP 排気) | `evaluate/runner.py` (`gas.model: semiperfect` + `gas.exhaust`) | ✅ | ロケット排気の凍結 TP (CEA2 の燃焼室平衡組成を lump `EXH` に、`gas/rocket_exhaust.py`)。1D 理想値は CEA 凍結と 2.1e-5 以内。推力の CV 会計 (`thrust_cv`)・ゲート (`tp_gates`、plan [tooling-nozzle-bell-two-mode](../plans/active/tooling-nozzle-bell-two-mode.md) §4.1)・同一メッシュの継続。TOP 基準ケース (case/68 run_0008) と (D) の 1 点 (run_0009) が全ゲート PASS |
+| `thruster_bell` (D) 直接モード | `geometry.bell_mode: direct_bspline` (`geometry/wall_bell_c2.py`) | ✅ | C2 の 5 次 B-spline、dv $(L,\theta_e,\theta_{max})$、$x_m$ は内部決定。前進 MOC ゲート (`geometry/moc_forward.py`) は記録だけ。MOO は case/68 run_0010 |
+| `thruster_bell` (M) 特性曲線モード | `geometry/rao_axisym.py` | 🔧 | TP の軸対称 Rao (γ-free の制御面条件、κ_B・θ_B・s_D の入れ子の根)。生成器は WIP (plan §5.1 #5) |
 | `wind_tunnel_axisym` | `evaluate/runner_wt.py` | 🔧 | 旧生産系 (B8)。axismach に置換済み、回帰対照として保持 |
 | `wind_tunnel_axisym_walldriven` | `evaluate/runner_walldriven.py` | 🔧 | 壁駆動系。axismach に置換済み |
 | `wind_tunnel_axisym_axismach` | `evaluate/runner_axismach.py` | ✅ | 現行生産 (case/42 isobutane, case/44 vitiated air)。ガス・凝縮メニューが最も厚い |
