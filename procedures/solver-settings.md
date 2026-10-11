@@ -419,7 +419,7 @@ output: {floorEvents: 1}   # 既定 0 = 数えない・ファイルも作らな�
 
 - **出力専用** (有効にしても数値は変えない)。GPU (`gpu: 1`) のみ。run ディレクトリの `floor_events.csv` に**追記**する
   (forge の起動ごとに `session_begin` 行。段階起動の各段・restart の痕跡を消さない)。定義の正本は
-  [`plans/active/tooling-sern-te-wake-grid.md`](../plans/active/tooling-sern-te-wake-grid.md) §4「床の判定」、書式は
+  [`plans/accepted/tooling-sern-te-wake-grid.md`](../plans/accepted/tooling-sern-te-wake-grid.md) §4「床の判定」、書式は
   `cuda_forge/floorEvents_d.cu` 冒頭。
 - **数えるのは「EOS の床を必要とした事象」**。定常陰解法 (と陽解法) では EOS の床は作業配列だけに入り、commit は床前の基準
   `roN/roeN + dq` なので、「保存量に残った補正」を数えると構造上 0 件になる。床の種類別の述語で、実節点 (ghost は別列) ごとに:

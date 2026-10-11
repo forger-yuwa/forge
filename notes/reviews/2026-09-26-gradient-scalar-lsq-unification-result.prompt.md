@@ -1,0 +1,884 @@
+forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
+SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
+リポジトリに対する**外部レビュー**を依頼する。忖度なしで、主張はコードと実測 (run の数値) で検証すること。
+結論が「この計画/結果は誤り」でも構わない。両論併記で逃げず、推奨は 1 つに絞ること。
+
+ルール:
+- **ファイルを変更しない** (read-only サンドボックスで動いている。読む・実行して確認するのは可)。
+- 出力は日本語。識別子・ファイル名は原語のまま。
+- 指摘は **Critical / Major / Minor** の重大度付きで、必ず根拠 (`ファイル:行` または `run_*` の数値) と対案をセットで書く。
+- リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
+  用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
+- 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
+  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+
+## 依頼: 検証結果レビュー (stage = result)
+
+対象の plan は下に全文を貼る (`plans/active/gradient-scalar-lsq-unification.md`)。実装と検証が終わり、`status: done` にして `plans/accepted/` へ移す直前の段階である。
+次を順に評価せよ。
+
+1. **実装 diff の検証**: `git diff 36d8ba03...HEAD -- solver_density_cuda design methods procedures` (必要なら `git log 36d8ba03..HEAD --oneline`)
+   を自分で取り、plan §4 の設計方針どおりに実装されているか、符号・単位・境界 (node の境界半割面、周期 seam、軸)・
+   float32 桁落ち・ゼロ割ガードの絶対閾値などの誤りがないかを見る。
+2. **検証結果の裏付け**: plan の §6 / 変更ログに書かれた数値・主張 (収束、一致、改善率) を、挙げられている `run_*`
+   ディレクトリの `CONVERGENCE_VERDICT.txt` / `residual_history.csv` / `README.md` の run 一覧で確認する。
+   主張と実測が食い違う箇所、VERDICT が NOT CONVERGED / DRIFTING のまま「一致」と書いている箇所を挙げよ。
+3. **回帰**: 既存機能 (既定値、他ケース) を壊していないか。既定挙動が変わった場合にそれが plan に明記されているか。
+4. **文書整合**: `methods/<area>/` の現在仕様、`procedures/` の手順、`methods/index.md`、`plans/README.md` が
+   実装と一致しているか。
+5. **残作業表**: 未解決事項が §5.1 の残作業表に残っているか (対話で決めて書いていない、が無いか)。
+
+最後に「accepted に移してよいか」を **GO / GO-with-changes / NO-GO** の 1 語で判定し、
+GO-with-changes なら移す前に直すべき点を優先順で列挙すること。
+
+## 重点
+
+Phase 1 (opt-in) の result 1 回目 (plan §5.1 #5r)。S2 は codex diagnose で『条件付き・未合格』と判定済み: 起点床の収束ゲートが設定差のある 4 case で gg・lsq とも不成立 (case/39 は両方 PASS、#5a で chi 単独説明は棄却)、FCT smoke は旧上限超過。これらを保存したまま、(1) 実装 diff (7ebf6d7d・f99f236d) に欠陥が無いか、(2) 物理ゲートと lsq−gg の差・S3 の主張が run の記録で裏付けられているか、(3) Phase 2 (既定化 #6) に進む前に何が不足か、を判定してほしい。結果の一次記録は 4 case README の run_095x_sglsq_* 行と case/09.Taylor-Green/_g0_lsq_seam/ の txt。
+
+## plan 全文 (`plans/active/gradient-scalar-lsq-unification.md`)
+
+```markdown
+# node のスカラー勾配を LSQ に統一する (k/ω・化学種・受動種・凝縮モーメント)
+
+## メタ
+
+- **area**: `gradient`
+- **status**: `in_progress`
+- **related_docs**:
+  - [`methods/gradient.md`](../../methods/gradient.md) (「境界寄与」node × 周期の継ぎ目、スカラー勾配)
+  - [`methods/discretization.md`](../../methods/discretization.md) §7.3 / §7.3.1 (「LSQ は NS だけ、スカラーは GG」の記述を更新する)
+- **related_plans**:
+  - [`boundary-node-periodic-gradient-fix.md`](../accepted/boundary-node-periodic-gradient-fix.md) (前提。§4.1 の合併 LSQ 係数は「変数に依らない形」で作ってある。§5.1 #7 の継続課題 (1)(3)(4) を本 plan に移す)
+  - [`boundary-node-rotational-periodic.md`](boundary-node-rotational-periodic.md) (回転周期。本 plan では扱わない)
+- **created**: `2026-09-26`
+- **owner**: `sano`
+
+## 1. 目的
+
+node の勾配は、NS の原始量 ($\rho, u, P, T$) だけが LSQ (`gradLSQ: 2`、事前計算係数) で、スカラー ($k,\omega$、化学種 $Y_s$、受動種 $\xi$、凝縮モーメント) は Green–Gauss (GG) である。
+2026-09-26 のユーザ決定 (「そろえるべき」) により、node のスカラー勾配も同じ LSQ に揃える。
+
+根拠 (前提 plan の測定):
+
+- GG は float32 で部分和 $\Sigma\phi_f S_f$ が $\sim\phi/h$ の打ち消しになり、**壁半割面込みの CV では定数場が閉じない** (channel 実測、壁節点で約 $5.3\,\varepsilon|\phi|/h$、継ぎ目に依らない。前提 plan §5.1 #7(3))。LSQ は定数場で厳密に 0。
+- NS の LSQ は継ぎ目の合併係数 (`lsqPre_mergePeriodic`) を持ち、係数は変数に依らないので、スカラーも**同じ係数を流用**できる (並進周期の継ぎ目の扱いが NS と自動的に揃う)。
+- 同じ場に NS は LSQ、スカラーは GG と作用素が混在していると、境界の扱い (LSQ は内部隣接のみ、GG は owner 値の半割面) が変数ごとに違う。
+
+## 2. スコープ
+
+- **やる**: node のスカラー勾配 4 系統 (`ransGradient` の $k,\omega$、`speciesGradient` の $Y_s$、`passiveGradient` の $\xi$・凝縮モーメント) を、NS と同じ事前計算 LSQ 係数 (`cInt`) による gather に置き換える。周期 gather の登録、出力配列名は現行どおり。検証ハーネス (`case/09.Taylor-Green/_g0_lsq_seam/`) の GG 参照を LSQ 参照 (`lsq_merged_ref`) に切り替える。前提 plan §5.1 #7 (1)(3)(4) の引き取り。
+- **やらない**: cell モード (GG のまま。ユーザ方針で cell は使わない)。回転周期 (別 plan)。軸対称×周期の継ぎ目合併 (前提 plan #7(5)。LSQ 化で半割面閉包の問題は消えるが、合併は NS と同じく片側のまま)。スカラーのリミタの変更。遷移モデル (スカラー勾配を持たない)。
+
+## 3. 関連 docs と前提
+
+- 現状の事実 (2026-09-26 調査、`solver_density_cuda/`):
+  - LSQ 係数 `cInt[3*ilp]` は `cell_planes` CSR の incidence ごとに float32 で 3 個、`calcGradient_d_wrapper` 内の static ローカル (`calcGradient_d.cu:959`)。境界 incidence (`ip >= nNormalPlanes`) は 0 (`:822`)、stencil は実在の内部隣接ノードだけ (ghost・bvar・境界点なし)。M⁺ は倍精度、打ち切り 1e-2。
+  - 適用は `lsqPreGrad_internal_d` (`:850-894`) のノード並列 gather (atomic なし)。
+  - スカラー GG: $k,\omega$ は `calc_scalar_gradient_face_d` (`ransTransport_d.cu:16-75`、境界面は owner 値 k[ic0]・ω[ic0])、$Y_s$・$\xi$・モーメントは `species_gradient_d` (`speciesTransport_d.cu:641-677`、境界面は実質 owner 値)。軸対称は `A_planar`・`s*_planar`。
+  - 使用先: $k,\omega$ 勾配は SST の $CD_{k\omega}$・$F_1$ (`ransSource_d.cu:344-350`、`rans_sst_blend_f1_d`)、`axisymMethod: 1` の半径方向ソース (`ransSource_d.cu:257-271`、既定 0・使用 run 0 件)、それらを通じた拡散係数 σ(F1)μt の面補間 (`scalarTransport_d.cu:116-124`)。移流 (1 次) と粘性流束は勾配を使わない。~~$CD_{k\omega}$・$F_1$ だけ~~ (codex plan M1 で訂正)。$Y_s$ は SLAU の面再構成 (`Yd_recon`、Venkat ψ_Y は nSpecies ≥ 2)。受動種は SLAU S3 の再構成 (`dPdx_recon`、無次元化 Venkat) と、それを通じて FCT の Pface。
+  - 周期 gather: `periodicGradientGather_d_wrapper` に NS 18 本・divU・dY・受動種を登録 (k/ω は `ransGradient` 直後の専用 gather)。合併係数の部分和は、group 内で状態が同値 (root→member ミラー、スカラーもミラー済み) なら和で合併 LSQ になる。
+  - 軸対称の NS LSQ は係数が純幾何 (planar LSQ) で、planar GG と同じ量を推定する。
+
+## 4. 設計方針 (2026-09-26 `diagnostician` 確定、同日 codex plan (GO-with-changes C0/M7/m2) を全件採用して改訂)
+
+**前提の事実**: 既定の設定で生きているスカラー勾配は $k,\omega$ だけ (`speciesFaceReconstruction` の既定 0、`solverConfig.hpp:110`、`main.cpp:1453`)。ただし $Y$・$\xi$・モーメントの opt-in 経路には case/16 に使用実績 (`run_0476` 5 種 + トレーサ SFR 2、`run_0482` 凝縮 S3) があるので、検証は縮小しない (codex M6)。
+
+### 4.1 係数の共有
+
+- `cInt` を static ローカルから外に出し、**読み取り専用 (const ポインタ) のアクセサ**で公開する。アクセサは構築時の (nCells, nInc, mesh アドレス) も返し、スカラー wrapper は一致を assert する。単一メッシュ・単一プロセス前提を明記。NS と同じ配列を使う (合併済み係数を含む)。係数の再計算・変数別の係数は作らない。
+
+### 4.2 適用カーネル
+
+- 汎用の多変数 LSQ gather カーネルを 1 本足す: 入力 `flow_float**` (N 変数)、出力 3N 配列。ノード並列 (atomic なし)、アキュムレータは最大 4 変数ずつのチャンク (CSR と `cInt` を読み直す)。REG・spill は `cuobjdump -res-usage` で記録。
+- **差分形** $\nabla\phi_i=\sum_j c_{ij}(\phi_j-\phi_i)$ (NS と同じ)。定数場の勾配は厳密に 0 (前提 plan #7(3) の GG 壁閉包 5.3ε は消える)。
+- 境界の扱いは NS と完全に同一: 内部隣接のみ、境界 incidence は係数 0 を掛けるのでなく `ip >= nNormalPlanes` で **skip** (NS `calcGradient_d.cu:869` と同じ)、疑似点なし。ghost 出力のゼロ初期化の契約は維持 (`speciesTransport_d.cu:1265-1268`)。化学種 dY の ghost は両経路とも書かない (GG も `ic1 < nCells` のみ、`:662`) ので未定義のまま。根拠: accepted の node 境界勾配の原則 (DOF-only) と同じで、変数ごとに境界の扱いが違う現状の方が不整合。GG の内部面値が使う幾何 fx (高 AR 曲面壁で 0.07–0.96 に振れる既知欠陥) も使わない。
+- 軸対称: 係数は planar LSQ のまま (NS と同じ)。GG の `A_planar` 除算は不要。
+- 壁節点の $k,\omega$: 低 Re + `sstNodeWallKPin` (既定 ON) では壁ノードは k=0・ω=ω_w にピン (`ransBoundary_d.cu:63-79`) され、残差・対角も 0 (`ransSource_d.cu:303-307`)。**壁ノードの F1 は k=0 により arg1_a = arg1_c = 0 で厳密に 0** (`ransSource_d.cu:343-350`、勾配作用素に依らない。~~1 に張り付く~~ は codex plan M1 で訂正)。作用素の差が入るのは (i) 第一内層ノードの $CD_{k\omega}$・$F_1$、(ii) それを通じた W–I 面の σ(F1) 補間、(iii) `axisymMethod: 1` の半径方向ソース (既定 0、使用 run 0 件)。S2 case/48 で第一内層 F1 の L∞ 差を記録する。
+- **起動時に roK/roOmega も root→member ミラーする** (`periodicMirrorScalarState` を `main.cpp:1257` の直後に追加。現状の初期ミラーは NS・化学種・roXi のみで、roK/roOmega は更新後 `main.cpp:1722,1947` だけ)。同期入力ではビット不変 (S1 で確認)。
+
+### 4.3 周期
+
+- lsq 経路のスカラー gather (和 → broadcast) は係数合併と同じ述語 `periodicSeamMergeActive` (`periodicNode_d.cu:215-224`: node ∧ 並進 type 0 ∧ 非軸対称) を条件にする。k/ω の専用 gather (`ransTransport_d.cu:246`) は既にこの述語。回転周期・軸対称×周期は片側 LSQ (NS と同じ)。GG 経路の登録 (`periodicGradientGather`) は現行どおり。**lsq では `periodicGradientGather` に dY・dξ・モーメント勾配を登録しない** (`periodicNode_d.cu:186-188`、2026-09-26 実装時に追加・`diagnostician` 採用: 登録すると wrapper 内の合併と二重になり継ぎ目が 2 倍、また同 gather は回転周期でも合併してしまう)。NS gather の述語統一は回転 plan #0a。
+- 壁∩継ぎ目の ω_w (`wall_y_eff` は部分 stencil の最短距離、`ransBoundary_d.cu:153-203`) の group 同値性は **本 plan の必要条件ではない既存問題** (BC 値の問題で作用素と無関係、GG も同じ露出。整合格子では一致する見込み)。S0-e の診断で確認し、非零なら §5.1 に F 項目 (`wall_y_eff` を group-min に)。
+- node + 回転周期 (type 1) は起動時に警告 (`[config] node 回転周期は未対応 (plan boundary-node-rotational-periodic)`)。エラー化は回転周期 plan の #0a。
+
+### 4.4 切り替えと provenance
+
+- **2 段ゲート**: Phase 1 = opt-in (`mesh.scalarGradient: gg|lsq`、既定 `gg`) の実装と S0–S3 → codex result 1 回目 → Phase 2 = 既定を `lsq` に切り替え (S4、設計 DB、docs) → codex result 2 回目。**既定化 (#6) の前提**: Phase 1 の result が GO、`tooling-stage-manifest-launch-binding` (別 plan、#2g) の完了、S3 ≤ 5 %。cell は GG 固定。
+  opt-in から入る理由: 共有ワークツリーで並行セッションの node SST run と設計 DB が検証途中で黙って変わるのを避ける。
+- 起動エコー `'scalarGradient' effective: <値> (default|explicit)`、`RUN_PROVENANCE` と起動記録 (`forge_launches.jsonl`) に実効値。
+- **既定化の provenance** (codex M7: 現行 `stage_manifest.py:148-157` は同じ config hash に最後の起動値だけを対応させ、旧既定と新既定を誤連結する — codex が実証): 起動記録を (cfg_fnv, 起動順) で段に対応させ、hard キーは実効 `scalarGradient` + バイナリ id (git rev)。旧 manifest のキー無しは `gg (legacy)` とし `inferred` と区別して連結しない。修正は別 plan `tooling-stage-manifest-launch-binding` で行う (`slauWallNormalChi` の既定化にも同じ欠陥が効いている)。設計 DB: `runner_sern.py` の `FLAG_POLICY` を既定化日に更新し、行に実効 `scalarGradient` を持つ。`procedures/recommended-settings.md` §9 に「〜既定化の日付までは gg」。
+
+## 5. 実装ステップ
+
+1. `methods/gradient.md`・`methods/discretization.md` §7.3 を更新 (opt-in の LSQ 経路、既知の制約) — **済 2026-09-26**。
+2. Phase 1: `cInt` の公開、汎用 LSQ gather カーネル、3 wrapper の分岐、roK/roOmega の初期ミラー、キー・エコー・provenance、回転周期の起動警告。
+3. Phase 1: ハーネス拡張 (#2d) と S0/S1、起点の固定 (#2e) と S2・S3 (AWS)。codex result 1 回目。
+4. Phase 2: 別 plan #2g の完了を待って既定を `lsq` に、S4、設計 DB、docs、codex result 2 回目。
+
+### 5.1 残作業 (優先順)
+
+| # | 項目 | 内容 | 担当 |
+| --- | --- | --- | --- |
+| 1 (**完了 2026-09-26**) | §4・§6 の確定 | 判断: 2026-09-26 `diagnostician`・§4 案 1–3 採用、周期は並進のみ合併、既定は opt-in から開始、§6 の合否を固定 | F |
+| 2 (**完了 2026-09-26**) | codex plan 段 | GO-with-changes C0/M7/m2 → 判断: 2026-09-26 `diagnostician`・全件採用 (M2 の壁 ω 同値性は既存問題として診断項目に格下げ)、分割せず 2 段ゲート | F |
+| 2a | M1 訂正の反映 | §3・§4.2・S2 表 (本改訂で済)、`axisymMethod: 1` の S0 変種 | O |
+| 2b (**実装済 2026-09-26**、合格判定は S1) | roK/roOmega 初期ミラー | `main.cpp:1257` 直後に `periodicMirrorScalarState`。合格: R3 規則でビット不変 | O |
+| 2c | S0-e 同値性診断 | channel と case/39 起点で 1 step、applyBconds 直後の k・ω・wall_y_eff の group 内差。非零なら `wall_y_eff` group-min を F 項目に | O (結論 F) |
+| 2d | ハーネス拡張 | 非合併参照 (軸対称×周期)、ξ 定数場 (壁込み)、Y 5 種 (チャンク境界)、負の対照、gather 前配列のダンプ | O |
+| 2e | 起点の固定 | §6 の起点表 (所在・sha256・バイナリ・実効設定) を AWS に転送し sha256 照合 | O |
+| 2f (**実装済 2026-09-26**: `solver_density_cuda/tools/check_floor_ratio.py --start <起点 run> <run>...`、`--selftest` 6 通り PASS。比較量の STEADY は従来どおり `check_quasisteady.py`) | S2 収束規則のスクリプト | plateau 許容 + 床比 (末尾平均 ≤ 起点の 1.5 倍、ピーク除外・再進入 step 記録) + STEADY 閾値 | O |
+| 2g | **別 plan 起票** `tooling-stage-manifest-launch-binding` | 起動順対応・バイナリ id・legacy 区別・S4 試験。本 plan #6 の前提 | F (§4) / O (実装) |
+| 2h | 設計 DB | `runner_sern.py` FLAG_POLICY 更新と実効 `scalarGradient` 列 (#6 と同時) | O |
+| 2i (**完了 2026-09-26: S3 PASS** — lsq/gg 比 case/48 1.010・case/39 1.017 (上限 1.05)。AWS g5・`f99f236d`・block 128・2500 step の step 501–2499 平均・交互 3 反復の中央値 (`s3_perf.py`、`S3_case{48,39}.txt`)。case/48 の初回は別 run と重なったので無効 (`S3_case48_contaminated.txt`) にして走行中監視つきで取り直した。「native」は AWS の native ビルド) | S3 の測定手順 | native・同一 GPU・同一 BLOCKSIZE・ウォームアップ 500 後 2000 step × 3 の中央値、REG/spill | O |
+| 3 (**完了 2026-09-26**、判断: 2026-09-26 `diagnostician`・diff レビューで欠陥なし、periodicGradientGather の登録変更を採用) | 実装 (Phase 1) | §4、§5 の 2。REG 38/39/40/48 (NV 1–4)、spill 0。AWS 最小確認: lsq の線形場誤差 ≤ 丸め床、NS 配列は lsq/gg でビット一致、gg の面寄与ダンプは HEAD と不一致 0 | O |
+| 4 (**完了 2026-09-26: S0/S1 PASS**。S0 は全変種 PASS (軸対称 2 変種の S0-c は §6 の適用除外)。S1 (1) 4 ケース PASS。S1 (2) は §6 の訂正を適用: tgv の NS 18 勾配は gather 前で gg/lsq 12 本ビット一致、group 外節点は厳密一致、2 member 以上は全点が順列和の集合内 (#4d・#4f)。初回 FAIL の記録は §6.2 相当として `S1.txt` に残す) | S0/S1 | ハーネス (AWS)。結果 `case/09.Taylor-Green/_g0_lsq_seam/{S0_*.txt,S0e_case39.txt,S1.txt}` | O |
+| 4a (**完了 2026-09-26**: Minor 2 件を修正して commit (v2 バイナリ `f1703bf8…` で pre-gather ダンプ 4 tag が v1 とバイト一致、E/P = A・N PASS、`~/sglsq/DUMP_RECHECK_tgv_lsq_v2.txt`)。**commit 可 — 判断: 2026-09-26 codex (diagnose) `notes/reviews/2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md`**。Minor 2 件 (null 成分をゼロで埋めず診断失敗として tag を捨てる、env 無しでは呼び出し側で vector を組まない) を直してから commit。S1(1) 再実行 4 ケース PASS。「ダンプ非干渉検証済み」とは記録しない — 判定は #4d) | 出力 hook (判断: 2026-09-26 `diagnostician`、既定 off・出力専用・数値不変) | (a) `FORGE_DUMP_PREGATHER=<path>`: `periodicGradientGather` の直前 (`main.cpp:1304`・`:1477`) に NS 18 本 + dY + dξ/モーメントの局所配列 [nVar][nCells][3] を、`ransGradient` の lsq 分岐では gather 直前の dK/dΩ を非 atomic に書く。gg 経路でも同じ位置で書ける。既存 `FORGE_DUMP_SCALARGRAD` (面寄与) とは別名。(b) `dY{s}d{x,y,z}` と `wall_y_eff` を output の extraFields に登録 (post-gather 値)。**入れた commit で S1(1) (gg 旧 vs 新、4 ケース × 3 本) を再実行して不変を示し、ダンプ有効時に res が変わらないことを 1 ケースで見る** | O |
+| 4b (**完了 2026-09-26: A**。gather 前 NS 18 配列は 6 本ビット同一、gather 後の差 (res_0 124・res_1 232 節点、全て 4 member) は全点が部分和の順列和の集合内。`PREGATHER_4b.txt`) | tgv S1(2) FAIL の判定 A/B (測る前に固定) | gg 3 本・lsq 3 本で pre-gather ダンプを取り、(i) NS 18 配列の gather 前がビット同一か、(ii) 不一致 36 節点の gg・lsq の gather 後の値が member 部分和の float32 順列和の集合に含まれるか。**A**: (i) 同一かつ (ii) 全点で含まれる → 「atomicAdd の順序差」として閉じ、§6 S1 (2) を下記に訂正。**B**: (i) 不一致 → lsq 経路が NS の入力を壊している → 実装を止めて調べる。**B′**: (i) 同一だが (ii) が外れる → gather 以外の非決定源があるので順序差の説明は採らない | O (結論 F) |
+| 4c (**完了 2026-09-26: 4 変種 PASS**。`S0Y_*.txt`、`S0e_case39.txt`) | Y の未測定項目 (S0-a の Y 5 種、S0-c の dY と dξ のビット一致、チャンク境界 4+1、S0-e の wall_y_eff) | 5 種は case/16 `run_0471` の組 [H2O, N2, O2, AR, CO2] (TP、README:30 で PASS 済み)。Y0 = Y4 = q (ξ と同じ量子化場、q < 0.5)、Y1..Y3 は正の sin 場で Σ = 1 − 2q を double で作ってから量子化。Y4 = ξ でチャンク境界の孤立変数を、Y0 で先頭チャンクを見る。S0-a の参照入力は res_0 の読み戻し (`VALUE/Y{s}`・`Xi`)。追加: Σ_s dY_s = 0 (≤ 4ε Σ\|dY_s\|) を全節点で | O |
+| 4d (**完了 2026-09-26: E/P = A、N = FAIL 1 配列 (tgv lsq res_1 `res_ro`: 群内 11・14、交差 40、最大差 3 組とも 2.98e-8)。ダンプ全体の非干渉は未確認**。case48 は E/P/N すべて通過。`DUMP_RECHECK_{tgv,case48}.txt`。N の扱いは #4f) | ダンプ非干渉と S1 (2) の再判定 (**事後規則**、判断: 2026-09-26 codex (diagnose)。§6「ダンプ非干渉」) | 追加計算なし、既存の 1 step 出力を §6 の 3 区分 (E 厳密 / P 順列集合 / N 両側ノイズ) で再判定。tgv: ダンプ無し `~/sglsq/s1h/s1_tgv_{gg,lsq}_{a,b,c}` とダンプ有り `~/sglsq/pg/pg_tgv_{gg,lsq}_{a,b,c}` の全 12 本の res_0・res_1 の NS 勾配を、ダンプ有り gg_a の pre-gather 部分和に照合 (非周期節点は部分和そのもの、2 member は唯一の和、3 member 以上は順列集合)。case48: 無し `s1h/s1_case48_gg_*` vs 有り `pg/dc_case48_*`。N 区分は不一致数と最大差を 3 組 (無し同士・有り同士・無し–有り) とも出す。**A**: E が全て厳密一致かつ P が全点集合内 → S1 (2) 訂正を適用して tgv PASS、#4a の非干渉を記録。**B**: E の不一致または P の集合外 → 順序差だけの説明を棄却し S2 を保留 (F)。結果 `DUMP_RECHECK.txt` | O (結論 F) |
+| 4f (**完了 2026-09-26: A** — E/P 16 本厳密・集合内、N 全配列 2 倍以内 (`res_ro`: 無し同士 49・有り同士 42・交差 47)。記録は「固定 8 本の規則では超過しない」まで。初回 FAIL は #4d に保存。`DUMP_RECHECK_tgv_lsq8.txt`、run `~/sglsq/pg8/lsq_{off,on}_{d..h}` (AWS スクラッチ、破棄可)。測る前に固定、判断: codex (diagnose) `notes/reviews/2026-09-26-gradient-scalar-lsq-4d-nfail-diagnose.md`) | #4d の N FAIL (tgv lsq res_1 `res_ro`) の一度限りの追加試験 | 変更点は `FORGE_DUMP_PREGATHER` の無効/有効だけ。同一バイナリ (`~/sglsq/forge_hook4a` sha `a398afdc…`、既存 12 本と同じ)・同一入力 (`pg_tgv_lsq_a` の入力を複製、mesh.h5 の sha256 を記録)・同一 GPU・BLOCKSIZE 128/128、1 step。lsq の無し・有りを各 +5 本 (d–h)、実行順は ABBA で固定: d無 d有 e有 e無 f無 f有 g有 g無 h無 h有。計 8 本ずつで、**res_0・res_1 の全 N 配列**について群内 28 対 + 28 対の最大と交差 64 対の最大を比べ、最大差・不一致数が**両方とも** 2 倍以下。E/P も 16 本で再確認し、各 run の sha256・実効 scalarGradient・mesh sha256 を記録。**A**: E/P 通過・全 N 通過 → 「固定 8 本の規則では超過しない」、初回 FAIL を持続的干渉の証拠とする解釈を退ける (初回 FAIL は保存)。**B**: E/P 通過・N FAIL 継続 → ダンプ非干渉は未確認のまま (#4a は診断専用)。**本数をさらに増やして合格を探さない**。どちらでも S2 は進める (ダンプ無し)。E/P 失敗 → S2 保留。gg の不一致数を借りて合格にしない。結果 `DUMP_RECHECK_tgv_lsq8.txt` | O (結論 F) |
+| 4e | S0-c 軸対称 2 変種の適用除外 (判断: 2026-09-26 codex (diagnose) の指摘を受けて理由を記録) | §6 S0-c に除外理由を書く (済)。測定は追加しない | O |
+| 5 (**S2 = 条件付き・未合格 2026-09-26**、判断: codex (diagnose) `notes/reviews/2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md`。物理ゲートと lsq−gg の上限は FCT smoke 以外 PASS、**起点床に対する収束ゲートは case/48・40・0476・0482 で gg・lsq とも不成立 (case/39 は両方 PASS)**、FCT smoke は旧上限 (反復差 × 2) 超過。旧判定は書き換えない。結果の表は各 case README の `run_095x_sglsq_*` 行) | S2/S3 | §6 の表 (**すべて AWS**、ユーザ指示で 2D も AWS)。**着手条件** (2026-09-26 codex (diagnose) 2 回): #4d・#4f の **E/P** が A、#2e (起点の sha256 照合) と #2f (収束規則スクリプト) の完了。N 区分の結果 (#4f の A/B) は S2 を保留する根拠にしない (S2 はダンプ無しで回す) | O (結論 F) |
+| 5a (**完了 2026-09-26: B** — `run_0956_sglsq_s2_gg_chi0` (48000 step、実効 chi 0 を起動エコーで確認) も起点床に戻らない: rms_ro 1.82×・roUy 9.08×・roe 1.85× (chi 1 の gg は 1.85×/9.1×/1.88×)。物理量は STEADY、chi 0/1 の差は Cf・q_w・θ ≤ 0.007 %・δ* ≤ 0.085 %。**chi 単独で床移動を説明する仮説を棄却**、自動延長はしない。残る候補は起点 (09-12) 以降の他のバイナリ変更と restart そのもの。測る前に固定、判断: codex (diagnose) S2) | case/48 の chi 一因子試験 | `run_0956_sglsq_s2_gg_chi0`: `run_0950_sglsq_s2_gg` の開始時入力 (同じ IC = run_0005/res_48000 のビット一致コピー) を複製し `space.slauWallNormalChi: 0` だけ変更、同一バイナリ `f99f236d`・BLOCKSIZE 128、48000 step (対照 0950+0952 の合計)。判定: `check_floor_ratio --start run_0005 --factor 1.5 --tail 0.2` の全残差列、`check_convergence` の NaN/RISING、既存の物理ゲート (Cf/VD-II・2St/Cf・閉合) と系列 STEADY。**A**: 全条件を満たし旧床へ戻る → case/48 では床移動を chi 変更で説明する (他ケースへ一般化しない)。**B**: 物理量が STEADY でも床を外れる → chi 単独の説明を棄却。まだ過渡なら判定不能とし自動延長はしない | O (結論 F) |
+| 5b (**完了 2026-09-26**: 継続末尾で Y0 1.63e-5・Xi 3.39e-4 (上限 3.7e-5/9.4e-4)、ΣY・ξ・floor 補正 (rel 1.3e-27) とも範囲内、machmax/pmax STEADY。`--from-floor run_0476` は両方不成立のまま) | 0476 双子の継続 24000 | §6 表どおり `run_0950/0951_sglsq_s2_0476_*` の res_24000 から同一設定で +24000 (`run_0956/0957_sglsq_s2_0476_*_cont`)。比較量・上限は §6 表のまま | O |
+| 5c (**完了 2026-09-26: 上限内**。onset (中心線 g = 1e-3) 0482・gg・lsq とも 23.23 mm、壁 p/p0 L∞ gg vs 0482 0.165 %・lsq vs 0482 0.163 % (上限 0.3 %、最大は出口 x = 95 mm)、lsq−gg 0.003 %) | 0482 双子の vs 0482 比較 | §6 表の比較対象は **vs run_0482** (lsq−gg ではない): onset と壁 p/p0 を gg・lsq それぞれ run_0482 と比べ、lsq−gg も併記する。旧バイナリ差 (gg vs 0482) と分けて書く | O |
+| 5d (**測定済 2026-09-26、判定は #5r**: floor 補正累積 rel 7e-19・limCorr 0・上限違反 0 セル・E_ρ 最大 5.5e-6 (gg) / 4.4e-6 (lsq)、トレーサ総量 200 step 後 4.1705e-5 で gg/lsq の差 rel 9e-8。流入流出の収支照合は未実施) | FCT smoke の保存・有界性 | 旧上限 (反復差 × 2) 超過の記録は残す。**0476 の定常差を上限に流用しない** (codex 却下)。受動種の保存収支 (floorCorr・limCorr・total の時系列) と有界性を独立に判定し、差は記録として #5r で審査する。`nSub 15` の十分性は未確認と明記 | O (結論 F) |
+| 5e | `slauWallNormalChi` の文書不整合 | `procedures/recommended-settings.md` §1.0a は既定 0 と書くが `f99f236d` のコードは node+nodeWallDirichlet+SLAU で auto = 1 (`solverConfig.cpp:700`)。担当 plan (`convection-slau-wall-normal-chi-default`) 側で同期してもらう。本 plan の run は実効値を `IC_FROM.txt`・起動エコーで固定済み | O |
+| 5r | codex result 1 回目 | Phase 1。**S2 は「条件付き・未合格」のまま審査に回してよい** (codex (diagnose) S2)。旧ゲート不成立・FCT 旧上限超過・#5a–#5d の結果を併記する | F |
+| 6 | 既定の切り替え (Phase 2) | **前提**: 5r が GO、2g 完了、S3 ≤ 5 %。S4、2h、docs、codex result 2 回目 | F |
+| 7 (**完了 2026-09-26**: `boundary-node-rotational-periodic` §5.1 #0a) | 回転周期 plan への登録 | | O |
+
+## 6. 検証 (2026-09-26 `diagnostician` 確定、同日 codex plan 対応で改訂。測る前に固定)
+
+- **S0 作用素** (ハーネス `case/09.Taylor-Green/_g0_lsq_seam/g_suite.py` の 7 変種 + 軸対称×周期 1 本 + `axisymMethod: 1` 1 本):
+  - **S0-a 純作用素 (BC 前)**: k・ω・ξ・Y (5 種、チャンク境界 N=5 を跨ぐ) の LSQ 勾配が double 参照と ≤ 1e-5·S。参照は並進周期で `lsq_merged_ref`、軸対称×周期は**非合併** (root = identity) の同関数。非線形場 (sin) で識別。
+  - **S0-b 定数場**: ξ (channel は入口が無くピン無し) で全節点・壁節点込みで勾配 == 0 (厳密)。k/ω は非ピン節点で == 0、壁隣接節点はピン値 (k=0, ω_w) からの差分形の解析値と ≤ 4ε。
+  - **S0-c NS との一致**: 同じ場を ro に入れた NS 勾配と、**周期 gather 前の局所配列がビット同一** (周期の無い変種 — box の全面 slip — では gather が no-op なので `res_1` の最終配列同士を直接比較。化学種は Y を ξ と同じ場にして dξ と dY のビット一致、5 種でチャンク境界 4+1 を通す)。gather 後は 2 member group がビット同一、3 member 以上 (多重周期の辺・角、atomicAdd の順序が非決定) は |差| ≤ 4ε·Σ|部分和|。
+  - **S0-c の軸対称 2 変種 (`axi`・`axi_m1`) は適用除外** (2026-09-26 記録、codex (diagnose) の指摘で明文化): ハーネスは TP 混合気の状態を ρ = q で作り直せない (`g_suite.py:452,527`)。除外の根拠: (1) 軸対称では周期 gather も継ぎ目合併も走らない (`periodicGradientGather_d_wrapper` の `isAxisymmetric` 早期 return、`periodicSeamMergeActive` は非軸対称限定) ので、比べる対象はカーネルと係数だけ; (2) カーネルは非軸対称 8 変種の S0-c で NS とビット同一; (3) 係数は NS と同じ `cInt` 配列 (軸対称でも planar LSQ); (4) 軸対称固有の取り違え (A_planar 除算の残り等) は O(1) の誤差になるが、S0-a で double 参照との差/S ≤ 7.6e-8 (`S0_axi.txt`・`S0_axi_m1.txt`)。
+  - **S0-d 検出力 (負の対照)**: jitter32 で GG 参照との差が 1e-5·S を超える (閾値が GG と LSQ を識別する証拠)。
+  - **S0-e BC 後の同値性 (診断)**: channel と case/39 起点で 1 step、applyBconds 直後の k・ω・wall_y_eff の group 内差 == 0 (記録。非零なら F 項目)。
+- **S1 非干渉**: `scalarGradient: gg` で実装前バイナリと全配列が一致 (旧経路の保存、roK/roOmega 初期ミラー追加も含めて)。判定規則 (**測る前の訂正 2026-09-26**、`diagnostician`): 旧同士がビット一致する配列は旧新もビット一致。旧同士でも一致しない配列 (周期 gather の atomicAdd、3 member 以上の group) は、旧 3 本・新 3 本の同一設定反復からノイズ対 (旧旧 3 対・新新 3 対) を取り、旧新 (9 対の最大) が (a) 最大差 ≤ ノイズ対の最大差の 2 倍、(b) 不一致数 ≤ ノイズ対の不一致数の最大の 2 倍。不一致の位置が 3 member 以上の group に限られるかは記録 (判定外)。~~R3 の「不一致数の桁が同じ」規則~~は廃止 (桁境界 8↔12・93↔108 で非決定的に反転する。前提 plan #6a と本 plan の Phase 1 最小確認で再現)。前提 plan の #6a の FAIL 記録は書き換えない。`lsq` で NS の勾配・リミタ配列が `gg` と同じ step でビット一致 (1 step、初回ダンプ)。
+- **S1 (2) の判定手順の訂正 (#4b が A の場合に適用。2026-09-26 `diagnostician`、測定後だが決定的な部分には厳しくする方向)**: ~~NS の勾配・リミタは~~ **NS の 18 勾配配列は gather 前の局所配列でビット一致** (決定的段、必須。リミタは gather の**後**に評価される (`main.cpp:1479,1485`) ので gather 前の比較対象にしない — 2026-09-26 codex (diagnose) で訂正。リミタは評価後の配列を下の E/N 区分で比べる)。gather 後は 2 member 以下の group はビット一致、3 member 以上は部分和の順列和の集合に含まれる (代替: \|差\| ≤ 4ε Σ\|p\|)。「旧同士がビット一致なら旧新もビット一致」は gather を含む配列には適用しない (一致は scheduling の偶然で配列の性質でない)。tgv の初回 FAIL (dUxdy 36・dUxdz 32、3 member 以上のみ、最大 1.19e-7) は §6.2 に記録として残す。
+- **ダンプ非干渉 (#4a) と S1 の 1 step 比較の区分 (事後規則。2026-09-26 codex (diagnose)、`notes/reviews/2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md`)**: 規則が事前に無く、S1 規則の流用 (片側条項「旧同士ビット一致なら旧新もビット一致」) で tgv (res_0 dUxdz・res_1 dUxdy) と case48 (res_1 roe) が FAIL した (`PREGATHER_4b.txt` 末尾・`DUMPCHECK_case48.txt`。**この初回 FAIL は書き換えない**)。観測値で決まる「両側ともビット一致なら厳密」ではなく、**コード上の依存関係で区分を先に決める**:
+  - **E (厳密一致)**: res_0 の状態量 (保存量・原始量。初期値 + BC で atomicAdd を通らない)。NS 18 勾配配列 (+ divU) の周期 group に属さない節点 (LSQ gather は atomic なし)。周期の無いケースのリミタ配列 (入力が E、`limiter_d.cu` の atomicAdd は診断 `g_limDiag` 既定 off のみ)。
+  - **P (順列集合)**: NS 18 勾配配列の 2 member 以上の節点。ダンプ有りの pre-gather 部分和から作った float32 順列和の集合に含まれること (2 member は唯一の和)。
+  - **N (両側ノイズ)**: 上以外 (面ループ atomicAdd の残差・GG スカラー勾配・res_1 の状態量、周期ケースのリミタ等)。S1 の訂正規則 (両側 3 本のノイズ対、最大差 ≤ 2 倍かつ不一致数 ≤ 2 倍) を適用し、不一致数と最大差を 3 組とも記録する。片側条項は N に適用しない。
+  - やらないこと: FAIL の配列だけの例外登録、両側ノイズの 2 倍以内だけを根拠に全配列を「数値不変」と書くこと、判定を通すために gather を決定的実装へ変えること (§7 の後続項目は別途)。
+- **S2 物理 A/B — 共通規則**: 起点の最終場から `restart_field.py` で gg/lsq の 2 本、同じバイナリ・同じ step 数。収束は (i) `check_convergence` が DIVERGED でなく RISING 列が無いこと (plateau は既知床として可、先例 case/48 `run_0025`)、(ii) 各列の末尾平均が起点の末尾平均の ≤ 1.5 倍 (ピークは除外し、再進入 step を記録)、(iii) 比較量が `check_quasisteady` で STEADY (閾値は表)。~~`--from-floor`~~ は使わない (codex M4: 全期間ピークを見るので作用素切替直後の跳ねで落ち、case/48・case/40 の起点は plateau で参照側が REFUSED)。ただし case/16 `run_0476` は起点が通常判定 PASS なので `--from-floor` を使える。未達なら同一設定で延長 (初回予算は表の step 数)。**物理ゲートは独立の必須条件**。差が上限を超えたら自動不合格にも自動合格にもせず、格子対診断 (両方向・両経路) を回して F 判断 (codex M5: 縮むかだけでは欠陥と離散化差を識別できない)。
+
+  | ケース | 起点 (所在・sha256 先頭) | step | 必須ゲート (既存) | 差 lsq−gg の上限 (超えたら格子対 → F) | STEADY 閾値 |
+  | --- | --- | --- | --- | --- | --- |
+  | case/48 冷却平板 | main ワークツリー `/home/sano/work/forge/case/48.flat_plate_cooled_m4/run_0005_B_tw300_y3/res_48000.h5` `9a9022d1…`、mesh `10a13dd0…` | 24000 | Cf/VD-II ∈ [0.96, 1.00] @x 0.3/0.6/0.9、2St/Cf ∈ [1.13, 1.19]、エネルギー閉合 ∈ [1.00, 1.03]、NaN 0。壁ノード F1 = 0 (両経路、記録)、第一内層 F1 の L∞ 差 (記録) | Cf・q_w・δ*・θ 各 ≤ 1 % (3 station)。格子対: 流れ方向 `fp_y1_3um_nx1500` (1.5×、期待比 ≤ 0.75)・壁方向 y1 6 µm (2×、期待比 ≤ 0.6)。差が反復床 (1.8e-6 相対) の 10 倍以上のときだけ縮小率を評価 | `--drift 0.002 --osc 0.005 --tail 0.4` |
+  | case/40 軸対称ノズル (axisymMethod 0) | main ワークツリー `/home/sano/work/forge/case/40.nozzle_design_tool/run_0045_node_yp1_outletfix_cont/res_12000.h5` `15e47af0…`、nozzle.h5 `849660af…` | 12000 | η_CF ∈ 0.978 ± 0.003 (README:172、抽出は `design/forge_design/metrics/extract.py` の `thrust_metrics` → `eta_cf`)、ṁ ∈ 1.29–1.30 kg/s、NaN 0、出口列に負値なし | η_CF ≤ 0.1 %、壁温 L∞ ≤ 15 K、ṁ ≤ 0.2 % | `--drift 0.0005 --osc 0.002` (η_CF, ṁ) |
+  | case/39 周期丘 | sern ワークツリー `case/39.periodic_hills/run_0039_r1_gradfix_new_ext` の最終 res (AWS、`--from-floor` PASS 済) | 200k | 継ぎ目比 r_gradk・r_gradw ∈ [0.9, 1.1]、NaN 0、S0-e で同値 | Cf 3 点・x_r は記録のみ。dF1_inf: lsq で STEADY なら「**case/39 のこの構成で**の GG 経路の性質」と限定して前提 plan #7(1) を閉じる、DRIFTING なら継続 | `--drift 0.002 --osc 0.005 --tail 0.4` |
+  | case/16 `run_0476` 双子 (Y 5 種 + ξ、SFR 2、Euler) | `run_0476/res_24000` | 24000 + 継続 24000 | 継続区間で `--from-floor run_0476` PASS、0 ≤ Y、\|ΣY−1\| ≤ 1e-6、0 ≤ ξ ≤ 1、floor 補正累積 ≤ 1e-6 | vs gg 固定点: Y0 max\|Δ\| ≤ 3.7e-5、Xi ≤ 9.4e-4 (S3 信号の 10 %。反復床は 2.0e-7 / 1.5e-5) | `--quantity machmax,pmax` STEADY |
+  | case/16 `run_0482` 双子 (凝縮 S3、SST TP、モーメント 4) | `run_0470/lim1e` 入力 + IC `run_0213` (0482 と同一) | 48000 | `check_convergence` PASS (0482 と同基準)、ALL STEADY、モーメント ≥ 0、NaN 0 | vs 0482: onset (中心線 g = 1e-3 の線形補間交差、格子間隔 0.426 mm) ≤ 0.3 mm (S3 効果 0.72 mm の 4 割)、壁 p/p0 L∞ ≤ 0.3 % (`extract_wall_pp0.py` の CSV、S3 効果 0.81 % 比)。「実験に近づく」は判定に使わない | `compare_condfix --series-csv` ALL STEADY |
+  | dual-time FCT smoke (`run_0486` プロトコル + `run_0476` 入力のトレーサ版) | `run_0471/res_12000`、`run_0476/res_24000` | 200 | NaN 0、\|ΣY−1\| ≤ 1e-7、0 ≤ ξ ≤ 1 | vs gg 双子 (同一物理時刻): ro ≤ 3e-6、roY ≤ 5e-6、roUy ≤ 1e-4 (反復差 0486 vs 0487 の 2 倍) | — |
+
+- **S3 性能**: case/48・case/39 で lsq/gg の step 時間比 ≤ 1.05 (AWS native、同一 GPU・BLOCKSIZE、ウォームアップ 500 step 後 2000 step × 3 反復の中央値)。**超過は #6 を保留**。REG・spill・実測を記録。
+- **S4 provenance (#6 の前提、別 plan #2g で実施し結果を写す)**: 同一 YAML を旧バイナリ (既定 gg) → 新バイナリ (既定 lsq) で 2 段起動し `stage_manifest.py --segments` が **2 区間**を返す。旧省略 / 新省略 / 明示 gg / 明示 lsq / cell (実効 gg) の 5 通りで実効値と由来 (launch / explicit / legacy / inferred) が正しい。設計 DB で FLAG_POLICY 旧行が選別から外れる。
+- **前提 plan #7(4) (ジッタ格子の LSQ 次数)**: ~~本 plan で「欠陥ではなく作用素の性質」として閉じる~~ (codex M3 で訂正) → 本 plan では閉じない。スカラーは NS と同じ LSQ の次数の性質を継承する (S0-c のビット同一が根拠)。
+
+### 6.1 レビュー記録 (codex)
+
+| 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
+| --- | --- | --- | --- | --- |
+| diagnose (諮問 3、S2 解釈) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md) | C0、Major 4 (現行 gg 床への差し替え却下・床移動は要再検証・FCT は 0476 差の流用却下・case/16 の不足区間と比較対象)、Minor 1 (chi 文書不整合) | **全件採用**。S2 は条件付き・未合格、#5a–#5e を追加 |
+| diagnose (諮問 2) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-4d-nfail-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-4d-nfail-diagnose.md) | C0、Major 2 (#4d の A をダンプ非干渉と記録しない・N FAIL 継続を「ダンプが分布を変えた」と確定しない) | **全件採用**。gg/lsq のノイズ対プールは却下 (親の案 (a) も採らない)、#4f の 8 本試験を測る前に固定、S2 は E/P と #2e・#2f が条件 |
+| diagnose (諮問、レビュー 2 回とは別) | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md) | C0、Major 2 (ダンプ判定規則の原案却下・S0/S1 は再判定が要る)、Minor 2 (hook)、Minor 1 (S1 (2) のリミタは gather 後) | **全件採用** (Fable 上限中のため codex で諮問)。#4a commit 可 (Minor 修正後)、§6 に E/P/N 区分、#4d・#4e、#5 の着手条件 |
+| plan | `2026-09-26` | [2026-09-26-gradient-scalar-lsq-unification-plan.md](../../notes/reviews/2026-09-26-gradient-scalar-lsq-unification-plan.md) | **GO-with-changes**, C0/M7/m2 (差分形 LSQ の係数共有は支持) | **全件採用** (2026-09-26 `diagnostician`)。M1 → 壁 F1 = 0 と axisymMethod 1・σ 補間の訂正 (§3・§4.2)。M2 → roK/roOmega 初期ミラー、スカラー gather の述語を `periodicSeamMergeActive` に統一 (§4.3)、壁 ω の同値性は既存問題として S0-e の診断に格下げ。M3 → S0 を a–e に分割。M4 → `--from-floor` を捨て plateau 許容 + 床比 + STEADY、起点を main ワークツリーで確認し sha256 固定。M5 → 物理ゲートは独立の必須条件、格子対は診断で F 判断、STEADY 閾値を締める。M6 → case/16 の 2 双子 + FCT smoke を追加。M7 → 既定化の provenance を別 plan (#2g) に切り出し #6 の前提に。m8 → アクセサの契約 (§4.1)。m9 → S3 を #6 の保留条件に。分割はしない (2 段ゲート) |
+
+## 7. 影響範囲
+
+- `solver_density_cuda/cuda_forge/calcGradient_d.cu`、`ransTransport_d.cu`、`speciesTransport_d.cu`、`periodicNode_d.cu`、`input/solverConfig.{hpp,cpp}`。
+- 後続項目 (本 plan では入れない): `periodicGather1ToRoot_d` (`periodicNode_d.cu:57`、atomicAdd) を root スレッドが member を index 順に足す決定的 gather に置き換える。全 node 周期 run が ulp で動くので、別項目として accepted plan の R3 型で検証する。
+- **既存の node SST・化学種再構成・受動種 run の結果が変わる** (勾配作用素の変更)。
+
+## 8. 完了条件
+
+- [ ] `methods/` 更新
+- [ ] 実装・検証完了 (§6)
+- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録
+- [ ] `status` を `done`、§9 に変更ログ
+- [ ] `plans/accepted/` へ移動、[`plans/README.md`](../README.md) を同期
+
+## 9. 変更ログ
+
+- `2026-09-26` — #5a = B (chi 0 でも case/48 は起点床に戻らない → chi 単独説明を棄却)、#5b 0476 継続は上限内、#5c vs 0482 は上限内、#5d FCT 保存・有界性を測定、S3 PASS (1.010 / 1.017)。
+
+- `2026-09-26` — S2 を AWS で実施 (4 case README の `run_095x_sglsq_*`)。物理ゲートと lsq−gg の上限は FCT smoke 以外 PASS (case/48 \|Δ\| ≤ 0.016 %、case/40 Δη 0.000 %・壁温 0.62 K、0476 Y0 1.2e-5・Xi 3.1e-4、0482 onset 差 0・壁 p/p0 0.003 %、case/39 全量 STEADY で dF1_inf も STEADY)。起点床の収束ゲートは設定差のある 4 case で gg・lsq とも不成立、case/39 (設定差なし) は両方 PASS。codex (diagnose) S2 で「条件付き・未合格」、#5a–#5e を追加。
+
+- `2026-09-26` — #4f = A (8 本ずつ、E/P 厳密・N 全配列 2 倍以内)。#4a の hook を Minor 2 件修正して commit。S0/S1 を PASS で閉じた (#4)。#2f の `check_floor_ratio.py` を実装。S2 は #2e (起点の AWS 転送と sha256 照合) から。
+
+- `2026-09-26` — #4d: E/P = A (tgv 12 本・case48 6 本)、N は tgv lsq res_1 `res_ro` の 1 配列が 2 倍規則 FAIL。codex (diagnose) 諮問 2 (`notes/reviews/2026-09-26-gradient-scalar-lsq-4d-nfail-diagnose.md`、全件採用) で「ダンプ非干渉は未確認」と記録し、一度限りの 8 本試験 (#4f) を測る前に固定。
+
+- `2026-09-26` — 引き継ぎの未決 3 点を codex (diagnose) に諮問 (`notes/reviews/2026-09-26-gradient-scalar-lsq-4a-closeout-diagnose.md`、全件採用): (1) #4a hook は commit 可 (Minor 2 件修正後)、(2) ダンプ非干渉は事後規則 E/P/N 区分で再判定 (#4d)、(3) S1 (2) 訂正の適用は支持するがダンプ無し出力の集合検査を先に (#4d)、S0-c 軸対称は適用除外を明記 (#4e)、S2 は #4d = A と #2e・#2f の後。
+
+- `2026-09-26` — #4b = A、#4c PASS、#4a は実装済み・未 commit。hook の diff レビューと「ダンプ有効で res 不変」の判定規則、§6 S1 (2) 訂正の適用可否は上位モデルの上限到達で未決 (引き継ぎ `notes/sessions/2026-09-26-gradient-scalar-lsq-handoff.md`)。
+
+- `2026-09-26` — S0 (測れた範囲 PASS) と S1 (tgv の NS 配列で FAIL) の結果を受け、`diagnostician` 判断で出力 hook (#4a)、tgv の決定的 A/B (#4b)、Y の未測定項目 (#4c) を追加。
+
+- `2026-09-26` — Phase 1 実装 (#3・#2b)。diff を `diagnostician` がレビューし欠陥なし。S1 の判定規則を測る前に訂正 (「不一致数の桁」廃止、両側 3 本のノイズ対)。
+
+- `2026-09-26` — codex plan (GO-with-changes C0/M7/m2) を全件採用して §3–§6 を改訂 (`diagnostician`)。前回の「壁 F1 は 1 に張り付く」は誤りで訂正 (k=0 ピンで F1=0)。2 段ゲート (Phase 1 opt-in → Phase 2 既定化) に。
+
+- `2026-09-26` — §4・§6 を `diagnostician` 判断で確定 (opt-in から開始、S0–S2 通過後に本 plan 内で既定化、既存ゲート + 格子対の合否規則)。
+- `2026-09-26` — 起票 (ユーザ決定「スカラー勾配も LSQ に揃える」、前提 plan の accepted を受けて)。
+```
+
+## 参考: `case/16.nozzle_wys/README.md`
+
+```
+# case/16.nozzle_wys — Wyslouzil 超音速ノズル
+
+Wyslouzil et al., *J. Chem. Phys.* **113**, 7317 (2000)
+("Binary condensation in a supersonic nozzle") の超音速 Laval ノズル。
+凝縮実験用の矩形断面ノズルで、forge による 2D / 3D・非粘性 / 粘性 / 乱流の計算を行う。
+
+## ジオメトリ (`mesh/nozzle_H.geo`, 単位 cm → ScalingFactor 0.01 で m)
+
+論文との寸法照合 (おおむね一致):
+
+| 量 | `.geo` 由来 | 論文 |
+| --- | --- | --- |
+| 入口全高 | 2×1.236 cm ≈ **24.7 mm** | flow straightener 25.4 mm |
+| 断面幅 (z 押し出し) | 1.259 cm = **12.59 mm** | 12.7 mm |
+| スロート半高さ | ≈ 0.225 cm = **2.25 mm** | — |
+| 出口/スロート面積比 | **1.69** → 等エントロピー M≈2.0 | 設計 M≈1.95 (γ=1.4) |
+
+矩形断面のため 2D 平面近似が妥当 (ユーザ確認済)。
+
+> **⚠️ 重要 (2026-06): `mesh/nozzle_H.geo` は Fig.3 の実験ノズルと別形状**だった
+> (`13.nozzle_H` とバイト同一の別 Wyslouzil 論文ノズル。スロート半 2.25mm・A/A\*=1.69 で過発散)。
+> JCP 113,7317 (2000) Fig.3 の正しいノズルは **スロート全高 5mm・収束 38mm・発散 95mm 直線壁・
+> 壁間 1.8°・A/A\*≈1.58** で `mesh/make_nozzle_fig3.py` が生成する (`nozzle_fig3_2d/3d`)。
+> **凝縮検証は run_0047 以降 (修正形状) を使うこと**。run_0001〜0046 (nozzle_H) は旧形状で、
+> dry が実験より過膨張・凝縮も相殺で「合って見えていた」だけ。詳細は下記「## 修正形状 (Fig.3) run」。
+> **さらに 2026-08-19: `make_nozzle_fig3.py` の Fig.3 形状 (smoothstep 収縮 + throat から直線膨張) もユーザ提示の壁式と
+> 不一致** (収縮部 |Δy| 最大 1.56 mm、throat 直後の 3 次ブレンド無し、A/A\* 1.597 vs 1.580)。**今後は `mesh/make_nozzle_user.py`
+> (`nozzle_user_profile.py` の式) を正とし、run_0189 以降を使うこと** (下記「## ユーザ指定形状 (2026-08-19)」)。
+
+## 条件
+
+- 入口: `inlet_Pressure`, Pt=101325 Pa, Tt=293.15 K (亜音速圧力入口)。
+- 出口: `outlet_statPress`, Ps=2000 Pa (超音速流出のため実質外挿)、逆流用 Pt/Tt 設定。
+- 気体: γ=1.4, cp=1039 J/kgK (N2 相当)。時間積分は陰解法 (block-DPLUR, `timeIntegration:11`)。
+- 初期場: `initial: nozzle_wys` (一様 M≈0.3, Pt/Tt そろえ。`setInitial.hpp` に追加)。
+- 段階起動: 非粘性(slip) → 粘性層流(no-slip) → 乱流(SST) を引き継ぎ計算で段階的に。
+
+### 2D / 3D メッシュの壁の扱い
+
+- **2D** (`nozzle_2d*.geo`, 1層スラブ): Euler は全面 slip。粘性/乱流は輪郭壁=no-slip、
+  front/back=slip (対称面) とするため `nozzle_2d_visc.geo` で front/back を別 physID(4) に分離。
+- **3D** (`nozzle_3d.geo`, 12層): 矩形ダクトの4壁すべてが実壁。Euler は slip、粘性/乱流は全壁 no-slip。
+  ※ **乱流(SST)では mesh を no-slip 壁付き bcond で `convertGmshToForge` する**こと
+  (壁が slip だと `wall_dist=0` になり SST の ω が発散する)。
+
+## 計算 run 一覧
+
+すべて SLAU + 陰解法 (block-DPLUR)。中心線 exit Mach は等エントロピー値 2.00 を基準に比較。
+詳細・後処理図は各 run の `centerline_compare.png` / `residual_history.png`。
+
+| run | 物理 | 壁 | exit M (中心線) | exit Ps | 状態・備考 |
+| --- | --- | --- | --- | --- | --- |
+| `run_0001_slau_2d_imp` | 2D 非粘性 Euler | slip | **1.989** | 12.9 kPa | active. 等エントロピー 2.00 と一致 (0.6%) |
+| `run_0002_slau_3d_imp` | 3D 非粘性 Euler | slip | **1.990** | 12.9 kPa | active. 2D と完全一致 (検証) |
+| `run_0003_slau_2d_visc` | 2D 粘性 層流 | 輪郭no-slip / fb slip | **1.940** | 13.9 kPa | active. BL 変位で M 低下 |
+| `run_0005_slau_3d_visc` | 3D 粘性 層流 | 全壁 no-slip | **1.937** | 14.0 kPa | active. 2D 層流とほぼ同等 |
+| `run_0004_slau_2d_sst` | 2D 乱流 SST | 輪郭no-slip / fb slip | **1.883** | 15.3 kPa | active. 乱流 BL でさらに M 低下。**乱流熱伝導修正後 T≤Tt** |
+| `run_0006_slau_3d_sst` | 3D 乱流 SST | 全壁 no-slip | **1.534** | 25.4 kPa | active. 4壁 no-slip の閉塞で M 大幅低下。T≤Tt |
+| `run_0502_reach_sct_default` / `run_0503_reach_sct_turbkey` / `run_0504_reach_sct_physprop` | `turbulence.turbulentSchmidt` が**実際に消費先へ届くか**の到達確認 (plan [config-key-pruning](../../plans/accepted/config-key-pruning.md) §6.4', codex plan-3 M4)。`run_0484` (SST + `viscMethod 1` + トレーサ) を 500 step にし、Sc_t 既定 0.7 / `turbulence.turbulentSchmidt: 0.2` / `physProp.Sc_t: 0.2` の 3 本 | 0.2 にするとトレーサ `roXi` が既定から**相対 L2 1.41e-1** 動き、2 つの綴りどうしの差は **5.6e-6**。**別名として等価で、値は届いている** | ref (到達確認) |
+
+exit Mach の単調序列 (非粘性 1.99 > 層流 1.94 > 2D乱流 1.88 > 3D乱流 1.53) は
+境界層変位による有効面積減少として物理的に整合。中心線静温はいずれも全温 293 K 以下。
+
+### 速度計測 run (2026-09-12, branch `feature/perf-3d-speedup`, AWS `~/forge-perf/case/16.nozzle_wys`, plan [performance-3d-node-sst-speedup](../../plans/accepted/performance-3d-node-sst-speedup.md))
+
+| run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
+| --- | --- | --- | --- |
+| `run_0400_perf_baseline` (AWS) | 速度計測テンプレート: run_0234 の入力 (メッシュ h5・config) + `res_12000.h5` の index コピー IC。`tools/bench_steps.sh` が `run_0400_perf_baseline_bench/<label>_n<N>/` に専用 dir を切って回す (res は書かない) | base 82.85 → limtpl 81.9 → lit1 70.6 → lit2 67.4 → thermof 44.0 → thermofl (`thermoFloat: 1`) 38.4 → fuse3 **35.7 ms/step** (A10G, 100 step, 交互 2 回)。dcache 46.5 / lb6 62.9 は却下。nsys/ncu は `run_0400_perf_baseline/profiles/`, `_bench/prof_*` | active (計測テンプレート) |
+| `run_0401_perf_verify` (AWS) | 同 IC から 100 step 継続し `res_100.h5` を基準バイナリ (`~/forge-bin/forge_base`) と比較 (`cmp_<label>.txt`, `cmp_by_walldist.py`)。base×base ×3 (`ref_base{,2,3}_res_100.h5`) がノイズ床 | 全変更が壁距離ビン別 p99.9 でノイズ床の ≤1.5 倍 (plan §4.3) | active (検証基準) |
+| `run_0410_sweep5_thermofl` / `run_0411_sweep3_thermofl` / `run_0412_sweep2_thermofl` (AWS) | run_0234 と同 IC (run_0228/res_12000 index コピー)・同 config + `thermoFloat: 1` で 12000 step、`nStepInner` 5 / 3 / 2 の壁時計 vs 残差比較 (plan §5.1 #8) | 5: 38.9 ms/step, 3: **34.6** (残差全列が 5 と一致: 末尾 rms_ro 1.2e-11 / roe 6.1e-6 / roOmega 1.9e-2, 5 の到達残差に着く step も同じ), 2: 32.8 だが **発散** (rms_roe 上昇, roOmega 79 停滞)。verdict は run_0234 と同区分 (NOT CONVERGED plateau: roUy/roK 頭打ち, 他 falling)、pmax/machmax ALL STEADY、壁 p/p0 の run_0234 比最大差 1.1e-6 (5) / 9.5e-6 (3)。`CONVERGENCE_VERDICT.txt` / `residual_history.png` / `wall_pp0.csv` | active (推奨 `nStepInner: 4`, ユーザ決定) |
+| `run_0414_cfl8_sweep4` (AWS) | run_0413 と同 IC・config で `cfl_pseudo` 6→8 (nStepInner 4, thermoFloat 既定 1) の壁時計 vs 残差比較 (plan §5.1 #8) | 33.0 ms/step (A10G, クリーン)、cfl 6 の到達残差に着く step −4.5 %、末尾残差同等、ALL STEADY、壁 p/p0 の run_0234 比最大差 8.1e-5 | active (cfl 8 は任意、推奨は cfl 6 のまま) |
+| `run_0415_perf_rcm_baseline` (AWS) | 2.37M ext メッシュを `mesh.renumber: rcm` で再変換 (`/MESH/RENUMBER_PERM`)、run_0234/res_12000 を `permute_res_h5.py` で移植。RCM・dq パック・原始量パックの A10G A/B | norcm 33.87 / rcm **32.74** / rcm+dq 35.34 / rcm+prim 33.41 / dq 36.58 ms/step (2 回同値) → RCM −3.3 %、パックは逆効果 | active (A/B 用) |
+| `run_0452_perf_bench3d_coarse` / `run_0453_perf_rcm_coarse` / `run_0454_perf_norcm_coarse` (ローカル RTX 3060) | 3D coarse 257k (run_0300 の msh) の速度計測テンプレート: 旧変換 h5 (run_0300) / 現行変換器 + RCM / 現行変換器 (RCM なし)。IC = run_0300/res_8000 (perm 移植) | RCM vs 非 RCM: 場の差はノイズ級 (k 5.5e-4, vis_turb 8e-4)、速度 −1〜−4 % (別セッションと GPU 共有で不安定)。旧変換 h5 は wall_dist 定義が 6.75 % 違う (2026-09-08 の変換器変更) ので比較対象にしない | active (ローカル計測用) |
+| `run_0450_perf_regress_node2d_tp` / `run_0451_perf_regress_cell2d_tp` / `run_0456_perf_regress_node2d_cond` (ローカル RTX 3060) | 高速化の回帰 (plan §6): run_0213 (node 2D TP SST) / run_0196 (cell 2D TP SST) / run_0335 (node 2D SST 凝縮) の最終場から 300 step 継続し、基準バイナリ (0512823d) ×2〜5 本のノイズ床と最終バイナリを比較 (`tools/perf_regress.py`) | 0450: 基準 5 本ノイズ床に対し ρ 2.3 倍・Ux 2.2 倍 (絶対 1.2e-6 / 2.4e-6)、他 ≤1.3 倍; 0451: 全場ノイズ級; 0456 (凝縮): 状態量 ≤1.6e-5 (Uy), h0 2.1e-5 (基準同士 3.2e-5), vis_turb 1.08e-3 (基準同士 9.2e-4), g_0/rog_0 3〜4e-6 = ノイズ級; `perf_regress.py cmp --noise` で 32/32 PASS | active (回帰) 2026-09-13: main (空気凝縮) マージ後バイナリ `merged` ラベルで 0450 PASS 22/22、0456 PASS 32/32 (マージ前 final ともノイズ無しで PASS)。凝縮 float 化 (`condFloat: 1`, b021bca1) の `condf*` ラベル: 0456 PASS 32/32 (T 9e-7)、`cond_axis_h0.py` 軸 h0 新旧差 −0.04 J/kg PASS; 凍結 1 step `run_0458_frozen1step_node2d_cond` で `condFloat: 0` の凝縮診断が変更前とビット一致 (plan condensation-float-speedup §5.1) |
+| `run_0455_perf_big_norcm` / `run_0455_perf_big_rcm` (ローカル) | 2.37M ext メッシュのローカル変換 (RCM なし / あり) + run_0234/res_12000 perm 移植。RTX 3060 の A/B | base 175 → head 64〜66 ms/step (2.7 倍)、RCM 62〜65 (差なし)、パック類差なし | active (ローカル計測用) |
+| `run_0420_perf_cond_baseline` / `run_0421_perf_regress_cond3d` / `run_0422_cond3d_spinup` (AWS A10G, 2026-09-13) | 凝縮 float 化の A10G 計測: 0420 = run_0400 + 凝縮 H2O carrier (起動区間), 0422 = 3000 step スピンアップ, 0421 = 0422/res_3000 IC の 300 step 回帰 + 発達場ベンチ (`_bench/`, 100 step ×3 交互, 旧 forge_merged vs 最終 forge_condf4 = commit の sha256 は `_aws_perf_evidence/cond/BINARY_SHA256.txt`) | 起動 89.4 → 44.0、発達場 98.0 → 52.3、dry (run_0400) 33.8 不変 ms/step; 0421 の 300 step は基準同士ノイズ内 (CMP_VERDICT 参照)、300 step 時点の湿潤統計は基準 2 本と同値 (定常性の主張ではない)。証拠 `_aws_perf_evidence/cond/` | active (速度・回帰) |
+| `run_0459_perf_cond3d_local` / `run_0460_condf_phys_node2d_cond` (ローカル RTX 3060, 2026-09-13) | 凝縮 float 化 (plan condensation-float-speedup): 0459 = run_0455 (3D 2.37M dry) + 凝縮 H2O carrier (AWS run_0420 の対応物) の速度 A/B (`_bench/` に 100 step ×4)、0460 = run_0456 config の 12000 step 物理検証 (merged 3b77cc4b / condf 両バイナリ; check_convergence・check_quasisteady・`cond_axis_h0.py`) | 0459 (起動区間): 凝縮 ON 197 → 84 ms/step (dry 63 不変)。0460 (12000 step, 両バイナリとも NOT CONVERGED plateau = 未収束状態の回帰): 同 verdict 区分・ALL STEADY・h0 +0.07 J/kg・場は 32/32 PASS (ρg 1.3e-5 は絶対基準 1e-4 で合格, ノイズ床 5.7e-6 の 2 倍は超える) (plan §5.1 #5)。関連: `run_0457_perf_regress_cell2d_cond` (cell 2D H2O, 基準 4 本, PASS 30/30), `run_0458_frozen1step_node2d_cond` (condFloat 0 のビット一致), `run_0461_frozen_roe_protect` (強制反転失敗 20 セルで roe 保護), `run_0462_cond3d_local_spinup` (3000 step, 湿潤 22.9 %), `run_0463_perf_cond3d_local_dev` (発達場: 221 → 113 ms/step) | active (回帰・速度) |
+| `run_0416_final_sweep4` (AWS) | **最終バイナリ** (ソース 9333df5c/ソルバ ac9262e8, sha256 49f5db32…) で推奨レシピ (nStepInner 4, thermoFloat 既定 1) の 12000 step。同 IC (run_0228/res_12000) | **32.62 ms/step** (A10G クリーン)。NOT CONVERGED plateau (基準と同区分)、ALL STEADY、壁 p/p0 時系列の隣接差 2.2e-3→2.2e-4 (単調減衰, 末尾 <1e-3 = STEADY)、run_0234 比 3.1e-6。証拠 `_aws_perf_evidence/run_0416_final_sweep4/` | active (最終確認 run) |
+| `run_0413_sweep4_default` (AWS) | 同上で `nStepInner: 4`、`thermoFloat` 既定 1 のバイナリ (308d799f) | 末尾残差は 5 と同値 (rms_ro 1.23e-11 / roe 6.11e-6 / roOmega 1.90e-2)、ALL STEADY、壁 p/p0 の run_0234 比最大差 3.4e-6。壁時計は chem run と GPU 共有のため無効 | active (推奨レシピの確認) |
+
+## 非平衡凝縮 (H2O) run 一覧 — Wyslouzil Fig.3 検証
+
+Wyslouzil et al. JCP 113, 7317 (2000) **Fig.3 (pv0=1.0 kPa 水)** 条件で、N2 キャリア中の
+希薄水蒸気 (Y_H2O=0.01095) の非平衡凝縮を 4 モーメント法で計算し、凝縮あり/なしの静圧比を比較する。
+凝縮潜熱で中心線静圧が dry 等エントロピー線より上振れする現象 ([condensation plan](../../plans/active/condensation-nonequilibrium.md))。
+
+- 入口: `inlet_Pressure` Pt=59070 Pa, Tt=286.65 K, Y(N2,H2O)=(0.98905, 0.01095)。
+- **carrier=CPG**: 低温 (<200K) で NASA-9 TP が外挿不可・発散するため、N2 キャリアは CPG (γ=1.4) で解く
+  (この温度域の N2 cp はほぼ一定で CPG が正確かつ頑健)。H2O は移流種 (vapor budget) として追跡し、
+  凝縮潜熱・物性 (Murphy-Koop psat / Hertz-Knudsen 成長) は CPG エネルギー経路に組み込む。
+- 検証図: `fig3_compare.png` (非粘性), `fig3_compare_visc.png` (非粘性+粘性SST 重ね合わせ)。
+
+| run | 物理 | 凝縮 | 主要結果 | 状態 |
+| --- | --- | --- | --- | --- |
+| `run_0007_h2o_cond` | 2D 非粘性 (CPG+species) | off | dry baseline。収束 (rms_ro↓3.5dec) | active |
+| `run_0008_h2o_cond_on` | 2D 非粘性 | **on** | 潜熱で T 143→185K, p/p0 +19〜28%。cond/dry 比が exp と ~5% 一致 | active |
+| `run_0009_h2o_sst_dry` | 2D 粘性+SST 乱流 | off | dry SST baseline (Wyslouzil 条件)。T≤Tt | active |
+| `run_0010_h2o_sst_cond` | 2D 粘性+SST 乱流 | **on** | 凝縮効果 (ユーザ要望)。等温CNT + Hertz-Knudsen (baseline) | active |
+
+**核生成/成長モデル感度 (SST, 凝縮 on, `condKantrowitz`×`condGrowthModel`)** — `compare_models.png`:
+
+| run | Kantrowitz | 成長則 | onset 位置 | 備考 |
+| --- | --- | --- | --- | --- |
+| `run_0010_h2o_sst_cond` | off | Hertz-Knudsen | x≈1.5cm | baseline。等温CNT は onset 早すぎ・bump 過大 |
+| `run_0011_h2o_sst_kw_hk` | **on** | Hertz-Knudsen | x≈2.3cm | Kantrowitz が J 抑制 → onset 遅延 (実験寄り)、bump 控えめ |
+| `run_0012_h2o_sst_nokw_gyar` | off | **Gyarmathy** | x≈1.3cm | Gyarmathy は成長急 → bump が最も鋭く過大 |
+| `run_0013_h2o_sst_kw_gyar` | **on** | **Gyarmathy** | x≈2.0cm | **onset 位置・peak が実験に最も一致** (Kantrowitz 遅延 + Gyarmathy 急成長) |
+
+知見: **Kantrowitz 非等温補正は核生成 J を抑え onset を下流へ遅らせる**(等温CNT は onset が早すぎ実験の
+bump 位置を外す)。**Gyarmathy(熱伝導律速)は Hertz-Knudsen より成長が急**で p/p0 の立ち上がりが鋭い。
+両者を併せた `run_0013` (Kantrowitz+Gyarmathy) が x≈2〜3.5cm の onset/peak を実験と最もよく再現
+(x=3.1cm: forge 0.353 vs exp 0.354)。下流 x≳4cm は全モデルほぼ収束し、実験より ~0.02 低い (膨張側オフセット)。
+
+**Gyarmathy Knudsen 係数 C 感度 (`condGyarmathyC`, base=Kantrowitz+Gyarmathy)** — `compare_gyarC.png`:
+
+| run | C | onset | x=3.1cm p/p0 |
+| --- | --- | --- | --- |
+| `run_0014_h2o_sst_gyarC0p0` | 0 (連続体, Kn 補正なし) | 最も早い (x≈1.3) | 0.342 |
+| `run_0015_h2o_sst_gyarC1p59` | 1.59 | 早い | 0.348 |
+| `run_0013_h2o_sst_kw_gyar` | **3.18 (標準)** | x≈2.0 | **0.353** (exp 0.354) |
+| `run_0016_h2o_sst_gyarC6p36` | 6.36 | 遅い | 0.328 |
+| `run_0017_h2o_sst_gyarC12p72` | 12.72 | 最も遅い (x≈3.5) | 0.284 |
+
+C は成長率の Knudsen 抑制を制御し、**小さいほど成長が速く onset が早まり、大きいほど遅く弱くなる**
+(g プロファイルの立ち上がり位置が C で単調にシフト)。**標準値 3.18 が onset/peak を実験に最も良く再現**し、
+ずらすと悪化 (C<3.18 で早すぎ・C>3.18 で遅すぎ)。下流 x≳5cm は最終的に全量凝縮するため C 依存は小。
+→ **この系では Gyarmathy 標準係数 3.18 がほぼ最適**であることを確認。
+
+**液滴温度 T_d 考慮 (一温度 vs 二温度, `condTwoTemp`, Hertz-Knudsen)** — `compare_2temp.png`:
+
+| run | モデル | 液滴温度 |
+| --- | --- | --- |
+| `run_0010_h2o_sst_cond` | isoCNT+HK | 一温度 (T_d=T_g) |
+| `run_0018_h2o_sst_nokw_hk_2T` | isoCNT+HK | **二温度 (Hill T_d)** |
+| `run_0011_h2o_sst_kw_hk` | Kantrowitz+HK | 一温度 |
+| `run_0019_h2o_sst_kw_hk_2T` | Kantrowitz+HK | **二温度** |
+
+知見: **この希薄水/N2 系では液滴温度の影響は小さい**(p/p0 差 ≤0.008、概ね ~0.002 = <1%)。液滴超過温度
+T_d−T_g は**成長活発な onset 前線で局所的に最大 ~15K**(過冷却 ~25–30K の一部)に達するが、中央値は ~0.2K
+(下流は凝縮完了で蒸気枯渇→成長停止→T_d→T_g)。**N2 キャリアが潜熱を効率よく奪う**ため巨視的影響は
+Kantrowitz/Gyarmathy のモデル選択より一桁小さい。方向は予想どおり成長を僅かに遅らせ onset を微小に下流へ
+(g プロファイルで二温度=破線が僅かに遅延)。→ **純蒸気凝縮では T_d が必須だが、キャリア希薄凝縮では一温度近似で十分**、という結論。実装詳細は [methods/condensation.md §4](../../methods/condensation.md#理論)。
+
+**複数 H2O 分圧スイープ (モデル汎化, Kantrowitz+Gyarmathy 固定)** — `compare_multicond.py` / `compare_multicond.png`:
+
+入口 H2O 質量分率のみを変えて pv0 を 1.00 / 0.50 / 0.26 kPa とし、Wyslouzil Fig.3 multi-P (`wyslouzil_fig3_multiP.csv`, P0=59.07 kPa) と中心線 p/p0 を比較。**単一条件で較正したモデルを他分圧に汎化できるかの検証**。
+
+| run | pv0 | 入口 Y_H2O | onset (exp) | x=3.1cm p/p0 (forge / exp) |
+| --- | --- | --- | --- | --- |
+| `run_0013_h2o_sst_kw_gyar` | 1.00 kPa | 0.01095 | x≈2cm | 0.353 / 0.354 |
+| `run_0020_h2o_sst_kg_0p50kPa` | 0.50 kPa | 0.005461 | x≈3.5cm | 0.279 / 0.297 |
+| `run_0021_h2o_sst_kg_0p26kPa` | 0.26 kPa | 0.002835 | x≈5cm | 0.274 / 0.293 |
+
+知見: **分圧依存 (凝縮 onset の下流シフトと圧力上昇幅の序列) を 3 条件すべてで再現**。pv0 が下がるほど onset
+が下流へ移り bump が弱まり dry に漸近する、という実験傾向を捉える。forge は絶対 p/p0 が一様に exp より
+~5–8% 低い (既知の dry baseline オフセット = forge dry が非粘性等エントロピー、実験は粘性排除厚で上振れ) が、
+**凝縮物理の相対挙動・分圧応答は単一条件較正なしで汎化**する。
+(注: `run_0021` は step6000 で外部中断したが、p/p0・g とも step2000→6000 で 4 桁不変＝定常化済みのため発達場として採用。0.26 kPa は g max≈6e-4 と凝縮ごく僅か。)
+
+**非平衡凝縮の検証結果**:
+
+- **非粘性 (run_0008)**: 凝縮ありの中心線 p/p0 は dry 比で 1.19〜1.28 倍 (スロート下流 2.5〜8 cm)、
+  実験の cond/isentrope 比 1.18〜1.23 と ~5% 以内で一致。**凝縮効果 (比) は定量一致**するが、絶対 p/p0 は
+  非粘性 dry が実験等エントロピーよりやや低い (粘性排除厚さ未考慮)。
+- **粘性+SST 乱流 (run_0010 vs run_0009, ユーザ要望)**: 粘性排除厚さで dry baseline が押し上がり、
+  **絶対 p/p0 も実験と一致**する (下表)。凝縮 onset (x≈1.7cm の潜熱スパイク) も再現。x≳6cm の下振れは
+  壁解像不足ではなく (y+ は良好、下記)、2D 近似/ノズル面積比など膨張側のオフセット (dry/cond 共通)。
+
+  | x [cm] | SST dry | SST cond | exp isentrope | exp cond |
+  | --- | --- | --- | --- | --- |
+  | 2.5 | 0.300 | 0.381 | 0.305 | 0.375 |
+  | 3.0 | 0.279 | 0.349 | 0.290 | 0.355 |
+  | 5.0 | 0.223 | 0.267 | 0.240 | 0.290 |
+
+  → **「粘性+乱流で凝縮あり/なしを計算すると Fig.3 の差が出る」というユーザ仮説を定量的に確認**。
+  比較図は `fig3_compare_visc.png` (非粘性破線 + 粘性SST実線 + 実験点)。
+
+## SU2 クロスチェック (dry, 3 物理モデル) — `compare_su2_forge.py` / `compare_su2_forge.png`
+
+同一ノズルの中心線 p/p0 を forge (SLAU, セル中心) と SU2 v8.5 (ROE, 節点) で比較。
+
+| 物理 | forge run | SU2 run | forge↔SU2 一致 |
+| --- | --- | --- | --- |
+| Euler (非粘性) | `run_0001_slau_2d_imp` | `run_0020_su2_euler` | 全域 ≤0.6% |
+| Laminar (粘性) | `run_0003_slau_2d_visc` | `run_0023_su2_lam_conv` | 全域 ≤0.6% |
+| Turbulent (SST) | `run_0004_slau_2d_sst` | `run_0024_su2_sst_conv` | 全域 ≤0.8% |
+
+→ **forge は 3 モデルとも SU2 と全域 <1% 一致**。粘性/SST は下流で等エントロピー線の上 (境界層排除厚) に乗り、
+forge が SU2 と同等の BL 変位を出していることを確認。
+
+⚠️ **教訓**: SU2 の初回 run (`run_0021_su2_lam` / `run_0022_su2_sst`) は前セッション中断で 975/752 iter で
+SIGTERM 終了 (`su2.log` に `Exit Success` は出るが `rms[RhoE]≈-0.2` の未収束) しており、その未収束場と比べると
+下流で偽の 20-25% 差が出ていた。途中解から継続収束 (`run_0023`/`run_0024`, `rms[RhoE]≈-1.4`, 出口積分量
+ドリフト <0.2%) させると上記のとおり一致。**SU2 は `Exit Success` でなく iter 数・`rms[RhoE]` で収束判定すること**
+([procedures/su2-cross-check.md](../../procedures/su2-cross-check.md) の収束確認節)。
+
+## TP gas (thermalMethod 2) + 凝縮の検証 — 真因 = sub-200K NASA-9 外挿
+
+ユーザ要望で TP 気相 + 凝縮を wys で計算しようとしたが dry TP すら発散。系統的切り分け
+(`run_0025`〜`run_0042`、大半は破棄可の診断用) で**入口/壁/出口 BC・凝縮・種数・粘性・乱流・
+時間積分・convMethod・float 精度・初期値をすべて棄却**。**真因は wys が出口 T≈159K (元の凝縮ゾーン ~27K) で
+NASA-9 有効下限 200K を割り、低温外挿が TP を不安定化**すること。全温 Tt スイープで確定:
+
+| run | 全温 Tt | 出口 T | 結果 |
+| --- | --- | --- | --- |
+| `run_0041_tp_n2_hot500` | 500 K | 278 K (>200K) | **400 step 完走・残差安定** |
+| `run_0042_tp_n2_Tt360` | 360 K | ~194 K | step24 で発散 |
+| (Tt=286.65, 通常) | 286.65 K | 159 K | step12 で発散 |
+
+→ TP 実装は壊れていない (T>200K では wys でも動く)。**wys の極低温凝縮で CPG を強制してきた方針は正しい**。
+詳細・全棄却リストは [`.github/plans/condensation-nonequilibrium.md`](../../plans/active/condensation-nonequilibrium.md) の 2026-06-16 ログ。
+
+## 壁面 y+ (SST メッシュ `nozzle_2d_sst.h5`)
+
+`wall_yplus.py` で run_0009/run_0010 の壁第一層 y+ を収束場から実測 (y+=√(u_t·y1/ν), ν=分子粘性):
+
+- 第一セル距離 y1 = **1.6〜9.0 µm** (スロート半高 2.25mm の ~0.1%)。
+- **y+ ≤ 1 が壁面の 98.2%**、mean 0.61、max **1.88**、全面 **y+ ≤ 2**。
+- 1 を超えるのは入口リーディングエッジ (x≈−6.3cm) のごく一部のみ。スロート下流 (超音速・凝縮領域) は
+  y+ ≈ 0.5 で完全に解像 → **低Re SST の壁まで積分が成立**。`wall_yplus.png` に分布。
+- **乱流粘性も正しく作動**: μ_turb/μ_lam は壁第一セルで ≈0 (粘性サブレイヤ、k→0/ω→∞ ゆえ)、対数層で
+  median 4.5・max 29、コアで ~3。場全体で 79% のセルが μ_turb>μ_lam。第一セルが粘性サブレイヤ内ゆえ
+  τ_w を有効粘性 (μ_lam+μ_turb) で評価しても y+ は不変 (= 壁解像が本物である証拠)。
+
+(旧記述「近壁メッシュは Euler デモ用で y+~1 ではない」は、非粘性デモ用 `nozzle_2d.h5` に関するもので、
+SST 専用メッシュ `nozzle_2d_sst.h5` には当てはまらない。上記実測のとおり壁解像済み。)
+
+## 既知の課題
+
+- 本ケース検証中に **RANS エネルギー方程式の乱流熱伝導欠落バグ**を発見・修正
+  (`.github/plans/diffusion-turbulent-thermal-conductivity.md`)。修正前は近壁静温が
+  449 K (全温 293 K 超過)、修正後 293 K に収束。
+
+## 後処理スクリプト
+
+- `postproc_centerline.py <run> <label>` — 中心線 Mach / 静圧を面積比等エントロピーと比較。
+- `plot_residuals.py <run> <label>` — 全 rms 残差の片対数プロット。
+- `wall_yplus.py <run> [--wall-physid 3]` — SST 壁第一層 y+ を収束場から算出・可視化。
+- `compare_fig3.py` / `compare_fig3_visc.py` — Wyslouzil Fig.3 (凝縮あり/なし) と中心線 p/p0 を比較。
+- `build_restart.py <src_res> <src_mesh> <dst_mesh> [--rok K --roomega W]` — 引き継ぎ初期場生成。
+
+## 修正形状 (Fig.3) run 一覧 — run_0047 以降
+
+正しい Fig.3 ノズル (`mesh/make_nozzle_fig3.py` → `nozzle_fig3_2d.h5`, 2D pseudo, front/back=slip) で再構築。
+SLAU 陰解法 (timeIntegration:11, blockDPLUR, **nStepInner:5, cfl_pseudo:4**)。dry は実験 isentrope、
+凝縮は実験 1kPa と比較。比較図: `dry_vs_exp.png` (laminar/SST vs isentrope)、`cond_models_compare.png` (4モデル vs 1kPa)。
+
+| run | 物理 | 凝縮モデル | 主要結果 | 状態 |
+| --- | --- | --- | --- | --- |
+| `run_0047_fig3_2d_lam_dry` | 2D laminar | off | dry。中心線 p/p0 が実験 isentrope と −2〜5% | active |
+| `run_0048_fig3_2d_sst_dry` | 2D SST | off | dry。**実験 isentrope と ±1.5% (laminar より良)** → 凝縮は SST 上で実施 | active |
+| `run_0049_fig3_2d_sst_hk` | 2D SST | Hertz–Knudsen | 全凝縮 (g~90%)。onset 過早・overshoot (0.44 vs exp 0.36 @2cm) | active |
+| `run_0050_fig3_2d_sst_kwhk` | 2D SST | **Kantrowitz+HK** | **onset 遅延で実験最良** (Fluent UDF 知見と一致) | active |
+| `run_0051_fig3_2d_sst_gyar` | 2D SST | Gyarmathy | 全凝縮。onset 過早・overshoot | active |
+| `run_0052_fig3_2d_sst_kwgyar` | 2D SST | Kantrowitz+Gyarmathy | onset 遅延で実験良好 | active |
+
+知見: **凝縮成長停止バグ修正後** (核生成を $r_{\rm nuc}=1.01r_*$ で生成し液滴を $r_*$ から離脱させる;
+[methods/condensation.md](../../methods/condensation.md#実装) §検証 case/16) に全モデルが全凝縮を再現。
+下流 (x≳4cm) は全モデル実験 ±数%。**onset 域は Kantrowitz 有り (Kw+HK/Kw+Gyar) が overshoot を抑え実験に最良**。
+残課題: x≈3cm のピークが実験よりやや高い (onset レート微調整)、3D 壁解像 (`make_nozzle_3d_wallres.py`) は未実施。
+
+## TP split (MIXDRY 擬似種 + H₂O 独立種) と node 検証 — run_0170 以降 (2026-08-17)
+
+計画 [tooling-nozzle-tp-split-h2o-condensation.md](../../plans/accepted/tooling-nozzle-tp-split-h2o-condensation.md)。
+イソブタン燃焼ガス (case/42) の H₂O 凝縮に向け、「H₂O 以外を NASA-9 擬似種 `MIXDRY` に畳み、H₂O だけ独立種」
+とする 2 種 TP を、既存 Fig.3 (2D SST, Kw+HK, `run_0050`) で検証した。組成は既存どおり **H₂O 1.095 %**。
+投入: `run_tp_split_wys.py` (cell, 同メッシュ) / `run_tp_split_wys_node.py` (node, 平面メッシュ)、比較: `compare_tpsplit_wys.py` → `compare_tpsplit_wys.png`。
+
+| run | 離散化 / メッシュ | 熱力学 | 物理 | 主要結果 | 状態 |
+| --- | --- | --- | --- | --- | --- |
+| `run_0170_fig3_2d_sst_kwhk_tpsplit` | cell / 既存 `nozzle_fig3_2d` (押し出し擬似2D) | **TP `[MIXDRY(=N2),H2O]`** thermoHrefTemp 298.15 (IC は run_0048 dry SST 場を `cpg_field_to_tp` で TP 化) | SST 粘性, Kw+HK | **run_0050 (CPG) を再現**: g_max 0.0106 vs 0.0107, onset 2.45 vs 2.35 cm, 中心線 p/p0 差 ≤3.1 % (TP の H₂O cp 差)。NaN 0、rms_ro 1.2e-9 (2.2 桁, still falling) | active (**TP split 検証の正本**) |
+| `run_0184_wysinv_cell_cpg_cond` / `run_0185_wysinv_node_cpg_cond` / `run_0186_wysinv_node_tpsplit_cond` | cell / **node** / node、平面 2D 一様メッシュ `mesh/nozzle_fig3_2d_planar_inv` (301×120, 壁クラスタなし) | CPG / CPG / TP split | **非粘性 slip**, Kw+HK, 2 次 (段階起動 soft→mid→本段 12000) | **node = cell**: g 0.0109 = 0.0109, onset 1.75 cm 同一, p/p0 差 2 %; **node TP split** g 0.0108, onset 1.85 cm, p/p0 差 1.7 %。node rms_ro 3.4e-9 (3.3 桁)。非粘性なので onset は SST 基準 (2.35 cm) より上流 | active (**node の検証**) |
+| `run_0187_wysinv_node_tpsplit_cond_regress_noevap` / `run_0188_wysinv_node_tpsplit_cond_evap` | run_0186 と同一入力 (node, 非粘性, TP split, Kw+HK) | TP split | 蒸発実装後バイナリの回帰 (0187 = `condEvaporation: 0` [当時の既定]; 現在の既定は 1) と蒸発 ON (0188 = 1) | **回帰同一**: 0187 vs 0186 max|ΔT| 3.8e-3 K・|ΔP/P| 2.4e-5・|Δg| 1.2e-7 (run 間ノイズ)。**蒸発 ON も同一** (0188 vs 0187 |ΔT| 7.8e-3 K): Wyslouzil は液相域が全域 S≥2.03 で蒸発分岐が発火しない。残差 3.1 桁 (0186 と同じプラトー) | active ([蒸発 plan](../../plans/accepted/condensation-evaporation.md) 回帰) |
+| `run_0172_fig3_2d_sst_kwhk_tpsplit_restart_ctrl` / `run_0173_fig3_2d_sst_kwhk_tpsplit_evap` | run_0170 (cell, SST no-slip 断熱壁, TP split, Kw+HK) の res_15000 から restart 9000 step | TP split | 蒸発 OFF (対照) / ON | 壁近傍 (wall_dist<80 µm) に S 0.4–0.99 の液相 (g 中央値 1.7e-5, max 1.6e-3) が両者に残る = HK 有限速度 (dr/dt −1e-4 m/s) と上流からの移流供給の釣り合い (Tt=287 K の壁は熱くなく蒸発が遅い、λ 律速は非発火)。evap vs ctrl: max|ΔT| 0.22 K, |Δg| 2.6e-4。**restart 後に両 run とも壁 T が 290 K>Tt へドリフト** ([[forge-sst-restart-nonfidelity]] 既知)。高温壁デモは case/42 NS で実施 | 削除済み(2026-08-31) (蒸発 plan §6-3 の低温壁 対照) |
+| `run_0171_fig3_2d_sst_kwhk_tpsplit_node` / `run_0179`, `run_0181`〜`0183_wysnode_*` | node / 平面 `nozzle_fig3_2d_planar` (Bump 0.004, y₁≈0.5–5 µm, AR 728) | CPG or TP | SST or laminar no-slip (0182 のみ slip) | **node × 平面壁クラスタ no-slip は不成立**: 壁ノード T が Tt を超え (出口コーナーから 326→400+ K)、衝撃列が遡上して 6000–9000 step で unstart (2 次・1 次・SST・laminar・nodeWallDirichlet 0/1・出口 Pt=Ps いずれも)。slip (0182) だけ健全 (T ≤ Tt)。cross-mesh IC の壁ジグザグは 1D 等エントロピー IC で除いたが本質でない → **node 粘性壁 (平面, 極薄壁セル) の申し送り** | 削除済み(2026-08-31) (**申し送りの根拠**) |
+
+診断 run (0172–0178, 0180, 0187) は削除済 (上記と同じ結論の切り分け)。
+
+## ユーザ指定形状 (2026-08-19) — 形状の確認と Euler/NS × 凝縮 off/on (TP split) — run_0189 以降
+
+ユーザ提示の上壁式 (半高 y [mm], throat x=0; `mesh/nozzle_user_profile.py`):
+12.7 (−60≤x≤−38) / 0.16−0.33x (−38<x<−21.27) / 2.5+0.015512821x²+0.000243078x³ (−21.27<x<0) /
+2.5+0.00194105x²−7.99459e−5x³ (0<x<8.093) / 2.457620744+0.015709255x (8.093<x<95)。
+**現行 `make_nozzle_fig3.py` 形状 (smoothstep 収縮 + 直線膨張) とは一致していなかった** (`check_geometry_user.py` → `geometry_user_vs_current.png`):
+
+| 量 | ユーザ式 | 現行 mesh (`nozzle_fig3_2d*`) |
+| --- | --- | --- |
+| 入口直管 (x −60〜−38 mm, 半高 12.7) | あり | **無し** (x=−38 から開始) |
+| 収縮部 (−38〜0) | 直線 (勾配 −0.33) + 3 次 (曲率半径 32 mm@throat) | smoothstep (曲率半径 24 mm@throat)。**最大 |Δy| 1.56 mm @x=−27** |
+| 膨張部 (0〜95) | 3 次ブレンド (0〜8.09 mm, R=258 mm) → 直線 (切片 2.4576, 勾配 0.015709=0.9°) | throat から直線 (切片 2.5, 同勾配)。**|Δy| ≤0.042 mm** (出口で最大) |
+| 出口半高 / A/A\* | **3.950 mm / 1.580** | 3.992 mm / 1.597 |
+| 1D 等エントロピー p/p0 差 (γ=1.4) | — | 現行が x=5 mm で −8 %、x=20 mm −4 %、出口 −2 % (ユーザ形状の方が膨張が緩い) |
+
+→ 収縮部と throat 直後のブレンドが違い、膨張側の p/p0 に 2〜8 % 効く。以下はユーザ式でメッシュを作り直して再計算した。
+
+**メッシュ** `mesh/make_nozzle_user.py` (5 区間を別カーブ + Transfinite 複合辺、単位 mm): `nozzle_user_2d.geo` (cell 用 1 層押し出し, front/back slip)、
+`nozzle_user_2d_planar.geo` (node 粘性用, 壁クラスタ)、`nozzle_user_2d_planar_inv.geo` (node 非粘性用, 一様)。
+streamwise 347 節点 (Δx≈0.42 mm; 直管 0.63 mm) × 壁法線 120 (Bump 0.004, y₁≈0.5–5 µm)、41174 cells。品質 **PASS** (AR max 724, skew 0.47)。
+**投入** `run_user_profile.py RUN --disc cell|node --phys euler|sst [--cond]`: TP split `[MIXDRY(=N2), H2O]` (Y_H2O 0.01095, `thermoHrefTemp` 298.15)、
+Pt 59070 Pa / Tt 286.65 K、出口 Ps=Pt=2000 Pa、Euler = slip + `visc 0` `thermCond 0`、NS = SST 低 Re (`wallTreatmentSST 0`) no-slip 断熱壁 + Sutherland + const-Pr 0.72 (Prt 0.9)、
+凝縮 = Kw+HK (`condModel 1, condKantrowitz 1, condGrowthModel 0`)、IC = 1D 等エントロピー (TP semi-perfect)、
+起動 soft (1 次 cfl0.5, 3000) → mid (1 次 cfl1, 3000) → 本段 **全域 2 次 (convMethod 1/limiter 2) cfl_pseudo 2**, 12000 step (NS は `continue_run.py` で +24000 継続)。
+比較 `compare_user_profile.py` → `compare_user_profile.png` / `compare_user_profile_centerline.csv` (中心線 x, M, P, T, g を 0.5 mm 刻みで保存)。
+
+| run | 離散化 | 物理 | 凝縮 | 主要結果 (中心線, x≈94 mm 出口) | 収束/定常 | 状態 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `run_0189_user_cell_euler_dry` | cell | Euler | off | M 1.912, p/p0 0.1465, T 165.8 K (1D 等エントロピー M 1.918 / p/p0 0.1448) | rms_ro 5.4e-10 (1.6 桁, still falling), `check_quasisteady` machmax/pmax **STEADY** | active |
+| `run_0190_user_cell_euler_cond` | cell | Euler | **on** | onset (g>1e-3) **x=20.2 mm**, g_exit 0.0109 (全量凝縮), M 1.704, p/p0 0.1771, T 199.3 K | rms_ro 1.6e-9 plateau, 全 snapshot で onset/p/p0 4 桁不変, STEADY | active |
+| `run_0191_user_cell_sst_dry` → **`run_0196_user_cell_sst_dry_cont`** (+24000) | cell | NS (SST) | off | M 1.792, p/p0 0.1762, T 174.8 K。**exp isentrope と x≥11 mm で +0.9〜+1.9 %** (throat 直後 x=0.9 mm は +4.6 %) | rms_ro 4e-8 plateau (2 次リミッタ), 継続 24000 step で p/p0 変化 ≤1e-4, **STEADY** | active (0191 は中継) |
+| `run_0192_user_cell_sst_cond` → **`run_0197_user_cell_sst_cond_cont`** (+24000) | cell | NS (SST) | **on** | onset **x=23.2 mm**, g_exit 0.0108, M 1.600, p/p0 0.2090, T 208.0 K。exp cond 1 kPa と −5〜−3 % (x 21–32 mm, onset 帯) / +4〜+5 % (x 42–72 mm) | rms_ro 4e-8 plateau, 継続で不変, **STEADY** | active (0192 は中継) |
+| `run_0193_user_node_euler_dry` / `run_0194_user_node_euler_cond` | **node** (平面一様) | Euler | off / on | **cell と一致**: p/p0 0.1460/0.1767 (cell 0.1465/0.1771), onset 20.2 mm 同一, g 0.0109 同一 | rms_ro 4.3e-9 (2.7 桁), STEADY | active (node 対照) |
+| `run_0195_user_node_sst_dry` | node (平面壁クラスタ) | NS (SST) | off | **不成立 (2026-09-07 に解決: run_0212/0213 参照)** (既知の申し送りと同じ指紋: 壁ノード T 504 K > Tt, P 126 kPa > Pt が x=−40 mm から、本段 6000 step で出口側 unstart)。途中で停止 | — | 削除済み(2026-08-31) |
+
+| `run_0198_user_node_sst_dry` / `run_0199_..._outfix` | node (平面壁クラスタ) | NS (SST) | off | **unstart** (出口列 P 45–57 kPa > 指定 2 kPa、全域 M≈0.3)。`nodeInletCornerWall: 1` で run_0195 の入口角 P>Pt は消えたが出口側が残る。0199 は TP 出口 γ 修正の効果確認 (bit 同一 = 無関係) | — | 破棄予定 (診断) |
+| `run_0200`–`run_0211` (診断) | node | NS | off | 切り分け: TP/CPG・dilatation・壁関数・nodeWallDirichlet・出口 k/ω・壁第一層 0.6/2.4/8 µm は全て同じ失敗、層流 (0203) は健全。100 step 再現 (0201) で出口列の壁向き Uy・+5 % P バンプ→SST の k 膨張→剥離前線が上流へ、と特定。**`outflow` (全量外挿) で解消** (0210 CPG / 0211 TP) | — | 破棄予定 (診断) |
+| `run_0214_ab_ps_matched` | node | NS (SST, CPG) | off | `outlet_statPress` のまま Ps を実出口圧 10.4 kPa に合わせても解消 (case/45 と同じ構成)。真因 = **Ps 指定 (2 kPa) ≪ 実出口圧 (10.4 kPa) × node の亜音速壁列** | mid 段 rms_ro 3.9e-7 (outflow と同一) | 破棄予定 (診断) |
+| `run_0212_user_node_sst_dry_outflow` → **`run_0213_user_node_sst_dry_outflow_cont`** (+24000) | **node** (平面壁クラスタ, `nodeInletCornerWall: 1`, 出口 `outflow`, katoLaunder) | NS (SST) | off | **cell run_0196 と中心線 0.1 % 以内で一致** (出口 M 1.793 / p/p0 0.1759 / T 174.7 K)。`compare_node_vs_cell_sst.png` | `check_convergence`: rms_ro 4.3e-9 プラトー (0212 から計 2.7 桁↓), roe/roK/roOmega still falling; `check_quasisteady` machmax/pmax **STEADY** | active (node NS 生産) |
+
+| `run_0219_user_node3d_sst_dry_half` (AWS g5) | **node 3D** 半幅+対称面 (`mesh/nozzle_user_3d.msh`: 12.7 mm 幅の半分 6.35 mm, z=0 側壁 no-slip / z=6.35 対称面 slip, 半幅 50 節点 z1 2 µm, **2.08 M 節点**, 品質 SOFT-PASS AR 1196@0.02 %) | NS (SST) | off | soft 段は収束したが mid 段 step 2 で k/ω 爆発 → 段間引き継ぎの `interp_field` が (x,y) 最近傍で z 列を混同していた (index コピーに修正) | — | 破棄予定 (h5 は 0220 が流用) |
+| **`run_0220_user_node3d_sst_dry_half`** (AWS g5, res_*.h5 は AWS 側) | node 3D 半幅+対称面 (同上), 出口 `outflow`, IC = run_0213 の 2D 場を (x,y) 移植, soft/mid 2000+2000 → 本段 **cfl 6 + relax 0.7** 12000 | NS (SST) | off | **3D node SST 完走** (12000 step 14.6 min @A10G = 73 ms/step, GPU 3.2 GB)。対称面中心線: throat M 0.898, 出口 M **1.604** / p/p0 0.235 (2D は 0.951 / 1.793 / 0.176 → 側壁 BL の閉塞。旧形状 4 壁 3D run_0006 の 1.53 と同傾向)。`compare_2d_vs_3d_node_sst.png` / `centerline_sym.csv`。**注意**: 側壁∩輪郭壁の角線近傍 (x>15 mm, wd≤0.5 mm) で T が Tt+20 K まで上がる (壁温は node の既知アーティファクト [node-wall-entropy-checkerboard] の 3D 版、コアは無影響) | `check_convergence`: rms_ro 5.7e-11 (falling), roUx 7e-9, roK 4e-8, roOmega 0.028 plateau; `check_quasisteady` machmax/pmax **ALL STEADY**; NaN 0 | active (3D node SST 初完走。ただし run_0222 で出口角 unstart と判明 → 定常解ではない) |
+
+| `run_0222_user_node3d_sst_dry_half_cont` (AWS) | run_0220 の継続 +24000 (index コピー restart) | NS (SST) | off | **出口角線から unstart が進行し step 25941 (通算) で NaN**: 壁 p/p0 @x=95 が 0.20 (2k) → 0.25 (12k) → 0.30 (18k) → 0.44 (24k)、角線 T−Tt +2 → +19 → +41 K。run_0220 の「+30 %」は過渡値で定常解ではない。2D では `outflow` で解消した出口列の問題が、3D では側壁∩輪郭壁∩出口の角線で残る (SST 固有、層流は無事) | `wall_series.py` (時系列表) | 破棄予定 (診断記録) |
+| **`run_0221_user_node3d_lam_dry_half`** (AWS) | 3D 半幅 **層流** (turbulence none, 同メッシュ h5 流用, IC = 2D 層流 run_0203, soft/mid 2000+2000 → 本段 cfl 5 + relax 0.7 12000) | NS (層流) | off | **収束・健全**: T ≤ Tt (超過ノード 0)、角線 T−Tt −7 K。**壁 p/p0 は 2D SST / 実験 dry と ±1〜2 %** (x=16.4: 0.367 vs exp 0.364, x=45.6: 0.255 vs 0.254)。側壁 BL の閉塞は実験と整合する大きさ | `check_convergence`: 全列 2.0〜2.4 桁↓ still converging (rms_ro 4e-12); `check_quasisteady` pmax STEADY; 壁 p/p0 は 6000 step 以降 4 桁不変 | active (**3D node NS 実証・実験一致**) |
+
+| **`run_0224_user_node3d_lam_cond_half`** (AWS) | 3D 半幅 層流 **凝縮 ON** (Kw+HK, 同メッシュ h5 流用, IC = run_0221 の index コピー, 段階起動なし, cfl 2 + relax 0.7, 12000) | NS (層流) | **on** | **完走・健全** (T ≤ Tt, NaN 0)。onset (中心 g>1e-3) **x=23.4 mm** (2D NS SST cond run_0197 は 23.2)、g_exit 0.0109 (全量凝縮)。壁 p/p0 の cond/dry 比 1.16/1.23/1.22/1.21/1.20 (x=32/42/52/62/72) が **実験の cond/isentrope 比 1.20/1.20/1.19/1.19/1.18 と一致**。絶対値は実験 cond と onset 帯 −2〜−5 %・下流 +1〜+3 %。`wall_pp0_3d_lam_cond_vs_exp.png` | `check_convergence`: 全列 1.6〜3.7 桁↓ still converging (rms_ro 1.5e-11); pmax STEADY; 壁 p/p0 は 6000→12000 で +1.4 % (x=42) とわずかに動く | active (**3D 凝縮の初結果**) |
+| `run_0223_user_node3d_sst_dry_half_ext` (AWS) | 3D SST + **出口バッファ 20 mm** (`mesh/nozzle_user_3d_ext.msh` 2.37 M 節点, x>95 の輪郭壁・側壁 slip physID 6) | NS (SST) | off | soft 段 step 826 で roOmega NaN: 接合 x=95 で wall_dist が 0→数 mm に跳び、BL を運ぶ slip 壁近傍 (x=100, y=±3.93, z 0.1) で ω 1e21。→ `mesh.wallDistExtraPhysIDs: [6]` (slip 壁も壁距離に含める) を実装して再試行 (run_0225) | — | 破棄予定 (診断) |
+| `run_0300_corner_node3d_sst_coarse` (ローカル RTX 3060) | **角線ノード仮説の判別**: 同じ生成器で x 半分・NY 60・z 25 (`mesh/nozzle_user_3d_coarse.msh` 257k 節点, 側壁 z₁ 2 µm 同一・輪郭 y₁ 1.8 µm, 角線構造は 2.08M と同一, QC SOFT-PASS AR 1214@0.04 %), node SST, run_0220 と同手順 (IC=run_0213 interp, soft/mid 2000+2000 → cfl 6 + relax 0.7 8000, outflow) | NS (SST) | off | **T>Tt のノード 0** (全 res で), T0 最大 +2.3 K (2D と同等), 出口角壁 T−Tt −5.7 K・P 11.68 kPa で頭打ち。角線ノード自体は 2.08M でも隣接と連続 (受動) → 角線の双対構造は加熱の原因でない (plan turbulence-sst-node-corner-heating §2.1) | `check_convergence`: rms_ro 3.0 桁↓ falling, roe 2.3 桁↓, roOmega 2.8 桁↓ (roUz 1.2e-9 plateau); `check_quasisteady` pmax/machmax STEADY | active (判別実験) |
+| `run_0301_corner_cell3d_sst_coarse` (ローカル) | 同上メッシュの **cell** 離散化 (IC=run_0196 interp) | NS (SST) | off | **T>Tt のセル 0**, T0 最大 +2.4 K, node run_0300 と角部分布一致 | `check_convergence`: 全列 plateau (cell 既知の床, rms_ro 7.6e-9); pmax/machmax STEADY | active (判別実験) |
+| `run_0302_corner_node3d_sst_finexy_z25` (ローカル) | (x,y) は 2.08M と同一 (y₁ 0.6 µm)・z 25 節点 (`mesh/nozzle_user_3d_finexy_z25.msh` 1.04M, **QC FAIL: AR>1000 が 0.66 %, max 2601** の診断 run), node SST, 同手順 | NS (SST) | off | **角部加熱が再現**: T>Tt 151k ノード (14.5 %), 出口角壁 T−Tt +2.1→+5.2→+6.7→+7.1 K (2000→8000 step, 上昇中), 角壁 P 12.2→13.5 kPa 上昇 (unstart ドリフト), x=60 角壁 +3.3 K。z を粗くしても再現するので引き金は輪郭壁 y₁ 0.6 µm × 側壁 2 µm の異方角セル (AR 700) 側 (角線構造・z 解像度は無関係) | `check_convergence`: rms_ro 1.3 桁↓, roe 0.6 桁↓, roOmega plateau 1.3e-1; `check_quasisteady` pmax/machmax STEADY だが角壁 T/P は単調上昇 | active (判別実験, H1 検証用の小型メッシュ) |
+| `run_0303_sstdef_ref` / `run_0304_sstdef_keys0` / `run_0305_sstdef_new` (ローカル) | **SST 整合オプション既定 ON の回帰 (node 2D)**: run_0213/res_24000 から +6000 (index コピー)。ref=旧バイナリ (b12d74a4)・旧既定 / keys0=新バイナリで `sstOmegaProdFromPk:0, sstSigmaBlend:0` 明記 (F1 ラグ除去・等方項リミッタ前の効果のみ) / new=新既定 | NS (SST) | off | keys0−ref ≤4e-6 (ビット同等)。new−ref: 壁 p/p0 @16.4/45.6/85 = 0.3657/0.2574/0.1874 → 0.3658/0.2575/0.1876 (+0.03〜+0.1 %), k 最大 2.8 %・μt 6 % (出口側)。plan [turbulence-sst-consistency-options](../../plans/active/turbulence-sst-consistency-options.md) §3.6 | `check_convergence`: 参照 plateau 継続 (rms_ro 4.3e-9), NaN 0 | active (A/B 記録) |
+| `run_0306_sstdef_cell_ref` / `run_0307_sstdef_cell_keys0` / `run_0308_sstdef_cell_new` (ローカル) | 同上の **cell** 版 (run_0196/res_24000 から +6000) | NS (SST) | off | keys0−ref ≤8e-5。new−ref: 壁 p/p0 0.3643/0.2578/0.1870 → 0.3644/0.2579/0.1872 (+0.03〜+0.1 %), k 3.5 %・μt 6 % | plateau 継続 (rms_ro 4.2e-8), NaN 0 | active (A/B 記録) |
+| `run_0309_ek_node_off` / `run_0310_ek_node_on` / `run_0311_ek_cell_on` (ローカル) | **全エネルギーに ρk を含める (`sstEnergyIncludesK`, plan [turbulence-sst-energy-includes-k](../../plans/active/turbulence-sst-energy-includes-k.md))**: run_0213 (node) / run_0196 (cell) の res_24000 から +6000。off=キー 0 (前バイナリ run_0305 とのビット同等確認) / on=キー 1 | NS (SST) | off | off−run_0305 ≤7e-6 (同等)。**on−off: 壁 p/p0 @16.4/45.6/85 = node 0.3658/0.2575/0.1876 → 0.3659/0.2577/0.1877, cell 0.3644/0.2579/0.1872 → 0.3645/0.2581/0.1874 (+0.03〜+0.08 %)**, max(T0−Tt) 1.96→1.56 K (node) / 2.00→1.58 K (cell), k/μt ≤ 数 %。全温は T0 + k/c_p で比較 | `check_convergence`: node rms_ro 3.0 桁↓, roK 3.6 桁↓, roe 1.9 桁↓ still converging; cell plateau (既知)。NaN 0。切替直後 rms_roK 7e-3 のスパイク→6000 step で床 | active (A/B 記録) |
+| `run_0312_ek_node3d_finexy_z25` (ローカル) | 3D 1.04M (`mesh/nozzle_user_3d_finexy_z25.msh`, run_0302 と同メッシュ) を **相対拡散ガード + `sstEnergyIncludesK: 1`** の最終バイナリで (IC = run_0310/res_6000, soft/mid 2000+2000 → cfl 6 + relax 0.7 8000, outflow) | NS (SST) | off | **T>Tt のノード 0** (run_0302 は 151k), 出口角壁 T−Tt −3.9 K (run_0302 +7.1 K), max(T0+k/c_p−Tt) +2.07 K (2D と同じ Pr 効果の範囲)。角部加熱は相対ガードで解消・E_t 形でも Tt 超えなし | `check_convergence`: 全列 falling (rms_ro 1.9 桁↓ 1.2e-11, roUx 2.5 桁↓), roOmega plateau 1.8e-1; NaN 0 | active (3D 確認) |
+| `run_0313_outlevel_default` / `run_0314_outlevel2` / `run_0315_outlevel0` / `run_0316_outlevel1_ek` (ローカル, 各 200 step) | **出力絞り込み `output.level` の動作確認** (plan [output-level-and-h0](../../plans/active/output-level-and-h0.md)): 既定 (level 1) / level 2 (従来全量) / level 0 + `extraFields: [volume, ducros]` / level 1 + `sstEnergyIncludesK: 1` | NS (SST) | off | データセット数 23 / 71 / 11 / 23、res サイズ 5.2 / 13.2 / 3.2 / 5.2 MB (2D 41k 節点)。`h0` と属性 `h0_includes_k` = 0 / 0 / — / 1、XMF にも h0。`check_quasisteady` は level 1 で動作 | — | 破棄予定 (動作確認) |
+| `run_0317_inletprof_tt_h2o` (ローカル, 1000 step) | **入口分布 (inletProfile CSV) の検証・node**: run_0316 と同一 IC/config + `ints: {inletProfile: 1}`, `inlet_profile_1.csv` = Tt(y) 286.65+30·exp(−(y/4mm)²), Y_H2O(y) 0.005+0.012·exp(−(y/6mm)²) (`tools/gen_inlet_profile.py gen`), 手順 [procedures/inlet-profile.md](../../procedures/inlet-profile.md) | NS (SST, TP MIXDRY+H2O) | off | `verify`: 入口ノード T0 (h0 由来) が目標と max 0.3 K 差 (幅 30 K), **Y_H2O は node 化学種入口ピン修正後に 1e-7 で一致** (修正前は一様 0.01095 のまま = ghost 専用 Dirichlet が node で無効だったバグ)。`field_T0_Y1.png` で山がノズル全長に伝わる | `check_convergence`: 全列 falling (rms_ro 2.6 桁↓), NaN 0 | active (機能検証 ref; 入力 config/CSV を git 追跡) |
+| `run_0318_inletprof_h2o_cell` (ローカル, 600 step) | 同上の **cell** 版 (run_0311 の IC, Y_H2O 分布のみ) | NS (SST, TP) | off | 第 1 セル Y_H2O が目標に追従 (境界層内は初期組成が残る過渡)。修正前後のバイナリ差 = 同一バイナリ run-to-run ノイズ (P 3e-4) → cell 経路不変 | plateau (cell 既知の床), NaN 0 | active (機能検証 ref) |
+| `run_0319_speciespin_node_regression` (ローカル, 200 step) | run_0316 と同一 config (inletProfile 無し) を node 化学種ピン修正後のバイナリで回し run_0316/res_200 と比較 | NS (SST, TP) | off | 全場の相対差 ≤ 7e-6 (ro/P/T/Ux 6e-7, Y1 6e-5 は 1e-6 幅の IC ゆらぎ), 入口ノード k/ω 完全一致。一様入口では修正の影響なし | — | 破棄予定 (回帰確認) |
+| `run_0320_inletprof_coupled1` / `run_0321_inletprof_coupled2` (ローカル, 各 300 step) | run_0317 と同一 (IC/CSV 継承) + `speciesImplicitCoupling: 1` / `2`。codex レビュー High 指摘 (連成陰解法の Jacobi sweep で入口ピンが隣接補正から漏れる) の修正 (`species_dplur_sweep_d` ピン行 δ=0) の検証 | NS (SST, TP) | off | いずれも入口ノード Y_H2O が目標と 2e-9 (1.7e-7 相対) で一致、T0 max 0.32 K 差。NaN 0 | — | 破棄予定 (修正検証) |
+| `run_0330_monitor_steady` (ローカル, 200 step) | run_0317 の複製。**console モニタ行** ([plans/accepted/architecture-runtime-monitor-line.md](../../plans/accepted/architecture-runtime-monitor-line.md)) の定常陰解法検証: 定常では `dt`/`maxCFL` を出さず ms/step・ETA・残差要約のみ。`_baseline/` は旧バイナリ (HEAD 1a9d75c2) で同一入力を回した `residual_history.csv` 比較用 | NS (SST, TP) | off | 完走 200 step, NaN 0。行形式 §8.5 通り (~4 ms/step)、CSV 旧×2/新×2 列別比較 (`csv_compare.txt`) 合格 (旧-新 1.6e-4 vs 床 1.5e-4)、壁時計 `wall_compare.txt` 中央値 1.19→1.21 s (ばらつき内)。`worst rms_roOmega (+2.4)` は run_0317 由来の restart 直後 ω 過渡 | — | 破棄予定 (ログ形式検証) |
+
+| `run_0225_user_node3d_sst_dry_half_ext_ps` (AWS) | 3D SST + 出口バッファ + `wallDistExtraPhysIDs: [6]` + **出口静圧固定 Ps 10.3 kPa** | NS (SST) | off | soft 段 step 11 で NaN: 接合 x=95 の壁ノードで `wall_y_eff` が wall_dist=0 の slip 隣接を拾い ω ピン 1e23 → `ransBoundary_d.cu` で wall_dist>0 の非壁隣接だけを使うよう修正 | — | 破棄予定 (診断) |
+| **`run_0226_user_node3d_sst_dry_half_ext_ps`** → **`run_0227_..._cont`** (+24000, AWS) | 3D SST + バッファ 20 mm (slip, 壁距離に算入) + 静圧固定 10.3 kPa + wall_y_eff 修正, cfl 6 + relax 0.7 | NS (SST) | off | **完走・NaN 0。角線 T−Tt が通算 12000→36000 で +9.4→+0.7 (x=46) / +10.9→+1.8 (x=85) と単調減少、x=16 は −1.1 (Tt 未満)。壁 p/p0 は 0.3199→0.3282 (x=46) で頭打ち**。上流 (x≤85) の壁圧は run_0220 (バッファ無し) と 4 桁同一 = 出口処理は上流に無影響、出口角の暴走だけを止めた。実験 dry より +29 % (角線の SST k 未減衰、plan turbulence-sst-node-corner-heating) | `wall_series.txt`; rms_ro 5e-11 台 | active (0228 で更新) |
+
+| **`run_0228_user_node3d_sst_dry_half_ext_ps_relguard`** (AWS) | run_0227 の最終場から index コピー、**k/ω 拡散の相対ガード** (`scalarTransport_d.cu`, 旧 1e-12 [m³] 絶対値 → 1e-6·|d||S|)、他は run_0226 と同一 (バッファ + 静圧固定 10.3 kPa + cfl 6) | NS (SST) | off | **角部加熱が消滅**: T > Tt+1 のノード 0 個 (旧 42896)、角線 T−Tt −9〜−17 K。角対角線の ω が壁漸近解 6ν/(β₁d²) に一致 (0.6 µm: 1.8e10 vs 1.7e10; 2.5 µm: 1.4e9 vs 1.0e9)、k は粘性底層で 1e-5 (旧 1.2e3)。壁 p/p0 @x=46 0.328 → **0.273** (2D SST 0.257, 層流 0.255, exp 0.254)、@x=85 0.251 → 0.206 (2D 0.187)。`wall_pp0_guard_fix.png` | `check_convergence`: roUx/roUy 3 桁↓, roOmega 5 桁↓, rms_ro 7e-11 falling; pmax STEADY; 壁 p/p0 は末尾 2000 step で −0.0006 (まだ僅かに下降) | active (**3D node SST の正本**) |
+
+| **`run_0229_user_node3d_sst_cond_half_ext_ps`** (AWS) | 3D SST **凝縮 ON** (run_0228 の場から index コピー, バッファ + 静圧固定, cfl 2, 12000) | NS (SST) | **on** | 完走・NaN 0。onset **24.7 mm** (2D SST cond 23.0 / 3D 層流 cond 23.4)、g_exit 0.0109。壁 p/p0 は実験 cond より +9〜+11 % (dry の +7 % 上乗せ)、cond/dry 比 1.13〜1.24 は実験 1.18〜1.20 と整合。T max 297 K (潜熱, 2D と同じく物理)。`wall_pp0_cond_all.png` | rms_ro 2.6e-11 falling, roe/roK 2.7 桁↓; pmax STEADY | active (3D SST 凝縮) |
+| `run_0230_user_node_sst_cond_outflow` (ローカル) | **2D node SST 凝縮** (run_0213 の場から index コピー, outflow, cfl 2, 12000) | NS (SST) | **on** | onset 23.0 mm、壁 p/p0 は実験 cond と onset 帯 −3〜−5 % / 下流 +4〜+5 % (cell run_0197 と同傾向) | — | active (2D node 凝縮対照) |
+| `run_0231_ab2d_{base_kpin0,base,omegaPk,sigmaBlend,isoStress,energyK,all}` | SST 整合オプション A/B (run_0213 の場から 3000 step, plan turbulence-sst-consistency-options §3.1) | NS (SST) | off | 壁 p/p0 差は base 比 ≤0.25 % (isoStress +0.2, energyK −0.1, omegaPk +0.1, sigmaBlend 0)。壁 k ピンは 2D で無差 | — | 破棄予定 (A/B 記録) |
+| `run_0232_ab3d_{base,all}` (AWS) | 同 A/B の 3D 版 (run_0228 の場から 6000 step) | NS (SST) | off | (plan §3.3) | — | 破棄予定 (A/B 記録) |
+| `run_0233_ab2d_nodewd` | node 壁距離をノード座標基準に修正した変換 h5 で run_0213 の場から 3000 step (旧 = 双対重心間距離) | NS (SST) | off | 第一層 wall_dist 最大 +30 % (1.34→1.74 µm)、壁 p/p0 −0.1〜−0.3 %、x=46 の壁 ω ピン 2.0e11→1.2e11、Tmax ≤ Tt。plan turbulence-sst-consistency-options §3.5 | — | 破棄予定 (A/B 記録) |
+
+| **Kantrowitz γ_v + 二相 frozen 音速 (2026-09-10, plan [condensation-kantrowitz-gamma-twophase-sonic](../../plans/active/condensation-kantrowitz-gamma-twophase-sonic.md))** — 2D node SST 凝縮 (run_0230 のプロトコル: IC=run_0213/res_24000 index コピー, outflow, cfl 2, TP MIXDRY+H2O, `condKantrowitz 1`, HK 成長, 出力 level 2)。48000 step で全 5 run `check_convergence` **PASS** (凝縮列込み) ・`compare_condfix.py --series` **STEADY**。24000 step の中間結果は各 `_24000/` に退避。比較図 `compare_condfix.png` / 表 `compare_condfix.txt`、cell は `compare_condfix_cell.{png,txt}` | | | | | |
+| `run_0331_condfix_head_ref` (ローカル, 48000) | **参照** (HEAD 5db69d93 バイナリ `build/forge.head`, 変更前の既定) | NS (SST) | **on** | onset (中心線 g=1e-3) **22.96 mm**、壁 p/p0 の実験偏差 x≥10 mm 平均 +2.28 % (@21/42/52 mm: −4.8/+4.8/+5.5 %)、g_exit 0.01085、c_exit 294.45 m/s。run_0230 を再現 | PASS (rms_ro 3.6 桁, roe 3.2 桁, rog 4.9 桁); series STEADY | active (修正前参照) |
+| `run_0338_condfix_head_repeat` (24000) | 参照の同一バイナリ反復 → **node の反復ノイズ床**: 全場 max\|Δ\|/max\|ref\| ≤1.6e-5 (Y1), ro/P/T 1–2e-6 (`diff_res.py`) | NS (SST) | on | 回帰許容値の根拠 | still converging (24000) | 破棄予定 (ノイズ床記録) |
+| `run_0339_condfix_dry_head` / `run_0340_condfix_dry_new` (1000 step) | **凝縮 OFF 回帰** (run_0213 継続, HEAD / 新バイナリ) | NS (SST) | off | 全場差 ≤7e-6 (core), vis_turb 7.8e-4 = 同一バイナリ反復ノイズ (2.4e-5 / 1.4e-3) 以内 → 凝縮 OFF はコード経路不変 | plateau (継続 1000 step) | 破棄予定 (回帰記録) |
+| `run_0332_condfix_legacy_keys` (48000) | 新バイナリ + 旧キー `condKantrowitzGammaMode: 1, condSonicModel: 0` | NS (SST) | on | **参照と 1.3e-5 以内 (反復ノイズ 1.6e-5 と同水準)**、onset/壁偏差/出口量すべて参照と同一 → 旧挙動を再現 | PASS; STEADY | active (旧キー回帰) |
+| `run_0333_condfix_kwgamma` (48000) | 新バイナリ, γ_v のみ (`condSonicModel: 0`) | NS (SST) | on | **onset 22.96 → 22.51 mm (−0.45 mm, 上流)**、壁偏差 @21 −4.8→−4.5 % (onset 帯が実験に近づく) / @42 +4.8→+5.1 / @52 +5.5→+5.4 / 平均 +2.28→+2.46 %。θ 196→167 (J ×1.17) の効果 | PASS; STEADY | active (γ_v 単独効果) |
+| `run_0334_condfix_sonic` (48000) | 新バイナリ, 二相音速のみ (`condKantrowitzGammaMode: 1`, `condSonicModel` 自動=1) | NS (SST) | on | 凝縮帯の `sonic` −1.3 % (平均, 最大 −1.63 % @ g=0.0109)・`dt_local` +1.0 % で経路は有効だが **収束場の差は小さい (P/T ≤2e-6, Uy 1.1e-5, g 1.4e-5 = 同一バイナリ反復ノイズと同水準)**。原因は未特定 (SLAU は面法線 Mach なので横向き面は亜音速のままで c 依存は残る; 「超音速で全風上」は誤りと codex が指摘)。M_exit は二相 c で 1.605→1.631 (+1.7 %, 出力の Mach 定義が変わる) | PASS; STEADY | active (音速単独効果) |
+| **`run_0335_condfix_new`** (48000) | **新既定 (両方)** | NS (SST) | on | γ_v の効果 (onset 22.51 mm, 壁偏差 +2.46/−4.5/+5.1/+5.4 %) + 二相 c (c_exit 289.59 m/s, M_exit 1.633)。実カーネル照合 `verify_sonic.py`: res `sonic`/`gamma` が host 式と 2.9e-7 / 4.8e-7。h0 中心線最大偏差 0.2720 kJ/kg (参照 0.2669, Δ0.005 = 許容 0.01 kJ/kg 以内) | PASS (rms_ro 3.6 桁, roe 3.2 桁); STEADY | **active (新既定の 2D node 生産参照)** |
+| `run_0471_node_ns_flag0` (**起動試行中**) | **#10: node + no-slip の新規 NS 設定** ([plan](../../plans/accepted/convection-slau-wall-normal-chi.md) §5.1 #10 / §6 V3)。既存 node run (`run_0193`/`0194`) は Euler + `slip` 壁で `slauWallNormalChi` の対象外なので新規に組む。メッシュ = `mesh/nozzle_user_2d_planar.geo` (node 粘性用・壁クラスタ) を **no-slip 壁付き bcond で変換**、41,640 節点、`check_mesh_quality` **VERDICT: PASS** (AR max 724 / skew 0.203)、壁 694 節点で `wall_dist`=0。駆動は `_v10_run.py` | 層流 NS (node) | off | **起動 2 回失敗、3 回目は `diagnostician` に諮ってから**。① `uniform_p101325_u10` + 入口 Pt 59070 (初期圧が入口全圧の 1.7 倍 = IC/BC 不整合) で層流段から `rms_ro` RISING、2 次段で `rms_roUx` 1.5e+31 発散。② IC/BC を揃え (`nozzle_wys` + 入口 Pt 101325/Tt 293.15) 1 段 1 変更に直して**全段 rc=0 完走**したが、出口 `outflow` に背圧が無く**ノズルが流れない** (P 100.7–101.3 kPa の淀み)。`outflow` は超音速化した後にしか使えない | — | 起動試行 (未完) |
+| `run_0470_limiter_regress_wys` (`lim1` / `lim0`, 48000, run_0335 プロトコル: IC=run_0213 res_24000 index コピー) | θ 律速の更新クランプ化 (plan condensation-source-limiter-steady §6-2) の回帰。新バイナリで `condLimiterMode 1` (既定) / 0 (旧経路)、参照は run_0335 (ハードリンク `run_0335/`) | NS (SST) | on | **lim1: 報告量すべて run_0335 と同一 (onset 22.51 mm, 壁偏差 +2.46/−4.5/+5.1/+5.4 %, g_exit 0.01085, M_exit 1.6325)、場の差 ro 5.3e-6 / P 2.1e-6 / T 7.9e-6 / Ux 5.1e-6 / g 9.5e-5** (`compare_condfix.py`)。この case は ΔT/step ≤ 0.86 K で旧 θ≡1 だったので無影響が期待どおり。**lim1 vs lim0 (同一バイナリ, モード差のみ) は ro 1.9e-6 / g 9.9e-6** で、lim0 vs run_0335 (バイナリ世代差: condFloat 等) の g 9.7e-5 より小さい = 更新クランプ化と蒸発の瞬間速度形はこの case を変えない。`condLim` 全域 1.000、NaN 0。**2 巡目 (`lim1b`/`lim0b`, outStepInterval 4000, 蒸発の一様 ṙ 形)**: 報告量同一、`compare_condfix --series` STEADY、rms_rog 5.1 桁・rms_roQ0 7.0 桁低下、lim1b vs lim0b ro 1.3e-6 / g 1.2e-5、`condClampCorr` 凝縮域 0 (`condClampCorrQ`=1 の 89 セルは g=0・Q0=0 の乾きセルの数値塵 floor)。**最終バイナリ (`lim1c`/`lim0c`)**: 報告量同一、`wys_cond_series.py` + `check_quasisteady --series-csv` ALL STEADY (両方)、rms_rog 5.1 / 4.8 桁、lim1c−lim0c g 6.4e-6、`condClampCorr`/`Q` 凝縮域 0。単独計測の step 時間 mode 1 3.28 vs mode 0 3.10 ms (+6 %)。**4 巡目 (`lim1d`/`lim0d`, 最終確定)**: 報告量同一、`compare_condfix.py --series-csv` (報告と同じ抽出) + `check_quasisteady --series-csv` ALL STEADY、rms_rog 5.1/4.8 桁、lim1d−lim0d g 8.8e-6、`condClampCorr`/`Q` 凝縮域 0 | PASS 相当 | active (回帰) |
+| `run_0336_condfix_cell_head` / `run_0342_condfix_cell_head_repeat` (cell, **48000, dry 場 run_0196/res_24000 から**; run_0197 継続の 24000 版は `_24000_from0197/`) | **cell 参照** (run_0197 の設定 + 出口 `outflow`, HEAD) と同一バイナリ反復。**cell は生産対象外 (2026-09-10 ユーザ決定) なので PASS を完了条件にしない回帰参考** | NS (SST) | on | onset 22.94 mm, 壁偏差 +2.24/−4.8/+4.8/+5.4 % (node と一致)。反復ノイズ床 `noise_cell_48000.json` (cell atomicAdd): ro 2.3e-5, P 3.5e-5, Uy 2.6e-4, rog_0 5.0e-5 | **NOT CONVERGED (plateau)**: dry 場から回しても rms_ro 4e-8 で頭打ち (cell の既知の床 [cell-atomicadd-nondeterminism]); series STEADY = 未収束の準定常比較 | active (cell 参照) / 破棄予定 (反復) |
+| `run_0337_condfix_cell_legacy` (cell, 48000, dry 場から) | 新バイナリ + 旧キー | NS (SST) | on | 報告量 (onset/壁偏差/出口量) は参照と同一。場の差 ro 7.3e-5, P 1.7e-4, Uy 1.3e-3 = 単一反復対から推定した床の 2〜5 倍 (`diff_res --tolfile noise_cell_48000.json --factor 2` は FAIL)。プラトー上のリミットサイクルで軌道が分かれるため床推定が 1 対では定まらない; 共有カーネルの同一性は node 回帰 (29 変数 PASS) で担保 | plateau; STEADY | 破棄予定 (cell 旧キー回帰, 非ゲート) |
+| `run_0341_condfix_cell_new` (cell, 48000, dry 場から) | 新既定 (cell) | NS (SST) | on | onset 22.49 mm (−0.45 mm), 壁偏差 +2.42/−4.5/+5.0/+5.3 %, c_exit 289.56。node と同じ応答。実カーネル照合 PASS | plateau (未収束の準定常比較); STEADY | active (cell 新既定, 非ゲート) |
+
+| **carrier 中の非等温核生成補正 (Feder 形) と σ 感度 (2026-09-12, branch feature/condensation-air, plan [condensation-kantrowitz-carrier](../../plans/accepted/condensation-kantrowitz-carrier.md))** — run_0335 のプロトコル (IC=run_0213 dry 場 index コピー, outflow, cfl 2, TP MIXDRY+H2O, HK 成長, `condSonicModel` 自動=1, 48000 step, 出力 level 2)。`condKantrowitz` 0=等温 / 1=Kantrowitz 純蒸気形 / 2=Feder carrier 形 / 3=Feder carrier + 表面仕事。診断 `condTheta_0`・`condLim_0` を `verify_theta.py` で host 式と照合 | | | | | |
+| `run_0350_kw1_ref` | mode 1 (参照; main 側 run_0335 と同設定・新バイナリ) | NS (SST) | on | onset 22.51 mm, 壁偏差 +2.46/−4.5/+5.1/+5.4 % — **main の run_0335 と反復ノイズ床 ×2 以内 (diff_res 29 変数 PASS)**。θ 104–215、`verify_theta` PASS (1e-4)、律速係数 1.000 | PASS; STEADY | active (mode 1 参照) |
+| `run_0351_kw0_iso` | mode 0 (等温 CNT, 下限) | NS (SST) | on | onset **12.28 mm**、壁偏差 @21 **+21.6 %** (実験より大幅に早い), 平均 +4.16 % | PASS; STEADY | active (等温対照) |
+| `run_0352_kw2_feder` | mode 2 (Feder carrier, q=潜熱項のみ) | NS (SST) | on | onset **14.75 mm**、壁偏差 @21 **+15.0 %** / @42 +3.7 / @52 +3.0。θ 0.03–4.4 (`verify_theta` PASS) | PASS; STEADY | active |
+| `run_0353_kw3_feder_surf` | mode 3 (Feder carrier + 表面仕事; 物理モデル) | NS (SST) | on | onset **14.28 mm**、壁偏差 @21 **+17.5 %** / @42 +3.5 / @52 +2.9。θ 0.03–3.0。**結合 run の onset 序列は局所 θ の序列どおり (0 < 3 < 2 < 1)**。carrier 形は等温寄りで、計算上の onset が mode 1 より 8.2 mm 上流 (モデル間差) → 21 mm の壁圧偏差が +17.5 % に増える。原因 (J か dr/dt=HK α=1 か) は未同定 (「CNT の J 過大」説は Wölk–Strey の逆読みで撤回, codex 2026-09-12) | PASS; STEADY | active |
+| `run_0354_kw3_sig097` / `run_0355_kw3_sig103` | mode 3 基準の σ 一定倍率局所感度 (`condSigmaScale` 0.97 / 1.03) | NS (SST) | on | onset **12.09 / 16.81 mm** (mode 3 の 14.28 から −2.2 / +2.5 mm; 符号は理論どおり)、壁偏差 @21 +21.2 / +6.2 %。一定倍率の局所感度であり σ の外挿精度や信頼区間の議論には使えない。σ 0.97 は 48000 step では未収束だったため **96000 step (cfl_pseudo 1.0) に延長**: 残差は plateau のまま (ro 2.1 / roUx 2.0 / roe 1.1 桁)、報告量は 60000–96000 の 4 保存場で頭打ち (onset 12.0888 mm 半範囲 2e-5, 壁偏差@21 半範囲 3e-4 %pt) だが、中心線 h0 偏差は 1.1833/1.2063/1.1961/1.2135 kJ/kg (**平均 1.200 ± 0.015 半範囲**, 上昇傾向) で `--series` OSCILLATING。疎な 4 点では限界サイクルと断定できない → **合否基準 (PASS+STEADY) 未達の準定常参考値** として報告 (codex 2026-09-13 result ②)。表 `compare_kantrowitz_carrier.txt` は res_96000 で再生成 | 0.97: NOT CONVERGED (plateau), series OSCILLATING (h0err) → 参考値 / 1.03: PASS, STEADY | active (σ 感度; 0.97 は参考値, h0 変動は followups plan #7) |
+| `run_0356_dry_regress` (1000 step) | 凝縮 OFF 回帰 (run_0213 継続; main 側 run_0339 = 旧バイナリと比較) | NS (SST) | off | core 変数 ≤7e-6, vis_turb 7.3e-4 = 同一バイナリ反復ノイズ (2.4e-5 / 1.4e-3) 以内 → 凝縮 OFF はコード経路不変 | plateau (継続 1000 step) | 破棄予定 (回帰記録) |
+| `run_0357_cell_kw1` / `run_0358_cell_kw3` (cell, 48000, dry 場から; 非ゲート) | cell 対照 mode 1 / mode 3 (run_0341 プロトコル) | NS (SST) | on | mode 1: main の run_0341 と報告量同一 (onset 22.49, 壁偏差 +2.42/−4.5/+5.0/+5.3) だが場差は `diff_res --tolfile noise_cell_48000.json --factor 2` で **9 変数 FAIL** (ρ 床の 2.4 倍, ρU_y 3.0 倍, h0 2.6 倍; cell の床は 1 対の反復からしか決まらずコード回帰の判定には使えない)。**mode 3: onset 14.28 mm = node と同一**、壁偏差 +17.5/+3.4/+2.8 %。`verify_theta` PASS | plateau (cell の既知の床) = 未収束の準定常比較; series STEADY | active (cell 対照, 非ゲート) |
+| **収束済み小型 TP 5 種 node ケース (2026-09-16, plan [thermophysics-cea-mole-fraction-species](../../plans/accepted/thermophysics-cea-mole-fraction-species.md) §6「収束済み小型 TP ケース (node のみ)」)** — run_0193 プロトコル (node, `nozzle_user_2d.h5` = run_0193 の平面 inviscid メッシュ, QC PASS AR 10.6/skew 0.20, Euler `slip`, `viscMethod 0`/visc 0/thermCond 0, SLAU `convMethod 1, limiter 2`, `timeIntegration 11 + blockDPLUR 1`, cfl_pseudo 2, `nStepInner 4`, `thermoHrefTemp 298.15`, outlet `outflow`, 12000 step, `output.level 1`)。IC = run_0193/res_12000 (収束済み Euler 場) の ro/U/T を index コピー + 各 run の `species_db.yaml` で roe を再構成 + 一様 roY_s=ρY_inlet (`IC_FROM.txt`)。**入口を va3 組成 (case/44 run_0193/0197 の `species_db.yaml`/`species_meta.yaml` を複製) + Tt 286.65→353 K に変えて過渡を作る** (出口 T 206 K > NASA-9 下限 200 K)。初回試行 (run_0213 SST 場 IC, nodeInletCornerWall メッシュ) は壁の旧 no-slip エントロピー層が非粘性では抜けず 12000 step で 2.2〜2.6 桁 (still converging)・入口角 T 409 K だったので出力を破棄して run_0193 mesh/IC に切替 (同 run 番号を再利用) | | | | | | |
+| `run_0505_node_lam_flag0` (2026-09-25, ローカル) | **#10 flag 0** ([plan](../../plans/accepted/convection-slau-wall-normal-chi.md) §5.1 #10 / §6 V3)。既製レシピ `run_user_profile.py --disc node --phys sst --laminar --bc-sub "kind: outlet_statPress=kind: outflow" --out-interval 500`、IC = 1D 等エントロピー、`FORGE_CUDA_BLOCKSIZE=128` (REG 上限)。メッシュ `nozzle_user_2d_planar.geo` 41,640 節点 PASS (AR 724) | 層流 NS (node, 2D) | off | 本段 1.77 ms/step。NaN 0。壁 p/p0 @16.4/45.6/85 = **0.3583/0.2459/0.1733** (8000 step 以降 4 桁不変)。1D 非粘性 0.340/0.227/0.157 と参照 (2D SST/3D 層流/実験) 0.367/0.255/0.187 の間 | `check_convergence` 本段: NOT CONVERGED (plateau, 1.1〜1.8 桁)。**前提ゲート ±2 % FAIL** (−2.4/−3.6/−7.3 %; 参照値が 2D 層流でない) | ref (#10 分岐元。前提ゲートは plan §6 V3 で差し替え) |
+| `run_0506_node_lam_flag0_br` / `run_0507_node_lam_flag1_br` (2026-09-25, ローカル) | **#10 V3 分岐** (plan §6 V3 case/16 条件)。`run_0505/res_12000` から `restart_field.py` (ビット一致) で 2 本、本段のみ 12000 step (out 500)。差は `slauWallNormalChi: 1` (0507) の 1 行のみ。`FORGE_CUDA_BLOCKSIZE=128` (`BRANCH_NOTE.txt`) | 層流 NS (node, 2D) | off | 壁 p/p0 末尾平均 0.358276/0.245869/0.173292 (両 flag 同値)、出口中心線 M 1.850。**flag 差: 末尾平均場の輪郭壁 L∞ ≈2e-6 (0.0002 %)**、#10b 式 (\|Δ\|+振幅) 最大 0.0026 % (許容 0.5 %)。rms 比 flag1/flag0 1.0003〜1.0024。評価 `v3_case16/` | `check_convergence`: 両方 plateau (分岐なので 0.1〜0.2 桁)。`check_quasisteady --series-csv` 3 点・M: 全 STEADY (差系列 dLinf は DRIFTING = operand 取り違え, plan §6.2 #10b) | **active (#10 V3 PASS, `diagnostician` 確認)** |
+| `_v2/v2_{old,new,new1}_{a,b,c}` (2026-09-25, ローカル) | **#10 V2** (plan §6 V3 case/16 条件)。`run_0505/res_12000` から `restart_field.py` で 9 本 × 500 step。old = commit `39526328` のビルド (`FORGE_BIN`)、new = HEAD flag 0、new1 = HEAD flag 1。壁 `outputHDFflg: 1`、`output.level 2`、`FORGE_CUDA_BLOCKSIZE=128` (`_v2/PROVENANCE.txt`) | 層流 NS (node, 2D) | off | **V2**: old vs new のノイズ床比 0.89〜1.58 (`V2_VERDICT.txt`)。**副次**: new vs new1 の床比 0.80〜1.47 = この 500 step 試験では flag 1 と flag 0 の差が反復ノイズと同程度 (許容 2 倍以内; 2026-09-25 表現を限定) (`SIDE_new0_vs_new1.txt`)。NaN 0 | `check_field_regress --boundary`: **V2 PASS** / 副次 PASS | active (#10 V2) |
+| **`run_0471_tp5_node_euler_va3`** | node (平面 inviscid) | Euler, TP 5 種 `[H2O, N2, O2, AR, CO2]` (Y 0.0376954/0.6397780/0.2375010/0.0109448/0.0740808) | off | 2.14 ms/step (12000 step 25.6 s)。res_12000: max\|ΣY−1\| 7.9e-8, min Y 1.094e-2 (負値 0), NaN 0, T 206.0〜352.6 K (Tt 超え 0), P 8.63〜58.8 kPa, h0 56077〜56297 J/kg。起動ログに 5 種テーブル + 入口 Y/X、`rms_roY0..4` 列出力 | **PASS** (`check_convergence`: ro 4.3 / roUx 4.3 / roUy 3.3 / roe 4.7 / roY0..4 4.2 桁, 全列 falling, 床 rms_ro 5.1e-9); `check_quasisteady --quantity machmax,pmax` **STEADY** (M_max 1.914, p_max 58.81 kPa; 既定の `asym` は 4e-7 の丸めノイズで DRIFTING 表示) | **active (5 種 node PASS ケース, plan §6 ゲート)** |
+| **`run_0472_tp2_node_euler_va3_lumped`** | node (同上) | Euler, TP 2 種 lumped `[MIXDRY, H2O]` (Y 0.9623046/0.0376954, MIXDRY = va3 乾き lump) | off | 1.61 ms/step (12000 step 19.3 s)。res_12000: max\|ΣY−1\| 8.6e-8, min Y 3.770e-2 (負値 0), NaN 0, T/P/h0 範囲は run_0471 と同一。**run_0471 との場の差 max\|Δ\|/max: ro 1.0e-6, P 1.7e-6, T 1.0e-6, Ux 1.3e-6, Uy 7.9e-5 (Uy は max 36 m/s 基準), h0 7.2e-6, Y_H2O (run_0471 Y0 vs Y1) 3.9e-6 (絶対 1.5e-7), ΣY_dry (Y1..4) vs Y0 2.6e-7** = float 精度で一致 (非粘性 frozen・内部比一定の等価性, plan §3) | **PASS** (ro 4.3 / roUx 4.3 / roUy 3.3 / roe 4.8 / roY0 4.2 / roY1 4.2 桁, 全列 falling, 床 rms_ro 4.9e-9); `check_quasisteady --quantity machmax,pmax` **STEADY** (M_max 1.914, p_max 58.81 kPa) | **active (lumped 対照, plan §6 ゲート)** |
+| `run_0473_passiveA_speciesonly_head` / `run_0474_passiveA_speciesonly_scheme1` / `run_0475_passiveA_speciesonly_head_rep1` | node (同上) | Euler, TP 5 種 (`run_0471` 入力 500 step) | off | **受動種経路 Phase A の無影響試験** (plan species-passive-scalar-unification §6-7): 化学種のみ (受動種なし) の run は `passiveScalarScheme` に依らず不変か。HEAD (c14909e1) vs 新バイナリ scheme 1: 場の差 max\|Δ\|/max **9.6e-6** (h0) / ro 1.5e-6 / roY 1.8e-6 = HEAD vs HEAD 反復 1.09e-5 / 1.5e-6 (ノイズ床) と同水準 | 500 step (途中) | active (無影響回帰) |
+| **`run_0476_tp5_node_euler_profile_base`** / `run_0477_tp5_node_euler_profile_sfr0` / `run_0481_tp5_node_euler_profile_base_rep1` (2026-09-17, バイナリ Phase A snapshot `forge-bin-passive-A`) | node (平面 inviscid) | Euler, TP 5 種 (`run_0471` プロトコル・同 IC) + **非一様組成入口** (`inletProfile` CSV: Y_H2O 軸 0.06 → 壁 0.02、他種は残りを bcond 比で分配) + **トレーサ** (`physProp.tracer: exhaust`, CSV `Xi` 列 軸 1 → 壁 0; `inlet_Pressure` は `Xi` 列を `applied:` に受け付ける)。`passiveScalarScheme 1`, `speciesImplicitCoupling 1`, `implicitRelax 0.7`, cfl 2, **24000 step** (relax 0.7 は run_0471 の relax 1.0 より遅く 12000 step では rms_roUy 2.7 桁 = still converging だったので倍に)。0476 = SFR 2 (S3), 0477 = SFR 0 (1 次) 双子, 0481 = 0476 の同一設定反復 | off | plan species-passive-scalar-unification §6-4 の**固定点ゲート用 PASS ケース** (codex plan-2 M4)。定常場に組成勾配が残る: res_24000 の Y_H2O 0.02004〜0.05999 (range 0.0400), Xi 1.2e-4〜0.99983 (range 0.9997), max\|ΣY−1\| 1.2e-7, 0≤roXi/ρ≤1。**反復ノイズ (0476 vs 0481)**: max\|Δ\| Y0 2.0e-7 / Xi 1.5e-5 / ro 8.9e-7 (相対 1.5e-6) / T 6.7e-4 K。**R2−R1 (0476 vs 0477)**: Y0 3.7e-4 (相対 6.1e-3, ノイズの 1850 倍) / Xi 9.4e-3 (630 倍) / T 0.078 K / Ux 5.1e-3 m/s → S3 の寄与はノイズより十分大きい。floor 補正 (`passiveFloorCorr_Xi`): per-step は step ≤5600 の過渡だけ非零、以後 24000 step まで 0; 累積 abs 1.075e-7 (総量比 2.2e-4)。2.81 / 2.28 / 2.73 ms/step | **PASS** (0476: ro 4.3 / roUx 4.4 / roUy 3.3 / roe 4.7 / roY0..4 4.2〜4.3 / roXi 4.6 桁; 0477, 0481 も ALL PASS); `check_quasisteady --quantity machmax,pmax` STEADY (M_max 1.913, p_max 58.81 kPa) | **active (固定点ゲートの基準場)** |
+| `run_0478_tp5_node_euler_profile_xr_cfl6_relax07` / `run_0479_tp5_node_euler_profile_xr_relax10` / `run_0480_tp5_node_euler_profile_xr_cfl6_scalarcfl2` | node | **交差 restart** (plan §6-4): `run_0476` res_24000 (収束 S3 場) から 24000 step。0478 = cfl 6 + `implicitRelax 0.7`; 0479 = cfl 2 で `speciesImplicitRelax 1.0` + `passiveImplicitRelax 1.0` (基準は species 1.0 [既定] / passive 0.7 [=implicitRelax]); 0480 = cfl 6 + relax 0.7 + `scalarCflMax 2` (化学種/受動種の擬似 Δτ を CFL 2 に制限) | off | **固定点不変**: 3 本とも NaN 0、残差は restart 直後から `run_0476` の収束床のまま (rms_ro 4.67e-9 → 4.60〜4.75e-9、ピークは init の ≤1.2 倍で過渡なし)。最終場 vs `run_0476`: Y0 max\|Δ\| 2.3 / 2.4 / 2.7e-7 (反復床 2.0e-7)、Xi 1.26 / 1.49 / 1.35e-5 (床 1.5e-5)、ro 相対 3.0 / 2.1 / 2.4e-6 (床 1.5e-6 の 2 倍以内)、T 6.4 / 7.0 / 5.6e-4 K (床 6.7e-4)。**floor 補正は 24000 step で累積 0 (`rel 0.000e+00`)**。step 時間 2.70 / 3.58 / 2.78 ms | 既定判定は 3 本とも `NOT CONVERGED (stalled/plateau)` (収束場からの再開なので drop 0.0 桁 = 判定不能)。**再判定 `check_convergence.py --from-floor run_0476 …` (codex result-1 M6 で追加; 参照 run_0476 の末尾床の 1.5 倍以内に全期間留まるか)**: `run_0478 -> PASS (within 1.5x of reference floor run_0476)` (床比 末尾/ピーク: ro 1.01/1.10, roUx 1.03/1.07, roUy 1.15/1.21, roe 1.07/1.12, roY0..4 1.00–1.02/1.08–1.10, roXi 0.99/1.04); `run_0479 -> PASS` (ro 1.02/1.06, roUy 1.03/1.07, roe 1.02/1.04, roY 1.02–1.03/1.06, roXi 0.98/1.02); `run_0480 -> PASS` (ro 0.99/1.06, roUy 1.13/1.19, roe 1.05/1.08, roY 0.99–1.03/1.05–1.08, roXi 0.93/1.02); 各 run の `CONVERGENCE_VERDICT_from_floor.txt` | active (固定点ゲート: cfl 2/6, relax 0.7/1.0, scalarCflMax 有/無で同一固定点) |
+| `run_0497_tp5_node_euler_profile_xr_implicitrelax10` (2026-09-17, **既定ビルド HEAD** [`passiveScalarScheme` 既定 1], codex result-1 M6) | node | **交差 restart (実効緩和の比較)**: `run_0476` res_24000 から cfl 2, **`implicitRelax 1.0` + `passiveImplicitRelax 1.0`** で 24000 step。根拠: 緩和キーの実読み先は coupling 0 → `speciesImplicitRelax` (`speciesTransport_d.cu:765`), **coupling 1 (scalar-DPLUR) → `implicitRelax`** (:829/:915; `speciesImplicitRelax` は読まれない), 受動種 point-implicit → `passiveImplicitRelax` (:1310), 受動種 DPLUR → `passiveImplicitRelax` (:1256; 既定 = `implicitRelax`)。`run_0479` は `speciesImplicitRelax 1.0` を変えたが coupling 1 では無効だったので、本 run が「化学種 DPLUR の緩和 0.7 → 1.0」の実効比較 | off | NaN 0。最終場 vs `run_0476`: Y0 max\|Δ\| 1.9e-7 (反復床 2.0e-7), Xi 1.46e-5 (床 1.5e-5), ro 7.7e-7 abs (相対 1.3e-6; 床 8.9e-7 / 1.5e-6), T 6.9e-4 K (床 6.7e-4), Ux 7.6e-4 m/s (床 1.2e-3); vs 反復 `run_0481`: Y0 2.4e-7 / Xi 9.7e-6 / ro 7.2e-7 / T 7.0e-4 K → **緩和 1.0 でも固定点は反復ノイズ内で同一**。floor 補正 24000 step 累積 0 (`rel 0.000e+00`)。2.74 ms/step | 既定判定 `NOT CONVERGED (stalled/plateau)` (drop 0.0 桁, 上昇なし); **`--from-floor run_0476` → `PASS (within 1.5x of reference floor run_0476)`** (床比 末尾/ピーク: ro 0.95/1.01, roUx 1.04/1.06, roUy 1.12/1.19, roe 1.02/1.06, roY0..4 0.94–0.95/1.00–1.02, roXi 0.86/1.00) | active (固定点ゲート: 実効緩和 0.7/1.0 で同一固定点) |
+| **`run_0482_passive_wys_s1_sfr2_c1`** / `run_0483_passive_wys_s0_sfr0` (2026-09-17, `forge-bin-passive-A`) | node | **run_0335 プロトコルの凝縮回帰 (plan species-passive-scalar-unification §6-5)**: `run_0470/lim1e` 入力 (node SST TP MIXDRY+H2O, IC = run_0213 res_24000, cfl 2, relax 1.0, 48000 step, level 2)。0482 = `passiveScalarScheme 1` + `speciesFaceReconstruction 2` + `speciesImplicitCoupling 1` + `passiveImplicitCoupling 1` (S3, 化学種・受動種とも scalar-DPLUR); 0483 = scheme 0 / SFR 0 (旧経路, 新バイナリ対照) | on (非平衡, Kantrowitz 1, `condLimiterMode 1`) | **0483 (旧経路) は lim1e と同一**: onset 22.51 mm, 壁偏差 +2.46/−4.5/+5.1/+5.4 %, g_exit 0.01085, M_exit 1.6325; 場の差 ro 1.5e-6 / P 1.0e-6 / T 2.6e-6 / Ux 3.5e-6 / g 5.8e-6 (`compare_condfix.py`) = 反復床。**0482 (S3) は固定点が動く**: onset (中心線 g>1e-3) **23.23 mm (+0.72 mm 下流**; 実験より遠ざかる方向), g>1e-4 onset 17.34 (lim1e 16.54), 壁偏差 +2.47/−5.0/+5.5/+5.5 %, g_exit 0.01086, M_exit 1.6330, c_exit 289.57; 場の差 ro 2.8e-3 / T 4.1e-3 / g 2.1e-1 (相対 max, 凝縮前線の移動)。壁近傍の g 分布 (x=30/45/60/90 mm で g が core の 0.9 に達する壁距離 0.49〜0.58 mm) は S3 と旧経路で同じ = **モーメントに拡散は入っていない**。floor 補正 (rog/Q2/Q1/Q0) 累積 rel 1.2〜5.3e-11 (乾き域の数値塵)。NaN 0。step 時間 3.77 (S3) / 2.91 ms | 0482 **PASS** (ro 3.8 / roUx 3.9 / roUy 3.6 / roe 3.1 / roK 4.6 / roOmega 4.1 / roY 3.7〜3.8 / rog 5.2 / roQ2 5.8 / roQ1 6.3 / roQ0 6.9 桁), 0483 NOT CONVERGED (rms_roe 2.9 桁で 3.0 に僅かに届かず; 床 6.1e-4 は lim1e と同水準); `check_quasisteady --series-csv` (compare_condfix --series-csv) **ALL STEADY (両方)** | active (§6-5 凝縮回帰; S3 は onset +0.7 mm の固定点差を記録) |
+| (図) `compare_s3_wall_pp0.py` → `s3_vs_legacy_wall_pp0.png` | — | **S3 有無の壁圧 p/p0 比較図** (2026-09-17): `run_0483` (SFR 0) / `run_0482` (SFR 2) の壁圧 (`extract_wall_pp0.py` → `wall_pp0_csv/wall_run_048{2,3}_*.csv`) と実験 `wyslouzil_fig3_pp0.csv` (Fig.3, pv0 1.00 kPa, p0 59.07 kPa) を重ねる | — | オンセット (中心線 g>1e-3) **22.58 mm → 23.43 mm (+0.85 mm 下流)**、壁圧の最大差 **2.77e-3 = 0.81 % @ x 26 mm**、出口 g は 0.01085/0.01086 で不変。実験が等エントロピーから外れるのは **11–21 mm の区間** (測点間隔 10 mm) なので、forge のオンセットは元々実験より下流で、S3 はさらに遠ざける向き。実験との平均差は両者とも +0.0074 | active |
+| `run_0484_passive_tracer_sst_sct` / `run_0485_passive_tracer_laminar` | node | **トレーサ拡散の定性試験 (plan §6-3)**: lim1e 入力 (凝縮 off) にトレーサ + ステップ入口分布 (Xi=1 for \|y\|<6 mm, 他 0), scheme 1 / SFR 2 / coupling 1, 3000 step。0484 = SST (`vis_turb` あり, Sc_t 0.7 既定), 0485 = 層流 (`turbulence: none`, viscMethod 1, Sc 0.7 既定) | off | 界面の 10–90 % 厚さ (上側界面): x=0/30/60/90 mm で **SST 0.66/0.85/1.07/1.25 mm vs 層流 0.32/0.47/0.60/0.72 mm** = 乱流拡散 (μt max 6.9e-4) でトレーサがより広がる。0≤roXi/ρ≤1, floor 補正累積 rel 8e-7 / 7e-6, NaN 0 | 3000 step の短 run (過渡; 定性比較のみ) | active (定性記録) |
+| `run_0494_passive_eqdiff_constSc` / `run_0495_passive_eqdiff_mixavg` / `run_0496_passive_eqdiff_constSc_cont` (2026-09-17, `forge-bin-passive-A`) | node | **等拡散係数条件でのトレーサ=化学種 一致試験 (plan species-passive-scalar-unification §6-3)**: `run_0485` 入力 (層流 Sutherland, TP [MIXDRY,H2O], 凝縮 off, トレーサ) で入口ステップ Y_H2O = 0.05·Xi (\|y\|<6 mm: Y_H2O 0.05 / Xi 1, 他 0; MIXDRY = 1−Y_H2O; `applied: Y0 Y1 Xi`)、IC は roXi := roY1/0.05 (両者同一初期状態 0.219)、`passiveScalarScheme 1`, `speciesFaceReconstruction 0`, `speciesImplicitCoupling 0`, `speciesImplicitRelax 1.0`, `passiveImplicitRelax 1.0`, `Sc 0.7` 共用。0494 = `speciesDiffusionMethod 0` (定数 Sc = 等拡散), 0495 = `speciesDiffusionMethod 1` (混合平均 = 非一致が正), 各 24000 step (res 3000 毎); 0496 = 0494 の res_24000 から +48000 step 継続 | off | **等拡散 (0494→0496)**: max\|Y_H2O/0.05 − Xi\| は擬似時間過渡として単調減少 — step 1000 2.7e-2 (前線通過中, 出口中心線) → 3000 2.2e-3 → 12000 1.3e-3 → 24000 **4.8e-4** (mean 4.8e-5; 出口壁角 x=95 mm, wall_dist ≤0.24 mm; core [wall_dist>0.5 mm, x<90 mm] max 2.3e-5) → 継続 +12000 1.2e-4 → +48000 (計 72000) **4.6e-5** (mean 4.7e-6, p99 1.7e-5, core max **2.7e-6**, 残りは入口角の壁列 y=−12.7 mm で初期値 0.219 を洗い流し中)。スケール残差は一致 (rms_roXi/20 = 7.05e-9 vs rms_roY1 7.03e-9 [24000], 7.3e-10 vs 7.26e-10 [72000]) = 離散作用素・更新写像は同一で、差は残差が残る間の過渡 (化学種だけの ΣρY=ρ 再正規化を含む; max\|ΣY−1\| 5.9e-8) で固定点は共通。**混合平均 (0495)**: max 3.66e-3 / mean 6.5e-4 / p99 2.9e-3 で 3000 step 以降一定 (出口付近の界面 y=±1.4 mm) = 拡散係数が違うので非一致 (期待どおり)。0≤ρξ≤ρ、floor 補正累積 rel 5e-4 (過渡の上限クランプ)、NaN 0。step 時間 1.70 / 1.73 / 1.88 ms | 0494/0495 **PASS** (ro 3.7 / roUx 4.0 / roUy 3.2 / roe 3.3 / roY0 3.2 / roY1 3.4 / roXi 3.4 桁); 0496 は継続 (rms_roY1・rms_roXi さらに 1.0 桁 falling, ro 床 5e-9) | active (§6-3 等拡散一致・混合平均非一致の記録) |
+| `run_0486_passiveB_dt_species_smoke` / `run_0487_passiveB_dt_ckpt100` / `run_0488_passiveB_dt_restart_from0487` / `run_0489_passiveB_dt_restart_oldformat` | node (同上) | Euler, TP 5 種, **dual-time** (`unsteady 1, dualTime 1, timeIntegration 11, blockDPLUR 1, control 0`, dt 5e-7 s [物理 CFL≈8.4], `nSubIterDualTime 15`, cfl_pseudo 2, `passiveScalarScheme 1`), IC = `run_0471/res_12000` (収束場) | off | **Phase B (plan species-passive-scalar-unification §4.4/§6-6) の多成分 dual-time smoke と restart 契約**: `0486` = 200 step 連続; `0487` = 100 step で checkpoint (`res_100.h5` の `/CHECKPOINT`: roN..roeN, roKN, roOmegaN, roY0P..roY4P + totalTime/dt/nHistoryValid/layout); `0488` = `0487/res_100` から 100 step (履歴復元, ログ `history restored ... nHistoryValid=2`); `0489` = 同じ入力から `/CHECKPOINT` を削除 (旧形式) → `history NOT restored ... BDF1`。結果: NaN 0、max\|ΣY−1\| 6.2e-8 (全出力)、化学種は動く (max\|ΔY\| 4.3e-7, Δρ 1.6e-6: 収束場なので微小)、sub-iter の残差低下は 0.03–0.3 桁 (**収束場では初回 sub-iter の残差が既に float 床 [rms_ro 6e-9, rms_roY 2e-10] で BDF 込み残差の桁低下は観測できない**; 過渡 IC の `run_0480` と case/09 `run_0071`–`0078` で判定)。restart: 連続 `0486/res_200` vs `0488/res_100` (同一物理時刻) ro 1.2e-6 / roUx 2.6e-6 / roe 3.5e-6 / roY 1.7e-6 = 同一設定の反復差 (`0486/res_100` vs `0487/res_100`: roUy 4.8e-5, ro 級 1e-6) 以内; 旧形式 BDF1 再開 `0489` も 1.5e-6 / 2.2e-6 / 3.6e-6 で完走 | 200/100 step (途中) | active (Phase B 検証) |
+| `run_0490_passiveB_dt_species_transient` | node (同上) | 同上 dual-time (dt 5e-7, nSub 15), **IC = `run_0471/res_2000` (過渡場)** | off | 過渡からの多成分 dual-time: NaN 0、max\|ΣY−1\| 7.0e-8、**BDF 込み sub-iter 残差の低下 (初回→最終 sub-iter) は全列で median 2.4 桁 (min 1.9, max 2.5–2.8; rms_roY0..4 1.9/2.4/2.5)**、ρ は動く (max\|Δρ\| 0.11 @100 step) が組成は case 固有に一様 (max\|ΔY\| 5e-7) | 100 step | active (Phase B 検証) |
+| `run_0491_passiveB_dt_species_transient_c1` / `run_0492_passiveB_dt_species_transient_c2` / `run_0493_passiveB_dt_pin_diag_1step` | node (同上) | `run_0490` プロトコル (dual-time, IC=`run_0471/res_2000`, dt 5e-7, nSub 15) を **`speciesImplicitCoupling` 1 (scalar-DPLUR) / 2 (案C EOS 結合, g_roPred)** で 100 step; `0493` = coupling 0 を 1 物理 step, `FORGE_PIN_DIAG=1` (ピン行診断) | off | **coupling 1/2**: NaN 0、max\|ΣY−1\| 6.7e-8 / 6.8e-8、BDF 込み sub-iter 残差低下 (初回→最終) rms_roY0..4 min 1.91 / median 2.38–2.39 / max 2.49–2.51 (流れ ro 2.41, roe 2.55; coupling 0 と同じ)、化学種の動き max\|ΔY\| 4.2e-7 (c1) / 1.7e-6 (c2)。coupling 0 (`run_0490`) との場の差 max\|Δ\|/max: c1 roUy 1.3e-5 / h0 6e-6 / roe 2.4e-6 / roY ≤1.6e-6; c2 Uy 1.2e-5 / Y0 8e-6 / Y2 7e-6 (組成の差 3e-7 絶対) = 反復ノイズ (1e-5 級) 以内。step 時間 78.8 (c1) / 100.7 (c2) ms vs 70.6 (c0)。**ピン行 (§6-6-iii, `0493`)**: 入口ピンノード 120 個で BDF 追加 + 再ピン後の \|res_roY0..4\| = **0.00 (全 15 sub-iter, 厳密 0)**、更新 + 入口 Dirichlet 再適用後の \|Y_pinned − Y_inlet(bvar)\| = **0.00** | 100 / 1 step | active (Phase B 検証) |
+| `run_0498_passiveC_m5_profile_base` / `run_0499_passiveC_m5_eqdiff_constSc` | node (同上) | **codex result M5 (増分スケーリング θ_b) 後の補正収支再取得**: `run_0476_tp5_node_euler_profile_base` (S3, coupling 1, relax 0.7, 24000 step) と `run_0494_passive_eqdiff_constSc` (NS 層流, 1 次, 24000 step) の入力をそのまま新バイナリで | off / off | 両方 ALL PASS。**トレーサの積算 floor 収支 (root のみ, 相対)**: `0498` **1.76e-4** (旧 2.22e-4), `0499` **4.84e-4** (旧 5.03e-4); 増分スケーリング limCorr 4.6e-5 / 1.9e-5。残る floor は全て上限側 (hi −8.5e-8 / −2.0e-7 [kg]): 流れ block 更新で ρ が減った後に ρξ_N > ρ_new となるノード (θ_b=0 で N に留めても範囲外) を硬い floor が切る = 分離更新 (block-DPLUR の δρ vs 点陰的の δ(ρξ)) の不整合で、増分スケーリングでは消えない → **1e-4 ゲートは未達 (M5 未解決)** | 24000 step | active (codex M5) |
+| `run_0500_passiveD_rhoterm_profile_base` / `run_0501_passiveD_rhoterm_eqdiff_constSc` | node (同上) | **plan §5.1 #19: 受動種の増分を流れの密度更新と整合 (ρφ = ρφ_N + z + φ_N δρ, δρ = ρ_new − ρ_pre; 案C と同形)** 後の再取得: `run_0476` 型 (S3, coupling 1, relax 0.7, 24000 step) / `run_0494` 型 (NS 層流, 1 次, 24000 step) | off / off | 両方 ALL PASS。**トレーサの積算 floor 収支 (root のみ, 相対) `0500` 3.4e-26 (旧 1.76e-4), `0501` 0 (旧 4.84e-4) → ≤1e-4 達成**; 増分スケーリング limCorr (輸送増分 z の縮小) 1.73e-4 / 4.9e-5 (符号付き −8.0e-8 / −2.0e-8 kg; 起動過渡のみ, per-step 0 で終了)。**固定点**: `0500/res_24000` vs `run_0476` ro 1.1e-6 / P 1.7e-6 / T 1.6e-6 / Y0 3.5e-6 / Xi 1.9e-5 = 反復ノイズ (`run_0498` vs `run_0476`: ro 1.0e-6 / P 1.1e-6 / Xi 1.7e-5) 以内、収束時 floor・lim とも per-step 0 | 24000 step | active (#19) |
+| `run_0950_sglsq_s2_0476_gg` / `run_0951_sglsq_s2_0476_lsq` / `run_0952_sglsq_s2_0482_gg` / `run_0953_sglsq_s2_0482_lsq` / `run_0954_sglsq_s2_fct_gg` / `run_0955_sglsq_s2_fct_lsq` (2026-09-26、**AWS** `~/forge-pgrad-new/case/16.nozzle_wys/` のみ) | node (平面) | **S2 物理 A/B (スカラー勾配 gg / lsq)** [plan](../../plans/active/gradient-scalar-lsq-unification.md) §6 S2。(a) 0950/0951 = `run_0476/res_24000` (sha256 `c1143289…`) から `restart_field.py` で 24000 step (Euler TP 5 種 + トレーサ、SFR 2); (b) 0952/0953 = `run_0482` と同じ入力・同じ IC (`lim1e` の入力 h5、`909786ef…`) から 48000 step (SST TP 凝縮 S3); (c) 0954/0955 = FCT smoke: `run_0476` の入力 + `run_0486` の dual-time 設定 (dt 5e-7、nSub 15、relax 1.0、cfl_pseudo 2) で `run_0476/res_24000` から 200 step (`[passiveFct] active` を確認。`run_0486` 自体は SFR 0 でスカラー勾配を計算せず lsq が効かないので 0476 入力に替えた)。バイナリ `f99f236d` (AWS `~/sglsq/forge_f99f236d`、sha256 `98703ca1…`)、`FORGE_CUDA_BLOCKSIZE=128`/`_SMALL=128`、双子の差は `mesh.scalarGradient` の 1 行のみ (`s2_setup.py`、`IC_FROM.txt` に起点 sha256 と設定差) | off / on / off | (a) min Y 1.07e-2、max\|ΣY−1\| ≤ 8.1e-8、ξ ∈ [5.9e-4, 0.99985]、floor 補正累積 rel 8e-28、machmax/pmax STEADY; **lsq−gg** Y0 1.18e-5・Xi 3.12e-4 (上限 3.7e-5/9.4e-4)。`--from-floor run_0476` は両方 NOT CONVERGED (全列 21–64×、旧バイナリの床)。(b) NaN 0、モーメント最小 0、cond_series ALL STEADY; **lsq−gg** onset (中心線 g = 1e-3) 23.23/23.23 mm、壁 p/p0 L∞ 0.0029 % (上限 0.3 mm/0.3 %)。`check_convergence` は両方 plateau 2.5 桁 (0482 は 3.8 桁 PASS)。参考: 旧 0482 vs 新 gg の壁 p/p0 L∞ 0.16 %。(c) NaN 0、max\|ΣY−1\| 7.5e-8/7.7e-8、ξ ∈ [0, 0.99983]; **lsq−gg** ro 3.4e-5・roY 2.2e-5・roUy 2.3e-2 (§6 の上限 3e-6/5e-6/1e-4 を超過)。**vs 0482** (plan #5c): onset 0482・gg・lsq とも 23.23 mm、壁 p/p0 L∞ gg 0.165 %・lsq 0.163 % (上限 0.3 %)。(c) の保存・有界性 (#5d): floor 補正 rel 7e-19・limCorr 0・上限違反 0・E_ρ ≤ 5.5e-6。**S2 判定 (codex diagnose `notes/reviews/2026-09-26-gradient-scalar-lsq-s2-result-diagnose.md`): 条件付き・未合格** (起点床の収束ゲート不成立と (c) の旧上限超過を保存)。継続 24000 は `run_0956/0957_sglsq_s2_0476_*_cont` | 24000 / 48000 / 200 step | active (S2) |
+**実験比較まとめ (2026-09-08, `compare_exp_wall_pp0.py` → `compare_exp_wall_pp0.{png,txt}`, 入力 `wall_pp0_csv/`)**: 輪郭壁 p/p0 (3D は対称面) を Fig.3 と比較した x≥10 mm の平均偏差。
+dry (参照 isentrope): 2D Euler node run_0193 −10.0 % / 2D SST node run_0213 +1.5 % / 2D SST cell run_0196 +1.5 % / **3D 層流 node run_0221 0.7 %** / 3D SST node run_0228 +8.8 % (下流ほど乖離、側壁合流域の乱流 BL 過厚が未解決)。
+凝縮 1.00 kPa (参照 実験点): 2D Euler cond run_0194 7.7 % / 2D SST cond cell run_0197 4.1 % / **3D 層流 cond run_0224 1.9 %**。3 run とも x=21 mm で −5 %、42〜52 mm で +2〜+5 % (onset が実験より ~5 mm 下流)。
+VERDICT: run_0213/0221/0224/0228 は `check_quasisteady` pmax/machmax STEADY、run_0221/0224 は全列 falling、run_0213/0228 は roe/roOmega plateau、cell は既知の床。
+
+| **`run_0234_user_node3d_sst_dry_half_ext_ps_newdef`** (AWS) | **新既定** (`sstOmegaProdFromPk`/`sstSigmaBlend` ON, セッション B 1bd2f69d) + 壁距離ノード座標化の再変換 h5、run_0228 の場から index コピー、バッファ + 静圧固定、cfl 6、12000 | NS (SST) | off | 旧既定 run_0228 と壁 p/p0 差 +0.06〜−0.29 %。角線 T−Tt −7/−9/−12 K (x=16/46/85)、T>Tt+1 ノード 0。実験 dry より +5〜+10 % (全域乱流 vs 実験の層流域) | `check_convergence`: rms_ro 6e-12, roOmega 5.9 桁↓ (falling); pmax STEADY | active (**3D SST dry の正本**) |
+| **`run_0235_user_node3d_sst_cond_half_ext_ps_newdef`** (AWS) | 同上から **凝縮 ON** (cfl 2, 12000) | NS (SST) | **on** | 旧既定 run_0229 と差 ≤0.08 %、onset 24.7 mm・g_exit 0.0109 同一。cond/dry 比 1.13〜1.24 (実験 1.18〜1.20)、絶対値は実験 cond より +9〜+11 %。T max Tt+10.9 K (潜熱, 物理)。`wall_pp0_cond_all.png` | rms_ro 3e-11 falling, roe 2.9 桁↓; pmax STEADY | active (**3D SST 凝縮の正本**) |
+
+**結果 (`compare_user_profile.png`)**:
+- **NS dry が実験 isentrope に乗る** (x≥11 mm で +1〜2 %; 旧形状 run_0048 は 1 次精度で ±1.5 %)。Euler dry は排除厚がないので −4〜−13 % 下 (下流ほど乖離)。
+- **凝縮の効果**: onset は Euler 20.2 mm → NS 23.2 mm (境界層で膨張が緩み過冷却到達が遅れる)。潜熱で中心線 M は出口で 1.91→1.70 (Euler) / 1.79→1.60 (NS)、静圧は +21 % (Euler) / +19 % (NS)、静温 +33 K。液滴質量分率は両者とも x≈50 mm で 0.010 に達しほぼ全量 (Y_H2O 0.01095) が凝縮。
+- **実験 cond 1 kPa との比較 (NS)**: onset 帯 (21–32 mm) で −3〜−5 % (forge の bump 立ち上がりが遅く低い)、下流 42–72 mm で +4〜+5 % (旧形状 run_0170 は +5.6〜+7.4 %。形状修正で下流の過大が 2 pt 縮んだ)。onset 域の差は凝縮モデル (Kantrowitz 抑制量) 側の残課題。
+- NS 凝縮 run の壁温は凝縮域下流で 291–297 K > Tt=286.65 K (壁 g≈0、コアの潜熱が乱流熱伝導で壁へ届く: 上限 g·L/cp≈26 K の一部)。dry は全域 T≤Tt。
+- 軸 h0=(ρe+P)/ρ (Euler cond) は入口/出口で一致 (差 2 J/kg)、onset 帯で最大 −263 J/kg (cp·Tt の 0.09 %)。
+
+## 多成分 TP 発散の再検証 run 一覧 — run_0069 以降 (2026-06-18)
+
+「多成分 thermally perfect gas (thermalMethod:2) が収束しない」件の原因切り分け。**結論 (0acca05 の
+「sub-200K のみ・種数無関係」を訂正): 真因は 2 つ**。
+1. **IC 生成器の運動エネルギーバグ**: `gen_ic_2sp_from_n2.py:69` が `ek=0.5*(roUx²+..)/ro` (solver 規約は
+   `/ro²`)。高速域 (出口 |u|~500, ro~0.1) で roe が ~10⁵ J/kg 過小 → 読み戻しで多数セル T<200K に床張り付き。
+2. **nSpecies≥2 コードパス固有の不安定**: ek を修正した整合 IC・全>200K・species 完全保存でも 2 成分は
+   step6-7 で局所 ro<0 → NaN。真の単成分は同条件で安定。Y_H2O≈0 でも発散 (step15)、実 H2O で加速 (step7)。
+3. sub-200K NASA-9 外挿は別の第 3 要因 (cold で全部落ちる。Tt スイープ `run_0041_hot500`[単成分]安定/
+   `run_0042_Tt360`/`run_0043_Tt286` は単成分の話)。
+
+棄却済 (再調査不要): float32 精度 (double 同一)・CFL/剛性 (explicit cfl0.05 でも発散)・implicit 分離更新。
+全 run native ビルド (`.build-native/`)。**全て診断用・破棄予定**。
+
+| run | 変更点 | 結果 (初 NaN) | 判定 |
+| --- | --- | --- | --- |
+| `run_0063_tp_2sp_relax_sst` | 2D TP 2 種 + SST の緩和 A/B (旧) | **注記 (2026-09-18)**: config が削除済みキー `implicitRelaxSST` を書いているため、現行バイナリでは起動時エラーになる (plan [config-key-pruning](../../plans/accepted/config-key-pruning.md) §5.2)。再実行するときはキーを外すこと (`implicitRelax` に統合済み) | 破棄予定 (旧 A/B) |
+| `run_0069_ver_min2sp_float` | 2sp, inviscid+explicit+laminar (最小化) | step4。ro<0・sonic→0 が最冷出口で発生 | 発散機構を特定 |
+| `run_0070_ver_min2sp_double` | =0069 を **double** ビルド | step4、残差軌跡が float と6桁一致 | **①float精度 棄却** |
+| `run_0071_ver_min_n2o2` | =0069 で H2O→O2 (IC不整合, 参考) | step3 | 参考 (IC不整合) |
+| `run_0072_ver_min2sp_implicit` | =0069 を implicit | step4 | **④分離更新 棄却** |
+| `run_0073_ver_2sp_zeroH2O` | 整合IC・**Y_H2O≈0** (実質純N2を2sp機構で) | step5 | **②H2O/種数 棄却** |
+| `run_0074_ver_2sp_realH2O_consistIC` | 整合IC・Y_H2O=0.01095 | step4 | 2sp は発散 |
+| `run_0076_ver_1sp_N2_stablecfg` | **単成分N2**・run_0056 と同一 config | step4 | cold で単成分も発散(交絡: ek+sub200K) |
+| `run_0077_ver_2sp_stablecfg` | =0076 を 2sp に | step4 | cold は交絡で切り分け不可 |
+
+注: cold (Tt=286.65) では sub-200K と ek バグの両方で 1sp も落ちるため切り分け不能。**hot (Tt=500K, 全>200K) が
+クリーンな対照** (下表)。hot で 1sp は安定・2sp は発散し、種数効果が分離できる。
+
+| run (hot Tt=500K) | 変更点 | 結果 | 判定 |
+| --- | --- | --- | --- |
+| `run_0081_ver_1sp_hot500_control` | **単成分N2**, res_400 から restart | **exit0・400step 安定・残差フラット** | 単成分 hot は安定 |
+| `run_0080_ver_2sp_hot500` | N2+H2O, ek バグ IC | step7。res_0 で 9466 セル T<200 (IC破壊) | 要因1顕在 |
+| `run_0083_ver_2sp_n2o2_hot500` | N2+O2 (生成エンタルピー≈0), ek バグ IC | step18 (序盤は残差低下) | O2 でも発散・H2Oより遅い |
+| `run_0084_ver_2sp_hot500_fixedIC` | N2+H2O, **ek 修正 IC** | res_0 整合(全>200K, 残差=1sp並)・なお step7 | **要因2: 修正後も発散** |
+| `run_0085_ver_2sp_hot500_zeroH2O_fixedIC` | **Y_H2O≈0**, ek 修正 IC | step15 (局所 ro<0・species完全保存) | **要因2はコードパス側** |
+
+### 要因2 の特定 (run_0089〜0094, hot Tt=500K, ek修正IC, condensation無)
+
+O2 と H2O の対照で **H2O 固有**と判明、cfl_pseudo 依存で **implicit 緩和ミスマッチ**と確定:
+
+| run | 2nd種/Y | cfl_pseudo | 結果 |
+| --- | --- | --- | --- |
+| `run_0089_cmp_1sp` | なし | 2 | 40step 安定 |
+| `run_0089_cmp_o2_1e6` | O2 / 1e-6 | 2 | **40step 安定** (h_O2−h_N2≈0) |
+| `run_0089_cmp_h2o_1e6` | H2O / 1e-6 | 2 | step13 発散。H2O が入ったセルの T が偽上昇 |
+| `run_0089_cmp_h2o_real` | H2O / 0.01095 | 2 | step5 発散 |
+| `run_0091_fix_*` | (energy補正カーネル配線) | 2 | **悪化** (O2もstep12)=**二重計上**。デッドカーネルは修正でない |
+| `run_0092b_h2o_cflp10` | H2O / 1e-6 | 10 | step2 |
+| `run_0092b_h2o_cflp1` | H2O / 1e-6 | **1** | **60step 安定** |
+| `run_0092b_h2o_cflp0p1` | H2O / 1e-6 | 0.1 | 安定 |
+| `run_0093_h2o_real_cflp1_long` | H2O / 0.01095 | **1** | **400step 完走・T[288,504]・Y1保持** (SST残差はプラトー=単成分と同) |
+| `run_0094_cold_real_fixedIC_cflp1` | H2O / 0.01095 **cold Tt=286** | 1 | step13 発散=**要因3(sub-200K)** が cold で残存 |
+
+**結論 (3 要因)**:
+1. **IC ek バグ** (`gen_ic_2sp_from_n2.py:72` を `/ro²` に修正済)。
+2. **多成分 implicit 結合不安定**: roe は block-DPLUR、roY は別 point-implicit で更新→擬似時間緩和がミスマッチ→roY 変化に roe が対応せず Newton で T ジャンプ。H2O の |h|≈1.3e7 が増幅 (O2 は無害)。**回避策: 多成分 TP は `cfl_pseudo ≤ 1`**。恒久修正は species を block 同梱 or 緩和整合 (未実装)。対流流束自体は整合 (energy 補正配線で二重計上→O2 発散が証拠)。
+3. **sub-200K NASA-9 外挿** (cold 固有): 出口<200K の極低温では CPG を使うか thermo 低温拡張。
+
+`run_0070` 用 double バイナリは `.build-native/double/` (要 `FORGE_CUDA_BLOCKSIZE=128`)。デッド energy 補正カーネルは
+[`.github/plans/thermophysics-multicomponent-tpgas.md`](../../plans/accepted/thermophysics-multicomponent-tpgas.md) 参照。
+
+### cfl_pseudo パラスタ + 等エントロピー IC + ramp (run_0095〜0100, hot Tt=500K, N2+H2O 1%)
+
+「cfl を上げても収束するか」「初期値を等エントロピーに」の検証。**結論: cfl_pseudo≤1 は硬い上限**。
+
+- **20step 刻み発達** (`run_0095`, cfl_pseudo=1, 600step): 場は定常・物理的 (T[288,504]・sub-200K=0・Y1=0.01095 保持・ro<0=0)。ただし残差はプラトー (rms_ro~1e-7, rms_roe~8e-3、機械ゼロには落ちない=単成分 run_0056 と同じ既存挙動)。cfl=1 vs 0.5 (`run_0096`) で最終場 max|ΔP|≈3.4kPa(~5%)・max|ΔT|≈13K=厳密収束前。
+- **cfl_pseudo パラスタ** (warm-start IC, `run_0099_ws_cflp*`):
+
+  | cfl_pseudo | 1 | 2 | 4 | 5 | 8 | 10 |
+  |---|---|---|---|---|---|---|
+  | 結果 | **安定(399)** | step6 | step3 | step2 | step2 | step2 |
+
+- **等エントロピー IC** (`gen_ic_isentropic.py`: 混合 R/Cp/s0 から (Pt,Tt) 等エントロピー再構成。T[283,509]・sub-200K=0): 熱力学的には妥当だが **連続の式 (ρuA=const) 非整合** (軸速度を sqrt(2Δh) から出したため)。no-slip 粘性壁では壁せん断ショック、inviscid+slip でも質量不整合で **cfl=1 でも発散** (`run_0097`/`run_0098`)。warm-start (mass-consistent) の方が安定。
+- **cfl ramp** (`run_0100_ramp_cflp*`: cfl=1 で落ち着いた `run_0099_ws_cflp1/res_400` から高 cfl 再起動): **cfl≥2 はやはり発散** (cfl=2→step7)。過渡限定でなく**構造的上限**。
+
+**まとめ**: 多成分 TP は (1) CEA 有効域 (>200K) の高温条件 + (2) `cfl_pseudo≤1` で**安定・物理的な定常場**が得られる (打ち手は有効)。ただし残差はプラトー品質 (厳密収束・高 cfl には要因2の恒久修正=species を block 同梱/緩和整合が必要)。等エントロピー IC を使うなら ρuA 連続を満たす quasi-1D 構成が要る。
+
+### エンタルピー基準オフセット (sensible-enthalpy datum) による安定化 (run_0101〜0109, 2026-06-19)
+
+**要因2 (多成分 implicit 結合不安定) への打ち手**として、各化学種のエンタルピー基準を
+`h_s(Tref=298.15K)=0` へ平行移動する **sensible-enthalpy datum** を実装 (config `physProp.thermoHrefTemp`、
+solver は NASA-9 係数 `a7` に焼き込み・全経路整合、Python IC 生成器は `gen_ic_2sp_from_n2.py` 第6引数で同一基準)。
+**狙い**: H2O の生成エンタルピー `h_H2O(298K)≈−13.4 MJ/kg` (N2/O2 は ≈0、`thermo_href_compare.png` 参照) が
+roe(block-DPLUR)/roY(point-implicit) の擬似時間緩和ミスマッチを増幅して Newton 温度ジャンプを起こすため、
+**桁違いの生成エンタルピーを除いて増幅を抑える**。非反応流では物理不変 (e_mix と Σh_s J_s* の基準移動が連続式で相殺)。
+
+同一 hot N2+H2O(1%) 場 (`run_0081/res_400` 由来、全>200K)・同一メッシュ・同一 BC で、絶対基準 (abs) と
+オフセット基準 (href) を `cfl_pseudo` スイープで比較 (全 native ビルド、要 `solverConfig.hpp` 変更後の full rebuild)。
+
+| run | 基準 | cfl_pseudo | 結果 (初 NaN step) |
+| --- | --- | --- | --- |
+| `run_0101_abs_cflp1`   | 絶対       | 1  | **400step 完走** (control = run_0099 再現) |
+| `run_0102_abs_cflp2`   | 絶対       | 2  | step6 発散 |
+| `run_0103_abs_cflp4`   | 絶対       | 4  | step3 発散 |
+| `run_0104_href_cflp1`  | オフセット | 1  | **400step 完走** |
+| `run_0105_href_cflp2`  | オフセット | 2  | **400step 完走** ← abs は step6 で落ちる cfl で安定化 |
+| `run_0106_href_cflp4`  | オフセット | 4  | step7 発散 (abs step3 より遅延) |
+| `run_0107_href_cflp5`  | オフセット | 5  | step4 発散 |
+| `run_0108_href_cflp8`  | オフセット | 8  | step3 発散 |
+| `run_0109_href_cflp10` | オフセット | 10 | step3 発散 |
+
+**結論 (打ち手は有効だが部分的)**:
+1. **安定 `cfl_pseudo` 上限が 1→2 へ向上** (abs は cfl2 で step6 発散、href は cfl2 で 400step 完走)。高 cfl (4,5,8,10) でも発散ステップが一貫して後退 (cfl4: step3→7 等)。**生成エンタルピーの増幅が安定性に効いている直接証拠**。
+2. **物理不変を確認**: 同一入力場の step0 再構成 (T,P,ρ,Ux) が abs と href で**機械精度一致** (T rel 1.2e-7, P 6.1e-8, ρ/Ux=0)。roe は基準分だけ平行移動 (`roe_abs−roe_href ≈ ρ·Y_H2O·h_ref(H2O)`, 整合 5%)。`roe/ρ` は abs の **−86〜−19 kJ/kg (負・桁落ち)** から href の **+61〜+127 kJ/kg (sensible・良条件)** へ。
+3. **限界**: 上限は 2× 止まりで `cfl_pseudo≥4` は依然発散、残差はプラトー品質 (`check_convergence.py`=NOT CONVERGED、単成分 run_0056 と同等)。**要因2 の構造的ミスマッチ自体は未解消** — オフセットは増幅振幅を下げるだけ。厳密収束・高 cfl には species を 5×5 block 同梱 (full coupling) が引き続き必要。
+
+図: `thermo_href_compare.png` (cp/h vs T・オフセット効果), `href_cfl_ceiling.png` (cfl 上限比較), 各 run の `residual_history.png`。
+**run_0101〜0109 は診断用** (恒久保持は不要、結論は本表)。
+
+### 化学種陰解法の緩和整合 (案B, matched-relaxation scalar-DPLUR) 検証 — run_0110 以降 (2026-06-19)
+
+**要因2 の恒久修正候補「案B (緩和整合)」の切り分け**。化学種 `ρY_s` を流れ block-DPLUR と**同一緩和**
+(同一凍結残差・`dt_local`・`implicitRelax`・`nStepInner` sweep) のスカラ DPLUR で前進させ、roe(block)/roY(点陰的)
+の擬似時間緩和ミスマッチを解消できるかを検証 (config `time.deltaT.speciesImplicitCoupling`, 既定 0=従来 segregated・
+ビット不変, 1=緩和整合)。実装は plan [`thermophysics-species-implicit-coupling.md`](../../plans/accepted/thermophysics-species-implicit-coupling.md)、
+docs `thermophysics/{theory §3.1, implementation §4b}`。全 native full rebuild。hot N2+H2O(1%, href ON)・同一場/BC。
+
+| run | 化学種更新 | cfl_pseudo | 結果 (初 NaN/最終 step) | 判定 |
+| --- | --- | --- | --- | --- |
+| `run_0110_match_cflp1`  | 緩和整合 (=1) | 1 | **400step 完走** (NaN無・T[288,504]・ΣY=1) | active (keeper) |
+| `run_0111_match_cflp2`  | 緩和整合 (=1) | 2 | **400step 完走** | active (keeper) |
+| `run_0112_match_cflp4`  | 緩和整合 (=1) | 4 | step7 発散 | 削除済み(2026-08-31) |
+| `run_0113_match_cflp5`  | 緩和整合 (=1) | 5 | step4 発散 | 削除済み(2026-08-31) |
+| `run_0114_match_cflp8`  | 緩和整合 (=1) | 8 | step3 発散 | 削除済み(2026-08-31) |
+| `run_0115_match_cflp10` | 緩和整合 (=1) | 10 | step3 発散 | 削除済み(2026-08-31) |
+| `run_0116_off_cflp1_regr` | 従来 (=0) | 1 | 400step 完走 (default-path 回帰) | 削除済み(2026-08-31) |
+| `run_0119_match_cflp3`  | 緩和整合 (=1) | 3 | step20 発散 | 削除済み(2026-08-31) |
+| `run_0120_off_cflp3`    | 従来 (=0) | 3 | step20 発散 | 削除済み(2026-08-31) |
+
+**単成分 N2 対照 (H2O 無・案B は構造的に no-op)**:
+
+| run | cfl_pseudo | 結果 | 用途 |
+| --- | --- | --- | --- |
+| `run_0117_1sp_n2_cflp2` | 2 | 400step 完走 | 単成分回帰 (新旧バイナリ ~atomicAdd 一致) |
+| `run_0118_1sp_n2_cflp3` | 3 | step55 発散 | 単成分 cfl3 上限 |
+| `run_0117_1sp_n2_cflp4` | 4 | step7 発散 | **単成分でも cfl4=step7** |
+
+**結論 (案B は要因2 の打ち手として無効 — 切り分け完了)**:
+1. **緩和整合は cfl 上限を一切動かさない**。matched (=1) と off (=0) の発散 step が**全 cfl で完全一致**
+   (cfl≤2 完走 / cfl3 step20=step20 / cfl4 step7=step7 / cfl5 step4 / cfl8,10 step3)。cfl1/2 の残差プラトーも
+   matched≡off (`check_convergence.py`=NOT CONVERGED, rms_roK/roOmega 上昇が律速で単成分と同型)。
+2. **cfl4 の壁は化学種起因ではない**。**単成分 N2 (H2O 完全に無し) も cfl4 で step7** に発散 (run_0117_cflp4)
+   = 2成分と同一。⚠️ **【2026-06-20 訂正】当初ここで「流れ+SST block-DPLUR 律速」と書いたが誤り** — その単成分 N2 も
+   `thermalMethod=2` (TP/NASA-9) だった。後続の CPG/TP 対照 (下節「ノズル CFL 上限」run_0121〜0155) で
+   **真の律速は `thermalMethod=2` (TP) であり、ノズル形状・乱流モデルではない**ことが判明
+   (CPG-SST は同一ノズルで cfl100 まで rms 1e-12 収束)。
+3. **案B が無効な機構**: 本ケースの組成は**完全に一様** (Y_N2=0.98905, Y_H2O=0.010950 が全セル同値, min=max)
+   → `res_roY≈0` → 化学種補正は matched/segregated どちらでも ~0。要因2 の H2O ペナルティは化学種**移流**の緩和ではなく、
+   **EOS エネルギー再構成** (Newton 反転の組成依存 h_mix) にある。移流緩和をそろえても触れない。
+4. cfl3 では 2成分 (step20) が単成分 (step55) より早く落ちる=残存する組成-エネルギー結合ペナルティはあるが、
+   **緩和率の統一では消えない** (cross-Jacobian ∂roe/∂roY が必要=案A 領域)。ただし cfl4 で単成分も壁に当たるため、
+   案A の上積み余地は流れ/SST 上限に頭打ち。**次の高優先は流れ/SST 陰解法の cfl 上限引き上げ** (cf.
+   `time_integration-implicit-stable-cfl.md` が flat_plate で cfl120 達成。hot ノズルで効かない理由の調査)。
+
+`speciesImplicitCoupling` は**既定 0 で温存** (本ケースでは無益だが、組成勾配の大きいケースで移流緩和が効く可能性は残すため
+削除せず flag-gated)。matched 経路の commit/再正規化/物理量は健全 (run_0110/0111 で NaN無・ΣY=1・T>200K 実証)。
+**run_0112〜0120 は診断用** (恒久保持不要、結論は本表)。keeper は run_0110/0111 (緩和整合の安定動作例)。
+図: 各 keeper の `residual_history.png`。
+
+## ノズル block-DPLUR CFL 上限 — 真因は thermalMethod (TP) であってノズル/乱流ではない (run_0121〜0155, 2026-06-20)
+
+「多成分/単成分 TP が cfl_pseudo 2〜3 で頭打ち」を、**ノズル形状そのものか・乱流モデルか・thermalMethod(TP)か**で
+切り分けた。**初期値は quasi-1D 等エントロピーで生成** (`gen_ic_isentropic_cpg.py`: 面積-マッハ関係から M(x) を解き
+P,T,ρ,u を等エントロピーで与える。ρuA=const を機械精度で満たし startup ショックが出ない)。1次風上・blockDPLUR・
+nStepInner=20・3000step・detectNaN。binary は `.build-native/relwithdebinfo/forge`。
+
+### Test 1/2: CPG (定数 cp) は乱流の有無に関係なく cfl 100〜200 まで深く収束
+
+| cfl_pseudo | 2 | 5 | 10 | 20 | 50 | 100 | 200 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **inviscid Euler** (run_0121〜0127) rms_ro fin | 5.3e-12 | 2.0e-12 | 1.9e-12 | 2.0e-12 | 2.2e-12 | 2.4e-12 | **2.7e-12** |
+| **SST 粘性乱流** (run_0131〜0136) rms_ro fin | 1.0e-10 | 2.5e-11 | 5.9e-12 | 2.3e-12 | 2.1e-12 | **2.2e-12** | — |
+
+- inviscid (`nozzle_2d.h5` 全slip, `ic_isen_cpg.h5`, Tt=293) は全 cfl で **rms_ro 5 桁低下→1e-12 (float32 floor)・NaN無**。
+  exit M=1.97 (等エントロピー 2.0 と一致)。
+- SST (`nozzle_2d_sst.h5` no-slip, `ic_isen_cpg_sst.h5`) も同様に **cfl100 まで深く収束** (rms_roOmega も 6.3 桁低下)。
+  → **ノズル超音速流も SST 乱流も block-DPLUR の cfl 上限を律速しない**。cfl2-3 の壁は別要因。
+- 注: `check_convergence.py` は floor 到達 (5 桁低下後フラット) を "NOT CONVERGED(plateau)" と誤判定する。
+  実体は機械精度収束 (TP の 0.5 桁プラトーとは別物)。
+
+### 対照 (decisive): 同一ノズル・同一 SST・同一 hot 等エントロピー IC で thermalMethod だけ変える
+
+`nozzle_2d_sst.h5` + SST + hot 等エントロピー IC (Pt=59070, Tt=500 → 全 T>200K で sub-200K 外挿を排除)。
+**唯一の差は `thermalMethod`** (0=CPG / 2=TP NASA-9・単成分 N2)。IC は `ic_isen_cpg_hot.h5` / `ic_isen_tpN2_hot.h5`
+(後者は前者の ρ,u を保ち roe のみ NASA-9 N2 の e(T) に置換、`cpg_to_tpN2_roe.py`)。
+
+| cfl_pseudo | 2 | 5 | 20 | 50 | 100 |
+| --- | --- | --- | --- | --- | --- |
+| **CPG (=0)** (run_0141〜0145) rms_ro fin | 5.4e-11 | 1.3e-11 | 2.5e-12 | 1.5e-12 | **1.4e-12** ✓ |
+| **TP/NASA-9 (=2)** (run_0151〜0155) | 9.6e-8 *(plateau)* | **発散 step14** | 発散 step5 | 発散 step3 | 発散 step3 |
+
+**結論 (真因 = thermalMethod=2 の TP 熱力学が block-DPLUR を律速)**:
+1. **cfl 上限もプラトーも TP 固有**。同一ノズル・SST・IC で CPG は cfl100 まで rms 1e-12 収束、TP は **cfl2 でも
+   1e-7 プラトー (収束しない)・cfl≥5 で発散**。ノズル形状・乱流モデル・初期値 (等エントロピー fresh IC で restart 過渡も排除) は
+   すべて無罪。
+2. **TP cfl2 のプラトー 9.6e-8 は元の「行き詰まり」runs (run_0093/0101 等) と同レベル** → あの残差プラトーも
+   SST ではなく **TP 律速**だった (CPG-SST は機械ゼロまで落ちる)。
+3. **機構 (推定)**: block-DPLUR の 5×5 Jacobian は CPG 閉形式 (`chi=(γ-1)/sonic`) を **per-cell 凍結 γ[ic]=γ_mix(T)** で
+   流用している。CPG は γ 厳密一定ゆえ Jacobian が厳密で機械収束。TP は γ=γ(T) が変動し、かつ T が毎ステップ NASA-9
+   Newton 反転で決まるため、凍結 γ の線形化が実 EOS 微分 (∂P/∂(ρe), ∂P/∂ρ) と不整合 → 線形化誤差が残差プラトーを作り、
+   高 cfl で増幅して発散。**恒久修正の方向 = block-DPLUR Jacobian に TP EOS 微分を整合的に入れる** (frozen-γ 流用をやめ、
+   ∂P/∂(ρe)=γ_eff−1 等を TP の実微分で評価する)。これは要因2 (組成-エネルギー結合) よりも上位の律速。
+
+run keeper: run_0121/0126 (inviscid), run_0131/0136 (SST), run_0141/0145 (CPG hot), run_0151 (TP hot プラトー実証)。
+他は cfl 掃引の診断用 (破棄可)。図: 各 keeper の `residual_history.png`。IC 生成: `gen_ic_isentropic_cpg.py`,
+`cpg_to_tpN2_roe.py`。
+
+## 一般EOSヤコビアンで TP 陰解法律速を根治 (run_0161〜0166, 2026-06-20)
+
+上節で「TP の cfl≈2 頭打ち・残差プラトーの真因は block-DPLUR の固有系が CPG 専用 (`h=c²/(γ−1)`,
+`∂P/∂ρ|_e=0` を仮定)」と確定したのを受け、**一般EOS固有系**を実装 (plan
+[`time_integration-general-eos-jacobian.md`](../../plans/accepted/time_integration-general-eos-jacobian.md))。
+音響右固有ベクトルのエネルギーに実全エンタルピー `Ht`、左密度成分に `χ=c²−κh` を入れる**閉形式**3項改変
+(`accumulate_split_jacobian_cf`、`generalEOS=thermalMethod==2` で分岐、CPG ビット不変)。閉形式は数値 LU・FD と
+機械精度一致を host 単体テスト (`tools/test_eos_jacobian.cpp`) で確認済。
+
+同一ノズル (`nozzle_2d_sst.h5`)・SST・hot 等エントロピー IC (`ic_isen_tpN2_hot.h5`, Tt=500) で:
+
+| cfl_pseudo | 2 | 5 | 20 | 50 | 100 |
+| --- | --- | --- | --- | --- | --- |
+| **TP 旧** (CPG 形 Jacobian) | 9.6e-8 *(plateau)* | 発散 s14 | 発散 s5 | 発散 s3 | 発散 s3 |
+| **TP 新** (一般EOS, run_0161〜0165) rms_ro | 5.6e-11 | **3.3e-11** | 3.7e-11 | 3.9e-11 | **3.8e-11** |
+
+**結論 (TP 律速を根治)**:
+1. **cfl 上限 2→≥100**: 新 TP は cfl 2/5/20/50/100 すべて 3000step 完走・NaN 無 (旧は cfl5 で step14 発散)。
+2. **残差プラトー突破**: 9.6e-8 → ~4e-11 (**3.6 桁改善**)。rms_roe 3.7 桁・rms_roOmega 5.6 桁低下。物理健全
+   (T∈[296,505]K, 超音速, exitM≈1.15=SST 閉塞)。
+3. **CPG 回帰** (`run_0166` vs 旧 `run_0143`): rms_ro 2.4816e-12 vs 2.4821e-12 = ~atomicAdd 一致
+   (`generalEOS=0` は旧コードと同一・ビット不変)。
+4. **残差床は別トラック**: 新 TP は ~4e-11 で下げ止まり (CPG は 1.4e-12)。これは Jacobian でなく NASA Newton
+   反転・単精度 EOS 評価の床 (レビュー予測どおり)。後続課題。
+
+keeper: run_0161/0163/0165 (TP 新, cfl2/20/100)・run_0166 (CPG 回帰)。図: 各 `residual_history.png`。
+IC: `gen_ic_isentropic_cpg.py` + `cpg_to_tpN2_roe.py`。実装: `cuda_forge/eos_jacobian_d.cuh`,
+`timeIntegration_d.cu`, 検証 `tools/test_eos_jacobian.cpp`。
+```
+
+## 出力形式
+
+1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。
+2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。
+3. 推奨 (1 つに絞る)。
+4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。

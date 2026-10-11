@@ -1,6 +1,6 @@
 # codex レビュー: tooling-sern-te-wake-grid (result)
 
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **stage**: `result` (diff base `main`)
 - **date**: 2026-10-11
 - **commit**: `f78b7eef` (feature/sern-design)
@@ -63,9 +63,9 @@
 
 5. **Minor — 現行手順と残作業の記述が整理されていない**
 
-   **根拠:** [plan:102](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:102) の同じ行に、g4 への `interp_field` を禁止する判断と、それを実行する旧手順が併存しています。§6 の説明も、現在の g3 の起点 `run_1055` に対して `run_1079` のままです。
+   **根拠:** [plan:102](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:102) の同じ行に、g4 への `interp_field` を禁止する判断と、それを実行する旧手順が併存しています。§6 の説明も、現在の g3 の起点 `run_1055` に対して `run_1079` のままです。
 
-   さらに、[plan:165](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:165) に識別粒度の未決事項と、EOS 床の commit 問題の「別 plan 未起票」が残っています。一方、2D・ghost 初期化の移管先は存在し、`plans/README.md` に登録されています。
+   さらに、[plan:165](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:165) に識別粒度の未決事項と、EOS 床の commit 問題の「別 plan 未起票」が残っています。一方、2D・ghost 初期化の移管先は存在し、`plans/README.md` に登録されています。
 
    **対案:** §5.1 を現在の完了・未完了・移管先が分かる表に整理し、旧手順は履歴として明示してください。識別粒度の決着と EOS commit 問題の追跡先を残すこと。また、[methods/design/overview.md:894](/home/sano/work/forge-sern-design/methods/design/overview.md:894) の「g3/g4 で冷点が消え」は、「g3 で消失、g4 の別起動履歴でも冷点なし」に限定すべきです。
 

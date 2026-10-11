@@ -1,6 +1,6 @@
 # 諮問: g4 の初期場の作り方 (cross-mesh の最近傍補間はカウルの双子節点を取り違える) (2026-10-11)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §5.1 #4・§6 #4 (g4 は「run_1079 の最終場から interp_field」と書いた。codex diagnose `2026-10-08-te-wake-ab-result-diagnose.md` の提案)。エスカレーション条件 4 (承認済みの手順からの変更)。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #4・§6 #4 (g4 は「run_1079 の最終場から interp_field」と書いた。codex diagnose `2026-10-08-te-wake-ab-result-diagnose.md` の提案)。エスカレーション条件 4 (承認済みの手順からの変更)。
 
 ## 観測事実
 - `solver_density_cuda/tools/interp_field.py` は KD-tree の最近傍 (3D は x,y,z) で原始量を移し、座標が一致する 2 節点は区別しない (双子の対策の引数は無い、grep で確認)。

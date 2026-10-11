@@ -1,6 +1,6 @@
 # codex レビュー: tooling-sern-te-wake-grid (result)
 
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **stage**: `result` (diff base `main`)
 - **date**: 2026-10-12
 - **commit**: `4257ae4d` (feature/sern-design)
@@ -51,7 +51,7 @@
 
 4. **Minor —「既存 YAML・run には影響しない」は適用範囲を過小に書いている**
 
-   **根拠:** [`plan:174`](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:174) は、blend の既定値が０であることから変更全体を無影響としています。しかし R2f〜R2h は、blend の指定にかかわらず、必須量・実効 config・力の部品が欠ける既存評価の判定を変えます。[`evaluate_gates:813`](/home/sano/work/forge-sern-design/design/forge_design/metrics/sern_gates.py:813)
+   **根拠:** [`plan:174`](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:174) は、blend の既定値が０であることから変更全体を無影響としています。しかし R2f〜R2h は、blend の指定にかかわらず、必須量・実効 config・力の部品が欠ける既存評価の判定を変えます。[`evaluate_gates:813`](/home/sano/work/forge-sern-design/design/forge_design/metrics/sern_gates.py:813)
 
    **対案:** 「既定の格子形状は不変」と「受理検査は既存経路にも適用」を分け、再判定で不合格になり得る入力を明記してください。
 

@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`methods/architecture/overview.md`](../../methods/architecture/overview.md)
 - **related_plans**:
-  - 起点: [`tooling-sern-te-wake-grid.md`](tooling-sern-te-wake-grid.md) §5.1 #2・#8 (EOS の凍結入力の比較で発見、2026-10-08〜10)
+  - 起点: [`tooling-sern-te-wake-grid.md`](../accepted/tooling-sern-te-wake-grid.md) §5.1 #2・#8 (EOS の凍結入力の比較で発見、2026-10-08〜10)
 - **created**: `2026-10-11`
 - **owner**: `CFD Dev (Claude セッション: SERN 3D)`
 

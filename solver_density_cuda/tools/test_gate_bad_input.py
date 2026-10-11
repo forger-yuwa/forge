@@ -448,7 +448,7 @@ def write_floor_csv(d, N, path="steady_implicit", events=None, drop=(), end=True
 
 def floor_events_bad_input():
     """毎更新の床事象の判定 (check_floor_events.judge) が **記録の欠け・区間の欠け・未検証の経路を合格にしない** こと
-    (plans/active/tooling-sern-te-wake-grid.md §4「床の判定」、§5.1 #2)。記録が無いことを 0 件として扱わない。"""
+    (plans/accepted/tooling-sern-te-wake-grid.md §4「床の判定」、§5.1 #2)。記録が無いことを 0 件として扱わない。"""
     import shutil
     import check_floor_events as fe
     print("=== check_floor_events: 不正入力 ===")

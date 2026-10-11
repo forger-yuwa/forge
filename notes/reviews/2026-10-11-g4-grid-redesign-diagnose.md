@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): g4-grid-redesign
 
 - **brief**: [`notes/reviews/briefs/2026-10-11-g4-grid-redesign.md`](../../notes/reviews/briefs/2026-10-11-g4-grid-redesign.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-11
 - **commit**: `d30ca2d2` (feature/sern-design)
 - **codex**: effort `xhigh`, 8.0 min, rc=0
@@ -18,7 +18,7 @@
 |---|---|---|
 | **Major** | **(a) を次の格子診断として採用** | メッシャは中間線の変更に伴い、帯全体の分布を再計算している。[層配置:271](/home/sano/work/forge-sern-design/design/forge_design/meshing/mesh_sern3d.py:271)。後述の再生成では、変位の局所化だけで新規低値・既存低値の悪化をともに 0 にできた。まずこの候補を実入力で確認する。 |
 | **Major** | **「新規低値 0 なら投入」は却下** | 基準格子に既に **40,700 個**の 0.65 未満がある。[比較記録:12](/home/sano/work/forge-sern-design/notes/investigations/2026-10-11-g4-admission/HEX_COMPARE.json:12)。現行条件は**全域最小 ≥ 0.65**なので、局所化しても合格にはならない。局所変形の合否と基準格子の受入れを分ける。 |
-| **Major** | **新方式への g3 実績の持ち越しは却下** | 変位の分布を変えると、同じ中間線でも別の格子になる。g3 にも同じ法則を適用し、格子検査と冷点の消失を再確認する。旧 `run_1079` は旧方式の成功例として保存する。[受入れ条件:115](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:115)。 |
+| **Major** | **新方式への g3 実績の持ち越しは却下** | 変位の分布を変えると、同じ中間線でも別の格子になる。g3 にも同じ法則を適用し、格子検査と冷点の消失を再確認する。旧 `run_1079` は旧方式の成功例として保存する。[受入れ条件:115](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:115)。 |
 | **Major** | **AR 外れ値の生産受入れは要再検証** | 「変形領域外・A/B 同一」は非増悪の証拠であり、無害性の証拠ではない。最大 **12,865.6** は「AR ≤ 5000 の緩和」だけでは説明できない。`SOFT-PASS` の局所外れ値として位置・形状・来歴を別に記録する。[品質記録:4](/home/sano/work/forge-sern-design/notes/investigations/2026-10-11-g4-admission/run_1081_tewake_g4_B10_m10/MESH_QUALITY.txt:4)、[手順:382](/home/sano/work/forge-sern-design/procedures/calculation-workflow.md:382)。 |
 | **Minor** | **(b)・(c) を第一手にする案は却下** | 今回の予備測定では、層数・第一層ブレンド・Hermite 曲線を変えずに追加劣化を除けた。先に変更範囲を広げる根拠がない。ただし、基準格子の品質を受け入れられなければ (b) は残る。 |
 
@@ -83,6 +83,6 @@ g3 も同じ法則で作り直す。冷点消失の再確認は、冷点を含�
 - **AR 外れ値の「領域外」は、無害という意味ではない。** 再生成では、251 個は入口境界の節点に接し、残る 440 個は x/H = **10.8069〜11.8348**にある。全件で最短辺は主に y、最長辺は x 方向。各群の最大 skew は **0.1846／0.00842**だった。記録には「閾値5000で `SOFT-PASS`、超過691個＝0.02213%、最大12865.6、位置・セル集合・変形による非増悪」を書く。**「AR ≤ 5000 を満たす」とは書かない。**
 - 旧 g4 との連続性より、現在の受入れ条件が優先する。旧 `run_0970/0972` の実績だけで現在の m10_on を保証しない。
 
-不足情報: AWS の実入力 HDF5 による局所化候補の判定、基準格子の低値セル・AR 外れ値の受入れ根拠、新方式での g3 の流れ検証。時間積分には、別途停止条件になっている **有限化 g3 入力での EOS 比較の合格**も必要。[停止条件:98](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:98)。
+不足情報: AWS の実入力 HDF5 による局所化候補の判定、基準格子の低値セル・AR 外れ値の受入れ根拠、新方式での g3 の流れ検証。時間積分には、別途停止条件になっている **有限化 g3 入力での EOS 比較の合格**も必要。[停止条件:98](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:98)。
 
 **ファイル変更・`forge` 起動なし。plan 未反映。** 呼び出し側で `tooling-sern-te-wake-grid.md` §4・§5.1 #4/#4b・§6 に採否と事前登録を反映すること。

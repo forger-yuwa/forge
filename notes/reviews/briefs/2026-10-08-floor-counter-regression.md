@@ -1,6 +1,6 @@
 # 諮問: 床事象のカウンタ (出力専用) の回帰で TP の時間発展が判定不能 — 受入れの物差し (2026-10-08)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §5.1 #2 (回帰の事前登録: 決定的な比較はビット一致、組立残差・時間発展は `procedures/verification/README.md` の「振る舞いを変えないはずの変更の回帰」)。エスカレーション条件 3 (事前に書いた比較が判定不能)。実装 commit 0ffc1a21。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #2 (回帰の事前登録: 決定的な比較はビット一致、組立残差・時間発展は `procedures/verification/README.md` の「振る舞いを変えないはずの変更の回帰」)。エスカレーション条件 3 (事前に書いた比較が判定不能)。実装 commit 0ffc1a21。
 
 ## 観測事実 (実装担当の測定、スクリプト scratch `regress_floor_events.py`、記録 `regress_*/REGRESSION*.txt`・`frozen_width.json(.sha256)`)
 - 変更: EOS カーネル (`dependentVariables_d.cu`) に出力専用の計数 (`fe.acc == nullptr` なら計数しない分岐)、終了時の監査 (コピー上)、記録の書き出し。数値は変えない設計。

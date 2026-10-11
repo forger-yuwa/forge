@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """毎更新の EOS 床事象ゲートの単体テスト (design/.venv-opt の Python で実行)。
 
-plans/active/tooling-sern-te-wake-grid.md §4「床の判定」(2026-10-08 のやり直し)・§5.1 #2 (codex plan レビュー M1・M2):
+plans/accepted/tooling-sern-te-wake-grid.md §4「床の判定」(2026-10-08 のやり直し)・§5.1 #2 (codex plan レビュー M1・M2):
 `sern_gates.floor_event_gate` / `evaluate_gates(require_floor_events=...)` が、生産系列で
 「途中で 1 件・最終場は正常」「記録の欠落」「restart 後の区間の欠落」を拒否し、全 0 件だけを通すこと。
 既存の呼び出し (必須にしない既定) の合否は変えないこと。runner の config・metrics の要約・driver の台帳までの接続。

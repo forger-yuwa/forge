@@ -1,6 +1,6 @@
 # 諮問: 毎更新の床補正のカウンタの定義のやり直し (定常陰解法では床が保存量に commit されない) (2026-10-08)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §4「床の判定」・§5.1 #2・§6 #1、起点 `plans/active/convection-zero-thickness-edge-reconstruction.md` §5 の 3。codex plan レビュー `notes/reviews/2026-10-08-tooling-sern-te-wake-grid-plan.md` M1・M2。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §4「床の判定」・§5.1 #2・§6 #1、起点 `plans/active/convection-zero-thickness-edge-reconstruction.md` §5 の 3。codex plan レビュー `notes/reviews/2026-10-08-tooling-sern-te-wake-grid-plan.md` M1・M2。
 エスカレーション条件 1 (§4・§6 の定義の変更)。
 
 ## 観測事実 (実装担当のコード読み、編集なし。SERN 生産設定 = node・TP・unsteady 0・timeIntegration 11・blockDPLUR 1・nStepInner 5・pMin 20、例 `case/46.sern_design/run_0446_3d_gs050_flag1/solverConfig.yaml`)

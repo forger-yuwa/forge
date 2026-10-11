@@ -1,6 +1,6 @@
 # 諮問: g3 継続場の EOS ビット比較 — 全配列 0 バイト差だが v2 で INVALID (遠方境界の ghost の roe が NaN) (2026-10-11)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §5.1 #2「規則の改訂と追加の試験」(4) と #8 (ghost の初期化の欠落)。判断の記録 `notes/reviews/2026-10-08-eos-dump-rule-diagnose.md` (v2 = 読む入力の pre・全書き込み先の post の有限性、壁・ghost を除外しない、差分 0 バイト)。エスカレーション条件 3。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #2「規則の改訂と追加の試験」(4) と #8 (ghost の初期化の欠落)。判断の記録 `notes/reviews/2026-10-08-eos-dump-rule-diagnose.md` (v2 = 読む入力の pre・全書き込み先の post の有限性、壁・ghost を除外しない、差分 0 バイト)。エスカレーション条件 3。
 記録の写し `notes/investigations/2026-10-08-eos-dump/g3/` (SUMMARY.json・cmp_*.txt/json・prepare.log・INPUT.json)。
 
 ## 実施 (AWS-B、2026-10-10 UTC)

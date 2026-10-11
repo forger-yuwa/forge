@@ -1,6 +1,6 @@
 # codex レビュー: tooling-sern-te-wake-grid (result)
 
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **stage**: `result` (diff base `main`)
 - **date**: 2026-10-12
 - **commit**: `3c640956` (feature/sern-design)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""毎更新の EOS 床事象の判定 (記録 `floor_events.csv` を読む; plans/active/tooling-sern-te-wake-grid.md §4「床の判定」・§6 #1)。
+"""毎更新の EOS 床事象の判定 (記録 `floor_events.csv` を読む; plans/accepted/tooling-sern-te-wake-grid.md §4「床の判定」・§6 #1)。
 
 forge の `output: {floorEvents: 1}` が run ディレクトリに追記する `floor_events.csv` (書式は
 `cuda_forge/floorEvents_d.cu` 冒頭) から、**判定区間 (a, b] の全更新・全実節点で床事象が 0 件か**を判定する。

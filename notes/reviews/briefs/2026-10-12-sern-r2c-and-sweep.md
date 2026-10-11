@@ -1,7 +1,7 @@
 # 諮問ブリーフ: R2c (実 GPU の延長経路) の解釈と、同じ型の欠陥の残り (R2h) の切り分け
 
 - 日付: 2026-10-12、ブランチ `feature/sern-design`、commit `9081e272`
-- 関連 plan: [`plans/active/tooling-sern-te-wake-grid.md`](../../../plans/active/tooling-sern-te-wake-grid.md) §5.1 R2〜R2h・§6 #11
+- 関連 plan: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../../plans/accepted/tooling-sern-te-wake-grid.md) §5.1 R2〜R2h・§6 #11
 - 前回の諮問: [`notes/reviews/2026-10-12-sern-judgment-path-diagnose.md`](../2026-10-12-sern-judgment-path-diagnose.md) (M1〜M3・Minor を全件採用 → R2a〜R2e)
 - 諮る理由: AGENTS.md 条件 7 (result 段の解釈を確定する前)。R2c の担当は「解釈は F」、R2h は「切り分けは F」。
 

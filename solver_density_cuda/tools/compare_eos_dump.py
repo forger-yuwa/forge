@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """EOS 1 回の前後の全 cell 配列のダンプ (FORGE_DUMP_EOS_STEP / FORGE_DUMP_EOS_FILE) を 2 つ比べ、ビット一致かを判定する。
 
-plans/active/tooling-sern-te-wake-grid.md §5.1 #2 の「凍結入力に対する EOS 1 回の全出力のビット比較」の比較器。
+plans/accepted/tooling-sern-te-wake-grid.md §5.1 #2 の「凍結入力に対する EOS 1 回の全出力のビット比較」の比較器。
 ダンプの形式は solver_density_cuda/eosDump.hpp (`/pre/<名前>`・`/post/<名前>` = var.c_d の全配列、nCells_all 長、
 `/db/*` = 物性 DB のバイト列、ルートの属性 = EOS が読む設定・経路・solverConfig.yaml の本文)。
 

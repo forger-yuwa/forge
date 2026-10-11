@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """床事象のカウンタの「計測の閉じ方」の小型 A/B と単体試験 (GPU と小さい node のケースが要る)。
 
-plans/active/tooling-sern-te-wake-grid.md §5.1 #2 の事前登録 (codex diagnose 2026-10-08):
+plans/accepted/tooling-sern-te-wake-grid.md §5.1 #2 の事前登録 (codex diagnose 2026-10-08):
 2 更新だけ回し、**最後の commit の 1 内部節点の ρE だけ**を変えて直後に終了する (密度・運動量・組成・種 DB・
 前処理は固定)。A 枝は床エネルギーより十分上、B 枝は十分下 (差は c_v(T_min)×1 K 以上かつ格納 ρE の 64 ULP 以上)。
 合格 = A 枝 0 件、B 枝は最後の更新 (監査行 q_index 2)・指定節点に温度床 1 件、コピー上の EOS も床到達

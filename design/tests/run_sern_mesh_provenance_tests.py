@@ -504,7 +504,7 @@ def n_learn(rows, te="off", req=None, co=()):
     return len(D.SernCampaign._XF(Fake(rows, te, req, co))[0])
 
 
-A6 = {"op": "m6_on", "from_eval_method": "legacy", "check_6": "PASS", "check_7": "PASS", "evidence": "plans/active/tooling-sern-te-wake-grid.md §6 #6・#7"}
+A6 = {"op": "m6_on", "from_eval_method": "legacy", "check_6": "PASS", "check_7": "PASS", "evidence": "plans/accepted/tooling-sern-te-wake-grid.md §6 #6・#7"}
 for label, rows, te, req, co, want in (
         ("(a) 修正後の系列: 同じ id の 2 設計点 (格子署名は違う) は両方採る", [row_({k: op_() for k in OPS2}, x) for x in (0.1, 0.2)], ON, ID_NEW, (), 2),
         ("(b) 修正後の系列: 識別の導入前の行 (格子変形なし) は外す", [row_({k: op_("legacy") for k in OPS2})], ON, ID_NEW, (), 0),

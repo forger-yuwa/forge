@@ -1,6 +1,6 @@
 # 諮問: g4 の投入条件で「スケール済みヤコビアンの最小 ≥ 0.65」だけ FAIL — 基準の 0 格子も同値 (2026-10-11)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §5.1 #4 (g4 の投入条件は g4 の 0 格子を基準に `--admission`)、起点 plan `convection-zero-thickness-edge-reconstruction.md` §6.0 の投入条件の表 (codex diagnose 2026-10-08 te-wake-blend-length で事前登録。0.65 は g3 の再生成値 0.67245 を見て決めた)。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #4 (g4 の投入条件は g4 の 0 格子を基準に `--admission`)、起点 plan `convection-zero-thickness-edge-reconstruction.md` §6.0 の投入条件の表 (codex diagnose 2026-10-08 te-wake-blend-length で事前登録。0.65 は g3 の再生成値 0.67245 を見て決めた)。
 事前の規則: 1 つでも外れたら投入しない (判定不能、L_b を変えて再挑戦しない — 諮り直す)。エスカレーション条件 3。記録の写し `notes/investigations/2026-10-11-g4-admission/`。
 
 ## 観測事実 (AWS-B、HEAD d734392d のメッシャ、現行の変換器 36b061b9)

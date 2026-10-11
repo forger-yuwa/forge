@@ -1,7 +1,7 @@
 # 諮問ブリーフ: SERN 生産の判定区間の経路 (plan tooling-sern-te-wake-grid §5.1 R2) と受入れへの進め方
 
 - 日付: 2026-10-12、ブランチ `feature/sern-design` (作業ツリー `/home/sano/work/forge-sern-design`)
-- 関連 plan: [`plans/active/tooling-sern-te-wake-grid.md`](../../../plans/active/tooling-sern-te-wake-grid.md) (§4・§5.1 R1〜R3・#7・§6・§6.1)
+- 関連 plan: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../../plans/accepted/tooling-sern-te-wake-grid.md) (§4・§5.1 R1〜R3・#7・§6・§6.1)
 - 前回の result レビュー: [`notes/reviews/2026-10-11-tooling-sern-te-wake-grid-result.md`](../2026-10-11-tooling-sern-te-wake-grid-result.md) (NO-GO、M1〜M3 を全件採用 → R1〜R3)
 - 諮る理由: R2 の担当は「O (経路の設計は F)」。実装担当が経路の設計で 8 点を選んだので、その採否を決める (AGENTS.md エスカレーション条件 1・7)。あわせて、この plan を result 段の再レビューに回してよいかを決める。
 

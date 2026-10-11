@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): sern-r2c-and-sweep
 
 - **brief**: [`notes/reviews/briefs/2026-10-12-sern-r2c-and-sweep.md`](../../notes/reviews/briefs/2026-10-12-sern-r2c-and-sweep.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-12
 - **commit**: `dfac3c32` (feature/sern-design)
 - **codex**: effort `high`, 3.8 min, rc=0

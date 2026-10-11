@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): eos-dump-rule
 
 - **brief**: [`notes/reviews/briefs/2026-10-08-eos-dump-rule.md`](../../notes/reviews/briefs/2026-10-08-eos-dump-rule.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-08
 - **commit**: `24a843f4` (feature/sern-design)
 - **codex**: effort `high`, 4.1 min, rc=0
@@ -18,7 +18,7 @@
 | Major | 有限性を「読む入力の pre」「書き込み先の post」に限定する | **採用。ただし EOS 単体の非干渉判定に限定する。** TP の `gamma`・`cp` は既存値を読まず上書きする（[dependentVariables_d.cu:251](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/dependentVariables_d.cu:251)）。現比較器は引数配列の pre/post 全部に有限性を要求している（[compare_eos_dump.py:162](/home/sano/work/forge-sern-design/solver_density_cuda/tools/compare_eos_dump.py:162)）。読み書き集合をコードから固定し、**壁・ghost を含む全書き込み先の比較、未変更入力の不変検査、差分 0 バイトは維持**する。旧 `INVALID` は保存し、改訂規則の再判定を別記する。 |
 | Major | ghost の NaN を無害として別件化する | **別件化は採用、無害の認定は却下。** EOS が読まないことと、ソルバ全体が読まないことは別。初期化では EOS 直後に `gasProperties` が呼ばれ（[main.cpp:1851](/home/sano/work/forge-sern-design/solver_density_cuda/main.cpp:1851)）、別の設定経路には ghost を含め `cp_array` を読む処理がある（[gasProperties_d.cu:84](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/gasProperties_d.cu:84)、同:94・104）。今回の `viscMethod: 2` でその経路による汚染を確認したわけではない。**EOS 比較規則の変更は認めるが、初期化全体の健全性は別途参照順序を監査する。** |
 | Major | B 枝の受入れ方法 | **(b) を採用。(c) は却下、(a) は今回の受入れ試験には採らない。** 初期化 EOS が床を適用してから基準状態へ保存する（[main.cpp:1846](/home/sano/work/forge-sern-design/solver_density_cuda/main.cpp:1846)、同:1876）。初期化位置へのダンプ移動は、境界ピン後という登録条件を変え、ghost の組成未設定も持ち込む。**診断専用の再生経路で境界ピン後の凍結状態を読み込み、EOS 1 回で終了する。** |
-| Major | 同じ規則で AWS の g3 へ進む | **改訂規則での EOS ダンプ比較は採用。g3/g4 の時間積分による検証への移行は要再検証。** 登録入力には g3 継続場が明記されている（[plan:84](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:84)）。直接の床下比較と g3 の比較を通してから移行する。TP 時間発展の回帰は「判定不能」のまま残す。 |
+| Major | 同じ規則で AWS の g3 へ進む | **改訂規則での EOS ダンプ比較は採用。g3/g4 の時間積分による検証への移行は要再検証。** 登録入力には g3 継続場が明記されている（[plan:84](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:84)）。直接の床下比較と g3 の比較を通してから移行する。TP 時間発展の回帰は「判定不能」のまま残す。 |
 
 結論: **有限性規則を EOS の読み書きに合わせて改訂し、(b) の診断専用再生で「本当に床下の凍結入力」に対する旧版／新版 EOS 1 回の直接比較を行う。**
 
@@ -41,4 +41,4 @@
 
 呼び出し側の前提への異議: **「全 7 入力が改訂規則でビット一致」と「登録した床上下の試験を完了」は同義ではない。** 現結果が示すのは、初期化を通過した状態に対する一致であり、床下入力に対する EOS の全出力一致ではない。
 
-不足情報: g3 の比較結果と、床下入力を直接与えた比較結果。保存比較記録 42 組は確認したが、元ダンプが残る旧新 4 組だけを独立に再計算できた。**plan 未反映**。呼び出し側で `plans/active/tooling-sern-te-wake-grid.md` §5.1 #2・§6.1 に規則改訂、直接比較、適用範囲を記録する。
+不足情報: g3 の比較結果と、床下入力を直接与えた比較結果。保存比較記録 42 組は確認したが、元ダンプが残る旧新 4 組だけを独立に再計算できた。**plan 未反映**。呼び出し側で `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #2・§6.1 に規則改訂、直接比較、適用範囲を記録する。

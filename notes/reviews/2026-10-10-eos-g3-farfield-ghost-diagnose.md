@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): eos-g3-farfield-ghost
 
 - **brief**: [`notes/reviews/briefs/2026-10-11-eos-g3-farfield-ghost.md`](../../notes/reviews/briefs/2026-10-11-eos-g3-farfield-ghost.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-10
 - **commit**: `4935db8b` (feature/sern-design)
 - **codex**: effort `high`, 2.5 min, rc=0
@@ -17,7 +17,7 @@
 |---|---|---|
 | **Major** | 現在の g3 比較を合格とする | **却下。`INVALID` を維持する。** 5 組とも差分 0 バイトだが、`roe/T` の pre と `roe/T/P/Ht/sonic/gamma/cp` の post に各 51,143 点の非有限がある（[比較記録:12](/home/sano/work/forge-sern-design/notes/investigations/2026-10-08-eos-dump/g3/w/cmp_old_r1_vs_new_r1.txt:12)、[同:42](/home/sano/work/forge-sern-design/notes/investigations/2026-10-08-eos-dump/g3/w/cmp_old_r1_vs_new_r1.txt:42)）。EOS は ghost を含め `roe/T` を実際に読む（[dependentVariables_d.cu:76](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/dependentVariables_d.cu:76)、同:93・126）。前回の書き込み専用配列の除外とは異なる。**有限で整合した ghost を持つ共通入力で再生比較する。** |
 | **Major** | farfield ghost の問題を #8 に含める | **採用。ただし同一原因の確定は保留。** 初期化 EOS は境界条件より先に走り（[main.cpp:1846](/home/sano/work/forge-sern-design/solver_density_cuda/main.cpp:1846)、同:1857）、farfield の状態境界処理は何もしない（[boundaryCond.cpp:498](/home/sano/work/forge-sern-design/solver_density_cuda/boundaryCond.cpp:498)）。#8 を「ghost の熱力学状態・物性の初期化と参照順序」に広げ、farfield の `roe/T` 残留を子項目にする。 |
-| **Major** | `GATES PASS` を理由に #4 へ進む | **現時点では却下。** g3 比較の合格が時間積分の前提として明記されている（[plan:93](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:93)）。また farfield 流束が ghost を読まなくても、EOS・`gasProperties` は読む（[gasProperties_d.cu:84](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/gasProperties_d.cu:84)、同:111・121）。**まず下記 A/B を完了する。合格しても #8 の無害性を証明したことにはしない。** |
+| **Major** | `GATES PASS` を理由に #4 へ進む | **現時点では却下。** g3 比較の合格が時間積分の前提として明記されている（[plan:93](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:93)）。また farfield 流束が ghost を読まなくても、EOS・`gasProperties` は読む（[gasProperties_d.cu:84](/home/sano/work/forge-sern-design/solver_density_cuda/cuda_forge/gasProperties_d.cu:84)、同:111・121）。**まず下記 A/B を完了する。合格しても #8 の無害性を証明したことにはしない。** |
 
 結論: **v2 を緩めず、farfield ghost の EOS 入力を有限で整合した状態にした共通再生入力で、旧版／新版の EOS 1 回比較を行う。**
 

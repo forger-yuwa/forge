@@ -1,6 +1,6 @@
 # 諮問: 後縁下流の局所変形が g4 の下側の帯を劣化させる — 格子設計の方向 (2026-10-11)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §5.1 #4・#4b、起点 `convection-zero-thickness-edge-reconstruction.md` §4.2・§6.0 (投入条件)。エスカレーション条件 1 (§4 の設計の変更)。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #4・#4b、起点 `convection-zero-thickness-edge-reconstruction.md` §4.2・§6.0 (投入条件)。エスカレーション条件 1 (§4 の設計の変更)。
 判断の記録: `notes/reviews/2026-10-11-g4-admission-jacobian-diagnose.md` (読み替えで投入しない、格子設計へ戻す)。
 
 ## 観測事実

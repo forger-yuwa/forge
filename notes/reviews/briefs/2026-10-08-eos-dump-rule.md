@@ -1,6 +1,6 @@
 # 諮問: 凍結入力の EOS ビット比較 — 全配列で差分 0 バイトだが TP が規則上 INVALID / B 枝が step の入力にならない (2026-10-08)
 
-関連 plan: `plans/active/tooling-sern-te-wake-grid.md` §5.1 #2 の「追加の受入れ試験 (事前登録 2026-10-08)」。判断の記録 `notes/reviews/2026-10-08-floor-counter-regression-diagnose.md`。
+関連 plan: `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #2 の「追加の受入れ試験 (事前登録 2026-10-08)」。判断の記録 `notes/reviews/2026-10-08-floor-counter-regression-diagnose.md`。
 エスカレーション条件 3 (事前登録の比較が判定不能) と 1 (規則の変更)。記録の写し `notes/investigations/2026-10-08-eos-dump/` (SUMMARY.json・cmp_*.txt・DUMP_SHA256.txt・フックの patch・harness)。
 
 ## 実施 (実装担当、commit b1448e54 のフック `FORGE_DUMP_EOS_STEP/FILE` と比較器 `tools/compare_eos_dump.py`)

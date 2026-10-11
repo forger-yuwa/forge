@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): floor-counter-definition
 
 - **brief**: [`notes/reviews/briefs/2026-10-08-floor-counter-definition.md`](../../notes/reviews/briefs/2026-10-08-floor-counter-definition.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-08
 - **commit**: `30348fa4` (feature/sern-design)
 - **codex**: effort `xhigh`, 7.4 min, rc=0

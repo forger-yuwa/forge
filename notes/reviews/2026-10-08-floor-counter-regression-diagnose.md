@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): floor-counter-regression
 
 - **brief**: [`notes/reviews/briefs/2026-10-08-floor-counter-regression.md`](../../notes/reviews/briefs/2026-10-08-floor-counter-regression.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-08
 - **commit**: `9c930e0a` (feature/sern-design)
 - **codex**: effort `high`, 4.8 min, rc=0
@@ -50,4 +50,4 @@
 
 呼び出し側の前提への異議: 「旧版５回で一致した出力＝EOS 全体の決定性」は受け入れない。また、旧版の追加３本が幅内だった CPG についても、確認できたのはその標本での受入れであり、検出力が定量的に保証されたわけではない。共通バイナリは g3/g4 間の版の交絡を防ぐが、カウンタの数値非干渉の証明にはならない。
 
-不足情報: EOS 直前・直後の全配列比較、および検証バイナリのハッシュとソース・ビルド条件の対応。**plan 未反映**。呼び出し側で `plans/active/tooling-sern-te-wake-grid.md` §5.1 #2・§6 に上記の代替検証と受入れ範囲を反映する。
+不足情報: EOS 直前・直後の全配列比較、および検証バイナリのハッシュとソース・ビルド条件の対応。**plan 未反映**。呼び出し側で `plans/accepted/tooling-sern-te-wake-grid.md` §5.1 #2・§6 に上記の代替検証と受入れ範囲を反映する。

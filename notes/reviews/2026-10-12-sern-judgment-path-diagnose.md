@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): sern-judgment-path
 
 - **brief**: [`notes/reviews/briefs/2026-10-12-sern-judgment-path.md`](../../notes/reviews/briefs/2026-10-12-sern-judgment-path.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-12
 - **commit**: `fa816325` (feature/sern-design)
 - **codex**: effort `high`, 4.7 min, rc=0

@@ -1,6 +1,6 @@
 # codex レビュー: tooling-sern-te-wake-grid (plan)
 
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **stage**: `plan`
 - **date**: 2026-10-08
 - **commit**: `11c7ee0e` (feature/sern-design)
@@ -21,7 +21,7 @@
 
 1. **Major — 床カウンタより先に行う g4 計算では、登録した受入れ条件を判定できない。**
 
-   **根拠:** [§5・§5.1](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:54)は g4 → カウンタの順ですが、[§6 #4](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:83)は両格子で毎更新の床補正ゼロを要求しています。既存 B の CSV にあるのは保存時点の `n_floor_plus1` で、過去の更新事象を復元できません。g3 の再実行を[未確定事項](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:109)に残すのも、この条件と矛盾します。
+   **根拠:** [§5・§5.1](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:54)は g4 → カウンタの順ですが、[§6 #4](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:83)は両格子で毎更新の床補正ゼロを要求しています。既存 B の CSV にあるのは保存時点の `n_floor_plus1` で、過去の更新事象を復元できません。g3 の再実行を[未確定事項](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:109)に残すのも、この条件と矛盾します。
 
    **対案:** カウンタ実装・検証を先行させ、その共通バイナリで g3 と g4 の判定区間を取得してください。既存 B は初期場として使用できます。更新単位、実節点数、計測区間、restart 時のリセット、欠測・切り詰め・整数オーバーフローの検出を記録形式として固定し、「記録がない」をゼロ件として扱わないことを試験します。
 
@@ -33,7 +33,7 @@
 
 3. **Major — 実格子の同一性と、サロゲートが学習する評価系列の互換性が区別されていない。**
 
-   **根拠:** [§4](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:42)は実格子署名・双対ハッシュ等を識別に含め、「識別が違えば別系列」としています。しかし [`driver_sern` の設計変数](/home/sano/work/forge-sern-design/design/forge_design/opt/driver_sern.py:41)には `L_cowl` や角度があり、正常な設計探索でも座標・接続署名は変わります。この署名の一致を学習条件にすると設計点ごとに系列が分裂し、記録するだけなら旧方式の混入を防げません。現在の[学習可否判定](/home/sano/work/forge-sern-design/design/forge_design/opt/driver_sern.py:91)にも、今回の互換性契約はありません。
+   **根拠:** [§4](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:42)は実格子署名・双対ハッシュ等を識別に含め、「識別が違えば別系列」としています。しかし [`driver_sern` の設計変数](/home/sano/work/forge-sern-design/design/forge_design/opt/driver_sern.py:41)には `L_cowl` や角度があり、正常な設計探索でも座標・接続署名は変わります。この署名の一致を学習条件にすると設計点ごとに系列が分裂し、記録するだけなら旧方式の混入を防げません。現在の[学習可否判定](/home/sano/work/forge-sern-design/design/forge_design/opt/driver_sern.py:91)にも、今回の互換性契約はありません。
 
    **対案:** 次の二つを分離してください。
    - `stage_key` と個別評価の来歴には、実入力の格子署名・双対ハッシュを保存する。
@@ -45,13 +45,13 @@
 
    **根拠:** 格子検査の [`_read_h5()`](/home/sano/work/forge-sern-design/case/46.sern_design/diag/te_wake_grid_check.py:146)はヘキサ接続を要求します。温度監視も[側端を z = 0.1 m に固定](/home/sano/work/forge-sern-design/case/46.sern_design/diag/te_monitor.py:27)しており、H = 0.1 m の平面 z = 0 にそのまま適用すると、半径 0.2H の R_SE は空です。
 
-   また、[§6 #10](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:87)は A/B のどちらに #1〜#3 を要求するか不明です。症状再現を要求する A に低温排除条件も課すと、試験が成立しません。
+   また、[§6 #10](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:87)は A/B のどちらに #1〜#3 を要求するか不明です。症状再現を要求する A に低温排除条件も課すと、試験が成立しません。
 
    **対案:** 2D 用の格子品質・双対閉性・実辺角度・層厚検査と、形状から監視領域を生成する処理を実装項目に追加してください。存在しない側端領域は明示的に対象外とし、必要領域が空なら判定不能にします。判別条件は **A＝症状再現、B＝#1〜#3 合格**と明記し、初期場の作成方法、2D runner のオプション受け渡し、既定0の不変試験まで登録してください。
 
 5. **Minor — 「残差・保存量がビット一致」は、現在の回帰手順と整合しない。**
 
-   **根拠:** [§5.1 #3](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:67)は残差のビット一致を要求しますが、[検証手順](/home/sano/work/forge-sern-design/procedures/verification/README.md:78)は同一バイナリでも `atomicAdd` の加算順により残差が変わるため、決定的状態と時間発展を分けています。「無効化不要」と「無効時」の関係も未定義です。
+   **根拠:** [§5.1 #3](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:67)は残差のビット一致を要求しますが、[検証手順](/home/sano/work/forge-sern-design/procedures/verification/README.md:78)は同一バイナリでも `atomicAdd` の加算順により残差が変わるため、決定的状態と時間発展を分けています。「無効化不要」と「無効時」の関係も未定義です。
 
    **対案:** 共通入力に対する EOS 更新前後の保存量など、決定的比較ではビット一致を要求してください。組立残差・時間発展には変更前だけで校正・凍結した許容幅を使い、カウンタ有効時を検証対象に明記します。周期・軸対称・凝縮への適用範囲も指定してください。`cell` の実行回帰は[現行規則](/home/sano/work/forge-sern-design/procedures/verification/README.md:63)どおり追加せず、未検証範囲として残す扱いで構いません。
 

@@ -1,7 +1,7 @@
 # codex 諮問 (diagnose): g4-admission-jacobian
 
 - **brief**: [`notes/reviews/briefs/2026-10-11-g4-admission-jacobian.md`](../../notes/reviews/briefs/2026-10-11-g4-admission-jacobian.md)
-- **plan**: [`plans/active/tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md)
+- **plan**: [`plans/accepted/tooling-sern-te-wake-grid.md`](../../plans/accepted/tooling-sern-te-wake-grid.md)
 - **date**: 2026-10-11
 - **commit**: `a3695e9b` (feature/sern-design)
 - **codex**: effort `high`, 4.9 min, rc=0
@@ -61,6 +61,6 @@
 
 呼び出し側の前提への異議: **40,700 個は再生成では A の値で、B は 44,880 個だった。** また、最悪セルが変形領域外にあることは、低品質セル全体が変形領域外にある証拠ではない。双子の記録も **11,620「組」ではなく、5,810 組・11,620 節点**である。[双子の検査記録](/home/sano/work/forge-sern-design/notes/investigations/2026-10-11-g4-admission/run_1081_tewake_g4_B10_m10/TWIN_IC_VERDICT.txt)。
 
-不足情報: 実入力 HDF5 による上記の対応比較、AR 外れ値 691 個の位置と受入れ根拠。時間積分へ進む際には、別途停止条件となっている g3 の有限化入力による EOS 比較の合格記録も必要。[plan:98](/home/sano/work/forge-sern-design/plans/active/tooling-sern-te-wake-grid.md:98)。
+不足情報: 実入力 HDF5 による上記の対応比較、AR 外れ値 691 個の位置と受入れ根拠。時間積分へ進む際には、別途停止条件となっている g3 の有限化入力による EOS 比較の合格記録も必要。[plan:98](/home/sano/work/forge-sern-design/plans/accepted/tooling-sern-te-wake-grid.md:98)。
 
 **ファイル変更・forge 起動なし。plan 未反映**。採否と追加検査の反映先は `tooling-sern-te-wake-grid.md` §5.1 #4・§6 とし、呼び出し側で記録する。

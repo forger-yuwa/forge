@@ -7,7 +7,7 @@
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) (SERN チェーンの「後縁下流の格子 (te_wake)」)
 - **related_plans**:
-  - 起点: [`tooling-sern-te-wake-grid.md`](tooling-sern-te-wake-grid.md) §5.1 #5・§6 #10 (3D の生産受入れから 2D を切り出し、2026-10-11)
+  - 起点: [`tooling-sern-te-wake-grid.md`](../accepted/tooling-sern-te-wake-grid.md) §5.1 #5・§6 #10 (3D の生産受入れから 2D を切り出し、2026-10-11)
 - **created**: `2026-10-11`
 - **owner**: `CFD Dev (Claude セッション: SERN 3D)`
 
