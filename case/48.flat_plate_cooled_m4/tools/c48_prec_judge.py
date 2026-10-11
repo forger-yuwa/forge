@@ -24,7 +24,11 @@ NEED = ("rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega")
 W0, W1 = 24000, 48000
 ap = argparse.ArgumentParser(); ap.add_argument("--series", default="prec_series.csv"); ap.add_argument("--out", default="c48_prec_judge.json")
 ap.add_argument("--window-only", action="store_true", help="系列が窓 (24,000〜48,000 step) だけのとき (§6.23 の再集計: 窓の前の場は消してある)")
+ap.add_argument("--arms", default=None, help="腕の run を差し替える (例 'f32=run_0061_li_f32a,run_0062_li_f32b;f64=run_0063_li_f64a,run_0064_li_f64b')。既定は §6.21 の 4 本")
 A = ap.parse_args()
+if A.arms:
+    ARMS = {k: tuple(v.split(",")) for k, v in (x.split("=") for x in A.arms.split(";"))}
+    assert set(ARMS) == {"f32", "f64"} and all(len(v) == 2 for v in ARMS.values()), f"--arms の形が違う: {A.arms}"
 OUT = {"undecidable": [], "runs": {}, "series": A.series}
 def und(msg): OUT["undecidable"].append(msg); print("  [判定不能]", msg)
 series = {}
