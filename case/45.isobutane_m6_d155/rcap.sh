@@ -38,7 +38,7 @@ batch() {   # batch <run50_d> <run1_d> <run50_f> <run1_f>
   done
   for r in "${RUNS[@]}"; do echo "$r 終了 $(date -Is) RUN_RC=$(cat $r/RUN_RC) 最後の行: $(grep -h '^step' $r/forge_run.log | tail -1 | cut -c1-100)" >> $LOG; done
   # 次の回の前の dt の照合用に、50 と 1 の設定の差を記録
-  diff $2/solverConfig.yaml $1/solverConfig.yaml > $2/config_vs_cap50.diff
+  diff $2/solverConfig.yaml $1/solverConfig.yaml > $2/config_vs_cap50.diff; true   # diff は差があると 1 を返す (2026-10-11: これで 1 回目の後に台本が止まった)
 }
 for b in 1 2; do
   av=$(free -m | awk '/^Mem:/{print $7}'); echo "回 $b: available ${av} MB" >> $LOG
