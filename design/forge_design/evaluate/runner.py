@@ -47,6 +47,42 @@ FORGE_BUILD = FORGE_ROOT / "solver_density_cuda" / "build"
 _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 
 
+# 変換器の終了時の GPUassert (AWS の native ドライバで、書き出しの後の cudaFree が invalid argument を返す既知の件 —
+# 終了処理で同じ GPU バッファを二重に解放する箇所が残っている。変換器の writeInputH5 の値渡しは 3c184c1a で直したが他にもある)。
+# 書き出しの後に起きた GPUassert で、出力 h5 に必要なものがそろっているときだけ受け入れ、CONVERTER_WARN.txt に残す。
+_CONV_REQUIRED = ("MESH", "PLANES", "CELLS", "VALUE", "BCONDS")
+
+
+def _run_converter(conv: str, msh: str, out: str, run_dir: Path) -> None:
+    r = subprocess.run([conv, msh, out], cwd=run_dir, env=_ENV, capture_output=True, text=True)
+    if r.returncode == 0:
+        return
+    text = (r.stdout or "") + (r.stderr or "")
+    i_w, i_a = text.find("Write Input HDF5"), text.find("GPUassert")
+    ok = i_w >= 0 and i_a > i_w and "cudaWrapper.cu" in text[i_a:]
+    missing = []
+    if ok:
+        import h5py
+        try:
+            with h5py.File(run_dir / out, "r") as f:
+                missing = [g for g in _CONV_REQUIRED if g not in f]
+                cfg = (run_dir / "solverConfig.yaml").read_text() if (run_dir / "solverConfig.yaml").exists() else ""
+                if 'discretization: "node"' in cfg:
+                    if "DUAL" not in f:
+                        missing.append("DUAL")
+                    if "isAxisymmetric: 1" in cfg and "rSurfVect" not in f["PLANES"]:
+                        missing.append("PLANES/rSurfVect")
+        except OSError as e:
+            missing = [f"open failed: {e}"]
+    if ok and not missing:
+        with open(run_dir / "CONVERTER_WARN.txt", "a") as w:
+            w.write(f"{out}: convertGmshToForge exit {r.returncode} after the write (teardown GPUassert); output checked "
+                    f"({', '.join(_CONV_REQUIRED)}{' + DUAL/rSurfVect' if 'DUAL' not in missing else ''}) and accepted\n"
+                    + text[i_a:i_a + 300] + "\n")
+        return
+    raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr + f"\n[runner] converter output not accepted: {missing}")
+
+
 def converter_path() -> Path:
     """convertGmshToForge の場所: 環境変数 FORGE_CONVERTER > FORGE_BIN (run_case.sh が使う forge) と同じビルドの変換器 >
     solver_density_cuda/build。変換器も solverConfig.yaml を読むので、forge と同じビルドのものを使う
@@ -423,8 +459,7 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
             (run_dir / "solverConfig.yaml").read_text().replace(
                 f'discretization: "{disc}"', 'discretization: "cell"').replace(
                 ", axisCentroidShift: 1, nodeWallDirichlet: 1", ""))
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        _run_converter(str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5", run_dir)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "nozzle_qc.h5"],
                            cwd=run_dir, env=_ENV, capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text("(primal/cell 変換で検査)\n" + q.stdout + q.stderr)
@@ -434,11 +469,9 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
         if q.returncode != 0:
             raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
         (run_dir / "solverConfig.yaml").write_text(_solver_config(p, n, int(p.evaluate.get("outStepInterval", max(n // 3, 1)))))
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        _run_converter(str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5", run_dir)
     else:
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        _run_converter(str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5", run_dir)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "nozzle.h5"],
                            cwd=run_dir, env=_ENV, capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
@@ -602,7 +635,7 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
     # 品質ゲートは primal (cell 変換) で測る (CPG 経路と同じ理由)。AR の上限は mesh.ar_max (既定 1000; 壁法線の構造層は 5000 まで可)
     ar_max = int(p.mesh.get("ar_max", 1000))
     (run_dir / "solverConfig.yaml").write_text(_solver_config_tp(p, n, out_int, stage, discretization="cell"))
-    subprocess.run([conv, "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    _run_converter(conv, "nozzle.msh", "nozzle_qc.h5", run_dir)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "nozzle_qc.h5", "--ar-max", str(ar_max)],
                        cwd=run_dir, env=_ENV, capture_output=True, text=True)
     relax = None
@@ -620,7 +653,7 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
         raise RuntimeError("AR ≤ 5000 の例外の条件 (AR > 1000 の全セルでスキュー ≤ 0.1、入口・出口面は平面) を満たさない: "
                            + _ar_relax_line(relax))
     (run_dir / "solverConfig.yaml").write_text(_solver_config_tp(p, n, out_int, stage))
-    subprocess.run([conv, "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    _run_converter(conv, "nozzle.msh", "nozzle.h5", run_dir)
 
     rec = tp_gas_record(p)
     gas = p.gas_model                       # = ex.moc_gas() (同じ Y・種 DB・Tc)
