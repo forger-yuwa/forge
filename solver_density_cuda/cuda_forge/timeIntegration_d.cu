@@ -18,6 +18,11 @@
 // roUy 対角に α·A_planar·c を加える。revolved 軸面積 (r_f·S→0) が落とす半径音響スペクトル半径を
 // planar 面積 A_pl で補うもの。near-axis radial-momentum 不安定 (case/28 TP) の最小修正診断。
 __device__ float g_axisDiagAlpha = 0.0f;
+// 診断 (FORGE_LINE_DUMP_FINAL_SPLIT、既定 0 でビット不変。plan tooling-nozzle-core-grid §4.52): 書き出し中の外反復の最後に、
+// 左辺の対流 (閉形式 FVS) の面の寄与を面の種類で外して組み直す。1 = ライン外の面 (has_nbr かつライン面でない) を外す、
+// 2 = ライン面を外す、3 = 両方を外す。g_diagForceStoreDiag = 1 のときは loop > 0 でもライン上の対角を配列へ書く (書き出し用)。
+__device__ int g_diagSkipConvLHS = 0;
+__device__ int g_diagForceStoreDiag = 0;
 
 namespace block_dplur {
 
@@ -918,7 +923,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
                 }
             }
-            if (skipDiag) {
+            // 診断 (g_diagSkipConvLHS、既定 0): 対流の面の寄与 (対角と近傍) を面の種類で外す。
+            const bool diagSkipConv = (g_diagSkipConvLHS != 0) &&
+                (((g_diagSkipConvLHS & 1) != 0 && has_nbr && !isLineFace) || ((g_diagSkipConvLHS & 2) != 0 && isLineFace));
+            if (diagSkipConv) {
+            } else if (skipDiag) {
                 block_dplur::accumulate_split_jacobian_cf<ST, false>(
                     gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
                     local_sonic, local_Ht, thermallyPerfect != 0,
@@ -1189,7 +1198,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             // line-implicit: 点解せず Thomas カーネル用に保存する。
             //   diag: 状態凍結ゆえ storeLU (loop==0) のみ / rhs: ライン外 lag 込みなので毎 sweep。
             //   dq_new は Thomas が上書きする (保険で前回反復値を置く)。
-            if (storeLU != 0) {
+            //   診断 (g_diagForceStoreDiag、既定 0): 書き出しのために loop > 0 でも対角を書く。
+            if (storeLU != 0 || g_diagForceStoreDiag != 0) {
                 diag_00[ic]=static_cast<flow_float>(diag_block[0][0]); diag_01[ic]=static_cast<flow_float>(diag_block[0][1]); diag_02[ic]=static_cast<flow_float>(diag_block[0][2]); diag_03[ic]=static_cast<flow_float>(diag_block[0][3]); diag_04[ic]=static_cast<flow_float>(diag_block[0][4]);
                 diag_10[ic]=static_cast<flow_float>(diag_block[1][0]); diag_11[ic]=static_cast<flow_float>(diag_block[1][1]); diag_12[ic]=static_cast<flow_float>(diag_block[1][2]); diag_13[ic]=static_cast<flow_float>(diag_block[1][3]); diag_14[ic]=static_cast<flow_float>(diag_block[1][4]);
                 diag_20[ic]=static_cast<flow_float>(diag_block[2][0]); diag_21[ic]=static_cast<flow_float>(diag_block[2][1]); diag_22[ic]=static_cast<flow_float>(diag_block[2][2]); diag_23[ic]=static_cast<flow_float>(diag_block[2][3]); diag_24[ic]=static_cast<flow_float>(diag_block[2][4]);
@@ -1632,6 +1642,28 @@ void lineDumpFinalRhs_wrapper(int nSweep, solverConfig& cfg, cudaConfig& cuda_cf
     line_dump::put<flow_float>("rhs_final", {var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"]}, n);
     line_dump::put<flow_float>("dqold_final", {var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"]}, n);
     printf("[lineDump] 確定する補正に対する右辺を書いた (sweep %d の後)\n", nSweep);
+    // 診断 (FORGE_LINE_DUMP_FINAL_SPLIT=1、既定 off。plan tooling-nozzle-core-grid §4.52): 同じ δ・同じ状態で、左辺の対流の面の寄与を
+    // 面の種類で外して右辺と対角を組み直し、D_s{m}・rhs_s{m}final を書く (m = 1 ライン外を外す、2 ライン面を外す、3 両方)。
+    // 最後に通常の組み立て (m = 0) をもう一度して対角の配列を元に戻し、D_check・rhs_check を書く (D・rhs_final と一致するはず)。
+    const char* splitEnv = getenv("FORGE_LINE_DUMP_FINAL_SPLIT");
+    if (splitEnv != nullptr && atoi(splitEnv) != 0) {
+        const int one = 1, zero = 0;
+        std::vector<const flow_float*> Dcols;
+        for (int i = 0; i < 5; ++i) for (int j = 0; j < 5; ++j) Dcols.push_back(var.c_d["diag_block_" + std::to_string(i) + std::to_string(j)]);
+        const std::vector<const flow_float*> Rcols = {var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"]};
+        for (int m : {1, 2, 3, 0}) {
+            gpuErrchk(cudaMemcpyToSymbol(g_diagSkipConvLHS, &m, sizeof(int)));
+            gpuErrchk(cudaMemcpyToSymbol(g_diagForceStoreDiag, &one, sizeof(int)));
+            timeIntegration_d_wrapper(nSweep, cfg, cuda_cfg, msh, var, 0);
+            gpuErrchk(cudaDeviceSynchronize());
+            const std::string tag = (m == 0) ? std::string("check") : ("s" + std::to_string(m));
+            line_dump::put<flow_float>("D_" + tag, Dcols, n);
+            line_dump::put<flow_float>("rhs_" + tag + "final", Rcols, n);
+        }
+        gpuErrchk(cudaMemcpyToSymbol(g_diagSkipConvLHS, &zero, sizeof(int)));
+        gpuErrchk(cudaMemcpyToSymbol(g_diagForceStoreDiag, &zero, sizeof(int)));
+        printf("[lineDump] 左辺の対流の面の寄与を外した組み直しを書いた (ライン外・ライン面・両方・確認)\n");
+    }
     line_dump::g.sweep = -1;   // この外反復の書き出しを閉じる
 }
 
