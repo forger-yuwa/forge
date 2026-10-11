@@ -30,6 +30,10 @@ arm() {   # arm <run> <バイナリ> <量子化 0|1>
 }
 for k in 1 2 3; do
   case $k in 1) c=run_0595_rq_c1; e=run_0598_rq_e1; f=run_0621_rq_f1;; 2) c=run_0596_rq_c2; e=run_0599_rq_e2; f=run_0622_rq_f2;; 3) c=run_0597_rq_c3; e=run_0620_rq_e3; f=run_0623_rq_f3;; esac
+  # メモリ: g5 は 16 GB・スワップなし。3 本ぶん (FP64 約 2.5 GB × 2 + float 約 2 GB) + 2 GB = 9 GB の available を 30 分まで待つ
+  for w in $(seq 1 30); do av=$(free -m | awk '/^Mem:/{print $7}'); [ "$av" -ge 9000 ] && break; echo "$(date -Is) 回 $k: available ${av} MB < 9000 MB、待つ" >> $LOG; sleep 60; done
+  [ "$av" -ge 9000 ] || { echo "回 $k: メモリが空かない (中止)" >> $LOG; exit 1; }
+  echo "回 $k: available ${av} MB で投入" >> $LOG
   arm $c $F64 0 || exit 1; arm $e $F64 1 || exit 1; arm $f $F32 0 || exit 1
   wait
   for r in $c $e $f; do echo "$r 終了 $(date -Is) RUN_RC=$(cat $r/RUN_RC) 最後の行: $(grep -h '^step' $r/forge_run.log | tail -1 | cut -c1-100)" >> $LOG; done
