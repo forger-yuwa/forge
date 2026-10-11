@@ -271,7 +271,8 @@ def cmd_judge3(a):
             raise SystemExit(f"{nm}: 必須の量が系列に無い (判定不能): {miss}")
     sh = a.x_base_shift
     WB = {"ref_base": ((20000, 40000), (40000, 60000)), "x_base": ((20000 + sh, 40000 + sh), (40000 + sh, 60000 + sh)),
-          "ref_point": ((20000, 40000), (40000, 60000)), "x_point": ((20000, 40000), (40000, 60000))}
+          "ref_point": ((20000 + a.ref_point_shift, 40000 + a.ref_point_shift), (40000 + a.ref_point_shift, 60000 + a.ref_point_shift)),
+          "x_point": ((20000, 40000), (40000, 60000))}                                                   # §4.28: Gref の point の延長は通算 80k〜120k
     def tm(D, k, lo, hi):
         s_ = D["step"]; m = (s_ >= lo) & (s_ <= hi)
         if m.sum() < 2 or s_[m][0] != lo or s_[m][-1] != hi:
@@ -356,6 +357,7 @@ def main():
     j3.add_argument("--tau-theta", type=float, default=1.5); j3.add_argument("--tau-delta", type=float, default=1.5); j3.add_argument("--tau-qw", type=float, default=1.5)
     j3.add_argument("--tau-exit", type=float, default=0.05); j3.add_argument("--tau-eta", type=float, default=0.05)
     j3.add_argument("--out", default="grefx_s_judge.json")
+    j3.add_argument("--ref-point-shift", type=int, default=0, help="Gref の point の系列の窓をずらす (§4.28 の延長は 60000、系列は --offset 60000 で作る)")
     a = ap.parse_args()
     {"series": cmd_series, "judge": cmd_judge, "judge2": cmd_judge2, "judge3": cmd_judge3}[a.cmd](a)
 
