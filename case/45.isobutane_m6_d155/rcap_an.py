@@ -45,11 +45,15 @@ for cap, g in ARMS.items():
     for k, (r1, r2) in g.items():
         a, b = q9(HERE / r1 / "res_0.h5"), q9(HERE / r2 / "res_0.h5")
         if set(a) != set(Q9) or set(b) != set(Q9) or any(not np.array_equal(a[q], b[q]) for q in Q9): und(f"上限 {cap} {k}: res_0 の 9 保存量が精度の中で一致しない")
-    for k in ("D", "F"):
-        c50, c1 = (HERE / ARMS[50][k][0] / "solverConfig.yaml").read_text().splitlines(), (HERE / ARMS[1][k][0] / "solverConfig.yaml").read_text().splitlines()
-        df = [(x, y) for x, y in zip(c50, c1) if x != y]
-        ok = len(c50) == len(c1) and len(df) == 1 and df[0][0].replace("lineDtDirectionalCap: 50.0", "lineDtDirectionalCap: 1.0") == df[0][1]
-        if not ok: und(f"{k}: 上限 50 と 1 の設定の差が上限だけでない: {df[:2]}")
+# 設定: 8 本すべてを上限 50 の FP64 の 1 回目 (基準) と比べる。上限 50 は差なし、上限 1 は上限の行だけ (2026-10-11 codex diagnose: 2 回目の組も照合する)
+cref = (HERE / ARMS[50]["D"][0] / "solverConfig.yaml").read_text().splitlines()
+for cap, g in ARMS.items():
+    for k, runs in g.items():
+        for r in runs:
+            c = (HERE / r / "solverConfig.yaml").read_text().splitlines()
+            df = [(x, y) for x, y in zip(cref, c) if x != y]
+            ok = len(c) == len(cref) and (df == [] if cap == 50 else (len(df) == 1 and df[0][0].replace("lineDtDirectionalCap: 50.0", "lineDtDirectionalCap: 1.0") == df[0][1]))
+            if not ok: und(f"{r}: 基準 ({ARMS[50]['D'][0]}) との設定の差が想定 (上限 {cap}) と違う: {df[:2]}")
 # 前提 2: dt の縮小
 with h5py.File(HERE / "_tr/q32_init.h5", "r") as h: xy = np.asarray(h["MESH/COORD"][:], float).reshape(-1, 3)
 ni, nj, S = XC.mesh_info(len(xy)); X = (xy[:, 0] / S).reshape(ni, nj); J = np.tile(np.arange(nj), (ni, 1))

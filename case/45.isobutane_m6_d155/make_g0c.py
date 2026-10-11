@@ -38,11 +38,14 @@ ia = int(np.argmin(np.abs(x0 - (-8.0)))); ib = int(np.argmin(np.abs(x0 - (-2.0))
 pre_ok = bool(np.array_equal(c0.reshape(NI0, NJ, -1)[:ia], c1.reshape(4467, NJ, -1)[:ia]))
 post_ok = bool(np.array_equal(c0.reshape(NI0, NJ, -1)[ib + 1:], c1.reshape(4467, NJ, -1)[ia + nseg + 1:]))
 dx1 = np.diff(x1); dx0 = np.diff(x0)
-info = dict(commit=commit, ni_G0=NI0, ni_G0c=4467, nj=NJ, seg_cols_G0=int(ib - ia), seg_cols_G0c=int(nseg), seg_x=[float(x0[ia]), float(x0[ib])],
+info = dict(commit=commit, msh_digits=int(m["msh_digits"]), ni_G0=NI0, ni_G0c=4467, nj=NJ, seg_cols_G0=int(ib - ia), seg_cols_G0c=int(nseg), seg_x=[float(x0[ia]), float(x0[ib])],
             pre_cols_bit_equal=pre_ok, post_cols_bit_equal=post_ok, n_pre=int(ia), n_post=int(NI0 - ib - 1),
             joint_dx_ratio=[float(dx1[ia] / dx1[ia - 1]), float(dx1[ia + nseg] / dx1[ia + nseg - 1])],
             seg_dx_max_ratio_vs_G0=float(np.max(dx1[ia:ia + nseg]) / np.max(dx0[ia:ib])))
-mesh2d.write_msh41_2d(str(outdir / "nozzle.msh"), c1, q1, b1)
+# 座標の桁数は生産 (runner_axismach.py の write_msh41_2d) と同じく問題 YAML の mesh.msh_digits (冷却壁は 17)。
+# 2026-10-11: これを渡さず既定 10 桁で書き、実際の G0 の入力と区間の外の座標が相対 ±5e-10 ずれた (壁際で局所の間隔の 0.13 %、g0c_check.py で発見)
+digits = int(m["msh_digits"]); assert digits == 17, digits
+mesh2d.write_msh41_2d(str(outdir / "nozzle.msh"), c1, q1, b1, digits=digits)
 (outdir / "g0c_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
 print(json.dumps(info, ensure_ascii=False))
 if not (pre_ok and post_ok): sys.exit("区間の外の列が G0 とビット一致しない")
