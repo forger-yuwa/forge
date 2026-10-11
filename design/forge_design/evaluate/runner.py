@@ -50,6 +50,7 @@ _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 # 変換器の終了時の GPUassert (AWS の native ドライバで、書き出しの後の cudaFree が invalid argument を返す既知の件 —
 # 終了処理で同じ GPU バッファを二重に解放する箇所が残っている。変換器の writeInputH5 の値渡しは 3c184c1a で直したが他にもある)。
 # 書き出しの後に起きた GPUassert で、出力 h5 に必要なものがそろっているときだけ受け入れ、CONVERTER_WARN.txt に残す。
+# 2026-10-11 に B で変換した node の h5 が、同じ msh を手元 (exit 0) で変換したものと 102 データセットすべてビット一致することを確認。
 _CONV_REQUIRED = ("MESH", "PLANES", "CELLS", "VALUE", "BCONDS")
 
 
@@ -68,8 +69,9 @@ def _run_converter(conv: str, msh: str, out: str, run_dir: Path) -> None:
                 missing = [g for g in _CONV_REQUIRED if g not in f]
                 cfg = (run_dir / "solverConfig.yaml").read_text() if (run_dir / "solverConfig.yaml").exists() else ""
                 if 'discretization: "node"' in cfg:
-                    if "DUAL" not in f:
-                        missing.append("DUAL")
+                    # node は双対が primal を置き換えるので /DUAL は無い。node の変換は /VIZMESH を書く
+                    if "VIZMESH" not in f:
+                        missing.append("VIZMESH")
                     if "isAxisymmetric: 1" in cfg and "rSurfVect" not in f["PLANES"]:
                         missing.append("PLANES/rSurfVect")
         except OSError as e:
