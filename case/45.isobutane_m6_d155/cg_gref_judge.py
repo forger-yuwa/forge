@@ -153,6 +153,10 @@ def cmd_judge(a):
     print(f"[judge] {OUTD / 'gref_judge.json'}")
 
 
+# §4.25 (ユーザ決定 2026-10-11): 判定の量は試験部の入口側の窓 [40,50] を外した 8 量 ([40,50] は記録だけ)
+REQUIRED8 = ("theta_r_w65_75", "theta_r_w84_94", "delta_loc_w65_75", "delta_loc_w84_94", "Q_w", "exit_M_line", "eta0.0_mean_pct", "eta0.1_mean_pct")
+
+
 # ---- §4.21 の A/B (Gref の継続 A 対 Grefx B): 新しい資格の基準 (codex 諮問 §4.20、ユーザ決定で M の τ 0.05) ----
 W1B, W2B = (20000, 40000), (40000, 60000)     # run の step (各 6 万 step、最初の 2 万は外す)
 P_GREFX = None                                 # Grefx の後処理の予算 (§4.21、post-ab で測った値を judge2 の引数で渡す)
@@ -179,6 +183,11 @@ def cmd_judge2(a):
         rows = list(csv.DictReader(open(OUTD / f"gref_series_{nm}.csv")))
         S[tag] = {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
     keys = [k for k in S["A"] if k not in ("step", "nonfinite")]
+    if a.required8:
+        miss = [k for k in REQUIRED8 if k not in keys]
+        if miss:
+            raise SystemExit(f"必須の量が系列に無い (判定不能): {miss}")
+        keys = list(REQUIRED8)
     def tm(D, k, lo, hi):
         s = D["step"]; m = (s >= lo) & (s <= hi)
         if m.sum() < 2 or s[m][0] != lo or s[m][-1] != hi:
@@ -237,6 +246,94 @@ def cmd_judge2(a):
     print("結果:", out["result"]); print(f"[judge2] {OUTD / a.out}")
 
 
+def cmd_judge3(a):
+    """§4.26 (事前登録、codex 諮問 2026-10-11): 反復条件の感度 s を含めた判定。基準 (B0) の窓は §4.24 のまま固定し、
+    point の継続 (各 6 万 step) を両格子で 1 回だけ回す。量は REQUIRED8。相対量の分母は D = |μ_ref,base| (固定)、M の量は %pt の差。
+      基準: μ_base・U_base は §4.24 と同じ (Gref = GrefA の 40k〜60k / 20k〜60k、Grefx = Grefx2 の 100k〜120k / 80k〜120k)
+      point: μ_point = 40k〜60k の時間窓平均、d = |平均(20k〜40k) − μ_point|、U_point = max_{20k〜60k} |q − μ_point|、
+             資格 = 非有限 0・17 出力・check_quasisteady (20k〜60k、--tail 1.0、drift τ/8・osc τ/2 を換算) STEADY・d ≤ τ/8・U ≤ τ/4・漸近値の差 ≤ τ/8
+      s = |μ_point − μ_base|、B_total = |E| + U_ref,base + U_x,base + p_ref + p_x + s_ref + s_x + U_ref,point + U_x,point ≤ τ
+    結果: 両 point が資格を満たし全 8 量で B_total ≤ τ → A (精度・反復の頑健性の条件で候補としてユーザに諮る)。資格ありでどれかが超過 → B。資格なし → 判定不能。延長しない。"""
+    import csv
+    tau = {"theta": a.tau_theta, "delta": a.tau_delta, "Q_w": a.tau_qw, "exit_M_line": a.tau_exit, "eta_pctpt": a.tau_eta}
+    pX = json.loads(a.p_x)
+    P = {"ref": {"theta": P_BUDGET["Gref"]["theta"], "delta": P_BUDGET["Gref"]["delta"], "Q_w": P_BUDGET["Gref"]["Q_w"], **P_M},
+         "x": {**{k: pX[k] for k in ("theta", "delta", "Q_w")}, **P_M}}
+    def kind(k):
+        return "theta" if k.startswith("theta_r") else "delta" if k.startswith("delta_loc") else "Q_w" if k == "Q_w" else "exit_M_line" if k == "exit_M_line" else "eta_pctpt"
+    def load(nm):
+        rows = list(csv.DictReader(open(OUTD / f"gref_series_{nm}.csv")))
+        return {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
+    S = {"ref_base": load(a.ref_base), "x_base": load(a.x_base), "ref_point": load(a.ref_point), "x_point": load(a.x_point)}
+    for nm, D in S.items():
+        miss = [k for k in REQUIRED8 if k not in D]
+        if miss:
+            raise SystemExit(f"{nm}: 必須の量が系列に無い (判定不能): {miss}")
+    sh = a.x_base_shift
+    WB = {"ref_base": ((20000, 40000), (40000, 60000)), "x_base": ((20000 + sh, 40000 + sh), (40000 + sh, 60000 + sh)),
+          "ref_point": ((20000, 40000), (40000, 60000)), "x_point": ((20000, 40000), (40000, 60000))}
+    def tm(D, k, lo, hi):
+        s_ = D["step"]; m = (s_ >= lo) & (s_ <= hi)
+        if m.sum() < 2 or s_[m][0] != lo or s_[m][-1] != hi:
+            raise SystemExit(f"窓 {lo}〜{hi} の出力が揃わない (判定不能)")
+        return float(np.trapezoid(D[k][m], s_[m]) / (hi - lo))
+    D0 = {k: abs(tm(S["ref_base"], k, *WB["ref_base"][1])) for k in REQUIRED8}
+    def sc(k, x):
+        return x if kind(k) == "eta_pctpt" else 100 * x / D0[k]
+    st = {}
+    for nm, D in S.items():
+        w1, w2 = WB[nm]; s_ = D["step"]; m = (s_ >= w1[0]) & (s_ <= w2[1]); r = {"n": int(m.sum()), "nonfinite": int(D["nonfinite"][m].sum()), "q": {}}
+        if nm.endswith("point"):
+            tmp = OUTD / f"_qs3_{nm}.csv"
+            with open(tmp, "w") as fh:
+                fh.write("step," + ",".join(REQUIRED8) + "\n")
+                for i in np.where(m)[0]:
+                    fh.write(f"{s_[i]:.0f}," + ",".join(f"{(1 + D[k][i] / 100) if k.startswith('eta') else D[k][i]:.12g}" for k in REQUIRED8) + "\n")
+        for k in REQUIRED8:
+            t = tau[kind(k)]; mu = tm(D, k, *w2); U = sc(k, float(np.abs(D[k][m] - mu).max()))
+            q = {"mu": mu, "U": U}
+            if nm.endswith("point"):
+                cmean = float(np.mean(D[k][m])); last = float(D[k][m][-1])
+                rel = (t / 100) / abs(1 + cmean / 100) if kind(k) == "eta_pctpt" else (t / 100) * D0[k] / abs(cmean)
+                pr = subprocess.run([sys.executable, str(TOOLS / "check_quasisteady.py"), "--series-csv", str(tmp), "--series-cols", k,
+                                     "--tail", "1.0", "--drift", f"{rel / 8:.6g}", "--osc", f"{rel / 2:.6g}"], capture_output=True, text=True)
+                ln = [l for l in pr.stdout.splitlines() if l.strip().startswith(k)]; line = ln[-1].strip() if ln else f"(行なし) rc={pr.returncode}"
+                mono = re.search(r"最終比 ([+\-−]?[\d.]+) ?%", line); asym_ok = True
+                if mono:
+                    y = abs(float(mono.group(1).replace("−", "-")))
+                    asym_ok = (y * (1 + last / 100) if kind(k) == "eta_pctpt" else y * abs(last) / D0[k]) <= t / 8
+                d = sc(k, abs(tm(D, k, *w1) - mu))
+                q.update(d=d, qs=line, steady=pr.returncode == 0, asym_ok=asym_ok, ok=pr.returncode == 0 and asym_ok and d <= t / 8 and U <= t / 4)
+            r["q"][k] = q
+        if nm.endswith("point"):
+            tmp.unlink()
+            r["qualified"] = r["nonfinite"] == 0 and r["n"] == 17 and all(v["ok"] for v in r["q"].values())
+        st[nm] = r
+    out = {"registration": "plans/active/tooling-nozzle-core-grid.md §4.26", "tau": tau, "p": P, "series": {k: getattr(a, k) for k in ("ref_base", "x_base", "ref_point", "x_point")},
+           "stats": st, "q": {}}
+    within, beyond = True, False
+    for k in REQUIRED8:
+        t = tau[kind(k)]; kk = kind(k)
+        E = sc(k, st["x_base"]["q"][k]["mu"] - st["ref_base"]["q"][k]["mu"])
+        s_ref = sc(k, abs(st["ref_point"]["q"][k]["mu"] - st["ref_base"]["q"][k]["mu"])); s_x = sc(k, abs(st["x_point"]["q"][k]["mu"] - st["x_base"]["q"][k]["mu"]))
+        B = (abs(E) + st["ref_base"]["q"][k]["U"] + st["x_base"]["q"][k]["U"] + P["ref"][kk] + P["x"][kk]
+             + s_ref + s_x + st["ref_point"]["q"][k]["U"] + st["x_point"]["q"][k]["U"])
+        out["q"][k] = {"E_signed": E, "s_ref": s_ref, "s_x": s_x, "B_total": B, "tau": t}
+        within &= B <= t
+    both = st["ref_point"]["qualified"] and st["x_point"]["qualified"]
+    out["result"] = ("判定不能 (point の資格なし: " + ", ".join(n for n in ("ref_point", "x_point") if not st[n]["qualified"]) + ")") if not both else \
+                    "A: 精度・反復の頑健性の条件で候補 (全 8 量で B_total ≤ τ) → ユーザに諮る (総時間の条件は別)" if within else \
+                    "B: この予算では候補化を見送る (どれかの量で B_total > τ。真の格子誤差が τ を超えたとは断定しない)"
+    (OUTD / a.out).write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    for nm in ("ref_point", "x_point"):
+        r = st[nm]; print(f"== {nm} ({getattr(a, nm)}): n {r['n']} 非有限 {r['nonfinite']} 資格 {r['qualified']}")
+        for k in REQUIRED8:
+            v = r["q"][k]; print(f"   {k:18s} d {v['d']:.4f} U {v['U']:.4f} STEADY {v['steady']} 漸近 {v['asym_ok']} | {v['qs'][-44:]}")
+    for k in REQUIRED8:
+        v = out["q"][k]; print(f"   {k:18s} E {v['E_signed']:+.4f}  s_ref {v['s_ref']:.4f}  s_x {v['s_x']:.4f}  B_total {v['B_total']:.4f}  τ {v['tau']:g}")
+    print("結果:", out["result"]); print(f"[judge3] {OUTD / a.out}")
+
+
 def main():
     ap = argparse.ArgumentParser(); sp = ap.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("series"); s.add_argument("name"); s.add_argument("run")
@@ -251,8 +348,16 @@ def main():
     j2.add_argument("--tau-exit", type=float, default=0.05); j2.add_argument("--tau-eta", type=float, default=0.05)
     j2.add_argument("--b-shift", type=int, default=0, help="B の窓を通算でずらす step (§4.23 の延長は 60000、系列は --offset 60000 で作る)")
     j2.add_argument("--out", default="grefx_judge.json", help="出力 (§4.22 の判定は grefx_judge.json、§4.23 は grefx_ext_judge.json)")
+    j2.add_argument("--required8", action="store_true", help="判定の量を §4.25 の 8 量に限る ([40,50] の窓は記録だけ。欠けていれば判定不能)")
+    j3 = sp.add_parser("judge3", help="§4.26 の s を含めた判定 (Gref・Grefx の point の継続)")
+    j3.add_argument("ref_base"); j3.add_argument("x_base"); j3.add_argument("ref_point"); j3.add_argument("x_point")
+    j3.add_argument("--x-base-shift", type=int, default=60000, help="Grefx の基準の系列 (Grefx2) は通算 step なので窓をずらす")
+    j3.add_argument("--p-x", required=True, help='Grefx の p (JSON: {"theta":..,"delta":..,"Q_w":..} [%%])')
+    j3.add_argument("--tau-theta", type=float, default=1.5); j3.add_argument("--tau-delta", type=float, default=1.5); j3.add_argument("--tau-qw", type=float, default=1.5)
+    j3.add_argument("--tau-exit", type=float, default=0.05); j3.add_argument("--tau-eta", type=float, default=0.05)
+    j3.add_argument("--out", default="grefx_s_judge.json")
     a = ap.parse_args()
-    {"series": cmd_series, "judge": cmd_judge, "judge2": cmd_judge2}[a.cmd](a)
+    {"series": cmd_series, "judge": cmd_judge, "judge2": cmd_judge2, "judge3": cmd_judge3}[a.cmd](a)
 
 
 if __name__ == "__main__":
