@@ -1,11 +1,11 @@
 #!/bin/bash
-# plan architecture-float-state-double-geometry §6.34 の前提 1: B で #18 の commit を float でビルドし (~/forge-fgeom9-f32)、
+# plan architecture-float-state-double-geometry §6.34 の前提 1: A で #18 の commit を float でビルドし (~/forge-fgeom9-f32)、
 # 単体試験 (test_qacc_axis・test_qacc_commit) を回し、§6.26 の float (~/forge-fgeom7-f32) と SASS を照合する。
 # 使い方: bash qa_build.sh <commit>。結果は _band_ab/cold_pair/qa_pre.json と qa_build.log。
 set -u
 SHA=$1
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
-[ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0ba2b91ba659254c4" ] || { echo "B ではない。中止"; exit 1; }
+[ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0b1a5e0b8dc152f00" ] || { echo "A ではない。中止"; exit 1; }
 C45=~/forge-wallfit/case/45.isobutane_m6_d155; LOG=$C45/qa_build.log; PRE=$C45/_band_ab/cold_pair/qa_pre.json
 D=~/forge-fgeom9-f32; S=$D/solver_density_cuda; OLD=~/forge-fgeom7-f32/solver_density_cuda
 W=~/qa_sass; mkdir -p $W/variants

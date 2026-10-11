@@ -1,4 +1,4 @@
-"""plan architecture-float-state-double-geometry §6.34 (事前登録) の判定: 平均流の状態を FP64 で積む float の軌跡 (qAccumulatorFP64 の感度試験)。qa.sh の後に B で回す。
+"""plan architecture-float-state-double-geometry §6.34 (事前登録) の判定: 平均流の状態を FP64 で積む float の軌跡 (qAccumulatorFP64 の感度試験)。qa.sh の後に A で回す。
 対照: A = run_0487_tr_fp64 (FP64、保存済みの参照の軌跡)、B = run_0488_tr_f32・B' = run_0489_tr_f32b (float、§6.27)。
 追加: E = run_0592_qa_f32・E' = run_0593_qa_f32b (float + qAccumulatorFP64 1)、F = run_0594_qa_off (同じ新しいバイナリ、qAccumulatorFP64 0)。
 前提 (一つでも欠ければ判定不能。結果を見て対照を差し替えない):

@@ -1,11 +1,11 @@
 #!/bin/bash
 # plan architecture-float-state-double-geometry §6.34 (事前登録、codex diagnose 2026-10-11): 平均流の状態を FP64 で積む float の軌跡 (qAccumulatorFP64 1、軸対称対応)。
 # §6.26 と同じ入力 (_tr/q32_init.h5)・環境変数・設定で、E = run_0592_qa_f32・E' = run_0593_qa_f32b (qAccumulatorFP64 1) と
-# 対照 F = run_0594_qa_off (同じ新しいバイナリ、qAccumulatorFP64 0)。各 30,000 step・500 ごと。インスタンス B で 3 本同時。判定は qa_an.py。
+# 対照 F = run_0594_qa_off (同じ新しいバイナリ、qAccumulatorFP64 0)。各 30,000 step・500 ごと。インスタンス A で 3 本同時 (B は他セッションの run で埋まっていたため。A と B は同じ型・同じ AMI)。判定は qa_an.py。
 # バイナリ ~/forge-fgeom9-f32 (qAccumulatorFP64 の軸対称対応と採用の mask の診断を含む commit)。
 set -uo pipefail
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
-[ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0ba2b91ba659254c4" ] || { echo "B ではない。中止"; exit 1; }
+[ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0b1a5e0b8dc152f00" ] || { echo "A ではない。中止"; exit 1; }
 export FORGE_CUDA_BLOCKSIZE=128
 for v in $(compgen -e | grep '^FORGE_'); do case $v in FORGE_CUDA_BLOCKSIZE) ;; *) unset $v;; esac; done
 export FORGE_OMEGA_BUDGET=1 FORGE_DIAG_COMMIT_LOSS=500
