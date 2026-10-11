@@ -20,7 +20,8 @@
 __device__ float g_axisDiagAlpha = 0.0f;
 // 診断 (FORGE_LINE_DUMP_FINAL_SPLIT、既定 0 でビット不変。plan tooling-nozzle-core-grid §4.52): 書き出し中の外反復の最後に、
 // 左辺の対流 (閉形式 FVS) の面の寄与を面の種類で外して組み直す。1 = ライン外の面 (has_nbr かつライン面でない) を外す、
-// 2 = ライン面を外す、3 = 両方を外す。g_diagForceStoreDiag = 1 のときは loop > 0 でもライン上の対角を配列へ書く (書き出し用)。
+// 2 = ライン面を外す、3 = 両方を外す、ビット 4 = ライン面の熱伝導の近傍作用を右辺に足す (§4.56)。
+// g_diagForceStoreDiag = 1 のときは loop > 0 でもライン上の対角を配列へ書く (書き出し用)。
 __device__ int g_diagSkipConvLHS = 0;
 __device__ int g_diagForceStoreDiag = 0;
 
@@ -1059,6 +1060,19 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     diag_block[4][2] += -cfac * velocity_y;
                     diag_block[4][3] += -cfac * velocity_z;
                     diag_block[4][4] += cfac;
+                    // 診断 (g_diagSkipConvLHS のビット 4、既定 0。plan tooling-nozzle-core-grid §4.56): ライン面の熱伝導の近傍作用
+                    // K_θ δ_j = ∂R_i/∂Q_j · δ_j = κ_f (γ_j/cp_j)/ρ_j [−(e_j − ½|u_j|²) δρ_j − u_j·δ(ρu)_j + δ(ρE)_j] を右辺へ足す
+                    // (物性・γ は凍結、自節点の対角は上で足したものだけで二重に足さない)。書き出しの組み直しでだけ使う。
+                    if ((g_diagSkipConvLHS & 4) != 0 && isLineFace) {
+                        const ST rj = max(static_cast<ST>(ro[other_ic]), static_cast<ST>(1.0e-30));
+                        const ST uxj = static_cast<ST>(Ux[other_ic]), uyj = static_cast<ST>(Uy[other_ic]), uzj = static_cast<ST>(Uz[other_ic]);
+                        const ST q2j = uxj * uxj + uyj * uyj + uzj * uzj;
+                        const ST ej = static_cast<ST>(roe[other_ic]) / rj - static_cast<ST>(0.5) * q2j;
+                        const ST cj = (k_face * delta / dcc) * (static_cast<ST>(gamma_arr[other_ic]) / max(static_cast<ST>(cpArr[other_ic]), static_cast<ST>(1.0e-30))) / rj;
+                        neighbor_accum[4] += cj * (-(ej - static_cast<ST>(0.5) * q2j) * static_cast<ST>(dq_old_0[other_ic])
+                                                   - uxj * static_cast<ST>(dq_old_1[other_ic]) - uyj * static_cast<ST>(dq_old_2[other_ic])
+                                                   - uzj * static_cast<ST>(dq_old_3[other_ic]) + static_cast<ST>(dq_old_4[other_ic]));
+                    }
                 } else {
                     block_dplur::add_identity_scaled(diag_block, viscous_diag);
                     // **診断専用 A/B** (codex 2026-09-21、既定はコンパイルから除外されビット不変)。
@@ -1644,7 +1658,8 @@ void lineDumpFinalRhs_wrapper(int nSweep, solverConfig& cfg, cudaConfig& cuda_cf
     line_dump::put<flow_float>("dqold_final", {var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"]}, n);
     printf("[lineDump] 確定する補正に対する右辺を書いた (sweep %d の後)\n", nSweep);
     // 診断 (FORGE_LINE_DUMP_FINAL_SPLIT=1、既定 off。plan tooling-nozzle-core-grid §4.52): 同じ δ・同じ状態で、左辺の対流の面の寄与を
-    // 面の種類で外して右辺と対角を組み直し、D_s{m}・rhs_s{m}final を書く (m = 1 ライン外を外す、2 ライン面を外す、3 両方)。
+    // 面の種類で外して右辺と対角を組み直し、D_s{m}・rhs_s{m}final を書く (m = 1 ライン外を外す、2 ライン面を外す、3 両方、
+    // 4 = 対流はそのままでライン面の熱伝導の近傍作用を右辺に足す §4.56)。
     // 最後に通常の組み立て (m = 0) をもう一度して対角の配列を元に戻し、D_check・rhs_check を書く (D・rhs_final と一致するはず)。
     const char* splitEnv = getenv("FORGE_LINE_DUMP_FINAL_SPLIT");
     if (splitEnv != nullptr && atoi(splitEnv) != 0) {
@@ -1652,7 +1667,7 @@ void lineDumpFinalRhs_wrapper(int nSweep, solverConfig& cfg, cudaConfig& cuda_cf
         std::vector<const flow_float*> Dcols;
         for (int i = 0; i < 5; ++i) for (int j = 0; j < 5; ++j) Dcols.push_back(var.c_d["diag_block_" + std::to_string(i) + std::to_string(j)]);
         const std::vector<const flow_float*> Rcols = {var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"]};
-        for (int m : {1, 2, 3, 0}) {
+        for (int m : {1, 2, 3, 4, 0}) {   // 4: ライン面の熱伝導の近傍作用を右辺に足す (§4.56)
             gpuErrchk(cudaMemcpyToSymbol(g_diagSkipConvLHS, &m, sizeof(int)));
             gpuErrchk(cudaMemcpyToSymbol(g_diagForceStoreDiag, &one, sizeof(int)));
             timeIntegration_d_wrapper(nSweep, cfg, cuda_cfg, msh, var, 0);

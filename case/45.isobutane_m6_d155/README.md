@@ -254,6 +254,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0655_cg_conv_q1m2` (同上) | M-c の回し直しの評価: Q₁・ライン面だけ (convMethod 0、`FORGE_DIAG_CONV_FACES`、Q₁ は `run_0649`) | 1 外反復 (RUN_RC 0) | active |
 | `run_0656_cg_conv_q0m3` (同上) | M-c の回し直しの評価: Q₀・対流なし (convMethod 0、`FORGE_DIAG_CONV_FACES`、Q₁ は `run_0649`) | 1 外反復 (RUN_RC 0) | active |
 | `run_0657_cg_conv_q1m3` (同上) | M-c の回し直しの評価: Q₁・対流なし (convMethod 0、`FORGE_DIAG_CONV_FACES`、Q₁ は `run_0649`) | 1 外反復 (RUN_RC 0) | active |
+| `run_0658_cg_therm_base` (2026-10-12 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-t ([plan §4.56](../../plans/active/tooling-nozzle-core-grid.md)): M-o の base を、ライン面の熱伝導の近傍作用を組み直しに足す診断入りの FP64 バイナリ `~/forge-fgeom7-fp64-diag5` で再現 (台本 `cg_therm.sh`) | 走行中。判定 `cg_therm_an.py` | active |
+| `run_0659_cg_therm_q0m0` (同上) | M-t の評価: Q₀・全面・convMethod 0 の残差 | 走行中 | active |
+| `run_0660_cg_therm_q1m0` (同上) | M-t の評価: Q₁ (`run_0658` res_1)・全面・convMethod 0 の残差 | 走行中 | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
