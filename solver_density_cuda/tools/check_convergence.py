@@ -25,6 +25,9 @@ forge の run ディレクトリの residual_history.csv を読み、**全保存
 必須列 (欠けたら判定不能): 流体 5 列、run の solverConfig.yaml の乱流モデルが SST なら rms_roK・rms_roOmega、
 遷移モデルが有効なら rms_roGamma・rms_roReth。solverConfig.yaml が無い・読めないときは SST の 2 列も必須にする
 (乱流モデルを決められないので最も厳しい集合で判定する。plan tooling-sern-te-wake-grid §5.1 R2g)。
+化学種・トレーサ (rms_roY0..・rms_roXi、physProp.species・tracer から。§5.1 R2i): CSV にその列が 1 本でもあれば設定の列を全部要求する
+(2026-09-16 より前の forge は列を書かないので、列が 1 本も無い CSV は旧版と区別できず要求しない)。analyze(..., require_species=True)
+(SERN の受理) は列の有無によらず要求する。詳しくは species_required。
 
 収束場からの restart (交差 restart など) 用: --from-floor REF_RUN (別名 --reference-floor)
   ピークからの低下桁数は収束場から再開した run では原理的に 0 なので、代わりに **参照 run の末尾床**
@@ -33,7 +36,7 @@ forge の run ディレクトリの residual_history.csv を読み、**全保存
   列ごとの床比 (末尾平均/床, ピーク/床) を表示する。NaN/Inf は DIVERGED、超過は NOT CONVERGED。
   例: python3 tools/check_convergence.py --from-floor run_0476 run_0478 run_0479
 """
-import csv, math, sys, argparse, os
+import csv, math, sys, argparse, os, re
 
 CONSERVED = ['rms_ro', 'rms_roUx', 'rms_roUy', 'rms_roUz', 'rms_roe',
              'rms_roK', 'rms_roOmega',
@@ -172,21 +175,93 @@ def required_cols(csv_path):
     return need, (None if kind is not None else why)
 
 
-def _input_report(cols, need, why):
+# 化学種・受動トレーサの残差列 (plan tooling-sern-te-wake-grid §5.1 R2i、codex result 再レビュー 2026-10-12 M1)。forge は
+# physProp.species の数 n が 2 以上なら rms_roY0..rms_roY{n−1}、physProp.tracer: exhaust なら rms_roXi を書く (main.cpp の
+# residualEquationNames・speciesResidualNames。thermalMethod によらない。species が無ければ n = 1 で列なし)。旧実装は「列があれば
+# 検査する」だったので、化学種の列が欠けた CSV も流体の列だけで合格した (run_1100 の残差から rms_roY0・rms_roY1 を消すと SERN の
+# 受理を通った)。ただし **2026-09-16 (185afd84) より前の forge は化学種・トレーサの残差列を書かない**: 主チェックアウトには設定が
+# n ≥ 2 で列の無い run が 473 本ある (2026-10-12 走査)。CSV の見出しからは旧版の forge と列の欠落を区別できないので、要求の仕方を分ける
+# (species_required)。
+SPECIES_COL_RE = re.compile(r'rms_roY\d+$')
+
+
+def species_cols(csv_path):
+    """残差 CSV の隣の solverConfig.yaml から、forge が書く化学種・トレーサの残差列: (列のタプル, None)、決められなければ (None, 説明)
+    (solverConfig.yaml が無い・YAML として読めない・PyYAML が無い・physProp が無い・species が列でない・tracer が未知の値)。
+    tracer は forge と同じく none・0 を無効、exhaust を有効とする (他の値は forge が起動時に拒否するので、その config で回った run は無い)。"""
+    cfgp = os.path.join(os.path.dirname(os.path.abspath(csv_path)), 'solverConfig.yaml')
+    try:
+        txt = open(cfgp, encoding='utf-8').read()
+    except OSError:
+        return None, 'solverConfig.yaml が無い'
+    try:
+        import yaml
+    except ImportError:
+        return None, 'PyYAML が無いので solverConfig.yaml を読めない'
+    try:
+        doc = yaml.safe_load(txt)
+    except Exception as e:   # noqa: BLE001 (YAML の構文エラーなど)
+        return None, 'solverConfig.yaml を YAML として読めない (%s)' % type(e).__name__
+    pp = doc.get('physProp') if isinstance(doc, dict) else None
+    if not isinstance(pp, dict):
+        return None, 'solverConfig.yaml に physProp が無い'
+    sp = pp.get('species')
+    if sp is not None and not isinstance(sp, list):
+        return None, 'physProp.species が列 (list) でない'
+    n = 1 if sp is None else len(sp)
+    tr = pp.get('tracer')
+    if tr is None or str(tr) in ('none', '0'):
+        tracer = False
+    elif str(tr) == 'exhaust':
+        tracer = True
+    else:
+        return None, 'physProp.tracer %r は未知の値' % (tr,)
+    ys = tuple('rms_roY%d' % i for i in range(n)) if n >= 2 else ()     # 単成分 (n = 1) は列なし
+    return ys + (('rms_roXi',) if tracer else ()), None
+
+
+def species_required(csv_path, cols, require_species=False):
+    """必須にする化学種・トレーサの残差列: (列のタプル, 判定不能の理由 または None)。
+    - 既定 (CLI・他のツール): CSV に化学種・トレーサの列が 1 本でもあれば (列を書く版の forge)、設定から決めた列を全部要求する
+      (1 本だけ消えた CSV は判定不能)。1 本も無い CSV は旧版の forge と区別できないので要求しない (主チェックアウトの既存 run の
+      判定を変えない)。設定から決められない CSV (写しなど) は、ある列だけの整合 (rms_roY は 0 から連続して 2 本以上) を要求する
+    - require_species=True (SERN の受理 sern_gates.residual_health。run は列を書く版の forge で回る): 列の有無によらず設定から決めた列を
+      要求する。決められなければ判定不能 (乱流モデルと違って候補の上限が無いので、最も厳しい集合を作れない)"""
+    present = [c for c in cols if SPECIES_COL_RE.match(c) or c == 'rms_roXi']
+    want, why = species_cols(csv_path)
+    if want is not None:
+        return (want if (require_species or present) else ()), None
+    if require_species:
+        return (), '化学種・トレーサの残差列を決められない (%s)' % why
+    ys = sorted(int(c[len('rms_roY'):]) for c in present if c != 'rms_roXi')
+    return (tuple('rms_roY%d' % i for i in range(max(ys[-1] + 1, 2))) if ys else ()), None
+
+
+def _input_report(cols, need, why, sp=((), None)):
     """必須列の検査を report の行にする: 欠落があれば ('(入力)', (理由, False))、乱流モデルを決められず SST の列も
-    要求したがそろっていれば ('(設定)', (注記, True))、それ以外は None。"""
-    missing = [c for c in need if c not in cols]
-    if missing:
-        msg = '必須の保存量残差列が無い: %s' % ', '.join(missing)
-        if why is not None and any(c in SST_COLS for c in missing):
-            msg += ' (%s: 乱流モデルを決められないので SST の %s も必須)' % (why, '・'.join(SST_COLS))
-        return '(入力)', (msg + '  <-- 判定不能', False)
+    要求したがそろっていれば ('(設定)', (注記, True))、それ以外は None。
+    sp = species_required の戻り (化学種・トレーサの必須列, 判定不能の理由)。理由があれば列がそろっていても判定不能。"""
+    sp_need, sp_why = sp
+    missing = [c for c in tuple(need) + tuple(sp_need) if c not in cols]
+    if missing or sp_why is not None:
+        parts = []
+        if missing:
+            msg = '必須の保存量残差列が無い: %s' % ', '.join(missing)
+            if why is not None and any(c in SST_COLS for c in missing):
+                msg += ' (%s: 乱流モデルを決められないので SST の %s も必須)' % (why, '・'.join(SST_COLS))
+            if any(c in sp_need for c in missing):
+                msg += ' (化学種・トレーサの列は solverConfig.yaml の physProp.species・tracer から)'
+            parts.append(msg)
+        if sp_why is not None:
+            parts.append(sp_why)
+        return '(入力)', ('; '.join(parts) + '  <-- 判定不能', False)
     if why is not None:
         return '(設定)', ('%s: 乱流モデルを決められないので SST の %s も必須として判定 (そろっている)' % (why, '・'.join(SST_COLS)), True)
     return None
 
 
-def analyze(path, min_drop, tail_frac):
+def analyze(path, min_drop, tail_frac, require_species=False):
+    """require_species: 化学種・トレーサの残差列を CSV の列の有無によらず設定から要求する (SERN の受理。species_required)。"""
     rows, cols = load_series(path)
     if not rows:
         return None
@@ -197,7 +272,7 @@ def analyze(path, min_drop, tail_frac):
     if not cols:
         report['(入力)'] = ('残差列が 1 つも無い  <-- 判定不能', False)
         return laststep, report, False, False, False, False
-    inp = _input_report(cols, *required_cols(path))
+    inp = _input_report(cols, *required_cols(path), sp=species_required(path, cols, require_species))
     if inp is not None:
         report[inp[0]] = inp[1]
         ok = ok and inp[1][1]
@@ -353,10 +428,10 @@ def reference_floor(path, tail_frac):
     return floor, zero_cols
 
 
-def analyze_from_floor(path, floor, zero_cols, factor, tail_frac, ref_path=None):
+def analyze_from_floor(path, floor, zero_cols, factor, tail_frac, ref_path=None, require_species=False):
     """収束場からの restart 判定: 全期間ピークと末尾平均が参照床の factor 倍以内なら列 PASS。
     列対応 (codex result-2 m1): 参照に無い列・参照で all-zero だった列が対象で非ゼロなら FAIL (前提不成立を PASS にしない)。
-    参照の非ゼロ列が対象に無い場合も FAIL。"""
+    参照の非ゼロ列が対象に無い場合も FAIL。require_species は analyze と同じ (species_required)。"""
     rows, cols = load_series(path)
     if not rows:
         return None
@@ -369,7 +444,8 @@ def analyze_from_floor(path, floor, zero_cols, factor, tail_frac, ref_path=None)
     if ref_path is not None and transition_active(ref_path) != transition_active(path):
         report['(参照)'] = ('参照 run と遷移モデルの有無が違う (別の方程式系)  <-- 判定不能', False)
         ok = False
-    inp = _input_report(cols, *required_cols(path))     # SST の 2 列も通常判定と同じく (§5.1 R2g)
+    # SST の 2 列 (§5.1 R2g)・化学種とトレーサ (§5.1 R2i) も通常判定と同じく
+    inp = _input_report(cols, *required_cols(path), sp=species_required(path, cols, require_species))
     if inp is not None:
         report[inp[0]] = inp[1]
         ok = ok and inp[1][1]

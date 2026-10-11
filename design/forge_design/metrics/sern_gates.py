@@ -8,7 +8,8 @@
   (3) 全残差 (check_convergence.analyze): NaN/Inf 無し、末尾で rising な列が無い。PASS (3 桁低下) は
       `require_residual_pass` のときだけ必須 (本ケースは残差が 1–2.5 桁でプラトーする性格 — その事実は台帳に残す)。
       入力の不備 (残差 CSV が無い・必須の保存量残差列の欠落など analyze の判定不能) は収束状態と別に判定不能
-      (plan tooling-sern-te-wake-grid §5.1 R2h1)
+      (plan tooling-sern-te-wake-grid §5.1 R2h1)。化学種・トレーサの残差列は実効 config から必須 (R2i)、残差の時系列は session の
+      nStepOuter と最終場の step に対して完全であること (欠測・重複・切り詰め・終了位置の不一致は判定不能、R2j)
   (4) **実際に最適化する量** (SST は C_T_with_shear、Euler は C_T) と C_T / C_L / C_M の頭打ち
       (check_quasisteady.classify_series による STEADY。NONFINITE / DRIFTING / TRANSIENT-UNSETTLED / OSCILLATING は不合格)。
       量と目的量は問題設定の乱流モデル (evaluate.model) から決め、量の列が力の履歴に欠ければ判定不能
@@ -159,23 +160,112 @@ def field_health(run_dir, *, model) -> dict:
     return out
 
 
+# --- 残差の時系列の完全性 (plan tooling-sern-te-wake-grid §5.1 R2j、codex result 再レビュー 2026-10-12 M2) ------------------------
+# 旧実装は analyze が空データだけを拒否し、residual_health は最終 step を保存するだけだったので、run_1100 の残差を先頭 step 0 だけ・
+# 末尾 step 19999 だけの 1 行にしても NOT CONVERGED (stalled/plateau) として受理・延長された (欠けた区間の NaN・上昇を検査していない)。
+# forge の時点規約 (main.cpp・output.cpp): forge は session ごとに step 0 から数え、iStep = 0..N−1 (N = max(1, time.last.nStepOuter)) の
+# 各 step の終わりに outer_end 行を 1 行書く (logOuterEnd)。他の phase (outer_begin・inner_begin・inner_iter) は同じ step のその前。
+# 最終場は最後の更新の後の res_N.h5 (isLast)。判定するのは run_dir の solverConfig.yaml (= 最後の session の config) の N。
+# 照合するもの: outer_end の step 列がちょうど 0..N−1 (欠測・重複・予定外・終了位置・昇順)、全行の step が 0..N−1 の整数で昇順・phase が
+# 既知、最後の res_*.h5 の step が N。共有の check_convergence には入れない (途中の run・停止した run・--segment の連結 CSV・設定の無い
+# 写しにも使われ、session の N と最終場はこの経路でしか決まらない)
+RESIDUAL_PHASES = ("outer_begin", "inner_begin", "inner_iter", "outer_end")   # main.cpp ResidualCsvLogger::phaseName
+
+
+def _session_steps(run_dir) -> tuple:
+    """run_dir/solverConfig.yaml の time.last.nStepOuter (正の整数): (N, None) か、決められなければ (None, 理由)。"""
+    from ..gas.composition import load_yaml_str
+    p = Path(run_dir) / "solverConfig.yaml"
+    try:
+        doc = load_yaml_str(p.read_text())
+    except OSError as e:
+        return None, f"実効 config {p.name} を読めない ({type(e).__name__})"
+    except Exception as e:  # noqa: BLE001 (YAML の構文エラーなど)
+        return None, f"実効 config {p.name} を YAML として読めない ({type(e).__name__})"
+    n = (((doc or {}).get("time") or {}).get("last") or {}).get("nStepOuter") if isinstance(doc, dict) else None
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        return None, f"実効 config {p.name} の time.last.nStepOuter が正の整数でない ({n!r})"
+    return n, None
+
+
+def residual_series_check(run_dir) -> tuple:
+    """残差の時系列 (run_dir/residual_history.csv) が判定する session (solverConfig.yaml の nStepOuter = N) と最終場に対して完全か。
+    戻り = (判定不能の理由のリスト [空なら完全], 要約 dict)。要約 = {"n_steps": N, "n_rows", "n_outer_end", "first", "last",
+    "final_field"}。上の時点規約のどれかを満たさなければ理由を返す (欠測・重複・予定外・切り詰め・終了位置の不一致・最終場の step の不一致・
+    step や phase が読めない)。CSV が無い・空は residual_health が先に判定不能にする。"""
+    import csv
+    path = Path(run_dir) / "residual_history.csv"
+    N, why = _session_steps(run_dir)
+    summ = {"n_steps": N, "n_rows": 0, "n_outer_end": 0, "first": None, "last": None, "final_field": None}
+    reasons = [] if why is None else [f"判定不能: 残差の時系列の予定を決められない ({why})"]
+    oe, bad_step, bad_phase, outside, prev, nondec = [], 0, {}, 0, None, False
+    with path.open(newline="") as fh:
+        rd = csv.reader(fh)
+        hdr = [h.strip() for h in next(rd, [])]
+        if "step" not in hdr or "phase" not in hdr:
+            return reasons + ["判定不能: 残差の CSV に step・phase の列が無い (時系列を照合できない)"], summ
+        si, pi = hdr.index("step"), hdr.index("phase")
+        for row in rd:
+            if not row:
+                continue
+            summ["n_rows"] += 1
+            try:
+                s = int(row[si])
+            except (ValueError, IndexError):
+                bad_step += 1
+                continue
+            ph = row[pi] if pi < len(row) else ""
+            if ph not in RESIDUAL_PHASES:
+                bad_phase[ph] = bad_phase.get(ph, 0) + 1
+            if N is not None and not 0 <= s < N:
+                outside += 1
+            nondec = nondec or (prev is not None and s < prev)
+            prev = s
+            if ph == "outer_end":
+                oe.append(s)
+    summ.update({"n_outer_end": len(oe), "first": oe[0] if oe else None, "last": oe[-1] if oe else None})
+    if bad_step:
+        reasons.append(f"判定不能: 残差の CSV に step が整数でない行が {bad_step} 行ある")
+    if bad_phase:
+        reasons.append(f"判定不能: 残差の CSV に未知の phase がある ({dict(list(bad_phase.items())[:3])})")
+    if nondec:
+        reasons.append("判定不能: 残差の CSV の行の step が昇順でない (別の session の連結・並べ替え)")
+    if N is not None:
+        if outside:
+            reasons.append(f"判定不能: 残差の CSV に session の範囲 0..{N - 1} の外の step の行が {outside} 行ある")
+        reasons += _step_mismatch(oe, list(range(N)), f"残差 (nStepOuter {N}) の outer_end 行")
+    res = _volume_res(run_dir)
+    if not res:
+        reasons.append("判定不能: 最終場 res_*.h5 が無い (残差の session の終了 step と照合できない)")
+    else:
+        summ["final_field"] = res[-1].name
+        k = int("".join(c for c in res[-1].stem if c.isdigit()))
+        if N is not None and k != N:
+            reasons.append(f"判定不能: 最終場 {res[-1].name} の step {k} が残差の session の終了 step (nStepOuter {N}) と違う")
+    return reasons, summ
+
+
 def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
     """check_convergence.analyze で全残差列を見る (VERDICT の語彙も同じ)。
     **入力の妥当性と収束状態を別の結果にする** (plan tooling-sern-te-wake-grid §5.1 R2h1、codex diagnose 2026-10-12 R2h(1)):
       input = {"ok", "reasons", "notes"}: 残差 CSV が無い・空、analyze の判定不能 (必須の保存量残差列の欠落・残差列が 1 つも無い・
               末尾窓の代表値が 0) は input.ok = False・unverifiable = True (evaluate_gates は JUDGMENT_UNVERIFIABLE、延長もしない)。
-              旧実装は analyze の判定不能を捨てて ok を組み直したので、SST で rms_roOmega が欠けた CSV も ok だった
+              旧実装は analyze の判定不能を捨てて ok を組み直したので、SST で rms_roOmega が欠けた CSV も ok だった。
+              化学種・トレーサの残差列は CSV の列の有無によらず実効 config から必須 (analyze の require_species、§5.1 R2i)。
+              残差の時系列の不完全 (residual_series_check: session の nStepOuter・最終場の step との不整合、§5.1 R2j) も入力の不備
       収束状態 (rising・stalled・converging・converged・verdict) は従来どおり。**プラトー受理は変えない** (analyze.ok は必須にしない)。
-    ok = 入力が妥当 かつ NaN/Inf 無し かつ rising 列無し。converged = 全列 PASS (3 桁低下)。"""
+    ok = 入力が妥当 かつ NaN/Inf 無し かつ rising 列無し。converged = 入力が妥当 かつ全列 PASS (3 桁低下)。"""
     path = Path(run_dir) / "residual_history.csv"
     out = {"ok": False, "converged": False, "verdict": "MISSING", "nan": False, "rising": [], "stalled": [], "converging": [],
            "columns": {}, "last_step": None, "unverifiable": True, "input": {"ok": False, "reasons": [], "notes": []}}
     if not path.exists():
         out["reasons"] = ["no residual_history.csv"]; out["input"]["reasons"] = list(out["reasons"]); return out
-    res = _cc.analyze(str(path), min_drop, tail)
+    res = _cc.analyze(str(path), min_drop, tail, require_species=True)
     if res is None:
         out["reasons"] = ["empty residual_history.csv"]; out["input"]["reasons"] = list(out["reasons"]); return out
     laststep, report, ok, any_nan, any_stalled, any_converging = res
+    series_bad, out["series"] = residual_series_check(run_dir)
+    ok = ok and not series_bad
     out["last_step"] = laststep; out["nan"] = bool(any_nan); out["converged"] = bool(ok)
     # **trend は msg から直接読む** (2026-09-19, codex plan レビュー M1)。
     # 旧実装は `<-- RISING` 等の**注記文字列**で分類していたが、`check_convergence.py:107` は
@@ -203,6 +293,7 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
             out["stalled"].append(c)
         elif trend == "falling":
             out["converging"].append(c)
+    bad_input += series_bad          # 残差の時系列の不完全 (§5.1 R2j)
     out["input"] = {"ok": not bad_input, "reasons": bad_input, "notes": notes}
     out["unverifiable"] = bool(bad_input)
     if ok:
@@ -800,8 +891,8 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
     JUDGMENT_UNVERIFIABLE は受理ゲート (4) の量の列が力の履歴に欠けたときにも出す (判定区間の有無によらない、§5.1 R2f)。
     力の履歴の標本が incomplete (3D の壁の部品の出力・粘性壁の摩擦の欠落、§5.1 R2h3・R2h4) を持つときも JUDGMENT_UNVERIFIABLE。
     最終場に乱流モデルの必須の量 (SST の roK・roOmega など) が無く、場の不合格がその欠落だけのときも JUDGMENT_UNVERIFIABLE (§5.1 R2g)。
-    残差の入力の不備 (residual_health の unverifiable: CSV が無い・必須の残差列の欠落など) も JUDGMENT_UNVERIFIABLE (§5.1 R2h1。
-    NaN/Inf があれば DIVERGED が先)。
+    残差の入力の不備 (residual_health の unverifiable: CSV が無い・必須の残差列 [化学種・トレーサを含む、R2i] の欠落・時系列の不完全
+    [R2j] など) も JUDGMENT_UNVERIFIABLE (§5.1 R2h1。NaN/Inf があれば DIVERGED が先)。
     model = 問題設定の乱流モデル (collect が evaluate.model を runner の既定 euler で解決して渡す。省略不可・None 不可):
     目的量と (4) の量、場と最終場の床の必須の量はここから決める (旧引数 obj と、列・量の有無から推測する経路は廃止)。
     物理的 INFEASIBLE はここでは出さない。"""

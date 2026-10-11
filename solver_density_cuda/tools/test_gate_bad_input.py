@@ -13,6 +13,7 @@
 | 〃 | `rms_ro` だけ (他の保存量なし) | `ok=True` |
 | 〃 | 19 点が 1 で**最終 1 点だけ 0** | `drop=inf`, `ok=True` |
 | 〃 (2026-10-12 追加) | solverConfig.yaml が SST なのに `rms_roK`・`rms_roOmega` が無い (流体 5 列だけ) | `ok=True` |
+| 〃 (2026-10-12 追加) | physProp.species が 2 種なのに `rms_roY0` が無い (`rms_roY1` はある)・トレーサ付きで `rms_roXi` が無い | `ok=True` |
 | `check_quasisteady.classify` | `[1,1,1,1,1,NaN]` | `STEADY` |
 | 〃 `classify_series` | step が全点 NaN・値は一定 | `STEADY` |
 | `check_mesh_quality` | 体積ゼロの四面体 | AR 1.732 / skew 0.500 = 通常合格 |
@@ -200,6 +201,83 @@ def main():
     ka = sm.stage_key('turbulence: {model: "sst", wallTreatmentSST: 0}\nspace: {convMethod: 1, limiter: 2}\n', "")
     kb = sm.stage_key('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "lm2009"}\nspace: {convMethod: 1, limiter: 2}\n', "")
     chk("SST -> SST+遷移 の段切替は別区間", ka != kb)
+
+    # (7) 化学種・トレーサの残差列 (plan tooling-sern-te-wake-grid §5.1 R2i, 2026-10-12)。forge は physProp.species が 2 種以上なら
+    # rms_roY0..、tracer: exhaust なら rms_roXi を書く。以前は「列があれば検査する」で、rms_roY0 が欠けても合格していた。
+    # 既定 (CLI) は CSV に化学種・トレーサの列が 1 本でもあれば設定の列を全部要求する (列を書かない 2026-09-16 以前の forge の run は
+    # 列が 1 本も無いので従来どおり)。require_species=True (SERN の受理) は列の有無によらず要求し、設定から決められなければ判定不能
+    tp2 = 'physProp: {thermalMethod: 2, species: [N2, O2]}\nturbulence: {model: "none"}\n'
+    tp2tr = 'physProp: {thermalMethod: 2, species: [N2, O2], tracer: exhaust}\nturbulence: {model: "none"}\n'
+    cpg2 = 'physProp: {thermalMethod: 0, species: [N2, O2]}\nturbulence: {model: "none"}\n'
+    tp1 = 'physProp: {thermalMethod: 2, species: [N2]}\nturbulence: {model: "none"}\n'
+    tp0 = 'physProp: {thermalMethod: 2}\nturbulence: {model: "none"}\n'
+    cpgtr = 'physProp: {thermalMethod: 0, tracer: exhaust}\nturbulence: {model: "none"}\n'
+
+    def sp_run(cfg, extra):
+        d = tempfile.mkdtemp()
+        if cfg is not None:
+            with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+                f.write(cfg)
+        pth_ = os.path.join(d, "residual_history.csv")
+        with open(pth_, "w", newline="") as f:
+            w = csv.writer(f); w.writerow(cols + extra)
+            w.writerows([[i, "outer_end"] + [v] * (5 + len(extra)) for i, v in enumerate(ser)])
+        return d, pth_
+
+    def inp_of(res):
+        return "" if res is None else res[1].get("(入力)", ("",))[0]
+
+    for cfg, extra, gone, lab in ((tp2, ["rms_roY1"], ["rms_roY0"], "TP 2 種で rms_roY0 が無い"),
+                                  (tp2, ["rms_roY0"], ["rms_roY1"], "TP 2 種で rms_roY1 が無い"),
+                                  (tp2tr, ["rms_roY0", "rms_roY1"], ["rms_roXi"], "トレーサ付き TP で rms_roXi が無い"),
+                                  (tp2tr, ["rms_roXi"], ["rms_roY0", "rms_roY1"], "トレーサ付き TP で化学種の 2 列が無い (rms_roXi は残る)"),
+                                  (cpg2, ["rms_roY1"], ["rms_roY0"], "CPG + species 2 種 (forge は thermalMethod によらず書く) で rms_roY0 が無い")):
+        d, pth_ = sp_run(cfg, extra)
+        res = cc.analyze(pth_, 3.0, 0.2)
+        chk("%s -> 判定不能" % lab, res is not None and res[2] is False and all(c in inp_of(res) for c in gone),
+            "ok=%s %s" % (None if res is None else res[2], inp_of(res)))
+        _shs.rmtree(d)
+    for cfg, extra, lab in ((tp2, ["rms_roY0", "rms_roY1"], "TP 2 種・2 列そろう"), (tp2tr, ["rms_roY0", "rms_roY1", "rms_roXi"], "トレーサ付き TP・3 列そろう"),
+                            (cpgtr, ["rms_roXi"], "CPG + トレーサ・rms_roXi あり")):
+        d, pth_ = sp_run(cfg, extra)
+        res, res_s = cc.analyze(pth_, 3.0, 0.2), cc.analyze(pth_, 3.0, 0.2, require_species=True)
+        chk("%s -> 従来どおり合格 (require_species=True でも)" % lab, res is not None and res[2] is True and res_s[2] is True,
+            "ok=%s/%s %s" % (None if res is None else res[2], res_s[2], inp_of(res_s)))
+        _shs.rmtree(d)
+    d, pth_ = sp_run(tp2, [])
+    res, res_s = cc.analyze(pth_, 3.0, 0.2), cc.analyze(pth_, 3.0, 0.2, require_species=True)
+    chk("TP 2 種で化学種の列が 1 本も無い: 既定は旧版の forge と区別できず合格のまま、require_species=True は判定不能",
+        res[2] is True and res_s[2] is False and "rms_roY0" in inp_of(res_s) and "rms_roY1" in inp_of(res_s),
+        "ok=%s/%s %s" % (res[2], res_s[2], inp_of(res_s)))
+    _shs.rmtree(d)
+    for cfg, lab in ((tp1, "TP 単成分 (species 1 種)"), (tp0, "TP で species なし (既定 N2 の 1 種)")):
+        d, pth_ = sp_run(cfg, [])
+        res_s = cc.analyze(pth_, 3.0, 0.2, require_species=True)
+        chk("%s: forge は化学種の列を書かないので要求しない (require_species=True でも合格)" % lab, res_s[2] is True, inp_of(res_s))
+        _shs.rmtree(d)
+    # 設定が無い CSV: 既定はある列だけの整合 (rms_roY は 0 から連続して 2 本以上)、require_species=True は判定不能
+    for extra, want_ok, lab in ((["rms_roK", "rms_roOmega", "rms_roY1"], False, "rms_roY1 だけ (rms_roY0 が欠けている)"),
+                                (["rms_roK", "rms_roOmega", "rms_roY0"], False, "rms_roY0 だけ (forge は 1 本だけ書かない)"),
+                                (["rms_roK", "rms_roOmega", "rms_roY0", "rms_roY1"], True, "rms_roY0・rms_roY1")):
+        d, pth_ = sp_run(None, extra)
+        res, res_s = cc.analyze(pth_, 3.0, 0.2), cc.analyze(pth_, 3.0, 0.2, require_species=True)
+        chk("設定が無い・%s -> 既定は%s、require_species=True は判定不能" % (lab, "合格 (注記あり)" if want_ok else "判定不能"),
+            res[2] is want_ok and res_s[2] is False and "化学種・トレーサの残差列を決められない" in inp_of(res_s),
+            "ok=%s/%s %s" % (res[2], res_s[2], inp_of(res)))
+        _shs.rmtree(d)
+    d, pth_ = sp_run('physProp: {thermalMethod: 2, species: [N2, O2], tracer: maybe}\nturbulence: {model: "none"}\n', ["rms_roY0", "rms_roY1"])
+    chk("tracer が未知の値 -> require_species=True は判定不能 (既定はある列だけの整合で合格)",
+        cc.analyze(pth_, 3.0, 0.2, require_species=True)[2] is False and cc.analyze(pth_, 3.0, 0.2)[2] is True)
+    _shs.rmtree(d)
+    # --from-floor と CLI も同じ必須列
+    d, pth_ = sp_run(tp2, ["rms_roY1"])
+    r2 = cc.analyze_from_floor(pth_, {c: 1.0 for c in cols[2:] + ["rms_roY1"]}, set(), 1e30, 0.2)
+    chk("--from-floor: TP 2 種で rms_roY0 が無い対象 -> 合格にしない", r2 is not None and r2[2] is False and "rms_roY0" in inp_of(r2),
+        "ok=%s" % (None if r2 is None else r2[2]))
+    rr = _sp.run([sys.executable, os.path.join(HERE, "check_convergence.py"), d], capture_output=True, text=True)
+    chk("CLI: TP 2 種で rms_roY0 が無い -> 非ゼロ終了・判定不能", rr.returncode == 1 and "判定不能" in rr.stdout and "rms_roY0" in rr.stdout
+        and "Traceback" not in rr.stderr, "rc=%d" % rr.returncode)
+    _shs.rmtree(d)
 
     print("=== check_quasisteady: 不正入力 ===")
     v, _, _ = cq.classify([0, 1, 2, 3, 4, 5], [1, 1, 1, 1, 1, float("nan")], 0.4, 0.02, 0.05, 4)

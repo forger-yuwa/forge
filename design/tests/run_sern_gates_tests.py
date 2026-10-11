@@ -87,10 +87,13 @@ def make_run(d: Path, roe_nan=False, p_neg=False, nan_dump=False, resid="plateau
     steps = 6000
     # 残差は流体 5 列 + SST の 2 列、run の solverConfig.yaml (SST) も置く: 旧 fixture の 3 列 (rms_ro・rms_roUx・rms_roe) で設定なしの
     # CSV は check_convergence の判定不能 (必須列の欠落) で、2026-10-12 から受理ゲートも判定不能にする (plan tooling-sern-te-wake-grid §5.1 R2h1)
-    (d / "solverConfig.yaml").write_text('turbulence: {model: "sst"}\n')
+    # forge と同じ時系列 (outer_end の step 0..N−1 を 1 行ずつ、最終場 res_N、config に nStepOuter N と physProp) にする: 2026-10-12 から
+    # 受理ゲートは残差の時系列の欠測・終了位置の不一致 (旧 fixture は 100 step おき・step N まで) と、化学種の列を決める physProp の
+    # 無い config を判定不能にする (plan tooling-sern-te-wake-grid §5.1 R2i・R2j)
+    (d / "solverConfig.yaml").write_text(f'physProp: {{thermalMethod: 0}}\nturbulence: {{model: "sst"}}\ntime:\n  last: {{nStepOuter: {steps}}}\n')
     with open(d / "residual_history.csv", "w", newline="") as fh:
         w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"])
-        for s in range(0, steps + 1, 100):
+        for s in range(steps):
             t = s / steps
             if resid == "converged":
                 v = 10 ** (-1 - 4 * t)

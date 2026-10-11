@@ -375,6 +375,11 @@ if args.all:
                 seen.add(m.parent.name); names.append(m.parent.name)
 summary = {}
 n_local = 0
+# この比較は R2g の変更前後 (PRE) を見る。後から入れた残差の時系列の完全性 (§5.1 R2j) は外す: 発散で切り詰められた保存 run
+# (run_0121 など) は R2j で理由が 1 つ増えるので、R2g の比較に混ぜると R2g の不変性を確かめられない。R2j の保存 run への影響は
+# run_sern_residual_series_tests.py の (s) で別に数える
+_series_check = G.residual_series_check
+G.residual_series_check = lambda run_dir: ([], {})
 for name in names:
     d = find_run("46.sern_design/" + name, ("metrics.json", "prepare_info.json"))
     if d is None or not list(d.glob("res_[0-9]*.h5")):
@@ -391,6 +396,7 @@ for name in names:
     if name in RUNS_LOCAL or not same:
         check(f"(g6) case/46 {name} [{model} {dim}D]: 変更前後で field_health・floor_gate・evaluate_gates が一致 "
               f"(field {fok}・floors {gok}・verdict {v}/{fc}; 保存値 {sv}/{sfc})", same, res)
+G.residual_series_check = _series_check
 if args.all:
     check(f"(g6) --all: case/46 の {n_local} 本で一致 (内訳 {sorted(summary.items())})", n_local >= len(RUNS_LOCAL))
 # 3D の写し (h5 は無い): 保存された床の counts に roOmega の行がある (SST で roOmega があった) と field が ok

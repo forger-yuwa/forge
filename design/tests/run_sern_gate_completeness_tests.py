@@ -15,7 +15,8 @@ R2a・R2f・R2g で直した「ファイル・列にあれば検査する」型�
        (保存された判定と同じ)、B (rms_roOmega 列だけ除く) は FAIL/JUDGMENT_UNVERIFIABLE・延長不可。変更前 (commit PRE) の
        実装では B も延長可だった (欠陥の再現)。A まで拒否したら方針 (プラトー受理) を誤って変えている。
        生の CSV (12 MB) は --r2c-raw (既定 = この試験を作ったセッションの scratchpad) から読み、無ければ止める (exit 2)。
-       リポジトリには 40 行おきに間引いた fixture (notes の R2c の写し、residual_judgment1_stride40.csv.gz) を置き、生の CSV が
+       リポジトリには 40 行おきに間引いた fixture (notes の R2c の写し、residual_judgment1_stride40.csv.gz) を置き、試験の中で
+       step-hold で 0..19999 に展開して使う (残差の時系列の完全性 §5.1 R2j を通すため。仕掛けは試験だけ)。生の CSV が
        あるときは列ごとの判定 (trend・合否) と A/B の結果が生の CSV と同じことを確かめる。--fixture で生の CSV なしに fixture だけで回す。
        合成の残差: CSV が無い・空・必須列の欠落・末尾窓の代表値 0 は判定不能 (延長不可)、NaN が重なれば DIVERGED が先、
        完全な列のプラトーは従来どおり合格 (require_residual_pass は使わない)
@@ -158,16 +159,20 @@ def stub_gates(mod, saved, keep=("residual_health", "residual_scale_gate")):
 
 
 COLS7 = ["rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"]
-CFG_SST = 'turbulence: {model: "sst"}\n'
+# 合成の run は forge と同じ時系列にする (outer_end の step 0..N−1 を 1 行ずつ、config に nStepOuter N と physProp、最終場 res_N):
+# 2026-10-12 から受理ゲートは残差の時系列の欠測・終了位置の不一致と、化学種の列を決める physProp の無い config を判定不能にする
+# (plan tooling-sern-te-wake-grid §5.1 R2i・R2j。旧 fixture は 100 step おき・nStepOuter・physProp なし)。試験の意図は変えない
+NSTEP = 60
+CFG_SST = f'physProp: {{thermalMethod: 0}}\nturbulence: {{model: "sst"}}\ntime:\n  last: {{nStepOuter: {NSTEP}}}\n'
 
 
-def write_resid(d, cols=COLS7, n=60, pattern="plateau", zero_col=None, nan_col=None):
+def write_resid(d, cols=COLS7, n=NSTEP, pattern="plateau", zero_col=None, nan_col=None):
     with open(Path(d) / "residual_history.csv", "w", newline="") as fh:
         w = csv.writer(fh); w.writerow(["step", "inner", "phase"] + list(cols))
         for i in range(n):
             t = i / (n - 1)
             v = 10 ** (-1 - 1.5 * min(t * 3, 1)) if pattern == "plateau" else 10 ** (-1 - 2 * min(t * 3, 1)) * (1 + 40 * max(t - 0.8, 0))
-            row = [i * 100, -1, "outer_end"]
+            row = [i, -1, "outer_end"]
             for c in cols:
                 x = v * (10 if c != "rms_ro" else 1)
                 if c == zero_col and t > 0.5:
@@ -188,11 +193,13 @@ MON1 = G.read_monitor_csv(R2C / "TE_MONITOR_judgment1.csv")
 
 
 def r2c_ab(resid_rows, hdr, label):
-    """生 (または fixture) の残差の行から A (完全)・B (rms_roOmega を除く) の run ディレクトリを作り、ゲートを通す。"""
+    """生 (または fixture) の残差の行から A (完全)・B (rms_roOmega を除く) の run ディレクトリを作り、ゲートを通す。
+    最終場は判定区間の段の終了 step の res_20000.h5 (中身は使わない: 場のゲートは保存値に固定し、残差の時系列の照合 [§5.1 R2j] が名前だけを見る)。"""
     out = {}
     for tag in ("A", "B"):
         d = tmp / f"r2c_{label}_{tag}"; d.mkdir()
         shutil.copy2(R2C / "solverConfig_judgment.yaml", d / "solverConfig.yaml")
+        (d / "res_20000.h5").write_bytes(b"")
         keep = [i for i, c in enumerate(hdr) if not (tag == "B" and c == "rms_roOmega")]
         with open(d / "residual_history.csv", "w", newline="") as fh:
             w = csv.writer(fh); w.writerow([hdr[i] for i in keep])
@@ -226,6 +233,17 @@ raw = Path(args.r2c_raw) / "residual_judgment1.csv"
 with gzip.open(FIXTURE, "rt", newline="") as fh:
     fx_rows = list(csv.reader(fh))
 fx_hdr, fx_body = fx_rows[0], fx_rows[1:]
+
+
+def expand_stride(body, n_steps=20000):
+    """40 行おきに間引いた fixture を、各行の値を次の行の step の手前まで保持して outer_end の step 0..N−1 に戻す (試験だけの仕掛け)。
+    受理ゲートは残差の時系列の欠測を判定不能にする (§5.1 R2j) ので、間引いたままでは A (完全) の試験にならない。列ごとの判定 (trend・合否)
+    が生の CSV と同じことは、生の CSV があるとき下で確かめる"""
+    out = []
+    for k, r in enumerate(body):
+        s1 = int(body[k + 1][0]) if k + 1 < len(body) else n_steps
+        out += [[str(s)] + r[1:] for s in range(int(r[0]), s1)]
+    return out
 runs_h1 = []
 if raw.exists():
     import hashlib
@@ -237,7 +255,7 @@ if raw.exists():
 elif not args.fixture:
     stop(f"R2c の 1 回目の生の残差 {raw} が無い (12 MB の CSV はリポジトリに置かない)。--r2c-raw で場所を渡すか、"
          f"--fixture で間引いた fixture ({FIXTURE.name}) だけで回す")
-runs_h1.append((f"fixture ({FIXTURE.name}, 40 行おき {len(fx_body)} 行)", fx_hdr, fx_body))
+runs_h1.append((f"fixture ({FIXTURE.name}, 40 行おき {len(fx_body)} 行を step-hold で 20000 行に展開)", fx_hdr, expand_stride(fx_body)))
 ab = {}
 for label, hdr, body in runs_h1:
     key = "raw" if label.startswith("生") else "fx"
@@ -299,6 +317,7 @@ def gates_resid_only(mod, d, hist=None):
 
 def resid_dir(name, cols=COLS7, cfg=CFG_SST, **kw):
     d = tmp / ("rh_" + name); d.mkdir()
+    (d / f"res_{NSTEP}.h5").write_bytes(b"")      # 最終場 (中身は使わない。場のゲートは合格に固定)
     if cfg is not None:
         (d / "solverConfig.yaml").write_text(cfg)
     if cols is not None:
@@ -360,9 +379,11 @@ N = 40
 
 def tp_run(name, cfg=CFG_TP, drop=(), y=(0.3, 0.7), shape_bad=None, extra=None):
     d = tmp / ("tp_" + name); d.mkdir()
-    if cfg is not None:
-        (d / "solverConfig.yaml").write_text(cfg)
-    write_resid(d)
+    if cfg is not None:      # 最終場 res_100.h5 と同じ session の長さ (§5.1 R2j)
+        (d / "solverConfig.yaml").write_text(cfg + "time:\n  last: {nStepOuter: 100}\n")
+    # 残差は forge が書く列: TP の 2 種は rms_roY0・rms_roY1、トレーサは rms_roXi (§5.1 R2i。場の欠落の試験で残差は完全にしておく)
+    write_resid(d, COLS7 + (["rms_roY0", "rms_roY1"] if cfg in (CFG_TP, CFG_TP_TR) else []) + (["rms_roXi"] if cfg == CFG_TP_TR else []),
+                n=100)
     with h5py.File(d / "res_100.h5", "w") as f:
         for k, v in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3e5), ("P", 1e5), ("T", 300.0),
                      ("roK", 1.0), ("roOmega", 1e3), ("roY0", y[0]), ("roY1", y[1]), ("roXi", 0.5)):
@@ -817,6 +838,11 @@ if args.all:
             if m.parent.name not in seen_n and list(m.parent.glob("res_[0-9]*.h5")) and (m.parent / "prepare_info.json").exists():
                 seen_n.add(m.parent.name); names.append(m.parent.name)
 summary, n_cmp, diff = {}, 0, []
+# この比較は R2h の変更前後 (PRE) を見る。後から入れた残差の時系列の完全性 (§5.1 R2j) は外す: 発散で切り詰められた保存 run
+# (run_0121 など) は R2j で理由が 1 つ増えるので、R2h の比較に混ぜると R2h の不変性を確かめられない。R2j の保存 run への影響は
+# run_sern_residual_series_tests.py の (s) で別に数える
+_series_check = G.residual_series_check
+G.residual_series_check = lambda run_dir: ([], {})
 for name in names:
     d = find_run("46.sern_design/" + name, ("metrics.json", "prepare_info.json"))
     if d is None or not list(d.glob("res_[0-9]*.h5")):
@@ -835,6 +861,7 @@ for name in names:
         check(f"(s) case/46 {name} [{res[1]} {res[2]}D]: 変更前後で field・floor・residual・evaluate_gates が一致"
               + (f"、力の履歴 {res[7]} 標本 (要求 {len(res[8] or [])} 部品) も新旧の経路で一致" if res[2] == 3 else "")
               + f" (verdict {res[3]}/{res[4]}; 保存値 {res[5]}/{res[6]})", res[0], res)
+G.residual_series_check = _series_check
 if args.all:
     check(f"(s) --all: case/46 の {n_cmp} 本で一致 (内訳 {sorted(summary.items())})", not diff, diff[:5])
 
