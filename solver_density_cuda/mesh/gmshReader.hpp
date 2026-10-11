@@ -2486,7 +2486,7 @@ public:
 
     // wallDist64: 壁距離の正本 (double、calcWallDistance64 の戻り値)。与えられれば /VALUE/wall_dist はこれから
     // double で書く (var.c["wall_dist"] はソルバ用の写しで、ここでは使わない)。nullptr なら従来どおり var.c から書く。
-    void writeInputH5(const string outFileName ,variables var, const std::vector<double>* wallDist64 = nullptr)
+    void writeInputH5(const string outFileName ,const variables& var, const std::vector<double>* wallDist64 = nullptr)
     {
         // ------------
         // *** HDF5 *** 
