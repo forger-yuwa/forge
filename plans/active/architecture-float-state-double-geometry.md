@@ -178,6 +178,7 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 | 16 | 粘性 Jacobian の値 2・3 を float のビルドで使う場合 (条件付き) | 粘性 Jacobian plan (faceh ブランチで accepted) の値 2・3 は FP64 のビルドでだけ確かめた (FP32 は起動も未確認)。float の状態のビルドで使うなら、先にその plan の §6.17 の再開の条件の最初の試験 (FP32 での起動と U2・U3) を行う (`forge-faceh` の `notes/sessions/2026-10-10-return-viscous-jacobian-close.md` (ブランチ `feature/faceh-audit-viscjac-close`)) | O |
 | 17 | 段ごとの更新の診断 `FORGE_DIAG_STAGE_DUMP` (§6.30) | 環境変数で有効にする診断。平均流の保存量 5 つについて、指定の step (既定 1) の組み立て後の残差 R・commit の基準 b・緩和とガードの後の要求の更新 d・commit の直後の状態 q と、境界条件・状態方程式の上書きの後の状態を、節点ごとに double で HDF5 に書く。数値を変えないこと (同じ入力で診断の有無の 2 step の結果がビット一致、FP64 と float の両方)。float と FP64 の両方でビルドし、§6.30 の 3 回ずつの 1 step を回す台本と判定 (`stage_an.py`) を用意する **実装 (2026-10-11、implementer)**: `cuda_forge/stageDumpDiag.{hpp,cpp}`、`main.cpp` (`advanceImplicitSteady` の頭と末尾・solve の直前のフック)・`update_d.cu` (commit のラッパのカーネルの直後のフック)。Q0・Q_asm (組み立ての後・solve の直前の ro..roe)・R (res_ro..res_roe)・b (roN..roeN)・d (block DPLUR は dq_block_old_k、implicitRelax は掛け済み)・q (commit の直後)・q_final (step の末尾) を節点ごとに double で書き、q == fl(b + d) を自己照合する。float・FP64 ともビルド可、`update_d.cu` の 8 カーネルの SASS は HEAD と一致 (環境変数なしでは数値の経路は同じ)。未対応の経路 (陽解法・dual-time・qAccumulatorFP64・updateGuardAlpha > 0) は書かずに標準出力に出す | O |
 | 18 | qAccumulatorFP64 の軸対称 (診断用) と採用の mask の診断 (§6.34) | **判断 (2026-10-11、codex diagnose `notes/reviews/2026-10-11-qacc-axisym-state-precision-diagnose.md`)**: 呼び出し側の案 (作業用 Q から運動エネルギーを取り `roe = (float)Qacc` で上書き) は壁と軸の両方に属する節点で誤る (Major 1) ので採らない。**実装する契約**: (i) `enforceAxisSymmetry_d` に `double* qacc_roUy, double* qacc_roe` を足す (nullptr = OFF、OFF の演算列は 1 文字も変えない)。作業用 Q と Q_N への既存の射影はそのまま。Q_N を射影する**前**に、既存と同じ `flow_float` の式と密度のガード (`rN > 0`) で `ke_N = 0.5·roUyN²/rN` を作り、ON では `qacc_roe −= (double)ke_N`・`qacc_roUy = 0` を足す。作業用 roe を Qacc から上書きしない (ミラーへの書き戻しは commit が担う)。(ii) 軸対称の拒否は全面解除しない (Major 4)。環境変数 `FORGE_QACC_AXISYM_DIAG=1` があるときだけ通し、起動時に「診断用、rollout plan の S1b-① の合格条件は未検証」と出す。無ければ今の拒否のまま。(iii) 採用の mask の診断 `FORGE_DIAG_QACC_ADOPT=<接頭辞>`・`FORGE_DIAG_QACC_ADOPT_STEPS=<step,...>`: 指定の step の `updateVariablesOuter` (reconcile) の直前に Q と Qacc を host に写し、量ごとに Q ≠ (float)Qacc の mask・節点の座標・軸/壁/境界の flag を h5 に書く (host だけ、カーネルを変えない)。(iv) 単体試験 `tests/unit/test_qacc_axis.cu`: (a) rollout の反例 (ρ=1, ρu_r=0.125, ρE=2, dq=0 → 軸ピン → commit で Q・Qacc とも ρu_r=0, ρE=1.9921875、旧い作り (Qacc に当てない) では 0.125・2 に戻ることも示す) (b) 1 ULP 未満の残余の保持 (c) 残余ゼロでピン後の (float)Qacc が OFF の Q_N と**生のビット**で一致 (乱数 20 万セル) (d) 壁→軸→commit の順序で壁と軸に重なる節点 (ρ=1, ρu_x=1, ρu_r=0.125, ρE=2 → ON・OFF とも commit 後 ρE=1.9921875) (e) 軸でない節点は不変 (f) dq ≠ 0 (g) 残余を持つ複数 step。(v) `cuobjdump -sass` で `enforceAxisSymmetry_d` 以外のカーネルが HEAD と一致することを確かめる。合格条件: 単体試験の全項目 PASS、float・FP64 のビルド成功、SASS の照合。rollout plan の S1b-① (case/44 の回帰・改善ゲート) はこれで済ませない。**実装 (2026-10-11、implementer)**: 軸ピンを `cuda_forge/axisSymmetryPin_d.cuh` (`axisSymmetryPinCell`) に切り出し、ON では Q_N を射影する前の `ke_N` を同じ式・同じガードで作り直して `qacc_roe` から引き、`qacc_roUy = 0` とした (OFF の行は HEAD の文字のまま。共有すると OFF の SASS で負号の置き場所が変わるので作り直す形にした)。`main.cpp` の拒否は `FORGE_QACC_AXISYM_DIAG=1` のときだけ外し、毎回「診断用」と出す。`cuda_forge/qaccAdoptDiag.{hpp,cpp}` (h5 は量ごとの `/<q>/{mask,Q,Qacc}` と `/cells/{cc64,axis_flag,wall_flag,iso_wall_flag,bnode_flag}`、属性に内訳の数)。単体試験 `tests/unit/test_qacc_axis.cu` (a)〜(g) PASS (旧い作りと却下した案が反例で外れることも示した)、既存の `test_qacc_commit` PASS、float・FP64 のビルド成功。SASS は 292 関数のうち 290 が HEAD と一致、残りは `enforceAxisSymmetry_d` (シグネチャ) と `dependentVariables_d` (nvcc の揺れ、HEAD の再コンパイルの 2 通りの一方と一致)。**分かった性質**: 軸の節点では Qacc が `roeN − ke_N` を float に丸めずに持つので、残余ゼロから始めても dq ≠ 0 の 1 step で ON と OFF の ρE がビット一致しない (単体試験 (f) で 20 万中 22,683、ON は常に正本に最も近い float)。軸対称では「残余ゼロなら ON は OFF とビット同一」を補助ゲートに使わない | O |
+| 19 | 状態の量子化の診断 `FORGE_DIAG_QUANTIZE_STATE` (§6.36) | 環境変数 `FORGE_DIAG_QUANTIZE_STATE=1` で、定常の陰解法の各 step の末尾 (`advanceImplicitSteady` の `applyNodeIsothermalWallPin` の後・`updateVariablesOuter` の前) に、保存量 9 つ (ρ・ρu・ρv・ρw・ρE・ρk・ρω・ρY_s すべて) を全 CV (`nCells_all`) で float32 に丸めて double に戻すカーネルを 1 本足す (読み書きは状態の配列だけ、ほかの補正を混ぜない)。**FP64 のビルド専用** (float のビルドでは何もしないので起動時に拒否)、定常の陰解法 (`timeIntegration 11`・`unsteady 0`) 以外と `qAccumulatorFP64 1` との併用も拒否。自己点検: 環境変数 `FORGE_DIAG_QUANTIZE_STATE_CHECK=<step,...>` (既定 1) の step で、`updateVariablesOuter` の後に Q と履歴 (Q_N・Q_M、ρk・ρω の N・M) を host に写し、float32 で表せない値の個数を量ごとに出す (0 であること)。ρY の履歴 (`roY_N`) は次の step の化学種の更新の頭で ρY から取られるので、その step の化学種の更新の直前にも ρY の個数を数える。合格条件: FP64 のビルド成功、float のビルド成功 (環境変数なしで数値の経路が同じ)、`cuobjdump -sass` で新しいカーネル以外が HEAD と一致 (FP64・float とも)、ローカルの短い確認は不可 (run は回さない) なので、自己点検の出力の書式を単体で確かめる | O |
 
 ## 6. 検証 (事前登録。数値は codex の提案する判定基準で、実測で裏付けた許容差ではない)
 
@@ -880,9 +881,34 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 | W2 | θ_r(94) | −0.054 % | +1.267 % | +1.194 % | +1.130 % | +1.407 % | +1.107 % | −0.026 | 0.073 | 0.137 | 0.300 |
 
 - 副判定 Q_w: 両窓で結果 R の条件が成立 (|mE − ΔA| 2.63・2.31 > 10 N_E 1.98・1.16)。
-- **記録 (判定ではない)**: 平均流の 5 保存量を FP64 で積んでも、float は B とほぼ同じように A から離れた。A からの離れの平均 (mE − ΔA) は mB − ΔA の 98〜104 % (θ_r)・96〜102 % (Q_w)。この変更で登録の窓の偏りが減る兆しは無い。E と E′ の再実行の差 (N_E 0.20〜0.47) は B と B′ (0.07〜0.14) より大きい。原因・発生源は言わない (§6.34 の解釈の範囲)。§6.33 (block の系の組み立て) と同じく、結果 R は「効果の大きさ」の条件を満たしながら再実行の差の 10 倍の条件で外れた。
+- **記録 (判定ではない、codex diagnose 2026-10-11 の範囲に直した)**: 登録の W1・W2 では、E・E′ の A からの差の平均は基準の float (B・B′) の 97.68〜103.56 % だった。大幅な抑制は観測されなかったが、事前登録の判定は S 0/6・R 0/6 で判別不能。**平均流の丸めの因果的な関与は除外できない** (qAccumulatorFP64 は累積の正本を double にするが、演算に渡す Q は float のままで、状態の表現・残差の入力の丸めまで除いた試験ではない)。有限期間の応答の記述であり、収束解の一致や固定点の偏りの確定ではない (E・E′・F とも `check_convergence` は CHECK FAILURES)。E と E′ の再実行の差 (N_E 0.20〜0.47) は B と B′ (0.07〜0.14) より大きい (N_E/N_B 2.27〜4.43)。F の合格範囲は B・B′ の最小〜最大の左右に N_B を足した許容範囲。§6.29・§6.33・§6.35 はいずれも総合判定が判別不能で、「どの介入も効かなかった」とは書かない (§6.29 は効果量の条件も一部未達)。
 - 後始末: 3 本とも途中の場を消した (残したのは res_0・20,000・25,000・30,000、採用の mask、ログ・残差履歴は gzip、VERDICT)。系列は `qa_judge.json` にある。
 - 次の段は諮ってから (エスカレーション条件 3・7)。
+
+### 6.36 事前登録: FP64 のビルドで step の末尾に状態を float32 に丸める試験 (十分性の試験) (2026-10-11、codex diagnose、実装の前)
+
+- **問い** (codex diagnose `notes/reviews/2026-10-11-qacc-result-next-step-diagnose.md`): FP64 のビルドで、step の末尾に保存量 9 つを float32 に丸めて戻すだけで、§6.27 の float と同じ向き・同じ規模の偏りが出るか。**十分性の試験**であり、「状態の保存が float の真因」「float の演算は無関係」のどちらも言わない。
+  - 第 1 仮説 (確度 低): step の末尾の量子化だけでは観測の規模の偏りを再現せず、step の中の低精度の演算・途中の丸めとの組み合わせが要る。
+  - 第 2 仮説 (未確認): 9 保存量の末尾の量子化だけでも同じ向き・同じ規模の偏りを生む。
+- **実装**: §5.1 #19 (`FORGE_DIAG_QUANTIZE_STATE`)。
+- **腕**: 同じ新しい FP64 のバイナリ (`~/forge-fgeom10-fp64`、#19 の commit を A でビルドし、B へは**同じファイルを写す** (nvcc のコード生成の揺れを持ち込まないため))。
+  - 対照 A\* = 量子化 OFF × 5 (`run_0595_sq_off1`〜`run_0599_sq_off5`)、介入 G = 量子化 ON × 5 (`run_0620_sq_on1`〜`run_0624_sq_on5`)。各 30,000 step 固定・500 ごと。各反復は同じ起点から独立に開始する。
+  - **反復を 5 にした理由** (codex の案は 3。結果を見る前に変更): B・B′・F の 3 本の float の再実行の標準偏差を G のばらつきと仮定して区間の半幅を見積もると、3 反復では G が float を完全に再現しても W1 の 3 断面で L < 0.5|D| (半幅 0.43〜0.64、効果 0.91〜1.50) になり、判定はほぼ確実に判別不能になる。5 反復なら半幅 0.14〜0.26 で 6 組とも L ≥ 0.5|D| になりうる。ただし G のばらつきが E・E′ 並みに大きければ (N_E 0.20〜0.47)、5 反復でも W1 で外れうる (見積もりの半幅 0.29〜0.58)。
+  - 共通の入力 `_tr/q32_init.h5` (sha256 `ba859e02…`)・格子・キー 1・実効設定は §6.26 の FP64 の腕 (`run_0487`) と同じ (`implicitSolvePrecision` は 0 のまま。FP64 のビルドにも `ST=float` の経路があるが、既存の FP64 の基準の演算経路を維持する、codex Minor)。環境変数は §6.26 と同じ (`FORGE_CUDA_BLOCKSIZE=128`・`FORGE_OMEGA_BUDGET=1`・`FORGE_DIAG_COMMIT_LOSS=500`) に、G だけ `FORGE_DIAG_QUANTIZE_STATE=1` を足す。
+  - 実行環境: A に off1・on1・off2・on2・off3、B に on3・off4・on4・off5・on5 (A と B は同じ型 g5.xlarge・同じ AMI・同じ GPU で、各機械に両方の腕を置く)。ディスクのため、run の途中で step 1〜19,500 の res を消す (判定は step 0 と 20,000〜30,000 だけを使う)。旧 A (`run_0487`) は参考で、新しい A\* の反復は省略しない。
+  - 台本 `sq.sh`、判定 `sq_an.py` → `_band_ab/cold_pair/sq_judge.json`。
+- **前提** (一つでも欠ければ判定不能):
+  1. 10 本とも全期間の残差と使う出力 (step 0・20,000〜30,000 の 22 出力) が有限、`check_convergence` が実行できる (VERDICT を記録)。`check_quasisteady` は θ_r の系列で `--drift 0.0001 --osc 0.0001` を記録する (判定に使わない)。
+  2. res_0 の 9 保存量が 10 本でビット一致 (旧 A の res_0 との一致も記録)。設定は 10 本とも `run_0487` と同じ (差 0 行)。
+  3. 介入の実効性: G の 5 本は、使う全出力で 9 保存量の全 CV が float32 で表せる値。自己点検 (step 1 と 30,000) で履歴の配列の表せない値が 0。A\* の 5 本は step 30,000 で表せない値が多数ある (割合を記録)。
+  4. 新しい A\* が旧 A と同じくほぼ動かない: 5 本の Δ がすべての組で |Δ| ≤ 0.1|D|。
+- **判定** (θ_r の 3 断面、W1 = 20,000〜25,000・W2 = 25,000〜30,000、Δ = (窓の平均 − 自分の step 0) / |A\*1 の step 0| × 100、D = (+1.892, +1.647, +1.431) %):
+  - 独立な標本は **run ごとの窓の平均** (窓の中の 11 出力や W1・W2 を反復に数えない)。e = sign(D)·(mean(ΔG) − mean(ΔA\*))。腕ごとの標本分散から Welch の差の区間を作り、6 組に Bonferroni の補正をした全体 95 % の両側区間 [L, U] (各組 t の分位 1 − 0.05/12、自由度は Welch–Satterthwaite。両腕の分散が 0 なら区間は点)。独立性と run の平均の近似正規性を仮定する (5 反復で分布を精密に推定できるとは扱わない)。
+  - **結果 A**: 6 組すべてで L ≥ 0.5|D| → 第 1 仮説を退け、「この量子化の介入だけで、観測の差の少なくとも半分の規模を生める」。必要性や float の真因は確定しない。
+  - **結果 B**: 6 組すべてで [L, U] ⊂ [−0.1|D|, +0.1|D|] → 第 2 仮説を退け、次の対象は途中の丸め・演算との組み合わせ。
+  - それ以外は判別不能。**有意差が出ないだけでは結果 B にしない**。倍率・窓を変えて救済しない。Q_w は同じ式の副判定として記録する。
+- **やらないこと** (codex): §6.35 を結果 R に読み替えること、異なる介入の run をプールすること、最初から平均流だけ・k/ω/ρY だけの腕に分けること、qAccumulatorFP64 の削除・既定の変更。
+- **所要**: 実装・ビルド 1〜2 時間、run は A と B で 5 本ずつ同時に約 2 時間 (FP64 の case/45 は RSS 約 2.1 GB/本、A の空き 14 GB・B の空き 12 GB)、ディスクは 1 本 約 3〜4 GB (途中の res を消す)。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -897,6 +923,7 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 | diagnose | 2026-10-11 | [2026-10-11-float-after-freeze-diagnose.md](../../notes/reviews/2026-10-11-float-after-freeze-diagnose.md) | C0/M4/m1 | 全件採用。M1 §6.29 の失敗の理由と Δ/δ の書き方を訂正、両仮説とも未確定。M2 系列の有限性・座標・準定常を確かめ直した (`fz_recheck.py`)。M3 次は最初の 1 回の更新の段ごとの診断 (§6.30、§5.1 #17)、double の commit は保留。M4 B − B′ の符号反転を判定に使わない。m1 記録の文を直した |
 | diagnose | 2026-10-11 | [2026-10-11-double-solve-trajectory-diagnose.md](../../notes/reviews/2026-10-11-double-solve-trajectory-diagnose.md) | C0/M4 | 全件採用。M1 `implicitSolvePrecision` の範囲は block の系の組み立て (Thomas は既に double、保存は float) → 感度試験と呼ぶ。M2 結論の範囲を限る。M3 再実行の差を含む判定の式に直した。M4 同じ float のビルドの B 対 C を主の対照とし、ハッシュ・設定・初期化後の保存量を前提で確かめる (§6.32) |
 | diagnose | 2026-10-11 | [2026-10-11-qacc-axisym-state-precision-diagnose.md](../../notes/reviews/2026-10-11-qacc-axisym-state-precision-diagnose.md) | C0/M4/m2 | 全件採用。M1 軸ピンの案を直す (Q_N を射影する前の運動エネルギーを Qacc にだけ当て、作業用 Q は上書きしない。壁と軸の重なる節点の反例を単体試験に入れる、§5.1 #18)。M2 S/R を感度試験の言い方に限る (§6.34)。M3 旧い A・B・B′ の流用は F の 6 条件と初期化後の照合が通るときだけ、外れたら判定不能・S の効果対ばらつきは B・B′・F の幅で。M4 軸対称の拒否は全面解除せず診断用の環境変数で通す。m1 k = 10 のまま。m2 採用の mask は 2 時点の観測と書く。§6.31 の判定不能の正式な理由は Q0 の不一致 (ブリーフの要約の誤り、plan の記述は元から正しい) |
+| diagnose | 2026-10-11 | [2026-10-11-qacc-result-next-step-diagnose.md](../../notes/reviews/2026-10-11-qacc-result-next-step-diagnose.md) | C0/M5/m1 | 全件採用。M1 §6.35 から平均流の丸めを候補から外さない (記録の文言を直した)。M2「3 つの介入がどれも効かなかった」と書かない。M3 step 末尾の丸めは「末尾の 9 保存量の量子化の十分性の試験」に限る。M4 G が離れても必要性、離れなくても演算側とは言わない。M5 異なる介入の run をプールしない、腕ごとの反復の分散で区間を作る (§6.36)。m1 FP64 のビルドにも ST=float の経路がある (設定は変えない)。反復は codex の 3 から 5 に増やした (検出力の見積もり、§6.36) |
 
 ## 7. 影響範囲
 
@@ -949,3 +976,4 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 - `2026-10-11` — §6.34 に平均流の状態を FP64 で積む float の軌跡 (qAccumulatorFP64 の感度試験) を事前登録した (codex diagnose、C0/M4/m2 全件採用)。
 - `2026-10-11` — §5.1 #18 を実装した (implementer。qAccumulatorFP64 の軸対称の診断用の経路・採用の mask の診断・単体試験 `test_qacc_axis` (a)〜(g) PASS)。§6.34 の前提 1 に nvcc のコード生成の揺れの扱いを追記 (run の前)。
 - `2026-10-11` — §6.34 を回した (§6.35、AWS A): 判別不能 (抑制 0/6、抑制不十分 0/6。後者は 6 組とも再実行の差の 10 倍の条件だけで外れた)。平均流の状態を FP64 で積んでも float は B とほぼ同じに離れた (98〜104 %)。
+- `2026-10-11` — §6.35 の記録を codex の範囲に直し、§6.36 に FP64 のビルドで step 末尾に状態を float32 に丸める十分性の試験を事前登録した (各 5 反復、Welch の区間判定)。§5.1 #19 を追加。
