@@ -1,0 +1,1169 @@
+r"""③ベル (M) モード: 凍結 TP (と CPG) の軸対称 Rao 輪郭の生成器 (S1)。
+
+計画: plans/active/tooling-nozzle-bell-two-mode.md §4.4 (S1 の導出)・§5.1 #5・§6 V1 (T1–T6)。導出と構成手順は
+diagnostician の記録 notes/reviews/2026-10-11-bell-s1-rao-tp-derivation.md。座標は $r_t$ で無次元 ($x$ はスロート基準)、
+状態は音速単位 (`gas/isentrope.py`: $V/a^*$、$\rho/\rho^*$、$p/(\rho^*a^{*2})$)。推力・流量は $\rho^*a^{*2}r_t^2$・$\rho^*a^*r_t^2$ の単位
+($2\pi$ を含む)。
+
+**条件** (凍結 TP でも古典と同形、比熱比は陽に現れない): 制御面 DE は C⁺ で、DE 上で
+$\Phi_2=V\cos(\theta-\mu)/\cos\mu$ と $\Phi_3=r\rho V^2\sin^2\theta\tan\mu$ が一定。固定 $(L,\varepsilon)$ では縁条件は課さない
+(端点項が消える。`edge_function` $=r_E[(p_E-p_a)-\tfrac12\rho_EV_E^2\tan\mu_E\sin2\theta_E]$ は $\partial F^*/\partial r_E|_L/2\pi$
+として報告)。自由 $\varepsilon$ (T1c) では縁条件 `edge_function` $=0$ を課す。
+
+**構成** (`design_rao`):
+
+1. kernel (`kernel_wall`): 曲率 $\kappa(s)=1/R_t+c\,s$ ($c$ = 曲率の勾配、$c=0$ が円弧 = 古典)。記録の族
+   $\kappa(s)=1/R_t+(\kappa_B-1/R_t)\,s/s_B$ と同じ集合で、$(\kappa_B,\theta_B)\leftrightarrow(c,s_B)$ は
+   $\kappa_B=1/R_t+cs_B$、$\theta_B=s_B/R_t+cs_B^2/2$ の 1 対 1 (外側の根を $c$ で取るのは実装上の選択 — 同じ $c$ の中で B を
+   動かせるので kernel 場が 1 本で済む)。場を作るために B の先は**同じ曲線の延長** (曲率が連続、BD の下流側も滑らか — BD の上流側の
+   片側極限は延長に依らない) を `s_lin` まで続け、その先は C2 の 5 次式で直線 $\theta_{st}$ へつないでどこまでも直線
+   (`KernelWall` の docstring: 前進 MOC の壁の交点の検索と「壁の外」の検査に合わせた形。$\theta_{st}$ は初期線の壁点の
+   マッハ角 − 5° 以下)。
+2. kernel 場 (`kernel_field`): `moc_forward.forward_moc` (`interior_vec` analytic・converge)。前線 $k$ (C⁻) × 点 $j$ (0 = 軸、$n$ = 壁) の
+   網を、列 $j$ ごとの $k$ 方向の 3 次スプラインで連続化する (`KernelNet`)。網の論理座標 $(\xi,\eta)=(k,j)$ は特性座標で、
+   $\xi$ 一定が C⁻、$(\xi,\eta)$ が同じだけ増える方向が C⁺。
+3. BD (`trace_bd`): B ($s_B$) から下流へ出る C⁻ = $\xi=\xi_B$ の線 ($\xi_B$ は壁の節点の弧長 $s(k)$ のスプラインの逆)。
+   値は列のスプラインを $\xi_B$ で評価し、$\eta$ 方向にもう一度 3 次スプライン (`BDLine`)。BD に沿った流量・推力は
+   区間ごとの Gauss–Legendre。
+4. DE (`rao_line`): D の状態から $\Phi_2,\Phi_3$ を決め、$M$ をパラメータに $\theta(M)=\mu-\sigma_D\arccos(\Phi_2\cos\mu/V)$
+   ($\sigma_D=\operatorname{sign}(\mu_D-\theta_D)$)、$r(M)=\Phi_3/(\rho V^2\sin^2\theta\tan\mu)$、$dx=dr/\tan(\theta+\mu)$。
+   $r$ が増える向きに $M$ を進め、流量が $\dot m_{BD}(D\to B)$ に達した点を E。折り返し ($dr/dM$ の符号反転)・$|c|>1$・
+   $\theta\le0$ は解なし (記録の規則のまま)。$M$ 格子 `dM` の区間ごとの Gauss–Legendre (T2 の「M 格子を倍に」の格子)。
+   **注 (2026-10-11、主セッションに返した方針の穴)**: $c=\cos(\theta-\mu)$ が 1 に達するのは DE 上で $\theta=\mu$ になる点で、
+   そこで $M$ が極値をとる ($M$ のパラメータ化の折り返し)。$r$ をパラメータにすると DE は正則に続く。θ_B > μ_B の kernel では
+   D が BD 上の θ_D = μ_D の点より B 寄りにある解がこの規則で除かれ、基準ケースの L_k 60〜90 % が根なしになる。
+5. 入れ子の根: 内 `solve_D` ($\eta_D$: $r_E=\sqrt\varepsilon$、自由 $\varepsilon$ では縁条件)、中 `solve_thetaB` ($s_B$: $x_E=L$)、
+   外 `solve_kappaB` ($c$: C2 の関数 $\tilde g=(d\theta/d\sigma)_{DE,D}-(d\theta/d\sigma)_{kernel\,C^+,D}=0$)。
+   すべて走査で符号変化を全部拾い、brentq で詰める。候補が複数なら MOC 推力 (制御面の会計) が最大のもの。
+6. 領域 BDE を Goursat 問題で埋め (`goursat_fill`、`interior_vec` を符号付きで — C⁻ を逆向きに積分)、壁 BE は各 C⁺ 線上で
+   流量が $\dot m_{BD}(b_i\to B)$ に達する点 (`wall_from_massflow`、`moc_inverse.cplus_flux_wall` と同じ閉包)。
+7. 推力の 2 会計 (`thrust_accounts`): (a) 制御面 = (軸 → D) + DE、(b) 初期線 + kernel 壁 + BE 壁。(a) の軸 → D は BD の代わりに
+   D を通る kernel 場の C⁺ を遡って閉じる (`cplus_closure`。θ_B > μ_B の BD は出口よりはるかに下流 [θ_B 36° で x ≈ 72 r_t、
+   軸の M ≈ 10] で軸に着くので網が粗く、BD と C⁺ の間には壁が無いので運動量は等しい)。BD は B から、kernel 場の列が
+   使える深さ (`KernelNet.j_low`) までだけを使う。
+
+**名前**: 記録が「最大推力」と呼ぶのは S1 を通ってから。それまでは「指定した kernel と拘束の下の停留輪郭」。
+"""
+from __future__ import annotations
+
+import time
+import warnings
+
+import numpy as np
+from scipy.interpolate import CubicSpline
+from scipy.optimize import brentq
+
+from ..gas.isentrope import Isentrope
+from .moc_kernel import PAIR_CONVERGED, interior_vec, mu_vec
+
+GL_N = 6
+_GLX, _GLW = np.polynomial.legendre.leggauss(GL_N)
+TWO_PI = 2.0 * np.pi
+
+# 探索域の既定 (S1 の定義: plan §4.4・§5.1 #4)
+THETA_B_RANGE_DEG = (12.0, 50.0)      # B の壁角の探索域
+KAPPA_B_MIN = -0.9                    # κ_B ≥ KAPPA_B_MIN / R_t (κ_B → −1/R_t で s_B → ∞)
+C_SCAN = (0.0, -0.1, -0.2, -0.35, -0.5, -0.7, -0.9, -1.2, -1.6, -2.0)   # 外側の走査 (c·R_t²)
+N_SCAN_SB = 14                        # 中の走査点数
+N_SCAN_D = 36                         # 内の走査点数
+XTOL = 1e-12
+THETA_LIN_MAX_DEG = 75.0              # kernel 場の線形曲率の延長の終わりの壁角の上限
+MARGIN_K = 4.0                        # BD の列のスプラインに要る ξ_B より先の前線数
+
+
+def _gl(a, b):
+    a = np.asarray(a, dtype=float)[..., None]
+    b = np.asarray(b, dtype=float)[..., None]
+    h = 0.5 * (b - a)
+    return 0.5 * (a + b) + h * _GLX, h * _GLW
+
+
+def as_isentrope(gas) -> Isentrope:
+    """ガスを `Isentrope` に (TP の表は M 16 まで — BD の軸寄りは出口より下流で高マッハになる)。"""
+    return gas if isinstance(gas, Isentrope) else Isentrope(gas, M_max=16.0)
+
+
+def default_L_march(L: float) -> float:
+    """kernel 場の前進 MOC の打ち切り (既定 2.5 L)。D の探索域 (BD の下端) を決める。"""
+    return 2.5 * float(L)
+
+
+# ================================================================================================
+# kernel 壁
+class KernelWall:
+    r"""kernel 壁 $\theta(s)$ (区分多項式、$s$ は壁の弧長):
+
+    1. $[0,s_{lin}]$: $\theta=s/R_t+c\,s^2/2$ (曲率 $1/R_t+cs$) — kernel 本体と、BD の下流側を滑らかにするための延長
+    2. $[s_{lin},s_{lin}+\ell_1]$: $(\theta,\theta',\theta'')$ を両端で合わせた 5 次式で直線 $\theta_{st}$ へ
+       ($\theta_{st}=\min(\theta_{lin}+\kappa_{lin}\ell_1/2,\ \theta_{cap})$、$\theta_{cap}$ は初期線の壁点のマッハ角 − 5°)
+    3. その先は直線 $\theta_{st}$ (どこまでも)
+
+    2・3 は場を作るためだけのもので、使う前線 ($s\le s_{lin}$ の壁点から出る C⁻) には影響しない。ただし前進 MOC の
+    幾何の検査 (新点が壁の外) と壁の交点の検索 (`moc_forward._Wall.intersect` は打ち切り $L$ で壁が C⁺ の下にあることを前提に
+    する) に効く: 直線が C⁺ の最小の傾き (スロートの壁点の $\tan\mu^*$) より緩ければ後者を満たし、θ_B > μ_B で上向きに出る
+    BD の C⁻ (傾き $\theta-\mu$) より急なら前者を満たす。
+    $(x,r)(s)$ は区間ごとの Gauss–Legendre の累積と 3 次 Hermite (微分 $\cos\theta,\sin\theta$ は厳密)。
+    `r(x, deriv)` (deriv 0・1) は `moc_forward.forward_moc` の壁の約束。"""
+
+    def __init__(self, R_t: float, c: float = 0.0, s_lin: float = 1.0, l1: float | None = None,
+                 theta_cap: float = np.deg2rad(45.0), l_tab: float = 6.0, h_tab: float = 5e-4):
+        self.R_t, self.c, self.s_lin = float(R_t), float(c), float(s_lin)
+        if not (self.R_t > 0 and self.s_lin > 0):
+            raise ValueError("KernelWall: R_t・s_lin は正")
+        s0 = self.s_lin
+        self.th_lin = s0 / self.R_t + 0.5 * self.c * s0 * s0
+        self.k_lin = 1.0 / self.R_t + self.c * s0
+        if not (abs(self.th_lin) < np.deg2rad(80.0)):
+            raise ValueError(f"KernelWall: θ(s_lin) = {np.rad2deg(self.th_lin):.1f}° (80° 以内)")
+        l1 = float(l1) if l1 is not None else 0.25 * self.R_t
+        th_st = min(self.th_lin + 0.5 * self.k_lin * l1, float(theta_cap))
+        segs = [(0.0, [0.0, 1.0 / self.R_t, 0.5 * self.c, 0.0, 0.0, 0.0]),
+                (s0, self._quintic(self.th_lin, self.k_lin, self.c, th_st, 0.0, 0.0, l1)),
+                (s0 + l1, [th_st, 0.0, 0.0, 0.0, 0.0, 0.0])]
+        self.segs = segs
+        self._bp = np.array([sg[0] for sg in segs])
+        self._co = np.array([sg[1] for sg in segs])
+        self.th_st = float(th_st)
+        self.theta_inf = float(th_st)
+        s_end = s0 + l1 + float(l_tab)
+        self.s_end = s_end
+        tt = self.theta(np.linspace(0.0, s_end, 20001))
+        if np.max(tt) >= np.deg2rad(85.0):
+            raise ValueError(f"KernelWall: 延長で壁角が {np.rad2deg(np.max(tt)):.1f}° になる")
+        # 表 (区分の境に節点を置く)。表の先 (s > s_end) は直線 θ_st を解析的に
+        nodes = [np.array([0.0])]
+        for a, b in zip(self._bp, np.append(self._bp[1:], s_end)):
+            nseg = max(int(np.ceil((b - a) / h_tab)), 8)
+            nodes.append(np.linspace(a, b, nseg + 1)[1:])
+        s = np.concatenate(nodes)
+        sg, wg = _gl(s[:-1], s[1:])
+        thg = self.theta(sg)
+        dx = np.sum(np.cos(thg) * wg, axis=-1)
+        dr = np.sum(np.sin(thg) * wg, axis=-1)
+        self._s = s
+        self._x = np.concatenate([[0.0], np.cumsum(dx)])
+        self._r = 1.0 + np.concatenate([[0.0], np.cumsum(dr)])
+        th = self.theta(s)
+        self._cx, self._cr = np.cos(th), np.sin(th)
+        self.x_end, self.r_end = float(self._x[-1]), float(self._r[-1])
+        if np.any(np.diff(self._x) <= 0.0):
+            raise ValueError("KernelWall: x(s) が単調でない (壁角が ±90° を超える)")
+
+    @staticmethod
+    def _quintic(t0, d0, dd0, t1, d1, dd1, ell):
+        """Δ ∈ [0, ℓ] で (θ, θ', θ'') が両端 (t0, d0, dd0)・(t1, d1, dd1) の 5 次式の係数 [a0..a5]。"""
+        A = np.array([[ell ** 3, ell ** 4, ell ** 5], [3 * ell ** 2, 4 * ell ** 3, 5 * ell ** 4],
+                      [6 * ell, 12 * ell ** 2, 20 * ell ** 3]])
+        rhs = np.array([t1 - (t0 + d0 * ell + 0.5 * dd0 * ell * ell), d1 - (d0 + dd0 * ell), dd1 - dd0])
+        a3, a4, a5 = np.linalg.solve(A, rhs)
+        return [t0, d0, 0.5 * dd0, a3, a4, a5]
+
+    def _seg(self, s):
+        s = np.asarray(s, dtype=float)
+        i = np.clip(np.searchsorted(self._bp, s, side="right") - 1, 0, len(self._bp) - 1)
+        return i, s - self._bp[i]
+
+    # --- 壁角と曲率 ---
+    def theta(self, s):
+        i, d = self._seg(s)
+        a = self._co[i]
+        return a[..., 0] + d * (a[..., 1] + d * (a[..., 2] + d * (a[..., 3] + d * (a[..., 4] + d * a[..., 5]))))
+
+    def kappa(self, s):
+        i, d = self._seg(s)
+        a = self._co[i]
+        return a[..., 1] + d * (2 * a[..., 2] + d * (3 * a[..., 3] + d * (4 * a[..., 4] + d * 5 * a[..., 5])))
+
+    # --- 位置 ---
+    def xr(self, s):
+        s = np.atleast_1d(np.asarray(s, dtype=float))
+        x = np.empty_like(s)
+        r = np.empty_like(s)
+        inside = (s >= 0.0) & (s <= self.s_end)
+        if np.any(inside):
+            si = s[inside]
+            i = np.clip(np.searchsorted(self._s, si, side="right") - 1, 0, len(self._s) - 2)
+            h = self._s[i + 1] - self._s[i]
+            t = (si - self._s[i]) / h
+            h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+            x[inside] = h00 * self._x[i] + h10 * h * self._cx[i] + h01 * self._x[i + 1] + h11 * h * self._cx[i + 1]
+            r[inside] = h00 * self._r[i] + h10 * h * self._cr[i] + h01 * self._r[i + 1] + h11 * h * self._cr[i + 1]
+        beyond = s > self.s_end
+        if np.any(beyond):
+            ds = s[beyond] - self.s_end
+            x[beyond] = self.x_end + ds * np.cos(self.theta_inf)
+            r[beyond] = self.r_end + ds * np.sin(self.theta_inf)
+        before = s < 0.0                        # スロートの上流 (使わない想定。曲率 1/R_t の円で延長)
+        if np.any(before):
+            a = s[before] / self.R_t
+            x[before] = self.R_t * np.sin(a)
+            r[before] = 1.0 + self.R_t * (1.0 - np.cos(a))
+        return x, r
+
+    def s_of_x(self, x):
+        x = np.atleast_1d(np.asarray(x, dtype=float))
+        s = np.empty_like(x)
+        inside = (x >= 0.0) & (x <= self.x_end)
+        if np.any(inside):
+            xi = x[inside]
+            i = np.clip(np.searchsorted(self._x, xi, side="right") - 1, 0, len(self._s) - 2)
+            h = self._s[i + 1] - self._s[i]
+            x0, x1, d0, d1 = self._x[i], self._x[i + 1], self._cx[i], self._cx[i + 1]
+            t = (xi - x0) / np.maximum(x1 - x0, 1e-300)
+            for _ in range(30):
+                h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+                f = h00 * x0 + h10 * h * d0 + h01 * x1 + h11 * h * d1 - xi
+                df = (6 * t * t - 6 * t) * x0 + (3 * t * t - 4 * t + 1) * h * d0 + (-6 * t * t + 6 * t) * x1 + (3 * t * t - 2 * t) * h * d1
+                dt = f / df
+                t = t - dt
+                if np.all(np.abs(dt) < 1e-15):
+                    break
+            s[inside] = self._s[i] + t * h
+        beyond = x > self.x_end
+        if np.any(beyond):
+            s[beyond] = self.s_end + (x[beyond] - self.x_end) / np.cos(self.theta_inf)
+        before = x < 0.0
+        if np.any(before):
+            s[before] = self.R_t * np.arcsin(np.clip(x[before] / self.R_t, -1.0, 1.0))
+        return s
+
+    def r(self, x, deriv: int = 0):
+        s = self.s_of_x(x)
+        if deriv == 0:
+            return self.xr(s)[1].reshape(np.shape(x))
+        if deriv == 1:
+            th = np.where(s < 0.0, s / self.R_t, self.theta(np.maximum(s, 0.0)))
+            return np.tan(th).reshape(np.shape(x))
+        raise ValueError("KernelWall.r: deriv は 0 か 1")
+
+
+def kernel_wall(R_t: float, *, c: float | None = None, kappa_B: float | None = None, theta_B: float | None = None,
+                kind: str = "linear", s_lin: float | None = None) -> KernelWall:
+    r"""kernel 壁。`kind="arc"` は円弧 ($c=0$)。`kind="linear"` は $c$ を直接、または記録の $(\kappa_B,\theta_B)$ で与える
+    ($s_B=2\theta_B/(1/R_t+\kappa_B)$、$c=(\kappa_B-1/R_t)/s_B$)。`s_lin` は線形曲率の区間の終わり (既定 $s_B$ の 1.5 倍か 1)。"""
+    if kind == "arc":
+        c = 0.0
+    elif kind == "linear":
+        if c is None:
+            if kappa_B is None or theta_B is None:
+                raise ValueError("kernel_wall: linear は c か (kappa_B, theta_B)")
+            if not (1.0 / R_t + kappa_B > 0.0):
+                raise ValueError(f"kernel_wall: 1/R_t + κ_B = {1.0 / R_t + kappa_B} ≤ 0")
+            sB = 2.0 * theta_B / (1.0 / R_t + kappa_B)
+            c = (kappa_B - 1.0 / R_t) / sB
+            s_lin = s_lin if s_lin is not None else 1.5 * sB
+    else:
+        raise ValueError("kernel_wall: kind は 'arc' か 'linear'")
+    return KernelWall(R_t, c=float(c), s_lin=float(s_lin if s_lin is not None else 1.0))
+
+
+def _s_of_theta(R_t: float, c: float, theta: float) -> float:
+    """θ(s) = s/R_t + c s²/2 が最初に theta に達する s (達しなければ極大の s)。"""
+    s = np.linspace(0.0, 20.0 * R_t, 200001)
+    th = s / R_t + 0.5 * c * s * s
+    i = int(np.argmax(th >= theta)) if np.any(th >= theta) else int(np.argmax(th))
+    return float(s[i])
+
+
+def sB_range(R_t: float, c: float, theta_range_deg=THETA_B_RANGE_DEG, kappa_min=KAPPA_B_MIN) -> tuple:
+    r"""$c$ を固定したとき B の弧長 $s_B$ の探索域: $\theta_B\in$ `theta_range`、$\kappa_B\ge$ `kappa_min`$/R_t$、$\theta$ が
+    最初に `theta_range` の下限を越えてから。戻り (s_lo, s_hi) (空なら None)。"""
+    lo, hi = np.deg2rad(theta_range_deg[0]), np.deg2rad(theta_range_deg[1])
+    s = np.linspace(0.0, 20.0 * R_t, 40001)
+    th = s / R_t + 0.5 * c * s * s
+    kap = 1.0 / R_t + c * s
+    ok = (th >= lo) & (th <= hi) & (kap >= kappa_min / R_t)
+    if not np.any(ok):
+        return None
+    i0 = int(np.argmax(ok))
+    i1 = i0
+    while i1 + 1 < len(s) and ok[i1 + 1]:
+        i1 += 1
+    return float(s[i0]), float(s[i1])
+
+
+# ================================================================================================
+# kernel 場
+class KernelNet:
+    r"""前進 MOC の網 (前線 $k$ × 点 $j$) の連続化。列 $j$ ごとに、その列で収束した前線 $k\in[0,k_{max}(j)]$ の範囲で
+    $k$ 方向の 3 次スプライン ($x,r,\theta,\nu$ を一括)。$x>$ `L_march` の点は「出口の外」で計算されないので、軸に近い列ほど
+    $k_{max}$ が小さい (前線は下流ほど軸の着地点が遠い)。"""
+
+    def __init__(self, res: dict, wall: KernelWall, ig: Isentrope, line: dict):
+        from .moc_forward import ST_OK
+        net = res["net"]
+        n = res["n"]
+        S = net.status
+        ok = S == ST_OK
+        Kc = S.shape[0] - 1
+        kmax = np.empty(n + 1, dtype=int)
+        for j in range(n + 1):
+            bad = np.flatnonzero(~ok[:, j])
+            kmax[j] = (bad[0] - 1) if len(bad) else Kc
+        self.kmax = kmax
+        self.K = int(kmax[n])                      # 壁の節点が続く前線
+        if self.K < 8:
+            raise RuntimeError(f"KernelNet: 壁の節点が {self.K + 1} 個しかない ({res['end']})")
+        self.n = n
+        self.A = np.stack([net.a["x"], net.a["r"], net.a["th"], net.a["nu"]], axis=-1)
+        self.wall, self.ig, self.line, self.res = wall, ig, line, res
+        self.s_wall = wall.s_of_x(net.a["x"][: self.K + 1, n])
+        if np.any(np.diff(self.s_wall) <= 0.0):
+            raise RuntimeError("KernelNet: 壁の節点の弧長が単調でない")
+        self.cols = [None] * (n + 1)
+        for j in range(n + 1):
+            if kmax[j] >= 4:
+                self.cols[j] = CubicSpline(np.arange(kmax[j] + 1, dtype=float), self.A[: kmax[j] + 1, j, :], axis=0)
+        self.dcols = [None if c is None else c.derivative() for c in self.cols]
+        kk = np.arange(self.K + 1, dtype=float)
+        self.s_spl = CubicSpline(kk, self.s_wall)
+        self.nu_wall_s = CubicSpline(self.s_wall, net.a["nu"][: self.K + 1, n])
+
+    def xi_of_s(self, s_B: float) -> float:
+        k = int(np.searchsorted(self.s_wall, s_B) - 1)
+        if k < 0 or k >= self.K:
+            raise ValueError(f"xi_of_s: s_B {s_B} が網の壁の範囲 [{self.s_wall[0]}, {self.s_wall[-1]}] の外")
+        return float(brentq(lambda xi: float(self.s_spl(xi)) - s_B, k, k + 1, xtol=1e-14, rtol=4 * np.finfo(float).eps))
+
+    def j_low(self, xi: float, margin: float = MARGIN_K) -> int:
+        """ξ で列のスプラインが使える最も軸寄りの j (それより上の列はすべて k_max ≥ ξ + margin)。"""
+        good = self.kmax >= xi + margin
+        if not good[self.n]:
+            raise ValueError(f"j_low: ξ {xi} で壁の列も使えない")
+        bad = np.flatnonzero(~good)
+        return int(bad[-1] + 1) if len(bad) else 0
+
+    def eval_cols(self, xi: float, js) -> tuple:
+        """列 js を ξ で評価: (値 (len, 4), ∂_ξ (len, 4))。"""
+        js = list(js)
+        v = np.array([self.cols[j](xi) for j in js])
+        d = np.array([self.dcols[j](xi) for j in js])
+        return v, d
+
+    def eval_point(self, xi, eta) -> tuple:
+        r"""任意の $(\xi,\eta)$ での値と $\partial_\xi$・$\partial_\eta$ ($\eta$ は 4 点の 3 次 Lagrange、$\xi$ は列のスプライン)。"""
+        j0 = int(np.clip(np.floor(eta) - 1, 0, self.n - 3))
+        js = np.arange(j0, j0 + 4)
+        v, d = self.eval_cols(float(xi), js)
+        w = np.empty(4)
+        dw = np.empty(4)
+        for a in range(4):
+            others = [b for b in range(4) if b != a]
+            den = np.prod([js[a] - js[b] for b in others])
+            w[a] = np.prod([float(eta) - js[b] for b in others]) / den
+            dw[a] = sum(np.prod([float(eta) - js[b] for b in others if b != c]) for c in others) / den
+        return w @ v, w @ d, dw @ v
+
+
+
+def kernel_field(ig, R_t: float, c: float, line: dict, s_need: float, *, L_march: float, n_after: int = 8,
+                 K_guess: int | None = None) -> KernelNet:
+    r"""$c$ の kernel 場。$s\le$ `s_need` の B を扱えるよう、壁の節点が `s_need` を越えてから `n_after` 本の前線まで
+    線形曲率の区間 (`s_lin`) に入るよう、`s_lin` と前線数を必要に応じて広げて `forward_moc` を回し直す。
+    `L_march`: 前進 MOC の打ち切り ($x>L$ の点は出口の外として計算しない)。設計の $L$ より十分長くとる (D の探索域を BD の
+    下の方まで確保するため)。"""
+    from .moc_forward import forward_moc
+    ig = as_isentrope(ig)
+    n = len(line["x"]) - 1
+    th_cap = float(np.arcsin(1.0 / float(line["M"][-1]))) - np.deg2rad(5.0)
+    s_cap = _s_of_theta(R_t, c, np.deg2rad(THETA_LIN_MAX_DEG))       # s_lin の上限 (θ_lin ≤ 75°)
+    s_need = min(float(s_need), s_cap - 0.02 * R_t)
+    s_lin = min(s_need + 0.06 * R_t, s_cap)
+    K = K_guess if K_guess is not None else n
+    last = None
+    for _ in range(12):
+        wall = KernelWall(R_t, c=c, s_lin=s_lin, theta_cap=th_cap)
+        res = forward_moc(wall, L_march, ig.moc, line, max_fronts=K)
+        try:
+            kn = KernelNet(res, wall, ig, line)
+        except RuntimeError as e:
+            last = str(e)
+            K = int(K * 1.5)
+            continue
+        sw = kn.s_wall
+        if sw[-1] <= s_need:
+            if res["end"]["reason"] not in ("front_cap",):
+                last = f"壁の節点が s_need に届く前に前進 MOC が止まった ({res['end']})"
+                break
+            K = int(K * 1.6) + 10
+            continue
+        k_need = int(np.searchsorted(sw, s_need))
+        if k_need + n_after > kn.K:
+            if res["end"]["reason"] not in ("front_cap",):
+                last = f"前線 {k_need + n_after} まで届かない ({res['end']})"
+                break
+            K = int(max(K, k_need + n_after + 5) * 1.2)
+            continue
+        if sw[k_need + n_after] > s_lin:
+            if s_lin >= s_cap - 1e-12:
+                # 延長を伸ばせない: B の探索域の上端を下げる (s_need = n_after 本手前の壁点)
+                k_need = int(np.searchsorted(sw, s_lin)) - n_after - 1
+                if k_need < 4:
+                    last = "θ_lin の上限で B の探索域が空"
+                    break
+                s_need = float(sw[k_need])
+            else:
+                s_lin = min(float(sw[k_need + n_after]) + 0.02 * R_t, s_cap)
+                continue
+        kn.k_need = k_need
+        kn.s_need = s_need
+        kn.c = c
+        kn.L_march = L_march
+        return kn
+    raise RuntimeError(f"kernel_field: c = {c} で s_need = {s_need} までの場が作れない ({last})")
+
+
+# ================================================================================================
+# BD と DE
+class BDLine:
+    r"""C⁻ 上の状態 ($\eta\in[\eta_0,N]$、N が B。kernel 場由来では $\eta=j$、$\eta_0$ は列が使える最も軸寄りの j) の
+    3 次スプライン表現と、$\eta$ に沿った流量・推力 (下 → 上の向き)。
+    `vals`: (N−η0+1, 4) [x, r, θ, ν]、`dxi`: 同じ形の $\partial_\xi$ (kernel 場由来のとき。C2 の関数に使う)。"""
+
+    def __init__(self, vals, ig, dxi=None, xi_B=None, s_B=None, eta0: int = 0):
+        self.ig = as_isentrope(ig)
+        v = np.asarray(vals, dtype=float)
+        self.eta0 = int(eta0)
+        self.N = self.eta0 + v.shape[0] - 1
+        self.eta = np.arange(self.eta0, self.N + 1, dtype=float)
+        self.spl = CubicSpline(self.eta, v, axis=0)
+        self.dspl = self.spl.derivative()
+        self.dxi = None if dxi is None else CubicSpline(self.eta, np.asarray(dxi, dtype=float), axis=0)
+        self.xi_B, self.s_B = xi_B, s_B
+        self._cum = {}
+
+    def at(self, eta):
+        """η での [x, r, θ, ν]。"""
+        return self.spl(eta)
+
+    def point(self, eta) -> dict:
+        x, r, th, nu = (float(v) for v in self.spl(float(eta)))
+        M = float(np.atleast_1d(self.ig.mach_of_nu(np.array([nu])))[0])
+        return {"x": x, "r": r, "th": th, "nu": nu, "M": M, "eta": float(eta)}
+
+    def _flux_density(self, eta, p_a):
+        v = self.spl(eta)
+        d = self.dspl(eta)
+        return flux_density(self.ig, v, d, p_a)
+
+    def _cumulative(self, p_a):
+        key = float(p_a)
+        if key not in self._cum:
+            eg, wg = _gl(self.eta[:-1], self.eta[1:])
+            dm, dT = self._flux_density(eg, p_a)
+            self._cum[key] = (np.concatenate([[0.0], np.cumsum(np.sum(dm * wg, axis=-1))]),
+                              np.concatenate([[0.0], np.cumsum(np.sum(dT * wg, axis=-1))]))
+        return self._cum[key]
+
+    def integrals_from_bottom(self, eta, p_a: float = 0.0) -> tuple:
+        """η0 から η までの (流量, 推力)。区間内は部分区間の Gauss–Legendre (η について滑らか)。"""
+        cm, cT = self._cumulative(p_a)
+        eta = float(np.clip(eta, self.eta0, self.N))
+        i = min(int(np.floor(eta)) - self.eta0, self.N - self.eta0 - 1)
+        j = self.eta0 + i
+        if eta == j:
+            return float(cm[i]), float(cT[i])
+        eg, wg = _gl(float(j), eta)
+        dm, dT = self._flux_density(eg, p_a)
+        return float(cm[i] + np.sum(dm * wg)), float(cT[i] + np.sum(dT * wg))
+
+    def integrals_to_B(self, eta, p_a: float = 0.0) -> tuple:
+        """η から B (N) までの (流量, 推力)。"""
+        cm, cT = self._cumulative(p_a)
+        m0, T0 = self.integrals_from_bottom(eta, p_a)
+        return float(cm[-1] - m0), float(cT[-1] - T0)
+
+
+def flux_density(ig, v, d, p_a):
+    r"""曲線 (パラメータ $t$、下 → 上) の $d\dot m/dt$ と $dT/dt$: 値 `v` [x, r, θ, ν] と $t$ 微分 `d` から
+    $2\pi r\rho V(\cos\theta\,r_t-\sin\theta\,x_t)$ と $2\pi r[\rho V^2\cos\theta(\cos\theta\,r_t-\sin\theta\,x_t)+(p-p_a)r_t]$。"""
+    x, r, th, nu = v[..., 0], v[..., 1], v[..., 2], v[..., 3]
+    xe, re = d[..., 0], d[..., 1]
+    M = ig.mach_of_nu(nu)
+    st = ig.state(np.maximum(np.ravel(M), 1.0))
+    shp = np.shape(M)
+    rhoV = (st["rho"] * st["V"]).reshape(shp)
+    V = st["V"].reshape(shp)
+    p = st["p"].reshape(shp)
+    nflux = np.cos(th) * re - np.sin(th) * xe
+    return TWO_PI * r * rhoV * nflux, TWO_PI * r * (rhoV * V * np.cos(th) * nflux + (p - p_a) * re)
+
+
+def trace_bd(net: KernelNet, s_B: float) -> BDLine:
+    r"""B ($s_B$) から下流へ出る C⁻ (BD) を kernel 場の補間で取る: $\xi_B$ = 壁の弧長のスプラインの逆、
+    各列 $j\ge j_{low}$ を $\xi_B$ で評価 (値と $\partial_\xi$)。θ_B > μ_B の作動域では網の前線は BD に使えない (逆向き) ので、
+    前線そのものではなく網を通る C⁻ の族の 1 本として取る (記録の構成手順)。"""
+    xi = net.xi_of_s(s_B)
+    jl = net.j_low(xi)
+    v, d = net.eval_cols(xi, range(jl, net.n + 1))
+    return BDLine(v, net.ig, dxi=d, xi_B=xi, s_B=s_B, eta0=jl)
+
+
+def cplus_closure(net: KernelNet, xi_B: float, eta_D: float, p_a: float = 0.0, n_per: int = 1) -> dict:
+    r"""D から軸 (または初期線) へ、D を通る kernel 場の C⁺ を遡る曲線 $(\xi_B-t,\eta_D-t)$ に沿った流量と推力
+    (軸 → D の向き)。C⁺ が初期線 ($\xi=0$) に先に当たるときは、初期線の軸 → 当たり点を足す。BD (軸 → D) の代わりの閉じ方
+    (BD と C⁺ の間に壁は無いので運動量は等しい)。"""
+    ig = net.ig
+    t_end = min(eta_D, xi_B)
+    nseg = max(int(np.ceil(t_end)) * n_per, 1)
+    tt = np.linspace(0.0, t_end, nseg + 1)
+    tg, wg = _gl(tt[:-1], tt[1:])
+    vals = np.empty(tg.shape + (4,))
+    ders = np.empty(tg.shape + (4,))
+    for idx in np.ndindex(tg.shape):
+        t = float(tg[idx])
+        v, dxi, deta = net.eval_point(xi_B - t, eta_D - t)
+        vals[idx] = v
+        ders[idx] = dxi + deta             # 軸 → D の向き (τ = t_end − t) の微分 d/dτ = ∂_ξ + ∂_η
+    dm, dT = flux_density(ig, vals, ders, p_a)
+    m = float(np.sum(dm * wg))
+    T = float(np.sum(dT * wg))
+    out = {"mdot": m, "T": T, "t_end": t_end, "hits": "axis" if eta_D <= xi_B else "initial_line"}
+    if eta_D > xi_B:
+        j_hit = eta_D - xi_B
+        ln = net.line
+        v0 = np.column_stack([ln["x"], ln["r"], ln["theta"], ig.nu(ln["M"])])
+        sp = CubicSpline(np.arange(len(v0), dtype=float), v0, axis=0)
+        jj = np.linspace(0.0, j_hit, max(int(np.ceil(j_hit)), 1) + 1)
+        jg, wj = _gl(jj[:-1], jj[1:])
+        dm2, dT2 = flux_density(ig, sp(jg), sp.derivative()(jg), p_a)
+        out["mdot"] += float(np.sum(dm2 * wj))
+        out["T"] += float(np.sum(dT2 * wj))
+    return out
+
+
+def edge_function(ig, M, th, r, p_a: float = 0.0) -> float:
+    r"""縁の関数 $r[(p-p_a)-\tfrac12\rho V^2\tan\mu\sin2\theta]$ ($=\partial F^*/\partial r_E|_L/2\pi$、0 が自由 $\varepsilon$ の
+    縁条件 = Cain 2010 式 4.3)。平面では $r$ を外した同じ式 (根は `rao_planar.theta_lip` と同じ)。"""
+    ig = as_isentrope(ig)
+    st = ig.state(np.array([float(M)]))
+    p, rho, V, mu = (float(st[k][0]) for k in ("p", "rho", "V", "mu"))
+    return float(r) * ((p - p_a) - 0.5 * rho * V * V * np.tan(mu) * np.sin(2.0 * float(th)))
+
+
+class RaoLine:
+    r"""制御面 DE (C⁺): D の状態から $\Phi_2,\Phi_3$ 一定で $M$ をパラメータに引く。"""
+
+    def __init__(self, ig, D: dict, dM: float = 4e-3, p_a: float = 0.0):
+        self.ig = as_isentrope(ig)
+        self.D = dict(D)
+        self.dM = float(dM)
+        self.p_a = float(p_a)
+        st = self.ig.state(np.array([float(D["M"])]))
+        V, rho, mu = float(st["V"][0]), float(st["rho"][0]), float(st["mu"][0])
+        thD = float(D["th"])
+        self.Phi2 = V * np.cos(thD - mu) / np.cos(mu)
+        self.Phi3 = float(D["r"]) * rho * V * V * np.sin(thD) ** 2 * np.tan(mu)
+        self.sig = 1.0 if thD < mu else -1.0
+        self.ok_D = thD > 0.0
+        f = self.eval(np.array([float(D["M"])]))
+        self.dir = 1.0 if float(f["rp"][0]) > 0.0 else -1.0
+
+    def eval(self, M) -> dict:
+        """DE 上の θ, r, dr/dM, dθ/dM と流量・推力・x の M 微分 (配列)。`valid` は |c| ≤ 1・θ > 0・θ+μ < 90°。"""
+        M = np.asarray(M, dtype=float)
+        st = self.ig.state(M.ravel())
+        V = st["V"].reshape(M.shape)
+        rho = st["rho"].reshape(M.shape)
+        p = st["p"].reshape(M.shape)
+        mu = st["mu"].reshape(M.shape)
+        dlnV = st["dlnV_dM"].reshape(M.shape)
+        c = self.Phi2 * np.cos(mu) / V
+        cc = np.clip(c, -1.0, 1.0)
+        sq = np.sqrt(np.maximum(1.0 - cc * cc, 0.0))
+        th = mu - self.sig * np.arccos(cc)
+        tmu = np.tan(mu)
+        mup = -tmu / M
+        cp_ = c * (tmu * tmu / M - dlnV)
+        thp = mup + self.sig * cp_ / np.where(sq > 0.0, sq, np.nan)
+        sth = np.sin(th)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r = self.Phi3 / (rho * V * V * sth * sth * tmu)
+            dlnr = -(-M * M * dlnV + 2.0 * dlnV + 2.0 * np.cos(th) / sth * thp - 1.0 / (M * np.cos(mu) ** 2))
+        rp = r * dlnr
+        spm = np.sin(th + mu)
+        tpm = np.tan(th + mu)
+        valid = (np.abs(c) <= 1.0) & (th > 0.0) & (np.cos(th + mu) > 0.0) & np.isfinite(r)
+        return {"M": M, "th": th, "r": r, "rp": rp, "thp": thp, "c": c, "mu": mu, "V": V, "rho": rho, "p": p,
+                "dx": rp / tpm, "dm": TWO_PI * r * rho * V * np.sin(mu) / spm * rp,
+                "dT": TWO_PI * r * (rho * V * V * np.cos(th) * np.sin(mu) / spm + (p - self.p_a)) * rp,
+                "valid": valid}
+
+    def _cells(self, i0, i1):
+        """セル i ∈ [i0, i1) の端と GL の評価。"""
+        M0 = float(self.D["M"])
+        a = M0 + self.dir * self.dM * np.arange(i0, i1)
+        b = a + self.dir * self.dM
+        mg, wg = _gl(a, b)
+        f = self.eval(mg)
+        fe = self.eval(b)
+        return a, b, f, fe, wg
+
+    def march(self, mdot_target: float, M_cap: float | None = None, max_cells: int = 200000) -> dict:
+        r"""流量 $\dot m_{DE}(D\to M)$ が `mdot_target` に達する E を求める。戻り dict: `ok`、`why` (失敗の理由)、
+        E の `M`・`x`・`r`・`th`、`T` (DE の推力)、`mdot`、`n_cells`。"""
+        M_cap = M_cap if M_cap is not None else (self.ig.M_max if not self.ig.cpg else 30.0)
+        if not self.ok_D:
+            return {"ok": False, "why": "θ_D ≤ 0 (D が軸上か壁角が負)"}
+        fD = self.eval(np.array([float(self.D["M"])]))
+        if not bool(fD["valid"][0]):
+            return {"ok": False, "why": "D で DE の式が成り立たない"}
+        if mdot_target <= 0.0:
+            return {"ok": True, "M": float(self.D["M"]), "x": float(self.D["x"]), "r": float(self.D["r"]),
+                    "th": float(self.D["th"]), "T": 0.0, "mdot": 0.0, "n_cells": 0}
+        cm = cx = cT = 0.0
+        i = 0
+        chunk = 64
+        self._cum = [(0.0, 0.0, 0.0)]
+        while i < max_cells:
+            a, b, f, fe, wg = self._cells(i, i + chunk)
+            for kk in range(chunk):
+                good = bool(np.all(f["valid"][kk]) and fe["valid"][kk])
+                rp_ok = bool(np.all(f["rp"][kk] * self.dir > 0.0) and fe["rp"][kk] * self.dir > 0.0)
+                Mb = b[kk]
+                if not (1.0 <= min(a[kk], Mb) and max(a[kk], Mb) <= M_cap):
+                    return {"ok": False, "why": f"M が範囲外 ({Mb:.4g})", "n_cells": i + kk}
+                if not good:
+                    why = ("|c| > 1" if np.any(np.abs(f["c"][kk]) > 1.0) or abs(fe["c"][kk]) > 1.0 else
+                           "θ ≤ 0 または θ+μ ≥ 90°")
+                    return {"ok": False, "why": f"DE: {why} (M {a[kk]:.4g})", "n_cells": i + kk}
+                if not rp_ok:
+                    return {"ok": False, "why": f"DE: 折り返し (dr/dM の符号反転、M {a[kk]:.4g})", "n_cells": i + kk}
+                # GL の重みは符号付き (M が減る向きでは負) なので、和がそのまま経路に沿った増分
+                dm = float(np.sum(f["dm"][kk] * wg[kk]))
+                if cm + dm >= mdot_target:
+                    return self._finish(i + kk, float(a[kk]), cm, cx, cT, mdot_target)
+                cm += dm
+                cx += float(np.sum(f["dx"][kk] * wg[kk]))
+                cT += float(np.sum(f["dT"][kk] * wg[kk]))
+                self._cum.append((cm, cx, cT))
+            i += chunk
+        return {"ok": False, "why": "DE: 流量に達しない (セル数の上限)"}
+
+    def _partial(self, Ma, Mb):
+        mg, wg = _gl(Ma, Mb)
+        f = self.eval(mg)
+        return (float(np.sum(f["dm"] * wg)), float(np.sum(f["dx"] * wg)), float(np.sum(f["dT"] * wg)))
+
+    def _finish(self, icell, Ma, cm, cx, cT, target):
+        Mb = Ma + self.dir * self.dM
+        lo, hi = min(Ma, Mb), max(Ma, Mb)
+        ME = brentq(lambda M: cm + self._partial(Ma, M)[0] - target, lo, hi, xtol=1e-15,
+                    rtol=4 * np.finfo(float).eps, maxiter=200)
+        dm, dx, dT = self._partial(Ma, ME)
+        fE = self.eval(np.array([ME]))
+        self.M_E = ME
+        self.n_cells = icell + 1
+        return {"ok": True, "M": ME, "x": float(self.D["x"]) + cx + dx, "r": float(fE["r"][0]), "th": float(fE["th"][0]),
+                "T": cT + dT, "mdot": cm + dm, "n_cells": icell + 1, "thp": float(fE["thp"][0]), "rp": float(fE["rp"][0])}
+
+    def points(self, Ms) -> np.ndarray:
+        """DE 上の M 列の点 [x, r, θ, ν, M] (march の後。x は累積 + 部分区間の積分)。"""
+        Ms = np.asarray(Ms, dtype=float)
+        out = np.empty((len(Ms), 5))
+        M0 = float(self.D["M"])
+        f = self.eval(Ms)
+        for q, M in enumerate(Ms):
+            i = int(np.floor((M - M0) * self.dir / self.dM + 1e-12))
+            i = max(0, min(i, len(self._cum) - 1))
+            Ma = M0 + self.dir * self.dM * i
+            base = self._cum[i][1]
+            dx = self._partial(Ma, M)[1] if M != Ma else 0.0
+            out[q] = (float(self.D["x"]) + base + dx, f["r"][q], f["th"][q], 0.0, M)
+        out[:, 3] = self.ig.nu(out[:, 4])
+        return out
+
+    def dtheta_dsigma_D(self) -> float:
+        """DE に沿った dθ/dσ (D で、σ は C⁺ の弧長、下流向き)。"""
+        f = self.eval(np.array([float(self.D["M"])]))
+        return float(f["thp"][0] * np.sin(f["th"][0] + f["mu"][0]) / f["rp"][0])
+
+
+def rao_line(ig, D: dict, mdot_target: float, *, p_a: float = 0.0, dM: float = 4e-3) -> tuple:
+    """DE を引いて E を求める。戻り (RaoLine, E の dict)。"""
+    rl = RaoLine(ig, D, dM=dM, p_a=p_a)
+    return rl, rl.march(mdot_target)
+
+
+# ================================================================================================
+# 入れ子の根
+def _de_at(bd: BDLine, eta: float, p_a: float, dM: float) -> dict:
+    """D = BD(η) から DE を引き、E と推力を返す (失敗は E["ok"] False と理由)。`F_part` = BD (η0 → D) + DE の推力
+    (B を固定した族では全推力と定数差。T2 と同じ B の中の比較に使う)。"""
+    D = bd.point(eta)
+    m_DB, _ = bd.integrals_to_B(eta, p_a)
+    m_bot, T_bot = bd.integrals_from_bottom(eta, p_a)
+    rl, E = rao_line(bd.ig, D, m_DB, p_a=p_a, dM=dM)
+    out = {"eta": float(eta), "D": D, "E": E, "rl": rl, "mdot_DB": m_DB, "T_BD_bottom_D": T_bot}
+    if E.get("ok"):
+        out["F_part"] = T_bot + E["T"]
+        out["edge"] = edge_function(bd.ig, E["M"], E["th"], E["r"], p_a)
+    return out
+
+
+def _refine_edges(xs, vals, fun, n_bisect: int = 12):
+    """走査の隣どうしで片方だけ有限 (成立の境) なら、境へ二分法で詰めて有限側の端の点を走査に足す
+    (成立域の端の近くにある符号変化を拾うため)。`fun(x)` は値 (非有限 = 不成立) を返す。戻り (xs, vals) を x 昇順で。"""
+    xs, vals = list(xs), list(vals)
+    add = []
+    for i in range(len(xs) - 1):
+        a, b, fa, fb = xs[i], xs[i + 1], vals[i], vals[i + 1]
+        if np.isfinite(fa) == np.isfinite(fb):
+            continue
+        good, bad, fg = (a, b, fa) if np.isfinite(fa) else (b, a, fb)
+        for _ in range(n_bisect):
+            mid = 0.5 * (good + bad)
+            fm = fun(mid)
+            if np.isfinite(fm):
+                good, fg = mid, fm
+            else:
+                bad = mid
+        add.append((good, fg))
+    for x, v in add:
+        xs.append(x)
+        vals.append(v)
+    o = np.argsort(xs)
+    return np.asarray(xs)[o], np.asarray(vals)[o]
+
+
+def solve_D(bd: BDLine, *, eps: float | None = None, p_a: float = 0.0, dM: float = 4e-3, n_scan: int = N_SCAN_D,
+            eta_lo: float = 0.25, xtol: float = XTOL) -> dict:
+    r"""内の根: D の位置 $\eta_D$ を、固定 $\varepsilon$ なら $r_E=\sqrt\varepsilon$、自由 ($\varepsilon$ = None) なら縁条件
+    `edge_function` = 0 で決める。$\eta\in[\eta_{lo}, N)$ を `n_scan` 点で走査して符号変化をすべて候補にし、brentq で詰める。
+    戻り dict: `roots` (各根の D・E・推力)、`scan` (走査の記録)、`why` (根が無いときの理由)。"""
+    N = bd.N
+    etas = np.linspace(bd.eta0 + eta_lo, N - 0.25, n_scan)
+    target = None if eps is None else float(np.sqrt(eps))
+
+    def fun(eta):
+        d = _de_at(bd, eta, p_a, dM)
+        if not d["E"].get("ok"):
+            return np.nan, d
+        return ((d["E"]["r"] - target) if target is not None else d["edge"]), d
+
+    vals, recs = [], []
+    for e in etas:
+        v, d = fun(float(e))
+        vals.append(v)
+        recs.append({"eta": float(e), "val": v, "ok": bool(d["E"].get("ok")), "why": d["E"].get("why"),
+                     "r_E": d["E"].get("r"), "x_E": d["E"].get("x")})
+    vals = np.asarray(vals)
+    etas, vals = _refine_edges(etas, vals, lambda t: fun(float(t))[0])
+    roots = []
+    for i in range(len(etas) - 1):
+        a, b = vals[i], vals[i + 1]
+        if np.isfinite(a) and np.isfinite(b) and a * b <= 0.0 and not (a == 0.0 and b == 0.0):
+            try:
+                e = brentq(lambda t: fun(t)[0], float(etas[i]), float(etas[i + 1]), xtol=xtol,
+                           rtol=4 * np.finfo(float).eps, maxiter=200)
+            except ValueError:          # 区間の内側に不成立の点がある (成立域が走査点の間で途切れる)
+                continue
+            roots.append(_de_at(bd, e, p_a, dM))
+    why = None
+    if not roots:
+        fin = np.isfinite(vals)
+        why = ("DE が全走査点で成り立たない: " + str(recs[0]["why"])) if not np.any(fin) else \
+            f"r_E − √ε (または縁の関数) の符号が変わらない (有限 {int(np.sum(fin))}/{len(vals)}、範囲 {np.nanmin(vals):.4g}〜{np.nanmax(vals):.4g})"
+    return {"roots": roots, "scan": recs, "why": why}
+
+
+def _middle_eval(net: KernelNet, s_B: float, eps, p_a, dM, n_scan_D):
+    bd = trace_bd(net, s_B)
+    sd = solve_D(bd, eps=eps, p_a=p_a, dM=dM, n_scan=n_scan_D)
+    return bd, sd
+
+
+def solve_thetaB(net: KernelNet, L: float, *, eps: float | None, p_a: float = 0.0, dM: float = 4e-3,
+                 s_range: tuple | None = None, n_scan: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D,
+                 xtol: float = XTOL) -> dict:
+    r"""中の根: B の弧長 $s_B$ (= $\theta_B$) を $x_E=L$ で決める (kernel 場 1 本の中で B を動かす)。D の根が複数あるときは
+    $\eta_D$ の小さい順に枝を作って枝ごとに走査する。戻り dict: `roots` (各根の B・BD・D・E)、`scan`、`why`。"""
+    s_lo, s_hi = s_range if s_range is not None else (net.s_wall[2], net.s_wall[net.k_need])
+    ss = np.linspace(s_lo, s_hi, n_scan)
+    scan = []
+    for s in ss:
+        bd, sd = _middle_eval(net, float(s), eps, p_a, dM, n_scan_D)
+        xs = [r["E"]["x"] for r in sd["roots"]]
+        scan.append({"s_B": float(s), "theta_B_deg": float(np.rad2deg(net.wall.theta(s))),
+                     "x_E": xs, "eta_D": [r["eta"] for r in sd["roots"]], "why": sd["why"]})
+    nb = max((len(r["x_E"]) for r in scan), default=0)
+    roots = []
+
+    def f_branch(s, br):
+        bd, sd = _middle_eval(net, float(s), eps, p_a, dM, n_scan_D)
+        if len(sd["roots"]) <= br:
+            return np.nan, None
+        return sd["roots"][br]["E"]["x"] - L, (bd, sd["roots"][br])
+
+    for br in range(nb):
+        v = np.array([(r["x_E"][br] - L) if len(r["x_E"]) > br else np.nan for r in scan])
+        ss_b, v = _refine_edges(ss, v, lambda t, br=br: f_branch(float(t), br)[0], n_bisect=10)
+        for i in range(len(ss_b) - 1):
+            a, b = v[i], v[i + 1]
+            if np.isfinite(a) and np.isfinite(b) and a * b <= 0.0:
+                try:
+                    s = brentq(lambda t: f_branch(t, br)[0], float(ss_b[i]), float(ss_b[i + 1]), xtol=xtol,
+                               rtol=4 * np.finfo(float).eps, maxiter=200)
+                except ValueError:
+                    continue
+                val, pack = f_branch(s, br)
+                if pack is None or not np.isfinite(val):
+                    continue
+                bd, rt = pack
+                roots.append({"s_B": float(s), "theta_B": float(net.wall.theta(s)), "kappa_B": float(net.wall.kappa(s)),
+                              "bd": bd, "D_root": rt, "branch": br, "x_E_minus_L": float(val)})
+    why = None
+    if not roots:
+        why = (f"x_E − L の符号が変わらない (θ_B {scan[0]['theta_B_deg']:.2f}〜{scan[-1]['theta_B_deg']:.2f}°、"
+               f"x_E {[r['x_E'] for r in scan]})")
+    return {"roots": roots, "scan": scan, "why": why}
+
+
+def gtilde(net: KernelNet, mid_root: dict) -> dict:
+    r"""C2 の根の関数 $\tilde g=(d\theta/d\sigma)_{DE,D}-(d\theta/d\sigma)_{kernel\,C^+,D}$ [rad/$r_t$]。kernel 側は網の論理座標で
+    C⁺ が $(d\xi,d\eta)=(1,1)$ の向きなので $(\theta_\xi+\theta_\eta)/|(x_\xi+x_\eta,\,r_\xi+r_\eta)|$ (BD の両側で滑らかな延長場)。"""
+    bd = mid_root["bd"]
+    rt = mid_root["D_root"]
+    eta = rt["eta"]
+    d_eta = bd.dspl(eta)
+    d_xi = bd.dxi(eta)
+    tx = d_xi[0] + d_eta[0]
+    tr = d_xi[1] + d_eta[1]
+    tth = d_xi[2] + d_eta[2]
+    k_side = float(tth / np.hypot(tx, tr))
+    de_side = rt["rl"].dtheta_dsigma_D()
+    # C⁺ の向きの検算: kernel 側の C⁺ の傾きと tan(θ+μ)
+    D = rt["D"]
+    mu = float(mu_vec(np.array([D["M"]]))[0])
+    slope_err = float(np.arctan2(tr, tx) - (D["th"] + mu))
+    return {"g": de_side - k_side, "de": de_side, "kernel": k_side, "cplus_angle_err": slope_err}
+
+
+# ================================================================================================
+# Goursat と壁
+def goursat_fill(ig, bd: BDLine, D_root: dict, m: int, q: int, ext: float = 0.08) -> np.ndarray:
+    r"""領域 BDE の Goursat 充填。`P[i, j]` ($i=0..m$ が BD 上 D → B、$j=0..q$ が DE 上 D → E、その先 E を越える延長) =
+    [x, r, θ, ν, M]。$P_{i,j}$ = interior(A = $P_{i,j-1}$ [C⁺ 担体], B = $P_{i-1,j}$ [C⁻ 担体、符号付きで逆向き])、段 $i+j$ ごとに
+    一括。DE は流量で `ext` だけ E の先へ延ばす (流量で切る壁が E の近くで網の外に出ないように — 中点則の流量は厳密な目標と
+    $O(h^2)$ ずれる)。延長が作れなければ延長なし。"""
+    ig = as_isentrope(ig)
+    eta_D = D_root["eta"]
+    etas = np.linspace(eta_D, bd.N, m + 1)
+    v = bd.at(etas)
+    ME = D_root["E"]["M"]
+    MD = float(D_root["D"]["M"])
+    Ms = np.linspace(MD, ME, q + 1)
+    rl = D_root["rl"]
+    q_ext = 0
+    if ext > 0.0:
+        rl2 = RaoLine(ig, D_root["D"], dM=rl.dM, p_a=rl.p_a)
+        E2 = rl2.march(D_root["E"]["mdot"] * (1.0 + ext))
+        if E2.get("ok"):
+            dMs = (ME - MD) / q
+            q_ext = max(int(np.floor((E2["M"] - ME) / dMs)), 0)
+            if q_ext > 0:
+                Ms = np.concatenate([Ms, ME + dMs * np.arange(1, q_ext + 1)])
+                rl = rl2
+    qq = q + q_ext
+    P = np.full((m + 1, qq + 1, 5), np.nan)
+    P[:, 0, :4] = v
+    P[:, 0, 4] = ig.mach_of_nu(v[:, 3])
+    P[0, :, :] = rl.points(Ms)
+    # D は BD と DE の共通点: BD 側の値を使う (DE は同じ状態から作った式なので一致)
+    P[0, 0, :4] = v[0]
+    P[0, 0, 4] = ig.mach_of_nu(np.array([v[0, 3]]))[0]
+    nfail = 0
+    for lev in range(2, m + qq + 1):
+        i = np.arange(max(1, lev - qq), min(m, lev - 1) + 1)
+        j = lev - i
+        A = [P[i, j - 1, k] for k in range(5)]
+        B = [P[i - 1, j, k] for k in range(5)]
+        st: dict = {}
+        xP, rP, thP, nuP, ok = interior_vec(*A, *B, ig.moc, 1.0, 2, axis_limit="analytic", thrA=None, thrB=None,
+                                            corrector="converge", stats=st)
+        good = ok & (st["status"] == PAIR_CONVERGED)
+        nfail += int(np.sum(~good & np.isfinite(A[0]) & np.isfinite(B[0])))
+        P[i, j, 0] = np.where(good, xP, np.nan)
+        P[i, j, 1] = np.where(good, rP, np.nan)
+        P[i, j, 2] = np.where(good, thP, np.nan)
+        P[i, j, 3] = np.where(good, nuP, np.nan)
+        P[i, j, 4] = np.where(good, ig.mach_of_nu(np.where(good, nuP, 0.0)), np.nan)
+    goursat_fill.last_nfail = nfail
+    goursat_fill.last_q_ext = q_ext
+    return P
+
+
+def wall_from_massflow(ig, bd: BDLine, D_root: dict, P: np.ndarray, p_a: float = 0.0) -> dict:
+    r"""壁 BE = 各 C⁺ 線 $i$ (BD 上の $b_i$ から) で、$b_i$ から数えた流量が $\dot m_{BD}(b_i\to B)$ に達する点
+    (`moc_inverse.cplus_flux_wall` と同じ: 中点則の流量、跨いだ線分を線形補間)。戻り: `wall` (B → E の順、[x, r, θ, M])、
+    `closure` (線 $i=0$ = DE 上の壁点と E の差)、`n_missing` (壁に届かない線)。"""
+    ig = as_isentrope(ig)
+    m = P.shape[0] - 1
+    eta_D = D_root["eta"]
+    etas = np.linspace(eta_D, bd.N, m + 1)
+    targets = np.array([bd.integrals_to_B(e, p_a)[0] for e in etas])
+    targets[-1] = 0.0
+    out = []
+    miss = 0
+    for i in range(m, -1, -1):
+        line = P[i]
+        ok = np.isfinite(line[:, 0])
+        cut = int(np.argmin(ok)) if not np.all(ok) else len(ok)
+        ln = line[:cut]
+        if targets[i] <= 0.0:
+            out.append((ln[0, 0], ln[0, 1], ln[0, 2], ln[0, 4]))
+            continue
+        if len(ln) < 2:
+            miss += 1
+            continue
+        Mm = 0.5 * (ln[1:, 4] + ln[:-1, 4])
+        thm = 0.5 * (ln[1:, 2] + ln[:-1, 2])
+        rm = 0.5 * (ln[1:, 1] + ln[:-1, 1])
+        d = ig.mass_flux_density(Mm) * (np.cos(thm) * np.diff(ln[:, 1]) - np.sin(thm) * np.diff(ln[:, 0])) * TWO_PI * rm
+        cum = np.concatenate([[0.0], np.cumsum(d)])
+        if cum[-1] < targets[i]:
+            miss += 1
+            continue
+        jj = int(np.argmax(cum >= targets[i]))
+        s = (targets[i] - cum[jj - 1]) / max(cum[jj] - cum[jj - 1], 1e-300)
+        a, b = ln[jj - 1], ln[jj]
+        out.append(tuple(a[[0, 1, 2, 4]] + s * (b[[0, 1, 2, 4]] - a[[0, 1, 2, 4]])))
+    w = np.asarray(out, dtype=float)
+    w = w[np.argsort(w[:, 0])]
+    E = D_root["E"]
+    closure = {"dx": float(w[-1, 0] - E["x"]), "dr": float(w[-1, 1] - E["r"]), "dth": float(w[-1, 2] - E["th"])}
+    # 独立の検算: 壁は流線でもあるはず (折れ線の傾きと tanθ)
+    slope = np.diff(w[:, 1]) / np.diff(w[:, 0])
+    tmid = np.tan(0.5 * (w[1:, 2] + w[:-1, 2]))
+    return {"wall": w, "closure": closure, "n_missing": miss,
+            "streamline_resid_max": float(np.max(np.abs(np.arctan(slope) - np.arctan(tmid))))}
+
+
+def wall_curvature_B(wall: np.ndarray, n_fit: int = 6) -> float:
+    """BE の出だしの曲率 dθ/ds (B から n_fit 点の 2 次の当てはめ)。"""
+    w = wall[:n_fit]
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(w[:, 0]), np.diff(w[:, 1])))])
+    c = np.polyfit(s, w[:, 2], 2)
+    return float(c[1])
+
+
+# ================================================================================================
+# 推力の会計
+def line_integrals(ig, x, r, th, M, p_a: float = 0.0, spline: bool = True) -> tuple:
+    """折れ線 (下 → 上) を横切る流量と推力。`spline` は点列の添字の 3 次スプライン + GL (初期線用)、False は中点則。"""
+    ig = as_isentrope(ig)
+    x, r, th, M = (np.asarray(v, dtype=float) for v in (x, r, th, M))
+    if spline:
+        t = np.arange(len(x), dtype=float)
+        sp = CubicSpline(t, np.stack([x, r, th, ig.nu(M)], axis=-1), axis=0)
+        dsp = sp.derivative()
+        tg, wg = _gl(t[:-1], t[1:])
+        v = sp(tg)
+        d = dsp(tg)
+        Mg = ig.mach_of_nu(v[..., 3])
+        st = ig.state(np.maximum(Mg, 1.0).ravel())
+        rhoV = (st["rho"] * st["V"]).reshape(Mg.shape)
+        V = st["V"].reshape(Mg.shape)
+        p = st["p"].reshape(Mg.shape)
+        nflux = np.cos(v[..., 2]) * d[..., 1] - np.sin(v[..., 2]) * d[..., 0]
+        dm = TWO_PI * v[..., 1] * rhoV * nflux
+        dT = TWO_PI * v[..., 1] * (rhoV * V * np.cos(v[..., 2]) * nflux + (p - p_a) * d[..., 1])
+        return float(np.sum(dm * wg)), float(np.sum(dT * wg))
+    Mm = 0.5 * (M[1:] + M[:-1])
+    st = ig.state(np.maximum(Mm, 1.0))
+    thm = 0.5 * (th[1:] + th[:-1])
+    rm = 0.5 * (r[1:] + r[:-1])
+    nflux = np.cos(thm) * np.diff(r) - np.sin(thm) * np.diff(x)
+    rhoV = st["rho"] * st["V"]
+    return (float(np.sum(TWO_PI * rm * rhoV * nflux)),
+            float(np.sum(TWO_PI * rm * (rhoV * st["V"] * np.cos(thm) * nflux + (st["p"] - p_a) * np.diff(r)))))
+
+
+def wall_pressure_force(ig, x, r, M, p_a: float = 0.0) -> float:
+    """壁の点列 (x 昇順) の圧力の軸力 ∫(p − p_a) 2πr dr (台形)。"""
+    ig = as_isentrope(ig)
+    p = ig.state(np.maximum(np.asarray(M, dtype=float), 1.0))["p"]
+    r = np.asarray(r, dtype=float)
+    return float(np.sum(0.5 * ((p[1:] - p_a) * r[1:] + (p[:-1] - p_a) * r[:-1]) * TWO_PI * np.diff(r)))
+
+
+def thrust_accounts(net: KernelNet, mid_root: dict, wall: dict, p_a: float = 0.0) -> dict:
+    r"""推力の 2 会計: (a) 制御面 = (軸 → D) + DE、(b) 初期線 + kernel 壁 (0 → $s_B$) + BE 壁。(a) の軸 → D は BD の代わりに
+    D を通る kernel 場の C⁺ を遡って閉じる (`cplus_closure`。BD は θ_B > μ_B では軸に着くのが出口よりずっと下流で、網が粗い)。
+    差は MOC の離散化の運動量の非保存 (n とともに減る)。流量も 2 通り (初期線と、閉じた曲線 + DE) を返す。"""
+    ig = net.ig
+    line = net.line
+    rt = mid_root["D_root"]
+    bd = mid_root["bd"]
+    cl = cplus_closure(net, bd.xi_B, rt["eta"], p_a)
+    F_cs = cl["T"] + rt["E"]["T"]
+    m_cs = cl["mdot"] + rt["E"]["mdot"]
+    m_line, T_line = line_integrals(ig, line["x"], line["r"], line["theta"], line["M"], p_a, spline=True)
+    s_B = mid_root["s_B"]
+    sgrid = np.linspace(0.0, s_B, 401)
+    sg, wg = _gl(sgrid[:-1], sgrid[1:])
+    nu = net.nu_wall_s(sg)
+    st = ig.state(np.maximum(ig.mach_of_nu(nu), 1.0).ravel())
+    p = st["p"].reshape(sg.shape)
+    rr = net.wall.xr(sg.ravel())[1].reshape(sg.shape)
+    T_kernel = float(np.sum((p - p_a) * TWO_PI * rr * np.sin(net.wall.theta(sg)) * wg))
+    w = wall["wall"]
+    T_BE = wall_pressure_force(ig, w[:, 0], w[:, 1], w[:, 3], p_a)
+    F_wall = T_line + T_kernel + T_BE
+    return {"F_cs": F_cs, "F_wall": F_wall, "rel_diff": (F_cs - F_wall) / F_cs, "T_line": T_line, "T_kernel": T_kernel,
+            "T_BE": T_BE, "T_closure": cl["T"], "closure_hits": cl["hits"], "T_DE": rt["E"]["T"], "mdot_line": m_line,
+            "mdot_cs": m_cs, "mdot_rel_diff": (m_cs - m_line) / m_line}
+
+
+# ================================================================================================
+# 全体
+def _hall_line(R_t, ig, n):
+    from .moc_forward import hall_initial_line
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return hall_initial_line(R_t, ig.moc, n)
+
+
+def solve_kappaB(ig, R_t: float, L: float, *, eps: float | None, line: dict, p_a: float = 0.0, dM: float = 4e-3,
+                 c_scan=C_SCAN, n_scan_sb: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D, xtol_c: float = 1e-11,
+                 L_march: float | None = None, log=None) -> dict:
+    r"""外の根: $c$ ($\kappa_B=1/R_t+cs_B$) を C2 の関数 $\tilde g=0$ で決める。各 $c$ で kernel 場を作り直し、中の根を解き直す
+    (記録の「各評価で B・D を解き直す」)。`c_scan` ($c R_t^2$) で走査して符号変化をすべて候補に。戻り dict: `roots`
+    (各根の c・中の根・g̃)、`scan`、`why`。"""
+    ig = as_isentrope(ig)
+    L_march = L_march if L_march is not None else default_L_march(L)
+    cache = {}
+
+    def evaluate(c):
+        key = float(c)
+        if key in cache:
+            return cache[key]
+        rng = sB_range(R_t, c)
+        if rng is None:
+            cache[key] = {"c": c, "ok": False, "why": "s_B の探索域が空"}
+            return cache[key]
+        try:
+            net = kernel_field(ig, R_t, c, line, rng[1], L_march=L_march)
+        except RuntimeError as e:
+            cache[key] = {"c": c, "ok": False, "why": f"kernel 場: {e}"}
+            return cache[key]
+        s_lo = max(rng[0], float(net.s_wall[2]))
+        mid = solve_thetaB(net, L, eps=eps, p_a=p_a, dM=dM, s_range=(s_lo, min(rng[1], net.s_need)), n_scan=n_scan_sb, n_scan_D=n_scan_D)
+        if not mid["roots"]:
+            cache[key] = {"c": c, "ok": False, "why": "中の根なし: " + str(mid["why"]), "mid": mid, "net": net}
+            return cache[key]
+        gs = [gtilde(net, r) for r in mid["roots"]]
+        cache[key] = {"c": c, "ok": True, "net": net, "mid": mid, "g": [gg["g"] for gg in gs], "gt": gs}
+        if log:
+            log(f"  c·R_t² {c * R_t * R_t:+.6f}: θ_B {[round(np.rad2deg(r['theta_B']), 4) for r in mid['roots']]}° "
+                f"κ_B {[round(r['kappa_B'], 5) for r in mid['roots']]} g̃ {[f'{g:+.4e}' for g in cache[key]['g']]}")
+        return cache[key]
+
+    cs = [float(v) / (R_t * R_t) for v in c_scan]
+    scan = [evaluate(c) for c in cs]
+    roots = []
+    nb = max((len(s["g"]) for s in scan if s["ok"]), default=0)
+    for br in range(nb):
+        vals = np.array([s["g"][br] if s["ok"] and len(s["g"]) > br else np.nan for s in scan])
+        for i in range(len(cs) - 1):
+            a, b = vals[i], vals[i + 1]
+            if np.isfinite(a) and np.isfinite(b) and a * b <= 0.0:
+                def f(c, br=br):
+                    e = evaluate(c)
+                    if not e["ok"] or len(e["g"]) <= br:
+                        return np.nan
+                    return e["g"][br]
+                try:
+                    c0 = brentq(f, cs[i], cs[i + 1], xtol=xtol_c, rtol=4 * np.finfo(float).eps, maxiter=100)
+                except ValueError:
+                    continue
+                e = evaluate(c0)
+                if e["ok"] and len(e["g"]) > br:
+                    roots.append({"c": c0, "net": e["net"], "mid_root": e["mid"]["roots"][br], "g": e["g"][br],
+                                  "gt": e["gt"][br], "branch": br})
+    why = None
+    if not roots:
+        why = "g̃ の符号が変わらない: " + "; ".join(
+            f"c·R_t² {s['c'] * R_t * R_t:+.3f}: " + (f"g̃ {[f'{g:+.3e}' for g in s['g']]}" if s["ok"] else s["why"])
+            for s in scan)
+    return {"roots": roots, "scan": [{k: v for k, v in s.items() if k in ("c", "ok", "why", "g")} for s in scan],
+            "why": why}
+
+
+def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "linear", n: int = 321,
+               line: dict | None = None, p_a: float = 0.0, dM: float | None = None, m: int | None = None,
+               q: int | None = None, c_scan=C_SCAN, L_march: float | None = None, log=None) -> dict:
+    r"""与えた $(L,\varepsilon)$ の停留輪郭 (固定 $\varepsilon$。`eps=None` は自由 $\varepsilon$ で縁条件)。
+
+    `gas`: γ・`GasCPG`・`GasSemiPerfect`・`Isentrope`。`kernel`: `"linear"` (C2、$c$ を $\tilde g=0$ で) / `"arc"` (古典、
+    曲率半径 $R_t$ の円弧、C2 は課さない)。`line`: 初期線 (既定 Hall の $n$ 点。$R_t\le1$ は $n\le321$)。
+    `m`・`q`: Goursat の BD・DE の点数 (既定 n/2)、`dM`: DE の M 格子 (既定 1.28/n)。
+    戻り dict: `status` (`ok` / `infeasible`)、`why`、`wall` (kernel + BE の [x, r, θ, M])、`theta_B`・`theta_max`・`theta_E`
+    [rad]・`kappa_B`・`c`・`s_B`・`D`・`E`・`thrust`・`closure`・`g_tilde`・`kappaW_B`・`candidates`・`timing`。"""
+    t0 = time.time()
+    ig = as_isentrope(gas)
+    L_march = L_march if L_march is not None else default_L_march(L)
+    if line is None:
+        line = _hall_line(R_t, ig, n)
+    n = len(line["x"])
+    dM = dM if dM is not None else 1.28 / n
+    m = m if m is not None else max(n // 2, 20)
+    q = q if q is not None else max(n // 2, 20)
+    base = {"R_t": R_t, "L": L, "eps": eps, "kernel": kernel, "n": n, "p_a": p_a, "dM": dM, "m": m, "q": q,
+            "gas": ig.kind, "gamma_star": ig.gamma_star}
+    if kernel == "arc":
+        rng = sB_range(R_t, 0.0)
+        net = kernel_field(ig, R_t, 0.0, line, rng[1], L_march=L_march)
+        mid = solve_thetaB(net, L, eps=eps, p_a=p_a, dM=dM, s_range=(max(rng[0], float(net.s_wall[2])), min(rng[1], net.s_need)))
+        if not mid["roots"]:
+            return {**base, "status": "infeasible", "why": "中の根なし: " + str(mid["why"]), "scan_mid": mid["scan"],
+                    "timing": {"total_s": time.time() - t0}}
+        cands = [{"c": 0.0, "net": net, "mid_root": r, "g": gtilde(net, r)["g"], "gt": gtilde(net, r)} for r in mid["roots"]]
+        scan_outer = None
+    elif kernel == "linear":
+        ko = solve_kappaB(ig, R_t, L, eps=eps, line=line, p_a=p_a, dM=dM, c_scan=c_scan, L_march=L_march, log=log)
+        if not ko["roots"]:
+            return {**base, "status": "infeasible", "why": "C2 の根が括れない: " + str(ko["why"]),
+                    "scan_outer": ko["scan"], "timing": {"total_s": time.time() - t0}}
+        cands = ko["roots"]
+        scan_outer = ko["scan"]
+    else:
+        raise ValueError("design_rao: kernel は 'linear' か 'arc'")
+    # 候補ごとに Goursat → 壁 → 推力。複数なら制御面の推力が最大
+    built = []
+    for cd in cands:
+        net, mr = cd["net"], cd["mid_root"]
+        P = goursat_fill(ig, mr["bd"], mr["D_root"], m, q)
+        nfail = goursat_fill.last_nfail
+        wl = wall_from_massflow(ig, mr["bd"], mr["D_root"], P, p_a)
+        th_acc = thrust_accounts(net, mr, wl, p_a)
+        built.append({"cd": cd, "P": P, "nfail": nfail, "wl": wl, "thrust": th_acc})
+    best = max(built, key=lambda b: b["thrust"]["F_cs"])
+    cd, net, mr = best["cd"], best["cd"]["net"], best["cd"]["mid_root"]
+    s_B = mr["s_B"]
+    sk = np.linspace(0.0, s_B, 801)
+    xk, rk = net.wall.xr(sk)
+    thk = net.wall.theta(sk)
+    Mk = net.ig.mach_of_nu(net.nu_wall_s(sk))
+    kern = np.column_stack([xk, rk, thk, Mk])
+    BE = best["wl"]["wall"]
+    full = np.vstack([kern, BE[1:]]) if abs(BE[0, 0] - xk[-1]) < 1e-6 else np.vstack([kern, BE])
+    E = mr["D_root"]["E"]
+    thmax_k = float(np.max(thk))
+    out = {**base, "status": "ok", "why": None, "wall": full, "kernel_wall": kern, "BE": BE,
+           "theta_B": mr["theta_B"], "theta_max": max(thmax_k, float(np.max(BE[:, 2]))), "theta_E": E["th"],
+           "kappa_B": mr["kappa_B"], "c": cd["c"], "s_B": s_B, "x_B": float(xk[-1]), "r_B": float(rk[-1]),
+           "D": mr["D_root"]["D"], "E": {k: v for k, v in E.items() if k in ("M", "x", "r", "th", "T", "mdot")},
+           "edge": mr["D_root"].get("edge"), "Phi2": mr["D_root"]["rl"].Phi2, "Phi3": mr["D_root"]["rl"].Phi3,
+           "thrust": best["thrust"], "closure": best["wl"]["closure"], "streamline_resid_max": best["wl"]["streamline_resid_max"],
+           "n_wall_missing": best["wl"]["n_missing"], "goursat_nfail": best["nfail"],
+           "g_tilde": cd["gt"], "kappaW_B": wall_curvature_B(BE),
+           "candidates": [{"c": b["cd"]["c"], "theta_B": b["cd"]["mid_root"]["theta_B"], "F_cs": b["thrust"]["F_cs"]}
+                          for b in built],
+           "scan_outer": scan_outer, "net_K": net.K, "line_n": n, "_net": net, "_mid": mr, "_goursat": best["P"],
+           "timing": {"total_s": time.time() - t0}}
+    F1 = ig.ideal_1d(eps if eps is not None else E["r"] ** 2, p_a)
+    out["F_1D"] = F1["F"]
+    out["CF"] = best["thrust"]["F_cs"] / (np.pi * ig.p0)
+    out["isp_ratio"] = (best["thrust"]["F_cs"] / best["thrust"]["mdot_line"]) / (F1["F"] / F1["mdot"])
+    return out
