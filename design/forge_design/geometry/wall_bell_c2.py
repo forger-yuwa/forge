@@ -1,6 +1,6 @@
 r"""③ベル (D) 直接モードの C2 壁: 拡大部の 5 次 B-spline (無次元, $r_t=1$)。
 
-計画: plans/active/tooling-nozzle-bell-two-mode.md §4.2・§4.3・§5.1 #3・#3c。
+計画: plans/active/tooling-nozzle-bell-two-mode.md §4.2・§4.3・§5.1 #3・#3c・#3d。
 
 **規約** (§5.1 #3 で固定、2026-10-11):
 
@@ -19,27 +19,36 @@ r"""③ベル (D) 直接モードの C2 壁: 拡大部の 5 次 B-spline (無次
   絶対値 1.1〜2.1 $r_t$ の帯 ($R_t$ に縛られる) にあり、$x_m/L$ で振ると長い $L$ で帯を外す (V0-a で成立 8/135 の原因)。
 - `BellC2Wall` は $x_m$ を与えて 1 本の壁を作る下位の部品。$x_m$ は絶対値 `x_m=` ($0<x_m<L$) か、試験・照合用に残した
   旧来の比 `xm_frac` (0.05〜0.40) のどちらか一方で与える。
-- **成立条件** (`feasibility`): 2000 点の等間隔標本で (i) $r'\ge0$、(ii) $\theta'$ の符号変化がちょうど 1 回
-  ($\theta'=r''/(1+r'^2)$ なので $r''$ の符号で数える)、(iii) $|\kappa|\le1/R_t$
-  ($\kappa=r''/(1+r'^2)^{3/2}$)。破れたら INFEASIBLE (違反を文で返す)。
+- **成立条件** (`feasibility`): 2000 点の等間隔標本で (i) $r'\ge0$、(ii) $r''\ge-tol$ on $[0,x_m]$ かつ
+  $r''\le tol$ on $[x_m,L]$ ($tol$ = `RESID_TOL`。$\theta'=r''/(1+r'^2)$ なので $\theta$ が $x_m$ まで非減少・その後は非増加、
+  壁角の最大が $x_m$)、(iii) $|\kappa|\le1/R_t$ ($\kappa=r''/(1+r'^2)^{3/2}$)。破れたら INFEASIBLE (違反を文で返す)。
+  (ii) は旧条件「$\theta'$ の符号変化がちょうど 1 回」の置き換え (#3d): 旧条件は $x_m$ で $r''$ が符号を変えずに 0 に接する壁
+  (例: $L$ 60 %・$\theta_{max}$ 20°・$\theta_e$ 10°・$x_m$ 1.2 は $x_m$ 以降に $r''$ が +0.056 まで戻り、最大壁角 30.18°) を通していた。
 - **収縮部** (§4.2、両モード共通): 入口直管 (長さ $L_{pipe}$、半径 $r_U=\sqrt{CR}$) → U→T 5 次 Hermite
   (`wall_walldriven.UpstreamThroatPoly`、$(r_U,0,0)\to(1,0,1/R_t)$、長さ $L_U$)。スロートで拡大部と
   $(r,r',r'')$ が一致するので構成上 C2。単調収縮 ⇔ $L_U^2/[R_t(r_U-1)]\le20$。
 
-**$x_m$ の内部決定** (`design_bell_c2`、§4.3・§5.1 #3・#3c):
+**$x_m$ の内部決定** (`design_bell_c2`、§4.3・§5.1 #3・#3c・#3d):
 
 1. **走査**: $x_m$ を 0.5〜4.0 $r_t$ の等間隔 141 点 (0.025 $r_t$ 刻み、$x_m<L$ の点だけ) で振り、各点で `BellC2Wall` を作って
    成立条件 (`feasibility`、2000 点の標本) と $J$ を求める。
-2. **成立区間**: 成立した走査点の連続した並び (隣の走査点も成立なら同じ区間)。区間の端は成立した走査点そのもので、
-   走査点の間の境界は細かく求めない。
+2. **成立区間**: 成立した走査点の連続した並び (隣の走査点も成立なら同じ区間)。`intervals` の端は成立した走査点そのもの
+   (区間の選び方はこの走査点で決める)。
 3. **区間の選び方** (複数に分かれる場合): **成立した走査点のうち $J$ が最小の点を含む区間** (= $J$ 最小の区間)。
    $J$ が同じなら $x_m$ の小さい側。
-4. **確定**: その最小の走査点 $x_i$ と、区間内の両隣の走査点 $x_{i\pm1}$ で挟んだ範囲 (区間の端なら片側だけ) を
-   黄金分割 (幅 1e-6 $r_t$ まで、$J$ が同じなら左側を残す) で詰め、評価した点 (走査点を含む) のうち $J$ 最小の点を採る。
-   走査点の間に不成立の穴があって採った点が不成立なら、$x_i$ (成立を確認済み) に戻す (`golden["fallback"]`)。
-5. **成立区間が空**なら例外にせず `status = "INFEASIBLE"` と理由 (走査範囲と不成立の内訳) を返す。
+4. **区間の端を詰める** (#3d): 選んだ区間の両端それぞれで、端の走査点 (成立) と隣の走査点 (不成立) の間を**二分法**
+   (幅 1e-6 $r_t$ まで) で詰め、成立側の点を区間の端とする (`interval_refined`、記録は `bisect`)。隣が走査範囲の外
+   (走査の端) なら詰めない。これで $x_m$ が走査の 0.025 $r_t$ 刻みに量子化されなくなる ($J$ は不成立の側へ下がり続けることが
+   多く、旧手順では $x_m$ が区間の端の走査点に留まっていた)。
+5. **確定**: その最小の走査点 $x_i$ と、区間内の両隣の走査点 $x_{i\pm1}$ で挟んだ範囲 ($x_i$ が区間の端なら、その側は
+   4. で詰めた端まで) を黄金分割 (幅 1e-6 $r_t$ まで、$J$ が同じなら左側を残す) で詰め、評価した点 (範囲内の走査点・詰めた端を
+   含む) のうち $J$ 最小の点を採る (**$J$ 最小の規則は #3d の前と同じ**)。採った点が成立を確かめていない黄金分割の点で
+   不成立なら (走査点の間の穴)、$J$ の小さい順に次の点へ移る (`golden["fallback"]`・`n_rejected`)。
+6. **成立区間が空**なら例外にせず `status = "INFEASIBLE"` と理由 (走査範囲と不成立の内訳) を返す。走査点の間にしか無い
+   幅 0.025 $r_t$ 未満の成立区間は拾わない (V0-b の 0.001 刻みの確認で見つかった細い区間 10 点は、すべて (ii) の旧条件の
+   穴による接触型で、#3d の条件では不成立)。
 
-同じ入力ならビット同一 (乱数・並列なし、走査点と黄金分割の手順が固定)。成立区間が走査の端点 (0.5 か 4.0 $r_t$、または
+同じ入力ならビット同一 (乱数・並列なし、走査点・二分法・黄金分割の手順が固定)。成立区間が走査の端点 (0.5 か 4.0 $r_t$、または
 $L$ の手前の最後の走査点) を含むときは `edge_touch` を立てる (帯が走査範囲の外へ続いているかもしれない — 範囲の見直しの合図)。
 
 この壁がそのまま物理壁 (δ\* 補正なし、§4.3)。CFD の runner への組み込みは別項目 (#2b と衝突するため後で行う)。
@@ -64,6 +73,7 @@ XM_FRAC_RANGE = (0.05, 0.40)     # 旧来の x_m/L 指定 (試験・照合用) �
 XM_SCAN_RANGE = (0.5, 4.0)       # x_m の内部決定の走査範囲 [r_t] (§4.3)
 XM_SCAN_N = 141                  # 走査点数 (0.025 r_t 刻み)
 XM_GOLDEN_TOL = 1e-6             # 黄金分割の打ち切り幅 [r_t]
+XM_BISECT_TOL = 1e-6             # 成立区間の端の二分法の打ち切り幅 [r_t] (#3d)
 RESID_TOL = 1e-10                 # 拘束の残差の合格上限 (§5.1 #3)
 _GAUSS_N = 5                      # Gram 行列の求積点 (r''' は 2 次なので積は 4 次。3 点で厳密、余裕をみて 5 点)
 
@@ -269,10 +279,14 @@ class BellC2Wall:
         return out
 
     def feasibility(self, n: int = N_SAMPLE) -> dict:
-        r"""成立条件 (§5.1 #3): 等間隔 n 点の標本で $r'\ge0$、$\theta'$ の符号変化ちょうど 1 回、$|\kappa|\le1/R_t$。
+        r"""成立条件 (§5.1 #3・#3d): 等間隔 n 点の標本で (i) $r'\ge0$、(ii) $r''\ge0$ on $[0,x_m]$ かつ
+        $r''\le0$ on $[x_m,L]$ ($\theta$ が $x_m$ まで非減少・その後は非増加、壁角の最大が $x_m$)、(iii) $|\kappa|\le1/R_t$。
 
-        許容差は拘束の残差の上限 (`RESID_TOL`) に揃える: $r'\ge-10^{-10}$、$|\kappa|R_t\le1+10^{-10}$
-        (スロートでは $r'=0$・$\kappa=1/R_t$ が拘束そのものなので丸めの分だけ緩める)。"""
+        許容差は拘束の残差の上限 (`RESID_TOL`) に揃える: $r'\ge-10^{-10}$、$r''\ge-10^{-10}$ / $\le10^{-10}$、
+        $|\kappa|R_t\le1+10^{-10}$ (スロートでは $r'=0$・$\kappa=1/R_t$、$x_m$ では $r''=0$ が拘束そのものなので丸めの分だけ緩める)。
+        (ii) は旧条件「$\theta'$ の符号変化がちょうど 1 回」を置き換えたもの (#3d、diagnostician 2026-10-11): 旧条件は
+        $x_m$ で $r''$ が符号を変えずに 0 に接し、下流で一度だけ負になる壁 (壁角の最大が $x_m$ の下流で $\theta_{max}$ を超える)
+        を通していた。符号変化の回数と位置 (`theta_sign_changes`・`x_sign_change`) は記録として残し、判定には使わない。"""
         x = np.linspace(0.0, self.L, int(n))
         rp = self.r_expansion(x, 1)
         rpp = self.r_expansion(x, 2)
@@ -281,14 +295,23 @@ class BellC2Wall:
         kmax = float(np.max(np.abs(kap)) * self.spec.R_t)
         rp_min = float(np.min(rp))
         th = np.degrees(np.arctan(rp))
+        # (ii) x_m の前後で r'' の符号 (標本 x = x_m は両側に入れる。0 < x_m < L なので両側とも空でない)
+        i_pre = np.flatnonzero(x <= self.x_m)
+        i_post = np.flatnonzero(x >= self.x_m)
+        k_pre = int(i_pre[int(np.argmin(rpp[i_pre]))])
+        k_post = int(i_post[int(np.argmax(rpp[i_post]))])
+        rpp_pre_min, rpp_post_max = float(rpp[k_pre]), float(rpp[k_post])
         v = []
         if rp_min < -RESID_TOL:
             v.append(f"r' < 0 (最小 {rp_min:.4g} @ x = {float(x[int(np.argmin(rp))]):.4g})")
-        if nchg != 1:
-            v.append(f"θ' の符号変化が {nchg} 回 (1 回であること)")
+        if rpp_pre_min < -RESID_TOL:
+            v.append(f"x_m の前で r'' < 0 (最小 {rpp_pre_min:.4g} @ x = {float(x[k_pre]):.4g}、θ が x_m の前で減る)")
+        if rpp_post_max > RESID_TOL:
+            v.append(f"x_m の後で r'' > 0 (最大 {rpp_post_max:.4g} @ x = {float(x[k_post]):.4g}、θ が x_m の後で増える)")
         if kmax > 1.0 + RESID_TOL:
             v.append(f"|κ| R_t の最大 {kmax:.6g} > 1 (@ x = {float(x[int(np.argmax(np.abs(kap)))]):.4g})")
         return {"ok": not v, "violations": v, "n_sample": int(n), "rp_min": rp_min,
+                "rpp_min_before_xm": rpp_pre_min, "rpp_max_after_xm": rpp_post_max,
                 "theta_sign_changes": nchg, "x_sign_change": [float(x[i]) for i in at],
                 "kappa_Rt_max": kmax, "theta_max_sampled_deg": float(th.max()),
                 "x_theta_max_sampled": float(x[int(np.argmax(th))]), "r_max": float(np.max(self.r_expansion(x)))}
@@ -310,8 +333,10 @@ def _violation_kind(v: str) -> str:
     """`feasibility` の違反文を種類に (集計用)。"""
     if v.startswith("r' < 0"):
         return "r' < 0"
-    if "符号変化" in v:
-        return "θ' の符号変化 ≠ 1"
+    if v.startswith("x_m の前で r'' < 0"):
+        return "x_m の前で r'' < 0"
+    if v.startswith("x_m の後で r'' > 0"):
+        return "x_m の後で r'' > 0"
     if "|κ|" in v:
         return "|κ| > 1/R_t"
     return v
@@ -323,7 +348,9 @@ class BellC2Design:
 
     `wall` は確定した壁 (`INFEASIBLE` なら None)、`reason` は不成立の理由 (`OK` なら空)。走査の記録
     (`scan_x`・`scan_ok`・`scan_J`・`scan_violations`)、成立区間 (`intervals`: (始点 x, 終点 x, 走査点数, 区間内の J の最小))、
-    選んだ区間の番号 (`chosen_interval`)、黄金分割の記録 (`golden`)、走査の端に触れたか (`edge_touch`) を持つ。"""
+    選んだ区間の番号 (`chosen_interval`)、選んだ区間の端を二分法で詰めた範囲 (`interval_refined`: (始点 x, 終点 x)) と
+    その記録 (`bisect`: 端 `lo`・`hi` ごとに詰めた成立側 `x_ok`・不成立側 `x_bad`・評価回数・不成立側の違反の種類 `binding`、
+    走査の端で隣が無ければ None)、黄金分割の記録 (`golden`)、走査の端に触れたか (`edge_touch`) を持つ。"""
     status: str
     reason: str
     L: float
@@ -339,6 +366,8 @@ class BellC2Design:
     intervals: list = field(default_factory=list)
     chosen_interval: int | None = None
     edge_touch: bool = False
+    interval_refined: tuple | None = None
+    bisect: dict = field(default_factory=dict)
     golden: dict = field(default_factory=dict)
 
     @property
@@ -354,8 +383,15 @@ class BellC2Design:
                 "n_scan": int(len(self.scan_x)), "n_scan_ok": int(np.sum(self.scan_ok)),
                 "intervals": ";".join(f"{a:.3f}-{b:.3f}" for (a, b, _, _) in self.intervals),
                 "n_intervals": len(self.intervals), "chosen_interval": self.chosen_interval,
-                "edge_touch": self.edge_touch, "golden_n_eval": self.golden.get("n_eval"),
+                "edge_touch": self.edge_touch,
+                "interval_refined": (f"{self.interval_refined[0]:.6f}-{self.interval_refined[1]:.6f}"
+                                     if self.interval_refined is not None else None),
+                "bisect_n_eval": (sum(v["n_eval"] for v in self.bisect.values() if v) if self.interval_refined else None),
+                "binding_lo": (self.bisect.get("lo") or {}).get("binding"),
+                "binding_hi": (self.bisect.get("hi") or {}).get("binding"),
+                "golden_n_eval": self.golden.get("n_eval"),
                 "golden_fallback": self.golden.get("fallback"), "golden_at_scan_point": self.golden.get("at_scan_point"),
+                "golden_at_refined_end": self.golden.get("at_refined_end"),
                 "rp_min": f["rp_min"] if f else None, "kappa_Rt_max": f["kappa_Rt_max"] if f else None,
                 "x_theta_max_sampled": f["x_theta_max_sampled"] if f else None,
                 "theta_max_sampled_deg": f["theta_max_sampled_deg"] if f else None}
@@ -436,29 +472,73 @@ def design_bell_c2(L: float, theta_e_deg: float, theta_max_deg: float,
     a, b = runs[ci]
     out.chosen_interval = ci
     out.edge_touch = any(a_ == 0 or b_ == len(xs) - 1 for (a_, b_) in runs)
-    # --- 黄金分割: 最小の走査点と区間内の両隣で挟む ---
-    lo_i, hi_i = max(a, i_best - 1), min(b, i_best + 1)
-    cand = [(float(xs[k]), float(Js[k])) for k in range(lo_i, hi_i + 1)]
+
+    def probe(xm):
+        """x_m で壁を作り (成立, J, 違反の種類) を返す。構築の失敗は不成立。"""
+        try:
+            w = BellC2Wall(L, te, tm, spec=spec, x_m=float(xm))
+        except ValueError:
+            return False, float("inf"), ["構築の失敗"]
+        f = w.feasibility()
+        return bool(f["ok"]), float(w.J), sorted({_violation_kind(v) for v in f["violations"]})
+
+    # --- 選んだ区間の端を二分法で詰める (#3d): 端の走査点 (成立) と隣の走査点 (不成立) の間 ---
+    verified = {float(xs[k]): float(Js[k]) for k in range(a, b + 1)}     # 成立を確かめた x_m → J
+    bis = {}
+    lo_x, hi_x = float(xs[a]), float(xs[b])
+    for side, k_ok, k_bad in (("lo", a, a - 1), ("hi", b, b + 1)):
+        if not (0 <= k_bad < len(xs)):                                   # 走査の端 (隣が無い) は詰めない
+            bis[side] = None
+            continue
+        x_ok, J_ok, x_bad, n_b = float(xs[k_ok]), float(Js[k_ok]), float(xs[k_bad]), 0
+        kinds_bad = None
+        while abs(x_bad - x_ok) > XM_BISECT_TOL:
+            xm = 0.5 * (x_ok + x_bad)
+            ok_m, J_m, kinds_m = probe(xm)
+            n_b += 1
+            if ok_m:
+                x_ok, J_ok = xm, J_m
+            else:
+                x_bad, kinds_bad = xm, kinds_m
+        if kinds_bad is None:                                            # 一度も詰めて不成立にならなかった
+            kinds_bad = probe(x_bad)[2]
+        verified[x_ok] = J_ok
+        bis[side] = {"x_scan_ok": float(xs[k_ok]), "x_scan_bad": float(xs[k_bad]), "x_ok": x_ok, "x_bad": x_bad,
+                     "J_ok": J_ok, "n_eval": n_b, "binding": ";".join(kinds_bad)}
+        if side == "lo":
+            lo_x = x_ok
+        else:
+            hi_x = x_ok
+    out.bisect, out.interval_refined = bis, (lo_x, hi_x)
+    # --- 黄金分割: 最小の走査点と区間内の両隣で挟む。区間の端なら詰めた端まで広げる ---
+    lo_b = lo_x if i_best == a else float(xs[i_best - 1])
+    hi_b = hi_x if i_best == b else float(xs[i_best + 1])
+    cand = [(x_, J_) for x_, J_ in verified.items() if lo_b <= x_ <= hi_b]
     n_eval = 0
-    if hi_i > lo_i:
+    if hi_b > lo_b:
         def Jfun(xm):
             try:
                 return float(BellC2Wall(L, te, tm, spec=spec, x_m=float(xm)).J)
             except ValueError:
                 return float("inf")
-        ev = _golden_min(Jfun, float(xs[lo_i]), float(xs[hi_i]), XM_GOLDEN_TOL)
+        ev = _golden_min(Jfun, lo_b, hi_b, XM_GOLDEN_TOL)
         n_eval = len(ev)
-        cand += ev
+        cand += [(float(x_), float(J_)) for x_, J_ in ev]
     cand.sort(key=lambda t: (t[1], t[0]))
-    x_star = cand[0][0]
-    at_scan = bool(np.any(xs[lo_i:hi_i + 1] == x_star))
-    wall = BellC2Wall(L, te, tm, spec=spec, x_m=x_star)
-    fallback = False
-    if not at_scan and not wall.feasibility()["ok"]:
+    # J の小さい順に、成立を確かめた点か、確かめて成立した点を採る (黄金分割の点が区間の穴に落ちた場合の保険)
+    x_star, n_rej = None, 0
+    for x_, _ in cand:
+        if x_ in verified or probe(x_)[0]:
+            x_star = x_
+            break
+        n_rej += 1
+    if x_star is None:                                                   # 起こらない (走査点は成立を確認済み)
         x_star = float(xs[i_best])
-        wall = BellC2Wall(L, te, tm, spec=spec, x_m=x_star)
-        fallback, at_scan = True, True
-    out.golden = {"bracket": (float(xs[lo_i]), float(xs[hi_i])), "x_scan_best": float(xs[i_best]),
-                  "J_scan_best": float(Js[i_best]), "n_eval": n_eval, "fallback": fallback, "at_scan_point": at_scan}
+    wall = BellC2Wall(L, te, tm, spec=spec, x_m=x_star)
+    at_scan = bool(np.any(xs[a:b + 1] == x_star))
+    at_end = any(s is not None and s["x_ok"] == x_star and x_star != s["x_scan_ok"] for s in bis.values())
+    out.golden = {"bracket": (lo_b, hi_b), "x_scan_best": float(xs[i_best]),
+                  "J_scan_best": float(Js[i_best]), "n_eval": n_eval, "fallback": n_rej > 0, "n_rejected": n_rej,
+                  "at_scan_point": at_scan, "at_refined_end": at_end}
     out.status, out.x_m, out.wall = "OK", float(x_star), wall
     return out
