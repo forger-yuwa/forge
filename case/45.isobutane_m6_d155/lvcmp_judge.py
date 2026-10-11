@@ -105,25 +105,38 @@ def qs(window, tag):
                         "--tail", "1.0", "--drift", "0.0005", "--min-snaps", "5"], capture_output=True, text=True)
     txt = (o.stdout + o.stderr).strip()
     ov = [l for l in txt.splitlines() if "OVERALL" in l]
-    return {"rc": o.returncode, "overall": ov[-1] if ov else None, "tail": txt.splitlines()[-6:]}
+    # 実行の失敗を正常な判定と区別する (result 段 codex M3): rc は 0/1、OVERALL の行があり、4 量それぞれに分類の行が 1 つずつある。
+    # ツールは入力の誤り (列の欠け・空の CSV) でも OVERALL を出して rc 1 で終わるので、OVERALL だけでは区別できない
+    cls = {}
+    for k in KEYS:
+        m = [l.split()[-1] for l in txt.splitlines() if re.match(rf"^\s*{k}\s*:", l)]
+        cls[k] = m[0] if len(m) == 1 and m[0] in QS_CLASSES else None
+    ok = o.returncode in (0, 1) and bool(ov) and None not in cls.values()
+    return {"rc": o.returncode, "overall": ov[-1] if ov else None, "classes": cls, "ok": ok, "tail": txt.splitlines()[-6:]}
 
 
+QS_CLASSES = ("STEADY", "DRIFTING", "OSCILLATING", "TRANSIENT-UNSETTLED")
 REQ_RES = ("rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega")
 
 
 def segverdict(run):
-    """区間付きの収束 VERDICT。判定不能・必須の列の欠け・VERDICT なしは (None, 理由) を返す (codex plan-2 M2)"""
+    """区間付きの収束 VERDICT。判定不能・必須の列の欠け・VERDICT なしは (None, 理由, 照合の記録) を返す (codex plan-2 M2)。
+    保存のテキストがその run の残差の履歴から作られたことを lvc_segcheck.recheck で照合する (result 段 codex M3)"""
+    import lvc_segcheck
     p = HERE / run / "CONVERGENCE_SEGMENT.txt"
     t = p.read_text(errors="replace") if p.is_file() else ""
     m = re.search(r"->\s*([A-Z][A-Z ]+[A-Z])", t)
     if not (m and "判定区間" in t):
-        return None, "区間付きの VERDICT が無い"
+        return None, "区間付きの VERDICT が無い", None
     if "判定不能" in t:
-        return None, "判定不能を含む"
+        return None, "判定不能を含む", None
     miss = [c for c in REQ_RES if not re.search(rf"^\s*{c}\s*:", t, re.M)]
     if miss:
-        return None, f"必須の残差の列が無い {miss}"
-    return m.group(1), None
+        return None, f"必須の残差の列が無い {miss}", None
+    ok, rec = lvc_segcheck.recheck(HERE / run)
+    if not ok:
+        return None, f"保存の VERDICT を残差の履歴と照合できない: {rec.get('why')}", rec
+    return m.group(1), None, rec
 
 
 def input_gates():
@@ -206,6 +219,11 @@ def assess(name):
         return "DIVERGED", info
     if not steps or len(set(steps)) != len(steps) or steps != list(range(OUT, steps[-1] + 1, OUT)):
         return "INVALID", {**info, "why": f"系列が {OUT} step ごとに欠け・重複なくそろっていない (行 {len(steps)}、最後 {steps[-1] if steps else None})"}
+    # 全行の量の存在と有限性 (到達の行だけでなく途中の行も。result 段 codex M3)。派生の列は要求しない
+    import math
+    badq = [x["step"] for x in rows if not all(x.get(k) is not None and math.isfinite(float(x[k])) for k in ("deficit",) + KEYS)]
+    if badq:
+        return "INVALID", {**info, "why": f"見張りの行の量が欠けているか非有限 ({len(badq)} 行、最初 step {badq[0]})"}
     # 記録係: 系列の全出力について sha256・全保存量の有限・ρ/P/T > 0 (見張りが消した出力の代わりの証拠、codex plan-2 m5)
     rp = HERE / run / "lvcmp_outputs.json"
     recs = json.loads(rp.read_text()).get("rows", {}) if rp.is_file() else {}
@@ -213,8 +231,9 @@ def assess(name):
     bad = [n for n in steps if n <= last_ok and not (str(n) in recs and recs[str(n)].get("nonfinite_all") == 0 and recs[str(n)].get("positive"))]
     if bad:
         return "INVALID", {**info, "why": f"記録係の記録が無いか、非有限・非正の出力がある ({len(bad)} 件、最初 {bad[0]})"}
-    seg, why = segverdict(run)
+    seg, why, segrec = segverdict(run)
     info["segment_verdict"] = seg
+    info["segment_recheck"] = segrec
     rl = reach_level(rows)
     if st == "REACHED":
         n = w.get("reach_step")
@@ -238,7 +257,12 @@ def assess(name):
             return "INVALID", {**info, "why": f"到達の出力から計算し直した量が系列の行と違う {diff}"}
         if seg is None or seg.startswith("DIVERGED"):
             return "INVALID", {**info, "why": f"区間付きの収束: {why or seg}"}
-        info.update(reach_step=int(n), drift=rl["drift"], deficit=rl["deficit"], quasisteady=qs(rl["window"], name))
+        if segrec["stored"]["last_step"] < int(n):
+            return "INVALID", {**info, "why": f"区間付きの収束の last step {segrec['stored']['last_step']} が到達の step {n} より前"}
+        q = qs(rl["window"], name)
+        if not q["ok"]:
+            return "INVALID", {**info, "quasisteady": q, "why": "準定常の判定を実行できなかった (rc・OVERALL・4 量の分類の行のどれかが無い)"}
+        info.update(reach_step=int(n), drift=rl["drift"], deficit=rl["deficit"], quasisteady=q)
         return "REACHED", info
     if st == "DIVERGED":
         nf_rows = [x["step"] for x in rows if x.get("nonfinite") or x.get("nonfinite_all")]

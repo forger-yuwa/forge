@@ -6,7 +6,8 @@ L0 (run_0554)・L5 (run_0555)・L7 (run_0553) の記録と比べる。
   量: 到達の θ_r(40/70/94)・Q_w の L0 からの相対差 [%]。床 = 到達の窓 [N − 20000, N] の rms_ro の中央値 (residual_history.csv の outer_begin の行、L7r・L0・L5・L7 で同じ規則)。
   判定: 再現 = 4 量すべて + の向きで ≥ 0.3 % かつ 床の比 (L7r/L0) ≥ 2.0、かつ旧 L7 も同じ規則でパターンあり。再現せず = 4 量すべて |ずれ| ≤ 0.1 % かつ 床の比 < 1.5。
         言えるのは「同じ停止規則による到達の時点の差のパターンが再び出たか」まで (止まる状態の再現・統計的な同等性ではない。codex plan-3 M4)。
-        L7r が DIVERGED・CENSORED は別の判定 (CENSORED は値を比べず、床は最後の 2 万 step の窓)。それ以外は判別不能 (値と床を別々に記録)。閾値は事後に変えない。
+        L7r が DIVERGED・CENSORED は別の判定 (CENSORED は値を比べず、床は最後の 2 万 step の窓 [BUDGET − 1 − 20000, BUDGET − 1]。
+        残差の step は 0〜BUDGET − 1 なので窓は最後の残差の step で終える。result 段 codex m4 の訂正、2026-10-11)。それ以外は判別不能 (値と床を別々に記録)。閾値は事後に変えない。
   I の追加: L7r の設定が run_0553 と全項目同じ。
 出力は _band_ab/cold_pair/lvcmp_rerun_judge.json。ゲートの不合格か INVALID があれば判定せず、終了コード 1。
 """
@@ -135,7 +136,7 @@ def main():
             elif st == "DIVERGED":
                 v = "L7r が DIVERGED (全部入りは上限 50 で破綻しうる。値のパターンの再現は判別不能)"
             elif st == "CENSORED":
-                floors["L7r"] = floor_median(J.ARMS["L7r"][0], J.BUDGET)
+                floors["L7r"] = floor_median(J.ARMS["L7r"][0], J.BUDGET - 1)   # 残差の最後の step は BUDGET − 1 (codex m4)
                 rec["floor_ratio_vs_L0"] = floors["L7r"]["rms_ro"] / floors["L0"]["rms_ro"]
                 v = "L7r が CENSORED (15 万 step で水準に入らない。値は比べない、床は最後の 2 万 step の窓で記録)"
             else:

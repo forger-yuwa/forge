@@ -219,6 +219,15 @@ def assess(run, fh):
             ev.append("区間付きの収束 VERDICT が無い")
         else:
             info["segment_verdict"] = mm.group(1)
+            # 保存のテキストがこの run の残差の履歴から作られたことの照合 (result 段 codex M3 の横展開、2026-10-11)
+            sys.path.insert(0, str(HERE))
+            import lvc_segcheck
+            okr, segrec = lvc_segcheck.recheck(d)
+            info["segment_recheck"] = segrec
+            if not okr:
+                ev.append(f"区間付きの収束 VERDICT を残差の履歴と照合できない: {segrec.get('why')}")
+            elif segrec["stored"]["last_step"] != NSTEP - 1:
+                ev.append(f"区間付きの収束の last step {segrec['stored']['last_step']} が {NSTEP - 1} でない")
         info["evidence_problems"] = ev
         return ("INVALID", {**info, "why": "証拠の欠け"}) if ev else ("FINITE", info)
     except Exception as e:                        # 想定外の入力も理由付きの INVALID にする

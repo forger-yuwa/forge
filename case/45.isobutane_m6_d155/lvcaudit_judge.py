@@ -142,6 +142,15 @@ def main():
             raise ValueError(f"必須の配列が無い {miss}")
         nl = arr(d, meta, "node_line"); nn = nl.shape[0]
         ch.ok("S", "節点が 0 でない", nn > 0, nn)
+        # sweep の配列と scalar_visc_line の形・有限性 (result 段 codex M1、諮問 2026-10-11 で scalar_visc_line を追加)。
+        # 以前は存在だけを見ていたので、非有限の配列が検査済みとして通った
+        for name, nc in {**{f"{p_}_s{k}": 5 for p_ in ("rhs", "dqnew", "dqold") for k in range(5)}, "scalar_visc_line": 1}.items():
+            if name not in meta:
+                ch.ok("S", f"{name} がある", False, None)
+                continue
+            x = arr(d, meta, name)
+            ch.ok("S", f"{name} の形 ({nn}, {nc}) と有限", x.shape == (nn, nc) and bool(np.all(np.isfinite(x))),
+                  [list(x.shape), int(np.sum(~np.isfinite(x)))])
         nodes = [int(x) for x in nl[:, 0]]
         pos = {n: k for k, n in enumerate(nodes)}
         ch.ok("S", "節点の重複なし", len(pos) == nn, nn - len(pos))
@@ -363,6 +372,9 @@ def main():
                 x, y, z = arr(d, meta, name), arr(Path(ctrl), mc, name), arr(Path(ctrl2), m2, name)
                 if not (x.shape == y.shape == z.shape):
                     ch.ok("T", f"{name} の形が同じ", False, [x.shape, y.shape, z.shape]); continue
+                # 同じビット列の NaN を一致として通さない (result 段 codex M1)。空か非有限は比較の前に INVALID
+                if x.size == 0 or not all(bool(np.all(np.isfinite(v))) for v in (x, y, z)):
+                    raise ValueError(f"対照の比較の {name} が空か非有限 (監査用・対照・対照の再実行)")
                 rep_bit = bool(np.array_equal(y.view(np.int64), z.view(np.int64)))
                 d_ay = float(np.max(np.abs(x - y))) if x.size else 0.0
                 d_yz = float(np.max(np.abs(y - z))) if y.size else 0.0
