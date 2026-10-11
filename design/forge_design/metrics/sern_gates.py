@@ -296,14 +296,20 @@ def floor_events_summary(fev: dict | None) -> dict | None:
 # 保存データから再計算できる形で持つ (collect と --rejudge が同じ関数を通る)。#1 (床事象) は floor_event_gate。
 #   #3 窓: collect の力の履歴の末尾 W step の平均 m・a = max|q − m|・前窓 (その前の W step) の平均との差 d
 #          (case/46.sern_design/v3_farfield_eval.py と同じ切り方)。max(a, d) ≤ 許容 (C_T・C_T_with_shear・C_L 5e-5、C_M 5e-4)、
-#          かつ 4 量が check_quasisteady --tail 0.5 (drift 0.05・osc 0.10・min 4 の既定) で STEADY。両窓とも標本 20 以上
+#          かつ必須量 (SST 4 量・Euler 3 量) が check_quasisteady --tail 0.5 (drift 0.05・osc 0.10・min 4 の既定) で STEADY。
+#          力の履歴の step は予定 step 列 (両窓とも 20 標本以上) と一致すること
 #   #2 温度: 監視 CSV (diag/te_monitor.py が全場のスナップショットごとに 1 行) の R_TE・R_SE・RET・ALL で、末尾 W step に
 #          T < 150 K の節点が無い・各領域の最低温度が --tail 0.5 で STEADY。T < 200 K の数と体積は記録だけ
 # 判定: PASS / UNSETTLED (窓・定常性が未達 = 同一設定の延長の対象) / FAIL (低温・非有限の温度) / INDETERMINATE (標本の欠け・
 # 空の領域・履歴が 2 窓に足りない・非有限の力 = 判定不能、延長の対象外)。**許容と窓は事前登録の値で固定** (結果を見て緩めない)
+# **必須量と標本の格子は問題設定から決める** (codex diagnose 2026-10-12 M1、plan §5.1 R2a): 必須量は乱流モデル (evaluate.model) で
+# 決め (SST は 4 量、Euler は 3 量。列の有無で減らさない)、標本は判定区間の段の予定 step 列 (N・W・outStepInterval) と照合する
+# (欠測・重複・予定外・終了 step の不一致は判定不能。標本数だけ見ると、各窓の後半だけに 20 標本を置いた入力が通っていた)
 JUDGMENT_FORCE_TOL = {"C_T": 5.0e-5, "C_T_with_shear": 5.0e-5, "C_L": 5.0e-5, "C_M": 5.0e-4}
 JUDGMENT_MIN_SAMPLES = 20
 JUDGMENT_STEADY = {"tail": 0.5, "drift": 0.05, "osc": 0.10, "min_snaps": 4}    # check_quasisteady.py --tail 0.5 (他は既定)
+# 乱流モデル → §6 #3 の必須量。runner の _solver_config と同じ既定 (evaluate.model が無ければ euler)
+JUDGMENT_QUANTITIES = {"sst": ("C_T", "C_T_with_shear", "C_L", "C_M"), "euler": ("C_T", "C_L", "C_M")}
 TE_REGIONS = ("R_TE", "R_SE", "RET", "ALL")
 T_COLD = 150.0
 
@@ -314,10 +320,86 @@ def _steady_verdict(steps, vals) -> tuple:
     return v, detail
 
 
-def judgment_window_gate(hist, window_steps: int) -> dict:
-    """§6 #3 (窓と 4 力量の STEADY)。hist は collect の力の履歴 (step 昇順)。"""
+def judgment_required_quantities(model) -> tuple:
+    """問題設定の乱流モデル (evaluate.model。None は runner と同じ既定 euler) から §6 #3 の必須量。未知のモデルは ValueError
+    (必須量を決められないまま判定しない)。"""
+    m = "euler" if model is None else str(model).strip().lower()
+    if m not in JUDGMENT_QUANTITIES:
+        raise ValueError(f"evaluate.model {model!r} から §6 #3 の必須量を決められない ({sorted(JUDGMENT_QUANTITIES)} のどれか)")
+    return JUDGMENT_QUANTITIES[m]
+
+
+def judgment_planned_steps(n_steps, window_steps, out_interval) -> list:
+    """判定区間の段の予定の標本 step 列 = outStepInterval の倍数 (0 < s ≤ N)。forge は段ごとに step 0 から数え、壁面の出力
+    (力の履歴の元) は outStepInterval の倍数の step だけ (step 0 は書かない、output.cpp の outputBconds_H5_XDMF)。
+    N ≥ 2W・outStepInterval が W と N を割り切り・窓あたり JUDGMENT_MIN_SAMPLES 以上でなければ ValueError
+    (runner_sern.judgment_config が config に課す条件と同じ。窓を短くして通さない)。"""
+    vals = (n_steps, window_steps, out_interval)
+    if not all(isinstance(v, (int, np.integer)) and not isinstance(v, bool) and v > 0 for v in vals):
+        raise ValueError(f"判定区間の予定: N・W・outStepInterval は正の整数 ({vals!r})")
+    N, W, oi = (int(v) for v in vals)
+    if N < 2 * W or W % oi or N % oi or W // oi < JUDGMENT_MIN_SAMPLES:
+        raise ValueError(f"判定区間の予定: N {N}・W {W}・outStepInterval {oi} は N ≥ 2W・outStepInterval が W と N を割り切り・"
+                         f"窓あたり {JUDGMENT_MIN_SAMPLES} 標本以上を満たさない")
+    return list(range(oi, N + 1, oi))
+
+
+def _planned_of(planned_steps) -> list | None:
+    """予定 step 列を整数のリストにする (空・整数でない・昇順でない・重複は None = 予定として使えない)。"""
+    try:
+        p = [int(s) for s in planned_steps]
+    except (TypeError, ValueError):
+        return None
+    if not p or any(float(s) != float(q) for s, q in zip(planned_steps, p)) or any(b <= a for a, b in zip(p, p[1:])):
+        return None
+    return p
+
+
+def _step_mismatch(steps, planned, what: str) -> list:
+    """観測 step 列と予定 step 列の照合: 欠測・重複・予定外・終了 step の不一致・昇順でないことを理由の文字列で返す (一致なら空)。"""
+    from collections import Counter
+    out = []
+    obs = [float(s) for s in steps]
+    cnt = Counter(obs)
+    dup = sorted(s for s, c in cnt.items() if c > 1)
+    plan = set(float(s) for s in planned)
+    missing = sorted(s for s in plan if s not in cnt)
+    extra = sorted(s for s in cnt if s not in plan)
+
+    def _fmt(xs):
+        return ", ".join(f"{x:g}" for x in xs[:5]) + (" …" if len(xs) > 5 else "")
+    if obs and max(obs) != float(planned[-1]):
+        out.append(f"判定不能: {what}の最終 step {max(obs):g} が予定の終了 step {planned[-1]} と違う")
+    if dup:
+        out.append(f"判定不能: {what}の step が重複している ({_fmt(dup)})")
+    if missing:
+        out.append(f"判定不能: {what}に予定の標本が欠けている ({len(missing)} 個: {_fmt(missing)})")
+    if extra:
+        out.append(f"判定不能: {what}に予定外の step がある ({len(extra)} 個: {_fmt(extra)})")
+    if any(b < a for a, b in zip(obs, obs[1:])):
+        out.append(f"判定不能: {what}の step が昇順でない")
+    return out
+
+
+def judgment_window_gate(hist, window_steps: int, required, planned_steps) -> dict:
+    """§6 #3 (窓と必須量の STEADY)。hist は collect の力の履歴 (step 昇順)。required = 必須量 (judgment_required_quantities)、
+    planned_steps = 判定区間の段の予定 step 列 (judgment_planned_steps)。必須量の列の欠落・予定 step 列との不一致は判定不能。"""
     W = int(window_steps)
-    out = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_tail": 0, "n_prev": 0, "quantities": {}, "reasons": []}
+    req = tuple(required or ())
+    planned = _planned_of(planned_steps or ())
+    out = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_tail": 0, "n_prev": 0, "quantities": {}, "reasons": [],
+           "required": list(req), "planned": {"end": planned[-1] if planned else None, "n": len(planned) if planned else 0}}
+    if not req or any(q not in JUDGMENT_FORCE_TOL for q in req) or not {"C_T", "C_L", "C_M"} <= set(req):
+        out["reasons"] = [f"判定不能: 必須量 {list(req)} が §6 #3 の量 ({list(JUDGMENT_FORCE_TOL)}) の C_T・C_L・C_M を含む部分集合でない"]
+        return out
+    if planned is None:
+        out["reasons"] = ["判定不能: 予定 step 列が無い・整数の昇順でない"]
+        return out
+    N = planned[-1]
+    out["window"] = [N - W, N]
+    if N < 2 * W:
+        out["reasons"] = [f"判定不能: 予定の終了 step {N} が 2 窓 ({2 * W} step) に足りない (前窓との差 d が取れない)"]
+        return out
     if not hist:
         out["reasons"] = ["判定不能: 力の履歴が無い"]
         return out
@@ -325,10 +407,9 @@ def judgment_window_gate(hist, window_steps: int) -> dict:
     if not np.all(np.isfinite(steps)):
         out["reasons"] = ["判定不能: 力の履歴の step が読めない"]
         return out
-    N = int(steps.max())
-    out["window"] = [N - W, N]
-    if N < 2 * W:
-        out["reasons"] = [f"判定不能: 履歴の最終 step {N} が 2 窓 ({2 * W} step) に足りない (前窓との差 d が取れない)"]
+    mism = _step_mismatch(steps, planned, "力の履歴")
+    if mism:
+        out["reasons"] = mism
         return out
     tail = steps > N - W
     prev = (steps > N - 2 * W) & ~tail
@@ -336,8 +417,12 @@ def judgment_window_gate(hist, window_steps: int) -> dict:
     if out["n_tail"] < JUDGMENT_MIN_SAMPLES or out["n_prev"] < JUDGMENT_MIN_SAMPLES:
         out["reasons"] = [f"判定不能: 窓の標本が足りない (末尾 {out['n_tail']}・前窓 {out['n_prev']} < {JUDGMENT_MIN_SAMPLES})"]
         return out
-    # RANS (壁摩擦の出力あり) は 4 量、Euler は C_T_with_shear が無いので 3 量 (objective_key と同じ規則)
-    qs = [q for q in JUDGMENT_FORCE_TOL if q != "C_T_with_shear" or "C_T_with_shear" in hist[-1]]
+    # 必須量は問題設定から (列の有無で減らさない)。列が無い量は判定不能
+    lack = [q for q in req if any(q not in h for h in hist)]
+    if lack:
+        out["reasons"] = [f"判定不能: 必須量 {q} の列が力の履歴に無い ({sum(q not in h for h in hist)}/{len(hist)} 標本)" for q in lack]
+        return out
+    qs = list(req)
     bad, unsettled = [], []
     for q in qs:
         v = np.array([float(h[q]) if h.get(q) is not None else np.nan for h in hist])
@@ -382,8 +467,8 @@ def read_monitor_csv(path) -> list | None:
 
 
 def judgment_temperature_gate(rows, window_steps: int, last_step: int | None, expect_steps=None) -> dict:
-    """§6 #2 (端の近くの低温)。rows = read_monitor_csv の戻り。last_step = 力の履歴の最終 step (監視も同じ場で終わること)、
-    expect_steps = 監視が要る step (力の履歴の step。末尾窓で欠けたら判定不能)。"""
+    """§6 #2 (端の近くの低温)。rows = read_monitor_csv の戻り。last_step = 判定区間の段の予定の終了 step (監視も同じ場で終わること)、
+    expect_steps = 判定区間の段の予定 step 列 (末尾窓で欠測・重複・予定外があれば判定不能)。"""
     W = int(window_steps)
     out = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_window": 0, "regions": {}, "reasons": []}
     if rows is None:
@@ -396,15 +481,14 @@ def judgment_temperature_gate(rows, window_steps: int, last_step: int | None, ex
     N = int(steps.max())
     out["window"] = [N - W, N]
     if last_step is not None and N != int(last_step):
-        out["reasons"] = [f"判定不能: 監視の最終 step {N} が力の履歴の最終 step {last_step} と違う (最後の場を監視していない)"]
+        out["reasons"] = [f"判定不能: 監視の最終 step {N} が予定の終了 step {last_step} と違う (最後の場を監視していない)"]
         return out
     win = steps > N - W
     out["n_window"] = int(win.sum())
-    have = {int(s) for s in steps[win]}
-    missing = sorted(int(s) for s in (expect_steps or ()) if N - W < int(s) <= N and int(s) not in have)
     reasons = []
-    if missing:
-        reasons.append(f"判定不能: 末尾窓のスナップショットの監視が欠けている (step {missing[:5]}{' …' if len(missing) > 5 else ''})")
+    if expect_steps is not None:          # 末尾窓の予定 step 列と照合 (欠測・重複・予定外)
+        plan_w = sorted({int(s) for s in expect_steps if N - W < int(s) <= N})
+        reasons += _step_mismatch(steps[win], plan_w, "末尾窓の監視") if plan_w else ["判定不能: 末尾窓に予定の標本が無い"]
     if out["n_window"] < JUDGMENT_MIN_SAMPLES:
         reasons.append(f"判定不能: 末尾窓の監視の標本 {out['n_window']} < {JUDGMENT_MIN_SAMPLES}")
     nonfin = float(np.sum([r.get("nonfinite_T", np.nan) for r, w in zip(rows, win) if w]))
@@ -448,17 +532,18 @@ def judgment_temperature_gate(rows, window_steps: int, last_step: int | None, ex
     return out
 
 
-def judgment_gate(hist, window_steps: int, monitor_rows=None, monitor_unavailable: str | None = None) -> dict:
+def judgment_gate(hist, window_steps: int, required, planned_steps, monitor_rows=None, monitor_unavailable: str | None = None) -> dict:
     """§6 #2・#3 をまとめる。fail_class: COLD_SPOT (低温・非有限の温度。延長の対象外) / JUDGMENT_UNVERIFIABLE (判定不能。対象外) /
-    JUDGMENT_UNSETTLED (窓・定常性の未達。同一設定の延長の対象)。monitor_unavailable を渡すと #2 は判定不能 (監視が使えない理由)。"""
-    win = judgment_window_gate(hist, window_steps)
-    last = win["window"][1] if win.get("window") else None          # 力の履歴の最終 step (読めなければ None。力の窓が判定不能になる)
+    JUDGMENT_UNSETTLED (窓・定常性の未達。同一設定の延長の対象)。monitor_unavailable を渡すと #2 は判定不能 (監視が使えない理由)。
+    required・planned_steps は問題設定から作った必須量と予定 step 列 (judgment_plan)。力の窓・温度の監視とも予定 step 列と照合する。"""
+    win = judgment_window_gate(hist, window_steps, required, planned_steps)
+    planned = _planned_of(planned_steps or ())
+    last = planned[-1] if planned else None          # 予定の終了 step (予定が使えなければ None。力の窓が判定不能になる)
     if monitor_unavailable:
         temp = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_window": 0, "regions": {},
                 "reasons": [f"判定不能: 温度の監視が使えない ({monitor_unavailable})"]}
     else:
-        temp = judgment_temperature_gate(monitor_rows, window_steps, last,
-                                         expect_steps=[h["step"] for h in (hist or []) if h.get("step") is not None])
+        temp = judgment_temperature_gate(monitor_rows, window_steps, last, expect_steps=planned or [])
     vs = (win["verdict"], temp["verdict"])
     if temp["verdict"] == "FAIL":
         fc, ext = "COLD_SPOT", False
@@ -472,6 +557,21 @@ def judgment_gate(hist, window_steps: int, monitor_rows=None, monitor_unavailabl
     reasons = [] if fc is None else [r for g in (win, temp) for r in g["reasons"]]
     return {"ok": fc is None, "verdict": verdict, "fail_class": fc, "extendable": ext, "window_steps": int(window_steps),
             "force_window": win, "temperature": temp, "reasons": reasons}
+
+
+def judgment_summary(jg: dict | None) -> dict | None:
+    """台帳の作動点要約に載せる判定区間の §6 #2・#3 の要約 (plan §5.1 R2b: driver_sern の学習の採否が判定・窓の長さ・
+    必須量の充足・温度の領域を照合する)。judgment_gate を通っていない評価は None。"""
+    if not jg:
+        return None
+    fw, tp = jg.get("force_window") or {}, jg.get("temperature") or {}
+    return {"verdict": jg.get("verdict"), "fail_class": jg.get("fail_class"), "window_steps": jg.get("window_steps"),
+            "force_window": {"verdict": fw.get("verdict"), "window": fw.get("window"), "n_tail": fw.get("n_tail"), "n_prev": fw.get("n_prev"),
+                             "required": fw.get("required"), "planned": fw.get("planned"),
+                             "ok": {q: bool(v.get("ok")) for q, v in (fw.get("quantities") or {}).items()}},
+            "temperature": {"verdict": tp.get("verdict"), "window": tp.get("window"), "n_window": tp.get("n_window"),
+                            "regions": sorted(tp.get("regions") or {})},
+            "reasons": (jg.get("reasons") or [])[:3]}
 
 
 def judgment_extendable(gates: dict) -> tuple:

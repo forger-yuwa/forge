@@ -452,12 +452,13 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
-    # 判定区間の段を使う問題 YAML (evaluate.judgment_steps) は §6 #2 (TE_MONITOR.csv)・#3 (力の窓) もゲートに入れる
-    jo = R2.judgment_options(p.evaluate)
+    # 判定区間の段を使う問題 YAML (evaluate.judgment_steps) は §6 #2 (TE_MONITOR.csv)・#3 (力の窓) もゲートに入れる。
+    # 必須量 (乱流モデル) と予定 step 列 (N・W・outStepInterval) は問題設定から (§5.1 R2a)
+    jp = R2.judgment_plan(p.evaluate)
     jg = None
-    if jo is not None:
-        jg = judgment_gate(hist, jo["window_steps"], monitor_rows=read_monitor_csv(run_dir / R2.MONITOR_CSV),
-                           monitor_unavailable=te_monitor_unavailable(run_dir))
+    if jp is not None:
+        jg = judgment_gate(hist, jp["window_steps"], jp["required"], jp["planned_steps"],
+                           monitor_rows=read_monitor_csv(run_dir / R2.MONITOR_CSV), monitor_unavailable=te_monitor_unavailable(run_dir))
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
                            p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg)
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,

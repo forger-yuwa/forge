@@ -93,6 +93,11 @@ check("(1) nStepOuter の置換に失敗したら止まる", raises(lambda: R2.j
 
 
 # ======================================================================== (2) 保存された検証 run の再判定
+# 必須量と予定 step 列は問題設定から (§5.1 R2a): 検証 run は SST・N 20000・窓 10000・出力 500 step (生産 YAML と同じ)
+SST4 = G.judgment_required_quantities("sst")
+PLAN = G.judgment_planned_steps(20000, 10000, 500)
+
+
 def load_hist(path):
     rows = list(csv.DictReader(open(path)))
     return [{k: (int(v) if k == "step" else float(v)) for k, v in r.items() if v not in ("", None)} for r in rows]
@@ -123,7 +128,7 @@ verdicts = {}
 for d in saved:
     name = d.name if d.name.startswith("run_") else "run_1084_tewake_g3_L10_m10"
     hist = load_hist(d / "force_history.csv")
-    jg = G.judgment_gate(hist, 10000, monitor_rows=G.read_monitor_csv(d / "TE_MONITOR.csv"))
+    jg = G.judgment_gate(hist, 10000, SST4, PLAN, monitor_rows=G.read_monitor_csv(d / "TE_MONITOR.csv"))
     verdicts[name[:8]] = jg
     v3, qf, qt = parse_v3(d / "V3_EVAL.txt"), parse_qs(d / "QUASISTEADY_forces.txt"), parse_qs(d / "QUASISTEADY_Tmin.txt")
     q = jg["force_window"]["quantities"]
@@ -178,7 +183,7 @@ def synth_mon(N=20000, dt=500, cold_at=None, region_empty=None, start=500, drop=
     return rows
 
 
-ok_g = G.judgment_gate(synth_hist(), 10000, monitor_rows=synth_mon())
+ok_g = G.judgment_gate(synth_hist(), 10000, SST4, PLAN, monitor_rows=synth_mon())
 check("(3) 合成: 定常な力・温度 → PASS", ok_g["ok"] and ok_g["verdict"] == "PASS" and ok_g["force_window"]["n_tail"] == 20
       and ok_g["force_window"]["n_prev"] == 20 and ok_g["temperature"]["n_window"] == 20, ok_g["reasons"])
 for label, kw, want in (
@@ -194,10 +199,10 @@ for label, kw, want in (
         ("末尾窓で ALL に T < 150 K が 1 節点", {"hist": synth_hist(), "mon": synth_mon(cold_at=12000)}, "COLD_SPOT"),
         ("低温は前窓だけ (判定の窓の外) なら合格", {"hist": synth_hist(), "mon": synth_mon(cold_at=8000)}, None),
         ("C_T のずれ (d 1e-4 > 5e-5)", {"hist": synth_hist(drift=1e-8), "mon": synth_mon()}, "JUDGMENT_UNSETTLED")):
-    g = G.judgment_gate(kw["hist"], 10000, monitor_rows=kw["mon"], monitor_unavailable=kw.get("why"))
+    g = G.judgment_gate(kw["hist"], 10000, SST4, PLAN, monitor_rows=kw["mon"], monitor_unavailable=kw.get("why"))
     check(f"(3) {label} → {g['fail_class']} (期待 {want})", g["fail_class"] == want and g["ok"] == (want is None), g["reasons"][:2])
 nf = synth_mon(); nf[-1]["nonfinite_T"] = 3.0
-check("(3) 末尾窓の非有限の温度は低温と同じく FAIL (延長しない)", G.judgment_gate(synth_hist(), 10000, monitor_rows=nf)["fail_class"] == "COLD_SPOT")
+check("(3) 末尾窓の非有限の温度は低温と同じく FAIL (延長しない)", G.judgment_gate(synth_hist(), 10000, SST4, PLAN, monitor_rows=nf)["fail_class"] == "COLD_SPOT")
 
 # ======================================================================== (4) 延長の可否
 def gates_(fail=None, **over):
@@ -236,7 +241,7 @@ with open(rd0 / "residual_history.csv", "w", newline="") as fh:
 h0 = synth_hist()
 g_none = G.evaluate_gates(rd0, h0, 0)
 g_pass = G.evaluate_gates(rd0, h0, 0, judgment=ok_g)
-g_uns = G.evaluate_gates(rd0, h0, 0, judgment=G.judgment_gate(synth_hist(drift=1e-8), 10000, monitor_rows=synth_mon()))
+g_uns = G.evaluate_gates(rd0, h0, 0, judgment=G.judgment_gate(synth_hist(drift=1e-8), 10000, SST4, PLAN, monitor_rows=synth_mon()))
 check("(4) evaluate_gates: judgment を渡さなければキーも出さず従来どおり、PASS の判定は合格のまま",
       "judgment" not in g_none and g_none["verdict"] == "PASS" and g_pass["verdict"] == "PASS" and g_pass["judgment"]["ok"])
 check("(4) evaluate_gates: 判定区間の未達は FAIL/JUDGMENT_UNSETTLED で延長の対象",

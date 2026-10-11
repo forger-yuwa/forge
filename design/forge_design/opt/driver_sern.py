@@ -49,6 +49,8 @@ from ..evaluate.runner_sern import FLAG_POLICY  # noqa: E402
 from ..evaluate.runner_sern import ZTE_EFFECTIVE, zte_signature_of, zte_spec_from_evaluate  # noqa: E402
 from ..metrics.sern_gates import floor_events_summary  # noqa: E402  毎更新の床事象の要約 (te-wake-grid §5.1 #2)
 from ..metrics.sern_gates import floor_events_options  # noqa: E402  キャンペーンの床判定の要件 (te-wake-grid §5.1 R1)
+from ..metrics.sern_gates import JUDGMENT_MIN_SAMPLES, TE_REGIONS, judgment_summary  # noqa: E402  判定区間の §6 #2・#3 (te-wake-grid §5.1 R2b)
+from ..evaluate.runner_sern import judgment_plan  # noqa: E402  キャンペーンの判定区間の要件 (import 時に束縛する)
 # 評価方式の識別 (plan tooling-sern-te-wake-grid §4、codex plan レビュー 2026-10-08 M3。import 時に束縛する)
 from ..evaluate.runner_sern import EVAL_METHOD_ID, TE_WAKE_EFFECTIVE, eval_method_required, te_wake_effective_of, te_wake_spec  # noqa: E402
 
@@ -200,12 +202,68 @@ def _floor_row_ok(r: dict, req: dict | None = None) -> bool:
     return bool(ops) and all(_floor_op_ok(o, req) for o in ops.values())
 
 
-def _learnable(r: dict, zte_required: str = "off", zte_carry_over=(), method=None, floor=None) -> bool:
+# --- 判定区間の §6 #2・#3 の要件 (plan tooling-sern-te-wake-grid §5.1 R2b、codex diagnose 2026-10-12 M2) ---
+# 基準 YAML に `evaluate.judgment_steps` があるキャンペーンは、各作動点に**保存された**判定区間の判定 (作動点要約の judgment と
+# judgment_summary = sern_gates.judgment_summary) が PASS で、判定窓 ≥ W (力の窓・温度の窓とも区間長 ≥ W、標本 20 以上)、
+# キャンペーンの必須量 (evaluate.model から: SST 4 量・Euler 3 量) が全部判定されて合格、温度の 4 領域がそろう行だけを学習・Pareto に使う。
+# #1 (床事象) も要件に含める (judgment_steps は evaluate.floor_events: 1 と窓を要求するので、上の床の要件と同じものを持つ)。
+# 判定の無い行 (判定区間の段の導入前・旧 GATES PASS) は欠測として外す。**旧評価の持ち越しの承認 (eval_method_carry_over) は
+# この要件を緩めない** (旧 ID の承認だけでは学習に戻らない。保存系列を現行の判定で再判定 [--rejudge] して要約を付け直す)。
+# judgment_steps が無いキャンペーンは要件なし = 従来どおり
+def judgment_requirement_of(evaluate) -> dict | None:
+    """基準 YAML の evaluate 節からキャンペーンの判定区間の要件を作る。judgment_steps が無ければ None (要件なし)。
+    戻り = {"window_steps": W, "quantities": 必須量, "regions": 温度の監視領域, "min_samples": 窓あたりの標本の下限,
+    "floor": #1 の床事象の要件 (floor_requirement_of)}。"""
+    jp = judgment_plan(evaluate)              # 値の検査もここで (runner の collect と同じ予定)
+    if jp is None:
+        return None
+    return {"window_steps": int(jp["window_steps"]), "quantities": list(jp["required"]), "regions": list(TE_REGIONS),
+            "min_samples": int(JUDGMENT_MIN_SAMPLES), "floor": floor_requirement_of(evaluate)}
+
+
+def _window_ok(win, need: int) -> bool:
+    return (isinstance(win, (list, tuple)) and len(win) == 2 and all(_is_int(v) for v in win) and (win[1] - win[0]) >= max(int(need), 1))
+
+
+def _judgment_op_ok(o: dict, req: dict) -> bool:
+    """作動点要約の判定区間の判定が要件を満たすか: #1 床事象 (_floor_op_ok)・judgment PASS・要約の verdict PASS・窓の長さ ≥ W・
+    力の窓 PASS (区間長 ≥ W、両窓の標本 ≥ 下限、必須量がすべて判定され合格)・温度の窓 PASS (区間長 ≥ W、標本 ≥ 下限、領域がそろう)。
+    欠けた要約は満たさない。"""
+    if not (isinstance(req.get("floor"), dict) and _floor_op_ok(o, req["floor"])):
+        return False
+    js = o.get("judgment_summary")
+    if o.get("judgment") != "PASS" or not isinstance(js, dict) or js.get("verdict") != "PASS":
+        return False
+    W, nmin = int(req["window_steps"]), int(req.get("min_samples") or 1)
+    if not (_is_int(js.get("window_steps")) and js["window_steps"] >= W):
+        return False
+    fw, tp = js.get("force_window"), js.get("temperature")
+    if not (isinstance(fw, dict) and isinstance(tp, dict)):
+        return False
+    oks = fw.get("ok") if isinstance(fw.get("ok"), dict) else {}
+    if not (fw.get("verdict") == "PASS" and _window_ok(fw.get("window"), W) and _is_int(fw.get("n_tail")) and _is_int(fw.get("n_prev"))
+            and fw["n_tail"] >= nmin and fw["n_prev"] >= nmin and all(oks.get(q) is True for q in req["quantities"])):
+        return False
+    regions = tp.get("regions") if isinstance(tp.get("regions"), list) else []
+    return (tp.get("verdict") == "PASS" and _window_ok(tp.get("window"), W) and _is_int(tp.get("n_window")) and tp["n_window"] >= nmin
+            and set(req["regions"]) <= set(regions))
+
+
+def _judgment_row_ok(r: dict, req: dict | None = None) -> bool:
+    """全作動点の判定区間の判定がキャンペーンの要件を満たす。要件なし (None) は従来どおり (見ない)。"""
+    if req is None:
+        return True
+    ops = r.get("ops") or {}
+    return bool(ops) and all(_judgment_op_ok(o, req) for o in ops.values())
+
+
+def _learnable(r: dict, zte_required: str = "off", zte_carry_over=(), method=None, floor=None, judgment=None) -> bool:
     """学習・Pareto に使ってよい行 = 処置以外の採否 (_learnable_base) かつ処置の一致 (_zte_row_ok) かつ評価方式の一致
-    (_method_row_ok) かつ床事象の判定の要件 (_floor_row_ok)。method = (格子変形の要求, 評価方式の id の要求, 承認済みの持ち越し)、
-    None は要求なし。floor = floor_requirement_of の戻り (None は要件なし)。"""
+    (_method_row_ok) かつ床事象の判定の要件 (_floor_row_ok) かつ判定区間の要件 (_judgment_row_ok)。method = (格子変形の要求,
+    評価方式の id の要求, 承認済みの持ち越し)、None は要求なし。floor = floor_requirement_of・judgment = judgment_requirement_of
+    の戻り (None は要件なし)。"""
     return (_learnable_base(r) and _zte_row_ok(r, zte_required, zte_carry_over) and _method_row_ok(r, *(method or ("off", None, ())))
-            and _floor_row_ok(r, floor))
+            and _floor_row_ok(r, floor) and _judgment_row_ok(r, judgment))
 
 
 def _zte_policy(obj):
@@ -223,6 +281,11 @@ def _method_policy(obj):
 def _floor_policy(obj):
     """キャンペーン (または試験の偽物) の床判定の要件。属性が無ければ要件なし (None)。"""
     return getattr(obj, "floor_required", None)
+
+
+def _judgment_policy(obj):
+    """キャンペーン (または試験の偽物) の判定区間の要件。属性が無ければ要件なし (None)。"""
+    return getattr(obj, "judgment_required", None)
 
 
 def parse_eval_method_carry_over(items, op_names, te_wake_required: str) -> tuple:
@@ -284,6 +347,8 @@ class SernCampaign:
             self.optcfg.get(EVAL_METHOD_CARRY_OVER_KEY), {o["name"] for o in self.ops}, self.te_wake_required)
         # 床事象の判定の要件 (基準 YAML の evaluate.floor_events / floor_events_window_steps、plan tooling-sern-te-wake-grid §5.1 R1)
         self.floor_required = floor_requirement_of(self.base_raw.get("evaluate") or {})
+        # 判定区間の §6 #2・#3 の要件 (基準 YAML の evaluate.judgment_steps、plan tooling-sern-te-wake-grid §5.1 R2b)
+        self.judgment_required = judgment_requirement_of(self.base_raw.get("evaluate") or {})
         _old = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") != FLAG_POLICY)
         if _old:
             print(f"[campaign] flag_policy が {FLAG_POLICY} でない PASS 行 {_old} 件を学習から除外 "
@@ -305,6 +370,13 @@ class SernCampaign:
         if _nofloor:
             print(f"[campaign] 床事象の判定が要件 {self.floor_required} を満たさない (欠測・短い区間・FAIL・判定不能) PASS 行 "
                   f"{_nofloor} 件を学習から除外 (台帳には残る。--rejudge で付け直せる)", flush=True)
+        _nojudg = sum(1 for r in self.rows if _learnable(r, self.zte_required, self.zte_carry_over, method=_method_policy(self),
+                                                         floor=self.floor_required)
+                      and not _judgment_row_ok(r, self.judgment_required))
+        if _nojudg:
+            print(f"[campaign] 判定区間の §6 #2・#3 が要件 {self.judgment_required} を満たさない (判定なし・未達・判定不能・短い窓・"
+                  f"必須量の欠け) PASS 行 {_nojudg} 件を学習から除外 (台帳には残る。持ち越しの承認では戻らない。--rejudge で付け直せる)",
+                  flush=True)
 
     def _write_problem(self, x, path: Path) -> Path:
         raw = json.loads(json.dumps(self.base_raw))
@@ -401,8 +473,10 @@ class SernCampaign:
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
                 # 毎更新の EOS 床事象 (必須か・判定・区間・件数)。必須で不合格なら gate_fail_class が FLOOR_EVENT / FLOOR_UNVERIFIABLE
                 "floor_events": floor_events_summary(g.get("floor_events")),
-                # 判定区間の段の §6 #2・#3 の判定 (問題 YAML が evaluate.judgment_steps を持つ評価だけ。plan tooling-sern-te-wake-grid §5.1 R2)
-                **({"judgment": (g.get("judgment") or {}).get("verdict")} if "judgment" in g else {}),
+                # 判定区間の段の §6 #2・#3 の判定 (問題 YAML が evaluate.judgment_steps を持つ評価だけ。plan tooling-sern-te-wake-grid §5.1 R2)。
+                # 学習の採否 (_judgment_op_ok) は要約 (窓の長さ・必須量の充足・温度の領域) まで照合する (§5.1 R2b)
+                **({"judgment": (g.get("judgment") or {}).get("verdict"), "judgment_summary": judgment_summary(g.get("judgment"))}
+                   if "judgment" in g else {}),
                 "steadiness": {k: v.get("verdict") for k, v in g.get("steadiness", {}).get("series", {}).items()},
                 # 評価方式の識別 (学習可否) と格子の来歴 (照合しない)。collect が出さない評価 (識別の導入前) はキーを作らない
                 **({TE_WAKE_EFFECTIVE: out[TE_WAKE_EFFECTIVE]} if TE_WAKE_EFFECTIVE in out else {}),
@@ -480,7 +554,8 @@ class SernCampaign:
         # convection-slau-wall-normal-chi-default §4.4、codex plan M3)。flag_policy の無い旧行と不一致の行は除外する。
         # さらに mesh.scalarGradient の node 既定 lsq 化 (2026-09-27) 以降は、**全作動点の実効値が lsq と確認できた行だけ**を使う
         # (日付の一致だけでは gg 評価・不明が混ざる。codex diagnose 2026-09-27、plan gradient-scalar-lsq-unification #6)。
-        ok = [r for r in self.rows if _learnable(r, *_zte_policy(self), method=_method_policy(self), floor=_floor_policy(self))]
+        ok = [r for r in self.rows if _learnable(r, *_zte_policy(self), method=_method_policy(self), floor=_floor_policy(self),
+                                                 judgment=_judgment_policy(self))]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         return X, F
 
@@ -517,7 +592,8 @@ class SernCampaign:
         """Pareto 要約。**degraded / tag / 作動点ごとのゲート要約を落とさない** (R1: pareto.json でも追える)。"""
         rows = self.rows if rows is None else rows
         # Pareto・HV の母集団も学習と同じ選別 (codex result 2026-09-27 M2: 学習から外した gg・旧方針の行が Pareto に混ざっていた)
-        ok = [r for r in rows if _learnable(r, *_zte_policy(self), method=_method_policy(self), floor=_floor_policy(self))]
+        ok = [r for r in rows if _learnable(r, *_zte_policy(self), method=_method_policy(self), floor=_floor_policy(self),
+                                            judgment=_judgment_policy(self))]
         X = np.array([r["x"] for r in ok]); F = np.array([[-r["C_T_w"], r["L_ramp"]] for r in ok])
         pareto = []
         if len(ok):
@@ -540,7 +616,7 @@ class SernCampaign:
                 "flag_policy": FLAG_POLICY, "required_scalar_gradient": REQUIRED_SCALAR_GRADIENT,
                 "required_zero_thickness_edge_velocity": _zte_policy(self)[0], ZTE_CARRY_OVER_KEY: list(_zte_policy(self)[1]),
                 "required_te_wake": _method_policy(self)[0], "required_eval_method_id": _method_policy(self)[1],
-                "required_floor_events": _floor_policy(self),
+                "required_floor_events": _floor_policy(self), "required_judgment": _judgment_policy(self),
                 EVAL_METHOD_CARRY_OVER_KEY: list(getattr(self, "eval_method_carry_over_records", ())),
                 "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
                 "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,

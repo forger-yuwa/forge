@@ -28,6 +28,7 @@ from ..metrics.sern_forces import force_history, write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..metrics.sern_gates import floor_events_config_line, floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
 from ..metrics.sern_gates import JUDGMENT_MIN_SAMPLES, judgment_extendable, judgment_gate   # 判定区間の段 (te-wake-grid §5.1 R2)
+from ..metrics.sern_gates import judgment_planned_steps, judgment_required_quantities   # 必須量・予定 step 列 (te-wake-grid §5.1 R2a)
 from ..probdef import Problem, dv_value, load_problem
 from .ic import _forge_species
 
@@ -1471,8 +1472,42 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
     return {"src": str(src_run_dir), "s_ro": s_ro, "s_u": s_u, "s_P": s_P, "gamma": [g_s, g_d], "species_attrs": species}
 
 
+# --- 起動の環境 (plan tooling-sern-te-wake-grid §5.1 R2e、codex diagnose 2026-10-12 の穴 (e)) ---------------------------------
+# 結果に効く環境変数の**実際の値** (runner が forge に渡す環境 _ENV = import 時の os.environ) を起動ごとに runner_launches.jsonl へ、
+# 判定区間の段では JUDGMENT.json にも残す。named の値 None (JSON の null) = 未設定 (unset にも名前を並べる)。
+#   FORGE_CUDA_BLOCKSIZE(_SMALL): カーネルの block 長 (cuda_forge/cudaConfig.cuh)。結果に効く (run_case.sh の注記: case/56 で
+#     減衰が 1.40 % / 1.88 %)。node SLAU は既定 512 で起動できない (検証の手順は 128)
+#   FORGE_ALLOW_UNVERIFIED_SPECIES: 化学種の属性の無い場を**その実行だけ**通す許可 (main.cpp・tools/forge_species.py、
+#     procedures/solver-settings.md の「化学種の解決済み記録と入力場の照合」)。**runner は既定で付けない** (呼び出し側の判断)
+#   FORGE_BIN: 回す forge のバイナリ (run_case.sh)
+# forge が読む他の FORGE_* (cuda_forge の getenv: 診断・実験の切替) は、設定されていれば other_forge_env に名前と値を残す
+RESULT_ENV_KEYS = ("FORGE_CUDA_BLOCKSIZE", "FORGE_CUDA_BLOCKSIZE_SMALL", "FORGE_ALLOW_UNVERIFIED_SPECIES", "FORGE_BIN")
+RUNNER_LAUNCHES = "runner_launches.jsonl"
+
+
+def launch_env(env=None) -> dict:
+    """forge に渡す環境 (既定 _ENV) の結果に効く環境変数の値。未設定は None (unset に名前)。"""
+    e = _ENV if env is None else env
+    named = {k: e.get(k) for k in RESULT_ENV_KEYS}
+    return {"source": "runner_sern._ENV (run_case.sh に渡す環境)", "named": named,
+            "unset": [k for k, v in named.items() if v is None],
+            "other_forge_env": {k: e[k] for k in sorted(e) if k.startswith("FORGE_") and k not in RESULT_ENV_KEYS}}
+
+
+def _record_launch_env(run_dir) -> dict:
+    """起動直前に、その段の config の識別 (forge_launches.jsonl の cfg_fnv と同じ FNV-1a) と環境の値を runner_launches.jsonl に追記する。"""
+    rd = Path(run_dir)
+    cfgp = rd / "solverConfig.yaml"
+    rec = {"time": int(time.time()), "cfg_fnv": _stage_manifest().fnv1a64(cfgp.read_bytes()) if cfgp.exists() else None,
+           "env": launch_env()}
+    with open(rd / RUNNER_LAUNCHES, "a") as fh:
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return rec
+
+
 def run_forge(run_dir) -> int:
     _record_zte_launch(run_dir)     # 処置を有効にした段だけ: 起動条件の検査と、読む w の識別量の記録 (無効の段は何もしない)
+    _record_launch_env(run_dir)     # 結果に効く環境変数の実際の値 (§5.1 R2e)
     r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=_ENV, capture_output=True, text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
     return r.returncode
@@ -1667,6 +1702,22 @@ def judgment_options(evaluate) -> dict | None:
     return {"steps": int(n), "extend_once": bool(ext), "window_steps": int(W)}
 
 
+def judgment_plan(evaluate) -> dict | None:
+    """判定区間の段の判定の予定 (plan tooling-sern-te-wake-grid §5.1 R2a、codex diagnose 2026-10-12 M1): judgment_options に
+    §6 #3 の必須量 (evaluate.model から。SST 4 量・Euler 3 量) と予定 step 列 (N・W・evaluate.outStepInterval) を足す。段なしは None。
+    collect がこれを judgment_gate に渡し (列の欠落で量を減らさない・標本を予定と照合する)、driver_sern が学習の要件を作る。
+    outStepInterval は明示が要る (prepare の既定 nStepOuter / 6 は本段の長さで変わり、予定として固定できない)。"""
+    jo = judgment_options(evaluate)
+    if jo is None:
+        return None
+    ev = evaluate or {}
+    oi = ev.get("outStepInterval")
+    if not isinstance(oi, int) or isinstance(oi, bool) or oi <= 0:
+        raise ValueError(f"判定区間の段は evaluate.outStepInterval (正の整数) の明示が要る (予定の標本の格子): {oi!r}")
+    return {**jo, "out_interval": int(oi), "required": judgment_required_quantities(ev.get("model")),
+            "planned_steps": judgment_planned_steps(jo["steps"], jo["window_steps"], int(oi))}
+
+
 def judgment_config(cfg_main: str, jo: dict) -> str:
     """判定区間の段の config = 本段の config の nStepOuter だけを N にしたもの (同一設定)。outStepInterval の条件を検査する。"""
     cfg, k = re.subn(r"nStepOuter: \d+", f"nStepOuter: {int(jo['steps'])}", cfg_main)
@@ -1729,6 +1780,7 @@ def _run_forge_monitored(run_dir, monitor=None, poll_s: float = 30.0) -> tuple:
     if monitor is None:
         return run_forge(rd), {}
     _record_zte_launch(rd)
+    _record_launch_env(rd)          # 結果に効く環境変数の実際の値 (§5.1 R2e)
     stats = {"monitored": 0, "failed": 0, "removed": 0}
 
     def _add(s):
@@ -1748,13 +1800,49 @@ def _run_forge_monitored(run_dir, monitor=None, poll_s: float = 30.0) -> tuple:
     return proc.returncode, stats
 
 
-def _restart_mismatch(res_h5, mesh_h5) -> list:
-    """段の移行 (restart_by_index) の後、保存量 (と化学種・トレーサ) が継続元とビット一致しない配列名 (一致なら空)。"""
+def required_state_keys(cfg_text: str) -> list:
+    """段の config から、段の移行で継続元と一致していなければならない保存量 (plan tooling-sern-te-wake-grid §5.1 R2d、codex diagnose
+    2026-10-12 Minor): 流体 5 量、乱流 SST の roK・roOmega、TP (thermalMethod 2) の化学種 roY0..roY{n−1} (n = physProp.species の数、
+    _species_signature と同じ既定) とトレーサ roXi。restart_by_index が写す量のうち config から必須と決まるもの。
+    乱流モデルが none / sst 以外なら ValueError (必須の集合を決められないまま移さない)。"""
+    from ..gas.composition import load_yaml_str
+    doc = load_yaml_str(cfg_text) or {}
+    keys = ["ro", "roUx", "roUy", "roUz", "roe"]
+    tm = str((doc.get("turbulence") or {}).get("model", "none")).strip().lower()
+    if tm == "sst":
+        keys += ["roK", "roOmega"]
+    elif tm != "none":
+        raise ValueError(f"段の移行: 乱流モデル {tm!r} の保存量の集合を決められない (none / sst)")
+    pp = doc.get("physProp") or {}
+    if int(pp.get("thermalMethod", 0) or 0) == 2:
+        keys += [f"roY{i}" for i in range(len(pp.get("species") or ["N2"]))]
+        if str(pp.get("tracer", "none")).lower() not in ("none", "", "0"):
+            keys.append("roXi")
+    return keys
+
+
+def _restart_mismatch(res_h5, mesh_h5, required=("ro", "roUx", "roUy", "roUz", "roe")) -> list:
+    """段の移行 (restart_by_index) の後、継続元と一致しない保存量 (一致なら空)。required (required_state_keys) の量は両方に
+    存在し、shape・dtype・**バイト列**が一致すること (+0 と −0、NaN のビット列も区別する。np.array_equal は区別しない)。
+    required 以外で両方にある保存量 (_STATE_RE、restart_by_index が写したもの) も同じく比べる。"""
+    bad = []
     with h5py.File(res_h5, "r") as s, h5py.File(mesh_h5, "r") as d:
-        keys = [k for k in s["VALUE"] if _STATE_RE.match(k) and k in d["VALUE"]]
-        bad = [k for k in keys if not (s["VALUE"][k].dtype == d["VALUE"][k].dtype and np.array_equal(s["VALUE"][k][:], d["VALUE"][k][:]))]
-        if not {"ro", "roUx", "roUy", "roUz", "roe"} <= set(keys):
-            bad.append("保存量の配列が欠けている")
+        S, D = s["VALUE"], d["VALUE"]
+        for k in required:
+            if k not in S:
+                bad.append(f"{k} が継続元に無い")
+            elif k not in D:
+                bad.append(f"{k} が継続先に無い")
+        keys = list(dict.fromkeys([k for k in required if k in S and k in D]
+                                  + [k for k in S if _STATE_RE.match(k) and k in D]))
+        for k in keys:
+            a, b = S[k], D[k]
+            if a.shape != b.shape:
+                bad.append(f"{k} の shape が違う ({a.shape} / {b.shape})")
+            elif a.dtype != b.dtype:
+                bad.append(f"{k} の dtype が違う ({a.dtype} / {b.dtype})")
+            elif np.ascontiguousarray(a[()]).tobytes() != np.ascontiguousarray(b[()]).tobytes():
+                bad.append(f"{k} のバイト列が違う")
     return bad
 
 
@@ -1802,9 +1890,14 @@ def run_judgment(problem_path, run_dir, collect_fn, rc_startup: int, monitor=Non
     jo = judgment_options(p.evaluate)
     if jo is None:
         raise ValueError(f"evaluate.{JUDGMENT_STEPS_KEY} が無い問題 YAML に判定区間の段は回さない")
+    jp = judgment_plan(p.evaluate)          # 必須量・予定 step 列 (collect と同じ。設定の誤りは時間積分の前に止める、§5.1 R2a)
     rd = Path(run_dir)
     rec = {"version": JUDGMENT_VERSION, "options": jo, "startup_rc": rc_startup, "layout": "same_run_dir",
-           "config": JUDGMENT_CONFIG, "attempts": [], "verdict": None, "reason": "", "metrics": "metrics.json"}
+           "config": JUDGMENT_CONFIG, "attempts": [], "verdict": None, "reason": "", "metrics": "metrics.json",
+           "plan": {"required": list(jp["required"]), "out_interval": jp["out_interval"], "planned_end": jp["planned_steps"][-1],
+                    "n_planned": len(jp["planned_steps"])},
+           # 結果に効く環境変数の実際の値 (§5.1 R2e。forge に渡す環境 _ENV、None = 未設定)。各段の値は attempts[].env
+           "env": launch_env()}
 
     def _finish(rc, out, verdict, reason):
         rec.update({"verdict": verdict, "reason": reason, "final_rc": rc})
@@ -1819,6 +1912,12 @@ def run_judgment(problem_path, run_dir, collect_fn, rc_startup: int, monitor=Non
     if why:
         return _finish(rc_startup, _collect(rc_startup), "INDETERMINATE", f"判定区間の段に進まない (§6 #2 を判定できない): {why}")
     cfg_j = judgment_config((rd / "solverConfig_main.yaml").read_text(), jo)
+    _m = re.search(r"outStepInterval: (\d+)", cfg_j)
+    if _m is None or int(_m.group(1)) != jp["out_interval"]:
+        raise ValueError(f"判定区間の段: config の outStepInterval {_m and _m.group(1)} が問題設定の evaluate.outStepInterval "
+                         f"{jp['out_interval']} と違う (予定 step 列と出力が合わない)")
+    req_keys = required_state_keys(cfg_j)      # 段の移行で一致を確かめる保存量 (§5.1 R2d)
+    rec["required_state"] = req_keys
     (rd / JUDGMENT_CONFIG).write_text(cfg_j)
     _archive_stage(rd, "main")          # 段階起動の本段の残差 (forge は段ごとに上書きする)
     n_att = 1 + int(jo["extend_once"])
@@ -1826,10 +1925,10 @@ def run_judgment(problem_path, run_dir, collect_fn, rc_startup: int, monitor=Non
     for k in range(1, n_att + 1):
         src = _volume_snapshots(rd)[-1][1]
         restart_by_index(src, rd / MESH)
-        bad = _restart_mismatch(src, rd / MESH)
+        bad = _restart_mismatch(src, rd / MESH, req_keys)
         if bad:
-            raise RuntimeError(f"判定区間の段 {k}: 継続元 {src.name} と保存量がビット一致しない ({bad})")
-        rec["attempts"].append({"attempt": k, "restart_from": src.name})
+            raise RuntimeError(f"判定区間の段 {k}: 継続元 {src.name} と保存量が一致しない ({bad})")
+        rec["attempts"].append({"attempt": k, "restart_from": src.name, "env": launch_env()})
         # 段より前の監視の記録が残っていれば退避する (同じ step を「監視済み」とみなしてスナップショットを監視せずに消さないため)
         stale = _archive_files(rd, (MONITOR_CSV, MONITOR_STEP0_CSV, MONITOR_LOG), f"before_judgment{k}")
         if stale:
@@ -1872,8 +1971,10 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
     # 判定区間の段を使う問題 YAML (evaluate.judgment_steps) は §6 #2・#3 もゲートに入れる。2D は #2 の監視領域が未実装で判定不能
-    jo = judgment_options(p.evaluate)
-    jg = judgment_gate(hist, jo["window_steps"], monitor_unavailable=MONITOR_UNAVAILABLE_2D) if jo else None
+    # 必須量と予定 step 列は問題設定から (§5.1 R2a)
+    jp = judgment_plan(p.evaluate)
+    jg = judgment_gate(hist, jp["window_steps"], jp["required"], jp["planned_steps"],
+                       monitor_unavailable=MONITOR_UNAVAILABLE_2D) if jp else None
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
                            p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg)
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
