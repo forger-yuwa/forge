@@ -335,6 +335,92 @@ def cmd_judge3(a):
     print("結果:", out["result"]); print(f"[judge3] {OUTD / a.out}")
 
 
+def cmd_judge4(a):
+    """§4.30 (事前登録、codex 諮問 2026-10-11): 物差しを「Gref の point の資格を満たした値」に替えた新しい比較。旧い試験 (§4.26・§4.28) の判定不能は残す。
+      参照: Gref の point (通算 160k〜200k、μ_ref,point = 180k〜200k、d = |平均(160k〜180k) − μ|、U_ref,point = 160k〜200k)。資格は §4.26 と同じ (8 量)。
+      候補: Grefx の B0 (μ_x,base = 通算 100k〜120k、U_x,base = 80k〜120k) と point (μ = 40k〜60k、U_x,point = 20k〜60k)、s_x = |μ_x,point − μ_x,base|。
+      E′ = μ_x,base − μ_ref,point、B′ = |E′| + U_x,base + U_ref,point + p_x + p_ref + s_x + U_x,point ≤ τ。相対量の分母は D = |μ_ref,base| (Gref の B0 の 40k〜60k、従来と同じ)。
+      s_ref (Gref の B0 ↔ point) と U_ref,base は予算に入れず記録する。
+    結果: 参照の資格あり (かつ Grefx の point の資格あり) で全 8 量 B′ ≤ τ → 指定の参照・許容差に対する精度面の候補 (総時間の条件は別)。資格ありで超過 → 見送り。資格なし → 判定不能 (延長しない)。"""
+    import csv
+    tau = {"theta": a.tau_theta, "delta": a.tau_delta, "Q_w": a.tau_qw, "exit_M_line": a.tau_exit, "eta_pctpt": a.tau_eta}
+    pX = json.loads(a.p_x)
+    P = {"ref": {"theta": P_BUDGET["Gref"]["theta"], "delta": P_BUDGET["Gref"]["delta"], "Q_w": P_BUDGET["Gref"]["Q_w"], **P_M},
+         "x": {**{k: pX[k] for k in ("theta", "delta", "Q_w")}, **P_M}}
+    def kind(k):
+        return "theta" if k.startswith("theta_r") else "delta" if k.startswith("delta_loc") else "Q_w" if k == "Q_w" else "exit_M_line" if k == "exit_M_line" else "eta_pctpt"
+    def load(nm):
+        rows = list(csv.DictReader(open(OUTD / f"gref_series_{nm}.csv")))
+        return {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
+    S = {"ref_base": load(a.ref_base), "ref_point": load(a.ref_point), "x_base": load(a.x_base), "x_point": load(a.x_point)}
+    for nm, D in S.items():
+        miss = [k for k in REQUIRED8 if k not in D]
+        if miss:
+            raise SystemExit(f"{nm}: 必須の量が系列に無い (判定不能): {miss}")
+    WB = {"ref_base": ((20000, 40000), (40000, 60000)), "ref_point": ((160000, 180000), (180000, 200000)),
+          "x_base": ((80000, 100000), (100000, 120000)), "x_point": ((20000, 40000), (40000, 60000))}
+    def tm(D, k, lo, hi):
+        s_ = D["step"]; m = (s_ >= lo) & (s_ <= hi)
+        if m.sum() < 2 or s_[m][0] != lo or s_[m][-1] != hi:
+            raise SystemExit(f"窓 {lo}〜{hi} の出力が揃わない (判定不能)")
+        return float(np.trapezoid(D[k][m], s_[m]) / (hi - lo))
+    D0 = {k: abs(tm(S["ref_base"], k, *WB["ref_base"][1])) for k in REQUIRED8}
+    def sc(k, x):
+        return x if kind(k) == "eta_pctpt" else 100 * x / D0[k]
+    st = {}
+    for nm, D in S.items():
+        w1, w2 = WB[nm]; s_ = D["step"]; m = (s_ >= w1[0]) & (s_ <= w2[1]); r = {"n": int(m.sum()), "nonfinite": int(D["nonfinite"][m].sum()), "q": {}}
+        qual_needed = nm in ("ref_point", "x_point")
+        if qual_needed:
+            tmp = OUTD / f"_qs4_{nm}.csv"
+            with open(tmp, "w") as fh:
+                fh.write("step," + ",".join(REQUIRED8) + "\n")
+                for i in np.where(m)[0]:
+                    fh.write(f"{s_[i]:.0f}," + ",".join(f"{(1 + D[k][i] / 100) if k.startswith('eta') else D[k][i]:.12g}" for k in REQUIRED8) + "\n")
+        for k in REQUIRED8:
+            t = tau[kind(k)]; mu = tm(D, k, *w2); U = sc(k, float(np.abs(D[k][m] - mu).max())); q = {"mu": mu, "U": U}
+            if qual_needed:
+                cmean = float(np.mean(D[k][m])); last = float(D[k][m][-1])
+                rel = (t / 100) / abs(1 + cmean / 100) if kind(k) == "eta_pctpt" else (t / 100) * D0[k] / abs(cmean)
+                pr = subprocess.run([sys.executable, str(TOOLS / "check_quasisteady.py"), "--series-csv", str(tmp), "--series-cols", k,
+                                     "--tail", "1.0", "--drift", f"{rel / 8:.6g}", "--osc", f"{rel / 2:.6g}"], capture_output=True, text=True)
+                ln = [l for l in pr.stdout.splitlines() if l.strip().startswith(k)]; line = ln[-1].strip() if ln else f"(行なし) rc={pr.returncode}"
+                mono = re.search(r"最終比 ([+\-−]?[\d.]+) ?%", line); asym_ok = True
+                if mono:
+                    y = abs(float(mono.group(1).replace("−", "-")))
+                    asym_ok = (y * (1 + last / 100) if kind(k) == "eta_pctpt" else y * abs(last) / D0[k]) <= t / 8
+                d = sc(k, abs(tm(D, k, *w1) - mu))
+                q.update(d=d, qs=line, steady=pr.returncode == 0, asym_ok=asym_ok, ok=pr.returncode == 0 and asym_ok and d <= t / 8 and U <= t / 4)
+            r["q"][k] = q
+        if qual_needed:
+            tmp.unlink()
+            r["qualified"] = r["nonfinite"] == 0 and r["n"] == 17 and all(v["ok"] for v in r["q"].values())
+        st[nm] = r
+    out = {"registration": "plans/active/tooling-nozzle-core-grid.md §4.30", "tau": tau, "p": P, "windows": WB,
+           "series": {k: getattr(a, k) for k in ("ref_base", "ref_point", "x_base", "x_point")}, "stats": st, "q": {}}
+    within = True
+    for k in REQUIRED8:
+        t = tau[kind(k)]; kk = kind(k)
+        E = sc(k, st["x_base"]["q"][k]["mu"] - st["ref_point"]["q"][k]["mu"])
+        s_x = sc(k, abs(st["x_point"]["q"][k]["mu"] - st["x_base"]["q"][k]["mu"]))
+        B = abs(E) + st["x_base"]["q"][k]["U"] + st["ref_point"]["q"][k]["U"] + P["x"][kk] + P["ref"][kk] + s_x + st["x_point"]["q"][k]["U"]
+        rec_s_ref = sc(k, abs(st["ref_point"]["q"][k]["mu"] - st["ref_base"]["q"][k]["mu"]))
+        out["q"][k] = {"E_signed": E, "s_x": s_x, "B_prime": B, "tau": t, "record_s_ref": rec_s_ref, "record_U_ref_base": st["ref_base"]["q"][k]["U"]}
+        within &= B <= t
+    both = st["ref_point"]["qualified"] and st["x_point"]["qualified"]
+    out["result"] = ("判定不能 (資格なし: " + ", ".join(n for n in ("ref_point", "x_point") if not st[n]["qualified"]) + ")") if not both else \
+                    "A: 指定の参照・許容差に対する精度面の候補 (全 8 量で B′ ≤ τ。総時間の条件は別)" if within else \
+                    "B: この予算では候補化を見送る (どれかの量で B′ > τ)"
+    (OUTD / a.out).write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    for nm in ("ref_point", "x_point"):
+        r = st[nm]; print(f"== {nm} ({getattr(a, nm)}): n {r['n']} 非有限 {r['nonfinite']} 資格 {r['qualified']}")
+        for k in REQUIRED8:
+            v = r["q"][k]; print(f"   {k:18s} d {v['d']:.4f} U {v['U']:.4f} STEADY {v['steady']} 漸近 {v['asym_ok']} | {v['qs'][-44:]}")
+    for k in REQUIRED8:
+        v = out["q"][k]; print(f"   {k:18s} E′ {v['E_signed']:+.4f}  s_x {v['s_x']:.4f}  B′ {v['B_prime']:.4f}  τ {v['tau']:g}  (記録 s_ref {v['record_s_ref']:.4f})")
+    print("結果:", out["result"]); print(f"[judge4] {OUTD / a.out}")
+
+
 def main():
     ap = argparse.ArgumentParser(); sp = ap.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("series"); s.add_argument("name"); s.add_argument("run")
@@ -358,8 +444,14 @@ def main():
     j3.add_argument("--tau-exit", type=float, default=0.05); j3.add_argument("--tau-eta", type=float, default=0.05)
     j3.add_argument("--out", default="grefx_s_judge.json")
     j3.add_argument("--ref-point-shift", type=int, default=0, help="Gref の point の系列の窓をずらす (§4.28 の延長は 60000、系列は --offset 60000 で作る)")
+    j4 = sp.add_parser("judge4", help="§4.30 の比較 (物差し = Gref の point の資格を満たした値)")
+    j4.add_argument("ref_base"); j4.add_argument("ref_point"); j4.add_argument("x_base"); j4.add_argument("x_point")
+    j4.add_argument("--p-x", required=True, help='Grefx の p (JSON: {"theta":..,"delta":..,"Q_w":..} [%%])')
+    j4.add_argument("--tau-theta", type=float, default=1.5); j4.add_argument("--tau-delta", type=float, default=1.5); j4.add_argument("--tau-qw", type=float, default=1.5)
+    j4.add_argument("--tau-exit", type=float, default=0.05); j4.add_argument("--tau-eta", type=float, default=0.05)
+    j4.add_argument("--out", default="grefx_refpoint_judge.json")
     a = ap.parse_args()
-    {"series": cmd_series, "judge": cmd_judge, "judge2": cmd_judge2, "judge3": cmd_judge3}[a.cmd](a)
+    {"series": cmd_series, "judge": cmd_judge, "judge2": cmd_judge2, "judge3": cmd_judge3, "judge4": cmd_judge4}[a.cmd](a)
 
 
 if __name__ == "__main__":
