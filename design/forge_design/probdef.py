@@ -31,6 +31,9 @@ class Problem:
     # Euler 専用の格子 (axis-Mach の prepare だけが読む。NS の prepare_ns は mesh; 2026-10-07, plan verification-case45-euler-total-enthalpy §4)。
     # 中身の検査 (未知のキー・既定) は runner_axismach.mesh_euler_block
     mesh_euler: dict | None = field(repr=False, default=None)
+    # ロケット排気 (`gas.exhaust`; 2026-10-11, plan tooling-nozzle-bell-two-mode §4.1 #2a)。load_problem が解決して入れる
+    # (gas.rocket_exhaust.RocketExhaust: 組成・全温・全圧・種 DB・エンタルピー基準の単一ソース)
+    _exhaust: object | None = field(repr=False, default=None)
 
     @property
     def R_gas(self) -> float:
@@ -47,6 +50,9 @@ class Problem:
             from .gas import GasCPG
             return GasCPG(self.gamma, self.cp)
         if kind == "semiperfect":
+            if self._exhaust is not None:
+                # gas.exhaust: MOC の気体も CFD と同じ契約 (同じ Y・種 DB・Tc) から作る (plan bell-two-mode §4.1)
+                return self._exhaust.moc_gas()
             from .gas import GasSemiPerfect
             Y, _, _ = self.gas_composition
             return GasSemiPerfect(Y, Tt=float(self.spec["Tt"]), db=self.species_db)
@@ -113,9 +119,18 @@ class Problem:
         return str(self.raw.get("gas", {}).get("composition_basis", "mass")).lower()
 
     @property
+    def exhaust(self):
+        """`gas.exhaust` を解決した `RocketExhaust` (無ければ None)。組成・全温 (spec.Tt)・全圧 (spec.Pt) の単一ソース。"""
+        return self._exhaust
+
+    @property
     def gas_composition(self) -> tuple:
-        """(Y 正規化, X 正規化, 入力の総和) — `gas.species` を `gas.composition_basis` (mass | mole) で解釈。"""
+        """(Y 正規化, X 正規化, 入力の総和) — `gas.species` を `gas.composition_basis` (mass | mole) で解釈。
+        `gas.exhaust` があれば排気ファイルの燃焼室組成 (モル分率; 総和は CEA の印字の和)。"""
         from .gas.composition import composition_to_mass
+        if self._exhaust is not None:
+            ex = self._exhaust
+            return dict(ex.Y), dict(ex.X), float(ex.data["chamber"].get("mole_fraction_sum_printed", 1.0))
         gs = self.raw.get("gas", {})
         if "species" not in gs:
             raise ValueError("gas.species が無い")
@@ -198,8 +213,44 @@ def load_problem(path) -> Problem:
         path=str(path),
         mesh_euler=raw.get("mesh_euler"),
     )
+    _apply_exhaust(prob)
     _validate(prob)
     return prob
+
+
+def _apply_exhaust(p: Problem) -> None:
+    """`gas.exhaust` (CEA の排気ファイル; gas.rocket_exhaust) を解決し、組成・spec.Pt (= Pc)・spec.Tt (= Tc) を
+    そこから入れる (plan tooling-nozzle-bell-two-mode §4.1 #2a)。二重の指定 (gas.species・composition_basis・spec.Pt・spec.Tt)
+    は単一ソースを崩すので拒否する。`evaluate.tp_species` を省略したら単一の lump 擬似種 EXH にする。"""
+    gs = p.raw.get("gas", {})
+    if "exhaust" not in gs:
+        return
+    errs = []
+    if str(gs.get("model", "cpg")) != "semiperfect":
+        errs.append("gas.exhaust は gas.model: semiperfect でのみ有効")
+    if p.type != "thruster_bell":
+        errs.append(f"gas.exhaust は type thruster_bell だけで検証済み (type {p.type})")
+    for k in ("species", "composition_basis"):
+        if k in gs:
+            errs.append(f"gas.exhaust と gas.{k} は併用不可 (組成は排気ファイルが単一ソース)")
+    for k in ("Pt", "Tt"):
+        if k in p.spec:
+            errs.append(f"gas.exhaust と spec.{k} は併用不可 (Pt = 燃焼室圧・Tt = 燃焼室温度は排気ファイルから入れる)")
+    if errs:
+        raise ValueError("問題定義検証: " + "; ".join(errs))
+    from pathlib import Path
+    from .gas.rocket_exhaust import RocketExhaust
+    pth = Path(str(gs["exhaust"]))
+    if not pth.is_absolute() and p.path:
+        pth = Path(p.path).resolve().parent / pth
+    if not pth.exists():
+        raise FileNotFoundError(f"gas.exhaust '{gs['exhaust']}' が無い (解決: {pth})")
+    href = float(p.evaluate.get("thermo_href_temp", 298.15))
+    p._exhaust = RocketExhaust.from_file(pth, db=p.species_db, href_T=href)
+    # 入れるのは Problem の spec / evaluate の写しだけ (p.raw は YAML のまま: 書き戻して読み直しても二重指定にならない)
+    p.spec = {**p.spec, "Pt": p._exhaust.Pc, "Tt": p._exhaust.Tc}
+    p.evaluate = dict(p.evaluate)
+    p.evaluate.setdefault("tp_species", RocketExhaust.tp_species())
 
 
 def _validate(p: Problem) -> None:

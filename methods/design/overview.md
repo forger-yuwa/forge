@@ -1241,6 +1241,15 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 (等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
 フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
 
+## ③ベルの TP 排気評価 (2026-10-11、plan [tooling-nozzle-bell-two-mode](../../plans/active/tooling-nozzle-bell-two-mode.md))
+
+③ベルの評価器は、問題 YAML に `gas.model: semiperfect` と `gas.exhaust: <排気ファイル>` を書いたときだけ TP のロケット排気で動く (書かなければ従来の CPG とビット同一)。
+
+- **排気ファイル** (`gas/rocket_exhaust.py`、schema `forge_rocket_exhaust_v1`): CEA2 (FCEA2) で推進剤・燃焼室圧・O/F から燃焼室の平衡組成と温度を解き、燃焼室で凍結した組成を記録する。反応物の状態、凍結位置、CEA の凍結計算の表、来歴を同じファイルに残す。生成物は forge の熱物性・輸送データにある種に限り、除いた種は `omitted_species` に書く (LOX/LH2・10 MPa・O/F 6 では H2・O2・H2O・OH・H・O、除いた HO2・H2O2・O3 の影響はモル分率 4.5e-5)。
+- **共通の契約** (`RocketExhaust`): 同じ質量分率・種 DB・燃焼室温度から、MOC 用の `GasSemiPerfect`、forge の lump `EXH` (`thermalMethod: 2`、`thermoHrefTemp: 298.15`、`viscMethod: 2` + 輸送物性)、1D 計算用の `FrozenGas` を作る。3 つの気体で $R$ と $h(T)$ が一致することを試験で確かめる。
+- **1D 理想値** (`ideal_1d`): 凍結 TP の等エントロピー膨張で、凍結音速でチョークする。$\dot m_{1D}$・出口状態・$F_{1D}$ は CEA の凍結計算と $\varepsilon$ 10〜100 で相対 6.8e-5 以内 (`design/tests/run_bell_tp_tests.py`)。
+- **runner の TP 経路**: 真空の出口は `outflow`、IC と壁の平滑化は TP の $e(T)$ で組む、段は soft → mid → main (`prepare(..., stage=)`)。推力の検査体積の会計とゲートは未実装 (plan §5.1 #2b)。
+
 ## 評価と目的関数
 
 バッチ評価 CLI が run ディレクトリを生成し (`run_*` 命名規約・case README 追記)、forge を

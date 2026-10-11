@@ -15,6 +15,7 @@
 | type | runner | 状態 | 備考 |
 | --- | --- | --- | --- |
 | `thruster_bell` | `evaluate/runner.py` | ✅ | MOO ドライバ ([`opt/driver.py`](forge_design/opt/driver.py)) の対象。case/40 run_0074 で 69/70 PASS |
+| `thruster_bell` (TP 排気) | `evaluate/runner.py` (`gas.model: semiperfect` + `gas.exhaust`) | 🔧 | ロケット排気の凍結 TP (CEA2 の燃焼室平衡組成を lump `EXH` に、`gas/rocket_exhaust.py`)。1D 理想値は CEA 凍結と 2.1e-5 以内、起動確認まで (case/68 run_0001)。推力の CV 会計・ゲート・収束は未 (plan [tooling-nozzle-bell-two-mode](../plans/active/tooling-nozzle-bell-two-mode.md) §5.1 #2b) |
 | `wind_tunnel_axisym` | `evaluate/runner_wt.py` | 🔧 | 旧生産系 (B8)。axismach に置換済み、回帰対照として保持 |
 | `wind_tunnel_axisym_walldriven` | `evaluate/runner_walldriven.py` | 🔧 | 壁駆動系。axismach に置換済み |
 | `wind_tunnel_axisym_axismach` | `evaluate/runner_axismach.py` | ✅ | 現行生産 (case/42 isobutane, case/44 vitiated air)。ガス・凝縮メニューが最も厚い |

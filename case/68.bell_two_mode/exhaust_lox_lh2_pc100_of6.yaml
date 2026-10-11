@@ -1,0 +1,195 @@
+# ロケット排気 (燃焼室の平衡組成を凍結した TP) — forge_design.gas.rocket_exhaust が NASA CEA2 から生成。手で編集しない。
+# 組成・全温・全圧の単一ソース: 問題 YAML の gas.exhaust がこのファイルを指す (plan tooling-nozzle-bell-two-mode §4.1)。
+schema: forge_rocket_exhaust_v1
+cea_input:
+  fuel: H2(L)
+  fuel_T: 20.27
+  oxid: O2(L)
+  oxid_T: 90.17
+  pc: 10000000.0
+  of_ratio: 6.0
+  products:
+  - H2
+  - O2
+  - H2O
+  - OH
+  - H
+  - O
+  pc_unit: Pa
+  of_ratio_basis: mass
+  fuel_T_unit: K
+  oxid_T_unit: K
+  freeze: chamber (CEA rocket frozen nfz=1; 組成は燃焼室の平衡を凍結)
+  combustor: infinite-area (CEA rocket iac 既定)
+  supar:
+  - 10.0
+  - 25.0
+  - 50.0
+  - 100.0
+cea_provenance:
+  program: NASA-GLENN CHEMICAL EQUILIBRIUM PROGRAM CEA2, MAY 21, 2004
+  thermo_inp_update: 9/09/04
+  fcea2: /home/sano/work/forge/.venv-cea/nasa_cea/FCEA2
+  thermo_lib_sha256: e417b3a173958a69d15b1ab41395e328ac1d314a1ee8e134822e0aa5f2374a09
+  trans_lib_sha256: c203d9330746405e1b57008cd697354745ab991694b4ca11ed556b18cb834111
+chamber:
+  Pc_Pa: 10000000.0
+  Tc_K: 3523.96
+  mole_fractions:
+    H: 0.031081
+    H2: 0.24799
+    H2O: 0.67299
+    O: 0.002854
+    OH: 0.042114
+    O2: 0.002975
+  mole_fraction_sum_printed: 1.000004
+  MW_g_per_mol_cea: 13.512
+  visc_Pa_s_cea_frozen: 0.00010675
+  cond_W_mK_cea_frozen: 0.56993
+omitted_species:
+  products: all (bell_full)
+  mole_fractions:
+    HO2: 3.285e-05
+    H2O2: 1.257e-05
+    O3: 6.309e-09
+  sum: 4.5426309e-05
+  Tc_full_K: 3523.79
+  dTc_K: -0.17000000000007276
+cea_frozen_reference:
+  columns:
+  - CHAMBER
+  - THROAT
+  - EXIT_1
+  - EXIT_2
+  - EXIT_3
+  - EXIT_4
+  Pinf_P:
+  - 1.0
+  - 1.7703
+  - 83.694
+  - 289.26
+  - 735.69
+  - 1874.99
+  P:
+  - 10000000.0
+  - 5648700.0
+  - 119480.0
+  - 34571.0
+  - 13593.0
+  - 5333.0
+  T:
+  - 3523.96
+  - 3209.27
+  - 1621.92
+  - 1264.98
+  - 1035.69
+  - 838.04
+  rho:
+  - 4.6118
+  - 2.8605
+  - 0.11972
+  - 0.044414
+  - 0.021329
+  - 0.010343
+  h:
+  - -986310.0
+  - -2168770.0
+  - -7736520.0
+  - -8834070.0
+  - -9493250.0
+  - -10031100.0
+  s:
+  - 17613.2
+  - 17613.2
+  - 17613.2
+  - 17613.2
+  - 17613.2
+  - 17613.2
+  MW_g:
+  - 13.512
+  - 13.512
+  - 13.512
+  - 13.512
+  - 13.512
+  - 13.512
+  cp:
+  - 3784.2
+  - 3729.3
+  - 3185.3
+  - 2956.9
+  - 2791.8
+  - 2651.4
+  gamma_s:
+  - 1.1942
+  - 1.1976
+  - 1.2394
+  - 1.2628
+  - 1.2827
+  - 1.3022
+  a:
+  - 1609.2
+  - 1537.8
+  - 1112.2
+  - 991.4
+  - 904.1
+  - 819.5
+  M:
+  - 0.0
+  - 1.0
+  - 3.304
+  - 3.996
+  - 4.562
+  - 5.19
+  visc:
+  - 0.00010675
+  - 9.9742e-05
+  - 5.8626e-05
+  - 4.7308e-05
+  - 3.9392e-05
+  - 3.2063e-05
+  cond:
+  - 0.56993
+  - 0.52412
+  - 0.26665
+  - 0.20414
+  - 0.16487
+  - 0.13229
+  Ae_At:
+  - null
+  - 1.0
+  - 10.0
+  - 25.0
+  - 50.0
+  - 100.0
+  cstar:
+  - null
+  - 2273.3
+  - 2273.3
+  - 2273.3
+  - 2273.3
+  - 2273.3
+  CF:
+  - null
+  - 0.6765
+  - 1.6163
+  - 1.7428
+  - 1.8145
+  - 1.8709
+  Ivac:
+  - null
+  - 2821.9
+  - 3945.9
+  - 4158.2
+  - 4279.3
+  - 4374.4
+  Isp:
+  - null
+  - 1537.8
+  - 3674.3
+  - 3961.8
+  - 4124.8
+  - 4253.2
+cea_input_text: "problem case=bell_eq rocket equilibrium o/f=6.0 p,bar=100.0\n   supar=10.0,25.0,50.0,100.0\nreac\n  fuel = H2(L)  wt%=100.  t,k=20.27\n  oxid = O2(L)  wt%=100.  t,k=90.17\nonly H2 O2 H2O\
+  \ OH H O\noutput siunits trace=1.e-15\nend\nproblem case=bell_fz rocket frozen nfz=1 o/f=6.0 p,bar=100.0\n   supar=10.0,25.0,50.0,100.0\nreac\n  fuel = H2(L)  wt%=100.  t,k=20.27\n  oxid = O2(L)  wt%=100.\
+  \  t,k=90.17\nonly H2 O2 H2O OH H O\noutput siunits transport\nend\nproblem case=bell_full rocket equilibrium o/f=6.0 p,bar=100.0\n   supar=10.0,25.0,50.0,100.0\nreac\n  fuel = H2(L)  wt%=100.  t,k=20.27\n\
+  \  oxid = O2(L)  wt%=100.  t,k=90.17\noutput siunits trace=1.e-15\nend\n"
