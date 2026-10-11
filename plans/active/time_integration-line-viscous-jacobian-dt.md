@@ -182,13 +182,15 @@
   - L7 = 値 3・`FORGE_LVC_TERMS=7` (全部入り)、L0 = 値 0 (生産)、L5 = 値 3・`FORGE_LVC_TERMS=5` (粘性入り)。
   - 共通: 段 ③ の FP64 (129de3f4…)、`run_0183` の res_100000、`--line dir --cap 50 --itj 5`、cfl 4・緩和 0.7・sweep 5・ISP 0、`axisTimestepBeta`・`lineViscousDtRelief` なし。
   - 値 0 の対照は同じバイナリで取り直す (速度 plan の L0・L5 の系列は別のバイナリなので比べない)。値 2 は足さない。
-- **run** (case/45、AWS-A `~/forge-faceh-audit/case/45.isobutane_m6_d155/`):
+- **run** (case/45、**AWS-B** `~/forge-faceh-audit/case/45.isobutane_m6_d155/`。1 時間を超える run は B に出す約束 (調整板) に従った。
+  出発の場 `run_0183` (A の `~/forge-wallfit` の run) と、`run_0550_lvcaudit/linedump`・`run_0585_lvcdt_b_dump/linedump` を A から B へ複製し、sha256 が一致することを確かめた):
   - 腕: `run_0553_lvcmp_l7`・`run_0554_lvcmp_l0`・`run_0555_lvcmp_l5` (この順)。
   - 書き出し: `run_0556_lvcmp_l7_dump`・`run_0557_lvcmp_l0_dump`・`run_0558_lvcmp_l5_dump`・`run_0559_lvcmp_l7_dump2`。
   - 番号は 05xx の空き (0590 以降は M6 ノズルのセッションが B で使っている)。台本 `lvcmp.sh`、事前のゲート `lvcmp_pregate.py`、本判定 `lvcmp_judge.py`。
 - **長さと終わり**: 最大 150000 step・2500 ごと (水準のドリフトの窓 2 万 step に 8 点以上)。
   見張りは速度 plan の `m9_watch.py --phase line` を使う (水準 = |欠損| ≤ 0.1 kg/s かつ θ_r(40/70/94) のドリフト ≤ 0.05 %/2 万 step、窓は run の中、step 0 は使わない)。
-  水準に入った最初の出力で止める (SIGTERM → 確かめてから後の出力を消す。5 万 step ごと・最新 5 つ・到達の出力は残す)。
+  水準に入った最初の出力で止める (SIGTERM → 確かめてから後の出力を消す)。見張りの実装は**最新の出力と到達の出力だけを残す** (plan-2 レビュー m5 で記述を実装に合わせた)。
+  消される出力の代わりの証拠として、記録係 `lvcmp_record.py` を横で動かし、見張りが読む前 (20 s 後) に各出力の sha256・全保存量の非有限の数・ρ・P・T の最小値を `<run>/lvcmp_outputs.json` に残す。
   - 状態は REACHED / CENSORED (上限まで回って届かず) / DIVERGED / EXEC_ERROR / DATA_ERROR。
   - 起動後 120 s で実効のモードを確かめ、外れれば止める。確かめるのは、LAYOUT2 の分解・代入、値とマスクの表示、面エンタルピーの切替なし。
   - 1 本の目安は、単独で速度 plan の L0・L5 と同じ 1.2 h 前後。GPU を共有するとそれより延びる。
@@ -204,16 +206,26 @@
       ここで β = max(μ_f, 0)|S|²/|e·S|、P = I + n̂n̂ᵀ/3。許容は要素ごとに 1e-5 × 尺度 + 64 ulp。自節点の行の拘束・隣の速度固定では 0。
     - (a′)(b′) それぞれ、変化が解像される面が 100 面以上。
     - 試行 (2026-10-11): 運動量の項の式は、監査の記録と共通関数でマスク 5・4 を組んだ差 (行 1〜3) と、許容の 0.023 倍以内で一致した (1200 面、外れ 0)。
+    - (b) の合格の範囲は「運動量の K の係数の変更が成立した」まで。L5 − L0 の D とエネルギーの K は照合しない。
+    - (b2) 等温壁の節点の D の行 4: 値 ≥ 2 は拘束の行 [−ρE/ρ, 0, 0, 0, 1] (`timeIntegration_d.cu` 1263 行付近)、値 0・キー 5 は [0, 0, 0, 0, 1]。L7・L5 と L0 で拘束の行が違うことを、期待値との照合で確かめる (plan-2 レビュー m4。7/5 の書き出しで値 3 の行が完全に一致することを確かめた)。
+    - L7 − L0 は構成全体の比較 (値・拘束の行・薄層の項) で、熱伝導の近傍 K の効きの分離は L7 − L5 で見る。
 - **判定** (`lvcmp_judge.py`):
   - ゲート: 腕の入力 (バイナリ・出発の場・格子・入力ファイル・腕ごとの設定・ログ)、事前のゲートの `--verify`、腕の設定が同じ腕の書き出しと step 数・出力の間隔・`extraFields` 以外で同じ。
-  - 腕ごと: REACHED なら、到達の step を系列から水準の規則で計算し直して見張りと一致すること (速度 plan の `run_0353` の系列で 115000 を再現した)、区間付きの収束 VERDICT が DIVERGED でないこと。
-    EXEC_ERROR・DATA_ERROR・記録なし・CENSORED なのに系列が水準に入っている、は INVALID。
-  - 比較: 2 本とも REACHED のとき、到達の step の差が 15000 以上なら速い/遅い、未満は判別不能。どちらかが届かなければ比較しない。閾値は事後に下げない。
+  - 腕ごと (plan-2 レビュー M1・M2): 見張りの記録のスキーマ (run・phase line・budget 150000・consec 1)、2500 step ごとの系列が終端まで欠け・重複なくそろうこと、
+    記録係が系列の全出力について sha256・全保存量の有限・ρ/P/T > 0 を記録していること (DIVERGED は非有限の出力より前まで)。
+    - REACHED: 到達の step を系列から水準の規則で計算し直して見張りと一致 (速度 plan の `run_0353` の系列で 115000 を再現した)。
+      到達の出力の sha256 が見張り・記録係と一致し、その出力から量を計算し直して系列の行と一致。
+    - CENSORED: RUN_RC 0・最後の出力が 150000・系列が水準に入っていない。
+    - DIVERGED: 非有限の出力の行か、`res_nan` と detectNaN のログ。
+    - 区間付きの収束: 「判定不能」を含む・必須の残差の列 (ro・roUx・roUy・roe・roK・roOmega) が無い・VERDICT が無い・DIVERGED は INVALID (REACHED・CENSORED)。
+    - EXEC_ERROR・DATA_ERROR・記録なしは INVALID。台本は、見張りの状態が REACHED・CENSORED・DIVERGED でなければ止まる (plan-2 レビュー m6)。
+  - 比較: 2 本とも REACHED のとき、到達の step の差が 15000 以上なら「今回の実行では速い/遅い」、未満は「差を検出しなかった」。どちらかが届かなければ比較しない。閾値は事後に下げない。
+    **各腕 1 本の探索的な比較** (plan-2 レビュー M3): 15000 step は採否の幅で、到達の step の再実行の揺れの上限ではない。再現性を含む結論は別に確かめてから言う。
 - **分岐** (主は L7 と L0):
-  1. L7 が L0 より 15000 step 以上早く届く → この条件で全部入りの利点を支持。用量 (上限 20・100・200) に進む前に result 段のレビューへ。
-  2. 差が 15000 未満 → 「全部入りは生産と区別できない」で閉じる (速度 plan §6.15 の L5 と同じ型。長い run を足さない)。
-  3. L7 が遅い、または L7 が届かない (DIVERGED・CENSORED) で L0 は届く → NO-GO。L0 が届かない → 判別不能。
-  - L7 と L5 の差 (15000 以上) は「熱伝導の近傍 K が到達を変えるか」の記録に使う。L5 と L0 も記録する。
+  1. 今回の実行で L7 が L0 より 15000 step 以上早く届いた → 「今回の実行では登録幅以上早かった」と書く。手法の利点としての支持は、再実行で確かめてから (用量に進む前に result 段のレビューへ)。
+  2. 差が 15000 未満 → 「今回の実行では差を検出しなかった」で閉じる (速度 plan §6.15 の L5 と同じ型。長い run を足さない)。
+  3. L7 が遅い、または L7 が 15 万 step 以内に届かない (DIVERGED・CENSORED) で L0 は届く → NO-GO (追加の投資を止める判断として)。L0 が届かない → 判別不能。
+  - L7 と L5・L5 と L0 の差は記録にとどめる (熱伝導の近傍 K が到達を変える、とは 1 本の比較では言わない)。
 - **記録だけ**: 到達の窓 [N − 2 万, N] の θ_r・Q_w の `check_quasisteady --series-csv` (`--tail 1.0 --drift 0.0005 --min-snaps 5`)、各腕の区間付きの `check_convergence`。
   NOT CONVERGED は「水準への到達」の比較に限る (速度 plan §6.11 の規則)。
 - **やらないこと**: 2000 step の残差で優劣を言う、既存の L0・L5 の系列 (別のバイナリ) と直接比べる、到達の閾値・終わりの条件の事後の変更、point の仕上げの追加。
@@ -226,6 +238,7 @@
 | 諮問 (§4・§6 の設計、diagnostician) | 2026-10-10 | [2026-10-11-lvcdt-design-diagnose.md](../../notes/reviews/2026-10-11-lvcdt-design-diagnose.md) | B を上限 50 に、`0` は条件付き C に。Major 4・Minor 2 | ユーザ 2026-10-11「ほい」で採用。介入のゲートに `dt_vol` の実測 (キーの無視を INVALID に)・K のビット一致・D の差 = 時間項を入れた。支持の条件に帳簿の第一層の Δρ/ρ を足した。この plan を新設し faceh §5.1 #8〜#10 を移した。帳簿の「ρ が先」の読みは主セッションの照合で裏付けられず、H1 の文言は確認できた範囲に留めた |
 | plan | 2026-10-11 | [2026-10-11-time_integration-line-viscous-jacobian-dt-plan.md](../../notes/reviews/2026-10-11-time_integration-line-viscous-jacobian-dt-plan.md) | GO-with-changes, C0/M5/m2 | 全件採用 (人工入力で確認): M1 帳簿の欠け・重複・非有限・基準 ≤ 0 を INVALID に、窓を事前登録、M2 上限 50 の用量 Δτ_B = min(Δτ_A, 50 Δτ_C) を全 605 節点で相対 1e-12、前提の設定 (`axisTimestepBeta`・`lineViscousDtRelief` なし) を確かめる (反例 B = C = A/50 が外れる)、M3 主判定を「上限 50 で 2000 step 以内の非有限化を避けたか」に限り、Δρ/ρ は記録だけ、H1〜H3 は調査の順として扱う、M4 累積の擬似時間は未測定と明記、M5 C の起動の直前に `--ab-only` で A/B を判定し直す、m6 10 倍到達の step を出力 (既知の値を再現)、m7 「全節点の Δτ が変わる」を訂正 |
 | 諮問 (§6 の結果、diagnostician) | 2026-10-11 | [2026-10-11-lvcdt-result-diagnose.md](../../notes/reviews/2026-10-11-lvcdt-result-diagnose.md) | 回避は登録の文のまま採用、Major 3・Minor 3 (安定・成立とは書かない・`rms_roOmega` の末尾の上昇を併記、Δρ/ρ は記録だけ、熱拡散数・SST の分離は書かない)、次は上限 50 での 3 本の水準までの比較 | 全件採用: §6.2 に限定した主張と観測を記録、§5.1 #1 を完了、#2 を 3 本の比較の提案に改めた (ユーザの判断待ち) |
+| plan (§6.3 の追加) | 2026-10-11 | [2026-10-11-time_integration-line-viscous-jacobian-dt-plan-2.md](../../notes/reviews/2026-10-11-time_integration-line-viscous-jacobian-dt-plan-2.md) | GO-with-changes, C0/M3/m3 | 全件採用: M1 本判定で見張りの記録のスキーマ・系列の完全さ・到達の出力の sha256 と量の再計算・CENSORED と DIVERGED の証拠を照合、M2 区間付きの収束の「判定不能」・必須の列の欠けを INVALID に、M3 各腕 1 本の探索的な比較と明記し分岐の文言を「今回の実行では」に限定、m4 等温壁の D の行 4 を期待値と照合 (V(b2))・V(b) の範囲を運動量の K に限定、m5 保存の記述を見張りの実装 (最新と到達だけ) に合わせ、記録係 `lvcmp_record.py` で各出力の sha256・有限・正値を残す、m6 台本は見張りの失敗で止まる |
 
 ## 7. 影響範囲
 

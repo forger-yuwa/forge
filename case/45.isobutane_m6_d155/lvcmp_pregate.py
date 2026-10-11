@@ -271,6 +271,21 @@ def main():
             ok("V", f"(a) {nm} の行 0〜3 が m7 と m5 で不変", okK, same[f"{nm}_rows0to3_m5_vs_m7"])
             okK0, same[f"{nm}_row0_m0_vs_m5"] = same_or_noise(nm, "m0", "m5", slice(0, 5))
             ok("V", f"(b) {nm} の行 0 が m5 と m0 で不変 (連続の行に粘性の流束は無い)", okK0, same[f"{nm}_row0_m0_vs_m5"])
+        # (b2) 等温壁の節点の D の行 4 (codex plan-2 m4): 値 ≥ 2 は拘束の行 [−ρE/ρ, 0, 0, 0, 1] (timeIntegration_d.cu 1263 行付近)、値 0・キー 5 は [0, 0, 0, 0, 1]
+        isoN = [k for k in range(arrays["m7"]["node_line"].shape[0]) if int(arrays["m7"]["flags_wall_iso_axis"][k, 1]) == 1]
+        stv = arrays["m7"]["state_ro_roU_roe_cp_gamma"]
+        worst_iso, bad_iso = 0.0, []
+        for k in isoN:
+            rho = max(np.float32(stv[k, 0]), np.float32(1e-30)); roe = np.float32(stv[k, 4])
+            e40 = float(-roe / rho)
+            for key, exp in (("m7", [e40, 0, 0, 0, 1]), ("m5", [e40, 0, 0, 0, 1]), ("m0", [0, 0, 0, 0, 1])):
+                row4 = arrays[key]["D"][k].reshape(5, 5)[4]
+                tol = 4 * float(np.spacing(np.float32(abs(e40)))) if key != "m0" else 0.0
+                err = abs(row4[0] - exp[0])
+                if not (err <= tol and all(row4[j] == exp[j] for j in range(1, 5))):
+                    bad_iso.append((nodes_k := int(arrays["m7"]["node_line"][k, 0]), key, row4.tolist()))
+                worst_iso = max(worst_iso, err / tol if tol > 0 else err)
+        ok("V", f"(b2) 等温壁の節点 ({len(isoN)} 個) の D の行 4: 値 3 は [−ρE/ρ, 0, 0, 0, 1] (4 ulp)、値 0 は [0, 0, 0, 0, 1]", len(isoN) > 0 and not bad_iso, bad_iso[:3] or worst_iso)
         rec["same"] = same
         exp_conn = []
         for k in range(nn):

@@ -5,9 +5,13 @@ lvcmp.sh の run_0553 (L7 = 値 3・マスク 7)・run_0554 (L0 = 値 0、生産
 (lvcmp_pregate.json、run_0556〜0559 の 1 step の書き出しから) を読み、
   (1) 入力のゲート: バイナリ・出発の場・格子の実体・入力ファイル・腕ごとの期待どおりの設定・起動ログ (値・マスク・LAYOUT2)、
       事前のゲートの --verify、腕の設定が同じ腕の書き出しの設定と step 数・出力の間隔・extraFields 以外で同じ
-  (2) 腕ごと: 見張り (m9_watch.json) の状態。REACHED なら、到達の step を系列から水準の規則で計算し直して一致すること、
-      区間付きの収束 VERDICT があって DIVERGED でないこと。EXEC_ERROR・DATA_ERROR・記録なしは INVALID
-  (3) 比較: 2 本とも REACHED のとき、到達の step の差が 15000 以上なら速い/遅い、未満は判別不能。どちらかが届かなければ比較しない
+  (2) 腕ごと (codex plan-2 M1・M2・m5): 見張りの記録のスキーマ (run・phase line・budget 150000・consec 1) と、2500 step ごとの系列が終端まで欠け・重複なく
+      そろうこと、記録係 (lvcmp_outputs.json) が系列の全出力について sha256・全保存量の有限・ρ/P/T > 0 を記録していること。
+      REACHED: 到達の step を系列から水準の規則で計算し直して一致、到達の出力の sha256 が見張りの記録と一致し、その出力から量を計算し直して系列の行と一致。
+      CENSORED: RUN_RC 0・最後の出力が 150000・系列は水準に入っていない。DIVERGED: 非有限の出力の行か、res_nan と detectNaN のログ。
+      区間付きの収束: 判定不能を含む・必須の残差の列が無い・VERDICT が無い・DIVERGED は INVALID (REACHED・CENSORED)。EXEC_ERROR・DATA_ERROR・記録なしは INVALID
+  (3) 比較: 2 本とも REACHED のとき、到達の step の差が 15000 以上なら「今回の実行では速い/遅い」、未満は「差を検出しなかった」。どちらかが届かなければ比較しない。
+      各腕 1 本なので探索的な比較で、再実行の揺れを除いた差とは言わない (codex plan-2 M3)
   (4) 記録だけ: 到達の窓 [N − 2 万, N] の θ_r・Q_w の check_quasisteady (--tail 1.0 --drift 0.0005 --min-snaps 5)、各列の区間付きの収束
 を行い、§6.3 の分岐どおりに判定する。出力は _band_ab/cold_pair/lvcmp_judge.json (異常でも必ず書く)。ゲートの不合格か INVALID があれば判定せず、終了コード 1。
 """
@@ -24,6 +28,7 @@ import numpy as np
 import yaml
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 D = HERE / "_band_ab" / "cold_pair"
 SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"
 SRC, SRC_RES, SRC_SHA16 = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5", "207d39f0e7f4aa03"
@@ -101,11 +106,22 @@ def qs(window, tag):
     return {"rc": o.returncode, "overall": ov[-1] if ov else None, "tail": txt.splitlines()[-6:]}
 
 
+REQ_RES = ("rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega")
+
+
 def segverdict(run):
+    """区間付きの収束 VERDICT。判定不能・必須の列の欠け・VERDICT なしは (None, 理由) を返す (codex plan-2 M2)"""
     p = HERE / run / "CONVERGENCE_SEGMENT.txt"
     t = p.read_text(errors="replace") if p.is_file() else ""
     m = re.search(r"->\s*([A-Z][A-Z ]+[A-Z])", t)
-    return (m.group(1) if (m and "判定区間" in t) else None), t
+    if not (m and "判定区間" in t):
+        return None, "区間付きの VERDICT が無い"
+    if "判定不能" in t:
+        return None, "判定不能を含む"
+    miss = [c for c in REQ_RES if not re.search(rf"^\s*{c}\s*:", t, re.M)]
+    if miss:
+        return None, f"必須の残差の列が無い {miss}"
+    return m.group(1), None
 
 
 def input_gates():
@@ -164,27 +180,59 @@ def assess(name):
         return "INVALID", {**info, "why": "見張りの記録が無い"}
     w = json.loads(p.read_text())
     st = w.get("status"); info["watch_status"] = st
-    rows = w.get("rows") or []
-    info["n_rows"] = len(rows)
-    seg, _ = segverdict(run)
-    info["segment_verdict"] = seg
     if st in ("EXEC_ERROR", "DATA_ERROR") or st is None:
         return "INVALID", {**info, "why": f"見張りの状態 {st}", "note": w.get("note")}
+    if not (w.get("run") == run and w.get("phase") == "line" and w.get("budget") == BUDGET and w.get("consec", 1) == 1 and not w.get("inherit")):
+        return "INVALID", {**info, "why": "見張りの記録のスキーマ (run・phase・budget・consec) が登録と違う"}
+    rows = sorted([x for x in (w.get("rows") or []) if x["step"] > 0], key=lambda x: x["step"])
+    steps = [x["step"] for x in rows]
+    info["n_rows"] = len(rows)
+    if not steps or len(set(steps)) != len(steps) or steps != list(range(OUT, steps[-1] + 1, OUT)):
+        return "INVALID", {**info, "why": f"系列が {OUT} step ごとに欠け・重複なくそろっていない (行 {len(steps)}、最後 {steps[-1] if steps else None})"}
+    # 記録係: 系列の全出力について sha256・全保存量の有限・ρ/P/T > 0 (見張りが消した出力の代わりの証拠、codex plan-2 m5)
+    rp = HERE / run / "lvcmp_outputs.json"
+    recs = json.loads(rp.read_text()).get("rows", {}) if rp.is_file() else {}
+    last_ok = steps[-1] if st != "DIVERGED" else max([x["step"] for x in rows if not (x.get("nonfinite") or x.get("nonfinite_all"))], default=0)
+    bad = [n for n in steps if n <= last_ok and not (str(n) in recs and recs[str(n)].get("nonfinite_all") == 0 and recs[str(n)].get("positive"))]
+    if bad:
+        return "INVALID", {**info, "why": f"記録係の記録が無いか、非有限・非正の出力がある ({len(bad)} 件、最初 {bad[0]})"}
+    seg, why = segverdict(run)
+    info["segment_verdict"] = seg
     rl = reach_level(rows)
     if st == "REACHED":
-        info["reach_step_watch"] = w.get("reach_step")
-        if rl is None or "step" not in rl or int(rl["step"]) != int(w.get("reach_step", -1)):
-            return "INVALID", {**info, "why": f"到達の step が系列からの再計算と合わない ({rl and rl.get('step')} ≠ {w.get('reach_step')})"}
+        n = w.get("reach_step")
+        info["reach_step_watch"] = n
+        if rl is None or "step" not in rl or int(rl["step"]) != int(n) or steps[-1] != int(n):
+            return "INVALID", {**info, "why": f"到達の step が系列からの再計算と合わない ({rl and rl.get('step')} ≠ {n}、系列の最後 {steps[-1]})"}
+        f = HERE / run / f"res_{n}.h5"
+        if not f.is_file() or sha(f) != w.get("reach_sha256") or recs.get(str(n), {}).get("sha256") != w.get("reach_sha256"):
+            return "INVALID", {**info, "why": "到達の出力が無いか、sha256 が見張り・記録係の記録と違う"}
+        import cold_series as CS, cold_xcheck as XC
+        yb_x, yb = XC.common_yb()
+        again = CS.snapshot(HERE / run, int(n), yb_x, yb)
+        row = rows[-1]
+        diff = {k: (again.get(k), row.get(k)) for k in ("deficit",) + KEYS
+                if again.get(k) is None or row.get(k) is None or abs(float(again[k]) - float(row[k])) > 1e-12 * max(abs(float(again[k])), abs(float(row[k])), 1e-300)}
+        if diff:
+            return "INVALID", {**info, "why": f"到達の出力から計算し直した量が系列の行と違う {diff}"}
         if seg is None or seg.startswith("DIVERGED"):
-            return "INVALID", {**info, "why": f"区間付きの収束 VERDICT が無いか DIVERGED ({seg})"}
-        info.update(reach_step=int(rl["step"]), drift=rl["drift"], deficit=rl["deficit"], quasisteady=qs(rl["window"], name))
+            return "INVALID", {**info, "why": f"区間付きの収束: {why or seg}"}
+        info.update(reach_step=int(n), drift=rl["drift"], deficit=rl["deficit"], quasisteady=qs(rl["window"], name))
         return "REACHED", info
     if st == "DIVERGED":
-        info["diverged_at"] = (rl or {}).get("diverged_at")
+        nf_rows = [x["step"] for x in rows if x.get("nonfinite") or x.get("nonfinite_all")]
+        nan = sorted((HERE / run).glob("res_nan_*.h5"))
+        log = (HERE / run / "forge_run.log").read_text(errors="replace") if (HERE / run / "forge_run.log").is_file() else ""
+        if not (nf_rows or (nan and "Non-finite value detected" in log)):
+            return "INVALID", {**info, "why": "DIVERGED の証拠 (非有限の出力の行、res_nan と detectNaN のログ) が無い"}
+        info["diverged_at"] = w.get("fail_step")
         return "DIVERGED", info
     if st == "CENSORED":
-        if rl is not None:
-            return "INVALID", {**info, "why": "CENSORED なのに系列は水準に入っている"}
+        rc = (HERE / run / "RUN_RC").read_text().strip() if (HERE / run / "RUN_RC").is_file() else None
+        if rc != "0" or steps[-1] != BUDGET or rl is not None:
+            return "INVALID", {**info, "why": f"CENSORED の条件 (RUN_RC 0・最後の出力 {BUDGET}・系列が水準に入っていない) を満たさない (rc {rc}、最後 {steps[-1]})"}
+        if seg is None or seg.startswith("DIVERGED"):
+            return "INVALID", {**info, "why": f"区間付きの収束: {why or seg}"}
         return "CENSORED", info
     return "INVALID", {**info, "why": f"未知の状態 {st}"}
 
@@ -193,7 +241,7 @@ def cmp(cls, x, y):
     cx, cy = cls[x], cls[y]
     if cx[0] == "REACHED" and cy[0] == "REACHED":
         d = cx[1]["reach_step"] - cy[1]["reach_step"]
-        v = (f"{x} が速い" if d < 0 else f"{x} が遅い") if abs(d) >= THR else "判別不能"
+        v = (f"{x} が速い" if d < 0 else f"{x} が遅い") if abs(d) >= THR else "差を検出しなかった"
         return {"verdict": v, "diff_steps": d, "x": cx[1]["reach_step"], "y": cy[1]["reach_step"]}
     return {"verdict": "比較しない", "x": cx[0], "y": cy[0]}
 
@@ -221,16 +269,17 @@ def main():
         c70, c75, c50 = cmp(cls, "L7", "L0"), cmp(cls, "L7", "L5"), cmp(cls, "L5", "L0")
         rec["comparisons"] = {"L7_vs_L0": c70, "L7_vs_L5": c75, "L5_vs_L0": c50}
         s7, s0 = cls["L7"][0], cls["L0"][0]
+        # 各腕 1 本の探索的な比較 (codex plan-2 M3): 再現性を含む結論 (手法の利点・熱伝導の K の効き) はここでは言わない
         if s0 != "REACHED":
-            main_v = "判別不能 (生産 L0 が水準に届かない)"
+            main_v = "判別不能 (生産 L0 が今回の実行では水準に届かなかった)"
         elif s7 != "REACHED":
-            main_v = f"NO-GO (全部入り L7 は上限 50 で水準に届かない: {s7})"
+            main_v = f"NO-GO (全部入り L7 は今回の実行では 15 万 step 以内に水準に届かなかった: {s7})"
         elif c70["verdict"] == "L7 が速い":
-            main_v = "全部入りが生産より早く水準に届く (この条件)"
+            main_v = "今回の実行では、全部入りが生産より登録幅 (15000 step) 以上早く水準に届いた (探索的。再現は別に確かめる)"
         elif c70["verdict"] == "L7 が遅い":
-            main_v = "NO-GO (全部入りは生産より遅い)"
+            main_v = "NO-GO (今回の実行では、全部入りが生産より登録幅以上遅かった)"
         else:
-            main_v = "全部入りと生産は区別できない"
+            main_v = "今回の実行では、全部入りと生産の到達の差を検出しなかった (登録幅 15000 step 未満)"
         rec["main"] = main_v
         rec["VERDICT"] = f"主 (L7 と L0): {main_v}; L7 と L5: {c75['verdict']}; L5 と L0: {c50['verdict']}"
     out.write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str))

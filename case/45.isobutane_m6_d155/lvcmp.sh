@@ -77,7 +77,8 @@ dump1() {  # dump1 <run> <l7|l5|l0>: 1 step のライン行列の書き出し
 
 arm() {  # arm <run> <l7|l5|l0>: 水準に入るまで (見張りが止める)
   local r=$1 a=$2 mk=$(masknum $2)
-  if [ -f $r/m9_watch.json ] && grep -q '"status": "\(REACHED\|CENSORED\|DIVERGED\|EXEC_ERROR\|DATA_ERROR\)"' $r/m9_watch.json; then echo "$r は既に終わっている" >> $LOG; return 0; fi
+  if [ -f $r/m9_watch.json ] && grep -q '"status": "\(REACHED\|CENSORED\|DIVERGED\)"' $r/m9_watch.json; then echo "$r は既に終わっている" >> $LOG; return 0; fi
+  if [ -f $r/m9_watch.json ] && grep -q '"status": "\(EXEC_ERROR\|DATA_ERROR\)"' $r/m9_watch.json; then echo "$r は見張りの失敗で終わっている — 止める" >> $LOG; return 1; fi
   [ -e $r ] && { echo "$r が途中まである — 止める (使い直さない)" >> $LOG; return 1; }
   disk_ok $r || return 1
   ( export FORGE_BIN=$BIN COLD_ALT_BINARY=$KEY
@@ -90,17 +91,22 @@ arm() {  # arm <run> <l7|l5|l0>: 水準に入るまで (見張りが止める)
     [ "$mk" != - ] && export FORGE_LVC_TERMS=$mk
     python3 cold_cfl.py run $r > $r/cold_pair_run_stdout.log 2>&1; echo $? > $r/forge_rc ) &
   local job=$!
+  python3 lvcmp_record.py $r >> $r/lvcmp_record.log 2>&1 &    # 見張りが消す前に各出力の sha256・有限性・ρ/P/T の正値を記録する (codex plan-2 m5)
+  local recpid=$!
   sleep 120
   if ! modes_ok $r $a; then
     echo "$r: 実効のモードが期待と違う — 止める" >> $LOG
     python3 m9_stop.py $r || echo "$r: forge を止められない" >> $LOG
-    wait $job; return 1
+    wait $job; wait $recpid; return 1
   fi
   echo "$r: モード OK $(date -Is)" >> $LOG
   python3 m9_watch.py $r --phase line --budget $BUDGET >> $LOG 2>&1; local wrc=$?
   wait $job
-  echo "$r 見張り rc=$wrc、forge rc=$(cat $r/forge_rc 2>/dev/null)、状態 $(python3 -c "import json;print(json.load(open('$r/m9_watch.json'))['status'])" 2>/dev/null) $(date -Is)" >> $LOG
+  wait $recpid
+  local wst=$(python3 -c "import json;print(json.load(open('$r/m9_watch.json'))['status'])" 2>/dev/null)
+  echo "$r 見張り rc=$wrc、forge rc=$(cat $r/forge_rc 2>/dev/null)、状態 $wst、記録係 $(python3 -c "import json;d=json.load(open('$r/lvcmp_outputs.json'));print(len(d['rows']), d.get('finished'))" 2>/dev/null) $(date -Is)" >> $LOG
   ( cd $r && python3 $TOOLS/check_convergence.py . --segment > CONVERGENCE_SEGMENT.txt 2>&1 ); echo "$r check_convergence --segment rc=$?" >> $LOG
+  case "$wst" in REACHED|CENSORED|DIVERGED) return 0;; *) echo "$r: 見張りの状態 $wst — 止める (codex plan-2 m6)" >> $LOG; return 1;; esac
 }
 
 MODE=${1:-all}
