@@ -51,6 +51,7 @@
 - **TP 化の範囲** (plan レビュー M1): ソルバ設定だけでなく、推力抽出 (`metrics/extract.py:38` は CPG の圧力復元)、1D 理想推力と 1D チョーク流量 (`opt/driver.py:84` は定比熱)、IC (`evaluate/runner.py:197`)、壁の平滑化 (`runner.py:243`)、最適化ドライバのゲートを TP にする。同じ解決済みの組成・物性 DB・エンタルピー基準を MOC 側の `GasSemiPerfect` と CFD に渡す (`FrozenGas` には MOC が要る `nu`・`mach_of_nu` が無い)。CEA との照合は出口温度だけでなく $\dot m_{1D}$・出口速度・出口圧力・$F_{1D}$ まで行い、反応物の状態と凍結位置 (燃焼室) を固定する。
 - **作動点 (第 1 段)**: 真空の設計点。領域は出口面までで、出口は超音速の流出 (`outflow`。現行 runner の `outlet_statPress: Ps=p_ambient` は残さない — `runner.py:126`)。 作動点は親 §3-14 と同じ「高度 (または $p_a$) と重みのリスト」で書き、真空は `p_a: 0` の要素とする。標準大気 (US 1976) は④と共用の `gas/atmosphere.py` (新規、所有はこの系列)。
 - **推力** (plan レビュー M2): ノズル内壁・入口面・出口面で閉じた検査体積 CV の全境界を、外向き法線で $\Pi_x=\int[\rho u_x(\mathbf u\cdot\mathbf n)+(p-p_a)n_x-(\boldsymbol\tau_{eff}\mathbf n)_x]\,dA$ ($dA=2\pi r\,ds$) に統一し、定常で総和 0 になることから壁会計 (入口面 + 内壁) と出口面会計 (出口面、粘性応力を含む) を導く。両者の差を CV 残差とし、$F_{1D}$ で正規化する。壁の摩擦の符号は node/cell の違い (`metrics/sern_forces.py:73`) を確かめてから使う。兄弟 plan §4.4 と同じ定義で、本計画はこの定義を自前で持つ。$\eta_{vac}=F_{vac}/F_{1D,vac}(\varepsilon)$ ($F_{1D}$ は同じ凍結 TP で $\varepsilon$ まで等エントロピー膨張した 1D 推力)。
+- **ユーザ決定 (2026-10-11)**: (1) 推力を壁会計と出口面会計の両方で出し、**2 つが大きく変わらないこと (CV 残差 $|F_{wall}-F_{exit}|/F_{1D}$ の絶対値が小さいこと) を収束判定の一つにする**。閾値と、残差の VERDICT・推力系の STEADY との組み合わせ方は diagnostician の回答を見て決める (主セッション案 1e-4)。(2) メッシュの AR は **5000 以下を基準**にする。AGENTS.md の例外 (壁法線に沿った、スキューの無い構造格子の境界層は ≤ 5000) の条件を満たすよう、近壁を壁法線の層にする方向で検討する (今の格子は半径方向の線が $x$ 一定で、拡大部の近壁セルにスキューがある)。以下のゲートの記述は、この 2 点を反映して改める。
 - **ゲート** (plan レビュー M3): 受理条件は、(i) 同じ実効設定の区間 (`StageManifest`) で `check_convergence` が **PASS** (現行 `opt/driver.py:173` の「DIVERGED でなければ可」は採らない)、(ii) 両推力会計・$\eta$・$\dot m$・CV 残差の時系列が `check_quasisteady.py --series-csv` で **STEADY**、(iii) Phase 2 の物理ゲート ($\dot m/\dot m_{1D}$、$\eta$ の範囲)、(iv) CV 残差 ≤ 0.1 %、(v) メッシュ品質と局所 $y_1^+$。polish は `restart_field.py` による**同一メッシュの継続**に替える (現行 `opt/polish.py:41` は `runner.prepare` 経由で補間し直すので継続ではない)。最初の TP の seed は段階起動、形状が変わる warm start は `interp_field.py` の cross-mesh restart。
 - **内部衝撃波の指標**: 診断ノートの方法 (各 $x$ 断面で Mach の最大降下の位置を追う) で最大の $|\Delta M|$ を記録する。
 - **Euler の設定** (V2 で使う): `viscMethod: 0`、`visc: 0.0`、`thermCond: 0.0`、`turbulence.model: none`、物理壁はすべて `slip`。
@@ -166,6 +167,7 @@
 
 ## 9. 変更ログ
 
+- `2026-10-11` — ユーザ決定: 壁と出口面の推力の一致を収束判定の一つに、AR は 5000 以下を基準 (§4.1)。
 - `2026-10-11` — #2b・#3・#3b を実装 (implementer、主セッションで試験と主要な数値を再確認)。V0 (CFD なし) は暫定で「中間」((D) 成立 8/135・通過 3/8、TOP 0/5)。ゲート (i)(ii)(v) が基準ケースを通さない件と、V0 の解釈・(D) の族・Hall 初期線の件を diagnostician に諮問中 (結果を見てから §4・§6 を直す)。
 - `2026-10-11` — ユーザ判断 (親 §3-16): 2 モードとも提供し設計者が選ぶ (`geometry.bell_mode`)。比較は選ぶための判断材料で、主項目は「十分良い形に達するまでの評価回数・実時間」($\delta_{good}$ 仮 0.3 %)。V0 の A/B は優先順だけを変え、どちらのモードも取りやめない。
 - `2026-10-11` — diagnostician (Fable) の横断レビュー [記録](../../notes/reviews/2026-10-11-thruster-strategy-diagnostician.md) を全件採用: 第一の判定量を前進 MOC ゲートに (η は拒否権)、順序を「(D) の壁 → ゲートの A/B (V0、CFD なし) → S1 と MOO の順を決める」に、共用モジュール #3b (所有はこの系列)、$U_k$ に δ\* 項、作動点を高度のリスト (真空は `p_a: 0`)、S1 が閉じない場合の TIC の代替をトリガ付きで §8-4 に。
