@@ -540,7 +540,12 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
   $\beta=\mu_f\delta/|\Delta\mathbf{cc}|$・$\kappa=k_f\delta/|\Delta\mathbf{cc}|$ (残差と同じ面の値、層流は節点の `vis_lam`)、$\bar u=f_iu_i+(1-f_i)u_j$ から
   $D\mathrel{+}=-\partial R_i/\partial Q_i$、$K\mathrel{+}=\partial R_i/\partial Q_j$。$P$ は現在の離散残差の厳密な微分ではなく前処理行列としての近似。
   隣が速度の Dirichlet の壁なら運動量・仕事の K を、等温壁なら熱伝導の K を 0 にし、等温壁の節点の行 4 は $\Delta(\rho E)_w-e_w\Delta\rho_w=0$ (ΔT_w = 0)。
-  単体照合 `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (中心差分・零空間 $\delta\rho(1,u,v,w,E)$・等温壁の拘束・短いラインの解。中心差分との差は D・K の行列全体の最大値で割って判定するので、列ごとの相対誤差は保証しない)。
+  単体照合 `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (中心差分・零空間 $\delta\rho(1,u,v,w,E)$・等温壁の拘束・短いラインの解)。
+  中心差分との照合は列ごとに分類する: 列 $c$ の大きさ $s_c=\max_r|J_{rc}|$ で割った誤差を 2 つの差分幅で測り、差分の再現と量子化の指標 $\eta_c$ (`--eta`) で
+  「解像しない」列を分ける (零列は固定の尺度で無次元化)。参照の差分の演算精度は `--ref double|mp100` で選べ、`mp100` (10 進 100 桁) では double の参照の
+  不一致が丸めによるものかを列ごとに判定する。片側だけ固定の隣 (速度だけ・温度だけ) は自由度を消去した系で列ごとに照合する。行列全体の最大値で割った誤差は
+  記録だけ。保証の範囲はこの単体照合の標本 (乱数 200 組・端の場合・零列) に限り、製品の経路の組立 (`-DFORGE_LINE_AUDIT` の監査) とは別に確かめる
+  (plan `time_integration-line-viscous-jacobian-faceh` §6.3〜§6.8)。
 - **`lineViscousDtRelief: θ`**: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍 (`setDT_d`
   で面ごとに割引、対流+音響分は残す)。θ=1 でも安定 (上と同じ理由で利得も僅差)。
 - **`lineDtDirectional: 1`**: 方向別 dt — line 面 (Thomas が厳密に解く結合) の λ を音響込みで

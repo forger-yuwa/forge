@@ -562,6 +562,24 @@
    "last_step": 1999,
    "csv_first_nonfinite": null,
    "segment_verdict": "NOT CONVERGED",
+   "segment_recheck": {
+    "tool_sha256": "6be9956a95b793eb90e1a420f3ebbbcffcf5d10d3c69a9ec73fd52c0c6ca29b5",
+    "stored": {
+     "segment": "main",
+     "last_step": 1999,
+     "verdict": "NOT CONVERGED"
+    },
+    "csv_sha256": {
+     "residual_history_main.csv": "3d57f331846646042055358ce398340837db444e096fef0edd3d066e3ff2e3a9"
+    },
+    "fresh": {
+     "segment": "main",
+     "last_step": 1999,
+     "verdict": "NOT CONVERGED",
+     "rc": 1
+    },
+    "csv_last_outer_end": 1999
+   },
    "evidence_problems": [],
    "records": {
     "rms_ro": {
@@ -681,6 +699,24 @@
    "last_step": 1999,
    "csv_first_nonfinite": null,
    "segment_verdict": "NOT CONVERGED",
+   "segment_recheck": {
+    "tool_sha256": "6be9956a95b793eb90e1a420f3ebbbcffcf5d10d3c69a9ec73fd52c0c6ca29b5",
+    "stored": {
+     "segment": "main",
+     "last_step": 1999,
+     "verdict": "NOT CONVERGED"
+    },
+    "csv_sha256": {
+     "residual_history_main.csv": "019ab99135bbf5aa55729aa90213bbacac85554494cc1fbaa38bf64504df21f7"
+    },
+    "fresh": {
+     "segment": "main",
+     "last_step": 1999,
+     "verdict": "NOT CONVERGED",
+     "rc": 1
+    },
+    "csv_last_outer_end": 1999
+   },
    "evidence_problems": [],
    "records": {
     "rms_ro": {

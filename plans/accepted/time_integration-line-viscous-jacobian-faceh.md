@@ -3,13 +3,13 @@
 ## メタ
 
 - **area**: `time_integration`
-- **status**: `in_progress`
+- **status**: `done`
 - **related_docs**:
   - `methods/time_integration/implementation.md` の `lineViscCoupling: 2`・`3` の節 (診断用、本線不採用)
 - **related_plans**:
   - [`../accepted/time_integration-line-viscous-jacobian.md`](../accepted/time_integration-line-viscous-jacobian.md) (親。§6.16 の面エンタルピーの A/B、§6.17 の再開の条件)
-  - [`time_integration-implicit-thermal-jacobian.md`](time_integration-implicit-thermal-jacobian.md) §6.2・§6.3 (point 仕上げでの面エンタルピーの A/B、NOT_SUPPORT)
-  - [`time_integration-line-implicit-speed.md`](time_integration-line-implicit-speed.md) (本線 B0 = 値 0 + 方向別 + キー 5 + 上限 50)
+  - [`time_integration-implicit-thermal-jacobian.md`](../active/time_integration-implicit-thermal-jacobian.md) §6.2・§6.3 (point 仕上げでの面エンタルピーの A/B、NOT_SUPPORT)
+  - [`time_integration-line-implicit-speed.md`](../active/time_integration-line-implicit-speed.md) (本線 B0 = 値 0 + 方向別 + キー 5 + 上限 50)
 - **created**: `2026-10-10`
 - **owner**: Claude (ユーザ 2026-10-10「速度上がる上がらないでなく、筋のいい手法がいいと思ってる」、マスク 7 + 面エンタルピーの double の A/B の提案に「よい」)
 
@@ -66,6 +66,7 @@
 | 8 | §6.8 の未解決の処置 (**2026-10-11 後継の [`time_integration-line-viscous-jacobian-dt.md`](time_integration-line-viscous-jacobian-dt.md) §5.1 #3 へ移した**) | 段 C の不一致 (対流の K の相殺)・D の判別不能 3 件・対照 T の保留 (同じソースの監査のビルドと通常のビルドで D が 1 ulp 違う)。§6.9 は係数の変更の成立を示すだけで、これらを解消していない。閉じる前に残すか後継に移すかを決める | F |
 | 9 | 実残差・更新の写像との整合 (**2026-10-11 後継の [`time_integration-line-viscous-jacobian-dt.md`](time_integration-line-viscous-jacobian-dt.md) §5.1 #4 へ移した**) | 共通関数は実残差の厳密な微分ではない (`block_dplur_jacobian_d.cuh` 94 行付近)。実残差の微小応答と有限の補正の応答を、同じ評価の経路で測る (親 plan §6.16 の続き)。マスク 5 が有限でも全部入りの整合の確認は要るので、着手条件 (「#7 で熱伝導の K なしでも壊れたら」) は外した (§6.13、諮問)。測る成分・凍結の範囲・拘束の向きを先に決める | F |
 | 10 | 方向別 dt の A/B (§6.13 の次の一手。**2026-10-11 ユーザ「ほい」: B を上限 50、`lineDtDirectional 0` は条件付きの C にする案 (diagnostician 諮問) で、後継の [`time_integration-line-viscous-jacobian-dt.md`](time_integration-line-viscous-jacobian-dt.md) §5.1 #1・§6 へ移した**) | 段 ③ の FP64・`run_0183` の res_100000・値 3・マスク 7・キー 5・cfl 4 で、`lineDtDirectional` 1 と 0 を各 2 本・最大 2000 step。介入のゲートは残差・物性・拘束・K の不変と `dt_local` の変化、D の差が時間項の変更で説明できること。事前登録と codex plan 段の後に回す。この plan を閉じるなら後継の plan に移す | F |
+| 11 | result 段の対応 (**完了 2026-10-11**) | codex result 段 (GO-with-changes、M1/m1) を諮問 ([2026-10-11-faceh-dt-result-disposition-diagnose.md](../../notes/reviews/2026-10-11-faceh-dt-result-disposition-diagnose.md)) のとおり採用: `lvcaudit_judge.py` の S に sweep 15 配列と `scalar_visc_line` の形・有限性を足し、T の比較の前に 3 本の非有限・空を INVALID にした (§6.8 の「次から検査する」の実装)。負例 (NaN・同じビット列の NaN・形の不一致) が INVALID になり、手元の保存済みの証拠 (`run_0550〜0552` の写し) で回し直して VERDICT・各段の不合格の数は不変 (`case/45.isobutane_m6_d155/_band_ab/cold_pair/rejudge_2026-10-11_result_review.json`)。m1: `methods/time_integration/implementation.md` の単体照合の説明と `plans/README.md` を直した。判断: 2026-10-11 diagnostician 諮問 — 採用、result 段は回し直さない | F |
 
 ## 6. 検証 (事前登録、2026-10-10、run の前。codex 諮問 [記録](../../notes/reviews/2026-10-10-lvc-faceh-design-diagnose.md) の採否を反映)
 
@@ -295,6 +296,7 @@
   - A (壁際の LHS の係数の float の座標による最大 10.8 % のずれ) は、幾何の精度の不整合として採用する。破綻への因果は未確認。係数は δ/dcc = S²/|e·S| に依存するので、dcc の長さだけでなく e·S の誤差として扱う。
     同じ幾何は B0 のスカラーの対角と、**キー 5 の熱伝導の対角**にも使われる。
   - 判定器の小さな抜け: S は sweep の配列 (rhs・dq) の存在だけを見て有限性を検査していなかった。今回の記録に非有限は無いが、次から検査する。
+    → 2026-10-11 に実装 (result 段 codex M1、§5.1 #11): sweep 15 配列と `scalar_visc_line` の形・有限性を S に、T の比較の前に 3 本の有限性を。回し直しで結論は不変。
   - 元のセッションの float 化の plan (§4.2a・段 ③) は、ISP 0 の LHS の座標の差を既に対象にしている。申し送りは対象の追加ではなく、観測と検証条件の共有にする。
 
 ### 6.9 事前登録: LHS の座標の差だけを変える A/B (§5.1 #6、2026-10-10、回す前。諮問の判別 A/B を、元のセッションの段 ②・段 ③ のバイナリの組で行う)
@@ -533,11 +535,13 @@
 | plan (§6.11 の追加) | 2026-10-10 | [2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md](../../notes/reviews/2026-10-10-time_integration-line-viscous-jacobian-faceh-plan-6.md) | GO-with-changes, C0/M3/m0 | 全件採用 (§6.11 に記録、人工入力で確認): M1 非有限の参照値・残差・比を即 INVALID に、最終の判定で I も必須、M2 V(c) を期待の接続の全部で比べ、接続・往復の面・拘束の行を先に照合、M3 証拠と設定のハッシュを記録して `--verify` で腕の起動と本判定に結び付け、腕と書き出しの設定を全項目で照合。同型の欠陥を §6.9 のゲートでも直し、既存の書き出しで結果が同じことを確認 |
 | 諮問 (§6.11 の事前のゲートの判別不能) | 2026-10-10 | [2026-10-10-lvc75-pregate-rhs-diagnose.md](../../notes/reviews/2026-10-10-lvc75-pregate-rhs-diagnose.md) | 旧の INDETERMINATE を保存し、構造の照合を入れた新しい登録で書き出しを一度だけ取り直す、Major 3・Minor 1 | 全件採用: 改めた規則で旧の判定を置き換えない、構造の照合 (`rhs_s0` = 拘束の処理をした float(残差)、行 3 を含む全行) を必須に、ulp・要素数の 3 倍の案は記録だけ、`res_roUz` を出力に足して行 3 を照合。§6.12 に記録 |
 | 諮問 (§6.11・§6.12 の結果) | 2026-10-10 | [2026-10-10-lvc75-result-diagnose.md](../../notes/reviews/2026-10-10-lvc75-result-diagnose.md) | 支持は限定付きで採用、Major 4・Minor 1 (マスク 5 は安定でない、局在からの熱の過渡の解釈と「K 自体は正しい」は要再検証、この plan は後継へ移して閉じる)、次は方向別 dt の 1/0 の A/B | 全件採用: §6.13 に限定した主張と観測を記録、§5.1 #9 の着手条件を外し、#10 (方向別 dt の A/B、ユーザの判断待ち) を足した |
+| result | 2026-10-11 | [2026-10-11-time_integration-line-viscous-jacobian-faceh-result.md](../../notes/reviews/2026-10-11-time_integration-line-viscous-jacobian-faceh-result.md) | GO-with-changes, C0/M1/m1 | 全件採用 (§5.1 #11): M1 は判定器を直して負例と保存済みの証拠で確かめ、結論は不変。m1 は methods と索引を直した |
+| 諮問 (result 段の採否、diagnostician) | 2026-10-11 | [2026-10-11-faceh-dt-result-disposition-diagnose.md](../../notes/reviews/2026-10-11-faceh-dt-result-disposition-diagnose.md) | 採用 (M1 は scalar_visc_line と T の 3 本の有限性まで広げる)、result 段の回し直しは不要 | 採用 (§5.1 #11) |
 
 ## 7. 影響範囲
 
 - ソルバの数値は変えない。単体試験 (`test_line_visc_jacobian.cpp`) の拡張、監査用のビルドだけの書き出し (`timeIntegration_d.cu` の `FORGE_LINE_AUDIT`)、照合のツール
-  (`line_audit_helper.cpp`・`lvcaudit_judge.py`)、case/45 の台本・判定と run を足す。監査の照合は case/45・5 本のライン・1 step の局所の組立に限り、cell・周期・収束性は保証しない。
+  (`line_audit_helper.cpp`・`lvcaudit_judge.py`)、case/45 の台本・判定と run を足す。通常のビルドの数値処理は変えない (監査の書き出しは `#if FORGE_LINE_AUDIT` の中だけ、codex result 段で確認)。監査の照合は case/45・5 本のライン・1 step の局所の組立に限り、cell・周期・収束性は保証しない。
 
 ## 変更ログ
 
@@ -546,3 +550,4 @@
 - 2026-10-10: 主の 4 本 (`run_0540`〜`run_0543`) を回し、VERDICT 棄却 (§6.2)。codex 諮問を全件採用し、次は U-J の列ごと・壁拘束の照合 (§5.1 #4、未着手)。
 - 2026-10-10: U-J の列ごとの照合 (§6.3 は FAIL・原文保存、§6.5 の多倍長の参照で PASS・丸めの仮説を支持、§6.6)。codex 諮問を採用し、次は製品の経路の照合 (§5.1 #5、未着手)。
 - 2026-10-11: §5.1 #8〜#10 を後継の [`time_integration-line-viscous-jacobian-dt.md`](time_integration-line-viscous-jacobian-dt.md) へ移した (方向別 dt の A/B は B = 上限 50、ユーザの判断)。この plan は result 段のレビューの後に閉じる。
+- 2026-10-11: codex result 段 (GO-with-changes、M1/m1) を diagnostician 諮問のとおり採用 (§5.1 #11)。監査の判定器の有限性の検査を足して回し直し (結論は不変)、methods と索引を直した。status を done にして accepted へ移した (§5.1 #8〜#10 は後継の dt plan で扱い、同じ日に閉じた)。

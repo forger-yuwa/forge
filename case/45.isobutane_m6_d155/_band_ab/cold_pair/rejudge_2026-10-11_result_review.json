@@ -1,0 +1,114 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-dt / faceh の result 段 (codex M3・m4・faceh M1) の確かめ直し、2026-10-11",
+ "rule": "諮問 notes/reviews/2026-10-11-faceh-dt-result-disposition-diagnose.md: 鍵項目 (VERDICT・分類・到達 step・segment_verdict・quasisteady.overall・floors・dev) が変わらなければ合格。追加の記録は変更に数えない",
+ "judge_commit": "b853baa2ba475d2cfac2a538ab6b05d6c20196ef",
+ "judges": {
+  "lvcmp_judge": {
+   "where": "AWS B",
+   "pre_sha256": "2da045c04f03b3cd56e30de04453dbdfe078aa7dd9d7596b8a72f8788db7503e",
+   "unchanged": {
+    "VERDICT": true,
+    "gates_ok": true,
+    "L7.class": true,
+    "L7.reach_step": true,
+    "L7.segment_verdict": true,
+    "L7.quasisteady.overall": true,
+    "L7.segment_recheck_ok": true,
+    "L0.class": true,
+    "L0.reach_step": true,
+    "L0.segment_verdict": true,
+    "L0.quasisteady.overall": true,
+    "L0.segment_recheck_ok": true,
+    "L5.class": true,
+    "L5.reach_step": true,
+    "L5.segment_verdict": true,
+    "L5.quasisteady.overall": true,
+    "L5.segment_recheck_ok": true,
+    "comparisons": true
+   },
+   "all_unchanged": true,
+   "VERDICT": "主 (L7 と L0): 今回の実行では、全部入りと生産の到達の差を検出しなかった (登録幅 15000 step 未満); L7 と L5: 差を検出しなかった; L5 と L0: 差を検出しなかった"
+  },
+  "lvcmp_rerun_judge": {
+   "where": "AWS B",
+   "pre_sha256": "423c38619f063e919c6f78d1318f37f03a9b6dc2b9f3a5a4a9cb3cbdadc562b1",
+   "unchanged": {
+    "VERDICT": true,
+    "gates_ok": true,
+    "L7.class": true,
+    "L7.reach_step": true,
+    "L7.segment_verdict": true,
+    "L7.quasisteady.overall": true,
+    "L7.segment_recheck_ok": true,
+    "L0.class": true,
+    "L0.reach_step": true,
+    "L0.segment_verdict": true,
+    "L0.quasisteady.overall": true,
+    "L0.segment_recheck_ok": true,
+    "L5.class": true,
+    "L5.reach_step": true,
+    "L5.segment_verdict": true,
+    "L5.quasisteady.overall": true,
+    "L5.segment_recheck_ok": true,
+    "L7r.class": true,
+    "L7r.reach_step": true,
+    "L7r.segment_verdict": true,
+    "L7r.quasisteady.overall": true,
+    "L7r.segment_recheck_ok": true,
+    "dev_vs_L0_pct": true,
+    "floor_ratio_vs_L0": true,
+    "floor_ratio_L5_vs_L0": true,
+    "reach_step_diff_vs_L7": true,
+    "L7_under_same_rule": true,
+    "floors.rms_ro": true
+   },
+   "all_unchanged": true,
+   "VERDICT": "再現: 同じ停止規則による到達の時点で、登録幅以上の正の差と高い残差の中央値が再び観測された (2 本、各 1 本の L0 に対して)"
+  },
+  "lvcdt_judge": {
+   "where": "AWS A",
+   "unchanged": {
+    "VERDICT": true,
+    "gates_ok": true,
+    "main_v3": true,
+    "a1.class": true,
+    "a1.segment_verdict": true,
+    "a1.evidence_problems": true,
+    "b1.class": true,
+    "b1.segment_verdict": true,
+    "b1.evidence_problems": true,
+    "a2.class": true,
+    "a2.segment_verdict": true,
+    "a2.evidence_problems": true,
+    "b2.class": true,
+    "b2.segment_verdict": true,
+    "b2.evidence_problems": true
+   },
+   "all_unchanged": true,
+   "VERDICT": "主 (値 3・マスク 7): 回避 — この条件・2000 step では、上限 50 で全部入りの非有限化を避けた (全部入りが成り立った・収束した・H1 の機構が正しいとは言わない); A は全部 DIVERGED、B (上限 50) は全部 FINITE"
+  },
+  "lvcaudit_judge": {
+   "where": "手元 (~/forge-evidence/2026-10-10-faceh の run_0550〜0552 の写し)",
+   "unchanged": {
+    "VERDICT": true,
+    "A_VERDICT": true,
+    "control": true,
+    "G.n/fail/ind": true,
+    "B.n/fail/ind": true,
+    "C.n/fail/ind": true,
+    "D.n/fail/ind": true,
+    "T.n/fail/ind": true,
+    "S.fail/ind": true
+   },
+   "all_unchanged": true,
+   "S_n": [
+    3663,
+    3679
+   ],
+   "note": "S の項目は sweep 15 配列と scalar_visc_line の形・有限性の 16 項目を足した (すべて合格)",
+   "VERDICT": "FAIL (製品の組立が記録の入力からの再現と許容外: 最初に外れる段 C); 対照とのビット一致が成り立たないので、通常の経路への結論は保留"
+  }
+ },
+ "badinput_test": "lvc_judge_badinput_test.py: 新しい判定器で 16 項目 ALL OK、修正前の判定器では 8 件 FAIL (試験が欠陥を捕まえることの確認)",
+ "ALL_UNCHANGED": true
+}

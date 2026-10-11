@@ -190,6 +190,24 @@
    "watch_status": "REACHED",
    "n_rows": 44,
    "segment_verdict": "NOT CONVERGED",
+   "segment_recheck": {
+    "tool_sha256": "6be9956a95b793eb90e1a420f3ebbbcffcf5d10d3c69a9ec73fd52c0c6ca29b5",
+    "stored": {
+     "segment": "main",
+     "last_step": 112261,
+     "verdict": "NOT CONVERGED"
+    },
+    "csv_sha256": {
+     "residual_history_main.csv": "0907aa74b7b19e8c3327827d17d7891c4f97fda51c14632f20428e5825e8d25f"
+    },
+    "fresh": {
+     "segment": "main",
+     "last_step": 112261,
+     "verdict": "NOT CONVERGED",
+     "rc": 1
+    },
+    "csv_last_outer_end": 112261
+   },
    "reach_step_watch": 110000,
    "reach_step": 110000,
    "drift": [
@@ -201,6 +219,13 @@
    "quasisteady": {
     "rc": 1,
     "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "classes": {
+     "theta_r_40": "STEADY",
+     "theta_r_70": "STEADY",
+     "theta_r_94": "STEADY",
+     "Q_w": "DRIFTING"
+    },
+    "ok": true,
     "tail": [
      "  theta_r_40      : tail mean=0.07848  drift=0.0%/tail  fluct=0.2%          STEADY",
      "  theta_r_70      : tail mean=0.1157  drift=0.0%/tail  fluct=0.2%           STEADY",
@@ -217,6 +242,24 @@
    "watch_status": "REACHED",
    "n_rows": 47,
    "segment_verdict": "NOT CONVERGED",
+   "segment_recheck": {
+    "tool_sha256": "6be9956a95b793eb90e1a420f3ebbbcffcf5d10d3c69a9ec73fd52c0c6ca29b5",
+    "stored": {
+     "segment": "main",
+     "last_step": 120099,
+     "verdict": "NOT CONVERGED"
+    },
+    "csv_sha256": {
+     "residual_history_main.csv": "36f2e0d44221953002c824cc374180cf34d6c0eb107a6c089a64a14df62666c4"
+    },
+    "fresh": {
+     "segment": "main",
+     "last_step": 120099,
+     "verdict": "NOT CONVERGED",
+     "rc": 1
+    },
+    "csv_last_outer_end": 120099
+   },
    "reach_step_watch": 117500,
    "reach_step": 117500,
    "drift": [
@@ -228,6 +271,13 @@
    "quasisteady": {
     "rc": 1,
     "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "classes": {
+     "theta_r_40": "STEADY",
+     "theta_r_70": "TRANSIENT-UNSETTLED",
+     "theta_r_94": "TRANSIENT-UNSETTLED",
+     "Q_w": "STEADY"
+    },
+    "ok": true,
     "tail": [
      "  theta_r_40      : tail mean=0.07787  drift=0.0%/tail  fluct=0.0%          STEADY",
      "  theta_r_70      : tail mean=0.1149  drift=0.0%/tail  fluct=0.0%  (still trending at tail-end) TRANSIENT-UNSETTLED",
@@ -244,6 +294,24 @@
    "watch_status": "REACHED",
    "n_rows": 47,
    "segment_verdict": "NOT CONVERGED",
+   "segment_recheck": {
+    "tool_sha256": "6be9956a95b793eb90e1a420f3ebbbcffcf5d10d3c69a9ec73fd52c0c6ca29b5",
+    "stored": {
+     "segment": "main",
+     "last_step": 119821,
+     "verdict": "NOT CONVERGED"
+    },
+    "csv_sha256": {
+     "residual_history_main.csv": "3de09a345b70b3129e3320854a7f645667d86baa0060c3d92e97294cbd8c1c7f"
+    },
+    "fresh": {
+     "segment": "main",
+     "last_step": 119821,
+     "verdict": "NOT CONVERGED",
+     "rc": 1
+    },
+    "csv_last_outer_end": 119821
+   },
    "reach_step_watch": 117500,
    "reach_step": 117500,
    "drift": [
@@ -255,6 +323,13 @@
    "quasisteady": {
     "rc": 0,
     "overall": "OVERALL: ALL STEADY",
+    "classes": {
+     "theta_r_40": "STEADY",
+     "theta_r_70": "STEADY",
+     "theta_r_94": "STEADY",
+     "Q_w": "STEADY"
+    },
+    "ok": true,
     "tail": [
      "  theta_r_40      : tail mean=0.07787  drift=0.0%/tail  fluct=0.1%          STEADY",
      "  theta_r_70      : tail mean=0.1149  drift=0.0%/tail  fluct=0.1%           STEADY",
