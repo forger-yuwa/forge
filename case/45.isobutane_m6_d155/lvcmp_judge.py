@@ -30,6 +30,7 @@ import yaml
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 D = HERE / "_band_ab" / "cold_pair"
+D.mkdir(parents=True, exist_ok=True)
 SHA_NEW = "129de3f4e7f67aa3a80dbd30d5f5cb75df1582d3974e702d76b61c8998598cec"
 SRC, SRC_RES, SRC_SHA16 = "run_0183_ns_coldmesh_tw300_ext", "res_100000.h5", "207d39f0e7f4aa03"
 ARMS = {"L7": ("run_0553_lvcmp_l7", "7", "m7"), "L0": ("run_0554_lvcmp_l0", "-", "m0"), "L5": ("run_0555_lvcmp_l5", "5", "m5")}

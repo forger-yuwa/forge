@@ -21,6 +21,7 @@ EXTRA=res_ro,res_roUx,res_roUy,res_roUz,res_roe,res_roK,res_roOmega,res_roY0,res
 BUDGET=150000
 
 echo "== 開始 $(date -Is)" >> $LOG
+mkdir -p _band_ab/cold_pair
 [ "$(sha256sum $BIN | cut -c1-16)" = 129de3f4e7f67aa3 ] || { echo "バイナリの sha256 が登録と違う — 止める" >> $LOG; exit 1; }
 [ -e $SRC ] || ln -s $HOME/forge-wallfit/case/45.isobutane_m6_d155/$SRC $SRC
 last=$(ls $SRC | grep -E '^res_[0-9]+\.h5$' | sort -t_ -k2 -n | tail -1)
@@ -101,9 +102,14 @@ arm() {  # arm <run> <l7|l5|l0>: 水準に入るまで (見張りが止める)
   fi
   echo "$r: モード OK $(date -Is)" >> $LOG
   python3 m9_watch.py $r --phase line --budget $BUDGET >> $LOG 2>&1; local wrc=$?
+  local wst=$(python3 -c "import json;print(json.load(open('$r/m9_watch.json'))['status'])" 2>/dev/null)
+  case "$wst" in REACHED|CENSORED|DIVERGED|EXEC_ERROR|DATA_ERROR) ;;
+    *) echo "$r: 見張りが最終の状態を残さずに終わった (rc $wrc) — forge と記録係を止める" >> $LOG
+       python3 m9_stop.py $r || echo "$r: forge を止められない" >> $LOG
+       kill $recpid 2>/dev/null ;;
+  esac
   wait $job
   wait $recpid
-  local wst=$(python3 -c "import json;print(json.load(open('$r/m9_watch.json'))['status'])" 2>/dev/null)
   echo "$r 見張り rc=$wrc、forge rc=$(cat $r/forge_rc 2>/dev/null)、状態 $wst、記録係 $(python3 -c "import json;d=json.load(open('$r/lvcmp_outputs.json'));print(len(d['rows']), d.get('finished'))" 2>/dev/null) $(date -Is)" >> $LOG
   ( cd $r && python3 $TOOLS/check_convergence.py . --segment > CONVERGENCE_SEGMENT.txt 2>&1 ); echo "$r check_convergence --segment rc=$?" >> $LOG
   case "$wst" in REACHED|CENSORED|DIVERGED) return 0;; *) echo "$r: 見張りの状態 $wst — 止める (codex plan-2 m6)" >> $LOG; return 1;; esac
@@ -122,6 +128,9 @@ fi
 [ $MODE = dumps ] && { echo "== 書き出しと事前のゲートまで $(date -Is)" >> $LOG; touch lvcmp.done; exit 0; }
 python3 lvcmp_pregate.py --verify >> $LOG 2>&1 \
   || { echo "事前のゲートの記録が PASS でないか、証拠が記録と違う — 腕を回さずに止める" >> $LOG; touch lvcmp.done; exit 1; }
+# 見張りの初期化 (参照の npz、cold_xcheck.common_yb) が通ることを先に確かめる (2026-10-11: B に npz が無く、見張りが起動直後に落ちた)
+python3 -c "import sys; sys.path.insert(0, '.'); import cold_xcheck as XC; XC.common_yb()" >> $LOG 2>&1 \
+  || { echo "見張りの初期化ができない (_band_ab の参照 npz) — 腕を回さずに止める" >> $LOG; touch lvcmp.done; exit 1; }
 arm run_0553_lvcmp_l7 l7 || exit 1
 arm run_0554_lvcmp_l0 l0 || exit 1
 arm run_0555_lvcmp_l5 l5 || exit 1

@@ -121,6 +121,7 @@ def ulp32(x):
 
 def main():
     out = HERE / "_band_ab" / "cold_pair" / "lvcmp_pregate.json"
+    out.parent.mkdir(parents=True, exist_ok=True)          # B の作業ツリーでは _band_ab が消されていた (2026-10-11、1 回目は書き込みで落ちた)
     rec = {"plan": "time_integration-line-viscous-jacobian-dt §6.3 (事前のゲート)"}
     checks = []
 
