@@ -1861,3 +1861,57 @@ def forward_thrust(wall, L: float, gas, line: dict, *, p_a: float = 0.0, splits=
             out["n_nodes_gate_run"] = int(len(wg_))
     out["time_s"] = time.time() - t0
     return out
+
+
+# ================================================================================================
+# 整合な前線の再標本化 — T4 の評価器の初期線 (plan §5.1 #5 (h)、diagnostician 2026-10-12)
+def resampled_front_line(net, k0: int, N: int) -> dict:
+    r"""前進 MOC の網 `net` (`moc_forward.forward_moc` の `res["net"]`) の前線 $k_0$ (壁点 → 軸の C⁻) を、$r$ 等間隔の
+    $N+1$ 点 ($0\le r\le r_w$) へ 3 次補間した初期線 (軸→壁、`forward_moc` の `line` の形)。
+
+    **目的**: T4 (停留性) の推力の評価で、BE の壁節点の密度を初期線の点数 $N$ で上げる。Hall の初期線は級数の不整合
+    (~1e-2 rad) のため $R_t\le1$ で $n\le321$ に制限される (`moc_forward.hall_initial_line` のガード)。そこで n 321 の Hall
+    初期線から前進 MOC を回し、その**網の前線** (マーチの適合式を満たす整合な C⁻) を新しい初期線として細かく取り直す
+    (diagnostician 2026-10-12、notes/reviews/2026-10-12-bell-rao-t4-stationarity-diagnostician.md)。前線は
+    スロートの近く (壁点が円弧 kernel の上、B より上流) を選ぶので、BE の摂動は前線にも初期線の流量にも効かない。
+
+    補間: $x(r)$・$\theta(r)$・$M(r)$ をそれぞれ前線の点 ($r$ は非等間隔) を通る 3 次スプライン (not-a-knot) にし、$r$ 等間隔の
+    点で評価する (補間誤差 $O(h^4)$、$h$ = 前線の点の間隔)。両端は前線の値をそのまま使う (軸端 $r=0,\ \theta=0$、壁端は壁点
+    そのもの — 壁が閉じた式なら `_check_line` の壁の検査 [`WALL_ON_TOL`] にそのまま乗る)。軸端の $\theta_r$ は
+    `net.thr_axis[k0]` (前進 MOC が軸点に持たせた代用値 `axis_thr_neighbor`)。
+
+    前線の点の状態が軸 ($j=0$) から壁 ($j=n$) まで全部 `ST_OK` でないとき、$r$ が狭義単調増加でないとき、軸端が $r=0$ で
+    ないとき、`thr_axis` が非有限のときは `ValueError`。戻り dict: `x`・`r`・`M`・`theta`・`thr_axis` と来歴
+    (`source` = `"resampled_front"`・`k0`・`N`・`n_front` [前線の区間数]・`front_dr_min`・`front_dr_max`・`x_wall`・`r_wall`・
+    `x_axis`)。"""
+    from .moc_forward import ST_OK, STATE_NAMES
+    k0, N = int(k0), int(N)
+    if N < 3:
+        raise ValueError(f"resampled_front_line: N = {N} (3 以上)")
+    S = net.status
+    if not 0 <= k0 < S.shape[0]:
+        raise ValueError(f"resampled_front_line: 前線 k0 = {k0} が網 (前線 0..{S.shape[0] - 1}) の外")
+    st = S[k0]
+    if not np.all(st == ST_OK):
+        bad = np.flatnonzero(st != ST_OK)
+        names = sorted({STATE_NAMES.get(int(st[j]), int(st[j])) for j in bad})
+        raise ValueError(f"resampled_front_line: 前線 {k0} の状態が軸まで OK でない ({len(bad)} 点、j {bad[:5].tolist()}…、{names})")
+    x, r, th, M = (np.asarray(net.a[f][k0], dtype=float) for f in ("x", "r", "th", "M"))
+    thr = float(net.thr_axis[k0])
+    if not np.isfinite(thr):
+        raise ValueError(f"resampled_front_line: 前線 {k0} の軸端の θ_r が非有限")
+    if r[0] != 0.0:
+        raise ValueError(f"resampled_front_line: 前線 {k0} の軸端が r = 0 でない (r = {r[0]:.3e})")
+    dr = np.diff(r)
+    if not np.all(dr > 0.0):
+        raise ValueError(f"resampled_front_line: 前線 {k0} の r が軸→壁で狭義単調増加でない")
+    rq = np.linspace(0.0, float(r[-1]), N + 1)
+    out = {"r": rq}
+    for name, v in (("x", x), ("theta", th), ("M", M)):
+        q = np.asarray(CubicSpline(r, v)(rq), dtype=float)
+        q[0], q[-1] = v[0], v[-1]
+        out[name] = q
+    out.update({"thr_axis": thr, "source": "resampled_front", "k0": k0, "N": N, "n_front": int(len(r) - 1),
+                "front_dr_min": float(dr.min()), "front_dr_max": float(dr.max()), "x_wall": float(x[-1]), "r_wall": float(r[-1]),
+                "x_axis": float(x[0])})
+    return out

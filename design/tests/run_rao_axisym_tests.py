@@ -34,6 +34,12 @@
   (dκ の符号変化) が少なく、点列の補間 (`"interp"`) は曲率が大きく振れる (前進 MOC が BDE の中で反転を出した原因の再現)。
 - **(g) 摂動 `PerturbedWall`**: 族 `sin`・`sin_c1` が両端で 0 (B・終点の位置が不変 → L・ε 不変)、`sin_c1` は端で勾配も不変、
   r' が差分と 1e-7。
+- **(h) 整合な前線の再標本化 `resampled_front_line`** (T4 の評価器の初期線、plan §5.1 #5 (h)、diagnostician 2026-10-12):
+  円弧 kernel (R_t 1) + 接線の壁で Hall n 321 の前進 MOC を回し、壁点 x ≈ 0.3 の前線 k₀ が軸まで ST_OK で、前線そのものを
+  初期線にしたマーチが元の網の前線を 1e-12 で再現すること (整合な初期線)。N 321・641・1281 の線が `_check_line` を通り
+  (壁点は壁に厳密に乗る)、r 等間隔・端が前線のまま。N 321 の線が前線を再現する往復の誤差を記録し N で単調に減ること
+  (前線には Hall のマーチの出だしの軸点の θ_r の振動から来る 2Δ の鋸歯の帯 [k₀ − j ∈ −6〜12] があり、往復の誤差はそこで
+  最大)。滑らかな合成の前線で補間誤差が O(h⁴) で減ること。軸まで OK でない前線は ValueError。
 
 **この版で回さないもの**: T3・T5・T6 は `design_rao` を基準ケースの L_k で回す run で、ここでは回さない —
 `case/68.bell_two_mode/rao_m/run_rao_t6.py` (円弧 kernel・L100・L70 × n 161/241/321 + n 321 の dr 半分・m・q 倍) が
@@ -461,13 +467,115 @@ check("(g) PerturbedWall: 両端で 0 (B・終点の位置が不変 → L・ε �
 t_ = wp_.t_of_x(np.array([wp_.x_B, wp_.x_end]))
 check("(g) RaoWall の弧長の正規化 t が B で 0・終点で 1", abs(t_[0]) <= 1e-15 and abs(t_[1] - 1.0) <= 1e-12, f"{t_}")
 
+# ================================================================ (h) 整合な前線の再標本化 resampled_front_line
+from types import SimpleNamespace  # noqa: E402
+
+from scipy.interpolate import CubicSpline  # noqa: E402
+
+from forge_design.geometry import moc_forward as mf  # noqa: E402
+
+
+class _ArcTangent:
+    """円弧 kernel (R_t 1、閉じた式) を θ_B 30° まで → 接線。前線 k₀ (壁点 x ≈ 0.3) は円弧の上なので B の先の形に依らない。"""
+
+    def __init__(self, thB):
+        self.xB, self.rB, self.t = np.sin(thB), 2.0 - np.cos(thB), np.tan(thB)
+
+    def r(self, x, deriv=0):
+        x = np.asarray(x, dtype=float)
+        xa = np.atleast_1d(x)
+        out = np.empty_like(xa)
+        k = xa <= self.xB
+        root = np.sqrt(np.maximum(1.0 - xa[k] ** 2, 0.0))
+        out[k] = (2.0 - root) if deriv == 0 else xa[k] / root
+        out[~k] = (self.rB + self.t * (xa[~k] - self.xB)) if deriv == 0 else self.t
+        return out.reshape(np.shape(x))
+
+
+W_AT, L_AT = _ArcTangent(np.deg2rad(30.0)), 8.0
+res_h = mf.forward_moc(W_AT, L_AT, IG_EXH.moc, ra._hall_line(1.0, IG_EXH, 321))
+net_h, n_h = res_h["net"], res_h["n"]
+k0_h = int(np.argmin(np.abs(net_h.a["x"][:, n_h] - 0.3)))
+fr_h = {f: net_h.a[f][k0_h].copy() for f in net_h.FIELDS}
+front_ok = bool(np.all(net_h.status[k0_h] == mf.ST_OK))
+lf_h = {"x": fr_h["x"], "r": fr_h["r"], "M": fr_h["M"], "theta": fr_h["th"], "thr_axis": float(net_h.thr_axis[k0_h])}
+net2_h = mf.forward_moc(W_AT, L_AT, IG_EXH.moc, lf_h)["net"]
+K_h = 30
+d_march = max(float(np.nanmax(np.abs(net_h.a[f][k0_h:k0_h + K_h] - net2_h.a[f][:K_h]))) for f in net_h.FIELDS)
+st_same = bool(np.array_equal(net_h.status[k0_h:k0_h + K_h], net2_h.status[:K_h]))
+check("(h) 前線 k₀ (Hall n 321 のマーチ、壁点 x ≈ 0.3 の円弧の上) は軸まで ST_OK で、前線そのものを初期線にしたマーチが元の網の"
+      "前線 k₀+1〜k₀+30 を 1e-12 で再現する (整合な初期線 — Hall の初期線と違い前線 1 で不整合を出さない)",
+      front_ok and st_same and d_march <= 1e-12,
+      f"k₀ {k0_h}・壁点 x {fr_h['x'][-1]:.6f}・軸点 x {fr_h['x'][0]:.6f}、マーチの差 {d_march:.1e}、状態一致 {st_same}")
+Wc_h = mf._Wall(W_AT, L_AT)
+lines_h, cl_det, cl_ok = {}, [], True
+for N in (321, 641, 1281):
+    ln = ra.resampled_front_line(net_h, k0_h, N)
+    lines_h[N] = ln
+    codes, _, info = mf._check_line(ln, Wc_h, IG_EXH.moc)
+    ends = (ln["r"][0] == 0.0 and ln["theta"][0] == 0.0 and ln["x"][0] == fr_h["x"][0] and ln["M"][0] == fr_h["M"][0]
+            and ln["x"][-1] == fr_h["x"][-1] and ln["r"][-1] == fr_h["r"][-1] and ln["theta"][-1] == fr_h["th"][-1]
+            and ln["M"][-1] == fr_h["M"][-1] and ln["thr_axis"] == net_h.thr_axis[k0_h])
+    uni = float(np.max(np.abs(np.diff(ln["r"]) - fr_h["r"][-1] / N)))
+    ok_n = not codes and len(ln["r"]) == N + 1 and info["wall_dr"] == 0.0 and info["wall_dtheta"] == 0.0 and ends and uni <= 1e-15
+    cl_ok = cl_ok and ok_n
+    cl_det.append(f"N {N}: 検査の符号 {codes or 'なし'}・壁 Δr {info['wall_dr']:.0e}・端 {ends}")
+check("(h) resampled_front_line: N 321・641・1281 の線が `_check_line` を通り (亜音速・壁から外れる・軸・順序なし、壁点は壁に"
+      "厳密に乗る)、r 等間隔の N+1 点、両端と軸端の θ_r が前線のまま", cl_ok, "; ".join(cl_det))
+# N = 321 で元の前線を再現するか: 再標本化した線を通る 3 次スプラインを前線の点で評価した往復の誤差 (記録) と、N で減ること
+rt_h = {}
+for N, ln in lines_h.items():
+    rt_h[N] = {nm: np.abs(CubicSpline(ln["r"], ln[key])(fr_h["r"]) - fr_h[nm]) for nm, key in (("x", "x"), ("th", "theta"), ("M", "M"))}
+band = (k0_h - np.arange(n_h + 1) <= 12) & (k0_h - np.arange(n_h + 1) >= -6)
+jmax = int(np.argmax(rt_h[321]["th"]))
+mono = all(float(rt_h[a][nm].max()) > float(rt_h[b][nm].max()) for nm in ("x", "th", "M") for a, b in ((321, 641), (641, 1281)))
+check("(h) resampled_front_line: N = 321 の線が前線の点を再現する往復の誤差 (記録) が N 321 → 641 → 1281 で単調に減る",
+      mono,
+      "θ の最大 " + "・".join(f"N {N} {float(v['th'].max()):.1e}" for N, v in rt_h.items())
+      + "、M の最大 " + "・".join(f"N {N} {float(v['M'].max()):.1e}" for N, v in rt_h.items())
+      + f"; N 321 の θ の最大は j {jmax} (k₀ − j = {k0_h - jmax}・r {fr_h['r'][jmax]:.3f}) — 前線の k₀ − j ∈ [−6, 12] の帯 "
+      f"(Hall のマーチの出だしの軸点の θ_r の振動から来る C⁺ の 2Δ の鋸歯) の外では θ {float(rt_h[321]['th'][~band].max()):.1e}・"
+      f"M {float(rt_h[321]['M'][~band].max()):.1e}")
+# 実装の検査: 同じ非等間隔の r の点に滑らかな関数を置いた合成の前線で、N 321 の補間誤差が O(h⁴) で減る (前線の点の間隔を
+# すべて半分にすると誤差が 1/12 以下 = 次数 3.6 以上)。誤差の大きさは参考に 3 次スプライン (端を固定) の上界 (5/384) h⁴ max|f⁗| と並べる
+fx = lambda r: 4.27 - 3.6 * r + 0.3 * np.sin(2.0 * r)  # noqa: E731
+fth = lambda r: 0.24 * r + 0.05 * r ** 3  # noqa: E731
+fM = lambda r: 3.26 - 1.2 * r ** 2 + 0.2 * np.cos(3.0 * r)  # noqa: E731
+M4_s = max(0.3 * 16.0, 0.0, 0.2 * 81.0)                              # max|f⁗| (x: 0.3·2⁴、θ: 0、M: 0.2·3⁴)
+
+
+def _synth_err(rr):
+    net_s = SimpleNamespace(status=np.zeros((1, len(rr)), dtype=np.int8), thr_axis=np.array([0.24]),
+                            a={"x": fx(rr)[None, :], "r": rr[None, :], "th": fth(rr)[None, :], "M": fM(rr)[None, :]})
+    ln_s = ra.resampled_front_line(net_s, 0, 321)
+    return max(float(np.max(np.abs(ln_s["x"] - fx(ln_s["r"])))), float(np.max(np.abs(ln_s["theta"] - fth(ln_s["r"])))),
+               float(np.max(np.abs(ln_s["M"] - fM(ln_s["r"])))))
+
+
+rr_s = fr_h["r"]
+rr_s2 = np.sort(np.concatenate([rr_s, 0.5 * (rr_s[1:] + rr_s[:-1])]))
+e_s1, e_s2 = _synth_err(rr_s), _synth_err(rr_s2)
+hmax_s = float(np.max(np.diff(rr_s)))
+check("(h) resampled_front_line: 滑らかな合成の前線 (前線 k₀ と同じ非等間隔の r) で N 321 の補間誤差が前線の点の間隔の半分で "
+      "1/12 以下 (O(h⁴))", e_s1 / e_s2 >= 12.0,
+      f"最大誤差 {e_s1:.1e} → {e_s2:.1e} (比 {e_s1 / e_s2:.1f})、参考: 端を固定した 3 次スプラインの上界 (5/384) h⁴ max|f⁗| = "
+      f"{5.0 / 384.0 * hmax_s ** 4 * M4_s:.1e} (h {hmax_s:.4f})")
+k_bad = int(np.flatnonzero([not np.all(net_h.status[k] == mf.ST_OK) for k in range(net_h.status.shape[0])])[0])
+try:
+    ra.resampled_front_line(net_h, k_bad, 321)
+    raised = False
+except ValueError:
+    raised = True
+check("(h) resampled_front_line: 軸まで ST_OK でない前線 (出口の外の軸点) は ValueError", raised, f"前線 {k_bad}")
+
 # ================================================================ 回さないもの
 NOT_RUN = {
     "T1a": "記録 (合否なし) に格下げ — #6 (CFD ピン) の中で case/29 の R_t 0.382 の Euler を凍結源に CPG γ 1.2・1.3・1.4 (diagnostician 2026-10-11)",
     "T1a′": "(D) 壁の MOC 推力 ≤ (M) の MOC 推力 — run の表 (case/68.bell_two_mode/rao_m/run_rao_t4.py → rao_t1ap.csv)、合否は親と上位",
     "T1c": "自由 ε → 固定 ε の解き直し — run の表 (run_rao_t4_gen.py → rao_t1c.csv)、合否は親と上位",
     "T3": "保存 (推力の 2 会計の差・閉合 |W_m − E|) — T6 の系列で判定 (run_rao_t6.py の表、合否は親と上位)",
-    "T4": "停留性 — run の表 (run_rao_t4_gen.py の壁 + run_rao_t4.py → rao_t4.csv)、合否は親と上位。評価器と壁の表現の単体はこの試験の (g)",
+    "T4": "停留性 — run の表 (run_rao_t4_gen.py の壁 + run_rao_t4.py → rao_t4.csv、(h) の A/B は run_rao_t4h.py → rao_t4h.csv)、"
+          "合否は親と上位。評価器と壁の表現の単体はこの試験の (g)、再標本化した初期線は (h)",
     "T5": "C2 は課さない (2026-10-11 改) — g̃ と Δκ_B を T6 の系列 (n 161/241/321) で記録 (run_rao_t6.py)",
     "T6": "分解能 n 161/241/321 + n 321 の dr 半分・m・q 倍 (円弧・L100・L70) — run_rao_t6.py の表、合否は親と上位",
 }
