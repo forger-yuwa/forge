@@ -174,6 +174,7 @@ def cmd_judge2(a):
     def kind(k):
         return "theta" if k.startswith("theta_r") else "delta" if k.startswith("delta_loc") else "Q_w" if k == "Q_w" else "exit_M_line" if k == "exit_M_line" else "eta_pctpt"
     S = {}
+    WIN = {"A": (W1B, W2B), "B": ((W1B[0] + a.b_shift, W1B[1] + a.b_shift), (W2B[0] + a.b_shift, W2B[1] + a.b_shift))}   # §4.23: B の延長は通算 80k〜120k
     for tag, nm in (("A", a.arm_a), ("B", a.arm_b)):
         rows = list(csv.DictReader(open(OUTD / f"gref_series_{nm}.csv")))
         S[tag] = {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
@@ -186,19 +187,20 @@ def cmd_judge2(a):
     out = {"registration": "plans/active/tooling-nozzle-core-grid.md §4.21", "tau": tau, "p": P, "arms": {"A": a.arm_a, "B": a.arm_b}, "q": {}, "qual": {}}
     muA = {k: tm(S["A"], k, *W2B) for k in keys}
     for tag in ("A", "B"):
-        D = S[tag]; s = D["step"]; m = (s >= W1B[0]) & (s <= W2B[1]); qual = {"nonfinite": int(D["nonfinite"][m].sum())}
+        w1, w2 = WIN[tag]
+        D = S[tag]; s = D["step"]; m = (s >= w1[0]) & (s <= w2[1]); qual = {"nonfinite": int(D["nonfinite"][m].sum()), "window": [w1, w2]}
         tmp = OUTD / f"_qs2_{tag}.csv"
         with open(tmp, "w") as fh:
             fh.write("step," + ",".join(keys) + "\n")
             for i in np.where(m)[0]:
                 fh.write(f"{s[i]:.0f}," + ",".join(f"{(1 + D[k][i] / 100) if k.startswith('eta') else D[k][i]:.12g}" for k in keys) + "\n")
         for k in keys:
-            t = tau[kind(k)]; mu = tm(D, k, *W2B)
+            t = tau[kind(k)]; mu = tm(D, k, *w2); cmean = float(np.mean(D[k][m])); last = float(D[k][m][-1])   # 分類の窓の標本平均・最終値
             if kind(k) == "eta_pctpt":
-                ratio_mean = 1 + mu / 100; rel_tau = (t / 100) / abs(ratio_mean)          # %pt の τ を M/6 の比の系列の相対に
+                rel_tau = (t / 100) / abs(1 + cmean / 100)                                  # %pt の τ を M/6 の比の系列 (分類の窓の平均) の相対に
                 scale = (lambda x: x)
             else:
-                rel_tau = (t / 100) * abs(muA[k]) / abs(mu)                                 # 共通の分母 D = |μ_A| の τ を、この系列の平均の相対に
+                rel_tau = (t / 100) * abs(muA[k]) / abs(cmean)                              # 共通の分母 |μ_A| の τ を、分類の窓の標本平均の相対に
                 scale = (lambda x, D_=abs(muA[k]): 100 * x / D_)
             p_ = subprocess.run([sys.executable, str(TOOLS / "check_quasisteady.py"), "--series-csv", str(tmp), "--series-cols", k,
                                  "--tail", "1.0", "--drift", f"{rel_tau / 8:.6g}", "--osc", f"{rel_tau / 2:.6g}"], capture_output=True, text=True)
@@ -206,8 +208,8 @@ def cmd_judge2(a):
             mono = re.search(r"最終比 ([+\-−]?[\d.]+) ?%", line); asym_ok = True
             if mono:
                 y = abs(float(mono.group(1).replace("−", "-")))                           # 漸近値と最終値の差 [最終値の %]
-                asym_ok = (y * (1 + mu / 100) if kind(k) == "eta_pctpt" else y * abs(mu) / abs(muA[k])) <= t / 8   # %pt / 共通分母の % に直す
-            d = scale(abs(tm(D, k, *W1B) - mu)); U = scale(float(np.abs(D[k][m] - mu).max()))
+                asym_ok = (y * (1 + last / 100) if kind(k) == "eta_pctpt" else y * abs(last) / abs(muA[k])) <= t / 8   # 最終値の % を %pt / 共通分母の % に直す
+            d = scale(abs(tm(D, k, *w1) - mu)); U = scale(float(np.abs(D[k][m] - mu).max()))
             qual[k] = {"mu": mu, "d": d, "U": U, "tau": t, "qs": line, "steady": p_.returncode == 0, "asym_ok": asym_ok,
                        "drift_tol": rel_tau / 8, "osc_tol": rel_tau / 2,
                        "ok": p_.returncode == 0 and asym_ok and d <= t / 8 and U <= t / 4}
@@ -225,14 +227,14 @@ def cmd_judge2(a):
     out["result"] = ("判定不能 (資格なし: " + ", ".join(tag for tag in ("A", "B") if not out["qual"][tag]["qualified"]) + ")") if not both else \
                     "A: x の粗さの大きな影響を退ける (s 抜きの予算は τ 以内) → Grefx と Gref の s の測定へ" if within else \
                     "B: この粗さの幅での候補化を見送る (どれかの量で E − U − p > τ。真の格子誤差が τ を超えたとは断定しない)" if beyond else "判定不能 (境界域)"
-    (OUTD / "grefx_judge.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    (OUTD / a.out).write_text(json.dumps(out, ensure_ascii=False, indent=1))
     for tag in ("A", "B"):
         q = out["qual"][tag]; print(f"== {tag} ({out['arms'][tag]}): 非有限 {q['nonfinite']} 資格 {q['qualified']}")
         for k in keys:
             v = q[k]; print(f"   {k:18s} d {v['d']:.4f} U {v['U']:.4f} τ {v['tau']:g} STEADY {v['steady']} 漸近 {v['asym_ok']} | {v['qs'][-48:]}")
     for k in keys:
         v = out["q"][k]; print(f"   {k:18s} E {v['E_signed']:+.4f}  U+p {v['budget_U_p']:.4f}  上 {v['upper']:.4f}  下 {v['lower']:.4f}  τ {v['tau']:g}")
-    print("結果:", out["result"]); print(f"[judge2] {OUTD / 'grefx_judge.json'}")
+    print("結果:", out["result"]); print(f"[judge2] {OUTD / a.out}")
 
 
 def main():
@@ -247,6 +249,8 @@ def main():
     j2.add_argument("arm_a"); j2.add_argument("arm_b"); j2.add_argument("--p-b", required=True, help='Grefx の p (JSON: {"theta":..,"delta":..,"Q_w":..} [%%])')
     j2.add_argument("--tau-theta", type=float, default=1.0); j2.add_argument("--tau-delta", type=float, default=1.0); j2.add_argument("--tau-qw", type=float, default=1.0)
     j2.add_argument("--tau-exit", type=float, default=0.05); j2.add_argument("--tau-eta", type=float, default=0.05)
+    j2.add_argument("--b-shift", type=int, default=0, help="B の窓を通算でずらす step (§4.23 の延長は 60000、系列は --offset 60000 で作る)")
+    j2.add_argument("--out", default="grefx_judge.json", help="出力 (§4.22 の判定は grefx_judge.json、§4.23 は grefx_ext_judge.json)")
     a = ap.parse_args()
     {"series": cmd_series, "judge": cmd_judge, "judge2": cmd_judge2}[a.cmd](a)
 

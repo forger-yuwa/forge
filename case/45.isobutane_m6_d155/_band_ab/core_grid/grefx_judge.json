@@ -1,0 +1,353 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.21",
+ "tau": {
+  "theta": 1.0,
+  "delta": 1.0,
+  "Q_w": 1.0,
+  "exit_M_line": 0.05,
+  "eta_pctpt": 0.05
+ },
+ "p": {
+  "A": {
+   "theta": 0.01,
+   "delta": 0.023,
+   "Q_w": 0.009,
+   "exit_M_line": 0.0006,
+   "eta_pctpt": 0.0014
+  },
+  "B": {
+   "theta": 0.081,
+   "delta": 0.133,
+   "Q_w": 0.025,
+   "exit_M_line": 0.0006,
+   "eta_pctpt": 0.0014
+  }
+ },
+ "arms": {
+  "A": "GrefA",
+  "B": "Grefx"
+ },
+ "q": {
+  "theta_r_w40_50": {
+   "E_signed": -0.9392888406291111,
+   "budget_U_p": 0.5038723855559001,
+   "upper": 1.443161226185011,
+   "lower": 0.43541645507321103,
+   "tau": 1.0
+  },
+  "delta_loc_w40_50": {
+   "E_signed": -0.03243220967942966,
+   "budget_U_p": 0.498583264096192,
+   "upper": 0.5310154737756216,
+   "lower": -0.46615105441676236,
+   "tau": 1.0
+  },
+  "theta_r_w65_75": {
+   "E_signed": -0.758842954254624,
+   "budget_U_p": 0.39723029103706037,
+   "upper": 1.1560732452916844,
+   "lower": 0.36161266321756363,
+   "tau": 1.0
+  },
+  "delta_loc_w65_75": {
+   "E_signed": 0.043324455834720395,
+   "budget_U_p": 0.3800386811458081,
+   "upper": 0.42336313698052846,
+   "lower": -0.3367142253110877,
+   "tau": 1.0
+  },
+  "theta_r_w84_94": {
+   "E_signed": -0.7066512609669396,
+   "budget_U_p": 0.3236586162282882,
+   "upper": 1.030309877195228,
+   "lower": 0.38299264473865147,
+   "tau": 1.0
+  },
+  "delta_loc_w84_94": {
+   "E_signed": 0.02006037328929851,
+   "budget_U_p": 0.33710124174379974,
+   "upper": 0.35716161503309823,
+   "lower": -0.31704086845450125,
+   "tau": 1.0
+  },
+  "Q_w": {
+   "E_signed": -0.44904577784487437,
+   "budget_U_p": 0.6322977511639953,
+   "upper": 1.0813435290088698,
+   "lower": -0.18325197331912096,
+   "tau": 1.0
+  },
+  "exit_M_line": {
+   "E_signed": 0.005753006057603086,
+   "budget_U_p": 0.009764889680525721,
+   "upper": 0.015517895738128808,
+   "lower": -0.004011883622922635,
+   "tau": 0.05
+  },
+  "eta0.0_mean_pct": {
+   "E_signed": 0.004664997774687485,
+   "budget_U_p": 0.01014482992068758,
+   "upper": 0.014809827695375064,
+   "lower": -0.005479832146000094,
+   "tau": 0.05
+  },
+  "eta0.1_mean_pct": {
+   "E_signed": 0.006097160981562544,
+   "budget_U_p": 0.010205114807562563,
+   "upper": 0.016302275789125107,
+   "lower": -0.004107953826000019,
+   "tau": 0.05
+  }
+ },
+ "qual": {
+  "A": {
+   "nonfinite": 0,
+   "theta_r_w40_50": {
+    "mu": 0.08510651847408125,
+    "d": 0.0374177132914981,
+    "U": 0.1715012716983666,
+    "tau": 1.0,
+    "qs": "theta_r_w40_50  : tail mean=0.08509  drift=0.1%/tail  fluct=0.3%          STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "delta_loc_w40_50": {
+    "mu": 0.2078868624475625,
+    "d": 0.030637515521731704,
+    "U": 0.09927571709327113,
+    "tau": 1.0,
+    "qs": "delta_loc_w40_50: tail mean=0.2079  drift=0.0%/tail  fluct=0.2%           STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "theta_r_w65_75": {
+    "mu": 0.11465264135806248,
+    "d": 0.017405499189640697,
+    "U": 0.12990596317561656,
+    "tau": 1.0,
+    "qs": "theta_r_w65_75  : tail mean=0.1146  drift=0.0%/tail  fluct=0.2%           STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "delta_loc_w65_75": {
+    "mu": 0.40098921432581247,
+    "d": 0.011918121075370939,
+    "U": 0.05277681234976587,
+    "tau": 1.0,
+    "qs": "delta_loc_w65_75: tail mean=0.401  drift=0.0%/tail  fluct=0.1%            STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "theta_r_w84_94": {
+    "mu": 0.1250674091581875,
+    "d": 0.003732890951714579,
+    "U": 0.09174840828627027,
+    "tau": 1.0,
+    "qs": "theta_r_w84_94  : tail mean=0.1251  drift=0.0%/tail  fluct=0.1%           STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "delta_loc_w84_94": {
+    "mu": 0.5527435866390625,
+    "d": 0.007262188489427404,
+    "U": 0.048254354167959444,
+    "tau": 1.0,
+    "qs": "delta_loc_w84_94: tail mean=0.5528  drift=0.0%/tail  fluct=0.1%           STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "Q_w": {
+    "mu": 9258357.58998875,
+    "d": 0.05055840103930023,
+    "U": 0.1136242423831665,
+    "tau": 1.0,
+    "qs": "Q_w             : tail mean=9.256e+06  drift=0.0%/tail  fluct=0.2%        STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 0.00125,
+    "osc_tol": 0.005,
+    "ok": true
+   },
+   "exit_M_line": {
+    "mu": 6.027743729149376,
+    "d": 0.0009909554189604672,
+    "U": 0.003131491613736031,
+    "tau": 0.05,
+    "qs": "exit_M_line     : tail mean=6.028  drift=0.0%/tail  fluct=0.0%            STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 6.25e-05,
+    "osc_tol": 0.00025,
+    "ok": true
+   },
+   "eta0.0_mean_pct": {
+    "mu": 0.40010450561600003,
+    "d": 0.0010374301996250446,
+    "U": 0.0030523194480000515,
+    "tau": 0.05,
+    "qs": "eta0.0_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%            STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 6.225093121940325e-05,
+    "osc_tol": 0.000249003724877613,
+    "ok": true
+   },
+   "eta0.1_mean_pct": {
+    "mu": 0.39800537277174997,
+    "d": 0.0009971091672499321,
+    "U": 0.002839428257250032,
+    "tau": 0.05,
+    "qs": "eta0.1_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%            STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 6.225223276890937e-05,
+    "osc_tol": 0.0002490089310756375,
+    "ok": true
+   },
+   "qualified": true
+  },
+  "B": {
+   "nonfinite": 0,
+   "theta_r_w40_50": {
+    "mu": 0.08430712244340625,
+    "d": 0.20244889944443273,
+    "U": 0.2413711138575335,
+    "tau": 1.0,
+    "qs": "theta_r_w40_50  : tail mean=0.08422  drift=0.4%/tail  fluct=0.3%  (extremum at tail-end) DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.0012618524391461057,
+    "osc_tol": 0.005047409756584423,
+    "ok": false
+   },
+   "delta_loc_w40_50": {
+    "mu": 0.2078194401444375,
+    "d": 0.11923460901118561,
+    "U": 0.24330754700292084,
+    "tau": 1.0,
+    "qs": "delta_loc_w40_50: tail mean=0.208  drift=0.2%/tail  fluct=0.3%  (extremum at tail-end) DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.001250405534144677,
+    "osc_tol": 0.005001622136578708,
+    "ok": false
+   },
+   "theta_r_w65_75": {
+    "mu": 0.11378260786725,
+    "d": 0.14551697536034894,
+    "U": 0.17632432786144375,
+    "tau": 1.0,
+    "qs": "theta_r_w65_75  : tail mean=0.1137  drift=0.2%/tail  fluct=0.3%  (extremum at tail-end) DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.001259558067651116,
+    "osc_tol": 0.005038232270604464,
+    "ok": false
+   },
+   "delta_loc_w65_75": {
+    "mu": 0.40116294072087505,
+    "d": 0.084568180033862,
+    "U": 0.1712618687960422,
+    "tau": 1.0,
+    "qs": "delta_loc_w65_75: tail mean=0.4013  drift=0.2%/tail  fluct=0.2%           DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.0012494586788265188,
+    "osc_tol": 0.004997834715306075,
+    "ok": false
+   },
+   "theta_r_w84_94": {
+    "mu": 0.1241836187343125,
+    "d": 0.11039992042440452,
+    "U": 0.14091020794201786,
+    "tau": 1.0,
+    "qs": "theta_r_w84_94  : tail mean=0.1241  drift=0.2%/tail  fluct=0.2%  (extremum at tail-end) DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.001258896004489991,
+    "osc_tol": 0.005035584017959964,
+    "ok": false
+   },
+   "delta_loc_w84_94": {
+    "mu": 0.552854469065875,
+    "d": 0.07123479073616855,
+    "U": 0.1328468875758403,
+    "tau": 1.0,
+    "qs": "delta_loc_w84_94: tail mean=0.5531  drift=0.1%/tail  fluct=0.1%           DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.0012497492956261172,
+    "osc_tol": 0.004998997182504469,
+    "ok": false
+   },
+   "Q_w": {
+    "mu": 9216783.326133125,
+    "d": 0.2654661137773113,
+    "U": 0.48467350878082877,
+    "tau": 1.0,
+    "qs": "Q_w             : tail mean=9.23e+06  drift=0.5%/tail  fluct=0.5%  (extremum at tail-end) DRIFTING",
+    "steady": false,
+    "asym_ok": true,
+    "drift_tol": 0.0012556383911805958,
+    "osc_tol": 0.005022553564722383,
+    "ok": false
+   },
+   "exit_M_line": {
+    "mu": 6.02809050561125,
+    "d": 0.0014992595954896669,
+    "U": 0.00543339806678969,
+    "tau": 0.05,
+    "qs": "exit_M_line     : tail mean=6.028  drift=0.0%/tail  fluct=0.0%            STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 6.249640457805885e-05,
+    "osc_tol": 0.0002499856183122354,
+    "ok": true
+   },
+   "eta0.0_mean_pct": {
+    "mu": 0.4047695033906875,
+    "d": 0.0006234061289374648,
+    "U": 0.004292510472687527,
+    "tau": 0.05,
+    "qs": "eta0.0_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.004 (最終比 -0.004 %)] STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 6.224803892198505e-05,
+    "osc_tol": 0.0002489921556879402,
+    "ok": true
+   },
+   "eta0.1_mean_pct": {
+    "mu": 0.4041025337533125,
+    "d": 0.0007521044775625207,
+    "U": 0.004565686550312531,
+    "tau": 0.05,
+    "qs": "eta0.1_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.00398 (最終比 -0.005 %)] STEADY",
+    "steady": true,
+    "asym_ok": true,
+    "drift_tol": 6.22484524265222e-05,
+    "osc_tol": 0.0002489938097060888,
+    "ok": true
+   },
+   "qualified": false
+  }
+ },
+ "result": "判定不能 (資格なし: B)"
+}
