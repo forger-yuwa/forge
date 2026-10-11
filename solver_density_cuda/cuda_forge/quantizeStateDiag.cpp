@@ -1,6 +1,6 @@
-// 診断 FORGE_DIAG_QUANTIZE_STATE (plans/active/architecture-float-state-double-geometry.md §5.1 #19・§6.36、既定 off)。
+// 診断 FORGE_DIAG_QUANTIZE_STATE (plans/active/architecture-float-state-double-geometry.md §5.1 #19・#20・§6.36・§6.40、既定 off)。
 // 対象・時点・拒否・自己点検の書式は quantizeStateDiag.hpp。ここはホスト側の段取り (環境変数・拒否・カーネルの呼び出し) と
-// 自己点検の読み取り (D2H) と集計。1 値の処理と集計・書式の関数は quantizeStateDiag_d.cuh (単体試験と共用)。
+// 自己点検の読み取り (D2H) と集計。1 値の処理と集計・書式・名前の検査の関数は quantizeStateDiag_d.cuh (単体試験と共用)。
 
 #include "cuda_forge/quantizeStateDiag.hpp"
 #include "cuda_forge/quantizeStateDiag_d.cuh"
@@ -25,13 +25,16 @@ bool g_speciesPending = false;
 namespace {
 
 struct State {
-    std::vector<std::string> targets;     // 丸める保存量 (Q)
-    std::vector<std::string> histN;       // 点検する履歴 Q_N
-    std::vector<std::string> histM;       // 点検する履歴 Q_M
-    std::vector<std::string> speciesN;    // (b) roY{s}N
-    std::vector<std::string> speciesM;    // (b) roY{s}M
+    std::vector<std::string> targets;     // 丸める保存量 (Q)。FORGE_DIAG_QUANTIZE_STATE_ONLY があれば選んだ量だけ
+    std::vector<std::string> histN;       // 点検する履歴 Q_N (丸める量の分だけ)
+    std::vector<std::string> histM;       // 点検する履歴 Q_M (丸める量の分だけ)
+    std::vector<std::string> speciesN;    // (b) roY{s}N (丸める化学種の分だけ)
+    std::vector<std::string> speciesM;    // (b) roY{s}M (丸める化学種の分だけ)
+    bool only = false;                    // FORGE_DIAG_QUANTIZE_STATE_ONLY で丸める量を選んだ
+    std::vector<std::string> unselected;  // 選ばなかった対象 (丸めない。自己点検の step で丸めの前後のビットを比べる)
     std::set<int> checkSteps;             // 自己点検の step (iStep + 1)
     std::set<int> checked;                // (a) を出した step
+    std::set<int> unselChecked;           // 選ばなかった量の丸め前後の比較を出した step
     std::set<int> pendingSpecies;         // (a) を出し、(b) を待っている step
 };
 State g;
@@ -92,7 +95,8 @@ std::vector<flow_float> d2h(variables& var, const std::string& name, size_t n)
 
 // 群ごとに全 CV と内点 (ic < nCells) の表せない値を数え、1 行出す。0 でなければ内点の行も出し、node の入口のピン
 // (scalarDirichletPin、組立の中で ρY・ρk・ρω を Dirichlet 値に書く。speciesTransport_d.cu の species_dirichlet_boundary_d)
-// があれば、それを除いた内点の個数も続ける。
+// があれば、それを除いた内点の個数も続ける。空の群 (FORGE_DIAG_QUANTIZE_STATE_ONLY で化学種だけを選んだときの Q_N 等) は
+// 行に出さない (未設定では空の群は無いので、行は #19 のまま)。
 void countAndPrint(int step, const std::vector<std::pair<std::string, const std::vector<std::string>*>>& spec,
                    mesh& msh, variables& var, const std::string& when)
 {
@@ -106,6 +110,7 @@ void countAndPrint(int step, const std::vector<std::pair<std::string, const std:
     if (!pin.empty()) { nPin = 0; for (flow_float p : pin) nPin += (p == (flow_float)1.0); }
     std::vector<QuantizeStateCountGroup> all, interior, noPin;
     for (const auto& sp : spec) {
+        if (sp.second->empty()) continue;
         QuantizeStateCountGroup ga{sp.first, *sp.second, {}}, gi{sp.first, *sp.second, {}}, gp{sp.first, *sp.second, {}};
         for (const auto& name : *sp.second) {
             const std::vector<flow_float> h = d2h(var, name, nAll);
@@ -132,6 +137,7 @@ void init(solverConfig& cfg, mesh& msh, variables& var, bool sst)
 {
     const char* env = std::getenv("FORGE_DIAG_QUANTIZE_STATE");
     const char* checkEnv = std::getenv("FORGE_DIAG_QUANTIZE_STATE_CHECK");
+    const char* onlyEnv = std::getenv("FORGE_DIAG_QUANTIZE_STATE_ONLY");
     const bool on = (env != nullptr && std::strcmp(env, "1") == 0);
     if (env != nullptr && *env != '\0' && !on && std::strcmp(env, "0") != 0) {
         fprintf(stderr, "[quantizeState] FORGE_DIAG_QUANTIZE_STATE='%s' は 1 (有効) か 0 (無効) でない。止める\n", env);
@@ -141,6 +147,9 @@ void init(solverConfig& cfg, mesh& msh, variables& var, bool sst)
         if (checkEnv != nullptr && *checkEnv != '\0')
             printf("[quantizeState] FORGE_DIAG_QUANTIZE_STATE_CHECK=%s は FORGE_DIAG_QUANTIZE_STATE=1 が無いので無視する\n",
                    checkEnv);
+        if (onlyEnv != nullptr && *onlyEnv != '\0')
+            printf("[quantizeState] FORGE_DIAG_QUANTIZE_STATE_ONLY=%s は FORGE_DIAG_QUANTIZE_STATE=1 が無いので無視する\n",
+                   onlyEnv);
         return;
     }
 
@@ -174,7 +183,8 @@ void init(solverConfig& cfg, mesh& msh, variables& var, bool sst)
             g.speciesM.push_back(n + "M");
         }
     }
-    // 名前の配列がデバイスにあることを確かめる (無ければ内部の不整合なので止める)。
+    // 名前の配列がデバイスにあることを確かめる (無ければ内部の不整合なので止める)。選ぶ前の全量で見る (選ばなかった対象も
+    // 丸めの前後の比較で読む)。
     for (const auto* list : {&g.targets, &g.histN, &g.histM, &g.speciesN, &g.speciesM}) {
         for (const auto& n : *list) {
             auto it = var.c_d.find(n);
@@ -186,11 +196,55 @@ void init(solverConfig& cfg, mesh& msh, variables& var, bool sst)
     }
     g.checkSteps = (checkEnv != nullptr && *checkEnv != '\0') ? parseSteps(checkEnv) : std::set<int>{1};
 
+    // FORGE_DIAG_QUANTIZE_STATE_ONLY (§5.1 #20): 丸める量を選ぶ。設定されていれば (空の値も) 検査し、対象に無い名前・空の要素・
+    // 重複は止める。選んだ量に合わせて、自己点検 (a) の履歴と (b) の化学種の履歴も選んだ量の分だけにする。
+    std::string what = joinNames(g.targets);   // 起動時の行の「丸める量」の欄 (未設定なら #19 のまま)
+    if (onlyEnv != nullptr) {
+        std::vector<bool> sel;
+        std::string err;
+        if (!quantizeStateParseOnly(onlyEnv, g.targets, &sel, &err)) {
+            fprintf(stderr, "[quantizeState] FORGE_DIAG_QUANTIZE_STATE_ONLY='%s': %s。この構成の丸めの対象は %s (カンマ区切り、"
+                            "空白なし)。止める\n", onlyEnv, err.c_str(), joinNames(g.targets).c_str());
+            std::exit(EXIT_FAILURE);
+        }
+        what = quantizeStateOnlyText(g.targets, sel);
+        // targets の並びは [ro..roe (、roK・roOmega)] が histN・histM と、[roY0..] が speciesN・speciesM と同じ添字。
+        const size_t nFlow = g.histN.size();
+        if (g.histM.size() != nFlow || g.speciesN.size() != g.speciesM.size() ||
+            g.targets.size() != nFlow + g.speciesN.size() || sel.size() != g.targets.size()) {
+            fprintf(stderr, "[quantizeState] 内部エラー: 対象 %zu・履歴 %zu/%zu・化学種の履歴 %zu/%zu の数が合わない。止める\n",
+                    g.targets.size(), g.histN.size(), g.histM.size(), g.speciesN.size(), g.speciesM.size());
+            std::exit(EXIT_FAILURE);
+        }
+        State f;
+        for (size_t k = 0; k < g.targets.size(); ++k) {
+            if (!sel[k]) { f.unselected.push_back(g.targets[k]); continue; }
+            f.targets.push_back(g.targets[k]);
+            if (k < nFlow) {
+                f.histN.push_back(g.histN[k]);
+                f.histM.push_back(g.histM[k]);
+            } else {
+                f.speciesN.push_back(g.speciesN[k - nFlow]);
+                f.speciesM.push_back(g.speciesM[k - nFlow]);
+            }
+        }
+        g.targets.swap(f.targets);
+        g.histN.swap(f.histN);
+        g.histM.swap(f.histM);
+        g.speciesN.swap(f.speciesN);
+        g.speciesM.swap(f.speciesM);
+        g.unselected.swap(f.unselected);
+        g.only = true;
+    }
+
     detail::g_enabled = true;
     detail::g_speciesPending = false;
     printf("[quantizeState] 診断用: step の末尾で保存量 %zu 本を float32 に丸める (%s)。全 CV (nCells_all %ld)、"
            "時点は advanceImplicitSteady の commit 後の等温壁のピンの後・updateVariablesOuter の前。自己点検 step %s\n",
-           g.targets.size(), joinNames(g.targets).c_str(), (long)msh.nCells_all, stepsText(g.checkSteps).c_str());
+           g.targets.size(), what.c_str(), (long)msh.nCells_all, stepsText(g.checkSteps).c_str());
+    if (g.only)
+        printf("[quantizeState] 自己点検の step では、表せない値は選んだ量とその履歴だけを数え、選ばなかった量は丸めのカーネルの"
+               "直前と直後で生のビットを比べる (変わった値 0 が期待)\n");
     // 丸めない保存量を黙らせない (拒否はしない。§5.1 #19 の対象は上の量だけ)。
     std::vector<std::string> notQ;
     if (var.transitionRegistered != 0) notQ.push_back("遷移モデル (roGamma, roReth)");
@@ -207,10 +261,26 @@ void init(solverConfig& cfg, mesh& msh, variables& var, bool sst)
     fflush(stdout);
 }
 
-void quantize(cudaConfig& cuda_cfg, mesh& msh, variables& var)
+void quantize(cudaConfig& cuda_cfg, mesh& msh, variables& var, int iStep)
 {
     if (!detail::g_enabled) return;
+    // 量を選んだとき (FORGE_DIAG_QUANTIZE_STATE_ONLY) の自己点検の step: 選ばなかった対象を丸めのカーネルの直前と直後に
+    // host に写し、生のビットが変わった値の個数を量ごとに出す (カーネルは選んだ配列にしか書かないので 0 が期待。
+    // 配列の取り違え・別名を見る)。未設定では写さない (#19 のまま)。
+    const int step = iStep + 1;
+    const bool cmp = g.only && g.checkSteps.count(step) != 0 && g.unselChecked.count(step) == 0;
+    const size_t nAll = (size_t)msh.nCells_all;
+    std::vector<std::vector<flow_float>> before;
+    if (cmp) for (const auto& n : g.unselected) before.push_back(d2h(var, n, nAll));
     for (const auto& n : g.targets) quantizeStateToFloat32_d_wrapper(cuda_cfg, msh.nCells_all, var.c_d.at(n));
+    if (cmp) {
+        std::vector<long long> changed;
+        for (size_t k = 0; k < g.unselected.size(); ++k)
+            changed.push_back(quantizeStateCountChanged(before[k], d2h(var, g.unselected[k], nAll)));
+        printf("%s\n", quantizeStateUnselectedLine(step, g.unselected, changed, (long long)msh.nCells_all, nullptr).c_str());
+        fflush(stdout);
+        g.unselChecked.insert(step);
+    }
 }
 
 void afterUpdateOuter(mesh& msh, variables& var, int iStep)

@@ -2542,7 +2542,7 @@ void advanceImplicitSteady(StepContext& s)
     if (qaccAdoptDiag::enabled()) qaccAdoptDiag::beforeReconcile(s.cfg , s.msh , s.var , s.iStep);
     // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off、FP64 のビルド専用): 保存量を全 CV で float32 に丸めて戻す (次の step の基準 Q_N・Q_M は
     // この値から写される)
-    if (quantizeStateDiag::enabled()) quantizeStateDiag::quantize(s.cuda_cfg , s.msh , s.var);
+    if (quantizeStateDiag::enabled()) quantizeStateDiag::quantize(s.cuda_cfg , s.msh , s.var , s.iStep);
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });

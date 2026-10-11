@@ -8,10 +8,13 @@
 //   - quantizeStateValue        : カーネル (quantizeStateDiag_d.cu) が 1 CV の 1 量に当てる処理そのもの。
 //   - quantizeStateRepresentable: 自己点検の判定 ((double)(float)x == x)。
 //   - quantizeStateFormat       : 自己点検の 1 行の本文 (量ごとの個数の並び)。
+//   - quantizeStateParseOnly    : FORGE_DIAG_QUANTIZE_STATE_ONLY の値の検査 (§5.1 #20)。
+//   - quantizeStateCountChanged : 丸めの直前と直後の生のビットの比較 (選ばなかった量が変わらないことの確認、§5.1 #20)。
 
 #include "flowFormat.hpp"
 
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -99,6 +102,99 @@ inline std::string quantizeStateInteriorLine(int step, long long nInt, const std
                     std::to_string(nInt) + ") に限ると " + bodyInt;
     if (nPin >= 0)
         s += "。入口のピン (scalarDirichletPin 1、" + std::to_string(nPin) + " 節点) を除く内点では " + bodyNoPin;
+    return s;
+}
+
+// ---- FORGE_DIAG_QUANTIZE_STATE_ONLY (丸める量を選ぶ、§5.1 #20・§6.40) ----
+
+// 値 ("roe"、"roe,roK") を読む。all は丸めの対象の全量 (起動時の構成で決まる。ro..roe、SST なら roK・roOmega、化学種なら
+// roY0..)。成功なら true を返し、*selected を all と同じ長さにして選んだ量を true にする (並びは all のまま。値の中の順は
+// 問わない)。失敗なら false を返し、*err に理由を入れる。拒否するもの (どれも黙って違う試験にしないため):
+//   - 空の値 (台本の変数の空展開で、黙って全量の丸めにならないように)
+//   - 空の要素 ("roe,"、",roe"、"roe,,ro")
+//   - 対象に無い名前 (この構成に無い量。roK を SST でない run で選ぶ等)。前後の空白は取り除かない (" roe" は対象に無い名前)
+//   - 同じ名前の重複 ("roe,roe")
+inline bool quantizeStateParseOnly(const std::string& s, const std::vector<std::string>& all,
+                                   std::vector<bool>* selected, std::string* err)
+{
+    std::vector<bool> sel(all.size(), false);
+    if (s.empty()) {
+        if (err != nullptr) *err = "値が空";
+        return false;
+    }
+    size_t pos = 0;
+    int k = 0;
+    while (true) {
+        const size_t comma = s.find(',', pos);
+        const std::string tok = s.substr(pos, (comma == std::string::npos) ? std::string::npos : comma - pos);
+        ++k;
+        if (tok.empty()) {
+            if (err != nullptr) *err = std::to_string(k) + " 番目の要素が空";
+            return false;
+        }
+        size_t idx = all.size();
+        for (size_t i = 0; i < all.size(); ++i) if (all[i] == tok) { idx = i; break; }
+        if (idx == all.size()) {
+            if (err != nullptr) *err = "'" + tok + "' は丸めの対象に無い";
+            return false;
+        }
+        if (sel[idx]) {
+            if (err != nullptr) *err = "'" + tok + "' が重複している";
+            return false;
+        }
+        sel[idx] = true;
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    if (selected != nullptr) *selected = sel;
+    return true;
+}
+
+// 起動時の行の「丸める量」の欄 (選んだとき)。
+//   "選んだ量だけ (roe)、FORGE_DIAG_QUANTIZE_STATE_ONLY。丸めない対象: ro, roUx, roUy, roUz"
+inline std::string quantizeStateOnlyText(const std::vector<std::string>& all, const std::vector<bool>& selected)
+{
+    std::string on, off;
+    for (size_t i = 0; i < all.size(); ++i) {
+        std::string& t = (i < selected.size() && selected[i]) ? on : off;
+        t += (t.empty() ? "" : ", ") + all[i];
+    }
+    return "選んだ量だけ (" + on + ")、FORGE_DIAG_QUANTIZE_STATE_ONLY。丸めない対象: " + (off.empty() ? std::string("なし") : off);
+}
+
+// a と b で生のビットが違う値の個数 (丸めのカーネルの直前と直後の比較)。NaN も同じビットなら変わっていない、+0 と −0 は
+// 変わった、に数える。長さが違えば、長い方の余りを変わったに数える。
+template <typename T>
+inline long long quantizeStateCountChanged(const std::vector<T>& a, const std::vector<T>& b)
+{
+    const size_t n = (a.size() < b.size()) ? a.size() : b.size();
+    long long c = (long long)((a.size() > b.size()) ? a.size() - b.size() : b.size() - a.size());
+    for (size_t i = 0; i < n; ++i) c += (std::memcmp(&a[i], &b[i], sizeof(T)) != 0);
+    return c;
+}
+
+// 自己点検の step で、丸めのカーネルの直前と直後に選ばなかった対象を比べた行 (改行なし)。names と counts は同じ長さ。
+// total に合計を返す (nullptr なら返さない)。
+//   "[quantizeState] step N: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 ... / 合計 0
+//    (0 が期待。全 CV <nAll>、丸めのカーネルの直前と直後の生のビットの比較)"
+//   選ばなかった量が無いときは "... 選ばなかった量の丸め前後の変化 なし (選んだ量が対象のすべて)"
+inline std::string quantizeStateUnselectedLine(int step, const std::vector<std::string>& names,
+                                               const std::vector<long long>& counts, long long nAll, long long* total)
+{
+    std::string s = "[quantizeState] step " + std::to_string(step) + ": 選ばなかった量の丸め前後の変化 ";
+    long long sum = 0;
+    if (names.empty()) {
+        s += "なし (選んだ量が対象のすべて)";
+    } else {
+        for (size_t k = 0; k < names.size(); ++k) {
+            const long long c = (k < counts.size()) ? counts[k] : -1;
+            s += names[k] + " " + std::to_string(c) + " ";
+            sum += (c > 0) ? c : 0;
+        }
+        s += "/ 合計 " + std::to_string(sum) + " (0 が期待。全 CV " + std::to_string(nAll) +
+             "、丸めのカーネルの直前と直後の生のビットの比較)";
+    }
+    if (total != nullptr) *total = sum;
     return s;
 }
 

@@ -1,5 +1,5 @@
 // test_quantize_state.cu — 診断 FORGE_DIAG_QUANTIZE_STATE の 1 値の処理と自己点検の集計・書式の単体試験
-//   (plans/active/architecture-float-state-double-geometry.md §5.1 #19・§6.36)
+//   (plans/active/architecture-float-state-double-geometry.md §5.1 #19・#20・§6.36・§6.40)
 //   build (FP64 のビルド専用。作業ツリーの flowFormat.hpp は float の既定のままにし、typedef を double にした写しを
 //   別のディレクトリ <fp64> に置いて先に探させる):
 //     cd solver_density_cuda
@@ -12,12 +12,19 @@
 //     下の試験のカーネルは製品のカーネルと同じ 1 行 (ic < n なら q[ic] = quantizeStateValue(q[ic]))。
 //   - quantizeStateRepresentable / quantizeStateCountNotRepresentable / quantizeStateFormat / quantizeStateCheckLine /
 //     quantizeStateInteriorLine / quantizeStateWhenOuter / quantizeStateWhenSpecies: 自己点検の判定・集計・行。
+//   - quantizeStateParseOnly / quantizeStateOnlyText: FORGE_DIAG_QUANTIZE_STATE_ONLY の名前の検査と起動時の行の欄 (§5.1 #20)。
+//   - quantizeStateCountChanged / quantizeStateUnselectedLine: 選ばなかった量の丸め前後のビット比較と行 (§5.1 #20)。
 // 項目:
 //   (1) 乱数の double 20 万個 (float の範囲内。非正規化数の範囲・0・負・丁度中間 (偶数丸め)・float で表せる値を含む) を
 //       デバイスで量子化し、結果が host の (double)(float)x と生のビットで一致する。host 側の quantizeStateValue も一致。
 //   (2) 2 回当てても変わらない (冪等)。量子化の後は全部 float32 で表せる。
 //   (3) 量子化の前に表せない値の個数 (quantizeStateCountNotRepresentable) = 量子化で値が変わった個数。
 //   (4) 自己点検の集計 (区間・NaN・入口のピンの除外) と行の書式が期待の文字列と一致する。
+//   (5) FORGE_DIAG_QUANTIZE_STATE_ONLY の名前の検査 (host): 対象の名前は受け付け (並びは対象の順)、空の値・空の要素・
+//       対象に無い名前 (この構成に無い量・前後の空白・大文字小文字違い)・重複を拒否する。起動時の行の欄の書式。
+//   (6) 丸め前後のビット比較 (host): 同じビットの NaN は変わらない、+0 と −0・1 ulp の違いは変わった、に数える。
+//       選んだ配列だけをデバイスで量子化し、選ばなかった配列が丸めの前後でビット一致する (製品の quantize と同じ並び)。
+//       選ばなかった量の行の書式。
 #include <cstdio>
 #include <cmath>
 #include <cfloat>
@@ -241,6 +248,131 @@ int main()
                                    "(全 CV 576000、step 2 の化学種の更新の頭 (speciesUpdateOuter の直後))";
         printf("(4) %s\n", lineSp.c_str());
         CHECK(tz == 0 && lineSp == wantSp, "(4) (b) の行の書式が違う:\n    得た '%s'\n    期待 '%s'", lineSp.c_str(), wantSp.c_str());
+    }
+
+    // ---- (5) FORGE_DIAG_QUANTIZE_STATE_ONLY の名前の検査 (host) ----
+    {
+        const std::vector<std::string> flow5 = {"ro", "roUx", "roUy", "roUz", "roe"};   // SST・化学種なし
+        const std::vector<std::string> all9  = {"ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega", "roY0", "roY1"};
+        auto joined = [](const std::vector<std::string>& all, const std::vector<bool>& m) {
+            std::string t;
+            for (size_t i = 0; i < all.size(); ++i) if (i < m.size() && m[i]) t += (t.empty() ? "" : ",") + all[i];
+            return t;
+        };
+        struct Ok  { const char* v; const std::vector<std::string>* all; const char* want; };
+        struct Bad { const char* v; const std::vector<std::string>* all; const char* err; };
+        const Ok oks[] = {
+            {"roe",                &all9,  "roe"},
+            {"roY1,roe,ro",        &all9,  "ro,roe,roY1"},            // 並びは対象の順 (値の中の順は問わない)
+            {"roK,roOmega",        &all9,  "roK,roOmega"},
+            {"roY0",               &all9,  "roY0"},
+            {"roe",                &flow5, "roe"},
+            {"ro,roUx,roUy,roUz,roe,roK,roOmega,roY0,roY1", &all9, "ro,roUx,roUy,roUz,roe,roK,roOmega,roY0,roY1"},
+        };
+        int nOk = 0;
+        for (const auto& c : oks) {
+            std::vector<bool> m;
+            std::string err;
+            const bool r = quantizeStateParseOnly(c.v, *c.all, &m, &err);
+            const std::string got = joined(*c.all, m);
+            CHECK(r && m.size() == c.all->size() && got == c.want, "(5) '%s' を受け付けない・選んだ量が違う (得た %d '%s'、期待 '%s'、err '%s')",
+                  c.v, (int)r, got.c_str(), c.want, err.c_str());
+            nOk += (r && got == c.want);
+        }
+        const Bad bads[] = {
+            {"",          &all9,  "値が空"},
+            {",",         &all9,  "1 番目の要素が空"},
+            {",roe",      &all9,  "1 番目の要素が空"},
+            {"roe,",      &all9,  "2 番目の要素が空"},
+            {"roe,,ro",   &all9,  "2 番目の要素が空"},
+            {"roK",       &flow5, "'roK' は丸めの対象に無い"},        // この構成 (SST なし) に無い量
+            {"roY0",      &flow5, "'roY0' は丸めの対象に無い"},       // 化学種なし
+            {"roY2",      &all9,  "'roY2' は丸めの対象に無い"},
+            {"roeN",      &all9,  "'roeN' は丸めの対象に無い"},       // 履歴は丸めの対象でない
+            {"ROE",       &all9,  "'ROE' は丸めの対象に無い"},        // 大文字小文字は区別する
+            {" roe",      &all9,  "' roe' は丸めの対象に無い"},       // 前後の空白は取り除かない
+            {"roe, ro",   &all9,  "' ro' は丸めの対象に無い"},
+            {"roe,roe",   &all9,  "'roe' が重複している"},
+            {"ro,roe,ro", &all9,  "'ro' が重複している"},
+        };
+        int nBad = 0;
+        for (const auto& c : bads) {
+            std::vector<bool> m = {true};   // 失敗では書き換えないこと
+            std::string err;
+            const bool r = quantizeStateParseOnly(c.v, *c.all, &m, &err);
+            CHECK(!r && err == c.err && m.size() == 1 && m[0], "(5) '%s' を拒否しない・理由が違う (得た %d '%s'、期待 '%s')",
+                  c.v, (int)r, err.c_str(), c.err);
+            nBad += (!r && err == c.err);
+        }
+        printf("(5) 名前の検査: 受け付け %d/%zu、拒否 %d/%zu (例 'roe,roe' → '%s')\n", nOk, sizeof(oks)/sizeof(oks[0]),
+               nBad, sizeof(bads)/sizeof(bads[0]), [&]() { std::string e; quantizeStateParseOnly("roe,roe", all9, nullptr, &e); return e; }().c_str());
+
+        // 起動時の行の欄
+        std::vector<bool> mRoe;
+        quantizeStateParseOnly("roe", all9, &mRoe, nullptr);
+        const std::string t1 = quantizeStateOnlyText(all9, mRoe);
+        const std::string w1 = "選んだ量だけ (roe)、FORGE_DIAG_QUANTIZE_STATE_ONLY。丸めない対象: ro, roUx, roUy, roUz, roK, roOmega, roY0, roY1";
+        CHECK(t1 == w1, "(5) 起動時の行の欄が違う:\n    得た '%s'\n    期待 '%s'", t1.c_str(), w1.c_str());
+        const std::string t2 = quantizeStateOnlyText(flow5, std::vector<bool>(5, true));
+        const std::string w2 = "選んだ量だけ (ro, roUx, roUy, roUz, roe)、FORGE_DIAG_QUANTIZE_STATE_ONLY。丸めない対象: なし";
+        CHECK(t2 == w2, "(5) 全部選んだときの欄が違う:\n    得た '%s'\n    期待 '%s'", t2.c_str(), w2.c_str());
+        printf("(5) %s\n", t1.c_str());
+    }
+
+    // ---- (6) 丸め前後のビット比較と、選ばなかった量の行 ----
+    {
+        auto fromBits = [](uint64_t u) { double d; std::memcpy(&d, &u, sizeof(d)); return d; };
+        const double qnan = fromBits(0x7ff8000000000000ULL), qnan2 = fromBits(0x7ff8000000000001ULL);
+        const std::vector<double> a = {1.0, qnan, 0.0, 1.0, qnan, 3.0};
+        const std::vector<double> b = {1.0, qnan, -0.0, std::nextafter(1.0, 2.0), qnan2, 3.0};
+        CHECK(quantizeStateCountChanged(a, a) == 0, "(6) 同じ配列で変わったと数える");
+        CHECK(quantizeStateCountChanged(a, b) == 3, "(6) ビット比較 (期待 3: +0/−0・1 ulp・NaN の payload)、得た %lld",
+              quantizeStateCountChanged(a, b));
+        std::vector<double> c(a.begin(), a.end() - 1);
+        CHECK(quantizeStateCountChanged(a, c) == 1 && quantizeStateCountChanged(c, a) == 1, "(6) 長さが違うときの余りを数えない");
+
+        // 選んだ配列 (roe) だけをデバイスで量子化し、選ばなかった配列 (ro・roUx) が前後でビット一致する (製品の quantize の並び:
+        // 選ばなかった対象を写す → 選んだ対象にカーネル → 選ばなかった対象を写して比べる)
+        const size_t n = 4099;
+        const std::vector<std::string> names = {"ro", "roUx", "roe"};
+        const std::vector<bool> chosen = {false, false, true};
+        std::vector<std::vector<double>> h(3, std::vector<double>(n));
+        for (size_t k = 0; k < 3; ++k)
+            for (size_t i = 0; i < n; ++i) h[k][i] = (1.0 + (double)(k + 1) * std::ldexp(1.0, -40)) * (1.0 + 1.0e-3*(double)i);
+        long long nNotRepRoe = quantizeStateCountNotRepresentable(h[2], 0, n);
+        std::vector<double*> d(3, nullptr);
+        for (size_t k = 0; k < 3; ++k) {
+            CUDA_OK(cudaMalloc(&d[k], n*sizeof(double)));
+            CUDA_OK(cudaMemcpy(d[k], h[k].data(), n*sizeof(double), cudaMemcpyHostToDevice));
+        }
+        auto d2hv = [&](size_t k) { std::vector<double> v(n); cudaMemcpy(v.data(), d[k], n*sizeof(double), cudaMemcpyDeviceToHost); return v; };
+        std::vector<std::vector<double>> before;
+        std::vector<std::string> unsel;
+        for (size_t k = 0; k < 3; ++k) if (!chosen[k]) { before.push_back(d2hv(k)); unsel.push_back(names[k]); }
+        for (size_t k = 0; k < 3; ++k) if (chosen[k]) quantizeKernel<<<(unsigned)((n + 127)/128), 128>>>((geom_int)n, d[k]);
+        CUDA_OK(cudaGetLastError());
+        std::vector<long long> changed;
+        for (size_t k = 0, u = 0; k < 3; ++k) if (!chosen[k]) changed.push_back(quantizeStateCountChanged(before[u++], d2hv(k)));
+        const long long changedRoe = quantizeStateCountChanged(h[2], d2hv(2));
+        for (auto* p : d) CUDA_OK(cudaFree(p));
+        long long tu = -1;
+        const std::string lineU = quantizeStateUnselectedLine(1, unsel, changed, (long long)n, &tu);
+        const std::string wantU = "[quantizeState] step 1: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 / 合計 0 "
+                                  "(0 が期待。全 CV 4099、丸めのカーネルの直前と直後の生のビットの比較)";
+        printf("(6) %s\n    選んだ roe で変わった値 %lld (量子化の前に表せない値 %lld)\n", lineU.c_str(), changedRoe, nNotRepRoe);
+        CHECK(tu == 0 && lineU == wantU, "(6) 選ばなかった量の行が違う:\n    得た '%s'\n    期待 '%s'", lineU.c_str(), wantU.c_str());
+        CHECK(nNotRepRoe > 4000 && changedRoe == nNotRepRoe, "(6) 選んだ量の変わった値 %lld が表せない値 %lld と違う (試験の入力が効いていない)",
+              changedRoe, nNotRepRoe);
+
+        // 0 でないとき・選ばなかった量が無いときの行
+        long long t3 = -1, t4 = -1;
+        const std::string l3 = quantizeStateUnselectedLine(2000, {"ro", "roUx", "roK"}, {0, 3, 2}, 576000, &t3);
+        const std::string w3 = "[quantizeState] step 2000: 選ばなかった量の丸め前後の変化 ro 0 roUx 3 roK 2 / 合計 5 "
+                               "(0 が期待。全 CV 576000、丸めのカーネルの直前と直後の生のビットの比較)";
+        CHECK(t3 == 5 && l3 == w3, "(6) 0 でない行が違う:\n    得た '%s'\n    期待 '%s'", l3.c_str(), w3.c_str());
+        const std::string l4 = quantizeStateUnselectedLine(1, {}, {}, 576000, &t4);
+        const std::string w4 = "[quantizeState] step 1: 選ばなかった量の丸め前後の変化 なし (選んだ量が対象のすべて)";
+        CHECK(t4 == 0 && l4 == w4, "(6) 選ばなかった量が無いときの行が違う:\n    得た '%s'\n    期待 '%s'", l4.c_str(), w4.c_str());
     }
 
     printf("%s (失敗 %d)\n", g_fail == 0 ? "PASS" : "FAIL", g_fail);
