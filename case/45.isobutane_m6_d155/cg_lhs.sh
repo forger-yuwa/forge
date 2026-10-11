@@ -20,7 +20,7 @@ EXTRA="[res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, volume]"
 free_gb() { df --output=avail -B1G . | tail -1 | tr -dc 0-9; }
 echo "== 開始 $(date -Is) $R $A $B F7_64 $(sha256sum $F7_64 | cut -c1-16) 起点 $(sha256sum $SEED | cut -c1-16)" >> $LOG
 [ "$(free_gb)" -ge $MIN_START_GB ] || { echo "ディスクの空きが ${MIN_START_GB} GB 未満 (中止)" >> $LOG; exit 1; }
-strings $F7_64 | grep -q FORGE_LVC_TERMS || { echo "バイナリに FORGE_LVC_TERMS が無い (中止)" >> $LOG; exit 1; }
+[ "$(strings $F7_64 | grep -c FORGE_LVC_TERMS)" -ge 1 ] || { echo "バイナリに FORGE_LVC_TERMS が無い (中止)" >> $LOG; exit 1; }
 for r in $R $A $B; do
   [ -e $r ] && { echo "$r: 既にある (中止)" >> $LOG; exit 1; }
   mkdir $r; for f in $GREF/*; do case $(basename $f) in res_*|*.log|RUN_*|forge_*|residual_*|CONVERGENCE_VERDICT.txt) ;; *) cp -a $f $r/;; esac; done
