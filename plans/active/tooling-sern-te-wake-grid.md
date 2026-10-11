@@ -131,6 +131,8 @@ m10_on で後縁の 1 節点が温度床 50 K に張り付いて評価が成立�
 | R2h3 | **3D の力の部品の完全性 (Major)** — **実装済み (2026-10-12)**: prepare_info に `wall_faces`、`runner_sern3d.force_parts_plan` が形状と bcondConfig から要求部品を固定 (存在しない面は要求しない)、`forces3d` は欠けた標本を `incomplete` にして係数を持たせず、`force_parts` ゲートで判定不能。 | `runner_sern3d.py:398` は出力の無い部品を足さずに通常の係数を返す。形状・境界定義から必要な面を固定し、各予定 step で完全性を要求 (存在しない面と出力の欠落を区別、全形状に 8 部品を一律要求しない)。欠落は判定不能 | O |
 | R2h4 | **C_T_with_shear の摩擦の完全性 (Major)** — **実装済み (2026-10-12)**: 要求する摩擦の部品 (R2c で 5 部品) の twall が 1 つでも欠けた標本は `incomplete` (0 で補わない)。R2c の保存系列は 40 標本 × 2 回で 8 部品・摩擦 5 部品がそろい、C_T_friction の再計算は相対差 0。 | `runner_sern3d.py:432` は 1 部品でも摩擦があれば他をゼロ補完する。目的量に寄与する全粘性壁の必要な traction 成分を要求し、欠落は判定不能 | O |
 | R2h5 | **標準生産経路の初期化と SST→SST 継承の検査 (Major、一律のコピー義務化は却下)** — **実装済み (2026-10-12)**: `runner_sern.check_initial_state` (2D・3D の prepare)、`restart_by_index(..., required=)` が必須量の欠落・節点数の違いで書き込み前に停止、`_stage_inherit_keys` で SST→SST は roK・roOmega を必須・層流→SST は課さない (`run_staged` と `_run_mid_and_main` の 6 か所)。`warm_from_same_mesh` (keep_turb=True) は不変。試験 `run_sern_gate_completeness_tests.py` 116 PASS (R2h1〜R2h5)、保存済み case/46 の 144 本・3D の写し 12 本 (480 標本)・R2c の保存系列で判定は前後一致、GPU の接続試験・R2c 台本試験 PASS。既存試験 4 本の fixture (3 列の残差・設定なし) はこの欠陥に頼っていたので 7 列・SST の設定に直した。**残りの同型 (範囲外、移管)**: `forces3d` の `C_T_friction_vehicle` のゼロ補完 (目的量でない)・`write_ic_arrays`・`warm_from_run`・余分な roY を不整合にしない・`floor_gate` が roXi を ρ と比べない → 親 plan R15。`check_convergence.analyze` の全期間 0 の必須列を 'inactive' で通す → 共有ツールの plan #14。`run_judgment` は `restart_by_index` に `required` を渡さないが書き込み後の `_restart_mismatch` (R2d) が同じ量を検査する (受容)。 | `runner_sern.restart_by_index` (:1364、標準起動の :1617 からも呼ばれる) は欠落・寸法不一致を飛ばす。標準生産経路の初期化と SST→SST の段間継承で必須の状態量を検査する。`runner_sern3d.py:308` の `keep_turb=True` (Euler からの暖機で初期乱流量を保つ明示仕様) は維持し、Euler→SST の初期化に SST→SST と同じ必須コピーを課さない | O |
+| R2i | **化学種・トレーサの残差列を必須に (result 再レビュー 2026-10-12 M1)** | `check_convergence.py` の必須集合 (:171) は流体・SST・遷移の列だけで、化学種の残差列はあるときだけ検査する (R2h2 は保存場だけ)。run_1100 の fixture から `rms_roY0`・`rms_roY1` を消すと `residual_health` は ok・判定不能でなく、1 回目相当は延長可・2 回目相当は GATES PASS (codex がメモリ内で再現)。実効 config (`config_species_keys`) から化学種・トレーサの必須残差列を決め、欠落は JUDGMENT_UNVERIFIABLE。試験: 単独列の欠落・全化学種列の欠落で受理・延長とも拒否、完全な残差は従来どおり | O |
+| R2j | **残差の時系列の完全性 (result 再レビュー 2026-10-12 M2)** | `check_convergence.py:189` は空データだけを拒否し、`sern_gates.py:179` は `last_step` を保存するだけ。先頭 `step=0` だけ・末尾 `step=19999` だけの 1 行でも `NOT CONVERGED (stalled/plateau)` で受理・延長される。判定する session の設定 (nStepOuter) と残差出力の時点規約 (outer_end の step 0…N−1、場は step N) から必要な step・phase の範囲を固定し、欠測・重複・切り詰め・終了位置の不一致・最終場の step との不整合を判定不能にする。`require_residual_pass=True` にはしない。試験: 1 行だけ (先頭・末尾)・途中の欠測・重複・切り詰めで受理・延長とも拒否、run_1100 の完全な残差は従来どおり、保存済みの run の判定の前後比較 | O |
 | 7 | **生産 YAML — 記入済み (2026-10-11)、受入れは R1〜R3 の後 (2026-10-12: R1〜R3・R2a〜R2h5 済み、`judgment_steps: 20000`・`judgment_extend_once: 1` を追記、標準経路で R2c が PASS。result 再レビュー待ち)**: `case/46.sern_design/problem_3d_prod_3op_wallres_lswx08.yaml`・`..._lswx10.yaml` に `mesh3d.te_wake_blend_H: 1.0`・`te_wake_mode: local`・`evaluate.floor_events: 1`・`floor_events_window_steps: 10000` を明示 (検証に使った `..._tewake_g3_L10.yaml` と name 以外同一)。メッシャの既定は 0 のまま。**R7b の再開・設計の順位は親 plan [`tooling-nozzle-sern-chain.md`](tooling-nozzle-sern-chain.md) R7b で上位に諮る** (修正後の評価は §5.1 #6b・#6d) | F |
 | 8 | ~~**別件: ghost の熱力学状態・物性の初期化と参照順序**~~ **別 plan へ移管 (2026-10-11)**: [`boundary-ghost-thermo-init.md`](boundary-ghost-thermo-init.md) | — | — |
 
@@ -160,6 +162,7 @@ m10_on で後縁の 1 節点が温度床 50 K に張り付いて評価が成立�
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | result | 2026-10-11 | [2026-10-11-tooling-sern-te-wake-grid-result.md](../../notes/reviews/2026-10-11-tooling-sern-te-wake-grid-result.md) | **NO-GO**, C0/M3/m2 (格子修正そのものは保存データで支持) | **全件採用**: M1 (学習の採否が床判定を見ない) → §5.1 R1、M2 (生産 YAML を標準 runner で回すと床判定が判定不能・検証の手順が標準経路に無い) → R2、M3 (L_sw が評価方式 ID を分裂させる) → R3、m1 (A の m6_on は #2 不合格・件数の取り違え) → §5.1 #6b 訂正、m2 (§5.1 の整理・旧手順の明示・未確定事項の追跡先・methods の表現) → 本文訂正。R1〜R3 の後に再レビュー |
+| result | 2026-10-12 | [2026-10-12-tooling-sern-te-wake-grid-result.md](../../notes/reviews/2026-10-12-tooling-sern-te-wake-grid-result.md) | **NO-GO**, C0/M2/m2 (R1〜R3・run_1100 の延長・局所化格子は支持) | **全件採用** (いずれも 2026-10-12 diagnose で決めた原則「必須の証拠の欠落は判定不能」の適用漏れで、codex がメモリ内の試験で再現しているので追加の諮問なしで採用): M1 (化学種の残差列が欠けても受理) → §5.1 R2i、M2 (残差 1 行でもプラトーとして受理) → R2j、m1 (case README の run_1097 を合格と読める) → README 訂正、m2 (§7 の「既存 YAML・run には影響しない」が受理検査の変更を過小に書いている) → §7 訂正。R2i・R2j の後に再レビュー |
 | diagnose (g4 の格子の作り直し) | 2026-10-11 | [2026-10-11-g4-grid-redesign-diagnose.md](../../notes/reviews/2026-10-11-g4-grid-redesign-diagnose.md) | (a) 変位の局所化を固定候補 1 つで事前登録、g4 実入力で 0 step 比較、時間積分は停止のまま (Major 4・Minor 1) | **全件採用** → §5.1 #4c。新規低値 0 でも全域 0.65 の条件で生産投入不可 (基準格子の受入れが別に要る)、g3 も作り直して再確認、AR 外れ値の記録の仕方。呼び出し側の「帯全体が比例で動く」は不正確 (`s_bot` が帯高さに依存) と訂正 |
 | diagnose (g4 の投入条件) | 2026-10-11 | [2026-10-11-g4-admission-jacobian-diagnose.md](../../notes/reviews/2026-10-11-g4-admission-jacobian-diagnose.md) | 読み替えでの投入は却下、実入力 h5 でヘキサごとに比較 (Major 2・Minor 1) | **全件採用**: 局所劣化を実入力で確認 (#4b)、基準格子の AR 外れ値は別に記録、復帰の折れは未丸め値で合格。呼び出し側の誤り (A の最小の位置だけで「変形は無関係」と書いた、40,700 は A の数、双子は 5,810 組) を訂正 |
 | diagnose (g3 の farfield ghost) | 2026-10-10 | [2026-10-10-eos-g3-farfield-ghost-diagnose.md](../../notes/reviews/2026-10-10-eos-g3-farfield-ghost-diagnose.md) | v2 を緩めず INVALID を維持、farfield ghost を owner で埋めた共通の再生入力で比較、#4 はその後 (Major 3) | **全件採用** → §5.1 #2 (5)・#4 の停止・#8 の拡大 |
@@ -171,7 +174,11 @@ m10_on で後縁の 1 節点が温度床 50 K に張り付いて評価が成立�
 
 ## 7. 影響範囲
 
-SERN 3D (と 2D) の生産評価系列。メッシャの既定は 0 のままなので、`te_wake_blend_H` を書かない既存の YAML・run には影響しない。
+SERN 3D (と 2D) の生産評価系列。
+
+- **格子**: メッシャの既定は `te_wake_blend_H: 0` のままなので、これを書かない既存の YAML の格子は不変 (小型構成で導入前版と座標・接続・境界面がバイト一致、2026-10-12 result レビュー)。
+- **受理と学習の検査 (R1・R2a〜R2j) は `te_wake_blend_H` の指定にかかわらず既存の経路にも適用される**。再判定すると次の入力は不合格 (判定不能) になりうる: 乱流モデルの必須の力の列・場の量・残差列 (SST の roK・roOmega、化学種・トレーサ) が欠けた評価、残差の時系列が切り詰められた評価、3D で壁の部品の出力・摩擦が欠けた標本、`evaluate.model` が小文字の `sst`・`euler` 以外の問題 YAML、`solverConfig.yaml` の無い run。キャンペーンが床事象・判定区間を要求すると、それを持たない旧評価は学習から外れる。保存済みの case/46 の 144 本・3D の写しでは判定は不変だった (R2f〜R2h5 の試験)。
+- `check_convergence.py` (全 case 共有) は SST の run で rms_roK・rms_roOmega を必須にした (R2g、主チェックアウトの 2866 run で判定不変)。
 
 ## 8. 完了条件
 
@@ -186,6 +193,7 @@ SERN 3D (と 2D) の生産評価系列。メッシャの既定は 0 のままな
 
 ## 9. 変更ログ
 
+- `2026-10-12` — codex result 再レビュー NO-GO (C0/M2/m2) を全件採用: 化学種・トレーサの残差列を必須に (R2i)、残差の時系列の完全性 (R2j)、case README の run_1097 の記載と §7 の適用範囲を訂正。R1〜R3・run_1100・局所化格子は支持された。
 - `2026-10-12` — R2h1〜R2h5 を実装 (残差の入力の判定不能を受理・延長から分離、実効 config の化学種・初期場・段の移行の必須量、3D の力の部品と摩擦の完全性)。R2c の 1 回目の残差で A は延長可・B は判定不能、保存済みの判定は不変、GPU 接続試験 PASS。methods/design/overview.md に「生産の評価経路: 判定区間の段と受理」を追記。残りの同型は親 R15・共有ツールの plan #14 へ。
 - `2026-10-12` — R2c の解釈と R2h の切り分けを codex diagnose に諮った ([`notes/reviews/2026-10-12-sern-r2c-and-sweep-diagnose.md`](../../notes/reviews/2026-10-12-sern-r2c-and-sweep-diagnose.md)): R2c は §6 #11 の合格として採用。R2h の (1)〜(5) は本 plan の完了前 (R2h1〜R2h5)、(6)(7) は共有ツールの plan、(8) は親 R7b、2D 側は 2D plan、一般の状態転送は親 R15 へ。result 再レビューは R2h1〜R2h5 の後。
 - `2026-10-12` — R2c の実 GPU の run (`run_1100_r2c_lsw10_m6_judgment`): 1 回目が未定常だけで不合格 → 自動延長 → 2 回目 PASS (§6 #11 の合格の形)、2 回目の平均は手作業の延長 run_1099 と 1e-6 以内。R2g を実装 (場・床・残差列の必須量を乱流モデルから、モデル名の正規化)。残りの同型箇所を R2h に。
