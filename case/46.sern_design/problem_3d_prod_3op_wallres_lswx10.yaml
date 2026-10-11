@@ -92,6 +92,8 @@ mesh:
   ramp_fillet: 0.1        # ランプ膨張角部 (x=0) の丸め半径 /H。鋭角だと SST が θ_r0 ≳ 18° で roOmega 発散 (run_0055-0057)。
                           # 曲率ジャンプ 1010 → 12.5、壁の持ち上げは最大 0.0019 H。NASA TM X-71972 も小半径で接続している
 evaluate:
+  floor_events: 1                 # 毎更新の床事象を必須ゲートに (plan tooling-sern-te-wake-grid §4・§6 #1)
+  floor_events_window_steps: 10000
   limiter_ref: {length: 2.136214053, ro: 0.04544068206, p: 4411.497933, a: 368.6412254}   # R7b 4-2: 作動点を通じて run_0986 の値に固定
   top_out_kind: slip       # 3D は top_out を slip 壁 (ランプ延長) にする (run_0027 で確立)
   side_far_kind: farfield  # 側方の遠方面を特性型遠方境界に (2026-10-01 生産に採用。遠方面 2.50 H で広幅と許容内・格子差込みで §8 内:
@@ -121,6 +123,8 @@ mesh3d:
   Z_ext: 1.5
   L_sw: 1.0                # R7a 判別試験 B (2026-10-05): 生産 problem_3d_prod_m6on_wallres.yaml から L_sw だけ変えた複製 (plan tooling-nozzle-sern-chain §5.1 R7a)
   L_sw_exact: true         # R7b 4-1 (2026-10-05): 側壁後縁を物理位置どおりに (mesh_sern3d L_sw_exact)
+  te_wake_blend_H: 1.0      # 後縁下流の中間線を後縁の接線から出す (plan tooling-sern-te-wake-grid、2026-10-11 生産採用)
+  te_wake_mode: local       # 変形前の格子に δ(x)·φ(d) を足す (0.02/0.30 H 固定)
   nz_in: 25   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   nz_out: 15   # R5d 段階1: **y 法線壁のみ**壁解像 (plan sern-3d §4.32)。側壁 (z 法線) は現行のまま — z を細くすると AR が 5000 を超えるため (probB/probC で確認)
   ni_up: 10

@@ -886,6 +886,12 @@ $$\text{燃焼器出口 starting line} \rightarrow \text{平面最大推力理�
   旧 `cpg` は外気にも排気の (γ, R) を使い外部動圧が −15 % ずれていた (codex C2)。
 - **3D メッシュの外部領域 (R4, 2026-09-13)**: `mesh_sern3d` は 2D と同じ `mesh.ext_top` (機体上面テーパ + 自由流バンド、タグ `vehicle_top`) と
   `ramp_fillet` を持ち、機体幅外の下面 `underside_far` (帳簿外) を分ける。領域独立性は `case/46/r4_domain_study.py` (Z_ext / x_out / bot_depth / top_depth / 格子)。
+- **後縁下流の格子 (te_wake、2026-10-11、plan [`tooling-sern-te-wake-grid.md`](../../plans/active/tooling-sern-te-wake-grid.md))**: 旧メッシャはカウル後縁の下流の中間線を MOC の自由境界の終端角 θ_b (約 −40°) で引くので、
+  境界層の格子線が後縁で約 36° 折れ、下流の辺が層間隔の約 100 倍ずれた点を指す。LSQ 勾配 (局所には正しい壁法線のせん断) をその辺へ外挿して面の速度が主流値に近くなり、m10_on で後縁の節点が温度床 50 K に張り付いた。
+  対策は `mesh3d.te_wake_blend_H: 1.0`・`te_wake_mode: local`: 中間線を後縁の下側壁面の接線から出し 1.0 H で旧線の位置と勾配へ戻す 3 次 Hermite $\delta(x)$ を、**変形前の格子に** $y_{new} = y_{old} + \delta(x)\varphi(d)$ で足す
+  ($d$ = 旧中間線からの鉛直距離、$d \le 0.02$ H で $\varphi = 1$、$d \ge 0.30$ H で 0、間は 5 次の滑らかな関数。定数は固定)。帯全体を再配分する方式 (`band`) は g4 で外部の帯のセルを潰したので使わない。
+  既定は `te_wake_blend_H: 0` (旧格子とビット一致)、生産 YAML に明示する。投入前の判定は `case/46.sern_design/diag/te_wake_grid_check.py --admission` (後縁の折れ・復帰の折れ・層厚・品質・双対閉性) と `te_wake_hex_compare.py` (変形による低品質セルの増加 0・支持領域の外の不変)。
+  評価方式の識別 (学習可否) に曲線と方式の版が入るので、修正前の評価とは学習で混ざらない。g3/g4 の m10_on で冷点が消え (最低温度 約 227 K)、g3 → g4 の力の差は許容内。
 - **壁の熱境界 (2026-09-13)**: 生産 YAML は等温壁 $T_w$ = 1000 K (`spec.wall_thermal`)。断熱だと M∞10 の外気側で回復温度 4600 K になり残差がプラトーする
   (plan §8-11)。
 - **3D の帳簿 (R2, 2026-09-13)**: メッシャは幅外の機体下面を `vehicle` タグ (W/2 < z ≤ W_vehicle/2) に分け、`forces3d` の $C_T,C_L,C_M$ は
