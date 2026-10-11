@@ -41,11 +41,13 @@ for k, r in RUNS.items():
             if any(h["VALUE"][q].dtype.kind == "f" and not np.all(np.isfinite(h["VALUE"][q][:])) for q in h["VALUE"]): und(f"{r}: res_{s} に非有限"); break
     a_, b_ = (d / "solverConfig.yaml").read_text().splitlines(), (HERE / BASE[k] / "solverConfig.yaml").read_text().splitlines()
     diff = [(x, y) for x, y in zip(a_, b_) if x != y]
-    ok = len(a_) == len(b_) and len(diff) == 1
+    # 許す差: deltaT の行の 4 キーの削除と、nStepOuter (旧 30,000 → 120,000、登録の時点で書き漏らした必然の差、run の前に追記)
+    rest = [(x, y) for x, y in diff if not (x.strip() == "last: {nStepOuter: 120000}" and y.strip() == "last: {nStepOuter: 30000}")]
+    ok = len(a_) == len(b_) and len(rest) == 1
     if ok:
-        y = diff[0][1]
+        y = rest[0][1]
         for t in REMOVED: y = y.replace(t, "")
-        ok = (y == diff[0][0])
+        ok = (y == rest[0][0])
     if not ok: und(f"{r}: {BASE[k]} との設定の差が 4 キーの削除だけでない: {diff[:2]}")
     OUT["checks"][f"{r} 設定の差"] = diff
 if not OUT["undecidable"] or A.stage == 1:
