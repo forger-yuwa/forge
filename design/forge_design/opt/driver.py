@@ -30,7 +30,11 @@ DOE → forge 評価 (VERDICT ゲート) → KRG (f1=−η のみ; f2=L/rt は d
 TP 経路 (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1・§5.1 #2b; 問題が `gas.model: semiperfect` + `gas.exhaust`):
 - 物理ゲートの分母は同じ凍結 TP の ṁ_1D・F_1D (`runner.ideal_1d_tp`; 定比熱の式は使わない)。
 - 評価は `runner.run_staged_tp` (soft → mid → 本段を同じ run・同じメッシュで、段の間は restart_field.py、StageManifest)。
-  最初の点は `--seed-res` なしなら冷間 (準 1D) から、形状が変わる warm start は interp_field.py の cross-mesh restart。
+  **全点を冷間の段階起動** (準 1D の等エントロピー IC → soft → mid → 本段) で回し、cross-mesh の warm start は使わない
+  (`--seed-res` も無視)。`interp_field.py` は生座標の最近傍なので、形状が変わると新旧の壁の間の帯に旧い壁の値 (u≈0・回復温度) が入り、
+  本段で出口の壁の角から逆流が育って発散した (case/68 run_0010 doe_001 → 同じ形の冷間 run_0011 は全ゲート PASS、plan §4.1)。
+  段の長さは同じなので費用は変わらず、評価が評価順に依存しない。
+  停止規則: 同じ fail_class (SUSPECT または RETRYABLE) が 3 評価続く、または DOE で SUSPECT + RETRYABLE が DOE 点数の 20 % を超えたら止める。
 - 受理は `tp_gates` の (i)〜(v) を**すべて**満たすとき (2026-10-11 組み替え、plan §4.1・§5.1 #2c'、diagnostician の記録
   notes/reviews/2026-10-11-bell-2b-gates-diagnostician.md): (i) 本段の区間の `check_convergence.py --segment` の VERDICT は記録し、
   不合格は DIVERGED と有意な末尾上昇 (rising) と判定不能だけ (NOT CONVERGED (stalled) は GATES.json に併記)、(ii) 推力系 4 列
@@ -105,7 +109,8 @@ def absolutize_problem_paths(raw: dict, base_dir) -> dict:
 # 残差は記録 (FAIL は DIVERGED と有意な末尾上昇だけ)、推力系 STEADY 1.5e-4・ṁ 1e-3、最終 |cv| ≤ 1e-4、η は出口面会計を主。
 TP_PHYS_BOUNDS = {"mdot_ratio_1d": (0.94, 1.005), "eta": (0.5, 1.02)}   # (iii) Phase 2 の物理ゲート (CPG 経路と同じ値)
 TP_CV_TOL = 1.0e-4                                                     # (iv) 最終スナップショットの |CV 残差| ≤ 1e-4 (F_1D 正規化)
-SUSPECT_STOP_N = 3          # 続けて SUSPECT ならキャンペーンを止める評価数 (`_stop_on_repeated_suspect`)
+FAIL_STOP_N = 3             # 同じ fail_class (SUSPECT・RETRYABLE) が続いたらキャンペーンを止める評価数 (`_stop_on_repeated_failures`)
+DOE_FAIL_STOP_FRAC = 0.20   # DOE の SUSPECT + RETRYABLE がこの割合を超えたら止める (`_stop_on_doe_failure_rate`)
 # (ii) 推力系 4 列 (runner.THRUST_QS_COLS) の閾値: drift・osc とも 1.5e-4 (相対、末尾窓 4 割)。問題 YAML の evaluate.quasisteady で上書き
 TP_QS_DEFAULT = {"tail": 0.4, "drift": 1.5e-4, "osc": 1.5e-4, "min_snaps": 4}
 TP_QS_MDOT = {"drift": 1.0e-3, "osc": 1.0e-3}                          # (ii) ṁ (runner.THRUST_QS_MDOT_COLS) の閾値
@@ -423,7 +428,7 @@ class Campaign:
     def evaluate(self, x, tag: str) -> dict:
         if self.tp:
             row = self._evaluate_tp(x, tag)
-            self._stop_on_repeated_suspect()
+            self._stop_on_repeated_failures()
             return row
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time()
@@ -535,9 +540,8 @@ class Campaign:
         row = {"tag": tag, "x": x, "run_dir": str(run_dir), "status": "FAIL",
                "fail_class": None, "warm_from": "", "note": "", "path": "tp"}
         try:
-            warm = self._warm_for(x)
-            row["warm_from"] = str(warm) if warm is not None else ""
-            runner.run_staged_tp(prob, run_dir, warm_from=warm)
+            # TP は全点冷間 (warm start は使わない — 冒頭の docstring・plan §4.1)。warm_from は空のまま台帳に残す
+            runner.run_staged_tp(prob, run_dir, warm_from=None)
             out = runner.collect(prob, run_dir)
             qs = (self.base_raw.get("evaluate") or {}).get("quasisteady")
             g = tp_gates(run_dir, out, qs=qs)
@@ -559,7 +563,8 @@ class Campaign:
                 row["wall_design"] = e.record
         except RuntimeError as e:
             row["fail_class"] = "RETRYABLE" if "段" in str(e) else "SUSPECT"   # 段の失敗 (発散・段終了ゲート) / メッシュ品質等
-            row["note"] = f"runtime: {str(e)[:250]}"
+            nan = sorted(run_dir.glob("res_nan_*.h5"))                       # 最初の NaN の step (ソルバの detectNaN の出力名)
+            row["note"] = f"runtime: {str(e)[:250]}" + (f" [NaN step {nan[0].stem.split('_')[-1]}]" if nan else "")
         except subprocess.CalledProcessError as e:  # 下請けツール (interp_field 等) の失敗: 理由は stderr にある
             row["fail_class"] = "SUSPECT"
             tool = Path(str(e.cmd[1] if isinstance(e.cmd, (list, tuple)) and len(e.cmd) > 1 else e.cmd)).name
@@ -577,13 +582,21 @@ class Campaign:
               f" ({row['wall_s']}s) {row['note']}", flush=True)
         return row
 
-    def _stop_on_repeated_suspect(self, n: int = SUSPECT_STOP_N) -> None:
-        """直近 n 評価が続けて SUSPECT (計測・下請けツール・I/O の失敗) なら止める。同じ原因で DOE 点を空費しないため
-        (2026-10-11 case/68 run_0010: warm start の interp_field が化学種署名を解決できず、17 点が 10 秒ずつ落ちた)。"""
+    def _stop_on_repeated_failures(self, n: int = FAIL_STOP_N) -> None:
+        """直近 n 評価が続けて同じ fail_class (SUSPECT = 計測・下請けツール・I/O、RETRYABLE = 段の発散・未定常) なら止める。
+        同じ原因で DOE 点を空費しないため (2026-10-11 case/68 run_0010: warm start の interp_field が化学種署名を解決できず
+        17 点が 10 秒ずつ落ちた)。失敗点はサロゲートに入らないので、infill が同じ失敗領域を繰り返し提案するのもここで捕まえる。"""
         tail = self.rows[-n:]
-        if len(tail) == n and all(r.get("fail_class") == "SUSPECT" for r in tail):
-            raise SystemExit(f"[driver] 直近 {n} 評価が続けて SUSPECT — 停止 (台帳 {self.ledger} の note を見る。"
-                             "原因を直したら失敗行を台帳から除いて再開する)")
+        for fc in ("SUSPECT", "RETRYABLE"):
+            if len(tail) == n and all(r.get("fail_class") == fc for r in tail):
+                raise SystemExit(f"[driver] 直近 {n} 評価が続けて {fc} — 停止 (台帳 {self.ledger} の note を見る。"
+                                 "原因を直すか上位に諮ってから、失敗行の扱いを決めて再開する)")
+
+    def _stop_on_doe_failure_rate(self, n_doe: int, frac: float = DOE_FAIL_STOP_FRAC) -> None:
+        """DOE の評価で SUSPECT + RETRYABLE が DOE 点数の frac を超えたら止める (INFEASIBLE と壁解像などの FAIL は数えない)。"""
+        bad = [r for r in self.rows if r["tag"].startswith("doe_") and r.get("fail_class") in ("SUSPECT", "RETRYABLE")]
+        if len(bad) > frac * n_doe:
+            raise SystemExit(f"[driver] DOE の SUSPECT + RETRYABLE が {len(bad)} 点 (> {frac:.0%} × {n_doe}) — 停止して上位に諮る")
 
     def _diverged(self, run_dir: Path, out: dict) -> bool:
         v = (run_dir / "CONVERGENCE_VERDICT.txt")
@@ -616,13 +629,15 @@ class Campaign:
     def run(self, n_doe: int, n_iter: int, batch: int) -> None:
         done = {r["tag"] for r in self.rows}
         cand = lhs(self.bounds, 3 * n_doe, seed=self.seed)
-        doe = [x for x in cand if self.feasible(x)][:n_doe]
-        print(f"DOE {len(doe)} 点 (feasible {len(doe)}/{3*n_doe} 生成中から先頭採用)",
-              flush=True)
+        feas = [x for x in cand if self.feasible(x)]
+        doe = feas[:n_doe]
+        print(f"DOE {len(doe)} 点 (LHS {3*n_doe} 点のうち成立 {len(feas)} 点の先頭)", flush=True)
         for i, x in enumerate(doe):
             tag = f"doe_{i:03d}"
             if tag not in done:
                 self.evaluate(x, tag)
+                if self.tp:
+                    self._stop_on_doe_failure_rate(len(doe))
         for it in range(n_iter):
             X, F = self._XF()
             if len(X) < 4:
@@ -667,7 +682,7 @@ def main(argv=None) -> int:
     ap.add_argument("--gate-only", action="store_true",
                     help="TP: campaign_dir を既存の run とみなし、受理ゲート (i)〜(v) だけをかけ直す (GATES.json を書く)")
     ap.add_argument("--seed-res", default=None,
-                    help="初期 warm start の収束 res_*.h5 (CPG は必須。TP は省略で冷間の段階起動から)")
+                    help="初期 warm start の収束 res_*.h5 (CPG は必須。TP は使わない — 全点を冷間の段階起動)")
     ap.add_argument("--n-doe", type=int, default=24)
     ap.add_argument("--n-iter", type=int, default=13)
     ap.add_argument("--batch", type=int, default=2)

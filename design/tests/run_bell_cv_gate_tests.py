@@ -612,5 +612,40 @@ check("driver: (D) の成立しない点の評価は INFEASIBLE・理由 (note)�
       and json.loads((tmp / "camp_d" / "ledger.jsonl").read_text().splitlines()[-1])["fail_class"] == "INFEASIBLE",
       row["note"][:120])
 
+# ---------------------------------------------------------------- driver: TP は全点冷間・停止規則 (2026-10-11 diagnostician)
+_seen = {}
+_orig_staged = runner.run_staged_tp
+def _fake_staged(prob, run_dir, warm_from=None, **kw):      # forge は起動しない: 渡された warm_from を記録して段の失敗にする
+    _seen["warm_from"] = warm_from
+    Path(run_dir).mkdir(parents=True, exist_ok=True)
+    (Path(run_dir) / "res_nan_41558.h5").write_bytes(b"")
+    raise RuntimeError("TP の段 S3_main が失敗 (rc=1)")
+runner.run_staged_tp = _fake_staged
+try:
+    campw = DR.Campaign(PROBLEM_D, tmp / "camp_cold", tmp / "nonexistent_seed.h5")
+    campw.rows.append({"tag": "doe_000", "x": [25.0, 10.0, 0.8 * Lc], "status": "PASS", "run_dir": str(tmp / "x"),
+                       "res_file": "res_60000.h5", "fail_class": None})
+    r1 = campw._evaluate_tp([26.0, 10.0, 0.8 * Lc], "doe_001")
+    check("driver: TP は PASS 点や --seed-res があっても warm start を渡さない (全点冷間)",
+          "warm_from" in _seen and _seen["warm_from"] is None and r1["warm_from"] == "", str(_seen))
+    check("driver: 段の失敗は RETRYABLE、note に最初の NaN の step", r1["fail_class"] == "RETRYABLE" and "NaN step 41558" in r1["note"],
+          r1["note"])
+    campw.rows.append({"tag": "doe_002", "fail_class": "RETRYABLE"})
+    check("driver: RETRYABLE 2 連続では止めない", raises(lambda: campw._stop_on_repeated_failures(), SystemExit) is None)
+    campw.rows.append({"tag": "doe_003", "fail_class": "RETRYABLE"})
+    check("driver: RETRYABLE 3 連続で止める", raises(lambda: campw._stop_on_repeated_failures(), SystemExit) is not None)
+    campw.rows[-1] = {"tag": "doe_003", "fail_class": "SUSPECT"}
+    check("driver: 種類の違う失敗の 3 連続は止めない", raises(lambda: campw._stop_on_repeated_failures(), SystemExit) is None)
+    rows0 = list(campw.rows)
+    campw.rows = [{"tag": f"doe_{i:03d}", "fail_class": ("RETRYABLE" if i < 8 else None)} for i in range(20)]
+    check("driver: DOE 40 点で失敗 8 点 (= 20 %) は止めない", raises(lambda: campw._stop_on_doe_failure_rate(40), SystemExit) is None)
+    campw.rows.append({"tag": "doe_020", "fail_class": "SUSPECT"})
+    check("driver: DOE 40 点で失敗 9 点 (> 20 %) で止める", raises(lambda: campw._stop_on_doe_failure_rate(40), SystemExit) is not None)
+    campw.rows = [{"tag": f"inf_00_{i}", "fail_class": "RETRYABLE"} for i in range(9)]
+    check("driver: infill の失敗は DOE の割合に数えない", raises(lambda: campw._stop_on_doe_failure_rate(40), SystemExit) is None)
+    campw.rows = rows0
+finally:
+    runner.run_staged_tp = _orig_staged
+
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAILED'}")
 sys.exit(1 if FAIL else 0)
