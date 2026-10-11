@@ -1,0 +1,7 @@
+# 本段の config: 現行 runner の prepare (run_1100_r2c_lsw10_m6_judgment/solverConfig_main.yaml) と起点 run (run_1094_tewake_lsw10_m6/solverConfig_main.yaml)
+# 許す差 (nStepOuter・出力系) 0 行、許さない差 0 行
+(差なし)
+
+# bcondConfig.yaml: 差なし
+
+# species_meta.yaml: 差なし

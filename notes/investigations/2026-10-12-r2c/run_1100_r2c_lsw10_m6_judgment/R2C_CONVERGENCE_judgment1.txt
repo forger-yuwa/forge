@@ -1,0 +1,16 @@
+# 判定区間 = 判定区間の段 1 回目の session (同一設定の 20000 step。residual_judgment1.csv)
+$ /home/ubuntu/forge-r8/solver_density_cuda/tools/check_convergence.py /tmp/tmpy9g_bafm
+
+=== /tmp/tmpy9g_bafm  [last step 19999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=2.43e-06 peak=2.47e-06 fin=5.86e-07 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=4.13e-03 peak=4.21e-03 fin=1.13e-03 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=6.30e-04 peak=6.48e-04 fin=2.00e-04 drop= 0.5dec flat     <-- STALLED (plateau)
+  rms_roUz    : init=6.49e-04 peak=8.28e-04 fin=4.37e-04 drop= 0.2dec flat     <-- STALLED (plateau)
+  rms_roe     : init=3.65e+00 peak=4.13e+00 fin=1.92e+00 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roK     : init=7.31e-02 fin=2.29e-03 drop= 1.4dec falling  <-- still converging
+  rms_roOmega : init=3.16e+01 peak=1.58e+02 fin=4.38e+01 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=7.04e-07 peak=8.62e-07 fin=3.84e-07 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=2.39e-06 peak=2.42e-06 fin=4.01e-07 drop= 0.7dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+EXIT: 1

@@ -14,6 +14,22 @@ import yaml
 KNOWN_TYPES = ("thruster_bell", "wind_tunnel_axisym", "wind_tunnel_axisym_walldriven",
                "wind_tunnel_axisym_axismach", "sern_2d")
 
+# ⑤ SERN の乱流モデル (evaluate.model) の綴り (plan tooling-sern-te-wake-grid §5.1 R2g、2026-10-12)。runner (solver config・
+# bcond・prepare_info) と受理ゲート (目的量・必須量) が同じ値を読むよう、**読む箇所はすべて sern_turbulence_model を通し**、
+# 問題 YAML の読み込み時 (_validate) にも検査する。綴りは小文字の 2 つだけで、大小文字・前後の空白を読み替えない
+# (旧実装は runner が "euler" の完全一致、ゲートが小文字化して引いたので、`Euler` と書くとソルバは SST・ゲートは Euler の 3 量になった)。
+# キーが無ければ既定 euler (runner の従来の既定)
+SERN_TURBULENCE_MODELS = ("sst", "euler")
+
+
+def sern_turbulence_model(evaluate) -> str:
+    """問題 YAML の evaluate 節から ⑤ SERN の乱流モデル (sst / euler)。キーが無ければ euler。それ以外の値は ValueError。"""
+    ev = evaluate or {}
+    m = ev.get("model", "euler")
+    if not isinstance(m, str) or m not in SERN_TURBULENCE_MODELS:
+        raise ValueError(f"evaluate.model {m!r} は {' | '.join(SERN_TURBULENCE_MODELS)} のどれか (小文字。大小文字・空白は読み替えない)")
+    return m
+
 
 @dataclass
 class Problem:
@@ -223,6 +239,11 @@ def _validate(p: Problem) -> None:
             errs.append("spec.M_design が必要 (現実装は M_design + r_throat の組を要求)")
         if "r_throat" not in p.spec:
             errs.append("spec.r_throat が必要 (D_e 従属モードは未実装 — 閉ループ派生で追加予定)")
+    elif p.type == "sern_2d":
+        try:
+            sern_turbulence_model(p.evaluate)      # 乱流モデルの綴り (runner とゲートが同じ値を読む。§5.1 R2g)
+        except ValueError as ex:
+            errs.append(str(ex))
     # gas (2026-09-16): 組成の基準・種名・凝縮種・tp_species スキーマを入力段階で検査 (plan cea-mole-fraction §4.1–4.2)
     gs = p.raw.get("gas", {})
     if str(gs.get("model", "cpg")) == "semiperfect":

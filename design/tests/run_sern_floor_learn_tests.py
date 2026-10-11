@@ -168,7 +168,9 @@ def make_run(d: Path, steps):
     d.mkdir(parents=True)
     n = 40
     with h5py.File(d / f"res_{steps}.h5", "w") as f:
-        for k, val in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3.0e5), ("P", 1.0e5), ("T", 300.0)):
+        # SST の場 (roK・roOmega も。2026-10-12 から SST では必須: plan tooling-sern-te-wake-grid §5.1 R2g)
+        for k, val in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3.0e5), ("P", 1.0e5), ("T", 300.0),
+                       ("roK", 1.0), ("roOmega", 1.0e3)):
             f.create_dataset(f"VALUE/{k}", data=np.full(n, val))
     with open(d / "residual_history.csv", "w", newline="") as fh:
         w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roe"])

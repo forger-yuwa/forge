@@ -1,0 +1,70 @@
+{
+ "version": "r2c-v1",
+ "time": "2026-10-11T16:57:14+0000",
+ "prepare_s": 186.1,
+ "git": {
+  "head": "15968c33753843685be0f41c26f1ccdf4be9ab8f",
+  "dirty_entries": null
+ },
+ "problem": "/home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx10.yaml",
+ "op": "m6_on",
+ "new_run": "/home/ubuntu/forge-r8/case/46.sern_design/run_1100_r2c_lsw10_m6_judgment",
+ "src_run": "/home/ubuntu/forge-r8/case/46.sern_design/run_1094_tewake_lsw10_m6",
+ "src_res": "res_4000.h5",
+ "forge_bin": {
+  "path": "/home/ubuntu/forge-r8/solver_density_cuda/build/forge",
+  "sha256": "61cf8f4fc64125cd5aa30cfef1439882c671156f5c1826baaa7578e3782131c2"
+ },
+ "ok": true,
+ "converter": {
+  "path": "/home/ubuntu/forge-r8/solver_density_cuda/build/convertGmshToForge",
+  "sha256": "36b061b966b14be831afd3908773c530a9a61cec0b256f250838bdaa52bcd402",
+  "bytes": 58462528,
+  "mtime": 1791643243
+ },
+ "mesh_identity": {
+  "mesh_signature": {
+   "new": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+   "src": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc"
+  },
+  "dual_hash": {
+   "new": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+   "src": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba"
+  },
+  "discretization": {
+   "new": "node",
+   "src": "node"
+  }
+ },
+ "eval_method_id": {
+  "new": "c9db16d5eab87ddf7613f560268347b1ae006096a772bea06f71372ac3ec55dc",
+  "src": "013caf37dd5b505259331545707a2e5898e348965aa6bb2bf84ec38d58fc2e7c"
+ },
+ "config_diff": {
+  "allowed": [],
+  "disallowed": [],
+  "files": {
+   "bcondConfig.yaml": true,
+   "species_meta.yaml": true
+  }
+ },
+ "species": {
+  "state": "unverified",
+  "attrs": {
+   "species_hash": "b72ff462d242cc995083e65845c31bb0b33900b9090f6948242583cc91d43cea",
+   "species_record_sha256": "476487b9a57b6eb760cc4b3176b4cd858116e868e7007160e0cef5a515bca5b0",
+   "species_record_file": "resolved_species_b72ff462d242cc99_476487b9a57b6eb7.yaml",
+   "species_input_unverified": 1
+  },
+  "why": "/home/ubuntu/forge-r8/case/46.sern_design/run_1094_tewake_lsw10_m6/res_4000.h5 descends from an unverified start (species_input_unverified=1)"
+ },
+ "allow_unverified_species": false,
+ "allow_unverified_species_reason": "起点の場は unverified (species_hash あり) — 宛先の解決結果とハッシュが一致すれば許可なしで通る (一致しなければ止まる)",
+ "src_res_sha256": "93bef85927c6d78e9ec9838e03fb9a77784e3f584a0ce56c8e0c2c81eba39189",
+ "copied_res_sha256": "93bef85927c6d78e9ec9838e03fb9a77784e3f584a0ce56c8e0c2c81eba39189",
+ "copied_records": [
+  "resolved_species_b72ff462d242cc99.yaml",
+  "resolved_species_b72ff462d242cc99_476487b9a57b6eb7.yaml",
+  "resolved_species_b72ff462d242cc99_7dd343d8d3d647c1.yaml"
+ ]
+}

@@ -1,0 +1,16 @@
+# 判定区間 = 判定区間の段 1 回目の session (同一設定の 20000 step。residual_judgment1.csv)
+# --from-floor /home/ubuntu/forge-r8/case/46.sern_design/run_1094_tewake_lsw10_m6 (起点 run の本段の残差の末尾床)
+$ /home/ubuntu/forge-r8/solver_density_cuda/tools/check_convergence.py /tmp/tmpy9g_bafm --from-floor /home/ubuntu/forge-r8/case/46.sern_design/run_1094_tewake_lsw10_m6
+=== reference /home/ubuntu/forge-r8/case/46.sern_design/run_1094_tewake_lsw10_m6  [last step 3999]  -> NOT CONVERGED ===
+  rms_ro      : init=1.26e-05 fin=2.43e-06 drop= 0.7dec falling  <-- still converging
+  rms_roUx    : init=2.11e-02 fin=4.12e-03 drop= 0.7dec falling  <-- still converging
+  rms_roUy    : init=3.81e-03 fin=6.30e-04 drop= 0.7dec falling  <-- still converging
+  rms_roUz    : init=2.62e-03 peak=2.63e-03 fin=6.55e-04 drop= 0.6dec falling  <-- still converging
+  rms_roe     : init=1.89e+01 fin=3.66e+00 drop= 0.7dec falling  <-- still converging
+  rms_roK     : init=9.90e-02 fin=7.31e-02 drop= 0.1dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=4.16e+01 peak=1.85e+02 fin=3.22e+01 drop= 0.6dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=3.69e-06 fin=7.13e-07 drop= 0.7dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.17e-05 fin=2.38e-06 drop= 0.7dec falling  <-- still converging
+
+REFUSED: --from-floor requires a reference run that PASSES the normal criterion (--drop 3.0, --tail 0.2); its residual floor is not a converged floor.
+EXIT: 2

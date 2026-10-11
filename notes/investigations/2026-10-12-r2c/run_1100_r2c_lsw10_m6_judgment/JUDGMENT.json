@@ -1,0 +1,391 @@
+{
+ "version": "sern-judgment-v1",
+ "options": {
+  "steps": 20000,
+  "extend_once": true,
+  "window_steps": 10000
+ },
+ "startup_rc": 0,
+ "layout": "same_run_dir",
+ "config": "solverConfig_judgment.yaml",
+ "attempts": [
+  {
+   "attempt": 1,
+   "restart_from": "res_4000.h5",
+   "env": {
+    "source": "runner_sern._ENV (run_case.sh に渡す環境)",
+    "named": {
+     "FORGE_CUDA_BLOCKSIZE": "128",
+     "FORGE_CUDA_BLOCKSIZE_SMALL": null,
+     "FORGE_ALLOW_UNVERIFIED_SPECIES": null,
+     "FORGE_BIN": null
+    },
+    "unset": [
+     "FORGE_CUDA_BLOCKSIZE_SMALL",
+     "FORGE_ALLOW_UNVERIFIED_SPECIES",
+     "FORGE_BIN"
+    ],
+    "other_forge_env": {}
+   },
+   "rc": 0,
+   "last_step": 20000,
+   "gates": "FAIL",
+   "fail_class": "JUDGMENT_UNSETTLED",
+   "reasons": [
+    "判定区間: 窓・定常性が未達: C_T_with_shear: a 3.32e-06・d 6.92e-05 (許容 5e-05)・STEADY",
+    "判定区間: 窓・定常性が未達: C_M: a 5.23e-04・d 1.92e-03 (許容 5e-04)・STEADY",
+    "判定区間: 最低温度が未定常: ALL の最低温度 TRANSIENT-UNSETTLED"
+   ],
+   "floor_events": {
+    "required": true,
+    "verdict": "PASS",
+    "fail_class": null,
+    "window": [
+     10000,
+     20000
+    ],
+    "n_updates_checked": 10000,
+    "n_events": {
+     "T": 0,
+     "Rho": 0,
+     "P": 0
+    },
+    "first_events": [],
+    "reasons": []
+   },
+   "judgment": "UNSETTLED",
+   "force_window": {
+    "verdict": "UNSETTLED",
+    "window": [
+     10000,
+     20000
+    ],
+    "n_tail": 20,
+    "n_prev": 20,
+    "quantities": {
+     "C_T": {
+      "mean": 0.8926333295363827,
+      "a": 3.7014367703092077e-06,
+      "d": 2.6467212442038424e-05,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "ok": true
+     },
+     "C_T_with_shear": {
+      "mean": 0.872551325192412,
+      "a": 3.3247849764439508e-06,
+      "d": 6.92245657999413e-05,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "ok": false
+     },
+     "C_L": {
+      "mean": 0.07149554056870763,
+      "a": 1.9629578217897348e-05,
+      "d": 4.3693594525301416e-05,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "ok": true
+     },
+     "C_M": {
+      "mean": -1.8493169211073208,
+      "a": 0.0005226133471611938,
+      "d": 0.0019179970713711914,
+      "tol": 0.0005,
+      "steady": "STEADY",
+      "ok": false
+     }
+    }
+   },
+   "temperature": {
+    "verdict": "UNSETTLED",
+    "window": [
+     10000,
+     20000
+    ],
+    "n_window": 20,
+    "regions": {
+     "R_TE": {
+      "Tmin_window": 220.78662109375,
+      "Tmin_step": 20000,
+      "Tmin_node": 486325.0,
+      "Tmin_xyz": [
+       0.11599194258451462,
+       -0.030481090769171715,
+       0.13409793376922607
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     },
+     "R_SE": {
+      "Tmin_window": 224.6658477783203,
+      "Tmin_step": 16500,
+      "Tmin_node": 342803.0,
+      "Tmin_xyz": [
+       0.07864279299974442,
+       -0.018784569576382637,
+       0.11595223098993301
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     },
+     "RET": {
+      "Tmin_window": 220.55075073242188,
+      "Tmin_step": 12500,
+      "Tmin_node": 582612.0,
+      "Tmin_xyz": [
+       0.19220668077468872,
+       -0.052809227257966995,
+       0.10721277445554733
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     },
+     "ALL": {
+      "Tmin_window": 209.99208068847656,
+      "Tmin_step": 20000,
+      "Tmin_node": 1849680.0,
+      "Tmin_xyz": [
+       1.157789707183838,
+       0.2947377562522888,
+       0.03849693387746811
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "TRANSIENT-UNSETTLED"
+     }
+    }
+   },
+   "steadiness": {
+    "C_T_with_shear": "STEADY",
+    "C_T": "STEADY",
+    "C_L": "STEADY",
+    "C_M": "STEADY"
+   },
+   "snapshots": {
+    "monitored": 41,
+    "failed": 0,
+    "removed": 40
+   },
+   "archived": [
+    "metrics_judgment1.json",
+    "force_history_judgment1.csv",
+    "TE_MONITOR_judgment1.csv",
+    "TE_MONITOR_step0_judgment1.csv",
+    "TE_MONITOR_judgment1.log",
+    "CONVERGENCE_VERDICT_judgment1.txt"
+   ],
+   "extend_reason": "未定常 (窓・定常性の未達) だけ"
+  },
+  {
+   "attempt": 2,
+   "restart_from": "res_20000.h5",
+   "env": {
+    "source": "runner_sern._ENV (run_case.sh に渡す環境)",
+    "named": {
+     "FORGE_CUDA_BLOCKSIZE": "128",
+     "FORGE_CUDA_BLOCKSIZE_SMALL": null,
+     "FORGE_ALLOW_UNVERIFIED_SPECIES": null,
+     "FORGE_BIN": null
+    },
+    "unset": [
+     "FORGE_CUDA_BLOCKSIZE_SMALL",
+     "FORGE_ALLOW_UNVERIFIED_SPECIES",
+     "FORGE_BIN"
+    ],
+    "other_forge_env": {}
+   },
+   "rc": 0,
+   "last_step": 20000,
+   "gates": "PASS",
+   "fail_class": null,
+   "reasons": [],
+   "floor_events": {
+    "required": true,
+    "verdict": "PASS",
+    "fail_class": null,
+    "window": [
+     10000,
+     20000
+    ],
+    "n_updates_checked": 10000,
+    "n_events": {
+     "T": 0,
+     "Rho": 0,
+     "P": 0
+    },
+    "first_events": [],
+    "reasons": []
+   },
+   "judgment": "PASS",
+   "force_window": {
+    "verdict": "PASS",
+    "window": [
+     10000,
+     20000
+    ],
+    "n_tail": 20,
+    "n_prev": 20,
+    "quantities": {
+     "C_T": {
+      "mean": 0.8926328614698485,
+      "a": 2.7970715833491866e-06,
+      "d": 3.977780896891048e-07,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "ok": true
+     },
+     "C_T_with_shear": {
+      "mean": 0.8725507010743471,
+      "a": 2.6728677485765573e-06,
+      "d": 3.7018737497618304e-07,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "ok": true
+     },
+     "C_L": {
+      "mean": 0.07148223578631123,
+      "a": 1.1549702562688169e-05,
+      "d": 8.279113029585616e-07,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "ok": true
+     },
+     "C_M": {
+      "mean": -1.8489204842705835,
+      "a": 0.0002551272202995225,
+      "d": 2.3778594140155818e-05,
+      "tol": 0.0005,
+      "steady": "STEADY",
+      "ok": true
+     }
+    }
+   },
+   "temperature": {
+    "verdict": "PASS",
+    "window": [
+     10000,
+     20000
+    ],
+    "n_window": 20,
+    "regions": {
+     "R_TE": {
+      "Tmin_window": 220.78662109375,
+      "Tmin_step": 11000,
+      "Tmin_node": 481372.0,
+      "Tmin_xyz": [
+       0.11529795080423355,
+       -0.030420901253819466,
+       0.13409793376922607
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     },
+     "R_SE": {
+      "Tmin_window": 224.666015625,
+      "Tmin_step": 10500,
+      "Tmin_node": 342803.0,
+      "Tmin_xyz": [
+       0.07864279299974442,
+       -0.018784569576382637,
+       0.11595223098993301
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     },
+     "RET": {
+      "Tmin_window": 220.5528564453125,
+      "Tmin_step": 11000,
+      "Tmin_node": 582612.0,
+      "Tmin_xyz": [
+       0.19220668077468872,
+       -0.052809227257966995,
+       0.10721277445554733
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     },
+     "ALL": {
+      "Tmin_window": 209.46714782714844,
+      "Tmin_step": 19500,
+      "Tmin_node": 1849680.0,
+      "Tmin_xyz": [
+       1.157789707183838,
+       0.2947377562522888,
+       0.03849693387746811
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY"
+     }
+    }
+   },
+   "steadiness": {
+    "C_T_with_shear": "STEADY",
+    "C_T": "STEADY",
+    "C_L": "STEADY",
+    "C_M": "STEADY"
+   },
+   "snapshots": {
+    "monitored": 41,
+    "failed": 0,
+    "removed": 40
+   }
+  }
+ ],
+ "verdict": "PASS",
+ "reason": "判定区間 2 回目 (20000 step) で §6 #1〜#3 を満たす",
+ "metrics": "metrics.json",
+ "plan": {
+  "required": [
+   "C_T",
+   "C_T_with_shear",
+   "C_L",
+   "C_M"
+  ],
+  "out_interval": 500,
+  "planned_end": 20000,
+  "n_planned": 40
+ },
+ "env": {
+  "source": "runner_sern._ENV (run_case.sh に渡す環境)",
+  "named": {
+   "FORGE_CUDA_BLOCKSIZE": "128",
+   "FORGE_CUDA_BLOCKSIZE_SMALL": null,
+   "FORGE_ALLOW_UNVERIFIED_SPECIES": null,
+   "FORGE_BIN": null
+  },
+  "unset": [
+   "FORGE_CUDA_BLOCKSIZE_SMALL",
+   "FORGE_ALLOW_UNVERIFIED_SPECIES",
+   "FORGE_BIN"
+  ],
+  "other_forge_env": {}
+ },
+ "required_state": [
+  "ro",
+  "roUx",
+  "roUy",
+  "roUz",
+  "roe",
+  "roK",
+  "roOmega",
+  "roY0",
+  "roY1"
+ ],
+ "final_rc": 0
+}

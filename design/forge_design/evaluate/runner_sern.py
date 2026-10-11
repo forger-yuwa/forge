@@ -29,7 +29,7 @@ from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..metrics.sern_gates import floor_events_config_line, floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
 from ..metrics.sern_gates import JUDGMENT_MIN_SAMPLES, judgment_extendable, judgment_gate   # 判定区間の段 (te-wake-grid §5.1 R2)
 from ..metrics.sern_gates import judgment_planned_steps, judgment_required_quantities   # 必須量・予定 step 列 (te-wake-grid §5.1 R2a)
-from ..probdef import Problem, dv_value, load_problem
+from ..probdef import Problem, dv_value, load_problem, sern_turbulence_model   # 乱流モデルの綴りは 1 か所 (te-wake-grid §5.1 R2g)
 from .ic import _forge_species
 
 # リポジトリ位置から導く (AWS など別マシンでも動くように。FORGE_ROOT で上書き可)
@@ -865,7 +865,7 @@ def _solver_config(p: Problem, nsteps: int, out_int: int, cfl: float, p_ref: flo
     pm = p.evaluate.get("p_min")
     _pmin = f", pMin: {float(pm)}" if pm is not None else ""   # physProp 配下 (space ではない)
     disc = p.mesh.get("discretization", "cell")
-    model = p.evaluate.get("model", "euler")
+    model = sern_turbulence_model(p.evaluate)
     # 厚さ 0 の板の自由端の速度再構成 (plan convection-zero-thickness-edge-reconstruction §4): 有効/フィールド名だけを出す。
     # 段階起動の全段に同じ値が出る (run_staged の各段は cfg_main の置換なので)。1 次・層流暖機の段では効かないが、値は
     # 同じに出して区間識別と来歴をそろえる。node 以外はソルバの起動時エラーなので、ここで先に止める
@@ -937,7 +937,7 @@ space: {{convMethod: 1, limiter: {_lim}, pRef: {p_ref}, limiterScaled: {_lsc}, v
 
 
 def _bcond_config(p: Problem, st: dict) -> str:
-    model = p.evaluate.get("model", "euler")
+    model = sern_turbulence_model(p.evaluate)
     ex, en = st["exhaust"], st["ext"]
     # `evaluate.outlet_kind`: outflow (既定・全量外挿) / statPress。**既定は 2026-09-23 に statPress から変更**。
     # SERN の出口と bottom は設計上つねに超音速なので、静圧指定は node の壁列・後流の**亜音速ノード**に
@@ -1259,7 +1259,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                        "theta_e_deg": float(np.rad2deg(design.info["theta_e"])), "theta_b_deg": float(np.rad2deg(theta_b)),
                        "p_te_over_p_in": kern.p_te_over_p_in, "warnings": design.info["warnings"]},
             "moc_forces": fr_moc, "F_ideal_N_per_m": F_ideal_nd * ex["P"] * H, "M_e_ideal": M_e_id,
-            "mesh": minfo, "discretization": disc, "model": p.evaluate.get("model", "euler")}
+            "mesh": minfo, "discretization": disc, "model": sern_turbulence_model(p.evaluate)}
     if zte is not None:      # IC・化学種属性を書いた後でも w が残っていることを確かめ、再計算した識別量を来歴に残す
         info["zero_thickness_edge_velocity"] = {"requested": zte, "signature": zte_signature_of(zte), "field": ZTE_FIELD,
                                                 "identity": verify_zte_field(run_dir, zte)}
@@ -1714,7 +1714,7 @@ def judgment_plan(evaluate) -> dict | None:
     oi = ev.get("outStepInterval")
     if not isinstance(oi, int) or isinstance(oi, bool) or oi <= 0:
         raise ValueError(f"判定区間の段は evaluate.outStepInterval (正の整数) の明示が要る (予定の標本の格子): {oi!r}")
-    return {**jo, "out_interval": int(oi), "required": judgment_required_quantities(ev.get("model")),
+    return {**jo, "out_interval": int(oi), "required": judgment_required_quantities(sern_turbulence_model(ev)),
             "planned_steps": judgment_planned_steps(jo["steps"], jo["window_steps"], int(oi))}
 
 
@@ -1978,7 +1978,7 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     # 目的量と定常性の量は問題設定の乱流モデルから (§5.1 R2f。_solver_config と同じ既定 euler。列の有無では決めない)
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
                            p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg,
-                           model=p.evaluate.get("model", "euler"))
+                           model=sern_turbulence_model(p.evaluate))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
            "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],

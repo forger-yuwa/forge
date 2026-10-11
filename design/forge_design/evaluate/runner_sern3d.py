@@ -21,7 +21,7 @@ from ..metrics.sern_forces import write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..metrics.sern_gates import floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
 from ..metrics.sern_gates import judgment_gate, read_monitor_csv   # 判定区間の §6 #2・#3 (te-wake-grid §5.1 R2)
-from ..probdef import load_problem
+from ..probdef import load_problem, sern_turbulence_model   # 乱流モデルの綴りは 1 か所 (te-wake-grid §5.1 R2g)
 from . import runner_sern as R2
 
 MESH = "sern.h5"
@@ -107,7 +107,7 @@ def _solver_config(p, nsteps, out_int, cfl, p_ref):
 
 
 def _bcond_config(p, st):
-    model = p.evaluate.get("model", "euler")
+    model = sern_turbulence_model(p.evaluate)
     ex, en = st["exhaust"], st["ext"]; P = PHYS_SERN3D
 
     def inlet(name, s):
@@ -283,7 +283,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "operating_point": opinfo, "gas_model": st["gas_model"],
             "design_point": d0, "design": {"key_point": list(design.key_point), "L_ramp": design.L_ramp, "theta_e_deg": float(np.rad2deg(design.info["theta_e"])),
             "theta_b_deg": float(np.rad2deg(theta_b)), "warnings": design.info["warnings"]}, "moc_forces": fr_moc,
-            "F_ideal_N_per_m": F_ideal_nd * ex["P"] * H, "mesh": minfo, "discretization": disc, "model": p.evaluate.get("model", "euler"), "dim": 3,
+            "F_ideal_N_per_m": F_ideal_nd * ex["P"] * H, "mesh": minfo, "discretization": disc, "model": sern_turbulence_model(p.evaluate), "dim": 3,
             "half_W_m": 0.5 * prm.W * H,
             # R2 (codex M5): 幅外の機体下面 (ramp タグの z > W/2) は **物理的な機体幅 W_vehicle** までを機体力として
             # 集計し、遠方境界 Z_ext に依存させない (None = 上限なし = 旧挙動)。総推力 C_T にはどちらも入れない
@@ -462,7 +462,7 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     # 目的量と定常性の量は問題設定の乱流モデルから (§5.1 R2f。2D と同じ既定 euler。列の有無では決めない)
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
                            p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg,
-                           model=p.evaluate.get("model", "euler"))
+                           model=sern_turbulence_model(p.evaluate))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],
            "floor_events": floor_events_summary(gates.get("floor_events"))}

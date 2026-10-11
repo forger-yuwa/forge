@@ -2,7 +2,9 @@
 
 1 作動点 run を「サロゲート学習・Pareto に入れてよいか」を判定する。ゲートは互いに独立で、全て必須:
   (1) forge の終了コード rc == 0 (発散 run の採用は撤回。旧 §4.13-3 は廃止)
-  (2) 保存場の有限値・正値 (最終 res_*.h5 の ro/roU/roe/P/T が有限、ro,P,T > 0、res_nan_*.h5 が無い)
+  (2) 保存場の有限値・正値 (最終 res_*.h5 の ro/roU/roe/P/T が有限、ro,P,T > 0、res_nan_*.h5 が無い)。量は乱流モデルから
+      必須の集合を決め (SST は roK・roOmega も)、欠ければ判定不能 (plan tooling-sern-te-wake-grid §5.1 R2g。h5 にある量だけを
+      検査して欠落を素通りさせない)。最終場の床の roOmega も SST では必須
   (3) 全残差 (check_convergence.analyze): NaN/Inf 無し、末尾で rising な列が無い。PASS (3 桁低下) は
       `require_residual_pass` のときだけ必須 (本ケースは残差が 1–2.5 桁でプラトーする性格 — その事実は台帳に残す)
   (4) **実際に最適化する量** (SST は C_T_with_shear、Euler は C_T) と C_T / C_L / C_M の頭打ち
@@ -36,18 +38,37 @@ from check_quasisteady import classify_series as _classify_series  # noqa: E402
 FIELD_VARS = ("ro", "roUx", "roUy", "roUz", "roe", "P", "T", "roK", "roOmega")
 POSITIVE_VARS = ("ro", "P", "T")
 FORCE_KEYS = ("C_T", "C_L", "C_M")
+# 乱流モデル → 最終場に必須の量 (plan tooling-sern-te-wake-grid §5.1 R2g、R2f の洗い出し 2026-10-12)。旧実装は FIELD_VARS のうち
+# h5 にある量だけを検査したので、SST で roK・roOmega が無くても素通りした。必須の量が無ければ判定不能 (evaluate_gates で
+# JUDGMENT_UNVERIFIABLE)。必須でない FIELD_VARS (Euler の roK・roOmega) はあれば従来どおり検査する
+FIELD_REQUIRED = {"euler": ("ro", "roUx", "roUy", "roUz", "roe", "P", "T"),
+                  "sst": ("ro", "roUx", "roUy", "roUz", "roe", "P", "T", "roK", "roOmega")}
 
 
 def _volume_res(run_dir):
     return sorted(Path(run_dir).glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
 
 
-def field_health(run_dir) -> dict:
-    """最終体積出力の保存量・原始量が有限で正値かを見る。res_nan_*.h5 (発散ダンプ) があれば不合格。"""
+def _state_model(model) -> str:
+    """場の必須量の表 (FIELD_REQUIRED) を引く乱流モデル。表の引き方は §6 #3 の必須量 (judgment_required_quantities) と同じ。
+    None・未知は ValueError (collect が問題設定から解決して渡す。既定に読み替えない: R2f の _gate_quantities と同じ扱い)。"""
+    if model is None:
+        raise ValueError("場の必須量の乱流モデル (model) が None: collect は evaluate.model を解決して渡す")
+    m = str(model).strip().lower()
+    if m not in FIELD_REQUIRED:
+        raise ValueError(f"乱流モデル {model!r} から場の必須量を決められない ({sorted(FIELD_REQUIRED)} のどれか)")
+    return m
+
+
+def field_health(run_dir, *, model) -> dict:
+    """最終体積出力の保存量・原始量が有限で正値かを見る。res_nan_*.h5 (発散ダンプ) があれば不合格。
+    model = 問題設定の乱流モデル (省略不可)。その必須の量 (FIELD_REQUIRED) が最終 h5 に無ければ判定不能 (missing に挙げて不合格)。"""
+    m = _state_model(model)          # モデルの検査は run の読み込みより先に
     run_dir = Path(run_dir)
     nan_files = sorted(f.name for f in run_dir.glob("res_nan*.h5"))
     res = _volume_res(run_dir)
-    out = {"ok": True, "file": None, "nonfinite": {}, "nonpositive": {}, "min": {}, "nan_files": nan_files, "reasons": []}
+    out = {"ok": True, "file": None, "nonfinite": {}, "nonpositive": {}, "min": {}, "nan_files": nan_files, "reasons": [],
+           "required": list(FIELD_REQUIRED[m]), "missing": []}
     if nan_files:
         out["ok"] = False; out["reasons"].append(f"res_nan dump present: {nan_files[:3]}")
     if not res:
@@ -58,6 +79,7 @@ def field_health(run_dir) -> dict:
         # FIELD_VARS だけだと roY* の NaN が field_health も floor_gate も素通りする実例があった。
         extra = tuple(sorted(k for k in f["VALUE"].keys() if re.fullmatch(r"(roY|Y|roXi|roQ)\d*[\d_]*", k)))
         out["species_checked"] = list(extra)
+        out["missing"] = [v for v in FIELD_REQUIRED[m] if f"VALUE/{v}" not in f]
         for v in FIELD_VARS + extra:
             if f"VALUE/{v}" not in f:
                 continue
@@ -75,6 +97,9 @@ def field_health(run_dir) -> dict:
         out["ok"] = False; out["reasons"].append(f"non-finite field values: {out['nonfinite']}")
     if out["nonpositive"]:
         out["ok"] = False; out["reasons"].append(f"non-positive field values: {out['nonpositive']}")
+    if out["missing"]:
+        out["ok"] = False
+        out["reasons"].append(f"判定不能: 必須の場の量 {', '.join(out['missing'])} が最終 h5 ({out['file']}) に無い (乱流モデル {m})")
     return out
 
 
@@ -203,13 +228,17 @@ def _solver_floors(run_dir) -> dict:
     return out
 
 
-def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict:
+def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6, *, model) -> dict:
     """最終保存場で EOS 床・乱流下限に張り付いたノードを数える。1 個でも在れば NG。
     床は run の `solverConfig.yaml` から読む。**読み取れない・保存場が無いときは判定不能で不合格**
     (旧実装は例外を握り潰して ok=True を返していた: codex M6)。
-    `k <= 0` は見ない — node 低 Re 壁は `sstNodeWallKPin` (既定 1) が正当に k=0 をピンする。"""
+    `k <= 0` は見ない — node 低 Re 壁は `sstNodeWallKPin` (既定 1) が正当に k=0 をピンする。
+    model = 問題設定の乱流モデル (省略不可)。SST では roOmega の床を必須にし、h5 に無ければ P・T・ro が無いときと同じく
+    「不在」(-1) で不合格 (plan tooling-sern-te-wake-grid §5.1 R2g。旧実装は roOmega があるときだけ数えた)。Euler は従来どおり
+    roOmega があれば数える。"""
     import glob
     import os
+    m = _state_model(model)          # モデルの検査は run の読み込みより先に (例外を判定不能に紛れさせない)
     run_dir = Path(run_dir)
     fs = sorted((q for q in glob.glob(str(run_dir / "res_[0-9]*.h5"))
                  if os.path.basename(q)[4:-3].isdigit()),      # 鏡像 (_full) など派生物を除く
@@ -249,6 +278,8 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6) -> dict
             if "roOmega" in V:
                 a = np.asarray(V["roOmega"][:])
                 counts[f"roOmega<={OMEGA_FLOOR:g}"] = int(np.sum(np.isfinite(a) & (a <= OMEGA_FLOOR * (1.0 + tol))))
+            elif m == "sst":
+                counts["roOmega 不在"] = -1          # SST では必須 (無ければ床を数えられない = 不合格)
             # k の床判定は壁ピン (正当) と区別できないので**当面外す** (R-f)
     except Exception as e:                                 # **読めないときは判定不能で不合格**
         return {"ok": False, "counts": {}, "reasons": [f"判定不能: {type(e).__name__}: {e}"]}
@@ -672,12 +703,14 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
     FLOOR_EVENT / FLOOR_UNVERIFIABLE (`require_floor_events` のときだけ: 判定区間の毎更新の床事象 / その記録が判定不能),
     COLD_SPOT / JUDGMENT_UNVERIFIABLE / JUDGMENT_UNSETTLED (`judgment` [judgment_gate の戻り] を渡したときだけ: 判定区間の §6 #2・#3)。
     JUDGMENT_UNVERIFIABLE は受理ゲート (4) の量の列が力の履歴に欠けたときにも出す (判定区間の有無によらない、§5.1 R2f)。
+    最終場に乱流モデルの必須の量 (SST の roK・roOmega など) が無く、場の不合格がその欠落だけのときも JUDGMENT_UNVERIFIABLE (§5.1 R2g)。
     model = 問題設定の乱流モデル (collect が evaluate.model を runner の既定 euler で解決して渡す。省略不可・None 不可):
-    目的量と (4) の量はここから決める (旧引数 obj と、列の有無から推測する経路は廃止)。物理的 INFEASIBLE はここでは出さない。"""
+    目的量と (4) の量、場と最終場の床の必須の量はここから決める (旧引数 obj と、列・量の有無から推測する経路は廃止)。
+    物理的 INFEASIBLE はここでは出さない。"""
     obj = objective_key(model)          # モデルの検査 (None・未知は ValueError) を履歴・run の読み込みより先に
-    field = field_health(run_dir)
+    field = field_health(run_dir, model=model)
     resid = residual_health(run_dir)
-    floors = floor_gate(run_dir, p_min)
+    floors = floor_gate(run_dir, p_min, model=model)
     fevents = floor_event_gate(run_dir, required=require_floor_events, window_steps=floor_window_steps, tail=floor_tail)
     rscale = residual_scale_gate(run_dir)
     stead = steadiness_gate(hist, model) if hist else {"ok": False, "objective": obj, "model": str(model).strip().lower(), "missing": [],
@@ -688,7 +721,9 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
     elif rc != 0:
         reasons.append(f"forge rc={rc}"); fail = fail or "DIVERGED"
     if not field["ok"]:
-        reasons += field["reasons"]; fail = fail or "DIVERGED"
+        # 必須の量の欠落**だけ**なら判定不能 (延長しても量は増えない)。非有限・非正・発散ダンプ・場が無いは従来どおり DIVERGED
+        only_missing = bool(field.get("missing")) and not (field["nonfinite"] or field["nonpositive"] or field["nan_files"])
+        reasons += field["reasons"]; fail = fail or ("JUDGMENT_UNVERIFIABLE" if only_missing else "DIVERGED")
     if not resid["ok"]:
         reasons += resid.get("reasons", []); fail = fail or ("DIVERGED" if resid["nan"] else "RESIDUAL_RISING")
     elif require_residual_pass and not resid["converged"]:

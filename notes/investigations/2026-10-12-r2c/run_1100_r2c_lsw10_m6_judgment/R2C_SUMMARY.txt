@@ -1,0 +1,34 @@
+R2C SUMMARY 2026-10-11T17:52:13+0000  run /home/ubuntu/forge-r8/case/46.sern_design/run_1100_r2c_lsw10_m6_judgment
+JUDGMENT: PASS (判定区間 2 回目 (20000 step) で §6 #1〜#3 を満たす)
+分類 (§6 #11、機械的な表示): 合格の形: 1 回目が未定常だけで不合格 → 自動延長 → 2 回目 PASS (§6 #11 の合格条件の形。解釈は上位)
+
+残差 1 回目: check_convergence rc 1 / --from-floor rc 2 (R2C_CONVERGENCE_judgment1*.txt)
+残差 2 回目: check_convergence rc 1 / --from-floor rc 2 (R2C_CONVERGENCE_judgment2*.txt)
+準定常 R2C_QUASISTEADY_forces.txt: OVERALL: ALL STEADY
+準定常 R2C_QUASISTEADY_Tmin.txt: OVERALL: ALL STEADY
+準定常 R2C_QUASISTEADY_forces_judgment1.txt: OVERALL: ALL STEADY
+準定常 R2C_QUASISTEADY_Tmin_judgment1.txt: OVERALL: NOT ALL STEADY (see above)
+床事象 check_floor_events --window-steps 10000: rc 0 VERDICT: PASS
+
+段 1: 継続元 res_4000.h5 rc 0 gates FAIL/JUDGMENT_UNSETTLED judgment UNSETTLED 床 PASS [10000, 20000] 更新 10000
+   C_T             平均 0.8926333  a 3.70e-06  d 2.65e-05  (許容 5e-05)  STEADY  OK
+   C_T_with_shear  平均 0.8725513  a 3.32e-06  d 6.92e-05  (許容 5e-05)  STEADY  NG
+   C_L             平均 0.07149554  a 1.96e-05  d 4.37e-05  (許容 5e-05)  STEADY  OK
+   C_M             平均 -1.849317  a 5.23e-04  d 1.92e-03  (許容 5e-04)  STEADY  NG
+   R_TE  最低 220.8 K (step 20000)  T<150 延べ 0  STEADY
+   R_SE  最低 224.7 K (step 16500)  T<150 延べ 0  STEADY
+   RET   最低 220.6 K (step 12500)  T<150 延べ 0  STEADY
+   ALL   最低 210.0 K (step 20000)  T<150 延べ 0  TRANSIENT-UNSETTLED
+   退避: metrics_judgment1.json, force_history_judgment1.csv, TE_MONITOR_judgment1.csv, TE_MONITOR_step0_judgment1.csv, TE_MONITOR_judgment1.log, CONVERGENCE_VERDICT_judgment1.txt  延長の理由: 未定常 (窓・定常性の未達) だけ
+段 2: 継続元 res_20000.h5 rc 0 gates PASS/None judgment PASS 床 PASS [10000, 20000] 更新 10000
+   C_T             平均 0.8926329  a 2.80e-06  d 3.98e-07  (許容 5e-05)  STEADY  OK
+   C_T_with_shear  平均 0.8725507  a 2.67e-06  d 3.70e-07  (許容 5e-05)  STEADY  OK
+   C_L             平均 0.07148224  a 1.15e-05  d 8.28e-07  (許容 5e-05)  STEADY  OK
+   C_M             平均 -1.84892  a 2.55e-04  d 2.38e-05  (許容 5e-04)  STEADY  OK
+   R_TE  最低 220.8 K (step 11000)  T<150 延べ 0  STEADY
+   R_SE  最低 224.7 K (step 10500)  T<150 延べ 0  STEADY
+   RET   最低 220.6 K (step 11000)  T<150 延べ 0  STEADY
+   ALL   最低 209.5 K (step 19500)  T<150 延べ 0  STEADY
+
+metrics.json (正本 = 最後の判定区間): gates PASS/None judgment PASS — JUDGMENT.json の最後の段と一致
+環境 (JUDGMENT.json の env.named): {'FORGE_CUDA_BLOCKSIZE': '128', 'FORGE_CUDA_BLOCKSIZE_SMALL': None, 'FORGE_ALLOW_UNVERIFIED_SPECIES': None, 'FORGE_BIN': None}

@@ -1,0 +1,10 @@
+$ /home/ubuntu/forge-r8/solver_density_cuda/tools/check_quasisteady.py --series-csv /home/ubuntu/forge-r8/case/46.sern_design/run_1100_r2c_lsw10_m6_judgment/TE_MONITOR_judgment1.csv --series-cols R_TE_Tmin,R_SE_Tmin,RET_Tmin,ALL_Tmin --tail 0.5
+
+=== /home/ubuntu/forge-r8/case/46.sern_design/run_1100_r2c_lsw10_m6_judgment/TE_MONITOR_judgment1.csv  [40 rows, steps 500..20000]  -> TRANSIENT-UNSETTLED ===
+  R_TE_Tmin       : tail mean=220.8  drift=0.0%/tail  fluct=0.0%            STEADY
+  R_SE_Tmin       : tail mean=224.7  drift=0.0%/tail  fluct=0.0%            STEADY
+  RET_Tmin        : tail mean=220.6  drift=0.0%/tail  fluct=0.0%            STEADY
+  ALL_Tmin        : tail mean=212.1  drift=2.7%/tail  fluct=2.4%  (still trending at tail-end) TRANSIENT-UNSETTLED
+
+OVERALL: NOT ALL STEADY (see above)
+EXIT: 1

@@ -1,0 +1,18 @@
+mesh: {discretization: "node", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: "sern.h5", valueFileName: "sern.h5"}
+gpu: 1
+solver: "SLAU"
+physProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: "EXH", lump: {"N2": 0.6389063890638906, "H2O": 0.3269532695326953, "H2": 0.012510125101251011, "AR": 0.007670076700767007, "OH": 0.0060400604006040064, "O2": 0.003980039800398003, "NO": 0.0020600206002060026, "H": 0.0012500125001250015, "O": 0.0003700037000370004, "CO2": 0.00021000210002100023, "CO": 5.000050000500005e-05}, basis: mole}, {name: "AMB", lump: {"N2": 0.781121203633308, "O2": 0.20953543275579212, "AR": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {"N2": "cea", "H2O": "custom:h2o_iapws_cea_v1", "H2": "cea", "AR": "cea", "OH": "cea", "O2": "cea", "NO": "cea", "H": "cea", "O": "cea", "CO2": "cea", "CO": "cea"}}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 20000}
+  deltaT: {control: 1, dt: 1e-8, cfl: 0.25, cfl_pseudo: 0.25,
+           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 500
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 1, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05, limiterRefLength: 2.136214053, limiterRoRef: 0.04544068206, limiterPRef: 4411.497933, limiterARef: 368.6412254}
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}
+output: {floorEvents: 1}
+initial: "uniform_p101325_u10"

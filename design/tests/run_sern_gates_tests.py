@@ -73,7 +73,9 @@ def make_run(d: Path, roe_nan=False, p_neg=False, nan_dump=False, resid="plateau
     d.mkdir(parents=True, exist_ok=True)
     n = 50
     with h5py.File(d / "res_6000.h5", "w") as f:
-        for k, val in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3.0e5), ("P", 1.0e5), ("T", 300.0)):
+        # SST の場 (roK・roOmega も。2026-10-12 から SST では必須: plan tooling-sern-te-wake-grid §5.1 R2g)
+        for k, val in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3.0e5), ("P", 1.0e5), ("T", 300.0),
+                       ("roK", 1.0), ("roOmega", 1.0e3)):
             a = np.full(n, val)
             if k == "roe" and roe_nan:
                 a[7] = nan
@@ -100,15 +102,15 @@ def make_run(d: Path, roe_nan=False, p_neg=False, nan_dump=False, resid="plateau
 
 
 run_ok = tmp / "ok"; make_run(run_ok)
-fh = G.field_health(run_ok)
+fh = G.field_health(run_ok, model="sst")
 check("field_health 健全 → ok", fh["ok"] and fh["file"] == "res_6000.h5" and fh["min"]["P"] == 1.0e5)
 run_nan = tmp / "roe_nan"; make_run(run_nan, roe_nan=True)
-check("field_health roe に NaN → 不合格 (個数付き)", not G.field_health(run_nan)["ok"] and G.field_health(run_nan)["nonfinite"] == {"roe": 1})
+check("field_health roe に NaN → 不合格 (個数付き)", not G.field_health(run_nan, model="sst")["ok"] and G.field_health(run_nan, model="sst")["nonfinite"] == {"roe": 1})
 run_pneg = tmp / "p_neg"; make_run(run_pneg, p_neg=True)
-check("field_health P ≤ 0 → 不合格", not G.field_health(run_pneg)["ok"] and G.field_health(run_pneg)["nonpositive"] == {"P": 1})
+check("field_health P ≤ 0 → 不合格", not G.field_health(run_pneg, model="sst")["ok"] and G.field_health(run_pneg, model="sst")["nonpositive"] == {"P": 1})
 run_dump = tmp / "dump"; make_run(run_dump, nan_dump=True)
-check("field_health res_nan_*.h5 あり → 不合格", not G.field_health(run_dump)["ok"])
-check("field_health res 無し → 不合格", not G.field_health(tmp / "nothing_here_")["ok"])
+check("field_health res_nan_*.h5 あり → 不合格", not G.field_health(run_dump, model="sst")["ok"])
+check("field_health res 無し → 不合格", not G.field_health(tmp / "nothing_here_", model="sst")["ok"])
 
 rh = G.residual_health(run_ok)
 check("residual_health プラトー → ok (NaN/rising 無し) だが converged でない", rh["ok"] and not rh["converged"] and "stalled" in rh["verdict"])

@@ -22,6 +22,9 @@ forge の run ディレクトリの residual_history.csv を読み、**全保存
      成分があり [node の準1D IC は Uy≈0]、初期比だと誤って停滞判定になる)。
   - 末尾 (--tail, 既定 20%) が rising でない (flat/falling)。
 "all-zero" 列 (例: 2D の rms_roUz) は判定から除外する。
+必須列 (欠けたら判定不能): 流体 5 列、run の solverConfig.yaml の乱流モデルが SST なら rms_roK・rms_roOmega、
+遷移モデルが有効なら rms_roGamma・rms_roReth。solverConfig.yaml が無い・読めないときは SST の 2 列も必須にする
+(乱流モデルを決められないので最も厳しい集合で判定する。plan tooling-sern-te-wake-grid §5.1 R2g)。
 
 収束場からの restart (交差 restart など) 用: --from-floor REF_RUN (別名 --reference-floor)
   ピークからの低下桁数は収束場から再開した run では原理的に 0 なので、代わりに **参照 run の末尾床**
@@ -116,6 +119,73 @@ def transition_active(csv_path):
     return bool(m) and m.group(1).lower() not in ('none', '0')
 
 
+# 乱流 SST の run では k・ω の 2 列も必須 (plan tooling-sern-te-wake-grid §5.1 R2g、2026-10-12)。forge は SST のときだけ
+# rms_roK / rms_roOmega を書く (main.cpp scalarResidualEnabled: LESorRANS == 2 && RANSmodel == 1)。旧実装は「列があれば検査する」
+# だったので、SST の run で 2 列が欠けても流体 5 列だけで合格していた。乱流モデルは残差 CSV の隣の solverConfig.yaml から読む。
+SST_COLS = ('rms_roK', 'rms_roOmega')
+SST_MODELS = ('sst', 'sst-ddes', 'sst-iddes')          # turbulence.model (solverConfig.cpp の受理する綴り)
+NON_SST_MODELS = ('none', 'wale', 'sigma')
+
+
+def turbulence_kind(csv_path):
+    """残差 CSV の隣の solverConfig.yaml から乱流モデルの種別を返す: ('sst' | 'other' | None, 説明)。
+    旧書式 (turbulence の LESorRANS / RANSmodel) も読む (SST = LESorRANS 2 かつ RANSmodel 1)。
+    None = 決められない (solverConfig.yaml が無い・YAML として読めない・PyYAML が無い・turbulence.model が無い/未知の綴り)。
+    綴りは forge と同じく完全一致で見る (forge は 'SST' などを起動時に拒否するので、その config で回った run は無い)。"""
+    cfgp = os.path.join(os.path.dirname(os.path.abspath(csv_path)), 'solverConfig.yaml')
+    try:
+        txt = open(cfgp, encoding='utf-8').read()
+    except OSError:
+        return None, 'solverConfig.yaml が無い'
+    try:
+        import yaml
+    except ImportError:
+        return None, 'PyYAML が無いので solverConfig.yaml を読めない'
+    try:
+        doc = yaml.safe_load(txt)
+    except Exception as e:   # noqa: BLE001 (YAML の構文エラーなど)
+        return None, 'solverConfig.yaml を YAML として読めない (%s)' % type(e).__name__
+    turb = doc.get('turbulence') if isinstance(doc, dict) else None
+    if not isinstance(turb, dict):
+        return None, 'solverConfig.yaml に turbulence が無い'
+    m = turb.get('model')
+    if m is not None:
+        if m in SST_MODELS:
+            return 'sst', 'turbulence.model %s' % m
+        if m in NON_SST_MODELS:
+            return 'other', 'turbulence.model %s' % m
+        return None, 'turbulence.model %r は未知の綴り' % (m,)
+    lr, rm = turb.get('LESorRANS'), turb.get('RANSmodel')
+    if lr in (0, 1) or (lr == 2 and rm is not None and rm != 1):
+        return 'other', '旧書式 LESorRANS %s / RANSmodel %s' % (lr, rm)
+    if lr == 2 and rm == 1:
+        return 'sst', '旧書式 LESorRANS 2 / RANSmodel 1'
+    return None, 'turbulence.model も旧書式 (LESorRANS/RANSmodel) も読めない'
+
+
+def required_cols(csv_path):
+    """必須の保存量残差列と、乱流モデルを決められなかったときの説明 (決まれば None)。
+    **決められないときは SST の 2 列も必須にする** (最も厳しい集合: 列がそろっていれば判定でき、欠けていれば判定不能)。
+    黙って流体 5 列に緩めない — 設定の無い CSV (写し・連結した CSV) で SST の列が欠けた run を合格にしないため。"""
+    kind, why = turbulence_kind(csv_path)
+    need = REQUIRED_COLS + (SST_COLS if kind != 'other' else ()) + (TRANSITION_COLS if transition_active(csv_path) else ())
+    return need, (None if kind is not None else why)
+
+
+def _input_report(cols, need, why):
+    """必須列の検査を report の行にする: 欠落があれば ('(入力)', (理由, False))、乱流モデルを決められず SST の列も
+    要求したがそろっていれば ('(設定)', (注記, True))、それ以外は None。"""
+    missing = [c for c in need if c not in cols]
+    if missing:
+        msg = '必須の保存量残差列が無い: %s' % ', '.join(missing)
+        if why is not None and any(c in SST_COLS for c in missing):
+            msg += ' (%s: 乱流モデルを決められないので SST の %s も必須)' % (why, '・'.join(SST_COLS))
+        return '(入力)', (msg + '  <-- 判定不能', False)
+    if why is not None:
+        return '(設定)', ('%s: 乱流モデルを決められないので SST の %s も必須として判定 (そろっている)' % (why, '・'.join(SST_COLS)), True)
+    return None
+
+
 def analyze(path, min_drop, tail_frac):
     rows, cols = load_series(path)
     if not rows:
@@ -127,11 +197,10 @@ def analyze(path, min_drop, tail_frac):
     if not cols:
         report['(入力)'] = ('残差列が 1 つも無い  <-- 判定不能', False)
         return laststep, report, False, False, False, False
-    need = REQUIRED_COLS + (TRANSITION_COLS if transition_active(path) else ())
-    missing = [c for c in need if c not in cols]
-    if missing:
-        report['(入力)'] = ('必須の保存量残差列が無い: %s  <-- 判定不能' % ', '.join(missing), False)
-        ok = False
+    inp = _input_report(cols, *required_cols(path))
+    if inp is not None:
+        report[inp[0]] = inp[1]
+        ok = ok and inp[1][1]
     any_nan = False
     any_stalled = False
     any_converging = False
@@ -300,11 +369,10 @@ def analyze_from_floor(path, floor, zero_cols, factor, tail_frac, ref_path=None)
     if ref_path is not None and transition_active(ref_path) != transition_active(path):
         report['(参照)'] = ('参照 run と遷移モデルの有無が違う (別の方程式系)  <-- 判定不能', False)
         ok = False
-    need = REQUIRED_COLS + (TRANSITION_COLS if transition_active(path) else ())
-    missing = [c for c in need if c not in cols]
-    if missing:
-        report['(入力)'] = ('必須の保存量残差列が無い: %s  <-- 判定不能' % ', '.join(missing), False)
-        ok = False
+    inp = _input_report(cols, *required_cols(path))     # SST の 2 列も通常判定と同じく (§5.1 R2g)
+    if inp is not None:
+        report[inp[0]] = inp[1]
+        ok = ok and inp[1][1]
     for c in floor:
         if c not in cols:
             report[c] = ('missing in target (reference has a nonzero floor)  <-- COLUMN MISMATCH', False)

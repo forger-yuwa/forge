@@ -461,7 +461,10 @@ class SernCampaign:
     @staticmethod
     def _op_summary(out: dict, rd) -> dict:
         g = out.get("gates", {})
-        return {"C_T": out.get(g.get("objective", "C_T"), out.get("C_T")), "C_T_p": out.get("C_T"), "C_L": out.get("C_L"), "C_M": out.get("C_M"),
+        # C_T 欄 = 目的量の値。目的量 (gates.objective) かその値が無ければ None (欠測)。圧力の C_T は C_T_p 欄だけに載せ、
+        # 目的量の欄に代わりに入れない (SST で C_T_with_shear が欠けた行が圧力の C_T を目的量として表示していた。§5.1 R2g)
+        obj_key = g.get("objective")
+        return {"C_T": out.get(obj_key) if obj_key else None, "C_T_p": out.get("C_T"), "C_L": out.get("C_L"), "C_M": out.get("C_M"),
                 "step": out.get("step"), "run_dir": str(rd), "sep_frac_ramp": out.get("sep_frac_ramp"), "sep_x_min_ramp": out.get("sep_x_min_ramp"),
                 "forge_rc": out.get("forge_rc"), "gate": g.get("verdict"), "gate_fail_class": g.get("fail_class"),
                 "slau_wall_normal_chi_effective": out.get("slau_wall_normal_chi_effective"), "flag_policy": out.get("flag_policy"),

@@ -12,6 +12,7 @@
 | `check_convergence.analyze` | `step,phase` のみ (残差列なし) | `ok=True` |
 | 〃 | `rms_ro` だけ (他の保存量なし) | `ok=True` |
 | 〃 | 19 点が 1 で**最終 1 点だけ 0** | `drop=inf`, `ok=True` |
+| 〃 (2026-10-12 追加) | solverConfig.yaml が SST なのに `rms_roK`・`rms_roOmega` が無い (流体 5 列だけ) | `ok=True` |
 | `check_quasisteady.classify` | `[1,1,1,1,1,NaN]` | `STEADY` |
 | 〃 `classify_series` | step が全点 NaN・値は一定 | `STEADY` |
 | `check_mesh_quality` | 体積ゼロの四面体 | AR 1.732 / skew 0.500 = 通常合格 |
@@ -76,13 +77,84 @@ def main():
     chk("最終 1 点だけ 0 -> 合格にしない", *okof(cc.analyze(p, 3.0, 0.2)))
     os.unlink(p)
 
-    # (4) 正常入力は従来どおり合格する (回帰)
+    # (4) 正常入力は従来どおり合格する (回帰)。乱流なしの run (solverConfig.yaml の turbulence.model: none) の 5 列。
+    # 設定の無い CSV は乱流モデルを決められず SST の 2 列も必須になる (下の (6)) ので、設定を隣に置く
     ser = [10.0 ** (-i / 4.0) for i in range(40)]
-    p = write_csv([[i, "outer_end"] + [v] * 5 for i, v in enumerate(ser)], cols)
+    d4 = tempfile.mkdtemp()
+    with open(os.path.join(d4, "solverConfig.yaml"), "w") as f:
+        f.write('turbulence: {model: "none"}\n')
+    p = os.path.join(d4, "residual_history.csv")
+    with open(p, "w", newline="") as f:
+        w = csv.writer(f); w.writerow(cols); w.writerows([[i, "outer_end"] + [v] * 5 for i, v in enumerate(ser)])
     res = cc.analyze(p, 3.0, 0.2)
-    chk("正常入力 (5 列 10 桁低下) -> 従来どおり合格",
+    chk("正常入力 (乱流なし・5 列 10 桁低下) -> 従来どおり合格",
         res is not None and res[2] is True, "ok=%s" % (None if res is None else res[2]))
-    os.unlink(p)
+    __import__("shutil").rmtree(d4)
+
+    # (6) 乱流 SST の run は rms_roK・rms_roOmega も必須 (plan tooling-sern-te-wake-grid §5.1 R2g, 2026-10-12)。
+    # 以前は「列があれば検査する」で、SST の run で 2 列が欠けても流体 5 列だけで合格していた
+    sst_cfgs = [('turbulence: {model: "sst", wallTreatmentSST: 0}\n', "sst (flow)"),
+                ("turbulence:\n  model: sst\n  scalarDiffusion: 1\n", "sst (block)"),
+                ("turbulence: {model: sst-iddes}\n", "sst-iddes"),
+                ("turbulence: {LESorRANS: 2, LESmodel: 1, RANSmodel: 1}\n", "旧書式 LESorRANS 2 + RANSmodel 1")]
+    kcols = ["rms_roK", "rms_roOmega"]
+
+    def conv_run(cfg, extra_cols):
+        d = tempfile.mkdtemp()
+        if cfg is not None:
+            with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+                f.write(cfg)
+        pth_ = os.path.join(d, "residual_history.csv")
+        with open(pth_, "w", newline="") as f:
+            w = csv.writer(f); w.writerow(cols + extra_cols)
+            w.writerows([[i, "outer_end"] + [v] * (5 + len(extra_cols)) for i, v in enumerate(ser)])
+        return d, pth_
+
+    import shutil as _shs
+    for cfg, lab in sst_cfgs:
+        for keep in ([], ["rms_roK"], ["rms_roOmega"]):
+            d, pth_ = conv_run(cfg, keep)
+            res = cc.analyze(pth_, 3.0, 0.2)
+            gone = [c for c in kcols if c not in keep]
+            chk("SST (%s) で %s が無い -> 判定不能" % (lab, "・".join(gone)),
+                res is not None and res[2] is False and all(c in res[1].get("(入力)", ("",))[0] for c in gone),
+                "ok=%s %s" % (None if res is None else res[2], None if res is None else res[1].get("(入力)")))
+            _shs.rmtree(d)
+        d, pth_ = conv_run(cfg, kcols)
+        res = cc.analyze(pth_, 3.0, 0.2)
+        chk("SST (%s) で 7 列そろう -> 従来どおり合格" % lab, res is not None and res[2] is True, "ok=%s" % (None if res is None else res[2]))
+        _shs.rmtree(d)
+    for cfg, lab in (("turbulence: {model: wale}\n", "wale"), ("turbulence: {LESorRANS: 0, LESmodel: 1}\n", "旧書式 LESorRANS 0")):
+        d, pth_ = conv_run(cfg, [])
+        res = cc.analyze(pth_, 3.0, 0.2)
+        chk("乱流 %s の 5 列 -> 従来どおり合格 (SST の列を要求しない)" % lab, res is not None and res[2] is True,
+            "ok=%s" % (None if res is None else res[2]))
+        _shs.rmtree(d)
+    # 設定が無い・読めない・未知の綴り: 乱流モデルを決められないので SST の 2 列も必須 (黙って 5 列に緩めない)
+    for cfg, lab in ((None, "solverConfig.yaml が無い"), ("turbulence: {model: [\n", "YAML として読めない"),
+                     ('turbulence: {model: "SST"}\n', "未知の綴り SST")):
+        d, pth_ = conv_run(cfg, [])
+        res = cc.analyze(pth_, 3.0, 0.2)
+        chk("%s・5 列 -> 判定不能 (SST の 2 列も必須)" % lab,
+            res is not None and res[2] is False and "乱流モデルを決められない" in res[1].get("(入力)", ("",))[0],
+            "ok=%s %s" % (None if res is None else res[2], None if res is None else res[1].get("(入力)")))
+        _shs.rmtree(d)
+        d, pth_ = conv_run(cfg, kcols)
+        res = cc.analyze(pth_, 3.0, 0.2)
+        chk("%s・7 列 -> 判定する (合格、注記あり)" % lab, res is not None and res[2] is True and "(設定)" in res[1],
+            "ok=%s" % (None if res is None else res[2]))
+        _shs.rmtree(d)
+    # --from-floor も同じ必須列 (対象が SST で 2 列欠落)
+    d, pth_ = conv_run(sst_cfgs[0][0], [])
+    r2 = cc.analyze_from_floor(pth_, {c: 1.0 for c in cols[2:]}, set(), 1e30, 0.2)
+    chk("--from-floor: SST で rms_roK・rms_roOmega が無い対象 -> 合格にしない",
+        r2 is not None and r2[2] is False and "rms_roK" in r2[1].get("(入力)", ("",))[0], "ok=%s" % (None if r2 is None else r2[2]))
+    # CLI も非ゼロ終了 (他のセッションは system の python3 で呼ぶ)
+    import subprocess as _sp
+    rr = _sp.run([sys.executable, os.path.join(HERE, "check_convergence.py"), d], capture_output=True, text=True)
+    chk("CLI: SST で 2 列欠落 -> 非ゼロ終了・判定不能", rr.returncode == 1 and "判定不能" in rr.stdout and "Traceback" not in rr.stderr,
+        "rc=%d" % rr.returncode)
+    _shs.rmtree(d)
 
     # (5) 遷移モデルの残差列 (rms_roGamma / rms_roReth): NaN は DIVERGED、遷移が有効な run で列が欠けたら判定不能
     tcols = cols + ["rms_roK", "rms_roOmega", "rms_roGamma", "rms_roReth"]
@@ -95,17 +167,19 @@ def main():
     with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
         f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "lm2009"}\n')
     pth = os.path.join(d, "residual_history.csv")
+    # SST の run なので流体 5 列 + rms_roK・rms_roOmega (2026-10-12 から SST の 2 列も必須)。遷移の 2 列だけを欠かせる
+    scols = cols + ["rms_roK", "rms_roOmega"]
     with open(pth, "w", newline="") as f:
-        w = csv.writer(f); w.writerow(cols); w.writerows([[i, "outer_end"] + [v] * 5 for i, v in enumerate(ser)])
+        w = csv.writer(f); w.writerow(scols); w.writerows([[i, "outer_end"] + [v] * 7 for i, v in enumerate(ser)])
     chk("遷移有効の run で rms_roGamma/rms_roReth が無い -> 合格にしない", *okof(cc.analyze(pth, 3.0, 0.2)))
     with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
         f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "none"}\n')
     res = cc.analyze(pth, 3.0, 0.2)
-    chk("transition: none なら 5 列で従来どおり合格", res is not None and res[2] is True, "ok=%s" % res[2])
-    # --from-floor も同じ必須列検査を通す (codex result M2)。参照 = 遷移なしの 5 列、対象 = 遷移有効だが 2 列欠落
+    chk("transition: none なら 7 列 (流体 5 + SST 2) で従来どおり合格", res is not None and res[2] is True, "ok=%s" % res[2])
+    # --from-floor も同じ必須列検査を通す (codex result M2)。参照 = 遷移なしの 7 列、対象 = 遷移有効だが 2 列欠落
     with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
         f.write('turbulence: {model: "sst", wallTreatmentSST: 0, transition: "lm2009"}\n')
-    fl = {c: 1e-9 for c in cols[2:]}
+    fl = {c: 1e-9 for c in scols[2:]}
     r2 = cc.analyze_from_floor(pth, fl, set(), 1e30, 0.2)
     chk("--from-floor: 遷移有効で 2 列欠落 -> 合格にしない", r2 is not None and r2[2] is False, "ok=%s" % (None if r2 is None else r2[2]))
     d2 = tempfile.mkdtemp()

@@ -232,7 +232,9 @@ for label, g, want in (("合格", gates_(), False),
 # evaluate_gates への接続 (判定区間の未達は FAIL、渡さなければ従来どおり)
 rd0 = tmp / "eg"; rd0.mkdir()
 with h5py.File(rd0 / "res_20000.h5", "w") as f:
-    for k, v in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3e5), ("P", 1e5), ("T", 300.0)):
+    # SST の場 (roK・roOmega も。2026-10-12 から SST では必須: plan tooling-sern-te-wake-grid §5.1 R2g)
+    for k, v in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3e5), ("P", 1e5), ("T", 300.0),
+                 ("roK", 1.0), ("roOmega", 1.0e3)):
         f.create_dataset(f"VALUE/{k}", data=np.full(30, v))
 with open(rd0 / "residual_history.csv", "w", newline="") as fh:
     w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roe"])
