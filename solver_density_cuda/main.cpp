@@ -72,6 +72,7 @@
 #include "cuda_forge/hoopClosureDiag.hpp"  // 診断 FORGE_DIAG_HOOP_CLOSURE (plan axisymmetric-freestream-hoop-gauge §4.6 の 3・5)
 #include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
 #include "cuda_forge/stageDumpDiag.hpp"    // 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30)
+#include "cuda_forge/qaccAdoptDiag.hpp"    // 診断 FORGE_DIAG_QACC_ADOPT (同 plan §5.1 #18・§6.34)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2531,6 +2532,9 @@ void advanceImplicitSteady(StepContext& s)
     // ρ が動くほど roe/(ρ c_v T_w) がずれていく (実測: 壁ノードの roe が 1000 step ビット不変)。
     applyNodeIsothermalWallPin(s.cfg , s.cuda_cfg , s.msh , s.var);
 
+    // 診断 FORGE_DIAG_QACC_ADOPT (既定 off): 対象の step なら reconcile (updateVariablesOuter) の直前に Q と Qacc を読み、
+    // 量ごとの採用の mask (Q != (float)Qacc) を書く (読むだけ)
+    if (qaccAdoptDiag::enabled()) qaccAdoptDiag::beforeReconcile(s.cfg , s.msh , s.var , s.iStep);
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });
@@ -3387,6 +3391,11 @@ int main(int argc, char** argv) {
         // **v1a の対応範囲** (§5.1 S1a)。どれも原理的な制限ではなく「まだ Qacc を扱っていない」だけで、
         // S1b-①〜④ で順に外す。**黙って劣化させるくらいなら拒否する** (codex plan M5)。
         const char* why = nullptr;
+        // 軸対称の診断用の通し (plans/active/architecture-float-state-double-geometry.md §5.1 #18・§6.34)。
+        // 軸ピン (axisSymmetryPin_d.cuh) は Q_N と同じ射影を Qacc にも当てるが、rollout plan の S1b-① の合格条件
+        // (case/44 の回帰・改善ゲート) は未検証なので、既定では拒否のまま。環境変数が "1" のときだけ軸対称の拒否を外す。
+        const char* axisymDiagEnv = std::getenv("FORGE_QACC_AXISYM_DIAG");
+        const bool axisymDiag = (axisymDiagEnv != nullptr && std::strcmp(axisymDiagEnv, "1") == 0);
         // **検証済みの経路だけ通す** (2026-09-24, codex result-2 M5)。
         // 以前は node / GPU の検査が無く、**cell も CPU 経路も素通り**していた。
         // CPU の commit (`update.cpp` の applyScalarImplicitCorrection 等) は FP32 のままなので、
@@ -3400,10 +3409,11 @@ int main(int argc, char** argv) {
             why = "v1a は timeIntegration=11 のみ (陽解法 tI 1/4 は S1b-④、tI 3 は凸結合なので Qacc_N/Qacc_M が要る)";
         else if (cfg.unsteady != 0)
             why = "v1a は unsteady=0 のみ (dual-time は QaccN/QaccNN の shift が要る。陽解法 unsteady は S1b-④)";
-        else if (cfg.isAxisymmetric != 0)
-            // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisymmetricSource_d.cu:312-323)。
-            // Qacc は Q_N を読まないので、その射影を Qacc に当てるまでは対応できない。
-            why = "node 軸対称は S1b-① 待ち (軸ピンが commit の基準 roeN/roUyN を射影するため)";
+        else if (cfg.isAxisymmetric != 0 && !axisymDiag)
+            // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisSymmetryPin_d.cuh)。
+            // その射影は Qacc にも当てる (§5.1 #18) が、S1b-① の合格条件は未検証なので診断用の環境変数でだけ通す。
+            why = "node 軸対称は S1b-① 待ち (軸ピンの Qacc への射影は実装済みだが合格条件は未検証。"
+                  "診断用には FORGE_QACC_AXISYM_DIAG=1)";
         else if (cfg.sstEnergyIncludesK != 0)
             // ransTransport_d.cu:175 は roe への**増分**なので、Qacc にも同じ増分を当てる必要がある。
             why = "sstEnergyIncludesK=1 は S1b-② 待ち (roe への増分を Qacc にも当てる必要がある)";
@@ -3414,7 +3424,7 @@ int main(int argc, char** argv) {
         if (why != nullptr) {
             fprintf(stderr, "[qAccumulatorFP64] 拒否: %s\n", why);
             fprintf(stderr, "[qAccumulatorFP64] v1a の対応: GPU・node・timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
-                            "軸対称なし、周期なし、sstEnergyIncludesK=0\n");
+                            "軸対称なし (FORGE_QACC_AXISYM_DIAG=1 で診断用のみ)、周期なし、sstEnergyIncludesK=0\n");
             exit(1);
         }
         // 確保と初期化は initializeSimulation の中 (updateVariablesOuter の直後) で隣接して行う。
@@ -3425,6 +3435,11 @@ int main(int argc, char** argv) {
             exit(1);
         }
         printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
+        if (cfg.isAxisymmetric != 0) {
+            // ここに来るのは FORGE_QACC_AXISYM_DIAG=1 のときだけ (上の拒否)。結果を対応完了と取り違えないよう毎回出す。
+            printf("[qAccumulatorFP64] **診断用**: FORGE_QACC_AXISYM_DIAG=1 で node 軸対称を通す。軸ピンは Q_N と同じ射影を "
+                   "Qacc にも当てる。rollout plan (time_integration-fp64-accumulator-rollout) の S1b-① の合格条件は未検証\n");
+        }
         // **対象は流れの 5 本だけ**。乱流・化学種・凝縮モーメント・受動種・遷移モデルの保存量は
         // **float32 のまま**で、commit の丸めを受ける経路に残る。拒否はしない (case/56 では
         // 全域 FP64 ビルドと物理量が 0.00-3.77 % で一致しており実害が出ていない) が、
@@ -3507,6 +3522,9 @@ int main(int argc, char** argv) {
     // 診断 FORGE_DIAG_STAGE_DUMP=<h5> (+ FORGE_DIAG_STAGE_STEP=<n>、既定 1。既定 off): 定常の陰解法の 1 step の更新を段ごとに
     // (Q0・Q_asm・R・b・d・q・q_final) 節点ごとに double で書く (plan architecture-float-state-double-geometry §5.1 #17・§6.30)。
     stageDumpDiag::init(cfg, msh);
+    // 診断 FORGE_DIAG_QACC_ADOPT=<接頭辞> (+ FORGE_DIAG_QACC_ADOPT_STEPS=<step,...>、既定 1。既定 off): qAccumulatorFP64 の
+    // reconcile が採用する節点を量ごとに <接頭辞>_<step>.h5 に書く (plan architecture-float-state-double-geometry §5.1 #18・§6.34)。
+    qaccAdoptDiag::init(cfg, msh, var);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -3529,6 +3547,7 @@ int main(int argc, char** argv) {
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
     commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
     stageDumpDiag::finalize();   // 対象の step に達しなかったらその旨を出す (無効なら何もしない)
+    qaccAdoptDiag::finalize();   // 書かなかった対象の step があればその旨を出す (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),

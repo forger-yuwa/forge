@@ -76,6 +76,7 @@ add_library(cuda_forge STATIC
     ransSource_d.cuh
     axisymmetricSource_d.cu
     axisymmetricSource_d.cuh
+    axisSymmetryPin_d.cuh
     ducrosSensor_d.cu
     ducrosSensor_d.cuh
     turbulent_viscosity_d.cu
@@ -100,6 +101,9 @@ add_library(cuda_forge STATIC
     # 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30、既定 off。定常の陰解法の 1 step の更新を段ごとに節点ごとの double で書く)
     stageDumpDiag.cpp
     stageDumpDiag.hpp
+    # 診断 FORGE_DIAG_QACC_ADOPT (同 plan §5.1 #18・§6.34、既定 off。qAccumulatorFP64 の reconcile が採用する節点を量ごとに書く)
+    qaccAdoptDiag.cpp
+    qaccAdoptDiag.hpp
     # node の壁関数・WMLES の代表内点 (境界面ごと、読み込み後に double の値の位置から 1 回作る。同 plan §4.2 3.)
     wallRepPoint_d.cu
     wallRepPoint_d.cuh
