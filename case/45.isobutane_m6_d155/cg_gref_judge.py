@@ -160,7 +160,7 @@ def main():
     s.add_argument("--from", dest="lo", type=int, default=W1[0]); s.add_argument("--to", dest="hi", type=int, default=W2[1])
     j = sp.add_parser("judge")
     j.add_argument("--tau-theta", type=float, default=1.0); j.add_argument("--tau-delta", type=float, default=1.0); j.add_argument("--tau-qw", type=float, default=1.0)
-    j.add_argument("--tau-exit", type=float, default=0.02); j.add_argument("--tau-eta", type=float, default=0.02)
+    j.add_argument("--tau-exit", type=float, default=0.05); j.add_argument("--tau-eta", type=float, default=0.05)   # M の許容差: 2026-10-11 ユーザ決定で 0.02 → 0.05 (§4.21 から。§4.19 の gref_judge.json は 0.02 で出した)
     a = ap.parse_args()
     {"series": cmd_series, "judge": cmd_judge}[a.cmd](a)
 
