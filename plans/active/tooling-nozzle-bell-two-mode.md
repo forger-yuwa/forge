@@ -140,6 +140,7 @@
 | 5 | (M) 生成器と単体試験 | §4.4 の構成と §6 V1 の T1–T6。新規 `geometry/rao_axisym.py` (`kernel_wall`・`kernel_field`・`trace_bd`・`rao_line`・`solve_D`・`solve_thetaB`・`solve_kappaB`・`goursat_fill`・`wall_from_massflow`・`thrust_accounts`・`design_rao`)、等エントロピーの accessor (`isentrope(M)` → T, V, ρ, p, a, μ, k — `gas/semiperfect.py` は他ブランチも触るので新規モジュールの関数として足すのを優先)、試験 `design/tests/run_rao_axisym_tests.py`。Rao チャートの出典 (γ・R_t・長さの定義) は case/29 の資産で確かめる | O |
 | 6 | CFD ピンと Hall 検算 | 合格: 凍結源の照合 PASS、Hall との初期線の差を記録 (合否なし) | O |
 | 7 | 当てはめの拡張・δ\* の TP 化・物理壁 | §4.2・§4.4。合格: 拡張した当てはめが旧 `joint_fit_wall` の拘束を与えたときビット一致、積分法の速度勾配が TP の数値微分と相対 1e-4 以内、$k_f$ の検証形状 (較正に使わない形状) での出口 δ\* の差を記録、最終壁が §4.2 の拘束を 1e-6 以内で満たす、射影の残差 (位置・壁角・曲率) が受理値以内 (値は #4 の後に事前登録) | O |
+| 8a | **(D) の MOO (2026-10-11 着手、AWS B、ユーザ了承)** | `case/68.bell_two_mode/problem_bell_tp_d_moo.yaml`、キャンペーン `case/68.bell_two_mode/run_0010_moo_d` (B の `~/forge-thruster`、ブランチ `feature/thruster-nozzle-design`、RelWithDebInfo・sm_86 のビルド)。LHS 40 点 (候補 120 点のうち成立 57 点から先頭 40) + EHVI infill 10 回 × 2 点、seed 0、基準点 (−0.90, 23.5)、目的 = −η_exit と L/r_t。1 評価 = 段階起動 (soft 2000 → mid 2000 → 本段 60000)、ゲートは §4.1 の組み替え後。前進 MOC ゲートは記録だけ。同時は 1 本 (共有 GPU)。評価ごとの「その時点の最良 η」の推移を設計時間の判断材料 (§6 V3) に使う | O (実行) / F (解釈) |
 | 8 | 比較の run と判定 | §6 V2・V3。case/68 の README に run 一覧 | O (実行) / F (解釈) |
 | 9 | 海面作動の比較 | 兄弟 plan の外部領域が受理されてから。§6 V4 に参照・判定量を書いてから回す | F |
 
