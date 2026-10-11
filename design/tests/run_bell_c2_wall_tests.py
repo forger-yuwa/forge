@@ -5,6 +5,10 @@
 成立条件の負例試験 (r' < 0・θ' の符号変化 ≠ 1・|κ| > 1/R_t がそれぞれ INFEASIBLE になる)、収縮部の単調条件。
 加えて: 拘束行列の階数 7・拘束の零空間で ∫(r''')² が正定値・KKT の解が最小 (零空間の摂動で J が増える)、
 規約 (等間隔 16 区間の clamped 5 次・係数 21)、設計変数の範囲外・非有限は ValueError。
+**x_m の内部決定** (§4.3・§5.1 #3c、`design_bell_c2`): 走査 0.5〜4.0 r_t・141 点、成立区間で J 最小の x_m を黄金分割で確定、
+同一入力でビット同一 (x_m・係数・走査の記録)、確定した壁は成立・拘束の残差 ≤ 1e-10、x_m で J が局所最小 (区間内の
+走査点と ±1e-4 の摂動に対して)、成立区間が複数なら J 最小の走査点を含む区間、成立区間が空なら例外にせず INFEASIBLE と
+理由、設計変数の範囲外は ValueError、`BellC2Wall` の x_m (絶対値) と xm_frac (旧来) は排他で同じ x_m なら同じ係数。
 
 実行: design/.venv-opt の Python で `python design/tests/run_bell_c2_wall_tests.py`。
 """
@@ -14,8 +18,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from forge_design.geometry.wall_bell_c2 import (DEGREE, N_COEF, N_SPAN, RESID_TOL, BellC2Spec,  # noqa: E402
-                                                BellC2Wall, cone15_length)
+from forge_design.geometry.wall_bell_c2 import (DEGREE, N_COEF, N_SPAN, RESID_TOL, XM_SCAN_N,  # noqa: E402
+                                                XM_SCAN_RANGE, BellC2Spec, BellC2Wall, cone15_length,
+                                                design_bell_c2)
 
 FAIL = 0
 
@@ -149,7 +154,95 @@ check("範囲の端 (θ_max 20/45°・θ_e 2/20°・x_m/L 0.05/0.40) は受け�
 
 # ---------------------------------------------------------------- V0 の格子の成立数 (記録)
 nfeas = sum(BellC2Wall(*a_).feasibility()["ok"] for a_ in GRID)
-print(f"info V0 の格子 (θ_max 3 × θ_e 3 × x_m/L 3 × L_k 5 = 135 点) の成立数: {nfeas}")
+print(f"info V0-a の格子 (θ_max 3 × θ_e 3 × x_m/L 3 × L_k 5 = 135 点、旧来の x_m/L 指定) の成立数: {nfeas}")
+
+# ---------------------------------------------------------------- x_m の内部決定 (§4.3・§5.1 #3c)
+print("== x_m の内部決定")
+check("走査の規約: 0.5〜4.0 r_t・141 点 (0.025 r_t 刻み)", XM_SCAN_RANGE == (0.5, 4.0) and XM_SCAN_N == 141)
+d1 = design_bell_c2(LK[0], 10.0, 32.5)
+d2 = design_bell_c2(LK[0], 10.0, 32.5)
+xs = np.linspace(d1.wall.x_in, d1.L, 5001)
+check("決定性: 同一入力で x_m・係数・標本の r/r'/r''・走査の記録 (x・成立・J)・区間がビット同一",
+      d1.ok and d2.ok and np.float64(d1.x_m).tobytes() == np.float64(d2.x_m).tobytes()
+      and d1.wall.coef.tobytes() == d2.wall.coef.tobytes()
+      and all(np.asarray(d1.wall.r(xs, k)).tobytes() == np.asarray(d2.wall.r(xs, k)).tobytes() for k in (0, 1, 2))
+      and d1.scan_x.tobytes() == d2.scan_x.tobytes() and d1.scan_ok.tobytes() == d2.scan_ok.tobytes()
+      and d1.scan_J.tobytes() == d2.scan_J.tobytes() and d1.intervals == d2.intervals and d1.golden == d2.golden,
+      f"x_m {d1.x_m!r}")
+f1 = d1.wall.feasibility()
+check("確定した壁: 成立・拘束の残差 ≤ 1e-10・x_m は走査範囲の中・壁の x_m と一致",
+      f1["ok"] and float(np.max(np.abs(d1.wall.constraint_residuals()))) <= RESID_TOL
+      and XM_SCAN_RANGE[0] <= d1.x_m <= XM_SCAN_RANGE[1] and d1.wall.x_m == d1.x_m and d1.wall.xm_mode == "abs",
+      f"x_m {d1.x_m:.6f}・区間 {d1.intervals}")
+ia, ib, _, _ = d1.intervals[d1.chosen_interval]
+inside_scan = (d1.scan_x >= ia) & (d1.scan_x <= ib)
+check("J 最小: 確定した x_m の J ≤ 選んだ区間の全走査点の J", d1.wall.J <= float(np.min(d1.scan_J[inside_scan])) + 1e-15,
+      f"J {d1.wall.J:.12g} vs 走査の最小 {float(np.min(d1.scan_J[inside_scan])):.12g}")
+if (not d1.golden["at_scan_point"]) and ia + 1e-4 < d1.x_m < ib - 1e-4:
+    Jp = [BellC2Wall(d1.L, 10.0, 32.5, x_m=d1.x_m + s_).J for s_ in (-1e-4, 1e-4)]
+    check("J 最小: 区間の内部の x_m では ±1e-4 r_t の摂動で J が増える (局所最小)", min(Jp) >= d1.wall.J,
+          f"J {d1.wall.J:.12g}・摂動 {Jp[0]:.12g} / {Jp[1]:.12g}")
+# 成立区間が複数: J 最小の走査点を含む区間を選ぶ
+multi = None
+for L_ in LK:
+    for tm_ in (20.0, 25.0, 32.5, 40.0):
+        for te_ in (5.0, 10.0, 15.0):
+            dd = design_bell_c2(L_, te_, tm_)
+            if dd.ok and len(dd.intervals) >= 2:
+                multi = dd
+                break
+        if multi:
+            break
+    if multi:
+        break
+if multi is None:
+    print("info 成立区間が複数に分かれる点は V0-b の格子に無かった (区間の選び方の試験は飛ばす)")
+else:
+    i_best = int(np.argmin(np.where(multi.scan_ok, multi.scan_J, np.inf)))
+    a_, b_, _, _ = multi.intervals[multi.chosen_interval]
+    check(f"成立区間が複数 (L {multi.L / LC:.0%}・θe {multi.theta_e_deg:g}°・θmax {multi.theta_max_deg:g}°、"
+          f"{len(multi.intervals)} 区間): J 最小の走査点を含む区間を選ぶ",
+          a_ <= multi.scan_x[i_best] <= b_ and a_ <= multi.x_m <= b_
+          and multi.intervals[multi.chosen_interval][3] == min(t[3] for t in multi.intervals),
+          f"区間 {[(round(t[0], 3), round(t[1], 3), round(t[3], 6)) for t in multi.intervals]}・選択 {multi.chosen_interval}・x_m {multi.x_m:.4f}")
+# 成立区間が空 → INFEASIBLE (例外にしない)
+inf_ = design_bell_c2(LK[4], 15.0, 20.0)
+check("成立区間が空 (L 100 %・θe 15°・θmax 20°): 例外にせず INFEASIBLE、壁なし・x_m なし・理由に走査と不成立の内訳",
+      (not inf_.ok) and inf_.status == "INFEASIBLE" and inf_.wall is None and inf_.x_m is None
+      and "走査" in inf_.reason and "θ' の符号変化" in inf_.reason and int(np.sum(inf_.scan_ok)) == 0
+      and len(inf_.scan_x) == XM_SCAN_N, inf_.reason)
+check("INFEASIBLE の record() が書ける (CSV の 1 行)", inf_.record()["design_status"] == "INFEASIBLE"
+      and inf_.record()["x_m"] is None)
+short = design_bell_c2(0.45, 10.0, 32.5)
+check("L が走査範囲より短い (L 0.45 < 0.5): 走査 0 点で INFEASIBLE", (not short.ok) and len(short.scan_x) == 0
+      and "0 点" in short.reason, short.reason)
+# 入力の誤り
+for name, fn in [("θ_max 19.9°", lambda: design_bell_c2(LK[0], 10.0, 19.9)),
+                 ("θ_e 20.1°", lambda: design_bell_c2(LK[0], 20.1, 30.0)),
+                 ("L = NaN", lambda: design_bell_c2(float("nan"), 10.0, 30.0)),
+                 ("L = 0", lambda: design_bell_c2(0.0, 10.0, 30.0)),
+                 ("BellC2Wall に x_m と xm_frac の両方", lambda: BellC2Wall(LK[0], 10.0, 30.0, 0.2, x_m=2.0)),
+                 ("BellC2Wall に x_m も xm_frac も無し", lambda: BellC2Wall(LK[0], 10.0, 30.0)),
+                 ("BellC2Wall の x_m ≤ 0", lambda: BellC2Wall(LK[0], 10.0, 30.0, x_m=0.0)),
+                 ("BellC2Wall の x_m ≥ L", lambda: BellC2Wall(LK[0], 10.0, 30.0, x_m=LK[0])),
+                 ("BellC2Wall の x_m = NaN", lambda: BellC2Wall(LK[0], 10.0, 30.0, x_m=float("nan")))]:
+    msg = raises(fn)
+    check(f"入力の検査: {name} は ValueError", msg is not None, msg or "例外なし")
+wa = BellC2Wall(LK[1], 10.0, 32.5, 0.1)
+wb = BellC2Wall(LK[1], 10.0, 32.5, x_m=0.1 * LK[1])
+check("旧来の xm_frac 指定と同じ x_m の絶対値指定で係数がビット同一", wa.coef.tobytes() == wb.coef.tobytes()
+      and wa.xm_mode == "frac" and wb.xm_mode == "abs")
+# V0-b の格子 (θ_max 4 × θ_e 3 × L_k 5 = 60 点) の成立数と走査の端 (記録)
+nok, nedge, byL = 0, 0, {}
+for L_ in LK:
+    for tm_ in (20.0, 25.0, 32.5, 40.0):
+        for te_ in (5.0, 10.0, 15.0):
+            dd = design_bell_c2(L_, te_, tm_)
+            nok += dd.ok
+            nedge += dd.edge_touch
+            byL[f"{L_ / LC:.0%}"] = byL.get(f"{L_ / LC:.0%}", 0) + dd.ok
+print(f"info V0-b の格子 (θ_max 4 × θ_e 3 × L_k 5 = 60 点、x_m は内部決定) の成立数: {nok} (L_k ごと {byL})・"
+      f"成立区間が走査の端に触れた点: {nedge}")
 
 print("\nALL PASS" if FAIL == 0 else f"\n{FAIL} FAIL")
 sys.exit(0 if FAIL == 0 else 1)

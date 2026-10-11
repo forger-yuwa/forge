@@ -16,6 +16,10 @@
 5. `moc_kernel.py`・`moc_inverse.py`・`moc_diagnostics.py` を変更していない (既定はビット不変。風洞の既存試験は別に回す:
    `run_inverse_tests.py`・`run_moc_axis_limit_tests.py`)。
 6. 決定性 (同じ入力で網とゲートが同一)。
+7. **ガード 3 点** (§5.1 #3c、diagnostician 2026-10-11): (a) Hall の初期線は R_t ≤ 1 で n > 321 を拒否 (321 可・641 不可)、
+   (b) 前線 1 (k = 1) の網の反転は壁の不受理でなく「判定不能 (初期線不整合)」(Hall R 1・n 641 の実例と、網に反転を
+   入れた合成例)、(c) 不受理の根拠の点に軸からの添字 j を記録し、根拠が j ≤ 2 だけなら「判定不能 (軸近傍)」(合成例)、
+   j > 2 の根拠があれば不受理のまま。既存の負例 (曲げ戻し 5°・0°) は verdict が reject。
 info: ③ベルの基準ガス (EXH) と Hall の初期線 (R 1) での動作、Hall の初期線の C⁻ 適合式の不整合の大きさ。
 
 実行: design/.venv-opt の Python で `python design/tests/run_moc_forward_tests.py`。
@@ -31,8 +35,10 @@ from scipy.integrate import solve_ivp
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "design"))
 from forge_design.geometry import moc_kernel as MK  # noqa: E402
-from forge_design.geometry.moc_forward import (axis_points, forward_moc, gate_record,  # noqa: E402
-                                               hall_initial_line, wall_points)
+from forge_design.geometry import moc_forward as MF  # noqa: E402
+from forge_design.geometry.moc_forward import (HALL_N_MAX_RT_LE1, NEAR_AXIS_J, _hall_line_raw,  # noqa: E402
+                                               axis_points, forward_moc, gate_record, hall_initial_line,
+                                               wall_points)
 from forge_design.geometry.moc_kernel import pm_mach_vec, pm_nu  # noqa: E402
 
 FAIL = 0
@@ -172,6 +178,9 @@ for th1 in (5.0, 0.0):
     recs = scan[th1]
     check(f"強い戻し θ₁ {th1}°: 3 水準とも不受理、理由に網の反転 (C⁺ 沿い) と C⁻ 族の交差",
           all((not r["gate_pass"]) and "reversal_cplus_step" in r["codes"] and "crossing_cminus" in r["codes"] for r in recs))
+    check(f"強い戻し θ₁ {th1}°: verdict は reject (判定不能にしない)・根拠の j の最大 > {NEAR_AXIS_J}",
+          all(r["verdict"] == "reject" and r["evidence_j_max"] > NEAR_AXIS_J for r in recs),
+          f"{[(r['verdict'], r['evidence_j_min'], r['evidence_j_max']) for r in recs]}")
     xs = [r["reversal_onset_x"] for r in recs]
     check(f"強い戻し θ₁ {th1}°: 交差の始まりの x が 3 水準で 0.03 r_t 以内 (物理の包絡線)",
           max(xs) - min(xs) <= 0.03, f"{['%.4f' % v for v in xs]}")
@@ -232,6 +241,88 @@ same = all(np.array_equal(ra["net"].a[f], rb["net"].a[f], equal_nan=True) for f 
     and ra["gate"]["reasons"] == rb["gate"]["reasons"]
 check("同じ入力で網 (全点・状態) とゲートが同一", same)
 
+# ---------------------------------------------------------------- 7. ガード 3 点 (§5.1 #3c)
+print("== 7. ガード 3 点")
+# (a) Hall の初期線の点数
+for R_, n_, ok_ in ((1.0, 161, True), (1.0, 321, True), (1.0, 322, False), (1.0, 641, False), (0.5, 641, False),
+                    (2.0, 641, True)):
+    try:
+        hl_ = hall_initial_line(R_, 1.4, n_)
+        got = len(hl_["x"]) == n_
+    except ValueError:
+        got = False
+    check(f"(a) Hall の初期線 R {R_:g}・n {n_}: {'受ける' if ok_ else '拒否 (ValueError)'}", got == ok_)
+check(f"(a) 上限の定数 HALL_N_MAX_RT_LE1 = 321", HALL_N_MAX_RT_LE1 == 321)
+check("(a) 制限のない本体 _hall_line_raw は hall_initial_line (n 321) と同じ線",
+      all(np.array_equal(_hall_line_raw(1.0, 1.4, 321)[k], hall_initial_line(1.0, 1.4, 321)[k]) for k in ("x", "r", "M", "theta")))
+# (b) 前線 1 の反転 → 判定不能 (初期線不整合): 実例 (CPG γ 1.4・Hall R 1・n 641 を (D) の壁で)
+from forge_design.geometry.wall_bell_c2 import BellC2Spec, cone15_length, design_bell_c2  # noqa: E402
+dsg = design_bell_c2(0.7 * cone15_length(50.0), 10.0, 32.5, BellC2Spec())
+for n_, exp in ((641, "undecidable"), (321, None)):
+    res_ = forward_moc(dsg.wall, dsg.L, 1.4, _hall_line_raw(1.0, 1.4, n_))
+    g_ = res_["gate"]
+    if exp == "undecidable":
+        check(f"(b) 実例: γ 1.4・Hall R 1・n {n_}・(D) L 70 %・θe 10°・θmax 32.5° → 判定不能 (初期線不整合)、pass は False",
+              g_["verdict"] == "undecidable" and (g_["undecidable"] or {}).get("kind") == "initial_line" and not g_["pass"],
+              f"{g_['verdict']} {(g_['undecidable'] or {}).get('kind')} {g_['codes']}")
+    else:
+        check(f"(b) 同じ壁で n {n_} は初期線不整合にならない", (g_["undecidable"] or {}).get("kind") != "initial_line",
+              f"{g_['verdict']} {g_['codes']}")
+
+
+def _regate(res):
+    return MF._gate(res, MF._Wall(Ray(), L_RAD), G, MF.N_CROSS_SAMPLE)
+
+
+def _perturbed(n_, k_, j_, dx):
+    """放射源流 (合格) の網の点 (k_, j_) を x 方向に dx ずらしてゲートだけ評価し直す (合成の負例)。"""
+    res_ = forward_moc(Ray(), L_RAD, G, radial_line(n_))
+    res_["net"].a["x"][k_, j_] += dx
+    return res_, _regate(res_)
+
+
+base_ = forward_moc(Ray(), L_RAD, G, radial_line(49))
+check("(合成の前提) 放射源流 n 49 は通過、verdict pass・根拠 0 点",
+      base_["gate"]["verdict"] == "pass" and base_["gate"]["evidence_j"]["n"] == 0)
+dx_back = -0.05
+res_b, g_b = _perturbed(49, 1, 30, dx_back)
+check("(b) 合成: 前線 1 の点 (k 1・j 30) を C⁺ の担体より手前へ → 判定不能 (初期線不整合)、他の理由があっても優先",
+      g_b["verdict"] == "undecidable" and g_b["undecidable"]["kind"] == "initial_line" and not g_b["pass"],
+      f"{g_b['verdict']} {g_b['codes']}")
+res_c, g_c = _perturbed(49, 1, 30, +0.0)
+check("(b) 合成の対照: ずらさなければ通過", g_c["verdict"] == "pass")
+# (c) 根拠の j の記録と軸近傍
+kmid = 20
+res_n, g_n = _perturbed(49, kmid, 1, dx_back)
+ej = g_n["evidence_j"]
+check(f"(c) 合成: 前線 {kmid} の j 1 の点を手前へ → 根拠はすべて j ≤ {NEAR_AXIS_J} → 判定不能 (軸近傍)",
+      g_n["verdict"] == "undecidable" and g_n["undecidable"]["kind"] == "near_axis" and ej["j_max"] <= NEAR_AXIS_J
+      and ej["n"] > 0 and ej["n_unlocated"] == 0, f"{g_n['verdict']} {g_n['codes']} j {ej}")
+check("(c) 根拠の点に種類・k・j・x・r が入る", all({"kind", "k", "j", "x", "r"} <= set(e) for e in g_n["evidence"])
+      and any(e["kind"] == "reversal_cplus_step" and e["k"] == kmid and e["j"] == 1 for e in g_n["evidence"]),
+      f"{g_n['evidence'][:3]}")
+res_f, g_f = _perturbed(49, kmid, 24, dx_back)
+check("(c) 合成: 同じずらしを j 24 に → 不受理 (reject)、根拠の j の最大 > 2",
+      g_f["verdict"] == "reject" and g_f["evidence_j"]["j_max"] > NEAR_AXIS_J, f"{g_f['verdict']} {g_f['evidence_j']}")
+res_g, g_g = _perturbed(49, kmid, NEAR_AXIS_J + 1, dx_back)
+check(f"(c) 合成: j {NEAR_AXIS_J + 1} (境界の 1 つ外) は不受理 (reject)", g_g["verdict"] == "reject",
+      f"{g_g['verdict']} {g_g['evidence_j']}")
+rec_ = gate_record({**res_n, "gate": g_n})
+check("(c) gate_record に verdict・判定不能の種類・根拠の j・最小間隔比の j が入る",
+      rec_["verdict"] == "undecidable" and rec_["undecidable_kind"] == "near_axis" and rec_["evidence_j_max"] <= NEAR_AXIS_J
+      and rec_["cminus_sep_j"] is not None and "reversal_onset_j" in rec_, f"{ {k: rec_[k] for k in ('verdict', 'undecidable_kind', 'evidence_j_max', 'cminus_sep_j', 'reversal_onset_j')} }")
+# 位置の分からない根拠 (前線数の上限) が 1 つでもあれば軸近傍の判定不能にしない
+res_cap = forward_moc(Ray(), L_RAD, G, radial_line(49), max_fronts=5)
+check("(c) 位置の分からない根拠 (前線数の上限で出口に届かない) は不受理のまま",
+      res_cap["gate"]["verdict"] == "reject" and res_cap["gate"]["evidence_j"]["n_unlocated"] >= 1,
+      f"{res_cap['gate']['verdict']} {res_cap['gate']['codes']} {res_cap['gate']['evidence_j']}")
+# 初期線の検査で止まったときも判定不能 (初期線の検査)
+l2 = {k: (np.array(v, dtype=float).copy() if isinstance(v, np.ndarray) else v) for k, v in radial_line(49).items()}
+l2["M"][10] = 0.98
+g_s = forward_moc(Ray(), L_RAD, G, l2)["gate"]
+check("初期線の検査で止まった (亜音速入力) → verdict undecidable・種類 initial_line_check・pass False",
+      g_s["verdict"] == "undecidable" and g_s["undecidable"]["kind"] == "initial_line_check" and not g_s["pass"])
+
 # ---------------------------------------------------------------- info: ③ベルの基準ガス・Hall の初期線
 print("== info: ③ベルの基準ガス (EXH) と Hall の初期線")
 try:
@@ -239,7 +330,7 @@ try:
     from forge_design.geometry.wall_bell_c2 import BellC2Wall, cone15_length
     gas = RocketExhaust.from_file(ROOT / "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml").moc_gas()
     for R_ in (1.0, 2.0):
-        hl = hall_initial_line(R_, gas, 2001)
+        hl = _hall_line_raw(R_, gas, 2001)        # 不整合の大きさを測る診断 (点数の制限なし)
         nu = np.asarray(pm_nu(hl["M"], gas), dtype=float)
         mu = np.arcsin(1.0 / hl["M"])
         s_ = np.where(hl["r"] > 1e-9, np.sin(hl["theta"]) / np.maximum(hl["r"], 1e-300), hl["thr_axis"])
@@ -256,6 +347,9 @@ try:
     print(f"info EXH・Hall R 1・(D) L 70 %・θ_e 10°・θ_max 32.5°・x_m/L 0.1 (n 161): 合否 {rec['gate_pass']} {rec['codes']}・"
           f"前線 {rec['n_fronts']}・C⁻ 間隔比 {rec['cminus_sep_ratio_min']:.3f}・流量 {rec['mdot_err_max']:.2e} "
           f"({time.time() - t0:.1f} s)")
+    rec = gate_record(forward_moc(w, w.L, gas, _hall_line_raw(1.0, gas, 641)))
+    check("(b) 実例 (EXH): Hall R 1・n 641・同じ壁 → 判定不能 (初期線不整合) (V0-a で全点不受理 → 分類 B と誤判定された件)",
+          rec["verdict"] == "undecidable" and rec["undecidable_kind"] == "initial_line", f"{rec['verdict']} {rec['codes']}")
 except FileNotFoundError as e:
     print(f"info 基準ガスの排気ファイルが無いので飛ばす ({e})")
 

@@ -1,6 +1,6 @@
 r"""壁を与えた前進 MOC (直接問題) と、その受理ゲート (前進 MOC ゲート)。
 
-計画: plans/active/tooling-nozzle-bell-two-mode.md §4.5 (第一の判定量)・§5.1 #3b (共用モジュール、所有はこの系列)。
+計画: plans/active/tooling-nozzle-bell-two-mode.md §4.5 (第一の判定量)・§5.1 #3b (共用モジュール、所有はこの系列)・#3c (ガード)。
 ③ベルのゲート、④デュアルベルの基部受理、剥離 plan の TC1A の全流れ壁圧が同じこのモジュールを使う。
 
 **問い**: 与えた壁 $r_w(x)$ ($x\in[x_0,L]$) の下で、初期線 (スロートの C⁻ 特性線) から出口 $x=L$ まで、
@@ -38,6 +38,19 @@ C⁺ が出口より下流で壁に当たったら前線の追加をやめる (=
 5. **同族特性線の交差**: `moc_diagnostics` の非隣接折れ線交差の検査 (`_polylines_cross_aabb`) を C⁺ 族 (対角線)・
    C⁻ 族 (前線) の両方に、間引いた線の組で
 6. 出口まで届かない (失敗で前線が途切れた・前線数の上限)
+
+**判定は 3 値** (`gate["verdict"]`、plan §5.1 #3c・diagnostician 2026-10-11): `"pass"` (通過) / `"reject"` (壁の不受理) /
+`"undecidable"` (判定不能 — 壁の性質として数えない)。`gate["pass"]` は `verdict == "pass"` と同じ。判定不能は次の 3 つ
+(`gate["undecidable"]["kind"]`):
+
+- `"initial_line"`: **前線 1 (k = 1) に網の反転がある** (C⁺ 沿い・C⁻ 沿いの反転、壁点・軸点の x の逆行が前線 0→1 の間)。
+  初期線と前進の適合式の不整合のアーチファクト (Hall R_t 1・n 641 で全点が不受理になり分類 B と誤判定された件)。
+  初期線の C⁻ 沿いの反転 (k = 0) も同じ扱い。他の理由があってもこれを優先する。
+- `"near_axis"`: 不受理の根拠となった点 (単位過程の失敗・網の反転・同族特性線の交差・最終残差の最大点・出口に届かない) の
+  **軸からの添字 j がすべて j ≤ 2** (`NEAR_AXIS_J`)。前進の軸点の θ_r は 1 次の代用 (`axis_thr_neighbor`) なので、
+  軸の極近傍だけに出る不受理は壁の性質と言えない。位置の分からない根拠 (前線数の上限など) が 1 つでもあれば不受理のまま。
+- `"initial_line_check"`: 初期線の検査 (亜音速・非有限・壁から外れる・順序) で止まった (マーチしない)。
+根拠の点は `gate["evidence"]` (種類・k・j・x・r) と、その j の要約 `gate["evidence_j"]` に記録する。
 
 **内部衝撃波の指標** (連続量、合否とは別に返す): 同族特性線の間隔の比。C⁻ 族は前線 $k-1,k$ の間隔を C⁺ に沿って測り、
 壁での間隔で割る ($d_k[j]/d_k[n]$)。C⁺ 族は隣り合う C⁺ の間隔を C⁻ に沿って測り、その 2 本が最初にそろった前線での間隔で割る。
@@ -79,6 +92,8 @@ STATE_NAMES = {ST_NONE: "none", ST_OK: "converged", ST_MISSING: "missing", ST_GE
 WALL_ON_TOL = 1e-9           # 初期線の壁点が壁に乗っているかの許容差 [r_t]
 OUTSIDE_WALL_TOL = 1e-9      # 新点が壁の外とみなす超過量 [r_t]
 N_CROSS_SAMPLE = 40          # 非隣接交差の検査で間引く線の本数 (族ごと; moc_diagnostics と同じ既定)
+NEAR_AXIS_J = 2              # 不受理の根拠がすべて j ≤ この値なら「判定不能 (軸近傍)」(j = 0 が軸、§5.1 #3c)
+HALL_N_MAX_RT_LE1 = 321      # Hall の初期線 (R_t ≤ 1) で許す点数の上限 (§5.1 #3c; 321 可・641 不可の実測)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -112,7 +127,21 @@ def hall_initial_line(R: float, g, n: int) -> dict:
     $d(\theta+\nu)=\sin\mu\,(\sin\theta/r)\,d\sigma$ を厳密には満たさない。線に沿った $\theta+\nu-\int$源項 の壁と軸端の差は
     $R$ 1 で −1.09e-2 rad (③の EXH、CPG γ 1.4 でも −1.07e-2)、$R$ 2 で −2.1e-3 rad。前進マーチは前線 1 をこの線から
     C⁺ 区間 1 つだけ下流に作るので、前線の間隔がこの不整合の効果より細かくなると (③の R 1・n ≥ 641 で実測)
-    前線 1 がスロート直後で初期線と交差し、壁によらず不受理になる。n ≤ 321 では起きなかった。"""
+    前線 1 がスロート直後で初期線と交差し、壁によらず不受理になる。n ≤ 321 では起きなかった。
+
+    **ガード** (plan §5.1 #3c、diagnostician 2026-10-11): $R\le1$ では $n>321$ (`HALL_N_MAX_RT_LE1`) を `ValueError` で拒否する。
+    実測 (③の EXH、R 1): n 161・321 は (D) と TOP の 13 点で合否が整合初期線 n 321/641/1281 と一致、
+    **n 641 は前線 1 がスロート直後 (x ≈ 0.30) で初期線と交差して全点が不受理** (分類 B と誤判定)。$R>1$ は制限しない
+    (R 2 の不整合は −2.1e-3 rad と小さい)。不整合の大きさを測る診断には制限のない `_hall_line_raw` を使う。"""
+    if float(R) <= 1.0 and int(n) > HALL_N_MAX_RT_LE1:
+        raise ValueError(f"hall_initial_line: R = {float(R):g} ≤ 1 で n = {int(n)} > {HALL_N_MAX_RT_LE1} は使えない "
+                         f"(Hall の初期線と C⁻ の適合式の不整合 ~1e-2 rad で前線 1 が初期線と交差する — 321 可・641 不可の実測、"
+                         f"plan §5.1 #3c)")
+    return _hall_line_raw(R, g, n)
+
+
+def _hall_line_raw(R: float, g, n: int) -> dict:
+    """`hall_initial_line` の本体 (点数の制限なし)。初期線の不整合を測る診断と試験だけが直接使う。"""
     from .transonic import HallThroat
     g_hall = float(g.gamma_throat()) if _is_gas(g) else float(g)
     ht = HallThroat(R=float(R), gamma=g_hall)
@@ -406,7 +435,8 @@ def forward_moc(wall, L: float, g, line: dict, *, axis_limit: str = "analytic", 
 
     `g`: γ (float) またはガスモデル (`moc_kernel` の規約)。`axis_limit`: `"analytic"` (既定) / `"legacy"`。
     `corrector`: `"converge"` のみ (前進ゲートは収束の分類を理由に使うため)。`max_fronts`: 前線数の上限 (既定 400 n)。
-    戻り dict: `gate` (`pass`・`codes`・`reasons`・`indicators`・`counts` [点の状態の内訳]・`failures_inside`・
+    戻り dict: `gate` (`pass`・`verdict` [pass / reject / undecidable]・`undecidable` [種類と説明]・`codes`・`reasons`・
+    `indicators`・`evidence` [不受理の根拠の点と j]・`evidence_j`・`counts` [点の状態の内訳]・`failures_inside`・
     `failure_locations`)、`net` (`_Net`: 前線 × 点の配列 `a[x|r|th|nu|M]`・`status`・`n_iter`・`resid`・`thr_axis`)、
     `end` (マーチの終わり方)、`n`・`n_fronts`・`mdot_star`・`resid_max`・`wall_info`・`axis_info`・`timing`。
     壁点・軸点は `wall_points(res)`・`axis_points(res)`、CSV 1 行の要約は `gate_record(res)`。
@@ -426,7 +456,10 @@ def forward_moc(wall, L: float, g, line: dict, *, axis_limit: str = "analytic", 
     base = {"L": L, "axis_limit": axis_limit, "corrector": corrector, "tol": float(tol), "max_corr": int(max_corr),
             "nu_max": nu_max, "line": line_info}
     if codes:
-        gate = {"pass": False, "codes": codes, "reasons": reasons, "indicators": {}, "stage": "initial_line"}
+        gate = {"pass": False, "verdict": "undecidable", "codes": codes, "reasons": reasons, "indicators": {},
+                "stage": "initial_line",
+                "undecidable": {"kind": "initial_line_check", "detail": "初期線の検査で止まった (マーチしない)"},
+                "evidence": [], "evidence_j": _evidence_j_summary([])}
         return {**base, "gate": gate, "net": None, "timing": {"total_s": time.time() - t0}}
     x0, r0, M0, th0 = (np.asarray(line[k], dtype=float) for k in ("x", "r", "M", "theta"))
     nu0 = np.asarray(pm_nu(M0, g), dtype=float)
@@ -612,6 +645,14 @@ def _signed_len(xP, xQ, ang):
         return (xP - xQ) / np.cos(ang)
 
 
+def _evidence_j_summary(ev: list) -> dict:
+    """根拠の点の j の要約 (j = 0 が軸、None は位置が分からない根拠)。"""
+    js = [e["j"] for e in ev if e.get("j") is not None]
+    return {"n": len(ev), "n_unlocated": sum(1 for e in ev if e.get("j") is None),
+            "j_min": min(js) if js else None, "j_max": max(js) if js else None,
+            "n_j_le_near_axis": sum(1 for j in js if j <= NEAR_AXIS_J)}
+
+
 def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
     net: _Net = res["net"]
     L = res["L"]
@@ -620,6 +661,12 @@ def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
     S = net.status
     K = S.shape[0] - 1
     codes, reasons = [], []
+    evidence = []                                # 不受理の根拠の点 (種類・k・j・x・r; j は軸からの添字)
+
+    def _ev(kind, k, j, x=None, r=None):
+        evidence.append({"kind": kind, "k": None if k is None else int(k), "j": None if j is None else int(j),
+                         "x": None if x is None or not np.isfinite(x) else float(x),
+                         "r": None if r is None or not np.isfinite(r) else float(r)})
     MU = mu_vec(np.where(np.isfinite(MM), MM, 1.0))
     ok = S == ST_OK
     inside = ok & (X <= L)
@@ -641,9 +688,10 @@ def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
             if where_x <= L:
                 name = STATE_NAMES[st]
                 fail_in[name] = fail_in.get(name, 0) + 1
+                rr = float(R[k, j]) if np.isfinite(R[k, j]) else float(R[carriers[0]])
+                _ev(f"unit_{name}", k, j, where_x, rr)
                 if len(fail_loc) < 20:
-                    fail_loc.append({"k": k, "j": int(j), "state": name, "x": where_x,
-                                     "r": float(R[k, j]) if np.isfinite(R[k, j]) else float(R[carriers[0]])})
+                    fail_loc.append({"k": k, "j": int(j), "state": name, "x": where_x, "r": rr})
     for name, cnt in sorted(fail_in.items()):
         codes.append(f"unit_{name}")
         label = {"geom_parallel": "幾何的棄却 (特性線が平行)", "iter_nonfinite": "反復の失敗 (非有限)",
@@ -656,6 +704,12 @@ def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
     if not rmax <= RESID_TOL:
         codes.append("resid")
         reasons.append(f"最終残差 {rmax:.3e} > {RESID_TOL:g}")
+        rz = np.where(inside & np.isfinite(net.resid), net.resid, -np.inf)
+        if np.any(np.isfinite(rz)):
+            kr, jr = np.unravel_index(int(np.argmax(rz)), rz.shape)
+            _ev("resid", kr, jr, X[kr, jr], R[kr, jr])
+        else:
+            _ev("resid", None, None)
     # --- 3. 網の反転 (担体より特性線の向きで手前) ---
     # C⁺: P = (k, j) ← A = (k−1, j−1)  (j = 1..n)
     Px, Pth, Pmu = X[1:, 1:], TH[1:, 1:], MU[1:, 1:]
@@ -673,21 +727,43 @@ def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
     rev_m = both_m & ~(e_m > 0.0)
     n_rev_p = int(np.sum(rev_p))
     n_rev_m = int(np.sum(rev_m))
+    init_rev = []                                # 前線 0→1 の反転 (初期線不整合の判定)
+    for (kk, jj) in zip(*np.nonzero(rev_p)):
+        _ev("reversal_cplus_step", kk + 1, jj + 1, X[kk + 1, jj + 1], R[kk + 1, jj + 1])
+        if kk + 1 <= 1:
+            init_rev.append(("reversal_cplus_step", int(kk + 1), int(jj + 1)))
+    for (kk, jj) in zip(*np.nonzero(rev_m)):
+        _ev("reversal_cminus_step", kk, jj, X[kk, jj], R[kk, jj])
+        if kk <= 1:
+            init_rev.append(("reversal_cminus_step", int(kk), int(jj)))
     onset = {}
-    for name, rv, XX, RR in (("cplus_step", rev_p, Px, R[1:, 1:]), ("cminus_step", rev_m, Qx, R[:, :-1])):
+    for name, rv, XX, RR, dk in (("cplus_step", rev_p, Px, R[1:, 1:], 1), ("cminus_step", rev_m, Qx, R[:, :-1], 0)):
         if np.any(rv):
             i = int(np.argmin(np.where(rv, XX, np.inf)))
-            onset[name] = {"x": float(XX.flat[i]), "r": float(RR.flat[i])}
+            ki, ji = np.unravel_index(i, XX.shape)
+            onset[name] = {"x": float(XX.flat[i]), "r": float(RR.flat[i]), "k": int(ki + dk), "j": int(ji + dk)}
     if n_rev_p:
         codes.append("reversal_cplus_step")
         reasons.append(f"網の反転: C⁺ 沿いに新点が担体の手前 {n_rev_p} 点 (C⁻ 族の前線どうしの交差)")
     if n_rev_m:
         codes.append("reversal_cminus_step")
         reasons.append(f"網の反転: C⁻ 沿いに新点が担体の手前 {n_rev_m} 点 (C⁺ 族どうしの交差)")
-    wx = X[:, n][ok[:, n]]
-    ax = X[:, 0][ok[:, 0] & (X[:, 0] <= L)]
-    n_wall_nonmono = int(np.sum(~(np.diff(wx) > 0.0))) if len(wx) > 1 else 0
-    n_axis_nonmono = int(np.sum(~(np.diff(ax) > 0.0))) if len(ax) > 1 else 0
+    kw = np.flatnonzero(ok[:, n])
+    ka = np.flatnonzero(ok[:, 0] & (X[:, 0] <= L))
+    wx = X[kw, n]
+    ax = X[ka, 0]
+    bad_w = np.flatnonzero(~(np.diff(wx) > 0.0)) if len(wx) > 1 else np.zeros(0, dtype=int)
+    bad_a = np.flatnonzero(~(np.diff(ax) > 0.0)) if len(ax) > 1 else np.zeros(0, dtype=int)
+    n_wall_nonmono = int(len(bad_w))
+    n_axis_nonmono = int(len(bad_a))
+    for i in bad_w:
+        _ev("reversal_wall", kw[i + 1], n, X[kw[i + 1], n], R[kw[i + 1], n])
+        if kw[i + 1] <= 1:
+            init_rev.append(("reversal_wall", int(kw[i + 1]), int(n)))
+    for i in bad_a:
+        _ev("reversal_axis", ka[i + 1], 0, X[ka[i + 1], 0], 0.0)
+        if ka[i + 1] <= 1:
+            init_rev.append(("reversal_axis", int(ka[i + 1]), 0))
     if n_wall_nonmono:
         codes.append("reversal_wall")
         reasons.append(f"網の反転: 壁点の x が単調でない {n_wall_nonmono} 箇所")
@@ -695,7 +771,11 @@ def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
         codes.append("reversal_axis")
         reasons.append(f"網の反転: 軸点の x が単調でない {n_axis_nonmono} 箇所 (前線が軸の近くで交差)")
     # --- 4. 非隣接の同族特性線の交差 (間引き、moc_diagnostics の折れ線交差) ---
-    n_cross_p, n_cross_m = _sampled_crossings(X, R, inside, n, n_cross_sample)
+    n_cross_p, n_cross_m, cross_loc = _sampled_crossings(X, R, inside, n, n_cross_sample)
+    for c in cross_loc:
+        # 交差した線分の端点の j のうち最大を根拠の j にする (両端とも j ≤ 2 のときだけ軸近傍に数える)
+        _ev(f"crossing_{c['family']}", c["k"], c["j_max"], c["x"], c["r"])
+        evidence[-1]["j_min"] = c["j_min"]
     if n_cross_m:
         codes.append("crossing_cminus")
         reasons.append(f"同族特性線の交差: C⁻ 族 (前線) の非隣接の組 {n_cross_m} (間引き {n_cross_sample} 本)")
@@ -708,15 +788,44 @@ def _gate(res: dict, W: _Wall, g, n_cross_sample: int) -> dict:
         codes.append("exit_not_reached" if end["reason"] != "wall_failed" else "wall_not_reached")
         last_w = float(wx[-1]) if len(wx) else float("nan")
         reasons.append(f"出口まで届かない ({end['reason']}: {end.get('detail')}; 最後の壁点 x = {last_w:.4g} / L = {L:.4g})")
+        fk = end.get("front")
+        if end["reason"] == "wall_failed":
+            _ev("exit_not_reached", fk, n, last_w)
+        elif end["reason"] == "carrier_lost":
+            _ev("exit_not_reached", fk, n - 1, X[fk, n - 1] if fk is not None else None)
+        else:                                    # 前線数の上限・段の使い切り: 位置が分からない
+            _ev("exit_not_reached", fk, None)
     # --- 指標 (連続量) ---
     ind = _indicators(X, R, TH, MU, ok, d_p, e_m, n, L)
     mdot = _front_mdot(res, X, R, TH, MM, ok, n, L, g)
     counts = {STATE_NAMES[int(s)]: int(np.sum(S == s)) for s in np.unique(S)}
-    gate = {"pass": not codes, "codes": codes, "reasons": reasons, "stage": "march",
+    # --- 判定 (3 値) ---
+    ev_j = _evidence_j_summary(evidence)
+    undecidable = None
+    if init_rev:
+        verdict = "undecidable"
+        kinds = sorted({t[0] for t in init_rev})
+        undecidable = {"kind": "initial_line",
+                       "detail": f"前線 0→1 に網の反転 {len(init_rev)} 点 ({', '.join(kinds)}) — 初期線と前進の適合式の不整合"
+                                 f" (壁の不受理として数えない)", "points": init_rev[:20]}
+        reasons.append("判定不能 (初期線不整合): " + undecidable["detail"])
+    elif not codes:
+        verdict = "pass"
+    elif ev_j["n"] > 0 and ev_j["n_unlocated"] == 0 and ev_j["j_max"] <= NEAR_AXIS_J:
+        verdict = "undecidable"
+        undecidable = {"kind": "near_axis",
+                       "detail": f"不受理の根拠 {ev_j['n']} 点がすべて軸から j ≤ {NEAR_AXIS_J} (j の最大 {ev_j['j_max']}) — "
+                                 f"前進の軸点の θ_r は 1 次の代用なので壁の不受理として数えない"}
+        reasons.append("判定不能 (軸近傍): " + undecidable["detail"])
+    else:
+        verdict = "reject"
+    gate = {"pass": verdict == "pass", "verdict": verdict, "undecidable": undecidable,
+            "codes": codes, "reasons": reasons, "stage": "march",
             "indicators": {**ind, "n_reversal_cplus_step": n_rev_p, "n_reversal_cminus_step": n_rev_m,
                            "n_wall_nonmonotone": n_wall_nonmono, "n_axis_nonmonotone": n_axis_nonmono,
                            "n_crossing_cplus_sampled": n_cross_p, "n_crossing_cminus_sampled": n_cross_m,
                            "resid_max": rmax, "reversal_onset": onset, **mdot},
+            "evidence": evidence[:200], "evidence_j": ev_j,
             "failures_inside": fail_in, "failure_locations": fail_loc, "counts": counts,
             "last_wall_x": float(wx[-1]) if len(wx) else None, "end": end}
     return gate
@@ -766,28 +875,35 @@ def _indicators(X, R, TH, MU, ok, d_p, e_m, n, L) -> dict:
 
 def _sampled_crossings(X, R, inside, n, n_sample) -> tuple:
     """C⁺ 族 (対角線 k−j 一定) と C⁻ 族 (前線) から n_sample 本ずつ間引き、非隣接 (2 本以上離れた) 組の折れ線交差を数える。
-    折れ線は x ≤ L の収束点だけで作る (欠けた点で切る)。交差判定は moc_diagnostics の `_polylines_cross_aabb`。"""
-    from .moc_diagnostics import _polylines_cross_aabb
+    折れ線は x ≤ L の収束点だけで作る (欠けた点で切る)。交差判定は moc_diagnostics の `_polylines_cross_aabb`。
+    戻り (C⁺ の交差組数, C⁻ の交差組数, 交差の位置のリスト)。位置は交差した組ごとに 1 件: 交差した線分 (全組) の端点の
+    j の最小・最大と、x 最小の交差線分の始点 (k, j, x, r)。組数の判定は位置の探索と独立 (`_polylines_cross_aabb` のまま)。"""
+    from .moc_diagnostics import _polylines_cross_aabb, _segments_cross_matrix
     K1 = X.shape[0]
 
-    def runs(xs, rs, ms):
-        # 連続した有効区間のうち最長のもの (欠けで切れた線は最長の区間だけを見る)
+    def runs(ks, js):
+        # 連続した有効区間のうち最長のもの (欠けで切れた線は最長の区間だけを見る)。戻り (点 (x, r), k, j)
         best, cur = None, []
-        for xv, rv, mv in zip(xs, rs, ms):
-            if mv:
-                cur.append((xv, rv))
+        for kv, jv in zip(ks, js):
+            if inside[kv, jv]:
+                cur.append((kv, jv))
             else:
                 if len(cur) >= 2 and (best is None or len(cur) > len(best)):
                     best = cur
                 cur = []
         if len(cur) >= 2 and (best is None or len(cur) > len(best)):
             best = cur
-        return None if best is None else np.asarray(best)
+        if best is None:
+            return None
+        kb = np.array([t[0] for t in best])
+        jb = np.array([t[1] for t in best])
+        return np.column_stack([X[kb, jb], R[kb, jb]]), kb, jb
 
     # C⁻ 族: 前線 k (j = n → 0 の順)
     fronts = []
+    jrev = np.arange(n, -1, -1)
     for k in np.unique(np.linspace(0, K1 - 1, min(n_sample, K1)).astype(int)):
-        ln = runs(X[k, ::-1], R[k, ::-1], inside[k, ::-1])
+        ln = runs(np.full(n + 1, k), jrev)
         if ln is not None:
             fronts.append((int(k), ln))
     # C⁺ 族: 線 a = k − j (a ∈ [−n, K]); 点 (k, k − a)
@@ -800,13 +916,25 @@ def _sampled_crossings(X, R, inside, n, n_sample) -> tuple:
         k, j = k[m], j[m]
         if len(k) < 2:
             continue
-        ln = runs(X[k, j], R[k, j], inside[k, j])
+        ln = runs(k, j)
         if ln is not None:
             lines_p.append((int(a), ln))
 
-    def count(lines, min_gap):
+    def locate(p, q):
+        # 交差した線分の組 (全組) → 端点の j の最小・最大と、x 最小の交差線分の始点
+        (P, kp, jp), (Q, kq, jq) = p, q
+        M = _segments_cross_matrix(P[:-1], P[1:], Q[:-1], Q[1:])
+        ip, iq = np.nonzero(M)
+        if len(ip) == 0:                          # `_polylines_cross_aabb` と同じ定義なので起きない想定
+            return None
+        jj = np.concatenate([jp[ip], jp[ip + 1], jq[iq], jq[iq + 1]])
+        i0 = int(np.argmin(P[ip, 0]))
+        return {"j_min": int(jj.min()), "j_max": int(jj.max()), "k": int(kp[ip[i0]]), "j": int(jp[ip[i0]]),
+                "x": float(P[ip[i0], 0]), "r": float(P[ip[i0], 1])}
+
+    def count(lines, min_gap, family, locs):
         c = 0
-        boxes = [(l[:, 0].min(), l[:, 0].max(), l[:, 1].min(), l[:, 1].max()) for _, l in lines]
+        boxes = [(l[0][:, 0].min(), l[0][:, 0].max(), l[0][:, 1].min(), l[0][:, 1].max()) for _, l in lines]
         for p in range(len(lines)):
             for q in range(p + 1, len(lines)):
                 if abs(lines[q][0] - lines[p][0]) < min_gap:
@@ -814,11 +942,18 @@ def _sampled_crossings(X, R, inside, n, n_sample) -> tuple:
                 b1, b2 = boxes[p], boxes[q]
                 if b1[1] < b2[0] or b2[1] < b1[0] or b1[3] < b2[2] or b2[3] < b1[2]:
                     continue
-                if _polylines_cross_aabb(lines[p][1], lines[q][1]):
+                if _polylines_cross_aabb(lines[p][1][0], lines[q][1][0]):
                     c += 1
+                    loc = locate(lines[p][1], lines[q][1])
+                    if loc is None:
+                        loc = {"j_min": None, "j_max": None, "k": None, "j": None, "x": None, "r": None}
+                    locs.append({"family": family, "lines": (lines[p][0], lines[q][0]), **loc})
         return c
 
-    return count(lines_p, 2), count(fronts, 2)
+    locs: list = []
+    n_p = count(lines_p, 2, "cplus", locs)
+    n_m = count(fronts, 2, "cminus", locs)
+    return n_p, n_m, locs
 
 
 def _front_mdot(res, X, R, TH, MM, ok, n, L, g) -> dict:
@@ -857,15 +992,20 @@ def gate_record(res) -> dict:
     ind = gt.get("indicators", {})
     at = ind.get("cminus_sep_ratio_at") or {}
     atp = ind.get("cplus_sep_ratio_at") or {}
-    return {"gate_pass": bool(gt["pass"]), "codes": ";".join(gt["codes"]), "reasons": " / ".join(gt["reasons"]),
+    ons = ind.get("reversal_onset") or {}
+    on0 = min(ons.values(), key=lambda v: v["x"]) if ons else {}
+    evj = gt.get("evidence_j") or {}
+    return {"gate_pass": bool(gt["pass"]), "verdict": gt.get("verdict"),
+            "undecidable_kind": (gt.get("undecidable") or {}).get("kind"),
+            "codes": ";".join(gt["codes"]), "reasons": " / ".join(gt["reasons"]),
             "end_reason": (res.get("end") or {}).get("reason"), "n_fronts": res.get("n_fronts"),
             "last_wall_x": gt.get("last_wall_x"),
             "cminus_sep_ratio_min": ind.get("cminus_sep_ratio_min"), "cminus_sep_x": at.get("x"),
-            "cminus_sep_r": at.get("r"), "cminus_sep_ratio_p01": ind.get("cminus_sep_ratio_p01"),
-            "cplus_sep_ratio_min": ind.get("cplus_sep_ratio_min"), "cplus_sep_x": atp.get("x"),
-            "reversal_onset_x": min((v["x"] for v in (ind.get("reversal_onset") or {}).values()), default=None),
-            "reversal_onset_r": (min((ind.get("reversal_onset") or {}).values(), key=lambda v: v["x"])["r"]
-                                 if ind.get("reversal_onset") else None),
+            "cminus_sep_r": at.get("r"), "cminus_sep_j": at.get("j"), "cminus_sep_ratio_p01": ind.get("cminus_sep_ratio_p01"),
+            "cplus_sep_ratio_min": ind.get("cplus_sep_ratio_min"), "cplus_sep_x": atp.get("x"), "cplus_sep_j": atp.get("j"),
+            "reversal_onset_x": on0.get("x"), "reversal_onset_r": on0.get("r"), "reversal_onset_j": on0.get("j"),
+            "n_evidence": evj.get("n"), "evidence_j_min": evj.get("j_min"), "evidence_j_max": evj.get("j_max"),
+            "n_evidence_j_le_near_axis": evj.get("n_j_le_near_axis"), "n_evidence_unlocated": evj.get("n_unlocated"),
             "n_reversal_cplus_step": ind.get("n_reversal_cplus_step"),
             "n_reversal_cminus_step": ind.get("n_reversal_cminus_step"),
             "n_crossing_cminus_sampled": ind.get("n_crossing_cminus_sampled"),

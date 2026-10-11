@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """§6 V0: 前進 MOC ゲートの A/B (CFD なし、事前登録の分類) — plan tooling-nozzle-bell-two-mode §6 V0・§5.1 #3・#3b。
 
+**V0-a の記録用 (2026-10-11、判定不能 = 標本の退化)**。出力は `v0a_*` に改名して残した (`v0a_gate.csv`・
+`v0a_d_feasibility.csv`・`v0a_summary.json`・`v0a_run_v0.log`、図 `v0a_gate_map.png`・`v0a_nets.png`)。§5.1 #3c の
+ガードの後は `hall_n641` の設定が `hall_initial_line` で拒否されるので、このスクリプトはそのままでは再実行できない
+(再現は commit `c636e716` で)。回し直し (V0-b) は `run_v0b.py`。
+
 対象:
 - (D) の格子点: θ_max {25, 32.5, 40}° × θ_e {5, 10, 15}° × x_m/L {0.1, 0.2, 0.3} を各 L_k
   (等面積比 15° 円錐の長さ (√ε − 1)/tan15° = 22.6575 r_t の 60・70・80・90・100 %、ε 50)。成立条件 (§5.1 #3) を満たす点だけゲートにかける。
