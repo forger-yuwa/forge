@@ -228,8 +228,8 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0629_cg_sweep_cap1` (2026-10-11 投入、**AWS A** 同上) | 同上、上限 (`lineDtDirectionalCap`) だけ 1 | 同上 (RUN_RC 0、非有限 0)。島の u5 0.001〜0.002。島の dt は B0 の 1/50〜1 (高さで違う、§4.43 の表) | active |
 | `run_0630_cg_sweep_cap50b` (2026-10-11 投入、**AWS A** 同上) | M-d の再試験 ([plan §4.44](../../plans/active/tooling-nozzle-core-grid.md)): `run_0628` と同じ条件 (上限 50) で 1 外反復・41 sweep をもう 1 回 (台本 `cg_sweep.sh`) | 1 外反復を完走 (RUN_RC 0、非有限 0)。判定 (§4.45、`sweep_repro.json`): **R-A** — 同じ腕でも rhs_s0 の丸めの差 (最大 3.5e-9) が再現、u5 も再現 (島 ≤ 9.2e-4) → 5 回の sweep の大きな解き残しは無い | active |
 | `run_0631_cg_sweep_cap1b` (2026-10-11 投入、**AWS A** 同上) | 同上、`run_0629` と同じ条件 (上限 1) | 同上 (RUN_RC 0、非有限 0)。同じ腕の差 最大 3.6e-9、島の u5 ≤ 1.6e-3 | active |
-| `run_0632_cg_resp_cap50` (2026-10-11 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-r ([plan §4.46](../../plans/active/tooling-nozzle-core-grid.md)): `run_0619` res_60000 から B0 (上限 50) のまま 2 外反復・nStepInner 42・`FORGE_FREEZE_TURB=1`、最初の外反復を書き出し、R(Q₀)・R(Q₁) で残差の応答を測る (台本 `cg_resp.sh`) | 走行中。解析 `cg_resp_an.py`、判定 `cg_resp_judge.py` | active |
-| `run_0633_cg_resp_cap1` (2026-10-11 投入、**AWS A** 同上) | 同上、上限だけ 1 | 走行中 | active |
+| `run_0632_cg_resp_cap50` (2026-10-11 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-r ([plan §4.46](../../plans/active/tooling-nozzle-core-grid.md)): `run_0619` res_60000 から B0 (上限 50) のまま 2 外反復・nStepInner 42・`FORGE_FREEZE_TURB=1`、最初の外反復を書き出し、R(Q₀)・R(Q₁) で残差の応答を測る (台本 `cg_resp.sh`) | 2 外反復を完走 (RUN_RC 0)。判定 (§4.47、`resp_judge.json`): 判定器は判定不能 (資格 q5)、値は島の m ρ 0.86・ρE 0.95 (左辺の予測する 1 step の減少 4〜10 % を応答のずれが打ち消す) | active |
+| `run_0633_cg_resp_cap1` (2026-10-11 投入、**AWS A** 同上) | 同上、上限だけ 1 | 同上。島の m 0.70、不足は上限 50 の 0.27〜0.29 倍 | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
