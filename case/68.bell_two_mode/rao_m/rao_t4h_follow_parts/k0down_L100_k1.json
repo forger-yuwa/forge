@@ -1,0 +1,13 @@
+{
+ "name": "k0down_L100_k1",
+ "role": "k0down",
+ "wall_src": "t6",
+ "wall": "L100",
+ "k0_x": 0.45,
+ "ks": [
+  1
+ ],
+ "status": "error",
+ "why": "ValueError: resampled_front_line: 前線 90 の r が軸→壁で狭義単調増加でない",
+ "traceback": "Traceback (most recent call last):\n  File \"/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/run_rao_t4h_follow.py\", line 159, in run\n    out = job(spec)\n          ^^^^^^^^^\n  File \"/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/run_rao_t4h_follow.py\", line 106, in job\n    line, lfi = line_for(spec[\"k0_x\"])\n                ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/run_rao_t4h_follow.py\", line 89, in line_for\n    ln = ra.resampled_front_line(net, k, N_LINE)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/sano/work/forge-thruster/design/forge_design/geometry/rao_axisym.py\", line 1907, in resampled_front_line\n    raise ValueError(f\"resampled_front_line: 前線 {k0} の r が軸→壁で狭義単調増加でない\")\nValueError: resampled_front_line: 前線 90 の r が軸→壁で狭義単調増加でない\n"
+}

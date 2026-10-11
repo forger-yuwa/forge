@@ -1,0 +1,320 @@
+{
+ "name": "ref_M_L100_n161",
+ "role": "ref",
+ "wall_src": "gen",
+ "gen": "gen_L100_n161",
+ "which": "M",
+ "k0_x": 0.3,
+ "ks": [
+  1
+ ],
+ "status": "ok",
+ "info": {
+  "gen_tag": "gen_L100_n161",
+  "which": "M",
+  "L_wall": 22.657533530078148,
+  "eps_wall": 50.00000000000019,
+  "theta_end_deg": 5.255208183666658,
+  "x_B": 0.49629404620400425,
+  "theta_B_deg": 29.755117460388487,
+  "B_replaced": [
+   1.3553785871422974e-10,
+   -1.351900813517659e-10
+  ],
+  "last_point_minus_E": [
+   2.5306462667629148e-05,
+   8.538635888122315e-06
+  ],
+  "n_gen": 161,
+  "m_gen": 161,
+  "F_cs_gen": 8.632687513138503,
+  "F_wall_gen": 8.633185317634885,
+  "lam_scale": null,
+  "fit_info": {
+   "fit": "pspline",
+   "deg": 5,
+   "n_int": 48,
+   "n_points": 162,
+   "lam": 1.7782794100389228e-08,
+   "lam_how": "gcv",
+   "edf": 41.997451820413744,
+   "gcv": 6.624597295654281e-11,
+   "resid_max": 1.7728359314350683e-05,
+   "resid_rms": 6.029137591642425e-06,
+   "kappa_B_plus": 0.07740103526898497,
+   "kappa_min": -0.03950358301760009,
+   "kappa_max": 0.07740103526898497,
+   "n_dkappa_sign_changes": 2,
+   "theta_max_BE_deg": 30.712390001928526,
+   "end_r_minus_point": 2.220446049250313e-14
+  }
+ },
+ "front_check": {
+  "front_same_as_line": true,
+  "front_wall": {
+   "k0": 64,
+   "x_wall": 0.30056304496789843,
+   "x_axis": 4.268982765291186,
+   "all_ok_to_axis": true,
+   "front_sha256_16": "a3cd89ad360bf1b8",
+   "thr_axis": 0.24055966697169773
+  },
+  "front_line": {
+   "k0": 64,
+   "x_wall": 0.30056304496789843,
+   "x_axis": 4.268982765291186,
+   "all_ok_to_axis": true,
+   "front_sha256_16": "a3cd89ad360bf1b8",
+   "thr_axis": 0.24055966697169773,
+   "x_B_line_wall": 0.4963130959089388,
+   "line_wall": "L100",
+   "N": 1281
+  },
+  "x_B_wall": 0.49629404620400425,
+  "line_wall_upstream_of_x_B": true,
+  "check_line_codes": [],
+  "check_line_info": {
+   "n": 1282,
+   "M_min": 1.6941113719347483,
+   "wall_dr": 0.0,
+   "wall_dtheta": 0.0
+  }
+ },
+ "time_s": 111.91265225410461,
+ "base": {
+  "F": 8.633420066042955,
+  "F_trap": 8.633425887036363,
+  "T_line": 5.8560576689302595,
+  "T_wall": 2.777362397112695,
+  "T_wall_trap": 2.777368218106104,
+  "mdot_line": 3.1093688108278466,
+  "gate": {
+   "gate_pass": false,
+   "verdict": "reject",
+   "undecidable_kind": null,
+   "codes": "unit_iter_maxiter;reversal_cplus_step;crossing_cminus",
+   "reasons": "反復の失敗 (上限到達) 1 点 (x ≤ L) / 網の反転: C⁺ 沿いに新点が担体の手前 107 点 (C⁻ 族の前線どうしの交差) / 同族特性線の交差: C⁻ 族 (前線) の非隣接の組 1 (間引き 40 本)",
+   "end_reason": "exit_reached",
+   "n_fronts": 1228,
+   "last_wall_x": 22.648304254135216,
+   "cminus_sep_ratio_min": -2.5224347460978094,
+   "cminus_sep_x": 17.429413630848387,
+   "cminus_sep_r": 0.07765912832098289,
+   "cminus_sep_j": 3,
+   "cminus_sep_ratio_p01": 1.0049501467841295,
+   "cplus_sep_ratio_min": 0.35334340718608315,
+   "cplus_sep_x": 22.649936761096917,
+   "cplus_sep_j": 437,
+   "reversal_onset_x": 15.826968699002089,
+   "reversal_onset_r": 0.33935806637630295,
+   "reversal_onset_j": 12,
+   "n_evidence": 109,
+   "evidence_j_min": 2,
+   "evidence_j_max": 350,
+   "n_evidence_j_le_near_axis": 1,
+   "n_evidence_unlocated": 0,
+   "n_reversal_cplus_step": 107,
+   "n_reversal_cminus_step": 0,
+   "n_crossing_cminus_sampled": 1,
+   "n_crossing_cplus_sampled": 0,
+   "resid_max": 5.409006575973763e-13,
+   "mdot_err_max": 1.1634571327467924e-05,
+   "time_s": 10.974295377731323
+  },
+  "dod": {
+   "clean": true,
+   "K_front": 1230,
+   "n_bad_in_dod": 0,
+   "n_bad_total": 108,
+   "n_missing_in_dod": 0,
+   "bad_x_min": 15.826968699002089,
+   "bad_r_max": 0.8444143721573961
+  },
+  "dod_clean": true,
+  "n_nodes_le_L": 1229,
+  "L_eval": 24.923286883085964
+ },
+ "families": {
+  "sin_c1_k1": {
+   "family": "sin_c1",
+   "k": 1,
+   "eps": [
+    -0.004,
+    -0.002,
+    -0.001,
+    0.0,
+    0.001,
+    0.002,
+    0.004
+   ],
+   "F": [
+    8.633418069331363,
+    8.633419562200602,
+    8.63341993778462,
+    8.633420066042955,
+    8.63341994690651,
+    8.633419580306082,
+    8.633418104435885
+   ],
+   "F_trap": [
+    8.633423886936209,
+    8.63342538149077,
+    8.633425757924169,
+    8.633425887036363,
+    8.633425768758253,
+    8.633425403020624,
+    8.633423928889417
+   ],
+   "runs": [
+    {
+     "eps": -0.004,
+     "ok": true,
+     "why": null,
+     "F": 8.633418069331363,
+     "F_trap": 8.633423886936209,
+     "T_wall": 2.7773604004011037,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    },
+    {
+     "eps": -0.002,
+     "ok": true,
+     "why": null,
+     "F": 8.633419562200602,
+     "F_trap": 8.63342538149077,
+     "T_wall": 2.777361893270343,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    },
+    {
+     "eps": -0.001,
+     "ok": true,
+     "why": null,
+     "F": 8.63341993778462,
+     "F_trap": 8.633425757924169,
+     "T_wall": 2.7773622688543593,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    },
+    {
+     "eps": 0.0,
+     "ok": true,
+     "why": null,
+     "F": 8.633420066042955,
+     "F_trap": 8.633425887036363,
+     "T_wall": 2.777362397112695,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    },
+    {
+     "eps": 0.001,
+     "ok": true,
+     "why": null,
+     "F": 8.63341994690651,
+     "F_trap": 8.633425768758253,
+     "T_wall": 2.7773622779762515,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    },
+    {
+     "eps": 0.002,
+     "ok": true,
+     "why": null,
+     "F": 8.633419580306082,
+     "F_trap": 8.633425403020624,
+     "T_wall": 2.777361911375822,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    },
+    {
+     "eps": 0.004,
+     "ok": true,
+     "why": null,
+     "F": 8.633418104435885,
+     "F_trap": 8.633423928889417,
+     "T_wall": 2.777360435505625,
+     "dod_clean": true,
+     "dod_n_bad": 0,
+     "end_reason": "exit_reached",
+     "n_nodes_le_L": 1229
+    }
+   ],
+   "fit": {
+    "ok": true,
+    "c0": 8.633420066043072,
+    "c1": 4.572471302098335e-06,
+    "c2": -0.12369746347929726,
+    "c3": -0.011525380000283952,
+    "c1_eps0": 1.828988520839334e-08,
+    "c2_eps0sq": -1.979159415668756e-06,
+    "c3_eps0cu": -7.376243200181729e-10,
+    "ratio_c1_c2": 0.00924123901470221,
+    "c2_sign": -1,
+    "eps_star": 1.848247802940442e-05,
+    "hung_thrust": 4.225530019055735e-11,
+    "hung_over_F1D": 4.8335822485457165e-12,
+    "fit_rms": 8.479861575718448e-14,
+    "fit_max": 1.2434497875801753e-13,
+    "central": {
+     "0.001": {
+      "c1": 4.560945399134653e-06,
+      "c2": -0.12369739010864578
+     },
+     "0.002": {
+      "c1": 4.526369945523356e-06,
+      "c2": -0.12369740343132207
+     },
+     "0.004": {
+      "c1": 4.388065244498307e-06,
+      "c2": -0.12369745827633949
+     }
+    },
+    "F0": 8.633420066042955
+   },
+   "fit_trap": {
+    "ok": true,
+    "c0": 8.633425887036482,
+    "c1": 5.4285675659267e-06,
+    "c2": -0.12369522727301797,
+    "c3": -0.011526020744350997,
+    "c1_eps0": 2.17142702637068e-08,
+    "c2_eps0sq": -1.9791236363682874e-06,
+    "c3_eps0cu": -7.376653276384638e-10,
+    "ratio_c1_c2": 0.01097165930651645,
+    "c2_sign": -1,
+    "eps_star": 2.19433186130329e-05,
+    "hung_thrust": 5.956039385575302e-11,
+    "hung_over_F1D": 6.813111282117764e-12,
+    "fit_rms": 8.565282493038633e-14,
+    "fit_max": 1.2434497875801753e-13,
+    "central": {
+     "0.001": {
+      "c1": 5.41704192613679e-06,
+      "c2": -0.12369515189902813
+     },
+     "0.002": {
+      "c1": 5.382463363901024e-06,
+      "c2": -0.12369516655397206
+     },
+     "0.004": {
+      "c1": 5.244151113359408e-06,
+      "c2": -0.12369522184307868
+     }
+    },
+    "F0": 8.633425887036363
+   }
+  }
+ }
+}
