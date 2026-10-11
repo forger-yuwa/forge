@@ -1,0 +1,62 @@
+{
+ "run_0595_rq_c1": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0596_rq_c2": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0597_rq_c3": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0598_rq_e1": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0599_rq_e2": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0620_rq_e3": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0621_rq_f1": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.5e+06  drift=0.0%/tail  fluct=0.0%          STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0622_rq_f2": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.5e+06  drift=0.0%/tail  fluct=0.0%          STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0623_rq_f3": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.5e+06  drift=0.0%/tail  fluct=0.0%          STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0706_rp_g9a": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0707_rp_g9b": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ],
+ "run_0708_rp_g9c": [
+  "machmax  : tail mean=6.04  drift=0.0%/tail  fluct=0.0%             STEADY",
+  "pmax     : tail mean=5.499e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+  "OVERALL: NOT ALL STEADY (see above)"
+ ]
+}

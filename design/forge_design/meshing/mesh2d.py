@@ -48,11 +48,61 @@ class Mesh2DParams:
     # 間隔 (/ r_w) がこの値 c に達したら軸まで一様にする。nj は全断面で同じ (Σ_j min(fr_i q^j, c) = 1 を q_i について解く)。
     # axis_gap_frac (nj が導出値) とは併用しない。
     axis_cap_frac: float | None = None
+    # --- 表で与える第一セル厚と x 方向の密度 (2026-10-08, plan tooling-nozzle-isothermal-wall-chain §5.1 #13) ---
+    # 冷却壁は y1+ が断熱の 8〜9 倍になり、必要な第一セル厚が x で 1 桁以上変わる (入口直管・スロートで最も薄く、試験部で厚い)。
+    # throat/blend の smoothstep 1 本ではこの形に合わず、AR ≤ 5000 と y1+ ≤ 1 を同時に満たせない。
+    # wall_first_frac_table: [[x, 第一セル厚/局所半径], ...] (x 昇順、r* 単位)。log 線形で補間。指定すると wall_first_frac・
+    #   wall_first_frac_throat・前後ブレンドより優先する (併用は例外)。表が x の範囲を覆わなければ例外 (端値で黙って外挿しない)。
+    # x_density_table: [[x, 相対密度 > 0], ...]。線形補間した密度をスロート細分・局所細分の密度に掛ける。範囲の扱いは同上。
+    # どちらも None なら従来どおり (既存の格子はビット同一)。
+    wall_first_frac_table: tuple | list | None = None
+    x_density_table: tuple | list | None = None
+    # --- 壁法線に沿った近壁層 (2026-10-08, plan tooling-nozzle-isothermal-wall-chain §5.1 #15) ---
+    # None なら従来どおり (j 方向の線は半径方向)。[d_n, d_b] (局所半径比) を指定すると、壁からの距離 d (= r_w − 半径方向の配置の r) が
+    # d ≤ d_n の節点を壁の法線上 (壁点 + d·内向き法線) に置き、d_n〜d_b で半径方向の配置へ smoothstep で戻す (d ≥ d_b と軸は従来の位置)。
+    # 傾斜壁 (縮流部で最大 40°) では半径方向の線が壁と直交せず、AR の大きい近壁セルにスキューが入る (AGENTS.md の AR ≤ 5000 の例外の外)。
+    # 壁の第一セル厚は法線距離 = d になる (半径方向の配置では法線距離 = d·cos θ_w)。
+    wall_normal_layer: tuple | list | None = None
+
+
+def _check_table(name: str, tbl, x0: float, x1: float, positive: bool = True) -> np.ndarray:
+    """[[x, v], ...] を (n, 2) 配列にして検査する: x は狭義単調増加・有限、v は有限 (positive なら > 0)、[x0, x1] を覆う。"""
+    t = np.asarray(tbl, dtype=float)
+    if t.ndim != 2 or t.shape[1] != 2 or len(t) < 2:
+        raise ValueError(f"{name}: [[x, 値], ...] の 2 点以上の表が要る (shape {t.shape})")
+    if not np.all(np.isfinite(t)):
+        raise ValueError(f"{name}: 非有限値がある")
+    if not np.all(np.diff(t[:, 0]) > 0):
+        raise ValueError(f"{name}: x は狭義単調増加にする")
+    if positive and not np.all(t[:, 1] > 0):
+        raise ValueError(f"{name}: 値は正にする")
+    tol = 1e-9 * max(1.0, abs(x0), abs(x1))
+    if t[0, 0] > x0 + tol or t[-1, 0] < x1 - tol:
+        raise ValueError(f"{name}: 表の x 範囲 [{t[0, 0]}, {t[-1, 0]}] が格子の範囲 [{x0}, {x1}] を覆わない (端値で外挿しない)")
+    return t
+
+
+def _first_frac_profile(xs: np.ndarray, prm: "Mesh2DParams") -> np.ndarray:
+    """各 station の第一セル厚 / 局所半径。表 → throat/blend → 一様、の順。"""
+    if prm.wall_first_frac_table is not None:
+        if prm.wall_first_frac_throat is not None or prm.wall_first_up_x0 is not None or prm.wall_first_up_x1 is not None:
+            raise ValueError("wall_first_frac_table と wall_first_frac_throat・wall_first_up_* は同時に指定できない")
+        t = _check_table("wall_first_frac_table", prm.wall_first_frac_table, float(xs[0]), float(xs[-1]))
+        return np.exp(np.interp(xs, t[:, 0], np.log(t[:, 1])))
+    if prm.wall_first_frac_throat is None:
+        return np.full(len(xs), float(prm.wall_first_frac))
+    t = np.clip((xs - prm.wall_first_blend_x0) / max(prm.wall_first_blend_x1 - prm.wall_first_blend_x0, 1e-9), 0.0, 1.0)
+    t = t * t * (3.0 - 2.0 * t)
+    if prm.wall_first_up_x0 is not None and prm.wall_first_up_x1 is not None:
+        tu = np.clip((prm.wall_first_up_x1 - xs) / max(prm.wall_first_up_x1 - prm.wall_first_up_x0, 1e-9), 0.0, 1.0)
+        tu = tu * tu * (3.0 - 2.0 * tu)
+        t = np.maximum(t, tu)
+    return prm.wall_first_frac_throat + (prm.wall_first_frac - prm.wall_first_frac_throat) * t
 
 
 def _x_stations(x0: float, x1: float, ni: int, refine: float, width: float,
                 local_center: float = 0.0, local_refine: float = 1.0,
-                local_width: float = 0.75) -> np.ndarray:
+                local_width: float = 0.75, density_table=None) -> np.ndarray:
     """間隔 h(x) ∝ 1/(密度) の逆積分で station を置く。
 
     密度 = スロート細分 (中心 x=0) × 局所細分 (中心 `local_center`)。後者は
@@ -64,6 +114,9 @@ def _x_stations(x0: float, x1: float, ni: int, refine: float, width: float,
     if local_refine > 1.0:
         dens = dens * (1.0 + (local_refine - 1.0)
                        * np.exp(-(((xs - local_center) / local_width) ** 2)))
+    if density_table is not None:
+        t = _check_table("x_density_table", density_table, x0, x1)
+        dens = dens * np.interp(xs, t[:, 0], t[:, 1])
     cum = np.concatenate([[0.0], np.cumsum(0.5 * (dens[1:] + dens[:-1]) * np.diff(xs))])
     cum /= cum[-1]
     return np.interp(np.linspace(0.0, 1.0, ni), cum, xs)
@@ -143,49 +196,55 @@ def _radial_fracs_capfixed(nj: int, first_frac: float, cap: float) -> tuple[np.n
 def generate_axisym_mesh(wall, prm: Mesh2DParams):
     """wall: NozzleWall。戻り値 (coords (N,3) [m], quads (M,4), 境界辺 dict)。"""
     xs = _x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width,
-                     prm.local_center, prm.local_refine, prm.local_width)
+                     prm.local_center, prm.local_refine, prm.local_width, prm.x_density_table)
     rw = wall.r(xs)
     ni, nj = prm.ni, prm.nj
     X = np.repeat(xs[:, None], nj, axis=1)
     if prm.axis_cap_frac is not None:
         if prm.axis_gap_frac is not None:
             raise ValueError("axis_cap_frac と axis_gap_frac は同時に指定できない")
-        if prm.wall_first_frac_throat is None:
-            fr = np.full(ni, float(prm.wall_first_frac))
-        else:
-            t = np.clip((xs - prm.wall_first_blend_x0) / max(prm.wall_first_blend_x1 - prm.wall_first_blend_x0, 1e-9), 0.0, 1.0)
-            t = t * t * (3.0 - 2.0 * t)
-            if prm.wall_first_up_x0 is not None and prm.wall_first_up_x1 is not None:
-                tu = np.clip((prm.wall_first_up_x1 - xs) / max(prm.wall_first_up_x1 - prm.wall_first_up_x0, 1e-9), 0.0, 1.0)
-                tu = tu * tu * (3.0 - 2.0 * tu)
-                t = np.maximum(t, tu)
-            fr = prm.wall_first_frac_throat + (prm.wall_first_frac - prm.wall_first_frac_throat) * t
+        fr = _first_frac_profile(xs, prm)
         R = np.empty((ni, nj))
         for i in range(ni):
             si, _ = _radial_fracs_capfixed(nj, float(fr[i]), float(prm.axis_cap_frac))
             R[i, :] = rw[i] * si
     elif prm.axis_gap_frac is not None:
-        if prm.wall_first_frac_throat is not None:
-            raise ValueError("axis_gap_frac と wall_first_frac_throat の併用は未対応")
+        if prm.wall_first_frac_throat is not None or prm.wall_first_frac_table is not None:
+            raise ValueError("axis_gap_frac と wall_first_frac_throat・wall_first_frac_table の併用は未対応")
         s = _radial_fracs_capped(nj, prm.wall_first_frac, prm.axis_gap_frac)
         nj = len(s)
         X = np.repeat(xs[:, None], nj, axis=1)
         R = rw[:, None] * s[None, :]
-    elif prm.wall_first_frac_throat is None:
+    elif prm.wall_first_frac_throat is None and prm.wall_first_frac_table is None:
         s = _radial_fracs(nj, prm.wall_first_frac)
         R = rw[:, None] * s[None, :]
     else:
         # station ごとに第一セル比を変える (構造は同じ nj、壁側クラスタリングだけ x で滑らかに変化)
-        t = np.clip((xs - prm.wall_first_blend_x0) / max(prm.wall_first_blend_x1 - prm.wall_first_blend_x0, 1e-9), 0.0, 1.0)
-        t = t * t * (3.0 - 2.0 * t)
-        if prm.wall_first_up_x0 is not None and prm.wall_first_up_x1 is not None:
-            tu = np.clip((prm.wall_first_up_x1 - xs) / max(prm.wall_first_up_x1 - prm.wall_first_up_x0, 1e-9), 0.0, 1.0)
-            tu = tu * tu * (3.0 - 2.0 * tu)
-            t = np.maximum(t, tu)
-        fr = prm.wall_first_frac_throat + (prm.wall_first_frac - prm.wall_first_frac_throat) * t
+        fr = _first_frac_profile(xs, prm)
         R = np.empty((ni, nj))
         for i in range(ni):
             R[i, :] = rw[i] * _radial_fracs(nj, float(fr[i]))
+    if prm.wall_normal_layer is not None:
+        dn, db = (float(v) for v in prm.wall_normal_layer)
+        if not (0.0 < dn < db < 1.0):
+            raise ValueError(f"wall_normal_layer: 0 < d_n < d_b < 1 にする ({dn}, {db})")
+        try:
+            drw = np.asarray(wall.r(xs, 1), dtype=float)       # 壁の解析的な傾き (物理壁は導関数を返す)
+        except TypeError:
+            drw = None
+        if drw is None or drw.shape != xs.shape:
+            drw = np.gradient(rw, xs)
+        nrm = np.sqrt(1.0 + drw ** 2)
+        d = rw[:, None] - R                                  # 壁からの (半径方向の配置での) 距離 [r*]
+        t = np.clip((d / rw[:, None] - dn) / (db - dn), 0.0, 1.0)
+        beta = 1.0 - t * t * (3.0 - 2.0 * t)                 # 1 (d ≤ d_n) → 0 (d ≥ d_b)
+        Xn = xs[:, None] + d * (drw / nrm)[:, None]          # 壁点 + d·内向き法線 (r′, −1)/√(1 + r′²)
+        Rn = rw[:, None] - d / nrm[:, None]
+        X = X + beta * (Xn - X)
+        R = R + beta * (Rn - R)
+        # 格子の線が交差していないこと (各 j で x が単調、各 i で r が単調)
+        if not (np.all(np.diff(X, axis=0) > 0) and np.all(np.diff(R, axis=1) > 0)):
+            raise ValueError("wall_normal_layer: 格子の線が交差する (d_n・d_b を小さくする)")
     coords = np.zeros((ni * nj, 3))
     coords[:, 0] = X.ravel() * prm.scale
     coords[:, 1] = R.ravel() * prm.scale
@@ -208,7 +267,7 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
     return coords, quads, bedges
 
 
-def write_msh41_2d(path, coords, quads, bedges) -> None:
+def write_msh41_2d(path, coords, quads, bedges, digits: int = 10) -> None:
     """2D 平面メッシュを gmsh msh4.1 テキストで書く (決定的)。"""
     curve_order = ["inlet", "outlet", "wall", "axis"]
     n_nodes = coords.shape[0]
@@ -234,7 +293,8 @@ def write_msh41_2d(path, coords, quads, bedges) -> None:
     ap(f"1 {n_nodes} 1 {n_nodes}")
     ap(f"2 1 0 {n_nodes}")
     ap("\n".join(str(i + 1) for i in range(n_nodes)))
-    ap("\n".join(f"{c[0]:.10g} {c[1]:.10g} {c[2]:.10g}" for c in coords))
+    # digits: 座標の有効桁数 (既定 10 = 従来どおり)。冷却壁の格子 (第一層厚 / 半径 3e-7) は 10 桁だと第一層厚が 0.2 % 動くので 17 にする
+    ap("\n".join(f"{c[0]:.{digits}g} {c[1]:.{digits}g} {c[2]:.{digits}g}" for c in coords))
     ap("$EndNodes")
     ap("$Elements")
     ap(f"{1 + len(curve_order)} {n_elems} 1 {n_elems}")

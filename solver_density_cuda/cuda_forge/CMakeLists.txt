@@ -76,6 +76,7 @@ add_library(cuda_forge STATIC
     ransSource_d.cuh
     axisymmetricSource_d.cu
     axisymmetricSource_d.cuh
+    axisSymmetryPin_d.cuh
     ducrosSensor_d.cu
     ducrosSensor_d.cuh
     turbulent_viscosity_d.cu
@@ -85,6 +86,32 @@ add_library(cuda_forge STATIC
     #convection/AUSM_d.cuh
     viscousFlux_d.cu
     viscousFlux_d.cuh
+    # V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2c、既定 off。ホスト側の段取りと h5 の書き出し)
+    geomAbDiag.cpp
+    geomAbDiag.hpp
+    # 段 ② の診断 FORGE_DIAG_GEOM_STAGE2_DUMP (同 plan §6.3、既定 off。読み込み時の量と接続を書いて終了する)
+    geomStage2Dump.cpp
+    geomStage2Dump.hpp
+    # 閉性の照合の診断 FORGE_DIAG_HOOP_CLOSURE (plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 の 3・5、既定 off。書いて計算は続ける)
+    hoopClosureDiag.cpp
+    hoopClosureDiag.hpp
+    # 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録、既定 off。定常の陰解法の commit で丸めで消えた更新を数える)
+    commitLossDiag.cu
+    commitLossDiag.hpp
+    # 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30、既定 off。定常の陰解法の 1 step の更新を段ごとに節点ごとの double で書く)
+    stageDumpDiag.cpp
+    stageDumpDiag.hpp
+    # 診断 FORGE_DIAG_QACC_ADOPT (同 plan §5.1 #18・§6.34、既定 off。qAccumulatorFP64 の reconcile が採用する節点を量ごとに書く)
+    qaccAdoptDiag.cpp
+    qaccAdoptDiag.hpp
+    # 診断 FORGE_DIAG_QUANTIZE_STATE (同 plan §5.1 #19・§6.36、既定 off。FP64 のビルドで step の末尾に保存量を float32 に丸める)
+    quantizeStateDiag.cpp
+    quantizeStateDiag.hpp
+    quantizeStateDiag_d.cu
+    quantizeStateDiag_d.cuh
+    # node の壁関数・WMLES の代表内点 (境界面ごと、読み込み後に double の値の位置から 1 回作る。同 plan §4.2 3.)
+    wallRepPoint_d.cu
+    wallRepPoint_d.cuh
 
     implicitCorrection_d.cu
     implicitCorrection_d.cuh

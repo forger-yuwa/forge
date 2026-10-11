@@ -137,7 +137,11 @@ __global__ void setCFL_cell_d
  int lineDtDirectional,
  // 診断 (lineDtWallRelief==1): wall 種境界半割面の λ も on-line セルの max から除外 (壁端点律速の切り分け)。
  const unsigned char* plane_wall,
- int lineDtWallRelief
+ int lineDtWallRelief,
+ // 方向別 dt の伸びの上限 R (lineDtDirectionalCap、0 で上限なし = 従来どおりビット同一):
+ // Δτ = min(Δτ_方向別, R·Δτ_全面) — line 面も含めた max (= point の dt) の 1/R を cfl の下限にする。
+ // plans/active/time_integration-implicit-thermal-jacobian.md §4.4。
+ flow_float lineDtCap
 )
 {
     geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
@@ -153,6 +157,8 @@ __global__ void setCFL_cell_d
 
         const bool onLine = (line_prev != nullptr && (line_prev[ic] >= 0 || line_next[ic] >= 0));
         const bool lineRelief = (lineReliefTheta > (flow_float)0.0 && onLine);
+        const bool capOn = (lineDtCap > (flow_float)0.0 && lineDtDirectional != 0 && onLine);
+        flow_float cfl_all = (flow_float)0.0;   // line 面も含めた max (capOn のときだけ使う)
 
         for (geom_int ilp=index_st; ilp<index_en; ilp++) {
             geom_int ip = cell_planes[ilp];
@@ -162,7 +168,10 @@ __global__ void setCFL_cell_d
                 const geom_int ic0 = plane_cells[2*ip+0];
                 const geom_int ic1 = plane_cells[2*ip+1];
                 const geom_int other = (ic0 == ic) ? ic1 : ic0;
-                if (other == line_prev[ic] || other == line_next[ic]) continue;  // line 面は除外
+                if (other == line_prev[ic] || other == line_next[ic]) {     // line 面は除外
+                    if (capOn) cfl_all = max(cfl_all, cfl_pln[ip]);        // 上限 R 用に全面の max だけ取る
+                    continue;
+                }
             }
             flow_float cfl_p = cfl_pln[ip];
             if (lineRelief) {
@@ -179,7 +188,10 @@ __global__ void setCFL_cell_d
                 cfl_p = max(cfl_p - lineReliefTheta * cfl_visc, (flow_float)0.0);
             }
             cfl[ic] = max(cfl[ic], cfl_p);
+            if (capOn) cfl_all = max(cfl_all, cfl_p);
         }
+        // 方向別 dt の伸びの上限: Δτ ∝ 1/cfl なので cfl ≥ cfl_all/R ⇔ Δτ ≤ R·Δτ_全面
+        if (capOn) cfl[ic] = max(cfl[ic], cfl_all / lineDtCap);
 
         // 軸対称 near-axis 半径音響スペクトル半径を加える: λ_axis = β·(|u_r|+c)·A_planar。
         // revolved 軸面積 (r_f·S→0) が落とす半径音響モードを planar 面積で補う。face 項と同じ
@@ -355,7 +367,8 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
         (cfg.lineImplicit == 1) ? msh.line_next_d : nullptr,
         (cfg.lineImplicit == 1) ? cfg.lineDtDirectional : 0,
         (cfg.lineImplicit == 1) ? msh.plane_wall_flag_d : nullptr,
-        0   /* 壁境界半割面の λ 除外は不採用 (発散した診断スイッチ) */
+        0,  /* 壁境界半割面の λ 除外は不採用 (発散した診断スイッチ) */
+        (cfg.lineImplicit == 1 && cfg.lineDtDirectional != 0) ? cfg.lineDtDirectionalCap : (flow_float)0.0
     ) ;
     gpuErrchk( cudaPeekAtLastError() );
 

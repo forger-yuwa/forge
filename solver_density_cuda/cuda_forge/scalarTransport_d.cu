@@ -1,5 +1,8 @@
 #include "scalarTransport_d.cuh"
+#include "geomAbDiag.hpp"   // V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c、既定 off)
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -56,9 +59,11 @@ __global__ void scalar_diffusion_first_order_d(
     int isNode,
     geom_int* normal_halo_planes,
     geom_int* plane_cells,
-    geom_float* ccx,
-    geom_float* ccy,
-    geom_float* ccz,
+    // 面ごとの差 e = cc[ic1] − cc[ic0] (double の座標から 1 回だけ丸めた値、var.p_d["ge_*"]、
+    // plans/active/architecture-float-state-double-geometry.md §4.2a、段 ③)
+    const flow_float* ge_x,
+    const flow_float* ge_y,
+    const flow_float* ge_z,
     geom_float* fx,
     geom_float* sx,
     geom_float* sy,
@@ -102,9 +107,10 @@ __global__ void scalar_diffusion_first_order_d(
             return;
         }
 
-        const flow_float dcc_x = ccx[ic1] - ccx[ic0];
-        const flow_float dcc_y = ccy[ic1] - ccy[ic0];
-        const flow_float dcc_z = ccz[ic1] - ccz[ic0];
+        // 座標の差 cc[ic1] − cc[ic0] の代わりに面ごとの差 e (同じ向き) を読む (§4.2a、段 ③)
+        const flow_float dcc_x = ge_x[ip];
+        const flow_float dcc_y = ge_y[ip];
+        const flow_float dcc_z = ge_z[ip];
         const flow_float dcc = sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z);
 
         const flow_float denom = dcc_x * sxx + dcc_y * syy + dcc_z * szz;
@@ -189,7 +195,14 @@ __global__ void scalar_diffusion_multi_d(
     geom_int* normal_halo_planes, geom_int* plane_cells,
     geom_float* ccx, geom_float* ccy, geom_float* ccz,
     geom_float* fx, geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
-    flow_float* ro, flow_float* vis_lam, flow_float* vis_turb, MultiScalarPtrs P)
+    flow_float* ro, flow_float* vis_lam, flow_float* vis_turb, MultiScalarPtrs P,
+    // 面ごとの差 e と V0 の評価の経路 (plans/active/architecture-float-state-double-geometry.md §4.2a・§4.2c):
+    //   ge_x/y/z: 面ごとの e = cc1 − cc0 (double の座標から 1 回だけ丸めた値)。非 nullptr のとき置き換えるのは
+    //             ccx[ic1] − ccx[ic0] の引き算だけで、以降の式・型・ガード・面の選択・向きは変えない (§4.2a)。
+    //             本番は段 ③ から e を渡す。nullptr (座標の差) は V0 の診断の旧腕だけが使う。
+    //   faceFlux: atomicAdd の直前の面の流束 flux を面の番号で書く ([N*nPlanes]、スカラー s は faceFlux[s*nPlanes+ip])。
+    const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
+    flow_float* faceFlux, geom_int nPlanes)
 {
     geom_int ih = blockDim.x * blockIdx.x + threadIdx.x;
     if (ih >= nNormalHaloPlanes) return;
@@ -199,9 +212,9 @@ __global__ void scalar_diffusion_multi_d(
     if (isNode != 0 && (ic0 >= nCells || ic1 >= nCells)) return;   // node 境界半割面は skip (単一版と同じ)
     const geom_float f = fx[ip];
     const geom_float sxx = sx[ip], syy = sy[ip], szz = sz[ip], sss = ss[ip];
-    const flow_float dcc_x = ccx[ic1] - ccx[ic0];
-    const flow_float dcc_y = ccy[ic1] - ccy[ic0];
-    const flow_float dcc_z = ccz[ic1] - ccz[ic0];
+    const flow_float dcc_x = (ge_x != nullptr) ? ge_x[ip] : (ccx[ic1] - ccx[ic0]);
+    const flow_float dcc_y = (ge_x != nullptr) ? ge_y[ip] : (ccy[ic1] - ccy[ic0]);
+    const flow_float dcc_z = (ge_x != nullptr) ? ge_z[ip] : (ccz[ic1] - ccz[ic0]);
     const flow_float dcc = sqrt(dcc_x * dcc_x + dcc_y * dcc_y + dcc_z * dcc_z);
     const flow_float denom = dcc_x * sxx + dcc_y * syy + dcc_z * szz;
     const flow_float denom_floor = static_cast<flow_float>(1.0e-6) * dcc * sss;
@@ -227,6 +240,7 @@ __global__ void scalar_diffusion_multi_d(
         const flow_float dphi = P.phi[s][ic1] - P.phi[s][ic0];
         const flow_float flux = mu_face * (dphi / dcc) * delta;
         const flow_float diag_face = mu_face * geo;
+        if (faceFlux != nullptr) faceFlux[(size_t)s * nPlanes + ip] = flux;   // V0 の診断 (既定 nullptr)
         atomicAdd(&P.res[s][ic0], flux);   atomicAdd(&P.diag[s][ic0], diag_face * inv_ro0);
         atomicAdd(&P.res[s][ic1], -flux);  atomicAdd(&P.diag[s][ic1], diag_face * inv_ro1);
     }
@@ -281,7 +295,8 @@ __global__ void runge_kutta_exp_scalar_d(
     flow_float* transport_diag,
     flow_float floor,
     flow_float relax,      // 増分緩和 (point-implicit 経路; 1.0 で厳密に不変)
-    flow_float dtScale)    // dt_local の倍率 (scalarCflMax; 1.0 で厳密に不変)
+    flow_float dtScale,    // dt_local の倍率 (scalarCflMax; 1.0 で厳密に不変)
+    double* diag_dq)       // 診断 FORGE_DIAG_COMMIT_LOSS (既定 nullptr): 足そうとした増分 relax·δ の写し (積は double で厳密)
 {
     geom_int ic = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -296,9 +311,46 @@ __global__ void runge_kutta_exp_scalar_d(
             + coef_Res * dt_l * (src_jac[ic] + transport_diag[ic] / v);
         const flow_float updated = coef_N * rho_phi_N[ic] + coef_M * rho_phi_M[ic]
                     + relax * ((coef_Res * res_rho_phi[ic] * dt_l / v) / fac);
+        // δ は上の式と同じ乗除算だけ (加算を含まないので縮約の対象にならない)。上の 2 式は変えない。
+        if (diag_dq != nullptr)
+            diag_dq[ic] = static_cast<double>(relax) * static_cast<double>((coef_Res * res_rho_phi[ic] * dt_l / v) / fac);
         // realizability 下限。source 側 point-implicit と整合。下限に達しない範囲では無影響。
         rho_phi[ic] = max(updated, floor);
     }
+}
+
+// 融合版の記述子の表を作る。本番 (scalarTransportResidualMulti_d) と V0 の評価の経路 (scalarDiffusionMultiArm_d) が
+// 同じ表を使うために切り出した。拡散を使うスカラーが 1 本でもあれば true。
+bool fillMultiScalarPtrs(const solverConfig& cfg, const ScalarTransportDesc* descs, int n, MultiScalarPtrs& P)
+{
+    bool anyDiff = false;
+    for (int s = 0; s < n; ++s) {
+        P.phi[s] = descs[s].phi; P.res[s] = descs[s].res_rho_phi; P.diag[s] = descs[s].transport_diag;
+        P.sigma[s] = descs[s].sigma; P.sigma2[s] = descs[s].sigma2; P.F1[s] = descs[s].F1; P.sigmaLam[s] = descs[s].sigma_lam;
+        P.diffusion[s] = (cfg.scalarDiffusion == 1 && descs[s].diffusion == 1) ? 1 : 0;
+        P.ext[s] = descs[s].ext_face;
+        anyDiff = anyDiff || (P.diffusion[s] != 0);
+    }
+    return anyDiff;
+}
+
+// 融合拡散カーネルの起動。本番は ge_* に面ごとの差 e (var.p_d["ge_*"]、段 ③)、faceFlux に nullptr を渡す。
+// V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c) は P の書き先と ge_*・faceFlux を差し替えて呼ぶ
+// (旧腕は ge_* = nullptr で座標の差)。
+void launchScalarDiffusionMulti(cudaConfig& cuda_cfg, mesh& msh, variables& var, int isNode, int n, const MultiScalarPtrs& P,
+                                const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z, flow_float* faceFlux)
+{
+    dim3 dimGrid_normal_halo = dim3(ceil(msh.nNormal_halo_Planes / (flow_float)cuda_cfg.blocksize));
+    #define FORGE_SCALAR_DIFF_ARGS msh.nCells, msh.nNormal_halo_Planes, isNode, msh.normal_halo_planes_d, msh.map_plane_cells_d, \
+        var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], var.p_d["fx"], var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"], \
+        var.c_d["ro"], var.c_d["vis_lam"], var.c_d["vis_turb"], P, ge_x, ge_y, ge_z, faceFlux, msh.nPlanes
+    switch (n) {
+        case 1: scalar_diffusion_multi_d<1><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+        case 2: scalar_diffusion_multi_d<2><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+        case 3: scalar_diffusion_multi_d<3><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+        default: scalar_diffusion_multi_d<4><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
+    }
+    #undef FORGE_SCALAR_DIFF_ARGS
 }
 
 }
@@ -329,9 +381,9 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
             (cfg.discretization == "node") ? 1 : 0,
             msh.normal_halo_planes_d,
             msh.map_plane_cells_d,
-            var.c_d["ccx"],
-            var.c_d["ccy"],
-            var.c_d["ccz"],
+            var.p_d["ge_x"],
+            var.p_d["ge_y"],
+            var.p_d["ge_z"],
             var.p_d["fx"],
             var.p_d["sx"],
             var.p_d["sy"],
@@ -354,26 +406,19 @@ void scalarTransportResidual_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& ms
 }
 
 void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
-                                    const ScalarTransportDesc* descs, int n)
+                                    const ScalarTransportDesc* descs, int n, bool geomAbHook)
 {
     if (n <= 0) return;
     if (n > SCALAR_MULTI_MAX) {
         // 4 本ずつ分割
         for (int s = 0; s < n; s += SCALAR_MULTI_MAX)
-            scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs + s, std::min(n - s, SCALAR_MULTI_MAX));
+            scalarTransportResidualMulti_d(cfg, cuda_cfg, msh, var, descs + s, std::min(n - s, SCALAR_MULTI_MAX), geomAbHook);
         return;
     }
     dim3 dimGrid_normal_halo = dim3(ceil(msh.nNormal_halo_Planes / (flow_float)cuda_cfg.blocksize));
     const int isNode = (cfg.discretization == "node") ? 1 : 0;
     MultiScalarPtrs P{};
-    bool anyDiff = false;
-    for (int s = 0; s < n; ++s) {
-        P.phi[s] = descs[s].phi; P.res[s] = descs[s].res_rho_phi; P.diag[s] = descs[s].transport_diag;
-        P.sigma[s] = descs[s].sigma; P.sigma2[s] = descs[s].sigma2; P.F1[s] = descs[s].F1; P.sigmaLam[s] = descs[s].sigma_lam;
-        P.diffusion[s] = (cfg.scalarDiffusion == 1 && descs[s].diffusion == 1) ? 1 : 0;
-        P.ext[s] = descs[s].ext_face;
-        anyDiff = anyDiff || (P.diffusion[s] != 0);
-    }
+    const bool anyDiff = fillMultiScalarPtrs(cfg, descs, n, P);
     #define FORGE_SCALAR_ADV_ARGS msh.nCells, msh.nNormal_halo_Planes, isNode, msh.normal_halo_planes_d, msh.map_plane_cells_d, var.c_d["ro"], var.p_d["massflux"], P
     switch (n) {
         case 1: scalar_advection_multi_d<1><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_ADV_ARGS); break;
@@ -383,21 +428,37 @@ void scalarTransportResidualMulti_d(solverConfig& cfg, cudaConfig& cuda_cfg, mes
     }
     #undef FORGE_SCALAR_ADV_ARGS
     if (anyDiff) {
-        #define FORGE_SCALAR_DIFF_ARGS msh.nCells, msh.nNormal_halo_Planes, isNode, msh.normal_halo_planes_d, msh.map_plane_cells_d, \
-            var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"], var.p_d["fx"], var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"], \
-            var.c_d["ro"], var.c_d["vis_lam"], var.c_d["vis_turb"], P
-        switch (n) {
-            case 1: scalar_diffusion_multi_d<1><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
-            case 2: scalar_diffusion_multi_d<2><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
-            case 3: scalar_diffusion_multi_d<3><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
-            default: scalar_diffusion_multi_d<4><<<dimGrid_normal_halo, cuda_cfg.dimBlock>>>(FORGE_SCALAR_DIFF_ARGS); break;
-        }
-        #undef FORGE_SCALAR_DIFF_ARGS
+        // V0 の評価の経路 (plan architecture-float-state-double-geometry §4.2c、既定 off): 本番の拡散の直前に入力の記録と
+        // 旧腕・新腕 (DUMP) / 参照腕 (REF) を別の書き先で評価し、直後に本番の寄与と照合する。
+        const bool geomAb = geomAbHook && geomAbDiag::armed();
+        if (geomAb) geomAbDiag::scalarBefore(cfg, cuda_cfg, msh, var, descs, n, &scalarDiffusionMultiArm_d);
+        // 座標の差は面ごとの差 e を読む (§4.2a、段 ③)。k/ω・トレーサ・遷移・凝縮モーメント・化学種のスカラー経路すべて。
+        launchScalarDiffusionMulti(cuda_cfg, msh, var, isNode, n, P, var.p_d["ge_x"], var.p_d["ge_y"], var.p_d["ge_z"], nullptr);
+        if (geomAb) geomAbDiag::scalarAfter(cfg, cuda_cfg, msh, var, descs, n);
     }
 }
 
+void scalarDiffusionMultiArm_d(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                               const ScalarTransportDesc* descs, int n,
+                               flow_float* const* resAlt, flow_float* const* diagAlt,
+                               const flow_float* ge_x, const flow_float* ge_y, const flow_float* ge_z,
+                               flow_float* faceFlux)
+{
+    if (n <= 0 || n > SCALAR_MULTI_MAX) {
+        fprintf(stderr, "[geomab] scalarDiffusionMultiArm_d: n=%d is outside 1..%d\n", n, SCALAR_MULTI_MAX);
+        std::exit(EXIT_FAILURE);
+    }
+    const int isNode = (cfg.discretization == "node") ? 1 : 0;
+    MultiScalarPtrs P{};
+    if (!fillMultiScalarPtrs(cfg, descs, n, P)) return;
+    for (int s = 0; s < n; ++s) { P.res[s] = resAlt[s]; P.diag[s] = diagAlt[s]; }
+    launchScalarDiffusionMulti(cuda_cfg, msh, var, isNode, n, P, ge_x, ge_y, ge_z, faceFlux);
+    gpuErrchk( cudaPeekAtLastError() );
+    gpuErrchk( cudaDeviceSynchronize() );
+}
+
 void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
-                             const ScalarTransportDesc& desc, flow_float relax, flow_float dtScale)
+                             const ScalarTransportDesc& desc, flow_float relax, flow_float dtScale, double* diag_dq)
 {
     if (cfg.timeIntegration == 4) {
         runge_kutta_exp_scalar_4th_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>>(
@@ -428,7 +489,8 @@ void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, 
             desc.transport_diag,
             desc.floor,
             static_cast<flow_float>(1.0),
-            static_cast<flow_float>(1.0));
+            static_cast<flow_float>(1.0),
+            nullptr);
     } else if (cfg.timeIntegration == 11) {
         // 陰解法 (block-DPLUR) ステップでの化学種更新。1 回の point-implicit forward-Euler:
         //   ρφ = ρφ_N + (res·Δτ/V) / (1 + Δτ(src_jac + transport_diag/V))。
@@ -449,6 +511,7 @@ void scalarTimeIntegration_d(int loop, solverConfig& cfg, cudaConfig& cuda_cfg, 
             desc.transport_diag,
             desc.floor,
             relax,
-            dtScale);
+            dtScale,
+            diag_dq);   // 診断 FORGE_DIAG_COMMIT_LOSS (既定 nullptr)
     }
 }

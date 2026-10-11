@@ -175,6 +175,20 @@
 
 `output_cellValNames` に含まれる変数だけが標準出力の対象になる。
 
+### 6.2a 幾何の量の精度 (2026-10-10、float 化 plan の段 ①〜④ の後)
+
+- 型は `flowFormat.hpp` の `flow_float` (状態) と `geom_float` (幾何) に分かれているが、幾何の配列 (`volume`・`ccx..ccz`・`sx..ss`・`pcx..pcz`・`fx`・`A_planar` など) も `variables` の `flow_float` の表 (`c`/`p`/`c_d`/`p_d`) に入っている。
+  - カーネルは `geom_float*` として受けるので、`geom_float` と `flow_float` を別の型にするとビルドが通らない。既定のビルドは両方 float、FP64 のビルドは両方 double。
+- **double の写し** (`mesh.hpp`): 読み込みで、メッシュ HDF5 の幾何を `geom_float` の配列とは別に double でも持つ (`coord64`・`surfVect64`・`surfArea64`・`planeCent64`・`cellCent64`・`cc64`。`cc64` は node の節点座標とゴーストの中心を含む)。`hasGeom64()` がそろっているかを返す。
+- **差を取る量は double の写しから 1 回だけ丸めて作る** (取り決め: plan の §4.2a)。式・型・ガード・対象面・向きは変えていない。
+  - 面ごとの差 e = fl(cc64[ic1] − cc64[ic0]) (`p_d["ge_x..ge_z"]`、全面)。粘性・スカラー拡散 (k/ω・遷移・凝縮モーメント)・化学種・受動種と FCT・3 種の DPLUR の粘性の対角・辺中点の再構成 (±0.5e) が読む。DPLUR は `(ic0 == ic) ? e : −e` で向きを合わせる。
+  - 面重心からの差 r0 = fl(pc64 − cc64[ic0])・r1 = fl(pc64 − cc64[ic1]) (`p_d["gr0_*"]`・`gr1_*`、全面)。再構成 (Roe・HLLE・SLAU・KEEP・境界) とリミタが読む。
+  - 読み込み時の量: LSQ の係数 (変位は ±e)、周期の相手と継ぎ目の同値類、ラインの接続、node の壁関数・WMLES の境界面ごとの代表点 (irep, y) (`wallRepPoint_d.cu`、起動時に 1 回)、弱形式の等温壁の d1/d2、`delta_les` は double の写しから作る。軸対称の closure は、デバイスの最終の面ベクトルを double で足して最後に 1 回丸める。
+  - FP64 のビルドでは e・r0・r1 は今までの差とビット単位で同じなので、結果は変わらない。例外は block DPLUR の `implicitSolvePrecision 0` (`ST = float`) で、左辺に入る値が fl32(cc1) − fl32(cc0) から fl32(e64) に変わる (不動点は変わらない)。
+- **メッシュ HDF5 の精度が前提**: 写しが double の値を持つのは、メッシュ HDF5 の幾何が double のときだけ。float32 で書かれた格子では、写しは float の値そのものになり、上の改善は効かない (変換の時点で失われた精度は戻らない)。冷却壁の第一層は座標の 1e-7〜1e-6 の厚さなので、float32 の座標では第一層が数 ulp になり、厚さが最大 28 % ずれた (2026-10-08、case/45)。
+- 状態 (保存量・原始量) と流束の計算・残差の足し込みは `flow_float` のまま。float のビルドで残る誤差の大部分はこちらにある (plan §6.10・§6.13)。
+- 経緯と検証: [`plans/active/architecture-float-state-double-geometry.md`](../../plans/active/architecture-float-state-double-geometry.md) (§4.2〜§4.2b、§6.2〜§6.13)。
+
 ### 6.3 `bcond`
 
 `bcond` は境界条件 1 種類分の情報を持つ。

@@ -1,0 +1,66 @@
+{
+ "undecidable": [],
+ "pre": {
+  "前段の関門": "関門を通った",
+  "バイナリ (rq.log / rpref.log)": [
+   [
+    "74954e7be5ef38a8",
+    "793215917d156680"
+   ],
+   [
+    "74954e7be5ef38a8",
+    "793215917d156680"
+   ]
+  ]
+ },
+ "records": {
+  "run_0700_rp_cp1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0701_rp_cp2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0702_rp_cp3 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0703_rp_fp1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0704_rp_fp2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0705_rp_fp3 check_convergence": "OVERALL: CHECK FAILURES ABOVE"
+ },
+ "a": {
+  "C": [
+   0.21640674325330014,
+   0.21653053540271575,
+   0.21658095908301359
+  ],
+  "F": [
+   1.1252865670165066,
+   1.0365742952859518,
+   1.225290210819345
+  ],
+  "Cp": [
+   0.21663717640049196,
+   0.21657118012972057,
+   0.21630401606701063
+  ],
+  "Fp": [
+   0.31522159828079405,
+   0.31654711191686835,
+   0.2937751538295394
+  ]
+ },
+ "compare": {
+  "e_Fp": {
+   "e": 0.09201049714332621,
+   "L": 0.04623474408651854,
+   "U": 0.13778625020013388,
+   "se": 0.007380363469983492,
+   "df": 2.0007619457000247,
+   "t": 6.202371094998396
+  },
+  "d": {
+   "e": 0.8205337813175986,
+   "L": 0.49397975172617126,
+   "U": 1.147087810909026,
+   "se": 0.05500747256930438,
+   "df": 2.0733059356749113,
+   "t": 5.936539425257162
+  },
+  "e_F_ref": 0.9125442784609248
+ },
+ "verdict": "判別不能"
+}
