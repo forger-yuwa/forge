@@ -36,6 +36,7 @@ for k in diff:
     if tuple(b[k]) in variants.get(k, set()): resolved[k] = f"基準のソースの再コンパイル {len(variants[k])} 通りのうちの 1 つと一致"
     else: unresolved.append(k)
 bad_only = [k for k in onlyA + onlyB if not axis(k)]
+if len(a) == 0 or len(b) == 0: bad_only.append(f"(空の入力: 基準 {len(a)} 関数・新しい {len(b)} 関数。照合していない)")
 res = dict(n_base=len(a), n_new=len(b), n_identical=sum(1 for k in set(a) & set(b) if a[k] == b[k]),
            only_base=onlyA, only_new=onlyB, differ=diff, differ_resolved_as_nvcc_variant=resolved,
            sass_mismatch_except_axis=sorted(unresolved + bad_only), variants_dir=str(vdir) if vdir else None)

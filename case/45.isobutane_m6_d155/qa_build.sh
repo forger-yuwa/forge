@@ -28,27 +28,7 @@ for t in test_qacc_axis test_qacc_commit; do
   $W/$t > $W/$t.out 2>&1; v=$(grep -h "VERDICT" $W/$t.out | tail -1); echo "$t: $v" >> $LOG
   echo "$v" | grep -q "VERDICT: PASS" || ut=false
 done
-# SASS
-cuobjdump -sass $OLD/build/forge > $W/base.sass; cuobjdump -sass $S/build/forge > $W/new.sass
-python3 -c "import json; json.dump({'commit': '$SHA', 'unit_test_pass': $( $ut && echo True || echo False ), 'forge_sha256': '$(sha256sum $S/build/forge | cut -c1-64)', 'base_forge_sha256': '$(sha256sum $OLD/build/forge | cut -c1-64)'}, open('$PRE', 'w'), ensure_ascii=False, indent=1)"
-python3 $C45/qa_sass_cmp.py $W/base.sass $W/new.sass $PRE > $W/cmp1.json
-# 一致しない関数があれば、その関数を含む基準のソースの .cu を同じフラグで 3 回再コンパイルして揺れの候補を作り、照合し直す
-FN=$(python3 -c "import json; d=json.load(open('$W/cmp1.json')); print(' '.join(d['differ']))")
-if [ -n "$FN" ]; then
-  FM=$OLD/build/cuda_forge/CMakeFiles/cuda_forge.dir/flags.make
-  DEF=$(sed -n 's/^CUDA_DEFINES = //p' $FM); INC=$(sed -n 's/^CUDA_INCLUDES = //p' $FM); FL=$(sed -n 's/^CUDA_FLAGS = //p' $FM)
-  for f in $FN; do
-    nm=$(python3 -c "import re,sys; f=sys.argv[1]; m=re.search(r'_(\d+)_([A-Za-z0-9_]+?)_cu_', f); n=re.match(r'_Z(\d+)', f)
-print(m.group(2) if m else f[n.end():n.end()+int(n.group(1))])" $f)
-    src=$(grep -lE "__global__ void $nm\b|^$nm\.cu" $OLD/cuda_forge/*.cu | head -1); [ -z "$src" ] && [ -f $OLD/cuda_forge/$nm.cu ] && src=$OLD/cuda_forge/$nm.cu
-    echo "揺れの確認: $nm → $src" >> $LOG
-    [ -n "$src" ] || continue
-    for i in 1 2 3; do
-      (cd $OLD/build/cuda_forge && eval /usr/local/cuda/bin/nvcc $DEF $INC $FL -x cu -c $src -o $W/variants/${nm}_base_$i.o) >> $LOG 2>&1
-      cuobjdump -sass $W/variants/${nm}_base_$i.o > $W/variants/${nm}_base_$i.sass
-    done
-  done
-  python3 $C45/qa_sass_cmp.py $W/base.sass $W/new.sass $PRE --variants $W/variants > $W/cmp2.json
-fi
+# SASS の照合は qa_sass.sh (cuobjdump が A に無いので venv の CUDA 13 の cuobjdump を使う)
+bash $C45/qa_sass.sh $SHA $( $ut && echo True || echo False ) >> $LOG 2>&1
 python3 -c "import json; d=json.load(open('$PRE')); print('単体試験', d['unit_test_pass'], '照合で残った不一致', d['sass_mismatch_except_axis'], '揺れとみなした', list(d.get('differ_resolved_as_nvcc_variant', {})))" >> $LOG
 echo "== $(date -Is) 終わり" >> $LOG; touch $C45/qa_build.done
