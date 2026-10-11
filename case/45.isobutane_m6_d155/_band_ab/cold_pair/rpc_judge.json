@@ -1,0 +1,155 @@
+{
+ "undecidable": [],
+ "checks": {
+  "バイナリ・入力・pRef": [
+   "1f9ff32232da8823",
+   "74954e7be5ef38a8",
+   "3baafa3d23d31e5e",
+   "5499000.0"
+  ],
+  "閉性 (rpc_gate.json)": {
+   "n": 540507,
+   "g_max": 2.5771340187128834e-16,
+   "g_p99": 1.2113160569612113e-16,
+   "n_over": 0,
+   "attrs": {
+    "axisRFloor": "0.0",
+    "axisSegmentRWeight": "1",
+    "axisymMethod": "0",
+    "closure_norm": "A_planar",
+    "closure_target_y": "A_planar",
+    "discretization": "node",
+    "flow_float_bytes": "8",
+    "geom_float_bytes": "8",
+    "hoopAreaFromClosure": "0",
+    "isAxisymmetric": "1",
+    "max_E_x": "9.223027430731426e-10",
+    "max_E_y": "2.3349771334853023e-09",
+    "max_abs_normlen_err": "0.0",
+    "mesh_file": "nozzle.h5",
+    "mesh_has_rSurfVect": "1",
+    "nCells": "540507",
+    "nCells_all": "549683",
+    "nNormalPlanes": "1076426",
+    "nPlanes": "1085602",
+    "n_bad_A": "0",
+    "n_over_100eps64_x": "0",
+    "n_over_100eps64_y": "0",
+    "n_ss_nonfinite": "0",
+    "n_ss_nonpositive": "0",
+    "plan": "plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 (3, 5)",
+    "segment_rweight_active": "1",
+    "segment_rweight_reason": "active"
+   }
+  },
+  "前提 (両窓で min E0 ≥ 10 N かつ G ≤ 0.05 min E0)": [
+   true,
+   true
+  ]
+ },
+ "records": {
+  "run_0743_pc_c1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   7.988706833038003e-07,
+   8.692563851826999e-07
+  ],
+  "run_0747_pc_c2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   7.953729068142007e-07,
+   8.926196606364142e-07
+  ],
+  "run_0744_pc_cp1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   7.894563826438003e-07,
+   8.362408375353687e-07
+  ],
+  "run_0748_pc_cp2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   7.940675787960897e-07,
+   8.732380260153623e-07
+  ],
+  "run_0745_pc_f1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   1.8974412296392802e-05,
+   2.8961248503037497e-05
+  ],
+  "run_0749_pc_f2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   1.7399728173682695e-05,
+   2.8992261439270806e-05
+  ],
+  "run_0746_pc_fp1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   6.044178295149562e-06,
+   1.690269304708636e-05
+  ],
+  "run_0750_pc_fp2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   4.608508756583304e-06,
+   1.2787715562808444e-05
+  ],
+  "run_0743_pc_c1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0743_pc_c1 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0743_pc_c1/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0747_pc_c2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0747_pc_c2 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0747_pc_c2/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0744_pc_cp1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0744_pc_cp1 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0744_pc_cp1/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0748_pc_cp2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0748_pc_cp2 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0748_pc_cp2/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0745_pc_f1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0745_pc_f1 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0745_pc_f1/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0749_pc_f2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0749_pc_f2 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0749_pc_f2/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0746_pc_fp1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0746_pc_fp1 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0746_pc_fp1/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ],
+  "run_0750_pc_fp2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0750_pc_fp2 check_quasisteady (評価域の平均温度、後半)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0750_pc_fp2/rpc_series.csv  [12 rows, steps 250..3000]  -> STEADY ==="
+  ]
+ },
+ "E": {
+  "W1": {
+   "E0": [
+    19.170632177438268,
+    18.27601852908904
+   ],
+   "Ep": [
+    6.3068781812463115,
+    4.328146134060199
+   ],
+   "N": 0.055134717631065554,
+   "G": 0.043433548196328935,
+   "max_abs_dT": {
+    "run_0745_pc_f1": 134.20604155293336,
+    "run_0749_pc_f2": 131.72044584980836,
+    "run_0746_pc_fp1": 59.69160849139553,
+    "run_0750_pc_fp2": 41.74727255389553
+   }
+  },
+  "W2": {
+   "E0": [
+    27.344771172668704,
+    27.264101886942413
+   ],
+   "Ep": [
+    13.53800685683438,
+    9.509658108876508
+   ],
+   "N": 0.15343483968823418,
+   "G": 0.10944811435991911,
+   "max_abs_dT": {
+    "run_0745_pc_f1": 188.9375892635644,
+    "run_0749_pc_f2": 195.26078262043256,
+    "run_0746_pc_fp1": 113.6749779435354,
+    "run_0750_pc_fp2": 93.52508252931716
+   }
+  }
+ },
+ "verdict": "判別不能"
+}
