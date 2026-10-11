@@ -1,6 +1,6 @@
 #!/bin/bash
 # plan tooling-nozzle-core-grid §4.52 M-c (事前登録、codex 諮問 2026-10-12 dxlink): ライン外の面の対流項の、左辺の予測と右辺の応答の差 Eₓ。
-#  base: 診断入りの FP64 バイナリ diag3 で M-o の base を再現し (2 外反復・nStepInner 42・SST 凍結)、FORGE_LINE_DUMP_FINAL_SPLIT で
+#  base: 診断入りの FP64 バイナリ diag4 (§4.53 で対角の組み直しを直した版) で M-o の base を再現し (2 外反復・nStepInner 42・SST 凍結)、FORGE_LINE_DUMP_FINAL_SPLIT で
 #        左辺の対流の面の寄与を外した組み直し (ライン外・ライン面・両方・確認) も書き出す。
 #  eval: 状態 (Q₀ または base の Q₁) から 1 外反復、convMethod 0 (1 次) で、FORGE_DIAG_CONV_FACES = 第 4 引数 (0 全面・1 ライン外だけ・2 ライン面だけ・3 なし)。
 # usage (AWS の ~/forge-coregrid/case/45.isobutane_m6_d155):
@@ -13,7 +13,7 @@ C45=$PWD
 export FORGE_CUDA_BLOCKSIZE=128
 for v in $(compgen -e | grep '^FORGE_'); do case $v in FORGE_CUDA_BLOCKSIZE) ;; *) unset $v;; esac; done
 TL=$C45/../../solver_density_cuda/tools; RC=$TL/run_case.sh
-FD=$HOME/forge-fgeom7-fp64-diag3/solver_density_cuda/build/forge
+FD=$HOME/forge-fgeom7-fp64-diag4/solver_density_cuda/build/forge
 SRC=run_0619_cg_gref_b0_ctl; LOG=$C45/cg_conv.log
 mode=$1; r=$2
 case $mode in

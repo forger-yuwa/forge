@@ -849,7 +849,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         const bool cached = (useDiagCache != 0) && (loop > 0) && !onLine;
         // ライン上の節点の対角は storeLU の sweep (Thomas の因子を作る sweep) でしか使わない。それ以外の sweep では
         // 組んでも捨てるだけなので組まない (plan time_integration-line-implicit-speed §4.3 案 A、数値は不変)。
-        const bool skipDiag = cached || (onLine && storeLU == 0);
+        // 診断 (g_diagForceStoreDiag、既定 0): 書き出しの組み直しでは loop > 0 でも対角を組む (plan tooling-nozzle-core-grid §4.53)。
+        const bool skipDiag = cached || (onLine && storeLU == 0 && g_diagForceStoreDiag == 0);
         ST nu_eff = static_cast<ST>(0.0);
         if (!skipDiag) nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
         bool rowDec[5] = {false, false, false, false, false};
