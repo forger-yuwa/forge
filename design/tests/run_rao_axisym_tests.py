@@ -8,23 +8,25 @@
   d ln V/dM = 1/[M(1−k)]・dν/dM = √(M²−1)/[M(1−k)]・d ln ρ/dM = −M/(1−k) を差分で 1e-8、1D の C_F が排気ファイルの
   1D 理想値 (F_1D,vac 1159.1 kN @ p_c 10 MPa・r_t 0.14 m → C_F 1.8824) と 1e-4。
 - **T1b** (平面縮約): 縁の関数 `edge_function` の根が `rao_planar.theta_lip` と 1e-8 (γ 1.2・1.4、M_e 2〜4.5、p_e/p_a 1.5〜10)。
-  加えて DE (Φ₂・Φ₃ 一定で引いた線) が軸対称の C⁺ の適合式 d(θ−ν) = −sinμ sinθ/r dσ を CPG と EXH で満たす
-  (残差 ≤ 1e-12 × 尺度、源項の符号を反転した対照は ≥ 1e-2 × 尺度)。
+  加えて DE (Φ₂・Φ₃ 一定で r をパラメータに引いた線) が軸対称の C⁺ の適合式 d(θ−ν) = −sinμ sinθ/r dσ を CPG と EXH で満たす
+  (残差 ≤ 1e-12 × 尺度、源項の符号を反転した対照は ≥ 1e-2 × 尺度)。**折り返し (θ = μ) を跨ぐ D** (`synth_bd` の M_B 2.2・
+  θ_B 32°、D を B 寄り) を必須にし (plan §6 V1、diagnostician 2026-10-11)、線が実際に θ − μ の符号を変えること、折り返し点で
+  dθ/dr = −tanθ/(2r) (C⁺ の適合式と Φ₃ 一定が同じ値を与える点検値) と dM/dr = 0 を相対 1e-9 で確かめる。
 - **T2** (包絡線の恒等式、前進 MOC なし): 適合式を満たす合成の C⁻ データ (θ を与え ν を C⁻ の適合式で積分) の上で D を動かし、
   dF/dη_D = 2π[Φ₃ dL/dη_D + F(E) dr_E/dη_D] (F = BD の下端 → D + DE の推力、F(E) = `edge_function`) が相対 1e-5。
-  DE の M 格子 8e-3・4e-3・2e-3 のどれでも成り立ち、格子を倍にして悪化しない。CPG と EXH、p_a 0 と p_a > 0。
+  DE の r 格子 `dr` 0.04・0.02・0.01 のどれでも成り立ち、格子を倍にして悪化しない。CPG と EXH、p_a 0 と p_a > 0。
+  **跨ぐ D の組** (上と同じ合成、η_D 0.72〜0.78 N — 5 点の差分の全点で θ_D > μ_D・θ_E < μ_E) も同じ条件で必須。
+- **(b) 枝の追跡** (`solve_thetaB`、plan §4.4 の訂正): `_link_branches` が η_D の連続性で結ぶこと (添字がずれる場合) と、
+  det_D の符号 (DE の族) の違う根を結ばないこと。
 - **T1d** (定比熱の擬似種で CPG 生成器と 1e-8): 同じ D からの DE の E と推力、同じ壁・初期線の kernel 場 (前進 MOC の網)。
 
-**この版で回さないもの (方針の穴、主セッションに返した)**: T1a・T1c・T3・T4・T5・T6 は `design_rao` を基準ケースの L_k で回す
-試験だが、記録 (構成手順 4、plan §4.4) の「DE で |c| > 1 は解なし」の規則の下では θ_B > μ_B の kernel で D が θ_D = μ_D の点より
-B 寄りになる解 (L ≲ 0.9 L_cone) がすべて INFEASIBLE になる。|c| = 1 は DE の M のパラメータ化の折り返し (θ = μ で M が極値) で、
-r をパラメータにすれば DE は滑らかに続く (Jacobian は正則)。規則を変えるかは上位の判断。
-`--blocked` を付けると、その事実 (規則の下の L_k 5 本の可否) を記録として出力する (数分)。
+**この版で回さないもの**: T1c・T3・T4・T5・T6・T1a′ は `design_rao` を基準ケースの L_k で回す試験で、円弧 kernel・n 161 の
+L_k 5 本の表 (`case/68.bell_two_mode/rao_m/run_rao_lk.py`、plan §5.1 #5 (d)) を見て親と上位が A/B を決めてから
+(plan §5.1 #5 の **A**)。T1a は記録 (合否なし) に格下げ (#6 で CFD ピンの後)。
 
 実行: design/.venv-opt の Python で `python design/tests/run_rao_axisym_tests.py`。
 """
 import sys
-import time
 import warnings
 from pathlib import Path
 
@@ -119,48 +121,110 @@ def synth_bd(ig, xB=0.7, rB=1.25, thB=np.deg2rad(30.0), MB=1.9, sig_max=3.0, N=1
     return ra.BDLine(np.column_stack([y[0], y[1], thf(ss), y[2]]), ig)
 
 
+def de_compat(d, n_pts=400):
+    """DE 上の r 等間隔の点で C⁺ の適合式の残差 (dθ/dr − ν' dM/dr と −sinμ sinθ/(r sin(θ+μ)))。戻り (残差, 対照, 尺度, 状態)。"""
+    rl = d["rl"]
+    rs = np.linspace(d["D"]["r"], d["E"]["r"], n_pts)
+    f = rl.state_at(rs)
+    lhs = f["dth_dr"] - np.sqrt(f["M"] ** 2 - 1) * f["dlnV"] * f["dM_dr"]
+    src = -np.sin(f["mu"]) * np.sin(f["th"]) / (f["r"] * np.sin(f["th"] + f["mu"]))
+    scale = float(np.max(np.abs(lhs)))
+    return float(np.max(np.abs(lhs - src))), float(np.max(np.abs(lhs + src))), scale, f
+
+
+CROSS = dict(MB=2.2, thB=np.deg2rad(32.0))          # θ_B > μ_B (μ(2.2) = 27.0°) — D を B 寄りに取ると DE が θ = μ を跨ぐ
 for name, ig in (("CPG γ 1.2", ra.as_isentrope(1.2)), ("EXH", IG_EXH)):
     bd = synth_bd(ig)
-    d = ra._de_at(bd, 0.4 * bd.N, 0.0, 4e-3)
-    rl = d["rl"]
-    Ms = np.linspace(d["D"]["M"], d["E"]["M"], 200)
-    f = rl.eval(Ms)
-    st = ig.state(Ms)
-    lhs = f["thp"] - np.sqrt(Ms * Ms - 1) * st["dlnV_dM"]
-    src = -np.sin(f["mu"]) * np.sin(f["th"]) / f["r"] * f["rp"] / np.sin(f["th"] + f["mu"])
-    scale = float(np.max(np.abs(lhs)))
-    res = float(np.max(np.abs(lhs - src)))
-    flip = float(np.max(np.abs(lhs + src)))
-    check(f"T1b: DE (Φ₂・Φ₃ 一定) が軸対称の C⁺ の適合式を満たす ({name})", res <= 1e-12 * scale and flip >= 1e-2 * scale,
-          f"残差 {res:.1e}、符号反転の対照 {flip:.2e}、尺度 {scale:.2f}")
+    d = ra._de_at(bd, 0.4 * bd.N, 0.0, 0.02)
+    res, flip, scale, _ = de_compat(d)
+    check(f"T1b: DE (Φ₂・Φ₃ 一定、r パラメータ) が軸対称の C⁺ の適合式を満たす ({name})",
+          res <= 1e-12 * scale and flip >= 1e-2 * scale, f"残差 {res:.1e}、符号反転の対照 {flip:.2e}、尺度 {scale:.2f}")
+    # 跨ぐ D
+    bdx = synth_bd(ig, **CROSS)
+    dx_ = ra._de_at(bdx, 0.75 * bdx.N, 0.0, 0.02)
+    ok_line = bool(dx_["E"].get("ok"))
+    res, flip, scale, f = de_compat(dx_) if ok_line else (np.inf, 0.0, 1.0, None)
+    psi = (f["th"] - f["mu"]) if ok_line else np.array([0.0])
+    crosses = ok_line and psi[0] > 0.0 and psi[-1] < 0.0
+    check(f"T1b: 跨ぐ D (M_B 2.2・θ_B 32°、η_D 0.75 N) の DE が θ = μ を通って C⁺ の適合式を満たす ({name})",
+          crosses and res <= 1e-12 * scale and flip >= 1e-2 * scale,
+          f"θ−μ {np.rad2deg(psi[0]):+.3f}° → {np.rad2deg(psi[-1]):+.3f}°、残差 {res:.1e}、対照 {flip:.2e}、尺度 {scale:.2f}")
+    if crosses:
+        rl = dx_["rl"]
+        i = int(np.flatnonzero(np.diff(np.sign(psi)) != 0)[0])
+        rr = np.linspace(dx_["D"]["r"], dx_["E"]["r"], len(psi))
+        g = lambda r: float((lambda q: q["th"][0] - q["mu"][0])(rl.state_at([r])))
+        r_f = brentq(g, rr[i], rr[i + 1], xtol=1e-15, rtol=4 * np.finfo(float).eps)
+        q = rl.state_at([r_f])
+        ref = -np.tan(q["th"][0]) / (2.0 * r_f)
+        e_th = abs(q["dth_dr"][0] / ref - 1.0)
+        e_M = abs(q["dM_dr"][0]) * abs(1.0 / ref)
+        # 陰関数の微分の式は θ = μ で代数的に −tanθ/(2r) になるので、解いた線そのものの傾き (中心差分) でも確かめる
+        hh = 1e-4 * r_f
+        qq = rl.state_at([r_f - hh, r_f + hh])
+        fd_th = (qq["th"][1] - qq["th"][0]) / (2 * hh)
+        fd_M = (qq["M"][1] - qq["M"][0]) / (2 * hh)
+        e_fd = abs(fd_th / ref - 1.0)
+        e_fdM = abs(fd_M / ref)
+        check(f"T1b: 折り返し点 (θ = μ) で dθ/dr = −tanθ/(2r)・dM/dr = 0 ({name})",
+              e_th <= 1e-9 and e_M <= 1e-9 and e_fd <= 1e-6 and e_fdM <= 1e-6,
+              f"r_f {r_f:.6f}・M_f {q['M'][0]:.6f}・θ_f {np.rad2deg(q['th'][0]):.4f}°、点検値 {ref:.10f}: 式 {q['dth_dr'][0]:.10f} "
+              f"(相対 {e_th:.1e})・解いた線の中心差分 {fd_th:.10f} (相対 {e_fd:.1e})、|dM/dr|/|点検値|: 式 {e_M:.1e}・差分 {e_fdM:.1e}")
 
 # ================================================================ T2
+DR_T2 = (0.04, 0.02, 0.01)
+
+
+def t2_rel(bd, etas, p_a, dr):
+    """包絡線の恒等式の相対差の最大 (η_D の 5 点差分、hh 0.5) と、差分の全点の (θ_D − μ_D, θ_E − μ_E) の符号。"""
+    rr, sgn = [], []
+    for eta in etas:
+        hh = 0.5
+        v = {k: ra._de_at(bd, eta + k * hh, p_a, dr) for k in (-2, -1, 0, 1, 2)}
+        D5 = lambda q: (-q[2] + 8 * q[1] - 8 * q[-1] + q[-2]) / (12 * hh)
+        lhs = D5({k: w["F_part"] for k, w in v.items()})
+        rhs = 2 * np.pi * (v[0]["rl"].Phi3 * D5({k: w["E"]["x"] for k, w in v.items()})
+                           + v[0]["edge"] * D5({k: w["E"]["r"] for k, w in v.items()}))
+        rr.append(abs(lhs - rhs) / abs(lhs))
+        for w in v.values():
+            sgn.append((np.sign(w["D"]["th"] - np.arcsin(1 / w["D"]["M"])), np.sign(w["E"]["th"] - np.arcsin(1 / w["E"]["M"]))))
+    return max(rr), sgn
+
+
 for name, ig in (("CPG γ 1.2", ra.as_isentrope(1.2)), ("EXH", IG_EXH)):
-    bd = synth_bd(ig)
-    for p_a in (0.0, 2e-3):
-        rels = {}
-        for dM in (8e-3, 4e-3, 2e-3):
-            rr = []
-            for eta in (0.3 * bd.N, 0.5 * bd.N, 0.7 * bd.N):
-                hh = 0.5
-                v = {k: ra._de_at(bd, eta + k * hh, p_a, dM) for k in (-2, -1, 0, 1, 2)}
-                D5 = lambda q: (-q[2] + 8 * q[1] - 8 * q[-1] + q[-2]) / (12 * hh)
-                lhs = D5({k: w["F_part"] for k, w in v.items()})
-                rhs = 2 * np.pi * (v[0]["rl"].Phi3 * D5({k: w["E"]["x"] for k, w in v.items()})
-                                   + v[0]["edge"] * D5({k: w["E"]["r"] for k, w in v.items()}))
-                rr.append(abs(lhs - rhs) / abs(lhs))
-            rels[dM] = max(rr)
-        ok = all(v <= 1e-5 for v in rels.values()) and rels[2e-3] <= max(rels[8e-3], 1e-9) * 10
-        check(f"T2: 包絡線の恒等式 dF/dη = 2π[Φ₃ dL/dη + F(E) dr_E/dη] ({name}、p_a {p_a:g})", ok,
-              "相対差 " + "・".join(f"dM {k:g}: {v:.1e}" for k, v in rels.items()))
+    for label, bd, etas in (("", synth_bd(ig), None), ("跨ぐ D、", synth_bd(ig, **CROSS), (0.72, 0.75, 0.78))):
+        etas = [e * bd.N for e in (etas or (0.3, 0.5, 0.7))]
+        for p_a in (0.0, 2e-3):
+            rels, sg = {}, []
+            for dr in DR_T2:
+                rels[dr], sgn = t2_rel(bd, etas, p_a, dr)
+                sg += sgn
+            ok = all(v <= 1e-5 for v in rels.values()) and rels[DR_T2[-1]] <= max(rels[DR_T2[0]], 1e-9) * 10
+            extra = ""
+            if label:
+                cross_all = all(a > 0 and b < 0 for a, b in sg)
+                ok = ok and cross_all
+                extra = f"、差分の全点で θ_D > μ_D・θ_E < μ_E: {cross_all}"
+            check(f"T2: 包絡線の恒等式 dF/dη = 2π[Φ₃ dL/dη + F(E) dr_E/dη] ({label}{name}、p_a {p_a:g})", ok,
+                  "相対差 " + "・".join(f"dr {k:g}: {v:.1e}" for k, v in rels.items()) + extra)
+
+# ================================================================ (b) 中の根の枝の追跡
+# 添字でなく η_D の連続性で結ぶ: 低い η_D に根が 1 つ増えても、元の根は近い η_D の根へつながる (添字なら 10 → 5 へ跳ぶ)。
+# det_D の符号 (DE の族) が違う根は η_D が近くても結ばない (det_D = 0 を跨ぐと E が跳ぶので連続な枝ではない)。
+lab = ra._link_branches([[(10.0, 1)], [(5.0, 1), (12.0, 1)], [(4.0, 1), (14.0, 1)]], tol=5.0)
+check("(b) 枝: 根が増えて添字がずれても η_D の近い根を同じ枝に結ぶ", lab[0][0] == lab[1][1] == lab[2][1] and lab[1][0] == lab[2][0]
+      and lab[1][0] != lab[0][0], f"枝番号 {lab}")
+lab = ra._link_branches([[(34.4, 1)], [(52.9, -1)], [(53.6, -1)]], tol=24.0)
+check("(b) 枝: det_D の符号 (族) が違う根は |Δη_D| ≤ tol でも結ばない", lab[0][0] != lab[1][0] and lab[1][0] == lab[2][0],
+      f"枝番号 {lab} (θ_B 37°→38° の円弧 kernel の主枝の終わり η 34.4 と偽枝 η 52.9 の型)")
 
 # ================================================================ T1d (線と場のレベル)
 g = 1.2
 icpg = ra.as_isentrope(g)
 itp = ra.as_isentrope(constant_cp_gas(g, Tt=3000.0))
 bd_c, bd_t = synth_bd(icpg), synth_bd(itp)
-dc = ra._de_at(bd_c, 0.45 * bd_c.N, 0.0, 4e-3)
-dt = ra._de_at(bd_t, 0.45 * bd_t.N, 0.0, 4e-3)
+dc = ra._de_at(bd_c, 0.45 * bd_c.N, 0.0, 0.02)
+dt = ra._de_at(bd_t, 0.45 * bd_t.N, 0.0, 0.02)
 worst = max(abs(dc["E"][k] - dt["E"][k]) / max(abs(dc["E"][k]), 1.0) for k in ("x", "r", "th", "M", "T", "mdot"))
 check("T1d: 定比熱の擬似種の TP と CPG で、同じ合成 C⁻ からの DE の E と推力が 1e-8", worst <= 1e-8, f"最大相対差 {worst:.1e}")
 with warnings.catch_warnings():
@@ -176,31 +240,17 @@ check("T1d: 定比熱の擬似種の TP と CPG で、同じ円弧 kernel・Hall
       f"網の (x, r, θ, ν) の最大差 {dnet:.1e} (前線 {K + 1} 本)")
 
 # ================================================================ 回さないもの
-BLOCKED = {
-    "T1a": "CPG・円弧 kernel・R_t 0.382 のチャート照合 (80 % ベル) — 解が DE の |c| = 1 を越える側にあり、規則の下では根が無い",
-    "T1c": "自由 ε と固定 ε の等価 — 同上 (L_k の範囲)",
-    "T3": "保存 (閉合と推力の 2 会計) — design_rao が基準ケースの L_k で成立しない",
+NOT_RUN = {
+    "T1a": "記録 (合否なし) に格下げ — #6 (CFD ピン) の中で case/29 の R_t 0.382 の Euler を凍結源に CPG γ 1.2・1.3・1.4 (diagnostician 2026-10-11)",
+    "T1a′": "(D) 壁の MOC 推力 ≤ (M) の MOC 推力 — L_k 5 本の表 (#5 (d)) で A/B が決まってから",
+    "T1c": "自由 ε と固定 ε の等価 — 同上",
+    "T3": "保存 (閉合と推力の 2 会計) — 同上 (#5 (d) の表に n 161 の値は出す)",
     "T4": "停留性 — 同上",
-    "T5": "C2 (|g̃| ≤ 1e-8) — 同上",
-    "T6": "分解能 (n 161/321/641) — 同上。加えて Hall 初期線は R_t ≤ 1 で n ≤ 321 (moc_forward.HALL_N_MAX_RT_LE1)",
+    "T5": "C2 (|g̃| ≤ 1e-8) — 同上 (C2 kernel は A の後)",
+    "T6": "分解能 n 161/241/321 + n 321 の dr・m・q 細分 — 同上",
 }
-for k, v in BLOCKED.items():
+for k, v in NOT_RUN.items():
     print(f"未実施 {k}: {v}", flush=True)
 
-if "--blocked" in sys.argv:
-    from forge_design.geometry.wall_bell_c2 import cone15_length
-    Lc = cone15_length(50.0)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        line = ra._hall_line(1.0, IG_EXH, 161)
-    t0 = time.time()
-    net = ra.kernel_field(IG_EXH, 1.0, 0.0, line, 0.75, L_march=2.5 * Lc)
-    for fr in (0.6, 0.7, 0.8, 0.9, 1.0):
-        mid = ra.solve_thetaB(net, fr * Lc, eps=50.0, s_range=(0.40, min(0.75, net.s_need)), n_scan=13, n_scan_D=30)
-        sol = [(round(np.rad2deg(r["theta_B"]), 3), round(np.rad2deg(r["D_root"]["E"]["th"]), 3)) for r in mid["roots"]]
-        print(f"記録 (円弧 kernel・EXH・n 161・規則 |c| ≤ 1): L {fr:.0%} ({fr * Lc:.3f} r_t) → (θ_B, θ_E) {sol or '根なし'}"
-              + ("" if sol else f" — {mid['why'][:120]}"), flush=True)
-    print(f"  ({time.time() - t0:.0f} s)")
-
-print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (未実施 {len(BLOCKED)} 件: 方針の判断待ち)")
+print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (未実施 {len(NOT_RUN)} 件: L_k 5 本の表で A/B が決まってから)")
 sys.exit(1 if FAIL else 0)
