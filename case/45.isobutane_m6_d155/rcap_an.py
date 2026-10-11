@@ -59,7 +59,9 @@ with h5py.File(HERE / "_tr/q32_init.h5", "r") as h: xy = np.asarray(h["MESH/COOR
 ni, nj, S = XC.mesh_info(len(xy)); X = (xy[:, 0] / S).reshape(ni, nj); J = np.tile(np.arange(nj), (ni, 1))
 def dtl(r):
     with h5py.File(HERE / r / "res_20000.h5", "r") as h: return np.asarray(h["VALUE/dt_local"][:], float).reshape(ni, nj) if "VALUE/dt_local" in h else None
-if not OUT["undecidable"]:
+# 2026-10-11 (結果の前): 前提 2 (dt の縮小) だけが欠けても Δ の表は記録として計算する (判定は従来どおり判定不能)。データの欠け・非有限なら計算しない
+data_ok = not OUT["undecidable"]
+if data_ok:
     t50, t1 = dtl(ARMS[50]["D"][0]), dtl(ARMS[1]["D"][0])
     if t50 is None or t1 is None: und("dt_local が出力に無い")
     else:
@@ -74,7 +76,7 @@ tj = json.loads((HERE / "_band_ab/cold_pair/tr_judge.json").read_text())
 A0 = {int(k): v for k, v in tj["series"]["A"].items()}[0]
 yb_x, yb = XC.common_yb()
 verdict = None
-if not OUT["undecidable"]:
+if data_ok:
     ser = {}
     for r in ALLR:
         ser[r] = {}
@@ -82,7 +84,7 @@ if not OUT["undecidable"]:
             x = CS.snapshot(HERE / r, s, yb_x, yb)
             if x.get("nonfinite") or any(not np.isfinite(x[q]) for q in KEYS + (QW,)): und(f"{r}: step {s} の系列に非有限"); break
             ser[r][s] = {q: float(x[q]) for q in KEYS + (QW,)}
-if not OUT["undecidable"]:
+if data_ok and not any("系列に非有限" in m for m in OUT["undecidable"]):
     def dl(r, q, w):
         w0, w1 = WIN[w]; return 100 * (np.mean([ser[r][s][q] for s in ser[r] if w0 <= s <= w1]) - ser[r][0][q]) / abs(A0[q])
     pos, ra, rb = [], [], []
@@ -114,6 +116,7 @@ if not OUT["undecidable"]:
     elif all(ra): verdict = "結果 A: 上限 1 でこの期間の float と FP64 の差が小さい (方向別 dt の拡大が関わる。長期の一致・遅いモードの同定とはしない)"
     elif all(rb): verdict = "結果 B: 上限 1 でも大差が残る (上限の変更だけでは小さくならない)"
     else: verdict = "判別不能"
+if OUT["undecidable"]: verdict = None   # 前提の欠けがあれば Δ を計算していても判定はしない
 if verdict is None: verdict = "判定不能: " + "; ".join(OUT["undecidable"][:4])
 OUT["verdict"] = verdict
 print(f"== VERDICT §6.51: {verdict}")
