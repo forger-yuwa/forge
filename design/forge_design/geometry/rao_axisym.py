@@ -12,10 +12,10 @@ $\Phi_2=V\cos(\theta-\mu)/\cos\mu$ と $\Phi_3=r\rho V^2\sin^2\theta\tan\mu$ が
 
 **構成** (`design_rao`):
 
-1. kernel (`kernel_wall`): 曲率 $\kappa(s)=1/R_t+c\,s$ ($c$ = 曲率の勾配、$c=0$ が円弧 = 古典)。記録の族
+1. kernel (`kernel_wall`): 曲率 $\kappa(s)=1/R_t+c\,s$ ($c$ = 曲率の勾配、$c=0$ が円弧 = 古典で (M) の既定)。記録の族
    $\kappa(s)=1/R_t+(\kappa_B-1/R_t)\,s/s_B$ と同じ集合で、$(\kappa_B,\theta_B)\leftrightarrow(c,s_B)$ は
-   $\kappa_B=1/R_t+cs_B$、$\theta_B=s_B/R_t+cs_B^2/2$ の 1 対 1 (外側の根を $c$ で取るのは実装上の選択 — 同じ $c$ の中で B を
-   動かせるので kernel 場が 1 本で済む)。場を作るために B の先は**同じ曲線の延長** (曲率が連続、BD の下流側も滑らか — BD の上流側の
+   $\kappa_B=1/R_t+cs_B$、$\theta_B=s_B/R_t+cs_B^2/2$ の 1 対 1 ($c$ でパラメータ化するのは、同じ $c$ の中で B を動かせるので
+   kernel 場が 1 本で済むため。$c\ne0$ は記録用に明示して与える — 外の根は撤回、下の 5)。場を作るために B の先は**同じ曲線の延長** (曲率が連続、BD の下流側も滑らか — BD の上流側の
    片側極限は延長に依らない) を `s_lin` まで続け、その先は C2 の 5 次式で直線 $\theta_{st}$ へつないでどこまでも直線
    (`KernelWall` の docstring: 前進 MOC の壁の交点の検索と「壁の外」の検査に合わせた形。$\theta_{st}$ は初期線の壁点の
    マッハ角 − 5° 以下)。
@@ -35,11 +35,16 @@ $\Phi_2=V\cos(\theta-\mu)/\cos\mu$ と $\Phi_3=r\rho V^2\sin^2\theta\tan\mu$ が
    跨いで D を動かすと E が跳ぶ (内の根の検算で跳びを根と取り違えない)。$\det_D\approx0$ の D では線の出だしが $r$ に対して急
    なので、区間幅を半分ずつ (`SUB_MIN` まで) 縮めて引く。積分は $r$ 格子 (`dr`、軸の近くでは $r$ に比例) の区間ごとの
    Gauss–Legendre (T2 の「格子を倍に」の格子)。
-5. 入れ子の根: 内 `solve_D` ($\eta_D$: $r_E=\sqrt\varepsilon$、自由 $\varepsilon$ では縁条件)、中 `solve_thetaB` ($s_B$: $x_E=L$)、
-   外 `solve_kappaB` ($c$: C2 の関数 $\tilde g=(d\theta/d\sigma)_{DE,D}-(d\theta/d\sigma)_{kernel\,C^+,D}=0$)。
+5. 入れ子の根: 内 `solve_D` ($\eta_D$: $r_E=\sqrt\varepsilon$、自由 $\varepsilon$ では縁条件)、中 `solve_thetaB` ($s_B$: $x_E=L$)。
    すべて走査で符号変化を全部拾い、brentq で詰め、根で残差を検算する (値の跳びは根にしない)。**中の根の枝は
-   $\eta_D$ の連続性で追い** (添字では結ばない)、**受理条件 $\theta_E\le\theta_B$** を破る候補は理由つきで捨てて記録する
-   (plan §4.4 の訂正)。候補が複数なら MOC 推力 (制御面の会計) が最大のもの。
+   $\eta_D$ の連続性で追い** (添字では結ばない)、**受理条件は $\det_D>0$** (DE が D で流れを軸向きに曲げ始める族 = 古典の枝の
+   延長。2026-10-11 diagnostician、plan §4.4「主枝の受理規則」)。$\det_D\le0$ の候補は理由つきで捨てて記録する。旧条件
+   $\theta_E\le\theta_B$ と $de=(d\theta/d\sigma)_{DE,D}<0$ は候補ごとのフラグ (記録) で、受理には使わない。$\det_D>0$ なのに
+   $\theta_E>\theta_B$ の候補は `policy_holes` に出す (方針の穴として諮る)。候補が複数なら MOC 推力 (制御面の会計) が最大のもの。
+   **外の根 (C2) は撤回** (2026-10-11 diagnostician、plan §4.4「(M) は円弧 kernel・B で C1」): $\kappa_B$ を振る族には
+   $\tilde g=(d\theta/d\sigma)_{DE,D}-(d\theta/d\sigma)_{kernel\,C^+,D}=0$ の根が無い。`solve_kappaB` は $c$ を明示パラメータとして
+   受け取って中の根を解くだけ (走査も brentq もしない)。既定は円弧 ($c=0$)、$\tilde g$ と曲率の跳び
+   $\Delta\kappa_B=\kappa_W(B^+)-\kappa_B$ (円弧では $\kappa_W(B^+)-1/R_t$) は記録。
 6. 領域 BDE を Goursat 問題で埋め (`goursat_fill`、`interior_vec` を符号付きで — C⁻ を逆向きに積分)、壁 BE は各 C⁺ 線上で
    流量が $\dot m_{BD}(b_i\to B)$ に達する点 (`wall_from_massflow`、`moc_inverse.cplus_flux_wall` と同じ閉包)。
 7. 推力の 2 会計 (`thrust_accounts`): (a) 制御面 = (軸 → D) + DE、(b) 初期線 + kernel 壁 + BE 壁。(a) の軸 → D は BD の代わりに
@@ -68,8 +73,7 @@ TWO_PI = 2.0 * np.pi
 # 探索域の既定 (S1 の定義: plan §4.4・§5.1 #4)
 THETA_B_RANGE_DEG = (12.0, 50.0)      # B の壁角の探索域
 KAPPA_B_MIN = -0.9                    # κ_B ≥ KAPPA_B_MIN / R_t (κ_B → −1/R_t で s_B → ∞)
-C_SCAN = (0.0, -0.1, -0.2, -0.35, -0.5, -0.7, -0.9, -1.2, -1.6, -2.0)   # 外側の走査 (c·R_t²)
-N_SCAN_SB = 14                        # 中の走査点数
+N_SCAN_SB = 14                       # 中の走査点数
 N_SCAN_D = 36                         # 内の走査点数
 XTOL = 1e-12
 THETA_LIN_MAX_DEG = 75.0              # kernel 場の線形曲率の延長の終わりの壁角の上限
@@ -1025,6 +1029,25 @@ class _BranchLost(Exception):
     """brentq の途中の s_B で枝の D の根が `eta_tol` 以内に見つからない。"""
 
 
+def _accept_candidate(cand: dict, theta_B: float, theta_E: float, det_D: float, de: float) -> bool:
+    r"""中の根の候補の受理 (plan §4.4「主枝の受理規則」、diagnostician 2026-10-11): **受理条件は $\det_D>0$ だけ**
+    ($\det_D>0\iff$ DE が D で流れを軸向きに曲げ始める [$a>0$ の域で $d\theta/dr=-a/(r\det)$] — 古典の枝の延長)。
+    $\theta_E\le\theta_B$ と $de=(d\theta/d\sigma)_{DE,D}<0$ は記録のフラグ。$\det_D>0$ なのに $\theta_E>\theta_B$ なら
+    `policy_hole` に理由を書く (受理はする — 方針の穴として呼び出し側が止めて諮る)。`cand` に記録を足し、受理なら True。"""
+    cand["det_D"] = float(det_D)
+    cand["de"] = float(de)
+    cand["theta_E_le_theta_B"] = bool(theta_E <= theta_B)
+    cand["de_lt_0"] = bool(de < 0.0)
+    if det_D > 0.0:
+        if not theta_E <= theta_B:
+            cand["policy_hole"] = (f"det_D {det_D:+.4g} > 0 なのに θ_E {np.rad2deg(theta_E):.3f}° > θ_B {np.rad2deg(theta_B):.3f}° "
+                                   f"(plan §4.4 の受理規則の穴 — 諮る)")
+        return True
+    cand["why"] = (f"det_D {det_D:+.4g} ≤ 0 (受理条件 det_D > 0 — D で DE が流れを軸から離す向きに曲げる族、"
+                   f"θ_E {np.rad2deg(theta_E):.3f}°・θ_B {np.rad2deg(theta_B):.3f}°・de {de:+.4g})")
+    return False
+
+
 def solve_thetaB(net: KernelNet, L: float, *, eps: float | None, p_a: float = 0.0, dr: float = DR_DE,
                  s_range: tuple | None = None, n_scan: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D,
                  xtol: float = XTOL, eta_tol: float | None = None, n_bisect: int = 10) -> dict:
@@ -1036,8 +1059,11 @@ def solve_thetaB(net: KernelNet, L: float, *, eps: float | None, p_a: float = 0.
     $s_B$ では括りの両端の $\eta_D$ の線形補間に最も近い根を取る (`eta_tol` 以内に無ければその括りは `lost` に記録して捨てる)。
     根の検算は $|x_E-L|\le$ `ROOT_RESID_TOL`$\cdot\max(1,L)$ (超えたら値の跳びとして `lost`)。
 
-    **受理条件 $\theta_E\le\theta_B$** (B の後で壁が外へ開いて戻る偽枝を切る)。破れた候補は `rejected` に理由つきで残す。
-    戻り dict: `roots` (受理)、`rejected`、`lost`、`scan` (走査点ごとの全根)、`branches` (枝ごとの点列)、`eta_tol`、`why`。"""
+    **受理条件は $\det_D>0$** (`_accept_candidate`、plan §4.4「主枝の受理規則」)。$\det_D\le0$ の候補は `rejected` に理由つきで
+    残す。$\theta_E\le\theta_B$ と $de<0$ は候補ごとのフラグ (記録)。$\det_D>0$ なのに $\theta_E>\theta_B$ の候補は受理したうえで
+    `policy_holes` にも出す (方針の穴として呼び出し側が止めて諮る)。
+    戻り dict: `roots` (受理)、`rejected`、`lost`、`policy_holes`、`scan` (走査点ごとの全根)、`branches` (枝ごとの点列)、
+    `eta_tol`、`why`。"""
     s_lo, s_hi = s_range if s_range is not None else (net.s_wall[2], net.s_wall[net.k_need])
     tol = float(eta_tol) if eta_tol is not None else ETA_LINK_FRAC * net.n
     ss = np.linspace(s_lo, s_hi, n_scan)
@@ -1126,17 +1152,16 @@ def solve_thetaB(net: KernelNet, L: float, *, eps: float | None, p_a: float = 0.
                 continue
             cand = {"s_B": float(s0), "theta_B": thB, "kappa_B": float(net.wall.kappa(s0)), "bd": bd, "D_root": r,
                     "branch": b, "x_E_minus_L": v}
-            if thE <= thB:
+            if _accept_candidate(cand, thB, thE, float(r["rl"].det_D), r["rl"].dtheta_dsigma_D()):
                 roots.append(cand)
             else:
-                cand["why"] = (f"θ_E {np.rad2deg(thE):.3f}° > θ_B {np.rad2deg(thB):.3f}° "
-                               f"(受理条件 θ_E ≤ θ_B — B の後で壁が外へ開いて戻る枝)")
                 rejected.append(cand)
+    holes = [c for c in roots if c.get("policy_hole")]
     why = None
     if not roots:
         if rejected:
-            why = (f"受理条件 θ_E ≤ θ_B を満たす根なし (捨てた候補 {len(rejected)} 個: "
-                   + "、".join(f"θ_B {np.rad2deg(c['theta_B']):.3f}°・θ_E {np.rad2deg(c['D_root']['E']['th']):.3f}°"
+            why = (f"受理条件 det_D > 0 を満たす根なし (捨てた候補 {len(rejected)} 個: "
+                   + "、".join(f"θ_B {np.rad2deg(c['theta_B']):.3f}°・det_D {c['det_D']:+.4g}・θ_E {np.rad2deg(c['D_root']['E']['th']):.3f}°"
                               for c in rejected) + ")")
         else:
             why = (f"x_E − L の符号が変わる枝なし (θ_B {scan[0]['theta_B_deg']:.2f}〜{scan[-1]['theta_B_deg']:.2f}°、枝 "
@@ -1147,8 +1172,8 @@ def solve_thetaB(net: KernelNet, L: float, *, eps: float | None, p_a: float = 0.
     branches = {b: {"family_det_sign": br_fam[b],
                     "points": [{"s_B": p[0], "theta_B_deg": float(np.rad2deg(net.wall.theta(p[0]))), "eta_D": p[1],
                                 "x_E_minus_L": p[2]} for p in pts]} for b, pts in br_pts.items()}
-    return {"roots": roots, "rejected": rejected, "lost": lost, "scan": scan, "branches": branches, "eta_tol": tol,
-            "why": why}
+    return {"roots": roots, "rejected": rejected, "lost": lost, "policy_holes": holes, "scan": scan, "branches": branches,
+            "eta_tol": tol, "why": why}
 
 
 def candidate_summary(c: dict) -> dict:
@@ -1157,14 +1182,17 @@ def candidate_summary(c: dict) -> dict:
     out = {"theta_B_deg": float(np.rad2deg(c["theta_B"])), "s_B": float(c["s_B"]), "kappa_B": float(c["kappa_B"]),
            "eta_D": float(c["D_root"]["eta"]), "x_E": float(E["x"]), "r_E": float(E["r"]),
            "theta_E_deg": float(np.rad2deg(E["th"])), "M_E": float(E["M"]), "branch": c.get("branch"),
-           "det_D": float(c["D_root"]["rl"].det_D)}
-    if c.get("why"):
-        out["why"] = c["why"]
+           "det_D": float(c["D_root"]["rl"].det_D), "de": float(c["D_root"]["rl"].dtheta_dsigma_D()),
+           "theta_E_le_theta_B": bool(E["th"] <= c["theta_B"]), "de_lt_0": bool(c["D_root"]["rl"].dtheta_dsigma_D() < 0.0)}
+    for k in ("why", "policy_hole"):
+        if c.get(k):
+            out[k] = c[k]
     return out
 
 
 def gtilde(net: KernelNet, mid_root: dict) -> dict:
-    r"""C2 の根の関数 $\tilde g=(d\theta/d\sigma)_{DE,D}-(d\theta/d\sigma)_{kernel\,C^+,D}$ [rad/$r_t$]。kernel 側は網の論理座標で
+    r"""C2 の判定量 $\tilde g=(d\theta/d\sigma)_{DE,D}-(d\theta/d\sigma)_{kernel\,C^+,D}$ [rad/$r_t$] (0 なら B で曲率連続と等価。
+    2026-10-11 に C2 を撤回したので根は取らず記録する — plan §4.4)。kernel 側は網の論理座標で
     C⁺ が $(d\xi,d\eta)=(1,1)$ の向きなので $(\theta_\xi+\theta_\eta)/|(x_\xi+x_\eta,\,r_\xi+r_\eta)|$ (BD の両側で滑らかな延長場)。"""
     bd = mid_root["bd"]
     rt = mid_root["D_root"]
@@ -1368,84 +1396,65 @@ def _hall_line(R_t, ig, n):
         return hall_initial_line(R_t, ig.moc, n)
 
 
-def solve_kappaB(ig, R_t: float, L: float, *, eps: float | None, line: dict, p_a: float = 0.0, dr: float = DR_DE,
-                 c_scan=C_SCAN, n_scan_sb: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D, xtol_c: float = 1e-11,
-                 L_march: float | None = None, log=None) -> dict:
-    r"""外の根: $c$ ($\kappa_B=1/R_t+cs_B$) を C2 の関数 $\tilde g=0$ で決める。各 $c$ で kernel 場を作り直し、中の根を解き直す
-    (記録の「各評価で B・D を解き直す」)。`c_scan` ($c R_t^2$) で走査して符号変化をすべて候補に。戻り dict: `roots`
-    (各根の c・中の根・g̃)、`scan`、`why`。"""
+def solve_kappaB(ig, R_t: float, L: float, *, c: float, eps: float | None, line: dict, p_a: float = 0.0,
+                 dr: float = DR_DE, n_scan_sb: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D, L_march: float | None = None,
+                 log=None) -> dict:
+    r"""与えた $c$ ($\kappa(s)=1/R_t+cs$、$c=0$ が円弧) の kernel 場を作り、中の根を解いて各根の $\tilde g$ を記録する。
+    **外の根 (C2) は取らない** (2026-10-11 diagnostician、plan §4.4「(M) は円弧 kernel・B で C1」: $\kappa_B$ を振る族には
+    $\tilde g=0$ の根が無い — $\kappa_B$ の影響は BD を伝わる間にほぼ失われ、D での DE の横断微分は D の状態だけで決まる)。
+    $c$ は明示パラメータで、走査も brentq もしない (関数名は旧版の外の根の名残)。
+    戻り dict: `c`、`ok` (受理した中の根があるか)、`why`、`net`、`mid` (`solve_thetaB` の戻り。kernel 場が作れなければ無し)、
+    `roots` (各根の `c`・`net`・`mid_root`・`g`・`gt` [`gtilde` の dict])。"""
     ig = as_isentrope(ig)
+    c = float(c)
     L_march = L_march if L_march is not None else default_L_march(L)
-    cache = {}
-
-    def evaluate(c):
-        key = float(c)
-        if key in cache:
-            return cache[key]
-        rng = sB_range(R_t, c)
-        if rng is None:
-            cache[key] = {"c": c, "ok": False, "why": "s_B の探索域が空"}
-            return cache[key]
-        try:
-            net = kernel_field(ig, R_t, c, line, rng[1], L_march=L_march)
-        except RuntimeError as e:
-            cache[key] = {"c": c, "ok": False, "why": f"kernel 場: {e}"}
-            return cache[key]
-        s_lo = max(rng[0], float(net.s_wall[2]))
-        mid = solve_thetaB(net, L, eps=eps, p_a=p_a, dr=dr, s_range=(s_lo, min(rng[1], net.s_need)), n_scan=n_scan_sb, n_scan_D=n_scan_D)
-        if not mid["roots"]:
-            cache[key] = {"c": c, "ok": False, "why": "中の根なし: " + str(mid["why"]), "mid": mid, "net": net}
-            return cache[key]
-        gs = [gtilde(net, r) for r in mid["roots"]]
-        cache[key] = {"c": c, "ok": True, "net": net, "mid": mid, "g": [gg["g"] for gg in gs], "gt": gs}
-        if log:
-            log(f"  c·R_t² {c * R_t * R_t:+.6f}: θ_B {[round(np.rad2deg(r['theta_B']), 4) for r in mid['roots']]}° "
-                f"κ_B {[round(r['kappa_B'], 5) for r in mid['roots']]} g̃ {[f'{g:+.4e}' for g in cache[key]['g']]}")
-        return cache[key]
-
-    cs = [float(v) / (R_t * R_t) for v in c_scan]
-    scan = [evaluate(c) for c in cs]
+    rng = sB_range(R_t, c)
+    if rng is None:
+        return {"c": c, "ok": False, "why": "s_B の探索域が空", "roots": []}
+    try:
+        net = kernel_field(ig, R_t, c, line, rng[1], L_march=L_march)
+    except RuntimeError as e:
+        return {"c": c, "ok": False, "why": f"kernel 場: {e}", "roots": []}
+    s_lo = max(rng[0], float(net.s_wall[2]))
+    mid = solve_thetaB(net, L, eps=eps, p_a=p_a, dr=dr, s_range=(s_lo, min(rng[1], net.s_need)), n_scan=n_scan_sb,
+                       n_scan_D=n_scan_D)
     roots = []
-    nb = max((len(s["g"]) for s in scan if s["ok"]), default=0)
-    for br in range(nb):
-        vals = np.array([s["g"][br] if s["ok"] and len(s["g"]) > br else np.nan for s in scan])
-        for i in range(len(cs) - 1):
-            a, b = vals[i], vals[i + 1]
-            if np.isfinite(a) and np.isfinite(b) and a * b <= 0.0:
-                def f(c, br=br):
-                    e = evaluate(c)
-                    if not e["ok"] or len(e["g"]) <= br:
-                        return np.nan
-                    return e["g"][br]
-                try:
-                    c0 = brentq(f, cs[i], cs[i + 1], xtol=xtol_c, rtol=4 * np.finfo(float).eps, maxiter=100)
-                except ValueError:
-                    continue
-                e = evaluate(c0)
-                if e["ok"] and len(e["g"]) > br:
-                    roots.append({"c": c0, "net": e["net"], "mid_root": e["mid"]["roots"][br], "g": e["g"][br],
-                                  "gt": e["gt"][br], "branch": br})
-    why = None
-    if not roots:
-        why = "g̃ の符号が変わらない: " + "; ".join(
-            f"c·R_t² {s['c'] * R_t * R_t:+.3f}: " + (f"g̃ {[f'{g:+.3e}' for g in s['g']]}" if s["ok"] else s["why"])
-            for s in scan)
-    return {"roots": roots, "scan": [{k: v for k, v in s.items() if k in ("c", "ok", "why", "g")} for s in scan],
-            "why": why}
+    for r in mid["roots"]:
+        gt = gtilde(net, r)
+        roots.append({"c": c, "net": net, "mid_root": r, "g": gt["g"], "gt": gt})
+    if log:
+        log(f"  c·R_t² {c * R_t * R_t:+.6f}: θ_B {[round(np.rad2deg(r['theta_B']), 4) for r in mid['roots']]}° "
+            f"κ_B {[round(r['kappa_B'], 5) for r in mid['roots']]} g̃ {[f'{r['g']:+.4e}' for r in roots]}")
+    return {"c": c, "ok": bool(roots), "why": None if roots else "中の根なし: " + str(mid["why"]), "net": net, "mid": mid,
+            "roots": roots}
 
 
-def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "linear", n: int = 321,
-               line: dict | None = None, p_a: float = 0.0, dr: float | None = None, m: int | None = None,
-               q: int | None = None, c_scan=C_SCAN, L_march: float | None = None, n_scan_sb: int = N_SCAN_SB,
-               n_scan_D: int = N_SCAN_D, log=None) -> dict:
+def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "arc", c: float | None = None,
+               n: int = 321, line: dict | None = None, p_a: float = 0.0, dr: float | None = None, m: int | None = None,
+               q: int | None = None, L_march: float | None = None, n_scan_sb: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D,
+               log=None) -> dict:
     r"""与えた $(L,\varepsilon)$ の停留輪郭 (固定 $\varepsilon$。`eps=None` は自由 $\varepsilon$ で縁条件)。
 
-    `gas`: γ・`GasCPG`・`GasSemiPerfect`・`Isentrope`。`kernel`: `"linear"` (C2、$c$ を $\tilde g=0$ で) / `"arc"` (古典、
-    曲率半径 $R_t$ の円弧、C2 は課さない)。`line`: 初期線 (既定 Hall の $n$ 点。$R_t\le1$ は $n\le321$)。
+    `gas`: γ・`GasCPG`・`GasSemiPerfect`・`Isentrope`。`kernel`: **既定 `"arc"`** (古典、曲率半径 $R_t$ の円弧 = $c=0$。
+    (M) の標準 — plan §4.4「(M) は円弧 kernel・B で C1」) / `"linear"` (曲率 $1/R_t+cs$ の kernel、`c` を明示して与える。
+    C2 の根は取らない [撤回] — 記録用)。`line`: 初期線 (既定 Hall の $n$ 点。$R_t\le1$ は $n\le321$)。
     `m`・`q`: Goursat の BD・DE の点数 (既定 n/2)、`dr`: DE の r 格子 (既定 3.2/n — n 161 で 0.02)。
+    中の根の受理条件は $\det_D>0$ (`solve_thetaB`)。B で C1 (接線連続) で、曲率の跳び `dkappa_B` $=\kappa_W(B^+)-\kappa_B$
+    (円弧では $\kappa_W(B^+)-1/R_t$) と C2 の判定量 `g_tilde` を記録する。
     戻り dict: `status` (`ok` / `infeasible`)、`why`、`wall` (kernel + BE の [x, r, θ, M])、`theta_B`・`theta_max`・`theta_E`
-    [rad]・`kappa_B`・`c`・`s_B`・`eta_D`・`D`・`E`・`thrust`・`closure`・`g_tilde`・`kappaW_B`・`candidates`・`timing`。
-    円弧 kernel では中の根の記録 (`rejected` = 受理条件 θ_E ≤ θ_B で捨てた候補、`lost`、`branches`、`scan_mid`) も返す。"""
+    [rad]・`kappa_B`・`c`・`s_B`・`eta_D`・`D`・`E`・`thrust`・`closure`・`g_tilde`・`kappaW_B`・`dkappa_B`・`det_D`・`de`・
+    `theta_E_le_theta_B`・`de_lt_0`・`candidates`・`timing`、中の根の記録 (`rejected` = 受理条件 det_D > 0 で捨てた候補、
+    `policy_holes` = det_D > 0 なのに θ_E > θ_B の受理候補 [方針の穴、空でなければ諮る]、`lost`、`branches`、`scan_mid`)。"""
+    if kernel == "arc":
+        if c is not None and float(c) != 0.0:
+            raise ValueError("design_rao: kernel='arc' は c = 0 (c を与えるなら kernel='linear')")
+        c = 0.0
+    elif kernel == "linear":
+        if c is None:
+            raise ValueError("design_rao: kernel='linear' は c (曲率の勾配) を明示する — 外の根 (C2) は撤回 (plan §4.4)")
+        c = float(c)
+    else:
+        raise ValueError("design_rao: kernel は 'arc' か 'linear'")
     t0 = time.time()
     ig = as_isentrope(gas)
     L_march = L_march if L_march is not None else default_L_march(L)
@@ -1455,31 +1464,18 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "l
     dr = dr if dr is not None else 3.2 / n
     m = m if m is not None else max(n // 2, 20)
     q = q if q is not None else max(n // 2, 20)
-    base = {"R_t": R_t, "L": L, "eps": eps, "kernel": kernel, "n": n, "p_a": p_a, "dr": dr, "m": m, "q": q,
-            "gas": ig.kind, "gamma_star": ig.gamma_star}
-    if kernel == "arc":
-        rng = sB_range(R_t, 0.0)
-        net = kernel_field(ig, R_t, 0.0, line, rng[1], L_march=L_march)
-        mid = solve_thetaB(net, L, eps=eps, p_a=p_a, dr=dr, s_range=(max(rng[0], float(net.s_wall[2])), min(rng[1], net.s_need)),
-                           n_scan=n_scan_sb, n_scan_D=n_scan_D)
-        mid_rec = {"rejected": [candidate_summary(c) for c in mid["rejected"]], "lost": mid["lost"],
-                   "branches": mid["branches"], "scan_mid": mid["scan"], "eta_tol": mid["eta_tol"]}
-        if not mid["roots"]:
-            return {**base, "status": "infeasible", "why": "中の根なし: " + str(mid["why"]), **mid_rec,
-                    "timing": {"total_s": time.time() - t0}}
-        cands = [{"c": 0.0, "net": net, "mid_root": r, "g": gtilde(net, r)["g"], "gt": gtilde(net, r)} for r in mid["roots"]]
-        scan_outer = None
-    elif kernel == "linear":
-        ko = solve_kappaB(ig, R_t, L, eps=eps, line=line, p_a=p_a, dr=dr, c_scan=c_scan, L_march=L_march,
-                          n_scan_sb=n_scan_sb, n_scan_D=n_scan_D, log=log)
-        mid_rec = {}
-        if not ko["roots"]:
-            return {**base, "status": "infeasible", "why": "C2 の根が括れない: " + str(ko["why"]),
-                    "scan_outer": ko["scan"], "timing": {"total_s": time.time() - t0}}
-        cands = ko["roots"]
-        scan_outer = ko["scan"]
-    else:
-        raise ValueError("design_rao: kernel は 'linear' か 'arc'")
+    base = {"R_t": R_t, "L": L, "eps": eps, "kernel": kernel, "c": c, "n": n, "p_a": p_a, "dr": dr, "m": m, "q": q,
+            "gas": ig.kind, "gamma_star": ig.gamma_star, "accept_rule": "det_D > 0"}
+    ko = solve_kappaB(ig, R_t, L, c=c, eps=eps, line=line, p_a=p_a, dr=dr, L_march=L_march, n_scan_sb=n_scan_sb,
+                      n_scan_D=n_scan_D, log=log)
+    mid = ko.get("mid")
+    mid_rec = {} if mid is None else {
+        "rejected": [candidate_summary(cc) for cc in mid["rejected"]], "lost": mid["lost"],
+        "policy_holes": [candidate_summary(cc) for cc in mid["policy_holes"]],
+        "branches": mid["branches"], "scan_mid": mid["scan"], "eta_tol": mid["eta_tol"]}
+    if not ko["roots"]:
+        return {**base, "status": "infeasible", "why": ko["why"], **mid_rec, "timing": {"total_s": time.time() - t0}}
+    cands = ko["roots"]
     # 候補ごとに Goursat → 壁 → 推力。複数なら制御面の推力が最大
     built = []
     for cd in cands:
@@ -1501,6 +1497,7 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "l
     full = np.vstack([kern, BE[1:]]) if abs(BE[0, 0] - xk[-1]) < 1e-6 else np.vstack([kern, BE])
     E = mr["D_root"]["E"]
     thmax_k = float(np.max(thk))
+    kW = wall_curvature_B(BE)
     out = {**base, "status": "ok", "why": None, "wall": full, "kernel_wall": kern, "BE": BE,
            "theta_B": mr["theta_B"], "theta_max": max(thmax_k, float(np.max(BE[:, 2]))), "theta_E": E["th"],
            "kappa_B": mr["kappa_B"], "c": cd["c"], "s_B": s_B, "x_B": float(xk[-1]), "r_B": float(rk[-1]),
@@ -1508,13 +1505,14 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "l
            "edge": mr["D_root"].get("edge"), "Phi2": mr["D_root"]["rl"].Phi2, "Phi3": mr["D_root"]["rl"].Phi3,
            "thrust": best["thrust"], "closure": best["wl"]["closure"], "streamline_resid_max": best["wl"]["streamline_resid_max"],
            "n_wall_missing": best["wl"]["n_missing"], "goursat_nfail": best["nfail"],
-           "g_tilde": cd["gt"], "kappaW_B": wall_curvature_B(BE),
+           "g_tilde": cd["gt"], "kappaW_B": kW, "dkappa_B": kW - mr["kappa_B"],
            "eta_D": float(mr["D_root"]["eta"]), "eta0_BD": int(mr["bd"].eta0), "N_BD": int(mr["bd"].N),
-           "det_D": float(mr["D_root"]["rl"].det_D), "branch": mr.get("branch"),
+           "det_D": mr["det_D"], "de": mr["de"], "theta_E_le_theta_B": mr["theta_E_le_theta_B"], "de_lt_0": mr["de_lt_0"],
+           "branch": mr.get("branch"),
            "candidates": [{**candidate_summary(b["cd"]["mid_root"]), "c": b["cd"]["c"], "F_cs": b["thrust"]["F_cs"],
-                           "rel_diff": b["thrust"]["rel_diff"]} for b in built],
+                           "rel_diff": b["thrust"]["rel_diff"], "g_tilde": b["cd"]["g"]} for b in built],
            **mid_rec,
-           "scan_outer": scan_outer, "net_K": net.K, "line_n": n, "_net": net, "_mid": mr, "_goursat": best["P"],
+           "net_K": net.K, "line_n": n, "_net": net, "_mid": mr, "_goursat": best["P"],
            "timing": {"total_s": time.time() - t0}}
     F1 = ig.ideal_1d(eps if eps is not None else E["r"] ** 2, p_a)
     out["F_1D"] = F1["F"]

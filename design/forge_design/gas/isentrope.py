@@ -1,7 +1,7 @@
 r"""等エントロピー膨張の状態 (音速単位) と、MOC 用の高精度な $\nu(M)$・$M(\nu)$・質量流束密度。
 
 計画: plans/active/tooling-nozzle-bell-two-mode.md §4.4 (S1) ・§5.1 #5。③ベルの (M) モード (TP の Rao、
-`geometry/rao_axisym.py`) が、制御面 DE の式 ($\Phi_2,\Phi_3$ が一定) とその解析微分、C2 の根の関数 $\tilde g$ に使う。
+`geometry/rao_axisym.py`) が、制御面 DE の式 ($\Phi_2,\Phi_3$ が一定) とその解析微分、B の曲率の判定量 $\tilde g$ (記録) に使う。
 
 **入力は既存のガスモデルの公開メソッドだけ** (`gas/semiperfect.py` は他ブランチも触るので本体は変えない):
 

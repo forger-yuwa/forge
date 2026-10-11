@@ -18,11 +18,16 @@
   **跨ぐ D の組** (上と同じ合成、η_D 0.72〜0.78 N — 5 点の差分の全点で θ_D > μ_D・θ_E < μ_E) も同じ条件で必須。
 - **(b) 枝の追跡** (`solve_thetaB`、plan §4.4 の訂正): `_link_branches` が η_D の連続性で結ぶこと (添字がずれる場合) と、
   det_D の符号 (DE の族) の違う根を結ばないこと。
+- **(e) 受理規則と kernel の既定** (plan §4.4「主枝の受理規則」「(M) は円弧 kernel・B で C1」、diagnostician 2026-10-11):
+  `_accept_candidate` は det_D > 0 だけで受理し、θ_E ≤ θ_B と de < 0 は記録のフラグ、det_D > 0 かつ θ_E > θ_B は受理して
+  `policy_hole` を立てる (4 象限)。`design_rao` の既定は円弧 (`kernel="arc"`)、`linear` は c の明示が要る、`solve_kappaB` は
+  c を明示パラメータとして受け取るだけ (外側の走査・brentq の引数が無い)。
 - **T1d** (定比熱の擬似種で CPG 生成器と 1e-8): 同じ D からの DE の E と推力、同じ壁・初期線の kernel 場 (前進 MOC の網)。
 
-**この版で回さないもの**: T1c・T3・T4・T5・T6・T1a′ は `design_rao` を基準ケースの L_k で回す試験で、円弧 kernel・n 161 の
-L_k 5 本の表 (`case/68.bell_two_mode/rao_m/run_rao_lk.py`、plan §5.1 #5 (d)) を見て親と上位が A/B を決めてから
-(plan §5.1 #5 の **A**)。T1a は記録 (合否なし) に格下げ (#6 で CFD ピンの後)。
+**この版で回さないもの**: T3・T5・T6 は `design_rao` を基準ケースの L_k で回す run で、ここでは回さない —
+`case/68.bell_two_mode/rao_m/run_rao_t6.py` (円弧 kernel・L100・L70 × n 161/241/321 + n 321 の dr 半分・m・q 倍) が
+表 `rao_t6.json`・`rao_t6.csv` を出し、合否は親と上位が判定する (plan §6 V1 の T3・T5・T6、2026-10-11 改)。
+T5 は C2 を課さない記録 (g̃ と Δκ_B)。T1c・T4・T1a′ は T6 の後 (§5.1 #5 (g))。T1a は記録 (合否なし) に格下げ (#6 で CFD ピンの後)。
 
 実行: design/.venv-opt の Python で `python design/tests/run_rao_axisym_tests.py`。
 """
@@ -218,6 +223,42 @@ lab = ra._link_branches([[(34.4, 1)], [(52.9, -1)], [(53.6, -1)]], tol=24.0)
 check("(b) 枝: det_D の符号 (族) が違う根は |Δη_D| ≤ tol でも結ばない", lab[0][0] != lab[1][0] and lab[1][0] == lab[2][0],
       f"枝番号 {lab} (θ_B 37°→38° の円弧 kernel の主枝の終わり η 34.4 と偽枝 η 52.9 の型)")
 
+# ================================================================ (e) 受理規則と kernel の既定
+# 受理は det_D > 0 だけ。θ_E ≤ θ_B・de < 0 はフラグ。det_D > 0 かつ θ_E > θ_B は受理 + policy_hole (方針の穴として諮る)。
+import inspect  # noqa: E402
+
+d2r = np.deg2rad
+quad = {}
+for name, (det, thB, thE, de) in {"det>0・θE≤θB": (0.1, d2r(36.0), d2r(11.0), -0.12),
+                                  "det<0・θE≤θB (θ_B ≥ 40.8° の偽枝の型)": (-0.005, d2r(41.0), d2r(40.5), 8.8),
+                                  "det>0・θE>θB": (0.1, d2r(36.0), d2r(37.0), -0.12),
+                                  "det<0・θE>θB": (-0.3, d2r(38.0), d2r(41.0), 2.0)}.items():
+    cd = {}
+    quad[name] = (ra._accept_candidate(cd, thB, thE, det, de), cd)
+ok_e = (quad["det>0・θE≤θB"][0] and not quad["det>0・θE≤θB"][1].get("policy_hole")
+        and not quad["det<0・θE≤θB (θ_B ≥ 40.8° の偽枝の型)"][0] and "det_D" in quad["det<0・θE≤θB (θ_B ≥ 40.8° の偽枝の型)"][1]["why"]
+        and quad["det>0・θE>θB"][0] and bool(quad["det>0・θE>θB"][1].get("policy_hole"))
+        and not quad["det<0・θE>θB"][0]
+        and all(set(("det_D", "de", "theta_E_le_theta_B", "de_lt_0")) <= set(c) for _, c in quad.values())
+        and [c["theta_E_le_theta_B"] for _, c in quad.values()] == [True, True, False, False]
+        and [c["de_lt_0"] for _, c in quad.values()] == [True, False, True, False])
+check("(e) 受理規則: det_D > 0 だけで受理、θ_E ≤ θ_B・de < 0 はフラグ、det_D > 0 かつ θ_E > θ_B は受理 + policy_hole (4 象限)",
+      ok_e, "; ".join(f"{k}: 受理 {v[0]}・hole {bool(v[1].get('policy_hole'))}" for k, v in quad.items()))
+sig_d = inspect.signature(ra.design_rao).parameters
+sig_k = inspect.signature(ra.solve_kappaB).parameters
+api_ok = (sig_d["kernel"].default == "arc" and sig_d["c"].default is None and "c_scan" not in sig_d
+          and sig_k["c"].default is inspect.Parameter.empty and sig_k["c"].kind is inspect.Parameter.KEYWORD_ONLY
+          and not any(k in sig_k for k in ("c_scan", "xtol_c")) and not hasattr(ra, "C_SCAN"))
+raised = {}
+for label, kw in (("linear・c 無し", {"kernel": "linear"}), ("arc・c ≠ 0", {"kernel": "arc", "c": -0.35})):
+    try:
+        ra.design_rao(IG_EXH, R_t=1.0, L=22.66, eps=50.0, **kw)
+        raised[label] = False
+    except ValueError:
+        raised[label] = True
+check("(e) kernel の既定: design_rao は円弧が既定、linear は c の明示が要る、solve_kappaB は c を受け取るだけ (外側の走査・brentq なし)",
+      api_ok and all(raised.values()), f"既定 kernel {sig_d['kernel'].default!r}、ValueError {raised}")
+
 # ================================================================ T1d (線と場のレベル)
 g = 1.2
 icpg = ra.as_isentrope(g)
@@ -242,15 +283,15 @@ check("T1d: 定比熱の擬似種の TP と CPG で、同じ円弧 kernel・Hall
 # ================================================================ 回さないもの
 NOT_RUN = {
     "T1a": "記録 (合否なし) に格下げ — #6 (CFD ピン) の中で case/29 の R_t 0.382 の Euler を凍結源に CPG γ 1.2・1.3・1.4 (diagnostician 2026-10-11)",
-    "T1a′": "(D) 壁の MOC 推力 ≤ (M) の MOC 推力 — L_k 5 本の表 (#5 (d)) で A/B が決まってから",
-    "T1c": "自由 ε と固定 ε の等価 — 同上",
-    "T3": "保存 (閉合と推力の 2 会計) — 同上 (#5 (d) の表に n 161 の値は出す)",
-    "T4": "停留性 — 同上",
-    "T5": "C2 (|g̃| ≤ 1e-8) — 同上 (C2 kernel は A の後)",
-    "T6": "分解能 n 161/241/321 + n 321 の dr・m・q 細分 — 同上",
+    "T1a′": "(D) 壁の MOC 推力 ≤ (M) の MOC 推力 — T6 の後 (§5.1 #5 (g))",
+    "T1c": "自由 ε と固定 ε の等価 — T6 の後",
+    "T3": "保存 (推力の 2 会計の差・閉合 |W_m − E|) — T6 の系列で判定 (run_rao_t6.py の表、合否は親と上位)",
+    "T4": "停留性 — T6 の後 (§5.1 #5 (g))",
+    "T5": "C2 は課さない (2026-10-11 改) — g̃ と Δκ_B を T6 の系列 (n 161/241/321) で記録 (run_rao_t6.py)",
+    "T6": "分解能 n 161/241/321 + n 321 の dr 半分・m・q 倍 (円弧・L100・L70) — run_rao_t6.py の表、合否は親と上位",
 }
 for k, v in NOT_RUN.items():
     print(f"未実施 {k}: {v}", flush=True)
 
-print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (未実施 {len(NOT_RUN)} 件: L_k 5 本の表で A/B が決まってから)")
+print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (未実施 {len(NOT_RUN)} 件: 理由は各行)")
 sys.exit(1 if FAIL else 0)
