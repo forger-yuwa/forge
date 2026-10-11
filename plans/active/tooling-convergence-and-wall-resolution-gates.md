@@ -150,6 +150,8 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | 9 | 実ケース展開 ✅: **`case/26`** (cell・壁関数) が設計 3 水準を再現 (y1 4.35/115/356 µm → y1+ 0.79/25.5/66.5)、**`case/48`** (冷却平板) が等温壁で断熱の 5 倍 (0.101→0.506) = 既知挙動と一致、**`case/49`** (node・低 Re) で `cyl_top` の全面 y1+>1 を検出。⏳ TP ケースは未 |
 | 10 | AGENTS.md に「壁解像確認 (必須)」節 + 収束節に判定区間と判定不能の 2 項目 ✅ / `methods/turbulence/implementation.md` §3.7.x に `ypls`/`utau` の mode 別定義と node での退化を記載 ✅ / `viscousFlux_d.cu` に同趣旨のコメント ✅ (コード変更なし=解はビット不変) |
 | 11 | `check_cavity_steady.py` を `classify_series` 経由に ✅ / `cavity_eval` の y1+ は参考値と明記し正式判定は共通ツールへ ✅ / ⏳ `stack_residuals.py` は #6 の段情報が入ってから統合 |
+| 12 | **`check_quasisteady.py` が要求量を黙って落とす (2026-10-12 移管、te-wake plan R2h(6)、codex diagnose [`notes/reviews/2026-10-12-sern-r2c-and-sweep-diagnose.md`](../../notes/reviews/2026-10-12-sern-r2c-and-sweep-diagnose.md))**: `:418` が適用できない量を除き、空集合でも ALL STEADY になりうる (`--quantity asym` を非対称格子の case/46 run_0198 に当てて実測)。`:447` の `wall_model_tau` も utau の無い壁を飛ばして残りで平均する。要求量ごとの適用可否を返し、未評価を ALL STEADY にしない。#5 の「`sern_gates.py` は自動継承」は残差については成り立っていなかった (te-wake plan R2h1 で修正) | 未着手 |
+| 13 | **`check_floor_events.py` の最終 step 照合 (2026-10-12 移管、te-wake plan R2h(7))**: `:149` は res_*.h5 が無いと最終 step を照合しない。照合を要求するモードでは場なしを判定不能にし、記録単体の監査では照合未実施を明示する (SERN の生産ゲートは `sern_gates` が保存場なしを拒否するので現状は塞がっている) | 未着手 |
 
 ## 6. 検証
 
