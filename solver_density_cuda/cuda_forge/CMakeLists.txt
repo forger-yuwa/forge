@@ -104,6 +104,11 @@ add_library(cuda_forge STATIC
     # 診断 FORGE_DIAG_QACC_ADOPT (同 plan §5.1 #18・§6.34、既定 off。qAccumulatorFP64 の reconcile が採用する節点を量ごとに書く)
     qaccAdoptDiag.cpp
     qaccAdoptDiag.hpp
+    # 診断 FORGE_DIAG_QUANTIZE_STATE (同 plan §5.1 #19・§6.36、既定 off。FP64 のビルドで step の末尾に保存量を float32 に丸める)
+    quantizeStateDiag.cpp
+    quantizeStateDiag.hpp
+    quantizeStateDiag_d.cu
+    quantizeStateDiag_d.cuh
     # node の壁関数・WMLES の代表内点 (境界面ごと、読み込み後に double の値の位置から 1 回作る。同 plan §4.2 3.)
     wallRepPoint_d.cu
     wallRepPoint_d.cuh

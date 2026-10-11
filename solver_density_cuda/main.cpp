@@ -73,6 +73,7 @@
 #include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
 #include "cuda_forge/stageDumpDiag.hpp"    // 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30)
 #include "cuda_forge/qaccAdoptDiag.hpp"    // 診断 FORGE_DIAG_QACC_ADOPT (同 plan §5.1 #18・§6.34)
+#include "cuda_forge/quantizeStateDiag.hpp" // 診断 FORGE_DIAG_QUANTIZE_STATE (同 plan §5.1 #19・§6.36)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2361,6 +2362,8 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     if (eosCoupled) {
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // roY_N = roY
+            // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off): 自己点検の step の次の step なら roY{s}N・M の表せない値を数える (読むだけ)
+            if (quantizeStateDiag::speciesPending()) quantizeStateDiag::afterSpeciesUpdateOuter(s.msh , s.var , s.iStep);
             speciesEOSCrossPredictInject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
     }
@@ -2409,6 +2412,8 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                 speciesEOSFinalCommit_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             } else {
                 speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // roY_N = roY_M = roY
+                // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off): 自己点検の step の次の step なら roY{s}N・M の表せない値を数える (読むだけ)
+                if (quantizeStateDiag::speciesPending()) quantizeStateDiag::afterSpeciesUpdateOuter(s.msh , s.var , s.iStep);
                 if (speciesImplicitCoupled(s.cfg, s.var)) {
                     speciesImplicitDPLURSolve_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
                 } else {
@@ -2535,9 +2540,14 @@ void advanceImplicitSteady(StepContext& s)
     // 診断 FORGE_DIAG_QACC_ADOPT (既定 off): 対象の step なら reconcile (updateVariablesOuter) の直前に Q と Qacc を読み、
     // 量ごとの採用の mask (Q != (float)Qacc) を書く (読むだけ)
     if (qaccAdoptDiag::enabled()) qaccAdoptDiag::beforeReconcile(s.cfg , s.msh , s.var , s.iStep);
+    // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off、FP64 のビルド専用): 保存量を全 CV で float32 に丸めて戻す (次の step の基準 Q_N・Q_M は
+    // この値から写される)
+    if (quantizeStateDiag::enabled()) quantizeStateDiag::quantize(s.cuda_cfg , s.msh , s.var);
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });
+    // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off): 自己点検の step なら Q・Q_N・Q_M の表せない値を数える (読むだけ)
+    if (quantizeStateDiag::enabled()) quantizeStateDiag::afterUpdateOuter(s.msh , s.var , s.iStep);
     // FP64 影アキュムレータの**計器**: reconcile が採用したセル数 (§4.4)。
     // 「上書き型の writer に書き換えられた保存量の数」であり、run ごとに**期待値を事前登録して
     // 突き合わせる** (case/56 なら等温壁ノード数、case/09 や case/44 なら 0)。
@@ -3459,6 +3469,10 @@ int main(int argc, char** argv) {
             }
         }
     }
+    // 診断 FORGE_DIAG_QUANTIZE_STATE=1 (+ FORGE_DIAG_QUANTIZE_STATE_CHECK=<step,...>、既定 1。既定 off): FP64 のビルドで定常の陰解法の
+    // 各 step の末尾に保存量を float32 に丸める (plan architecture-float-state-double-geometry §5.1 #19・§6.36)。対応外の構成は
+    // ここで止める (float のビルド・定常の陰解法以外・qAccumulatorFP64 1・cell・gpu 0)。
+    quantizeStateDiag::init(cfg, msh, var, scalarResidualEnabled(cfg));
 
     // line-implicit (plans/active/time_integration-line-implicit.md): 壁法線ラインを構築。
     // blockDPLUR==1 専用・完全前処理 (lowMachPrecond>=2) とは併用不可。
@@ -3548,6 +3562,7 @@ int main(int argc, char** argv) {
     commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
     stageDumpDiag::finalize();   // 対象の step に達しなかったらその旨を出す (無効なら何もしない)
     qaccAdoptDiag::finalize();   // 書かなかった対象の step があればその旨を出す (無効なら何もしない)
+    quantizeStateDiag::finalize();   // 点検しなかった対象の step があればその旨を出す (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
