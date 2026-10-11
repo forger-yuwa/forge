@@ -345,19 +345,32 @@ def cmd_post_ab(a):
     x_E = float(json.loads((Path(a.wall_ref) / "prepare_info.json").read_text())["x_E"])
     out = {"x_E": x_E, "ref": {"name": "Gpost", "nj": GPOST[0], "c": GPOST[1]}, "truth": a.truth}
     arrays = {}
-    for name, nj, c in grid_list(ref=True):
-        m = mesh_block(nj, c); P, prm = generate(wall, m)
+    # x 方向を粗くした格子 (Grefx、§4.21) は列の x が G0 と違うので、G0 の隣り合う 2 列の d の補間を x で線形に混ぜた連続の場を載せる
+    # (G0 の列の上ではその列の補間そのもの。列の x が G0 と一致する格子は従来どおり)
+    for name, nj, c, xc in [g + (False,) for g in grid_list(ref=True)] + [("Grefx", YAML_NJ["Gref"], REF_CAP, True)]:
+        m = mesh_block(nj, c, xcoarse=xc); P, prm = generate(wall, m)
         S, q = radial_fracs_all(prm, wall)
-        d = rw[:, None] * (1.0 - S)
-        V = {k: np.empty((NI, prm.nj)) for k in keys}
-        for i in range(NI):
-            for k in keys:
-                V[k][i] = interp[i][k](d[i])
+        if prm.ni == NI:
+            d = rw[:, None] * (1.0 - S)
+            V = {k: np.empty((NI, prm.nj)) for k in keys}
+            for i in range(NI):
+                for k in keys:
+                    V[k][i] = interp[i][k](d[i])
+        else:
+            xs = mesh2d._x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width, density_table=prm.x_density_table)
+            d = wall.r(xs)[:, None] * (1.0 - S)
+            i0 = np.clip(np.searchsorted(xs0, xs, side="right") - 1, 0, NI - 2); wx = np.clip((xs - xs0[i0]) / (xs0[i0 + 1] - xs0[i0]), 0.0, 1.0)
+            V = {k: np.empty((prm.ni, prm.nj)) for k in keys}
+            for i in range(prm.ni):
+                for k in keys:
+                    # d は軸側の端で隣の G0 の列の範囲をわずかに超えうる (r_w が列で違う) ので、各列の範囲に切り詰める (Akima は範囲外で NaN)
+                    V[k][i] = ((1.0 - wx[i]) * interp[i0[i]][k](np.minimum(d[i], d0[i0[i]][-1]))
+                               + wx[i] * interp[i0[i] + 1][k](np.minimum(d[i], d0[i0[i] + 1][-1])))
         xy = (P.reshape(-1, 2) * wall.scale)
-        rec = {"nj": prm.nj, "q_col_max": float(q.max())}
+        rec = {"nj": prm.nj, "ni": prm.ni, "q_col_max": float(q.max())}
         for prof in ("linear", "pchip"):
             o = XC.reduce_fields(xy, V["ro"].ravel(), V["Ux"].ravel(), V["Uy"].ravel(), V["T"].ravel(), V["k"].ravel(), False,
-                                 NI, prm.nj, wall.scale, yb_x, yb, profile=prof)
+                                 prm.ni, prm.nj, wall.scale, yb_x, yb, profile=prof)
             sfx = "" if prof == "linear" else "_pchip"
             rec["Q_w" + sfx] = float(o["Q_w"])
             for xq in (40.0, 70.0, 94.0):
@@ -382,7 +395,7 @@ def cmd_post_ab(a):
         out[name] = rec
         print(f"[post-ab] {name} nj {prm.nj}: Q_w {rec['Q_w']:.6e}、θ_r(70) {rec['theta_r_70']:.6e}、出口 M (線) {rec['exit_M_line_mean']:.7f}", flush=True)
     ref = out["Gpost"]; tab = {}
-    for name in ("G0", "G1", "Gc", "G2", "Gref"):
+    for name in ("G0", "G1", "Gc", "G2", "Gref", "Grefx"):
         r = out[name]; tab[name] = {}
         wk = [f"{k}_w{int(lo)}_{int(hi)}{sfx}" for sfx in ("", "_pchip") for k in ("theta_r", "delta_loc") for (lo, hi) in WINDOWS]
         for k in ["Q_w", "theta_r_40", "theta_r_70", "theta_r_94", "delta_loc_40", "delta_loc_70", "delta_loc_94",
@@ -406,6 +419,7 @@ def cmd_post_ab(a):
 
 YAML_NAMES = {"G1": "cg1", "Gc": "cgc", "G2": "cg2", "Gref": "cgref"}
 YAML_NJ = {"G1": 75, "Gc": 122, "G2": 170, "Gref": 160}      # select.json の結果 (2026-10-10、物理壁で全列の q_i ≤ q_max)
+KINK_EXCEPT = {"Grefx": 2.01}   # 準備の検査の折れ角の上限 2° の例外 (ユーザ決定 2026-10-11、plan §4.21: 入口付近の 1 か所 2.002°)
 # x 方向を粗くした格子: 名前 → (YAML の tag, c, q_max の説明, nj, 半径方向の元, plan の節)
 XARMS = {"G1x": ("cg1x", 0.03, 1.3, 75, "G1", "§5.1 #10"), "Grefx": ("cgrefx", 0.015, "各列で G0 以下", 160, "Gref", "§4.21")}
 
@@ -575,13 +589,16 @@ def cmd_prep(a):
                                            (max(rec["vs_G0"]["wall_nodes_rel_max"], rec["vs_G0"]["first_interior_rel_max"], rec["vs_G0"]["x_station_rel_max"]) <= SAME_RTOL
                                             and rec["vs_G0"]["wall_tangent_max_abs_diff"] <= SAME_RTOL),
         "wall_dist_first_interior_as_G0": True if "note" in rec["vs_G0"] else rec["vs_G0"]["wall_dist_first_interior_rel_max"] <= NS.WALLDIST_RTOL,
-        "kinks_le_2deg": rec["vs_generated"]["metrics"]["kink_over_2deg"] == 0,
+        "kinks_le_2deg": (rec["vs_generated"]["metrics"]["kink_over_2deg"] == 0) if arm not in KINK_EXCEPT else
+                         (rec["vs_generated"]["metrics"]["kink_max_deg"] <= KINK_EXCEPT[arm]),
         # CFD ピンの初期線が生産の準備と同じ (run_0062 の nozzle.h5 は AWS で消されたので手元の複製を使う。初期線のハッシュで同一性を確かめる)
         "initial_line_same_as_production": (info.get("initial_line") or {}).get("sha256_16") == json.loads(
             (HERE / CP.WALL_REF / "prepare_info.json").read_text())["initial_line"]["sha256_16"],
         "ic_finite": all(v["nonfinite"] == 0 for v in rec["ic_values"].values()),
         "ic_positive": all(rec["ic_values"][k]["min"] > 0 for k in ("ro", "T", "P") if k in rec["ic_values"]),
     }
+    if arm in KINK_EXCEPT:
+        rec["kink_exception"] = {"limit_deg": KINK_EXCEPT[arm], "why": "ユーザ決定 2026-10-11 (plan §4.21): 入口付近 x = −12.0 r_t の 1 か所 2.002° を例外として通す"}
     rec["checks"] = ok; rec["VERDICT"] = "PASS" if all(ok.values()) else "FAIL"
     rec["nozzle_sha256"] = NS.sha256_file(out / "nozzle.h5")
     NS.jdump(out / "CORE_GRID_PREP.json", rec)
