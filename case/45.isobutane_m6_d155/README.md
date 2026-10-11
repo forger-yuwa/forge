@@ -230,11 +230,11 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0631_cg_sweep_cap1b` (2026-10-11 投入、**AWS A** 同上) | 同上、`run_0629` と同じ条件 (上限 1) | 同上 (RUN_RC 0、非有限 0)。同じ腕の差 最大 3.6e-9、島の u5 ≤ 1.6e-3 | active |
 | `run_0632_cg_resp_cap50` (2026-10-11 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-r ([plan §4.46](../../plans/active/tooling-nozzle-core-grid.md)): `run_0619` res_60000 から B0 (上限 50) のまま 2 外反復・nStepInner 42・`FORGE_FREEZE_TURB=1`、最初の外反復を書き出し、R(Q₀)・R(Q₁) で残差の応答を測る (台本 `cg_resp.sh`) | 2 外反復を完走 (RUN_RC 0)。判定 (§4.47、`resp_judge.json`): 判定器は判定不能 (資格 q5)、値は島の m ρ 0.86・ρE 0.95 (左辺の予測する 1 step の減少 4〜10 % を応答のずれが打ち消す) | active |
 | `run_0633_cg_resp_cap1` (2026-10-11 投入、**AWS A** 同上) | 同上、上限だけ 1 | 同上。島の m 0.70、不足は上限 50 の 0.27〜0.29 倍 | active |
-| `run_0634_cg_mis_base` (2026-10-11 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-o ([plan §4.48](../../plans/active/tooling-nozzle-core-grid.md)): M-r の上限 50 を診断入りの FP64 バイナリ (`~/forge-fgeom7-fp64-diag`、`FORGE_LINE_DUMP_FINAL`) で回し直し、確定した補正に対する右辺を直接書き出す (台本 `cg_mis.sh`) | 走行中。判定 `cg_mis_an.py` | active |
-| `run_0635_cg_mis_o2q0` (同上) | M-o の評価: Q₀ (`run_0619` res_60000) から 1 外反復、convMethod 1 (現行) の残差 | 走行中 | active |
-| `run_0636_cg_mis_o2q1` (同上) | M-o の評価: Q₁ (`run_0634` res_1) から 1 外反復、convMethod 1 | 走行中 | active |
-| `run_0637_cg_mis_o1q0` (同上) | M-o の評価: Q₀ から 1 外反復、convMethod 0 (1 次の再構成) | 走行中 | active |
-| `run_0638_cg_mis_o1q1` (同上) | M-o の評価: Q₁ から 1 外反復、convMethod 0 | 走行中 | active |
+| `run_0634_cg_mis_base` (2026-10-11 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-o ([plan §4.48](../../plans/active/tooling-nozzle-core-grid.md)): M-r の上限 50 を診断入りの FP64 バイナリ (`~/forge-fgeom7-fp64-diag`、`FORGE_LINE_DUMP_FINAL`) で回し直し、確定した補正に対する右辺を直接書き出す (台本 `cg_mis.sh`) | 2 外反復を完走 (RUN_RC 0)。資格すべて満たした。判定 (§4.49、`mis_judge.json`): 判定不能 (中間) — 再構成の次数の寄与は応答のずれの 2 割弱。停滞帯の実際の残差は 1 step で 0.1 % しか減らない | active |
+| `run_0635_cg_mis_o2q0` (同上) | M-o の評価: Q₀ (`run_0619` res_60000) から 1 外反復、convMethod 1 (現行) の残差 | 1 外反復 (RUN_RC 0)。R₂(Q₀) は base の R₀ と 1e−8 で一致 | active |
+| `run_0636_cg_mis_o2q1` (同上) | M-o の評価: Q₁ (`run_0634` res_1) から 1 外反復、convMethod 1 | 1 外反復 (RUN_RC 0)。R₂(Q₁) は base の R₁ と ≤ 2.6e−6 (‖ΔR₂‖ 比) で一致 | active |
+| `run_0637_cg_mis_o1q0` (同上) | M-o の評価: Q₀ から 1 外反復、convMethod 0 (1 次の再構成) | 1 外反復 (RUN_RC 0) | active |
+| `run_0638_cg_mis_o1q1` (同上) | M-o の評価: Q₁ から 1 外反復、convMethod 0 | 1 外反復 (RUN_RC 0) | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
