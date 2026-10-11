@@ -1,0 +1,1 @@
+IC: restart_field run_1097_tewake_lsw10_m6_cont20k res_20000 (同一設定の +20000 延長、事前登録の延長 1 回)。plan tooling-sern-te-wake-grid §6
