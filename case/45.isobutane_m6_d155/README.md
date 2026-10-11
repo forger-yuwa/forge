@@ -235,7 +235,7 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0636_cg_mis_o2q1` (同上) | M-o の評価: Q₁ (`run_0634` res_1) から 1 外反復、convMethod 1 | 1 外反復 (RUN_RC 0)。R₂(Q₁) は base の R₁ と ≤ 2.6e−6 (‖ΔR₂‖ 比) で一致 | active |
 | `run_0637_cg_mis_o1q0` (同上) | M-o の評価: Q₀ から 1 外反復、convMethod 0 (1 次の再構成) | 1 外反復 (RUN_RC 0) | active |
 | `run_0638_cg_mis_o1q1` (同上) | M-o の評価: Q₁ から 1 外反復、convMethod 0 | 1 外反復 (RUN_RC 0) | active |
-| `run_0639_cg_dnu_base` (2026-10-12 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-v ([plan §4.50](../../plans/active/tooling-nozzle-core-grid.md)): M-o の base (`run_0634`) を、粘性スカラー対角 Dν をライン面・ライン外の面に分けて書き出すバイナリ (`~/forge-fgeom7-fp64-diag2`) で 1 回だけ再現 (台本 `cg_dnu.sh`) | 走行中。判定 `cg_dnu_an.py` | active |
+| `run_0639_cg_dnu_base` (2026-10-12 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-v ([plan §4.50](../../plans/active/tooling-nozzle-core-grid.md)): M-o の base (`run_0634`) を、粘性スカラー対角 Dν をライン面・ライン外の面に分けて書き出すバイナリ (`~/forge-fgeom7-fp64-diag2`) で 1 回だけ再現 (台本 `cg_dnu.sh`) | 2 外反復 (RUN_RC 0)、資格すべて満たした (D は run_0634 とビット一致)。判定 (§4.51、`dnu_judge.json`): **結果 B** — 粘性スカラー対角は ρE の約 1/3・運動量はほぼ説明しない。連続の式の行のずれはほぼすべてライン面の粘性スカラー対角 (島の射影 +0.035 → 0.000) | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
