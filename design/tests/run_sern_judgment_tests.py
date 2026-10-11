@@ -236,10 +236,13 @@ with h5py.File(rd0 / "res_20000.h5", "w") as f:
     for k, v in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3e5), ("P", 1e5), ("T", 300.0),
                  ("roK", 1.0), ("roOmega", 1.0e3)):
         f.create_dataset(f"VALUE/{k}", data=np.full(30, v))
+# 残差は流体 5 列 + SST の 2 列、run の solverConfig.yaml (SST) も置く: 旧 fixture の 3 列 (rms_ro・rms_roUx・rms_roe) で設定なしの
+# CSV は check_convergence の判定不能 (必須列の欠落) で、2026-10-12 から受理ゲートも判定不能にする (plan tooling-sern-te-wake-grid §5.1 R2h1)
+(rd0 / "solverConfig.yaml").write_text('turbulence: {model: "sst"}\n')
 with open(rd0 / "residual_history.csv", "w", newline="") as fh:
-    w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roe"])
+    w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"])
     for s in range(0, 20001, 500):
-        v = 10 ** (-1 - 1.5 * min(s / 20000 * 3, 1)); w.writerow([s, -1, "outer_end", v, v * 10, v * 100])
+        v = 10 ** (-1 - 1.5 * min(s / 20000 * 3, 1)); w.writerow([s, -1, "outer_end", v, v * 10, v * 10, v * 10, v * 100, v * 10, v * 1000])
 h0 = synth_hist()
 g_none = G.evaluate_gates(rd0, h0, 0, model="sst")
 g_pass = G.evaluate_gates(rd0, h0, 0, judgment=ok_g, model="sst")

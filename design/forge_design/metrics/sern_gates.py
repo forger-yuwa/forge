@@ -6,7 +6,9 @@
       必須の集合を決め (SST は roK・roOmega も)、欠ければ判定不能 (plan tooling-sern-te-wake-grid §5.1 R2g。h5 にある量だけを
       検査して欠落を素通りさせない)。最終場の床の roOmega も SST では必須
   (3) 全残差 (check_convergence.analyze): NaN/Inf 無し、末尾で rising な列が無い。PASS (3 桁低下) は
-      `require_residual_pass` のときだけ必須 (本ケースは残差が 1–2.5 桁でプラトーする性格 — その事実は台帳に残す)
+      `require_residual_pass` のときだけ必須 (本ケースは残差が 1–2.5 桁でプラトーする性格 — その事実は台帳に残す)。
+      入力の不備 (残差 CSV が無い・必須の保存量残差列の欠落など analyze の判定不能) は収束状態と別に判定不能
+      (plan tooling-sern-te-wake-grid §5.1 R2h1)
   (4) **実際に最適化する量** (SST は C_T_with_shear、Euler は C_T) と C_T / C_L / C_M の頭打ち
       (check_quasisteady.classify_series による STEADY。NONFINITE / DRIFTING / TRANSIENT-UNSETTLED / OSCILLATING は不合格)。
       量と目的量は問題設定の乱流モデル (evaluate.model) から決め、量の列が力の履歴に欠ければ判定不能
@@ -49,6 +51,41 @@ def _volume_res(run_dir):
     return sorted(Path(run_dir).glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
 
 
+# --- 実効 config から必須の化学種・トレーサ (plan tooling-sern-te-wake-grid §5.1 R2h2、codex diagnose 2026-10-12 R2h(2)) ------------
+# 旧実装の field_health・floor_gate は h5 に**ある** roY* だけを見たので、全部欠けると組成の検査そのものが消えた (ΣρY = ρ の検査も
+# 欠けた種の質量分率が 0 の場合を検出できない)。必須の集合は run の実効 config から決める。規則は段の移行の
+# runner_sern.required_state_keys と同じ (この関数を共用する)
+def config_species_keys(doc) -> list:
+    """読み込んだ solverConfig (dict) から必須の化学種・トレーサの保存量: TP (physProp.thermalMethod 2) は roY0..roY{n−1}
+    (n = physProp.species の数、無ければ forge の既定 [N2] の 1 種) と、トレーサ (physProp.tracer が none 以外) の roXi。TP 以外は空。"""
+    pp = (doc.get("physProp") or {}) if isinstance(doc, dict) else {}
+    if int(pp.get("thermalMethod", 0) or 0) != 2:
+        return []
+    keys = [f"roY{i}" for i in range(len(pp.get("species") or ["N2"]))]
+    if str(pp.get("tracer", "none")).lower() not in ("none", "", "0"):
+        keys.append("roXi")
+    return keys
+
+
+def run_species_keys(run_dir) -> tuple:
+    """run の実効 config (run_dir/solverConfig.yaml = 最後の段が読んだ config) から必須の化学種 (config_species_keys)。
+    戻り = (必須の量のリスト, None) か、決められなければ (None, 理由) (config が無い・YAML として読めない・dict でない)。"""
+    from ..gas.composition import load_yaml_str
+    p = Path(run_dir) / "solverConfig.yaml"
+    try:
+        doc = load_yaml_str(p.read_text())
+    except OSError as e:
+        return None, f"実効 config {p.name} を読めない ({type(e).__name__})"
+    except Exception as e:  # noqa: BLE001 (YAML の構文エラーなど)
+        return None, f"実効 config {p.name} を YAML として読めない ({type(e).__name__})"
+    if not isinstance(doc, dict):
+        return None, f"実効 config {p.name} が設定の辞書でない"
+    try:
+        return config_species_keys(doc), None
+    except (TypeError, ValueError) as e:
+        return None, f"実効 config {p.name} の physProp (thermalMethod・species) を読めない ({type(e).__name__}: {e})"
+
+
 def _state_model(model) -> str:
     """場の必須量の表 (FIELD_REQUIRED) を引く乱流モデル。表の引き方は §6 #3 の必須量 (judgment_required_quantities) と同じ。
     None・未知は ValueError (collect が問題設定から解決して渡す。既定に読み替えない: R2f の _gate_quantities と同じ扱い)。"""
@@ -62,24 +99,36 @@ def _state_model(model) -> str:
 
 def field_health(run_dir, *, model) -> dict:
     """最終体積出力の保存量・原始量が有限で正値かを見る。res_nan_*.h5 (発散ダンプ) があれば不合格。
-    model = 問題設定の乱流モデル (省略不可)。その必須の量 (FIELD_REQUIRED) が最終 h5 に無ければ判定不能 (missing に挙げて不合格)。"""
+    model = 問題設定の乱流モデル (省略不可)。その必須の量 (FIELD_REQUIRED) が最終 h5 に無ければ判定不能 (missing に挙げて不合格)。
+    化学種・トレーサは run の実効 config (solverConfig.yaml) から必須の集合を決め (config_species_keys、§5.1 R2h2)、無ければ同じく
+    missing。必須の量の配列寸法が ro と違えば shape_mismatch、config から必須の集合を決められなければ unverifiable (いずれも判定不能)。"""
     m = _state_model(model)          # モデルの検査は run の読み込みより先に
     run_dir = Path(run_dir)
     nan_files = sorted(f.name for f in run_dir.glob("res_nan*.h5"))
     res = _volume_res(run_dir)
     out = {"ok": True, "file": None, "nonfinite": {}, "nonpositive": {}, "min": {}, "nan_files": nan_files, "reasons": [],
-           "required": list(FIELD_REQUIRED[m]), "missing": []}
+           "required": list(FIELD_REQUIRED[m]), "missing": [], "shape_mismatch": {}, "unverifiable": []}
     if nan_files:
         out["ok"] = False; out["reasons"].append(f"res_nan dump present: {nan_files[:3]}")
     if not res:
         out["ok"] = False; out["reasons"].append("no volume res_*.h5"); return out
     out["file"] = res[-1].name
+    sp_keys, sp_why = run_species_keys(run_dir)
+    out["species_required"] = sp_keys
+    if sp_why:
+        out["unverifiable"].append(f"判定不能: 必須の化学種を決められない ({sp_why})")
+    out["required"] = list(FIELD_REQUIRED[m]) + list(sp_keys or [])
     with h5py.File(res[-1], "r") as f:
         # 固定の保存量に加え、**ファイルにある化学種・受動スカラーを全部**見る (codex plan-2 M3)。
         # FIELD_VARS だけだと roY* の NaN が field_health も floor_gate も素通りする実例があった。
         extra = tuple(sorted(k for k in f["VALUE"].keys() if re.fullmatch(r"(roY|Y|roXi|roQ)\d*[\d_]*", k)))
         out["species_checked"] = list(extra)
-        out["missing"] = [v for v in FIELD_REQUIRED[m] if f"VALUE/{v}" not in f]
+        out["missing"] = [v for v in out["required"] if f"VALUE/{v}" not in f]
+        # 必須の量は存在に加えて配列寸法 (ro と同じ節点数) を先に見る (§5.1 R2h2)
+        shp0 = f["VALUE/ro"].shape if "VALUE/ro" in f else None
+        if shp0 is not None:
+            out["shape_mismatch"] = {v: list(f[f"VALUE/{v}"].shape) for v in out["required"]
+                                     if f"VALUE/{v}" in f and f[f"VALUE/{v}"].shape != shp0}
         for v in FIELD_VARS + extra:
             if f"VALUE/{v}" not in f:
                 continue
@@ -99,21 +148,33 @@ def field_health(run_dir, *, model) -> dict:
         out["ok"] = False; out["reasons"].append(f"non-positive field values: {out['nonpositive']}")
     if out["missing"]:
         out["ok"] = False
-        out["reasons"].append(f"判定不能: 必須の場の量 {', '.join(out['missing'])} が最終 h5 ({out['file']}) に無い (乱流モデル {m})")
+        out["reasons"].append(f"判定不能: 必須の場の量 {', '.join(out['missing'])} が最終 h5 ({out['file']}) に無い (乱流モデル {m}"
+                              + (f"・実効 config の化学種 {', '.join(sp_keys)}" if sp_keys else "") + ")")
+    if out["shape_mismatch"]:
+        out["ok"] = False
+        out["reasons"].append(f"判定不能: 必須の場の量の配列寸法が ro {list(shp0)} と違う ({out['shape_mismatch']})")
+    if out["unverifiable"]:
+        out["ok"] = False
+        out["reasons"] += out["unverifiable"]
     return out
 
 
 def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
     """check_convergence.analyze で全残差列を見る (VERDICT の語彙も同じ)。
-    ok = NaN/Inf 無し かつ rising 列無し。converged = 全列 PASS (3 桁低下)。"""
+    **入力の妥当性と収束状態を別の結果にする** (plan tooling-sern-te-wake-grid §5.1 R2h1、codex diagnose 2026-10-12 R2h(1)):
+      input = {"ok", "reasons", "notes"}: 残差 CSV が無い・空、analyze の判定不能 (必須の保存量残差列の欠落・残差列が 1 つも無い・
+              末尾窓の代表値が 0) は input.ok = False・unverifiable = True (evaluate_gates は JUDGMENT_UNVERIFIABLE、延長もしない)。
+              旧実装は analyze の判定不能を捨てて ok を組み直したので、SST で rms_roOmega が欠けた CSV も ok だった
+      収束状態 (rising・stalled・converging・converged・verdict) は従来どおり。**プラトー受理は変えない** (analyze.ok は必須にしない)。
+    ok = 入力が妥当 かつ NaN/Inf 無し かつ rising 列無し。converged = 全列 PASS (3 桁低下)。"""
     path = Path(run_dir) / "residual_history.csv"
     out = {"ok": False, "converged": False, "verdict": "MISSING", "nan": False, "rising": [], "stalled": [], "converging": [],
-           "columns": {}, "last_step": None}
+           "columns": {}, "last_step": None, "unverifiable": True, "input": {"ok": False, "reasons": [], "notes": []}}
     if not path.exists():
-        out["reasons"] = ["no residual_history.csv"]; return out
+        out["reasons"] = ["no residual_history.csv"]; out["input"]["reasons"] = list(out["reasons"]); return out
     res = _cc.analyze(str(path), min_drop, tail)
     if res is None:
-        out["reasons"] = ["empty residual_history.csv"]; return out
+        out["reasons"] = ["empty residual_history.csv"]; out["input"]["reasons"] = list(out["reasons"]); return out
     laststep, report, ok, any_nan, any_stalled, any_converging = res
     out["last_step"] = laststep; out["nan"] = bool(any_nan); out["converged"] = bool(ok)
     # **trend は msg から直接読む** (2026-09-19, codex plan レビュー M1)。
@@ -122,22 +183,34 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
     # **3 桁落ちてなお下降中 (falling) の列がどのリストにも入らず**、
     # 「全列プラトー」を要求したはずのゲートを素通りしていた。
     # msg は必ず `drop=X.Xdec <trend>` を含むので、そこから分類する。
+    # 判定できた列 (drop と trend を持つ) と NaN/Inf の列以外で不合格の行 ('(入力)' の必須列の欠落・列の末尾窓の代表値 0 など、
+    # analyze が「判定不能」とした行) は入力の不備として input に集める (§5.1 R2h1)。合格の注記行 ('(設定)') は notes に残す
     import re as _re
+    bad_input, notes = [], []
     for c, (msg, col_ok) in report.items():
         m = _re.search(r"drop=\s*([-\d.]+)dec\s+(rising|falling|flat)", msg)
         trend = m.group(2) if m else ""
         drop = float(m.group(1)) if m else float("nan")
         out["columns"][c] = {"msg": msg, "ok": bool(col_ok), "trend": trend, "drop": drop}
+        if m is None:
+            if not col_ok and not msg.startswith("NaN/Inf"):
+                bad_input.append(f"判定不能: 残差 {c}: {msg.replace('<-- 判定不能', '').strip()}")
+            elif col_ok and c.startswith("("):
+                notes.append(f"{c}: {msg}")
         if trend == "rising":
             out["rising"].append(c)
         elif trend == "flat":
             out["stalled"].append(c)
         elif trend == "falling":
             out["converging"].append(c)
+    out["input"] = {"ok": not bad_input, "reasons": bad_input, "notes": notes}
+    out["unverifiable"] = bool(bad_input)
     if ok:
         out["verdict"] = "PASS (converged)"
     elif any_nan:
         out["verdict"] = "DIVERGED (NaN/Inf)"
+    elif bad_input:
+        out["verdict"] = "UNVERIFIABLE (input)"
     elif out["rising"]:
         out["verdict"] = "NOT CONVERGED (rising)"
     elif any_stalled:
@@ -146,8 +219,9 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
         out["verdict"] = "NOT CONVERGED (still converging)"
     else:
         out["verdict"] = "NOT CONVERGED"
-    out["ok"] = (not any_nan) and (not out["rising"])
-    out["reasons"] = [] if out["ok"] else [f"residual {out['verdict']}" + (f" columns {out['rising']}" if out["rising"] else "")]
+    out["ok"] = (not bad_input) and (not any_nan) and (not out["rising"])
+    out["reasons"] = [] if out["ok"] else (
+        [f"residual {out['verdict']}" + (f" columns {out['rising']}" if out["rising"] else "")] + bad_input)
     return out
 
 
@@ -259,8 +333,21 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6, *, mode
                     continue
                 a = np.asarray(V[name][:])
                 counts[f"{name}<={lo:g}"] = int(np.sum(np.isfinite(a) & (a <= lo * (1.0 + tol))))
-            # 化学種: 非負性と ΣρY = ρ (codex M6)
-            ys = sorted(k for k in V.keys() if re.fullmatch(r"roY\d+", k))
+            # 化学種: 非負性と ΣρY = ρ (codex M6)。必須の集合は実効 config から (§5.1 R2h2): 欠けた種・ro と配列寸法の違う種・
+            # 必須の集合を決められない config は「不在」と同じく -1 で不合格 (h5 にある種だけを見ると、全部欠けたとき検査が消える)
+            sp_keys, sp_why = run_species_keys(run_dir)
+            req_y = [k for k in (sp_keys or []) if re.fullmatch(r"roY\d+", k)]
+            if sp_why:
+                counts[f"roY 必須の集合 (判定不能: {sp_why})"] = -1
+            for k in req_y:
+                if k not in V:
+                    counts[f"{k} 不在"] = -1
+            ys = sorted(k for k in V.keys() if re.fullmatch(r"roY\d+", k))      # 和の順序は旧実装と同じ (文字列順)
+            if "ro" in V:
+                for k in ys:
+                    if V[k].shape != V["ro"].shape:
+                        counts[f"{k} 配列寸法 {list(V[k].shape)} (ro {list(V['ro'].shape)})"] = -1
+                ys = [k for k in ys if V[k].shape == V["ro"].shape]
             if ys and "ro" in V:
                 roa = np.asarray(V["ro"][:]); tot = np.zeros_like(roa)
                 neg = 0; nonfin = 0
@@ -286,8 +373,12 @@ def floor_gate(run_dir, p_min: float | None = None, tol: float = 1.0e-6, *, mode
     # `|sum...|` は許容超過 **と 判定不能 (-1)** の両方を不合格にする (codex plan-2 M3)
     bad = {k: v for k, v in counts.items()
            if (k.startswith("|sum") and (v > 1.0e-4 or v < 0.0)) or (not k.startswith("|sum") and v != 0)}
+    # 「不在」などの -1 (量が無い・寸法が違う・必須の集合を決められない) は張り付きでなく判定不能として書く (§5.1 R2h2)
+    unk = [k for k, v in bad.items() if not k.startswith("|sum") and v == -1]
+    stuck = {k: v for k, v in bad.items() if k not in unk}
     return {"ok": not bad, "counts": counts, "file": os.path.basename(fs[-1]),
-            "reasons": [] if not bad else ["床/下限に張り付き: " + ", ".join(f"{k} {v} ノード" for k, v in bad.items())]}
+            "reasons": ([f"判定不能: {', '.join(unk)}"] if unk else [])
+            + (["床/下限に張り付き: " + ", ".join(f"{k} {v} ノード" for k, v in stuck.items())] if stuck else [])}
 
 
 # --- 毎更新の EOS 床事象 (plan tooling-sern-te-wake-grid §4「床の判定」、codex plan レビュー M1・M2) -------------
@@ -640,10 +731,14 @@ def judgment_extendable(gates: dict) -> tuple:
         if not (gates.get(key) or {}).get("ok", False):
             blockers.append(label)
     res = gates.get("residual") or {}
-    if not res.get("ok", False) or (gates.get("require_residual_pass") and not res.get("converged")):
+    if res.get("unverifiable") or not (res.get("input") or {"ok": True}).get("ok", False):
+        blockers.append("残差の入力 (判定不能)")      # §5.1 R2h1: 入力の不備は延長しても直らない
+    elif not res.get("ok", False) or (gates.get("require_residual_pass") and not res.get("converged")):
         blockers.append("残差")
     if gates.get("require_residual_plateau") and (gates.get("plateau") or {}).get("falling"):
         blockers.append("残差のプラトー")
+    if not (gates.get("force_parts") or {"ok": True}).get("ok", False):       # 壁の部品・摩擦の欠落した標本 (§5.1 R2h3・R2h4)
+        blockers.append("力の部品の出力")
     stead = gates.get("steadiness") or {}
     if not stead.get("series"):
         blockers.append("力の履歴")
@@ -703,7 +798,10 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
     FLOOR_EVENT / FLOOR_UNVERIFIABLE (`require_floor_events` のときだけ: 判定区間の毎更新の床事象 / その記録が判定不能),
     COLD_SPOT / JUDGMENT_UNVERIFIABLE / JUDGMENT_UNSETTLED (`judgment` [judgment_gate の戻り] を渡したときだけ: 判定区間の §6 #2・#3)。
     JUDGMENT_UNVERIFIABLE は受理ゲート (4) の量の列が力の履歴に欠けたときにも出す (判定区間の有無によらない、§5.1 R2f)。
+    力の履歴の標本が incomplete (3D の壁の部品の出力・粘性壁の摩擦の欠落、§5.1 R2h3・R2h4) を持つときも JUDGMENT_UNVERIFIABLE。
     最終場に乱流モデルの必須の量 (SST の roK・roOmega など) が無く、場の不合格がその欠落だけのときも JUDGMENT_UNVERIFIABLE (§5.1 R2g)。
+    残差の入力の不備 (residual_health の unverifiable: CSV が無い・必須の残差列の欠落など) も JUDGMENT_UNVERIFIABLE (§5.1 R2h1。
+    NaN/Inf があれば DIVERGED が先)。
     model = 問題設定の乱流モデル (collect が evaluate.model を runner の既定 euler で解決して渡す。省略不可・None 不可):
     目的量と (4) の量、場と最終場の床の必須の量はここから決める (旧引数 obj と、列・量の有無から推測する経路は廃止)。
     物理的 INFEASIBLE はここでは出さない。"""
@@ -722,10 +820,14 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
         reasons.append(f"forge rc={rc}"); fail = fail or "DIVERGED"
     if not field["ok"]:
         # 必須の量の欠落**だけ**なら判定不能 (延長しても量は増えない)。非有限・非正・発散ダンプ・場が無いは従来どおり DIVERGED
-        only_missing = bool(field.get("missing")) and not (field["nonfinite"] or field["nonpositive"] or field["nan_files"])
+        # 必須の量の欠落・配列寸法の不一致・必須の化学種を決められない (§5.1 R2h2) も同じく判定不能
+        only_missing = (bool(field.get("missing") or field.get("shape_mismatch") or field.get("unverifiable"))
+                        and not (field["nonfinite"] or field["nonpositive"] or field["nan_files"]))
         reasons += field["reasons"]; fail = fail or ("JUDGMENT_UNVERIFIABLE" if only_missing else "DIVERGED")
     if not resid["ok"]:
-        reasons += resid.get("reasons", []); fail = fail or ("DIVERGED" if resid["nan"] else "RESIDUAL_RISING")
+        # 残差の入力の不備 (CSV が無い・必須列の欠落など) は判定不能 (§5.1 R2h1。延長しても列は増えない)。NaN/Inf は従来どおり DIVERGED が先
+        reasons += resid.get("reasons", [])
+        fail = fail or ("DIVERGED" if resid["nan"] else ("JUDGMENT_UNVERIFIABLE" if resid.get("unverifiable") else "RESIDUAL_RISING"))
     elif require_residual_pass and not resid["converged"]:
         reasons.append(f"residual {resid['verdict']} (require_residual_pass)"); fail = fail or "NOT_CONVERGED"
     elif require_residual_plateau and resid.get("converging"):
@@ -742,6 +844,13 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
         reasons += ["床事象: " + r for r in fevents["reasons"]]; fail = fail or fevents["fail_class"]
     if not rscale["ok"]:
         reasons += rscale["reasons"]; fail = fail or "RESIDUAL_UNBALANCED"
+    # 力の標本の完全性 (3D の forces3d: 壁の部品の出力・粘性壁の摩擦の欠落。§5.1 R2h3・R2h4): 欠けた標本は力係数を持たないので
+    # 判定不能 (延長しても欠けた出力は戻らない)。2D の力の履歴は incomplete を持たない (従来どおり)
+    inc_steps = [h.get("step") for h in (hist or []) if h.get("incomplete")]
+    inc = list(dict.fromkeys(r for h in (hist or []) for r in (h.get("incomplete") or [])))
+    fparts = {"ok": not inc_steps, "n_incomplete": len(inc_steps), "steps": inc_steps[:20], "reasons": inc[:5]}
+    if inc_steps:
+        reasons += [f"力の標本 {len(inc_steps)}/{len(hist)} が不完全: " + r for r in inc[:5]]; fail = fail or "JUDGMENT_UNVERIFIABLE"
     if not hist:
         reasons += stead["reasons"]; fail = fail or "NO_FORCES"
     elif stead["missing"]:
@@ -753,7 +862,7 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
         reasons += ["判定区間: " + r for r in judgment.get("reasons", [])]; fail = fail or judgment.get("fail_class") or "JUDGMENT_UNVERIFIABLE"
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
-            "floors": floors, "residual_scale": rscale, "floor_events": fevents,
+            "floors": floors, "residual_scale": rscale, "floor_events": fevents, "force_parts": fparts,
             **({"judgment": judgment} if judgment is not None else {}),
             # プラトー到達は**診断**として常に載せる (受理条件ではない)
             "plateau": {"all_flat": not resid.get("converging") and not resid.get("rising"),

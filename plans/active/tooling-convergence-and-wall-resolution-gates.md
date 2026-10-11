@@ -152,6 +152,7 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | 11 | `check_cavity_steady.py` を `classify_series` 経由に ✅ / `cavity_eval` の y1+ は参考値と明記し正式判定は共通ツールへ ✅ / ⏳ `stack_residuals.py` は #6 の段情報が入ってから統合 |
 | 12 | **`check_quasisteady.py` が要求量を黙って落とす (2026-10-12 移管、te-wake plan R2h(6)、codex diagnose [`notes/reviews/2026-10-12-sern-r2c-and-sweep-diagnose.md`](../../notes/reviews/2026-10-12-sern-r2c-and-sweep-diagnose.md))**: `:418` が適用できない量を除き、空集合でも ALL STEADY になりうる (`--quantity asym` を非対称格子の case/46 run_0198 に当てて実測)。`:447` の `wall_model_tau` も utau の無い壁を飛ばして残りで平均する。要求量ごとの適用可否を返し、未評価を ALL STEADY にしない。#5 の「`sern_gates.py` は自動継承」は残差については成り立っていなかった (te-wake plan R2h1 で修正) | 未着手 |
 | 13 | **`check_floor_events.py` の最終 step 照合 (2026-10-12 移管、te-wake plan R2h(7))**: `:149` は res_*.h5 が無いと最終 step を照合しない。照合を要求するモードでは場なしを判定不能にし、記録単体の監査では照合未実施を明示する (SERN の生産ゲートは `sern_gates` が保存場なしを拒否するので現状は塞がっている) | 未着手 |
+| 14 | **`check_convergence.analyze` が全期間 0 の必須列を通す (2026-10-12 移管、te-wake plan R2h5 の洗い出し)**: 必須列があっても全期間 0 なら 'all-zero (inactive)' として通る (SST の rms_roOmega が書かれていなくても列があれば通る)。必須列の全期間 0 は判定不能にする (乱流・遷移が無効な段の列との区別は設定から) | 未着手 |
 
 ## 6. 検証
 

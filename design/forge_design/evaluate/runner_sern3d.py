@@ -279,6 +279,7 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
     if zte is not None:      # 処置の重み w を最終の node 格子に書く (品質確認用の cell 格子ではない。格子を作るたびに作り直す)
         R2.mark_zte_field(run_dir, zte)
     paste_region_ic3d(run_dir / MESH, y_mid, H, 0.5 * prm.W * H, st, p.gamma, minfo=minfo if disc == "node" else None)
+    R2.check_initial_state(run_dir / MESH, cfg, "prepare (3D) の初期場")    # 段の config が解く保存量がそろうこと (§5.1 R2h5)
     ex = st["exhaust"]; F_ideal_nd, M_e_id = R2.ideal_thrust(p, st)
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "operating_point": opinfo, "gas_model": st["gas_model"],
             "design_point": d0, "design": {"key_point": list(design.key_point), "L_ramp": design.L_ramp, "theta_e_deg": float(np.rad2deg(design.info["theta_e"])),
@@ -287,7 +288,9 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
             "half_W_m": 0.5 * prm.W * H,
             # R2 (codex M5): 幅外の機体下面 (ramp タグの z > W/2) は **物理的な機体幅 W_vehicle** までを機体力として
             # 集計し、遠方境界 Z_ext に依存させない (None = 上限なし = 旧挙動)。総推力 C_T にはどちらも入れない
-            "half_W_vehicle_m": (0.5 * float(m["W_vehicle"]) * H) if m.get("W_vehicle") is not None else None}
+            "half_W_vehicle_m": (0.5 * float(m["W_vehicle"]) * H) if m.get("W_vehicle") is not None else None,
+            # 力の部品ごとの境界 quad の数 (メッシャの出力。collect が要求する部品を決める: 0 = 存在しない面、§5.1 R2h3)
+            WALL_FACES_KEY: {n: len(B.get(n, [])) for n in _FORCE_PARTS}}
     if zte is not None:      # IC を書いた後でも w が残っていることを確かめ、再計算した識別量を来歴に残す
         info["zero_thickness_edge_velocity"] = {"requested": zte, "signature": R2.zte_signature_of(zte), "field": R2.ZTE_FIELD,
                                                 "identity": R2.verify_zte_field(run_dir, zte)}
@@ -376,28 +379,130 @@ def surface_forces(h5file, expect_dir, p_a, x_ref, y_ref, z_split=None, z_vehicl
 
 # 機体側の面集合 (ノズル力に入れない。codex plan-3 M4)。`vehicle` は幅外機体下面 (R4e で 0 面、旧メッシュ互換)
 _VEHICLE_FACES = ("vehicle", "vehicle_top", "vehicle_side", "vehicle_base")
+# 力の部品: 名前 → (物理タグ, 流体から壁へ向く概ねの向き)。forces3d が壁面出力 res_<名前>_<タグ>_<step>.h5 を積分する
+_FORCE_PARTS = {"ramp": (PHYS_SERN3D["ramp"], (0, 1, 0)), "cowl_in": (PHYS_SERN3D["cowl_in"], (0, -1, 0)),
+                "cowl_out": (PHYS_SERN3D["cowl_out"], (0, 1, 0)),
+                "sidewall_in": (PHYS_SERN3D["sidewall_in"], (0, 0, 1)), "sidewall_out": (PHYS_SERN3D["sidewall_out"], (0, 0, -1)),
+                "vehicle": (PHYS_SERN3D["vehicle"], (0, 1, 0)),             # R2: 幅外機体下面 (R4e で 0 面。旧メッシュ互換で残す)
+                "vehicle_top": (PHYS_SERN3D["vehicle_top"], (0, -1, 0)),    # R4: 機体上面
+                "vehicle_side": (PHYS_SERN3D["vehicle_side"], (0, 0, -1)),  # R4c: 機体側面 (z = W/2、外向きは −z)
+                "vehicle_base": (PHYS_SERN3D["vehicle_base"], (-1, 0, 0))}  # R4e: 機体ベース (x = L_ramp、外向きは −x)
+_NOZZLE_FACES = tuple(n for n in _FORCE_PARTS if n not in _VEHICLE_FACES)     # C_T・C_L・C_M・C_T_with_shear の帳簿の面
+_VISCOUS_WALL_KINDS = ("wall", "wall_isothermal")                            # 摩擦 (twall) を出す粘性壁 (probdef.wall_bcond_line)
+
+
+# --- 力の部品と摩擦の完全性 (plan tooling-sern-te-wake-grid §5.1 R2h3・R2h4、codex diagnose 2026-10-12 R2h(3)(4)) -------------
+# 旧実装の forces3d は出力の無い部品を足さずに通常の係数を返し (R2h3)、1 部品でも twall があれば他の部品の摩擦を 0 として
+# C_T_with_shear を作った (R2h4)。必要な部品は形状・境界定義から固定する (全形状に 9 部品を一律に要求しない):
+#   面の有無 = prepare_info の wall_faces (prepare がメッシャの境界 quad の数を記録) / 記録の無い run は prepare_info の mesh
+#             (メッシャの info) からメッシャと同じ条件で決める (wall_faces_from_minfo)
+#   出力を要求する部品 = 面があり、bcondConfig で outputHDFflg 1 の部品。面が無い部品 (存在しない面) は要求しない
+#   ノズルの部品に面があるのに出力が無い設定 (bcond に無い・outputHDFflg 0)、面の有無を決められない部品に出力を要求する設定は判定不能
+#   摩擦を要求する部品 = 出力を要求するノズルの部品のうち粘性壁 (bcond の kind が wall・wall_isothermal)。twall (Fx_tau) が 1 部品でも
+#   無ければ C_T_with_shear・C_T_friction を作らない (0 で補わない)
+# 足りない標本は力係数 (部品の欠落) や C_T_with_shear (摩擦の欠落) を作らず、理由を "incomplete" に残す。evaluate_gates は
+# JUDGMENT_UNVERIFIABLE (延長もしない)
+WALL_FACES_KEY = "wall_faces"
+
+
+def wall_faces_from_minfo(minfo) -> dict:
+    """prepare_info の mesh (メッシャ generate_sern_mesh3d の info) から、力の部品ごとに面があるか (True / False / None = 決められない)。
+    メッシャの条件と同じ: ランプ・カウル内外・側壁内は常に面がある。側壁外は外側空間がある (nz > k_sw + 1) ときだけ。幅外の機体下面は
+    n_vehicle_faces、機体上面は ext_top、機体側面・ベースは n_vside_faces・n_vbase_faces (キーが無く ext_top の記録があれば 0 面 =
+    機体側面を作らない構成か、ベースを作る前のメッシャ)。記録の無い量 (旧メッシャ) は None。"""
+    m = minfo or {}
+    out = {n: True for n in ("ramp", "cowl_in", "cowl_out", "sidewall_in")}
+    out["sidewall_out"] = (int(m["nz"]) > int(m["k_sw"]) + 1) if ("nz" in m and "k_sw" in m) else None
+    out["vehicle"] = (int(m["n_vehicle_faces"]) > 0) if m.get("n_vehicle_faces") is not None else None
+    out["vehicle_top"] = bool(m["ext_top"]) if m.get("ext_top") is not None else None
+    for n, k in (("vehicle_side", "n_vside_faces"), ("vehicle_base", "n_vbase_faces")):
+        out[n] = (int(m[k]) > 0) if m.get(k) is not None else (False if m.get("ext_top") is not None else None)
+    return out
+
+
+def force_parts_plan(run_dir, info=None) -> dict:
+    """run の力の部品の要求: {"required": 出力を要求する部品, "friction": twall を要求する部品, "faces": 面の有無, "faces_source",
+    "reasons": 判定不能の理由 (空なら要求を固定できた)}。info = prepare_info (省略時は run_dir から読む)。"""
+    from ..gas.composition import load_yaml_str
+    rd = Path(run_dir)
+    out = {"required": [], "friction": [], "faces": {}, "faces_source": None, "reasons": []}
+    try:
+        info = info if info is not None else json.loads((rd / "prepare_info.json").read_text())
+    except (OSError, ValueError) as e:
+        out["reasons"].append(f"判定不能: prepare_info.json を読めず力の部品の面を決められない ({type(e).__name__})")
+        return out
+    wf = info.get(WALL_FACES_KEY)
+    if isinstance(wf, dict):
+        faces = {n: (int(wf[n]) > 0 if wf.get(n) is not None else None) for n in _FORCE_PARTS}
+        out["faces_source"] = f"prepare_info.{WALL_FACES_KEY}"
+    else:
+        faces = wall_faces_from_minfo(info.get("mesh"))
+        out["faces_source"] = "prepare_info.mesh (メッシャの条件)"
+    out["faces"] = faces
+    try:
+        bc = load_yaml_str((rd / "bcondConfig.yaml").read_text())
+        if not isinstance(bc, dict):
+            raise ValueError("境界定義の辞書でない")
+    except Exception as e:  # noqa: BLE001 (無い・YAML として読めない)
+        out["reasons"].append(f"判定不能: bcondConfig.yaml を読めず力の部品の出力を決められない ({type(e).__name__}: {e})")
+        return out
+    for n, (pid, _d) in _FORCE_PARTS.items():
+        b = bc.get(n) if isinstance(bc.get(n), dict) else None
+        if b is not None and int(b.get("physID", -1)) != pid:
+            out["reasons"].append(f"判定不能: bcondConfig の {n} の physID {b.get('physID')} が力の部品のタグ {pid} と違う")
+            continue
+        wants = b is not None and int(b.get("outputHDFflg", 0) or 0) == 1
+        has = faces.get(n)
+        if has is None:
+            if wants or n in _NOZZLE_FACES:
+                out["reasons"].append(f"判定不能: 部品 {n} の面の有無を形状の記録 ({out['faces_source']}) から決められない")
+            continue
+        if not has:
+            continue                                   # 存在しない面 (出力は無くてよい)
+        if not wants:
+            if n in _NOZZLE_FACES:
+                out["reasons"].append(f"判定不能: ノズルの部品 {n} に面があるのに bcondConfig で壁面の出力 (outputHDFflg 1) が無い")
+            continue                                   # 機体の面の出力なし: ノズル力の帳簿に入らない (従来どおり)
+        out["required"].append(n)
+        if n in _NOZZLE_FACES and str(b.get("kind")) in _VISCOUS_WALL_KINDS:
+            out["friction"].append(n)
+    return out
+
+
+def _part_steps(run_dir, names) -> list:
+    """部品の壁面出力 res_<名前>_<タグ>_<step>.h5 の step の和集合 (派生物 res_..._<step>_full.h5 などは除く)。"""
+    steps = set()
+    for n in names:
+        pid = _FORCE_PARTS[n][0]
+        pat = re.compile(rf"^res_{re.escape(n)}_{pid}_(\d+)\.h5$")
+        for f in Path(run_dir).glob(f"res_{n}_{pid}_*.h5"):
+            mm = pat.match(f.name)
+            if mm:
+                steps.add(int(mm.group(1)))
+    return sorted(steps)
 
 
 def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0, mdot_u_in=0.0, p_in=0.0, twall_on_fluid=False,
-             half_W_vehicle=None):
+             half_W_vehicle=None, required_parts=None, friction_parts=None):
     """3D の力係数。**帳簿 (R2, codex M5 採用 2026-09-09)**: C_T / C_L / C_M は**ノズル力**
     (ramp の z ≤ W/2 + cowl_in + cowl_out + sidewall_in/out) だけで、2D の集計範囲と同じ対象面にする。
     幅外の機体下面 (ramp の W/2 < z ≤ W_vehicle/2) は C_T_vehicle / C_L_vehicle / C_M_vehicle に**別枠**で出し、
     W_vehicle の外 (遠方境界までのランプ延長) は集計しない (`beyond_vehicle` に残すだけ)。
-    旧定義 (幅外を総推力に加算) は C_T_total_with_vehicle として残す (run_0027 との突き合わせ用)。"""
-    P = PHYS_SERN3D; run_dir = Path(run_dir)
-    spec = {"ramp": (P["ramp"], (0, 1, 0)), "cowl_in": (P["cowl_in"], (0, -1, 0)), "cowl_out": (P["cowl_out"], (0, 1, 0)),
-            "sidewall_in": (P["sidewall_in"], (0, 0, 1)), "sidewall_out": (P["sidewall_out"], (0, 0, -1)),
-            "vehicle": (P["vehicle"], (0, 1, 0)),      # R2: 幅外機体下面 (R4e で 0 面。旧メッシュ互換で残す)
-            "vehicle_top": (P["vehicle_top"], (0, -1, 0)),   # R4: 機体上面
-            "vehicle_side": (P["vehicle_side"], (0, 0, -1)),  # R4c: 機体側面 (z = W/2、外向きは −z)
-            "vehicle_base": (P["vehicle_base"], (-1, 0, 0))}  # R4e: 機体ベース (x = L_ramp、外向きは −x)
+    旧定義 (幅外を総推力に加算) は C_T_total_with_vehicle として残す (run_0027 との突き合わせ用)。
+    required_parts・friction_parts (force_parts_plan の required・friction、§5.1 R2h3・R2h4): この step に出力の無い部品があれば
+    力係数を作らず {"step", "parts", "incomplete"} を返す。摩擦を要求する部品に twall が無ければ C_T_with_shear・C_T_friction を
+    作らず incomplete に理由を残す (0 で補わない)。None は従来どおり (ある部品だけを足す)。"""
+    run_dir = Path(run_dir)
     parts = {}
-    for name, (pid, d) in spec.items():
+    for name, (pid, d) in _FORCE_PARTS.items():
         c = list(run_dir.glob(f"res_{name}_{pid}_{step}.h5"))
         if c:
             parts[name] = surface_forces(c[0], np.array(d, float), p_a, x_ref, y_ref, z_split=half_W if name == "ramp" else None,
                                          z_vehicle_max=half_W_vehicle if name == "ramp" else None)
+    lack = [n for n in (required_parts or ()) if n not in parts]
+    if lack:
+        return {"step": step, "parts": parts,
+                "incomplete": [f"判定不能: step {step} に壁の部品 {', '.join(lack)} の出力が無い (面があり出力を要求する部品)"]}
     def _sum(key, sel):
         tot = 0.0
         for name, v in parts.items():
@@ -429,7 +534,11 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
         out["C_L_ramp_inside"] = ri["Fy_p"] / F_ideal; out["C_L_ramp_outside"] = ro["Fy_p"] / F_ideal
         out["C_T_ramp_inside"] = -ri["Fx_p"] / F_ideal; out["C_T_ramp_outside"] = -ro["Fx_p"] / F_ideal
         out["area_beyond_vehicle"] = parts["ramp"]["beyond_vehicle"]["area"]
-    if any("Fx_tau" in v for v in parts.values()):
+    no_tau = [n for n in (friction_parts or ()) if "Fx_tau" not in parts.get(n, {})]
+    if no_tau:
+        # 粘性壁の部品に twall が無い: C_T_with_shear を作らない (旧実装は 1 部品でも摩擦があれば他を 0 として足した。§5.1 R2h4)
+        out["incomplete"] = [f"判定不能: step {step} の粘性壁の部品 {', '.join(no_tau)} に摩擦 (twall_x) が無い — C_T_with_shear を作らない"]
+    elif any("Fx_tau" in v for v in parts.values()):
         # 摩擦: vehicle タグがあればノズル面 (vehicle 以外) だけを足す。旧 run (ramp が幅外を含む) では全面の値になる
         sgn = 1.0 if twall_on_fluid else -1.0
         Fx_t = sgn * sum(v.get("Fx_tau", 0.0) for name, v in parts.items() if name not in _VEHICLE_FACES)
@@ -445,10 +554,17 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     p = load_problem(problem_path); run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
     st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]; xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
-    steps = sorted({int(f.stem.split("_")[-1]) for f in run_dir.glob("res_ramp_*_[0-9]*.h5")})
+    # 力の部品の要求を形状・境界定義から固定し (§5.1 R2h3・R2h4)、標本の step は要求する全部品の出力の和集合 (旧: ランプの出力の step。
+    # 1 部品でも出力の無い step を力係数から黙って落とさない)。要求を固定できなければ全標本に判定不能の理由を付ける
+    fp = force_parts_plan(run_dir, info)
+    steps = _part_steps(run_dir, fp["required"] or ["ramp"])
     hist = [forces3d(run_dir, s, en["P"], info["F_ideal_N_per_m"], info["half_W_m"], H, float(xr) * H, float(yr) * H,
                      ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell"),
-                     half_W_vehicle=info.get("half_W_vehicle_m")) for s in steps]
+                     half_W_vehicle=info.get("half_W_vehicle_m"), required_parts=fp["required"], friction_parts=fp["friction"])
+            for s in steps]
+    if fp["reasons"]:
+        for h in hist:
+            h["incomplete"] = list(fp["reasons"]) + list(h.get("incomplete") or [])
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
@@ -465,7 +581,8 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
                            model=sern_turbulence_model(p.evaluate))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],
-           "floor_events": floor_events_summary(gates.get("floor_events"))}
+           "floor_events": floor_events_summary(gates.get("floor_events")),
+           "force_parts": {k: fp[k] for k in ("required", "friction", "faces_source", "reasons")}}
     if hist:
         last = hist[-1]
         out.update({k: last[k] for k in last if k != "parts"})

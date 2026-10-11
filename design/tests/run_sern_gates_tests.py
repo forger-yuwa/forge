@@ -85,8 +85,11 @@ def make_run(d: Path, roe_nan=False, p_neg=False, nan_dump=False, resid="plateau
     if nan_dump:
         (d / "res_nan_12.h5").write_bytes(b"")
     steps = 6000
+    # 残差は流体 5 列 + SST の 2 列、run の solverConfig.yaml (SST) も置く: 旧 fixture の 3 列 (rms_ro・rms_roUx・rms_roe) で設定なしの
+    # CSV は check_convergence の判定不能 (必須列の欠落) で、2026-10-12 から受理ゲートも判定不能にする (plan tooling-sern-te-wake-grid §5.1 R2h1)
+    (d / "solverConfig.yaml").write_text('turbulence: {model: "sst"}\n')
     with open(d / "residual_history.csv", "w", newline="") as fh:
-        w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roe"])
+        w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"])
         for s in range(0, steps + 1, 100):
             t = s / steps
             if resid == "converged":
@@ -97,7 +100,7 @@ def make_run(d: Path, roe_nan=False, p_neg=False, nan_dump=False, resid="plateau
                 v = 10 ** (-1 - 2 * min(t * 3, 1)) * (1 + 40 * max(t - 0.8, 0))
             elif resid == "nan":
                 v = nan if s > steps * 0.9 else 10 ** (-1 - t)
-            w.writerow([s, -1, "outer_end", v, v * 10, v * 100])
+            w.writerow([s, -1, "outer_end", v, v * 10, v * 10, v * 10, v * 100, v * 10, v * 1000])
     (d / "run_case_stdout.log").write_text(f"[run_case] forge exit={rc}\n")
 
 
@@ -118,7 +121,8 @@ run_conv = tmp / "conv"; make_run(run_conv, resid="converged")
 check("residual_health 4 桁低下 → converged", G.residual_health(run_conv)["converged"])
 run_rise = tmp / "rise"; make_run(run_rise, resid="rising")
 rr = G.residual_health(run_rise)
-check("residual_health 末尾上昇 → rising 列を挙げて不合格", not rr["ok"] and rr["rising"] == ["rms_ro", "rms_roUx", "rms_roe"])
+check("residual_health 末尾上昇 → rising 列を挙げて不合格", not rr["ok"]
+      and rr["rising"] == ["rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"])
 run_rnan = tmp / "rnan"; make_run(run_rnan, resid="nan")
 check("residual_health NaN → nan/不合格", not G.residual_health(run_rnan)["ok"] and G.residual_health(run_rnan)["nan"])
 check("residual_health csv 無し → MISSING", G.residual_health(tmp / "nothing_here_")["verdict"] == "MISSING")

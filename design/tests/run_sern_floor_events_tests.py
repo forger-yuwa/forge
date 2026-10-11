@@ -47,11 +47,14 @@ def make_run(d: Path, steps=6000, rc=0):
         for k, val in (("ro", 1.0), ("roUx", 2.0), ("roUy", 0.0), ("roUz", 0.0), ("roe", 3.0e5), ("P", 1.0e5), ("T", 300.0),
                        ("roK", 1.0), ("roOmega", 1.0e3)):
             f.create_dataset(f"VALUE/{k}", data=np.full(n, val))
+    # 残差は流体 5 列 + SST の 2 列、run の solverConfig.yaml (SST) も置く: 旧 fixture の 3 列 (rms_ro・rms_roUx・rms_roe) で設定なしの
+    # CSV は check_convergence の判定不能 (必須列の欠落) で、2026-10-12 から受理ゲートも判定不能にする (plan tooling-sern-te-wake-grid §5.1 R2h1)
+    (d / "solverConfig.yaml").write_text('turbulence: {model: "sst"}\n')
     with open(d / "residual_history.csv", "w", newline="") as fh:
-        w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roe"])
+        w = csv.writer(fh); w.writerow(["step", "inner", "phase", "rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"])
         for s in range(0, steps + 1, 100):
             v = 10 ** (-1 - 1.5 * min(s / steps * 3, 1))
-            w.writerow([s, -1, "outer_end", v, v * 10, v * 100])
+            w.writerow([s, -1, "outer_end", v, v * 10, v * 10, v * 10, v * 100, v * 10, v * 1000])
     (d / "run_case_stdout.log").write_text(f"[run_case] forge exit={rc}\n")
     return d
 

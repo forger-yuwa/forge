@@ -28,6 +28,7 @@ from ..metrics.sern_forces import force_history, write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..metrics.sern_gates import floor_events_config_line, floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
 from ..metrics.sern_gates import JUDGMENT_MIN_SAMPLES, judgment_extendable, judgment_gate   # 判定区間の段 (te-wake-grid §5.1 R2)
+from ..metrics.sern_gates import config_species_keys   # 必須の化学種・トレーサ (te-wake-grid §5.1 R2h2、ゲートと共用)
 from ..metrics.sern_gates import judgment_planned_steps, judgment_required_quantities   # 必須量・予定 step 列 (te-wake-grid §5.1 R2a)
 from ..probdef import Problem, dv_value, load_problem, sern_turbulence_model   # 乱流モデルの綴りは 1 か所 (te-wake-grid §5.1 R2g)
 from .ic import _forge_species
@@ -1249,6 +1250,7 @@ def prepare(problem_path, run_dir, nsteps=None, op: str | None = None, wall_offs
                            kern=(kern if _ic == "moc" else None),
                            gas=((_gs or {}).get("exhaust")))
     stamp_region_ic_species(run_dir / MESH, run_dir, st, _gs)     # 新規初期場の化学種属性 (TP のみ)
+    check_initial_state(run_dir / MESH, cfg, "prepare (2D) の初期場")    # 段の config が解く保存量がそろうこと (§5.1 R2h5)
     ex = st["exhaust"]
     F_ideal_nd, M_e_id = ideal_thrust(p, st)
     info = {"problem": str(problem_path), "run_dir": str(run_dir), "nsteps": n, "H_m": H, "states": st, "gas_model": st["gas_model"],
@@ -1341,10 +1343,70 @@ def _require_datasets(h5, names, what: str) -> None:
         raise ValueError(f"{what}: 元の VALUE に {missing} が無い")
 
 
-def restart_by_index(res_h5, mesh_h5) -> None:
+# --- 初期化と段の移行の必須の状態量 (plan tooling-sern-te-wake-grid §5.1 R2h5、codex diagnose 2026-10-12 R2h(5)) ---------------
+# restart_by_index は「継続元にあり節点数が同じ量だけ写す」作りで、必須の量の欠落・寸法の不一致を黙って飛ばした (標準起動の
+# run_staged の段の移行もこれを通る)。初期化 (prepare の IC は write_ic_arrays が VALUE に無い roK・roOmega を飛ばす) も同じ型。
+#   - 初期化: 段の config が解く保存量 (required_state_keys) が初期場にそろうこと (check_initial_state)
+#   - 段の移行: 継承で必須の量 (inherit_state_keys) は書き込みの前に継続元・継続先の存在と節点数を検査し、欠ければ止める
+#     層流 (turbulence none) の暖機段 → SST は roK・roOmega を必須にしない: 継続先の初期場の乱流量を保つ明示仕様
+#     (runner_sern3d.warm_from_same_mesh の keep_turb=True と同じ。Euler→SST の初期化に SST→SST と同じ必須コピーを課さない)
+# 一般の変形 restart・warm_from_same_mesh・warm_from_run の状態転送は親 plan tooling-nozzle-sern-chain R15 (ここでは触らない)
+STATE_FLUID = ("ro", "roUx", "roUy", "roUz", "roe")
+
+
+def inherit_state_keys(src_cfg: str, dst_cfg: str) -> list:
+    """段の移行で継続元から必ず写す保存量: 継続先の段が解く量 (required_state_keys(dst_cfg)) のうち、継続元の段も解いた量。
+    SST → SST は roK・roOmega を含み、層流 (none) → SST は含まない (継続先の初期場の乱流量を保つ)。流体 5 量と TP の化学種は常に含む。"""
+    s = set(required_state_keys(src_cfg))
+    return [k for k in required_state_keys(dst_cfg) if k in s]
+
+
+def _state_gaps(src_v, dst_v, required) -> list:
+    """必須の量 (required) の継承を妨げるもの (無ければ空): 継続元に無い・継続先の ro と節点数が違う・継続先に無い (化学種 roY*・
+    トレーサ roXi は restart_by_index が作るので除く)・継続先の配列寸法が違う。src_v・dst_v は h5 の VALUE グループ。"""
+    if "ro" not in dst_v:
+        return ["ro が継続先に無い"]
+    shp = dst_v["ro"].shape
+    bad = []
+    for k in required:
+        if k not in src_v:
+            bad.append(f"{k} が継続元に無い")
+        elif src_v[k].shape != shp:
+            bad.append(f"{k} の寸法が継続先の節点数と違う (継続元 {src_v[k].shape} / 継続先 ro {shp})")
+        elif k in dst_v:
+            if dst_v[k].shape != shp:
+                bad.append(f"{k} の継続先の寸法が ro と違う ({dst_v[k].shape} / {shp})")
+        elif not (re.fullmatch(r"roY\d+", k) or k == "roXi"):
+            bad.append(f"{k} が継続先に無い")
+    return bad
+
+
+def check_initial_state(mesh_h5, cfg_text: str, what: str = "初期場") -> list:
+    """標準生産経路の初期化 (prepare が IC を書いた後): 段の config が解く保存量 (required_state_keys) が初期場 (メッシュ h5 の VALUE) に
+    そろい、節点数 (ro) が同じこと。欠ければ ValueError (forge に渡す前に止める)。戻り = 検査した量。"""
+    req = required_state_keys(cfg_text)
+    with h5py.File(mesh_h5, "r") as f:
+        v = f["VALUE"]
+        shp = v["ro"].shape if "ro" in v else None
+        bad = [f"{k} が無い" for k in req if k not in v] + \
+              [f"{k} の寸法が ro と違う ({v[k].shape} / {shp})" for k in req if k in v and shp is not None and v[k].shape != shp]
+    if bad:
+        raise ValueError(f"{what}: 段の config が解く保存量が初期場 {Path(mesh_h5).name} にそろわない ({'; '.join(bad)})")
+    return req
+
+
+def restart_by_index(res_h5, mesh_h5, required=None) -> None:
     """同一メッシュの stage 間移植: VALUE を index でコピーする (座標最近傍の `interp_field.py` は使わない)。
     理由 (2026-09-04, case/46 run_0009): スリットカウルの上下壁ノードは座標が一致し、最近傍補間が双子を同じ元
-    ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
+    ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。
+    required = 継承で必須の保存量 (inherit_state_keys。None は流体 5 量)。継続元・継続先に無い、または節点数が違えば
+    **書き込みの前に** ValueError (§5.1 R2h5。旧実装は黙って飛ばした)。必須でない量は従来どおり、あって節点数が同じときだけ写す。"""
+    req = list(STATE_FLUID) if required is None else list(required)
+    with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r") as dst:
+        gaps = _state_gaps(src["VALUE"], dst["VALUE"], req)
+    if gaps:
+        raise ValueError(f"restart_by_index: 継承に必須の保存量がそろわない ({'; '.join(gaps)}) — "
+                         f"{Path(res_h5).name} → {Path(mesh_h5).name}")
     check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
     sig = _species_signature(Path(mesh_h5).parent)
     # 化学種の属性 (§4.3): SRC の記録を検証し、宛先を --resolve-species で解決して一致なら継承 (不一致は書き込み前に停止)
@@ -1526,6 +1588,13 @@ def _archive_stage(run_dir, tag: str) -> None:
             pass
 
 
+def _stage_inherit_keys(run_dir, cfg_main: str) -> list:
+    """run_staged の段の移行で継承が必須の保存量 (§5.1 R2h5): いま終わった段の config (run_dir/solverConfig.yaml) → 次の段。
+    次の段 (soft・mid・適応段・本段) は本段の config から CFL・次数・段の長さだけを変えたもので、解く量は cfg_main と同じ
+    (層流の暖機段どうしの移行も、継続元が層流なので roK・roOmega は入らない)。"""
+    return inherit_state_keys((Path(run_dir) / "solverConfig.yaml").read_text(), cfg_main)
+
+
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
                warm_lam_ramp=None, soft_ramp=None,
@@ -1549,7 +1618,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         else (run_dir / "solverConfig.yaml").read_text()
     if stages == "main":  # soft 段の res_*.h5 が残っている状態から本段だけ回す
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, required=_stage_inherit_keys(run_dir, cfg_main))
         for f in run_dir.glob("res_*"):
             f.unlink()
         (run_dir / "solverConfig.yaml").write_text(cfg_main)
@@ -1568,7 +1637,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("warm start の適応段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, required=_stage_inherit_keys(run_dir, cfg_main))
         for f in run_dir.glob("res_*"):
             f.unlink()
         warm_lam_steps = 0      # 以降は mid → 本段
@@ -1593,7 +1662,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
             if rc != 0 or not res:
                 raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
             _archive_stage(run_dir, f"warm_cfl{c:g}")
-            restart_by_index(res[-1], run_dir / MESH)
+            restart_by_index(res[-1], run_dir / MESH, required=_stage_inherit_keys(run_dir, cfg_main))
             for f in run_dir.glob("res_*"):
                 f.unlink()
     if warm_src is not None:      # soft は適応段で代替済み → mid へ
@@ -1614,7 +1683,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         if rc != 0 or not res:
             raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
         _archive_stage(run_dir, f"soft_cfl{c:g}")
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, required=_stage_inherit_keys(run_dir, cfg_main))
         for f in run_dir.glob("res_*"):
             f.unlink()
     return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp)
@@ -1636,13 +1705,13 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
                 _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
                 if rc != 0 or not _r:
                     raise RuntimeError(f"mid 段が失敗 (cfl {c})")
-                restart_by_index(_r[-1], run_dir / MESH)
+                restart_by_index(_r[-1], run_dir / MESH, required=_stage_inherit_keys(run_dir, cfg_main))
                 for f in run_dir.glob("res_*"):
                     f.unlink()
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("mid 段 (2 次 + soft CFL) が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, required=_stage_inherit_keys(run_dir, cfg_main))
         for f in run_dir.glob("res_*"):
             f.unlink()
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
@@ -1813,12 +1882,8 @@ def required_state_keys(cfg_text: str) -> list:
         keys += ["roK", "roOmega"]
     elif tm != "none":
         raise ValueError(f"段の移行: 乱流モデル {tm!r} の保存量の集合を決められない (none / sst)")
-    pp = doc.get("physProp") or {}
-    if int(pp.get("thermalMethod", 0) or 0) == 2:
-        keys += [f"roY{i}" for i in range(len(pp.get("species") or ["N2"]))]
-        if str(pp.get("tracer", "none")).lower() not in ("none", "", "0"):
-            keys.append("roXi")
-    return keys
+    # 化学種・トレーサの規則は受理ゲート (sern_gates.field_health・floor_gate) と共用 (§5.1 R2h2)
+    return keys + config_species_keys(doc)
 
 
 def _restart_mismatch(res_h5, mesh_h5, required=("ro", "roUx", "roUy", "roUz", "roe")) -> list:
