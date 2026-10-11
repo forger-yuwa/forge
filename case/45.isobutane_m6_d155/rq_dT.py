@@ -10,7 +10,7 @@ I, J = np.meshgrid(np.arange(ni), np.arange(nj), indexing="ij")
 DOM = ((X < -2) & (I >= 1) & (J >= 1) & (J <= nj - 2)).ravel()
 HOT = ((np.abs(X + 7.1) < 0.15) & (J >= 100) & (J <= 106)).ravel()
 def T(r, s): return np.asarray(h5py.File(f"{r}/res_{s}.h5", "r")["VALUE/T"][:], float)
-ALL = ("run_0595_rq_c1", "run_0596_rq_c2", "run_0597_rq_c3", "run_0598_rq_e1", "run_0599_rq_e2", "run_0620_rq_e3", "run_0621_rq_f1", "run_0622_rq_f2", "run_0623_rq_f3", "run_0706_rp_g9a", "run_0707_rp_g9b", "run_0708_rp_g9c")
+ALL = ("run_0595_rq_c1", "run_0596_rq_c2", "run_0597_rq_c3", "run_0598_rq_e1", "run_0599_rq_e2", "run_0620_rq_e3", "run_0621_rq_f1", "run_0622_rq_f2", "run_0623_rq_f3", "run_0706_rp_g9a", "run_0707_rp_g9b", "run_0708_rp_g9c", "run_0700_rp_cp1", "run_0701_rp_cp2", "run_0702_rp_cp3", "run_0703_rp_fp1", "run_0704_rp_fp2", "run_0705_rp_fp3")
 runs = [r for r in ALL if os.path.exists(f"{r}/RUN_RC")]
 ref = np.mean([T(r, 2000) for r in ("run_0595_rq_c1", "run_0596_rq_c2")], axis=0)
 print(f"基準 = FP64 の C1・C2 の平均 (step 2,000)。対象 = 入口〜収縮部の内点 {int(DOM.sum())} 節点、差の最大の所 (x/r_t≈−7, j 100〜106) {int(HOT.sum())} 節点 (温度 {np.mean(ref[HOT]):.1f} K)")
