@@ -1,0 +1,291 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-dt §6.3",
+ "gates": [
+  {
+   "check": "出発の場の sha256",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 設定が腕 L7 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0553_lvcmp_l7: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 値とマスクの表示が腕 L7 と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 設定が腕 L0 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0554_lvcmp_l0: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 値とマスクの表示が腕 L0 と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 台本が渡した FORGE_LVC_TERMS = -",
+   "ok": true,
+   "value": "-"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 設定が腕 L5 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0555_lvcmp_l5: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 値とマスクの表示が腕 L5 と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 台本が渡した FORGE_LVC_TERMS = 5",
+   "ok": true,
+   "value": "5"
+  },
+  {
+   "check": "事前のゲートの記録が PASS で、証拠のハッシュが今のファイルと同じ",
+   "ok": true,
+   "value": "照合 OK: 69 ファイル"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0556_lvcmp_l7_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0557_lvcmp_l0_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0558_lvcmp_l5_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0559_lvcmp_l7_dump2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  }
+ ],
+ "gates_ok": true,
+ "arms": {
+  "L7": {
+   "class": "REACHED",
+   "run": "run_0553_lvcmp_l7",
+   "watch_status": "REACHED",
+   "n_rows": 44,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 110000,
+   "reach_step": 110000,
+   "drift": [
+    0.04269567340458025,
+    -0.01665758825610819,
+    0.011730479986749032
+   ],
+   "deficit": -0.005148730348460003,
+   "quasisteady": {
+    "rc": 1,
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07848  drift=0.0%/tail  fluct=0.2%          STEADY",
+     "  theta_r_70      : tail mean=0.1157  drift=0.0%/tail  fluct=0.2%           STEADY",
+     "  theta_r_94      : tail mean=0.1285  drift=0.0%/tail  fluct=0.1%           STEADY",
+     "  Q_w             : tail mean=9.366e+06  drift=0.1%/tail  fluct=0.2%  (extremum at tail-end) DRIFTING",
+     "",
+     "OVERALL: NOT ALL STEADY (see above)"
+    ]
+   }
+  },
+  "L0": {
+   "class": "REACHED",
+   "run": "run_0554_lvcmp_l0",
+   "watch_status": "REACHED",
+   "n_rows": 47,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 117500,
+   "reach_step": 117500,
+   "drift": [
+    0.036450037200119745,
+    0.048193296383414186,
+    0.04822730386204732
+   ],
+   "deficit": 0.0025326328223924254,
+   "quasisteady": {
+    "rc": 1,
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07787  drift=0.0%/tail  fluct=0.0%          STEADY",
+     "  theta_r_70      : tail mean=0.1149  drift=0.0%/tail  fluct=0.0%  (still trending at tail-end) TRANSIENT-UNSETTLED",
+     "  theta_r_94      : tail mean=0.1277  drift=0.0%/tail  fluct=0.0%  (still trending at tail-end) TRANSIENT-UNSETTLED",
+     "  Q_w             : tail mean=9.294e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+     "",
+     "OVERALL: NOT ALL STEADY (see above)"
+    ]
+   }
+  },
+  "L5": {
+   "class": "REACHED",
+   "run": "run_0555_lvcmp_l5",
+   "watch_status": "REACHED",
+   "n_rows": 47,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 117500,
+   "reach_step": 117500,
+   "drift": [
+    0.005082955726121163,
+    0.02366624584053678,
+    0.014614639044774336
+   ],
+   "deficit": -0.00047406923815935306,
+   "quasisteady": {
+    "rc": 0,
+    "overall": "OVERALL: ALL STEADY",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07787  drift=0.0%/tail  fluct=0.1%          STEADY",
+     "  theta_r_70      : tail mean=0.1149  drift=0.0%/tail  fluct=0.1%           STEADY",
+     "  theta_r_94      : tail mean=0.1277  drift=0.0%/tail  fluct=0.0%           STEADY",
+     "  Q_w             : tail mean=9.293e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+     "",
+     "OVERALL: ALL STEADY"
+    ]
+   }
+  }
+ },
+ "comparisons": {
+  "L7_vs_L0": {
+   "verdict": "差を検出しなかった",
+   "diff_steps": -7500,
+   "x": 110000,
+   "y": 117500
+  },
+  "L7_vs_L5": {
+   "verdict": "差を検出しなかった",
+   "diff_steps": -7500,
+   "x": 110000,
+   "y": 117500
+  },
+  "L5_vs_L0": {
+   "verdict": "差を検出しなかった",
+   "diff_steps": 0,
+   "x": 117500,
+   "y": 117500
+  }
+ },
+ "main": "今回の実行では、全部入りと生産の到達の差を検出しなかった (登録幅 15000 step 未満)",
+ "VERDICT": "主 (L7 と L0): 今回の実行では、全部入りと生産の到達の差を検出しなかった (登録幅 15000 step 未満); L7 と L5: 差を検出しなかった; L5 と L0: 差を検出しなかった"
+}
