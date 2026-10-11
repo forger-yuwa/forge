@@ -24,7 +24,7 @@ make -j4 forge > make.log 2>&1; rc=$?; echo "make rc=$rc $(date -Is) $(sha256sum
 [ $rc = 0 ] || exit 1
 cd $S; ut=False
 /usr/local/cuda/bin/nvcc --expt-relaxed-constexpr -arch=sm_86 -I. -o $W/test_quantize_state tests/unit/test_quantize_state.cu > $W/build.log 2>&1 \
-  && $W/test_quantize_state > $W/test_quantize_state.out 2>&1; v=$(grep -h "VERDICT" $W/test_quantize_state.out 2>/dev/null | tail -1); echo "test_quantize_state: $v" >> $LOG
-echo "$v" | grep -q "VERDICT: PASS" && ut=True
+  && $W/test_quantize_state > $W/test_quantize_state.out 2>&1; v=$(grep -hE "VERDICT|^PASS|^FAIL" $W/test_quantize_state.out 2>/dev/null | tail -1); echo "test_quantize_state: $v" >> $LOG
+echo "$v" | grep -qE "VERDICT: PASS|^PASS \(失敗 0\)" && ut=True
 python3 -c "import json; json.dump({'commit': '$SHA', 'unit_test_pass': $ut, 'forge_sha256': '$(sha256sum $S/build/forge | cut -c1-64)'}, open('$PRE', 'w'), ensure_ascii=False, indent=1)"
 echo "== $(date -Is) 終わり" >> $LOG; touch $C45/rq_build.done
