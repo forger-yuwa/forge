@@ -183,7 +183,7 @@ hist = [{"step": 500 * (i + 1), "C_T": 0.95, "C_T_with_shear": 0.94, "C_L": 0.1,
 
 
 def summary_after_json(run, required, window):
-    g = G.evaluate_gates(run, hist, 0, require_floor_events=required, floor_window_steps=window)
+    g = G.evaluate_gates(run, hist, 0, require_floor_events=required, floor_window_steps=window, model="sst")
     out = {"gates": g, "C_T": 0.95, "C_T_with_shear": 0.94, "C_L": 0.1, "C_M": -1.0, "forge_rc": 0,
            "slau_wall_normal_chi_effective": 1, "scalar_gradient_effective": "lsq", D.EVAL_METHOD_ID: ID, D.TE_WAKE_EFFECTIVE: "off", D.ZTE_EFFECTIVE: "off"}
     s = D.SernCampaign._op_summary(out, run)

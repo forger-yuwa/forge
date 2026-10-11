@@ -1975,8 +1975,10 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     jp = judgment_plan(p.evaluate)
     jg = judgment_gate(hist, jp["window_steps"], jp["required"], jp["planned_steps"],
                        monitor_unavailable=MONITOR_UNAVAILABLE_2D) if jp else None
+    # 目的量と定常性の量は問題設定の乱流モデルから (§5.1 R2f。_solver_config と同じ既定 euler。列の有無では決めない)
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
-                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg)
+                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg,
+                           model=p.evaluate.get("model", "euler"))
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
            "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],

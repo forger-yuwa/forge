@@ -123,24 +123,24 @@ check("residual_health csv 無し → MISSING", G.residual_health(tmp / "nothing
 check("forge_rc_from_log", G.forge_rc_from_log(run_ok) == 0 and G.forge_rc_from_log(tmp / "nothing_here_") is None)
 
 steady_hist = [{"step": 500 * (i + 1), "C_T": 0.95, "C_T_with_shear": 0.94, "C_L": 0.1, "C_M": -1.0} for i in range(8)]
-g = G.evaluate_gates(run_ok, steady_hist, 0)
+g = G.evaluate_gates(run_ok, steady_hist, 0, model="sst")
 check("evaluate_gates 全合格 → PASS, objective = C_T_with_shear", g["verdict"] == "PASS" and g["fail_class"] is None and g["objective"] == "C_T_with_shear")
-check("evaluate_gates Euler (摩擦なし) の objective = C_T", G.evaluate_gates(run_ok, [{k: v for k, v in h.items() if k != "C_T_with_shear"} for h in steady_hist], 0)["objective"] == "C_T")
-check("evaluate_gates rc=1 → FAIL/DIVERGED (力係数が STEADY でも)", G.evaluate_gates(run_ok, steady_hist, 1)["fail_class"] == "DIVERGED")
-check("evaluate_gates rc 不明 → DIVERGED", G.evaluate_gates(run_ok, steady_hist, None)["fail_class"] == "DIVERGED")
-check("evaluate_gates 場 NaN → DIVERGED", G.evaluate_gates(run_nan, steady_hist, 0)["fail_class"] == "DIVERGED")
-check("evaluate_gates 残差 rising → RESIDUAL_RISING", G.evaluate_gates(run_rise, steady_hist, 0)["fail_class"] == "RESIDUAL_RISING")
-check("evaluate_gates 残差 NaN → DIVERGED", G.evaluate_gates(run_rnan, steady_hist, 0)["fail_class"] == "DIVERGED")
-check("evaluate_gates プラトー + require_residual_pass → NOT_CONVERGED", G.evaluate_gates(run_ok, steady_hist, 0, require_residual_pass=True)["fail_class"] == "NOT_CONVERGED")
-check("evaluate_gates 履歴なし → NO_FORCES", G.evaluate_gates(run_ok, [], 0)["fail_class"] == "NO_FORCES")
+check("evaluate_gates Euler (摩擦なし) の objective = C_T", G.evaluate_gates(run_ok, [{k: v for k, v in h.items() if k != "C_T_with_shear"} for h in steady_hist], 0, model="euler")["objective"] == "C_T")
+check("evaluate_gates rc=1 → FAIL/DIVERGED (力係数が STEADY でも)", G.evaluate_gates(run_ok, steady_hist, 1, model="sst")["fail_class"] == "DIVERGED")
+check("evaluate_gates rc 不明 → DIVERGED", G.evaluate_gates(run_ok, steady_hist, None, model="sst")["fail_class"] == "DIVERGED")
+check("evaluate_gates 場 NaN → DIVERGED", G.evaluate_gates(run_nan, steady_hist, 0, model="sst")["fail_class"] == "DIVERGED")
+check("evaluate_gates 残差 rising → RESIDUAL_RISING", G.evaluate_gates(run_rise, steady_hist, 0, model="sst")["fail_class"] == "RESIDUAL_RISING")
+check("evaluate_gates 残差 NaN → DIVERGED", G.evaluate_gates(run_rnan, steady_hist, 0, model="sst")["fail_class"] == "DIVERGED")
+check("evaluate_gates プラトー + require_residual_pass → NOT_CONVERGED", G.evaluate_gates(run_ok, steady_hist, 0, require_residual_pass=True, model="sst")["fail_class"] == "NOT_CONVERGED")
+check("evaluate_gates 履歴なし → NO_FORCES", G.evaluate_gates(run_ok, [], 0, model="sst")["fail_class"] == "NO_FORCES")
 h_nan = [dict(h) for h in steady_hist]; h_nan[-1]["C_T_with_shear"] = nan
-gg = G.evaluate_gates(run_ok, h_nan, 0)
+gg = G.evaluate_gates(run_ok, h_nan, 0, model="sst")
 check("evaluate_gates 目的量の末尾 NaN → UNSTEADY (NONFINITE)", gg["fail_class"] == "UNSTEADY" and gg["steadiness"]["series"]["C_T_with_shear"]["verdict"] == "NONFINITE")
 h_cl = [dict(h) for h in steady_hist]
 for i, h in enumerate(h_cl):
     h["C_L"] = 0.1 + 0.02 * i
-check("evaluate_gates C_L ドリフト → UNSTEADY (目的量以外も独立に見る)", G.evaluate_gates(run_ok, h_cl, 0)["unsteady" if False else "fail_class"] == "UNSTEADY")
-check("evaluate_gates 理由が全ゲート分積まれる (rc + 場 + 残差)", len(G.evaluate_gates(run_rnan, [], 1)["reasons"]) >= 3)
+check("evaluate_gates C_L ドリフト → UNSTEADY (目的量以外も独立に見る)", G.evaluate_gates(run_ok, h_cl, 0, model="sst")["unsteady" if False else "fail_class"] == "UNSTEADY")
+check("evaluate_gates 理由が全ゲート分積まれる (rc + 場 + 残差)", len(G.evaluate_gates(run_rnan, [], 1, model="sst")["reasons"]) >= 3)
 
 
 # --- (3) driver: 採用条件・分類・degraded ----------------------------------------------------------

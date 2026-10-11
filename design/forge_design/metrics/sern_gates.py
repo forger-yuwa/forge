@@ -5,8 +5,10 @@
   (2) 保存場の有限値・正値 (最終 res_*.h5 の ro/roU/roe/P/T が有限、ro,P,T > 0、res_nan_*.h5 が無い)
   (3) 全残差 (check_convergence.analyze): NaN/Inf 無し、末尾で rising な列が無い。PASS (3 桁低下) は
       `require_residual_pass` のときだけ必須 (本ケースは残差が 1–2.5 桁でプラトーする性格 — その事実は台帳に残す)
-  (4) **実際に最適化する量** (RANS は C_T_with_shear、Euler は C_T) と C_T / C_L / C_M の頭打ち
-      (check_quasisteady.classify_series による STEADY。NONFINITE / DRIFTING / TRANSIENT-UNSETTLED / OSCILLATING は不合格)
+  (4) **実際に最適化する量** (SST は C_T_with_shear、Euler は C_T) と C_T / C_L / C_M の頭打ち
+      (check_quasisteady.classify_series による STEADY。NONFINITE / DRIFTING / TRANSIENT-UNSETTLED / OSCILLATING は不合格)。
+      量と目的量は問題設定の乱流モデル (evaluate.model) から決め、量の列が力の履歴に欠ければ判定不能
+      (plan tooling-sern-te-wake-grid §5.1 R2f。列の有無で量を減らさない)
   (5) 問題 YAML が要求するときだけ: 毎更新の床事象 (floor_event_gate)、判定区間の段の §6 #2・#3 (judgment_gate:
       後縁まわりの最低温度と 4 力量の窓。plan tooling-sern-te-wake-grid §5.1 R2)
 判定結果は metrics.json の `gates` に残し、数値失敗 (fail_class) と物理的 INFEASIBLE (設計不成立・C_M 窓) を混同しない。
@@ -124,19 +126,38 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
     return out
 
 
-def objective_key(hist) -> str:
-    """実際に最適化する量: RANS (壁摩擦出力あり) は C_T_with_shear、Euler は C_T。"""
-    return "C_T_with_shear" if hist and "C_T_with_shear" in hist[-1] else "C_T"
+# --- 受理ゲート (4) の量 (plan tooling-sern-te-wake-grid §5.1 R2f、R2a の横展開 2026-10-12) --------------------------------
+# 旧実装は「最後の履歴に C_T_with_shear の列があるか」で目的量と量の数を決めていたので、判定区間の段を持たない SST キャンペーンでは
+# 列が欠けると C_T の 3 量で通った。量は問題設定の乱流モデルから決め (表は §6 #3 の必須量 JUDGMENT_QUANTITIES を共用)、
+# 量の列が欠けた履歴は判定不能 (evaluate_gates で JUDGMENT_UNVERIFIABLE) にする。model は collect が問題設定 (evaluate.model、
+# runner の _solver_config と同じ既定 euler) から解決して渡す。None は渡し忘れと区別できないので拒否する (既定に読み替えない)
+def _gate_quantities(model) -> tuple:
+    """(目的量, 量の並び)。並びは目的量が先頭 (旧実装の metrics.json と同じ)。None・未知のモデルは ValueError。"""
+    if model is None:
+        raise ValueError("受理ゲートの乱流モデル (model) が None: collect は evaluate.model を runner の既定 euler で解決して渡す")
+    req = judgment_required_quantities(model)
+    obj = "C_T_with_shear" if "C_T_with_shear" in req else "C_T"
+    return obj, (obj,) + tuple(q for q in req if q != obj)
 
 
-def steadiness_gate(hist, obj: str | None = None) -> dict:
-    obj = obj or objective_key(hist)
-    keys = [obj] + [k for k in FORCE_KEYS if k != obj]
+def objective_key(model) -> str:
+    """実際に最適化する量: 乱流モデルが SST なら C_T_with_shear、Euler なら C_T (列の有無では決めない)。"""
+    return _gate_quantities(model)[0]
+
+
+def steadiness_gate(hist, model) -> dict:
+    """目的量と力係数の頭打ち (受理ゲート (4))。量は乱流モデルから (SST 4 量・Euler 3 量)。量の列が履歴のどれかの標本に
+    無ければ missing に挙げて不合格 (判定不能。evaluate_gates が JUDGMENT_UNVERIFIABLE にする)。値が非有限なら従来どおり NONFINITE。"""
+    obj, keys = _gate_quantities(model)
     steps = [h["step"] for h in hist]
-    series = {k: steadiness([h.get(k, float("nan")) for h in hist], steps=steps) for k in keys}
+    missing = [k for k in keys if any(k not in h for h in hist)]
+    series = {k: steadiness([h.get(k, float("nan")) for h in hist], steps=steps) for k in keys if k not in missing}
     unsteady = [k for k, v in series.items() if v["verdict"] != "STEADY"]
-    return {"ok": not unsteady, "objective": obj, "series": series, "unsteady": unsteady,
-            "reasons": [f"{k}: {series[k]['verdict']} ({series[k]['detail']})" for k in unsteady]}
+    reasons = ([f"判定不能: 必須量 {k} の列が力の履歴に無い ({sum(k not in h for h in hist)}/{len(hist)} 標本、乱流モデル {model})"
+                for k in missing]
+               + [f"{k}: {series[k]['verdict']} ({series[k]['detail']})" for k in unsteady])
+    return {"ok": not unsteady and not missing, "objective": obj, "model": str(model).strip().lower(), "missing": missing,
+            "series": series, "unsteady": unsteady, "reasons": reasons}
 
 
 
@@ -308,7 +329,8 @@ def floor_events_summary(fev: dict | None) -> dict | None:
 JUDGMENT_FORCE_TOL = {"C_T": 5.0e-5, "C_T_with_shear": 5.0e-5, "C_L": 5.0e-5, "C_M": 5.0e-4}
 JUDGMENT_MIN_SAMPLES = 20
 JUDGMENT_STEADY = {"tail": 0.5, "drift": 0.05, "osc": 0.10, "min_snaps": 4}    # check_quasisteady.py --tail 0.5 (他は既定)
-# 乱流モデル → §6 #3 の必須量。runner の _solver_config と同じ既定 (evaluate.model が無ければ euler)
+# 乱流モデル → §6 #3 の必須量。runner の _solver_config と同じ既定 (evaluate.model が無ければ euler)。受理ゲート (4) の量も
+# この表から (_gate_quantities、§5.1 R2f)
 JUDGMENT_QUANTITIES = {"sst": ("C_T", "C_T_with_shear", "C_L", "C_M"), "euler": ("C_T", "C_L", "C_M")}
 TE_REGIONS = ("R_TE", "R_SE", "RET", "ALL")
 T_COLD = 150.0
@@ -594,6 +616,8 @@ def judgment_extendable(gates: dict) -> tuple:
     stead = gates.get("steadiness") or {}
     if not stead.get("series"):
         blockers.append("力の履歴")
+    if stead.get("missing"):             # 量の列の欠落は判定不能 (延長しても列は増えない。§5.1 R2f)
+        blockers.append("必須量の列 " + "・".join(stead["missing"]))
     jg = gates.get("judgment")
     if jg is not None and not jg.get("ok") and not jg.get("extendable"):
         blockers.append(f"判定区間 {jg.get('fail_class')}")
@@ -638,23 +662,26 @@ def residual_scale_gate(run_dir, ratio: float = 1.0e6, gate: bool = False) -> di
             [f"残差の桁が揃わない (中央値 {med:.2e}): " + ", ".join(f"{k} {v:.2e}" for k, v in bad.items())]}
 
 
-def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
+def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
                    p_min: float | None = None, require_residual_plateau: bool = False,
                    require_floor_events: bool = False, floor_window_steps: int | None = None, floor_tail: float = 0.5,
-                   judgment: dict | None = None) -> dict:
+                   judgment: dict | None = None, *, model) -> dict:
     """全ゲートを評価して verdict / fail_class を返す。fail_class は数値失敗の種別:
     DIVERGED (rc≠0 / 発散ダンプ / 非有限・非正の場 / 残差 NaN), RESIDUAL_RISING, NOT_CONVERGED (require 時のみ),
     NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない),
     FLOOR_EVENT / FLOOR_UNVERIFIABLE (`require_floor_events` のときだけ: 判定区間の毎更新の床事象 / その記録が判定不能),
     COLD_SPOT / JUDGMENT_UNVERIFIABLE / JUDGMENT_UNSETTLED (`judgment` [judgment_gate の戻り] を渡したときだけ: 判定区間の §6 #2・#3)。
-    物理的 INFEASIBLE はここでは出さない。"""
+    JUDGMENT_UNVERIFIABLE は受理ゲート (4) の量の列が力の履歴に欠けたときにも出す (判定区間の有無によらない、§5.1 R2f)。
+    model = 問題設定の乱流モデル (collect が evaluate.model を runner の既定 euler で解決して渡す。省略不可・None 不可):
+    目的量と (4) の量はここから決める (旧引数 obj と、列の有無から推測する経路は廃止)。物理的 INFEASIBLE はここでは出さない。"""
+    obj = objective_key(model)          # モデルの検査 (None・未知は ValueError) を履歴・run の読み込みより先に
     field = field_health(run_dir)
     resid = residual_health(run_dir)
     floors = floor_gate(run_dir, p_min)
     fevents = floor_event_gate(run_dir, required=require_floor_events, window_steps=floor_window_steps, tail=floor_tail)
     rscale = residual_scale_gate(run_dir)
-    stead = steadiness_gate(hist, obj) if hist else {"ok": False, "objective": obj or objective_key(hist), "series": {}, "unsteady": [],
-                                                    "reasons": ["no force history (no wall output)"]}
+    stead = steadiness_gate(hist, model) if hist else {"ok": False, "objective": obj, "model": str(model).strip().lower(), "missing": [],
+                                                      "series": {}, "unsteady": [], "reasons": ["no force history (no wall output)"]}
     reasons = []; fail = None
     if rc is None:
         reasons.append("forge rc unknown"); fail = fail or "DIVERGED"
@@ -682,6 +709,9 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
         reasons += rscale["reasons"]; fail = fail or "RESIDUAL_UNBALANCED"
     if not hist:
         reasons += stead["reasons"]; fail = fail or "NO_FORCES"
+    elif stead["missing"]:
+        # 量の列の欠落は判定不能 (UNSTEADY にすると「未定常だけ」として延長の対象になる)
+        reasons += stead["reasons"]; fail = fail or "JUDGMENT_UNVERIFIABLE"
     elif not stead["ok"]:
         reasons += stead["reasons"]; fail = fail or "UNSTEADY"
     if judgment is not None and not judgment.get("ok"):

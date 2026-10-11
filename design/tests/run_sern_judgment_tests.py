@@ -239,9 +239,9 @@ with open(rd0 / "residual_history.csv", "w", newline="") as fh:
     for s in range(0, 20001, 500):
         v = 10 ** (-1 - 1.5 * min(s / 20000 * 3, 1)); w.writerow([s, -1, "outer_end", v, v * 10, v * 100])
 h0 = synth_hist()
-g_none = G.evaluate_gates(rd0, h0, 0)
-g_pass = G.evaluate_gates(rd0, h0, 0, judgment=ok_g)
-g_uns = G.evaluate_gates(rd0, h0, 0, judgment=G.judgment_gate(synth_hist(drift=1e-8), 10000, SST4, PLAN, monitor_rows=synth_mon()))
+g_none = G.evaluate_gates(rd0, h0, 0, model="sst")
+g_pass = G.evaluate_gates(rd0, h0, 0, judgment=ok_g, model="sst")
+g_uns = G.evaluate_gates(rd0, h0, 0, judgment=G.judgment_gate(synth_hist(drift=1e-8), 10000, SST4, PLAN, monitor_rows=synth_mon()), model="sst")
 check("(4) evaluate_gates: judgment を渡さなければキーも出さず従来どおり、PASS の判定は合格のまま",
       "judgment" not in g_none and g_none["verdict"] == "PASS" and g_pass["verdict"] == "PASS" and g_pass["judgment"]["ok"])
 check("(4) evaluate_gates: 判定区間の未達は FAIL/JUDGMENT_UNSETTLED で延長の対象",

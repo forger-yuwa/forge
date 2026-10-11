@@ -58,39 +58,39 @@ steady_hist = [{"step": 500 * (i + 1), "C_T": 0.95, "C_T_with_shear": 0.94, "C_L
 
 # --- (1) ゲート ---------------------------------------------------------------------------------------
 run_ok = make_run(tmp / "fe_ok"); TGB.write_floor_csv(str(run_ok), 6000)
-g = G.evaluate_gates(run_ok, steady_hist, 0, require_floor_events=True)
+g = G.evaluate_gates(run_ok, steady_hist, 0, require_floor_events=True, model="sst")
 check("必須: 全更新 0 件 → PASS (区間 (3000, 6000]、3000 更新)", g["verdict"] == "PASS" and g["floor_events"]["verdict"] == "PASS"
       and g["floor_events"]["window"] == [3000, 6000] and g["floor_events"]["n_updates_checked"] == 3000)
 run_mid = make_run(tmp / "fe_mid"); TGB.write_floor_csv(str(run_mid), 6000, events={4321: (1, 0, 0)})
-g = G.evaluate_gates(run_mid, steady_hist, 0, require_floor_events=True)
+g = G.evaluate_gates(run_mid, steady_hist, 0, require_floor_events=True, model="sst")
 check("必須: 途中で 1 件・最終場は正常 (floor_gate・field_health は ok) → FAIL/FLOOR_EVENT",
       g["verdict"] == "FAIL" and g["fail_class"] == "FLOOR_EVENT" and g["floors"]["ok"] and g["field"]["ok"]
       and g["floor_events"]["events"]["T"]["first_q_index"] == 4321)
 run_none = make_run(tmp / "fe_none")
-g = G.evaluate_gates(run_none, steady_hist, 0, require_floor_events=True)
+g = G.evaluate_gates(run_none, steady_hist, 0, require_floor_events=True, model="sst")
 check("必須: 記録の欠落 (floor_events.csv 無し) → FAIL/FLOOR_UNVERIFIABLE (0 件として扱わない)",
       g["verdict"] == "FAIL" and g["fail_class"] == "FLOOR_UNVERIFIABLE")
 run_drop = make_run(tmp / "fe_drop"); TGB.write_floor_csv(str(run_drop), 6000, drop=(5000,))
 check("必須: 区間の step の欠け → FAIL/FLOOR_UNVERIFIABLE",
-      G.evaluate_gates(run_drop, steady_hist, 0, require_floor_events=True)["fail_class"] == "FLOOR_UNVERIFIABLE")
+      G.evaluate_gates(run_drop, steady_hist, 0, require_floor_events=True, model="sst")["fail_class"] == "FLOOR_UNVERIFIABLE")
 run_rs = make_run(tmp / "fe_restart"); TGB.write_floor_csv(str(run_rs), 6000, sessions=[20000])
-g = G.evaluate_gates(run_rs, steady_hist, 0, require_floor_events=True, floor_window_steps=10000)
+g = G.evaluate_gates(run_rs, steady_hist, 0, require_floor_events=True, floor_window_steps=10000, model="sst")
 check("必須: restart 後の区間の欠落 (区間 10000 step > restart 後の 6000 step) → FAIL/FLOOR_UNVERIFIABLE",
       g["fail_class"] == "FLOOR_UNVERIFIABLE" and "restart" in " ".join(g["reasons"]))
-g = G.evaluate_gates(run_rs, steady_hist, 0, require_floor_events=True, floor_window_steps=5000)
+g = G.evaluate_gates(run_rs, steady_hist, 0, require_floor_events=True, floor_window_steps=5000, model="sst")
 check("必須: restart 後の session に区間が収まれば判定 → PASS", g["verdict"] == "PASS")
 run_end = make_run(tmp / "fe_noend"); TGB.write_floor_csv(str(run_end), 6000, end=False)
 check("必須: session_end 無し (異常終了) → FAIL/FLOOR_UNVERIFIABLE",
-      G.evaluate_gates(run_end, steady_hist, 0, require_floor_events=True)["fail_class"] == "FLOOR_UNVERIFIABLE")
+      G.evaluate_gates(run_end, steady_hist, 0, require_floor_events=True, model="sst")["fail_class"] == "FLOOR_UNVERIFIABLE")
 run_old = make_run(tmp / "fe_stale", steps=6000); TGB.write_floor_csv(str(run_old), 4000)
 check("必須: 記録の最終 step (4000) と res_*.h5 (6000) が違う (古い記録) → FAIL/FLOOR_UNVERIFIABLE",
-      G.evaluate_gates(run_old, steady_hist, 0, require_floor_events=True)["fail_class"] == "FLOOR_UNVERIFIABLE")
-g = G.evaluate_gates(run_mid, steady_hist, 0)
+      G.evaluate_gates(run_old, steady_hist, 0, require_floor_events=True, model="sst")["fail_class"] == "FLOOR_UNVERIFIABLE")
+g = G.evaluate_gates(run_mid, steady_hist, 0, model="sst")
 check("既定 (必須でない): 既存の呼び出しの合否は変えない (PASS)、結果は notes に載る",
       g["verdict"] == "PASS" and not g["floor_events"]["required"] and g["floor_events"]["verdict"] == "FAIL"
       and g["floor_events"]["notes"] and not g["floor_events"]["reasons"] and g["floor_events"]["fail_class"] is None)
-check("既定: 記録が無くても既存の合否は PASS のまま", G.evaluate_gates(run_none, steady_hist, 0)["verdict"] == "PASS")
-g = G.evaluate_gates(run_mid, steady_hist, 1, require_floor_events=True)
+check("既定: 記録が無くても既存の合否は PASS のまま", G.evaluate_gates(run_none, steady_hist, 0, model="sst")["verdict"] == "PASS")
+g = G.evaluate_gates(run_mid, steady_hist, 1, require_floor_events=True, model="sst")
 check("必須: rc≠0 なら fail_class は DIVERGED が先 (理由には床事象も積む)",
       g["fail_class"] == "DIVERGED" and any(r.startswith("床事象") for r in g["reasons"]))
 
@@ -106,7 +106,7 @@ for bad in ({"floor_events": 2}, {"floor_events": 1, "floor_events_window_steps"
     check(f"floor_events_options: 不正値 {bad} は拒否", okb)
 check("floor_events_config_line: 必須のときだけ output 節", G.floor_events_config_line({"floor_events": 1}) == "output: {floorEvents: 1}\n"
       and G.floor_events_config_line({}) == "")
-sm = G.floor_events_summary(G.evaluate_gates(run_mid, steady_hist, 0, require_floor_events=True)["floor_events"])
+sm = G.floor_events_summary(G.evaluate_gates(run_mid, steady_hist, 0, require_floor_events=True, model="sst")["floor_events"])
 check("floor_events_summary: 必須・判定・区間・種類別の件数・fail_class", sm["required"] and sm["verdict"] == "FAIL" and sm["n_events"]["T"] == 1
       and sm["window"] == [3000, 6000] and sm["fail_class"] == "FLOOR_EVENT")
 check("floor_events_summary(None) は None (床事象を持たない旧 gates)", G.floor_events_summary(None) is None)
