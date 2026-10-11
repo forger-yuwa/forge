@@ -257,9 +257,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0658_cg_therm_base` (2026-10-12 投入、**AWS A** 同上) | B0 の遅いモードの仕組み M-t ([plan §4.56](../../plans/active/tooling-nozzle-core-grid.md)): M-o の base を、ライン面の熱伝導の近傍作用を組み直しに足す診断入りの FP64 バイナリ `~/forge-fgeom7-fp64-diag5` で再現 (台本 `cg_therm.sh`) | 2 外反復 (RUN_RC 0)、資格すべて満たした。判定 (§4.57、`therm_judge.json`): **結果 A** — ライン面の熱伝導の近傍項の欠落が ρE のずれの主要部分 (島の比 0.31・射影 0.14) | active |
 | `run_0659_cg_therm_q0m0` (同上) | M-t の評価: Q₀・全面・convMethod 0 の残差 | 1 外反復 (RUN_RC 0) | active |
 | `run_0660_cg_therm_q1m0` (同上) | M-t の評価: Q₁ (`run_0658` res_1)・全面・convMethod 0 の残差 | 1 外反復 (RUN_RC 0) | active |
-| `run_0661_cg_lhs_r` (2026-10-12 投入、**AWS A** 同上) | 左辺の整合 L-θ ([plan §4.59](../../plans/active/tooling-nozzle-core-grid.md)) の基準腕 R: `run_0608` res_60000 から B0 そのまま 2 万 step (台本 `cg_lhs.sh`、3 本同時) | 走行中。判定 `cg_ab_region_judge.py` | active |
-| `run_0662_cg_lhs_a` (同上) | L-θ の腕 A: B0 + `lineViscCoupling: 3`・`FORGE_LVC_TERMS=0` (熱伝導の近傍 K なし)。最初の外反復のライン行列を書き出す | 走行中 | active |
-| `run_0663_cg_lhs_b` (同上) | L-θ の腕 B: A + `FORGE_LVC_TERMS=2` (ライン面の熱伝導の近傍 K だけを足す)。最初の外反復のライン行列を書き出す | 走行中 | active |
+| `run_0661_cg_lhs_r` (2026-10-12 投入、**AWS A** 同上) | 左辺の整合 L-θ ([plan §4.59](../../plans/active/tooling-nozzle-core-grid.md)) の基準腕 R: `run_0608` res_60000 から B0 そのまま 2 万 step (台本 `cg_lhs.sh`、3 本同時) | 2 万 step 完走 (RUN_RC 0)、非有限 0、NOT CONVERGED (プラトー、rms_ro 2.09e−5)。θ_r・Q_w は ±0.05 % で横ばい | active |
+| `run_0662_cg_lhs_a` (同上) | L-θ の腕 A: B0 + `lineViscCoupling: 3`・`FORGE_LVC_TERMS=0` (熱伝導の近傍 K なし)。最初の外反復のライン行列を書き出す | 2 万 step 完走、非有限 0、NOT CONVERGED (rms_ro 2.48e−5)。判定 (§4.61): A/R は結果 B (効かない)。θ_r +0.1 % | active |
+| `run_0663_cg_lhs_b` (同上) | L-θ の腕 B: A + `FORGE_LVC_TERMS=2` (ライン面の熱伝導の近傍 K だけを足す)。最初の外反復のライン行列を書き出す | 2 万 step 完走、非有限 0、NOT CONVERGED (rms_ro 3.81e−5)。判定 (§4.61、`lhs_ba.json`): **結果 B** — 熱伝導の近傍 K を入れても停滞は緩和しない。θ_r +0.86 %・Q_w +0.9 % と動き続ける | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
