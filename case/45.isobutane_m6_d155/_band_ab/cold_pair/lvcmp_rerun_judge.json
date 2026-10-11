@@ -1,0 +1,461 @@
+{
+ "plan": "time_integration-line-viscous-jacobian-dt §6.5",
+ "gates": [
+  {
+   "check": "出発の場の sha256",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 設定が腕 L7 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0553_lvcmp_l7: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 値とマスクの表示が腕 L7 と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 設定が腕 L0 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0554_lvcmp_l0: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 値とマスクの表示が腕 L0 と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 台本が渡した FORGE_LVC_TERMS = -",
+   "ok": true,
+   "value": "-"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 設定が腕 L5 の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0555_lvcmp_l5: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 値とマスクの表示が腕 L5 と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 台本が渡した FORGE_LVC_TERMS = 5",
+   "ok": true,
+   "value": "5"
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: forge の sha256",
+   "ok": true,
+   "value": "129de3f4e7f67aa3"
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 出発の場",
+   "ok": true,
+   "value": "207d39f0e7f4aa03"
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 格子の実体",
+   "ok": true,
+   "value": "3fe163acbbbc26df"
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 入力ファイル",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 設定が腕 L7r の期待どおり",
+   "ok": true,
+   "value": {}
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: LAYOUT2 の分解・代入",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 面エンタルピーの切替なし",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 値とマスクの表示が腕 L7r と合う",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 台本が渡した FORGE_LVC_TERMS = 7",
+   "ok": true,
+   "value": "7"
+  },
+  {
+   "check": "事前のゲートの記録が PASS で、証拠のハッシュが今のファイルと同じ",
+   "ok": true,
+   "value": "照合 OK: 69 ファイル"
+  },
+  {
+   "check": "run_0553_lvcmp_l7: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0554_lvcmp_l0: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0555_lvcmp_l5: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0567_lvcmp_l7r: 設定が同じ腕の書き出しと同じ (差は step 数・出力の間隔・extraFields だけ)",
+   "ok": true,
+   "value": []
+  },
+  {
+   "check": "run_0556_lvcmp_l7_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0557_lvcmp_l0_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0558_lvcmp_l5_dump: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "run_0559_lvcmp_l7_dump2: 書き出しが残っている",
+   "ok": true,
+   "value": null
+  },
+  {
+   "check": "L7r の設定が run_0553 と全項目同じ",
+   "ok": true,
+   "value": []
+  }
+ ],
+ "gates_ok": true,
+ "arms": {
+  "L7": {
+   "class": "REACHED",
+   "run": "run_0553_lvcmp_l7",
+   "watch_status": "REACHED",
+   "n_rows": 44,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 110000,
+   "reach_step": 110000,
+   "drift": [
+    0.04269567340458025,
+    -0.01665758825610819,
+    0.011730479986749032
+   ],
+   "deficit": -0.005148730348460003,
+   "quasisteady": {
+    "rc": 1,
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07848  drift=0.0%/tail  fluct=0.2%          STEADY",
+     "  theta_r_70      : tail mean=0.1157  drift=0.0%/tail  fluct=0.2%           STEADY",
+     "  theta_r_94      : tail mean=0.1285  drift=0.0%/tail  fluct=0.1%           STEADY",
+     "  Q_w             : tail mean=9.366e+06  drift=0.1%/tail  fluct=0.2%  (extremum at tail-end) DRIFTING",
+     "",
+     "OVERALL: NOT ALL STEADY (see above)"
+    ]
+   }
+  },
+  "L0": {
+   "class": "REACHED",
+   "run": "run_0554_lvcmp_l0",
+   "watch_status": "REACHED",
+   "n_rows": 47,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 117500,
+   "reach_step": 117500,
+   "drift": [
+    0.036450037200119745,
+    0.048193296383414186,
+    0.04822730386204732
+   ],
+   "deficit": 0.0025326328223924254,
+   "quasisteady": {
+    "rc": 1,
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07787  drift=0.0%/tail  fluct=0.0%          STEADY",
+     "  theta_r_70      : tail mean=0.1149  drift=0.0%/tail  fluct=0.0%  (still trending at tail-end) TRANSIENT-UNSETTLED",
+     "  theta_r_94      : tail mean=0.1277  drift=0.0%/tail  fluct=0.0%  (still trending at tail-end) TRANSIENT-UNSETTLED",
+     "  Q_w             : tail mean=9.294e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+     "",
+     "OVERALL: NOT ALL STEADY (see above)"
+    ]
+   }
+  },
+  "L5": {
+   "class": "REACHED",
+   "run": "run_0555_lvcmp_l5",
+   "watch_status": "REACHED",
+   "n_rows": 47,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 117500,
+   "reach_step": 117500,
+   "drift": [
+    0.005082955726121163,
+    0.02366624584053678,
+    0.014614639044774336
+   ],
+   "deficit": -0.00047406923815935306,
+   "quasisteady": {
+    "rc": 0,
+    "overall": "OVERALL: ALL STEADY",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07787  drift=0.0%/tail  fluct=0.1%          STEADY",
+     "  theta_r_70      : tail mean=0.1149  drift=0.0%/tail  fluct=0.1%           STEADY",
+     "  theta_r_94      : tail mean=0.1277  drift=0.0%/tail  fluct=0.0%           STEADY",
+     "  Q_w             : tail mean=9.293e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+     "",
+     "OVERALL: ALL STEADY"
+    ]
+   }
+  },
+  "L7r": {
+   "class": "REACHED",
+   "run": "run_0567_lvcmp_l7r",
+   "watch_status": "REACHED",
+   "n_rows": 55,
+   "segment_verdict": "NOT CONVERGED",
+   "reach_step_watch": 137500,
+   "reach_step": 137500,
+   "drift": [
+    0.044889115447288575,
+    0.007564889817457399,
+    0.02980033508597213
+   ],
+   "deficit": 0.010070684657329201,
+   "quasisteady": {
+    "rc": 1,
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "tail": [
+     "  theta_r_40      : tail mean=0.07837  drift=0.0%/tail  fluct=0.2%  (still trending at tail-end) TRANSIENT-UNSETTLED",
+     "  theta_r_70      : tail mean=0.1156  drift=0.0%/tail  fluct=0.1%           STEADY",
+     "  theta_r_94      : tail mean=0.1283  drift=0.0%/tail  fluct=0.0%           STEADY",
+     "  Q_w             : tail mean=9.361e+06  drift=0.1%/tail  fluct=0.2%        DRIFTING",
+     "",
+     "OVERALL: NOT ALL STEADY (see above)"
+    ]
+   }
+  }
+ },
+ "L7_under_same_rule": {
+  "dev_vs_L0_pct": {
+   "theta_r_40": 0.7413768459574532,
+   "theta_r_70": 0.5752099014737944,
+   "theta_r_94": 0.5418978940997521,
+   "Q_w": 0.7187798142391566
+  },
+  "floor_ratio_vs_L0": 3.2982342221000267,
+  "value_pattern": true,
+  "floor_pattern": true
+ },
+ "floor_ratio_L5_vs_L0": 0.920897443985604,
+ "dev_vs_L0_pct": {
+  "theta_r_40": 0.7197656978895628,
+  "theta_r_70": 0.5474236307617453,
+  "theta_r_94": 0.47768734625244225,
+  "Q_w": 0.8033730287283936
+ },
+ "floor_ratio_vs_L0": 3.359884743201886,
+ "value_pattern": true,
+ "value_no_pattern": false,
+ "floor_pattern": true,
+ "floor_no_pattern": false,
+ "reach_step_L7r": 137500,
+ "reach_step_diff_vs_L7": 27500,
+ "floors": {
+  "L7": {
+   "rms_ro": 2.982338988709398e-05,
+   "all": {
+    "rms_ro": 2.982338988709398e-05,
+    "rms_roUx": 0.003548532394407943,
+    "rms_roUy": 0.002253102448982328,
+    "rms_roe": 18.11444800765146,
+    "rms_roK": 0.001441090023354434,
+    "rms_roOmega": 240.8356826086283,
+    "rms_roY0": 2.726453660609343e-05,
+    "rms_roY1": 2.558846187680927e-06
+   },
+   "rows": 20001,
+   "window": [
+    90000,
+    110000
+   ],
+   "csv_sha256": "0907aa74b7b19e8c3327827d17d7891c4f97fda51c14632f20428e5825e8d25f"
+  },
+  "L0": {
+   "rms_ro": 9.042229228979698e-06,
+   "all": {
+    "rms_ro": 9.042229228979698e-06,
+    "rms_roUx": 0.003152999587727103,
+    "rms_roUy": 0.001062679411752428,
+    "rms_roe": 8.158729933190374,
+    "rms_roK": 0.0005670702404369169,
+    "rms_roOmega": 156.4992198200585,
+    "rms_roY0": 8.266336317386418e-06,
+    "rms_roY1": 7.758167282242139e-07
+   },
+   "rows": 20001,
+   "window": [
+    97500,
+    117500
+   ],
+   "csv_sha256": "36f2e0d44221953002c824cc374180cf34d6c0eb107a6c089a64a14df62666c4"
+  },
+  "L5": {
+   "rms_ro": 8.326965784899322e-06,
+   "all": {
+    "rms_ro": 8.326965784899322e-06,
+    "rms_roUx": 0.003143861300176482,
+    "rms_roUy": 0.0009615132217938624,
+    "rms_roe": 7.86272037216935,
+    "rms_roK": 0.0005183884050085786,
+    "rms_roOmega": 113.9039400798863,
+    "rms_roY0": 7.61249214113112e-06,
+    "rms_roY1": 7.144517852390351e-07
+   },
+   "rows": 20001,
+   "window": [
+    97500,
+    117500
+   ],
+   "csv_sha256": "3de09a345b70b3129e3320854a7f645667d86baa0060c3d92e97294cbd8c1c7f"
+  },
+  "L7r": {
+   "rms_ro": 3.038084803098304e-05,
+   "all": {
+    "rms_ro": 3.038084803098304e-05,
+    "rms_roUx": 0.003554438326014884,
+    "rms_roUy": 0.002231397500684062,
+    "rms_roe": 18.40341687552496,
+    "rms_roK": 0.001253795985930573,
+    "rms_roOmega": 226.5260900709462,
+    "rms_roY0": 2.777416536650362e-05,
+    "rms_roY1": 2.606676200377877e-06
+   },
+   "rows": 20001,
+   "window": [
+    117500,
+    137500
+   ],
+   "csv_sha256": "2a36b607c650beb50dc68841ed575ee503435a70083829e4db0ad18c49b290ba"
+  }
+ },
+ "quasisteady": {
+  "L7": "OVERALL: NOT ALL STEADY (see above)",
+  "L0": "OVERALL: NOT ALL STEADY (see above)",
+  "L5": "OVERALL: ALL STEADY",
+  "L7r": "OVERALL: NOT ALL STEADY (see above)"
+ },
+ "VERDICT": "再現: 同じ停止規則による到達の時点で、登録幅以上の正の差と高い残差の中央値が再び観測された (2 本、各 1 本の L0 に対して)"
+}
