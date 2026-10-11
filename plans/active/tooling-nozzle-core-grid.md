@@ -781,6 +781,13 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 - **判定 (事前登録のとおり)**: **結果 B — SST の更新を止めても停滞が続く** (平均流の側の第 2 仮説を優先)。凍結/対照: 縮流部の ρ 1.00 (10k〜15k)・1.12 (15k〜20k)、ρE 0.94・1.00、縮流部が全域の残差を担う割合の比 1.01・1.01。全域の平均流・化学種の残差は 0.86〜0.99。判定 `cg_freeze_judge.py` → `_band_ab/core_grid/freeze_judge.json`。
 - **帰結**: B0 の停滞には SST の分離更新は要らない。残る候補は平均流の側 — ライン外 (流れ方向) の結合を遅れで扱うこと、熱の Jacobian (ITJ 5)、有限回 (nStepInner 5) の内部反復。上限 1 (壁際の方向別 dt を縮める) と縮流部の流れ方向の粗化は効く (§4.33・§4.37)。
 
+### 4.40 平均流の側の切り分け M-a: 熱の Jacobian を外す (2026-10-11、codex 諮問、事前登録)
+
+- **諮問**: codex (diagnose) [`notes/reviews/2026-10-11-core-grid-meanflow-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-meanflow-diagnose.md) — 結論「M-a を採用し、B0 の `time.deltaT.implicitThermalJacobian` だけを 5 → 0 にした 20,000 step の試験を、既存の `run_0619` の同区間と比較する」。ブリーフ `notes/reviews/briefs/2026-10-11-core-grid-meanflow.md`。採否 (全件採用): 「流れ方向に細かいからライン外の結合が強い」はまだ機構の説明ではない (方向別 dt 自体もライン外の面の CFL で決まる) → 今回は ITJ への依存だけを判別し、機構の確定には時間項・対角・近傍項の相対強度と線形の解き残しが要る (Major)。他セッションの「値 3・マスク 7」は `lineViscCoupling 3` と `FORGE_LVC_TERMS` の別経路 (近傍の熱伝導 K) で、B0 の ITJ の対角項とは別の操作 → 補助情報に留める (Major)。F1 で外れたのは「SST の保存量の更新を止めれば停滞が崩れる」予測だけで、μt・熱伝導係数の計算し直しの経路は未除外 (Major)。M-b (内部反復 20)・M-c・低マッハ前処理は同時に足さない (M-b は 20 回でも線形反復が収束した保証がなく、陰性の結果から内部反復の不足を除外できない)。
+- **ITJ の中身** (codex が確認): B0 の熱伝導の項は `diag_block[4][0..4]` に加わる**自節点の微分**で、近傍の温度の増分との結合は無い。5 → 0 では従来の 5 行のスカラー対角が残り、足した温度の項だけが外れる。等温壁の拘束 (ビット 2) は 5・0 の双方で無効 (`timeIntegration_d.cu` 1026・1045・1163)。
+- **構成**: `run_0627_cg_gref_itj0` (AWS A): `run_0608` の res_60000 から restart_field (9 量・ビット一致)、B0 のまま `implicitThermalJacobian` だけ 5 → 0、20,000 step、2500 ごと、`extraFields` に `dt_local`。対照は `run_0619` の 0〜20k (設定の差は nStepOuter・extraFields・ITJ の 3 行だけであることを検査)。`FORGE_FREEZE_TURB` は無効。台本 `cg_itj0.sh`。
+- **判定** (`cg_ab_region_judge.py run_0627 run_0619 itj0_judge` → `itj0_judge.json`): 縮流部 x ∈ [−8, −2] の q (§4.36 と同じ) の、窓 10k〜15k・15k〜20k の出力の平均の変更側/対照。対照の停滞 = ρ・ρE とも W2/W1 ≥ 1/2。**結果 A**: 両窓・両成分で ≤ 1/3 → ITJ の足した項への強い依存を支持 (「ITJ にほぼ依存しない解き残しだけが支配する」を退ける。熱の対角単独と内部反復の相互作用は分けられない)。**結果 B**: 両窓・両成分で ≥ 2/3、集中の場所も維持 (縮流部の割合の比 0.5〜2) → 第 1 仮説を退け、第 2 仮説 (ライン外の結合を 5 回の内部反復で解き残す) を優先 (確定ではない)。それ以外・対照の停滞の不成立 → 判定不能。非有限は発散。SST が悪化なら「平均流のみ改善、連成系は未解決」。θ_r・Q_w の参照値への到達は合否に使わない。延長しない。
+
 ## 5. 実装ステップ
 
 1. `case/45.isobutane_m6_d155/core_grid_mesh.py` (済み: `check-g0`・`select`・`geom-ab`)。これに、300 K の生産の YAML から mesh ブロックの nj・`axis_cap_frac`・name だけを変えた YAML を作る `yaml` を足す。
@@ -837,6 +844,7 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 | diagnose | `2026-10-11` | [`notes/reviews/2026-10-11-core-grid-contraction-test-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-contraction-test-diagnose.md) | 範囲外の列を保ち縮流部 −8〜−2 だけ粗くした Grefc と Gref の B0 の継続を 6 万 step。Major 4 | §4.36。全件採用 |
 | diagnose | `2026-10-11` | [`notes/reviews/2026-10-11-core-grid-mechanism-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-mechanism-diagnose.md) | F1 (SST の凍結の有無だけの 2 万 step の比較)。Major 3 | §4.38。全件採用 |
 | diagnose | `2026-10-11` | [`notes/reviews/2026-10-11-core-grid-lowmach-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-lowmach-diagnose.md) | F1 を先に。L1 は加速の試験で、低マッハの硬さを真因とは特定できない。Major 4 | §4.38。全件採用 |
+| diagnose | `2026-10-11` | [`notes/reviews/2026-10-11-core-grid-meanflow-diagnose.md`](../../notes/reviews/2026-10-11-core-grid-meanflow-diagnose.md) | M-a (ITJ 5 → 0 だけの 2 万 step)。Major 3 | §4.40。全件採用 |
 
 ## 7. 影響範囲
 
