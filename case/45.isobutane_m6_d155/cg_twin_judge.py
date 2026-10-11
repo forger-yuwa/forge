@@ -1,5 +1,6 @@
 """plan tooling-nozzle-core-grid §4.62 の判定 (事前登録、codex 2026-10-12 twin)。入力: _band_ab/core_grid/twin_{noise,step01,main}_cap{50,1}.jsonl と各 pert の perturb.json。
-主指標は島の D_T(n) = √[Σ V (T⁺ − T)² / Σ V]。測定限界 L = 雑音の床 (同じ入力の 2 本の 1 step 後の島の D_T)。
+主指標は島の D_T(n) = √[Σ V (T⁺ − T)² / Σ V]。測定限界 L = 雑音の床。**訂正 (2026-10-12、本番の結果を見る前、§4.63)**: 出力の T は更新前の状態の値 (1 step 遅れ) で、
+同じ入力の 2 本の 1 step 後の T の差は 0 になるので、L は保存量 ρE の雑音比から T に換算する: L = D_T,pert(1) × D_ρE,noise(1) / D_ρE,pert(1) (島)。
 適格な点: step ≥ 1000、島の D_T ≥ 100 L、max|ΔT/T| < 1e−3。適格な点が連続する区間 (250 ごと) のうち 5 点以上・1000 step 以上の最大の区間をすべて報告する。
 各区間で ln D_T を step に当てはめて λ (1/step)・R²・前半と後半の傾きを出し、ρ・ρE (島) の λ も出す。
 持続増幅: λ ≥ 1e−3、R² ≥ 0.95、前半・後半の傾きがともに正で比が 2 倍以内、ρ・ρE の λ も正。境界付近 (λ が 0.8e−3〜1.2e−3、R² が 0.93〜0.97) は判定不能扱い。
@@ -25,8 +26,10 @@ for cap in ("50", "1"):
         sha[f"{cap}_{k}"] = json.loads(pj.read_text())["sha256_delta"] if pj else None
 res["perturb_same"] = len(set(sha.values())) == 1 and None not in sha.values()
 for cap in ("50", "1"):
-    noise = rd(f"noise_cap{cap}")[-1]; L = noise["island_D_T"]
+    noise = rd(f"noise_cap{cap}")[-1]
     s01 = rd(f"step01_cap{cap}"); M = rd(f"main_cap{cap}")
+    p1 = [r for r in s01 if r["step"] == 1][0]
+    L = p1["island_D_T"] * noise["island_D_roe"] / p1["island_D_roe"]   # §4.63 の訂正 (T は 1 step 遅れ)
     st = np.array([r["step"] for r in M], float); D = {k: np.array([r[f"island_D_{k}"] for r in M]) for k in ("T", "ro", "roe")}
     rel = np.array([r["max_dT_rel"] for r in M]); nf = sum(r["nonfinite"] for r in M)
     q = (st >= 1000) & (D["T"] >= 100 * max(L, 1e-300)) & (rel < 1e-3)
@@ -46,7 +49,7 @@ for cap in ("50", "1"):
         pers = lam >= 1e-3 and r2 >= 0.95 and l1 > 0 and l2 > 0 and max(l1, l2) / min(l1, l2) <= 2 and lro > 0 and lre > 0
         segs.append({"steps": [float(s[0]), float(s[-1])], "n": len(r), "lambda": lam, "R2": r2, "lambda_halves": [l1, l2], "lambda_ro": lro, "lambda_roe": lre,
                      "persistent": bool(pers), "borderline": bool(border)})
-    res["caps"][cap] = {"noise_island_D_T": L, "step0_1": s01, "nonfinite": nf, "segments": segs,
+    res["caps"][cap] = {"noise_island_D_T": L, "noise_island_D_T_raw": noise["island_D_T"], "noise_island_D_roe": noise["island_D_roe"], "step0_1": s01, "nonfinite": nf, "segments": segs,
                         "series": [{"step": r["step"], "D_T": r["island_D_T"], "D_ro": r["island_D_ro"], "D_roe": r["island_D_roe"], "max_dT": r["max_dT"], "max_dT_rel": r["max_dT_rel"],
                                     "max_x": r["max_x"], "max_jw": r["max_jw"], "max_dx": r["max_dx"], "dt_ratio": r.get("island_dt_ratio_median")} for r in M]}
 c50, c1 = res["caps"]["50"], res["caps"]["1"]
