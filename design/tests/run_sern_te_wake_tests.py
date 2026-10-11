@@ -242,6 +242,8 @@ try:
     src = yaml.safe_load(open(ROOT / "case" / "46.sern_design" / "problem_3d_prod_3op_wallres_lswx08.yaml"))
     for label, extra, want in (("キー無し", None, 0.0), ("0.3", 0.3, 0.3)):
         y = json.loads(json.dumps(src))
+        # 生産 YAML は 2026-10-11 (f78b7eef) から te_wake_blend_H 1.0 を明示するので、「キー無し」はキーを消して作る
+        y["mesh3d"].pop("te_wake_blend_H", None)
         if extra is not None:
             y["mesh3d"]["te_wake_blend_H"] = extra
         pth = tmp / f"prob_{label}.yaml"; pth.write_text(yaml.safe_dump(y, allow_unicode=True))

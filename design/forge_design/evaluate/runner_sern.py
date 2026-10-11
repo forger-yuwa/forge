@@ -27,6 +27,7 @@ from ..meshing.mesh_sern import PHYS_SERN, SernMeshParams, generate_sern_mesh, w
 from ..metrics.sern_forces import force_history, write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..metrics.sern_gates import floor_events_config_line, floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
+from ..metrics.sern_gates import JUDGMENT_MIN_SAMPLES, judgment_extendable, judgment_gate   # 判定区間の段 (te-wake-grid §5.1 R2)
 from ..probdef import Problem, dv_value, load_problem
 from .ic import _forge_species
 
@@ -315,10 +316,19 @@ def _hash_agrees(recorded, full) -> bool:
     return len(r) >= 16 and str(full).lower().startswith(r)
 
 
+def _final_stage_config(rd: Path) -> Path:
+    """最後の段の config: 判定区間の段を回した run は solverConfig_judgment.yaml (本段と nStepOuter だけが違う。
+    plan tooling-sern-te-wake-grid §5.1 R2)、それ以外は solverConfig_main.yaml (無ければ solverConfig.yaml)。"""
+    for name in (JUDGMENT_CONFIG, "solverConfig_main.yaml"):
+        if (rd / name).exists():
+            return rd / name
+    return rd / "solverConfig.yaml"
+
+
 def zte_provenance(run_dir) -> dict:
     """評価の来歴: 処置の有効状態・フィールド・属性のタグ/rings・格子署名・w のハッシュ・節点数・起動の記録と、
     設計 DB の識別に使う `effective` ("off" / "tags=...;rings=N" / None = 不明)。
-    有効の評価が確定する条件: 最後の起動 (forge_launches.jsonl) の config が solverConfig_main と同じ・runner の起動前の
+    有効の評価が確定する条件: 最後の起動 (forge_launches.jsonl) の config が最後の段の config (solverConfig_main、判定区間の段を回した run は solverConfig_judgment) と同じ・runner の起動前の
     記録 (zte_launches.jsonl) がその起動に対応する・いま meshFileName から再計算した格子署名と w のハッシュが起動前と
     同じ・**ソルバが有効を記録** (forge_launches.jsonl に処置のキーがあればそれ、無ければ起動ログ forge_run.log の
     effective 行。格子署名・ハッシュを記録していれば一致)。旧バイナリは未知の space キーを
@@ -326,7 +336,7 @@ def zte_provenance(run_dir) -> dict:
     (最後の起動が有効を記録していたら矛盾で不明)。"""
     sm = _stage_manifest()
     rd = Path(run_dir)
-    cfgp = (rd / "solverConfig_main.yaml") if (rd / "solverConfig_main.yaml").exists() else (rd / "solverConfig.yaml")
+    cfgp = _final_stage_config(rd)
     st, launch, launch_fnv = _last_launch_zte(rd)
     pre = _last_jsonl(rd / ZTE_LAUNCHES)
     out = {"enabled": False, "field": None, "tags": None, "rings": None, "mesh_signature": None, "field_hash": None,
@@ -399,6 +409,14 @@ _MESHER_SOURCES = {2: ("mesh2d.py", "mesh_sern.py"), 3: ("mesh2d.py", "mesh_sern
 # 設計点ごとに変わる格子パラメータ (問題 YAML の mesh 節で明示しなければ設計の MOC の θ_b・θ_e から決まる)。
 # レシピでは値でなく "design" と書く (同じ方式の別設計点を同じレシピにする)
 _DESIGN_DERIVED = {"interface_angle": "interface_angle_rad", "top_ext_angle": "top_ext_angle_deg"}
+# 設計変数の値を持つ格子パラメータ (plan tooling-sern-te-wake-grid §5.1 R3、codex result レビュー 2026-10-11 M3)。
+# 問題 YAML の dv (driver_sern.DV_ORDER: M_c・f・θ_r0・θ_c0・L_cowl) は格子パラメータに直接は入らず、MOC の設計を通って
+# 上の 2 つの角度 (_DESIGN_DERIVED) にだけ流れる (L_cowl は L_sw 未指定時の側壁の終端にも効くが、そのときの値は None のまま)。
+# それ以外に設計点ごとに値を変える格子パラメータが 3D の側壁の後縁位置 `mesh3d.L_sw` (§6 #7 の設計差 L_sw 0.8/1.0)。
+# 指定した値は "design" に置き換え、値は設計点・来歴 (prepare_info の eval_method.design_values → metrics) に残す。
+# None (= 未指定: 側壁はカウル後縁まで) は格子の作り方の違いとしてレシピに残す。L_sw の置き方 (L_sw_exact)・解像度・
+# 後縁下流の格子変形の方式 (te_wake_mode) と版はレシピ・評価方式に残る
+_DESIGN_VARIABLES = ("L_sw",)
 _SHA_CACHE: dict = {}
 
 
@@ -433,12 +451,23 @@ def mesher_version(dim: int) -> dict:
 
 def mesh_recipe(prm, mesh_yaml: dict) -> dict:
     """格子生成のレシピ = メッシャに渡す格子パラメータ (dataclass) の全項目。設計から決まる項目は、問題 YAML の mesh 節で
-    明示していなければ "design" に置き換える (設計点に依らない)。runner の既定値の変更もここに現れる。"""
+    明示していなければ "design" に置き換える (設計点に依らない)。設計変数の値を持つ項目 (_DESIGN_VARIABLES、指定があるとき) も
+    "design" に置き換える (値は design_mesh_values で来歴に残す)。runner の既定値の変更もここに現れる。"""
     d = dataclasses.asdict(prm)
     for fld, key in _DESIGN_DERIVED.items():
         if fld in d and key not in (mesh_yaml or {}):
             d[fld] = "design"
+    for fld in _DESIGN_VARIABLES:
+        if fld in d and d[fld] is not None:
+            d[fld] = "design"
     return d
+
+
+def design_mesh_values(prm, mesh_yaml: dict) -> dict:
+    """mesh_recipe が "design" に置き換えた格子パラメータの値 (設計点・来歴に残す。評価方式の id には入れない)。"""
+    d = dataclasses.asdict(prm)
+    r = mesh_recipe(prm, mesh_yaml)
+    return {k: d[k] for k in sorted(d) if r.get(k) == "design" and d[k] != "design"}
 
 
 def _canon_sha(obj) -> str:
@@ -479,7 +508,7 @@ def eval_method_record(p: Problem, dim: int, prm, minfo: dict, discretization, c
     mesher = mesher_version(dim)
     em, eid = eval_method_of(dim, discretization, recipe, mesher, L_b, curve, (converter or {}).get("sha256"), mode_v)
     return {"eval_method": em, EVAL_METHOD_ID: eid, TE_WAKE_EFFECTIVE: te_wake_effective_of(L_b, curve, mode_v),
-            "mesh_recipe": recipe, "mesher": mesher, "converter": converter}
+            "mesh_recipe": recipe, "design_values": design_mesh_values(prm, p.mesh), "mesher": mesher, "converter": converter}
 
 
 def te_wake_spec(raw: dict, dim: int) -> tuple:
@@ -599,6 +628,8 @@ def eval_method_provenance(run_dir, mesh_prov: dict | None = None) -> dict:
         return out
     out["eval_method"] = rec.get("eval_method")
     out[TE_WAKE_EFFECTIVE] = rec.get(TE_WAKE_EFFECTIVE)
+    # 評価方式から外した設計変数の値 (L_sw・設計の角度。plan tooling-sern-te-wake-grid §5.1 R3)。記録の無い旧 run は None
+    out["design_values"] = rec.get("design_values")
     mp = mesh_prov if mesh_prov is not None else mesh_provenance(rd)
     em = rec.get("eval_method") or {}
     if not rec.get(EVAL_METHOD_ID):
@@ -1583,6 +1614,249 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
     return run_forge(run_dir)
 
 
+# --- 判定区間の段 (plan tooling-sern-te-wake-grid §5.1 R2・§6 #1〜#3、codex result レビュー 2026-10-11 M2) ------------------
+# 検証で手作業にしていた「段階起動 → 本段の最終場から同一設定で N step (判定区間) → §6 #1〜#3 の判定 → 未定常なら同一設定で
+# +N を 1 回」(case/46.sern_design/diag/tewake_g4_local.sh・tewake_ext.sh) を標準経路にする。問題 YAML の
+# `evaluate.judgment_steps: N` で有効 (無ければ従来どおり段階起動の本段で collect)、`evaluate.judgment_extend_once: 1` で延長 1 回。
+# - **同じ run ディレクトリで続ける**: 各段は forge の別 session (floor_events.csv に追記) で、判定区間の段が最後の session。
+#   床事象の判定区間 (末尾 floor_events_window_steps) はその session の中に収まる。段の移行は段階起動と同じ同一格子の index コピー
+#   (restart_by_index) に保存量のビット一致の検査を足し、res_* は消す (力の履歴は判定区間の段だけになる)
+# - 判定の窓 W = `evaluate.floor_events_window_steps` (必須、#1〜#3 で共通)。#3 の前窓との差 d のため N ≥ 2W。outStepInterval は
+#   W と N を割り切り、窓あたり 20 標本以上 (v3_farfield_eval の必要条件)。**窓を短くして通さない** (足りなければ起動前に止める)
+# - 全場のスナップショットは monitor (3D: diag/te_monitor.py) を通して TE_MONITOR.csv に 1 行ずつ記録し、最後の 1 枚だけ残す
+# - metrics.json の正本は最後の判定区間 (延長したら延長の段)。延長前の記録は *_judgment1.* に退避。経過は JUDGMENT.json
+# - 延長は未達が「未定常」だけのとき (sern_gates.judgment_extendable)。延長しても未達なら INDETERMINATE (§6 #3 の判定不能)、
+#   低温・床事象・発散などは延長せずに FAIL / INDETERMINATE で止める (metrics.json の gates は FAIL = 学習に入らない)
+JUDGMENT_STEPS_KEY = "judgment_steps"
+JUDGMENT_EXTEND_KEY = "judgment_extend_once"
+JUDGMENT_CONFIG = "solverConfig_judgment.yaml"
+JUDGMENT_FILE = "JUDGMENT.json"
+JUDGMENT_VERSION = "sern-judgment-v1"
+MONITOR_CSV = "TE_MONITOR.csv"
+MONITOR_STEP0_CSV = "TE_MONITOR_step0.csv"
+MONITOR_LOG = "TE_MONITOR.log"
+# 2D は §6 #2 の監視領域 (形状から生成) が未実装なので判定不能 (plan tooling-sern-te-wake-grid-2d、必要な領域が空なら判定不能)
+MONITOR_UNAVAILABLE_2D = "2D の後縁まわりの監視領域 (§6 #2) は未実装 — plan tooling-sern-te-wake-grid-2d.md"
+_SNAP_RE = re.compile(r"^res_(\d+)\.h5$")
+_STATE_RE = re.compile(r"^(ro|roUx|roUy|roUz|roe|roK|roOmega|roXi|roY\d+)$")
+
+
+def judgment_options(evaluate) -> dict | None:
+    """問題 YAML の evaluate 節から判定区間の段の設定を作る。judgment_steps が無ければ None (段なし = 従来の経路)。
+    戻り = {"steps": N, "extend_once": bool, "window_steps": W}。床事象のゲート (#1) と判定区間の長さを必須にする。"""
+    ev = evaluate or {}
+    n = ev.get(JUDGMENT_STEPS_KEY)
+    ext = ev.get(JUDGMENT_EXTEND_KEY, 0)
+    if ext not in (0, 1, True, False):
+        raise ValueError(f"evaluate.{JUDGMENT_EXTEND_KEY} は 0 か 1: {ext!r}")
+    if n is None:
+        if ext:
+            raise ValueError(f"evaluate.{JUDGMENT_EXTEND_KEY} は evaluate.{JUDGMENT_STEPS_KEY} と組で使う")
+        return None
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        raise ValueError(f"evaluate.{JUDGMENT_STEPS_KEY} は正の整数 [step]: {n!r}")
+    fo = floor_events_options(ev)
+    if not fo["require_floor_events"]:
+        raise ValueError("判定区間の段は §6 #1 (毎更新の床事象) を判定するので evaluate.floor_events: 1 が要る")
+    W = fo["floor_window_steps"]
+    if W is None:
+        raise ValueError("判定区間の段は判定区間の長さ evaluate.floor_events_window_steps が要る (#1〜#3 で共通の窓)")
+    if n < 2 * W:
+        raise ValueError(f"evaluate.{JUDGMENT_STEPS_KEY} {n} は判定区間 {W} の 2 倍以上が要る (#3 の前窓との差 d に前の {W} step)。"
+                         "窓を短くして通さない")
+    return {"steps": int(n), "extend_once": bool(ext), "window_steps": int(W)}
+
+
+def judgment_config(cfg_main: str, jo: dict) -> str:
+    """判定区間の段の config = 本段の config の nStepOuter だけを N にしたもの (同一設定)。outStepInterval の条件を検査する。"""
+    cfg, k = re.subn(r"nStepOuter: \d+", f"nStepOuter: {int(jo['steps'])}", cfg_main)
+    if k != 1:
+        raise RuntimeError("判定区間の段: nStepOuter の置換に失敗 (solverConfig の書式が変わった)")
+    m = re.search(r"outStepInterval: (\d+)", cfg)
+    oi = int(m.group(1)) if m else 0
+    W, N = int(jo["window_steps"]), int(jo["steps"])
+    if oi <= 0 or W % oi or N % oi or W // oi < JUDGMENT_MIN_SAMPLES:
+        raise ValueError(f"判定区間の段: outStepInterval {oi} は判定区間 {W}・段の長さ {N} step を割り切り、"
+                         f"窓あたり {JUDGMENT_MIN_SAMPLES} 標本以上が要る (evaluate.outStepInterval を見直す)")
+    return cfg
+
+
+def _volume_snapshots(rd) -> list:
+    """全場のスナップショット res_<n>.h5 の (n, パス) を n の昇順で (壁面の出力 res_<名>_<id>_<n>.h5・発散ダンプは除く)。"""
+    out = []
+    for f in Path(rd).glob("res_*.h5"):
+        m = _SNAP_RE.match(f.name)
+        if m:
+            out.append((int(m.group(1)), f))
+    return sorted(out)
+
+
+def _monitored_steps(rd) -> set:
+    import csv
+    p = Path(rd) / MONITOR_CSV
+    if not p.exists():
+        return set()
+    with open(p, newline="") as fh:
+        return {int(float(r["step"])) for r in csv.DictReader(fh) if r.get("step") not in (None, "")}
+
+
+def _drain_snapshots(rd, monitor, final: bool) -> dict:
+    """全場のスナップショットを monitor (rd, パス, step0) に通し、最後の 1 枚を残して消す (.xmf も)。実行中 (final=False) は
+    最新の 1 枚を書きかけとみなして触らない。step 0 は別の CSV (step0=True)。監視に失敗した 1 枚も消す (欠けは判定で判定不能)。"""
+    rd = Path(rd)
+    stats = {"monitored": 0, "failed": 0, "removed": 0}
+    snaps = _volume_snapshots(rd)
+    if not snaps:
+        return stats
+    last = snaps[-1][0]
+    done = _monitored_steps(rd)
+    for n, f in snaps:
+        if n == last and not final:
+            continue
+        if n == 0 or n not in done:
+            stats["monitored" if monitor(rd, f, step0=(n == 0)) else "failed"] += 1
+        if n != last:
+            f.unlink(missing_ok=True)
+            f.with_suffix(".xmf").unlink(missing_ok=True)
+            stats["removed"] += 1
+    return stats
+
+
+def _run_forge_monitored(run_dir, monitor=None, poll_s: float = 30.0) -> tuple:
+    """run_forge と同じ起動 (run_case.sh) で、実行中に全場のスナップショットを monitor に通して消す。monitor が無ければ run_forge。
+    戻り = (rc, 監視の件数)。"""
+    rd = Path(run_dir)
+    if monitor is None:
+        return run_forge(rd), {}
+    _record_zte_launch(rd)
+    stats = {"monitored": 0, "failed": 0, "removed": 0}
+
+    def _add(s):
+        for k_ in stats:
+            stats[k_] += s.get(k_, 0)
+    with open(rd / "run_case_stdout.log", "w") as log:
+        proc = subprocess.Popen([str(FORGE_TOOLS / "run_case.sh"), str(rd.resolve())], env=_ENV, stdout=log, stderr=subprocess.STDOUT)
+        try:
+            while proc.poll() is None:
+                _add(_drain_snapshots(rd, monitor, final=False))
+                time.sleep(poll_s)
+        except BaseException:
+            proc.kill()
+            proc.wait()
+            raise
+    _add(_drain_snapshots(rd, monitor, final=True))
+    return proc.returncode, stats
+
+
+def _restart_mismatch(res_h5, mesh_h5) -> list:
+    """段の移行 (restart_by_index) の後、保存量 (と化学種・トレーサ) が継続元とビット一致しない配列名 (一致なら空)。"""
+    with h5py.File(res_h5, "r") as s, h5py.File(mesh_h5, "r") as d:
+        keys = [k for k in s["VALUE"] if _STATE_RE.match(k) and k in d["VALUE"]]
+        bad = [k for k in keys if not (s["VALUE"][k].dtype == d["VALUE"][k].dtype and np.array_equal(s["VALUE"][k][:], d["VALUE"][k][:]))]
+        if not {"ro", "roUx", "roUy", "roUz", "roe"} <= set(keys):
+            bad.append("保存量の配列が欠けている")
+    return bad
+
+
+def _archive_files(rd: Path, names, tag: str) -> list:
+    moved = []
+    for name in names:
+        src = rd / name
+        if src.exists():
+            dst = rd / f"{src.stem}_{tag}{src.suffix}"
+            src.replace(dst)
+            moved.append(dst.name)
+    return moved
+
+
+def _archive_judgment(rd: Path, k: int) -> list:
+    """延長の前に k 回目の判定区間の記録を *_judgment<k>.* に退避する (metrics.json の正本は最後の判定区間)。"""
+    return _archive_files(rd, ("metrics.json", "force_history.csv", MONITOR_CSV, MONITOR_STEP0_CSV, MONITOR_LOG, "CONVERGENCE_VERDICT.txt"),
+                          f"judgment{k}")
+
+
+def _attempt_summary(k: int, rc, out: dict, stats: dict) -> dict:
+    g = out.get("gates") or {}
+    jg = g.get("judgment") or {}
+    fw, tp = jg.get("force_window") or {}, jg.get("temperature") or {}
+    return {"attempt": k, "rc": rc, "last_step": out.get("step"), "gates": g.get("verdict"), "fail_class": g.get("fail_class"),
+            "reasons": (g.get("reasons") or [])[:8], "floor_events": floor_events_summary(g.get("floor_events")),
+            "judgment": jg.get("verdict"),
+            "force_window": {"verdict": fw.get("verdict"), "window": fw.get("window"), "n_tail": fw.get("n_tail"), "n_prev": fw.get("n_prev"),
+                             "quantities": {q: {x: v.get(x) for x in ("mean", "a", "d", "tol", "steady", "ok")}
+                                            for q, v in (fw.get("quantities") or {}).items()}},
+            "temperature": {"verdict": tp.get("verdict"), "window": tp.get("window"), "n_window": tp.get("n_window"),
+                            "regions": {R: {x: v.get(x) for x in ("Tmin_window", "Tmin_step", "Tmin_node", "Tmin_xyz", "n_lt150_window_sum",
+                                                                   "n_lt200_window_max", "vol_lt200_window_max", "steady")}
+                                        for R, v in (tp.get("regions") or {}).items()}},
+            "steadiness": {q: v.get("verdict") for q, v in ((g.get("steadiness") or {}).get("series") or {}).items()},
+            "snapshots": stats}
+
+
+def run_judgment(problem_path, run_dir, collect_fn, rc_startup: int, monitor=None, precheck=None,
+                 require_residual_pass: bool = False, poll_s: float = 30.0) -> tuple:
+    """段階起動 (run_staged) の後の判定区間の段。戻り = (最後の forge の rc, 最後の collect の出力)。collect_fn は 2D / 3D の collect、
+    monitor は全場のスナップショットの監視 (3D の te_monitor)、precheck(run_dir) は時間積分の前に判定できない理由を返す
+    (監視が当てはまらない形状・2D など。理由があれば段を回さずに INDETERMINATE)。経過は JUDGMENT.json。"""
+    p = load_problem(problem_path)
+    jo = judgment_options(p.evaluate)
+    if jo is None:
+        raise ValueError(f"evaluate.{JUDGMENT_STEPS_KEY} が無い問題 YAML に判定区間の段は回さない")
+    rd = Path(run_dir)
+    rec = {"version": JUDGMENT_VERSION, "options": jo, "startup_rc": rc_startup, "layout": "same_run_dir",
+           "config": JUDGMENT_CONFIG, "attempts": [], "verdict": None, "reason": "", "metrics": "metrics.json"}
+
+    def _finish(rc, out, verdict, reason):
+        rec.update({"verdict": verdict, "reason": reason, "final_rc": rc})
+        (rd / JUDGMENT_FILE).write_text(json.dumps(rec, indent=1, ensure_ascii=False))
+        return rc, out
+
+    def _collect(rc):
+        return collect_fn(problem_path, rd, rc=rc, require_residual_pass=require_residual_pass)
+    if rc_startup != 0 or not _volume_snapshots(rd):
+        return _finish(rc_startup, _collect(rc_startup), "FAIL", f"段階起動が失敗した (rc={rc_startup}、場が無い) — 判定区間の段に進まない")
+    why = precheck(rd) if precheck is not None else None
+    if why:
+        return _finish(rc_startup, _collect(rc_startup), "INDETERMINATE", f"判定区間の段に進まない (§6 #2 を判定できない): {why}")
+    cfg_j = judgment_config((rd / "solverConfig_main.yaml").read_text(), jo)
+    (rd / JUDGMENT_CONFIG).write_text(cfg_j)
+    _archive_stage(rd, "main")          # 段階起動の本段の残差 (forge は段ごとに上書きする)
+    n_att = 1 + int(jo["extend_once"])
+    rc, out = rc_startup, None
+    for k in range(1, n_att + 1):
+        src = _volume_snapshots(rd)[-1][1]
+        restart_by_index(src, rd / MESH)
+        bad = _restart_mismatch(src, rd / MESH)
+        if bad:
+            raise RuntimeError(f"判定区間の段 {k}: 継続元 {src.name} と保存量がビット一致しない ({bad})")
+        rec["attempts"].append({"attempt": k, "restart_from": src.name})
+        # 段より前の監視の記録が残っていれば退避する (同じ step を「監視済み」とみなしてスナップショットを監視せずに消さないため)
+        stale = _archive_files(rd, (MONITOR_CSV, MONITOR_STEP0_CSV, MONITOR_LOG), f"before_judgment{k}")
+        if stale:
+            rec["attempts"][-1]["stale_monitor_archived"] = stale
+        for f in rd.glob("res_*"):
+            f.unlink()
+        (rd / "solverConfig.yaml").write_text(cfg_j)
+        rc, stats = _run_forge_monitored(rd, monitor, poll_s)
+        _archive_stage(rd, f"judgment{k}")
+        out = _collect(rc)
+        rec["attempts"][-1].update(_attempt_summary(k, rc, out, stats))
+        g = out["gates"]
+        if rc == 0 and g["verdict"] == "PASS":
+            return _finish(rc, out, "PASS", f"判定区間 {k} 回目 ({jo['steps']} step) で §6 #1〜#3 を満たす")
+        ext, why = judgment_extendable(g)
+        if not ext:
+            verdict = "INDETERMINATE" if g.get("fail_class") in ("FLOOR_UNVERIFIABLE", "JUDGMENT_UNVERIFIABLE") else "FAIL"
+            return _finish(rc, out, verdict, f"判定区間 {k} 回目: {g.get('fail_class')} — 延長しない ({why})")
+        if k == n_att:
+            return _finish(rc, out, "INDETERMINATE",
+                           ("同一設定の延長 (+%d step) 後も窓・定常性が未達 (§6 #3 の判定不能)" % jo["steps"]) if k > 1
+                           else "窓・定常性が未達で、延長しない設定 (judgment_extend_once: 0)")
+        rec["attempts"][-1]["archived"] = _archive_judgment(rd, k)
+        rec["attempts"][-1]["extend_reason"] = why
+    return _finish(rc, out, "INDETERMINATE", "到達しない")
+
+
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
     """力係数履歴 + 受理ゲート (plan §5.1 R1)。metrics.json / force_history.csv は out_dir (既定 run_dir) に書く
     (再判定で元 run を汚さない)。rc は forge の終了コード (None なら run_case_stdout.log から読む)。"""
@@ -1597,8 +1871,11 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
+    # 判定区間の段を使う問題 YAML (evaluate.judgment_steps) は §6 #2・#3 もゲートに入れる。2D は #2 の監視領域が未実装で判定不能
+    jo = judgment_options(p.evaluate)
+    jg = judgment_gate(hist, jo["window_steps"], monitor_unavailable=MONITOR_UNAVAILABLE_2D) if jo else None
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
-                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate))
+                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg)
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "forge_rc": rc,
            "operating_point": info.get("operating_point"), "L_ramp": info["design"]["L_ramp"],
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],
@@ -1664,7 +1941,13 @@ def main(argv=None):
                     warm_lam_ramp=o.get("warm_lam_ramp"), soft_ramp=o.get("soft_ramp"),
                     mid_steps=int(o.get("mid_steps", 0)),
                     warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
-    out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
+    if judgment_options(load_problem(a.problem).evaluate) is not None:
+        # 判定区間の段 (plan tooling-sern-te-wake-grid §5.1 R2)。2D は §6 #2 の監視が未実装なので段を回さずに判定不能で止める
+        rc, out = run_judgment(a.problem, a.run_dir, collect, rc, precheck=lambda _rd: MONITOR_UNAVAILABLE_2D,
+                               require_residual_pass=bool(o.get("require_residual_pass", False)))
+        print(f"JUDGMENT: {json.loads((Path(a.run_dir) / JUDGMENT_FILE).read_text())['verdict']}")
+    else:
+        out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
     print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
     g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}")
     return rc

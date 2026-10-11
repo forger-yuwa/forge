@@ -7,6 +7,8 @@
       `require_residual_pass` のときだけ必須 (本ケースは残差が 1–2.5 桁でプラトーする性格 — その事実は台帳に残す)
   (4) **実際に最適化する量** (RANS は C_T_with_shear、Euler は C_T) と C_T / C_L / C_M の頭打ち
       (check_quasisteady.classify_series による STEADY。NONFINITE / DRIFTING / TRANSIENT-UNSETTLED / OSCILLATING は不合格)
+  (5) 問題 YAML が要求するときだけ: 毎更新の床事象 (floor_event_gate)、判定区間の段の §6 #2・#3 (judgment_gate:
+      後縁まわりの最低温度と 4 力量の窓。plan tooling-sern-te-wake-grid §5.1 R2)
 判定結果は metrics.json の `gates` に残し、数値失敗 (fail_class) と物理的 INFEASIBLE (設計不成立・C_M 窓) を混同しない。
 """
 from __future__ import annotations
@@ -27,6 +29,7 @@ if _TOOLS not in sys.path:
     sys.path.insert(0, _TOOLS)
 import check_convergence as _cc  # noqa: E402
 import check_floor_events as _cfe  # noqa: E402
+from check_quasisteady import classify_series as _classify_series  # noqa: E402
 
 FIELD_VARS = ("ro", "roUx", "roUy", "roUz", "roe", "P", "T", "roK", "roOmega")
 POSITIVE_VARS = ("ro", "P", "T")
@@ -288,6 +291,218 @@ def floor_events_summary(fev: dict | None) -> dict | None:
             "reasons": (fev.get("reasons") or fev.get("notes") or [])[:3]}
 
 
+# --- 判定区間の §6 #2・#3 (plan tooling-sern-te-wake-grid §5.1 R2、codex result レビュー 2026-10-11 M2) -------------
+# 生産の標準経路 (runner の段階起動 → 判定区間の段) で、検証の手作業 (case/46.sern_design/diag/tewake_*.sh) が使った判定を
+# 保存データから再計算できる形で持つ (collect と --rejudge が同じ関数を通る)。#1 (床事象) は floor_event_gate。
+#   #3 窓: collect の力の履歴の末尾 W step の平均 m・a = max|q − m|・前窓 (その前の W step) の平均との差 d
+#          (case/46.sern_design/v3_farfield_eval.py と同じ切り方)。max(a, d) ≤ 許容 (C_T・C_T_with_shear・C_L 5e-5、C_M 5e-4)、
+#          かつ 4 量が check_quasisteady --tail 0.5 (drift 0.05・osc 0.10・min 4 の既定) で STEADY。両窓とも標本 20 以上
+#   #2 温度: 監視 CSV (diag/te_monitor.py が全場のスナップショットごとに 1 行) の R_TE・R_SE・RET・ALL で、末尾 W step に
+#          T < 150 K の節点が無い・各領域の最低温度が --tail 0.5 で STEADY。T < 200 K の数と体積は記録だけ
+# 判定: PASS / UNSETTLED (窓・定常性が未達 = 同一設定の延長の対象) / FAIL (低温・非有限の温度) / INDETERMINATE (標本の欠け・
+# 空の領域・履歴が 2 窓に足りない・非有限の力 = 判定不能、延長の対象外)。**許容と窓は事前登録の値で固定** (結果を見て緩めない)
+JUDGMENT_FORCE_TOL = {"C_T": 5.0e-5, "C_T_with_shear": 5.0e-5, "C_L": 5.0e-5, "C_M": 5.0e-4}
+JUDGMENT_MIN_SAMPLES = 20
+JUDGMENT_STEADY = {"tail": 0.5, "drift": 0.05, "osc": 0.10, "min_snaps": 4}    # check_quasisteady.py --tail 0.5 (他は既定)
+TE_REGIONS = ("R_TE", "R_SE", "RET", "ALL")
+T_COLD = 150.0
+
+
+def _steady_verdict(steps, vals) -> tuple:
+    s = JUDGMENT_STEADY
+    v, detail, _ = _classify_series(steps, vals, s["tail"], s["drift"], s["osc"], s["min_snaps"])
+    return v, detail
+
+
+def judgment_window_gate(hist, window_steps: int) -> dict:
+    """§6 #3 (窓と 4 力量の STEADY)。hist は collect の力の履歴 (step 昇順)。"""
+    W = int(window_steps)
+    out = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_tail": 0, "n_prev": 0, "quantities": {}, "reasons": []}
+    if not hist:
+        out["reasons"] = ["判定不能: 力の履歴が無い"]
+        return out
+    steps = np.array([float(h["step"]) if h.get("step") is not None else np.nan for h in hist])
+    if not np.all(np.isfinite(steps)):
+        out["reasons"] = ["判定不能: 力の履歴の step が読めない"]
+        return out
+    N = int(steps.max())
+    out["window"] = [N - W, N]
+    if N < 2 * W:
+        out["reasons"] = [f"判定不能: 履歴の最終 step {N} が 2 窓 ({2 * W} step) に足りない (前窓との差 d が取れない)"]
+        return out
+    tail = steps > N - W
+    prev = (steps > N - 2 * W) & ~tail
+    out["n_tail"], out["n_prev"] = int(tail.sum()), int(prev.sum())
+    if out["n_tail"] < JUDGMENT_MIN_SAMPLES or out["n_prev"] < JUDGMENT_MIN_SAMPLES:
+        out["reasons"] = [f"判定不能: 窓の標本が足りない (末尾 {out['n_tail']}・前窓 {out['n_prev']} < {JUDGMENT_MIN_SAMPLES})"]
+        return out
+    # RANS (壁摩擦の出力あり) は 4 量、Euler は C_T_with_shear が無いので 3 量 (objective_key と同じ規則)
+    qs = [q for q in JUDGMENT_FORCE_TOL if q != "C_T_with_shear" or "C_T_with_shear" in hist[-1]]
+    bad, unsettled = [], []
+    for q in qs:
+        v = np.array([float(h[q]) if h.get(q) is not None else np.nan for h in hist])
+        if not np.all(np.isfinite(v)):
+            bad.append(f"{q} に非有限・欠けた値 {int(np.count_nonzero(~np.isfinite(v)))} 個")
+            continue
+        m = float(v[tail].mean())
+        a = float(np.max(np.abs(v[tail] - m)))
+        d = float(abs(m - v[prev].mean()))
+        st, detail = _steady_verdict(steps, v)
+        tol = JUDGMENT_FORCE_TOL[q]
+        ok = max(a, d) <= tol and st == "STEADY"
+        out["quantities"][q] = {"mean": m, "a": a, "d": d, "tol": tol, "steady": st, "detail": detail, "ok": bool(ok)}
+        if not ok:
+            unsettled.append(f"{q}: a {a:.2e}・d {d:.2e} (許容 {tol:.0e})・{st}")
+    if bad:
+        out["reasons"] = ["判定不能: " + b for b in bad]
+        return out
+    out["verdict"] = "UNSETTLED" if unsettled else "PASS"
+    out["ok"] = not unsettled
+    out["reasons"] = ["窓・定常性が未達: " + u for u in unsettled]
+    return out
+
+
+def read_monitor_csv(path) -> list | None:
+    """監視 CSV (te_monitor.py の出力) を読む。無ければ None。数値にできない欄は NaN。step 昇順に並べる。"""
+    import csv
+    p = Path(path)
+    if not p.exists():
+        return None
+    rows = []
+    with open(p, newline="") as fh:
+        for r in csv.DictReader(fh):
+            row = {}
+            for k, v in r.items():
+                try:
+                    row[k] = float(v)
+                except (TypeError, ValueError):
+                    row[k] = float("nan")
+            rows.append(row)
+    return sorted(rows, key=lambda r: r.get("step", float("nan")))
+
+
+def judgment_temperature_gate(rows, window_steps: int, last_step: int | None, expect_steps=None) -> dict:
+    """§6 #2 (端の近くの低温)。rows = read_monitor_csv の戻り。last_step = 力の履歴の最終 step (監視も同じ場で終わること)、
+    expect_steps = 監視が要る step (力の履歴の step。末尾窓で欠けたら判定不能)。"""
+    W = int(window_steps)
+    out = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_window": 0, "regions": {}, "reasons": []}
+    if rows is None:
+        out["reasons"] = ["判定不能: 監視の記録 (TE_MONITOR.csv) が無い"]
+        return out
+    steps = np.array([r.get("step", np.nan) for r in rows])
+    if not rows or not np.all(np.isfinite(steps)):
+        out["reasons"] = ["判定不能: 監視の記録が空・step が読めない"]
+        return out
+    N = int(steps.max())
+    out["window"] = [N - W, N]
+    if last_step is not None and N != int(last_step):
+        out["reasons"] = [f"判定不能: 監視の最終 step {N} が力の履歴の最終 step {last_step} と違う (最後の場を監視していない)"]
+        return out
+    win = steps > N - W
+    out["n_window"] = int(win.sum())
+    have = {int(s) for s in steps[win]}
+    missing = sorted(int(s) for s in (expect_steps or ()) if N - W < int(s) <= N and int(s) not in have)
+    reasons = []
+    if missing:
+        reasons.append(f"判定不能: 末尾窓のスナップショットの監視が欠けている (step {missing[:5]}{' …' if len(missing) > 5 else ''})")
+    if out["n_window"] < JUDGMENT_MIN_SAMPLES:
+        reasons.append(f"判定不能: 末尾窓の監視の標本 {out['n_window']} < {JUDGMENT_MIN_SAMPLES}")
+    nonfin = float(np.sum([r.get("nonfinite_T", np.nan) for r, w in zip(rows, win) if w]))
+    cold, unsettled = [], []
+    for R in TE_REGIONS:
+        n = np.array([r.get(f"{R}_n", np.nan) for r in rows])
+        if not np.all(np.isfinite(n[win])) or np.any(n[win] <= 0):
+            reasons.append(f"判定不能: 領域 {R} が空・欠けている")
+            continue
+        tmin = np.array([r.get(f"{R}_Tmin", np.nan) for r in rows])
+        lt150 = np.array([r.get(f"{R}_n_lt150", np.nan) for r in rows])
+        lt200 = np.array([r.get(f"{R}_n_lt200", np.nan) for r in rows])
+        vol200 = np.array([r.get(f"{R}_vol_lt200", np.nan) for r in rows])
+        if not (np.all(np.isfinite(tmin[win])) and np.all(np.isfinite(lt150[win]))):
+            reasons.append(f"判定不能: 領域 {R} の最低温度・低温の数が読めない")
+            continue
+        st, detail = _steady_verdict(steps, tmin)
+        jmin = int(np.flatnonzero(win)[np.argmin(tmin[win])])
+        reg = {"Tmin_window": float(tmin[jmin]), "Tmin_step": int(steps[jmin]), "Tmin_node": rows[jmin].get(f"{R}_Tmin_node"),
+               "Tmin_xyz": [rows[jmin].get(f"{R}_Tmin_{c}") for c in "xyz"], "n_lt150_window_sum": int(np.sum(lt150[win])),
+               "n_lt200_window_max": int(np.nanmax(lt200[win])) if np.any(np.isfinite(lt200[win])) else None,
+               "vol_lt200_window_max": float(np.nanmax(vol200[win])) if np.any(np.isfinite(vol200[win])) else None,
+               "steady": st, "detail": detail}
+        out["regions"][R] = reg
+        if reg["n_lt150_window_sum"] > 0:
+            cold.append(f"{R}: T < {T_COLD:g} K が延べ {reg['n_lt150_window_sum']} 節点 (最低 {reg['Tmin_window']:.1f} K、step {reg['Tmin_step']})")
+        if st != "STEADY":
+            unsettled.append(f"{R} の最低温度 {st}")
+    if not (np.isfinite(nonfin) and nonfin == 0):
+        cold.append(f"末尾窓に非有限の温度 (延べ {nonfin:g})")
+    if cold:
+        out["verdict"] = "FAIL"
+        out["reasons"] = ["低温: " + c for c in cold] + reasons
+        return out
+    if reasons:
+        out["reasons"] = reasons
+        return out
+    out["verdict"] = "UNSETTLED" if unsettled else "PASS"
+    out["ok"] = not unsettled
+    out["reasons"] = ["最低温度が未定常: " + u for u in unsettled]
+    return out
+
+
+def judgment_gate(hist, window_steps: int, monitor_rows=None, monitor_unavailable: str | None = None) -> dict:
+    """§6 #2・#3 をまとめる。fail_class: COLD_SPOT (低温・非有限の温度。延長の対象外) / JUDGMENT_UNVERIFIABLE (判定不能。対象外) /
+    JUDGMENT_UNSETTLED (窓・定常性の未達。同一設定の延長の対象)。monitor_unavailable を渡すと #2 は判定不能 (監視が使えない理由)。"""
+    win = judgment_window_gate(hist, window_steps)
+    last = win["window"][1] if win.get("window") else None          # 力の履歴の最終 step (読めなければ None。力の窓が判定不能になる)
+    if monitor_unavailable:
+        temp = {"verdict": "INDETERMINATE", "ok": False, "window": None, "n_window": 0, "regions": {},
+                "reasons": [f"判定不能: 温度の監視が使えない ({monitor_unavailable})"]}
+    else:
+        temp = judgment_temperature_gate(monitor_rows, window_steps, last,
+                                         expect_steps=[h["step"] for h in (hist or []) if h.get("step") is not None])
+    vs = (win["verdict"], temp["verdict"])
+    if temp["verdict"] == "FAIL":
+        fc, ext = "COLD_SPOT", False
+    elif "INDETERMINATE" in vs:
+        fc, ext = "JUDGMENT_UNVERIFIABLE", False
+    elif "UNSETTLED" in vs:
+        fc, ext = "JUDGMENT_UNSETTLED", True
+    else:
+        fc, ext = None, False
+    verdict = {None: "PASS", "COLD_SPOT": "FAIL", "JUDGMENT_UNVERIFIABLE": "INDETERMINATE", "JUDGMENT_UNSETTLED": "UNSETTLED"}[fc]
+    reasons = [] if fc is None else [r for g in (win, temp) for r in g["reasons"]]
+    return {"ok": fc is None, "verdict": verdict, "fail_class": fc, "extendable": ext, "window_steps": int(window_steps),
+            "force_window": win, "temperature": temp, "reasons": reasons}
+
+
+def judgment_extendable(gates: dict) -> tuple:
+    """同一設定の延長 (+N を 1 回) の対象か。**未達が「未定常」だけ**のとき (既存ゲートの UNSTEADY と判定区間の
+    JUDGMENT_UNSETTLED) に限る。rc ≠ 0・場・残差・床 (最終場・毎更新)・低温・判定不能があれば延長しない (戻り = (可否, 理由))。"""
+    if gates.get("verdict") == "PASS":
+        return False, "合格"
+    blockers = []
+    rc = gates.get("rc")
+    if rc != 0:
+        blockers.append(f"rc={rc}")
+    for key, label in (("field", "保存場"), ("floors", "最終場の床"), ("floor_events", "床事象"), ("residual_scale", "残差の桁")):
+        if not (gates.get(key) or {}).get("ok", False):
+            blockers.append(label)
+    res = gates.get("residual") or {}
+    if not res.get("ok", False) or (gates.get("require_residual_pass") and not res.get("converged")):
+        blockers.append("残差")
+    if gates.get("require_residual_plateau") and (gates.get("plateau") or {}).get("falling"):
+        blockers.append("残差のプラトー")
+    stead = gates.get("steadiness") or {}
+    if not stead.get("series"):
+        blockers.append("力の履歴")
+    jg = gates.get("judgment")
+    if jg is not None and not jg.get("ok") and not jg.get("extendable"):
+        blockers.append(f"判定区間 {jg.get('fail_class')}")
+    if blockers:
+        return False, "未定常以外の不合格: " + "・".join(blockers)
+    unsteady = (not stead.get("ok", False)) or (jg is not None and jg.get("fail_class") == "JUDGMENT_UNSETTLED")
+    return (True, "未定常 (窓・定常性の未達) だけ") if unsteady else (False, "不合格の理由が分類できない")
+
+
 def residual_scale_gate(run_dir, ratio: float = 1.0e6, gate: bool = False) -> dict:
     """残差列の**桁の揃い**を見る **補助警報** (2026-09-19, codex plan レビュー M3 で受理条件から降格)。
 
@@ -325,11 +540,13 @@ def residual_scale_gate(run_dir, ratio: float = 1.0e6, gate: bool = False) -> di
 
 def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: str | None = None,
                    p_min: float | None = None, require_residual_plateau: bool = False,
-                   require_floor_events: bool = False, floor_window_steps: int | None = None, floor_tail: float = 0.5) -> dict:
+                   require_floor_events: bool = False, floor_window_steps: int | None = None, floor_tail: float = 0.5,
+                   judgment: dict | None = None) -> dict:
     """全ゲートを評価して verdict / fail_class を返す。fail_class は数値失敗の種別:
     DIVERGED (rc≠0 / 発散ダンプ / 非有限・非正の場 / 残差 NaN), RESIDUAL_RISING, NOT_CONVERGED (require 時のみ),
     NO_FORCES (壁出力が無い), UNSTEADY (目的量・力係数が頭打ちしていない),
-    FLOOR_EVENT / FLOOR_UNVERIFIABLE (`require_floor_events` のときだけ: 判定区間の毎更新の床事象 / その記録が判定不能)。
+    FLOOR_EVENT / FLOOR_UNVERIFIABLE (`require_floor_events` のときだけ: 判定区間の毎更新の床事象 / その記録が判定不能),
+    COLD_SPOT / JUDGMENT_UNVERIFIABLE / JUDGMENT_UNSETTLED (`judgment` [judgment_gate の戻り] を渡したときだけ: 判定区間の §6 #2・#3)。
     物理的 INFEASIBLE はここでは出さない。"""
     field = field_health(run_dir)
     resid = residual_health(run_dir)
@@ -367,9 +584,12 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False, obj: 
         reasons += stead["reasons"]; fail = fail or "NO_FORCES"
     elif not stead["ok"]:
         reasons += stead["reasons"]; fail = fail or "UNSTEADY"
+    if judgment is not None and not judgment.get("ok"):
+        reasons += ["判定区間: " + r for r in judgment.get("reasons", [])]; fail = fail or judgment.get("fail_class") or "JUDGMENT_UNVERIFIABLE"
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
             "floors": floors, "residual_scale": rscale, "floor_events": fevents,
+            **({"judgment": judgment} if judgment is not None else {}),
             # プラトー到達は**診断**として常に載せる (受理条件ではない)
             "plateau": {"all_flat": not resid.get("converging") and not resid.get("rising"),
                         "falling": resid.get("converging", []), "rising": resid.get("rising", []),

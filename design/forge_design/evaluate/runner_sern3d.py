@@ -20,10 +20,85 @@ from ..meshing.mesh_sern3d import PHYS_SERN3D, SernMesh3DParams, generate_sern_m
 from ..metrics.sern_forces import write_force_history_csv
 from ..metrics.sern_gates import evaluate_gates, forge_rc_from_log
 from ..metrics.sern_gates import floor_events_options, floor_events_summary   # 毎更新の床事象 (te-wake-grid §5.1 #2)
+from ..metrics.sern_gates import judgment_gate, read_monitor_csv   # 判定区間の §6 #2・#3 (te-wake-grid §5.1 R2)
 from ..probdef import load_problem
 from . import runner_sern as R2
 
 MESH = "sern.h5"
+
+# --- 判定区間の段の温度の監視 (§6 #2、plan tooling-sern-te-wake-grid §5.1 R2) -----------------------------------------------
+# 検証と同じ道具 case/46.sern_design/diag/te_monitor.py を全場のスナップショットごとに呼ぶ (TE_MONITOR.csv に 1 行、
+# 呼び出しと削除は runner_sern._run_forge_monitored)。道具の監視領域は g3 の生産形状 (H 0.1 m・L_cowl 1.2 H・W 2 H) の後縁と
+# 露出したカウル側端の座標を定数で持つ (SE_P0・SE_P1・Y_TE、L_cowl は prepare_info に無ければ 1.2 H) ので、時間積分の前に
+# run の形状 (prepare の cowl_contour.csv・prepare_info) がその定数に当てはまるかを検査し、当てはまらなければ判定不能で止める
+# (形状から監視領域を作る処理は未実装)。露出した側端 [L_sw, L_cowl] は道具の線分 [P0.x, P1.x] に含まれること (L_sw 0.8・1.0 は可)。
+# RET の長さ --lb-h は格子の te_wake_blend_H (0 格子は検証と同じ 1.0 H)
+TE_MONITOR_TOOL = R2.FORGE_ROOT / "case" / "46.sern_design" / "diag" / "te_monitor.py"
+TE_MONITOR_TOL_M = 5.0e-7      # 道具の定数の桁 (1e-7 m) に合わせた照合の許容 [m]
+_TE_MONITOR_MOD = {}
+
+
+def _te_monitor_module():
+    if "m" not in _TE_MONITOR_MOD:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_te_monitor_tool", TE_MONITOR_TOOL)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _TE_MONITOR_MOD["m"] = mod
+    return _TE_MONITOR_MOD["m"]
+
+
+def te_monitor_unavailable(run_dir) -> str | None:
+    """監視の道具の固定領域がこの run の形状に当てはまらない理由 (当てはまれば None)。"""
+    rd = Path(run_dir)
+    if not TE_MONITOR_TOOL.exists():
+        return f"監視の道具 {TE_MONITOR_TOOL} が無い"
+    try:
+        tm = _te_monitor_module()
+        info = json.loads((rd / "prepare_info.json").read_text())
+        cowl = np.loadtxt(rd / "cowl_contour.csv", delimiter=",", skiprows=1).reshape(-1, 2)
+        H, half_w = float(info["H_m"]), float(info["half_W_m"])
+        L_sw_m = float(info["mesh"]["L_sw"]) * H
+        d = info.get("design") or {}
+        L_cowl_tool = float(d["L_cowl"]) * H if "L_cowl" in d else 1.2 * H     # te_monitor.py と同じ規則
+    except Exception as e:  # noqa: BLE001
+        return f"形状 (prepare_info.json・cowl_contour.csv) を読めない ({type(e).__name__}: {e})"
+    tol = TE_MONITOR_TOL_M
+    x_te, y_te = float(cowl[-1, 0]), float(cowl[-1, 1])
+    p0, p1 = np.asarray(tm.SE_P0, float), np.asarray(tm.SE_P1, float)
+    bad = []
+    if abs(x_te - L_cowl_tool) > tol:
+        bad.append(f"カウル後縁 x {x_te:.7g} m ≠ 道具の L_cowl {L_cowl_tool:.7g} m")
+    if abs(y_te - float(tm.Y_TE)) > tol or abs(x_te - p1[0]) > tol or abs(y_te - p1[1]) > tol:
+        bad.append(f"カウル後縁 ({x_te:.7g}, {y_te:.7g}) m ≠ 道具の後縁 ({p1[0]:.7g}, {float(tm.Y_TE):.7g})")
+    y0 = float(np.interp(p0[0], cowl[:, 0], cowl[:, 1]))
+    if abs(y0 - p0[1]) > tol:
+        bad.append(f"x = {p0[0]:g} m のカウル y {y0:.7g} ≠ 道具の側端の始点 y {p0[1]:.7g}")
+    if abs(p0[2] - half_w) > tol or abs(p1[2] - half_w) > tol:
+        bad.append(f"ノズル幅の半分 {half_w:.7g} m ≠ 道具の側端の z {p0[2]:.7g}")
+    if L_sw_m < p0[0] - tol:
+        bad.append(f"露出した側端の始点 L_sw {L_sw_m:.7g} m が道具の線分 [{p0[0]:g}, {p1[0]:g}] m の外")
+    return "; ".join(bad) or None
+
+
+def _te_monitor_lb(rd: Path) -> float:
+    try:
+        L_b = float((json.loads((rd / "prepare_info.json").read_text()).get("mesh") or {}).get("te_wake_blend_H", 0.0) or 0.0)
+    except Exception:  # noqa: BLE001
+        L_b = 0.0
+    return L_b if L_b > 0.0 else 1.0
+
+
+def te_monitor_snapshot(run_dir, res, step0: bool = False) -> bool:
+    """全場のスナップショット 1 枚を te_monitor.py に通す (step 0 は TE_MONITOR_step0.csv、他は TE_MONITOR.csv に追記)。成否を返す。"""
+    rd = Path(run_dir)
+    cmd = [sys.executable, str(TE_MONITOR_TOOL), str(rd), str(res), "--lb-h", repr(_te_monitor_lb(rd))]
+    if step0:
+        cmd += ["--csv", str(rd / R2.MONITOR_STEP0_CSV)]
+    r = subprocess.run(cmd, env=R2._ENV, capture_output=True, text=True)
+    with open(rd / R2.MONITOR_LOG, "a") as fh:
+        fh.write(f"{Path(res).name} rc={r.returncode} {(r.stdout or '').strip()} {(r.stderr or '').strip()[-500:]}\n")
+    return r.returncode == 0
 
 
 def _solver_config(p, nsteps, out_int, cfl, p_ref):
@@ -377,8 +452,14 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
+    # 判定区間の段を使う問題 YAML (evaluate.judgment_steps) は §6 #2 (TE_MONITOR.csv)・#3 (力の窓) もゲートに入れる
+    jo = R2.judgment_options(p.evaluate)
+    jg = None
+    if jo is not None:
+        jg = judgment_gate(hist, jo["window_steps"], monitor_rows=read_monitor_csv(run_dir / R2.MONITOR_CSV),
+                           monitor_unavailable=te_monitor_unavailable(run_dir))
     gates = evaluate_gates(run_dir, hist, rc, require_residual_pass=require_residual_pass,
-                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate))
+                           p_min=float(p.evaluate.get("p_min", 1.0)), **floor_events_options(p.evaluate), judgment=jg)
     out = {"convergence_verdict": verdict, "n_snapshots": len(hist), "history": hist, "dim": 3, "moc_forces": info["moc_forces"], "forge_rc": rc,
            "gates": gates, "steadiness": gates["steadiness"]["series"], "objective": gates["objective"],
            "floor_events": floor_events_summary(gates.get("floor_events"))}
@@ -409,6 +490,7 @@ def main(argv=None):
     ap.add_argument("problem"); ap.add_argument("run_dir"); ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--prepare-only", action="store_true"); ap.add_argument("--stages", default="full", choices=["full", "none", "main"])
     ap.add_argument("--op", default=None); ap.add_argument("--soft-steps", type=int, default=2000)
+    ap.add_argument("--poll-s", type=float, default=30.0, help="判定区間の段でスナップショットを監視する間隔 [s]")
     a = ap.parse_args(argv)
     info = prepare(a.problem, a.run_dir, a.steps, op=a.op); print(json.dumps({k: info[k] for k in ("design", "mesh", "moc_forces")}, indent=1))
     if a.prepare_only:
@@ -419,7 +501,14 @@ def main(argv=None):
                     soft_cfl=float(o.get("soft_cfl", 0.5)), soft_conv=int(o.get("soft_conv", 0)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
                     mid_steps=int(o.get("mid_steps", 0)))
-    out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
+    if R2.judgment_options(load_problem(a.problem).evaluate) is not None:
+        # 判定区間の段 (plan tooling-sern-te-wake-grid §5.1 R2): 本段の最終場から同一設定で judgment_steps → §6 #1〜#3 → 未定常なら +1 回
+        rc, out = R2.run_judgment(a.problem, a.run_dir, collect, rc, monitor=te_monitor_snapshot, precheck=te_monitor_unavailable,
+                                  require_residual_pass=bool(o.get("require_residual_pass", False)), poll_s=a.poll_s)
+        j = json.loads((Path(a.run_dir) / R2.JUDGMENT_FILE).read_text())
+        print(f"JUDGMENT: {j['verdict']} ({j['reason']})")
+    else:
+        out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
     print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
     g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}"); return rc
 
