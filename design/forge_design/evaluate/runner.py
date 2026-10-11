@@ -79,7 +79,7 @@ def _run_converter(conv: str, msh: str, out: str, run_dir: Path) -> None:
     if ok and not missing:
         with open(run_dir / "CONVERTER_WARN.txt", "a") as w:
             w.write(f"{out}: convertGmshToForge exit {r.returncode} after the write (teardown GPUassert); output checked "
-                    f"({', '.join(_CONV_REQUIRED)}{' + DUAL/rSurfVect' if 'DUAL' not in missing else ''}) and accepted\n"
+                    f"({', '.join(_CONV_REQUIRED)}; node: + VIZMESH, PLANES/rSurfVect) and accepted\n"
                     + text[i_a:i_a + 300] + "\n")
         return
     raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr + f"\n[runner] converter output not accepted: {missing}")
