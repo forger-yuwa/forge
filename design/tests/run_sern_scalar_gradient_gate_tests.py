@@ -21,6 +21,7 @@ except ImportError:
     sys.modules["forge_design.opt.surrogate"] = _s
 from forge_design.opt.driver_sern import FLAG_POLICY, SernCampaign  # noqa: E402
 from forge_design.evaluate import runner_sern as RS  # noqa: E402
+import sern_acceptance_fixture as AF  # noqa: E402  受理検査の版と残差の入力の要約 (§5.1 R2k)
 import json, tempfile  # noqa: E402,E401
 
 
@@ -30,8 +31,11 @@ class _Fake:
 
 
 def row(sg_list, policy=FLAG_POLICY, chi=1):
+    # 受理検査の版と残差の入力の要約は現行のゲートで判定した形 (2026-10-12 から学習の採否が一律に要求する、§5.1 R2k。
+    # この試験は scalarGradient・chi・flag_policy だけを差にする)
     return {"status": "PASS", "flag_policy": policy, "x": [0.0], "C_T_w": 0.9, "L_ramp": 1.0,
-            "ops": {f"op{i}": {"scalar_gradient_effective": sg, "slau_wall_normal_chi_effective": chi} for i, sg in enumerate(sg_list)}}
+            "ops": {f"op{i}": {"scalar_gradient_effective": sg, "slau_wall_normal_chi_effective": chi, **AF.accepted_op_fields()}
+                    for i, sg in enumerate(sg_list)}}
 
 
 fails = 0

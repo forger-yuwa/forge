@@ -58,6 +58,7 @@ from forge_design.evaluate import runner_sern as RS  # noqa: E402
 from forge_design.evaluate import runner_sern3d as R3  # noqa: E402
 from forge_design.opt import driver_sern as D  # noqa: E402
 from forge_design.probdef import Problem  # noqa: E402
+import sern_acceptance_fixture as AF  # noqa: E402  受理検査の版と残差の入力の要約 (§5.1 R2k)
 
 REF_COMMIT = "cac3c9a4"     # 配線を入れる前の HEAD
 fails = 0
@@ -456,9 +457,11 @@ ON2, ON3 = "tags=cowl_in,cowl_out;rings=2", "tags=cowl_in,cowl_out;rings=3"
 
 
 def row(effs, legacy=False):
+    # 受理検査の版と残差の入力の要約は現行のゲートで判定した形 (2026-10-12 から学習の採否が一律に要求する、§5.1 R2k)。
+    # legacy は処置のキーの無い行 (処置の導入前の形) を表す。この試験は処置の要求と持ち越しだけを差にする
     ops = {}
     for op, e in effs.items():
-        o = {"scalar_gradient_effective": "lsq", "slau_wall_normal_chi_effective": 1}
+        o = {"scalar_gradient_effective": "lsq", "slau_wall_normal_chi_effective": 1, **AF.accepted_op_fields()}
         if not legacy:
             o[RS.ZTE_EFFECTIVE] = e
         ops[op] = o
@@ -539,7 +542,7 @@ def fake_runner(eff):
                 "scalar_gradient_effective": "lsq", "slau_wall_normal_chi_effective": 1, "flag_policy": D.FLAG_POLICY,
                 RS.ZTE_EFFECTIVE: eff, "zero_thickness_edge_velocity": {"mesh_signature": "msig-x", "field_hash": "fh-y"},
                 "gates": {"verdict": "PASS", "fail_class": None, "reasons": [], "objective": "C_T_with_shear",
-                          "residual": {"verdict": "NOT CONVERGED"}, "steadiness": {"series": st}}}
+                          "steadiness": {"series": st}, **AF.accepted_gate_fields(verdict="NOT CONVERGED")}}
     m.prepare, m.run_staged, m.collect = prepare, run_staged, collect
     return m
 

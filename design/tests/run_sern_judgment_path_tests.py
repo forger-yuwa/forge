@@ -64,6 +64,7 @@ from forge_design.evaluate import runner_sern3d as R3  # noqa: E402
 from forge_design.metrics import sern_gates as G  # noqa: E402
 from forge_design.opt import driver_sern as D  # noqa: E402
 from forge_design.probdef import load_problem  # noqa: E402
+import sern_acceptance_fixture as AF  # noqa: E402  受理検査の版と残差の入力の要約 (§5.1 R2k)
 
 fails = 0
 tmp = Path(tempfile.mkdtemp(prefix="sern_judgment_path_"))
@@ -228,11 +229,13 @@ check("(b1) run_1096・run_1097 の方式 ID は同じ (L_sw は方式に入ら�
 
 
 def op_from(m, jg=None):
-    """保存された metrics.json (collect の出力) から作動点要約を作る。jg を渡すと判定区間の判定を付け直す (= --rejudge と同じ形)。"""
+    """保存された metrics.json (collect の出力) から作動点要約を作る。jg を渡すと判定区間の判定を付け直す (= --rejudge と同じ形)。
+    受理検査の版と残差の入力の要約は現行のゲートで再判定した形にそろえる (2026-10-12 から学習の採否は一律に現行の版を要求する
+    [§5.1 R2k] が、保存された metrics は版の導入前。この試験は判定区間の要件だけを差にする)。"""
     out = dict(m)
     if jg is not None:
         out["gates"] = {**m["gates"], "judgment": jg}
-    return json.loads(json.dumps(D.SernCampaign._op_summary(out, "run")))
+    return json.loads(json.dumps({**D.SernCampaign._op_summary(out, "run"), **AF.accepted_op_fields()}))
 
 
 def row_(ops, x=0.0):

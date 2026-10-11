@@ -45,6 +45,7 @@ except ImportError:
 from forge_design.metrics import sern_gates as G  # noqa: E402
 from forge_design.opt import driver_sern as D  # noqa: E402
 import test_gate_bad_input as TGB  # noqa: E402  (合成の floor_events.csv)
+import sern_acceptance_fixture as AF  # noqa: E402  受理検査の版と残差の入力の要約 (§5.1 R2k)
 
 fails = 0
 tmp = Path(tempfile.mkdtemp(prefix="sern_floor_learn_"))
@@ -101,7 +102,9 @@ def fe_(verdict="PASS", window=(10000, 20000), n=None, required=True):
 
 
 def op_(fe="pass", mid=ID, te="off"):
-    o = {"scalar_gradient_effective": "lsq", "slau_wall_normal_chi_effective": 1, D.EVAL_METHOD_ID: mid, D.TE_WAKE_EFFECTIVE: te}
+    # 受理検査の版と残差の入力の要約は現行のゲートで判定した形 (2026-10-12 から学習の採否が一律に要求する、§5.1 R2k。この試験は床の要件だけを差にする)
+    o = {"scalar_gradient_effective": "lsq", "slau_wall_normal_chi_effective": 1, D.EVAL_METHOD_ID: mid, D.TE_WAKE_EFFECTIVE: te,
+         **AF.accepted_op_fields()}
     if fe != "absent":
         o["floor_events"] = fe_() if fe == "pass" else fe
     return o

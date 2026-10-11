@@ -43,6 +43,7 @@ from forge_design.evaluate import runner_sern as R2  # noqa: E402
 from forge_design.evaluate import runner_sern3d as R3  # noqa: E402
 from forge_design.opt import driver_sern as D  # noqa: E402
 from forge_design.probdef import Problem, load_problem  # noqa: E402
+import sern_acceptance_fixture as AF  # noqa: E402  受理検査の版と残差の入力の要約 (§5.1 R2k)
 
 C46 = ROOT / "case" / "46.sern_design"
 Y08 = C46 / "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml"     # run_1084 の問題 YAML (L_sw 0.8、g3、局所化)
@@ -135,7 +136,9 @@ def stub_collect(rd, prob_path):
     cfg_main = (rd / "solverConfig_main.yaml").read_text()
     with open(rd / "forge_launches.jsonl", "a") as fh:
         fh.write(json.dumps({"time": 0, "cfg_fnv": SM.fnv1a64(cfg_main), "slauWallNormalChi": 1, "scalarGradient": "lsq"}) + "\n")
-    gates = lambda *a, **k: {"steadiness": {"series": {}}, "objective": "C_T", "verdict": "PASS", "fail_class": None, "reasons": []}
+    # 受理検査の版と残差の判定は現行のゲートの形 (2026-10-12 から学習の採否が一律に要求する、§5.1 R2k。この試験は評価方式の id だけを差にする)
+    gates = lambda *a, **k: {"steadiness": {"series": {}}, "objective": "C_T", "verdict": "PASS", "fail_class": None, "reasons": [],
+                             **AF.accepted_gate_fields()}
     saved = R3.evaluate_gates
     R3.evaluate_gates = gates
     try:

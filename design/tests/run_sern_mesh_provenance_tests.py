@@ -60,6 +60,7 @@ from forge_design.evaluate import runner_sern3d as R3  # noqa: E402
 from forge_design.meshing.mesh_sern3d import TE_WAKE_CURVE_VERSION  # noqa: E402
 from forge_design.opt import driver_sern as D  # noqa: E402
 from forge_design.probdef import Problem, load_problem  # noqa: E402
+import sern_acceptance_fixture as AF  # noqa: E402  受理検査の版と残差の入力の要約 (§5.1 R2k)
 
 REF_COMMIT = "9c930e0a"     # 本変更の直前の HEAD
 fails = 0
@@ -340,7 +341,9 @@ def stub_collect(mod, rd, prob_path, cfg_main):
     """力の履歴とゲートを差し替えて collect (metrics.json) を回す。起動記録は本段の config で 1 行。"""
     with open(rd / "forge_launches.jsonl", "a") as fh:
         fh.write(json.dumps({"time": 0, "cfg_fnv": SM.fnv1a64(cfg_main), "slauWallNormalChi": 1, "scalarGradient": "lsq"}) + "\n")
-    gates = lambda *a, **k: {"steadiness": {"series": {}}, "objective": "C_T", "verdict": "PASS", "fail_class": None, "reasons": []}
+    # 受理検査の版と残差の判定は現行のゲートの形 (2026-10-12 から学習の採否が一律に要求する、§5.1 R2k。この試験は評価方式の識別だけを差にする)
+    gates = lambda *a, **k: {"steadiness": {"series": {}}, "objective": "C_T", "verdict": "PASS", "fail_class": None, "reasons": [],
+                             **AF.accepted_gate_fields()}
     saved = (R2.force_history, R2.evaluate_gates, R3.evaluate_gates)
     R2.force_history = lambda *a, **k: []; R2.evaluate_gates = gates; R3.evaluate_gates = gates
     try:
@@ -484,7 +487,8 @@ OPS2 = ("m6_on", "m10_on")
 
 
 def op_(mid="new", te=None, sg="lsq"):
-    o = {"scalar_gradient_effective": sg, "slau_wall_normal_chi_effective": 1, "mesh_signature": os.urandom(8).hex()}
+    # 受理検査の版と残差の入力の要約は現行のゲートで判定した形 (§5.1 R2k の一律の要件。この試験は評価方式の識別と持ち越しだけを差にする)
+    o = {"scalar_gradient_effective": sg, "slau_wall_normal_chi_effective": 1, "mesh_signature": os.urandom(8).hex(), **AF.accepted_op_fields()}
     if mid != "legacy":
         o[D.EVAL_METHOD_ID] = {"new": ID_NEW, "old": ID_OLD, "conv2": ID_CONV2, "none": None}[mid]
         o[D.TE_WAKE_EFFECTIVE] = te if te is not None else (ON if mid == "new" else "off")

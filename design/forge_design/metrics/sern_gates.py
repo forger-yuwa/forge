@@ -17,6 +17,8 @@
   (5) 問題 YAML が要求するときだけ: 毎更新の床事象 (floor_event_gate)、判定区間の段の §6 #2・#3 (judgment_gate:
       後縁まわりの最低温度と 4 力量の窓。plan tooling-sern-te-wake-grid §5.1 R2)
 判定結果は metrics.json の `gates` に残し、数値失敗 (fail_class) と物理的 INFEASIBLE (設計不成立・C_M 窓) を混同しない。
+`gates` には受理検査の版 (ACCEPTANCE_VERSION) を書き、学習の採否 (driver_sern) は現行の版と残差の入力の検査済み要約
+(residual_evidence_summary) の合格を要求する (plan tooling-sern-te-wake-grid §5.1 R2k)。
 """
 from __future__ import annotations
 
@@ -46,6 +48,23 @@ FORCE_KEYS = ("C_T", "C_L", "C_M")
 # JUDGMENT_UNVERIFIABLE)。必須でない FIELD_VARS (Euler の roK・roOmega) はあれば従来どおり検査する
 FIELD_REQUIRED = {"euler": ("ro", "roUx", "roUy", "roUz", "roe", "P", "T"),
                   "sst": ("ro", "roUx", "roUy", "roUz", "roe", "P", "T", "roK", "roOmega")}
+
+# --- 受理検査の版 (plan tooling-sern-te-wake-grid §5.1 R2k、codex result 再レビュー 3 回目 2026-10-12 M1) -------------------------
+# 評価方式の識別 (runner_sern.EVAL_METHOD_ID: 離散化・格子・変換器 = 何を解いたか) とは別に、**その評価をどの受理検査で判定したか**を
+# gates に書く。学習の採否は保存された判定 (status PASS) を照合するので、受理検査を厳しくしても、旧い検査で PASS した保存済みの評価は
+# 再判定なしに学習・Pareto に入っていた (9e5f0ffd の判定で PASS した、化学種の残差列の欠落・1 行だけ・途中の欠測/重複の残差。codex の再現)。
+# driver_sern._learnable は現行の版と、残差の入力の検査済み要約 (residual_evidence_summary) の合格を要求する。
+# **ゲートの検査を厳しくしたら (同じ入力が不合格・判定不能になる変更をしたら) 上げる**。共有の判定ツール (check_convergence・
+# check_floor_events・check_quasisteady) と、ゲートの入力を作る runner 側の検査 (3D の力の部品の完全性 force_parts_plan・forces3d の
+# incomplete、判定区間の予定 judgment_plan) を厳しくしたときも上げる。判定を変えない変更 (記録の欄の追加・表示) と緩める変更では上げない。
+# 版は文字列の一致で照合する (旧い版の行は再判定 [driver_sern --rejudge] で現行の版を付け直すまで学習から外れる)。
+#   sern-acceptance-v1 (2026-10-12): R1 (2026-09-09) の (1)〜(4)・最終場の床、毎更新の床事象と判定区間の §6 #2・#3 (問題 YAML が要求する
+#     とき、§5.1 #2・R2・R2a)、目的量と (4) の量を乱流モデルから (R2f)、場・最終場の床・残差列の必須量を乱流モデルから (R2g)、
+#     残差の入力の判定不能を受理・延長に通さない (R2h1)、化学種の場 (R2h2)、3D の力の部品と摩擦の完全性 (R2h3・R2h4)、
+#     化学種・トレーサの残差列 (R2i)、残差の時系列の完全性 (R2j)
+ACCEPTANCE_VERSION = "sern-acceptance-v1"
+ACCEPTANCE_VERSION_KEY = "acceptance_version"
+RESIDUAL_FLUID_COLS = tuple(_cc.REQUIRED_COLS)     # 必須の残差列のうち常に要る流体 5 列 (学習の採否が要約の健全性の確認に使う)
 
 
 def _volume_res(run_dir):
@@ -254,16 +273,25 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
               化学種・トレーサの残差列は CSV の列の有無によらず実効 config から必須 (analyze の require_species、§5.1 R2i)。
               残差の時系列の不完全 (residual_series_check: session の nStepOuter・最終場の step との不整合、§5.1 R2j) も入力の不備
       収束状態 (rising・stalled・converging・converged・verdict) は従来どおり。**プラトー受理は変えない** (analyze.ok は必須にしない)。
-    ok = 入力が妥当 かつ NaN/Inf 無し かつ rising 列無し。converged = 入力が妥当 かつ全列 PASS (3 桁低下)。"""
+    ok = 入力が妥当 かつ NaN/Inf 無し かつ rising 列無し。converged = 入力が妥当 かつ全列 PASS (3 桁低下)。
+    required_columns = analyze と同じ規則で要求した残差列 (流体・乱流・遷移・化学種/トレーサ。化学種を決められなければ None)、
+    missing_columns = そのうち CSV に無い列 (台帳の残差の入力の要約に載せる、§5.1 R2k。判定は analyze の入力検査のまま)。"""
     path = Path(run_dir) / "residual_history.csv"
     out = {"ok": False, "converged": False, "verdict": "MISSING", "nan": False, "rising": [], "stalled": [], "converging": [],
-           "columns": {}, "last_step": None, "unverifiable": True, "input": {"ok": False, "reasons": [], "notes": []}}
+           "columns": {}, "last_step": None, "unverifiable": True, "input": {"ok": False, "reasons": [], "notes": []},
+           "required_columns": None, "missing_columns": None}
     if not path.exists():
         out["reasons"] = ["no residual_history.csv"]; out["input"]["reasons"] = list(out["reasons"]); return out
     res = _cc.analyze(str(path), min_drop, tail, require_species=True)
     if res is None:
         out["reasons"] = ["empty residual_history.csv"]; out["input"]["reasons"] = list(out["reasons"]); return out
     laststep, report, ok, any_nan, any_stalled, any_converging = res
+    # 要求した残差列 (analyze の _input_report と同じ規則・同じ require_species) と欠けた列。report の列名は CSV にある残差列
+    _need, _ = _cc.required_cols(str(path))
+    _sp_need, _sp_why = _cc.species_required(str(path), [c for c in report if not c.startswith("(")], require_species=True)
+    if _sp_why is None:
+        out["required_columns"] = list(_need) + list(_sp_need)
+        out["missing_columns"] = [c for c in out["required_columns"] if c not in report]
     series_bad, out["series"] = residual_series_check(run_dir)
     ok = ok and not series_bad
     out["last_step"] = laststep; out["nan"] = bool(any_nan); out["converged"] = bool(ok)
@@ -314,6 +342,21 @@ def residual_health(run_dir, min_drop: float = 3.0, tail: float = 0.2) -> dict:
     out["reasons"] = [] if out["ok"] else (
         [f"residual {out['verdict']}" + (f" columns {out['rising']}" if out["rising"] else "")] + bad_input)
     return out
+
+
+def residual_evidence_summary(resid: dict | None) -> dict | None:
+    """台帳の作動点要約に載せる残差の入力の検査済み要約 (plan tooling-sern-te-wake-grid §5.1 R2k): 入力の妥当性 (input.ok・判定不能)、
+    必須列の充足 (要求した列・欠けた列)、時系列の照合 (residual_series_check の要約)。residual_health を通っていない評価は None。
+    旧い residual_health の結果 (input・series・required_columns を持たない) は該当の欄が None になり、学習の採否で外れる。
+    **ここで欠けた欄を補わない** (旧い判定から、現行の検査を通ったように見える要約を作らない)。"""
+    if not isinstance(resid, dict) or not resid:
+        return None
+    inp = resid.get("input") if isinstance(resid.get("input"), dict) else None
+    ser = resid.get("series") if isinstance(resid.get("series"), dict) else None
+    return {"verdict": resid.get("verdict"), "input_ok": inp.get("ok") if inp is not None else None,
+            "unverifiable": resid.get("unverifiable"), "input_reasons": list(inp.get("reasons") or [])[:3] if inp is not None else None,
+            "required_columns": resid.get("required_columns"), "missing_columns": resid.get("missing_columns"),
+            "series": dict(ser) if ser is not None else None}
 
 
 # --- 受理ゲート (4) の量 (plan tooling-sern-te-wake-grid §5.1 R2f、R2a の横展開 2026-10-12) --------------------------------
@@ -895,6 +938,7 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
     [R2j] など) も JUDGMENT_UNVERIFIABLE (§5.1 R2h1。NaN/Inf があれば DIVERGED が先)。
     model = 問題設定の乱流モデル (collect が evaluate.model を runner の既定 euler で解決して渡す。省略不可・None 不可):
     目的量と (4) の量、場と最終場の床の必須の量はここから決める (旧引数 obj と、列・量の有無から推測する経路は廃止)。
+    戻りの acceptance_version は受理検査の版 (ACCEPTANCE_VERSION、§5.1 R2k。判定の合否によらず書く)。
     物理的 INFEASIBLE はここでは出さない。"""
     obj = objective_key(model)          # モデルの検査 (None・未知は ValueError) を履歴・run の読み込みより先に
     field = field_health(run_dir, model=model)
@@ -952,6 +996,7 @@ def evaluate_gates(run_dir, hist, rc, require_residual_pass: bool = False,
     if judgment is not None and not judgment.get("ok"):
         reasons += ["判定区間: " + r for r in judgment.get("reasons", [])]; fail = fail or judgment.get("fail_class") or "JUDGMENT_UNVERIFIABLE"
     return {"verdict": "PASS" if fail is None else "FAIL", "fail_class": fail, "reasons": reasons, "rc": rc,
+            ACCEPTANCE_VERSION_KEY: ACCEPTANCE_VERSION,      # この判定をした受理検査の版 (学習の採否が照合する、§5.1 R2k)
             "objective": stead["objective"], "field": field, "residual": resid, "steadiness": stead,
             "floors": floors, "residual_scale": rscale, "floor_events": fevents, "force_parts": fparts,
             **({"judgment": judgment} if judgment is not None else {}),

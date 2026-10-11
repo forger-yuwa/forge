@@ -7,7 +7,9 @@ dv = (M_c, f, theta_r0_deg, theta_c0_deg, L_cowl) [YAML の dv.min/max]。1 評�
 ゲート (plan §5.1 R1, `metrics/sern_gates.py`): 逆設計成立 (kernel 内に key point、C⁻ が直線ランプに着地、
 `L_ramp_max` は最終輪郭で再検査)、メッシュ品質 PASS、各作動点で **rc == 0 かつ 保存場が有限・正値、全残差に NaN/rising 無し、
 実目的量 (RANS は C_T_with_shear) と C_T/C_L/C_M が STEADY**。発散した評価の採用 (旧 §4.13-3) は撤回した:
-ゲート不合格はサロゲート学習と Pareto から外す (accepted `tooling-nozzle-moo-loop.md` と同じ)。
+ゲート不合格はサロゲート学習と Pareto から外す (accepted `tooling-nozzle-moo-loop.md` と同じ)。学習・Pareto に使うのは現行の受理検査の版
+(sern_gates.ACCEPTANCE_VERSION) で判定し、残差の入力の検査済み要約が合格の行だけ (plan tooling-sern-te-wake-grid §5.1 R2k。旧い版の行は
+台帳に残り、`--rejudge` で付け直す)。
 status: PASS / INFEASIBLE (物理: 設計不成立 `DESIGN`, `L_RAMP_MAX`, `CM_WINDOW`) / FAIL (数値: `DIVERGED`,
 `RESIDUAL_RISING`, `NOT_CONVERGED`, `UNSTEADY`, `NO_FORCES`, `ERROR`)。`degraded` = 緩レシピ (再試行) で通った評価
 (台帳と pareto.json の両方に残す)。C_M (機体 CG 基準) は台帳に記録し制約は任意 (`opt.cm_min/cm_max` = 加重平均、
@@ -51,6 +53,8 @@ from ..metrics.sern_gates import floor_events_summary  # noqa: E402  毎更新�
 from ..metrics.sern_gates import floor_events_options  # noqa: E402  キャンペーンの床判定の要件 (te-wake-grid §5.1 R1)
 from ..metrics.sern_gates import JUDGMENT_MIN_SAMPLES, TE_REGIONS, judgment_summary  # noqa: E402  判定区間の §6 #2・#3 (te-wake-grid §5.1 R2b)
 from ..evaluate.runner_sern import judgment_plan  # noqa: E402  キャンペーンの判定区間の要件 (import 時に束縛する)
+# 受理検査の版と残差の入力の検査済み要約 (te-wake-grid §5.1 R2k)
+from ..metrics.sern_gates import ACCEPTANCE_VERSION, ACCEPTANCE_VERSION_KEY, RESIDUAL_FLUID_COLS, residual_evidence_summary  # noqa: E402
 # 評価方式の識別 (plan tooling-sern-te-wake-grid §4、codex plan レビュー 2026-10-08 M3。import 時に束縛する)
 from ..evaluate.runner_sern import EVAL_METHOD_ID, TE_WAKE_EFFECTIVE, eval_method_required, te_wake_effective_of, te_wake_spec  # noqa: E402
 
@@ -257,13 +261,52 @@ def _judgment_row_ok(r: dict, req: dict | None = None) -> bool:
     return bool(ops) and all(_judgment_op_ok(o, req) for o in ops.values())
 
 
+# --- 受理検査の版と残差の入力の証拠 (plan tooling-sern-te-wake-grid §5.1 R2k、codex result 再レビュー 3 回目 2026-10-12 M1) ---
+# 学習・Pareto は保存された判定 (status PASS) を使うので、受理検査を厳しくしても、旧い検査で PASS した評価が再判定なしで入っていた
+# (9e5f0ffd の判定で PASS した、化学種の残差列の欠落・1 行だけ・途中の欠測/重複の残差。codex の再現)。そこで各作動点に
+#   (1) 受理検査の版 (作動点要約の acceptance_version = 評価時の gates の値) が現行の sern_gates.ACCEPTANCE_VERSION と一致し、
+#   (2) 残差の入力の検査済み要約 (residual_evidence = sern_gates.residual_evidence_summary) が合格: 入力が妥当 (input_ok True・判定不能でない)、
+#       要求した残差列が流体 5 列を含み欠けた列が無い、時系列が session の nStepOuter と最終場に対して完全 (outer_end が step 0..N−1 の N 行・最終場 res_N)
+# であることを要求する。**キャンペーンの設定によらず一律**: 床事象・判定区間 (R1・R2b) は問題 YAML が要求するときだけ回す検査で、窓の長さも
+# キャンペーンが決めるのでキャンペーンの要求に置いたが、ここで照合する検査は evaluate_gates が全評価に課す必須の検査なので、要求しない
+# キャンペーン (床事象・判定区間を持たない 2D など) を作れると旧い検査の PASS が黙って戻る。R1 と同じく、照合するのは評価時の設定でなく
+# 保存された判定と要約、版・要約の無い行 (R2k の前の台帳の全行)・旧い版の行は台帳に残して外し、旧評価の持ち越しの承認
+# (eval_method_carry_over・処置の持ち越し) は緩めない。戻すのは `--rejudge` (現行ゲートで判定し直した行は現行の版と要約を持つ)
+def _residual_evidence_ok(ev) -> bool:
+    """残差の入力の検査済み要約が合格か (保存された要約の欄だけを見る。run は読み直さない)。欄の欠け・None は不合格。"""
+    if not isinstance(ev, dict) or ev.get("input_ok") is not True or ev.get("unverifiable") is not False:
+        return False
+    req, miss = ev.get("required_columns"), ev.get("missing_columns")
+    if not (isinstance(req, list) and all(isinstance(c, str) for c in req) and set(RESIDUAL_FLUID_COLS) <= set(req)
+            and isinstance(miss, list) and not miss):
+        return False
+    s = ev.get("series")
+    if not isinstance(s, dict):
+        return False
+    n = s.get("n_steps")
+    return (_is_int(n) and n > 0 and _is_int(s.get("n_outer_end")) and s["n_outer_end"] == n
+            and _is_int(s.get("first")) and s["first"] == 0 and _is_int(s.get("last")) and s["last"] == n - 1
+            and s.get("final_field") == f"res_{n}.h5")
+
+
+def _acceptance_op_ok(o: dict) -> bool:
+    """作動点要約が現行の受理検査の版で判定され、残差の入力の検査済み要約が合格か。"""
+    return o.get(ACCEPTANCE_VERSION_KEY) == ACCEPTANCE_VERSION and _residual_evidence_ok(o.get("residual_evidence"))
+
+
+def _acceptance_row_ok(r: dict) -> bool:
+    """全作動点が現行の受理検査の版と残差の入力の要約の合格を持つ (キャンペーンの設定によらない)。"""
+    ops = r.get("ops") or {}
+    return bool(ops) and all(_acceptance_op_ok(o) for o in ops.values())
+
+
 def _learnable(r: dict, zte_required: str = "off", zte_carry_over=(), method=None, floor=None, judgment=None) -> bool:
-    """学習・Pareto に使ってよい行 = 処置以外の採否 (_learnable_base) かつ処置の一致 (_zte_row_ok) かつ評価方式の一致
-    (_method_row_ok) かつ床事象の判定の要件 (_floor_row_ok) かつ判定区間の要件 (_judgment_row_ok)。method = (格子変形の要求,
-    評価方式の id の要求, 承認済みの持ち越し)、None は要求なし。floor = floor_requirement_of・judgment = judgment_requirement_of
-    の戻り (None は要件なし)。"""
-    return (_learnable_base(r) and _zte_row_ok(r, zte_required, zte_carry_over) and _method_row_ok(r, *(method or ("off", None, ())))
-            and _floor_row_ok(r, floor) and _judgment_row_ok(r, judgment))
+    """学習・Pareto に使ってよい行 = 処置以外の採否 (_learnable_base) かつ受理検査の版と残差の入力の要約 (_acceptance_row_ok、一律)
+    かつ処置の一致 (_zte_row_ok) かつ評価方式の一致 (_method_row_ok) かつ床事象の判定の要件 (_floor_row_ok) かつ判定区間の要件
+    (_judgment_row_ok)。method = (格子変形の要求, 評価方式の id の要求, 承認済みの持ち越し)、None は要求なし。
+    floor = floor_requirement_of・judgment = judgment_requirement_of の戻り (None は要件なし)。"""
+    return (_learnable_base(r) and _acceptance_row_ok(r) and _zte_row_ok(r, zte_required, zte_carry_over)
+            and _method_row_ok(r, *(method or ("off", None, ()))) and _floor_row_ok(r, floor) and _judgment_row_ok(r, judgment))
 
 
 def _zte_policy(obj):
@@ -356,6 +399,10 @@ class SernCampaign:
         _nolsq = sum(1 for r in self.rows if r.get("status") == "PASS" and r.get("flag_policy") == FLAG_POLICY and not _learnable_base(r))
         if _nolsq:
             print(f"[campaign] 実効 scalarGradient (lsq) / slauWallNormalChi (1) が全作動点で確認できない PASS 行 {_nolsq} 件を学習から除外", flush=True)
+        _noacc = sum(1 for r in self.rows if _learnable_base(r) and not _acceptance_row_ok(r))
+        if _noacc:
+            print(f"[campaign] 受理検査の版が現行 ({ACCEPTANCE_VERSION}) でない・残差の入力の検査済み要約が無いか不合格の PASS 行 {_noacc} 件を"
+                  f"学習から除外 (旧い受理検査の判定。台帳には残る。--rejudge で現行ゲートの判定を付け直せる)", flush=True)
         _nozte = sum(1 for r in self.rows if _learnable_base(r) and not _zte_row_ok(r, self.zte_required, self.zte_carry_over))
         if _nozte:
             print(f"[campaign] 処置 (zero_thickness_edge_velocity) の実効値が要求 {self.zte_required} と違う・不明な PASS 行 {_nozte} 件を学習から除外"
@@ -474,6 +521,10 @@ class SernCampaign:
                 "zero_thickness_edge_velocity_mesh_signature": (out.get("zero_thickness_edge_velocity") or {}).get("mesh_signature"),
                 "zero_thickness_edge_velocity_field_hash": (out.get("zero_thickness_edge_velocity") or {}).get("field_hash"),
                 "residual": g.get("residual", {}).get("verdict"), "objective": g.get("objective"),
+                # 受理検査の版と残差の入力の検査済み要約 (学習の採否が現行の版と要約の合格を要求する、§5.1 R2k)。
+                # **gates に版が無ければ None のまま** (旧い判定に現行の版を付けない)。要約も gates の残差の判定から作り、欠けた欄を補わない
+                ACCEPTANCE_VERSION_KEY: g.get(ACCEPTANCE_VERSION_KEY),
+                "residual_evidence": residual_evidence_summary(g.get("residual")),
                 # 毎更新の EOS 床事象 (必須か・判定・区間・件数)。必須で不合格なら gate_fail_class が FLOOR_EVENT / FLOOR_UNVERIFIABLE
                 "floor_events": floor_events_summary(g.get("floor_events")),
                 # 判定区間の段の §6 #2・#3 の判定 (問題 YAML が evaluate.judgment_steps を持つ評価だけ。plan tooling-sern-te-wake-grid §5.1 R2)。
@@ -607,7 +658,7 @@ class SernCampaign:
                                "flag_policy": r.get("flag_policy"),
                                "ops": {op: {**{k: v.get(k) for k in ("C_T", "C_M", "gate", "residual", "steadiness", "scalar_gradient_effective")},
                                             ZTE_EFFECTIVE: _zte_effective_of(v), TE_WAKE_EFFECTIVE: _te_wake_of(v),
-                                            EVAL_METHOD_ID: v.get(EVAL_METHOD_ID)}
+                                            EVAL_METHOD_ID: v.get(EVAL_METHOD_ID), ACCEPTANCE_VERSION_KEY: v.get(ACCEPTANCE_VERSION_KEY)}
                                        for op, v in r.get("ops", {}).items()}})
         pareto.sort(key=lambda r: r["L_ramp"])
         classes = {}
@@ -620,6 +671,7 @@ class SernCampaign:
                 "required_zero_thickness_edge_velocity": _zte_policy(self)[0], ZTE_CARRY_OVER_KEY: list(_zte_policy(self)[1]),
                 "required_te_wake": _method_policy(self)[0], "required_eval_method_id": _method_policy(self)[1],
                 "required_floor_events": _floor_policy(self), "required_judgment": _judgment_policy(self),
+                "required_acceptance_version": ACCEPTANCE_VERSION,     # 一律 (キャンペーンの設定によらない、§5.1 R2k)
                 EVAL_METHOD_CARRY_OVER_KEY: list(getattr(self, "eval_method_carry_over_records", ())),
                 "n_degraded": int(sum(1 for r in ok if r.get("degraded"))),
                 "hv": (hypervolume2d(F, self.ref) if len(ok) else 0.0), "ref": self.ref, "status_counts": classes,
@@ -629,7 +681,8 @@ class SernCampaign:
     # -- 既存キャンペーンの再判定 (CFD なし) ----------------------------------------
     def rejudge(self, out_dir) -> dict:
         """台帳の各評価を現行ゲートで判定し直す。元 run は読むだけ (metrics/force_history は out_dir/<tag>_<op>/ に書く)。
-        rc は台帳に無いので run_case_stdout.log から復元する。"""
+        rc は台帳に無いので run_case_stdout.log から復元する。判定し直した行は現行の受理検査の版と残差の入力の要約を持つ
+        (pareto_rejudged の学習の母集団に入りうる。元の ledger.jsonl は書き換えない)。"""
         out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
         new_rows = []; lines = ["| tag | 旧 status | 新 status | fail_class | degraded | C_T_w (旧→新) | 理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
         for r0 in self.rows:
