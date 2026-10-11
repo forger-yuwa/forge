@@ -105,6 +105,7 @@ def absolutize_problem_paths(raw: dict, base_dir) -> dict:
 # 残差は記録 (FAIL は DIVERGED と有意な末尾上昇だけ)、推力系 STEADY 1.5e-4・ṁ 1e-3、最終 |cv| ≤ 1e-4、η は出口面会計を主。
 TP_PHYS_BOUNDS = {"mdot_ratio_1d": (0.94, 1.005), "eta": (0.5, 1.02)}   # (iii) Phase 2 の物理ゲート (CPG 経路と同じ値)
 TP_CV_TOL = 1.0e-4                                                     # (iv) 最終スナップショットの |CV 残差| ≤ 1e-4 (F_1D 正規化)
+SUSPECT_STOP_N = 3          # 続けて SUSPECT ならキャンペーンを止める評価数 (`_stop_on_repeated_suspect`)
 # (ii) 推力系 4 列 (runner.THRUST_QS_COLS) の閾値: drift・osc とも 1.5e-4 (相対、末尾窓 4 割)。問題 YAML の evaluate.quasisteady で上書き
 TP_QS_DEFAULT = {"tail": 0.4, "drift": 1.5e-4, "osc": 1.5e-4, "min_snaps": 4}
 TP_QS_MDOT = {"drift": 1.0e-3, "osc": 1.0e-3}                          # (ii) ṁ (runner.THRUST_QS_MDOT_COLS) の閾値
@@ -421,7 +422,9 @@ class Campaign:
     # -- 1 点評価 (ゲート込み) --------------------------------------------------
     def evaluate(self, x, tag: str) -> dict:
         if self.tp:
-            return self._evaluate_tp(x, tag)
+            row = self._evaluate_tp(x, tag)
+            self._stop_on_repeated_suspect()
+            return row
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time()
         run_dir = self.dir / tag
@@ -557,6 +560,11 @@ class Campaign:
         except RuntimeError as e:
             row["fail_class"] = "RETRYABLE" if "段" in str(e) else "SUSPECT"   # 段の失敗 (発散・段終了ゲート) / メッシュ品質等
             row["note"] = f"runtime: {str(e)[:250]}"
+        except subprocess.CalledProcessError as e:  # 下請けツール (interp_field 等) の失敗: 理由は stderr にある
+            row["fail_class"] = "SUSPECT"
+            tool = Path(str(e.cmd[1] if isinstance(e.cmd, (list, tuple)) and len(e.cmd) > 1 else e.cmd)).name
+            err = (e.stderr or e.stdout or "").strip().replace("\n", " ")
+            row["note"] = f"CalledProcessError rc={e.returncode} {tool}: {err[-400:]}"
         except Exception as e:  # noqa: BLE001 — I/O・OOM・その他は一律 SUSPECT (人間が見る)
             row["fail_class"] = "SUSPECT"
             row["note"] = f"{type(e).__name__}: {str(e)[:250]}"
@@ -568,6 +576,14 @@ class Campaign:
         print(f"[{tag}] {row['status']}{fail_marker} x={np.round(x, 3)} eta={row.get('eta_cf')}"
               f" ({row['wall_s']}s) {row['note']}", flush=True)
         return row
+
+    def _stop_on_repeated_suspect(self, n: int = SUSPECT_STOP_N) -> None:
+        """直近 n 評価が続けて SUSPECT (計測・下請けツール・I/O の失敗) なら止める。同じ原因で DOE 点を空費しないため
+        (2026-10-11 case/68 run_0010: warm start の interp_field が化学種署名を解決できず、17 点が 10 秒ずつ落ちた)。"""
+        tail = self.rows[-n:]
+        if len(tail) == n and all(r.get("fail_class") == "SUSPECT" for r in tail):
+            raise SystemExit(f"[driver] 直近 {n} 評価が続けて SUSPECT — 停止 (台帳 {self.ledger} の note を見る。"
+                             "原因を直したら失敗行を台帳から除いて再開する)")
 
     def _diverged(self, run_dir: Path, out: dict) -> bool:
         v = (run_dir / "CONVERGENCE_VERDICT.txt")
