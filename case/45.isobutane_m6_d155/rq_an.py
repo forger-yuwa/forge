@@ -1,4 +1,4 @@
-"""plan architecture-float-state-double-geometry §6.40 (事前登録、codex diagnose 2026-10-11) の判定: FP64 のビルドで ρE だけを step 末尾に float32 に丸める短い試験。B で回す。
+"""plan architecture-float-state-double-geometry §6.40 (事前登録、codex diagnose 2026-10-11) の判定: FP64 のビルドで ρE だけを step 末尾に float32 に丸める短い試験。A で回す (B が満杯のため run の前に変更)。
 腕: C = run_0595〜0597 (FP64 OFF)、E = run_0598・0599・0620 (FP64 + ρE の量子化)、F = run_0621〜0623 (float、陽性対照)。参照: A = run_0487・B = run_0488・B' = run_0489。
 参照の型 (固定): 評価域は x/r_t < −2 の内点 (軸 j = 0・壁 j = nj−1・入口 i = 0 を除く)。z_{r,s} = (T_{r,s} − T_{r,0}) / T_{A,0}、v_s = mean(z_B, z_B') − z_A (s = 1000・1500・2000)。
 指標: a_r = mean_s ⟨v_s, z_{r,s}⟩ / ⟨v_s, v_s⟩。e_E = mean(a_E) − mean(a_C)、e_F = mean(a_F) − mean(a_C)。Welch の区間、2 比較で全体 95 % (各 t の分位 1 − 0.05/4)。

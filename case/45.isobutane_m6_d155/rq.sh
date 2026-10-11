@@ -1,10 +1,10 @@
 #!/bin/bash
-# plan architecture-float-state-double-geometry §6.40 (事前登録、codex diagnose 2026-10-11): FP64 のビルドで ρE だけを step 末尾に float32 に丸める短い試験。インスタンス B。
+# plan architecture-float-state-double-geometry §6.40 (事前登録、codex diagnose 2026-10-11): FP64 のビルドで ρE だけを step 末尾に float32 に丸める短い試験。インスタンス A (B が満杯のため run の前に変更)。
 # 対照 C = FP64 OFF (run_0595〜0597)、介入 E = FP64 + ρE だけ量子化 (run_0598・0599・0620)、陽性対照 F = float (run_0621〜0623)。各 2,000 step・500 ごと。
-# C・E のバイナリ ~/forge-fgeom11-fp64 (#20 の commit、rq_build.sh)、F は ~/forge-fgeom7-f32 (§6.26 の B・B′ と同じ)。1 回に C_i・E_i・F_i の 3 本、3 回に分ける。判定は rq_an.py。
+# C・E のバイナリ ~/forge-fgeom11-fp64 (#20 の commit、rq_build.sh)、F は ~/forge-fgeom7-f32 (§6.26 の B・B′ と同じ)。A の他セッションの run と共存するため 1 本ずつ C1・E1・F1・C2・… の順に回す。判定は rq_an.py。
 set -uo pipefail
 TOKEN=$(curl -s -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
-[ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0ba2b91ba659254c4" ] || { echo "B ではない。中止"; exit 1; }
+[ "$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)" = "i-0b1a5e0b8dc152f00" ] || { echo "A ではない。中止"; exit 1; }
 export FORGE_CUDA_BLOCKSIZE=128
 for v in $(compgen -e | grep '^FORGE_'); do case $v in FORGE_CUDA_BLOCKSIZE) ;; *) unset $v;; esac; done
 export FORGE_OMEGA_BUDGET=1 FORGE_DIAG_COMMIT_LOSS=500
@@ -30,13 +30,16 @@ arm() {   # arm <run> <バイナリ> <量子化 0|1>
 }
 for k in 1 2 3; do
   case $k in 1) c=run_0595_rq_c1; e=run_0598_rq_e1; f=run_0621_rq_f1;; 2) c=run_0596_rq_c2; e=run_0599_rq_e2; f=run_0622_rq_f2;; 3) c=run_0597_rq_c3; e=run_0620_rq_e3; f=run_0623_rq_f3;; esac
-  # メモリ: g5 は 16 GB・スワップなし。3 本ぶん (FP64 約 2.5 GB × 2 + float 約 2 GB) + 2 GB = 9 GB の available を 30 分まで待つ
-  for w in $(seq 1 30); do av=$(free -m | awk '/^Mem:/{print $7}'); [ "$av" -ge 9000 ] && break; echo "$(date -Is) 回 $k: available ${av} MB < 9000 MB、待つ" >> $LOG; sleep 60; done
-  [ "$av" -ge 9000 ] || { echo "回 $k: メモリが空かない (中止)" >> $LOG; exit 1; }
-  echo "回 $k: available ${av} MB で投入" >> $LOG
-  arm $c $F64 0 || exit 1; arm $e $F64 1 || exit 1; arm $f $F32 0 || exit 1
-  wait
-  for r in $c $e $f; do echo "$r 終了 $(date -Is) RUN_RC=$(cat $r/RUN_RC) 最後の行: $(grep -h '^step' $r/forge_run.log | tail -1 | cut -c1-100)" >> $LOG; done
+  for spec in "$c $F64 0" "$e $F64 1" "$f $F32 0"; do
+    set -- $spec
+    # メモリ: g5 は 16 GB・スワップなし。1 本ぶん (約 2.5 GB) + 2 GB = 4.5 GB の available を 30 分まで待つ (forge-25 の依頼: 1 本ずつ)
+    for w in $(seq 1 30); do av=$(free -m | awk '/^Mem:/{print $7}'); [ "$av" -ge 4500 ] && break; echo "$(date -Is) $1: available ${av} MB < 4500 MB、待つ" >> $LOG; sleep 60; done
+    [ "$av" -ge 4500 ] || { echo "$1: メモリが空かない (中止)" >> $LOG; exit 1; }
+    echo "$1: available ${av} MB で投入" >> $LOG
+    arm $1 $2 $3 || exit 1
+    wait
+    echo "$1 終了 $(date -Is) RUN_RC=$(cat $1/RUN_RC) 最後の行: $(grep -h '^step' $1/forge_run.log | tail -1 | cut -c1-100)" >> $LOG
+  done
   grep -h "\[quantizeState\]" $e/forge_run.log | cut -c1-300 >> $LOG
 done
 python3 rq_an.py >> $LOG 2>&1
