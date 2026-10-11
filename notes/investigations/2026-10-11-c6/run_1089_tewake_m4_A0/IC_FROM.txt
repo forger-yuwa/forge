@@ -1,0 +1,1 @@
+IC: restart_field run_1058_r7b_m4_A_c res_20000 (旧評価の最終場)。plan tooling-sern-te-wake-grid §5.1 #6a の A (te_wake 0)

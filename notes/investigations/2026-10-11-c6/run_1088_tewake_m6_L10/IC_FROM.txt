@@ -1,0 +1,1 @@
+IC: restart_field_deformed run_1050_r7b_x_lsw08 res_20000 → 局所化格子、src-mesh = run_1087_tewake_m6_A0 の格子。plan tooling-sern-te-wake-grid §5.1 #6a の B

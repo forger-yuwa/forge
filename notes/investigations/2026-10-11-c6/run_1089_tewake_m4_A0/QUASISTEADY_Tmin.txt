@@ -1,0 +1,8 @@
+
+=== case/46.sern_design/run_1089_tewake_m4_A0/TE_MONITOR.csv  [40 rows, steps 500..20000]  -> STEADY ===
+  R_TE_Tmin       : tail mean=216.7  drift=0.0%/tail  fluct=0.0%            STEADY
+  R_SE_Tmin       : tail mean=220.8  drift=0.0%/tail  fluct=0.0%            STEADY
+  RET_Tmin        : tail mean=206.6  drift=0.0%/tail  fluct=0.0%            STEADY
+  ALL_Tmin        : tail mean=159.5  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY
