@@ -16,6 +16,9 @@ TP 経路 (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1・§5.1 #2a): 問
 1D 理想値を同じ契約 (`RocketExhaust`) の気体で作り、真空の出口を `outflow` にする。config は推奨レシピ
 (procedures/recommended-settings.md §1・§1.2・§2・§3) の値で書き、段 (`stage`: soft | mid | main) を選べる。
 既定の CPG 経路は従来の config・BC・IC・平滑化のまま (この節の追加で文字単位で変わらない)。
+TP の段階起動・同一メッシュの継続・推力の CV 会計 (2026-10-11, 同 plan §5.1 #2b): `run_staged_tp` (soft → mid → 本段を同じ run・
+同じメッシュで、段の間は restart_field.py、stage_manifest.json)、`continue_tp` (本段の継続 = polish)、`collect` が本段の全スナップショットで
+`metrics.extract.thrust_cv` を出して thrust_history.csv を書く。CLI は `--staged` / `--continue-from <run>`。
 """
 from __future__ import annotations
 
@@ -149,6 +152,11 @@ TP_STAGES = {
 }
 TP_NODE_KEYS = ", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeInletCornerWall: 1"
 TP_K_INIT, TP_OMEGA_INIT = 1.0, 18000.0     # IC・入口の k/ω (CPG 経路と同じ値)
+# 推力の CV 会計 (metrics.extract.thrust_cv) が入口・出口面の粘性応力に使うソルバの勾配 (output.extraFields; 場は不変)
+TP_EXTRA_FIELDS = ("dUxdx", "dUxdy", "dUydx", "dUydy", "axisym_divU")
+# 段階起動の既定の step 数 (recommended-settings §1.2: soft 2000 → mid 2000 → 本段 8000〜12000)。evaluate.stage_steps で上書き。
+# 本段は evaluate.nStepOuter、res の間隔は evaluate.outStepInterval (既定は本段の 1/12 — 推力の時系列の準定常判定に 4 点以上)
+TP_STAGE_STEPS = {"soft": 2000, "mid": 2000}
 
 
 def _is_tp(p: Problem) -> bool:
@@ -228,7 +236,7 @@ time:
   nStepInner: {st['nStepInner']}
 space: {{convMethod: {st['convMethod']}, limiter: {st['limiter']}}}
 {turb}
-output: {{level: 1}}
+output: {{level: 1, extraFields: [{", ".join(TP_EXTRA_FIELDS)}]}}
 initial: "uniform_p101325_u10"
 """
 
@@ -259,6 +267,25 @@ def ideal_1d_tp(p: Problem) -> dict:
 
 PROBE_STUB = "outStepInterval: 100\noutStepStart: 0\npoints:\nsurfaces:\n"
 
+# 第一セル厚の x 依存 (スロートだけ詰める) と細分幅のキー (meshing.mesh2d.Mesh2DParams)。**書いてあるときだけ**渡す
+# (書いていない問題は従来の 4 キーだけの格子とビット同一; plan bell-two-mode §5.1 #2b 引き継ぎ (c): スロートの y1+ ≤ 1)。
+MESH_OPTIONAL_KEYS = ("throat_width", "wall_first_frac_throat", "wall_first_blend_x0", "wall_first_blend_x1",
+                      "wall_first_up_x0", "wall_first_up_x1")
+
+
+def mesh_params(p: Problem, scale: float) -> Mesh2DParams:
+    """問題の mesh ブロック → Mesh2DParams。ni・nj・wall_first_frac・throat_refine は従来の既定、`MESH_OPTIONAL_KEYS` は
+    書いてあるときだけ渡す (以前は黙って無視していた)。"""
+    kw = {k: float(p.mesh[k]) for k in MESH_OPTIONAL_KEYS if p.mesh.get(k) is not None}
+    return Mesh2DParams(
+        ni=int(p.mesh.get("ni", 241)),
+        nj=int(p.mesh.get("nj", 81)),
+        wall_first_frac=float(p.mesh.get("wall_first_frac", 2.0e-3)),
+        throat_refine=float(p.mesh.get("throat_refine", 3.0)),
+        scale=scale,
+        **kw,
+    )
+
 
 def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> dict:
     """メッシュ・config・IC まで準備する (forge は起動しない)。
@@ -269,8 +296,8 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
     stage: TP 経路だけ (soft | mid | main; 既定は warm_from なしで soft、ありで main)。TP の冷間 IC は soft 段に限って
     warm_from なしで起動できる (recommended-settings §1.2)。CPG 経路では指定不可 (従来の 1 段 config)。
     注意: warm_from は形状が変わる cross-mesh の引き継ぎ (`interp_field.py`) で、**同一メッシュの段の継続には使わない**
-    (AGENTS「メッシュ変更後の restart」: 同一メッシュは `restart_field.py`)。TP の段の継続と `StageManifest` の配線は
-    plan bell-two-mode §5.1 #2b。
+    (AGENTS「メッシュ変更後の restart」: 同一メッシュは `restart_field.py`)。TP の段の継続 (`restart_field.py` + `StageManifest`)
+    は `run_staged_tp`・`continue_tp` (plan bell-two-mode §5.1 #2b)。
     """
     p = load_problem(problem_path)
     tp = _is_tp(p)
@@ -283,13 +310,7 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
     wall, wp = build_wall(p)
     scale = float(p.spec["r_throat"])
 
-    mp = Mesh2DParams(
-        ni=int(p.mesh.get("ni", 241)),
-        nj=int(p.mesh.get("nj", 81)),
-        wall_first_frac=float(p.mesh.get("wall_first_frac", 2.0e-3)),
-        throat_refine=float(p.mesh.get("throat_refine", 3.0)),
-        scale=scale,
-    )
+    mp = mesh_params(p, scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     # 壁座標も記録 (IC・後処理・帰還エンジンの入力)
@@ -432,7 +453,7 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
             "gas": {**rec, "species": species, "transport": transport, "mode": layout.mode},
             "ideal_1d": ideal_1d_tp(p), "outlet_kind": _outlet_kind(p),
             "mesh": {"ni": mp.ni, "nj": mp.nj, "cells": int(quads.shape[0]), "wall_first_frac": mp.wall_first_frac,
-                     "ar_max": ar_max},
+                     "ar_max": ar_max, **{k: getattr(mp, k) for k in MESH_OPTIONAL_KEYS if p.mesh.get(k) is not None}},
             "environment": _environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
     return info
@@ -502,6 +523,200 @@ def run_forge(run_dir) -> int:
     return r.returncode
 
 
+# ---------------------------------------------------------------- TP の段階起動と同一メッシュの継続 (plan bell-two-mode §4.1, §5.1 #2b)
+
+def _res_sorted(run_dir) -> list:
+    """run の主スナップショット res_<step>.h5 を step 順に (境界ダンプ res_<群>_<id>_<step>.h5 は含めない)。"""
+    import re
+    rs = [f for f in Path(run_dir).glob("res_*.h5") if re.fullmatch(r"res_\d+\.h5", f.name)]
+    return sorted(rs, key=lambda f: int(f.stem.split("_")[1]))
+
+
+def tp_stage_plan(p: Problem, stages=None) -> list:
+    """TP の段の計画 [(tag, 段, step 数, outStepInterval)]。段は `stages` > `evaluate.stages` > (soft, mid, main)。
+    soft・mid の step 数は `evaluate.stage_steps` (既定 TP_STAGE_STEPS)、本段は `evaluate.nStepOuter` (既定 12000) で
+    res を `evaluate.outStepInterval` (既定は本段の 1/12) ごとに書く。前段は最終 step だけを書く。最後の段は main、
+    本段の step 数が outStepInterval の倍数でなければ ValueError (最終 step の res が書かれず判定がずれるため; 黙って直さない)。"""
+    stages = tuple(stages or p.evaluate.get("stages") or ("soft", "mid", "main"))
+    bad = [s for s in stages if s not in TP_STAGES]
+    if bad or not stages or stages[-1] != "main" or "main" in stages[:-1]:
+        raise ValueError(f"TP の段 {stages}: 段は {list(TP_STAGES)} から選び、main で終える (main は最後の 1 回だけ)")
+    steps = {**TP_STAGE_STEPS, **(p.evaluate.get("stage_steps") or {})}
+    n_main = int(p.evaluate.get("nStepOuter", 12000))
+    out_main = int(p.evaluate.get("outStepInterval", max(n_main // 12, 1)))
+    if n_main <= 0 or out_main <= 0 or n_main % out_main:
+        raise ValueError(f"本段の nStepOuter {n_main} が outStepInterval {out_main} の正の倍数でない")
+    plan = []
+    for i, s in enumerate(stages):
+        n = n_main if s == "main" else int(steps[s])
+        if n <= 0:
+            raise ValueError(f"段 {s} の step 数 {n} が正でない")
+        plan.append((f"S{i + 1}_{s}", s, n, out_main if s == "main" else n))
+    return plan
+
+
+def _tp_stage_run(p: Problem, run_dir: Path, sm, bc_text: str, tag: str, stage: str, n: int, out_int: int) -> Path:
+    """1 段を回す: config を書き、forge を起動し、段の残差履歴を `residual_history_<tag>.csv` に写して manifest に足す。
+    最終 res が step n まで届かない・forge が非 0・段終了ゲート (必要保存量が有限で ρ>0; runner_axismach.stage_gate) に
+    落ちたら RuntimeError (次段へ進まない)。戻り値は段の最終 res。"""
+    import shutil
+
+    from .runner_axismach import stage_gate
+    cfg = _solver_config_tp(p, n, out_int, stage)
+    (run_dir / "solverConfig.yaml").write_text(cfg)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
+    rc = run_forge(run_dir)
+    hist = run_dir / "residual_history.csv"
+    if hist.exists():
+        shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+    sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+    sm.write()
+    res = _res_sorted(run_dir)
+    last = int(res[-1].stem.split("_")[1]) if res else -1
+    if rc != 0 or last < n:
+        raise RuntimeError(f"TP の段 {tag} が失敗 (rc={rc}, 最終 res step {last} < {n}; 発散の切り分けは res_nan_*.h5)")
+    probs = stage_gate(res[-1], cfg)
+    if probs:
+        raise RuntimeError(f"TP の段 {tag} の最終場 {res[-1].name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                           + "\n    ".join(probs))
+    return res[-1]
+
+
+def run_staged_tp(problem_path, run_dir, warm_from=None, stages=None) -> dict:
+    """TP の段階起動 (recommended-settings §1.2): `prepare` (冷間は準 1D 等エントロピー IC、`warm_from` は形状が変わる
+    cross-mesh の `interp_field.py`) の後、**同じ run・同じメッシュ**で段 (`tp_stage_plan`) を順に回す。段の間は
+    `restart_field.py` (保存量の index コピー、ビット一致の検査; 引き継ぎ (a))。段ごとの実効設定を `stage_manifest.json`
+    (StageManifest) に記録するので、`check_convergence.py --segment` が本段の区間 (方程式・BC・離散化が同じ段の連結) を
+    判定する。前段の res は消し、本段の res と境界ダンプを残す (推力の時系列用)。戻り値は prepare_info (段の計画を追記)。"""
+    from .runner_axismach import _restart_same_mesh, _stage_manifest_cls
+    p = load_problem(problem_path)
+    if not _is_tp(p):
+        raise ValueError("run_staged_tp は TP 経路 (gas.model: semiperfect + gas.exhaust) 専用")
+    plan = tp_stage_plan(p, stages)
+    if warm_from is None and plan[0][1] != "soft":
+        raise ValueError("TP の冷間 IC は soft 段で起動する (recommended-settings §1.2)")
+    info = prepare(problem_path, run_dir, nsteps=plan[0][2], warm_from=warm_from, stage=plan[0][1])
+    run_dir = Path(run_dir)
+    bc_text = (run_dir / "bcondConfig.yaml").read_text()
+    sm = _stage_manifest_cls()(run_dir)
+    for k, (tag, st, n, oi) in enumerate(plan):
+        last = _tp_stage_run(p, run_dir, sm, bc_text, tag, st, n, oi)
+        if k == len(plan) - 1:
+            break
+        _restart_same_mesh(last, run_dir / "nozzle.h5")          # 同一メッシュ: index コピー
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+    info["stages"] = [{"tag": t, "stage": s, "nStepOuter": n, "outStepInterval": oi} for t, s, n, oi in plan]
+    (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    return info
+
+
+# 同一メッシュの継続で親 run から写すもの (メッシュと入力・化学種の記録・段の記録)。res・ログ・VERDICT は写さない
+TP_CONTINUE_COPY = ("nozzle.h5", "nozzle.xmf", "nozzle.msh", "contour.csv", "bcondConfig.yaml", "probe.yaml",
+                    "species_meta.yaml", "species_db_external.yaml", "MESH_QUALITY.txt", "forge_launches.jsonl")
+
+
+def continue_tp(problem_path, src_run, new_run, nsteps=None) -> dict:
+    """TP の本段を**同一メッシュで継続**する (polish 用; plan §4.1「polish は restart_field.py による同一メッシュの継続」)。
+    親 run のメッシュ・入力・化学種の記録・段の履歴と manifest を新しい run に写し、親の最終 res を `restart_field.py` で
+    初期場にして本段をもう 1 段 (`S<k>_main_p`) 回す。親の本段と同じ実効設定なので `check_convergence.py --segment` は
+    親の本段とこの段を 1 区間として判定する。`nsteps` 既定は親の本段と同じ。戻り値は新しい run の prepare_info。"""
+    import shutil
+
+    from .runner_axismach import _restart_same_mesh, _stage_manifest_cls
+    p = load_problem(problem_path)
+    if not _is_tp(p):
+        raise ValueError("continue_tp は TP 経路専用 (CPG の polish は従来どおり)")
+    src_run, new_run = Path(src_run), Path(new_run)
+    res = _res_sorted(src_run)
+    if not res:
+        raise FileNotFoundError(f"{src_run}: 継続元の res_*.h5 が無い")
+    man_p = src_run / "stage_manifest.json"
+    if not man_p.exists():
+        raise FileNotFoundError(f"{src_run}: stage_manifest.json が無い (段の記録の無い run は継続しない)")
+    man = json.loads(man_p.read_text())
+    if not man["stages"] or not man["stages"][-1]["tag"].split("_", 1)[-1].startswith("main"):
+        raise ValueError(f"{src_run}: 最後の段が本段でない ({[s['tag'] for s in man['stages']]})")
+    info_src = json.loads((src_run / "prepare_info.json").read_text())
+    st_main = [s for s in info_src.get("stages", []) if s["stage"] == "main"]
+    if not st_main:
+        raise ValueError(f"{src_run}: prepare_info に本段の記録が無い")
+    n = int(nsteps or st_main[-1]["nStepOuter"])
+    oi = int(st_main[-1]["outStepInterval"])
+    if n % oi:
+        raise ValueError(f"継続の step 数 {n} が outStepInterval {oi} の倍数でない")
+    new_run.mkdir(parents=True, exist_ok=False)
+    for name in TP_CONTINUE_COPY:
+        if (src_run / name).exists():
+            shutil.copy2(src_run / name, new_run / name)
+    for f in src_run.glob("resolved_species_*.yaml"):
+        shutil.copy2(f, new_run / f.name)
+    for st in man["stages"]:
+        h = src_run / st["history"]
+        if h.exists():
+            shutil.copy2(h, new_run / st["history"])
+    sm = _stage_manifest_cls()(new_run)
+    sm.stages = [dict(s) for s in man["stages"]]
+    k = len(sm.stages) + 1
+    tag = f"S{k}_main_p"
+    bc_text = (new_run / "bcondConfig.yaml").read_text()
+    (new_run / "solverConfig.yaml").write_text(_solver_config_tp(p, n, oi, "main"))   # restart_field が宛先を解決する
+    _restart_same_mesh(res[-1], new_run / "nozzle.h5")
+    info = {**info_src, "run_dir": str(new_run), "continued_from": str(res[-1].resolve()),
+            "stages": info_src.get("stages", []) + [{"tag": tag, "stage": "main", "nStepOuter": n, "outStepInterval": oi}]}
+    (new_run / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    _tp_stage_run(p, new_run, sm, bc_text, tag, "main", n, oi)
+    return info
+
+
+def tp_iso_k(run_dir) -> bool:
+    """run の solverConfig の `turbulence.sstIsotropicStress` (−(2/3)ρk δij を応力に足すか; 既定 0)。重複キーは拒否。"""
+    from .runner_axismach import _cfg_load
+    doc = _cfg_load((Path(run_dir) / "solverConfig.yaml").read_text())
+    t = doc.get("turbulence") or {}
+    return int((t.get("sstIsotropicStress", 0) if isinstance(t, dict) else 0) or 0) == 1
+
+
+THRUST_HISTORY_COLS = ("thrust_exit_N", "thrust_wall_N", "eta", "eta_wall", "mdot_exit_kg_s", "mdot_in_kg_s",
+                       "mdot_ratio_1d", "cv_residual", "friction_N")
+# 準定常ゲート (ii) で判定する列 (両推力会計・η・ṁ・CV 残差; plan §4.1)
+THRUST_QS_COLS = ("thrust_exit_N", "thrust_wall_N", "eta", "mdot_exit_kg_s", "cv_residual")
+
+
+def thrust_history_tp(p: Problem, run_dir) -> list:
+    """本段の全スナップショット (res_<step>.h5 と同じ step の壁ダンプがあるもの) で推力の CV 会計を出す。
+    壁ダンプの無い step (forge は step 0 の境界ダンプを書かない) は摩擦が評価できないので時系列に入れない。"""
+    from ..metrics.extract import CV_IDS, thrust_cv
+    run_dir = Path(run_dir)
+    ideal = ideal_1d_tp(p)
+    gas = p.exhaust.frozen_gas()
+    iso_k = tp_iso_k(run_dir)
+    rows = []
+    for r in _res_sorted(run_dir):
+        step = int(r.stem.split("_")[1])
+        wd = run_dir / f"res_wall_{CV_IDS['wall']}_{step}.h5"     # bcondConfig の壁 (名前 wall・physID 3)
+        if not wd.exists():
+            continue
+        o = thrust_cv(run_dir / "nozzle.h5", r, float(p.spec["p_ambient"]), float(ideal["F"]), wall_dump=wd, gas=gas,
+                      iso_k=iso_k, mdot_ideal=float(ideal["mdot"]))
+        o["step"] = step
+        o["eta"] = o["eta_exit"]
+        rows.append(o)
+    return rows
+
+
+def write_thrust_history(path, rows) -> Path:
+    """thrust_history_tp の結果を `step` + THRUST_HISTORY_COLS の CSV に (check_quasisteady --series-csv 用)。"""
+    import csv
+    path = Path(path)
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(("step",) + THRUST_HISTORY_COLS)
+        for o in rows:
+            w.writerow([o["step"]] + [("" if o.get(c) is None else repr(float(o[c]))) for c in THRUST_HISTORY_COLS])
+    return path
+
+
 def collect(problem_path, run_dir) -> dict:
     """収束 VERDICT + 最終 res からメトリクスを抽出し metrics.json に保存。"""
     from ..metrics.extract import thrust_metrics
@@ -513,11 +728,27 @@ def collect(problem_path, run_dir) -> dict:
                  key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
     out = {"convergence_verdict": verdict.strip().splitlines()[-2:] if verdict else []}
     if res and _is_tp(p):
-        # thrust_metrics は CPG の圧力復元 (extract.py) なので TP には使わない。TP の推力の CV 会計は plan
-        # tooling-nozzle-bell-two-mode §5.1 #2b。ここでは 1D 理想値 (η の分母) だけを残す
+        # TP: 推力は閉じた CV の 2 会計 (metrics.extract.thrust_cv; CPG の圧力復元は使わない)。本段の全スナップショットで
+        # 時系列 thrust_history.csv を書き (準定常ゲート用)、最終 step の値を metrics に入れる。η は出口面会計 (eta_cf)
+        res = _res_sorted(run_dir)
+        rows = thrust_history_tp(p, run_dir)
+        write_thrust_history(run_dir / "thrust_history.csv", rows)
         out["res_file"] = res[-1].name
         out["ideal_1d"] = ideal_1d_tp(p)
-        out["thrust"] = "TP の推力の抽出 (CV 会計) は未実装 (plan tooling-nozzle-bell-two-mode §5.1 #2b)"
+        if not rows or rows[-1]["step"] != int(res[-1].stem.split("_")[1]):
+            out["thrust"] = f"最終 step {res[-1].name} の壁ダンプが無く推力の CV 会計を出せない"
+        else:
+            last = rows[-1]
+            out.update({k: last[k] for k in ("thrust_exit_N", "thrust_wall_N", "friction_N", "eta_exit", "eta_wall",
+                                             "cv_residual", "cv_closable", "mdot_exit_kg_s", "mdot_in_kg_s",
+                                             "mass_imbalance", "mdot_ratio_1d", "pressure_source", "open_viscous",
+                                             "wall_traction_convention", "exit_area_m2")})
+            out["eta_cf"] = last["eta_exit"]
+            out["thrust_N"] = last["thrust_exit_N"]
+            out["mdot_kg_s"] = last["mdot_exit_kg_s"]
+            out["cv_groups"] = last["groups"]
+            out["thrust_history"] = {"file": "thrust_history.csv", "n": len(rows),
+                                     "steps": [rows[0]["step"], rows[-1]["step"]]}
     elif res:
         out["res_file"] = res[-1].name
         out.update(thrust_metrics(run_dir / "nozzle.h5", res[-1], p.gamma,
@@ -539,7 +770,24 @@ def main(argv=None):
                     help="収束 res_*.h5 から cross-mesh warm start (node は必須)")
     ap.add_argument("--stage", default=None, choices=sorted(TP_STAGES),
                     help="TP 経路の段 (既定: warm-from なし soft / あり main)。CPG では指定不可")
+    ap.add_argument("--staged", action="store_true",
+                    help="TP 経路: 段階起動 (evaluate.stages、既定 soft → mid → main) を同じ run・同じメッシュで回す "
+                         "(段の間は restart_field.py、stage_manifest.json に記録)")
+    ap.add_argument("--continue-from", default=None,
+                    help="TP 経路: 指定 run の本段を同一メッシュで継続する (restart_field.py; polish と同じ)")
     a = ap.parse_args(argv)
+    if a.staged or a.continue_from:
+        if (a.staged and a.continue_from) or a.prepare_only or a.stage or (a.steps and not a.continue_from) \
+                or (a.warm_from and a.continue_from):
+            ap.error("--staged と --continue-from は排他。--prepare-only・--stage とは併用しない "
+                     "(--steps は --continue-from の継続 step 数だけ、--warm-from は --staged の cross-mesh 起点だけ)")
+        if a.continue_from:
+            info = continue_tp(a.problem, a.continue_from, a.run_dir, nsteps=a.steps)
+        else:
+            info = run_staged_tp(a.problem, a.run_dir, warm_from=a.warm_from)
+        out = collect(a.problem, a.run_dir)
+        print(json.dumps({k: v for k, v in out.items() if k != "cv_groups"}, indent=1, ensure_ascii=False))
+        return 0
     info = prepare(a.problem, a.run_dir, a.steps, warm_from=a.warm_from, stage=a.stage)
     print(json.dumps(info, indent=1))
     if a.prepare_only:

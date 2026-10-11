@@ -24,6 +24,18 @@ DOE → forge 評価 (VERDICT ゲート) → KRG (f1=−η のみ; f2=L/rt は d
   soft 段 (convMethod 0 + cfl 0.5, 3000 step) → 本設定 (12000 step)** の
   2 段で回す (run_0019/0024/0034 の実証レシピの常用化)。
 - **決定性**: LHS/pymoo/KRG とも seed 固定。台帳は ledger.jsonl (逐次追記)。
+
+TP 経路 (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1・§5.1 #2b; 問題が `gas.model: semiperfect` + `gas.exhaust`):
+- 物理ゲートの分母は同じ凍結 TP の ṁ_1D・F_1D (`runner.ideal_1d_tp`; 定比熱の式は使わない)。
+- 評価は `runner.run_staged_tp` (soft → mid → 本段を同じ run・同じメッシュで、段の間は restart_field.py、StageManifest)。
+  最初の点は `--seed-res` なしなら冷間 (準 1D) から、形状が変わる warm start は interp_field.py の cross-mesh restart。
+- 受理は `tp_gates` の (i)〜(v) を**すべて**満たすとき: (i) 本段の区間で `check_convergence.py --segment` が PASS
+  (CPG の「DIVERGED でなければ可」は使わない)、(ii) 推力の両会計・η・ṁ・CV 残差の時系列が
+  `check_quasisteady.py --series-csv` で ALL STEADY、(iii) Phase 2 の物理ゲート (ṁ/ṁ_1D・η)、(iv) |CV 残差| ≤ 0.1 %、
+  (v) メッシュ品質 PASS と局所 y1+ (`check_wall_resolution.py`) PASS。
+- 評価ごとの問題 YAML は campaign_dir に書くので、問題 YAML 基準の相対パス (`gas.exhaust`・`gas.species_db`) は
+  書き出す前に絶対パスへ直す (以前は切れていた; 引き継ぎ (b))。
+CPG 経路 (既定) の挙動は変えない。
 """
 from __future__ import annotations
 
@@ -47,6 +59,156 @@ from .surrogate import KrigingSet
 
 DV_ORDER = ("theta_a_deg", "theta_e_deg", "L_over_rt")
 
+# 問題 YAML の所在を基準に解決する相対パスのキー (probdef: gas.species_db・gas.exhaust)
+PROBLEM_PATH_KEYS = (("gas", "exhaust"), ("gas", "species_db"))
+
+
+def absolutize_problem_paths(raw: dict, base_dir) -> dict:
+    """問題 YAML の dict の相対パス (`PROBLEM_PATH_KEYS`) を `base_dir` 基準の絶対パスに直した写しを返す。
+    評価ごとの YAML を別ディレクトリに書くと相対パスが切れる (plan bell-two-mode §5.1 #2b 引き継ぎ (b))。
+    文字列でない値は ValueError (黙って書き出さない)。"""
+    out = json.loads(json.dumps(raw))      # deep copy
+    for path in PROBLEM_PATH_KEYS:
+        cur = out
+        for k in path[:-1]:
+            cur = cur.get(k) if isinstance(cur, dict) else None
+        if not isinstance(cur, dict) or cur.get(path[-1]) in (None, ""):
+            continue
+        v = cur[path[-1]]
+        if not isinstance(v, str):
+            raise ValueError(f"{'.'.join(path)} はパスの文字列であること (値 {v!r})")
+        pth = Path(v)
+        if not pth.is_absolute():
+            cur[path[-1]] = str((Path(base_dir) / pth).resolve())
+    return out
+
+
+# ---------------------------------------------------------------- TP の受理ゲート (plan bell-two-mode §4.1 ゲート (i)〜(v))
+TP_PHYS_BOUNDS = {"mdot_ratio_1d": (0.94, 1.005), "eta": (0.5, 1.02)}   # (iii) Phase 2 の物理ゲート (CPG 経路と同じ値)
+TP_CV_TOL = 1.0e-3                                                     # (iv) |CV 残差| ≤ 0.1 % (F_1D で正規化)
+# (ii) の閾値は check_quasisteady.py の既定 (tail 0.4・drift 0.05・osc 0.10)。問題 YAML の evaluate.quasisteady で上書き
+TP_QS_DEFAULT = {"tail": 0.4, "drift": 0.05, "osc": 0.10, "min_snaps": 4}
+
+
+def _tool(name: str) -> str:
+    return str(runner.FORGE_TOOLS / name)
+
+
+def gate_convergence(run_dir) -> dict:
+    """(i) 本段の区間 (stage_manifest.json の最後の区間) で `check_convergence.py --segment` が PASS。
+    出力を CONVERGENCE_SEGMENT_VERDICT.txt に残す。判定不能 (manifest 無し等) は不合格。"""
+    r = subprocess.run([sys.executable, _tool("check_convergence.py"), str(run_dir), "--segment"],
+                       capture_output=True, text=True, env=runner._ENV)
+    txt = r.stdout + r.stderr
+    Path(run_dir, "CONVERGENCE_SEGMENT_VERDICT.txt").write_text(txt)
+    heads = [l for l in txt.splitlines() if l.startswith("=== ") and "->" in l]
+    verdict = heads[-1].split("->", 1)[1].strip(" =") if heads else "判定不能 (VERDICT 行が無い)"
+    seg = [l.strip() for l in txt.splitlines() if "[segment] 判定区間" in l]
+    ok = r.returncode == 0 and verdict.startswith("PASS")
+    return {"ok": ok, "verdict": verdict, "segment": seg[-1] if seg else None, "file": "CONVERGENCE_SEGMENT_VERDICT.txt",
+            "class": "DIVERGED" if "DIVERGED" in verdict else ("PASS" if ok else
+                     ("STALLED" if "stalled" in verdict else "NOT CONVERGED"))}
+
+
+def gate_quasisteady(series_csv, cols=None, qs: dict | None = None) -> dict:
+    """(ii) 推力の両会計・η・ṁ・CV 残差の時系列 (`series_csv`) が `check_quasisteady.py --series-csv` で ALL STEADY。
+    列ごとの VERDICT も返す。出力を series_csv の隣の QUASISTEADY_THRUST_VERDICT.txt に残す。"""
+    cols = tuple(cols or runner.THRUST_QS_COLS)
+    q = {**TP_QS_DEFAULT, **(qs or {})}
+    series_csv = Path(series_csv)
+    r = subprocess.run([sys.executable, _tool("check_quasisteady.py"), "--series-csv", str(series_csv),
+                        "--series-cols", ",".join(cols), "--tail", repr(float(q["tail"])),
+                        "--drift", repr(float(q["drift"])), "--osc", repr(float(q["osc"])),
+                        "--min-snaps", str(int(q["min_snaps"]))],
+                       capture_output=True, text=True, env=runner._ENV)
+    txt = r.stdout + r.stderr
+    (series_csv.parent / "QUASISTEADY_THRUST_VERDICT.txt").write_text(txt)
+    per = {}
+    for line in txt.splitlines():
+        s = line.strip()
+        for c in cols:
+            if s.startswith(c + " ") or s.startswith(c + ":"):
+                per[c] = s.split()[-1]
+    overall = [l for l in txt.splitlines() if l.startswith("OVERALL:")]
+    ok = r.returncode == 0 and bool(overall) and overall[-1].strip() == "OVERALL: ALL STEADY" \
+        and len(per) == len(cols) and all(v == "STEADY" for v in per.values())
+    return {"ok": ok, "per_column": per, "overall": overall[-1] if overall else "判定不能 (OVERALL 行が無い)",
+            "thresholds": q, "file": "QUASISTEADY_THRUST_VERDICT.txt"}
+
+
+def gate_physics(metrics: dict, bounds: dict | None = None) -> dict:
+    """(iii) Phase 2 の物理ゲート: ṁ/ṁ_1D (実効 Cd) と η (出口面会計) が範囲内 (開区間)。欠損・非有限は不合格。"""
+    b = {**TP_PHYS_BOUNDS, **(bounds or {})}
+    eta, mrel = metrics.get("eta_cf"), metrics.get("mdot_ratio_1d")
+    fin = all(v is not None and np.isfinite(v) for v in (eta, mrel))
+    ok = fin and b["eta"][0] < eta < b["eta"][1] and b["mdot_ratio_1d"][0] < mrel < b["mdot_ratio_1d"][1]
+    return {"ok": bool(ok), "eta": eta, "mdot_ratio_1d": mrel, "bounds": b, "missing": not fin}
+
+
+def gate_cv(metrics: dict, tol: float = TP_CV_TOL) -> dict:
+    """(iv) |CV 残差| ≤ tol (F_1D で正規化)。開境界の粘性応力・壁の摩擦を評価できなかった (cv_closable False) ものは不合格。"""
+    cv = metrics.get("cv_residual")
+    ok = bool(metrics.get("cv_closable")) and cv is not None and np.isfinite(cv) and abs(cv) <= tol
+    return {"ok": ok, "cv_residual": cv, "tol": tol, "closable": bool(metrics.get("cv_closable"))}
+
+
+def gate_mesh_quality(run_dir) -> dict:
+    """(v-a) メッシュ品質 (prepare が書く MESH_QUALITY.txt の VERDICT が PASS)。"""
+    f = Path(run_dir) / "MESH_QUALITY.txt"
+    txt = f.read_text() if f.exists() else ""
+    v = [l.strip() for l in txt.splitlines() if l.strip().startswith("VERDICT")]
+    ok = bool(v) and v[-1].startswith("VERDICT: PASS")
+    return {"ok": ok, "verdict": v[-1] if v else "判定不能 (MESH_QUALITY.txt に VERDICT が無い)"}
+
+
+def gate_wall_resolution(run_dir, groups: str = "wall", target: float = 1.0) -> dict:
+    """(v-b) 局所 y1+ (`check_wall_resolution.py --groups wall`; 第一内部ノード距離と接線 traction、ソルバの ypls は使わない)
+    が PASS (y1+ > target の点の割合が既定の許容 2 % 以下)。出力を WALL_RESOLUTION_VERDICT.txt に残す。"""
+    r = subprocess.run([sys.executable, _tool("check_wall_resolution.py"), str(run_dir), "--groups", groups,
+                        "--target", repr(float(target))], capture_output=True, text=True, env=runner._ENV)
+    txt = r.stdout + r.stderr
+    Path(run_dir, "WALL_RESOLUTION_VERDICT.txt").write_text(txt)
+    v = [l.strip() for l in txt.splitlines() if l.strip().startswith("VERDICT")]
+    ok = r.returncode == 0 and bool(v) and v[-1].startswith("VERDICT: PASS")
+    over = [l.strip() for l in txt.splitlines() if "y1+ >" in l]
+    return {"ok": ok, "verdict": v[-1] if v else "判定不能 (VERDICT 行が無い)", "detail": over[-1] if over else None,
+            "file": "WALL_RESOLUTION_VERDICT.txt"}
+
+
+def combine_tp_gates(g: dict) -> tuple:
+    """ゲート結果 {名前: {"ok": ...}} → (PASS/FAIL, fail_class, note)。分類は CPG 経路と同じ語彙:
+    RETRYABLE = 未収束・未定常 (段や CFL を変えた再投入で回復し得る)、SUSPECT = 計測・格子の問題 (CV 残差・メトリクス欠損・
+    Cd > 1・メッシュ品質・y1+; 要人間)、INFEASIBLE = 収束・定常なのに物理ゲート外 (不始動流などの偽解)。"""
+    failed = [k for k in ("convergence", "quasisteady", "physics", "cv", "mesh_quality", "wall_resolution")
+              if not g.get(k, {}).get("ok", False)]
+    if not failed:
+        return "PASS", None, ""
+    note = "gate: " + ", ".join(failed)
+    if "convergence" in failed or "quasisteady" in failed:
+        return "FAIL", "RETRYABLE", note
+    ph = g.get("physics", {})
+    if ph.get("missing") or "cv" in failed or "mesh_quality" in failed or "wall_resolution" in failed:
+        return "FAIL", "SUSPECT", note
+    if ph.get("mdot_ratio_1d") is not None and ph["mdot_ratio_1d"] >= ph["bounds"]["mdot_ratio_1d"][1]:
+        return "FAIL", "SUSPECT", note + " (Cd > 1 は物理的にあり得ない: 計測を疑う)"
+    return "FAIL", "INFEASIBLE", note
+
+
+def tp_gates(run_dir, metrics: dict, qs: dict | None = None, cv_tol: float = TP_CV_TOL,
+             phys_bounds: dict | None = None) -> dict:
+    """TP の評価 1 点の受理判定 (i)〜(v)。各ゲートの結果と総合 (status・fail_class・note) を返し、GATES.json に残す。"""
+    run_dir = Path(run_dir)
+    g = {"convergence": gate_convergence(run_dir),
+         "quasisteady": gate_quasisteady(run_dir / "thrust_history.csv", qs=qs),
+         "physics": gate_physics(metrics, phys_bounds),
+         "cv": gate_cv(metrics, cv_tol),
+         "mesh_quality": gate_mesh_quality(run_dir),
+         "wall_resolution": gate_wall_resolution(run_dir)}
+    status, fc, note = combine_tp_gates(g)
+    out = {"status": status, "fail_class": fc, "note": note, "gates": g}
+    (run_dir / "GATES.json").write_text(json.dumps(out, indent=1, ensure_ascii=False, default=float))
+    return out
+
 
 class _F1KrgF2Exact:
     """f1=−η は KRG、f2=L/rt は dv そのもの (厳密・σ≈0) の predict アダプタ。"""
@@ -69,8 +231,11 @@ class Campaign:
                  seed: int = 0) -> None:
         self.base_yaml = Path(base_yaml)
         self.dir = Path(campaign_dir)
+        self.tp = runner._is_tp(load_problem(self.base_yaml))   # TP 経路 (gas.model: semiperfect + gas.exhaust)
+        if seed_res is None and not self.tp:
+            raise ValueError("CPG 経路は --seed-res (収束 res_*.h5) が必須 (node の冷間 IC は発散)")
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.seed_res = Path(seed_res).resolve()
+        self.seed_res = Path(seed_res).resolve() if seed_res is not None else None
         self.ref = tuple(ref)
         self.seed = int(seed)
         self.base_raw = yaml.safe_load(self.base_yaml.read_text())
@@ -80,6 +245,12 @@ class Campaign:
         self.rows: list = []
         if self.ledger.exists():  # 再開: 既存台帳を読み戻す (評価済みはスキップ)
             self.rows = [json.loads(l) for l in self.ledger.read_text().splitlines() if l]
+        if self.tp:
+            # TP: 同じ凍結 TP の 1D 理想値 (ṁ_1D・F_1D(ε; p_a)) を物理ゲートと η の分母に (定比熱の式は使わない)
+            self.ideal_1d = runner.ideal_1d_tp(load_problem(self.base_yaml))
+            self.mdot_1d = float(self.ideal_1d["mdot"])
+            self.F_1d = float(self.ideal_1d["F"])
+            return
         # 1D チョーク流量 (Cd=1): 物理ゲートの分母
         g, cp = float(self.base_raw["gas"]["gamma"]), float(self.base_raw["gas"]["cp"])
         R = cp * (g - 1.0) / g
@@ -102,7 +273,8 @@ class Campaign:
         return wall
 
     def _write_problem(self, x, path: Path) -> Path:
-        raw = json.loads(json.dumps(self.base_raw))  # deep copy
+        # 相対パス (gas.exhaust・gas.species_db) は元の問題 YAML の所在で解決した絶対パスにする (引き継ぎ (b))
+        raw = absolutize_problem_paths(self.base_raw, self.base_yaml.resolve().parent)   # deep copy
         for k, v in zip(DV_ORDER, np.asarray(x, dtype=float)):
             raw["dv"][k]["value"] = float(v)
         path.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False))
@@ -123,6 +295,8 @@ class Campaign:
 
     # -- 1 点評価 (ゲート込み) --------------------------------------------------
     def evaluate(self, x, tag: str) -> dict:
+        if self.tp:
+            return self._evaluate_tp(x, tag)
         x = [float(v) for v in np.asarray(x, dtype=float)]
         t0 = time.time()
         run_dir = self.dir / tag
@@ -223,6 +397,47 @@ class Campaign:
               f" ({row['wall_s']}s) {row['note']}", flush=True)
         return row
 
+    def _evaluate_tp(self, x, tag: str) -> dict:
+        """TP の 1 点評価: 段階起動 (`runner.run_staged_tp`; warm は cross-mesh、無ければ冷間) → 推力の CV 会計
+        (`runner.collect`) → 受理ゲート (i)〜(v) (`tp_gates`)。台帳の行は CPG 経路と同じ列 + gates。"""
+        x = [float(v) for v in np.asarray(x, dtype=float)]
+        t0 = time.time()
+        run_dir = self.dir / tag
+        prob = self._write_problem(x, self.dir / f"{tag}.yaml")
+        row = {"tag": tag, "x": x, "run_dir": str(run_dir), "status": "FAIL",
+               "fail_class": None, "warm_from": "", "note": "", "path": "tp"}
+        try:
+            warm = self._warm_for(x)
+            row["warm_from"] = str(warm) if warm is not None else ""
+            runner.run_staged_tp(prob, run_dir, warm_from=warm)
+            out = runner.collect(prob, run_dir)
+            qs = (self.base_raw.get("evaluate") or {}).get("quasisteady")
+            g = tp_gates(run_dir, out, qs=qs)
+            row.update(eta_cf=out.get("eta_cf"), eta_wall=out.get("eta_wall"), mdot=out.get("mdot_kg_s"),
+                       mdot_ratio_1d=out.get("mdot_ratio_1d"), thrust_N=out.get("thrust_N"),
+                       thrust_wall_N=out.get("thrust_wall_N"), cv_residual=out.get("cv_residual"),
+                       res_file=out.get("res_file", ""), conv=g["gates"]["convergence"]["class"],
+                       quasisteady=g["gates"]["quasisteady"]["overall"],
+                       gates={k: bool(v["ok"]) for k, v in g["gates"].items()})
+            row["status"], row["fail_class"], row["note"] = g["status"], g["fail_class"], g["note"]
+        except ValueError as e:
+            row["fail_class"] = "INFEASIBLE"                # 幾何構築失敗 (設計空間外)
+            row["note"] = f"geometry: {str(e)[:250]}"
+        except RuntimeError as e:
+            row["fail_class"] = "RETRYABLE" if "段" in str(e) else "SUSPECT"   # 段の失敗 (発散・段終了ゲート) / メッシュ品質等
+            row["note"] = f"runtime: {str(e)[:250]}"
+        except Exception as e:  # noqa: BLE001 — I/O・OOM・その他は一律 SUSPECT (人間が見る)
+            row["fail_class"] = "SUSPECT"
+            row["note"] = f"{type(e).__name__}: {str(e)[:250]}"
+        row["wall_s"] = round(time.time() - t0, 1)
+        self.rows.append(row)
+        with open(self.ledger, "a") as f:
+            f.write(json.dumps(row, ensure_ascii=False, default=float) + "\n")
+        fail_marker = f" [{row['fail_class']}]" if row['fail_class'] else ""
+        print(f"[{tag}] {row['status']}{fail_marker} x={np.round(x, 3)} eta={row.get('eta_cf')}"
+              f" ({row['wall_s']}s) {row['note']}", flush=True)
+        return row
+
     def _diverged(self, run_dir: Path, out: dict) -> bool:
         v = (run_dir / "CONVERGENCE_VERDICT.txt")
         txt = v.read_text() if v.exists() else ""
@@ -292,7 +507,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="③ベル TOP dv の MOO キャンペーン")
     ap.add_argument("problem")
     ap.add_argument("campaign_dir")
-    ap.add_argument("--seed-res", required=True, help="初期 warm start の収束 res_*.h5")
+    ap.add_argument("--seed-res", default=None,
+                    help="初期 warm start の収束 res_*.h5 (CPG は必須。TP は省略で冷間の段階起動から)")
     ap.add_argument("--n-doe", type=int, default=24)
     ap.add_argument("--n-iter", type=int, default=13)
     ap.add_argument("--batch", type=int, default=2)
