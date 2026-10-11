@@ -2,7 +2,7 @@
 窓 W1 = 10k〜15k・W2 = 15k〜20k の出力の平均で、縮流部 x∈[−8, −2] の q = sqrt(ΣV(R/V)²/ΣV) (ρ・ρE) の変更側/対照。
 対照の停滞 = ρ・ρE とも W2/W1 ≥ 1/2。結果 A: 対照が停滞し両窓・両成分で ≤ 1/3。結果 B: 両窓・両成分で ≥ 2/3 かつ縮流部が全域の残差を担う割合の比 0.5〜2 (集中の場所が維持)。
 それ以外 (中間・成分で割れる・対照の停滞が不成立) → 判定不能。非有限 → 発散。SST (ρk・ρω の縮流部の残差) が変更側で大きければ「平均流のみ改善、連成系は未解決」と付ける。延長しない。
-usage: python3 cg_ab_region_judge.py <変更側の run> <対照の run> <出力名> → _band_ab/core_grid/<出力名>.json"""
+usage: python3 cg_ab_region_judge.py <変更側の run> <対照の run> <出力名> [登録の節] → _band_ab/core_grid/<出力名>.json"""
 import json, sys
 from pathlib import Path
 import numpy as np
@@ -13,7 +13,7 @@ def region(run):
     return sorted({r["step"]: r for r in rows}.values(), key=lambda r: r["step"])
 RX, RC = region(X), region(C)
 def wm(R, key, lo, hi): return float(np.mean([r[key] for r in R if lo <= r["step"] <= hi]))
-out = {"registration": "plans/active/tooling-nozzle-core-grid.md §4.40", "changed": X, "control": C, "region": {}}
+out = {"registration": "plans/active/tooling-nozzle-core-grid.md " + (sys.argv[4] if len(sys.argv) > 4 else "§4.40"), "changed": X, "control": C, "region": {}}
 nonfinite = any(r["nonfinite"] for r in RX)
 stall = all(wm(RC, f"contraction_{c}", *W[1]) / wm(RC, f"contraction_{c}", *W[0]) >= 0.5 for c in ("res_ro", "res_roe"))
 A, B, sst_worse = True, True, False
