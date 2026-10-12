@@ -84,11 +84,14 @@ def step_dimensions(step_path, freecadcmd: str | None = None) -> dict:
             break
     um = 0.5 * (a + b)
     pm = C(um)
+    d1, d2 = C(um, nu=1), C(um, nu=2)
+    kap = float((d1[0] * d2[1] - d1[1] * d2[0]) / (d1[0] ** 2 + d1[1] ** 2) ** 1.5)       # 曲線の曲率 [1/mm] (凸 = 正)
     return {"source": str(step_path), "units": "mm", "x_origin": "設計スロート (x=0)",
             "x_start_mm": float(p0[0]), "x_end_mm": float(p1[0]),
             "inlet_radius_mm": r_in, "straight": straight,
             "L_pipe_mm": float(x_star - p0[0]), "L_U_mm": float(0.0 - x_star),
-            "throat_physical": {"r_mm": float(pm[1]), "x_mm": float(pm[0]), "diameter_mm": 2.0 * float(pm[1])},
+            "throat_physical": {"r_mm": float(pm[1]), "x_mm": float(pm[0]), "diameter_mm": 2.0 * float(pm[1]),
+                                "curvature_radius_mm": (1.0 / kap if kap != 0.0 else float("inf"))},
             "L_div_mm": float(p1[0]), "exit_radius_mm": float(p1[1]),
             "curve": {"degree": k, "n_poles": int(len(P)), "u_range": [u0, u1]}}
 
@@ -210,6 +213,13 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
             raise ValueError("設計スロート径のカードには設計壁の最小径 (design_throat_diameter_mm) が要る")
         add("throat_diameter_design", T["throat_diameter_mm"], design_throat["diameter_mm"], td,
             note=f"物理スロート径 (参考) {phys:.6f} mm")
+    # スロートの曲率 (参考; 合否には使わない): カードは設計壁の曲率、STEP は物理壁 (境界層の分だけ違う) の最小半径の点の曲率
+    th_c = card.get("throat") or {}
+    info = {"throat_curvature_radius_physical_mm": step_dims["throat_physical"].get("curvature_radius_mm")}
+    if "curvature_radius_m" in th_c:
+        info["throat_curvature_radius_card_design_mm"] = 1000.0 * float(th_c["curvature_radius_m"])
+    elif "curvature_ratio" in th_c:
+        info["throat_curvature_ratio_card_design"] = float(th_c["curvature_ratio"])
     # メッシュと STEP の整合 (codex result レビュー 2026-10-13 M1: 記録するだけでなく合否に入れる)。誤差の量を分けて判定する:
     # - 端点 (出口端・入口半径): 節点は曲線上なので転送・丸めの範囲 END_TOL_MM
     # - 最小半径: 壁節点の最小は曲線の最小以上 (節点は曲線上) で、取り逃しは弦の範囲 → 0 − END_TOL ≤ 差 ≤ 直径公差/2
@@ -247,7 +257,7 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
     ok = items_ok and cons_ok and not missing
     verdict = "PASS" if ok else ("FAIL" if (not items_ok or not cons_ok) else "未判定")
     return {"format": "forge.dimension_gate/v1", "verdict": verdict, "items": items,
-            "tolerances_source": T["tolerances_source"],
+            "tolerances_source": T["tolerances_source"], "info": info,
             "throat_kind": T["throat_kind"], "mesh_vs_step": consistency,
             "note": "STEP とメッシュから測り直した寸法をカードと比べた (YAML の往復ではない)。出口マッハ数は CFD の判定で、ここでは測らない"}
 

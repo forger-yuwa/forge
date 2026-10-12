@@ -1,0 +1,18 @@
+# 要求カードの例 (forge.wt_card/v1): M5 の空気の風洞ノズル、壁温 350 K (plan plans/accepted/tooling-nozzle-wt-deliverables.md §5.1 #8 の
+# デモ)。**条件は実条件ではない**: ユーザ指示 (2026-10-13) で Tt 1250 K、Pt は出口静圧が下がりすぎないよう 3 MPa を選定
+# (semiperfect 空気で出口静温 約 222 K・静圧 約 5.1 kPa)。壁 350 K は断熱壁温 (約 1150 K) に対して強い冷却。
+# 長さ・径は実寸 [m]、圧力 [Pa]、温度 [K]。
+# 生成: cd design && .venv-opt/bin/python -m forge_design.intake.wt_card forge_design/intake/examples/m5_air_demo.yaml --out <problem.yaml>
+format: forge.wt_card/v1
+name: m5_air_demo_c2
+gas: {preset: air}                      # N2 0.7552 / O2 0.2314 / AR 0.0129 / CO2 0.0005 (質量分率) の semiperfect
+conditions: {Pt: 3.0e6, Tt: 1250.0}     # ユーザ指示で Tt 1250 K、Pt は 3 MPa を選定 (実条件ではない)
+M_exit: 5.0                              # = spec.M_design
+throat: {diameter_physical_m: 0.050}     # 物理スロート径 (δ 込み)。r_t は CFD 前の solve_rt_throat で解く
+inlet: {radius_m: 0.150, pipe_length_m: 0.20, contraction_length_m: 0.30}   # μ = L_U²/(R Δr) = 14.4 (R 2.0、r_t ≈ 25 mm)
+divergent_length_m: 1.20                 # 設計スロート (x = 0) → 物理出口
+wall: {thermal: isothermal, Tw: 350.0}
+p_ambient: design                        # 設計出口静圧 (等エントロピー、semiperfect)
+tolerances: {length_m: 1.0e-3, diameter_m: 2.0e-5}   # 出荷ゲートの公差 (既定値は仮)
+recipe: axismach_final_v1
+overrides: {deltastar_initializer: {model: contur, a_crocco: 1.0, cf_scale: 0.8370392861291878, n_scale: 1.0}}   # C2: run_0006 の出口 δ_E に合わせた CONTUR の k_f (c2_calibrate_kf.json); 形は case/45 の生産 YAML と同じ

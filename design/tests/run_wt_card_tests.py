@@ -349,6 +349,25 @@ with tempfile.TemporaryDirectory() as td:
     load_problem(out)
 
 # ---------------------------------------------------------------------------------------------- 最終の雛形
+print("== スロート曲率 (2026-10-13 ユーザ「スロート曲率も指定できるようにして」)")
+import copy as _copy
+def _th(**kw):
+    c = card(); c["throat"] = dict(c["throat"], **kw); return c
+p1 = W.card_to_problem(W.validate_card(_th(curvature_radius_m=0.075)), 0.025)
+check("曲率半径 0.075 m (r_t 0.025) → geometry.R = 3 (r_t で割る)", abs(p1["geometry"]["R"] - 3.0) < 1e-12 and
+      p1["_card"]["throat"]["curvature_source"] == "card throat.curvature_radius_m", p1["geometry"]["R"])
+p2 = W.card_to_problem(W.validate_card(_th(curvature_radius_m=0.075)), 0.030)
+check("r_t を変えると曲率半径の実寸を保って R を割り直す (0.075/0.030 = 2.5)", abs(p2["geometry"]["R"] - 2.5) < 1e-12, p2["geometry"]["R"])
+p3 = W.card_to_problem(W.validate_card(_th(curvature_ratio=3.0)), 0.025)
+check("curvature_ratio 3 → geometry.R = 3", p3["geometry"]["R"] == 3.0)
+r, msg = raises(lambda: W.validate_card(_th(curvature_radius_m=0.075, curvature_ratio=3.0)), "どちらか 1 つ")
+check("曲率を 2 つの書き方で与えると拒否", r, msg)
+c4 = _th(curvature_ratio=3.0); c4["overrides"] = {"geometry.R": 2.5}
+r, msg = raises(lambda: W.card_to_problem(W.validate_card(c4), 0.025), "両方")
+check("throat の曲率と overrides.geometry.R の両方は拒否", r, msg)
+r, msg = raises(lambda: W.card_to_problem(W.validate_card(_th(curvature_ratio=0.3)), 0.025), "Hall")
+check("R < 0.5 (遷音速解の精度が落ちる範囲) は拒否", r, msg)
+
 print("== 最終の雛形 axismach_final_v1 (M5 デモの r_t で)")
 pf = W.card_to_problem(W.validate_card(card(recipe="axismach_final_v1")), rt_m5)
 pf["mesh"].update(ni=1000, wall_first_frac=1e-5, wall_first_frac_throat=3e-6)

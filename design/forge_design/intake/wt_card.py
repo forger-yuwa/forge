@@ -51,6 +51,9 @@ SPECIES_SUM_TOL = 1e-9
 # 出荷ゲート (§4.2a) の公差の既定。**仮の値** (ユーザの実用公差が決まったら置き換える; plan §4.1)
 DEFAULT_TOLERANCES = {"length_m": 1.0e-3, "diameter_m": 2.0e-5}
 MU_MAX = 20.0                        # 縮流部の単調収縮の条件 μ = L_U²/(R Δr) ≤ 20 (UpstreamThroatPoly.mu、手順書 §0)
+# スロートの壁の曲率 (設計壁の曲率半径) のカードのキー: 実寸 [m] (r_t を解き直すたびに割り直す) か r_t 比 (= geometry.R)
+THROAT_CURVATURE_KEYS = ("curvature_radius_m", "curvature_ratio")
+R_HALL_MIN = 0.5                     # Hall–KL 遷音速解の精度が落ちる R の下限 (geometry/transonic.py HallThroat の警告と同じ値)
 
 # 壁解像の初期見積もり (§4.1 4.)
 Y1PLUS_TARGET = 0.8                  # 第 1 層の y1+ の目標
@@ -222,15 +225,22 @@ def validate_card(card) -> dict:
         if not isinstance(t, dict):
             errs.append(f"throat は mapping (受け取った値: {t!r})")
         else:
-            unknown = [str(k) for k in t if k not in ("diameter_physical_m", "diameter_design_m")]
+            unknown = [str(k) for k in t if k not in ("diameter_physical_m", "diameter_design_m") + THROAT_CURVATURE_KEYS]
             if unknown:
-                errs.append(f"throat の未知のキー {unknown} (diameter_physical_m か diameter_design_m のどちらか 1 つ)")
+                errs.append(f"throat の未知のキー {unknown} (径は diameter_physical_m か diameter_design_m のどちらか 1 つ、"
+                            f"曲率は {' か '.join(THROAT_CURVATURE_KEYS)} を任意で 1 つ)")
             given = [k for k in ("diameter_physical_m", "diameter_design_m") if k in t]
             if len(given) != 1:
                 errs.append(f"throat は diameter_physical_m (物理スロート径、δ 込み) か diameter_design_m (設計 = 非粘性) の"
                             f"どちらか 1 つ (受け取ったキー: {given})")
             else:
                 out["throat"] = {given[0]: _num(errs, f"throat.{given[0]}", t[given[0]], gt=0.0)}
+            # スロートの壁の曲率 (設計壁; 2026-10-13 ユーザ「スロート曲率も指定できるようにして」): 実寸の曲率半径か r_t 比のどちらか
+            cg = [k for k in THROAT_CURVATURE_KEYS if k in t]
+            if len(cg) > 1:
+                errs.append(f"throat の曲率は {' か '.join(THROAT_CURVATURE_KEYS)} のどちらか 1 つ (受け取ったキー: {cg})")
+            elif cg and "throat" in out:
+                out["throat"][cg[0]] = _num(errs, f"throat.{cg[0]}", t[cg[0]], gt=0.0)
     i = card.get("inlet")
     if "inlet" in card and _mapping(errs, "inlet", i, ("radius_m", "pipe_length_m", "contraction_length_m")):
         out["inlet"] = {"radius_m": _num(errs, "inlet.radius_m", i["radius_m"], gt=0.0),
@@ -279,6 +289,16 @@ def load_card(path) -> dict:
 
 def _sha256(path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def throat_curvature_ratio(card: dict, rt: float):
+    """カードのスロート曲率を R = 曲率半径 / r_t に (指定が無ければ None)。"""
+    t = card["throat"]
+    if "curvature_ratio" in t:
+        return float(t["curvature_ratio"])
+    if "curvature_radius_m" in t:
+        return float(t["curvature_radius_m"]) / float(rt)
+    return None
 
 
 def throat_kind(card: dict) -> tuple:
@@ -425,7 +445,8 @@ def card_to_problem(card, r_t_m: float) -> dict:
     spec = {"Pt": Pt, "Tt": Tt, "p_ambient": p_amb, "r_throat": rt, "M_design": M, "wall_thermal": wt}
     if kind == "physical":
         spec["sizing"] = {"method": "throat", "target_m": D / 2.0}
-    geom = {"R": float(rec["geometry"]["R"]), "r_inlet": R_in / rt, "L_U": L_U_m / rt, "L_pipe": L_pipe_m / rt,
+    R_card = throat_curvature_ratio(card, rt)
+    geom = {"R": (R_card if R_card is not None else float(rec["geometry"]["R"])), "r_inlet": R_in / rt, "L_U": L_U_m / rt, "L_pipe": L_pipe_m / rt,
             "Lc_mode": "from_length", "L_total_tol": tol_len / 2.0 / rt,
             "M_knot": float(meta["M_knot_factor"]) * M}
     for k, v in rec["geometry"].items():
@@ -451,6 +472,8 @@ def card_to_problem(card, r_t_m: float) -> dict:
         "mesh_euler": mesh_euler,
         "evaluate": evaluate,
     }
+    if R_card is not None and "geometry.R" in card["overrides"]:
+        raise ValueError("要求カード → 問題: スロート曲率を throat と overrides.geometry.R の両方で与えている (どちらか 1 つ)")
     ov_log = []
     for path, val in card["overrides"].items():
         old = _set_path(prob, path, copy.deepcopy(val))
@@ -470,13 +493,19 @@ def card_to_problem(card, r_t_m: float) -> dict:
                         f"Δr = {dr:.6g} r_t。縮流部長 ≤ {math.sqrt(MU_MAX * R * dr) * rt:.6g} m か R を大きく)")
     if not L_pipe_m >= 0.0:
         errs.append(f"直管長 {L_pipe_m} m が負")
+    if R < R_HALL_MIN:
+        errs.append(f"スロート曲率半径 / r_t = R {R:.4g} < {R_HALL_MIN} (遷音速解 Hall–KL の精度が落ちる範囲; 曲率半径 ≥ {R_HALL_MIN * rt:.6g} m)")
     if errs:
         raise ValueError("要求カード → 問題: " + "; ".join(errs))
     dr = R_in / rt - 1.0
     prob["_card"] = {
         "format": CARD_FORMAT, "generator": GENERATOR, "name": str(card["name"]),
         "recipe": {"name": card["recipe"], "path": str(rec_path), "sha256": rec_sha},
-        "r_t_m": rt, "throat": {"kind": kind, "diameter_m": D},
+        "r_t_m": rt, "throat": {"kind": kind, "diameter_m": D,
+                                "curvature_ratio_R": R, "curvature_radius_design_m": R * rt,
+                                "curvature_source": ("card throat." + next(k for k in THROAT_CURVATURE_KEYS if k in card["throat"])
+                                                     if R_card is not None else
+                                                     ("overrides geometry.R" if "geometry.R" in card["overrides"] else "雛形"))},
         "p_ambient_source": p_amb_src,
         "mu_contraction": (L_U_m / rt) ** 2 / (R * dr),
         "tolerances": dict(card["tolerances"]), "tolerances_default": bool(card["tolerances_default"]),
@@ -497,6 +526,9 @@ def mapping_table(card: dict, prob: dict) -> list:
         (f"throat.diameter_{kind}_m", D, "spec.r_throat", rt,
          "物理スロート径: CFD 前の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2)" if kind == "physical"
          else "設計スロート径 / 2"),
+        (("throat." + next((k for k in THROAT_CURVATURE_KEYS if k in card["throat"]), "curvature (雛形)")),
+         card["throat"].get("curvature_radius_m", card["throat"].get("curvature_ratio", "(無し)")), "geometry.R", g["R"],
+         "曲率半径 / r_t (設計壁のスロートの曲率; 物理壁は境界層の分だけわずかに違う)"),
         ("inlet.radius_m", card["inlet"]["radius_m"], "geometry.r_inlet", g["r_inlet"], "/ r_t"),
         ("inlet.pipe_length_m", card["inlet"]["pipe_length_m"], "geometry.L_pipe", g["L_pipe"], "/ r_t"),
         ("inlet.contraction_length_m", card["inlet"]["contraction_length_m"], "geometry.L_U", g["L_U"], "/ r_t"),
@@ -892,7 +924,10 @@ def _key_comments(card: dict, prob: dict) -> dict:
         "spec.sizing": f"カード throat.diameter_physical_m {D} m の半径 (物理スロート) で寸法を決めた",
         "dv": "Lc_mode: from_length の設計変数 (r_t 単位)",
         "dv.L_total": f"= divergent_length_m {card['divergent_length_m']} m / r_t (設計スロート x=0 → 物理出口)",
-        "geometry.R": f"雛形 {rec} (スロート曲率半径 / r_t)",
+        "geometry.R": (f"= throat.curvature_radius_m {card['throat']['curvature_radius_m']} m / r_t (設計壁のスロートの曲率半径)"
+                       if "curvature_radius_m" in card["throat"] else
+                       f"= throat.curvature_ratio (設計壁のスロートの曲率半径 / r_t)" if "curvature_ratio" in card["throat"] else
+                       f"雛形 {rec} (スロート曲率半径 / r_t = {prob['geometry']['R']:g}; 曲率半径 {prob['geometry']['R'] * prob['spec']['r_throat']:.6g} m)"),
         "geometry.r_inlet": f"= inlet.radius_m {card['inlet']['radius_m']} m / r_t",
         "geometry.L_U": f"= inlet.contraction_length_m {card['inlet']['contraction_length_m']} m / r_t "
                         f"(μ = L_U²/(R Δr) = {prob['_card']['mu_contraction']:.4g} ≤ {MU_MAX:g})",
