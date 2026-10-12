@@ -394,8 +394,12 @@ class Campaign:
         self.seed = int(seed)
         self.base_raw = yaml.safe_load(self.base_yaml.read_text())
         self.dv_order = dv_order_of(self.base_raw)
-        self.bounds = np.array([[float(self.base_raw["dv"][k]["min"]),
-                                 float(self.base_raw["dv"][k]["max"])] for k in self.dv_order])
+        # 固定の設計変数 (`fixed: true`、min・max なし可) は [value, value] (単目的の長さ固定 — plan bell-two-mode §5.1 #8b)。
+        # MOO の経路 (`run`) は固定の変数を持たない問題だけ (幅 0 の変数を正規化できない)
+        dvs = self.base_raw["dv"]
+        self.fixed_mask = np.array([bool(dvs[k].get("fixed", False)) for k in self.dv_order])
+        self.bounds = np.array([[float(dvs[k]["value"]), float(dvs[k]["value"])] if dvs[k].get("fixed", False) else
+                                [float(dvs[k]["min"]), float(dvs[k]["max"])] for k in self.dv_order])
         self.ledger = self.dir / "ledger.jsonl"
         self.rows: list = []
         if self.ledger.exists():  # 再開: 既存台帳を読み戻す (評価済みはスキップ)
@@ -651,6 +655,8 @@ class Campaign:
 
     # -- メインループ -----------------------------------------------------------
     def run(self, n_doe: int, n_iter: int, batch: int) -> None:
+        if self.fixed_mask.any():
+            raise ValueError("MOO の経路は固定の設計変数を持たない問題だけ (長さ固定の単目的は --soo)")
         done = {r["tag"] for r in self.rows}
         cand = lhs(self.bounds, 3 * n_doe, seed=self.seed)
         feas = [x for x in cand if self.feasible(x)]
@@ -689,6 +695,134 @@ class Campaign:
         print(json.dumps(summary, indent=1, ensure_ascii=False), flush=True)
 
 
+    # -- 単目的 (長さ固定) の再最適化: plan bell-two-mode §5.1 #8b (codex 2026-10-13 の改訂の事前登録) ------
+    def _soo_full(self, xa) -> np.ndarray:
+        x = self.bounds[:, 0].copy()
+        x[~self.fixed_mask] = np.asarray(xa, dtype=float)
+        return x
+
+    def _soo_best_history(self) -> list:
+        """評価順の各行に、その時点までの PASS の最良 η (b) と PASS の通し番号 K を付けた表。"""
+        out, best, K = [], None, 0
+        for r in self.rows:
+            if r["tag"].startswith("rep_"):        # 再現性の回し直しは探索の履歴に入れない
+                continue
+            if r["status"] == "PASS" and r.get("eta_cf") is not None:
+                K += 1
+                best = r["eta_cf"] if best is None else max(best, r["eta_cf"])
+            out.append({"n": len(out) + 1, "tag": r["tag"], "status": r["status"], "eta_cf": r.get("eta_cf"), "K": K, "best": best,
+                        "wall_s": r.get("wall_s")})
+        return out
+
+    def _soo_propose(self, seed: int, n_lhs: int = 2048, n_local: int = 512, min_dist: float = 5e-3):
+        """Kriging (−η) の期待改善 (EI) 最大の、成立・未評価の点 (能動変数だけ)。評価済み (失敗を含む) から正規化距離 min_dist 以内は除く。"""
+        from scipy.stats import norm
+        act = ~self.fixed_mask
+        ab = self.bounds[act]
+        lo, span = ab[:, 0], ab[:, 1] - ab[:, 0]
+        P = [(np.asarray(r["x"], dtype=float)[act], -float(r["eta_cf"])) for r in self.rows
+             if r["status"] == "PASS" and r.get("eta_cf") is not None]
+        X = np.array([p[0] for p in P]); Y = np.array([p[1] for p in P])
+        krg = KrigingSet(ab).fit(X, Y[:, None])
+        rng = np.random.default_rng(seed)
+        xb = (X[int(np.argmin(Y))] - lo) / span
+        local = np.clip(xb + 0.05 * rng.standard_normal((n_local, len(lo))), 0.0, 1.0) * span + lo
+        cand = np.vstack([lhs(ab, n_lhs, seed=seed), local])
+        mu, sg = krg.predict(cand)
+        mu, sg = mu[:, 0], np.maximum(sg[:, 0], 1e-15)
+        z = (Y.min() - mu) / sg
+        ei = (Y.min() - mu) * norm.cdf(z) + sg * norm.pdf(z)
+        Xall = np.array([np.asarray(r["x"], dtype=float)[act] for r in self.rows])
+        Xn_all = (Xall - lo) / span
+        for i in np.argsort(-ei):
+            xn = (cand[i] - lo) / span
+            if np.min(np.linalg.norm(Xn_all - xn, axis=1)) < min_dist:
+                continue
+            if not self.feasible(self._soo_full(cand[i])):
+                continue
+            return cand[i], float(ei[i]), float(-mu[i]), float(sg[i])
+        raise RuntimeError("EI の候補に成立・未評価の点が無い")
+
+    def run_soo(self, n_doe: int = 12, n_max: int = 40, n_confirm: int = 8, window: int = 8, tol: float = 1e-4,
+                repeat_best: bool = True) -> dict:
+        """§5.1 #8b: LHS n_doe → EI 1 点ずつ。**停止候補** = EI による PASS が window 点以上かつ b_K − b_{K−window} < tol、
+        **予算打切り** = 評価 n_max 回 (失敗込み)。その後 **確認** n_confirm 評価 (最大 n_max + n_confirm)、G = 確認後の最良 − 停止時の最良。
+        最後に最良形を同じ設定で回し直す (再現性)。要約は `soo_summary.json` (評価ごとに書き直す)。"""
+        act = ~self.fixed_mask
+        if act.sum() < 1:
+            raise ValueError("単目的の経路: 能動の設計変数が無い")
+        done = {r["tag"] for r in self.rows}
+        cand = lhs(self.bounds[act], 3 * n_doe, seed=self.seed)
+        feas = [x for x in cand if self.feasible(self._soo_full(x))]
+        doe = feas[:n_doe]
+        print(f"[soo] DOE {len(doe)} 点 (LHS {3*n_doe} 点のうち成立 {len(feas)} 点の先頭)", flush=True)
+        for i, xa in enumerate(doe):
+            tag = f"doe_{i:03d}"
+            if tag not in done:
+                self.evaluate(self._soo_full(xa), tag)
+                if self.tp:
+                    self._stop_on_doe_failure_rate(len(doe))
+        n_doe_eval = sum(1 for r in self.rows if r["tag"].startswith("doe_"))
+        summ = {"plan": "plans/active/tooling-nozzle-bell-two-mode.md §5.1 #8b", "seed": self.seed, "n_doe": n_doe, "n_max": n_max,
+                "n_confirm": n_confirm, "window": window, "tol": tol, "fixed": {k: float(self.bounds[i, 0]) for i, k in
+                                                                                 enumerate(self.dv_order) if self.fixed_mask[i]}}
+        it = 0
+        announced = False
+        while True:
+            hist = self._soo_best_history()
+            n = len(hist)
+            stop = soo_stop(hist, n_doe_eval, window, tol, n_max)
+            if stop is not None and not announced:
+                announced = True
+                print(f"[soo] 停止 ({stop['reason']}) n {stop['n']}・最良 η {stop['best']} — 確認の {n_confirm} 評価へ", flush=True)
+            if stop is not None and n >= stop["n"] + n_confirm:
+                break
+            if n >= n_max + n_confirm:
+                break
+            tag = f"ei_{it:03d}" if stop is None else f"conf_{n - stop['n']:03d}"
+            it += 1
+            if tag in done:
+                continue
+            xa, ei, mu, sg = self._soo_propose(seed=self.seed + 1000 + n)
+            print(f"[soo] {tag}: EI {ei:.3e} 予測 η {mu:.6f} ± {sg:.1e} x={np.round(xa, 4)}", flush=True)
+            self.evaluate(self._soo_full(xa), tag)
+            summ["history"] = self._soo_best_history()
+            (self.dir / "soo_summary.json").write_text(json.dumps(summ, indent=1, ensure_ascii=False, default=float))
+        hist = self._soo_best_history()
+        stop = soo_stop(hist, n_doe_eval, window, tol, n_max)
+        best_row = max((r for r in self.rows if r["status"] == "PASS" and r.get("eta_cf") is not None), key=lambda r: r["eta_cf"])
+        summ.update({"history": hist, "stop": stop, "best": {"tag": best_row["tag"], "x": best_row["x"], "eta_cf": best_row["eta_cf"]},
+                     "G": (hist[-1]["best"] - stop["best"]) if stop else None,
+                     "confirm": ("A (確認で 1e-4 超の改善 — 停止規則は改善を取り逃した)" if stop and hist[-1]["best"] - stop["best"] > tol else
+                                 "B (確認の区間では反例なし)") if stop else None})
+        if repeat_best and "rep_best" not in done:
+            r2 = self.evaluate(np.asarray(best_row["x"], dtype=float), "rep_best")
+            summ["repeat"] = {"tag": "rep_best", "of": best_row["tag"], "status": r2["status"], "eta_cf": r2.get("eta_cf"),
+                              "diff": (r2["eta_cf"] - best_row["eta_cf"]) if r2.get("eta_cf") is not None else None}
+        elif "rep_best" in done:
+            r2 = next(r for r in self.rows if r["tag"] == "rep_best")
+            summ["repeat"] = {"tag": "rep_best", "status": r2["status"], "eta_cf": r2.get("eta_cf")}
+        (self.dir / "soo_summary.json").write_text(json.dumps(summ, indent=1, ensure_ascii=False, default=float))
+        print(json.dumps({k: summ[k] for k in ("stop", "best", "G", "confirm")}, indent=1, ensure_ascii=False, default=float), flush=True)
+        return summ
+
+
+def soo_stop(hist: list, n_doe_eval: int, window: int, tol: float, n_max: int) -> dict | None:
+    """単目的の停止 (plan bell-two-mode §5.1 #8b): 履歴の先頭から順に、**最初に**条件を満たした評価の位置を返す (再開しても同じ位置)。
+    停止候補 = DOE の後の PASS が window 点以上かつ b_K − b_{K−window} < tol (b_K = PASS の K 点目までの最良)、
+    予算打切り = 評価 n_max 回 (失敗込み)。どちらも無ければ None。"""
+    for m in range(n_doe_eval + 1, len(hist) + 1):
+        h = hist[:m]
+        pass_ei = sum(1 for x in h[n_doe_eval:] if x["status"] == "PASS")
+        K, bK = h[-1]["K"], h[-1]["best"]
+        b_prev = next((x["best"] for x in reversed(h) if x["K"] == K - window), None) if K > window else None
+        if pass_ei >= window and bK is not None and b_prev is not None and bK - b_prev < tol:
+            return {"reason": "stop_candidate", "n": m, "K": K, "best": bK, "best_K_minus_window": b_prev}
+        if m >= n_max:
+            return {"reason": "budget_cut", "n": m, "K": K, "best": bK}
+    return None
+
+
 def gate_run(problem, run_dir) -> dict:
     """TP の run 1 本に受理ゲート (i)〜(v) をかけ直す (`runner.collect` → `tp_gates`; GATES.json・各 VERDICT を run に書く)。
     段階起動・継続を CLI で回した run の判定と、ゲートの定数を変えたあとの既存 run の再判定に使う。"""
@@ -712,6 +846,12 @@ def main(argv=None) -> int:
     ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--ref", type=float, nargs=2, default=(-0.90, 13.0))
+    ap.add_argument("--soo", action="store_true",
+                    help="長さ固定の単目的 (η 最大) の再最適化 (plan bell-two-mode §5.1 #8b): --n-doe・--n-max・--n-confirm・--window・--tol")
+    ap.add_argument("--n-max", type=int, default=40)
+    ap.add_argument("--n-confirm", type=int, default=8)
+    ap.add_argument("--window", type=int, default=8)
+    ap.add_argument("--tol", type=float, default=1e-4)
     a = ap.parse_args(argv)
     if a.gate_only:
         g = gate_run(a.problem, a.campaign_dir)
@@ -720,8 +860,11 @@ def main(argv=None) -> int:
                                         if kk in v} for k, v in g["gates"].items()}},
                          indent=1, ensure_ascii=False, default=float))
         return 0 if g["status"] == "PASS" else 1
-    Campaign(a.problem, a.campaign_dir, a.seed_res, ref=tuple(a.ref),
-             seed=a.seed).run(a.n_doe, a.n_iter, a.batch)
+    c = Campaign(a.problem, a.campaign_dir, a.seed_res, ref=tuple(a.ref), seed=a.seed)
+    if a.soo:
+        c.run_soo(a.n_doe, a.n_max, a.n_confirm, a.window, a.tol)
+    else:
+        c.run(a.n_doe, a.n_iter, a.batch)
     return 0
 
 
