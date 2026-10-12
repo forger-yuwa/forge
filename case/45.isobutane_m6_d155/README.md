@@ -282,6 +282,8 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0683_rzp_r` (2026-10-13 投入、**AWS A**) | 実行間差と摂動への応答の分離 ([plan §4.76](../../plans/active/tooling-nozzle-core-grid.md)): Grefc の基準 R、`run_0625` res_60000 から 3,000 step・250 ごと (台本 `cg_twin_rzp.sh`、3 本同時) | 3,000 step (RUN_RC 0)。判定 (§4.77、`twin_rzp_judge.json`): **結果 A** — 同じ入力の複製との差 N が 1e−7 の摂動の差 S と同じ大きさ (N/S 1.0〜1.66) で同じ速さで育つ。`nozzle.h5` は消した | active |
 | `run_0684_rzp_z` (同上) | 同上の複製 Z (R とビット一致の入力) | 同上 (複製 Z、入力は R とビット一致) | active |
 | `run_0685_rzp_p` (同上) | 同上の摂動 P (a = 1e−7) | 同上 (摂動 P) | active |
+| `run_0686_lmp_r` (2026-10-13 投入、**AWS A**) | 低マッハの散逸の A/B L-m1 ([plan §4.80](../../plans/active/tooling-nozzle-core-grid.md)) の対照: `run_0608` res_60000 から B0 そのまま (`lowMachPrecond: 0`)、2 万 step の予定 (台本 `cg_lmp1.sh`、2 本同時) | L の発散で判定が決まったので step 3492 で手動停止。`check_convergence` NOT CONVERGED (プラトー)。`nozzle.h5`・`res_0` を消した (`_disk_cleanup_20261013_forge25.tsv`) | 破棄予定 |
+| `run_0687_lmp_1` (同上) | 同上の補正側: `time.deltaT.lowMachPrecond` を 0 → 1 (SLAU の質量流束の圧力差の項を c′ でスケール、右辺だけ) の 1 行だけ | **step 10 で発散** (step 1 から増え始め、step 4 以降は 1 step あたり約 3.2〜3.3 倍、step 11 で detectNaN)。非有限は縮流部の停滞帯 (x/r_t −4.6〜−5.0・壁から 58〜101 節点目)。判定 (§4.81、`lmp1_judge.json`): **結果 B** (「`=1` だけで緩和できる」を退ける)。`check_convergence` DIVERGED。`nozzle.h5`・`res_0`・`res_nan_11` を消した | 破棄予定 |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
