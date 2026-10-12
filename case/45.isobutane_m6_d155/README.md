@@ -279,9 +279,9 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0680_tw50r_pert` (同上) | 同上の摂動側 (§4.62 と同じ摂動の配列) | 同上 (摂動側) | active |
 | `run_0681_twc50s_base` (2026-10-12 投入、**AWS A**) | Grefc の双子を初期摂動 1/1000 で ([plan §4.73](../../plans/active/tooling-nozzle-core-grid.md)): 基準、`run_0625` res_60000 から 6,000 step・250 ごと (台本 `cg_twin_s.sh`) | 6,000 step (RUN_RC 0、非有限 0)。判定 (§4.74、`twin_amp.json`): 判定不能 — 差は 1e−10 の摂動でなく GPU の丸めに支配された (絶対値で 1e−7 の run の 0.33〜0.41 倍)。頭打ちの大きさは 1e−7 の run と近い。res_0・6000 を残す | active |
 | `run_0682_twc50s_pert` (同上) | 同上の摂動側 (a = 1e−10、形は §4.65 と同じ) | 同上 (摂動側) | active |
-| `run_0683_rzp_r` (2026-10-13 投入、**AWS A**) | 実行間差と摂動への応答の分離 ([plan §4.76](../../plans/active/tooling-nozzle-core-grid.md)): Grefc の基準 R、`run_0625` res_60000 から 3,000 step・250 ごと (台本 `cg_twin_rzp.sh`、3 本同時) | 走行中。判定 `cg_twin_rzp_judge.py` | active |
-| `run_0684_rzp_z` (同上) | 同上の複製 Z (R とビット一致の入力) | 走行中 | active |
-| `run_0685_rzp_p` (同上) | 同上の摂動 P (a = 1e−7) | 走行中 | active |
+| `run_0683_rzp_r` (2026-10-13 投入、**AWS A**) | 実行間差と摂動への応答の分離 ([plan §4.76](../../plans/active/tooling-nozzle-core-grid.md)): Grefc の基準 R、`run_0625` res_60000 から 3,000 step・250 ごと (台本 `cg_twin_rzp.sh`、3 本同時) | 3,000 step (RUN_RC 0)。判定 (§4.77、`twin_rzp_judge.json`): **結果 A** — 同じ入力の複製との差 N が 1e−7 の摂動の差 S と同じ大きさ (N/S 1.0〜1.66) で同じ速さで育つ。`nozzle.h5` は消した | active |
+| `run_0684_rzp_z` (同上) | 同上の複製 Z (R とビット一致の入力) | 同上 (複製 Z、入力は R とビット一致) | active |
+| `run_0685_rzp_p` (同上) | 同上の摂動 P (a = 1e−7) | 同上 (摂動 P) | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
