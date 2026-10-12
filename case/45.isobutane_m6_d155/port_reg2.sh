@@ -23,7 +23,10 @@ declare -A WANT=([pre-f32]=9e203e1f03c87f60 [pre-fp64]=00f95b7b88c682c9 [post-f3
 for k in "${!WANT[@]}"; do s=$(sha256sum $BIN/$k/forge | cut -c1-16); echo "bin $k $s" >> $LOG; [ "$s" = "${WANT[$k]}" ] || die "バイナリ $k の sha が port_build.log と違う"; done
 scp -q $K "ubuntu@$B_IP:forge-wallfit/case/45.isobutane_m6_d155/run_0713_pt_d1/*.yaml" $C45/_reg_src/pt/ || die "point の設定の取得"
 scp -q $K "ubuntu@$B_IP:forge-wallfit/case/45.isobutane_m6_d155/run_0717_c50_d1/*.yaml" $C45/_reg_src/b0/ || die "B0 の設定の取得"
-[ -e $C48/_smoke/mesh_init.h5 ] || { mkdir -p $C48/_smoke && scp -q $K "ubuntu@$B_IP:forge-wallfit/case/48.flat_plate_cooled_m4/_smoke/*" $C48/_smoke/; } || die "case/48 の _smoke の取得"
+mkdir -p $C48/_smoke
+for f in solverConfig.yaml bcondConfig.yaml probe.yaml mesh_init.h5; do   # _smoke にはサブディレクトリもあるので必要なファイルだけ (2026-10-13: まとめて写して失敗した)
+  [ -e $C48/_smoke/$f ] || scp -q $K "ubuntu@$B_IP:forge-wallfit/case/48.flat_plate_cooled_m4/_smoke/$f" $C48/_smoke/$f || die "case/48 の _smoke/$f の取得"
+done
 [ "$(sha256sum $C45/_tr/q32_init.h5 | cut -c1-8)" = "ba859e02" ] || die "case/45 の入力が §6.26 と違う"
 echo "入力: case/45 $(sha256sum $C45/_tr/q32_init.h5 | cut -c1-16)、case/48 $(sha256sum $C48/_smoke/mesh_init.h5 | cut -c1-16)" >> $LOG
 waitfree() { for i in $(seq 1 120); do [ -z "$(pgrep -x forge)" ] && return 0; sleep 30; done; die "ほかの forge が 1 時間空かない (占有できない)"; }
