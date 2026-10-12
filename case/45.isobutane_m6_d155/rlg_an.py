@@ -31,8 +31,9 @@ if not OUT["undecidable"]:
     for r, (d, fl, at) in D.items():
         OUT["pre"][f"{r} 属性"] = {k: str(at[k])[:80] for k in ("path", "commit_kernel", "d_source", "step") if k in at}
         if "blockDPLUR" not in str(at.get("path", "")) or "line" in str(at.get("path", "")).lower(): und(f"{r}: path が blockDPLUR (ライン無し) でない ({at.get('path')})")
-        mism = [q for q in Q if not np.array_equal(d["q"][q], (d["b"][q] + d["d"][q]))]
-        if mism: OUT["pre"][f"{r} q != b + d の量 (double で照合、記録)"] = mism
+        # 2026-10-12 (codex diagnose precond-port の Major 5): commit の自己照合の不一致は判定不能にする (float の和の丸めを考え fl(b + d) と比べる)
+        mism = [q for q in Q if not np.array_equal(d["q"][q], (d["b"][q] + d["d"][q]).astype(np.float64))]
+        if mism: und(f"{r}: commit の自己照合 q != b + d ({mism})")
     d0 = D[P0[0]][0]
     for r in P0[1:] + P3:
         if any(not np.array_equal(D[r][0]["Q0"][q], d0["Q0"][q]) for q in Q): und(f"{r}: Q0 が {P0[0]} とビット一致しない")
@@ -43,12 +44,14 @@ if not OUT["undecidable"]:
     OUT["pre"]["領域の節点数"] = {k: int(v.sum()) for k, v in REG.items()}
     comps = [q for q in Q if not (q == "roUz" and all(np.all(D[r][0]["d"][q] == 0) for r in D))]
     nrm = lambda a: float(np.sqrt(np.sum(a * a)))  # noqa: E731
-    # 前提: R が腕の間で再実行の幅の中
+    # 前提: R が腕の間で再実行の幅の中 (2026-10-12、codex の Major 5: 両腕の再実行の幅と実際の差を出し、超えたら判定不能)
     for nm, m in REG.items():
         for q in comps:
-            r0a, r0b, r3a = (D[x][0]["R"][q][m] for x in (P0[0], P0[1], P3[0]))
+            r0a, r0b, r3a, r3b = (D[x][0]["R"][q][m] for x in (P0[0], P0[1], P3[0], P3[1]))
             base = nrm(r0a) or 1e-300
-            if nrm(r3a - r0a) / base > max(10 * nrm(r0b - r0a) / base, 1e-6): und(f"R が腕で違う ({nm}・{q}: {nrm(r3a - r0a) / base:.2e})")
+            sR = max(nrm(r0b - r0a), nrm(r3b - r3a)) / base; dR = nrm(r3a - r0a) / base
+            OUT["pre"][f"R {nm}|{q} (腕の差 / 再実行の幅)"] = [dR, sR]
+            if dR > max(sR, 1e-12): und(f"R が腕で再実行の幅を超えて違う ({nm}・{q}: 差 {dR:.2e}、幅 {sR:.2e})")
     ra, rb = [], []
     for nm, m in REG.items():
         for q in comps:
