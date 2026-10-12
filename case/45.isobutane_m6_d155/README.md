@@ -277,8 +277,8 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0678_twc50_pert` (2026-10-12 投入、**AWS A**) | Grefc の双子の試験 ([plan §4.65](../../plans/active/tooling-nozzle-core-grid.md)) の上限 50: 摂動、6,000 step・250 ごと。起点 `run_0625` res_60000 (台本 `cg_twin_c.sh`) | 同上 (摂動側) | active |
 | `run_0679_tw50r_base` (2026-10-12 投入、**AWS A**) | Gref の双子の回し直し ([plan §4.70](../../plans/active/tooling-nozzle-core-grid.md)): §4.62 と同じ起点・設定 (上限 50) の基準、3,000 step・250 ごと、列ごとの振幅と帯の dt を記録 (台本 `cg_twin_r.sh`) | 3,000 step (RUN_RC 0、非有限 0)。判定 (§4.71、`twin_track_gref.json`): 判定不能 (最後の点だけ線形の資格を外れた)。値は追従窓 λ 3.63e−3 /step (R² 1.000)、波束の移動 1.5e−3 r_t/step = 0.0665 列/step (Grefc は 0.037 列/step、物理の速さはほぼ同じ)。帯の dt/Δx は両格子で一致 | active |
 | `run_0680_tw50r_pert` (同上) | 同上の摂動側 (§4.62 と同じ摂動の配列) | 同上 (摂動側) | active |
-| `run_0681_twc50s_base` (2026-10-12 投入、**AWS A**) | Grefc の双子を初期摂動 1/1000 で ([plan §4.73](../../plans/active/tooling-nozzle-core-grid.md)): 基準、`run_0625` res_60000 から 6,000 step・250 ごと (台本 `cg_twin_s.sh`) | 走行中。判定 `cg_twin_amp.py` | active |
-| `run_0682_twc50s_pert` (同上) | 同上の摂動側 (a = 1e−10、形は §4.65 と同じ) | 走行中 | active |
+| `run_0681_twc50s_base` (2026-10-12 投入、**AWS A**) | Grefc の双子を初期摂動 1/1000 で ([plan §4.73](../../plans/active/tooling-nozzle-core-grid.md)): 基準、`run_0625` res_60000 から 6,000 step・250 ごと (台本 `cg_twin_s.sh`) | 6,000 step (RUN_RC 0、非有限 0)。判定 (§4.74、`twin_amp.json`): 判定不能 — 差は 1e−10 の摂動でなく GPU の丸めに支配された (絶対値で 1e−7 の run の 0.33〜0.41 倍)。頭打ちの大きさは 1e−7 の run と近い。res_0・6000 を残す | active |
+| `run_0682_twc50s_pert` (同上) | 同上の摂動側 (a = 1e−10、形は §4.65 と同じ) | 同上 (摂動側) | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
