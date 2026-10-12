@@ -34,6 +34,12 @@ band = (jw >= 50) & (jw <= 110)
 colmax = np.zeros(ni); np.maximum.at(colmax, i[band], np.abs(P["T"][band] - B["T"][band]))
 rec["col_x"] = [round(float(v), 4) for v in xc]
 rec["col_max_dT"] = [float(f"{v:.3e}") for v in colmax]
+if "dt_local" in B:   # 列ごとの擬似 dt (帯 壁から 70〜80 節点目の中央値、基準側) と列の間隔 (§4.70、波束の上の Δτ ∝ Δx の確認)
+    bd = (jw >= 70) & (jw <= 80); rows = np.where(bd)[0]
+    colv = [[] for _ in range(ni)]
+    for q in rows: colv[i[q]].append(B["dt_local"][q])
+    rec["col_dt_band"] = [float(f"{np.median(v):.4e}") if v else None for v in colv]
+    rec["col_dx"] = [round(float(v), 5) for v in dxc]
 if "dt_local" in B and "dt_local" in P:
     m = reg["island"]; rec["island_dt_ratio_median"] = float(np.median(P["dt_local"][m] / B["dt_local"][m]))
 with open(HERE / "_band_ab" / "core_grid" / f"twin_{tag}.jsonl", "a") as fh:

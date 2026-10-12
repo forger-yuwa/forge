@@ -8,12 +8,14 @@
   W を 0.67 倍・1.33 倍にしても追従窓の λ が ±20 % 以内、隣り合う出力の相互相関の最大が 0.5 以上 (形の対応がつく)。
 結果 A: 追従窓の λ ≥ 1e−3 /step・R² ≥ 0.95・固定窓の λ の ±20 % 以内 → 「流入が主成分」を退け、波束自身の増幅を支持 (列数による格子差の説明までは確定しない)。
 結果 B: 固定窓は増幅するが追従窓の λ が固定窓の 20 % 以下 → 流入が主成分 (固定窓の λ を使った e¹⁶/e⁸ の説明を退ける)。中間・資格不足は判定不能。
-usage: python3 cg_twin_track.py → _band_ab/core_grid/twin_track.json"""
-import json
+usage: python3 cg_twin_track.py [<系列のタグ> <出力名> <登録の節>] → _band_ab/core_grid/<出力名>.json (既定 main_grefc・twin_track・§4.67)
+§4.70 (Gref の回し直し) の判定は登録が違う: 結果 A = 追従窓で λ ≥ 1e−3・R² ≥ 0.95・前半後半とも正、結果 B = 追従窓の λ が固定窓の 20 % 以下 (固定窓は増大)。"""
+import json, sys
 from pathlib import Path
 import numpy as np
 HERE = Path(__file__).resolve().parent; OUT = HERE / "_band_ab" / "core_grid"
-M = sorted({r["step"]: r for r in (json.loads(l) for l in open(OUT / "twin_main_grefc.jsonl")) if r.get("col_max_dT")}.values(), key=lambda r: r["step"])
+TAG, NAME, REG = (sys.argv[1:4] if len(sys.argv) > 3 else ("main_grefc", "twin_track", "§4.67"))
+M = sorted({r["step"]: r for r in (json.loads(l) for l in open(OUT / f"twin_{TAG}.jsonl")) if r.get("col_max_dT")}.values(), key=lambda r: r["step"])
 xc = np.array(M[0]["col_x"]); ni = len(xc)
 LO, HI = 1500, 2750
 P = [r for r in M if LO <= r["step"] <= HI]
@@ -38,7 +40,7 @@ for n in range(1, len(P)):
     corrs.append(best); c.append(c[-1] + bs)
 c = np.array(c)
 def amp(n, cols): return float(np.sqrt(np.mean(A[n, cols] ** 2)))
-res = {"registration": "plans/active/tooling-nozzle-core-grid.md §4.67", "steps": st.tolist(), "center_col": c.tolist(), "center_x": [float(np.interp(v, np.arange(ni), xc)) for v in c],
+res = {"registration": "plans/active/tooling-nozzle-core-grid.md " + REG, "tag": TAG, "steps": st.tolist(), "center_col": c.tolist(), "center_x": [float(np.interp(v, np.arange(ni), xc)) for v in c],
        "xcorr_max": corrs, "W_fixed": W0, "fixed": {}, "follow": {}}
 yf = np.log([amp(n, fixed) for n in range(len(P))]); lf, r2f = fit(st, yf); res["fixed"] = {"lambda": lf, "R2": r2f, "amp": np.exp(yf).tolist()}
 for scale in (0.67, 1.0, 1.33):
@@ -53,8 +55,19 @@ F = res["follow"]; base = F[f"W{W0}"]; lams = [v["lambda"] for v in F.values()]
 qual = {"points": bool(len(P) >= 5 and st[-1] - st[0] >= 1000), "linear": bool(max(rel) < 1e-3), "capture": bool(base["capture_frac_min"] >= 0.5),
         "W_robust": bool(all(abs(l - base["lambda"]) <= 0.2 * abs(base["lambda"]) for l in lams)), "xcorr": bool(min(corrs) >= 0.5)}
 res["qualification"] = qual
+h = len(P) // 2
+l1, _ = fit(st[:h + 1], np.log(base["amp"][:h + 1])); l2, _ = fit(st[h:], np.log(base["amp"][h:])); base["halves"] = [l1, l2]
+# 波束の中心の実際の列の移動と、波束の上の擬似 dt・列の間隔 (§4.70)
+res["center_cols_per_step"] = float(np.polyfit(st, c, 1)[0])
+if P[0].get("col_dt_band"):
+    dtc = [P[n]["col_dt_band"][int(round(c[n]))] for n in range(len(P))]; dxp = [P[n]["col_dx"][int(round(c[n]))] for n in range(len(P))]
+    res["packet_dt"] = dtc; res["packet_dx"] = dxp; res["packet_dt_over_dx"] = [a / b if a and b else None for a, b in zip(dtc, dxp)]
 if not all(qual.values()):
     out = "判定不能 (資格不足: " + ", ".join(k for k, v in qual.items() if not v) + ")"
+elif REG == "§4.70":
+    if base["lambda"] >= 1e-3 and base["R2"] >= 0.95 and l1 > 0 and l2 > 0: out = "A: Gref でも波束自身が増幅する (「流入だけで増大」を退ける)"
+    elif lf > 0 and base["lambda"] <= 0.2 * lf: out = "B: 追従窓では増幅が弱い (第 1 仮説を退け、滞在時間の説明を組み直す)"
+    else: out = "判定不能 (中間)"
 elif base["lambda"] >= 1e-3 and base["R2"] >= 0.95 and abs(base["lambda"] - lf) <= 0.2 * abs(lf):
     out = "A: 追従窓でも固定窓と同程度に増幅 (波束自身の増幅を支持、流入が主成分ではない)"
 elif lf > 0 and base["lambda"] <= 0.2 * lf:
@@ -62,8 +75,9 @@ elif lf > 0 and base["lambda"] <= 0.2 * lf:
 else:
     out = "判定不能 (中間)"
 res["result"] = out
-(OUT / "twin_track.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
+(OUT / f"{NAME}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
 print("中心 x:", [round(v, 2) for v in res["center_x"]], " 相互相関の最大:", [round(v, 2) for v in corrs])
 print(f"固定窓 (W {W0}): λ {lf:.2e} R² {r2f:.3f}  振幅 {[f'{v:.2e}' for v in res['fixed']['amp']]}")
 for k, v in F.items(): print(f"追従窓 {k}: λ {v['lambda']:.2e} R² {v['R2']:.3f} 捕捉の最小 {v['capture_frac_min']:.2f}  振幅 {[f'{a:.2e}' for a in v['amp']]}")
+print("中心の移動 %.4f 列/step" % res["center_cols_per_step"], " 波束の上の dt/Δx:", [f"{v:.3g}" if v else None for v in res.get("packet_dt_over_dx", [])])
 print("資格:", qual, " 結果:", out)

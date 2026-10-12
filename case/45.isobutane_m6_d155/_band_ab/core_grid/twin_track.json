@@ -1,5 +1,6 @@
 {
  "registration": "plans/active/tooling-nozzle-core-grid.md §4.67",
+ "tag": "main_grefc",
  "steps": [
   1500.0,
   1750.0,
@@ -69,7 +70,11 @@
     0.2240176570546344,
     0.4351959941049143
    ],
-   "capture_frac_min": 0.9911210602526294
+   "capture_frac_min": 0.9911210602526294,
+   "halves": [
+    0.0036087385703946744,
+    0.0028131438048296935
+   ]
   },
   "W150": {
    "lambda": 0.00318198507077878,
@@ -92,5 +97,6 @@
   "W_robust": true,
   "xcorr": true
  },
+ "center_cols_per_step": 0.03702857142857142,
  "result": "判定不能 (中間)"
 }

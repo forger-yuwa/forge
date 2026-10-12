@@ -275,6 +275,8 @@ Pt 5.5 MPa / Tt 1600 K / φ=0.9 燃焼ガス (semi-perfect NASA-9) / M_design 6 
 | `run_0676_twc50_pert1` (2026-10-12 投入、**AWS A**) | Grefc の双子の試験 ([plan §4.65](../../plans/active/tooling-nozzle-core-grid.md)) の上限 50: 摂動 (Gref の摂動を x/r_t で補間、max 1e−7)、1 step。起点 `run_0625` res_60000 (台本 `cg_twin_c.sh`) | 1 step (RUN_RC 0) | active |
 | `run_0677_twc50_base` (2026-10-12 投入、**AWS A**) | Grefc の双子の試験 ([plan §4.65](../../plans/active/tooling-nozzle-core-grid.md)) の上限 50: 基準、6,000 step・250 ごと。起点 `run_0625` res_60000 (台本 `cg_twin_c.sh`) | 6,000 step (RUN_RC 0)。判定 (§4.66、`twin_grefc_judge.json`): **結果 B** — Grefc でも λ 4.0e−3 /step で増幅 (Gref 3.83e−3)。頭打ちは RMS 0.4〜0.5 K (Gref の約 1/30)。波束は 0.044 列/step で下流へ (Gref 0.040) | active |
 | `run_0678_twc50_pert` (2026-10-12 投入、**AWS A**) | Grefc の双子の試験 ([plan §4.65](../../plans/active/tooling-nozzle-core-grid.md)) の上限 50: 摂動、6,000 step・250 ごと。起点 `run_0625` res_60000 (台本 `cg_twin_c.sh`) | 同上 (摂動側) | active |
+| `run_0679_tw50r_base` (2026-10-12 投入、**AWS A**) | Gref の双子の回し直し ([plan §4.70](../../plans/active/tooling-nozzle-core-grid.md)): §4.62 と同じ起点・設定 (上限 50) の基準、3,000 step・250 ごと、列ごとの振幅と帯の dt を記録 (台本 `cg_twin_r.sh`) | 走行中。判定 `cg_twin_track.py main_gref_r` | active |
+| `run_0680_tw50r_pert` (同上) | 同上の摂動側 (§4.62 と同じ摂動の配列) | 走行中 | active |
 
 - 2026-10-11 (forge-25、AWS A): 判定の済んだ `run_0607`〜`run_0610` の途中の場 `res_<n>.h5` (64 個、9.4 GB) を消した。残したのは res_0・最後の場・壁/出口の出力・残差・VERDICT。登録の量の系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録 `_disk_cleanup_2026-10-11_coregrid.tsv` (AWS A)。
 - 2026-10-11 (forge-25、AWS A、2 回目): 判定の済んだ `run_0611`〜`run_0614` の途中の場 (64 個、10.4 GB) を消した。残したのは res_0・最後の場 (継続の起点)。系列は `_band_ab/core_grid/gref_series_*.csv` (repo)。記録は同じ tsv に追記。
