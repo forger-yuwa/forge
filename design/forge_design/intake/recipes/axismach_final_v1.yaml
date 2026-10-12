@@ -1,0 +1,63 @@
+# 雛形 axismach_final_v1 — 要求カード (forge.wt_card/v1) から**成果物を出す最終の NS 用**の問題 YAML を作るときの構成キー。
+#   plan: plans/active/tooling-nozzle-wt-deliverables.md §4.1 6.。読み手: forge_design.intake.wt_card (card_to_problem)。
+#   axismach_explore_v1 と同じキーに、生産の形状の詰め (joint 壁・r″ の単調拘束・上流の 5 次多項式・物理壁 1 本の B-spline・
+#   MOC の analytic/converge) を加えたもの。STEP の書き出し (export/wall_step.py) は物理壁の表現 single_bspline が要る。
+#   出典は case/45.isobutane_m6_d155 の生産の問題 problem_d155_ns_prod.yaml (以下「生産」) と、Euler の格子は
+#   problem_d155_euler_e4_recal_d0.yaml (以下「E4」)。
+#   **設計の数値 (Pt・Tt・組成・r_t・L_c・r_inlet・L_U・L_pipe) はここに書かない** — カードから生成器が埋める。
+#   ケースごとの較正値 (initial_line: cfd + initial_line_run/_res、Md_moc_offset、deltastar_initializer.cf_scale) は入れない。
+#   手順書 procedures/nozzle-design-workflow.md §2 ⑤ の手順で、較正したあとに問題 YAML へ足す (カードの overrides でも足せる)。
+#   形状パラメータ (R・M_knot) で設計が成立しないときは skill nozzle-design の手順で振る。
+
+# 生成器への指示 (問題 YAML には写さない)
+_recipe:
+  name: axismach_final_v1
+  stage: final
+  # geometry.M_knot = M_knot_factor × M_design。生産は M6 で M_knot 2.7 (= 0.45 × 6)
+  M_knot_factor: 0.45
+  # gas.transport: 実種ごとに default、H2O だけは生産の custom (IAPWS/CEA つなぎ)
+  gas_transport: {default: cea, H2O: "custom:h2o_iapws_cea_v1"}
+  # evaluate.tp_species: 組成に H2O があるときだけ生産の split_h2o。無ければ書かない (既定 pseudo)
+  tp_species_if_h2o: split_h2o
+
+geometry:
+  R: 2.0                     # スロート曲率半径 / r_t (生産)
+  axis_law: knot             # 生産
+  start_line: throat_char    # 生産
+  n_start: 41                # 生産
+  n_axis_inv: 2400           # 生産
+  axis_dx0: 0.03             # 生産
+  x_end_margin: 2.3          # 生産
+  wall_mode: cplus           # 生産
+  exit_mode: characteristic  # 生産
+  wall_repr: joint                     # 位置 + 壁角の同時当てはめ (生産; 物理壁は解析経路)
+  wall_fit_mono_r2: [0.0, 1.5]         # r″ を [0, 1.5] r_t で単調非増加に拘束 (生産; plan tooling-nozzle-throat-monotone-r2)
+  pw_upstream: poly                    # 配管〜設計スロートを 5 次多項式 1 本、上流に δ_r を足さない (生産; pw_ramp は併記不可)
+  physical_wall_repr: single_bspline   # 物理壁を全域 1 本の 5 次 B-spline に (生産; STEP の書き出しに要る)
+  moc_axis_limit: analytic             # 軸上の端点の sinθ/r を解析極限に (生産)
+  moc_corrector: converge              # 予測修正を収束まで (生産)
+
+# NS の格子 (prepare_ns)。ni・wall_first_frac・wall_first_frac_throat は生成器の estimate_mesh が埋める (初期値)
+mesh:
+  discretization: node       # 生産
+  nj: 97                     # 生産
+  throat_refine: 4.0         # 生産
+  throat_width: 3.0          # 生産
+  wall_first_up_x0: -9.0     # 生産
+  wall_first_up_x1: -4.0     # 生産
+  wall_first_blend_x0: 1.0   # 生産
+  wall_first_blend_x1: 17.0  # 生産
+  ar_max: 5000               # 生産 (境界層層の AR 例外)
+
+# Euler の格子 (prepare)。全域 0.005 (E4)。軸方向 (ni・throat_refine・throat_width) は mesh と同じ。ni は生成器が mesh.ni を写す
+mesh_euler:
+  nj: 97                     # E4
+  throat_refine: 4.0         # E4 (= mesh)
+  throat_width: 3.0          # E4 (= mesh)
+  wall_first_frac: 0.005     # E4
+
+evaluate:
+  nStepOuter: 12000          # 生産
+  outStepInterval: 1000      # 生産
+  cfl_main: 1.0              # 生産
+  mid_stage: true            # 生産

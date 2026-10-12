@@ -1,6 +1,6 @@
 ---
 name: nozzle-design
-description: 軸対称風洞ノズル (wind_tunnel_axisym_axismach) の設計・計算の作業手順。(1) 軸長・出口径・入口径・入口条件を指定して非粘性 (MOC) ノズルを新規設計する、(2) 出口・入口・条件を固定して軸長を MOC でパラスタし、有望形状を Euler → NS (境界層補正) → 形状調整 → 凝縮計算する、(3) 作成済みのノズルで Euler/NS を回す — のどれかをユーザが頼んだとき (「ノズルを設計したい」「軸長を振りたい」「このノズルで Euler/NS を回して」「凝縮を見たい」) に使う。
+description: 軸対称風洞ノズル (wind_tunnel_axisym_axismach) の設計・計算の作業手順。(1) 軸長・出口径・入口径・入口条件を指定して非粘性 (MOC) ノズルを新規設計する、(2) 出口・入口・条件を固定して軸長を MOC でパラスタし、有望形状を Euler → NS (境界層補正) → 形状調整 → 凝縮計算する、(3) 作成済みのノズルで Euler/NS を回す、(4) 実寸の要求 (全圧・全温・出口マッハ・スロート径・入口半径・入口長さ・出口長さ・壁温) から問題を作り、STEP・gmsh・Fluent メッシュ・Excel 表の成果物一式を出す — のどれかをユーザが頼んだとき (「ノズルを設計したい」「軸長を振りたい」「このノズルで Euler/NS を回して」「凝縮を見たい」「この寸法で風洞ノズルを作って」「STEP/Fluent/gmsh/Excel で欲しい」) に使う。
 ---
 
 # /nozzle-design — 軸対称風洞ノズルの設計・計算
@@ -11,6 +11,46 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 
 **手順の正本は [`procedures/nozzle-design-workflow.md`](../../../procedures/nozzle-design-workflow.md)**。
 ここには AI が判断を誤りやすい点だけを置く。作業前に正本の該当節 (§1 新規設計 / §2 パラスタ〜凝縮 / §3 既存形状) を読む。
+
+## 実寸の要求から作る・成果物を出す (2026-10-13 整備中; plan [`tooling-nozzle-wt-deliverables`](../../../plans/active/tooling-nozzle-wt-deliverables.md))
+
+ユーザが寸法を実寸で言ったら、**要求カード** (`forge.wt_card/v1`、例 `design/forge_design/intake/examples/m5_air_demo.yaml`) に写す。
+ユーザの言葉とキーの対応 (2026-10-12 ユーザ回答で確定):
+
+| ユーザの言葉 | カードのキー | 注意 |
+| --- | --- | --- |
+| 全圧・全温 | `conditions.Pt` [Pa]・`conditions.Tt` [K] | 絶対圧 |
+| 出口マッハ数 | `M_exit` | = `spec.M_design` |
+| スロート径 | `throat.diameter_physical_m` または `throat.diameter_design_m` | **物理 (境界層込みの実際の穴) か設計 (非粘性) かを必ず聞く**。物理なら r_t は CFD 前の δ で解く |
+| 入口半径 | `inlet.radius_m` | 縮流部の上流の直管の半径 |
+| 入口長さ | `inlet.pipe_length_m` と `inlet.contraction_length_m` | **両方を指定** (直管長と縮流部長)。縮流部が長すぎると μ = L_U²/(R Δr) > 20 で単調に絞れず例外 |
+| 出口長さ | `divergent_length_m` | **設計スロート (x=0) → 物理出口**の長さ。出口の後ろの直管ではない |
+| 壁温 | `wall: {thermal: isothermal, Tw}` | 断熱なら `adiabatic` |
+| ガス | `gas: {preset: air}` か `gas: {species: {...}}` | 空気の M5 以上は出口の N₂ 液化を生成器が警告する |
+| 寸法の許容差 | `tolerances: {length_m, diameter_m}` | 既定値は仮。ユーザの実用公差を聞いて書く (出荷ゲートの基準) |
+
+流れ (正本は手順書 §1・§2。ここでは新しい入口と出口だけ):
+
+1. `cd design && /home/sano/work/forge/design/.venv-opt/bin/python -m forge_design.intake.wt_card CARD --out ../case/NN/problem_<tag>.yaml`
+   — カード → problem YAML。物理スロート径なら「r_t を解く → 長さを r_t で割り直す」を自動で繰り返す。
+   標準出力の対応表・警告 (液化・格子の見積もり) をユーザに見せる。**格子の見積もりは初期値**で、合格の根拠は NS 後の `check_wall_resolution.py`。
+2. 以降は手順書 §1 ③〜§2 (Euler → NS/δ* → C2 → 最終 NS)。**Euler は生成器が一緒に書く `<stem>_euler.yaml` で回す** (最終の雛形の
+   `physical_wall_repr`・`pw_upstream` は NS 専用で、Euler の prepare が拒否する。写しは設計壁がビット同一)。CFD 前の物理壁とメッシュだけなら
+   `deltastar_loop --problem YAML --euler-ref none_precfd --init-integral --prepare-only --run-dir RUN` (`FORGE_BIN`・`FORGE_CONVERTER` を新しいビルドに)。NS 後に r_t を解き直したら、同じカードに `--r-throat R` を付けて YAML を作り直す
+   (長さの割り直し。r_t 単位の値を手で直さない)。
+3. 最終 NS の run で `-m forge_design.export.deliverables RUN --card CARD --problem YAML` → `RUN/deliverables/` (README・MANIFEST・cad/・mesh/・fluent/・excel/)。
+   **応答には `DIMENSIONS.json` の判定 (寸法の出荷ゲート) と、熱量の `thermal_use` の状態を必ず書く**。ゲートが FAIL なら成果物を渡さず原因を報告する。
+4. Fluent での読み込みはこちらでは確認できない — 初回は「Fluent で `Mesh > Check` を見てほしい」とユーザに頼み、結果を plan §9 に記録する。
+
+罠:
+- **2D の Fluent メッシュの面の向きは「n0→n1 の左側が c0」**。3D の規則からの類推は逆 (2026-10-13 に一度誤った)。書き出し器を触ったら実物の 2D メッシュで測り直す。
+- **軸対称の `iface_q_eff` は r·q** (熱流束ではない)。熱量は `iface_Qf_eff` × 2π から作る。`qwall` は診断値。
+- **新しい設計の最初の NS は Euler の場から始められない** (2026-10-13): `--ic-from <Euler run>` は interp_field が化学種の照合で拒否する
+  (Euler は輸送の記録が無い)。`--ic-from` を付けずに 1 次元等エントロピー場 + 段階起動 (`--stages full`) で始める。
+  `FORGE_ALLOW_UNVERIFIED_SPECIES` で黙らせない。
+- 熱量の列の状態が `valid` 以外、または `thermal_use` が `PASS` でない表を、1 次元熱伝導の入力として「使える」と書かない。
+- STEP を CAD で編集した後のメッシュの作り直しは `deliverables/mesh/rebuild_from_step.py` (x(u) を解いて station に合わせる)。
+  編集後の形状の格子品質は `check_mesh_quality.py` で確かめる。
 
 ## 最初に決めること
 
@@ -50,7 +90,8 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 
 ## 未実装 (ユーザに聞かれたら正直に言う)
 
-汎用の MOC パラスタ CLI・壁 CSV 出力/作図 CLI・k_f の YAML キー・凝縮引き継ぎの自動化・外部壁 CSV の取り込みは無い (case スクリプト頼み)。
+汎用の MOC パラスタ CLI・凝縮引き継ぎの自動化・外部壁 CSV の取り込みは無い (case スクリプト頼み)。壁の形状表・STEP・メッシュの書き出しは
+`forge_design.export.deliverables` (上の節)、k_f は YAML の `deltastar_initializer.cf_scale` に書ける。
 統一は [`plans/active/tooling-design-problem-campaign-recipe.md`](../../../plans/active/tooling-design-problem-campaign-recipe.md) の残作業。
 
 ## 終わったら

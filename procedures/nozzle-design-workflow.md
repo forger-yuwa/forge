@@ -46,6 +46,9 @@
 
 1. **要件を決める** — skill `design-intake` (要件インタビュー → 検証済み YAML・方針メモ。本書は以降の実行手順を担う) で、Pt・Tt・組成・設計マッハ数 `M_design`・入口配管半径・軸長
    (または全長)・出口径を確定する。凝縮の可能性 (H₂O を含み膨張で低温) をここで確認する。
+   **実寸で与えられた要求** (物理スロート径・入口半径・直管長・縮流部長・設計スロート→出口の長さ・壁温) は要求カード
+   (`forge.wt_card/v1`) に書き、`-m forge_design.intake.wt_card CARD --out problem.yaml` で ② の YAML を作る
+   (r_t を解いた後の長さの割り直しを生成器が行う。④ で r_t を解き直したら `--r-throat` で作り直す)。
 2. **YAML を作る** — 近い既存ケースの `problem_*.yaml` を複製し、`spec`・`gas`・`geometry.r_inlet`
    (= 入口半径 / r_t)・`dv.L_c` (または `Lc_mode: from_length` + `dv.L_total`) を書き換える。
    `r_throat` は仮の値でよい (④ で出口径から解く)。
@@ -84,10 +87,19 @@
    `SIZING_TOL_M` (1e-9 m) で止め、NS 後の `solve_rt` (`--prev`) は固定回数の反復で許容差を判定しない。
    NS 後に物理スロート径から決め直すときは `--prev RUN --delta-next RUN/_extract_edge/delta_r_next.csv --delta-r-out FILE`
    (δ_E の全分布で寸法を決め、同じ補正の表を FILE に書く。次の壁は `prepare_ns(delta_r_csv=FILE)` でその表から作る)。
-5. **形を見る・出す** — 作図・CAD 用の全輪郭出力は case 側のスクリプトしかない
-   (`case/42.isobutane_wt/export_wall_m42.py`、`case/44.vitiated_air_wt/export_wall_va.py`、
-   `case/45.isobutane_m6_d155/viz_*.py`)。**中に `/home/sano/work/forge/...` の絶対パスが書かれているものがある**
-   ので、使う前に確認する。壁の 2 階微分 (r″) の連続性も見る (ユーザが重視する観点)。
+5. **形を見る・出す** — 最終 NS の run から成果物一式を 1 コマンドで出す (plan
+   [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md)、2026-10-13 整備中):
+   ```
+   .venv-opt/bin/python -m forge_design.export.deliverables ../case/NN/run_XXXX --card ../case/NN/card_<tag>.yaml --problem ../case/NN/problem_<tag>.yaml
+   ```
+   → `run_XXXX/deliverables/`: STEP (2D の壁曲線・3D の内面)・STL・解析メッシュ (msh4.1/2.2)・STEP から同じ構造のメッシュを
+   作り直す gmsh スクリプトと構造ファイル・Fluent 2D 軸対称メッシュ (`.msh`、境界の名前と型つき)・CGNS・Fluent の境界条件表
+   (動作圧 0 Pa)・Excel 向けの形状表と壁面量表 (CSV、`xlsxwriter` があれば `.xlsx`)。README の冒頭に**寸法の出荷ゲート**
+   (STEP とメッシュから測り直した寸法と要求カードの公差) と、壁面の熱量を熱設計に使えるか (`thermal_use`) が出る。
+   物理壁の表現が `single_bspline` の run (最終 NS 用の雛形 `axismach_final_v1`) でないと STEP は出ない。
+   壁の 2 階微分 (r″) の連続性は `nozzle_report` の「壁の形と微分」で見る (ユーザが重視する観点)。
+   旧来の case 側のスクリプト (`case/42.isobutane_wt/export_wall_m42.py`、`case/44.vitiated_air_wt/export_wall_va.py`、
+   `case/45.isobutane_m6_d155/cad_deliverables.py`・`viz_*.py`) は絶対パスを含むので新しい設計には使わない。
 
 ## 2. 出口・入口・条件を固定し、軸長を MOC でパラスタ → Euler → NS → 形状調整 → 凝縮
 
@@ -112,6 +124,9 @@ M6 (case/45) で実際に通した順番。各段の「何で判定するか」�
    .venv-opt/bin/python -m forge_design.feedback.deltastar_loop --problem ... --euler-ref ... --prev ../case/NN/run_XXXX_ns_pass0 --run-dir ../case/NN/run_YYYY_ns_pass1 [--stages none --cfl 5 --implicit-relax 0.7 --steps 12000]
    ```
    物理壁 = 設計壁 + δ_r。δ は CONTUR 積分法で初期化し、NS から E 法 (`band_select="edge"`) で δ_E を測る。
+   **注意 (2026-10-13)**: `--ic-from <Euler run>` は、`interp_field.py` が化学種の照合で拒否する (Euler は輸送の記録が無く、NS は
+   `transport` を持つので species_hash が違う)。新しい設計の最初の NS は `--ic-from` を付けず、prepare_ns の 1 次元等エントロピー場から
+   段階起動 (`--stages full`) で始める (case/70 run_0005)。2 回目以降の NS は前の NS の場から (`--prev`)。
 4. **C2 方式 (出口 δ で CONTUR を較正し r_t を解く)** — CONTUR の摩擦係数倍率 k_f を「出口での δ_C = 測った δ_E」
    に合わせ、出口径 0.775 m (例) から r_t を解き直す。**k_f は YAML キーが無く case スクリプト経由**:
    `case/45.isobutane_m6_d155/prep_c2pin.py` (run 準備、k_f を引数で渡す)、`c2pin_solve.py PASS1_RUN EULER_REF
@@ -210,7 +225,8 @@ axismach パイプラインに取り込むキーは**未実装** (`wall_csv` 相
 
 ## 4. 未実装・注意 (2026-10-06 時点)
 
-- MOC パラスタ・壁出力・作図・C2 の k_f・凝縮の引き継ぎは **case スクリプト頼み** (汎用 CLI・YAML キーなし)。
+- MOC パラスタ・作図・凝縮の引き継ぎは **case スクリプト頼み** (汎用 CLI なし)。壁の出力は `forge_design.export.deliverables` (§1 ⑤)、
+  C2 の k_f は `deltastar_initializer.cf_scale`。
   統一は campaign-recipe plan の残作業 (#6〜#8・#14・#15)。
 - 出口径・スロート径を spec に書けない (r_throat + M_design → `solve_rt` / `solve_rt_throat` → 手で書き換え。`spec.sizing` は記録だけ)。
 - `design_chain` には fold・トポロジ・壁マージンの検査が入っていない。

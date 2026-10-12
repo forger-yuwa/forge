@@ -1241,6 +1241,59 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 (等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
 フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
 
+## 実寸の要求カードと成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-12 起票、計画中
+
+計画: [`plans/active/tooling-nozzle-wt-deliverables.md`](../../plans/active/tooling-nozzle-wt-deliverables.md)。
+**以下は計画中の仕様** (実装・検証が済んだ節から「計画中」を外す)。
+
+### 要求カード (実寸入力 → problem YAML)
+
+風洞ノズルの要求は実寸で与えられることが多い (全圧・全温・ガス・出口マッハ数・物理スロート径・入口半径・
+入口直管長・縮流部長・スロート→出口長・壁温)。問題 YAML は寸法を $r_t$ 単位で持つので、両者の橋渡しを
+**要求カード** (`forge.wt_card/v1`) が受け持つ。カードは実寸 [m] で書き、生成器が $r_t$ で割って
+`geometry.r_inlet`・`geometry.L_pipe`・`geometry.L_U`・`dv.L_total` (`Lc_mode: from_length`) と
+`spec.wall_thermal`・`spec.sizing` に写す。
+
+- 長さの起点: `L_total` は設計スロート ($x=0$) から物理出口 $x_F$ まで (`Lc_mode: from_length` の定義)。
+  `L_U` は縮流部の始まり ($x=-L_U$) から設計スロートまで、`L_pipe` はその上流の直管。
+- 物理スロート径を固定する場合、$r_t$ は `solve_rt_throat` で決まり、$r_t$ が変わると $r_t$ 単位の長さが
+  実寸からずれる。生成器は「$r_t$ を解く → 長さを割り直す」を相対変化が許容値を下回るまで繰り返す
+  (CFD 前の寸法。NS 後に $r_t$ を解き直したときも同じ割り直しを行う)。
+
+### 成果物一式
+
+最終 NS の run から 1 コマンドで書き出す (`<run>/deliverables/`)。
+
+| 成果物 | 中身 | 出典 |
+| --- | --- | --- |
+| STEP (2D) | 物理壁の 1 本の 5 次 B-spline 曲線 (mm、$x$ = 軸、原点 = 設計スロート) | 既存 `export/wall_step.py` |
+| STEP (3D)・STL | 2D 曲線を $x$ 軸まわりに 360° 回した内面 | FreeCAD (case/45 `cad_deliverables.py` の一般化) |
+| gmsh | 解析メッシュ (msh4.1・msh2.2) と、STEP から同じ構造のメッシュを作り直す gmsh スクリプト + 構造ファイル | run の `nozzle.msh` |
+| Fluent | 2D 軸対称のメッシュ (Fluent 形式 `.msh`、境界の名前と型つき) と CGNS、境界条件表 | 同上 + `bcondConfig.yaml` |
+| Excel | 形状表 (mm: $x, r$, 壁角, 曲率半径, 弧長, 周長, 累積側面積) と CFD 壁面量表 (壁節点ごと: 圧力・温度・壁面せん断・壁への熱流束・リング面積) | `wall_repr.json`・`res_wall_<physID>_*.h5` |
+
+**「同じ構造」の定義**: 元のメッシュと**接続 (四角形の節点番号の並び) が同一**で、各節点が
+「station $x_i$ と半径方向の比 $s_{ij}=r_{ij}/r_w(x_i)$」で表され、$r_w$ を STEP の曲線から評価して
+作り直した節点が元の節点と許容差内で一致すること。現行の `mesh2d` の格子 (格子線が $x$ = 一定の縦線) が対象。
+格子線が縦でない格子 (壁法線の近壁層など) は構造ファイルの形式が違うので、書き出しを拒否する。
+
+**Fluent 形式の面の向き**: Fluent のメッシュは面ごとに両側のセル $c_0, c_1$ を持ち、境界面は $c_1=0$。
+2D の面 (辺 $n_0\to n_1$) は**進行方向の左側が $c_0$** ($\hat z\times(n_1-n_0)$ が $c_0$ を向く)。実物の 2D の Fluent メッシュ
+(TGrid 2D、OpenFOAM-10 の `icoFoam/elbow/elbow.msh`) で 1,454 面すべてがこの向きだった。3D の実物 (case/30・32) では節点順の右手系の
+法線が全面で $c_0$ を向く。**3D の規則から 2D を押し出しで推定すると逆になる** (2026-10-13 に一度そう推定して、2D の実物で否定した)。
+
+**寸法の出荷ゲート**: 成果物は、最終の STEP と配布するメッシュから**測り直した**寸法 (入口半径・直管長・縮流部長・物理スロート径・
+設計スロート→出口の長さ) が要求カードの公差に入るときだけ合格とする。YAML の値 × $r_t$ の往復は単位換算の検査で、形状の検査ではない
+(`Lc_mode: from_length` の既定の許容差は 0.05 $r_t$ で、カードの公差から `geometry.L_total_tol` を決める)。
+
+**壁への熱流束**: 正本は `output.interfaceDiag: 1` の壁ダンプが出す保存形の熱量 (固体向き正;
+[`methods/boundary.md`](../boundary.md) 「界面熱量の 4 つの定義」)。**軸対称 (`axisymMethod: 0`) では `iface_q_eff` は $q$ でなく $r\,q$**
+(流束は $r$ 重みの面積で積むが、`iface_q_eff` は $r$ を掛けない面積で割る)。そこで積分済みの `iface_Qf_eff` [W/rad] から
+全周の節点熱量 $Q_{node}=2\pi\,$`iface_Qf_eff` を作り、節点の壁面の $r$ 重み面積 $A_{node}=2\pi\sum_f r_f|S_f|$ で割って $q$ にする。
+`qwall` は $r$ 重みの面積で割った再構成勾配形の診断値 (流体向き正) で、正本が使えない run では符号を反転し「診断値」と明記して出す。
+正本は等温壁・定常・`interfaceDiag: 1` のときだけ値を持ち、それ以外もデータセットは NaN で出るので、熱量の列には状態
+(`valid`・`not_applicable`・`missing`・`diagnostic`・`nonfinite`) を付け、熱設計に使えるか (`thermal_use`) は収束・準定常・壁解像の判定と組で示す。
+
 ## 評価と目的関数
 
 バッチ評価 CLI が run ディレクトリを生成し (`run_*` 命名規約・case README 追記)、forge を

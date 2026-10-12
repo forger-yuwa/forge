@@ -75,3 +75,21 @@ PowerPoint にまとめる (2026-10-05 ユーザ指示でルール化)。設計�
 
 - pptx は run ディレクトリの `report/` に置く (run の成果物なので commit しない)。結論・判定は対応する plan と case README の run 一覧に書く。
 - 設計の比較では、比べる run 同士で同じ Euler 参照・同じバイナリを使う (plan `verification-m6-axis-wave-mesh-su2` §4.1 の教訓)。
+
+## 成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 整備中
+
+報告 (pptx) とは別に、形状とメッシュを外で使うための成果物を最終 NS の run から出す
+(plan [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md)、手順は
+[`nozzle-design-workflow.md`](nozzle-design-workflow.md) §1 ⑤)。
+
+| フォルダ | 中身 | 使い方の注意 |
+| --- | --- | --- |
+| `cad/` | 壁の 2D 曲線の STEP (1 本の 5 次 B-spline、mm、原点 = 設計スロート、x = 軸)・3D の内面の STEP・STL | 回転体 (肉厚) は CAD 側で作る。2D 曲線は `u = x` [mm] の助変数 |
+| `mesh/` | 解析メッシュ (msh4.1・msh2.2)、構造ファイル、STEP から同じ構造で作り直す gmsh スクリプト | 格子線が縦 (x = 一定) のメッシュだけ。CAD で形を変えたら作り直して `check_mesh_quality.py` |
+| `fluent/` | 2D 軸対称の Fluent メッシュ (`.msh`)・CGNS・境界条件表 | x 軸が対称軸、単位 m、動作圧 0 Pa で全圧・背圧を絶対値で入れる。forge は節点中心、Fluent はセル中心 |
+| `excel/` | 形状表 (mm)・壁面量表 (壁節点ごと)・条件、`.xlsx` (1 次元の壁伝導の記入シートつき) | 列名は ASCII。熱量の列は状態 (`valid` など) と `thermal_use` を見てから使う |
+
+- README の冒頭に、**寸法の出荷ゲート** (`DIMENSIONS.json`: STEP とメッシュから測った入口半径・直管長・縮流部長・スロート径・
+  スロート→出口長と、要求カードの公差) と `thermal_use` が出る。ゲートが FAIL の成果物は渡さない。
+- 軸対称の壁への熱量は `iface_Qf_eff` (1 rad あたりの積分値) × 2π から作る。`iface_q_eff` は軸対称では r·q で熱流束ではない。
+- `deliverables/` は run の成果物なので commit しない。
