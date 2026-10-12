@@ -32,7 +32,8 @@ sed -i "s/lowMachPrecond: 0, /lowMachPrecond: 2, /" $L/solverConfig.yaml
 sed -i "s/nStepOuter: $STEPS}/nStepOuter: 2500}/" $R/solverConfig.yaml
 # 設定の検査: P2 と C (run_0688) の差は lowMachPrecond の値 (0 → 2) の 1 行だけ、C′ と C の差は nStepOuter の 1 行だけ。キーは各 1 個
 dL=$(diff $CC/solverConfig.yaml $L/solverConfig.yaml | grep -c '^>'); dR=$(diff $CC/solverConfig.yaml $R/solverConfig.yaml | grep -c '^>')
-[ "$dL" = 1 ] && [ "$dR" = 1 ] && diff $CC/solverConfig.yaml $L/solverConfig.yaml | grep '^>' | grep -q 'lowMachPrecond: 2, ' && diff $CC/solverConfig.yaml $R/solverConfig.yaml | grep '^>' | grep -q 'nStepOuter: 2500}' \
+# (pipefail の下で grep -q は上流を SIGPIPE で失敗させるので、数える形にする)
+[ "$dL" = 1 ] && [ "$dR" = 1 ] && [ "$(diff $CC/solverConfig.yaml $L/solverConfig.yaml | grep '^>' | grep -c 'lowMachPrecond: 2, ')" = 1 ] && [ "$(diff $CC/solverConfig.yaml $R/solverConfig.yaml | grep '^>' | grep -c 'nStepOuter: 2500}')" = 1 ] \
   && [ "$(grep -o lowMachPrecond $L/solverConfig.yaml | wc -l)" = 1 ] && [ "$(grep -c 'speciesImplicitCoupling\|speciesPrecondDt\|precondEps' $L/solverConfig.yaml)" = 0 ] \
   && diff $CC/bcondConfig.yaml $L/bcondConfig.yaml > /dev/null && diff $CC/bcondConfig.yaml $R/bcondConfig.yaml > /dev/null \
   || { echo "設定の差が想定と違う (P2-C $dL 行、C′-C $dR 行) (中止)" >> $LOG; exit 1; }
