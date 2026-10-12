@@ -89,6 +89,10 @@ print(json.dumps({"n_nodes": len(nt), "physical": names})); gmsh.finalize()
 
 
 def part_cad(run: Path, out: Path, freecadcmd=None) -> dict:
+    """cad/: 2D の STEP (転送誤差の検査つき)、3D の内面の STEP と STL、独立の読み直し (§6 V2)。
+    合格は**全部の検査が実行されて合格したときだけ** (失敗・未実行・結果の欠落を合格にしない; codex result レビュー 2026-10-13 M2):
+    2D の転送 PASS・回転面が作れる、3D の書き出しの FreeCAD の読み直しが有効で面 1 枚・ノット区間の和の面積が ∫2πr ds と相対 ≤ 1e-6、
+    gmsh の読み直しが成功・求積が収束・面積が相対 ≤ 1e-6・bbox の x 範囲が曲線の定義域と ≤ 1e-6 mm (+ OCC の許容差 1e-7 mm)。"""
     from . import wall_step
     _need(run, ["wall_repr.json"])
     rec = json.loads((run / "wall_repr.json").read_text())
@@ -99,32 +103,44 @@ def part_cad(run: Path, out: Path, freecadcmd=None) -> dict:
     tr = sc["readback"]["transfer"]
     res = {"step2d": "cad/wall_physical.step", "transfer_pass": bool(tr["pass"]), "transfer_pos_max_mm": tr.get("pos_max_mm"),
            "revolve_ok": bool(sc["readback"]["revolve_ok"]), "chord_minus_curve": sc["cad_vs_cfd"].get("chord_minus_curve")}
-    if hasattr(wall_step, "write_surface"):
-        sf = wall_step.write_surface(d / "wall_physical.step", d / "wall_surface.step", d / "wall_surface.stl")
-        res["surface"] = sf
-        chk = HERE / "cad_check_gmsh.py"
-        if chk.exists():
-            q = subprocess.run([GMSH_PYTHON, str(chk), str(d / "wall_surface.step")], capture_output=True, text=True, timeout=600)
-            if q.returncode == 0:
-                g = json.loads(q.stdout.strip().splitlines()[-1])
-                res["surface_gmsh"] = g
-                # 解析の面積 ∫2πr ds (保存した曲線を 20001 点で台形積分) と比べる (§6 V2)
-                from ..geometry.wall_axismach import load_wall_file
-                W = load_wall_file(run)
-                s = float(W["scale_m"]) * 1000.0
-                x = np.linspace(*W["domain"], 400001)
-                r = np.asarray(W["physical"].r(x), dtype=float)
-                ds = np.hypot(np.diff(x), np.diff(r))
-                A = float(np.sum(np.pi * (r[1:] + r[:-1]) * ds)) * s * s   # 台形 (40 万区間; 打ち切り誤差 ≲1e-10 相対)
-                res["surface_area_analytic_mm2"] = A
-                res["surface_area_rel_err"] = float(abs(g.get("area_mm2", float("nan")) - A) / A)
-            else:
-                res["surface_gmsh_error"] = q.stderr[-800:]
-    else:
-        res["surface"] = "未実装 (wall_step.write_surface が無い)"
-    res["pass"] = bool(res["transfer_pass"] and res["revolve_ok"] and res.get("surface_area_rel_err", 0.0) <= 1e-6)
+    checks = {"transfer_2d": res["transfer_pass"], "revolve_2d": res["revolve_ok"]}
+    # 解析の面積 ∫2πr ds (保存した曲線を 40 万区間の台形; 打ち切り誤差 ≲1e-10 相対) と曲線の定義域 [mm]
+    from ..geometry.wall_axismach import load_wall_file
+    W = load_wall_file(run)
+    s = float(W["scale_m"]) * 1000.0
+    x = np.linspace(*W["domain"], 400001)
+    r = np.asarray(W["physical"].r(x), dtype=float)
+    A = float(np.sum(np.pi * (r[1:] + r[:-1]) * np.hypot(np.diff(x), np.diff(r)))) * s * s
+    dom = [float(W["domain"][0]) * s, float(W["domain"][1]) * s]
+    res["surface_area_analytic_mm2"], res["domain_mm"] = A, dom
+    sf = wall_step.write_surface(d / "wall_physical.step", d / "wall_surface.step", d / "wall_surface.stl")
+    res["surface"] = sf
+    fc_area = sf.get("readback_area_knot_split_mm2")
+    fc_bb = sf.get("readback_bbox_mm") or [np.nan] * 6
+    checks["freecad_readback_valid"] = sf.get("readback_valid") is True
+    checks["freecad_one_face"] = sf.get("readback_faces") == 1
+    checks["freecad_area"] = fc_area is not None and abs(fc_area - A) / A <= 1e-6
+    checks["freecad_bbox_x"] = bool(abs(fc_bb[0] - dom[0]) <= 1e-6 and abs(fc_bb[3] - dom[1]) <= 1e-6)
+    chk = HERE / "cad_check_gmsh.py"
+    q = subprocess.run([GMSH_PYTHON, str(chk), str(d / "wall_surface.step")], capture_output=True, text=True, timeout=600)
+    g = None
+    if q.returncode == 0 and q.stdout.strip():
+        try:
+            g = json.loads(q.stdout.strip().splitlines()[-1])
+        except ValueError:
+            g = None
+    res["surface_gmsh"] = g if g is not None else {"error": (q.stdout + q.stderr)[-800:], "exit": q.returncode}
+    g = g or {}
+    g_bb = g.get("bbox_mm") or [np.nan] * 6
+    checks["gmsh_readback"] = q.returncode == 0 and "area_mm2" in g
+    checks["gmsh_quadrature_converged"] = g.get("area_quadrature_converged") is True
+    checks["gmsh_area"] = "area_mm2" in g and abs(float(g["area_mm2"]) - A) / A <= 1e-6
+    checks["gmsh_bbox_x"] = bool(abs(g_bb[0] - dom[0]) <= 1.1e-6 and abs(g_bb[3] - dom[1]) <= 1.1e-6)
+    res["surface_area_rel_err"] = {"freecad": (abs(fc_area - A) / A if fc_area is not None else None),
+                                   "gmsh": (abs(float(g["area_mm2"]) - A) / A if "area_mm2" in g else None)}
+    res["checks"] = checks
+    res["pass"] = bool(all(checks.values()))
     return res
-
 
 def _converter() -> Path | None:
     """convertGmshToForge の場所 (runner と同じ規則: FORGE_CONVERTER > FORGE_BIN の隣 > 既定のビルド)。この作業ツリーの native ビルドも探す。"""
@@ -264,13 +280,45 @@ def part_excel(run: Path, out: Path, step=None) -> dict:
     else:
         res["cfd"] = "飛ばした: res_wall_*.h5 が無い (CFD 前の run)"
         res["thermal_use"] = {"verdict": "未評価", "reason": "CFD の結果が無い"}
+    # thermal_use を表の付属 JSON と xlsx に専用の欄で残す (表だけを渡されても使えるかが分かるように; codex result レビュー 2026-10-13 M3)
+    tu = res["thermal_use"] if isinstance(res.get("thermal_use"), dict) else {"verdict": "未評価"}
+    tu_short = {"verdict": tu.get("verdict"), "step": tu.get("step"), "rule": tu.get("rule"), "reason": tu.get("reason")}
+    for k in ("convergence", "quasisteady", "wall_resolution"):
+        v = tu.get(k) or {}
+        tu_short[k] = {"result": v.get("result"), "verdict_line": v.get("verdict_line"), "reason": v.get("reason")}
+    stj = d / "wall_cfd_nodes.status.json"
+    if stj.exists():
+        sj = json.loads(stj.read_text())
+        sj["thermal_use"] = tu_short
+        sj["use_for_thermal_design"] = (tu_short["verdict"] == "PASS")
+        stj.write_text(json.dumps(_jsonable(sj), indent=1, ensure_ascii=False))
+    # 幾何の面積との積分の整合 (§6 V5 の再定義): q × A_node は Q に厳密に戻る。幾何のリング面積 (多角形の台形) との差は面積の定義の差
+    # (ソルバの半割面の 1/4 点の r の重み) で、|Σq·ring − ΣQ|/ΣQ ≤ 1e-4 を合格とする (codex result レビュー 2026-10-13 M5)
+    cf = d / "wall_cfd_nodes.csv"
+    if cf.exists():
+        import csv as _csv
+        rows = list(_csv.DictReader(open(cf)))
+        qk = "q_into_wall_W_m2" if rows and "q_into_wall_W_m2" in rows[0] else None
+        if qk and all(r_[qk] not in ("", None) for r_ in rows):
+            Qs = np.array([float(r_["Q_node_W"]) for r_ in rows]); qs = np.array([float(r_[qk]) for r_ in rows])
+            ring = np.array([float(r_["ring_area_m2"]) for r_ in rows]); An = np.array([float(r_["A_node_m2"]) for r_ in rows])
+            rel = float(abs(np.sum(qs * ring) - Qs.sum()) / abs(Qs.sum())) if Qs.sum() != 0 else float("nan")
+            res["cfd_integral"] = {"sum_Q_W": float(Qs.sum()), "sum_q_ring_W": float(np.sum(qs * ring)), "rel": rel,
+                                   "max_abs_ring_over_A_minus_1": float(np.max(np.abs(ring / An - 1.0))), "tol": 1e-4,
+                                   "pass": bool(rel <= 1e-4)}
     conds = _conditions(run)
+    conds["thermal_use_verdict"] = (tu_short["verdict"], "PASS のときだけ壁面量表の熱量を熱設計に使ってよい")
     (d / "conditions.csv").write_text("key,value,unit\n" + "".join(f"{k},{v[0]},{v[1]}\n" for k, v in conds.items()))
     if Path(PPTX_PYTHON).exists() and hasattr(wt, "write_xlsx"):
-        notes = [f"thermal_use: {json.dumps(res['thermal_use'], ensure_ascii=False, default=str)[:500]}"]
+        notes = [f"thermal_use (熱量を熱設計に使えるか): {tu_short['verdict']}  — PASS 以外なら cfd_wall の熱量を使わない",
+                 f"  収束: {tu_short['convergence']['result']}  {tu_short['convergence']['verdict_line'] or tu_short['convergence']['reason'] or ''}",
+                 f"  熱量の準定常 (総熱量と 16 区間): {tu_short['quasisteady']['result']}  {tu_short['quasisteady']['verdict_line'] or tu_short['quasisteady']['reason'] or ''}",
+                 f"  壁解像: {tu_short['wall_resolution']['result']}  {tu_short['wall_resolution']['verdict_line'] or tu_short['wall_resolution']['reason'] or ''}",
+                 f"  対象の step: {tu_short['step']}"]
         res["xlsx"] = wt.write_xlsx(d / "nozzle_tables.xlsx", (d / "wall_shape_mm.csv") if (d / "wall_shape_mm.csv").exists() else None,
                                     (d / "wall_cfd_nodes.csv") if (d / "wall_cfd_nodes.csv").exists() else None,
-                                    {k: f"{v[0]} {v[1]}" for k, v in conds.items()}, notes, PPTX_PYTHON)
+                                    {k: f"{v[0]} {v[1]}" for k, v in conds.items()}, notes, PPTX_PYTHON,
+                                    thermal_use=str(tu_short["verdict"]))
     else:
         res["xlsx"] = "飛ばした: xlsxwriter (.venv-pptx) が無い"
     return res
@@ -307,7 +355,9 @@ def part_dimensions(run: Path, out: Path, card_path) -> dict:
     else:
         card = yaml.safe_load(Path(card_path).read_text())
         dt = dg.design_throat_diameter_mm(run) if "diameter_design_m" in (card.get("throat") or {}) else None
-        g = dg.evaluate_gate(card, sd, md, dt)
+        sc = out / "cad" / "wall_physical_step.json"           # 弦の形状誤差 (wall_step.chord_deviation) を判定に渡す
+        chord = (json.loads(sc.read_text()).get("cad_vs_cfd") or {}).get("chord_minus_curve") if sc.exists() else None
+        g = dg.evaluate_gate(card, sd, md, dt, chord)
         res.update(g)
         res["card"] = str(card_path)
         res["card_sha256"] = _sha(Path(card_path))

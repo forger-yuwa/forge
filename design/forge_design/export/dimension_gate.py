@@ -134,14 +134,17 @@ def mesh_dimensions(msh_path) -> dict:
 
 def card_targets(card: dict) -> dict:
     """要求カードから比べる寸法 [mm] と公差 [mm] を取り出す。"""
-    tol = card.get("tolerances") or {}
-    if "length_m" not in tol or "diameter_m" not in tol:
-        raise ValueError("カードに tolerances.length_m と tolerances.diameter_m が要る")
+    # 公差の既定は生成器と同じ値 (wt_card.DEFAULT_TOLERANCES) で補う (codex result レビュー 2026-10-13 M4: 生成器は省略を許すのに
+    # ゲートが拒否していた)
+    from ..intake.wt_card import DEFAULT_TOLERANCES
+    given = card.get("tolerances") or {}
+    tol = {**DEFAULT_TOLERANCES, **given}
     th = card["throat"]
     if ("diameter_physical_m" in th) == ("diameter_design_m" in th):
         raise ValueError("カードの throat は diameter_physical_m か diameter_design_m のどちらか 1 つ")
     kind = "physical" if "diameter_physical_m" in th else "design"
-    return {"inlet_radius_mm": 1000.0 * float(card["inlet"]["radius_m"]),
+    return {"tolerances_source": {k: ("card" if k in given else "default (wt_card.DEFAULT_TOLERANCES)") for k in ("length_m", "diameter_m")},
+            "inlet_radius_mm": 1000.0 * float(card["inlet"]["radius_m"]),
             "L_pipe_mm": 1000.0 * float(card["inlet"]["pipe_length_m"]),
             "L_U_mm": 1000.0 * float(card["inlet"]["contraction_length_m"]),
             "L_div_mm": 1000.0 * float(card["divergent_length_m"]),
@@ -180,19 +183,33 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
             raise ValueError("設計スロート径のカードには設計壁の最小径 (design_throat_diameter_mm) が要る")
         add("throat_diameter_design", T["throat_diameter_mm"], design_throat["diameter_mm"], td,
             note=f"物理スロート径 (参考) {phys:.6f} mm")
-    # メッシュと STEP の整合 (弦の形状誤差の範囲か): 出口位置・入口半径は節点が曲線上なので丸めの範囲、最小半径は弦で取り逃しうる
+    # メッシュと STEP の整合 (codex result レビュー 2026-10-13 M1: 記録するだけでなく合否に入れる)。誤差の量を分けて判定する:
+    # - 端点 (出口端・入口半径): 節点は曲線上なので転送・丸めの範囲 END_TOL_MM
+    # - 最小半径: 壁節点の最小は曲線の最小以上 (節点は曲線上) で、取り逃しは弦の範囲 → 0 − END_TOL ≤ 差 ≤ 直径公差/2
+    # - 直管の終端: メッシュの接合点を挟む区間に STEP の終端が入る
+    # - 弦の形状誤差 (wall_step.chord_deviation、節点を結ぶ多角形と曲線の差): 最大 |差| ≤ 直径公差/2
     consistency = {}
     if mesh_dims:
         consistency["x_end_diff_mm"] = float(m["x_end_mm"] - step_dims["x_end_mm"])
         consistency["x_end_pass"] = bool(abs(consistency["x_end_diff_mm"]) <= END_TOL_MM)
         consistency["inlet_radius_diff_mm"] = float(m["inlet_radius_mm"] - step_dims["inlet_radius_mm"])
-        consistency["throat_r_mesh_minus_curve_mm"] = float(m["throat_physical"]["r_mm"] - step_dims["throat_physical"]["r_mm"])
+        consistency["inlet_radius_pass"] = bool(abs(consistency["inlet_radius_diff_mm"]) <= END_TOL_MM)
+        d_th = float(m["throat_physical"]["r_mm"] - step_dims["throat_physical"]["r_mm"])
+        consistency["throat_r_mesh_minus_curve_mm"] = d_th
+        consistency["throat_r_pass"] = bool(-END_TOL_MM <= d_th <= td / 2.0)
         lo, hi = m["straight_end_interval_mm"]
         consistency["straight_end_in_mesh_interval"] = bool(lo - 1e-6 <= step_dims["straight"]["x_end_mm"] <= hi + 1e-6)
-    if chord:
-        consistency["chord"] = chord
-    ok = all(v["pass"] for v in items.values()) and consistency.get("x_end_pass", True)
+    if chord and chord.get("status") == "ok":
+        cmax = max(abs(float(chord["min_um"])), abs(float(chord["max_um"]))) * 1e-3
+        consistency["chord_max_abs_mm"] = cmax
+        consistency["chord_pass"] = bool(cmax <= td / 2.0)
+    elif chord:
+        consistency["chord_status"] = chord.get("status")
+    req = [k for k in ("x_end_pass", "inlet_radius_pass", "throat_r_pass", "straight_end_in_mesh_interval", "chord_pass") if k in consistency]
+    consistency["required"] = req
+    ok = all(v["pass"] for v in items.values()) and all(consistency[k] for k in req)
     return {"format": "forge.dimension_gate/v1", "verdict": "PASS" if ok else "FAIL", "items": items,
+            "tolerances_source": T["tolerances_source"],
             "throat_kind": T["throat_kind"], "mesh_vs_step": consistency,
             "note": "STEP とメッシュから測り直した寸法をカードと比べた (YAML の往復ではない)。出口マッハ数は CFD の判定で、ここでは測らない"}
 

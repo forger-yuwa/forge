@@ -116,7 +116,7 @@ def syn_q(pid, x):
     return 1000.0 * (1.0 + 10.0 * x) if pid == 3 else -3000.0 * (1.0 + x)
 
 
-def make_synth(td: Path, axi=True, steps=(100,), qf="valid", tw=5.0, residual=False, only_q_eff=False):
+def make_synth(td: Path, axi=True, steps=(100,), qf="valid", tw=5.0, residual=False, only_q_eff=False, redistribute=False):
     """node 方式・2D の合成 run: 壁 2 本 (円筒 r = 0.01 / 0.05 m)、各壁節点の内側に 1 節点。壁ダンプは iCells と違う順。
     qf: valid / nan_one / nan_all。iface_Qf_eff = q r_f |S_f| (軸対称、1 rad あたり) または q |S_f| (平面)。"""
     td.mkdir(parents=True, exist_ok=True)
@@ -181,7 +181,14 @@ def make_synth(td: Path, axi=True, steps=(100,), qf="valid", tw=5.0, residual=Fa
         elif qf == "nan_all":
             Qf = np.full_like(Qf, np.nan)
         perm = [2, 0, 4, 1, 3] + list(range(5, len(xs)))            # 壁ダンプの順も別に
-        for st in steps:
+        for k_st, st in enumerate(steps):
+            Qf_st = Qf
+            if redistribute and pid == 3:
+                # 総熱量は厳密に同じまま、離れた 2 節点の熱量を ±20 % で交互に入れ替える (codex 諮問 2026-10-13 result の判別 A/B の腕 B)
+                Qf_st = Qf.copy()
+                d = 0.2 * (1.0 if k_st % 2 == 0 else -1.0) * Qf[0]
+                Qf_st[0] += d
+                Qf_st[-1] -= d
             with h5py.File(td / f"res_{nm}_{pid}_{st}.h5", "w") as f:
                 f.attrs["step"] = np.int32(st)
                 f["MESH/COORD"] = coords[[wall_ids[pid][i] for i in perm]].ravel()
@@ -189,7 +196,7 @@ def make_synth(td: Path, axi=True, steps=(100,), qf="valid", tw=5.0, residual=Fa
                         "twall_x": np.full(len(xs), tw), "twall_y": np.zeros(len(xs)), "twall_z": np.zeros(len(xs)),
                         "qwall": -1.01 * q, "iface_q_eff": q_eff_old}
                 if not only_q_eff:
-                    vals["iface_Qf_eff"] = Qf
+                    vals["iface_Qf_eff"] = Qf_st
                 for k, v in vals.items():
                     f["VALUE/" + k] = np.asarray(v, dtype=float)[perm]
         truth[pid] = {"x": xs_, "r": r, "ds": ds_, "q": q, "Qf": Qf, "q_eff_old": q_eff_old}
@@ -513,6 +520,22 @@ def run(out: Path):
     check(f"thermal_use (合成: y1+ 136 で壁解像 FAIL): {th5['verdict']} = FAIL ({th5['wall_resolution']['verdict_line']})",
           th5["verdict"] == "FAIL" and th5["wall_resolution"]["result"] == "FAIL")
     make_synth(syn / "pass_nan", steps=(100, 200, 300, 400, 500), tw=1e-5, residual=True, qf="nan_one")
+    # 判別 A/B (codex 諮問 2026-10-13 result): A = 各節点の熱量が一定 (上の pass)、B = 総熱量は同じで局所の熱量が ±20 % で交互に変わる
+    STEPS_AB = tuple(range(100, 2100, 100))
+    make_synth(syn / "ab_A", steps=STEPS_AB, tw=1e-5, residual=True)
+    make_synth(syn / "ab_B", steps=STEPS_AB, tw=1e-5, residual=True, redistribute=True)
+    sA = WT.wall_heat_series(syn / "ab_A", syn / "ab_out" / "A.csv")
+    sB = WT.wall_heat_series(syn / "ab_B", syn / "ab_out" / "B.csv")
+    _, rA = read_csv(syn / "ab_out" / "A.csv")
+    _, rB = read_csv(syn / "ab_out" / "B.csv")
+    totA = np.array([float(r[1]) for r in rA]); totB = np.array([float(r[1]) for r in rB])
+    check(f"判別 A/B: 腕 B の総熱量は腕 A と同じ (相対の最大差 {np.max(np.abs(totB / totA - 1)):.1e})・区間の列 {len(sB['band_columns'])}",
+          np.max(np.abs(totB / totA - 1)) <= 1e-12 and len(sB["band_columns"]) == 12)
+    tA = WT.thermal_use(syn / "ab_A")
+    tB = WT.thermal_use(syn / "ab_B")
+    check(f"判別 A/B: 腕 A (局所も一定) は PASS ({tA['verdict']}; 準定常 {tA['quasisteady']['result']})", tA["verdict"] == "PASS")
+    check(f"判別 A/B: 腕 B (総熱量一定・局所が入れ替わる) は準定常で FAIL ({tB['verdict']}; 準定常 {tB['quasisteady']['result']}: "
+          f"{tB['quasisteady'].get('not_steady')})", tB["verdict"] == "FAIL" and tB["quasisteady"]["result"] == "FAIL")
     th4 = WT.thermal_use(syn / "pass_nan")
     check(f"thermal_use (合成: 熱量 nonfinite): {th4['verdict']} = FAIL", th4["verdict"] == "FAIL")
 

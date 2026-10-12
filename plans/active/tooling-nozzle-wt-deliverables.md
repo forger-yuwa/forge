@@ -244,17 +244,17 @@ NS 後に $r_t$・k_f を解き直して壁を作り直した最終 run にも�
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
 | 1 | plan 段の諮問とレビュー | §4・§6 を codex (diagnose; 判断役のスイッチが codex) に諮り、続けて `codex_review.py --stage plan`。採否を §6.1 に書く。判断: 2026-10-13 諮問済み (寸法の出荷ゲートを採用) と plan 段レビュー済み (GO-with-changes、全件採用)。§6.1 | F |
-| 2 | 要求カードの生成器 | §4.1 の 1〜6。触る: `design/forge_design/intake/{__init__,wt_card}.py`・`intake/recipes/*.yaml`・`design/tests/test_wt_card.py`。合格: §6 V1 | O |
-| 3 | 形状表と 3D STEP/STL | §4.5 の形状表、§4.2 の cad/。FreeCAD ジョブを `export/` に一般化 (case/45 の `cad_deliverables.py` の surface を移す)。合格: §6 V2 | O |
-| 4 | 構造ファイルと STEP→gmsh 再構築 | §4.3。触る: `export/mesh_structure.py`・`export/rebuild_from_step.py`。合格: §6 V3 | O |
-| 5 | Fluent 書き出し器と CGNS・境界条件表 | §4.4。触る: `export/fluent_msh.py`。合格: §6 V4a・V4b | O |
-| 6 | 壁面量表と xlsx | §4.5。合格: §6 V5 | O |
-| 7 | 一括コマンドと README/MANIFEST・寸法ゲート | §4.2・§4.2a。合格: §6 V6・V7 のゲート | O |
-| 8 | M5 デモ (CFD 前) | カード (**Tt 1250 K (ユーザ指示 2026-10-13)、Pt 3.0 MPa (出口静圧が下がりすぎないよう親が選定: semiperfect 空気で出口 221.8 K・5139 Pa)**、実条件ではない) → `--solve-rt-throat` → `--init-integral --prepare-only` → 成果物。壁 350 K は断熱壁温 ~1150 K に対し強い冷却 (CONTUR の温度形の熱閉包の危険、isothermal plan §5.1 #10) なので、CFD 前の壁の精度は M6 の断熱の実績からは言えない。合格: §6 V7 | O |
-| 9 | skill・手順書・methods の同期 | §4.6。合格: `check_plans.py`、skill を読んだだけの別エージェントが V7 を再現できる (§6 V8) | O |
+| 2 | ~~要求カードの生成器~~ **完了 2026-10-13** | §4.1 の 1〜6。触る: `design/forge_design/intake/{__init__,wt_card}.py`・`intake/recipes/*.yaml`・`design/tests/test_wt_card.py`。合格: §6 V1 | O |
+| 3 | ~~形状表と 3D STEP/STL~~ **完了** | §4.5 の形状表、§4.2 の cad/。FreeCAD ジョブを `export/` に一般化 (case/45 の `cad_deliverables.py` の surface を移す)。合格: §6 V2 | O |
+| 4 | ~~構造ファイルと STEP→gmsh 再構築~~ **完了** | §4.3。触る: `export/mesh_structure.py`・`export/rebuild_from_step.py`。合格: §6 V3 | O |
+| 5 | ~~Fluent 書き出し器と CGNS・境界条件表~~ **完了** (Fluent での読み込みは #10) | §4.4。触る: `export/fluent_msh.py`。合格: §6 V4a・V4b | O |
+| 6 | ~~壁面量表と xlsx~~ **完了** | §4.5。合格: §6 V5 | O |
+| 7 | ~~一括コマンドと README/MANIFEST・寸法ゲート~~ **完了** | §4.2・§4.2a。合格: §6 V6・V7 のゲート | O |
+| 8 | ~~M5 デモ (CFD 前)~~ **完了** (case/70 run_0001; V7 の対照 run_0007) | カード (**Tt 1250 K (ユーザ指示 2026-10-13)、Pt 3.0 MPa (出口静圧が下がりすぎないよう親が選定: semiperfect 空気で出口 221.8 K・5139 Pa)**、実条件ではない) → `--solve-rt-throat` → `--init-integral --prepare-only` → 成果物。壁 350 K は断熱壁温 ~1150 K に対し強い冷却 (CONTUR の温度形の熱閉包の危険、isothermal plan §5.1 #10) なので、CFD 前の壁の精度は M6 の断熱の実績からは言えない。合格: §6 V7 | O |
+| 9 | ~~skill・手順書・methods の同期~~ **完了** (V8 は未実施のまま記録) | §4.6。合格: `check_plans.py`、skill を読んだだけの別エージェントが V7 を再現できる (§6 V8) | O |
 | 10 | Fluent での読み込み確認 (ユーザ) | `fluent/nozzle_2d_axi.msh` を Fluent で `Mesh > Check` (負の体積なし・ゾーン名と型)。結果を §9 に記録。**2026-10-13 ユーザ: 手元に Fluent が無いので先に進める** → 未確認のまま保留 (Fluent が使えるようになったら確認する。読めなければ CGNS が代わり) | ユーザ |
 | 11 | result 段の解釈とレビュー | V1〜V8 の結果を codex (diagnose) に諮ってから `--stage result` | F |
-| 13 | 変換器のタグ順の検査 | 作り直したメッシュ (gmsh が CAD 要素ごとに節点を書き、元の番号を保つ) を `convertGmshToForge` に通すと、変換器 (`mesh/gmshReader.hpp`) が節点のタグを読まずにファイル順で番号を振るため接続が黙って壊れた (skew 1.0 が 16.5 %、元は最大 0.44)。**変換器にタグ順の検査を追加 (2026-10-13、1 ファイルのバグ修正: 正しい msh の結果は不変、壊れた入力は止まる)**。再構築は forge 形 (節点ブロック 1 つ・元と同じ番号) と CAD 形 (`_cad.msh`) を分けて書く。合格: 元と作り直しの両方が `check_mesh_quality.py --ar-max 5000` で PASS (V3(d)) | O |
+| 13 | ~~変換器のタグ順の検査~~ **完了** | 作り直したメッシュ (gmsh が CAD 要素ごとに節点を書き、元の番号を保つ) を `convertGmshToForge` に通すと、変換器 (`mesh/gmshReader.hpp`) が節点のタグを読まずにファイル順で番号を振るため接続が黙って壊れた (skew 1.0 が 16.5 %、元は最大 0.44)。**変換器にタグ順の検査を追加 (2026-10-13、1 ファイルのバグ修正: 正しい msh の結果は不変、壊れた入力は止まる)**。再構築は forge 形 (節点ブロック 1 つ・元と同じ番号) と CAD 形 (`_cad.msh`) を分けて書く。合格: 元と作り直しの両方が `check_mesh_quality.py --ar-max 5000` で PASS (V3(d)) | O |
 | 14 | 壁の端の節点の熱量 | case/63 run_0013 の加熱壁の両端 (断熱壁と接する節点) で q / (−qwall) が 3.81・1.93 (内部は 1.8〜3.2 % の差)。原因は未確認。ノズルでは入口・出口の角に当たる。表は値を変えず `.status.json` の `walls.*.end_nodes` に隣の節点との比を記録し、README に「壁の両端の節点の熱量は信頼できない (未確認)」と書く。原因の切り分けは CHT 側の論点として別に | F |
 | 15 | **(別 plan に切り出す) 出口の切断と from_length の解法** | codex 諮問 2026-10-13 (2 回目) の採用。(1) **[2026-10-13 implementer の測定で訂正]** 今の雛形の閉包 (`wall_mode: cplus`) では $x_F$ は終端 C⁺ 自身の壁点の上に来る (`moc_inverse.py:609`) が、丸めで $x_F$ がその点より 1e-13 程度下になると切る規則 `wall[wall[:,0] <= x_F]` (`moc_inverse.py:613`) がその点を落とし、壁 = メッシュ = STEP の終点 $x_e$ が**ちょうど 1 点間隔**短くなる (起票時に引いた `:903-904` は streamline の経路)。M5 デモの from_length の 8 回の評価のうち 5 回で落ち (0.845 mm)、case/45 の実寸では拡大部長の誤差 −6.06 mm のうち 5.35 mm (0.0698 $r_t$) がこれだった。`explicit` も同じ経路 (`runner_axismach.py:554`) なので**生産の壁 (case/45) にも当たる** (実害は未確認)。交点 $(x_F, r_F)$ を有効な壁区間で補間して追加するのが方向 (最後の点の $x$ の書き換えは却下、$x_e$ を逆問題の目標にするだけの修正も却下)。(2) from_length は最初の非改善で打ち切る。判別 A/B (同じ MOC 場で切断 vs 交点追加、出口移動が $r_t(x_F-x_e)$ と 0.05 mm 以内で一致するか) を含めて別 plan で。候補: `tooling-design-problem-campaign-recipe` §5.1 #15 (寸法固定) の前提作業として新規 plan。判断: 2026-10-13 codex 諮問 — 本 plan では扱わない | F |
 | 16 | **格子の雛形は M6 系の最新の格子の結論に追随する** | 要求カードの雛形の `mesh` (と生成器の第 1 層の見積もり) は 2026-10-07 の生産 G1 (2000×97、壁に寄せた等比) を元にしている。冷却壁の格子はその後、別セッションで ni 4719 × nj 121 の壁法線の層つきの格子 (`cold_pair_mesh.py`、isothermal plan §5.1 #13〜#15) と、節点を減らして軸付近を細かくする core grid (`feature/nozzle-core-grid` の plan `tooling-nozzle-core-grid`、draft) へ進んでいる。**本 plan は格子の仕様を決めない** (ユーザ 2026-10-13: 本セッションはフローを流す役、細かい検証は別セッション)。core grid の plan が accepted になったら雛形と見積もりをその結論に差し替える。それまで生成器の格子は「初期値」と明記したまま | O |
@@ -288,7 +288,13 @@ NS 後に $r_t$・k_f を解き直して壁を作り直した最終 run にも�
 - **V5 Excel**: 形状表のリング面積の総和 (台形) と V2 の面積が相対 1e-6、CFD 表の `ring_area` の総和と壁の多角形の側面積が相対 1e-12。CSV の列名がすべて ASCII。
   **熱量の単位と符号** (codex plan レビュー M1): 軸対称で `interfaceDiag: 1` の等温壁の run (手元の case/63 系など; 無ければ小さい
   軸対称の管の run を作る) で、表の $q$ (= $2\pi$`iface_Qf_eff`$/A_{node}$) と物理量の `qwall` (反転) と `iface_q_compact` が、半径の違う
-  2 箇所以上で 5 % 以内 (3 つは別の離散式なので一致はしない; 桁と符号の検査)、総熱量 $\sum Q_{node}$ と $\int q\,2\pi r\,ds$ が相対 1e-9、
+  2 箇所以上で 5 % 以内 (3 つは別の離散式なので一致はしない; 桁と符号の検査)、総熱量 $\sum Q_{node}$ と $\int q\,2\pi r\,ds$ が相対 1e-9
+  **[2026-10-13 result レビュー M5: 不合格 → 再定義]** 実測 2.880e-6 (case/70 run_0006) で 1e-9 を満たさない。原因は面積の定義の差で、
+  ソルバの面積 $A_{node}$ (半割面の 1/4 点の $r$ で重み) と幾何のリング面積 (多角形の台形) の節点ごとの比 ring/A − 1 が最大 2.1e-5・中央値 7e-8、
+  その Q 重みの平均が 2.880e-6 で積分差を説明しきる (単位・符号の誤りではない)。1e-9 は「同じ面積なら一致する」自己一致を想定した値で、独立な面積では
+  原理的に届かない。**再定義**: 正本は保存形の $Q_{node}$ と $q = Q/A_{node}$ (q × A_node は Q に厳密に戻る)。幾何の面積との差は
+  |Σq·ring − ΣQ| / ΣQ ≤ 1e-4 (熱流束の形式間の差 1〜3 % より 2 桁以上小さい; 工学的に無視できる) を合格とし、実測値と節点ごとの比の最大を記録する。
+  結果を見てから許容を変えたことをここに残す (codex result レビューの推奨どおり、自己一致でない検査に置き換えた)、
   符号は流体→壁が正。**$r$ 倍のずれ (旧 `iface_q_eff` をそのまま使う) を負例として検出する**。
   **状態** (M3): 断熱壁の run (データセットはあるが NaN) で `not_applicable`、一部 NaN を入れた写しで `nonfinite`、異なる step の混入で例外、
   未収束の run で `thermal_use` が `PASS` にならない。
@@ -306,14 +312,18 @@ NS 後に $r_t$・k_f を解き直して壁を作り直した最終 run にも�
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-10-13 | [2026-10-13-tooling-nozzle-wt-deliverables-plan.md](../../notes/reviews/2026-10-13-tooling-nozzle-wt-deliverables-plan.md) | GO-with-changes, C0/M5/m1 | **全件採用** (根拠を当方で確認してから): M1 軸対称の `iface_q_eff` は $r q$ (`variables.cpp:599-604` と `conjugateWall.cpp:229` を確認) → §3・§4.5 を積分済み `iface_Qf_eff` からに、V5 に単位と符号の検査。M2 直管長の閾値測定が +15〜18 mm ずれる (接合点が $r'=r''=0$) → §4.2a を制御点とノットからの同定に、設計スロート径の比較を設計壁に。M3 NaN のデータセット・収束との結び付き → §4.5 の状態と `thermal_use`、V5 の負例。M4 CAD 編集後に $x(u)=u$ が崩れる → §4.3 で $x(u)=x_i$ を解く、V3 に正例・負例。M5 Fluent の動作圧 → §4.4・V4(d)。m6 誤差の量の混同・品質判定 → §4.2a・V3(d)。判断役 (codex) 自身の指摘で却下が無いため、採否の別途諮問は省略 |
+| result | 2026-10-13 | [2026-10-13-tooling-nozzle-wt-deliverables-result.md](../../notes/reviews/2026-10-13-tooling-nozzle-wt-deliverables-result.md) | **NO-GO**, C0/M5/m2 | **全件採用** (codex がメモリ上の負例で再現したものを当方でも試験に): M1 寸法ゲートがメッシュ側の差を合否に使っていない → 入口半径・最小半径・直管の終端の区間・出口端・弦の形状誤差を必須の判定に (`dimension_gate.py`; 負例 5 本を `run_deliverables_tests.py` に)。M2 3D STEP の検査の失敗・欠落が合格になる → 全検査を必須に (`deliverables.part_cad`; FreeCAD の読み直し無効・面 2 枚・gmsh 失敗の負例)。M3 `thermal_use` が表の JSON と xlsx に伝わらない → `.status.json` の `thermal_use`・`use_for_thermal_design`、conditions、xlsx の notes と wall_1d に専用の欄 (case/70 run_0006 で FAIL が載ることを確認)。M4 公差を省いたカードでゲートが止まる → 生成器と同じ既定の公差で補う。M5 V5 の積分検査が自己一致で、独立な面積では 2.88e-6 > 1e-9 → 不合格を記録し、原因 (面積の定義の差) を測って説明、許容を根拠つきで再定義 (§6 V5)。m6 V7 の A/B を M5 で実施 (run_0007: 内部許容差 0.05 r_t で拡大部長 −1.907 mm → ゲート FAIL、カード由来 0.02 r_t の run_0001 は +0.066 mm で PASS)。m7 文書の状態の同期 (methods・手順書・plans/README・§7・§5.1) |
+| diagnose (result 前) | 2026-10-13 | [2026-10-13-wt-deliverables-result-diagnose.md](../../notes/reviews/2026-10-13-wt-deliverables-result-diagnose.md) | 結論: accepted は保留し、総熱量が一定のまま局所の熱流束だけが変わる負例で `thermal_use` が誤って PASS しないかを確かめる。Major 1 | **採用**: `thermal_use` は `Q_total_W` しか準定常を見ていなかった (`wall_tables.py` の `--series-cols Q_total_W`)。用途 (1 次元の壁伝導) は局所の q を使うので、壁ごとに x の順で 16 区間に分けた熱量 `Qband*` を時系列に足し、全部の準定常を要件にした。判別 A/B (合成、`run_wall_tables_tests.py`): 腕 A (局所一定) PASS、腕 B (総熱量は相対差 0 で同じ・2 節点の熱量を ±20 % で交互) は旧判定なら総熱量が STEADY で PASS になるところ、新判定で FAIL (区間 0 DRIFTING 40 %・区間 6 OSCILLATING)。V5 の単位検査は未収束の snapshot でも有効 (桁・符号の検査) とする codex の判断、−qwall と q_compact は別の式 (`viscousFlux_d.cu:615-617,654`・`conjugateWall.cpp:264`) との指摘も記録 |
 | diagnose | 2026-10-13 | [2026-10-13-wt-length-accuracy-diagnose.md](../../notes/reviews/2026-10-13-wt-length-accuracy-diagnose.md) | 結論: 寸法固定の本体修正は別 plan、今回は内部許容差の緩和を明示・記録しカードの公差で出荷ゲートが判定 (未達は FAIL)。Major 3 / Minor 1 | Major 3 件は採用 (§4.1 1.・§4.2a・§5.1 #15)。Minor (「YAML は必ず作れる」「explicit は影響しない」) は当方の前提の誤りとして撤回 — 緩和しても形状の成立は保証せず、explicit も同じ切断を通る (§5.1 #15)。判断役 (codex) 自身の結論で却下なし |
 | diagnose | 2026-10-13 | [2026-10-13-wt-deliverables-diagnose.md](../../notes/reviews/2026-10-13-wt-deliverables-diagnose.md) | 結論: 最終の STEP とメッシュから寸法を測る出荷ゲートを入れる。Major 1 / Minor 1 | Major (V1(b)・V7 が自己一致で、`from_length` の許容差 0.05 $r_t$ が寸法を保証しない; `runner_axismach.py:571,591-611` を当方で確認) → 採用: §4.1 1. の `L_total_tol`、§4.2a、V1(b) の注記、V7 のゲートと A/B。Minor (V4(a) が書き出し器と同じ規則で自己検証) → 採用、かつ当方の測定で**規則そのものが誤り**と判明 (2D の実物で $c_0$ は左側、§3) → §4.4 を訂正し V4(a) を実物と同じ測定スクリプトでの判定に変更。V4(c) (ユーザの Fluent 確認) は必須のまま |
 
 ## 7. 影響範囲
 
 - 新規: `design/forge_design/intake/`・`design/forge_design/export/{deliverables,mesh_structure,rebuild_from_step,fluent_msh,wall_tables,freecad_surface_job}.py`・`design/tests/`。
-- 既存の変更: `export/wall_step.py` (呼び出し側から使うだけ。挙動は変えない)、skill 2 本・手順書 2 本・`methods/design/overview.md`・`design/CAPABILITIES.md`。
-- ソルバ・設計チェーン本体・既存 run の結果は変わらない。
+- 新規 (実際): `design/forge_design/intake/{wt_card.py, recipes/*.yaml, examples/m5_air_demo.yaml}`・`export/{deliverables, dimension_gate, mesh_structure, rebuild_from_step, fluent_msh, wall_tables, cad_check_gmsh}.py`・試験 6 本・`case/70.m5_air_wt_demo`。
+- 既存の変更: `export/wall_step.py` (`write_surface` の追加のみ)・`export/freecad_wall_step_job.py` (mode surface の追加のみ)、skill 2 本・手順書 2 本・`methods/design/overview.md`・`design/CAPABILITIES.md`、
+  **`solver_density_cuda/mesh/gmshReader.hpp`** (変換器: 節点のタグがファイル順に 1..N でない msh を止める検査。正しい msh の結果は不変; §5.1 #13)。
+- ソルバの計算・設計チェーン本体・既存 run の結果は変わらない。
 
 ## 8. 完了条件
 
@@ -359,3 +369,7 @@ NS 後に $r_t$・k_f を解き直して壁を作り直した最終 run にも�
     from_length の内部許容差の緩和の A/B は case/45 の実寸で記録 (緩和 0.00652 → 0.05 r_t、寸法ゲートは拡大部長 −6.06 mm で FAIL を正しく出す; 内訳は §5.1 #15)。
   - V8 (skill だけで別エージェントが再現): 未実施。
   - 結合で見つけて直したもの: 変換器のタグ順 (§5.1 #13)、再構築の出力を forge 形と CAD 形に分離、生成器の AR の余裕、Euler 用の写し、Euler → NS の移植の拒否 (§5.1 #17、回避を手順書に)。
+- 2026-10-13: result 前の codex 諮問を採用 — `thermal_use` に局所の熱量 (壁ごと 16 区間) の準定常を追加、判別 A/B の試験を追加 (§6.1)。
+- 2026-10-13: result 段の codex レビュー (NO-GO, C0/M5/m2) を全件採用して修正・再検証 (§6.1)。V5 の積分検査は事前登録の 1e-9 に対し 2.880e-6 で不合格、
+  原因を面積の定義の差と特定して許容を再定義 (§6 V5、実測 2.880e-6 ≤ 1e-4)。V7 の A/B を M5 で実施 (case/70 run_0007)。試験: deliverables 23 ok (負例 7 本を追加)・
+  wall_tables 61 ok (判別 A/B を含む)。成果物は case/70 run_0001・run_0006 を新しいコードで作り直した (run_0006 の `thermal_use` FAIL が表の JSON・xlsx・conditions に載る)。

@@ -92,6 +92,36 @@ def main() -> int:
         check("(c) wall_repr.json の無い run は cad を理由つきで飛ばす", "cad" in man_c["skipped"] and "wall_repr" in man_c["skipped"]["cad"],
               man_c["skipped"].get("cad"))
         check("(c) その run の寸法ゲートは STEP が無いので飛ばす (合格にしない)", man_c["verdict"] != "PASS", man_c["verdict"])
+    # ---- codex result レビュー 2026-10-13 の負例 (M1・M2・M4) ----
+    import copy
+    from unittest import mock
+    from forge_design.export import wall_step
+    md = dg.mesh_dimensions(FIX / "nozzle.msh")
+    check("(M1) 基準: 生産の設計値のカード・メッシュあり → PASS", dg.evaluate_gate(card_ok, sd, md)["verdict"] == "PASS")
+    for name, mut in (("入口半径 +10 mm", lambda m: m.__setitem__("inlet_radius_mm", m["inlet_radius_mm"] + 10.0)),
+                      ("スロート半径 +10 mm", lambda m: m["throat_physical"].__setitem__("r_mm", m["throat_physical"]["r_mm"] + 10.0)),
+                      ("直管の終端の区間を別の位置に", lambda m: m.__setitem__("straight_end_interval_mm", [0.0, 1.0])),
+                      ("出口端 +0.01 mm", lambda m: m.__setitem__("x_end_mm", m["x_end_mm"] + 0.01))):
+        m2 = copy.deepcopy(md); mut(m2)
+        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2)["verdict"] == "FAIL")
+    check("(M1) 弦の形状誤差 50 µm → FAIL",
+          dg.evaluate_gate(card_ok, sd, md, None, {"status": "ok", "min_um": -50.0, "max_um": 3.0})["verdict"] == "FAIL")
+    card_nt = {k: v for k, v in card_ok.items() if k != "tolerances"}
+    g_nt = dg.evaluate_gate(card_nt, sd, md)
+    check("(M4) 公差を省いたカードは生成器と同じ既定の公差で判定 (止まらない)",
+          g_nt["verdict"] == "PASS" and all(v.startswith("default") for v in g_nt["tolerances_source"].values()), g_nt["tolerances_source"])
+    with tempfile.TemporaryDirectory(prefix="deliv_m2_") as td2:
+        tmp2 = Path(td2); run3 = make_run(tmp2)
+        real_ws = wall_step.write_surface
+        def bad_surface(*a, **k):
+            r = real_ws(*a, **k); r.update(readback_valid=False, readback_faces=2); return r
+        with mock.patch.object(wall_step, "write_surface", bad_surface):
+            pc = dl.part_cad(run3, tmp2 / "out")
+        check("(M2) 3D STEP の読み直しが無効・面 2 枚なら cad は不合格", pc["pass"] is False and not pc["checks"]["freecad_readback_valid"]
+              and not pc["checks"]["freecad_one_face"], {k: v for k, v in pc["checks"].items() if not v})
+        with mock.patch.object(dl, "GMSH_PYTHON", "/bin/false"):
+            pc2 = dl.part_cad(run3, tmp2 / "out2")
+        check("(M2) gmsh の読み直しが失敗したら cad は不合格 (既定値で合格にしない)", pc2["pass"] is False and not pc2["checks"]["gmsh_readback"])
     print(f"FAIL 件数: {fails}")
     return 1 if fails else 0
 

@@ -3,7 +3,7 @@ r"""Excel 向けの壁の表 (plans/active/tooling-nozzle-wt-deliverables.md §4
 - `shape_table`: 物理壁 (`wall_repr.json` の B-spline、STEP と同じ曲線) の形状表 `wall_shape_mm.csv` [mm]。
 - `cfd_wall_table`: CFD の壁節点ごとの壁面量表 `wall_cfd_nodes.csv` [SI] と状態 `wall_cfd_nodes.status.json`。
 - `wall_heat_series`: 全 `res_<壁名>_<physID>_<step>.h5` の総熱量の時系列 (`check_quasisteady.py --series-csv` の入力)。
-- `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・総熱量の準定常・壁解像・熱量の状態)。
+- `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・熱量の準定常 [総熱量と壁ごと 16 区間の局所の熱量]・壁解像・熱量の状態)。
 - `write_xlsx`: 上の CSV と条件・注記を `.xlsx` に (`.venv-pptx` の xlsxwriter を subprocess で呼ぶ)。
 
 **熱量の正本** (plan §3・§4.5、codex plan レビュー M1・M3): 壁へ入る熱は積分済みの節点熱量 `iface_Qf_eff` (固体向き正、
@@ -525,10 +525,14 @@ def cfd_wall_table(run_dir, out_csv, step=None, allow_diagnostic: bool = False, 
     return st
 
 
-def wall_heat_series(run_dir, out_csv, wall_ids=None) -> dict:
-    """全 `res_<壁名>_<physID>_*.h5` から step ごとの総熱量 ΣQ_node [W] を時系列 CSV に (`check_quasisteady.py --series-csv`
-    の入力: 列 `step`・`Q_total_W` と壁ごとの `Q_wall<physID>_W`)。正本 (`iface_Qf_eff`) が有限でない step・壁のダンプが欠けた step は空欄
-    (非有限として残す。落とさない)。"""
+HEAT_BANDS = 16   # 局所の熱量の定常性を見る区間の数 (壁ごと、x の順に節点数で等分; codex 諮問 2026-10-13 result の採用)
+
+
+def wall_heat_series(run_dir, out_csv, wall_ids=None, n_bands: int = HEAT_BANDS) -> dict:
+    """全 `res_<壁名>_<physID>_*.h5` から step ごとの熱量を時系列 CSV に (`check_quasisteady.py --series-csv` の入力): 列 `step`・
+    `Q_total_W`・壁ごとの `Q_wall<physID>_W` と、**壁を x の順に節点数で `n_bands` 等分した区間ごとの熱量 `Qband<physID>_<k>_W`**
+    (総熱量が一定のまま局所の熱流束が入れ替わる変化を見落とさないため; codex 諮問 2026-10-13 result)。正本 (`iface_Qf_eff`) が
+    有限でない step・壁のダンプが欠けた step は空欄 (非有限として残す。落とさない)。"""
     import h5py
     run_dir = Path(run_dir)
     rc = _run_config(run_dir)
@@ -539,11 +543,13 @@ def wall_heat_series(run_dir, out_csv, wall_ids=None) -> dict:
     steps = sorted(set().union(*[set(d) for d in dumps.values()])) if dumps else []
     pids = sorted(walls)
     rows, stat = [], {}
+    nb = {}
     for st in steps:
-        tot, per = 0.0, []
+        tot, per, bands = 0.0, [], []
         for pid in pids:
             p = dumps[pid].get(st)
             Q = np.nan
+            bq = None
             if p is not None and ok_geom:
                 with h5py.File(p, "r") as f:
                     a = f.attrs.get("step")
@@ -551,13 +557,27 @@ def wall_heat_series(run_dir, out_csv, wall_ids=None) -> dict:
                         raise ValueError(f"{p.name}: 属性 step {int(a)} ≠ ファイル名の step {st}")
                     if "VALUE/iface_Qf_eff" in f:
                         qf = np.array(f["VALUE/iface_Qf_eff"], dtype=float)
+                        xw = np.asarray(f["MESH/COORD"], dtype=float).reshape(-1, 3)[:, 0]
                         if np.all(np.isfinite(qf)):
-                            Q = float((2.0 * np.pi if axi else 1.0) * qf.sum())
+                            fac = 2.0 * np.pi if axi else 1.0
+                            Q = float(fac * qf.sum())
+                            k = nb.setdefault(pid, max(1, min(int(n_bands), len(qf))))
+                            bq = [float(fac * qf[ix].sum()) for ix in np.array_split(np.argsort(xw, kind="stable"), k)]
             per.append(Q)
             tot += Q
-        rows.append([st, tot] + per)
+            bands.append((pid, bq))
+        rows.append((st, tot, per, bands))
         stat[st] = "valid" if np.isfinite(tot) else "invalid"
-    cols = ["step", "Q_total_W"] + [f"Q_wall{pid}_W" for pid in pids]
+    band_cols = [f"Qband{pid}_{k:02d}_W" for pid in pids for k in range(nb.get(pid, 0))]
+    cols = ["step", "Q_total_W"] + [f"Q_wall{pid}_W" for pid in pids] + band_cols
+    flat = []
+    for st, tot, per, bands in rows:
+        bvals = []
+        for pid, bq in bands:
+            n = nb.get(pid, 0)
+            bvals += (bq if bq is not None and len(bq) == n else [np.nan] * n)
+        flat.append([st, tot] + per + bvals)
+    rows = flat
     out_csv = Path(out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with open(out_csv, "w", newline="") as f:
@@ -565,8 +585,8 @@ def wall_heat_series(run_dir, out_csv, wall_ids=None) -> dict:
         for r_ in rows:
             f.write(",".join([str(int(r_[0]))] + [_fmt(v) for v in r_[1:]]) + "\n")
     n_valid = sum(1 for v in stat.values() if v == "valid")
-    return {"csv": str(out_csv), "columns": cols, "n_steps": len(steps), "n_valid": n_valid, "steps": steps,
-            "geometry_ok": ok_geom, "unit": "W" if axi else "W/m", "per_step": stat}
+    return {"csv": str(out_csv), "columns": cols, "band_columns": band_cols, "n_bands": nb, "n_steps": len(steps),
+            "n_valid": n_valid, "steps": steps, "geometry_ok": ok_geom, "unit": "W" if axi else "W/m", "per_step": stat}
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -647,9 +667,13 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     else:
         with tempfile.TemporaryDirectory(prefix="thermal_use_qs_") as td:
             ser = wall_heat_series(run_dir, Path(td) / "wall_heat_series.csv", [b["pid"] for b in T["blocks"]])
-            args = [TOOLS / "check_quasisteady.py", "--series-csv", ser["csv"], "--series-cols", "Q_total_W"]
+            qcols = ["Q_total_W"] + ser["band_columns"]          # 総熱量と区間ごとの局所の熱量 (codex 諮問 2026-10-13 result)
+            args = [TOOLS / "check_quasisteady.py", "--series-csv", ser["csv"], "--series-cols", ",".join(qcols)]
             rc_, txt = _run_tool(args, python)
-        qs.update(cmd="check_quasisteady.py --series-csv <tmp>/wall_heat_series.csv --series-cols Q_total_W", exit=rc_,
+        qs.update(cmd=f"check_quasisteady.py --series-csv <tmp>/wall_heat_series.csv --series-cols Q_total_W,<{len(qcols) - 1} 区間の熱量>",
+                  exit=rc_, n_bands=ser["n_bands"],
+                  not_steady=[ln.strip() for ln in txt.splitlines() if ln.strip().startswith(("Q_total_W", "Qband"))
+                              and "STEADY" not in ln.split(":")[-1][:12]][:8],
                   n_steps=ser["n_steps"], n_valid=ser["n_valid"],
                   verdict_line=next((ln.strip() for ln in txt.splitlines() if ln.startswith("===") and "->" in ln), None),
                   detail_line=next((ln.strip() for ln in txt.splitlines() if ln.strip().startswith("Q_total_W")), None))
@@ -675,7 +699,8 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
         out["verdict"] = "PASS"
     else:
         out["verdict"] = "未評価"
-    out["rule"] = "収束・総熱量の準定常・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、不合格 (熱量 nonfinite を含む) があれば FAIL、他は未評価"
+    out["rule"] = ("収束・熱量の準定常 (総熱量と壁ごと 16 区間の局所の熱量の全部)・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、"
+                   "不合格 (熱量 nonfinite を含む) があれば FAIL、他は未評価")
     return out
 
 
@@ -753,6 +778,10 @@ if cfd_hdr is not None:
         ws.write_string(3, 0, "等温壁の単純な抵抗の式 T_back = T_w - q t / k (q は cfd_wall の %s、流体→壁が正)。連成は cht_loop + solid_shell" % qcol)
         if qcol.endswith("_diag_W_m2"):
             ws.write_string(4, 0, "注意: q は診断値 (-qwall) で熱設計の正本ではない")
+        tuv = job.get("thermal_use")
+        if tuv is not None:
+            ws.write_string(5, 0, "thermal_use (この熱量を熱設計に使えるか): %s%s" % (
+                tuv, "" if tuv == "PASS" else " — PASS でないので、この表の熱量で壁の温度を決めない (収束・準定常・壁解像を conditions/notes で確認)"), bold)
         hdr = ["x_m", "r_m", "T_w_K", "q_W_m2", "T_back_K"]
         h0 = 6
         ws.write_row(h0, 0, hdr, bold)
@@ -792,7 +821,7 @@ def _flatten(d, pre=""):
 
 
 def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None = None, notes: list | None = None,
-               python: str | None = None, wall_1d: dict | None = None, timeout: int = 600) -> dict:
+               python: str | None = None, wall_1d: dict | None = None, timeout: int = 600, thermal_use: str | None = None) -> dict:
     """形状表・CFD 壁面量表・条件・注記を `.xlsx` に書く (plan §4.5)。xlsxwriter は design の venv に無いので
     `.venv-pptx` の python (`python`、既定 `PPTX_PY`) を subprocess で呼ぶ。python か xlsxwriter が無ければ書かずに
     `{"written": False, "skipped": True, "reason": ...}` を返す (呼び出し側が飛ばしたことを MANIFEST・README に書く)。
@@ -811,7 +840,7 @@ def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None =
                                   "shape_csv": str(Path(shape_csv).resolve()) if shape_csv else None,
                                   "cfd_csv": str(Path(cfd_csv).resolve()) if cfd_csv else None,
                                   "conditions": _flatten(conditions), "notes": nts,
-                                  "wall_1d": dict(wall_1d or {})}, ensure_ascii=False))
+                                  "wall_1d": dict(wall_1d or {}), "thermal_use": thermal_use}, ensure_ascii=False))
         q = subprocess.run([exe, "-I", str(sp), str(jp)], capture_output=True, text=True, timeout=timeout, cwd=td)
         if not rp.exists():
             raise RuntimeError(f"xlsx の作業が結果を返さない (rc={q.returncode}):\n{q.stdout[-2000:]}\n{q.stderr[-2000:]}")

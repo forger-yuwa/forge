@@ -88,7 +88,7 @@
    NS 後に物理スロート径から決め直すときは `--prev RUN --delta-next RUN/_extract_edge/delta_r_next.csv --delta-r-out FILE`
    (δ_E の全分布で寸法を決め、同じ補正の表を FILE に書く。次の壁は `prepare_ns(delta_r_csv=FILE)` でその表から作る)。
 5. **形を見る・出す** — 最終 NS の run から成果物一式を 1 コマンドで出す (plan
-   [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md)、2026-10-13 整備中):
+   [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md)、2026-10-13):
    ```
    .venv-opt/bin/python -m forge_design.export.deliverables ../case/NN/run_XXXX --card ../case/NN/card_<tag>.yaml --problem ../case/NN/problem_<tag>.yaml
    ```

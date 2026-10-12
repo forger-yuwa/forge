@@ -76,7 +76,7 @@ PowerPoint にまとめる (2026-10-05 ユーザ指示でルール化)。設計�
 - pptx は run ディレクトリの `report/` に置く (run の成果物なので commit しない)。結論・判定は対応する plan と case README の run 一覧に書く。
 - 設計の比較では、比べる run 同士で同じ Euler 参照・同じバイナリを使う (plan `verification-m6-axis-wave-mesh-su2` §4.1 の教訓)。
 
-## 成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 整備中
+## 成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 から
 
 報告 (pptx) とは別に、形状とメッシュを外で使うための成果物を最終 NS の run から出す
 (plan [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md)、手順は
