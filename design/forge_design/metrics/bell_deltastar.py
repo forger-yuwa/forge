@@ -299,20 +299,43 @@ def delta_r_annular(dstar_n, cos_phi, rw):
     return np.where(disc >= 0.0, rw - np.sqrt(np.maximum(disc, 0.0)), np.nan)
 
 
+def moc_edge_table(wall_npz, freeze_euler_run, gas, x_end: float) -> tuple:
+    r"""縁の M の表 [x, M] (plan §5.1 #7c、codex 2026-10-13 option-design 採用): x ≥ 0 は生成器の壁ファイル (`<tag>_wall.npz` の
+    `wall` = kernel + BE の [x, r, θ, M]) の MOC の壁の M、x < 0 (収縮部、全 (M) で共通) は凍結源の Euler (`euler_wall_edge`) の壁の節点。
+    終点は壁の x_end に切り、x_end の M は線形補間。戻り (表 (n, 2), 記録)。"""
+    up = euler_wall_edge(freeze_euler_run, gas)
+    with np.load(wall_npz) as z:
+        W = np.asarray(z["wall"], dtype=float)
+    m_up = up["x"] < 0.0
+    x = np.r_[up["x"][m_up], W[:, 0]]; M = np.r_[up["M"][m_up], W[:, 3]]
+    o = np.argsort(x, kind="stable"); x, M = x[o], M[o]
+    keep = np.r_[True, np.diff(x) > 1e-9]; x, M = x[keep], M[keep]
+    Me = float(np.interp(float(x_end), x, M)); k = x < float(x_end) - 1e-9
+    x = np.r_[x[k], float(x_end)]; M = np.r_[M[k], Me]
+    rec = {"mode": "moc", "wall_npz": str(wall_npz), "freeze_euler": {kk: up[kk] for kk in ("run", "res", "check")},
+           "M_x0_euler": float(np.interp(-1e-9, up["x"], up["M"])), "M_x0_moc": float(W[0, 3])}
+    return np.c_[x, M], rec
+
+
 def contur_bell(problem_yaml, euler_run, *, x_out=None, x_virtual_m: float | None = None, theta0_m: float | None = None,
-                edge: str = "euler_full", edge_n_grid: int = 4000, rtol: float = 1e-6) -> dict:
+                edge: str = "euler_full", edge_n_grid: int = 4000, rtol: float = 1e-6, moc_wall_npz=None) -> dict:
     r"""③の壁・排気・断熱壁・Euler 基準の縁で `contur_v2` を回し、未較正の $\delta_{r,CONTUR}(x)$ (M5 の環状の定義と従来の 1 次) を返す。
 
     problem_yaml: NS の問題 (壁ファイル・gas.exhaust・gas.transport)。壁は `runner.build_wall` (= NS run の壁; 照合は呼び出し側)。
     edge: "euler_full" (既定; 縁の M を全域で Euler の壁の節点から) / "euler_1d_upstream" (感度用: 従来の EdgeConditions の
     上流 1D 面積比 + x > 0 は Euler の壁の M — スロートで M が跳ぶ)。x_virtual_m: None は入口直管長 L_pipe·r_t
-    (`integral_bl` の文書の既定。`RaoBellWall` は L_pipe 属性を持たないので明示する)。x_out: 出す x [r_t] (積分区間に切る)。"""
+    (`integral_bl` の文書の既定。`RaoBellWall` は L_pipe 属性を持たないので明示する)。x_out: 出す x [r_t] (積分区間に切る)。
+    edge = "moc" (2026-10-13、§5.1 #7c の生産の取り方): 縁の M を `moc_edge_table` (x ≥ 0 は `moc_wall_npz` の MOC の壁、x < 0 は
+    `euler_run` = 凍結源の Euler) から — 補正壁ごとの Euler が要らない。同じ壁の Euler の縁との差は L100 で ≤ 0.30 %・L70 で ≤ 0.62 %、
+    kδ 据え置きの移植は (7c-0) で A (`case/68.bell_two_mode/rao_m/check_edge_moc_transfer.json`)。"""
     from ..evaluate.runner import build_wall, rao_bell_spec
     from ..evaluate.runner_axismach import contur_mu_fn
     from ..feedback.deltastar_integral import integral_bl
     from ..probdef import load_problem
-    if edge not in ("euler_full", "euler_1d_upstream"):
-        raise ValueError(f"edge {edge!r} は euler_full | euler_1d_upstream")
+    if edge not in ("euler_full", "euler_1d_upstream", "moc"):
+        raise ValueError(f"edge {edge!r} は euler_full | euler_1d_upstream | moc")
+    if (edge == "moc") != (moc_wall_npz is not None):
+        raise ValueError("edge 'moc' は moc_wall_npz (生成器の壁ファイル) と組で使う")
     p = load_problem(problem_yaml)
     wall, rec = build_wall(p)
     gas = p.gas_model
@@ -320,11 +343,16 @@ def contur_bell(problem_yaml, euler_run, *, x_out=None, x_virtual_m: float | Non
     tbc = p.wall_thermal_bc_integral
     if str(tbc.get("mode", "adiabatic")) != "adiabatic":
         raise ValueError(f"③の較正の基準ケースは断熱壁 (問題の壁は {tbc})")
-    ed = euler_wall_edge(euler_run, gas)
-    x_F = min(float(ed["x"][-1]), float(wall.x_e))
-    m = ed["x"] <= x_F
-    tbl_full = np.c_[ed["x"][m], ed["M"][m]]
-    wall_tbl = np.c_[ed["x"][m], ed["r"][m], np.zeros(int(m.sum())), ed["M"][m]]
+    if edge == "moc":
+        tbl_full, ed = moc_edge_table(moc_wall_npz, euler_run, gas, float(wall.x_e))
+        x_F = float(wall.x_e)
+        wall_tbl = np.c_[tbl_full[:, 0], np.asarray(wall.r(tbl_full[:, 0]), dtype=float), np.zeros(len(tbl_full)), tbl_full[:, 1]]
+    else:
+        ed = euler_wall_edge(euler_run, gas)
+        x_F = min(float(ed["x"][-1]), float(wall.x_e))
+        m = ed["x"] <= x_F
+        tbl_full = np.c_[ed["x"][m], ed["M"][m]]
+        wall_tbl = np.c_[ed["x"][m], ed["r"][m], np.zeros(int(m.sum())), ed["M"][m]]
     if x_virtual_m is None and theta0_m is None:
         x_virtual_m = float(rao_bell_spec(p).L_pipe) * rt_m
     x0 = float(wall.x_in) + 1e-6
@@ -337,12 +365,13 @@ def contur_bell(problem_yaml, euler_run, *, x_out=None, x_virtual_m: float | Non
     res = integral_bl(wall, wall_tbl, gas, p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]), rt_m, thermal_bc=tbc,
                       theta0_m=theta0_m, x_virtual_m=x_virtual_m, x_out=xo, rtol=rtol, closure_version="contur_v2",
                       mu_fn=contur_mu_fn(p), edge_n_grid=edge_n_grid,
-                      edge_M_full=(tbl_full if edge == "euler_full" else None))
+                      edge_M_full=(tbl_full if edge in ("euler_full", "moc") else None))
     rw = np.asarray(wall.r(res["x"]), dtype=float)
     res["r_wall"] = rw
     res["delta_r_lin"] = res["delta_r"]                              # 従来の 1 次 δ*_n / cos φ
     res["delta_r_ann"] = delta_r_annular(res["dstar_n"], res["cos_phi"], rw)
-    res["edge"] = {"mode": edge, "euler": {k: v for k, v in ed.items() if k in ("run", "res", "check")}}
+    res["edge"] = ({"mode": edge, **{k: v for k, v in ed.items() if k != "mode"}} if edge == "moc" else
+                   {"mode": edge, "euler": {k: v for k, v in ed.items() if k in ("run", "res", "check")}})
     res["wall_record"] = {k: rec.get(k) for k in ("wall_file", "wall_file_sha256") if k in rec}
     res["problem"] = str(problem_yaml)
     return res

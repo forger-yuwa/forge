@@ -12,7 +12,8 @@ from forge_design.evaluate.runner_axismach import contur_mu_fn
 from forge_design.feedback.deltastar_integral import integral_bl
 from forge_design.probdef import load_problem
 C68 = Path('/home/sano/work/forge-thruster/case/68.bell_two_mode')
-def run(problem, wall_npz, eu_run, src_run='run_0015_tp_m_euler_l100'):
+def moc_edge_C(problem, wall_npz, eu_run, src_run='run_0015_tp_m_euler_l100'):
+    """MOC の縁の contur_v2 の δ_r (環状) を、同じ壁の Euler の縁の contur の x 格子で返す: (x, C_moc, C_euler)。"""
     p = load_problem(C68 / problem); wall, rec = build_wall(p); gas = p.gas_model; rt = float(p.spec['r_throat'])
     up = bd.euler_wall_edge(C68 / src_run, gas)
     z = np.load(C68 / wall_npz); W = z['wall']
@@ -32,12 +33,20 @@ def run(problem, wall_npz, eu_run, src_run='run_0015_tp_m_euler_l100'):
     rw = np.asarray(wall.r(res['x']))
     Cm = bd.delta_r_annular(res['dstar_n'], res['cos_phi'], rw)
     Ce = np.interp(res['x'], ref['x'], ref['delta_r_ann'])
+    return res['x'], Cm, Ce
+
+
+def run(problem, wall_npz, eu_run, src_run='run_0015_tp_m_euler_l100'):
+    x, Cm, Ce = moc_edge_C(problem, wall_npz, eu_run, src_run)
+    res = {'x': x}
     r = Cm / Ce - 1
+    p = load_problem(C68 / problem); up = bd.euler_wall_edge(C68 / src_run, p.gas_model); W = np.load(C68 / wall_npz)['wall']
     print(problem, 'M jump at 0: euler_up', float(np.interp(-1e-6, up['x'], up['M'])), 'moc', float(W[0, 3]))
     for lo, hi in [(-4, 0), (0, 0.41), (0.41, 1.17), (1.17, 2), (2, 8), (8, 16), (16, 99)]:
         mm = (res["x"] >= lo) & (res["x"] < hi)
         if not mm.any(): continue
         print(f'  [{lo},{hi}) C_moc/C_euler-1 mean {np.mean(r[mm])*100:+.3f}% max|{np.max(abs(r[mm]))*100:.3f}%')
     print('  exit', Cm[-1], Ce[-1], (Cm[-1] / Ce[-1] - 1) * 100, '%')
-run('problem_bell_tp_m_ns_l100.yaml', 'rao_m/rao_pin_parts/L100_pin_n321_wall.npz', 'run_0018_tp_m_euler_l100_pin')
-run('problem_bell_tp_m_ns_l70.yaml', 'rao_m/rao_pin_parts/L70_pin_n321_wall.npz', 'run_0023_tp_m_euler_l70_pin')
+if __name__ == '__main__':
+  run('problem_bell_tp_m_ns_l100.yaml', 'rao_m/rao_pin_parts/L100_pin_n321_wall.npz', 'run_0018_tp_m_euler_l100_pin')
+  run('problem_bell_tp_m_ns_l70.yaml', 'rao_m/rao_pin_parts/L70_pin_n321_wall.npz', 'run_0023_tp_m_euler_l70_pin')
