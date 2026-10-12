@@ -355,6 +355,35 @@ LHS は従来の $A^\pm$（物理音速 `sonic`）のまま。低マッハ前処
   ([`theory.md`](theory.md) 参照)。収束は $(\Delta\tau'/V)\Gamma_c^{-1}A_c$ の固有値 $\lambda'$ で一様に前処理される。
   ※当初フラックスも $\hat A_\Gamma=\Gamma_c^{-1}A_c$ のスペクトル半径分割で前処理したが、別系で過散逸ゆえ撤回 (上記が正)。
 - **その他**: 粘性スペクトル半径・軸対称ソースヤコビアン・dual-time 物理 BDF 項 (非前処理) も倍精度で踏襲。
+- **node の行の処理 (2026-10-12、[plan](../../plans/active/architecture-float-state-double-geometry.md) §5.1 #26)**:
+  標準の `implicit_defect_correction_block_d` と**同じ印・同じ条件**で、wrapper が `axis_ur_flag`・`wall_flag`・
+  `iso_wall_flag`・`isNode` を渡す (それ以前の本カーネルはこれを持たず、node では境界の節点の更新がほぼ凍結し、
+  軸・壁の拘束の成分も 0 にならなかった。plan §6.57)。
+  - 境界半割面 (`other_ic >= nCells` = ゴースト側) の粘性対角は `isNode` のとき課さない (標準の `!(isNode && !has_nbr)`)。
+    境界ノードは境界面上に乗るので node→ghost が退化し、$2\nu\delta/d_{cc}$ が対角を支配して $\Delta Q\approx0$ になるため。
+    対流 $A^+S$ は自節点の状態と面法線だけで組むので境界半割面でも残す (標準と同じ)。
+  - 拘束の行: 軸の roUy 行 (node × 軸対称、軸対称ソース Jacobian の後で上書き)・壁の運動量 3 行 (`nodeWallDirichlet 1`)・
+    等温壁の roe 行 (`nodeWallDirichlet 1` かつ `mesh.nodeIsothermalEnergyBC != 1`。弱形式ではエネルギー行を残す) で、
+    $D_0$ の行を単位行・$b$ の成分を 0 にする。さらにランク 1 項の $g$ の成分を 0 にする ($\gamma g r^\top$ の行 $k$ は
+    $g_k r^\top$ なので、$D=D_0+\gamma g r^\top$ の行も単位行のまま。$y_k=b_k=0$・$z_k=g_k=0$ → $x_k=0$)。
+    拘束の無い行の $D$ は変わらない。$D_0$ の拘束の列で部分ピボットの行交換が起きると、標準の block カーネルと同じく
+    $x_k$ は丸めのぶんだけ 0 から外れうる。
+  - 標準の経路にあって本カーネルに無いもの: 弱形式の等温壁の近似対角 (`weakIsoDiag`)、`implicitThermalJacobian`
+    (`lowMachPrecond >= 2` とは起動時に拒否)、line-implicit (同じく拒否)、SU2 流の軸対称ソース Jacobian (`axisymMethod 1`)、
+    対角キャッシュ・近傍 dq の AoS。軸対称ソース Jacobian の $[2][0]$ は本カーネルだけ $\chi_{hoop}$ を足す。
+  - 単体試験 [`tests/unit/test_precond_node_rows.cu`](../../solver_density_cuda/tests/unit/test_precond_node_rows.cu):
+    $\beta<1$ (0.0225) で拘束の行の $\Delta Q$ が厳密に 0、拘束の無い成分が $(D_{UU})^{-1}b_U$ に一致、
+    isNode が外す量が境界半割面の $2\nu\delta/d_{cc}$ に一致、`isNode 0`・印なし (cell と同じ経路) の出力が移植前とビット一致。
+- **化学種の擬似時間刻み `speciesPrecondDt` (2026-10-12、同 §5.1 #26)**: 前処理は流れ 5 変数の擬似時間項だけを
+  $\Gamma_c$ で変え、`dt_local` は下の `setDTlocal_precond_scale_d` で拡大される。分離更新の $\rho Y_s$ は前処理されないので、
+  拡大後の $\Delta\tau'$ で進めると組成と密度の前線が擬似時間で別の速さで進む。`time.deltaT.speciesPrecondDt` (既定 1) で
+  化学種の刻み `dt_local_sp` を選ぶ: 1 = 拡大前の $\Delta\tau$ (`setDT_d_wrapper` が拡大の前に退避)、2 = $\Delta\tau'\beta$
+  (`setDTlocal_species_beta_d`)、0 = 拡大後の $\Delta\tau'$ (旧挙動)。読むのは化学種の scalar-DPLUR
+  (`speciesTransport_d.cu` の `dplurSweepOnce`、`speciesImplicitCoupling` 1/2) だけで、刻みのポインタは呼び出し側が
+  `speciesPseudoDt` で明示的に渡す。受動種 (同じ `dplurSweepOnce` を共有) と `speciesImplicitCoupling 0` の point-implicit
+  (`scalarTimeIntegration_d`) は対象外で `dt_local` のまま。`dt_local_sp` は多成分のときだけ確保し
+  (`variables::registerSpecies`、確保時に 0)、書くのは `lowMachPrecond >= 2` かつ `speciesPrecondDt` 1/2 のときだけ。
+  `lowMachPrecond < 2` では化学種は `dt_local` を読む (ビット不変)。
 - **`SLAU_d`** は `lowMachPrecond==1||==2` で `c'` 散逸を使う (==2 は散逸是正を併用、==3 は RHS 散逸を触らず `c_hat`)。
   $\beta=1$ で $\Gamma_c=I$・$\Delta\tau'=\Delta\tau$・フラックス同一ゆえ現行カーネルと同一組み立て (倍精度の丸め差 ~1e-7、解一致)。
 
@@ -403,7 +432,9 @@ roe→0.5 に収束する一方、scalar は cfl_pseudo=1 で 12000 step でも�
 
 `setDT_d_wrapper` ([`setDT_d.cu`](../../solver_density_cuda/cuda_forge/setDT_d.cu)) が
 セル中心スペクトル半径を集計して `dt_local[ic] = CFL * V / λ_max` を書き込む。
-`cfg.dt`, `cfg.cfl` で挙動を制御。
+`cfg.dt`, `cfg.cfl` で挙動を制御。`lowMachPrecond >= 2` では `setDTlocal_precond_scale_d` が `dt_local` を前処理
+スペクトル半径に合わせて拡大し、多成分で `speciesPrecondDt` 1/2 のときは化学種用の `dt_local_sp` も書く
+(上の `implicit_defect_correction_block_precond_d` の節)。
 
 **setDT の低マッハ前処理は不採用** (2026-06 検証)。`setCFL_pln_d` のスペクトル半径の音速 `sonic` を
 前処理音速 `c'` に置換する案は、低マッハ域で `dt_local` を増大させ陰解法対角 `V/Δτ` を縮め、block DPLUR の

@@ -606,8 +606,9 @@ __global__ void species_eos_final_commit_d(
 static flow_float** g_srcjac_dev = nullptr;   // src_jac_Y{s} の device ポインタ配列 (化学反応ソース用)
 
 // 1 回の scalar-DPLUR sweep (化学種・受動種共通)。node 周期では近傍寄与を独立バッファで周期合算してから解く (M1)。
+// dtLocal: 擬似時間刻みの配列。呼び出し側が明示的に渡す (化学種は speciesPseudoDt、受動種は dt_local。§5.1 #26)。
 static void dplurSweepOnce(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
-                           flow_float relax, flow_float dtScale, flow_float* roRef,
+                           flow_float relax, flow_float dtScale, flow_float* dtLocal, flow_float* roRef,
                            flow_float* res, flow_float* td, flow_float* sj, flow_float* dq_old, flow_float* dq_new, flow_float* pin)
 {
     if (periodicNodeActive(cfg, msh)) {
@@ -619,13 +620,31 @@ static void dplurSweepOnce(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, v
         gpuErrchk( cudaPeekAtLastError() ); gpuErrchkKernelSync();
         periodicGatherArray_d_wrapper(cfg, cuda_cfg, msh, s_nb);   // 合併 CV の非対角 = 両側部分 CV の和
         species_dplur_solve_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-            relax, dtScale, var.c_d["dt_local"], msh.nCells, var.c_d["volume"], res, td, sj, s_nb, dq_new, pin);
+            relax, dtScale, dtLocal, msh.nCells, var.c_d["volume"], res, td, sj, s_nb, dq_new, pin);
     } else {
         species_dplur_sweep_d<<<cuda_cfg.dimGrid_cell, cuda_cfg.dimBlock>>>(
-            relax, dtScale, var.c_d["dt_local"], msh.nCells, var.c_d["volume"],
+            relax, dtScale, dtLocal, msh.nCells, var.c_d["volume"],
             msh.map_plane_cells_d, msh.map_cell_planes_index_d, msh.map_cell_planes_d,
             var.p_d["massflux"], roRef, res, td, sj, dq_old, dq_new, pin);
     }
+}
+
+// 化学種の擬似時間刻み (speciesPrecondDt、§5.1 #26)。前処理 (lowMachPrecond>=2) は流れ 5 変数の擬似時間項だけを Γ_c で
+// 変え、dt_local は setDT で前処理スペクトル半径に合わせて拡大される。分離更新の ρY_s は前処理されないので、拡大後の
+// dt_local で進めると組成の前線と密度の前線が擬似時間で別の速さで進み、異組成の接触面で P が暴走する (chem の
+// ブランチの case/48 Cabra、876ec8b4)。1 = 拡大前の Δτ、2 = Δτ'·β、0 = 従来どおり拡大後の Δτ'。
+bool speciesPrecondDtActive(const solverConfig& cfg, const variables& var)
+{
+    if (cfg.lowMachPrecond < 2) return false;
+    if (cfg.speciesPrecondDt != 1 && cfg.speciesPrecondDt != 2) return false;
+    if (!speciesEnabled(var)) return false;
+    const auto it = var.c_d.find("dt_local_sp");
+    return it != var.c_d.end() && it->second != nullptr;
+}
+
+flow_float* speciesPseudoDt(const solverConfig& cfg, variables& var)
+{
+    return speciesPrecondDtActive(cfg, var) ? var.c_d["dt_local_sp"] : var.c_d["dt_local"];
 }
 flow_float** species_resroY_device_ptr() { return g_resroY_dev; }
 flow_float** species_srcjac_device_ptr() { return g_srcjac_dev; }
@@ -1017,6 +1036,8 @@ void speciesTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& c
     if (!speciesEnabled(var)) return;
 
     // speciesImplicitRelax (既定 1.0 = 現行と同じ写像) と scalarCflMax は timeIntegration 11 の point-implicit 経路にだけ効く。
+    // speciesPrecondDt (§5.1 #26) はこの経路 (speciesImplicitCoupling 0) には効かない: scalarTimeIntegration_d は化学種でも
+    // 前処理で拡大した dt_local を読む。前処理と多成分を併用するときは speciesImplicitCoupling 1/2 にする。
     const flow_float relax = static_cast<flow_float>(cfg.speciesImplicitRelax);
     const flow_float dts   = scalarDtScale(cfg);
     // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): 計る step だけ、point-implicit のカーネルに relax·δ の書き先を渡し、
@@ -1091,10 +1112,12 @@ void speciesImplicitDPLURSolve_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg
     const int nSweep = std::max(1, cfg.nStepInner);
     // 非対角の ρ_nbr: 定常は roN (=assemble 時の ρ, ビット不変)。dual-time では roN は物理レベル ρ^n で反復値と違うので現在の ρ。
     flow_float* roRef = (cfg.unsteady == 1 && cfg.dualTime == 1) ? var.c_d["ro"] : var.c_d["roN"];
+    // 擬似時間刻み: lowMachPrecond>=2 × speciesPrecondDt 1/2 では dt_local_sp、それ以外は dt_local (§5.1 #26)。
+    flow_float* dtSp = speciesPseudoDt(cfg, var);
     for (int iSweep = 0; iSweep < nSweep; ++iSweep) {
         for (int s = 0; s < nSpecies; s++) {
             const std::string i = std::to_string(s);
-            dplurSweepOnce(cfg, cuda_cfg, msh, var, cfg.implicitRelax, scalarDtScale(cfg), roRef,
+            dplurSweepOnce(cfg, cuda_cfg, msh, var, cfg.implicitRelax, scalarDtScale(cfg), dtSp, roRef,
                 var.c_d["res_roY"+i], var.c_d["transport_diag_Y"+i], var.c_d["src_jac_Y"+i],
                 var.c_d["dq_roY"+i+"_old"], var.c_d["dq_roY"+i],
                 (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr);
@@ -1169,10 +1192,11 @@ void speciesEOSCrossPredictInject_d_wrapper(solverConfig& cfg, cudaConfig& cuda_
         cudaMemset(var.c_d["dq_roY"+i+"_old"], 0, bytes);
     }
     const int nSweep = std::max(1, cfg.nStepInner);
+    flow_float* dtSp = speciesPseudoDt(cfg, var);   // 化学種の擬似時間刻み (§5.1 #26。前処理の外では dt_local)
     for (int iSweep = 0; iSweep < nSweep; ++iSweep) {
         for (int s = 0; s < nSpecies; ++s) {
             const std::string i = std::to_string(s);
-            dplurSweepOnce(cfg, cuda_cfg, msh, var, cfg.implicitRelax, scalarDtScale(cfg),
+            dplurSweepOnce(cfg, cuda_cfg, msh, var, cfg.implicitRelax, scalarDtScale(cfg), dtSp,
                 (cfg.unsteady == 1 && cfg.dualTime == 1) ? var.c_d["ro"] : var.c_d["roN"],
                 var.c_d["res_roY"+i], var.c_d["transport_diag_Y"+i], var.c_d["src_jac_Y"+i],
                 var.c_d["dq_roY"+i+"_old"], var.c_d["dq_roY"+i],
@@ -1556,7 +1580,8 @@ bool passiveDPLURIncrement_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, me
     for (int iSweep = 0; iSweep < nSweep; ++iSweep) {
         for (int q = q0; q < q0+nq; ++q) {
             const std::string& c = g_pCons[q];
-            dplurSweepOnce(cfg, cuda_cfg, msh, var, relax, dts, roRef,
+            // 受動種は speciesPrecondDt の対象外: 前処理のときも流れと同じ dt_local (従来どおり。§5.1 #26)
+            dplurSweepOnce(cfg, cuda_cfg, msh, var, relax, dts, var.c_d["dt_local"], roRef,
                 h_p_res[q], h_p_diag[q], h_p_sj[q],
                 var.c_d["dq_"+c+"_old"], var.c_d["dq_"+c],
                 (cfg.discretization == "node") ? var.c_d["scalarDirichletPin"] : nullptr);
