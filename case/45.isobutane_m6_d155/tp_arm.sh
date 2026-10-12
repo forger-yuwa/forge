@@ -31,10 +31,12 @@ EXTRA="[res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, volume, dt_lo
 cd $C45
 die() { echo "中止: $* ($(date -Is))" >> $LOG; exit 1; }
 free_b() { df --output=avail -B1 . | tail -1 | tr -dc 0-9; }
-wait_free() {   # ほかの forge が無くなるまで最大 1 時間待つ
-  local i
-  for i in $(seq 1 120); do [ -z "$(pgrep -x forge)" ] && return 0; [ $i = 1 ] && echo "ほかの forge が走っている。空くのを待つ $(date -Is)" >> $LOG; sleep 30; done
-  [ -z "$(pgrep -x forge)" ] || die "ほかの forge が 1 時間空かない (占有できない)"
+wait_free() {   # 2026-10-13 の変更 (§6.62「GPU の共有」): ほかのセッションの forge が続くので占有を待たない。ほかの forge を記録し、メモリの空きだけ確かめる
+  local o m
+  o=$(for p in $(pgrep -x forge); do readlink /proc/$p/cwd; done | tr '\n' ' ')
+  [ -n "$o" ] && echo "ほかの forge と GPU を共有して回す ($(date -Is)): $o" >> $LOG
+  m=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
+  [ "$m" -ge 4608 ] || die "使えるメモリが 4.5 GiB 未満 ($m MiB)"
 }
 echo "== 開始 $(date -Is) バイナリ $(sha256sum $BIN | cut -c1-16) 入力 $(sha256sum $INP | cut -c1-16) 空き $(( $(free_b) / 1024 / 1024 )) MiB" >> $LOG
 
