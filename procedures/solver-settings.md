@@ -134,6 +134,43 @@ time:
 
 毎ステップ GPU リダクション (`thrust::any_of`) が走るため、原因調査時のみ有効化し、本番計算では `0` のままにする。ダンプされた `res_nan_<step>.h5` を ParaView で開けば、どの境界・どのセルで最初に NaN が出たかを直接確認できる。
 
+## lowMachPrecond ≥ 2 — 低マッハ完全前処理の注意 (node・多成分、2026-10-12)
+
+```yaml
+time:
+  deltaT: {..., blockDPLUR: 1, lowMachPrecond: 2, precondEps: 0.15, speciesPrecondDt: 1}   # キーの置き場所の例 (推奨値は recommended-settings.md)
+```
+
+`lowMachPrecond` 2/3 は `timeIntegration 11`・`blockDPLUR 1` 専用 (設計と検証は
+[plan](../plans/accepted/time_integration-lowmach-preconditioning.md)、実装は
+[`methods/time_integration/implementation.md`](../methods/time_integration/implementation.md) の
+`implicit_defect_correction_block_precond_d`)。
+
+- **node × `lowMachPrecond ≥ 2` は、このブランチでは 2026-10-12 の修正より前のバイナリで境界の節点がほぼ凍結していた**。
+  前処理の block カーネルに標準の block カーネルの node の行の処理 (境界半割面の粘性対角を課さない・軸の roUy 行・
+  壁の運動量 3 行・等温壁の roe 行の拘束) が無く、1 step の試験で入口・出口の節点の更新が P0 の 0.02〜1 % に縮み、
+  軸・壁の拘束の成分も 0 にならなかった ([plan architecture-float-state-double-geometry](../plans/active/architecture-float-state-double-geometry.md)
+  §6.57・§5.1 #26。chem のブランチは `876ec8b4` で修正済み)。それより前の node の前処理の run の結論は、再計算なしに流用しない。
+  等温壁の roe 行の拘束は標準の経路と同じく強いピン (`mesh.nodeIsothermalEnergyBC 0`) のときだけで、弱形式 (`1`) では
+  エネルギー行を残す (弱形式の近似対角 `weakIsoDiag` は前処理のカーネルには入っていない)。
+- **`time.deltaT.speciesPrecondDt`** (int、既定 `1`): 多成分 (nSpecies ≥ 2) × `lowMachPrecond ≥ 2` の定常擬似時間で、
+  化学種の擬似時間刻みを選ぶ。前処理は流れ 5 変数の擬似時間項だけを Γ_c で変え、`dt_local` を前処理スペクトル半径に
+  合わせて拡大する。分離更新の ρY_s は前処理されないので、拡大後の Δτ' で進めると組成の前線と密度の前線が擬似時間で
+  別の速さで進み、異組成の接触面で P が暴走する (chem のブランチの Cabra H₂/N₂ 浮き上がり火炎、`876ec8b4`。
+  `lowMachPrecond 0` と dual-time では起きない)。
+
+  | 値 | 化学種の擬似時間刻み |
+  | --- | --- |
+  | `0` | 流れと同じ拡大後の Δτ' (旧挙動。A/B 用) |
+  | `1` (既定) | 前処理で拡大する前の Δτ (物理スペクトル半径基準) |
+  | `2` | Δτ'·β (β = `lowMachBeta`、[1e-6, 1] に収める) |
+
+  効くのは化学種の scalar-DPLUR (`speciesImplicitCoupling` 1/2) だけ。**`speciesImplicitCoupling 0` の point-implicit と
+  受動種 (トレーサ・凝縮モーメント) は対象外**で、前処理のときも拡大後の `dt_local` で進む。前処理と多成分を併用するときは
+  `speciesImplicitCoupling 1` 以上にする。`lowMachPrecond < 2` では何もしない (ビット不変)。実際に使われた刻みは
+  `output.extraFields: [dt_local_sp]` で出せる (多成分のときだけ確保。効いていない run では 0)。
+  このブランチでの β < 1・多成分の検証は未了 (§5.1 #26)。
+
 ## リスタート手順
 
 前の run の結果から引き継ぐ場合は `valueFileName` に該当の `res_*.h5` を指定する。
