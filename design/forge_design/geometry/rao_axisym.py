@@ -1396,6 +1396,28 @@ def _hall_line(R_t, ig, n):
         return hall_initial_line(R_t, ig.moc, n)
 
 
+def check_initial_line(line: dict, R_t: float, ig) -> dict:
+    r"""外から渡す初期線 (`design_rao` の `line`。例: CFD ピン `feedback.cfd_initial_line.moc_initial_line`) の検査
+    (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #6 W3)。前進 MOC の初期線の検査 `moc_forward._check_line` を円弧 kernel
+    (曲率半径 $R_t$) の壁に対して行い (壁点が壁に乗る・軸端が $r=0$・軸→壁で $r$ 単調増加・超音速・有限)、軸端の $\theta_r$
+    (`thr_axis`、`axis_limit="analytic"` に要る) が有限であることを確かめる。不合格は `ValueError` (前進 MOC は不合格の線では網を
+    作らないので、黙って進むと kernel 場の段で別の例外になる)。戻り: `_check_line` の info に `thr_axis` を足した dict。"""
+    from .moc_forward import _check_line, _Wall
+    ig = as_isentrope(ig)
+    M_w = float(np.asarray(line["M"], dtype=float)[-1])
+    th_cap = (float(np.arcsin(1.0 / M_w)) - np.deg2rad(5.0)) if M_w > 1.0 else np.deg2rad(45.0)
+    W = _Wall(KernelWall(R_t, c=0.0, s_lin=0.5 * R_t, theta_cap=th_cap), 10.0 * R_t)
+    codes, reasons, info = _check_line(line, W, ig.moc)
+    thr = line.get("thr_axis")
+    if not (thr is not None and np.isfinite(float(thr))):
+        codes = list(codes) + ["init_thr_axis"]
+        reasons = list(reasons) + [f"軸端の θ_r (thr_axis) が無いか非有限 ({thr!r})"]
+    if codes:
+        raise ValueError(f"design_rao: 渡された初期線 ({line.get('source', '出所不明')}) が初期線の検査に不合格 — {codes}: "
+                         + "; ".join(reasons))
+    return {**info, "thr_axis": float(thr)}
+
+
 def solve_kappaB(ig, R_t: float, L: float, *, c: float, eps: float | None, line: dict, p_a: float = 0.0,
                  dr: float = DR_DE, n_scan_sb: int = N_SCAN_SB, n_scan_D: int = N_SCAN_D, L_march: float | None = None,
                  log=None) -> dict:
@@ -1437,7 +1459,9 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "a
 
     `gas`: γ・`GasCPG`・`GasSemiPerfect`・`Isentrope`。`kernel`: **既定 `"arc"`** (古典、曲率半径 $R_t$ の円弧 = $c=0$。
     (M) の標準 — plan §4.4「(M) は円弧 kernel・B で C1」) / `"linear"` (曲率 $1/R_t+cs$ の kernel、`c` を明示して与える。
-    C2 の根は取らない [撤回] — 記録用)。`line`: 初期線 (既定 Hall の $n$ 点。$R_t\le1$ は $n\le321$)。
+    C2 の根は取らない [撤回] — 記録用)。`line`: 初期線 (既定 Hall の $n$ 点。$R_t\le1$ は $n\le321$)。外から渡す線
+    (例: CFD ピン `feedback.cfd_initial_line.moc_initial_line`、2026-10-12 plan §5.1 #6 W3) は `check_initial_line` で検査し
+    (不合格は ValueError)、点数 $n$ は線の点数。戻りの `line_source` は線の `source` (既定 Hall は `"hall"`)。
     `m`・`q`: Goursat の BD・DE の点数 (**既定 n** — 2026-10-12 に n/2 から変更、plan §5.1 #5 (g1): T6 で m・q 倍は
     費用 2 s で推力 2 会計の差を約 1/3 にし、θ_max・F_wall・Δκ_B は m に律速されていた。根 [θ_B・θ_E・η_D] は m・q に
     依らない)、`dr`: DE の r 格子 (既定 3.2/n — n 161 で 0.02)。
@@ -1462,12 +1486,16 @@ def design_rao(gas, *, R_t: float, L: float, eps: float | None, kernel: str = "a
     L_march = L_march if L_march is not None else default_L_march(L)
     if line is None:
         line = _hall_line(R_t, ig, n)
+        line_source = "hall"
+    else:
+        check_initial_line(line, R_t, ig)
+        line_source = str(line.get("source", "given"))
     n = len(line["x"])
     dr = dr if dr is not None else 3.2 / n
     m = m if m is not None else max(n, 20)
     q = q if q is not None else max(n, 20)
     base = {"R_t": R_t, "L": L, "eps": eps, "kernel": kernel, "c": c, "n": n, "p_a": p_a, "dr": dr, "m": m, "q": q,
-            "gas": ig.kind, "gamma_star": ig.gamma_star, "accept_rule": "det_D > 0"}
+            "gas": ig.kind, "gamma_star": ig.gamma_star, "accept_rule": "det_D > 0", "line_source": line_source}
     ko = solve_kappaB(ig, R_t, L, c=c, eps=eps, line=line, p_a=p_a, dr=dr, L_march=L_march, n_scan_sb=n_scan_sb,
                       n_scan_D=n_scan_D, log=log)
     mid = ko.get("mid")

@@ -25,6 +25,11 @@
 - **T1d** (定比熱の擬似種で CPG 生成器と 1e-8): 同じ D からの DE の E と推力、同じ壁・初期線の kernel 場 (前進 MOC の網)。
 - **(g1) Goursat の既定** (plan §5.1 #5 (g1)、2026-10-12): `design_rao` の m・q の既定が初期線の点数 n (旧 n/2)、明示した値は
   そのまま。根の探索を差し替えて (根なしを返す) 戻りの記録で確かめる。
+- **(W3) 初期線を外から渡す口** (plan §5.1 #6 W3、2026-10-12): `design_rao` の既定 (`line=None`) が solve_kappaB に渡す線と
+  引数が `_hall_line` の線・従来の既定と厳密に一致し外の線の検査を呼ばない (既定の経路はビット同一)、渡した線は同じ dict の
+  まま検査 `check_initial_line` を 1 回通る、検査は Hall の線を通し壁から外れた線・θ_r 無し・亜音速の点・r が単調でない線を
+  solve_kappaB の前に ValueError で止める。検証 run (case/68 の run_0015) が手元にあれば CFD ピンの線 (n 321) が
+  `moc_forward._check_line` を通ること (無ければ未実施に記録)。
 - **(g) 与えた壁の推力 `forward_thrust`** (T4・T1a′ の評価器、前進 MOC で場を解き直す): 放射源流 (γ 1.4・半角 10°・厳密な
   C⁻ 初期線) の円錐壁で、推力 (初期線 + 壁の圧力積分) が厳密値に n 49/97/193 で単調に近づき最細区間の次数 ≥ 1.8・
   n 193 で相対 1e-6 以下、ゲート通過・壁の依存域に反転なし。衝撃波を要する壁 (曲げ戻し θ₁ 0°) は依存域に反転ありと返す。
@@ -314,6 +319,102 @@ check("(g1) design_rao の Goursat の既定 m = q = n (初期線の点数)、�
       r_def["status"] == "infeasible" and (r_def["n"], r_def["m"], r_def["q"]) == (81, 81, 81) and (r_exp["m"], r_exp["q"]) == (40, 30),
       f"既定 (n, m, q) = ({r_def['n']}, {r_def['m']}, {r_def['q']})、明示 ({r_exp['m']}, {r_exp['q']})")
 
+# ================================================================ (W3) 初期線を外から渡す口 (plan §5.1 #6 W3、2026-10-12)
+# 既定 (line=None) は Hall の線を作って solve_kappaB に渡すだけで、外から渡す線の検査 `check_initial_line` を通らない。
+# 既定の経路がビット同一であることは、solve_kappaB に渡る線と引数が `_hall_line` の線・従来の既定 (dr 3.2/n・m = q = n) と
+# 厳密に一致することで確かめる (solve_kappaB 以降は変えていない)。
+_cap = {}
+
+
+def _capture(*a, **k):
+    _cap.clear()
+    _cap.update(k)
+    _cap["args"] = a
+    return {"c": 0.0, "ok": False, "why": "試験の差し替え (根なし)", "roots": []}
+
+
+_orig_cil = ra.check_initial_line
+_n_cil = [0]
+
+
+def _count_cil(*a, **k):
+    _n_cil[0] += 1
+    return _orig_cil(*a, **k)
+
+
+ra.solve_kappaB, ra.check_initial_line = _capture, _count_cil
+try:
+    r_w3 = ra.design_rao(IG_EXH, R_t=1.0, L=22.66, eps=50.0, n=81)
+    cap_def = dict(_cap)
+    n_cil_def = _n_cil[0]
+    ref81 = ra._hall_line(1.0, IG_EXH, 81)
+    r_w3g = ra.design_rao(IG_EXH, R_t=1.0, L=22.66, eps=50.0, line=ref81)
+    cap_giv = dict(_cap)
+    n_cil_giv = _n_cil[0] - n_cil_def
+finally:
+    ra.solve_kappaB, ra.check_initial_line = _orig_skb, _orig_cil
+same_line = all(np.array_equal(cap_def["line"][k], ref81[k]) for k in ("x", "r", "M", "theta")) and \
+    cap_def["line"]["thr_axis"] == ref81["thr_axis"]
+check("(W3) design_rao の既定 (line=None) は Hall の線 (`_hall_line` と全配列・θ_r が厳密一致) を solve_kappaB に渡し、"
+      "dr 3.2/n・m = q = n・line_source 'hall'、外の線の検査は呼ばない (既定の経路はビット同一)",
+      same_line and cap_def["args"][1:] == (1.0, 22.66) and cap_def["dr"] == 3.2 / 81 and cap_def["c"] == 0.0
+      and cap_def["eps"] == 50.0 and (r_w3["m"], r_w3["q"]) == (81, 81) and r_w3["line_source"] == "hall" and n_cil_def == 0,
+      f"線の一致 {same_line}・dr {cap_def['dr']}・(m, q) ({r_w3['m']}, {r_w3['q']})・検査の呼び出し {n_cil_def}")
+check("(W3) 外から渡した線はそのまま (同じ dict) solve_kappaB に渡り、検査 `check_initial_line` を 1 回通り、"
+      "line_source は線の source",
+      cap_giv["line"] is ref81 and n_cil_giv == 1 and r_w3g["line_source"] == "hall_throat_characteristic",
+      f"line_source {r_w3g['line_source']}・検査 {n_cil_giv} 回")
+
+
+def _cil_ok(line_):
+    try:
+        ra.check_initial_line(line_, 1.0, IG_EXH)
+        return True
+    except ValueError:
+        return False
+
+
+# 検査: Hall の線は通る (n 81/161/321)、壁から外れた線・θ_r の無い線・亜音速の点を含む線・r が単調でない線は ValueError
+# (solve_kappaB の前に止まる)
+ok_cil = all(_cil_ok(ra._hall_line(1.0, IG_EXH, n_)) for n_ in (81, 161, 321))
+bad_cases = {}
+for lab, edit in (("壁から外れた (r × 1.001)", lambda d_: d_.update({"r": d_["r"] * 1.001})),
+                  ("θ_r 無し", lambda d_: d_.pop("thr_axis")),
+                  ("亜音速の点", lambda d_: d_.update({"M": np.where(np.arange(len(d_["M"])) == 40, 0.98, d_["M"])})),
+                  ("r が単調でない", lambda d_: d_.update({"r": np.r_[d_["r"][:40], d_["r"][41], d_["r"][40], d_["r"][42:]]}))):
+    bl = {k: (np.array(v, dtype=float).copy() if isinstance(v, np.ndarray) else v) for k, v in ref81.items()}
+    edit(bl)
+    ra.solve_kappaB = _capture
+    _cap.clear()
+    try:
+        ra.design_rao(IG_EXH, R_t=1.0, L=22.66, eps=50.0, line=bl)
+        bad_cases[lab] = "通った"
+    except ValueError as e:
+        bad_cases[lab] = ("ValueError" if not _cap else "ValueError (solve_kappaB の後)") \
+            if "初期線の検査に不合格" in str(e) else f"別の ValueError: {e}"
+    finally:
+        ra.solve_kappaB = _orig_skb
+check("(W3) check_initial_line: Hall の線 (n 81/161/321) は通り、壁から外れた線・θ_r の無い線・亜音速の点・r が単調でない線は "
+      "design_rao が solve_kappaB の前に ValueError で止める",
+      ok_cil and all(v == "ValueError" for v in bad_cases.values()), str(bad_cases))
+# CFD ピンの線 (検証 run が手元にあるときだけ): run_0015 (Hall 版 L100 の TP Euler) から n 321・r 等間隔の線が検査を通る
+RUN_PIN = ROOT / "case" / "68.bell_two_mode" / "run_0015_tp_m_euler_l100"
+PIN_RAN = (RUN_PIN / "res_30000.h5").exists()
+if PIN_RAN:
+    from forge_design.feedback.cfd_initial_line import expected_bell_source, moc_initial_line, pinned_factory  # noqa: E402
+    from forge_design.geometry import moc_forward as mf_w3  # noqa: E402
+    from forge_design.probdef import load_problem  # noqa: E402
+    eb_w3 = expected_bell_source(load_problem(ROOT / "case" / "68.bell_two_mode" / "problem_bell_tp_m_euler_l100.yaml"))
+    th_w3 = pinned_factory(RUN_PIN, "res_30000.h5", eb_w3["expect"])(eb_w3["R"], float(IG_EXH.moc.gamma_throat()))
+    pin_w3 = moc_initial_line(th_w3, IG_EXH.moc, 321)
+    info_w3 = ra.check_initial_line(pin_w3, 1.0, IG_EXH)
+    W_w3 = mf_w3._Wall(ra.KernelWall(1.0, c=0.0, s_lin=0.5, theta_cap=np.deg2rad(40.0)), 10.0)
+    codes_w3 = mf_w3._check_line(pin_w3, W_w3, IG_EXH.moc)[0]
+    m_w3 = ra.line_integrals(IG_EXH, pin_w3["x"], pin_w3["r"], pin_w3["theta"], pin_w3["M"], 0.0)[0] / np.pi
+    check("(W3) CFD ピンの線 (run_0015、n 321・r 等間隔) が `moc_forward._check_line` と `check_initial_line` を通る",
+          not codes_w3 and info_w3["wall_dr"] == 0.0 and pin_w3["source"] == "cfd_pinned" and len(pin_w3["x"]) == 321,
+          f"M 最小 {info_w3['M_min']:.5f}・θ_r {info_w3['thr_axis']:.6f}・軸端 x {pin_w3['x'][0]:.6f}・m*/ṁ_1D {m_w3:.7f} (記録)")
+
 # ================================================================ (g) 与えた壁の推力 forward_thrust (放射源流の円錐壁)
 G_RAD, T10, X1_RAD, L_RAD = 1.4, np.tan(np.deg2rad(10.0)), 1.2, 3.0
 IG_RAD = ra.as_isentrope(G_RAD)
@@ -578,7 +679,11 @@ NOT_RUN = {
           "合否は親と上位。評価器と壁の表現の単体はこの試験の (g)、再標本化した初期線は (h)",
     "T5": "C2 は課さない (2026-10-11 改) — g̃ と Δκ_B を T6 の系列 (n 161/241/321) で記録 (run_rao_t6.py)",
     "T6": "分解能 n 161/241/321 + n 321 の dr 半分・m・q 倍 (円弧・L100・L70) — run_rao_t6.py の表、合否は親と上位",
+    "W3 ピン版の (M)": "CFD ピンの初期線で L100 を生成し Hall 版との差を記録 — run の表 (rao_m/run_pin_line.py → rao_pin.json・"
+                       "rao_pin_compare.csv)、合否は親と上位",
 }
+if not PIN_RAN:
+    NOT_RUN["W3 CFD ピンの線"] = f"検証 run {RUN_PIN} が無い (git 管理外) — 線の検査を省略"
 for k, v in NOT_RUN.items():
     print(f"未実施 {k}: {v}", flush=True)
 
