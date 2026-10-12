@@ -5,6 +5,8 @@
 #include "setDT_d.cuh"
 #include "lowMachPrecond_d.cuh"   // Phase 4: β・c' で Δτ' を前処理スペクトル半径に合わせて拡大
 #include "cuda_forge/speciesTransport_d.cuh"   // speciesPrecondDtActive (化学種の擬似時間刻み dt_local_sp、§5.1 #26)
+#include <cstdio>    // 診断の切替の表示 (FORGE_DIAG_PRECOND_NO_DT_SCALE)
+#include <cstdlib>   // getenv・atoi
 
 
 __global__ void setCFL_pln_d
@@ -423,15 +425,25 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
             // 1: 前処理で拡大する前の Δτ (物理スペクトル半径基準) を退避する
             gpuErrchk( cudaMemcpy(var.c_d["dt_local_sp"], var.c_d["dt_local"], sizeof(flow_float)*msh.nCells_all, cudaMemcpyDeviceToDevice) );
         }
-        setDTlocal_precond_scale_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
-            cfg.precondEps,
-            msh.nCells,
-            var.c_d["ro"],
-            var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"],
-            var.c_d["sonic"],
-            var.c_d["dt_local"]
-        );
-        gpuErrchk( cudaPeekAtLastError() );
+        // 診断 (FORGE_DIAG_PRECOND_NO_DT_SCALE=1、既定 off): 刻みの拡大だけを止め、Γ・β・precondEps はそのまま使う
+        // (plans/active/tooling-nozzle-core-grid.md §4.86、前処理で近壁の残差が増える理由を刻みと Γ に分ける A/B)。
+        static const bool diagNoDtScale = [](){
+            const char* e = getenv("FORGE_DIAG_PRECOND_NO_DT_SCALE");
+            const bool on = (e != nullptr && atoi(e) == 1);
+            if (on) fprintf(stderr, "[diag] FORGE_DIAG_PRECOND_NO_DT_SCALE=1: 前処理の擬似時間刻みの拡大を止める (Γ はそのまま)\n");
+            return on;
+        }();
+        if (!diagNoDtScale) {
+            setDTlocal_precond_scale_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
+                cfg.precondEps,
+                msh.nCells,
+                var.c_d["ro"],
+                var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"],
+                var.c_d["sonic"],
+                var.c_d["dt_local"]
+            );
+            gpuErrchk( cudaPeekAtLastError() );
+        }
         if (spDt && cfg.speciesPrecondDt == 2) {
             // 2: 拡大後の Δτ' に β を掛ける
             setDTlocal_species_beta_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
