@@ -1,0 +1,299 @@
+{
+ "lines": {
+  "tail": 0.4,
+  "drift": 0.005,
+  "osc": 0.01,
+  "min_snaps": 20,
+  "asym_tol": 0.01
+ },
+ "n_snapshots": 21,
+ "steps": [
+  0.0,
+  3000.0,
+  6000.0,
+  9000.0,
+  12000.0,
+  15000.0,
+  18000.0,
+  21000.0,
+  24000.0,
+  27000.0,
+  30000.0,
+  33000.0,
+  36000.0,
+  39000.0,
+  42000.0,
+  45000.0,
+  48000.0,
+  51000.0,
+  54000.0,
+  57000.0,
+  60000.0
+ ],
+ "n_stable": 682,
+ "targets": {
+  "x0.5": {
+   "verdict": "TRANSIENT-UNSETTLED",
+   "asym_final_ratio": null,
+   "ok": false,
+   "detail": "tail mean=0.00236  drift=0.3%/tail  fluct=0.3%  (still trending at tail-end)",
+   "stable_section": false
+  },
+  "x1": {
+   "verdict": "STEADY",
+   "asym_final_ratio": null,
+   "ok": true,
+   "detail": "tail mean=0.004305  drift=0.1%/tail  fluct=0.1%",
+   "stable_section": false
+  },
+  "x2": {
+   "verdict": "STEADY",
+   "asym_final_ratio": 7.000000000000001e-05,
+   "ok": true,
+   "detail": "tail mean=0.008067  drift=0.2%/tail  fluct=0.2%  [単調増加; 増分減衰から漸近値 0.0080729 (最終比 +0.007 %)]",
+   "stable_section": true
+  },
+  "x4": {
+   "verdict": "STEADY",
+   "asym_final_ratio": null,
+   "ok": true,
+   "detail": "tail mean=0.01645  drift=0.0%/tail  fluct=0.1%",
+   "stable_section": true
+  },
+  "x8": {
+   "verdict": "STEADY",
+   "asym_final_ratio": 4e-05,
+   "ok": true,
+   "detail": "tail mean=0.0366  drift=0.1%/tail  fluct=0.1%  [単調増加; 増分減衰から漸近値 0.0366169 (最終比 +0.004 %)]",
+   "stable_section": true
+  },
+  "x16": {
+   "verdict": "STEADY",
+   "asym_final_ratio": null,
+   "ok": true,
+   "detail": "tail mean=0.08618  drift=0.1%/tail  fluct=0.1%",
+   "stable_section": true
+  },
+  "exit": {
+   "verdict": "STEADY",
+   "asym_final_ratio": null,
+   "ok": true,
+   "detail": "tail mean=0.1344  drift=0.1%/tail  fluct=0.1%",
+   "stable_section": true
+  },
+  "L2_x_ge0": {
+   "verdict": "STEADY",
+   "asym_final_ratio": null,
+   "ok": true,
+   "detail": "tail mean=0.07141  drift=0.1%/tail  fluct=0.1%",
+   "stable_section": true
+  },
+  "L2_stable": {
+   "verdict": "STEADY",
+   "asym_final_ratio": null,
+   "ok": true,
+   "detail": "tail mean=0.07261  drift=0.1%/tail  fluct=0.1%",
+   "stable_section": true
+  }
+ },
+ "sections": {
+  "n": 682,
+  "n_ok": 619,
+  "verdicts": {
+   "DRIFTING": 55,
+   "STEADY": 619,
+   "TRANSIENT-UNSETTLED": 8
+  },
+  "not_ok_first": [
+   [
+    0.005790540249285714,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.012329615214285713,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.018868792242857143,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.025408125635714283,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.03194766982142857,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.038487482085714286,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.04502761480714285,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.051568122349999995,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.0581090591,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.06465047947857143,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.07119243791428571,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.07773498885714285,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.08427818685714285,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.09082208642857142,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.0973667422142857,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.1039122087142857,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.11045854064285714,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.11700579271428571,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.12355401978571427,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.13010327657142856,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.13665361807142856,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.14320509914285712,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.14975777478571428,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.1563117001428571,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.16286693035714286,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.16942352064285712,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.17598152628571428,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.1825410027142857,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.18910200535714283,
+    "DRIFTING",
+    null,
+    false
+   ],
+   [
+    0.19566458978571427,
+    "DRIFTING",
+    null,
+    false
+   ]
+  ],
+  "not_ok_x_ranges": [
+   [
+    0.005790540249285714,
+    0.4134879246428571,
+    63
+   ]
+  ]
+ },
+ "last4_rel_change_max_stable": 0.0023573128795389975,
+ "all_ok": false
+}
