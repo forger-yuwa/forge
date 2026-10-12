@@ -1,0 +1,50 @@
+# forge_design 問題定義 — ③ベル (M) L80 の **δ* 補正壁** (生産の手順、plan tooling-nozzle-bell-two-mode §4.4・§5.1 #7c、V3 の補正列)。
+# 元の問題 problem_bell_tp_m_ns_l80.yaml (補正しない) から forge_design.feedback.bell_deltastar_correction.correct_rao で作った:
+# kδ 1.0288900769793352・縁 = MOC の壁 + 凍結源 Euler run_0015_tp_m_euler_l100・V-ext (x 0〜0.41 の立ち上げ)・δ_e 0.103816 r_t・ε_inv 48.542592。台本 rao_m/run_corrected_walls_prod.py design。
+# NS の設定・格子族・段は元の問題と同じ。
+name: bell_tp_m_ns_eps50_L80_pin_corr
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  L_over_rt: {value: 18.126026824062375, fixed: true}   # 15° 円錐長 22.6575 の 80 %。壁ファイルが決める L との照合用 (相対 1e-9)
+
+geometry:
+  bell_mode: moc_rao
+  rao_wall_file: rao_m/rao_corrprod_parts/L80_corr_vext_n321_wall.npz   # 補正後の非粘性壁 (ε_inv 48.542592)
+  rao_offset_file: rao_m/rao_corrprod_parts/L80_corr_vext_n321_offset.npz   # 物理壁 = 非粘性壁 + δ(x) (V-ext)
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 1.25e-5         # 下流 (x ≥ wall_first_blend_x1) の第一セル厚 / 局所半径 ((D) の MOO と同じ — plan §5.1 #8a′)
+  wall_first_frac_throat: 3.5e-6   # x ≤ wall_first_blend_x0 (上流は全域この値)
+  wall_first_blend_x0: 0.3
+  wall_first_blend_x1: 14.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  wall_normal_layer: [0.02, 0.8]   # 近壁を壁法線に (局所半径比 d_n, d_b)
+  wall_normal_end_stations: 20     # 入口・出口の 20 断面で半径方向の配置へ戻す (面を平面に保つ)
+  ar_max: 5000                     # AR 緩和 (≤5000): 壁法線の構造層 (AGENTS.md の例外)
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 60000          # 本段
+  outStepInterval: 3000      # 本段の res の間隔 = 本段長の 1/20 (推力の時系列 20 点、末尾窓 8 点)
+  cfl_main: 4.0
+  objectives: [eta_cf, length]

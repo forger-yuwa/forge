@@ -1,0 +1,454 @@
+{
+ "setup_by_tag": {
+  "L70_corr_vext_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 48.75670638188641,
+   "eps_phys": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 15.860273471054509,
+   "n_line": 321,
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "deltastar_correction": {
+    "k_delta": 1.0288900769793352,
+    "delta_E": 0.08846755251463592,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "offset": "L70_corr_vext_n321_offset.npz"
+   }
+  },
+  "L100_corr_vext_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 48.09126024049191,
+   "eps_phys": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 22.657533530077565,
+   "n_line": 321,
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "deltastar_correction": {
+    "k_delta": 1.0288900769793352,
+    "delta_E": 0.13628156854896567,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "offset": "L100_corr_vext_n321_offset.npz"
+   }
+  },
+  "L80_corr_vext_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 48.54259169760986,
+   "eps_phys": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 18.126026824062283,
+   "n_line": 321,
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "deltastar_correction": {
+    "k_delta": 1.0288900769793352,
+    "delta_E": 0.10381643864734966,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "offset": "L80_corr_vext_n321_offset.npz"
+   }
+  },
+  "L90_corr_vext_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 48.32042349205245,
+   "eps_phys": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 20.391780177070284,
+   "n_line": 321,
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "deltastar_correction": {
+    "k_delta": 1.0288900769793352,
+    "delta_E": 0.11977847160258802,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "offset": "L90_corr_vext_n321_offset.npz"
+   }
+  }
+ },
+ "setup": {
+  "gas": "EXH (RocketExhaust.moc_gas)",
+  "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+  "R_t": 1.0,
+  "eps": 48.75670638188641,
+  "eps_phys": 50.0,
+  "p_a": 0.0,
+  "kernel": "arc",
+  "accept_rule": "det_D > 0",
+  "L_rt": 15.860273471054509,
+  "n_line": 321,
+  "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+  "deltastar_correction": {
+   "k_delta": 1.0288900769793352,
+   "delta_E": 0.08846755251463592,
+   "ramp": [
+    0.0,
+    0.41
+   ],
+   "offset": "L70_corr_vext_n321_offset.npz"
+  }
+ },
+ "rows": {
+  "L70_corr_vext_n321": {
+   "tag": "L70_corr_vext_n321",
+   "wall_record": {
+    "theta_B_deg": 35.57259211214097,
+    "theta_E_deg": 10.670071750672534,
+    "theta_max_deg": 35.594002786512654,
+    "x_E": 15.860273471047574,
+    "r_E": 6.9826002593508445,
+    "M_E": 4.120511044806922,
+    "F_cs": 8.543427138863423,
+    "thrust_rel_diff": -1.608331837143149e-05,
+    "closure_norm": 1.8864853617073457e-05,
+    "det_D": 0.1368398629306203
+   },
+   "eps": 50.0,
+   "eps_inv": 48.75670638188641,
+   "delta_E": 0.08846755251463592,
+   "k_delta": 1.0288900769793352,
+   "offset": {
+    "n": 1199,
+    "lam": null,
+    "lam_rule": "GCV",
+    "end_weight": 100000000.0,
+    "fit_rms": 1.031265547060416e-06,
+    "fit_max": 2.694996259748096e-05,
+    "fit_end_resid": -9.992007221626409e-16,
+    "fit_rel_max_x_ge_0p1": 0.008635575016698467,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "x_end": 15.860273471054509,
+    "meta": {
+     "k_delta": 1.0288900769793352,
+     "eps_phys": 50.0,
+     "eps_inv": 48.75670638188641,
+     "delta_E": 0.08846755251463592,
+     "ramp": [
+      0.0,
+      0.41
+     ],
+     "variant": "vext",
+     "x_cal_start": 1.17,
+     "theory": "contur_v2 (metrics.bell_deltastar.contur_bell, edge moc)",
+     "edge": {
+      "mode": "moc",
+      "wall_npz": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L70_pin_n321_wall.npz",
+      "freeze_euler": {
+       "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+       "res": "res_30000.h5",
+       "check": {
+        "max_abs_T_minus_T_of_M_supersonic_K": 0.1992987762946541,
+        "h0_rel_spread": 0.0001700117572909221,
+        "x_first": -4.0,
+        "x_last": 22.657533528571424,
+        "M_at_x0": 1.1812402214289541
+       }
+      },
+      "M_x0_euler": 1.1812402198189236,
+      "M_x0_moc": 1.1812335132555591
+     },
+     "source_wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L70_pin_n321_wall.npz",
+     "source_wall_sha256_16": "b1ca544470959223",
+     "inviscid_wall": "L70_corr_vext_n321_wall.npz",
+     "problem": "/home/sano/work/forge-thruster/case/68.bell_two_mode/problem_bell_tp_m_ns_l70.yaml",
+     "plan": "plans/active/tooling-nozzle-bell-two-mode.md §4.4・§5.1 #7c"
+    },
+    "d0": 0.0,
+    "d1_0": 0.0,
+    "d2_0": 0.0,
+    "delta_end": 0.08846755251463492,
+    "d1_min": 0.0,
+    "d1_max": 0.009445610245191222,
+    "x_d1_max": 0.5590746398546714,
+    "d2_absmax": 0.12981766543327922,
+    "x_d2_absmax": 0.5939672414909913
+   },
+   "time_s": 1612.2055819034576,
+   "files": {
+    "wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L70_corr_vext_n321_wall.npz",
+    "record": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L70_corr_vext_n321.json",
+    "offset": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L70_corr_vext_n321_offset.npz"
+   }
+  },
+  "L100_corr_vext_n321": {
+   "tag": "L100_corr_vext_n321",
+   "wall_record": {
+    "theta_B_deg": 29.381993513248414,
+    "theta_E_deg": 4.948931813961287,
+    "theta_max_deg": 30.37863375531902,
+    "x_E": 22.657533530077565,
+    "r_E": 6.934786243316503,
+    "M_E": 4.295278159313042,
+    "F_cs": 8.648493775273376,
+    "thrust_rel_diff": -1.2522467584219278e-05,
+    "closure_norm": 6.079098650331705e-06,
+    "det_D": 0.7901522247453195
+   },
+   "eps": 50.0,
+   "eps_inv": 48.09126024049191,
+   "delta_E": 0.13628156854896567,
+   "k_delta": 1.0288900769793352,
+   "offset": {
+    "n": 1276,
+    "lam": null,
+    "lam_rule": "GCV",
+    "end_weight": 100000000.0,
+    "fit_rms": 5.1022561133999e-07,
+    "fit_max": 1.544631197539616e-05,
+    "fit_end_resid": -8.604228440844963e-16,
+    "fit_rel_max_x_ge_0p1": 0.006807538698935449,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "x_end": 22.657533530077565,
+    "meta": {
+     "k_delta": 1.0288900769793352,
+     "eps_phys": 50.0,
+     "eps_inv": 48.09126024049191,
+     "delta_E": 0.13628156854896567,
+     "ramp": [
+      0.0,
+      0.41
+     ],
+     "variant": "vext",
+     "x_cal_start": 1.17,
+     "theory": "contur_v2 (metrics.bell_deltastar.contur_bell, edge moc)",
+     "edge": {
+      "mode": "moc",
+      "wall_npz": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L100_pin_n321_wall.npz",
+      "freeze_euler": {
+       "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+       "res": "res_30000.h5",
+       "check": {
+        "max_abs_T_minus_T_of_M_supersonic_K": 0.1992987762946541,
+        "h0_rel_spread": 0.0001700117572909221,
+        "x_first": -4.0,
+        "x_last": 22.657533528571424,
+        "M_at_x0": 1.1812402214289541
+       }
+      },
+      "M_x0_euler": 1.1812402198189236,
+      "M_x0_moc": 1.1812335132555591
+     },
+     "source_wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L100_pin_n321_wall.npz",
+     "source_wall_sha256_16": "4ea98e9db67eafd7",
+     "inviscid_wall": "L100_corr_vext_n321_wall.npz",
+     "problem": "/home/sano/work/forge-thruster/case/68.bell_two_mode/problem_bell_tp_m_ns_l100.yaml",
+     "plan": "plans/active/tooling-nozzle-bell-two-mode.md §4.4・§5.1 #7c"
+    },
+    "d0": 0.0,
+    "d1_0": 0.0,
+    "d2_0": 0.0,
+    "delta_end": 0.1362815685489648,
+    "d1_min": 0.0,
+    "d1_max": 0.007925983280899086,
+    "x_d1_max": 22.657533530077565,
+    "d2_absmax": 0.052779035022948,
+    "x_d2_absmax": 0.49619998430869866
+   },
+   "time_s": 1667.4297015666962,
+   "files": {
+    "wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L100_corr_vext_n321_wall.npz",
+    "record": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L100_corr_vext_n321.json",
+    "offset": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L100_corr_vext_n321_offset.npz"
+   }
+  },
+  "L80_corr_vext_n321": {
+   "tag": "L80_corr_vext_n321",
+   "wall_record": {
+    "theta_B_deg": 32.6297832630471,
+    "theta_E_deg": 8.355128308930714,
+    "theta_max_deg": 32.98370663787204,
+    "x_E": 18.12602682405636,
+    "r_E": 6.9672513732181445,
+    "M_E": 4.187265548207232,
+    "F_cs": 8.600660852664248,
+    "thrust_rel_diff": -1.4310419579642006e-05,
+    "closure_norm": 1.0516765012185909e-05,
+    "det_D": 0.37686584093226955
+   },
+   "eps": 50.0,
+   "eps_inv": 48.54259169760986,
+   "delta_E": 0.10381643864734966,
+   "k_delta": 1.0288900769793352,
+   "offset": {
+    "n": 1230,
+    "lam": null,
+    "lam_rule": "GCV",
+    "end_weight": 100000000.0,
+    "fit_rms": 7.435705072474893e-07,
+    "fit_max": 2.116506434720819e-05,
+    "fit_end_resid": -1.0547118733938987e-15,
+    "fit_rel_max_x_ge_0p1": 0.008034320444405106,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "x_end": 18.126026824062283,
+    "meta": {
+     "k_delta": 1.0288900769793352,
+     "eps_phys": 50.0,
+     "eps_inv": 48.54259169760986,
+     "delta_E": 0.10381643864734966,
+     "ramp": [
+      0.0,
+      0.41
+     ],
+     "variant": "vext",
+     "x_cal_start": 1.17,
+     "theory": "contur_v2 (metrics.bell_deltastar.contur_bell, edge moc)",
+     "edge": {
+      "mode": "moc",
+      "wall_npz": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L80_pin_n321_wall.npz",
+      "freeze_euler": {
+       "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+       "res": "res_30000.h5",
+       "check": {
+        "max_abs_T_minus_T_of_M_supersonic_K": 0.1992987762946541,
+        "h0_rel_spread": 0.0001700117572909221,
+        "x_first": -4.0,
+        "x_last": 22.657533528571424,
+        "M_at_x0": 1.1812402214289541
+       }
+      },
+      "M_x0_euler": 1.1812402198189236,
+      "M_x0_moc": 1.1812335132555591
+     },
+     "source_wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L80_pin_n321_wall.npz",
+     "source_wall_sha256_16": "3632da1fc6ff4f25",
+     "inviscid_wall": "L80_corr_vext_n321_wall.npz",
+     "problem": "/home/sano/work/forge-thruster/case/68.bell_two_mode/problem_bell_tp_m_ns_l80.yaml",
+     "plan": "plans/active/tooling-nozzle-bell-two-mode.md §4.4・§5.1 #7c"
+    },
+    "d0": 0.0,
+    "d1_0": 0.0,
+    "d2_0": 0.0,
+    "delta_end": 0.1038164386473486,
+    "d1_min": 0.0,
+    "d1_max": 0.007447010192953713,
+    "x_d1_max": 18.126026824062283,
+    "d2_absmax": 0.08309858074382231,
+    "x_d2_absmax": 0.5437808047218685
+   },
+   "time_s": 1406.5138838291168,
+   "files": {
+    "wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L80_corr_vext_n321_wall.npz",
+    "record": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L80_corr_vext_n321.json",
+    "offset": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L80_corr_vext_n321_offset.npz"
+   }
+  },
+  "L90_corr_vext_n321": {
+   "tag": "L90_corr_vext_n321",
+   "wall_record": {
+    "theta_B_deg": 30.74546142223232,
+    "theta_E_deg": 6.469874660652895,
+    "theta_max_deg": 31.434023768011855,
+    "x_E": 20.391780177066963,
+    "r_E": 6.951289340262899,
+    "M_E": 4.244668103503675,
+    "F_cs": 8.63193625508246,
+    "thrust_rel_diff": -1.3415074006360445e-05,
+    "closure_norm": 7.8349084397092e-06,
+    "det_D": 0.5849368088820623
+   },
+   "eps": 50.0,
+   "eps_inv": 48.32042349205245,
+   "delta_E": 0.11977847160258802,
+   "k_delta": 1.0288900769793352,
+   "offset": {
+    "n": 1256,
+    "lam": null,
+    "lam_rule": "GCV",
+    "end_weight": 100000000.0,
+    "fit_rms": 5.893265597202161e-07,
+    "fit_max": 1.7726046339597984e-05,
+    "fit_end_resid": -8.465450562766819e-16,
+    "fit_rel_max_x_ge_0p1": 0.007275191531404307,
+    "ramp": [
+     0.0,
+     0.41
+    ],
+    "x_end": 20.391780177070284,
+    "meta": {
+     "k_delta": 1.0288900769793352,
+     "eps_phys": 50.0,
+     "eps_inv": 48.32042349205245,
+     "delta_E": 0.11977847160258802,
+     "ramp": [
+      0.0,
+      0.41
+     ],
+     "variant": "vext",
+     "x_cal_start": 1.17,
+     "theory": "contur_v2 (metrics.bell_deltastar.contur_bell, edge moc)",
+     "edge": {
+      "mode": "moc",
+      "wall_npz": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L90_pin_n321_wall.npz",
+      "freeze_euler": {
+       "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+       "res": "res_30000.h5",
+       "check": {
+        "max_abs_T_minus_T_of_M_supersonic_K": 0.1992987762946541,
+        "h0_rel_spread": 0.0001700117572909221,
+        "x_first": -4.0,
+        "x_last": 22.657533528571424,
+        "M_at_x0": 1.1812402214289541
+       }
+      },
+      "M_x0_euler": 1.1812402198189236,
+      "M_x0_moc": 1.1812335132555591
+     },
+     "source_wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_pin_parts/L90_pin_n321_wall.npz",
+     "source_wall_sha256_16": "c44bbe66d4fa3ee0",
+     "inviscid_wall": "L90_corr_vext_n321_wall.npz",
+     "problem": "/home/sano/work/forge-thruster/case/68.bell_two_mode/problem_bell_tp_m_ns_l90.yaml",
+     "plan": "plans/active/tooling-nozzle-bell-two-mode.md §4.4・§5.1 #7c"
+    },
+    "d0": 0.0,
+    "d1_0": 0.0,
+    "d2_0": 0.0,
+    "delta_end": 0.11977847160258717,
+    "d1_min": 0.0,
+    "d1_max": 0.007716175221650807,
+    "x_d1_max": 20.391780177070284,
+    "d2_absmax": 0.06608490817529236,
+    "x_d2_absmax": 0.5210099835241458
+   },
+   "time_s": 1410.9494860172272,
+   "files": {
+    "wall": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L90_corr_vext_n321_wall.npz",
+    "record": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L90_corr_vext_n321.json",
+    "offset": "/home/sano/work/forge-thruster/case/68.bell_two_mode/rao_m/rao_corrprod_parts/L90_corr_vext_n321_offset.npz"
+   }
+  }
+ },
+ "plan": "plans/active/tooling-nozzle-bell-two-mode.md §4.4・§5.1 #7c",
+ "commit": "494ba80a8159d32fb03c02b83ca21fc66c3c796e"
+}
