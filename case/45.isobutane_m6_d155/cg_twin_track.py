@@ -50,8 +50,8 @@ for scale in (0.67, 1.0, 1.33):
     res["follow"][f"W{W}"] = {"lambda": l, "R2": r2, "amp": lam_amp, "capture_frac_min": min(frac)}
 rel = [r["max_dT_rel"] for r in M if LO <= r["step"] <= HI]
 F = res["follow"]; base = F[f"W{W0}"]; lams = [v["lambda"] for v in F.values()]
-qual = {"points": len(P) >= 5 and st[-1] - st[0] >= 1000, "linear": max(rel) < 1e-3, "capture": base["capture_frac_min"] >= 0.5,
-        "W_robust": all(abs(l - base["lambda"]) <= 0.2 * abs(base["lambda"]) for l in lams), "xcorr": min(corrs) >= 0.5}
+qual = {"points": bool(len(P) >= 5 and st[-1] - st[0] >= 1000), "linear": bool(max(rel) < 1e-3), "capture": bool(base["capture_frac_min"] >= 0.5),
+        "W_robust": bool(all(abs(l - base["lambda"]) <= 0.2 * abs(base["lambda"]) for l in lams)), "xcorr": bool(min(corrs) >= 0.5)}
 res["qualification"] = qual
 if not all(qual.values()):
     out = "判定不能 (資格不足: " + ", ".join(k for k, v in qual.items() if not v) + ")"
