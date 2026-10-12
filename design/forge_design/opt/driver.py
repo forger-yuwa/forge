@@ -84,7 +84,7 @@ def dv_order_of(raw: dict) -> tuple:
 
 # 問題 YAML の所在を基準に解決する相対パスのキー (probdef: gas.species_db・gas.exhaust・geometry.rao_wall_file [(M) の壁ファイル、
 # plan bell-two-mode §5.1 #6])
-PROBLEM_PATH_KEYS = (("gas", "exhaust"), ("gas", "species_db"), ("geometry", "rao_wall_file"))
+PROBLEM_PATH_KEYS = (("gas", "exhaust"), ("gas", "species_db"), ("geometry", "rao_wall_file"), ("geometry", "rao_offset_file"))
 
 
 def absolutize_problem_paths(raw: dict, base_dir) -> dict:

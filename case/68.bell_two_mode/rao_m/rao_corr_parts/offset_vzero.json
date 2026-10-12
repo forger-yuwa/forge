@@ -1,0 +1,38 @@
+{
+ "n": 790,
+ "lam": null,
+ "lam_rule": "GCV",
+ "end_weight": 100000000.0,
+ "fit_rms": 6.799453512014332e-07,
+ "fit_max": 1.1087113447596272e-05,
+ "fit_end_resid": -2.120525977034049e-14,
+ "fit_rel_max_x_ge_0p1": 0.004832754387128118,
+ "ramp": [
+  1.17,
+  2.0
+ ],
+ "x_end": 22.657533530077966,
+ "meta": {
+  "variant": "vzero",
+  "k_delta": 1.0288900769793352,
+  "contur": "contur_l100_euler_run0018.npz",
+  "calibration": "kdelta_l100_calibration.json",
+  "sha256_16": {
+   "kdelta_l100_calibration.json": "3e911a2954d5e74b",
+   "contur_l100_euler_run0018.npz": "9a733091b0df3333"
+  },
+  "eps_phys": 50.0,
+  "eps_inv": 48.09052527964615,
+  "plan": "plans/active/tooling-nozzle-bell-two-mode.md §5.1 #7 (7b-4)"
+ },
+ "d0": 0.0,
+ "d1_0": 0.0,
+ "d2_0": 0.0,
+ "delta_end": 0.13633455963100707,
+ "d1_min": 0.0,
+ "d1_max": 0.016531302178625362,
+ "x_d1_max": 1.6313424141656137,
+ "d2_absmax": 0.05460687134301717,
+ "x_d2_absmax": 1.3866410520407717,
+ "delta_at_xE_minus_frozen": -1.3147177790884257e-11
+}

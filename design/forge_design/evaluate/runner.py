@@ -122,7 +122,7 @@ DIRECT_DV = ("theta_max_deg", "theta_e_deg", "L_over_rt")
 BELL_MODES = ("direct_bspline", "moc_rao")  # geometry.bell_mode (無し = 従来の bell_type の経路)
 # (M) 特性曲線モード (plan bell-two-mode §4.4・§5.1 #6 (W1)): geometry に書けるキー (寸法 spec は (D) と同じ `BellC2Spec`) と dv。
 # L は生成器の壁ファイルが決めるので dv の L_over_rt は照合用 (壁の終点 x_E と相対 RAO_SPEC_RTOL で一致しなければ止める)
-RAO_GEOMETRY_KEYS = ("bell_mode", "rao_wall_file", "R_t", "contraction_ratio", "L_U", "L_pipe")
+RAO_GEOMETRY_KEYS = ("bell_mode", "rao_wall_file", "rao_offset_file", "R_t", "contraction_ratio", "L_U", "L_pipe")
 RAO_DV = ("L_over_rt",)
 RAO_SPEC_RTOL = 1.0e-9                      # 壁ファイルの L・ε・R_t と問題の spec の一致 (相対)
 
@@ -221,9 +221,22 @@ def _build_wall_rao(p: Problem) -> tuple:
     L = dv_value(p, "L_over_rt")
     eps = float(spec.eps)
     setup = (rec.get("campaign") or {}).get("setup") or {}
+    offset, eps_gen = None, eps
+    if p.rao_offset_file is not None:
+        # δ* 補正の物理壁 (plan §5.1 #7 (7b-4)): 壁ファイルは非粘性壁 (ε_inv)、物理壁の出口半径 r_E + δ(x_E) が √(spec.eps)
+        import hashlib
+        from ..geometry.wall import DisplacementOffset
+        offset = DisplacementOffset.load(p.rao_offset_file)
+        eps_gen = float(offset.meta["eps_inv"])
+        rec["offset"] = {"file": str(p.rao_offset_file), "sha256": hashlib.sha256(p.rao_offset_file.read_bytes()).hexdigest(),
+                         **offset.record()}
+    r_end_phys = float(rw.r_end) + (float(offset(np.array([float(rw.x_end)]))[0]) if offset is not None else 0.0)
     chk = {"L_problem": L, "L_wall": float(rw.x_end), "L_rel_diff": (float(rw.x_end) - L) / L,
-           "eps_problem": eps, "eps_wall": float(rw.r_end) ** 2, "eps_rel_diff": (float(rw.r_end) ** 2 - eps) / eps,
+           "eps_problem": eps, "eps_wall": r_end_phys ** 2, "eps_rel_diff": (r_end_phys ** 2 - eps) / eps,
            "R_t_problem": float(spec.R_t), "R_t_wall": float(rw.R_t), "rtol": RAO_SPEC_RTOL}
+    if offset is not None:
+        chk.update({"eps_inviscid_wall": float(rw.r_end) ** 2, "eps_inv_offset_meta": eps_gen,
+                    "eps_inv_rel_diff": (float(rw.r_end) ** 2 - eps_gen) / eps_gen})
     errs = []
     if abs(chk["L_rel_diff"]) > RAO_SPEC_RTOL:
         errs.append(f"L: 壁ファイルの終点 x_E {chk['L_wall']!r} と dv.L_over_rt {L!r} (相対 {chk['L_rel_diff']:+.2e})")
@@ -231,7 +244,9 @@ def _build_wall_rao(p: Problem) -> tuple:
         errs.append(f"ε: 壁ファイルの r_E² {chk['eps_wall']!r} と spec.eps {eps!r} (相対 {chk['eps_rel_diff']:+.2e})")
     if abs(float(rw.R_t) - float(spec.R_t)) > RAO_SPEC_RTOL * float(spec.R_t):
         errs.append(f"R_t: 壁ファイル {float(rw.R_t)!r} と geometry.R_t {float(spec.R_t)!r}")
-    for k, mine in (("eps", eps), ("R_t", float(spec.R_t))):
+    if offset is not None and abs(chk["eps_inv_rel_diff"]) > RAO_SPEC_RTOL:
+        errs.append(f"ε_inv: 非粘性壁の r_E² {chk['eps_inviscid_wall']!r} とずれのファイルの eps_inv {eps_gen!r}")
+    for k, mine in (("eps", eps_gen), ("R_t", float(spec.R_t))):
         if setup.get(k) is not None and abs(float(setup[k]) - mine) > RAO_SPEC_RTOL * abs(mine):
             errs.append(f"{k}: 壁ファイルのキャンペーンの setup.{k} {setup[k]!r} と問題 {mine!r}")
     if setup.get("p_a") is not None and float(setup["p_a"]) != 0.0:
@@ -239,7 +254,7 @@ def _build_wall_rao(p: Problem) -> tuple:
     if errs:
         raise ValueError("geometry.bell_mode moc_rao: 壁ファイル " + str(pth) + " が問題と合わない — " + "; ".join(errs))
     chk["gas"] = _rao_exhaust_check(p, setup)
-    wall = RaoBellWall(rw, spec)
+    wall = RaoBellWall(rw, spec, offset=offset)
     msgs = wall.validate()
     if msgs:
         raise ValueError("(M) の壁の検査に不合格: " + "; ".join(msgs))
