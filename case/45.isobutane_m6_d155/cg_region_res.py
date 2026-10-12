@@ -11,7 +11,8 @@ with h5py.File(HERE / run / f"res_{step}.h5", "r") as h:
     V = np.asarray(h["VALUE/volume"][:], float)
     R = {k: np.asarray(h["VALUE/" + k][:], float) for k in ("res_ro", "res_roUx", "res_roUy", "res_roe", "res_roK", "res_roOmega") if "VALUE/" + k in h}
 rec = {"step": step, "nonfinite": int(sum(np.count_nonzero(~np.isfinite(v)) for v in R.values()))}
-for lab, m in (("contraction", (x >= -8) & (x <= -2)), ("all", np.ones_like(x, bool))):
+mc = (x >= -8) & (x <= -2)   # §4.80: 縮流部の外 (outside) を足した (既存のキーの値は不変)
+for lab, m in (("contraction", mc), ("all", np.ones_like(x, bool)), ("outside", ~mc)):
     for k, r in R.items():
         rec[f"{lab}_{k}"] = float(np.sqrt(np.sum(V[m] * (r[m] / V[m]) ** 2) / np.sum(V[m])))
 with open(HERE / "_band_ab" / "core_grid" / f"region_res_{run}.jsonl", "a") as fh:
