@@ -1741,5 +1741,191 @@
  "target": {
   "dtheta_deg": 0.1,
   "dr": 0.001
+ },
+ "setup_by_tag": {
+  "L70_pin_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 15.860273471054576,
+   "L_frac": 0.7,
+   "n_line": 321,
+   "dr_default": "3.2/n",
+   "mq_default": "n (2026-10-12)",
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "note": "合否は判定しない (親と上位)。目安 Δθ_B・Δθ_E ≤ 0.1°・壁 Δr ≤ 1e-3 r_t (diagnostician 2026-10-12)",
+   "initial_line_detail": {
+    "run": "run_0015_tp_m_euler_l100",
+    "res": "res_30000.h5",
+    "cfd": {
+     "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+     "res": [
+      "res_30000.h5"
+     ],
+     "match": {
+      "checked": [
+       "R",
+       "gas.exhaust",
+       "L_U",
+       "r_U",
+       "L_pipe",
+       "contraction_shape",
+       "meta.gas.exhaust.Tc_K",
+       "meta.gas.exhaust.Pc_Pa",
+       "meta.gas.species",
+       "inlet.Pt",
+       "inlet.Tt",
+       "inlet.Y",
+       "physProp.thermalMethod",
+       "physProp.species",
+       "physProp.thermoHrefTemp"
+      ],
+      "unchecked": [
+       "gamma_hall"
+      ]
+     },
+     "sha256_16": {
+      "snapshot": "c1271cbb67b8cdd1",
+      "thermo": "a0fc9bd18f2cfdde",
+      "line": "e8bd021adff43eda"
+     }
+    },
+    "x_axis": 0.6535007773011583,
+    "M_axis_anchor": 1.3315662388504297,
+    "Mp_axis_anchor": 0.7489923001660992,
+    "thr_axis": 0.1856141653586971,
+    "sha256_16": "06885f029fe3910c"
+   }
+  },
+  "L80_pin_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 18.126026824062375,
+   "L_frac": 0.8,
+   "n_line": 321,
+   "dr_default": "3.2/n",
+   "mq_default": "n (2026-10-12)",
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "note": "合否は判定しない (親と上位)。目安 Δθ_B・Δθ_E ≤ 0.1°・壁 Δr ≤ 1e-3 r_t (diagnostician 2026-10-12)",
+   "initial_line_detail": {
+    "run": "run_0015_tp_m_euler_l100",
+    "res": "res_30000.h5",
+    "cfd": {
+     "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+     "res": [
+      "res_30000.h5"
+     ],
+     "match": {
+      "checked": [
+       "R",
+       "gas.exhaust",
+       "L_U",
+       "r_U",
+       "L_pipe",
+       "contraction_shape",
+       "meta.gas.exhaust.Tc_K",
+       "meta.gas.exhaust.Pc_Pa",
+       "meta.gas.species",
+       "inlet.Pt",
+       "inlet.Tt",
+       "inlet.Y",
+       "physProp.thermalMethod",
+       "physProp.species",
+       "physProp.thermoHrefTemp"
+      ],
+      "unchecked": [
+       "gamma_hall"
+      ]
+     },
+     "sha256_16": {
+      "snapshot": "c1271cbb67b8cdd1",
+      "thermo": "a0fc9bd18f2cfdde",
+      "line": "e8bd021adff43eda"
+     }
+    },
+    "x_axis": 0.6535007773011583,
+    "M_axis_anchor": 1.3315662388504297,
+    "Mp_axis_anchor": 0.7489923001660992,
+    "thr_axis": 0.1856141653586971,
+    "sha256_16": "06885f029fe3910c"
+   }
+  },
+  "L90_pin_n321": {
+   "gas": "EXH (RocketExhaust.moc_gas)",
+   "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+   "R_t": 1.0,
+   "eps": 50.0,
+   "p_a": 0.0,
+   "kernel": "arc",
+   "accept_rule": "det_D > 0",
+   "L_rt": 20.39178017707017,
+   "L_frac": 0.9,
+   "n_line": 321,
+   "dr_default": "3.2/n",
+   "mq_default": "n (2026-10-12)",
+   "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+   "note": "合否は判定しない (親と上位)。目安 Δθ_B・Δθ_E ≤ 0.1°・壁 Δr ≤ 1e-3 r_t (diagnostician 2026-10-12)",
+   "initial_line_detail": {
+    "run": "run_0015_tp_m_euler_l100",
+    "res": "res_30000.h5",
+    "cfd": {
+     "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+     "res": [
+      "res_30000.h5"
+     ],
+     "match": {
+      "checked": [
+       "R",
+       "gas.exhaust",
+       "L_U",
+       "r_U",
+       "L_pipe",
+       "contraction_shape",
+       "meta.gas.exhaust.Tc_K",
+       "meta.gas.exhaust.Pc_Pa",
+       "meta.gas.species",
+       "inlet.Pt",
+       "inlet.Tt",
+       "inlet.Y",
+       "physProp.thermalMethod",
+       "physProp.species",
+       "physProp.thermoHrefTemp"
+      ],
+      "unchecked": [
+       "gamma_hall"
+      ]
+     },
+     "sha256_16": {
+      "snapshot": "c1271cbb67b8cdd1",
+      "thermo": "a0fc9bd18f2cfdde",
+      "line": "e8bd021adff43eda"
+     }
+    },
+    "x_axis": 0.6535007773011583,
+    "M_axis_anchor": 1.3315662388504297,
+    "Mp_axis_anchor": 0.7489923001660992,
+    "thr_axis": 0.1856141653586971,
+    "sha256_16": "06885f029fe3910c"
+   }
+  }
+ },
+ "lk": {
+  "script": "case/68.bell_two_mode/rao_m/run_pin_lk.py",
+  "table": "case/68.bell_two_mode/rao_m/rao_pin_lk.json",
+  "tags": [
+   "L70_pin_n321",
+   "L80_pin_n321",
+   "L90_pin_n321"
+  ],
+  "note": "L_k 70・80・90 % のピン版 (M)。setup_by_tag は load_rao_wall が tag ごとに使う"
  }
 }

@@ -29,7 +29,8 @@
   引数が `_hall_line` の線・従来の既定と厳密に一致し外の線の検査を呼ばない (既定の経路はビット同一)、渡した線は同じ dict の
   まま検査 `check_initial_line` を 1 回通る、検査は Hall の線を通し壁から外れた線・θ_r 無し・亜音速の点・r が単調でない線を
   solve_kappaB の前に ValueError で止める。検証 run (case/68 の run_0015) が手元にあれば CFD ピンの線 (n 321) が
-  `moc_forward._check_line` を通ること (無ければ未実施に記録)。
+  `moc_forward._check_line` を通ること (無ければ未実施に記録)。**(W3′)** `load_rao_wall` は要約の `setup_by_tag` にその壁の tag が
+  あればそれを setup にし (L_k の壁を同じ要約 rao_pin.json に足す用)、無ければ従来どおり `setup` (setup_source のキーも足さない)。
 - **(g) 与えた壁の推力 `forward_thrust`** (T4・T1a′ の評価器、前進 MOC で場を解き直す): 放射源流 (γ 1.4・半角 10°・厳密な
   C⁻ 初期線) の円錐壁で、推力 (初期線 + 壁の圧力積分) が厳密値に n 49/97/193 で単調に近づき最細区間の次数 ≥ 1.8・
   n 193 で相対 1e-6 以下、ゲート通過・壁の依存域に反転なし。衝撃波を要する壁 (曲げ戻し θ₁ 0°) は依存域に反転ありと返す。
@@ -414,6 +415,31 @@ if PIN_RAN:
     check("(W3) CFD ピンの線 (run_0015、n 321・r 等間隔) が `moc_forward._check_line` と `check_initial_line` を通る",
           not codes_w3 and info_w3["wall_dr"] == 0.0 and pin_w3["source"] == "cfd_pinned" and len(pin_w3["x"]) == 321,
           f"M 最小 {info_w3['M_min']:.5f}・θ_r {info_w3['thr_axis']:.6f}・軸端 x {pin_w3['x'][0]:.6f}・m*/ṁ_1D {m_w3:.7f} (記録)")
+
+# ================================================================ (W3′) load_rao_wall の setup_by_tag (L_k の壁を同じ要約に足す、2026-10-12)
+# 要約 `<prefix>.json` の `setup_by_tag` にその壁の tag があればそれが campaign の setup (setup_source 'setup_by_tag')、
+# 無ければ従来どおり `setup` (setup_source のキーも無い)。壁は git 管理の rao_t6_parts/L100_n321_mq2 を一時ディレクトリへ写して使う
+import json as _json  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+_src_parts = ROOT / "case" / "68.bell_two_mode" / "rao_m" / "rao_t6_parts"
+_td = Path(_tempfile.mkdtemp(prefix="rao_sbt_"))
+(_td / "camp_parts").mkdir()
+for _fn in ("L100_n321_mq2.json", "L100_n321_mq2_wall.npz"):
+    _shutil.copy(_src_parts / _fn, _td / "camp_parts" / _fn)
+_base = {"eps": 50.0, "R_t": 1.0, "p_a": 0.0, "L_rt": 1.0, "L_frac": 0.1}
+_mine = {**_base, "L_rt": 22.657533530077966, "L_frac": 1.0}
+_res_sbt = {}
+for _lab, _camp in (("無し", {"setup": _base}), ("他の tag だけ", {"setup": _base, "setup_by_tag": {"L70_x": _mine}}),
+                    ("この tag", {"setup": _base, "setup_by_tag": {"L100_n321_mq2": _mine}})):
+    (_td / "camp.json").write_text(_json.dumps(_camp))
+    _c = ra.load_rao_wall(_td / "camp_parts" / "L100_n321_mq2_wall.npz")[1]["campaign"]
+    _res_sbt[_lab] = (_c["setup"], _c.get("setup_source", "キー無し"))
+check("(W3′) load_rao_wall: 要約の setup_by_tag にこの壁の tag があればそれを setup に (setup_source)、無い・他の tag だけなら従来の setup "
+      "(setup_source のキーも足さない)",
+      _res_sbt["無し"] == (_base, "キー無し") and _res_sbt["他の tag だけ"] == (_base, "キー無し")
+      and _res_sbt["この tag"] == (_mine, "setup_by_tag"), str({k: v[1] for k, v in _res_sbt.items()}))
 
 # ================================================================ (g) 与えた壁の推力 forward_thrust (放射源流の円錐壁)
 G_RAD, T10, X1_RAD, L_RAD = 1.4, np.tan(np.deg2rad(10.0)), 1.2, 3.0

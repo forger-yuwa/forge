@@ -1978,7 +1978,9 @@ def load_rao_wall(path, *, fit: str = "pspline", n_int: int = 48, lam: float | N
     (黙って作らない)。
 
     キャンペーンの要約 (`<prefix>_parts/` の親の `<prefix>.json`。`run_rao_t6.py` の `rao_t6.json`) があれば、その `setup`
-    (ガス・排気ファイル・$R_t$・$\varepsilon$・$p_a$・初期線)・`commit`・ソースの sha を来歴に写す。
+    (ガス・排気ファイル・$R_t$・$\varepsilon$・$p_a$・初期線)・`commit`・ソースの sha を来歴に写す。要約に `setup_by_tag` があり
+    この壁の tag を含むときは、その値をこの壁の setup にする (`campaign.setup_source` = `"setup_by_tag"`; 長さの違う壁を同じ要約に
+    足した `rao_pin.json` の L_k 用。無い要約・tag は従来どおり)。
 
     戻り (`RaoWall`, 記録 dict)。記録: `wall_file`・`record_file` とその sha256、`generator` (生成条件 `RAO_WALL_GEN_KEYS`)、
     `result` (生成器の結果 `RAO_WALL_RESULT_KEYS`。推力・流量は $\rho^*a^{*2}r_t^2$・$\rho^*a^*r_t^2$ の単位で $2\pi$ を含む)、`R_t`、
@@ -2026,6 +2028,12 @@ def load_rao_wall(path, *, fit: str = "pspline", n_int: int = 48, lam: float | N
             c = json.loads(cpath.read_text())
             camp = {"file": str(cpath), "sha256": _sha256_file(cpath), "setup": c.get("setup"), "commit": c.get("commit"),
                     "design_tree_dirty": c.get("design_tree_dirty"), "source_sha256_16": c.get("source_sha256_16")}
+            # 長さ L_k の違う壁を同じ要約に足したとき (rao_pin.json の L70・80・90、2026-10-12 plan bell-two-mode §5.1 #6):
+            # 要約の `setup_by_tag` にその壁の tag があれば、それがその壁の setup (L_rt・L_frac が L_k)。無い壁は従来どおり `setup`
+            sbt = c.get("setup_by_tag") or {}
+            if tag in sbt:
+                camp["setup"] = sbt[tag]
+                camp["setup_source"] = "setup_by_tag"
     out = {"wall_file": str(path), "wall_file_sha256": _sha256_file(path), "record_file": str(jpath),
            "record_sha256": _sha256_file(jpath), "generator": {k: rec.get(k) for k in RAO_WALL_GEN_KEYS},
            "result": {k: rec.get(k) for k in RAO_WALL_RESULT_KEYS}, "R_t": R_t, "n_BE": int(len(BE)),
