@@ -1011,6 +1011,15 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 - **意味の限定 (codex、§4.62)**: 結果 A が支持するのは「Gref の停滞の軌道で、上限 50 の反復が境界層の縁の微小な差を持続的に増幅し、上限 1 では抑えられる」まで。双子の差の増幅・残差の停滞・格子幅の依存は別々の主張で、細かい格子でなぜ増幅するかは未解明。|g| のような固有値は認定しない。他セッション (§4.60、G0c) の成長率 (250 step で 2.4〜2.7 倍) と大きさ・高さはそろう。
 - **dx とのつながりの見立て (未検証)**: 波束が 1 列を渡るたびに一定の割合 (約 11 %) で増幅するなら、縮流部を渡るあいだの総増幅は列の数に指数的に依存する。流れ方向に細かいと列が多く、総増幅が大きい。ただし Grefc でも列は 337 あり、これだけでは Grefc で停滞が緩和したことを説明しない (1 列あたりの増幅率そのものが Δx や局所の Δτ に依存する可能性)。Grefc の自分の場での双子の試験 (codex は状態の違いのため今回の主比較から外した) で、成長率・1 列あたりの増幅を Gref と比べるのが次の候補 (未登録、上位に諮る)。
 
+### 4.65 双子の試験を Grefc で (2026-10-12、ユーザ決定・codex 諮問、事前登録)
+
+- **ユーザ決定** (2026-10-12 「じゃあおｋ」): Grefc で双子の試験を回し、成長率を Gref と比べる。
+- **諮問**: codex (diagnose) [`notes/reviews/2026-10-12-core-grid-twin-grefc-diagnose.md`](../../notes/reviews/2026-10-12-core-grid-twin-grefc-diagnose.md) — 結論「Grefc の `run_0625_cg_grefc/res_60000.h5` から上限 50 の基準・摂動の双子を 6,000 step 回し、既存 Gref と同じ物理座標上の摂動で比較する。ただし判別対象は『それぞれの背景軌道で増幅が弱まるか』に限定する」。ブリーフ `notes/reviews/briefs/2026-10-12-core-grid-twin-grefc.md`。採否 (全件採用): 自分の場からの双子は採用、その差を格子幅だけの効果とする解釈は却下 (背景の状態が交絡、両起点とも NOT CONVERGED) → 「格子とその背景軌道の組」の比較と書き、移送した起点の腕は足さない (Major)。列番号の式を Grefc にそのまま使わない → Gref の相対摂動を各 jw で x/r_t に沿って区分線形補間した共通関数を Grefc で評価、正規化も共通 (Major)。「1 列あたり 1.11 倍」は要再検証 (島の λ と全域の最大点の速度は区間・場所が違い、Δx は壁の列間隔) → 補助量に下げ、列ごとの差の振幅分布から同じ波束を線形区間で追う、最大点が飛ぶなら算出不能 (Major、§4.64 の値は探索的のまま)。測定コードの Gref の座標・体積への予備の読み込みを外し、欠けたら止める・節点数・双子の座標の一致を検査 (Major、`cg_twin_perturb.py`・`cg_twin_diff.py` を直した)。判定器の入力を明示し、基準・摂動の両方の非有限を検査 (Minor)。
+- **仮説 (codex)**: 第 1 — Grefc の残差が低い背景軌道では、上限 50 の有限時間の摂動増幅が Gref の停滞の軌道より弱い (確度 中、残差の低さは増幅率の低さの証拠ではない)。第 2 — 増幅率は同程度でも、増幅する領域・持続時間・非線形になった後の差の大きさが違う。第 3 — 固定した島への差の流入・流出が D_T の傾きに寄与し、波束そのものの成長率と取り違えている。
+- **構成** (台本 `cg_twin_c.sh`、AWS A、FP64 `~/forge-fgeom7-fp64`): 起点 `run_0625_cg_grefc` res_60000 (restart_field 9 量・ビット一致)、上限 50 (B0 のまま、他の設定は run_0625 と同じ)。摂動は `cg_twin_perturb.py <run> 1e-7 <Grefc の座標> --ref-coords <Gref の座標>`。run: `run_0674_twc50_base1`・`run_0675_twc50_dup1`・`run_0676_twc50_pert1` (1 step) と `run_0677_twc50_base`・`run_0678_twc50_pert` (同時に 6,000 step・250 ごと)。比べる相手は既存の Gref の `run_0667`・`run_0668` (§4.64)。
+- **判定** (`cg_twin_grefc_judge.py` → `twin_grefc_judge.json`): 測定限界 L は §4.63 と同じ (Grefc 自身で)。主比較の窓は Gref と同じ step 1000〜2750 に固定 (8 点)。資格 (Grefc): 窓の全点で島の D_T ≥ 100 L・max|ΔT/T| < 1e−3・非有限なし、摂動の実現振幅 ≤ 1e−7。λ_ref = Gref の同じ窓の傾き 3.83e−3/step。**結果 A**: 資格を満たし λ_c ≤ λ_ref/3 = 1.28e−3/step → 第 1 仮説を支持し「両背景で同程度に増幅する」を退ける。**結果 B**: 持続増幅を満たし λ_c ≥ 2λ_ref/3 = 2.55e−3/step → 第 1 仮説を退ける。中間・資格不足・境界域は判定不能。後の窓で強い増幅が現れたら「増幅が弱い」でなく「立ち上がりが遅い」。島・縮流部・全域・上流 (x < −8)・遷移区間 (−8〜−7.5・−2.5〜−2) の D_T も記録し、島だけ弱く別の場所で育つ場合は全域の増幅の抑制と判定しない。
+- **やらないこと**: 移送の起点や上限 1 の腕を足す。「λ が同じだから格子間隔に依らない」「11 % を列数だけ累乗すれば停滞を説明できる」と結論する。6,000 step の末尾を飽和値とする。どちらの結果でも Δx 単独の機構は確定しない。
+
 ## 5. 実装ステップ
 
 1. `case/45.isobutane_m6_d155/core_grid_mesh.py` (済み: `check-g0`・`select`・`geom-ab`)。これに、300 K の生産の YAML から mesh ブロックの nj・`axis_cap_frac`・name だけを変えた YAML を作る `yaml` を足す。
@@ -1077,6 +1086,7 @@ y₁⁺ は `y1p_115000_wall.csv` (`check_wall_resolution.py` の分布) の x �
 | diagnose | `2026-10-12` | [`notes/reviews/2026-10-12-core-grid-linefaces-diagnose.md`](../../notes/reviews/2026-10-12-core-grid-linefaces-diagnose.md) | M-c の扱い (旧判定は維持、作用の誤差で事後の再評価) と次の候補 (熱伝導の近傍作用)。Major 4・Minor 1 | §4.55。全件採用 |
 | diagnose | `2026-10-12` | [`notes/reviews/2026-10-12-core-grid-consistent-lhs-diagnose.md`](../../notes/reviews/2026-10-12-core-grid-consistent-lhs-diagnose.md) | 左辺の整合の A/B (B0・値 3 マスク 0・値 3 マスク 2 の 3 腕)。Major 4・Minor 1 | §4.59。全件採用 |
 | diagnose | `2026-10-12` | [`notes/reviews/2026-10-12-core-grid-twin-diagnose.md`](../../notes/reviews/2026-10-12-core-grid-twin-diagnose.md) | 双子の試験 (Gref・同一起点・同じ微小摂動、上限 50/1 の 2 腕 4 本)。Major 4 | §4.62。全件採用 (§4.60 の読みを訂正) |
+| diagnose | `2026-10-12` | [`notes/reviews/2026-10-12-core-grid-twin-grefc-diagnose.md`](../../notes/reviews/2026-10-12-core-grid-twin-grefc-diagnose.md) | Grefc の自分の場で双子 (上限 50、Gref と同じ物理座標の摂動)。Major 4・Minor 1 | §4.65。全件採用 (測定コードの予備の読み込みを外した) |
 
 ## 7. 影響範囲
 
