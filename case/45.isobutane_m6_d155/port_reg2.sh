@@ -32,13 +32,17 @@ echo "入力: case/45 $(sha256sum $C45/_tr/q32_init.h5 | cut -c1-16)、case/48 $
 waitfree() { for i in $(seq 1 120); do [ -z "$(pgrep -x forge)" ] && return 0; sleep 30; done; die "ほかの forge が 1 時間空かない (占有できない)"; }
 one() {   # one <case_dir> <run> <bin> <cfg_dir> <入力>
   local cd=$1 r=$2 bin=$3 src=$4 inp=$5
+  # 2026-10-13: A のディスクが一杯になって止まった (入力の写しと res_0 を全部残していた)。終わった run は飛ばし、1 本ごとに判定に使わないものを消す
+  [ "$(cat $cd/$r/RUN_RC 2>/dev/null)" = 0 ] && [ -e $cd/$r/res_10.h5 ] && return 0
+  [ "$(df --output=avail -B1 $cd | tail -1 | tr -dc 0-9)" -ge 2147483648 ] || die "ディスクの空きが 2 GiB 未満"
   waitfree
-  cd $cd; mkdir $r || die "$r が既にある"
+  cd $cd; rm -rf $r; mkdir $r || die "$r を作れない"
   cp $src/*.yaml $r/
   local mf; mf=$(grep -o 'meshFileName: "\?[A-Za-z0-9_.]*' $r/solverConfig.yaml | sed 's/.*: "\?//'); cp $inp $r/$mf || die "$r の入力"
   sed -i -E "s/nStepOuter: [0-9]+\}/nStepOuter: 10}/; s/outStepInterval: [0-9]+$/outStepInterval: 10/" $r/solverConfig.yaml
   ( export FORGE_BIN=$bin; bash $RC $cd/$r > $r/run_case_stdout.log 2>&1; echo $? > $r/RUN_RC )
   echo "$r $(basename $(dirname $bin)) RUN_RC=$(cat $r/RUN_RC) 設定の差 $(diff $src/solverConfig.yaml $r/solverConfig.yaml | grep -c '^[<>]') 行 入力 $(sha256sum $r/$mf | cut -c1-16) ほかの forge $(pgrep -x forge | wc -l)" >> $LOG
+  rm -f $r/$mf $r/res_0.h5 $r/res_0.xmf
   cd $C45
 }
 n=780
