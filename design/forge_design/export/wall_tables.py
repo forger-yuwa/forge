@@ -3,7 +3,7 @@ r"""Excel 向けの壁の表 (plans/active/tooling-nozzle-wt-deliverables.md §4
 - `shape_table`: 物理壁 (`wall_repr.json` の B-spline、STEP と同じ曲線) の形状表 `wall_shape_mm.csv` [mm]。
 - `cfd_wall_table`: CFD の壁節点ごとの壁面量表 `wall_cfd_nodes.csv` [SI] と状態 `wall_cfd_nodes.status.json`。
 - `wall_heat_series`: 全 `res_<壁名>_<physID>_<step>.h5` の総熱量の時系列 (`check_quasisteady.py --series-csv` の入力)。
-- `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・熱量の準定常 [総熱量と壁ごと 16 区間の局所の熱量]・壁解像・熱量の状態)。
+- `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・熱量の準定常 [総熱量と壁の全節点の熱量、16 区間の和は補助]・壁解像・熱量の状態)。
 - `write_xlsx`: 上の CSV と条件・注記を `.xlsx` に (`.venv-pptx` の xlsxwriter を subprocess で呼ぶ)。
 
 **熱量の正本** (plan §3・§4.5、codex plan レビュー M1・M3): 壁へ入る熱は積分済みの節点熱量 `iface_Qf_eff` (固体向き正、
@@ -543,7 +543,7 @@ def wall_heat_series(run_dir, out_csv, wall_ids=None, n_bands: int = HEAT_BANDS)
     steps = sorted(set().union(*[set(d) for d in dumps.values()])) if dumps else []
     pids = sorted(walls)
     rows, stat = [], {}
-    nb = {}
+    nb, nn = {}, {}
     for st in steps:
         tot, per, bands = 0.0, [], []
         for pid in pids:
@@ -562,21 +562,27 @@ def wall_heat_series(run_dir, out_csv, wall_ids=None, n_bands: int = HEAT_BANDS)
                             fac = 2.0 * np.pi if axi else 1.0
                             Q = float(fac * qf.sum())
                             k = nb.setdefault(pid, max(1, min(int(n_bands), len(qf))))
-                            bq = [float(fac * qf[ix].sum()) for ix in np.array_split(np.argsort(xw, kind="stable"), k)]
+                            o = np.argsort(xw, kind="stable")
+                            bq = [float(fac * qf[ix].sum()) for ix in np.array_split(o, k)]
+                            nn.setdefault(pid, len(qf))
+                            bq = (bq, [float(fac * v) for v in qf[o]])          # 区間の和 (補助) と節点ごと (判定の本体)
             per.append(Q)
             tot += Q
             bands.append((pid, bq))
         rows.append((st, tot, per, bands))
         stat[st] = "valid" if np.isfinite(tot) else "invalid"
     band_cols = [f"Qband{pid}_{k:02d}_W" for pid in pids for k in range(nb.get(pid, 0))]
-    cols = ["step", "Q_total_W"] + [f"Q_wall{pid}_W" for pid in pids] + band_cols
+    node_cols = [f"Qnode{pid}_{i:05d}_W" for pid in pids for i in range(nn.get(pid, 0))]
+    cols = ["step", "Q_total_W"] + [f"Q_wall{pid}_W" for pid in pids] + band_cols + node_cols
     flat = []
     for st, tot, per, bands in rows:
-        bvals = []
+        bvals, nvals = [], []
         for pid, bq in bands:
-            n = nb.get(pid, 0)
-            bvals += (bq if bq is not None and len(bq) == n else [np.nan] * n)
-        flat.append([st, tot] + per + bvals)
+            n, m = nb.get(pid, 0), nn.get(pid, 0)
+            ok_ = bq is not None and len(bq[0]) == n and len(bq[1]) == m
+            bvals += (bq[0] if ok_ else [np.nan] * n)
+            nvals += (bq[1] if ok_ else [np.nan] * m)
+        flat.append([st, tot] + per + bvals + nvals)
     rows = flat
     out_csv = Path(out_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -585,7 +591,8 @@ def wall_heat_series(run_dir, out_csv, wall_ids=None, n_bands: int = HEAT_BANDS)
         for r_ in rows:
             f.write(",".join([str(int(r_[0]))] + [_fmt(v) for v in r_[1:]]) + "\n")
     n_valid = sum(1 for v in stat.values() if v == "valid")
-    return {"csv": str(out_csv), "columns": cols, "band_columns": band_cols, "n_bands": nb, "n_steps": len(steps),
+    return {"csv": str(out_csv), "columns": cols, "band_columns": band_cols, "node_columns": node_cols, "n_bands": nb,
+            "n_nodes": nn, "n_steps": len(steps),
             "n_valid": n_valid, "steps": steps, "geometry_ok": ok_geom, "unit": "W" if axi else "W/m", "per_step": stat}
 
 
@@ -667,13 +674,15 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     else:
         with tempfile.TemporaryDirectory(prefix="thermal_use_qs_") as td:
             ser = wall_heat_series(run_dir, Path(td) / "wall_heat_series.csv", [b["pid"] for b in T["blocks"]])
-            qcols = ["Q_total_W"] + ser["band_columns"]          # 総熱量と区間ごとの局所の熱量 (codex 諮問 2026-10-13 result)
+            # 総熱量と**節点ごとの熱量** (表と 1 次元の壁伝導が使う量; codex result レビュー 2 回目 M3: 区間の和は区間内の入れ替わりを
+            # 相殺するので補助の診断に留め、判定は節点ごとの最悪で行う)
+            qcols = ["Q_total_W"] + ser["node_columns"]
             args = [TOOLS / "check_quasisteady.py", "--series-csv", ser["csv"], "--series-cols", ",".join(qcols)]
             rc_, txt = _run_tool(args, python)
-        qs.update(cmd=f"check_quasisteady.py --series-csv <tmp>/wall_heat_series.csv --series-cols Q_total_W,<{len(qcols) - 1} 区間の熱量>",
+        qs.update(cmd=f"check_quasisteady.py --series-csv <tmp>/wall_heat_series.csv --series-cols Q_total_W,<{len(qcols) - 1} 節点の熱量>",
                   exit=rc_, n_bands=ser["n_bands"],
-                  not_steady=[ln.strip() for ln in txt.splitlines() if ln.strip().startswith(("Q_total_W", "Qband"))
-                              and "STEADY" not in ln.split(":")[-1][:12]][:8],
+                  not_steady=[ln.strip() for ln in txt.splitlines() if ln.strip().startswith(("Q_total_W", "Qnode"))
+                              and not ln.rstrip().endswith(" STEADY")][:8],
                   n_steps=ser["n_steps"], n_valid=ser["n_valid"],
                   verdict_line=next((ln.strip() for ln in txt.splitlines() if ln.startswith("===") and "->" in ln), None),
                   detail_line=next((ln.strip() for ln in txt.splitlines() if ln.strip().startswith("Q_total_W")), None))
@@ -699,7 +708,7 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
         out["verdict"] = "PASS"
     else:
         out["verdict"] = "未評価"
-    out["rule"] = ("収束・熱量の準定常 (総熱量と壁ごと 16 区間の局所の熱量の全部)・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、"
+    out["rule"] = ("収束・熱量の準定常 (総熱量と壁の全節点の熱量; 最悪で判定)・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、"
                    "不合格 (熱量 nonfinite を含む) があれば FAIL、他は未評価")
     return out
 

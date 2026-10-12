@@ -184,11 +184,13 @@ def make_synth(td: Path, axi=True, steps=(100,), qf="valid", tw=5.0, residual=Fa
         for k_st, st in enumerate(steps):
             Qf_st = Qf
             if redistribute and pid == 3:
-                # 総熱量は厳密に同じまま、離れた 2 節点の熱量を ±20 % で交互に入れ替える (codex 諮問 2026-10-13 result の判別 A/B の腕 B)
+                # 総熱量は厳密に同じまま、2 節点の熱量を ±20 % で交互に入れ替える。redistribute="far": 離れた 2 節点 (codex 諮問
+                # 2026-10-13 result の判別 A/B の腕 B)、"adjacent": 隣り合う 2 節点 (同じ区間に入る; codex result レビュー 2 回目 M3 の負例)
                 Qf_st = Qf.copy()
                 d = 0.2 * (1.0 if k_st % 2 == 0 else -1.0) * Qf[0]
+                j = 1 if redistribute == "adjacent" else -1
                 Qf_st[0] += d
-                Qf_st[-1] -= d
+                Qf_st[j] -= d
             with h5py.File(td / f"res_{nm}_{pid}_{st}.h5", "w") as f:
                 f.attrs["step"] = np.int32(st)
                 f["MESH/COORD"] = coords[[wall_ids[pid][i] for i in perm]].ravel()
@@ -536,6 +538,16 @@ def run(out: Path):
     check(f"判別 A/B: 腕 A (局所も一定) は PASS ({tA['verdict']}; 準定常 {tA['quasisteady']['result']})", tA["verdict"] == "PASS")
     check(f"判別 A/B: 腕 B (総熱量一定・局所が入れ替わる) は準定常で FAIL ({tB['verdict']}; 準定常 {tB['quasisteady']['result']}: "
           f"{tB['quasisteady'].get('not_steady')})", tB["verdict"] == "FAIL" and tB["quasisteady"]["result"] == "FAIL")
+    # codex result レビュー 2 回目 M3: 同じ区間の中 (隣り合う 2 節点) での入れ替わり。区間の和は相殺して STEADY だが、節点ごとの判定で FAIL
+    make_synth(syn / "ab_C", steps=STEPS_AB, tw=1e-5, residual=True, redistribute="adjacent")
+    sC = WT.wall_heat_series(syn / "ab_C", syn / "ab_out" / "C.csv", n_bands=2)
+    import subprocess as _sp
+    qb = _sp.run([sys.executable, str(WT.TOOLS / "check_quasisteady.py"), "--series-csv", sC["csv"], "--series-cols",
+                  ",".join(["Q_total_W"] + sC["band_columns"])], capture_output=True, text=True)
+    tC = WT.thermal_use(syn / "ab_C")
+    check(f"同じ区間の中の入れ替わり: 区間の和 (2 区間) は準定常で見逃す (終了 {qb.returncode}) が、節点ごとの判定の thermal_use は FAIL "
+          f"({tC['verdict']}; {tC['quasisteady'].get('not_steady', [])[:2]})", qb.returncode == 0 and tC["verdict"] == "FAIL"
+          and tC["quasisteady"]["result"] == "FAIL")
     th4 = WT.thermal_use(syn / "pass_nan")
     check(f"thermal_use (合成: 熱量 nonfinite): {th4['verdict']} = FAIL", th4["verdict"] == "FAIL")
 

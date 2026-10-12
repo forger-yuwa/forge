@@ -280,6 +280,26 @@ def part_excel(run: Path, out: Path, step=None) -> dict:
     else:
         res["cfd"] = "飛ばした: res_wall_*.h5 が無い (CFD 前の run)"
         res["thermal_use"] = {"verdict": "未評価", "reason": "CFD の結果が無い"}
+    # 幾何の面積との積分の整合 (§6 V5 の再定義): q × A_node は Q に厳密に戻る。幾何のリング面積 (多角形の台形) との差は面積の定義の差
+    # (ソルバの半割面の 1/4 点の r の重み) で、|Σq·ring − ΣQ|/ΣQ ≤ 1e-4 を合格とする (codex result レビュー 2026-10-13 M5)
+    cf = d / "wall_cfd_nodes.csv"
+    if cf.exists():
+        import csv as _csv
+        rows = list(_csv.DictReader(open(cf)))
+        qk = "q_into_wall_W_m2" if rows and "q_into_wall_W_m2" in rows[0] else None
+        if qk and all(r_[qk] not in ("", None) for r_ in rows):
+            Qs = np.array([float(r_["Q_node_W"]) for r_ in rows]); qs = np.array([float(r_[qk]) for r_ in rows])
+            ring = np.array([float(r_["ring_area_m2"]) for r_ in rows]); An = np.array([float(r_["A_node_m2"]) for r_ in rows])
+            # 正規化は Σ|Q| (総熱量が 0 に近い・符号が相殺する壁でも意味を保つ; codex result レビュー 2 回目 M2)
+            den = float(np.sum(np.abs(Qs)))
+            rel = float(abs(np.sum(qs * ring) - Qs.sum()) / den) if den > 0 else float("nan")
+            res["cfd_integral"] = {"sum_Q_W": float(Qs.sum()), "sum_abs_Q_W": den, "sum_q_ring_W": float(np.sum(qs * ring)),
+                                   "rel_to_sum_abs_Q": rel, "max_abs_ring_over_A_minus_1": float(np.max(np.abs(ring / An - 1.0))),
+                                   "tol": 1e-4, "pass": bool(np.isfinite(rel) and rel <= 1e-4)}
+            res["pass"] = res["cfd_integral"]["pass"]           # 総合判定へ伝える (MANIFEST の failed_parts に入る)
+    if isinstance(res.get("thermal_use"), dict) and isinstance(res.get("cfd_integral"), dict) and not res["cfd_integral"]["pass"]:
+        res["thermal_use"] = dict(res["thermal_use"], verdict="FAIL",
+                                  reason=f"幾何の面積との積分の整合が許容外 (相対 {res['cfd_integral']['rel_to_sum_abs_Q']:.3g} > 1e-4)")
     # thermal_use を表の付属 JSON と xlsx に専用の欄で残す (表だけを渡されても使えるかが分かるように; codex result レビュー 2026-10-13 M3)
     tu = res["thermal_use"] if isinstance(res.get("thermal_use"), dict) else {"verdict": "未評価"}
     tu_short = {"verdict": tu.get("verdict"), "step": tu.get("step"), "rule": tu.get("rule"), "reason": tu.get("reason")}
@@ -292,20 +312,6 @@ def part_excel(run: Path, out: Path, step=None) -> dict:
         sj["thermal_use"] = tu_short
         sj["use_for_thermal_design"] = (tu_short["verdict"] == "PASS")
         stj.write_text(json.dumps(_jsonable(sj), indent=1, ensure_ascii=False))
-    # 幾何の面積との積分の整合 (§6 V5 の再定義): q × A_node は Q に厳密に戻る。幾何のリング面積 (多角形の台形) との差は面積の定義の差
-    # (ソルバの半割面の 1/4 点の r の重み) で、|Σq·ring − ΣQ|/ΣQ ≤ 1e-4 を合格とする (codex result レビュー 2026-10-13 M5)
-    cf = d / "wall_cfd_nodes.csv"
-    if cf.exists():
-        import csv as _csv
-        rows = list(_csv.DictReader(open(cf)))
-        qk = "q_into_wall_W_m2" if rows and "q_into_wall_W_m2" in rows[0] else None
-        if qk and all(r_[qk] not in ("", None) for r_ in rows):
-            Qs = np.array([float(r_["Q_node_W"]) for r_ in rows]); qs = np.array([float(r_[qk]) for r_ in rows])
-            ring = np.array([float(r_["ring_area_m2"]) for r_ in rows]); An = np.array([float(r_["A_node_m2"]) for r_ in rows])
-            rel = float(abs(np.sum(qs * ring) - Qs.sum()) / abs(Qs.sum())) if Qs.sum() != 0 else float("nan")
-            res["cfd_integral"] = {"sum_Q_W": float(Qs.sum()), "sum_q_ring_W": float(np.sum(qs * ring)), "rel": rel,
-                                   "max_abs_ring_over_A_minus_1": float(np.max(np.abs(ring / An - 1.0))), "tol": 1e-4,
-                                   "pass": bool(rel <= 1e-4)}
     conds = _conditions(run)
     conds["thermal_use_verdict"] = (tu_short["verdict"], "PASS のときだけ壁面量表の熱量を熱設計に使ってよい")
     (d / "conditions.csv").write_text("key,value,unit\n" + "".join(f"{k},{v[0]},{v[1]}\n" for k, v in conds.items()))
@@ -355,14 +361,23 @@ def part_dimensions(run: Path, out: Path, card_path) -> dict:
     else:
         card = yaml.safe_load(Path(card_path).read_text())
         dt = dg.design_throat_diameter_mm(run) if "diameter_design_m" in (card.get("throat") or {}) else None
-        sc = out / "cad" / "wall_physical_step.json"           # 弦の形状誤差 (wall_step.chord_deviation) を判定に渡す
-        chord = (json.loads(sc.read_text()).get("cad_vs_cfd") or {}).get("chord_minus_curve") if sc.exists() else None
+        # 弦の形状誤差は配布するメッシュ (run の nozzle.msh = mesh/nozzle.msh) と配布する STEP から測る (codex result レビュー 2 回目 M1)
+        chord = dg.chord_from_mesh(step, run / "nozzle.msh") if (run / "nozzle.msh").exists() else None
+        res["chord"] = chord
         g = dg.evaluate_gate(card, sd, md, dt, chord)
         res.update(g)
         res["card"] = str(card_path)
         res["card_sha256"] = _sha(Path(card_path))
     (out / "DIMENSIONS.json").write_text(json.dumps(_jsonable(res), indent=1, ensure_ascii=False))
     return {"verdict": res["verdict"], "file": "DIMENSIONS.json"}
+
+
+def _stl_setting(man: dict) -> str:
+    sf = ((man.get("parts") or {}).get("cad") or {}).get("surface") or {}
+    if not isinstance(sf, dict) or "stl_linear_deflection_mm" not in sf:
+        return "記録なし"
+    return (f"線の偏差 {sf['stl_linear_deflection_mm']} mm・角度の偏差 {sf.get('stl_angular_deflection_rad')} rad "
+            f"(三角形 {sf.get('stl_triangles')} 枚)")
 
 
 def _readme(run: Path, out: Path, man: dict) -> str:
@@ -392,7 +407,10 @@ def _readme(run: Path, out: Path, man: dict) -> str:
          "- 軸対称の壁への熱量は `iface_Qf_eff` (1 rad あたりの積分値) × 2π から作った (`iface_q_eff` は軸対称では r·q で熱流束ではない)。",
          "- 壁の両端の節点 (入口・出口の角) の熱量は信頼できない (別の壁との境目で再構成勾配との比が 2〜4 倍になった例がある。原因は未確認)。"
          "`excel/wall_cfd_nodes.status.json` の `end_nodes` を見る。",
-         "- STEP を CAD で編集したら `rebuild_from_step.py` で作り直し、`check_mesh_quality.py` で格子品質を確かめる。", ""]
+         "- STEP を CAD で編集したら `rebuild_from_step.py` で作り直し、`check_mesh_quality.py` で格子品質を確かめる。",
+         f"- STL (`cad/wall_surface.stl`) は表示・形の確認用の近似: 弦誤差の設定 {_stl_setting(man)}。寸法の正本は STEP。",
+         "- CGNS (`fluent/nozzle_2d_axi.cgns`) を Fluent で読むと**境界の型は付かない** (入口・出口・壁・軸を Fluent 側で付け直す)。"
+         "gmsh で読み直すと物理タグの番号も振り直されるので、境界は**名前**で対応付ける。型つきの Fluent 形式は `fluent/nozzle_2d_axi.msh`。", ""]
     if man["skipped"]:
         L += ["## 飛ばしたもの", ""] + [f"- `{k}`: {v}" for k, v in man["skipped"].items()] + [""]
     if man["errors"]:

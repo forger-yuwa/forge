@@ -97,17 +97,18 @@ def main() -> int:
     from unittest import mock
     from forge_design.export import wall_step
     md = dg.mesh_dimensions(FIX / "nozzle.msh")
-    check("(M1) 基準: 生産の設計値のカード・メッシュあり → PASS", dg.evaluate_gate(card_ok, sd, md)["verdict"] == "PASS")
+    chm = dg.chord_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")   # 弦の検査は必須 (欠けたら未判定)
+    check("(M1) 基準: 生産の設計値のカード・メッシュ・弦あり → PASS", dg.evaluate_gate(card_ok, sd, md, None, chm)["verdict"] == "PASS")
     for name, mut in (("入口半径 +10 mm", lambda m: m.__setitem__("inlet_radius_mm", m["inlet_radius_mm"] + 10.0)),
                       ("スロート半径 +10 mm", lambda m: m["throat_physical"].__setitem__("r_mm", m["throat_physical"]["r_mm"] + 10.0)),
                       ("直管の終端の区間を別の位置に", lambda m: m.__setitem__("straight_end_interval_mm", [0.0, 1.0])),
                       ("出口端 +0.01 mm", lambda m: m.__setitem__("x_end_mm", m["x_end_mm"] + 0.01))):
         m2 = copy.deepcopy(md); mut(m2)
-        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2)["verdict"] == "FAIL")
+        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2, None, chm)["verdict"] == "FAIL")
     check("(M1) 弦の形状誤差 50 µm → FAIL",
           dg.evaluate_gate(card_ok, sd, md, None, {"status": "ok", "min_um": -50.0, "max_um": 3.0})["verdict"] == "FAIL")
     card_nt = {k: v for k, v in card_ok.items() if k != "tolerances"}
-    g_nt = dg.evaluate_gate(card_nt, sd, md)
+    g_nt = dg.evaluate_gate(card_nt, sd, md, None, chm)
     check("(M4) 公差を省いたカードは生成器と同じ既定の公差で判定 (止まらない)",
           g_nt["verdict"] == "PASS" and all(v.startswith("default") for v in g_nt["tolerances_source"].values()), g_nt["tolerances_source"])
     with tempfile.TemporaryDirectory(prefix="deliv_m2_") as td2:
@@ -122,6 +123,38 @@ def main() -> int:
         with mock.patch.object(dl, "GMSH_PYTHON", "/bin/false"):
             pc2 = dl.part_cad(run3, tmp2 / "out2")
         check("(M2) gmsh の読み直しが失敗したら cad は不合格 (既定値で合格にしない)", pc2["pass"] is False and not pc2["checks"]["gmsh_readback"])
+    # ---- codex result レビュー 2 回目の負例 ----
+    md0 = dg.mesh_dimensions(FIX / "nozzle.msh")
+    m3 = copy.deepcopy(md0); m3["x_start_mm"] += 10.0
+    check("(R2-M1) メッシュの入口端を 10 mm ずらす (直管が短い) → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m3, None, chm)["verdict"] == "FAIL")
+    ch = dg.chord_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")
+    check(f"(R2-M1) 弦の形状誤差を配布メッシュと STEP から測る (最大 {max(abs(ch['min_mm']), abs(ch['max_mm'])):.2e} mm) → 基準は PASS",
+          dg.evaluate_gate(card_ok, sd, md0, None, ch)["verdict"] == "PASS")
+    check("(R2-M1) 弦の検査が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, md0, None, None)["verdict"] == "未判定")
+    check("(R2-M1) メッシュの測定が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, None, None, ch)["verdict"] == "未判定")
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import run_wall_tables_tests as RWT
+    from forge_design.export import wall_tables as WT
+    with tempfile.TemporaryDirectory(prefix="deliv_int_") as td3:
+        syn = Path(td3) / "syn"
+        RWT.make_synth(syn, steps=tuple(range(100, 2100, 100)), tw=1e-5, residual=True)
+        okx = dl.part_excel(syn, Path(td3) / "o_ok")
+        check(f"(R2-M2) 基準: 合成 run の積分の整合 PASS (相対 {okx['cfd_integral']['rel_to_sum_abs_Q']:.1e})・Excel part 合格",
+              okx["cfd_integral"]["pass"] and okx.get("pass") is True)
+        real_t = WT.cfd_wall_table
+        def bad_table(run, out_csv, *a, **k):
+            r = real_t(run, out_csv, *a, **k)
+            lines = Path(out_csv).read_text().splitlines()
+            hdr = lines[0].split(","); ic = hdr.index("ring_area_m2")
+            out = [lines[0]] + [",".join(f"{float(v) * 1.01!r}" if j == ic else v for j, v in enumerate(ln.split(","))) for ln in lines[1:]]
+            Path(out_csv).write_text("\n".join(out) + "\n")
+            return r
+        with mock.patch.object(WT, "cfd_wall_table", bad_table):
+            man = dl.export(syn, Path(td3) / "o_bad", card=None, skip=("cad", "mesh", "fluent", "dimensions"))
+        ex = man["parts"]["excel"]
+        check(f"(R2-M2) ring_area を 1.01 倍 → 積分の整合 FAIL (相対 {ex['cfd_integral']['rel_to_sum_abs_Q']:.3g})・MANIFEST FAIL・excel が failed_parts に入る",
+              not ex["cfd_integral"]["pass"] and man["verdict"] == "FAIL" and "excel" in man["failed_parts"])
+        check("(R2-M2) 積分の整合が FAIL なら thermal_use も FAIL", ex["thermal_use"]["verdict"] == "FAIL", ex["thermal_use"].get("reason"))
     print(f"FAIL 件数: {fails}")
     return 1 if fails else 0
 

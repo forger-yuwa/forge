@@ -132,6 +132,33 @@ def mesh_dimensions(msh_path) -> dict:
             "L_div_mm": float(xw[-1]), "exit_radius_mm": float(rw[-1])}
 
 
+def chord_from_mesh(step_path, msh_path, freecadcmd: str | None = None) -> dict:
+    """配布するメッシュ (msh) の壁節点を x 順に直線でつないだ多角形と STEP の曲線の半径方向の差 (弦 − 曲線) [mm] を全壁辺で測る
+    (codex result レビュー 2 回目 M1: 固定名の nozzle.h5 でなく配布物から測る)。曲線の r(x) は STEP の B-spline を密に評価して補間する。"""
+    from .wall_step import read_step
+    from .mesh_structure import read_msh41_mesh2d
+    rd = read_step(step_path, freecadcmd=freecadcmd)
+    C, _t, _P, _k = _bspline(rd)
+    us = np.linspace(float(rd["first"]), float(rd["last"]), 400001)
+    cx = C(us)
+    coords, _q, bedges, _tags = read_msh41_mesh2d(msh_path)
+    nodes = np.unique(np.asarray(bedges["wall"], dtype=np.int64).ravel())
+    xw, rw = coords[nodes, 0] * 1000.0, coords[nodes, 1] * 1000.0
+    o = np.argsort(xw)
+    xw, rw = xw[o], rw[o]
+    lo = hi = 0.0
+    xlo = xhi = float(xw[0])
+    for (xa, ra), (xb, rb) in zip(zip(xw[:-1], rw[:-1]), zip(xw[1:], rw[1:])):
+        q = np.linspace(xa, xb, 21)
+        e = ra + (rb - ra) * (q - xa) / (xb - xa) - np.interp(q, cx[:, 0], cx[:, 1])
+        if e.min() < lo:
+            lo, xlo = float(e.min()), float(q[np.argmin(e)])
+        if e.max() > hi:
+            hi, xhi = float(e.max()), float(q[np.argmax(e)])
+    return {"status": "ok", "source": f"{msh_path} の壁節点と {step_path} の曲線", "unit": "mm", "min_mm": lo, "x_of_min_mm": xlo,
+            "max_mm": hi, "x_of_max_mm": xhi, "n_edges": int(len(xw) - 1)}
+
+
 def card_targets(card: dict) -> dict:
     """要求カードから比べる寸法 [mm] と公差 [mm] を取り出す。"""
     # 公差の既定は生成器と同じ値 (wt_card.DEFAULT_TOLERANCES) で補う (codex result レビュー 2026-10-13 M4: 生成器は省略を許すのに
@@ -199,16 +226,27 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
         consistency["throat_r_pass"] = bool(-END_TOL_MM <= d_th <= td / 2.0)
         lo, hi = m["straight_end_interval_mm"]
         consistency["straight_end_in_mesh_interval"] = bool(lo - 1e-6 <= step_dims["straight"]["x_end_mm"] <= hi + 1e-6)
+        consistency["x_start_diff_mm"] = float(m["x_start_mm"] - step_dims["x_start_mm"])
+        consistency["x_start_pass"] = bool(abs(consistency["x_start_diff_mm"]) <= END_TOL_MM)
     if chord and chord.get("status") == "ok":
-        cmax = max(abs(float(chord["min_um"])), abs(float(chord["max_um"]))) * 1e-3
+        if "min_mm" in chord:
+            cmax = max(abs(float(chord["min_mm"])), abs(float(chord["max_mm"])))
+        else:
+            cmax = max(abs(float(chord["min_um"])), abs(float(chord["max_um"]))) * 1e-3
         consistency["chord_max_abs_mm"] = cmax
         consistency["chord_pass"] = bool(cmax <= td / 2.0)
     elif chord:
         consistency["chord_status"] = chord.get("status")
-    req = [k for k in ("x_end_pass", "inlet_radius_pass", "throat_r_pass", "straight_end_in_mesh_interval", "chord_pass") if k in consistency]
-    consistency["required"] = req
-    ok = all(v["pass"] for v in items.values()) and all(consistency[k] for k in req)
-    return {"format": "forge.dimension_gate/v1", "verdict": "PASS" if ok else "FAIL", "items": items,
+    # 出荷判定に要る検査は固定 (codex result レビュー 2 回目 M1): 欠けたら PASS にしない (未判定)
+    REQUIRED = ("x_start_pass", "x_end_pass", "inlet_radius_pass", "throat_r_pass", "straight_end_in_mesh_interval", "chord_pass")
+    missing = [k for k in REQUIRED if k not in consistency]
+    consistency["required"] = list(REQUIRED)
+    consistency["missing"] = missing
+    items_ok = all(v["pass"] for v in items.values())
+    cons_ok = all(consistency[k] for k in REQUIRED if k in consistency)
+    ok = items_ok and cons_ok and not missing
+    verdict = "PASS" if ok else ("FAIL" if (not items_ok or not cons_ok) else "未判定")
+    return {"format": "forge.dimension_gate/v1", "verdict": verdict, "items": items,
             "tolerances_source": T["tolerances_source"],
             "throat_kind": T["throat_kind"], "mesh_vs_step": consistency,
             "note": "STEP とメッシュから測り直した寸法をカードと比べた (YAML の往復ではない)。出口マッハ数は CFD の判定で、ここでは測らない"}
