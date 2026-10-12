@@ -68,4 +68,6 @@ CONTUR 平面積分 (`deltastar_integral.flat_plate_integral`)・温度–速度
 | `run_0065〜0070` (`_r3_<f32|fp64>_<pre|post>`) (2026-10-13、**AWS-B**) | plan [architecture-float-state-double-geometry](../../plans/active/architecture-float-state-double-geometry.md) §6.59 の R3 (事前登録): §5.1 #26 (前処理のカーネルの node の行の処理の移植) の回帰。CPG・node・`lowMachPrecond 0` の `_smoke` の設定・入力で 10 step、移植の前 2 本・後 1 本のビット不変 (再実行の差と比べる)。台本 `case/45.isobutane_m6_d155/port_reg.sh` | 投入待ち | active |
 | `run_0071〜0082` (`_q3_<f32|fp64>_<pre|post><1..3>`) (2026-10-13、**AWS-A**) | plan [architecture-float-state-double-geometry](../../plans/active/architecture-float-state-double-geometry.md) §6.60 の R3 の回し直し (事前登録): 前・後を交互に 3 本ずつ、固定の許容 τ と群のばらつきで判定。台本 `case/45.isobutane_m6_d155/port_reg2.sh` | **FP64 は A、float は判別不能** (許容が再実行のばらつきより小さい、差を示す量は無い)。判定は case/45 の `_band_ab/cold_pair/port_reg2_judge.json`、float plan §6.60 の結果 | ref |
 
+> **2026-10-13 AWS 後片付け**: 本表の `run_0057〜0082` (M6ノズルの設計セッション) は判定済みのため、AWS 上の途中の場・初期場の写し・入力の写しを消した (最終の場・残差の履歴・判定の json は残す)。一覧は各機の `case/45.isobutane_m6_d155/_cleanup_2026-10-12.tsv`。
+
 > **2026-09-27 AWS 後片付け**: 本表の `run_095x`/`run_096x` (`*_sglsq_*`・`*_chidef_*`) は判定・証拠の取り込み後に AWS 上の場 h5・面流束ダンプを削除 (設定・残差・判定出力は AWS に残し、一次記録は `case/09.Taylor-Green/_g0_lsq_seam/s2_evidence/`・`case/46.sern_design/chi_evidence/`)。
