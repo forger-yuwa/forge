@@ -63,6 +63,12 @@ class Mesh2DParams:
     # 傾斜壁 (縮流部で最大 40°) では半径方向の線が壁と直交せず、AR の大きい近壁セルにスキューが入る (AGENTS.md の AR ≤ 5000 の例外の外)。
     # 壁の第一セル厚は法線距離 = d になる (半径方向の配置では法線距離 = d·cos θ_w)。
     wall_normal_layer: tuple | list | None = None
+    # --- 区間の局所の並べ直し (2026-10-13, plan tooling-nozzle-isothermal-wall-chain §4.8-1・§5.1 #29) ---
+    # None なら従来どおり (既存の格子はビット同一)。[{x0, x1, blend, factor, ni_ref}] (区間は 1 つだけ) を指定すると、
+    # x の station を ni_ref 列で従来どおり (_x_stations) 置いてから、区間 [x0, x1] の中だけ流れ方向の密度を max(1, d/factor) 側へ
+    # 寄せて置き直す。区間の外の station は元の配列そのもの (半径方向・壁法線の層は列ごとに x だけで決まるので、区間の外の列はビット一致)。
+    # 列の数は計算で決まるので ni はその値を書く (違えば generate_axisym_mesh が止める)。式は _x_stations_respaced を参照。
+    x_respace: tuple | list | None = None
 
 
 def _check_table(name: str, tbl, x0: float, x1: float, positive: bool = True) -> np.ndarray:
@@ -110,16 +116,88 @@ def _x_stations(x0: float, x1: float, ni: int, refine: float, width: float,
     格子収束を、全域解像度を上げずに調べるためのもの (B10)。
     """
     xs = np.linspace(x0, x1, 8001)
+    t = None if density_table is None else _check_table("x_density_table", density_table, x0, x1)
+    dens = _x_density(xs, refine, width, local_center, local_refine, local_width, t)
+    cum = np.concatenate([[0.0], np.cumsum(0.5 * (dens[1:] + dens[:-1]) * np.diff(xs))])
+    cum /= cum[-1]
+    return np.interp(np.linspace(0.0, 1.0, ni), cum, xs)
+
+
+def _x_density(xs: np.ndarray, refine: float, width: float, local_center: float = 0.0, local_refine: float = 1.0,
+               local_width: float = 0.75, table: np.ndarray | None = None) -> np.ndarray:
+    """station の相対密度 = スロート細分 × 局所細分 × 表 (_x_stations と _x_stations_respaced が共有する式)。
+    table は _check_table 済みの (n, 2) 配列か None。"""
     dens = 1.0 + (refine - 1.0) * np.exp(-((xs / width) ** 2))
     if local_refine > 1.0:
         dens = dens * (1.0 + (local_refine - 1.0)
                        * np.exp(-(((xs - local_center) / local_width) ** 2)))
-    if density_table is not None:
-        t = _check_table("x_density_table", density_table, x0, x1)
-        dens = dens * np.interp(xs, t[:, 0], t[:, 1])
-    cum = np.concatenate([[0.0], np.cumsum(0.5 * (dens[1:] + dens[:-1]) * np.diff(xs))])
-    cum /= cum[-1]
-    return np.interp(np.linspace(0.0, 1.0, ni), cum, xs)
+    if table is not None:
+        dens = dens * np.interp(xs, table[:, 0], table[:, 1])
+    return dens
+
+
+X_RESPACE_KEYS = ("x0", "x1", "blend", "factor", "ni_ref")
+
+
+def _x_stations_respaced(x_in: float, x_e: float, prm: "Mesh2DParams") -> tuple[np.ndarray, dict]:
+    """区間の局所の並べ直し (`Mesh2DParams.x_respace`、plan tooling-nozzle-isothermal-wall-chain §4.8-1・§5.1 #29)。
+
+    式・区間の端・積分の点数・丸め・端の上書きは forge-25 の G0c の作り方 (commit 96197821 の
+    case/45.isobutane_m6_d155/core_grid_mesh.py:451-473 `grefc_stations`) と同じ:
+    1. 元の station xs を ni_ref 列で _x_stations のとおり作る。ni_ref は「並べ直す前の列の数」(全域の配列の列の数)。
+    2. 区間の端 xa・xb = xs のうち x0・x1 に最も近い列 (固定)。ブレンドの内側の端は**指定の** x0 + blend・x1 − blend のまま
+       (端の station から blend を取らない。取ると case/45 の G0c で列が 1 つ増える: codex diagnose 2026-10-13)。
+    3. [xa, xb] を 20,001 点に刻み、密度 d (_x_density = _x_stations と同じ式) から
+       d_n = d·(1 − w·(1 − max(1, d/factor)/d))、w は両端の幅 blend の smoothstep (0 → 1 → 0)。
+    4. 区間の列の数 n_new = round(n_old·∫d_n/∫d) (n_old = ib − ia、台形の累積)、d_n の累積の逆写像で置き直し、両端を xa・xb で上書き。
+    5. 区間の外の station は xs そのもの。
+    forge-25 版は d を x_density_table の線形補間だけで取る。こちらは _x_stations と同じ式なので、throat_refine 1・local_refine 1
+    (case/45 の冷却壁の格子) では同じ値になる。ガウスの細分 (throat_refine ≠ 1・local_refine > 1) との組み合わせは旧 G0c の検証の範囲外。
+    区間は 1 つだけ (複数の区間の重なり・順序・ni_ref の意味は決めていないので受けない)。戻り値 (station, 情報)。"""
+    segs = prm.x_respace
+    if not isinstance(segs, (list, tuple)) or len(segs) != 1 or not isinstance(segs[0], dict):
+        raise ValueError(f"x_respace: [{{x0, x1, blend, factor, ni_ref}}] の 1 区間だけを受ける (受け取った値: {segs!r})")
+    s = segs[0]
+    bad = sorted(set(map(str, s)) ^ set(X_RESPACE_KEYS))
+    if bad:
+        raise ValueError(f"x_respace: キーは {list(X_RESPACE_KEYS)} のちょうど 5 つ (過不足 {bad})")
+    x0, x1, blend, factor = (float(s[k]) for k in ("x0", "x1", "blend", "factor"))
+    ni_ref = s["ni_ref"]
+    if isinstance(ni_ref, bool) or int(ni_ref) != ni_ref or int(ni_ref) < 3:
+        raise ValueError(f"x_respace.ni_ref: 3 以上の整数にする ({ni_ref!r})")
+    ni_ref = int(ni_ref)
+    if not all(np.isfinite(v) for v in (x0, x1, blend, factor)) or blend <= 0.0 or factor <= 0.0:
+        raise ValueError(f"x_respace: x0・x1・blend・factor は有限、blend・factor は正にする ({x0}, {x1}, {blend}, {factor})")
+    if not (x_in < x0 < x1 < x_e):
+        raise ValueError(f"x_respace: x_in {x_in} < x0 {x0} < x1 {x1} < x_e {x_e} にする")
+    a1, b1 = x0 + blend, x1 - blend                   # ブレンドの内側の端 (指定の x0・x1 から取る)
+    if a1 > b1:
+        raise ValueError(f"x_respace: 2·blend ({2 * blend}) が区間の幅 ({x1 - x0}) を超える")
+    xs = _x_stations(x_in, x_e, ni_ref, prm.throat_refine, prm.throat_width,
+                     prm.local_center, prm.local_refine, prm.local_width, prm.x_density_table)
+    ia = int(np.argmin(np.abs(xs - x0)))
+    ib = int(np.argmin(np.abs(xs - x1)))
+    xa, xb = float(xs[ia]), float(xs[ib])
+    if not (0 < ia < ib < ni_ref - 1 and xa < a1 and b1 < xb):
+        raise ValueError(f"x_respace: 区間の端の列 (ia {ia} x {xa}, ib {ib} x {xb}) が両端の列の内側で、ブレンドの内側の端 "
+                         f"({a1}, {b1}) より外にない (ni_ref {ni_ref} の格子が粗すぎるか blend が狭すぎる)")
+    xf = np.linspace(xa, xb, 20001)
+    t = None if prm.x_density_table is None else _check_table("x_density_table", prm.x_density_table, x_in, x_e)
+    d = _x_density(xf, prm.throat_refine, prm.throat_width, prm.local_center, prm.local_refine, prm.local_width, t)
+    w = np.clip((xf - xa) / (a1 - xa), 0, 1) * np.clip((xb - xf) / (xb - b1), 0, 1)       # 0 → 1 → 0 (端でなめらかに)
+    w = w * w * (3 - 2 * w)                                                                 # smoothstep
+    dn = d * (1 - w * (1 - np.maximum(1.0, d / factor) / d))
+    cr = np.concatenate([[0], np.cumsum(0.5 * (d[1:] + d[:-1]) * np.diff(xf))])
+    cn = np.concatenate([[0], np.cumsum(0.5 * (dn[1:] + dn[:-1]) * np.diff(xf))])
+    nseg = int(round((ib - ia) * cn[-1] / cr[-1]))
+    if nseg < 1:
+        raise ValueError(f"x_respace: 区間の列の数が 1 未満になる (n_old {ib - ia}・∫d_n/∫d {cn[-1] / cr[-1]})")
+    seg = np.interp(np.linspace(0, cn[-1], nseg + 1), cn, xf)
+    seg[0], seg[-1] = xa, xb
+    out = np.concatenate([xs[:ia], seg, xs[ib + 1:]])
+    if not np.all(np.diff(out) > 0):
+        raise ValueError("x_respace: 並べ直した station が狭義単調増加でない")
+    return out, {"ni_ref": ni_ref, "ia": ia, "ib": ib, "xa": xa, "xb": xb, "n_old": ib - ia, "n_new": nseg, "ni": len(out)}
 
 
 def _radial_fracs(nj: int, first_frac: float) -> np.ndarray:
@@ -195,8 +273,13 @@ def _radial_fracs_capfixed(nj: int, first_frac: float, cap: float) -> tuple[np.n
 
 def generate_axisym_mesh(wall, prm: Mesh2DParams):
     """wall: NozzleWall。戻り値 (coords (N,3) [m], quads (M,4), 境界辺 dict)。"""
-    xs = _x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width,
-                     prm.local_center, prm.local_refine, prm.local_width, prm.x_density_table)
+    if prm.x_respace is None:
+        xs = _x_stations(wall.x_in, wall.x_e, prm.ni, prm.throat_refine, prm.throat_width,
+                         prm.local_center, prm.local_refine, prm.local_width, prm.x_density_table)
+    else:
+        xs, info = _x_stations_respaced(float(wall.x_in), float(wall.x_e), prm)
+        if len(xs) != prm.ni:          # 列の数は並べ直しで決まる。ni と違えば黙って作らない
+            raise ValueError(f"x_respace: 並べ直した列の数 {len(xs)} が mesh.ni {prm.ni} と違う (ni に {len(xs)} を書く; {info})")
     rw = wall.r(xs)
     ni, nj = prm.ni, prm.nj
     X = np.repeat(xs[:, None], nj, axis=1)

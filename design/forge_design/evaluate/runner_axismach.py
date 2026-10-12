@@ -694,7 +694,10 @@ def _mesh_params_from(m: dict, scale, ni, nj, wall_first_frac) -> Mesh2DParams:
                         wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
                         axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"),
                         wall_first_frac_table=m.get("wall_first_frac_table"), x_density_table=m.get("x_density_table"),
-                        wall_normal_layer=m.get("wall_normal_layer"), scale=scale)
+                        wall_normal_layer=m.get("wall_normal_layer"),
+                        # 区間の局所の並べ直し (NS の mesh だけ。MESH_EULER_KEYS に無いので mesh_euler には書けない;
+                        # plan tooling-nozzle-isothermal-wall-chain §4.8-1・§5.1 #29)
+                        x_respace=m.get("x_respace"), scale=scale)
 
 
 def mesh_params(p, scale, ni, nj, wall_first_frac):
@@ -1249,6 +1252,165 @@ def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar
     return wall
 
 
+# --- 本段だけの陰解法 B0 (`evaluate.main_line`; plan tooling-nozzle-isothermal-wall-chain §4.8-2・§5.1 #30) ---------------
+# case/45 の生産の陰解法 B0 (壁法線のライン陰解法・方向別の擬似 dt とその伸びの上限・implicitThermalJacobian・cfl・implicitRelax・
+# リミッタの基準値の固定・出力の量) を、段階起動の前の段 (S1・S2) には付けずに本段だけに書く。キーと書き方は case/45 の
+# `cold_cfl.py prep --line dir --itj … --cap … --cfl … --limiter-ref-from … --extra …` と同じ (implicitRelax だけは prepare_ns の
+# `implicit_relax` と同じく blockDPLUR の直後に挿入する。B0 の系譜 run_0182 → run_0183 → run_0483 の本段の書き方)。
+# 前の段の元の設定 (B0 を当てる前) は run の PRESTAGE_CONFIG に置き、run_staged_ns が S1・S2 をそこから作る (本段の設定から
+# CFL・次数・nStepInner だけを変えて作ると S1 にもライン陰解法・上限・ITJ が残る; codex diagnose 2026-10-13)。
+PRESTAGE_CONFIG = "solverConfig_prestage.yaml"
+MAIN_STAGE_STARTED = "MAIN_STAGE_STARTED"
+_MAIN_LINE_KEYS = ("line", "cap", "itj", "cfl", "relax", "limiter_ref", "extra_fields")
+_MAIN_LINE_REQUIRED = ("line", "cap", "itj", "cfl", "relax", "limiter_ref")     # extra_fields (出力の量) だけは任意
+_LIMITER_REF_KEYS = (("ro", "limiterRoRef"), ("p", "limiterPRef"), ("a", "limiterARef"))
+# B0 だけが書くパス (前の段の設定に残っていてはいけない)。cfl・cfl_pseudo・implicitRelax は前の段にもありうるので含めない
+_MAIN_LINE_ONLY_PATHS = ({("time", "deltaT", k) for k in ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap",
+                                                         "implicitThermalJacobian")}
+                         | {("space", k) for _, k in _LIMITER_REF_KEYS} | {("output",)})
+# 前の段の元の設定と本段の設定の差として許すパス (B0 のパス + cfl・cfl_pseudo・implicitRelax)
+_MAIN_LINE_PATHS = (_MAIN_LINE_ONLY_PATHS
+                    | {("time", "deltaT", k) for k in ("cfl", "cfl_pseudo", "implicitRelax")})
+_CFG_MISSING = object()
+
+
+def _cfg_diff_paths(a, b, path=()) -> dict:
+    """読み込んだ 2 つの設定の差 {パス: (a の値, b の値)}。片側にしか無いキーは _CFG_MISSING
+    (case/45 の make_ns_n012_problems.diff_paths と同じ定義)。"""
+    out = {}
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b), key=str):
+            out.update(_cfg_diff_paths(a.get(k, _CFG_MISSING), b.get(k, _CFG_MISSING), path + (k,)))
+        return out
+    if a is _CFG_MISSING or b is _CFG_MISSING or type(a) is not type(b) or a != b:
+        out[path] = (a, b)
+    return out
+
+
+def _cfg_path_get(doc, path):
+    """読み込んだ設定の path (キーの tuple) の値。無ければ _CFG_MISSING。"""
+    v = doc
+    for k in path:
+        if not isinstance(v, dict) or k not in v:
+            return _CFG_MISSING
+        v = v[k]
+    return v
+
+
+def _main_line_spec(p: Problem, cfl_main=None, implicit_relax=None) -> dict | None:
+    """`evaluate.main_line` を読んで検査し、解決した値を返す (キー無しは None = 今と同じ設定・同じ段)。
+    {line: dir, cap, itj, cfl, relax, limiter_ref: {ro, p, a}, extra_fields: [...]}。本段の cfl・implicitRelax は main_line が
+    決めるので、引数・YAML の `cfl_main` と同時に指定したら ValueError (どちらが効くかを曖昧にしない)。`implicit_relax` は
+    前の段 (S1・S2) にも効く値なので、main_line.relax と同じ値のときだけ併記を許す (2026-10-13 親の決定: 生産の系譜 run_0182 は
+    `prepare_ns(implicit_relax=0.7)` で S1・S2 も 0.7。違う値は ValueError)。
+    line は dir (lineImplicit 1 + lineDtDirectional 1) だけ。未知のキー・欠けたキー・範囲外の値も ValueError。"""
+    ml = p.evaluate.get("main_line")
+    if ml is None:
+        return None
+    if not isinstance(ml, dict):
+        raise ValueError(f"evaluate.main_line は mapping であること ({ml!r})")
+    clash = [w for w, on in (("引数 cfl_main", cfl_main is not None), ("evaluate.cfl_main", "cfl_main" in p.evaluate)) if on]
+    if clash:
+        raise ValueError(f"evaluate.main_line と {', '.join(clash)} は同時に指定できない "
+                         "(本段の cfl は main_line の cfl で決める。前の段は S1 0.5・S2 1.0 のまま)")
+    unknown = sorted(set(ml) - set(_MAIN_LINE_KEYS), key=str)
+    missing = [k for k in _MAIN_LINE_REQUIRED if k not in ml]
+    if unknown or missing:
+        raise ValueError(f"evaluate.main_line のキーが不正 (未知 {unknown}、欠け {missing}; 使えるのは {list(_MAIN_LINE_KEYS)})")
+    if ml["line"] != "dir":
+        raise ValueError(f"evaluate.main_line.line は dir だけ (lineImplicit 1 + lineDtDirectional 1; 指定 {ml['line']!r})")
+
+    def _pos(name, v, hi=None):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(float(v)) or float(v) <= 0.0 \
+                or (hi is not None and float(v) > hi):
+            raise ValueError(f"evaluate.main_line.{name} は有限の正の数{'' if hi is None else f' (≤ {hi})'}であること ({v!r})")
+        return float(v)
+    itj = ml["itj"]
+    if isinstance(itj, bool) or not isinstance(itj, int) or not 0 <= itj <= 7 or ((itj & 4) and not (itj & 1)):
+        # ソルバの検査 (solverConfig.cpp: 0..7、ビット 4 はビット 1 が要る) と同じ
+        raise ValueError(f"evaluate.main_line.itj は 0..7 の整数 (ビット 4 はビット 1 と一緒に) であること ({itj!r})")
+    lr = ml["limiter_ref"]
+    if not isinstance(lr, dict) or set(lr) != {k for k, _ in _LIMITER_REF_KEYS}:
+        raise ValueError(f"evaluate.main_line.limiter_ref は {{ro, p, a}} の 3 つだけを持つ mapping であること ({lr!r})")
+    refs = {sk: _pos(f"limiter_ref.{k}", lr[k]) for k, sk in _LIMITER_REF_KEYS}
+    ex = ml.get("extra_fields")
+    if ex is not None and (not isinstance(ex, list) or not ex or len(set(map(str, ex))) != len(ex)
+                           or any(not isinstance(s, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s) for s in ex)):
+        raise ValueError(f"evaluate.main_line.extra_fields は重複の無い量の名前の空でないリストであること ({ex!r})")
+    relax = _pos("relax", ml["relax"], hi=1.0)
+    ir = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
+    if ir is not None and float(ir) != relax:
+        raise ValueError(f"implicit_relax ({ir!r}、前の段にも効く) は evaluate.main_line.relax ({relax!r}) と同じ値に限る "
+                         "(違う値を前の段と本段に分けて書く形は決めていない)")
+    return {"line": "dir", "cap": _pos("cap", ml["cap"]), "itj": int(itj), "cfl": _pos("cfl", ml["cfl"]),
+            "relax": relax, "prestage_relax": (None if ir is None else float(ir)), "limiter_ref": refs,
+            "extra_fields": (list(ex) if ex else None)}
+
+
+def _apply_main_line(cfg: str, ml: dict) -> str:
+    """前の段の元の設定 cfg に B0 (`_main_line_spec` の解決済みの値) を当てた本段の設定を返す。キー・書き方・前提の検査は
+    case/45 の `cold_cfl.py prep` と同じ (cfl・cfl_pseudo の値の置換 → output → space の先頭にリミッタの基準値 →
+    deltaT の先頭に lineImplicit・lineDtDirectional → implicitThermalJacobian → lineDtDirectionalCap の順)。implicitRelax は
+    prepare_ns の `implicit_relax` と同じく `blockDPLUR: 1,` の直後に挿入する。読み直して、元との差が B0 のパスだけで値が
+    指定どおりであることを確かめる (違えば ValueError)。"""
+    doc = _cfg_load(cfg)
+    tm = doc.get("time")
+    dt = tm.get("deltaT") if isinstance(tm, dict) else None
+    sp = doc.get("space")
+    if not isinstance(dt, dict) or not isinstance(sp, dict):
+        raise ValueError("solverConfig に time.deltaT・space の mapping が無い — main_line を書けない")
+    if int(dt.get("blockDPLUR", 0)) != 1 or int(tm.get("timeIntegration", 0)) != 11 or int(dt.get("lowMachPrecond", 0)) >= 2:
+        raise ValueError("lineImplicit は timeIntegration 11 + blockDPLUR 1 + lowMachPrecond < 2 専用 — main_line を書けない")
+    pre_relax = _cfg_path_get(doc, ("time", "deltaT", "implicitRelax"))
+    if pre_relax is not _CFG_MISSING and float(pre_relax) != float(ml["relax"]):
+        raise ValueError(f"前の段の元の設定の implicitRelax ({pre_relax!r}) が main_line.relax ({ml['relax']!r}) と違う")
+    have = [".".join(pth) for pth in sorted(_MAIN_LINE_ONLY_PATHS)
+            if _cfg_path_get(doc, pth) is not _CFG_MISSING and (pth != ("output",) or ml["extra_fields"])]
+    if have:
+        raise ValueError(f"前の段の元の設定に既に {have} がある — main_line を重ねて書けない")
+    if cfg.count("deltaT: {") != 1 or cfg.count("space: {") != 1 or cfg.count("blockDPLUR: 1,") != 1:
+        raise ValueError("deltaT・space が 1 つのフロー形式でないか `blockDPLUR: 1,` が 1 か所でない — main_line の足し方を決めていない")
+    text = _cfg_set(cfg, {"cfl": ml["cfl"], "cfl_pseudo": ml["cfl"]})
+    if ml["extra_fields"]:
+        text = text.rstrip("\n") + "\noutput: {level: 1, extraFields: [" + ", ".join(ml["extra_fields"]) + "]}\n"
+    text = text.replace("space: {", "space: {" + ", ".join(f"{k}: {float(v)!r}" for k, v in ml["limiter_ref"].items()) + ", ", 1)
+    text = text.replace("deltaT: {", "deltaT: {lineImplicit: 1, lineDtDirectional: 1, ", 1)
+    text = text.replace("deltaT: {", f"deltaT: {{implicitThermalJacobian: {int(ml['itj'])}, ", 1)
+    text = text.replace("deltaT: {", f"deltaT: {{lineDtDirectionalCap: {float(ml['cap'])!r}, ", 1)
+    if pre_relax is _CFG_MISSING:          # 前の段に implicitRelax が無いときだけ本段に挿入 (あれば同じ値を引き継ぐ)
+        text = text.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(ml['relax'])},", 1)
+    want = {("time", "deltaT", "lineImplicit"): 1, ("time", "deltaT", "lineDtDirectional"): 1,
+            ("time", "deltaT", "lineDtDirectionalCap"): float(ml["cap"]),
+            ("time", "deltaT", "implicitThermalJacobian"): int(ml["itj"]),
+            ("time", "deltaT", "cfl"): float(ml["cfl"]), ("time", "deltaT", "cfl_pseudo"): float(ml["cfl"]),
+            ("time", "deltaT", "implicitRelax"): float(ml["relax"]),
+            **{("space", k): float(v) for k, v in ml["limiter_ref"].items()}}
+    if ml["extra_fields"]:
+        want[("output",)] = {"level": 1, "extraFields": list(ml["extra_fields"])}
+    after = _cfg_load(text)
+    stray = sorted(set(_cfg_diff_paths(doc, after)) - set(want), key=str)
+    bad = {".".join(pth): _cfg_path_get(after, pth) for pth, v in want.items()
+           if _cfg_path_get(after, pth) is _CFG_MISSING or _cfg_path_get(after, pth) != v}
+    if stray or bad:
+        raise ValueError(f"main_line を当てた本段の設定を読み直したら想定と違う (B0 以外の差 {stray}、値の違い {bad})")
+    return text
+
+
+def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None, main_line: dict | None = None):
+    """NS の (前の段の元の設定, 本段の設定) を返す。`main_line` (`_main_line_spec` の戻り値) が None なら 2 つは同じ文字列で、
+    従来の prepare_ns の組み立てと同じ (`_config_sst_node` → `_apply_gas_to_config` → implicit_relax の挿入)。
+    `_apply_gas_to_config` は run_dir に species_meta.yaml などを書く (従来どおり 1 回だけ呼ぶ)。"""
+    cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
+    implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
+    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
+    if implicit_relax is not None:
+        # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
+        cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    if main_line is None:
+        return cfg_ns, cfg_ns
+    return cfg_ns, _apply_main_line(cfg_ns, main_line)
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
@@ -1281,6 +1443,12 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       解決済みの値は prepare_info.json の `pw_upstream` に、`poly` のゲートは `pw_upstream_gate` に書く。
     - **`spec.sizing`** (任意、§4.2): 寸法の決め方 {method: exit | throat, target_m}。prepare_info.json の `sizing` に、実際の物理壁の
       物理スロート半径・出口半径 [m] と目標との差を書く (キー無しは method = null = 未記録)。
+    - **`evaluate.main_line`** (任意、plan tooling-nozzle-isothermal-wall-chain §4.8-2・§5.1 #30): 本段だけに B0 (ライン陰解法・方向別の
+      擬似 dt の上限・implicitThermalJacobian・cfl・implicitRelax・リミッタの基準値・出力の量) を当てる (`_main_line_spec`・
+      `_apply_main_line`)。B0 を当てる前の設定を `PRESTAGE_CONFIG` に置き (run_staged_ns が S1・S2 をそこから作る)、変換・初期場の
+      処理はその設定のまま行い、最後に solverConfig.yaml を本段の設定に替える。`cfl_main`・`implicit_relax` との併記は run dir を
+      作る前に例外。キー無しは今と同じ設定・同じファイル。prepare_info.json の `main_line` と `ns_stage_configs` (stages=full の
+      S1・S2・本段の設定の sha256) に記録する。
     """
     from ..feedback.deltastar import _sutherland
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, check_required_attrs, save_wall_file
@@ -1297,6 +1465,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     sizing = _sizing_spec(p.spec)
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
+    # 本段だけの B0 (§5.1 #30): 不正値・cfl_main / implicit_relax との併記は run dir を作る前に例外
+    main_line = _main_line_spec(p, cfl_main, implicit_relax)
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
@@ -1408,11 +1578,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     (run_dir / "nozzle_qc.h5").unlink()
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
-    # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)
-    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
-    if implicit_relax is not None:
-        # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
-        cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)。main_line があっても変換・初期場の処理は B0 を
+    # 当てる前の設定で行い、本段の設定 (cfg_main) への切り替えは最後に行う (§5.1 #30)
+    cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
@@ -1486,6 +1654,15 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
     info["sizing"] = _sizing_record(sizing, wall, scale)
     info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
+    # 本段だけの B0 (§5.1 #30): 前の段の元の設定を PRESTAGE_CONFIG に置き、solverConfig.yaml を本段の設定に替える
+    # (cfl_main・implicit_relax の記録は本段の値にする)。キー無しはファイルを書かない
+    info["main_line"] = None
+    if main_line is not None:
+        (run_dir / PRESTAGE_CONFIG).write_text(cfg_ns)
+        (run_dir / "solverConfig.yaml").write_text(cfg_main)
+        info["cfl_main"], info["implicit_relax"] = main_line["cfl"], main_line["relax"]
+        info["main_line"] = {**main_line, "source": "evaluate.main_line", "prestage_config": PRESTAGE_CONFIG}
+    info["ns_stage_configs"] = ns_stage_sha256(cfg_main, cfg_ns if main_line is not None else None)
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -1536,23 +1713,142 @@ def _stage_manifest_cls():
     return StageManifest
 
 
+def _ns_prestage(cfg: str, cfl: float) -> str:
+    """前段: CFL を cfl に、空間 1 次、nStepInner 5 → 10 (従来どおり; 5 以外は据え置き)。"""
+    cfg = _first_order(_cfg_set(cfg, {"cfl": cfl, "cfl_pseudo": cfl}))
+    if _cfg_num(_cfg_get(_cfg_load(cfg), "nStepInner")) == 5.0:
+        cfg = _cfg_set(cfg, {"nStepInner": 10})
+    return cfg
+
+
+def ns_stage_configs(cfg_main: str, stages: str = "full", ramp=None, ramp_steps: int = 1000, cfg_pre: str | None = None):
+    """`run_staged_ns` の段の設定を、forge を回さずに導く。戻り: (前の段 [(tag, 実効設定, step 数, 起動前の要求値)],
+    本段の実効設定, 本段の起動前の要求値)。前の段の実効設定は step 数・出力の間隔まで書いた起動直前の文字列。
+    `cfg_pre` (main_line の run の PRESTAGE_CONFIG = B0 を当てる前の設定) があれば S1・S2 はそこから作り
+    (§5.1 #30)、本段との差が B0 のパスと段の長さだけであること、S1・S2 に B0 だけのキーが残っていないことを検査する
+    (違えば ValueError)。`cfg_pre` があるときの stages="ramp" は定義していないので ValueError。"""
+    n_main = _cfg_value(cfg_main, "nStepOuter")
+    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
+    if cfg_pre is not None:
+        len_paths = {("time", "last", "nStepOuter"), ("time", "outStepInterval")}
+        stray = sorted(set(_cfg_diff_paths(_cfg_load(cfg_pre), _cfg_load(cfg_main))) - _MAIN_LINE_PATHS - len_paths, key=str)
+        if stray:
+            raise ValueError(f"{PRESTAGE_CONFIG} と本段の設定の差が B0 (main_line) のパスと段の長さ以外にもある: "
+                             + ", ".join(".".join(map(str, pth)) for pth in stray) + " — 段の設定を作らない")
+        if stages == "ramp":
+            raise ValueError("main_line (前の段の元の設定がある run) の stages='ramp' は定義していない — 'full' か 'none' を使う")
+    pre = []
+
+    def _add(cfg, nsteps, tag, want):
+        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
+        pre.append((tag, cfg, nsteps, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}))
+
+    if stages == "full":
+        src = cfg_main if cfg_pre is None else cfg_pre
+        _add(_ns_prestage(src, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+        _add(_ns_prestage(src, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
+        if cfg_pre is not None:
+            # S1・S2 にライン陰解法・上限・ITJ・リミッタの基準値が無く、出力の指定は前の段の元の設定のまま (本段の extraFields が無い)
+            out_pre = _cfg_path_get(_cfg_load(cfg_pre), ("output",))
+            for tag, cfg, _, _ in pre:
+                doc = _cfg_load(cfg)
+                left = [".".join(pth) for pth in sorted(_MAIN_LINE_ONLY_PATHS - {("output",)})
+                        if _cfg_path_get(doc, pth) is not _CFG_MISSING]
+                if _cfg_path_get(doc, ("output",)) != out_pre:
+                    left.append("output")
+                if left:
+                    raise ValueError(f"前の段 {tag} の設定に B0 のキー {left} が残っている — 段の設定を作らない")
+    elif stages == "ramp":
+        ramp = tuple(ramp or (1.0, 2.0, 3.5))
+        for i, c in enumerate(ramp):
+            _add(_cfg_set(cfg_main, {"cfl": c, "cfl_pseudo": c}), int(ramp_steps), f"R{i + 1}_cfl{c:g}",
+                 {"convMethod": main_want["convMethod"], "cfl": c, "cfl_pseudo": c})
+        n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
+        # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
+        out_int = main_want["outStepInterval"]
+        n_main = max((n_main // out_int) * out_int, out_int)
+        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
+    elif stages != "none":
+        raise ValueError("stages は 'full' / 'none' / 'ramp'")
+    return pre, cfg_main, {**main_want, "nStepOuter": n_main}
+
+
+def _sha256_bytes(b: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(b).hexdigest()
+
+
+def _sha256_file(path) -> str | None:
+    """ファイルの sha256 (無ければ None)。"""
+    import hashlib
+    path = Path(path)
+    if not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def ns_stage_sha256(cfg_main: str, cfg_pre: str | None = None) -> dict:
+    """prepare_info.json の `ns_stage_configs`: prepare の時点の本段の設定から stages="full" で導いた S1・S2・本段の
+    設定の sha256 (`ns_stage_configs` と同じ導出、UTF-8 の文字列の sha256 = 書いたファイルの sha256)。呼び出し側が後で
+    solverConfig.yaml を書き換えたら実際に回した設定は MAIN_STAGE_STARTED (`previous_stages`・`main_config`) を見る。"""
+    pre, main, _ = ns_stage_configs(cfg_main, "full", cfg_pre=cfg_pre)
+    return {"stages": "full", "at": "prepare",
+            **{tag: _sha256_bytes(cfg.encode()) for tag, cfg, _, _ in pre},
+            "main": _sha256_bytes(main.encode()),
+            "prestage_config": (None if cfg_pre is None else _sha256_bytes(cfg_pre.encode()))}
+
+
+def _write_main_stage_started(run_dir: Path, cfg_main: str, stages: str, done: list, cfg_pre: str | None) -> dict:
+    """本段の通知 MAIN_STAGE_STARTED (JSON) を書く。本段の設定への切り替え (solverConfig.yaml) と前の段の出力の処理 (最終場の
+    restart と res_* の削除) の後、forge を起動する直前に呼ぶ。外の見張り (case/45 の m9_watch.py など) はこのファイルが
+    出てから起動する (前の段の res_3000.h5 を本段の出力と取り違えない; codex diagnose 2026-10-13)。一時ファイルに書いて
+    rename する (読みかけの JSON を見せない)。中身: 時刻、本段の設定と本段の初期の場 (mesh.valueFileName) の sha256、
+    前の段の tag・step 数・設定の sha256、前の段の元の設定 (main_line の run だけ)、この時点で残っている res_*。"""
+    import datetime
+    import os
+    import time
+    vf = str((_cfg_load(cfg_main).get("mesh") or {}).get("valueFileName", "nozzle.h5"))
+    rec = {"event": "main_stage_started", "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+           "time_unix": time.time(), "stages": stages,
+           "main_config": {"file": "solverConfig.yaml", "sha256": _sha256_file(run_dir / "solverConfig.yaml"),
+                           "nStepOuter": _cfg_value(cfg_main, "nStepOuter")},
+           "initial_field": {"file": vf, "sha256": _sha256_file(run_dir / vf)},
+           "previous_stages": list(done),
+           "prestage_config": (None if cfg_pre is None
+                               else {"file": PRESTAGE_CONFIG, "sha256": _sha256_file(run_dir / PRESTAGE_CONFIG)}),
+           "res_files_present": sorted(f.name for f in run_dir.glob("res_*"))}
+    tmp = run_dir / (MAIN_STAGE_STARTED + ".tmp")
+    tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False))
+    os.replace(tmp, run_dir / MAIN_STAGE_STARTED)
+    return rec
+
+
 def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> int:
     """NS の起動。stages:
     - "full" (既定・run_0030 レシピ): soft (1次 cfl0.5 ni10, 3000 step) → mid (1次 cfl1, 3000) → 本段 (2次 cfl_main)。
     - "none": 本段だけ (収束済み NS 場からの warm start 用)。
     - "ramp": 2 次のまま cfl を `ramp` (例 (1, 2, 3.5)) の順に各 ramp_steps だけ回して本段 cfl_main へ
       (forge に CFL ランプ機能は無いので restart で段階化する。本段の step 数はランプ分を差し引く)。
-    各段の最終場を IC に引き継ぐ。
+    各段の最終場を IC に引き継ぐ。段の設定は `ns_stage_configs` で導く。run に PRESTAGE_CONFIG (prepare_ns が
+    `evaluate.main_line` のときに書く、B0 を当てる前の設定) があれば S1・S2 はそこから作り、本段だけが B0 になる (§5.1 #30)。
     段ごとの実効設定を `stage_manifest.json` に記録し (`check_convergence.py --segment` 用)、段の残差履歴を
     `residual_history_<tag>.csv` に残す (段の res_* は従来どおり消す)。段の最終 res の必要保存量が非有限・ρ≤0 なら
-    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。"""
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。
+    本段の設定への切り替えと前の段の出力の処理の後、forge を起動する直前に通知 MAIN_STAGE_STARTED を書く
+    (`_write_main_stage_started`; 前の呼び出しの通知は最初に消す)。"""
     import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    pre_path = run_dir / PRESTAGE_CONFIG
+    cfg_pre = pre_path.read_text() if pre_path.is_file() else None
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
-    n_main = _cfg_value(cfg_main, "nStepOuter")
-    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
+    pre, cfg_main, main_want = ns_stage_configs(cfg_main, stages, ramp, ramp_steps, cfg_pre)
+    (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     sm = _stage_manifest_cls()(run_dir)
 
     def _record(cfg, tag):
@@ -1564,9 +1860,9 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         sm.write()
 
     def _stage(cfg, nsteps, tag, want):
-        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
-        _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, tag)   # 起動前に実効値を検査
+        _cfg_check(cfg, want, tag)                                   # 起動前に実効値を検査
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        sha = _sha256_file(run_dir / "solverConfig.yaml")
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
         _record(cfg, tag)
@@ -1581,33 +1877,13 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         _restart_same_mesh(res[-1], run_dir / "nozzle.h5")    # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
+        return {"tag": tag, "nsteps": nsteps, "config_sha256": sha}
 
-    def _pre(cfg, cfl):
-        """前段: CFL を cfl に、空間 1 次、nStepInner 5 → 10 (従来どおり; 5 以外は据え置き)。"""
-        cfg = _first_order(_cfg_set(cfg, {"cfl": cfl, "cfl_pseudo": cfl}))
-        if _cfg_num(_cfg_get(_cfg_load(cfg), "nStepInner")) == 5.0:
-            cfg = _cfg_set(cfg, {"nStepInner": 10})
-        return cfg
-
-    if stages == "full":
-        _stage(_pre(cfg_main, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
-        _stage(_pre(cfg_main, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
-    elif stages == "ramp":
-        ramp = tuple(ramp or (1.0, 2.0, 3.5))
-        for i, c in enumerate(ramp):
-            st = _cfg_set(cfg_main, {"cfl": c, "cfl_pseudo": c})
-            _stage(st, int(ramp_steps), f"R{i + 1}_cfl{c:g}",
-                   {"convMethod": main_want["convMethod"], "cfl": c, "cfl_pseudo": c})
-        n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
-        # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
-        out_int = main_want["outStepInterval"]
-        n_main = max((n_main // out_int) * out_int, out_int)
-        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
-    elif stages != "none":
-        raise ValueError("stages は 'full' / 'none' / 'ramp'")
-    _cfg_check(cfg_main, {**main_want, "nStepOuter": n_main}, "main")
+    done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
+    _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
+    _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
     rc = run_forge(run_dir)
     _record(cfg_main, "main")
     return rc
