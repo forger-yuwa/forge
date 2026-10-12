@@ -638,6 +638,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
             ss = [extract_one(int(r_["i_col"]), main_par, y_b_fixed=yb_sel * float(f)) if np.isfinite(yb_sel) else None
                   for f in yb_sens_factors]
             r_["delta_r_sens_yb"] = [s_["delta_r"] if s_ else np.nan for s_ in ss]
+            r_["_yb_sens_rows"] = ss                    # 感度帯の診断 (停止条件の量) を返すため
     x = np.array([r_["x"] for r_ in rows])
     draw = np.array([r_["delta_r"] for r_ in rows])
     sens = np.array([r_["delta_r_sens"] for r_ in rows])
@@ -708,6 +709,15 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     if sens_yb is not None:                         # 既定 (None) では鍵を増やさない (戻り値・diag JSON を従来どおりに保つ)
         out["delta_r_sens_yb"] = sens_yb
         out["settings"]["yb_sens_factors"] = [float(f) for f in yb_sens_factors]
+        # 帯の診断 (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #7 の edge の A/B): 主系列の帯の比の切片 a (適応の停止条件
+        # a ≥ 0.95 α に使う量) と、感度帯 (n, 倍率の数) ごとの停止条件の量。固定帯では再試行しないので、条件の違反は理由に残らない —
+        # ここで量を返し、判定は呼び出し側 (`bell_deltastar`) が行う
+        out["band_ratio_a"] = np.array([r_.get("band_ratio_a", np.nan) for r_ in rows])
+        for key in ("band_y_b", "band_slope", "band_rms", "band_deficit_share", "band_ratio_a", "alpha", "mass_deficit"):
+            out["yb_sens_" + key] = np.array([[(s_[key] if s_ is not None else np.nan) for s_ in r_["_yb_sens_rows"]] for r_ in rows],
+                                             dtype=float).reshape(len(rows), len(yb_sens_factors))
+        out["yb_sens_reason"] = np.array([[(",".join(s_["reason"]) if s_ is not None else "none") for s_ in r_["_yb_sens_rows"]]
+                                          for r_ in rows]).reshape(len(rows), len(yb_sens_factors))
     out["massflow"] = massflow_ratio(ns_run, euler_run) if ns_res is None else massflow_ratio(ns_run, euler_run, ns_res=ns_res)
     if edge is not None:
         out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])

@@ -237,6 +237,106 @@ def cmd_series(a):
     print("判定:", r["command"])
 
 
+def _runs_of(mask, x):
+    """bool の列が True の連続区間を [(x_first, x_last, n)] で。"""
+    out, i, n = [], 0, len(mask)
+    while i < n:
+        if mask[i]:
+            j = i
+            while j + 1 < n and mask[j + 1]:
+                j += 1
+            out.append([float(x[i]), float(x[j]), int(j - i + 1)])
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def cmd_ab_edge(a):
+    """事前登録の A/B (plan §5.1 #7「次の A/B」): 帯の選び方だけ adaptive → edge。倍率・受理線・区間・補間・積分・平滑化は固定。
+    CONTUR は使わない。出力は新しい名前 (既存の出力は上書きしない)。判定は数値を出すだけ (A/B の当てはめは親)。"""
+    pr = PRESETS[a.tag]
+    ns_dir, eu_dir, problem = CASE / pr["ns"], CASE / pr["euler"], CASE / pr["problem"]
+    out_dir = Path(a.out_dir) if a.out_dir else HERE
+    t = a.tag.lower()
+    stem = f"dstar_{t}_ns_run{_num(pr['ns'])}_constx_edge"
+    files = {"npz": out_dir / f"{stem}.npz", "json": out_dir / f"{stem}.json", "bands": out_dir / f"dstar_{t}_uncert_bands_edge.csv",
+             "diag": out_dir / f"dstar_{t}_edge_diag_bands.csv"}
+    exist = [str(f) for f in files.values() if f.exists()]
+    if exist and not a.force:
+        raise SystemExit(f"既存の出力を上書きしない: {exist} (--force で上書き)")
+    wchk = wall_check(ns_dir, eu_dir, problem)
+    ex = bd.extract_bell(ns_dir, eu_dir, band_select="edge", return_ladders=True)
+    u = ex["uncertainty"]
+    acc = bd.band_acceptance(ex)
+    x = ex["x"]; reg = x >= 0.0; E = acc["edge"]
+    bcols = (["x_lo", "x_hi", "n", "u_max", "frac_over", "u_outward_max"]
+             + [f"rel_f{f:g}_{s_}" for f in u["factors"] for s_ in ("min", "max")])
+    write_csv(files["bands"], u["bands"], bcols)
+    # 区間ごとの条件の不成立数と縁の位置 (平滑化の前後)
+    drows = []
+    for lo, hi in bd.UNC_BANDS:
+        m = (x >= lo) & (x < hi)
+        if not m.any():
+            continue
+        row = {"x_lo": None if not np.isfinite(lo) else float(lo), "x_hi": None if not np.isfinite(hi) else float(hi), "n": int(m.sum())}
+        for k in acc["criteria"]:
+            row[f"fail_{k}"] = int(np.sum(m & ~acc["crit"][k]))
+        for k, v in acc["main_parts"].items():
+            row[f"fail_main_{k}"] = int(np.sum(m & ~v))
+        for f, sp in acc["sens_parts"].items():
+            for k, v in sp.items():
+                row[f"fail_f{f:g}_{k}"] = int(np.sum(m & ~v))
+        fin = m & np.isfinite(E["y_star"])
+        row["yb_over_ystar_min"] = float(np.min(E["y_b"][fin] / E["y_star"][fin])) if fin.any() else float("nan")
+        row["yb_over_ystar_max"] = float(np.max(E["y_b"][fin] / E["y_star"][fin])) if fin.any() else float("nan")
+        row["ysmooth_over_ystar_min"] = float(np.min(E["y_edge_smooth"][fin] / E["y_star"][fin])) if fin.any() else float("nan")
+        row["ysmooth_over_ystar_max"] = float(np.max(E["y_edge_smooth"][fin] / E["y_star"][fin])) if fin.any() else float("nan")
+        row["yb_over_rw_min"] = float(np.min(E["y_b"][m] / ex["r_wall_ns"][m])); row["yb_over_rw_max"] = float(np.max(E["y_b"][m] / ex["r_wall_ns"][m]))
+        row["n_held"] = int(np.sum(m & E["held"]))
+        drows.append(row)
+    write_csv(files["diag"], drows, list(drows[0].keys()))
+    ed = ex["edge_detail"]
+    lad_y = np.full((len(ed["ladders_y"]), max(len(v) for v in ed["ladders_y"])), np.nan); lad_d = np.full_like(lad_y, np.nan)
+    for k, (yy, dd) in enumerate(zip(ed["ladders_y"], ed["ladders_d"])):
+        lad_y[k, :len(yy)] = yy; lad_d[k, :len(dd)] = dd
+    np.savez(files["npz"], x=x, delta_r_raw=ex["delta_r_raw"], delta_r_smooth=ex["delta_r_smooth"], delta_r_use=ex["delta_r_use"],
+             delta_r_sens_edge=ex["delta_r_sens"], delta_r_sens_yb=ex["delta_r_sens_yb"], yb_factors=np.array(u["factors"]),
+             band_y_b=ex["band_y_b"], band_slope=ex["band_slope"], band_rms=ex["band_rms"], band_deficit_share=ex["band_deficit_share"],
+             band_ratio_a=ex["band_ratio_a"], alpha=ex["alpha"], core_rms=ex["core_rms"], r_wall_ns=ex["r_wall_ns"],
+             **{k: ex[k] for k in ex if k.startswith("yb_sens_")},
+             ok=ex["ok"], hard_ok=ex["hard_ok"], reason=ex["reason"], u=u["u"], u_outward=u["u_outward"], rel_yb=u["rel"],
+             edge_y_star=E["y_star"], y_ref=E["y_ref"], y_edge_median=E["y_edge_median"], y_edge_smooth=E["y_edge_smooth"], held=E["held"],
+             **{f"crit_{k}": v for k, v in acc["crit"].items()}, crit_all=acc["all"],
+             ladder_x=np.asarray(ed["x"]), ladder_y=lad_y, ladder_d=lad_d)
+    miss = reg & ~np.isfinite(E["y_star"])
+    old_npz = out_dir / f"dstar_{t}_ns_run{_num(pr['ns'])}_constx.npz"
+    cmp_old = None
+    if old_npz.is_file():
+        z = np.load(old_npz)
+        if np.array_equal(z["x"], x):
+            cmp_old = {"adaptive": bd.station_values(x, z["delta_r_raw"]), "edge": bd.station_values(x, ex["delta_r_raw"])}
+    js = {"what": "③ベル (M) の δ_r 抽出の A/B (帯の選び方 adaptive → edge だけ) — plan tooling-nozzle-bell-two-mode §5.1 #7「次の A/B (事前登録)」",
+          "tag": a.tag, "ns_run": f"case/68.bell_two_mode/{pr['ns']}", "euler_run": f"case/68.bell_two_mode/{pr['euler']}", "wall": wchk,
+          "settings": _jsonable(ex["settings"]), "massflow": _jsonable(ex["massflow"]),
+          "n_sections": int(len(x)), "n_region": acc["n_region"],
+          "acceptance": _jsonable({k: v for k, v in acc.items() if k in ("region", "n_region", "accept_rel", "factors", "criteria", "all_pass", "summary")}),
+          "uncertainty": _jsonable({k: v for k, v in u.items() if k not in ("u", "u_outward", "rel")}),
+          "edge_positions": {"n_missing_y_star_region": int(miss.sum()), "missing_runs_region": _runs_of(miss, x),
+                             "n_held_region": int(np.sum(reg & E["held"])), "held_rule": "x < 3 と x > 出口 − 3 は P-spline の値を保持 (edge_band_positions)",
+                             "y_b_over_y_star_region": {"min": float(np.nanmin((E["y_b"] / E["y_star"])[reg])), "max": float(np.nanmax((E["y_b"] / E["y_star"])[reg]))},
+                             "y_smooth_over_y_star_region": {"min": float(np.nanmin((E["y_edge_smooth"] / E["y_star"])[reg])),
+                                                             "max": float(np.nanmax((E["y_edge_smooth"] / E["y_star"])[reg]))},
+                             "band_outside_edge_fail_runs": _runs_of(reg & ~acc["crit"]["band_outside_edge"], x)},
+          "fail_runs": {k: _runs_of(reg & ~v, x) for k, v in acc["crit"].items()},
+          "delta_r_raw_at_stations": cmp_old,
+          "files": {k: v.name for k, v in files.items()}, "provenance": provenance()}
+    files["json"].write_text(json.dumps(_jsonable(js), indent=1, ensure_ascii=False))
+    s_ = acc["summary"]
+    print(f"[ab-edge] {stem}: all_pass {acc['all_pass']} (区間 {acc['n_region']} 断面) — "
+          + "、".join(f"{k} 不成立 {s_[k]['n_fail']}" for k in acc["criteria"]))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -250,8 +350,12 @@ def main(argv=None):
     s.add_argument("--tag", choices=sorted(PRESETS), default=None)
     s.add_argument("--out", default=None, help="CSV (既定 <ns_run>/dstar_series.csv; 同名の .npz・.json も書く)")
     s.add_argument("--min-step", type=int, default=None, help="この step 以上のスナップショットだけ")
+    b = sp.add_parser("ab-edge", help="帯の選び方 adaptive → edge の A/B (事前登録)。出力は新しい名前、既存は上書きしない")
+    b.add_argument("--tag", choices=sorted(PRESETS), required=True)
+    b.add_argument("--out-dir", default=None, help="出力先 (既定 このディレクトリ)")
+    b.add_argument("--force", action="store_true", help="同名の出力があっても上書きする")
     a = ap.parse_args(argv)
-    {"extract": cmd_extract, "series": cmd_series}[a.cmd](a)
+    {"extract": cmd_extract, "series": cmd_series, "ab-edge": cmd_ab_edge}[a.cmd](a)
 
 
 if __name__ == "__main__":

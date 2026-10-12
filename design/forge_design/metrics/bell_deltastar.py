@@ -103,6 +103,85 @@ def extraction_uncertainty(out: dict, accept_rel: float = ACCEPT_REL, x_lo: floa
             "bands": rows, "u": u, "u_outward": u_out, "rel": rel}
 
 
+def _stop_ok(slope, rms, share, a, alpha, d, reason, settings, a_frac: float = 0.95) -> dict:
+    """帯の停止条件 (`band_local_deficit` の適応の再試行の条件と同じ量) を満たすか — 要素ごとの bool の dict。
+    slope: 帯の中の比の変化 |Δ| ≤ slope_max、a_core: 帯の比の切片 a ≥ 0.95 α (帯が境界層の深部でない)、clean: 帯の中の残留欠損の比
+    ≤ 0.1、fit: 帯の当てはめの RMS ≤ gate_band_rms、root: δ_r が有限で no_root / nan / 帯が取れない (none) でない。"""
+    slope, rms, share, a, alpha, d = (np.asarray(v, dtype=float) for v in (slope, rms, share, a, alpha, d))
+    hard = np.array([any(h in str(r).split(",") for h in ("no_root", "nan", "none")) for r in np.ravel(reason)],
+                    dtype=bool).reshape(np.shape(reason))
+    with np.errstate(invalid="ignore"):
+        return {"slope": np.abs(slope) <= float(settings["slope_max"]),
+                "a_core": ~(np.isfinite(alpha) & (a < a_frac * alpha)),
+                "clean": ~(np.isfinite(share) & (np.abs(share) > 0.1)),
+                "fit": rms <= float(settings["gate_band_rms"]),
+                "root": np.isfinite(d) & ~hard}
+
+
+def band_acceptance(out: dict, accept_rel: float = ACCEPT_REL, x_lo: float = 0.0) -> dict:
+    r"""帯の選び方の A/B (plan §5.1 #7「次の A/B (事前登録)」、codex diagnose 2026-10-12 の受理の諮問) の判定に使う断面ごとの条件。
+
+    区間 $x\ge x_{lo}$ の各断面で:
+      - `sens`: 帯位置の感度 $u\le$ accept_rel (登録の倍率すべてで有限)
+      - `main_stop`: 主系列の帯が停止条件 (`_stop_ok`) をすべて満たす
+      - `sens_stop`: 感度帯 (全倍率) が停止条件をすべて満たす
+      - (band_select="edge" のときだけ) `edge_found`: 局所縁 $y^\ast$ (`edge_y_star`、平滑化の前) が有限、
+        `band_outside_edge`: 最終の帯の下端 $y_b\ge y^\ast$ (帯が局所縁の外)
+    `all_pass` = 全条件を区間の全断面で満たす (A/B の当てはめは親が事前登録に対して行う)。edge のときは平滑化の前後の縁の位置
+    (局所 $y^\ast$、移動中央値、P-spline + 端の保持、$y_b=c\cdot$平滑縁) と端の保持の区間 (`held`) も断面ごとに返す
+    (`edge_detail` が要る — `return_ladders=True` で抽出する)。"""
+    st = out["settings"]
+    x = np.asarray(out["x"], dtype=float)
+    reg = x >= x_lo
+    unc = out["uncertainty"] if (isinstance(out.get("uncertainty"), dict) and out["uncertainty"].get("computed")) else \
+        extraction_uncertainty(out, accept_rel=accept_rel, x_lo=x_lo)
+    u = np.asarray(unc["u"], dtype=float)
+    crit = {"sens": np.isfinite(u) & (u <= accept_rel)}
+    main = _stop_ok(out["band_slope"], out["band_rms"], out["band_deficit_share"], out["band_ratio_a"], out["alpha"],
+                    out["delta_r_raw"], out["reason"], st)
+    crit["main_stop"] = np.logical_and.reduce(list(main.values()))
+    facs = [float(f) for f in st["yb_sens_factors"]]
+    sens_parts = {}
+    for k, f in enumerate(facs):
+        sens_parts[f] = _stop_ok(out["yb_sens_band_slope"][:, k], out["yb_sens_band_rms"][:, k], out["yb_sens_band_deficit_share"][:, k],
+                                 out["yb_sens_band_ratio_a"][:, k], out["yb_sens_alpha"][:, k], out["delta_r_sens_yb"][:, k],
+                                 out["yb_sens_reason"][:, k], st)
+    crit["sens_stop"] = np.logical_and.reduce([np.logical_and.reduce(list(sp.values())) for sp in sens_parts.values()])
+    edge = None
+    if st.get("band_select") == "edge":
+        ys = np.asarray(out["edge_y_star"], dtype=float)
+        yb = np.asarray(out["band_y_b"], dtype=float)
+        crit["edge_found"] = np.isfinite(ys)
+        crit["band_outside_edge"] = np.isfinite(ys) & (yb >= ys)
+        ed = out.get("edge_detail")
+        if ed is not None:
+            ex = np.asarray(ed["x"], dtype=float)
+            pos = np.clip(np.searchsorted(ex, x), 0, len(ex) - 1)
+            if not np.array_equal(ex[pos], x):
+                raise ValueError("edge_detail の x が抽出の断面と対応しない")
+            y_ref = np.asarray(ed["y_ref"], dtype=float)[pos]
+            edge = {"x": x, "y_star": ys, "y_ref": y_ref, "y_edge_median": y_ref * np.exp(np.asarray(ed["kappa_med"], dtype=float)[pos]),
+                    "y_edge_smooth": y_ref * np.exp(np.asarray(ed["kappa_s"], dtype=float)[pos]), "y_b": yb,
+                    "c": float(st["edge"]["c"]),
+                    "held": (x < 3.0) | (x > float(ex.max()) - 3.0)}       # edge_band_positions の端の保持 (hold_lo 3、出口から 3)
+    keys = list(crit)
+    all_c = np.logical_and.reduce([crit[k] for k in keys])
+
+    def where_fail(m):
+        bad = reg & ~np.asarray(m, dtype=bool)
+        if not bad.any():
+            return {"n_fail": 0}
+        xb = x[bad]
+        return {"n_fail": int(bad.sum()), "x_first": float(xb.min()), "x_last": float(xb.max())}
+    summary = {k: where_fail(crit[k]) for k in keys}
+    summary["main_stop_parts"] = {k: where_fail(v) for k, v in main.items()}
+    summary["sens_stop_parts"] = {f"f{f:g}": {k: where_fail(v) for k, v in sp.items()} for f, sp in sens_parts.items()}
+    summary["all"] = where_fail(all_c)
+    return {"region": f"x >= {x_lo:g}", "n_region": int(reg.sum()), "accept_rel": accept_rel, "factors": facs,
+            "criteria": keys, "all_pass": bool(np.all(all_c[reg])), "summary": summary,
+            "crit": crit, "all": all_c, "main_parts": main, "sens_parts": sens_parts, "edge": edge}
+
+
 def station_values(x, v, stations=STATIONS) -> dict:
     """代表 x (線形補間) と出口 (最後の断面) の値。"""
     x = np.asarray(x, dtype=float); v = np.asarray(v, dtype=float)

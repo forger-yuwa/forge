@@ -184,7 +184,28 @@ u_ok, u_ng = o_new["uncertainty"], o3["uncertainty"]
 check("(3) 受理の判定: 外の倍率 (1.5, 2.0) だけなら受理、0.3 を入れると不受理と理由 yb_sens",
       u_ok["accepted"] and not u_ng["accepted"] and u_ng["n_over"] > 0 and any("yb_sens" in r for r in o3["reason"]),
       f"外のみ u_max {u_ok['u_max']:.4f} / 0.3 込み u_max {u_ng['u_max']:.3f}")
-check("(3) 既定の抽出器は帯位置の感度の鍵を足さない", "delta_r_sens_yb" not in o_old and "yb_sens_factors" not in o_old["settings"])
+check("(3) 既定の抽出器は帯位置の感度の鍵を足さない", "delta_r_sens_yb" not in o_old and "yb_sens_factors" not in o_old["settings"]
+      and not any(k.startswith("yb_sens_") or k == "band_ratio_a" for k in o_old))
+
+# (3b) 帯の診断と A/B の判定 (plan §5.1 #7「次の A/B (事前登録)」)
+same_diag = all(np.array_equal(o3["yb_sens_" + k][:, 1], o3[k]) for k in ("band_slope", "band_rms", "band_deficit_share", "band_ratio_a", "alpha"))
+check("(3b) 感度帯の診断: 倍率 1.0 の列は主系列の帯の診断とビット一致", same_diag and o3["yb_sens_band_y_b"].shape == (len(o3["x"]), 3)
+      and np.array_equal(o3["yb_sens_band_y_b"][:, 1], o3["band_y_b"]))
+acc_ok = bd.band_acceptance(o_new)
+acc_ng = bd.band_acceptance(o3)
+check("(3b) A/B の判定: 外の倍率だけ (1.5, 2.0) は全条件を満たし、0.3 倍は感度と感度帯の停止条件で落ちる",
+      acc_ok["all_pass"] and not acc_ng["all_pass"] and acc_ng["summary"]["sens"]["n_fail"] > 0
+      and acc_ng["summary"]["sens_stop_parts"]["f0.3"]["slope"]["n_fail"] > 0 and acc_ng["summary"]["main_stop"]["n_fail"] == 0
+      and "edge_found" not in acc_ok["criteria"],
+      f"0.3 倍の帯の傾き不成立 {acc_ng['summary']['sens_stop_parts']['f0.3']['slope']['n_fail']} 断面")
+o_e = bd.extract_bell(ns3, eu3, yb_sens_factors=(0.75, 1.5, 2.0), band_select="edge", return_ladders=True)
+acc_e = bd.band_acceptance(o_e)
+E = acc_e["edge"]
+check("(3b) edge の判定: 局所縁・帯が縁の外・平滑化の前後の縁の位置・端の保持を断面ごとに返す",
+      {"edge_found", "band_outside_edge"} <= set(acc_e["criteria"]) and E is not None
+      and np.array_equal(E["y_b"], o_e["band_y_b"]) and np.allclose(E["y_b"], E["c"] * E["y_edge_smooth"], rtol=1e-12)
+      and np.array_equal(E["held"], (o_e["x"] < 3.0) | (o_e["x"] > o_e["x"].max() - 3.0)) and np.all(np.isfinite(E["y_star"])),
+      f"all_pass {acc_e['all_pass']}、不成立 " + ", ".join(f"{k} {acc_e['summary'][k]['n_fail']}" for k in acc_e["criteria"]))
 
 # (4) ①の既定がビット同一
 base_ds = load_base("design/forge_design/metrics/deltastar.py", "forge_design.metrics._deltastar_base")
