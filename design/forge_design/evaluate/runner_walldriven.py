@@ -22,7 +22,7 @@ from ..geometry.wall_walldriven import WallDrivenCFDWall, WallDrivenThroatRegion
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic
-from .runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
+from .runner import run_converter, FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
 from .runner_wt import _bcond, _config_euler, _config_euler_node
 
 
@@ -83,8 +83,7 @@ def prepare(problem_path, run_dir, nsteps=None) -> dict:
     (run_dir / "probe.yaml").write_text(PROBE_STUB)
     # 品質検査は cell 変換の一時コピーで (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(_config_euler(p, n, out_int, 4.0, 1))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                         "nozzle_qc.h5"], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
@@ -95,8 +94,7 @@ def prepare(problem_path, run_dir, nsteps=None) -> dict:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node 変換 (node config を書いてから変換 — 必須) + 等エントロピー IC
     (run_dir / "solverConfig.yaml").write_text(_config_euler_node(p, n, out_int, 4.0, 1))
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp)
     info = {"chain": "walldriven_w3", "discretization": "node", **diag,

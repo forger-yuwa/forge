@@ -43,7 +43,7 @@ from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, PW_UPSTREAM_DEFAULT, 
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
-from .runner import FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
+from .runner import run_converter, FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
 from .runner_wt import (_bcond, _config_euler, _config_euler_node,
                         _config_sst_node)
 
@@ -843,8 +843,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     # 品質検査は cell 変換の一時コピー (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(m_eu.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
@@ -860,8 +859,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if implicit_relax is not None:
         cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
     mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
@@ -1568,8 +1566,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
@@ -1582,8 +1579,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 当てる前の設定で行い、本段の設定 (cfg_main) への切り替えは最後に行う (§5.1 #30)
     cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
     mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
