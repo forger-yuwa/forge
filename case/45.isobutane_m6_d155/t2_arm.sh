@@ -20,7 +20,9 @@ grep -q "lineDtDirectionalCap: 1.0, " $SRC/solverConfig.yaml || die "元の run 
 mkdir $R || die "$R が既にある"
 cp $SRC/*.yaml $R/ && cp _tr/q32_init.h5 $R/nozzle.h5 || die "複製"
 sed -i 's/nStepOuter: 30000}/nStepOuter: 170000}/; s/outStepInterval: 500/outStepInterval: 2500/' $R/solverConfig.yaml
-[ "$(diff $SRC/solverConfig.yaml $R/solverConfig.yaml | grep -c '^[<>]')" = 2 ] && grep -q "nStepOuter: 170000}" $R/solverConfig.yaml && grep -q "outStepInterval: 2500" $R/solverConfig.yaml || die "設定の書き換え (2 行だけのはず)"
+# 差は 2 行の変更 = diff の < と > が 4 行で、どれも nStepOuter か outStepInterval の行 (2026-10-12: 最初は 2 と決め打ちして止まった)
+DL=$(diff $SRC/solverConfig.yaml $R/solverConfig.yaml | grep '^[<>]')
+[ "$(echo "$DL" | wc -l)" = 4 ] && [ -z "$(echo "$DL" | grep -v -e 'nStepOuter: ' -e 'outStepInterval: ')" ] && grep -q "nStepOuter: 170000}" $R/solverConfig.yaml && grep -q "outStepInterval: 2500$" $R/solverConfig.yaml || die "設定の書き換え (2 行だけのはず)"
 KD=""; [ $P = fp64 ] && KD="--keep-src-dtype"
 python3 $TL/restart_field.py $SRC/res_30000.h5 $R/nozzle.h5 $KD --dst-run $R --forge $BIN > $R/restart.log 2>&1 || die "restart_field.py"
 grep -q "VERDICT: OK (9 量を移した、SRC とビット一致)" $R/restart.log || die "restart_field の VERDICT が 9 量のビット一致でない: $(grep VERDICT $R/restart.log)"
