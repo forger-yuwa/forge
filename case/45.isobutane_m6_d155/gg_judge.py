@@ -69,7 +69,7 @@ def compare(c, r):
     re_ = b["r_exit"][-1]; rr = a["r_exit"] / re_
     m95 = (rr <= 0.95); m95[0] = False; m80 = (rr <= 0.8); m80[0] = False
     dM = a["M_exit"] - b["M_exit"]
-    res["M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)"] = float(np.max(np.abs(dM[m95]))); res["M_exit 平均 |ΔM| (r/r_e ≤ 0.8)"] = float(abs(np.mean(dM[m80]))); res["M_exit 軸の行の ΔM (記録)"] = float(dM[0])
+    res["M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)"] = float(np.max(np.abs(dM[m95]))); res["M_exit 平均 |ΔM| (r/r_e ≤ 0.8)"] = float(np.mean(np.abs(dM[m80])))  # 2026-10-13 codex: |平均| でなく平均 |ΔM| (登録どおり); res["M_exit 軸の行の ΔM (記録)"] = float(dM[0])
     ok &= res["M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)"] <= 0.002 and res["M_exit 平均 |ΔM| (r/r_e ≤ 0.8)"] <= 0.001
     for k in ("mdot_in", "mdot_out", "Hdot_in", "Hdot_out"):
         v = 100 * (float(a[k]) - float(b[k])) / abs(float(b[k])); res[k] = v; ok &= abs(v) <= 0.1
