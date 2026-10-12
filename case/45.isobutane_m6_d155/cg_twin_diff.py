@@ -22,7 +22,8 @@ idx = np.arange(N); i = idx // nj; jj = idx % nj; jw = nj - 1 - jj; x = xy[:, 0]
 xc = x.reshape(ni, nj)[:, nj - 1]; dxc = np.gradient(xc)   # 壁の列の x 間隔 (r_t)
 inner = (jw >= 1) & (jw <= nj - 2)
 reg = {"island": (x >= -6.0) & (x <= -3.25) & (jw >= 60) & (jw <= 100), "contraction": (x >= -8.0) & (x <= -2.0) & inner, "all": inner,
-       "upstream": (x < -8.0) & inner, "transition": (((x >= -8.0) & (x <= -7.5)) | ((x >= -2.5) & (x <= -2.0))) & inner}
+       "upstream": (x < -8.0) & inner, "transition": (((x >= -8.0) & (x <= -7.5)) | ((x >= -2.5) & (x <= -2.0))) & inner,
+       "fixed95": (x >= -9.5) & (x <= -2.0) & inner}   # §4.76 の主指標の固定領域
 rec = {"step": step, "ni": ni, "nonfinite": int(sum(np.count_nonzero(~np.isfinite(X[k])) for X in (B, P) for k in ("T", "ro", "roe")))}
 for rn, m in reg.items():
     for k in ("T", "ro", "roe"):
