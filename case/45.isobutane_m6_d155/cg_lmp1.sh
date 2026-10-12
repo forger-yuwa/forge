@@ -26,14 +26,14 @@ for r in $R $L; do
   grep -q "VERDICT: OK (9 量を移した、SRC とビット一致)" $r/restart.log || { echo "$r: 移した量が想定と違う" >> $LOG; exit 1; }
   sed -i "s/nStepOuter: 60000}/nStepOuter: $STEPS}/; s/output: {level: 1, extraFields: \[res_ro\]}/output: {level: 1, extraFields: $EXTRA}/" $r/solverConfig.yaml
 done
-sed -i "s/deltaT: {lineDtDirectionalCap: 50.0, /deltaT: {lineDtDirectionalCap: 50.0, lowMachPrecond: 1, /" $L/solverConfig.yaml
-# 設定の検査: R と L の差は lowMachPrecond の 1 行だけ、R にはこのキーが無い (既定 0)
+sed -i "s/lowMachPrecond: 0, /lowMachPrecond: 1, /" $L/solverConfig.yaml   # 元の設定は deltaT に lowMachPrecond: 0 を持つ (キーを足すと 2 重になる)
+# 設定の検査: R と L の差は lowMachPrecond の値の 1 行だけ (R は 0、L は 1、どちらもキーは 1 個)
 dRL=$(diff $R/solverConfig.yaml $L/solverConfig.yaml | grep -c '^>')
-[ "$dRL" = 1 ] && [ "$(grep -c lowMachPrecond $R/solverConfig.yaml)" = 0 ] && [ "$(grep -c 'lowMachPrecond: 1, ' $L/solverConfig.yaml)" = 1 ] \
+[ "$dRL" = 1 ] && [ "$(grep -o lowMachPrecond $R/solverConfig.yaml | wc -l)" = 1 ] && [ "$(grep -o lowMachPrecond $L/solverConfig.yaml | wc -l)" = 1 ] && [ "$(grep -c 'lowMachPrecond: 0, ' $R/solverConfig.yaml)" = 1 ] && [ "$(grep -c 'lowMachPrecond: 1, ' $L/solverConfig.yaml)" = 1 ] \
   && grep -q "nStepOuter: $STEPS}" $R/solverConfig.yaml && grep -q "volume\]" $R/solverConfig.yaml \
   && grep -q "implicitThermalJacobian: 5, lineImplicit: 1, lineDtDirectional: 1," $R/solverConfig.yaml && diff $R/bcondConfig.yaml $L/bcondConfig.yaml > /dev/null \
   || { echo "設定の差が想定と違う (R-L $dRL 行) (中止)" >> $LOG; exit 1; }
-echo "R と L の差は lowMachPrecond の 1 行 (R は既定 0)" >> $LOG
+echo "R と L の差は lowMachPrecond の値の 1 行 (R 0、L 1)" >> $LOG
 PIDS=()
 for r in $R $L; do
   ( export FORGE_BIN=$F7_64; bash $RC $C45/$r > $r/run_case_stdout.log 2>&1; echo $? > $r/RUN_RC ) &
