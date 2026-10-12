@@ -1,0 +1,181 @@
+{
+ "undecidable": [],
+ "arms": {
+  "S_g0c": {
+   "run": "run_0804_sp_g0c",
+   "status": "REACHED",
+   "reach_step": 80000
+  },
+  "S_g0": {
+   "run": "run_0805_sp_g0",
+   "status": "REACHED",
+   "reach_step": 77500
+  },
+  "T2a": {
+   "run": "run_0752_t2_d1",
+   "status": "REACHED",
+   "reach_step": 142500
+  },
+  "T2b": {
+   "run": "run_0754_t2_d2",
+   "status": "REACHED",
+   "reach_step": 142500
+  }
+ },
+ "pairs": {
+  "S_g0c/T2a": {
+   "theta_r_40": 0.07260803669195927,
+   "theta_r_70": 0.06440073954369419,
+   "theta_r_94": 0.058692925960105134,
+   "delta_loc_40": -0.006775598061057203,
+   "delta_loc_70": -0.0008275295674519801,
+   "delta_loc_94": -0.0008834558394065042,
+   "Q_w_proxy": -0.03840736663084966,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.6602368716046358,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.34231775417103416,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0004705585978355131,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.2494840626930774e-05,
+   "M_exit 軸の行の ΔM (記録)": -2.4515449473128115e-05,
+   "mdot_in": 0.002277441841732447,
+   "mdot_out": 0.002480217279218619,
+   "Hdot_in": 0.002501680782260055,
+   "Hdot_out": -0.001033857223532318,
+   "許容内": true
+  },
+  "S_g0c/T2b": {
+   "theta_r_40": 0.07259902227742145,
+   "theta_r_70": 0.06439989982419557,
+   "theta_r_94": 0.058685518851431674,
+   "delta_loc_40": -0.006785826845925842,
+   "delta_loc_70": -0.000831629439512447,
+   "delta_loc_94": -0.0008767851071841257,
+   "Q_w_proxy": -0.03846158501753189,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.5902538759045125,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.2933167227943224,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0004705160455085178,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.229412170613344e-05,
+   "M_exit 軸の行の ΔM (記録)": -2.3485744226725558e-05,
+   "mdot_in": 0.0021337473666497384,
+   "mdot_out": 0.002486023348628885,
+   "Hdot_in": 0.002359719598207815,
+   "Hdot_out": -0.0010263667689512463,
+   "許容内": true
+  },
+  "S_g0/T2a": {
+   "theta_r_40": 1.229878147009913,
+   "theta_r_70": 1.0564661275387202,
+   "theta_r_94": 0.9461282931011883,
+   "delta_loc_40": -0.30177079679053276,
+   "delta_loc_70": -0.06910077736707027,
+   "delta_loc_94": -0.03357017011955483,
+   "Q_w_proxy": 0.8473116060994601,
+   "q_w_proxy 超過の節点": 836,
+   "q_w_proxy 最大の相対差 [%]": 14.557850348574636,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 14.858112806365487,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.007235373014672142,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 0.0003433361226663691,
+   "M_exit 軸の行の ΔM (記録)": -0.000534573765331281,
+   "mdot_in": 0.04518097504158381,
+   "mdot_out": 0.03199420832312727,
+   "Hdot_in": 0.04541110654395377,
+   "Hdot_out": -0.023891868540441688,
+   "許容内": false
+  },
+  "S_g0/T2b": {
+   "theta_r_40": 1.2298690283499405,
+   "theta_r_70": 1.0564652794940166,
+   "theta_r_94": 0.9461208202977709,
+   "delta_loc_40": -0.30178099539893255,
+   "delta_loc_70": -0.06910487443999176,
+   "delta_loc_94": -0.0335635015677949,
+   "Q_w_proxy": 0.8472569073057286,
+   "q_w_proxy 超過の節点": 836,
+   "q_w_proxy 最大の相対差 [%]": 14.557660495071683,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 14.858135768430994,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.007235330462345146,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 0.0003431354037455718,
+   "M_exit 軸の行の ΔM (記録)": -0.0005335440600848784,
+   "mdot_in": 0.04503721891789829,
+   "mdot_out": 0.032000016106097845,
+   "Hdot_in": 0.04526908444669651,
+   "Hdot_out": -0.02388437979804727,
+   "許容内": false
+  }
+ },
+ "timing": {
+  "S_g0c": {
+   "T_reach_s": 2448.5147619247437,
+   "per_step_ms": 30.573864032731468,
+   "exclusive": true,
+   "others": [],
+   "n_end": 80000,
+   "samples": 85
+  },
+  "S_g0": {
+   "T_reach_s": 2497.132418870926,
+   "per_step_ms": 32.1838731511609,
+   "exclusive": true,
+   "others": [],
+   "n_end": 77500,
+   "samples": 87
+  }
+ },
+ "records": {
+  "S_g0c check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_roe     : init=1.37e+02 peak=1.97e+02 fin=4.81e-01 drop= 2.5dec flat     <-- STALLED (plateau)",
+    "rms_roK     : init=9.34e-04 peak=2.47e-03 fin=1.66e-04 drop= 1.2dec flat     <-- STALLED (plateau)",
+    "rms_roOmega : init=6.44e+04 peak=9.02e+04 fin=1.09e+03 drop= 1.9dec flat     <-- STALLED (plateau)"
+   ]
+  },
+  "S_g0c check_quasisteady (末尾 2 万 step)": [
+   "theta_r_40      : tail mean=0.0772  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1141  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1269  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.212e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+  ],
+  "S_g0 check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_ro      : init=3.13e-05 peak=3.76e-05 fin=2.51e-05 drop= 0.1dec flat     <-- STALLED (plateau)",
+    "rms_roUx    : init=1.78e-03 peak=2.16e-03 fin=1.43e-03 drop= 0.1dec flat     <-- STALLED (plateau)",
+    "rms_roUy    : init=2.32e-03 peak=2.81e-03 fin=1.90e-03 drop= 0.1dec flat     <-- STALLED (plateau)",
+    "rms_roe     : init=1.92e+01 peak=2.32e+01 fin=1.54e+01 drop= 0.1dec flat     <-- STALLED (plateau)",
+    "rms_roK     : init=8.95e-04 peak=2.12e-03 fin=1.56e-03 drop= 0.3dec falling  <-- still converging",
+    "rms_roOmega : init=1.49e+02 peak=2.55e+02 fin=1.95e+02 drop= 0.3dec flat     <-- STALLED (plateau)",
+    "rms_roY0    : init=2.86e-05 peak=3.44e-05 fin=2.30e-05 drop= 0.1dec flat     <-- STALLED (plateau)",
+    "rms_roY1    : init=2.69e-06 peak=3.23e-06 fin=2.15e-06 drop= 0.1dec flat     <-- STALLED (plateau)"
+   ]
+  },
+  "S_g0 check_quasisteady (末尾 2 万 step)": [
+   "theta_r_40      : tail mean=0.07805  drift=0.1%/tail  fluct=0.2%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1152  drift=0.1%/tail  fluct=0.1%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.128  drift=0.0%/tail  fluct=0.1%            DRIFTING",
+   "Q_w             : tail mean=9.291e+06  drift=0.1%/tail  fluct=0.2%        DRIFTING"
+  ]
+ },
+ "verdict": "G0c だけが今回の出力要件を満たした (G0 は 停止したが出力要件を外す)。速度の倍率は出さない。G0 の記録の時間 2497.132418870926 s"
+}
