@@ -1507,6 +1507,18 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 - **やらないこと**: `--drop` を緩めること、STEADY を残差の合格の代わりにすること、G0c の ρ の残差の低下だけで「停滞しない」と言うこと、T2 の結果 B を書き換えること。
 - **所要**: 3 本同時で、上限 50 の G0c は数万 step で到達する見込み (§6.52 で 30,000 step に 3.6〜3.8 桁)、上限 1 は G0 と同じく 15〜20 万 step かかりうる (3 本同時で最大 4〜5 時間)。
 
+### 6.59 事前登録: §5.1 #26 (前処理のカーネルの node の行の処理の移植) の回帰 R1〜R3 (2026-10-13、codex diagnose `2026-10-12-precond-port-diagnose.md` の合格条件、実行前)
+
+- **バイナリ**: 移植の前 (`2fe05af8`) と後 (`e224ae11`) を、B の同じソースのパス `~/forge-port` で float・FP64 にクリーンビルド (`port_build.sh`、記録 `port_build.log`)。パスが違うと命令の並びが変わりうる (implementer の注意)。
+- **再実行の差の扱い**: §6.57 で FP64 の同じバイナリの再実行でも右辺が 1e-11 程度ずれた (GPU の加算順)。そのため R1・R3 の「ビット不変」は、移植の前の 2 本 (a・b) と後の 1 本を比べ、全量で max|後 − 前a| ≤ max|前b − 前a| を合格とする (前の 2 本がビット一致なら後もビット一致を求める)。
+- **R1** (case/45、`lowMachPrecond 0` の経路が変わらない): G0・`_tr/q32_init.h5`、point (`run_0713_pt_d1` の設定) と B0 (`run_0717_c50_d1` の設定) の各 10 step、float と FP64。`case/45.isobutane_m6_d155/run_0763〜0774` (`_r1_<pt|b0>_<f32|fp64>_<pre|post>`)。比べる量: res_10 の VALUE の全浮動小数点の量と残差の履歴の rms 列。
+- **R2** (case/45、前処理の経路の境界の修復): point・FP64・`lowMachPrecond 3`・`precondEps 1.0` (β = 1)・1 step・`FORGE_DIAG_STAGE_DUMP`。移植の前 2 本・後 2 本と、移植の後の P0 (`lowMachPrecond 0`・`precondEps 1.0`) 1 本。`run_0775〜0779` (`_r2_p<3|0>_<pre|post>`)。
+  - 結果 A (修復の効果を支持): (i) 移植の後の P3 で拘束の成分 (軸の ρv、壁の ρu・ρv、強いピンの等温壁の ρE) の max|d| が 0、かつ (ii) 入口・出口の境界の節点の各成分で、移植の後の P0 に対する相対差 e が e_前 − e_後 > 10 × 再実行の幅。結果 B: 拘束の違反が残るか凍結が改善しない (この移植だけで症状を説明できるという仮説を退け、試験 P の長い計算へ進まない)。
+  - 移植の後も P0 と P3 に残る差 (軸でない節点の行 2 の χ_hoop、解く精度 float 対 flow_float、Jacobian の作り方) は領域ごとに記録だけ。β = 1 では γ = 0 なので g[row] = 0 は確かめられない (単体試験 `test_precond_node_rows.cu` の (1) が代わり)。
+- **R3** (case/48、CPG・node・`lowMachPrecond 0`): `_smoke` の設定と入力 (`mesh_init.h5`) の 10 step、float と FP64。`case/48.flat_plate_cooled_m4/run_0065〜0070` (`_r3_<f32|fp64>_<pre|post>`)。合格の式は R1 と同じ。
+- 台本 `port_reg.sh` (1 本ずつ逐次、GPU は試験 G と共有)、判定 `port_reg_an.py` → `_band_ab/cold_pair/port_reg_judge.json`。
+- **全体の合格**: R1・R3 合格かつ R2 結果 A → §5.1 #26 を完了とし、試験 P (`lowMachPrecond 3` で収束の速さ) を codex に諮って登録し直す。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -1634,3 +1646,4 @@ codex の勧めどおり一度に変えず、4 段に分けて各段で V2 を�
 - `2026-10-12` — 移植の計画を codex に諮った (`notes/reviews/2026-10-12-precond-port-diagnose.md`、全件採用): TP の出口の修正は取り込み済みと訂正、前処理のカーネルの node の行の処理はいまの標準の経路の仕様に合わせる、`speciesPrecondDt` は化学種の経路だけ、合格条件 R1〜R3 を §5.1 #26 に書いた。
 - `2026-10-12` — 試験 G を codex に 2 回諮り (`2026-10-12-g0c-stop-compare-diagnose.md`・`-2-diagnose.md`)、停止規則での出力の互換性の試験として §6.58 に事前登録した (`run_0760〜0762`)。
 - `2026-10-13` — §5.1 #26 を実装した (implementer、commit 下)。前処理のカーネルに node の行の処理、`speciesPrecondDt` と `dt_local_sp`。float・FP64 のビルドと単体試験は PASS、前処理なしの経路は SASS で移植前と同一。R1〜R3 は AWS で。
+- `2026-10-13` — §5.1 #26 の回帰 R1〜R3 を §6.59 に事前登録した (`case/45` の `run_0763〜0779`、`case/48` の `run_0065〜0070`)。
