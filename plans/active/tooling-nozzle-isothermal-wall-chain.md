@@ -297,7 +297,18 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
     延長後の θ の比 (`theta_run_0183_*.npz`) は x = 40 → 94 で θ_r 2.85 → 2.53、δ_loc/θ_r 0.23 → 0.32、δ_loc 0.66 → 0.80 (1 回目より θ の差がさらに大きい)。**延長しても「冷却で δ_E が 21〜27 % 薄くなり、CONTUR はどの形でもそれを再現しない」は変わらない**。
     さらに延長するか、ゲート 2・4 をどう作り直すかは未決 (諮問・ユーザ判断)。
 
-- **V-g0c-chain (§4.8、§5.1 #31、2026-10-13 起案)**: 方針は §4.8 の「検証」。諮問の後、#29・#30 の合格を確かめてから、run 名・入力の sha・予算・判定の台本をここに事前登録する。
+- **V-g0c-chain の事前登録 (§4.8、§5.1 #31、2026-10-13、codex diagnose `2026-10-13-g0c-chain-design-diagnose.md` の判別 A/B、#29・#30 の実装 (aef1627b) の後、実行前)**:
+  - **問い**: G0c・FP64・B0 の停止の時点の出力の互換性 (float plan §6.58・§6.61、登録の Q32 の起点) が、`run_0179/res_20000 → 格子をまたいで移す → S1 → S2 → 本段` という**チェーンの開始の手順**へ広がるか。変えるのは本段へ渡す開始の場の作り方だけ。
+  - **run**: `case/45.isobutane_m6_d155/run_0810_vgc_chain` (AWS B、試験 P (float plan §6.62) の後に GPU を占有して)。
+  - **コード**: B に新しい作業ツリー `~/forge-g0cchain` (この plan のブランチの、台本を commit した後の commit) を作り、その `design/` を使う。forge は `~/forge-fgeom7-fp64` (sha256 7e95e5bbd8f50c9e)、変換器は同じビルドの `convertGmshToForge` (`FORGE_BIN` から決まる、sha256 711f4438…)。Python は B の python3 (numpy 2.5.2、手元の design の venv と同じ版)。環境変数は float plan §6.61 の `sp_arm.sh` と同じ (`FORGE_CUDA_BLOCKSIZE=128`・`FORGE_OMEGA_BUDGET=1`・`FORGE_DIAG_COMMIT_LOSS=500`、ほかの `FORGE_*` は消す)。
+  - **問題**: `problem_d155_ns_prod_coldmesh_tw300_g0c.yaml` (#29) の evaluate を、`cfl_main` を外し `implicit_relax: 0.7`・`main_line: {line: dir, cap: 50, itj: 5, cfl: 4, relax: 0.7, limiter_ref: {ro: 0.8739869154, p: 387491.0573, a: 359.7712185}, extra_fields: [res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, omg_prod, omg_dest, omg_cross, omg_trans, omg_axisym, dt_local]}`・`nStepOuter: 200000`・`outStepInterval: 2500` にした `problem_d155_ns_prod_coldmesh_tw300_g0c_chain.yaml`。
+  - **入力** (A から B へ写し、sha を照合): `run_0179_ns_n012_N2_ext/res_20000.h5` (fb65c9b37d9bb475…) と設定、`_band_ab/prod_confirm/prep/` (`delta_r_initial.csv` 0bc9da5b6e8f0197…、`wall_physical.csv` 31b4fd80818b4a0c…)、Euler の参照 `run_0174_euler_v5d_M_r1` (生産の系譜の `cold_pair.py prep` と同じく `euler_ref` に渡す)。準備は `cold_pair.py prep` と同じ呼び方 (`prepare_ns(problem, run, ic_from=run_0179, delta_r_csv=…/delta_r_initial.csv, offset="radial", euler_ref=run_0174)`) で、`cfl_main` は渡さない。
+  - **前提の検査** (どれかが外れたら回さず判定不能): (1) チェーンが作った `nozzle.msh` の sha256 が G0c (285f0fa4ecc0ed1c) と一致。(2) 変換後の `nozzle.h5` の `MESH/COORD`・接続・`wall_dist` が `run_0804_sp_g0c/nozzle.h5` (= `_g0c/q32_init.h5`) とビット一致。(3) `check_mesh_quality.py --ar-max 10000` が PASS、AR > 5000 のセルの数・位置・スキューを記録。(4) `ic_from` の res の sha、移して ω の床を掛けた後の `nozzle.h5` の sha、`MAIN_STAGE_STARTED` の本段の入力の sha を記録。(5) 本段の solverConfig.yaml が B の `run_0717_c50_d1/solverConfig.yaml` と nStepOuter・outStepInterval・`mesh.axisSegmentRWeight` の明示 (ソルバの既定 1) 以外でキーごとに一致。S1・S2 にライン陰解法・ITJ・上限・リミッタの基準値・extraFields が無く、implicitRelax 0.7。(6) bcond・物性のファイル (`bcondConfig.yaml`・`species_meta.yaml`・`resolved_species_*.yaml`) が `run_0804_sp_g0c` と一致 (違えば差を記録して止める)。
+  - **実行**: チェーンの `run_staged_ns(stages="full")`。見張り (`m9_watch.py`、§6.11 の引数 `--phase line --budget 200000 --consec 2 --interval 2500 --min-points 9 --keep-tail 9`) は `MAIN_STAGE_STARTED` が出た後に本段にだけ当てる。予算は本段だけで 20 万 step (S1・S2 の 6,000 step は別枠)。見張りの停止 (m9_watch.json の REACHED) と予期しない終了 (EXEC_ERROR・DIVERGED・forge の異常終了) を分けて記録する。時刻は `sp_arm.sh` と同じく 30 秒ごとの `timing.tsv` と `START_EPOCH`。総時間 (準備・段階起動を含む) と本段の時間 (`MAIN_STAGE_STARTED` から) を分ける。
+  - **段のゲート** (記録、収束の合格は求めない): S1・S2 の正常終了、保存量の有限性・ρ > 0・P・T の妥当性、残差の履歴の非有限なし。`stage_manifest.py <run> --segments` で最後の区間が本段だけであることを確かめ、`check_convergence.py <run> --segment`。準定常は本段の末尾 2 万 step の 9 出力で §6.11 の閾値。
+  - **判定** (`vgc_judge.py`、M1〜M7 は float plan §6.58 と同じ式・許容、`sp_judge.py` の `fields`・`compare` を使う): **結果 A** = 本段が停止規則に到達し、停止の出力が T2a (`run_0752_t2_d1`)・T2b (`run_0754_t2_d2`) のそれぞれと M1〜M7 で許容内 → 「登録した開始の手順で停止規則に到達し、T2 の両方の参照との比較が許容内」(この開始の手順への適用の拡大を支持)。**結果 B** = 本段 20 万 step までに未到達・発散・どれかの許容の超過 → 拡大を退け、いまの採用の範囲 (登録の Q32 の起点) を保つ。入力の不一致・出力の欠損・見張りの誤作動は判定不能 (数値の手法の失敗に数えない)。`run_0804_sp_g0c` との近さだけで合格にしない。
+  - **言わないこと**: 定常解の一致・物理の精度・壁温の感度の保証、壁温を変えた問題・δ* ループの全 pass・別形状・float のビルドへの一括の適用、起点の違う対照との時間の比を速さの率にすること、ic_from 無しの準一次元の開始 (別の検証)。
+  - **台本**: `vgc_prep.sh` (B: 作業ツリー・入力の写し・前提の検査)、`vgc_run.sh` (準備・段階起動・見張り)、`vgc_judge.py`。
 
 ### 6.1 レビュー記録 (codex)
 
@@ -332,6 +343,7 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 
 ## 10. 変更ログ
 
+- `2026-10-13` — §6 V-g0c-chain を事前登録した (`run_0810_vgc_chain`、B、試験 P の後)。#30 は S1・S2 の implicitRelax を生産の系譜 (0.7) に合わせる併記を許すよう直した (aef1627b の後の commit)。
 - `2026-10-13` — §4.8 を codex に諮った (`notes/reviews/2026-10-13-g0c-chain-design-diagnose.md`、全件採用): メッシャの `x_respace` を採用 (端は旧実装どおり)、段の設定を分けて本段だけ B0、B0 はリミッタの基準値・出力の量まで照合、見張りは本段の通知の後、開始の場を sha で固定。§5.1 #29〜#31 を実装の仕様に直した。
 - `2026-10-13` — **§4.8 (G0c と B0 をチェーンに入れる) と §5.1 #29〜#31 を起案** (float plan §6.58・§6.61 の結果と codex の次の一手、ユーザ「よい」)。メッシャに区間の局所の並べ直し `mesh.x_respace`、本段だけ B0 にする `evaluate.main_line`、チェーンの開始の場 (`run_0179` res_20000 → 段階起動 full → 本段) からの検証。諮問の前。
 - `2026-10-08` — **壁温が頻繁に変わる前提 (§8-4、ユーザ発言) を受けて §5.1 #10〜#12 を起票**。case/45 の実測で、CONTUR の断熱壁温の式が燃焼ガスで全温を超えること (+190 K)・その式の違いで δ_r が 3〜5.5 % 動くこと・μ が NS と最大 9 % ずれること・出口合わせの k_f が壁温条件で変わることを確認した (数値は §5.1 #10、詳細は [verification-m6-axis-wave-mesh-su2](verification-m6-axis-wave-mesh-su2.md) §9 の 2026-10-08)。物性の評価の方針は codex (diagnose) に諮問中で、§4 は未反映。
