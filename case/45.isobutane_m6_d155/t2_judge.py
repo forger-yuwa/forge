@@ -115,6 +115,9 @@ for prec, runs in ARMS.items():
                 p = subprocess.run([sys.executable, str(TOOLS / "check_quasisteady.py"), str(run), "--series-csv", str(sc), "--series-cols", cols,
                                     "--tail", "1.0", "--drift", dr, "--osc", dr], capture_output=True, text=True)
                 ov = [l for l in (p.stdout + p.stderr).splitlines() if "OVERALL" in l or "VERDICT" in l or "->" in l]
-                OUT["arms"][name][f"check_quasisteady {cols}"] = ov[-1] if ov else f"(行なし) rc={p.returncode}"
+                # 2026-10-12 (codex diagnose t2-result の Minor): 総合の行だけでなく量ごとの行と区間・閾値も残す
+                per = [l.strip() for l in p.stdout.splitlines() if any(k in l for k in ("theta_r_", "Q_w")) and ":" in l]
+                OUT["arms"][name][f"check_quasisteady {cols}"] = {"overall": ov[-1] if ov else f"(行なし) rc={p.returncode}", "per_quantity": per,
+                                                                 "window_steps": [n - 20000, n], "drift_osc": dr}
                 print(f"  {name} check_quasisteady ({cols}): {OUT['arms'][name][f'check_quasisteady {cols}']}")
 o = HERE / "_band_ab/cold_pair/t2_judge.json"; o.write_text(json.dumps(OUT, indent=1, ensure_ascii=False, default=float)); print("→", o)

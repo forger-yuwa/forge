@@ -36,8 +36,30 @@
    },
    "sum_abs_res_ro_2pi": 0.2347958019320638,
    "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
-   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": "OVERALL: NOT ALL STEADY (see above)",
-   "check_quasisteady Q_w": "OVERALL: NOT ALL STEADY (see above)"
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.07714  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1268  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.216e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0002"
+   }
   },
   "run_0754_t2_d2": {
    "prec": "fp64",
@@ -75,8 +97,30 @@
    },
    "sum_abs_res_ro_2pi": 0.23730677591563382,
    "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
-   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": "OVERALL: NOT ALL STEADY (see above)",
-   "check_quasisteady Q_w": "OVERALL: NOT ALL STEADY (see above)"
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.07714  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1268  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.216e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0002"
+   }
   },
   "run_0753_t2_f1": {
    "prec": "float",
@@ -114,8 +158,30 @@
    },
    "sum_abs_res_ro_2pi": 0.3829008717410043,
    "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
-   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": "OVERALL: NOT ALL STEADY (see above)",
-   "check_quasisteady Q_w": "OVERALL: NOT ALL STEADY (see above)"
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.0771  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1267  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.217e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0002"
+   }
   },
   "run_0755_t2_f2": {
    "prec": "float",
@@ -153,8 +219,30 @@
    },
    "sum_abs_res_ro_2pi": 0.37501665910995724,
    "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
-   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": "OVERALL: NOT ALL STEADY (see above)",
-   "check_quasisteady Q_w": "OVERALL: NOT ALL STEADY (see above)"
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.0771  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1267  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.216e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0002"
+   }
   },
   "fp64 の 2 本の差 [%]": {
    "theta_r_40": 9.007874908706505e-06,
