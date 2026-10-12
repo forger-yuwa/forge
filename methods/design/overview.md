@@ -1255,6 +1255,7 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 `spec.wall_thermal`・`spec.sizing` に写す。
 
 - 長さの起点: `L_total` は設計スロート ($x=0$) から物理出口 $x_F$ まで (`Lc_mode: from_length` の定義)。
+- 壁の熱条件 (**計画中**、plan [`tooling-nozzle-wall-temperature-profile`](../../plans/active/tooling-nozzle-wall-temperature-profile.md)): 断熱 / 等温 (一様 `Tw`) / 等温 (分布 `Tw_profile: {x_m, Tw_K}`、x は実寸で原点は設計スロート、壁の全長を覆う)。分布は NS の `wallProfile` CSV と積分法の `Tw_table` に同じ表を渡す (単一ソース)。
 - スロートの曲率: `throat.curvature_radius_m` (設計壁の曲率半径の実寸) か `throat.curvature_ratio` (= `geometry.R`) を任意で与える。設計壁はスロート付近で $r_w = 1 + x^2/(2R)$ ($r_t$ 単位) で、同じ $R$ が遷音速解 (Hall) の出発線と縮流部の 5 次多項式の端の曲率に入る。無ければ雛形の $R=2$。
   `L_U` は縮流部の始まり ($x=-L_U$) から設計スロートまで、`L_pipe` はその上流の直管。
 - 物理スロート径を固定する場合、$r_t$ は `solve_rt_throat` で決まり、$r_t$ が変わると $r_t$ 単位の長さが

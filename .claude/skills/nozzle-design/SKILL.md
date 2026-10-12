@@ -26,7 +26,8 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 | 入口半径 | `inlet.radius_m` | 縮流部の上流の直管の半径 |
 | 入口長さ | `inlet.pipe_length_m` と `inlet.contraction_length_m` | **両方を指定** (直管長と縮流部長)。縮流部が長すぎると μ = L_U²/(R Δr) > 20 で単調に絞れず例外 |
 | 出口長さ | `divergent_length_m` | **設計スロート (x=0) → 物理出口**の長さ。出口の後ろの直管ではない |
-| 壁温 | `wall: {thermal: isothermal, Tw}` | 断熱なら `adiabatic` |
+| 壁温 (一様) | `wall: {thermal: isothermal, Tw}` | 断熱なら `adiabatic` |
+| 壁温 (分布) | `wall: {thermal: isothermal, Tw_profile: {s: [...], Tw_K: [...]}}` (s: 入口直管 −2→−1・縮流部 −1→0・拡大部 0→1) か `{x_m: [...], Tw_K: [...]}` (実寸、原点は設計スロート)、または `Tw_profile_csv: <カードからの相対パス>` | **長さを振るなら s** (分布が長さに追従)。表は全長を覆うこと (足りなければ止まる)。NS は `wall_profile_3.csv` (`wallProfile: 1`)、積分法は同じ表を実効の r_t で読む。run の `wall_temperature_profile.json` と CSV が正本 (書き換えると段の起動・成果物で止まる)。Fluent は `fluent/wall_temperature.prof` (壁面中心の値; Fluent での読み込みは未確認) |
 | ガス | `gas: {preset: air}` か `gas: {species: {...}}` | 空気の M5 以上は出口の N₂ 液化を生成器が警告する |
 | 寸法の許容差 | `tolerances: {length_m, diameter_m}` | 既定値は仮。ユーザの実用公差を聞いて書く (出荷ゲートの基準) |
 
