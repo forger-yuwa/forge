@@ -1,5 +1,5 @@
 r"""STEP の壁曲線から gmsh で「同じ構造」の 2D 軸対称メッシュを作り直す単体スクリプト
-(plans/active/tooling-nozzle-wt-deliverables.md §4.3・§6 V3)。
+(plans/accepted/tooling-nozzle-wt-deliverables.md §4.3・§6 V3)。
 
 forge にも forge_design にも依存しない (標準ライブラリ・numpy・gmsh だけ)。成果物フォルダにそのまま写して配る。
 

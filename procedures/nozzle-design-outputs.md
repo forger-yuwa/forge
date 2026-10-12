@@ -79,7 +79,7 @@ PowerPoint にまとめる (2026-10-05 ユーザ指示でルール化)。設計�
 ## 成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 から
 
 報告 (pptx) とは別に、形状とメッシュを外で使うための成果物を最終 NS の run から出す
-(plan [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md)、手順は
+(plan [`tooling-nozzle-wt-deliverables`](../plans/accepted/tooling-nozzle-wt-deliverables.md)、手順は
 [`nozzle-design-workflow.md`](nozzle-design-workflow.md) §1 ⑤)。
 
 | フォルダ | 中身 | 使い方の注意 |

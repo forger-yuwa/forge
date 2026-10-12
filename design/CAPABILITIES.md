@@ -44,7 +44,7 @@
 | Gmsh `.geo` | `procedures/calculation-workflow.md` | ✅ | 固定形状評価向き。プリューム付きテンプレ = `case/23.axi_nozzle/mesh_axisym_m4/axi_nozzle_2d_publicrao_plume.geo` |
 | Fluent CFF HDF5 | `tools/fluent_h5_to_forge.py` | ✅ | tet+prism/非直交 hex とも検証済み (fan 完全収束, StaticMixer 完走)。**レシピ厳守**: 1 次で投入 / IC を入口流速に整合 / 陰解法 / `space.pRef`=動作静圧 / `outlet_statPress`+逆流 Pt,Tt (calculation-workflow「Fluent メッシュの取り込み」が正本)。多面体は可視化不可・単位 `--scale`・`mapping.yaml` 整備。設計ループ (dv→再メッシュ) には未接続 = 固定形状評価用 |
 | Netgen/FreeCAD | case/37 ブリッジ (msh4.1)、`.venv-mesh` | 🔧 | 3D 複雑形状 (ピントル)。boolean の罠は case/37 メモ参照 |
-| 成果物の書き出し (STEP・gmsh・Fluent・Excel) | `export/deliverables.py` (+ `wall_step`・`mesh_structure`・`rebuild_from_step`・`fluent_msh`・`wall_tables`・`dimension_gate`) | 🔧 | axismach の最終 NS (`physical_wall_repr: single_bspline`) から。Fluent は 2D 軸対称の `.msh` (c0 = n0→n1 の左) と CGNS、Fluent での読み込みはユーザ確認待ち。plan [`tooling-nozzle-wt-deliverables`](../plans/active/tooling-nozzle-wt-deliverables.md) |
+| 成果物の書き出し (STEP・gmsh・Fluent・Excel) | `export/deliverables.py` (+ `wall_step`・`mesh_structure`・`rebuild_from_step`・`fluent_msh`・`wall_tables`・`dimension_gate`) | 🔧 | axismach の最終 NS (`physical_wall_repr: single_bspline`) から。Fluent は 2D 軸対称の `.msh` (c0 = n0→n1 の左) と CGNS、Fluent での読み込みはユーザ確認待ち。plan [`tooling-nozzle-wt-deliverables`](../plans/accepted/tooling-nozzle-wt-deliverables.md) |
 | 実寸の要求カード → problem YAML | `intake/wt_card.py` (`forge.wt_card/v1`) | 🔧 | 風洞ノズル (axismach)。物理スロート径なら r_t を解いて長さを割り直す。格子の第 1 層は初期見積もり (合否は NS 後の `check_wall_resolution.py`) |
 
 共通の罠: node 計算のメッシュは **node config で変換必須** / RANS メッシュは no-slip

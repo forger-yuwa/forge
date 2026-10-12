@@ -155,6 +155,15 @@ def main() -> int:
         check(f"(R2-M2) ring_area を 1.01 倍 → 積分の整合 FAIL (相対 {ex['cfd_integral']['rel_to_sum_abs_Q']:.3g})・MANIFEST FAIL・excel が failed_parts に入る",
               not ex["cfd_integral"]["pass"] and man["verdict"] == "FAIL" and "excel" in man["failed_parts"])
         check("(R2-M2) 積分の整合が FAIL なら thermal_use も FAIL", ex["thermal_use"]["verdict"] == "FAIL", ex["thermal_use"].get("reason"))
+    # ---- codex result レビュー 3 回目 m1: 単体の CLI が弦の検査を渡し、正常な入力で PASS ----
+    import subprocess as _sp
+    with tempfile.TemporaryDirectory(prefix="deliv_cli_") as td4:
+        cpth = Path(td4) / "card.yaml"; cpth.write_text(yaml.safe_dump(card_ok))
+        q = _sp.run([sys.executable, "-m", "forge_design.export.dimension_gate", str(FIX / "step" / "wall_physical.step"),
+                     "--card", str(cpth), "--msh", str(FIX / "nozzle.msh")], capture_output=True, text=True,
+                    cwd=str(Path(__file__).resolve().parents[1]))
+        check("(R3-m1) 単体の寸法ゲート CLI (--msh あり) が正常な入力で PASS・終了 0", q.returncode == 0 and "VERDICT: PASS" in q.stdout,
+              q.stdout.strip().splitlines()[-1] if q.stdout.strip() else q.stderr[-200:])
     print(f"FAIL 件数: {fails}")
     return 1 if fails else 0
 

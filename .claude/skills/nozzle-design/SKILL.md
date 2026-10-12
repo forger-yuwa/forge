@@ -12,7 +12,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 **手順の正本は [`procedures/nozzle-design-workflow.md`](../../../procedures/nozzle-design-workflow.md)**。
 ここには AI が判断を誤りやすい点だけを置く。作業前に正本の該当節 (§1 新規設計 / §2 パラスタ〜凝縮 / §3 既存形状) を読む。
 
-## 実寸の要求から作る・成果物を出す (2026-10-13; plan [`tooling-nozzle-wt-deliverables`](../../../plans/active/tooling-nozzle-wt-deliverables.md))
+## 実寸の要求から作る・成果物を出す (2026-10-13; plan [`tooling-nozzle-wt-deliverables`](../../../plans/accepted/tooling-nozzle-wt-deliverables.md))
 
 ユーザが寸法を実寸で言ったら、**要求カード** (`forge.wt_card/v1`、例 `design/forge_design/intake/examples/m5_air_demo.yaml`) に写す。
 ユーザの言葉とキーの対応 (2026-10-12 ユーザ回答で確定):

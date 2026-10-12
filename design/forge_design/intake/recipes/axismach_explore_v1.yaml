@@ -1,5 +1,5 @@
 # 雛形 axismach_explore_v1 — 要求カード (forge.wt_card/v1) から問題 YAML を作るときの**探索段階**の構成キー。
-#   plan: plans/active/tooling-nozzle-wt-deliverables.md §4.1 6.。読み手: forge_design.intake.wt_card (card_to_problem)。
+#   plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 6.。読み手: forge_design.intake.wt_card (card_to_problem)。
 #   出典は case/45.isobutane_m6_d155 の生産の問題 problem_d155_ns_prod.yaml (以下「生産」) と、Euler の格子は
 #   problem_d155_euler_e4_recal_d0.yaml (以下「E4」; plan verification-case45-euler-total-enthalpy の E3/E4 の格子)。
 #   **設計の数値 (Pt・Tt・組成・r_t・L_c・r_inlet・L_U・L_pipe) はここに書かない** — カードから生成器が埋める。

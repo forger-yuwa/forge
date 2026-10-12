@@ -1,4 +1,4 @@
-r"""風洞ノズルの成果物一式を最終 NS の run から書き出す (plans/active/tooling-nozzle-wt-deliverables.md §4.2)。
+r"""風洞ノズルの成果物一式を最終 NS の run から書き出す (plans/accepted/tooling-nozzle-wt-deliverables.md §4.2)。
 
 `<run>/deliverables/` に次を作り、各成果物に独立の読み直し検査の結果を付ける:
 
@@ -318,7 +318,7 @@ def part_excel(run: Path, out: Path, step=None) -> dict:
     if Path(PPTX_PYTHON).exists() and hasattr(wt, "write_xlsx"):
         notes = [f"thermal_use (熱量を熱設計に使えるか): {tu_short['verdict']}  — PASS 以外なら cfd_wall の熱量を使わない",
                  f"  収束: {tu_short['convergence']['result']}  {tu_short['convergence']['verdict_line'] or tu_short['convergence']['reason'] or ''}",
-                 f"  熱量の準定常 (総熱量と 16 区間): {tu_short['quasisteady']['result']}  {tu_short['quasisteady']['verdict_line'] or tu_short['quasisteady']['reason'] or ''}",
+                 f"  熱量の準定常 (総熱量と壁の全節点の熱量の最悪; 16 区間の和は補助): {tu_short['quasisteady']['result']}  {tu_short['quasisteady']['verdict_line'] or tu_short['quasisteady']['reason'] or ''}",
                  f"  壁解像: {tu_short['wall_resolution']['result']}  {tu_short['wall_resolution']['verdict_line'] or tu_short['wall_resolution']['reason'] or ''}",
                  f"  対象の step: {tu_short['step']}"]
         res["xlsx"] = wt.write_xlsx(d / "nozzle_tables.xlsx", (d / "wall_shape_mm.csv") if (d / "wall_shape_mm.csv").exists() else None,

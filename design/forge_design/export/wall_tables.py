@@ -1,4 +1,4 @@
-r"""Excel 向けの壁の表 (plans/active/tooling-nozzle-wt-deliverables.md §4.5、§5.1 #3・#6)。
+r"""Excel 向けの壁の表 (plans/accepted/tooling-nozzle-wt-deliverables.md §4.5、§5.1 #3・#6)。
 
 - `shape_table`: 物理壁 (`wall_repr.json` の B-spline、STEP と同じ曲線) の形状表 `wall_shape_mm.csv` [mm]。
 - `cfd_wall_table`: CFD の壁節点ごとの壁面量表 `wall_cfd_nodes.csv` [SI] と状態 `wall_cfd_nodes.status.json`。

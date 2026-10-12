@@ -1,4 +1,4 @@
-r"""解析メッシュの構造ファイル `mesh_structure.json` (plans/active/tooling-nozzle-wt-deliverables.md §4.3・§6 V3)。
+r"""解析メッシュの構造ファイル `mesh_structure.json` (plans/accepted/tooling-nozzle-wt-deliverables.md §4.3・§6 V3)。
 
 run の `nozzle.msh` (`meshing/mesh2d.py` の `write_msh41_2d` が書いた msh4.1) を読み、STEP の壁曲線から gmsh で
 **同じ構造**のメッシュを作り直すための情報 (station $x_i$・半径方向の比 $s_{ij}$・接続の規則・物理名とタグ) を取り出す。

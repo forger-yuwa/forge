@@ -1243,7 +1243,7 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 
 ## 実寸の要求カードと成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 実装・検証済み
 
-計画: [`plans/active/tooling-nozzle-wt-deliverables.md`](../../plans/active/tooling-nozzle-wt-deliverables.md)。
+計画: [`plans/accepted/tooling-nozzle-wt-deliverables.md`](../../plans/accepted/tooling-nozzle-wt-deliverables.md)。
 実装: `design/forge_design/intake/wt_card.py`・`design/forge_design/export/deliverables.py` ほか。検証は case/45 の生産の壁と case/70 (M5 空気)。**Fluent での読み込みは未確認** (実物の 2D の Fluent メッシュと書式・面の向きを照合済み)。
 
 ### 要求カード (実寸入力 → problem YAML)
@@ -1293,7 +1293,9 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 `qwall` は $r$ 重みの面積で割った再構成勾配形の診断値 (流体向き正) で、正本が使えない run では符号を反転し「診断値」と明記して出す。
 正本は等温壁・定常・`interfaceDiag: 1` のときだけ値を持ち、それ以外もデータセットは NaN で出るので、熱量の列には状態
 (`valid`・`not_applicable`・`missing`・`diagnostic`・`nonfinite`) を付け、熱設計に使えるか (`thermal_use`) は収束・準定常・壁解像の判定と組で示す。
-準定常は総熱量だけでなく、壁を x の順に 16 区間に分けた**局所の熱量**の全部で見る (総熱量が一定のまま熱流束の分布が入れ替わる変化を見落とさないため)。
+準定常は総熱量だけでなく、**壁の全節点の熱量**の最悪で判定する (総熱量が一定のまま熱流束の分布が入れ替わる変化や、区間の中での入れ替わりを見落とさないため)。壁を x の順に 16 区間に分けた和は補助の診断として時系列に残す。
+幾何のリング面積との積分の整合は $|\sum q\,A_{ring} - \sum Q| / \sum |Q| \le 10^{-4}$ (面積の定義の差だけが残る) で、外れたら成果物と `thermal_use` を不合格にする。
+単体の寸法ゲート `python -m forge_design.export.dimension_gate STEP --card CARD --msh MSH` は弦の形状誤差を配布する msh と STEP から測る (`--msh` が無ければ「未判定」)。
 
 ## 評価と目的関数
 

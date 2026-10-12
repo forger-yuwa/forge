@@ -1,4 +1,4 @@
-# 要求カードの例 (forge.wt_card/v1): M5 の空気の風洞ノズル、壁温 350 K (plan plans/active/tooling-nozzle-wt-deliverables.md §5.1 #8 の
+# 要求カードの例 (forge.wt_card/v1): M5 の空気の風洞ノズル、壁温 350 K (plan plans/accepted/tooling-nozzle-wt-deliverables.md §5.1 #8 の
 # デモ)。**条件は実条件ではない**: ユーザ指示 (2026-10-13) で Tt 1250 K、Pt は出口静圧が下がりすぎないよう 3 MPa を選定
 # (semiperfect 空気で出口静温 約 222 K・静圧 約 5.1 kPa)。壁 350 K は断熱壁温 (約 1150 K) に対して強い冷却。
 # 長さ・径は実寸 [m]、圧力 [Pa]、温度 [K]。

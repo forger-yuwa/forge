@@ -1,5 +1,5 @@
 """Fluent の ASCII メッシュ (2D 軸対称) の書き出しと読み直し検査、gmsh 経由の CGNS、境界条件表
-(plans/active/tooling-nozzle-wt-deliverables.md §4.4・§6 V4)。
+(plans/accepted/tooling-nozzle-wt-deliverables.md §4.4・§6 V4)。
 
 - **面の向き**: 2D の Fluent は面 $(n_0, n_1, c_0, c_1)$ で **$n_0\\to n_1$ の進行方向の左側が $c_0$**。
   TGrid 2D の実物 (OpenFOAM-10 の elbow.msh、1,454 面) で全面がこの向きだった (plan §3)。3D の右手系の規則を $z$ に

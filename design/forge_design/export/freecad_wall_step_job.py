@@ -12,7 +12,7 @@ mode = surface: 2D の STEP (`step2d`、辺 1 本) を読み、辺を x 軸ま�
               3D の STEP (`step3d`) に書き、`MeshPart.meshFromShape(LinearDeflection, AngularDeflection)` で STL (`stl`、mm) を書く。
               書いた 3D の STEP を `Part.Shape().read()` で読み直し、面の数・妥当性・面積・bbox を返す。面積は `Shape.Area` と、
               母線のノット区間ごとに切り出した面の和 (`readback_area_knot_split_mm2`、検査にはこちらを使う; `_area_knot_split`)
-              (plans/active/tooling-nozzle-wt-deliverables.md §4.2 の cad/、case/45 の `cad_deliverables.py` の surface を一般化)。
+              (plans/accepted/tooling-nozzle-wt-deliverables.md §4.2 の cad/、case/45 の `cad_deliverables.py` の surface を一般化)。
 """
 import json
 import os

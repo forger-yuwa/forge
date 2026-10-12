@@ -1,4 +1,4 @@
-"""Fluent 書き出し器・CGNS・境界条件表の試験 (plans/active/tooling-nozzle-wt-deliverables.md §5.1 #5、§6 V4)。
+"""Fluent 書き出し器・CGNS・境界条件表の試験 (plans/accepted/tooling-nozzle-wt-deliverables.md §5.1 #5、§6 V4)。
 
 (a) 合成メッシュ (`generate_axisym_mesh` ni 11・nj 5、節点とセルを並べ替えた写し、六角形を 3 枚の四角形に割った非構造の例) で
     書いて `check_fluent_msh_2d` が全部合格。

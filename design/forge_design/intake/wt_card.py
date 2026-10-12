@@ -1,6 +1,6 @@
 r"""風洞ノズルの実寸の要求カード `forge.wt_card/v1` → 問題 YAML (`wind_tunnel_axisym_axismach`)。
 
-plan: plans/active/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §6 V1。
+plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §6 V1。
 
 カードは実寸 [m, Pa, K] で書く YAML (未知のキー・欠けたキー・型違い・負値は拒否)。生成器は
 

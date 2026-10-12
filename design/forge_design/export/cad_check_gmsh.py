@@ -1,5 +1,5 @@
 """3D の STEP (回転内面) を gmsh (OpenCascade) で読み直し、面の面積の合計と bbox を JSON で出す単体スクリプト
-(plans/active/tooling-nozzle-wt-deliverables.md §6 V2 の独立の読み直し。FreeCAD と別の読み込み経路)。
+(plans/accepted/tooling-nozzle-wt-deliverables.md §6 V2 の独立の読み直し。FreeCAD と別の読み込み経路)。
 
 forge_design に依存しない (`.venv-mesh` の python で動かす。design の venv に gmsh は無い)。単位は STEP の単位 (forge の STEP は mm)。
 

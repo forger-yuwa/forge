@@ -152,7 +152,7 @@ def read_step(step_path, u=(), revolve: bool = False, freecadcmd: str | None = N
 def write_surface(step2d, step3d, stl, linear_deflection_mm: float = 0.05, angular_deflection: float = 0.05,
                   freecadcmd: str | None = None) -> dict:
     """2D の STEP (`write_step` が書いた辺 1 本) を x 軸まわりに 360° 回した内面を 3D の STEP と STL (mm) に書く
-    (plans/active/tooling-nozzle-wt-deliverables.md §4.2 の cad/)。
+    (plans/accepted/tooling-nozzle-wt-deliverables.md §4.2 の cad/)。
     STL の弦誤差の設定は `linear_deflection_mm` [mm] と `angular_deflection` [rad] (README に書く値)。
     戻り: FreeCAD の報告 (書いた殻の妥当性・面積、3D の STEP を読み直した面の数・妥当性・面積・bbox [mm]、STL の三角形の数・面積)。
     回転面の面積の独立の検査 (gmsh) は `cad_check_gmsh.py` で別に行う。"""

@@ -1,4 +1,4 @@
-"""入力層: 実寸の要求カード → 問題 YAML (plans/active/tooling-nozzle-wt-deliverables.md §4.1)。
+"""入力層: 実寸の要求カード → 問題 YAML (plans/accepted/tooling-nozzle-wt-deliverables.md §4.1)。
 
 - `wt_card`: 風洞ノズルの要求カード `forge.wt_card/v1` の読み込み・検査と、問題 YAML (`wind_tunnel_axisym_axismach`) の生成
   (長さの r_t 単位への写し、物理スロート径からの r_t の固定点、壁解像の第 1 層と ni の初期見積もり、空気の液化の事前警告)。

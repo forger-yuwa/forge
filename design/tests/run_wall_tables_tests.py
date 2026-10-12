@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""形状表・3D STEP/STL・CFD 壁面量表・xlsx の試験 (plans/active/tooling-nozzle-wt-deliverables.md §5.1 #3・#6、§6 V2・V5)。
+"""形状表・3D STEP/STL・CFD 壁面量表・xlsx の試験 (plans/accepted/tooling-nozzle-wt-deliverables.md §5.1 #3・#6、§6 V2・V5)。
 
 1. 形状表 (fixture の生産の壁 `wall_repr.json`): 列名 ASCII・ヘッダ 1 行・両端を含む・刻み (1 mm / スロート付近 0.1 mm)・
    r が `load_wall_file` の評価と 1e-9 mm・曲率半径の符号と inf・累積側面積の最終値が ∫2πr ds (20001 点) と相対 1e-6

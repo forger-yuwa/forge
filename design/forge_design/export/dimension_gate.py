@@ -1,4 +1,4 @@
-r"""寸法の出荷ゲート (plans/active/tooling-nozzle-wt-deliverables.md §4.2a、codex 諮問 2026-10-13)。
+r"""寸法の出荷ゲート (plans/accepted/tooling-nozzle-wt-deliverables.md §4.2a、codex 諮問 2026-10-13)。
 
 配布する STEP (2D の壁曲線) とメッシュから寸法を**測り直し**、要求カード (`forge.wt_card/v1`) の値と公差で比べる。
 YAML の値 × $r_t$ の往復は単位換算の検査であって形状の検査ではないので、ここでは形状そのものを測る。
@@ -265,8 +265,10 @@ def main(argv=None) -> int:
     card = yaml.safe_load(Path(a.card).read_text())
     sd = step_dimensions(a.step, a.freecadcmd)
     md = mesh_dimensions(a.msh) if a.msh else None
+    ch = chord_from_mesh(a.step, a.msh, a.freecadcmd) if a.msh else None      # 弦の検査は必須 (--msh が無ければ未判定)
     dt = design_throat_diameter_mm(a.wall_file) if a.wall_file else None
-    res = evaluate_gate(card, sd, md, dt)
+    res = evaluate_gate(card, sd, md, dt, ch)
+    res["chord"] = ch
     res["step_dimensions"], res["mesh_dimensions"], res["design_throat"] = sd, md, dt
     txt = json.dumps(res, indent=1, ensure_ascii=False)
     if a.out:

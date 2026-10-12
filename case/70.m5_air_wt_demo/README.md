@@ -1,6 +1,6 @@
 # case/70 — M5 空気の風洞ノズルのデモ (要求カード → 問題 → 成果物一式)
 
-plan [`tooling-nozzle-wt-deliverables`](../../plans/active/tooling-nozzle-wt-deliverables.md) の検証用 (§6 V5・V7・V8)。
+plan [`tooling-nozzle-wt-deliverables`](../../plans/accepted/tooling-nozzle-wt-deliverables.md) の検証用 (§6 V5・V7・V8)。
 **条件は試験用** (ユーザの実条件ではない): 空気 (semiperfect)・**Tt 1250 K (ユーザ指示 2026-10-13)**・Pt 3.0 MPa (出口静圧が下がりすぎないよう選定: 出口 221.8 K・5.1 kPa)・出口マッハ 5・物理スロート径 50 mm・
 入口半径 150 mm・直管 0.20 m・縮流部 0.30 m・設計スロート→出口 1.20 m・等温壁 350 K。
 要求カード: `card_m5_air_demo.yaml` (`design/forge_design/intake/examples/m5_air_demo.yaml` の写し)。
