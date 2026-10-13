@@ -22,7 +22,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 | 全圧・全温 | `conditions.Pt` [Pa]・`conditions.Tt` [K] | 絶対圧 |
 | 出口マッハ数 | `M_exit` | = `spec.M_design` |
 | スロート径 | `throat.diameter_physical_m` または `throat.diameter_design_m` | **物理 (境界層込みの実際の穴) か設計 (非粘性) かを必ず聞く**。物理なら r_t は CFD 前の δ で解く |
-| スロート曲率 | `throat.curvature_radius_m` (設計壁のスロートの曲率半径 [m]) か `throat.curvature_ratio` (= 曲率半径 / r_t = `geometry.R`) | 任意。無ければ雛形の R = 2。実寸で与えると r_t を解き直すたびに割り直す。R < 0.5 は遷音速解の精度が落ちるので拒否。物理壁の曲率は境界層の分だけ違う (DIMENSIONS.json の info に STEP から測った値) |
+| スロート曲率 | `throat.curvature_radius_m` (設計壁のスロートの曲率半径 [m]) か `throat.curvature_ratio` (= 曲率半径 / r_t = `geometry.R`) | インテークで必ず聞く (無ければ雛形の R = 2 になることを伝えて了承を取る)。実寸で与えると r_t を解き直すたびに割り直す。R < 0.5 は遷音速解の精度が落ちるので拒否。物理壁の曲率は境界層の分だけ違う (DIMENSIONS.json の info に STEP から測った値) |
 | 入口半径 | `inlet.radius_m` | 縮流部の上流の直管の半径 |
 | 入口長さ | `inlet.pipe_length_m` と `inlet.contraction_length_m` | **両方を指定** (直管長と縮流部長)。縮流部が長すぎると μ = L_U²/(R Δr) > 20 で単調に絞れず例外 |
 | 出口長さ | `divergent_length_m` | **設計スロート (x=0) → 物理出口**の長さ。出口の後ろの直管ではない |
