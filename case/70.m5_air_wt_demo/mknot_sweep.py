@@ -5,7 +5,8 @@
   - 網の余裕: 特性線の網の内部の三角形の最小 sin 角・向きの反転の数 (`characteristic_topology_diagnostics`)
   - 最大壁角 θ_max [°]、設計壁の曲率の最大 |κ| と曲率の変化率の最大 |dκ/ds|・∫(dκ/ds)² ds (スロート窓の外 x > 0.25 r_t)
   - L_c・x_K・出口 x_F (長さは from_length で固定)
-usage (case dir、design/.venv-opt):  python mknot_sweep.py PROBLEM.yaml OUT.json M_K [M_K ...]
+usage (case dir、design/.venv-opt):  python mknot_sweep.py PROBLEM.yaml OUT.json [--n-axis N] M_K [M_K ...]
+  --n-axis N: geometry.n_axis_inv を N に上書き (解像度の A/B; plan tooling-nozzle-mknot-auto の諮問 2026-10-13)
 """
 import json
 import sys
@@ -21,13 +22,15 @@ sys.path.insert(0, str(C.parents[1] / "design"))
 
 
 def one(args):
-    prob_path, MK = args
+    prob_path, MK, n_over = args
     import forge_design.evaluate.runner_axismach as RA
     from forge_design.geometry.moc_diagnostics import (characteristic_topology_diagnostics, wall_curvature_diagnostics,
                                                         wall_margin_diagnostics)
     from forge_design.probdef import load_problem
     raw = yaml.safe_load(Path(prob_path).read_text())
     raw.setdefault("geometry", {})["M_knot"] = float(MK)
+    if n_over:
+        raw["geometry"]["n_axis_inv"] = int(n_over)
     raw.pop("_card", None)
     cap = {}
     orig = RA.inverse_design
@@ -55,6 +58,8 @@ def one(args):
                 "theta_max_deg": float(d["qa"]["theta_max_deg"]), "margin_deg": mg["min_mu_minus_theta_deg"], "x_at_min_margin": mg["x_at_min_margin"],
                 "min_sin_angle": float(topo.get("min_sin_angle_interior", float("nan"))),
                 "n_flip_interior": int(topo.get("n_orientation_flip_interior", -1)),
+                "n_crossings_sampled": int(topo.get("n_crossings_sampled", -1)), "pileup_pairs_interior": int(topo.get("pileup_pairs_interior", -1)),
+                "n_axis": n_axis, "qa_violations": list(d["qa"].get("violations") or []),
                 "max_kappa_down": float(wc.get("downstream_max_abs_kappa", float("nan"))),
                 "max_dkappa_ds_down": float(wc.get("downstream_max_abs_dkappa_ds", float("nan"))),
                 "J_dkappa_down": float(wc.get("downstream_J_dkappa_ds2", float("nan"))),
@@ -70,10 +75,14 @@ def one(args):
 
 
 if __name__ == "__main__":
-    prob, out = sys.argv[1], Path(sys.argv[2])
-    mks = [float(v) for v in sys.argv[3:]]
+    argv = list(sys.argv[1:])
+    n_over = None
+    if "--n-axis" in argv:
+        k = argv.index("--n-axis"); n_over = int(argv[k + 1]); del argv[k:k + 2]
+    prob, out = argv[0], Path(argv[1])
+    mks = [float(v) for v in argv[2:]]
     with ProcessPoolExecutor(max_workers=4) as ex:
-        rows = list(ex.map(one, [(prob, m) for m in mks]))
+        rows = list(ex.map(one, [(prob, m, n_over) for m in mks]))
     out.write_text(json.dumps(rows, indent=1))
     for r in rows:
         print(json.dumps(r))
