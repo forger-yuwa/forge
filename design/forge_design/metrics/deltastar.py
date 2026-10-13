@@ -339,8 +339,8 @@ def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, 
     δ_r の梯子 (y_ladders[i], d_ladders[i]) から $R(y)=\delta_r(\text{edge\_ratio}\,y)/\delta_r(y)-1$ を作り
     (log y で線形補間)、**そこから persist 段続けて** $|R|<\varepsilon$ を満たす最初の段を交点の段とし、その段と 1 つ内側の段の間を
     **格子点間の線形補間で**解いて縁 $y^*$ とする (無ければ NaN)。persist = 1 は「$|R|<\varepsilon$ を初めて満たす段」(2026-10-13 までの式)。
-    既定 persist = 4 (plan tooling-nozzle-cooled-wall-ns-settling §4.2b): 一番内側の段で R が偶然 ±ε の中に入るだけの交点を拾わない
-    (冷却壁のスロート付近で y* の有無が場のわずかな違いで切り替わっていた)。
+    既定は persist = 1。persist > 1 (opt-in) は一番内側の段で R が偶然 ±ε の中に入るだけの交点を拾わない (冷却壁のスロート付近で y* の有無が
+    場のわずかな違いで切り替わっていた) が、K = 4 は帯の 1 段の揺れを消せず不採用 (plan tooling-nozzle-cooled-wall-ns-settling §4.2b・§4.4)。
     $\kappa=\ln(y^*/y_{ref})$, $y_{ref}=\max(\delta_{in}, f\,r_w)$ を x 方向に移動中央値 (半幅 window) → 3 次 P-spline
     (ノット knot, λ) で平滑化し、$y_b=c\,y_{ref}e^{\tilde\kappa}$。NaN の断面は y_b 側をスプラインで埋める (δ_r 側の穴にしない)。"""
     persist = int(persist)
@@ -448,8 +448,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     - "edge" (2026-10-04, diagnostician 推薦 E, plan §5.1 #7a): 帯を細かい梯子 (比 edge_step) で固定して δ_r(y) を測り、
       `edge_band_positions` で縁 y* を連続推定 → x 平滑 → y_b = edge_c × 縁 に帯を固定して測る。感度欄は c×0.8 / c×1.25。
       edge_y0_shift は梯子の位相試験用 (始点の倍率)。return_ladders=True で梯子と縁を戻り値に含める (試験用)。
-      edge_persist は縁の交点に要求する持続の段数 (`edge_band_positions` の persist; 既定 4、2026-10-13 plan
-      tooling-nozzle-cooled-wall-ns-settling §4.2b。1 で 2026-10-13 までの抽出をビット同一で再現する)。
+      edge_persist は縁の交点に要求する持続の段数 (`edge_band_positions` の persist; 既定 1 = 2026-10-13 までの抽出とビット同一。
+      > 1 は opt-in、plan tooling-nozzle-cooled-wall-ns-settling §4.2b・§4.4)。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿。

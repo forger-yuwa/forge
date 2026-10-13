@@ -37,6 +37,7 @@
 | `mesh` | `ni`, `nj`, `wall_first_frac` (+ `_throat`・ブレンド)、`throat_refine`、`throat_width`、`axis_cap_frac`、`ar_max` | **NS (`prepare_ns`) の格子**。壁解像 PASS の格子を使う (§2 ⑥)。Euler には効かない (2026-10-07 から) |
 | `mesh_euler` | `mesh` と同じキー (未知のキーは例外) | **Euler (`prepare`) の格子** (2026-10-07、plan `verification-case45-euler-total-enthalpy` §4)。`mesh` からは補完しない。既定は全断面で `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし、ni × nj は 321 × 65)。**`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる** (旧格子の記録を再現するなら `mesh` の全キーを写す)。case/45 は ni 2000 × nj 97・軸方向は G1 と同じ (`throat_refine 4`・`throat_width 3`)・全域 0.005 |
 | `evaluate` | `nStepOuter`, `outStepInterval`, `cfl_main`, `tp_species`, `condensation` | 凝縮は `tp_species: split_h2o` + `condensation` |
+| `mesh`・`mesh_euler` の上限 | `max_nodes`, `max_nodes_reason` (組で書く) | **2D の節点数の上限 30 万点** (2026-10-14、plan `tooling-nozzle-mesh-size-guard`)。生成器・`prepare`・`prepare_ns` が格子を作る前に実効の節点数 (`axis_gap_frac` の導出 nj を含む) で判定して止まる。引き上げはユーザの了承を取ってから理由と組で書く (AGENTS.md「メッシュの規模は作る前に示す」)。`prepare_info.json` の mesh 欄に `n_nodes` |
 
 新しい問題は既存の YAML を複製して作る。複製元のコメントに残る古い設定 (`M_design` の試作較正値、
 `mesh.bndFirstOrder`、廃止キー) を持ち込まない ([`recommended-settings.md`](recommended-settings.md) §9)。

@@ -513,7 +513,9 @@ def card_to_problem(card, r_t_m: float) -> dict:
     - mesh の ni・wall_first_frac・wall_first_frac_throat と mesh_euler.ni は None (`build_problem` が `estimate_mesh` で埋める。
       None のまま `prepare` に渡すと例外になる — 黙って Mesh2DParams の既定に落とさない)。overrides で与えたらそちら。
     - overrides を最後に当て、上書きの記録を `_card.overrides` に置く。
-    - 検査 (例外): R_in > r_t、μ = L_U²/(R Δr) ≤ 20 (R は雛形か overrides の geometry.R)、L_pipe ≥ 0、M_exit > 1。"""
+    - 検査 (例外): R_in > r_t、μ = L_U²/(R Δr) ≤ 20 (R は雛形か overrides の geometry.R)、L_pipe ≥ 0、M_exit > 1、
+      節点数の上限の許可 (mesh・mesh_euler の max_nodes と max_nodes_reason は組)、明示の mesh_euler.ni の節点数 (plan
+      tooling-nozzle-mesh-size-guard §4.2)。"""
     card = validate_card(card) if "tolerances_default" not in card else card
     rt = float(r_t_m)
     if not (math.isfinite(rt) and rt > 0.0):
@@ -599,6 +601,20 @@ def card_to_problem(card, r_t_m: float) -> dict:
         errs.append(f"直管長 {L_pipe_m} m が負")
     if R < R_HALL_MIN:
         errs.append(f"スロート曲率半径 / r_t = R {R:.4g} < {R_HALL_MIN} (遷音速解 Hall–KL の精度が落ちる範囲; 曲率半径 ≥ {R_HALL_MIN * rt:.6g} m)")
+    # 節点数の上限の許可 (plan tooling-nozzle-mesh-size-guard §4.2): max_nodes と max_nodes_reason の組を重い処理の前に検査する。
+    # 明示の mesh_euler.ni はここで節点数も判定する (mesh.ni の写しは build_problem が estimate_mesh の後に判定する)
+    from ..evaluate.runner_axismach import MESH_EULER_DEFAULTS, _mesh_params_from, check_node_budget, node_budget
+    for blk in ("mesh", "mesh_euler"):
+        try:
+            node_budget(prob.get(blk) or {}, blk)
+        except ValueError as ex:
+            errs.append(str(ex))
+    if not errs and prob["mesh_euler"].get("ni") is not None:
+        mp_e = _mesh_params_from(prob["mesh_euler"], 1.0, **MESH_EULER_DEFAULTS)
+        try:
+            check_node_budget(mp_e, prob["mesh_euler"], "mesh_euler", allow_hint=_card_allow_hint("mesh_euler"))
+        except ValueError as ex:
+            errs.append(f"明示の mesh_euler.ni {mp_e.ni}: {ex}")
     if errs:
         raise ValueError("要求カード → 問題: " + "; ".join(errs))
     dr = R_in / rt - 1.0
@@ -702,17 +718,29 @@ def _wall_ar_fast(wall, ni: int, mesh: dict, frac: float, frac_t) -> tuple:
     return float(ar[k]), float(0.5 * (xs[k] + xs[k + 1]))
 
 
+def _ar_mesh_params(ni: int, mesh: dict, frac: float, frac_t):
+    """`_mesh_ar_full` が作る全格子の Mesh2DParams (節点数の事前の判定もこれで数える)。"""
+    from ..meshing.mesh2d import Mesh2DParams
+    opt = lambda k: None if mesh.get(k) is None else float(mesh[k])  # noqa: E731
+    return Mesh2DParams(ni=int(ni), nj=int(mesh.get("nj", 81)), wall_first_frac=float(frac),
+                        throat_refine=float(mesh.get("throat_refine", 3.0)), throat_width=float(mesh.get("throat_width", 1.5)),
+                        wall_first_frac_throat=(None if frac_t is None else float(frac_t)),
+                        wall_first_blend_x0=float(mesh.get("wall_first_blend_x0", 0.5)),
+                        wall_first_blend_x1=float(mesh.get("wall_first_blend_x1", 6.0)),
+                        wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
+                        axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"), scale=1.0)
+
+
+def _card_allow_hint(block: str) -> str:
+    """要求カードで節点数の上限を許す書き方 (plan tooling-nozzle-mesh-size-guard §4.2)。{n_nodes} は check_node_budget が実効の節点数に置き換える。"""
+    return (f"カードの overrides に {block}.max_nodes と {block}.max_nodes_reason を組で書く "
+            f"(例 overrides: {{{block}.max_nodes: {{n_nodes}}, {block}.max_nodes_reason: \"…\"}})")
+
+
 def _mesh_ar_full(wall, ni: int, mesh: dict, frac: float, frac_t) -> dict:
     """実際の mesh2d.generate_axisym_mesh で格子を作り、全セルの AR (check_mesh_quality.py と同じ max 辺/min 辺) を測る。"""
-    from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh
-    opt = lambda k: None if mesh.get(k) is None else float(mesh[k])  # noqa: E731
-    prm = Mesh2DParams(ni=int(ni), nj=int(mesh.get("nj", 81)), wall_first_frac=float(frac),
-                       throat_refine=float(mesh.get("throat_refine", 3.0)), throat_width=float(mesh.get("throat_width", 1.5)),
-                       wall_first_frac_throat=(None if frac_t is None else float(frac_t)),
-                       wall_first_blend_x0=float(mesh.get("wall_first_blend_x0", 0.5)),
-                       wall_first_blend_x1=float(mesh.get("wall_first_blend_x1", 6.0)),
-                       wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
-                       axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"), scale=1.0)
+    from ..meshing.mesh2d import generate_axisym_mesh
+    prm = _ar_mesh_params(ni, mesh, frac, frac_t)
     coords, quads, _ = generate_axisym_mesh(wall, prm)
     P = coords[:, :2][quads]
     e = np.linalg.norm(np.roll(P, -1, axis=1) - P, axis=2)
@@ -767,6 +795,9 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
     - `ni` = 壁際のセルの AR (max 辺/min 辺) ≤ `mesh.ar_max` (既定 5000) となる最小 (station は `mesh2d._x_stations` で実際に置き、
       第 1 層は mesh2d と同じブレンドの規則)。10 の倍数に切り上げ、実際の `generate_axisym_mesh` の全セルの AR で確かめる。
       上限 NI_CAP (6000)、超えたら上限にして警告。
+    - **節点数の上限** (plan tooling-nozzle-mesh-size-guard §4.2): 全格子 (`_mesh_ar_full`) を作る前に、同じ Mesh2DParams の実効の節点数
+      (`mesh2d.node_count`) を `runner_axismach.check_node_budget` で判定し、上限 (既定 30 万、`mesh.max_nodes` と理由で許可) を超えたら
+      全格子を作らずに ValueError。戻り値の `nodes` に節点数と上限。
     chain: `design_chain` の結果 (無ければ problem_dict から作る)。"""
     card = validate_card(card) if "tolerances_default" not in card else card
     if chain is None:
@@ -868,10 +899,24 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
     if ni_fixed is None and ni_req > NI_CAP:
         warnings.append(f"格子: 壁際の AR ≤ {ar_max:g} に要る ni {ni_req} が上限 {NI_CAP} を超える — ni を {NI_CAP} にした "
                         f"(AR {_wall_ar_fast(wall, NI_CAP, mesh_c, frac, frac_t)[0]:.0f}; 第 1 層・ar_max・throat_refine を見直す)")
+    from ..evaluate.runner_axismach import check_node_budget
+
+    def guard_nodes(ni_: int) -> dict:
+        # 節点数の上限 (plan tooling-nozzle-mesh-size-guard §4.2): 全格子 (_mesh_ar_full) を作る前に、同じ Mesh2DParams の実効の節点数で判定する
+        prm = _ar_mesh_params(ni_, mesh_c, frac, frac_t)
+        try:
+            return check_node_budget(prm, mesh, "mesh", allow_hint=_card_allow_hint("mesh"))
+        except ValueError as ex:
+            src = ("overrides の mesh.ni" if ni_fixed is not None else
+                   f"見積もり (壁際の AR ≤ {AR_MARGIN} × {ar_max:g} に要る ni {ni_req}、上限 NI_CAP {NI_CAP}、第 1 層 {frac:g}・スロート {frac_t})")
+            raise ValueError(f"要求カード → 問題 (estimate_mesh、NS の格子 ni {ni_} は {src}): {ex}") from ex
+
+    nodes = guard_nodes(ni)
     full = _mesh_ar_full(wall, ni, mesh_c, frac, frac_t)
     n_bump = 0
     while full["ar_max"] > ar_max and ni < NI_CAP and ni_fixed is None and n_bump < 50:
         ni = min(NI_CAP, ni + 10)
+        nodes = guard_nodes(ni)
         full = _mesh_ar_full(wall, ni, mesh_c, frac, frac_t)
         n_bump += 1
     if full["ar_max"] > ar_max:
@@ -907,6 +952,7 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
         "y1_m_throat": float(y1[k_th]), "y1_m_downstream_min": float(y1[k_dn]),
         "ni_required_for_ar": int(ni_req), "ar_max_limit": ar_max,
         "ar_max_wall_fast": _wall_ar_fast(wall, ni, mesh_c, frac, frac_t)[0], "mesh_check": full,
+        "nodes": nodes,              # NS の格子の実効の節点数と上限 (check_node_budget; plan tooling-nozzle-mesh-size-guard §4.2)
         "y1plus_est_max_with_blend": yp, "x_y1plus_est_max_rt": xp,
         "radial_growth_max": {"downstream": q_of(frac), "throat": (q_of(frac_t) if frac_t is not None else None)},
         "inputs": {"y1plus_target": Y1PLUS_TARGET, "wall": tw_note, "mu": "Sutherland (空気: 1.716e-5 Pa s, 273.15 K, S 110.4 K)",
@@ -1281,6 +1327,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     - sizing="none" (CLI の --no-solve): 物理スロート径でも解かずに r_t = 径/2 で書く (r_t は未解決とコメントに書く)。
     最後に設計チェーン (`design_chain`) を通し、`estimate_mesh`・`liquefaction_check`・設計壁から測る寸法を YAML のコメントと `_card` に
     書く。寸法が公差外でも書き出しは止めない (戻りの dimensions.pass が False、CLI は終了コード 2)。
+    Euler の格子 (ni は明示が無ければ mesh.ni の写し) の節点数も estimate_mesh と同じ上限で判定し、超えたら書き出さずに ValueError。
+    NS・Euler の節点数と上限は YAML のコメント・標準出力・card_log の `nodes` に出す (plan tooling-nozzle-mesh-size-guard §4.2)。
 
     自動調整 (どれも `_card.auto_adjust`・card_log・YAML のコメントに記録し、調整したら r_t の反復から全部やり直す):
     - **from_length が止まる** (STALL_TEXT): まず `n_axis_inv` を 2 倍にする。それでも止まれば、内部許容差 `geometry.L_total_tol` を
@@ -1496,6 +1544,15 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             prob["mesh"][k] = est[k]
     if "mesh_euler.ni" not in ov_keys:
         prob["mesh_euler"]["ni"] = int(prob["mesh"]["ni"])
+    # Euler の格子の節点数 (plan tooling-nozzle-mesh-size-guard §4.2; ni は明示が無ければ mesh.ni の写し)。prepare と同じ Mesh2DParams で数える
+    from ..evaluate.runner_axismach import MESH_EULER_DEFAULTS, _mesh_params_from, check_node_budget
+    mp_e = _mesh_params_from(prob["mesh_euler"], 1.0, **MESH_EULER_DEFAULTS)
+    try:
+        nodes_eu = check_node_budget(mp_e, prob["mesh_euler"], "mesh_euler", allow_hint=_card_allow_hint("mesh_euler"))
+    except ValueError as ex:
+        src = "overrides の mesh_euler.ni" if "mesh_euler.ni" in ov_keys else f"mesh.ni {prob['mesh']['ni']} の写し"
+        raise ValueError(f"要求カード → 問題 (Euler の格子 ni {mp_e.ni} は {src}): {ex}") from ex
+    nodes = {"mesh": est["nodes"], "mesh_euler": nodes_eu}
     warnings += est["warnings"]
     liq = liquefaction_check(card)
     if liq.get("warning"):
@@ -1546,7 +1603,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             "final_table_equals_last_inner": (last_inner_table is not None and table_path.read_bytes() == last_inner_table),
             "use": f"deltastar_loop --problem {out.name} --delta-r-csv {table_path.name} (sha256 を照合する)"})
         prob["_card"]["ns_correction"] = ns_rec
-    header = _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust)
+    header = _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust, nodes)
     _write_problem(card, prob, out, header)
     load_problem(out)               # 書いたものが読み込みの検査を通ること
     euler_out = write_euler_companion(out)
@@ -1564,6 +1621,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
                              "Lc_solve": chain["Lc_solve"], "x_E": chain["x_E"], "M_knot": chain["M_knot"],
                              "qa": _json_safe(chain["qa"])},
             "mesh_estimate": {k: v for k, v in est.items() if k != "sections"},     # 断面ごとの配列は書かない
+            "nodes": nodes,          # NS (mesh)・Euler (mesh_euler) の実効の節点数と上限 (plan tooling-nozzle-mesh-size-guard §4.2)
             "liquefaction": liq, "dimensions": dims, "time_s": time.time() - t_all,
             "euler_companion": (str(euler_out) if euler_out else None)}
     if ns_rec is not None:
@@ -1635,7 +1693,16 @@ def _header_wall_temperature(card, est) -> list:
     return h
 
 
-def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust) -> list:
+def _nodes_text(nodes: dict) -> str:
+    """NS・Euler の実効の節点数と上限 (YAML のコメントと標準出力に同じ文言で出す; plan tooling-nozzle-mesh-size-guard §4.2)。"""
+    def one(label, r):
+        src = "既定" if r["max_nodes_source"] == "default" else f"明示: {r['max_nodes_reason']}"
+        return f"{label} ni {r['ni']} × nj {r['nj']} = {r['n_nodes']} (上限 {r['max_nodes']}、{src})"
+    return ("節点数 (格子を作る前の判定): " + one("NS (mesh)", nodes["mesh"]) + "・" + one("Euler (mesh_euler)", nodes["mesh_euler"])
+            + "。上限を超える格子はユーザの了承を取ってから overrides の max_nodes と max_nodes_reason を組で書いて許す")
+
+
+def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust, nodes) -> list:
     rt = float(prob["spec"]["r_throat"])
     rec = prob["_card"]["recipe"]
     h = [f"生成: {GENERATOR} ({prob['_card']['generated']})。**手で編集しない** — 要求カードを直して作り直す。",
@@ -1648,6 +1715,7 @@ def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnin
          f" estimate_mesh の**初期値** (y1+ {Y1PLUS_TARGET}、Eckert + 平板乱流 Cf)。合格の根拠ではない — NS 後に check_wall_resolution.py"
          " の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥)。実際の格子の AR の最大 "
          f"{est['mesh_check']['ar_max']:.0f} (ar_max {est['ar_max_limit']:g})",
+         _nodes_text(nodes),
          *_header_wall_temperature(card, est),
          f"液化 (N₂、出口 {liq['T_exit_K']:.2f} K・{liq['p_exit_Pa']:.4g} Pa): {liq['verdict']}",
          "設計壁から測った寸法 (§4.2a の前段; 最終の合格は成果物から測る出荷ゲート): "
@@ -1708,6 +1776,7 @@ def _print_report(logd: dict) -> None:
     print(f"格子 (初期値): ni {e['ni']}  wall_first_frac {e['wall_first_frac']}  wall_first_frac_throat {e['wall_first_frac_throat']}"
           f"  ブレンド {e['blend_choice']} (up_x0/x1 {e['wall_first_up_x0']}/{e['wall_first_up_x1']})  (AR の最大 {e['mesh_check']['ar_max']:.0f}、"
           f"y1+ の目安の最大 {e['y1plus_est_max_with_blend']:.2f} @ x {e['x_y1plus_est_max_rt']:.2f})")
+    print(_nodes_text(logd["nodes"]))
     tw = e.get("wall_temperature")
     if tw is not None:
         print(f"壁温 (格子の見積もり): {e['inputs']['wall']}、区切りの点 [m] {tw['anchors_m']}、第 1 層を決めた断面の T_w "

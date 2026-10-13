@@ -355,7 +355,11 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
 $M_{d,\rm MOC}=M_d+\Delta M_{\rm cal}$ にする 1 係数較正。CFD ピンでは $m^*$ が Hall 比 $+4.2\times10^{-4}$ 動き、
 Euler の出口コア $M$ が設計値からずれる (case/45: 6.000416) ので、その偏差を打ち消す
 (粗い Euler 格子 [ni 1100 × nj 65] での当初値 $\Delta M_{\rm cal}=-4.16\times10^{-4}$)。**較正は Euler 専用の格子 `mesh_euler` (壁に寄せない配点) で行う** (2026-10-07、plan verification-case45-euler-total-enthalpy §4)。
-Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
+Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。
+**節点数の上限** (2026-10-14、plan tooling-nozzle-mesh-size-guard): `prepare`・`prepare_ns`・要求カードの生成器は、実効の節点数 (`mesh2d.node_count`: ni × 実効の nj。`axis_gap_frac` では nj が導出値) を
+格子を作る前に数え、2D の上限 30 万点 (`runner_axismach.MAX_NODES_2D`) を超えたら止まる。`mesh.max_nodes`・`mesh_euler.max_nodes` と `max_nodes_reason` の組で引き上げる (片方だけは誤り)。
+`prepare_info.json` の mesh 欄に `n_nodes`・`max_nodes`・`max_nodes_reason`・`max_nodes_source` を残す。要求カードの生成器は Euler の ni に NS の ni を写す (明示の `mesh_euler.ni` は保持)。
+切り離さない理由: case/70 で Euler の ni だけを 1800 → 900 → 600 にすると出口コア M が +1.5e-4・+3.8e-4 動き (2 次の格子収束に乗る)、出口較正は Euler から設計に入る。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
 理由: NS と同じ壁に寄せた配点 (case/45 の G1: 1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が $T_t$ を数百 K 超えたまま整定せず、全域 0.005 の配点では同じ窓で全領域 $|T_0-T_t|\le0.103$ K だった (同 plan §9 E2。原因 [薄いセル・縦横比か、整定しない収束か] は切り分けていない)。
 旧方針「生産 NS と同じ格子パラメータの Euler で較正」(plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f。Euler の出口コア $M$ は格子に依存し、case/45 で 1100 × 65 → G1 で $-7.9\times10^{-4}$) は取り下げた。case/45 の旧値 $\Delta M_{\rm cal}=+3.770\times10^{-4}$ は G1 の Euler 由来で、2000 × 97・全域 0.005 の `mesh_euler` でやり直した (同 plan §6 E4・E4V: 出口コア $M$ は最終断面の $\eta\in[0.05,0.7]$ を NS の基準格子 G1 の固定の $\eta$ の列に線形補間した平均)。**現行値は $\Delta M_{\rm cal}=6.8825\times10^{-6}$** (2026-10-07、E4V run_0164 で 13 枚すべて $|M-6|\le3.1\times10^{-6}$。適用範囲: legacy MOC・単調壁・凍結の初期線 run_0062・`mesh_euler` 2000 × 97 の Euler)。Euler の較正の合格を NS に移せるとは限らないので、NS の出口 $M$ は NS で判定する。**報告・評価の $M_d$ (`prepare_info` の `Md`、`collect` の基準) は
 `spec.M_design` のまま**で、較正値は `prepare_info` の `Md_moc_offset` に別記録する。Euler の性質として据え置き、

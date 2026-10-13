@@ -149,6 +149,12 @@ forge の結果が「軸対称・乱流・近軸で forge だけ妙な値にな�
 
 ユーザーが solver のコード構造、アーキテクチャ、モジュール責務について質問した場合は、`methods/architecture/overview.md` を既定の参照先とすること。
 
+**メッシュの規模は作る前に示す (必須、2026-10-14 ユーザ指摘「黙ってたら、50万点以上のメッシュのオイラーメッシュを作ってきた」)**: メッシュを作る前 (要求カードの生成・
+`prepare`・`prepare_ns`・自作の格子台本の前) に、**節点数と、手元の GPU での 1 万 step あたりの時間の見込み**を応答に書く。2D 軸対称の axis-Mach チェーンは、要求カードの生成器と
+`prepare`/`prepare_ns` が実効の節点数 (`axis_gap_frac` の導出 nj を含む) を格子を作る前に数え、**上限 30 万点** (Euler・NS 共通、`runner_axismach.MAX_NODES_2D`) を超えたら止まる。
+超える格子が要るときは**ユーザの了承を取ってから** `mesh.max_nodes`・`mesh_euler.max_nodes` と `max_nodes_reason` (了承の要旨) を書く (要求カードは `overrides` に)。了承なしに AI が書かない。
+Euler の ni は NS の ni と同じ (切り離すと Euler の解が動く、plan [`tooling-nozzle-mesh-size-guard`](plans/active/tooling-nozzle-mesh-size-guard.md) §4.1)。
+
 **既存ツールの再利用を最優先 (必須、2026-10-13 ユーザ指示「新規に検証スクリプトを作ろうとして、めちゃくちゃ時間かかった」)**: 検証・判定・後処理・設計の評価のために
 新しいスクリプトを書く**前に**、既存のツールを探して使う。探す順:
 1. 判定ツール `solver_density_cuda/tools/` (`check_convergence.py`・`check_quasisteady.py` [`--series-csv` で任意の量の系列]・`check_wall_resolution.py`・`check_mesh_quality.py`・
@@ -242,7 +248,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 
 ## モデル分担とエスカレーション (2026-09-22)
 
-**上位の判断役は 2 系統あり、切り替えて使う (2026-09-26 ユーザ決定)**。以下「上位」「諮る」はどちらかへの諮問を指す。
+**上位の判断役は 2 系統あり、切り替えて使う (2026-09-26 ユーザ決定)**。どちらも使えないときは 3 段目として Claude の別インスタンスを使う (2026-10-14 ユーザ指示)。以下「上位」「諮る」はこれらへの諮問を指す。
 
 - **既定: `diagnostician` サブエージェント (Fable)**。
 - **代替: codex 諮問** (`gpt-6-astra`, `model_reasoning_effort=high`)。
@@ -254,6 +260,18 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
   2. `diagnostician` の呼び出しが usage 上限・rate limit・overloaded で失敗した (その諮問は codex で回し直し、
      応答に「Fable 不可のため codex で代替」と書く。スイッチは立てない — 恒常化はユーザが決める)。
   3. ユーザがその場で codex を指定した。
+- **3 段目: Claude の別インスタンス** (2026-10-14 ユーザ指示「codexもfableもないから、測れない状況なんだよ。…測る相手を作るようにしてくれんか。同じ言語モデルになるかもしれん」、
+  plan [`tooling-review-fallback-backend`](plans/active/tooling-review-fallback-backend.md))。codex も Fable も使えないとき (CLI 無し・認証・usage 上限・rate limit・overloaded・timeout)、
+  `codex_review.py` が自動で (`--backend auto`、既定) `claude -p --safe-mode` の子に回し直す。子は CLAUDE.md・auto memory・hook を読まず、道具は Read・Grep・Glob だけ (書けない・コマンドを
+  実行できない)。git の差分などは親が証拠一式のファイルにして渡す。最初から使うときは `--backend claude`、全ワークツリーで固定するときはスイッチの中身を `claude` にする。
+  - **同じモデルになってよいが、独立性は文脈の分離だけ**。記録の見出しと plan §6.1 の行に `[Claude 代替]` が付く。応答の痕跡は「Claude の別インスタンス (代替) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」。
+    Claude Code の主セッションは `--requester-model <自分のモデル ID>` を渡す (同一か別かを記録に残すため)。
+  - 主セッションで Fable が使えないときに `Agent` の `model` 上書きで `diagnostician` を呼ばない (記録が残らず、親の文脈からの分離も無い)。
+  - 記録が `未成立` (結論・判定・指摘数が取れない、`証拠不足:`) のときは諮った扱いにしない (ツールは非 0 で終わり、§6.1 の行を出さない)。
+  - `claude` コマンドの無い環境 (Copilot など): 新しいチャット (前の会話を持たないもの) を開き、ブリーフ (レビューは `codex_review.py ... --dry-run` の出力) だけを渡して判定させ、
+    結果を `notes/reviews/` に同じ形式で残す。
+  - 同調の対照試験 (2026-10-14、opus、plan §6 V1): 依頼側の誤った結論を添えても 3/3 で退け、6/6 で正答。最低限の棄却試験であって、診断の能力全般の保証ではない。
+    別系統 (codex・Fable) が使えるようになったら、未決着の判断はそちらでもう一度諮ることを勧める。
 - ブリーフは両系統で共通 (下記の 5 分割)。codex 側はファイルに書いて渡すので、Fable 側でも同じファイルを
   `notes/reviews/briefs/` に残しておくと、失敗時にそのまま codex へ回せる。
 
@@ -321,7 +339,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 7. **result 段の解釈を確定する前** (VERDICT が出そろい、codex の `--stage result` に回す前)。結果が予想どおりに見えるときも諮る
    (過渡ピークを定常値と、抽出アーチファクトを物理と誤認した実績は「予想どおり」に見える場面で起きた)。
 
-- **痕跡を残す** (run パス明示・VERDICT 貼付と同じ扱い): 条件に当たった応答には「`diagnostician` に諮った (結論 1 行)」または「codex (diagnose) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」を書く。
+- **痕跡を残す** (run パス明示・VERDICT 貼付と同じ扱い): 条件に当たった応答には「`diagnostician` に諮った (結論 1 行)」または「codex (diagnose) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」(3 段目なら「Claude の別インスタンス (代替) に諮った: …」) を書く。
   **「諮っていない」は保留の記録であって通過ではない** — 諮るまで、その条件が守る先 (修正の投入・原因の記載・解釈の確定) へ進まない。
   plan §5.1 残作業表の**担当列** (`F` = 上位の判断が要る / `O` = 中位で自走可) を埋め、`F` の項目を完了にするときは
   内容欄に「判断: 日付・結論 1 行」を書く。

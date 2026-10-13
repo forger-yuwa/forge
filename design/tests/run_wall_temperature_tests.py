@@ -549,13 +549,18 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
         pi_.pop("environment", None)
         if isinstance(pi_.get("physical_wall"), dict) and isinstance(pi_["physical_wall"].get("fit"), dict):
             pi_["physical_wall"]["fit"].pop("build_seconds", None)
-    pi_same = json.dumps(pi_o, sort_keys=True) == json.dumps(pi_n, sort_keys=True)
+    # mesh 欄の節点数と上限 (2026-10-14 に足したキー、plan tooling-nozzle-mesh-size-guard §4.2) は変更前に無いので比べない。
+    # 節点数は今の記録が実際の座標数であることだけを見る
+    nodes_ok = pi_n.get("mesh", {}).get("n_nodes") == pi_n.get("mesh", {}).get("ni", 0) * pi_n.get("mesh", {}).get("nj", 0)
+    for k in ("n_nodes", "max_nodes", "max_nodes_reason", "max_nodes_source"):
+        pi_n.get("mesh", {}).pop(k, None)
+    pi_same = nodes_ok and json.dumps(pi_o, sort_keys=True) == json.dumps(pi_n, sort_keys=True)
     pi_diff = sorted(k for k in set(pi_o) | set(pi_n) if pi_o.get(k) != pi_n.get(k))
     extra = [f.name for f in r_new.iterdir() if f.name == WTP.RUN_JSON or f.name.startswith("wall_profile_")]
     present = [f for f in CMP_FILES if (r_new / f).exists()]
     check(f"V4 {label}: prepare-only の生成物が変更前とバイト同一 ({len(present)} 個 + prepare_info から environment・"
-          "physical_wall.fit.build_seconds を除いたもの)、壁温の JSON・CSV を書かない", not diff and pi_same and not extra,
-          f"違うファイル {diff}、prepare_info の違うキー {pi_diff}、余分 {extra}")
+          "physical_wall.fit.build_seconds・mesh の節点数と上限を除いたもの)、壁温の JSON・CSV を書かない", not diff and pi_same and not extra,
+          f"違うファイル {diff}、prepare_info の違うキー {pi_diff}、余分 {extra}、mesh.n_nodes = ni × nj {nodes_ok}")
     check(f"V4 {label}: 一様・断熱の run の load_run_profile は None", WTP.load_run_profile(r_new) is None)
     v4[label + " prepare"] = bool(not diff and pi_same and not extra)
     # 今の切り方 (§5.1 #4c): 違うのは壁の長さに依るファイルだけで、設計壁の終点が直す前より下流 (x_F) に動く

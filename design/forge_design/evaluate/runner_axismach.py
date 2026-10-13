@@ -40,7 +40,7 @@ from ..geometry.moc_inverse import inverse_design
 from ..geometry.transonic import HallThroat
 from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, PW_UPSTREAM_DEFAULT, PW_UPSTREAMS, AxisMachCFDWall,
                                       area_ratio_isentropic, wall_qa)
-from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
+from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, node_count, radial_node_count, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from ..wall_temperature import check_covers, integral_thermal_bc, load_run_profile, to_x_m, write_run_files
 from ..wall_temperature import anchors_from_design as _wt_anchors
@@ -712,10 +712,68 @@ def mesh_params(p, scale, ni, nj, wall_first_frac):
 #   (同 plan §9 E2。全域 0.005 の配点は同じ窓で全領域 |T₀ − Tt| ≤ 0.103 K)。
 # - mesh だけがあって mesh_euler が無い問題は移行先を示して止める (黙って NS の配点を使わない・指定を無視して既定に落とさない)。
 MESH_EULER_DEFAULTS = {"ni": 321, "nj": 65, "wall_first_frac": 5.0e-3}
-# mesh_euler に書けるキー (_mesh_params_from が読むもの + 品質検査の ar_max + node 固定の discretization)。それ以外は書き誤りとして止める
+# mesh_euler に書けるキー (_mesh_params_from が読むもの + 品質検査の ar_max + node 固定の discretization + 節点数の上限の許可)。
+# それ以外は書き誤りとして止める
 MESH_EULER_KEYS = ("ni", "nj", "wall_first_frac", "throat_refine", "throat_width", "wall_first_frac_throat",
                    "wall_first_blend_x0", "wall_first_blend_x1", "wall_first_up_x0", "wall_first_up_x1",
-                   "axis_gap_frac", "axis_cap_frac", "ar_max", "discretization")
+                   "axis_gap_frac", "axis_cap_frac", "ar_max", "discretization", "max_nodes", "max_nodes_reason")
+
+# 2D 軸対称の格子の節点数の上限 (2026-10-14, plan tooling-nozzle-mesh-size-guard §4.2): Euler・NS とも 30 万点 (Euler の ni は明示が無ければ
+# NS と同じなので同じ値; 雛形 1600〜2000 × 97 = 15.5〜19.4 万、M6 生産の NS 19.4 万の 1.5 倍)。超える格子は問題 YAML のブロック
+# (mesh / mesh_euler) に max_nodes (正の整数) と max_nodes_reason (空でない文字列) を組で書けば、その値まで許す (ユーザの了承を取ってから書く)。
+# 判定は run dir を作る前・設計チェーンの前に、実効の節点数 (mesh2d.node_count; axis_gap_frac の導出 nj を含む) で行う。
+MAX_NODES_2D = 300_000
+
+
+def node_budget(m: dict, block: str) -> dict:
+    """格子のブロックの節点数の上限 {max_nodes, max_nodes_reason, max_nodes_source ("default" / "explicit")}。
+    max_nodes と max_nodes_reason は組で書く (片方だけ・正の整数でない値・空の理由は ValueError)。"""
+    m = m or {}
+    v, why = m.get("max_nodes"), m.get("max_nodes_reason")
+    if v is None and why is None:
+        return {"max_nodes": MAX_NODES_2D, "max_nodes_reason": None, "max_nodes_source": "default"}
+    errs = []
+    if v is None:
+        errs.append(f"{block}.max_nodes_reason だけがあり {block}.max_nodes (許す節点数) が無い")
+    elif isinstance(v, bool) or not isinstance(v, (int, np.integer)) or int(v) <= 0:
+        errs.append(f"{block}.max_nodes は正の整数 (受け取った値: {v!r})")
+    if why is None:
+        errs.append(f"{block}.max_nodes だけがあり理由 {block}.max_nodes_reason が無い")
+    elif not isinstance(why, str) or not why.strip():
+        errs.append(f"{block}.max_nodes_reason は空でない文字列 (受け取った値: {why!r})")
+    if errs:
+        raise ValueError("節点数の上限の許可は max_nodes と max_nodes_reason を組で書く: " + "; ".join(errs))
+    return {"max_nodes": int(v), "max_nodes_reason": why, "max_nodes_source": "explicit"}
+
+
+def check_node_budget(mp: Mesh2DParams, m: dict, block: str, allow_hint: str | None = None) -> dict:
+    """格子を作る前の節点数の判定 (plan tooling-nozzle-mesh-size-guard §4.2)。実効の節点数 (mesh2d.node_count、上限を超えたら数えるのを
+    打ち切る) が上限 (`node_budget`) を超えたら ValueError (実効の節点数・ni・nj・上限・許可の書き方)。allow_hint は許可の書き方の文言
+    (既定は問題 YAML のブロックに書く形; 文言の {n_nodes} は数えた節点数に置き換える)。
+    戻り値 {n_nodes, ni, nj, max_nodes, max_nodes_reason, max_nodes_source}。"""
+    b = node_budget(m, block)
+    lim = b["max_nodes"]
+    ni = int(mp.ni)
+    n = node_count(mp, limit=lim)
+    nj, exact = radial_node_count(mp, max_nj=lim // max(ni, 1))
+    if n > lim:
+        how = (allow_hint or f"問題 YAML の {block} に max_nodes: {{n_nodes}} と max_nodes_reason: \"<理由>\" を組で書く"
+               ).replace("{n_nodes}", str(n) if exact else f"<{n} 以上>")
+        src = "既定 MAX_NODES_2D" if b["max_nodes_source"] == "default" else f"明示: {b['max_nodes_reason']}"
+        more = "" if exact else " 以上"
+        derived = "、nj は axis_gap_frac からの導出値" if mp.axis_gap_frac is not None else ""
+        raise ValueError(
+            f"{block} の格子の実効の節点数 {n}{more} (ni {ni} × nj {int(nj)}{more}{derived}) が上限 {lim} ({src}) を超える — "
+            f"格子を作らずに止めた。上限を超える格子はユーザの了承を取ってから {how} (了承なしに書かない)。"
+            "超えないようにするなら ni・nj・axis_gap_frac (・要求カードなら第 1 層と ar_max) を見直す")
+    return {"n_nodes": int(n), "ni": ni, "nj": int(nj), **b}
+
+
+def _check_generated_nodes(coords, nodes: dict, block: str) -> None:
+    """格子を作った後の照合: 実際の節点数が事前の数え (mesh2d.node_count) と違えば止める (事前の判定が当てにならないため)。"""
+    if int(coords.shape[0]) != int(nodes["n_nodes"]):
+        raise RuntimeError(f"{block}: 生成した格子の節点数 {coords.shape[0]} が事前の数え (mesh2d.node_count) {nodes['n_nodes']} と"
+                           " 一致しない — 事前の節点数の判定が当てにならないので止める")
 
 
 def mesh_euler_block(p) -> dict:
@@ -785,14 +843,17 @@ def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
             "topology_datasets": names, "msh_sha256": hm.hexdigest(), "generator_sha256": hg.hexdigest()}
 
 
-def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges) -> dict:
+def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges, nodes: dict) -> dict:
     """prepare_info.json の mesh 欄: 従来の ni・nj・wall_first_frac (読む側: nozzle_report・metrics.deltastar・cfd_initial_line) に、
     全 Mesh2DParams・採用元のブロック名・問題に書かれたブロックの有無と中身・座標と接続のハッシュを足す
-    (plan verification-case45-euler-total-enthalpy §4、2026-10-07)。"""
+    (plan verification-case45-euler-total-enthalpy §4、2026-10-07)。nodes (`check_node_budget` の戻り値) から節点数と上限・理由・
+    上限の出所 (default / explicit) も書く (plan tooling-nozzle-mesh-size-guard §4.2、2026-10-14)。"""
     import dataclasses
     return {"ni": mp.ni, "nj": int(nj), "wall_first_frac": mp.wall_first_frac,
             "source": source, "blocks_present": {b: (b in (p.raw or {})) for b in ("mesh", "mesh_euler")},
             "block": dict((p.raw or {}).get(source) or {}), "params": dataclasses.asdict(mp),
+            "n_nodes": int(coords.shape[0]),
+            **{k: nodes[k] for k in ("max_nodes", "max_nodes_reason", "max_nodes_source")},
             "hashes": _mesh_hashes(run_dir, coords, quads, bedges)}
 
 
@@ -813,6 +874,9 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             raise ValueError("geometry.pw_upstream: poly は prepare_ns (joint 壁の物理壁) 専用 — Euler の prepare には物理壁が無い")
     # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
     m_eu = mesh_euler_block(p)
+    # 節点数の上限 (plan tooling-nozzle-mesh-size-guard §4.2): 実効の節点数で run dir を作る前・設計チェーンの前に判定する
+    # (節点数は scale によらないので scale 1 の Mesh2DParams で数える)
+    nodes = check_node_budget(mesh_params_euler(p, 1.0), m_eu, "mesh_euler")
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
@@ -823,6 +887,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     scale = float(p.spec["r_throat"])
     mp = mesh_params_euler(p, scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
+    _check_generated_nodes(coords, nodes, "mesh_euler")
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     # 記録: 目標軸分布 (x0 → x_E) と設計壁
     law = d["law"]
@@ -860,7 +925,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
-    mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
+    mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges, nodes)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -1276,6 +1341,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     sizing = _sizing_spec(p.spec)
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
+    # 節点数の上限 (plan tooling-nozzle-mesh-size-guard §4.2): 実効の節点数で run dir を作る前・設計チェーンの前に判定する
+    # (節点数は scale によらないので scale 1 で数える。既定の ni・nj・第 1 層は下の格子と同じ ns_mesh_defaults)
+    ns_mesh_defaults = {"ni": 561, "nj": 97, "wall_first_frac": 4.5e-5}
+    nodes = check_node_budget(mesh_params(p, 1.0, **ns_mesh_defaults), p.mesh, "mesh")
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
@@ -1358,8 +1427,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             pw_info["fit"] = wall.fit_diag
     elif getattr(wall, "single_bspline_default_skipped", None):
         pw_info = {"repr": None, "source": "default (1 本で表せないので区分表現のまま)", "reason": wall.single_bspline_default_skipped}
-    mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
+    mp = mesh_params(p, scale, **ns_mesh_defaults)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
+    _check_generated_nodes(coords, nodes, "mesh")
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     law = d["law"]
     xs = np.linspace(d["x0"], d["x_E"], 400)
@@ -1404,7 +1474,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
                    cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
     # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
-    mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
+    mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges, nodes)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),

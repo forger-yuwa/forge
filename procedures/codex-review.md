@@ -17,7 +17,8 @@ Claude Code はプロンプトの作法・禁止事項 (巨大ファイルを読
 ### 1.1 診断・設計判断の諮問 (stage = diagnose, 2026-09-26〜)
 
 plan/result 段レビューとは別に、AGENTS.md「モデル分担とエスカレーション」の 7 条件に当たったときの諮問も codex で回す
-(既定は `diagnostician` = Fable サブエージェント。Fable が usage 上限のとき・`~/.config/forge/diagnose-backend` が `codex` のときの代替。切り替え条件は AGENTS.md)。ブリーフを `notes/reviews/briefs/<日付>-<slug>.md`
+(既定は `diagnostician` = Fable サブエージェント。Fable が usage 上限のとき・`~/.config/forge/diagnose-backend` が `codex` のときの代替。切り替え条件は AGENTS.md)。
+codex も使えないときは同じツールが Claude の別インスタンスに回し直す (§2.1)。ブリーフを `notes/reviews/briefs/<日付>-<slug>.md`
 に書き、`codex_review.py --stage diagnose --brief <brief> [plan] [--extra ...]` を回す。出力は
 `notes/reviews/<日付>-<slug>-diagnose.md` (結論・仮説・判別 A/B の定型)。plan の §6.1 レビュー記録表には書かない
 (`check_plans.py` の plan/result 行とは別物)。痕跡は応答と plan §5.1 の `F` 項目の判断欄に残す。
@@ -36,14 +37,27 @@ python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --focus "§4
 python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --dry-run
 ```
 
+### 2.1 判定役の選択 (`--backend`, 2026-10-14、plan `tooling-review-fallback-backend`)
+
+- `--backend auto` (既定): スイッチ `~/.config/forge/diagnose-backend` が `claude` なら最初から Claude の別インスタンス。そうでなければ codex を試し、
+  **使えない** (CLI 無し・認証・usage 上限・rate limit・overloaded・timeout・最終メッセージ空) ときだけ Claude で回し直す。有効な NO-GO や `証拠不足:` では切り替えない。
+- `--backend codex`: 失敗しても切り替えない。`--backend claude`: 最初から Claude (`--claude-model`、既定 `opus`)。
+- Claude の子は `claude -p --safe-mode --tools Read,Grep,Glob` (CLAUDE.md・auto memory・hook・MCP を読まない、書けない、コマンドを実行できない)。
+  git の差分・履歴は親が `notes/reviews/<名前>.evidence/` (git 追跡外) に書いて渡す。Claude Code の主セッションは `--requester-model <自分のモデル ID>` を渡す。
+- **結果の分類** (両方の経路): `ok` / `unavailable` / `failed` / `incomplete`。`ok` (diagnose は「結論:」、plan・result は判定と「指摘数:」がある) のときだけ
+  §6.1 の行を表示して 0 で終わる。それ以外は記録の先頭に「未成立 (分類)」を書いて非 0 (incomplete 2・unavailable 3・failed 1)。未成立の記録は諮った・レビューした扱いにしない。
+- 記録の見出し: backend・選んだ理由・要求と実効のモデル・CLI の版・依頼側との関係・`permission_denials`・試行のログ (`<名前>.codex.log`・`<名前>.claude.log`)。
+  Claude のときは §6.1 の行に `[Claude 代替]` が付く。同じモデルになりうるので独立性は文脈の分離だけ — 別系統が使えるようになったら未決着の判断はもう一度諮ることを勧める。
+- `claude` コマンドの無い環境: 新しいチャットに `--dry-run` の出力 (またはブリーフ) だけを渡し、結果を同じ形式で `notes/reviews/` に残す。
+
 - 所要 5〜15 分。Claude Code からは **`run_in_background` + timeout 1200 s 以上**で呼ぶ。`( … &)`・nohup のシェル背景は不可 (完了通知が来ない; PreToolUse フック `hook_forge_guard.py` が拒否する、2026-10-06)。進捗は
-  `notes/reviews/<名前>.log` のサイズ、または `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` の末尾 timestamp で見る。
+  `notes/reviews/<名前>.codex.log` (Claude なら `.claude.log`) のサイズ、または `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` の末尾 timestamp で見る。
   フリーズ疑いでも kill する前に `ps -o pid,etime,time` の CPU 時間で進行中か確かめる。
 - ツールが守っている作法 (手で `codex exec` を打つときも同じ): `--sandbox read-only`、**stdin は `/dev/null`**
   (開いたままだと EOF 待ちで永久ブロック)、**stdout をパイプに通さない** (tail/head を挟むと終了まで何も見えない)、
   `model_reasoning_effort` を `high` に上書き (`~/.codex/config.toml` は `low`)。
 - 出力: `notes/reviews/<日付>-<plan stem>-<stage>.md` (メタ情報ヘッダ + codex の最終メッセージ)。同名があれば `-2` を付ける。
-  生ログ `*.log` は git 追跡外。
+  生ログ `*.log` (`.codex.log`・`.claude.log`) と証拠一式 `*.evidence/` は git 追跡外。
 
 ## 3. 記録と採否
 

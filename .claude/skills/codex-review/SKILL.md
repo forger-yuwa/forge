@@ -27,6 +27,9 @@ python3 solver_density_cuda/tools/codex_review.py --stage diagnose \
 ブリーフにも下の §2 禁止事項・§3 の 4 点 (指標の定義・潰した候補と証拠・生データ・問いを 1 つ) を入れる。
 結論 1 行と記録パスを応答に書き、採否は plan §5.1 の `F` 項目の判断欄へ。
 
+**codex も Fable も使えないとき**はツールが Claude の別インスタンス (`claude -p --safe-mode`、道具は Read・Grep・Glob だけ) に回し直す (`--backend auto`、既定)。
+手順は `procedures/codex-review.md` §2.1。主セッションは `--requester-model <自分のモデル ID>` を渡す。記録が「未成立」なら諮った扱いにしない。
+
 起動作法 (read-only / stdin=/dev/null / stdout をパイプに通さない / reasoning=high) はツールが守る。
 **自由形式の切り分け依頼**だけ手で `codex exec` を打つ。そのときも同じ作法を守る:
 

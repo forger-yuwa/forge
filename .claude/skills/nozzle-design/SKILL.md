@@ -54,6 +54,15 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 - STEP を CAD で編集した後のメッシュの作り直しは `deliverables/mesh/rebuild_from_step.py` (x(u) を解いて station に合わせる)。
   編集後の形状の格子品質は `check_mesh_quality.py` で確かめる。
 
+## メッシュの規模 (作る前に示す; AGENTS.md「メッシュの規模は作る前に示す」)
+
+- 要求カードの生成・`prepare`・`prepare_ns` の前に、**節点数** (Euler・NS。生成器は YAML のコメントと標準出力に `# 節点数` を出す) と時間の見込みを応答に書く。
+  目安 (手元の GPU、2026-10-14): Euler 17.5 万点で 1 万 step 約 36 s (3.6 ms/step)、NS 15〜17 万点の本段で 1 万 step 約 80 s。
+- 上限は 2D で **30 万点** (Euler・NS 共通)。超えると生成器・prepare が格子を作る前に止まる。超える格子が要るなら**ユーザの了承を取ってから** `overrides: {mesh.max_nodes: N,
+  mesh.max_nodes_reason: "…", mesh_euler.max_nodes: N, mesh_euler.max_nodes_reason: "…"}` を書く。NS の ni は壁際の AR (≤ 0.97 × 5000) から決まり、第 1 層が薄い (Re が高い)
+  と上限 6000 まで増える — まず第 1 層・`ar_max`・`throat_refine` を見直す。
+- Euler の ni は NS と同じ (減らすと Euler の解が動く: case/70 で ni 600 の出口 M +3.8e-4、plan `tooling-nozzle-mesh-size-guard` §4.1)。明示の `mesh_euler.ni` は保持される。
+
 ## まず使うツール (新しく書かない; AGENTS.md「既存ツールの再利用を最優先」)
 
 検証・判定・後処理のスクリプトを新しく書く前に、この表から探す。足りないときだけ書き、応答に「既存の何が足りなかったか」を 1 行書く。
