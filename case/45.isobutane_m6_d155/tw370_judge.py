@@ -356,6 +356,9 @@ def summarize_dstar(ser: dict, scale_m: float, run: Path, tools: Path) -> dict:
 
 
 # --- 腕ごとの状態 ---------------------------------------------------------------------------------------------------------------
+CORRECTED_CLASSIFICATION = False   # --corrected-classification (2026-10-13、codex diagnose 2026-10-13-tw370-result-diagnose.md)
+
+
 def arm_state(name: str, case: Path, tools: Path, m9ns: dict, m9_bad: list, c1_state: dict | None) -> dict:
     """1 本の腕の前提・段・見張りを読む。戻り {und, b, gfail, reached, reach_step, status, ...}。und は腕の判定不能の理由 (その腕の B を無効にする)。"""
     run = case / ARMS[name]
@@ -498,6 +501,15 @@ def arm_state(name: str, case: Path, tools: Path, m9ns: dict, m9_bad: list, c1_s
     # --- 見張り ---
     m9 = jload(run / "m9_watch.json")
     status = None if m9 is None else m9.get("status")
+    if CORRECTED_CLASSIFICATION and m9 is not None and status == "EXEC_ERROR" and str(m9.get("rc")) == "?" and rc_txt == "0":
+        # 終了分類の訂正 (結果を見た後の実装の修正であることを記録する): m9_watch は forge の終了時に RUN_RC で CENSORED と EXEC_ERROR を分けるが、
+        # チェーン経由の台本は RUN_RC を run_staged_ns の後に書くので、読んだ時点で無く rc '?' で EXEC_ERROR になった。いまの RUN_RC が 0 で
+        # 系列の最後が上限なら CENSORED として、下の CENSORED の検査 (間隔・途中の到達なし・最後の step・RUN_RC) をそのまま通す
+        rows0 = sorted(m9.get("rows", []), key=lambda r: r["step"])
+        if rows0 and rows0[-1]["step"] >= BUDGET:
+            A["classification_corrected"] = {"original": "EXEC_ERROR", "corrected": "CENSORED", "m9_rc": m9.get("rc"), "RUN_RC_now": rc_txt,
+                                             "note": "終了分類だけの訂正 (閾値・予算・比較の対象は変えない)、結果を見た後の実装の修正"}
+            status = "CENSORED"
     A.update(status=status, m9=m9)
     if mss is not None:
         rows = sorted((m9 or {}).get("rows", []), key=lambda r: r["step"])
@@ -592,6 +604,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=None)
     ap.add_argument("--fix-q300", action="store_true", help="起動の前: 300 K の参照の値を固定する")
     ap.add_argument("--no-dstar-series", action="store_true", help="δ_E・δ_target の時系列 (記録) を作らない")
+    ap.add_argument("--corrected-classification", action="store_true",
+                    help="終了分類の訂正: EXEC_ERROR (m9 の rc '?') で RUN_RC 0・最後の step が上限の腕を CENSORED として判定し直す。"
+                         "元の判定は残し、出力は tw370_judge_corrected.json (codex diagnose 2026-10-13-tw370-result-diagnose.md)")
     a = ap.parse_args(argv)
     case, code = Path(a.case_dir).resolve(), Path(a.code_dir).resolve()
     tools = Path(a.tools) if a.tools else (Path.home() / "forge-g0cchain/solver_density_cuda/tools")
@@ -603,7 +618,9 @@ def main(argv=None) -> int:
     sys.path.insert(0, str(design))
     if a.fix_q300:
         return fix_q300(case, code, case / Q300)
-    out_p = Path(a.out) if a.out else case / OUT
+    global CORRECTED_CLASSIFICATION
+    CORRECTED_CLASSIFICATION = bool(a.corrected_classification)
+    out_p = Path(a.out) if a.out else case / (OUT.replace(".json", "_corrected.json") if CORRECTED_CLASSIFICATION else OUT)
     R = {"plan": PLAN, "created": now(), "arms": dict(ARMS), "case_dir": str(case), "code_dir": str(code), "tools": str(tools), "design": str(design),
          "undecidable": [], "b_reasons": [], "gate_failures": [], "notes": [], "per_arm": {}, "extraction": {}, "pairs": {}, "band_dependence": [],
          "band_sensitivity": {}, "quasisteady": {}, "dstar_series": {}, "timing": {}, "records": {}, "fixed": {"DSTAR": DSTAR, "QS_ARGS": QS_ARGS,
@@ -770,6 +787,10 @@ def main(argv=None) -> int:
                    "(この壁温・固定壁の停止の時点の運用への G0c・B0 の拡大を支持。壁の更新の許可ではない)")
     else:
         verdict = "判定不能 (想定外の分岐: 到達・比較の記録がそろわない)"
+    if CORRECTED_CLASSIFICATION:
+        R["corrected_classification"] = {k: st[k].get("classification_corrected") for k in ("R0", "C1", "C50")}
+        R["original_verdict_file"] = OUT
+        verdict = "終了分類の訂正後 (元の判定は判定不能のまま残す、結果を見た後の実装の修正): " + verdict
     R["verdict"] = verdict
     for t, v in R["pairs"].items():
         print(t, "帯 1:", "許容内" if v["許容内 (帯 1)"] else "超過", " 帯 1.25:", "許容内" if v["許容内 (帯 1.25)"] else "超過",
