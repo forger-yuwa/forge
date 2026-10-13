@@ -70,7 +70,10 @@ err = np.abs(d_out - d_ref)
 k = int(np.argmax(err))
 res = {"same_design_wall_and_scale": same_design, "scale_m": A["scale"], "x_range_rt": [float(x[0]), float(x[-1])],
        "Tw_table_A": A["tbc"].get("Tw_table"), "Tw_table_B": B["tbc"].get("Tw_table"),
-       "max_abs_dr_ref_m": float(np.max(np.abs(d_ref))), "dr_ref_at_exit_m": float(d_ref[-1]),
+       "max_abs_dr_ref_m": float(np.max(np.abs(d_ref))),
+       "dr_ref_at_check_end_m": float(d_ref[-1]), "check_end_x_m": float(x[-1] * A["scale"]),   # 検査区間の終点 x_e − 1 (出口ではない)
+       "dr_ref_at_exit_m": float((B["dr"](A["x_e"]) - A["dr"](A["x_e"])) * A["scale"]),           # 実際の出口 x_e (参考; 判定は検査区間)
+       "dr_out_at_exit_m": float((B["r"](A["x_e"]) - A["r"](A["x_e"])) * A["scale"]),
        "max_abs_out_minus_ref_m": float(err.max()), "at_x_rt": float(x[k]), "eps_m": eps,
        "ratio_signal_to_eps": float(np.max(np.abs(d_ref)) / eps)}
 if not same_design:
@@ -83,5 +86,6 @@ else:
     v = "判定 B: 期待差があるのに物理壁の差が合わない (完了を保留)"
 res["verdict"] = v
 (OUT / "walltemp_wall_ab.json").write_text(json.dumps(res, indent=1, ensure_ascii=False, default=float))
-print(json.dumps({kk: res[kk] for kk in ("same_design_wall_and_scale", "max_abs_dr_ref_m", "dr_ref_at_exit_m", "max_abs_out_minus_ref_m",
+print(json.dumps({kk: res[kk] for kk in ("same_design_wall_and_scale", "max_abs_dr_ref_m", "dr_ref_at_check_end_m", "check_end_x_m",
+                                         "dr_ref_at_exit_m", "dr_out_at_exit_m", "max_abs_out_minus_ref_m",
                                          "at_x_rt", "eps_m", "ratio_signal_to_eps", "verdict")}, indent=1, ensure_ascii=False))

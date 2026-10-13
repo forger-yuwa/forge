@@ -3,15 +3,15 @@
 ## メタ
 
 - **area**: `tooling / boundary (design chain)`
-- **status**: `in_progress`  <!-- 2026-10-13 起票 (ユーザ「壁面温度分布って入れられる？入れられるようにしてほしいし、設計開始時に尋ねるようにしてほしい。実際にデモしてみてほしい」) -->
+- **status**: `done`  <!-- 2026-10-13 起票 (ユーザ「壁面温度分布って入れられる？入れられるようにしてほしいし、設計開始時に尋ねるようにしてほしい。実際にデモしてみてほしい」) -->
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) 「壁の熱境界条件 (断熱 / 等温) と壁温影響の評価」節・「実寸の要求カードと成果物一式」節
   - [`methods/boundary.md`](../../methods/boundary.md) 「壁温分布の入力 (`wallProfile`)」(ソルバ側は実装・検証済み)
   - [`procedures/inlet-profile.md`](../../procedures/inlet-profile.md) (CSV の書式: 座標列 1 つなら 1D 線形補間・範囲外は端値)
 - **related_plans**:
-  - [`tooling-nozzle-isothermal-wall-chain.md`](tooling-nozzle-isothermal-wall-chain.md) (`spec.wall_thermal` を単一ソースにした §4.1。§5.1 #6 の `wallProfile` はソルバ側として CHT plan へ移管済み)
-  - [`boundary-conjugate-heat-transfer.md`](boundary-conjugate-heat-transfer.md) (`ints: {wallProfile: 1}` の実装と検証 case/48 `run_0015_wallprofile`)
-  - [`../accepted/tooling-nozzle-wt-deliverables.md`](../accepted/tooling-nozzle-wt-deliverables.md) (要求カード `forge.wt_card/v1`・成果物一式。本計画はその入力と出力に壁温分布を足す)
+  - [`tooling-nozzle-isothermal-wall-chain.md`](../active/tooling-nozzle-isothermal-wall-chain.md) (`spec.wall_thermal` を単一ソースにした §4.1。§5.1 #6 の `wallProfile` はソルバ側として CHT plan へ移管済み)
+  - [`boundary-conjugate-heat-transfer.md`](../active/boundary-conjugate-heat-transfer.md) (`ints: {wallProfile: 1}` の実装と検証 case/48 `run_0015_wallprofile`)
+  - [`../accepted/tooling-nozzle-wt-deliverables.md`](tooling-nozzle-wt-deliverables.md) (要求カード `forge.wt_card/v1`・成果物一式。本計画はその入力と出力に壁温分布を足す)
 - **created**: `2026-10-13`
 - **owner**: `sano`
 
@@ -74,10 +74,13 @@ spec:
 - `wall_thermal` は `{"mode": "isothermal", "Tw": <代表値>, "Tw_profile": {...}}` を返す。代表値は表の x = 0 (設計スロート) の値 (bcond の `Ts` の既定値・帳簿用; 分布があるときソルバは CSV で上書きする)。
 - **[実装で確定 2026-10-13]** 積分法の熱条件は `forge_design.wall_temperature.integral_thermal_bc(p, d, scale)` (s の表は設計の区切りの点 `d` が要るので Problem の
   メソッドにしない)。property `wall_thermal_bc_integral` は分布の問題では例外 (scale も区切りの点も知らないので; これを直接使う case スクリプト
-  `case/70/c2_calibrate_kf.py`・`case/45/calibrate_contur.py`・`c2pin_solve.py` は分布の問題では止まる)。当初案: `wall_thermal_bc_integral_at(scale)` は分布なら `{"mode": "prescribed_temperature", "Tw_table": [[x_m / scale, Tw], ...]}`。**`scale` は積分法を呼ぶその場の実効の $r_t$**
+  `case/70/c2_calibrate_kf.py`・`case/45/calibrate_contur.py`・`c2pin_solve.py` は分布の問題では止まる; §5.1 #7)。**`scale` は積分法を呼ぶその場の実効の $r_t$**
   (寸法の逆算 `solve_rt_throat` の反復中は試しの $r_t$; `deltastar_loop.py:134,185,197`)。`integral_delta_r` (`runner_axismach.py:1161-1172`) は解決した同じ `scale` を
-  熱条件と `integral_bl` の両方に渡す。表を `spec.r_throat` で換算してキャッシュしない (codex 諮問 2026-10-13 の採用)。既存の property `wall_thermal_bc_integral` は
-  `spec.r_throat` での換算 (case スクリプト向けの互換)。
+  熱条件と `integral_bl` の両方に渡す。表を `spec.r_throat` で換算してキャッシュしない (codex 諮問 2026-10-13 の採用)。
+  (履歴: 当初案は `wall_thermal_bc_integral_at(scale)` を Problem のメソッドにし、property は `spec.r_throat` で換算する互換としていた。実装では上のとおり
+  モジュール関数にし、property は分布で例外にした — codex result レビュー m3 で本文の矛盾を整理。)
+- 代表値 (bcond の `Ts`・帳簿) は表の座標 0 の値。**s の表は s = 0 を点として含むこと** (実寸の x に写してから補間するので、0 が点でないと代表値と実際のスロートの温度が
+  食い違う; codex result レビュー m1 の再現例 s [−2,−1,1]・T [300,400,600] で代表値 500 K・実際 440 K)。**s の表は直管長 > 0** (直管なしは x_m の表; 同 m4)。
 - `wall_bcond_line` は分布なら `ints: {wallProfile: 1}` を付ける。
 - `prepare_ns` は分布なら run に**実寸に解決した表** `wall_temperature_profile.json` (元の座標の種類・元の表・x [m] の表・区切りの点) と
   `wall_profile_<wallID>.csv` (**空白区切り**の列 `x Ts`、x は m; ソルバは空白で分割して読む `boundaryCond.cpp:264` — カンマ区切りは起動で落ちる) を書き、`prepare_info.json` の `wall_thermal` に両方の sha256 を記録する。**run の中のこの 2 つが実行条件の正本**
@@ -121,8 +124,9 @@ spec:
 | 3 | ~~カード・見積もり・成果物~~ **完了 2026-10-13** | カード (`wt_card.py`: `Tw_profile`・`Tw_profile_csv`、見積もりの局所 T_w、s の区切りの点は設計壁から) と成果物 (`export/fluent_msh.py`・`deliverables.py`・`wall_tables.py`: Fluent の point profile を Fluent メッシュの壁面中心で、境界条件表・conditions.csv・xlsx シート `wall_temperature`・README、書き出しの入口で正本の照合)。試験: `run_wt_card_profile_tests.py` 87 ok (V1c は期待値と相対差 0、誤実装 (a) 代表温度・(b) 無次元の x・(c) カードの長さの区切り を検出)、`run_deliverables_walltemp_tests.py` 36 ok (V3: 1799 点 = 壁面数、最近傍の値と run の表の相対差 0 [元の s の表を独立に写した値とは 6.4e-11]、壁ノードで書く誤実装なら 585 面が 0.1 K 超; V1d 成果物側の負例 3 種で出力を作る前に止まる)。一様・断熱は 5a6dd76f と同一 (時刻の値を除く)。既存の試験 8 本も同数で合格 | O |
 | 4 | ~~skill~~ **完了 2026-10-13** | `design-intake` 3b で壁の熱条件を必ず聞く (断熱 / 一様 / 分布 s か x_m、区切りの点を表に含める)、`nozzle-design` の対応表に壁温 (分布) の行 | O |
 | 5 | ~~M5 デモ~~ **完了 2026-10-13** | `case/70.m5_air_wt_demo/run_0011_ns_walltemp_demo`: **V2 合格** (壁 1800 節点の `VALUE/T` と表の線形補間の最大差 1.5e-5 K、許容 0.1 K)。積分法が `Tw_table` を読んだことは `delta_r_initial.json` の `thermal_bc` で確認 (x は実効の r_t 0.0249699 m で割った値、終点 48.0615 = 1.20009 m / r_t)。warm start の元 run_0010 (一様 350 K)、cross-mesh、段 full (soft・mid が壁温の変化を吸収)、品質 PASS、NaN 0。収束は合否と別: `check_convergence --segment` NOT CONVERGED (main)、`check_quasisteady machmax,pmax` ALL STEADY、壁解像 PASS。成果物 PASS (Fluent profile 1799 点) | O |
-| 6 | result 段 | 諮問 (2026-10-13 codex: 物理壁への反映の確認が不足 [Major] → **採用**、V1e を追加して判定 A)。判断: 2026-10-13 codex — V1e を足せば完了の主張を支える。次は codex `--stage result` のレビュー | F |
-| 7 | (後続) `rerun_conditions.py`・SERN の分布対応 | 本計画の範囲外 | O |
+| 6 | ~~result 段~~ **完了 2026-10-13** | 諮問 (物理壁への反映の確認が不足 [Major] → 採用、V1e 判定 A)。レビュー GO-with-changes C0/M0/m4 → 全件採用して対応 (§6.1)。判断: 2026-10-13 codex — V1e を足せば完了の主張を支える | F |
+| 7 | (後続) `rerun_conditions.py`・SERN・較正スクリプトの分布対応 | 本計画の範囲外。`rerun_conditions.py` (一様の `--Tw` だけ)、SERN (`runner_sern.py` は `profile_ok=False`)、`wall_thermal_bc_integral` を直接使う case スクリプト (`case/70/c2_calibrate_kf.py`・`case/45/calibrate_contur.py`・`c2pin_solve.py`) は分布の問題では止まる (安全側)。分布で C2 の較正をするときに `integral_thermal_bc(p, d, scale)` へ移す | O |
+| 8 | (ユーザ) Fluent での profile の読み込み | `fluent/wall_temperature.prof` を Fluent で読み、壁の Thermal で `wall-temperature` `temperature` を選べること・面の値が表と合うことの確認 (手元に Fluent が無い; deliverables plan §5.1 #10 と同じくユーザに依頼) | — |
 
 ## 6. 検証 (事前登録)
 
@@ -135,11 +139,13 @@ spec:
   腕 A = デモの表、腕 B = スロートより下流 (s = 0.2・0.5・1) だけ +100 K。設計壁・scale・補正の設定は同じで、`--init-integral --prepare-only` を各 1 回。
   拡大部 x ∈ [1, x_e − 1] r_t で、積分法の δ_r の差 Δr_ref と保存された物理壁 (`wall_repr.json`) の半径の差 Δr_out を比べる。
   ε = max(1e-8 m, Σ (物理壁の許容 tol.r + 旧表現との差 d0) × scale)。**判定 A**: max|Δr_ref| > 10 ε かつ max|Δr_out − Δr_ref| ≤ ε。
-  **結果 (2026-10-13): 判定 A** — max|Δr_ref| 0.155 mm (出口)、max|Δr_out − Δr_ref| 7.1e-17 m、ε 1e-8 m (信号/ε 1.6e4)。出力 `case/70.m5_air_wt_demo/_walltemp_wall_ab/`。
+  **結果 (2026-10-13): 判定 A** — max|Δr_ref| 0.155 mm (検査区間の終点 x_e − 1 = 1.175 m; 実際の出口 1.200 m では Δr_ref = Δr_out = 0.159 mm、参考)、
+  max|Δr_out − Δr_ref| 7.1e-17 m、ε 1e-8 m (信号/ε 1.6e4)。**[2026-10-13 訂正、codex result レビュー m2]** 当初「出口 0.155 mm」と書いたのは検査区間の終点の値。出力 `case/70.m5_air_wt_demo/_walltemp_wall_ab/`。
 - **V1c 格子の見積もり** (codex plan レビュー M4): スロートの温度が同じで上流・下流の温度が違う 2 つの表で、選んだ断面の局所の $T_w$ と丸め前の第 1 層厚が、
   独立に計算した期待値と相対 1e-8。代表温度で置き換える誤実装・無次元の x をそのまま使う誤実装が落ちることを確かめる。
-- **V1d 正本の照合** (codex plan レビュー M3): CSV を書き換えた run・別の問題 YAML・スロートの温度が同じで分布だけ違う表のそれぞれで、`run_staged_ns` の起動と
-  成果物の書き出しが止まる (負例)。
+- **V1d 正本の照合** (codex plan レビュー M3): CSV を書き換えた run・別の run の JSON を写した run・スロートの温度が同じで分布だけ違う表の JSON に差し替えた run の
+  それぞれで、`run_staged_ns` の起動と成果物の書き出しが止まる (負例)。**外の問題 YAML (`--problem`) の壁温では run の正本を上書きしない** (分布が違っても run の表を使い、
+  一様の YAML を渡したときだけ注記; §4.4) — **[2026-10-13 同期、codex result レビュー m3]** 当初の「別の問題 YAML で止まる」は §4.4 の決定と矛盾していた。
 - **V2 M5 デモ (case/70) — 温度拘束の配管の検査**: 壁温分布 (例: 入口 320 K → スロート 500 K → 出口 330 K) の要求カードで、生成 → CFD 前の物理壁 (積分法が `Tw_table` を読んだことを
   `prepare_info.json`・`delta_r_initial.json` の記録で確認) → NS (warm start、短い run で可)。**合格: 最終 snapshot の場の壁ノードの `VALUE/T` が与えた分布の線形補間と
   最大差 ≤ 0.1 K** (node の壁は温度をピンするので配管の検査であって流れの妥当性ではない; codex plan レビュー m6)。warm start の元・引き継ぎの方法・壁温を変えた後の
@@ -153,6 +159,7 @@ spec:
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-10-13 | [2026-10-13-tooling-nozzle-wall-temperature-profile-plan.md](../../notes/reviews/2026-10-13-tooling-nozzle-wall-temperature-profile-plan.md) | GO-with-changes, C0/M4/m2 | **全件採用**: M1 Fluent の profile を壁面中心で (§4.4・V3)、M2 範囲を積分法の呼び出しごとに (§4.1・V1b の負例)、M3 run の中の表と CSV を正本に起動・再開・成果物で照合 (§4.2・V1d)、M4 格子の見積もりの数値試験 (V1c)、m5 入力の契約 (§4.1)、m6 V2 を配管の検査と明記し記録項目を追加 |
+| result | 2026-10-13 | [2026-10-13-tooling-nozzle-wall-temperature-profile-result.md](../../notes/reviews/2026-10-13-tooling-nozzle-wall-temperature-profile-result.md) | GO-with-changes, C0/M0/m4 | **全件採用**: m1 s の表は s = 0 を点として含むこと (`parse_profile`、回帰試験に codex の再現例) / m2 V1e の値を「検査区間の終点」と「実際の出口 0.159 mm」に分けた (`walltemp_wall_ab.py`・§6) / m3 §4.2 の旧案を履歴として分け、V1d を §4.4 と同期、較正スクリプトと Fluent の実機確認を §5.1 #7・#8 に / m4 s の表は直管長 > 0 をカードで早期に拒否 (x_m を案内、回帰試験)。試験: `run_wall_temperature_tests` 102 ok・`run_wt_card_profile_tests` 89 ok・`run_wt_card_tests` 86 ok・`run_deliverables_walltemp_tests` 36 ok |
 | diagnose (result 段の解釈) | 2026-10-13 | [2026-10-13-wall-temperature-profile-result-diagnose.md](../../notes/reviews/2026-10-13-wall-temperature-profile-result-diagnose.md) | Major 1: 検証が積分法の温度の読み取りで止まり、δ_r が初期の物理壁に反映されないことを検出できない | **採用**: §6 V1e (壁温だけを変えた prepare-only の A/B) を追加し、判定 A (差 7.1e-17 m ≤ ε 1e-8 m、信号 0.155 mm)。「V2 の NS を延ばして埋めない」も採用 |
 | diagnose | 2026-10-13 | [2026-10-13-wall-temperature-profile-diagnose.md](../../notes/reviews/2026-10-13-wall-temperature-profile-diagnose.md) | 結論: 壁温表の無次元化には寸法逆算中の実効 `scale` を使う契約と A/B を足す。Major 1 | **採用**: §4.2 に契約 (`wall_thermal_bc_integral_at(scale)`)、§6 に V1b。「V2 の 0.1 K だけで配管全体を合格にしない」も採用 (V1b・V3 と組で判定) |
 
@@ -174,3 +181,4 @@ spec:
 - 2026-10-13: §5.1 #3 実装 (カード・見積もり・成果物)。成果物の正本の扱いを §4.4 に追記。デモの YAML `case/70.m5_air_wt_demo/problem_m5_air_walltemp.yaml` (r_t 0.0249699 m、設計壁の終点はカードの拡大部長より +0.089 mm、寸法 PASS)。
 - 2026-10-13: §5.1 #5 (M5 デモ) — V2 合格 (`run_0011_ns_walltemp_demo`、最大差 1.5e-5 K)。成果物にも profile が載った。
 - 2026-10-13: result 段の諮問を採用し V1e (δ_r → 物理壁) を追加・判定 A。
+- 2026-10-13: result 段のレビュー (GO-with-changes, m4) を全件採用して対応し、status done → accepted へ移す。

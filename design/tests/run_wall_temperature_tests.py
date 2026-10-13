@@ -546,6 +546,15 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     v4[label + " prepare"] = bool(not diff and pi_same and not extra)
 SUMMARY["V4"] = v4
 
+# --- codex result レビュー 2026-10-13 m1: s = 0 を点として含まない s の表は拒否 (代表値と実際のスロートの温度の食い違いを作らない) ---
+r_, msg_ = raises(lambda: WTP.parse_profile({"s": [-2.0, -1.0, 1.0], "Tw_K": [300.0, 400.0, 600.0]}), "s = 0 を点として含む")
+check("m1: s = 0 を含まない s の表 (codex の再現例 s [-2,-1,1]・T [300,400,600]) は拒否", r_, msg_)
+p0_ = WTP.parse_profile({"s": [-2.0, -1.0, 0.0, 1.0], "Tw_K": [300.0, 400.0, 440.0, 600.0]})
+anc_ = WTP.anchors_m(0.2, 0.3, 1.2)
+xm_, tm_ = WTP.to_x_m(p0_, anc_)
+check("m1: s = 0 を含む表では代表値 = 実寸に写した表の x = 0 の値", WTP.representative_Tw(p0_) == float(np.interp(0.0, xm_, tm_)),
+      f"代表値 {WTP.representative_Tw(p0_)!r}・x = 0 {float(np.interp(0.0, xm_, tm_))!r}")
+
 print("\n要約:", json.dumps(SUMMARY, ensure_ascii=False, indent=1))
 print(f"\n{'ALL OK' if FAIL == 0 else f'{FAIL} FAIL'}")
 if FAIL == 0 and not KEEP_OUT:

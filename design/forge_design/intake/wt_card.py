@@ -346,6 +346,12 @@ def validate_card(card, card_dir=None) -> dict:
             wv = _wall_isothermal(errs, w, card_dir)
             if wv is not None:
                 out["wall"] = wv
+                # s の表は入口直管 [−2, −1] を区間で写すので直管長 > 0 が要る (codex result レビュー 2026-10-13 m4)
+                prof = wv.get("Tw_profile")
+                if isinstance(prof, dict) and "s" in prof and "inlet" in out \
+                        and isinstance(out["inlet"].get("pipe_length_m"), float) and not out["inlet"]["pipe_length_m"] > 0.0:
+                    errs.append("wall.Tw_profile の s の表は入口直管の長さ > 0 が要る (s ∈ [−2, −1] を直管に写す)。"
+                                "直管なし (inlet.pipe_length_m = 0) なら x_m の表 (実寸、原点は設計スロート) を使う")
         elif _mapping(errs, "wall (adiabatic)", w, ("thermal",)):
             out["wall"] = {"thermal": "adiabatic"}
     pa = card.get("p_ambient", "design")

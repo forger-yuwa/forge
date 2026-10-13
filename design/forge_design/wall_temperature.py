@@ -63,8 +63,9 @@ def parse_profile(obj) -> dict:
 
     mapping `{s: [...], Tw_K: [...]}` か `{x_m: [...], Tw_K: [...]}`。座標キーは厳密に 1 つ、未知のキーは不可。
     座標と `Tw_K` は同じ長さの 1 次元の有限な数値列・2 点以上、座標は狭義単調増加、`Tw_K` > 0。
-    `s` の表は [−2, 1] (入口端〜壁の終点) を覆うこと (許容 1e-12)。`x_m` の表は設計スロート x = 0 を含むこと
-    (代表値 = x = 0 の値を表の中で取るため。ノズル全長を覆う表なら必ず含む)。違反は理由つきの ValueError。"""
+    `s` の表は [−2, 1] (入口端〜壁の終点) を覆い、設計スロート s = 0 を**点として**含むこと (s の表は実寸の x に写してから x で補間するので、
+    0 が点でないと s で補間した代表値と実際の x = 0 の温度が違う; codex result レビュー 2026-10-13 m1)。`x_m` の表は設計スロート x = 0 を
+    含むこと (代表値 = x = 0 の値を表の中で取るため。x で補間するので 0 は点でなくてよい)。違反は理由つきの ValueError。"""
     if not isinstance(obj, dict):
         raise ValueError("Tw_profile は mapping ({s: [...], Tw_K: [...]} か {x_m: [...], Tw_K: [...]}) "
                          f"(受け取った値: {obj!r})")
@@ -94,6 +95,9 @@ def parse_profile(obj) -> dict:
     if c == "s":
         if not (xs[0] <= S_LO + COVER_TOL_M and xs[-1] >= S_HI - COVER_TOL_M):
             raise ValueError(f"Tw_profile.s の表は [−2, 1] (入口端〜壁の終点) を覆うこと (表の範囲 [{xs[0]!r}, {xs[-1]!r}])")
+        if 0.0 not in xs:
+            raise ValueError("Tw_profile.s の表は設計スロート s = 0 を点として含むこと (表は実寸の x に写してから補間するので、0 が点でないと "
+                             "代表値 [bcond の Ts・帳簿] と実際のスロートの温度が食い違う; 区切りの点 −2・−1・0・1 を含めるのを推奨)")
     elif not (xs[0] <= 0.0 <= xs[-1]):
         raise ValueError(f"Tw_profile.x_m の表は設計スロート x = 0 を含むこと (ノズル全長を覆う表; 表の範囲 [{xs[0]!r}, {xs[-1]!r}] m)")
     return {"coord": c, "coords": xs, "Tw_K": Ts}

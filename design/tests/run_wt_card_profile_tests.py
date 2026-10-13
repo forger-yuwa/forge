@@ -358,6 +358,17 @@ yA = est_s["A (上流 320/下流 330)"]["sections"]["y1_m"]
 yB = est_s["B (上流 450/下流 480)"]["sections"]["y1_m"]
 check("V1c: スロートの温度が同じ 2 つの表で、選んだ断面の y1 が違う (代表温度では区別できない差)",
       all(abs(yA[k] - yB[k]) / yA[k] > 1e-3 for k in K.values()), str([f"{yA[k]:.4e} vs {yB[k]:.4e}" for k in K.values()]))
+# --- codex result レビュー 2026-10-13 m4: s の表は直管長 > 0 が要る (カードで早期に拒否し x_m を案内) ---
+_inl = dict(BASE["inlet"]); _inl["pipe_length_m"] = 0.0
+r, msg = raises(lambda: W.validate_card(card(inlet=_inl, wall=iso(Tw_profile=S_DEMO))), "直管の長さ > 0", "x_m")
+check("m4: 直管長 0 のカードで s の表は拒否 (x_m を案内)", r, msg)
+_xm = {"x_m": [-0.3, 0.0, 1.21], "Tw_K": [320.0, 500.0, 330.0]}
+try:
+    W.validate_card(card(inlet=_inl, wall=iso(Tw_profile=_xm))); ok_ = True; msg = ""
+except ValueError as ex:
+    ok_ = False; msg = str(ex)[:200]
+check("m4: 直管長 0 のカードでも x_m の表は受ける", ok_, msg)
+
 print("   V1c の数値 (表, 座標, 断面, x [m], T_w 期待/実装 [K], y1 期待/実装 [m], 相対差, (a) T_w・ずれ, (b) T_w・ずれ):")
 for r in v1c:
     print(f"   {r[0]} {r[1]:>3} {r[2]}: x {r[3]:+.6f} m  T_w {r[4]:.6f}/{r[5]:.6f}  y1 {r[6]:.9e}/{r[7]:.9e}  相対 {r[8]:.1e}  "
