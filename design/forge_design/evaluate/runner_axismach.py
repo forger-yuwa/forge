@@ -723,6 +723,7 @@ MESH_EULER_KEYS = ("ni", "nj", "wall_first_frac", "throat_refine", "throat_width
 # (mesh / mesh_euler) に max_nodes (正の整数) と max_nodes_reason (空でない文字列) を組で書けば、その値まで許す (ユーザの了承を取ってから書く)。
 # 判定は run dir を作る前・設計チェーンの前に、実効の節点数 (mesh2d.node_count; axis_gap_frac の導出 nj を含む) で行う。
 MAX_NODES_2D = 300_000
+NS_STEPS_DEFAULT = 60_000      # NS の本段の既定の step 数 (2026-10-14 ユーザ決定、手順書 §2 ⑥ の最終 NS の標準。evaluate.ns_steps で上書き)
 
 
 def node_budget(m: dict, block: str) -> dict:
@@ -1442,7 +1443,16 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     xs_p = np.linspace(wall.x_throat, wall.x_e, 1500)
     np.savetxt(run_dir / "wall_physical.csv", np.c_[xs_p * scale, wall.r(xs_p) * scale],
                delimiter=",", header="x_m,r_m", comments="")
-    n = nsteps or int(p.evaluate.get("nStepOuter", 48000))
+    # NS の本段の step 数 (2026-10-14 ユーザ決定「1 ok」: 何も指定しないときは手順書の標準の 60,000 step)。`evaluate.nStepOuter` は Euler (`prepare`) だけが読む
+    # (雛形の 12,000 が NS にも効いて本段が短すぎた)。優先: 引数 nsteps (`--steps`) > `evaluate.ns_steps` > NS_STEPS_DEFAULT
+    if nsteps:
+        n, n_src = int(nsteps), "引数 (--steps)"
+    elif p.evaluate.get("ns_steps") is not None:
+        n, n_src = int(p.evaluate["ns_steps"]), "evaluate.ns_steps"
+    else:
+        n, n_src = NS_STEPS_DEFAULT, f"既定 {NS_STEPS_DEFAULT}"
+    if not nsteps and p.evaluate.get("nStepOuter") is not None and p.evaluate.get("ns_steps") is None:
+        print(f"[prepare_ns] 本段 {n} step ({n_src})。evaluate.nStepOuter {p.evaluate['nStepOuter']} は Euler だけが読む (2026-10-14 から)", flush=True)
     out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
     if n % out_int:
         # forge は outStepInterval の倍数でしか res を書かない → 最終 step の res が残るよう n を割り切る間隔に直す
@@ -1528,7 +1538,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "wall_fit": d["wall_fit"],      # 設計壁の当てはめ (joint: spline・mono_r2 ほか; plan tooling-nozzle-throat-monotone-r2 §5.1 #5 M4)
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
-            "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
+            "nStepOuter": n, "nStepOuter_source": n_src, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "wall_thermal": wt_rec,         # 分布なら Tw_profile と正本 2 つの sha256 (files) も
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}

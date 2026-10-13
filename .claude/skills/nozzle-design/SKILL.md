@@ -54,6 +54,11 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 - STEP を CAD で編集した後のメッシュの作り直しは `deliverables/mesh/rebuild_from_step.py` (x(u) を解いて station に合わせる)。
   編集後の形状の格子品質は `check_mesh_quality.py` で確かめる。
 
+## 計算の長さの既定 (2026-10-14)
+
+- NS の本段は何も指定しないと **60,000 step** (`--steps` > `evaluate.ns_steps` > 既定)。`evaluate.nStepOuter` は Euler の本段だけ。止める規則 (量が落ち着いたら止める) は
+  まだ設計チェーンに無い — M6 の `m9_watch.py` (case/45 専用) を風洞向けの量 (出口コア M・流量・δ_E) で移植するかは未決 (plan `tooling-nozzle-cooled-wall-ns-settling`)。
+
 ## メッシュの規模 (作る前に示す; AGENTS.md「メッシュの規模は作る前に示す」)
 
 - 要求カードの生成・`prepare`・`prepare_ns` の前に、**節点数** (Euler・NS。生成器は YAML のコメントと標準出力に `# 節点数` を出す) と時間の見込みを応答に書く。

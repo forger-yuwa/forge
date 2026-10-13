@@ -30,6 +30,7 @@ import ast
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -529,6 +530,12 @@ arc = subprocess.run(f"git -C {REPO} archive {REF_COMMIT} design solver_density_
 check("V4: 変更前のコード (git archive REF_COMMIT design solver_density_cuda/data) を展開", arc.returncode == 0, arc.stderr[-200:])
 CMP_FILES = ("bcondConfig.yaml", "solverConfig.yaml", "delta_r_initial.json", "delta_r_initial.csv", "wall_design.csv",
              "wall_physical.csv", "target_axis_M.csv", "wall_repr.json", "probe.yaml", "MESH_QUALITY.txt")
+def _cmp_bytes(f, path):
+    # NS の本段の step 数 (2026-10-14 に既定を 60,000 に変えた、runner_axismach.NS_STEPS_DEFAULT) は比べない — 下で値を別に確かめる
+    b = path.read_bytes()
+    return re.sub(rb"nStepOuter: \d+", b"nStepOuter: N", b) if f == "solverConfig.yaml" else b
+
+
 for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断熱)", pf45)):
     if label.startswith("case/45") and not (C45_PIN_DIR / raw45["geometry"]["initial_line_run"]).exists():
         print(f"   {label}: CFD ピンの run が無いので prepare の比較を飛ばした")
@@ -543,7 +550,7 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
         check(f"V4 {label}: prepare-only (変更前・今) が通る", False, (log_o if rc_o else log_n)[-300:])
         continue
     diff = [f for f in CMP_FILES if (r_old / f).exists() != (r_new / f).exists()
-            or ((r_old / f).exists() and (r_old / f).read_bytes() != (r_new / f).read_bytes())]
+            or ((r_old / f).exists() and _cmp_bytes(f, r_old / f) != _cmp_bytes(f, r_new / f))]
     pi_o = json.loads((r_old / "prepare_info.json").read_text()); pi_n = json.loads((r_new / "prepare_info.json").read_text())
     for pi_ in (pi_o, pi_n):          # 実行環境 (git の状態・時刻) と壁の当てはめの所要時間 [s] (壁時計) は比べない
         pi_.pop("environment", None)
@@ -554,6 +561,10 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     nodes_ok = pi_n.get("mesh", {}).get("n_nodes") == pi_n.get("mesh", {}).get("ni", 0) * pi_n.get("mesh", {}).get("nj", 0)
     for k in ("n_nodes", "max_nodes", "max_nodes_reason", "max_nodes_source"):
         pi_n.get("mesh", {}).pop(k, None)
+    # NS の本段の step 数: 変更前は evaluate.nStepOuter (雛形の 12,000) を読み、今は既定 60,000 (evaluate.ns_steps が無いとき)
+    ns_o, ns_n, ns_src = pi_o.pop("nStepOuter", None), pi_n.pop("nStepOuter", None), pi_n.pop("nStepOuter_source", None)
+    check(f"V4 {label}: NS の本段の step 数は既定 {RA.NS_STEPS_DEFAULT} (evaluate.ns_steps が無いとき; 変更前は evaluate.nStepOuter)",
+          ns_n == RA.NS_STEPS_DEFAULT and str(ns_src).startswith("既定"), f"変更前 {ns_o} → 今 {ns_n} ({ns_src})")
     pi_same = nodes_ok and json.dumps(pi_o, sort_keys=True) == json.dumps(pi_n, sort_keys=True)
     pi_diff = sorted(k for k in set(pi_o) | set(pi_n) if pi_o.get(k) != pi_n.get(k))
     extra = [f.name for f in r_new.iterdir() if f.name == WTP.RUN_JSON or f.name.startswith("wall_profile_")]
@@ -571,7 +582,7 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
         continue
     wall_dep = {"delta_r_initial.json", "delta_r_initial.csv", "wall_design.csv", "wall_physical.csv", "wall_repr.json", "MESH_QUALITY.txt"}
     diff_c = [f for f in CMP_FILES if (r_old / f).exists() != (r_cut / f).exists()
-              or ((r_old / f).exists() and (r_old / f).read_bytes() != (r_cut / f).read_bytes())]
+              or ((r_old / f).exists() and _cmp_bytes(f, r_old / f) != _cmp_bytes(f, r_cut / f))]
     dom_o = json.loads((r_old / "wall_repr.json").read_text())["domain"]
     dom_c = json.loads((r_cut / "wall_repr.json").read_text())["domain"]
     check(f"V4 {label}: 今の切り方は壁の長さに依るファイルだけが違い、設計壁の終点が直す前より下流 (入口端は同じ)",
