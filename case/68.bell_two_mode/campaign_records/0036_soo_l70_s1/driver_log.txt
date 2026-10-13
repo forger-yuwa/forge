@@ -1,0 +1,114 @@
+[soo] DOE 12 点 (LHS 36 点のうち成立 21 点の先頭)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_000] PASS x=[30.061 18.525 15.86 ] eta=0.9671527644210592 (2102.9s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_001] PASS x=[26.033 15.788 15.86 ] eta=0.9654666856465366 (1976.6s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_002] PASS x=[34.009 14.295 15.86 ] eta=0.9698038200564483 (1983.8s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_003] PASS x=[37.674  3.986 15.86 ] eta=0.9536968831059989 (1696.0s) 残差 NOT CONVERGED (still converging — run more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_004] PASS x=[28.505  3.231 15.86 ] eta=0.9636386400027801 (1557.1s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_005] PASS x=[35.762  5.273 15.86 ] eta=0.9605219781303478 (1548.6s) 残差 NOT CONVERGED (still converging — run more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_006] PASS x=[42.824  4.798 15.86 ] eta=0.9542906104346376 (1504.6s) 残差 NOT CONVERGED (still converging — run more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_007] PASS x=[32.858 14.51  15.86 ] eta=0.9696163906261589 (1614.7s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_008] PASS x=[35.999  5.638 15.86 ] eta=0.9602737048067009 (1591.1s) 残差 NOT CONVERGED (still converging — run more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_009] PASS x=[30.735  9.362 15.86 ] eta=0.9677396566979372 (1617.2s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_010] PASS x=[39.086 12.442 15.86 ] eta=0.968844548699185 (893.2s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[doe_011] PASS x=[33.456  2.612 15.86 ] eta=0.9618646428400781 (610.9s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_000: EI 1.121e-03 予測 η 0.970332 ± 2.1e-03 x=[38.1185 15.0801]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_000] PASS x=[38.119 15.08  15.86 ] eta=0.9694676696948961 (621.9s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_001: EI 3.376e-04 予測 η 0.969531 ± 1.2e-03 x=[33.8159 12.2822]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_001] PASS x=[33.816 12.282 15.86 ] eta=0.9690191245602485 (615.0s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_002: EI 2.132e-04 予測 η 0.969839 ± 4.9e-04 x=[36.7138 13.9606]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_002] PASS x=[36.714 13.961 15.86 ] eta=0.9698018616354838 (609.4s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_003: EI 1.201e-04 予測 η 0.968722 ± 1.2e-03 x=[34.5423 17.0222]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_003] PASS x=[34.542 17.022 15.86 ] eta=0.9691843797915118 (644.1s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_004: EI 1.026e-04 予測 η 0.964326 ± 3.6e-03 x=[25.4469  9.3112]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_004] PASS x=[25.447  9.311 15.86 ] eta=0.9635692968343544 (576.0s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_005: EI 9.331e-05 予測 η 0.969896 ± 5.5e-05 x=[34.9724 14.7176]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_005] PASS x=[34.972 14.718 15.86 ] eta=0.969918130373481 (636.6s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_006: EI 4.878e-05 予測 η 0.963381 ± 3.6e-03 x=[23.6249 19.9256]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_006] PASS x=[23.625 19.926 15.86 ] eta=0.960096551317983 (592.2s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_007: EI 6.706e-06 予測 η 0.969785 ± 1.1e-04 x=[33.6416 15.5855]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_007] PASS x=[33.642 15.586 15.86 ] eta=0.9697128291634094 (603.6s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_008: EI 9.545e-06 予測 η 0.969544 ± 2.7e-04 x=[39.7044 13.5501]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_008] PASS x=[39.704 13.55  15.86 ] eta=0.9689366409046611 (532.9s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_009: EI 9.967e-06 予測 η 0.968213 ± 9.0e-04 x=[31.4194  6.5162]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_009] PASS x=[31.419  6.516 15.86 ] eta=0.9663863290062576 (510.2s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_010: EI 1.116e-05 予測 η 0.969926 ± 1.5e-05 x=[35.463  14.9017]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_010] PASS x=[35.463 14.902 15.86 ] eta=0.9699169885529871 (425.6s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_011: EI 3.967e-06 予測 η 0.969922 ± 3.5e-07 x=[35.1498 14.7697]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_011] PASS x=[35.15 14.77 15.86] eta=0.9699228338136937 (402.8s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_012: EI 3.971e-06 予測 η 0.969926 ± 4.0e-06 x=[35.4337 14.6456]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_012] PASS x=[35.434 14.646 15.86 ] eta=0.9699254257337661 (566.6s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] ei_013: EI 6.317e-07 予測 η 0.967738 ± 7.9e-04 x=[28.3869 12.4558]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[ei_013] PASS x=[28.387 12.456 15.86 ] eta=0.967513738669003 (450.5s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] 停止 (stop_candidate) n 26・最良 η 0.9699254257337661 — 確認の 8 評価へ
+[soo] conf_000: EI 9.016e-08 予測 η 0.969925 ± 1.4e-07 x=[35.3796 14.7327]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_000] PASS x=[35.38  14.733 15.86 ] eta=0.9699249924345912 (395.8s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] conf_001: EI 1.078e-07 予測 η 0.963506 ± 1.8e-03 x=[42.95    9.0389]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_001] PASS x=[42.95   9.039 15.86 ] eta=0.9637081477956132 (539.3s) 残差 NOT CONVERGED (still converging — run more steps) (併記)
+[soo] conf_002: EI 1.168e-08 予測 η 0.963863 ± 1.5e-03 x=[26.6058  5.6662]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_002] PASS x=[26.606  5.666 15.86 ] eta=0.963802373300097 (643.1s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] conf_003: EI 1.403e-10 予測 η 0.963505 ± 1.3e-03 x=[24.4264 13.8616]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_003] PASS x=[24.426 13.862 15.86 ] eta=0.9620615515883788 (588.9s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] conf_004: EI 2.221e-08 予測 η 0.969925 ± 6.8e-08 x=[35.2748 14.6422]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_004] PASS x=[35.275 14.642 15.86 ] eta=0.9699252240839757 (233.3s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] conf_005: EI 8.135e-11 予測 η 0.958009 ± 2.3e-03 x=[44.9837  2.8261]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_005] PASS x=[44.984  2.826 15.86 ] eta=0.9454486069082586 (392.0s) 残差 NOT CONVERGED (still converging — run more steps) (併記)
+[soo] conf_006: EI 3.897e-10 予測 η 0.965252 ± 1.0e-03 x=[26.6557 19.3785]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_006] PASS x=[26.656 19.379 15.86 ] eta=0.9642763794193643 (235.3s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[soo] conf_007: EI 3.223e-09 予測 η 0.963229 ± 1.6e-03 x=[26.8386  2.5408]
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[conf_007] PASS x=[26.839  2.541 15.86 ] eta=0.9619504068906573 (285.6s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+[paste_isentropic_ic] species: initial field stamped with species_hash 9c6311fe2e4337ce (record resolved_species_9c6311fe2e4337ce.yaml; datum 298.15 K, species ['EXH'])
+[rep_best] PASS x=[35.434 14.646 15.86 ] eta=0.9699254912136682 (213.4s) 残差 NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) (併記)
+{
+ "stop": {
+  "reason": "stop_candidate",
+  "n": 26,
+  "K": 26,
+  "best": 0.9699254257337661,
+  "best_K_minus_window": 0.969918130373481
+ },
+ "best": {
+  "tag": "ei_012",
+  "x": [
+   35.433737195325605,
+   14.645575022684586,
+   15.860273471054576
+  ],
+  "eta_cf": 0.9699254257337661
+ },
+ "G": 0.0,
+ "confirm": "B (確認の区間では反例なし)"
+}
