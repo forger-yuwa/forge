@@ -23,6 +23,9 @@ plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §
 usage (design/ 直下):
   .venv-opt/bin/python -m forge_design.intake.wt_card CARD --out problem.yaml [--r-throat R] [--no-solve]
     → problem.yaml と problem.yaml.card_log.json (カードの値 → YAML のキーの対応表・警告・r_t の反復・格子の見積もり・寸法)
+  NS 後の補正 (2026-10-13, plan tooling-nozzle-deltastar-band-root-zone §4.3 3):
+  .venv-opt/bin/python -m forge_design.intake.wt_card CARD --out problem.yaml --ns-correction PREV_RUN [--delta-next CSV]
+    → 上に加えて problem_delta_r.csv (最終の r_t の補正の表; NS は deltastar_loop --delta-r-csv で立てる)
 """
 from __future__ import annotations
 
@@ -638,7 +641,9 @@ def mapping_table(card: dict, prob: dict) -> list:
         ("conditions.Tt", card["conditions"]["Tt"], "spec.Tt", s["Tt"], "そのまま [K]"),
         ("M_exit", card["M_exit"], "spec.M_design", s["M_design"], "そのまま"),
         (f"throat.diameter_{kind}_m", D, "spec.r_throat", rt,
-         "物理スロート径: CFD 前の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2)" if kind == "physical"
+         ("物理スロート径: NS 後の補正の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2; _card.ns_correction)"
+          if prob["_card"].get("r_t_method") == "physical_throat_ns_corrected" else
+          "物理スロート径: CFD 前の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2)") if kind == "physical"
          else "設計スロート径 / 2"),
         (("throat." + next((k for k in THROAT_CURVATURE_KEYS if k in card["throat"]), "curvature (雛形)")),
          card["throat"].get("curvature_radius_m", card["throat"].get("curvature_ratio", "(無し)")), "geometry.R", g["R"],
@@ -999,8 +1004,9 @@ def measure_design_dimensions(card, chain: dict, r_t_m: float, sizing: dict | No
     row("divergent_length", float(card["divergent_length_m"]), x_e * rt, tl, "設計壁の終点 x_e × r_t (設計スロートが原点)")
     if kind == "physical":
         if sizing is not None:
+            ns_after = str(sizing.get("delta_r_route", "")).startswith("ns_after")
             row("throat_diameter_physical", D, 2.0 * float(sizing["physical_throat"]["r_m"]), td,
-                "solve_rt_throat の物理スロート半径 × 2 (CFD 前の δ)")
+                f"solve_rt_throat の物理スロート半径 × 2 ({'NS 後の補正の δ_E' if ns_after else 'CFD 前の δ'})")
     else:
         row("throat_diameter_design", D, 2.0 * r_t_min * rt, td, "設計壁の最小半径 × 2")
     x_F = (chain.get("exit") or {}).get("x_F")
@@ -1257,12 +1263,19 @@ class _Retry(Exception):
 
 
 def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10, rel_tol: float = 1e-6,
-                  r_throat_m: float | None = None, log=print) -> dict:
+                  r_throat_m: float | None = None, ns_prev_run=None, ns_delta_next=None, log=print) -> dict:
     r"""要求カード → 問題 YAML (§4.1 2.)。戻り: card_log.json と同じ dict。
 
     - 物理スロート径のカード (sizing="auto"): r_t = 径/2 で YAML を書く → `solve_rt_throat(YAML, 径/2)` (CFD 前の δ) → r_t を更新して
       YAML を書き直す、を $|\Delta r_t|/r_t \le$ rel_tol まで繰り返す (max_outer 回で止まらなければ RuntimeError)。内側の
       `solve_rt_throat` の許容差は min(CFD 前の既定 1e-7 m, rel_tol × 径/2) (外側の判定より緩い内側で止めない)。
+    - **NS 後の補正** (ns_prev_run、CLI の `--ns-correction PREV_RUN [--delta-next CSV]`; plan tooling-nozzle-deltastar-band-root-zone
+      §4.3 3): 上の固定点の内側を `solve_rt_throat(YAML, 径/2, prev_run=PREV_RUN, delta_next=CSV)` (前の run の δ_E の全分布 ×
+      (r_t/S_prev)^−0.2、前の設計の x → s → その反復の設計の x) で解く。内側の許容差は min(NS 後の既定 1e-9 m, rel_tol × 径/2)。
+      実寸の長さはカードのまま (固定点は同じ)。最終の r_t・最終の設計での補正の表を YAML の横の `<stem>_delta_r.csv` に書き
+      (`deltastar_loop.write_ns_correction_table`、寸法を解いたのと同じ関数)、`_card.ns_correction` に出典 (前の run・delta_next・
+      壁ファイル・prepare_info の sha256・S_prev・揃えた表の端の差・写し) と表のパス・sha256 を残す。NS は
+      `deltastar_loop --delta-r-csv <表>` で立てる (sha256 を照合する)。物理スロート径のカード・sizing="auto"・r_throat_m なしに限る。
     - 設計スロート径のカード: r_t = 径/2 で 1 回。
     - r_throat_m (CLI の --r-throat): 外から与えた r_t で書くだけ (NS 後の解き直しの割り直し)。設計スロート径のカードには使えない。
     - sizing="none" (CLI の --no-solve): 物理スロート径でも解かずに r_t = 径/2 で書く (r_t は未解決とコメントに書く)。
@@ -1276,7 +1289,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
       止まれば例外 (形状が成立しない; codex 諮問 2026-10-13)。
     - **x_F が MOC の場の終点に張り付く** (`moc_call_record` の pinned、または終端特性線が壁に届かない例外): `geometry.x_end_margin` を
       0.5 ずつ上げる (上限 5.0、超えても解消しなければ例外)。"""
-    from ..feedback.deltastar_loop import SIZING_TOL_PRE_CFD_THROAT_M, solve_rt_throat
+    from ..feedback.deltastar_loop import SIZING_TOL_M, SIZING_TOL_PRE_CFD_THROAT_M, load_ns_correction, solve_rt_throat
     from ..probdef import load_problem
     t_all = time.time()
     card_path, out = Path(card_path), Path(out_yaml)
@@ -1287,10 +1300,17 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         raise ValueError(f"sizing は 'auto' か 'none' (受け取った値: {sizing!r})")
     if r_throat_m is not None and kind == "design":
         raise ValueError("設計スロート径 (diameter_design_m) のカードに --r-throat は使えない (r_t = 径/2 で決まる)")
+    if ns_delta_next is not None and ns_prev_run is None:
+        raise ValueError("--delta-next は --ns-correction PREV_RUN と一緒に使う")
+    if ns_prev_run is not None:
+        if kind != "physical" or sizing != "auto" or r_throat_m is not None:
+            raise ValueError("--ns-correction は物理スロート径のカードで r_t を解くときだけ (--r-throat・--no-solve・設計スロート径とは併用しない)")
+        load_ns_correction(ns_prev_run, ns_delta_next)   # 入力の検査 (使用域の held・表の端・前の設計の壁ファイル) を固定点の前に
     auto: dict = {}                  # 自動調整した geometry のキー → 値 (make が card_to_problem の後に当てる)
     auto_adjust: list = []           # 自動調整の履歴
     relaxed: dict | None = None      # L_total_tol_relaxed
     moc_log: list = []               # design_chain ごとの from_length の各評価 (card_log)
+    last_inner_table: bytes | None = None   # NS 後の補正: 最後の内側の solve_rt_throat が書いた補正の表 (最終の表との照合用)
     base_geom = card_to_problem(card, D / 2.0)["geometry"]
 
     def make(rt):
@@ -1370,6 +1390,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
 
     def solve_loop():
         """r_t を決める。戻り (rt, 履歴, solve_rt_throat の最後の結果, method, method_text, 内側の許容差)。"""
+        nonlocal last_inner_table
         if r_throat_m is not None:
             rt = float(r_throat_m)
             return rt, [], None, "external", f"外から与えた r_t (--r-throat {rt!r} m; NS 後の解き直しなど。生成器は解いていない)", None
@@ -1377,7 +1398,9 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             return D / 2.0, [], None, "design_throat", "設計スロート径 / 2 (解かない)", None
         if sizing == "none":
             return (D / 2.0, [], None, "unsolved", "**未解決** (--no-solve): 仮に 物理スロート径/2。solve_rt_throat で解いていない", None)
-        inner_tol = min(SIZING_TOL_PRE_CFD_THROAT_M, rel_tol * D / 2.0)
+        ns = ns_prev_run is not None
+        # 内側の許容差: CFD 前は初期見積もりの既定 (1e-7 m)、NS 後の補正は NS 後の既定 (1e-9 m) と rel_tol × 径/2 の小さい方
+        inner_tol = min(SIZING_TOL_M if ns else SIZING_TOL_PRE_CFD_THROAT_M, rel_tol * D / 2.0)
         rt = D / 2.0
         hist: list = []
         res = None
@@ -1386,7 +1409,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             prob = make(rt)
             cap = _MocCapture()
             L_tgt = float(prob["dv"]["L_total"]["value"])
-            rec = {"stage": f"r_t 反復 {k} (solve_rt_throat)", "r_t_m": rt, "n_axis_inv": prob["geometry"].get("n_axis_inv"),
+            rec = {"stage": f"r_t 反復 {k} (solve_rt_throat{', NS 後の補正' if ns else ''})", "r_t_m": rt,
+                   "n_axis_inv": prob["geometry"].get("n_axis_inv"),
                    "x_end_margin": prob["geometry"].get("x_end_margin"), "L_total_tol": prob["geometry"].get("L_total_tol"),
                    "L_total_target_rt": L_tgt}
             with tempfile.TemporaryDirectory() as td:
@@ -1394,7 +1418,13 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
                 path.write_text(yaml.safe_dump(prob, sort_keys=False, allow_unicode=True))
                 try:
                     with cap:
-                        res = solve_rt_throat(path, D / 2.0, tol_R_m=inner_tol)
+                        if ns:
+                            tab = Path(td) / "delta_r_iter.csv"
+                            res = solve_rt_throat(path, D / 2.0, prev_run=ns_prev_run, delta_next=ns_delta_next, delta_r_out=tab,
+                                                  tol_R_m=inner_tol)
+                            last_inner_table = tab.read_bytes()
+                        else:
+                            res = solve_rt_throat(path, D / 2.0, tol_R_m=inner_tol)
                 except (ValueError, RuntimeError) as ex:
                     rec.update(evals=_evals_log(cap.calls, rt, L_tgt), outcome=f"{type(ex).__name__}: {str(ex)[:200]}")
                     moc_log.append(rec)
@@ -1417,6 +1447,12 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             log(f"[wt_card] r_t 反復 {k}: r_t {rt!r} → {rt_new!r} m (|Δ|/r_t {rel:.3e}、内側 {res['n_iter']} 回・残差 "
                 f"{res['residual_m']:.3e} m、{time.time() - t0:.1f} s)", flush=True)
             rt = rt_new
+            if rel <= rel_tol and ns:
+                text = (f"NS 後の補正の solve_rt_throat (δ: 前の run {ns_prev_run} の δ_E の全分布 × (r_t/S_prev)^−0.2、前の設計の x → s → "
+                        f"今の設計の x) で物理スロート半径 {D / 2.0!r} m に合わせた固定点 (外側 {len(hist)} 回、最後の |Δr_t|/r_t {rel:.2e} ≤ "
+                        f"{rel_tol:g}、内側の許容差 {inner_tol:.3g} m)。補正の表は YAML の横の {out.stem}_delta_r.csv "
+                        "(出典と sha256 は _card.ns_correction; NS は deltastar_loop --delta-r-csv で立てる)")
+                return rt, hist, res, "physical_throat_ns_corrected", text, inner_tol
             if rel <= rel_tol:
                 text = (f"CFD 前の solve_rt_throat (δ: 積分法の初期壁、prepare_ns と同じ経路) で物理スロート半径 {D / 2.0!r} m に合わせた "
                         f"固定点 (外側 {len(hist)} 回、最後の |Δr_t|/r_t {rel:.2e} ≤ {rel_tol:g}、内側の許容差 {inner_tol:.3g} m)。"
@@ -1491,8 +1527,26 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         "warnings": list(warnings),
         "generated": datetime.date.today().isoformat(),
     })
-    header = _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust)
     out.parent.mkdir(parents=True, exist_ok=True)
+    ns_rec = None
+    if ns_prev_run is not None:
+        # 最終の r_t・最終の設計 (この YAML の設計壁) での補正の表を YAML の横に書く (寸法を解いたのと同じ関数; plan
+        # tooling-nozzle-deltastar-band-root-zone §4.3 3)。最後の内側の反復は r_t の入力が最終の r_t と rel_tol 以内で違いうるので、
+        # 表は最終の設計の区切りの点で作り直し、内側の表と同じかを記録する
+        from ..feedback.deltastar_loop import (design_anchors, ns_correction_record, ns_correction_table,
+                                               write_ns_correction_table)
+        corr = load_ns_correction(ns_prev_run, ns_delta_next)
+        a_new = design_anchors(chain["wall"])
+        tb = ns_correction_table(corr, a_new, rt)
+        table_path = out.with_name(out.stem + "_delta_r.csv")
+        write_ns_correction_table(table_path, tb, corr, rt, a_new)
+        ns_rec = _json_safe({
+            **ns_correction_record(corr, a_new), "table": str(table_path), "table_sha256": _sha256(table_path),
+            "r_t_m": rt, "factor": tb["factor"], "table_x_range_rt": [float(tb["x"][0]), float(tb["x"][-1])],
+            "final_table_equals_last_inner": (last_inner_table is not None and table_path.read_bytes() == last_inner_table),
+            "use": f"deltastar_loop --problem {out.name} --delta-r-csv {table_path.name} (sha256 を照合する)"})
+        prob["_card"]["ns_correction"] = ns_rec
+    header = _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust)
     _write_problem(card, prob, out, header)
     load_problem(out)               # 書いたものが読み込みの検査を通ること
     euler_out = write_euler_companion(out)
@@ -1512,6 +1566,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             "mesh_estimate": {k: v for k, v in est.items() if k != "sections"},     # 断面ごとの配列は書かない
             "liquefaction": liq, "dimensions": dims, "time_s": time.time() - t_all,
             "euler_companion": (str(euler_out) if euler_out else None)}
+    if ns_rec is not None:
+        logd["ns_correction"] = ns_rec
     logd = _json_safe(logd)
     Path(str(out) + ".card_log.json").write_text(json.dumps(logd, indent=1, ensure_ascii=False))
     return logd
@@ -1601,6 +1657,15 @@ def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnin
     if dims.get("x_F_minus_x_e_m") is not None:
         h.append(f"  MOC の出口 x_F と設計壁の終点 x_e の差 {dims['x_F_minus_x_e_m'] * 1e3:+.3f} mm (from_length は x_F を合わせ、"
                  "壁とメッシュは x_e で終わる)")
+    ns = prob["_card"].get("ns_correction")
+    if ns:
+        e = ns["table_ends"]
+        h.append(f"NS 後の補正: 前の run {ns['prev_run']} の {ns['delta_next']} (sha256 {ns['delta_next_sha256'][:16]}…) の δ_E × "
+                 f"(r_t/S_prev)^−0.2 (S_prev {ns['S_prev_m']!r} m、factor {ns['factor']!r})。x は {ns['x_map']}。表の端を前の設計に揃えた差 "
+                 f"始点 {e['start']['diff_rt']:+.3e}・終点 {e['end']['diff_rt']:+.3e} r_t (ε_f32 {e['start']['eps_f32_rt']:.2e}・"
+                 f"{e['end']['eps_f32_rt']:.2e})")
+        h.append(f"  補正の表: {ns['table']} (sha256 {ns['table_sha256'][:16]}…) — NS は deltastar_loop --delta-r-csv で立てる "
+                 "(問題 YAML の _card.ns_correction.table_sha256 と照合する)")
     fd = prob["_card"].get("moc_field")
     if fd:
         h.append(f"逆 MOC の場: x_F {fd['x_F']:.6f} r_t、切る前の壁の終点 {fd['x_wall_full_end']:.6f} r_t (x_F の {fd['margin_to_field_end_rt']:.4g} r_t "
@@ -1656,6 +1721,13 @@ def _print_report(logd: dict) -> None:
         rl = logd["L_total_tol_relaxed"]
         print(f"from_length の内部許容差を緩めた: {rl['from']:.4g} → {rl['to']} r_t (カードの公差は不変)")
     print(f"液化: {logd['liquefaction']['verdict']}")
+    ns = logd.get("ns_correction")
+    if ns:
+        e = ns["table_ends"]
+        print(f"NS 後の補正: {ns['delta_next']} (前の run {ns['prev_run']}、S_prev {ns['S_prev_m']!r} m)、x の写し {ns['x_map']}、"
+              f"表の端の差 始点 {e['start']['diff_rt']:+.3e}・終点 {e['end']['diff_rt']:+.3e} r_t → 表 {ns['table']} "
+              f"(sha256 {ns['table_sha256'][:16]}…、x {ns['table_x_range_rt'][0]:.9g}〜{ns['table_x_range_rt'][1]:.9g} r_t、"
+              f"最後の内側の表と同一: {ns['final_table_equals_last_inner']})")
     d = logd["dimensions"]
     print(f"寸法 (設計壁から): {'PASS' if d['pass'] else 'FAIL'}")
     for r in d["rows"]:
@@ -1674,11 +1746,20 @@ def main(argv=None) -> int:
     ap.add_argument("--no-solve", action="store_true", help="物理スロート径でも r_t を解かない (仮に 径/2)")
     ap.add_argument("--max-outer", type=int, default=10)
     ap.add_argument("--rel-tol", type=float, default=1e-6)
+    ap.add_argument("--ns-correction", default=None, metavar="PREV_RUN",
+                    help="NS 後の補正: r_t の固定点の内側を PREV_RUN の δ_E の全分布で解き (solve_rt_throat --prev と同じ)、最終の r_t の補正の表を "
+                         "YAML の横の <stem>_delta_r.csv に書く (出典と sha256 は _card.ns_correction)")
+    ap.add_argument("--delta-next", default=None, metavar="CSV",
+                    help="--ns-correction のとき δ_E を読む delta_r_next.csv (既定 PREV_RUN/delta_r_next.csv)")
     a = ap.parse_args(argv)
+    if a.delta_next is not None and a.ns_correction is None:
+        ap.error("--delta-next は --ns-correction PREV_RUN と一緒に使う")
     logd = build_problem(a.card, a.out, sizing=("none" if a.no_solve else "auto"), max_outer=a.max_outer, rel_tol=a.rel_tol,
-                         r_throat_m=a.r_throat)
+                         r_throat_m=a.r_throat, ns_prev_run=a.ns_correction, ns_delta_next=a.delta_next)
     _print_report(logd)
     print(f"→ {a.out}  ({a.out}.card_log.json)")
+    if logd.get("ns_correction"):
+        print(f"→ {logd['ns_correction']['table']}  (NS 後の補正の表。deltastar_loop --delta-r-csv に渡す)")
     eo = Path(a.out).with_name(Path(a.out).stem + "_euler" + Path(a.out).suffix)
     if eo.exists():
         print(f"→ {eo}  (Euler の参照用。physical_wall_repr・pw_upstream を除いた写し)")
