@@ -121,7 +121,7 @@ spec:
 | 3 | ~~カード・見積もり・成果物~~ **完了 2026-10-13** | カード (`wt_card.py`: `Tw_profile`・`Tw_profile_csv`、見積もりの局所 T_w、s の区切りの点は設計壁から) と成果物 (`export/fluent_msh.py`・`deliverables.py`・`wall_tables.py`: Fluent の point profile を Fluent メッシュの壁面中心で、境界条件表・conditions.csv・xlsx シート `wall_temperature`・README、書き出しの入口で正本の照合)。試験: `run_wt_card_profile_tests.py` 87 ok (V1c は期待値と相対差 0、誤実装 (a) 代表温度・(b) 無次元の x・(c) カードの長さの区切り を検出)、`run_deliverables_walltemp_tests.py` 36 ok (V3: 1799 点 = 壁面数、最近傍の値と run の表の相対差 0 [元の s の表を独立に写した値とは 6.4e-11]、壁ノードで書く誤実装なら 585 面が 0.1 K 超; V1d 成果物側の負例 3 種で出力を作る前に止まる)。一様・断熱は 5a6dd76f と同一 (時刻の値を除く)。既存の試験 8 本も同数で合格 | O |
 | 4 | ~~skill~~ **完了 2026-10-13** | `design-intake` 3b で壁の熱条件を必ず聞く (断熱 / 一様 / 分布 s か x_m、区切りの点を表に含める)、`nozzle-design` の対応表に壁温 (分布) の行 | O |
 | 5 | ~~M5 デモ~~ **完了 2026-10-13** | `case/70.m5_air_wt_demo/run_0011_ns_walltemp_demo`: **V2 合格** (壁 1800 節点の `VALUE/T` と表の線形補間の最大差 1.5e-5 K、許容 0.1 K)。積分法が `Tw_table` を読んだことは `delta_r_initial.json` の `thermal_bc` で確認 (x は実効の r_t 0.0249699 m で割った値、終点 48.0615 = 1.20009 m / r_t)。warm start の元 run_0010 (一様 350 K)、cross-mesh、段 full (soft・mid が壁温の変化を吸収)、品質 PASS、NaN 0。収束は合否と別: `check_convergence --segment` NOT CONVERGED (main)、`check_quasisteady machmax,pmax` ALL STEADY、壁解像 PASS。成果物 PASS (Fluent profile 1799 点) | O |
-| 6 | result 段 | 諮問とレビュー | F |
+| 6 | result 段 | 諮問 (2026-10-13 codex: 物理壁への反映の確認が不足 [Major] → **採用**、V1e を追加して判定 A)。判断: 2026-10-13 codex — V1e を足せば完了の主張を支える。次は codex `--stage result` のレビュー | F |
 | 7 | (後続) `rerun_conditions.py`・SERN の分布対応 | 本計画の範囲外 | O |
 
 ## 6. 検証 (事前登録)
@@ -131,6 +131,11 @@ spec:
   (表は内部で 10 K 以上の差が出る勾配のものを使う)。`x_m` の表で、B だけ積分区間が表の外に出るように作った場合は**例外**になる (端値クランプで通らない)。
 - **V1 単体**: 書式の正例 (表・CSV)・負例 (非単調・負の温度・`Tw` との併用・壁を覆わない表)、`thermal_bc` の `Tw_table` の x が `x_m / r_t` と相対 1e-15、
   bcond の行に `wallProfile: 1`、CSV が表と一致 (値の文字列の往復で相対 1e-12)。
+- **V1e δ_r が物理壁まで伝わる** (codex result 段の諮問 2026-10-13 で追加; 事前登録は `case/70.m5_air_wt_demo/walltemp_wall_ab.py` の docstring):
+  腕 A = デモの表、腕 B = スロートより下流 (s = 0.2・0.5・1) だけ +100 K。設計壁・scale・補正の設定は同じで、`--init-integral --prepare-only` を各 1 回。
+  拡大部 x ∈ [1, x_e − 1] r_t で、積分法の δ_r の差 Δr_ref と保存された物理壁 (`wall_repr.json`) の半径の差 Δr_out を比べる。
+  ε = max(1e-8 m, Σ (物理壁の許容 tol.r + 旧表現との差 d0) × scale)。**判定 A**: max|Δr_ref| > 10 ε かつ max|Δr_out − Δr_ref| ≤ ε。
+  **結果 (2026-10-13): 判定 A** — max|Δr_ref| 0.155 mm (出口)、max|Δr_out − Δr_ref| 7.1e-17 m、ε 1e-8 m (信号/ε 1.6e4)。出力 `case/70.m5_air_wt_demo/_walltemp_wall_ab/`。
 - **V1c 格子の見積もり** (codex plan レビュー M4): スロートの温度が同じで上流・下流の温度が違う 2 つの表で、選んだ断面の局所の $T_w$ と丸め前の第 1 層厚が、
   独立に計算した期待値と相対 1e-8。代表温度で置き換える誤実装・無次元の x をそのまま使う誤実装が落ちることを確かめる。
 - **V1d 正本の照合** (codex plan レビュー M3): CSV を書き換えた run・別の問題 YAML・スロートの温度が同じで分布だけ違う表のそれぞれで、`run_staged_ns` の起動と
@@ -148,6 +153,7 @@ spec:
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-10-13 | [2026-10-13-tooling-nozzle-wall-temperature-profile-plan.md](../../notes/reviews/2026-10-13-tooling-nozzle-wall-temperature-profile-plan.md) | GO-with-changes, C0/M4/m2 | **全件採用**: M1 Fluent の profile を壁面中心で (§4.4・V3)、M2 範囲を積分法の呼び出しごとに (§4.1・V1b の負例)、M3 run の中の表と CSV を正本に起動・再開・成果物で照合 (§4.2・V1d)、M4 格子の見積もりの数値試験 (V1c)、m5 入力の契約 (§4.1)、m6 V2 を配管の検査と明記し記録項目を追加 |
+| diagnose (result 段の解釈) | 2026-10-13 | [2026-10-13-wall-temperature-profile-result-diagnose.md](../../notes/reviews/2026-10-13-wall-temperature-profile-result-diagnose.md) | Major 1: 検証が積分法の温度の読み取りで止まり、δ_r が初期の物理壁に反映されないことを検出できない | **採用**: §6 V1e (壁温だけを変えた prepare-only の A/B) を追加し、判定 A (差 7.1e-17 m ≤ ε 1e-8 m、信号 0.155 mm)。「V2 の NS を延ばして埋めない」も採用 |
 | diagnose | 2026-10-13 | [2026-10-13-wall-temperature-profile-diagnose.md](../../notes/reviews/2026-10-13-wall-temperature-profile-diagnose.md) | 結論: 壁温表の無次元化には寸法逆算中の実効 `scale` を使う契約と A/B を足す。Major 1 | **採用**: §4.2 に契約 (`wall_thermal_bc_integral_at(scale)`)、§6 に V1b。「V2 の 0.1 K だけで配管全体を合格にしない」も採用 (V1b・V3 と組で判定) |
 
 ## 7. 影響範囲
@@ -167,3 +173,4 @@ spec:
 - 2026-10-13: §4.3 を訂正 (見積もりの s の区切りの点もその設計の壁から取る)。カードの長さで写すと、公差の内で設計壁の終点がカードの長さを超えたときに表が壁を覆わない (デモで +0.089 mm)。
 - 2026-10-13: §5.1 #3 実装 (カード・見積もり・成果物)。成果物の正本の扱いを §4.4 に追記。デモの YAML `case/70.m5_air_wt_demo/problem_m5_air_walltemp.yaml` (r_t 0.0249699 m、設計壁の終点はカードの拡大部長より +0.089 mm、寸法 PASS)。
 - 2026-10-13: §5.1 #5 (M5 デモ) — V2 合格 (`run_0011_ns_walltemp_demo`、最大差 1.5e-5 K)。成果物にも profile が載った。
+- 2026-10-13: result 段の諮問を採用し V1e (δ_r → 物理壁) を追加・判定 A。
