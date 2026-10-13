@@ -490,12 +490,20 @@ public:
             splitOnSpace(l_str, line);
             geom_int nn = stoi(l_str[3]);
 
-            id_now += nn;
-
+            // 節点はファイル内の順番で番号を振る (タグは読まない)。タグがファイル順に 1..N でない msh
+            // (gmsh が CAD 要素ごとに節点を分けて書き、元の番号を保ったもの等) は接続が黙って壊れるので止める。
             for (geom_int i = 0 ; i < nn ; i++)
             {
                 getline(inputFile, line);
+                if (stol(line) != (long)(id_now + i + 1))
+                {
+                    cerr << "Error: gmsh node tags are not 1..N in file order (tag " << line
+                         << " at position " << (id_now + i + 1) << "). Renumber the mesh before conversion." << endl;
+                    exit(EXIT_FAILURE);
+                }
             }
+
+            id_now += nn;
 
             for (geom_int i = 0 ; i < nn ; i++)
             {

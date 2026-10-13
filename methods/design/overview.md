@@ -789,7 +789,20 @@ $x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3
    壁の異なる 4 場での δ_r ばらつき 3 %、尾部取りこぼしの系統バイアス −3 % (出口 M で ≤0.05 %)。
    **δ_r の平滑化は 5 次 P-spline** (3 階差分ペナルティ, ノット 2 r_t 相当, λ=1) — 壁曲率が滑らかになる (曲率ノイズ 2e-4 [1/r_t]; 3 次平滑化では 1e-3〜8e-3 で設計曲率並みに凸凹した)。壁更新は単調性ガード付き (非単調なら λ を強める)。
    符号付き質量欠損 $D=2\pi\int_{y<y_b}(q_{ref}-q_{NS})r\,dr$ を壁側の円環に詰め直した $\delta_r = r_{w,NS}-r_{eff}$ を
-   **直管〜出口の全列**で取る ($x_{lo}$ なし・縁判定なし・相関補完なし)。内側 30 % コアの単一倍率 α とコア RMS は診断
+   **直管〜出口の全列**で取る ($x_{lo}$ なし・縁判定なし・相関補完なし)。
+   **等価半径の探索は積分域に限る** (2026-10-13 実装 ae34f09e、plan [`tooling-nozzle-deltastar-band-root-zone`](../../plans/accepted/tooling-nozzle-deltastar-band-root-zone.md) §4.1):
+   $r_{eff}$ は壁から帯の下端 $y_b$ までの累積流量 $F(y)=2\pi\int q_{ref}\,r\,dr$ だけで引き、区間の中で $F$ が単調でなければ hard の不合格にする。
+   $q_{ref}$ は帯の 1 次フィットの外挿なので、帯の傾きが大きい断面 (遷音速のスロート直後) ではコアで $q_{ref}<0$ になり、全半径の $F$ で `np.interp` すると
+   末尾が $D$ を下回って軸の半径を返し **$\delta_r = r_w$** になっていた (case/70 x ≈ 1〜3、case/45 run_0089 の縮流部)。この誤った値は edge の帯の位置を決める梯子にも入り、
+   帯の位置の平滑化 (半幅 3・ノット 6 r_t) を通じて x ≈ 18 まで δ_E を動かす (case/70 run_0010: x = 10 で −9.3 %)。修正後のスロートの δ_E は流量からの実効値と 1.5〜5 % で一致する。
+   符号で分岐する前に探索域の $q_{ref}$ が有限・正かを検査し、違えば `nonpos_ref` (hard)。NS 後の寸法 (`solve_rt_throat --prev`) は使用域 [0, x_e] に hard/held の点があれば止まり、
+   補正の表の端は前の設計の入口端・出口に float32 の 2 回の丸めの範囲で揃え、区間で正規化した座標 s で今の設計へ写す。`wt_card --ns-correction PREV_RUN` はこの補正で
+   実寸の長さを保ったままカードから r_t と壁を作り直し、`deltastar_loop --delta-r-csv` で NS を準備する。
+   **設計壁の検査と出口の終点 (2026-10-13)**: 設計壁の単調性は 4000 点の隣接差分でなく、設計壁のスプラインそのもので「最小の壁角 ≥ −1e-4°・最大の累積減少 ≤ 1e-7 r_t」を見る
+   (35ab6821; 旧検査は出口直前のほぼ平行な区間の 1e-9 r_t 級の減少で r_t ごとにまばらに落ち、点の間の狭い収縮は見逃していた)。cplus の閉包で x_F が終端の壁点の丸め下に来たときは
+   その点を落とさず補間した交点を足す (de35cb0b; 旧規則では壁 = メッシュ = STEP が 1 点間隔短く、case/70 で 0.85 mm・case/45 生産で 5.35 mm)。
+   **既知の限界**: 冷却壁 (case/70、T_w/T_aw ≈ 0.3) の NS には非常に遅いモードがあり、残差が床に着いた後も出口 M と流量が 10 万 step 単位で動き続ける。NS 後の作り直しの固定点はこのモードが
+   定常になってからでないと閉じない (plan [`tooling-nozzle-cooled-wall-ns-settling`](../../plans/active/tooling-nozzle-cooled-wall-ns-settling.md))。内側 30 % コアの単一倍率 α とコア RMS は診断
    (同じ $x$ でコア全体を合わせる方式は、上流の壁 δ 誤差が特性線で下流の軸へ運ぶ波を欠損に取り込み反復が収縮しなかった —
    case/45 run_0019)。実測: 壁の異なる 3 つの NS 場から同じ $\delta_r(x)$ が ±1 % で出る。
    壁更新は半径方向 $r^{k+1}_{phys} = r_{inv} + (1-\omega)\delta^k_{in} + \omega\,\delta^k_{ext}$ ($\omega$=0.5 → 1.0)。
@@ -1240,6 +1253,64 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 2 run から目的量の感度ブラケットを取り、設計公差より小さければ断熱設計 + ロバスト性記録、大きければ公称 $T_w$ で設計
 (等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
 フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
+
+## 実寸の要求カードと成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 実装・検証済み
+
+計画: [`plans/accepted/tooling-nozzle-wt-deliverables.md`](../../plans/accepted/tooling-nozzle-wt-deliverables.md)。
+実装: `design/forge_design/intake/wt_card.py`・`design/forge_design/export/deliverables.py` ほか。検証は case/45 の生産の壁と case/70 (M5 空気)。**Fluent での読み込みは未確認** (実物の 2D の Fluent メッシュと書式・面の向きを照合済み)。
+
+### 要求カード (実寸入力 → problem YAML)
+
+風洞ノズルの要求は実寸で与えられることが多い (全圧・全温・ガス・出口マッハ数・物理スロート径・入口半径・
+入口直管長・縮流部長・スロート→出口長・壁温)。問題 YAML は寸法を $r_t$ 単位で持つので、両者の橋渡しを
+**要求カード** (`forge.wt_card/v1`) が受け持つ。カードは実寸 [m] で書き、生成器が $r_t$ で割って
+`geometry.r_inlet`・`geometry.L_pipe`・`geometry.L_U`・`dv.L_total` (`Lc_mode: from_length`) と
+`spec.wall_thermal`・`spec.sizing` に写す。
+
+- 長さの起点: `L_total` は設計スロート ($x=0$) から物理出口 $x_F$ まで (`Lc_mode: from_length` の定義)。
+- 壁の熱条件 (plan [`tooling-nozzle-wall-temperature-profile`](../../plans/accepted/tooling-nozzle-wall-temperature-profile.md)、2026-10-13 実装): 断熱 / 等温 (一様 `Tw`) / 等温 (分布 `Tw_profile: {s|x_m, Tw_K}` か `Tw_profile_csv`)。`s` は区間で正規化した座標 (入口直管 [−2,−1]・縮流部 [−1,0]・拡大部 [0,1]; 区切りの点はその設計の壁から取る) で長さを振っても分布が追従する。`x_m` は実寸で原点は設計スロート。表は壁の全長を覆うこと (端値クランプに頼らない)。分布は `forge_design.wall_temperature` が呼ぶたびにその場の寸法で実寸に写し、積分法には `Tw_table` (x / 実効の r_t)、NS には `wall_profile_3.csv` (空白区切り `x Ts`、`wallProfile: 1`) で渡す。run の `wall_temperature_profile.json` と CSV が正本で、`prepare_info.json` の sha256 と NS の各段の起動前・成果物の書き出しの前に照合する。成果物は Fluent の point profile (`fluent/wall_temperature.prof`、Fluent メッシュの壁面中心の値; Fluent での読み込みは未確認)。格子の見積もりは断面ごとの局所の T_w を使う。case/70 `run_0011_ns_walltemp_demo` で場の壁ノードの T が表と最大 1.5e-5 K、壁温だけを変えた A/B で積分法の δ_r の差が物理壁へ 7e-17 m で伝わる。対応範囲: s の表は s = 0 を点として含み、直管長 > 0 (直管なしは x_m)。`rerun_conditions.py`・SERN・`wall_thermal_bc_integral` を直接使う較正スクリプトは分布の問題では止まる (未対応)。
+- スロートの曲率: `throat.curvature_radius_m` (設計壁の曲率半径の実寸) か `throat.curvature_ratio` (= `geometry.R`) を任意で与える。設計壁はスロート付近で $r_w = 1 + x^2/(2R)$ ($r_t$ 単位) で、同じ $R$ が遷音速解 (Hall) の出発線と縮流部の 5 次多項式の端の曲率に入る。無ければ雛形の $R=2$。
+  `L_U` は縮流部の始まり ($x=-L_U$) から設計スロートまで、`L_pipe` はその上流の直管。
+- 物理スロート径を固定する場合、$r_t$ は `solve_rt_throat` で決まり、$r_t$ が変わると $r_t$ 単位の長さが
+  実寸からずれる。生成器は「$r_t$ を解く → 長さを割り直す」を相対変化が許容値を下回るまで繰り返す
+  (CFD 前の寸法。NS 後に $r_t$ を解き直したときも同じ割り直しを行う)。
+
+### 成果物一式
+
+最終 NS の run から 1 コマンドで書き出す (`<run>/deliverables/`)。
+
+| 成果物 | 中身 | 出典 |
+| --- | --- | --- |
+| STEP (2D) | 物理壁の 1 本の 5 次 B-spline 曲線 (mm、$x$ = 軸、原点 = 設計スロート) | 既存 `export/wall_step.py` |
+| STEP (3D)・STL | 2D 曲線を $x$ 軸まわりに 360° 回した内面 | FreeCAD (case/45 `cad_deliverables.py` の一般化) |
+| gmsh | 解析メッシュ (msh4.1・msh2.2) と、STEP から同じ構造のメッシュを作り直す gmsh スクリプト + 構造ファイル | run の `nozzle.msh` |
+| Fluent | 2D 軸対称のメッシュ (Fluent 形式 `.msh`、境界の名前と型つき) と CGNS、境界条件表 | 同上 + `bcondConfig.yaml` |
+| Excel | 形状表 (mm: $x, r$, 壁角, 曲率半径, 弧長, 周長, 累積側面積) と CFD 壁面量表 (壁節点ごと: 圧力・温度・壁面せん断・壁への熱流束・リング面積) | `wall_repr.json`・`res_wall_<physID>_*.h5` |
+
+**「同じ構造」の定義**: 元のメッシュと**接続 (四角形の節点番号の並び) が同一**で、各節点が
+「station $x_i$ と半径方向の比 $s_{ij}=r_{ij}/r_w(x_i)$」で表され、$r_w$ を STEP の曲線から評価して
+作り直した節点が元の節点と許容差内で一致すること。現行の `mesh2d` の格子 (格子線が $x$ = 一定の縦線) が対象。
+格子線が縦でない格子 (壁法線の近壁層など) は構造ファイルの形式が違うので、書き出しを拒否する。
+
+**Fluent 形式の面の向き**: Fluent のメッシュは面ごとに両側のセル $c_0, c_1$ を持ち、境界面は $c_1=0$。
+2D の面 (辺 $n_0\to n_1$) は**進行方向の左側が $c_0$** ($\hat z\times(n_1-n_0)$ が $c_0$ を向く)。実物の 2D の Fluent メッシュ
+(TGrid 2D、OpenFOAM-10 の `icoFoam/elbow/elbow.msh`) で 1,454 面すべてがこの向きだった。3D の実物 (case/30・32) では節点順の右手系の
+法線が全面で $c_0$ を向く。**3D の規則から 2D を押し出しで推定すると逆になる** (2026-10-13 に一度そう推定して、2D の実物で否定した)。
+
+**寸法の出荷ゲート**: 成果物は、最終の STEP と配布するメッシュから**測り直した**寸法 (入口半径・直管長・縮流部長・物理スロート径・
+設計スロート→出口の長さ) が要求カードの公差に入るときだけ合格とする。YAML の値 × $r_t$ の往復は単位換算の検査で、形状の検査ではない
+(`Lc_mode: from_length` の既定の許容差は 0.05 $r_t$ で、カードの公差から `geometry.L_total_tol` を決める)。
+
+**壁への熱流束**: 正本は `output.interfaceDiag: 1` の壁ダンプが出す保存形の熱量 (固体向き正;
+[`methods/boundary.md`](../boundary.md) 「界面熱量の 4 つの定義」)。**軸対称 (`axisymMethod: 0`) では `iface_q_eff` は $q$ でなく $r\,q$**
+(流束は $r$ 重みの面積で積むが、`iface_q_eff` は $r$ を掛けない面積で割る)。そこで積分済みの `iface_Qf_eff` [W/rad] から
+全周の節点熱量 $Q_{node}=2\pi\,$`iface_Qf_eff` を作り、節点の壁面の $r$ 重み面積 $A_{node}=2\pi\sum_f r_f|S_f|$ で割って $q$ にする。
+`qwall` は $r$ 重みの面積で割った再構成勾配形の診断値 (流体向き正) で、正本が使えない run では符号を反転し「診断値」と明記して出す。
+正本は等温壁・定常・`interfaceDiag: 1` のときだけ値を持ち、それ以外もデータセットは NaN で出るので、熱量の列には状態
+(`valid`・`not_applicable`・`missing`・`diagnostic`・`nonfinite`) を付け、熱設計に使えるか (`thermal_use`) は収束・準定常・壁解像の判定と組で示す。
+準定常は総熱量だけでなく、**壁の全節点の熱量**の最悪で判定する (総熱量が一定のまま熱流束の分布が入れ替わる変化や、区間の中での入れ替わりを見落とさないため)。壁を x の順に 16 区間に分けた和は補助の診断として時系列に残す。
+幾何のリング面積との積分の整合は $|\sum q\,A_{ring} - \sum Q| / \sum |Q| \le 10^{-4}$ (面積の定義の差だけが残る) で、外れたら成果物と `thermal_use` を不合格にする。
+単体の寸法ゲート `python -m forge_design.export.dimension_gate STEP --card CARD --msh MSH` は弦の形状誤差を配布する msh と STEP から測る (`--msh` が無ければ「未判定」)。
 
 ## 評価と目的関数
 

@@ -569,6 +569,33 @@ def terminal_exit(pts, wall, x_E: float, M_d: float, gamma: float = 1.4,
             "n_frozen": n_frozen, "path": np.asarray(path)}
 
 
+# 物理出口で切った壁の表に交点を足すかの下限 [r_t]: x_F と残った最後の壁点の間隔がこれ未満なら足さない (落ちていない扱い)。
+# plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c
+EXIT_APPEND_MIN_GAP = 1e-9
+
+
+def _cut_wall_at_exit(wall: np.ndarray, x_F: float) -> tuple:
+    r"""壁の表 (x 昇順、列 [x, r, θ, M]) を物理出口 $x_F$ で切る (`wall_mode='cplus'` の閉包)。
+
+    `wall[:, 0] <= x_F` で切った後、$x_F$ が残った最後の点より `EXIT_APPEND_MIN_GAP` 以上下流で、元の壁に $x_F$ を挟む区間が
+    あれば、その区間で**全列を線形補間した点** $(x_F, r_F, \theta, M)$ を末尾に足す ($r$ は `exit['r_F']` と同じ `np.interp`)。
+
+    背景 (plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c、deliverables plan §5.1 #15 の codex 諮問 2026-10-13): $x_F$ は
+    終端 C⁺ 自身の壁点の上に来るが、丸めでその点の 1e-13 程度下になると切る規則だけではその点が落ち、壁の終点 $x_e$ が
+    ちょうど 1 点間隔短くなっていた。最後の点の $x$ の書き換えは採らない (値と位置がずれる)。
+
+    戻り: (切った壁の表, exit に足す記録 {`x_F_appended`: 足したか, `x_F_minus_last_node_rt`: 足す前の $x_F$ − 最後の点の $x$})。"""
+    cut = wall[wall[:, 0] <= x_F]
+    gap = float(x_F - cut[-1, 0]) if len(cut) else float("nan")
+    k = int(np.searchsorted(wall[:, 0], x_F, side="right"))   # wall[k-1, 0] ≤ x_F < wall[k, 0]
+    append = bool(len(cut) and 0 < k < len(wall) and gap >= EXIT_APPEND_MIN_GAP)
+    if append:
+        pt = np.array([np.interp(x_F, wall[:, 0], wall[:, c]) for c in range(wall.shape[1])])
+        pt[0] = x_F
+        cut = np.vstack([cut, pt])
+    return cut, {"x_F_appended": append, "x_F_minus_last_node_rt": gap}
+
+
 def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
                   exit_mode, x_E, M_d, start_line, axis_thr=None) -> dict:
     r"""`wall_mode='cplus'` の設計本体 — **補間構造を一切作らない**経路。
@@ -610,7 +637,8 @@ def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
         exit_info.update({"x_F": x_F,
                           "r_F": float(np.interp(x_F, wall[:, 0], wall[:, 1])),
                           "x_E_index": m_E, "n_frozen": 0})
-        wall = wall[wall[:, 0] <= x_F]
+        wall, cut_info = _cut_wall_at_exit(wall, x_F)
+        exit_info.update(cut_info)
     elif exit_mode == "lip":
         i_pk = int(np.argmax(wall[:, 2]))
         after = wall[i_pk:, 2] <= np.deg2rad(0.05)

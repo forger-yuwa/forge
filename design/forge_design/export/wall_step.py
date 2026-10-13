@@ -149,6 +149,19 @@ def read_step(step_path, u=(), revolve: bool = False, freecadcmd: str | None = N
     return _freecad(job, freecadcmd)
 
 
+def write_surface(step2d, step3d, stl, linear_deflection_mm: float = 0.05, angular_deflection: float = 0.05,
+                  freecadcmd: str | None = None) -> dict:
+    """2D の STEP (`write_step` が書いた辺 1 本) を x 軸まわりに 360° 回した内面を 3D の STEP と STL (mm) に書く
+    (plans/accepted/tooling-nozzle-wt-deliverables.md §4.2 の cad/)。
+    STL の弦誤差の設定は `linear_deflection_mm` [mm] と `angular_deflection` [rad] (README に書く値)。
+    戻り: FreeCAD の報告 (書いた殻の妥当性・面積、3D の STEP を読み直した面の数・妥当性・面積・bbox [mm]、STL の三角形の数・面積)。
+    回転面の面積の独立の検査 (gmsh) は `cad_check_gmsh.py` で別に行う。"""
+    job = {"mode": "surface", "step2d": str(Path(step2d).resolve()), "step3d": str(Path(step3d).resolve()),
+           "stl": str(Path(stl).resolve()), "linear_deflection_mm": float(linear_deflection_mm),
+           "angular_deflection": float(angular_deflection)}
+    return _freecad(job, freecadcmd)
+
+
 def sample_params(data: dict, n_per_interval: int = 3, eps_rel: float = 1e-12) -> list:
     """転送誤差の検査点: 各ノット区間の内部 n_per_interval 点 + 全ノットの左右の極限 (u = ノット ∓ δ、δ は u の丸めより十分大きい)。
     戻り: [(u, side, label)]。"""
