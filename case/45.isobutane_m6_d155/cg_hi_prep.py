@@ -32,6 +32,8 @@ class HalfInletWall:
 
     def __init__(self, base):
         self._b = base
+        # required_attrs は wall.__dict__ から pw_upstream を直接読む (wall_axismach.required_attrs) ので、インスタンスの属性として写す
+        self.pw_upstream = base.__dict__.get("pw_upstream")
         j = [float(np.asarray(base.r(np.array([0.0]), d) if d else base.r(np.array([0.0])))[0]) for d in (0, 1, 2)]
         self.join = j
         self._L = -X_U_NEW
