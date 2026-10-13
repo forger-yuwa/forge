@@ -1298,7 +1298,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
                omega: float | None = None, prev_run=None, initializer=None,
-               cfl_main: float | None = None, implicit_relax: float | None = None) -> dict:
+               cfl_main: float | None = None, implicit_relax: float | None = None,
+               stop_rule: bool | None = None) -> dict:
     r"""**物理壁 (inviscid + δ*) の RANS run** を準備する (A12)。
 
     plan: plans/active/tooling-nozzle-axismach-viscous-deltastar.md。
@@ -1326,8 +1327,14 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       解決済みの値は prepare_info.json の `pw_upstream` に、`poly` のゲートは `pw_upstream_gate` に書く。
     - **`spec.sizing`** (任意、§4.2): 寸法の決め方 {method: exit | throat, target_m}。prepare_info.json の `sizing` に、実際の物理壁の
       物理スロート半径・出口半径 [m] と目標との差を書く (キー無しは method = null = 未記録)。
+    - **停止規則** (plan tooling-nozzle-cooled-wall-ns-settling §4.6、`stop_rule.resolve_settings`): 既定で使う。`evaluate.stop_rule: false` か
+      引数 `stop_rule=False` (CLI `--no-stop-rule`) で使わない。使うときの本段の上限は `--steps` (引数 nsteps) > `evaluate.stop_rule_cap` >
+      200,000 で、`run_staged_ns` が本段の solverConfig に書く (ここで書く solverConfig の nStepOuter は使わない・使えないときの本段の長さ
+      = `--steps` > `evaluate.ns_steps` > 60,000 のまま)。`euler_ref` が無い・出力の間隔が窓に 9 点を入れられないときは使えない (記録)。
+      決めた設定は prepare_info.json の `stop_rule` に書く。
     """
     from ..feedback.deltastar import _sutherland
+    from . import stop_rule as SR
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, check_required_attrs, save_wall_file
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
@@ -1342,6 +1349,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     sizing = _sizing_spec(p.spec)
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
+    SR.check_evaluate_keys(p.evaluate)           # 停止規則の YAML のキー (evaluate.stop_rule・stop_rule_cap) の不正値は run dir を作る前に例外
     # 節点数の上限 (plan tooling-nozzle-mesh-size-guard §4.2): 実効の節点数で run dir を作る前・設計チェーンの前に判定する
     # (節点数は scale によらないので scale 1 で数える。既定の ni・nj・第 1 層は下の格子と同じ ns_mesh_defaults)
     ns_mesh_defaults = {"ni": 561, "nj": 97, "wall_first_frac": 4.5e-5}
@@ -1459,6 +1467,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
     cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
     implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
+    # 停止規則の設定 (使うか・上限・閾値; run_staged_ns が読む)
+    sr_settings = SR.resolve_settings(p.evaluate, nsteps_arg=nsteps, n_main=n, n_main_source=n_src, out_int=out_int,
+                                      euler_ref=euler_ref, requested=stop_rule)
     # 壁温分布なら壁の行に wallProfile: 1 (CSV は上で書いた。この runner だけが profile_ok=True)
     (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p)))
     (run_dir / "probe.yaml").write_text(PROBE_STUB)
@@ -1539,6 +1550,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "nStepOuter": n, "nStepOuter_source": n_src, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
+            "stop_rule": sr_settings,       # 停止規則 (plan tooling-nozzle-cooled-wall-ns-settling §4.6): 使うか・上限・閾値・使わない理由
             "wall_thermal": wt_rec,         # 分布なら Tw_profile と正本 2 つの sha256 (files) も
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}
@@ -1603,7 +1615,8 @@ def _stage_manifest_cls():
     return StageManifest
 
 
-def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> int:
+def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000,
+                  stop_rule: bool | None = None, stop_rule_watch: dict | None = None) -> int:
     """NS の起動。stages:
     - "full" (既定・run_0030 レシピ): soft (1次 cfl0.5 ni10, 3000 step) → mid (1次 cfl1, 3000) → 本段 (2次 cfl_main)。
     - "none": 本段だけ (収束済み NS 場からの warm start 用)。
@@ -1615,7 +1628,15 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。
     壁温分布の run は**各段の起動前** (前段の restart の後を含む) に run の正本 (wall_temperature_profile.json・wall_profile_<id>.csv) を
     prepare_info.json の sha256 と照合し、合わなければ config を書く前・forge を起動する前に ValueError で止める
-    (`wall_temperature.load_run_profile`; plan tooling-nozzle-wall-temperature-profile §4.2)。一様・断熱の run は何もしない。"""
+    (`wall_temperature.load_run_profile`; plan tooling-nozzle-wall-temperature-profile §4.2)。一様・断熱の run は何もしない。
+
+    **本段の停止規則** (plan tooling-nozzle-cooled-wall-ns-settling §4.6、`stop_rule.py`): prepare_info.json の `stop_rule` が使う (`use`) なら、
+    本段の nStepOuter を上限 (`cap`: `--steps` > `evaluate.stop_rule_cap` > 200,000) に書き換えて solverConfig と stage_manifest.json に記録し、
+    forge を子プロセスで持ったまま見張る (`stop_rule.watch_main_stage`; REACHED・DIVERGED で止めて後の出力を消す、記録は stop_rule.json)。
+    `stop_rule=False` (CLI `--no-stop-rule`) なら使わない。要求したのに使えない (euler_ref が無い・見つからない、出力の間隔) ときは
+    stop_rule.json に UNAVAILABLE と理由を書き、本段は prepare の長さ (ns_steps) で今までどおり回す。prepare_info.json に `stop_rule` の無い
+    run (2026-10-14 より前の準備) と使わない run は今までと同じ。`stop_rule_watch` は見張りの時間の設定 (試験用; poll_s・settle_s ほか)。
+    戻り: forge の終了コード (停止規則のときは REACHED・CENSORED = 0、それ以外は非 0; 内訳は stop_rule.json)。"""
     import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
@@ -1683,13 +1704,51 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
     elif stages != "none":
         raise ValueError("stages は 'full' / 'none' / 'ramp'")
+    from . import stop_rule as SR
+    sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
+    if sr_use:
+        # 停止規則の上限を本段の nStepOuter に (manifest の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
+        n_main = int(sr["cap"])
+        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
     _check_wall_profile("main")
     _cfg_check(cfg_main, {**main_want, "nStepOuter": n_main}, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
-    rc = run_forge(run_dir)
+    if sr_use:
+        w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
+        rc = w["rc"]
+        print(f"[stop_rule] 本段: {w['status']} (止めた/最後の出力 {w['stop_step']}、forge rc {w['forge_rc']}、上限 {n_main}) → "
+              f"{run_dir / SR.RECORD}", flush=True)
+    else:
+        if sr_why is not None:
+            # 要求したのに使えない: 理由を記録し、本段は prepare の長さで今までどおり回す
+            urec = {"version": 1, "plan": "plans/active/tooling-nozzle-cooled-wall-ns-settling.md §4.6", "settings": sr,
+                    "status": "UNAVAILABLE", "reason": sr_why, "action": f"停止規則を使わず本段を nStepOuter {n_main} で回す",
+                    "started": SR._now()}
+            SR.save_record(run_dir, urec)
+            print(f"[stop_rule] 使えない ({sr_why}) — 本段は {n_main} step", flush=True)
+        rc = run_forge(run_dir)
+        if sr_why is not None:
+            urec.update(forge_rc=SR._forge_exit(run_dir), run_case_rc=rc, finished=SR._now())
+            SR.save_record(run_dir, urec)
     _record(cfg_main, "main")
     return rc
+
+
+def _stop_rule_for_main(run_dir: Path, stop_rule: bool | None) -> tuple:
+    """本段で停止規則を使うか: (prepare_info の stop_rule, 使う, 要求したのに使えない理由)。
+    prepare_info に stop_rule が無い (2026-10-14 より前の準備)・使わない指定 (prepare の要求・引数 stop_rule=False) は (sr, False, None) で
+    今までどおり。euler_ref の実在は起動前に確かめる (見つからなければ使えない)。"""
+    from . import stop_rule as SR
+    pi = run_dir / "prepare_info.json"
+    sr = json.loads(pi.read_text()).get("stop_rule") if pi.exists() else None
+    if sr is None or not sr.get("requested") or stop_rule is False:
+        return sr, False, None
+    if not sr.get("use"):
+        return sr, False, sr.get("reason") or "prepare で使えないと記録"
+    if SR.resolve_path(sr.get("euler_ref")) is None:
+        return sr, False, f"euler_ref が見つからない ({sr.get('euler_ref')!r})"
+    return sr, True, None
 
 
 if __name__ == "__main__":

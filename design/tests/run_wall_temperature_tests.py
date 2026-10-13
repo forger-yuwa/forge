@@ -565,12 +565,18 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     ns_o, ns_n, ns_src = pi_o.pop("nStepOuter", None), pi_n.pop("nStepOuter", None), pi_n.pop("nStepOuter_source", None)
     check(f"V4 {label}: NS の本段の step 数は既定 {RA.NS_STEPS_DEFAULT} (evaluate.ns_steps が無いとき; 変更前は evaluate.nStepOuter)",
           ns_n == RA.NS_STEPS_DEFAULT and str(ns_src).startswith("既定"), f"変更前 {ns_o} → 今 {ns_n} ({ns_src})")
+    # 停止規則の設定 (2026-10-14 に足したキー、plan tooling-nozzle-cooled-wall-ns-settling §4.6) は変更前に無いので比べない。
+    # 既定 (要求あり・上限 200,000・使わないときの本段 = NS_STEPS_DEFAULT) であることを別に見る
+    sr_n = pi_n.pop("stop_rule", None) or {}
+    check(f"V4 {label}: 停止規則の設定は既定 (要求あり・上限 200,000・使わないときの本段 {RA.NS_STEPS_DEFAULT})",
+          sr_n.get("requested") is True and sr_n.get("cap") == 200000 and sr_n.get("fallback_steps") == RA.NS_STEPS_DEFAULT
+          and "stop_rule" not in pi_o, str({k: sr_n.get(k) for k in ("requested", "use", "cap", "cap_source", "fallback_steps", "reason")}))
     pi_same = nodes_ok and json.dumps(pi_o, sort_keys=True) == json.dumps(pi_n, sort_keys=True)
     pi_diff = sorted(k for k in set(pi_o) | set(pi_n) if pi_o.get(k) != pi_n.get(k))
     extra = [f.name for f in r_new.iterdir() if f.name == WTP.RUN_JSON or f.name.startswith("wall_profile_")]
     present = [f for f in CMP_FILES if (r_new / f).exists()]
     check(f"V4 {label}: prepare-only の生成物が変更前とバイト同一 ({len(present)} 個 + prepare_info から environment・"
-          "physical_wall.fit.build_seconds・mesh の節点数と上限を除いたもの)、壁温の JSON・CSV を書かない", not diff and pi_same and not extra,
+          "physical_wall.fit.build_seconds・mesh の節点数と上限・stop_rule を除いたもの)、壁温の JSON・CSV を書かない", not diff and pi_same and not extra,
           f"違うファイル {diff}、prepare_info の違うキー {pi_diff}、余分 {extra}、mesh.n_nodes = ni × nj {nodes_ok}")
     check(f"V4 {label}: 一様・断熱の run の load_run_profile は None", WTP.load_run_profile(r_new) is None)
     v4[label + " prepare"] = bool(not diff and pi_same and not extra)
