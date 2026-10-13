@@ -153,7 +153,7 @@ forge の結果が「軸対称・乱流・近軸で forge だけ妙な値にな�
 `prepare`・`prepare_ns`・自作の格子台本の前) に、**節点数と、手元の GPU での 1 万 step あたりの時間の見込み**を応答に書く。2D 軸対称の axis-Mach チェーンは、要求カードの生成器と
 `prepare`/`prepare_ns` が実効の節点数 (`axis_gap_frac` の導出 nj を含む) を格子を作る前に数え、**上限 30 万点** (Euler・NS 共通、`runner_axismach.MAX_NODES_2D`) を超えたら止まる。
 超える格子が要るときは**ユーザの了承を取ってから** `mesh.max_nodes`・`mesh_euler.max_nodes` と `max_nodes_reason` (了承の要旨) を書く (要求カードは `overrides` に)。了承なしに AI が書かない。
-Euler の ni は NS の ni と同じ (切り離すと Euler の解が動く、plan [`tooling-nozzle-mesh-size-guard`](plans/active/tooling-nozzle-mesh-size-guard.md) §4.1)。
+Euler の ni は NS の ni と同じ (切り離すと Euler の解が動く、plan [`tooling-nozzle-mesh-size-guard`](plans/accepted/tooling-nozzle-mesh-size-guard.md) §4.1)。
 
 **既存ツールの再利用を最優先 (必須、2026-10-13 ユーザ指示「新規に検証スクリプトを作ろうとして、めちゃくちゃ時間かかった」)**: 検証・判定・後処理・設計の評価のために
 新しいスクリプトを書く**前に**、既存のツールを探して使う。探す順:

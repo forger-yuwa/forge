@@ -1,0 +1,11 @@
+{
+ "ni": 1800,
+ "nj": 97,
+ "n_nodes": 174600,
+ "max_nodes": 300000,
+ "max_nodes_reason": null,
+ "max_nodes_source": "default",
+ "source": "mesh_euler",
+ "problem": "case/70.m5_air_wt_demo/problem_m5_air_c2b_euler.yaml",
+ "run_dir": "(scratch, 破棄) /tmp/claude-1000/-home-sano-work-forge/bd18adac-85f4-4627-811b-8f3186867995/scratchpad/v4_prepare"
+}

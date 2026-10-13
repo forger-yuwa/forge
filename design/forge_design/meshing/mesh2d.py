@@ -163,6 +163,12 @@ def radial_node_count(prm: Mesh2DParams, max_nj: int | None = None) -> tuple:
     if prm.axis_gap_frac is not None:
         if prm.wall_first_frac_throat is not None:
             raise ValueError("axis_gap_frac と wall_first_frac_throat の併用は未対応")
+        if max_nj is not None and int(prm.nj) - 1 > max_nj:
+            # 配列を作る前の打ち切り (2026-10-14 result 段レビュー M1: `_capped_layout` は指定 nj の `_radial_fracs` を作るので、nj が極端に大きいと
+            # 数える前に巨大な配列を確保していた)。実効の nj ≥ 指定 nj − 1: 等比の部分は元の配点の先頭の区間そのままで、残りの区間はどれも cap 以上
+            # (q ≥ 1 なので打ち切った後の区間は大きくなる一方) だから一様の区間の数 m = ceil(rest / cap) は残りの区間の数以上になる。
+            # 前提は `_radial_fracs` の等比の配点が正常なこと (nj が大きく第 1 層が薄いと Newton が退化して第 1 層 0 になる既存の欠陥がある; その格子は品質検査で落ちる)。
+            return int(prm.nj) - 1, False
         gaps, _, m = _capped_layout(prm.nj, prm.wall_first_frac, prm.axis_gap_frac, max_nj)
         if m is None:
             return len(gaps) + 2, False

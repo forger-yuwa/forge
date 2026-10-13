@@ -162,6 +162,26 @@ nj_long, exact_long = M.radial_node_count(prm_long, max_nj=300_000 // 2000)
 dt = time.perf_counter() - t
 check("nj 10 万・axis_gap_frac 0.5 (等比の部分が長い): 等比の数え上げを打ち切って 1 秒以内に limit + 1 以上",
       n_long > 300_000 and not exact_long and nj_long > 150 and dt < 1.0, f"{n_long}、nj ≥ {nj_long}、{dt * 1e3:.1f} ms")
+# result 段レビュー M1 (2026-10-14): 指定 nj が極端に大きいと `_capped_layout` が数える前に nj 個の配列を作っていた → 指定 nj − 1 の下限で配列の前に打ち切る
+with patched(M, "_radial_fracs", lambda *a, **k: (_ for _ in ()).throw(AssertionError("_radial_fracs を呼んだ (配列を確保)"))):
+    t = time.perf_counter()
+    n_huge = M.node_count(M.Mesh2DParams(ni=2000, nj=1_000_000_000, wall_first_frac=0.005, axis_gap_frac=0.005), limit=300_000)
+    dt = time.perf_counter() - t
+check("指定 nj 10 億・axis_gap_frac 0.005: `_radial_fracs` (配列) を呼ばずに limit + 1 以上", n_huge > 300_000 and dt < 1.0, f"{n_huge}、{dt * 1e3:.2f} ms")
+viol = []
+for nj in (3, 10, 65, 97, 201, 1000):
+    for fr in (0.4, 0.05, 5e-3, 4.5e-5, 1e-6):
+        for cap in (0.9, 0.5, 0.05, 0.005, 1e-3):
+            g0 = np.diff(M._radial_fracs(nj, fr))[::-1]
+            if not (np.all(np.isfinite(g0)) and g0[0] > 0 and np.isfinite(g0[1] / g0[0])):
+                continue    # 等比の配点が壊れる組 (nj が大きく第 1 層が薄いと Newton が退化し第 1 層 0; 既存の欠陥、plan §5.1 #8) は下限の前提の外
+            try:
+                nj_eff, ok = M.radial_node_count(M.Mesh2DParams(ni=10, nj=nj, wall_first_frac=fr, axis_gap_frac=cap))
+            except Exception:  # noqa: BLE001 — 実現不能な組は数えない
+                continue
+            if nj_eff < nj - 1:
+                viol.append((nj, fr, cap, nj_eff))
+check("打ち切りの下限 (実効の nj ≥ 指定 nj − 1) が等比の配点の正常な組で成り立つ", not viol, viol[:5])
 t = time.perf_counter()
 e = raises(lambda: RA.check_node_budget(M.Mesh2DParams(ni=2000, nj=97, wall_first_frac=0.005, axis_gap_frac=1e-7), {}, "mesh_euler"))
 dt = time.perf_counter() - t
