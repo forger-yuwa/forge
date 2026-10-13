@@ -119,8 +119,8 @@ spec:
 | 1 | ~~plan 段の諮問とレビュー~~ **完了 2026-10-13**: 諮問 (実効の r_t の契約) とレビュー (GO-with-changes, M4/m2) を全件採用 (§6.1)。判断: 2026-10-13 codex | F |
 | 2 | ~~配管~~ **完了 2026-10-13** | `wall_temperature.py` (新規)・`probdef.py`・`runner_axismach.py`・`runner_wt.py`。試験 `run_wall_temperature_tests.py` 100 ok: V1b 最大差 5.7e-14 K (A・B、s・x_m; 旧半径の誤実装なら 22.4 K、B だけ範囲外は例外)、V1d の負例 6 種で止まる (`run_staged_ns` は forge の起動前)、V4 は case/45 生産 (断熱)・case/70 c2b (一様) の prepare-only の生成物が 138e83b2 とバイト同一。既存の試験 5 本も同数で合格 | O |
 | 3 | ~~カード・見積もり・成果物~~ **完了 2026-10-13** | カード (`wt_card.py`: `Tw_profile`・`Tw_profile_csv`、見積もりの局所 T_w、s の区切りの点は設計壁から) と成果物 (`export/fluent_msh.py`・`deliverables.py`・`wall_tables.py`: Fluent の point profile を Fluent メッシュの壁面中心で、境界条件表・conditions.csv・xlsx シート `wall_temperature`・README、書き出しの入口で正本の照合)。試験: `run_wt_card_profile_tests.py` 87 ok (V1c は期待値と相対差 0、誤実装 (a) 代表温度・(b) 無次元の x・(c) カードの長さの区切り を検出)、`run_deliverables_walltemp_tests.py` 36 ok (V3: 1799 点 = 壁面数、最近傍の値と run の表の相対差 0 [元の s の表を独立に写した値とは 6.4e-11]、壁ノードで書く誤実装なら 585 面が 0.1 K 超; V1d 成果物側の負例 3 種で出力を作る前に止まる)。一様・断熱は 5a6dd76f と同一 (時刻の値を除く)。既存の試験 8 本も同数で合格 | O |
-| 4 | skill | §4.3。合格: インテークの質問が skill に入る | O |
-| 5 | M5 デモ | §6 V2 | O |
+| 4 | ~~skill~~ **完了 2026-10-13** | `design-intake` 3b で壁の熱条件を必ず聞く (断熱 / 一様 / 分布 s か x_m、区切りの点を表に含める)、`nozzle-design` の対応表に壁温 (分布) の行 | O |
+| 5 | ~~M5 デモ~~ **完了 2026-10-13** | `case/70.m5_air_wt_demo/run_0011_ns_walltemp_demo`: **V2 合格** (壁 1800 節点の `VALUE/T` と表の線形補間の最大差 1.5e-5 K、許容 0.1 K)。積分法が `Tw_table` を読んだことは `delta_r_initial.json` の `thermal_bc` で確認 (x は実効の r_t 0.0249699 m で割った値、終点 48.0615 = 1.20009 m / r_t)。warm start の元 run_0010 (一様 350 K)、cross-mesh、段 full (soft・mid が壁温の変化を吸収)、品質 PASS、NaN 0。収束は合否と別: `check_convergence --segment` NOT CONVERGED (main)、`check_quasisteady machmax,pmax` ALL STEADY、壁解像 PASS。成果物 PASS (Fluent profile 1799 点) | O |
 | 6 | result 段 | 諮問とレビュー | F |
 | 7 | (後続) `rerun_conditions.py`・SERN の分布対応 | 本計画の範囲外 | O |
 
@@ -166,3 +166,4 @@ spec:
 - 2026-10-13: §5.1 #2 実装 (共通モジュールと配管)。CSV は空白区切り `x Ts` (§4.2 を訂正)、熱条件は `integral_thermal_bc(p, d, scale)` (§4.2 を訂正)、s の補間の意味を §4.1 に追記。
 - 2026-10-13: §4.3 を訂正 (見積もりの s の区切りの点もその設計の壁から取る)。カードの長さで写すと、公差の内で設計壁の終点がカードの長さを超えたときに表が壁を覆わない (デモで +0.089 mm)。
 - 2026-10-13: §5.1 #3 実装 (カード・見積もり・成果物)。成果物の正本の扱いを §4.4 に追記。デモの YAML `case/70.m5_air_wt_demo/problem_m5_air_walltemp.yaml` (r_t 0.0249699 m、設計壁の終点はカードの拡大部長より +0.089 mm、寸法 PASS)。
+- 2026-10-13: §5.1 #5 (M5 デモ) — V2 合格 (`run_0011_ns_walltemp_demo`、最大差 1.5e-5 K)。成果物にも profile が載った。

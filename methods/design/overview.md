@@ -1255,7 +1255,7 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 `spec.wall_thermal`・`spec.sizing` に写す。
 
 - 長さの起点: `L_total` は設計スロート ($x=0$) から物理出口 $x_F$ まで (`Lc_mode: from_length` の定義)。
-- 壁の熱条件 (**計画中**、plan [`tooling-nozzle-wall-temperature-profile`](../../plans/active/tooling-nozzle-wall-temperature-profile.md)): 断熱 / 等温 (一様 `Tw`) / 等温 (分布 `Tw_profile: {x_m, Tw_K}`、x は実寸で原点は設計スロート、壁の全長を覆う)。分布は NS の `wallProfile` CSV と積分法の `Tw_table` に同じ表を渡す (単一ソース)。
+- 壁の熱条件 (plan [`tooling-nozzle-wall-temperature-profile`](../../plans/active/tooling-nozzle-wall-temperature-profile.md)、2026-10-13 実装): 断熱 / 等温 (一様 `Tw`) / 等温 (分布 `Tw_profile: {s|x_m, Tw_K}` か `Tw_profile_csv`)。`s` は区間で正規化した座標 (入口直管 [−2,−1]・縮流部 [−1,0]・拡大部 [0,1]; 区切りの点はその設計の壁から取る) で長さを振っても分布が追従する。`x_m` は実寸で原点は設計スロート。表は壁の全長を覆うこと (端値クランプに頼らない)。分布は `forge_design.wall_temperature` が呼ぶたびにその場の寸法で実寸に写し、積分法には `Tw_table` (x / 実効の r_t)、NS には `wall_profile_3.csv` (空白区切り `x Ts`、`wallProfile: 1`) で渡す。run の `wall_temperature_profile.json` と CSV が正本で、`prepare_info.json` の sha256 と NS の各段の起動前・成果物の書き出しの前に照合する。成果物は Fluent の point profile (`fluent/wall_temperature.prof`、Fluent メッシュの壁面中心の値; Fluent での読み込みは未確認)。格子の見積もりは断面ごとの局所の T_w を使う。case/70 `run_0011_ns_walltemp_demo` で場の壁ノードの T が表と最大 1.5e-5 K。
 - スロートの曲率: `throat.curvature_radius_m` (設計壁の曲率半径の実寸) か `throat.curvature_ratio` (= `geometry.R`) を任意で与える。設計壁はスロート付近で $r_w = 1 + x^2/(2R)$ ($r_t$ 単位) で、同じ $R$ が遷音速解 (Hall) の出発線と縮流部の 5 次多項式の端の曲率に入る。無ければ雛形の $R=2$。
   `L_U` は縮流部の始まり ($x=-L_U$) から設計スロートまで、`L_pipe` はその上流の直管。
 - 物理スロート径を固定する場合、$r_t$ は `solve_rt_throat` で決まり、$r_t$ が変わると $r_t$ 単位の長さが
