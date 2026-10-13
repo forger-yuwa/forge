@@ -42,6 +42,8 @@ from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, PW_UPSTREAM_DEFAULT, 
                                       area_ratio_isentropic, wall_qa)
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
+from ..wall_temperature import check_covers, integral_thermal_bc, load_run_profile, to_x_m, write_run_files
+from ..wall_temperature import anchors_from_design as _wt_anchors
 from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
 from .runner import run_converter, FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
 from .runner_wt import (_bcond, _config_euler, _config_euler_node,
@@ -1191,7 +1193,9 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
         raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
     # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
     # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
-    tbc = p.wall_thermal_bc_integral
+    # 壁温分布の表は**ここで解決した同じ scale** で換算する (integral_bl に渡す scale と同じ; 寸法の逆算の試しの r_t を含む。
+    # plan tooling-nozzle-wall-temperature-profile §4.2 の契約)。一様・断熱は wall_thermal_bc_integral と同じ dict
+    tbc = integral_thermal_bc(p, d, scale)
     if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
         print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
     res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
@@ -1525,6 +1529,14 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     msgs = wall.validate()
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
+    # 壁温分布 (plan tooling-nozzle-wall-temperature-profile §4.2): 表が最終の物理壁 (入口端〜出口端) を覆うか検査し、run に実行条件の
+    # 正本 2 つ (wall_temperature_profile.json・wall_profile_3.csv; physID 3 = _bcond の壁) を書いて sha256 を prepare_info に記録する。
+    # 一様・断熱は今までどおり p.wall_thermal をそのまま記録する
+    wt_rec = p.wall_thermal
+    if "Tw_profile" in wt_rec:
+        x_tab, _ = to_x_m(wt_rec["Tw_profile"], _wt_anchors(p, d, scale))
+        check_covers(x_tab, float(wall.x_in) * scale, float(wall.x_e) * scale, f"最終の物理壁 (入口端〜出口端、scale = {scale!r} m)")
+        wt_rec = {**wt_rec, "files": write_run_files(run_dir, p, d, scale, wall_id=3)}
     pw_info = None
     # 実効の表現: 明示 (legacy / single_bspline) か、キー無しの poly の既定 (1 本で表せれば single_bspline)
     pw_source = "explicit" if pw_repr is not None else None
@@ -1561,7 +1573,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
     cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
     implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
-    (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False), _tp_species_Y(p)))
+    # 壁温分布なら壁の行に wallProfile: 1 (CSV は上で書いた。この runner だけが profile_ok=True)
+    (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p)))
     (run_dir / "probe.yaml").write_text(PROBE_STUB)
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
@@ -1636,7 +1649,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
-            "wall_thermal": p.wall_thermal,
+            "wall_thermal": wt_rec,         # 分布なら Tw_profile と正本 2 つの sha256 (files) も
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}
     if transport is not None:
@@ -1835,7 +1848,10 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     `residual_history_<tag>.csv` に残す (段の res_* は従来どおり消す)。段の最終 res の必要保存量が非有限・ρ≤0 なら
     次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。
     本段の設定への切り替えと前の段の出力の処理の後、forge を起動する直前に通知 MAIN_STAGE_STARTED を書く
-    (`_write_main_stage_started`; 前の呼び出しの通知は最初に消す)。"""
+    (`_write_main_stage_started`; 前の呼び出しの通知は最初に消す)。
+    壁温分布の run は**各段の起動前** (前段の restart の後を含む) に run の正本 (wall_temperature_profile.json・wall_profile_<id>.csv) を
+    prepare_info.json の sha256 と照合し、合わなければ config を書く前・forge を起動する前に ValueError で止める
+    (`wall_temperature.load_run_profile`; plan tooling-nozzle-wall-temperature-profile §4.2)。一様・断熱の run は何もしない。"""
     import shutil
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
@@ -1847,6 +1863,13 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     sm = _stage_manifest_cls()(run_dir)
 
+    def _check_wall_profile(tag):
+        """壁温分布の正本の照合 (一様・断熱の run では load_run_profile が None を返すだけ)。"""
+        try:
+            load_run_profile(run_dir)
+        except ValueError as ex:
+            raise ValueError(f"段 {tag}: 壁温分布の照合で不合格 — forge を起動しない: {ex}") from ex
+
     def _record(cfg, tag):
         """段の残差履歴を段名つきで残し、manifest に段を足して書く (失敗した段も診断用に残す)。"""
         hist = run_dir / "residual_history.csv"
@@ -1856,6 +1879,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         sm.write()
 
     def _stage(cfg, nsteps, tag, want):
+        _check_wall_profile(tag)                                     # 壁温分布の正本 (前段の restart の後も) — config を書く前 (main の §4.2)
         _cfg_check(cfg, want, tag)                                   # 起動前に実効値を検査
         (run_dir / "solverConfig.yaml").write_text(cfg)
         sha = _sha256_file(run_dir / "solverConfig.yaml")
@@ -1876,6 +1900,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         return {"tag": tag, "nsteps": nsteps, "config_sha256": sha}
 
     done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
+    _check_wall_profile("main")
     _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)

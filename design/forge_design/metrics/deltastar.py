@@ -214,6 +214,8 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
     帯内の比の変化が slope_max (1 %) を下回るまで band_growth (1.25) 倍ずつ広げる (適応帯: 4 つの異なる壁の NS 場で
     δ_r のばらつき 3 %、固定 k=4/w=1 では 6.5 % — case/45 run_0004/0019/0020/0021)。
     欠損 $D = 2\pi\int_{y<y_b}(q_{ref}-q_{NS})r\,dr$、$\delta_r = r_w - r_{eff}$。
+    $r_{eff}$ は壁〜$y_b$ の区間の累積流量 $F$ だけで引く (2026-10-13, plan tooling-nozzle-deltastar-band-root-zone §4.1)。
+    探索域で $q_{ref}$ が非正・非有限なら `nonpos_ref`、区間の中で $F$ が減れば `nonmono_zone` (どちらも hard、δ_r = NaN)。
     内側 30 % の α・コア RMS は診断として併記する。q_e は配列または callable(r)。"""
     r0 = np.asarray(r, dtype=float); q0 = np.asarray(q_ns, dtype=float)
     if refine > 1:
@@ -285,7 +287,17 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
     F_from_wall = 2 * np.pi * np.concatenate([[0.0], np.cumsum(seg[::-1])])
     r_desc = rr[::-1]
     reason = []
-    if D < 0:
+    # 探索域 (壁〜帯の下端 y_b) の参照の検査 (plan tooling-nozzle-deltastar-band-root-zone §4.1、codex plan レビュー M2): 帯のフィットを
+    # 壁側へ外挿した q_ref が探索域で非正・非有限なら、D の符号によらず等価半径は定義できない (D < 0 の枝は q_ref の壁値を 1e-30 に
+    # 置き換えて、codex の再現例で δ_r = −4.98e13 を soft で返していた) → hard (nonpos_ref) で NaN。正の参照に対する負の δ_r (冷却壁) は
+    # そのまま
+    qz = qref[mz]
+    # 探索域の上端 y_b そのもの (格子点の間にあることが多い) の参照値も見る: 帯のフィットは y_b で a、q_E は線形補間 (codex result レビュー 2026-10-13 M1;
+    # 格子点だけでは y_b の手前で q_ref が負に横切る断面を見逃し、D < 0 の枝で soft の negative_deficit を返していた)
+    qz = np.append(qz, a * float(np.interp(rwN - y_b, rr, qE)))
+    if not (np.all(np.isfinite(qz)) and np.all(qz > 0.0)):
+        delta_r = float("nan"); reason.append("nonpos_ref")
+    elif D < 0:
         delta_r = _negative_delta_r(D, rwN, qref[-1])                      # 符号付き (負値 = 過剰質量)
         reason.append("negative_deficit")
     else:
@@ -297,8 +309,18 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
                                           band_growth=band_growth, max_retry=max_retry, fit_from=fit_from)
             delta_r = float("nan"); reason.append("no_root")
         else:
-            r_eff = float(np.interp(D, F_from_wall, r_desc))
-            delta_r = rwN - r_eff
+            # 等価半径は壁〜y_b の区間の F だけで引く (§4.1)。全半径の F で引くと、帯の傾きが大きくコアで q_ref < 0 の断面では F が
+            # 途中から減って末尾が D を下回り、np.interp が軸の半径を返して δ_r = r_w になっていた (case/70 の x ≈ 1〜3)。
+            # 区間の端は y_b で線形補間した点 (F_zone) で、それは y_b を挟む 2 格子点を結ぶ線分の上にある。根はその線分 (全半径の探索と
+            # 同じ 2 点) で引くので、全半径で F が単調な断面では結果はビット同一
+            y_desc = rwN - r_desc
+            kz = int(np.searchsorted(y_desc, y_b, side="right"))           # 壁から y ≤ y_b の格子点の数
+            hi = kz + 1 if (kz < len(y_desc) and y_desc[kz - 1] < y_b) else kz   # y_b が格子点の間なら、それを挟む外側の点まで
+            if np.any(np.diff(F_from_wall[:hi]) < 0.0):
+                delta_r = float("nan"); reason.append("nonmono_zone")      # 区間の中で F が減る (hard)
+            else:
+                r_eff = float(np.interp(D, F_from_wall[:hi], r_desc[:hi]))
+                delta_r = rwN - r_eff
     return dict(r_wall_euler=float(rw_e), r_wall_ns=rwN, delta_in=rwN - float(rw_e), alpha=alpha,
                 core_rms=core_rms, core_rms_noaxis=core_rms, core_maxdev=float("nan"),
                 mass_deficit=D, delta_r=float(delta_r), outer_share=float("nan"),
@@ -584,8 +606,9 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     x = np.array([r_["x"] for r_ in rows])
     draw = np.array([r_["delta_r"] for r_ in rows])
     sens = np.array([r_["delta_r_sens"] for r_ in rows])
-    # negative_deficit は 2026-09-12 から soft (符号付き δ_r を採用: 冷却壁では物理)。hard は根なし/NaN のみ
-    HARD = ("no_root", "nan", "no_plateau")
+    # negative_deficit は 2026-09-12 から soft (符号付き δ_r を採用: 冷却壁では物理)。hard は根なし/NaN と、帯局所の探索域の参照が
+    # 非正 (nonpos_ref)・探索区間の F が非単調 (nonmono_zone) (2026-10-13, plan tooling-nozzle-deltastar-band-root-zone §4.1)
+    HARD = ("no_root", "nan", "no_plateau", "nonpos_ref", "nonmono_zone")
     ok = np.ones(len(rows), bool); hard_ok = np.ones(len(rows), bool); reasons = []
     for k, r_ in enumerate(rows):
         rs = list(r_["reason"])

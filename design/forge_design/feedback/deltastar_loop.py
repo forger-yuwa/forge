@@ -14,6 +14,11 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
       --prev case/45.isobutane_m6_d155/run_0004_ns_v3 \
       --run-dir case/45.isobutane_m6_d155/run_0019_ns_cm_pass1 [--omega 0.5] [--prepare-only]
 
+補正の表で NS を立てる (2026-10-13, plan tooling-nozzle-deltastar-band-root-zone §4.3 3; 表は `wt_card --ns-correction` が問題 YAML の横に
+書く `<stem>_delta_r.csv`。YAML の `_card.ns_correction` があれば表の sha256 を照合する):
+  design/.venv-opt/bin/python -m forge_design.feedback.deltastar_loop --problem P.yaml --euler-ref EULER_RUN \
+      --delta-r-csv P_delta_r.csv --prev PREV_RUN --run-dir RUN [--stages none --cfl 1 --steps 60000] [--prepare-only]
+
 推奨 (2026-09-04, case/45 run_0026 で検証): 収束済み NS 場からの warm start では
   `--stages none --cfl 5 --implicit-relax 0.7 --steps 12000`
 (soft/mid 6000 step は不要、cfl 5 + relax 0.7 で 5000〜9000 step で cfl1/24000 step と同じ残差水準・出口 M は 8000 step で凍結。
@@ -22,6 +27,7 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -140,7 +146,190 @@ def _sizing_delta_supplier(p, init_cfg: dict, rtol: float | None = None):
     return supplier
 
 
-SIZING_TOL_M = 1e-9      # 寸法の逆算の数値解法の許容差 [m] (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2・U2b の合格条件と同じ値)。
+# --- NS 後の補正の表: 表の端の照合と前の設計 → 今の設計への写し (plan tooling-nozzle-deltastar-band-root-zone §4.2) --------------
+# 抽出の表 (delta_r_next.csv) の x は前の設計 (prev run) の r_t 単位。実寸の長さを保って作り直す設計では r_t 単位の x_e も変わるので、
+# 区間で正規化した座標 s (壁温分布 `wall_temperature` と同じ区切り: 入口直管 [−2,−1]・縮流部 [−1,0]・拡大部 [0,1]) で今の設計の x に写す。
+# 端は端に写るので覆い漏れが起きない。表の端は抽出の float32 の丸め分だけ設計の端からずれる (#18) ので、照合したうえで揃える
+ANCHOR_KEYS = ("x_in", "x_contraction", "x_throat", "x_exit")    # 区切りの点 [r_t]: 入口端・縮流部の始まり (−L_U)・設計スロート (0)・出口
+
+
+def _sha256(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def eps_f32(x: float, S: float) -> float:
+    r"""表の端の照合の許容 [r_t]: $\varepsilon_{f32} = \mathrm{ulp}_{f32}(|x| S)/S + \mathrm{ulp}_{f32}(|x|)$ (格子の座標 [m] の float32 と、
+    抽出が x を r_t 単位の float32 で持つ分の 2 回の丸め; plan §3 #18 の実測: 短い分 1.54e-6 r_t ≤ ε 8.6e-6 r_t)。"""
+    ax, S = abs(float(x)), float(S)
+    return float(np.spacing(np.float32(ax * S))) / S + float(np.spacing(np.float32(ax)))
+
+
+def prev_design_anchors(prev_run) -> dict:
+    """前の設計 (prev run の壁ファイル `wall_repr.json`) の区切りの点 [r_t、前の設計] と S_prev [m]。入口端・出口は `domain`、縮流部の始まり
+    −L_U は `design_wall.upstream_hermite.L_U` (`design_wall.pipe.domain` の終点・`design_wall` の x_in/x_e と照合)、スロートは 0。
+    S_prev は `units.scale_m` (prev run の `prepare_info.json` の scale_m と照合)。無い・欠けている・食い違う・並びが
+    x_in < −L_U < 0 < x_e でなければ ValueError。戻り: 区切りの点・scale_m・壁ファイルと prepare_info.json のパスと sha256。"""
+    from ..geometry.wall_axismach import WALL_FILE
+    prev_run = Path(prev_run)
+    path = prev_run / WALL_FILE
+    if not path.exists():
+        raise ValueError(f"{path} が無い — NS 後の補正の表は前の設計の区切りの点 (入口端・縮流部の始まり・スロート・出口) で今の設計へ写す "
+                         "(plan tooling-nozzle-deltastar-band-root-zone §4.2)。壁ファイルのある run (physical_wall_repr: single_bspline / legacy) を使う")
+    rec = json.loads(path.read_text())
+    try:
+        dom = [float(v) for v in rec["domain"]]
+        S, unit = float(rec["units"]["scale_m"]), rec["units"]["length"]
+        dw = rec["design_wall"]
+        L_U = float(dw["upstream_hermite"]["L_U"])
+        pipe_dom = [float(v) for v in dw["pipe"]["domain"]]
+        dw_in, dw_e = float(dw["x_in"]), float(dw["x_e"])
+    except (KeyError, TypeError, ValueError, IndexError) as ex:
+        raise ValueError(f"{path}: 前の設計の区切りの点を読めない ({type(ex).__name__}: {ex}) — domain・units.scale_m・design_wall の x_in・x_e・"
+                         "pipe.domain・upstream_hermite.L_U が要る") from ex
+    if unit != "r_t":
+        raise ValueError(f"{path}: 長さの単位 {unit!r} は未対応 (r_t)")
+    if dom != [dw_in, dw_e] or pipe_dom != [dw_in, -L_U]:
+        raise ValueError(f"{path}: domain {dom}・設計壁の [x_in, x_e] {[dw_in, dw_e]}・直管の区間 {pipe_dom} (終点は −L_U = {-L_U!r}) が食い違う")
+    x_in, xc, xe = dom[0], -L_U, dom[1]
+    if not (x_in < xc < 0.0 < xe):
+        raise ValueError(f"{path}: 区切りの点の並びが x_in {x_in!r} < −L_U {xc!r} < 0 < x_e {xe!r} でない (入口直管の長さ 0 などは写せない)")
+    pi_path = prev_run / "prepare_info.json"
+    if not pi_path.exists():
+        raise ValueError(f"{pi_path} が無い (S_prev の照合に要る)")
+    S_pi = float(json.loads(pi_path.read_text())["scale_m"])
+    if S_pi != S:
+        raise ValueError(f"{path} の units.scale_m {S!r} m と {pi_path} の scale_m {S_pi!r} m が違う (別の run の壁ファイル)")
+    return {"x_in": x_in, "x_contraction": xc, "x_throat": 0.0, "x_exit": xe, "scale_m": S,
+            "wall_repr": str(path), "wall_repr_sha256": _sha256(path), "prepare_info": str(pi_path), "prepare_info_sha256": _sha256(pi_path)}
+
+
+def design_anchors(wall) -> dict:
+    """今の設計 (`design_chain` の `d["wall"]`、joint 壁) の区切りの点 [r_t]: 入口端 x_in・縮流部の始まり −L_U・スロート 0・出口 x_e
+    (壁ファイルの `domain`・`design_wall.upstream_hermite.L_U` と同じ量)。"""
+    try:
+        x_in, L_U, xe = float(wall.x_in), float(wall.up.L_U), float(wall.x_e)
+    except AttributeError as ex:
+        raise ValueError(f"design_anchors: 設計壁 {type(wall).__name__} に x_in・up.L_U・x_e が無い (joint 壁だけ)") from ex
+    if not (x_in < -L_U < 0.0 < xe):
+        raise ValueError(f"design_anchors: 区切りの点の並びが x_in {x_in!r} < −L_U {-L_U!r} < 0 < x_e {xe!r} でない")
+    return {"x_in": x_in, "x_contraction": -L_U, "x_throat": 0.0, "x_exit": xe}
+
+
+def x_to_s(x, a: dict):
+    """x [r_t] → 区間で正規化した座標 s (`wall_temperature.to_x_m` の逆: [x_in, −L_U] → [−2, −1]・[−L_U, 0] → [−1, 0]・[0, x_e] → [0, 1]、
+    外側は同じ区間の写像を延長)。"""
+    x = np.asarray(x, dtype=float)
+    xi, xc, xt, xe = (float(a[k]) for k in ANCHOR_KEYS)
+    return np.where(x < xc, -2.0 + (x - xi) / (xc - xi), np.where(x < xt, -1.0 + (x - xc) / (xt - xc), (x - xt) / (xe - xt)))
+
+
+def s_to_x(s, a: dict):
+    """s → x [r_t] (`wall_temperature.to_x_m` と同じ式・同じ区間の分け方)。"""
+    s = np.asarray(s, dtype=float)
+    xi, xc, xt, xe = (float(a[k]) for k in ANCHOR_KEYS)
+    return np.where(s < -1.0, xi + (s + 2.0) * (xc - xi), np.where(s < 0.0, xc + (s + 1.0) * (xt - xc), xt + s * (xe - xt)))
+
+
+def map_x_between_designs(x, a_prev: dict, a_new: dict) -> tuple:
+    """前の設計の x → s → 今の設計の x。区切りの点が全部同じ (同じ設計) なら恒等 (コピーを返す; ビット同一)。戻り: (x, 恒等か)。"""
+    if all(float(a_prev[k]) == float(a_new[k]) for k in ANCHOR_KEYS):
+        return np.array(x, dtype=float, copy=True), True
+    return s_to_x(x_to_s(x, a_prev), a_new), False
+
+
+def snap_table_ends(x, a_prev: dict, S_prev: float) -> tuple:
+    """表の始点・終点を前の設計の入口端・出口に揃える (#18; plan §4.2、codex plan レビュー M3)。**両側** |Δ| ≤ ε_f32 (`eps_f32`) なら端の
+    x をその値に置き換える (値はそのまま、点は足さない)。それより大きい差 (内側・外側とも) は ValueError — 範囲の足りない表・別の設計の表は
+    揃えない。戻り: (揃えた x のコピー, 記録 {start, end: 表の x・設計の x・差・ε・置き換えたか})。"""
+    x = np.array(x, dtype=float, copy=True)
+    S = float(S_prev)
+    rec = {}
+    for name, i, key, what in (("start", 0, "x_in", "入口端"), ("end", -1, "x_exit", "出口")):
+        xd, xt = float(a_prev[key]), float(x[i])
+        diff, eps = xt - xd, eps_f32(xd, S)
+        if not abs(diff) <= eps:
+            raise ValueError(f"表の{'始点' if name == 'start' else '終点'} {xt!r} r_t と前の設計の{what} {xd!r} r_t の差 {diff:+.3e} r_t "
+                             f"({diff * S:+.3e} m) が ε_f32 {eps:.3e} r_t (float32 の 2 回の丸め) を超える — 表が前の設計を覆わない・"
+                             "別の設計の表 (plan tooling-nozzle-deltastar-band-root-zone §4.2)")
+        rec[name] = {"x_table_rt": xt, "x_design_rt": xd, "diff_rt": diff, "diff_m": diff * S, "eps_f32_rt": eps, "snapped": diff != 0.0}
+        x[i] = xd
+    if not np.all(np.diff(x) > 0.0):
+        raise ValueError("表の端を揃えると x が狭義単調増加でなくなる")
+    return x, rec
+
+
+def load_ns_correction(prev_run, delta_next=None) -> dict:
+    """NS 後の補正の入力を読んで検査する (plan tooling-nozzle-deltastar-band-root-zone §4.2・§4.3 3、codex plan レビュー M1・M3):
+    prev run の `delta_r_next.csv` (delta_next で別の抽出を指定可) の δ_E と held、前の設計の区切りの点と S_prev (`prev_design_anchors`)。
+
+    - δ_E に非有限値があれば ValueError。表の始点・終点を前の設計の入口端・出口に揃える (`snap_table_ends`、合わなければ ValueError)。
+    - **使用域 [0, x_e] (前の設計の出口) に held (hard 不合格で前回値を保持した点) が 1 点でもあれば ValueError** (平滑化は hard の点を重み 0 で
+      飛ばして全点で値を作るので、δ_E の列だけを見ると不合格の点が素通りする)。使用域の外 (x < 0) の held は記録だけ。
+      held の列が無い読み (旧形式) は検査しない。
+    戻り: x (揃えた後、前の設計の r_t 単位)・delta_E・S_prev_m・anchors_prev・ends・held・出典 (パスと sha256)。"""
+    prev_run = Path(prev_run)
+    dn = Path(delta_next) if delta_next is not None else prev_run / "delta_r_next.csv"
+    if not dn.exists():
+        raise ValueError(f"solve_rt_throat (NS 後): {dn} が無い (extract_and_merge で作る — δ_E の全分布が要る)")
+    nx = read_delta_r_next(dn)
+    dE = np.asarray(nx["delta_E"], dtype=float)
+    if not np.all(np.isfinite(dE)):
+        raise ValueError(f"{dn} の delta_E に非有限値がある")
+    a_prev = prev_design_anchors(prev_run)
+    S_prev = a_prev["scale_m"]
+    x, ends = snap_table_ends(np.asarray(nx["x_rt"], dtype=float), a_prev, S_prev)
+    held_rec = None
+    if nx.get("held") is not None:
+        held = np.asarray(nx["held"], dtype=float) != 0.0
+        use = held & (x >= 0.0) & (x <= a_prev["x_exit"])
+        if use.any():
+            xs = x[use]
+            raise ValueError(f"{dn}: 使用域 [0, x_e = {a_prev['x_exit']:.9g}] r_t に held (hard 不合格で前回値を保持した点) が {int(use.sum())} 点 "
+                             f"(x = {', '.join(f'{v:.4f}' for v in xs[:10])}{' …' if len(xs) > 10 else ''} r_t) — 不合格の点の δ_E "
+                             "(平滑化の値) で寸法と壁を作らない (plan tooling-nozzle-deltastar-band-root-zone §4.1、codex plan レビュー M1)")
+        held_rec = {"n_held": int(held.sum()), "n_held_in_use": 0, "x_held_outside_use_rt": [float(v) for v in x[held][:20]]}
+    return {"prev_run": str(prev_run), "delta_next": str(dn), "delta_next_sha256": _sha256(dn), "header_kind": nx["header_kind"],
+            "x": x, "delta_E": dE, "S_prev_m": S_prev, "anchors_prev": {k: a_prev[k] for k in ANCHOR_KEYS}, "ends": ends,
+            "held": held_rec, "wall_repr": a_prev["wall_repr"], "wall_repr_sha256": a_prev["wall_repr_sha256"],
+            "prepare_info": a_prev["prepare_info"], "prepare_info_sha256": a_prev["prepare_info_sha256"]}
+
+
+def ns_correction_table(corr: dict, anchors_new: dict, rt: float) -> dict:
+    r"""補正の表: x は前の設計 → s → 今の設計 (`map_x_between_designs`)、値は今の `solve_rt_throat --prev` と同じ大きさ
+    $\delta = \delta_E\,(r_t/S_{prev})^{-0.2}$。戻り: x・delta_r・factor・identity (写しが恒等か)。"""
+    fac = (rt / corr["S_prev_m"]) ** -0.2
+    x_new, ident = map_x_between_designs(corr["x"], corr["anchors_prev"], anchors_new)
+    if not np.all(np.diff(x_new) > 0.0):
+        raise ValueError("ns_correction_table: 今の設計へ写した x が狭義単調増加でない")
+    return {"x": x_new, "delta_r": corr["delta_E"] * fac, "factor": fac, "identity": ident}
+
+
+def write_ns_correction_table(path, tbl: dict, corr: dict, rt: float, anchors_new: dict) -> None:
+    """補正の表を書く (列 x_rt, delta_r; `prepare_ns(delta_r_csv=...)` が読む形)。寸法の逆算 (`solve_rt_throat`) と
+    要求カードの NS 補正 (`wt_card --ns-correction`) の共通の書き手。"""
+    e = corr["ends"]
+    ap_, an_ = (", ".join(repr(float(a[k])) for k in ANCHOR_KEYS) for a in (corr["anchors_prev"], anchors_new))
+    np.savetxt(path, np.c_[tbl["x"], tbl["delta_r"]], delimiter=",", comments="",
+               header=f"x_rt,delta_r (= delta_E x (r_t/S_prev)^-0.2; r_t={rt!r} m, S_prev={corr['S_prev_m']!r} m, factor={tbl['factor']!r}; "
+                      f"from {corr['delta_next']} col delta_E; x mapped from the previous design (x_in, -L_U, 0, x_e) = ({ap_}) r_t to this design "
+                      f"({an_}) r_t via s{' [identity]' if tbl['identity'] else ''}; table ends snapped to the previous design: "
+                      f"start {e['start']['diff_rt']:+.3e} r_t, end {e['end']['diff_rt']:+.3e} r_t (eps_f32 {e['start']['eps_f32_rt']:.3e} / "
+                      f"{e['end']['eps_f32_rt']:.3e}); solve_rt_throat)")
+
+
+def ns_correction_record(corr: dict, anchors_new: dict) -> dict:
+    """NS 後の補正の出典と写しの記録 (JSON にそのまま書ける形)。"""
+    return {"prev_run": corr["prev_run"], "delta_next": corr["delta_next"], "delta_next_sha256": corr["delta_next_sha256"],
+            "delta_column": f"delta_E ({corr['header_kind']} header)",
+            "wall_repr": corr["wall_repr"], "wall_repr_sha256": corr["wall_repr_sha256"],
+            "prepare_info": corr["prepare_info"], "prepare_info_sha256": corr["prepare_info_sha256"],
+            "S_prev_m": corr["S_prev_m"], "anchors_prev_rt": dict(corr["anchors_prev"]), "anchors_new_rt": dict(anchors_new),
+            "x_map": ("identity (同じ区切りの点)" if all(float(corr["anchors_prev"][k]) == float(anchors_new[k]) for k in ANCHOR_KEYS)
+                      else "前の設計の x → s (区間で正規化; wall_temperature と同じ区切り) → 今の設計の x"),
+            "table_ends": corr["ends"], "held": corr["held"]}
+
+
+SIZING_TOL_M = 1e-9     # 寸法の逆算の数値解法の許容差 [m] (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2・U2b の合格条件と同じ値)。
                          # 既定で使うのは NS 後の `solve_rt_throat` (δ_E の全分布) と試験用の `_delta_supplier`。CFD 前の既定は下の 2 つ
 SIZING_MAX_ITER = 30
 # CFD 前の寸法 (積分法の δ_r) は**初期見積もり**: その既定の許容差 [m] (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2d、
@@ -299,7 +488,10 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
       S_prev は prev_run の prepare_info.json の scale_m) の **δ_E の全分布** (未緩和の平滑化抽出) から補正関数
       $\delta(x; r_t) = \delta_E(x)\,(r_t/S_{prev})^{-0.2}$ を作り、同じ関数で寸法と壁を作る ($Re^{-0.2}$ の換算は予測の近似)。
       解いた r_t での補正関数の表を delta_r_out (必須) に書く — 次の壁はこの表を `prepare_ns(delta_r_csv=...)` に渡して作る
-      (寸法と壁で同じ関数)。delta_r_next.csv が無ければ例外。
+      (寸法と壁で同じ関数)。delta_r_next.csv が無ければ例外。2026-10-13 (plan tooling-nozzle-deltastar-band-root-zone §4.2、
+      codex plan レビュー M1・M3; `load_ns_correction`): 使用域 [0, x_e] に held (hard 不合格) の点があれば例外。表の始点・終点を
+      前の設計 (prev run の `wall_repr.json`、無ければ例外) の入口端・出口と照合し、両側 ε_f32 以内なら揃える (超えれば例外)。表の x は
+      前の設計 → 区間で正規化した s → この問題の設計へ写す (同じ設計なら恒等)。戻りの `ns_correction` に出典・揃えた差・写しを記録する。
     - 反復: 各反復で今の r_t の残差 r_t·min r_W − R を評価し、|残差| ≤ tol_R_m で止める (返す残差 = 最終の寸法で評価し直した値)。
       max_iter 回で収まらなければ例外 (`SizingNotConverged`、不合格)。tol_R_m の既定 (None) は経路で違う: CFD 前は
       `SIZING_TOL_PRE_CFD_THROAT_M` (1e-7 m)、NS 後と `_delta_supplier` は `SIZING_TOL_M` (1e-9 m、今までどおり)。明示で渡せる。
@@ -311,6 +503,13 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
     そのとき決まる出口半径 ほか。"""
     from ..probdef import load_problem
     from ..evaluate.runner_axismach import delta_r_from_table, design_chain
+    corr = None
+    if _delta_supplier is None and prev_run is not None:
+        if delta_r_out is None:
+            raise ValueError("solve_rt_throat (NS 後): delta_r_out (次の壁に渡す補正関数の表の出力先) が必要 — 寸法と壁を同じ関数で作るため")
+        # 入力の検査 (使用域の held・δ_E の非有限・表の端と前の設計の照合) と前の設計の区切りの点 (plan tooling-nozzle-deltastar-band-root-zone
+        # §4.2、codex plan レビュー M1・M3)。設計チェーンの前に検査する
+        corr = load_ns_correction(prev_run, delta_next)
     p = load_problem(problem); d = design_chain(p)
     S0 = float(p.spec["r_throat"])
     R = float(R_throat_m)
@@ -326,31 +525,21 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
         tol, tol_src = _resolve_sizing_tol(tol_R_m, "throat", cfd_before=True)
     else:
         tol, tol_src = _resolve_sizing_tol(tol_R_m, "throat", cfd_before=False)
-        prev_run = Path(prev_run)
-        if delta_r_out is None:
-            raise ValueError("solve_rt_throat (NS 後): delta_r_out (次の壁に渡す補正関数の表の出力先) が必要 — 寸法と壁を同じ関数で作るため")
-        dn = Path(delta_next) if delta_next is not None else prev_run / "delta_r_next.csv"
-        if not dn.exists():
-            raise ValueError(f"solve_rt_throat (NS 後): {dn} が無い (extract_and_merge で作る — δ_E の全分布が要る)")
-        nx = read_delta_r_next(dn)
-        xE, dE = np.asarray(nx["x_rt"], dtype=float), np.asarray(nx["delta_E"], dtype=float)
-        if not np.all(np.isfinite(dE)):
-            raise ValueError(f"{dn} の delta_E に非有限値がある")
-        S_prev = float(json.loads((prev_run / "prepare_info.json").read_text())["scale_m"])
+        # 表の x は前の設計 → s → この問題の設計 (同じ設計なら恒等) へ写す
+        a_new = design_anchors(d["wall"])
         out_csv = Path(delta_r_out)
 
-        def supplier(d_, rt, _x=xE, _dE=dE, _S=S_prev, _out=out_csv):
+        def supplier(d_, rt, _c=corr, _a=a_new, _out=out_csv):
             # 表を書いて読み直し、prepare_ns(delta_r_csv=...) と同じ読み方・同じ関数で壁を作る (寸法と壁で同じ関数)
-            fac = (rt / _S) ** -0.2
-            np.savetxt(_out, np.c_[_x, _dE * fac], delimiter=",", comments="",
-                       header=f"x_rt,delta_r (= delta_E x (r_t/S_prev)^-0.2; r_t={rt!r} m, S_prev={_S!r} m, factor={fac!r}; "
-                              f"from {dn} col delta_E; solve_rt_throat)")
+            tb = ns_correction_table(_c, _a, rt)
+            write_ns_correction_table(_out, tb, _c, rt, _a)
             tbl = np.loadtxt(_out, delimiter=",", skiprows=1)
             return delta_r_from_table(tbl[:, 0], tbl[:, 1]), {
-                "kind": "delta_E 全分布 × (r_t/S_prev)^-0.2 (Re^-0.2 換算は予測の近似)", "prev_run": str(prev_run), "delta_next": str(dn),
-                "delta_column": f"delta_E ({nx['header_kind']} header)", "S_prev_m": _S, "factor": fac, "table": str(_out)}
-        rt0 = S_prev
-        extra.update(delta_r_route="ns_after: delta_E 全分布", delta_r_out=str(out_csv))
+                "kind": "delta_E 全分布 × (r_t/S_prev)^-0.2 (Re^-0.2 換算は予測の近似)", "prev_run": _c["prev_run"],
+                "delta_next": _c["delta_next"], "delta_column": f"delta_E ({_c['header_kind']} header)", "S_prev_m": _c["S_prev_m"],
+                "factor": tb["factor"], "table": str(_out), "x_map_identity": tb["identity"]}
+        rt0 = corr["S_prev_m"]
+        extra.update(delta_r_route="ns_after: delta_E 全分布", delta_r_out=str(out_csv), ns_correction=ns_correction_record(corr, a_new))
     fp = _fixed_point_rt(p, d, R, "throat", supplier, rt0, max_iter, tol)
     out = _sizing_result(fp, p, R, "throat", tol_src)
     out.update(r_t_problem_m=S0, R_throat_m=R, **extra)
@@ -444,6 +633,68 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     return m
 
 
+def check_table_against_card(problem, table) -> dict:
+    """`--delta-r-csv TABLE` の照合 (plan tooling-nozzle-deltastar-band-root-zone §4.3 3): 問題 YAML の `_card.ns_correction`
+    (`wt_card --ns-correction` が書く NS 後の補正の記録) があれば、TABLE の sha256 がその `table_sha256` と一致すること (違えば ValueError —
+    寸法を解いた表と別の表で壁を作らない)。記録が無ければ照合しない。戻り: {table, sha256, card_table, card_table_sha256, checked}。"""
+    from ..probdef import load_problem
+    table = Path(table)
+    if not table.exists():
+        raise ValueError(f"--delta-r-csv: {table} が無い")
+    sha = _sha256(table)
+    rec = (load_problem(problem).raw.get("_card") or {}).get("ns_correction")
+    out = {"table": str(table), "sha256": sha, "card_table": None, "card_table_sha256": None, "checked": False}
+    if rec is None:
+        return out
+    want = rec.get("table_sha256") if isinstance(rec, dict) else None
+    if not want:
+        raise ValueError(f"{problem}: _card.ns_correction に table_sha256 が無い (壊れた記録; wt_card --ns-correction で作り直す)")
+    out.update(card_table=rec.get("table"), card_table_sha256=want, checked=True)
+    if sha != want:
+        raise ValueError(f"--delta-r-csv {table} の sha256 {sha[:16]}… が問題 YAML の記録 (_card.ns_correction.table {rec.get('table')!r}、"
+                         f"sha256 {want[:16]}…) と違う — 寸法を解いた補正の表と別の表で壁を作らない (wt_card --ns-correction で作り直す)")
+    return out
+
+
+def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=None, prepare_only: bool = False, nsteps=None,
+                   omega: float = 0.5, cfl_main=None, implicit_relax=None, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
+    """補正の表 TABLE (`wt_card --ns-correction` が問題 YAML の横に書く `<stem>_delta_r.csv`、または `--solve-rt-throat --prev` の
+    `--delta-r-out`) で物理壁を作り、NS を準備・実行する (plan tooling-nozzle-deltastar-band-root-zone §4.3 3):
+    `prepare_ns(delta_r_csv=TABLE, offset="radial")` → `run_staged_ns` → collect → 抽出 (`fixed_point.json`) → 設計の標準出力
+    (`run_pass` と同じ後段)。表は緩和しない (omega は後段の抽出の delta_r_next.csv にだけ使う)。問題 YAML の `_card.ns_correction` が
+    あれば TABLE の sha256 を照合する (`check_table_against_card`、違えば run dir を作る前に例外)。照合の結果は prepare_info.json の
+    `delta_r_table` に書く。"""
+    from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
+    from ..evaluate.runner import FORGE_TOOLS
+    run_dir = Path(run_dir)
+    chk = check_table_against_card(problem, table)
+    info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, delta_r_csv=table, offset="radial",
+                      euler_ref=euler_ref, omega=None, prev_run=prev_run, cfl_main=cfl_main, implicit_relax=implicit_relax)
+    info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
+    info["delta_r_table"] = chk
+    (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
+    print(json.dumps({k: info[k] for k in ("throat_physical", "dstar_source", "delta_r_table", "mesh", "nStepOuter", "cfl_main")},
+                     indent=1, default=str), flush=True)
+    print(Path(run_dir, "MESH_QUALITY.txt").read_text().splitlines()[-1], flush=True)
+    if prepare_only:
+        return info
+    import time as _t
+    t0 = _t.time()
+    rc = run_staged_ns(run_dir, stages=stages, ramp=ramp, ramp_steps=ramp_steps)
+    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages})", flush=True)
+    m = collect(problem, run_dir)
+    m["ns_wall_time_s"] = _t.time() - t0
+    (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
+    print(json.dumps(m, indent=1), flush=True)
+    subprocess.run([sys.executable, str(FORGE_TOOLS / "check_convergence.py"), str(run_dir)], check=False)
+    fp = extract_and_merge(run_dir, euler_ref, omega=omega)
+    (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
+    print("extract(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
+    print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
+    _design_report(run_dir, euler_ref)
+    return m
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="δ_r 固定点反復 (固定 Euler 基準)")
     ap.add_argument("--problem", required=True)
@@ -470,7 +721,21 @@ def main(argv=None) -> int:
                          "そのとき --delta-r-out に次の壁に渡す表を書く)")
     ap.add_argument("--delta-r-out", default=None, help="--solve-rt-throat --prev のとき、解いた r_t での補正関数の表の出力先")
     ap.add_argument("--delta-next", default=None, help="--solve-rt-throat --prev のとき、δ_E を読む delta_r_next.csv (既定 PREV/delta_r_next.csv)")
+    ap.add_argument("--delta-r-csv", default=None, metavar="TABLE",
+                    help="補正の表 (wt_card --ns-correction が YAML の横に書く <stem>_delta_r.csv など) で物理壁を作って NS を準備・実行する "
+                         "(prepare_ns(delta_r_csv=TABLE, offset=radial) → run_staged_ns)。YAML の _card.ns_correction があれば TABLE の "
+                         "sha256 を照合する。IC は --ic-from (無ければ --prev)。--init-integral とは排他")
     a = ap.parse_args(argv)
+    if a.delta_r_csv is not None:
+        clash = [n for n, v in (("--init-integral", a.init_integral), ("--extract-only", a.extract_only),
+                                ("--solve-rt", a.solve_rt is not None), ("--solve-rt-throat", a.solve_rt_throat is not None)) if v]
+        if clash:
+            ap.error(f"--delta-r-csv と {', '.join(clash)} は排他")
+        ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
+        run_from_table(a.problem, a.euler_ref, a.delta_r_csv, a.run_dir, ic_from=(a.ic_from or a.prev), prev_run=a.prev,
+                       prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
+                       stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
+        return 0
     if a.solve_rt is not None:
         r = solve_rt(a.problem, a.solve_rt, prev_run=a.prev, euler_run=a.euler_ref)
         print(json.dumps(r, indent=1, default=str))

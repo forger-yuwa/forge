@@ -275,13 +275,14 @@ initial: "uniform_p101325_u10"
 """
 
 
-def _bcond(p: Problem, euler: bool) -> str:
+def _bcond(p: Problem, euler: bool, profile_ok: bool = False) -> str:
     Pt, Tt = float(p.spec["Pt"]), float(p.spec["Tt"])
     pa = float(p.spec.get("p_ambient", 1000.0))
-    # 壁行は Problem.wall_bcond_line (spec.wall_thermal が単一ソース: 断熱 wall / 等温 wall_isothermal+Ts)
+    # 壁行は Problem.wall_bcond_line (spec.wall_thermal が単一ソース: 断熱 wall / 等温 wall_isothermal+Ts)。
+    # profile_ok: 壁温分布の CSV を run に書く呼び出し側 (runner_axismach.prepare_ns) だけが True (それ以外で分布の問題なら例外)
     return f"""inlet:  {{physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {{Pt: {Pt}, Tt: {Tt}, k: 1.0, omega: 18000.0}}}}
 outlet: {{physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {{Ps: {pa}, Pt: {pa}, Tt: 300.0}}}}
-wall:   {p.wall_bcond_line(euler, phys_id=3, output=1)}
+wall:   {p.wall_bcond_line(euler, phys_id=3, output=1, profile_ok=profile_ok)}
 axis:   {{physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }}
 """
 

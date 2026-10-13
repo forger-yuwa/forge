@@ -45,6 +45,98 @@ def area_ratio_isentropic(M_d: float, gamma=1.4) -> float:
                  ** ((g + 1.0) / (2.0 * (g - 1.0))))
 
 
+# --- 設計壁の単調性の複合ゲート (plans/active/tooling-nozzle-deltastar-band-root-zone.md §5.1 #4b、
+#     諮問 notes/reviews/2026-10-13-design-wall-monotone-gate-diagnose.md) -----------------------------------------------
+# 実用上の許容であって、数値雑音の上限を測った値ではない。局所の傾き (狭く急な収縮) と累積の減少 (浅く長い収縮) を併せて拘束する
+MONO_R1_MIN = -1.74533e-6          # 最小の r′ の下限 = −tan(1e-4°) (6 桁に丸めた値)
+MONO_D_MAX = 1e-7                  # 最大の累積減少 D の上限 [r_t] (設計壁は r_t 単位)
+
+
+def monotone_gate(spl, a: float, b: float, r1_min: float = MONO_R1_MIN, d_max: float = MONO_D_MAX) -> dict:
+    r"""区間多項式 (scipy の `BSpline` / `PPoly`) $r(x)$ の区間 $[a, b]$ での単調性の複合ゲート。
+
+    - (i) 最小の $r'$ ≥ `r1_min`: 各区間の端 (左右の極限) と $r''=0$ の根で $r'$ を評価する。
+    - (ii) 最大の累積減少 $D=\max_x\{\max_{u\le x} r(u) - r(x)\}$ ≤ `d_max`: 各区間の端と $r'=0$ の根で $r$ を評価し、
+      座標順に既往最大との差を取る (根の間では $r$ が単調なので、この点の集合で $D$ が厳密に取れる)。
+
+    根は各区間の多項式の根 (`np.roots`) の実部を区間に切り詰めて評価点に足す。複素の対・重根の近くでも評価点が欠けず、
+    余分な点は区間の中の実際の値なので最小値・$D$ を過小にしない。標本の点の間隔には依存しない。
+    非有限の係数・評価値、$[a, b]$ が多項式の定義域の外、多次元の値は**不合格** (評価不能)。
+    `spl` が `BSpline` / `PPoly` でなければ判定しない (`applicable: False`; 呼び出し側は従来の標本の検査を使う)。
+
+    戻り: `applicable`・`pass`・`reasons` (不合格の理由)・`min_r1`・`min_theta_deg`・`x_min_theta`・`D`・`x_D` (D を取る点)・
+    `x_D_peak` (その既往最大の点)・閾値・区間・評価した区間の数。
+    """
+    from scipy.interpolate import BSpline, PPoly
+    nan = float("nan")
+    a, b = float(a), float(b)
+    out = {"applicable": True, "pass": False, "reasons": [], "kind": type(spl).__name__, "interval": [a, b],
+           "r1_min": float(r1_min), "d_max": float(d_max), "min_r1": nan, "min_theta_deg": nan, "x_min_theta": nan,
+           "D": nan, "x_D": nan, "x_D_peak": nan, "n_pieces": 0}
+    if isinstance(spl, BSpline):
+        try:
+            pp = PPoly.from_spline(spl)
+        except Exception as ex:                 # noqa: BLE001 — 変換できないものは評価不能 (不合格)
+            out["reasons"].append(f"評価不能 (BSpline → PPoly の変換に失敗: {ex})")
+            return out
+    elif isinstance(spl, PPoly):
+        pp = spl
+    else:
+        return {"applicable": False, "pass": None, "kind": type(spl).__name__,
+                "reason": f"{type(spl).__name__} は BSpline / PPoly でない (区間多項式に変換できない)"}
+    xb = np.asarray(pp.x, dtype=float)
+    c = np.asarray(pp.c, dtype=float)
+    if c.ndim != 2:
+        out["reasons"].append(f"評価不能 (値が多次元: 係数の形 {c.shape})")
+        return out
+    if not (np.isfinite(a) and np.isfinite(b) and a < b):
+        out["reasons"].append(f"評価不能 (区間 [{a!r}, {b!r}] が不正)")
+        return out
+    if not np.all(np.isfinite(xb)) or not (xb[0] <= a and b <= xb[-1]):
+        out["reasons"].append(f"評価不能 (区間 [{a:.9g}, {b:.9g}] が多項式の定義域 [{xb[0]:.9g}, {xb[-1]:.9g}] の外)")
+        return out
+    idx = np.where((np.diff(xb) > 0.0) & (xb[1:] > a) & (xb[:-1] < b))[0]
+    if len(idx) == 0 or not np.all(np.isfinite(c[:, idx])):
+        out["reasons"].append("評価不能 (区間の多項式の係数に非有限値がある)" if len(idx) else "評価不能 (区間に長さのある多項式の区間が無い)")
+        return out
+    s1_x, s1_v, r_x, r_v = [], [], [], []
+    for j in idx:
+        p0 = c[:, j]
+        p1 = np.polyder(p0)
+        p2 = np.polyder(p1)
+        lo = max(float(xb[j]), a) - float(xb[j])
+        hi = min(float(xb[j + 1]), b) - float(xb[j])
+        # (i) r′ の候補: 端と r″ = 0 の根
+        s = np.concatenate(([lo, hi], np.clip(np.real(np.roots(p2)), lo, hi)))
+        s1_x.append(xb[j] + s)
+        s1_v.append(np.polyval(p1, s))
+        # (ii) r の候補: 端と r′ = 0 の根 (区間の中で座標順)
+        s = np.sort(np.concatenate(([lo, hi], np.clip(np.real(np.roots(p1)), lo, hi))))
+        r_x.append(xb[j] + s)
+        r_v.append(np.polyval(p0, s))
+    s1_x, s1_v = np.concatenate(s1_x), np.concatenate(s1_v)
+    r_x, r_v = np.concatenate(r_x), np.concatenate(r_v)
+    out["n_pieces"] = int(len(idx))
+    if not (np.all(np.isfinite(s1_v)) and np.all(np.isfinite(r_v))):
+        out["reasons"].append("評価不能 (r または r′ の評価値に非有限値がある)")
+        return out
+    i1 = int(np.argmin(s1_v))
+    run_max = np.maximum.accumulate(r_v)
+    gap = run_max - r_v
+    iD = int(np.argmax(gap))
+    iP = int(np.argmax(r_v[:iD + 1] == run_max[iD]))
+    out.update(min_r1=float(s1_v[i1]), min_theta_deg=float(np.degrees(np.arctan(s1_v[i1]))), x_min_theta=float(s1_x[i1]),
+               D=float(gap[iD]), x_D=float(r_x[iD]), x_D_peak=float(r_x[iP]))
+    if not out["min_r1"] >= r1_min:
+        out["reasons"].append(f"最小の壁角 {out['min_theta_deg']:.4e}° (r′ = {out['min_r1']:.5e} < {r1_min:.5e}、"
+                              f"x = {out['x_min_theta']:.9g})")
+    if not out["D"] <= d_max:
+        out["reasons"].append(f"最大の累積減少 D = {out['D']:.4e} r_t > {d_max:.1e} r_t "
+                              f"(x = {out['x_D_peak']:.9g} → {out['x_D']:.9g})")
+    out["pass"] = not out["reasons"]
+    return out
+
+
 class AxisMachCFDWall:
     """直管 + U→T Hermite + 逆 MOC 壁 (クランプ 5 次 B-spline)。
     旧・縦 starting line 構成では U→T Hermite と設計壁の間に骨接放物線が入る。
@@ -136,8 +228,15 @@ class AxisMachCFDWall:
             msgs.append("壁半径が非正")
         if abs(float(rv.min()) - 1.0) > 5e-3:
             msgs.append(f"最小半径 {float(rv.min()):.4f} != 1")
-        m_dsg = xs >= self.x0
-        if np.any(np.diff(rv[m_dsg]) < -1e-9):
+        # 設計壁区間 [x0, x_e] の単調性 (plan tooling-nozzle-deltastar-band-root-zone §5.1 #4b、2026-10-13 置き換え):
+        # 設計壁 `_spl` の連続関数での複合ゲート (最小の壁角 ≥ −1e-4°・最大の累積減少 ≤ 1e-7 r_t)。以前の 4000 点の隣接差分
+        # (< −1e-9) は点の間隔に依存し、点の間の収縮を見逃す一方で出口直前の微小な減少をまばらに落としていた (A/B:
+        # case/70.m5_air_wt_demo/_monotone_gate_ab/)。区間多項式に変換できない表現 (interp・lsq・joint はすべて変換できる) だけ従来の検査
+        mg = monotone_gate(self._spl, self.x0, self.x_e)
+        if mg["applicable"]:
+            if not mg["pass"]:
+                msgs.append("設計壁区間で半径が非単調 (" + "; ".join(mg["reasons"]) + ")")
+        elif np.any(np.diff(rv[xs >= self.x0]) < -1e-9):
             msgs.append("設計壁区間で半径が非単調")
         # spline リンギング検査 (2026-08-16 追加): 補間スプラインはテーブル点を通るが、
         # 端点クランプとデータが矛盾すると**点の間**で振動する。テーブル点上の

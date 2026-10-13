@@ -257,8 +257,16 @@ prev = TMP / "run_prev"
 prev.mkdir()
 S_prev = 0.0768
 (prev / "prepare_info.json").write_text(json.dumps({"scale_m": S_prev}))
-dE = dB(xt_tab) * 1.02 + 2e-5
-np.savetxt(prev / "delta_r_next.csv", np.c_[xt_tab, dE, dE, dE, 0 * dE], delimiter=",", comments="",
+# 前の設計の記録 (2026-10-13 から solve_rt_throat --prev は prev run の壁ファイルの区切りの点で表の端を照合し、今の設計へ写す;
+# plan tooling-nozzle-deltastar-band-root-zone §4.2): 同じ設計 (dS) の区切りの点を S_prev で書いた最小の壁ファイル。表は入口端〜出口
+Wd = dS["wall"]
+x_in_d, L_U_d, x_e_d = float(Wd.x_in), float(Wd.up.L_U), float(Wd.x_e)
+(prev / "wall_repr.json").write_text(json.dumps({"domain": [x_in_d, x_e_d], "units": {"length": "r_t", "scale_m": S_prev},
+                                                 "design_wall": {"x_in": x_in_d, "x_e": x_e_d, "pipe": {"domain": [x_in_d, -L_U_d]},
+                                                                 "upstream_hermite": {"L_U": L_U_d}}}))
+xt_ns = np.r_[x_in_d, xt_tab[(xt_tab > x_in_d) & (xt_tab < x_e_d)], x_e_d]
+dE = dB(xt_ns) * 1.02 + 2e-5
+np.savetxt(prev / "delta_r_next.csv", np.c_[xt_ns, dE, dE, dE, 0 * dE], delimiter=",", comments="",
            header=",".join(DL.DELTA_R_NEXT_COLUMNS) + " (test)")
 R_t = 0.0768
 out_csv = TMP / "delta_next_wall.csv"

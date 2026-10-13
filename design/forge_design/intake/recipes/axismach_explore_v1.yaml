@@ -1,0 +1,60 @@
+# 雛形 axismach_explore_v1 — 要求カード (forge.wt_card/v1) から問題 YAML を作るときの**探索段階**の構成キー。
+#   plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 6.。読み手: forge_design.intake.wt_card (card_to_problem)。
+#   出典は case/45.isobutane_m6_d155 の生産の問題 problem_d155_ns_prod.yaml (以下「生産」) と、Euler の格子は
+#   problem_d155_euler_e4_recal_d0.yaml (以下「E4」; plan verification-case45-euler-total-enthalpy の E3/E4 の格子)。
+#   **設計の数値 (Pt・Tt・組成・r_t・L_c・r_inlet・L_U・L_pipe) はここに書かない** — カードから生成器が埋める。
+#   探索段階なので Hall 初期線 (initial_line の既定)・補間壁 (wall_repr の既定 interp) のまま。STEP を出すには物理壁の表現
+#   single_bspline が要るので、成果物を出す最終の NS 用の問題は axismach_final_v1 で作る (plan §4.1 6.)。
+#   ケースごとの較正値 (initial_line: cfd + initial_line_run/_res、Md_moc_offset、deltastar_initializer.cf_scale) は入れない。
+#   手順書 procedures/nozzle-design-workflow.md §2 ⑤ の手順で、較正したあとに問題 YAML へ足す (カードの overrides でも足せる)。
+#   形状パラメータ (R・M_knot) で設計が成立しない (law の窓・壁 QA の例外) ときは skill nozzle-design の手順で振る (自動探索は
+#   plan tooling-design-problem-campaign-recipe #15)。
+
+# 生成器への指示 (問題 YAML には写さない)
+_recipe:
+  name: axismach_explore_v1
+  stage: explore
+  # geometry.M_knot = M_knot_factor × M_design。生産は M6 で M_knot 2.7 (= 0.45 × 6; search_shortest.py の最短ロバスト点 R2/L_c 39.3/M_K 2.7)
+  M_knot_factor: 0.45
+  # gas.transport: 実種ごとに default、H2O だけは生産の custom (IAPWS/CEA つなぎ、plan thermophysics-solver-owned-species-db §4.3c)
+  gas_transport: {default: cea, H2O: "custom:h2o_iapws_cea_v1"}
+  # evaluate.tp_species: 組成に H2O があるときだけ生産の split_h2o (凝縮の restart を可能にしておく)。無ければ書かない (既定 pseudo)
+  tp_species_if_h2o: split_h2o
+
+geometry:
+  R: 2.0                     # スロート曲率半径 / r_t (生産; 縮流部の μ = L_U²/(R Δr) ≤ 20 の検査にも使う)
+  axis_law: knot             # 内部 knot 1 個の区分 C² 軸則 (生産。M6 では単一 quintic が fold を起こすため)
+  start_line: throat_char    # スロート壁点発の C⁻ 初期線 (生産)
+  n_start: 41                # 初期線の点数 (生産)
+  n_axis_inv: 2400           # 逆 MOC の軸の点数 (生産)
+  axis_dx0: 0.03             # 軸の最初の間隔 (生産)
+  x_end_margin: 2.3          # 逆 MOC の場の長さの余裕 (生産)
+  wall_mode: cplus           # 壁の閉包 (生産)
+  exit_mode: characteristic  # 出口の扱い (生産)
+  # moc_axis_limit・moc_corrector は書かない (既定が生産と同じ analytic・converge、2026-10-07 から)
+
+# NS の格子 (prepare_ns)。ni・wall_first_frac・wall_first_frac_throat は生成器の estimate_mesh が埋める (初期値)
+mesh:
+  discretization: node       # 生産
+  nj: 97                     # 生産
+  throat_refine: 4.0         # 生産 (スロート近傍の x 方向の細分比)
+  throat_width: 3.0          # 生産 (細分の幅 [r_t])
+  wall_first_up_x0: -9.0     # 生産 (上流側のブレンド: x ≤ −9 で wall_first_frac)
+  wall_first_up_x1: -4.0     # 生産 (x ≥ −4 で wall_first_frac_throat)
+  wall_first_blend_x0: 1.0   # 生産 (下流側のブレンド: x ≤ 1 で wall_first_frac_throat)
+  wall_first_blend_x1: 17.0  # 生産 (x ≥ 17 で wall_first_frac)
+  ar_max: 5000               # 生産 (壁法線に沿った境界層層の AR 例外、AGENTS.md「メッシュ品質チェック」)
+
+# Euler の格子 (prepare)。全域 wall_first_frac 0.005 の等比 (E4)。軸方向 (ni・throat_refine・throat_width) は mesh と同じにする
+# (E4 は生産の G1 と同じ 2000 点)。ni は生成器が mesh.ni を写す
+mesh_euler:
+  nj: 97                     # E4
+  throat_refine: 4.0         # E4 (= mesh)
+  throat_width: 3.0          # E4 (= mesh)
+  wall_first_frac: 0.005     # E4 (全域。壁に寄せた配点の Euler はスロート付近の全温が整定しない; 手順書 §2 ⑤)
+
+evaluate:
+  nStepOuter: 12000          # 生産
+  outStepInterval: 1000      # 生産
+  cfl_main: 1.0              # 生産
+  mid_stage: true            # 生産
