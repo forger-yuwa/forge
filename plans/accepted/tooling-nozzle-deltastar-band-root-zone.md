@@ -3,15 +3,15 @@
 ## メタ
 
 - **area**: `tooling / design (δ* 抽出・設計チェーン)`
-- **status**: `paused`  <!-- 2026-10-13 起票 (ユーザ決定「ある程度できたら、2 に進んでもらっていい」= 抽出の頑健化と #18 を別 plan で起こし、codex に諮ってから実装 → NS の分布全体で壁と r_t を作り直して出口 M を 4.9975〜5.0025 に) -->
+- **status**: `done`  <!-- 2026-10-13 起票 (ユーザ決定「ある程度できたら、2 に進んでもらっていい」= 抽出の頑健化と #18 を別 plan で起こし、codex に諮ってから実装 → NS の分布全体で壁と r_t を作り直して出口 M を 4.9975〜5.0025 に) -->
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) 「排除厚さ (δ*) の帯局所抽出」の節
   - [`procedures/nozzle-design-workflow.md`](../../procedures/nozzle-design-workflow.md) (NS 後の寸法 `solve_rt_throat --prev`)
 - **related_plans**:
-  - [`../accepted/tooling-nozzle-deltastar-core-matched-euler.md`](../accepted/tooling-nozzle-deltastar-core-matched-euler.md) (帯局所抽出 `band_local_deficit` の起源)
-  - [`verification-m6-axis-wave-mesh-su2.md`](verification-m6-axis-wave-mesh-su2.md) §5.1 #7a (帯の位置の選び方 `band_select="edge"`; 別セッションの plan、本計画からは書き込まない)
-  - [`../accepted/tooling-nozzle-wt-deliverables.md`](../accepted/tooling-nozzle-wt-deliverables.md) §5.1 #18・#19 (本計画へ移す)
-  - [`tooling-nozzle-isothermal-wall-chain.md`](tooling-nozzle-isothermal-wall-chain.md) (冷却壁の符号付き δ_r `_negative_delta_r`)
+  - [`../accepted/tooling-nozzle-deltastar-core-matched-euler.md`](tooling-nozzle-deltastar-core-matched-euler.md) (帯局所抽出 `band_local_deficit` の起源)
+  - [`verification-m6-axis-wave-mesh-su2.md`](../active/verification-m6-axis-wave-mesh-su2.md) §5.1 #7a (帯の位置の選び方 `band_select="edge"`; 別セッションの plan、本計画からは書き込まない)
+  - [`../accepted/tooling-nozzle-wt-deliverables.md`](tooling-nozzle-wt-deliverables.md) §5.1 #18・#19 (本計画へ移す)
+  - [`tooling-nozzle-isothermal-wall-chain.md`](../active/tooling-nozzle-isothermal-wall-chain.md) (冷却壁の符号付き δ_r `_negative_delta_r`)
 - **created**: `2026-10-13`
 - **owner**: `sano`
 
@@ -86,9 +86,10 @@ NS 後の δ* の分布で寸法と壁を作り直す経路 (`solve_rt_throat --
 r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から新しい設計の x へ写す必要があり、#18 もこの写しの中で扱う。
 
 - **前の設計の終点に揃える** (#18): 表の終点 $x_{last}$ と**前の設計** (prev run の `wall_repr.json` の `domain[1]`) の出口 $x_{e,prev}$ を比べ、
-  $0 \le x_{e,prev} - x_{last} \le \varepsilon_{f32}$ なら終点の x を $x_{e,prev}$ に置き換える (値はそのまま; 新しい点は足さない)。
+  **両側** $|x_{e,prev} - x_{last}| \le \varepsilon_{f32}$ なら終点の x を $x_{e,prev}$ に置き換える (値はそのまま; 新しい点は足さない)。
+  **[2026-10-13 訂正、codex plan レビュー M3・result レビュー 2 回目 m1]** 当初は片側 (不足だけ) を許していたが、丸めは内外両方向に起きる (run_0009 は出口を 2.7e-6 r_t 超える)。実装 (`deltastar_loop.py` の `snap_table_ends`) は両側。
   $\varepsilon_{f32} = \mathrm{ulp}_{f32}(x_{e,prev} S_{prev})/S_{prev} + \mathrm{ulp}_{f32}(x_{e,prev})$ (格子の座標 [m] と抽出の r_t 単位の 2 回の丸め)。
-  それより大きい差・超過は例外。始点も同じ規則で前の設計の入口端に揃える。`SingleBSplinePhysicalWall.applicability` は緩めない。
+  それより大きい差は内側・外側とも例外。始点も同じ規則で前の設計の入口端に揃える (case/70 の実データ: 入口は外側に 1.039e-7 r_t、出口は内側に 1.542e-6 r_t)。`SingleBSplinePhysicalWall.applicability` は緩めない。
 - **区間で正規化した座標で写す**: 壁温分布 (plan tooling-nozzle-wall-temperature-profile §4.1) と同じ $s$ (直管 [−2,−1]・縮流部 [−1,0]・拡大部 [0,1]、
   区切りの点はそれぞれの設計の壁から) で、前の設計の x → s → 新しい設計の x。端は端に写るので覆い漏れが起きない。
   実寸の長さを保つ作り直しでは、s の写しと実寸の x の写しの差は長さの公差 (1 mm) の程度 (δ_E の傾きで出口 δ に 1e-3 r_t 程度)。
@@ -136,11 +137,11 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 | 5 | Euler 参照 (前の設計) と受入れ | §4.3 1。`case/70/run_0012_euler_c2b`。**受入れ (codex 諮問 2026-10-13 ns-rebuild-route の採用)**: `check_convergence --segment` PASS かつ `qs_series.py` (出口コア M・無次元の流量の系列を `check_quasisteady --series-csv` で末尾 5 枚) が STEADY。**判別 A/B** (変えるのは Euler の本段の反復数だけ): A = run_0012 (36000 step)、B = run_0012 を複製して同じ設定で 12000 step 継続 (`run_0012b_*`)。両方から run_0010 を同じ修正済みの抽出に通し、事前の識別閾値 |ΔM_exit core| ≤ 2.5e-4・流量の相対差 ≤ 1e-4・max|Δδ_E| ≤ 1e-4 r_t。A・B とも PASS/STEADY で差が閾値内 → 参照の過渡が主因の仮説を棄却し A を使う。A が不合格か延長で閾値を超える → 36000 step の参照をそのまま使う方針を棄却 (諮問)。B も不合格なら判別未了 (過渡どうしの差を補正の効果と解釈しない) | O |
 | 5b | ~~帯位置の固定の A/B~~ **完了 2026-10-13: 帯選択の寄与を支持** (x = 5 の 50k→55k: 再選択 5.1e-4・固定 2.4e-5 r_t ≤ 1e-4)。帯を固定しても δ_E は通算 120k まで直線的に動く (スロート +2e-6 r_t / 1k step; `run_0010b_ns_c2b_cont60k`)。Euler A/B の差も帯位置の差を伴う (y_b 最大 27 %)。**帯位置の固定の A/B** (諮問 2026-10-13 reference-acceptance) | forge 0 step。Euler は run_0012 に固定、run_0010 の 40k・45k・50k・55k・60k を再抽出。腕 A = 各時刻で edge を再選択 (`_deltaE_series_run_0010/`)、腕 B = 50k の最終の帯位置 y_b(x) を全時刻で固定 (流束のフィット・積分・平滑化は各時刻)。見る量: x = 5 の 50k→55k の差、使用域の最大差、y_star・y_b・hard/held の変化。判定: A で段差が再現し B で x = 5 の差 ≤ 1e-4 r_t → 帯選択の寄与を支持; B でも > 1e-4 r_t → 帯選択だけで説明する仮説を棄却 (流れの過渡とは断定しない)。B は診断用で、その表を設計入力に使わない | O |
 | 6 | ~~抽出と作り直し~~ **完了 2026-10-13** | §4.3 2〜3。`_ns2_extract/` (run_0010b の 120k の場 × run_0012b、hard 1800/1800・held 0)、`problem_m5_air_ns2.yaml` (r_t 0.025073258 m)。**カード生成時の設計寸法は PASS** (拡大部長 −0.478 mm; 設計壁から測った値)。成果物 (STEP・メッシュ) から測る出荷寸法ゲートは未実施 (codex result レビュー M3; 最終 NS が未達のため成果物を作っていない) | O |
-| 7 | Euler (新しい設計) と最終 NS — **未達** | `run_0013_euler_ns2`・`run_0014_ns_ns2` と延長 `run_0014b〜d`。V5 は専用の許容で全 run DRIFTING (§6 V5)。§5.1 #11 の解決後に再開 | O |
-| 8 | result 段 (コードの修正の範囲) | 2026-10-13 1 回目: 諮問 (nonpos_ref の伝播 → case/45 の 4 対の A/B で棄却) とレビュー (NO-GO C0/M3/m2 → 全件採用して対応、§6.1)。2 回目のレビューで GO なら main へ (PR) | F |
-| 9 | (別セッションへ) M6 生産への影響の連絡 | 2026-10-13 に M6 のセッションへ SendMessage (抽出の欠陥 ae34f09e・単調性の検査 35ab6821・出口の終点 #15)。返信: 3 つとも M6 の δ* ループの前に取り込む前提として plan に記録 (feature/nozzle-wall-fit-and-pipeline cbfb96df)、AWS の生産の抽出で当たっているかは取り込み時に記録。**#4c (出口の終点) を commit したら、その commit を M6 のセッションに伝える** (壁・格子が変わるので固定壁の確認との順序を決めたいとのこと) | O |
-| 10 | (後続) 帯選択の頑健化 | edge の縁 y* の推定 (|R| < ε を最初に満たす交点) が場のわずかな違いで別の枝に切り替わり、帯位置の平滑化を通じて x 2〜12 の δ_E を 5e-4 r_t 動かす (§5.1 #5b)。方法を設計して諮問する (候補: 窓の平均の梯子で選ぶ、帯位置の上流側の固定、c を上げて δ_r が y_b に鈍い域に置く)。M6 生産も同じ抽出を使う | F |
-| 11 | (後続) **冷却壁の NS の遅いモード** | case/70 の最終 NS (`run_0014*`) で、残差が床に着いた後も出口コア M が 10k step ごとに −1〜−5e-4、流量が +0.02 % (cfl 1) で動き続け、cfl 5 で 6 万 step 足しても減衰が見えない (§9 2026-10-13)。補正の元の NS (run_0010 系) も同じく未整定だった。δ* の固定点 (NS 後の作り直し) は NS がこのモードについて定常になってからでないと閉じない。どの量 (スロート付近の境界層の厚さ・温度) が動いているかの切り分けと、加速 (陰解法の設定・粘性ヤコビアン) は M6 のセッションの冷却壁の収束 (isothermal plan・停止規則) と合わせて扱う | F |
+| 7 | Euler (新しい設計) と最終 NS — **未達** | `run_0013_euler_ns2`・`run_0014_ns_ns2` と延長 `run_0014b〜d`。V5 は専用の許容で全 run DRIFTING (§6 V5)。後続 plan `tooling-nozzle-cooled-wall-ns-settling` §5.1 #4 へ | O |
+| 8 | ~~result 段 (コードの修正の範囲)~~ **完了 2026-10-13** | 1 回目: 諮問 (nonpos_ref の伝播 → case/45 の 4 対の A/B で棄却)・レビュー NO-GO C0/M3/m2 → 全件対応。2 回目: レビュー GO-with-changes C0/M0/m3 → 全件対応 (§6.1)。判断: 2026-10-13 codex — コードの修正の受入れを推奨 | F |
+| 9 | (別セッションへ) M6 生産への影響の連絡 | 2026-10-13 に M6 のセッションへ SendMessage (抽出の欠陥 ae34f09e・単調性の検査 35ab6821・出口の終点 #15)。返信: 3 つとも M6 の δ* ループの前に取り込む前提として plan に記録 (feature/nozzle-wall-fit-and-pipeline cbfb96df)、AWS の生産の抽出で当たっているかは取り込み時に記録。~~#4c (出口の終点) を commit したら、その commit を M6 のセッションに伝える~~ **済み 2026-10-13**: de35cb0b を SendMessage で伝えた (case/45 生産の壁 609→610 点・+5.353 mm、L_c 不変、記録の `cut_dropped_node_at_x_F` の注意) | O |
+| 10 | (後続 → plan `tooling-nozzle-cooled-wall-ns-settling` §5.1 #3) 帯選択の頑健化 | edge の縁 y* の推定 (|R| < ε を最初に満たす交点) が場のわずかな違いで別の枝に切り替わり、帯位置の平滑化を通じて x 2〜12 の δ_E を 5e-4 r_t 動かす (§5.1 #5b)。方法を設計して諮問する (候補: 窓の平均の梯子で選ぶ、帯位置の上流側の固定、c を上げて δ_r が y_b に鈍い域に置く)。M6 生産も同じ抽出を使う | F |
+| 11 | (後続 → plan `tooling-nozzle-cooled-wall-ns-settling` §5.1 #1・#2) **冷却壁の NS の遅いモード** | case/70 の最終 NS (`run_0014*`) で、残差が床に着いた後も出口コア M が 10k step ごとに −1〜−5e-4、流量が +0.02 % (cfl 1) で動き続け、cfl 5 で 6 万 step 足しても減衰が見えない (§9 2026-10-13)。補正の元の NS (run_0010 系) も同じく未整定だった。δ* の固定点 (NS 後の作り直し) は NS がこのモードについて定常になってからでないと閉じない。どの量 (スロート付近の境界層の厚さ・温度) が動いているかの切り分けと、加速 (陰解法の設定・粘性ヤコビアン) は M6 のセッションの冷却壁の収束 (isothermal plan・停止規則) と合わせて扱う | F |
 
 ## 6. 検証 (事前登録)
 
@@ -179,6 +180,7 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
 | plan | 2026-10-13 | [2026-10-13-tooling-nozzle-deltastar-band-root-zone-plan.md](../../notes/reviews/2026-10-13-tooling-nozzle-deltastar-band-root-zone-plan.md) | GO-with-changes, C0/M5/m2 | **全件採用** (採否は諮問 [2026-10-13-deltastar-reference-acceptance-diagnose.md](../../notes/reviews/2026-10-13-deltastar-reference-acceptance-diagnose.md) で確認): M1 使用域 [0, x_e] の hard/held で NS 後の寸法を止める + 抽出→平滑化→CSV→寸法の伝播試験 (§4.1・§6 V1) / M2 符号分岐の前に q_ref の有限・正と探索域を検査 (§4.1・V1 の負例) / M3 表の端は両側 \|Δ\| ≤ ε_f32 (§4.2・V4) / M4 入力 δ_E の準定常 (§6 V3e) / M5 出口 M 専用の準定常の許容 (§6 V5) / m6 V5 は各設計の受入れた定常解どうし / m7 methods を実装前に (済) と §5・§7 の整備 |
+| result (2 回目) | 2026-10-13 | [2026-10-13-tooling-nozzle-deltastar-band-root-zone-result-2.md](../../notes/reviews/2026-10-13-tooling-nozzle-deltastar-band-root-zone-result-2.md) | GO-with-changes, C0/M0/m3 | **全件採用**: m1 §4.2 を両側 \|Δ\| ≤ ε_f32 に訂正 (実装どおり) / m2 §8 に受入れ対象を列挙し、V3e・Euler の厳密な受入れ・V5・成果物の出荷寸法ゲートを未達・対象外と明記、後続 plan `tooling-nozzle-cooled-wall-ns-settling` に引き継ぎ / m3 plans/README の索引・§7 の影響範囲・#9 の連絡済みを更新。status done → accepted |
 | result | 2026-10-13 | [2026-10-13-tooling-nozzle-deltastar-band-root-zone-result.md](../../notes/reviews/2026-10-13-tooling-nozzle-deltastar-band-root-zone-result.md) | NO-GO, C0/M3/m2 | **全件採用**: M1 `nonpos_ref` が y_b の端 (格子点の間) を見ていない → y_b での参照値 (a·q_E(y_b)) も検査に入れた (`deltastar.py`、試験 V1(d) に codex の再現例; case/45 の 4 対と case/70 の最終出力はバイト同一のまま) / M2 V5 は未達 → 専用の許容の判定を保存 (`_v5_judgment/`、run_0014 系は全部 DRIFTING)、完了範囲をコードの修正に絞った (§1・§8) / M3「寸法ゲート PASS」を「カード生成時の設計寸法 PASS」に限定 (§5.1 #6) / m4 手順書 (`procedures/nozzle-design-workflow.md`) に新しい経路と再現性の注意を追記 / m5 V5 の比較条件の記述と §5.1 #8・#12 の重複を整理 |
 | diagnose (result 段の解釈) | 2026-10-13 | [2026-10-13-deltastar-band-root-zone-result-diagnose.md](../../notes/reviews/2026-10-13-deltastar-band-root-zone-result-diagnose.md) | Major 1: `nonpos_ref` の hard 化が生産の入力で梯子に留まらず最終の補正の表や寸法の停止へ伝わる可能性 (V2 の 1 対だけでは判定できない)。M5 デモを合否の対象外とする判断は採用 | **採用**: 検査の有無だけを変える A/B (`case/70.m5_air_wt_demo/nonpos_ref_ab.py`、`_nonpos_ref_ab/`、forge 0 step) を手元の case/45 の 4 対 (run_0038×0037・0036×0035・0034×0033・0022×0001、読むだけ) で回した: 検査に当たる呼び出しは各 5960〜6158 / 12.4〜14.2 万件で**すべて梯子・感度の呼び出し**、最終の断面は 0 件、最終の `delta_r_equiv.csv`・`delta_r_next.csv` は両腕で**バイト同一**、使用域の hard・held は 0 → この 4 対では伝播の仮説を棄却。AWS の現行生産の対は M6 のセッションが取り込み時に確かめる (先方の plan に記録済み、§5.1 #9) |
 | diagnose (設計壁の単調性の検査) | 2026-10-13 | [2026-10-13-design-wall-monotone-gate-diagnose.md](../../notes/reviews/2026-10-13-design-wall-monotone-gate-diagnose.md) | 連続関数での複合ゲート (最小壁角 ≥ −1e-4°・最大累積減少 ≤ 1e-7 r_t) と今の検査を、壁を固定して負例つきで比べる A/B を先に。Major 2: 微小な隣接差分 = 無視できる形状誤差は未成立 (区間内の最小傾斜と累積減少を拘束しない)、「数値雑音」の発生源は未立証 | **採用**: §5.1 #4b に A/B と判定を事前登録。「雑音」と書かず「実用許容内の非単調」として、MOC の点列と補間後の減少を分けて記録する |
@@ -188,12 +190,16 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 
 ## 7. 影響範囲
 
-- `metrics/deltastar.py` の `band_local_deficit` (全ての帯局所抽出; 欠陥の無い断面はビット同一)、`feedback/deltastar_loop.py` の `solve_rt_throat --prev`。
+- `metrics/deltastar.py` の `band_local_deficit` (全ての帯局所抽出; 欠陥の無い断面はビット同一)、`feedback/deltastar_loop.py` の `solve_rt_throat --prev`・`--delta-r-csv`。
+- `intake/wt_card.py` (`--ns-correction`)、`geometry/wall_axismach.py` (設計壁の単調性の検査を連続関数の複合ゲートに; 既存の YAML の設計はビット同一)、
+  `geometry/moc_inverse.py` (出口の終点の切断: 落ちていた設計は壁・メッシュ・STEP が 1 点間隔長くなる、case/45 生産 +5.353 mm)。
+- 試験の更新: `run_moc_axis_limit_tests.py`・`run_deltastar_root_zone_tests.py`・`run_wall_temperature_tests.py`・`run_pw_upstream_poly_tests.py` (直す前の規則に戻すとビット同一を確認)。
 - M6 生産 (case/45) の抽出も同じ関数を通る。過去の抽出の結果は変えない (再抽出は M6 のセッションの判断)。
 
 ## 8. 完了条件
 
-- **[2026-10-13 改定]** §6 V1〜V4・§5.1 #4b・#4c の事前登録の A/B が合格、plan 段・result 段の codex レビューの行、methods と手順書の同期。V5 (M5 デモの出口 M) は未達として §5.1 #7・#11 に残し、本計画の完了条件から外す (ユーザ決定「デモはここで区切る」)。
+- **[2026-10-13 改定、ユーザ決定「デモはここで区切る」・codex result レビュー 2 回目 m2] 受入れ対象 (コードの修正)**: §6 V1 (等価半径の探索・`nonpos_ref` の y_b の端を含む)・V2 (欠陥に当たらない抽出のバイト同一)・V4 (表の端と写し・NS 補正のカード)・§5.1 #4b (単調性の検査) と #4c (出口の終点) の事前登録の A/B・`nonpos_ref` の有無の A/B (case/45 の 4 対)、plan 段・result 段の codex レビューの行、methods と手順書の同期。
+- **未達・今回の受入れの対象外**: §6 V3 (V3e の入力 δ_E の準定常を含む)、§5.1 #5 の Euler 参照の厳密な受入れ (収束 PASS)、§6 V5 (M5 デモの出口 M)、成果物の出荷寸法ゲート。後続の plan [`tooling-nozzle-cooled-wall-ns-settling`](../active/tooling-nozzle-cooled-wall-ns-settling.md) に引き継ぐ (§5.1 #7・#10・#11 も同じ)。
 
 ## 9. 変更ログ
 
@@ -215,3 +221,4 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 - 2026-10-13: **ユーザ決定「デモはここで区切る」** (選択肢: 区切る / NS を定常まで回して詰める / 遅いモードの原因を先に調べる)。到達点: 抽出の欠陥の修正 (ae34f09e)・単調性の検査の置き換え (35ab6821)・出口の終点の修正 (de35cb0b)・NS 補正でカードから作り直す経路は動き、作り直した設計は寸法ゲート PASS。最終 NS は 60k step で出口コア M 5.0022 (−0.19 % → +0.04 %) だが、長く回すと 4.998 前後まで下がり続け定常でない (V5 判定保留)。status を paused にし、遅いモードを §5.1 #11、result 段を #12 に残す。
 - 2026-10-13: result 段の諮問を採用し、`nonpos_ref` の有無の A/B を手元の case/45 の 4 対で実施 (最終出力はバイト同一、使用域の hard/held 0)。
 - 2026-10-13: result 段 1 回目 (NO-GO, M3/m2) を全件採用。`nonpos_ref` の y_b の端を修正、完了範囲をコードの修正に絞った (V5 は未達として残す)。回帰 (design/tests 43 本、1ca7160b の前の HEAD): 41 本合格。失敗 2 本 (`run_sern_gates_tests` の pareto 要約の IndexError、`run_sern_moc_tests` の「C⁻ がランプ角部に達した」ValueError) は origin/main のコード (git archive) でも同じ箇所で落ちる既存の失敗 (本計画の変更と無関係)。
+- 2026-10-13: result 段 2 回目 (GO-with-changes, m3) を全件採用。完了範囲をコードの修正とし、未達の検証と後続課題を plan `tooling-nozzle-cooled-wall-ns-settling` に引き継いで accepted へ移す。
