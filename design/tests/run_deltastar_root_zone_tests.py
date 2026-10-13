@@ -583,9 +583,12 @@ def test_case70(out_dir):
         skip("case/70 の抽出", "run_0010・run_0012・_ab_euler_steps/A/zone のどれかが無い")
         return
     out_dir = Path(out_dir)
-    DL.extract_and_merge(NS10, EU12, band_select="edge", out_dir=out_dir)
+    # 基準の zone の腕は持続を入れる前 (edge の縁の持続 = 1 段) の抽出。2026-10-13 に既定が persist 4 になった
+    # (plan tooling-nozzle-cooled-wall-ns-settling §4.2b) ので、ここでは edge_persist=1 で旧の式に戻して比べる
+    # (既定のままだと 3 ファイルとも異なる; persist 1 で旧の式とビット同一なことは run_band_persist_tests.py (c))
+    DL.extract_and_merge(NS10, EU12, band_select="edge", edge_persist=1, out_dir=out_dir)
     same = {f: filecmp.cmp(out_dir / f, ref / f, shallow=False) for f in ("delta_r_next.csv", "delta_r_equiv.csv", "delta_r_edge.csv")}
-    check("case/70: 新実装の抽出が ab_root_zone の zone の腕とバイト同一", all(same.values()), f"{same}")
+    check("case/70: 新実装の抽出 (edge_persist=1) が ab_root_zone の zone の腕とバイト同一", all(same.values()), f"{same}")
 
 
 def main(argv=None) -> int:

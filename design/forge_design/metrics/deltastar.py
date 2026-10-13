@@ -332,14 +332,20 @@ def pspline_uniform(x, v, knot: float, lam: float = 1.0, weights=None, k: int = 
 def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, c: float = 1.25,
                         window: float = 3.0, knot: float = 6.0, edge_ratio: float = 1.25,
                         ref_min_frac: float = 0.0133, lam: float = 1.0, crossing: str = "quadratic",
-                        hold_lo: float | None = 3.0, hold_hi_from_end: float | None = 3.0) -> dict:
+                        hold_lo: float | None = 3.0, hold_hi_from_end: float | None = 3.0, persist: int = 1) -> dict:
     r"""帯の位置を「境界層の縁の連続推定 → x 方向平滑化 → その c 倍」で決める (band_select="edge"、純関数)。
 
     plan verification-m6-axis-wave-mesh-su2 §5.1 #7a (diagnostician 2026-10-04 推薦 E)。各断面 i で、帯を固定した
     δ_r の梯子 (y_ladders[i], d_ladders[i]) から $R(y)=\delta_r(\text{edge\_ratio}\,y)/\delta_r(y)-1$ を作り
-    (log y で線形補間)、$|R|<\varepsilon$ を初めて満たす y を**格子点間の線形補間で**求めて縁 $y^*$ とする (無ければ NaN)。
+    (log y で線形補間)、**そこから persist 段続けて** $|R|<\varepsilon$ を満たす最初の段を交点の段とし、その段と 1 つ内側の段の間を
+    **格子点間の線形補間で**解いて縁 $y^*$ とする (無ければ NaN)。persist = 1 は「$|R|<\varepsilon$ を初めて満たす段」(2026-10-13 までの式)。
+    既定 persist = 4 (plan tooling-nozzle-cooled-wall-ns-settling §4.2b): 一番内側の段で R が偶然 ±ε の中に入るだけの交点を拾わない
+    (冷却壁のスロート付近で y* の有無が場のわずかな違いで切り替わっていた)。
     $\kappa=\ln(y^*/y_{ref})$, $y_{ref}=\max(\delta_{in}, f\,r_w)$ を x 方向に移動中央値 (半幅 window) → 3 次 P-spline
     (ノット knot, λ) で平滑化し、$y_b=c\,y_{ref}e^{\tilde\kappa}$。NaN の断面は y_b 側をスプラインで埋める (δ_r 側の穴にしない)。"""
+    persist = int(persist)
+    if persist < 1:
+        raise ValueError(f"persist={persist} は 1 以上")
     x = np.asarray(x, dtype=float); n = len(x)
     d_in = np.asarray(d_in, dtype=float); r_w = np.asarray(r_w, dtype=float)
     y_ref = np.maximum(np.maximum(d_in, 0.0), ref_min_frac * r_w)
@@ -355,7 +361,15 @@ def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, 
         if m.sum() < 2:
             continue
         Rabs = np.abs(np.interp(lq[m], ly, dd) / dd[m] - 1.0) - eps
-        j = int(np.argmax(Rabs < 0.0)) if np.any(Rabs < 0.0) else -1
+        hit = Rabs < 0.0
+        if persist > 1:
+            # 持続: 段 j から persist 段 (j … j+persist−1) がすべて |R| < ε のときだけ j を候補にする (梯子の外へははみ出さない)。
+            # 選んだ j の 1 つ内側の段は必ず |R| ≥ ε (そうでなければ j−1 が先の候補) なので、下の交点の補間は今と同じ 2 段の間で解く
+            run = np.zeros_like(hit)
+            if len(hit) >= persist:
+                run[:len(hit) - persist + 1] = np.lib.stride_tricks.sliding_window_view(hit, persist).all(axis=1)
+            hit = run
+        j = int(np.argmax(hit)) if np.any(hit) else -1
         if j < 0:
             continue
         L = ly[m]
@@ -409,7 +423,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       edge_eps: float = 0.003, edge_c: float = 1.25, edge_window: float = 3.0,
                                       edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.125, edge_y0_fac: float = 1.2,
                                       edge_min_frac: float = 0.016, edge_ymax_frac: float = 0.5, edge_ref_min_frac: float = 0.0133,
-                                      edge_y0_shift: float = 1.0, return_ladders: bool = False) -> dict:
+                                      edge_y0_shift: float = 1.0, edge_persist: int = 1, return_ladders: bool = False) -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
 
     定義 (plan §4.2–4.4):
@@ -434,6 +448,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     - "edge" (2026-10-04, diagnostician 推薦 E, plan §5.1 #7a): 帯を細かい梯子 (比 edge_step) で固定して δ_r(y) を測り、
       `edge_band_positions` で縁 y* を連続推定 → x 平滑 → y_b = edge_c × 縁 に帯を固定して測る。感度欄は c×0.8 / c×1.25。
       edge_y0_shift は梯子の位相試験用 (始点の倍率)。return_ladders=True で梯子と縁を戻り値に含める (試験用)。
+      edge_persist は縁の交点に要求する持続の段数 (`edge_band_positions` の persist; 既定 4、2026-10-13 plan
+      tooling-nozzle-cooled-wall-ns-settling §4.2b。1 で 2026-10-13 までの抽出をビット同一で再現する)。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿。
@@ -518,7 +534,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                 ds.append(rk["delta_r"] if (rk is not None and np.isfinite(rk["delta_r"])) else np.nan)
             ii.append(i); xs_e.append(x); din_e.append(d_in); rw_e_l.append(rwN); yl.append(np.array(ys)); dl.append(np.array(ds))
         pos = edge_band_positions(np.array(xs_e), yl, dl, np.array(din_e), np.array(rw_e_l), eps=edge_eps, c=edge_c,
-                                  window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac)
+                                  window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac,
+                                  persist=edge_persist)
         edge = dict(i=ii, x=np.array(xs_e), y_b=pos["y_b"], y_star=pos["y_star"], kappa_s=pos["kappa_s"],
                     kappa_med=pos["kappa_med"], y_ref=pos["y_ref"], ladders_y=yl, ladders_d=dl)
         edge_map = {i: k for k, i in enumerate(ii)}
@@ -634,7 +651,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                              plateau_tol=plateau_tol, plateau_kmax=plateau_kmax,
                              edge=(dict(eps=edge_eps, c=edge_c, window=edge_window, knot=edge_knot, step=edge_step,
                                         y0_fac=edge_y0_fac, min_frac=edge_min_frac, ymax_frac=edge_ymax_frac,
-                                        ref_min_frac=edge_ref_min_frac, y0_shift=edge_y0_shift)
+                                        ref_min_frac=edge_ref_min_frac, y0_shift=edge_y0_shift, persist=int(edge_persist))
                                    if band_select == "edge" else None),
                              gate_band_rms=gate_band_rms,
                              core_frac=core_frac, core_frac_sens=list(core_frac_sens), n_axis_skip=n_axis_skip,
