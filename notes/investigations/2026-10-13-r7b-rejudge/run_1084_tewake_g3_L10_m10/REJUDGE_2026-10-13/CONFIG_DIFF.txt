@@ -1,0 +1,12 @@
+# run/solverConfig.yaml と 現行の判定区間の config (runner_sern.judgment_config(prepare_current/solverConfig_main.yaml))
+# 許す差 (nStepOuter・出力系) 0 行、許さない差 0 行
+(差なし)
+
+# run/solverConfig_main.yaml と 現行の本段の config (prepare_current/solverConfig_main.yaml)
+# 許す差 (nStepOuter・出力系) 0 行、許さない差 0 行
+(差なし)
+
+# bcondConfig.yaml: 差なし
+
+# species_meta.yaml: 差なし
+

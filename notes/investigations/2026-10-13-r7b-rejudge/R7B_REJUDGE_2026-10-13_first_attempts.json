@@ -1,0 +1,306 @@
+{
+ "version": "rejudge-r7b-v1",
+ "time": "2026-10-13T03:06:03+0000",
+ "git": {
+  "head": "4829694052e1bedb53db25228b619701434535ca",
+  "dirty_tracked": null
+ },
+ "acceptance_version_current": "sern-acceptance-v1",
+ "result": "B",
+ "result_text": "結果 B: 欠落・判定不能・不合格の run がある (版の付け替えだけで救済しない)",
+ "failures": [
+  {
+   "run": "run_1088_tewake_m6_L10",
+   "reasons": [
+    "現行の受理検査で FAIL (JUDGMENT_UNSETTLED): 判定区間: 窓・定常性が未達: C_L: a 1.37e-05・d 9.08e-05 (許容 5e-05)・STEADY; 判定区間: 窓・定常性が未達: C_M: a 2.90e-04・d 1.71e-03 (許容 5e-04)・STEADY",
+    "判定区間 (#2・#3) が PASS でない (UNSETTLED)"
+   ]
+  },
+  {
+   "run": "run_1097_tewake_lsw10_m6_cont20k",
+   "reasons": [
+    "現行の受理検査で FAIL (JUDGMENT_UNSETTLED): 判定区間: 窓・定常性が未達: C_T_with_shear: a 2.64e-06・d 6.85e-05 (許容 5e-05)・STEADY; 判定区間: 窓・定常性が未達: C_M: a 5.47e-04・d 1.97e-03 (許容 5e-04)・STEADY; 判定区間: 最低温度が未定常: ALL の最低温度 TRANSIENT-UNSETTLED",
+    "判定区間 (#2・#3) が PASS でない (UNSETTLED)"
+   ]
+  },
+  {
+   "run": "run_1085_tewake_g4_L10_cont20k",
+   "reasons": [
+    "現行の受理検査で FAIL (JUDGMENT_UNSETTLED): 判定区間: 窓・定常性が未達: C_L: a 2.43e-06・d 5.87e-05 (許容 5e-05)・STEADY; 判定区間: 窓・定常性が未達: C_M: a 6.35e-05・d 1.72e-03 (許容 5e-04)・STEADY",
+    "判定区間 (#2・#3) が PASS でない (UNSETTLED)"
+   ]
+  }
+ ],
+ "rows": [
+  {
+   "run": "run_1088_tewake_m6_L10",
+   "L_sw": 0.8,
+   "op": "m6_on",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "FAIL",
+   "fail_class": "JUDGMENT_UNSETTLED",
+   "judgment": {
+    "verdict": "UNSETTLED",
+    "fail_class": "JUDGMENT_UNSETTLED",
+    "temperature": "PASS",
+    "force_window": "UNSETTLED",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.8891112666879033,
+     "a": 4.3142903196624616e-06,
+     "d": 7.283923597833919e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8704129034524806,
+     "a": 4.24101133500443e-06,
+     "d": 1.1567838749115822e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.06209783573217429,
+     "a": 1.3708561391108376e-05,
+     "d": 9.077671555966088e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": false
+    },
+    "C_M": {
+     "mean": -1.626623527928438,
+     "a": 0.00029006431245681696,
+     "d": 0.0017074257139788607,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": false
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": false,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:49:45+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+    "te_wake_sha256": "d281fd40292d",
+    "te_wake_commit": "7c88aa35",
+    "production": "problem_3d_prod_3op_wallres_lswx08.yaml",
+    "production_sha256": "df1969f2bf1e",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1097_tewake_lsw10_m6_cont20k",
+   "L_sw": 1.0,
+   "op": "m6_on",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "FAIL",
+   "fail_class": "JUDGMENT_UNSETTLED",
+   "judgment": {
+    "verdict": "UNSETTLED",
+    "fail_class": "JUDGMENT_UNSETTLED",
+    "temperature": "UNSETTLED",
+    "force_window": "UNSETTLED",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.892632760971488,
+     "a": 2.8730416923306024e-06,
+     "d": 2.5665623852866304e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8725507972002161,
+     "a": 2.63639615838418e-06,
+     "d": 6.847833901990619e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": false
+    },
+    "C_L": {
+     "mean": 0.07149329304551386,
+     "a": 1.7479829151831328e-05,
+     "d": 4.613100032983819e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": -1.8492669227435337,
+     "a": 0.0005472686406875482,
+     "d": 0.0019722766353069687,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": false
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": false,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1097_tewake_lsw10_m6_cont20k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:56:29+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+    "te_wake_sha256": "7a259984523f",
+    "te_wake_commit": "7f056898",
+    "production": "problem_3d_prod_3op_wallres_lswx10.yaml",
+    "production_sha256": "9d8134c794b6",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1085_tewake_g4_L10_cont20k",
+   "L_sw": 0.8,
+   "op": "m10_on",
+   "grid": "g4",
+   "status": "JUDGED",
+   "verdict": "FAIL",
+   "fail_class": "JUDGMENT_UNSETTLED",
+   "judgment": {
+    "verdict": "UNSETTLED",
+    "fail_class": "JUDGMENT_UNSETTLED",
+    "temperature": "PASS",
+    "force_window": "UNSETTLED",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.9162842731546638,
+     "a": 3.624963883508414e-07,
+     "d": 6.182747246286091e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8965901722867733,
+     "a": 6.420090993275451e-07,
+     "d": 3.957739925519732e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.06728738669950983,
+     "a": 2.4276682237117653e-06,
+     "d": 5.871624056445757e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": false
+    },
+    "C_M": {
+     "mean": -1.7767734148211054,
+     "a": 6.352987357716167e-05,
+     "d": 0.0017218712598046082,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": false
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": false,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1085_tewake_g4_L10_cont20k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T03:06:03+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx08_tewake_g4_L10.yaml",
+    "te_wake_sha256": "c6f01b51a87f",
+    "te_wake_commit": "7c88aa35",
+    "production": "problem_3d_prod_3op_wallres_lswx08.yaml",
+    "production_sha256": "df1969f2bf1e",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 8
+   }
+  }
+ ],
+ "design_diff": {
+  "q": "C_T_with_shear",
+  "weights": {
+   "m6_on": 0.5,
+   "m10_on": 0.3,
+   "m4_off": 0.2
+  },
+  "per_op": {},
+  "dJ": null,
+  "U_time_weighted": null,
+  "missing": [
+   "m10_on: g3 の L_sw 0.8 (対応表に無い: 未実施) / 1.0 (対応表に無い: 未実施) の両方が現行で PASS でない",
+   "m6_on: g3 の L_sw 0.8 (run_1088_tewake_m6_L10: FAIL) / 1.0 (run_1097_tewake_lsw10_m6_cont20k: FAIL) の両方が現行で PASS でない",
+   "m4_off: g3 の L_sw 0.8 (対応表に無い: 未実施) / 1.0 (対応表に無い: 未実施) の両方が現行で PASS でない"
+  ],
+  "G10": {
+   "status": "未確定",
+   "why": "Δ₁₀,g4 に要る g4・L_sw 1.0・m10_on の判定区間が無い (g4 は L_sw 0.8 だけ)",
+   "formula": "G₁₀ = |Δ₁₀,g4 − Δ₁₀,g3| + U₁₀,g4 + U₁₀,g3"
+  }
+ }
+}

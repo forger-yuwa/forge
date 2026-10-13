@@ -1,0 +1,16 @@
+inlet_nozzle: {physID: 1, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {ro: 0.0666855, Ux: 2837.02, Uy: 0.0, Uz: 0.0, Ps: 57935, k: 1207.3, omega: 447274, Y0: 1, Y1: 0}}
+inlet_ext: {physID: 2, kind: inlet_uniformVelocity, outputHDFflg: 0, ints: , floats: {ro: 0.0157083, Ux: 3025.17, Uy: 0.0, Uz: 0.0, Ps: 1026, k: 1372.75, omega: 119798, Y0: 0, Y1: 1}}
+outlet: {physID: 3, kind: outflow, outputHDFflg: 0, ints: , floats: }
+ramp: {physID: 4, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+cowl_in: {physID: 5, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+cowl_out: {physID: 6, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+bottom: {physID: 7, kind: outflow, outputHDFflg: 0, ints: , floats: }
+top_out: {physID: 8, kind: slip, outputHDFflg: 0, ints: , floats: }
+sym: {physID: 9, kind: slip, outputHDFflg: 0, ints: , floats: }
+side_far: {physID: 10, kind: farfield, outputHDFflg: 0, ints: , floats: {ro: 0.015708337, Ux: 3025.17359, Uy: 0.0, Uz: 0.0, Ps: 1026, k: 1372.75128, omega: 119797.999, Y0: 0, Y1: 1}}
+sidewall_in: {physID: 11, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+sidewall_out: {physID: 12, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+vehicle_side: {physID: 17, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+vehicle_base: {physID: 18, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+vehicle: {physID: 14, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}
+vehicle_top: {physID: 15, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 1000.0}}

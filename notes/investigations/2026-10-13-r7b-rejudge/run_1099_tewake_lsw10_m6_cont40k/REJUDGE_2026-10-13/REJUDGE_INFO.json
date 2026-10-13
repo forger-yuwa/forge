@@ -1,0 +1,1013 @@
+{
+ "version": "rejudge-r7b-v1",
+ "start": "2026-10-13T02:20:29+0000",
+ "spec": {
+  "run": "run_1099_tewake_lsw10_m6_cont40k",
+  "L_sw": 1.0,
+  "op": "m6_on",
+  "grid": "g3",
+  "te_yaml": "problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+  "prod_yaml": "problem_3d_prod_3op_wallres_lswx10.yaml",
+  "note": "run_1097 (run_1094 の段階起動の本段の最終場から 20000 step) の +20000 (diag/tewake_ext.sh)"
+ },
+ "run_dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k",
+ "out_dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k/REJUDGE_2026-10-13",
+ "acceptance_version_current": "sern-acceptance-v1",
+ "git": {
+  "head": "4829694052e1bedb53db25228b619701434535ca",
+  "dirty_tracked": null
+ },
+ "status": "JUDGED",
+ "elapsed_s": {
+  "snapshot_before": 7.9,
+  "prepare": 268.2,
+  "mesh_identity": 1.1,
+  "te_monitor": 0.5,
+  "collect": 125.3,
+  "snapshot_after": 0.9,
+  "total": 404.1
+ },
+ "run_files": {
+  "n": 674,
+  "bytes": 1134678171
+ },
+ "run_records": {
+  "IC_FROM.txt": "IC: restart_field run_1097_tewake_lsw10_m6_cont20k res_20000 (同一設定の +20000 延長、事前登録の延長 1 回)。plan tooling-sern-te-wake-grid §6\n",
+  "RESTART_FROM.txt": "[restart_field] species: SRC species_hash b72ff462d242cc99 = destination species_hash b72ff462d242cc99 (forge --resolve-species); SRC descends from an unverified start -> inherit the hash and the mark (species_input_unverified=1; record of SRC resolved_species_b72ff462d242cc99_476487b9a57b6eb7.yaml)\n同一メッシュを確認 (MESH/COORD 一致, 1920906 cells)\n移した保存量  : ['ro', 'roK', 'roOmega', 'roUx', 'roUy', 'roUz', 'roY0', 'roY1', 'roe']\nDST を残す    : ['wall_dist']\nspecies 属性  : 継承 (species_input_unverified=1)\nVERDICT: OK (9 量を移した、SRC とビット一致)\n",
+  "RUN_PROVENANCE.txt": "date        : 2026-10-11T06:41:15+00:00\nforge_bin   : /home/ubuntu/forge-r8/solver_density_cuda/build/forge\nforge_mtime : 2026-10-10T14:40:23+00:00\nforge_sha256: 61cf8f4fc64125cd5aa30cfef1439882c671156f5c1826baaa7578e3782131c2\ngit_head    : 7f05689833c87032870d75690df127fb41c89991\ngit_dirty   : 0 件\nhost        : ip-172-31-14-139\nenv         : FORGE_CUDA_BLOCKSIZE=128\ncfg         : lowMachPrecond=0 (要求値)\ncfg         : wallTreatmentSST=0 (要求値)\n'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)\n'scalarGradient' effective: lsq (default)\n"
+ },
+ "yaml": {
+  "te_wake": {
+   "path": "/home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+   "sha256": "7a259984523f790a76f2b945773e09c84b80d0c042cbed31b3c1fb4f6fd19778",
+   "git_last_commit": "7f05689833c87032870d75690df127fb41c89991",
+   "git_modified": false
+  },
+  "production": {
+   "path": "/home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx10.yaml",
+   "sha256": "9d8134c794b6bd9fd99ce197451793a8cb9542dd6015be954cd33bdb59b5bacb",
+   "git_last_commit": "fa816325fcdcef58ff19746be6f6cb0d84ee0bb0",
+   "git_modified": false
+  },
+  "merged": {
+   "path": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k/REJUDGE_2026-10-13/problem_rejudge.yaml",
+   "sha256": "dad926ff4d2aabb0af6dfaf19b8470531b6884e5d5832871fc39750386c28f4f"
+  },
+  "keys_from_production": {
+   "judgment_steps": {
+    "production": 20000,
+    "te_wake": "(無い)",
+    "used": 20000
+   },
+   "judgment_extend_once": {
+    "production": 1,
+    "te_wake": "(無い)",
+    "used": 1
+   },
+   "floor_events": {
+    "production": 1,
+    "te_wake": 1,
+    "used": 1
+   },
+   "floor_events_window_steps": {
+    "production": 10000,
+    "te_wake": 10000,
+    "used": 10000
+   },
+   "outStepInterval": {
+    "production": 500,
+    "te_wake": 500,
+    "used": 500
+   }
+  },
+  "species_db_abs": null,
+  "other_differences_te_vs_production": []
+ },
+ "judgment_plan": {
+  "steps": 20000,
+  "window_steps": 10000,
+  "extend_once": true,
+  "out_interval": 500,
+  "required": [
+   "C_T",
+   "C_T_with_shear",
+   "C_L",
+   "C_M"
+  ]
+ },
+ "provenance": {
+  "checked": true,
+  "prepare_problem": "../case/46.sern_design/problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+  "prepare_op": "m6_on",
+  "expected_yaml": "problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+  "expected_op": "m6_on"
+ },
+ "inputs": {
+  "missing": [],
+  "notes": [],
+  "final_step": 20000,
+  "mesh_file": "sern.h5",
+  "forge_rc_from_log": 0,
+  "force_parts": {
+   "required": [
+    "ramp",
+    "cowl_in",
+    "cowl_out",
+    "sidewall_in",
+    "sidewall_out",
+    "vehicle_top",
+    "vehicle_side",
+    "vehicle_base"
+   ],
+   "friction": [
+    "ramp",
+    "cowl_in",
+    "cowl_out",
+    "sidewall_in",
+    "sidewall_out"
+   ],
+   "faces_source": "prepare_info.mesh (メッシャの条件)",
+   "reasons": []
+  },
+  "planned": {
+   "first": 500,
+   "last": 20000,
+   "n": 40,
+   "window_steps": 10000,
+   "out_interval": 500
+  }
+ },
+ "free_gib_before_prepare": 151.6,
+ "current_prepare": {
+  "dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k/REJUDGE_2026-10-13/prepare_current",
+  "converter": {
+   "path": "/home/ubuntu/forge-r8/solver_density_cuda/build/convertGmshToForge",
+   "sha256": "36b061b966b14be831afd3908773c530a9a61cec0b256f250838bdaa52bcd402",
+   "bytes": 58462528,
+   "mtime": 1791643243
+  },
+  "mesher": {
+   "modules": [
+    "mesh2d.py",
+    "mesh_sern.py",
+    "mesh_sern3d.py"
+   ],
+   "source_sha256": "b58406b627e53e1a26fad9c6324a73ec93ba1994fe669df4dedf5d822bdb8668"
+  },
+  "mesh_quality": "VERDICT: PASS (AR<= 5000, skew<= 0.90)",
+  "removed": [
+   {
+    "name": "sern.h5",
+    "bytes": 669681332
+   },
+   {
+    "name": "sern.msh",
+    "bytes": 218375960
+   },
+   {
+    "name": "sern.xmf",
+    "bytes": 2151
+   }
+  ]
+ },
+ "mesh": {
+  "run_now": {
+   "h5": "sern.h5",
+   "mesh_signature": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "dual_hash": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+   "dual_hash_version": "dual-geom-v1",
+   "discretization": "node"
+  },
+  "run_record": {
+   "h5": "sern.h5",
+   "mesh_signature": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "dual_hash": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+   "dual_hash_version": "dual-geom-v1",
+   "discretization": "node",
+   "te_wake_attrs": {
+    "te_wake_blend_H": 1.0,
+    "te_wake_curve_version": "hermite3-lower-tangent-v1"
+   }
+  },
+  "current": {
+   "h5": "sern.h5",
+   "mesh_signature": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "dual_hash": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+   "dual_hash_version": "dual-geom-v1",
+   "discretization": "node",
+   "te_wake_attrs": {
+    "te_wake_blend_H": 1.0,
+    "te_wake_curve_version": "hermite3-lower-tangent-v1"
+   }
+  },
+  "items": {
+   "mesh_signature": {
+    "current": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+    "run_now": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+    "run_record": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc"
+   },
+   "dual_hash": {
+    "current": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+    "run_now": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+    "run_record": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba"
+   },
+   "discretization": {
+    "current": "node",
+    "run_now": "node",
+    "run_record": "node"
+   }
+  },
+  "disallowed": []
+ },
+ "config": {
+  "compared": {
+   "solverConfig_main.yaml": "run に無い (比べない。run の判定区間は solverConfig.yaml が読んだ)",
+   "solverConfig.yaml": {
+    "against": "現行の判定区間の config (runner_sern.judgment_config(prepare_current/solverConfig_main.yaml))",
+    "allowed": [],
+    "disallowed": []
+   }
+  },
+  "files": {
+   "bcondConfig.yaml": true,
+   "species_meta.yaml": true
+  },
+  "disallowed": []
+ },
+ "prepare_info": {
+  "items": {
+   "H_m": {
+    "run": 0.1,
+    "current": 0.1,
+    "same": true
+   },
+   "half_W_m": {
+    "run": 0.1,
+    "current": 0.1,
+    "same": true
+   },
+   "half_W_vehicle_m": {
+    "run": null,
+    "current": null,
+    "same": true
+   },
+   "F_ideal_N_per_m": {
+    "run": 53220.323816436976,
+    "current": 53220.323816436976,
+    "same": true
+   },
+   "discretization": {
+    "run": "node",
+    "current": "node",
+    "same": true
+   },
+   "states.exhaust.ro": {
+    "run": 0.12750691181432816,
+    "current": 0.12750691181432816,
+    "same": true
+   },
+   "states.exhaust.u": {
+    "run": 1620.9863323558386,
+    "current": 1620.9863323558386,
+    "same": true
+   },
+   "states.exhaust.P": {
+    "run": 101027.0,
+    "current": 101027.0,
+    "same": true
+   },
+   "states.ext.P": {
+    "run": 2851.0,
+    "current": 2851.0,
+    "same": true
+   },
+   "operating_point.name": {
+    "run": "m6_on",
+    "current": "m6_on",
+    "same": true
+   },
+   "mesh.L_sw": {
+    "run": 1.0,
+    "current": 1.0,
+    "same": true
+   },
+   "mesh.te_wake_blend_H": {
+    "run": 1.0,
+    "current": 1.0,
+    "same": true
+   },
+   "wall_faces": {
+    "run": null,
+    "current": {
+     "ramp": 5472,
+     "cowl_in": 2496,
+     "cowl_out": 2496,
+     "sidewall_in": 5832,
+     "sidewall_out": 5832,
+     "vehicle": 0,
+     "vehicle_top": 5472,
+     "vehicle_side": 3648,
+     "vehicle_base": 384
+    },
+    "same": null,
+    "note": "片方に記録が無い (collect はメッシャの記録 prepare_info.mesh から面の有無を決める)"
+   }
+  },
+  "eval_method_id": {
+   "run": "013caf37dd5b505259331545707a2e5898e348965aa6bb2bf84ec38d58fc2e7c",
+   "current": "c9db16d5eab87ddf7613f560268347b1ae006096a772bea06f71372ac3ec55dc",
+   "note": "記録だけ (照合は格子署名・双対・config で)"
+  },
+  "disallowed": []
+ },
+ "te_monitor": {
+  "tool": "/home/ubuntu/forge-r8/case/46.sern_design/diag/te_monitor.py",
+  "tool_sha256": "436ba3d62f74fd40b46fb401b5eb81ff8fd91601c5d87bd4735a2def6e0328db",
+  "lb_h": 1.0,
+  "rc": 0,
+  "stdout": "step=20000 n_floor_plus1=0 R_TE_Tmin=220.7890625 R_TE_n_lt150=0 R_SE_Tmin=224.66671752929688 R_SE_n_lt150=0 RET_Tmin=220.56785583496094 RET_n_lt150=0 ALL_Tmin=209.46888732910156 ALL_n_lt150=0",
+  "stderr": "",
+  "columns": {
+   "current": 39,
+   "run": 39,
+   "same": true
+  },
+  "n_rows_run": 40,
+  "final_row_same": true
+ },
+ "current_gates": {
+  "verdict": "PASS",
+  "fail_class": null,
+  "reasons": [],
+  "rc": 0,
+  "acceptance_version": "sern-acceptance-v1",
+  "objective": "C_T_with_shear",
+  "field": {
+   "ok": true,
+   "file": "res_20000.h5",
+   "nonfinite": {},
+   "nonpositive": {},
+   "min": {
+    "ro": 0.002491205232217908,
+    "P": 840.80419921875,
+    "T": 209.46888732910156
+   },
+   "nan_files": [],
+   "reasons": [],
+   "required": [
+    "ro",
+    "roUx",
+    "roUy",
+    "roUz",
+    "roe",
+    "P",
+    "T",
+    "roK",
+    "roOmega",
+    "roY0",
+    "roY1"
+   ],
+   "missing": [],
+   "shape_mismatch": {},
+   "unverifiable": [],
+   "species_required": [
+    "roY0",
+    "roY1"
+   ],
+   "species_checked": [
+    "Y0",
+    "Y1",
+    "roY0",
+    "roY1"
+   ]
+  },
+  "residual": {
+   "ok": true,
+   "converged": false,
+   "verdict": "NOT CONVERGED (stalled/plateau)",
+   "nan": false,
+   "rising": [],
+   "stalled": [
+    "rms_ro",
+    "rms_roUx",
+    "rms_roUy",
+    "rms_roUz",
+    "rms_roe",
+    "rms_roOmega",
+    "rms_roY0",
+    "rms_roY1"
+   ],
+   "converging": [
+    "rms_roK"
+   ],
+   "columns": {
+    "rms_ro": {
+     "msg": "init=6.10e-07 peak=8.76e-07 fin=5.43e-07 drop= 0.1dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.1
+    },
+    "rms_roUx": {
+     "msg": "init=1.16e-03 peak=1.70e-03 fin=1.01e-03 drop= 0.1dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.1
+    },
+    "rms_roUy": {
+     "msg": "init=2.19e-04 peak=2.71e-04 fin=1.83e-04 drop= 0.1dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.1
+    },
+    "rms_roUz": {
+     "msg": "init=4.09e-04 peak=6.77e-04 fin=3.27e-04 drop= 0.1dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.1
+    },
+    "rms_roe": {
+     "msg": "init=1.85e+00 peak=2.79e+00 fin=1.60e+00 drop= 0.1dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.1
+    },
+    "rms_roK": {
+     "msg": "init=2.30e-03 peak=2.31e-03 fin=8.54e-04 drop= 0.4dec falling  <-- still converging",
+     "ok": false,
+     "trend": "falling",
+     "drop": 0.4
+    },
+    "rms_roOmega": {
+     "msg": "init=3.47e+01 peak=1.68e+02 fin=4.19e+01 drop= 0.6dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.6
+    },
+    "rms_roY0": {
+     "msg": "init=3.51e-07 peak=5.80e-07 fin=2.97e-07 drop= 0.1dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.1
+    },
+    "rms_roY1": {
+     "msg": "init=4.54e-07 peak=6.40e-07 fin=4.19e-07 drop= 0.2dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.2
+    }
+   },
+   "last_step": "19999",
+   "unverifiable": false,
+   "input": {
+    "ok": true,
+    "reasons": [],
+    "notes": []
+   },
+   "required_columns": [
+    "rms_ro",
+    "rms_roUx",
+    "rms_roUy",
+    "rms_roUz",
+    "rms_roe",
+    "rms_roK",
+    "rms_roOmega",
+    "rms_roY0",
+    "rms_roY1"
+   ],
+   "missing_columns": [],
+   "series": {
+    "n_steps": 20000,
+    "n_rows": 60000,
+    "n_outer_end": 20000,
+    "first": 0,
+    "last": 19999,
+    "final_field": "res_20000.h5"
+   },
+   "reasons": []
+  },
+  "steadiness": {
+   "ok": true,
+   "objective": "C_T_with_shear",
+   "model": "sst",
+   "missing": [],
+   "series": {
+    "C_T_with_shear": {
+     "verdict": "STEADY",
+     "detail": "tail mean=0.8726  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": 0.872550360693922,
+     "amp": 2.616527248144873e-06
+    },
+    "C_T": {
+     "verdict": "STEADY",
+     "detail": "tail mean=0.8926  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": 0.89263247869967,
+     "amp": 2.691986493941201e-06
+    },
+    "C_L": {
+     "verdict": "STEADY",
+     "detail": "tail mean=0.07148  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": 0.07148130710532687,
+     "amp": 1.2452672037324697e-05
+    },
+    "C_M": {
+     "verdict": "STEADY",
+     "detail": "tail mean=-1.849  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": -1.8488997665967486,
+     "amp": 0.00027270183530803127
+    }
+   },
+   "unsteady": [],
+   "reasons": []
+  },
+  "floors": {
+   "ok": true,
+   "counts": {
+    "P<=20": 0,
+    "ro<=0.0001": 0,
+    "T<=50": 0,
+    "roY 非有限": 0,
+    "roY<0": 0,
+    "|sum(roY)/ro-1| max": 1.1920928955078125e-07,
+    "roOmega<=1e-20": 0
+   },
+   "file": "res_20000.h5",
+   "reasons": []
+  },
+  "residual_scale": {
+   "ok": true,
+   "gate": false,
+   "median": 0.0003274680639151484,
+   "outliers": {},
+   "warnings": [],
+   "reasons": []
+  },
+  "floor_events": {
+   "ok": true,
+   "required": true,
+   "verdict": "PASS",
+   "fail_class": null,
+   "window": [
+    10000,
+    20000
+   ],
+   "path": "steady_implicit",
+   "last_step": 20000,
+   "session": {
+    "session": 1,
+    "prior_sessions": 0,
+    "note": {
+     "format": "1",
+     "path": "steady_implicit",
+     "thermo": "tp",
+     "condensation": "0",
+     "condEquilibrium": "0",
+     "tfloor": "50",
+     "romin": "9.9999997473787516e-05",
+     "pmin": "20",
+     "near_band": "1",
+     "ids_max": "8",
+     "discretization": "node",
+     "periodic": "0",
+     "axisymmetric": "0",
+     "nStepOuter": "20000",
+     "prior_sessions": "0",
+     "cfg_fnv": "361c60ae82f4c0c7",
+     "inject": "0"
+    }
+   },
+   "n_updates_checked": 10000,
+   "events": {
+    "T": {
+     "n_events": 0,
+     "n_updates_with_events": 0,
+     "sum": 0.0,
+     "max": 0.0,
+     "first_q_index": null,
+     "first_ids": ""
+    },
+    "Rho": {
+     "n_events": 0,
+     "n_updates_with_events": 0,
+     "sum": 0.0,
+     "max": 0.0,
+     "first_q_index": null,
+     "first_ids": ""
+    },
+    "P": {
+     "n_events": 0,
+     "n_updates_with_events": 0,
+     "sum": 0.0,
+     "max": 0.0,
+     "first_q_index": null,
+     "first_ids": ""
+    }
+   },
+   "first_events": [],
+   "entry": {
+    "q_index": 10000,
+    "step": 10001,
+    "nT": 0,
+    "nRho": 0,
+    "nP": 0,
+    "n_nonfinite": 0,
+    "n_near": 0
+   },
+   "init": {
+    "n_rows": 1,
+    "nT": 0,
+    "nRho": 0,
+    "nP": 0,
+    "n_nonfinite": 0,
+    "nT_ghost": 0,
+    "nRho_ghost": 167265,
+    "nP_ghost": 0
+   },
+   "aux": {
+    "n_rows": 0,
+    "nT": 0,
+    "nRho": 0,
+    "nP": 0,
+    "n_nonfinite": 0,
+    "nT_ghost": 0,
+    "nRho_ghost": 0,
+    "nP_ghost": 0
+   },
+   "near_window": 0,
+   "ghost_window": {
+    "T": 0,
+    "Rho": 0,
+    "P": 0,
+    "nonfinite": 511430000
+   },
+   "reasons": [],
+   "notes": []
+  },
+  "force_parts": {
+   "ok": true,
+   "n_incomplete": 0,
+   "steps": [],
+   "reasons": []
+  },
+  "judgment": {
+   "ok": true,
+   "verdict": "PASS",
+   "fail_class": null,
+   "extendable": false,
+   "window_steps": 10000,
+   "force_window": {
+    "verdict": "PASS",
+    "ok": true,
+    "window": [
+     10000,
+     20000
+    ],
+    "n_tail": 20,
+    "n_prev": 20,
+    "quantities": {
+     "C_T": {
+      "mean": 0.8926326836417185,
+      "a": 2.9532656090625053e-06,
+      "d": 1.0392624361088565e-07,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "detail": "tail mean=0.8926  drift=0.0%/tail  fluct=0.0%",
+      "ok": true
+     },
+     "C_T_with_shear": {
+      "mean": 0.8725505486972303,
+      "a": 2.904380662527295e-06,
+      "d": 9.186256255677705e-08,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "detail": "tail mean=0.8726  drift=0.0%/tail  fluct=0.0%",
+      "ok": true
+     },
+     "C_L": {
+      "mean": 0.07148224814767275,
+      "a": 1.353130082330789e-05,
+      "d": 6.991224716923483e-07,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "detail": "tail mean=0.07148  drift=0.0%/tail  fluct=0.0%",
+      "ok": true
+     },
+     "C_M": {
+      "mean": -1.848920685056865,
+      "a": 0.000295796481075028,
+      "d": 2.2790703231079235e-05,
+      "tol": 0.0005,
+      "steady": "STEADY",
+      "detail": "tail mean=-1.849  drift=0.0%/tail  fluct=0.0%",
+      "ok": true
+     }
+    },
+    "reasons": [],
+    "required": [
+     "C_T",
+     "C_T_with_shear",
+     "C_L",
+     "C_M"
+    ],
+    "planned": {
+     "end": 20000,
+     "n": 40
+    }
+   },
+   "temperature": {
+    "verdict": "PASS",
+    "ok": true,
+    "window": [
+     10000,
+     20000
+    ],
+    "n_window": 20,
+    "regions": {
+     "R_TE": {
+      "Tmin_window": 220.78591918945312,
+      "Tmin_step": 12000,
+      "Tmin_node": 486325.0,
+      "Tmin_xyz": [
+       0.11599194258451462,
+       -0.030481090769171715,
+       0.13409793376922607
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=220.8  drift=0.0%/tail  fluct=0.0%"
+     },
+     "R_SE": {
+      "Tmin_window": 224.66549682617188,
+      "Tmin_step": 16000,
+      "Tmin_node": 342803.0,
+      "Tmin_xyz": [
+       0.07864279299974442,
+       -0.018784569576382637,
+       0.11595223098993301
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=224.7  drift=0.0%/tail  fluct=0.0%"
+     },
+     "RET": {
+      "Tmin_window": 220.5521697998047,
+      "Tmin_step": 18000,
+      "Tmin_node": 582612.0,
+      "Tmin_xyz": [
+       0.19220668077468872,
+       -0.052809227257966995,
+       0.10721277445554733
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=220.6  drift=0.0%/tail  fluct=0.0%"
+     },
+     "ALL": {
+      "Tmin_window": 209.4678497314453,
+      "Tmin_step": 19000,
+      "Tmin_node": 1849680.0,
+      "Tmin_xyz": [
+       1.157789707183838,
+       0.2947377562522888,
+       0.03849693387746811
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=209.5  drift=0.0%/tail  fluct=0.0%"
+     }
+    },
+    "reasons": []
+   },
+   "reasons": []
+  },
+  "plateau": {
+   "all_flat": false,
+   "falling": [
+    "rms_roK"
+   ],
+   "rising": [],
+   "flat": [
+    "rms_ro",
+    "rms_roUx",
+    "rms_roUy",
+    "rms_roUz",
+    "rms_roe",
+    "rms_roOmega",
+    "rms_roY0",
+    "rms_roY1"
+   ]
+  },
+  "require_residual_pass": false,
+  "require_residual_plateau": false
+ },
+ "current_metrics": {
+  "path": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k/REJUDGE_2026-10-13/metrics.json",
+  "sha256": "e3e98d7d8a2056b809b17d508ae22a4f80b294af809d67d7933ef5178e196ba2",
+  "forge_rc": 0,
+  "n_snapshots": 40,
+  "eval_method_id": "013caf37dd5b505259331545707a2e5898e348965aa6bb2bf84ec38d58fc2e7c"
+ },
+ "old_metrics": {
+  "path": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k/metrics.json",
+  "sha256": "0e2d9e53b0c1eed81c43fdf7c6478a71fd40f368d3b6eb7dad745bb0f52ca79f",
+  "mtime": "2026-10-11T07:10:24+0000",
+  "forge_rc": 0,
+  "n_snapshots": 40
+ },
+ "ab": {
+  "rows": [
+   {
+    "item": "verdict",
+    "old": "PASS",
+    "current": "PASS",
+    "same": true
+   },
+   {
+    "item": "fail_class",
+    "old": "None",
+    "current": "None",
+    "same": true
+   },
+   {
+    "item": "acceptance_version",
+    "old": "(なし)",
+    "current": "sern-acceptance-v1",
+    "same": false
+   },
+   {
+    "item": "rc",
+    "old": "0",
+    "current": "0",
+    "same": true
+   },
+   {
+    "item": "保存場 field",
+    "old": "OK",
+    "current": "OK",
+    "same": true
+   },
+   {
+    "item": "残差 residual",
+    "old": "OK NOT CONVERGED (stalled/plateau)",
+    "current": "OK NOT CONVERGED (stalled/plateau)",
+    "same": true
+   },
+   {
+    "item": "残差の入力 residual_evidence",
+    "old": "input_ok None・欠けた列 None・時系列 None 行 (step None..None、最終場 None)",
+    "current": "input_ok True・欠けた列 []・時系列 20000 行 (step 0..19999、最終場 res_20000.h5)",
+    "same": false
+   },
+   {
+    "item": "4 量の頭打ち steadiness",
+    "old": "OK C_T_with_shear STEADY・C_T STEADY・C_L STEADY・C_M STEADY",
+    "current": "OK C_T_with_shear STEADY・C_T STEADY・C_L STEADY・C_M STEADY",
+    "same": true
+   },
+   {
+    "item": "最終場の床 floors",
+    "old": "OK",
+    "current": "OK",
+    "same": true
+   },
+   {
+    "item": "#1 床事象 floor_events",
+    "old": "OK PASS 区間 [10000, 20000] 更新 10000 必須 True",
+    "current": "OK PASS 区間 [10000, 20000] 更新 10000 必須 True",
+    "same": true
+   },
+   {
+    "item": "力の部品 force_parts",
+    "old": "(なし)",
+    "current": "OK 不完全 0",
+    "same": false
+   },
+   {
+    "item": "判定区間 judgment (#2・#3)",
+    "old": "(なし)",
+    "current": "PASS",
+    "same": false
+   },
+   {
+    "item": "#2 温度 temperature",
+    "old": "(なし)",
+    "current": "PASS 窓 [10000, 20000] 標本 20",
+    "same": false
+   },
+   {
+    "item": "#3 力の窓 force_window",
+    "old": "(なし)",
+    "current": "PASS 窓 [10000, 20000] 標本 20/20",
+    "same": false
+   },
+   {
+    "item": "残差の桁 residual_scale",
+    "old": "OK",
+    "current": "OK",
+    "same": true
+   },
+   {
+    "item": "理由 reasons",
+    "old": "(なし)",
+    "current": "(なし)",
+    "same": true
+   }
+  ]
+ },
+ "old_gates_items": {
+  "verdict": "PASS",
+  "fail_class": "None",
+  "acceptance_version": "(なし)",
+  "rc": "0",
+  "保存場 field": "OK",
+  "残差 residual": "OK NOT CONVERGED (stalled/plateau)",
+  "残差の入力 residual_evidence": "input_ok None・欠けた列 None・時系列 None 行 (step None..None、最終場 None)",
+  "4 量の頭打ち steadiness": "OK C_T_with_shear STEADY・C_T STEADY・C_L STEADY・C_M STEADY",
+  "最終場の床 floors": "OK",
+  "#1 床事象 floor_events": "OK PASS 区間 [10000, 20000] 更新 10000 必須 True",
+  "力の部品 force_parts": "(なし)",
+  "判定区間 judgment (#2・#3)": "(なし)",
+  "#2 温度 temperature": "(なし)",
+  "#3 力の窓 force_window": "(なし)",
+  "残差の桁 residual_scale": "OK",
+  "理由 reasons": "(なし)"
+ },
+ "run_files_unchanged": true,
+ "run_files_changes": [],
+ "end": "2026-10-13T02:27:13+0000",
+ "summary": {
+  "status": "JUDGED",
+  "verdict": "PASS",
+  "fail_class": null,
+  "acceptance_version": "sern-acceptance-v1",
+  "reasons": [],
+  "judgment": {
+   "verdict": "PASS",
+   "fail_class": null,
+   "temperature": "PASS",
+   "force_window": "PASS",
+   "floor_events": "PASS",
+   "floor_window": [
+    10000,
+    20000
+   ]
+  },
+  "force_window": {
+   "C_T": {
+    "mean": 0.8926326836417185,
+    "a": 2.9532656090625053e-06,
+    "d": 1.0392624361088565e-07,
+    "tol": 5e-05,
+    "steady": "STEADY",
+    "ok": true
+   },
+   "C_T_with_shear": {
+    "mean": 0.8725505486972303,
+    "a": 2.904380662527295e-06,
+    "d": 9.186256255677705e-08,
+    "tol": 5e-05,
+    "steady": "STEADY",
+    "ok": true
+   },
+   "C_L": {
+    "mean": 0.07148224814767275,
+    "a": 1.353130082330789e-05,
+    "d": 6.991224716923483e-07,
+    "tol": 5e-05,
+    "steady": "STEADY",
+    "ok": true
+   },
+   "C_M": {
+    "mean": -1.848920685056865,
+    "a": 0.000295796481075028,
+    "d": 2.2790703231079235e-05,
+    "tol": 0.0005,
+    "steady": "STEADY",
+    "ok": true
+   }
+  },
+  "residual_evidence_input_ok": true,
+  "missing_inputs": [],
+  "stop": null,
+  "run_files_unchanged": true,
+  "error": null
+ }
+}

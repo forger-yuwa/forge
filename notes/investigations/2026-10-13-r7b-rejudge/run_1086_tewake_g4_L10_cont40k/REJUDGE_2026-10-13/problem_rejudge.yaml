@@ -1,0 +1,185 @@
+# rejudge-r7b-v1: plan tooling-nozzle-sern-chain §5.1 R7b ④-0 の再判定用 (2026-10-13T02:33:59+0000)。
+# 基本 = /home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_g4_L10.yaml (run run_1086_tewake_g4_L10_cont40k を作った YAML)、evaluate の judgment_steps, judgment_extend_once, floor_events, floor_events_window_steps, outStepInterval だけ /home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx08.yaml の値。
+name: sern_3d_prod_3op_wallres_lswx08_tewake_g4_L10
+type: sern_2d
+gas:
+  model: frozen_tp
+  transport:
+    N2: cea
+    H2O: custom:h2o_iapws_cea_v1
+    H2: cea
+    AR: cea
+    OH: cea
+    O2: cea
+    'NO': cea
+    H: cea
+    O: cea
+    CO2: cea
+    CO: cea
+  thermo_href_temp: 298.15
+  gamma: 1.247
+  cp: 1718.5
+spec:
+  wall_thermal:
+    mode: isothermal
+    Tw: 1000.0
+  H_m: 0.1
+  inflow:
+    mode: supersonic
+    M_in: 1.6308
+    p_in: 101027.0
+    T_in: 2328.0
+  external:
+    M_inf: 6.0
+    p_inf: 2851.0
+    T_inf: 220.8
+  operating_points:
+  - name: m6_on
+    weight: 1.0
+    external:
+      M_inf: 6.0
+      p_inf: 2851.0
+      T_inf: 220.8
+    inflow:
+      M_in: 1.6308
+      p_in: 101027.0
+      T_in: 2328.0
+    gas:
+      gamma: 1.247
+      cp: 1718.5
+      composition:
+        N2: 0.6389
+        H2O: 0.32695
+        H2: 0.01251
+        Ar: 0.00767
+        OH: 0.00604
+        O2: 0.00398
+        'NO': 0.00206
+        H: 0.00125
+        O: 0.00037
+        CO2: 0.00021
+        CO: 5.0e-05
+  - name: m10_on
+    weight: 1.0
+    external:
+      M_inf: 10.0
+      p_inf: 1026.0
+      T_inf: 227.5
+    inflow:
+      M_in: 2.7171
+      p_in: 57935.0
+      T_in: 2222.0
+    gas:
+      gamma: 1.2549
+      cp: 1925.0
+      composition:
+        N2: 0.54922
+        H2O: 0.2937
+        H2: 0.14592
+        Ar: 0.00659
+        H: 0.0032
+        OH: 0.00104
+        CO: 0.00016
+        'NO': 8.0e-05
+        CO2: 6.0e-05
+        O: 1.0e-05
+        O2: 1.0e-05
+  - name: m4_off
+    weight: 1.0
+    external:
+      M_inf: 4.0
+      p_inf: 6415.0
+      T_inf: 216.7
+    inflow:
+      M_in: 2.9101
+      p_in: 17888.0
+      T_in: 338.0
+    gas:
+      gamma: 1.3986
+      cp: 1007.2
+      composition:
+        N2: 0.78084
+        O2: 0.20948
+        Ar: 0.00936
+        CO2: 0.00032
+  moment_ref:
+  - -20.0
+  - 0.0
+dv:
+  M_c: 2.9
+  f: 0.45
+  theta_r0_deg: 15.0
+  theta_c0_deg: 5.0
+  L_cowl: 1.2
+geometry:
+  x_max_kernel: 20.0
+  nj_moc: 301
+  dx_moc: 0.002
+  nj_moc_probe: 151
+  dx_moc_probe: 0.004
+  L_ramp_max: 20.0
+mesh:
+  discretization: node
+  cowl_thickness: 0.005
+  ni_up: 16
+  ni_noz: 160
+  ni_plume: 180
+  nj_top: 81
+  nj_bot: 51
+  L_up: 0.5
+  x_out_extra: 2.0
+  bot_depth: 3.0
+  first_wall_frac: 0.004
+  ext_top: 1
+  top_depth: 2.0
+  nj_ext_top: 67
+  nj_wake: 9
+  vehicle_clearance: 0.06
+  ar_max: 5000
+  first_top_frac: 0.00015
+  vehicle_taper: 0.35
+  ramp_fillet: 0.1
+evaluate:
+  floor_events: 1
+  floor_events_window_steps: 10000
+  limiter_ref:
+    length: 2.136214053
+    ro: 0.04544068206
+    p: 4411.497933
+    a: 368.6412254
+  top_out_kind: slip
+  side_far_kind: farfield
+  model: sst
+  nStepOuter: 4000
+  p_min: 20.0
+  cfl_main: 0.25
+  outStepInterval: 500
+  judgment_steps: 20000
+  judgment_extend_once: 1
+opt:
+  soft_steps: 2000
+  soft_cfl: 0.2
+  warm_lam_steps: 2000
+  warm_lam_cfl: 0.2
+  mid_steps: 2000
+  warm_adapt_steps: 500
+  cm_min: -7.0
+mesh3d:
+  W: 2.0
+  Z_ext: 1.5
+  L_sw: 0.8
+  L_sw_exact: true
+  te_wake_blend_H: 1.0
+  te_wake_mode: local
+  nz_in: 25
+  nz_out: 32
+  ni_up: 10
+  ni_noz: 90
+  ni_plume: 153
+  nj_top: 83
+  nj_bot: 65
+  first_wall_frac: 4.0e-05
+  first_wall_frac_far: 0.004
+  wall_frac_blend_len: 3.0
+  first_z_frac: 0.004
+  first_wake_frac: 0.00017

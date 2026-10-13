@@ -1,0 +1,9 @@
+REJUDGE run_1097_tewake_lsw10_m6_cont20k (rejudge-r7b-v1, 2026-10-13T02:56:29+0000) status JUDGED
+現行の受理検査 (sern-acceptance-v1): verdict FAIL fail_class JUDGMENT_UNSETTLED
+判定区間: {'verdict': 'UNSETTLED', 'fail_class': 'JUDGMENT_UNSETTLED', 'temperature': 'UNSETTLED', 'force_window': 'UNSETTLED', 'floor_events': 'PASS', 'floor_window': [10000, 20000]}
+  C_T             平均 0.8926328  a 2.87e-06  d 2.57e-05  STEADY OK
+  C_T_with_shear  平均 0.8725508  a 2.64e-06  d 6.85e-05  STEADY NG
+  C_L             平均 0.07149329  a 1.75e-05  d 4.61e-05  STEADY OK
+  C_M             平均 -1.849267  a 5.47e-04  d 1.97e-03  STEADY NG
+run の既存ファイル: 処理の前後で同じ
+所要 [s]: {'snapshot_before': 8.0, 'prepare': 266.9, 'mesh_identity': 2.4, 'te_monitor': 0.5, 'collect': 122.6, 'snapshot_after': 3.2, 'total': 403.8}

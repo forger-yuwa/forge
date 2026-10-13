@@ -1,0 +1,9 @@
+REJUDGE run_1098_tewake_lsw10_m4_cont20k (rejudge-r7b-v1, 2026-10-13T02:33:46+0000) status JUDGED
+現行の受理検査 (sern-acceptance-v1): verdict PASS fail_class None
+判定区間: {'verdict': 'PASS', 'fail_class': None, 'temperature': 'PASS', 'force_window': 'PASS', 'floor_events': 'PASS', 'floor_window': [10000, 20000]}
+  C_T             平均 0.9797876  a 2.82e-07  d 9.09e-07  STEADY OK
+  C_T_with_shear  平均 0.967652  a 3.41e-07  d 2.85e-07  STEADY OK
+  C_L             平均 -0.02234788  a 2.73e-06  d 9.45e-06  STEADY OK
+  C_M             平均 0.4365694  a 6.11e-05  d 2.65e-04  STEADY OK
+run の既存ファイル: 処理の前後で同じ
+所要 [s]: {'snapshot_before': 7.8, 'prepare': 271.3, 'mesh_identity': 1.0, 'te_monitor': 0.6, 'collect': 110.8, 'snapshot_after': 0.9, 'total': 392.7}

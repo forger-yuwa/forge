@@ -1,0 +1,328 @@
+{
+ "problem": "/home/ubuntu/forge-r8/case/46.sern_design/run_1097_tewake_lsw10_m6_cont20k/REJUDGE_2026-10-13/problem_rejudge.yaml",
+ "run_dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1097_tewake_lsw10_m6_cont20k/REJUDGE_2026-10-13/prepare_current",
+ "nsteps": 4000,
+ "H_m": 0.1,
+ "states": {
+  "exhaust": {
+   "M": 1.6308,
+   "P": 101027.0,
+   "T": 2328.0,
+   "ro": 0.12750691181432816,
+   "u": 1620.9863323558386,
+   "a": 993.9822984767222,
+   "R": 340.3460804260001,
+   "gamma_T": 1.2469630110069463,
+   "cp_T": 1718.4718128516838,
+   "h_sens": 3072221.417532131,
+   "gas": "EXH",
+   "k": 394.13950345266505,
+   "omega": 279197.28282934474,
+   "Y": [
+    1.0,
+    0.0
+   ]
+  },
+  "ext": {
+   "M": 6.0,
+   "P": 2851.0,
+   "T": 220.8,
+   "ro": 0.04497409138976543,
+   "u": 1788.2077245903256,
+   "a": 298.0346207650543,
+   "R": 287.1016908214355,
+   "gamma_T": 1.401195110488836,
+   "cp_T": 1002.7178170289968,
+   "h_sens": -77623.8738454914,
+   "gas": "AMB",
+   "k": 479.65302994267654,
+   "omega": 119844.21780011016,
+   "Y": [
+    0.0,
+    1.0
+   ]
+  },
+  "R": 340.39254210104264,
+  "gas_model": "frozen_tp",
+  "q_inf": 71906.53068006608,
+  "species": [
+   "EXH",
+   "AMB"
+  ],
+  "href_T": 298.15,
+  "tp_mode": "lumped",
+  "tracer": false,
+  "gas_summary": {
+   "exhaust": {
+    "name": "EXH",
+    "Y": {
+     "N2": 0.7326383060514221,
+     "H2O": 0.24110891545449314,
+     "H2": 0.0010323165671794633,
+     "AR": 0.012542419332427206,
+     "OH": 0.004204982995675805,
+     "O2": 0.0052132394785424346,
+     "NO": 0.0025302747639249566,
+     "H": 5.157456870400997e-05,
+     "O": 0.0002423239456106409,
+     "CO2": 0.00037831768247285875,
+     "CO": 5.73291595474409e-05
+    },
+    "MW": 0.02442943549575496,
+    "R": 340.3460804260001,
+    "href_T": 298.15
+   },
+   "ext": {
+    "name": "AMB",
+    "Y": {
+     "N2": 0.7555893268571967,
+     "O2": 0.23152224790309525,
+     "AR": 0.012888425239708005
+    },
+    "MW": 0.028959991821055582,
+    "R": 287.1016908214355,
+    "href_T": 298.15
+   }
+  }
+ },
+ "operating_point": {
+  "name": "m6_on",
+  "weight": 1.0,
+  "external": {
+   "M_inf": 6.0,
+   "p_inf": 2851.0,
+   "T_inf": 220.8
+  },
+  "inflow": {
+   "mode": "supersonic",
+   "M_in": 1.6308,
+   "p_in": 101027.0,
+   "T_in": 2328.0
+  },
+  "gas": {
+   "gamma": 1.247,
+   "cp": 1718.5,
+   "composition": {
+    "N2": 0.6389,
+    "H2O": 0.32695,
+    "H2": 0.01251,
+    "Ar": 0.00767,
+    "OH": 0.00604,
+    "O2": 0.00398,
+    "NO": 0.00206,
+    "H": 0.00125,
+    "O": 0.00037,
+    "CO2": 0.00021,
+    "CO": 5e-05
+   }
+  }
+ },
+ "gas_model": "frozen_tp",
+ "design_point": {
+  "inflow": {
+   "mode": "supersonic",
+   "M_in": 1.6308,
+   "p_in": 101027.0,
+   "T_in": 2328.0
+  },
+  "external": {
+   "M_inf": 6.0,
+   "p_inf": 2851.0,
+   "T_inf": 220.8
+  },
+  "gamma": 1.247,
+  "cp": 1718.5,
+  "composition": null
+ },
+ "design": {
+  "key_point": [
+   5.198807091449873,
+   0.9590814572668243,
+   2.900000027710998,
+   -0.01322613141173051
+  ],
+  "L_ramp": 10.091642885701802,
+  "theta_e_deg": -0.7578015091775635,
+  "theta_b_deg": -40.23544491658127,
+  "warnings": []
+ },
+ "moc_forces": {
+  "T_wall": 0.5830621788469728,
+  "L": 1.4493609027904464,
+  "M_noseup": -37.78115850901404,
+  "F_gross": 4.87124927416288,
+  "F_ideal": 5.288357265815308,
+  "M_e_ideal": 3.702598438849049,
+  "C_T": 0.9211271155319491,
+  "C_T_wall": 0.11025393133250838,
+  "C_L": 0.27406637447876697,
+  "C_M": -7.144214471521584,
+  "T_ramp": 0.502534930009085,
+  "T_cowl": 0.08052724883788778,
+  "L_ramp": 2.3697915688049904,
+  "L_cowl": -0.920430666014544,
+  "pa_over_pin": 0.028220178764092767
+ },
+ "F_ideal_N_per_m": 53220.323816436976,
+ "mesh": {
+  "ni": 257,
+  "NJ": 127,
+  "nz": 39,
+  "jm": 54,
+  "k_sw": 24,
+  "i_te": 104,
+  "i_sw": 81,
+  "cells": 1838592,
+  "n_dup_cowl_closed": 81,
+  "first_wall_frac_far": 0.0,
+  "wall_frac_blend_len": 0.5,
+  "nodes": 1920906,
+  "W": 2.0,
+  "Z_far": 2.5,
+  "L_sw": 1.0,
+  "cowl_thickness": 0.005,
+  "x_out": 12.091642885701802,
+  "y_bot": -12.320693971529767,
+  "L_cowl": 1.2,
+  "L_ramp": 10.091642885701802,
+  "n_dup_cowl": 2577,
+  "n_dup_side": 5832,
+  "W_vehicle": null,
+  "n_vehicle_faces": 0,
+  "ramp_fillet": 0.1,
+  "te_wake_blend_H": 1.0,
+  "te_wake_curve_version": "hermite3-lower-tangent-v1",
+  "te_wake_x_end": 2.2,
+  "te_wake_slope_te_deg": -4.407187551085556,
+  "te_wake_slope_end_deg": -40.23544491658127,
+  "te_wake_n_stations": 16,
+  "te_wake_i_first": 105,
+  "te_wake_i_last": 120,
+  "te_wake_max_dy": 0.11387103581928237,
+  "te_wake_mode": "local",
+  "te_wake_mode_version": "local-0.02-0.30-quintic-v1",
+  "te_wake_local_d_full_H": 0.02,
+  "te_wake_local_d_zero_H": 0.3,
+  "te_wake_local_n_section_nodes": 993,
+  "te_wake_local_clear_top_H": 1.4549292803810703,
+  "te_wake_local_clear_bot_H": 11.411843580735336,
+  "ext_top": true,
+  "nj_ext_top": 57,
+  "y_veh": 2.746514903909113,
+  "i_ramp_te": 228,
+  "t_base": 0.02,
+  "vehicle_taper": 0.35,
+  "vehicle_wedge_deg": 3.0,
+  "top_depth": 2.0,
+  "n_top_nodes": 571311,
+  "nj_vside": 17,
+  "n_vside_nodes": 68265,
+  "n_vside_faces": 3648,
+  "n_vbase_faces": 384
+ },
+ "discretization": "node",
+ "model": "sst",
+ "dim": 3,
+ "half_W_m": 0.1,
+ "half_W_vehicle_m": null,
+ "wall_faces": {
+  "ramp": 5472,
+  "cowl_in": 2496,
+  "cowl_out": 2496,
+  "sidewall_in": 5832,
+  "sidewall_out": 5832,
+  "vehicle": 0,
+  "vehicle_top": 5472,
+  "vehicle_side": 3648,
+  "vehicle_base": 384
+ },
+ "mesh_provenance": {
+  "h5": "sern.h5",
+  "mesh_signature": "5f22ff6e3bcf3bbfc474f1429542f31982afe20efe255b45ba82531e38968ecc",
+  "mesh_signature_version": "zte-mesh-sig-v1",
+  "dual_hash": "475ce48400516c4c88000d899207fb91f9cd8c40601c38ac13ad48ee136409ba",
+  "dual_hash_version": "dual-geom-v1",
+  "discretization": "node",
+  "te_wake_attrs": {
+   "te_wake_blend_H": 1.0,
+   "te_wake_curve_version": "hermite3-lower-tangent-v1"
+  }
+ },
+ "eval_method": {
+  "eval_method": {
+   "version": "sern-eval-method-v1",
+   "dim": 3,
+   "discretization": "node",
+   "mesh_recipe_sha256": "df4239abea64c6f8f8d7335187b1f545f597f5bcb33b3dda2805a986615f2e7b",
+   "mesher_source_sha256": "b58406b627e53e1a26fad9c6324a73ec93ba1994fe669df4dedf5d822bdb8668",
+   "te_wake_blend_H": 1.0,
+   "te_wake_curve_version": "hermite3-lower-tangent-v1",
+   "converter_sha256": "36b061b966b14be831afd3908773c530a9a61cec0b256f250838bdaa52bcd402",
+   "te_wake_mode_version": "local-0.02-0.30-quintic-v1"
+  },
+  "eval_method_id": "c9db16d5eab87ddf7613f560268347b1ae006096a772bea06f71372ac3ec55dc",
+  "te_wake_effective": "L_b=1.0;curve=hermite3-lower-tangent-v1;mode=local-0.02-0.30-quintic-v1",
+  "mesh_recipe": {
+   "ni_up": 10,
+   "ni_noz": 90,
+   "ni_plume": 153,
+   "nj_top": 73,
+   "nj_bot": 55,
+   "nz_in": 25,
+   "nz_out": 15,
+   "W": 2.0,
+   "Z_ext": 1.5,
+   "z_append": 0.0,
+   "L_sw": "design",
+   "L_sw_exact": true,
+   "share_cowl_free_edge": true,
+   "W_vehicle": null,
+   "ext_top": true,
+   "top_depth": 2.0,
+   "nj_ext_top": 57,
+   "vehicle_side": true,
+   "nj_vside": 17,
+   "vehicle_clearance": 0.06,
+   "t_base": 0.02,
+   "first_top_frac": 0.0006,
+   "vehicle_taper": 0.35,
+   "vehicle_wedge_deg": 3.0,
+   "ramp_fillet": 0.1,
+   "L_up": 0.5,
+   "x_out_extra": 2.0,
+   "bot_depth": 3.0,
+   "first_wake_frac": 0.00017,
+   "first_wall_frac": 0.00016,
+   "first_wall_frac_far": 0.0,
+   "wall_frac_blend_len": 0.5,
+   "first_z_frac": 0.004,
+   "interface_angle": "design",
+   "te_wake_blend_H": 1.0,
+   "te_wake_mode": "local",
+   "top_ext_angle": "design",
+   "scale": 0.1,
+   "cowl_thickness": 0.005,
+   "x_cluster_w": 0.15,
+   "x_cluster_a": 3.0
+  },
+  "design_values": {
+   "L_sw": 1.0,
+   "interface_angle": -0.7022409897991584,
+   "top_ext_angle": -0.01322613141173051
+  },
+  "mesher": {
+   "modules": [
+    "mesh2d.py",
+    "mesh_sern.py",
+    "mesh_sern3d.py"
+   ],
+   "source_sha256": "b58406b627e53e1a26fad9c6324a73ec93ba1994fe669df4dedf5d822bdb8668"
+  },
+  "converter": {
+   "path": "/home/ubuntu/forge-r8/solver_density_cuda/build/convertGmshToForge",
+   "sha256": "36b061b966b14be831afd3908773c530a9a61cec0b256f250838bdaa52bcd402",
+   "bytes": 58462528,
+   "mtime": 1791643243
+  }
+ }
+}

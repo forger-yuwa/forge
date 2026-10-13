@@ -1,0 +1,104 @@
+mode: lumped
+species:
+- EXH
+- AMB
+keep: []
+condensing_species: null
+condensing_index: null
+tracer:
+  enabled: false
+  name: null
+  definition: null
+exhaust_fraction:
+  kind: species
+  array: Y0
+  conserved: roY0
+  species: EXH
+lumps:
+  EXH:
+    from: stream
+    stream: inflow
+    mole_fractions:
+      N2: 0.78084
+      O2: 0.20948
+      AR: 0.00936
+      CO2: 0.00032
+    mass_fractions:
+      N2: 0.7551844173566162
+      O2: 0.2314202731825274
+      AR: 0.012909102068606855
+      CO2: 0.00048620739224954274
+  AMB:
+    from: stream
+    stream: external
+    mole_fractions:
+      N2: 0.781121203633308
+      O2: 0.20953543275579212
+      AR: 0.009343363610899925
+    mass_fractions:
+      N2: 0.7555893268571967
+      O2: 0.23152224790309525
+      AR: 0.012888425239708005
+expansion:
+  EXH:
+    N2: 0.7551844173566162
+    O2: 0.2314202731825274
+    AR: 0.012909102068606855
+    CO2: 0.00048620739224954274
+  AMB:
+    N2: 0.7555893268571967
+    O2: 0.23152224790309525
+    AR: 0.012888425239708005
+streams:
+  inflow:
+    X:
+      N2: 0.78084
+      O2: 0.20948
+      AR: 0.00936
+      CO2: 0.00032
+    Y:
+      N2: 0.7551844173566162
+      O2: 0.2314202731825274
+      AR: 0.012909102068606855
+      CO2: 0.00048620739224954274
+    Y_transport:
+    - 1.0
+    - 0.0
+    sum_input: 1.0
+  external:
+    X:
+      N2: 0.781121203633308
+      O2: 0.20953543275579212
+      AR: 0.009343363610899925
+    Y:
+      N2: 0.7555893268571967
+      O2: 0.23152224790309525
+      AR: 0.012888425239708005
+    Y_transport:
+    - 0.0
+    - 1.0
+    sum_input: 1.0
+atoms:
+  EXH:
+    N: 1.56168
+    O: 0.4196
+    AR: 0.00936
+    C: 0.00032
+  AMB:
+    N: 1.562242407266616
+    O: 0.41907086551158423
+    AR: 0.009343363610899925
+MW:
+  EXH: 0.0289650882
+  AMB: 0.028959991821055582
+source:
+  EXH: lumped from ['N2', 'O2', 'AR', 'CO2'] (mass-fraction linear mixing of NASA-9)
+  AMB: lumped from ['N2', 'O2', 'AR'] (mass-fraction linear mixing of NASA-9)
+transport:
+  source: gas.transport
+  viscMethod: 2
+  models:
+    N2: cea
+    O2: cea
+    AR: cea
+    CO2: cea

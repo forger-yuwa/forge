@@ -1,0 +1,1027 @@
+{
+ "version": "rejudge-r7b-v1",
+ "start": "2026-10-13T02:43:27+0000",
+ "spec": {
+  "run": "run_1088_tewake_m6_L10",
+  "L_sw": 0.8,
+  "op": "m6_on",
+  "grid": "g3",
+  "te_yaml": "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+  "prod_yaml": "problem_3d_prod_3op_wallres_lswx08.yaml",
+  "note": "(--spec)"
+ },
+ "run_dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10",
+ "out_dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10/REJUDGE_2026-10-13",
+ "acceptance_version_current": "sern-acceptance-v1",
+ "git": {
+  "head": "4829694052e1bedb53db25228b619701434535ca",
+  "dirty_tracked": null
+ },
+ "status": "JUDGED",
+ "elapsed_s": {
+  "snapshot_before": 7.8,
+  "prepare": 261.1,
+  "mesh_identity": 1.0,
+  "te_monitor": 0.5,
+  "collect": 105.3,
+  "snapshot_after": 1.9,
+  "total": 378.1
+ },
+ "run_files": {
+  "n": 679,
+  "bytes": 1129740993
+ },
+ "run_records": {
+  "IC_FROM.txt": "IC: restart_field_deformed run_1050_r7b_x_lsw08 res_20000 → 局所化格子、src-mesh = run_1087_tewake_m6_A0 の格子。plan tooling-sern-te-wake-grid §5.1 #6a の B\n",
+  "IC_TRANSFER.txt": "[restart_field_deformed] species: SRC species_hash b72ff462d242cc99 = destination species_hash b72ff462d242cc99 (forge --resolve-species); SRC descends from an unverified start -> inherit the hash and the mark (species_input_unverified=1; record of the destination resolved_species_b72ff462d242cc99.yaml)\n[restart_field_deformed] SRC の化学種署名が解決できない (/home/ubuntu/forge-r8/case/46.sern_design/run_1050_r7b_x_lsw08): /home/ubuntu/forge-r8/case/46.sern_design/run_1050_r7b_x_lsw08/solverConfig.yaml が無い — 互換性ハッシュは plan_inherit で一致を確認済みなので続ける\n[restart_field_deformed] 節点 1920103: 接続同一・境界面の接続同一 (15 群)、座標が一致 1881376、**動いた 38727**\n[restart_field_deformed] 動いた節点の範囲 (DST): x 0.12255..0.215005  y -0.118845..0.0140202  z 0..0.25\n[restart_field_deformed] 最大移動量: |Δx| 0.0000e+00  |Δy| 1.1387e-02  |Δz| 0.0000e+00\n[restart_field_deformed] 最寄りの SRC 節点までの距離: max 2.1437e-03 (DST 572715 -> SRC 572715)、median 2.9761e-04、距離 0 0、使った SRC 節点 16575、双子 0\n[restart_field_deformed] 動いた節点の一覧: case/46.sern_design/run_1088_tewake_m6_L10/MOVED_NODES.csv\n[restart_field_deformed] 移す量: ['ro', 'roUx', 'roUy', 'roUz', 'roe', 'roK', 'roOmega', 'roY0', 'roY1']  /  DST を残す: ['wall_dist']\n[restart_field_deformed] species 属性: 継承 (species_input_unverified=1)\nVERDICT: OK (9 量: 不動節点 1881376 は index コピーで SRC とビット一致、動いた節点 38727 は interp_field と同じ原始量の最近傍補間; wall_dist・/AUX は DST のまま)\n",
+  "RUN_PROVENANCE.txt": "date        : 2026-10-11T01:49:05+00:00\nforge_bin   : /home/ubuntu/forge-r8/solver_density_cuda/build/forge\nforge_mtime : 2026-10-10T14:40:23+00:00\nforge_sha256: 61cf8f4fc64125cd5aa30cfef1439882c671156f5c1826baaa7578e3782131c2\ngit_head    : 95157b891c20f04eec36c6f7fe2c11203b7dceff\ngit_dirty   : 0 件\nhost        : ip-172-31-14-139\nenv         : FORGE_CUDA_BLOCKSIZE=128\ncfg         : lowMachPrecond=0 (要求値)\ncfg         : wallTreatmentSST=0 (要求値)\n'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)\n'scalarGradient' effective: lsq (default)\n"
+ },
+ "yaml": {
+  "te_wake": {
+   "path": "/home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+   "sha256": "d281fd40292db7e9abbc01446b78d87d734330889314f453e9f46ae0bb541174",
+   "git_last_commit": "7c88aa35d4a2e14128e3fd11e20662c10de311ea",
+   "git_modified": false
+  },
+  "production": {
+   "path": "/home/ubuntu/forge-r8/case/46.sern_design/problem_3d_prod_3op_wallres_lswx08.yaml",
+   "sha256": "df1969f2bf1ecfa6b654ebfb098f4ee7105c82b5c982b7ccb958bf467059eb9c",
+   "git_last_commit": "fa816325fcdcef58ff19746be6f6cb0d84ee0bb0",
+   "git_modified": false
+  },
+  "merged": {
+   "path": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10/REJUDGE_2026-10-13/problem_rejudge.yaml",
+   "sha256": "8ae52d4c6e2d13b549a0b744e8628c7aa8b81d52a530c48c034d2aec494d3f75"
+  },
+  "keys_from_production": {
+   "judgment_steps": {
+    "production": 20000,
+    "te_wake": "(無い)",
+    "used": 20000
+   },
+   "judgment_extend_once": {
+    "production": 1,
+    "te_wake": "(無い)",
+    "used": 1
+   },
+   "floor_events": {
+    "production": 1,
+    "te_wake": 1,
+    "used": 1
+   },
+   "floor_events_window_steps": {
+    "production": 10000,
+    "te_wake": 10000,
+    "used": 10000
+   },
+   "outStepInterval": {
+    "production": 500,
+    "te_wake": 500,
+    "used": 500
+   }
+  },
+  "species_db_abs": null,
+  "other_differences_te_vs_production": []
+ },
+ "judgment_plan": {
+  "steps": 20000,
+  "window_steps": 10000,
+  "extend_once": true,
+  "out_interval": 500,
+  "required": [
+   "C_T",
+   "C_T_with_shear",
+   "C_L",
+   "C_M"
+  ]
+ },
+ "provenance": {
+  "checked": true,
+  "prepare_problem": "../case/46.sern_design/problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+  "prepare_op": "m6_on",
+  "expected_yaml": "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+  "expected_op": "m6_on"
+ },
+ "inputs": {
+  "missing": [],
+  "notes": [],
+  "final_step": 20000,
+  "mesh_file": "sern.h5",
+  "forge_rc_from_log": 0,
+  "force_parts": {
+   "required": [
+    "ramp",
+    "cowl_in",
+    "cowl_out",
+    "sidewall_in",
+    "sidewall_out",
+    "vehicle_top",
+    "vehicle_side",
+    "vehicle_base"
+   ],
+   "friction": [
+    "ramp",
+    "cowl_in",
+    "cowl_out",
+    "sidewall_in",
+    "sidewall_out"
+   ],
+   "faces_source": "prepare_info.mesh (メッシャの条件)",
+   "reasons": []
+  },
+  "planned": {
+   "first": 500,
+   "last": 20000,
+   "n": 40,
+   "window_steps": 10000,
+   "out_interval": 500
+  }
+ },
+ "free_gib_before_prepare": 149.2,
+ "current_prepare": {
+  "dir": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10/REJUDGE_2026-10-13/prepare_current",
+  "converter": {
+   "path": "/home/ubuntu/forge-r8/solver_density_cuda/build/convertGmshToForge",
+   "sha256": "36b061b966b14be831afd3908773c530a9a61cec0b256f250838bdaa52bcd402",
+   "bytes": 58462528,
+   "mtime": 1791643243
+  },
+  "mesher": {
+   "modules": [
+    "mesh2d.py",
+    "mesh_sern.py",
+    "mesh_sern3d.py"
+   ],
+   "source_sha256": "b58406b627e53e1a26fad9c6324a73ec93ba1994fe669df4dedf5d822bdb8668"
+  },
+  "mesh_quality": "VERDICT: PASS (AR<= 5000, skew<= 0.90)",
+  "removed": [
+   {
+    "name": "sern.h5",
+    "bytes": 669199708
+   },
+   {
+    "name": "sern.msh",
+    "bytes": 218288025
+   },
+   {
+    "name": "sern.xmf",
+    "bytes": 2151
+   }
+  ]
+ },
+ "mesh": {
+  "run_now": {
+   "h5": "sern.h5",
+   "mesh_signature": "1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "dual_hash": "e7eec23b7e3aa51549ad7e0fe7ed8dd91c1d5bc8280a9e4c2f29cb5051c50716",
+   "dual_hash_version": "dual-geom-v1",
+   "discretization": "node"
+  },
+  "run_record": {
+   "h5": "sern.h5",
+   "mesh_signature": "1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "dual_hash": "e7eec23b7e3aa51549ad7e0fe7ed8dd91c1d5bc8280a9e4c2f29cb5051c50716",
+   "dual_hash_version": "dual-geom-v1",
+   "discretization": "node",
+   "te_wake_attrs": {
+    "te_wake_blend_H": 1.0,
+    "te_wake_curve_version": "hermite3-lower-tangent-v1"
+   }
+  },
+  "current": {
+   "h5": "sern.h5",
+   "mesh_signature": "1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40",
+   "mesh_signature_version": "zte-mesh-sig-v1",
+   "dual_hash": "e7eec23b7e3aa51549ad7e0fe7ed8dd91c1d5bc8280a9e4c2f29cb5051c50716",
+   "dual_hash_version": "dual-geom-v1",
+   "discretization": "node",
+   "te_wake_attrs": {
+    "te_wake_blend_H": 1.0,
+    "te_wake_curve_version": "hermite3-lower-tangent-v1"
+   }
+  },
+  "items": {
+   "mesh_signature": {
+    "current": "1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40",
+    "run_now": "1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40",
+    "run_record": "1529e257628a8bee9d8943f807e498cbbe1ed40d8524d9a16cd551983e0f9f40"
+   },
+   "dual_hash": {
+    "current": "e7eec23b7e3aa51549ad7e0fe7ed8dd91c1d5bc8280a9e4c2f29cb5051c50716",
+    "run_now": "e7eec23b7e3aa51549ad7e0fe7ed8dd91c1d5bc8280a9e4c2f29cb5051c50716",
+    "run_record": "e7eec23b7e3aa51549ad7e0fe7ed8dd91c1d5bc8280a9e4c2f29cb5051c50716"
+   },
+   "discretization": {
+    "current": "node",
+    "run_now": "node",
+    "run_record": "node"
+   }
+  },
+  "disallowed": []
+ },
+ "config": {
+  "compared": {
+   "solverConfig.yaml": {
+    "against": "現行の判定区間の config (runner_sern.judgment_config(prepare_current/solverConfig_main.yaml))",
+    "allowed": [],
+    "disallowed": []
+   },
+   "solverConfig_main.yaml": {
+    "against": "現行の本段の config (prepare_current/solverConfig_main.yaml)",
+    "allowed": [],
+    "disallowed": []
+   }
+  },
+  "files": {
+   "bcondConfig.yaml": true,
+   "species_meta.yaml": true
+  },
+  "disallowed": []
+ },
+ "prepare_info": {
+  "items": {
+   "H_m": {
+    "run": 0.1,
+    "current": 0.1,
+    "same": true
+   },
+   "half_W_m": {
+    "run": 0.1,
+    "current": 0.1,
+    "same": true
+   },
+   "half_W_vehicle_m": {
+    "run": null,
+    "current": null,
+    "same": true
+   },
+   "F_ideal_N_per_m": {
+    "run": 53220.323816436976,
+    "current": 53220.323816436976,
+    "same": true
+   },
+   "discretization": {
+    "run": "node",
+    "current": "node",
+    "same": true
+   },
+   "states.exhaust.ro": {
+    "run": 0.12750691181432816,
+    "current": 0.12750691181432816,
+    "same": true
+   },
+   "states.exhaust.u": {
+    "run": 1620.9863323558386,
+    "current": 1620.9863323558386,
+    "same": true
+   },
+   "states.exhaust.P": {
+    "run": 101027.0,
+    "current": 101027.0,
+    "same": true
+   },
+   "states.ext.P": {
+    "run": 2851.0,
+    "current": 2851.0,
+    "same": true
+   },
+   "operating_point.name": {
+    "run": "m6_on",
+    "current": "m6_on",
+    "same": true
+   },
+   "mesh.L_sw": {
+    "run": 0.8,
+    "current": 0.8,
+    "same": true
+   },
+   "mesh.te_wake_blend_H": {
+    "run": 1.0,
+    "current": 1.0,
+    "same": true
+   },
+   "wall_faces": {
+    "run": null,
+    "current": {
+     "ramp": 5472,
+     "cowl_in": 2496,
+     "cowl_out": 2496,
+     "sidewall_in": 5040,
+     "sidewall_out": 5040,
+     "vehicle": 0,
+     "vehicle_top": 5472,
+     "vehicle_side": 3648,
+     "vehicle_base": 384
+    },
+    "same": null,
+    "note": "片方に記録が無い (collect はメッシャの記録 prepare_info.mesh から面の有無を決める)"
+   }
+  },
+  "eval_method_id": {
+   "run": "a50c918590cac0714e96577d1966bc3b10486eba8fc154dd0c3c70480e207057",
+   "current": "c9db16d5eab87ddf7613f560268347b1ae006096a772bea06f71372ac3ec55dc",
+   "note": "記録だけ (照合は格子署名・双対・config で)"
+  },
+  "disallowed": []
+ },
+ "te_monitor": {
+  "tool": "/home/ubuntu/forge-r8/case/46.sern_design/diag/te_monitor.py",
+  "tool_sha256": "436ba3d62f74fd40b46fb401b5eb81ff8fd91601c5d87bd4735a2def6e0328db",
+  "lb_h": 1.0,
+  "rc": 0,
+  "stdout": "step=20000 n_floor_plus1=0 R_TE_Tmin=220.785400390625 R_TE_n_lt150=0 R_SE_Tmin=224.6129150390625 R_SE_n_lt150=0 RET_Tmin=220.62408447265625 RET_n_lt150=0 ALL_Tmin=210.57577514648438 ALL_n_lt150=0",
+  "stderr": "",
+  "columns": {
+   "current": 39,
+   "run": 39,
+   "same": true
+  },
+  "n_rows_run": 40,
+  "final_row_same": true
+ },
+ "current_gates": {
+  "verdict": "FAIL",
+  "fail_class": "JUDGMENT_UNSETTLED",
+  "reasons": [
+   "判定区間: 窓・定常性が未達: C_L: a 1.37e-05・d 9.08e-05 (許容 5e-05)・STEADY",
+   "判定区間: 窓・定常性が未達: C_M: a 2.90e-04・d 1.71e-03 (許容 5e-04)・STEADY"
+  ],
+  "rc": 0,
+  "acceptance_version": "sern-acceptance-v1",
+  "objective": "C_T_with_shear",
+  "field": {
+   "ok": true,
+   "file": "res_20000.h5",
+   "nonfinite": {},
+   "nonpositive": {},
+   "min": {
+    "ro": 0.002536460291594267,
+    "P": 859.43896484375,
+    "T": 210.57577514648438
+   },
+   "nan_files": [],
+   "reasons": [],
+   "required": [
+    "ro",
+    "roUx",
+    "roUy",
+    "roUz",
+    "roe",
+    "P",
+    "T",
+    "roK",
+    "roOmega",
+    "roY0",
+    "roY1"
+   ],
+   "missing": [],
+   "shape_mismatch": {},
+   "unverifiable": [],
+   "species_required": [
+    "roY0",
+    "roY1"
+   ],
+   "species_checked": [
+    "Y0",
+    "Y1",
+    "roY0",
+    "roY1"
+   ]
+  },
+  "residual": {
+   "ok": true,
+   "converged": false,
+   "verdict": "NOT CONVERGED (stalled/plateau)",
+   "nan": false,
+   "rising": [],
+   "stalled": [
+    "rms_ro",
+    "rms_roUx",
+    "rms_roUy",
+    "rms_roUz",
+    "rms_roe",
+    "rms_roK",
+    "rms_roOmega",
+    "rms_roY0",
+    "rms_roY1"
+   ],
+   "converging": [],
+   "columns": {
+    "rms_ro": {
+     "msg": "init=3.85e-05 fin=6.85e-07 drop= 1.7dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 1.7
+    },
+    "rms_roUx": {
+     "msg": "init=5.95e-02 fin=1.29e-03 drop= 1.7dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 1.7
+    },
+    "rms_roUy": {
+     "msg": "init=2.68e-02 fin=2.72e-04 drop= 2.0dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 2.0
+    },
+    "rms_roUz": {
+     "msg": "init=3.72e-03 fin=4.05e-04 drop= 0.9dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.9
+    },
+    "rms_roe": {
+     "msg": "init=5.81e+01 fin=1.93e+00 drop= 1.5dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 1.5
+    },
+    "rms_roK": {
+     "msg": "init=2.19e-01 fin=4.80e-04 drop= 2.6dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 2.6
+    },
+    "rms_roOmega": {
+     "msg": "init=3.15e+02 fin=4.12e+01 drop= 0.8dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 0.8
+    },
+    "rms_roY0": {
+     "msg": "init=7.66e-06 fin=3.61e-07 drop= 1.3dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 1.3
+    },
+    "rms_roY1": {
+     "msg": "init=3.75e-05 fin=5.43e-07 drop= 1.8dec flat     <-- STALLED (plateau)",
+     "ok": false,
+     "trend": "flat",
+     "drop": 1.8
+    }
+   },
+   "last_step": "19999",
+   "unverifiable": false,
+   "input": {
+    "ok": true,
+    "reasons": [],
+    "notes": []
+   },
+   "required_columns": [
+    "rms_ro",
+    "rms_roUx",
+    "rms_roUy",
+    "rms_roUz",
+    "rms_roe",
+    "rms_roK",
+    "rms_roOmega",
+    "rms_roY0",
+    "rms_roY1"
+   ],
+   "missing_columns": [],
+   "series": {
+    "n_steps": 20000,
+    "n_rows": 60000,
+    "n_outer_end": 20000,
+    "first": 0,
+    "last": 19999,
+    "final_field": "res_20000.h5"
+   },
+   "reasons": []
+  },
+  "steadiness": {
+   "ok": true,
+   "objective": "C_T_with_shear",
+   "model": "sst",
+   "missing": [],
+   "series": {
+    "C_T_with_shear": {
+     "verdict": "STEADY",
+     "detail": "tail mean=0.8704  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": 0.8704127606236112,
+     "amp": 3.8016078764968597e-06
+    },
+    "C_T": {
+     "verdict": "STEADY",
+     "detail": "tail mean=0.8891  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": 0.8891110660235046,
+     "amp": 3.874385289148741e-06
+    },
+    "C_L": {
+     "verdict": "STEADY",
+     "detail": "tail mean=0.0621  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": 0.06209838311759297,
+     "amp": 1.1438598244137288e-05
+    },
+    "C_M": {
+     "verdict": "STEADY",
+     "detail": "tail mean=-1.627  drift=0.0%/tail  fluct=0.0%",
+     "n": 40,
+     "n_nonfinite": 0,
+     "mean": -1.6266300518414527,
+     "amp": 0.00023837757130595882
+    }
+   },
+   "unsteady": [],
+   "reasons": []
+  },
+  "floors": {
+   "ok": true,
+   "counts": {
+    "P<=20": 0,
+    "ro<=0.0001": 0,
+    "T<=50": 0,
+    "roY 非有限": 0,
+    "roY<0": 0,
+    "|sum(roY)/ro-1| max": 1.1920928955078125e-07,
+    "roOmega<=1e-20": 0
+   },
+   "file": "res_20000.h5",
+   "reasons": []
+  },
+  "residual_scale": {
+   "ok": true,
+   "gate": false,
+   "median": 0.000405205151764676,
+   "outliers": {},
+   "warnings": [],
+   "reasons": []
+  },
+  "floor_events": {
+   "ok": true,
+   "required": true,
+   "verdict": "PASS",
+   "fail_class": null,
+   "window": [
+    10000,
+    20000
+   ],
+   "path": "steady_implicit",
+   "last_step": 20000,
+   "session": {
+    "session": 1,
+    "prior_sessions": 0,
+    "note": {
+     "format": "1",
+     "path": "steady_implicit",
+     "thermo": "tp",
+     "condensation": "0",
+     "condEquilibrium": "0",
+     "tfloor": "50",
+     "romin": "9.9999997473787516e-05",
+     "pmin": "20",
+     "near_band": "1",
+     "ids_max": "8",
+     "discretization": "node",
+     "periodic": "0",
+     "axisymmetric": "0",
+     "nStepOuter": "20000",
+     "prior_sessions": "0",
+     "cfg_fnv": "361c60ae82f4c0c7",
+     "inject": "0"
+    }
+   },
+   "n_updates_checked": 10000,
+   "events": {
+    "T": {
+     "n_events": 0,
+     "n_updates_with_events": 0,
+     "sum": 0.0,
+     "max": 0.0,
+     "first_q_index": null,
+     "first_ids": ""
+    },
+    "Rho": {
+     "n_events": 0,
+     "n_updates_with_events": 0,
+     "sum": 0.0,
+     "max": 0.0,
+     "first_q_index": null,
+     "first_ids": ""
+    },
+    "P": {
+     "n_events": 0,
+     "n_updates_with_events": 0,
+     "sum": 0.0,
+     "max": 0.0,
+     "first_q_index": null,
+     "first_ids": ""
+    }
+   },
+   "first_events": [],
+   "entry": {
+    "q_index": 10000,
+    "step": 10001,
+    "nT": 0,
+    "nRho": 0,
+    "nP": 0,
+    "n_nonfinite": 0,
+    "n_near": 0
+   },
+   "init": {
+    "n_rows": 1,
+    "nT": 0,
+    "nRho": 0,
+    "nP": 0,
+    "n_nonfinite": 0,
+    "nT_ghost": 0,
+    "nRho_ghost": 165659,
+    "nP_ghost": 0
+   },
+   "aux": {
+    "n_rows": 0,
+    "nT": 0,
+    "nRho": 0,
+    "nP": 0,
+    "n_nonfinite": 0,
+    "nT_ghost": 0,
+    "nRho_ghost": 0,
+    "nP_ghost": 0
+   },
+   "near_window": 0,
+   "ghost_window": {
+    "T": 0,
+    "Rho": 0,
+    "P": 0,
+    "nonfinite": 511430000
+   },
+   "reasons": [],
+   "notes": []
+  },
+  "force_parts": {
+   "ok": true,
+   "n_incomplete": 0,
+   "steps": [],
+   "reasons": []
+  },
+  "judgment": {
+   "ok": false,
+   "verdict": "UNSETTLED",
+   "fail_class": "JUDGMENT_UNSETTLED",
+   "extendable": true,
+   "window_steps": 10000,
+   "force_window": {
+    "verdict": "UNSETTLED",
+    "ok": false,
+    "window": [
+     10000,
+     20000
+    ],
+    "n_tail": 20,
+    "n_prev": 20,
+    "quantities": {
+     "C_T": {
+      "mean": 0.8891112666879033,
+      "a": 4.3142903196624616e-06,
+      "d": 7.283923597833919e-06,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "detail": "tail mean=0.8891  drift=0.0%/tail  fluct=0.0%",
+      "ok": true
+     },
+     "C_T_with_shear": {
+      "mean": 0.8704129034524806,
+      "a": 4.24101133500443e-06,
+      "d": 1.1567838749115822e-06,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "detail": "tail mean=0.8704  drift=0.0%/tail  fluct=0.0%",
+      "ok": true
+     },
+     "C_L": {
+      "mean": 0.06209783573217429,
+      "a": 1.3708561391108376e-05,
+      "d": 9.077671555966088e-05,
+      "tol": 5e-05,
+      "steady": "STEADY",
+      "detail": "tail mean=0.0621  drift=0.0%/tail  fluct=0.0%",
+      "ok": false
+     },
+     "C_M": {
+      "mean": -1.626623527928438,
+      "a": 0.00029006431245681696,
+      "d": 0.0017074257139788607,
+      "tol": 0.0005,
+      "steady": "STEADY",
+      "detail": "tail mean=-1.627  drift=0.0%/tail  fluct=0.0%",
+      "ok": false
+     }
+    },
+    "reasons": [
+     "窓・定常性が未達: C_L: a 1.37e-05・d 9.08e-05 (許容 5e-05)・STEADY",
+     "窓・定常性が未達: C_M: a 2.90e-04・d 1.71e-03 (許容 5e-04)・STEADY"
+    ],
+    "required": [
+     "C_T",
+     "C_T_with_shear",
+     "C_L",
+     "C_M"
+    ],
+    "planned": {
+     "end": 20000,
+     "n": 40
+    }
+   },
+   "temperature": {
+    "verdict": "PASS",
+    "ok": true,
+    "window": [
+     10000,
+     20000
+    ],
+    "n_window": 20,
+    "regions": {
+     "R_TE": {
+      "Tmin_window": 220.7852325439453,
+      "Tmin_step": 19500,
+      "Tmin_node": 481372.0,
+      "Tmin_xyz": [
+       0.11529257148504257,
+       -0.03042043372988701,
+       0.13409793376922607
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=220.8  drift=0.0%/tail  fluct=0.0%"
+     },
+     "R_SE": {
+      "Tmin_window": 224.61239624023438,
+      "Tmin_step": 13000,
+      "Tmin_node": 342803.0,
+      "Tmin_xyz": [
+       0.07809370011091232,
+       -0.018736744299530983,
+       0.11595223098993301
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=224.6  drift=0.0%/tail  fluct=0.0%"
+     },
+     "RET": {
+      "Tmin_window": 220.62112426757812,
+      "Tmin_step": 15500,
+      "Tmin_node": 592519.0,
+      "Tmin_xyz": [
+       0.207405686378479,
+       -0.06629224866628647,
+       0.11079314351081848
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=220.6  drift=0.0%/tail  fluct=0.0%"
+     },
+     "ALL": {
+      "Tmin_window": 210.57440185546875,
+      "Tmin_step": 17500,
+      "Tmin_node": 1851099.0,
+      "Tmin_xyz": [
+       1.2091642618179321,
+       0.2970581650733948,
+       0.027621960267424583
+      ],
+      "n_lt150_window_sum": 0,
+      "n_lt200_window_max": 0,
+      "vol_lt200_window_max": 0.0,
+      "steady": "STEADY",
+      "detail": "tail mean=210.6  drift=0.0%/tail  fluct=0.0%"
+     }
+    },
+    "reasons": []
+   },
+   "reasons": [
+    "窓・定常性が未達: C_L: a 1.37e-05・d 9.08e-05 (許容 5e-05)・STEADY",
+    "窓・定常性が未達: C_M: a 2.90e-04・d 1.71e-03 (許容 5e-04)・STEADY"
+   ]
+  },
+  "plateau": {
+   "all_flat": true,
+   "falling": [],
+   "rising": [],
+   "flat": [
+    "rms_ro",
+    "rms_roUx",
+    "rms_roUy",
+    "rms_roUz",
+    "rms_roe",
+    "rms_roK",
+    "rms_roOmega",
+    "rms_roY0",
+    "rms_roY1"
+   ]
+  },
+  "require_residual_pass": false,
+  "require_residual_plateau": false
+ },
+ "current_metrics": {
+  "path": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10/REJUDGE_2026-10-13/metrics.json",
+  "sha256": "3f19deefbec93bdb7ef8415ea0fddb63c78907de1dccc15109035f42de8f7735",
+  "forge_rc": 0,
+  "n_snapshots": 40,
+  "eval_method_id": "a50c918590cac0714e96577d1966bc3b10486eba8fc154dd0c3c70480e207057"
+ },
+ "old_metrics": {
+  "path": "/home/ubuntu/forge-r8/case/46.sern_design/run_1088_tewake_m6_L10/metrics.json",
+  "sha256": "9c9d01488451d091de38745569449d70139a833bed27094e1c92c4371c81a766",
+  "mtime": "2026-10-11T02:26:14+0000",
+  "forge_rc": 0,
+  "n_snapshots": 40
+ },
+ "ab": {
+  "rows": [
+   {
+    "item": "verdict",
+    "old": "PASS",
+    "current": "FAIL",
+    "same": false
+   },
+   {
+    "item": "fail_class",
+    "old": "None",
+    "current": "JUDGMENT_UNSETTLED",
+    "same": false
+   },
+   {
+    "item": "acceptance_version",
+    "old": "(なし)",
+    "current": "sern-acceptance-v1",
+    "same": false
+   },
+   {
+    "item": "rc",
+    "old": "0",
+    "current": "0",
+    "same": true
+   },
+   {
+    "item": "保存場 field",
+    "old": "OK",
+    "current": "OK",
+    "same": true
+   },
+   {
+    "item": "残差 residual",
+    "old": "OK NOT CONVERGED (stalled/plateau)",
+    "current": "OK NOT CONVERGED (stalled/plateau)",
+    "same": true
+   },
+   {
+    "item": "残差の入力 residual_evidence",
+    "old": "input_ok None・欠けた列 None・時系列 None 行 (step None..None、最終場 None)",
+    "current": "input_ok True・欠けた列 []・時系列 20000 行 (step 0..19999、最終場 res_20000.h5)",
+    "same": false
+   },
+   {
+    "item": "4 量の頭打ち steadiness",
+    "old": "OK C_T_with_shear STEADY・C_T STEADY・C_L STEADY・C_M STEADY",
+    "current": "OK C_T_with_shear STEADY・C_T STEADY・C_L STEADY・C_M STEADY",
+    "same": true
+   },
+   {
+    "item": "最終場の床 floors",
+    "old": "OK",
+    "current": "OK",
+    "same": true
+   },
+   {
+    "item": "#1 床事象 floor_events",
+    "old": "OK PASS 区間 [10000, 20000] 更新 10000 必須 True",
+    "current": "OK PASS 区間 [10000, 20000] 更新 10000 必須 True",
+    "same": true
+   },
+   {
+    "item": "力の部品 force_parts",
+    "old": "(なし)",
+    "current": "OK 不完全 0",
+    "same": false
+   },
+   {
+    "item": "判定区間 judgment (#2・#3)",
+    "old": "(なし)",
+    "current": "UNSETTLED JUDGMENT_UNSETTLED",
+    "same": false
+   },
+   {
+    "item": "#2 温度 temperature",
+    "old": "(なし)",
+    "current": "PASS 窓 [10000, 20000] 標本 20",
+    "same": false
+   },
+   {
+    "item": "#3 力の窓 force_window",
+    "old": "(なし)",
+    "current": "UNSETTLED 窓 [10000, 20000] 標本 20/20",
+    "same": false
+   },
+   {
+    "item": "残差の桁 residual_scale",
+    "old": "OK",
+    "current": "OK",
+    "same": true
+   },
+   {
+    "item": "理由 reasons",
+    "old": "(なし)",
+    "current": "判定区間: 窓・定常性が未達: C_L: a 1.37e-05・d 9.08e-05 (許容 5e-05)・STEADY; 判定区間: 窓・定常性が未達: C_M: a 2.90e-04・d 1.71e-03 (許容 5e-04)・STEADY",
+    "same": false
+   }
+  ]
+ },
+ "old_gates_items": {
+  "verdict": "PASS",
+  "fail_class": "None",
+  "acceptance_version": "(なし)",
+  "rc": "0",
+  "保存場 field": "OK",
+  "残差 residual": "OK NOT CONVERGED (stalled/plateau)",
+  "残差の入力 residual_evidence": "input_ok None・欠けた列 None・時系列 None 行 (step None..None、最終場 None)",
+  "4 量の頭打ち steadiness": "OK C_T_with_shear STEADY・C_T STEADY・C_L STEADY・C_M STEADY",
+  "最終場の床 floors": "OK",
+  "#1 床事象 floor_events": "OK PASS 区間 [10000, 20000] 更新 10000 必須 True",
+  "力の部品 force_parts": "(なし)",
+  "判定区間 judgment (#2・#3)": "(なし)",
+  "#2 温度 temperature": "(なし)",
+  "#3 力の窓 force_window": "(なし)",
+  "残差の桁 residual_scale": "OK",
+  "理由 reasons": "(なし)"
+ },
+ "run_files_unchanged": true,
+ "run_files_changes": [],
+ "end": "2026-10-13T02:49:45+0000",
+ "summary": {
+  "status": "JUDGED",
+  "verdict": "FAIL",
+  "fail_class": "JUDGMENT_UNSETTLED",
+  "acceptance_version": "sern-acceptance-v1",
+  "reasons": [
+   "判定区間: 窓・定常性が未達: C_L: a 1.37e-05・d 9.08e-05 (許容 5e-05)・STEADY",
+   "判定区間: 窓・定常性が未達: C_M: a 2.90e-04・d 1.71e-03 (許容 5e-04)・STEADY"
+  ],
+  "judgment": {
+   "verdict": "UNSETTLED",
+   "fail_class": "JUDGMENT_UNSETTLED",
+   "temperature": "PASS",
+   "force_window": "UNSETTLED",
+   "floor_events": "PASS",
+   "floor_window": [
+    10000,
+    20000
+   ]
+  },
+  "force_window": {
+   "C_T": {
+    "mean": 0.8891112666879033,
+    "a": 4.3142903196624616e-06,
+    "d": 7.283923597833919e-06,
+    "tol": 5e-05,
+    "steady": "STEADY",
+    "ok": true
+   },
+   "C_T_with_shear": {
+    "mean": 0.8704129034524806,
+    "a": 4.24101133500443e-06,
+    "d": 1.1567838749115822e-06,
+    "tol": 5e-05,
+    "steady": "STEADY",
+    "ok": true
+   },
+   "C_L": {
+    "mean": 0.06209783573217429,
+    "a": 1.3708561391108376e-05,
+    "d": 9.077671555966088e-05,
+    "tol": 5e-05,
+    "steady": "STEADY",
+    "ok": false
+   },
+   "C_M": {
+    "mean": -1.626623527928438,
+    "a": 0.00029006431245681696,
+    "d": 0.0017074257139788607,
+    "tol": 0.0005,
+    "steady": "STEADY",
+    "ok": false
+   }
+  },
+  "residual_evidence_input_ok": true,
+  "missing_inputs": [],
+  "stop": null,
+  "run_files_unchanged": true,
+  "error": null
+ }
+}

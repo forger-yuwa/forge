@@ -1,0 +1,712 @@
+{
+ "version": "rejudge-r7b-v1",
+ "time": "2026-10-13T02:43:27+0000",
+ "git": {
+  "head": "4829694052e1bedb53db25228b619701434535ca",
+  "dirty_tracked": null
+ },
+ "acceptance_version_current": "sern-acceptance-v1",
+ "result": "A",
+ "result_text": "結果 A: 対象の全 run が現行の受理検査の必要条件を満たす",
+ "failures": [],
+ "rows": [
+  {
+   "run": "run_1084_tewake_g3_L10_m10",
+   "L_sw": 0.8,
+   "op": "m10_on",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.9163371726750965,
+     "a": 1.608140893893939e-06,
+     "d": 1.2771800045330295e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8969471031856031,
+     "a": 1.4244779396044294e-06,
+     "d": 1.3948983271783177e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.0674893302503658,
+     "a": 6.3081087455924e-06,
+     "d": 1.9608704080936734e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": -1.7832147294295755,
+     "a": 0.00013953802759902878,
+     "d": 0.0004265208693534639,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1084_tewake_g3_L10_m10/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:01:19+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+    "te_wake_sha256": "d281fd40292d",
+    "te_wake_commit": "7c88aa35",
+    "production": "problem_3d_prod_3op_wallres_lswx08.yaml",
+    "production_sha256": "df1969f2bf1e",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1091_tewake_m6_L10_cont40k",
+   "L_sw": 0.8,
+   "op": "m6_on",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.8891105892063385,
+     "a": 2.61580570459774e-06,
+     "d": 5.7631076577635554e-08,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8704123094664327,
+     "a": 2.5981071475333906e-06,
+     "d": 1.9861489231054463e-08,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.062095771938847,
+     "a": 1.1736494787958907e-05,
+     "d": 2.1361071610229154e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": -1.6265630358895244,
+     "a": 0.00026338492626298837,
+     "d": 4.5493726884560104e-05,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1091_tewake_m6_L10_cont40k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:07:35+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+    "te_wake_sha256": "d281fd40292d",
+    "te_wake_commit": "7c88aa35",
+    "production": "problem_3d_prod_3op_wallres_lswx08.yaml",
+    "production_sha256": "df1969f2bf1e",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1090_tewake_m4_L10",
+   "L_sw": 0.8,
+   "op": "m4_off",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.9791903291411858,
+     "a": 2.3409403160368214e-07,
+     "d": 1.2100943713733159e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.967699407564921,
+     "a": 2.533657198489081e-07,
+     "d": 1.8614857684173813e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": -0.024865420393380962,
+     "a": 1.898996852267576e-06,
+     "d": 1.330421497677467e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": 0.5040016078533804,
+     "a": 3.880032155445523e-05,
+     "d": 0.0003930200926930416,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1090_tewake_m4_L10/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:13:59+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx08_tewake_g3_L10.yaml",
+    "te_wake_sha256": "d281fd40292d",
+    "te_wake_commit": "7c88aa35",
+    "production": "problem_3d_prod_3op_wallres_lswx08.yaml",
+    "production_sha256": "df1969f2bf1e",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1096_tewake_lsw10_m10_cont20k",
+   "L_sw": 1.0,
+   "op": "m10_on",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.9176494835484483,
+     "a": 1.0939344894378422e-06,
+     "d": 2.4667746050255346e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8969680525566842,
+     "a": 9.858860333666897e-07,
+     "d": 1.2011840862746759e-05,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.0723893309585039,
+     "a": 4.5688107716129744e-06,
+     "d": 7.752413338918407e-07,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": -1.906226123079729,
+     "a": 0.00010173455528050823,
+     "d": 1.7257512401114283e-05,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1096_tewake_lsw10_m10_cont20k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:20:29+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+    "te_wake_sha256": "7a259984523f",
+    "te_wake_commit": "7f056898",
+    "production": "problem_3d_prod_3op_wallres_lswx10.yaml",
+    "production_sha256": "9d8134c794b6",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1099_tewake_lsw10_m6_cont40k",
+   "L_sw": 1.0,
+   "op": "m6_on",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.8926326836417185,
+     "a": 2.9532656090625053e-06,
+     "d": 1.0392624361088565e-07,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8725505486972303,
+     "a": 2.904380662527295e-06,
+     "d": 9.186256255677705e-08,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.07148224814767275,
+     "a": 1.353130082330789e-05,
+     "d": 6.991224716923483e-07,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": -1.848920685056865,
+     "a": 0.000295796481075028,
+     "d": 2.2790703231079235e-05,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1099_tewake_lsw10_m6_cont40k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:27:13+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+    "te_wake_sha256": "7a259984523f",
+    "te_wake_commit": "7f056898",
+    "production": "problem_3d_prod_3op_wallres_lswx10.yaml",
+    "production_sha256": "9d8134c794b6",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1098_tewake_lsw10_m4_cont20k",
+   "L_sw": 1.0,
+   "op": "m4_off",
+   "grid": "g3",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.9797875771514934,
+     "a": 2.8198690926739545e-07,
+     "d": 9.092875425942282e-07,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.9676520349648987,
+     "a": 3.4105929869188145e-07,
+     "d": 2.848243946251827e-07,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": -0.022347884917292136,
+     "a": 2.7321199753613246e-06,
+     "d": 9.450783772207982e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": 0.43656941112924325,
+     "a": 6.11283627803827e-05,
+     "d": 0.0002645869775290133,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1098_tewake_lsw10_m4_cont20k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:33:46+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx10_tewake_g3_L10.yaml",
+    "te_wake_sha256": "7a259984523f",
+    "te_wake_commit": "7f056898",
+    "production": "problem_3d_prod_3op_wallres_lswx10.yaml",
+    "production_sha256": "9d8134c794b6",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 0
+   }
+  },
+  {
+   "run": "run_1086_tewake_g4_L10_cont40k",
+   "L_sw": 0.8,
+   "op": "m10_on",
+   "grid": "g4",
+   "status": "JUDGED",
+   "verdict": "PASS",
+   "fail_class": null,
+   "judgment": {
+    "verdict": "PASS",
+    "fail_class": null,
+    "temperature": "PASS",
+    "force_window": "PASS",
+    "floor_events": "PASS",
+    "floor_window": [
+     10000,
+     20000
+    ]
+   },
+   "force_window": {
+    "C_T": {
+     "mean": 0.9162844941147961,
+     "a": 3.299155367786355e-07,
+     "d": 8.770139925395881e-08,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_T_with_shear": {
+     "mean": 0.8965903036766489,
+     "a": 3.3684328293315247e-07,
+     "d": 5.1394483335798213e-08,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_L": {
+     "mean": 0.06729052701812119,
+     "a": 4.135053116971488e-06,
+     "d": 1.137438334575247e-06,
+     "tol": 5e-05,
+     "steady": "STEADY",
+     "ok": true
+    },
+    "C_M": {
+     "mean": -1.7768666164653624,
+     "a": 0.00011149775416963159,
+     "d": 3.352080462337703e-05,
+     "tol": 0.0005,
+     "steady": "STEADY",
+     "ok": true
+    }
+   },
+   "missing_inputs": [],
+   "stop": null,
+   "necessary_ok": true,
+   "record": "/home/ubuntu/forge-r8/case/46.sern_design/run_1086_tewake_g4_L10_cont40k/REJUDGE_2026-10-13",
+   "record_end": "2026-10-13T02:43:27+0000",
+   "git": "4829694052e1bedb53db25228b619701434535ca",
+   "yaml": {
+    "te_wake": "problem_3d_prod_3op_wallres_lswx08_tewake_g4_L10.yaml",
+    "te_wake_sha256": "c6f01b51a87f",
+    "te_wake_commit": "7c88aa35",
+    "production": "problem_3d_prod_3op_wallres_lswx08.yaml",
+    "production_sha256": "df1969f2bf1e",
+    "production_commit": "fa816325",
+    "keys": {
+     "judgment_steps": 20000,
+     "judgment_extend_once": 1,
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "keys_te_wake": {
+     "judgment_steps": "(無い)",
+     "judgment_extend_once": "(無い)",
+     "floor_events": 1,
+     "floor_events_window_steps": 10000,
+     "outStepInterval": 500
+    },
+    "n_other_differences": 8
+   }
+  }
+ ],
+ "design_diff": {
+  "q": "C_T_with_shear",
+  "weights": {
+   "m6_on": 0.5,
+   "m10_on": 0.3,
+   "m4_off": 0.2
+  },
+  "per_op": {
+   "m10_on": {
+    "run_0.8": "run_1084_tewake_g3_L10_m10",
+    "run_1.0": "run_1096_tewake_lsw10_m10_cont20k",
+    "quantities": {
+     "C_T": {
+      "q_0.8": 0.9163371726750965,
+      "q_1.0": 0.9176494835484483,
+      "delta": 0.0013123108733518185,
+      "U": 4.074915498919474e-06
+     },
+     "C_T_with_shear": {
+      "q_0.8": 0.8969471031856031,
+      "q_1.0": 0.8969680525566842,
+      "delta": 2.094937108110262e-05,
+      "U": 1.3436318802351188e-05
+     },
+     "C_L": {
+      "q_0.8": 0.0674893302503658,
+      "q_1.0": 0.0723893309585039,
+      "delta": 0.004900000708138105,
+      "U": 2.417751485254971e-05
+     },
+     "C_M": {
+      "q_0.8": -1.7832147294295755,
+      "q_1.0": -1.906226123079729,
+      "delta": -0.12301139365015357,
+      "U": 0.0005282554246339721
+     }
+    }
+   },
+   "m6_on": {
+    "run_0.8": "run_1091_tewake_m6_L10_cont40k",
+    "run_1.0": "run_1099_tewake_lsw10_m6_cont40k",
+    "quantities": {
+     "C_T": {
+      "q_0.8": 0.8891105892063385,
+      "q_1.0": 0.8926326836417185,
+      "delta": 0.0035220944353800965,
+      "U": 5.5690713136602454e-06
+     },
+     "C_T_with_shear": {
+      "q_0.8": 0.8704123094664327,
+      "q_1.0": 0.8725505486972303,
+      "delta": 0.0021382392307975895,
+      "U": 5.5024878100606855e-06
+     },
+     "C_L": {
+      "q_0.8": 0.062095771938847,
+      "q_1.0": 0.07148224814767275,
+      "delta": 0.009386476208825746,
+      "U": 2.5267795611266797e-05
+     },
+     "C_M": {
+      "q_0.8": -1.6265630358895244,
+      "q_1.0": -1.848920685056865,
+      "delta": -0.22235764916734047,
+      "U": 0.0005591814073380164
+     }
+    }
+   },
+   "m4_off": {
+    "run_0.8": "run_1090_tewake_m4_L10",
+    "run_1.0": "run_1098_tewake_lsw10_m4_cont20k",
+    "quantities": {
+     "C_T": {
+      "q_0.8": 0.9791903291411858,
+      "q_1.0": 0.9797875771514934,
+      "delta": 0.0005972480103076938,
+      "U": 2.2100943713733156e-06
+     },
+     "C_T_with_shear": {
+      "q_0.8": 0.967699407564921,
+      "q_1.0": 0.9676520349648987,
+      "delta": -4.7372600022299594e-05,
+      "U": 2.861485768417381e-06
+     },
+     "C_L": {
+      "q_0.8": -0.024865420393380962,
+      "q_1.0": -0.022347884917292136,
+      "delta": 0.002517535476088826,
+      "U": 2.2754998748982652e-05
+     },
+     "C_M": {
+      "q_0.8": 0.5040016078533804,
+      "q_1.0": 0.43656941112924325,
+      "delta": -0.0674321967241372,
+      "U": 0.0006576070702220549
+     }
+    }
+   }
+  },
+  "dJ": 0.0010659299067186656,
+  "U_time_weighted": 7.354436699419176e-06,
+  "missing": [],
+  "G10": {
+   "status": "未確定",
+   "why": "Δ₁₀,g4 に要る g4・L_sw 1.0・m10_on の判定区間が無い (g4 は L_sw 0.8 だけ)",
+   "formula": "G₁₀ = |Δ₁₀,g4 − Δ₁₀,g3| + U₁₀,g4 + U₁₀,g3",
+   "reference_0.8": {
+    "run_g4": "run_1086_tewake_g4_L10_cont40k",
+    "run_g3": "run_1084_tewake_g3_L10_m10",
+    "q_g4": 0.8965903036766489,
+    "q_g3": 0.8969471031856031,
+    "q_g4_minus_g3": -0.00035679950895417534,
+    "u_g4": 1e-06,
+    "u_g3": 1.4244779396044294e-06
+   }
+  }
+ }
+}
