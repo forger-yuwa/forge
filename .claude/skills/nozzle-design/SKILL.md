@@ -56,8 +56,11 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 
 ## 計算の長さの既定 (2026-10-14)
 
-- NS の本段は何も指定しないと **60,000 step** (`--steps` > `evaluate.ns_steps` > 既定)。`evaluate.nStepOuter` は Euler の本段だけ。止める規則 (量が落ち着いたら止める) は
-  まだ設計チェーンに無い — M6 の `m9_watch.py` (case/45 専用) を風洞向けの量 (出口コア M・流量・δ_E) で移植するかは未決 (plan `tooling-nozzle-cooled-wall-ns-settling`)。
+- NS の本段は**停止規則つきで既定 20 万 step を上限**に回す (2026-10-14 ユーザ決定; `run_staged_ns`、`prepare_info.euler_ref` が要る)。2 万 step の窓で、
+  入口−出口の質量の収支 r (|平均| ≤ 0.05 %・振幅 ≤ 0.5 %) と θ_r (x/x_E 0.4・0.7・0.95、平均の変化 2 万 step あたり ≤ 0.05 %・振幅 ≤ 0.5 %) を満たした最初の出力で止める。
+  上限に届けば「未到達」(合格でない)。記録は run の `stop_rule.json`。使わないときは `--no-stop-rule` か `evaluate.stop_rule: false` で、本段は `--steps` > `evaluate.ns_steps` > 60,000。
+  `evaluate.nStepOuter` は Euler の本段だけ。冷却壁の case/70 は入口の直管の質量の過渡で未到達になる (plan `tooling-nozzle-cooled-wall-ns-settling` §6 S-stop)。
+- **計算は手元の PC でなく AWS で** (2026-10-14 ユーザ「ローカルで計算かけない方がいいかも」、手元の PC がメモリ不足で落ちた)。skill `forge-aws-run`。
 
 ## メッシュの規模 (作る前に示す; AGENTS.md「メッシュの規模は作る前に示す」)
 
