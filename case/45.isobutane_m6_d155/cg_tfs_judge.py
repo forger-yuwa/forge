@@ -99,7 +99,7 @@ elif pv == "B":
     res = "B: この条件・期間では、θ_r[65,75] に 0.1 % 以上の経路依存を検出しなかった" + ("" if all(out["q"][q].get("verdict") == "B" for q in Q[1:]) else " (補助量の一部は B でない: 「経路は効かない」と総括しない)")
 else:
     res = "判定不能 (中間・符号が窓で変わる)"
-out["qualification"] = qual; out["result"] = res
+out["qualification"] = {k: bool(v) for k, v in qual.items()}; out["result"] = res   # numpy の真偽値を JSON に書けるように (判定の論理は不変)
 (OUTD / "tfs_judge.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
 for q, rec in out["q"].items():
     for wn, w in rec["windows"].items():
