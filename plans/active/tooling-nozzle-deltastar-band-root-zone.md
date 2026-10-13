@@ -119,6 +119,7 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 | 3 | 等価半径の探索 | §4.1。触る: `design/forge_design/metrics/deltastar.py`・`design/tests/run_deltastar_tests.py`。合格: §6 V1・V2 | O |
 | 4 | 表の端と写し、カードの NS 補正 | §4.2・§4.3 3。触る: `design/forge_design/feedback/deltastar_loop.py`・`intake/wt_card.py`・試験。合格: §6 V4 (写しの試験を含む) | O |
 | 5 | Euler 参照 (前の設計) と受入れ | §4.3 1。`case/70/run_0012_euler_c2b`。**受入れ (codex 諮問 2026-10-13 ns-rebuild-route の採用)**: `check_convergence --segment` PASS かつ `qs_series.py` (出口コア M・無次元の流量の系列を `check_quasisteady --series-csv` で末尾 5 枚) が STEADY。**判別 A/B** (変えるのは Euler の本段の反復数だけ): A = run_0012 (36000 step)、B = run_0012 を複製して同じ設定で 12000 step 継続 (`run_0012b_*`)。両方から run_0010 を同じ修正済みの抽出に通し、事前の識別閾値 |ΔM_exit core| ≤ 2.5e-4・流量の相対差 ≤ 1e-4・max|Δδ_E| ≤ 1e-4 r_t。A・B とも PASS/STEADY で差が閾値内 → 参照の過渡が主因の仮説を棄却し A を使う。A が不合格か延長で閾値を超える → 36000 step の参照をそのまま使う方針を棄却 (諮問)。B も不合格なら判別未了 (過渡どうしの差を補正の効果と解釈しない) | O |
+| 5b | ~~帯位置の固定の A/B~~ **完了 2026-10-13: 帯選択の寄与を支持** (x = 5 の 50k→55k: 再選択 5.1e-4・固定 2.4e-5 r_t ≤ 1e-4)。帯を固定しても δ_E は通算 120k まで直線的に動く (スロート +2e-6 r_t / 1k step; `run_0010b_ns_c2b_cont60k`)。Euler A/B の差も帯位置の差を伴う (y_b 最大 27 %)。**帯位置の固定の A/B** (諮問 2026-10-13 reference-acceptance) | forge 0 step。Euler は run_0012 に固定、run_0010 の 40k・45k・50k・55k・60k を再抽出。腕 A = 各時刻で edge を再選択 (`_deltaE_series_run_0010/`)、腕 B = 50k の最終の帯位置 y_b(x) を全時刻で固定 (流束のフィット・積分・平滑化は各時刻)。見る量: x = 5 の 50k→55k の差、使用域の最大差、y_star・y_b・hard/held の変化。判定: A で段差が再現し B で x = 5 の差 ≤ 1e-4 r_t → 帯選択の寄与を支持; B でも > 1e-4 r_t → 帯選択だけで説明する仮説を棄却 (流れの過渡とは断定しない)。B は診断用で、その表を設計入力に使わない | O |
 | 6 | 抽出と作り直し | §4.3 2〜3。合格: §6 V3、寸法ゲート PASS (長さ 1 mm・径 0.02 mm) | O |
 | 7 | Euler (新しい設計) と最終 NS | §4.3 4〜5。`case/70/run_0013_euler_<slug>`・`run_0014_ns_<slug>`。合格: run_0013 は #5 と同じ受入れ (収束 PASS・出口コア M と流量が STEADY)、最終 NS は §6 V5 (V5b は記録) | O |
 | 8 | result 段 | 諮問とレビュー | F |
@@ -139,12 +140,18 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
   **注記**: (c) の許容は run_0009/run_0010 の結果 (差 5 %・1.5 %) を見た後に書いた。根拠は事前の見積もり: 2 つの量は定義が違い
   (帯局所の欠損 と 断面全体の流量の比)、コアの流量係数の差 (`cd_rel` 1.006) と流量の測定の広がり (`mdot_ns_spread` 2e-5 相対) を含む。
   0.2 は「符号と桁が合う」ことの確認として置く。
+- **V3e 入力 δ_E の準定常** (codex plan レビュー M4 と諮問 reference-acceptance): 受入れた Euler を固定し、NS の事前固定の 5 枚・20k step の窓 (5k 間隔) から
+  同じ抽出・平滑化で δ_E(x) を作る。`check_quasisteady --series-csv` (窓全体) の VERDICT を残し、使用域 [0, x_e] で max_x(max_t δ_E − min_t δ_E) ≤ 1e-4 r_t・hard/held なし。
+  単調な量は推定の残りの変化も同じ許容、推定不能は保留。合格した窓の**点ごとの平均**を入力 δ_E にする (不合格を平均で消さない)。
+  **2026-10-13 の run_0010 の 40k〜60k の窓は不合格** (x = 2〜12 で 50k→55k に 5e-4 r_t の段差、x = 48 が単調に 2.2e-4 r_t 減る)。
 - **V4 #18 と写し**: (a) 終点が $\varepsilon_{f32}$ 以内で前の設計の出口より短い表 → 揃えて物理壁が作れる、(b) $\varepsilon_{f32}$ を超えて短い → 例外、
   (c) 前の設計の記録 (`wall_repr.json`) が無い・表の範囲と合わない → 例外、(d) 同じ設計への写しは恒等 (相対 1e-15)、
   (e) 長さを変えた設計への写しで区切りの点 (−2・−1・0・1) が新しい設計の区切りの点に写る (相対 1e-12)、(f) 既存の `solve_rt_throat --prev` の経路 (同じ設計) の出力が今と同じ。
 - **V5b 固定点の近さ** (記録、合否なし): run_0014 × run_0013 の修正後の抽出の δ_E と、作り直しに使った補正の表の差 (スロート・x = 10・出口)。
   1 回で固定点に近いか (M6 の実績では比 0.995〜1.010) の確認で、2 回目に進むかは諮問で決める。
 - **V5 M5 デモ (最終 NS)**: 出口コア M (`nozzle_report` の `exit_core.M_mean`、η 0.05〜0.7) が **4.9975 ≤ M ≤ 5.0025**。
+  出口コア M の準定常は**専用の許容** (codex plan レビュー M5): 末尾の変化と推定の残りの変化がともに ≤ 2.5e-4、単調なら漸近値も合否範囲内、推定不能は合格にしない
+  (既定の `check_quasisteady` の drift 5 %・osc 10 % は合否の半幅 0.0025 に対して緩すぎる)。比較の対照は「各設計の受入れた定常解どうし」(run_0010 の IC は run_0009 で、同じ IC の A/B ではない; m6)。
   加えて `check_convergence --segment` の VERDICT、`check_quasisteady` で出口コア M・ṁ_NS/ṁ_Euler・最大 M・最大 p が STEADY、
   壁解像 (`check_wall_resolution.py`) PASS、メッシュ品質 PASS、成果物の寸法ゲート PASS。収束が PASS でなければ M の合否を出さない。
   比較の対照は run_0010 (同じ IC・段取り・step 数で、壁と r_t だけが違う)。出口コア M は新しい設計の Euler (run_0013) と同じ評価で出す。
@@ -153,6 +160,8 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan | 2026-10-13 | [2026-10-13-tooling-nozzle-deltastar-band-root-zone-plan.md](../../notes/reviews/2026-10-13-tooling-nozzle-deltastar-band-root-zone-plan.md) | GO-with-changes, C0/M5/m2 | **全件採用** (採否は諮問 [2026-10-13-deltastar-reference-acceptance-diagnose.md](../../notes/reviews/2026-10-13-deltastar-reference-acceptance-diagnose.md) で確認): M1 使用域 [0, x_e] の hard/held で NS 後の寸法を止める + 抽出→平滑化→CSV→寸法の伝播試験 (§4.1・§6 V1) / M2 符号分岐の前に q_ref の有限・正と探索域を検査 (§4.1・V1 の負例) / M3 表の端は両側 \|Δ\| ≤ ε_f32 (§4.2・V4) / M4 入力 δ_E の準定常 (§6 V3e) / M5 出口 M 専用の準定常の許容 (§6 V5) / m6 V5 は各設計の受入れた定常解どうし / m7 methods を実装前に (済) と §5・§7 の整備 |
+| diagnose (参照と δ_E の受入れ) | 2026-10-13 | [2026-10-13-deltastar-reference-acceptance-diagnose.md](../../notes/reviews/2026-10-13-deltastar-reference-acceptance-diagnose.md) | Euler A (run_0012)・B (run_0012b) とも受入れない (収束 PASS なし; 使用域でも x = 10 で 1.47e-4 r_t > 1e-4)。入力 δ_E の 40k〜60k の窓は不合格 (x = 48 が単調に 2.2e-4 r_t 減る、x = 3 DRIFTING)。Major 3 (呼び出し側の前提への異議): 使用域への限定で合格にしない・x < 0 を壁が使わないことから設計への無影響は導けない・plateau = float32 の床は未立証 | **採用**: 閾値と受入れ条件は事前登録のまま維持 (§5.1 #5・§6 V3e)。最終 NS を保留し、帯位置を毎回選ぶ / 50k に固定する抽出の A/B (§5.1 #5b) を先に行う。やらないこと: 使用域への限定で合格にする・末尾 2 枚の平均・原因の確認前に CFL と緩和を変える |
 | diagnose (経路の改定) | 2026-10-13 | [2026-10-13-deltastar-ns-rebuild-route-diagnose.md](../../notes/reviews/2026-10-13-deltastar-ns-rebuild-route-diagnose.md) | カードから実寸を保って作り直す判断は採用。Major 1: Euler 参照の受入れが「完走・NaN なし」で弱い (未収束の参照の過渡が δ_E に入り得る; 確度 中) | **採用**: §5.1 #5・#7 に受入れ (収束 PASS + 出口コア M・流量が STEADY) と反復数だけを変える判別 A/B (閾値 2.5e-4・1e-4・1e-4 r_t) を入れた。不足情報の run_0010 の対象量の準定常は `qs_series.py` で補った: 出口コア M・無次元の流量とも STEADY (末尾 5 枚、M 4.990617〜4.990682) |
 | diagnose | 2026-10-13 | [2026-10-13-deltastar-band-root-zone-diagnose.md](../../notes/reviews/2026-10-13-deltastar-band-root-zone-diagnose.md) | 機構 (全半径の F の `np.interp`) は採用・確度高。Major 2: (1) x = 10 で δ_E −9.27 %、V3(d) は満たさない (2) 寸法の変化は ≈1e-4 でなく約 0.4 % の見積もり | **全件採用**: (1) §3 を訂正、V3(d) を x ≥ 20 に改定し既存の A/B を V3 の合格扱いしない、V2 を「当たり件数 0」に改定 (2) §4.3 の「≈1e-4」を撤回、§5.1 #2 に寸法の A/B を入れて経路を決める。不足情報の指摘 (run_0010 の出口コア M・流量比そのものの準定常の VERDICT が無い、Euler run_0003 は未収束) は §6 V5 の判定に出口コア M と流量比の `check_quasisteady` を含めることで対応 |
 
@@ -173,3 +182,5 @@ r_t 単位の x_e も変わる (約 −0.4 %)。表は前の設計の x から�
 - 2026-10-13: codex 諮問 (diagnose) を全件採用。§3 の「x ≥ 10 はほぼ同じ」を訂正 (x = 10 で −9.3 %)、梯子の汚染 (run_0006) を追記、V2・V3(d) を改定、§4.3 の寸法の見積もりを撤回し §5.1 #2 に寸法の A/B を入れた。
 - 2026-10-13: §5.1 #2 の寸法の A/B (`case/70.m5_air_wt_demo/sizing_ab.py`、`_sizing_ab/`): A は run_0010 の r_t を再現 (0.024973561 m)、B (修正後の δ_E) は r_t 0.025075725 m (×1.004091)・拡大部長 +4.422 mm・直管 +0.818 mm・縮流部 +1.227 mm で公差 (1 mm) の外 → **事前の判定どおり r_t 単位の設計を据え置く経路を棄却**。§4.2 (写し) と §4.3 (カードから作り直す) を改定。codex の近似の予測 (×1.00403・+4.8 mm) と一致。
 - 2026-10-13: 経路の改定の諮問を採用 (Euler 参照の受入れゲートと反復数の A/B)。`case/70.m5_air_wt_demo/qs_series.py` を追加し、run_0010 の出口コア M・流量が STEADY を確認。
+- 2026-10-13: plan 段のレビュー (GO-with-changes, M5/m2) と参照の受入れの諮問を採用。Euler A/B は受入れ不可 (両腕とも収束 PASS なし、使用域でも 1.47e-4 r_t)、入力 δ_E の窓も不合格。最終 NS を保留し §5.1 #5b (帯位置の固定の A/B) を追加。methods を実装前に更新した (§4.1 の決定分)。
+- 2026-10-13: §5.1 #5b — 段差は帯位置の切り替わり (固定で 2.4e-5 r_t)。帯を固定した δ_E は run_0010 を 120k まで延ばしても直線的に動く (冷却境界層が未整定; 総熱量 TRANSIENT-UNSETTLED と整合)。出口コア M は 4.99068 → 4.99077。
