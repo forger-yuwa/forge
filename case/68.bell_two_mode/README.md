@@ -77,4 +77,5 @@ python -m forge_design.gas.rocket_exhaust --supar 10,25,50,100 --out ../case/68.
 | `run_0035_soo_d_l100_s0` (**AWS B**、キャンペーン) | plan §5.1 #8b・§6 V3 の (D) 列: L100 固定・(θ_max, θ_e) の単目的 (η_exit 最大) の再最適化、種 0。`problem_bell_tp_d_fixl100.yaml`、`--soo --n-doe 12 --n-max 40 --n-confirm 8 --window 8 --tol 1e-4 --seed 0`。台帳 `ledger.jsonl`・要約 `soo_summary.json`・駆動ログ `../run_0035_soo_d_l100_s0.log`。途中の場は判定済みの評価から `../clean_soo.sh` が消す (`../clean_soo.tsv`) | 走行中 (10-13 21:57〜22:00 UTC 投入) | active |
 | `run_0036_soo_d_l70_s1` (**AWS B**、キャンペーン) | plan §5.1 #8b: L70 の種 1 (事前登録どおり結果に関係なく回す、種 0 の run_0032 の終了後に投入)。設定は run_0032 と同じで `--seed 1` | 走行中 (10-13 05:39 UTC〜 投入、B 時計) | active |
 | `run_0037_soo_d_l80_s1` (**AWS B**、キャンペーン) | plan §5.1 #8b: L80 の種 1 (run_0033 の終了後に投入)。設定は run_0033 と同じで `--seed 1` | 走行中 | active |
+| `run_0038_soo_d_l90_s1` (**AWS B**、キャンペーン) | plan §5.1 #8b: L90 の種 1 (run_0034 の終了後に投入)。設定は run_0034 と同じで `--seed 1` | 走行中 | active |
 | `run_0039_soo_d_l100_s1` (**AWS B**、キャンペーン) | plan §5.1 #8b: L100 の種 1 (run_0035 の終了後に投入。番号は種 1 の L70〜L100 = 0036〜0039 の対応どおり、L90 の種 1 は 0038)。設定は run_0035 と同じで `--seed 1` | 走行中 | active |
