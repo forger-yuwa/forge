@@ -54,6 +54,27 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 - STEP を CAD で編集した後のメッシュの作り直しは `deliverables/mesh/rebuild_from_step.py` (x(u) を解いて station に合わせる)。
   編集後の形状の格子品質は `check_mesh_quality.py` で確かめる。
 
+## まず使うツール (新しく書かない; AGENTS.md「既存ツールの再利用を最優先」)
+
+検証・判定・後処理のスクリプトを新しく書く前に、この表から探す。足りないときだけ書き、応答に「既存の何が足りなかったか」を 1 行書く。
+
+| やりたいこと | 使うもの |
+| --- | --- |
+| 実寸の要求 → 問題 YAML (r_t の固定点・Euler 用の写し) | `python -m forge_design.intake.wt_card CARD --out P.yaml` (NS 後の δ_E で作り直すなら `--ns-correction RUN --delta-next CSV`) |
+| Euler を回す | `python -m forge_design.evaluate.runner_axismach P_euler.yaml RUN --steps N --stages soft` |
+| NS (CFD 前の積分法の壁) | `python -m forge_design.feedback.deltastar_loop --problem P.yaml --euler-ref EULER --init-integral --run-dir RUN [--ic-from RUN] [--stages full\|none] [--prepare-only]` (`interfaceDiag` を足す台本の例: `case/70.m5_air_wt_demo/run_ns_ifacediag.sh`) |
+| NS (補正の表の壁) | `deltastar_loop --problem P.yaml --euler-ref EULER --delta-r-csv P_delta_r.csv --ic-from RUN --run-dir RUN` |
+| 同じメッシュで続きを回す | `solver_density_cuda/tools/restart_field.py RES.h5 NEW/nozzle.h5` → `runner_axismach.run_staged_ns(RUN, "none")` (Euler は `run_staged`) |
+| メッシュ品質・収束・準定常・壁解像 | `check_mesh_quality.py`・`check_convergence.py RUN --segment`・`check_quasisteady.py`・`check_wall_resolution.py RUN --mesh RUN/nozzle.h5 --groups wall` |
+| 出口コア M・流量の系列と準定常 | `case/70.m5_air_wt_demo/qs_series.py RUN [--tail 0.4 --drift 5e-5 --osc 5e-5]` (出口 M の合否は専用の許容) |
+| 残差の図 | `solver_density_cuda/tools/plot_residual.py RUN/residual_history.csv -o RUN/residual_history.png --all` |
+| 標準の報告 (図・評価量・pptx) | `python -m forge_design.report.nozzle_report RUN --euler EULER` → `build_pptx.py RUN/report` (`.venv-pptx`) |
+| 成果物一式 (STEP・gmsh・Fluent・Excel) | `python -m forge_design.export.deliverables RUN --card CARD --problem P.yaml` |
+| δ* の抽出 (1 枚・指定のスナップショット) | `deltastar_loop.extract_and_merge(NS, EULER, band_select="edge", out_dir=...)`; スナップショットを指定する例 `case/70.m5_air_wt_demo/band_c_ab.py`・`band_persist_ab.py` |
+| M_knot を長さ固定で振る (設計計算だけ) | `case/70.m5_air_wt_demo/mknot_sweep.py PROBLEM_euler.yaml OUT.json [--n-axis N] M_K ...` |
+| 遅い量 (熱量・排除厚さ・流量・出口 M) の時系列 | `case/70.m5_air_wt_demo/slow_mode_probe.py OUT.json RUN[:OFFSET] ...` |
+| 寸法の逆算の A/B・壁温の δ_r → 物理壁の A/B | `case/70.m5_air_wt_demo/sizing_ab.py`・`walltemp_wall_ab.py` (手本) |
+
 ## 最初に決めること
 
 1. **どのユースケースか** を確定する (§1 / §2 / §3)。曖昧ならユーザに 1 問だけ聞く。

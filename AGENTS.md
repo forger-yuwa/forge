@@ -148,6 +148,16 @@ forge の結果が「軸対称・乱流・近軸で forge だけ妙な値にな�
 
 ユーザーが solver のコード構造、アーキテクチャ、モジュール責務について質問した場合は、`methods/architecture/overview.md` を既定の参照先とすること。
 
+**既存ツールの再利用を最優先 (必須、2026-10-13 ユーザ指示「新規に検証スクリプトを作ろうとして、めちゃくちゃ時間かかった」)**: 検証・判定・後処理・設計の評価のために
+新しいスクリプトを書く**前に**、既存のツールを探して使う。探す順:
+1. 判定ツール `solver_density_cuda/tools/` (`check_convergence.py`・`check_quasisteady.py` [`--series-csv` で任意の量の系列]・`check_wall_resolution.py`・`check_mesh_quality.py`・
+   `stage_manifest.py`・`restart_field.py`・`interp_field.py`・`plot_residual.py` ほか)。
+2. 設計チェーンの入口と機能の一覧 [`design/CAPABILITIES.md`](design/CAPABILITIES.md)、設計の skill (`nozzle-design` の「まず使うツール」の表)、手順書 [`procedures/`](procedures/README.md)。
+3. 同じ種類の作業をした case の README の run 一覧と、その case の台本 (引数で run を受けるもの)。
+- 既存のもので足りるなら新しく書かない。足りないときだけ書き、**応答に「既存の何が足りなかったか」を 1 行書く**。
+- 書いたものが他でも使えるなら case の中に置き捨てにせず、`solver_density_cuda/tools/` か `design/forge_design/` に置き、skill の表か `design/CAPABILITIES.md` に載せる。
+- 判定ツールの代わりに自前の判定 (手書きの収束・準定常の判定など) を書かない (本節の上の「判定はツールで」と同じ)。
+
 ## ドキュメント整備方針
 
 forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物理プロセス / 数値処理) のサブディレクトリで蓄積する。運用方針の本文は `methods/README.md` を参照し、本ファイルには重複記載しない。
