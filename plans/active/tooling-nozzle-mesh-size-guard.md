@@ -134,6 +134,7 @@ AI が黙って 50 万点を超える Euler のメッシュを作った (ユー�
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| diagnose (result の解釈) | 2026-10-14 | [2026-10-14-meshguard-fallback-result-diagnose.md](../../notes/reviews/2026-10-14-meshguard-fallback-result-diagnose.md) | 両 plan の accepted を保留: Major fallback V1 は無応答 2 回を補充で埋めた (事前の条件の読み替え)、却下 既存 YAML 7 本の停止は破壊でない、却下 V3 は道具の一覧で満たす、Minor mesh の完了条件の V1b の文言 | **採用** (Major と Minor): fallback は V1 を条件を固定して 1 回再試験、mesh は §8 の文言を直す |
 | plan | 2026-10-14 | [2026-10-14-tooling-nozzle-mesh-size-guard-plan.md](../../notes/reviews/2026-10-14-tooling-nozzle-mesh-size-guard-plan.md) | GO-with-changes, C0/M3/m1: M1 比 3 の合格を全ケースの上限 2000 に一般化できない (配点は領域長・細分で決まる)、M2 準定常のゲートが許容差に対応していない (流量の振動が 1e-4 を覆う)、M3 要求カードの `estimate_mesh` が prepare の前に全格子を作る、m4 明示の `mesh_euler.ni` を黙って上書きしない | **全件採用** (諮問 mesh-size-guard-v1b): M1 → 既定を変えない (§4.1)、M2 → V1b は判定不能で閉じ、δ_E の合格を主張しない、M3 → 生成器にも格子を作る前の判定と打ち切る点数計算 (§4.2・V2・V3)、m4 → 明示の Euler の ni を保持し上限を当てる |
 | diagnose (V1b の解釈) | 2026-10-14 | [2026-10-14-mesh-size-guard-v1b-diagnose.md](../../notes/reviews/2026-10-14-mesh-size-guard-v1b-diagnose.md) | 推奨 C (切り離さない; ガードと事前の提示を先に)。A (比の規則) は事前の分岐の条件を満たさない、B (Δx の目標) は最大間隔では局所を拘束できない。M2 は延長の A/B で判定可能か確かめる案。異議: δ_E の合格は保留、Richardson は既定の根拠にしない、case/45 の −0.0008 は ni 単独の証拠でない | **採用** (C 案、§4.1)。延長の A/B は決定に要らないので回さない (理由を V1b に) |
 | diagnose | 2026-10-14 | [2026-10-14-mesh-size-guard-diagnose.md](../../notes/reviews/2026-10-14-mesh-size-guard-diagnose.md) | Major 1: 事前の判定を指定の ni × nj ですると `axis_gap_frac` の導出 nj (`mesh2d.py:170-173`) で過小評価し、上限を超えた格子を作ってから止まる | **採用** (親が `mesh2d.py:170-173` で確認): §4.2 を実効の節点数 (生成器と共通の関数) で格子の確保の前に判定、§6 V3 に axis_gap_frac の A/B |
@@ -148,7 +149,7 @@ AI が黙って 50 万点を超える Euler のメッシュを作った (ユー�
 
 ## 8. 完了条件
 
-- §6 V1a・V1b・V2〜V4 が合格、plan 段・result 段の codex レビューの行、AGENTS.md・skill・手順書の同期。
+- §6 V1a (合格)・V1b (判定不能で閉じる: Euler の ni を切り離さない決定 (§4.1) の根拠であり、合格を主張しない; 追加の計算は不要)・V2〜V4 が合格、plan 段・result 段の codex レビューの行、AGENTS.md・skill・手順書の同期。
 
 ## 9. 変更ログ
 
@@ -158,3 +159,4 @@ AI が黙って 50 万点を超える Euler のメッシュを作った (ユー�
 - 2026-10-14: V1b を実施 (`run_0015`〜`0017`): 比 3 は出口 M で FAIL、比 2 は流量が判定不能。plan 段のレビュー (GO-with-changes, M3/m1) と合わせて諮問へ。
 - 2026-10-14: 諮問 (mesh-size-guard-v1b) を採用: **Euler の ni は NS から切り離さない** (目的 1 を取り下げ)。上限は 2D で Euler・NS とも 30 万点、要求カードの生成器にも格子を作る前の判定、点数の計算は上限で打ち切る、明示の Euler の ni は保持。plan 段レビュー M1〜M3・m4 を全件採用。
 - 2026-10-14: §5.1 #3・#4 済。V2〜V4 合格 (試験 54 ok、既存の試験も通る)。既存の YAML 7 本が上限で止まるようになる (§7)。残作業 #6 (他の runner)・#7 (nj の既定の食い違い)。
+- 2026-10-14: result 段の諮問 (meshguard-fallback-result) を採用: 完了条件の V1b を「判定不能で閉じる (切り離さない決定の根拠)」に直した。既存の YAML 7 本が止まるのは目的どおり (却下側)、main に入れるときに該当セッションへ知らせる。
