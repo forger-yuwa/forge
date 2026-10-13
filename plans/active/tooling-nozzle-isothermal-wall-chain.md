@@ -313,6 +313,14 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
   - **準備で見つかったこと (2026-10-13、実行前)**: (i) チェーンの初期線の凍結源 `run_0062` の `nozzle.h5`・`nozzle.msh` は 2026-10-10 の掃除で消えていた (統合の確認 4 が実行不能だったのと同じ)。`cfd_initial_line.py:205` が読むのは `/MESH/COORD` だけなので、B の写し (`_vgc_in/run_0062_…`) に `res_6000.h5` (sha b1cc31ea78113457) の `MESH` (COORD float32・CONNE) だけを写した `nozzle.h5` (sha 7189d4a1e04ac7c6、属性に由来を記録) を作った。正しさは前提の検査 (1) (.msh が G0c とバイト一致) で確かめる。A の元のファイルには触っていない。(ii) 変換器が HDF5 を書き終えた後の GPU の後片付けで落ちる既知の症状 (`GPUassert: invalid argument`) で、チェーンの準備が `check=True` で止まった。`runner.run_converter` を作り、書き出しの行・その GPU エラー・出力の HDF5 が MESH/COORD と VALUE を持つ、の 3 つがそろうときだけ通すようにした (ランナー 4 本の 11 か所を置き換え、`runner_sern` は独自の検査なので触らない。試験 `design/tests/run_converter_exit_tests.py`)。書き終えた格子の正しさは前提の検査 (2) で確かめる。
   - **台本の解釈の記録** (implementer、親が確認): `geometry.initial_line_run` の `run_0062` も準備に要る (B に無いときだけ写して sha を記録、効き方は (1) の .msh のバイト一致で見る)。`run_0174` は `prepare_ns` がパスを記録するだけで中身を読まないので写さない。(2) は MESH・CELLS・PLANES・VIZMESH の全データセットと BCONDS の番号のデータセット・`wall_dist` のビット一致。(3) は cell の写しと node の `nozzle.h5` の両方で `--ar-max 10000` が PASS。前の段の失敗は非有限・ρ ≤ 0・detectNaN の証拠があれば B、無ければ判定不能。EXEC_ERROR・DATA_ERROR・見張りの再計算の食い違いは判定不能。段のゲートが不成立なら A の条件がそろっても判定不能。準定常は §6.11 の閾値 (θ_r 1e−4・Q_w 2e−4) を記録 (判定に使わない)。本番の前に `--dry-prep` で (1)〜(6) を確かめる。
 
+- **V-g0c-chain の結果 (2026-10-13、判定 `case/45.isobutane_m6_d155/_band_ab/cold_pair/vgc_judge.json`)**:
+  - **run** `case/45.isobutane_m6_d155/run_0810_vgc_chain` (AWS B、コードは B の作業ツリー `~/forge-g0cchain` = 018d993d、FP64 7e95e5bb、GPU は推力ノズル設計の最適化と共有)。前提の検査 (1)〜(6) 合格 (.msh が G0c とバイト一致、格子 33 データセットが `run_0804` とビット一致、品質 PASS ≤ 10,000・AR > 5000 は 1,325 セル、本段の設定と `run_0717` の差は `axisSegmentRWeight` の明示・nStepOuter・outStepInterval だけ、bcond・物性のファイル一致)。
+  - **VERDICT: 結果 A** — 「登録した開始の手順で停止規則に到達し、T2 の両方の参照との比較が許容内 (この開始の手順への適用の拡大を支持)」。段 S1_soft・S2_mid は正常終了 (非有限 0、ρ・P・T > 0)、本段は見張りの停止で **120,000 step で到達** (再計算で一致、RUN_RC 143 は見張りの停止)。判定不能・B の理由・ゲートの不成立は無い。
+  - **M1〜M7** (対 T2a / T2b): θ_r 40/70/94 +0.076/+0.068/+0.062 %、δ_loc −0.006/−0.000/−0.000 %、代理 Q_w −0.040 %、代理 q_w の最大の相対差 0.69/0.63 % (超過 0)、τ_w 0.36/0.32 % (超過 0、符号の反転 0/0)、出口 M の最大 |ΔM| 0.0005、ṁ・Ḣ ≤ 0.003 %。
+  - **対照 `run_0804_sp_g0c` との差** (記録、合格の根拠にしない): θ_r 0.003 %、Q_w −0.001 %、出口 M 3e−5。開始の場が違ってもほぼ同じ所で止まった。
+  - **記録**: 区間は `[[S1_soft, S2_mid], [main]]`。`check_convergence --segment` (本段) は ALL PASS — ただし本段は別の格子から移して 1 次の段を経た場から始まるので、低下の桁数は起点の残差の大きさで大きく出る (§6.58・§6.61 の `run_0804` は収束に近い起点から FAIL)。収束がよくなったとは言わない。準定常 (本段の末尾 2 万 step、§6.11 の閾値): θ_r 3 断面 DRIFTING、Q_w TRANSIENT-UNSETTLED (末尾でまだ動く)。時間 (共有の GPU、参考): 準備 40 s、S1 248 s、S2 234 s、本段 8,884 s (73 ms/step)、総 9,412 s。
+  - **解釈**: codex に諮問中 (次の一手 = 壁温を変える計算への進み方を含む)。
+
 ### 6.1 レビュー記録 (codex)
 
 [`AGENTS.md`](../../AGENTS.md) 「codex レビュー」の記録表 (`solver_density_cuda/tools/codex_review.py`)。
@@ -346,6 +354,7 @@ forge (素 SST, `run_0013` から index コピー warm start) と SU2 (`MARKER_I
 
 ## 10. 変更ログ
 
+- `2026-10-13` — V-g0c-chain (`run_0810_vgc_chain`) を判定した: 結果 A (チェーンの開始の手順から 120,000 step で到達、T2 の両方と M1〜M7 が許容内、`run_0804` との差は θ_r 0.003 %)。準備の途中で `run_0062` の消えた `nozzle.h5` を `res_6000.h5` の格子から補い、変換器の終了時の既知のエラーを通す `run_converter` を入れた。
 - `2026-10-13` — §6 V-g0c-chain を事前登録した (`run_0810_vgc_chain`、B、試験 P の後)。#30 の、S1・S2 の implicitRelax を生産の系譜 (0.7) に合わせる併記の許可は aef1627b に含めた。
 - `2026-10-13` — §4.8 を codex に諮った (`notes/reviews/2026-10-13-g0c-chain-design-diagnose.md`、全件採用): メッシャの `x_respace` を採用 (端は旧実装どおり)、段の設定を分けて本段だけ B0、B0 はリミッタの基準値・出力の量まで照合、見張りは本段の通知の後、開始の場を sha で固定。§5.1 #29〜#31 を実装の仕様に直した。
 - `2026-10-13` — **§4.8 (G0c と B0 をチェーンに入れる) と §5.1 #29〜#31 を起案** (float plan §6.58・§6.61 の結果と codex の次の一手、ユーザ「よい」)。メッシャに区間の局所の並べ直し `mesh.x_respace`、本段だけ B0 にする `evaluate.main_line`、チェーンの開始の場 (`run_0179` res_20000 → 段階起動 full → 本段) からの検証。諮問の前。

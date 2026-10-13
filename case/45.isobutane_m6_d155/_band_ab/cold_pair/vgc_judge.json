@@ -1,0 +1,478 @@
+{
+ "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #31・§6 V-g0c-chain (事前登録 commit 68d56723)",
+ "created": "2026-10-13T01:52:44+00:00",
+ "run": "run_0810_vgc_chain",
+ "case_dir": "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155",
+ "code_dir": "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155",
+ "tools": "/home/ubuntu/forge-g0cchain/solver_density_cuda/tools",
+ "undecidable": [],
+ "b_reasons": [],
+ "gate_failures": [],
+ "precheck": {
+  "ok": true,
+  "failures": [],
+  "items_ok": {
+   "1_msh": true,
+   "2_mesh": true,
+   "3_quality": true,
+   "5_config": true,
+   "6_files": true
+  },
+  "ar_gt5000": {
+   "n": 1325,
+   "wall_layers": [
+    0,
+    5
+   ],
+   "x_rt": [
+    -7.8084353921111935,
+    -2.2321787081815407
+   ],
+   "skew_max": 0.002435322543597667,
+   "wall_index_is_last_j": true
+  },
+  "sha": {
+   "ic_res": {
+    "path": "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0179_ns_n012_N2_ext/res_20000.h5",
+    "sha256": "fb65c9b37d9bb475bcc0b11b9f277bfea2b5e9625ff0e35bd36707810c8fcd7a",
+    "registered": "fb65c9b37d9bb475"
+   },
+   "nozzle_h5_after_prepare": "f2edce728d169e2ca857d32e5e6df1d57f465a2ae4011c6f3abc6d207454c166",
+   "prepare_info_ic_from": "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0179_ns_n012_N2_ext",
+   "main_initial_field": "本段の通知 (VGC_MAIN_START.json の initial_field_sha256) に記録"
+  },
+  "code": {
+   "forge_design": "/home/ubuntu/forge-g0cchain/design/forge_design/__init__.py",
+   "worktree": "/home/ubuntu/forge-g0cchain",
+   "worktree_head": "018d993ddab8e9401750efeec353de6aa9f5c449",
+   "forge_root": "/home/ubuntu/forge-g0cchain",
+   "python": "/usr/bin/python3",
+   "python_version": "3.12.3",
+   "numpy": "2.5.2",
+   "forge_bin": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/forge",
+   "forge_sha256": "7e95e5bbd8f50c9ebdd2b5cafa0926dd653dc0f5276ca27810c5abaf06d7aa5e",
+   "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+   "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+   "env": {
+    "FORGE_OMEGA_BUDGET": "1",
+    "FORGE_DIAG_COMMIT_LOSS": "500",
+    "FORGE_CUDA_BLOCKSIZE": "128",
+    "FORGE_BIN": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/forge"
+   },
+   "tools_sha256": {
+    "run_case.sh": "1a9f414f1eb857d4",
+    "interp_field.py": "46c9e645168e64ed",
+    "check_mesh_quality.py": "1b4750c90d79be1a",
+    "stage_manifest.py": "d15b2ec3b6c8001f",
+    "restart_field.py": "61a3b4e2aca8a9b4",
+    "rerun_conditions.py": "56a0f5033e594289",
+    "check_convergence.py": "6be9956a95b793eb"
+   },
+   "case_scripts_sha256": {
+    "vgc_run.py": "528fd794a6e8f9ba",
+    "vgc_judge.py": "8f617927ad4270ff",
+    "m9_watch.py": "21689b53850ab53f",
+    "cold_series.py": "5a2c9cb6ded72879",
+    "cold_xcheck.py": "adcf31bd9bbc7c26",
+    "sp_judge.py": "b627310d4d51537d",
+    "problem_d155_ns_prod_coldmesh_tw300_g0c_chain.yaml": "ac1870b482349f08"
+   }
+  }
+ },
+ "stages": {
+  "residual_history": {
+   "S1_soft": {
+    "file": "residual_history_S1_soft.csv",
+    "rows": 9000,
+    "rms_cols": 14,
+    "nonfinite": 0,
+    "first_nonfinite_step": null,
+    "last_step": "2999"
+   },
+   "S2_mid": {
+    "file": "residual_history_S2_mid.csv",
+    "rows": 9000,
+    "rms_cols": 14,
+    "nonfinite": 0,
+    "first_nonfinite_step": null,
+    "last_step": "2999"
+   },
+   "main": {
+    "file": "residual_history_main.csv",
+    "rows": 364170,
+    "rms_cols": 14,
+    "nonfinite": 0,
+    "first_nonfinite_step": null,
+    "last_step": "121389"
+   }
+  },
+  "S1_soft": {
+   "rc": 0,
+   "seconds": 247.54942727088928,
+   "gate_problems": [],
+   "stats": {
+    "nonfinite_total": 0,
+    "nonfinite_by_field": {},
+    "ro_min": 0.006792558686205652,
+    "ro_max": 69.10324369871296,
+    "ro_n_nonpositive": 0,
+    "P_min": 689.5468941602303,
+    "P_max": 6314057.759837472,
+    "P_n_nonpositive": 0,
+    "T_min": 172.88012862511454,
+    "T_max": 1648.2009930342808,
+    "T_n_nonpositive": 0
+   },
+   "res_sha256": "2795418fb16c3650",
+   "ok": true
+  },
+  "S2_mid": {
+   "rc": 0,
+   "seconds": 233.72659397125244,
+   "gate_problems": [],
+   "stats": {
+    "nonfinite_total": 0,
+    "nonfinite_by_field": {},
+    "ro_min": 0.007317222305619672,
+    "ro_max": 65.11627891217688,
+    "ro_n_nonpositive": 0,
+    "P_min": 1522.5370595879756,
+    "P_max": 5704790.962342112,
+    "P_n_nonpositive": 0,
+    "T_min": 216.71949427335596,
+    "T_max": 1620.2666344467855,
+    "T_n_nonpositive": 0
+   },
+   "res_sha256": "a75ae053f7ea80ab",
+   "ok": true
+  },
+  "main_stage_started": {
+   "time": "2026-10-12T23:22:23+00:00",
+   "time_unix": 1791847343.223794,
+   "main_config": {
+    "file": "solverConfig.yaml",
+    "sha256": "675560fddfa763f89263f09c4d4d2ccb7b4156a2039e35746e11c5d61a25d838",
+    "nStepOuter": 200000
+   },
+   "initial_field": {
+    "file": "nozzle.h5",
+    "sha256": "b0fc07bd619854016b01111743375a71dad81fee0a8a1b7cf50836dc64acc6d4"
+   },
+   "previous_stages": [
+    {
+     "tag": "S1_soft",
+     "nsteps": 3000,
+     "config_sha256": "7fe4c9bb9081316efffd1ca5c7bb22c784330b714f9d129264307bd5ef0d1474"
+    },
+    {
+     "tag": "S2_mid",
+     "nsteps": 3000,
+     "config_sha256": "553a70e66ba1acc5be6b2b5088d4e43440f2b1b32f3a383a32dd14cda5a3af31"
+    }
+   ],
+   "prestage_config": {
+    "file": "solverConfig_prestage.yaml",
+    "sha256": "c10fdfbf4e0ca9eb6139ce66c2bf92a6e5bd0e0e76ab0d64128761eb70445864"
+   }
+  },
+  "manifest_segments": [
+   [
+    "S1_soft",
+    "S2_mid"
+   ],
+   [
+    "main"
+   ]
+  ],
+  "stage_manifest_cli": {
+   "rc": 0,
+   "out": [
+    "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain : 3 段 / 2 区間 ===",
+    "  区間 0: S1_soft -> S2_mid",
+    "        hard: {\"convMethod\": \"0\", \"limiter\": \"2\", \"turbulence.model\": \"sst\", \"wallTreatmentSST\": \"0\", \"viscMethod\": \"2\", \"thermalMethod\": \"2\", \"unsteady\": \"0\", \"dualTime\": \"0\", \"turbulence.wallTreatmentSST\": \"0\", \"space.convMethod\": \"0\", \"space.limiter\": \"2\", \"time.unsteady\": \"0\", \"time.dualTime\": \"0\", \"solver\": \"SLAU\", \"space.slauWallNormalChi.effective\": \"1\", \"bcond_sha1\": \"0b552bbd07b8\", \"conjugate.enabled\": \"0\"}",
+    "        soft (区間内で変化・連結可): {\"S1_soft\": {\"cfl\": \"0.5\", \"cfl_pseudo\": \"0.5\", \"nStepInner\": \"10\", \"nStepOuter\": \"3000\", \"implicitRelax\": \"0.7\"}, \"S2_mid\": {\"cfl\": \"1.0\", \"cfl_pseudo\": \"1.0\", \"nStepInner\": \"10\", \"nStepOuter\": \"3000\", \"implicitRelax\": \"0.7\"}}",
+    "  区間 1: main",
+    "        hard: {\"convMethod\": \"1\", \"limiter\": \"2\", \"turbulence.model\": \"sst\", \"wallTreatmentSST\": \"0\", \"viscMethod\": \"2\", \"thermalMethod\": \"2\", \"unsteady\": \"0\", \"dualTime\": \"0\", \"turbulence.wallTreatmentSST\": \"0\", \"space.convMethod\": \"1\", \"space.limiter\": \"2\", \"time.unsteady\": \"0\", \"time.dualTime\": \"0\", \"solver\": \"SLAU\", \"space.slauWallNormalChi.effective\": \"1\", \"bcond_sha1\": \"0b552bbd07b8\", \"conjugate.enabled\": \"0\"}",
+    "",
+    "**判定区間は最後の区間** (main)。",
+    "  `check_convergence.py` にはこの区間の履歴だけを渡すこと。"
+   ]
+  },
+  "check_convergence_segment": {
+   "rc": 0,
+   "overall": "OVERALL: ALL PASS",
+   "verdict_lines": []
+  },
+  "files_6_late": {
+   "bcondConfig.yaml": {
+    "same": true,
+    "sha256": "f5b9905b957f8b7f",
+    "ref_sha256": "f5b9905b957f8b7f"
+   },
+   "resolved_species_fc8ba1a8828147e3.yaml": {
+    "same": true,
+    "sha256": "c14350fba6bc1e88",
+    "ref_sha256": "c14350fba6bc1e88"
+   },
+   "resolved_species_fc8ba1a8828147e3_70cc58aa292c9504.yaml": {
+    "same": true,
+    "sha256": "70cc58aa292c9504",
+    "ref_sha256": "70cc58aa292c9504"
+   },
+   "species_meta.yaml": {
+    "same": true,
+    "sha256": "a6982f6339b0e806",
+    "ref_sha256": "a6982f6339b0e806"
+   },
+   "probe.yaml (記録だけ)": true
+  }
+ },
+ "watch": {
+  "status": "REACHED",
+  "reach_step": 120000,
+  "note": null,
+  "rows": 48,
+  "RUN_RC": "143",
+  "termination": "見張りの停止 (REACHED)",
+  "recheck": {
+   "spacing_ok": true,
+   "done_at": [
+    "REACH",
+    120000
+   ]
+  },
+  "arms": {
+   "C": {
+    "run": "run_0810_vgc_chain",
+    "step": 120000
+   },
+   "T2a": {
+    "run": "run_0752_t2_d1",
+    "step": 142500
+   },
+   "T2b": {
+    "run": "run_0754_t2_d2",
+    "step": 142500
+   }
+  }
+ },
+ "pairs": {
+  "C/T2a": {
+   "theta_r_40": 0.07584283986890303,
+   "theta_r_70": 0.067645448952333,
+   "theta_r_94": 0.06208840281109387,
+   "delta_loc_40": -0.005998680434440605,
+   "delta_loc_70": -0.00010755552172406211,
+   "delta_loc_94": -0.00024000374673686418,
+   "Q_w_proxy": -0.03978379804457858,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.6894309599197563,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.35758623805955214,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0005029098211917216,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.584029770915946e-05,
+   "M_exit 軸の行の ΔM (記録)": -2.3580380025478576e-05,
+   "mdot_in": 0.002056846128438164,
+   "mdot_out": 0.0026519297674454365,
+   "Hdot_in": 0.0022818975326330806,
+   "Hdot_out": -0.0010565229372398966,
+   "許容内": true
+  },
+  "C/T2b": {
+   "theta_r_40": 0.07583382516297821,
+   "theta_r_70": 0.06764460920560546,
+   "theta_r_94": 0.06208099545106128,
+   "delta_loc_40": -0.006008909298783861,
+   "delta_loc_70": -0.00011165542330278805,
+   "delta_loc_94": -0.00023333297159114038,
+   "Q_w_proxy": -0.03983801568469516,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.6290532654522953,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.32175172708237343,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0005028672688647262,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.563957878836212e-05,
+   "M_exit 軸の行の ΔM (記録)": -2.255067477907602e-05,
+   "mdot_in": 0.0019131519703320882,
+   "mdot_out": 0.0026577358468252016,
+   "Hdot_in": 0.002139936660579939,
+   "Hdot_out": -0.0010490324843566072,
+   "許容内": true
+  }
+ },
+ "control_record": {
+  "C/S_g0c": {
+   "theta_r_40": 0.003232456153993424,
+   "theta_r_70": 0.003242621136646215,
+   "theta_r_94": 0.0033934851152825534,
+   "delta_loc_40": 0.0007769702709992151,
+   "delta_loc_70": 0.000719980003775329,
+   "delta_loc_94": 0.0006434577773349479,
+   "Q_w_proxy": -0.0013769602679073677,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.06197173476077976,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.051379209256733144,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 3.2351223356208436e-05,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.3454570822286844e-06,
+   "M_exit 軸の行の ΔM (記録)": 9.350694476495391e-07,
+   "mdot_in": -0.00022059068946962237,
+   "mdot_out": 0.00017170822948963993,
+   "Hdot_in": -0.00021977775148920135,
+   "Hdot_out": -2.2665948041119588e-05,
+   "許容内": true
+  }
+ },
+ "quasisteady": {
+  "window": [
+   100000,
+   120000
+  ],
+  "points": 9,
+  "§6.11 θ_r (0.0001)": [
+   "theta_r_40      : tail mean=0.07721  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1141  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1269  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+  ],
+  "§6.11 Q_w (0.0002)": [
+   "Q_w             : tail mean=9.212e+06  drift=0.0%/tail  fluct=0.0%  (still trending at tail-end) TRANSIENT-UNSETTLED"
+  ],
+  "sp_judge と同じ (4 量 0.0001)": [
+   "theta_r_40      : tail mean=0.07721  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1141  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1269  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.212e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+  ]
+ },
+ "timing": {
+  "prepare_s": 40.0275194644928,
+  "main_start_after_s": 527.9294459819794,
+  "samples": 319,
+  "main_samples": 301,
+  "stage_S1_soft_s": 247.54942727088928,
+  "stage_S2_mid_s": 233.72659397125244,
+  "stage_main_s": 9021.035046815872,
+  "n_end": 120000,
+  "T_total_s": 9412.09333205223,
+  "T_main_s": 8884.163886070251,
+  "per_step_ms": 73.26619353317606,
+  "exclusive": false,
+  "others": [
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_002 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_002",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_002",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 ?",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_002",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_002 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_002",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_008",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_008 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_010",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_010 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_011",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_011 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_000",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_000 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_001",
+   "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/ei_001 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/ei_002 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/ei_002",
+   "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007",
+   "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007",
+   "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007",
+   "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007",
+   "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007",
+   "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0807_tp_p3 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008",
+   "? /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_009 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_009"
+  ]
+ },
+ "records": {
+  "functions": {
+   "sp_judge.py": {
+    "sha256": "b627310d4d51537d",
+    "funcs": {
+     "fields": "198a8d50ea0ed40b",
+     "compare": "230a1a0def551c33"
+    },
+    "mismatch": []
+   },
+   "m9_watch.py": {
+    "sha256": "21689b53850ab53f",
+    "funcs": {
+     "drift": "72506550c522d561",
+     "spacing_ok": "a2e65d791a97ebe3",
+     "window_points": "d16897d68f8af794",
+     "done_at": "2c66bdc29bd942f5"
+    },
+    "mismatch": []
+   }
+  },
+  "RUN_RC": "143",
+  "run_end_exception": null,
+  "provenance": {
+   "forge_sha256": "7e95e5bbd8f50c9e",
+   "env": {
+    "FORGE_CUDA_BLOCKSIZE": "128",
+    "FORGE_BIN": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/forge"
+   }
+  }
+ },
+ "verdict": "結果 A: 登録した開始の手順で停止規則に到達し、T2 の両方の参照との比較が許容内 (この開始の手順への適用の拡大を支持)"
+}
