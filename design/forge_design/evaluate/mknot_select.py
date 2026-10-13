@@ -1,6 +1,6 @@
 r"""軸 Mach 則 (knot) の knot のマッハ数 M_knot を、長さを固定したまま選ぶ (最大壁角の最小化、規則 `min_theta_max_v1`)。
 
-plan: plans/active/tooling-nozzle-mknot-auto.md §4.1・§4.2 (§5.1 #2・#2b・#2c)。設計計算だけで CFD は回さない。
+plan: plans/active/tooling-nozzle-mknot-auto.md §4.1・§4.2 (§5.1 #2・#2b・#2c・#3b)。設計計算だけで CFD は回さない。
 
 評価 (`evaluate_mknot`) は case/70.m5_air_wt_demo/mknot_sweep.py の `one()` と同じ組み合わせ:
 design_chain + `inverse_design` の捕捉 + `characteristic_topology_diagnostics` (seam の除外は
@@ -26,6 +26,9 @@ case/42.isobutane_wt/compare_axislaw_D.py と同じ) + `wall_margin_diagnostics`
     N と 2N の境目を全部残し (対にしてまとめない; `conservative_boundaries`、2026-10-14 諮問 mknot-gate-output)、全部の境目の
     成立側の端からの距離で N と 2N の選択をそれぞれ選び直して比べる: 選択値の差 ≤ 0.01、両方の解像度で制約と境目からの距離が
     成立、最小が詰めの端に無いこと。満たさなければ「選択は未確定」。出力する値は選び直した N の値 `chosen_N` (§4.2)。
+    選び直した値 (同点の規則の後) が詰めの窓の端に来たら、同じ geometry のまま窓を上限つきで広げて (半幅 0.1 → 0.2 → 0.3、
+    評価済みの点は使い回す) 選び直す。上限でも端なら「未確定」(2026-10-14 諮問 mknot-card-holes)。θ_max の最小の位置の端の判定
+    (同点の規則の前) とは別の判定。
 
 候補 (選ばれうる点) は粗い格子・詰めの格子・境目 + ΔM_safe の点 (と解像度のゲート・V6 の格子の点)。二分法の点は境目を
 決めるためだけに使い、候補にしない。
@@ -47,6 +50,7 @@ RULE_NAME = "min_theta_max_v1"
 SIN_MIN = 0.02            # 網の最小 sin 角の床 (sweep_axislaw_A_MK.py の TOPO_FLOOR)
 MARGIN_MIN_DEG = 1.0      # 壁での余裕 min(μ_w − θ_w) の床 [°] (同 MARGIN_FLOOR_DEG)
 CANDIDATE_ROLES = ("coarse", "fine", "safe", "grid", "window")
+GATE_HALF_WIDTHS = (0.1, 0.2, 0.3)   # 解像度のゲートの窓の半幅の列 (§4.2 窓の端の選択: 選び直した値が端なら次へ広げる、上限 0.3)
 _EPS = 1e-9
 
 
@@ -600,83 +604,123 @@ def reselect_common(evN: Evaluator, ev2: Evaluator, rows_N: list[dict], rows_2N:
 
 
 def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_result: dict | None = None,
-                    eval_factory=None, base_dir=None, fine: float = 0.01, half_width: float = 0.1,
+                    eval_factory=None, base_dir=None, fine: float = 0.01, half_widths=GATE_HALF_WIDTHS,
                     tie_deg: float | None = None, dM_safe: float | None = None, bisect_tol: float | None = None,
                     max_change: float = 0.01, workers: tuple[int, int] = (4, 2), seed_2N: list | None = None,
                     raise_on_fail: bool = True, log=None) -> dict:
-    """§4.2 の解像度のゲート。`n_axis_inv` = N と 2N で選んだ点 (chosen) の前後 ±half_width を fine で詰め (chosen を中心の格子)、
-    境目を 2N でも求め直す (N の境目のうち chosen から half_width + ΔM_safe 以内のものは区間の両端も 2N で評価する)。
+    """§4.2 の解像度のゲート。`n_axis_inv` = N と 2N で選んだ点 (chosen) の前後 ±半幅を fine で詰め (chosen を中心の格子)、
+    境目を 2N でも求め直す (N の境目のうち chosen から 半幅 + ΔM_safe 以内のものは区間の両端も 2N で評価する)。
     N と 2N の境目を全部残し (`conservative_boundaries`; 対にしてまとめない、2026-10-14 諮問 mknot-gate-output)、全部の境目の
     成立側の端からの距離で窓の候補から N と 2N の選択をそれぞれ選び直して比べる (`reselect_common`; 境目 + ΔM_safe の点は
     全部の境目について窓の中だけ評価)。
 
-    判定 (全部で合格):
+    窓の端の選択 (plan §4.2、2026-10-14 諮問 mknot-card-holes の Major): 選び直した N・2N の値 (同点の規則の後) のどちらかが
+    窓の端に来たら、同じ geometry・同じ chosen を中心に半幅を half_widths の次の値に広げ (既定 0.1 → 0.2 → 0.3; 評価済みの点は
+    Evaluator が使い回す)、境目・距離・同点の規則を当て直して選び直す。平らな谷では同点の規則が境目から最も遠い点を選ぶので、
+    端の選択は窓が選択を縛っている印であって、それだけで「未確定」にはしない (諮問の合成の例: 境目 1.65 / 2.25 で窓 1.95〜2.15
+    の選択 1.95 は端、半幅 0.2 で同じ 1.95 が内部に入り距離 0.30)。上限の半幅でも端なら chosen_inside_* が不合格 (未確定)。
+    広げた窓では N を ±(半幅 + ΔM_safe) まで評価し (役割 context; 候補にしない)、窓の外 ΔM_safe 以内の境目も見る
+    (最初の窓の外の文脈は呼び出し側が渡す: select_mknot の表、カードの最終の組は ±(0.1 + ΔM_safe); plan §4.4)。
+
+    判定 (全部で合格; 最後の窓で):
       change      全部の境目で選び直した N と 2N の選択値の差 ≤ max_change (0.01)
       ok_N・ok_2N 入力の選択点 (chosen) と選び直した 2 点が、その解像度で全部の制約を満たす
                   (選び直した 2 点は両方の解像度で評価する; 高い解像度だけ制約を破る選択点を通さない)
       distance    選び直した 2 点から全部の境目まで ≥ ΔM_safe (入力の点の距離は distance_input に記録だけ)
-      edge_N・edge_2N  窓の中の成立点の θ_max の最小が窓の端に無い
+      edge_N・edge_2N  窓の中の成立点の θ_max の最小 (同点の規則の前) が窓の端に無い (窓を広げる契機にはしない; 別の判定)
+      chosen_inside_N・chosen_inside_2N  選び直した値 (同点の規則の後) が窓の端に無い (上限の半幅まで広げた後)
     出力する値は選び直した N の値 `chosen_N` (§4.2; 入力の chosen をそのまま出すと境目から ΔM_safe 未満の値が出うる)。
-    chosen_N は入力の chosen と違うことがある (2N の境目が保守側へ動いた、同点の規則の境目からの距離が変わった)。その差は
-    moved_N に記録する (合否には入れない)。row_chosen_N・row_chosen_2N は chosen_N を N で・chosen_2N を 2N で評価した行、
+    chosen_N は入力の chosen と違うことがある (2N の境目が保守側へ動いた、同点の規則の境目からの距離が変わった、窓を広げた)。
+    その差は moved_N に記録する (合否には入れない)。row_chosen_N・row_chosen_2N は chosen_N を N で・chosen_2N を 2N で評価した行、
     row_input_N・row_input_2N は入力の chosen の行 (rows_selected に全部の組)。
+    窓の記録: window・half_width は最後の窓、n_widen は広げた回数、widen は半幅ごとの選び直し (窓・chosen_N・chosen_2N・
+    端だった値 edge_values・θ_max の最小の位置 min_offset_*・次の手 action)、edge_values は最後の窓で端だった値 (内部なら空)。
+    min_offset_* と edge_* は最後の窓の値。
     select_result: `select_mknot` の戻り (N の評価の表・境目・設定を再利用; 同じ問題・同じ N の評価に限る)。seed_2N: 同じ問題の
     2N の評価済みの行 (同じ問題・同じ 2N に限る)。eval_factory: n_axis → 評価の関数 (既定は make_eval_fn(problem_dict, n_axis,
-    base_dir); 試験で差し替える)。raise_on_fail なら不合格で MknotUndeterminedError。
+    base_dir); 試験で差し替える)。half_widths: 窓の半幅の列 (正で増える、fine の整数倍)。raise_on_fail なら不合格で
+    MknotUndeterminedError。
     窓の評価は並列 (workers)、選び直しの境目 + ΔM_safe の点と交差の評価は逐次 (少数の点; 2 つの並列を同時に持たない)。"""
     st = (select_result or {}).get("settings") or {}
     tie_deg = st.get("tie_deg", 1e-3) if tie_deg is None else tie_deg
     dM_safe = st.get("dM_safe", 0.05) if dM_safe is None else dM_safe
     bisect_tol = st.get("bisect_tol", 1e-3) if bisect_tol is None else bisect_tol
+    hws = [float(h) for h in half_widths]
+    nhs = [int(round(h / fine)) for h in hws]
+    if (not hws or any(h <= 0.0 for h in hws) or any(b <= a for a, b in zip(hws[:-1], hws[1:]))
+            or any(abs(n * fine - h) > 1e-9 for n, h in zip(nhs, hws))):
+        raise ValueError(f"half_widths は正で増える列、各値は fine {fine} の整数倍 (受け取った値: {half_widths!r})")
     if eval_factory is None:
         def eval_factory(n):
             return make_eval_fn(problem_dict, n_axis_inv=n, base_dir=base_dir)
     t0 = time.time()
-    nh = int(round(half_width / fine))
-    window = [round(float(chosen) + j * fine, 12) for j in range(-nh, nh + 1)]
-    out = {"N": int(N), "N2": int(2 * N), "chosen": float(chosen), "window": [window[0], window[-1]],
-           "settings": {"fine": fine, "half_width": half_width, "tie_deg": tie_deg, "dM_safe": dM_safe,
+    out = {"N": int(N), "N2": int(2 * N), "chosen": float(chosen),
+           "settings": {"fine": fine, "half_widths": hws, "tie_deg": tie_deg, "dM_safe": dM_safe,
                         "bisect_tol": bisect_tol, "max_change": max_change}}
-    evN = Evaluator(eval_factory(N), workers[0], log)
-    if select_result:
-        evN.seed(select_result.get("table") or [])
-    with evN:
-        if log:
-            log(f"解像度のゲート: N = {N} の窓 {window[0]:.6g}〜{window[-1]:.6g}")
-        rows_N = evN.many(window, "window")
-        bN = find_boundaries(evN, bisect_tol)
-    near = [b for b in bN if abs(b["feasible_end"] - chosen) <= half_width + dM_safe + _EPS]
-    ev2 = Evaluator(eval_factory(2 * N), workers[1], log)
-    if seed_2N:
-        ev2.seed(seed_2N)
-    with ev2:
-        if log:
-            log(f"解像度のゲート: 2N = {2 * N} の窓と N の境目の区間の両端 ({len(near)} 個)")
-        rows_2N = ev2.many(window, "window")
-        if near:
-            ev2.many([v for b in near for v in (b["lo"], b["hi"])], "bracket")
-        find_boundaries(ev2, bisect_tol)            # 2N の二分法は並列の中で (reselect_common は評価済みの点を使う)
-    # 全部の境目で両方を選び直す (候補は窓の点だけ; N の窓の点は select_mknot の表の行を再利用するので役割を窓に揃える)
-    rc = reselect_common(evN, ev2, [dict(r, role="window") for r in rows_N], [dict(r, role="window") for r in rows_2N],
-                         tie_deg=tie_deg, dM_safe=dM_safe, bisect_tol=bisect_tol,
-                         safe_range=(window[0], window[-1]), candidate_roles=("window", "safe"), log=log)
-    common = rc["common"]
-    cN, c2 = rc["N"].get("chosen"), rc["2N"].get("chosen")
-    sel_pts = [float(chosen)] + [c for c in (cN, c2) if c is not None]
-    at_N = {_key(r["M_K"]): r for r in evN.many(sel_pts, "cross")}          # 逐次 (with の外)
-    at_2N = {_key(r["M_K"]): r for r in ev2.many(sel_pts, "cross")}
+    n_ctx = int(math.ceil(dM_safe / fine - 1e-9)) if dM_safe > 0.0 else 0      # 広げた窓の外の文脈 (N、ΔM_safe ぶん)
 
-    def _edge(rows):
+    def grid(j: int) -> float:
+        return round(float(chosen) + j * fine, 12)
+
+    def _edge(rows, nh):
         f = [(j, r) for j, r in enumerate(rows) if _feasible(r)]
         if not f:
             return None
         j, _ = min(f, key=lambda t: (t[1]["theta_max_deg"], t[1]["M_K"]))
         return j - nh
 
+    def _at_end(c, window):
+        return c is not None and (abs(c - window[0]) <= _EPS or abs(c - window[-1]) <= _EPS)
+
+    evN = Evaluator(eval_factory(N), workers[0], log)
+    if select_result:
+        evN.seed(select_result.get("table") or [])
+    ev2 = Evaluator(eval_factory(2 * N), workers[1], log)
+    if seed_2N:
+        ev2.seed(seed_2N)
+    steps = []
+    for i, (hw, nh) in enumerate(zip(hws, nhs)):
+        window = [grid(j) for j in range(-nh, nh + 1)]
+        with evN:
+            if log:
+                log(f"解像度のゲート: N = {N} の窓 {window[0]:.6g}〜{window[-1]:.6g}" + ("" if i == 0 else f" (半幅 {hw:g} に広げた)"))
+            rows_N = evN.many(window, "window")
+            if i > 0 and n_ctx:
+                evN.many([grid(j) for j in range(-nh - n_ctx, nh + n_ctx + 1) if abs(j) > nh], "context")
+            bN = find_boundaries(evN, bisect_tol)
+        near = [b for b in bN if abs(b["feasible_end"] - chosen) <= hw + dM_safe + _EPS]
+        with ev2:
+            if log:
+                log(f"解像度のゲート: 2N = {2 * N} の窓と N の境目の区間の両端 ({len(near)} 個)")
+            rows_2N = ev2.many(window, "window")
+            if near:
+                ev2.many([v for b in near for v in (b["lo"], b["hi"])], "bracket")
+            find_boundaries(ev2, bisect_tol)        # 2N の二分法は並列の中で (reselect_common は評価済みの点を使う)
+        # 全部の境目で両方を選び直す (候補は窓の点だけ; N の窓の点は select_mknot の表の行を再利用するので役割を窓に揃える)
+        rc = reselect_common(evN, ev2, [dict(r, role="window") for r in rows_N], [dict(r, role="window") for r in rows_2N],
+                             tie_deg=tie_deg, dM_safe=dM_safe, bisect_tol=bisect_tol,
+                             safe_range=(window[0], window[-1]), candidate_roles=("window", "safe"), log=log)
+        cN, c2 = rc["N"].get("chosen"), rc["2N"].get("chosen")
+        edge_vals = {tag: c for tag, c in (("N", cN), ("2N", c2)) if _at_end(c, window)}
+        last = i == len(hws) - 1
+        steps.append({"half_width": hw, "window": [window[0], window[-1]], "chosen_N": cN, "chosen_2N": c2,
+                      "edge_values": edge_vals, "min_offset_N": _edge(rows_N, nh), "min_offset_2N": _edge(rows_2N, nh),
+                      "action": ("選び直した値は窓の内部" if not edge_vals else
+                                 f"選び直した値が上限の半幅 {hw:g} でも窓の端 — 未確定" if last else
+                                 f"選び直した値が窓の端 → 半幅 {hws[i + 1]:g} に広げて選び直す")})
+        if log and edge_vals:
+            log(f"  半幅 {hw:g}: " + "・".join(f"{k} {v!r}" for k, v in edge_vals.items()) + f" が窓の端 — {steps[-1]['action']}")
+        if not edge_vals or last:
+            break
+    common = rc["common"]
+    sel_pts = [float(chosen)] + [c for c in (cN, c2) if c is not None]
+    at_N = {_key(r["M_K"]): r for r in evN.many(sel_pts, "cross")}          # 逐次 (with の外)
+    at_2N = {_key(r["M_K"]): r for r in ev2.many(sel_pts, "cross")}
+
     def _bad(at, pts):
         return [m for m in pts if not _feasible(at[_key(m)])]
 
-    eN, e2 = _edge(rows_N), _edge(rows_2N)
+    eN, e2 = steps[-1]["min_offset_N"], steps[-1]["min_offset_2N"]
     dN = None if cN is None else boundary_distance(cN, common)
     d2 = None if c2 is None else boundary_distance(c2, common)
     badN, bad2 = _bad(at_N, sel_pts), _bad(at_2N, sel_pts)
@@ -686,6 +730,8 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
         "ok_2N": cN is not None and c2 is not None and not bad2,
         "distance": dN is not None and d2 is not None and min(dN, d2) >= dM_safe - _EPS,
         "edge_N": eN is not None and abs(eN) < nh, "edge_2N": e2 is not None and abs(e2) < nh,
+        "chosen_inside_N": cN is not None and "N" not in edge_vals,
+        "chosen_inside_2N": c2 is not None and "2N" not in edge_vals,
     }
     reasons = []
     if not checks["change"]:
@@ -699,10 +745,16 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
     if not checks["distance"]:
         reasons.append(f"選び直した点から全部の境目まで N {dN!r}・2N {d2!r} < ΔM_safe {dM_safe:g}")
     if not checks["edge_N"]:
-        reasons.append(f"N の窓の θ_max の最小が窓の端 (添字 {eN!r} / ±{nh})")
+        reasons.append(f"N の窓の θ_max の最小 (同点の規則の前) が窓の端 (添字 {eN!r} / ±{nh})")
     if not checks["edge_2N"]:
-        reasons.append(f"2N の窓の θ_max の最小が窓の端 (添字 {e2!r} / ±{nh})")
-    out.update({"chosen_N": cN, "chosen_N_reason": rc["N"].get("reason") or rc["N"].get("error"),
+        reasons.append(f"2N の窓の θ_max の最小 (同点の規則の前) が窓の端 (添字 {e2!r} / ±{nh})")
+    for tag in ("N", "2N"):
+        if tag in edge_vals:
+            reasons.append(f"選び直した {tag} の値 {edge_vals[tag]!r} (同点の規則の後) が窓 {window[0]:.6g}〜{window[-1]:.6g} の端 — "
+                           f"半幅を上限 {hws[-1]:g} まで広げても端 (半幅の列 {' → '.join(f'{h:g}' for h in hws)})")
+    out.update({"window": [window[0], window[-1]], "half_width": hw, "n_widen": len(steps) - 1, "widen": steps,
+                "edge_values": edge_vals,
+                "chosen_N": cN, "chosen_N_reason": rc["N"].get("reason") or rc["N"].get("error"),
                 "chosen_2N": c2, "chosen_2N_reason": rc["2N"].get("reason") or rc["2N"].get("error"),
                 "moved_N": (None if cN is None else cN - float(chosen)),
                 "common_boundaries": common, "boundaries_N": rc["boundaries_N"], "boundaries_2N": rc["boundaries_2N"],

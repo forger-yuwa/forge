@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""M_knot の選び方 `forge_design.evaluate.mknot_select` の試験 — plan tooling-nozzle-mknot-auto §6 V2・V1b (§5.1 #2・#2b)。
+"""M_knot の選び方 `forge_design.evaluate.mknot_select` の試験 — plan tooling-nozzle-mknot-auto §6 V2・V1b (§5.1 #2・#2b・#2c・#3b)。
 
 V2 (合成の評価、設計チェーンは回さない):
   (a) 単峰 → 最小
@@ -18,7 +18,14 @@ V2 (合成の評価、設計チェーンは回さない):
   (j) MOC のゲート (require_moc_gate と同じ関数で判定) だけを破る点は選ばれない。fixed2 の pass = None は今の扱いのまま通す
   (k) 境目をまとめない (諮問 mknot-gate-output の反例): N の不成立の区間 (2.00, 2.02)・2N の不成立の区間 (2.08, 2.10) で、2.05 は
       両方の解像度で成立するが、全部の境目からの距離 0.03 < 0.05 で選ばれない (対にしてまとめると 0.05 で通ってしまう)。
-      ゲートの row_chosen_N・row_chosen_2N は選び直した点の行 (入力の点の行は row_input_N・row_input_2N)
+      ゲートの row_chosen_N・row_chosen_2N は選び直した点の行 (入力の点の行は row_input_N・row_input_2N)。この入力の窓 (半幅 0.1) では
+      選び直した 1.95 が窓の端なので、§5.1 #3b の後は半幅 0.1 だけなら未確定・既定の列なら 0.2 に広げて内部で PASS
+  (l) 窓の端の選択 (諮問 mknot-card-holes、§5.1 #3b): 諮問の合成の例 (N・2N 共通の境目 1.65 / 2.25、θ_max = 15 + 0.0005·((M_K − 2.05)/0.1)²)
+      で、窓 1.95〜2.15 (半幅 0.1) では同点の規則の選択 1.95 が端 → 半幅 0.2 に広げて同じ 1.95 が内部に入り PASS、距離 0.30。
+      半幅 0.1 だけなら例外。上限 0.3 まで広げても端 (さらに平らな谷) → 例外。θ_max の最小の位置の端 (同点の規則の前) だけでは
+      広げない。広げた窓は N を ±(半幅 + ΔM_safe) まで評価して窓の外の境目を見る
+  (m) カードの YAML の要約 (wt_card の `_mknot_record` → `_mknot_yaml_summary`、§4.4; 設計チェーンは回さない): 掃引の表は card_log だけ、
+      YAML の `_card.M_knot_rule` の行 ≤ 4 kB、card_log の記録の sha256 で結び、`mknot_card_log_check` で照合できる
 V1b (M6 の目的の回帰): case/42.isobutane_wt/sweep_axislaw_A_MK_summary.csv の L_c 45・50 (n_axis 600) の記録を評価に差し替え、
   境目の距離と同点の規則を切った設定 (ΔM_safe 0、tie 0) で L_c 45 → 2.6・50 → 2.7 を選ぶ (余裕最大の 3.0・3.1 を選んだら取り違え)。
   既定の設定 (tie 1e-3°・ΔM_safe 0.05) の選択値も記録する (合否なし)。CSV は 0.1 刻みなので格子は coarse = fine = 0.1、原点は
@@ -381,8 +388,10 @@ rk = MS.apply_rule(rows_k, all_k, tie_deg=1e-3, dM_safe=0.05)
 check("(k) apply_rule: θ_max の最小 2.05 は距離で除外され選ばれない (選ぶのは全部の境目から 0.05 以上の点)",
       2.05 in rk["excluded_by_distance"] and not near(rk["chosen"], 2.05) and rk["distance"] >= 0.05 - 1e-9,
       f"chosen {rk['chosen']!r} 距離 {rk['distance']!r} 除外 {rk['excluded_by_distance']}")
+# 窓は半幅 0.1 だけ (広げない): (k) は「境目をまとめない」をこの窓で確かめる試験。選び直した 1.95 は窓の端なので、§5.1 #3b の後は
+# 上限 (この呼び出しでは 0.1) で端 = 未確定 になる (広げたときの振る舞いは (l) で確かめる)
 g = MS.resolution_gate(None, 2.05, 600, workers=(1, 1), eval_factory=lambda n: gap_fn(2.00, 2.02) if n == 600 else gap_fn(2.08, 2.10),
-                       raise_on_fail=False)
+                       raise_on_fail=False, half_widths=(0.1,))
 sel205 = g["rows_selected"]["2.05"]
 check("(k) ゲート (入力 2.05): 2.05 は両方の解像度で成立、全部の境目からは 0.03、選び直した N の値は 2.05 でなく全部の境目から ≥ 0.05",
       sel205["at_N"]["ok"] and sel205["at_2N"]["ok"] and near(g["distance_input"], 0.03, 1e-9) and not near(g["chosen_N"], 2.05)
@@ -394,6 +403,160 @@ check("(k) ゲート (入力 2.05): 2.05 は両方の解像度で成立、全部
 check("(k) ゲート: row_chosen_N は選び直した点 (chosen_N) の行、row_input_N は入力 2.05 の行",
       near(g["row_chosen_N"]["M_K"], g["chosen_N"]) and near(g["row_input_N"]["M_K"], 2.05) and near(g["row_input_2N"]["M_K"], 2.05),
       f"{g['row_chosen_N']['M_K']!r} / {g['row_input_N']['M_K']!r}")
+check("(k) 半幅 0.1 だけでは選び直した 1.95 が窓の端のまま上限 → 未確定 (以前はこの入力で PASS を出していた; plan §9 の穴 (1))",
+      g["pass"] is False and near(g["chosen_N"], 1.95) and g["edge_values"] == {"N": 1.95, "2N": 1.95}
+      and [k for k, v in g["checks"].items() if not v] == ["chosen_inside_N", "chosen_inside_2N"], f"{g['checks']} {g['edge_values']}")
+gk = MS.resolution_gate(None, 2.05, 600, workers=(1, 1), eval_factory=lambda n: gap_fn(2.00, 2.02) if n == 600 else gap_fn(2.08, 2.10),
+                        raise_on_fail=False)
+check("(k) 既定の半幅の列では 0.2 に広げて選び直し、2.05 は全部の境目から 0.03 で選ばれないまま、選択は窓の内部で全部の境目から ≥ 0.05",
+      gk["pass"] and gk["n_widen"] == 1 and gk["half_width"] == 0.2 and not near(gk["chosen_N"], 2.05)
+      and 2.05 in gk["rule_N"]["excluded_by_distance"] and MS.boundary_distance(gk["chosen_N"], gk["common_boundaries"]) >= 0.05 - 1e-9
+      and gk["checks"]["chosen_inside_N"] and gk["checks"]["chosen_inside_2N"],
+      f"chosen_N {gk['chosen_N']!r} 半幅 {gk['half_width']} 広げた {gk['n_widen']} {gk['checks']}")
+
+print("== V2 (l) 窓の端の選択 (諮問 mknot-card-holes): 選び直した値が窓の端なら半幅を 0.1 → 0.2 → 0.3 に広げて選び直す")
+
+
+def holes_fn(lo, hi, c=2.05, a=0.0005):
+    """諮問の合成の例: N・2N 共通で成立 [lo, hi]、θ_max = 15 + a·((M_K − c)/0.1)² ° (平らな谷)。"""
+    def fn(M):
+        if not (lo <= M <= hi):
+            return infeasible(M)
+        return row(M, 15.0 + a * ((M - c) / 0.1) ** 2)
+    return fn
+
+
+def gate_at(fn, chosen, **kw):
+    """select_mknot の表 (境目を含む) を渡して、入力 chosen でゲートを回す (カードの最終の組のゲートと同じ形: 入力は探索の選択と違いうる)。"""
+    return MS.resolution_gate(None, chosen, 600, select_result=sel(fn), workers=(1, 1), eval_factory=lambda n: fn, **kw)
+
+
+f_l = holes_fn(1.65, 2.25)
+g1 = gate_at(f_l, 2.05, raise_on_fail=False, half_widths=(0.1,))
+check("(l) 諮問の例の A: 半幅 0.1 (窓 1.95〜2.15) では同点の規則の選択 1.95 が窓の端、θ_max の最小 2.05 は窓の中央",
+      near(g1["chosen_N"], 1.95) and near(g1["chosen_2N"], 1.95) and g1["edge_values"] == {"N": 1.95, "2N": 1.95}
+      and g1["min_offset_N"] == 0 and g1["min_offset_2N"] == 0 and g1["checks"]["edge_N"] and g1["checks"]["edge_2N"]
+      and g1["window"] == [1.95, 2.15],
+      f"chosen {g1['chosen_N']!r}/{g1['chosen_2N']!r} 端 {g1['edge_values']} min_offset {g1['min_offset_N']}/{g1['min_offset_2N']}")
+g2 = gate_at(f_l, 2.05)
+check("(l) 諮問の例の B: 既定の列で半幅 0.2 (窓 1.85〜2.25) に 1 回広げ、同じ 1.95 が内部に入り PASS、全部の境目から 0.30",
+      g2["pass"] and near(g2["chosen_N"], 1.95) and near(g2["chosen_2N"], 1.95) and g2["n_widen"] == 1 and g2["half_width"] == 0.2
+      and g2["window"] == [1.85, 2.25] and g2["edge_values"] == {} and near(g2["distance_to_conservative_boundary"], 0.30, 1e-9)
+      and near(g2["distance_2N"], 0.30, 1e-9) and abs(g2["moved_N"] + 0.10) <= 1e-9,
+      f"{g2['checks']} chosen {g2['chosen_N']!r}/{g2['chosen_2N']!r} 距離 {g2['distance_to_conservative_boundary']!r} 半幅 {g2['half_width']}")
+check("(l) 記録: 広げた回数・最後の半幅・各半幅の端だった値と次の手 (θ_max の最小の位置の判定は各段で別に記録)",
+      [s["half_width"] for s in g2["widen"]] == [0.1, 0.2] and g2["widen"][0]["edge_values"] == {"N": 1.95, "2N": 1.95}
+      and "広げて" in g2["widen"][0]["action"] and g2["widen"][1]["edge_values"] == {} and "内部" in g2["widen"][1]["action"]
+      and all(s["min_offset_N"] == 0 and s["min_offset_2N"] == 0 for s in g2["widen"]) and g2["settings"]["half_widths"] == [0.1, 0.2, 0.3],
+      str(g2["widen"]))
+try:
+    gate_at(f_l, 2.05, half_widths=(0.1,))
+    check("(l) 半幅 0.1 だけ (上限 0.1) なら端のまま → 例外", False)
+except MS.MknotUndeterminedError as e:
+    c = e.result["checks"]
+    check("(l) 半幅 0.1 だけ (上限 0.1) なら端のまま → 例外 (落ちるのは選び直した値の位置の判定だけ)",
+          [k for k, v in c.items() if not v] == ["chosen_inside_N", "chosen_inside_2N"] and "未確定" in str(e) and "端" in str(e), str(c))
+f_top = holes_fn(1.5, 4.0, a=0.0001)          # 成立 [1.5, 4.0]、谷がさらに平ら (2.05 ± 0.316 が同点): 境目から最も遠い方へ窓の端が逃げ続ける
+try:
+    gate_at(f_top, 2.05)
+    check("(l) 半幅 0.3 まで広げても端 → 例外", False)
+except MS.MknotUndeterminedError as e:
+    r_ = e.result
+    check("(l) 半幅 0.3 まで広げても選び直した値が端 (2.15 → 2.25 → 2.35) → 例外 (選択は未確定)、θ_max の最小の位置は中央で成立",
+          r_["n_widen"] == 2 and r_["half_width"] == 0.3 and r_["edge_values"] == {"N": 2.35, "2N": 2.35}
+          and [s["edge_values"].get("N") for s in r_["widen"]] == [2.15, 2.25, 2.35]
+          and [k for k, v in r_["checks"].items() if not v] == ["chosen_inside_N", "chosen_inside_2N"]
+          and "上限 0.3" in str(e) and "上限の半幅 0.3 でも窓の端" in r_["widen"][-1]["action"],
+          f"{r_['checks']} 端 {[s['edge_values'] for s in r_['widen']]}")
+_, gd = gate(quad(2.5), drift, raise_on_fail=False)
+check("(l) θ_max の最小が窓の端 (同点の規則の前) だけなら窓を広げない (別の判定; (g) の drift の入力)",
+      gd["n_widen"] == 0 and gd["checks"]["edge_2N"] is False and gd["checks"]["chosen_inside_N"] and gd["checks"]["chosen_inside_2N"]
+      and gd["min_offset_2N"] == 10, f"広げた {gd['n_widen']} {gd['checks']}")
+
+
+def beyond_fn(M):
+    """成立 [1.5, 2.27]、θ_max = 15 + 10 (M_K − 2.24)² (急な谷、最小 2.24 は上の境目から 0.03)。"""
+    if not (1.5 <= M <= 2.27):
+        return infeasible(M)
+    return row(M, 15.0 + 10.0 * (M - 2.24) ** 2)
+
+
+ctx_tab = [dict(beyond_fn(round(2.05 + 0.01 * j, 12)), role="context") for j in range(-15, 16)]     # カードの最終の組の文脈 ±0.15
+gb = MS.resolution_gate(None, 2.05, 600, select_result={"settings": {}, "table": ctx_tab}, workers=(1, 1), eval_factory=lambda n: beyond_fn,
+                        raise_on_fail=False)
+upper = [b for b in gb["common_boundaries"] if b["kind"] == "upper"]
+check("(l) 広げた窓は N を ±(半幅 + ΔM_safe) まで評価し、窓の外 0.02 の上の境目 2.27 を見て、最小 2.24 (境目から 0.03) を選ばない",
+      gb["pass"] and gb["n_widen"] == 1 and near(gb["chosen_N"], 2.22) and near(gb["chosen_2N"], 2.22)
+      and any(abs(b["feasible_end"] - 2.27) <= 1e-3 and b["source"] == "N" for b in upper)
+      and gb["distance_to_conservative_boundary"] >= 0.05 - 1e-9
+      and any(r.get("role") == "context" and r["M_K"] > 2.25 + 1e-9 for r in gb["rows_N"]),
+      f"chosen {gb['chosen_N']!r}/{gb['chosen_2N']!r} 上の境目 {[(round(b['feasible_end'], 6), b['source']) for b in upper]} {gb['checks']}")
+try:
+    MS.resolution_gate(None, 2.05, 600, workers=(1, 1), eval_factory=lambda n: f_l, half_widths=(0.2, 0.1))
+    check("(l) half_widths が増えない列 → ValueError", False)
+except ValueError as e:
+    check("(l) half_widths が増えない列 → ValueError", "half_widths" in str(e), str(e)[:120])
+
+print("== (m) カードの YAML の要約 (wt_card、§4.4): 掃引の表は card_log だけ、YAML の _card.M_knot_rule の行 ≤ 4 kB、記録の sha256 で結ぶ")
+import json  # noqa: E402
+import tempfile  # noqa: E402
+
+from forge_design.intake import wt_card as W  # noqa: E402
+
+YAML_LINE_MAX = 4096                     # YAML の _card.M_knot_rule の 1 行の上限 [byte] (plan §5.1 #3b の例)
+s_m = sel(f_l)                                                           # 探索の選択 1.95 (諮問の例)
+# 最初のゲートの入力は 2.00 (合成; 探索の 1.95 を中心にすると窓 1.85〜2.05 の θ_max の最小 2.05 が端で別の判定が落ちる)
+g1_m = MS.resolution_gate(None, 2.00, 600, select_result=s_m, workers=(1, 1), eval_factory=lambda n: f_l)
+gF_m = MS.resolution_gate(None, 2.05, 600, select_result=s_m, workers=(1, 1), eval_factory=lambda n: f_l)   # 最終の組: 1 回広げて PASS
+cN_m = gF_m["chosen_N"]
+ev_m = [{"stage": "最初の r_t", "attempt": 0, "r_t_m": 0.025, "M_K_in": 2.00, "chosen_N": g1_m["chosen_N"],
+         "gate_pass": True, "gate_n_widen": g1_m["n_widen"], "action": "select_mknot の選択 → ゲートで選び直した chosen_N を固定"},
+        {"stage": "最終の組 (最終の組で詰め直し (N は ±(半幅 + ΔM_safe)))", "attempt": 0, "r_t_m": 0.0249, "M_K_in": 2.05,
+         "M_K_used_in_fixed_point": 2.05, "chosen_N": cN_m, "diff_vs_used": cN_m - 2.05, "gate_pass": True,
+         "gate_n_widen": gF_m["n_widen"], "action": "差 > 0.01 → chosen_N で r_t の固定点をやり直す (1 回目、始まりは前の r_t)"}]
+mk_m = {"gate_final": gF_m, "gate_first": g1_m, "sel": s_m, "M_K": cN_m, "sel_rt": 0.025, "N": 600, "events": ev_m, "redo": 1,
+        "workers": {"N": 1, "2N": 1, "available_gb": None}, "t": 1.0}
+card_m = {"recipe": "axismach_final_v1", "M_exit": 5.0, "M_knot_auto_source": "カードに geometry.M_knot を書いていない (既定は自動)"}
+full_m = W._mknot_record(card_m, {"geometry": {"M_knot": cN_m}}, {"qa": {"theta_max_deg": gF_m["row_chosen_N"]["theta_max_deg"]}},
+                         0.0249, mk_m)
+CL = "problem_m.yaml.card_log.json"
+summ_m = W._mknot_yaml_summary(full_m, CL)
+text_m = W.render_problem_yaml({"name": "m", "_card": {"M_knot_rule": summ_m}}, ["要約の試験"], {})
+line_m = [ln for ln in text_m.splitlines() if ln.startswith("  M_knot_rule:")]
+line_full = W.render_problem_yaml({"name": "m", "_card": {"M_knot_rule": full_m}}, [], {}).splitlines()
+nfull = max(len(ln.encode()) for ln in line_full if ln.startswith("  M_knot_rule:"))
+check(f"(m) YAML の _card.M_knot_rule の行 ≤ {YAML_LINE_MAX} byte (全部の記録なら {nfull} byte)、掃引の表・行の詳細を持たない",
+      len(line_m) == 1 and len(line_m[0].encode()) <= YAML_LINE_MAX < nfull and "table" not in summ_m
+      and "rows_selected" not in json.dumps(summ_m) and "constraints_at_output" not in summ_m,
+      f"{len(line_m[0].encode()) if line_m else None} byte / 全部 {nfull} byte")
+check("(m) 要約: 規則の名前・選んだ値・距離・全部の境目・ゲートの判定 (広げた回数・端だった値)・選び直しの要約・card_log の記録の sha256",
+      summ_m["rule"] == "min_theta_max_v1" and summ_m["chosen"] == cN_m and summ_m["distance_to_boundary"] == full_m["distance_to_boundary"]
+      and [b["feasible_end"] for b in summ_m["boundaries"]] == [b["feasible_end"] for b in full_m["boundaries"]]
+      and summ_m["gate"]["pass"] and summ_m["gate"]["n_widen"] == 1 and summ_m["gate"]["half_width"] == 0.2
+      and summ_m["gate"]["widen"][0]["edge_values"] == {"N": 1.95, "2N": 1.95} and summ_m["ok_at_output"] == {"N": True, "2N": True}
+      and [e["gate_n_widen"] for e in summ_m["events"]] == [g1_m["n_widen"], 1] and summ_m["redo"] == 1
+      and summ_m["card_log"]["file"] == CL and summ_m["card_log"]["key"] == "M_knot_rule"
+      and summ_m["card_log"]["sha256"] == W._mknot_record_sha256(json.loads(json.dumps(full_m, ensure_ascii=False))),
+      str({k: summ_m.get(k) for k in ("chosen", "distance_to_boundary", "redo")}))
+check("(m) geometry.M_knot のコメントの文は要約からでも全部の記録からでも同じ (窓を広げた記録を含む)",
+      W._mknot_rule_text(summ_m) == W._mknot_rule_text(full_m) and "窓を 1 回広げた" in W._mknot_rule_text(summ_m),
+      W._mknot_rule_text(summ_m)[:200])
+with tempfile.TemporaryDirectory() as td:
+    yp = Path(td) / "problem_m.yaml"
+    yp.write_text(text_m)
+    (Path(td) / CL).write_text(json.dumps(W._json_safe({"out_sha256": "x", "M_knot_rule": full_m}), indent=1, ensure_ascii=False))
+    ok_chk = W.mknot_card_log_check(yp)
+    bad = json.loads((Path(td) / CL).read_text())
+    bad["M_knot_rule"]["table"]["select"][0]["theta_max_deg"] += 1e-12     # card_log の表を 1 箇所だけ変える
+    (Path(td) / CL).write_text(json.dumps(bad, indent=1, ensure_ascii=False))
+    bad_chk = W.mknot_card_log_check(yp)
+    yp.write_text(text_m.replace(f"chosen: {cN_m!r}", f"chosen: {cN_m + 0.01!r}", 1))     # YAML の要約の選んだ値だけを変える
+    bad_y = W.mknot_card_log_check(yp)
+check("(m) mknot_card_log_check: 書いた YAML の要約と card_log の記録が sha256・作り直した要約で一致。card_log の表を 1 箇所変えると "
+      "sha256 だけが不一致、YAML の要約の値を変えると要約が不一致",
+      ok_chk["ok"] is True and ok_chk["summary_matches"] and bad_chk["ok"] is False and bad_chk["summary_matches"]
+      and bad_chk["sha256_card_log"] != bad_chk["sha256_yaml"] and bad_y["ok"] is False and bad_y["summary_matches"] is False,
+      f"{ok_chk['ok']} / 表 {bad_chk['ok']} {bad_chk['summary_matches']} / 要約 {bad_y['ok']} {bad_y['summary_matches']}")
 
 # ---------------------------------------------------------------------------------------------------------------------
 print("== V1b M6 の目的の回帰 (sweep_axislaw_A_MK_summary.csv、n_axis 600)")

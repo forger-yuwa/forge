@@ -9,7 +9,9 @@
         生成し (CLI と同じ build_problem)、`check` と同じ判定をする。所要時間を記録する。
   check 生成した問題 YAML の判定 (§6 V4): 寸法ゲート PASS (長さ 1 mm・径 0.02 mm)、全部の制約 (記録の N・2N と、--reeval なら出力 YAML を
         n_axis_inv と 2 倍で独立に評価し直した値)、全部の境目からの距離 ≥ 0.05、解像度のゲート PASS、記録の選んだ値 = YAML の
-        geometry.M_knot = card_log、r_t の一致。
+        geometry.M_knot = card_log、r_t の一致。§5.1 #3b の後は YAML の _card.M_knot_rule が要約だけなので、行の詳細 (出力の点の
+        N・2N の行・選び直しの文・所要) は card_log の M_knot_rule から読み、YAML の要約が card_log の記録と sha256 で結べること
+        (wt_card.mknot_card_log_check)・要約の行 ≤ 4 kB・Euler の写しの要約の行が同じことも見る。
 
 usage (forge-deliv の直下、design/.venv-opt の python):
   python case/70.m5_air_wt_demo/mknot_card_v34.py v3 [--old-rev d9f554f4] [--out DIR]
@@ -164,9 +166,15 @@ def check(out: Path, reeval: bool) -> bool:
     sys.path.insert(0, str(DESIGN))
     from forge_design.evaluate import mknot_select as MS
     from forge_design.probdef import load_problem
+    from forge_design.intake import wt_card as W
     raw = yaml.safe_load(out.read_text())
     logd = json.loads(Path(str(out) + ".card_log.json").read_text())
-    mkr = raw["_card"]["M_knot_rule"]
+    mkr = raw["_card"]["M_knot_rule"]               # YAML の要約 (§5.1 #3b)
+    full = logd["M_knot_rule"]                      # card_log の記録 (全部)
+    lines = [ln for ln in out.read_text().splitlines() if ln.startswith("  M_knot_rule:")]
+    eo = out.with_name(out.stem + "_euler.yaml")
+    eu_lines = [ln for ln in eo.read_text().splitlines() if ln.startswith("  M_knot_rule:")] if eo.exists() else None
+    link = W.mknot_card_log_check(out)
     M = raw["geometry"]["M_knot"]
     N = int(raw["geometry"]["n_axis_inv"])
     dims = logd["dimensions"]
@@ -175,12 +183,16 @@ def check(out: Path, reeval: bool) -> bool:
         "寸法ゲート PASS (長さ 1 mm・径 0.02 mm)": dims["pass"] and raw["_card"]["tolerances"] == {"length_m": 1e-3, "diameter_m": 2e-5}
         and all(r["pass"] for r in dims["rows"]),
         "記録の選んだ値 = YAML の geometry.M_knot = card_log": mkr["chosen"] == M == logd["M_knot_rule"]["chosen"] == logd["design_chain"]["M_knot"],
-        "全部の制約 (記録の N・2N)": mkr["constraints_at_output"]["N"]["ok"] and mkr["constraints_at_output"]["2N"]["ok"],
+        "全部の制約 (記録の N・2N)": full["constraints_at_output"]["N"]["ok"] and full["constraints_at_output"]["2N"]["ok"]
+        and mkr["ok_at_output"] == {"N": True, "2N": True},
         "θ_max (記録 = 最終の設計チェーン)": mkr["theta_max_deg"] == mkr["theta_max_deg_final_chain"],
         "全部の境目からの距離 ≥ 0.05": mkr["distance_to_boundary"] is None or mkr["distance_to_boundary"] >= 0.05 - 1e-9,
         "解像度のゲート PASS": mkr["gate"]["pass"] and all(mkr["gate"]["checks"].values()),
         "規則の名前": mkr["rule"] == "min_theta_max_v1",
         "r_t (YAML = 記録 = card_log)": raw["spec"]["r_throat"] == mkr["r_t_m"] == logd["r_t"]["r_t_m"],
+        "YAML の要約と card_log の記録 (sha256・作り直した要約) が一致": link["ok"] is True,
+        "YAML の _card.M_knot_rule は要約 (行 ≤ 4 kB・掃引の表なし)": len(lines) == 1 and len(lines[0].encode()) <= 4096 and "table" not in mkr,
+        "Euler の写しの要約の行 = YAML (写しがあれば)": eu_lines is None or eu_lines == lines,
     }
     if reeval:
         base = {k: v for k, v in raw.items() if k != "_card"}
@@ -196,14 +208,15 @@ def check(out: Path, reeval: bool) -> bool:
     print(f"  M_knot {M!r}、r_t {raw['spec']['r_throat']!r} m、θ_max {mkr['theta_max_deg']:.6f}°、余裕 {mkr['margin_deg']:.4f}°、"
           f"最小 sin 角 {mkr['min_sin_angle']:.4f}、距離 {mkr['distance_to_boundary']}、境目 "
           f"{[(b['kind'], round(b['feasible_end'], 6), b['source']) for b in mkr['boundaries']]}")
-    print(f"  ゲート: N {g['chosen_N']!r}・2N {g['chosen_2N']!r}、入力 {g['chosen']!r}、窓 {g['window']}、最初の r_t のゲートを再利用 "
-          f"{mkr['gate_first_reused']}、やり直し {mkr['redo']}")
-    for e in mkr["events"]:
+    print(f"  ゲート: N {g['chosen_N']!r}・2N {g['chosen_2N']!r}、入力 {g['chosen']!r}、窓 {g['window']} (広げた回数 {g['n_widen']}、"
+          f"半幅 {g['half_width']})、最初の r_t のゲートを再利用 {mkr['gate_first_reused']}、やり直し {mkr['redo']}")
+    print(f"  YAML の _card.M_knot_rule の行 {len(lines[0].encode()) if lines else None} byte、card_log との照合 {link}")
+    for e in full["events"]:
         print(f"  [{e['stage']}] r_t {e['r_t_m']!r} 入力 {e['M_K_in']!r} → chosen_N {e['chosen_N']!r} (差 {e['diff_vs_used']}): "
               f"{e['action'][:160]} ({e['elapsed_s']:.0f} s)")
     for r in dims["rows"]:
         print(f"  寸法 {r['name']:<26} 差 {r['diff_m']:+.3e} m (公差 {r['tol_m']:g}) {'ok' if r['pass'] else 'FAIL'}")
-    print(f"  所要: 全体 {logd['time_s']:.0f} s、うち M_knot {mkr['elapsed_s']:.0f} s (並列 {mkr['workers']})")
+    print(f"  所要: 全体 {logd['time_s']:.0f} s、うち M_knot {full['elapsed_s']:.0f} s (並列 {full['workers']})")
     return all(checks.values())
 
 

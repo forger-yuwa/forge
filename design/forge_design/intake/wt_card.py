@@ -20,7 +20,9 @@ plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §
 7. **knot の M_knot** (plan tooling-nozzle-mknot-auto §4.3・§4.4): 既定は自動 (カードに書かない、または `overrides: {geometry.M_knot: auto}`)。
    最初の r_t で `mknot_select.select_mknot` → `resolution_gate` (規則 min_theta_max_v1) の `chosen_N` を選び、r_t の固定点の間は固定する。
    収束した最終の組で詰めと解像度のゲートを回し直し、`chosen_N` が固定点に使った M_K から 0.01 を超えて動いたら r_t の固定点をやり直す
-   (最大 2 回)。記録は `_card.M_knot_rule`・card_log・YAML のコメント。数値の `overrides: {geometry.M_knot: x}` は今と同じ (探索しない)。
+   (最大 2 回)。ゲートで選び直した値が詰めの窓の端なら、窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す (上限でも端なら例外; §5.1 #3b)。
+   記録は card_log の `M_knot_rule` (掃引の表を含む全部)・YAML の `_card.M_knot_rule` (要約だけ; card_log の記録の sha256 で結ぶ)・
+   YAML のコメント。数値の `overrides: {geometry.M_knot: x}` は今と同じ (探索しない)。
 
 `_card` 節は問題 YAML の最上位に置く記録 (ソルバ・設計チェーンは読まない。`probdef.load_problem` は未知の最上位キーを拒否しない)。
 
@@ -1221,7 +1223,7 @@ def _key_comments(card: dict, prob: dict) -> dict:
                                   "雛形の値では y1+ の目安 > 1")
     mkr = prob["_card"].get("M_knot_rule")
     if mkr is not None and mkr.get("mode") == "auto":
-        c["geometry.M_knot"] = _mknot_rule_text(mkr) + "。表と記録は _card.M_knot_rule"
+        c["geometry.M_knot"] = _mknot_rule_text(mkr) + "。要約は _card.M_knot_rule、掃引の表と全部の記録は card_log の M_knot_rule"
     for a in prob["_card"].get("auto_adjust") or []:
         c[a["key"]] = f"自動調整: {a['from']!r} → {a['to']!r} ({_one_line(a['reason'])[:160]})"
     rl = prob["_card"].get("L_total_tol_relaxed")
@@ -1358,7 +1360,8 @@ class _Retry(Exception):
 
 # ---------------------------------------------------------------------------------------------------- M_knot の自動の選択 (記録)
 
-MKNOT_GATE_HALF_WIDTH = 0.1          # 詰めとゲートの窓の半幅 (§4.2; mknot_select.resolution_gate の既定と同じ値を明示して渡す)
+MKNOT_GATE_HALF_WIDTHS = (0.1, 0.2, 0.3)   # ゲートの窓の半幅の列 (§4.2 窓の端の選択; mknot_select.GATE_HALF_WIDTHS と同じ値を明示して渡す)
+MKNOT_GATE_HALF_WIDTH = MKNOT_GATE_HALF_WIDTHS[0]   # 詰めとゲートの最初の窓の半幅 (最終の組の N の文脈 ±(この値 + ΔM_safe) の幅)
 _MKNOT_ROW_KEYS = ("M_K", "ok", "reasons", "role", "theta_max_deg", "margin_deg", "min_sin_angle", "mpp_sign_changes", "x_K", "L_c",
                    "moc_gate_ok", "moc_gate_pass", "n_axis")
 
@@ -1427,9 +1430,11 @@ def _mknot_select_record(s: dict) -> dict:
 
 
 def _mknot_gate_record(g: dict) -> dict:
-    keep = ("N", "N2", "chosen", "window", "settings", "pass", "checks", "reasons", "warnings", "chosen_N", "chosen_N_reason",
-            "chosen_2N", "chosen_2N_reason", "moved_N", "distance_to_conservative_boundary", "distance_2N", "distance_input",
-            "min_offset_N", "min_offset_2N", "elapsed_s")
+    # 窓の記録 (§5.1 #3b): window・half_width は最後の窓、n_widen は広げた回数、widen は半幅ごとの選び直しと端だった値、
+    # edge_values は最後の窓で端だった値 (θ_max の最小の位置の判定 min_offset_* とは別)
+    keep = ("N", "N2", "chosen", "window", "half_width", "n_widen", "widen", "edge_values", "settings", "pass", "checks", "reasons",
+            "warnings", "chosen_N", "chosen_N_reason", "chosen_2N", "chosen_2N_reason", "moved_N", "distance_to_conservative_boundary",
+            "distance_2N", "distance_input", "min_offset_N", "min_offset_2N", "elapsed_s")
     rec = {k: g.get(k) for k in keep}
     rec["boundaries_all"] = _mknot_bounds(g.get("common_boundaries") or [])
     rec["rows_selected"] = {m: {"at_N": _mknot_row(v["at_N"]), "at_2N": _mknot_row(v["at_2N"])}
@@ -1442,30 +1447,44 @@ def _mknot_dist(v) -> str:
     return "∞ (境目なし)" if v is None else f"{v:.4f}"
 
 
+def _mknot_widen_text(g: dict) -> str:
+    """ゲートの窓を広げた記録の表示 (広げていなければ空)。g はゲートの記録 (card_log) か YAML の要約のゲート。"""
+    n = g.get("n_widen") or 0
+    if not n:
+        return ""
+    edges = "; ".join(f"半幅 {w['half_width']:g} で " + "・".join(f"{k} {v!r}" for k, v in w["edge_values"].items()) + " が端"
+                      for w in g["widen"] if w["edge_values"])
+    return f"窓を {n} 回広げた (半幅 {g['widen'][0]['half_width']:g} → {g['half_width']:g}; {edges})"
+
+
 def _mknot_rule_text(mkr: dict) -> str:
-    """M_knot の記録の 1 行の説明 (geometry.M_knot のコメント・対応表)。"""
+    """M_knot の記録の 1 行の説明 (geometry.M_knot のコメント・対応表)。mkr は card_log の記録 (全部) か YAML の要約。"""
     if mkr.get("mode") != "auto":
         return f"自動 ({mkr.get('rule')}) — {mkr.get('reason')}"
     g = mkr["gate"]
+    wt = _mknot_widen_text(g)
     return (f"自動 (規則 {mkr['rule']}): 最終の組 (r_t {mkr['r_t_m']!r} m) の解像度のゲートで選び直した N の値 chosen_N "
             f"(θ_max {mkr['theta_max_deg']:.5f}°、全部の境目から {_mknot_dist(mkr['distance_to_boundary'])} ≥ ΔM_safe {mkr['dM_safe']:g}、"
-            f"ゲート {'PASS' if g['pass'] else 'FAIL'} (n_axis_inv {g['N']}/{g['N2']}: {g['chosen_N']!r}/{g['chosen_2N']!r}); "
-            f"雛形の M_knot_factor {mkr['recipe_M_knot_factor']:g} は使わない)")
+            f"ゲート {'PASS' if g['pass'] else 'FAIL'} (n_axis_inv {g['N']}/{g['N2']}: {g['chosen_N']!r}/{g['chosen_2N']!r}"
+            + (f"; {wt}" if wt else "") + f"); 雛形の M_knot_factor {mkr['recipe_M_knot_factor']:g} は使わない)")
 
 
-def _mknot_summary_lines(mkr: dict) -> list:
-    """M_knot の記録の要約 (YAML のコメント・標準出力)。"""
+def _mknot_summary_lines(mkr: dict, card_log_name: str | None = None) -> list:
+    """M_knot の記録の要約 (YAML のコメント・標準出力)。mkr は card_log の記録 (全部)。card_log_name があれば、掃引の表と全部の
+    記録の置き場 (card_log のファイル名と記録の sha256; YAML の _card.M_knot_rule.card_log と同じ値) の行を足す。"""
     if mkr.get("mode") != "auto":
         return [f"M_knot: {_mknot_rule_text(mkr)}"]
     s, g = mkr["selection"], mkr["gate"]
+    wt = _mknot_widen_text(g)
     out = [f"M_knot: 自動 (規則 {mkr['rule']}; {mkr['source']}) → geometry.M_knot {mkr['chosen']!r} (θ_max {mkr['theta_max_deg']:.5f}°、"
-           f"余裕 {mkr['margin_deg']:.3f}°、網の最小 sin 角 {mkr['min_sin_angle']:.4f})。表と記録は _card.M_knot_rule",
+           f"余裕 {mkr['margin_deg']:.3f}°、網の最小 sin 角 {mkr['min_sin_angle']:.4f})。要約は _card.M_knot_rule、掃引の表と全部の記録は "
+           "card_log の M_knot_rule",
            f"  境目 (N・2N を全部、成立側の端): "
            + "、".join(f"{b['kind']} {b['feasible_end']:.6f} ({b['source']})" for b in g["boundaries_all"])
            + f" — 選んだ値から {_mknot_dist(mkr['distance_to_boundary'])} (ΔM_safe {mkr['dM_safe']:g})",
            f"  解像度のゲート (最終の組 r_t {mkr['r_t_m']!r} m、n_axis_inv {g['N']}/{g['N2']}、窓 {g['window'][0]:.6g}〜{g['window'][1]:.6g}): "
            f"{'PASS' if g['pass'] else 'FAIL'} — 選び直し N {g['chosen_N']!r}・2N {g['chosen_2N']!r} (入力 {g['chosen']!r} から "
-           f"{g['moved_N']:+.4g})",
+           f"{g['moved_N']:+.4g})" + (f"; {wt}" if wt else ""),
            f"  探索 (最初の r_t {mkr['first_r_t_m']!r} m、n_axis_inv {mkr['n_axis_inv']}): {s['n_eval']} 点、M_A {s['M_A']:.6g}〜"
            f"M_d {s['M_d']:.6g}、選択 {s['chosen']!r} ({_one_line(s['reason'])[:160]})" + (f"; 警告 {s['warnings']}" if s["warnings"] else "")]
     for e in mkr["events"]:
@@ -1473,7 +1492,80 @@ def _mknot_summary_lines(mkr: dict) -> list:
                    f"{_one_line(e['action'])[:200]}")
     out.append(f"  M_knot の所要 {mkr['elapsed_s']:.0f} s (並列 N {mkr['workers']['N']}・2N {mkr['workers']['2N']}、開始時の使えるメモリ "
                f"{mkr['workers']['available_gb'] if mkr['workers']['available_gb'] is None else round(mkr['workers']['available_gb'], 1)} GB)")
+    if card_log_name is not None:
+        out.append(f"  掃引の表と全部の記録: {card_log_name} の M_knot_rule (その記録の sha256 {_mknot_record_sha256(mkr)}; "
+                   "YAML の _card.M_knot_rule は要約だけ)")
     return out
+
+
+def _mknot_record_sha256(rec: dict) -> str:
+    """card_log の `M_knot_rule` (記録の全部) の sha256。JSON にしてから測る (キーの順・区切りを固定、ensure_ascii=False; card_log を
+    読み直した dict からも同じ値になる)。card_log のファイルは YAML の sha256 (out_sha256) を含むので、ファイルそのものの sha256 は
+    YAML に書けない (循環) — 記録の部分を測る。"""
+    txt = json.dumps(_json_safe(rec), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(txt.encode("utf-8")).hexdigest()
+
+
+def _mknot_yaml_summary(rec: dict, card_log_name: str) -> dict:
+    """YAML の `_card.M_knot_rule` に置く要約 (plan tooling-nozzle-mknot-auto §4.4、2026-10-14 諮問 mknot-card-holes の採用): 規則の
+    名前・選んだ値 (と出力の点の θ_max・余裕・最小 sin 角・N/2N の成立)・距離・全部の境目・ゲートの判定 (窓を広げた回数・端だった値を
+    含む)・r_t の固定点の前後の選び直しの要約・card_log の記録の sha256。掃引の表と行の詳細 (table・ゲートの rows_selected・
+    constraints_at_output の行・選び方の記録・選び直しの文) は card_log の `M_knot_rule` だけに置く (掃引の表を YAML に入れると
+    1 行 約 52 kB になり、Euler の写しにも入った)。rec は `_mknot_record` の戻り (card_log に書く記録)。
+    knot でない軸則の記録 (mode not_applicable) は表を持たないので、そのまま返す。照合は `mknot_card_log_check`。"""
+    if rec.get("mode") != "auto":
+        return rec
+
+    def gate(x):
+        return {"pass": x["pass"], "N": x["N"], "N2": x["N2"], "chosen": x["chosen"], "chosen_N": x["chosen_N"],
+                "chosen_2N": x["chosen_2N"], "moved_N": x["moved_N"], "distance_N": x["distance_to_conservative_boundary"],
+                "distance_2N": x["distance_2N"], "window": x["window"], "half_width": x["half_width"], "n_widen": x["n_widen"],
+                "widen": [{k: w[k] for k in ("half_width", "chosen_N", "chosen_2N", "edge_values")} for w in x["widen"]],
+                "checks": x["checks"], "warnings": x["warnings"]}
+
+    s = rec["selection"]
+    return _plain({
+        "rule": rec["rule"], "mode": rec["mode"], "source": rec["source"], "chosen": rec["chosen"], "chosen_from": rec["chosen_from"],
+        "r_t_m": rec["r_t_m"], "first_r_t_m": rec["first_r_t_m"], "n_axis_inv": rec["n_axis_inv"],
+        "theta_max_deg": rec["theta_max_deg"], "theta_max_deg_final_chain": rec["theta_max_deg_final_chain"],
+        "margin_deg": rec["margin_deg"], "min_sin_angle": rec["min_sin_angle"],
+        "ok_at_output": {k: rec["constraints_at_output"][k]["ok"] for k in ("N", "2N")},
+        "distance_to_boundary": rec["distance_to_boundary"], "dM_safe": rec["dM_safe"],
+        "boundaries": [{k: b.get(k) for k in ("kind", "feasible_end", "lo", "hi", "source")} for b in rec["boundaries"]],
+        "gate": gate(rec["gate"]),
+        "gate_first": (None if rec["gate_first"] is None else       # 最初の r_t のゲート (最終の組と別のとき) は判定と値だけ
+                       {k: rec["gate_first"][k] for k in ("pass", "chosen", "chosen_N", "chosen_2N", "n_widen", "half_width")}),
+        "gate_first_reused": rec["gate_first_reused"],
+        "selection": {k: s[k] for k in ("M_A", "M_d", "chosen", "distance_to_boundary", "n_eval", "warnings")},
+        "events": [{k: e.get(k) for k in ("stage", "r_t_m", "M_K_in", "M_K_used_in_fixed_point", "chosen_N", "chosen_2N", "diff_vs_used",
+                                          "gate_pass", "gate_n_widen", "distance")} for e in rec["events"]],
+        "redo": rec["redo"], "elapsed_s": rec["elapsed_s"],
+        "recipe_M_knot_factor": rec["recipe_M_knot_factor"], "recipe_M_knot_value_unused": rec["recipe_M_knot_value_unused"],
+        "card_log": {"file": card_log_name, "key": "M_knot_rule", "sha256": _mknot_record_sha256(rec),
+                     "sha256_of": "card_log の M_knot_rule を JSON (キーの順に並べ、区切りに空白なし、ensure_ascii=False) にしたもの",
+                     "holds": "掃引の表 (table)・ゲートの全部の記録 (行・理由)・選び方の記録・選び直しの文"},
+    })
+
+
+def mknot_card_log_check(problem_yaml) -> dict:
+    """問題 YAML (または Euler の写し) の `_card.M_knot_rule` (要約) を、同じディレクトリの card_log の `M_knot_rule` (全部) と照合する:
+    記録の sha256 が要約の値と同じ、かつ要約が card_log の記録から作り直したものと同じ (summary_matches は sha256 の値を除いて比べる:
+    card_log の表だけが違えば sha256 だけが合わない)。戻り: {ok (自動でなければ None), card_log, sha256_yaml, sha256_card_log,
+    summary_matches}。"""
+    p = Path(problem_yaml)
+    summ = ((yaml.safe_load(p.read_text()) or {}).get("_card") or {}).get("M_knot_rule")
+    if summ is None or summ.get("mode") != "auto":
+        return {"ok": None, "card_log": None, "reason": "M_knot が自動の記録ではない (要約・card_log の照合の対象外)"}
+    cl = p.with_name(summ["card_log"]["file"])
+    full = json.loads(cl.read_text())["M_knot_rule"]
+    sha = _mknot_record_sha256(full)
+
+    def wo_sha(d):
+        return {**d, "card_log": {**d["card_log"], "sha256": None}}
+
+    same = wo_sha(_mknot_yaml_summary(full, summ["card_log"]["file"])) == wo_sha(summ)
+    return {"ok": sha == summ["card_log"]["sha256"] and same, "card_log": str(cl), "sha256_yaml": summ["card_log"]["sha256"],
+            "sha256_card_log": sha, "summary_matches": same}
 
 
 def _mknot_record(card: dict, prob: dict, chain: dict, rt: float, mk: dict) -> dict:
@@ -1563,6 +1655,10 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
       やり直す (最大 MKNOT_REDO_MAX 回、超えたら RuntimeError)。差 ≤ 0.01 で値が違えば、出力する組 (chosen_N、最後の r_t) で r_t の固定点の
       1 回を回し直して寸法の残差を確かめる (|Δr_t|/r_t ≤ rel_tol でなければやり直しに数える)。出力する組の最終の設計チェーンの θ_max が
       ゲートのその組の評価と一致することも確かめる (`_mknot_record`)。
+    - ゲートで選び直した値 (同点の規則の後) が詰めの窓の端なら、同じ組のまま窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す
+      (`MKNOT_GATE_HALF_WIDTHS`; 上限でも端なら MknotUndeterminedError)。
+    - 記録は card_log の `M_knot_rule` に全部 (掃引の表を含む)、YAML の `_card.M_knot_rule` (と Euler の写し) には要約だけ
+      (`_mknot_yaml_summary`; card_log の記録の sha256 で結び、書いた後に `mknot_card_log_check` で照合する)。
     - 評価の並列は `mknot_workers` (MKNOT_WORKERS: N・2N とも 1)。2N の 1 評価のメモリの見積もりが使えるメモリを超えるなら評価の前に
       RuntimeError (`_mknot_mem_check`)。"""
     from ..feedback.deltastar_loop import SIZING_TOL_M, SIZING_TOL_PRE_CFD_THROAT_M, load_ns_correction, solve_rt_throat
@@ -1781,6 +1877,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             "stage": stage, "attempt": mk["attempt"], "r_t_m": rt, "geometry": mk_geom(rt), "M_K_in": g["chosen"],
             "M_K_used_in_fixed_point": M_used, "chosen_N": g["chosen_N"], "chosen_2N": g["chosen_2N"],
             "diff_vs_used": (None if M_used is None else g["chosen_N"] - M_used), "gate_pass": g["pass"],
+            "gate_n_widen": g["n_widen"], "gate_half_width": g["half_width"],
             "distance": g["distance_to_conservative_boundary"], "action": action, "elapsed_s": time.time() - t0}))
 
     def mk_select_first(rt0):
@@ -1802,7 +1899,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         bad = [r["M_K"] for r in sel["table"] if r.get("M_A") is not None and r["M_A"] != rng["M_A"]]
         if bad:
             raise RuntimeError(f"M_knot: 評価の行の M_A が探索の原点 {rng['M_A']!r} と違う ({bad[:5]}) — 格子の原点が揃っていない")
-        gate = MS.resolution_gate(base, sel["chosen"], N, select_result=sel, half_width=MKNOT_GATE_HALF_WIDTH,
+        gate = MS.resolution_gate(base, sel["chosen"], N, select_result=sel, half_widths=MKNOT_GATE_HALF_WIDTHS,
                                   workers=(wk["N"], wk["2N"]), log=mlog)
         mk.update(M_K=float(gate["chosen_N"]), key=mk_key(rt0), sel=sel, sel_rt=float(rt0), gate_first=gate, gate_final=None,
                   N=N, workers=wk, redo=0, seedN={MS._key(r["M_K"]): r for r in gate["rows_N"]},
@@ -1810,12 +1907,14 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         mk_event(stage, rt0, gate, f"select_mknot の選択 {sel['chosen']!r} → ゲートで選び直した chosen_N {gate['chosen_N']!r} を "
                  "r_t の固定点の M_K に固定", t0)
         mlog(f"{stage}: 選択 {sel['chosen']!r} → chosen_N {gate['chosen_N']!r} (ゲート PASS、全部の境目から "
-             f"{gate['distance_to_conservative_boundary']:.4f}、{time.time() - t0:.0f} s)")
+             f"{_mknot_dist(gate['distance_to_conservative_boundary'])}"
+             + (f"、{_mknot_widen_text(gate)}" if gate["n_widen"] else "") + f"、{time.time() - t0:.0f} s)")
         mk["t"] += time.time() - t0
 
     def mk_gate(rt, M_c):
         """(rt, M_c) を中心に詰めと解像度のゲート。同じ r_t・geometry の探索の表があれば再利用し、無ければ N の評価を
-        ±(半幅 + ΔM_safe) に広げて境目を求める (窓の候補から ΔM_safe 以内の境目を全部見るため)。"""
+        ±(最初の半幅 + ΔM_safe) に広げて境目を求める (窓の候補から ΔM_safe 以内の境目を全部見るため)。ゲートが窓を広げたときの
+        窓の外の文脈 ±(広げた半幅 + ΔM_safe) は resolution_gate が N で評価する。"""
         from ..evaluate import mknot_select as MS
         base = mk_base(rt, M_K=M_c)
         N, sel = mk["N"], mk["sel"]
@@ -1834,7 +1933,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
                 ev.many(Ms, "context")
                 ctx = {"settings": st, "table": ev.table()}
             seed2, how = None, "最終の組で詰め直し (N は ±(半幅 + ΔM_safe))"
-        g = MS.resolution_gate(base, M_c, N, select_result=ctx, seed_2N=seed2, half_width=MKNOT_GATE_HALF_WIDTH,
+        g = MS.resolution_gate(base, M_c, N, select_result=ctx, seed_2N=seed2, half_widths=MKNOT_GATE_HALF_WIDTHS,
                                workers=(wk["N"], wk["2N"]), log=mlog)
         if mk_key(rt) == mk["key"]:
             mk["seedN"].update({MS._key(r["M_K"]): r for r in g["rows_N"]})
@@ -1990,8 +2089,9 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         "generated": datetime.date.today().isoformat(),
     })
     mk_rec = _mknot_record(card, prob, chain, rt, mk) if mk_auto else None
-    if mk_rec is not None:
-        prob["_card"]["M_knot_rule"] = mk_rec
+    card_log_name = out.name + ".card_log.json"
+    if mk_rec is not None:          # YAML には要約だけ (掃引の表と全部の記録は card_log の M_knot_rule; plan §4.4)
+        prob["_card"]["M_knot_rule"] = _mknot_yaml_summary(mk_rec, card_log_name)
     out.parent.mkdir(parents=True, exist_ok=True)
     ns_rec = None
     if ns_prev_run is not None:
@@ -2011,7 +2111,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             "final_table_equals_last_inner": (last_inner_table is not None and table_path.read_bytes() == last_inner_table),
             "use": f"deltastar_loop --problem {out.name} --delta-r-csv {table_path.name} (sha256 を照合する)"})
         prob["_card"]["ns_correction"] = ns_rec
-    header = _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust, nodes)
+    header = _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust, nodes,
+                     mk_full=mk_rec, card_log_name=card_log_name)
     _write_problem(card, prob, out, header)
     load_problem(out)               # 書いたものが読み込みの検査を通ること
     euler_out = write_euler_companion(out)
@@ -2038,6 +2139,11 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         logd["M_knot_rule"] = mk_rec
     logd = _json_safe(logd)
     Path(str(out) + ".card_log.json").write_text(json.dumps(logd, indent=1, ensure_ascii=False))
+    if mk_rec is not None and mk_rec.get("mode") == "auto":
+        for y in [out] + ([euler_out] if euler_out else []):      # 書いた YAML の要約と card_log の記録が結べること (sha256・作り直した要約)
+            chk = mknot_card_log_check(y)
+            if not chk["ok"]:
+                raise RuntimeError(f"M_knot: {y.name} の _card.M_knot_rule (要約) と card_log の M_knot_rule が一致しない ({chk})")
     return logd
 
 
@@ -2112,7 +2218,10 @@ def _nodes_text(nodes: dict) -> str:
             + "。上限を超える格子はユーザの了承を取ってから overrides の max_nodes と max_nodes_reason を組で書いて許す")
 
 
-def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust, nodes) -> list:
+def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust, nodes, mk_full=None,
+            card_log_name=None) -> list:
+    """YAML の見出しのコメント。mk_full: card_log の M_knot_rule (記録の全部; YAML の _card.M_knot_rule は要約なので、選び直しの文・
+    所要などはこちらから書く)。card_log_name: card_log のファイル名 (M_knot の記録の置き場の行)。"""
     rt = float(prob["spec"]["r_throat"])
     rec = prob["_card"]["recipe"]
     h = [f"生成: {GENERATOR} ({prob['_card']['generated']})。**手で編集しない** — 要求カードを直して作り直す。",
@@ -2157,9 +2266,8 @@ def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnin
         h.append(f"格子の縮流部側のブレンド: {est['blend_choice']} ({est['blend_text']}) に決め直した — y1+ の目安の最大 "
                  f"{est['y1plus_est_max_with_blend']:.2f} @ x = {est['x_y1plus_est_max_rt']:.2f} r_t "
                  f"(雛形の値では {est['blend_candidates'][0]['y1plus_est_max']:.2f} @ x = {est['blend_candidates'][0]['x_y1plus_est_max_rt']:.2f})")
-    mkr = prob["_card"].get("M_knot_rule")
-    if mkr is not None:
-        h += _mknot_summary_lines(mkr)
+    if mk_full is not None:
+        h += _mknot_summary_lines(mk_full, card_log_name)
     for a in auto_adjust:
         h.append(f"自動調整: {a['key']} {a['from']} → {a['to']} ({a['reason'][:120]})")
     for o in prob["_card"]["overrides"]:
@@ -2198,7 +2306,7 @@ def _print_report(logd: dict) -> None:
     print(f"逆 MOC の場: x_F {f['x_F']:.6f}  x_e {f['x_e']:.6f}  x_F − x_e {f['x_F_minus_x_e_m'] * 1e3:+.3f} mm  場の終点 "
           f"{f['x_wall_full_end']:.4f} r_t ({'張り付き' if f['pinned'] else '張り付きなし'}、x_end_margin {f['x_end_margin']})")
     if logd.get("M_knot_rule") is not None:
-        for ln in _mknot_summary_lines(logd["M_knot_rule"]):
+        for ln in _mknot_summary_lines(logd["M_knot_rule"], Path(logd["out"]).name + ".card_log.json"):
             print(ln)
     for a in logd["auto_adjust"]:
         print(f"自動調整: {a['key']} {a['from']!r} → {a['to']!r}  ({_one_line(a['reason'])[:160]})")
