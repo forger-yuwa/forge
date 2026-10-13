@@ -332,6 +332,9 @@ check("prepare_info.json の mesh 欄に n_nodes・max_nodes・max_nodes_reason�
 # ---------------------------------------------------------------------------------------------- (f) V2 要求カードの生成器
 print("== (f) V2: 要求カードの生成器 (c2b、r_t 固定)")
 CARD = yaml.safe_load(CARD_C2B.read_text())
+# 数値の M_knot 2.25 (= c2b の生成時の旧既定 0.45 × M_exit)。M_knot の既定は自動になったので、期待を変えずに回す
+# (plan tooling-nozzle-mknot-auto §6 V3)
+CARD["overrides"] = dict(CARD.get("overrides") or {}, **{"geometry.M_knot": 2.25})
 
 
 def card_with(name, **ov):
@@ -340,6 +343,9 @@ def card_with(name, **ov):
     p = TMP / f"{name}.yaml"
     p.write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
     return p
+
+
+CARD_C2B_NUM = card_with("card_m5_air_demo_c2b_num")
 
 
 def norm_yaml(text: str) -> str:
@@ -362,7 +368,7 @@ outA = TMP / "gen_on" / "problem_c2b.yaml"
 outA.parent.mkdir()
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
-    rc = W.main([str(CARD_C2B), "--out", str(outA), "--r-throat", repr(RT_C2B)])
+    rc = W.main([str(CARD_C2B_NUM), "--out", str(outA), "--r-throat", repr(RT_C2B)])
 stdout = buf.getvalue()
 textA = outA.read_text()
 logA = json.loads(Path(str(outA) + ".card_log.json").read_text())
@@ -384,7 +390,7 @@ def no_guard(mp, m, block, allow_hint=None):
 
 
 with patched(RA, "check_node_budget", no_guard):
-    W.build_problem(CARD_C2B, outN, r_throat_m=RT_C2B, log=lambda *a, **k: None)
+    W.build_problem(CARD_C2B_NUM, outN, r_throat_m=RT_C2B, log=lambda *a, **k: None)
 same_p = norm_yaml(textA) == norm_yaml(outN.read_text())
 eA, eN = outA.with_name("problem_c2b_euler.yaml"), outN.with_name("problem_c2b_euler.yaml")
 same_e = eA.is_file() and eN.is_file() and norm_yaml(eA.read_text()) == norm_yaml(eN.read_text())

@@ -13,9 +13,12 @@ V2 (合成の評価、設計チェーンは回さない):
   (g) 解像度のゲート: 合格の例、選択が 0.01 を超えて動く・高い解像度だけ制約違反・最小が詰めの端 → 例外 (選択は未確定)
   (h) 選ぶ順序の反例 (諮問 mknot-result-v6): 境目 1.98・ΔM_safe 0.05・tie 1e-3°、θ_max {2.00: 15.0000 (A) / 15.0020 (B)、
       2.04: 15.0008、2.05: 15.0015} で A・B とも 2.05 (距離で除外される 2.00 の値が選択を変えない)
-  (i) 2N の境目が保守側へ動く合成の入力: 共通の境目 (保守側) で N と 2N を選び直して比べる (N の境目のままで判定しない)。
-      逆向き (2N が保守的でない側へ動く) では共通の境目は N の境目のまま
+  (i) 2N の境目が保守側へ動く合成の入力: N と 2N の境目を全部残し (§5.1 #2c で対にしてまとめるのをやめた)、全部の境目で
+      N と 2N を選び直して比べる (N の境目のままで判定しない)。逆向き (2N が保守的でない側へ動く) では効く境目は N の境目
   (j) MOC のゲート (require_moc_gate と同じ関数で判定) だけを破る点は選ばれない。fixed2 の pass = None は今の扱いのまま通す
+  (k) 境目をまとめない (諮問 mknot-gate-output の反例): N の不成立の区間 (2.00, 2.02)・2N の不成立の区間 (2.08, 2.10) で、2.05 は
+      両方の解像度で成立するが、全部の境目からの距離 0.03 < 0.05 で選ばれない (対にしてまとめると 0.05 で通ってしまう)。
+      ゲートの row_chosen_N・row_chosen_2N は選び直した点の行 (入力の点の行は row_input_N・row_input_2N)
 V1b (M6 の目的の回帰): case/42.isobutane_wt/sweep_axislaw_A_MK_summary.csv の L_c 45・50 (n_axis 600) の記録を評価に差し替え、
   境目の距離と同点の規則を切った設定 (ΔM_safe 0、tie 0) で L_c 45 → 2.6・50 → 2.7 を選ぶ (余裕最大の 3.0・3.1 を選んだら取り違え)。
   既定の設定 (tie 1e-3°・ΔM_safe 0.05) の選択値も記録する (合否なし)。CSV は 0.1 刻みなので格子は coarse = fine = 0.1、原点は
@@ -265,7 +268,7 @@ for tag, t200 in (("A", 15.0000), ("B", 15.0020)):
         check(f"(h) {tag}: 境目 + 0.05 の点 2.03 (θ_max {t203}) を評価して足す → {want}",
               [p["M_K"] for p in rs_["safe_points"]] == [2.03] and near(rs_["chosen"], want), f"chosen {rs_['chosen']!r}")
 
-print("== V2 (i) 2N の境目が保守側へ動く → 共通の境目で N と 2N を選び直して比べる")
+print("== V2 (i) 2N の境目が保守側へ動く → 全部の境目 (N と 2N、まとめない) で N と 2N を選び直して比べる")
 
 
 def edge_fn(lo, hi=3.0):
@@ -276,29 +279,40 @@ def edge_fn(lo, hi=3.0):
     return fn
 
 
+def lower_by_source(g):
+    return {x["source"]: x for x in g["common_boundaries"] if x["kind"] == "lower"}
+
+
 fN_i, f2N_i = edge_fn(2.0005), edge_fn(2.0205)        # 2N の下の境目が 0.02 上 (成立の範囲を狭める側) へ動く
 s, g = gate(fN_i, f2N_i, raise_on_fail=False)
 lowN = [x for x in s["boundaries"] if x["kind"] == "lower"][0]
-cl = [x for x in g["common_boundaries"] if x["kind"] == "lower"]
+cl = lower_by_source(g)
+binding = max(x["feasible_end"] for x in cl.values())
+check("(i) 下の境目は N (≈ 2.0005) と 2N (≈ 2.0205) の両方を残す (まとめない; N から見た 2N の同じ向き ≈ +0.02)",
+      sorted(cl) == ["2N", "N"] and len([x for x in g["common_boundaries"] if x["kind"] == "lower"]) == 2
+      and 2.0005 - 1e-12 <= cl["N"]["feasible_end"] <= 2.0015 and 2.0205 - 1e-12 <= cl["2N"]["feasible_end"] <= 2.0215
+      and 0.0195 <= cl["N"]["nearest_other"]["offset"] <= 0.0205 and binding == cl["2N"]["feasible_end"],
+      str([(x["kind"], round(x["feasible_end"], 6), x["source"], x["nearest_other"]) for x in g["common_boundaries"]]))
 check("(i) N の選択は N の境目 + 0.05 (入力)", near(s["chosen"], lowN["feasible_end"] + 0.05, 1e-12), f"{s['chosen']!r}")
-check("(i) 共通の下の境目は 2N の端 (保守側; N と 2N の区間を両方記録、2N − N ≈ +0.02)",
-      len(cl) == 1 and cl[0]["source"] == "2N" and cl[0]["paired"] and cl[0]["interval_N"] and cl[0]["interval_2N"]
-      and 0.0195 <= cl[0]["shift_2N"] <= 0.0205 and 2.0205 - 1e-12 <= cl[0]["feasible_end"] <= 2.0215,
-      str([(x["kind"], round(x["feasible_end"], 6), x["source"], x["shift_2N"]) for x in g["common_boundaries"]]))
-check("(i) 共通の境目で N と 2N をそれぞれ選び直すと両方 共通の境目 + 0.05 (差 0) で合格",
-      g["pass"] and near(g["chosen_N"], g["chosen_2N"]) and near(g["chosen_N"], cl[0]["feasible_end"] + 0.05, 1e-9),
+check("(i) 全部の境目で N と 2N をそれぞれ選び直すと両方 効く境目 (2N の端) + 0.05 (差 0) で合格",
+      g["pass"] and near(g["chosen_N"], g["chosen_2N"]) and near(g["chosen_N"], binding + 0.05, 1e-9),
       f"N {g['chosen_N']!r} 2N {g['chosen_2N']!r} {g['checks']} {g['reasons']}")
-check("(i) N の選び直しは入力から +0.02 動き、記録に残る (入力の点は共通の境目から 0.05 未満)",
+check("(i) N の選び直しは入力から +0.02 動き、記録に残る (入力の点は全部の境目から 0.05 未満)",
       g["moved_N"] is not None and 0.0195 <= g["moved_N"] <= 0.0205 and g["distance_input"] < 0.05,
       f"moved {g['moved_N']!r} distance_input {g['distance_input']!r}")
+check("(i) row_chosen_N・row_chosen_2N は選び直した点の行、row_input_N は入力の点の行",
+      near(g["row_chosen_N"]["M_K"], g["chosen_N"]) and near(g["row_chosen_2N"]["M_K"], g["chosen_2N"])
+      and near(g["row_input_N"]["M_K"], s["chosen"]) and near(g["row_input_2N"]["M_K"], s["chosen"]) and not near(s["chosen"], g["chosen_N"]),
+      f"row_chosen_N {g['row_chosen_N']['M_K']!r} row_input_N {g['row_input_N']['M_K']!r}")
 own2N = sel(f2N_i)["chosen"]
-check("(i) N の境目のままで比べると (N 単独 vs 2N 単独の選択) 差 > 0.01 — 共通の境目で選び直さないと判定が変わる入力",
+check("(i) N の境目のままで比べると (N 単独 vs 2N 単独の選択) 差 > 0.01 — 全部の境目で選び直さないと判定が変わる入力",
       abs(own2N - s["chosen"]) > 0.01, f"N {s['chosen']!r} 2N 単独 {own2N!r}")
 s, g = gate(edge_fn(2.0205), edge_fn(2.0005), raise_on_fail=False)      # 逆向き: 2N が保守的でない側へ動く
-cl = [x for x in g["common_boundaries"] if x["kind"] == "lower"]
-check("(i) 逆向き (2N の境目が下へ) では共通の境目は N の端のまま、選び直しも入力と同じで合格",
-      g["pass"] and len(cl) == 1 and cl[0]["source"] == "N" and near(g["chosen_N"], s["chosen"]) and near(g["chosen_2N"], s["chosen"])
-      and g["moved_N"] == 0.0, f"{cl} N {g['chosen_N']!r} 2N {g['chosen_2N']!r}")
+cl = lower_by_source(g)
+check("(i) 逆向き (2N の境目が下へ): 両方残し、効く境目は N の端、選び直しも入力と同じで合格",
+      g["pass"] and sorted(cl) == ["2N", "N"] and max(cl.values(), key=lambda x: x["feasible_end"])["source"] == "N"
+      and near(g["chosen_N"], s["chosen"]) and near(g["chosen_2N"], s["chosen"]) and g["moved_N"] == 0.0,
+      f"{[(k, round(v['feasible_end'], 6)) for k, v in cl.items()]} N {g['chosen_N']!r} 2N {g['chosen_2N']!r}")
 
 print("== V2 (j) MOC のゲート (require_moc_gate と同じ関数) だけを破る点は選ばれない")
 from types import SimpleNamespace  # noqa: E402
@@ -335,6 +349,51 @@ for name, mres, chosen_ok in (("pass False", moc("converge", bad_gate), False), 
 nomoc = {k: v for k, v in row(2.0, 15.0).items() if not k.startswith("moc_gate")}
 check("(j) MOC のゲートの値が無い行は判定不能 = 不成立", any("MOC" in x and "判定不能" in x for x in MS.feasibility_reasons(nomoc)),
       str(MS.feasibility_reasons(nomoc)))
+
+print("== V2 (k) 境目をまとめない (諮問 mknot-gate-output の反例)")
+
+
+def gap_fn(a, b):
+    """[1.9, 2.3] で成立、ただし開区間 (a, b) は不成立。θ_max = 15 + (M − 2.05)² (最小は 2.05)。"""
+    def fn(M):
+        if not (1.9 <= M <= 2.3) or a < M < b:
+            return infeasible(M)
+        return row(M, 15.0 + (M - 2.05) ** 2)
+    return fn
+
+
+def bnd(kind, end):
+    lo, hi = (end, end + 5e-4) if kind == "upper" else (end - 5e-4, end)
+    return {"lo": lo, "hi": hi, "width": 5e-4, "kind": kind, "feasible_end": end, "reasons_infeasible": []}
+
+
+bN_k, b2_k = [bnd("upper", 2.00), bnd("lower", 2.02)], [bnd("upper", 2.08), bnd("lower", 2.10)]
+paired_k = [bnd("upper", min(2.00, 2.08)), bnd("lower", max(2.02, 2.10))]       # 同じ向きを対にして保守側を採る (直す前)
+all_k = MS.conservative_boundaries(bN_k, b2_k)
+check("(k) 反例の確認: 対にしてまとめた境目 (上 2.00・下 2.10) からは 2.05 の距離 0.05 (ΔM_safe を満たしてしまう)",
+      near(MS.boundary_distance(2.05, paired_k), 0.05), f"{MS.boundary_distance(2.05, paired_k)!r}")
+check("(k) N・2N の境目を全部 (4 個) 残し、2.05 の距離は 0.03 < 0.05",
+      [(x["kind"], x["feasible_end"], x["source"]) for x in all_k]
+      == [("upper", 2.00, "N"), ("lower", 2.02, "N"), ("upper", 2.08, "2N"), ("lower", 2.10, "2N")]
+      and near(MS.boundary_distance(2.05, all_k), 0.03), f"{[(x['kind'], x['feasible_end'], x['source']) for x in all_k]}")
+rows_k = [dict(row(m, 15.0 + (m - 2.05) ** 2), role="fine") for m in (1.95, 2.03, 2.04, 2.05, 2.06, 2.07, 2.15)]
+rk = MS.apply_rule(rows_k, all_k, tie_deg=1e-3, dM_safe=0.05)
+check("(k) apply_rule: θ_max の最小 2.05 は距離で除外され選ばれない (選ぶのは全部の境目から 0.05 以上の点)",
+      2.05 in rk["excluded_by_distance"] and not near(rk["chosen"], 2.05) and rk["distance"] >= 0.05 - 1e-9,
+      f"chosen {rk['chosen']!r} 距離 {rk['distance']!r} 除外 {rk['excluded_by_distance']}")
+g = MS.resolution_gate(None, 2.05, 600, workers=(1, 1), eval_factory=lambda n: gap_fn(2.00, 2.02) if n == 600 else gap_fn(2.08, 2.10),
+                       raise_on_fail=False)
+sel205 = g["rows_selected"]["2.05"]
+check("(k) ゲート (入力 2.05): 2.05 は両方の解像度で成立、全部の境目からは 0.03、選び直した N の値は 2.05 でなく全部の境目から ≥ 0.05",
+      sel205["at_N"]["ok"] and sel205["at_2N"]["ok"] and near(g["distance_input"], 0.03, 1e-9) and not near(g["chosen_N"], 2.05)
+      and MS.boundary_distance(g["chosen_N"], g["common_boundaries"]) >= 0.05 - 1e-9
+      and sorted((x["kind"], x["source"]) for x in g["common_boundaries"])
+      == [("lower", "2N"), ("lower", "N"), ("upper", "2N"), ("upper", "N")],
+      f"chosen_N {g['chosen_N']!r} distance_input {g['distance_input']!r} 境目 "
+      f"{[(x['kind'], round(x['feasible_end'], 6), x['source']) for x in g['common_boundaries']]}")
+check("(k) ゲート: row_chosen_N は選び直した点 (chosen_N) の行、row_input_N は入力 2.05 の行",
+      near(g["row_chosen_N"]["M_K"], g["chosen_N"]) and near(g["row_input_N"]["M_K"], 2.05) and near(g["row_input_2N"]["M_K"], 2.05),
+      f"{g['row_chosen_N']['M_K']!r} / {g['row_input_N']['M_K']!r}")
 
 # ---------------------------------------------------------------------------------------------------------------------
 print("== V1b M6 の目的の回帰 (sweep_axislaw_A_MK_summary.csv、n_axis 600)")

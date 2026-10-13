@@ -27,7 +27,7 @@
   "moc_gate_pass": true,
   "moc_gate_ok": true,
   "moc_gate_reason": null,
-  "time_s": 16.667065382003784
+  "time_s": 12.775219917297363
  },
  "select": {
   "rule": "min_theta_max_v1",
@@ -125,7 +125,7 @@
   ],
   "warnings": [],
   "n_eval": 67,
-  "elapsed_s": 950.6193203926086,
+  "elapsed_s": 1132.3608574867249,
   "chosen_row": {
    "M_K": 2.069270614,
    "ok": true,
@@ -151,7 +151,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.682522058486938
+   "time_s": 31.71551752090454
   }
  },
  "table": [
@@ -164,7 +164,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.267 が 1/R=0.500 から 47% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 12.26140570640564
+   "time_s": 13.102090120315552
   },
   {
    "M_K": 1.429270614,
@@ -175,7 +175,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.311 が 1/R=0.500 から 38% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 12.51248550415039
+   "time_s": 13.032176733016968
   },
   {
    "M_K": 1.529270614,
@@ -186,7 +186,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.346 が 1/R=0.500 から 31% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 10.931829690933228
+   "time_s": 12.478366613388062
   },
   {
    "M_K": 1.629270614,
@@ -197,7 +197,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.373 が 1/R=0.500 から 25% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 10.819501638412476
+   "time_s": 12.58404016494751
   },
   {
    "M_K": 1.729270614,
@@ -208,7 +208,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.393 が 1/R=0.500 から 21% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 16.03086805343628
+   "time_s": 13.40199899673462
   },
   {
    "M_K": 1.829270614,
@@ -219,7 +219,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.408 が 1/R=0.500 から 18% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 16.145004749298096
+   "time_s": 13.409329175949097
   },
   {
    "M_K": 1.929270614,
@@ -230,7 +230,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 13.79030966758728
+   "time_s": 13.623575210571289
   },
   {
    "M_K": 1.939270614,
@@ -241,7 +241,7 @@
    "role": "fine",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 12.298720598220825
+   "time_s": 14.078944683074951
   },
   {
    "M_K": 1.949270614,
@@ -252,7 +252,7 @@
    "role": "fine",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 12.385406970977783
+   "time_s": 14.262141227722168
   },
   {
    "M_K": 1.959270614,
@@ -263,7 +263,7 @@
    "role": "fine",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 13.281048059463501
+   "time_s": 13.381922245025635
   },
   {
    "M_K": 1.969270614,
@@ -274,7 +274,7 @@
    "role": "fine",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 13.307377338409424
+   "time_s": 13.511173486709595
   },
   {
    "M_K": 1.970520614,
@@ -285,7 +285,7 @@
    "role": "bisect",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 13.198702335357666
+   "time_s": 22.085095405578613
   },
   {
    "M_K": 1.971145614,
@@ -296,7 +296,7 @@
    "role": "bisect",
    "n_axis": null,
    "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-   "time_s": 12.782042503356934
+   "time_s": 21.159114599227905
   },
   {
    "M_K": 1.971770614,
@@ -323,7 +323,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.885921955108643
+   "time_s": 32.2025580406189
   },
   {
    "M_K": 1.974270614,
@@ -350,7 +350,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 20.659602880477905
+   "time_s": 29.06666326522827
   },
   {
    "M_K": 1.979270614,
@@ -377,7 +377,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 18.443510055541992
+   "time_s": 33.283199310302734
   },
   {
    "M_K": 1.989270614,
@@ -404,7 +404,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 18.78222107887268
+   "time_s": 32.93274760246277
   },
   {
    "M_K": 1.999270614,
@@ -431,7 +431,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.867882013320923
+   "time_s": 28.23135757446289
   },
   {
    "M_K": 2.009270614,
@@ -458,7 +458,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.790194511413574
+   "time_s": 31.139841079711914
   },
   {
    "M_K": 2.019270614,
@@ -485,7 +485,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.308438301086426
+   "time_s": 31.153078079223633
   },
   {
    "M_K": 2.021770614,
@@ -512,7 +512,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 21.211516857147217
+   "time_s": 45.381083726882935
   },
   {
    "M_K": 2.029270614,
@@ -539,7 +539,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 16.957109212875366
+   "time_s": 16.50463843345642
   },
   {
    "M_K": 2.039270614,
@@ -566,7 +566,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.033154487609863
+   "time_s": 30.198041439056396
   },
   {
    "M_K": 2.049270614,
@@ -593,7 +593,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.948676824569702
+   "time_s": 32.36208462715149
   },
   {
    "M_K": 2.059270614,
@@ -620,7 +620,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.894548416137695
+   "time_s": 31.80575656890869
   },
   {
    "M_K": 2.069270614,
@@ -647,7 +647,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.682522058486938
+   "time_s": 31.71551752090454
   },
   {
    "M_K": 2.079270614,
@@ -674,7 +674,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.615846872329712
+   "time_s": 26.357368230819702
   },
   {
    "M_K": 2.089270614,
@@ -701,7 +701,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.621610164642334
+   "time_s": 28.178264379501343
   },
   {
    "M_K": 2.099270614,
@@ -728,7 +728,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.422821521759033
+   "time_s": 32.06466484069824
   },
   {
    "M_K": 2.109270614,
@@ -755,7 +755,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 18.064373254776
+   "time_s": 33.855252265930176
   },
   {
    "M_K": 2.119270614,
@@ -782,7 +782,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.98386788368225
+   "time_s": 31.131722927093506
   },
   {
    "M_K": 2.129270614,
@@ -809,7 +809,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.062615394592285
+   "time_s": 16.87265658378601
   },
   {
    "M_K": 2.229270614,
@@ -836,7 +836,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 16.84745979309082
+   "time_s": 17.577946186065674
   },
   {
    "M_K": 2.329270614,
@@ -863,7 +863,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.12747836112976
+   "time_s": 16.780306577682495
   },
   {
    "M_K": 2.429270614,
@@ -890,7 +890,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.050962686538696
+   "time_s": 16.361879348754883
   },
   {
    "M_K": 2.529270614,
@@ -917,7 +917,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.13590431213379
+   "time_s": 15.406755685806274
   },
   {
    "M_K": 2.629270614,
@@ -944,7 +944,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 16.28499984741211
+   "time_s": 17.212608098983765
   },
   {
    "M_K": 2.729270614,
@@ -971,7 +971,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.825705289840698
+   "time_s": 17.56511640548706
   },
   {
    "M_K": 2.829270614,
@@ -998,7 +998,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.610572814941406
+   "time_s": 16.422802686691284
   },
   {
    "M_K": 2.929270614,
@@ -1025,7 +1025,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.878745079040527
+   "time_s": 16.306921005249023
   },
   {
    "M_K": 3.029270614,
@@ -1052,7 +1052,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 18.218849897384644
+   "time_s": 17.14952778816223
   },
   {
    "M_K": 3.129270614,
@@ -1079,7 +1079,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.665993690490723
+   "time_s": 16.237493753433228
   },
   {
    "M_K": 3.229270614,
@@ -1106,7 +1106,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 17.28421711921692
+   "time_s": 16.374483823776245
   },
   {
    "M_K": 3.329270614,
@@ -1133,7 +1133,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 21.27905797958374
+   "time_s": 15.71239423751831
   },
   {
    "M_K": 3.429270614,
@@ -1160,7 +1160,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 21.59556770324707
+   "time_s": 17.93683362007141
   },
   {
    "M_K": 3.529270614,
@@ -1187,7 +1187,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 20.16173768043518
+   "time_s": 19.49379587173462
   },
   {
    "M_K": 3.629270614,
@@ -1214,7 +1214,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 19.892170667648315
+   "time_s": 21.2698814868927
   },
   {
    "M_K": 3.729270614,
@@ -1241,7 +1241,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 18.625033378601074
+   "time_s": 18.91662073135376
   },
   {
    "M_K": 3.829270614,
@@ -1268,7 +1268,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 21.562920808792114
+   "time_s": 22.407188177108765
   },
   {
    "M_K": 3.929270614,
@@ -1295,7 +1295,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 25.377806425094604
+   "time_s": 19.893670320510864
   },
   {
    "M_K": 4.029270614,
@@ -1322,7 +1322,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 24.72102642059326
+   "time_s": 18.234994173049927
   },
   {
    "M_K": 4.129270614,
@@ -1349,7 +1349,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 34.31400656700134
+   "time_s": 20.685832977294922
   },
   {
    "M_K": 4.229270614,
@@ -1376,7 +1376,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 31.76264500617981
+   "time_s": 17.981290578842163
   },
   {
    "M_K": 4.306614364,
@@ -1403,7 +1403,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 22.11781883239746
+   "time_s": 62.782856464385986
   },
   {
    "M_K": 4.329270614,
@@ -1430,7 +1430,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 40.58177328109741
+   "time_s": 17.201595783233643
   },
   {
    "M_K": 4.354270614,
@@ -1457,7 +1457,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 20.22155475616455
+   "time_s": 36.727572441101074
   },
   {
    "M_K": 4.355833114,
@@ -1484,7 +1484,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 23.028082370758057
+   "time_s": 64.37218880653381
   },
   {
    "M_K": 4.356614364,
@@ -1511,7 +1511,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.162798643112183
+   "time_s": 60.11630606651306
   },
   {
    "M_K": 4.357395614,
@@ -1522,7 +1522,7 @@
    "role": "bisect",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)",
-   "time_s": 17.598154544830322
+   "time_s": 53.85875082015991
   },
   {
    "M_K": 4.360520614,
@@ -1533,7 +1533,7 @@
    "role": "bisect",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)",
-   "time_s": 14.51089358329773
+   "time_s": 53.819371461868286
   },
   {
    "M_K": 4.366770614,
@@ -1544,7 +1544,7 @@
    "role": "bisect",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.21° > 0.2°)",
-   "time_s": 14.189087629318237
+   "time_s": 33.126771211624146
   },
   {
    "M_K": 4.379270614,
@@ -1555,7 +1555,7 @@
    "role": "bisect",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.23° > 0.2°)",
-   "time_s": 20.080050230026245
+   "time_s": 59.63601875305176
   },
   {
    "M_K": 4.429270614,
@@ -1566,7 +1566,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.28° > 0.2°)",
-   "time_s": 41.47416639328003
+   "time_s": 19.018773555755615
   },
   {
    "M_K": 4.529270614,
@@ -1577,7 +1577,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.49° > 0.2°)",
-   "time_s": 17.124366283416748
+   "time_s": 21.283904790878296
   },
   {
    "M_K": 4.629270614,
@@ -1588,7 +1588,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.89° > 0.2°)",
-   "time_s": 190.54282021522522
+   "time_s": 37.34221911430359
   },
   {
    "M_K": 4.729270614,
@@ -1599,7 +1599,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "RuntimeError: joint_fit_wall(mono_r2): 有効制約法が 200 回で収束しない",
-   "time_s": 233.17960405349731
+   "time_s": 31.708503484725952
   },
   {
    "M_K": 4.829270614,
@@ -1610,7 +1610,7 @@
    "role": "coarse",
    "n_axis": null,
    "error": "RuntimeError: joint_fit_wall(mono_r2): 有効制約法が 200 回で収束しない",
-   "time_s": 141.2679102420807
+   "time_s": 149.4307689666748
   }
  ],
  "lower_boundaries": [
@@ -1996,15 +1996,30 @@
    "tie_deg": 0.001,
    "dM_safe": 0.05,
    "bisect_tol": 0.001,
-   "max_change": 0.01,
-   "pair_tol": 0.1
+   "max_change": 0.01
   },
   "chosen_N": 2.069270614,
-  "chosen_N_reason": "θ_max の最小 (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 5 点を除外; 境目 + ΔM_safe の点 2.02177 を評価)",
+  "chosen_N_reason": "θ_max の最小 (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.02115, 2.02177 を評価)",
   "chosen_2N": 2.069270614,
-  "chosen_2N_reason": "同点の規則 (最小 2.04927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 5 点を除外; 境目 + ΔM_safe の点 2.02177 を評価)",
+  "chosen_2N_reason": "同点の規則 (最小 2.04927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.02115, 2.02177 を評価)",
   "moved_N": 0.0,
   "common_boundaries": [
+   {
+    "kind": "lower",
+    "feasible_end": 1.971145614,
+    "lo": 1.970208114,
+    "hi": 1.971145614,
+    "width": 0.0009375000000000355,
+    "source": "2N",
+    "reasons_infeasible": [
+     "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+    ],
+    "nearest_other": {
+     "source": "N",
+     "feasible_end": 1.971770614,
+     "offset": 0.0006249999999998757
+    }
+   },
    {
     "kind": "lower",
     "feasible_end": 1.971770614,
@@ -2012,19 +2027,14 @@
     "hi": 1.971770614,
     "width": 0.0006249999999998757,
     "source": "N",
-    "paired": true,
-    "interval_N": [
-     1.971145614,
-     1.971770614
-    ],
-    "interval_2N": [
-     1.970208114,
-     1.971145614
-    ],
-    "shift_2N": -0.0006249999999998757,
     "reasons_infeasible": [
      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
-    ]
+    ],
+    "nearest_other": {
+     "source": "2N",
+     "feasible_end": 1.971145614,
+     "offset": -0.0006249999999998757
+    }
    },
    {
     "kind": "upper",
@@ -2033,16 +2043,10 @@
     "hi": 4.357395614,
     "width": 0.0007812499999992895,
     "source": "N",
-    "paired": false,
-    "interval_N": [
-     4.356614364,
-     4.357395614
-    ],
-    "interval_2N": null,
-    "shift_2N": null,
     "reasons_infeasible": [
      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)"
-    ]
+    ],
+    "nearest_other": null
    }
   ],
   "boundaries_N": [
@@ -2091,6 +2095,13 @@
    },
    "safe_points": [
     {
+     "M_K": 2.021145614,
+     "ok": true,
+     "theta_max_deg": 15.290061315565875,
+     "distance": 0.04937499999999995,
+     "reasons": []
+    },
+    {
      "M_K": 2.021770614,
      "ok": true,
      "theta_max_deg": 15.289937225587297,
@@ -2103,7 +2114,8 @@
     1.989270614,
     1.999270614,
     2.009270614,
-    2.019270614
+    2.019270614,
+    2.021145614
    ],
    "n_admissible": 16,
    "chosen": 2.069270614,
@@ -2121,7 +2133,7 @@
     2.059270614,
     2.069270614
    ],
-   "reason": "θ_max の最小 (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 5 点を除外; 境目 + ΔM_safe の点 2.02177 を評価)"
+   "reason": "θ_max の最小 (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.02115, 2.02177 を評価)"
   },
   "rule_2N": {
    "theta_min": {
@@ -2131,6 +2143,13 @@
     "excluded_by_distance": false
    },
    "safe_points": [
+    {
+     "M_K": 2.021145614,
+     "ok": true,
+     "theta_max_deg": 15.289010941775295,
+     "distance": 0.04937499999999995,
+     "reasons": []
+    },
     {
      "M_K": 2.021770614,
      "ok": true,
@@ -2144,7 +2163,8 @@
     1.989270614,
     1.999270614,
     2.009270614,
-    2.019270614
+    2.019270614,
+    2.021145614
    ],
    "n_admissible": 16,
    "chosen": 2.069270614,
@@ -2161,7 +2181,7 @@
     2.059270614,
     2.069270614
    ],
-   "reason": "同点の規則 (最小 2.04927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 5 点を除外; 境目 + ΔM_safe の点 2.02177 を評価)"
+   "reason": "同点の規則 (最小 2.04927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.02115, 2.02177 を評価)"
   },
   "min_offset_N": 0,
   "min_offset_2N": -2,
@@ -2176,7 +2196,7 @@
   "pass": true,
   "warnings": [],
   "reasons": [],
-  "elapsed_s": 789.5348823070526,
+  "elapsed_s": 768.1875445842743,
   "rows_N": [
    {
     "M_K": 1.329270614,
@@ -2187,7 +2207,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.267 が 1/R=0.500 から 47% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 12.26140570640564
+    "time_s": 13.102090120315552
    },
    {
     "M_K": 1.429270614,
@@ -2198,7 +2218,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.311 が 1/R=0.500 から 38% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 12.51248550415039
+    "time_s": 13.032176733016968
    },
    {
     "M_K": 1.529270614,
@@ -2209,7 +2229,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.346 が 1/R=0.500 から 31% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 10.931829690933228
+    "time_s": 12.478366613388062
    },
    {
     "M_K": 1.629270614,
@@ -2220,7 +2240,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.373 が 1/R=0.500 から 25% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 10.819501638412476
+    "time_s": 12.58404016494751
    },
    {
     "M_K": 1.729270614,
@@ -2231,7 +2251,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.393 が 1/R=0.500 から 21% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 16.03086805343628
+    "time_s": 13.40199899673462
    },
    {
     "M_K": 1.829270614,
@@ -2242,7 +2262,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.408 が 1/R=0.500 から 18% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 16.145004749298096
+    "time_s": 13.409329175949097
    },
    {
     "M_K": 1.929270614,
@@ -2253,7 +2273,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 13.79030966758728
+    "time_s": 13.623575210571289
    },
    {
     "M_K": 1.939270614,
@@ -2264,7 +2284,7 @@
     "role": "fine",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 12.298720598220825
+    "time_s": 14.078944683074951
    },
    {
     "M_K": 1.949270614,
@@ -2275,7 +2295,7 @@
     "role": "fine",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 12.385406970977783
+    "time_s": 14.262141227722168
    },
    {
     "M_K": 1.959270614,
@@ -2286,7 +2306,7 @@
     "role": "fine",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 13.281048059463501
+    "time_s": 13.381922245025635
    },
    {
     "M_K": 1.969270614,
@@ -2297,7 +2317,7 @@
     "role": "fine",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 13.307377338409424
+    "time_s": 13.511173486709595
    },
    {
     "M_K": 1.970520614,
@@ -2308,7 +2328,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 13.198702335357666
+    "time_s": 22.085095405578613
    },
    {
     "M_K": 1.971145614,
@@ -2319,7 +2339,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 12.782042503356934
+    "time_s": 21.159114599227905
    },
    {
     "M_K": 1.971770614,
@@ -2346,7 +2366,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.885921955108643
+    "time_s": 32.2025580406189
    },
    {
     "M_K": 1.974270614,
@@ -2373,7 +2393,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 20.659602880477905
+    "time_s": 29.06666326522827
    },
    {
     "M_K": 1.979270614,
@@ -2400,7 +2420,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 18.443510055541992
+    "time_s": 33.283199310302734
    },
    {
     "M_K": 1.989270614,
@@ -2427,7 +2447,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 18.78222107887268
+    "time_s": 32.93274760246277
    },
    {
     "M_K": 1.999270614,
@@ -2454,7 +2474,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.867882013320923
+    "time_s": 28.23135757446289
    },
    {
     "M_K": 2.009270614,
@@ -2481,7 +2501,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.790194511413574
+    "time_s": 31.139841079711914
    },
    {
     "M_K": 2.019270614,
@@ -2508,7 +2528,34 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.308438301086426
+    "time_s": 31.153078079223633
+   },
+   {
+    "M_K": 2.021145614,
+    "ok": true,
+    "reasons": [],
+    "role": "safe",
+    "theta_max_deg": 15.290061315565875,
+    "margin_deg": 4.204748164166825,
+    "min_sin_angle": 0.0513053285977734,
+    "n_flip_interior": 0,
+    "n_crossings_sampled": 0,
+    "pileup_pairs_interior": 0,
+    "mpp_sign_changes": 1,
+    "mpp_quality_ok": true,
+    "qa_violations": [],
+    "law_violations": [],
+    "L_c": 21.490233049915503,
+    "x_K": 2.202777264885946,
+    "x_F": 47.840693679881404,
+    "n_axis": 2400,
+    "M_A": 1.229270614396492,
+    "M_d_moc": 5.0,
+    "moc_corrector": "converge",
+    "moc_gate_pass": true,
+    "moc_gate_ok": true,
+    "moc_gate_reason": null,
+    "time_s": 12.007380247116089
    },
    {
     "M_K": 2.021770614,
@@ -2535,7 +2582,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 21.211516857147217
+    "time_s": 45.381083726882935
    },
    {
     "M_K": 2.029270614,
@@ -2562,7 +2609,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.957109212875366
+    "time_s": 16.50463843345642
    },
    {
     "M_K": 2.039270614,
@@ -2589,7 +2636,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.033154487609863
+    "time_s": 30.198041439056396
    },
    {
     "M_K": 2.049270614,
@@ -2616,7 +2663,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.948676824569702
+    "time_s": 32.36208462715149
    },
    {
     "M_K": 2.059270614,
@@ -2643,7 +2690,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.894548416137695
+    "time_s": 31.80575656890869
    },
    {
     "M_K": 2.069270614,
@@ -2670,7 +2717,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.682522058486938
+    "time_s": 31.71551752090454
    },
    {
     "M_K": 2.079270614,
@@ -2697,7 +2744,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.615846872329712
+    "time_s": 26.357368230819702
    },
    {
     "M_K": 2.089270614,
@@ -2724,7 +2771,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.621610164642334
+    "time_s": 28.178264379501343
    },
    {
     "M_K": 2.099270614,
@@ -2751,7 +2798,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.422821521759033
+    "time_s": 32.06466484069824
    },
    {
     "M_K": 2.109270614,
@@ -2778,7 +2825,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 18.064373254776
+    "time_s": 33.855252265930176
    },
    {
     "M_K": 2.119270614,
@@ -2805,7 +2852,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.98386788368225
+    "time_s": 31.131722927093506
    },
    {
     "M_K": 2.129270614,
@@ -2832,7 +2879,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.062615394592285
+    "time_s": 16.87265658378601
    },
    {
     "M_K": 2.139270614,
@@ -2859,7 +2906,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.616918325424194
+    "time_s": 19.996057510375977
    },
    {
     "M_K": 2.149270614,
@@ -2886,7 +2933,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 14.520941495895386
+    "time_s": 19.699034929275513
    },
    {
     "M_K": 2.159270614,
@@ -2913,7 +2960,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.702558517456055
+    "time_s": 17.5086727142334
    },
    {
     "M_K": 2.169270614,
@@ -2940,7 +2987,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.856297969818115
+    "time_s": 17.642040967941284
    },
    {
     "M_K": 2.229270614,
@@ -2967,7 +3014,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.84745979309082
+    "time_s": 17.577946186065674
    },
    {
     "M_K": 2.329270614,
@@ -2994,7 +3041,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.12747836112976
+    "time_s": 16.780306577682495
    },
    {
     "M_K": 2.429270614,
@@ -3021,7 +3068,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.050962686538696
+    "time_s": 16.361879348754883
    },
    {
     "M_K": 2.529270614,
@@ -3048,7 +3095,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.13590431213379
+    "time_s": 15.406755685806274
    },
    {
     "M_K": 2.629270614,
@@ -3075,7 +3122,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.28499984741211
+    "time_s": 17.212608098983765
    },
    {
     "M_K": 2.729270614,
@@ -3102,7 +3149,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.825705289840698
+    "time_s": 17.56511640548706
    },
    {
     "M_K": 2.829270614,
@@ -3129,7 +3176,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.610572814941406
+    "time_s": 16.422802686691284
    },
    {
     "M_K": 2.929270614,
@@ -3156,7 +3203,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.878745079040527
+    "time_s": 16.306921005249023
    },
    {
     "M_K": 3.029270614,
@@ -3183,7 +3230,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 18.218849897384644
+    "time_s": 17.14952778816223
    },
    {
     "M_K": 3.129270614,
@@ -3210,7 +3257,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.665993690490723
+    "time_s": 16.237493753433228
    },
    {
     "M_K": 3.229270614,
@@ -3237,7 +3284,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.28421711921692
+    "time_s": 16.374483823776245
    },
    {
     "M_K": 3.329270614,
@@ -3264,7 +3311,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 21.27905797958374
+    "time_s": 15.71239423751831
    },
    {
     "M_K": 3.429270614,
@@ -3291,7 +3338,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 21.59556770324707
+    "time_s": 17.93683362007141
    },
    {
     "M_K": 3.529270614,
@@ -3318,7 +3365,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 20.16173768043518
+    "time_s": 19.49379587173462
    },
    {
     "M_K": 3.629270614,
@@ -3345,7 +3392,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 19.892170667648315
+    "time_s": 21.2698814868927
    },
    {
     "M_K": 3.729270614,
@@ -3372,7 +3419,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 18.625033378601074
+    "time_s": 18.91662073135376
    },
    {
     "M_K": 3.829270614,
@@ -3399,7 +3446,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 21.562920808792114
+    "time_s": 22.407188177108765
    },
    {
     "M_K": 3.929270614,
@@ -3426,7 +3473,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 25.377806425094604
+    "time_s": 19.893670320510864
    },
    {
     "M_K": 4.029270614,
@@ -3453,7 +3500,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 24.72102642059326
+    "time_s": 18.234994173049927
    },
    {
     "M_K": 4.129270614,
@@ -3480,7 +3527,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 34.31400656700134
+    "time_s": 20.685832977294922
    },
    {
     "M_K": 4.229270614,
@@ -3507,7 +3554,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.76264500617981
+    "time_s": 17.981290578842163
    },
    {
     "M_K": 4.306614364,
@@ -3534,7 +3581,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 22.11781883239746
+    "time_s": 62.782856464385986
    },
    {
     "M_K": 4.329270614,
@@ -3561,7 +3608,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 40.58177328109741
+    "time_s": 17.201595783233643
    },
    {
     "M_K": 4.354270614,
@@ -3588,7 +3635,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 20.22155475616455
+    "time_s": 36.727572441101074
    },
    {
     "M_K": 4.355833114,
@@ -3615,7 +3662,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 23.028082370758057
+    "time_s": 64.37218880653381
    },
    {
     "M_K": 4.356614364,
@@ -3642,7 +3689,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.162798643112183
+    "time_s": 60.11630606651306
    },
    {
     "M_K": 4.357395614,
@@ -3653,7 +3700,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)",
-    "time_s": 17.598154544830322
+    "time_s": 53.85875082015991
    },
    {
     "M_K": 4.360520614,
@@ -3664,7 +3711,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)",
-    "time_s": 14.51089358329773
+    "time_s": 53.819371461868286
    },
    {
     "M_K": 4.366770614,
@@ -3675,7 +3722,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.21° > 0.2°)",
-    "time_s": 14.189087629318237
+    "time_s": 33.126771211624146
    },
    {
     "M_K": 4.379270614,
@@ -3686,7 +3733,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.23° > 0.2°)",
-    "time_s": 20.080050230026245
+    "time_s": 59.63601875305176
    },
    {
     "M_K": 4.429270614,
@@ -3697,7 +3744,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.28° > 0.2°)",
-    "time_s": 41.47416639328003
+    "time_s": 19.018773555755615
    },
    {
     "M_K": 4.529270614,
@@ -3708,7 +3755,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.49° > 0.2°)",
-    "time_s": 17.124366283416748
+    "time_s": 21.283904790878296
    },
    {
     "M_K": 4.629270614,
@@ -3719,7 +3766,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.89° > 0.2°)",
-    "time_s": 190.54282021522522
+    "time_s": 37.34221911430359
    },
    {
     "M_K": 4.729270614,
@@ -3730,7 +3777,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "RuntimeError: joint_fit_wall(mono_r2): 有効制約法が 200 回で収束しない",
-    "time_s": 233.17960405349731
+    "time_s": 31.708503484725952
    },
    {
     "M_K": 4.829270614,
@@ -3741,7 +3788,7 @@
     "role": "coarse",
     "n_axis": null,
     "error": "RuntimeError: joint_fit_wall(mono_r2): 有効制約法が 200 回で収束しない",
-    "time_s": 141.2679102420807
+    "time_s": 149.4307689666748
    }
   ],
   "rows_2N": [
@@ -3754,7 +3801,7 @@
     "role": "window",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 22.017762184143066
+    "time_s": 20.8482506275177
    },
    {
     "M_K": 1.970208114,
@@ -3765,7 +3812,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 21.79139804840088
+    "time_s": 21.27694606781006
    },
    {
     "M_K": 1.971145614,
@@ -3792,7 +3839,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.168259859085083
+    "time_s": 28.139384984970093
    },
    {
     "M_K": 1.971770614,
@@ -3819,7 +3866,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.178460836410522
+    "time_s": 26.840353965759277
    },
    {
     "M_K": 1.979270614,
@@ -3846,7 +3893,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.067051887512207
+    "time_s": 29.307049989700317
    },
    {
     "M_K": 1.989270614,
@@ -3873,7 +3920,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.27433156967163
+    "time_s": 28.33558702468872
    },
    {
     "M_K": 1.999270614,
@@ -3900,7 +3947,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.732864379882812
+    "time_s": 27.920279264450073
    },
    {
     "M_K": 2.009270614,
@@ -3927,7 +3974,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.347564220428467
+    "time_s": 27.898509979248047
    },
    {
     "M_K": 2.019270614,
@@ -3954,7 +4001,34 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.763599157333374
+    "time_s": 26.250856637954712
+   },
+   {
+    "M_K": 2.021145614,
+    "ok": true,
+    "reasons": [],
+    "role": "safe",
+    "theta_max_deg": 15.289010941775295,
+    "margin_deg": 4.205349266284255,
+    "min_sin_angle": 0.04330808800273468,
+    "n_flip_interior": 0,
+    "n_crossings_sampled": 0,
+    "pileup_pairs_interior": 0,
+    "mpp_sign_changes": 1,
+    "mpp_quality_ok": true,
+    "qa_violations": [],
+    "law_violations": [],
+    "L_c": 21.49290364330262,
+    "x_K": 2.202847170662266,
+    "x_F": 47.85878045135963,
+    "n_axis": 4800,
+    "M_A": 1.229270614396492,
+    "M_d_moc": 5.0,
+    "moc_corrector": "converge",
+    "moc_gate_pass": true,
+    "moc_gate_ok": true,
+    "moc_gate_reason": null,
+    "time_s": 30.63550591468811
    },
    {
     "M_K": 2.021770614,
@@ -3981,7 +4055,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.488687753677368
+    "time_s": 31.476585149765015
    },
    {
     "M_K": 2.029270614,
@@ -4008,7 +4082,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.140650510787964
+    "time_s": 27.93732237815857
    },
    {
     "M_K": 2.039270614,
@@ -4035,7 +4109,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.058229446411133
+    "time_s": 28.48660445213318
    },
    {
     "M_K": 2.049270614,
@@ -4062,7 +4136,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.387775421142578
+    "time_s": 28.32619571685791
    },
    {
     "M_K": 2.059270614,
@@ -4089,7 +4163,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 27.57137680053711
+    "time_s": 28.52507758140564
    },
    {
     "M_K": 2.069270614,
@@ -4116,7 +4190,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.402060747146606
+    "time_s": 26.805662155151367
    },
    {
     "M_K": 2.079270614,
@@ -4143,7 +4217,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 33.67949628829956
+    "time_s": 28.568807125091553
    },
    {
     "M_K": 2.089270614,
@@ -4170,7 +4244,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 33.86717224121094
+    "time_s": 27.87028431892395
    },
    {
     "M_K": 2.099270614,
@@ -4197,7 +4271,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 32.46374559402466
+    "time_s": 28.20227837562561
    },
    {
     "M_K": 2.109270614,
@@ -4224,7 +4298,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 32.322943925857544
+    "time_s": 28.242204427719116
    },
    {
     "M_K": 2.119270614,
@@ -4251,7 +4325,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 32.74742674827576
+    "time_s": 28.157620906829834
    },
    {
     "M_K": 2.129270614,
@@ -4278,7 +4352,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 32.15751647949219
+    "time_s": 26.519674062728882
    },
    {
     "M_K": 2.139270614,
@@ -4305,7 +4379,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 32.671733379364014
+    "time_s": 27.734982013702393
    },
    {
     "M_K": 2.149270614,
@@ -4332,7 +4406,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.79320502281189
+    "time_s": 27.758498430252075
    },
    {
     "M_K": 2.159270614,
@@ -4359,7 +4433,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.88735318183899
+    "time_s": 28.19093632698059
    },
    {
     "M_K": 2.169270614,
@@ -4386,7 +4460,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.049482345581055
+    "time_s": 28.142524242401123
    }
   ],
   "row_chosen_N": {
@@ -4414,7 +4488,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 15.682522058486938
+   "time_s": 31.71551752090454
   },
   "row_chosen_2N": {
    "M_K": 2.069270614,
@@ -4441,7 +4515,61 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 30.402060747146606
+   "time_s": 26.805662155151367
+  },
+  "row_input_N": {
+   "M_K": 2.069270614,
+   "ok": true,
+   "reasons": [],
+   "role": "fine",
+   "theta_max_deg": 15.28832299273602,
+   "margin_deg": 4.2294374009455415,
+   "min_sin_angle": 0.05061812164610304,
+   "n_flip_interior": 0,
+   "n_crossings_sampled": 0,
+   "pileup_pairs_interior": 0,
+   "mpp_sign_changes": 1,
+   "mpp_quality_ok": true,
+   "qa_violations": [],
+   "law_violations": [],
+   "L_c": 21.490233049915496,
+   "x_K": 2.310682804390697,
+   "x_F": 47.8406936798814,
+   "n_axis": 2400,
+   "M_A": 1.229270614396492,
+   "M_d_moc": 5.0,
+   "moc_corrector": "converge",
+   "moc_gate_pass": true,
+   "moc_gate_ok": true,
+   "moc_gate_reason": null,
+   "time_s": 31.71551752090454
+  },
+  "row_input_2N": {
+   "M_K": 2.069270614,
+   "ok": true,
+   "reasons": [],
+   "role": "window",
+   "theta_max_deg": 15.287610656248882,
+   "margin_deg": 4.229987928295663,
+   "min_sin_angle": 0.04231325730115949,
+   "n_flip_interior": 0,
+   "n_crossings_sampled": 0,
+   "pileup_pairs_interior": 0,
+   "mpp_sign_changes": 1,
+   "mpp_quality_ok": true,
+   "qa_violations": [],
+   "law_violations": [],
+   "L_c": 21.49290364330262,
+   "x_K": 2.3107569483862678,
+   "x_F": 47.85878045135963,
+   "n_axis": 4800,
+   "M_A": 1.229270614396492,
+   "M_d_moc": 5.0,
+   "moc_corrector": "converge",
+   "moc_gate_pass": true,
+   "moc_gate_ok": true,
+   "moc_gate_reason": null,
+   "time_s": 26.805662155151367
   },
   "rows_selected": {
    "2.069270614": {
@@ -4470,7 +4598,7 @@
      "moc_gate_pass": true,
      "moc_gate_ok": true,
      "moc_gate_reason": null,
-     "time_s": 15.682522058486938
+     "time_s": 31.71551752090454
     },
     "at_2N": {
      "M_K": 2.069270614,
@@ -4497,10 +4625,10 @@
      "moc_gate_pass": true,
      "moc_gate_ok": true,
      "moc_gate_reason": null,
-     "time_s": 30.402060747146606
+     "time_s": 26.805662155151367
     }
    }
   }
  },
- "elapsed_s": 2071.522880792618
+ "elapsed_s": 2468.5411036014557
 }

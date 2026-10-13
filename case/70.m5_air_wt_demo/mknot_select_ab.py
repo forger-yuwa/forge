@@ -1,14 +1,15 @@
 """case/70: M_knot の選び方 (forge_design.evaluate.mknot_select、規則 min_theta_max_v1) の V1a・V6 (設計計算だけ、forge 0 step)。
 
-plan: plans/active/tooling-nozzle-mknot-auto.md §6 V1a・V6 (§5.1 #2・#2b)。問題は problem_m5_air_ns2_euler.yaml (r_t 0.0250733 m を固定、
+plan: plans/active/tooling-nozzle-mknot-auto.md §6 V1a・V6 (§5.1 #2・#2b・#2c)。問題は problem_m5_air_ns2_euler.yaml (r_t 0.0250733 m を固定、
 長さ 1.2 m を from_length で固定)。出力は _mknot_select/ (JSON とログ)。
 
   v6   低い側の境目と最小の A/B: n_axis_inv 2400 と 4800 で M_K 1.90〜2.20 を 0.01 刻みに評価し、成立の切り替わりの区間を
-       幅 ≤ 0.001 まで二分法で詰める。2400 と 4800 の境目の保守的な側を共通の境目 (mknot_select.conservative_boundaries) とし、
-       その境目で両方の解像度の選択をそれぞれ選び直す (§4.2 の規則: 制約と距離 → 最小 → 同点; 0.01 の格子なので詰めは格子
-       そのもの)。各解像度の境目だけで選んだ値 (#2 の V6 と同じ選び方) も記録する (合否には使わない)。
-       合格 (§6 V6): 選択値の差 ≤ 0.01・両方の選択点が両方の解像度で全部の制約を満たす・選択点から保守的な (共通の) 境目まで
-       ≥ 0.05。不合格でも表と判定を JSON に残す (境目が動いたのか最小が動いたのかを表で区別)。
+       幅 ≤ 0.001 まで二分法で詰める。2400 と 4800 の境目を全部残し (対にしてまとめない; mknot_select.conservative_boundaries、
+       §5.1 #2c)、全部の境目の成立側の端からの距離で両方の解像度の選択をそれぞれ選び直す (§4.2 の規則: 制約と距離 → 最小 →
+       同点; 0.01 の格子なので詰めは格子そのもの)。各解像度の境目だけで選んだ値 (#2 の V6 と同じ選び方) も記録する (合否には
+       使わない)。
+       合格 (§6 V6): 選択値の差 ≤ 0.01・両方の選択点が両方の解像度で全部の制約を満たす・選択点から全部の境目まで ≥ 0.05。
+       不合格でも表と判定を JSON に残す (境目が動いたのか最小が動いたのかを表で区別)。
   v1a  固定の入力の再現: select_mknot を全範囲で回す (N 2400)。合格 (§6 V1a): (a) 選んだ点が 2.03〜2.10 で保守的な境目から ≥ 0.05、
        (b) 評価の値が _mknot_sweep/low_end_N2400.json・low_end2_N2400.json・res_N2400.json と同じ M_K で相対 1e-9。
        §4.2 の格子の原点は M_A + 0.1 (M_A は軸のアンカーの M、M5 では 1.2293) なので select_mknot の評価点は掃引の丸い M_K
@@ -93,10 +94,10 @@ def run_v6(raw, workers, workers_2n, log):
         log(f"  その解像度の境目だけの選択 (記録): {own.get('chosen')!r} ({own.get('reason') or own.get('error')})")
         res[N] = {"boundaries": bnd, "rule_own_boundary": own}
         evs[N] = ev
-    # 共通の境目 (2400 と 4800 の保守的な側) で両方を選び直す (§4.2; 候補は 0.01 の格子と共通の境目 + ΔM_safe の点)
+    # 全部の境目 (2400 と 4800 の両方、まとめない) で両方を選び直す (§4.2; 候補は 0.01 の格子と境目 + ΔM_safe の点)
     grid_rows = {N: [r for r in evs[N].table() if r.get("role") == "grid"] for N in (2400, 4800)}
     rc = MS.reselect_common(evs[2400], evs[4800], grid_rows[2400], grid_rows[4800], tie_deg=1e-3, dM_safe=0.05,
-                            bisect_tol=1e-3, pair_tol=0.1, safe_range=rng, candidate_roles=("grid", "safe"), log=log)
+                            bisect_tol=1e-3, safe_range=rng, candidate_roles=("grid", "safe"), log=log)
     common = rc["common"]
     for N, tag in ((2400, "N"), (4800, "2N")):
         rule = rc[tag]
@@ -105,7 +106,7 @@ def run_v6(raw, workers, workers_2n, log):
         res[N]["rule"] = rule
         res[N]["boundaries_after_reselect"] = rc["boundaries_N" if tag == "N" else "boundaries_2N"]
         res[N]["n_eval"] = evs[N].n_eval
-        log(f"  {N}: 共通の境目で選び直した選択 {rule.get('chosen')!r} ({rule.get('reason') or rule.get('error')})")
+        log(f"  {N}: 全部の境目で選び直した選択 {rule.get('chosen')!r} ({rule.get('reason') or rule.get('error')})")
     c24, c48 = res[2400]["rule"].get("chosen"), res[4800]["rule"].get("chosen")
     # 交差の評価: 各解像度の選択点を相手の解像度でも評価する (格子の外の点なら新しく評価; 少数なので逐次)
     pts = [c for c in (c24, c48) if c is not None]
@@ -156,8 +157,8 @@ def run_v6(raw, workers, workers_2n, log):
             if r.get("reasons"):
                 why.append(f"{N}: " + "; ".join(r["reasons"])[:90])
         log(f"  {t['M_K']:<9.6f} | {cells[0]} | {cells[1]} | {' / '.join(why)}")
-    log(f"V6 判定: {'PASS' if judg['pass'] else 'FAIL'} {checks} 選択 (共通の境目で選び直し) 2400 {c24!r}・4800 {c48!r}、距離 "
-        f"{_fmt(judg['distance_2400'], '.4f')}・{_fmt(judg['distance_4800'], '.4f')}、保守的な (共通の) 境目 {judg['conservative_boundary']}"
+    log(f"V6 判定: {'PASS' if judg['pass'] else 'FAIL'} {checks} 選択 (全部の境目で選び直し) 2400 {c24!r}・4800 {c48!r}、距離 "
+        f"{_fmt(judg['distance_2400'], '.4f')}・{_fmt(judg['distance_4800'], '.4f')}、効いている境目 (下の最大・上の最小) {judg['conservative_boundary']}"
         f"、各解像度の境目だけの選択 (記録) {judg['chosen_own_boundary']}")
     return {"problem": str(PROB), "grid": grid, "rule": MS.RULE_NAME, "N": {str(k): v for k, v in res.items()},
             "cross": cross, "judgment": judg, "table": table}
@@ -221,16 +222,17 @@ def run_v1a(raw, workers, workers_2n, gate, log):
         log("解像度のゲート (§4.2; V1a の合否には入れない)")
         g = MS.resolution_gate(raw, sel["chosen"], 2400, select_result=sel, base_dir=C, workers=(workers, workers_2n),
                                raise_on_fail=False, log=log)
-        log(f"  ゲート: {'PASS' if g['pass'] else 'FAIL'} {g['checks']} 共通の境目で選び直した N {g['chosen_N']!r} "
+        log(f"  ゲート: {'PASS' if g['pass'] else 'FAIL'} {g['checks']} 全部の境目で選び直した N {g['chosen_N']!r} "
             f"({g['chosen_N_reason']})・2N {g['chosen_2N']!r} ({g['chosen_2N_reason']})、入力からの動き {g['moved_N']!r}、"
-            f"共通の境目まで N {_fmt(g['distance_to_conservative_boundary'], '.4f')}・2N {_fmt(g['distance_2N'], '.4f')}、共通の境目 "
-            f"{[(b['kind'], round(b['feasible_end'], 6), b['source'], b['shift_2N']) for b in g['common_boundaries'] if abs(b['feasible_end'] - sel['chosen']) < 0.5]}"
+            f"全部の境目まで N {_fmt(g['distance_to_conservative_boundary'], '.4f')}・2N {_fmt(g['distance_2N'], '.4f')}、全部の境目 "
+            f"{[(b['kind'], round(b['feasible_end'], 6), b['source'], b['nearest_other']) for b in g['common_boundaries'] if abs(b['feasible_end'] - sel['chosen']) < 0.5]}"
             f"、2N の境目 {[(b['kind'], round(b['lo'], 6), round(b['hi'], 6)) for b in g['boundaries_2N']]}、理由 {g['reasons']}、"
             f"警告 {g['warnings']}")
         out["resolution_gate"] = {k: v for k, v in g.items()
-                                  if k not in ("rows_N", "rows_2N", "row_chosen_N", "row_chosen_2N", "rows_selected")} | {
+                                  if k not in ("rows_N", "rows_2N", "row_chosen_N", "row_chosen_2N", "row_input_N", "row_input_2N",
+                                               "rows_selected")} | {
             "rows_N": [_slim(r) for r in g["rows_N"]], "rows_2N": [_slim(r) for r in g["rows_2N"]],
-            "row_chosen_N": _slim(g["row_chosen_N"]), "row_chosen_2N": _slim(g["row_chosen_2N"]),
+            **{k: (None if g[k] is None else _slim(g[k])) for k in ("row_chosen_N", "row_chosen_2N", "row_input_N", "row_input_2N")},
             "rows_selected": {k: {kk: _slim(vv) for kk, vv in v.items()} for k, v in g["rows_selected"].items()}}
     return out
 
