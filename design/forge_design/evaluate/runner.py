@@ -122,7 +122,7 @@ DIRECT_DV = ("theta_max_deg", "theta_e_deg", "L_over_rt")
 BELL_MODES = ("direct_bspline", "moc_rao")  # geometry.bell_mode (無し = 従来の bell_type の経路)
 # (M) 特性曲線モード (plan bell-two-mode §4.4・§5.1 #6 (W1)): geometry に書けるキー (寸法 spec は (D) と同じ `BellC2Spec`) と dv。
 # L は生成器の壁ファイルが決めるので dv の L_over_rt は照合用 (壁の終点 x_E と相対 RAO_SPEC_RTOL で一致しなければ止める)
-RAO_GEOMETRY_KEYS = ("bell_mode", "rao_wall_file", "rao_offset_file", "R_t", "contraction_ratio", "L_U", "L_pipe")
+RAO_GEOMETRY_KEYS = ("bell_mode", "rao_wall_file", "rao_offset_file", "rao_perturb", "R_t", "contraction_ratio", "L_U", "L_pipe")
 RAO_DV = ("L_over_rt",)
 RAO_SPEC_RTOL = 1.0e-9                      # 壁ファイルの L・ε・R_t と問題の spec の一致 (相対)
 
@@ -202,6 +202,18 @@ def _rao_exhaust_check(p: Problem, setup: dict | None) -> dict:
     return {"verified": True, "generator_exhaust": str(setup["exhaust"]), "problem_exhaust": str(gpath)}
 
 
+def rao_perturb_dv(p) -> tuple:
+    """(M) の摂動の設計変数名 (`geometry.rao_perturb: {family, K}` があれば `pert_a1`..`pert_aK`、無ければ空)。plan §5.1 #8c。"""
+    g = p.geometry if hasattr(p, "geometry") else (p.get("geometry") or {})
+    rp = g.get("rao_perturb")
+    if not rp:
+        return ()
+    K = int(rp.get("K", 0))
+    if K < 1:
+        raise ValueError("geometry.rao_perturb.K は 1 以上")
+    return tuple(f"pert_a{k}" for k in range(1, K + 1))
+
+
 def _build_wall_rao(p: Problem) -> tuple:
     """(M) の壁 (plan §4.4・§5.1 #6 (W1)): `geometry.rao_wall_file` (生成器の壁ファイル) を `rao_axisym.load_rao_wall` で読み、
     (D) と同じ収縮部・入口直管につなぐ (`RaoBellWall`、スロートで C2・B で C1)。壁ファイルの L (= 終点 x_E)・ε (= r_E²)・R_t
@@ -209,10 +221,12 @@ def _build_wall_rao(p: Problem) -> tuple:
     (黙って合わせない)。戻り (RaoBellWall, 記録 dict = load_rao_wall の記録 + 照合 `checks` + 接合 `joints` + 寸法 spec)。"""
     from ..geometry.rao_axisym import load_rao_wall
     from ..geometry.wall import RaoBellWall
-    missing = [k for k in RAO_DV if k not in p.dv]
-    extra = [k for k in p.dv if k not in RAO_DV]
+    pert_dv = rao_perturb_dv(p)
+    missing = [k for k in RAO_DV + pert_dv if k not in p.dv]
+    extra = [k for k in p.dv if k not in RAO_DV + pert_dv]
     if missing or extra:
-        raise ValueError(f"geometry.bell_mode moc_rao の dv は {list(RAO_DV)} (L は壁ファイルとの照合用; 欠け {missing}・余分 {extra})")
+        raise ValueError(f"geometry.bell_mode moc_rao の dv は {list(RAO_DV + pert_dv)} (L は壁ファイルとの照合用、"
+                         f"pert_a* は geometry.rao_perturb の係数; 欠け {missing}・余分 {extra})")
     spec = rao_bell_spec(p)
     pth = p.rao_wall_file
     if pth is None:
@@ -254,7 +268,13 @@ def _build_wall_rao(p: Problem) -> tuple:
     if errs:
         raise ValueError("geometry.bell_mode moc_rao: 壁ファイル " + str(pth) + " が問題と合わない — " + "; ".join(errs))
     chk["gas"] = _rao_exhaust_check(p, setup)
-    wall = RaoBellWall(rw, spec, offset=offset)
+    perturb = None
+    if pert_dv:
+        from ..geometry.wall import RaoPerturbation
+        perturb = RaoPerturbation([dv_value(p, k) for k in pert_dv], float(rw.x_B), float(rw.x_end),
+                                  family=str(p.geometry["rao_perturb"].get("family", "sin2_sin")))
+        rec["perturb"] = perturb.record()
+    wall = RaoBellWall(rw, spec, offset=offset, perturb=perturb)
     msgs = wall.validate()
     if msgs:
         raise ValueError("(M) の壁の検査に不合格: " + "; ".join(msgs))

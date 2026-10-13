@@ -216,16 +216,17 @@ class RaoBellWall:
     `r(x, deriv)` は deriv 0..2 ($r''$ は記録と試験用: 円弧は閉じた式、BE は B-spline の 2 階微分)。$[x_{in},x_e]$ の外は
     `ValueError` (端から `END_TOL` 以内の丸めだけ端へ寄せる — `DirectBellWall` と同じ)。
     `offset` (`DisplacementOffset`、既定なし): δ* 補正の物理壁 = 非粘性壁 + δ(x) (固定 x の半径方向、拡大部だけ。
-    δ はスロートで値・1・2 階が 0 なので、スロートの C2 と物理スロートの r・r′・r″ は変わらない — plan §5.1 #7 (7b-4))。"""
+    δ はスロートで値・1・2 階が 0 なので、スロートの C2 と物理スロートの r・r′・r″ は変わらない — plan §5.1 #7 (7b-4))。
+    `perturb` (`RaoPerturbation`、既定なし): 物理壁にさらに足す B〜E の摂動 (plan §5.1 #8c。B で値・傾き 0、E で値 0)。"""
 
     END_TOL = 1.0e-9
 
-    def __init__(self, rao_wall, spec, offset=None) -> None:
+    def __init__(self, rao_wall, spec, offset=None, perturb=None) -> None:
         from .wall_walldriven import UpstreamThroatPoly
         spec.check()
         if abs(float(rao_wall.R_t) - float(spec.R_t)) > 1e-9 * float(spec.R_t):
             raise ValueError(f"RaoBellWall: 壁の R_t {rao_wall.R_t} と寸法 spec の R_t {spec.R_t} が違う (スロートで C2 にならない)")
-        self.rao, self.spec, self.offset = rao_wall, spec, offset
+        self.rao, self.spec, self.offset, self.perturb = rao_wall, spec, offset, perturb
         if offset is not None and abs(float(offset.x_end) - float(rao_wall.x_end)) > 1e-6 * max(1.0, float(rao_wall.x_end)):
             raise ValueError(f"RaoBellWall: δ* のずれの終点 {offset.x_end} と非粘性壁の終点 {rao_wall.x_end} が違う")
         self.up = UpstreamThroatPoly(r_U=spec.r_U, R_t=spec.R_t, L_U=spec.L_U, r_t=1.0)
@@ -247,6 +248,8 @@ class RaoBellWall:
         out = self._expansion_inviscid(x, deriv)
         if self.offset is not None:
             out = out + self.offset(x, deriv)
+        if self.perturb is not None:
+            out = out + self.perturb(x, deriv)
         return out
 
     def _expansion_inviscid(self, x, deriv: int):
@@ -391,3 +394,54 @@ class DisplacementOffset:
                 "delta_end": float(self(np.array([self.x_end]))[0]),
                 "d1_min": float(d1.min()), "d1_max": float(d1.max()), "x_d1_max": float(xs[int(np.argmax(d1))]),
                 "d2_absmax": float(np.max(np.abs(d2))), "x_d2_absmax": float(xs[int(np.argmax(np.abs(d2)))])}
+
+
+class RaoPerturbation:
+    r"""(M) の物理壁の B〜E に足す摂動 $\sum_k a_k\,\eta_k(t)$、$t=(x-x_B)/(x_E-x_B)$ (plan tooling-nozzle-bell-two-mode §5.1 #8c)。
+
+    族 `"sin2_sin"`: $\eta_k(t)=\sin^2(\pi t/2)\sin(k\pi t)$ — $\eta_k(0)=\eta_k'(0)=\eta_k(1)=0$、$\eta_k'(1)=k\pi(-1)^k$
+    (B で値・傾き 0 = 円弧との C1、E で値 0 = 出口半径を保つ、E の傾きは自由 = 出口の角を固定しない)。
+    `__call__(x, deriv)` は deriv 0..2、区間の外は 0。"""
+
+    FAMILIES = ("sin2_sin",)
+
+    def __init__(self, coeffs, x_B: float, x_E: float, family: str = "sin2_sin") -> None:
+        if family not in self.FAMILIES:
+            raise ValueError(f"RaoPerturbation: family は {self.FAMILIES}")
+        if not (float(x_E) > float(x_B)):
+            raise ValueError("RaoPerturbation: x_E > x_B")
+        self.a = np.asarray(coeffs, dtype=float)
+        if not np.all(np.isfinite(self.a)):
+            raise ValueError("RaoPerturbation: 係数が非有限")
+        self.x_B, self.x_E, self.family = float(x_B), float(x_E), family
+
+    @staticmethod
+    def _eta(t, k: int, deriv: int):
+        # η = s²·g、s = sin(πt/2)、g = sin(kπt)
+        p, q = 0.5 * np.pi, k * np.pi
+        s, c = np.sin(p * t), np.cos(p * t)
+        g, gp, gpp = np.sin(q * t), q * np.cos(q * t), -q * q * np.sin(q * t)
+        f, fp, fpp = s * s, 2.0 * p * s * c, 2.0 * p * p * (c * c - s * s)
+        if deriv == 0:
+            return f * g
+        if deriv == 1:
+            return fp * g + f * gp
+        return fpp * g + 2.0 * fp * gp + f * gpp
+
+    def __call__(self, x, deriv: int = 0):
+        if deriv not in (0, 1, 2):
+            raise ValueError("RaoPerturbation: deriv は 0..2")
+        x = np.asarray(x, dtype=float)
+        h = self.x_E - self.x_B
+        t = (x - self.x_B) / h
+        m = (t > 0.0) & (t <= 1.0 + 1e-12)
+        tt = np.clip(t, 0.0, 1.0)
+        out = np.zeros_like(x, dtype=float)
+        for k, a in enumerate(self.a, start=1):
+            if a != 0.0:
+                out = out + a * self._eta(tt, k, deriv) / h ** deriv
+        return np.where(m, out, 0.0)
+
+    def record(self) -> dict:
+        return {"family": self.family, "coeffs": self.a.tolist(), "x_B": self.x_B, "x_E": self.x_E,
+                "end_slope_change": float(self(np.array([self.x_E]), 1)[0])}

@@ -80,6 +80,9 @@ def dv_order_of(raw: dict) -> tuple:
         return DV_ORDER
     if mode == "direct_bspline":
         return DV_ORDER_DIRECT
+    if mode == "moc_rao":
+        # (M) の摂動の探索 (plan bell-two-mode §5.1 #8c): pert_a1..K と固定の L
+        return runner.rao_perturb_dv(raw) + ("L_over_rt",)
     raise ValueError(f"geometry.bell_mode '{mode}' の設計変数の並びは未定義")
 
 # 問題 YAML の所在を基準に解決する相対パスのキー (probdef: gas.species_db・gas.exhaust・geometry.rao_wall_file [(M) の壁ファイル、
@@ -744,7 +747,7 @@ class Campaign:
         raise RuntimeError("EI の候補に成立・未評価の点が無い")
 
     def run_soo(self, n_doe: int = 12, n_max: int = 40, n_confirm: int = 8, window: int = 8, tol: float = 1e-4,
-                repeat_best: bool = True) -> dict:
+                repeat_best: bool = True, with_start: bool = False) -> dict:
         """§5.1 #8b: LHS n_doe → EI 1 点ずつ。**停止候補** = EI による PASS が window 点以上かつ b_K − b_{K−window} < tol、
         **予算打切り** = 評価 n_max 回 (失敗込み)。その後 **確認** n_confirm 評価 (最大 n_max + n_confirm)、G = 確認後の最良 − 停止時の最良。
         最後に最良形を同じ設定で回し直す (再現性)。要約は `soo_summary.json` (評価ごとに書き直す)。"""
@@ -755,7 +758,14 @@ class Campaign:
         cand = lhs(self.bounds[act], 3 * n_doe, seed=self.seed)
         feas = [x for x in cand if self.feasible(self._soo_full(x))]
         doe = feas[:n_doe]
-        print(f"[soo] DOE {len(doe)} 点 (LHS {3*n_doe} 点のうち成立 {len(feas)} 点の先頭)", flush=True)
+        print(f"[soo] DOE {len(doe)} 点 (LHS {3*n_doe} 点のうち成立 {len(feas)} 点の先頭)"
+              + (" + 出発点 (問題 YAML の dv.value)" if with_start else ""), flush=True)
+        if with_start and "doe_start" not in done:
+            # 出発点 (plan bell-two-mode §5.1 #8c: a = 0 = 補正済み Rao) を DOE の先頭に必ず 1 点
+            x0 = np.array([float(self.base_raw["dv"][k]["value"]) for k in self.dv_order])
+            if not self.feasible(x0):
+                raise ValueError("出発点 (dv.value) が幾何の成立を満たさない")
+            self.evaluate(x0, "doe_start")
         for i, xa in enumerate(doe):
             tag = f"doe_{i:03d}"
             if tag not in done:
@@ -852,6 +862,7 @@ def main(argv=None) -> int:
     ap.add_argument("--n-confirm", type=int, default=8)
     ap.add_argument("--window", type=int, default=8)
     ap.add_argument("--tol", type=float, default=1e-4)
+    ap.add_argument("--with-start", action="store_true", help="--soo: 問題 YAML の dv.value (出発点) を DOE の先頭に必ず評価")
     a = ap.parse_args(argv)
     if a.gate_only:
         g = gate_run(a.problem, a.campaign_dir)
@@ -862,7 +873,7 @@ def main(argv=None) -> int:
         return 0 if g["status"] == "PASS" else 1
     c = Campaign(a.problem, a.campaign_dir, a.seed_res, ref=tuple(a.ref), seed=a.seed)
     if a.soo:
-        c.run_soo(a.n_doe, a.n_max, a.n_confirm, a.window, a.tol)
+        c.run_soo(a.n_doe, a.n_max, a.n_confirm, a.window, a.tol, with_start=a.with_start)
     else:
         c.run(a.n_doe, a.n_iter, a.batch)
     return 0
