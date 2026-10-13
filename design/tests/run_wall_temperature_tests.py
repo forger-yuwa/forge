@@ -16,6 +16,9 @@
       `integral_thermal_bc` の dict が変更前 (REF_COMMIT) の `wall_bcond_line`・`wall_thermal_bc_integral` の結果と同一。
       さらに変更前のコード (REF_COMMIT の design/・solver_density_cuda/data を git archive) と今のコードで同じ問題を `--prepare-only` し、生成物
       (bcondConfig・solverConfig・delta_r_initial ほか・prepare_info から environment と壁の当てはめの所要時間を除いたもの) がバイト同一。
+      今のコードの側は逆 MOC の出口の切り方を直す前の規則に戻して回す (2026-10-13 plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c で
+      意図して変えた; 両問題とも直す前の切り方が x_F の壁点を落としていた)。今の切り方では壁の長さに依るファイルだけが違い、設計壁の終点が
+      下流へ動くことを別に見る。
 
 forge の計算は回さない (変換器と `forge --resolve-species` は prepare が使う)。出力は WALL_TEMP_TEST_OUT (無ければ一時ディレクトリで、
 全部合格なら最後に消す; run の写しで 700 MB ほどになる)。
@@ -124,14 +127,23 @@ def ref_x_of_table(prof: dict, scale: float, d: dict, geom: dict) -> np.ndarray:
     return np.asarray(out)
 
 
-def prepare_cli(design_dir: Path, problem: Path, run_dir: Path, env_extra=None):
-    """`deltastar_loop --init-integral --prepare-only` (CFD 前の準備) を design_dir のコードで回す。戻り (rc, ログ)。"""
+def prepare_cli(design_dir: Path, problem: Path, run_dir: Path, env_extra=None, old_exit_cut: bool = False):
+    """`deltastar_loop --init-integral --prepare-only` (CFD 前の準備) を design_dir のコードで回す。戻り (rc, ログ)。
+    `old_exit_cut`: 逆 MOC の出口の切り方を直す前 (plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c) の規則 `wall[:, 0] <= x_F` に
+    戻して回す (変更前のコードとの比較で、意図して変えた切り方の差を除くため)。"""
     if run_dir.exists():
         shutil.rmtree(run_dir)
     env = dict(os.environ, FORGE_ROOT=str(REPO), FORGE_NO_DESIGN_REPORT="1", **(env_extra or {}))
-    r = subprocess.run([PY, "-m", "forge_design.feedback.deltastar_loop", "--problem", str(problem), "--euler-ref", "none",
-                        "--run-dir", str(run_dir), "--init-integral", "--prepare-only"],
-                       cwd=design_dir, env=env, capture_output=True, text=True)
+    args = ["--problem", str(problem), "--euler-ref", "none", "--run-dir", str(run_dir), "--init-integral", "--prepare-only"]
+    if old_exit_cut:
+        code = ("import runpy, sys; from forge_design.geometry import moc_inverse as MI; "
+                "MI._cut_wall_at_exit = lambda w, xF: (w[w[:, 0] <= xF], {}); "
+                f"sys.argv = ['deltastar_loop'] + {args!r}; "
+                "runpy.run_module('forge_design.feedback.deltastar_loop', run_name='__main__')")
+        cmd = [PY, "-c", code]
+    else:
+        cmd = [PY, "-m", "forge_design.feedback.deltastar_loop", *args]
+    r = subprocess.run(cmd, cwd=design_dir, env=env, capture_output=True, text=True)
     (run_dir.parent / f"{run_dir.name}.prepare.log").write_text(r.stdout + r.stderr)
     return r.returncode, r.stdout + r.stderr
 
@@ -524,7 +536,9 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     tag = "c70" if label.startswith("case/70") else "c45"
     r_old, r_new = OUT / f"v4_{tag}_before", OUT / f"v4_{tag}_after"
     rc_o, log_o = prepare_cli(ref_root / "design", prob, r_old)
-    rc_n, log_n = prepare_cli(DESIGN, prob, r_new)
+    # 今のコードは出口の切り方を直す前の規則に戻して比べる (§5.1 #4c: c2b・case/45 生産は直す前の切り方が x_F の壁点を落としていた;
+    # case/70 exit_cut_ab.py)。今の切り方の差は下で別に見る
+    rc_n, log_n = prepare_cli(DESIGN, prob, r_new, old_exit_cut=True)
     if rc_o or rc_n:
         check(f"V4 {label}: prepare-only (変更前・今) が通る", False, (log_o if rc_o else log_n)[-300:])
         continue
@@ -544,6 +558,20 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
           f"違うファイル {diff}、prepare_info の違うキー {pi_diff}、余分 {extra}")
     check(f"V4 {label}: 一様・断熱の run の load_run_profile は None", WTP.load_run_profile(r_new) is None)
     v4[label + " prepare"] = bool(not diff and pi_same and not extra)
+    # 今の切り方 (§5.1 #4c): 違うのは壁の長さに依るファイルだけで、設計壁の終点が直す前より下流 (x_F) に動く
+    r_cut = OUT / f"v4_{tag}_after_exitcut"
+    rc_c, log_c = prepare_cli(DESIGN, prob, r_cut)
+    if rc_c:
+        check(f"V4 {label}: 今の切り方の prepare-only が通る", False, log_c[-300:])
+        continue
+    wall_dep = {"delta_r_initial.json", "delta_r_initial.csv", "wall_design.csv", "wall_physical.csv", "wall_repr.json", "MESH_QUALITY.txt"}
+    diff_c = [f for f in CMP_FILES if (r_old / f).exists() != (r_cut / f).exists()
+              or ((r_old / f).exists() and (r_old / f).read_bytes() != (r_cut / f).read_bytes())]
+    dom_o = json.loads((r_old / "wall_repr.json").read_text())["domain"]
+    dom_c = json.loads((r_cut / "wall_repr.json").read_text())["domain"]
+    check(f"V4 {label}: 今の切り方は壁の長さに依るファイルだけが違い、設計壁の終点が直す前より下流 (入口端は同じ)",
+          set(diff_c) <= wall_dep and dom_c[0] == dom_o[0] and dom_c[1] > dom_o[1],
+          f"違うファイル {diff_c}、終点 {dom_o[1]!r} → {dom_c[1]!r} (差 {dom_c[1] - dom_o[1]:.6e} r_t)")
 SUMMARY["V4"] = v4
 
 # --- codex result レビュー 2026-10-13 m1: s = 0 を点として含まない s の表は拒否 (代表値と実際のスロートの温度の食い違いを作らない) ---

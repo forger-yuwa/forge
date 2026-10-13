@@ -17,10 +17,15 @@
       丸め (内側・外側) (e) 前の設計の記録 (wall_repr.json) が無い・欠けている・S が prepare_info と違う → 例外 (f) 同じ設計への写しが恒等
       (ビット同一) (g) 長さを変えた設計への写しで区切りの点が新しい設計の区切りの点に写る (相対 1e-12)・s → x が `wall_temperature.to_x_m` と
       同じ値 (h) `solve_rt_throat --prev` (同じ設計) の r_t が写しの前後で同じ (case/70 sizing_ab.py の腕 B と同じ入力; 差 ≤ 1e-12 m)。
+      **出口の切り方 (§5.1 #4c, 2026-10-13)**: run_0010・run_0009 は切り方を直す前の設計 (c2b・c2 の YAML は x_F の壁点を落として 1 点間隔
+      短い壁で作られた; case/70 exit_cut_ab.py)。「同じ設計」を前提にする実データの項目 (M1 の通る側・V4(a)(f)・表の端・(h)) は切り方を
+      直す前の規則 (`wall[:, 0] <= x_F`) に戻して作り (`old_exit_cut`)、今の切り方では c2b の設計壁が run_0010 の壁ファイルより
+      その 1 点間隔だけ長く x_F で終わることを別に見る。
   --card (要求カードの NS 後の補正、§4.3 3): case/70 の c2b カードを `build_problem(ns_prev_run=...)` で作る (出力は一時ディレクトリ)。
       δ_E は run_0010 の CFD 前の補正 (delta_r_initial.csv の δ_r を同じ 5 次補間で NS の列 [run_0010 × run_0012 の抽出の x] に写したもの;
       表の端は抽出の float32 の丸めのまま) で、r_t が CFD 前のカードの r_t (0.024973561273227432 m; 内側の許容差 2.5e-8 m で止まった残差の
-      分を戻した値) を 1e-12 m で再現することも見る。
+      分を戻した値) を 1e-12 m で再現することも見る (同じ設計が前提なので出口の切り方を直す前の規則で作ったカードで; 今の切り方の
+      カードは出口が 1 点間隔長く写しが恒等でない — §5.1 #4c)。
       (i) 実寸の長さがカードと公差内 (寸法ゲート PASS) (ii) `_card.ns_correction` の sha256 が実ファイルと一致・表の端が最終の設計の入口端・
       出口と一致 (iii) `deltastar_loop --delta-r-csv` の prepare-only が通り、表を 1 値書き換えると run dir を作る前に止まる。
       **実データの δ_E (run_0010 × run_0012 / × run_0003) では、解いた r_t (約 0.02508 m) で設計チェーンの壁の検査 (設計壁区間で半径が非単調)
@@ -40,6 +45,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import filecmp
 import hashlib
 import inspect
@@ -319,6 +325,19 @@ def _write_next_with_held(src_csv: Path, dst_csv: Path, held_idx) -> None:
     dst_csv.write_text("\n".join(lines) + "\n")
 
 
+@contextlib.contextmanager
+def old_exit_cut():
+    """出口の切り方を直す前 (plan §5.1 #4c) の規則 `wall[:, 0] <= x_F` に戻す。run_0010・run_0009 はこの規則で作った設計なので、
+    c2b・c2 の YAML と「同じ設計」を前提にする項目はこの中で設計チェーンを回す。"""
+    from forge_design.geometry import moc_inverse as MI
+    new = MI._cut_wall_at_exit
+    MI._cut_wall_at_exit = lambda w, xF: (w[w[:, 0] <= xF], {})
+    try:
+        yield
+    finally:
+        MI._cut_wall_at_exit = new
+
+
 def test_real(tmp: Path):
     print("\n--- M1 の伝播・V4 (実データ: case/70) ---")
     need = [NS10 / "wall_repr.json", NS10 / "prepare_info.json", NEXT_A_ZONE, NEXT_B_ZONE, PROB_C2B]
@@ -341,7 +360,21 @@ def test_real(tmp: Path):
     check("M1 出口の近く (x ≈ 48) の held も止まる", ok, msg[:80])
     neg = [int(i) for i in np.where((x > -6.0) & (x < -4.0))[0][:5]]
     _write_next_with_held(NEXT_A_ZONE, prev / "delta_r_next.csv", neg)
-    r = DL.solve_rt_throat(PROB_C2B, R_THROAT, prev_run=prev, delta_r_out=tmp / "m1_go.csv")
+    # §5.1 #4c: 今の切り方では c2b の設計壁は run_0010 の壁ファイル (直す前の切り方) より 1 点間隔長く、x_F で終わる
+    from forge_design.evaluate.runner_axismach import design_chain
+    from forge_design.probdef import load_problem
+    d_now = design_chain(load_problem(PROB_C2B))
+    a_now, x_F_now = DL.design_anchors(d_now["wall"]), float(d_now["exit"]["x_F"])
+    with old_exit_cut():
+        d_old = design_chain(load_problem(PROB_C2B))
+    a_old = DL.design_anchors(d_old["wall"])
+    check("§5.1 #4c: 直す前の切り方の c2b の設計 = run_0010 の壁ファイル (区切りの点がビット同一)", a_old == A10, f"{a_old}")
+    check("§5.1 #4c: 今の切り方では c2b の設計壁が x_F で終わり、run_0010 より 1 点間隔 (0.0339 r_t) 長い (入口端・縮流部は同じ)",
+          a_now["x_exit"] == x_F_now and d_now["exit"]["x_F_appended"] and 0.0338 < a_now["x_exit"] - A10["x_exit"] < 0.0339
+          and a_now["x_in"] == A10["x_in"] and a_now["x_contraction"] == A10["x_contraction"],
+          f"出口 {a_now['x_exit']!r} (x_F {x_F_now!r})、run_0010 {A10['x_exit']!r}、差 {a_now['x_exit'] - A10['x_exit']:.6e} r_t")
+    with old_exit_cut():
+        r = DL.solve_rt_throat(PROB_C2B, R_THROAT, prev_run=prev, delta_r_out=tmp / "m1_go.csv")
     nc = r["ns_correction"]
     check("M1 使用域の外 (x < 0) だけの held では止まらない (寸法が解ける; held は記録)",
           np.isfinite(r["r_t_m"]) and nc["held"]["n_held"] == 5 and nc["held"]["n_held_in_use"] == 0,
@@ -379,8 +412,9 @@ def test_real(tmp: Path):
         np.savetxt(old_tab, np.c_[xo, dEo * fac], delimiter=",", comments="", header="x_rt,delta_r (旧の供給)")
         t = np.loadtxt(old_tab, delimiter=",", skiprows=1)
         return delta_r_from_table(t[:, 0], t[:, 1]), {"kind": "旧の供給 (試験)"}
-    r_old = DL.solve_rt_throat(PROB_C2B, R_THROAT, _delta_supplier=old_supplier)
-    r_new = DL.solve_rt_throat(PROB_C2B, R_THROAT, prev_run=NS10, delta_next=NEXT_B_ZONE, delta_r_out=tmp / "h_new.csv")
+    with old_exit_cut():     # 同じ設計 (run_0010) を前提にする (§5.1 #4c)
+        r_old = DL.solve_rt_throat(PROB_C2B, R_THROAT, _delta_supplier=old_supplier)
+        r_new = DL.solve_rt_throat(PROB_C2B, R_THROAT, prev_run=NS10, delta_next=NEXT_B_ZONE, delta_r_out=tmp / "h_new.csv")
     d_rt = abs(r_new["r_t_m"] - r_old["r_t_m"])
     ref = json.loads(SIZING_AB.read_text())["B"]["r_t_m"] if SIZING_AB.exists() else None
     check("V4(h) solve_rt_throat --prev (同じ設計) の r_t が写しの前後で同じ (差 ≤ 1e-12 m)", d_rt <= 1e-12,
@@ -414,17 +448,27 @@ def test_card(tmp: Path):
     rt = logd["r_t"]["r_t_m"]
     check("カード: r_t は NS 後の補正の固定点 (method)", logd["r_t"]["method"] == "physical_throat_ns_corrected", logd["r_t"]["method"])
     # CFD 前のカードの r_t は内側の許容差 2.5e-8 m で止まっていて残差 res (物理スロート半径 − R) を持つ。NS 補正の経路 (許容差 1e-9 m) は
-    # 同じ δ なら r_t ≈ r_t,CFD前 · R/(R + res) になるはず
+    # 同じ δ なら r_t ≈ r_t,CFD前 · R/(R + res) になるはず。
+    # 「同じ設計」が前提なので、出口の切り方を直す前 (§5.1 #4c) の規則で作る: CFD 前のカード (c2b) と run_0010 はその規則の設計 (x_F の
+    # 壁点を落として 1 点間隔短い)。今の切り方の設計は拡大部が 1 点間隔 (0.0339 r_t) 長く、s の写しで拡大部の表が x_e の比 ≈ 1.0007 で伸びて
+    # r_t が 1.8e-11 m 動く (2026-10-13 実測)
+    with old_exit_cut():
+        logd_o = W.build_problem(CARD_C2B, tmp / "card_oldcut" / "problem_c2b_ns.yaml", ns_prev_run=prev, log=lambda *a, **k: None)
+    rt_o = logd_o["r_t"]["r_t_m"]
+    fo, fn = logd_o["moc_field"], logd["moc_field"]
+    check("カード: 直す前の切り方は x_F の壁点を落とす (x_F − x_e ≈ 0.0339 r_t)、今の切り方は x_F で終わる",
+          0.0338 < fo["x_F"] - fo["x_e"] < 0.0339 and fn["x_e"] == fn["x_F"],
+          f"直す前 x_F − x_e {fo['x_F'] - fo['x_e']:.6e}、今 {fn['x_F'] - fn['x_e']:.1e} r_t、r_t の差 (今 − 直す前) {rt - rt_o:+.1e} m")
     log_c2b = PROB_C2B.with_name(PROB_C2B.name + ".card_log.json")
     res_pre = (json.loads(log_c2b.read_text())["r_t"]["history"][-1]["inner_residual_m"] if log_c2b.exists() else None)
     if res_pre is not None:
         want = RT_C2B_PRECFD * R_THROAT / (R_THROAT + res_pre)
-        check("カード: CFD 前と同じ δ を NS 補正で与えると CFD 前のカードの r_t を再現 (その残差の分を戻して |Δ| ≤ 1e-12 m)",
-              abs(rt - want) <= 1e-12, f"r_t {rt!r}、期待 {want!r} (CFD 前 {RT_C2B_PRECFD!r}・残差 {res_pre:.3e} m)、差 {rt - want:+.1e} m、"
-              f"外側 {len(logd['r_t']['history'])} 回")
+        check("カード: CFD 前と同じ δ を NS 補正で与えると CFD 前のカードの r_t を再現 (その残差の分を戻して |Δ| ≤ 1e-12 m; 直す前の切り方)",
+              abs(rt_o - want) <= 1e-12, f"r_t {rt_o!r}、期待 {want!r} (CFD 前 {RT_C2B_PRECFD!r}・残差 {res_pre:.3e} m)、差 {rt_o - want:+.1e} m、"
+              f"外側 {len(logd_o['r_t']['history'])} 回")
     else:
-        check("カード: CFD 前と同じ δ を NS 補正で与えると CFD 前のカードの r_t を再現 (|Δ| ≤ 2.5e-8 m = CFD 前の内側の許容差)",
-              abs(rt - RT_C2B_PRECFD) <= 2.5e-8, f"r_t {rt!r}、差 {rt - RT_C2B_PRECFD:+.2e} m")
+        check("カード: CFD 前と同じ δ を NS 補正で与えると CFD 前のカードの r_t を再現 (|Δ| ≤ 2.5e-8 m = CFD 前の内側の許容差; 直す前の切り方)",
+              abs(rt_o - RT_C2B_PRECFD) <= 2.5e-8, f"r_t {rt_o!r}、差 {rt_o - RT_C2B_PRECFD:+.2e} m")
     rows = {r_["name"]: r_ for r_ in logd["dimensions"]["rows"]}
     lens = ("pipe_length", "contraction_length", "divergent_length")
     check("カード (i) 実寸の長さがカードと公差内・寸法ゲート PASS", logd["dimensions"]["pass"] and all(rows[k]["pass"] for k in lens),
