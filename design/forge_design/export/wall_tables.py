@@ -807,6 +807,25 @@ if cfd_hdr is not None:
                              % (ex, ex, ex, ex))
         ws.freeze_panes(h0 + 1, 0)
         info["wall_1d"] = {"n_rows": n_cfd, "q_column": qcol}
+wtj = job.get("wall_temperature")
+if wtj:
+    # 壁温分布の表 (run の正本の JSON から; 説明の行・区切りの点・元の表と実寸の表)
+    ws = wb.add_worksheet("wall_temperature"); sheets.append("wall_temperature")
+    r0 = 0
+    for t in wtj["lines"]:
+        ws.write_string(r0, 0, t); r0 += 1
+    r0 += 1
+    ws.write_row(r0, 0, ["anchor", "x_m"], bold); r0 += 1
+    for k, v in wtj["anchors"]:
+        ws.write_string(r0, 0, k); ws.write_number(r0, 1, float(v)); r0 += 1
+    r0 += 1
+    ws.write_row(r0, 0, wtj["columns"], bold); h1 = r0; r0 += 1
+    for row_ in wtj["rows"]:
+        for j, v in enumerate(row_):
+            ws.write_number(r0, j, float(v))
+        r0 += 1
+    ws.freeze_panes(h1 + 1, 0)
+    info["wall_temperature"] = {"n_rows": len(wtj["rows"]), "columns": wtj["columns"]}
 wb.close()
 done({"written": True, "skipped": False, "sheets": sheets, "info": info, "xlsxwriter": xlsxwriter.__version__})
 '''
@@ -830,12 +849,16 @@ def _flatten(d, pre=""):
 
 
 def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None = None, notes: list | None = None,
-               python: str | None = None, wall_1d: dict | None = None, timeout: int = 600, thermal_use: str | None = None) -> dict:
+               python: str | None = None, wall_1d: dict | None = None, timeout: int = 600, thermal_use: str | None = None,
+               wall_temperature: dict | None = None) -> dict:
     """形状表・CFD 壁面量表・条件・注記を `.xlsx` に書く (plan §4.5)。xlsxwriter は design の venv に無いので
     `.venv-pptx` の python (`python`、既定 `PPTX_PY`) を subprocess で呼ぶ。python か xlsxwriter が無ければ書かずに
     `{"written": False, "skipped": True, "reason": ...}` を返す (呼び出し側が飛ばしたことを MANIFEST・README に書く)。
     シート: shape・cfd_wall・conditions・notes と、cfd 表があれば 1 次元の壁伝導の記入用 wall_1d (入力セル t_m・k_W_mK、
-    各壁節点の T_back_K = T_w − q t / k)。`wall_1d` = {"t_m": .., "k_W_mK": ..} で入力セルの初期値 (既定は空欄)。"""
+    各壁節点の T_back_K = T_w − q t / k)。`wall_1d` = {"t_m": .., "k_W_mK": ..} で入力セルの初期値 (既定は空欄)。
+    `wall_temperature` (壁温分布の run だけ; plan tooling-nozzle-wall-temperature-profile §4.4) = {"lines": [説明の行],
+    "anchors": [[名前, x_m]], "columns": [列名], "rows": [[数値]]} を渡すと最後に専用シート `wall_temperature` を足す
+    (None なら今までどおり; ほかのシートの並びは変えない)。"""
     exe = python or PPTX_PY
     if not Path(exe).exists():
         return {"written": False, "skipped": True, "reason": f"python が無い: {exe}"}
@@ -845,11 +868,14 @@ def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None =
     with tempfile.TemporaryDirectory(prefix="wall_xlsx_") as td:
         jp, rp, sp = Path(td) / "job.json", Path(td) / "result.json", Path(td) / "xlsx_job.py"
         sp.write_text(_XLSX_JOB)
-        jp.write_text(json.dumps({"out": str(out_xlsx.resolve()), "result": str(rp),
-                                  "shape_csv": str(Path(shape_csv).resolve()) if shape_csv else None,
-                                  "cfd_csv": str(Path(cfd_csv).resolve()) if cfd_csv else None,
-                                  "conditions": _flatten(conditions), "notes": nts,
-                                  "wall_1d": dict(wall_1d or {}), "thermal_use": thermal_use}, ensure_ascii=False))
+        job = {"out": str(out_xlsx.resolve()), "result": str(rp),
+               "shape_csv": str(Path(shape_csv).resolve()) if shape_csv else None,
+               "cfd_csv": str(Path(cfd_csv).resolve()) if cfd_csv else None,
+               "conditions": _flatten(conditions), "notes": nts,
+               "wall_1d": dict(wall_1d or {}), "thermal_use": thermal_use}
+        if wall_temperature is not None:
+            job["wall_temperature"] = wall_temperature
+        jp.write_text(json.dumps(job, ensure_ascii=False))
         q = subprocess.run([exe, "-I", str(sp), str(jp)], capture_output=True, text=True, timeout=timeout, cwd=td)
         if not rp.exists():
             raise RuntimeError(f"xlsx の作業が結果を返さない (rc={q.returncode}):\n{q.stdout[-2000:]}\n{q.stderr[-2000:]}")

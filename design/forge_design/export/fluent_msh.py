@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -592,6 +593,71 @@ def write_cgns_via_gmsh(msh_path, cgns_path, gmsh_python, timeout: float = 600.0
 
 
 # ---------------------------------------------------------------------------
+# 壁温の point profile (plan tooling-nozzle-wall-temperature-profile §4.4)
+# ---------------------------------------------------------------------------
+
+WALL_PROFILE_NAME = "wall-temperature"
+WALL_PROFILE_FIELD = "temperature"
+_PROFILE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*$")
+
+
+def wall_profile_points_2d(coords, wall_edges, x_tab, T_tab) -> tuple:
+    """壁ゾーンの面中心 (2 節点の中点) と、そこでの壁温を返す: (xy (K,2) [m], T (K,) [K])。並びは `wall_edges` の順
+    (= `write_fluent_msh_2d` が書く壁ゾーンの面の順)。座標は `write_fluent_msh_2d` に渡すのと同じ (x = 軸方向・y = 半径 [m])。
+
+    値は実寸の表 (x_tab [m], T_tab [K]) を面中心の x で 1D 線形補間 (`wall_temperature.eval_Tw`、ソルバと同じ)。
+    **表の範囲外の面中心は例外** (端値で延長しない)。壁ノードでなく面中心で取るのは、Fluent の point profile が境界面へ
+    最近傍で値を割り当てる (既定) ため (壁ノードで書くと面の値が線形分布からずれる; codex plan レビュー M1)。"""
+    from ..wall_temperature import eval_Tw
+    xy = _planar_xy(coords)
+    E = _as_edges(wall_edges, "wall")
+    if len(E) == 0:
+        raise ValueError("壁の辺が無い (壁温の profile を書けない)")
+    if E.min() < 0 or E.max() >= len(xy):
+        raise ValueError(f"壁の辺の節点番号が範囲外 [{E.min()}, {E.max()}] (節点 {len(xy)})")
+    c = 0.5 * (xy[E[:, 0]] + xy[E[:, 1]])
+    xt = np.asarray(x_tab, dtype=float)
+    Tt = np.asarray(T_tab, dtype=float)
+    if xt.ndim != 1 or xt.shape != Tt.shape or len(xt) < 2 or not np.all(np.diff(xt) > 0.0):
+        raise ValueError("壁温の表は同じ長さ (2 点以上) の 1 次元の列で、x は狭義単調増加であること")
+    lo, hi = float(np.min(c[:, 0])), float(np.max(c[:, 0]))
+    if lo < xt[0] or hi > xt[-1]:
+        raise ValueError(f"壁面中心の x [{lo!r}, {hi!r}] m が壁温の表の範囲 [{float(xt[0])!r}, {float(xt[-1])!r}] m の外 "
+                         "(端値で延長しない; 表がメッシュの壁を覆っていない)")
+    T = np.asarray(eval_Tw(xt, Tt, c[:, 0]), dtype=float)
+    if not np.all(np.isfinite(T)) or not np.all(T > 0.0):
+        raise ValueError("壁面中心の壁温に有限でない値・正でない値がある")
+    return c, T
+
+
+def write_point_profile_2d(path, xy, values, name: str = WALL_PROFILE_NAME, field: str = WALL_PROFILE_FIELD) -> dict:
+    """Fluent の point profile (2D) を書く: `((name point N)`・`(x ...)`・`(y ...)`・`(field ...)`・`)`。
+    数値は 17 有効桁 (`.16e`; メッシュの座標と同じで往復で値が変わらない)、1 行 1 値。
+    戻り: {"header", "name", "field", "n_points", "x_range_m", "y_range_m", "T_range_K", "sha256"}。"""
+    for what, s in (("profile の名前", name), ("場の名前", field)):
+        if not _PROFILE_NAME_RE.match(str(s)) or s in ("x", "y"):
+            raise ValueError(f"{what} {s!r} は英字で始まる英数字・'_'・'-' (x・y は座標の場なので不可)")
+    p = np.asarray(xy, dtype=float)
+    v = np.asarray(values, dtype=float)
+    if p.ndim != 2 or p.shape[1] != 2 or v.shape != (len(p),) or len(p) == 0:
+        raise ValueError(f"点 {p.shape} と値 {v.shape} の形が合わない ((N,2) と (N,), N ≥ 1)")
+    if not (np.all(np.isfinite(p)) and np.all(np.isfinite(v))):
+        raise ValueError("点か値に有限でない値がある")
+    n = len(p)
+    header = f"(({name} point {n})"
+    out = [header]
+    for fname, col in (("x", p[:, 0]), ("y", p[:, 1]), (field, v)):
+        out.append(f"({fname}")
+        out.append("\n".join(f"{a:.16e}" for a in col.tolist()))
+        out.append(")")
+    out.append(")")
+    Path(path).write_text("\n".join(out) + "\n", encoding="ascii")
+    return {"header": header, "name": name, "field": field, "n_points": int(n),
+            "x_range_m": [float(p[:, 0].min()), float(p[:, 0].max())], "y_range_m": [float(p[:, 1].min()), float(p[:, 1].max())],
+            "T_range_K": [float(v.min()), float(v.max())], "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+
+
+# ---------------------------------------------------------------------------
 # 境界条件表
 # ---------------------------------------------------------------------------
 
@@ -617,6 +683,14 @@ def _get(d, *keys):
 
 def _num(v) -> str:
     return repr(float(v))
+
+
+def _same_id(a, b) -> bool:
+    """physID の一致 (整数として; 真偽値・整数でない値は不一致)。"""
+    try:
+        return not isinstance(a, bool) and not isinstance(b, bool) and int(a) == a and int(a) == int(b)
+    except (TypeError, ValueError):
+        return False
 
 
 def _isentropic_subsonic_p_ratio(area_ratio: float, gamma: float) -> tuple:
@@ -659,7 +733,7 @@ def _inlet_static_guess(problem: dict, prep: dict) -> tuple:
 
 
 def write_fluent_bc_table(path, problem_yaml_or_dict, bcond_yaml, prepare_info=None, zone_types=None,
-                          species_names=None, msh_physical=None) -> dict:
+                          species_names=None, msh_physical=None, wall_profile=None) -> dict:
     """Fluent 用の境界条件表 (Markdown、日本語) を書く (plan §4.4・§6 V4(d))。
 
     値は `bcondConfig.yaml` (圧力・温度・k/ω・化学種) と問題 YAML・`prepare_info.json` (ガス・物性・寸法) から写し、
@@ -667,6 +741,10 @@ def write_fluent_bc_table(path, problem_yaml_or_dict, bcond_yaml, prepare_info=N
     (= 絶対値 − 動作圧)」を併記する (codex plan レビュー M5)。`species_names` を渡すと bcond の Y0.. に種名を付ける。
     `msh_physical` (msh の物理名 → タグ、`read_msh41_mesh2d` の 4 番目の戻り値) を渡すと、forge が境界を対応付ける physID から
     ゾーン名 (= msh の物理名 = Fluent のゾーン名) を引く (bcond のキー名と違えば注記する)。
+    `wall_profile` (壁温分布の run; plan tooling-nozzle-wall-temperature-profile §4.4): `write_point_profile_2d` の戻り値に
+    `wall_id` (bcond の physID)・`file` (成果物の中の相対パス)・`run_json`・`run_json_sha256`・`run_csv` を足した dict。
+    その physID の `wall_isothermal` の行を「Thermal: Temperature = profile `wall-temperature` `temperature`」にし、bcond の `Ts`
+    (代表値) は注記に回す。その physID の `wall_isothermal` が無ければ例外 (書かない)。None (一様・断熱) の出力は変更前と同一。
     戻り: {"path", "rows" [{"zone","fluent_type","item","abs","input","unit","source"}], "operating_pressure_pa"}。
     """
     problem = _load(problem_yaml_or_dict, "yaml")
@@ -692,6 +770,7 @@ def write_fluent_bc_table(path, problem_yaml_or_dict, bcond_yaml, prepare_info=N
     order = [n for n in ZONE_ORDER if n in bc] + sorted(n for n in bc if n not in ZONE_ORDER)
     wt = _get(problem, "spec", "wall_thermal") or _get(prep, "wall_thermal")
     tag2name = {int(v): str(k) for k, v in msh_physical.items()} if msh_physical else None
+    wp_rows = 0                                       # 壁温分布の profile を指した壁の行の数 (1 であること)
     for key in order:
         ent = bc[key] or {}
         zone = key
@@ -737,6 +816,23 @@ def write_fluent_bc_table(path, problem_yaml_or_dict, bcond_yaml, prepare_info=N
         elif kind == "wall":
             rows.append({"zone": zone, "fluent_type": ftype, "item": "Thermal: Heat Flux (断熱壁、滑りなし)", "abs": "0.0",
                          "input": "0.0", "unit": "W/m²", "source": f"{bsrc} {key}.kind = wall (断熱)"})
+        elif kind == "wall_isothermal" and wall_profile is not None and _same_id(ent.get("physID"), wall_profile["wall_id"]):
+            # 壁温分布: 値は Fluent の profile (run の正本の表を壁面中心で評価したもの)。bcond の Ts は代表値なので値にしない
+            wp = wall_profile
+            wp_rows += 1
+            val = f"profile ({wp['n_points']} 点, T_w {wp['T_range_K'][0]:.6g}〜{wp['T_range_K'][1]:.6g} K)"
+            rows.append({"zone": zone, "fluent_type": ftype,
+                         "item": f"Thermal: Temperature = profile `{wp['name']}` `{wp['field']}` (等温壁の分布、滑りなし)",
+                         "abs": val, "input": val, "unit": "K",
+                         "source": f"`{wp['file']}` (run の `{wp['run_json']}` の実寸の表 x_m・Tw_x_K を壁面中心で線形補間; "
+                                   f"JSON の sha256 {str(wp['run_json_sha256'])[:16]}…)"})
+            notes.append(f"`{zone}`: 壁温は分布。bcond の `{key}.floats.Ts` = {_num(fl['Ts']) if fl.get('Ts') is not None else '不明'} K は"
+                         f"代表値 (設計スロートの値) で、forge は `{wp['run_csv']}` で壁ノードごとに上書きする。Fluent ではこの値を使わず、"
+                         f"`{wp['file']}` を読み込んで (File > Read > Profile...) Thermal の Temperature で `{wp['name']}` `{wp['field']}` を選ぶ。"
+                         f"点は Fluent メッシュの壁ゾーンの面中心 ({wp['n_points']} 点、x = 軸方向・y = 半径 [m])。")
+            if isinstance(wt, dict) and "Tw_profile" not in wt:
+                notes.append(f"**注意**: 渡された問題 YAML の wall_thermal は {wt} (分布でない) が、壁温は run の正本 "
+                             f"`{wp['run_json']}` の分布で書いた (外の問題 YAML で代替しない)。")
         elif kind == "wall_isothermal":
             row(zone, "Thermal: Temperature (等温壁 Ts、滑りなし)", fl.get("Ts"), "K", f"{src}.Ts")
         elif kind == "axis":
@@ -752,10 +848,16 @@ def write_fluent_bc_table(path, problem_yaml_or_dict, bcond_yaml, prepare_info=N
             want = "isothermal" if kind == "wall_isothermal" else "adiabatic"
             if str(wt.get("mode")) != want:
                 notes.append(f"**注意**: `{key}` の bcond は `{kind}` だが、問題/prepare の wall_thermal は {wt} (食い違い)。")
+    if wall_profile is not None and wp_rows != 1:
+        raise ValueError(f"壁温分布の profile を指す壁 (physID {wall_profile['wall_id']} の wall_isothermal) が bcond に "
+                         f"{wp_rows} 個 (1 個であること) — 境界条件表を書かない")
 
     L = ["# Fluent 用の境界条件表 (forge の設定から写したもの)", ""]
     L += ["この表は forge の `bcondConfig.yaml`・問題 YAML・`prepare_info.json` の値を写したもの。値が無いものは「不明」とし、推測で補っていない。",
           "**Fluent でこの表と `.msh` を読んだ確認はまだしていない** (plan §5.1 #10、ユーザ確認待ち)。", ""]
+    if wall_profile is not None:
+        L[-1:-1] = [f"壁温は分布: 壁の値は run の `{wall_profile['run_json']}` (実行条件の正本) から作った `{wall_profile['file']}` "
+                    "(Fluent の point profile)。**Fluent での profile の読み込みも未確認** (手元に Fluent が無い)。"]
     L += ["## 解析の設定", "", "| 項目 | 値 |", "| --- | --- |",
           "| 空間 | 2D 軸対称 (General > 2D Space = Axisymmetric) |",
           "| 対称軸 | $x$ 軸 (半径方向 = $y$、$y \\ge 0$ の上半分) |",

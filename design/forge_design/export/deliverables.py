@@ -4,12 +4,13 @@ r"""風洞ノズルの成果物一式を最終 NS の run から書き出す (pl
 
 - `cad/`    2D の壁曲線の STEP (`wall_step.export_run`)・3D の内面の STEP と STL (`wall_step.write_surface`)・gmsh での読み直し
 - `mesh/`   解析メッシュ (msh4.1 のまま・msh2.2)・構造ファイル・STEP から同じ構造で作り直す gmsh スクリプトとその照合
-- `fluent/` 2D 軸対称の Fluent メッシュ (`.msh`)・CGNS・境界条件表
-- `excel/`  形状表・CFD 壁面量表 (状態つき)・条件・`.xlsx`
+- `fluent/` 2D 軸対称の Fluent メッシュ (`.msh`)・CGNS・境界条件表 (壁温分布の run は壁温の point profile `wall_temperature.prof` も)
+- `excel/`  形状表・CFD 壁面量表 (状態つき)・条件・`.xlsx` (壁温分布の run は壁温の表も)
 - `DIMENSIONS.json` 寸法の出荷ゲート (§4.2a)、`MANIFEST.json` (sha256・検査の数値・飛ばしたものと理由)、`README.md`
 
 入力が欠けた成果物は飛ばして理由を MANIFEST に書く (黙って欠けさせない)。寸法ゲートが FAIL なら MANIFEST の `verdict` を FAIL にし、
-README の冒頭に書く (書き出しは止めない — 何が外れたかを見せるため)。
+README の冒頭に書く (書き出しは止めない — 何が外れたかを見せるため)。壁温分布の run は、run の正本 (`wall_temperature_profile.json`・
+`wall_profile_<id>.csv`) が `prepare_info.json` の sha256 と合わなければ何も書かずに止める (plan tooling-nozzle-wall-temperature-profile §4.2)。
 
 usage:
   design/.venv-opt/bin/python -m forge_design.export.deliverables RUN [--card CARD] [--problem YAML] [--out DIR] [--step N] [--skip cad,fluent,...]
@@ -222,25 +223,70 @@ def part_mesh(run: Path, out: Path) -> dict:
     return res
 
 
+def _wall_profile(run: Path):
+    """run の壁温分布の正本 (`wall_temperature_profile.json`・`wall_profile_<id>.csv`) を `prepare_info.json` の sha256 と照合して読む
+    (plan tooling-nozzle-wall-temperature-profile §4.2・V1d)。壁温は run の JSON から読み、外の問題 YAML や bcond の代表 `Ts` で
+    代替しない。一様・断熱の run は None。不一致 (書き換え・別の run の写し・bcond の wallProfile なし) は ValueError。
+    戻り: {"rec": JSON の中身, "files": prepare_info の wall_thermal.files (名前と sha256)}。"""
+    from ..wall_temperature import load_run_profile
+    try:
+        rec = load_run_profile(run)
+    except ValueError as ex:
+        raise ValueError(f"成果物: 壁温分布の正本の照合で不合格 — 書き出さない: {ex}") from ex
+    if rec is None:
+        return None
+    files = json.loads((run / "prepare_info.json").read_text())["wall_thermal"]["files"]
+    return {"rec": rec, "files": files}
+
+
 def part_fluent(run: Path, out: Path, problem=None) -> dict:
+    """fluent/: 2D 軸対称の Fluent メッシュ・CGNS・境界条件表。壁温分布の run は、壁ゾーンの面中心で run の正本の表を評価した
+    point profile `wall_temperature.prof` も書き、境界条件表の壁の行をその profile にする (plan tooling-nozzle-wall-temperature-profile §4.4)。
+    正本の照合と、面中心が表の範囲内かの検査は何かを書く前に行う (不合格なら fluent/ に何も書かない)。"""
     from . import fluent_msh as fm
     from . import mesh_structure as ms
     _need(run, ["nozzle.msh", "bcondConfig.yaml", "prepare_info.json"])
+    wtp = _wall_profile(run)
+    coords, quads, bedges, tags = ms.read_msh41_mesh2d(run / "nozzle.msh")
+    wall_zone = prof_pts = None
+    if wtp is not None:
+        wid = int(wtp["rec"]["wall_id"])
+        names = [n for n, t in tags.items() if int(t) == wid]
+        if len(names) != 1 or names[0] not in bedges:
+            raise ValueError(f"壁温分布の壁 (physID {wid}) が msh の境界に 1 つでない (物理名 {names}、境界 {sorted(bedges)})")
+        wall_zone = names[0]
+        prof_pts = fm.wall_profile_points_2d(coords, bedges[wall_zone], wtp["rec"]["x_m"], wtp["rec"]["Tw_x_K"])
     d = out / "fluent"
     d.mkdir(parents=True, exist_ok=True)
-    coords, quads, bedges, tags = ms.read_msh41_mesh2d(run / "nozzle.msh")
     fp = d / "nozzle_2d_axi.msh"
-    fm.write_fluent_msh_2d(fp, coords, quads, bedges)
+    zs = fm.write_fluent_msh_2d(fp, coords, quads, bedges)
     chk = fm.check_fluent_msh_2d(fp, coords, quads, bedges)
     cg = fm.write_cgns_via_gmsh(run / "nozzle.msh", d / "nozzle_2d_axi.cgns", GMSH_PYTHON)
     prob = _problem_dict(problem)
+    wp = None
+    if wtp is not None:
+        pr = fm.write_point_profile_2d(d / "wall_temperature.prof", *prof_pts)
+        files = wtp["files"]
+        n_faces = int(zs["zones"][wall_zone]["faces"])
+        wp = {"file": "fluent/wall_temperature.prof", **pr, "wall_zone": wall_zone, "wall_id": int(wtp["rec"]["wall_id"]),
+              "n_wall_faces": n_faces, "points_match_wall_faces": bool(pr["n_points"] == n_faces),
+              "points": "Fluent メッシュの壁ゾーンの面中心 (2 節点の中点; x = 軸方向・y = 半径 [m]、メッシュと同じ座標)",
+              "values": "run の正本の実寸の表 (x_m・Tw_x_K) を面中心の x で 1D 線形補間 (表の範囲外は例外)",
+              "run_json": files["json"], "run_json_sha256": files["json_sha256"],
+              "run_csv": files["csv"], "run_csv_sha256": files["csv_sha256"],
+              "table_coord": wtp["rec"]["coord"], "table_T_range_K": [float(min(wtp["rec"]["Tw_x_K"])), float(max(wtp["rec"]["Tw_x_K"]))],
+              "fluent_readback": "未確認 (手元に Fluent が無い)"}
     bt = fm.write_fluent_bc_table(d / "boundary_conditions.md", prob, run / "bcondConfig.yaml",
                                   json.loads((run / "prepare_info.json").read_text()),
-                                  species_names=_species_names(run), msh_physical=tags)
-    return {"msh": "fluent/nozzle_2d_axi.msh", "check": chk, "cgns": cg, "bc_table": "fluent/boundary_conditions.md",
-            "bc_rows": len(bt.get("rows", [])), "problem_yaml": str(problem) if problem else "無し (組成・物性は「不明」と書いた)",
-            "pass": bool(chk.get("ok", False) and cg.get("match", False)),
-            "fluent_readback": "未確認 (手元に Fluent が無い。plan §5.1 #10 でユーザに確認を依頼)"}
+                                  species_names=_species_names(run), msh_physical=tags, wall_profile=wp)
+    res = {"msh": "fluent/nozzle_2d_axi.msh", "check": chk, "cgns": cg, "bc_table": "fluent/boundary_conditions.md",
+           "bc_rows": len(bt.get("rows", [])), "problem_yaml": str(problem) if problem else "無し (組成・物性は「不明」と書いた)",
+           "pass": bool(chk.get("ok", False) and cg.get("match", False)),
+           "fluent_readback": "未確認 (手元に Fluent が無い。plan §5.1 #10 でユーザに確認を依頼)"}
+    if wp is not None:
+        res["wall_temperature_profile"] = wp
+        res["pass"] = bool(res["pass"] and wp["points_match_wall_faces"])
+    return res
 
 
 def _species_names(run: Path):
@@ -262,7 +308,11 @@ def _problem_dict(problem) -> dict | None:
 
 
 def part_excel(run: Path, out: Path, step=None) -> dict:
+    """excel/: 形状表・CFD 壁面量表 (状態つき)・条件・`.xlsx`。壁温分布の run は conditions.csv に壁温の表 (元の座標の種類・元の表・
+    実寸の表・区切りの点; `wall_Tw_profile_*`) を足し、xlsx に専用シート `wall_temperature` を足す (run の正本の JSON から;
+    plan tooling-nozzle-wall-temperature-profile §4.4)。CFD 壁面量表の `T_w_K` は壁ダンプの `Ts` のまま (分布が入ったことが見える)。"""
     from . import wall_tables as wt
+    wtp = _wall_profile(run)                                  # 正本の照合 (不合格なら excel/ に何も書かない)
     d = out / "excel"
     d.mkdir(parents=True, exist_ok=True)
     res = {}
@@ -313,21 +363,81 @@ def part_excel(run: Path, out: Path, step=None) -> dict:
         sj["use_for_thermal_design"] = (tu_short["verdict"] == "PASS")
         stj.write_text(json.dumps(_jsonable(sj), indent=1, ensure_ascii=False))
     conds = _conditions(run)
+    if wtp is not None:
+        wconds = _wall_profile_conditions(wtp)
+        import yaml
+        bcd = yaml.safe_load((run / "bcondConfig.yaml").read_text()) or {}
+        for name, v in bcd.items():                            # 壁の bcond の Ts は代表値 (分布は下の行) と明記する
+            if isinstance(v, dict) and v.get("physID") == wtp["rec"]["wall_id"] and f"bc_{name}_Ts" in conds:
+                conds[f"bc_{name}_Ts"] = (conds[f"bc_{name}_Ts"][0], "K (代表値 = 設計スロートの値; 壁温は分布 wall_Tw_profile_*)")
+        conds.update(wconds)
     conds["thermal_use_verdict"] = (tu_short["verdict"], "PASS のときだけ壁面量表の熱量を熱設計に使ってよい")
     (d / "conditions.csv").write_text("key,value,unit\n" + "".join(f"{k},{v[0]},{v[1]}\n" for k, v in conds.items()))
+    wnotes = []
+    if wtp is not None:
+        f = wtp["files"]
+        wnotes = [f"壁温分布: run の正本 {f['json']} (sha256 {f['json_sha256'][:16]}…) の表 → シート wall_temperature・"
+                  "conditions の wall_Tw_profile_*。Fluent は fluent/wall_temperature.prof。cfd_wall の T_w_K は壁ダンプの Ts (分布が入ったことが見える)"]
+        res["wall_temperature_profile"] = {"conditions_rows": len(wconds), "xlsx_sheet": "wall_temperature", "notes": wnotes,
+                                           "run_json": f["json"], "run_json_sha256": f["json_sha256"]}
     if Path(PPTX_PYTHON).exists() and hasattr(wt, "write_xlsx"):
         notes = [f"thermal_use (熱量を熱設計に使えるか): {tu_short['verdict']}  — PASS 以外なら cfd_wall の熱量を使わない",
                  f"  収束: {tu_short['convergence']['result']}  {tu_short['convergence']['verdict_line'] or tu_short['convergence']['reason'] or ''}",
                  f"  熱量の準定常 (総熱量と壁の全節点の熱量の最悪; 16 区間の和は補助): {tu_short['quasisteady']['result']}  {tu_short['quasisteady']['verdict_line'] or tu_short['quasisteady']['reason'] or ''}",
                  f"  壁解像: {tu_short['wall_resolution']['result']}  {tu_short['wall_resolution']['verdict_line'] or tu_short['wall_resolution']['reason'] or ''}",
-                 f"  対象の step: {tu_short['step']}"]
+                 f"  対象の step: {tu_short['step']}"] + wnotes
         res["xlsx"] = wt.write_xlsx(d / "nozzle_tables.xlsx", (d / "wall_shape_mm.csv") if (d / "wall_shape_mm.csv").exists() else None,
                                     (d / "wall_cfd_nodes.csv") if (d / "wall_cfd_nodes.csv").exists() else None,
                                     {k: f"{v[0]} {v[1]}" for k, v in conds.items()}, notes, PPTX_PYTHON,
-                                    thermal_use=str(tu_short["verdict"]))
+                                    thermal_use=str(tu_short["verdict"]),
+                                    wall_temperature=_wall_profile_sheet(wtp) if wtp is not None else None)
     else:
         res["xlsx"] = "飛ばした: xlsxwriter (.venv-pptx) が無い"
     return res
+
+
+def _wall_profile_conditions(wtp: dict) -> dict:
+    """壁温分布の表を conditions.csv の行 {key: (value, unit)} にする: 正本の所在と sha256、元の座標の種類、区切りの点、各点の
+    元の座標・元の温度・実寸の x・実寸の表の温度 (`wall_Tw_profile_<i>_*`)。値・単位の欄にカンマを入れない (引用符なしの 3 列)。"""
+    rec, f = wtp["rec"], wtp["files"]
+    c = rec["coord"]
+    cu = "m" if c == "x_m" else "-"
+    out = {"wall_Tw_profile_json": (f["json"], "run の壁温の正本 (実行条件)"),
+           "wall_Tw_profile_json_sha256": (f["json_sha256"], ""),
+           "wall_Tw_profile_csv": (f["csv"], "forge が読む壁温 (列 x [m] と Ts [K])"),
+           "wall_Tw_profile_csv_sha256": (f["csv_sha256"], ""),
+           "wall_Tw_profile_coord": (c, "元の座標の種類 (s = 区間で正規化: 入口直管 -2→-1・縮流部 -1→0・拡大部 0→1 / "
+                                        "x_m = 実寸 [m]・原点は設計スロート)"),
+           "wall_Tw_profile_n_points": (len(rec["coords"]), "点"),
+           "wall_Tw_profile_Tw_representative": (rec["Tw_representative_K"], "K (代表値 = 設計スロートの値; bcond の Ts)"),
+           "wall_Tw_profile_scale": (rec["scale_m"], "m (写したときの r_t)")}
+    labels = {"x_in_m": "m (区切り: 入口端)", "x_contraction_m": "m (区切り: 縮流部の始まり)",
+              "x_throat_m": "m (区切り: 設計スロート)", "x_exit_m": "m (区切り: 壁の終点)"}
+    for k, v in rec["anchors_m"].items():
+        out[f"wall_Tw_profile_anchor_{k}"] = (float(v), labels.get(k, "m"))
+    for i, (s, t, x, tx) in enumerate(zip(rec["coords"], rec["Tw_K"], rec["x_m"], rec["Tw_x_K"])):
+        out[f"wall_Tw_profile_{i}_orig_{c}"] = (float(s), f"{cu} (元の表)")
+        out[f"wall_Tw_profile_{i}_orig_Tw_K"] = (float(t), "K (元の表)")
+        out[f"wall_Tw_profile_{i}_x_m"] = (float(x), "m (実寸の表)")
+        out[f"wall_Tw_profile_{i}_Tw_x_K"] = (float(tx), "K (実寸の表)")
+    bad = [k for k, v in out.items() if "," in f"{v[0]}{v[1]}"]
+    if bad:
+        raise ValueError(f"conditions.csv の行にカンマが入る: {bad}")
+    return out
+
+
+def _wall_profile_sheet(wtp: dict) -> dict:
+    """xlsx のシート `wall_temperature` の中身 (`wall_tables.write_xlsx` の `wall_temperature`)。"""
+    rec, f = wtp["rec"], wtp["files"]
+    c = rec["coord"]
+    return {"lines": [f"壁温分布 (run の正本 {f['json']}、sha256 {f['json_sha256']}; plan tooling-nozzle-wall-temperature-profile §4.2)",
+                      f"元の座標の種類: {c} ({'実寸 [m]、原点 = 設計スロート' if c == 'x_m' else '区間で正規化: 入口直管 -2→-1・縮流部 -1→0・拡大部 0→1'})",
+                      f"forge は {f['csv']} を壁ノードの x で 1D 線形補間する。Fluent は fluent/wall_temperature.prof (壁面中心で同じ表を評価した point profile)",
+                      f"写したときの r_t = {rec['scale_m']!r} m、代表値 (設計スロート) = {rec['Tw_representative_K']!r} K"],
+            "anchors": [[k, float(v)] for k, v in rec["anchors_m"].items()],
+            "columns": [f"orig_{c}", "orig_Tw_K", "x_m", "Tw_x_K"],
+            "rows": [[float(s), float(t), float(x), float(tx)]
+                     for s, t, x, tx in zip(rec["coords"], rec["Tw_K"], rec["x_m"], rec["Tw_x_K"])]}
 
 
 def _conditions(run: Path) -> dict:
@@ -380,7 +490,31 @@ def _stl_setting(man: dict) -> str:
             f"(三角形 {sf.get('stl_triangles')} 枚)")
 
 
-def _readme(run: Path, out: Path, man: dict) -> str:
+def _readme_wall_profile(man: dict, wtp: dict) -> list:
+    """README の壁温分布の節 (分布の run だけ): 正本・Fluent での設定手順・未確認であること・Excel の所在。"""
+    rec, f = wtp["rec"], wtp["files"]
+    wp = (man["parts"].get("fluent") or {}).get("wall_temperature_profile")
+    anc = "・".join(f"{k} {v!r} m" for k, v in rec["anchors_m"].items())
+    L = ["## 壁温分布 (等温壁、分布)", "",
+         f"- 正本: run の `{f['json']}` (sha256 `{f['json_sha256'][:16]}…`、元の座標 `{rec['coord']}`・{len(rec['coords'])} 点、"
+         f"表の T_w {min(rec['Tw_x_K']):.6g}〜{max(rec['Tw_x_K']):.6g} K; 区切りの点 {anc})。forge は `{f['csv']}` を壁ノードの x で 1D 線形補間する。"
+         "成果物の壁温はこの JSON から作った (問題 YAML や bcond の代表 `Ts` では作らない)。書き出しの前に `prepare_info.json` の sha256 と照合した。"]
+    if isinstance(wp, dict):
+        L += [f"- Fluent: `{wp['file']}` (point profile `{wp['name']}`、場 `{wp['field']}`、{wp['n_points']} 点 = 壁ゾーン `{wp['wall_zone']}` の"
+              f"面中心、x = 軸方向・y = 半径 [m] でメッシュと同じ座標、T_w {wp['T_range_K'][0]:.6g}〜{wp['T_range_K'][1]:.6g} K)。設定手順:",
+              f"  1. `File > Read > Profile...` で `{Path(wp['file']).name}` を読む (TUI: `/file/read-profile {Path(wp['file']).name}`)。",
+              f"  2. `Boundary Conditions > {wp['wall_zone']} > Thermal` で `Temperature` を選び、値の欄で `{wp['name']}` `{wp['field']}` を選ぶ。",
+              "  3. point profile は各面に最も近い点の値が入る (既定)。点は壁面中心なので、面ごとに表の値 (面中心で線形補間) がそのまま入る。",
+              "- **Fluent での読み込みは未確認** (手元に Fluent が無い)。読み込めない・値の欄に出ない・面の値が表と違うときは教えてほしい。"]
+    else:
+        L += [f"- Fluent の profile は作っていない (fluent を飛ばした・失敗した: {(man['skipped'].get('fluent') or man['errors'].get('fluent') or '理由不明')})。"
+              "**Fluent での読み込みは未確認** (手元に Fluent が無い)。"]
+    L += ["- Excel: `excel/conditions.csv` の `wall_Tw_profile_*` (元の表・実寸の表・区切りの点) と `nozzle_tables.xlsx` のシート `wall_temperature`。"
+          "CFD 壁面量表 (`wall_cfd_nodes.csv`) の `T_w_K` は壁ダンプの `Ts` (分布が入ったことが見える)。", ""]
+    return L
+
+
+def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
     dim = man["parts"].get("dimensions", {}).get("verdict", "未判定")
     th = (man["parts"].get("excel", {}).get("thermal_use") or {})
     thv = th.get("verdict", "未評価") if isinstance(th, dict) else str(th)
@@ -411,6 +545,12 @@ def _readme(run: Path, out: Path, man: dict) -> str:
          f"- STL (`cad/wall_surface.stl`) は表示・形の確認用の近似: 弦誤差の設定 {_stl_setting(man)}。寸法の正本は STEP。",
          "- CGNS (`fluent/nozzle_2d_axi.cgns`) を Fluent で読むと**境界の型は付かない** (入口・出口・壁・軸を Fluent 側で付け直す)。"
          "gmsh で読み直すと物理タグの番号も振り直されるので、境界は**名前**で対応付ける。型つきの Fluent 形式は `fluent/nozzle_2d_axi.msh`。", ""]
+    if wtp is not None:                                       # 壁温分布の run だけ (一様・断熱の README は変えない)
+        L.insert(L.index(f"- 総合: **{man['verdict']}**") + 1,
+                 "- **壁温**: 分布 (`fluent/wall_temperature.prof` の point profile; 下の「壁温分布」。Fluent での読み込みは未確認)")
+        i = next(k for k, s in enumerate(L) if s.startswith("| `fluent/` |"))
+        L[i] = L[i][:-2] + "・`wall_temperature.prof` (壁温の point profile) |"
+        L[L.index("## 注意"):L.index("## 注意")] = _readme_wall_profile(man, wtp)
     if man["skipped"]:
         L += ["## 飛ばしたもの", ""] + [f"- `{k}`: {v}" for k, v in man["skipped"].items()] + [""]
     if man["errors"]:
@@ -420,7 +560,11 @@ def _readme(run: Path, out: Path, man: dict) -> str:
 
 
 def export(run_dir, out_dir=None, card=None, step=None, skip=(), freecadcmd=None, problem=None) -> dict:
+    """成果物一式を書き出す。壁温分布の run は、何かを書く前 (出力ディレクトリを作る前) に run の正本 (JSON・CSV) を
+    `prepare_info.json` の sha256 と照合し、合わなければ ValueError で止める (部分的な出力を残さない;
+    plan tooling-nozzle-wall-temperature-profile §4.2・V1d)。"""
     run = Path(run_dir).resolve()
+    wtp = _wall_profile(run)
     out = Path(out_dir).resolve() if out_dir else run / "deliverables"
     out.mkdir(parents=True, exist_ok=True)
     log = _Log()
@@ -447,9 +591,17 @@ def export(run_dir, out_dir=None, card=None, step=None, skip=(), freecadcmd=None
     man = {"format": "forge.deliverables/v1", "run": str(run), "created": time.strftime("%Y-%m-%d %H:%M:%S"),
            "git_commit": commit, "verdict": verdict, "failed_parts": part_fail, "parts": log.parts,
            "skipped": log.skipped, "errors": log.errors, "files_sha256": files}
+    if wtp is not None:                                       # 壁温分布の run だけ (一様・断熱の MANIFEST のキーは変えない)
+        f = wtp["files"]
+        man["wall_temperature_profile"] = {
+            "run_json": f["json"], "run_json_sha256": f["json_sha256"], "run_csv": f["csv"], "run_csv_sha256": f["csv_sha256"],
+            "verified": "書き出しの前に prepare_info.json の sha256 と照合した (wall_temperature.load_run_profile)",
+            "coord": wtp["rec"]["coord"],
+            "fluent_profile": (log.parts.get("fluent") or {}).get("wall_temperature_profile")
+            or f"作っていない ({log.skipped.get('fluent') or log.errors.get('fluent') or '理由不明'})"}
     man = _jsonable(man)
     (out / "MANIFEST.json").write_text(json.dumps(man, indent=1, ensure_ascii=False))
-    (out / "README.md").write_text(_readme(run, out, man))
+    (out / "README.md").write_text(_readme(run, out, man, wtp))
     return man
 
 

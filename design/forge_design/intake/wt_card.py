@@ -14,6 +14,7 @@ plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §
 3. **縮流部の検査**: $R_{in} > r_t$、$\mu = L_U^2/(R\,\Delta r) \le 20$、`L_pipe` ≥ 0、`M_exit` > 1。外れたら例外。
 4. **壁解像の初期見積もり** (`estimate_mesh`): 1 次元の等エントロピー + Eckert の参照温度 + 平板乱流の $C_f$ で $y_1^+ = 0.8$ の第 1 層を
    断面ごとに見積もり、`mesh.wall_first_frac`・`wall_first_frac_throat`・`ni` を埋める。**初期値であって合格の根拠ではない**。
+   壁温分布のカードでは断面ごとの局所の $T_w(x)$ を使う (plan tooling-nozzle-wall-temperature-profile §4.3)。
 5. **空気の液化の事前警告** (`liquefaction_check`): 出口の静温・静圧と N₂ の飽和蒸気圧 (Antoine) を比べる (止めない)。
 6. **雛形** (`recipes/*.yaml`) の構成キーを写し、カードの `overrides` を最後に当てる (上書きは `_card` 節とコメントに残す)。
 
@@ -82,6 +83,11 @@ _OVERRIDE_FORBIDDEN = ("gas.model", "gas.species", "gas.composition_basis",
                        "geometry.r_inlet", "geometry.L_U", "geometry.L_pipe", "geometry.Lc_mode", "geometry.L_total_tol")
 # mesh のうち estimate_mesh が埋めるキー (overrides で与えたらそちらを使う)
 _MESH_ESTIMATED = ("ni", "wall_first_frac", "wall_first_frac_throat")
+# 等温壁の壁温の与え方: 一様・表・CSV の厳密に 1 つ (plan tooling-nozzle-wall-temperature-profile §4.1・§4.3)
+WALL_TW_KEYS = ("Tw", "Tw_profile", "Tw_profile_csv")
+CSV_HEADERS = (("s", "Tw_K"), ("x_m", "Tw_K"))    # Tw_profile_csv のヘッダ行 (カンマ区切り)
+_COORD_TEXT = {"s": "s = 区間で正規化した座標 (入口直管 [−2,−1]・縮流部 [−1,0]・拡大部 [0,1]、スロート 0・出口 1)",
+               "x_m": "x_m = 実寸 [m]、原点は設計スロート"}
 _PROBLEM_ORDER = ("name", "type", "gas", "deltastar_initializer", "spec", "dv", "geometry", "mesh", "mesh_euler", "evaluate", "_card")
 
 
@@ -154,11 +160,94 @@ def _flatten_overrides(errs: list, ov) -> dict:
     return flat
 
 
-def validate_card(card) -> dict:
+def _yaml12_floats(obj):
+    """壁温の表 (mapping の値の列) の要素のうち、PyYAML が文字列と読む YAML 1.2 の浮動小数 (`5.0e2` など) だけを数値にする
+    (カードの他の数値と同じ扱い; `_num`)。他の値はそのまま返し、検査は `wall_temperature.parse_profile` に任せる。"""
+    if not isinstance(obj, dict):
+        return obj
+    return {k: ([float(e) if isinstance(e, str) and _YAML12_FLOAT.fullmatch(e.strip()) else e for e in v]
+                if isinstance(v, list) else v) for k, v in obj.items()}
+
+
+def read_profile_csv(path_given, card_dir=None) -> tuple:
+    """カードの `wall.Tw_profile_csv` を読む → (表 `{s | x_m: [...], Tw_K: [...]}`, 出典 `{path, abs_path, sha256}`)。
+
+    カンマ区切り、最初の空でない行がヘッダ `s,Tw_K` か `x_m,Tw_K` (各欄の前後の空白・空行・UTF-8 の BOM は無視)、以降は 1 行 2 列の数値。
+    **相対パスはカードのファイルの所在 (card_dir) が基準** (cwd ではない; codex plan レビュー m5)。card_dir が無い (カードを dict で
+    渡した) ときの相対パスは拒否。表の検査 (単調・正・有限・範囲) は呼ぶ側が `wall_temperature.parse_profile` で行う。"""
+    if not isinstance(path_given, str) or not path_given.strip():
+        raise ValueError(f"CSV のパス (文字列) を書く (受け取った値: {path_given!r})")
+    p = Path(path_given)
+    if not p.is_absolute():
+        if card_dir is None:
+            raise ValueError(f"相対パス {path_given!r} はカードのファイルの所在が基準 — カードをファイルから読む (load_card) か、"
+                             "絶対パスで書く")
+        p = Path(card_dir) / p
+    p = p.resolve()
+    if not p.is_file():
+        raise ValueError(f"CSV {str(p)!r} が無い (カードの値 {path_given!r}; 相対パスはカードのファイルの所在が基準)")
+    data = p.read_bytes()
+    rows = [(i + 1, ln.strip()) for i, ln in enumerate(data.decode("utf-8-sig").splitlines()) if ln.strip()]
+    if not rows:
+        raise ValueError(f"CSV {str(p)!r} が空")
+    hdr = tuple(c.strip() for c in rows[0][1].split(","))
+    if hdr not in CSV_HEADERS:
+        raise ValueError(f"CSV {str(p)!r} の列名 (ヘッダ行) は {' か '.join(','.join(h) for h in CSV_HEADERS)} "
+                         f"(受け取った値: {rows[0][1]!r}; カンマ区切り)")
+    xs, ts = [], []
+    for ln_no, ln in rows[1:]:
+        cells = [c.strip() for c in ln.split(",")]
+        if len(cells) != 2:
+            raise ValueError(f"CSV {str(p)!r} の {ln_no} 行目は 2 列 (受け取った値: {ln!r}; カンマ区切り)")
+        try:
+            xs.append(float(cells[0]))
+            ts.append(float(cells[1]))
+        except ValueError:
+            raise ValueError(f"CSV {str(p)!r} の {ln_no} 行目に数値でない値 ({ln!r})") from None
+    return {hdr[0]: xs, "Tw_K": ts}, {"path": path_given, "abs_path": str(p), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+def _wall_isothermal(errs: list, w: dict, card_dir):
+    """`wall: {thermal: isothermal, ...}` の検査。`Tw` (一様)・`Tw_profile` (表)・`Tw_profile_csv` (CSV) の厳密に 1 つ。
+    表は `wall_temperature.parse_profile` に通し (書き直さない)、`{"thermal", "Tw_profile": {座標: [...], "Tw_K": [...]}}` の形に揃える。
+    CSV は読んだ表を `Tw_profile` に、出典 (カードの値・絶対パス・sha256) を `Tw_profile_csv` に残す (card_log・`_card.card` の記録)。
+    不正なら errs に足して None。"""
+    from ..wall_temperature import parse_profile
+    unknown = [str(k) for k in w if k not in ("thermal",) + WALL_TW_KEYS]
+    if unknown:
+        errs.append(f"wall (isothermal) の未知のキー {unknown} (書けるのは thermal と {' / '.join(WALL_TW_KEYS)} のどれか 1 つ)")
+        return None
+    given = [k for k in WALL_TW_KEYS if k in w]
+    if len(given) != 1:
+        errs.append("wall (isothermal) は Tw (一様 [K])・Tw_profile (表 {s|x_m: [...], Tw_K: [...]})・Tw_profile_csv (CSV のパス) の"
+                    f"どれか 1 つ ({'どれも無い' if not given else f'併用している: {given}'})")
+        return None
+    k = given[0]
+    if k == "Tw":
+        return {"thermal": "isothermal", "Tw": _num(errs, "wall.Tw", w["Tw"], gt=0.0)}
+    try:
+        if k == "Tw_profile":
+            src = None
+            prof = parse_profile(_yaml12_floats(w["Tw_profile"]))
+        else:
+            tbl, src = read_profile_csv(w["Tw_profile_csv"], card_dir)
+            prof = parse_profile(tbl)
+    except ValueError as ex:
+        errs.append(f"wall.{k}: {ex}")
+        return None
+    out = {"thermal": "isothermal"}
+    if src is not None:
+        out["Tw_profile_csv"] = src
+    out["Tw_profile"] = {prof["coord"]: list(prof["coords"]), "Tw_K": list(prof["Tw_K"])}
+    return out
+
+
+def validate_card(card, card_dir=None) -> dict:
     """カード (dict) を検査し、既定値を埋めた写しを返す。不正なら全部の理由をまとめて ValueError。
 
     戻りの形はカードと同じキー (既定値を埋める: p_ambient = "design"、tolerances = DEFAULT_TOLERANCES、recipe = DEFAULT_RECIPE、
-    overrides = {})。gas.species の名前は大文字。overrides は「節.キー」に平らにした mapping。"""
+    overrides = {})。gas.species の名前は大文字。overrides は「節.キー」に平らにした mapping。
+    card_dir: カードのファイルの所在 (`wall.Tw_profile_csv` の相対パスの基準; `load_card` が渡す)。"""
     errs: list = []
     if not isinstance(card, dict):
         raise ValueError(f"要求カード: 最上位は mapping (受け取った値: {type(card).__name__})")
@@ -251,10 +340,12 @@ def validate_card(card) -> dict:
     w = card.get("wall")
     if "wall" in card:
         if not isinstance(w, dict) or w.get("thermal") not in ("isothermal", "adiabatic"):
-            errs.append(f"wall は {{thermal: isothermal, Tw: K}} か {{thermal: adiabatic}} (受け取った値: {w!r})")
+            errs.append(f"wall は {{thermal: isothermal, Tw: K}}・{{thermal: isothermal, Tw_profile: {{s|x_m: [...], Tw_K: [...]}}}}・"
+                        f"{{thermal: isothermal, Tw_profile_csv: <path>}} か {{thermal: adiabatic}} (受け取った値: {w!r})")
         elif w["thermal"] == "isothermal":
-            if _mapping(errs, "wall (isothermal)", w, ("thermal", "Tw")):
-                out["wall"] = {"thermal": "isothermal", "Tw": _num(errs, "wall.Tw", w["Tw"], gt=0.0)}
+            wv = _wall_isothermal(errs, w, card_dir)
+            if wv is not None:
+                out["wall"] = wv
         elif _mapping(errs, "wall (adiabatic)", w, ("thermal",)):
             out["wall"] = {"thermal": "adiabatic"}
     pa = card.get("p_ambient", "design")
@@ -281,10 +372,10 @@ def validate_card(card) -> dict:
 
 
 def load_card(path) -> dict:
-    """カードのファイルを読んで `validate_card` を通す。"""
+    """カードのファイルを読んで `validate_card` を通す (`wall.Tw_profile_csv` の相対パスはこのファイルの所在が基準)。"""
     with open(path) as f:
         raw = yaml.safe_load(f)
-    return validate_card(raw)
+    return validate_card(raw, card_dir=Path(path).resolve().parent)
 
 
 def _sha256(path) -> str:
@@ -408,7 +499,7 @@ def card_to_problem(card, r_t_m: float) -> dict:
 
     - 長さは r_t で割る: r_inlet = R_in/r_t、L_U、L_pipe、dv.L_total = L_div/r_t、Lc_mode from_length、
       L_total_tol = 長さ公差/2/r_t。spec は Pt・Tt・p_ambient (design なら semiperfect の等エントロピー出口静圧)・r_throat・M_design・
-      wall_thermal・(物理スロート径なら) sizing {method: throat, target_m: 径/2}。
+      wall_thermal (壁温分布は `{mode: isothermal, Tw_profile: {s|x_m: [...], Tw_K: [...]}}`)・(物理スロート径なら) sizing {method: throat, target_m: 径/2}。
     - gas は semiperfect、species はカードの質量分率、transport は雛形 (実種ごとに cea、H2O は custom)、gamma・cp は参照値 (スロート)。
     - mesh の ni・wall_first_frac・wall_first_frac_throat と mesh_euler.ni は None (`build_problem` が `estimate_mesh` で埋める。
       None のまま `prepare` に渡すと例外になる — 黙って Mesh2DParams の既定に落とさない)。overrides で与えたらそちら。
@@ -439,7 +530,11 @@ def card_to_problem(card, r_t_m: float) -> dict:
     L_div_m = float(card["divergent_length_m"])
     tol_len = float(card["tolerances"]["length_m"])
     wall = card["wall"]
-    wt = {"mode": "isothermal", "Tw": float(wall["Tw"])} if wall["thermal"] == "isothermal" else {"mode": "adiabatic"}
+    if wall["thermal"] == "isothermal" and "Tw_profile" in wall:
+        # 壁温分布: 表をそのまま写す (s は無次元・x_m は実寸なので r_t で割り直さない; CSV から来た表も埋め込み、YAML 単体で再現できる)
+        wt = {"mode": "isothermal", "Tw_profile": copy.deepcopy(wall["Tw_profile"])}
+    else:
+        wt = {"mode": "isothermal", "Tw": float(wall["Tw"])} if wall["thermal"] == "isothermal" else {"mode": "adiabatic"}
     tr_rule = meta["gas_transport"]
     transport = {k: tr_rule.get(k, tr_rule["default"]) for k in Y}
     spec = {"Pt": Pt, "Tt": Tt, "p_ambient": p_amb, "r_throat": rt, "M_design": M, "wall_thermal": wt}
@@ -519,6 +614,19 @@ def mapping_table(card: dict, prob: dict) -> list:
     rt = float(prob["spec"]["r_throat"])
     kind, D = throat_kind(card)
     g, s = prob["geometry"], prob["spec"]
+    w = card["wall"]
+    if "Tw_profile" in w:
+        # 壁温分布: mode の行と表の行 (表はそのまま写す。CSV なら読んだ表を埋め込む)
+        tbl = s["wall_thermal"]["Tw_profile"]
+        coord = next(k for k in ("s", "x_m") if k in tbl)
+        how = f"表をそのまま写す ({_COORD_TEXT[coord]}; r_t で割り直さない。実寸の x への写しは呼ぶたびにその場の寸法で)"
+        wall_rows = [("wall.thermal", w["thermal"], "spec.wall_thermal.mode", s["wall_thermal"]["mode"], "thermal → mode"),
+                     (("wall.Tw_profile_csv", w["Tw_profile_csv"], "spec.wall_thermal.Tw_profile", tbl,
+                       "CSV (相対パスはカードの所在が基準; 絶対パスと sha256 を記録) を読み、" + how + "。YAML 単体で再現できる")
+                      if "Tw_profile_csv" in w else
+                      ("wall.Tw_profile", w["Tw_profile"], "spec.wall_thermal.Tw_profile", tbl, how))]
+    else:
+        wall_rows = [("wall", w, "spec.wall_thermal", s["wall_thermal"], "thermal → mode")]
     rows = [
         ("conditions.Pt", card["conditions"]["Pt"], "spec.Pt", s["Pt"], "そのまま [Pa]"),
         ("conditions.Tt", card["conditions"]["Tt"], "spec.Tt", s["Tt"], "そのまま [K]"),
@@ -535,7 +643,7 @@ def mapping_table(card: dict, prob: dict) -> list:
         ("divergent_length_m", card["divergent_length_m"], "dv.L_total", prob["dv"]["L_total"]["value"],
          "/ r_t (Lc_mode: from_length)"),
         ("tolerances.length_m", card["tolerances"]["length_m"], "geometry.L_total_tol", g["L_total_tol"], "/ 2 / r_t"),
-        ("wall", card["wall"], "spec.wall_thermal", s["wall_thermal"], "thermal → mode"),
+        *wall_rows,
         ("p_ambient", card["p_ambient"], "spec.p_ambient", s["p_ambient"], prob["_card"]["p_ambient_source"]),
         ("gas", card["gas"], "gas.species", prob["gas"]["species"], "質量分率 (model semiperfect、transport は雛形)"),
         ("recipe", card["recipe"], "geometry・mesh・mesh_euler・evaluate", "(雛形の構成キー)",
@@ -634,6 +742,12 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
     で $M,T,p,u$ を作り、Eckert の参照温度 $T^*=T_e(1+0.032M^2+0.58(T_w/T_e-1))$ と平板乱流 $C_f^*=0.0592\,Re_x^{*-0.2}$
     ($x$ = 入口端からの壁の弧長、μ は Sutherland の空気) で $\tau_w = C_f^*\,\rho^* u_e^2/2$、$u_\tau=\sqrt{\tau_w/\rho_w}$、
     $y_1 = 0.8\,\mu_w/(\rho_w u_\tau)$。断熱壁の $T_w$ は回復温度 $T_e + 0.89\,(T_t - T_e)$。
+    - **壁温分布** (`wall.Tw_profile`; plan tooling-nozzle-wall-temperature-profile §4.3): 断面ごとの局所の $T_w(x)$ を使う。x は実寸
+      (断面の x [r_t] × r_t)。s の表の区切りの点は**その設計の壁** (`geometry.L_pipe`・`L_U`・設計壁の終点 `chain["wall"].x_e` に r_t を
+      掛けたもの; `wall_temperature.anchors_from_design`、prepare_ns と同じ写し) から取る (カードの長さではない: 設計壁の終点はカードの
+      拡大部長と公差の内でずれ、超えることもある; plan §4.3 [2026-10-13 訂正])。戻り値の `wall_temperature` に区切りの点と出典を残す。
+      表が見積もりの範囲 (設計壁の入口端〜終点) を覆うかを `check_covers` で検査し、補間は `eval_Tw` (端値で延長しない)。
+    - 戻り値の `sections` (断面ごとの x・局所の $T_w$・丸め前の $y_1$ と $y_1/r_w$) は呼ぶ側の検査用 (card_log には書かない)。
     - `wall_first_frac` = スロート下流 x > 6 の $y_1/r_w$ の最小、`wall_first_frac_throat` = |x| ≤ 2 の最小 (有効 2 桁に切り下げ)。
     - **縮流部側のブレンド** (`wall_first_up_x0/x1`): 雛形の値の配点で、station ごとの y1+ の目安 (入口の節点を除く) が 1 を超えたら、
       問題の形から決め直す。候補を順に試し、目安の最大 ≤ 1 になった最初のものを使う:
@@ -661,7 +775,28 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
     P = Pt * _isentropic_pressure_ratio_gas(T, gas)
     Rg = float(gas.R)
     u = Mx * np.sqrt(gas.gamma(T) * Rg * T)
-    if card["wall"]["thermal"] == "isothermal":
+    tw_rec = None
+    if card["wall"]["thermal"] == "isothermal" and "Tw_profile" in card["wall"]:
+        import types
+        from ..wall_temperature import anchors_from_design, check_covers, eval_Tw, parse_profile, to_x_m
+        prof = parse_profile(card["wall"]["Tw_profile"])
+        # s の区切りの点はその設計の壁から (geometry.L_pipe・L_U と設計壁の終点 x_e に r_t を掛ける; prepare_ns と同じ写し、
+        # plan §4.3 [2026-10-13 訂正])。anchors_from_design は p.geometry だけを読むので、問題 dict の geometry を渡す
+        anc = anchors_from_design(types.SimpleNamespace(geometry=problem_dict["geometry"]), chain, rt)
+        x_tab, T_tab = to_x_m(prof, anc)
+        xm = x * rt                                        # 断面の x [m] (原点は設計スロート)
+        check_covers(x_tab, float(xm[0]), float(xm[-1]), "格子の見積もりの範囲 (設計壁の入口端〜終点)")
+        Tw = eval_Tw(x_tab, T_tab, xm)
+        tw_note = (f"等温壁 分布 ({prof['coord']} の表 {len(prof['coords'])} 点、T_w {min(prof['Tw_K']):g}〜{max(prof['Tw_K']):g} K)")
+        tw_rec = {"coord": prof["coord"], "n_points": len(prof["coords"]),
+                  "anchors_m": ({k: float(v) for k, v in anc.items()} if prof["coord"] == "s" else None),
+                  "anchors_source": ("design wall: geometry.L_pipe·r_t・geometry.L_U·r_t・設計壁の終点 x_e·r_t "
+                                     "(prepare_ns の anchors_from_design と同じ写し; plan §4.3)"
+                                     if prof["coord"] == "s" else "x_m の表 (区切りの点を使わない)"),
+                  "x_m_table": [float(v) for v in x_tab], "Tw_K_table": [float(v) for v in T_tab],
+                  "range_m": [float(xm[0]), float(xm[-1])],
+                  "wall_end_minus_card_exit_m": float(xm[-1]) - float(card["divergent_length_m"])}   # 記録 (写しには使わない)
+    elif card["wall"]["thermal"] == "isothermal":
         Tw = np.full_like(T, float(card["wall"]["Tw"]))
         tw_note = f"等温壁 Tw {float(card['wall']['Tw'])} K"
     else:
@@ -751,7 +886,7 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
     def q_of(fr):
         g = np.diff(_radial_fracs(nj, fr))
         return float(np.max(g[:-1] / g[1:]))
-    return {
+    res = {
         "note": "初期値 (合格の根拠ではない)。NS 後に check_wall_resolution.py の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥)",
         "wall_first_frac": frac, "wall_first_frac_throat": frac_t, "ni": int(ni),
         "wall_first_up_x0": chosen["wall_first_up_x0"], "wall_first_up_x1": chosen["wall_first_up_x1"],
@@ -769,6 +904,13 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
                    "y1plus_check": "mesh2d._x_stations の station ごと (入口の節点を除く)、配点は mesh2d と同じブレンド"},
         "warnings": warnings,
     }
+    if tw_rec is not None:
+        # 壁温分布: 表・区切りの点・第 1 層を決めた断面の局所の T_w (一様・断熱の戻り値・card_log は変えない)
+        tw_rec.update(Tw_K_at_wall_first_frac=float(Tw[k_dn]), Tw_K_at_wall_first_frac_throat=float(Tw[k_th]))
+        res["wall_temperature"] = tw_rec
+    # 断面ごとの値 (丸め前; 検査用の配列。build_problem は card_log に書かない)
+    res["sections"] = {"x_rt": x, "x_m": x * rt, "Tw_K": Tw, "y1_m": y1, "y1_over_rw": frac_req}
+    return res
 
 
 # ---------------------------------------------------------------------------------------------------- 液化の事前警告
@@ -903,6 +1045,20 @@ def render_problem_yaml(prob: dict, header: list, comments: dict) -> str:
     return text
 
 
+def _wall_comment(card: dict) -> str:
+    """spec.wall_thermal のコメント (一様・断熱は従来どおり「カード wall」)。"""
+    w = card["wall"]
+    if "Tw_profile" not in w:
+        return "カード wall"
+    tbl = w["Tw_profile"]
+    coord = next(k for k in ("s", "x_m") if k in tbl)
+    desc = f"{coord} の表 {len(tbl[coord])} 点、T_w {min(tbl['Tw_K']):g}〜{max(tbl['Tw_K']):g} K; {_COORD_TEXT[coord]}"
+    if "Tw_profile_csv" in w:
+        src = w["Tw_profile_csv"]
+        return f"カード wall.Tw_profile_csv {src['abs_path']} (sha256 {src['sha256'][:16]}…) の表を埋め込んだ ({desc}; YAML 単体で再現できる)"
+    return f"カード wall.Tw_profile をそのまま写した ({desc})"
+
+
 def _key_comments(card: dict, prob: dict) -> dict:
     """生成した各キーのコメント (出典・換算)。"""
     rt = float(prob["spec"]["r_throat"])
@@ -920,7 +1076,7 @@ def _key_comments(card: dict, prob: dict) -> dict:
         "spec.Tt": "カード conditions.Tt [K]",
         "spec.p_ambient": f"[Pa] {prob['_card']['p_ambient_source']}",
         "spec.M_design": "カード M_exit",
-        "spec.wall_thermal": "カード wall",
+        "spec.wall_thermal": _wall_comment(card),
         "spec.sizing": f"カード throat.diameter_physical_m {D} m の半径 (物理スロート) で寸法を決めた",
         "dv": "Lc_mode: from_length の設計変数 (r_t 単位)",
         "dv.L_total": f"= divergent_length_m {card['divergent_length_m']} m / r_t (設計スロート x=0 → 物理出口)",
@@ -1320,7 +1476,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         "mesh_estimate": {k: est[k] for k in ("note", "wall_first_frac", "wall_first_frac_throat", "ni", "wall_first_frac_raw",
                                                "wall_first_frac_throat_raw", "ni_required_for_ar", "ar_max_limit",
                                                "y1plus_est_max_with_blend", "x_y1plus_est_max_rt", "blend_choice",
-                                               "wall_first_up_x0", "wall_first_up_x1")},
+                                               "wall_first_up_x0", "wall_first_up_x1", "wall_temperature") if k in est},
         "mesh_estimate_ar_check": est["mesh_check"],
         "liquefaction": {k: liq[k] for k in ("verdict", "T_exit_K", "p_exit_Pa", "p_N2_Pa", "p_sat_N2_Pa", "supersaturated")},
         "dimensions": {"pass": dims["pass"], "rows": [{k: r[k] for k in ("name", "card_m", "measured_m", "diff_m", "tol_m", "pass")}
@@ -1347,7 +1503,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             "design_chain": {"time_s": t_chain, "L_c": chain["L_c"], "Lc_window": chain["Lc_window"],
                              "Lc_solve": chain["Lc_solve"], "x_E": chain["x_E"], "M_knot": chain["M_knot"],
                              "qa": _json_safe(chain["qa"])},
-            "mesh_estimate": est, "liquefaction": liq, "dimensions": dims, "time_s": time.time() - t_all,
+            "mesh_estimate": {k: v for k, v in est.items() if k != "sections"},     # 断面ごとの配列は書かない
+            "liquefaction": liq, "dimensions": dims, "time_s": time.time() - t_all,
             "euler_companion": (str(euler_out) if euler_out else None)}
     logd = _json_safe(logd)
     Path(str(out) + ".card_log.json").write_text(json.dumps(logd, indent=1, ensure_ascii=False))
@@ -1397,6 +1554,25 @@ def _json_safe(v):
     return repr(v)
 
 
+def _header_wall_temperature(card, est) -> list:
+    """壁温分布のカードのヘッダの行 (一様・断熱は無し)。"""
+    tw = est.get("wall_temperature")
+    if tw is None:
+        return []
+    w = card["wall"]
+    h = [f"壁温: {est['inputs']['wall']} → spec.wall_thermal.Tw_profile (表をそのまま写した; {_COORD_TEXT[tw['coord']]})。"
+         "NS (wallProfile の CSV) と積分法 (Tw_table) は prepare_ns がその場の寸法で実寸の x に写して読む"]
+    if "Tw_profile_csv" in w:
+        h.append(f"  壁温の CSV: {w['Tw_profile_csv']['abs_path']} (sha256 {w['Tw_profile_csv']['sha256']}; カードの値 "
+                 f"{w['Tw_profile_csv']['path']!r})")
+    anc = tw["anchors_m"]
+    where = ("区切りの点は設計壁から: 入口端 {x_in_m:.9g}・縮流部の始まり {x_contraction_m:.9g}・スロート {x_throat_m:g}・壁の終点 {x_exit_m:.9g} m"
+             .format(**anc) + f" (カードの拡大部長との差 {tw['wall_end_minus_card_exit_m'] * 1e3:+.3f} mm)" if anc is not None else "x_m の表")
+    h.append(f"  格子の見積もりは断面ごとの局所の T_w(x) ({where}; 第 1 層を決めた断面の T_w: 下流 {tw['Tw_K_at_wall_first_frac']:.1f} K、"
+             f"スロート付近 {tw['Tw_K_at_wall_first_frac_throat']:.1f} K)")
+    return h
+
+
 def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnings, auto_adjust) -> list:
     rt = float(prob["spec"]["r_throat"])
     rec = prob["_card"]["recipe"]
@@ -1410,6 +1586,7 @@ def _header(card, prob, card_path, card_sha, method_text, est, liq, dims, warnin
          f" estimate_mesh の**初期値** (y1+ {Y1PLUS_TARGET}、Eckert + 平板乱流 Cf)。合格の根拠ではない — NS 後に check_wall_resolution.py"
          " の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥)。実際の格子の AR の最大 "
          f"{est['mesh_check']['ar_max']:.0f} (ar_max {est['ar_max_limit']:g})",
+         *_header_wall_temperature(card, est),
          f"液化 (N₂、出口 {liq['T_exit_K']:.2f} K・{liq['p_exit_Pa']:.4g} Pa): {liq['verdict']}",
          "設計壁から測った寸法 (§4.2a の前段; 最終の合格は成果物から測る出荷ゲート): "
          + "、".join(f"{r['name']} {r['measured_m']:.6f} m (差 {r['diff_m']:+.2e}、公差 {r['tol_m']:g}、{'ok' if r['pass'] else 'FAIL'})"
@@ -1460,6 +1637,10 @@ def _print_report(logd: dict) -> None:
     print(f"格子 (初期値): ni {e['ni']}  wall_first_frac {e['wall_first_frac']}  wall_first_frac_throat {e['wall_first_frac_throat']}"
           f"  ブレンド {e['blend_choice']} (up_x0/x1 {e['wall_first_up_x0']}/{e['wall_first_up_x1']})  (AR の最大 {e['mesh_check']['ar_max']:.0f}、"
           f"y1+ の目安の最大 {e['y1plus_est_max_with_blend']:.2f} @ x {e['x_y1plus_est_max_rt']:.2f})")
+    tw = e.get("wall_temperature")
+    if tw is not None:
+        print(f"壁温 (格子の見積もり): {e['inputs']['wall']}、区切りの点 [m] {tw['anchors_m']}、第 1 層を決めた断面の T_w "
+              f"下流 {tw['Tw_K_at_wall_first_frac']:.1f} K・スロート付近 {tw['Tw_K_at_wall_first_frac_throat']:.1f} K")
     f = logd["moc_field"]
     print(f"逆 MOC の場: x_F {f['x_F']:.6f}  x_e {f['x_e']:.6f}  x_F − x_e {f['x_F_minus_x_e_m'] * 1e3:+.3f} mm  場の終点 "
           f"{f['x_wall_full_end']:.4f} r_t ({'張り付き' if f['pinned'] else '張り付きなし'}、x_end_margin {f['x_end_margin']})")
