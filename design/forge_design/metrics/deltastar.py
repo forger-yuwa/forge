@@ -274,6 +274,9 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
     # 置き換えて、codex の再現例で δ_r = −4.98e13 を soft で返していた) → hard (nonpos_ref) で NaN。正の参照に対する負の δ_r (冷却壁) は
     # そのまま
     qz = qref[mz]
+    # 探索域の上端 y_b そのもの (格子点の間にあることが多い) の参照値も見る: 帯のフィットは y_b で a、q_E は線形補間 (codex result レビュー 2026-10-13 M1;
+    # 格子点だけでは y_b の手前で q_ref が負に横切る断面を見逃し、D < 0 の枝で soft の negative_deficit を返していた)
+    qz = np.append(qz, a * float(np.interp(rwN - y_b, rr, qE)))
     if not (np.all(np.isfinite(qz)) and np.all(qz > 0.0)):
         delta_r = float("nan"); reason.append("nonpos_ref")
     elif D < 0:

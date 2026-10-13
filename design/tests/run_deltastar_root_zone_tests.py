@@ -191,6 +191,16 @@ def test_v1():
     check("V1(c) 旧: δ_r ≈ −4.98e13 (soft の negative_deficit)", abs(oc["delta_r"] / -4.979e13 - 1.0) < 1e-3 and oc["reason"] == ["negative_deficit"],
           f"旧 {oc['delta_r']:.4e} {oc['reason']}、D {oc['mass_deficit']:.6e}")
     check("V1(c) 新: nonpos_ref (hard)・NaN", np.isnan(nc["delta_r"]) and nc["reason"] == ["nonpos_ref"], f"新 {nc['delta_r']} {nc['reason']}")
+    # (d) codex result レビュー 2026-10-13 M1 の再現例: y_b が格子点の間 (0.10003) にあり、帯の参照 q_ref = −0.001 − 100 (y − y_b) が y_b で負。
+    #     格子点 (y ≤ y_b) の q_ref は正なので、y_b の端を見ないと soft の negative_deficit (δ_r ≈ −0.122) を返していた
+    rd = np.linspace(0.0, 1.0, 401); yd = 1.0 - rd; ybd = 0.10003
+    qNd = -0.001 - 100.0 * (yd - ybd)
+    nd = DS.band_local_deficit(rd, qNd, ones, 1.0, y_b_fixed=ybd)          # 既定の refine = 4
+    yref = 1.0 - np.concatenate([(rd[:-1, None] + (rd[1:] - rd[:-1])[:, None] * np.linspace(0, 1, 4, endpoint=False)[None, :]).ravel(), [rd[-1]]])
+    qz_grid = (-0.001 - 100.0 * (yref - ybd))[yref <= ybd]
+    check("V1(d) 前提: 探索域の格子点の q_ref は正、y_b での参照は負", bool(np.all(qz_grid > 0)) and (-0.001 < 0), f"格子点の最小 {qz_grid.min():.3e}")
+    check("V1(d) 新: y_b の端の参照が負 → nonpos_ref (hard)・NaN", nd is not None and np.isnan(nd["delta_r"]) and nd["reason"] == ["nonpos_ref"],
+          f"{None if nd is None else (nd['delta_r'], nd['reason'], nd['mass_deficit'])}")
     src = inspect.getsource(DS.deltastar_from_core_matched_euler)
     check("V1 HARD に nonpos_ref・nonmono_zone", 'HARD = ("no_root", "nan", "no_plateau", "nonpos_ref", "nonmono_zone")' in src)
     # 単調な断面はビット同一 (run_deltastar_tests.py と同じ合成断面: 円環欠損・べき乗則・コアの波・壁半径差・負の δ_r)

@@ -3,8 +3,9 @@
 
 - 出口コア M: 最後の列の η = r/r_w ∈ [0.05, 0.7] の M の平均 (nozzle_report の exit_core と同じ定義)。
 - 流量 (無次元、r_t 単位): 2π∫ρU_x r dr を x ∈ (−2.5, x_E) の列で計算した中央値 (nozzle_report の mdot_ratio_vs_euler の分子・分母と同じ定義)。
-判定は末尾 5 枚 (--tail 4.5/n)。出力 <run>/quantities_series.csv・<run>/quasisteady_series.txt。
-usage (case dir、design/.venv-opt):  python qs_series.py RUN [--every K]   (K 枚ごとに間引く。既定 1)
+判定は末尾 5 枚 (--tail 4.5/n) で check_quasisteady の既定の許容 (drift 5 %・osc 10 %)。**出口 M の合否 (plan tooling-nozzle-deltastar-band-root-zone §6 V5) には緩すぎる**
+(codex result レビュー 2026-10-13 M2) ので、その判定は `--tail 0.4 --drift 5e-5 --osc 5e-5` (M ≈ 5 で絶対 2.5e-4) を渡す。出力 <run>/quantities_series.csv・<run>/quasisteady_series.txt。
+usage (case dir、design/.venv-opt):  python qs_series.py RUN [--every K] [--tail F --drift F --osc F]   (K 枚ごとに間引く。既定 1)
 """
 import argparse
 import csv
@@ -20,6 +21,7 @@ from forge_design.report.nozzle_report import _res_files, load_field  # noqa: E4
 
 ap = argparse.ArgumentParser()
 ap.add_argument("run"); ap.add_argument("--every", type=int, default=1)
+ap.add_argument("--tail", type=float, default=None); ap.add_argument("--drift", type=float, default=None); ap.add_argument("--osc", type=float, default=None)
 a = ap.parse_args()
 run = (C / a.run).resolve()
 files = _res_files(run)[::a.every]
@@ -41,7 +43,9 @@ n = len(rows)
 if n < 6:
     raise SystemExit(f"{out}: スナップショットが {n} 枚 (末尾 5 枚の判定には 6 枚以上)")
 q = subprocess.run([sys.executable, str(C.parents[1] / "solver_density_cuda/tools/check_quasisteady.py"), "--series-csv", str(out),
-                    "--series-cols", "exit_core_M,mdot_rt", "--tail", f"{4.5 / n:.6f}"], capture_output=True, text=True)
+                    "--series-cols", "exit_core_M,mdot_rt", "--tail", f"{(a.tail if a.tail is not None else 4.5 / n):.6f}"]
+                   + (["--drift", str(a.drift)] if a.drift is not None else []) + (["--osc", str(a.osc)] if a.osc is not None else []),
+                   capture_output=True, text=True)
 txt = q.stdout + q.stderr
 (run / "quasisteady_series.txt").write_text(txt)
 tail = rows[-5:]

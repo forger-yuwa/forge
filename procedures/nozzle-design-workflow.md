@@ -87,6 +87,19 @@
    `SIZING_TOL_M` (1e-9 m) で止め、NS 後の `solve_rt` (`--prev`) は固定回数の反復で許容差を判定しない。
    NS 後に物理スロート径から決め直すときは `--prev RUN --delta-next RUN/_extract_edge/delta_r_next.csv --delta-r-out FILE`
    (δ_E の全分布で寸法を決め、同じ補正の表を FILE に書く。次の壁は `prepare_ns(delta_r_csv=FILE)` でその表から作る)。
+   **実寸の長さを保って作り直すとき (要求カードから; 2026-10-13、plan `tooling-nozzle-deltastar-band-root-zone`)**: r_t が動くと r_t 単位の設計を
+   据え置く上の経路では実寸の長さが公差を外れる (case/70: r_t ×1.0041 で拡大部長 +4.4 mm)。カードから作り直す:
+   ```
+   .venv-opt/bin/python -m forge_design.intake.wt_card CARD --out P.yaml --ns-correction PREV_RUN --delta-next PREV_RUN/<抽出>/delta_r_next.csv
+       → P.yaml・P_delta_r.csv (最終の r_t での補正の表)・P.yaml.card_log.json
+   .venv-opt/bin/python -m forge_design.feedback.deltastar_loop --problem P.yaml --euler-ref EULER_RUN --delta-r-csv P_delta_r.csv \
+       --ic-from PREV_RUN --run-dir RUN [--stages none --cfl 1 --steps 60000]
+   ```
+   `--prev` / `--ns-correction` の前の run は `wall_repr.json` (前の設計の区切りの点) が必須。表の端は前の設計の入口端・出口に float32 の丸めの範囲で揃え、
+   区間で正規化した座標 s で今の設計へ写す。使用域 [0, x_e] に hard 不合格 (held) の点があれば止まる。`--delta-r-csv` は表の sha256 をカードの記録と照合する。
+   カードの寸法ゲートは**設計壁から測った値**で、最終の合格は成果物 (STEP・メッシュ) の出荷寸法ゲート。
+   **冷却壁の注意**: case/70 (T_w/T_aw ≈ 0.3) の NS は、残差が床に着いた後も出口 M・流量が 10 万 step 単位で動き続けた (plan §5.1 #11)。
+   作り直しの入力の δ_E と最終の出口 M は、長い窓の系列で動きが止まったか (出口 M は末尾の変化と推定の残りの変化 ≤ 2.5e-4) を確かめてから使う。
 5. **形を見る・出す** — 最終 NS の run から成果物一式を 1 コマンドで出す (plan
    [`tooling-nozzle-wt-deliverables`](../plans/accepted/tooling-nozzle-wt-deliverables.md)、2026-10-13):
    ```
@@ -211,6 +224,7 @@ python3 solver_density_cuda/tools/rerun_conditions.py REF_RUN NEW_RUN [--Pt P --
   または C2 で解いた k_f で `prep_c2pin.py RUN K_F --problem YAML --ic RUN --stages full` → `run_staged_ns`
   (`case/45.isobutane_m6_d155/run_recal_chain.sh` が手本)。
 - YAML の Pt・Tt・ガスを変えると壁が変わる (上記)。同じ壁を再現したいだけなら YAML を変えない。
+- **コードの版も壁を変える**: 2026-10-13 の出口の終点の修正 (de35cb0b) から、終端の壁点を丸めで落としていた設計は同じ YAML でも壁・メッシュ・STEP が 1 点間隔長くなる (case/70 c2b +0.846 mm、case/45 生産 +5.353 mm)。古い run と同じ壁を再現するには、その run の `wall_repr.json`・`wall_physical.csv` (保存された壁) と `RUN_PROVENANCE.txt` のコードの版を確かめる (YAML だけでは再現しない)。
 
 ### 3c. 外部の壁座標 (CSV・CAD) しか無い場合
 
