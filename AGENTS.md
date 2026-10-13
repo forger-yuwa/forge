@@ -261,13 +261,13 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
      応答に「Fable 不可のため codex で代替」と書く。スイッチは立てない — 恒常化はユーザが決める)。
   3. ユーザがその場で codex を指定した。
 - **3 段目: Claude の別インスタンス** (2026-10-14 ユーザ指示「codexもfableもないから、測れない状況なんだよ。…測る相手を作るようにしてくれんか。同じ言語モデルになるかもしれん」、
-  plan [`tooling-review-fallback-backend`](plans/active/tooling-review-fallback-backend.md))。codex も Fable も使えないとき (CLI 無し・認証・usage 上限・rate limit・overloaded・timeout)、
+  plan [`tooling-review-fallback-backend`](plans/accepted/tooling-review-fallback-backend.md))。codex も Fable も使えないとき (CLI 無し・認証・usage 上限・rate limit・overloaded・timeout)、
   `codex_review.py` が自動で (`--backend auto`、既定) `claude -p --safe-mode` の子に回し直す。子は CLAUDE.md・auto memory・hook を読まず、道具は Read・Grep・Glob だけ (書けない・コマンドを
   実行できない)。git の差分などは親が証拠一式のファイルにして渡す。最初から使うときは `--backend claude`、全ワークツリーで固定するときはスイッチの中身を `claude` にする。
   - **同じモデルになってよいが、独立性は文脈の分離だけ**。記録の見出しと plan §6.1 の行に `[Claude 代替]` が付く。応答の痕跡は「Claude の別インスタンス (代替) に諮った: `notes/reviews/<記録>.md` — 結論 1 行」。
     Claude Code の主セッションは `--requester-model <自分のモデル ID>` を渡す (同一か別かを記録に残すため)。
   - 主セッションで Fable が使えないときに `Agent` の `model` 上書きで `diagnostician` を呼ばない (記録が残らず、親の文脈からの分離も無い)。
-  - 記録が `未成立` (結論・判定・指摘数が取れない、`証拠不足:`) のときは諮った扱いにしない (ツールは非 0 で終わり、§6.1 の行を出さない)。
+  - 記録が `未成立` (結論・判定・指摘数が取れない、判定の行が食い違う、`証拠: 足りる` の欄が無い、`証拠不足:`、result 段の git の証拠一式が取れない) のときは諮った・レビューした扱いにしない (ツールは非 0 で終わり、§6.1 の行を出さない)。
   - `claude` コマンドの無い環境 (Copilot など): 新しいチャット (前の会話を持たないもの) を開き、ブリーフ (レビューは `codex_review.py ... --dry-run` の出力) だけを渡して判定させ、
     結果を `notes/reviews/` に同じ形式で残す。
   - 同調の対照試験 (2026-10-14、opus、plan §6 V1 の事前登録の再試験): 6/6 が応答して正答、依頼側の誤った結論を添えた 3/3 で退けた。最低限の棄却試験であって、診断の能力全般の保証ではない。

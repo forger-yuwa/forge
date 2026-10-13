@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """codex_review.py の判定役の切り替え・結果の分類の試験 (plan tooling-review-fallback-backend §6 V2 (a)〜(j)
 と、既存の記録の後方互換)。**実モデルは呼ばない**。
+result 段レビュー (2026-10-14) の指摘 1〜3 の負例・回帰も持つ: (o) 判定は明示の判定の行から・指摘数は最後の行、
+(p) 証拠の欄 (「証拠: 足りる」/「証拠不足:」) が必須、(q) 証拠一式の必須の git の取得の失敗 → 子を起動せず failed。
 
 仕組み:
   * 偽の `codex`・`claude` を一時ディレクトリに作って PATH の先頭に置く (本物の ~/.local/bin は PATH から外す)。
@@ -9,13 +11,15 @@
   * スイッチ ~/.config/forge/diagnose-backend は一時の HOME で制御する。
   * codex_review.py は小さな一時の git リポジトリ (fixture) に写して走らせる。ROOT はスクリプトの場所で決まるので、
     本物の notes/reviews/ を汚さない。出力先は一時ディレクトリ (--out-dir)。
-  * 後方互換は本物のリポジトリの notes/reviews/ の記録 (codex_review.py が書いた形式のもの) を分類にかけて ok を確かめる。
+  * 後方互換は本物のリポジトリの notes/reviews/ の記録 (codex_review.py が書いた形式のもの) から判定・指摘数・結論が
+    取れることを確かめる (証拠の欄の契約より前の記録なので、分類は incomplete になってよい)。
+  * 証拠一式の git の timeout は、偽の git を PATH の先頭に置き、モジュールを直に読んで打ち切りを 1 s にして試す。
 
 使い方:
   python3 solver_density_cuda/tools/test_codex_review_backend.py        # 全部 ok なら 0、失敗があれば 1
   python3 solver_density_cuda/tools/test_codex_review_backend.py -v     # 失敗した試験の stdout も出す
 """
-import glob, importlib.util, json, os, re, shutil, subprocess, sys, tempfile
+import argparse, contextlib, glob, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REAL_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -41,14 +45,20 @@ print("OpenAI Codex v0.0.0-fake\n--------\nworkdir: %s\nmodel: fake-codex-model\
 print("user\n<prompt>\n")
 sys.stdout.flush()
 BODY = {
-    "ok_plan": "**判定: GO-with-changes**\n要約。\n\n1. Major — 何か (根拠 a.py:1)\n\n指摘数: Critical 0 / Major 1 / Minor 2",
-    "ok_diag": "結論: 次は A/B を 1 つ回す\n第 1 仮説: x  確度: 中\n不足情報: 無し",
-    "nogo": "**判定: NO-GO**\n直すまで進めない。\n\n指摘数: Critical 1 / Major 0 / Minor 0",
+    "ok_plan": "**判定: GO-with-changes**\n要約。\n\n1. Major — 何か (根拠 a.py:1)\n\n証拠: 足りる\n指摘数: Critical 0 / Major 1 / Minor 2",
+    "ok_diag": "結論: 次は A/B を 1 つ回す\n第 1 仮説: x  確度: 中\n不足情報: 無し\n証拠: 足りる",
+    "nogo": "**判定: NO-GO**\n直すまで進めない。\n\n証拠: 足りる\n指摘数: Critical 1 / Major 0 / Minor 0",
+    # result 段レビュー 2026-10-14 指摘 1 の入力 (+ 証拠の欄): 本文の前の方の「GO」でなく判定の行の NO-GO を取る
+    "nogo_prose": "GO は不適切です。\n判定: NO-GO\n証拠: 足りる\n指摘数: Critical 1 / Major 0 / Minor 0",
+    "verdict_conflict": "**判定: GO**\n要約。\n\n判定: NO-GO\n証拠: 足りる\n指摘数: Critical 0 / Major 0 / Minor 0",
+    "no_evidence": "**判定: GO**\n要約。\n\n指摘数: Critical 0 / Major 0 / Minor 0",
+    # 同 指摘 2 の入力: diagnose の書式どおりの「結論: 判断できません」+「不足情報:」、証拠の欄なし
+    "diag_lack": "結論: 判断できません\n不足情報: 最終 HDF5 の NaN 検査結果",
     "errbody": "Error: rate limit reached",
     "readfail": "レビューに必要なファイルを読み取れません。",
     "insufficient": "**判定: GO**\n証拠不足: run_0001 の residual_history.csv\n指摘数: Critical 0 / Major 0 / Minor 0",
     # 本文に「rate limit」「ERROR:」を含むだけの正常なレビュー (unavailable にしてはいけない)
-    "ok_mentions_ratelimit": "**判定: GO**\nERROR: rate limit の扱いを確認した。429 も見た。\n\n指摘数: Critical 0 / Major 0 / Minor 0",
+    "ok_mentions_ratelimit": "**判定: GO**\nERROR: rate limit の扱いを確認した。429 も見た。\n\n証拠: 足りる\n指摘数: Critical 0 / Major 0 / Minor 0",
 }
 if mode in BODY:
     if mode == "ok_mentions_ratelimit":
@@ -97,15 +107,16 @@ res = {"type": "result", "subtype": "success", "is_error": False, "num_turns": 3
        "modelUsage": {"claude-fake-%s-9" % model: {"outputTokens": 100}, "claude-fake-haiku-9": {"outputTokens": 5}},
        "permission_denials": [], "api_error_status": None}
 BODY = {
-    "ok_plan": "**判定: GO**\n要約。\n\n指摘数: Critical 0 / Major 0 / Minor 1",
-    "ok_diag": "結論: 根拠の行を確かめた\n第 1 仮説: y  確度: 高",
+    "ok_plan": "**判定: GO**\n要約。\n\n証拠: 足りる\n指摘数: Critical 0 / Major 0 / Minor 1",
+    "ok_diag": "結論: 根拠の行を確かめた\n第 1 仮説: y  確度: 高\n証拠: 足りる",
     "errbody": "Error: rate limit reached",
     "readfail": "必要なファイルを読み取れません",
     "insufficient": "結論: 判断できない\n証拠不足: git diff の全文 (証拠一式に無い)",
-    "insufficient_none": "結論: 判断した\n証拠不足: 無し",
+    "insufficient_none": "結論: 判断した\n証拠: 足りる\n証拠不足: 無し",
     "insufficient_none2": "結論: 判断した\n証拠不足: 該当なし",
-    "pretty": "結論: 整形された JSON でも読める",
-    "denial": "結論: 書き込みは拒否された",
+    "diag_lack": "結論: 判断できません\n不足情報: 最終 HDF5 の NaN 検査結果",
+    "pretty": "結論: 整形された JSON でも読める\n証拠: 足りる",
+    "denial": "結論: 書き込みは拒否された\n証拠: 足りる",
     "empty": "",
 }
 rc = 0
@@ -129,6 +140,23 @@ else:
     print("unknown mode " + mode, file=sys.stderr); sys.exit(9)
 print(json.dumps(res, ensure_ascii=False, indent=2 if mode == "pretty" else None))
 sys.exit(rc)
+'''
+
+# 偽の git (証拠一式の取得の失敗の試験用)。FAKE_GIT_MODE で result 段の必須の取得 (`<base>...HEAD` / `<base>..HEAD`) だけを
+# 止める (sleep: 打ち切りまで眠る、fail_log / fail_diff: その取得だけ rc 1)。それ以外は本物の git に渡す。
+FAKE_GIT = r'''#!@PY@
+import os, sys, time
+args = sys.argv[1:]
+mode = os.environ.get("FAKE_GIT_MODE", "")
+ranged = any(".." in x and x.endswith("HEAD") for x in args)
+if ranged:
+    with open(os.environ["FAKE_GIT_LOG"], "a", encoding="utf-8") as f:
+        f.write(" ".join(args) + "\n")
+    if mode == "sleep":
+        time.sleep(60)
+    if (mode == "fail_log" and args[0] == "log") or (mode == "fail_diff" and args[0] == "diff" and "--stat=200" not in args):
+        print("fatal: fake failure (" + mode + ")", file=sys.stderr); sys.exit(1)
+os.execv("@GIT@", ["git"] + args)
 '''
 
 PLAN_TEXT = """# demo plan
@@ -200,6 +228,12 @@ class Fixture:
                 p = os.path.join(d, n)
                 open(p, "w").write((FAKE_CODEX if n == "codex" else FAKE_CLAUDE).replace("@PY@", py))
                 os.chmod(p, 0o755)
+        # 偽の git (本物の git の絶対パスへ渡す)
+        self.bin_git = os.path.join(self.tmp, "bin_git")
+        os.makedirs(self.bin_git)
+        p = os.path.join(self.bin_git, "git")
+        open(p, "w").write(FAKE_GIT.replace("@PY@", py).replace("@GIT@", shutil.which("git")))
+        os.chmod(p, 0o755)
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(os.path.join(self.home, ".config", "forge"))
         self.calls = os.path.join(self.tmp, "calls.jsonl")
@@ -294,7 +328,11 @@ def main():
           and "依頼側との関係**: 不明" in r.text, r)
     check("(a) 本文は codex の最終メッセージそのまま",
           r.text.split("\n---\n", 1)[1].strip() == "**判定: GO-with-changes**\n要約。\n\n1. Major — 何か (根拠 a.py:1)\n\n"
-          "指摘数: Critical 0 / Major 1 / Minor 2", r)
+          "証拠: 足りる\n指摘数: Critical 0 / Major 1 / Minor 2", r)
+    cp = r.call("codex")["argv"][-1]
+    check("(a) codex のプロンプトの出力形式: 判定の行・証拠の欄 (「証拠: 足りる」か「証拠不足: <要るもの>」)・指摘数",
+          "`判定: <GO / GO-with-changes / NO-GO のどれか 1 語>`" in cp and "`証拠: 足りる`" in cp
+          and "`証拠不足: <要るもの>`" in cp and "`指摘数: Critical N / Major N / Minor N`" in cp, r)
     check("(a) §6.1 の行を出す ([Claude 代替] は付かない)", r.has_row() and "[Claude 代替]" not in r.out, r)
     check("(a) codex のときは証拠一式を作らない (今の振る舞い)", not r.files("*.evidence"), r)
     check("(a) codex の起動作法は今のまま (read-only・stdin /dev/null・cwd=ROOT・effort)",
@@ -354,9 +392,10 @@ def main():
     check("(e) claude「証拠不足:」 → incomplete・非 0・行なし",
           r.rc == 2 and not r.has_row("diagnose") and "証拠不足: git diff の全文" in r.text.splitlines()[0], r)
     r = fx.run(D + ["--backend", "claude"], claude="insufficient_none")
-    check("(e) 「証拠不足: 無し」は数えない → ok", r.rc == 0 and "- **分類**: `ok`" in r.text, r)
+    check("(e) 「証拠: 足りる」があれば「証拠不足: 無し」は不足として数えない → ok", r.rc == 0 and "- **分類**: `ok`" in r.text, r)
     r = fx.run(D + ["--backend", "claude"], claude="insufficient_none2")
-    check("(e) 「証拠不足: 該当なし」も数えない → ok", r.rc == 0 and "- **分類**: `ok`" in r.text, r)
+    check("(e) 「証拠不足: 該当なし」だけでは証拠の欄の代わりにならない → incomplete・非 0・行なし",
+          r.rc == 2 and not r.has_row("diagnose") and "証拠の欄" in r.text.splitlines()[0], r)
 
     # (f) 96 KiB 超のプロンプト → ファイル渡し (codex・claude とも)
     r = fx.run(P + ["--extra", fx.big], codex="ok_plan")
@@ -417,6 +456,7 @@ def main():
     check("(i'') diff が上限を超えたら優先パス (design/) を入れ、入らなかったファイルを README に列挙",
           "design/foo.py" in patch and "notes/other.txt" not in patch and "省略: `notes/other.txt`" in readme
           and any("上限" in n for n in e["notes"]), note=readme[:400])
+    check("(i'') 意図した差分の省略は取得の失敗 (errors) にしない", e["errors"] == [], note=str(e["errors"]))
 
     # claude の起動の契約 (plan §4.2)
     r = fx.run(P + ["--backend", "claude", "--effort", "xhigh", "--requester-model", "claude-fake-opus-9"])
@@ -489,27 +529,182 @@ def main():
     check("(m) 表示された §6.1 の行 ([Claude 代替]) を貼った plan で check_plans.py が PASS",
           bool(row) and cp.returncode == 0 and "VERDICT: PASS" in cp.stdout, r, note=cp.stdout[-300:])
 
-    # 後方互換: 既存の codex の記録 (codex_review.py が書いた形式) が分類で ok になる
+    # (o) 判定は明示の判定の行から・指摘数は最後の行 (result 段レビュー 2026-10-14 指摘 1)
     mod = load_module()
-    head_rev = re.compile(r"^# codex レビュー: \S+ \((plan|result)\)$")
-    head_diag = re.compile(r"^# codex 諮問 \(diagnose\): \S+$")
-    n_ok, bad, n_recent = 0, [], 0
+    EV = "\n証拠: 足りる\n"
+    CNT = "指摘数: Critical 0 / Major 0 / Minor 0"
+    for name, body, want_v, want_c, want_cls in (
+            ("指摘 1 の入力 (「GO は不適切です。」の後に「判定: NO-GO」、証拠の欄なし) → 判定は NO-GO (分類は証拠の欄なしで incomplete)",
+             "GO は不適切です。\n判定: NO-GO\n指摘数: Critical 1 / Major 0 / Minor 0", "NO-GO", "C1/M0/m0", "incomplete"),
+            ("指摘 1 の入力 + 証拠の欄 → ok・NO-GO",
+             "GO は不適切です。\n判定: NO-GO" + EV + "指摘数: Critical 1 / Major 0 / Minor 0", "NO-GO", "C1/M0/m0", "ok"),
+            ("判定の語だけの行 `**NO-GO**  ` (既存の記録 32 件の書式) → NO-GO", "**NO-GO**  \n要約。" + EV + CNT, "NO-GO", "C0/M0/m0", "ok"),
+            ("`## 判定: **GO-with-changes**` → GO-with-changes", "## 判定: **GO-with-changes**\n要約。" + EV + CNT,
+             "GO-with-changes", "C0/M0/m0", "ok"),
+            ("全角コロン `**判定：GO**` → GO", "**判定：GO**\n要約。" + EV + CNT, "GO", "C0/M0/m0", "ok"),
+            ("コードブロックの中の例文の判定の行・指摘数の行は拾わない (指摘数は最後の行)",
+             "**判定: GO-with-changes**\n\n1. Major — 例:\n\n   ```text\n   GO は不適切です。\n   判定: NO-GO\n"
+             "   指摘数: Critical 1 / Major 0 / Minor 0\n   ```\n" + EV + "指摘数: Critical 0 / Major 3 / Minor 2",
+             "GO-with-changes", "C0/M3/m2", "ok"),
+            ("判定の行が相反する (GO と NO-GO) → incomplete・判定 ?", "**判定: GO**\n\n判定: NO-GO" + EV + CNT, "?", "C0/M0/m0",
+             "incomplete"),
+            ("同じ判定の行が 2 回 → その判定", "**判定: NO-GO**\n\n判定: NO-GO" + EV + CNT, "NO-GO", "C0/M0/m0", "ok"),
+            ("判定の行が無い (文中の GO・NO-GO だけ) → incomplete", "GO は不適切です。NO-GO とすべき。" + EV + CNT, "?", "C0/M0/m0",
+             "incomplete"),
+            ("箇条書きの「- 判定: GO」・後ろに文が続く「判定: GO は早い」は判定の行でない",
+             "- 判定: GO の場合は進める\n判定: GO は早い\n**判定: NO-GO**" + EV + CNT, "NO-GO", "C0/M0/m0", "ok"),
+            ("指摘数は最後の行 (本文中の例文 `指摘数: Critical 1 / …` を拾わない)",
+             "**判定: GO**\n例文 `指摘数: Critical 1 / Major 0 / Minor 0` を拾っていた。" + EV + "指摘数: Critical 0 / Major 3 / Minor 2",
+             "GO", "C0/M3/m2", "ok")):
+        cls, why, info = mod.classify_body("result", body)
+        check(f"(o) {name}", (cls, info.get("verdict"), info.get("counts")) == (want_cls, want_v, want_c),
+              note=f"{cls} {why} {info}")
+    # 回帰: 指摘 1〜3 を出したレビュー自身の記録。旧来の抽出は見出しを「C1/M0/m0」と誤った (本文の例文を拾った)
+    rec = os.path.join(REAL_ROOT, "notes", "reviews", "2026-10-14-tooling-review-fallback-backend-result.md")
+    if os.path.isfile(rec):
+        cls, why, info = mod.classify_body("result", open(rec, encoding="utf-8").read().split("\n---\n", 1)[1])
+        check("(o) 回帰: 2026-10-14-tooling-review-fallback-backend-result.md の本文 → GO-with-changes・C0/M3/m2 "
+              "(コードブロックの「判定: NO-GO」・例文の指摘数を拾わない。証拠の欄の契約より前なので分類は incomplete)",
+              (info.get("verdict"), info.get("counts"), cls) == ("GO-with-changes", "C0/M3/m2", "incomplete")
+              and "証拠の欄" in why, note=f"{cls} {why} {info}")
+    else:
+        check("(o) 回帰の入力 2026-10-14-tooling-review-fallback-backend-result.md がある", False, note=rec)
+    r = fx.run(P, codex="nogo_prose")
+    check("(o) codex 本文「GO は不適切です。/判定: NO-GO」 → ok・rc 0・見出しと §6.1 の行が NO-GO, C1/M0/m0",
+          r.rc == 0 and "- **判定**: **NO-GO**, 指摘 C1/M0/m0" in r.text
+          and re.search(r"^\| plan .*\| NO-GO, C1/M0/m0 \|", r.out, re.M), r)
+    r = fx.run(P, codex="verdict_conflict")
+    check("(o) codex 本文の判定の行が相反 → incomplete・rc 2・行なし・切り替えない",
+          r.rc == 2 and not r.has_row() and r.n("claude") == 0
+          and r.text.startswith("**未成立 (incomplete)** — incomplete: 判定の行が相反する: GO / NO-GO"), r)
+
+    # (p) 証拠の欄が必須 (同 指摘 2)。diagnose の「不足情報:」はそれだけでは incomplete にしない
+    for name, body, want in (
+            ("「不足情報:」+「証拠: 足りる」 → ok (不足情報は追加の希望の欄)", "結論: x\n不足情報: y\n証拠: 足りる", "ok"),
+            ("「証拠: 足りない (…)」は証拠の欄として数えない → incomplete", "結論: x\n証拠: 足りない (run の VERDICT)", "incomplete"),
+            ("書式の写し「証拠: 足りる | 証拠不足: <要るもの>」は数えない → incomplete",
+             "結論: x\n証拠: 足りる | 証拠不足: <要るもの>", "incomplete"),
+            ("「`証拠: 足りる`」(バッククォート)・「**証拠: 足りる (diff を確認)**」は数える → ok",
+             "結論: x\n`証拠: 足りる`\n**証拠: 足りる (diff を確認)**", "ok"),
+            ("「証拠: 足りる」と「証拠不足: <要るもの>」が両方 → 不足を優先して incomplete",
+             "結論: x\n証拠: 足りる\n証拠不足: run_0001 の CONVERGENCE_VERDICT.txt", "incomplete")):
+        cls, why, info = mod.classify_body("diagnose", body)
+        check(f"(p) {name}", cls == want, note=f"{cls} {why}")
+    r = fx.run(D, codex="diag_lack")
+    check("(p) codex diagnose 指摘 2 の入力 (「結論: 判断できません」+「不足情報: …」、証拠の欄なし) → incomplete・rc 2・行なし・切り替えない",
+          r.rc == 2 and not r.has_row("diagnose") and r.n("claude") == 0
+          and r.text.startswith("**未成立 (incomplete)**") and "証拠の欄" in r.text.splitlines()[0], r)
+    r = fx.run(D + ["--backend", "claude"], claude="diag_lack")
+    check("(p) claude diagnose 指摘 2 の入力 → incomplete・rc 2・行なし",
+          r.rc == 2 and not r.has_row("diagnose") and "証拠の欄" in r.text.splitlines()[0], r)
+    r = fx.run(P, codex="no_evidence")
+    check("(p) codex plan 判定・指摘数はあるが証拠の欄なし → incomplete・rc 2・行なし",
+          r.rc == 2 and not r.has_row() and "証拠の欄" in r.text.splitlines()[0], r)
+    r = fx.run(D, codex="ok_diag")
+    dp = r.call("codex")["argv"][-1]
+    check("(p) diagnose のプロンプトの出力形式に証拠の欄と「不足情報:」との区別がある",
+          r.rc == 0 and "証拠: 足りる | 証拠不足: <要るもの>" in dp and "`不足情報:` は結論を妨げない" in dp, r)
+    r = fx.run([fx.plan, "--stage", "result", "--base", "main"], codex="ok_plan")
+    rp = r.call("codex")["argv"][-1]
+    check("(p) result 段 (codex) のプロンプトにも証拠の欄", r.rc == 0 and "`証拠: 足りる`" in rp and "`証拠不足: <要るもの>`" in rp
+          and r.has_row("result"), r)
+    r = fx.run([fx.plan, "--stage", "result", "--base", "main", "--backend", "claude"])
+    check("(p) claude の前書き: 足りているときは「証拠: 足りる」を書く (どちらか一方は必須)",
+          r.rc == 0 and "足りているときは `証拠: 足りる` の行を書く" in r.call("claude")["argv"][-1], r)
+
+    # (q) 証拠一式の必須の git の取得の失敗 → 子を起動せず failed: 証拠一式 (同 指摘 3)
+    r = fx.run([fx.plan, "--stage", "result", "--base", "no-such-ref", "--backend", "claude", "--timeout", "20"])
+    log = open(r.md[:-3] + ".claude.log", encoding="utf-8").read() if r.md and os.path.isfile(r.md[:-3] + ".claude.log") else ""
+    evr = os.path.join(r.md[:-3] + ".evidence", "README.md") if r.md else ""
+    check("(q) 不正な --base (claude) → claude を起動しない・rc 1・記録の先頭「未成立 (failed: 証拠一式)」・行なし",
+          r.rc == 1 and r.n("claude") == 0 and not r.has_row("result")
+          and r.text.startswith("**未成立 (failed: 証拠一式)** — failed: 証拠一式: 必須の git の取得に失敗"), r)
+    check("(q) 不正な --base → 失敗した git のコマンドと stderr が claude のログ・証拠一式の README・記録に残る",
+          "`git diff --stat=200 no-such-ref...HEAD` が失敗 (rc=128)" in log and os.path.isfile(evr)
+          and "取得の失敗" in open(evr, encoding="utf-8").read() and "no-such-ref" in r.text
+          and "(claude: failed: 証拠一式)" in r.text, r, note=log[:300])
+    r = fx.run([fx.plan, "--stage", "result", "--base", "no-such-ref", "--timeout", "20"], codex="rate_limit")
+    check("(q) auto: codex unavailable → claude への切り替えでも不正な --base なら起動しない・rc 1・両方の試行が記録に残る",
+          r.rc == 1 and r.n("codex") == 1 and r.n("claude") == 0 and r.text.startswith("**未成立 (failed: 証拠一式)**")
+          and "(codex: unavailable/rate_limit)" in r.text and "(claude: failed: 証拠一式)" in r.text, r)
+
+    # 偽の git を PATH の先頭に置き、モジュールを直に呼ぶ (打ち切りを 1 s にする)
+    gitlog = os.path.join(fx.tmp, "fake_git.log")
+
+    def in_process(git_mode, fn):
+        if os.path.exists(gitlog):
+            os.remove(gitlog)
+        if os.path.exists(fx.calls):
+            os.remove(fx.calls)
+        old = dict(os.environ)
+        os.environ.update(PATH=fx.bin_git + ":" + fx.bin_all + ":" + fx.sys_path, HOME=fx.home, FAKE_CALLS=fx.calls,
+                          FAKE_GIT_MODE=git_mode, FAKE_GIT_LOG=gitlog, FAKE_CLAUDE_MODE="ok_plan")
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                return fn()
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
+    def git_calls():
+        return open(gitlog, encoding="utf-8").read().splitlines() if os.path.exists(gitlog) else []
+
+    mq = load_module()
+    mq.ROOT = fx.repo
+    mq.EVIDENCE_GIT_TIMEOUT = 1
+    outq = os.path.join(fx.tmp, "q_out")
+    os.makedirs(outq)
+    ns = argparse.Namespace(claude_model="opus", stage="result", base="main", effort="high", timeout=20)
+    at = in_process("sleep", lambda: mq.run_claude(ns, "prompt", "q-timeout", outq))
+    gc = git_calls()
+    claude_calls = open(fx.calls, encoding="utf-8").read().splitlines() if os.path.exists(fx.calls) else []
+    check("(q) git の timeout (偽の git が眠る) → failed: 証拠一式・claude を起動しない・最初の取得で止める (timeout を重ねない)",
+          at.cls == "failed" and at.phase == "証拠一式" and not at.ran and "timeout 1s" in at.detail and not claude_calls
+          and len(gc) == 1 and gc[0].startswith("diff --stat=200 main...HEAD"), note=f"{at.cls} {at.detail} git={gc}")
+    for mode, cmd in (("fail_log", "git log --oneline main..HEAD"), ("fail_diff", "git diff main...HEAD")):
+        e = in_process(mode, lambda: mq.build_evidence(os.path.join(fx.tmp, "q_" + mode), "result", "main"))
+        check(f"(q) 2 つ目以降の必須の取得 ({cmd}) の失敗も errors に入る",
+              len(e["errors"]) == 1 and f"`{cmd}` が失敗 (rc=1)" in e["errors"][0] and "fake failure" in e["errors"][0],
+              note=str(e["errors"]))
+    e = in_process("", lambda: mq.build_evidence(os.path.join(fx.tmp, "q_ok"), "result", "main"))
+    check("(q) 偽の git でも取得が成功すれば errors なし (stat・log・diff の 3 回)", e["errors"] == [] and len(git_calls()) == 3,
+          note=f"{e['errors']} {git_calls()}")
+
+    # (n) 後方互換: 既存の記録 (codex_review.py が書いた形式、証拠の欄の契約より前) から判定・指摘数・結論が取れる。
+    #     分類は新しい契約では incomplete になってよい (証拠の欄が無い)。判定・指摘数は記録の見出しと一致することも見る。
+    mod = load_module()
+    head_rev = re.compile(r"^# (?:codex レビュー|Claude 代替レビュー): \S+ \((plan|result)\)$")
+    head_diag = re.compile(r"^# (?:codex 諮問|Claude 代替諮問) \(diagnose\): \S+$")
+    hdr_v = re.compile(r"^- \*\*判定\*\*: \*\*(\S+?)\*\*, 指摘 (C\S+)$", re.M)
+    # 旧来の抽出 (本文で最初の一致) が見出しを誤った記録。見出しとの一致は見ない (正しい値は (o) の回帰で確かめる)
+    known_bad_header = {"2026-10-14-tooling-review-fallback-backend-result.md"}
+    n_all, n_recent, bad, mismatch, other_why = 0, 0, [], [], []
     for f in sorted(glob.glob(os.path.join(REAL_ROOT, "notes", "reviews", "*.md"))):
         t = open(f, encoding="utf-8").read()
         first = t.splitlines()[0] if t else ""
         stage = "plan" if head_rev.match(first) else ("diagnose" if head_diag.match(first) else "")
         if not stage or "\n---\n" not in t:
             continue
-        body = t.split("\n---\n", 1)[1]
-        cls, why, _ = mod.classify_body(stage, body)
-        if re.match(r"2026-10-1\d-", os.path.basename(f)):
+        hdr, body = t.split("\n---\n", 1)
+        cls, why, info = mod.classify_body(stage, body)
+        b = os.path.basename(f)
+        n_all += 1
+        if re.match(r"2026-10-1\d-", b):
             n_recent += 1
-        if cls == "ok":
-            n_ok += 1
-        else:
-            bad.append(f"{os.path.basename(f)}: {why}")
-    check(f"(n) 後方互換: 既存の記録 {n_ok + len(bad)} 件 (うち 2026-10-1x {n_recent} 件) が全部 ok",
-          not bad and n_recent > 0, note="; ".join(bad[:5]))
+        got = info["conclusion"] != "?" if stage == "diagnose" else (info["verdict"] != "?" and "?" not in info["counts"])
+        if not got:
+            bad.append(f"{b}: {why} {info}")
+        if cls != "ok" and not why.startswith("必須の項目が無い: 証拠の欄"):
+            other_why.append(f"{b}: {why}")
+        h = hdr_v.search(hdr)
+        if stage != "diagnose" and h and b not in known_bad_header and (h.group(1), h.group(2)) != (info["verdict"], info["counts"]):
+            mismatch.append(f"{b}: 見出し {h.group(1)} {h.group(2)} / 抽出 {info['verdict']} {info['counts']}")
+    check(f"(n) 後方互換 (証拠の欄の契約より前の記録、分類は incomplete でよい): 既存の記録 {n_all} 件 "
+          f"(うち 2026-10-1x {n_recent} 件) から判定・指摘数・結論が取れる", not bad and n_recent > 0, note="; ".join(bad[:5]))
+    check("(n) 後方互換: 判定・指摘数が記録の見出し (旧来の抽出) と一致 (旧来の抽出が誤った 1 件を除く)", not mismatch,
+          note="; ".join(mismatch[:5]))
+    check("(n) 後方互換: 既存の記録が ok でない理由は証拠の欄が無いことだけ (判定の相反・証拠不足は無い)", not other_why,
+          note="; ".join(other_why[:5]))
 
     n_ng = sum(1 for ok, _ in RESULTS if not ok)
     print(f"\n{len(RESULTS) - n_ng}/{len(RESULTS)} ok" + (f", {n_ng} NG" if n_ng else ""))

@@ -25,10 +25,14 @@ codex が使えないときは、文脈を分けた Claude の別インスタン
          git の情報は親 (このスクリプト) が証拠一式 notes/reviews/<記録名>.evidence/ (git 追跡外) にして渡す。
 
 結果の分類 (codex・claude 共通):
-  ok           段ごとの必須の項目がある (diagnose: 「結論:」の行、plan・result: 判定 GO / GO-with-changes / NO-GO と「指摘数:」の行)
+  ok           段ごとの必須の項目がある (diagnose: 「結論:」の行、plan・result: 判定の行 (GO / GO-with-changes / NO-GO) と
+               「指摘数:」の行) かつ証拠の欄が「証拠: 足りる」
   unavailable  上の定義
-  failed       それ以外の非 0 終了
-  incomplete   本文はあるが必須の項目が無い、または「証拠不足:」の行がある
+  failed       それ以外の非 0 終了。result 段の claude で、必須の git の取得 (diff --stat・diff・log) が失敗したときも
+               子を起動せずにこれで終わる (記録の先頭は「未成立 (failed: 証拠一式)」)
+  incomplete   本文はあるが必須の項目が無い・判定の行が相反する・「証拠不足:」の行がある・証拠の欄 (「証拠: 足りる」) が無い
+  判定は明示の判定の行 (`判定: NO-GO` か、判定の語だけの行 `**NO-GO**`) からだけ取る (コードブロックの中は見ない)。
+  指摘数は「指摘数: Critical n / Major n / Minor n」の行の最後のもの。diagnose の「不足情報:」はそれだけでは incomplete にしない。
   **ok のときだけ** plan の §6.1 に貼る行を表示して 0 で終わる。それ以外は記録の先頭に「**未成立 (分類)**」と書き、
   非 0 で終わる (failed 1 / incomplete 2 / unavailable 3)。
 
@@ -69,6 +73,8 @@ MANAGED_SETTINGS_PATHS = ("/etc/claude-code/managed-settings.json", "/etc/claude
                           "/etc/claude-code/managed-mcp.json")
 # 証拠一式: result 段の git diff がこれを超えたら、stat と上位のファイルの差分に切る
 EVIDENCE_DIFF_MAX_BYTES = 512 * 1024
+# 証拠一式: git の 1 回の取得の打ち切り (秒)。超えたら取得の失敗 (result 段なら failed: 証拠一式)
+EVIDENCE_GIT_TIMEOUT = 120
 # 証拠一式: プロンプトに直に入れる diff の stat の上限 (超えたら頭だけ入れてファイルを読ませる)
 EVIDENCE_STAT_INLINE_MAX_BYTES = 16 * 1024
 # 差分を切るときに優先するパス (result 段のプロンプトが見る範囲 + plans)
@@ -97,11 +103,23 @@ CLAUDE_UNAVAILABLE_STATUS = {429: "rate_limit", 529: "overloaded", 503: "overloa
 
 # 段ごとの必須の項目。「結論:」は行頭の `**`・`-`・`#`・`>` を許す (`**結論: …**` の記録が既存にある)
 CONCLUSION_RE = re.compile(r"^[ \t>*#\-]*\**[ \t]*結論[ \t]*\**[ \t]*[:：][ \t]*(.+)$", re.M)
+# 指摘数は最後の行を取る (本文中の例文 `指摘数: Critical 1 / …` を拾わない。result 段レビュー 2026-10-14 指摘 1)
 COUNTS_RE = re.compile(r"指摘数\s*[:：]\s*Critical\s*(\d+)\s*/\s*Major\s*(\d+)\s*/\s*Minor\s*(\d+)")
-VERDICT_RE = re.compile(r"\b(GO-with-changes|NO-GO|GO)\b")
-# 「証拠不足: <要るもの>」の行 → incomplete。「証拠不足: 無し」は数えない
+# 判定の行 (同 指摘 1): 本文で最初に一致した語は取らない (「GO は不適切です。」の後の「判定: NO-GO」を GO と読んだ)。
+# 行頭の `**`・`#`・空白を許し、行には判定の語だけ (前後の `**`・行末の句点は可)。コードブロックの外の行だけを見る。
+#   VERDICT_LINE_RE: `**判定: GO**`・`## 判定: **NO-GO**`・`**判定：GO**` (既存の codex の記録 155 件)
+#   VERDICT_BARE_RE: 判定の語だけの行 `**NO-GO**` (既存の codex の記録 32 件。旧プロンプト「冒頭に **判定 (…)**」の書き方)
+VERDICT_WORD = r"(GO-with-changes|NO-GO|GO)"
+VERDICT_LINE_RE = re.compile(r"^[ \t#*]*判定[ \t*]*[:：][ \t*]*" + VERDICT_WORD + r"[ \t*]*[。.]?[ \t]*$")
+VERDICT_BARE_RE = re.compile(r"^[ \t#*]*" + VERDICT_WORD + r"[ \t*]*[。.]?[ \t]*$")
+FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+# 「証拠不足: <要るもの>」の行 → incomplete。「証拠不足: 無し」は数えない (ただし証拠の欄の代わりにもならない)
 INSUFFICIENT_RE = re.compile(r"^[ \t>*\-]*\**[ \t]*証拠不足[ \t]*\**[ \t]*[:：][ \t]*(.*)$", re.M)
 INSUFFICIENT_NONE_RE = re.compile(r"^\**\s*(?:無し|なし|特になし|特に無し|該当なし|該当無し|none|n/?a|-)\s*\**\s*[。.]?$", re.I)
+# 証拠の欄 (必須、同 指摘 2): 「証拠: 足りる」の行が無ければ incomplete。値は「足りる」(行末の句点・括弧の注は可) だけを数える
+# (「証拠: 足りない」「証拠: 足りる | 証拠不足: …」(書式の写し) は数えない)
+EVIDENCE_RE = re.compile(r"^[ \t>*#\-`]*証拠[ \t*`]*[:：][ \t*`]*(.*)$", re.M)
+EVIDENCE_OK_RE = re.compile(r"^足りる[。.]?(?:[ \t]*[(（][^()（）]*[)）])?[。.]?$")
 
 COMMON_HEADER = """forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
 SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
@@ -207,7 +225,11 @@ DIAG_OUTPUT = """## 出力形式 (この形のまま)
 やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
 呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
 不足情報: <あれば>
+証拠: 足りる | 証拠不足: <要るもの>
 ```
+最後の行 (証拠の欄) は必須で、どちらか一方だけを書く: 結論を出すのに要る証拠がそろっていれば `証拠: 足りる`、
+足りなければ代わりに `証拠不足: <要るもの>` を足りないものごとに 1 行 (この行があると諮問は不成立として扱われる)。
+`不足情報:` は結論を妨げない追加の希望の欄で、それだけでは不成立にしない。
 設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。
 """
 
@@ -258,21 +280,27 @@ def build_prompt(plan_path, stage, base, extras, focus):
             parts.append(f"## 参考: `{rel}` (ディレクトリ。中を自分で読むこと)\n")
     parts.append(
         "## 出力形式\n\n"
-        "1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。\n"
+        "1. 冒頭に `判定: <GO / GO-with-changes / NO-GO のどれか 1 語>` の 1 行 (この行には判定の語だけを書く) と 3 行以内の要約。\n"
         "2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。\n"
         "3. 推奨 (1 つに絞る)。\n"
-        "4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。\n")
+        "4. 証拠の欄 (必須): 判定に要る証拠 (diff・run の VERDICT・数値) がそろっていれば `証拠: 足りる` の 1 行。"
+        "足りなければ代わりに `証拠不足: <要るもの>` を足りないものごとに 1 行 (この行があるとレビューは不成立として扱われる)。\n"
+        "5. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。\n")
     return "\n".join(parts)
 
 
-def git_raw(*args, timeout=120):
-    """git を ROOT で走らせ (rc, stdout, stderr) を返す (strip しない。証拠一式用)。"""
+def git_raw(*args, timeout=None):
+    """git を ROOT で走らせ (rc, stdout, stderr) を返す (strip しない。証拠一式用)。
+    timeout は rc 124、起動できないときは rc 127 (stderr に理由)。"""
+    timeout = EVIDENCE_GIT_TIMEOUT if timeout is None else timeout
     try:
-        p = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=timeout,
-                           errors="replace")
+        p = subprocess.run(["git", *args], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=timeout, errors="replace")
         return p.returncode, p.stdout, p.stderr
-    except Exception as e:
-        return 1, "", str(e)
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout {timeout}s (打ち切り)"
+    except OSError as e:
+        return 127, "", f"git を起動できない: {e}"
 
 
 def rel_or_abs(path):
@@ -313,27 +341,63 @@ def excerpt(text, n=300):
     return text if len(text) <= n else text[:n] + " …"
 
 
+def lines_outside_fences(text):
+    """コードブロック (``` / ~~~ で囲んだ範囲) の外の行。本文中の例文・引用の行を判定の行として拾わない。
+    閉じていないコードブロックは最後までブロックとみなす (拾い損ねは incomplete に倒れる)。"""
+    out, fence = [], ""
+    for ln in text.splitlines():
+        m = FENCE_RE.match(ln)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                    and not ln.strip()[len(m.group(1)):].strip():
+                fence = ""
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        out.append(ln)
+    return out
+
+
+def extract_verdicts(text):
+    """明示の判定の行 (コードブロックの外) の判定の語を本文の順に返す。"""
+    vals = []
+    for ln in lines_outside_fences(text):
+        m = VERDICT_LINE_RE.match(ln) or VERDICT_BARE_RE.match(ln)
+        if m:
+            vals.append(m.group(1))
+    return vals
+
+
 def classify_body(stage, text):
     """判定役の最終メッセージ → (分類 ok/incomplete, 理由, 抽出した項目)。codex・claude 共通。"""
     info = {}
     missing = []
+    conflict = ""
     if stage == "diagnose":
         m = CONCLUSION_RE.search(text)
         info["conclusion"] = m.group(1).strip().strip("*").strip() if m else "?"
         if not m:
             missing.append("「結論:」の行")
     else:
-        m = COUNTS_RE.search(text)
-        v = VERDICT_RE.search(text)
-        info["counts"] = f"C{m.group(1)}/M{m.group(2)}/m{m.group(3)}" if m else "C?/M?/m?"
-        info["verdict"] = v.group(1) if v else "?"
-        if not v:
-            missing.append("判定 (GO / GO-with-changes / NO-GO)")
-        if not m:
+        counts = COUNTS_RE.findall(text)
+        info["counts"] = "C{}/M{}/m{}".format(*counts[-1]) if counts else "C?/M?/m?"
+        if not counts:
             missing.append("「指摘数: Critical n / Major n / Minor n」の行")
+        verdicts = extract_verdicts(text)
+        distinct = list(dict.fromkeys(verdicts))
+        info["verdict"] = distinct[0] if len(distinct) == 1 else "?"
+        if not distinct:
+            missing.append("判定の行 (`判定: GO / GO-with-changes / NO-GO`)")
+        elif len(distinct) > 1:
+            conflict = "判定の行が相反する: " + " / ".join(distinct)
     lacks = [x.strip() for x in INSUFFICIENT_RE.findall(text) if not INSUFFICIENT_NONE_RE.match(x.strip())]
     if lacks:
         return "incomplete", "証拠不足: " + " / ".join(excerpt(x, 120) or "(内容なし)" for x in lacks), info
+    if conflict:
+        return "incomplete", conflict, info
+    if not any(EVIDENCE_OK_RE.match(v.strip().strip("*` \t")) for v in EVIDENCE_RE.findall(text)):
+        missing.append("証拠の欄 (「証拠: 足りる」、足りなければ「証拠不足: <要るもの>」)")
     if missing:
         return "incomplete", "必須の項目が無い: " + "・".join(missing), info
     return "ok", "", info
@@ -360,9 +424,10 @@ class Attempt:
         self.cost_usd = None
         self.evidence_dir = ""
         self.ran = False         # CLI を起動したか
+        self.phase = ""          # 子を起動する前に親の段で止まったときの段 (例: 証拠一式)
 
     def label(self):
-        return self.cls + (f"/{self.kind}" if self.kind else "")
+        return self.cls + (f"/{self.kind}" if self.kind else "") + (f": {self.phase}" if self.phase else "")
 
 
 def run_codex(a, prompt, name, out_dir):
@@ -447,11 +512,14 @@ def build_evidence(ev_dir, stage, base, diff_max_bytes=EVIDENCE_DIFF_MAX_BYTES):
     """claude に渡す証拠一式を ev_dir に書く (plan §4.2 入力の契約)。
 
     全段: head.txt (HEAD・ブランチ)。result 段: diff_stat.txt・diff.patch・log.txt。
-    diff が diff_max_bytes を超えたら、優先パス → 変更行数の多い順にファイル単位で入れ、入らなかったファイルは README.md に列挙する。
-    返り値: {"files": [(名前, 説明)], "stat_inline": プロンプトに直に入れる stat, "notes": [注記]}
+    diff が diff_max_bytes を超えたら、優先パス → 変更行数の多い順にファイル単位で入れ、入らなかったファイルは README.md に列挙する
+    (意図した省略。errors には入れない)。
+    result 段の必須の git の取得 (diff --stat・log・diff) が失敗 (非 0・timeout) したら、そこで止めて errors に入れる
+    (呼び出し側は子を起動せずに failed: 証拠一式 で終わる。result 段レビュー 2026-10-14 指摘 3)。
+    返り値: {"files": [(名前, 説明)], "stat_inline": プロンプトに直に入れる stat, "notes": [注記], "errors": [取得の失敗]}
     """
     os.makedirs(ev_dir, exist_ok=True)
-    files, notes = [], []
+    files, notes, errors = [], [], []
     head = git("rev-parse", "HEAD")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     subject = git("log", "-1", "--format=%s")
@@ -460,21 +528,29 @@ def build_evidence(ev_dir, stage, base, diff_max_bytes=EVIDENCE_DIFF_MAX_BYTES):
     files.append(("head.txt", "HEAD のコミット・ブランチ (`git rev-parse HEAD` / `--abbrev-ref HEAD`)"))
     stat_inline = ""
     if stage == "result":
-        rc, stat, err = git_raw("diff", "--stat=200", f"{base}...HEAD")
-        if rc != 0:
-            notes.append(f"`git diff --stat {base}...HEAD` が失敗 (rc={rc}): {excerpt(err, 200)}")
+        got = {}
+        for key, args in (("stat", ("diff", "--stat=200", f"{base}...HEAD")), ("log", ("log", "--oneline", f"{base}..HEAD")),
+                          ("diff", ("diff", f"{base}...HEAD"))):
+            rc, out, err = git_raw(*args)
+            if rc != 0:   # 1 つ失敗したら残りは取らない (timeout を重ねない)
+                errors.append(f"`git {' '.join(args)}` が失敗 (rc={rc}): {excerpt(err, 200) or '(stderr なし)'}")
+                break
+            got[key] = out
+    if errors:
+        with open(os.path.join(ev_dir, "README.md"), "w", encoding="utf-8") as f:
+            f.write("# 証拠一式 (codex_review.py が作成)\n\n"
+                    f"- stage: `{stage}` (diff base `{base}`)\n\n"
+                    "## 取得の失敗 (必須の git の取得に失敗したので claude を起動しなかった)\n\n"
+                    + "\n".join(f"- {e}" for e in errors) + "\n")
+        return {"files": files, "stat_inline": "", "notes": notes, "errors": errors}
+    if stage == "result":
+        stat, log, diff = got["stat"], got["log"], got["diff"]
         with open(os.path.join(ev_dir, "diff_stat.txt"), "w", encoding="utf-8") as f:
             f.write(stat)
         files.append(("diff_stat.txt", f"`git diff --stat {base}...HEAD`"))
-        rc, log, err = git_raw("log", "--oneline", f"{base}..HEAD")
-        if rc != 0:
-            notes.append(f"`git log --oneline {base}..HEAD` が失敗 (rc={rc}): {excerpt(err, 200)}")
         with open(os.path.join(ev_dir, "log.txt"), "w", encoding="utf-8") as f:
             f.write(log)
         files.append(("log.txt", f"`git log --oneline {base}..HEAD`"))
-        rc, diff, err = git_raw("diff", f"{base}...HEAD")
-        if rc != 0:
-            notes.append(f"`git diff {base}...HEAD` が失敗 (rc={rc}): {excerpt(err, 200)}")
         size = len(diff.encode())
         if size <= diff_max_bytes:
             with open(os.path.join(ev_dir, "diff.patch"), "w", encoding="utf-8") as f:
@@ -511,7 +587,7 @@ def build_evidence(ev_dir, stage, base, diff_max_bytes=EVIDENCE_DIFF_MAX_BYTES):
         if notes:
             f.write("\n## 注記\n\n" + "\n".join(n if n.startswith("  ") else f"- {n}" for n in notes) + "\n")
     files.insert(0, ("README.md", "この証拠一式の目次と注記 (切った差分の一覧)"))
-    return {"files": files, "stat_inline": stat_inline, "notes": notes}
+    return {"files": files, "stat_inline": stat_inline, "notes": notes, "errors": errors}
 
 
 def truncate_diff(diff, max_bytes):
@@ -559,7 +635,8 @@ def claude_preface(ev_rel, ev, stage, base):
         "- 依頼側 (この依頼を書いたモデル) は**あなたと同じ系統のモデルかもしれない**。依頼側の結論・仮説・「除外済み」に同調せず、"
         "根拠の行 (`ファイル:行`) を自分で読んで確かめてから採る。確かめられないものは採らない。",
         "- 判定に要る証拠が足りなければ、推測で埋めずに `証拠不足: <要るもの>` の行を (足りないものごとに) 出す。"
-        "この行があると、この依頼は不成立 (incomplete) として扱われる。足りているときはこの行を書かない (「証拠不足: 無し」とも書かない)。",
+        "この行があると、この依頼は不成立 (incomplete) として扱われる。足りているときは `証拠: 足りる` の行を書く "
+        "(本文の出力形式の証拠の欄。どちらか一方は必須で、無いと不成立)。",
         "- 出力の形式は本文の「出力形式」に従う。",
     ]
     if stage == "result" and ev.get("stat_inline"):
@@ -587,6 +664,15 @@ def run_claude(a, prompt, name, out_dir):
     at.evidence_dir = os.path.join(out_dir, name + ".evidence")
     ev = build_evidence(at.evidence_dir, a.stage, a.base)
     ev_rel = rel_or_abs(at.evidence_dir)
+    if ev["errors"]:
+        # 必須の証拠が取れない → 子の自己申告に委ねず、親が未成立で止める (result 段レビュー 2026-10-14 指摘 3)
+        with open(at.log, "w", encoding="utf-8") as lf:
+            lf.write("[codex_review] 証拠一式の必須の git の取得に失敗したので claude を起動しなかった\n"
+                     + "\n".join(ev["errors"]) + "\n")
+        at.cls, at.phase = "failed", "証拠一式"
+        at.detail = "必須の git の取得に失敗 (claude は起動しない): " + "; ".join(ev["errors"])
+        print(f"  claude: 証拠一式の取得に失敗 → 起動しない ({rel_or_abs(at.log)})")
+        return at
     full = claude_preface(ev_rel, ev, a.stage, a.base) + prompt
 
     cmd = ["claude", "-p", "--safe-mode", "--model", a.claude_model, "--effort", CLAUDE_EFFORT[a.effort],
@@ -708,7 +794,8 @@ def write_record(a, ctx, attempts, reason):
         title = f"# {'Claude 代替レビュー' if claude else 'codex レビュー'}: {stem} ({stage})"
     L = []
     if final.cls != "ok":
-        L += [f"**未成立 ({final.cls})** — {final.label()}: {final.detail}", ""]
+        state = final.cls + (f": {final.phase}" if final.phase else "")
+        L += [f"**未成立 ({state})** — {final.label()}: {final.detail}", ""]
     L += [title, ""]
     if claude:
         L += ["> **Claude の別インスタンスによる代替** (独立性は文脈の分離だけ。依頼側と同じ系統のモデルでありうる; "

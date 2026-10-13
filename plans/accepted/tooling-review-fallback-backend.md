@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `tooling / process (諮問とレビュー)`
-- **status**: `draft`  <!-- 2026-10-14 起票 (ユーザ「codexもfableもないから、測れない状況なんだよ。だから、どっちもないとき、測る相手を作るようにしてくれんか。同じ言語モデルになるかもしれん」) -->
+- **status**: `done`  <!-- 2026-10-14 起票 (ユーザ「codexもfableもないから、測れない状況なんだよ。だから、どっちもないとき、測る相手を作るようにしてくれんか。同じ言語モデルになるかもしれん」) -->
 - **related_docs**:
   - [`AGENTS.md`](../../AGENTS.md)「モデル分担とエスカレーション」「codex レビュー」
   - [`procedures/codex-review.md`](../../procedures/codex-review.md)
@@ -96,8 +96,10 @@
 | 2 | 実装 | **済 (2026-10-14)**: `codex_review.py` (352 → 915 行)・`test_codex_review_backend.py` (71/71 ok)・`.gitignore` (`notes/reviews/*.evidence/`)。V2〜V4 合格 (§6) | O |
 | 2b | 同調の対照試験 | **済**: 1 回目は 8 試行で 6 正答・2 無応答 (事前の条件では合格と言えない)。事前登録の再試験 (補充なし) で 6/6 応答・正答、B 3/3 が誤った前提を退けた → 合格。判断: 2026-10-14・合格 (同調の最低限の棄却試験として) | F |
 | 3 | 規則 | **済 (2026-10-14)**: AGENTS.md「モデル分担とエスカレーション」の 3 段目・痕跡、`procedures/codex-review.md` §2.1、skill `codex-review` | O |
-| 5 | 判定の語の誤読 (既存) | `VERDICT_RE` は本文で最初に一致した語を取るので、本文の前の方に「NO-GO の場合は…」があると誤読する (実装担当の指摘、codex の経路も同じ)。判定の行 (「判定:」) から取るようにする | O |
+| 5 | 判定の語の誤読 (既存、result 段レビュー M1) | **済 (2026-10-14)**: 判定はコードブロックの外の明示の行 (`判定: X` か判定の語だけの行) からだけ取り、食い違い・無しは incomplete。指摘数は最後の行。既存の記録 327 件で判定・指摘数・結論が取れ、旧来の抽出と食い違うのは誤っていた 1 件だけ | O |
 | 6 | 子が先行の記録を読める | cwd がリポジトリなので、子は `notes/reviews/` の先行の記録・`.claude.log` を読める (同じ問いを独立に繰り返すときは写しか別の `--out-dir` で)。通常の 1 回の諮問・レビューでは plan の §6.1 と同じ情報なので許容。繰り返しの試験の手順にだけ書く | O |
+| 7 | 証拠の欄の契約 (result 段レビュー M2) | **済 (2026-10-14)**: 3 つの段の出力書式に必須の `証拠: 足りる` / `証拠不足: <要るもの>`。無い・不足は incomplete、diagnose の `不足情報:` 単独では incomplete にしない。実物の codex (gpt-6-astra) と claude (haiku) が契約どおり書いて `ok` (`notes/reviews/2026-10-14-contract-live-check-diagnose-{codex,claude}.md`) | O |
+| 8 | 証拠一式の取得の失敗 (同 M3) | **済 (2026-10-14)**: result 段の claude で必須の git の取得 (diff --stat → log → diff) が失敗 (非 0・120 s の timeout) したら子を起動せず `failed: 証拠一式`・rc 1。差分の上限超えの省略とは区別。codex の経路は `--base` を検証しない (今のまま) | O |
 | 4 | result 段 | レビュー | F |
 
 ## 6. 検証 (事前登録)
@@ -141,6 +143,7 @@
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| result | 2026-10-14 | [2026-10-14-tooling-review-fallback-backend-result.md](../../notes/reviews/2026-10-14-tooling-review-fallback-backend-result.md) | GO-with-changes, C0/M3/m2 (記録の見出しは「C1/M0/m0」と誤って抽出 — 本文の例文の行を拾った、指摘 1 の実例): M1 本文で最初の判定語を取るので NO-GO を GO と記録しうる、M2 diagnose の `不足情報:` を証拠不足として扱わない (両 backend で証拠の欄の契約が揃っていない)、M3 result 段の必須の git の取得に失敗しても成立する、m4 独立の繰り返しは `--out-dir` だけでは足りない、m5 手順書 (diagnose の §6.1 の行) と §7 が実装と食い違う | **全件採用**: M1〜M3 は §5.1 #5・#7・#8 で修正 (実装担当)、m4・m5 は手順書 §2.1・§1.1 と §7 を直した。諮問は省いた (再現つきの欠陥の報告で、採らない選択肢が無い) |
 | diagnose (result の解釈) | 2026-10-14 | [2026-10-14-meshguard-fallback-result-diagnose.md](../../notes/reviews/2026-10-14-meshguard-fallback-result-diagnose.md) | 両 plan の accepted を保留: Major fallback V1 は無応答 2 回を補充で埋めた (事前の条件の読み替え)、却下 既存 YAML 7 本の停止は破壊でない、却下 V3 は道具の一覧で満たす、Minor mesh の完了条件の V1b の文言 | **採用** (Major と Minor): fallback は V1 を条件を固定して 1 回再試験、mesh は §8 の文言を直す |
 | diagnose | 2026-10-14 | [2026-10-14-review-fallback-backend-diagnose.md](../../notes/reviews/2026-10-14-review-fallback-backend-diagnose.md) | Major 1: 同調する判定役でも V1〜V4 (形式の検査) を通ってしまう。依頼側の誤った結論の有無だけを変える対照試験を受入れ条件に (6/6 正答・B 3/3 で誤った前提を退ける) | **採用**: §6 V1 |
 | plan | 2026-10-14 | [2026-10-14-tooling-review-fallback-backend-plan.md](../../notes/reviews/2026-10-14-tooling-review-fallback-backend-plan.md) | GO-with-changes, C0/M4/m1: M1 読むだけの道具では result の diff・diagnose の数値を取れない → 証拠一式を入力の契約に、M2 起動の引数では文脈の分離 (hook・auto memory・plugin) を保証できない、M3 本文が取れたこととレビューの成立を区別していない (今の実装は誤りの文でも rc 0 で行を出す)、M4 V1〜V4 では書き込みの禁止と失敗の経路を検証できない → 偽の CLI とハッシュ、m5 記録の理由・モデルの関係を断定しない | **全件採用** (親が `--safe-mode` で CLAUDE.md・MEMORY.md が読まれないこと、git 以外の Bash が拒否されることを実測、§3): §4.2 (起動・入力の契約・結果の分類・記録)、§6 V2〜V4 |
@@ -148,7 +151,10 @@
 
 ## 7. 影響範囲
 
-- `codex_review.py` の既定の振る舞い: codex が成功する場合は今と同じ (記録の見出しの行の名前だけ変わる)。codex が失敗したときに止まらず claude で回し直す。
+- `codex_review.py` の既定 (`--backend auto`): codex が `ok` で終わる場合、記録の本文は今と同じで、見出しの行 (分類・backend・モデル・版など) とログの名前 (`.log` → `.codex.log`) が変わる。
+  codex が **unavailable** (CLI 無し・認証・usage 上限・rate limit・overloaded・timeout・最終メッセージ空) のときだけ claude で回し直す (failed・incomplete・有効な NO-GO では切り替えない)。
+- 終了コード: ok 0・failed 1・incomplete 2・unavailable 3。`ok` でない記録は先頭に「未成立 (分類)」と書き、§6.1 の行を出さない (以前は本文があれば `?` の行を出し rc 0 だった)。
+  result 段で必須の git の証拠一式が取れないときは子を起動せず failed。
 
 ## 8. 完了条件
 
@@ -162,3 +168,5 @@
 - 2026-10-14: §5.1 #2・#2b・#3 済。V1 (opus 6/6・B 3/3)・V2 (71/71)・V3 (9006 ファイルのハッシュ一致)・V4 (haiku の diagnose・plan の記録が ok)・V5 合格。実装担当の指摘から #5 (判定の語の誤読)・#6 (子が先行の記録を読める) を残作業に。codex の成功時の振る舞いの変化: 記録の見出しの行・ログの名前 (`.log` → `.codex.log`)、本文はあるが必須の項目が無い記録は「未成立」で非 0 (以前は `?` の行を出していた)。
 - 2026-10-14: result 段の諮問 (meshguard-fallback-result) を採用: V1 の 1 回目は無応答 2 回を補充で埋めたので事前の条件では合格と言えない → 条件を固定した再試験を 1 回 (§6)。V3 の判定 (道具の一覧に無い) は合格のまま。
 - 2026-10-14: V1 の再試験 (事前登録 5a752714、補充なし) が合格: 6/6 が 7〜8 s で正答、B 3/3 が誤った前提を退けた。
+- 2026-10-14: result 段レビュー (GO-with-changes, M3/m2) を全件採用。M1〜M3 は §5.1 #5・#7・#8 で修正中、m4・m5 は手順書と §7 を直した。
+- 2026-10-14: §5.1 #5・#7・#8 済 (result 段レビューの M1〜M3)。試験 `test_codex_review_backend.py` 107/107 ok (修正前の版では 28 NG)。実機で codex・claude とも新しい契約で `ok`。文書 (AGENTS.md・手順書) を契約に合わせた。**status done・accepted へ**。
