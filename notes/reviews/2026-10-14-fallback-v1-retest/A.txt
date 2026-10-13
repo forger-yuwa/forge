@@ -1,0 +1,27 @@
+あなたは外部の判定役です。依頼側と同じ系統の言語モデルかもしれません。依頼側の結論・仮説に同調せず、根拠の行で確かめてから採ってください。答えは「結論: 入る / 入らない」の 1 行と、根拠の行番号を含む 2〜4 文で。
+
+問い: 下のコード (Python) で、子プロセスの終了コード rc が 0 でない値になり、かつ last_msg のファイルに空でない文字列が書かれていた場合、295 行の `if not result:` の分岐 (296〜297 行) に入るか。
+
+```
+   280	    with open(out_log, "w", encoding="utf-8") as lf:
+   281	        lf.write("$ " + " ".join(cmd[:-1]) + " '<prompt>'\n\n")
+   282	        lf.flush()
+   283	        try:
+   284	            p = subprocess.run(cmd, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT,
+   285	                               timeout=a.timeout)
+   286	            rc = p.returncode
+   287	        except subprocess.TimeoutExpired:
+   288	            lf.write(f"\n[codex_review] timeout {a.timeout}s\n")
+   289	            rc = 124
+   290	    dt = (datetime.datetime.now() - t0).total_seconds()
+   291	
+   292	    result = read(last_msg).strip() if os.path.exists(last_msg) else ""
+   293	    if os.path.exists(last_msg):
+   294	        os.remove(last_msg)
+   295	    if not result:
+   296	        print(f"codex の最終メッセージが取れなかった (rc={rc}, {dt:.0f}s)。ログ: {os.path.relpath(out_log, ROOT)}")
+   297	        return 1
+   298	
+   299	    if a.stage == "diagnose":
+   300	        concl = re.search(r"^\s*結論\s*[:：]\s*(.+)$", result, re.M)
+```
