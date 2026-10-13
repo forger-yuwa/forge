@@ -1,0 +1,56 @@
+# §5.1 #8c の a₁ の伸びしろの確認 (ユーザ指示 2026-10-14、登録の範囲の外の診断): a₂〜a₄ を最良候補 a* (run_0041 conf_000) に固定し a₁ = -0.045。格子・設定は探索と同じ (×1)。runner --staged で 1 本回す (範囲の下限は診断のため −0.1 に広げた)。
+# forge_design 問題定義 — ③ベル (M) L100 の補正済み Rao を出発点にした **NS の摂動探索** (plan tooling-nozzle-bell-two-mode §5.1 #8c、事前登録 14bd2eab)。
+# 物理壁 = 補正済みの Rao 壁 (problem_bell_tp_m_ns_l100_corr.yaml と同じ壁・offset) + Σ_{k=1..4} a_k η_k(t)、η_k = sin²(πt/2) sin(kπt)
+# (B で値・傾き 0、E で値 0・傾き自由)。a_k ∈ [−0.03, 0.03] r_t、出発点 a = 0。NS の設定・格子・段は元の問題と同じ。
+# キャンペーン: python -m forge_design.opt.driver <この YAML> <run> --soo --with-start --n-doe 12 --n-max 40 --n-confirm 8 --window 8 --tol 1e-4 --seed 0|1
+name: bell_tp_m_ns_eps50_L100_corr_pert_a1m045
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  L_over_rt: {value: 22.657533530077966, fixed: true}   # 15° 円錐長 22.6575 の 100 %。壁ファイルが決める L との照合用 (相対 1e-9)
+  pert_a1: {value: -0.045, min: -0.1, max: 0.03}   # 摂動 η_1 の係数 [r_t]
+  pert_a2: {value: 0.01657292407966906, min: -0.1, max: 0.03}   # 摂動 η_2 の係数 [r_t]
+  pert_a3: {value: 0.00419406453380379, min: -0.1, max: 0.03}   # 摂動 η_3 の係数 [r_t]
+  pert_a4: {value: 0.01093901020502689, min: -0.1, max: 0.03}   # 摂動 η_4 の係数 [r_t]
+
+geometry:
+  bell_mode: moc_rao
+  rao_wall_file: rao_m/rao_corrprod_parts/L100_corr_vext_n321_wall.npz   # 補正後の非粘性壁 (ε_inv 48.091260)
+  rao_offset_file: rao_m/rao_corrprod_parts/L100_corr_vext_n321_offset.npz   # 物理壁 = 非粘性壁 + δ(x) (V-ext)
+  rao_perturb: {family: sin2_sin, K: 4}   # 物理壁 + Σ a_k sin²(πt/2) sin(kπt)、t = (x − x_B)/(x_E − x_B) (§5.1 #8c)
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 1.25e-5         # 下流 (x ≥ wall_first_blend_x1) の第一セル厚 / 局所半径 ((D) の MOO と同じ — plan §5.1 #8a′)
+  wall_first_frac_throat: 3.5e-6   # x ≤ wall_first_blend_x0 (上流は全域この値)
+  wall_first_blend_x0: 0.3
+  wall_first_blend_x1: 14.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  wall_normal_layer: [0.02, 0.8]   # 近壁を壁法線に (局所半径比 d_n, d_b)
+  wall_normal_end_stations: 20     # 入口・出口の 20 断面で半径方向の配置へ戻す (面を平面に保つ)
+  ar_max: 5000                     # AR 緩和 (≤5000): 壁法線の構造層 (AGENTS.md の例外)
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 60000          # 本段
+  outStepInterval: 3000      # 本段の res の間隔 = 本段長の 1/20 (推力の時系列 20 点、末尾窓 8 点)
+  cfl_main: 4.0
+  objectives: [eta_cf]
