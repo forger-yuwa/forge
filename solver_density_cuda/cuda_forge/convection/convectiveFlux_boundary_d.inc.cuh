@@ -29,6 +29,9 @@ __global__ void convectiveFlux_boundary_d // slau
  geom_float* pcx ,  geom_float* pcy ,  geom_float* pcz, geom_float* fx,
  geom_float* sx  ,  geom_float* sy  ,  geom_float* sz , geom_float* ss,
  flow_float* massflux,  // node 弱形式境界の質量流束を書き戻す (スカラ移流 k/ω/species が境界で読む)
+ // 面の内部側の pc − cc: r0 = pc[ip] − cc[ic0] (double の値の位置で引いて 1 回だけ丸めた値、var.p_d["gr0_*"]、
+ // plans/active/architecture-float-state-double-geometry.md §4.2a、段 ④)。境界面の ic0 は bplane_cell と同じ内部側のセル。
+ const flow_float* gr0_x, const flow_float* gr0_y, const flow_float* gr0_z,
 
  // variables
  flow_float* ro   ,
@@ -90,17 +93,10 @@ __global__ void convectiveFlux_boundary_d // slau
         geom_float ny = syy/sss;
         geom_float nz = szz/sss;
 
-        flow_float ccx_0 = ccx[ic];
-        flow_float ccy_0 = ccy[ic];
-        flow_float ccz_0 = ccz[ic];
-
-        flow_float pcx_1 = pcx[ip];
-        flow_float pcy_1 = pcy[ip];
-        flow_float pcz_1 = pcz[ip];
-
-        flow_float dcc_x = pcx_1 - ccx_0;
-        flow_float dcc_y = pcy_1 - ccy_0;
-        flow_float dcc_z = pcz_1 - ccz_0;
+        // 座標の差 pc − cc[ic] は r0 を読む (段 ④。同じ向き)。dcc_x..dcc は現状どこからも読まれていない。
+        flow_float dcc_x = gr0_x[ip];
+        flow_float dcc_y = gr0_y[ip];
+        flow_float dcc_z = gr0_z[ip];
         flow_float dcc   = sqrt(dcc_x*dcc_x +dcc_y*dcc_y +dcc_z*dcc_z) ;
 
         flow_float ro_L = ro[ic];

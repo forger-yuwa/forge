@@ -146,6 +146,15 @@ check("(c) Problem.mesh_euler に YAML の mesh_euler が入る", pp.mesh_euler 
 
 # --- (d) NS は mesh だけを読み、変更前と同じ ----------------------------------------------------------------------------
 ns_files = sorted(f for f in C45.glob("problem_d155*.yaml") if "_ns" in f.name)
+# 2026-10-08 に足した opt-in の格子のキー (表の第一層・x 密度・壁法線の近壁層) を使う問題は「変更前と同一」の対象外 (変更前の関数はこれらを知らない)。
+# 代わりに、そのキーが Mesh2DParams に入ることを別に確かめる (plan tooling-nozzle-isothermal-wall-chain §5.1 #13・#15)
+NEW_MESH_KEYS = ("wall_first_frac_table", "x_density_table", "wall_normal_layer")
+new_key_files = [f for f in ns_files if any(k in (load_problem(f).mesh or {}) for k in NEW_MESH_KEYS)]
+ns_files = [f for f in ns_files if f not in new_key_files]
+for f in new_key_files:
+    p = load_problem(f); mp = RA.mesh_params(p, 0.0768075, 561, 97, 4.5e-5)
+    check(f"(d) 新しい格子のキーが Mesh2DParams に入る ({f.name})",
+          all((getattr(mp, k) is not None) == (k in p.mesh) for k in NEW_MESH_KEYS))
 nbad = []
 for f in ns_files:
     p = load_problem(f)
@@ -167,6 +176,9 @@ STD = ("problem_d155_euler_pin_G1_recal.yaml", "problem_d155_euler_pin_G1_recal_
        "problem_d155_euler_pin_G1_recal_mono_moc.yaml", "problem_d155_euler_t0cluster_u5em3.yaml",
        "problem_d155_euler_e4_recal_d0.yaml")
 STD = STD + tuple(sorted(f.name for f in C45.glob("problem_d155_euler_e4_recal_d[1-9].yaml")))   # E4 の段 2 (make-d1 が作る)
+# H の固定の Euler の参照 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36b、h370_problems.py make が run_0174 の問題から作る) は
+# §5.1 #36e (codex diagnose 3) で mesh_euler の throat_refine だけを 4 → 5 にした (ni・nj・0.005・throat_width は同じ) — 下で別に確かめる
+H_REF = "problem_d155_euler_h_ref.yaml"
 KEEP = ("problem_d155_euler_t0cluster_g1.yaml", "problem_d155_euler_pin_G1.yaml", "problem_d155_euler_pin_G0.yaml",
         "problem_d155_euler_c2final_n2400.yaml", "problem_d155_euler_c2final_n2400_pincal.yaml", "problem_d155_R2_Lc39.3_tp.yaml",
         "problem_d155_R2_Lc39.3_tp_Lpipe10.yaml", "problem_d155_R2_Lc39.3_tp_rt77p02.yaml", "problem_d155_cpg_euler.yaml",
@@ -177,6 +189,12 @@ for f in STD:
     ok = ((m.ni, m.nj, m.wall_first_frac, m.wall_first_frac_throat, m.axis_cap_frac, m.axis_gap_frac, m.throat_refine, m.throat_width)
           == (2000, 97, 0.005, None, None, None, 4.0, 3.0)) and (m.throat_refine, m.throat_width) == (float(p.mesh["throat_refine"]), float(p.mesh["throat_width"]))
     check(f"(e) 全域 0.005 へ移した: {f} (軸方向の鍵は mesh と同じ)", ok, m)
+pH = load_problem(C45 / H_REF)
+mH = RA.mesh_params_euler(pH, 0.0768075)
+check(f"(e) H の Euler の参照 {H_REF}: 2000 × 97・全域 0.005・cap なし・throat_width は mesh と同じ、throat_refine だけ 5 (§5.1 #36e; mesh は 4)",
+      (mH.ni, mH.nj, mH.wall_first_frac, mH.wall_first_frac_throat, mH.axis_cap_frac, mH.axis_gap_frac, mH.throat_refine, mH.throat_width)
+      == (2000, 97, 0.005, None, None, None, 5.0, 3.0) and float(pH.mesh["throat_refine"]) == 4.0
+      and mH.throat_width == float(pH.mesh["throat_width"]), mH)
 for f in KEEP:
     p = load_problem(C45 / f)
     m = RA.mesh_params_euler(p, 0.0768075)
@@ -194,7 +212,7 @@ check("(e) case/44 va3 dry lumpX (試験が使う Euler の問題) は記録の�
       RA.mesh_params_euler(p44, 0.05) == _old_mesh_params(p44, 0.05, 321, 65, 5.0e-3))
 eul = [f.name for f in C45.glob("problem_d155*.yaml") if "_ns" not in f.name]
 miss = [f for f in eul if "mesh_euler" not in yaml.safe_load((C45 / f).read_text())]
-check(f"(e) case/45 の Euler の問題 ({len(eul)} 本) はすべて mesh_euler を持つ", not miss and set(eul) == set(STD) | set(KEEP), miss)
+check(f"(e) case/45 の Euler の問題 ({len(eul)} 本) はすべて mesh_euler を持つ", not miss and set(eul) == set(STD) | set(KEEP) | {H_REF}, miss)
 ns_with = [f.name for f in ns_files if "mesh_euler" in yaml.safe_load(f.read_text())]
 check("(e) case/45 の NS の問題には mesh_euler を足していない", not ns_with, ns_with)
 

@@ -50,8 +50,12 @@ __global__ void limiter_psi_merged_d
  geom_int nNormalPlanes,
  geom_int* plane_cells,
  geom_int* cell_planes_index, geom_int* cell_planes,
- geom_float* vol, geom_float* ccx, geom_float* ccy, geom_float* ccz,
- geom_float* pcx, geom_float* pcy, geom_float* pcz,
+ geom_float* vol,
+ // 座標の差 (double の値の位置で引いて 1 回だけ丸めた面の配列、plans/active/architecture-float-state-double-geometry.md
+ // §4.2a、段 ④): e = cc[plane_cells の 1 番目] − cc[0 番目]、r0 = pc − cc[0 番目]、r1 = pc − cc[1 番目]
+ const flow_float* ge_x,  const flow_float* ge_y,  const flow_float* ge_z,
+ const flow_float* gr0_x, const flow_float* gr0_y, const flow_float* gr0_z,
+ const flow_float* gr1_x, const flow_float* gr1_y, const flow_float* gr1_z,
  flow_float phi_floor,
  flow_float* Q, flow_float* Q_max_in, flow_float* Q_min_in,
  flow_float* limiter_Q,
@@ -92,15 +96,18 @@ __global__ void limiter_psi_merged_d
         if (ip >= nNormalPlanes) continue;
         flow_float dcp_x, dcp_y, dcp_z;
         geom_int ic1p = -1;
+        // ic0 が plane_cells の 0 番目か (段 ④): pc − cc[ic0] は r0 / r1、cc[ic1p] − cc[ic0] は e / 0 − e
+        // (0 − e は −e と同じ値で、差が 0 のときも従来どおり +0)
+        const bool side0 = (plane_cells[2*ip+0] == ic0);
         if (matchRecon != 0 && edgeMid != 0) {        // node: 目標点 = エッジ中点 (流束と同じ)
             ic1p = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
-            dcp_x = (flow_float)0.5*(ccx[ic1p] - ccx[ic0]);
-            dcp_y = (flow_float)0.5*(ccy[ic1p] - ccy[ic0]);
-            dcp_z = (flow_float)0.5*(ccz[ic1p] - ccz[ic0]);
+            dcp_x = (flow_float)0.5*(side0 ? ge_x[ip] : (flow_float)0.0 - ge_x[ip]);
+            dcp_y = (flow_float)0.5*(side0 ? ge_y[ip] : (flow_float)0.0 - ge_y[ip]);
+            dcp_z = (flow_float)0.5*(side0 ? ge_z[ip] : (flow_float)0.0 - ge_z[ip]);
         } else {
-            dcp_x = pcx[ip] - ccx[ic0];
-            dcp_y = pcy[ip] - ccy[ic0];
-            dcp_z = pcz[ip] - ccz[ic0];
+            dcp_x = side0 ? gr0_x[ip] : gr1_x[ip];
+            dcp_y = side0 ? gr0_y[ip] : gr1_y[ip];
+            dcp_z = side0 ? gr0_z[ip] : gr1_z[ip];
         }
         flow_float delta_m;
         if (matchRecon != 0) {
@@ -139,8 +146,10 @@ __global__ void limiter_g1_check_periodic_d
 (
  geom_int nCells, geom_int nNormalPlanes, geom_int* plane_cells,
  geom_int* cell_planes_index, geom_int* cell_planes,
- geom_float* ccx, geom_float* ccy, geom_float* ccz,
- geom_float* pcx, geom_float* pcy, geom_float* pcz,
+ // 座標の差 e・r0・r1 (limiter_psi_merged_d と同じ。段 ④)
+ const flow_float* ge_x,  const flow_float* ge_y,  const flow_float* ge_z,
+ const flow_float* gr0_x, const flow_float* gr0_y, const flow_float* gr0_z,
+ const flow_float* gr1_x, const flow_float* gr1_y, const flow_float* gr1_z,
  flow_float* Q, flow_float* Q_max_in, flow_float* Q_min_in, flow_float* limiter_Q,
  flow_float* dQdx, flow_float* dQdy, flow_float* dQdz,
  int edgeMid, int convM, int kVar, flow_float qRef,
@@ -158,11 +167,15 @@ __global__ void limiter_g1_check_periodic_d
         const geom_int ip = cell_planes[ilp];
         if (ip >= nNormalPlanes) continue;
         const geom_int ic1 = plane_cells[2*ip+0] + plane_cells[2*ip+1] - ic0;
+        // ic0 の側に合わせて e・r0・r1 を読む (段 ④。limiter_psi_merged_d と同じ)
+        const bool side0 = (plane_cells[2*ip+0] == ic0);
         flow_float dx, dy, dz;
         if (edgeMid != 0) {
-            dx = (flow_float)0.5*(ccx[ic1]-ccx[ic0]); dy = (flow_float)0.5*(ccy[ic1]-ccy[ic0]); dz = (flow_float)0.5*(ccz[ic1]-ccz[ic0]);
+            dx = (flow_float)0.5*(side0 ? ge_x[ip] : (flow_float)0.0 - ge_x[ip]);
+            dy = (flow_float)0.5*(side0 ? ge_y[ip] : (flow_float)0.0 - ge_y[ip]);
+            dz = (flow_float)0.5*(side0 ? ge_z[ip] : (flow_float)0.0 - ge_z[ip]);
         } else {
-            dx = pcx[ip]-ccx[ic0]; dy = pcy[ip]-ccy[ic0]; dz = pcz[ip]-ccz[ic0];
+            dx = side0 ? gr0_x[ip] : gr1_x[ip]; dy = side0 ? gr0_y[ip] : gr1_y[ip]; dz = side0 ? gr0_z[ip] : gr1_z[ip];
         }
         if (kVar == 0) atomicAdd(sides, 1ULL);   // 面側の総数は 1 変数ぶんだけ数える
         const flow_float d  = recon_increment(convM, qc, Q[ic1], gx, gy, gz, dx, dy, dz);

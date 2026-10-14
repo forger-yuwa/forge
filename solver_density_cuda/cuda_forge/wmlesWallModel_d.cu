@@ -8,6 +8,10 @@
 #include "cuda_forge/speciesTransport_d.cuh"  // species_roY_device_ptr()
 #include "cuda_forge/gasPhaseComposition_d.cuh"  // 凝縮 carrier の気相組成 (plan condensation-two-phase-transport §4.1)
 #include "cuda_forge/nodeWallDirichlet_d.cuh"  // pinWallNodeTemperature_bcond (状態層・共有)
+#include "cuda_forge/wallRepPoint_d.cuh"       // node の代表内点 (境界面ごと、段 ②)
+
+#include <cstdio>
+#include <cstdlib>
 
 #include <unordered_set>
 
@@ -102,12 +106,10 @@ __global__ void wmles_wall_model_d(
     geom_int* bplane_cell,
     geom_int* bplane_cell_ghst,
     geom_float* sx, geom_float* sy, geom_float* sz, geom_float* ss,
-    // 取得層 (node): SU2 Normal_Neighbor 内点選択用 CSR (ransWallFunction_d と同機構)
+    // 取得層 (node): SU2 Normal_Neighbor 内点 (ransWallFunction_d と同じもの)。境界面ごとに読み込み時に作ってある
+    // (wallRepPoint_d.cu、段 ②: double の値の位置から。選び方は従来どおり)。wrp_irep (候補なし -1)・wrp_dn (壁内向き距離)。
     int isNode,
-    geom_int nNormalPlanes,
-    geom_int* cell_planes_index, geom_int* cell_planes, geom_int* plane_cells,
-    geom_int* wall_flag,
-    geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    const geom_int* wrp_irep, const flow_float* wrp_dn,
     flow_float* wall_dist,
     // 場
     flow_float* ro, flow_float* Ux, flow_float* Uy, flow_float* Uz,
@@ -152,27 +154,8 @@ __global__ void wmles_wall_model_d(
     flow_float d    = max(wall_dist[ic], kSmall);
     flow_float Tw_in, p_w;
     if (isNode != 0) {
-        flow_float best_cos = static_cast<flow_float>(-2.0);
-        geom_int   bestI = -1;
-        flow_float bestDn = kSmall;
-        const flow_float xw = ccx[ic], yw = ccy[ic], zw = ccz[ic];
-        for (geom_int j = cell_planes_index[ic]; j < cell_planes_index[ic + 1]; ++j) {
-            const geom_int ipn = cell_planes[j];
-            if (ipn >= nNormalPlanes) continue;                 // 内部双対面のみ
-            const geom_int a = plane_cells[2 * ipn + 0];
-            const geom_int b = plane_cells[2 * ipn + 1];
-            const geom_int cand = (a == ic) ? b : a;
-            if (wall_flag[cand] != 0) continue;                 // 内部ノードのみ
-            const flow_float dx = ccx[cand] - xw;
-            const flow_float dy = ccy[cand] - yw;
-            const flow_float dz = ccz[cand] - zw;
-            const flow_float dist = sqrt(dx * dx + dy * dy + dz * dz);
-            if (dist <= kSmall) continue;
-            const flow_float dn_in = -(dx * nx + dy * ny + dz * nz);
-            if (dn_in <= static_cast<flow_float>(0.0)) continue;
-            const flow_float cosv = dn_in / dist;
-            if (cosv > best_cos) { best_cos = cosv; bestI = cand; bestDn = dn_in; }
-        }
+        const geom_int   bestI  = wrp_irep[ib];
+        const flow_float bestDn = wrp_dn[ib];
         if (bestI < 0) {   // 代表点なし: 層流退避 (τ_w=0 扱い)
             utau_b[ib] = 0.0; ypls_b[ib] = 0.0;
             twall_x_b[ib] = 0.0; twall_y_b[ib] = 0.0; twall_z_b[ib] = 0.0;
@@ -358,6 +341,15 @@ void applyWmlesWallModel(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , 
         if (!wmlesActiveForBcond(cfg, bc)) continue;
         if (bc.iPlanes.empty()) continue;
 
+        // node の代表内点 (段 ②、plans/active/architecture-float-state-double-geometry.md §4.2 3.)。初回に全壁 bcond の分を作る。
+        static const WallRepPoints noRep{};
+        const WallRepPoints& wrp = (isNode != 0) ? wallRepPoints(cuda_cfg, msh, var, bc) : noRep;
+        if (isNode != 0 && wrp.nb != static_cast<geom_int>(bc.iPlanes.size())) {
+            fprintf(stderr, "[WMLES] representative points missing for bcond physID %d (%d faces, built %d)\n",
+                    (int)bc.physID, (int)bc.iPlanes.size(), (int)wrp.nb);
+            std::exit(1);
+        }
+
         if (utauInitialized.insert(bc.bvar_d["utau"]).second) {
             gpuErrchk(cudaMemset(bc.bvar_d["utau"], 0, bc.iPlanes.size()*sizeof(flow_float)));
         }
@@ -376,10 +368,7 @@ void applyWmlesWallModel(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , 
             bc.map_bplane_cell_ghst_d,
             var.p_d["sx"], var.p_d["sy"], var.p_d["sz"], var.p_d["ss"],
             isNode,
-            msh.nNormalPlanes,
-            msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.map_plane_cells_d,
-            msh.wall_flag_d,
-            var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
+            wrp.irep_d, wrp.dn_d,
             var.c_d["wall_dist"],
             var.c_d["ro"], var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"],
             var.c_d["T"], var.c_d["P"],

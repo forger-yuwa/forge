@@ -73,14 +73,37 @@ time:
 - **`lineKFreeze: 1`**: dual-time サブ反復間で K/LU を凍結 (収束軌道不変・コスト削減)。dual-time では常用推奨。
 - (削除済 2026-09-18) `lineDtWallRelief`: 壁境界半割面の λ も CFL max から除外する診断スイッチ。発散したので削除した (plan config-key-pruning §5.2)。
 - **`lineDtDirectional: 1`**: 方向別 dt — 内部 line 面の λ (音響込み) を擬似 dt の CFL max から除外。
+- **`lineDtDirectionalCap: R`** (2026-10-09、既定 0 = 上限なし): 方向別 dt の伸びを Δτ ≤ R·Δτ_point に抑える (平均流と SST の両方に効く)。検証中 — plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md) §4.4。
+- **Thomas の配列の並び** (環境変数、2026-10-10): 既定は LAYOUT2 (ラインが隣り合う並び + 前の節点の値をレジスタに持つ。数値は従来とビット一致、case/45 で −7.6 %/step)。`FORGE_LINE_LAYOUT=0` で従来の並び。起動ログの `[line] Thomas の配列の並び: …` で実効の並びを確かめる。詳細は [methods/time_integration/implementation.md](../methods/time_integration/implementation.md) の「Thomas の配列の並び」。
   壁ノードの境界半割面は除外されない (壁 CV 自身の Δτ は境界面律速のまま) 点に注意。
-- `lineViscCoupling` / `lineViscousDtRelief`: line 面のスカラー粘性結合と粘性 CFL 割引。
+- `lineViscCoupling` / `lineViscousDtRelief`: line 面の粘性結合と粘性 CFL 割引。`lineViscCoupling` は 0 (結合なし、既定) / 1 (スカラー α I を 5 行すべて) /
+  2 (薄層の粘性・熱伝導の Jacobian をライン面の K と対角に。連続の行 0、運動量は速度、エネルギーは T と粘性の仕事。等温壁の行は ΔT_w = 0 の拘束)。
+  2 は node・`lineImplicit 1`・`blockDPLUR 1`・`timeIntegration 11`・`lowMachPrecond < 2`・`heatCorrSU2 0`・`nodeIsothermalEnergyBC 0`・`wallTreatmentSST 0` 専用 (それ以外は起動時に拒否)。
+  検証中 (plan [time_integration-line-viscous-jacobian](../plans/active/time_integration-line-viscous-jacobian.md))。
   圧縮性の壁法線 pseudo-dt 律速は音響 (λ_visc/λ_ac=2ν/(Δn·c)≪1) なので通常は効果僅差 — 既定 off で可。
 
 **使い分け (2026-09-03 実測)**: 定常 M6 ノズル (case/45) では cfl 上限を上げない (streamwise
 対流律速) — 使わない。**壁解像 DDES/dual-time (case/39) では point の cfl_pseudo 上限 (2 で発散)
 を 8 まで引き上げ、`cfl_pseudo 4 + nSub 13-15` で現行比 ~13% 高速・ωバースト低減** — 採用候補
 (長時間 run でのバースト余裕検証は未了)。
+
+## implicitThermalJacobian — エネルギー行の熱伝導 Jacobian (opt-in、2026-10-09)
+
+```yaml
+time:
+  deltaT: {..., blockDPLUR: 1, implicitThermalJacobian: 1}
+```
+
+block DPLUR の粘性の対角は 5 行に同じスカラー (2ν·δ/dcc) を保存量に掛けるので、エネルギー行では ρE にかかり、
+ρE がほとんど動かずに ρ と T が入れ替わる等圧のエントロピーのモードを抑えない。ビットマスク (既定 0 = 従来どおりビット同一):
+
+- **ビット 1**: 内部の node 間面でエネルギー行を熱伝導の Jacobian k_face·δ/dcc·(γ/c_p)·∂e/∂Q に置き換える (k_face は残差と同じ式)。
+- **ビット 2**: 等温壁の節点のエネルギー行を拘束の行 [−e_w, 0, 0, 0, 1] にする (原因の切り分け用)。
+- **ビット 4** (ビット 1 と併用、キー 5): エネルギー行にも従来のスカラーを残し、温度の項はその上に足す (ビット 1 だけは高速・高 μ_t の所で不安定化した)。
+
+node・`timeIntegration 11`・`blockDPLUR 1`・`lowMachPrecond < 2` 専用。`lineViscCoupling 1`・`mesh.nodeIsothermalEnergyBC 1` との併用は起動時に拒否する (`lineViscCoupling 2` とは併用できる)。
+LHS だけの変更なので定常解は変わらない。**検証中** (plan [time_integration-implicit-thermal-jacobian](../plans/active/time_integration-implicit-thermal-jacobian.md)) で、既定化はしていない。
+式は [`methods/time_integration/implementation.md`](../methods/time_integration/implementation.md) の「エネルギー行の熱伝導 Jacobian」。
 
 ## bodyForce — 一様体積力 (周期チャネル駆動)
 
@@ -429,6 +452,10 @@ node (median-dual) で入口 (`inlet_*`) と no-slip 壁が角ノードを共有
 **`convertGmshToForge` 実行時の solverConfig に置く**と、入口エッジの壁ノード側半割面を壁 bcond に帰属させて回避する
 ([methods/discretization.md](../methods/discretization.md) §7.2 (D))。solver 実行時には読むだけで挙動は変わらない (メッシュに焼き込まれる)。
 既定 0。入口壁角を slip で逃がす旧回避 (case/47 run_0006–0008) は不要になる。2D/3D とも対応 (3D は 2026-09-07)。
+
+## mesh.axisSegmentRWeight — 軸対称 r 重みを区間ごとに掛ける (2026-10-10)
+
+既定 1: 軸対称 (`axisymMethod: 0`) の面ベクトルを、変換器が書く区間ごとの $W_f=\sum_k r_k S_k$ (`/PLANES/rSurfVect`、**`isAxisymmetric: 1` の solverConfig で 2D の node を変換したときだけ書かれる**) にし、0 で旧来の $\bar r_f S_f$ (A/B・古い run の再現。古い run の再現は保存した旧 HDF5 + 0)。node・平面の 2D・`axisRFloor: 0` 以外とデータセットの無い格子では 1 でも旧来のまま (起動時に `[axisym] axisSegmentRWeight: ON/OFF` を 1 行出す)。plan [axisymmetric-freestream-hoop-gauge](../plans/active/axisymmetric-freestream-hoop-gauge.md) §4.5。
 
 ## discretization / bndFirstOrder — 離散化レイアウト (node-centered)
 

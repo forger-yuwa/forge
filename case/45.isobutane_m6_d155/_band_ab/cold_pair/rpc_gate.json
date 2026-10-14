@@ -1,0 +1,38 @@
+{
+ "fail": [],
+ "closure": {
+  "n": 540507,
+  "g_max": 2.5771340187128834e-16,
+  "g_p99": 1.2113160569612113e-16,
+  "n_over": 0,
+  "attrs": {
+   "axisRFloor": "0.0",
+   "axisSegmentRWeight": "1",
+   "axisymMethod": "0",
+   "closure_norm": "A_planar",
+   "closure_target_y": "A_planar",
+   "discretization": "node",
+   "flow_float_bytes": "8",
+   "geom_float_bytes": "8",
+   "hoopAreaFromClosure": "0",
+   "isAxisymmetric": "1",
+   "max_E_x": "9.223027430731426e-10",
+   "max_E_y": "2.3349771334853023e-09",
+   "max_abs_normlen_err": "0.0",
+   "mesh_file": "nozzle.h5",
+   "mesh_has_rSurfVect": "1",
+   "nCells": "540507",
+   "nCells_all": "549683",
+   "nNormalPlanes": "1076426",
+   "nPlanes": "1085602",
+   "n_bad_A": "0",
+   "n_over_100eps64_x": "0",
+   "n_over_100eps64_y": "0",
+   "n_ss_nonfinite": "0",
+   "n_ss_nonpositive": "0",
+   "plan": "plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 (3, 5)",
+   "segment_rweight_active": "1",
+   "segment_rweight_reason": "active"
+  }
+ }
+}

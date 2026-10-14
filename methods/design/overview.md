@@ -355,7 +355,11 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
 $M_{d,\rm MOC}=M_d+\Delta M_{\rm cal}$ にする 1 係数較正。CFD ピンでは $m^*$ が Hall 比 $+4.2\times10^{-4}$ 動き、
 Euler の出口コア $M$ が設計値からずれる (case/45: 6.000416) ので、その偏差を打ち消す
 (粗い Euler 格子 [ni 1100 × nj 65] での当初値 $\Delta M_{\rm cal}=-4.16\times10^{-4}$)。**較正は Euler 専用の格子 `mesh_euler` (壁に寄せない配点) で行う** (2026-10-07、plan verification-case45-euler-total-enthalpy §4)。
-Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
+Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。
+**節点数の上限** (2026-10-14、plan tooling-nozzle-mesh-size-guard): `prepare`・`prepare_ns`・要求カードの生成器は、実効の節点数 (`mesh2d.node_count`: ni × 実効の nj。`axis_gap_frac` では nj が導出値) を
+格子を作る前に数え、2D の上限 30 万点 (`runner_axismach.MAX_NODES_2D`) を超えたら止まる。`mesh.max_nodes`・`mesh_euler.max_nodes` と `max_nodes_reason` の組で引き上げる (片方だけは誤り)。
+`prepare_info.json` の mesh 欄に `n_nodes`・`max_nodes`・`max_nodes_reason`・`max_nodes_source` を残す。要求カードの生成器は Euler の ni に NS の ni を写す (明示の `mesh_euler.ni` は保持)。
+切り離さない理由: case/70 で Euler の ni だけを 1800 → 900 → 600 にすると出口コア M が +1.5e-4・+3.8e-4 動き (case/70 の感度評価; 収束次数は未確定)、出口較正は Euler から設計に入る。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
 理由: NS と同じ壁に寄せた配点 (case/45 の G1: 1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が $T_t$ を数百 K 超えたまま整定せず、全域 0.005 の配点では同じ窓で全領域 $|T_0-T_t|\le0.103$ K だった (同 plan §9 E2。原因 [薄いセル・縦横比か、整定しない収束か] は切り分けていない)。
 旧方針「生産 NS と同じ格子パラメータの Euler で較正」(plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f。Euler の出口コア $M$ は格子に依存し、case/45 で 1100 × 65 → G1 で $-7.9\times10^{-4}$) は取り下げた。case/45 の旧値 $\Delta M_{\rm cal}=+3.770\times10^{-4}$ は G1 の Euler 由来で、2000 × 97・全域 0.005 の `mesh_euler` でやり直した (同 plan §6 E4・E4V: 出口コア $M$ は最終断面の $\eta\in[0.05,0.7]$ を NS の基準格子 G1 の固定の $\eta$ の列に線形補間した平均)。**現行値は $\Delta M_{\rm cal}=6.8825\times10^{-6}$** (2026-10-07、E4V run_0164 で 13 枚すべて $|M-6|\le3.1\times10^{-6}$。適用範囲: legacy MOC・単調壁・凍結の初期線 run_0062・`mesh_euler` 2000 × 97 の Euler)。Euler の較正の合格を NS に移せるとは限らないので、NS の出口 $M$ は NS で判定する。**報告・評価の $M_d$ (`prepare_info` の `Md`、`collect` の基準) は
 `spec.M_design` のまま**で、較正値は `prepare_info` の `Md_moc_offset` に別記録する。Euler の性質として据え置き、
@@ -396,6 +400,8 @@ $s_K=2\Delta M_2/L_2$、$L_1=2\Delta M_1/(M'_A+s_K)$ (台形則、1 次元 bisec
 DOF は $(L_c, M_K)$ で **$L_c$ に上限なし**。ゲートは quintic と同じ。
 M6/R3 では $L_c$ 25 でまだ fold (Δθ 3.9°)、35 で θ_max 17.5° < μ_w 19° (Δθ 0.9°)、45 で 14° (M4.2 並)。
 **全長は $L_c+55\,r_t$ 以上** (出口 1 m で ≥ 5 m) が M6 の物理的必然。
+
+**$M_K$ の選び方 (2026-10-14 実装、要求カードの既定; plan [`tooling-nozzle-mknot-auto`](../../plans/accepted/tooling-nozzle-mknot-auto.md))**: 長さ (from_length で $L_c$ が決まる) を固定して $M_K$ を振る。制約は 網の内部の反転 0・交差 0・重なり 0・最小 sin 角 ≥ 0.02・壁での余裕 $\min(\mu_w-\theta_w)\ge1°$・軸則の $M''$ の符号反転 ≤ 1・prepare の入口と同じ MOC のゲート。成り立たなくなる境目は、成立と不成立が隣り合う区間を二分法で幅 ≤ 0.001 まで詰め、逆 MOC の解像度 N と 2N の両方で求めて**全部残す**。選ぶ順序は (1) 制約と全部の境目から $\Delta M_K\ge0.05$ → (2) その中の**最大壁角 $\theta_{\max}$ の最小** → (3) 同点 (最小との差 ≤ 1e-3°) の中で境目から最も遠い点。解像度のゲートで N・2N をそれぞれ選び直して差 ≤ 0.01 を確かめ、出力はゲートで選び直した N の値 (選び直した値が窓の端なら窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す)。要求カードは最初の $r_t$ で選び、$r_t$ の固定点の後の最終の組でゲートを当て直し、固定点に使った値との差 > 0.01 なら組み直す (最大 2 回)。M6 の記録 (L_c 45・50、n_axis 600) に対しては、安全距離と同点の規則を切った目的関数の回帰で 2.6・2.7 を再現する (余裕最大は 3.0・3.1 で別; 既定の設定では CSV に無い点を不成立として扱うため未確定になり、実形状の不成立を意味しない)。既定の規則全体を実データで確かめたのは M5 (case/70) だけ。$M_K$ は長さを変えない (case/70 M5 で $L_c$ 21.49 が全点同じ)。M5 (case/70) は 2.0693 (境目 約 1.972 から 0.097)。数値の `overrides: {geometry.M_knot: x}` は今までどおり固定 (探索しない)。記録は YAML の `_card.M_knot_rule` (要約) と card_log の `M_knot_rule` (掃引の表を含む全部)。所要は手元の目安を超える (V4 で 45 分) ので重い計算は AWS で。
 
 **$M_K$ 感度 (2026-08-17, M6/R3)**: $L_c\in\{30,35,40,45,50,60\}$、
 $M_K=1.5$〜4.0 (0.1 刻み) を n_axis 600 で全 156 点、代表点を 1200/2400 で再評価した。
@@ -802,7 +808,8 @@ $x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3
    (35ab6821; 旧検査は出口直前のほぼ平行な区間の 1e-9 r_t 級の減少で r_t ごとにまばらに落ち、点の間の狭い収縮は見逃していた)。cplus の閉包で x_F が終端の壁点の丸め下に来たときは
    その点を落とさず補間した交点を足す (de35cb0b; 旧規則では壁 = メッシュ = STEP が 1 点間隔短く、case/70 で 0.85 mm・case/45 生産で 5.35 mm)。
    **既知の限界**: 冷却壁 (case/70、T_w/T_aw ≈ 0.3) の NS には非常に遅いモードがあり、残差が床に着いた後も出口 M と流量が 10 万 step 単位で動き続ける。NS 後の作り直しの固定点はこのモードが
-   定常になってからでないと閉じない (plan [`tooling-nozzle-cooled-wall-ns-settling`](../../plans/active/tooling-nozzle-cooled-wall-ns-settling.md))。内側 30 % コアの単一倍率 α とコア RMS は診断
+   定常になってからでないと閉じない (plan [`tooling-nozzle-cooled-wall-ns-settling`](../../plans/active/tooling-nozzle-cooled-wall-ns-settling.md))。
+   **帯位置の切り替わり (2026-10-13)**: 縁 y* は梯子の R(y) が最初に |R| < ε を満たす段。梯子が平らにならない区間 (冷却壁のスロート付近など) では一番内側の段の R が偶然 ε の中に入るかで y* が「その段」と「NaN」に分かれ、1 枚ごとに δ_E が局所で 5e-4 r_t 動く。持続 (`edge_persist`、K 段続けて |R| < ε) は K = 4 で窓をまたぐ再現性と case/45 の非劣化を満たさず不採用 (既定 1)。設計の入力は 5 枚の窓の平均 (1 枚の切り替わりで 1.03e-4 r_t が残る既知の限界)。内側 30 % コアの単一倍率 α とコア RMS は診断
    (同じ $x$ でコア全体を合わせる方式は、上流の壁 δ 誤差が特性線で下流の軸へ運ぶ波を欠損に取り込み反復が収縮しなかった —
    case/45 run_0019)。実測: 壁の異なる 3 つの NS 場から同じ $\delta_r(x)$ が ±1 % で出る。
    壁更新は半径方向 $r^{k+1}_{phys} = r_{inv} + (1-\omega)\delta^k_{in} + \omega\,\delta^k_{ext}$ ($\omega$=0.5 → 1.0)。
@@ -1244,6 +1251,17 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 **x 依存の第一セル**: `mesh2d.Mesh2DParams.wall_first_frac_throat` (+ `wall_first_blend_x0/x1`, `wall_first_up_x0/x1`) でスロート近傍だけ
 第一セルを詰める (問題 YAML の `mesh:` に同名キー)。case/44 冷却壁の実例: ni 4001 / nj 113 / 1.8e-5 / 2.5e-6 / throat_refine 30 で AR max 846。
 平板の実測 (case/48): 冷却で y₁⁺ は ×5.7、δ\*/θ は y₁⁺ ≤ 3.6 で 2 % 内、$q_w$ は y₁⁺ ≤ 1 で 1.5 % 内。
+**表で与える第一セルと x 方向の密度** (2026-10-08、plan §5.1 #13): `wall_first_frac_table` ([[x, 第一セル厚/局所半径], ...]、log 線形) と
+`x_density_table` ([[x, 相対密度], ...]、スロート細分・局所細分の密度に掛ける)。どちらも opt-in で、表が格子の x 範囲を覆わなければ例外
+(端値で外挿しない)。指定しなければ既存の格子はビット同一。case/45 (燃焼ガス M6、$T_w/T_{aw}$ ≈ 0.2) の 300 K では y₁⁺ が断熱の 8.5〜9.4 倍になり、
+必要な第一セルが入口直管・スロートと試験部で 40 倍違うため、smoothstep 1 本では y₁⁺ ≤ 1 と AR ≤ 5000 を同時に満たせなかった。
+設計は `case/45.isobutane_m6_d155/cold_pair_mesh.py` (断熱 NS の y₁⁺ 分布 × 局所の冷却倍率 → 第一セルの表、AR の上限 → 密度の表、ni 4496 × nj 121)。
+
+**積分法 (CONTUR) の熱力学・輸送の整合** (2026-10-08、plan §4.7、実装中): 今の CONTUR は温度分布 (Eq. 69) を温度で書き、断熱壁温を
+一定 γ の式に縁の局所 γ_e を入れて作り (燃焼ガスでは全温を超える)、粘性は空気の Sutherland、運動量式の加速の項も一定 γ の式である。
+`closure_version: contur_v2` では、温度分布をエンタルピーで書き ($h(v)$ の 2 次式 → $T = h^{-1}$)、$h_{aw} = h_e + r(h_0 - h_e)$、
+粘性を NS と同じ輸送物性に、加速の項を $(2 + H - M^2)\,d\ln u_e/dx$ にする。CPG で同じ物性なら熱閉包と加速の項は式として `contur_v1` と一致する (Sutherland の定数は今の CONTUR 273.15 / 110.4 と NS 273 / 111 で違うので、v1 のビット再現とは別に試験する)。
+熱閉包の書き方だけで 300 K の δ_r が断熱比で最大 2.8 % 変わる (plan §5.1 #10a)。どちらが NS の冷却の効果に合うかは plan §6 V-c45 で決める。
 
 **検証の物差し** (plan §4.3): 摩擦は van Driest II ($C_f(Re_\theta; M_e, T_w/T_{aw})$、非圧縮基準 Kármán–Schoenherr)、
 熱流束は Reynolds アナロジー係数 $2St/C_f$ 1.0–1.2、積分厚さは CONTUR 積分法 (同じ $T_w$) と Crocco–Busemann 温度–速度関係、

@@ -1,0 +1,82 @@
+{
+ "undecidable": [],
+ "pre": {
+  "FP64 のバイナリ (rq.log / rp.log)": [
+   "74954e7be5ef38a8",
+   "74954e7be5ef38a8"
+  ],
+  "run_0706_rp_g9a 自己点検": [
+   "[quantizeState] step 1: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)",
+   "[quantizeState] step 1: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 580679、step 2 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 1: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 570999) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 2000: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)"
+  ],
+  "run_0706_rp_g9a (b) 0 でない (全 CV)": {
+   "roY0N": 244,
+   "roY1N": 244,
+   "roY0M": 244,
+   "roY1M": 244
+  },
+  "run_0707_rp_g9b 自己点検": [
+   "[quantizeState] step 1: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)",
+   "[quantizeState] step 1: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 580679、step 2 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 1: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 570999) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 2000: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)"
+  ],
+  "run_0707_rp_g9b (b) 0 でない (全 CV)": {
+   "roY0N": 244,
+   "roY1N": 244,
+   "roY0M": 244,
+   "roY1M": 244
+  },
+  "run_0708_rp_g9c 自己点検": [
+   "[quantizeState] step 1: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)",
+   "[quantizeState] step 1: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 580679、step 2 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 1: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 570999) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 2000: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)"
+  ],
+  "run_0708_rp_g9c (b) 0 でない (全 CV)": {
+   "roY0N": 244,
+   "roY1N": 244,
+   "roY0M": 244,
+   "roY1M": 244
+  }
+ },
+ "records": {},
+ "a": {
+  "C": [
+   0.21640674325330014,
+   0.21653053540271575,
+   0.21658095908301359
+  ],
+  "G9": [
+   0.20047247660214093,
+   0.20543447122129263,
+   0.20625359152649478
+  ],
+  "F": [
+   1.1252865670165066,
+   1.0365742952859518,
+   1.225290210819345
+  ]
+ },
+ "compare": {
+  "G9": {
+   "e": -0.012452566129700388,
+   "se": 0.001806805908573133,
+   "df": 2.003284972137475,
+   "t": 6.192546452802086,
+   "L": -0.023641295649736792,
+   "U": -0.0012638366096639833
+  },
+  "F": {
+   "e": 0.9125442784609248,
+   "se": 0.05451011166300898,
+   "df": 2.000003606157746,
+   "t": 6.205332723448493,
+   "L": 0.5742908987996238,
+   "U": 1.2507976581222258
+  }
+ },
+ "verdict": "結果 B: 9 保存量の末尾の量子化だけでは不十分 (第 2 仮説を退ける。残差の演算への局在化はしない)"
+}

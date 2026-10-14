@@ -1,0 +1,364 @@
+{
+ "Q1": {
+  "input_sha": {
+   "values": {
+    "_g0c/q32_init.h5": "6f8fcda6d97482e3",
+    "run_0806_tp_p0/nozzle.h5": "6f8fcda6d97482e3",
+    "run_0807_tp_p3/nozzle.h5": "6f8fcda6d97482e3",
+    "run_0808_tp_q0/nozzle.h5": "6f8fcda6d97482e3",
+    "run_0809_tp_q3/nozzle.h5": "6f8fcda6d97482e3"
+   },
+   "ok": true
+  },
+  "res0_bitwise": {
+   "not_equal_vs_P0": {
+    "run_0807_tp_p3": {},
+    "run_0808_tp_q0": {},
+    "run_0809_tp_q3": {}
+   },
+   "ok": true
+  },
+  "res0_vs_input_record": {
+   "ro": {
+    "壁": 0,
+    "入口": 0,
+    "出口": 0,
+    "軸": 0,
+    "内部": 0
+   },
+   "roUx": {
+    "壁": 6,
+    "入口": 0,
+    "出口": 0,
+    "軸": 0,
+    "内部": 0
+   },
+   "roUy": {
+    "壁": 6,
+    "入口": 0,
+    "出口": 0,
+    "軸": 0,
+    "内部": 0
+   },
+   "roUz": {
+    "壁": 0,
+    "入口": 0,
+    "出口": 0,
+    "軸": 0,
+    "内部": 0
+   },
+   "roe": {
+    "壁": 4467,
+    "入口": 65,
+    "出口": 23,
+    "軸": 1283,
+    "内部": 219382
+   },
+   "roK": {
+    "壁": 6,
+    "入口": 47,
+    "出口": 0,
+    "軸": 0,
+    "内部": 0
+   },
+   "roOmega": {
+    "壁": 4467,
+    "入口": 119,
+    "出口": 0,
+    "軸": 1,
+    "内部": 0
+   },
+   "roY0": {
+    "壁": 1,
+    "入口": 119,
+    "出口": 0,
+    "軸": 1,
+    "内部": 0
+   },
+   "roY1": {
+    "壁": 1,
+    "入口": 119,
+    "出口": 0,
+    "軸": 1,
+    "内部": 0
+   }
+  },
+  "config": {
+   "P0_vs_P3": {
+    "lines": [
+     "           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 0, precondEps: 0.15, implicitSolvePrecision: 0, detectNaN: 1}",
+     "           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 3, precondEps: 0.15, implicitSolvePrecision: 0, detectNaN: 1}"
+    ],
+    "ok": true
+   },
+   "P0_vs_Q0": {
+    "lines": [
+     "  last: {nStepOuter: 20000}",
+     "  last: {nStepOuter: 1}"
+    ],
+    "ok": true
+   },
+   "P3_vs_Q3": {
+    "lines": [
+     "  last: {nStepOuter: 20000}",
+     "  last: {nStepOuter: 1}"
+    ],
+    "ok": true
+   },
+   "P0_registered_values": {
+    "missing": [],
+    "lowMachPrecond_keys": 1,
+    "ok": true
+   },
+   "P3_registered_values": {
+    "missing": [],
+    "lowMachPrecond_keys": 1,
+    "ok": true
+   },
+   "other_yaml": {
+    "files": [
+     "bcondConfig.yaml",
+     "probe.yaml",
+     "resolved_species_fc8ba1a8828147e3.yaml",
+     "resolved_species_fc8ba1a8828147e3_70cc58aa292c9504.yaml",
+     "species_meta.yaml"
+    ],
+    "same_names": true,
+    "differ": [],
+    "ok": true
+   },
+   "ok": true
+  },
+  "forge_sha": {
+   "values": {
+    "run_0806_tp_p0": "75ee4675b0c90f41d14539af10851a4c18956ee4303ee0b6915cb826f879e95f",
+    "run_0807_tp_p3": "75ee4675b0c90f41d14539af10851a4c18956ee4303ee0b6915cb826f879e95f",
+    "run_0808_tp_q0": "75ee4675b0c90f41d14539af10851a4c18956ee4303ee0b6915cb826f879e95f",
+    "run_0809_tp_q3": "75ee4675b0c90f41d14539af10851a4c18956ee4303ee0b6915cb826f879e95f"
+   },
+   "ok": true
+  },
+  "pass": true
+ },
+ "Q2": {
+  "runs": {
+   "P0": {
+    "lowMachPrecond": "0",
+    "precondEps": "0.15",
+    "implicitSolvePrecision": "0",
+    "speciesImplicitCoupling": "未記載 (yaml に無い → ソースの既定 0、solverConfig.cpp:394・396)",
+    "speciesPrecondDt": "未記載 (yaml に無い → ソースの既定 1、solverConfig.cpp:394・396)",
+    "cfl": "4",
+    "cfl_pseudo": "4",
+    "implicitRelax": "0.7",
+    "nStepInner": "5",
+    "blockDPLUR": "1",
+    "expected_lowMachPrecond": 0,
+    "ok": true
+   },
+   "P3": {
+    "lowMachPrecond": "3",
+    "precondEps": "0.15",
+    "implicitSolvePrecision": "0",
+    "speciesImplicitCoupling": "未記載 (yaml に無い → ソースの既定 0、solverConfig.cpp:394・396)",
+    "speciesPrecondDt": "未記載 (yaml に無い → ソースの既定 1、solverConfig.cpp:394・396)",
+    "cfl": "4",
+    "cfl_pseudo": "4",
+    "implicitRelax": "0.7",
+    "nStepInner": "5",
+    "blockDPLUR": "1",
+    "expected_lowMachPrecond": 3,
+    "ok": true
+   },
+   "Q0": {
+    "lowMachPrecond": "0",
+    "precondEps": "0.15",
+    "implicitSolvePrecision": "0",
+    "speciesImplicitCoupling": "未記載 (yaml に無い → ソースの既定 0、solverConfig.cpp:394・396)",
+    "speciesPrecondDt": "未記載 (yaml に無い → ソースの既定 1、solverConfig.cpp:394・396)",
+    "cfl": "4",
+    "cfl_pseudo": "4",
+    "implicitRelax": "0.7",
+    "nStepInner": "5",
+    "blockDPLUR": "1",
+    "expected_lowMachPrecond": 0,
+    "ok": true
+   },
+   "Q3": {
+    "lowMachPrecond": "3",
+    "precondEps": "0.15",
+    "implicitSolvePrecision": "0",
+    "speciesImplicitCoupling": "未記載 (yaml に無い → ソースの既定 0、solverConfig.cpp:394・396)",
+    "speciesPrecondDt": "未記載 (yaml に無い → ソースの既定 1、solverConfig.cpp:394・396)",
+    "cfl": "4",
+    "cfl_pseudo": "4",
+    "implicitRelax": "0.7",
+    "nStepInner": "5",
+    "blockDPLUR": "1",
+    "expected_lowMachPrecond": 3,
+    "ok": true
+   }
+  },
+  "pass": true
+ },
+ "Q3": {
+  "island": {
+   "n_nodes": 4633,
+   "n_cols": 113,
+   "nonfinite": 0
+  },
+  "median_measured_ratio": 6.013558863413111,
+  "median_expected_ratio": 6.021414161443664,
+  "median_measured_over_expected": 0.999976485581839,
+  "p10_p90_measured_over_expected": [
+   0.9901618690287609,
+   1.0057423478609253
+  ],
+  "median_abs_sonic_rel_diff": 0.0009022819954145334,
+  "median_M": 0.042433414521019286,
+  "median_beta": 0.0225,
+  "pass": true
+ },
+ "Q4": {
+  "r_g": {
+   "P0": {
+    "inlet": 0.3678581247354924,
+    "outlet": 0.9842355277036682,
+    "axis": 0.7316046101190976,
+    "wall": 1.2396908822687693
+   },
+   "P3": {
+    "inlet": 0.53758582455807,
+    "outlet": 0.9959954419989717,
+    "axis": 0.9870421946482644,
+    "wall": 1.7105864649728766
+   }
+  },
+  "per_group": {
+   "inlet": true,
+   "outlet": true,
+   "axis": true,
+   "wall": true
+  },
+  "pass": true
+ },
+ "Q5": {
+  "pre": {
+   "Q0 属性": {
+    "path": "blockDPLUR",
+    "commit_kernel": "applyBlockImplicitCorrection_d",
+    "d_source": "dq_block_old_0,dq_block_old_1,dq_block_old_2,dq_block_old_3,dq_block_old_4",
+    "step": "1"
+   },
+   "Q3 属性": {
+    "path": "blockDPLUR",
+    "commit_kernel": "applyBlockImplicitCorrection_d",
+    "d_source": "dq_block_old_0,dq_block_old_1,dq_block_old_2,dq_block_old_3,dq_block_old_4",
+    "step": "1"
+   }
+  },
+  "named": {
+   "軸|roUy": {
+    "節点数": 4467,
+    "P0 の max|d|": 0.0,
+    "P3 の max|d|": 0.0
+   },
+   "壁|roUx": {
+    "節点数": 4467,
+    "P0 の max|d|": 0.0,
+    "P3 の max|d|": 0.0
+   },
+   "壁|roUy": {
+    "節点数": 4467,
+    "P0 の max|d|": 0.0,
+    "P3 の max|d|": 0.0
+   },
+   "等温壁|roe": {
+    "節点数": 4467,
+    "P0 の max|d|": 0.0,
+    "P3 の max|d|": 0.0
+   }
+  },
+  "auto": {
+   "軸|roUy": {
+    "P3 の max|d|": 0.0
+   },
+   "壁|roUx": {
+    "P3 の max|d|": 0.0
+   },
+   "壁|roUy": {
+    "P3 の max|d|": 0.0
+   },
+   "壁|roe": {
+    "P3 の max|d|": 0.0
+   }
+  },
+  "beta_record": {
+   "β<1 の節点数": 246809,
+   "全節点数": 540507,
+   "軸|roUy の β の最大": 1.0,
+   "壁|roUx の β の最大": 0.0225,
+   "壁|roUy の β の最大": 0.0225,
+   "等温壁|roe の β の最大": 0.0225
+  },
+  "pass": true
+ },
+ "Q6": {
+  "Y0_start_limit": 2.05e-07,
+  "input_ptp_roY0_over_ro (記録)": 2.0453167359768543e-07,
+  "P0": {
+   "outputs": 41,
+   "missing_steps": [],
+   "bad": [],
+   "n_bad": 0,
+   "nan_dumps": [],
+   "Y0_ptp_max_step": [
+    2.0453167359768543e-07,
+    0
+   ],
+   "Y0_ptp_20000": 2.571593493705393e-09,
+   "min_ro_P_T": [
+    0.014273180149108014,
+    2153.6798996964562,
+    230.78716556124078
+   ],
+   "ok": true
+  },
+  "P3": {
+   "outputs": 41,
+   "missing_steps": [],
+   "bad": [],
+   "n_bad": 0,
+   "nan_dumps": [],
+   "Y0_ptp_max_step": [
+    2.0453167359768543e-07,
+    0
+   ],
+   "Y0_ptp_20000": 2.227057649406561e-09,
+   "min_ro_P_T": [
+    0.013887874381815315,
+    2021.76860619429,
+    192.03873634030148
+   ],
+   "ok": true
+  },
+  "pass": true
+ },
+ "RUN_RC (記録)": {
+  "run_0806_tp_p0": "0",
+  "run_0807_tp_p3": "0",
+  "run_0808_tp_q0": "0",
+  "run_0809_tp_q3": "0"
+ },
+ "passes": {
+  "Q1": true,
+  "Q2": true,
+  "Q3": true,
+  "Q4": true,
+  "Q5": true,
+  "Q6": true
+ },
+ "failed": [],
+ "undecidable": [],
+ "status": "成立"
+}

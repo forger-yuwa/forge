@@ -14,6 +14,8 @@
 log
 log[0-9]*
 *.log
+# codex_review.py が claude に渡す証拠一式 (git diff 等の写し。*.log と同じく追跡しない)
+notes/reviews/*.evidence/
 *.su2
 *.out
 *.xz

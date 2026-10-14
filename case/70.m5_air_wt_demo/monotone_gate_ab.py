@@ -37,6 +37,8 @@ from forge_design.probdef import load_problem  # noqa: E402
 OUT = C / "_monotone_gate_ab"
 OUT.mkdir(exist_ok=True)
 CARD = C / "card_m5_air_demo_c2b.yaml"
+# 走査の M_knot: 自動化の前 (2026-10-13) の既定 = 雛形 axismach_final_v1 の M_knot_factor 0.45 × M_exit 5 (problem_m5_air_c2b.yaml と同じ)
+MKNOT_LEGACY = 2.25
 RT_SCAN = [0.024973561273227432] + [float(v) for v in np.linspace(0.02500, 0.02512, 25)] + [0.025077342164181705, 0.02507572544991335]
 EXISTING = [("c70_c2b", C / "problem_m5_air_c2b.yaml"), ("c70_final", C / "problem_m5_air_final.yaml"),
             ("c70_c2", C / "problem_m5_air_c2.yaml"), ("c70_walltemp", C / "problem_m5_air_walltemp.yaml")]
@@ -207,8 +209,18 @@ def main():
            "validate_uses_gate": "monotone_gate(" in inspect.getsource(_ORIG_VALIDATE),
            "designs": [], "negatives": []}
     card = W.load_card(CARD)
+    # M_knot: カードの既定が自動になり (plan tooling-nozzle-mknot-auto §5.1 #3)、M_knot を書かないカードでは M_knot= なしの
+    # card_to_problem(card, rt) が例外になる。この A/B は自動化の前の振る舞いで走査した設計の再現なので、カードに数値の
+    # overrides.geometry.M_knot があればそれ (card_to_problem がそのまま当てる; M_knot= は渡せない)、無ければ当時の値 2.25 を
+    # 明示して渡す (§5.1 #3b)。自動の選択 (探索) はここでは回さない
+    if card["M_knot_mode"] == "auto":
+        mk_kw = {"M_knot": MKNOT_LEGACY}
+        out["scan_M_knot"] = {"value": MKNOT_LEGACY, "source": "カードに数値の M_knot が無い → 自動化の前の既定 0.45 × 5 を明示"}
+    else:
+        mk_kw = {}
+        out["scan_M_knot"] = {"value": card["overrides"]["geometry.M_knot"], "source": "カードの overrides.geometry.M_knot"}
     for rt in RT_SCAN:
-        prob = W.card_to_problem(card, float(rt))
+        prob = W.card_to_problem(card, float(rt), **mk_kw)
         try:
             d = chain_without_validate(lambda: W._design_chain_of(prob))
         except Exception as ex:      # noqa: BLE001 — 設計が組めないものは記録して続ける

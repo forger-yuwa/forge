@@ -1,0 +1,511 @@
+{
+ "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c・#36e",
+ "tool": "h370_problems.py prep-check",
+ "environment": {
+  "python": "3.12.3",
+  "executable": "/home/sano/work/forge/design/.venv-opt/bin/python",
+  "numpy": "2.5.2",
+  "scipy": "1.18.0",
+  "host": "DESKTOP-S8N5ES6"
+ },
+ "cfd_pin_dir": "/home/sano/work/forge/case/45.isobutane_m6_d155/run_0062_euler_wallfit_fit_r1_ext6k",
+ "files": {
+  "problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml": "0d784f7c49922444f9e476579b3fee092f4188e7717354caf37184ba84250eea",
+  "problem_d155_euler_h_ref.yaml": "0e54f48d3229d7812442284004ce457e0632a1f8c7277c1adb06a06bf9f8cafb",
+  "csv": "24251cb647226d6523109655c08c05210fdb8ba4a669aeaecb4407202945b918"
+ },
+ "scope": "CFD 0 step: prepare_ns の変換の前までを同じ関数で再現 (変換器・forge は使わない)",
+ "design": {
+  "cfd_pin_match": {
+   "checked": [
+    "R",
+    "gamma_hall",
+    "gas",
+    "L_U",
+    "r_U",
+    "L_pipe",
+    "contraction_shape",
+    "meta.gas.Tt",
+    "meta.species.Y_transport",
+    "meta.species.transported",
+    "inlet.Pt",
+    "inlet.Tt",
+    "inlet.Y",
+    "physProp.thermalMethod",
+    "physProp.species",
+    "physProp.thermoHrefTemp"
+   ],
+   "unchecked": []
+  },
+  "x_in": -12.5,
+  "x_e": 95.29740274407894,
+  "n_wall_inv": 610,
+  "L_c": 39.3,
+  "moc_gate": true
+ },
+ "ns_wall": {
+  "type": "SingleBSplinePhysicalWall",
+  "physical_upstream": {
+   "r_U": 3.2425,
+   "L_U": 9.0,
+   "L_pipe": 3.5,
+   "x_in": -12.5,
+   "x_contraction": -9.0,
+   "mu": 18.06020066889632,
+   "R_t": 2.0,
+   "nominal_hermite": {
+    "coef": [
+     3.2425,
+     0.0,
+     0.0,
+     -2.1750000000000185,
+     -6.862499999999972,
+     6.794999999999989
+    ],
+    "basis": "Σ coef[j] ξ^j, ξ = (x + L_U)/L_U",
+    "domain": [
+     -9.0,
+     0.0
+    ],
+    "end_conditions": [
+     [
+      3.2425,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.5
+     ]
+    ]
+   },
+   "frozen_design": {
+    "r_U": 6.485,
+    "L_U": 12.0,
+    "L_pipe": 0.5,
+    "x_in": -12.5
+   },
+   "note": "物理壁の直管 r_U・多項式 Q の始点 (−L_U, r_U, 0, 0) だけをこの値にする。設計壁 (MOC・CFD ピンの照合) は frozen_design のまま"
+  },
+  "throat": {
+   "x": -0.001552220271703539,
+   "r": 1.0013916826514275,
+   "kappa": 0.5006916250549565
+  },
+  "upstream_gate_pass": true
+ },
+ "ns_mesh": {
+  "ni": 4719,
+  "nj": 160,
+  "axis_cap_frac": 0.015,
+  "wall_normal_layer": [
+   0.02,
+   0.8
+  ],
+  "msh_digits": 17,
+  "generator_sha256": "3980ac549a97de3f11e593843a547748e45474980d47a3bbf740357cc0d1edc0",
+  "quality": {
+   "cells": 750162,
+   "ar_max": 4573.992788806282,
+   "ar_p99": 3395.0547320328606,
+   "skew_max": 0.31975149426940735,
+   "n_ar_gt_max": 0,
+   "n_skew_gt_0.9": 0,
+   "ar_limit": 5000.0,
+   "at_ar_max_xy_m": [
+    -0.9202762752717005,
+    0.24858713743958258
+   ],
+   "pass": true,
+   "note": "生成の座標に当てた値 (変換後の HDF5 の check_mesh_quality の VERDICT ではない — AWS で確かめる)"
+  },
+  "first_layer": {
+   "min_m": 2.6671911347850872e-08,
+   "x_at_min": -0.08299794823302242,
+   "max_m": 1.1829271012561017e-05,
+   "x_at_max": 95.29740274407894,
+   "x_lt_0": [
+    2.6671911347850872e-08,
+    1.1523375186561768e-06
+   ],
+   "throat_0_1": [
+    2.672449098692188e-08,
+    4.5946012211419944e-08
+   ],
+   "test_40_94": [
+    5.660716290364309e-06,
+    1.1802821276180335e-05
+   ],
+   "note": "壁の節点と第一の内部の節点の距離 (壁法線の近壁層では法線方向)。変換器の wall_dist (双対の重心の距離) は AWS で"
+  },
+  "remap_constant_x": {
+   "n_missing_cols": 0,
+   "x_missing": [],
+   "max_column_dx_rt": 0.2235302575705731,
+   "note": "生成の座標で、行 j の x の範囲が列の目標 x[:, 0] を覆わない列 (抽出で欠測になる)"
+  },
+  "same_as_tw300_h": true
+ },
+ "stop_rule_sections": [
+  {
+   "x_frac": 0.419738616669543,
+   "x_requested": 40.0,
+   "x_column": 39.99197556836169
+  },
+  {
+   "x_frac": 0.7345425791717,
+   "x_requested": 69.99999999999999,
+   "x_column": 69.99227344095111
+  },
+  {
+   "x_frac": 0.986385749173426,
+   "x_requested": 94.00000000000001,
+   "x_column": 94.01690222512549
+  }
+ ],
+ "bcond_wall_lines": [
+  "wall:   {physID: 3, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 370.0}}"
+ ],
+ "stages": {
+  "S1_soft": {
+   "cfl": 0.5,
+   "cfl_pseudo": 0.5,
+   "convMethod": 0,
+   "nStepOuter": 3000,
+   "outStepInterval": 3000,
+   "implicitRelax": 0.7,
+   "lineImplicit": null,
+   "lineDtDirectional": null,
+   "lineDtDirectionalCap": null,
+   "implicitThermalJacobian": null,
+   "limiterRoRef": null,
+   "limiterPRef": null,
+   "limiterARef": null,
+   "output": null,
+   "blockDPLUR": 1,
+   "timeIntegration": 11,
+   "nStepInner": 10,
+   "limiter": 2
+  },
+  "S2_mid": {
+   "cfl": 1.0,
+   "cfl_pseudo": 1.0,
+   "convMethod": 0,
+   "nStepOuter": 3000,
+   "outStepInterval": 3000,
+   "implicitRelax": 0.7,
+   "lineImplicit": null,
+   "lineDtDirectional": null,
+   "lineDtDirectionalCap": null,
+   "implicitThermalJacobian": null,
+   "limiterRoRef": null,
+   "limiterPRef": null,
+   "limiterARef": null,
+   "output": null,
+   "blockDPLUR": 1,
+   "timeIntegration": 11,
+   "nStepInner": 10,
+   "limiter": 2
+  },
+  "main": {
+   "cfl": 4.0,
+   "cfl_pseudo": 4.0,
+   "convMethod": 1,
+   "nStepOuter": 200000,
+   "outStepInterval": 2500,
+   "implicitRelax": 0.7,
+   "lineImplicit": 1,
+   "lineDtDirectional": 1,
+   "lineDtDirectionalCap": 50.0,
+   "implicitThermalJacobian": 5,
+   "limiterRoRef": 0.8739869154,
+   "limiterPRef": 387491.0573,
+   "limiterARef": 359.7712185,
+   "output": {
+    "level": 1,
+    "extraFields": [
+     "res_ro",
+     "res_roUx",
+     "res_roUy",
+     "res_roe",
+     "res_roK",
+     "res_roOmega",
+     "omg_prod",
+     "omg_dest",
+     "omg_cross",
+     "omg_trans",
+     "omg_axisym",
+     "dt_local"
+    ]
+   },
+   "blockDPLUR": 1,
+   "timeIntegration": 11,
+   "nStepInner": 5,
+   "limiter": 2
+  }
+ },
+ "stage_sha256": {
+  "stages": "full",
+  "at": "prepare",
+  "S1_soft": "7fe4c9bb9081316efffd1ca5c7bb22c784330b714f9d129264307bd5ef0d1474",
+  "S2_mid": "553a70e66ba1acc5be6b2b5088d4e43440f2b1b32f3a383a32dd14cda5a3af31",
+  "main": "675560fddfa763f89263f09c4d4d2ccb7b4156a2039e35746e11c5d61a25d838",
+  "prestage_config": "c10fdfbf4e0ca9eb6139ce66c2bf92a6e5bd0e0e76ab0d64128761eb70445864"
+ },
+ "euler_design": {
+  "same_S_as_ns": true,
+  "scale_same": true,
+  "cfd_pin_match": {
+   "checked": [
+    "R",
+    "gamma_hall",
+    "gas",
+    "L_U",
+    "r_U",
+    "L_pipe",
+    "contraction_shape",
+    "meta.gas.Tt",
+    "meta.species.Y_transport",
+    "meta.species.transported",
+    "inlet.Pt",
+    "inlet.Tt",
+    "inlet.Y",
+    "physProp.thermalMethod",
+    "physProp.species",
+    "physProp.thermoHrefTemp"
+   ],
+   "unchecked": []
+  },
+  "monotone_gate_S": {
+   "pass": true,
+   "min_r1": -4.016425232507338e-08,
+   "x_min_theta": 95.01875915667219,
+   "D": 6.129329932491601e-09,
+   "x_D_peak": 94.89755428348434,
+   "x_D": 95.13414208656312
+  }
+ },
+ "euler_reference_wall": {
+  "status": "built",
+  "type": "UpstreamDesignWall",
+  "repr": "design_upstream",
+  "throat": {
+   "x": -8.881784197001252e-16,
+   "r": 0.9999999999999987,
+   "kappa": 0.500000000007276
+  },
+  "gate": {
+   "pass": true,
+   "reasons": [],
+   "downstream_monotone_gate": {
+    "applicable": true,
+    "pass": true,
+    "reasons": [],
+    "min_r1": -4.016425232507338e-08,
+    "min_theta_deg": -2.3012421455252074e-06,
+    "x_min_theta": 95.01875915667219,
+    "D": 6.129329932491601e-09,
+    "x_D": 95.13414208656312,
+    "x_D_peak": 94.89755428348434,
+    "r1_min": -1.74533e-06,
+    "d_max": 1e-07,
+    "interval": [
+     0.0,
+     95.29740274407894
+    ],
+    "n_pieces": 254
+   },
+   "upstream": {
+    "r_U": 3.2425,
+    "q_min": 0.9999999999999987,
+    "x_q_min": 0.0,
+    "positive_radius": true,
+    "max_r1": 0.0,
+    "max_r1_q": 0.0,
+    "x_max_r1_q": -9.0,
+    "r1_tol": 1e-12,
+    "monotone_contraction": true,
+    "note": "直管は r′ = 0、Q は端と Q″ の根で厳密に評価"
+   },
+   "max_seam_jump": 1.1102230246251565e-15,
+   "max_abs_d2_change_vs_H": 7.275957614183426e-12
+  },
+  "global_min": {
+   "pass": true,
+   "x_t": -8.881784197001252e-16,
+   "r_t": 0.9999999999999987,
+   "unique": true,
+   "monotone_after": false
+  },
+  "vs_HRefWall": {
+   "x_ge_0_bit_identical": true,
+   "x_lt_0_max_abs": 2.6645352591003757e-15
+  }
+ },
+ "euler_mesh": {
+  "wall": "正式の Euler の参照の壁 (euler_reference_wall、案 A)",
+  "ni": 2000,
+  "nj": 97,
+  "mesh_euler": {
+   "ni": 2000,
+   "nj": 97,
+   "throat_refine": 5.0,
+   "throat_width": 3.0,
+   "wall_first_frac": 0.005
+  },
+  "throat_refine": 5.0,
+  "generator_sha256": "dd51ee8e9c51bc15c7a3a713fdb7b2d0c9cde2e98c5ce7f858219525da438de9",
+  "quality": {
+   "cells": 191904,
+   "ar_max": 4.983988627105224,
+   "ar_p99": 3.729690290283316,
+   "skew_max": 0.29568144939886276,
+   "n_ar_gt_max": 0,
+   "n_skew_gt_0.9": 0,
+   "ar_limit": 1000.0,
+   "at_ar_max_xy_m": [
+    0.4387002888834189,
+    0.18736175456652654
+   ],
+   "pass": true,
+   "note": "生成の座標に当てた値 (変換後の HDF5 の check_mesh_quality の VERDICT ではない — AWS で確かめる)"
+  }
+ },
+ "euler_wall_file": {
+  "kind": "design_upstream",
+  "sha256": "34c106ee99b8f4c95f0109a1bd37b61e49436ab0b12ce7cb45f820124ae57c39",
+  "coords_bit_identical": true,
+  "quads_identical": true,
+  "bedges_identical": true
+ },
+ "delta_in_check": {
+  "pass": true,
+  "covered": true,
+  "n_cols_ns": 4719,
+  "n_cols_euler": 2000,
+  "n_uncovered": 0,
+  "uncovered_x": [],
+  "range_ns": [
+   -12.5,
+   95.29740274407894
+  ],
+  "range_euler": [
+   -12.5,
+   95.29740274407894
+  ],
+  "x_min": 0.0,
+  "tol_mm": 0.001,
+  "tol_rt": 1.3043699632363295e-05,
+  "scale_m": 0.07666536551630307,
+  "judged": {
+   "n": 2938,
+   "max_abs_rt": 1.0388060644587723e-05,
+   "max_abs_mm": 0.0007964044663228406,
+   "x_at_max": 0.002772988786916012,
+   "rms_rt": 2.41842500898232e-06
+  },
+  "by_region": {
+   "throat_0_1": {
+    "n": 556,
+    "max_abs_rt": 1.0388060644587723e-05,
+    "max_abs_mm": 0.0007964044663228406,
+    "x_at_max": 0.002772988786916012,
+    "rms_rt": 4.601064106491772e-06
+   },
+   "x_1_40": {
+    "n": 1475,
+    "max_abs_rt": 5.195572804435333e-06,
+    "max_abs_mm": 0.0003983204881185986,
+    "x_at_max": 8.941450547390847,
+    "rms_rt": 1.84967190961765e-06
+   },
+   "test_40_94": {
+    "n": 885,
+    "max_abs_rt": 1.6697324571879335e-06,
+    "max_abs_mm": 0.0001280106491447478,
+    "x_at_max": 41.028571226560594,
+    "rms_rt": 6.438877207316054e-07
+   },
+   "end_94_exit": {
+    "n": 22,
+    "max_abs_rt": 1.0571765685085666e-09,
+    "max_abs_mm": 8.104882803998027e-08,
+    "x_at_max": 94.01690222512549,
+    "rms_rt": 3.5969031490967724e-10
+   }
+  },
+  "upstream_x_lt_min": {
+   "n": 1781,
+   "max_abs_rt": 0.00969123204123319,
+   "max_abs_mm": 0.7429818467444503,
+   "x_at_max": -8.429690292229115,
+   "rms_rt": 0.0028747669381492358,
+   "note": "判定しない (poly の物理壁は上流に δ_r を足さない; δ_in は NS と Euler の縮流部の多項式の差)"
+  },
+  "decomposition": {
+   "euler_interp_minus_exact": {
+    "n": 4719,
+    "max_abs_rt": 4.791040594431806e-05,
+    "max_abs_mm": 0.003673068783755603,
+    "x_at_max": -5.8183655907689396,
+    "rms_rt": 6.666343242069158e-06
+   },
+   "euler_nodes_minus_exact": {
+    "n": 2000,
+    "max_abs_rt": 3.552713678800501e-15,
+    "max_abs_mm": 2.7237009276001014e-13,
+    "x_at_max": 27.6971071895609,
+    "rms_rt": 4.342661167468608e-16
+   },
+   "ns_nodes_minus_exact": {
+    "n": 4719,
+    "max_abs_rt": 5.329070518200751e-15,
+    "max_abs_mm": 4.085551391400152e-13,
+    "x_at_max": 63.83367570693685,
+    "rms_rt": 3.3355668599825506e-16
+   },
+   "exact_gap_minus_delta_r_x_ge_min": {
+    "n": 2938,
+    "max_abs_rt": 1.0436096431476471e-14,
+    "max_abs_mm": 8.000871474825298e-13,
+    "x_at_max": 72.98010798517582,
+    "rms_rt": 1.6824425835373384e-15
+   },
+   "delta_in_minus_exact_gap_all": {
+    "n": 4719,
+    "max_abs_rt": 4.791040594431806e-05,
+    "max_abs_mm": 0.003673068783755603,
+    "x_at_max": -5.8183655907689396,
+    "rms_rt": 6.666343242069152e-06
+   },
+   "note": "δ_in − δ_r = (Euler の補間 − 真の Euler の壁) の符号反転 + (NS の節点 − 真の NS の壁) + (真の壁の間隔 − δ_r)"
+  },
+  "over_tol": {
+   "n": 0,
+   "x_range": null
+  }
+ },
+ "old_reference_uncovered_ns_cols": {
+  "x_e_old": 95.2275815792169,
+  "n": 2,
+  "x_range": [
+   95.23642652889069,
+   95.29740274407894
+  ]
+ },
+ "fails": [],
+ "VERDICT": "PASS",
+ "aws_todo": [
+  "prepare_ns (変換器 2 回) の後の MESH_QUALITY.txt (check_mesh_quality --ar-max 5000) の VERDICT と高 AR のセルの位置",
+  "変換後の nozzle.h5 の /VALUE/wall_dist (双対の重心の距離) と第一層の局所の法線の距離・y₁⁺ の見込み",
+  "prepare_info.json の mesh.hashes.generator_sha256 がここの値と一致 (同じ環境なら; 違えば numpy・scipy の版の差を記録)",
+  "solverConfig_prestage.yaml・solverConfig.yaml・ns_stage_configs の sha256 とここの stage_sha256 の一致",
+  "Euler の参照: prepare (変換器・品質・IC) の MESH_QUALITY.txt の VERDICT と、check_runs (delta_in_check の CLI) で変換後の座標の δ_in の照合 (≤ 0.001 mm)",
+  "Euler の参照の資格を満たした時点の res と sha256 を固定して NS に渡す (deltastar_loop --euler-ref-res・--euler-ref-sha256)"
+ ],
+ "superseded_record": {
+  "file": "h370_prep_check.json・h370_delta_in.csv",
+  "note": "throat_refine 4・診断の参照の壁 (HRefWall) での照合の旧い FAIL (max 1.1367e-3 mm)。消さずに残す (§5.1 #36e)"
+ }
+}

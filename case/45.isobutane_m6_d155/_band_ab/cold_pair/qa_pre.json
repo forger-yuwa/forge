@@ -1,0 +1,19 @@
+{
+ "commit": "4d45f5f6",
+ "unit_test_pass": true,
+ "forge_sha256": "a9ce00b1c3248c23462c7ea9d1ffa90fc3604546f416c160302d4b0cec6d6b01",
+ "base_forge_sha256": "793215917d15668003a7e7005496d8fde10429b73cc8e8829163dcea3902ae69",
+ "n_base": 283,
+ "n_new": 283,
+ "n_identical": 282,
+ "only_base": [
+  "_Z21enforceAxisSymmetry_diPiPfS0_S0_S0_S0_S0_S0_"
+ ],
+ "only_new": [
+  "_Z21enforceAxisSymmetry_diPiPfS0_S0_S0_S0_S0_S0_PdS1_"
+ ],
+ "differ": [],
+ "differ_resolved_as_nvcc_variant": {},
+ "sass_mismatch_except_axis": [],
+ "variants_dir": null
+}

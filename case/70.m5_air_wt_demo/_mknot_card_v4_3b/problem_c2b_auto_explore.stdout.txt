@@ -1,0 +1,84 @@
+[wt_card] M_knot: 最初の r_t: r_t 0.025 m・n_axis_inv 2400 で探索 (M_A 1.22927〜M_d 5、並列 N 1・2N 1、使えるメモリ 14.0 GB)
+[wt_card] M_knot: 粗い格子: 36 点 (1.32927〜4.82927、0.1 刻み)
+[wt_card] M_knot:   [coarse] 36 点を評価 (529.2 s): 1.32927×, 1.42927×, 1.52927×, 1.62927×, 1.72927×, 1.82927×, 1.92927×, 2.02927, 2.12927, 2.22927, 2.32927, 2.42927, 2.52927, 2.62927, 2.72927, 2.82927, 2.92927, 3.02927, 3.12927, 3.22927, 3.32927, 3.42927, 3.52927, 3.62927, 3.72927, 3.82927, 3.92927, 4.02927, 4.12927, 4.22927, 4.32927, 4.42927, 4.52927, 4.62927, 4.72927, 4.82927
+[wt_card] M_knot: 局所極小 1 個の前後 ±0.1 を 0.01 で詰める
+[wt_card] M_knot:   [fine] 18 点を評価 (263.8 s): 1.93927×, 1.94927×, 1.95927×, 1.96927×, 1.97927, 1.98927, 1.99927, 2.00927, 2.01927, 2.03927, 2.04927, 2.05927, 2.06927, 2.07927, 2.08927, 2.09927, 2.10927, 2.11927
+[wt_card] M_knot:   [bisect] 1 点を評価 (15.0 s): 1.97427
+[wt_card] M_knot:   [bisect] 1 点を評価 (13.2 s): 1.97177×
+[wt_card] M_knot:   [bisect] 1 点を評価 (15.0 s): 1.97302
+[wt_card] M_knot:   [bisect] 1 点を評価 (15.0 s): 1.9724
+[wt_card] M_knot:   [safe] 1 点を評価 (15.0 s): 2.0224
+[wt_card] M_knot: 解像度のゲート: N = 2400 の窓 1.96927〜2.16927
+[wt_card] M_knot:   [window] 4 点を評価 (60.0 s): 2.13927, 2.14927, 2.15927, 2.16927
+[wt_card] M_knot: 解像度のゲート: 2N = 4800 の窓と N の境目の区間の両端 (1 個)
+[wt_card] M_knot:   [window] 21 点を評価 (871.7 s): 1.96927×, 1.97927, 1.98927, 1.99927, 2.00927, 2.01927, 2.02927, 2.03927, 2.04927, 2.05927, 2.06927, 2.07927, 2.08927, 2.09927, 2.10927, 2.11927, 2.12927, 2.13927, 2.14927, 2.15927, 2.16927
+[wt_card] M_knot:   [bracket] 2 点を評価 (83.4 s): 1.97177, 1.9724
+[wt_card] M_knot:   [bisect] 1 点を評価 (35.6 s): 1.97052×
+[wt_card] M_knot:   [bisect] 1 点を評価 (35.8 s): 1.97115×
+[wt_card] M_knot:   [safe] 1 点を評価 (15.2 s): 2.02177
+[wt_card] M_knot:   [safe] 2 点を評価 (83.3 s): 2.02177, 2.0224
+[wt_card] M_knot:   全部の境目: lower 1.971771 (2N, N の同じ向き +0.000625), lower 1.972396 (N, 2N の同じ向き -0.000625) → 選び直し N 2.069270614・2N 2.079270614
+[wt_card] M_knot: 最初の r_t: 選択 2.069270614 → chosen_N 2.069270614 (ゲート PASS、全部の境目から 0.0969、2051 s)
+[wt_card] r_t 反復 0: r_t 0.025 → 0.024974024650534648 m (|Δ|/r_t 1.039e-03、内側 2 回・残差 8.474e-09 m、18.5 s)
+[wt_card] r_t 反復 1: r_t 0.024974024650534648 → 0.024974024650534648 m (|Δ|/r_t 0.000e+00、内側 1 回・残差 -1.179e-08 m、22.5 s)
+[wt_card] M_knot: 最終の組 r_t 0.024974024650534648 m: M_K 2.069270614 の前後 ±0.15 を n_axis_inv 2400 で評価 (31 点、並列 1)
+[wt_card] M_knot:   [context] 31 点を評価 (659.8 s): 1.91927×, 1.92927×, 1.93927×, 1.94927×, 1.95927×, 1.96927×, 1.97927, 1.98927, 1.99927, 2.00927, 2.01927, 2.02927, 2.03927, 2.04927, 2.05927, 2.06927, 2.07927, 2.08927, 2.09927, 2.10927, 2.11927, 2.12927, 2.13927, 2.14927, 2.15927, 2.16927, 2.17927, 2.18927, 2.19927, 2.20927, 2.21927
+[wt_card] M_knot: 解像度のゲート: N = 2400 の窓 1.96927〜2.16927
+[wt_card] M_knot:   [bisect] 1 点を評価 (21.6 s): 1.97427
+[wt_card] M_knot:   [bisect] 1 点を評価 (19.8 s): 1.97177×
+[wt_card] M_knot:   [bisect] 1 点を評価 (21.7 s): 1.97302
+[wt_card] M_knot:   [bisect] 1 点を評価 (19.8 s): 1.9724×
+[wt_card] M_knot: 解像度のゲート: 2N = 4800 の窓と N の境目の区間の両端 (1 個)
+[wt_card] M_knot:   [window] 21 点を評価 (870.9 s): 1.96927×, 1.97927, 1.98927, 1.99927, 2.00927, 2.01927, 2.02927, 2.03927, 2.04927, 2.05927, 2.06927, 2.07927, 2.08927, 2.09927, 2.10927, 2.11927, 2.12927, 2.13927, 2.14927, 2.15927, 2.16927
+[wt_card] M_knot:   [bracket] 2 点を評価 (83.3 s): 1.9724, 1.97302
+[wt_card] M_knot:   [bisect] 1 点を評価 (35.4 s): 1.97083×
+[wt_card] M_knot:   [bisect] 1 点を評価 (35.2 s): 1.97161×
+[wt_card] M_knot:   [safe] 2 点を評価 (42.9 s): 2.0224, 2.02302
+[wt_card] M_knot:   [safe] 2 点を評価 (83.1 s): 2.0224, 2.02302
+[wt_card] M_knot:   全部の境目: lower 1.972396 (2N, N の同じ向き +0.000625), lower 1.973021 (N, 2N の同じ向き -0.000625) → 選び直し N 2.069270614・2N 2.079270614
+[wt_card] design_chain 19.9 s (L_c 21.6972、x_F − L_total 1.478e-02 r_t、x_F − x_e 0.000e+00 r_t、場の終点まで 7.86 r_t)
+カードの値 → 問題 YAML のキー:
+  conditions.Pt                3000000.0                  → spec.Pt                3000000.0   (そのまま [Pa])
+  conditions.Tt                1250.0                     → spec.Tt                1250.0   (そのまま [K])
+  M_exit                       5.0                        → spec.M_design          5.0   (そのまま)
+  throat.diameter_physical_m   0.05                       → spec.r_throat          0.024974024650534648   (物理スロート径: CFD 前の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2))
+  throat.curvature (雛形)        (無し)                       → geometry.R             2.0   (曲率半径 / r_t (設計壁のスロートの曲率; 物理壁は境界層の分だけわずかに違う))
+  inlet.radius_m               0.15                       → geometry.r_inlet       6.006240567908976   (/ r_t)
+  inlet.pipe_length_m          0.2                        → geometry.L_pipe        8.008320757211969   (/ r_t)
+  inlet.contraction_length_m   0.3                        → geometry.L_U           12.012481135817952   (/ r_t)
+  divergent_length_m           1.2                        → dv.L_total             48.04992454327181   (/ r_t (Lc_mode: from_length))
+  tolerances.length_m          0.001                      → geometry.L_total_tol   0.020020801893029922   (/ 2 / r_t)
+  wall                         {thermal: isothermal, Tw: 350.0} → spec.wall_thermal      {mode: isothermal, Tw: 350.0}   (thermal → mode)
+  p_ambient                    design                     → spec.p_ambient         5138.646661132853   (design: 設計出口静圧 (semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)、M 5.0、p/Pt 1.712882e-03))
+  gas                          {preset: air}              → gas.species            {N2: 0.7552, O2: 0.2314, AR: 0.0129, CO2: 0.0005}   (質量分率 (model semiperfect、transport は雛形))
+  recipe                       axismach_explore_v1        → geometry・mesh・mesh_euler・evaluate (雛形の構成キー)   (M_knot は自動 (雛形 axismach_explore_v1 の M_knot_factor は使わない))
+  M_knot (自動)                  auto                       → geometry.M_knot        2.069270614   (自動 (規則 min_theta_max_v1): 最終の組 (r_t 0.024974024650534648 m) の解像度のゲートで選び直した N の値 chosen_N (θ_max 15.16444°、全部の境目から 0.0963 ≥ ΔM_safe 0.05、ゲート PASS (n_axis_inv 2400/4800: 2.069270614/2.079270614); 雛形の M_knot_factor 0.45 は使わない))
+  overrides.deltastar_initializer.model contur                     → deltastar_initializer.model contur   (上書き (雛形/生成値: None))
+  overrides.deltastar_initializer.a_crocco 1.0                        → deltastar_initializer.a_crocco 1.0   (上書き (雛形/生成値: None))
+  overrides.deltastar_initializer.cf_scale 0.8246498920214053         → deltastar_initializer.cf_scale 0.8246498920214053   (上書き (雛形/生成値: None))
+  overrides.deltastar_initializer.n_scale 1.0                        → deltastar_initializer.n_scale 1.0   (上書き (雛形/生成値: None))
+  overrides.mesh.wall_first_frac 1.15e-05                   → mesh.wall_first_frac   1.15e-05   (上書き (雛形/生成値: None))
+  overrides.mesh.wall_first_frac_throat 2.75e-06                   → mesh.wall_first_frac_throat 2.75e-06   (上書き (雛形/生成値: None))
+r_t = 0.024974024650534648 m (physical_throat_solved)
+  反復 0: 0.025 → 0.024974024650534648 m  |Δ|/r_t 1.039e-03  物理スロート半径 0.025000008473735413 m  (18.5 s)
+  反復 1: 0.024974024650534648 → 0.024974024650534648 m  |Δ|/r_t 0.000e+00  物理スロート半径 0.024999988210867297 m  (22.5 s)
+格子 (初期値): ni 1830  wall_first_frac 1.15e-05  wall_first_frac_throat 2.75e-06  ブレンド C (up_x0/x1 None/None)  (AR の最大 4845、y1+ の目安の最大 0.69 @ x -0.33)
+節点数 (格子を作る前の判定): NS (mesh) ni 1830 × nj 97 = 177510 (上限 300000、既定)・Euler (mesh_euler) ni 1830 × nj 97 = 177510 (上限 300000、既定)。上限を超える格子はユーザの了承を取ってから overrides の max_nodes と max_nodes_reason を組で書いて許す
+逆 MOC の場: x_F 48.064704  x_e 48.064704  x_F − x_e +0.000 mm  場の終点 55.9215 r_t (張り付きなし、x_end_margin 2.3)
+M_knot: 自動 (規則 min_theta_max_v1; カードに geometry.M_knot を書いていない (既定は自動)) → geometry.M_knot 2.069270614 (θ_max 15.16444°、余裕 4.279°、網の最小 sin 角 0.0513)。要約は _card.M_knot_rule、掃引の表と全部の記録は card_log の M_knot_rule
+  境目 (N・2N を全部、成立側の端): lower 1.972396 (2N)、lower 1.973021 (N) — 選んだ値から 0.0963 (ΔM_safe 0.05)
+  解像度のゲート (最終の組 r_t 0.024974024650534648 m、n_axis_inv 2400/4800、窓 1.96927〜2.16927): PASS — 選び直し N 2.069270614・2N 2.079270614 (入力 2.069270614 から +0)
+  探索 (最初の r_t 0.025 m、n_axis_inv 2400): 59 点、M_A 1.22927〜M_d 5、選択 2.069270614 (同点の規則 (最小 2.05927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 39 点の中; ΔM_safe 未満の 5 点を除外; 境目 + ΔM_safe の点 2.0224 を評価))
+  選び直し [最初の r_t] r_t 0.025 m・M_K の入力 2.069270614 → chosen_N 2.069270614: select_mknot の選択 2.069270614 → ゲートで選び直した chosen_N 2.069270614 を r_t の固定点の M_K に固定
+  選び直し [最終の組 (最終の組で詰め直し (N は ±(半幅 + ΔM_safe)))] r_t 0.024974024650534648 m・M_K の入力 2.069270614 → chosen_N 2.069270614: chosen_N = r_t の固定点に使った M_K — その組を出力 (寸法は最終の設計チェーンで測る)
+  M_knot の所要 3945 s (並列 N 1・2N 1、開始時の使えるメモリ 14.0 GB)
+  掃引の表と全部の記録: problem_c2b_auto_explore.yaml.card_log.json の M_knot_rule (その記録の sha256 2ff69792a6d12f3d94eac15d47f020274464ad42bf9b33dd411a61f7ec1c41ac; YAML の _card.M_knot_rule は要約だけ)
+液化: 出口静温 221.80 K が Antoine の範囲 (63〜126 K) より高い (N₂ の臨界温度 126.2 K 付近より上) — 液化しない
+寸法 (設計壁から): PASS
+  inlet_radius               カード 0.150000 m  測定 0.150000 m  差 +0.000e+00 m  公差 1e-05  ok
+  pipe_length                カード 0.200000 m  測定 0.200000 m  差 -5.551e-17 m  公差 0.001  ok
+  contraction_length         カード 0.300000 m  測定 0.300000 m  差 +5.823e-11 m  公差 0.001  ok
+  divergent_length           カード 1.200000 m  測定 1.200369 m  差 +3.691e-04 m  公差 0.001  ok
+  throat_diameter_physical   カード 0.050000 m  測定 0.050000 m  差 -2.358e-08 m  公差 2e-05  ok
+警告: 格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.51 (x = -19.97 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.69 @ x = -0.33 r_t)
+→ ../case/70.m5_air_wt_demo/_mknot_card_v4_3b/problem_c2b_auto_explore.yaml  (../case/70.m5_air_wt_demo/_mknot_card_v4_3b/problem_c2b_auto_explore.yaml.card_log.json)

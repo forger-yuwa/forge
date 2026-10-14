@@ -1,0 +1,220 @@
+{
+ "undecidable": [],
+ "checks": {
+  "バイナリ・入力 (lp.log)": [
+   "793215917d156680",
+   "7e95e5bbd8f50c9e",
+   "ba859e02f3ec236a"
+  ],
+  "run_0709_lp_f0": {
+   "RUN_RC": "0",
+   "座標一致": true,
+   "設定の差": [],
+   "res0_9キー": true,
+   "res0_ビット一致": true
+  },
+  "run_0710_lp_bp1": {
+   "RUN_RC": "0",
+   "座標一致": true,
+   "設定の差": [
+    "< space: {pRef: 5499000.0, limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}",
+    "> space: {limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}"
+   ],
+   "res0_9キー": true,
+   "res0_ビット一致": true
+  },
+  "run_0711_lp_bp2": {
+   "RUN_RC": "0",
+   "座標一致": true,
+   "設定の差": [
+    "< space: {pRef: 5499000.0, limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}",
+    "> space: {limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}"
+   ],
+   "res0_9キー": true,
+   "res0_ビット一致": true
+  },
+  "run_0712_lp_ap": {
+   "RUN_RC": "0",
+   "座標一致": true,
+   "設定の差": [
+    "< space: {pRef: 5499000.0, limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}",
+    "> space: {limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}"
+   ],
+   "res0_9キー": true,
+   "res0_ビット一致": true
+  }
+ },
+ "records": {
+  "run_0709_lp_f0 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0710_lp_bp1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0711_lp_bp2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0712_lp_ap check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0709_lp_f0 check_quasisteady (θ_r・Q_w、20,000〜30,000、1e-4)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0709_lp_f0/lp_series.csv  [21 rows, steps 20000..30000]  -> DRIFTING ===",
+   "theta_r_40      : tail mean=0.07959  drift=1.0%/tail  fluct=1.0%          DRIFTING",
+   "theta_r_70      : tail mean=0.1169  drift=0.9%/tail  fluct=0.9%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1296  drift=0.8%/tail  fluct=0.8%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.54e+06  drift=0.2%/tail  fluct=0.5%  (extremum at tail-end) DRIFTING"
+  ],
+  "run_0710_lp_bp1 check_quasisteady (θ_r・Q_w、20,000〜30,000、1e-4)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0710_lp_bp1/lp_series.csv  [21 rows, steps 20000..30000]  -> DRIFTING ===",
+   "theta_r_40      : tail mean=0.07937  drift=0.7%/tail  fluct=0.8%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1167  drift=0.7%/tail  fluct=0.7%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1294  drift=0.6%/tail  fluct=0.6%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.49e+06  drift=0.6%/tail  fluct=0.8%  (extremum at tail-end) DRIFTING"
+  ],
+  "run_0711_lp_bp2 check_quasisteady (θ_r・Q_w、20,000〜30,000、1e-4)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0711_lp_bp2/lp_series.csv  [21 rows, steps 20000..30000]  -> DRIFTING ===",
+   "theta_r_40      : tail mean=0.07951  drift=0.4%/tail  fluct=0.6%          DRIFTING",
+   "theta_r_70      : tail mean=0.1168  drift=0.5%/tail  fluct=0.6%           DRIFTING",
+   "theta_r_94      : tail mean=0.1295  drift=0.5%/tail  fluct=0.5%           DRIFTING",
+   "Q_w             : tail mean=9.452e+06  drift=0.2%/tail  fluct=0.5%        DRIFTING"
+  ],
+  "run_0712_lp_ap check_quasisteady (θ_r・Q_w、20,000〜30,000、1e-4)": [
+   "=== /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0712_lp_ap/lp_series.csv  [21 rows, steps 20000..30000]  -> DRIFTING ===",
+   "theta_r_40      : tail mean=0.07808  drift=0.0%/tail  fluct=0.1%          DRIFTING",
+   "theta_r_70      : tail mean=0.1152  drift=0.0%/tail  fluct=0.1%  -> report 0.1152 +/- 4.5e-05 OSCILLATING",
+   "theta_r_94      : tail mean=0.128  drift=0.0%/tail  fluct=0.1%            DRIFTING",
+   "Q_w             : tail mean=9.292e+06  drift=0.0%/tail  fluct=0.1%        DRIFTING"
+  ]
+ },
+ "delta": {
+  "W1|theta_r_40": {
+   "A": -0.05587196121825968,
+   "B": 1.5772126591071691,
+   "Bp": 1.439387312026821,
+   "F0": 1.620413343329453,
+   "Ap": -0.03878457930659612,
+   "Bp1": 1.4173979098235558,
+   "Bp2": 1.6998691878051466,
+   "pre_Ap": 1.0,
+   "pre_F0": 1.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 1.456182489130152,
+   "resid_Bp2": 1.7386537671117428,
+   "vs_F0_Bp1": -0.20301543350589712,
+   "vs_F0_Bp2": 0.07945584447569365
+  },
+  "W1|theta_r_70": {
+   "A": 0.011528337172405426,
+   "B": 1.2292638932360143,
+   "Bp": 1.1201315000788625,
+   "F0": 1.2291375341419168,
+   "Ap": -0.0011167624225937687,
+   "Bp1": 1.104947650363371,
+   "Bp2": 1.303028845035198,
+   "pre_Ap": 1.0,
+   "pre_F0": 1.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 1.106064412785965,
+   "resid_Bp2": 1.3041456074577917,
+   "vs_F0_Bp1": -0.12418988377854578,
+   "vs_F0_Bp2": 0.07389131089328105
+  },
+  "W1|theta_r_94": {
+   "A": 0.0003040793430043039,
+   "B": 0.9949544153453468,
+   "Bp": 0.9083597265221599,
+   "F0": 0.9808040177072067,
+   "Ap": -0.013023684804673901,
+   "Bp1": 0.8916123445520775,
+   "Bp2": 1.0452869691284656,
+   "pre_Ap": 1.0,
+   "pre_F0": 1.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 0.9046360293567514,
+   "resid_Bp2": 1.0583106539331395,
+   "vs_F0_Bp1": -0.08919167315512921,
+   "vs_F0_Bp2": 0.06448295142125893
+  },
+  "W1|Q_w": {
+   "A": 0.08481082697999655,
+   "B": 2.8161803990462095,
+   "Bp": 2.52396368979233,
+   "F0": 2.871978838569733,
+   "Ap": 0.15543865343301164,
+   "Bp1": 2.4596573603614353,
+   "Bp2": 1.940177520500087,
+   "pre_Ap": 1.0,
+   "pre_F0": 1.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 2.304218706928424,
+   "resid_Bp2": 1.7847388670670754,
+   "vs_F0_Bp1": -0.4123214782082978,
+   "vs_F0_Bp2": -0.9318013180696461
+  },
+  "W2|theta_r_40": {
+   "A": -0.12080807719531968,
+   "B": 1.8826434511084273,
+   "Bp": 1.7762659690578002,
+   "F0": 2.166872151202079,
+   "Ap": -0.04803763497300567,
+   "Bp1": 1.7989097661019244,
+   "Bp2": 1.8907556610204412,
+   "pre_Ap": 1.0,
+   "pre_F0": 0.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 1.84694740107493,
+   "resid_Bp2": 1.9387932959934469,
+   "vs_F0_Bp1": -0.36796238510015455,
+   "vs_F0_Bp2": -0.27611649018163775
+  },
+  "W2|theta_r_70": {
+   "A": -0.05573375769313026,
+   "B": 1.5115452145923938,
+   "Bp": 1.426265434058501,
+   "F0": 1.7146412600776533,
+   "Ap": -0.004841729541951999,
+   "Bp1": 1.439707811693024,
+   "Bp2": 1.5506351044653728,
+   "pre_Ap": 1.0,
+   "pre_F0": 0.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 1.444549541234976,
+   "resid_Bp2": 1.5554768340073248,
+   "vs_F0_Bp1": -0.2749334483846293,
+   "vs_F0_Bp2": -0.1640061556122805
+  },
+  "W2|theta_r_94": {
+   "A": -0.05444769291526164,
+   "B": 1.267094606046828,
+   "Bp": 1.194301138165598,
+   "F0": 1.4258885016088705,
+   "Ap": -0.02439117307517517,
+   "Bp1": 1.198662453998984,
+   "Bp2": 1.3077974961256538,
+   "pre_Ap": 1.0,
+   "pre_F0": 0.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 1.2230536270741592,
+   "resid_Bp2": 1.332188669200829,
+   "vs_F0_Bp1": -0.2272260476098864,
+   "vs_F0_Bp2": -0.11809100548321672
+  },
+  "W2|Q_w": {
+   "A": 0.1693881818526883,
+   "B": 2.748816044626796,
+   "Bp": 2.399962475264175,
+   "F0": 2.827004652443822,
+   "Ap": 0.1766537475983866,
+   "Bp1": 2.1440700817311527,
+   "Bp2": 1.824817638834864,
+   "pre_Ap": 1.0,
+   "pre_F0": 1.0,
+   "resultA": false,
+   "resultB": true,
+   "resid_Bp1": 1.967416334132766,
+   "resid_Bp2": 1.6481638912364773,
+   "vs_F0_Bp1": -0.6829345707126695,
+   "vs_F0_Bp2": -1.0021870136089581
+  }
+ },
+ "verdict": "判別不能 (前提: Ap が旧 A と同じ、または F0 が陽性対照として成立、を満たさない組がある)"
+}

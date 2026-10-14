@@ -32,6 +32,33 @@ FORGE_BUILD = FORGE_ROOT / "solver_density_cuda" / "build"
 _ENV = dict(os.environ, LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu/hdf5/serial")
 
 
+def run_converter(args, cwd, env=None) -> subprocess.CompletedProcess:
+    """convertGmshToForge を回す (args の最後が出力の HDF5)。非 0 の終了は CalledProcessError。ただし AWS で既知の
+    「HDF5 を書き終えた後の GPU の後片付けで落ちる」症状 (stdout に `Write Input HDF5`、stderr に `GPUassert: invalid argument`)
+    で、出力の HDF5 が開けて MESH/COORD と VALUE を持つときだけは通す (case/45 `g0c_prep.sh` と同じ扱い。2026-10-13、
+    plan tooling-nozzle-isothermal-wall-chain §5.1 #31 の準備がこれで止まった)。通したときは出力の隣に記録を書く。"""
+    r = subprocess.run([str(a) for a in args], cwd=cwd, env=env, capture_output=True, text=True)
+    if r.returncode == 0:
+        return r
+    out = Path(cwd) / str(args[-1])
+    known = "Write Input HDF5" in (r.stdout or "") and "GPUassert: invalid argument" in (r.stderr or "")
+    ok = False
+    if known and out.is_file():
+        try:
+            import h5py
+            with h5py.File(out, "r") as f:
+                ok = "MESH/COORD" in f and "VALUE" in f
+        except OSError:
+            ok = False
+    if not ok:
+        raise subprocess.CalledProcessError(r.returncode, [str(a) for a in args], r.stdout, r.stderr)
+    (out.parent / f"{out.stem}_converter_exit.log").write_text(
+        f"rc={r.returncode}: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した\n"
+        f"--- stderr ---\n{r.stderr}")
+    print(f"[converter] {out.name}: 終了時の既知の GPU エラー (rc={r.returncode}) — HDF5 は書き終えているので通す", flush=True)
+    return r
+
+
 def converter_path() -> Path:
     """convertGmshToForge の場所: 環境変数 FORGE_CONVERTER > FORGE_BIN (run_case.sh が使う forge) と同じビルドの変換器 >
     solver_density_cuda/build。変換器も solverConfig.yaml を読むので、forge と同じビルドのものを使う
@@ -172,8 +199,7 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None) -> dict:
             (run_dir / "solverConfig.yaml").read_text().replace(
                 f'discretization: "{disc}"', 'discretization: "cell"').replace(
                 ", axisCentroidShift: 1, nodeWallDirichlet: 1", ""))
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "nozzle_qc.h5"],
                            cwd=run_dir, env=_ENV, capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text("(primal/cell 変換で検査)\n" + q.stdout + q.stderr)
@@ -183,11 +209,9 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None) -> dict:
         if q.returncode != 0:
             raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
         (run_dir / "solverConfig.yaml").write_text(_solver_config(p, n, int(p.evaluate.get("outStepInterval", max(n // 3, 1)))))
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     else:
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"), "nozzle.h5"],
                            cwd=run_dir, env=_ENV, capture_output=True, text=True)
         (run_dir / "MESH_QUALITY.txt").write_text(q.stdout + q.stderr)
