@@ -453,7 +453,14 @@ def test_card(tmp: Path):
     np.savetxt(prev / "delta_r_next.csv", np.c_[xs, dE, np.zeros_like(xs), dE, np.zeros_like(xs)], delimiter=",", comments="",
                header=",".join(DL.DELTA_R_NEXT_COLUMNS) + " (試験: run_0010 の CFD 前の δ_r を NS の列に写した合成の δ_E)")
     out = tmp / "card" / "problem_c2b_ns.yaml"
-    logd = W.build_problem(CARD_C2B, out, ns_prev_run=prev, log=lambda *a, **k: None)
+    # 数値の M_knot 2.25 (= c2b の生成時の旧既定 0.45 × M_exit; M_knot の既定は自動になったので、同じ設計で回す。
+    # plan tooling-nozzle-mknot-auto §6 V3)
+    import yaml
+    c2b = yaml.safe_load(CARD_C2B.read_text())
+    c2b["overrides"] = dict(c2b.get("overrides") or {}, **{"geometry.M_knot": 2.25})
+    card_num = tmp / "card_m5_air_demo_c2b_num.yaml"
+    card_num.write_text(yaml.safe_dump(c2b, allow_unicode=True, sort_keys=False))
+    logd = W.build_problem(card_num, out, ns_prev_run=prev, log=lambda *a, **k: None)
     ns = logd.get("ns_correction") or {}
     rt = logd["r_t"]["r_t_m"]
     check("カード: r_t は NS 後の補正の固定点 (method)", logd["r_t"]["method"] == "physical_throat_ns_corrected", logd["r_t"]["method"])
@@ -463,7 +470,7 @@ def test_card(tmp: Path):
     # 壁点を落として 1 点間隔短い)。今の切り方の設計は拡大部が 1 点間隔 (0.0339 r_t) 長く、s の写しで拡大部の表が x_e の比 ≈ 1.0007 で伸びて
     # r_t が 1.8e-11 m 動く (2026-10-13 実測)
     with old_exit_cut():
-        logd_o = W.build_problem(CARD_C2B, tmp / "card_oldcut" / "problem_c2b_ns.yaml", ns_prev_run=prev, log=lambda *a, **k: None)
+        logd_o = W.build_problem(card_num, tmp / "card_oldcut" / "problem_c2b_ns.yaml", ns_prev_run=prev, log=lambda *a, **k: None)
     rt_o = logd_o["r_t"]["r_t_m"]
     fo, fn = logd_o["moc_field"], logd["moc_field"]
     check("カード: 直す前の切り方は x_F の壁点を落とす (x_F − x_e ≈ 0.0339 r_t)、今の切り方は x_F で終わる",
@@ -490,7 +497,6 @@ def test_card(tmp: Path):
     bad = [k for k, (p_, s_) in shas.items() if not p_ or not Path(p_).exists() or sha256(p_) != s_]
     check("カード (ii) _card.ns_correction の sha256 が実ファイルと一致 (delta_next・壁ファイル・prepare_info・表)", not bad and tp is not None
           and tp == out.with_name(out.stem + "_delta_r.csv"), f"不一致 {bad}" if bad else f"表 {tp.name}")
-    import yaml
     card_rec = yaml.safe_load(out.read_text())["_card"]["ns_correction"]
     check("カード (ii) YAML の _card.ns_correction = card_log の記録", card_rec == json.loads(json.dumps(ns)))
     p = load_problem(out); d = design_chain(p)
@@ -583,9 +589,12 @@ def test_case70(out_dir):
         skip("case/70 の抽出", "run_0010・run_0012・_ab_euler_steps/A/zone のどれかが無い")
         return
     out_dir = Path(out_dir)
-    DL.extract_and_merge(NS10, EU12, band_select="edge", out_dir=out_dir)
+    # 基準の zone の腕は持続を入れる前 (edge の縁の持続 = 1 段) の抽出。2026-10-13 に既定が persist 4 になった
+    # (plan tooling-nozzle-cooled-wall-ns-settling §4.2b) ので、ここでは edge_persist=1 で旧の式に戻して比べる
+    # (既定のままだと 3 ファイルとも異なる; persist 1 で旧の式とビット同一なことは run_band_persist_tests.py (c))
+    DL.extract_and_merge(NS10, EU12, band_select="edge", edge_persist=1, out_dir=out_dir)
     same = {f: filecmp.cmp(out_dir / f, ref / f, shallow=False) for f in ("delta_r_next.csv", "delta_r_equiv.csv", "delta_r_edge.csv")}
-    check("case/70: 新実装の抽出が ab_root_zone の zone の腕とバイト同一", all(same.values()), f"{same}")
+    check("case/70: 新実装の抽出 (edge_persist=1) が ab_root_zone の zone の腕とバイト同一", all(same.values()), f"{same}")
 
 
 def main(argv=None) -> int:

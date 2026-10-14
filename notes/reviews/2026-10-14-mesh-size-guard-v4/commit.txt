@@ -1,0 +1,2 @@
+fc72a1df
+注: prepare-only は作業ツリー (HEAD + 未 commit の打ち切りの修正) で実行

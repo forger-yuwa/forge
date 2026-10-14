@@ -547,7 +547,7 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
 
 def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=None,
              prepare_only: bool = False, nsteps=None, cfl_main=None, implicit_relax=None,
-             stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
+             stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None) -> dict:
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
     from ..evaluate.runner import FORGE_TOOLS
     prev_run = Path(prev_run); run_dir = Path(run_dir)
@@ -557,7 +557,7 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from or prev_run,
                       delta_r_csv=prev_run / "delta_r_next.csv", offset="radial",
                       euler_ref=euler_ref, omega=omega, prev_run=prev_run,
-                      cfl_main=cfl_main, implicit_relax=implicit_relax)
+                      cfl_main=cfl_main, implicit_relax=implicit_relax, stop_rule=stop_rule)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
     print(json.dumps({k: info[k] for k in ("throat_physical", "dstar_source", "mesh", "nStepOuter", "cfl_main")}, indent=1), flush=True)
@@ -598,7 +598,7 @@ def resolve_integral_initializer(problem) -> dict:
 
 def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, prepare_only: bool = False,
                        nsteps=None, omega: float = 0.5, cfl_main=None, implicit_relax=None,
-                       stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
+                       stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None) -> dict:
     """pass 0: 積分法 (CONTUR) 初期壁で NS を立て、終了後に抽出して次 pass 用 delta_r_next.csv まで作る。
     initializer=None なら problem YAML の `deltastar_initializer` (無ければ断熱 contur)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
@@ -607,7 +607,7 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     # thermal_bc は prepare_ns 側で spec.wall_thermal から決める (ここでは model のみ)
     init = initializer if initializer is not None else resolve_integral_initializer(problem)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, initializer=init,
-                      euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax)
+                      euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax, stop_rule=stop_rule)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
     print(json.dumps({k: info[k] for k in ("throat_physical", "dstar_source", "initializer", "mesh", "nStepOuter", "cfl_main")},
@@ -656,7 +656,8 @@ def check_table_against_card(problem, table) -> dict:
 
 
 def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=None, prepare_only: bool = False, nsteps=None,
-                   omega: float = 0.5, cfl_main=None, implicit_relax=None, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
+                   omega: float = 0.5, cfl_main=None, implicit_relax=None, stages: str = "full", ramp=None, ramp_steps: int = 1000,
+                   stop_rule: bool | None = None) -> dict:
     """補正の表 TABLE (`wt_card --ns-correction` が問題 YAML の横に書く `<stem>_delta_r.csv`、または `--solve-rt-throat --prev` の
     `--delta-r-out`) で物理壁を作り、NS を準備・実行する (plan tooling-nozzle-deltastar-band-root-zone §4.3 3):
     `prepare_ns(delta_r_csv=TABLE, offset="radial")` → `run_staged_ns` → collect → 抽出 (`fixed_point.json`) → 設計の標準出力
@@ -668,7 +669,8 @@ def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=No
     run_dir = Path(run_dir)
     chk = check_table_against_card(problem, table)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, delta_r_csv=table, offset="radial",
-                      euler_ref=euler_ref, omega=None, prev_run=prev_run, cfl_main=cfl_main, implicit_relax=implicit_relax)
+                      euler_ref=euler_ref, omega=None, prev_run=prev_run, cfl_main=cfl_main, implicit_relax=implicit_relax,
+                      stop_rule=stop_rule)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
     info["delta_r_table"] = chk
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
@@ -713,6 +715,10 @@ def main(argv=None) -> int:
     ap.add_argument("--stages", default="full", choices=("full", "none", "ramp"), help="起動: full=soft/mid/本段, none=本段のみ, ramp=cfl を段階的に上げて本段")
     ap.add_argument("--ramp", default=None, help="--stages ramp の cfl 列 (例 '1,2,3.5')")
     ap.add_argument("--ramp-steps", type=int, default=1000)
+    ap.add_argument("--no-stop-rule", action="store_true",
+                    help="本段の停止規則を使わない (plan tooling-nozzle-cooled-wall-ns-settling §4.6; 既定は使う = 上限 --steps か "
+                         "evaluate.stop_rule_cap か 200,000 まで回し、r と θ_r の条件を満たした出力で止める)。使わないときの本段は "
+                         "--steps > evaluate.ns_steps > 60,000 step")
     ap.add_argument("--solve-rt", type=float, default=None, metavar="R_EXIT_M",
                     help="出口物理半径 [m] を与えて r_t を解くだけ (--prev があれば実測 δ_r で、無ければ prepare_ns と同じ積分法の経路で)")
     ap.add_argument("--solve-rt-throat", type=float, default=None, metavar="R_THROAT_M",
@@ -725,6 +731,7 @@ def main(argv=None) -> int:
                          "(prepare_ns(delta_r_csv=TABLE, offset=radial) → run_staged_ns)。YAML の _card.ns_correction があれば TABLE の "
                          "sha256 を照合する。IC は --ic-from (無ければ --prev)。--init-integral とは排他")
     a = ap.parse_args(argv)
+    sr_arg = False if a.no_stop_rule else None      # None = evaluate.stop_rule (既定で使う)
     if a.delta_r_csv is not None:
         clash = [n for n, v in (("--init-integral", a.init_integral), ("--extract-only", a.extract_only),
                                 ("--solve-rt", a.solve_rt is not None), ("--solve-rt-throat", a.solve_rt_throat is not None)) if v]
@@ -733,7 +740,7 @@ def main(argv=None) -> int:
         ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
         run_from_table(a.problem, a.euler_ref, a.delta_r_csv, a.run_dir, ic_from=(a.ic_from or a.prev), prev_run=a.prev,
                        prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
-                       stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
+                       stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps, stop_rule=sr_arg)
         return 0
     if a.solve_rt is not None:
         r = solve_rt(a.problem, a.solve_rt, prev_run=a.prev, euler_run=a.euler_ref)
@@ -754,14 +761,14 @@ def main(argv=None) -> int:
         ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
         run_pass0_integral(a.problem, a.euler_ref, a.run_dir, a.ic_from, initializer=init,
                            prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl,
-                           implicit_relax=a.implicit_relax, stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
+                           implicit_relax=a.implicit_relax, stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps, stop_rule=sr_arg)
         return 0
     if not a.prev:
         ap.error("--prev が必要 (--init-integral でなければ)")
     ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
     run_pass(a.problem, a.euler_ref, a.prev, a.run_dir, omega=a.omega, ic_from=a.ic_from,
              prepare_only=a.prepare_only, nsteps=a.steps, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
-             stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
+             stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps, stop_rule=sr_arg)
     return 0
 
 

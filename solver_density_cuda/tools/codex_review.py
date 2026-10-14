@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """codex に plan の外部レビューを依頼し、結果を notes/reviews/ に残す (AGENTS.md 「codex レビュー」の実体化)。
+codex が使えないときは、文脈を分けた Claude の別インスタンスで回し直す (下の「判定役」)。
 
 段階は 3 つ:
   --stage diagnose 診断・設計判断の諮問 (AGENTS.md「モデル分担とエスカレーション」の 7 条件)。旧 `diagnostician`
@@ -13,6 +14,28 @@
   * stdout はパイプに通さずログファイルへ直書きする (tail 等を挟むと終了まで何も見えない)。
   * 所要 5〜15 分。Claude Code からは run_in_background + timeout 1200 s 以上で呼ぶ。
 
+判定役 (--backend、plan tooling-review-fallback-backend §4.1・§4.2):
+  auto   (既定) スイッチ ~/.config/forge/diagnose-backend の中身が `claude` なら最初から claude。そうでなければ codex を試し、
+         codex が unavailable (CLI 無し・認証・usage 上限・rate limit・overloaded・timeout・最終メッセージが空) のときだけ、
+         理由を記録して claude で回し直す。有効な NO-GO・incomplete・failed では切り替えない (弱い判定役で通し直さない)。
+  codex  codex だけ (失敗しても切り替えない。今までの振る舞い)。
+  claude 最初から claude。**文脈を共有しない Claude の別インスタンス** (同じ系統のモデルになりうる。独立性は文脈の分離だけ)。
+         `claude -p --safe-mode` (CLAUDE.md・auto memory・hook・skill・plugin・MCP を読まない) で、道具は Read・Grep・Glob だけ
+         (Bash を渡さない: 許可した git のコマンドにも `git diff --output=<file>` の書き込みの経路がある)。
+         git の情報は親 (このスクリプト) が証拠一式 notes/reviews/<記録名>.evidence/ (git 追跡外) にして渡す。
+
+結果の分類 (codex・claude 共通):
+  ok           段ごとの必須の項目がある (diagnose: 「結論:」の行、plan・result: 判定の行 (GO / GO-with-changes / NO-GO) と
+               「指摘数:」の行) かつ証拠の欄が「証拠: 足りる」
+  unavailable  上の定義
+  failed       それ以外の非 0 終了。result 段の claude で、必須の git の取得 (diff --stat・diff・log) が失敗したときも
+               子を起動せずにこれで終わる (記録の先頭は「未成立 (failed: 証拠一式)」)
+  incomplete   本文はあるが必須の項目が無い・判定の行が相反する・「証拠不足:」の行がある・証拠の欄 (「証拠: 足りる」) が無い
+  判定は明示の判定の行 (`判定: NO-GO` か、判定の語だけの行 `**NO-GO**`) からだけ取る (コードブロックの中は見ない)。
+  指摘数は「指摘数: Critical n / Major n / Minor n」の行の最後のもの。diagnose の「不足情報:」はそれだけでは incomplete にしない。
+  **ok のときだけ** plan の §6.1 に貼る行を表示して 0 で終わる。それ以外は記録の先頭に「**未成立 (分類)**」と書き、
+  非 0 で終わる (failed 1 / incomplete 2 / unavailable 3)。
+
 使い方:
   python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage plan
   python3 solver_density_cuda/tools/codex_review.py plans/active/<plan>.md --stage result --base main
@@ -20,17 +43,83 @@
   python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --dry-run   # プロンプトだけ表示
   python3 solver_density_cuda/tools/codex_review.py --stage diagnose --brief notes/reviews/briefs/<日付>-<slug>.md \
       [plans/active/<plan>.md] [--extra case/NN/README.md ...]           # 諮問 (plan は任意)
+  python3 solver_density_cuda/tools/codex_review.py PLAN --stage plan --backend claude [--claude-model opus] \
+      [--requester-model claude-opus-5-5]                                # Claude の別インスタンスで
 
 出力:
-  notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.md   レビュー本文 (メタ情報ヘッダ + codex の最終メッセージ)
-  notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.log  生ログ (*.log は git 追跡外)
+  notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.md          記録 (見出し + 判定役の最終メッセージ)
+  notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.codex.log   codex の試行の生ログ (*.log は git 追跡外)
+  notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.claude.log  claude の試行の生ログ (JSON の出力 + stderr)
+  notes/reviews/YYYY-MM-DD-<plan stem>-<stage>.evidence/   claude に渡した証拠一式 (git 追跡外)
   diagnose は stem にブリーフのファイル名を使う (notes/reviews/YYYY-MM-DD-<brief stem>-diagnose.md)
-最後に plan の「レビュー記録」表へ貼る行を表示する。
+  試行のログは切り替えたときも全部残す。
+最後に (ok のときだけ) plan の「レビュー記録」表へ貼る行を表示する。
 """
-import argparse, datetime, os, re, shutil, subprocess, sys
+import argparse, datetime, json, os, re, shutil, subprocess, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 OUT_DIR = os.path.join(ROOT, "notes", "reviews")
+
+# 判定役の切り替えスイッチ (AGENTS.md「モデル分担とエスカレーション」)。中身が `claude` なら最初から Claude の別インスタンス。
+SWITCH_FILE = "~/.config/forge/diagnose-backend"
+# これを超えるプロンプトは引数で渡さずファイルに書いて読ませる (execve の引数長上限、2026-09-20)
+PROMPT_ARG_MAX_BYTES = 96 * 1024
+# 子の claude に渡す道具 (読むだけ)。Bash は渡さない (plan §4.2、諮問 review-fallback-adoption)
+CLAUDE_TOOLS = "Read,Grep,Glob"
+# codex の --effort → claude の --effort (claude は low/medium/high/xhigh/max を受ける。同じ名前はそのまま写す)
+CLAUDE_EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh"}
+# 管理ポリシー (managed settings) は --safe-mode でも外せない。あれば記録に残す
+MANAGED_SETTINGS_PATHS = ("/etc/claude-code/managed-settings.json", "/etc/claude-code/managed-settings.d",
+                          "/etc/claude-code/managed-mcp.json")
+# 証拠一式: result 段の git diff がこれを超えたら、stat と上位のファイルの差分に切る
+EVIDENCE_DIFF_MAX_BYTES = 512 * 1024
+# 証拠一式: git の 1 回の取得の打ち切り (秒)。超えたら取得の失敗 (result 段なら failed: 証拠一式)
+EVIDENCE_GIT_TIMEOUT = 120
+# 証拠一式: プロンプトに直に入れる diff の stat の上限 (超えたら頭だけ入れてファイルを読ませる)
+EVIDENCE_STAT_INLINE_MAX_BYTES = 16 * 1024
+# 差分を切るときに優先するパス (result 段のプロンプトが見る範囲 + plans)
+EVIDENCE_DIFF_PRIORITY = ("solver_density_cuda/", "design/", "methods/", "procedures/", "plans/")
+EXIT_CODE = {"ok": 0, "failed": 1, "incomplete": 2, "unavailable": 3}
+
+# unavailable の型 (分類, 正規表現)。codex はログの末尾のエラー行、claude は is_error のときの本文・stderr に当てる。
+# **成功した試行 (codex: rc 0 かつ最終メッセージあり、claude: is_error でない) の本文には当てない**
+# (本文に「rate limit」と書いてあるだけの正常なレビューを unavailable にしないため)。
+UNAVAILABLE_PATTERNS = (
+    ("usage_limit", re.compile(r"usage limit|hit your usage|purchase more credits|insufficient_quota|quota exceeded"
+                               r"|credit balance is too low|out of credits", re.I)),
+    ("rate_limit", re.compile(r"rate[ _-]?limit|\b429\b|too many requests", re.I)),
+    ("overloaded", re.compile(r"overloaded|\b529\b|\b503\b|service unavailable|server is busy", re.I)),
+    ("auth", re.compile(r"\b401\b|\b403\b|unauthori[sz]ed|not logged in|/login\b|log ?in again|please (?:run )?login"
+                        r"|authenticat|invalid api key|token (?:has )?expired|forbidden", re.I)),
+)
+# codex のログでエラーとして読む行 (codex 自身が出す `ERROR: ...` と stream の失敗)。ログの末尾だけを見る。
+CODEX_ERROR_LINE_RE = re.compile(r"^\s*(?:ERROR|Error|error)\b.*$|^.*(?:stream error|unexpected status|stream disconnected).*$",
+                                 re.M)
+CODEX_ERROR_TAIL_LINES = 200
+# codex のログの見出しの `model: <名前>` (実効のモデル)
+CODEX_MODEL_RE = re.compile(r"^model:\s*(\S+)\s*$", re.M)
+# claude の api_error_status → unavailable の型
+CLAUDE_UNAVAILABLE_STATUS = {429: "rate_limit", 529: "overloaded", 503: "overloaded", 401: "auth", 403: "auth"}
+
+# 段ごとの必須の項目。「結論:」は行頭の `**`・`-`・`#`・`>` を許す (`**結論: …**` の記録が既存にある)
+CONCLUSION_RE = re.compile(r"^[ \t>*#\-]*\**[ \t]*結論[ \t]*\**[ \t]*[:：][ \t]*(.+)$", re.M)
+# 指摘数は最後の行を取る (本文中の例文 `指摘数: Critical 1 / …` を拾わない。result 段レビュー 2026-10-14 指摘 1)
+COUNTS_RE = re.compile(r"指摘数\s*[:：]\s*Critical\s*(\d+)\s*/\s*Major\s*(\d+)\s*/\s*Minor\s*(\d+)")
+# 判定の行 (同 指摘 1): 本文で最初に一致した語は取らない (「GO は不適切です。」の後の「判定: NO-GO」を GO と読んだ)。
+# 行頭の `**`・`#`・空白を許し、行には判定の語だけ (前後の `**`・行末の句点は可)。コードブロックの外の行だけを見る。
+#   VERDICT_LINE_RE: `**判定: GO**`・`## 判定: **NO-GO**`・`**判定：GO**` (既存の codex の記録 155 件)
+#   VERDICT_BARE_RE: 判定の語だけの行 `**NO-GO**` (既存の codex の記録 32 件。旧プロンプト「冒頭に **判定 (…)**」の書き方)
+VERDICT_WORD = r"(GO-with-changes|NO-GO|GO)"
+VERDICT_LINE_RE = re.compile(r"^[ \t#*]*判定[ \t*]*[:：][ \t*]*" + VERDICT_WORD + r"[ \t*]*[。.]?[ \t]*$")
+VERDICT_BARE_RE = re.compile(r"^[ \t#*]*" + VERDICT_WORD + r"[ \t*]*[。.]?[ \t]*$")
+FENCE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+# 「証拠不足: <要るもの>」の行 → incomplete。「証拠不足: 無し」は数えない (ただし証拠の欄の代わりにもならない)
+INSUFFICIENT_RE = re.compile(r"^[ \t>*\-]*\**[ \t]*証拠不足[ \t]*\**[ \t]*[:：][ \t]*(.*)$", re.M)
+INSUFFICIENT_NONE_RE = re.compile(r"^\**\s*(?:無し|なし|特になし|特に無し|該当なし|該当無し|none|n/?a|-)\s*\**\s*[。.]?$", re.I)
+# 証拠の欄 (必須、同 指摘 2): 「証拠: 足りる」の行が無ければ incomplete。値は「足りる」(行末の句点・括弧の注は可) だけを数える
+# (「証拠: 足りない」「証拠: 足りる | 証拠不足: …」(書式の写し) は数えない)
+EVIDENCE_RE = re.compile(r"^[ \t>*#\-`]*証拠[ \t*`]*[:：][ \t*`]*(.*)$", re.M)
+EVIDENCE_OK_RE = re.compile(r"^足りる[。.]?(?:[ \t]*[(（][^()（）]*[)）])?[。.]?$")
 
 COMMON_HEADER = """forge (自作の圧縮性 FVM ソルバ。CUDA/float32、cell 中心と node 中心 median-dual の 2 離散化、現在は node 主体。
 SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称、ノズル設計ツール design/forge_design を含む) の
@@ -136,7 +225,11 @@ DIAG_OUTPUT = """## 出力形式 (この形のまま)
 やらない方がよいこと: <呼び出し側が取りそうな誤った一手>
 呼び出し側の前提への異議: <ブリーフの枠組み・除外判断・指標の定義で受け入れなかったものと理由。無ければ「無し」>
 不足情報: <あれば>
+証拠: 足りる | 証拠不足: <要るもの>
 ```
+最後の行 (証拠の欄) は必須で、どちらか一方だけを書く: 結論を出すのに要る証拠がそろっていれば `証拠: 足りる`、
+足りなければ代わりに `証拠不足: <要るもの>` を足りないものごとに 1 行 (この行があると諮問は不成立として扱われる)。
+`不足情報:` は結論を妨げない追加の希望の欄で、それだけでは不成立にしない。
 設計判断・採否を諮られた場合は、上の前に「採否表 (指摘ごとに 採用/却下/要再検証 と理由)」を置いてよい。
 """
 
@@ -187,11 +280,598 @@ def build_prompt(plan_path, stage, base, extras, focus):
             parts.append(f"## 参考: `{rel}` (ディレクトリ。中を自分で読むこと)\n")
     parts.append(
         "## 出力形式\n\n"
-        "1. 冒頭に **判定 (GO / GO-with-changes / NO-GO)** と 3 行以内の要約。\n"
+        "1. 冒頭に `判定: <GO / GO-with-changes / NO-GO のどれか 1 語>` の 1 行 (この行には判定の語だけを書く) と 3 行以内の要約。\n"
         "2. 指摘一覧 (Critical → Major → Minor の順、番号付き。各項目に根拠と対案)。\n"
         "3. 推奨 (1 つに絞る)。\n"
-        "4. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。\n")
+        "4. 証拠の欄 (必須): 判定に要る証拠 (diff・run の VERDICT・数値) がそろっていれば `証拠: 足りる` の 1 行。"
+        "足りなければ代わりに `証拠不足: <要るもの>` を足りないものごとに 1 行 (この行があるとレビューは不成立として扱われる)。\n"
+        "5. 末尾に `指摘数: Critical N / Major N / Minor N` の 1 行。\n")
     return "\n".join(parts)
+
+
+def git_raw(*args, timeout=None):
+    """git を ROOT で走らせ (rc, stdout, stderr) を返す (strip しない。証拠一式用)。
+    timeout は rc 124、起動できないときは rc 127 (stderr に理由)。"""
+    timeout = EVIDENCE_GIT_TIMEOUT if timeout is None else timeout
+    try:
+        p = subprocess.run(["git", *args], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=timeout, errors="replace")
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout {timeout}s (打ち切り)"
+    except OSError as e:
+        return 127, "", f"git を起動できない: {e}"
+
+
+def rel_or_abs(path):
+    """ROOT の中なら ROOT からの相対パス、外なら絶対パス。"""
+    path = os.path.abspath(path)
+    rel = os.path.relpath(path, ROOT)
+    return path if rel.startswith("..") else rel
+
+
+def cli_version(cmd):
+    try:
+        p = subprocess.run([cmd, "--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+        out = (p.stdout or p.stderr).strip().splitlines()
+        return out[0].strip() if out else "不明"
+    except Exception:
+        return "不明"
+
+
+def read_switch():
+    """スイッチ ~/.config/forge/diagnose-backend の中身 (無ければ "")。"""
+    path = os.path.expanduser(SWITCH_FILE)
+    try:
+        return read(path).strip().lower()
+    except OSError:
+        return ""
+
+
+def match_unavailable(text):
+    """エラーの文 → unavailable の型 (当たらなければ "")。"""
+    for kind, rx in UNAVAILABLE_PATTERNS:
+        if rx.search(text or ""):
+            return kind
+    return ""
+
+
+def excerpt(text, n=300):
+    text = " ".join((text or "").split())
+    return text if len(text) <= n else text[:n] + " …"
+
+
+def lines_outside_fences(text):
+    """コードブロック (``` / ~~~ で囲んだ範囲) の外の行。本文中の例文・引用の行を判定の行として拾わない。
+    閉じていないコードブロックは最後までブロックとみなす (拾い損ねは incomplete に倒れる)。"""
+    out, fence = [], ""
+    for ln in text.splitlines():
+        m = FENCE_RE.match(ln)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                    and not ln.strip()[len(m.group(1)):].strip():
+                fence = ""
+            continue
+        if m:
+            fence = m.group(1)
+            continue
+        out.append(ln)
+    return out
+
+
+def extract_verdicts(text):
+    """明示の判定の行 (コードブロックの外) の判定の語を本文の順に返す。"""
+    vals = []
+    for ln in lines_outside_fences(text):
+        m = VERDICT_LINE_RE.match(ln) or VERDICT_BARE_RE.match(ln)
+        if m:
+            vals.append(m.group(1))
+    return vals
+
+
+def classify_body(stage, text):
+    """判定役の最終メッセージ → (分類 ok/incomplete, 理由, 抽出した項目)。codex・claude 共通。"""
+    info = {}
+    missing = []
+    conflict = ""
+    if stage == "diagnose":
+        m = CONCLUSION_RE.search(text)
+        info["conclusion"] = m.group(1).strip().strip("*").strip() if m else "?"
+        if not m:
+            missing.append("「結論:」の行")
+    else:
+        counts = COUNTS_RE.findall(text)
+        info["counts"] = "C{}/M{}/m{}".format(*counts[-1]) if counts else "C?/M?/m?"
+        if not counts:
+            missing.append("「指摘数: Critical n / Major n / Minor n」の行")
+        verdicts = extract_verdicts(text)
+        distinct = list(dict.fromkeys(verdicts))
+        info["verdict"] = distinct[0] if len(distinct) == 1 else "?"
+        if not distinct:
+            missing.append("判定の行 (`判定: GO / GO-with-changes / NO-GO`)")
+        elif len(distinct) > 1:
+            conflict = "判定の行が相反する: " + " / ".join(distinct)
+    lacks = [x.strip() for x in INSUFFICIENT_RE.findall(text) if not INSUFFICIENT_NONE_RE.match(x.strip())]
+    if lacks:
+        return "incomplete", "証拠不足: " + " / ".join(excerpt(x, 120) or "(内容なし)" for x in lacks), info
+    if conflict:
+        return "incomplete", conflict, info
+    if not any(EVIDENCE_OK_RE.match(v.strip().strip("*` \t")) for v in EVIDENCE_RE.findall(text)):
+        missing.append("証拠の欄 (「証拠: 足りる」、足りなければ「証拠不足: <要るもの>」)")
+    if missing:
+        return "incomplete", "必須の項目が無い: " + "・".join(missing), info
+    return "ok", "", info
+
+
+class Attempt:
+    """判定役 1 回の試行の結果。"""
+
+    def __init__(self, backend, log):
+        self.backend = backend
+        self.log = log
+        self.cls = ""            # ok / unavailable / failed / incomplete
+        self.kind = ""           # unavailable の型 (cli_missing / timeout / empty / usage_limit / rate_limit / overloaded / auth)
+        self.detail = ""         # 分類の理由 (1 行)
+        self.result = ""         # 最終メッセージ
+        self.info = {}           # 結論 / 判定・指摘数
+        self.rc = None
+        self.dt = 0.0
+        self.requested_model = ""
+        self.effective_model = "不明"
+        self.model_usage = {}
+        self.cli_version = "不明"
+        self.permission_denials = None
+        self.cost_usd = None
+        self.evidence_dir = ""
+        self.ran = False         # CLI を起動したか
+        self.phase = ""          # 子を起動する前に親の段で止まったときの段 (例: 証拠一式)
+
+    def label(self):
+        return self.cls + (f"/{self.kind}" if self.kind else "") + (f": {self.phase}" if self.phase else "")
+
+
+def run_codex(a, prompt, name, out_dir):
+    """codex exec を 1 回 (今までの起動作法のまま)。"""
+    at = Attempt("codex", os.path.join(out_dir, name + ".codex.log"))
+    at.requested_model = a.model or "既定 (~/.codex/config.toml)"
+    if not shutil.which("codex"):
+        with open(at.log, "w", encoding="utf-8") as lf:
+            lf.write("[codex_review] codex CLI が PATH に無い (~/.local/bin/codex)\n")
+        at.cls, at.kind, at.detail = "unavailable", "cli_missing", "codex CLI が PATH に無い"
+        return at
+    at.cli_version = cli_version("codex")
+    last_msg = os.path.join(out_dir, name + ".last.txt")
+    cmd = ["codex", "exec", "--sandbox", "read-only", "-C", ROOT, "--color", "never",
+           "-c", f'model_reasoning_effort="{a.effort}"', "-o", last_msg]
+    if a.model:
+        cmd += ["-m", a.model]
+    # **長いプロンプトは引数で渡せない** (2026-09-20)。plan が育つと `execve` の
+    # 引数長上限に当たり `OSError: [Errno 7] Argument list too long` で落ちる
+    # (case/49 の plan で 142 kB)。上限に近ければ**ファイルに落として読ませる**。
+    # codex は read-only サンドボックスでもリポジトリ内のファイルを読める。
+    if len(prompt.encode()) > PROMPT_ARG_MAX_BYTES:
+        prompt_file = os.path.join(out_dir, name + ".prompt.md")
+        with open(prompt_file, "w", encoding="utf-8") as pf:
+            pf.write(prompt)
+        rel = os.path.relpath(prompt_file, ROOT)
+        cmd.append("レビュー依頼の全文は `%s` にある。**まずこのファイルを読み**、"
+                   "その指示どおりにレビューして結果を出力せよ。"
+                   "(プロンプトが %d kB と長く引数で渡せないためファイル渡しにしている)"
+                   % (rel, len(prompt.encode()) // 1024))
+        print("  prompt: %s (%d kB, 引数長上限のためファイル渡し)"
+              % (rel, len(prompt.encode()) // 1024))
+    else:
+        cmd.append(prompt)
+    print(f"  codex : log {rel_or_abs(at.log)}  (進捗はこのファイルのサイズ、または ~/.codex/sessions/ の rollout jsonl で確認)")
+    sys.stdout.flush()
+
+    t0 = datetime.datetime.now()
+    timed_out = False
+    with open(at.log, "w", encoding="utf-8") as lf:
+        lf.write("$ " + " ".join(cmd[:-1]) + " '<prompt>'\n\n")
+        lf.flush()
+        try:
+            p = subprocess.run(cmd, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT,
+                               timeout=a.timeout)
+            rc = p.returncode
+        except subprocess.TimeoutExpired:
+            lf.write(f"\n[codex_review] timeout {a.timeout}s\n")
+            rc = 124
+            timed_out = True
+    at.ran = True
+    at.rc = rc
+    at.dt = (datetime.datetime.now() - t0).total_seconds()
+    at.result = read(last_msg).strip() if os.path.exists(last_msg) else ""
+    if os.path.exists(last_msg):
+        os.remove(last_msg)
+    log_text = read(at.log) if os.path.exists(at.log) else ""
+    m = CODEX_MODEL_RE.search("\n".join(log_text.splitlines()[:40]))
+    if m:
+        at.effective_model = m.group(1)
+
+    if timed_out:
+        at.cls, at.kind, at.detail = "unavailable", "timeout", f"timeout {a.timeout}s"
+    elif rc != 0 or not at.result:
+        # 失敗した試行だけ、ログの末尾のエラー行で型を見分ける
+        tail = "\n".join(log_text.splitlines()[-CODEX_ERROR_TAIL_LINES:])
+        err = "\n".join(x.group(0).strip() for x in CODEX_ERROR_LINE_RE.finditer(tail))
+        kind = match_unavailable(err)
+        if kind:
+            at.cls, at.kind, at.detail = "unavailable", kind, excerpt(err.splitlines()[-1] if err else "")
+        elif not at.result:
+            at.cls, at.kind = "unavailable", "empty"
+            at.detail = f"最終メッセージが空 (rc={rc})" + (f": {excerpt(err.splitlines()[-1])}" if err else "")
+        else:
+            at.cls, at.detail = "failed", f"codex が rc={rc} で終わった" + (f": {excerpt(err.splitlines()[-1])}" if err else "")
+    else:
+        at.cls, at.detail, at.info = classify_body(a.stage, at.result)
+    return at
+
+
+def build_evidence(ev_dir, stage, base, diff_max_bytes=EVIDENCE_DIFF_MAX_BYTES):
+    """claude に渡す証拠一式を ev_dir に書く (plan §4.2 入力の契約)。
+
+    全段: head.txt (HEAD・ブランチ)。result 段: diff_stat.txt・diff.patch・log.txt。
+    diff が diff_max_bytes を超えたら、優先パス → 変更行数の多い順にファイル単位で入れ、入らなかったファイルは README.md に列挙する
+    (意図した省略。errors には入れない)。
+    result 段の必須の git の取得 (diff --stat・log・diff) が失敗 (非 0・timeout) したら、そこで止めて errors に入れる
+    (呼び出し側は子を起動せずに failed: 証拠一式 で終わる。result 段レビュー 2026-10-14 指摘 3)。
+    返り値: {"files": [(名前, 説明)], "stat_inline": プロンプトに直に入れる stat, "notes": [注記], "errors": [取得の失敗]}
+    """
+    os.makedirs(ev_dir, exist_ok=True)
+    files, notes, errors = [], [], []
+    head = git("rev-parse", "HEAD")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    subject = git("log", "-1", "--format=%s")
+    with open(os.path.join(ev_dir, "head.txt"), "w", encoding="utf-8") as f:
+        f.write(f"HEAD: {head or '(取れない)'}\nbranch: {branch or '(取れない)'}\nsubject: {subject}\n")
+    files.append(("head.txt", "HEAD のコミット・ブランチ (`git rev-parse HEAD` / `--abbrev-ref HEAD`)"))
+    stat_inline = ""
+    if stage == "result":
+        got = {}
+        for key, args in (("stat", ("diff", "--stat=200", f"{base}...HEAD")), ("log", ("log", "--oneline", f"{base}..HEAD")),
+                          ("diff", ("diff", f"{base}...HEAD"))):
+            rc, out, err = git_raw(*args)
+            if rc != 0:   # 1 つ失敗したら残りは取らない (timeout を重ねない)
+                errors.append(f"`git {' '.join(args)}` が失敗 (rc={rc}): {excerpt(err, 200) or '(stderr なし)'}")
+                break
+            got[key] = out
+    if errors:
+        with open(os.path.join(ev_dir, "README.md"), "w", encoding="utf-8") as f:
+            f.write("# 証拠一式 (codex_review.py が作成)\n\n"
+                    f"- stage: `{stage}` (diff base `{base}`)\n\n"
+                    "## 取得の失敗 (必須の git の取得に失敗したので claude を起動しなかった)\n\n"
+                    + "\n".join(f"- {e}" for e in errors) + "\n")
+        return {"files": files, "stat_inline": "", "notes": notes, "errors": errors}
+    if stage == "result":
+        stat, log, diff = got["stat"], got["log"], got["diff"]
+        with open(os.path.join(ev_dir, "diff_stat.txt"), "w", encoding="utf-8") as f:
+            f.write(stat)
+        files.append(("diff_stat.txt", f"`git diff --stat {base}...HEAD`"))
+        with open(os.path.join(ev_dir, "log.txt"), "w", encoding="utf-8") as f:
+            f.write(log)
+        files.append(("log.txt", f"`git log --oneline {base}..HEAD`"))
+        size = len(diff.encode())
+        if size <= diff_max_bytes:
+            with open(os.path.join(ev_dir, "diff.patch"), "w", encoding="utf-8") as f:
+                f.write(diff)
+            files.append(("diff.patch", f"`git diff {base}...HEAD` (全文, {size // 1024} KiB)"))
+        else:
+            kept, dropped = truncate_diff(diff, diff_max_bytes)
+            with open(os.path.join(ev_dir, "diff.patch"), "w", encoding="utf-8") as f:
+                f.write("".join(c for _, c, _ in kept))
+            files.append(("diff.patch", f"`git diff {base}...HEAD` を切ったもの ({len(kept)} ファイル。全文 {size // 1024} KiB は"
+                                        f"上限 {diff_max_bytes // 1024} KiB を超える。入らなかったファイルは README.md)"))
+            notes.append(f"diff は上限 {diff_max_bytes // 1024} KiB を超えた ({size // 1024} KiB) ので、"
+                         f"{', '.join(EVIDENCE_DIFF_PRIORITY)} → その他 の順・変更行数の多い順にファイル単位で入れた。"
+                         f"入らなかった {len(dropped)} ファイルは下に列挙 (今の作業ツリーの中身は Read で読める)")
+            notes += [f"  - 省略: `{p}` ({len(c.encode()) // 1024} KiB, 変更 {n} 行)" for p, c, n in dropped]
+        b = stat.encode()
+        if len(b) <= EVIDENCE_STAT_INLINE_MAX_BYTES:
+            stat_inline = stat
+        else:
+            lines = stat.splitlines()
+            keep, total = [], 0
+            for ln in lines[:-1]:
+                total += len(ln.encode()) + 1
+                if total > EVIDENCE_STAT_INLINE_MAX_BYTES:
+                    break
+                keep.append(ln)
+            stat_inline = "\n".join(keep + [f" ... (残り {len(lines) - 1 - len(keep)} ファイルは diff_stat.txt)",
+                                             lines[-1] if lines else ""]) + "\n"
+    with open(os.path.join(ev_dir, "README.md"), "w", encoding="utf-8") as f:
+        f.write("# 証拠一式 (codex_review.py が作成。子の claude は Read・Grep・Glob しか持たないので、git の情報はここで渡す)\n\n")
+        f.write(f"- stage: `{stage}`" + (f" (diff base `{base}`)" if stage == "result" else "") + "\n")
+        for fn, desc in files:
+            f.write(f"- `{fn}`: {desc}\n")
+        if notes:
+            f.write("\n## 注記\n\n" + "\n".join(n if n.startswith("  ") else f"- {n}" for n in notes) + "\n")
+    files.insert(0, ("README.md", "この証拠一式の目次と注記 (切った差分の一覧)"))
+    return {"files": files, "stat_inline": stat_inline, "notes": notes, "errors": errors}
+
+
+def truncate_diff(diff, max_bytes):
+    """git diff の全文をファイル単位に分け、優先パス → 変更行数の多い順に max_bytes まで入れる。
+    返り値: (入れた [(パス, 差分, 変更行数)] (元の順), 入らなかった [(パス, 差分, 変更行数)])"""
+    chunks = re.split(r"(?m)^(?=diff --git )", diff)
+    items = []
+    for i, c in enumerate(chunks):
+        if not c.startswith("diff --git "):
+            continue
+        first = c.split("\n", 1)[0]
+        path = first.rsplit(" b/", 1)[-1] if " b/" in first else first[len("diff --git "):]
+        n = sum(1 for ln in c.splitlines() if (ln.startswith("+") and not ln.startswith("+++"))
+                or (ln.startswith("-") and not ln.startswith("---")))
+        grp = next((k for k, pre in enumerate(EVIDENCE_DIFF_PRIORITY) if path.startswith(pre)), len(EVIDENCE_DIFF_PRIORITY))
+        items.append((grp, -n, i, path, c, n))
+    kept, dropped, total = [], [], 0
+    for grp, _, i, path, c, n in sorted(items):
+        sz = len(c.encode())
+        if total + sz <= max_bytes:
+            kept.append((i, path, c, n))
+            total += sz
+        else:
+            dropped.append((path, c, n))
+    kept.sort()
+    return [(p, c, n) for _, p, c, n in kept], dropped
+
+
+def claude_preface(ev_rel, ev, stage, base):
+    """claude に渡すプロンプトの前書き (codex と同じプロンプトの前に置く。plan §4.2)。"""
+    lines = [
+        "## この依頼の前書き (Claude の別インスタンス向け。下の本文の指示より優先する)",
+        "",
+        "- あなたは codex の代わりにこの依頼を受けている、**依頼側と文脈を共有しない Claude の別インスタンス**である。"
+        "cwd はリポジトリのルート。",
+        "- **道具は Read・Grep・Glob だけ**。シェル・git・python は使えず、ファイルを変更することもできない "
+        "(本文の「読む・実行して確認するのは可」「`git diff` を自分で取り」「`python3` で統計量を出す」は、次の読み替えに従う)。",
+        f"- **git の情報 (HEAD・ブランチ・差分・履歴) は証拠一式 `{ev_rel}/` のファイルにある**:",
+    ]
+    lines += [f"  - `{ev_rel}/{fn}`: {desc}" for fn, desc in ev["files"]]
+    lines += [
+        "- `sed -n 'A,Bp' f` のような行範囲の指示は、Read の offset/limit (offset=A, limit=B−A+1) で読む。長いファイルは分けて読む。",
+        "- 実行しないと得られない数値 (HDF5 の統計・判定ツールの出力など) は、ブリーフ・証拠一式・リポジトリの既存のファイル "
+        "(`CONVERGENCE_VERDICT.txt` など) にあるものだけを根拠にする。",
+        "- 依頼側 (この依頼を書いたモデル) は**あなたと同じ系統のモデルかもしれない**。依頼側の結論・仮説・「除外済み」に同調せず、"
+        "根拠の行 (`ファイル:行`) を自分で読んで確かめてから採る。確かめられないものは採らない。",
+        "- 判定に要る証拠が足りなければ、推測で埋めずに `証拠不足: <要るもの>` の行を (足りないものごとに) 出す。"
+        "この行があると、この依頼は不成立 (incomplete) として扱われる。足りているときは `証拠: 足りる` の行を書く "
+        "(本文の出力形式の証拠の欄。どちらか一方は必須で、無いと不成立)。",
+        "- 出力の形式は本文の「出力形式」に従う。",
+    ]
+    if stage == "result" and ev.get("stat_inline"):
+        lines += ["", f"### `git diff --stat {base}...HEAD` (証拠一式 `diff_stat.txt` と同じ)", "", "```",
+                  ev["stat_inline"].rstrip("\n"), "```"]
+    return "\n".join(lines) + "\n\n---\n\n"
+
+
+def managed_policy():
+    found = [p for p in MANAGED_SETTINGS_PATHS if os.path.exists(p)]
+    return ("有り: " + ", ".join(f"`{p}`" for p in found) + " (--safe-mode でも効く)") if found else \
+        "無し (" + ", ".join(f"`{p}`" for p in MANAGED_SETTINGS_PATHS) + " が無い)"
+
+
+def run_claude(a, prompt, name, out_dir):
+    """claude -p を 1 回 (文脈を分けた別インスタンス、道具は Read・Grep・Glob だけ)。"""
+    at = Attempt("claude", os.path.join(out_dir, name + ".claude.log"))
+    at.requested_model = a.claude_model
+    if not shutil.which("claude"):
+        with open(at.log, "w", encoding="utf-8") as lf:
+            lf.write("[codex_review] claude CLI が PATH に無い (~/.local/bin/claude)\n")
+        at.cls, at.kind, at.detail = "unavailable", "cli_missing", "claude CLI が PATH に無い"
+        return at
+    at.cli_version = cli_version("claude")
+    at.evidence_dir = os.path.join(out_dir, name + ".evidence")
+    ev = build_evidence(at.evidence_dir, a.stage, a.base)
+    ev_rel = rel_or_abs(at.evidence_dir)
+    if ev["errors"]:
+        # 必須の証拠が取れない → 子の自己申告に委ねず、親が未成立で止める (result 段レビュー 2026-10-14 指摘 3)
+        with open(at.log, "w", encoding="utf-8") as lf:
+            lf.write("[codex_review] 証拠一式の必須の git の取得に失敗したので claude を起動しなかった\n"
+                     + "\n".join(ev["errors"]) + "\n")
+        at.cls, at.phase = "failed", "証拠一式"
+        at.detail = "必須の git の取得に失敗 (claude は起動しない): " + "; ".join(ev["errors"])
+        print(f"  claude: 証拠一式の取得に失敗 → 起動しない ({rel_or_abs(at.log)})")
+        return at
+    full = claude_preface(ev_rel, ev, a.stage, a.base) + prompt
+
+    cmd = ["claude", "-p", "--safe-mode", "--model", a.claude_model, "--effort", CLAUDE_EFFORT[a.effort],
+           "--tools", CLAUDE_TOOLS, "--permission-mode", "default", "--no-session-persistence", "--strict-mcp-config"]
+    if rel_or_abs(out_dir) == os.path.abspath(out_dir):
+        # 記録の置き場がリポジトリの外 (試験など) なら、証拠一式・プロンプトを読めるようにする
+        cmd += ["--add-dir", os.path.abspath(out_dir)]
+    cmd += ["--output-format", "json"]
+    if len(full.encode()) > PROMPT_ARG_MAX_BYTES:
+        prompt_file = os.path.join(out_dir, name + ".claude.prompt.md")
+        with open(prompt_file, "w", encoding="utf-8") as pf:
+            pf.write(full)
+        rel = rel_or_abs(prompt_file)
+        cmd.append("依頼の全文は `%s` にある。**まずこのファイルを Read で最後まで読み** (長いので offset/limit で分けて)、"
+                   "その指示どおりに結果を出力せよ。道具は Read・Grep・Glob だけ。"
+                   "(プロンプトが %d kB と長く引数で渡せないためファイル渡しにしている)"
+                   % (rel, len(full.encode()) // 1024))
+        print("  prompt: %s (%d kB, 引数長上限のためファイル渡し)" % (rel, len(full.encode()) // 1024))
+    else:
+        cmd.append(full)
+    print(f"  claude: log {rel_or_abs(at.log)}  evidence {ev_rel}/  model {a.claude_model}")
+    sys.stdout.flush()
+
+    t0 = datetime.datetime.now()
+    timed_out = False
+    stderr = ""
+    with open(at.log, "w", encoding="utf-8") as lf:
+        lf.write("$ " + " ".join(cmd[:-1]) + " '<prompt>'\n\n")
+        lf.flush()
+        out_start = os.lseek(lf.fileno(), 0, os.SEEK_CUR)   # ここから子の stdout (JSON)
+        try:
+            p = subprocess.run(cmd, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.PIPE,
+                               text=True, errors="replace", timeout=a.timeout)
+            rc, stderr = p.returncode, p.stderr or ""
+        except subprocess.TimeoutExpired as e:
+            rc, timed_out = 124, True
+            stderr = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        out_end = os.lseek(lf.fileno(), 0, os.SEEK_CUR)
+        lf.write("\n[stderr]\n" + stderr + ("\n" if stderr and not stderr.endswith("\n") else ""))
+        if timed_out:
+            lf.write(f"[codex_review] timeout {a.timeout}s\n")
+    at.ran = True
+    at.rc = rc
+    at.dt = (datetime.datetime.now() - t0).total_seconds()
+
+    with open(at.log, "rb") as f:
+        f.seek(out_start)
+        out = f.read(max(out_end - out_start, 0)).decode("utf-8", errors="replace")
+    data = None
+    try:   # stdout 全体が 1 つの JSON (整形されていてもよい)
+        data = json.loads(out)
+    except ValueError:   # 前後に余計な行があれば、`{` で始まる行を後ろから探す
+        for ln in reversed(out.splitlines()):
+            if ln.startswith("{"):
+                try:
+                    data = json.loads(ln)
+                    break
+                except ValueError:
+                    continue
+    if isinstance(data, dict):
+        at.result = (data.get("result") or "").strip() if isinstance(data.get("result"), str) else ""
+        at.model_usage = data.get("modelUsage") or {}
+        if at.model_usage:
+            at.effective_model = max(at.model_usage, key=lambda k: (at.model_usage[k] or {}).get("outputTokens", 0))
+        at.permission_denials = data.get("permission_denials")
+        at.cost_usd = data.get("total_cost_usd")
+
+    if timed_out:
+        at.cls, at.kind, at.detail = "unavailable", "timeout", f"timeout {a.timeout}s"
+    elif not isinstance(data, dict):
+        kind = match_unavailable(stderr + "\n" + out)
+        if kind:
+            at.cls, at.kind, at.detail = "unavailable", kind, excerpt((stderr or out).strip().splitlines()[-1])
+        else:
+            at.cls, at.detail = "failed", f"claude の JSON が読めない (rc={rc})" + (f": {excerpt(stderr)}" if stderr.strip() else "")
+    elif data.get("is_error"):
+        status = data.get("api_error_status")
+        kind = CLAUDE_UNAVAILABLE_STATUS.get(status if isinstance(status, int) else -1, "") \
+            or match_unavailable(f"{data.get('result') or ''}\n{stderr}")
+        msg = excerpt(f"{data.get('subtype', '')}: {data.get('result') or ''}" + (f" (api_error_status {status})" if status else ""))
+        if kind:
+            at.cls, at.kind, at.detail = "unavailable", kind, msg
+        else:
+            at.cls, at.detail = "failed", f"claude が is_error で終わった (rc={rc}): {msg}"
+    elif rc != 0:
+        at.cls, at.detail = "failed", f"claude が rc={rc} で終わった" + (f": {excerpt(stderr)}" if stderr.strip() else "")
+    elif not at.result:
+        at.cls, at.kind, at.detail = "unavailable", "empty", "最終メッセージ (result) が空"
+    else:
+        at.cls, at.detail, at.info = classify_body(a.stage, at.result)
+    return at
+
+
+def requester_relation(requester, at):
+    """依頼側との関係 (同一 / 別 / 不明)。--requester-model を渡されたときだけ判定し、推測で埋めない。"""
+    if not requester:
+        return "不明 (`--requester-model` 未指定)"
+    eff = at.effective_model
+    if not eff or eff == "不明":
+        return f"不明 (依頼側 `{requester}`、実効のモデルが取れない)"
+    r, e = requester.strip().lower(), eff.lower()
+    if r == e:
+        return f"同一 (依頼側 `{requester}` = 実効 `{eff}`)"
+    if r in ("opus", "sonnet", "haiku", "fable") and r in re.split(r"[-_.]", e):
+        return f"同一 (依頼側の別名 `{requester}` が実効 `{eff}` に一致)"
+    claude_like = lambda s: "claude" in s or any(t in re.split(r"[-_.]", s) for t in ("opus", "sonnet", "haiku", "fable"))
+    same_family = " (同じ Claude 系統)" if claude_like(r) and claude_like(e) else ""
+    return f"別 (依頼側 `{requester}`、実効 `{eff}`){same_family}"
+
+
+def write_record(a, ctx, attempts, reason):
+    """記録の md を書く。返り値: 最終の試行。"""
+    final = attempts[-1]
+    claude = final.backend == "claude"
+    stage, stem = a.stage, ctx["stem"]
+    if stage == "diagnose":
+        title = f"# {'Claude 代替諮問' if claude else 'codex 諮問'} (diagnose): {stem}"
+    else:
+        title = f"# {'Claude 代替レビュー' if claude else 'codex レビュー'}: {stem} ({stage})"
+    L = []
+    if final.cls != "ok":
+        state = final.cls + (f": {final.phase}" if final.phase else "")
+        L += [f"**未成立 ({state})** — {final.label()}: {final.detail}", ""]
+    L += [title, ""]
+    if claude:
+        L += ["> **Claude の別インスタンスによる代替** (独立性は文脈の分離だけ。依頼側と同じ系統のモデルでありうる; "
+              "codex・Fable と別系統の判定ではない)", ""]
+    plan_rel, brief_rel = ctx["plan_rel"], ctx["brief_rel"]
+    if stage == "diagnose":
+        L.append(f"- **brief**: [`{brief_rel}`](../../{brief_rel})")
+        if plan_rel:
+            L.append(f"- **plan**: [`{plan_rel}`](../../{plan_rel})")
+    else:
+        L.append(f"- **plan**: [`{plan_rel}`](../../{plan_rel})")
+        L.append(f"- **stage**: `{stage}`" + (f" (diff base `{a.base}`)" if stage == "result" else ""))
+    L.append(f"- **date**: {ctx['today']}")
+    L.append(f"- **commit**: `{ctx['head']}` ({ctx['branch']})")
+    L.append(f"- **分類**: `{final.cls}`" + (f" ({final.kind})" if final.kind else ""))
+    L.append(f"- **backend**: `{final.backend}` — 選んだ理由: {reason}")
+    L.append(f"- **要求したモデル**: `{final.requested_model}`")
+    eff = final.effective_model
+    if claude and final.model_usage:
+        eff_s = f"`{eff}` (modelUsage: " + ", ".join(
+            f"`{k}` out {(v or {}).get('outputTokens', '?')}" for k, v in final.model_usage.items()) + ")"
+    else:
+        eff_s = f"`{eff}`" if eff != "不明" else "不明"
+        if not claude and eff != "不明":
+            eff_s += " (codex のログの見出し)"
+    L.append(f"- **実効のモデル**: {eff_s}")
+    L.append(f"- **CLI の版**: `{final.cli_version}`")
+    L.append(f"- **依頼側との関係**: {requester_relation(a.requester_model, final)}")
+    if claude:
+        pd = final.permission_denials
+        if pd is None:
+            L.append("- **permission_denials**: 不明 (JSON が取れない)")
+        elif not pd:
+            L.append("- **permission_denials**: 0 件")
+        else:
+            L.append(f"- **permission_denials**: {len(pd)} 件 — " + "; ".join(
+                excerpt(f"{d.get('tool_name', '?')} {json.dumps(d.get('tool_input', {}), ensure_ascii=False)}", 160)
+                if isinstance(d, dict) else excerpt(str(d), 160) for d in pd))
+        L.append(f"- **道具**: `{CLAUDE_TOOLS}` (`--safe-mode`、Bash なし) / 管理ポリシー: {managed_policy()}")
+    else:
+        L.append("- **permission_denials**: 対象外 (codex は read-only サンドボックス)")
+    run = f"- **実行**: effort `{a.effort}`" + (f", model `{a.model}`" if (a.model and not claude) else "")
+    run += f", {final.dt / 60:.1f} min, rc={final.rc if final.rc is not None else '-'}"
+    if claude and final.cost_usd is not None:
+        run += f", total_cost_usd {final.cost_usd:.4f}"
+    L.append(run)
+    L.append("- **試行のログ**: " + ", ".join(f"`{rel_or_abs(t.log)}` ({t.backend}: {t.label()})" for t in attempts))
+    if claude and final.evidence_dir:
+        L.append(f"- **証拠一式**: `{rel_or_abs(final.evidence_dir)}/` (git 追跡外)")
+    if stage == "diagnose":
+        L.append(f"- **結論**: {final.info.get('conclusion', '?')}")
+    else:
+        L.append(f"- **判定**: **{final.info.get('verdict', '?')}**, 指摘 {final.info.get('counts', 'C?/M?/m?')}")
+    if a.focus:
+        L.append(f"- **focus**: {a.focus}")
+    if a.extra:
+        L.append(f"- **extra**: {', '.join('`' + os.path.relpath(os.path.abspath(e), ROOT) + '`' for e in a.extra)}")
+    who = "Claude の別インスタンスの最終メッセージ (JSON の `result`) " if claude else "codex の最終メッセージ"
+    L.append("")
+    if stage == "diagnose":
+        L.append(f"本文は {who}をそのまま転記。結論は**仮説**であり、提案 A/B で確かめる。"
+                 "採否・反映は plan 側 (§5.1 担当列 F の判断欄) に書く。")
+    else:
+        L.append(f"本文は {who}をそのまま転記 (指摘の採否と対応は plan 側の「レビュー記録」表と残作業表に書く)。")
+    L += ["", "---", ""]
+    body = final.result
+    if not body:
+        tails = []
+        for t in attempts:
+            txt = read(t.log) if os.path.exists(t.log) else ""
+            tails.append(f"### `{rel_or_abs(t.log)}` ({t.backend}: {t.label()}) の末尾\n\n```\n"
+                         + "\n".join(txt.splitlines()[-20:]) + "\n```")
+        body = "(本文なし)\n\n" + "\n\n".join(tails)
+    with open(ctx["out_md"], "w", encoding="utf-8") as f:
+        f.write("\n".join(L) + "\n" + body + "\n")
+    return final
 
 
 def main():
@@ -204,9 +884,16 @@ def main():
     ap.add_argument("--focus", default="", help="重点的に見てほしい点 (自由文)")
     ap.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh"],
                     help="model_reasoning_effort の上書き (~/.codex/config.toml は low なので既定で high に上げる。"
-                         "難所の diagnose は xhigh も可)")
+                         "難所の diagnose は xhigh も可)。claude にも同じ値を --effort で渡す")
     ap.add_argument("--model", default="", help="codex の model 上書き (既定は config.toml のもの)")
-    ap.add_argument("--timeout", type=int, default=1800, help="秒 (既定 1800)")
+    ap.add_argument("--backend", default="auto", choices=["auto", "codex", "claude"],
+                    help="判定役 (既定 auto: スイッチが claude なら claude、そうでなければ codex を試し unavailable なら claude)")
+    ap.add_argument("--claude-model", default="opus", help="claude の --model (既定 opus)")
+    ap.add_argument("--requester-model", default="",
+                    help="依頼側 (このスクリプトを呼んだモデル) の名前。渡したときだけ記録に 同一 / 別 を書く (無ければ「不明」)")
+    ap.add_argument("--name-suffix", default="",
+                    help="記録名の末尾に足す識別子 (例: claude → YYYY-MM-DD-<stem>-<stage>-claude.md。試験・同日の区別用)")
+    ap.add_argument("--timeout", type=int, default=1800, help="秒 (既定 1800、試行ごと)")
     ap.add_argument("--out-dir", default=OUT_DIR)
     ap.add_argument("--dry-run", action="store_true", help="プロンプトを表示して終了")
     a = ap.parse_args()
@@ -214,6 +901,7 @@ def main():
     plan_path = os.path.abspath(a.plan) if a.plan else ""
     if plan_path and not os.path.isfile(plan_path):
         sys.exit(f"plan が無い: {a.plan}")
+    brief_path = ""
     if a.stage == "diagnose":
         if not a.brief or not os.path.isfile(a.brief):
             sys.exit("diagnose には --brief <md> が要る (観測事実 / 期待値と出典 / 再現条件 / 実施済みの操作と結果 / 仮説)")
@@ -226,126 +914,88 @@ def main():
             sys.exit("plan / result 段には plan のパスが要る")
         prompt = build_prompt(plan_path, a.stage, a.base, a.extra, a.focus)
         stem = os.path.splitext(os.path.basename(plan_path))[0]
+
+    # 判定役の選択 (plan §4.1)
+    switch = read_switch()
+    if a.backend == "auto" and switch == "claude":
+        first, reason = "claude", f"スイッチ (`{SWITCH_FILE}` = `claude`)"
+    elif a.backend == "auto":
+        first, reason = "codex", "既定 (auto: codex を試し、unavailable のときだけ claude)"
+    else:
+        first, reason = a.backend, f"明示 (`--backend {a.backend}`)"
+
     if a.dry_run:
-        print(prompt)
+        if first == "claude":
+            ev = {"files": [("README.md", "(dry-run のため未作成)")], "stat_inline": ""}
+            print(claude_preface("notes/reviews/<記録名>.evidence", ev, a.stage, a.base) + prompt)
+        else:
+            print(prompt)
         return 0
 
-    if not shutil.which("codex"):
-        sys.exit("codex CLI が PATH に無い (~/.local/bin/codex)")
-
-    os.makedirs(a.out_dir, exist_ok=True)
+    out_dir = os.path.abspath(a.out_dir)
+    os.makedirs(out_dir, exist_ok=True)
     today = datetime.date.today().isoformat()
-    name = f"{today}-{stem}-{a.stage}"
+    base_name = f"{today}-{stem}-{a.stage}" + (f"-{a.name_suffix}" if a.name_suffix else "")
+    name = base_name
     k = 1
-    while os.path.exists(os.path.join(a.out_dir, name + ".md")):
+    while os.path.exists(os.path.join(out_dir, name + ".md")):
         k += 1
-        name = f"{today}-{stem}-{a.stage}-{k}"
-    out_md = os.path.join(a.out_dir, name + ".md")
-    out_log = os.path.join(a.out_dir, name + ".log")
-    last_msg = os.path.join(a.out_dir, name + ".last.txt")
-
-    cmd = ["codex", "exec", "--sandbox", "read-only", "-C", ROOT, "--color", "never",
-           "-c", f'model_reasoning_effort="{a.effort}"', "-o", last_msg]
-    if a.model:
-        cmd += ["-m", a.model]
-    # **長いプロンプトは引数で渡せない** (2026-09-20)。plan が育つと `execve` の
-    # 引数長上限に当たり `OSError: [Errno 7] Argument list too long` で落ちる
-    # (case/49 の plan で 142 kB)。上限に近ければ**ファイルに落として読ませる**。
-    # codex は read-only サンドボックスでもリポジトリ内のファイルを読める。
-    prompt_file = None
-    if len(prompt.encode()) > 96 * 1024:
-        prompt_file = os.path.join(a.out_dir, name + ".prompt.md")
-        with open(prompt_file, "w", encoding="utf-8") as pf:
-            pf.write(prompt)
-        rel = os.path.relpath(prompt_file, ROOT)
-        cmd.append("レビュー依頼の全文は `%s` にある。**まずこのファイルを読み**、"
-                   "その指示どおりにレビューして結果を出力せよ。"
-                   "(プロンプトが %d kB と長く引数で渡せないためファイル渡しにしている)"
-                   % (rel, len(prompt.encode()) // 1024))
-        print("  prompt: %s (%d kB, 引数長上限のためファイル渡し)"
-              % (rel, len(prompt.encode()) // 1024))
-    else:
-        cmd.append(prompt)
+        name = f"{base_name}-{k}"
+    out_md = os.path.join(out_dir, name + ".md")
 
     head = git("rev-parse", "--short", "HEAD")
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     target = os.path.relpath(plan_path, ROOT) if plan_path else "-"
-    print(f"codex review: stage={a.stage} plan={target} effort={a.effort}"
+    print(f"review: stage={a.stage} plan={target} effort={a.effort} backend={a.backend} ({reason})"
           + (f" brief={os.path.relpath(a.brief, ROOT)}" if a.brief else ""))
-    print(f"  log : {os.path.relpath(out_log, ROOT)}  (進捗はこのファイルのサイズ、または ~/.codex/sessions/ の rollout jsonl で確認)")
-    print(f"  out : {os.path.relpath(out_md, ROOT)}")
+    print(f"  out : {rel_or_abs(out_md)}")
     sys.stdout.flush()
 
-    t0 = datetime.datetime.now()
-    with open(out_log, "w", encoding="utf-8") as lf:
-        lf.write("$ " + " ".join(cmd[:-1]) + " '<prompt>'\n\n")
-        lf.flush()
-        try:
-            p = subprocess.run(cmd, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=lf, stderr=subprocess.STDOUT,
-                               timeout=a.timeout)
-            rc = p.returncode
-        except subprocess.TimeoutExpired:
-            lf.write(f"\n[codex_review] timeout {a.timeout}s\n")
-            rc = 124
-    dt = (datetime.datetime.now() - t0).total_seconds()
+    attempts = []
+    if first == "codex":
+        at = run_codex(a, prompt, name, out_dir)
+        attempts.append(at)
+        if at.cls == "unavailable" and a.backend == "auto":
+            reason = f"自動の切り替え (codex が unavailable/{at.kind}: 「{excerpt(at.detail, 200)}」)"
+            print(f"codex が unavailable ({at.kind}: {excerpt(at.detail, 200)}) → Claude の別インスタンスで回し直す")
+            sys.stdout.flush()
+            attempts.append(run_claude(a, prompt, name, out_dir))
+    else:
+        attempts.append(run_claude(a, prompt, name, out_dir))
 
-    result = read(last_msg).strip() if os.path.exists(last_msg) else ""
-    if os.path.exists(last_msg):
-        os.remove(last_msg)
-    if not result:
-        print(f"codex の最終メッセージが取れなかった (rc={rc}, {dt:.0f}s)。ログ: {os.path.relpath(out_log, ROOT)}")
-        return 1
+    ctx = {"stem": stem, "today": today, "head": head, "branch": branch, "out_md": out_md,
+           "plan_rel": os.path.relpath(plan_path, ROOT) if plan_path else "",
+           "brief_rel": os.path.relpath(brief_path, ROOT) if brief_path else ""}
+    final = write_record(a, ctx, attempts, reason)
+    claude = final.backend == "claude"
+    rel_md = rel_or_abs(out_md)
 
+    if final.cls != "ok":
+        print(f"\n未成立 ({final.label()}): {final.detail}")
+        print(f"記録 (先頭に未成立と書いた): {rel_md}")
+        print("試行のログ: " + ", ".join(f"{rel_or_abs(t.log)} ({t.backend}: {t.label()})" for t in attempts))
+        print("§6.1 の行は出さない (レビュー・諮問は成立していない)。")
+        return EXIT_CODE.get(final.cls, 1)
+
+    tag = "[Claude 代替] " if claude else ""
     if a.stage == "diagnose":
-        concl = re.search(r"^\s*結論\s*[:：]\s*(.+)$", result, re.M)
-        concl = concl.group(1).strip() if concl else "?"
-        header = (
-            f"# codex 諮問 (diagnose): {stem}\n\n"
-            f"- **brief**: [`{os.path.relpath(brief_path, ROOT)}`](../../{os.path.relpath(brief_path, ROOT)})\n"
-            + (f"- **plan**: [`{os.path.relpath(plan_path, ROOT)}`](../../{os.path.relpath(plan_path, ROOT)})\n" if plan_path else "")
-            + f"- **date**: {today}\n"
-            f"- **commit**: `{head}` ({branch})\n"
-            f"- **codex**: effort `{a.effort}`" + (f", model `{a.model}`" if a.model else "") + f", {dt/60:.1f} min, rc={rc}\n"
-            f"- **結論**: {concl}\n"
-            + (f"- **focus**: {a.focus}\n" if a.focus else "")
-            + (f"- **extra**: {', '.join('`'+os.path.relpath(os.path.abspath(e), ROOT)+'`' for e in a.extra)}\n" if a.extra else "")
-            + "\n本文は codex の最終メッセージをそのまま転記。結論は**仮説**であり、提案 A/B で確かめる。"
-            "採否・反映は plan 側 (§5.1 担当列 F の判断欄) に書く。\n\n---\n\n")
-        with open(out_md, "w", encoding="utf-8") as f:
-            f.write(header + result + "\n")
-        print(f"\n完了 ({dt/60:.1f} min, rc={rc})")
-        print(f"諮問記録: {os.path.relpath(out_md, ROOT)}")
+        concl = final.info.get("conclusion", "?")
+        print(f"\n完了 ({final.dt / 60:.1f} min, rc={final.rc}, backend={final.backend})")
+        print(f"諮問記録: {rel_md}")
         print(f"結論: {concl}")
-        print("応答・plan に書く痕跡: 「codex (diagnose) に諮った: "
-              f"{os.path.relpath(out_md, ROOT)} — 結論 1 行」")
-        return 0 if rc == 0 else 1
+        who = "Claude の別インスタンス (同一系統の代替)" if claude else "codex (diagnose)"
+        print(f"応答・plan に書く痕跡: 「{who} に諮った: {rel_md} — 結論 1 行」")
+        link = os.path.relpath(out_md, os.path.dirname(plan_path)) if plan_path else rel_md
+        print("\nplan の「レビュー記録」表に貼る行 (対応欄は採否を書いてから):")
+        print(f"| diagnose | {today} | [{name}.md]({link}) | {tag}{excerpt(concl, 200)} | <採用/却下と理由> |")
+        return 0
 
-    m = re.search(r"指摘数\s*[:：]\s*Critical\s*(\d+)\s*/\s*Major\s*(\d+)\s*/\s*Minor\s*(\d+)", result)
-    counts = f"C{m.group(1)}/M{m.group(2)}/m{m.group(3)}" if m else "C?/M?/m?"
-    verdict_m = re.search(r"\b(GO-with-changes|NO-GO|GO)\b", result)
-    verdict = verdict_m.group(1) if verdict_m else "?"
-
-    header = (
-        f"# codex レビュー: {stem} ({a.stage})\n\n"
-        f"- **plan**: [`{os.path.relpath(plan_path, ROOT)}`](../../{os.path.relpath(plan_path, ROOT)})\n"
-        f"- **stage**: `{a.stage}`" + (f" (diff base `{a.base}`)" if a.stage == "result" else "") + "\n"
-        f"- **date**: {today}\n"
-        f"- **commit**: `{head}` ({branch})\n"
-        f"- **codex**: effort `{a.effort}`" + (f", model `{a.model}`" if a.model else "") + f", {dt/60:.1f} min, rc={rc}\n"
-        f"- **判定**: **{verdict}**, 指摘 {counts}\n"
-        + (f"- **focus**: {a.focus}\n" if a.focus else "")
-        + (f"- **extra**: {', '.join('`'+os.path.relpath(os.path.abspath(e), ROOT)+'`' for e in a.extra)}\n" if a.extra else "")
-        + "\n本文は codex の最終メッセージをそのまま転記 (指摘の採否と対応は plan 側の「レビュー記録」表と残作業表に書く)。\n\n---\n\n"
-    )
-    with open(out_md, "w", encoding="utf-8") as f:
-        f.write(header + result + "\n")
-
-    rel_md = os.path.relpath(out_md, ROOT)
-    print(f"\n完了 ({dt/60:.1f} min, rc={rc}) 判定={verdict} 指摘={counts}")
+    verdict, counts = final.info.get("verdict", "?"), final.info.get("counts", "C?/M?/m?")
+    print(f"\n完了 ({final.dt / 60:.1f} min, rc={final.rc}, backend={final.backend}) 判定={verdict} 指摘={counts}")
     print(f"レビュー: {rel_md}")
     print("\nplan の「レビュー記録」表に貼る行 (対応欄は採否を書いてから):")
-    print(f"| {a.stage} | {today} | [{name}.md]({os.path.relpath(out_md, os.path.dirname(plan_path))}) | {verdict}, {counts} | <採用/却下と理由。Critical/Major は §5.1 残作業表へ> |")
-    return 0 if rc == 0 else 1
+    print(f"| {a.stage} | {today} | [{name}.md]({os.path.relpath(out_md, os.path.dirname(plan_path))}) | {tag}{verdict}, {counts} | <採用/却下と理由。Critical/Major は §5.1 残作業表へ> |")
+    return 0
 
 
 if __name__ == "__main__":
