@@ -25,6 +25,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-generator-defaults-and-launch-gate.md](active/tooling-generator-defaults-and-launch-gate.md) | `tooling` | **生成器の既定を推奨レシピから組み、投入前の関門で止める** (2026-10-14 起票、draft): 設計チェーンの生成器が推奨設定の正本を読まず直書きで古い値 (`nStepInner` 5・緩和なし・CFL 1.0・`nodeInletCornerWall`/`turbulentPrandtl`/`pRef` の欠落・cell) を作る、傾斜壁で壁に直交しない近壁格子が判定を通る、の 2 件。解析種別ごとの生産レシピを機械可読の正本にし、生成器は共通関数で組み、`run_case.sh` → `launch_gate.py` で設定とメッシュ (壁直交性・AR 緩和条件) を照合して FAIL なら起動しない |
 | [tooling-stage-manifest-launch-binding.md](active/tooling-stage-manifest-launch-binding.md) | `tooling` | **段の区間判定を起動記録に結び付ける** (2026-09-27 起票、gradient-scalar-lsq #2g): 同じ YAML を旧→新バイナリで起動すると最後の起動の実効値で全段が上書きされ、別作用素の段が 1 区間に連結される欠陥 (codex M7)。起動記録にバイナリ id、段と起動を設定ハッシュ + 起動順で単調対応、実効 `scalarGradient`・`slauWallNormalChi`・バイナリを hard キーに。draft・**後回し (2026-09-27 ユーザ決定)**: 起動 ID と履歴の直接対応で §4/§6 は確定済み、codex plan 段 GO-with-changes (Major 4) の反映は再開時 |
 | [boundary-node-rotational-periodic.md](active/boundary-node-rotational-periodic.md) | `boundary` | **node 周期 (seam 合算経路) の回転周期対応** (2026-09-26 ユーザ指示)。member ごとの root 相対角でベクトル量 (運動量・勾配・速度勾配テンソル・陰解法対角) にだけ回転をはさむ、スカラーは恒等。90° 環状セクタ vs 全周で同値性、SLAU + slauWallNormalChi を検証。draft・codex plan 段が先 |
 | [verification-m6-axis-wave-mesh-su2.md](active/verification-m6-axis-wave-mesh-su2.md) | `verification` | **in_progress (2026-10-08 棚卸し)**: M6 ノズルの軸の波・格子・δ* 抽出の検証の傘。済み: 帯 E・C2 方式 (CONTUR 較正)・生産化・標準報告・main 取り込み。残り: 8d (4 係数化)・12② (波の指標の窓)・14 (r″ 指標)・17 (軸上 M +0.1〜0.2 % の原因、急がない)。§6 の判定は保留 |
