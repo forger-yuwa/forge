@@ -21,8 +21,10 @@
     手元の過去の成果物とも一致しない。
   - `prepare`・`prepare_ns` は `prepare_info.json` の `environment` (Python・numpy・scipy の版、実行ファイル、ホスト、逆 MOC の
     backend と numba・llvmlite の版) に環境を残す。照合が合わないときは、まず両方の `environment` を比べる。
-  - **numba が要る (2026-10-15)**: 逆 MOC の網の充填 (`InverseMOC.fill_levels`) は既定で numba の版 (`geometry/moc_fill_nb.py`、
-    numpy の版とビット同一を試験で確認、plan [tooling-nozzle-mknot-fast](../plans/active/tooling-nozzle-mknot-fast.md) §4.4・§6 V5)。
+  - **numba が要る (2026-10-15)**: 逆 MOC の充填 (`InverseMOC.fill_levels`・`fill_arrays`) の 1 段の単位過程は既定で numba の版
+    (`geometry/moc_fill_nb.py`。numpy の版とはビット同一でなく、網の位置の差は 1e−14 r_t の桁、受入は 1e−10 r_t; plan
+    [tooling-nozzle-mknot-fast](../plans/active/tooling-nozzle-mknot-fast.md) §4.4・§4.5・§6 V5)。壁のビット同一を要する照合は
+    両方とも同じ backend で行う (`prepare_info.json` の `environment.moc_kernel`)。
     design の venv に `numba 0.68.0`・`llvmlite 0.50.0` を **`--no-deps`** で入れる (`.venv-opt/bin/pip install --no-deps numba==0.68.0
     llvmlite==0.50.0`; numpy を変えると δ_r が動く)。numba が無いと ImportError で止まる (黙って numpy の版に落ちない)。
     環境変数 `FORGE_MOC_KERNEL=numpy` で numpy の版 (A/B と回帰の基準)、他の値は ValueError。初回はコンパイルに数秒〜十数秒かかり、

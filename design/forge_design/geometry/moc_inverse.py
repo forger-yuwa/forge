@@ -30,10 +30,11 @@ from .moc_kernel import (AXIS_LIMIT_MODES, AXIS_R_EPS, CORR_MAX, CORR_TOL,
                          pm_mach, pm_mach_vec, pm_nu, source_branches)
 
 
-# --- 網の充填の backend (plans/active/tooling-nozzle-mknot-fast.md §4.4、受入は §6 V5) -----------------------------------
-# `fill_levels` の段のループは既定で numba の版 (`moc_fill_nb.fill_levels_nb`)。環境変数 `FORGE_MOC_KERNEL=numpy` で
-# numpy の版 (A/B と回帰の基準)。他の値は ValueError。numba が無ければ ImportError (黙って numpy の版に落ちない)。
-# `fill_arrays`・`fill` は numpy の版のまま。
+# --- 単位過程の backend (plans/active/tooling-nozzle-mknot-fast.md §4.4・§4.5、受入は §6 V5) ---------------------------------
+# 充填 (`fill_levels`・`fill_arrays`) の 1 段の単位過程 (`InverseMOC._pairs`) は既定で numba の版 (`moc_fill_nb.pairs_nb`)。
+# 環境変数 `FORGE_MOC_KERNEL=numpy` で numpy の版 (`moc_kernel.interior_vec`、A/B と回帰の基準)。他の値は ValueError。
+# numba が無ければ ImportError (黙って numpy の版に落ちない)。段のループと集計 (`MocFillDiag.add`) は両方の backend で共通。
+# numba の版は numpy の版とビット同一ではない (ν→M の Newton を対ごとに前の M から回す; §4.5、ユーザ決定 2026-10-15)。
 MOC_KERNEL_ENV = "FORGE_MOC_KERNEL"
 MOC_KERNELS = ("numba", "numpy")
 # numba の版は単位過程を内側に持つので、試験・台本が差し替えた関数は効かない。差し替えを検出したら止める (黙って無視しない)。
@@ -43,7 +44,7 @@ _UNITS_MK = {k: getattr(_mk, k) for k in _UNIT_NAMES_MK}
 
 
 def moc_kernel_backend() -> str:
-    """`fill_levels` の backend (`FORGE_MOC_KERNEL`、未設定は `numba`)。呼ぶたびに読む (試験で切り替えるため)。"""
+    """単位過程の backend (`FORGE_MOC_KERNEL`、未設定は `numba`)。呼ぶたびに読む (試験で切り替えるため)。"""
     v = os.environ.get(MOC_KERNEL_ENV)
     if v is None:
         return "numba"
@@ -223,29 +224,6 @@ class MocFillDiag:
                 "iter_failures": self.fail, "n_levels": int(self.n_levels)}
 
 
-def _diag_from_nb(diag: MocFillDiag, res) -> MocFillDiag:
-    """`moc_fill_nb.fill_levels_nb` の戻り値から `MocFillDiag` の欄を組み立てる (`add` を段ごとに呼んだのと同じ中身・同じ順)。"""
-    from .moc_fill_nb import BRANCH_KEYS, COUNT_KEYS, FAIL_KINDS, FRAC_KEYS, GEOM_KINDS
-    (_err, _err_n, counts, hist, hist_order, resid_max, resid_at_i, resid_at_f, resid_has, branch, frac_rng,
-     fp_i, fp_f, g_i, g_f, fl_i, fl_f, n_levels) = res
-    diag.counts = {k: int(counts[i]) for i, k in enumerate(COUNT_KEYS)}
-    diag.iter_hist = {int(v): int(hist[v]) for v in hist_order}
-    for q, key in enumerate(("geom", "comp")):
-        diag.resid[key + "_max"] = float(resid_max[q])
-        diag.resid["at_" + key] = ([int(resid_at_i[q, 0]), int(resid_at_i[q, 1]), float(resid_at_f[q, 0]),
-                                    float(resid_at_f[q, 1])] if resid_has[q] else None)
-    diag.branch = {k: int(branch[i]) for i, k in enumerate(BRANCH_KEYS)}
-    diag.frac_pos = [[int(a[0]), int(a[1]), FRAC_KEYS[int(a[2])], float(b[0]), float(b[1]), float(b[2])]
-                     for a, b in zip(fp_i, fp_f)]
-    diag.frac_rng = [float(v) for v in frac_rng]
-    diag.geom = [(int(a[0]), int(a[1]), GEOM_KINDS[int(a[2])], float(b[0]), float(b[1]), float(b[2]), float(b[3]))
-                 for a, b in zip(g_i, g_f)]
-    diag.fail = [[int(a[0]), int(a[1]), FAIL_KINDS[int(a[2])], int(a[3]), float(b[0]), float(b[1]), float(b[2]),
-                  float(b[3])] for a, b in zip(fl_i, fl_f)]
-    diag.n_levels = int(n_levels)
-    return diag
-
-
 def _posthoc_stats(A, B, out, n_corr: int) -> dict:
     """既定 (legacy + fixed2) の対の分類を、従来の呼び出しの入出力から作る (値は変えない)。
     `interior_vec` を位置引数だけで呼ぶ (試験スクリプトが単位過程を差し替える経路との互換) ため、
@@ -296,19 +274,50 @@ class InverseMOC(KernelMOC):
             raise ValueError(f"axis_thr の長さ {thr.shape} が初期前線 ({n}) と違う")
         return thr
 
-    def _pairs(self, x, r, th, nu, M, thr):
-        """隣接対 (B=front[:-1] が C⁻ 担体、A=front[1:] が C⁺ 担体) を単位過程に通す。戻り: 5 値 + 集計用 stats。"""
+    def _kernel(self):
+        """この充填の単位過程: numba の版なら (模組 `moc_fill_nb`, ν→M の経路)、numpy の版なら None (`moc_kernel_backend`)。"""
+        if moc_kernel_backend() != "numba":
+            return None
+        nb = _load_nb()
+        _check_units_unpatched()
+        return nb, _nb_gas(self.g)
+
+    def _pairs(self, x, r, th, nu, M, thr, kern=None):
+        """隣接対 (B=front[:-1] が C⁻ 担体、A=front[1:] が C⁺ 担体) を単位過程に通す。
+        戻り: 5 値 + 集計用 stats + 新点の M (numba の版は ok の対だけ、numpy の版は None = 呼び出し側が `pm_mach_vec`)。"""
+        if kern is not None:
+            return self._pairs_nb(x, r, th, nu, M, thr, kern)
         A = (x[1:], r[1:], th[1:], nu[1:], M[1:])
         B = (x[:-1], r[:-1], th[:-1], nu[:-1], M[:-1])
         if self.axis_limit == "legacy" and self.corrector == "fixed2":
             # 既定: 従来と同じ呼び出し (位置引数だけ — 単位過程を差し替える試験スクリプトとの互換)
             out = interior_vec(*A, *B, self.g, self.delta, self.n_corr)
-            return out + (_posthoc_stats(A, B, out, self.n_corr),)
+            return out + (_posthoc_stats(A, B, out, self.n_corr), None)
         st: dict = {}
         out = interior_vec(*A, *B, self.g, self.delta, self.n_corr, axis_limit=self.axis_limit,
                            thrA=None if thr is None else thr[1:], thrB=None if thr is None else thr[:-1],
                            corrector=self.corrector, tol=self.tol, max_corr=self.max_corr, stats=st)
-        return out + (st,)
+        return out + (st, None)
+
+    def _pairs_nb(self, x, r, th, nu, M, thr, kern):
+        """`_pairs` の numba の版 (`moc_fill_nb.pairs_nb`)。戻り値の形は numpy の版と同じ (+ 新点の M)。"""
+        nb, (gas_kind, gam, tx, ty) = kern
+        m = len(x) - 1
+        analytic = self.axis_limit == "analytic"
+        tA = np.full(m, np.nan) if thr is None else np.ascontiguousarray(thr[1:], dtype=float)
+        tB = np.full(m, np.nan) if thr is None else np.ascontiguousarray(thr[:-1], dtype=float)
+        mode = (nb.MODE_CONVERGE if self.corrector == "converge" else
+                nb.MODE_FIXED2 if analytic else nb.MODE_LEGACY_FIXED2)
+        f = [np.ascontiguousarray(a, dtype=float) for a in (x, r, th, nu, M)]
+        (n_lack, xP, rP, thP, nuP, ok, status, n_it, rg, rc, br, MP) = nb.pairs_nb(
+            *f, tA, tB, analytic, mode, int(self.n_corr), float(self.tol), int(self.max_corr), float(self.delta),
+            gas_kind, gam, tx, ty, float(_mk.AXIS_LIMIT_FRAC), float(AXIS_R_EPS))
+        if n_lack:
+            raise ValueError(f"axis_limit='analytic': 軸上の既知点 {int(n_lack)} 対に θ_r が無い "
+                             "(初期前線の軸端点には axis_thr を渡すこと)")
+        branch = {k: (br[i] if i < 3 else br[i].view(np.bool_)) for i, k in enumerate(nb.BRANCH_KEYS)}
+        st = {"status": status, "n_iter": n_it, "resid_geom": rg, "resid_comp": rc, "branch": branch}
+        return xP, rP, thP, nuP, ok, st, MP
 
     # -- 場充填 ---------------------------------------------------------------
     def fill(self, init_front, axis_thr=None) -> list:
@@ -350,6 +359,9 @@ class InverseMOC(KernelMOC):
 
         `axis_thr`: `axis_limit='analytic'` のときの初期前線の各点の θ_r (長さ = 初期前線、
         軸端点以外は NaN)。生成した点 (軸外) は θ_r を持たない。対の集計は `self.last_diag`。
+
+        1 段の単位過程は既定で numba の版 (2026-10-15、段の中も逐次の固定費が支配していたため)、
+        `FORGE_MOC_KERNEL=numpy` で numpy の版 (`_pairs`・`moc_kernel_backend`)。
         """
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
@@ -357,20 +369,21 @@ class InverseMOC(KernelMOC):
         nu = np.array([p.nu for p in init_front], dtype=float)
         M = np.array([p.M for p in init_front], dtype=float)
         thr = self._front_thr(len(x), axis_thr)
+        kern = self._kernel()
         diag = self._new_diag()
         out = [np.column_stack([x, r, th, nu, M])]
         k = 0
         while len(x) >= 2:
             k += 1
             # B=右(下流)側 C⁻ 担体 = front[:-1], A=左側 C⁺ 担体 = front[1:]
-            xP, rP, thP, nuP, ok, st = self._pairs(x, r, th, nu, M, thr)
+            xP, rP, thP, nuP, ok, st, MP = self._pairs(x, r, th, nu, M, thr, kern)
             below = ~(rP >= -1e-12)
             ok &= rP >= -1e-12
             diag.add(k, x[1:], r[1:], x[:-1], r[:-1], xP, rP, st, below & np.isfinite(rP))
             if not np.any(ok):
                 break
             x, r, th, nu = xP[ok], rP[ok], thP[ok], nuP[ok]
-            M = pm_mach_vec(nu, self.g)
+            M = pm_mach_vec(nu, self.g) if MP is None else MP[ok]
             thr = None if thr is None else np.full(len(x), np.nan)
             out.append(np.column_stack([x, r, th, nu, M]))
         self.last_diag = diag.summary()
@@ -392,11 +405,8 @@ class InverseMOC(KernelMOC):
 
         `axis_thr`: `fill_arrays` と同じ。対の集計 (欠損 = 死んだ対を含む) は `self.last_diag`。
 
-        段のループは既定で numba の版 (`moc_fill_nb`、同じ式・同じ順序)、`FORGE_MOC_KERNEL=numpy` で下の numpy の版
-        (`moc_kernel_backend`)。
+        1 段の単位過程は既定で numba の版、`FORGE_MOC_KERNEL=numpy` で numpy の版 (`_pairs`・`moc_kernel_backend`)。
         """
-        if moc_kernel_backend() == "numba":
-            return self._fill_levels_nb(init_front, axis_thr)
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
         th = np.array([p.th for p in init_front], dtype=float)
@@ -404,6 +414,7 @@ class InverseMOC(KernelMOC):
         M = np.array([p.M for p in init_front], dtype=float)
         n = len(x)
         thr = self._front_thr(n, axis_thr)
+        kern = self._kernel()
         diag = self._new_diag()
         out = np.full((n, n, 5), np.nan)
         out[0] = np.column_stack([x, r, th, nu, M])
@@ -413,13 +424,13 @@ class InverseMOC(KernelMOC):
             pair = live[:-1] & live[1:]
             if not np.any(pair):
                 break
-            xP, rP, thP, nuP, ok, st = self._pairs(x, r, th, nu, M, thr)
+            xP, rP, thP, nuP, ok, st, MPk = self._pairs(x, r, th, nu, M, thr, kern)
             diag.add(k, x[1:], r[1:], x[:-1], r[:-1], xP, rP, st, pair & np.isfinite(rP) & ~(rP >= -1e-12))
             ok &= pair & (rP >= -1e-12)
             thr = None if thr is None else np.full(len(x) - 1, np.nan)    # 生成した点は軸外 (θ_r なし)
             if not np.any(ok):
                 break
-            MP = pm_mach_vec(np.where(ok, nuP, 0.0), self.g)
+            MP = pm_mach_vec(np.where(ok, nuP, 0.0), self.g) if MPk is None else MPk
             x = np.where(ok, xP, np.nan)
             r = np.where(ok, rP, np.nan)
             th = np.where(ok, thP, np.nan)
@@ -428,35 +439,6 @@ class InverseMOC(KernelMOC):
             out[k, :len(x)] = np.column_stack([x, r, th, nu, M])
             live = ok
         self.last_diag = diag.summary()
-        return out
-
-    def _fill_levels_nb(self, init_front, axis_thr=None, trace=None) -> np.ndarray:
-        """`fill_levels` の numba の版 (段 0 と入力の検査は numpy の版と同じ、段のループは `moc_fill_nb.fill_levels_nb`)。
-        `trace`: 試験用 (`moc_fill_nb.trace_arrays(n)` の戻り値を渡すと段・対ごとの状態・回数・残差・分岐を書き込む)。"""
-        nb = _load_nb()
-        _check_units_unpatched()
-        x = np.array([p.x for p in init_front], dtype=float)
-        r = np.array([p.r for p in init_front], dtype=float)
-        th = np.array([p.th for p in init_front], dtype=float)
-        nu = np.array([p.nu for p in init_front], dtype=float)
-        M = np.array([p.M for p in init_front], dtype=float)
-        n = len(x)
-        thr = self._front_thr(n, axis_thr)
-        gas_kind, gam, tx, ty = _nb_gas(self.g)
-        out = np.full((n, n, 5), np.nan)
-        out[0] = np.column_stack([x, r, th, nu, M])
-        analytic = self.axis_limit == "analytic"
-        mode = (nb.MODE_CONVERGE if self.corrector == "converge" else
-                nb.MODE_FIXED2 if analytic else nb.MODE_LEGACY_FIXED2)
-        thr0 = np.full(n, np.nan) if thr is None else np.ascontiguousarray(thr, dtype=float)
-        res = nb.fill_levels_nb(out, x, r, th, nu, M, thr0, analytic, mode, int(self.n_corr), float(self.tol),
-                                int(self.max_corr), float(self.delta), gas_kind, gam, tx, ty,
-                                float(_mk.AXIS_LIMIT_FRAC), float(AXIS_R_EPS), int(MocFillDiag.CAP),
-                                *(nb.no_trace() if trace is None else trace))
-        if int(res[0]) == nb.ERR_LACK_THR:
-            raise ValueError(f"axis_limit='analytic': 軸上の既知点 {int(res[1])} 対に θ_r が無い "
-                             "(初期前線の軸端点には axis_thr を渡すこと)")
-        self.last_diag = _diag_from_nb(self._new_diag(), res).summary()
         return out
 
     # -- 壁流線 ---------------------------------------------------------------

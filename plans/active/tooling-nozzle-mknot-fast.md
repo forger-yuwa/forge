@@ -140,6 +140,19 @@
 5. 生産の既定 (analytic + converge) の壁は numpy の版と丸めの範囲で違う (V5 の許容差 ≤ 1e−10 r_t で縛る)。legacy + fixed2 の
    「従来とビット同一」(plan discretization-moc-axis-limit-and-corrector) は numpy の版についての保証になる。
 
+### 4.6 充填以外を削る (2026-10-15 ユーザ依頼「充填以外の 2〜3 割を削る … まず N 2400 の 1 評価を numba の版でプロファイルし直して、残りの内訳を見るのが先です」「まだ下げる余地があれば、こちらをやっていってほしいな」「AWS B使ってもいいんだよ」)
+
+§6.3 のプロファイルで、JIT の後の 1 評価は充填以外が過半。順に、数値を変えないものから:
+
+1. **集計 `MocFillDiag.add`** (段ごとに約 20 回の numpy の小さな呼び出し): 分類の数を `np.bincount` 1 回に、反復回数の分布を
+   `np.unique` から `np.bincount` に、など。出力 (`last_diag`) は今と完全に同じ (辞書の順を含む) ことを試験で縛る。
+2. **網の検査 `characteristic_topology_diagnostics`**: n² 個の三角形の配列演算 (網の半分は NaN の上三角)・段ごとの KD-tree・中央値。
+   有効な三角形に詰めてから計算するなど。出力は今と完全に同じ (同じ値・同じ判定) ことを試験で縛る。
+3. **壁の当てはめ `joint_fit_wall` の有効制約法** (`_joint_fit_mono_qp`、反復ごとに KKT 全体を `linalg.solve`): 解き方を変えると
+   壁の係数が丸めで変わる。変えるなら別の受入 (壁の位置・形状の量の差) を先に登録する。
+4. `cplus_flux_wall`・網の配列の確保。
+計時は AWS B で行う (ユーザ了承 2026-10-15; A は他セッションが CPU を使っている)。受入は §6 V5 の「N 2400 の 1 評価が 3 倍以上」のまま。
+
 ### 4.9 書き直す前の案の記録 (2026-10-15)
 
 - 粗い網で `select_mknot`・`resolution_gate` を回し 2400 で 11 点確かめる案 → diagnose M1 (4800 にだけある不成立を見落とす) で却下。
@@ -159,7 +172,8 @@
 | 3 | 実装 | `mknot_select.py` に規則 `coarse_min_theta_v2` (§4.1)、`evaluate_mknot` の捕捉を 2 つに・並列 (§4.2)、`wt_card.py` の M_knot の流れ (最初と最終の r_t、実効の入力での終了、自動調整での破棄、計時の改修)、記録、V1・V2 の試験。**実装 (2026-10-15、implementer)**: `mknot_select.py` に `select_coarse_min_theta` (部品 `v2_grid`・`v2_coarse_analysis`・`v2_valleys`・`v2_confirm`・`v2_pick`)、`evaluate_mknot` の捕捉を最後の 2 つ (`_CAPTURE_KEEP`)・`L_total_tol` の上書き・行に長さ合わせの記録 (L_c・符号つきの残差・停止の理由・実効の入力)。`wt_card.py` の M_knot の流れ (最初の r_t で選ぶ → 固定点 → 出力と同じ実効の入力で選び直し、一致で終了・違えば固定点のやり直し最大 2 回、自動調整で評価を捨てる、`_clock` で選択と再固定点を計時し `card_elapsed_s` と並べる)、並列 `mknot_workers` (1 評価のピーク 600: 0.15 GB・2400: 1.04 GB、case/70 (a) を手元で測定、case/71 は未測定 → #3b で測り直す)、記録 `_mknot_record_v2` (照合 `mknot_card_log_check` は規則の名前で読み分け、旧の記録も照合できる)。試験 `design/tests/run_mknot_v2_tests.py` (V1 (i)〜(vi)、`--real` で (vii)) 34 + 8 ok・`run_mknot_v2_card_tests.py` (V2) 42 ok。(vii) は基準 4e0b9f9e の evaluate_mknot とも基準の欄が全部一致。既存の `run_mknot_select_tests.py` 97 ok・`run_wt_card_tests.py`・`run_wt_card_profile_tests.py`・`run_mesh_size_guard_tests.py`・`run_tests.py` 通過 (旧の規則の合成の流れの試験は `run_wt_card_tests.py` から外した)。`run_deltastar_root_zone_tests.py --card` はこの作業ツリーに case/70 の run が無く該当部分を飛ばした | O |
 | 3b | V3・V4 (AWS A) | 新旧の A/B と計時。**結果 (2026-10-15、§6.2)**: (a) 全部 ✓・191 s (BLAS 1 スレッド)、(b) ①②④ ✓・③ は格子の節点数の上限のユーザ判断待ち | O |
 | 4 | 逆 MOC の網の充填の JIT 化 (§4.4) | ユーザ依頼 2026-10-15。plan 段レビュー (§4.4・§6 V5・V6) の後に実装。途中 (2026-10-15、WIP commit 9865cdc1)。**組み込み (2026-10-15、forge-7d)**: `moc_inverse.fill_levels` の既定を numba の版に (`moc_kernel_backend`・`_fill_levels_nb`・`_diag_from_nb`・`_nb_gas`・差し替えの検出)、記録 `moc_kernel_record`、試験 `design/tests/run_moc_jit_tests.py` (合成 ALL OK: 4 つの組・semi-perfect・異常系で網・集計・段ごとの状態がビット同一)、文書 (`procedures/nozzle-design-workflow.md` の計算環境、`methods/design/overview.md`)。残り: V5 の実データ (`--real`) と AWS A の所要、V4 の回し直し | O |
-| 4b | JIT の簡素化 (§4.5、ユーザ決定 2026-10-15) | ビット同一の写しをやめ (Newton は対ごと・前の M から、補間は素直に)、集計を Python の `MocFillDiag.add` に戻す。試験 `run_moc_jit_tests.py` を許容差の照合に、`run_moc_axis_limit_tests.py` 8 の新しい側を numpy の版に。合格: §6 V5 (合成と `--real`) と既存の design の試験 | O |
+| 4b | JIT の簡素化 (§4.5、ユーザ決定 2026-10-15) | ビット同一の写しをやめ (Newton は対ごと・前の M から、補間は素直に)、集計を Python の `MocFillDiag.add` に戻す。試験 `run_moc_jit_tests.py` を許容差の照合に、`run_moc_axis_limit_tests.py` 8 の新しい側を numpy の版に。合格: §6 V5 (合成と `--real`) と既存の design の試験。**実装 (2026-10-15、forge-7d)**: numba は 1 段の単位過程 `pairs_nb` だけ (`_pairs` の backend を切り替え、段のループと集計は両方の backend で共通、`fill_arrays` も同じ)、カーネル 650 → 約 270 行。反復で変わらない端点の項は対ごとに 1 回。V5 は §6.3 (合成・実データとも合格、所要は未達) | O |
+| 7 | 充填以外を削る (§4.6、ユーザ依頼 2026-10-15) | (a) `MocFillDiag.add` の高速化 (出力は完全一致)、(b) `characteristic_topology_diagnostics` の高速化 (出力は完全一致)、(c) `joint_fit_wall` の有効制約法 (数値が変わるなら受入を先に登録)、(d) `cplus_flux_wall`・配列の確保。各段で N 2400 の 1 評価をプロファイルし直す。計時は AWS B | O |
 | 6 | ~~L_c の使い回し (§4.4)~~ **後回し** (plan 段 jit の M1: 反例で M_K によらないと言えない) | `from_length` の L_c が M_K に依らないこと (§3) を使い、(問題、N) ごとに L_c を 1 回解いて使い回せば `inverse_design` の呼び出しが 1/3〜1/4 になり、メモリも減る見込み。数値は 1e−11 r_t の桁で変わりうるので、#4 と同じく別の受入を登録してから | F |
 | 5 | skill の手順 | `nozzle-design`・`design-intake` にパラスタの間は M_knot を固定する手順と所要の目安 | O |
 
@@ -200,6 +214,30 @@
 - **V4 (所要)**: (a) M_knot 569 s (選択 327 + 241 s、再固定点 0、カード全体 634 s) ≤ 600 s ✓ — ただし 4 並列の各プロセスが OpenBLAS のスレッドを 4 本ずつ持ち、物理 2 コアで取り合っていた (負荷 11)。
   並列の各プロセスの BLAS を 1 スレッドに (`mknot_select._worker_init`、threadpoolctl) すると **191 s** (粗い掃引 74 点 305 s → 55 s、選ぶ値は同じ 2.05)。(b) M_knot 144 s (BLAS の修正の前)。旧の規則は (a) 5,339 s、(b) 約 98 分で失敗。
 
+### 6.3 V5 の結果 (2026-10-15、手元の PC、commit は §9、簡素化した版 §4.5)
+
+- **合成** (`run_moc_jit_tests.py`、ALL OK): 4 つの組 × `fill_levels`・`fill_arrays` × 放射源流 n_ax 60・300、semi-perfect の表
+  (case/71 の燃焼ガス)、異常系 (欠損・反復中の非有限・平行・軸より下・上限・θ_r の欠如) で、NaN の位置・分類・反復回数・分岐・
+  `moc_gate` が同じ、位置の差 ≤ 2.2e−14 r_t、θ/ν ≤ 5.8e−15 rad。最終残差の最大の位置 (段・対) は丸めで入れ替わるので比べない
+  (値は ≤ 1e−12 で照合)。平行な特性線の入力は隣の対が θ+μ = 90° になると丸めの差が 0.25 まで増幅されたので、平行な対だけの前線にした。
+- **実データ** (`--real`、ALL OK、評価 12 回、最大 RSS 1.4 GB):
+
+  | 問題 | N | 逆 MOC | 位置の差の最大 [r_t] | θ/ν [rad] | 壁 [r_t] | θ_max [°] | ok | 1 評価 numpy / numba |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | M5 case/70 c2b (M_K 2.05) | 600 | 1 回 | 8.5e−14 | 3.0e−15 | 0 | 0 | True | 1.3 / 0.9 s |
+  | 同 | 2400 | 3 回 | 9.2e−13 | 1.5e−14 | 6.2e−13 | 5.2e−14 | True | 13.5 / 9.9 s |
+  | M5.5 case/71 (r_t 0.1 m、M_K 2.80) | 600 | 1 回 | 3.1e−13 | 6.0e−15 | 4.3e−14 | 4.6e−14 | True | 0.9 / 0.5 s |
+  | 同 | 2400 | 1 回 | 1.3e−12 | 1.6e−14 | 7.7e−13 | 9.2e−14 | True | 5.7 / 4.2 s |
+  | M6 case/45 prod (M_K 2.7) | 600 | 1 回 | 1.3e−13 | 3.8e−15 | 0 | 0 | False (両方) | 1.9 / 1.7 s |
+  | 同 | 2400 | 1 回 | 1.8e−12 | 1.8e−14 | 1.4e−12 | 5.3e−14 | False (両方) | 6.3 / 5.6 s |
+
+  判定の欄 (ok・reasons・error)・集計の分類と分岐の数・`moc_gate` の pass は全部同じ。許容差 (1e−10 r_t・1e−10 rad・1e−8°) に対し 50 倍以上の余裕。
+- **所要 (未達)**: 放射源流 n_ax 2400 の `fill_levels` (analytic + converge) は numpy 8.2 s / numba 3.3 s (2.5 倍、コンパイル込みの初回 5.6 s)。
+  1 評価は 1.13〜1.46 倍で、§6 V5 の「3 倍」に届かない。numba の版の N 2400 の 1 評価 (case/70) のプロファイル (cProfile、13.2 s):
+  単位過程 4.7 s (35 %)、壁の当てはめ `joint_fit_wall` 2.2 s (`linalg.solve` 409 回)、網の検査 `characteristic_topology_diagnostics` 1.8 s、
+  集計 `MocFillDiag.add` 1.7 s (7317 回)、`cplus_flux_wall` 0.8 s、網の配列の確保 0.4 s。単位過程は超越関数の計算量で律速
+  (converge の修正子は対あたり平均 3.3 回)。**充填以外が過半** → §4.6・§5.1 #7。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -222,6 +260,7 @@
 
 ## 9. 変更ログ
 
+- `2026-10-15` — 簡素化した JIT (#4b) を実装。V5 は合成・実データとも合格 (差は 1e−12 r_t の桁)、所要は 1 評価 1.13〜1.46 倍で未達 (§6.3)。ユーザ依頼で充填以外を削る (§4.6、#7)。
 - `2026-10-15` — **ユーザ決定**: JIT を簡素化する (§4.5、#4b): ビット同一をやめて許容差で照合、Newton は対ごと・前の M から、集計は Python の `MocFillDiag.add`。
 - `2026-10-15` — (forge-7d、引き継ぎ) JIT (#4) を組み込んだ: 既定 numba・`FORGE_MOC_KERNEL=numpy`、扱わないガス・単位過程の差し替えは例外、`environment` に backend の記録。合成の V5 (4 つの組・semi-perfect・異常系) はビット同一。
 
