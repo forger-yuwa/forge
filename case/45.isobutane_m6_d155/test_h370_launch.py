@@ -41,6 +41,12 @@
      (e) 感度の分類 (結果 A・B・判定不能、17 出力の欠け、合否の変化、D が 0.01 mm をまたぐ時刻があっても最大で決まる) を単体・偽物の抽出の
      全経路・本物の抽出 (diag_snapshot は stop_rule.delta_snapshot と同じ値) で; (f) 途中の出力を消さない (診断の経路の後に本段の全出力と
      境界の出力が残り sha の一覧に入る、stop_rule.delete_after は停止の出力より後だけを消す、診断の関数・run_staged_ns の本段の部分に消す処理が無い)。
+  M. 帯を共通にした A/B (§5.1 #36n; h370_judge.py --diag-sens-fixed-band、forge なし): 分類 (classify_fixed: 結果 A・B・判定不能、0.01 mm の境目、
+     F の中の held は有効な列の差が大きくても判定不能、腕 A の再現の不成立は判定不能)・区間ごとの最大 (section_max) を単体で; 偽物の抽出の全経路で
+     結果 A・B・判定不能 (held・抽出の不成立)、腕 A の再現の不成立 (1e−9 r_t・非有限) で判定不能かつ腕 B を回さない、丸め程度 (5e−13 r_t) は再現、
+     帯の固定が両腕に同じ値で渡る (腕 A に #36l の npz の A_y_b、腕 B に腕 A が使った全列の帯)、#36l の記録との照合・#36l と同じ照合の不成立で
+     抽出しない; 本物の抽出 (diag_snapshot_fixed) で、自分の帯を固定すると diag_snapshot とビット同一・使用域の外は自分の帯・腕 B に腕 A の帯が
+     そのまま入る・差し替えが元に戻る、本物の全経路 (L の #36l の記録) で腕 A の再現がビット同一・34 抽出・両腕の帯が同じ。
 usage: /home/sano/work/forge/design/.venv-opt/bin/python case/45.isobutane_m6_d155/test_h370_launch.py   (所要 約 8〜12 分; 終了コード 0 = ALL PASS)
 """
 from __future__ import annotations
@@ -1855,10 +1861,248 @@ def test_diag_path():
           and all(r_.get("band_y_b_max_diff_mm") is not None for r_ in RB["per_output"]), str((R.get("why"), RB.get("why")))[:300])
 
 
+# ====================================================================================== M. 帯を共通にした A/B (§5.1 #36n)
+X_OUT = (-1.5, -0.5)                                                    # 偽物の抽出の使用域の外の列 (縮流部; #36l の記録に無い列)
+
+
+def fake_fixed_snap(effect=None, mutate=None, calls=None, a_offset=None):
+    """偽物の帯を共通にした抽出 (速い; diag_snapshot_fixed の形): δ_E = δ_target = 1e-3 r_t + effect(腕, 出力, x) [mm] / MMPR (腕 A は
+    fake_diag_snap と同じ値 = #36l の偽物の記録を再現) + a_offset(出力) [r_t] (腕 A の再現の不成立を作る)。帯を決める列 = 使用域の外 X_OUT + 使用域。
+    帯は band の表を x の完全一致で引き、表に無い列は fill_own なら自分の帯 (選び直した帯 = 0.1、腕 B は 0.11)、そうでなければ例外 (本物と同じ)。
+    calls に (腕, 出力, band) を足す。mutate(腕, 出力, d) で held・例外を作る。"""
+    def g(run, step, spec, ext, x_use, band):
+        x = np.asarray(x_use, dtype=float)
+        arm = "A" if Path(spec["run"]).name == ARM_RUNS["A"] else "B"
+        if calls is not None:
+            calls.append((arm, int(step), band))
+        xa = np.concatenate([np.asarray(X_OUT, dtype=float), x])
+        lut = dict(zip(np.asarray(band["x"], dtype=float).tolist(), np.asarray(band["y_b"], dtype=float).tolist()))
+        nat = (0.11 if arm == "B" else 0.1) + 0.0 * xa
+        hit = np.array([v in lut for v in xa.tolist()])
+        if not hit.all() and not band.get("fill_own"):
+            raise ValueError("固定する帯の表に無い列 (偽物)")
+        yb = np.array([lut[v] if h else nat[i] for i, (v, h) in enumerate(zip(xa.tolist(), hit))])
+        e = 1e-3 + (np.asarray(effect(arm, int(step), x), dtype=float) / MMPR if effect else 0.0) + 0.0 * x
+        if arm == "A" and a_offset:
+            e = e + a_offset(int(step))
+        n = len(X_OUT)
+        d = {"delta_E": e.tolist(), "delta_target": e.tolist(), "held": [0] * len(x), "missing": [], "n_missing": 0, "n_held": 0, "lam": 1.0,
+             "res_sha256": None, "seconds": 0.0, "y_b": yb[n:].tolist(), "y_star": (0.08 + 0.0 * x).tolist(), "y_b_natural": nat[n:].tolist(),
+             "delta_r_raw": (0.9 * e).tolist(), "band_all": {"x": xa.tolist(), "y_b": yb.tolist(), "y_b_natural": nat.tolist()},
+             "band_fill": {"n_table": int(hit.sum()), "n_own": int((~hit).sum()), "x_own_range": None, "edge_table_matches_fixed": True}}
+        if mutate:
+            d = mutate(arm, int(step), d) or d
+        return d
+    return g
+
+
+def fixed_judge(case: Path, extra=()) -> tuple:
+    rc = HJ.main(["--diag-sens-fixed-band", "--case-dir", str(case), "--design", str(ROOT / "design"), "--tools", str(TOOLS), *extra])
+    return rc, HJ.jload(case / HJ.FIXED_OUT)
+
+
+def test_fixed_band():
+    print("== M. 帯を共通にした A/B (--diag-sens-fixed-band; §5.1 #36n)", flush=True)
+    import inspect
+    gate_calls = []
+    req = SR.required_window_steps(S_DIAG, 20000, 2500)
+    # --- 分類 (単体) ---
+    P = lambda Ds, err=None, bad=None: [{"step": k, "D_mm": (None if bad and i in bad else d), "pf_A": True, "pf_B": not (bad and i in bad),  # noqa: E731
+                                         **({"error_B": "RuntimeError"} if err and i in err else {}),
+                                         **({"D_partial_mm": 0.02, "x_at_D_valid": 1.0} if bad and i in bad else {}), "x_at_D": 2.0}
+                                        for i, (k, d) in enumerate(zip(req, Ds))]
+    for name, per_, repro, want, code in (
+            ("全 17 出力で D_fixed 0.003 mm → 結果 A", P([0.003] * 17), True, "結果 A", "A"),
+            ("ちょうど 0.01 mm → 結果 A (≤)", P([0.01] * 17), True, "結果 A", "A"),
+            ("1 出力だけ 0.0101 mm → 結果 B", P([0.001] * 16 + [0.0101]), True, "結果 B", "B_D"),
+            ("腕 A の再現の不成立 (D は小さい) → 判定不能", P([0.001] * 17), False, "判定不能", "U_repro"),
+            ("1 出力で腕 B の F の中に held (有効な列の差 0.02 > 0.01 でも) → 判定不能 (登録: 固定の帯で欠測・非有限・抽出の不成立)",
+             P([0.001] * 17, bad={4}), True, "判定不能", "U_invalid"),
+            ("抽出の例外 (腕 B の 1 出力) → 判定不能", P([0.001] * 17, err={7}), True, "判定不能", "U_error"),
+            ("17 出力のうち 1 つが無い → 判定不能 (縮めない)", P([0.001] * 17)[1:], True, "判定不能", "U_incomplete")):
+        cl = HJ.classify_fixed(per_, req, repro)
+        check(f"M 分類: {name}", cl["result"] == want and cl["code"] == code, f"{cl['result']} {cl['code']}: {cl['why'][:120]}")
+    check("M 分類: 必要な出力の集合が無い → 判定不能", HJ.classify_fixed(P([0.001] * 17), [], True)["code"] == "U_required")
+    xs = np.array([0.5, 2.0, 4.0, 7.0, 20.0, 60.0, 94.0, 95.3])
+    Dk = np.array([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], [0.0, 0.9, 0.0, 0.0, np.nan, 0.0, 0.0, 0.85]])
+    sm = HJ.section_max(xs, Dk, np.array([True] * 7 + [False]), [100, 200])
+    check("M 区間ごとの最大: 区間 [lo, hi)・出口までの最後の区間・比べる列 F の外と非有限を除く・最大の出力と x",
+          [r_["max_mm"] for r_ in sm] == [0.1, 0.9, 0.3, 0.4, 0.5, 0.6, 0.7] and sm[1]["step"] == 200 and sm[1]["x"] == 2.0
+          and sm[6]["x_range"] == [94.0, 94.0] and len(sm) == len(HJ.FIXED_SECTIONS) == 7, str(sm))
+    # --- 全経路 (偽物の抽出): #36l の偽物の記録 (腕 B − A = 0.02 mm) → 帯を共通にした A/B ---
+    mbase = write_diag_case(TMP / "fixed_base")
+    with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls), "diag_snapshot": fake_diag_snap(
+            lambda arm, k, x: 0.02 * np.ones(len(x)) if arm == "B" else 0.0 * x)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rc36, R36 = diag_judge(mbase)
+    check(f"M 前提: #36l の偽物の記録 (結果 B、D 0.02 mm、rc {rc36})", rc36 == 0 and R36["result"] == "結果 B" and (mbase / HJ.DIAG_NPZ).is_file())
+    z36 = np.load(mbase / HJ.DIAG_NPZ)
+
+    def run_fixed(name, snap, prep=None):
+        case = TMP / f"fixed_{name}"
+        shutil.copytree(mbase, case, symlinks=True)
+        if prep:
+            prep(case)
+        with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls), "diag_snapshot_fixed": snap}), (DL, "handoff_gate", gate_boom(gate_calls))):
+            return fixed_judge(case)
+    calls = []
+    eff_a = lambda arm, k, x: np.where((x >= 3.0) & (x < 5.0), 0.003, 0.0) if arm == "B" else 0.0 * x  # noqa: E731
+    rc, R = run_fixed("A", fake_fixed_snap(eff_a, calls=calls))
+    arms = [a_ for a_, _, _ in calls]
+    sec = {tuple(s_["x_range"][:1]): s_ for s_ in R.get("sections", [])}
+    check(f"M 全経路 (偽物の抽出): 帯を共通にすると差 0.003 mm (x 3〜5 だけ) → 結果 A (rc {rc})・34 抽出 (腕 A 17 → 腕 B 17 の順)・"
+          "update_conditions_met 偽・関門を呼ばない・#36l の記録と照合 (npz の sha・比べる列)・腕 A の再現 (ビット同一、最大差 0)",
+          rc == 0 and R["result"] == "結果 A" and R["code"] == "A" and arms == ["A"] * 17 + ["B"] * 17 and sorted({k for _, k, _ in calls}) == req
+          and abs(R["D_fixed_mm"]["max"] - 0.003) < 1e-12 and R["update_conditions_met"] is False and not gate_calls
+          and R["columns"]["same_as_36l"] is True and R["source_36l"]["result"] == "結果 B" and R["repro_A"]["ok"] is True
+          and R["repro_A"]["bitwise_all"] is True and R["repro_A"]["max_abs_delta_E_rt"] == 0.0 and R["extractions"]["n"] == 34,
+          str(R.get("why"))[:300])
+    check("M 区間ごと: D_fixed は 3〜5 だけ 0.003 mm、ほかの区間は 0・#36l の D (帯を選び直した) は全区間 0.02 mm を並べる・帯の移動 (0.01 r_t) を記録",
+          len(R["sections"]) == 7 and abs(sec[(3.0,)]["D_fixed"]["max_mm"] - 0.003) < 1e-12 and sec[(1.0,)]["D_fixed"]["max_mm"] == 0.0
+          and all(abs(s_["D_36l"]["max_mm"] - 0.02) < 1e-12 for s_ in R["sections"] if s_["n_cols"])
+          and all(abs(s_["band_move_B"]["max_mm"] - 0.01 * MMPR) < 1e-9 for s_ in R["sections"] if s_["n_cols"])
+          and all(abs(v - 0.02) < 1e-12 for v in R["D_fixed_mm"]["D_36l_per_output"].values()), str(R["sections"])[:300])
+    bA = [b_ for a_, _, b_ in calls if a_ == "A"]
+    bB = [b_ for a_, _, b_ in calls if a_ == "B"]
+    stepsA = [k for a_, k, _ in calls if a_ == "A"]
+    okA = all(b_["fill_own"] is True and np.array_equal(np.asarray(b_["x"]), z36["x_use"])
+              and np.array_equal(np.asarray(b_["y_b"]), z36["A_y_b"][req.index(k)]) for b_, k in zip(bA, stepsA))
+    xa_all = np.concatenate([np.asarray(X_OUT), z36["x_use"]])
+    okB = all(b_["fill_own"] is False and np.array_equal(np.asarray(b_["x"]), xa_all)
+              and np.array_equal(np.asarray(b_["y_b"]), np.concatenate([[0.1] * len(X_OUT), z36["A_y_b"][0]])) for b_ in bB)
+    check("M 帯の固定が両腕に同じ値で渡る: 腕 A には #36l の npz の A_y_b(k) (使用域の列・fill_own; 使用域の外は自分の帯)、腕 B には腕 A が同じ出力で"
+          "使った全列の帯 (使用域の外を含む・fill_own なし)、両腕の使った帯 (使用域の列) が全出力で同じ (band_common)",
+          okA and okB and len(bA) == len(bB) == 17 and all(r_["band_common"] is True for r_ in R["per_output"]))
+    npz = np.load(TMP / "fixed_A" / HJ.FIXED_NPZ)
+    check("M 配列: 腕 A・B の δ_E・δ_target・held・使った帯・選び直した帯・y*・生の δ_r (出力 17 × 使用域の列)・D_fixed と #36l の D と帯の移動 "
+          "(出力 × 列・列ごとの最大)・帯を決めた全列の帯",
+          npz["A_delta_r_raw"].shape == (17, len(npz["x_use"])) and {"B_y_b_natural", "D_fixed_kx_mm", "D_36l_x_mm", "band_move_B_x_mm",
+                                                                      "band_all_x", "A_band_all_y_b", "B_band_all_y_b", "A_delta_E"} <= set(npz.files)
+          and np.array_equal(npz["A_delta_E"], z36["A_delta_E"]))
+    eff_b = lambda arm, k, x: np.where((x >= 1.0) & (x < 3.0), 0.02, 0.0) if arm == "B" else 0.0 * x  # noqa: E731
+    rc, R = run_fixed("B", fake_fixed_snap(eff_b))
+    check(f"M 全経路: 帯を共通にしても差 0.02 mm (x 1〜3) → 結果 B ({R['code']}、D_fixed {R['D_fixed_mm']['max']:.4f} mm、区間 1〜3 の最大)",
+          rc == 0 and R["result"] == "結果 B" and R["code"] == "B_D" and abs(R["D_fixed_mm"]["max"] - 0.02) < 1e-12
+          and 1.0 <= R["D_max"]["x"] < 3.0 and R["over_tol_columns"]["D_fixed"]["n"] > 0, str(R.get("why"))[:200])
+
+    def held_b(arm, k, d):
+        if arm == "B" and k == req[4]:
+            d["held"] = list(d["held"])
+            d["held"][len(d["held"]) // 2] = 1
+        return d
+    rc, R = run_fixed("held", fake_fixed_snap(eff_b, mutate=held_b))
+    check(f"M 全経路: 固定の帯で腕 B の 1 出力の比べる列の中に held (差 0.02 mm でも) → 判定不能 ({R['code']}、rc {rc})",
+          rc == 2 and R["result"] == "判定不能" and R["code"] == "U_invalid")
+
+    def exc_b(arm, k, d):
+        if arm == "B" and k == req[9]:
+            raise ValueError("固定する帯の表に無い列 (試験)")
+        return d
+    rc, R = run_fixed("exc", fake_fixed_snap(mutate=exc_b))
+    check(f"M 全経路: 腕 B の 1 出力の抽出の不成立 (帯の表に無い列) → 判定不能 ({R['code']}、rc {rc})", rc == 2 and R["code"] == "U_error")
+    calls = []
+    rc, R = run_fixed("repro", fake_fixed_snap(calls=calls, a_offset=lambda k: 1e-9 if k == req[3] else 0.0))
+    check(f"M 腕 A の再現の不成立 (1 出力で δ_E が #36l と 1e−9 r_t 違う) → 判定不能 ({R['code']}、rc {rc})・最大差を記録・腕 B は回さない "
+          f"({sum(1 for a_, _, _ in calls if a_ == 'B')} 回)",
+          rc == 2 and R["result"] == "判定不能" and R["code"] == "U_repro" and abs(R["repro_A"]["max_abs_delta_E_rt"] - 1e-9) < 1e-15
+          and R["repro_A"]["ok"] is False and not any(a_ == "B" for a_, _, _ in calls) and R["update_conditions_met"] is False)
+    rc, R = run_fixed("repro_tol", fake_fixed_snap(a_offset=lambda k: 5e-13 if k == req[3] else 0.0))
+    check(f"M 腕 A の再現: 丸め程度の差 (5e−13 r_t ≤ 許容 {HJ.REPRO_TOL_RT}) は再現とする (ビット同一ではないと記録) → {R['result']}",
+          rc == 0 and R["repro_A"]["ok"] is True and R["repro_A"]["bitwise_all"] is False and R["result"] == "結果 A")
+
+    def a_nan(arm, k, d):
+        if arm == "A" and k == req[2]:
+            d["delta_E"] = list(d["delta_E"])
+            d["delta_E"][3] = float("nan")
+        return d
+    rc, R = run_fixed("repro_nan", fake_fixed_snap(mutate=a_nan))
+    check(f"M 腕 A の再現: 固定の帯で腕 A の 1 列が非有限 (#36l は有限) → 再現の不成立で判定不能 ({R['code']})",
+          rc == 2 and R["code"] == "U_repro" and R["repro_A"]["per_output"][2]["finite_pattern_same"] is False)
+    # --- 入力の照合 (#36l の記録・#36l と同じ照合) → 判定不能・抽出しない ---
+
+    def set_json(p_, f_):
+        p_.write_text(json.dumps(f_(json.loads(p_.read_text()))))
+
+    def npz_change(cs, **kw):
+        with np.load(cs / HJ.DIAG_NPZ) as f_:
+            a_ = {k: f_[k] for k in f_.files}
+        a_.update(kw)
+        np.savez_compressed(cs / HJ.DIAG_NPZ, **a_)
+        set_json(cs / HJ.DIAG_OUT, lambda r_: {**r_, "arrays": {**r_["arrays"], "sha256": HJ.sha256_file(cs / HJ.DIAG_NPZ)}})
+    F_bad = z36["F"].copy()
+    F_bad[3] = False
+    yb_nan = z36["A_y_b"].copy()
+    yb_nan[5, 10] = np.nan
+    for name, prep, want in (
+            ("#36l の記録が無い", lambda cs: (cs / HJ.DIAG_OUT).unlink(), "#36l の記録"),
+            ("#36l の配列の中身が記録の sha と違う", lambda cs: set_json(cs / HJ.DIAG_OUT, lambda r_: {**r_, "arrays": {**r_["arrays"], "sha256": "0" * 64}}),
+             "sha256"),
+            ("#36l の比べる列 F が座標から決め直した F と違う", lambda cs: npz_change(cs, F=F_bad), "比べる列"),
+            ("共通の帯 (#36l の腕 A の y_b) に非有限", lambda cs: npz_change(cs, A_y_b=yb_nan), "非有限"),
+            ("#36l の 17 出力が今の窓と違う", lambda cs: set_json(cs / HJ.DIAG_OUT, lambda r_: {**r_, "required": r_["required"][1:]}), "17 出力"),
+            ("#36l と同じ照合: 窓の 1 出力の res が無い", lambda cs: (cs / HJ.NS_RUN / f"res_{req[8]}.h5").unlink(), "が無い"),
+            ("#36l と同じ照合: 腕 B の参照の sha が固定と違う", lambda cs: (cs / ARM_RUNS["B"] / "res_40000.h5").write_bytes(b"changed"), "参照 B")):
+        calls = []
+        n_u = len(list(TMP.glob("fixed_u*")))
+        rc, R = run_fixed(f"u{n_u}", fake_fixed_snap(calls=calls), prep=prep)
+        check(f"M 入力の照合: {name} → 判定不能 (rc {rc}、{R.get('code')})・抽出しない ({len(calls)} 回)", rc == 2 and R["result"] == "判定不能"
+              and R["code"] == "U_input" and not calls and any(want in u for u in R["undecidable"]) and R["update_conditions_met"] is False,
+              str(R.get("undecidable"))[:300])
+    srcs = {f.__name__: inspect.getsource(f) for f in (HJ.diag_inputs, HJ.diag_sens_fixed_band, HJ.diag_snapshot_fixed, HJ.fixed_band,
+                                                        HJ.classify_fixed, HJ.section_max)}
+    bad = [n for n, s_ in srcs.items() if any(w_ in s_ for w_ in ("unlink(", "rmtree(", "os.remove(", "delete_after(", "handoff_gate", "update_wall"))]
+    check(f"M 帯を共通にした A/B の関数に消す処理・関門・壁の更新の呼び出しが無い ({bad or 'なし'})", not bad and not gate_calls)
+    # --- 本物の抽出 (diag_snapshot_fixed、プロセス並列) ---
+    rb = TMP / "diag_real_B"                                    # L の本物の #36l の記録 (腕 B の形 0.01) があれば使う
+    if not (rb / HJ.DIAG_OUT).is_file():
+        rb = write_diag_case(TMP / "fixed_real_src", shape_b=0.01)
+        with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+            diag_judge(rb)
+    ns = rb / HJ.NS_RUN
+    rec = json.loads((ns / SR.RECORD).read_text())
+    ext = {k: v for k, v in rec["delta_series"]["extract"].items() if k != "source"}
+    xu = np.asarray(rec["delta_series"]["x"], dtype=float)
+    spec = {a_: {"run": str(rb / r_), "res": "res_40000.h5", "sha256": HJ.sha256_file(rb / r_ / "res_40000.h5")} for a_, r_ in ARM_RUNS.items()}
+    dA = HJ.diag_snapshot(ns, S_DIAG, spec["A"], ext, xu)
+    fA = HJ.diag_snapshot_fixed(ns, S_DIAG, spec["A"], ext, xu, {"x": xu, "y_b": np.asarray(dA["y_b"]), "fill_own": True})
+    same = all(np.array_equal(np.asarray(dA[k], dtype=float), np.asarray(fA[k], dtype=float), equal_nan=True) for k in ("delta_E", "delta_target", "held", "y_b"))
+    bfA = fA["band_fill"]
+    check(f"M 本物の抽出: 腕 A に自分の帯 (使用域の列) を固定 → diag_snapshot と δ_E・δ_target・held・帯がビット同一・使用域の外の {bfA['n_own']} 列 "
+          f"(x {bfA['x_own_range']}) は自分の帯・差し替えが抽出の表まで届く",
+          same and bfA["n_own"] > 0 and bfA["x_own_range"][1] < 0.0 and bfA["n_table"] == len(xu) and bfA["edge_table_matches_fixed"] is True
+          and np.array_equal(np.asarray(fA["y_b_natural"]), np.asarray(fA["y_b"])) and np.isfinite(fA["delta_r_raw"]).all())
+    dB = HJ.diag_snapshot(ns, S_DIAG, spec["B"], ext, xu)
+    fB = HJ.diag_snapshot_fixed(ns, S_DIAG, spec["B"], ext, xu, {"x": fA["band_all"]["x"], "y_b": fA["band_all"]["y_b"], "fill_own": False})
+    mv = float(np.nanmax(np.abs(np.asarray(fB["y_b_natural"]) - np.asarray(fA["y_b"])))) * MMPR
+    check(f"M 本物の抽出: 腕 B に腕 A の全列の帯 → 使った帯 (使用域) が腕 A と同じ・選び直した帯は固定しない抽出の帯と同じ (帯の移動 {mv:.3f} mm)・"
+          "表に無い列があれば例外 (fill_own なし)",
+          np.array_equal(np.asarray(fB["y_b"]), np.asarray(fA["y_b"])) and fB["band_fill"]["n_own"] == 0
+          and np.array_equal(np.asarray(fB["y_b_natural"]), np.asarray(dB["y_b"]), equal_nan=True) and mv > 0.0
+          and raises(lambda: HJ.diag_snapshot_fixed(ns, S_DIAG, spec["B"], ext, xu, {"x": xu, "y_b": np.asarray(dA["y_b"]), "fill_own": False}),
+                     ValueError) is not None)
+    import forge_design.metrics.deltastar as DSm
+    check("M 本物の抽出: 帯の固定は抽出の後に戻る (deltastar.edge_band_positions・deltastar_loop の抽出器が元の関数)",
+          DSm.edge_band_positions is DS.edge_band_positions and DSm.edge_band_positions.__qualname__ == "edge_band_positions"
+          and DL.deltastar_from_core_matched_euler.__qualname__ == "deltastar_from_core_matched_euler")
+    rcase = TMP / "fixed_real_B"
+    shutil.copytree(rb, rcase, symlinks=True)
+    with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rc, R = fixed_judge(rcase)
+    px = (R.get("extractions") or {}).get("B") or {}
+    dfx = (R.get("D_fixed_mm") or {}).get("max")
+    check(f"M 本物の全経路 (腕 B の形 0.01、{px.get('mode')} {px.get('jobs')}): 腕 A の再現 (最大差 {R.get('repro_A', {}).get('max_abs_delta_E_rt')} r_t、"
+          f"ビット同一 {R.get('repro_A', {}).get('bitwise_all')})・34 抽出・両腕の帯が同じ・D_fixed {dfx} mm で分類 {R.get('result')} "
+          f"(#36l の D {R.get('source_36l', {}).get('D_max', {}).get('mm')})・関門を呼ばない",
+          R.get("repro_A", {}).get("ok") is True and R["repro_A"]["bitwise_all"] is True and R["repro_A"]["max_abs_delta_E_rt"] == 0.0
+          and R["extractions"]["n"] == 34 and px.get("mode", "").startswith("process") and all(r_["band_common"] for r_ in R["per_output"])
+          and R["result"] == ("結果 B" if dfx > HJ.TOL_MM else "結果 A") and rc == 0 and not gate_calls
+          and R["repro_A"]["per_output"][0]["band_fill"]["n_own"] > 0 and R["per_output"][0]["band_fill_B"]["n_own"] == 0,
+          str(R.get("why"))[:300])
+
+
 def main() -> int:
     for t in (test_constants, test_wall_output_and_configs, test_euler_stage_configs, test_euler_qualify, test_classify_ab, test_ns_judge,
               test_prelaunch_counterexamples, test_parallel_extraction, test_run_orchestration, test_ns_phase_and_parts, test_euler_wall_restore,
-              test_diag_path):
+              test_diag_path, test_fixed_band):
         try:
             t()
         except Exception:  # noqa: BLE001
