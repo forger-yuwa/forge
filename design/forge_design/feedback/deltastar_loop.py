@@ -23,11 +23,16 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
 `run_pass0_integral` は NS の本段の後 (`run_pass` は前の pass の run から次の壁を作る前にも) `handoff_gate` を通し、
 (a) 本段の停止の状態 (`STOP_RULE_STATE.json`; run_staged_ns の終了コードでは決めない) が REACHED、(b) `check_convergence.py --segment`
 (本段の区間) が PASS のときだけ抽出 (`band_select="edge"` を明示) と次の壁の入力 (`delta_r_next.csv`・`fixed_point.json`) へ進む。
-判定は `HANDOFF_GATE.json`・`HANDOFF_CONVERGENCE.txt` に残す。明示の上書き: `--allow-not-reached` (停止規則を使わない run・CENSORED・
-UNAVAILABLE から進む)・`--allow-unconverged` (収束の判定が NOT CONVERGED でも進む)。DIVERGED・EXEC_ERROR・DATA_ERROR・状態の記録なし・
-収束の判定の DIVERGED・判定不能は上書きでも進まない。止めたら CLI は終了コード 3。**壁の更新を次の pass へ自動でつながない** (1 pass ずつ
+判定は `HANDOFF_GATE.json`・`HANDOFF_CONVERGENCE.txt` に残す。明示の上書き (理由の文字列が必須、HANDOFF_GATE.json の override に残す;
+§5.1 #36h): `--allow-not-reached "<理由>"` (停止規則を使わない run・CENSORED・UNAVAILABLE から進む)・`--allow-unconverged "<理由>"` (収束の
+判定が NOT CONVERGED でも進む)・`--allow-unsettled "<理由>"` (保存則・δ の 2 窓の実測が閾値を超えても進む; 冷却壁の case/70 のように
+落ち着かないのが普通の流れ用)。DIVERGED・EXEC_ERROR・DATA_ERROR・状態の記録なし・収束の判定の DIVERGED・判定不能、保存則・2 窓の判定
+不能 (記録の欠け・窓を覆わない・点数の不足・非有限) は上書きでも進まない。落ち着きの条件 (停止の状態の REACHED・保存則・2 窓) を上書きで
+通した受け渡しは「落ち着いていない場からの設計」として `settled: false`・`unsettled_overrides` を HANDOFF_GATE.json と抽出の要約
+(`fixed_point.json`・`delta_r_extract_summary.json`) に残す。止めたら CLI は終了コード 3。**壁の更新を次の pass へ自動でつながない** (1 pass ずつ
 呼び出し側が確かめる)。2026-10-14 (§5.1 #36e、codex diagnose 3・§6 V-h370) から関門は §4.9 の「更新に進む条件」の残りも見る
-(上書きでは通さない): 保存則 (stop_rule.json の r の窓)・局所 y₁⁺ (`check_wall_resolution.py`)・δ_E と δ_target の隣り合う 2 窓
+(保存則と 2 窓は実測の超過だけ #36h の `--allow-unsettled` で通せる、ほかは上書きでは通さない): 保存則 (stop_rule.json の r の窓)・
+局所 y₁⁺ (`check_wall_resolution.py`)・δ_E と δ_target の隣り合う 2 窓
 (見張りの中の出力ごとの記録)・Euler の参照と ω が本段の記録と同じ、それを満たしたら固定の条件 (`handoff_extract_settings`: edge・一定 x の
 断面への補間・端は欠測・ω 0.5・λ 1.0・昇格の上限 ×1000) で抽出して全域の被覆・使用域の held と欠測・次の壁の幾何の健全性。全部満たしたときだけ
 抽出の表を run の直下に写す。Euler の参照は `--euler-ref-res res_<N>.h5 --euler-ref-sha256 HEX` でスナップショットを固定できる (sha が
@@ -67,6 +72,9 @@ HANDOFF_WALL_RESOLUTION = "HANDOFF_WALL_RESOLUTION.txt"   # 関門で回した c
 HANDOFF_EXTRACT_DIR = "handoff_extract"       # 関門の抽出の置き場 (合格したときだけ表を run の直下へ写す; §5.1 #36e)
 HANDOFF_BAND_SELECT = "edge"                  # 関門を通った後の抽出の帯の選び方 (2026-10-14 まで未指定 = 既定の adaptive)
 _STOP_OVERRIDABLE = ("NOT_USED", "CENSORED", "UNAVAILABLE")   # allow_not_reached で通せる停止の状態 (それ以外の非 REACHED は通さない)
+# allow_unsettled で通せる条件 (§5.1 #36h、forge-f5 と合意): 実測が閾値を超えたときだけ (各 check の measured が真)。判定不能 (記録の欠け・
+# 窓を覆わない・点数の不足・非有限・δ の記録の held と欠測) は通さない
+_UNSETTLED_OVERRIDABLE = ("conservation", "two_windows")
 # 受け渡しの抽出の固定の条件 (§5.1 #36e (4)(5)、codex diagnose 3・§6 V-h370)。停止規則の帯の生成・見張りの中の出力ごとの δ の記録・
 # 関門の抽出で共通に使う (prepare_info の stop_rule.extract に写す):
 #   - 一定 x の断面への補間 remap_constant_x=True、端の補間範囲の不足は欠測 remap_edge="missing" (定数で外挿しない)
@@ -657,7 +665,8 @@ def _read_stop_record(run_dir) -> dict | None:
 def conservation_check(rec: dict | None, step) -> dict:
     """保存則 (質量の収支): stop_rule.json の行の r = (ṁ_in − ṁ_out)/ṁ_in の、停止の出力 s で終わる窓 [s − W, s] の平均と振幅
     ((最大 − 最小)/2) が停止規則の閾値 (r_mean_max・r_amp_max) 以内。窓が本段の履歴に覆われ (最初の出力 ≤ s − W)、min_points 点以上で、
-    r が全部有限であること。記録が無い・s が無い・足りないときは不合格 (判定不能は合格ではない)。"""
+    r が全部有限であること。記録が無い・s が無い・足りないときは不合格 (判定不能は合格ではない)。
+    measured: 平均と振幅を測れた (不合格なら閾値の超過; 関門の allow_unsettled はこのときだけ通す、§5.1 #36h)。"""
     if rec is None or step is None:
         return {"pass": False, "why": "stop_rule.json か停止の出力 s が無い (停止規則を使っていない run は保存則を判定できない)"}
     st = rec.get("settings") or {}
@@ -675,6 +684,7 @@ def conservation_check(rec: dict | None, step) -> dict:
         out["why"] = f"窓の点数 {len(win)} (≥ {mp} が要る) か r に非有限値"
         return out
     out["r_mean"], out["r_amp"] = float(rv.mean()), float((rv.max() - rv.min()) / 2.0)
+    out["measured"] = True
     out["pass"] = bool(abs(out["r_mean"]) <= float(st["r_mean_max"]) and out["r_amp"] <= float(st["r_amp_max"]))
     if not out["pass"]:
         out["why"] = f"|r の平均| {abs(out['r_mean']):.3e} (≤ {st['r_mean_max']}) か r の振幅 {out['r_amp']:.3e} (≤ {st['r_amp_max']})"
@@ -687,7 +697,8 @@ def two_window_check(rec: dict | None, step, tol_mm: float = HANDOFF_WINDOW_TOL_
     各窓の全使用域 (delta_series.x の全列) で δ_E・δ_target の最大 − 最小 ≤ tol_mm、窓の平均どうしの差も全列で ≤ tol_mm [mm]。
     各窓は min_points 点以上 (停止規則と同じ)、窓の全出力に欠測・held・抽出の失敗・飛ばしの無い記録があること。満たさなければ不合格。
     窓に入るべき出力は記録にある行からではなく、出力の間隔 (settings.out_step_interval) から `stop_rule.required_window_steps` で列挙し、
-    行そのものが欠けた出力も不合格にする (§5.1 #36g、codex diagnose 2026-10-14 の Major「判定窓の完全性」; V-h370 では 17 出力)。"""
+    行そのものが欠けた出力も不合格にする (§5.1 #36g、codex diagnose 2026-10-14 の Major「判定窓の完全性」; V-h370 では 17 出力)。
+    measured: 両方の量の全部の振れを測れた (不合格なら閾値の超過; 関門の allow_unsettled はこのときだけ通す、§5.1 #36h)。"""
     from ..evaluate.stop_rule import required_window_steps
     if rec is None or step is None:
         return {"pass": False, "why": "stop_rule.json か停止の出力 s が無い (出力ごとの δ の記録が要る)"}
@@ -747,6 +758,7 @@ def two_window_check(rec: dict | None, step, tol_mm: float = HANDOFF_WINDOW_TOL_
             worst[f"{q}.{name}"] = {"max_mm": float(v[i] * mm), "x_at_max": float(xs[i])}
             ok &= bool(v[i] * mm <= tol_mm)
     out["worst"] = worst
+    out["measured"] = True
     out["pass"] = ok
     if not ok:
         out["why"] = "; ".join(f"{k} {v['max_mm']:.4g} mm (x {v['x_at_max']:.4g})" for k, v in worst.items() if v["max_mm"] > tol_mm)
@@ -823,47 +835,127 @@ def _same_euler_ref(a, b) -> bool:
     return fa == fb
 
 
-def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None = None, allow_not_reached: bool = False,
-                 allow_unconverged: bool = False, write: bool = True, extract: bool = True) -> dict:
-    """受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a・#36e、codex diagnose 2026-10-14・diagnose 3、§6 V-h370):
+def override_reason(name: str, value) -> str | None:
+    """受け渡しの関門の明示の上書き (`allow_not_reached`・`allow_unconverged`・`allow_unsettled`) の値を理由の文字列にする
+    (2026-10-14 統合 integrate/design-flow-1 と同じ形、forge-f5 の要望: 上書きは理由の文字列が必須; §5.1 #36h)。None・False は上書きなし
+    (None を返す; 2026-10-14 までの呼び出し元が渡す False をそのまま受ける)。空でない文字列はその理由 (前後の空白を除く)。True や空の文字列・
+    文字列でない値は ValueError (理由の無い上書きを通さない)。"""
+    if value is None or value is False:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} は上書きの理由の文字列で書く (受け取った値: {value!r}; 理由の無い上書きは通さない)")
+    return value.strip()
+
+
+def _caller_delta_e_source(extractor, delta_e_source) -> dict | None:
+    """呼び出し側の δ_E の作り方 (§5.1 #36h): 関門の抽出を呼び出し側の `extractor` (`extract_and_merge` と同じ呼び方・戻り) に替えるときの
+    作り方の記録。extractor と delta_e_source は一緒に渡す (片方だけは ValueError: 関門の抽出は最新の出力 1 枚なので、作り方の記録だけを
+    書き替えない)。delta_e_source は mapping で kind (空でない文字列、例 "window_mean")・n_snapshots (1 以上の整数) が要る。
+    5 枚の窓の平均の作り方 (forge-f5、plan tooling-nozzle-cooled-wall-ns-settling §4.4・§5.1 #3b) はこの口から渡す (ここには移植しない)。"""
+    if extractor is None and delta_e_source is None:
+        return None
+    if extractor is None or delta_e_source is None:
+        raise ValueError("extractor と delta_e_source は一緒に渡す (関門の抽出は最新の出力 1 枚; 作り方の記録と抽出を食い違わせない)")
+    if not callable(extractor):
+        raise ValueError(f"extractor は extract_and_merge と同じ呼び方の関数 (受け取った値: {extractor!r})")
+    n = delta_e_source.get("n_snapshots") if isinstance(delta_e_source, dict) else None
+    if (not isinstance(delta_e_source, dict) or not isinstance(delta_e_source.get("kind"), str) or not delta_e_source["kind"].strip()
+            or not isinstance(n, int) or isinstance(n, bool) or n < 1):
+        raise ValueError(f"delta_e_source は kind (空でない文字列) と n_snapshots (1 以上の整数) を持つ mapping (受け取った値: {delta_e_source!r})")
+    return {**delta_e_source, "provider": "caller (handoff_gate の extractor)"}
+
+
+def _single_snapshot_source(od: Path, stop_step) -> dict:
+    """関門の既定の抽出 (`extract_and_merge`、NS の run の最新の出力 1 枚) の δ_E の作り方の記録 (§5.1 #36h)。読んだ出力は抽出器の記録
+    (delta_r_equiv_diag.json の settings.ns_res) から取る (無ければ None)。"""
+    try:
+        res = json.loads((od / "delta_r_equiv_diag.json").read_text())["settings"]["ns_res"]
+    except (OSError, ValueError, KeyError, TypeError):
+        res = None
+    try:
+        step = int(Path(res).stem.split("_")[1]) if res else None
+    except (IndexError, ValueError):
+        step = None
+    return {"kind": "single_snapshot", "n_snapshots": 1, "res": res, "steps": [step] if step is not None else None,
+            "stop_step": stop_step, "is_stop_output": (step is not None and stop_step is not None and step == int(stop_step)),
+            "provider": "handoff_gate (extract_and_merge、NS の run の最新の出力 1 枚)"}
+
+
+def _unsettled_entry(name: str, c: dict, reason: str) -> dict:
+    """allow_unsettled で通した条件の記録 (実測の値; §5.1 #36h)。保存則: r の窓の平均と振幅・閾値・窓。2 窓: 変動の最大とその量・窓・x、
+    閾値を超えた量の全部。"""
+    if name == "conservation":
+        return {"override": "allow_unsettled", "condition": "conservation", "reason": reason, "r_mean": c.get("r_mean"), "r_amp": c.get("r_amp"),
+                "r_mean_max": c.get("r_mean_max"), "r_amp_max": c.get("r_amp_max"),
+                "window": [c["step"] - c["window"], c["step"]], "n": c.get("n")}
+    w = c.get("worst") or {}
+    k = max(w, key=lambda k_: w[k_]["max_mm"]) if w else None
+    return {"override": "allow_unsettled", "condition": "two_windows", "reason": reason, "windows": c.get("windows"), "tol_mm": c.get("tol_mm"),
+            "max_mm": (w[k]["max_mm"] if k else None), "quantity": k, "x_at_max": (w[k]["x_at_max"] if k else None),
+            "exceeded": {k_: v for k_, v in w.items() if v["max_mm"] > float(c.get("tol_mm", HANDOFF_WINDOW_TOL_MM))}, "n": c.get("n")}
+
+
+def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None = None, allow_not_reached: str | None = None,
+                 allow_unconverged: str | None = None, allow_unsettled: str | None = None, write: bool = True, extract: bool = True,
+                 extractor=None, delta_e_source: dict | None = None) -> dict:
+    """受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a・#36e・#36h、codex diagnose 2026-10-14・diagnose 3、§6 V-h370):
     その run の場から抽出して次の壁の入力 (`delta_r_next.csv`・`fixed_point.json`) を作ってよいか (§4.9 の「更新に進む条件」)。
     (a) 本段の停止の状態 (`stop_state`) が REACHED。`allow_not_reached` で NOT_USED・CENSORED・UNAVAILABLE も通す (明示の上書き)。
         DIVERGED・EXEC_ERROR・DATA_ERROR・MISSING は通さない。
     (b) `convergence_verdict` (`check_convergence.py --segment --drop 3`) が PASS。`allow_unconverged` で NOT_CONVERGED も通す (明示の上書き)。
         DIVERGED・UNDETERMINED は通さない (判定不能は合格ではない)。
-    以下は **上書きでは通さない** (#36e; 既存の 2 つの上書きの範囲は (a)(b) のまま):
-    (c) 保存則 (`conservation_check`、stop_rule.json の r の窓)。(d) 局所 y₁⁺ (`wall_resolution_verdict` の PASS)。(e) δ_E・δ_target の
-        隣り合う 2 窓 (`two_window_check`、見張りの中の出力ごとの記録)。(f) Euler の参照が本段の記録 (停止規則の euler_ref) と同じ、ω が
-        固定の値 (`HANDOFF_OMEGA`) と同じ。
-    (a)〜(f) を満たしたときだけ抽出する (`extract`; run の HANDOFF_EXTRACT_DIR に、固定の条件 `handoff_extract_settings` = edge・一定 x の
-    断面への補間・端の欠測・ω・平滑化の λ・昇格の上限、Euler の参照は (f) の固定のスナップショット) → (g) 抽出の全域の被覆と使用域の held・
-    欠測なし (`coverage_check`)、(h) 次の壁の幾何の健全性 (`next_wall_check`、problem が要る)。抽出の例外 (昇格の上限を超えた単調性ガード・
-    sha の不一致ほか) も不合格。全部満たしたら抽出の表を run の直下に写す (`delta_r_next.csv` ほか; 不合格なら写さない)。
-    戻り: {proceed, blocked_by, stop_rule, convergence, checks, override, extract (settings・made・summary)}。write なら run に HANDOFF_GATE.json
-    (原子的に)・HANDOFF_CONVERGENCE.txt・HANDOFF_WALL_RESOLUTION.txt を書く (抽出は write でなくても HANDOFF_EXTRACT_DIR に書く)。"""
+    (c) 保存則 (`conservation_check`、stop_rule.json の r の窓)。(e) δ_E・δ_target の隣り合う 2 窓 (`two_window_check`、見張りの中の出力ごとの
+        記録)。`allow_unsettled` (§5.1 #36h) で実測が閾値を超えた不合格 (check の measured が真) だけ通す。判定不能 (記録の欠け・窓を覆わない・
+        点数の不足・非有限・δ の記録の held と欠測) は通さない。
+    以下は **上書きでは通さない** (#36e):
+    (d) 局所 y₁⁺ (`wall_resolution_verdict` の PASS)。(f) Euler の参照が本段の記録 (停止規則の euler_ref) と同じ、ω が固定の値
+        (`HANDOFF_OMEGA`) と同じ。
+    上書き 3 つは**理由の文字列** (`override_reason`; True・空の文字列・文字列でない値は ValueError) で渡し、HANDOFF_GATE.json の override に
+    理由と実際に使った上書き (applied) を残す。**落ち着きの条件** ((a)・(c)・(e)) を全部満たせば `settled: true`、上書きで通したら
+    `settled: false` と `unsettled_overrides` (理由・実測の値: 停止の状態、r の平均と振幅と窓、2 窓の変動の最大とその量・窓・x) を残し、
+    抽出の要約 (`delta_r_extract_summary.json`・`_after_ns` の `fixed_point.json`) にも同じ印を写す (「落ち着いていない場からの設計」を後で
+    探せるように; `grep '"settled": false'`)。
+    (a)〜(f) を満たした (上書きで通したものを含む) ときだけ抽出する (`extract`; run の HANDOFF_EXTRACT_DIR に、固定の条件
+    `handoff_extract_settings` = edge・一定 x の断面への補間・端の欠測・ω・平滑化の λ・昇格の上限、Euler の参照は (f) の固定のスナップショット)
+    → (g) 抽出の全域の被覆と使用域の held・欠測なし (`coverage_check`)、(h) 次の壁の幾何の健全性 (`next_wall_check`、problem が要る)。
+    (g)(h) は上書きでは通さない。抽出の例外 (昇格の上限を超えた単調性ガード・sha の不一致ほか) も不合格。全部満たしたら抽出の表を run の
+    直下に写す (`delta_r_next.csv` ほか; 不合格なら写さない)。
+    δ_E の作り方 (`delta_e_source`): 既定は `extract_and_merge` で NS の run の最新の出力 1 枚 (`kind: single_snapshot`、読んだ res を記録)。
+    呼び出し側が別の作り方 (例: 5 枚の窓の平均) で抽出するときは `extractor` (`extract_and_merge` と同じ呼び方・戻り、out_dir に
+    delta_r_next.csv を書く) と `delta_e_source` (kind・n_snapshots を持つ mapping) を一緒に渡す (`_caller_delta_e_source`)。(g)(h) は
+    その抽出にも同じに掛かる。
+    戻り: {proceed, blocked_by, settled, unsettled_overrides, delta_e_source, stop_rule, convergence, checks, override, extract (settings・made・
+    summary)}。write なら run に HANDOFF_GATE.json (原子的に)・HANDOFF_CONVERGENCE.txt・HANDOFF_WALL_RESOLUTION.txt を書く (抽出は write で
+    なくても HANDOFF_EXTRACT_DIR に書く)。"""
     import datetime
     import shutil
     from ..evaluate import stop_rule as SR
     run_dir = Path(run_dir)
+    why_nr = override_reason("allow_not_reached", allow_not_reached)
+    why_uc = override_reason("allow_unconverged", allow_unconverged)
+    why_us = override_reason("allow_unsettled", allow_unsettled)
+    src = _caller_delta_e_source(extractor, delta_e_source)
     st = stop_state(run_dir)
     cv = convergence_verdict(run_dir)
-    blocked = []
+    blocked, unsettled, applied = [], [], []
     s = st["status"]
     if s != "REACHED":
-        if allow_not_reached and s in _STOP_OVERRIDABLE:
-            pass
+        if why_nr is not None and s in _STOP_OVERRIDABLE:
+            unsettled.append({"override": "allow_not_reached", "condition": "stop_state", "reason": why_nr, "status": s,
+                              "stop_step": st.get("stop_step")})
+            applied.append("allow_not_reached")
         else:
             blocked.append(f"停止の状態 {s} (REACHED が要る"
                            + (f"; allow_not_reached で通せるのは {'・'.join(_STOP_OVERRIDABLE)} だけ)" if s not in _STOP_OVERRIDABLE
                               else "; 明示の上書き allow_not_reached が無い)"))
     k = cv["kind"]
     if k != "PASS":
-        if allow_unconverged and k == "NOT_CONVERGED":
-            pass
+        if why_uc is not None and k == "NOT_CONVERGED":
+            applied.append("allow_unconverged")
         else:
             blocked.append(f"収束の判定 {k} (check_convergence.py --segment の終了コード {cv['rc']}"
                            + ("; 明示の上書き allow_unconverged が無い)" if k == "NOT_CONVERGED" else "; 上書きでも通さない)"))
-    # --- (c)〜(f): 記録から (上書きでは通さない) ---
+    # --- (c)〜(f): 記録から ((c)(e) の実測の超過だけ allow_unsettled で通す、ほかは上書きでは通さない) ---
     try:
         info = json.loads((run_dir / "prepare_info.json").read_text())
     except (OSError, ValueError):
@@ -891,9 +983,19 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
     for name, label in (("conservation", "保存則 (質量の収支)"), ("wall_resolution", "局所 y₁⁺ (check_wall_resolution)"),
                         ("two_windows", "δ_E・δ_target の 2 窓"), ("euler_ref", "Euler の参照 (本段の記録と同じ)"), ("omega", "ω (固定の値)")):
         c = checks[name]
-        if not c["pass"]:
-            blocked.append(f"{label}: " + str(c.get("why") or c.get("kind") or c))
-    # --- (g)(h): 抽出 (a)〜(f) を満たしたときだけ ---
+        if c["pass"]:
+            continue
+        if name in _UNSETTLED_OVERRIDABLE and why_us is not None and c.get("measured"):
+            unsettled.append(_unsettled_entry(name, c, why_us))
+            if "allow_unsettled" not in applied:
+                applied.append("allow_unsettled")
+            continue
+        blocked.append(f"{label}: " + str(c.get("why") or c.get("kind") or c)
+                       + (" (判定不能・記録の欠けは allow_unsettled でも通さない)" if name in _UNSETTLED_OVERRIDABLE and why_us is not None else ""))
+    # 落ち着きの条件 ((a)・(c)・(e)) を上書きなしで満たしたか (§5.1 #36h)
+    settled = bool(s == "REACHED" and checks["conservation"]["pass"] and checks["two_windows"]["pass"])
+    mark = {"settled": settled, "unsettled_overrides": unsettled, "delta_e_source": src}
+    # --- (g)(h): 抽出 (a)〜(f) を満たしたときだけ (上書き不可) ---
     ext = {"band_select": HANDOFF_BAND_SELECT, "settings": settings, "dir": HANDOFF_EXTRACT_DIR, "made": None, "summary": None}
     if blocked or not extract:
         why = "前の条件で止めた" if blocked else "extract=False"
@@ -907,7 +1009,9 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
             shutil.rmtree(od)
         od.mkdir(parents=True)
         try:
-            summ = extract_and_merge(run_dir, SR.euler_ref_spec(use_eref) or use_eref, out_dir=od, **settings)
+            summ = (extractor or extract_and_merge)(run_dir, SR.euler_ref_spec(use_eref) or use_eref, out_dir=od, **settings)
+            if not isinstance(summ, dict):
+                raise TypeError(f"抽出の戻りが要約の mapping でない ({type(summ).__name__})")
             ext["summary"] = summ
         except Exception as e:  # noqa: BLE001 — 抽出の例外 (昇格の上限・sha の不一致ほか) は関門の不合格
             summ = None
@@ -915,6 +1019,11 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
             checks["coverage"] = {"pass": False, "evaluated": False, "why": "抽出が例外"}
             checks["next_wall"] = {"pass": False, "evaluated": False, "why": "抽出が例外"}
         if summ is not None:
+            if src is None:
+                mark["delta_e_source"] = _single_snapshot_source(od, step)
+            # 抽出の要約に落ち着きの印を写す (表の隣の記録; run の直下へ写すときもこの要約を写す)
+            summ.update(mark)
+            (od / "delta_r_extract_summary.json").write_text(json.dumps(summ, indent=1, default=str))
             dn = od / "delta_r_next.csv"
             x_e = ((info.get("physical_wall") or {}).get("domain") or [None, None])[1]
             if x_e is None:
@@ -931,14 +1040,20 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
                         shutil.copy2(od / f, run_dir / f)
                         made.append(f)
                 ext["made"] = made
-    rec = {"version": 2, "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a・#36e (§6 V-h370)",
+    rec = {"version": 3, "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a・#36e・#36h (§6 V-h370)",
            "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
            "proceed": not blocked, "blocked_by": blocked,
+           "settled": mark["settled"], "unsettled_overrides": mark["unsettled_overrides"], "delta_e_source": mark["delta_e_source"],
            "stop_rule": st, "convergence": {k_: v for k_, v in cv.items() if k_ != "output"}, "checks": checks,
-           "override": {"allow_not_reached": bool(allow_not_reached), "allow_unconverged": bool(allow_unconverged),
-                        "scope": "上書きは (a) 停止の状態・(b) 収束の判定だけ。保存則・y₁⁺・2 窓・参照・ω・被覆・held・次の壁は上書きでは通さない"},
+           "override": {"allow_not_reached": why_nr is not None, "allow_unconverged": why_uc is not None, "allow_unsettled": why_us is not None,
+                        "allow_not_reached_reason": why_nr, "allow_unconverged_reason": why_uc, "allow_unsettled_reason": why_us,
+                        "applied": applied,
+                        "scope": "上書きは (a) 停止の状態 (allow_not_reached)・(b) 収束の判定 (allow_unconverged)・保存則と 2 窓の実測の超過 "
+                                 "(allow_unsettled) だけ。保存則・2 窓の判定不能 (記録の欠け・覆わない・点数・非有限・held・欠測)・y₁⁺・参照・ω・"
+                                 "被覆・held・次の壁は上書きでは通さない"},
            "extract": ext,
-           "note": "proceed は §4.9 の「更新に進む条件」の全部を満たしたか (壁の更新は次の pass へ自動でつながない)。0.05 mm の固定点の条件は設計を終える用で、ここでは見ない"}
+           "note": "proceed は §4.9 の「更新に進む条件」の全部を満たしたか (壁の更新は次の pass へ自動でつながない)。0.05 mm の固定点の条件は設計を終える用で、ここでは見ない。"
+                   "settled: false は落ち着きの条件を上書きで通した「落ち着いていない場からの設計」 (後で作り直す対象)"}
     if write:
         (run_dir / HANDOFF_CONVERGENCE).write_text(cv["output"])
         (run_dir / HANDOFF_WALL_RESOLUTION).write_text(wr["output"])
@@ -953,19 +1068,30 @@ def _write_json_atomic(path: Path, rec: dict) -> None:
 
 
 def _print_gate(label: str, gate: dict) -> None:
+    ov = gate["override"]
+    used = "; ".join("{} ({})".format(k, ov.get(k + "_reason")) for k in ov.get("applied") or [])
     print(f"handoff gate ({label}): {'進む' if gate['proceed'] else '止める'} — 停止の状態 {gate['stop_rule']['status']}、"
           f"収束の判定 {gate['convergence']['kind']}" + (f"、理由: {'; '.join(gate['blocked_by'])}" if gate["blocked_by"] else "")
-          + (f"、上書き {({k: v for k, v in gate['override'].items() if k != 'scope'})}"
-             if any(v for k, v in gate["override"].items() if k != "scope") else ""), flush=True)
+          + (f"、上書き {used}" if used else "")
+          + ("" if gate.get("settled", True) else "、settled: false (落ち着いていない場からの設計)"), flush=True)
 
 
-def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached: bool, allow_unconverged: bool, problem=None) -> dict:
+def _check_overrides(allow_not_reached, allow_unconverged, allow_unsettled) -> None:
+    """上書きの理由 (`override_reason`) を NS の前に検査する (理由の無い上書きで本段を回してから止めない)。"""
+    override_reason("allow_not_reached", allow_not_reached)
+    override_reason("allow_unconverged", allow_unconverged)
+    override_reason("allow_unsettled", allow_unsettled)
+
+
+def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached: str | None, allow_unconverged: str | None,
+              problem=None, allow_unsettled: str | None = None) -> dict:
     """NS の後段 (`run_pass`・`run_pass0_integral`・`run_from_table` 共通): 受け渡しの関門 (`handoff_gate`; 条件を満たせば関門の中で抽出し、
-    表を run の直下に写す) → 通れば fixed_point.json → 設計の標準出力。関門で止めたら fixed_point.json・delta_r_next.csv を run の直下に
-    作らない (標準出力は今までどおり作る)。m (metrics) に関門の記録 `handoff_gate` を足して返す。"""
+    表を run の直下に写す) → 通れば fixed_point.json (抽出の要約 = 落ち着きの印 settled・unsettled_overrides・delta_e_source を含む) →
+    設計の標準出力。関門で止めたら fixed_point.json・delta_r_next.csv を run の直下に作らない (標準出力は今までどおり作る)。m (metrics) に
+    関門の記録 `handoff_gate` を足して返す。"""
     run_dir = Path(run_dir)
     gate = handoff_gate(run_dir, problem=problem, euler_ref=euler_ref, omega=omega, allow_not_reached=allow_not_reached,
-                        allow_unconverged=allow_unconverged)
+                        allow_unconverged=allow_unconverged, allow_unsettled=allow_unsettled)
     print((run_dir / HANDOFF_CONVERGENCE).read_text(), flush=True)      # 収束の判定の出力 (今までは check_convergence がそのまま出した)
     _print_gate("new", gate)
     if gate["proceed"]:
@@ -986,15 +1112,19 @@ def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached:
 def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=None,
              prepare_only: bool = False, nsteps=None, cfl_main=None, implicit_relax=None,
              stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
-             allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
+             allow_not_reached: str | None = None, allow_unconverged: str | None = None, allow_unsettled: str | None = None) -> dict:
     """前の pass の run (prev_run) から抽出して次の壁を作り、NS を準備・実行する 1 pass (自動で次の pass へはつながない)。
     prev_run の受け渡しの関門 (`handoff_gate`、HANDOFF_GATE.json は prev_run に書かない; 条件を満たせば関門の中で固定の条件で抽出し、表を
     prev_run の直下に写す) が不合格なら準備の前に `HandoffBlocked` (新しい run dir を作らない)。関門の結果は新しい run の prepare_info.json
-    の `handoff_from_prev` に残す。NS の後は `_after_ns`。stop_rule: prepare_ns へ (None = 問題 YAML の evaluate.stop_rule、False = 使わない)。"""
+    の `handoff_from_prev` に残す (前の run の関門が落ち着きの条件を上書きで通したら、その `settled: false`・`unsettled_overrides` も
+    ここに入る = 落ち着いていない場から作った壁の run; §5.1 #36h)。NS の後は `_after_ns`。stop_rule: prepare_ns へ (None = 問題 YAML の
+    evaluate.stop_rule、False = 使わない)。allow_not_reached・allow_unconverged・allow_unsettled は上書きの理由の文字列 (`override_reason`;
+    前の run と新しい run の関門の両方に効く)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
+    _check_overrides(allow_not_reached, allow_unconverged, allow_unsettled)
     prev_run = Path(prev_run); run_dir = Path(run_dir)
     gate_prev = handoff_gate(prev_run, problem=problem, euler_ref=euler_ref, omega=omega, allow_not_reached=allow_not_reached,
-                             allow_unconverged=allow_unconverged, write=False)
+                             allow_unconverged=allow_unconverged, allow_unsettled=allow_unsettled, write=False)
     _print_gate("prev", gate_prev)
     if not gate_prev["proceed"]:
         raise HandoffBlocked(f"前の pass の run {prev_run} が受け渡しの関門で不合格 — 抽出・次の壁の作成へ進まない: "
@@ -1022,7 +1152,8 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
     # 受け渡しの関門 → 固定点差: 新 run から抽出し、入力 (= 新 run の壁 − Euler 壁) と比較
-    return _after_ns(run_dir, euler_ref, omega, m, "fixed_point(new)", allow_not_reached, allow_unconverged, problem=problem)
+    return _after_ns(run_dir, euler_ref, omega, m, "fixed_point(new)", allow_not_reached, allow_unconverged, problem=problem,
+                     allow_unsettled=allow_unsettled)
 
 
 def resolve_integral_initializer(problem) -> dict:
@@ -1042,10 +1173,12 @@ def resolve_integral_initializer(problem) -> dict:
 def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, prepare_only: bool = False,
                        nsteps=None, omega: float = 0.5, cfl_main=None, implicit_relax=None,
                        stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
-                       allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
+                       allow_not_reached: str | None = None, allow_unconverged: str | None = None,
+                       allow_unsettled: str | None = None) -> dict:
     """pass 0: 積分法 (CONTUR) 初期壁で NS を立て、終了後に受け渡しの関門 (`_after_ns`) を通れば抽出して次 pass 用 delta_r_next.csv まで作る。
-    initializer=None なら problem YAML の `deltastar_initializer` (無ければ断熱 contur)。"""
+    initializer=None なら problem YAML の `deltastar_initializer` (無ければ断熱 contur)。上書きの理由 (`override_reason`) は NS の前に検査する。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
+    _check_overrides(allow_not_reached, allow_unconverged, allow_unsettled)
     run_dir = Path(run_dir)
     # thermal_bc は prepare_ns 側で spec.wall_thermal から決める (ここでは model のみ)
     init = initializer if initializer is not None else resolve_integral_initializer(problem)
@@ -1066,7 +1199,8 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem)
+    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem,
+                     allow_unsettled=allow_unsettled)
 
 
 def check_table_against_card(problem, table) -> dict:
@@ -1094,15 +1228,18 @@ def check_table_against_card(problem, table) -> dict:
 
 def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=None, prepare_only: bool = False, nsteps=None,
                    omega: float = 0.5, cfl_main=None, implicit_relax=None, stages: str = "full", ramp=None, ramp_steps: int = 1000,
-                   stop_rule: bool | None = None, allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
+                   stop_rule: bool | None = None, allow_not_reached: str | None = None, allow_unconverged: str | None = None,
+                   allow_unsettled: str | None = None) -> dict:
     """補正の表 TABLE (`wt_card --ns-correction` が問題 YAML の横に書く `<stem>_delta_r.csv`、または `--solve-rt-throat --prev` の
     `--delta-r-out`) で物理壁を作り、NS を準備・実行する (plan tooling-nozzle-deltastar-band-root-zone §4.3 3):
     `prepare_ns(delta_r_csv=TABLE, offset="radial")` → `run_staged_ns` → collect → 受け渡しの関門 (`_after_ns`、plan
     tooling-nozzle-isothermal-wall-chain §5.1 #36a) → 通れば抽出 (`fixed_point.json`) → 設計の標準出力 (`run_pass` と同じ後段)。
     表は緩和しない (omega は後段の抽出の delta_r_next.csv にだけ使う)。問題 YAML の `_card.ns_correction` が
     あれば TABLE の sha256 を照合する (`check_table_against_card`、違えば run dir を作る前に例外)。照合の結果は prepare_info.json の
-    `delta_r_table` に書く。表は呼び出し側が渡すので、前の run の関門はここでは見ない (prev_run は記録と初期場だけ)。"""
+    `delta_r_table` に書く。表は呼び出し側が渡すので、前の run の関門はここでは見ない (prev_run は記録と初期場だけ)。
+    上書きの理由 (`override_reason`) は NS の前に検査する。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
+    _check_overrides(allow_not_reached, allow_unconverged, allow_unsettled)
     run_dir = Path(run_dir)
     chk = check_table_against_card(problem, table)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, delta_r_csv=table, offset="radial",
@@ -1124,7 +1261,8 @@ def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=No
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem)
+    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem,
+                     allow_unsettled=allow_unsettled)
 
 
 def _gate_rc(res) -> int:
@@ -1171,13 +1309,23 @@ def main(argv=None) -> int:
     ap.add_argument("--no-stop-rule", action="store_true",
                     help="本段の停止規則を使わない (問題 YAML の evaluate.stop_rule: true を打ち消す; plan tooling-nozzle-isothermal-wall-chain "
                          "§5.1 #36a)。YAML に evaluate.stop_rule が無ければ今までどおり使わない")
-    ap.add_argument("--allow-not-reached", action="store_true",
-                    help="受け渡しの関門の明示の上書き: 本段の停止の状態が REACHED でない run (停止規則を使わない NOT_USED・CENSORED・"
-                         "UNAVAILABLE) からも抽出・次の壁の入力を作る。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なしは通さない")
-    ap.add_argument("--allow-unconverged", action="store_true",
-                    help="受け渡しの関門の明示の上書き: check_convergence.py --segment が NOT CONVERGED でも抽出・次の壁の入力を作る "
-                         "(DIVERGED・判定不能は通さない)")
+    ap.add_argument("--allow-not-reached", default=None, metavar="理由",
+                    help="受け渡しの関門の明示の上書き (理由の文字列が必須、HANDOFF_GATE.json に残す): 本段の停止の状態が REACHED でない run "
+                         "(停止規則を使わない NOT_USED・CENSORED・UNAVAILABLE) からも抽出・次の壁の入力を作る。DIVERGED・EXEC_ERROR・"
+                         "DATA_ERROR・記録なしは通さない。使ったら settled: false (落ち着いていない場からの設計) を記録する")
+    ap.add_argument("--allow-unconverged", default=None, metavar="理由",
+                    help="受け渡しの関門の明示の上書き (理由の文字列が必須、HANDOFF_GATE.json に残す): check_convergence.py --segment が "
+                         "NOT CONVERGED でも抽出・次の壁の入力を作る (DIVERGED・判定不能は通さない)")
+    ap.add_argument("--allow-unsettled", default=None, metavar="理由",
+                    help="受け渡しの関門の明示の上書き (理由の文字列が必須、HANDOFF_GATE.json に残す; plan tooling-nozzle-isothermal-wall-chain "
+                         "§5.1 #36h): 保存則 (停止規則の窓の質量の収支) と δ_E・δ_target の直近 2 窓の変動が閾値を超えても抽出・次の壁の入力を作る。"
+                         "実測の値を記録し settled: false (落ち着いていない場からの設計) にする。判定不能 (記録の欠け・窓を覆わない・点数・"
+                         "非有限・held・欠測)・y₁⁺・参照・ω・被覆・held・次の壁は通さない")
     a = ap.parse_args(argv)
+    for flag, v in (("--allow-not-reached", a.allow_not_reached), ("--allow-unconverged", a.allow_unconverged),
+                    ("--allow-unsettled", a.allow_unsettled)):
+        if v is not None and not v.strip():
+            ap.error(f"{flag} には上書きの理由の文字列を書く (空は不可)")
     if (a.euler_ref_res is None) != (a.euler_ref_sha256 is None):
         ap.error("--euler-ref-res と --euler-ref-sha256 は一緒に書く (Euler の参照のスナップショットの固定)")
     if a.euler_ref_res is not None:
@@ -1186,7 +1334,7 @@ def main(argv=None) -> int:
         a.euler_ref = {"run": a.euler_ref, "res": a.euler_ref_res, "sha256": a.euler_ref_sha256}
         resolve_euler_ref(a.euler_ref, verify=True)
     sr_arg = False if a.no_stop_rule else None      # None = 問題 YAML の evaluate.stop_rule (無ければ使わない)
-    gate_kw = dict(allow_not_reached=a.allow_not_reached, allow_unconverged=a.allow_unconverged)
+    gate_kw = dict(allow_not_reached=a.allow_not_reached, allow_unconverged=a.allow_unconverged, allow_unsettled=a.allow_unsettled)
     if a.delta_r_csv is not None:
         clash = [n for n, v in (("--init-integral", a.init_integral), ("--extract-only", a.extract_only),
                                 ("--solve-rt", a.solve_rt is not None), ("--solve-rt-throat", a.solve_rt_throat is not None)) if v]

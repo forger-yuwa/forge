@@ -21,14 +21,21 @@
       euler_ref が見つからない run は forge を起動する前に例外。stop_rule=False は NOT_USED を記録して今までの経路。
   (c) 受け渡しの制御 (`handoff_gate` と `run_from_table`・`run_pass`・`run_pass0_integral`・CLI): 状態が REACHED で収束の判定が PASS のときだけ
       抽出 (band_select="edge"・remap_constant_x=True を明示) と fixed_point.json に進む。REACHED でも収束の判定が不合格なら止める
-      (`allow_unconverged` で進む)。CENSORED・UNAVAILABLE は止める (`allow_not_reached` で進む)。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なし
+      (`allow_unconverged` で進む)。CENSORED・UNAVAILABLE は止める (`allow_not_reached` で進む)。上書きは理由の文字列 (§5.1 #36h、統合
+      integrate/design-flow-1 と同じ形; True・空・文字列でない値は ValueError、CLI は `--allow-unconverged "<理由>"`、値なし・空は終了、
+      理由は HANDOFF_GATE.json の override に残る)。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なし
       (MISSING)・収束の判定の DIVERGED・判定不能は上書きでも進まない。`run_pass` は前の pass の run の関門が不合格なら抽出・準備の前に止める
       (新しい run dir を作らない)。判定の結果は HANDOFF_GATE.json・HANDOFF_CONVERGENCE.txt に残る。CLI は止めたら終了コード 3。
       **#36e で関門に足した条件** (保存則・局所 y₁⁺・δ の 2 窓・被覆・held・次の壁) のうち、局所 y₁⁺ (`wall_resolution_verdict`) と次の壁
       (`next_wall_check`) は偽物で合格にし、δ の 2 窓は見張りの中の出力ごとの記録 (`stop_rule.delta_snapshot` の偽物) で満たす。2 窓
       ([s − 4 万, s − 2 万]・[s − 2 万, s]) を覆うため、進む側の試験は到達の後の継続 2 万 step (hold 20,000・上限 45,000) で回す。
       停止規則を使わない run (NOT_USED) は allow_not_reached でも保存則・2 窓の記録が無いので止める (#36e: 新しい条件は上書きで通さない)。
-      各条件の負例は `run_h370_prelaunch_tests.py`。
+      **落ち着きの条件の上書き (§5.1 #36h)**: 上書きなしで通った受け渡しは `settled: true`・`unsettled_overrides: []`・δ_E の作り方
+      `delta_e_source` (kind single_snapshot) を HANDOFF_GATE.json と fixed_point.json に残す。CENSORED を allow_not_reached で通すと
+      `settled: false` と上書きの記録 (状態・理由) が HANDOFF_GATE.json・fixed_point.json・run の直下の delta_r_extract_summary.json に入り、
+      その run を前の pass にした `run_pass` の新しい run の prepare_info.json (handoff_from_prev) にも写る。偽の forge の出口の密度の振動
+      (r の振幅 1 %) で CENSORED: allow_not_reached だけなら保存則で止める、`--allow-unsettled "<理由>"` を足せば進み、保存則の実測 (r の平均と
+      振幅・窓) を記録する (CLI)。各条件の負例 (上書きで通さない条件) は `run_h370_prelaunch_tests.py` の F。
   (d) 指定の無い問題の回帰: prepare_info に stop_rule の無い run の `run_staged_ns` は今までの経路 (run_forge、本段の nStepOuter は準備のまま、
       stop_rule.json・STOP_RULE_STATE.json を書かない、戻りは int と等しい)。
 
@@ -703,11 +710,19 @@ def test_handoff():
               and all(gate["checks"][c]["pass"] for c in ("conservation", "wall_resolution", "two_windows", "coverage", "next_wall"))
               and m["handoff_gate"]["proceed"], f"{gate['blocked_by']} {calls}")
         check("  判定の記録: HANDOFF_GATE.json (状態・収束の判定の行・上書きなし)・HANDOFF_CONVERGENCE.txt (check_convergence --segment の出力)",
-              {k: gate["override"][k] for k in ("allow_not_reached", "allow_unconverged")} == {"allow_not_reached": False, "allow_unconverged": False}
+              {k: gate["override"][k] for k in ("allow_not_reached", "allow_unconverged", "allow_unsettled")}
+              == {"allow_not_reached": False, "allow_unconverged": False, "allow_unsettled": False}
+              and gate["override"]["applied"] == [] and gate["override"]["allow_not_reached_reason"] is None
               and "上書きでは通さない" in gate["override"]["scope"] and "--segment" in gate["convergence"]["cmd"]
               and gate["convergence"]["cmd"][gate["convergence"]["cmd"].index("--drop") + 1] == "3"
               and (rd / DL.HANDOFF_CONVERGENCE).exists() and "OVERALL" in (rd / DL.HANDOFF_CONVERGENCE).read_text()
               and gate["extract"]["band_select"] == "edge")
+        fp = json.loads((rd / "fixed_point.json").read_text())
+        check("  #36h: 上書きなしで通った受け渡し → HANDOFF_GATE.json・fixed_point.json に settled: true・unsettled_overrides: []・"
+              "δ_E の作り方 (single_snapshot、1 枚)",
+              gate["settled"] is True and gate["unsettled_overrides"] == [] and gate["delta_e_source"]["kind"] == "single_snapshot"
+              and gate["delta_e_source"]["n_snapshots"] == 1 and fp["settled"] is True and fp["unsettled_overrides"] == []
+              and fp["delta_e_source"]["kind"] == "single_snapshot", f"{gate.get('settled')} {gate.get('delta_e_source')}")
         ok_run = rd
 
         rd, m, gate, calls = from_table("h_unconv", slow, HOLD)
@@ -716,35 +731,67 @@ def test_handoff():
               and not calls and not (rd / "fixed_point.json").exists() and not (rd / "delta_r_next.csv").exists()
               and not m["handoff_gate"]["proceed"], f"{gate['blocked_by']}")
         blocked_run = rd
-        rd, m, gate, calls = from_table("h_unconv_allow", slow, HOLD, allow_unconverged=True)
-        check("  allow_unconverged=True (明示の上書き) なら抽出へ進み、上書きを記録",
-              gate["proceed"] and gate["override"]["allow_unconverged"] and len(calls) == 1 and calls[0]["band_select"] == "edge")
+        rd, m, gate, calls = from_table("h_unconv_allow", slow, HOLD, allow_unconverged="試験: 収束の判定の上書き")
+        check("  allow_unconverged=\"<理由>\" (明示の上書き) なら抽出へ進み、上書きと理由を記録 (#36h: 理由は必須)",
+              gate["proceed"] and gate["override"]["allow_unconverged"] and len(calls) == 1 and calls[0]["band_select"] == "edge"
+              and gate["override"]["allow_unconverged_reason"] == "試験: 収束の判定の上書き"
+              and gate["override"]["allow_not_reached_reason"] is None and gate["override"]["applied"] == ["allow_unconverged"]
+              and gate["settled"] is True and gate["unsettled_overrides"] == [])
+        for name_ in ("allow_unconverged", "allow_not_reached", "allow_unsettled"):
+            for bad in (True, "", "   ", 1):
+                ok, e = raises(lambda bad=bad, name_=name_: DL.handoff_gate(blocked_run, write=False, **{name_: bad}), ValueError, "理由")
+                check(f"  #36h: {name_}={bad!r} (理由が無い・文字列でない) → ValueError", ok, e[:100])
+        g = DL.handoff_gate(blocked_run, write=False, allow_not_reached=False, allow_unconverged=False, allow_unsettled=None)
+        check("  #36h: False・None は上書きなし (2026-10-14 までの呼び出し元の False をそのまま受ける) → 今までどおり止める",
+              not g["proceed"] and g["override"]["applied"] == [] and not any(g["override"][k] for k in
+                                                                              ("allow_not_reached", "allow_unconverged", "allow_unsettled")))
+        scen["next"] = {"scenario": slow, "kw": HOLD}
+        ok, e = raises(lambda: DL.run_from_table("試験.yaml", eu, TMP / "table.csv", TMP / "h_bool_override", stages="none",
+                                                 allow_unsettled=True), ValueError, "理由")
+        check("  #36h: run_from_table に理由の無い上書き → NS の前に ValueError (run dir を作らない)",
+              ok and not (TMP / "h_bool_override").exists(), e[:100])
 
         rd, m, gate, calls = from_table("h_censored", {**fast, "osc_out": 0.01}, kw={"cap": 30000})
         check("CENSORED (rc 0) + 収束 PASS → 止める", not gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and not calls,
               f"{gate['stop_rule']['status']} {gate['convergence']['kind']}")
         # 到達 22,500 の後の保持 4 万 step が上限 45,000 までに終わらない CENSORED (r は 0・2 窓 [5,000, 25,000]・[25,000, 45,000] を覆う)
-        rd, m, gate, calls = from_table("h_censored_allow", fast, kw={"hold": 40000, "cap": 45000}, allow_not_reached=True)
-        check("  allow_not_reached=True なら CENSORED (保持の途中で上限) から進む (上書きを記録; 足した条件は満たす)",
-              gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and gate["override"]["allow_not_reached"] and len(calls) == 1,
+        rd, m, gate, calls = from_table("h_censored_allow", fast, kw={"hold": 40000, "cap": 45000},
+                                        allow_not_reached="試験: 冷却壁の入口の直管で未到達が普通 (case/70 相当)")
+        check("  allow_not_reached=\"<理由>\" なら CENSORED (保持の途中で上限) から進む (上書きと理由を記録; 足した条件は満たす)",
+              gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and gate["override"]["allow_not_reached"] and len(calls) == 1
+              and gate["override"]["allow_not_reached_reason"].startswith("試験: 冷却壁")
+              and json.loads((rd / DL.HANDOFF_GATE).read_text())["override"]["allow_not_reached_reason"].startswith("試験: 冷却壁"),
               f"{gate['stop_rule']['status']} {gate['blocked_by']}")
+        fp = json.loads((rd / "fixed_point.json").read_text())
+        es = json.loads((rd / "delta_r_extract_summary.json").read_text())
+        uo = gate["unsettled_overrides"]
+        check("  #36h: 落ち着きの条件を上書きで通した → settled: false・unsettled_overrides (allow_not_reached・状態 CENSORED・理由・停止の出力) を "
+              "HANDOFF_GATE.json・fixed_point.json・run の直下の delta_r_extract_summary.json に残す (grep '\"settled\": false')",
+              gate["settled"] is False and len(uo) == 1 and uo[0]["override"] == "allow_not_reached" and uo[0]["condition"] == "stop_state"
+              and uo[0]["status"] == "CENSORED" and uo[0]["stop_step"] == 45000 and uo[0]["reason"].startswith("試験: 冷却壁")
+              and fp["settled"] is False and fp["unsettled_overrides"] == uo and es["settled"] is False and es["unsettled_overrides"] == uo
+              and all('"settled": false' in (rd / f).read_text() for f in (DL.HANDOFF_GATE, "fixed_point.json", "delta_r_extract_summary.json"))
+              and gate["override"]["applied"] == ["allow_not_reached"], f"{gate.get('settled')} {uo}")
+        unsettled_run = rd
 
         SR.fix_band = lambda *a, **k: (_ for _ in ()).throw(SR.Unavailable("試験: 抽出が失敗"))
         rd, m, gate, calls = from_table("h_unavail", fast)
         SR.fix_band = fake_band
         check("UNAVAILABLE (rc 0) → 止める", not gate["proceed"] and gate["stop_rule"]["status"] == "UNAVAILABLE" and not calls)
 
-        rd, m, gate, calls = from_table("h_diverged", {**fast, "nan_at": 12500}, allow_not_reached=True, allow_unconverged=True)
-        check("DIVERGED は上書き (allow_not_reached・allow_unconverged) でも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "DIVERGED"
+        both = dict(allow_not_reached="試験: 上書き", allow_unconverged="試験: 上書き", allow_unsettled="試験: 上書き")
+        rd, m, gate, calls = from_table("h_diverged", {**fast, "nan_at": 12500}, **both)
+        check("DIVERGED は上書き (allow_not_reached・allow_unconverged・allow_unsettled) でも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "DIVERGED"
               and not calls, f"{gate['blocked_by']}")
-        rd, m, gate, calls = from_table("h_exec", {**fast, "exit_at": 15000}, allow_not_reached=True, allow_unconverged=True)
+        rd, m, gate, calls = from_table("h_exec", {**fast, "exit_at": 15000}, **both)
         check("EXEC_ERROR は上書きでも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "EXEC_ERROR" and not calls)
 
         rd, m, gate, calls = from_table("h_notused", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False})
         check("停止規則を使わない run (指定の無い問題、NOT_USED) → 既定は止める (従来は抽出へ進んだ)",
               not gate["proceed"] and gate["stop_rule"]["status"] == "NOT_USED" and not calls and SR.read_state(rd) is None)
-        rd, m, gate, calls = from_table("h_notused_allow", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False}, allow_not_reached=True)
-        check("  allow_not_reached=True でも NOT_USED は止める (#36e: 保存則・2 窓の記録 stop_rule.json が無い。足した条件は上書きで通さない)",
+        rd, m, gate, calls = from_table("h_notused_allow", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False}, **both)
+        check("  上書き 3 つ (理由つき、allow_unsettled を含む) でも NOT_USED は止める (#36e: 保存則・2 窓の記録 stop_rule.json が無い = 判定不能。"
+              "#36h: 判定不能は allow_unsettled でも通さない)",
               not gate["proceed"] and not calls and not gate["checks"]["conservation"]["pass"] and not gate["checks"]["two_windows"]["pass"]
               and gate["convergence"]["kind"] == "PASS", f"{gate['blocked_by']}")
 
@@ -752,13 +799,13 @@ def test_handoff():
         miss = TMP / "h_missing"
         shutil.copytree(ok_run, miss)
         (miss / SR.STATE).unlink()
-        g = DL.handoff_gate(miss, allow_not_reached=True, allow_unconverged=True)
+        g = DL.handoff_gate(miss, **both)
         check("記録なし (MISSING) は上書きでも止める", not g["proceed"] and g["stop_rule"]["status"] == "MISSING", f"{g['blocked_by']}")
         # 収束の判定不能 (stage_manifest.json が無い) は上書きでも止める
         und = TMP / "h_undetermined"
         shutil.copytree(ok_run, und)
         (und / "stage_manifest.json").unlink()
-        g = DL.handoff_gate(und, allow_not_reached=True, allow_unconverged=True)
+        g = DL.handoff_gate(und, **both)
         check("収束の判定不能 (--segment に stage_manifest.json が無い) は上書きでも止める", not g["proceed"]
               and g["convergence"]["kind"] == "UNDETERMINED", f"{g['convergence']['verdict']}")
 
@@ -779,6 +826,19 @@ def test_handoff():
         check("run_pass: 前の run の関門の結果を新しい run の prepare_info.json (handoff_from_prev) に残す (前の run には書かない)",
               pi.get("handoff_from_prev", {}).get("proceed") is True and pi["handoff_from_prev"]["run"] == str(ok_run)
               and info.get("handoff_from_prev") is not None)
+        scen["next"] = {"scenario": fast, "kw": HOLD}
+        CALLS.clear()
+        nxt = TMP / "p_from_unsettled"
+        ok, msg = raises(lambda: DL.run_pass("試験.yaml", eu, unsettled_run, nxt, stages="none", prepare_only=True), DL.HandoffBlocked, "前の pass")
+        check("run_pass: 前の pass の run が CENSORED (上書きなし) → 止める", ok and not nxt.exists(), msg[:120])
+        CALLS.clear()
+        DL.run_pass("試験.yaml", eu, unsettled_run, nxt, stages="none", prepare_only=True, allow_not_reached="試験: 未到達のまま設計へ")
+        pi = json.loads((nxt / "prepare_info.json").read_text())
+        hp = pi.get("handoff_from_prev") or {}
+        check("  #36h: allow_not_reached (理由つき) で通すと、新しい run の prepare_info.json (handoff_from_prev) に settled: false・"
+              "unsettled_overrides (= 落ち着いていない場から作った壁の run) が入る",
+              len(CALLS) == 1 and hp.get("settled") is False and hp["unsettled_overrides"][0]["reason"] == "試験: 未到達のまま設計へ"
+              and '"settled": false' in (nxt / "prepare_info.json").read_text(), f"{hp.get('settled')}")
         CALLS.clear()
         scen["next"] = {"scenario": slow}
         nxt = TMP / "p_run_unconv"
@@ -808,8 +868,43 @@ def test_handoff():
         check("CLI --delta-r-csv: 関門が不合格 → 終了コード 3", rc == 3, f"rc {rc}")
         scen["next"] = {"scenario": slow, "kw": HOLD}
         rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_allow"),
-                      "--stages", "none", "--allow-unconverged"])
-        check("CLI --allow-unconverged → 進む (終了コード 0)", rc == 0, f"rc {rc}")
+                      "--stages", "none", "--allow-unconverged", "試験: CLI の上書き"])
+        g = json.loads((TMP / "cli_allow" / DL.HANDOFF_GATE).read_text())
+        check("CLI --allow-unconverged \"<理由>\" → 進む (終了コード 0)、理由を HANDOFF_GATE.json に残す",
+              rc == 0 and g["override"]["allow_unconverged_reason"] == "試験: CLI の上書き", f"rc {rc}")
+        for argv_tail, label in ((["--allow-unconverged", "  "], "--allow-unconverged の空の理由"),
+                                 (["--allow-not-reached"], "--allow-not-reached の理由なし"),
+                                 (["--allow-unsettled"], "--allow-unsettled の理由なし"),
+                                 (["--allow-unsettled", ""], "--allow-unsettled の空の理由")):
+            try:
+                DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"),
+                         "--run-dir", str(TMP / "cli_bad_override"), "--stages", "none", *argv_tail])
+                ok, e = False, "終了しない"
+            except SystemExit as ex:
+                ok, e = ex.code == 2, f"SystemExit {ex.code}"
+            check(f"CLI {label} → argparse の誤り (終了コード 2)・run dir を作らない", ok and not (TMP / "cli_bad_override").exists(), e)
+        # 出口の密度の振動 1 % (r の振幅 1 % > 0.5 %): 停止規則は届かず上限 45,000 で CENSORED。2 窓 [5,000, 25,000]・[25,000, 45,000] は覆う
+        osc = {"scenario": {**fast, "osc_out": 0.01}, "kw": {"cap": 45000}}
+        scen["next"] = dict(osc)
+        rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_unsettled_nr"),
+                      "--stages", "none", "--allow-not-reached", "試験: 未到達"])
+        g = json.loads((TMP / "cli_unsettled_nr" / DL.HANDOFF_GATE).read_text())
+        check("CLI --allow-not-reached だけ (r の振幅 1 % の CENSORED) → 保存則で止める (終了コード 3)",
+              rc == 3 and g["stop_rule"]["status"] == "CENSORED" and g["checks"]["conservation"].get("measured") is True
+              and not g["checks"]["conservation"]["pass"] and any("保存則" in b for b in g["blocked_by"]), f"rc {rc} {g['blocked_by']}")
+        scen["next"] = dict(osc)
+        rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_unsettled"),
+                      "--stages", "none", "--allow-not-reached", "試験: 未到達", "--allow-unsettled", "試験: 実用として区切る (case/70 相当)"])
+        g = json.loads((TMP / "cli_unsettled" / DL.HANDOFF_GATE).read_text())
+        cons = [u for u in g["unsettled_overrides"] if u["condition"] == "conservation"]
+        fp = json.loads((TMP / "cli_unsettled" / "fixed_point.json").read_text())
+        check("CLI --allow-not-reached + --allow-unsettled \"<理由>\" → 進む (終了コード 0)、settled: false、保存則の実測 (r の平均と振幅・窓・閾値) と"
+              "理由を unsettled_overrides に記録、fixed_point.json にも同じ印",
+              rc == 0 and g["settled"] is False and len(cons) == 1 and cons[0]["reason"].startswith("試験: 実用として")
+              and abs(cons[0]["r_amp"] - 0.01) < 2e-3 and cons[0]["window"] == [25000, 45000] and cons[0]["r_amp_max"] == 0.005
+              and g["override"]["applied"] == ["allow_not_reached", "allow_unsettled"]
+              and g["override"]["allow_unsettled_reason"].startswith("試験: 実用として")
+              and fp["settled"] is False and fp["unsettled_overrides"] == g["unsettled_overrides"], f"rc {rc} {g['unsettled_overrides']}")
         rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--prev", str(blocked_run), "--run-dir", str(TMP / "cli_prev_blocked"),
                       "--stages", "none"])
         check("CLI (run_pass): 前の pass の run が不合格 → 終了コード 3・run dir を作らない", rc == 3 and not (TMP / "cli_prev_blocked").exists())
