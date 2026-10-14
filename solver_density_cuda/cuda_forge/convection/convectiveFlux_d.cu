@@ -228,6 +228,18 @@ void convectiveFlux_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& m
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLog,       &clog, sizeof(int)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactLogThresh, &lth,  sizeof(flow_float)));
             CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_contactBlend,     &blend,sizeof(flow_float)));
+            if (const char* e = getenv("FORGE_DIAG_CONV_FACES")) {   // 診断 (右辺を変える。既定 off、plan tooling-nozzle-core-grid §4.52)
+                const int mode = atoi(e);
+                if (mode < 0 || mode > 3) throw std::runtime_error("FORGE_DIAG_CONV_FACES must be 0..3");
+                if (mode != 0 && (msh.line_prev_d == nullptr || msh.line_next_d == nullptr))
+                    throw std::runtime_error("FORGE_DIAG_CONV_FACES needs lineImplicit (line adjacency)");
+                const geom_int* lp = msh.line_prev_d; const geom_int* ln = msh.line_next_d;
+                CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagConvFaceMode, &mode, sizeof(int)));
+                CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagLinePrev, &lp, sizeof(const geom_int*)));
+                CHECK_CUDA_ERROR(cudaMemcpyToSymbol(g_diagLineNext, &ln, sizeof(const geom_int*)));
+                std::cout << "[FORGE_DIAG_CONV_FACES] **警告: 右辺を変える診断** SLAU の平均流の残差への加算を面で絞る: mode " << mode
+                          << " (1 = ライン外の面だけ、2 = ライン面だけ、3 = 加えない)。生産で使わない" << std::endl;
+            }
             if (const char* e = getenv("FORGE_DIAG_FACE_VEL_CELL")) {   // 診断介入 (数値を変える。既定 off)
                 std::string v(e);
                 const size_t c = v.find(':');

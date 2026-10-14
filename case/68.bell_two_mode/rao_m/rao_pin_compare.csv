@@ -1,0 +1,45 @@
+comparison,quantity,unit,hall,pin,pin_minus_hall,target_abs,within_target
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),theta_B_deg,°,29.7563747,29.80086497,0.04449027834,0.1,True
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),theta_E_deg,°,5.255403701,5.250644989,-0.00475871163,0.1,True
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),theta_max_deg,°,30.71399326,30.72643365,0.01244038633,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),x_B,r_t,0.4963130959,0.4969870613,0.00067396541,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),x_D,r_t,7.192166626,7.190200617,-0.001966008973,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),r_D,r_t,1.287485662,1.286328736,-0.001156925561,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),M_D,,4.163844368,4.161646055,-0.002198313162,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),x_E,r_t,22.65753353,22.65753353,-3.268496584e-13,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),M_E,,4.31618861,4.314070702,-0.002117908555,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),F_cs,ρ*a*²r_t²,8.633014011,8.657620802,0.02460679067,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),F_wall,ρ*a*²r_t²,8.633113267,8.65773367,0.02462040268,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),thrust_rel_diff,,-1.149728344e-05,-1.303686327e-05,-1.539579837e-06,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),mdot_rel_diff,,-1.123401724e-05,-8.343432952e-06,2.890584287e-06,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),eta_cs,,0.987530158,0.9903449279,0.002814769887,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),eta_wall,,0.9875415119,0.9903578389,0.002816326965,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),mstar_ratio_1d,,0.9897055633,0.992622378,0.002916814621,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),F_per_mdot_ratio,,0.9978019672,0.9977056229,-9.634427157e-05,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),dkappa_B,1/r_t,-0.9224165518,-0.9256042024,-0.003187650575,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),g_tilde,rad/r_t,-0.06900794405,-0.06903865976,-3.071571246e-05,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),closure_norm,r_t,6.767527922e-06,6.753819924e-06,-1.370799831e-08,,
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),wall_r_fit_all,r_t,,,0.0009456998097,0.001,True
+pin_mq320_vs_hall_mq2 (Euler run_0015 の壁と同じ m・q),wall_r_fit_x3.4_5.3,r_t,,,0.0008220714844,0.001,True
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),theta_B_deg,°,29.7563747,29.80086497,0.04449027834,0.1,True
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),theta_E_deg,°,5.255403701,5.250644989,-0.00475871163,0.1,True
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),theta_max_deg,°,30.71401159,30.72645661,0.01244501715,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),x_B,r_t,0.4963130959,0.4969870613,0.00067396541,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),x_D,r_t,7.192166626,7.190200617,-0.001966008973,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),r_D,r_t,1.287485662,1.286328736,-0.001156925561,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),M_D,,4.163844368,4.161646055,-0.002198313162,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),x_E,r_t,22.65753353,22.65753353,-3.268496584e-13,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),M_E,,4.31618861,4.314070702,-0.002117908555,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),F_cs,ρ*a*²r_t²,8.633014011,8.657620802,0.02460679067,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),F_wall,ρ*a*²r_t²,8.633100856,8.657733343,0.0246324872,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),thrust_rel_diff,,-1.005959019e-05,-1.299908129e-05,-2.939491098e-06,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),mdot_rel_diff,,-1.123401724e-05,-8.343432952e-06,2.890584287e-06,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),eta_cs,,0.987530158,0.9903449279,0.002814769887,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),eta_wall,,0.9875400922,0.9903578015,0.002817709313,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),mstar_ratio_1d,,0.9897055633,0.992622378,0.002916814621,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),F_per_mdot_ratio,,0.9978019672,0.9977056229,-9.634427157e-05,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),dkappa_B,1/r_t,-0.9224118512,-0.9255978804,-0.0031860292,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),g_tilde,rad/r_t,-0.06900794405,-0.06903865976,-3.071571246e-05,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),closure_norm,r_t,6.725451469e-06,6.711828701e-06,-1.362276784e-08,,
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),wall_r_fit_all,r_t,,,0.0009454385392,0.001,True
+pin_mq321_vs_hall_mq321 (今の既定 m = q = n),wall_r_fit_x3.4_5.3,r_t,,,0.0008222593809,0.001,True

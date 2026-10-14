@@ -169,3 +169,279 @@ class NozzleWall:
         if np.any(d[m_con] > 1e-9):
             msgs.append("収縮区間で半径が増加")
         return msgs
+
+
+class DirectBellWall:
+    r"""③ベル (D) 直接モードの壁 (`wall_bell_c2.BellC2Wall`) を runner の壁の口 (`x_in`・`x_e`・`r(x)`・`r(x, 1)`・`drdx`) に
+    合わせる薄い包み (plan tooling-nozzle-bell-two-mode §5.1 #3f)。値は `BellC2Wall.r` そのまま (C2 スロート・U→T Hermite の収縮部・
+    拡大部の 5 次 B-spline)。スロートは $(0, 1)$ (IC の `_throat_of` の既定と同じ)。
+
+    `BellC2Wall.r` は $[x_{in}, L]$ の外で `ValueError` にする。格子座標を書き戻した節点・双対重心は丸めで端をわずかに出るので、
+    端から `END_TOL` ($r_t$ 単位) 以内だけ端へ寄せて評価する (それより外は従来どおり例外: 黙って外挿しない)。"""
+
+    END_TOL = 1.0e-9
+
+    def __init__(self, c2wall) -> None:
+        self.c2 = c2wall
+        self.x_in = float(c2wall.x_in)
+        self.x_e = float(c2wall.L)
+        self.x_throat, self.r_throat = 0.0, 1.0
+
+    def _clip(self, x):
+        x = np.asarray(x, dtype=float)
+        tol = self.END_TOL * max(1.0, abs(self.x_in), abs(self.x_e))
+        if np.any(x < self.x_in - tol) or np.any(x > self.x_e + tol):
+            raise ValueError(f"DirectBellWall: x が [{self.x_in}, {self.x_e}] の外 (端の許容 {tol:.1e})")
+        return np.clip(x, self.x_in, self.x_e)
+
+    def r(self, x, deriv: int = 0):
+        return np.asarray(self.c2.r(self._clip(x), deriv), dtype=float)
+
+    def drdx(self, x):
+        return self.r(x, 1)
+
+
+class RaoBellWall:
+    r"""③ベル (M) 特性曲線モードの壁 (plan tooling-nozzle-bell-two-mode §4.2・§4.4・§5.1 #6 (W1))。runner の壁の口
+    (`x_in`・`x_e`・`r(x)`・`r(x, 1)`・`drdx`・スロート `(x_throat, r_throat)` = (0, 1)) に合わせる。
+
+    - 入口直管 ($x<-L_U$、半径 $r_U=\sqrt{CR}$) → 収縮部 ($-L_U\le x<0$、U→T 5 次 Hermite `wall_walldriven.UpstreamThroatPoly`;
+      (D) の `BellC2Wall` と同じ部品・同じ寸法 spec `BellC2Spec`) → 拡大部 ($0\le x\le x_e$、`rao_axisym.RaoWall`: 円弧 kernel
+      [曲率半径 $R_t$、閉じた式] + BE [生成器の壁点列の罰則付き 5 次 B-spline])。
+    - **スロートで C2**: 収縮部の終端 $(1, 0, 1/R_t)$ と円弧の始端 $(1, 0, 1/R_t)$ が一致する (構成上。`throat_jump` で検査)。
+    - **B で C1**: 円弧の終端と BE の始端で $r$・$r'$ が一致 (BE の当てはめの拘束)。曲率は跳ぶ ($\Delta\kappa_B$、`B_jump`) —
+      (M) は古典どおり円弧 kernel (plan §4.4「(M) は円弧 kernel・B で C1」)。
+    - 出口 $x_e$ = BE の終点 (生成器の E)。$x_e$ より先 (`RaoWall` の接線の延長) は使わない。
+
+    `r(x, deriv)` は deriv 0..2 ($r''$ は記録と試験用: 円弧は閉じた式、BE は B-spline の 2 階微分)。$[x_{in},x_e]$ の外は
+    `ValueError` (端から `END_TOL` 以内の丸めだけ端へ寄せる — `DirectBellWall` と同じ)。
+    `offset` (`DisplacementOffset`、既定なし): δ* 補正の物理壁 = 非粘性壁 + δ(x) (固定 x の半径方向、拡大部だけ。
+    δ はスロートで値・1・2 階が 0 なので、スロートの C2 と物理スロートの r・r′・r″ は変わらない — plan §5.1 #7 (7b-4))。
+    `perturb` (`RaoPerturbation`、既定なし): 物理壁にさらに足す B〜E の摂動 (plan §5.1 #8c。B で値・傾き 0、E で値 0)。"""
+
+    END_TOL = 1.0e-9
+
+    def __init__(self, rao_wall, spec, offset=None, perturb=None) -> None:
+        from .wall_walldriven import UpstreamThroatPoly
+        spec.check()
+        if abs(float(rao_wall.R_t) - float(spec.R_t)) > 1e-9 * float(spec.R_t):
+            raise ValueError(f"RaoBellWall: 壁の R_t {rao_wall.R_t} と寸法 spec の R_t {spec.R_t} が違う (スロートで C2 にならない)")
+        self.rao, self.spec, self.offset, self.perturb = rao_wall, spec, offset, perturb
+        if offset is not None and abs(float(offset.x_end) - float(rao_wall.x_end)) > 1e-6 * max(1.0, float(rao_wall.x_end)):
+            raise ValueError(f"RaoBellWall: δ* のずれの終点 {offset.x_end} と非粘性壁の終点 {rao_wall.x_end} が違う")
+        self.up = UpstreamThroatPoly(r_U=spec.r_U, R_t=spec.R_t, L_U=spec.L_U, r_t=1.0)
+        self.x_in = -float(spec.L_U) - float(spec.L_pipe)
+        self.x_e = float(rao_wall.x_end)
+        self.x_B = float(rao_wall.x_B)
+        self.x_throat, self.r_throat = 0.0, 1.0
+        self._d2spl = rao_wall.spl.derivative(2)
+
+    def _clip(self, x):
+        x = np.asarray(x, dtype=float)
+        tol = self.END_TOL * max(1.0, abs(self.x_in), abs(self.x_e))
+        if np.any(x < self.x_in - tol) or np.any(x > self.x_e + tol) or not np.all(np.isfinite(x)):
+            raise ValueError(f"RaoBellWall: x が [{self.x_in}, {self.x_e}] の外 (端の許容 {tol:.1e}) または非有限")
+        return np.clip(x, self.x_in, self.x_e)
+
+    def _expansion(self, x, deriv: int):
+        """拡大部 $[0, x_e]$ の $r^{(deriv)}$ (deriv 0..2)。δ* のずれ (`offset`) があれば足す (物理壁 = 非粘性壁 + δ)。"""
+        out = self._expansion_inviscid(x, deriv)
+        if self.offset is not None:
+            out = out + self.offset(x, deriv)
+        if self.perturb is not None:
+            out = out + self.perturb(x, deriv)
+        return out
+
+    def _expansion_inviscid(self, x, deriv: int):
+        if deriv in (0, 1):
+            return np.asarray(self.rao.r(x, deriv), dtype=float)
+        R = float(self.rao.R_t)
+        out = np.empty_like(x)
+        k = x <= self.x_B
+        out[k] = R * R / np.maximum(R * R - x[k] * x[k], 1e-300) ** 1.5
+        out[~k] = self._d2spl(x[~k])
+        return out
+
+    def r(self, x, deriv: int = 0):
+        if deriv not in (0, 1, 2):
+            raise ValueError("RaoBellWall.r: deriv は 0..2")
+        x = np.asarray(x, dtype=float)
+        xa = np.atleast_1d(self._clip(x))
+        out = np.empty_like(xa)
+        m_pipe = xa < -self.spec.L_U
+        m_con = (xa >= -self.spec.L_U) & (xa < 0.0)
+        m_exp = xa >= 0.0
+        out[m_pipe] = self.spec.r_U if deriv == 0 else 0.0
+        if np.any(m_con):
+            out[m_con] = self.up.r(xa[m_con], deriv)
+        if np.any(m_exp):
+            out[m_exp] = self._expansion(xa[m_exp], deriv)
+        return out.reshape(np.shape(x))
+
+    def drdx(self, x):
+        return self.r(x, 1)
+
+    def throat_jump(self) -> dict:
+        """スロート $x=0$ での収縮部 (左) と円弧 (右) の $r$・$r'$・$r''$ の差 (C2 なら丸めの範囲で 0)。"""
+        z = np.array([0.0])
+        return {k: float(self._expansion(z, k)[0] - self.up.r(z, k)[0]) for k in (0, 1, 2)}
+
+    def B_jump(self) -> dict:
+        r"""B での BE (右) と円弧 (左) の差: $r$・$r'$ (C1 なら丸めの範囲で 0) と $r''$・曲率 $\kappa$ の跳び (円弧 kernel では非零)。
+        非粘性壁の値 (δ* のずれは C2 なので跳びを変えない)。"""
+        R, xB = float(self.rao.R_t), self.x_B
+        left = (1.0 + R - np.sqrt(R * R - xB * xB), xB / np.sqrt(R * R - xB * xB), R * R / (R * R - xB * xB) ** 1.5)
+        right = (float(self.rao.spl(xB)), float(self.rao.dspl(xB)), float(self._d2spl(xB)))
+        kap = lambda rp, rpp: rpp / (1.0 + rp * rp) ** 1.5  # noqa: E731
+        return {0: right[0] - left[0], 1: right[1] - left[1], 2: right[2] - left[2],
+                "kappa_left": kap(left[1], left[2]), "kappa_right": kap(right[1], right[2]),
+                "dkappa": kap(right[1], right[2]) - kap(left[1], left[2])}
+
+    def validate(self, n: int = 4001) -> list:
+        """壁の破綻の検査 (空なら OK): 収縮部の単調性 (`UpstreamThroatPoly.validate`)、拡大部で $r'\\ge0$ (最小半径がスロート)、
+        半径が正。"""
+        msgs = [f"収縮部: {m}" for m in self.up.validate()]
+        xs = np.linspace(0.0, self.x_e, int(n))
+        rp = self.r(xs, 1)
+        if float(rp.min()) < -1e-12:
+            msgs.append(f"拡大部で r' < 0 (最小 {float(rp.min()):.3e} @ x = {float(xs[int(np.argmin(rp))]):.4g})")
+        rr = self.r(np.r_[np.linspace(self.x_in, self.x_e, int(n)), 0.0])
+        if float(rr.min()) < 1.0 - 1e-12:
+            msgs.append(f"最小半径 {float(rr.min()):.12g} がスロートの 1 を下回る")
+        return msgs
+
+
+class DisplacementOffset:
+    r"""δ* 補正の半径方向のずれ $\delta(x)$ (plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-4))。物理壁 = 非粘性壁 + $\delta(x)$。
+
+    $\delta(x)=f(x)\,S(t)$、$f$ = 較正した理論式 $k_\delta C(x)$ の 3 次の平滑化スプライン (`make_smoothing_spline`、λ は GCV、
+    $x\in[0,x_{end}]$)、$S$ = 5 次の滑らかな立ち上げ $10t^3-15t^4+6t^5$ ($t=(x-a)/(b-a)$ を [0, 1] に切る)。$S$ の 0・1・2 階は
+    $t=0$ で 0 なので、$a\ge0$ なら $x\le a$ で $\delta=\delta'=\delta''=0$ (スロートの $r$・$r'$・$r''$ を保つ)。$t\ge1$ では $\delta=f$。
+    `__call__(x, deriv)` は deriv 0..2 (積の微分)。保存は npz (スプラインの t・c・k、立ち上げ、終点、来歴の JSON)。"""
+
+    def __init__(self, spl, ramp, x_end: float, meta: dict | None = None, fit_info: dict | None = None) -> None:
+        a, b = float(ramp[0]), float(ramp[1])
+        if not (0.0 <= a < b <= float(x_end)):
+            raise ValueError(f"DisplacementOffset: 立ち上げ [{a}, {b}] は 0 ≤ a < b ≤ x_end ({x_end})")
+        self.spl, self.ramp, self.x_end = spl, (a, b), float(x_end)
+        self.meta = dict(meta or {})
+        self.fit_info = dict(fit_info or {})
+        self._d = [spl, spl.derivative(1), spl.derivative(2)]
+
+    END_WEIGHT = 1.0e8   # 終点の重み: 出口の δ を較正値に (ほぼ) 一致させる — ε_inv = (√ε − δ_E)² と物理壁の出口半径 √ε の整合
+
+    @classmethod
+    def fit(cls, x, d, ramp, meta: dict | None = None, lam: float | None = None) -> "DisplacementOffset":
+        """`x` は 0 から始まる単調増加 (先頭は x = 0 の点)。λ は既定 GCV。終点は重み `END_WEIGHT` で値に寄せる。"""
+        from scipy.interpolate import make_smoothing_spline
+        x, d = np.asarray(x, float), np.asarray(d, float)
+        if np.any(np.diff(x) <= 0.0) or abs(x[0]) > 1e-12 or not np.all(np.isfinite(d)):
+            raise ValueError("DisplacementOffset.fit: x は 0 から単調増加・d は有限")
+        w = np.ones_like(x); w[-1] = cls.END_WEIGHT
+        spl = make_smoothing_spline(x, d, w=w, lam=lam)
+        res = spl(x) - d
+        info = {"n": int(len(x)), "lam": lam, "lam_rule": "GCV" if lam is None else "given", "end_weight": cls.END_WEIGHT,
+                "fit_rms": float(np.sqrt(np.mean(res ** 2))), "fit_max": float(np.max(np.abs(res))),
+                "fit_end_resid": float(res[-1]),
+                "fit_rel_max_x_ge_0p1": float(np.max(np.abs(res[x >= 0.1] / d[x >= 0.1])))}
+        return cls(spl, ramp, float(x[-1]), meta, info)
+
+    @staticmethod
+    def _S(t, deriv):
+        if deriv == 0:
+            return t * t * t * (10.0 - 15.0 * t + 6.0 * t * t)
+        if deriv == 1:
+            return 30.0 * t * t * (1.0 - t) ** 2
+        return 60.0 * t * (1.0 - t) * (1.0 - 2.0 * t)
+
+    def __call__(self, x, deriv: int = 0):
+        if deriv not in (0, 1, 2):
+            raise ValueError("DisplacementOffset: deriv は 0..2")
+        x = np.asarray(x, float)
+        a, b = self.ramp
+        h = b - a
+        xc = np.clip(x, 0.0, self.x_end)
+        t = np.clip((xc - a) / h, 0.0, 1.0)
+        f = [self._d[k](xc) for k in range(deriv + 1)]
+        S = [self._S(t, k) / h ** k for k in range(deriv + 1)]
+        if deriv == 0:
+            out = f[0] * S[0]
+        elif deriv == 1:
+            out = f[1] * S[0] + f[0] * S[1]
+        else:
+            out = f[2] * S[0] + 2.0 * f[1] * S[1] + f[0] * S[2]
+        return np.where(x >= 0.0, out, 0.0)   # x > x_end は終点の値で頭打ち (壁の終点との丸めの差で 0 に落とさない)
+
+    def save(self, path) -> None:
+        import json
+        np.savez(path, t=self.spl.t, c=self.spl.c, k=np.array(self.spl.k), ramp=np.array(self.ramp), x_end=np.array(self.x_end),
+                 meta=np.array(json.dumps(self.meta, ensure_ascii=False)), fit_info=np.array(json.dumps(self.fit_info)))
+
+    @classmethod
+    def load(cls, path) -> "DisplacementOffset":
+        import json
+        from scipy.interpolate import BSpline
+        with np.load(path) as z:
+            spl = BSpline(z["t"], z["c"], int(z["k"]))
+            return cls(spl, tuple(z["ramp"]), float(z["x_end"]), json.loads(str(z["meta"])), json.loads(str(z["fit_info"])))
+
+    def record(self) -> dict:
+        xs = np.linspace(0.0, self.x_end, 20001)
+        d1, d2 = self(xs, 1), self(xs, 2)
+        z = np.array([0.0])
+        return {**self.fit_info, "ramp": list(self.ramp), "x_end": self.x_end, "meta": self.meta,
+                "d0": float(self(z)[0]), "d1_0": float(self(z, 1)[0]), "d2_0": float(self(z, 2)[0]),
+                "delta_end": float(self(np.array([self.x_end]))[0]),
+                "d1_min": float(d1.min()), "d1_max": float(d1.max()), "x_d1_max": float(xs[int(np.argmax(d1))]),
+                "d2_absmax": float(np.max(np.abs(d2))), "x_d2_absmax": float(xs[int(np.argmax(np.abs(d2)))])}
+
+
+class RaoPerturbation:
+    r"""(M) の物理壁の B〜E に足す摂動 $\sum_k a_k\,\eta_k(t)$、$t=(x-x_B)/(x_E-x_B)$ (plan tooling-nozzle-bell-two-mode §5.1 #8c)。
+
+    族 `"sin2_sin"`: $\eta_k(t)=\sin^2(\pi t/2)\sin(k\pi t)$ — $\eta_k(0)=\eta_k'(0)=\eta_k(1)=0$、$\eta_k'(1)=k\pi(-1)^k$
+    (B で値・傾き 0 = 円弧との C1、E で値 0 = 出口半径を保つ、E の傾きは自由 = 出口の角を固定しない)。
+    `__call__(x, deriv)` は deriv 0..2、区間の外は 0。"""
+
+    FAMILIES = ("sin2_sin",)
+
+    def __init__(self, coeffs, x_B: float, x_E: float, family: str = "sin2_sin") -> None:
+        if family not in self.FAMILIES:
+            raise ValueError(f"RaoPerturbation: family は {self.FAMILIES}")
+        if not (float(x_E) > float(x_B)):
+            raise ValueError("RaoPerturbation: x_E > x_B")
+        self.a = np.asarray(coeffs, dtype=float)
+        if not np.all(np.isfinite(self.a)):
+            raise ValueError("RaoPerturbation: 係数が非有限")
+        self.x_B, self.x_E, self.family = float(x_B), float(x_E), family
+
+    @staticmethod
+    def _eta(t, k: int, deriv: int):
+        # η = s²·g、s = sin(πt/2)、g = sin(kπt)
+        p, q = 0.5 * np.pi, k * np.pi
+        s, c = np.sin(p * t), np.cos(p * t)
+        g, gp, gpp = np.sin(q * t), q * np.cos(q * t), -q * q * np.sin(q * t)
+        f, fp, fpp = s * s, 2.0 * p * s * c, 2.0 * p * p * (c * c - s * s)
+        if deriv == 0:
+            return f * g
+        if deriv == 1:
+            return fp * g + f * gp
+        return fpp * g + 2.0 * fp * gp + f * gpp
+
+    def __call__(self, x, deriv: int = 0):
+        if deriv not in (0, 1, 2):
+            raise ValueError("RaoPerturbation: deriv は 0..2")
+        x = np.asarray(x, dtype=float)
+        h = self.x_E - self.x_B
+        t = (x - self.x_B) / h
+        m = (t > 0.0) & (t <= 1.0 + 1e-12)
+        tt = np.clip(t, 0.0, 1.0)
+        out = np.zeros_like(x, dtype=float)
+        for k, a in enumerate(self.a, start=1):
+            if a != 0.0:
+                out = out + a * self._eta(tt, k, deriv) / h ** deriv
+        return np.where(m, out, 0.0)
+
+    def record(self) -> dict:
+        return {"family": self.family, "coeffs": self.a.tolist(), "x_B": self.x_B, "x_E": self.x_E,
+                "end_slope_change": float(self(np.array([self.x_E]), 1)[0])}

@@ -1,0 +1,241 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.82",
+ "C": "run_0688_pp_c",
+ "P": "run_0689_pp_p3",
+ "qualification": {
+  "precond_effective": true,
+  "same_start_and_rhs": true,
+  "boundary_not_frozen": true,
+  "composition_uniform": true,
+  "control_finite": true,
+  "physical": true
+ },
+ "ratios_P_over_C": {
+  "10000-15000": {
+   "contraction_res_ro": 12.168747045704816,
+   "contraction_res_roe": 10.773464058216852,
+   "contraction_res_roUx": 4.351100965759399,
+   "contraction_res_roUy": 4.083665124831827,
+   "contraction_res_roK": 8.461396302860827,
+   "contraction_res_roOmega": 2.035518165923085,
+   "outside_res_ro": 1.9895367485616289,
+   "outside_res_roUx": 0.986528876006867,
+   "outside_res_roUy": 0.7749008981365871,
+   "outside_res_roe": 1.0370900991629586,
+   "outside_res_roK": 0.8412322016379471,
+   "outside_res_roOmega": 0.8604240425429937
+  },
+  "15000-20000": {
+   "contraction_res_ro": 20.780276670123744,
+   "contraction_res_roe": 18.81962786805655,
+   "contraction_res_roUx": 6.762319241620202,
+   "contraction_res_roUy": 6.042456125883554,
+   "contraction_res_roK": 11.222054031484557,
+   "contraction_res_roOmega": 2.8908256359781284,
+   "outside_res_ro": 3.1322565251889563,
+   "outside_res_roUx": 1.2554608493618542,
+   "outside_res_roUy": 1.1948717195428211,
+   "outside_res_roe": 1.7594880472727124,
+   "outside_res_roK": 0.9602037837351269,
+   "outside_res_roOmega": 2.1819338507624386
+  }
+ },
+ "first_last_contraction": {
+  "run_0688_pp_c": {
+   "res_ro": [
+    216.52584897412754,
+    48.76201046089865
+   ],
+   "res_roe": [
+    113422447.87610416,
+    13245141.950229192
+   ]
+  },
+  "run_0689_pp_p3": {
+   "res_ro": [
+    686.4452986124746,
+    1295.970338139785
+   ],
+   "res_roe": [
+    149311529.06005803,
+    317885474.1854692
+   ]
+  }
+ },
+ "series": {
+  "run_0688_pp_c": [
+   {
+    "step": 2500,
+    "ro": 216.52584897412754,
+    "roe": 113422447.87610416,
+    "roOmega_all": 234855716124.72806
+   },
+   {
+    "step": 5000,
+    "ro": 124.7851981406809,
+    "roe": 55784881.1480235,
+    "roOmega_all": 577082348558.5273
+   },
+   {
+    "step": 7500,
+    "ro": 81.4439090316518,
+    "roe": 28321780.382783238,
+    "roOmega_all": 1176351329809.7522
+   },
+   {
+    "step": 10000,
+    "ro": 73.01593116419069,
+    "roe": 20364446.426233463,
+    "roOmega_all": 1685085208408.571
+   },
+   {
+    "step": 12500,
+    "ro": 65.4643780305477,
+    "roe": 18418814.66498352,
+    "roOmega_all": 1598278351804.5427
+   },
+   {
+    "step": 15000,
+    "ro": 59.219169818010215,
+    "roe": 16190082.74342579,
+    "roOmega_all": 1026786893742.673
+   },
+   {
+    "step": 17500,
+    "ro": 52.8289412197587,
+    "roe": 14205258.686194435,
+    "roOmega_all": 717527919420.9099
+   },
+   {
+    "step": 20000,
+    "ro": 48.76201046089865,
+    "roe": 13245141.950229192,
+    "roOmega_all": 405179799781.238
+   }
+  ],
+  "run_0689_pp_p3": [
+   {
+    "step": 2500,
+    "ro": 686.4452986124746,
+    "roe": 149311529.06005803,
+    "roOmega_all": 320671997814.7848
+   },
+   {
+    "step": 5000,
+    "ro": 559.5084904515709,
+    "roe": 132420659.37636994,
+    "roOmega_all": 520622380604.8026
+   },
+   {
+    "step": 7500,
+    "ro": 679.9551000870584,
+    "roe": 164145207.48255453,
+    "roOmega_all": 785741974226.7985
+   },
+   {
+    "step": 10000,
+    "ro": 675.828706393269,
+    "roe": 165712075.84823978,
+    "roOmega_all": 1067522951856.1096
+   },
+   {
+    "step": 12500,
+    "ro": 772.8965034156483,
+    "roe": 191626058.3913602,
+    "roOmega_all": 1095173222257.2245
+   },
+   {
+    "step": 15000,
+    "ro": 957.0297413648482,
+    "roe": 234915209.72292086,
+    "roOmega_all": 1546083220162.5564
+   },
+   {
+    "step": 17500,
+    "ro": 1088.678736593893,
+    "roe": 268496973.28248274,
+    "roOmega_all": 1715379528454.8147
+   },
+   {
+    "step": 20000,
+    "ro": 1295.970338139785,
+    "roe": 317885474.1854692,
+    "roOmega_all": 1428722672581.1792
+   }
+  ]
+ },
+ "check": {
+  "C": "run_0688_pp_c",
+  "P": "run_0689_pp_p3",
+  "config": {
+   "run_0688_pp_c": {
+    "lowMachPrecond": "0",
+    "precondEps": null,
+    "speciesImplicitCoupling": null,
+    "speciesPrecondDt": null,
+    "lineImplicit": "0",
+    "cfl_pseudo": "1"
+   },
+   "run_0689_pp_p3": {
+    "lowMachPrecond": "3",
+    "precondEps": null,
+    "speciesImplicitCoupling": null,
+    "speciesPrecondDt": null,
+    "lineImplicit": "0",
+    "cfl_pseudo": "1"
+   }
+  },
+  "dt": {
+   "island_median_measured_ratio": 6.03832659938297,
+   "island_median_expected_ratio": 6.038677037681561,
+   "island_median_measured_over_expected": 0.9999646421328916,
+   "island_p10_p90_measured_over_expected": [
+    0.9940245674094973,
+    1.005597769548337
+   ],
+   "island_median_M": 0.04123119478389961
+  },
+  "step0_rel_diff": {
+   "rms_ro": 6.272244881901461e-16,
+   "rms_roUx": 2.464447929784471e-14,
+   "rms_roUy": 3.460545677813519e-15,
+   "rms_roUz": 0.0,
+   "rms_roe": 8.956317179628269e-16,
+   "rms_roK": 6.667456021051901e-15,
+   "rms_roOmega": 2.0246702435175744e-12,
+   "rms_roY0": 6.860922414171939e-16,
+   "rms_roY1": 0.0,
+   "rms_dq_ro": 0.0,
+   "rms_dq_roUx": 0.0,
+   "rms_dq_roUy": 0.0,
+   "rms_dq_roUz": 0.0,
+   "rms_dq_roe": 0.0
+  },
+  "restart_bitwise": true,
+  "boundary_r": {
+   "C": {
+    "inlet": 1.0053858107280051,
+    "outlet": 0.9944183891804752,
+    "axis": 0.9648978450636168,
+    "wall": 1.2065408576370857
+   },
+   "P": {
+    "inlet": 0.9617789716664834,
+    "outlet": 0.9835818828641153,
+    "axis": 1.0291113636163594,
+    "wall": 1.4129098483965064
+   }
+  },
+  "Y0_ptp_20000": {
+   "run_0688_pp_c": 1.213251721310371e-12,
+   "run_0689_pp_p3": 1.2660872350522823e-11
+  },
+  "qualification": {
+   "precond_effective": true,
+   "same_start_and_rhs": true,
+   "boundary_not_frozen": true,
+   "composition_uniform": true
+  }
+ },
+ "result": "B: この設定・予算では lowMachPrecond 3 による大きな改善はない"
+}

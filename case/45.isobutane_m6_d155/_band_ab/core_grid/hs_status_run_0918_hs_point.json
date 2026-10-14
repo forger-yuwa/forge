@@ -1,0 +1,104 @@
+{
+ "run": "run_0918_hs_point",
+ "arm": "point",
+ "first_reach": 22500,
+ "checks": [
+  {
+   "s": 2500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 5000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 7500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 10000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 12500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 15000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 17500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 20000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 22500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 25000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 27500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 30000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 32500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 35000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 37500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 40000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 42500,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "qual_ok": true,
+   "qual_fail": [],
+   "decision": "STOP"
+  },
+  {
+   "s": 45000,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "qual_ok": true,
+   "qual_fail": [],
+   "decision": "STOP"
+  }
+ ],
+ "stop_step": 45000
+}

@@ -1,0 +1,521 @@
+{
+ "run": "run_0618_cg_gref_d1_cap1",
+ "ni": 4719,
+ "nj": 160,
+ "n": 755040,
+ "steps": [
+  2000,
+  2032
+ ],
+ "vars": {
+  "ro": {
+   "live_nodes": 754586,
+   "alt_nodes": 8,
+   "alt_residual_share": 2.8969793811282562e-05,
+   "alt_amp_rms": 7.689063073227651e-06,
+   "lag1_median_live": [
+    0.8747563148000657,
+    0.875962746841402
+   ],
+   "lag1_median_top_residual": [
+    0.9995249447382233,
+    0.9995001100611622
+   ],
+   "top_residual_share": 0.5753212677302312,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     7,
+     0
+    ],
+    "x_hist": [
+     8,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     667,
+     88
+    ],
+    "x_hist": [
+     755,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 3.077803182889294e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 4.009818011750977e-11,
+     "nodes": 312128
+    }
+   }
+  },
+  "roUx": {
+   "live_nodes": 750321,
+   "alt_nodes": 17,
+   "alt_residual_share": 4.503068687922655e-06,
+   "alt_amp_rms": 0.00044781879901345544,
+   "lag1_median_live": [
+    0.9571076141473365,
+    0.9575415639414199
+   ],
+   "lag1_median_top_residual": [
+    0.9965105076544536,
+    0.9983516644465268
+   ],
+   "top_residual_share": 0.1863290157703496,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     17,
+     0
+    ],
+    "x_hist": [
+     17,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     36,
+     719
+    ],
+    "x_hist": [
+     41,
+     43,
+     671,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 2.0656873080445538e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 2.4691061020473377e-10,
+     "nodes": 161120
+    }
+   }
+  },
+  "roUy": {
+   "live_nodes": 745602,
+   "alt_nodes": 18,
+   "alt_residual_share": 7.249916030906885e-06,
+   "alt_amp_rms": 0.0002098225205849867,
+   "lag1_median_live": [
+    0.9518200925417859,
+    0.9519213087369731
+   ],
+   "lag1_median_top_residual": [
+    0.9991786737060973,
+    0.9996753843443171
+   ],
+   "top_residual_share": 0.09601127672469695,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     4,
+     14,
+     0
+    ],
+    "x_hist": [
+     17,
+     0,
+     0,
+     0,
+     1
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     7,
+     748
+    ],
+    "x_hist": [
+     115,
+     640,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 4.1406447147674e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 2.025683534630112e-13,
+     "nodes": 10112
+    }
+   }
+  },
+  "roe": {
+   "live_nodes": 755014,
+   "alt_nodes": 6,
+   "alt_residual_share": 0.00020041779566047104,
+   "alt_amp_rms": 2.9443992529758924,
+   "lag1_median_live": [
+    0.9247076183986076,
+    0.9244897755113691
+   ],
+   "lag1_median_top_residual": [
+    0.9980244216193341,
+    0.9979557038430407
+   ],
+   "top_residual_share": 0.5422630303282282,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     6,
+     0
+    ],
+    "x_hist": [
+     6,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     657,
+     98
+    ],
+    "x_hist": [
+     755,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 3.026873089527195e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 4.224882994294418e-10,
+     "nodes": 161120
+    }
+   }
+  },
+  "roK": {
+   "live_nodes": 610624,
+   "alt_nodes": 8,
+   "alt_residual_share": 1.759226127644466e-10,
+   "alt_amp_rms": 6.464440854229258e-06,
+   "lag1_median_live": [
+    0.9962805923026512,
+    0.9963591956930862
+   ],
+   "lag1_median_top_residual": [
+    0.9994843217604451,
+    0.9991457057062367
+   ],
+   "top_residual_share": 0.1270779833752733,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     8,
+     0
+    ],
+    "x_hist": [
+     8,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     58,
+     697
+    ],
+    "x_hist": [
+     0,
+     217,
+     243,
+     295,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 1.1707738543532172e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 8.276745823379388e-11,
+     "nodes": 156032
+    }
+   }
+  },
+  "roOmega": {
+   "live_nodes": 157413,
+   "alt_nodes": 0,
+   "alt_residual_share": 0.0,
+   "alt_amp_rms": 0.0,
+   "lag1_median_live": [
+    0.9938263034738417,
+    0.9938008294386345
+   ],
+   "lag1_median_top_residual": [
+    0.8870694104397306,
+    0.8951895407702706
+   ],
+   "top_residual_share": 0.923842224577533,
+   "alt_where": null,
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     652,
+     103,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "x_hist": [
+     0,
+     755,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 5.043886965721721e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 8.39817829646195e-10,
+     "nodes": 156032
+    }
+   }
+  }
+ },
+ "bins": {
+  "j_from_wall": [
+   0,
+   1,
+   2,
+   5,
+   10,
+   20,
+   40,
+   80,
+   160
+  ],
+  "x_over_rt": [
+   -13,
+   -2,
+   2,
+   12,
+   40,
+   96
+  ]
+ },
+ "commit_loss": {
+  "ro|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 246.65279930906186,
+   "S_act": 246.65279930906854
+  },
+  "ro|boundary": {
+   "n_req": 312128,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 3.8344187707286936,
+   "S_act": 3.8344187707284303
+  },
+  "roUx|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 87121.65722341709,
+   "S_act": 87121.65722341723
+  },
+  "roUx|boundary": {
+   "n_req": 161120,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 54.40237545977865,
+   "S_act": 54.40237545978262
+  },
+  "roUy|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 82779.20703499946,
+   "S_act": 82779.20703499937
+  },
+  "roUy|boundary": {
+   "n_req": 10112,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.27276008473984664,
+   "S_act": 0.2727600847398451
+  },
+  "roUz|interior": {
+   "n_req": 0,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.0,
+   "S_act": 0.0
+  },
+  "roUz|boundary": {
+   "n_req": 0,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.0,
+   "S_act": 0.0
+  },
+  "roe|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 136636693.565421,
+   "S_act": 136636693.5654236
+  },
+  "roe|boundary": {
+   "n_req": 161120,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 88611.3223002564,
+   "S_act": 88611.32230020249
+  },
+  "roK|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 246489.41542010193,
+   "S_act": 246489.41542010248
+  },
+  "roK|boundary": {
+   "n_req": 156032,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.24069164240026636,
+   "S_act": 0.24069164240079305
+  },
+  "roOmega|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 103060106766.81326,
+   "S_act": 103060106766.80684
+  },
+  "roOmega|boundary": {
+   "n_req": 156032,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 43.45296110789792,
+   "S_act": 43.452961105838796
+  },
+  "roY0|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 263.42688932322085,
+   "S_act": 263.4268893232188
+  },
+  "roY0|boundary": {
+   "n_req": 307008,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 14.25904615455225,
+   "S_act": 14.259046154552449
+  },
+  "roY1|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 24.723284952899775,
+   "S_act": 24.72328495289981
+  },
+  "roY1|boundary": {
+   "n_req": 307008,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 1.3382478233071522,
+   "S_act": 1.3382478233071127
+  }
+ }
+}

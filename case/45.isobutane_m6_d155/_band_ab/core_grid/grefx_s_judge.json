@@ -1,0 +1,327 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.26",
+ "tau": {
+  "theta": 1.5,
+  "delta": 1.5,
+  "Q_w": 1.5,
+  "exit_M_line": 0.05,
+  "eta_pctpt": 0.05
+ },
+ "p": {
+  "ref": {
+   "theta": 0.01,
+   "delta": 0.023,
+   "Q_w": 0.009,
+   "exit_M_line": 0.0006,
+   "eta_pctpt": 0.0014
+  },
+  "x": {
+   "theta": 0.081,
+   "delta": 0.133,
+   "Q_w": 0.025,
+   "exit_M_line": 0.0006,
+   "eta_pctpt": 0.0014
+  }
+ },
+ "series": {
+  "ref_base": "GrefA",
+  "x_base": "Grefx2",
+  "ref_point": "GrefP",
+  "x_point": "GrefxP"
+ },
+ "stats": {
+  "ref_base": {
+   "n": 17,
+   "nonfinite": 0,
+   "q": {
+    "theta_r_w65_75": {
+     "mu": 0.11465264135806248,
+     "U": 0.12990596317561656
+    },
+    "theta_r_w84_94": {
+     "mu": 0.1250674091581875,
+     "U": 0.09174840828627027
+    },
+    "delta_loc_w65_75": {
+     "mu": 0.40098921432581247,
+     "U": 0.05277681234976587
+    },
+    "delta_loc_w84_94": {
+     "mu": 0.5527435866390625,
+     "U": 0.048254354167959444
+    },
+    "Q_w": {
+     "mu": 9258357.58998875,
+     "U": 0.1136242423831665
+    },
+    "exit_M_line": {
+     "mu": 6.027743729149376,
+     "U": 0.003131491613736031
+    },
+    "eta0.0_mean_pct": {
+     "mu": 0.40010450561600003,
+     "U": 0.0030523194480000515
+    },
+    "eta0.1_mean_pct": {
+     "mu": 0.39800537277174997,
+     "U": 0.002839428257250032
+    }
+   }
+  },
+  "x_base": {
+   "n": 17,
+   "nonfinite": 0,
+   "q": {
+    "theta_r_w65_75": {
+     "mu": 0.11399098156331251,
+     "U": 0.018328836617801325
+    },
+    "theta_r_w84_94": {
+     "mu": 0.12440539779024998,
+     "U": 0.019527493544772262
+    },
+    "delta_loc_w65_75": {
+     "mu": 0.40121730770093744,
+     "U": 0.0049971852662197965
+    },
+    "delta_loc_w84_94": {
+     "mu": 0.5529072714904375,
+     "U": 0.004603481442858939
+    },
+    "Q_w": {
+     "mu": 9206812.407025,
+     "U": 0.0078117082643460005
+    },
+    "exit_M_line": {
+     "mu": 6.0279608155775,
+     "U": 0.00034070762499507294
+    },
+    "eta0.0_mean_pct": {
+     "mu": 0.40254491878981247,
+     "U": 0.0002888134071875603
+    },
+    "eta0.1_mean_pct": {
+     "mu": 0.40188168657737494,
+     "U": 0.0002901054016250515
+    }
+   }
+  },
+  "ref_point": {
+   "n": 17,
+   "nonfinite": 0,
+   "q": {
+    "theta_r_w65_75": {
+     "mu": 0.11339258765600002,
+     "U": 0.6200795276749974,
+     "d": 0.27028941893905667,
+     "qs": "theta_r_w65_75  : tail mean=0.1136  drift=0.6%/tail  fluct=0.6%           DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "theta_r_w84_94": {
+     "mu": 0.1238194347894375,
+     "U": 0.6061022513097197,
+     "d": 0.281814486381671,
+     "qs": "theta_r_w84_94  : tail mean=0.124  drift=0.6%/tail  fluct=0.6%            DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "delta_loc_w65_75": {
+     "mu": 0.40146411369681245,
+     "U": 0.17809966020863827,
+     "d": 0.14911446836054365,
+     "qs": "delta_loc_w65_75: tail mean=0.4018  drift=0.3%/tail  fluct=0.2%  (extremum at tail-end) DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "delta_loc_w84_94": {
+     "mu": 0.553252718381125,
+     "U": 0.12265332158754949,
+     "d": 0.10337415539487814,
+     "qs": "delta_loc_w84_94: tail mean=0.5535  drift=0.2%/tail  fluct=0.2%  (still trending at tail-end) TRANSIENT-UNSETTLED",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "Q_w": {
+     "mu": 9259602.804641875,
+     "U": 0.13782784294185885,
+     "d": 0.12211630142128685,
+     "qs": "Q_w             : tail mean=9.265e+06  drift=0.2%/tail  fluct=0.2%  (extremum at tail-end) DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "exit_M_line": {
+     "mu": 6.02804310232625,
+     "U": 0.01153123552497781,
+     "d": 0.007754904287221305,
+     "qs": "exit_M_line     : tail mean=6.028  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "eta0.0_mean_pct": {
+     "mu": 0.40579088229456245,
+     "U": 0.013176647822562448,
+     "d": 0.008147650257812444,
+     "qs": "eta0.0_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    },
+    "eta0.1_mean_pct": {
+     "mu": 0.4044621525268125,
+     "U": 0.013012849684812478,
+     "d": 0.008013969775124974,
+     "qs": "eta0.1_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "steady": false,
+     "asym_ok": true,
+     "ok": false
+    }
+   },
+   "qualified": false
+  },
+  "x_point": {
+   "n": 17,
+   "nonfinite": 0,
+   "q": {
+    "theta_r_w65_75": {
+     "mu": 0.11399246701450001,
+     "U": 4.705561020910244e-05,
+     "d": 1.6463260087129e-05,
+     "qs": "theta_r_w65_75  : tail mean=0.114  drift=0.0%/tail  fluct=0.0%            STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "theta_r_w84_94": {
+     "mu": 0.124407226131375,
+     "U": 5.588216424382035e-05,
+     "d": 1.9606026993738304e-05,
+     "qs": "theta_r_w84_94  : tail mean=0.1244  drift=0.0%/tail  fluct=0.0%           STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "delta_loc_w65_75": {
+     "mu": 0.4012192582150625,
+     "U": 3.901278560165861e-05,
+     "d": 1.6915994268164626e-05,
+     "qs": "delta_loc_w65_75: tail mean=0.4012  drift=0.0%/tail  fluct=0.0%           STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "delta_loc_w84_94": {
+     "mu": 0.552909958026875,
+     "U": 4.240643957765759e-05,
+     "d": 1.8210692990064435e-05,
+     "qs": "delta_loc_w84_94: tail mean=0.5529  drift=0.0%/tail  fluct=0.0%           STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "Q_w": {
+     "mu": 9206747.62822,
+     "U": 0.00012904059801977197,
+     "d": 6.997023972820678e-05,
+     "qs": "Q_w             : tail mean=9.207e+06  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 9.20675e+06 (最終比 -0.000 %)] STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "exit_M_line": {
+     "mu": 6.027959051891876,
+     "U": 2.3567379563265247e-06,
+     "d": 7.981842134587519e-07,
+     "qs": "exit_M_line     : tail mean=6.028  drift=0.0%/tail  fluct=0.0%            STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "eta0.0_mean_pct": {
+     "mu": 0.4025255545273125,
+     "U": 1.5844066875159157e-06,
+     "d": 6.049378750705436e-07,
+     "qs": "eta0.0_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%            STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    },
+    "eta0.1_mean_pct": {
+     "mu": 0.4018594186146875,
+     "U": 1.2445523124848812e-06,
+     "d": 4.7328356256315374e-07,
+     "qs": "eta0.1_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%            STEADY",
+     "steady": true,
+     "asym_ok": true,
+     "ok": true
+    }
+   },
+   "qualified": true
+  }
+ },
+ "q": {
+  "theta_r_w65_75": {
+   "E_signed": -0.57709947796457,
+   "s_ref": 1.0990184675530397,
+   "s_x": 0.0012956100879180348,
+   "B_total": 2.536774938684152,
+   "tau": 1.5
+  },
+  "theta_r_w84_94": {
+   "E_signed": -0.5293236442598789,
+   "s_ref": 0.9978413858174315,
+   "s_x": 0.0014618845447688699,
+   "B_total": 2.3370609499270856,
+   "tau": 1.5
+  },
+  "delta_loc_w65_75": {
+   "E_signed": 0.05688267089888372,
+   "s_ref": 0.11843195628052866,
+   "s_x": 0.00048642558337337653,
+   "B_total": 0.5677137233730113,
+   "tau": 1.5
+  },
+  "delta_loc_w84_94": {
+   "E_signed": 0.02961316156922736,
+   "s_ref": 0.09210993204972676,
+   "s_x": 0.00048603665469379995,
+   "B_total": 0.45376269391159346,
+   "tau": 1.5
+  },
+  "Q_w": {
+   "E_signed": -0.5567421917196874,
+   "s_ref": 0.013449627982305508,
+   "s_x": 0.0006996792289677183,
+   "B_total": 0.8642843331183517,
+   "tau": 1.5
+  },
+  "exit_M_line": {
+   "E_signed": 0.0036014541738817684,
+   "s_ref": 0.004966587670716837,
+   "s_x": 2.9259465953787628e-05,
+   "B_total": 0.024803092812217636,
+   "tau": 0.05
+  },
+  "eta0.0_mean_pct": {
+   "E_signed": 0.002440413173812439,
+   "s_ref": 0.0056863766785624215,
+   "s_x": 1.9364262499987905e-05,
+   "B_total": 0.027465519199312425,
+   "tau": 0.05
+  },
+  "eta0.1_mean_pct": {
+   "E_signed": 0.0038763138056249757,
+   "s_ref": 0.006456779755062536,
+   "s_x": 2.2267962687450016e-05,
+   "B_total": 0.029298989419375008,
+   "tau": 0.05
+  }
+ },
+ "result": "判定不能 (point の資格なし: ref_point)"
+}

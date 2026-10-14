@@ -1,0 +1,58 @@
+# forge_design 問題定義 — ③ベル 2 モード比較の共通評価器 (TP) の推力会計とゲートの確認用 (plan tooling-nozzle-bell-two-mode §5.1 #2b)。
+# 形状・ガス・作動点は problem_bell_tp_top.yaml (#2a の起動確認) と同じ。違いは段階起動 (soft → mid → 本段) を同じ run・同じメッシュで
+# 回すための evaluate ブロックだけ (python -m forge_design.evaluate.runner <この YAML> <run> --staged)。
+#   - 段の間は restart_field.py (同一メッシュの index コピー)、段ごとの実効設定は stage_manifest.json (check_convergence --segment 用)
+#   - 本段の res を outStepInterval ごとに書き、推力の CV 会計の時系列 (thrust_history.csv) を準定常ゲートに使う
+# 設計の比較ではない (2 モードの壁は §4.2 の C2 構成で別に作る)。
+# _wallfine: 引き継ぎ (c) — 第一セル厚の x 依存 (mesh.wall_first_frac_throat と前後のブレンド) を runner が読むことの確認と、
+#   AR ≤ 1000 のままスロートの局所 y1+ をどこまで下げられるかの実測。値は run_0003 の y1+ 分布 (第一セル厚に比例と仮定) から
+#   ni ≤ 1201 で AR ≤ 1000 を満たす組を探した結果 (予測: スロート y1+ ≈ 1.6、入口直管で最大 ≈ 2.1)。y1+ ≤ 1 は
+#   この格子生成 (半径方向の線が x 一定) では AR ≤ 1000 と両立しなかった (ni 1601 でも AR ≈ 1400)。
+name: bell_tp_top_eps50_2b_wallfine
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  theta_a_deg: {value: 32.0, min: 20.0, max: 40.0}
+  theta_e_deg: {value: 9.0,  min: 4.0,  max: 14.0}
+  L_over_rt:   {value: 18.0, min: 12.0, max: 24.0}
+
+geometry:
+  bell_type: top
+  r_inlet: 2.5
+  L_pipe: 0.5
+  L_contract: 3.0
+  Ru: 1.5
+  Rd: 0.4
+  phi_u_deg: 25.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 1.4e-5          # 入口直管 (x ≤ up_x0) と下流 (x ≥ blend_x1) の第一セル厚 / 局所半径
+  wall_first_frac_throat: 7.0e-6   # スロート近傍 (up_x1 ≤ x ≤ blend_x0) — スロートで 0.98 µm
+  wall_first_up_x0: -3.0
+  wall_first_up_x1: -1.0
+  wall_first_blend_x0: 0.4
+  wall_first_blend_x1: 8.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  ar_max: 1000
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 36000          # 本段 (run_0002 → run_0003 で CV 残差が落ち着くまで本段 36000 step 要った)
+  outStepInterval: 3000      # 本段の res の間隔 (推力の時系列 12 点)
+  cfl_main: 4.0
+  objectives: [eta_cf, length]

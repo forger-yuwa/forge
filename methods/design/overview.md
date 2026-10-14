@@ -1257,6 +1257,16 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 必要な第一セルが入口直管・スロートと試験部で 40 倍違うため、smoothstep 1 本では y₁⁺ ≤ 1 と AR ≤ 5000 を同時に満たせなかった。
 設計は `case/45.isobutane_m6_d155/cold_pair_mesh.py` (断熱 NS の y₁⁺ 分布 × 局所の冷却倍率 → 第一セルの表、AR の上限 → 密度の表、ni 4496 × nj 121)。
 
+**主流と軸付近の間隔の上限 `axis_cap_frac`** (2026-10-10 記載、plan tooling-nozzle-core-grid §4.2): 各列で壁から $g_k=\min(f_i q_i^k,\,c)$
+($f_i$ は第一セル厚/局所半径、$c$ = `axis_cap_frac`) とし、$\sum_k g_k=1$ になる比 $q_i$ を列ごとに二分法で解く (`mesh2d._radial_fracs_capfixed`)。
+nj は全列で共通なので、第一セルが最も薄い列 (スロート) で $q_i$ が最大になる。`generate_axisym_mesh` は解いた $q_i$ を返さないので、
+比の上限は呼び出し側で同じ関数を使って確かめる (`case/45.isobutane_m6_d155/core_grid_mesh.py select`)。
+第一セルの表 (`wall_first_frac_table`)・壁法線の層 (`wall_normal_layer`) と併用できる (`axis_gap_frac` とは併用不可)。
+**$c$ は壁法線の層で座標を動かす前の分布のパラメータ**であり、物理的な間隔の上限ではない。層のつなぎ目 ($d_n<d<d_b$) では半径方向の辺が
+$c\,r_w$ を最大 25 % 超える (case/45、$c=0.03$)。軸から変形の及ばない範囲 ($d\ge d_b$) では $c\,r_w$ のまま。
+主流の節点は $\eta=j\,c$ に固定されるので、$f$ が $x$ で急に変わっても格子線は折れにくい。逆の形 (比を全列で固定し、上限を列ごとに解く) は、
+上限が $f$ に敏感 ($dc/df\approx-1.4\times10^4$) で、case/45 の入口〜縮流部で格子線が最大 20.9° 折れた (同 plan §4.9)。
+
 **積分法 (CONTUR) の熱力学・輸送の整合** (2026-10-08、plan §4.7、実装中): 今の CONTUR は温度分布 (Eq. 69) を温度で書き、断熱壁温を
 一定 γ の式に縁の局所 γ_e を入れて作り (燃焼ガスでは全温を超える)、粘性は空気の Sutherland、運動量式の加速の項も一定 γ の式である。
 `closure_version: contur_v2` では、温度分布をエンタルピーで書き ($h(v)$ の 2 次式 → $T = h^{-1}$)、$h_{aw} = h_e + r(h_0 - h_e)$、
@@ -1271,6 +1281,23 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 2 run から目的量の感度ブラケットを取り、設計公差より小さければ断熱設計 + ロバスト性記録、大きければ公称 $T_w$ で設計
 (等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
 フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
+
+## ③ベルの TP 排気評価 (2026-10-11、plan [tooling-nozzle-bell-two-mode](../../plans/active/tooling-nozzle-bell-two-mode.md))
+
+③ベルの評価器は、問題 YAML に `gas.model: semiperfect` と `gas.exhaust: <排気ファイル>` を書いたときだけ TP のロケット排気で動く (書かなければ従来の CPG とビット同一)。
+
+- **排気ファイル** (`gas/rocket_exhaust.py`、schema `forge_rocket_exhaust_v1`): CEA2 (FCEA2) で推進剤・燃焼室圧・O/F から燃焼室の平衡組成と温度を解き、燃焼室で凍結した組成を記録する。反応物の状態、凍結位置、CEA の凍結計算の表、来歴を同じファイルに残す。生成物は forge の熱物性・輸送データにある種に限り、除いた種は `omitted_species` に書く (LOX/LH2・10 MPa・O/F 6 では H2・O2・H2O・OH・H・O、除いた HO2・H2O2・O3 の影響はモル分率 4.5e-5)。
+- **共通の契約** (`RocketExhaust`): 同じ質量分率・種 DB・燃焼室温度から、MOC 用の `GasSemiPerfect`、forge の lump `EXH` (`thermalMethod: 2`、`thermoHrefTemp: 298.15`、`viscMethod: 2` + 輸送物性)、1D 計算用の `FrozenGas` を作る。3 つの気体で $R$ と $h(T)$ が一致することを試験で確かめる。
+- **1D 理想値** (`ideal_1d`): 凍結 TP の等エントロピー膨張で、凍結音速でチョークする。$\dot m_{1D}$・出口状態・$F_{1D}$ は CEA の凍結計算と $\varepsilon$ 10〜100 で相対 6.8e-5 以内 (`design/tests/run_bell_tp_tests.py`)。
+- **runner の TP 経路**: 真空の出口は `outflow`、IC と壁の平滑化は TP の $e(T)$ で組む、段は soft → mid → main (`prepare(..., stage=)`)。段の継続は同一メッシュの `restart_field.py` (`StageManifest` で区間を記録)。
+- **推力の検査体積 (CV) 会計** (`metrics/extract.py` の `thrust_cv`): 入口面・内壁・出口面で閉じた CV の全境界で $\Pi_x=\int[\rho u_x(\mathbf u\cdot\mathbf n)+(p-p_a)n_x-(\boldsymbol\tau_{eff}\mathbf n)_x]\,2\pi r\,ds$ を積み、壁会計 (入口面 + 内壁) と出口面会計 (出口面、粘性応力込み) を出す。node の壁の摩擦は `twall` の符号を反転して牽引力にする。圧力は保存量から TP の $e(T)$ を逆に解いて復元する (`tp_pressure_from_conserved`)。CV 残差 $cv=(F_{wall}-F_{exit})/F_{1D}$。$\eta=F/F_{1D,vac}(\varepsilon)$ は出口面会計を主、壁会計を照合とする。runner がスナップショットごとの時系列を `thrust_history.csv` に書く。壁ダンプに `twall` が無いときは止める (Euler の slip 壁だけ `wall_model="slip"` で内壁の traction を 0 にする — 下の Euler の項)。
+- **受理ゲート** (`opt/driver.py` の `tp_gates`、plan §4.1): (i) 残差は `check_convergence --segment` の VERDICT を記録し、FAIL は DIVERGED と有意な末尾上昇だけ (`NOT CONVERGED (stalled)` は併記)、(ii) 壁会計・出口面会計・$\eta$ (出口面・壁) を drift・osc 1.5e-4、$\dot m$ を 1e-3 で `check_quasisteady --series-csv` が STEADY (末尾窓 8 点以上、本段の出力間隔は本段長の 1/20)、(iv) 最終スナップショットの $|cv|\le1\times10^{-4}$、(v) メッシュ品質 (壁法線の近壁層で AR ≤ 5000 のときは AR > 1000 の全セルでスキュー ≤ 0.1 を `MESH_AR_RELAX.json` に記録) と局所 $y_1^+$。`--gate-only` で既存 run を判定し直せる。継続 (`opt/polish.py` の `polish_run_tp`) は同一メッシュの `restart_field.py`。`space.pRef` は置かない (燃焼室と出口で静圧が 3 桁違い、代表値が無い)。
+- **格子**: `mesh.wall_normal_layer` (壁法線の近壁層、`meshing/mesh2d.py`) で $y_1^+\le1$ と AR ≤ 5000 を両立させ、`mesh.wall_normal_end_stations` で入口・出口面の数ステーションを平面 (半径線) に戻す。TOP の基準ケースで $y_1^+$ 最大 0.82・AR 最大 2700 (case/68 run_0008)。
+- **拡大部の作り方** (`geometry.bell_mode`): 既定は従来の `bell_type` (TOP・hermite)。**`direct_bspline` = (D) 直接モード** (`geometry/wall_bell_c2.py` の `design_bell_c2`): 拡大部を等間隔 16 区間の clamped 5 次 B-spline にし、スロート ($r=1,r'=0,r''=1/R_t$)・最大壁角の点 $x_m$ ($r'=\tan\theta_{max},r''=0$)・出口 ($r=\sqrt\varepsilon,r'=\tan\theta_e$) の 7 拘束の下で $\int(r''')^2dx$ を最小化する。設計変数は $(L,\theta_e,\theta_{max})$、$x_m$ は 0.5〜4.0 $r_t$ を走査した成立区間 (端は二分法で 1e-6 $r_t$ まで詰める) の中で $J$ 最小を黄金分割で内部決定する。成立条件は $r'\ge0$、$[0,x_m]$ で $r''\ge-tol$・$[x_m,L]$ で $r''\le tol$、$|\kappa|\le1/R_t$。成立しなければ `WallInfeasible` (理由つき) を driver に返す。壁の決定は `WALL_DESIGN.json` に記録する。
+- **`moc_rao` = (M) 特性曲線モード** (2026-10-12、plan §5.1 #6 (W1)): runner は生成器 (`geometry/rao_axisym.py` の `design_rao`) を回さず、生成器の壁ファイル `geometry.rao_wall_file` (`<tag>_wall.npz` と同じディレクトリの記録 `<tag>.json`) を `load_rao_wall` で読む。壁は `RaoWall` (円弧 kernel は閉じた式、BE は罰則付き 5 次 B-spline で B の $r,r'$ と E の $r,r'$ を拘束 — T4 の評価と同じ作り方) に (D) と同じ収縮部 (U→T 5 次 Hermite) と入口直管をつないだ `geometry/wall.py` の `RaoBellWall` で、スロートで C2、B で C1 (曲率は跳ぶ: L100 で $\Delta\kappa_B=-0.922$、L70 で $-0.998$)。dv は照合用の `L_over_rt` だけで、壁ファイルの $L$ (終点 $x_E$)・$\varepsilon$ ($r_E^2$)・$R_t$ (円弧の $1/\kappa_B$)・排気ファイル (キャンペーンの要約の `setup`) が問題と相対 1e-9 で合わなければ run ディレクトリを作る前に止める。`WALL_DESIGN.json` に壁ファイルと記録の sha256・生成条件・照合・接合・当てはめの記録と、生成器の推力の 2 会計を runner の単位に換算した参照値 (`rao_moc_reference`: $F\,[\mathrm N]=F_{nd}\,\rho^*a^{*2}r_t^2-p_a\pi(r_Er_t)^2$、$\eta=F/F_{1D}$; $\rho^*,a^*$ は同じ凍結 TP の 1D スロート状態) を残す。
+- **Euler** (`evaluate.model: euler`、既定 `ns`; plan §4.1「Euler の設定」): `viscMethod: 0`・`visc: 0.0`・`thermCond: 0.0` (`viscMethod: 0` は定数粘性なので係数も 0)・`turbulence: none`・物理壁は `slip`。node のキーは `isAxisymmetric`・`axisCentroidShift` だけ (`nodeWallDirichlet`・`nodeInletCornerWall` は wall / wall_isothermal の節点にだけ作用するので書かない)。段・陰解法・出力は NS と同じ。格子は壁際を細分しない: 壁法線の近壁層・スロートだけ詰める第一セル・AR 緩和は書けない (case/45 で NS 用の壁際細分化格子の Euler はスロート付近の全温が整定しなかった)。推力の CV 会計は同じ式で、`thrust_cv(..., wall_model="slip")` が内壁の粘性 traction を 0 とし壁ダンプを読まない (forge の slip 境界の壁ダンプには `twall` が無い)。場の $\mu_{eff}$ (vis_lam + vis_turb) が境界の全 DOF で 0 でなければ止め、NS (既定 `wall_model="viscous"`) で壁ダンプに `twall` が無ければ止める (摩擦を黙って 0 にしない)。開境界の粘性項は式のままで、`viscMethod: 0` の vis_lam = visc = 0 なので 0。時系列は NS と同じ step の集合 (step 0 を入れない)。(M) の run では metrics に MOC の参照値との差 $\eta-\eta_{cs}$ (出口面・壁会計) と推力の相対差を載せる。受理ゲートは (i)〜(iv)・メッシュ品質が NS と同じで、壁解像 ($y_1^+$) は回さず GATES.json に「対象外 (slip 壁で境界層が無い)」と書いて ok 扱い (`tp_gates(..., flow_model="euler")`)。
+- **前進 MOC ゲート** (`geometry/moc_forward.py`、①の配列版 `interior_vec` の analytic・converge 経路を共用): 与えた壁で前進 MOC を解き、C⁻ 間隔比の最小・反転・交差から pass / reject / undecidable を返す (初期線不整合と軸近傍 j ≤ 2 は undecidable)。初期線は Hall (R_t ≤ 1 で n ≤ 321 に制限)。③の真空の比較では制約にせず `MOC_GATE.json` に記録だけする (④の基部と海面作動で使う)。
+- **変換器の終了時の GPUassert** (`evaluate/runner.py` の `run_converter`、main の 2026-10-13 の版に統一): HDF5 を書き終えた後の GPU の後片付けで落ちる既知の症状で、出力に MESH/COORD と VALUE があるときだけ通し、出力の隣に `<stem>_converter_exit.log` を残す (③ベルの 2026-10-11 版 `_run_converter` は 2026-10-15 の main の取り込みで置き換えた)。
 
 ## 実寸の要求カードと成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 実装・検証済み
 

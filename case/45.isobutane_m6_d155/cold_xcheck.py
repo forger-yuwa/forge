@@ -43,7 +43,17 @@ def mu_suth(T):
 EXTRA_GRIDS = {4467 * 121: (4467, 121, "G0c")}
 
 
-def mesh_info(n_nodes):
+def mesh_info(n_nodes, run=None):
+    """(ni, nj, スケール)。run を渡し、その run の prepare_info.json に格子の ni と scale_m があれば、それを使う
+    (plan tooling-nozzle-core-grid の格子 G1x は ni 3086 で、冷却壁の格子の ni 4719 と違う)。無ければ従来どおり冷却壁の格子の npz から。"""
+    if run is not None:
+        pi = Path(run) / "prepare_info.json"
+        if pi.is_file():
+            info = json.loads(pi.read_text()); ni = int((info.get("mesh") or {}).get("ni", 0)); S = info.get("scale_m")
+            if ni > 0 and S is not None:
+                if n_nodes % ni:
+                    raise SystemExit(f"節点数 {n_nodes} が {pi} の ni {ni} で割り切れない (格子が違う)")
+                return ni, n_nodes // ni, float(S)
     z = np.load(OUTD / "theta_run_0181_ns_coldmesh_ad_100000.npz")
     ni = len(z["x"]); S = float(z["scale"])
     if n_nodes % ni:
@@ -59,7 +69,10 @@ def common_yb():
     return x, yb
 
 
-def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb, h0=None):
+def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb, h0=None, profile="linear"):
+    """profile: 断面の ρ・u の分布のつなぎ方。"linear" (既定、従来どおり) は節点値の折れ線、"pchip" は単調な 3 次 (PCHIP)。
+    格子を比べるときは "pchip" を使う (折れ線では、同じ連続の場でも境界層の節点数で θ_r・δ_loc が 0.1〜0.4 % 変わる。
+    plan tooling-nozzle-core-grid §4.10)。"""
     x = xy[:, 0].reshape(ni, nj) / S; r = xy[:, 1].reshape(ni, nj) / S
     RO = ro.reshape(ni, nj); UX = ux.reshape(ni, nj); UY = uy.reshape(ni, nj); TT = T.reshape(ni, nj); KK = k.reshape(ni, nj); H0 = None if h0 is None else h0.reshape(ni, nj)
     xt = x[:, 0].copy()
@@ -67,6 +80,8 @@ def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb, h0=None)
     for j in range(nj):
         R[:, j] = np.interp(xt, x[:, j], r[:, j])
         Q["ro"][:, j] = np.interp(xt, x[:, j], RO[:, j]); Q["ux"][:, j] = np.interp(xt, x[:, j], UX[:, j]); Q["T"][:, j] = np.interp(xt, x[:, j], TT[:, j])
+    if profile not in ("linear", "pchip"):
+        raise ValueError(f"profile は linear か pchip ({profile!r})")
     out = {"x": xt}
     yb_i = np.interp(xt, yb_x, yb)
     for fac, tag in ((1.0, ""), (1.25, "_s125")):
@@ -76,7 +91,11 @@ def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb, h0=None)
             if not np.isfinite(rb) or rb <= rr[0]:
                 continue
             rf = np.linspace(rb, rw, 4001)
-            rho = np.interp(rf, rr, Q["ro"][i]); u = np.interp(rf, rr, Q["ux"][i])
+            if profile == "pchip":
+                from scipy.interpolate import PchipInterpolator
+                rho = PchipInterpolator(rr, Q["ro"][i])(rf); u = PchipInterpolator(rr, Q["ux"][i])(rf)
+            else:
+                rho = np.interp(rf, rr, Q["ro"][i]); u = np.interp(rf, rr, Q["ux"][i])
             re_, ue_ = rho[0], u[0]
             qm = np.trapezoid((re_ * ue_ - rho * u) * rf, rf); qq = np.trapezoid(rho * u * (ue_ - u) * rf, rf)
             dl[i] = rw - np.sqrt(max(rw ** 2 - 2.0 * qm / (re_ * ue_), 0.0))

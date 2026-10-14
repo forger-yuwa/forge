@@ -203,6 +203,16 @@ def conditions(run, F):
 
 
 # ------------------------------------------------------------------ 評価量
+def exit_core_line_mean(eta, M, lo=0.05, hi=0.7):
+    """最終断面の主流 M の線平均 ∫M dη/(hi − lo) (節点値の折れ線、区間の端点は補間)。
+    M_mean (区間内の節点の単純平均) は節点の配置で重みが変わり、同じ M(η) でも格子の間で最大 0.0056 % 変わる
+    (plan tooling-nozzle-core-grid §4.6)。格子を比べるときはこちらを使う。"""
+    eta = np.asarray(eta, dtype=float); M = np.asarray(M, dtype=float)
+    core = (eta >= lo) & (eta <= hi)
+    e = np.unique(np.concatenate([[lo], eta[core], [hi]]))
+    return float(np.trapezoid(np.interp(e, eta, M), e) / (hi - lo))
+
+
 def metrics(run, F, euler=None):
     info = F["info"]; Md = float(info.get("Md", 6.0))
     xE = float(info.get("x_E", 40.0)); xF = float(F["X"][-1, 0])
@@ -215,10 +225,12 @@ def metrics(run, F, euler=None):
         cf = np.polyfit(xx, v, 1)
         out[f"eta{eta}"] = dict(wave_pct=float(np.abs(v - pspline(xx, v)).max()), overshoot_pct=float(d[w_ov].max()),
                                 x_overshoot=float(xq[w_ov][np.argmax(d[w_ov])]), slope_pct=float(cf[0] * (xx[-1] - xx[0])),
-                                range_pct=float(v.max() - v.min()), test_window=[float(xx[0]), float(xx[-1])])
+                                range_pct=float(v.max() - v.min()), test_window=[float(xx[0]), float(xx[-1])],
+                                mean_pct=float(v.mean()))   # 試験部の窓の平均 (等間隔の xq の単純平均 = 線平均; plan tooling-nozzle-core-grid §4.5)
     eta_last = F["R"][-1] / F["R"][-1, -1]; core = (eta_last >= 0.05) & (eta_last <= 0.7)
     Mx = F["V"]["M"][-1][core]
-    out["exit_core"] = dict(M_mean=float(Mx.mean()), M_min=float(Mx.min()), M_max=float(Mx.max()), eta_range=[0.05, 0.7])
+    out["exit_core"] = dict(M_mean=float(Mx.mean()), M_min=float(Mx.min()), M_max=float(Mx.max()), eta_range=[0.05, 0.7],
+                            M_line=exit_core_line_mean(eta_last, F["V"]["M"][-1]))
     if euler is not None:
         try:
             from forge_design.metrics.deltastar import massflow_ratio

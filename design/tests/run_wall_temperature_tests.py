@@ -587,8 +587,11 @@ def _diff_paths(a, b, pre=""):
 #     null = 使わない (従来の格子の作り方)。格子そのものは mesh.hashes (座標・接続・生成器の出力の sha256) で比べ続ける
 #   main_line: 本段だけの B0 (evaluate.main_line)。null = 指定なし (本段の設定は従来どおり。設定そのものは solverConfig.yaml で比べる)
 #   physical_upstream: 物理壁だけの上流の形。キー無しの問題では書かれない (書かれていれば null でないので比較に残る)
+#   mesh.params の wall_normal_end_stations: 統合の 2 回目 (integrate/design-flow-2) でベルのブランチから入った、壁法線の層を
+#     入口・出口の断面で半径方向へ戻す断面数 (plan tooling-nozzle-bell-two-mode §5.1 #2d)。null = 使わない (従来どおり全断面)
 INTEG_NULL_KEYS = (("mesh", "params", "wall_first_frac_table"), ("mesh", "params", "wall_normal_layer"),
                    ("mesh", "params", "x_density_table"), ("mesh", "params", "x_respace"),
+                   ("mesh", "params", "wall_normal_end_stations"),
                    ("main_line",), ("physical_upstream",))
 
 

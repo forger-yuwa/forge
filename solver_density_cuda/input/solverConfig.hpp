@@ -130,6 +130,13 @@ public:
                                      // 1: 緩和整合 scalar-DPLUR (流れ block と同一 dt_local/implicitRelax/nStepInner
                                      //    sweep で ρY_s を緩和し、要因2 の擬似時間緩和ミスマッチを解消)。
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
+    // 多成分 × lowMachPrecond>=2 (定常擬似時間) の化学種の擬似時間刻み (plans/active/architecture-float-state-double-geometry.md
+    // §5.1 #26、chem のブランチの 876ec8b4 の移植)。前処理 Γ_c は流れ 5 変数の擬似時間項だけを変え、分離更新の ρY_s は
+    // 前処理されないので、拡大後の Δτ' で進めると組成と密度の前線が擬似時間で別の速さで進み、異組成の接触面で P が暴走する。
+    //   0: 流れと同じ拡大後の Δτ' (旧挙動、A/B 用) / 1: 拡大前の Δτ (既定) / 2: Δτ'·β (β = lowMachBeta)。
+    // 効くのは化学種の scalar-DPLUR (speciesImplicitCoupling 1/2) だけ。speciesImplicitCoupling 0 の point-implicit と受動種は対象外。
+    // lowMachPrecond<2 では何もしない (化学種は dt_local を読む・ビット不変)。
+    int speciesPrecondDt = 1;
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
     // block-DPLUR のエネルギー行の熱伝導 Jacobian (ビットマスク、既定 0 = 従来どおりビット同一)。
     //   ビット 1: 内部の node 間面でエネルギー行の粘性対角 (ρE にかかるスカラー) を k_face·δ/dcc·(γ/cp)·∂e/∂Q に置き換える。

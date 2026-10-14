@@ -1,0 +1,37 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.55 (事後の再評価、結果を見た後の基準)",
+ "base": "run_0649_cg_conv_base",
+ "old_c_formula": "max|dsum − d3| / max|d3| (全要素の最大どうしの比、要素ごとの相対差の最大ではない)",
+ "old_c_value": 1.8151356347778029e-07,
+ "components": {
+  "ro": {
+   "eps_over_E_norm": 2.3955903021209783e-05,
+   "eps_over_E_proj": 1.1691749014960229e-05,
+   "ok": true
+  },
+  "roUx": {
+   "eps_over_E_norm": 2.067063084826222e-06,
+   "eps_over_E_proj": 4.6871852776762244e-08,
+   "ok": true
+  },
+  "roUy": {
+   "eps_over_E_norm": 1.6579437768243164e-06,
+   "eps_over_E_proj": 6.057778896972331e-08,
+   "ok": true
+  },
+  "roe": {
+   "eps_over_E_norm": 7.298526501254573e-06,
+   "eps_over_E_proj": 1.591074920102289e-07,
+   "ok": true
+  }
+ },
+ "new_c": true,
+ "other_quals": {
+  "a": true,
+  "b": true,
+  "d": true,
+  "e": true,
+  "f": true
+ },
+ "reevaluated_result": "B (事後の再評価): ライン外の面の対流は ρE・ρuₓ の残るずれの主要部分ではない"
+}

@@ -1,0 +1,41 @@
+# forge_design 問題定義 — ③ベル (M) の **CFD ピン版** L70 の壁を TP の Euler で回す (plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-2)、
+# codex 2026-10-12: δ* の較正を L70 で独立検証するための、同じ壁の Euler 基準 — Hall 版 L70 の Euler (run_0016) では代用しない)。
+# problem_bell_tp_m_euler_l70.yaml (run_0016 = Hall 版の壁) と同じ格子・段・設定で、**壁ファイルと name だけ**差し替え。
+# 壁: rao_m/rao_pin_parts/L70_pin_n321_wall.npz (CFD ピンの初期線 [凍結源 run_0015]・Goursat m = q = n = 321)。
+name: bell_tp_m_euler_eps50_L70_pin
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  L_over_rt: {value: 15.860273471054576, fixed: true}   # 15° 円錐長の 70 %。壁ファイルが決める L との照合用 (相対 1e-9)
+
+geometry:
+  bell_mode: moc_rao
+  rao_wall_file: rao_m/rao_pin_parts/L70_pin_n321_wall.npz
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 0.005           # 全断面で一様 (壁に寄せない)
+  throat_refine: 8.0
+  throat_width: 3.0
+
+evaluate:
+  model: euler
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 30000          # 本段
+  outStepInterval: 1500      # 本段の res の間隔 = 本段長の 1/20
+  cfl_main: 4.0

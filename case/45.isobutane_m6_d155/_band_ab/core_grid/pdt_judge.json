@@ -1,0 +1,382 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.86",
+ "Splus": "run_0692_pdt_on",
+ "S0": "run_0693_pdt_off",
+ "P3": "run_0689_pp_p3",
+ "qualification": {
+  "same_start_config_switch": true,
+  "same_rhs_step0": true,
+  "dt_scaling_toggled": true,
+  "Splus_reproduces_P3": true,
+  "finite_physical_completed": true
+ },
+ "switch_lines": {
+  "run_0692_pdt_on": 0,
+  "run_0693_pdt_off": 1
+ },
+ "step0_rel_diff_max": 2.013781574417287e-12,
+ "dt": {
+  "island_median_measured_ratio": 6.031485469585585,
+  "island_median_expected_ratio": 6.0321525074071936,
+  "island_median_measured_over_expected": 0.9999758043994929,
+  "island_median_abs_sonic_rel_diff": 0.0010370318763991415
+ },
+ "Splus_over_P3": {
+  "10000": 0.9997110911294098,
+  "15000": 0.9998326851606116,
+  "20000": 0.999799663861538
+ },
+ "table": {
+  "contraction_res_ro": {
+   "d_S0": 1.0531104618986975,
+   "d_Splus": 1.4572760079226457,
+   "slope_S0": [
+    1.1525518332605931e-05,
+    -2.4011683879269143e-06
+   ]
+  },
+  "contraction_res_roUx": {
+   "d_S0": 0.930936892629078,
+   "d_Splus": 1.414060726732961,
+   "slope_S0": [
+    -6.926514877161246e-06,
+    -1.1897374761848632e-05
+   ]
+  },
+  "contraction_res_roUy": {
+   "d_S0": 0.8619464569593082,
+   "d_Splus": 1.4086018112570982,
+   "slope_S0": [
+    -2.373783672779633e-05,
+    -6.379742118203795e-06
+   ]
+  },
+  "contraction_res_roe": {
+   "d_S0": 1.0264243450431039,
+   "d_Splus": 1.455586794133355,
+   "slope_S0": [
+    1.4286641327328554e-05,
+    5.710868858458279e-06
+   ]
+  },
+  "contraction_res_roK": {
+   "d_S0": 1.1950629121613237,
+   "d_Splus": 1.3441068830845981,
+   "slope_S0": [
+    4.43162043506864e-05,
+    9.756044069184363e-06
+   ]
+  },
+  "contraction_res_roOmega": {
+   "d_S0": 0.6503677622620857,
+   "d_Splus": 1.4142729187852066,
+   "slope_S0": [
+    -0.00017455928903507974,
+    -0.00010092142230526237
+   ]
+  },
+  "throatwall_res_ro": {
+   "d_S0": 0.9482874119453922,
+   "d_Splus": 3.115491778851858,
+   "slope_S0": [
+    -5.306366925036199e-05,
+    -1.8984340094907033e-05
+   ]
+  },
+  "throatwall_res_roUx": {
+   "d_S0": 0.988908733022209,
+   "d_Splus": 3.6433043779893164,
+   "slope_S0": [
+    -4.751978834449078e-05,
+    -6.249812767975559e-05
+   ]
+  },
+  "throatwall_res_roUy": {
+   "d_S0": 0.7506869425227485,
+   "d_Splus": 3.6214030452705073,
+   "slope_S0": [
+    -8.344914457585306e-05,
+    -6.445082437301982e-05
+   ]
+  },
+  "throatwall_res_roe": {
+   "d_S0": 1.0159173620180089,
+   "d_Splus": 2.9840763297124804,
+   "slope_S0": [
+    -4.5107548871477735e-05,
+    1.2538815636096231e-05
+   ]
+  },
+  "throatwall_res_roK": {
+   "d_S0": 1.0393997589187653,
+   "d_Splus": 4.078213696931756,
+   "slope_S0": [
+    -5.549489403381763e-05,
+    -5.9744914330163105e-05
+   ]
+  },
+  "throatwall_res_roOmega": {
+   "d_S0": 0.7159361094697019,
+   "d_Splus": 4.378875752619532,
+   "slope_S0": [
+    -0.00013837523217679864,
+    -0.00021671671624149509
+   ]
+  },
+  "outside_res_ro": {
+   "d_S0": 0.9148948276699589,
+   "d_Splus": 0.893203920922716,
+   "slope_S0": [
+    -1.3219603677009775e-05,
+    -5.486349875427519e-06
+   ]
+  },
+  "outside_res_roUx": {
+   "d_S0": 0.8162977935073309,
+   "d_Splus": 0.7539668947228083,
+   "slope_S0": [
+    0.00011955146007194581,
+    -3.451341494680329e-05
+   ]
+  },
+  "outside_res_roUy": {
+   "d_S0": 0.6789850945280703,
+   "d_Splus": 0.9133002096627821,
+   "slope_S0": [
+    1.3982402753323608e-05,
+    -5.984976889687502e-05
+   ]
+  },
+  "outside_res_roe": {
+   "d_S0": 0.931128704546687,
+   "d_Splus": 1.0504521195279286,
+   "slope_S0": [
+    3.519052317789272e-05,
+    1.1060210909885867e-05
+   ]
+  },
+  "outside_res_roK": {
+   "d_S0": 1.0092319447471938,
+   "d_Splus": 0.7080100914675738,
+   "slope_S0": [
+    0.00011858570148138608,
+    -6.669916240652897e-06
+   ]
+  },
+  "outside_res_roOmega": {
+   "d_S0": 0.6492626290148759,
+   "d_Splus": 1.505096689522076,
+   "slope_S0": [
+    -5.750251555917365e-05,
+    -0.00014168714760744264
+   ]
+  }
+ },
+ "series": {
+  "run_0692_pdt_on": [
+   {
+    "step": 1000,
+    "contraction_ro": 602.4335778903685,
+    "throatwall_ro": 915798.5528961815
+   },
+   {
+    "step": 2000,
+    "contraction_ro": 677.1066598973777,
+    "throatwall_ro": 988531.269903134
+   },
+   {
+    "step": 3000,
+    "contraction_ro": 604.4920824122488,
+    "throatwall_ro": 1183212.605123092
+   },
+   {
+    "step": 4000,
+    "contraction_ro": 598.1844258272587,
+    "throatwall_ro": 1298423.7814883175
+   },
+   {
+    "step": 5000,
+    "contraction_ro": 559.3561251213237,
+    "throatwall_ro": 1546982.9732128563
+   },
+   {
+    "step": 6000,
+    "contraction_ro": 615.6612788676341,
+    "throatwall_ro": 1544944.5966127745
+   },
+   {
+    "step": 7000,
+    "contraction_ro": 588.2489899854767,
+    "throatwall_ro": 1458696.6408402582
+   },
+   {
+    "step": 8000,
+    "contraction_ro": 667.6941396994998,
+    "throatwall_ro": 1430373.6419954202
+   },
+   {
+    "step": 9000,
+    "contraction_ro": 719.6430855179334,
+    "throatwall_ro": 1268137.8063599656
+   },
+   {
+    "step": 10000,
+    "contraction_ro": 675.6334534849925,
+    "throatwall_ro": 1068860.612199104
+   },
+   {
+    "step": 11000,
+    "contraction_ro": 703.3896832247785,
+    "throatwall_ro": 1007720.4477996831
+   },
+   {
+    "step": 12000,
+    "contraction_ro": 828.1238172786093,
+    "throatwall_ro": 1071328.4825677003
+   },
+   {
+    "step": 13000,
+    "contraction_ro": 806.8289454966416,
+    "throatwall_ro": 1439708.3200331326
+   },
+   {
+    "step": 14000,
+    "contraction_ro": 882.9470959947962,
+    "throatwall_ro": 2508036.9652632247
+   },
+   {
+    "step": 15000,
+    "contraction_ro": 956.8696160873818,
+    "throatwall_ro": 3321751.927874009
+   },
+   {
+    "step": 16000,
+    "contraction_ro": 1000.1235796442926,
+    "throatwall_ro": 4001229.1514710076
+   },
+   {
+    "step": 17000,
+    "contraction_ro": 1081.4743595670548,
+    "throatwall_ro": 4487448.04481766
+   },
+   {
+    "step": 18000,
+    "contraction_ro": 1112.0497928589834,
+    "throatwall_ro": 4744878.445326225
+   },
+   {
+    "step": 19000,
+    "contraction_ro": 1189.5339455177752,
+    "throatwall_ro": 4571676.330849575
+   },
+   {
+    "step": 20000,
+    "contraction_ro": 1295.7107084466809,
+    "throatwall_ro": 4301222.309312726
+   }
+  ],
+  "run_0693_pdt_off": [
+   {
+    "step": 1000,
+    "contraction_ro": 2238.123344409035,
+    "throatwall_ro": 1877590.1987640532
+   },
+   {
+    "step": 2000,
+    "contraction_ro": 477.35880788832606,
+    "throatwall_ro": 1461284.0185300324
+   },
+   {
+    "step": 3000,
+    "contraction_ro": 1294.7359374837454,
+    "throatwall_ro": 1276309.039101296
+   },
+   {
+    "step": 4000,
+    "contraction_ro": 749.0777480985548,
+    "throatwall_ro": 1365652.593338895
+   },
+   {
+    "step": 5000,
+    "contraction_ro": 1191.5505207434687,
+    "throatwall_ro": 1149860.0541916017
+   },
+   {
+    "step": 6000,
+    "contraction_ro": 822.9085438088973,
+    "throatwall_ro": 960878.8898914849
+   },
+   {
+    "step": 7000,
+    "contraction_ro": 1120.698922140395,
+    "throatwall_ro": 980800.2577275316
+   },
+   {
+    "step": 8000,
+    "contraction_ro": 716.5041253903302,
+    "throatwall_ro": 991752.262198248
+   },
+   {
+    "step": 9000,
+    "contraction_ro": 884.3087853648896,
+    "throatwall_ro": 1460799.9122636293
+   },
+   {
+    "step": 10000,
+    "contraction_ro": 678.8105918789444,
+    "throatwall_ro": 1444386.486987258
+   },
+   {
+    "step": 11000,
+    "contraction_ro": 820.3338334433797,
+    "throatwall_ro": 1005334.4602573023
+   },
+   {
+    "step": 12000,
+    "contraction_ro": 733.8689721496639,
+    "throatwall_ro": 1329242.864651293
+   },
+   {
+    "step": 13000,
+    "contraction_ro": 724.2938167114744,
+    "throatwall_ro": 1191107.309214977
+   },
+   {
+    "step": 14000,
+    "contraction_ro": 765.2685724318992,
+    "throatwall_ro": 1017740.2787833213
+   },
+   {
+    "step": 15000,
+    "contraction_ro": 778.129644083224,
+    "throatwall_ro": 1087663.8949235324
+   },
+   {
+    "step": 16000,
+    "contraction_ro": 790.6353488508421,
+    "throatwall_ro": 1262711.0120017063
+   },
+   {
+    "step": 17000,
+    "contraction_ro": 763.1363989723365,
+    "throatwall_ro": 1020202.9026286362
+   },
+   {
+    "step": 18000,
+    "contraction_ro": 851.8074588062999,
+    "throatwall_ro": 1250698.0991315115
+   },
+   {
+    "step": 19000,
+    "contraction_ro": 697.6794063546582,
+    "throatwall_ro": 961896.1278059352
+   },
+   {
+    "step": 20000,
+    "contraction_ro": 817.0248931112741,
+    "throatwall_ro": 1182658.0340549517
+   }
+  ]
+ },
+ "result": "判定不能 (中間・成分で割れる・悪化の移動)"
+}

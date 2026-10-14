@@ -1,0 +1,213 @@
+{
+ "method": "2026-10-12、plan tooling-nozzle-bell-two-mode §5.1 #7 (7b) の比較。NS = run_0019 (res_60000)、Euler = run_0018 (res_30000、同じ物理壁)。",
+ "plateau_tol": 0.01,
+ "plateau_span": 2.0,
+ "refine": 4,
+ "ns_run": "case/68.bell_two_mode/run_0019_tp_m_ns_l100",
+ "eu_run": "case/68.bell_two_mode/run_0018_tp_m_euler_l100_pin",
+ "ns_res": "res_60000.h5",
+ "eu_res": "res_30000.h5",
+ "core_fracs": [
+  0.2,
+  0.3,
+  0.4
+ ],
+ "n": 789,
+ "no_plateau": {
+  "20": 700,
+  "30": 679,
+  "40": 652
+ },
+ "regions": [
+  {
+   "x": [
+    0,
+    1
+   ],
+   "n": 148,
+   "n_plateau_30": 83,
+   "core_sens_max": 0.0026578352029078545,
+   "vs_edge_median": -0.01888646561912688,
+   "vs_edge_maxabs": 0.049412958969557885,
+   "vs_contur_median": 1.0666445267624294
+  },
+  {
+   "x": [
+    1,
+    3
+   ],
+   "n": 209,
+   "n_plateau_30": 0,
+   "core_sens_max": null,
+   "vs_edge_median": null,
+   "vs_edge_maxabs": null,
+   "vs_contur_median": null
+  },
+  {
+   "x": [
+    3,
+    8
+   ],
+   "n": 151,
+   "n_plateau_30": 0,
+   "core_sens_max": null,
+   "vs_edge_median": null,
+   "vs_edge_maxabs": null,
+   "vs_contur_median": null
+  },
+  {
+   "x": [
+    8,
+    16
+   ],
+   "n": 153,
+   "n_plateau_30": 27,
+   "core_sens_max": 0.11664954044344678,
+   "vs_edge_median": -0.003076852413225528,
+   "vs_edge_maxabs": 0.015188559695554216,
+   "vs_contur_median": 1.0243233930808202
+  },
+  {
+   "x": [
+    16,
+    23
+   ],
+   "n": 128,
+   "n_plateau_30": 0,
+   "core_sens_max": null,
+   "vs_edge_median": null,
+   "vs_edge_maxabs": null,
+   "vs_contur_median": null
+  }
+ ],
+ "stations": {
+  "0.70": {
+   "x": 0.6966297685,
+   "R": 1.2483936028571427,
+   "R_euler": 1.2483936028571427,
+   "core20": {
+    "a": 0.9997338652573863,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 21.298137410081498
+   },
+   "core30": {
+    "a": 0.9997478243938955,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 21.489621803700405
+   },
+   "core40": {
+    "a": 1.0000478223666158,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 25.60484267392804
+   },
+   "edge_dr": 0.0031875730443153,
+   "adaptive_dr": 0.0030152108879301365,
+   "contur_dr": 0.0029293341291061203
+  },
+  "3.99": {
+   "x": 3.994521933571428,
+   "R": 2.9985688799999997,
+   "R_euler": 2.9985688799999997,
+   "core20": {
+    "a": 0.9987943876637881,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 11.173346992774587
+   },
+   "core30": {
+    "a": 0.9939413462704451,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": -55.400079659626186
+   },
+   "core40": {
+    "a": 0.9923535586162747,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": -77.18115597178998
+   },
+   "edge_dr": 0.016444160788688388,
+   "adaptive_dr": 0.016482929681798493,
+   "contur_dr": 0.0158041915717666
+  },
+  "10.89": {
+   "x": 10.887304964285713,
+   "R": 5.249237047142857,
+   "R_euler": 5.249237047142857,
+   "core20": {
+    "a": 1.017965921553827,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 274.3864842583304
+   },
+   "core30": {
+    "a": 1.0257599045620678,
+    "Yp": 0.1519883664687427,
+    "adopt": 406.67607485241683,
+    "var": 0.00953977047189019,
+    "dr": 0.052461842132449886,
+    "total": 381.3070396920419
+   },
+   "core40": {
+    "a": 1.023591639252707,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 351.5620260116948
+   },
+   "edge_dr": 0.0531219486976189,
+   "adaptive_dr": 0.052181003519666244,
+   "contur_dr": 0.05165807675860812
+  },
+  "21.51": {
+   "x": 21.506666214285715,
+   "R": 6.959774047857143,
+   "R_euler": 6.959774047857143,
+   "core20": {
+    "a": 1.076862111158876,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 1080.285513598436
+   },
+   "core30": {
+    "a": 1.0798299724545917,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 1120.9989368548615
+   },
+   "core40": {
+    "a": 1.0662259438774033,
+    "Yp": NaN,
+    "adopt": NaN,
+    "var": NaN,
+    "dr": NaN,
+    "total": 934.3774885226447
+   },
+   "edge_dr": 0.12567737071417698,
+   "adaptive_dr": 0.12568097555715685,
+   "contur_dr": 0.12376310578213356
+  }
+ }
+}
