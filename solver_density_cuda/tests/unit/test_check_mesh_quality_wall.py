@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """check_mesh_quality.py の壁直交性・AR の緩和の条件・結果の再利用の試験
-(plan tooling-generator-defaults-and-launch-gate §5.1 #8、§6.2「壁直交性」・§6.3「再利用の鍵の試験」)。
+(plan tooling-generator-defaults-and-launch-gate §5.1 #8・#8c、§6.2「壁直交性」・§6.3「再利用の鍵の試験」)。
+
+#8c (codex diagnose 2026-10-14 `notes/reviews/2026-10-14-wall-orthogonality-judgments-diagnose.md`) の反例と事前登録の受入:
+判別 A/B (直線壁の 5 セルを単一の physID と 2 分割で判定し、両方とも緩和の確認 2・警告 1・WARN)、AR 100・φ 40° の格子を
+1 ID と 20 ID に分けても警告 20、真の角部を WARN から外さない、AR 6000.3 の 1 セルが --bcond で FAIL。
 
 メッシュは小さい合成の h5 を直接書く (変換器は使わない)。node 変換と同じ配置: primal は `/VIZMESH/CONNE`
 (XDMF の 5 = 四角形・4 = 三角形)、壁の面は `/BCONDS/<physID>/vizBfaceNodes`・`vizBfaceSizes`、座標は float32 の
@@ -143,6 +147,76 @@ def lcorner_mesh(ni=11, nj=11, h=1.0e-3):
            'bottom': (3, [(nid(i, 0), nid(i + 1, 0)) for i in range(ni - 1)]),
            'top': (4, [(nid(i, nj - 1), nid(i + 1, nj - 1)) for i in range(ni - 1)])}
     return coords, cells, bnd
+
+
+def band_mesh():
+    """codex の判別 A/B (diagnose 2026-10-14) の 5 セル: 直線壁 (y = 0) の上に 1 層、x の幅 1・1・0.1・0.1・0.1、層厚 0.00025
+    → AR 4000・4000・400・400・400.8。最後のセルだけ外側の右の節点を h·tan40° ずらし、その横断辺の φ を 40° にする。
+    戻り (coords, cells, 壁の辺 [5 本], 壁以外の境界 {名前: (physID, [辺])})。"""
+    xs = np.array([0.0, 1.0, 2.0, 2.1, 2.2, 2.3])
+    h = 0.00025
+    shift = np.zeros(len(xs))
+    shift[-1] = h * np.tan(np.radians(40.0))
+    coords = np.array([(x + (shift[i] if j else 0.0), j * h, 0.0) for i, x in enumerate(xs) for j in range(2)])
+    n = len(xs) - 1
+    cells = [[2 * i, 2 * i + 2, 2 * i + 3, 2 * i + 1] for i in range(n)]
+    wall = [(2 * i, 2 * i + 2) for i in range(n)]
+    bnd = {'left': (1, [(0, 1)]), 'right': (2, [(2 * n, 2 * n + 1)]), 'top': (4, [(2 * i + 1, 2 * i + 3) for i in range(n)])}
+    return coords, cells, wall, bnd
+
+
+def band_kinds(wall_parts):
+    """band_mesh の bcond: 壁以外は固定、壁は wall_parts {名前: (physID, 辺)} の分け方で kind wall。"""
+    out = {'left': (1, 'inlet_Pressure'), 'right': (2, 'outlet_statPress'), 'top': (4, 'slip')}
+    out.update({nm: (pid, 'wall') for nm, (pid, _) in wall_parts.items()})
+    return out
+
+
+STRIP_WALL_BOTTOM = {'left': (1, 'inlet_Pressure'), 'right': (2, 'outlet_statPress'), 'bottom': (3, 'wall'), 'top': (4, 'slip')}
+STRIP_CORNER_KINDS = {'left': (1, 'wall'), 'right': (2, 'outlet_statPress'), 'bottom': (3, 'wall'), 'top': (4, 'slip')}
+
+
+def strip_split(n_ids):
+    """§6.3 の固定メッシュ (傾斜 40°・AR 100・φ 40°) の下辺の壁 20 面を n_ids 個の physID (1 または 20) に分ける。
+    戻り (coords, cells, 境界, bcond の {名前: (physID, kind)})。"""
+    co, ce, bn = strip_mesh()
+    edges = bn.pop('bottom')[1]
+    kinds = {k: v for k, v in STRIP_WALL_BOTTOM.items() if k != 'bottom'}
+    if n_ids == 1:
+        bn['bottom'] = (3, edges)
+        kinds['bottom'] = (3, 'wall')
+    else:
+        assert len(edges) == n_ids
+        for i, e in enumerate(edges):
+            bn['bottom_%02d' % i] = (10 + i, [e])
+            kinds['bottom_%02d' % i] = (10 + i, 'wall')
+    return co, ce, bn, kinds
+
+
+def ar6000_mesh():
+    """codex の追加指摘の入力: 平らな壁の上の 1 層 2000 セル (AR 100)、最後のセルだけ外側の右の節点を 1/60 に下げて AR 6000.3。
+    座標は float64 で書く (float32 だと 1.7e-7 の辺が丸めで消える)。"""
+    co, ce, bn = strip_mesh(theta_deg=0.0, ar=100.0, ni=2001, nj=2)
+    co = np.array(co)
+    co[-1, 1] /= 60.0
+    return co, ce, bn
+
+
+def inproc_wall(coords, cells, walls, ar_max=5000.0):
+    """check_mesh_quality.wall_orthogonality をプロセス内で回す (四角形だけ・2D)。walls: {physID: (名前, kind, [辺])}。
+    戻り (結果の dict, ars)。セルごとの判定 (masks) を physID の分け方の間で比べるのに使う。"""
+    sys.path.insert(0, os.path.dirname(TOOL))
+    import argparse
+    import check_mesh_quality as cmq                               # noqa: E402
+    co = np.asarray(coords, dtype=np.float64)
+    conn = np.asarray(cells, dtype=np.int64).ravel()
+    offs = np.arange(1, len(cells) + 1, dtype=np.int64) * 4
+    ty = np.full(len(cells), 9)
+    ars, _ = cmq.metrics_vectorized(co[:, :2], conn, offs, ty, False)
+    a = argparse.Namespace(ar_max=ar_max, phi_construct=cmq.PHI_CONSTRUCT_DEFAULT, theta_tol=cmq.THETA_TOL_DEFAULT,
+                           corner_angle=cmq.CORNER_ANGLE_DEFAULT)
+    w = {pid: (nm, kind, [np.asarray(e, dtype=np.int64) for e in faces]) for pid, (nm, kind, faces) in walls.items()}
+    return cmq.wall_orthogonality(co, conn, offs, ty, w, ars, a, rnode=cmq.node_rounding_radius(co)), ars
 
 
 def write_h5(path, coords, cells, bnd, layout='node', dtype=np.float32, kinds=None):
@@ -296,6 +370,9 @@ def main():
     check(verdict_of(out) == 'PASS' and set(wl) == {1, 3} and all('edges_corner' in w for w in wl.values())
           and all(w['edges_corner']['phi_max'] < 1e-6 for w in wl.values()) and '角部: 対象辺' in out,
           f'L corner: corner cells must be counted separately with φ 0 ({wl})\n{out}')
+    cor = (sm or {}).get('summary', {}).get('corners', {})
+    check(cor.get('n_nodes') == 1 and abs((cor.get('fold_max') or 0) - 90.0) < 1e-6 and cor.get('at') == [0.0, 0.0, 0.0]
+          and cor.get('n_seam_nodes') == 0, f'L corner: one geometric corner (fold 90° at the origin), no label seam ({cor})')
 
     # ---- 格納精度: 座標が大きい (x + 1 m) 薄い層は float32 の丸めで φ が揺れる → 確かめられない (丸めの範囲) で FAIL、
     #      同じ格子を float64 で書けば PASS (判定は格納された形で行い、丸めの上限は理由の区別にだけ使う) ----
@@ -325,6 +402,10 @@ def main():
         rc, out, _ = run(h, *args)
         check(verdict_of(out) == want and rc == wrc and 'wall orthogonality' not in out and not os.path.exists(h + '.quality.json'),
               f'without --bcond {os.path.basename(h)} {args}: legacy verdict {want}/{wrc} expected, got {verdict_of(out)}/{rc}')
+        # #8c (d): --bcond なしの判定は関門の合格の根拠にならない旨を必ず 1 行出す (VERDICT の行より前、語 VERDICT を含まない)
+        note = [ln for ln in out.splitlines() if '投入の関門の合格の根拠にならない' in ln]
+        check(len(note) == 1 and 'VERDICT' not in note[0] and out.splitlines().index(note[0]) < len(out.splitlines()) - 1,
+              f'without --bcond {os.path.basename(h)} {args}: the "not evidence for the launch gate" note must appear once\n{out}')
     rc = subprocess.run([sys.executable, TOOL, h_rad, '--ar-max', '6000'], capture_output=True, text=True).returncode
     check(rc == 2, f'--ar-max above 5000 must be rejected (rc {rc})')
 
@@ -371,12 +452,115 @@ def main():
     rc, out, sm = run(h63, '--bcond', os.path.join(tmp, 'bc63_B2.yaml'), '--phi-construct', '45')
     check((sm or {}).get('reused') is False and 'mesh_invariant_sha256' in out, f'§6.3: moving a node must change the key ({sm})')
 
+    # ==== #8c (codex diagnose 2026-10-14 の反例と事前登録の受入) ====
+    rec8c = []
+
+    def summ_of(sm):
+        s = (sm or {}).get('summary') or {}
+        rel, wn = s.get('relax', {}), s.get('warn_near_wall', {})
+        return {'verified': rel.get('n_verified'), 'unverified': rel.get('n_unverified'), 'warn': wn.get('n'),
+                'warn_corner': wn.get('n_corner'), 'corners': s.get('corners', {}).get('n_nodes'),
+                'seams': s.get('corners', {}).get('n_seam_nodes')}
+
+    # ---- 判別 A/B (事前登録): 直線壁の 5 セル (AR 4000・4000・400・400・400.8、下流の低 AR のセルに φ 40°)。
+    #      A = 単一の physID、B = 上流 2 面と下流 3 面に分割、キャッシュなし。受入: 両方とも緩和の確認 2・警告 1・WARN
+    #      (修正前は A = 確認 0・FAIL、B = 確認 2・WARN) ----
+    co, ce, wall, bnd = band_mesh()
+    ab = {}
+    for tag, parts in (('A', {'bottom': (3, wall)}), ('B', {'up': (3, wall[:2]), 'down': (5, wall[2:])})):
+        kinds = band_kinds(parts)
+        hb = os.path.join(tmp, 'band_%s.h5' % tag)
+        write_h5(hb, co, ce, dict(bnd, **parts), dtype=np.float64, kinds={pid: k for pid, k in kinds.values()})
+        bb = os.path.join(tmp, 'band_%s.yaml' % tag); write_bcond(bb, kinds)
+        rc, out, sm = run(hb, '--ar-max', '5000', '--bcond', bb, '--no-cache')
+        r = dict(summ_of(sm), verdict=verdict_of(out), rc=rc, target=(sm or {}).get('summary', {}).get('relax', {}).get('n_target'))
+        ab[tag] = r
+        check(r['target'] == 2 and r['verified'] == 2 and r['unverified'] == 0 and r['warn'] == 1 and r['verdict'] == 'WARN'
+              and r['rc'] == 0, f'#8c band {tag}: pre-registered acceptance is verified 2 / warn 1 / WARN (got {r})\n{out}')
+        rec8c.append(('band 5 cells %s (%s)' % (tag, 'single physID' if tag == 'A' else 'split 2+3'), r))
+    # セルごとにも同じ (緩和の可否・警告の対象が physID の分け方で変わらない)
+    rA, _ = inproc_wall(co, ce, {3: ('bottom', 'wall', wall)})
+    rB, _ = inproc_wall(co, ce, {3: ('up', 'wall', wall[:2]), 5: ('down', 'wall', wall[2:])})
+    check(all(np.array_equal(rA['masks'][k], rB['masks'][k]) for k in ('verified', 'warn', 'layer'))
+          and list(np.flatnonzero(rA['masks']['verified'])) == [0, 1] and list(np.flatnonzero(rA['masks']['warn'])) == [4],
+          f'#8c band: per-cell verified / warn must not depend on the physID split '
+          f'(A verified {np.flatnonzero(rA["masks"]["verified"])} warn {np.flatnonzero(rA["masks"]["warn"])}, '
+          f'B verified {np.flatnonzero(rB["masks"]["verified"])} warn {np.flatnonzero(rB["masks"]["warn"])})')
+
+    # ---- 境界のラベルの継ぎ目は角部ではない: AR 100・φ 40° の格子の下辺の壁を 1 ID と 20 ID に分けても警告は 20 ----
+    warn_masks = {}
+    for nids in (1, 20):
+        co, ce, bn, kinds = strip_split(nids)
+        hs = os.path.join(tmp, 'strip_%dids.h5' % nids)
+        write_h5(hs, co, ce, bn, kinds={pid: k for pid, k in kinds.values()})
+        bs = os.path.join(tmp, 'strip_%dids.yaml' % nids); write_bcond(bs, kinds)
+        rc, out, sm = run(hs, '--bcond', bs, '--no-cache')
+        r = dict(summ_of(sm), verdict=verdict_of(out), rc=rc)
+        check(r['warn'] == 20 and r['warn_corner'] == 0 and r['corners'] == 0 and r['seams'] == (19 if nids == 20 else 0)
+              and r['verdict'] == 'WARN' and r['rc'] == 0, f'#8c strip AR 100 φ 40° with {nids} wall IDs: warn 20 / WARN (got {r})\n{out}')
+        rec8c.append(('strip AR 100 φ 40°, %d wall ID%s' % (nids, 's' if nids > 1 else ''), r))
+        walls_in = {pid: (nm, k, [e for e in bn[nm][1]]) for nm, (pid, k) in kinds.items() if k == 'wall'}
+        warn_masks[nids] = inproc_wall(co, ce, walls_in, ar_max=1000.0)[0]['masks']['warn']
+    check(np.array_equal(warn_masks[1], warn_masks[20]) and int(warn_masks[1].sum()) == 20,
+          '#8c strip: the warned cells must be the same set for 1 and 20 wall IDs')
+
+    # ---- 真の角部も WARN から外さない: 40° 傾斜の下辺 + 左辺の壁 (内角 50° → 法線の折れ 130°) ----
+    co, ce, bn = strip_mesh()
+    hc = os.path.join(tmp, 'strip_corner.h5')
+    write_h5(hc, co, ce, bn, kinds={pid: k for pid, k in STRIP_CORNER_KINDS.values()})
+    bcc = os.path.join(tmp, 'strip_corner.yaml'); write_bcond(bcc, STRIP_CORNER_KINDS)
+    rc, out, sm = run(hc, '--bcond', bcc, '--no-cache')
+    r = dict(summ_of(sm), verdict=verdict_of(out), rc=rc)
+    cor = (sm or {}).get('summary', {}).get('corners', {})
+    wn = (sm or {}).get('summary', {}).get('warn_near_wall', {})
+    check(r['warn'] == 24 and r['warn_corner'] == 1 and r['corners'] == 1 and abs((cor.get('fold_max') or 0) - 130.0) < 1e-3
+          and cor.get('at') == [0.0, 0.0, 0.0] and wn.get('corner_phi_max') is not None and abs(wn['corner_phi_max'] - 40.0) < 0.5
+          and r['verdict'] == 'WARN' and '折れ角 最大 130.0°' in out and 'うち角部 1 セル' in out,
+          f'#8c true corner: 20 + 5 − 1 = 24 warned cells incl. the corner cell, fold 130° at the origin (got {r}, {cor})\n{out}')
+    rec8c.append(('strip + left wall (fold 130°)', dict(r, fold=cor.get('fold_max'))))
+
+    # ---- 3D の角部 (六面体の L 字、直交): 角の線の 3 節点が折れ 90°、PASS ----
+    co, ce, bn = lcorner_mesh()
+    co3, he, b3 = extrude(co, ce, bn, nk=3, dz=1.0e-3)
+    kL3 = {'left': (1, 'wall'), 'right': (2, 'outlet_statPress'), 'bottom': (3, 'wall_isothermal'), 'top': (4, 'slip'),
+           'front': (5, 'slip'), 'back': (6, 'slip')}
+    hL3 = os.path.join(tmp, 'lcorner3d.h5'); write_h5(hL3, co3, he, b3, kinds={pid: k for pid, k in kL3.values()})
+    bL3 = os.path.join(tmp, 'lcorner3d.yaml'); write_bcond(bL3, kL3)
+    rc, out, sm = run(hL3, '--bcond', bL3, '--no-cache')
+    cor = (sm or {}).get('summary', {}).get('corners', {})
+    check('mode: 3D' in out and verdict_of(out) == 'PASS' and rc == 0 and cor.get('n_nodes') == 3
+          and abs((cor.get('fold_max') or 0) - 90.0) < 1e-6 and cor.get('n_seam_nodes') == 0,
+          f'#8c 3D L corner: 3 corner nodes with fold 90°, PASS (got {verdict_of(out)}/{rc} {cor})\n{out}')
+    rec8c.append(('3D hex L corner', dict(summ_of(sm), verdict=verdict_of(out), rc=rc, fold=cor.get('fold_max'))))
+
+    # ---- AR > 5000 が 1 セル (2000 セル中) は --bcond で件数によらず FAIL (修正前は SOFT-PASS・終了コード 0) ----
+    co, ce, bn = ar6000_mesh()
+    h6 = os.path.join(tmp, 'ar6000.h5')
+    write_h5(h6, co, ce, bn, dtype=np.float64, kinds={pid: k for pid, k in STRIP_WALL_BOTTOM.values()})
+    b6 = os.path.join(tmp, 'ar6000.yaml'); write_bcond(b6, STRIP_WALL_BOTTOM)
+    for args in (['--ar-max', '5000'], []):
+        rc, out, sm = run(h6, '--bcond', b6, '--no-cache', *args)
+        s = (sm or {}).get('summary') or {}
+        check(verdict_of(out) == 'FAIL' and rc != 0 and s.get('ar_bad') == 1 and s.get('ar_over_cap') == 1
+              and 'SOFT-PASS を当てない' in out and abs(float(out.split('AR 最大 ')[1].split()[0]) - 6000.3) < 0.1,
+              f'#8c one cell of AR 6000.3 among 2000 with --bcond {args}: FAIL / rc != 0 (got {verdict_of(out)}/{rc})\n{out}')
+        rec8c.append(('AR 6000.3 x1 / 2000, --bcond %s' % ' '.join(args), {'verdict': verdict_of(out), 'rc': rc,
+                                                                          'ar_bad': s.get('ar_bad')}))
+    # --bcond なしは旧判定のまま (互換): SOFT-PASS・終了コード 0
+    rc, out, _ = run(h6, '--ar-max', '5000')
+    check(verdict_of(out) == 'SOFT-PASS' and rc == 0 and '投入の関門の合格の根拠にならない' in out,
+          f'#8c AR 6000.3 without --bcond keeps the legacy SOFT-PASS / rc 0 and prints the note (got {verdict_of(out)}/{rc})')
+    rec8c.append(('AR 6000.3 x1 / 2000, no --bcond (legacy)', {'verdict': verdict_of(out), 'rc': rc}))
+
     print('--- §6.2 壁直交性 (φ は格納された座標で測った近壁の最大)')
     for r in rows:
         print('  %-44s VERDICT %-5s rc %d  φ max %s  %s' % (r[0], r[1], r[2], 'None' if r[3] is None else '%.2f°' % r[3], r[4]))
     print('--- §6.3 再利用の鍵 (傾斜 40°・AR 100、試験用の閾値 5°)')
     for k, r in rec63.items():
         print('  %-9s %s' % (k, r))
+    print('--- #8c 列ごとの全層・角部・AR の外れ値 (codex diagnose 2026-10-14 の反例)')
+    for k, r in rec8c:
+        print('  %-44s %s' % (k, r))
     print('ALL PASS' if fails == 0 else f'FAILED ({fails})')
     return 1 if fails else 0
 
