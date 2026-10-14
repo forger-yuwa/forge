@@ -8,6 +8,9 @@
 
 書き写す値: 各段の config を完全修飾パスに平らにし、`problem_keys` (問題 YAML の物理条件・入出力) と `steady_base` の `ignore`
 (定常では効かない dt) を除いたもの。Euler (viscMethod 0) の visc・thermCond は 0 でなければならないので残す。
+明示すべきキー (plan §5.1 #16): YAML の `explicit_keys` の基準に当たるのに段の config が書いていないキーを、その段の `explicit` に
+旧い実効値 (書き写しに使ったソルバの既定) で載せる (`recipe_settings.explicit_for`)。旧い実効値の出所は今のソースで確かめ、
+合わなければ止まる (`recipe_settings.explicit_table`)。照合では `explicit` も `fixed` と同じく省略が FAIL。
 §1 との差 (`differs_from_recommended`) は `recipe_settings.compute_differs` で共通プロファイルと比べて作る。
 
     design/.venv-opt/bin/python solver_density_cuda/tools/recipes/regen_profiles.py            # 生成区間を出す
@@ -401,17 +404,19 @@ def stage_fixed(recipes, cfg_text, stage="main"):
 def build_profiles(recipes, specs=None, keep=False):
     """全機種を回して生成区間のプロファイル (dict) と、段ごとの config を返す。"""
     profiles, configs = {}, {}
+    table = RS.explicit_table(recipes)                 # 旧い実効値の出所を今のソースで確かめる (合わなければ RecipeError)
     for sp in (specs or SPECS):
         work = Path(tempfile.mkdtemp(prefix=f"regen_{sp['name']}_"))
         problem = ROOT / sp["problem"]
         stages, bcond = sp["run"](problem, work)
-        fixed, legs = {}, {}
+        fixed, explicit, legs = {}, {}, {}
         for st, cfg in stages:
             fx = stage_fixed(recipes, cfg, st)
+            ex = RS.explicit_for(recipes, cfg, bcond, table)
             legs.setdefault(st, []).append(cfg)
-            if st in fixed and fixed[st] != fx:
+            if st in fixed and (fixed[st] != fx or explicit[st] != ex):
                 raise RuntimeError(f"{sp['name']}: 段 {st} の脚の値が違う (梯子の代表の問題は脚を 1 つにする)")
-            fixed[st] = fx
+            fixed[st], explicit[st] = fx, ex
         doc, _ = RS.parse_config(stages[-1][1])
         app = RS.derive_applies(doc, bcond)
         applies = {"dimension": sp["dimension"], "discretization": app["discretization"], "axisymmetric": app["axisymmetric"],
@@ -421,7 +426,8 @@ def build_profiles(recipes, specs=None, keep=False):
                 "source": {"plan": PLAN, "section": "§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6", "date": DATE},
                 "transcribed_from": {"generator": sp["generator"], "problem": sp["problem"], "call": sp["call"]},
                 "recommended_ref": sp["ref"],
-                "stages": {st: {"fixed": fx} for st, fx in fixed.items()}}
+                "stages": {st: ({"fixed": fx, "explicit": explicit[st]} if explicit[st] else {"fixed": fx})
+                           for st, fx in fixed.items()}}
         prof["differs_from_recommended"] = RS.compute_differs(recipes, fixed, sp["ref"])
         profiles[sp["name"]] = prof
         configs[sp["name"]] = stages

@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """機種と段ごとの推奨設定 (プロファイル) の読み込み・照合・宣言・文書の生成
-(plan tooling-generator-defaults-and-launch-gate §4.1・§4.3・§5.1 #6)。
+(plan tooling-generator-defaults-and-launch-gate §4.1・§4.3・§5.1 #6・#16)。
 
-値の正本は `recipes/recommended_settings.yaml`。プロファイル = 機種と段ごとの推奨設定で、各キーは 3 種のどれか:
+値の正本は `recipes/recommended_settings.yaml`。プロファイル = 機種と段ごとの推奨設定で、各キーは次のどれか:
 
 - `fixed`    宣言したプロファイルの値。違えば FAIL (理由つきの逸脱 `--deviate key=value --reason ...` を宣言すれば通す)。
+- `explicit` 明示すべきキー (plan §5.1 #16): 値に依存するのに書き写しの出力 (生成器の config) が省略していたキーと、その旧い実効値
+             (書き写しに使ったソルバの既定)。照合は `fixed` と同じ。#11 で生成器に書かせるときの「足してよいキーと旧い実効値」の
+             例外表。基準は YAML の `explicit_keys` (`recipes/regen_profiles.py` が段ごとに作る)。
 - `advisory` 推奨の範囲 (`[lo, hi]`・`{in: [...]}`・`any`)。外れたら WARN (終了 0)。
 - `forbid`   書けば FAIL (逸脱にもできない)。
+
+**`fixed`・`explicit` の省略は FAIL** (出所によらない。plan §4.3 の 4 (a)、2026-10-15 codex diagnose の Major)。省略したキーの値は
+実行するバイナリの既定で決まり (`run_case.sh` は `FORGE_BIN` で別ビルドも回す)、今のソースの既定との一致は照合の代わりにならない。
+省略そのものを試すときは `--deviate key=~ --reason ...` (「書かない」の逸脱) で宣言する。逸脱の記録の実効値は未確定とする。
 
 どれにも無いキーは、問題 YAML の物理条件・入出力のキー (YAML の `problem_keys`) か段の値に効かないキー (`ignore`) でなければ
 **プロファイルに無いキー**として FAIL (逸脱を宣言すれば通す)。加えて `check_solver_config.py` の FAIL、
@@ -27,7 +34,8 @@
 `declare` は照合が通ったときだけ `RECIPE.json` (プロファイル・版・段・逸脱・config の sha256) を書く (終了 0)。FAIL は書かずに終了 1。
 「実験」の宣言 (`--experiment`) は推奨への適合を求めず、プロファイルから外れるキーと理由 (1 行の自由記述、必須) だけを書く
 (禁止キー・check_solver_config の FAIL・未知のキー・重複キーは実験でも FAIL)。逸脱・実験の根拠 (`--basis`) は任意
-(ユーザ決定 2026-10-14「試し計算は手軽にやりたい」)。逸脱の値に `~` を書くと「書かない」(キーを省いた) の宣言。
+(ユーザ決定 2026-10-14「試し計算は手軽にやりたい」)。逸脱の値に `~` を書くと「書かない」(キーを省いた) の宣言
+(`RECIPE.json` の逸脱には `effective: 未確定` を付ける)。
 """
 import argparse
 import datetime
@@ -45,7 +53,8 @@ DOC_BEGIN = '<!-- BEGIN GENERATED: recipe_settings.py --doc (手で編集しな�
 DOC_END = '<!-- END GENERATED: recipe_settings.py --doc -->'
 DECL_FORMAT = 'forge-recipe-declaration'
 DECL_VERSION = 1
-KINDS = ('fixed', 'advisory')
+KINDS = ('fixed', 'advisory', 'explicit')
+UNDETERMINED = '未確定 (省略: 実行するバイナリの既定で決まる)'
 
 sys.path.insert(0, HERE)
 
@@ -138,22 +147,32 @@ def advisory_text(spec):
 # ------------------------------------------------------------------------------------------------ solver の既定値
 
 _DEFAULTS = None
+_RAW_DEFAULTS = None
 
 
-def solver_defaults():
-    """solverConfig が省略時に使う値 (config_key_inventory の抽出から、数値・文字列に読めるものだけ)。"""
-    global _DEFAULTS
-    if _DEFAULTS is not None:
-        return _DEFAULTS
-    out = {}
-    try:
+def solver_default_strings():
+    """config_key_inventory が solverConfig.{cpp,hpp} から抜いた既定値の文字列 {キー: 文字列 or None} (失敗は例外)。"""
+    global _RAW_DEFAULTS
+    if _RAW_DEFAULTS is None:
         import importlib.util
         spec = importlib.util.spec_from_file_location('cki_rs', os.path.join(HERE, 'config_key_inventory.py'))
         cki = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cki)
         raw = open(cki.SRC_CPP, errors='replace').read() + '\n' + open(cki.SRC_HPP, errors='replace').read()
-        for p, d in cki.extract_keys(cki.strip_comments(raw)).items():
-            v = _parse_default(d.get('default'))
+        _RAW_DEFAULTS = {p: d.get('default') for p, d in cki.extract_keys(cki.strip_comments(raw)).items()}
+    return _RAW_DEFAULTS
+
+
+def solver_defaults():
+    """solverConfig が省略時に使う値 (config_key_inventory の抽出から、数値・文字列に読めるものだけ)。
+    表示 (§1 との差の「書かない (solver 既定 X)」) にだけ使う。照合には使わない (省略は FAIL、plan §4.3 の 4 (a))。"""
+    global _DEFAULTS
+    if _DEFAULTS is not None:
+        return _DEFAULTS
+    out = {}
+    try:
+        for p, d in solver_default_strings().items():
+            v = _parse_default(d)
             if v is not None:
                 out[p] = v
     except Exception:
@@ -178,6 +197,138 @@ def _parse_default(s):
         return float(s2)
     except ValueError:
         return None
+
+
+# ------------------------------------------------------------------------------------------------ 明示すべきキー (#16)
+
+WHEN_OPS = ('not', 'gt', 'min')
+
+
+def _when_value_ok(spec, v):
+    """`when` の 1 条件。spec: 値 (同じ値) / 列 (どれか; `null` = 書いていない) / {not: [...]} / {gt: x} / {min: x}。
+    v は文脈の値 (None = 書いていない)。"""
+    if isinstance(spec, dict):
+        if len(spec) != 1 or set(spec) - set(WHEN_OPS):
+            raise RecipeError(f'explicit_keys の when の条件の形が不正: {spec!r} (値 / 列 / {{not: [...]}} / {{gt: x}} / {{min: x}})')
+        op, arg = next(iter(spec.items()))
+        if op == 'not':
+            return not _when_value_ok(list(arg) if isinstance(arg, (list, tuple)) else [arg], v)
+        if v is None or isinstance(v, bool):
+            return False
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            return False
+        return x > float(arg) if op == 'gt' else x >= float(arg)
+    if isinstance(spec, (list, tuple)):
+        return any((c is None and v is None) or (c is not None and v is not None and same(c, v)) for c in spec)
+    return v is not None and same(spec, v)
+
+
+def when_match(when, ctx):
+    """`when` (写像。全部の条件が成り立てば真) を文脈 ctx (config の完全修飾パス・`applies.X`・`species_count`) に当てる。"""
+    if when is not None and not isinstance(when, dict):
+        raise RecipeError(f'explicit_keys の when は写像: {when!r}')
+    return all(_when_value_ok(spec, ctx.get(k)) for k, spec in (when or {}).items())
+
+
+def explicit_context(doc, bcond=None):
+    """`when` を当てる文脈: config の完全修飾パス、`applies.X` (derive_applies; 壁の種類は bcond から)、`species_count` (化学種の数)。"""
+    flat = flatten(doc)
+    ctx = dict(flat)
+    ctx.update({f'applies.{k}': v for k, v in derive_applies(doc, bcond).items()})
+    sp = flat.get('physProp.species')
+    ctx['species_count'] = len(sp) if isinstance(sp, (list, tuple)) else 0
+    return flat, ctx
+
+
+def _verify_source(key, case, raw, where):
+    """旧い実効値の出所を今のソースで確かめる。合わなければ RecipeError (ソルバの既定が変わった: 旧い実効値を黙って更新しない)。"""
+    src = case['source']
+    if 'inventory' in src:
+        got = raw.get(key)
+        if key not in raw or str(got) != str(src['inventory']):
+            raise RecipeError(f'{where}: config_key_inventory の抽出した既定 {got!r} が記録 {src["inventory"]!r} と違う '
+                              '(ソルバの既定が書き写しの後に変わった。旧い実効値を見直し、plan に書いてから直す)')
+        v = _parse_default(got)
+        if v is not None and not same(v, case['value']):
+            raise RecipeError(f'{where}: 旧い実効値 {show(case["value"])} が config_key_inventory の既定 {show(v)} と違う')
+    for s in ([src] if 'file' in src else []) + list(src.get('also') or []):
+        try:
+            with open(os.path.join(ROOT, str(s['file'])), encoding='utf-8', errors='replace') as f:
+                text = f.read()
+        except (OSError, KeyError, TypeError) as e:
+            raise RecipeError(f'{where}: 出所のファイルを読めない: {e}') from None
+        for t in (s.get('text') if isinstance(s.get('text'), list) else [s.get('text')]):
+            if not t or str(t) not in text:
+                raise RecipeError(f'{where}: 出所 {s["file"]} に {t!r} が無い '
+                                  '(ソルバの既定の決め方が書き写しの後に変わった。旧い実効値を見直す)')
+
+
+def explicit_table(recipes, verify=True):
+    """YAML の `explicit_keys` (明示すべきキーの基準、plan §5.1 #16) を検査して返す {キー: {why, basis, cases}}。
+    各 case = {when (適用条件), value (旧い実効値), source (出所)}。source は `inventory` (config_key_inventory が抜いた既定値の
+    文字列) か `file` + `text` (既定を決めるソースの文字列; inventory が抜けない既定・条件つきの既定。`also: [{file, text}]` で
+    別のファイルも確かめる)、`at` (ファイル:行、表示用)。
+    verify なら出所を今のソースで確かめる (`_verify_source`)。"""
+    table = recipes.get('explicit_keys') or {}
+    if not isinstance(table, dict):
+        raise RecipeError('explicit_keys は写像 (キー → {why, basis, cases})')
+    raw = solver_default_strings() if verify else {}
+    out = {}
+    for key, ent in table.items():
+        key = str(key)
+        if not isinstance(ent, dict) or not isinstance(ent.get('cases'), list) or not ent['cases']:
+            raise RecipeError(f'explicit_keys.{key}: cases (列) が要る')
+        if set(ent) - {'why', 'basis', 'cases'}:
+            raise RecipeError(f'explicit_keys.{key}: 未知の項目 {sorted(set(ent) - {"why", "basis", "cases"})}')
+        if not str(ent.get('why') or '').strip():
+            raise RecipeError(f'explicit_keys.{key}: why (値に依存する理由) が要る')
+        if is_problem_key(recipes, key):
+            raise RecipeError(f'explicit_keys.{key}: 問題 YAML のキー (problem_keys) は明示すべきキーにしない')
+        for i, c in enumerate(ent['cases']):
+            where = f'explicit_keys.{key}.cases[{i}]'
+            if not isinstance(c, dict) or 'value' not in c or not isinstance(c.get('source'), dict):
+                raise RecipeError(f'{where}: value (旧い実効値) と source (出所) が要る')
+            if set(c) - {'when', 'value', 'source'}:
+                raise RecipeError(f'{where}: 未知の項目 {sorted(set(c) - {"when", "value", "source"})}')
+            when_match(c.get('when'), {})                 # 形の検査
+            src = c['source']
+            if not ('inventory' in src or ('file' in src and 'text' in src)):
+                raise RecipeError(f'{where}: source は inventory (抽出した既定値の文字列) か file + text (ソースの文字列)')
+            if verify:
+                _verify_source(key, c, raw, where)
+        out[key] = ent
+    return out
+
+
+def explicit_for(recipes, cfg_text, bcond=None, table=None):
+    """段の config が省略している明示すべきキー → 旧い実効値 {キー: 値}。`explicit_keys` の各キーのうち config に書いていないもので、
+    最初に when が成り立つ case の値。書き写しの台本 (`recipes/regen_profiles.py`) が段ごとの `explicit` を作るのに使う。"""
+    doc, fails = parse_config(cfg_text)
+    if fails:
+        raise RecipeError(f'config を読めない: {fails}')
+    flat, ctx = explicit_context(doc, bcond)
+    out = {}
+    for key, ent in (explicit_table(recipes) if table is None else table).items():
+        if key in flat or any(p.startswith(key + '.') for p in flat):
+            continue
+        for c in ent['cases']:
+            if when_match(c.get('when'), ctx):
+                out[key] = c['value']
+                break
+    return dict(sorted(out.items()))
+
+
+def explicit_source(recipes, key, value):
+    """明示すべきキーの旧い実効値の出所 (表示用の 1 行)。"""
+    for c in ((recipes.get('explicit_keys') or {}).get(key) or {}).get('cases') or []:
+        if same(c.get('value'), value):
+            src = c.get('source') or {}
+            if src.get('at'):
+                return str(src['at'])
+            return 'config_key_inventory' if 'inventory' in src else str(src.get('file', ''))
+    return None
 
 
 # ------------------------------------------------------------------------------------------------ 読み込みと継承
@@ -226,8 +377,8 @@ def _chain(recipes, name):
 
 
 def resolve(recipes, name):
-    """プロファイルを継承の鎖で解決する。戻り {name, chain, abstract, stages: {段: {fixed, advisory}}, forbid, ignore, ...}。
-    鎖の中で同じ段・同じキーに違う値・違う種類 (fixed/advisory/forbid/ignore) を与えたら RecipeError。"""
+    """プロファイルを継承の鎖で解決する。戻り {name, chain, abstract, stages: {段: {fixed, advisory, explicit}}, forbid, ignore, ...}。
+    鎖の中で同じ段・同じキーに違う値・違う種類 (fixed/advisory/explicit/forbid/ignore) を与えたら RecipeError。"""
     chain = _chain(recipes, name)
     profs = recipes['profiles']
     per_stage = {}            # 段 → キー → (種類, 値, 出所)
@@ -270,7 +421,7 @@ def resolve(recipes, name):
                     put(tbl, str(k), kind, v, f'{lvl}.stages.{st}')
             extra = set(body or {}) - set(KINDS)
             if extra:
-                raise RecipeError(f'{lvl}.stages.{st}: 未知の項目 {sorted(extra)} (fixed / advisory だけ)')
+                raise RecipeError(f'{lvl}.stages.{st}: 未知の項目 {sorted(extra)} (fixed / advisory / explicit だけ)')
     for st in stages:
         tbl = per_stage.setdefault(st, {})
         for kind, k, v, origin in all_entries:
@@ -442,8 +593,7 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
         return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res}
 
     st = res['stages'][stage]
-    fixed, adv = st['fixed'], st['advisory']
-    defaults = solver_defaults()
+    fixed, adv, expl = st['fixed'], st['advisory'], st['explicit']
 
     def off_or_fail(key, msg, actual, want):
         if experiment:
@@ -451,7 +601,11 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
             return
         if key in deviations:
             dv = deviations[key]
-            if (dv is None and actual is None) or (dv is not None and actual is not None and same(dv, actual)):
+            if dv is None and actual is None:
+                # 「書かない」(~) の逸脱: 実効値は実行するバイナリの既定で決まるので未確定として記録する (plan §4.3 の 4 (a))
+                applied.append({'key': key, 'value': None, 'profile_value': want, 'effective': UNDETERMINED})
+                return
+            if dv is not None and actual is not None and same(dv, actual):
                 applied.append({'key': key, 'value': actual, 'profile_value': want})
                 return
             fails.append((key, f'逸脱の宣言 {show(dv)} と config の値 {show(actual)} が違う'))
@@ -465,18 +619,21 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
             fails.append((k, f'禁止キー ({why})'))
         if k in deviations:
             fails.append((k, '禁止キーは逸脱として宣言できない'))
-    # fixed
-    for k, want in fixed.items():
-        if k in flat:
-            got = flat[k]
-            if not same(got, want):
-                off_or_fail(k, f'プロファイル {profile} の段 {stage} は {show(want)} (config は {show(got)})', got, want)
-        else:
-            d = defaults.get(k)
-            if d is not None and same(d, want):
-                continue                                   # 省略 = solver 既定 = プロファイルの値
-            off_or_fail(k, f'書いていない (プロファイル {profile} の段 {stage} は {show(want)}、solver 既定 '
-                           f'{show(d) if d is not None else "不明"})', None, want)
+    # fixed と explicit (明示すべきキー、#16): 値を照合し、省略は FAIL。省略を solver の既定で代用しない
+    # (既定は実行するバイナリで決まる。2026-10-15 codex diagnose の Major、plan §4.3 の 4 (a))
+    for kind, table in (('fixed', fixed), ('explicit', expl)):
+        for k, want in table.items():
+            what = (f'プロファイル {profile} の段 {stage} は {show(want)}' if kind == 'fixed' else
+                    f'明示すべきキー (plan §5.1 #16): プロファイル {profile} の段 {stage} は {show(want)} '
+                    f'(生成器が省略していた値 = 書き写しに使ったソルバの既定、出所 {explicit_source(recipes, k, want) or "explicit_keys"}。'
+                    '#11 で生成器に書かせる例外表のキー)')
+            if k in flat:
+                got = flat[k]
+                if not same(got, want):
+                    off_or_fail(k, f'{what} (config は {show(got)})', got, want)
+            else:
+                off_or_fail(k, f'書いていない ({what}。省略の実効値は実行するバイナリで決まるので照合に使わない。'
+                               f'省略を試すなら --deviate {k}=~ --reason "...")', None, want)
     # advisory
     for k, spec in adv.items():
         if k in flat:
@@ -489,7 +646,7 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
                 else:
                     warns.append((k, f'推奨の範囲 {rng} の外 ({show(flat[k])}; プロファイル {profile} の段 {stage})'))
     # プロファイルに無いキー
-    known = set(fixed) | set(adv) | set(res['forbid']) | set(res['ignore'])
+    known = set(fixed) | set(expl) | set(adv) | set(res['forbid']) | set(res['ignore'])
     for k, v in flat.items():
         if k in known or any(k.startswith(f + '.') for f in res['forbid']) or is_problem_key(recipes, k):
             continue
@@ -666,11 +823,29 @@ def render_doc(recipes):
         L.append(f'| `{n}` | {_cell(r.get("machine") or "")} | {_cell(app)} | {" → ".join(r["stages"])} | {_cell(src_txt)} |')
     L.append('')
     L.append('**読み方**: 各表の値は `fixed` (宣言したプロファイルと違えば FAIL、理由つきの逸脱で通す)、`〜` の範囲と「任意」は `advisory`'
-             ' (外れたら WARN)。本段 (main) 以外の列の「=」は本段と同じ値、空欄はその段では照合しない (本段の長さ'
+             ' (外れたら WARN)。「(明示すべき)」の値は `explicit` (plan §5.1 #16: 生成器が省略していた、値に依存するキーと旧い実効値。'
+             '照合は `fixed` と同じ)。**`fixed`・`explicit` の省略は FAIL** (省略の実効値は実行するバイナリで決まるので、solver の既定との'
+             '一致で代用しない。省略を試すなら `--deviate key=~ --reason "..."`、実効値は未確定として記録)。'
+             '本段 (main) 以外の列の「=」は本段と同じ値、空欄はその段では照合しない (本段の長さ'
              ' `time.last.nStepOuter` は問題 YAML のキー)。表に無いキーは、問題 YAML の物理条件・入出力のキー'
              ' (`problem_keys`) か無視するキー以外は「プロファイルに無いキー」として FAIL (逸脱を宣言すれば通す)。'
              '禁止キーは書けば FAIL。')
     L.append('')
+    ek = recipes.get('explicit_keys') or {}
+    if ek:
+        L.append('**明示すべきキーの基準** (YAML の `explicit_keys`、plan §5.1 #16): 各機種・段で、下の適用条件が成り立ち、'
+                 '生成器の config が書いていないキーを、その段の `explicit` に旧い実効値で載せる (`recipes/regen_profiles.py`)。'
+                 '旧い実効値の出所は書き写しの時のソースで確かめてある (変わると書き写しの台本が止まる)。')
+        L.append('')
+        L.append('| キー | 適用条件 | 旧い実効値 | 出所 | 値に依存する理由 |')
+        L.append('| --- | --- | --- | --- | --- |')
+        for k, ent in ek.items():
+            for c in ent.get('cases') or []:
+                when = ', '.join(f'{a} {show(b)}' for a, b in (c.get('when') or {}).items()) or '常に'
+                src = c.get('source') or {}
+                at = src.get('at') or ('config_key_inventory' if 'inventory' in src else src.get('file', ''))
+                L.append(f'| `{k}` | {_cell(when)} | {_cell(c.get("value"))} | {_cell(at)} | {_cell(ent.get("why", ""))} |')
+        L.append('')
     for n in names:
         r = resolve(recipes, n)
         L.append(f'#### `{n}`')
@@ -719,6 +894,8 @@ def _val_txt(stage_tbl, k):
         return show(stage_tbl['fixed'][k])
     if k in stage_tbl['advisory']:
         return advisory_text(stage_tbl['advisory'][k])
+    if k in stage_tbl.get('explicit', {}):
+        return show(stage_tbl['explicit'][k]) + ' (明示すべき)'
     return ''
 
 
@@ -755,7 +932,8 @@ def _print_result(r, head):
     for k, m in r['warns']:
         print(f'  WARN {k}: {m}')
     for a in r.get('applied') or []:
-        print(f'  DEVIATION {a["key"]}: {show(a["value"])} (プロファイル {show(a["profile_value"])})')
+        eff = f'、実効値 {a["effective"]}' if a.get('effective') else ''
+        print(f'  DEVIATION {a["key"]}: {show(a["value"])} (プロファイル {show(a["profile_value"])}{eff})')
     for o in r.get('off_profile') or []:
         print(f'  OFF-PROFILE {o["key"]}: {show(o["value"])} (プロファイル {show(o["profile_value"])})')
     print(f'  VERDICT: {"FAIL" if r["fails"] else ("WARN" if r["warns"] else "PASS")}')
