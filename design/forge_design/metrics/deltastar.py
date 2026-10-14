@@ -85,13 +85,14 @@ def euler_cover_range(xE, edge_tol: bool = True) -> dict:
     edge_tol=True (remap_edge="missing" の経路): lo = xE[0] − tol_lo、hi = xE[−1] + tol_hi、tol = EULER_EDGE_TOL_FRAC (1e−4) × その端の
     列の間隔 (tol_lo = 1e−4 (xE[1] − xE[0])、tol_hi = 1e−4 (xE[−1] − xE[−2]))。許容は**端の外側だけ**に足し、内側の列の被覆と評価
     (列 k と重み w の補間) は変えない。許容の内側で端を越える列は、抽出器の補間 (`euler_q_at`: 重み w を [0, 1] に丸める) により
-    **端の列の値**で評価される (外挿ではない)。
-    **この許容は、浮動小数の丸めや壁の法線のずらしによる、本来同じはずの端の位置の差を吸収するためのもので、範囲の不足を隠すためではない**。
-    2026-10-14 の B の dry-run で、変換後の座標の NS の最後の列 x = 95.29740274407894 が Euler の参照の端 95.29740274239427 を
-    1.68e−9 r_t 越えて被覆が落ちた (Euler の格子は msh の座標を既定の 10 桁で書くので、出口の x × r_t = 7.306010214129155 m が
-    7.306010214 m に丸まり、÷ r_t = 95.29740274239427 と一致する。NS の格子は 17 桁なので生成の値のまま)。この種の差 (≲ 1e−8 r_t) は
-    許容 (端の間隔の 1e−4 倍) より十分小さく、範囲の不足 (旧い run_0174 の終端 95.2276 と NS の 95.2974 の 0.07 r_t) は許容より
-    桁違いに大きいので、後者は今どおり欠測になる。
+    **端の列の値**で評価される。数学的には端の外側の微小区間 (幅 tol) への**定数の延長**であり、これを「外挿ではない」とは呼ばない
+    (plan §5.1 #36i (v)、codex diagnose `notes/reviews/2026-10-14-h370-prelaunch-review-diagnose.md`)。
+    **この許容は、同一の端点の丸め (本来同じ座標の端の列が、格子のファイルの桁数の違いで 1e−9 r_t 程度ずれる) を吸収するためのもので、
+    範囲の不足を隠すためではない**。2026-10-14 の B の dry-run で、変換後の座標の NS の最後の列 x = 95.29740274407894 が Euler の参照の端
+    95.29740274239427 を 1.68e−9 r_t 越えて被覆が落ちた (Euler の格子は msh の座標を既定の 10 桁で書くので、出口の x × r_t =
+    7.306010214129155 m が 7.306010214 m に丸まり、÷ r_t = 95.29740274239427 と一致する。NS の格子は 17 桁なので生成の値のまま)。この種の
+    差 (≲ 1e−8 r_t) は許容 (端の間隔の 1e−4 倍) より十分小さく、範囲の不足 (旧い run_0174 の終端 95.2276 と NS の 95.2974 の 0.07 r_t) は
+    許容より桁違いに大きいので、後者は今どおり欠測になる。
     edge_tol=False (既定の remap_edge="clamp" の経路): 今までどおり ±EULER_RANGE_PAD (1e−9 r_t) — 既定の呼び出し元の結果は変えない。
     戻り: {"lo", "hi", "x0", "x1", "tol_lo", "tol_hi", "edge_tol", "frac" (edge_tol のとき)}。"""
     xE = np.asarray(xE, dtype=float)
@@ -565,7 +566,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     ValueError; plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6))。remap_edge: `_load_structured` の remap_constant_x の端の扱い
     ("clamp" 既定 = 今の挙動 / "missing" = 補間範囲の足りない列を欠測にして抽出しない; §5.1 #36e (4))。Euler の範囲の外の列の判定は
     `euler_cover_range` (§5.1 #36g): "missing" の経路は Euler の端の外側だけに幾何の許容 (端の列の間隔 × 1e−4) を足し、許容の内側で
-    端を越える列は端の列の値で評価する (浮動小数・法線のずらしによる位置の差の吸収で、範囲の不足は今どおり欠測)。"clamp" は ±1e−9 のまま。
+    端を越える列は端の列の値で評価する (同一の端点の丸めを吸収する許容 = 微小区間の定数の延長; 範囲の不足は今どおり欠測)。
+    "clamp" は ±1e−9 のまま。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿、抽出しなかった NS の列
@@ -582,7 +584,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     xE = E["x"][:, 0]
     rwE_col = E["r"][:, -1]
     # Euler の補間できる範囲 (§5.1 #36g、`euler_cover_range`): "missing" の経路は端の外側だけに幾何の許容 (端の列の間隔 × 1e−4) を足し、
-    # 許容の内側で端を越える列は euler_q_at (w を [0, 1] に丸める) で端の列の値になる。"clamp" (既定) は今までどおり ±1e−9
+    # 許容の内側で端を越える列は euler_q_at (w を [0, 1] に丸める) で端の列の値になる (同一の端点の丸めを吸収する許容 = 微小区間の
+    # 定数の延長、§5.1 #36i (v))。"clamp" (既定) は今までどおり ±1e−9
     cover = euler_cover_range(xE, edge_tol=(remap_edge == "missing"))
 
     def covered(x) -> bool:

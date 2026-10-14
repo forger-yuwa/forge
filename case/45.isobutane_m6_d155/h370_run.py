@@ -14,7 +14,7 @@ B で h370_run.sh から起動する (h370_prep.sh <commit> を先に通す)。
        (ii) で正式の準備の格子・設定がこれとビット同一であることを確かめる。
        終了後に h370_judge.py --euler-prequalify で予備の資格を判定し (全残差の check_convergence.py --segment PASS・NaN/Inf なし・出口 M・
        流量・参照場の時系列の check_quasisteady.py の VERDICT; §5.1 #36g (1))、満たせば本段の最後の出力と sha256 を
-       _band_ab/half_inlet/h370_euler_ref_pin.json に固定し、σ_ref の代わりの参照 (末尾の窓の代表の出力と sha) を記録する。満たさなければ NS に
+       _band_ab/half_inlet/h370_euler_ref_pin.json に固定し、σ_ref の代わりの参照 (末尾の窓の全 20 出力と sha、§5.1 #36i) を記録する。満たさなければ NS に
        進まない。最終の資格は NS の判定の σ_ref (h370_judge.py) で決める。このスクリプトと runner_axismach.run_staged は Euler の本段の出力を
        消さない (run_staged が消すのは soft・mid の段の res_* だけで、本段の前)。
   (ii) --phase ns: 固定した {run, res, sha256} を euler_ref にして run_0951_h370_ns_b0 = problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml を
@@ -85,6 +85,9 @@ NUMPY_WANT = "2.5.2"
 SCRIPTS = ("h370_run.py", "h370_judge.py", "h370_problems.py", EU_PROBLEM, NS_PROBLEM, CSV)
 # 登録の値 (§6 V-h370; h370_problems.py の STOP_RULE_* と同じ値。試験 test_h370_launch.py が照合する)
 EU_STEPS, EU_OUT, EU_CFL, EU_SOFT = 60000, 1000, 2.0, 3000
+EU_TAIL = 20000                                    # σ_ref の Euler の末尾の窓 (h370_judge.EU_TAIL と同じ)
+SIGMA_REF_STEPS = list(range(EU_STEPS - EU_TAIL, EU_STEPS, EU_OUT))   # σ_ref の代わりの参照 = 末尾の窓の全出力 (固定の 60,000 を除く 20 出力;
+                                                   # h370_judge.sigma_ref_required() と同じ、§5.1 #36i M1)
 EU_MESH = {"ni": 2000, "nj": 97, "throat_refine": 5.0}
 NS_CAP, NS_OUT, NS_HOLD, NS_PRE = 200000, 2500, 40000, 3000
 NS_MESH = {"ni": 4719, "nj": 160}
@@ -870,8 +873,8 @@ def phase_euler(a, RA, code: dict) -> int:
 # --- (ii) NS ----------------------------------------------------------------------------------------------------------------------
 def read_pin() -> dict:
     """固定した Euler の参照 (h370_judge.py --euler-prequalify が書く) を読み、sha を照合する。σ_ref の代わりの参照 (予備の資格の
-    sigma_ref_snapshots、§5.1 #36g (2)) も在ることと sha を NS を回す前に確かめる (無ければ σ_ref を測れず、NS の後で更新に進めない)。
-    戻り {spec, record, pin}。不成立は die。"""
+    sigma_ref_snapshots、§5.1 #36g (2)・#36i (M1)) が末尾の窓の全 20 出力 (SIGMA_REF_STEPS、登録の定数から列挙) ちょうどで、各出力が在り
+    sha が記録と同じことを NS を回す前に確かめる (欠ければ σ_ref を測れず、NS の後で更新に進めない)。戻り {spec, record, pin}。不成立は die。"""
     pin, qual = jload(HERE / PIN), jload(HERE / QUAL)
     if not pin or not qual:
         die(f"{PIN} か {QUAL} が無い (Euler の予備の資格の判定が済んでいない)")
@@ -880,9 +883,16 @@ def read_pin() -> dict:
     f = HERE / pin["run"] / pin["res"]
     if not f.is_file() or sha256_file(f) != pin["sha256"]:
         die(f"固定した Euler の参照 {f} が無いか sha256 が {pin['sha256'][:16]}… と違う")
+    if pin.get("res") != f"res_{EU_STEPS}.h5":
+        die(f"固定した Euler の参照 {pin.get('res')} が本段の上限の出力 res_{EU_STEPS}.h5 でない")
     alts = qual.get("sigma_ref_snapshots") or []
     if not alts:
         die(f"{QUAL} に σ_ref の代わりの参照 (sigma_ref_snapshots) が無い")
+    got = sorted(a["step"] for a in alts if isinstance(a, dict) and isinstance(a.get("step"), int))
+    if got != SIGMA_REF_STEPS or len(got) != len(alts) or any(a.get("res") != f"res_{a.get('step')}.h5" for a in alts):
+        miss = [k for k in SIGMA_REF_STEPS if k not in got]
+        die(f"{QUAL} の σ_ref の代わりの参照が末尾の窓の全 {len(SIGMA_REF_STEPS)} 出力 ({SIGMA_REF_STEPS[0]}〜{SIGMA_REF_STEPS[-1]}) でない "
+            f"(無い {miss[:8]}、記録 {len(got)} 出力)")
     for a in alts:
         g = HERE / pin["run"] / str(a.get("res"))
         if not g.is_file() or sha256_file(g) != a.get("sha256"):

@@ -1,5 +1,6 @@
-"""plan tooling-nozzle-isothermal-wall-chain §5.1 #36f・#36g・§6「V-h370 の事前登録」(§4.9 codex diagnose 3、判定の基準の諮問
-`notes/reviews/2026-10-14-h370-judge-criteria-diagnose.md`) の判定。B の case dir で回す (h370_run.py が呼ぶ)。壁は更新しない (固定壁の pass)。
+"""plan tooling-nozzle-isothermal-wall-chain §5.1 #36f・#36g・#36i・§6「V-h370 の事前登録」(§4.9 codex diagnose 3、判定の基準の諮問
+`notes/reviews/2026-10-14-h370-judge-criteria-diagnose.md`、投入前のレビューの諮問 `notes/reviews/2026-10-14-h370-prelaunch-review-diagnose.md`)
+の判定。B の case dir で回す (h370_run.py が呼ぶ)。壁は更新しない (固定壁の pass)。
 
 --euler-prequalify: (i) Euler 参照 run_0950_h370_euler_ref の**予備の資格** (prequalify; §6 V-h370 の「Euler」、§5.1 #36g (1)):
   - RUN_RC 0、投入前の検査 (H370_PRECHECK.json) の合格、本段が上限 60,000 step まで回った (最後の出力 res_60000.h5)。
@@ -11,12 +12,14 @@
     (OSCILLATING も参照の時間の変動なので未達)。nozzle_report.metrics の η = 0.1 の線の評価量 (wave・overshoot・slope・range、%) は
     平均が 0 に近く相対の閾値が意味を持たないので記録だけ。閾値を細かくした (1e-4) 判定も記録だけ。
   これは 6 点の M・出口 M・流量の既定の相対閾値の準定常で、抽出に使う参照場全体の資格には足りない (codex の Major)。**最終の資格**は
-  NS の判定の σ_ref (下の 5) で決め、σ_ref を測れない・判定不能・参照の時間の変動が A/B の判定を左右する (参照の未整定) なら
-  `update_conditions_met` を偽にする。
+  NS の判定の σ_ref・σ_ref,use (下の 5) で決め、σ_ref を測れない・判定不能・参照の時間の変動が A/B の判定を左右する (参照の未整定)・
+  σ_ref,use > 0.01 mm・A/B が判定不能なら `update_conditions_met` を偽にする。
   満たせば本段の最後の出力とその sha256 を _band_ab/half_inlet/h370_euler_ref_pin.json に固定する (既にあって違えば止める; 消さない)。
-  σ_ref の代わりの参照 (Euler の末尾の窓 = 本段の最後の 20,000 step の出力から 5,000 step ごとの代表 40,000・45,000・50,000・55,000、
-  固定の 60,000 と合わせて 5 出力; 選び方は NS の判定の前のここで固定する) とその sha、末尾の窓の全出力の sha と場の差 (記録だけ;
-  代表の選び方の裏付け)、スクリーニングの出力 (check_quasisteady の末尾の窓の始まりと中ほど、停止の出力だけに当てる) を記録する。
+  σ_ref の代わりの参照 (§5.1 #36i (M1)) は Euler の末尾の窓 = 本段の最後の 20,000 step [40,000, 60,000] の**全**出力 (出力 1,000 ごと、
+  固定の 60,000 を含め 21 出力のうち代わりは 40,000〜59,000 の 20 出力; 出力の間隔と窓から列挙し、在る出力だけから作らない) とその sha。
+  1 つでも欠ければ予備の資格を判定不能にする。旧い代表 (5,000 ごとの 40,000・45,000・50,000・55,000) と末尾の窓の全出力の場の差
+  (`tail_field_dev`) は記録だけで、資格の判定には使わない。スクリーニングの出力 (check_quasisteady の末尾の窓の始まりと中ほど、停止の出力
+  だけに当てる) も記録する。
   → _band_ab/half_inlet/h370_euler_prequalify.json。終了コード 0 予備の資格あり / 1 未達 / 2 判定不能。
 
 (既定): (ii) NS run_0951_h370_ns_b0 の §6 V-h370 の判定 → _band_ab/half_inlet/h370_judge.json:
@@ -36,30 +39,47 @@
        抽出し直して補い、res が無ければ判定不能。
      - 比べる列 F を**抽出の前に**座標だけで決める: NS の使用域の列 (stop_rule.json の delta_series.x) のうち、腕 A (旧い
        run_0174_euler_v5d_M_r1、最後の出力を sha で固定) と腕 B (固定した run_0950) の Euler の補間できる範囲 (共通の関数
-       deltastar.euler_cover_range、受け渡しの抽出と同じ端の幾何の許容つき) の両方に入る列。F の中の非有限・欠測・held は比較を
+       deltastar.euler_cover_range、受け渡しの抽出と同じ端の許容つき = 同一の端点の丸めを吸収する許容 (端の外側の微小区間への
+       定数の延長、端の列の間隔 × 1e−4)) の両方に入る列。F の中の非有限・欠測・held は比較を
        合格にしない (後から有限の列だけを選ばない)。旧い参照の範囲の外 (出口の区間) は F に入らないので比べない (外挿しない)。
      - 出力 k ごと: 各腕の合否 pf (抽出の例外なし・F の中に held・非有限・欠測なし)、両腕とも pf のとき
        D_k = F の max|δ_E,B − δ_E,A| [mm]。抽出の条件は受け渡しと同じ (edge・一定 x の断面への補間・端は欠測・ω 0.5・平滑化の λ・
        昇格の上限; stop_rule.json の extract)。
-     - σ_ref (腕 B の参照の時間の変動): 必要な全出力 k について、固定した出力の代わりに予備の資格で固定した代わりの参照 (Euler の末尾の
-       窓の代表 4 出力) で抽出し直し、σ_ref = max_k max_e max_F |δ_E(k, e) − δ_E(k, 固定)| [mm] (使用域の全列の値 σ_ref,use も記録)。
-       代わりの参照で F・使用域の held・欠測・合否が変われば σ_ref は判定不能、抽出が失敗・代わりの参照が無い・sha が違えば測れない。
-       停止の出力 × スクリーニングの 2 出力の差は「スクリーニング」として記録だけ (σ_ref の上限とは扱わない)。
+     - σ_ref (腕 B の参照の時間の変動; §5.1 #36i (M1)・(M3)): 必要な全出力 k (17) について、固定した出力の代わりに Euler の末尾の窓の
+       **全**出力 (40,000〜59,000 の 20 出力 = `sigma_ref_required`、登録の定数から列挙) で抽出し直し (17 × 20 = 340 抽出)、
+       σ_ref = max_k max_e max_F |δ_E(k, e) − δ_E(k, 固定)| [mm] (比べる列 F)、
+       σ_ref,use = max_k max_e max_U |δ_E(k, e) − δ_E(k, 固定)| [mm] (使用域の全体 U = 固定の参照で抽出できる使用域の全列 = 受け渡しの
+       関門の coverage_check と同じ使用域 [0, x_e]; F ⊂ U)。最大を与えた (NS の出力・Euler の出力・x) を両方とも記録する。
+       抽出の前に、予備の資格の記録の代わりの参照が 20 出力ちょうどで、各出力が在り sha が記録と同じことを照合する (欠け・不一致は
+       σ_ref を測れない → 最終の資格なし; 抽出は回さない)。代わりの参照で F・使用域の held・欠測・非有限の列 (列ごとの印) や合否が
+       変われば σ_ref は判定不能、抽出が失敗すれば測れない。停止の出力 × スクリーニングの 2 出力の差は「スクリーニング」として記録だけ
+       (σ_ref の上限とは扱わない)。
      - 分類 (classify_ab): 必要な出力の欠け・抽出の失敗・σ_ref を測れない・判定不能 → 判定不能。どれかの出力で pf_A ≠ pf_B → 代わりの
        参照の全部でもその違いが保たれれば 結果 B (保たれなければ判定不能)。両腕とも pf でない出力 (F の中の欠測) → 判定不能。
        それ以外: max_k D_k + σ_ref ≤ 0.01 mm → 結果 A、min_k D_k − σ_ref > 0.01 mm → 結果 B、σ_ref を足し引きして初めて 0.01 mm を
        またぐ → 判定不能 (参照の未整定)、D_k だけで窓の中で 0.01 mm をまたぐ → 判定不能 (時間の変動)。
-     - 参照の最終の資格 (reference_final): σ_ref を測れる・判定できる・参照の未整定でない (σ_ref が A/B の分類を左右しない) とき資格あり。
-       A/B が分類に至らない (出力の欠け・抽出の失敗・F の中の欠測) ときは σ_ref が判定を左右するかを決められないので資格を確かめられない。
+     - 参照の最終の資格 (reference_final; §5.1 #36i (M2)・(M3)): 次の**すべて**のとき資格あり — σ_ref・σ_ref,use を測れて判定できる、
+       **σ_ref,use ≤ 0.01 mm** (A/B の分類とは独立の必要条件: 旧い参照との差が明確なことと、新しい参照が設計の入力として落ち着いている
+       ことは別)、A/B が結果 A か結果 B (B_D・B_pf) に分類された (σ_ref が分類を左右しない)。σ_ref・σ_ref,use を測れない・判定不能・
+       σ_ref,use > 0.01 mm・参照の未整定 → 資格なし。A/B が判定不能 (窓の中で 0.01 mm をまたぐ時間の変動 U_time・出力の欠け・抽出の
+       失敗・F の中の欠測・合否の違いを確かめられない) → 資格を確かめられない。どちらも更新に進めない。
      停止の出力 s では両腕の全体の抽出 (run の H370_AB/{A,B}) で帯の位置 (y_b・y*)・感度・held・δ_target の差・次の壁 (腕 B の表、腕 A は
      共通の列だけ腕 A の δ_target に替えた表 = 出口の区間を延ばさない) の真のスロートを記録する。
-     抽出の回数の目安 (V-h370、1 抽出 ~116 s = #36e の実寸の格子の実測): 腕 A 17 + σ_ref 17 × 4 + スクリーニング 2 + 停止の出力の全体 2
-     ≈ 89 回 ≈ 2.9 h (腕 B は記録を使う)。末尾の窓の全 20 出力を代わりにすると ≈ 361 回 ≈ 11.6 h。
+     抽出の回数と所要の目安 (V-h370、§5.1 #36i): 腕 A 17 + σ_ref 17 × 20 = 340 + スクリーニング 2 (+ 記録の無い出力の腕 B の抽出し直し)
+     = 359 回を 1 つの作業の一覧にしてプロセス並列 (`run_snaps`、既定の上限 3; --jobs 1 の直列も子プロセス 1 つで回す: BLAS のスレッド数で
+     丸めが変わる (実寸で δ_E 最大 6.9e−18 r_t) ので、子の BLAS を 1 スレッドにそろえて直列と並列をビット同一にする) で回し、停止の出力の全体の抽出
+     2 回はこのプロセスで直列。1 抽出は
+     実寸の合成の場で 116〜123 s (直列なら 361 回 ≈ 11.6〜12.3 h)。手元 (12 論理 CPU、他の負荷あり) の 3 本同時は 1 本 157 s (1 本だけの
+     とき 123 s) で 359 × 157 / 3 + 2 × 123 ≈ 5.3 h。B (g5.xlarge の 4 vCPU = 2 物理コア × 2) では並列の伸びがこれより小さいことがある。
+     1 抽出のプロセスの最大メモリは 181〜187 MiB (SNAP_PEAK_MIB 256 で見積もる)。抽出の本体 (帯の梯子 = band_local_deficit) は Euler の参照に
+     依る (deltastar.py の euler_q_at を梯子の各段が呼ぶ) ので、代わりの参照の間で使い回せる NS 側の処理は読み込みと一定 x への写像だけで
+     1 抽出の約 0.05 % (0.06 s) — 抽出器を変えずに分けられる分は無視できるので使い回しはしない。
   6. 設計を終える条件の量 (記録だけ; 最初の pass の判定には使わない): 使用域の未緩和の max|δ_E − δ_in|。
   判定: 「更新に進める条件」= 関門の proceed かつ 参照の最終の資格 (と 1 の基盤の不成立が無いこと)、抽出の参照の A/B は
   結果 A / 結果 B / 判定不能。
-usage: python3 h370_judge.py --euler-prequalify     python3 h370_judge.py [--no-ab]
+usage: python3 h370_judge.py --euler-prequalify     python3 h370_judge.py [--no-ab] [--jobs N]
        (--no-ab は A/B と σ_ref を回さない = 参照の最終の資格を確かめないので、更新に進める条件は満たさない)
+       (--jobs は抽出の並列数の上限 1〜4、既定 3。実際の並列数は min(上限, 空きメモリ / 1 抽出の最大メモリ SNAP_PEAK_MIB))
        (--case-dir・--design・--tools は試験用; 既定は B の ~/forge-g0cchain、無ければこの作業ツリー)
 """
 import argparse
@@ -89,8 +109,13 @@ PIN = "_band_ab/half_inlet/h370_euler_ref_pin.json"
 QUAL = "_band_ab/half_inlet/h370_euler_prequalify.json"   # 予備の資格の記録 (§5.1 #36g (1); 旧名 h370_euler_qualify.json)
 OUT = "_band_ab/half_inlet/h370_judge.json"
 EU_STEPS = 60000
+EU_OUT = 1000                                 # Euler の本段の出力の間隔 (h370_run.EU_OUT・problem_d155_euler_h_ref.yaml と同じ)
 EU_TAIL = 20000                               # σ_ref の Euler の末尾の窓 (本段の最後の 20,000 step、出力 1,000 ごと 21 出力)
-SIGMA_REF_EVERY = 5000                        # 末尾の窓の中の代わりの参照の代表の間隔 (40,000・45,000・50,000・55,000 + 固定の 60,000)
+SIGMA_REF_REP_EVERY = 5000                    # 記録だけ: 旧い代表の間隔 (40,000・45,000・50,000・55,000)。資格の判定には使わない (§5.1 #36i M1)
+JOBS_CAP = 3                                  # 抽出の並列数の上限の既定 (B = g5.xlarge の 4 vCPU を他のセッションの計算と共有する)
+JOBS_MAX = 4                                  # 並列数の上限の最大 (g5.xlarge の vCPU)
+SNAP_PEAK_MIB = 256                           # 1 抽出のプロセスの最大メモリの見積もり [MiB] (実寸の合成の場 NS 4719 × 160・Euler 2000 × 97
+                                              # で 1 抽出を回したプロセスの ru_maxrss 181 MiB、3 抽出を続けた子 187 MiB を切り上げ; 並列数を空きメモリで抑える)
 BIN_SHA = "7e95e5bbd8f50c9e"
 XS = (40.0, 70.0, 94.0)                       # 参照場・記録の量の位置 [r_t] (停止規則の要求の断面 = x_fracs × x_w)
 QUAL_COLS = ["exit_core_M", "mdot_rt"] + [f"M_axis_{x:g}" for x in XS] + [f"M_eta0.1_{x:g}" for x in XS]
@@ -225,24 +250,39 @@ def euler_series(run: Path, steps: list) -> tuple:
     return rows, probs
 
 
-def sigma_ref_selection(steps: list, last: int = EU_STEPS, tail: int = EU_TAIL, every: int = SIGMA_REF_EVERY) -> dict:
-    """σ_ref の代わりの参照の選び方 (§5.1 #36g (2); 予備の資格の時点 = NS の判定の前に固定する)。末尾の窓 [last − tail, last] の出力のうち、
-    窓の始まりから every step ごとの出力 (固定の last を除く) を代表にする (V-h370: 40,000・45,000・50,000・55,000)。
-    戻り {"tail_window", "tail_steps" (窓の全出力), "representatives", "missing" (代表のうち出力が無いもの), "rule", "why"}。"""
+def sigma_ref_required(last=None, tail=None, every=None) -> list:
+    """σ_ref の代わりの参照に要る Euler の出力の step (§5.1 #36i (M1)): 末尾の窓 [last − tail, last] の出力の間隔 every ごとの全出力から
+    固定の last を除いたもの (V-h370: 40,000〜59,000 の 20 出力)。登録の定数 (既定 EU_STEPS・EU_TAIL・EU_OUT、呼ぶ時点の値) から列挙する
+    (在る出力・予備の資格の記録からは作らない)。"""
+    last, tail, every = (EU_STEPS if last is None else last), (EU_TAIL if tail is None else tail), (EU_OUT if every is None else every)
+    lo = last - tail
+    return [lo + k * every for k in range(tail // every) if lo + k * every < last]
+
+
+def sigma_ref_selection(steps: list, last=None, tail=None, every=None) -> dict:
+    """σ_ref の代わりの参照の選び方 (§5.1 #36i (M1); 予備の資格の時点 = NS の判定の前に固定する)。末尾の窓 [last − tail, last] の
+    **全**出力 (出力の間隔 every ごと、固定の last を除く; V-h370 は 40,000〜59,000 の 20 出力) を代わりの参照にする。
+    旧い代表 (SIGMA_REF_REP_EVERY ごと) は記録だけ。
+    戻り {"tail_window", "tail_steps" (窓の在る出力), "required" (要る出力の列挙), "alternatives" (要る出力のうち在るもの), "missing"
+    (要る出力のうち無いもの), "representatives_record" (旧い代表、記録だけ), "rule", "why"}。"""
+    last, tail, every = (EU_STEPS if last is None else last), (EU_TAIL if tail is None else tail), (EU_OUT if every is None else every)
     lo = last - tail
     tail_steps = [s_ for s_ in steps if lo <= s_ <= last]
-    want = [lo + k * every for k in range(tail // every + 1) if lo + k * every < last]
-    return {"tail_window": [lo, last], "tail_steps": tail_steps, "representatives": [s_ for s_ in want if s_ in tail_steps],
-            "missing": [s_ for s_ in want if s_ not in tail_steps],
-            "rule": f"末尾の窓 [{lo}, {last}] の {every} step ごとの出力 (固定の {last} を除く) を代わりの参照にする",
-            "why": ("必要な NS の 17 出力 × 末尾の窓の全 20 出力は 340 抽出 ≈ 11 h (1 抽出 ~116 s、#36e の実寸の格子の実測) で重いので、"
-                    f"{every} step ごとの代表 {len(want)} 出力にした (17 × {len(want)} = {17 * len(want)} 抽出 ≈ {17 * len(want) * 116 / 3600:.1f} h)。"
-                    "代表の間の出力だけの変動は見ない (末尾の窓の全出力の場の差 tail_field_dev を記録して裏付ける)")}
+    want = sigma_ref_required(last, tail, every)
+    reps = [lo + k * SIGMA_REF_REP_EVERY for k in range(tail // SIGMA_REF_REP_EVERY) if lo + k * SIGMA_REF_REP_EVERY < last]
+    return {"tail_window": [lo, last], "tail_steps": tail_steps, "required": want, "alternatives": [s_ for s_ in want if s_ in tail_steps],
+            "missing": [s_ for s_ in want if s_ not in tail_steps], "representatives_record": reps,
+            "rule": f"末尾の窓 [{lo}, {last}] の全出力 ({every} step ごと、固定の {last} を除く {len(want)} 出力) を代わりの参照にする",
+            "why": (f"代表 ({SIGMA_REF_REP_EVERY} step ごと) に間引くと代表の間の出力だけの参照の変動を見ない (codex diagnose "
+                    "2026-10-14-h370-prelaunch-review の反例: NS 82,500 × Euler 42,000 だけ 0.030 mm 動く場を代表 4 出力は σ_ref 0 と見た)。"
+                    f"NS の 17 出力 × {len(want)} = {17 * len(want)} 抽出は NS の判定でプロセス並列にして回す。旧い代表と場の差 tail_field_dev は"
+                    "記録だけ (資格の判定に使わない)")}
 
 
 def tail_field_dev(run: Path, steps: list, pin_step: int, reps: list) -> dict:
-    """記録だけ (代表の選び方の裏付け): 末尾の窓の各出力の ρU_x の固定の出力との差 max|ρU_x − ρU_x,pin| / max|ρU_x,pin|。代表の中の最大と
-    代表の外の最大を並べる (代表の外の出力だけが大きく違えば、代表で測る σ_ref はそれを見ない)。"""
+    """記録だけ (資格の判定には使わない、§5.1 #36i (M1)): 末尾の窓の各出力の ρU_x の固定の出力との差 max|ρU_x − ρU_x,pin| / max|ρU_x,pin|。
+    旧い代表 (reps) の中の最大と代表の外の最大を並べる。閾値・抽出の誤差の上界を持たないので σ_ref の保証にはならない (σ_ref は全出力で
+    抽出し直して測る)。"""
     import h5py
 
     def q(st):
@@ -256,7 +296,7 @@ def tail_field_dev(run: Path, steps: list, pin_step: int, reps: list) -> dict:
     o = max(oth, key=lambda p_: p_["max_rel"]) if oth else None
     return {"per_output": per, "max_rel_representatives": max(rep) if rep else None,
             "max_rel_others": o["max_rel"] if o else None, "step_max_others": o["step"] if o else None,
-            "note": "記録だけ (合否に使わない)。代表の外の最大が代表の中の最大より大きいときは、σ_ref がその出力の参照の変動を見ていない"}
+            "note": "記録だけ (合否に使わない; 閾値も抽出の誤差の上界も無い)。σ_ref は末尾の窓の全出力で抽出し直して測る (§5.1 #36i M1)"}
 
 
 def euler_prequalify(case: Path, tools: Path) -> int:
@@ -271,7 +311,9 @@ def euler_prequalify(case: Path, tools: Path) -> int:
                          "M_axis・M_eta0.1": "forge_design.report.nozzle_report.eta_line(F, 'M', η, x) (η = 0 は軸、0.1 は metrics の判定の線)",
                          "record_cols": "nozzle_report.metrics の eta0.1 (wave_pct・overshoot_pct・slope_pct・range_pct)、記録だけ",
                          "pin": "本段の最後の出力 (上限 60,000 step) とその sha256",
-                         "sigma_ref_snapshots": f"σ_ref の代わりの参照: 末尾の窓 (最後の {EU_TAIL} step) の {SIGMA_REF_EVERY} step ごとの代表 (固定を除く)",
+                         "sigma_ref_snapshots": (f"σ_ref の代わりの参照: 末尾の窓 (最後の {EU_TAIL} step) の全出力 ({EU_OUT} step ごと、固定を除く "
+                                                 f"{len(sigma_ref_required())} 出力; §5.1 #36i M1)"),
+                         "sigma_ref_representatives_record": f"旧い代表 ({SIGMA_REF_REP_EVERY} step ごと) と tail_field_dev は記録だけ (資格の判定に使わない)",
                          "screening_snapshots": "スクリーニング (check_quasisteady の末尾の窓の始まりと中ほど; NS の停止の出力だけに当てる記録、σ_ref の上限とは扱わない)"}}
     und, fails = R["undecidable"], R["failures"]
     qual_p, pin_p = case / QUAL, case / PIN
@@ -337,17 +379,19 @@ def euler_prequalify(case: Path, tools: Path) -> int:
         fails.append(f"check_quasisteady.py の VERDICT が STEADY でない: {bad}")
     last = rows[-1]
     R["last_values"] = {c: last.get(c) for c in QUAL_COLS + REC_COLS}
-    # σ_ref の代わりの参照 (末尾の窓の代表; NS の判定の前のここで固定する) と末尾の窓の全出力の sha
+    # σ_ref の代わりの参照 (末尾の窓の全出力; NS の判定の前のここで固定する) と末尾の窓の全出力の sha (§5.1 #36i M1)
     sel = sigma_ref_selection(steps)
-    R["sigma_ref_selection"] = {k: sel[k] for k in ("tail_window", "representatives", "missing", "rule", "why")}
+    R["sigma_ref_selection"] = {k: sel[k] for k in ("tail_window", "required", "alternatives", "missing", "representatives_record", "rule", "why")}
     R["tail_outputs"] = [{"res": f"res_{s}.h5", "step": s, "sha256": sha256_file(run / f"res_{s}.h5")} for s in sel["tail_steps"]]
-    R["sigma_ref_snapshots"] = [o for o in R["tail_outputs"] if o["step"] in sel["representatives"]]
+    R["sigma_ref_snapshots"] = [o for o in R["tail_outputs"] if o["step"] in sel["alternatives"]]
+    R["sigma_ref_representatives_record"] = [o for o in R["tail_outputs"] if o["step"] in sel["representatives_record"]]
     if sel["missing"]:
         # 本段が上限まで回っていれば出力の欠け (消された) で判定不能、上限より前に終わった run は既に未達 (その帰結)
-        (und if steps[-1] == EU_STEPS else fails).append(f"σ_ref の代わりの参照の出力 {sel['missing']} が無い (σ_ref を測れない)")
+        (und if steps[-1] == EU_STEPS else fails).append(f"σ_ref の代わりの参照 (末尾の窓の全出力) のうち出力 {sel['missing']} が無い "
+                                                         "(σ_ref を測れない)")
     elif steps[-1] == EU_STEPS:
         try:
-            R["tail_field_dev"] = tail_field_dev(run, sel["tail_steps"], EU_STEPS, sel["representatives"])
+            R["tail_field_dev"] = tail_field_dev(run, sel["tail_steps"], EU_STEPS, sel["representatives_record"])
         except Exception as e:  # noqa: BLE001 — 記録だけ
             R["tail_field_dev"] = {"error": f"{type(e).__name__}: {e}"[:300]}
     # スクリーニング (check_quasisteady の末尾の窓 = 既定 tail 0.4 の始まりと中ほど; 停止の出力だけに当てる記録)
@@ -397,10 +441,11 @@ def _arr(d, k):
     return np.asarray(d.get(k, []), dtype=float)
 
 
-# A/B の分類の理由の符号 (classify_ab の code)。参照の最終の資格 (reference_final) は SIGMA_FAIL なら資格なし、REF_OK なら資格あり、
-# それ以外 (A/B が分類に至らない) は σ_ref が判定を左右するかを決められないので確かめられない (更新に進めない)
+# A/B の分類の理由の符号 (classify_ab の code)。参照の最終の資格 (reference_final) は SIGMA_FAIL なら資格なし、REF_OK (結果 A・結果 B に
+# 分類できたもの) なら σ_ref,use ≤ 0.01 mm を併せて資格あり、それ以外 (判定不能: U_time を含む) は確かめられない (更新に進めない)。
+# U_time (窓の中の時間の変動で D が 0.01 mm をまたぐ) は §5.1 #36i (M2) で REF_OK から外した (判定不能は更新不可に統一)
 SIGMA_FAIL = ("U_sigma_unmeasurable", "U_sigma_undecidable", "U_sigma_straddle")
-REF_OK = ("A", "B_D", "B_pf", "U_time")
+REF_OK = ("A", "B_D", "B_pf")
 
 
 def fixed_columns(x_use, eu_runs: dict, edge_tol: bool) -> dict:
@@ -538,49 +583,220 @@ def classify_ab(per: list, sigma, required, tol: float = TOL_MM) -> dict:
     return res("判定不能", "U_time", f"窓の中の時間の変動で D_k が {tol} mm をまたぐ ({why})")
 
 
-def reference_final(ab, do_ab: bool) -> dict:
-    """参照の最終の資格 (§5.1 #36g (1)): σ_ref を測れる・判定できる・σ_ref が A/B の分類を左右しない (参照の未整定でない) なら資格あり。
-    戻り {"qualified": True / False / None (確かめられない), "why", "sigma_ref_mm", "sigma_status", "ab_code"}。None も更新に進めない。"""
+def reference_final(ab, do_ab: bool, tol: float = TOL_MM) -> dict:
+    """参照の最終の資格 (§5.1 #36g (1)・#36i (M2)・(M3)): 次のすべてのとき資格あり — σ_ref・σ_ref,use を測れて判定できる (status ok)、
+    **σ_ref,use ≤ tol** (使用域の全体の参照の変動; A/B の分類とは独立の必要条件)、A/B が結果 A・結果 B に分類された (REF_OK: σ_ref が
+    分類を左右しない)。σ を測れない・判定不能・σ_ref,use > tol・参照の未整定 (SIGMA_FAIL) → 資格なし (False)。A/B が判定不能
+    (U_time を含む) → 確かめられない (None)。False・None はどちらも更新に進めない。
+    戻り {"qualified", "why", "sigma_ref_mm", "sigma_ref_at", "sigma_ref_use_mm", "sigma_ref_use_at", "sigma_status", "ab_code", "tol_mm"}。"""
     if not do_ab:
         return {"qualified": None, "why": "A/B と σ_ref を回していない (--no-ab) — 参照の最終の資格を確かめていない"}
     if not ab or "classify" not in ab:
         return {"qualified": None, "why": (ab or {}).get("why") or "A/B を回せない — 参照の最終の資格を確かめていない"}
     c, sg = ab["classify"], ab.get("sigma_ref") or {}
-    out = {"sigma_ref_mm": sg.get("mm"), "sigma_ref_use_mm": sg.get("mm_use"), "sigma_status": sg.get("status"), "ab_code": c["code"]}
-    if c["code"] in SIGMA_FAIL:
+    use = sg.get("mm_use")
+    out = {"sigma_ref_mm": sg.get("mm"), "sigma_ref_at": sg.get("at_F"), "sigma_ref_use_mm": use, "sigma_ref_use_at": sg.get("at_use"),
+           "sigma_status": sg.get("status"), "ab_code": c["code"], "tol_mm": tol}
+    if sg.get("status") != "ok" or use is None or sg.get("mm") is None:
+        out.update(qualified=False, why=f"資格なし: σ_ref・σ_ref,use を測れない・判定不能 (status {sg.get('status')}: {sg.get('why')})"[:600])
+    elif use > tol:
+        at = sg.get("at_use") or {}
+        out.update(qualified=False, why=(f"資格なし: 使用域の全体の参照の変動 σ_ref,use {use:.4g} mm > {tol} mm (NS の出力 {at.get('step')}・Euler の出力 "
+                                         f"{at.get('euler_res')}・x {at.get('x')}) — 新しい参照が設計の入力として落ち着いていない "
+                                         f"(A/B の分類 {c['result']} に関係なく、§5.1 #36i M3)"))
+    elif c["code"] in SIGMA_FAIL:
         out.update(qualified=False, why=f"資格なし: {c['why']}")
     elif c["code"] in REF_OK:
-        out.update(qualified=True, why=f"資格あり: σ_ref {sg.get('mm')} mm は A/B の分類 ({c['result']}) を左右しない")
+        out.update(qualified=True, why=(f"資格あり: σ_ref,use {use:.4g} mm ≤ {tol} mm、σ_ref {sg.get('mm'):.4g} mm は A/B の分類 "
+                                        f"({c['result']}) を左右しない"))
     else:
-        out.update(qualified=None, why=f"確かめられない: A/B が分類に至らない ({c['why']}) ので σ_ref が判定を左右するかを決められない")
+        out.update(qualified=None, why=f"確かめられない: A/B が判定不能 ({c['code']}: {c['why']}) — 判定不能は更新に進めない (§5.1 #36i M2)")
     return out
 
 
-def sigma_ref_measure(run: Path, steps: list, spec_b: dict, alts: list, ext: dict, x_use, F, dB: dict, mm: float, snap) -> dict:
-    """σ_ref (§5.1 #36g (2)): 判定窓の全出力 k について、腕 B の固定の Euler の出力の代わりに alts (予備の資格で固定した代わりの参照
-    {res, step, sha256}) で抽出し直し、固定の抽出 dB[k] との δ_E の差を比べる列 F (と使用域の全列) で見る。
+def sigma_ref_alternatives(spec_b: dict, qual) -> tuple:
+    """σ_ref の代わりの参照の照合 (§5.1 #36i (M1); 抽出の前): 固定の出力が本段の上限の出力 (res_<EU_STEPS>.h5) で、予備の資格の記録の
+    sigma_ref_snapshots が末尾の窓の全出力 (`sigma_ref_required`、20 出力) ちょうどで、各出力が腕 B の run に在り sha が記録と同じ。
+    戻り (alts (step の順), check {"ok", "required", "recorded", "missing_in_record", "extra_in_record", "missing_files", "sha_mismatch", "why"})。
+    ok でなければ σ_ref を測れない (抽出は回さない)。"""
+    req = sigma_ref_required()
+    raw = [a for a in ((qual or {}).get("sigma_ref_snapshots") or []) if isinstance(a, dict)]
+    rec = {}
+    for a in raw:
+        try:
+            rec[int(a.get("step"))] = a
+        except (TypeError, ValueError):
+            pass
+    chk = {"required": req, "recorded": sorted(rec), "missing_in_record": [k for k in req if k not in rec],
+           "extra_in_record": sorted(k for k in rec if k not in req), "missing_files": [], "sha_mismatch": [], "ok": False}
+    why = []
+    if spec_b.get("res") != f"res_{EU_STEPS}.h5":
+        why.append(f"固定の出力 {spec_b.get('res')} が本段の上限の出力 res_{EU_STEPS}.h5 でない")
+    if chk["missing_in_record"] or chk["extra_in_record"]:
+        why.append(f"予備の資格の記録の代わりの参照が末尾の窓の全 {len(req)} 出力でない (無い {chk['missing_in_record'][:8]}・余分 "
+                   f"{chk['extra_in_record'][:8]})")
+    rd = Path(spec_b["run"])
+    alts = []
+    for k in req:
+        a = rec.get(k)
+        if a is None:
+            continue
+        if a.get("res") != f"res_{k}.h5":
+            chk["missing_files"].append(k)
+            continue
+        f = rd / a["res"]
+        if not f.is_file():
+            chk["missing_files"].append(k)
+        elif sha256_file(f) != a.get("sha256"):
+            chk["sha_mismatch"].append(k)
+        else:
+            alts.append({"res": a["res"], "step": k, "sha256": a["sha256"]})
+    if chk["missing_files"]:
+        why.append(f"代わりの参照の出力が腕 B の run に無い {chk['missing_files'][:8]}")
+    if chk["sha_mismatch"]:
+        why.append(f"代わりの参照の出力の sha が予備の資格の記録と違う {chk['sha_mismatch'][:8]}")
+    chk["ok"] = not why
+    if why:
+        chk["why"] = "; ".join(why)
+    return alts, chk
+
+
+def mem_available_mib():
+    """/proc/meminfo の MemAvailable [MiB] (読めなければ None)。"""
+    try:
+        for ln in Path("/proc/meminfo").read_text().splitlines():
+            if ln.startswith("MemAvailable:"):
+                return int(ln.split()[1]) / 1024.0
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def snap_jobs(requested=None) -> dict:
+    """抽出の並列数 (§5.1 #36i 計算量): min(上限 (既定 JOBS_CAP = 3、--jobs で 1〜JOBS_MAX), 空きメモリ / SNAP_PEAK_MIB)。空きメモリが
+    読めなければ 1。戻り {"jobs", "cap", "mem_available_mib", "per_extraction_peak_mib", "by_memory", "cpu_count"}。"""
+    cap = JOBS_CAP if requested is None else int(requested)
+    if not 1 <= cap <= JOBS_MAX:
+        raise ValueError(f"--jobs は 1〜{JOBS_MAX} ({requested!r})")
+    avail = mem_available_mib()
+    by_mem = int(avail // SNAP_PEAK_MIB) if avail is not None else 1
+    return {"jobs": max(1, min(cap, by_mem)), "cap": cap, "mem_available_mib": None if avail is None else round(avail),
+            "per_extraction_peak_mib": SNAP_PEAK_MIB, "by_memory": by_mem, "cpu_count": os.cpu_count()}
+
+
+def _call_snap(snap, task) -> dict:
+    """抽出 1 回 (task = (NS の run, step, Euler の参照の指定, 抽出の条件, 使用域の列 x))。戻り {"ok": 抽出} か {"exc": 例外の文}。
+    直列でも並列でも同じこの関数を通す (例外の扱いを揃える)。"""
+    run, k, spec, ext, x_use = task
+    try:
+        return {"ok": snap(run, k, spec, ext, x_use)}
+    except Exception as e:  # noqa: BLE001 — sha の不一致・出力が無いを含む
+        return {"exc": f"{type(e).__name__}: {e}"}
+
+
+def _snap_worker(task) -> dict:
+    """プロセス並列の子 (spawn) の抽出: 本物の stop_rule.delta_snapshot (sys.path は親から引き継ぐ)。"""
+    from forge_design.evaluate import stop_rule as SR
+    return _call_snap(SR.delta_snapshot, task)
+
+
+@contextlib.contextmanager
+def _single_thread_env():
+    """子プロセスの BLAS・OpenMP を 1 スレッドにする (並列の子どうしでコアを取り合わない)。spawn の子は起動の時点の環境変数を読む。"""
+    keys = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+    old = {k: os.environ.get(k) for k in keys}
+    os.environ.update({k: "1" for k in keys})
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def run_snaps(tasks: list, snap, jobs: int = 1, progress=None) -> tuple:
+    """抽出の作業をまとめて回す (§5.1 #36i 計算量)。snap が本物の stop_rule.delta_snapshot なら **jobs によらず**子プロセス (spawn、
+    max_workers = jobs、子は BLAS・OpenMP 1 スレッド) で回す: jobs 1 (直列) も子 1 つで回す。BLAS のスレッド数で行列積・解の丸めが変わり
+    (実寸の合成の場で親プロセス (BLAS 既定のスレッド数) と子 (1 スレッド) の抽出が 2,938 列のうち 771 列で違った: δ_E 最大 6.9e−18 r_t、
+    δ_target 最大 2.8e−17 r_t、held は同じ; 2026-10-14 の手元の実測)、
+    直列と並列の値をビット同一にするには計算する環境をそろえる必要があるため。試験の差し替え (snap が別の関数) は子に渡せないので
+    このプロセスで直列。結果は作業の順に並べる (抽出は互いに独立なので、並列でも記録の順・値は直列と同じ)。
+    戻り (結果 [{"ok": 抽出} | {"exc": 文}], 記録 {"n", "mode", "jobs", "seconds", "children_maxrss_mib"})。progress(i, n, 経過秒) は進み。"""
+    import resource
+    import time
+    from forge_design.evaluate import stop_rule as SR
+    n = len(tasks)
+    info = {"n": n, "mode": "in-process (serial)", "jobs": 1}
+    t0 = time.time()
+    out = [None] * n
+    if n and snap is SR.delta_snapshot:
+        import multiprocessing as mp
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        w = max(1, min(int(jobs), n))
+        info.update(mode="process (spawn)", jobs=w, blas_threads=1)
+        with _single_thread_env(), ProcessPoolExecutor(max_workers=w, mp_context=mp.get_context("spawn")) as ex:
+            futs = {ex.submit(_snap_worker, t): i for i, t in enumerate(tasks)}
+            for m, f in enumerate(as_completed(futs), 1):
+                try:
+                    out[futs[f]] = f.result()
+                except Exception as e:  # noqa: BLE001 — 子の異常終了 (BrokenProcessPool など) は抽出の失敗として残す
+                    out[futs[f]] = {"exc": f"{type(e).__name__}: {e}"}
+                if progress:
+                    progress(m, n, time.time() - t0)
+    else:
+        if snap is not SR.delta_snapshot:
+            info["note"] = "抽出が差し替え (試験) なので子に渡さずこのプロセスで直列"
+        for i, t in enumerate(tasks):
+            out[i] = _call_snap(snap, t)
+            if progress:
+                progress(i + 1, n, time.time() - t0)
+    info["seconds"] = round(time.time() - t0, 1)
+    info["children_maxrss_mib"] = round(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024.0, 1)
+    return out, info
+
+
+def _masks(d, n: int):
+    """抽出 d の使用域の列ごとの印: held と、δ_E・δ_target が有限 (欠測の列は NaN なので偽)。"""
+    e, t = _arr(d, "delta_E"), _arr(d, "delta_target")
+    h = np.asarray(d.get("held", []), dtype=bool)
+    if not (len(e) == len(t) == len(h) == n):
+        return None, None
+    return h, np.isfinite(e) & np.isfinite(t)
+
+
+def sigma_ref_eval(steps: list, alts: list, d0_by: dict, dalt: dict, x_use, F, mm: float) -> dict:
+    """σ_ref・σ_ref,use (§5.1 #36g (2)・#36i (M1)・(M3)) を抽出の結果から測る。d0_by[k] = 固定の参照の抽出 (腕 B)、dalt[(k, res)] =
+    代わりの参照の抽出の結果 ({"ok": 抽出} か {"exc": 文})。
+    σ_ref = max_k max_e max_F |Δδ_E| [mm] (比べる列 F)、σ_ref,use = max_k max_e max_U |Δδ_E| [mm] (U = 固定の参照で δ_E・δ_target が
+    有限な使用域の列 = 使用域の全体; F ⊂ U)。最大を与えた (NS の出力・Euler の出力・x) を at_F・at_use に残す。
     status: ok / unmeasurable (代わりの参照が無い・抽出の例外 = sha の不一致を含む・固定の抽出が無い) / undecidable (代わりの参照で
-    F・使用域の held・欠測・合否が変わる)。mm = max_k max_e max_F |Δδ_E| [mm]、mm_use は使用域の全列。"""
-    out = {"status": "ok", "mm": None, "mm_use": None, "alts": [a.get("res") for a in alts], "per_step": {}, "why": None, "seconds": 0.0}
+    F・使用域の合否、または使用域の列ごとの held・有限の印が変わる)。ok でなければ mm・mm_use は None (観測値は *_observed)。"""
+    xu = np.asarray(x_use, dtype=float)
+    out = {"status": "ok", "mm": None, "mm_use": None, "at_F": None, "at_use": None, "alts": [a.get("res") for a in alts], "per_step": {},
+           "why": None, "seconds": 0.0}
     if not alts:
         return {**out, "status": "unmeasurable", "why": "代わりの参照 (予備の資格の sigma_ref_snapshots) が無い"}
     FU = np.ones(len(F), dtype=bool)
     worst, worst_u, unmeas, undec = 0.0, 0.0, [], []
     for k in steps:
-        d0 = dB.get(k)
+        d0 = d0_by.get(k)
         c0F, c0U = arm_check(d0, F), arm_check(d0, FU)
         if "error" in c0F:
             unmeas.append(f"{k}: 固定の参照の抽出が無い ({c0F['error'][:80]})")
             continue
         e0 = _arr(d0, "delta_E")
-        rec = {"pf_F_pin": c0F["pf"], "pf_use_pin": c0U["pf"], "alts": []}
+        h0, f0 = _masks(d0, len(F))
+        rec = {"pf_F_pin": c0F["pf"], "pf_use_pin": c0U["pf"], "n_use_extractable": int(f0.sum()), "alts": []}
         for a in alts:
-            try:
-                d = snap(run, k, {"run": spec_b["run"], "res": a["res"], "sha256": a["sha256"]}, ext, x_use)
-            except Exception as e:  # noqa: BLE001 — sha の不一致・出力が無いを含む
-                unmeas.append(f"{k} × {a.get('res')}: {type(e).__name__}: {e}"[:200])
-                rec["alts"].append({"res": a.get("res"), "error": f"{type(e).__name__}: {e}"[:200]})
+            r = dalt.get((k, a.get("res")))
+            if r is None or "exc" in r:
+                msg = "抽出していない" if r is None else r["exc"]
+                unmeas.append(f"{k} × {a.get('res')}: {msg}"[:200])
+                rec["alts"].append({"res": a.get("res"), "error": msg[:200]})
                 continue
+            d = r["ok"]
             out["seconds"] += float(d.get("seconds") or 0.0)
             cF, cU = arm_check(d, F), arm_check(d, FU)
             if "error" in cF:
@@ -588,18 +804,26 @@ def sigma_ref_measure(run: Path, steps: list, spec_b: dict, alts: list, ext: dic
                 rec["alts"].append({"res": a.get("res"), "error": cF["error"][:200]})
                 continue
             e1 = _arr(d, "delta_E")
-            both = np.isfinite(e0) & np.isfinite(e1)
-            dF = np.abs(e1 - e0)[F & both] * mm
-            dU = np.abs(e1 - e0)[both] * mm
-            ar = {"res": a.get("res"), "pf_F": cF["pf"], "pf_use": cU["pf"], "max_mm_F": float(dF.max()) if dF.size else None,
-                  "max_mm_use": float(dU.max()) if dU.size else None,
-                  "change": {q: [c0U[q], cU[q]] for q in ("n_held", "n_missing", "n_nonfinite") if c0U[q] != cU[q]}}
+            h1, f1 = _masks(d, len(F))
+            both = f0 & f1
+            dd = np.abs(e1 - e0) * mm
+            ar = {"res": a.get("res"), "pf_F": cF["pf"], "pf_use": cU["pf"], "max_mm_F": None, "x_at_F": None, "max_mm_use": None,
+                  "x_at_use": None, "change": {q: [c0U[q], cU[q]] for q in ("n_held", "n_missing", "n_nonfinite") if c0U[q] != cU[q]}}
+            diff = (h0 != h1) | (f0 != f1)
+            if diff.any():
+                ar["change"]["x_mask_diff"] = [float(v) for v in xu[diff][:8]]
+            for key, m in (("F", F & both), ("use", both)):
+                if m.any():
+                    j = int(np.flatnonzero(m)[int(np.argmax(dd[m]))])
+                    ar[f"max_mm_{key}"], ar[f"x_at_{key}"] = float(dd[j]), float(xu[j])
             if cF["pf"] != c0F["pf"] or cU["pf"] != c0U["pf"] or ar["change"]:
                 undec.append(f"{k} × {a.get('res')}: 合否 F {c0F['pf']}→{cF['pf']}・使用域 {c0U['pf']}→{cU['pf']} {ar['change']}")
-            if ar["max_mm_F"] is not None:
-                worst = max(worst, ar["max_mm_F"])
-            if ar["max_mm_use"] is not None:
-                worst_u = max(worst_u, ar["max_mm_use"])
+            if ar["max_mm_F"] is not None and (out["at_F"] is None or ar["max_mm_F"] > worst):
+                worst = ar["max_mm_F"]
+                out["at_F"] = {"step": k, "euler_res": a.get("res"), "x": ar["x_at_F"], "mm": worst}
+            if ar["max_mm_use"] is not None and (out["at_use"] is None or ar["max_mm_use"] > worst_u):
+                worst_u = ar["max_mm_use"]
+                out["at_use"] = {"step": k, "euler_res": a.get("res"), "x": ar["x_at_use"], "mm": worst_u}
             rec["alts"].append(ar)
         out["per_step"][k] = rec
     out["mm"], out["mm_use"] = (worst, worst_u)
@@ -608,7 +832,21 @@ def sigma_ref_measure(run: Path, steps: list, spec_b: dict, alts: list, ext: dic
     elif undec:
         out.update(status="undecidable", why="; ".join(undec[:4]) + (" …" if len(undec) > 4 else ""))
     if out["status"] != "ok":
-        out["mm_observed"], out["mm"] = out["mm"], None
+        out["mm_observed"], out["mm_use_observed"], out["mm"], out["mm_use"] = out["mm"], out["mm_use"], None, None
+    return out
+
+
+def sigma_ref_measure(run: Path, steps: list, spec_b: dict, alts: list, ext: dict, x_use, F, dB: dict, mm: float, snap, jobs: int = 1) -> dict:
+    """σ_ref を測る (抽出して `sigma_ref_eval`): 判定窓の全出力 k × alts (代わりの参照 {res, step, sha256}) を、腕 B の固定の Euler の出力の
+    代わりにして抽出し直す (`run_snaps`、jobs > 1 ならプロセス並列)。dB[k] は固定の参照の抽出。"""
+    tasks, keys = [], []
+    for k in steps:
+        for a in alts:
+            tasks.append((run, k, {"run": spec_b["run"], "res": a["res"], "sha256": a["sha256"]}, ext, x_use))
+            keys.append((k, a["res"]))
+    res, info = run_snaps(tasks, snap, jobs)
+    out = sigma_ref_eval(steps, alts, dB, dict(zip(keys, res)), x_use, F, mm)
+    out["parallel"] = info
     return out
 
 
@@ -698,8 +936,9 @@ def ab_full(run: Path, s: int, specs: dict, ext: dict, problem: Path, x_w: float
     return out
 
 
-def ab_compare(case: Path, run: Path, s: int, rec: dict, spec_b: dict, qual: dict, problem: Path, x_w: float) -> dict:
-    """抽出の参照の A/B と σ_ref (上の docstring の 5、§5.1 #36g (2)〜(5))。"""
+def ab_compare(case: Path, run: Path, s: int, rec: dict, spec_b: dict, qual: dict, problem: Path, x_w: float, jobs: int = 1) -> dict:
+    """抽出の参照の A/B と σ_ref・σ_ref,use (上の docstring の 5、§5.1 #36g (2)〜(5)・#36i)。腕 B の抽出し直し・腕 A・σ_ref・スクリーニングの
+    抽出は 1 つの作業の一覧にまとめて `run_snaps` で回す (jobs > 1 ならプロセス並列; 結果は作業の順に並べるので記録は直列と同じ)。"""
     from forge_design.evaluate import stop_rule as SR
     from forge_design.feedback import deltastar_loop as DL
     snap = HOOKS.get("delta_snapshot", SR.delta_snapshot)
@@ -741,53 +980,87 @@ def ab_compare(case: Path, run: Path, s: int, rec: dict, spec_b: dict, qual: dic
     if not F.any():
         out["why"] = "比べる列 F が空 (両腕の Euler の範囲が重ならない)"
         return out
-    per, dB_by = [], {}
+    # --- 抽出の作業の一覧 (腕 B の抽出し直し → 腕 A → σ_ref → スクリーニングの順; 直列のときもこの順に回す)
+    tasks, keys, plan = [], [], {}
     for k in required:
         f = run / f"res_{k}.h5"
         if not f.is_file():
-            per.append({"step": k, "error_missing": f"出力 res_{k}.h5 が無い (再抽出で補えない)"})
+            plan[k] = None
             continue
         sha_k = sha256_file(f)
         dB = (rows.get(k) or {}).get("delta")
         if k not in rows:
-            src = "抽出し直し (stop_rule.json に行が無い)"
-            dB = None
+            src, dB = "抽出し直し (stop_rule.json に行が無い)", None
         elif isinstance(dB, dict) and "delta_E" in dB and len(dB["delta_E"]) == len(x_use) and dB.get("res_sha256") == sha_k:
             src = "記録 (stop_rule.json の delta)"
         else:
-            src = "抽出し直し (記録が無いか出力の sha が違う)"
-            dB = None
+            src, dB = "抽出し直し (記録が無いか出力の sha が違う)", None
+        plan[k] = {"src": src, "dB": dB}
         if dB is None:
-            try:
-                dB = snap(run, k, spec_b, ext, x_use)
-            except Exception as e:  # noqa: BLE001
-                dB = {"error": f"{type(e).__name__}: {e}"[:300]}
-        try:
-            dA = snap(run, k, spec_a, ext, x_use)
-        except Exception as e:  # noqa: BLE001
-            dA = {"error": f"{type(e).__name__}: {e}"[:300]}
+            tasks.append((run, k, spec_b, ext, x_use))
+            keys.append(("B", k, None))
+        tasks.append((run, k, spec_a, ext, x_use))
+        keys.append(("A", k, None))
+    present = [k for k in required if plan.get(k) is not None]
+    # σ_ref の代わりの参照の照合 (§5.1 #36i M1: 末尾の窓の全 20 出力ちょうど・在る・sha が記録と同じ)。合わなければ σ_ref の抽出は回さない
+    alts, achk = sigma_ref_alternatives(spec_b, qual)
+    if achk["ok"]:
+        for k in present:
+            for a in alts:
+                tasks.append((run, k, {"run": spec_b["run"], "res": a["res"], "sha256": a["sha256"]}, ext, x_use))
+                keys.append(("S", k, a["res"]))
+    scr_snaps = (qual or {}).get("screening_snapshots") or []
+    for sn in scr_snaps:
+        tasks.append((run, s, {"run": spec_b["run"], "res": sn.get("res"), "sha256": sn.get("sha256")}, ext, x_use))
+        keys.append(("scr", s, sn.get("res")))
+    prog_p = run / "h370_judge_progress.log"
+
+    def progress(m, n, el):
+        if m == n or m % 5 == 0:
+            with open(prog_p, "a") as fh:
+                fh.write(f"{now()} 抽出 {m}/{n} (経過 {el:.0f} s、残りの見込み {el / m * (n - m):.0f} s、並列 {jobs})\n")
+    results, pinfo = run_snaps(tasks, snap, jobs, progress=progress)
+    got = dict(zip(keys, results))
+
+    def as_d(r):
+        return r["ok"] if "ok" in r else {"error": r["exc"][:300]}
+    per, dB_by = [], {}
+    for k in required:
+        pk = plan.get(k)
+        if pk is None:
+            per.append({"step": k, "error_missing": f"出力 res_{k}.h5 が無い (再抽出で補えない)"})
+            continue
+        dB = pk["dB"] if pk["dB"] is not None else as_d(got[("B", k, None)])
+        dA = as_d(got[("A", k, None)])
         dB_by[k] = dB
-        per.append(ab_pair(k, dA, dB, mm, src, x_use, F))
+        per.append(ab_pair(k, dA, dB, mm, pk["src"], x_use, F))
     comp["reextracted_B"] = [r["step"] for r in per if str(r.get("B_source", "")).startswith("抽出し直し")]
     out["per_output"] = per
-    # --- (2) σ_ref: 判定窓の全出力 × 予備の資格で固定した代わりの参照
-    alts = (qual or {}).get("sigma_ref_snapshots") or []
-    sig = sigma_ref_measure(run, [k for k in required if k in dB_by], spec_b, alts, ext, x_use, F, dB_by, mm, snap)
+    # --- (2) σ_ref・σ_ref,use: 判定窓の全出力 × 末尾の窓の全 20 出力
+    if achk["ok"]:
+        sig = sigma_ref_eval([k for k in required if k in dB_by], alts, dB_by, {(k, r_): got[(t_, k, r_)] for (t_, k, r_) in keys if t_ == "S"},
+                             x_use, F, mm)
+    else:
+        sig = {"status": "unmeasurable", "mm": None, "mm_use": None, "at_F": None, "at_use": None, "alts": [a["res"] for a in alts],
+               "per_step": {}, "seconds": 0.0, "why": f"σ_ref の代わりの参照が揃わない (抽出していない): {achk.get('why')}"}
+    sig["alternatives_check"] = achk
     sig["selection"] = (qual or {}).get("sigma_ref_selection")
-    sig["note"] = ("判定窓の全出力を、固定した Euler の出力の代わりに予備の資格の時点で固定した代わりの参照 (末尾の窓の代表) で抽出し直した "
-                   "δ_E の差 (mm は比べる列 F、mm_use は使用域の全列)")
+    sig["note"] = ("判定窓の全出力を、固定した Euler の出力の代わりに末尾の窓の全出力 (予備の資格の時点で固定した 20 出力と sha) で抽出し直した "
+                   "δ_E の差 (mm は比べる列 F、mm_use は使用域の全体 U = 固定の参照で抽出できる使用域の全列; at_F・at_use は最大を与えた "
+                   "NS の出力・Euler の出力・x)")
     out["sigma_ref"] = sig
     # スクリーニング (停止の出力 × check_quasisteady の末尾の窓の始まり・中ほど): 記録だけ、σ_ref の上限とは扱わない
     scr = []
     d_s = dB_by.get(s)
-    for sn in (qual or {}).get("screening_snapshots") or []:
-        try:
-            d = snap(run, s, {"run": spec_b["run"], "res": sn["res"], "sha256": sn["sha256"]}, ext, x_use)
-            e0, e1 = _arr(d_s or {}, "delta_E"), _arr(d, "delta_E")
-            m = F & np.isfinite(e0) & np.isfinite(e1) if len(e0) == len(e1) == len(F) else np.zeros(0, bool)
-            scr.append({"res": sn["res"], "max_mm_F": float(np.max(np.abs(e1 - e0)[m]) * mm) if m.any() else None})
-        except Exception as e:  # noqa: BLE001
-            scr.append({"res": sn.get("res"), "error": f"{type(e).__name__}: {e}"[:300]})
+    for sn in scr_snaps:
+        r = got[("scr", s, sn.get("res"))]
+        if "exc" in r:
+            scr.append({"res": sn.get("res"), "error": r["exc"][:300]})
+            continue
+        d = r["ok"]
+        e0, e1 = _arr(d_s or {}, "delta_E"), _arr(d, "delta_E")
+        m = F & np.isfinite(e0) & np.isfinite(e1) if len(e0) == len(e1) == len(F) else np.zeros(0, bool)
+        scr.append({"res": sn["res"], "max_mm_F": float(np.max(np.abs(e1 - e0)[m]) * mm) if m.any() else None})
     out["screening"] = {"per_snapshot": scr, "label": "スクリーニング (停止の出力 × 2 出力だけ。σ_ref の上限とは扱わない、記録だけ)"}
     ok = [r for r in per if r.get("D_mm") is not None]
     if ok:
@@ -798,9 +1071,9 @@ def ab_compare(case: Path, run: Path, s: int, rec: dict, spec_b: dict, qual: dic
     out["result"], out["why"] = out["classify"]["result"], out["classify"]["why"]
     n_a = sum(1 for r in per if "error_missing" not in r)
     out["extractions"] = {"arm_A": n_a, "arm_B_reextracted": len(comp["reextracted_B"]),
-                          "sigma_ref": sum(len(v.get("alts", [])) for v in sig["per_step"].values()), "screening": len(scr),
-                          "sigma_ref_seconds": round(sig.get("seconds", 0.0), 1),
-                          "note": "停止の出力の全体の抽出 (at_stop、両腕) は別に 2 回"}
+                          "sigma_ref": sum(1 for (t_, _k, _r) in keys if t_ == "S"), "screening": len(scr),
+                          "sigma_ref_seconds": round(sig.get("seconds", 0.0), 1), "parallel": pinfo,
+                          "note": "停止の出力の全体の抽出 (at_stop、両腕) は別に 2 回 (直列)"}
     try:
         out["at_stop"] = ab_full(run, s, {"A": spec_a, "B": spec_b}, ext, problem, x_w, mm)
     except Exception as e:  # noqa: BLE001 — 記録だけ
@@ -822,7 +1095,7 @@ def gate_summary(g: dict) -> dict:
             "made": (g.get("extract") or {}).get("made"), "override": g.get("override")}
 
 
-def ns_judge(case: Path, tools: Path, do_ab: bool, out_p: Path) -> int:
+def ns_judge(case: Path, tools: Path, do_ab: bool, out_p: Path, jobs=None) -> int:
     from forge_design.evaluate import stop_rule as SR
     from forge_design.feedback import deltastar_loop as DL
     run = case / NS_RUN
@@ -922,7 +1195,10 @@ def ns_judge(case: Path, tools: Path, do_ab: bool, out_p: Path) -> int:
         info = jload(run / "prepare_info.json") or {}
         x_w = float(((info.get("physical_wall") or {}).get("domain") or [0.0, float("inf")])[1])
         try:
-            R["ab"] = ab_compare(case, run, int(s), rec, spec, qual, case / NS_PROBLEM, x_w)
+            pj = snap_jobs(jobs)
+            R["parallel_plan"] = {**pj, "rule": f"並列数 = min(上限 {pj['cap']}, 空きメモリ {pj['mem_available_mib']} MiB / 1 抽出の最大 "
+                                                 f"{SNAP_PEAK_MIB} MiB = {pj['by_memory']}) (§5.1 #36i)"}
+            R["ab"] = ab_compare(case, run, int(s), rec, spec, qual, case / NS_PROBLEM, x_w, jobs=pj["jobs"])
             if status != "REACHED":
                 R["ab"]["note"] = f"停止の状態 {status} の窓で行った診断の抽出 (更新の許可とは別)"
         except Exception as e:  # noqa: BLE001
@@ -930,14 +1206,15 @@ def ns_judge(case: Path, tools: Path, do_ab: bool, out_p: Path) -> int:
     else:
         R["ab"] = {"result": "判定不能" if do_ab else "未実施 (--no-ab)",
                    "why": f"停止の状態 {status}・停止の出力 {s} では A/B の窓を作れない" if do_ab else None}
-    # --- 参照の最終の資格 (§5.1 #36g (1): σ_ref を測れない・判定不能・参照の未整定なら更新に進めない) ---
+    # --- 参照の最終の資格 (§5.1 #36g (1)・#36i: σ_ref・σ_ref,use を測れない・判定不能・σ_ref,use > 0.01 mm・参照の未整定・A/B が判定不能
+    #     なら更新に進めない) ---
     rf = reference_final(R["ab"], do_ab)
     R["reference_final"] = rf
     # --- 判定 ---
     proceed = bool(gate and gate.get("proceed"))
     met = proceed and rf.get("qualified") is True
     blk = ([] if proceed else ((gate or {}).get("blocked_by") or ["関門の記録が無い"])) + \
-          ([] if rf.get("qualified") is True else [f"Euler の参照の最終の資格 (σ_ref): {rf.get('why')}"])
+          ([] if rf.get("qualified") is True else [f"Euler の参照の最終の資格 (σ_ref・σ_ref,use): {rf.get('why')}"])
     upd = ("更新に進める条件をすべて満たす (関門と参照の最終の資格; 壁の更新は自動でつながない)" if met
            else "更新に進める条件を満たさない: " + "; ".join(blk)[:900])
     R["update_conditions_met"] = bool(met and not und)
@@ -959,6 +1236,8 @@ def main(argv=None) -> int:
     ap.add_argument("--design", default=None, help="forge_design の design/ (既定: ~/forge-g0cchain の、無ければこの作業ツリーの)")
     ap.add_argument("--tools", default=None, help="forge の tools (既定: ~/forge-g0cchain の、無ければこの作業ツリーの)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--jobs", type=int, default=None,
+                    help=f"抽出の並列数の上限 (1〜{JOBS_MAX}、既定 {JOBS_CAP}; 実際は min(上限, 空きメモリ / {SNAP_PEAK_MIB} MiB))")
     a = ap.parse_args(argv)
     case = Path(a.case_dir).resolve()
     design = Path(a.design) if a.design else Path.home() / "forge-g0cchain/design"
@@ -971,7 +1250,7 @@ def main(argv=None) -> int:
         sys.path.insert(0, str(design))
     if a.euler_prequalify:
         return euler_prequalify(case, tools)
-    return ns_judge(case, tools, not a.no_ab, Path(a.out) if a.out else case / OUT)
+    return ns_judge(case, tools, not a.no_ab, Path(a.out) if a.out else case / OUT, jobs=a.jobs)
 
 
 if __name__ == "__main__":
