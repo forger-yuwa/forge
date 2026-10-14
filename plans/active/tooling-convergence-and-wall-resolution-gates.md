@@ -132,23 +132,29 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
   **ソルバ出力の `ypls` を壁解像の根拠にしない**ことを明記。
 - 「収束確認」節: **段階起動では判定区間を明示する**ことを追記。
 
-### 4.6 計算の後の判定を 1 本にして自動で回す (ユーザ 2026-10-15「計算後の収束判定は完全に機械化してほしい」; 起案、上位に諮る前)
+### 4.6 計算の後の判定を 1 本にして自動で回す (ユーザ 2026-10-15「計算後の収束判定は完全に機械化してほしい」「あほなAIでもね」; 2026-10-15 plan 段レビュー judge を全件採用して改訂)
 
-今は `run_case.sh` が forge の後に `check_convergence.py` を**履歴全体**で回すだけで、判定区間 (`--segment`)・準定常・全スナップショットの非有限の監査・物理性・
-壁解像・停止規則の状態は、エージェントが手で順に回している (所要 5〜10 分、漏れ・取り違え・区間の誤りの実例あり)。これを 1 つの道具にまとめ、計算の終わりに必ず回す。
+今は `run_case.sh` が forge の後に `check_convergence.py` を**履歴全体**で回すだけで、判定区間・準定常・非有限の監査・物理性・壁解像・停止規則の状態は
+エージェントが手で順に回している (所要 5〜10 分、漏れ・取り違え・区間の誤りの実例あり)。弱いモデルでも判定を誤らないよう、**選ぶ場面を作らずに**自動で回す。
+`judge_run.py` は既存の判定ツールの**共通の集約層**で、設計の受理の条件 (deltastar_loop の関門・SERN のゲートなど) はそれぞれのゲートに残す。
 
-- **道具** `solver_density_cuda/tools/judge_run.py RUN`: run の記録から判定の対象を自分で決め、次を順に行って `RUN_VERDICT.json`・`RUN_VERDICT.txt` を書く。
-  1. **非有限の監査**: `residual_history*.csv` の全列、全 `res_*.h5` (と境界の出力) の `VALUE/*` の非有限の数と最初の step。物理性 (ρ > 0、T > 0 があれば、P > 0)。
-  2. **収束**: `stage_manifest.json` があれば `check_convergence.py --segment` (最後の同一設定の区間)、無ければ全体。区間を記録。
-  3. **停止規則**: `STOP_RULE_STATE.json`・`stop_rule.json` があれば状態 (REACHED / NOT_REACHED / 未使用) をそのまま。
-  4. **準定常**: 対象の量は run の種類で決める — 設計チェーンの run (`prepare_info.json` の機種) はその機種の既定の量 (ノズルなら出口の軸の M・質量の収支・θ_r の系列; 停止規則の系列があればそれを使う)、
-     それ以外は case が `judge.yaml` (対象の量と `check_quasisteady.py` の引数) を置いたときだけ。どちらも無ければ「準定常: 対象未設定」(判定不能) と書く (黙って省かない)。
-  5. **壁解像**: 粘性 (viscMethod ≠ 0) で no-slip 壁があるとき、全 no-slip 壁の最後の step の出力が揃っていることを確かめ、`check_wall_resolution.py --step s --groups <全壁> --weight area` (#36q の規則と同じ)。
-  6. **総合**: 全部 PASS なら PASS、どれか FAIL なら FAIL、判定不能が 1 つでもあれば INDETERMINATE (合格にしない)。各判定の VERDICT の原文・道具の版 (sha)・区間・対象の量を記録。
-- **自動で回す**: `run_case.sh` は forge の終了後に今の `check_convergence.py` の代わりに `judge_run.py` を呼ぶ (`CONVERGENCE_VERDICT.txt` は互換のため同じ内容を書き続ける)。
-  段階起動の設計チェーンは本段の終わりに呼ぶ。Stop フックのゲート (`hook_convergence_gate.py`) は `RUN_VERDICT.json` を読む。
-- **速さ**: 判定は CPU だけで、45 万点・スナップショット 80 枚の run で 2 分以内 (h5 は量ごとに読み、全体を一度に持たない)。
-- 報告の規則 (AGENTS.md): 「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合と各判定の行を貼る。
+1. **判定の仕様を実行の前に確定する** (`JUDGE_SPEC.json`、run の中): 量の定義・単位・抽出器・対象の領域・判定区間・窓・閾値・必須か・適用外の理由。
+   設計チェーンの run は機種の既定から生成器が書く (ノズル: 出口コア M・質量の収支 (絶対の平均・振幅も)・θ_r など、停止規則の系列は定義・出典・区間が一致するときだけ再利用。SERN: C_T_with_shear・C_L・C_M)。
+   手書きの run は `judge.yaml` (case か run に置く) から作る。どちらも無ければ準定常は「対象未設定」= INDETERMINATE (黙って省かない)。継続の run の `--from-floor` と非定常の扱いも仕様に書く。
+   壁解像の適用は**実効の粘性と境界条件**で決める (`viscMethod 0` の定数粘性も粘性: `gasProperties_d.cu:91`)。適用になる run で壁の出力 (`outputHDFflg`) が無ければ**投入の関門で止める** (終わってからでは計算し直しになる)。
+2. **確定の時点**: 単段の run は `run_case.sh` が forge の後に判定する。段階起動の run は、`run_case.sh` は段ごとの実行の結果と健全性だけを保存し、
+   親 (runner) が段の履歴・manifest・停止の記録の確定・出力の整理を終えた後に総合の判定を**一度だけ**確定する (`runner_axismach` の段の記録 2414・2467 行の後、`stop_rule.postprocess()` の後)。
+3. **入力の完全性**: 要求した対象と実際に評価した対象の完全一致を確かめる。段・列・量・壁・時刻の欠損、空集合、時刻の重複・逆行、要る窓の不足は INDETERMINATE。
+   共通の判定ツール側も直す (`check_convergence.py` の欠けた段の `continue`・`check_quasisteady.py` の評価量ゼロで STEADY・step が進まない系列で STEADY・`check_wall_resolution.py` の step の代替; plan 段 judge の M3 の再現)。
+   manifest が無いときの単段の扱いは、単段と確かめられるときだけ。
+4. **状態と終了コード**: 原判定を保持した構造化の結果と、総合の真理値表を先に決める。総合は PASS / FAIL / INDETERMINATE / NOT_APPLICABLE (理由つき)。既知の FAIL は判定不能と併存しても隠さない。
+   停止規則の状態は `REACHED / CENSORED / DIVERGED / EXEC_ERROR / DATA_ERROR / UNAVAILABLE / NOT_USED` をそのまま。solver の異常終了・正常な監視の停止・判定器の例外を区別する。
+   `CONVERGENCE_VERDICT.txt` は収束の副判定として残し、`FORGE_STRICT_CONVERGENCE` の意味は変えない。起動の関門・`LAUNCH_ECHO`・残差のプロットは今のまま。
+5. **鮮度**: 判定に実行の識別子・確定の状態・入力の識別 (config・manifest・系列・壁の出力・停止の記録・`JUDGE_SPEC.json` の sha) を記録し、原子的に書く。
+   Stop フックは同じセッションの範囲で「判定済みか・今の入力に対応するか」を確かめる。**FAIL や判定不能を正しく報告して終えるのは許す** (PASS になるまで止める設計にしない)。
+6. **監査の範囲**: 通常は AGENTS.md どおり残差の全履歴 + 最終の場 (+ 準定常の抽出で読む場はその場で監査、停止規則の体積場の監査の記録を再利用)。全スナップショットの完全な監査はオプション。
+   所要の目標 (45 万点・出力 80 枚で 2 分以内) は出力量・媒体・キャッシュの条件を固定した性能試験として登録する。
+7. 報告の規則 (AGENTS.md): 「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合と各判定の行を貼る。
 
 ## 5. 実装
 
@@ -168,7 +174,7 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 | 9 | 実ケース展開 ✅: **`case/26`** (cell・壁関数) が設計 3 水準を再現 (y1 4.35/115/356 µm → y1+ 0.79/25.5/66.5)、**`case/48`** (冷却平板) が等温壁で断熱の 5 倍 (0.101→0.506) = 既知挙動と一致、**`case/49`** (node・低 Re) で `cyl_top` の全面 y1+>1 を検出。⏳ TP ケースは未 |
 | 10 | AGENTS.md に「壁解像確認 (必須)」節 + 収束節に判定区間と判定不能の 2 項目 ✅ / `methods/turbulence/implementation.md` §3.7.x に `ypls`/`utau` の mode 別定義と node での退化を記載 ✅ / `viscousFlux_d.cu` に同趣旨のコメント ✅ (コード変更なし=解はビット不変) |
 | 11 | `check_cavity_steady.py` を `classify_series` 経由に ✅ / `cavity_eval` の y1+ は参考値と明記し正式判定は共通ツールへ ✅ / ⏳ `stack_residuals.py` は #6 の段情報が入ってから統合 |
-| 12 | 計算の後の判定を 1 本に (§4.6、ユーザ依頼 2026-10-15) | `judge_run.py` と試験 (非有限・区間・停止規則・準定常の対象の決め方・壁解像・総合の各負例、判定不能を合格にしない)、`run_case.sh` と設計チェーンの呼び出し、Stop フック、AGENTS.md。plan 段レビューの後 | ⏳ |
+| 12 | 計算の後の判定を 1 本に (§4.6) | 順に: ① 確定の時点 (単段 / 段階起動、runner と `stop_rule.postprocess` の後) → ② `JUDGE_SPEC.json` (機種の既定・`judge.yaml`) と責務の分け方 → ③ 入力の完全性 (共通の判定ツールの欠損の扱いを直す) → ④ 壁解像の適用 (実効の粘性と BC、投入の関門で壁の出力を確かめる) → ⑤ 状態・終了コード・鮮度・Stop フック → ⑥ 統合試験 (欠損の反例、段階起動、監視の停止、solver の異常終了、判定器の例外、古い判定、定数粘性の壁、他のセッションの除外、関門で未起動、エコーとプロットの維持、終了コードの互換)。変更対象: tools (judge_run・check_*・run_case.sh・hook)、design の runner・stop_rule・設計ゲート、AGENTS.md | ⏳ |
 
 ## 6. 検証
 
@@ -176,6 +182,7 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 | 対応 |
 | --- | --- | --- | --- | --- |
+| plan (§4.6 judge) | 2026-10-15 | [2026-10-15-tooling-convergence-and-wall-resolution-gates-plan-judge.md](../../notes/reviews/2026-10-15-tooling-convergence-and-wall-resolution-gates-plan-judge.md) | GO-with-changes, C0/M6/m2 | **全件採用** → §4.6 を改訂: M1 確定の時点 (段階起動は親の確定の後)、M2 判定の仕様を実行の前に確定 (`JUDGE_SPEC.json`、責務は共通の集約層)、M3 入力の完全性 (共通ツールの欠損の扱いを直す)、M4 壁解像の適用は実効の粘性と BC (定数粘性も) + 投入の関門で壁の出力、M5 状態の真理値表と終了コード、M6 鮮度と Stop フック (FAIL・判定不能の報告は許す)、m7 監査の範囲は AGENTS.md どおり、m8 統合試験と影響範囲 (#12) |
 | plan | `2026-09-19` | [`notes/reviews/2026-09-19-tooling-convergence-and-wall-resolution-gates-plan.md`](../../notes/reviews/2026-09-19-tooling-convergence-and-wall-resolution-gates-plan.md) | **NO-GO**, C0/M9/m0 | **全件採用**。M1 段名では同一性を保証できない・本段単独判定は許可すべき → §4.2 を書き直し / M2 共通列縮退は誤合格を再導入・`check_convergence` の空検査と最終 1 点ゼロの穴 → §4.1, §5.1 #1 / M3 `wall_dist` 全域パーセンタイルは局所距離でない → §4.3 / M4 `utau` と `twall` の不整合 (最大 74.5 倍) → §4.3 で接線 traction から組む / M5 Sutherland 固定は 3 経路ある物性と不整合 → §4.3 / M6 閾値が局所精度と automatic treatment を取り違え → §4.3 / M7 準定常の穴は HDF5 経路 → §5.1 #2 / M8 `check_mesh_quality` がゼロ体積・NaN 座標を通す → §5.1 #3 / M9 呼び出し側の迂回と独立検証の欠落 → §5.1 #5, #8, #9 |
 
 ### 6.2 合否条件
@@ -198,6 +205,7 @@ codex が現行コードで再現した**誤合格**を先に塞ぐ。いずれ�
 
 ## 変更ログ
 
+- `2026-10-15` — plan 段 judge (GO-with-changes C0/M6/m2) を全件採用して §4.6・#12 を改訂。
 - `2026-10-15` — ユーザ依頼「計算後の収束判定は完全に機械化してほしい」: §4.6 (判定を 1 本の道具 `judge_run.py` にまとめ、`run_case.sh`・設計チェーン・Stop フックから自動で回す) と §5.1 #12 を起案。
 
 - 2026-09-19 (3): #8 (小規模テスト 4 配置)・#9 (case/26, case/48, case/49 展開)・#11 の一部を実装。
