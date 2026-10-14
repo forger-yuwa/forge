@@ -414,6 +414,11 @@ def main():
         res = mp.check_run(dc)
         check(not recc['artifact']['node'] and not res['fails'] and [k for k, _ in res['warns']] == ['bcond.1'],
               f'cell 変換: 入口の分類の変更は WARN {res["warns"]}')
+        # 格子の種類の事実 (plan §5.1 #28): node は /VIZMESH/CONNE、cell は /MESH/CONNE の primal のセルの型を記録に残す
+        ctA, ctc = recA['artifact'].get('cell_types'), recc['artifact'].get('cell_types')
+        check(isinstance(ctA, dict) and set(ctA) == {'quad'} and ctA == ctc
+              and mp.mesh_kind(os.path.join(dc, 'mesh.h5')) == {'node': False, 'cell_types': ctc},
+              f'記録の artifact に primal のセルの型 (node {ctA}・cell {ctc}、mesh_kind と同じ)')
 
         print('=== 正例: 保存量だけを更新した restart (restart_field.py) ===')
         dr = E.run_dir(', discretization: "node", nodeInletCornerWall: 1, wallDistExtraPhysIDs: [5]')

@@ -13,6 +13,10 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
    `solverConfig.yaml` と違えば FAIL (宣言は別の config のもの。宣言し直す)。宣言が無い run は check_solver_config の検査だけを回す:
    その FAIL (削除・改名キー・`bndFirstOrder`・dual-time の緩和など、solver が起動を拒むかプロファイルの `forbid` と同じ類) と
    YAML の重複キー・merge key は FAIL、未知・誤配置のキーは宣言の欠落と同じ水準 (移行期 WARN・強制 FAIL)。
+   **適用条件** (plan §5.1 #28): 宣言のプロファイルの `applies` のうち次元 (`2d_planar`・`2d_axisym`・`3d`)・格子の種類
+   (`structured`・`unstructured`)・格子の node/cell は変換の成果物から取る (来歴の記録が今の h5 と一致すれば記録の `artifact` の
+   `node`・`cell_types`、無ければ h5 の primal のセルの型; `gate_mesh_kind`)。導けない条件 (h5 が無い・読めない・型の混在など) は
+   一致扱いせず、宣言した run では移行期でも FAIL (実験の宣言は NOTE)。
 2. **メッシュの実効条件**: `mesh_provenance.check_run` (変換時の記録 `<h5>.provenance.json` と run の config・bcond の照合)。
    記録はメッシュの**実体** (realpath) の隣を探す (run が格子を symlink で置いても見つかる; plan §5.1 #23)。
 3. **メッシュの品質**: `check_mesh_quality.py <h5> --bcond bcondConfig.yaml --ar-max 5000` (§4.4: AR 1000 を超えるセルは
@@ -35,6 +39,7 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
 | `fixed`・`explicit` の値の不一致・省略 (逸脱の宣言と config の値の食い違いを含む) | FAIL | FAIL | **WARN に落とす** |
 | `forbid`・check_solver_config の FAIL・重複キー・merge key | FAIL | FAIL | 変えない |
 | 未知/誤配置のキー・プロファイルに無いキー・適用条件の外 (宣言した run) | FAIL | FAIL | 変えない |
+| 適用条件を照合できない (次元・格子の種類を成果物から取れない・知らない条件や値; 宣言した run) | FAIL | FAIL | 変えない |
 | 未知/誤配置のキー (宣言の無い run) | WARN | FAIL | 変えない |
 | `advisory` の範囲外・check_solver_config の WARN・宣言の後にプロファイルの内容が変わった | WARN | WARN | — |
 | メッシュの記録 (`<h5>.provenance.json`) が無い | WARN | FAIL | 変えない |
@@ -195,8 +200,10 @@ def _read_declaration(path):
     return decl, probs
 
 
-def check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, info):
-    """1. 設定と宣言。info に宣言・プロファイル・段・逸脱・プロファイルのハッシュを書く。"""
+def check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, info, mesh_kind=None):
+    """1. 設定と宣言。info に宣言・プロファイル・段・逸脱・プロファイルのハッシュを書く。mesh_kind: 格子の事実 (`gate_mesh_kind`)。
+    宣言のプロファイルの適用条件のうち導けないもの (次元・格子の種類を成果物から取れない、など) は、宣言した run では移行期でも
+    FAIL (判定不能を一致扱いしない; plan §5.1 #28)。`FORGE_LAUNCH_GATE=warn` でも落とさない (検査不能)。実験の宣言は NOTE。"""
     import recipe_settings as RS
     decl_path = os.path.join(run_dir, RECIPE_FILE)
     for k, m in parse_fails:
@@ -243,7 +250,7 @@ def check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, inf
         out.add('FAIL', '設定', '(受理キー)', 'solverConfig の受理キーの一覧を作れない (config_key_inventory の抽出に失敗; 検査できない)')
     try:
         r = RS.check_config(recipes, cfg_raw.decode('utf-8', errors='replace'), decl.get('profile'), decl.get('stage'), devs,
-                            bcond_doc, experiment=(kind == 'experiment'))
+                            bcond_doc, experiment=(kind == 'experiment'), mesh=mesh_kind)
     except RS.RecipeError as e:
         out.add('FAIL', '設定', '(推奨設定)', f'プロファイルを解決できない (検査できない): {e}')
         return
@@ -258,6 +265,11 @@ def check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, inf
     for o in r.get('off_profile') or []:
         out.add('NOTE', '設定', o['key'], f'実験の宣言でプロファイルから外れた値 {RS.show(o["value"])} '
                                           f'(プロファイル {RS.show(o["profile_value"])})')
+    for k, m in r.get('unchecked') or []:
+        if kind == 'experiment':
+            out.add('NOTE', '設定', k, f'実験の宣言: プロファイルの適用条件を照合していない ({m})')
+        else:
+            out.add('FAIL', '設定', k, f'プロファイルの適用条件を照合できない (判定不能は一致扱いしない; 移行期でも宣言した run は FAIL): {m}')
     res = r.get('profile')
     if res is not None:
         info['profile_sha256'] = res['sha256']
@@ -302,6 +314,36 @@ def check_provenance(run_dir, mode, out, info):
             except Exception as e:                  # noqa: BLE001
                 out.add('FAIL', '来歴', '(mesh)', f'{mesh} を読めない (検査できない): {e}')
     return res
+
+
+def gate_mesh_kind(prov, info):
+    """宣言のプロファイルの適用条件 (次元・格子の種類・格子の node/cell) と照合する格子の事実 (plan §5.1 #28)。来歴の記録が今の h5 と
+    一致し、記録の成果物の事実 (`artifact`) に `node`・`cell_types` があればそれを使う。記録が無い・一致しない・記録に `cell_types`
+    が無い (#28 より前の記録) ときは h5 そのものから読む (`mesh_provenance.mesh_kind`)。読めなければ None (判定不能: 宣言した run では
+    照合できない適用条件として FAIL)。info['mesh_kind'] に事実と出所を書く。"""
+    import mesh_provenance as mpv
+    import recipe_settings as RS
+    if not prov:
+        return None
+    mesh, rec = prov.get('mesh'), prov.get('record')
+    consistent = rec is not None and not any(k == '(provenance)' for k, _ in prov.get('fails') or [])
+    art = (rec.get('artifact') or {}) if consistent else {}
+    if isinstance(art.get('node'), bool) and isinstance(art.get('cell_types'), dict):
+        facts = {'node': art['node'], 'cell_types': art['cell_types']}
+        info['mesh_kind'] = f'{RS.mesh_kind_text(facts)} (来歴の記録の成果物の事実)'
+        return facts
+    if not mesh or not os.path.isfile(mesh):
+        info['mesh_kind'] = '不明 (メッシュの h5 が無い)'
+        return None
+    try:
+        facts = mpv.mesh_kind(mesh)
+    except Exception as e:                          # noqa: BLE001
+        info['mesh_kind'] = f'不明 (h5 を読めない: {e})'
+        return None
+    why = ('来歴の記録に cell_types が無い' if consistent else
+           ('来歴の記録と一致しない' if rec is not None else '来歴の記録が無い'))
+    info['mesh_kind'] = f'{RS.mesh_kind_text(facts)} (h5 から読んだ; {why})'
+    return facts
 
 
 def note_initial_field(run_dir, doc, out, info):
@@ -439,10 +481,14 @@ def run_gate(run_dir, forge_bin=None, environ=None, dry_run=False):
             except Exception as e:                  # noqa: BLE001
                 out.add('FAIL', '品質', BCOND_FILE, f'{BCOND_FILE} を読めない (検査できない): {e}')
                 bcond_doc, bcond_path = None, None
+        # 2. メッシュの実効条件 (設定の照合より先に回し、宣言のプロファイルの適用条件 (次元・格子の種類) と照合する格子の事実を
+        # 取る: plan §5.1 #28。判定の項目は従来どおり設定の後に並べる)
+        pout = Findings()
+        prov = check_provenance(run_dir, mode, pout, info) if doc is not None else None
+        mesh_facts = gate_mesh_kind(prov, info)
         # 1. 設定と宣言
-        check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, info)
-        # 2. メッシュの実効条件
-        prov = check_provenance(run_dir, mode, out, info) if doc is not None else None
+        check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, info, mesh_kind=mesh_facts)
+        out.items += pout.items
         note_initial_field(run_dir, doc, out, info)
         # 3. メッシュの品質
         mesh = (prov or {}).get('mesh')
@@ -477,6 +523,8 @@ def render(out, info):
                  f'{eff}; 理由 {d.get("reason")}' + (f'; 根拠 {d["basis"]}' if d.get('basis') else '') + ')')
     L.append(f'mesh        : {info.get("mesh") or "-"}')
     L.append(f'mesh_hash   : {info.get("mesh_hash", "-")}')
+    if info.get('mesh_kind'):
+        L.append(f'mesh_kind   : {info["mesh_kind"]}')
     if info.get('initial_field'):
         L.append(f'initial_field: {info["initial_field"]}')
     L.append(f'quality     : {info.get("quality", "-")}' + (f' [{info["quality_cmd"]}]' if info.get('quality_cmd') else ''))

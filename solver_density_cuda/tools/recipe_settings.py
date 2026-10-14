@@ -23,6 +23,13 @@
 継承は 1 本の鎖 (`inherits: <親の名前>`)。鎖の中で同じ段・同じキーに違う値・違う種類を与えたら読み込み時に `RecipeError`
 (黙って上書きしない)。`all_stages` はそのプロファイルの全段に当てる。`abstract: true` のプロファイルは宣言できない。
 
+**適用条件** (`applies`、plan §5.1 #28): config から導く条件 (離散化・軸対称・物理・気体・時間、壁は bcond から) に加え、次元
+(`2d_planar`・`2d_axisym`・`3d`) と格子の種類 (`structured`・`unstructured`) は変換の成果物 (h5 の primal のセルの型) から導き、
+格子そのものの node/cell も照合する (`applies_from_mesh`)。知らない条件・語彙 (`APPLIES_VOCAB`) の外の値は FAIL。導けない条件は
+黙って飛ばさず `unchecked` に名指しする (`declare` は宣言に `unchecked_applies` として残し、投入の関門は宣言した run で FAIL にする)。
+`declare`・`check` は格子を読まない (次元・格子の種類は `unchecked`): 格子との照合は、来歴の記録と今の h5 を結び付けてから投入の関門
+(`launch_gate.py`) が行う。
+
 使い方:
     recipe_settings.py list
     recipe_settings.py show PROFILE
@@ -519,9 +526,20 @@ def parse_deviations(items, reason=None, basis=None):
     return out
 
 
-def derive_applies(doc, bcond=None):
+def derive_applies(doc, bcond=None, mesh=None):
     """config (と bcond) から適用条件の値を導く (照合・書き写しに使う)。軸対称は solver と同じ優先順
-    (`mesh.isAxisymmetric`、無ければ旧 `physProp.isAxisymmetric`: `check_solver_config.effective_axisymmetric`)。"""
+    (`mesh.isAxisymmetric`、無ければ旧 `physProp.isAxisymmetric`: `check_solver_config.effective_axisymmetric`)。
+    mesh (変換の成果物の事実 `mesh_provenance.mesh_kind`・来歴の記録の `artifact`) を渡せば、config からは導けない次元
+    (`dimension`) と格子の種類 (`mesh`) を足す (`applies_from_mesh`; 導けなければ足さない。plan §5.1 #28)。
+    導けない条件は入れない: check_config が「照合していない」と名指しする (取れた属性だけを黙って比べない)。"""
+    out = _derive_applies_config(doc, bcond)
+    if mesh is not None:
+        m = applies_from_mesh(mesh, out.get('axisymmetric'))
+        out.update({k: m[k] for k in MESH_APPLIES if k in m})
+    return out
+
+
+def _derive_applies_config(doc, bcond=None):
     import check_solver_config as csc
     flat = flatten(doc)
     tb = str(flat.get('turbulence.model', 'none')).strip().lower()
@@ -548,6 +566,53 @@ APPLIES_KEYS = {'discretization': ('mesh.discretization',), 'axisymmetric': ('me
                 'gas': ('physProp.thermalMethod',), 'physics': ('turbulence.model', 'physProp.viscMethod'),
                 'time': ('time.unsteady', 'time.dualTime')}
 
+# 適用条件の語彙 (plan §5.1 #28)。プロファイルが知らない条件・語彙の外の値を書いたら照合できないので check_config が FAIL にする
+# (以前は導けない条件を黙って飛ばしたので、`dimension: 4d` のような値でも FAIL 0・WARN 0 だった: 2026-10-15 codex result 段 M2)
+APPLIES_VOCAB = {'dimension': ('2d_planar', '2d_axisym', '3d'), 'discretization': ('node', 'cell'),
+                 'axisymmetric': (True, False), 'physics': ('euler', 'ns_laminar', 'ns_sst'), 'gas': ('cpg', 'tp'),
+                 'wall': ('slip', 'noslip_adiabatic', 'isothermal'), 'mesh': ('structured', 'unstructured'),
+                 'time': ('steady', 'unsteady', 'dual_time')}
+# 変換の成果物 (メッシュ) からだけ導ける条件 (config からは導けない)。関門 (`launch_gate.py`) は来歴の記録の成果物の事実か h5 から渡す
+MESH_APPLIES = ('dimension', 'mesh')
+CELLS_2D = ('tri', 'quad')
+CELLS_3D = ('tet', 'pyramid', 'prism', 'hex')
+
+
+def applies_from_mesh(kind, axisymmetric):
+    """変換の成果物の事実 {node, cell_types} (`mesh_provenance.mesh_kind`・来歴の記録の `artifact`) → 適用条件
+    {dimension, mesh, discretization} のうち導けるもの (導けない条件は入れない。判定不能を一致扱いしない)。
+
+    - `dimension`: primal のセルの型が全部 2D (三角形・四角形) なら軸対称 (config) で `2d_axisym` / `2d_planar`、全部 3D
+      (四面体・ピラミッド・プリズム・六面体) なら `3d`。2D と 3D の型が混ざる・型を読めない (`cell_types` が None) なら導かない。
+    - `mesh`: 全セルが四角形 (2D)・六面体 (3D) なら `structured`、それ以外 (三角形・四面体・プリズム・ピラミッドを含む) は
+      `unstructured`。h5 に格子の構造の記録は無いので型で決める (四角形だけの非構造 (paving) は `structured` と区別できない)。
+    - `discretization`: `/VIZMESH` の有無 (node / cell)。config の `mesh.discretization` とは別に、格子そのものを照合する。"""
+    out = {}
+    if not isinstance(kind, dict):
+        return out
+    if isinstance(kind.get('node'), bool):
+        out['discretization'] = 'node' if kind['node'] else 'cell'
+    ct = kind.get('cell_types')
+    if isinstance(ct, dict) and ct and all(isinstance(v, int) and v > 0 for v in ct.values()):
+        types = set(ct)
+        if types <= set(CELLS_2D):
+            out['dimension'] = '2d_axisym' if axisymmetric else '2d_planar'
+            out['mesh'] = 'structured' if types == {'quad'} else 'unstructured'
+        elif types <= set(CELLS_3D):
+            out['dimension'] = '3d'
+            out['mesh'] = 'structured' if types == {'hex'} else 'unstructured'
+    return out
+
+
+def mesh_kind_text(kind):
+    """格子の事実の 1 行 (表示用): 例 `node; quad 61030`。"""
+    if not isinstance(kind, dict):
+        return '不明'
+    node = kind.get('node')
+    ct = kind.get('cell_types')
+    cts = ', '.join(f'{k} {v}' for k, v in sorted(ct.items())) if isinstance(ct, dict) and ct else 'セルの型を読めない'
+    return f'{"node" if node is True else ("cell" if node is False else "node/cell 不明")}; {cts}'
+
 
 def _applies_match(want, got):
     if isinstance(want, (list, tuple)):
@@ -555,13 +620,17 @@ def _applies_match(want, got):
     return same(want, got)
 
 
-def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, bcond=None, experiment=False):
+def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, bcond=None, experiment=False, mesh=None):
     """config をプロファイルの段と照合する。戻り dict:
     fails/warns [(キー, 説明)]、applied (宣言どおりの逸脱 [{key, value, profile_value}])、off_profile (実験で外れたキー)、
     profile (解決したプロファイル、無ければ None)、fixed_fails (fails のうち `fixed`・`explicit` の値の不一致・省略によるもの。
-    投入の関門 `launch_gate.py` が `FORGE_LAUNCH_GATE=warn` のときだけ WARN に落とす; plan §4.3・§5.1 #10)。"""
+    投入の関門 `launch_gate.py` が `FORGE_LAUNCH_GATE=warn` のときだけ WARN に落とす; plan §4.3・§5.1 #10)、
+    unchecked [(applies.X, 理由)] (プロファイルが適用条件を書いたのに導けず照合していないもの。plan §5.1 #28: 関門は宣言した run で
+    FAIL にする。ここでは fails・warns に入れない (呼び出し側が水準を決める))。
+    mesh: 変換の成果物の事実 (`mesh_provenance.mesh_kind`・来歴の記録の `artifact`)。渡せば次元・格子の種類・格子の node/cell を
+    適用条件と照合する (`applies_from_mesh`)。"""
     import check_solver_config as csc
-    fails, warns, applied, off, fixed_fails = [], [], [], [], []
+    fails, warns, applied, off, fixed_fails, unchecked = [], [], [], [], [], []
     deviations = dict(deviations or {})
     res = None
     doc, pf = parse_config(cfg_text)
@@ -578,7 +647,8 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
     elif not experiment:
         fails.append(('(profile)', 'プロファイルの宣言が無い (--profile / 実験なら --experiment)'))
     if doc is None:
-        return {'fails': fails, 'warns': warns, 'applied': applied, 'off_profile': off, 'profile': res, 'fixed_fails': []}
+        return {'fails': fails, 'warns': warns, 'applied': applied, 'off_profile': off, 'profile': res, 'fixed_fails': [],
+                'unchecked': []}
 
     # --- check_solver_config (起動時拒否・禁止・dual-time の緩和など) と未知・誤配置のキー (ここでは FAIL) ---
     _, uk_w = csc.unknown_keys(doc)              # 起動時拒否 (unknown_keys の fails) は csc.check の fails に含まれる
@@ -593,7 +663,7 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
             for k in deviations:
                 warns.append((k, '実験の宣言では逸脱を個別に宣言しない (外れたキーは自動で記録する)'))
         return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res,
-                'fixed_fails': []}
+                'fixed_fails': [], 'unchecked': []}
 
     st = res['stages'][stage]
     fixed, adv, expl = st['fixed'], st['advisory'], st['explicit']
@@ -668,20 +738,53 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
             fails.append((k, f'逸脱の宣言 {show(dv)} だが config に書いていない'))
         elif k not in res['forbid'] and k not in {a['key'] for a in applied} and not any(fk == k for fk, _ in fails):
             warns.append((k, f'逸脱の宣言 {show(dv)} が使われていない (config はプロファイル {profile} の段 {stage} どおり)'))
-    # 適用条件 (段の fixed がその条件を決めるキーを全部持つ段では fixed の照合に任せる: 例 SERN の層流暖機は SST の機種の段だが
-    # turbulence.model none を fixed に持つ)
-    got_app = derive_applies(doc, bcond)
+    # 適用条件 (plan §5.1 #28): 知らない条件・語彙の外の値は照合できないので FAIL。導けない条件は黙って飛ばさず unchecked に
+    # 名指しする (関門は宣言した run で FAIL)。段の fixed がその条件を決める config のキーを全部持つ段では、config 側の照合を fixed に
+    # 任せる (例 SERN の層流暖機は SST の機種の段だが turbulence.model none を fixed に持つ)。格子そのものの node/cell は fixed では
+    # 照合されないので、成果物の事実を渡されたら別に照合する
+    got_app = derive_applies(doc, bcond, mesh)
+    from_mesh = applies_from_mesh(mesh, got_app.get('axisymmetric')) if mesh is not None else {}
+
+    def outside(k, want, got, where):
+        msg = f'適用条件の外: {k} はプロファイル {show(want)}、{where} は {show(got)}'
+        if experiment:
+            off.append({'key': f'applies.{k}', 'value': got, 'profile_value': want, 'note': msg})
+        else:
+            fails.append((f'applies.{k}', msg))
+
+    def why_unchecked(k):
+        if k in MESH_APPLIES:
+            if mesh is None:
+                return ('変換の成果物 (メッシュ) の事実を渡していない: 次元・格子の種類は config から導けない '
+                        '(投入の関門は来歴の記録の成果物の事実か h5 から照合する)')
+            return (f'変換の成果物 (メッシュ) から導けない ({mesh_kind_text(mesh)}; 2D と 3D の型の混在・知らない型・'
+                    '型を読めない格子は判定不能)')
+        if k == 'wall':
+            return 'bcondConfig が無い・読めない (壁の種類は bcond から導く)'
+        return '導けない'
+
     for k, want in res['applies'].items():
+        vocab = APPLIES_VOCAB.get(k)
+        if vocab is None:
+            fails.append((f'applies.{k}', f'プロファイル {profile} の適用条件 {k} を知らない '
+                                          f'(知っている条件: {", ".join(APPLIES_VOCAB)}; 照合できない)'))
+            continue
+        wants = list(want) if isinstance(want, (list, tuple)) else [want]
+        if not wants or any(not any(same(w, v) for v in vocab) for w in wants):
+            fails.append((f'applies.{k}', f'プロファイル {profile} の適用条件 {k} の値 {show(want)} が語彙 '
+                                          f'({", ".join(show(v) for v in vocab)}) の外 (照合できない)'))
+            continue
+        if k == 'discretization' and 'discretization' in from_mesh and not _applies_match(want, from_mesh[k]):
+            outside(k, want, from_mesh[k], '変換の成果物 (メッシュ)')
         if APPLIES_KEYS.get(k) and all(c in fixed for c in APPLIES_KEYS[k]):
             continue
-        if k in got_app and not _applies_match(want, got_app[k]):
-            msg = f'適用条件の外: {k} はプロファイル {show(want)}、config は {show(got_app[k])}'
-            if experiment:
-                off.append({'key': f'applies.{k}', 'value': got_app[k], 'profile_value': want, 'note': msg})
-            else:
-                fails.append((f'applies.{k}', msg))
+        if k not in got_app:
+            unchecked.append((f'applies.{k}', why_unchecked(k)))
+            continue
+        if not _applies_match(want, got_app[k]):
+            outside(k, want, got_app[k], '変換の成果物 (メッシュ)' if k in MESH_APPLIES else 'config')
     return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res,
-            'fixed_fails': _dedupe(fixed_fails)}
+            'fixed_fails': _dedupe(fixed_fails), 'unchecked': _dedupe(unchecked)}
 
 
 def _dedupe(items):
@@ -717,10 +820,12 @@ def _load_bcond(path):
 
 
 def declare(run, profile=None, stage=None, deviate=None, reason=None, basis=None, experiment=False, out=None,
-            recipes=None, write=True, deviation_sources=None, extra=None):
+            recipes=None, write=True, deviation_sources=None, extra=None, mesh=None):
     """config を照合し、通れば宣言 (RECIPE.json) を書く。戻り (終了コード, 結果 dict, 書いた path or None)。
     deviation_sources {キー: 出所}: 逸脱の記録に `source` として写す (生成器が問題 YAML の上書きを逸脱に変換したときの出所の
-    問題 YAML のパスとキー; plan §4.3 の 4b・§5.1 #11)。extra {項目: 値}: 宣言に足す項目 (生成器・段の tag など。既定の項目は上書きしない)。"""
+    問題 YAML のパスとキー; plan §4.3 の 4b・§5.1 #11)。extra {項目: 値}: 宣言に足す項目 (生成器・段の tag など。既定の項目は上書きしない)。
+    mesh: 格子の事実 (`mesh_provenance.mesh_kind`、任意)。宣言は既定では格子を読まない (格子との照合は、来歴の記録と今の h5 を
+    結び付けてから投入の関門が行う; plan §5.1 #28)。照合していない適用条件は宣言の `unchecked_applies` に名指しで残す。"""
     recipes = recipes or load_recipes()
     run_dir, cfg_path, bc_path = _read_run(run)
     if experiment and not (reason or '').strip():
@@ -737,7 +842,7 @@ def declare(run, profile=None, stage=None, deviate=None, reason=None, basis=None
     except OSError as e:
         return 1, {'fails': [('(config)', f'solverConfig.yaml を読めない: {e}')], 'warns': []}, None
     text = raw.decode('utf-8', errors='replace')
-    r = check_config(recipes, text, profile, stage, devs, _load_bcond(bc_path), experiment=experiment)
+    r = check_config(recipes, text, profile, stage, devs, _load_bcond(bc_path), experiment=experiment, mesh=mesh)
     if r['fails']:
         return 1, r, None
     res = r['profile']
@@ -750,6 +855,7 @@ def declare(run, profile=None, stage=None, deviate=None, reason=None, basis=None
                            **({'source': deviation_sources[a['key']]} if a['key'] in (deviation_sources or {}) else {})}
                           for a in r['applied']],
            'warnings': [{'key': k, 'message': m} for k, m in r['warns']],
+           'unchecked_applies': [{'key': k, 'message': m} for k, m in r.get('unchecked') or []],
            'declared_at': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
            'tool': 'solver_density_cuda/tools/recipe_settings.py'}
     if experiment:
@@ -952,7 +1058,11 @@ def _print_result(r, head):
         print(f'  DEVIATION {a["key"]}: {show(a["value"])} (プロファイル {show(a["profile_value"])}{eff})')
     for o in r.get('off_profile') or []:
         print(f'  OFF-PROFILE {o["key"]}: {show(o["value"])} (プロファイル {show(o["profile_value"])})')
-    print(f'  VERDICT: {"FAIL" if r["fails"] else ("WARN" if r["warns"] else "PASS")}')
+    for k, m in r.get('unchecked') or []:
+        print(f'  UNCHECKED {k}: {m}')
+    unc = len(r.get('unchecked') or [])
+    print(f'  VERDICT: {"FAIL" if r["fails"] else ("WARN" if r["warns"] else "PASS")}'
+          + (f' (照合していない適用条件 {unc} 件: 投入の関門は宣言した run でこれを FAIL にする)' if unc else ''))
 
 
 def main(argv=None):

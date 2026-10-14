@@ -31,6 +31,8 @@
 記録を書く前に、要求値と成果物の食い違い (`/VIZMESH` の有無と離散化、`/BCONDS/<id>` の `bcondKind` と bcondConfig、
 `/MESH/RENUMBER_PERM` と `renumber`、軸対称でないのに `/PLANES/rSurfVect`) と、変換中の config の書き換えを調べ、あれば**書かない**
 (変換器がその config を読んでいない)。変換器の版で決まる事実 (2D の node の軸対称で `/PLANES/rSurfVect` が有るか) は `artifact` に残す。
+格子の種類の事実 (`node`・primal のセルの型ごとの数 `cell_types`、`mesh_kind()`) も `artifact` に残し、投入の関門が宣言の
+プロファイルの適用条件 (次元・格子の種類・node/cell) と照合する (plan §5.1 #28。記録に `cell_types` が無ければ h5 から読む)。
 
 **照合** (`check_run`、関門 `launch_gate.py` が呼ぶ予定。§5.1 #10) — FAIL:
 
@@ -386,6 +388,45 @@ def _mesh_is_2d(f):
     return code in (4, 5) if code in (4, 5, 6, 7, 8, 9) else None
 
 
+# primal のセルの型 (XDMF の Mixed の code → 名前・節点数。res_h5_to_vtu.XDMF2VTK と同じ)
+XDMF_CELLS = {4: ('tri', 3), 5: ('quad', 4), 6: ('tet', 4), 7: ('pyramid', 5), 8: ('prism', 6), 9: ('hex', 8)}
+
+
+def primal_cell_types(f):
+    """primal のセルの型ごとの数 {名前: 数} (plan §5.1 #28: 適用条件の次元・格子の種類を成果物から取る)。node は /VIZMESH/CONNE
+    (双対を primal に置き換えた後の primal; gmshReader.hpp:2659)、cell は /MESH/CONNE (XDMF の Mixed: code と節点の列)。
+    知らない code (多角形・多面体)・列の長さの不整合・空は None (判定不能。一致扱いしない)。"""
+    key = 'VIZMESH/CONNE' if 'VIZMESH/CONNE' in f else 'MESH/CONNE'
+    if key not in f or f[key].shape is None:
+        return None
+    c = np.asarray(f[key])
+    if c.ndim != 1 or c.size == 0 or int(c[0]) not in XDMF_CELLS:
+        return None
+    c0 = int(c[0])
+    s = 1 + XDMF_CELLS[c0][1]
+    # 1 種類だけの格子 (生産の格子はどれもこれ) は刻みで確かめる: 先頭から同じ型が続く限り次のセルは s の倍数の位置で始まるので、
+    # 最初に違う型のセルは必ず s の倍数の位置の code で見つかる (取りこぼさない)
+    if c.size % s == 0 and bool(np.all(c[::s] == c0)):
+        return {XDMF_CELLS[c0][0]: int(c.size // s)}
+    counts, i, n = {}, 0, int(c.size)
+    while i < n:
+        code = int(c[i])
+        if code not in XDMF_CELLS:
+            return None
+        nm, nv = XDMF_CELLS[code]
+        counts[nm] = counts.get(nm, 0) + 1
+        i += 1 + nv
+    return counts if i == n else None
+
+
+def mesh_kind(h5_path):
+    """変換の成果物 (h5) から格子の種類の事実: `node` (/VIZMESH の有無; artifact_problems と同じ印)・`cell_types`
+    (primal_cell_types、判定不能は None)。来歴の記録の `artifact` にも同じ項目を書く (build_record)。"""
+    import h5py
+    with h5py.File(h5_path, 'r') as f:
+        return {'node': 'VIZMESH' in f, 'cell_types': primal_cell_types(f)}
+
+
 def artifact_problems(h5_path, conv, bconds):
     """要求値・境界の表と成果物の突き合わせ。戻り (食い違いの一覧, 成果物の事実 dict)。食い違いは「変換器がこの config・bcond を
     読んでいない」ことを示すもの (node の有無・境界の種類・再番号) で、あれば記録しない。変換器の版で決まるもの
@@ -425,7 +466,8 @@ def artifact_problems(h5_path, conv, bconds):
                     probs.append(f'/BCONDS/{pid} の bcondKind {kind!r} が変換時の bcondConfig の {bconds[pid]["kind"]!r} と違う')
         if 'VALUE/wall_dist' not in f:
             probs.append('/VALUE/wall_dist が無い')
-        facts = {'node': is_node, 'is2d': _mesh_is_2d(f), 'rSurfVect': has_rw, 'renumber_perm': has_perm,
+        facts = {'node': is_node, 'is2d': _mesh_is_2d(f), 'cell_types': primal_cell_types(f),
+                 'rSurfVect': has_rw, 'renumber_perm': has_perm,
                  'coord_dtype': f['MESH/COORD'].dtype.str if 'MESH/COORD' in f else None,
                  'in_mesh': sorted(int(k) for k in f['BCONDS'] if str(k).isdigit()) if 'BCONDS' in f else []}
     return probs, facts

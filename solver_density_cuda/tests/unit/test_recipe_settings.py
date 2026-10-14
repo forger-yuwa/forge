@@ -396,6 +396,26 @@ check(not ok and msg == '例外にならない', '鎖の中で同じキーに同
 ok, msg = raises(BASE.replace('version: 1', 'version: 1\nversion: 2'), '重複キー')
 check(ok, f'推奨設定のファイルの重複キーも拒否 ({msg})')
 
+# --- 適用条件の次元・格子の種類 (plan §5.1 #28): 成果物の事実から導き、導けなければ名指し -------------------------------------
+AFM = RS.applies_from_mesh
+check(AFM({'node': True, 'cell_types': {'quad': 10}}, False) == {'discretization': 'node', 'dimension': '2d_planar', 'mesh': 'structured'}
+      and AFM({'node': True, 'cell_types': {'quad': 10}}, True)['dimension'] == '2d_axisym',
+      '四角形だけの 2D: 2d_planar / 2d_axisym (軸対称は config)・structured')
+check(AFM({'node': True, 'cell_types': {'quad': 10, 'tri': 2}}, False)['mesh'] == 'unstructured'
+      and AFM({'node': False, 'cell_types': {'hex': 8}}, False) == {'discretization': 'cell', 'dimension': '3d', 'mesh': 'structured'}
+      and AFM({'node': True, 'cell_types': {'hex': 8, 'prism': 2}}, False)['mesh'] == 'unstructured',
+      '三角形を含む 2D・プリズムを含む 3D は unstructured、六面体だけの 3D は structured')
+check(AFM({'node': True, 'cell_types': {'quad': 4, 'hex': 4}}, False) == {'discretization': 'node'}
+      and AFM({'node': True, 'cell_types': None}, False) == {'discretization': 'node'} and AFM(None, False) == {},
+      '2D と 3D の型の混在・型を読めない格子は次元も種類も導かない (判定不能)')
+r = RS.check_config(RC, cfg_of('sern2d_finite_base_frozen_tp_sst', 'main'), 'sern2d_finite_base_frozen_tp_sst', 'main')
+check(not r['fails'] and not r['warns'] and {k for k, _ in r['unchecked']} == {'applies.dimension', 'applies.mesh', 'applies.wall'},
+      'check_config: 格子の事実・bcond を渡さなければ次元・格子の種類・壁は unchecked に名指し (fails・warns には入れない)')
+r = RS.check_config(RC, cfg_of('sern2d_finite_base_frozen_tp_sst', 'main'), 'sern2d_finite_base_frozen_tp_sst', 'main',
+                    mesh={'node': True, 'cell_types': {'hex': 8}})
+check(fail_keys(r) == {'applies.dimension'} and any('2d_planar' in m and '3d' in m for k, m in r['fails']),
+      'check_config: 2D の機種に 3D の格子の事実 → applies.dimension を名指しで FAIL')
+
 # --- 文書の同期: recommended-settings.md の生成区間 = YAML から作った表 (plan §5.1 #5・§6.2「文書の同期」) -----------------
 doc = os.path.join(root, 'procedures', 'recommended-settings.md')
 check(RS.doc_block(open(doc, encoding='utf-8').read()) is not None, 'recommended-settings.md に生成区間の印がある')

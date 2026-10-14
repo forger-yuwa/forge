@@ -13,10 +13,14 @@ forge の代わりに偽のバイナリ (起動されたら印 `FORGE_STARTED` �
   初期場の h5 に `restart_field.py --allow-coord-upcast` の記録があれば両方に写る (判定は変えない; plan §5.1 #20b)。
 - 移行期 (既定) は宣言の無い run・記録の無いメッシュを WARN で起動し、強制のモード (`FORGE_LAUNCH_GATE=enforce`・定数
   `ENFORCE`) では止める。
+- 適用条件 (plan §5.1 #28): 宣言のプロファイルの次元・格子の種類を変換の成果物 (来歴の記録の `artifact`、無ければ h5) から照合する。
+  2D/3D の取り違え (SERN 2D の宣言 + 六面体の格子、SERN 3D の宣言 + 四角形の格子) と構造/非構造の取り違え (SERN 2D の宣言 +
+  三角形の格子) は名指しで FAIL、正しい組 (SERN 2D + 四角形、SERN 3D + 六面体) は通る。型を読めない格子は判定不能として
+  宣言した run を FAIL (warn でも落とさない)。codex result 段 M2 の再現 (プロファイルの適用条件だけを `dimension: 3d` 等に) も FAIL。
 
-メッシュは node 変換と同じ置き方の小さい合成の h5 (長方形の四角形の格子、上辺が壁) を直接書き、来歴の記録は
-`mesh_provenance.build_record` で作る (変換器は使わない)。宣言は `recipe_settings.declare` で書く (プロファイル
-`common_node_ns_sst` の段 main)。
+メッシュは node 変換と同じ置き方の小さい合成の h5 (長方形の四角形の格子、上辺が壁。適用条件の試験は三角形・六面体・型を読めない
+格子も) を直接書き、来歴の記録は `mesh_provenance.build_record` で作る (変換器は使わない)。宣言は `recipe_settings.declare` で
+書く (プロファイル `common_node_ns_sst` の段 main。適用条件の試験は SERN 2D・3D の本段)。
 
 実行: python3 solver_density_cuda/tests/unit/test_launch_gate.py   (約 1〜2 分、出力は一時ディレクトリ。全部合格なら消す)
 """
@@ -93,9 +97,14 @@ def bcond_text(kinds=None):
     return ''.join(f'{nm}: {{physID: {pid}, kind: {k}, outputHDFflg: 0, ints: , floats: }}\n' for nm, (pid, k) in kinds.items())
 
 
-def write_mesh(path, ni=21, nj=6, L=1.0, H=0.2, first=None, shift=0.0, kinds=None):
+def write_mesh(path, ni=21, nj=6, L=1.0, H=0.2, first=None, shift=0.0, kinds=None, cells='quad'):
     """node 変換と同じ置き方の合成の h5 (primal は /VIZMESH/CONNE、双対は節点ごとの 1 点の CV)。上辺 (physID 3) が壁。
-    first を与えると壁 (上辺) の第一層の厚さをそれにする (AR = (L/(ni−1)) / first)。"""
+    first を与えると壁 (上辺) の第一層の厚さをそれにする (AR = (L/(ni−1)) / first)。
+    cells (plan §5.1 #28 の適用条件の試験): 'quad' (既定、2D の構造格子)・'tri' (四角形を対角で 2 つの三角形に割った 2D の
+    非構造格子)・'hex' (z 方向に 2 層押し出した 3D の六面体; 境界は押し出した辺の四角形の面)・'polygon' (知らない型の code 3
+    = 型を読めない格子)。"""
+    if cells == 'hex':
+        return _write_mesh_hex(path, ni, nj, L, H, kinds)
     kinds = kinds or BCOND
     xs = np.linspace(0.0, L, ni) + shift
     ys = np.linspace(0.0, H, nj)
@@ -115,8 +124,14 @@ def write_mesh(path, ni=21, nj=6, L=1.0, H=0.2, first=None, shift=0.0, kinds=Non
         g.attrs['nCells'] = np.int64(len(coord))
         f['MESH/COORD'] = coord.ravel()
         f['MESH/CONNE'] = np.array([x for n in range(len(coord)) for x in (1, n)], dtype=np.int64)
-        f['VIZMESH/CONNE'] = np.array([x for q in quads for x in [5] + q], dtype=np.int64)
-        f['VIZMESH'].attrs['nVizCells'] = np.int64(len(quads))
+        if cells == 'tri':
+            tris = [t for q in quads for t in ([q[0], q[1], q[2]], [q[0], q[2], q[3]])]
+            f['VIZMESH/CONNE'] = np.array([x for t in tris for x in [4] + t], dtype=np.int64)
+            f['VIZMESH'].attrs['nVizCells'] = np.int64(len(tris))
+        else:
+            code = [3, 4] if cells == 'polygon' else [5]
+            f['VIZMESH/CONNE'] = np.array([x for q in quads for x in code + q], dtype=np.int64)
+            f['VIZMESH'].attrs['nVizCells'] = np.int64(len(quads))
         f['CELLS/volume'] = np.ones(len(coord))
         for k in ('ro', 'roUx', 'roUy', 'roUz', 'roe'):
             f['VALUE/' + k] = np.ones(len(coord), np.float32)
@@ -127,6 +142,43 @@ def write_mesh(path, ni=21, nj=6, L=1.0, H=0.2, first=None, shift=0.0, kinds=Non
             b['iCells'] = np.array(nodes, dtype=np.int64)
             b['vizBfaceNodes'] = np.array([n for e in es for n in e], dtype=np.int64)
             b['vizBfaceSizes'] = np.full(len(es), 2, dtype=np.int64)
+            b.attrs['bcondKind'] = pid_kind[pid]
+
+
+def _write_mesh_hex(path, ni, nj, L, H, kinds, nk=3, W=0.1):
+    """write_mesh の 3D 版 (cells='hex'): 長方形の格子を z 方向に nk−1 層押し出した六面体。境界は押し出した 4 辺の四角形の面
+    (z の両端の面は境界にしない; 品質の検査と来歴の記録に要るのは壁の面だけ)。"""
+    kinds = kinds or BCOND
+    xs, ys, zs = np.linspace(0.0, L, ni), np.linspace(0.0, H, nj), np.linspace(0.0, W, nk)
+    X, Y, Z = np.meshgrid(xs, ys, zs, indexing='ij')
+    coord = np.c_[X.ravel(), Y.ravel(), Z.ravel()]
+    nid = lambda i, j, k: (i * nj + j) * nk + k                                        # noqa: E731
+    hexes = [[nid(i, j, k), nid(i + 1, j, k), nid(i + 1, j + 1, k), nid(i, j + 1, k),
+              nid(i, j, k + 1), nid(i + 1, j, k + 1), nid(i + 1, j + 1, k + 1), nid(i, j + 1, k + 1)]
+             for i in range(ni - 1) for j in range(nj - 1) for k in range(nk - 1)]
+    faces = {1: [(nid(0, j, k), nid(0, j + 1, k), nid(0, j + 1, k + 1), nid(0, j, k + 1)) for j in range(nj - 1) for k in range(nk - 1)],
+             2: [(nid(ni - 1, j, k), nid(ni - 1, j + 1, k), nid(ni - 1, j + 1, k + 1), nid(ni - 1, j, k + 1))
+                 for j in range(nj - 1) for k in range(nk - 1)],
+             3: [(nid(i, nj - 1, k), nid(i + 1, nj - 1, k), nid(i + 1, nj - 1, k + 1), nid(i, nj - 1, k + 1))
+                 for i in range(ni - 1) for k in range(nk - 1)],
+             4: [(nid(i, 0, k), nid(i + 1, 0, k), nid(i + 1, 0, k + 1), nid(i, 0, k + 1)) for i in range(ni - 1) for k in range(nk - 1)]}
+    pid_kind = {pid: k for _, (pid, k) in kinds.items()}
+    with h5py.File(path, 'w') as f:
+        g = f.create_group('MESH')
+        g.attrs['nCells'] = np.int64(len(coord))
+        f['MESH/COORD'] = coord.ravel()
+        f['MESH/CONNE'] = np.array([x for n in range(len(coord)) for x in (1, n)], dtype=np.int64)
+        f['VIZMESH/CONNE'] = np.array([x for h in hexes for x in [9] + h], dtype=np.int64)
+        f['VIZMESH'].attrs['nVizCells'] = np.int64(len(hexes))
+        f['CELLS/volume'] = np.ones(len(coord))
+        for k in ('ro', 'roUx', 'roUy', 'roUz', 'roe'):
+            f['VALUE/' + k] = np.ones(len(coord), np.float32)
+        f['VALUE/wall_dist'] = (H - coord[:, 1])
+        for pid, fs in faces.items():
+            b = f.create_group(f'BCONDS/{pid}')
+            b['iCells'] = np.array(sorted({n for fc in fs for n in fc}), dtype=np.int64)
+            b['vizBfaceNodes'] = np.array([n for fc in fs for n in fc], dtype=np.int64)
+            b['vizBfaceSizes'] = np.full(len(fs), 4, dtype=np.int64)
             b.attrs['bcondKind'] = pid_kind[pid]
 
 
@@ -526,6 +578,112 @@ d = make_run('bcond_type', declare=False)
 open(os.path.join(d, 'bcondConfig.yaml'), 'w').write('wall: {physID: 3, type: wall_isothermal, Tw: 370.0}\n')
 rc, out, started, gate = run_case(d)
 stopped(rc, out, started, gate, 'kind の無い bcondConfig (検査不能)')
+
+# ------------------------------------------------------------------------------------------------ 適用条件 (次元・格子の種類)
+
+print('== 適用条件 (次元・格子の種類・格子の node/cell; plan §5.1 #28)')
+SERN2D, SERN3D = 'sern2d_finite_base_frozen_tp_sst', 'sern3d_frozen_tp_sst'
+K_ISO = dict(BCOND, wall=(3, 'wall_isothermal'))
+s2, s3 = cfg_flat(SERN2D, STAGE), cfg_flat(SERN3D, STAGE)
+
+
+ok2 = make_run('sern2d_quad', flat=s2, kinds=K_ISO, profile=SERN2D)
+rc, out, started, gate = run_case(ok2)
+launched(rc, out, started, gate, 'SERN 2D の宣言 + 2D の四角形の格子 (正しい組)')
+check(keys(gate, 'FAIL') == set() and items(gate, 'WARN') == [('バイナリ', FAKE_FORGE)],
+      'SERN 2D の正しい組: FAIL 0、WARN は「対応の分からないバイナリ」だけ', str(items(gate, 'FAIL') + items(gate, 'WARN')))
+check(field(gate, 'mesh_kind') == 'node; quad 100 (来歴の記録の成果物の事実)', 'LAUNCH_GATE.txt に格子の事実 (来歴の記録から)',
+      field(gate, 'mesh_kind'))
+dec = json.load(open(os.path.join(ok2, 'RECIPE.json')))
+check({u['key'] for u in dec.get('unchecked_applies') or []} == {'applies.dimension', 'applies.mesh'},
+      '宣言は格子を読まず、次元・格子の種類を照合していないと unchecked_applies に名指し (関門が照合する)',
+      str(dec.get('unchecked_applies')))
+ok3 = make_run('sern3d_hex', flat=s3, kinds=K_ISO, profile=SERN3D, mesh_kw={'cells': 'hex'})
+rc, out, started, gate = run_case(ok3)
+launched(rc, out, started, gate, 'SERN 3D の宣言 + 3D の六面体の格子 (正しい組)')
+check(keys(gate, 'FAIL') == set() and field(gate, 'mesh_kind') == 'node; hex 200 (来歴の記録の成果物の事実)',
+      'SERN 3D の正しい組: FAIL 0、格子の事実は六面体', field(gate, 'mesh_kind'))
+
+# 2D/3D の取り違え (宣言は格子を読まないので書ける。関門が成果物から照合して止める)
+d = make_run('sern2d_on_hex', flat=s2, kinds=K_ISO, mesh_kw={'cells': 'hex'}, profile=SERN2D)
+rc_, r_, _ = RS.declare(d, SERN2D, STAGE, recipes=RC, write=False, mesh=MP.mesh_kind(os.path.join(d, 'mesh.h5')))
+check(rc_ == 1 and 'applies.dimension' in {k for k, _ in r_['fails']},
+      'declare に格子の事実 (mesh) を渡せば宣言の時点で止める (applies.dimension を名指し)', str(r_['fails']))
+rc, out, started, gate = run_case(d)
+stopped(rc, out, started, gate, 'SERN 2D の宣言 + 3D の六面体の格子')
+fl_ = [ln for ln in gate.splitlines() if ln.startswith('FAIL') and 'applies.dimension' in ln]
+check(len(fl_) == 1 and "2d_planar" in fl_[0] and "3d" in fl_[0], '2D/3D の取り違えを applies.dimension で名指し (プロファイル 2d_planar・格子 3d)',
+      str(items(gate, 'FAIL')))
+rc, out, started, gate = run_case(d, FORGE_LAUNCH_GATE='warn')
+stopped(rc, out, started, gate, 'SERN 2D の宣言 + 3D の格子 + FORGE_LAUNCH_GATE=warn (適用条件の外は落とさない)')
+d = make_run('sern3d_on_quad', flat=s3, kinds=K_ISO, profile=SERN3D)
+rc, out, started, gate = run_case(d)
+stopped(rc, out, started, gate, 'SERN 3D の宣言 + 2D の四角形の格子')
+check('applies.dimension' in keys(gate, 'FAIL'), '3D/2D の取り違えを applies.dimension で名指し', str(items(gate, 'FAIL')))
+
+# 構造/非構造の取り違え
+d = make_run('sern2d_on_tri', flat=s2, kinds=K_ISO, mesh_kw={'cells': 'tri'}, profile=SERN2D)
+rc, out, started, gate = run_case(d)
+stopped(rc, out, started, gate, 'SERN 2D (structured) の宣言 + 三角形の格子')
+fl_ = [ln for ln in gate.splitlines() if ln.startswith('FAIL') and 'applies.mesh' in ln]
+check(len(fl_) == 1 and 'structured' in fl_[0] and 'unstructured' in fl_[0] and 'applies.dimension' not in keys(gate, 'FAIL'),
+      '構造/非構造の取り違えを applies.mesh で名指し (次元は合う)', str(items(gate, 'FAIL')))
+
+# 判定不能 (型を読めない格子) は一致扱いしない: 宣言した run は移行期でも FAIL、warn でも落とさない
+d = make_run('sern2d_on_polygon', flat=s2, kinds=K_ISO, mesh_kw={'cells': 'polygon'}, record=False, profile=SERN2D)
+rc, out, started, gate = run_case(d)
+stopped(rc, out, started, gate, 'SERN 2D の宣言 + 型を読めない格子 (判定不能)')
+unc = [ln for ln in gate.splitlines() if ln.startswith('FAIL') and ('applies.dimension' in ln or 'applies.mesh' in ln)]
+check(len(unc) == 2 and all('照合できない' in ln for ln in unc), '判定不能の次元・格子の種類を名指しで FAIL (一致扱いしない)', str(unc))
+rc, out, started, gate = run_case(d, FORGE_LAUNCH_GATE='warn')
+check({'applies.dimension', 'applies.mesh'} <= keys(gate, 'FAIL') and not started, '判定不能 + warn: 落とさない', str(items(gate, 'FAIL')))
+d = make_run('exp_on_polygon', flat=s2, kinds=K_ISO, mesh_kw={'cells': 'polygon'}, record=False, declare=False)
+assert RS.declare(d, SERN2D, STAGE, experiment=True, reason='実験: 型の試験', recipes=RC)[0] == 0
+rc_, res_, _ = gate_inproc(d, forge_bin=FAKE_FORGE, environ={}, dry_run=True)
+check(('NOTE', '設定', 'applies.dimension') in [(lv, a, k) for lv, a, k, _ in res_.items]
+      and ('FAIL', '設定', 'applies.dimension') not in [(lv, a, k) for lv, a, k, _ in res_.items],
+      '実験の宣言 (プロファイルつき) では照合できない適用条件は NOTE', str(res_.items))
+
+# 来歴の記録が無い・#28 より前の記録 (cell_types なし) は h5 から読む
+d = make_run('sern2d_norecord', flat=s2, kinds=K_ISO, profile=SERN2D, record=False)
+rc, out, started, gate = run_case(d)
+launched(rc, out, started, gate, 'SERN 2D の正しい組・記録の無いメッシュ (移行期)', want=('WARN',))
+check(not {k for k in keys(gate, 'FAIL') if k.startswith('applies.')} and
+      field(gate, 'mesh_kind') == 'node; quad 100 (h5 から読んだ; 来歴の記録が無い)', '記録が無ければ h5 から格子の事実を読む',
+      field(gate, 'mesh_kind'))
+d = make_run('sern2d_oldrecord', flat=s2, kinds=K_ISO, profile=SERN2D)
+pj = os.path.join(d, 'mesh.h5.provenance.json')
+rj = json.load(open(pj))
+del rj['artifact']['cell_types']
+json.dump(rj, open(pj, 'w'), ensure_ascii=False)
+rc, out, started, gate = run_case(d)
+launched(rc, out, started, gate, 'SERN 2D の正しい組・#28 より前の記録 (cell_types なし)')
+check(field(gate, 'mesh_kind') == 'node; quad 100 (h5 から読んだ; 来歴の記録に cell_types が無い)',
+      '記録に cell_types が無ければ h5 から読む', field(gate, 'mesh_kind'))
+
+# codex result 段 M2 の再現: SERN 2D の正常な config に、プロファイルの適用条件だけを変える (以前は FAIL 0・WARN 0)
+import copy                                                                                     # noqa: E402
+_load = RS.load_recipes
+for what, val, key in (('dimension', '3d', 'applies.dimension'), ('mesh', 'unstructured', 'applies.mesh'),
+                       ('dimension', '4d', 'applies.dimension'), ('dimensions', '2d_planar', 'applies.dimensions')):
+    rc2 = copy.deepcopy(RC)
+    rc2['profiles'][SERN2D].setdefault('applies', {})[what] = val
+    RS.load_recipes = lambda *a, _r=rc2, **k: _r                                                 # noqa: E731
+    try:
+        rc_, res_, _ = gate_inproc(ok2, forge_bin=FAKE_FORGE, environ={}, dry_run=True)
+    finally:
+        RS.load_recipes = _load
+    fk = [(a, k) for lv, a, k, _ in res_.items if lv == 'FAIL']
+    check(rc_ == 1 and ('設定', key) in fk, f'プロファイルの適用条件だけ {what}: {val} → {key} を名指しで FAIL', str(fk))
+rc_, res_, _ = gate_inproc(ok2, forge_bin=FAKE_FORGE, environ={}, dry_run=True)
+check(rc_ == 0, '戻したプロファイルでは同じ run が通る', str(res_.items))
+r_ = RS.check_config(RC, cfg_text(s2), SERN2D, STAGE, bcond=yaml.safe_load(bcond_text(K_ISO)))
+check(not r_['fails'] and {k for k, _ in r_['unchecked']} == {'applies.dimension', 'applies.mesh'},
+      'check_config に格子の事実を渡さなければ、次元・格子の種類は照合していないと名指し (黙って飛ばさない)', str(r_['unchecked']))
+r_ = RS.check_config(RC, cfg_text(s2), SERN2D, STAGE, bcond=yaml.safe_load(bcond_text(K_ISO)),
+                     mesh={'node': False, 'cell_types': {'quad': 100}})
+check({k for k, _ in r_['fails']} == {'applies.discretization'} and not r_['unchecked'],
+      'check_config: 格子そのものが cell (config は node) なら applies.discretization を名指しで FAIL', str(r_['fails']))
 
 # ------------------------------------------------------------------------------------------------ モード・入力
 
