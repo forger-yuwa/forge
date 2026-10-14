@@ -7,7 +7,7 @@ r"""逆 MOC の単位過程 (`moc_kernel.interior_vec` を 1 段の対に通す�
 段の中は対ごとのスカラーのループ。式と演算の順序は numpy の版と同じだが、**ビット同一は求めない** (§4.5、ユーザ決定 2026-10-15):
 
 - ν→M の CPG の Newton は対ごとに止め (|ΔM| < 1e-13、上限 60 回)、前の反復の M から始める (numpy の版は配列全体の収束で止め、
-  毎回 1 + max(ν, 1e-6) から始める)。semi-perfect の表は二分探索と線形の式 (範囲外は端の値、NaN は NaN)。
+  毎回 1 + max(ν, 1e-6) から始める)。前の M で収束しなければ numpy の版と同じ初期値でやり直す (`_mach`)。semi-perfect の表は二分探索と線形の式 (範囲外は端の値、NaN は NaN)。
 - 段のループ (前線の対・軸より下の棄却・次の前線) と集計 (`MocFillDiag.add`) は Python 側 (`moc_inverse`) にあり、両方の backend が
   同じものを使う。ここは数値と、`add` に渡す対ごとの生の状態・反復回数・最終残差・分岐、次の前線の M だけを返す。
 
@@ -41,9 +41,27 @@ def _nmax(a, b):
 
 
 @njit(cache=True)
+def _pm_newton(nu, M, a, c):
+    """`pm_mach_vec` (CPG) の Newton を M から (同じ式・|ΔM| < NEWTON_TOL・上限 NEWTON_ITERS 回)。戻り: (M, 収束したか)。"""
+    for _ in range(NEWTON_ITERS):
+        b = math.sqrt(_nmax(M * M - 1.0, 0.0))
+        f = (a * math.atan(b / a) - math.atan(b)) - nu
+        df = b / (1.0 + c * M * M) / M
+        dM = f / _nmax(df, 1e-14)
+        M = M - dM
+        if M <= 1.0:
+            M = 1.0 + 1e-9
+        if abs(dM) < NEWTON_TOL:
+            return M, True
+    return M, False
+
+
+@njit(cache=True)
 def _mach(nu, M0, gas_kind, g, tx, ty):
-    """ν → M (1 点)。CPG: `pm_mach_vec` と同じ式の Newton を M0 から (M0 が 1 以下・非有限なら 1 + max(ν, 1e-6) から)。
-    表: tx (ν) の上の線形補間。NaN は NaN。"""
+    """ν → M (1 点)。CPG: `pm_mach_vec` と同じ式の Newton を前の反復の M0 から始め、収束しなければ (または M0 が 1 + 1e-6 以下・非有限
+    なら最初から) numpy の版と同じ初期値 1 + max(ν, 1e-6) からやり直す。音速の点 (M → 1) は dν/dM = 0 なので、そこに張り付いた M
+    (前の回で ν < 0 → M = 1 + 1e-9) から始めると Newton が往復して収束しない (2026-10-15 codex 諮問の A/B で見つけた欠陥: 段 1 の対で
+    M 1.2137 のところを 1.000000001 にし、網の位置が 0.25 ずれた)。表: tx (ν) の上の線形補間。NaN は NaN。"""
     if nu != nu:
         return nu
     if gas_kind == GAS_TABLE:
@@ -63,17 +81,11 @@ def _mach(nu, M0, gas_kind, g, tx, ty):
         return ty[lo] + (ty[hi] - ty[lo]) * ((nu - tx[lo]) / (tx[hi] - tx[lo]))
     a = math.sqrt((g + 1.0) / (g - 1.0))
     c = 0.5 * (g - 1.0)
-    M = M0 if (M0 > 1.0 and math.isfinite(M0)) else 1.0 + _nmax(nu, 1e-6)
-    for _ in range(NEWTON_ITERS):
-        b = math.sqrt(_nmax(M * M - 1.0, 0.0))
-        f = (a * math.atan(b / a) - math.atan(b)) - nu
-        df = b / (1.0 + c * M * M) / M
-        dM = f / _nmax(df, 1e-14)
-        M = M - dM
-        if M <= 1.0:
-            M = 1.0 + 1e-9
-        if abs(dM) < NEWTON_TOL:
-            break
+    if M0 > 1.0 + 1e-6 and math.isfinite(M0):
+        M, conv = _pm_newton(nu, M0, a, c)
+        if conv:
+            return M
+    M, conv = _pm_newton(nu, 1.0 + _nmax(nu, 1e-6), a, c)
     return M
 
 

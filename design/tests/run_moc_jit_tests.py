@@ -368,6 +368,18 @@ for gam in (1.4, 1.3, 1.15):
         d = float(np.max(np.abs(got - ref)))
         check(f"Newton (γ {gam}、{lab}、{nus.size} 点) が pm_mach_vec と |ΔM| {d:.1e} ≤ 1e-12", d <= 1e-12)
 check("Newton: NaN は NaN", np.isnan(NB._mach(np.nan, 2.0, NB.GAS_CPG, 1.4, E, E)))
+# 前の M が音速の点 (1 + 1e-9 に張り付いた値) や遠い値でも、numpy の版と同じ根に収束する (2026-10-15 の欠陥の回帰)
+nus2 = np.concatenate([np.linspace(0.0, 1.6, 401), [0.068021, 1e-7, 0.5]])
+for gam in (1.4, 1.15):
+    ref = pm_mach_vec(nus2, gam)
+    for lab, m0 in (("1 + 1e-9 (張り付き)", 1.0 + 1e-9), ("1 + 1e-6", 1.0 + 1e-6), ("1.0001", 1.0001), ("50", 50.0), ("1e6", 1e6)):
+        got = np.array([NB._mach(v, m0, NB.GAS_CPG, gam, E, E) for v in nus2])
+        d = float(np.max(np.abs(got - ref)))
+        check(f"Newton (γ {gam}、前の M {lab}): pm_mach_vec と |ΔM| {d:.1e} ≤ 1e-12", d <= 1e-12)
+# ν < 0 (音速より下、根が無い): numpy の版と同じく 1 + 1e-9 を返す
+neg = np.array([-1e-6, -0.001368, -0.2])
+check("Newton: ν < 0 は numpy の版と同じ値 (1 + 1e-9)",
+      all(NB._mach(v, m0, NB.GAS_CPG, 1.4, E, E) == pm_mach_vec(np.array([v]), 1.4)[0] for v in neg for m0 in (np.nan, 2.0, 1.0 + 1e-9)))
 for n_t in (1, 2, 3, 400):
     tx = np.cumsum(rng.uniform(0.001, 0.01, n_t))
     ty = np.sort(rng.uniform(1.0, 6.0, n_t))
@@ -420,8 +432,11 @@ def P(x, r, th, M):
 
 
 abn = {
-    # 平行な対だけの前線 (隣の対を置くと θ+μ = 90° の向きになり、丸めの差が大きく増幅される — 照合の入力に向かない)
     "平行な特性線 (θ ∓60°、M 2)": ([P(1.2, 0.6, np.pi / 3, 2.0), P(1.0, 0.5, -np.pi / 3, 2.0)], None, {"geom_parallel"}),
+    # 回帰 (2026-10-15 codex 諮問の A/B): 平行な対の隣の対 (段 1・添字 2) で ν が回 1 に負 → M が 1 + 1e-9 に張り付き、回 2 で
+    # そこから始めた Newton が往復して収束しなかった (修正前は網の位置が 0.25 ずれた)。入力を消して合格に戻さないこと
+    "平行な特性線と隣の対 (ν が途中で負、回帰)": ([P(3.0, 0.0, 0.0, 2.0), P(1.2, 0.6, np.pi / 3, 2.0), P(1.0, 0.5, -np.pi / 3, 2.0),
+                                              P(0.8, 0.7, 0.0, 2.0)], None, {"geom_parallel"}),
     "反復中の非有限 (座標 1e308)": ([P(3.0, 0.0, 0.0, 2.0), P(2.0, 0.1, 0.0, 2.0), P(1e308, 0.2, 0.1, 2.0), P(1.0, 0.3, 0.1, 2.0),
                                      P(0.5, 0.4, 0.1, 2.0)], None, {"geom_parallel"}),
     "軸より下 (軸の点が上流から下流の順)": ([P(1.0, 0.0, 0.0, 2.0), P(1.2, 0.0, 0.0, 2.1), P(1.4, 0.0, 0.0, 2.2), P(1.3, 0.3, 0.1, 2.0),
