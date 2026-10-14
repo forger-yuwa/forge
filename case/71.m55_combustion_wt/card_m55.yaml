@@ -21,12 +21,17 @@ divergent_length_m: 8.0                  # 設計スロート (x = 0) → 物理
 wall: {thermal: isothermal, Tw: 350.0}
 p_ambient: design                        # 設計出口静圧 (等エントロピー、semiperfect)
 tolerances: {length_m: 1.0e-3, diameter_m: 2.0e-5}   # 雛形の仮の値 (ユーザ「よくわからん」)
-recipe: axismach_explore_v1
+# 雛形 (2026-10-15、plan tooling-nozzle-card-local-mesh §5.1 #3a の判断 (4)・#3b): axismach_explore_v1 → axismach_final_v1。探索の雛形の
+# 物理壁 (interp 壁の区分表現、壁ファイルを書かない) では NS の本段の停止規則が使えない (θ_r の断面を壁ファイルの設計壁の出口
+# physical_wall.domain[1] の比で決める; runner_axismach.prepare_ns)。最終の雛形は joint 壁・physical_wall_repr: single_bspline・
+# pw_upstream: poly で壁ファイルを書き、Euler 用の <stem>_euler.yaml (物理壁の 2 行を除いた写し) も一緒に書かれる。
+recipe: axismach_final_v1
 # 格子 (2026-10-15): 一度 ni 10,200・上限 100 万点を明示したが、ユーザが「メッシュ多すぎ、古いやり方で作ってない？」と取り下げた。
 # 今の見積もりは第一層を 2 値 (スロート / それ以外) で持ち、最も厳しい場所の薄い第一層を拡大部全体に掛けるので AR ≤ 5000 に ni ≈ 10,177 が要る。
 # 場所ごとの第一層と流れ方向の密度の表で作る見積もりに直してから決める (README「経緯」)。
 # 2026-10-15 (plan tooling-nozzle-card-local-mesh §5.1 #3a): 生成器の格子の見積もり (第一層 2 値) は ni ≈ 10,177・約 99 万点で節点数の上限
 # (30 万) に止まるので、問題 YAML を作るためだけに mesh.ni を 3000 (291,000 点、Euler も同じ ni) に固定する。生成した YAML の mesh・mesh_euler は
 # 手組みの格子 (場所ごとの第一層の表・流れ方向の密度の表、ユーザ決定「a」) に置き換える (problem_m55_ns.yaml)。M_knot は自動 (新しい規則) のまま。
+# #3b (最終の雛形) からは problem_m55_final.yaml (NS)・problem_m55_final_euler.yaml (Euler) (生成器の出力は problem_m55_final_card*.yaml)。
 overrides:
-  mesh.ni: 3000                          # 生成のためだけ (上の理由)。実際の格子は problem_m55_ns.yaml の mesh 節
+  mesh.ni: 3000                          # 生成のためだけ (上の理由)。実際の格子は problem_m55_final.yaml の mesh 節 (#3a は problem_m55_ns.yaml)
