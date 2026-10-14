@@ -1,6 +1,14 @@
-r"""軸 Mach 則 (knot) の knot のマッハ数 M_knot を、長さを固定したまま選ぶ (最大壁角の最小化、規則 `min_theta_max_v1`)。
+r"""軸 Mach 則 (knot) の knot のマッハ数 M_knot を、長さを固定したまま選ぶ (最大壁角の最小化)。
 
-plan: plans/accepted/tooling-nozzle-mknot-auto.md §4.1・§4.2 (§5.1 #2・#2b・#2c・#3b)。設計計算だけで CFD は回さない。
+規則は 2 つ:
+  - `coarse_min_theta_v2` (要求カードの既定、2026-10-15〜; plan plans/active/tooling-nozzle-mknot-fast.md §4.1・§4.2):
+    `select_coarse_min_theta`。0.05 の格子 (整数 k、M_K = k/20) を粗い網 (N_s = N_p/4、長さの許容差 0.1 r_t) で 1 回掃き、
+    候補の区間ごとの θ_max の局所極小を生産の網 (N_p、カードの L_total_tol) で前後と確かめ (ずらしは最大 3 回)、代表が残った谷を
+    一度だけ作る同点の集合 (θ_min + 0.01°) から推定の距離が最大の谷を選ぶ。詳細は下の「規則 coarse_min_theta_v2」の節。
+  - `min_theta_max_v1` (旧版、2026-10-14〜15 の既定; plan plans/accepted/tooling-nozzle-mknot-auto.md §4.1・§4.2、§5.1 #2・#2b・#2c・#3b):
+    `select_mknot`・`resolution_gate`。カードからは呼ばない (関数と試験は残す)。以下の説明はこの旧版のもの。
+
+設計計算だけで CFD は回さない。
 
 評価 (`evaluate_mknot`) は case/70.m5_air_wt_demo/mknot_sweep.py の `one()` と同じ組み合わせ:
 design_chain + `inverse_design` の捕捉 + `characteristic_topology_diagnostics` (seam の除外は
@@ -60,6 +68,10 @@ CANDIDATE_ROLES = ("coarse", "fine", "safe", "grid", "window")
 GATE_HALF_WIDTHS = (0.1, 0.2, 0.3)   # 解像度のゲートの窓の半幅の列 (§4.2 窓の端の選択: 選び直した値が端なら次へ広げる、上限 0.3)
 SETTLE_MAX = 3            # 境目の探し直し (境目 + ΔM_safe の点が新しい切り替わりを作ったときの選び直し) の上限 (§5.1 #3d、レビュー M1)
 _EPS = 1e-9
+# evaluate_mknot が捕捉する逆 MOC の結果の数 (plan tooling-nozzle-mknot-fast §4.2): from_length が採る壁は最後か 1 つ前の評価
+# (runner_axismach の from_length は改善が止まった時点で打ち切り、最良は常に最後の 2 回の中) なので最後の 2 つだけを持つ
+# (網 levels を全部持つとメモリが評価の回数ぶん増える)。None なら全部 (旧の挙動; 試験の対照だけに使う)
+_CAPTURE_KEEP: int | None = 2
 
 
 class MknotSelectionError(ValueError):
@@ -138,14 +150,76 @@ def moc_gate_result(p, d: dict) -> dict:
     return {"moc_gate_ok": True, "moc_gate_reason": None}
 
 
+def _length_record(raw: dict, p, d: dict | None, caps: list, error: str | None) -> dict:
+    """行の長さ合わせの記録 (plan tooling-nozzle-mknot-fast §4.1 の 1: 粗い網の各行に L_c・符号つきの長さの残差・停止の理由)。
+    実効の入力 (r_t・L_total_tol・x_end_margin) も残す (どの入力で評価した行かを YAML・card_log と照合するため)。
+    成功の行は design_chain の Lc_solve (from_length) から。失敗の行は捕捉した逆 MOC の結果 (最後の 2 つ) のうち |x_F − L_total| が
+    最小のもの (from_length の最良は常に最後の 2 回の中) から求め、停止の理由は例外の文から分ける。値は記録だけ (判定には使わない)。"""
+    g = (p.geometry if p is not None else raw.get("geometry") or {})
+    mode = str(g.get("Lc_mode", "explicit"))
+    rt = (raw.get("spec") or {}).get("r_throat")
+    out = {"r_t_m": (None if rt is None else float(rt)), "Lc_mode": mode,
+           "L_total_tol": (float(g.get("L_total_tol", 0.05)) if mode == "from_length" else None),
+           "x_end_margin": float(g.get("x_end_margin", 2.3)), "L_residual_rt": None, "length_stop": None}
+    if d is not None:
+        sv = d.get("Lc_solve")
+        if sv:
+            out.update(L_residual_rt=float(sv["xF_residual"]), L_total_tol=float(sv["tol"]),
+                       length_stop=f"許容差内 (|x_F − L_total| ≤ {float(sv['tol']):.4g} r_t、逆 MOC {int(sv['n_design_evals'])} 回)")
+        else:
+            out["length_stop"] = f"長さ合わせなし (Lc_mode {mode})"
+        return out
+    if mode != "from_length":
+        out["length_stop"] = f"設計チェーンが例外 (Lc_mode {mode}、長さ合わせなし)"
+        return out
+    L_tgt = None
+    v = (raw.get("dv") or {}).get("L_total")                 # probdef.dv_value と同じ読み方 ({value: x} か数値)
+    try:
+        L_tgt = float(v["value"] if isinstance(v, dict) else v)
+    except (TypeError, ValueError, KeyError):
+        L_tgt = None
+    best = None
+    for c in caps:
+        res, x_E, anc = c[0], c[2], c[3]
+        xF = float((res.get("exit") or {}).get("x_F", float("nan")))
+        if L_tgt is None or not np.isfinite(xF):
+            continue
+        f = xF - L_tgt
+        if best is None or abs(f) < abs(best[0]):
+            best = (f, (None if (x_E is None or anc is None) else float(x_E) - float(anc[0])))
+    if best is not None:
+        out["L_residual_rt"] = best[0]
+        if best[1] is not None:
+            out["L_c"] = best[1]
+    err = error or ""
+    tol = out["L_total_tol"]
+    if "from_length 未収束" in err:
+        out["length_stop"] = "from_length 未収束 (改善停止か反復上限; 最良の |x_F − L_total| > L_total_tol)"
+    elif "実現不能" in err:
+        out["length_stop"] = "from_length の L_c が許容窓の端に張り付いた (実現不能)"
+    elif "x_F 追跡に失敗" in err:
+        out["length_stop"] = "from_length の途中で終端特性線の x_F 追跡に失敗 (場が短い)"
+    elif best is not None and tol is not None and abs(best[0]) <= tol:
+        out["length_stop"] = "許容差内 (長さ合わせの後の例外で不成立)"
+    else:
+        out["length_stop"] = "設計チェーンが例外 (長さ合わせの状態は不明)"
+    return out
+
+
 def evaluate_mknot(problem_dict: dict, M_K: float, n_axis_inv: int | None = None, *,
-                   base_dir: str | Path | None = None, n_crossing_sample: int = 20) -> dict:
-    """問題 (dict) の `geometry.M_knot` を M_K に (と `geometry.n_axis_inv` を上書き) して design_chain を回し、
+                   base_dir: str | Path | None = None, n_crossing_sample: int = 20,
+                   L_total_tol: float | None = None) -> dict:
+    """問題 (dict) の `geometry.M_knot` を M_K に (と `geometry.n_axis_inv`・`geometry.L_total_tol` を上書き) して design_chain を回し、
     制約の値と成立の判定を返す。例外は行に記録する (成立しない理由)。
 
     base_dir: 問題の相対パス (initial_line_run など) の基準。一時の YAML はシステムの一時ディレクトリ ($TMPDIR) に書き、
     読んだ後の `Problem.path` を base_dir の中の仮の名前にする (case の中にファイルを作らない)。
-    n_crossing_sample: 特性線の交差の標本の数 (mknot_sweep.py の one() と同じ 20)。"""
+    n_crossing_sample: 特性線の交差の標本の数 (mknot_sweep.py の one() と同じ 20)。
+    L_total_tol: from_length の長さの許容差 [r_t] の上書き (規則 coarse_min_theta_v2 の粗い網 L_s = 0.1 r_t; None なら問題の値)。
+    逆 MOC の結果の捕捉は最後の _CAPTURE_KEEP (2) 個だけ (plan tooling-nozzle-mknot-fast §4.2; from_length の最良は最後の 2 回の中なので
+    数値・判定は全部を捕捉したときと同じ。外を採ったら下の RuntimeError で行の error = 不成立)。
+    行には長さ合わせの記録 (`_length_record`: 実効の r_t・L_total_tol・x_end_margin、L_c・符号つきの残差 L_residual_rt・停止の理由
+    length_stop) も入れる (記録だけ)。"""
     import forge_design.evaluate.runner_axismach as RA
     from forge_design.geometry.moc_diagnostics import (characteristic_topology_diagnostics, wall_curvature_diagnostics,
                                                         wall_margin_diagnostics)
@@ -156,14 +230,19 @@ def evaluate_mknot(problem_dict: dict, M_K: float, n_axis_inv: int | None = None
     raw.setdefault("geometry", {})["M_knot"] = float(M_K)
     if n_axis_inv:
         raw["geometry"]["n_axis_inv"] = int(n_axis_inv)
+    if L_total_tol is not None:
+        raw["geometry"]["L_total_tol"] = float(L_total_tol)
     raw.pop("_card", None)
     row = {"M_K": float(M_K), "n_axis": None}
     caps = []
     orig = RA.inverse_design
+    p, d = None, None
 
     def wrapped(*a, **k):
         r = orig(*a, **k)
-        caps.append((r, k.get("n_axis")))
+        caps.append((r, k.get("n_axis"), k.get("x_E"), k.get("axis_anchor")))
+        if _CAPTURE_KEEP is not None:
+            del caps[:-_CAPTURE_KEEP]           # 最後の _CAPTURE_KEEP 個だけを持つ (§4.2)
         return r
 
     RA.inverse_design = wrapped
@@ -178,7 +257,7 @@ def evaluate_mknot(problem_dict: dict, M_K: float, n_axis_inv: int | None = None
         w = d["wall_inv"]
         x_A = float(d["x_A"])
         # from_length は逆 MOC を何回も回す。design_chain が採用した壁 (d["wall_inv"]) を返した呼び出しの網を見る
-        hit = [(r, n) for r, n in caps if r.get("wall") is w]
+        hit = [(c[0], c[1]) for c in caps if c[0].get("wall") is w]
         if not hit:
             raise RuntimeError("design_chain の壁に対応する逆 MOC の網が捕捉できない (網の診断の対象が不明)")
         res, n_cap = hit[-1]
@@ -214,17 +293,28 @@ def evaluate_mknot(problem_dict: dict, M_K: float, n_axis_inv: int | None = None
         })
     except Exception as e:  # noqa: BLE001 — 失敗も表の行として残す
         row["error"] = f"{type(e).__name__}: {str(e)[:300]}"
+        d = None
     finally:
         RA.inverse_design = orig
+    try:
+        lrec = _length_record(raw, p, d, caps, row.get("error"))
+    except Exception as e:  # noqa: BLE001 — 記録だけ。判定は変えない
+        lrec = {"length_stop": f"長さ合わせの記録に失敗: {type(e).__name__}: {str(e)[:120]}"}
+    for k, v in lrec.items():
+        row.setdefault(k, v)
+    if row.get("n_axis") is None and p is not None:
+        row["n_axis_input"] = int(p.geometry.get("n_axis_inv", 500))
     row["reasons"] = feasibility_reasons(row)
     row["ok"] = not row["reasons"]
     row["time_s"] = time.time() - t0
     return row
 
 
-def make_eval_fn(problem_dict: dict, n_axis_inv: int | None = None, base_dir: str | Path | None = None):
-    """`select_mknot` に渡す評価 (M_K → 行)。ProcessPoolExecutor に渡せるよう partial で作る。"""
-    return functools.partial(evaluate_mknot, problem_dict, n_axis_inv=n_axis_inv, base_dir=base_dir)
+def make_eval_fn(problem_dict: dict, n_axis_inv: int | None = None, base_dir: str | Path | None = None,
+                 L_total_tol: float | None = None):
+    """`select_mknot`・`select_coarse_min_theta` に渡す評価 (M_K → 行)。ProcessPoolExecutor に渡せるよう partial で作る。
+    L_total_tol: from_length の長さの許容差の上書き (粗い網 L_s; None なら問題の値)。"""
+    return functools.partial(evaluate_mknot, problem_dict, n_axis_inv=n_axis_inv, base_dir=base_dir, L_total_tol=L_total_tol)
 
 
 class _RangeFound(Exception):
@@ -854,4 +944,272 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
                 "warnings": rc["warnings"], "reasons": reasons, "elapsed_s": time.time() - t0})
     if raise_on_fail and not out["pass"]:
         raise MknotUndeterminedError("選択は未確定 (解像度のゲートが不合格): " + " / ".join(reasons), out)
+    return out
+
+
+# --- 規則 coarse_min_theta_v2 (plan tooling-nozzle-mknot-fast §4.1、要求カードの既定) ----------------------------------------
+#
+#   1. 粗い掃引: M_A < 0.05k < M_d かつ両端から 0.05 以上内側の全部の整数 k を、粗い網 (N_s = N_p/4、長さの許容差 L_s = 0.1 r_t) で
+#      1 回評価する。制約は feasibility_reasons (θ_max が有限でも ok=False の行はある)。
+#   2. 候補の区間: 粗い網で成立し、両隣 (k ± 1) も成立している k を候補にし、k が続く候補を 1 つの区間にまとめる (不成立の点で分かれる)。
+#      境目までの推定の距離 = 候補から最も近い粗い網の不成立の格子点までの距離 − 0.05 (記録用と同点の決着用)。
+#   3. 谷の代表: 区間ごとに粗い網の θ_max の局所極小を全部拾う (区間の端も内側の隣と比べて極小なら含める。等しい値が続く平らな列は
+#      1 つの極小とし、代表は推定の距離が最大の点、同じなら小さい k)。
+#   4. 谷ごとの確認とずらし (生産の網 N_p、カードの L_total_tol): 代表 v と v ± 1 を評価する。v が不成立 → 谷を捨てる。v と両隣が
+#      成立 → 谷の最終の代表は v。v が成立で片側だけ不成立 → 反対側へ 1 つずらす (移動先が同じ候補の区間にあるときだけ)。移動先で
+#      同じ確認をその谷で最大 3 回まで繰り返す (初回の確認 + 移動 3 回)。区間の外・両側が不成立・上限 → 谷を捨てる。
+#   5. 谷の比較: 最終の代表が決まった谷の生産の網の θ_max の最小を θ_min とし、θ_max ≤ θ_min + 0.01° の谷を同点の集合として一度だけ
+#      作る (逐次比較しない)。その中で推定の距離が最大、同じなら θ_max が小さい、同じなら M_K が小さい谷を選ぶ。最終の代表が 1 つも
+#      無ければ例外 (表つき)。
+#   6. 粗い網で成立点が無い・粗い網の長さ合わせが全点で未収束・候補が無いときは例外 (表つき)。黙って旧の規則に落ちない。
+#   出す値は格子の値 (k / 20)。
+RULE_NAME_V2 = "coarse_min_theta_v2"
+V2_K_PER_UNIT = 20          # 格子 M_K = k / 20 (= 0.05 k)。整数 k で持ち、浮動小数の比較で隣を決めない
+V2_EDGE_STEPS = 1           # 探索の範囲: M_A・M_d から 0.05 (= 1 格子) 以上内側
+V2_DIST_OFFSET_STEPS = 1    # 推定の距離 = 最も近い粗い網の不成立の格子点までの距離 − 0.05 (= 1 格子; 旧の ΔM_safe と同じ値)
+V2_TIE_DEG = 0.01           # 谷の比較の同点の幅 [°] (θ_min からの差; 設計の許容差)
+V2_SHIFT_MAX = 3            # 谷ごとのずらしの上限 (初回の確認 + 移動 3 回)
+V2_COARSE_DIV = 4           # 粗い網 N_s = 生産の n_axis_inv / 4 (2400 なら 600)
+V2_L_COARSE = 0.1           # 粗い網の長さの許容差 L_s [r_t] (事前に固定; カードの値は 600 の網では全点未収束、plan §3)
+_LENGTH_UNCONVERGED = "from_length 未収束"   # runner_axismach.design_chain の from_length の未収束の例外の文 (行の error に入る)
+
+
+def v2_M(k: int) -> float:
+    """格子の値 M_K = k / 20 (0.05 k の最も近い倍精度; 例 41 → 2.05)。"""
+    return int(k) / V2_K_PER_UNIT
+
+
+def v2_k(M: float) -> int:
+    """M_K → 格子の整数 k。格子の上に無ければ ValueError (隣を浮動小数の比較で決めない)。"""
+    k = int(round(float(M) * V2_K_PER_UNIT))
+    if abs(v2_M(k) - float(M)) > 1e-9:
+        raise ValueError(f"M_K {M!r} は 0.05 の格子の上に無い (規則 {RULE_NAME_V2})")
+    return k
+
+
+def v2_grid(M_A: float, M_d: float) -> list[int]:
+    """§4.1 の 1 の探索の範囲の整数 k: M_A < k/20 < M_d かつ両端から 0.05 以上内側 (k/20 − M_A ≥ 0.05、M_d − k/20 ≥ 0.05)。"""
+    edge = V2_EDGE_STEPS / V2_K_PER_UNIT
+    lo = math.ceil((float(M_A) + edge) * V2_K_PER_UNIT - 1e-6)
+    hi = math.floor((float(M_d) - edge) * V2_K_PER_UNIT + 1e-6)
+    ks = [k for k in range(lo, hi + 1) if v2_M(k) - float(M_A) >= edge - _EPS and float(M_d) - v2_M(k) >= edge - _EPS]
+    if not ks:
+        raise ValueError(f"探索の範囲が空 (M_A {M_A!r} + 0.05 > M_d {M_d!r} − 0.05; 規則 {RULE_NAME_V2})")
+    return ks
+
+
+def _is_length_unconverged(row: dict) -> bool:
+    return _LENGTH_UNCONVERGED in str(row.get("error") or "")
+
+
+def v2_distance_steps(k: int, infeasible_k: list[int]) -> float:
+    """推定の距離を格子の数で (最も近い粗い網の不成立の格子点までの |Δk| − 1)。不成立の格子点が無ければ inf。"""
+    if not infeasible_k:
+        return math.inf
+    return float(min(abs(int(k) - j) for j in infeasible_k) - V2_DIST_OFFSET_STEPS)
+
+
+def v2_distance(k: int, infeasible_k: list[int]) -> float | None:
+    """推定の距離 [M_K] (記録用; 不成立の格子点が無ければ None = 無限大)。"""
+    s = v2_distance_steps(k, infeasible_k)
+    return None if math.isinf(s) else s / V2_K_PER_UNIT
+
+
+def v2_coarse_analysis(rows: list[dict]) -> dict:
+    """§4.1 の 2: 粗い掃引の行 (順不同) → 成立・候補・候補の区間・不成立の格子点。同じ k の行が 2 つあれば ValueError。
+    戻り: {by_k, feasible_k, infeasible_k, candidates_k, intervals_k (= [(k_a, k_b)])}。"""
+    by_k: dict[int, dict] = {}
+    for r in rows:
+        k = v2_k(r["M_K"])
+        if k in by_k:
+            raise ValueError(f"粗い掃引に同じ M_K {v2_M(k)!r} の行が 2 つある")
+        by_k[k] = r
+    ks = sorted(by_k)
+    feas = {k: _feasible(by_k[k]) for k in ks}
+    cand = [k for k in ks if feas[k] and feas.get(k - 1) is True and feas.get(k + 1) is True]
+    intervals: list[tuple[int, int]] = []
+    for k in cand:
+        if intervals and k == intervals[-1][1] + 1:
+            intervals[-1] = (intervals[-1][0], k)
+        else:
+            intervals.append((k, k))
+    return {"by_k": by_k, "feasible_k": [k for k in ks if feas[k]], "infeasible_k": [k for k in ks if not feas[k]],
+            "candidates_k": cand, "intervals_k": intervals}
+
+
+def v2_valleys(ana: dict) -> list[dict]:
+    """§4.1 の 3: 候補の区間ごとに粗い網の θ_max の局所極小を全部拾う。等しい値 (同じ倍精度) が続く平らな列は 1 つの極小で、
+    その両外側 (区間の中だけ) の値がどちらも大きければ極小 (区間の端の側は比べない)。代表は列の中で推定の距離が最大の点、同じなら
+    小さい k。戻り: [{interval_k, plateau_k, rep_k, theta_coarse}] (区間の順・区間の中の k の順)。"""
+    th = {k: float(ana["by_k"][k]["theta_max_deg"]) for k in ana["candidates_k"]}    # 候補は成立 = θ_max が有限
+    out = []
+    for a, b in ana["intervals_k"]:
+        ks = list(range(a, b + 1))
+        runs, i = [], 0
+        while i < len(ks):
+            j = i
+            while j + 1 < len(ks) and th[ks[j + 1]] == th[ks[i]]:
+                j += 1
+            runs.append((i, j))
+            i = j + 1
+        for i0, i1 in runs:
+            t = th[ks[i0]]
+            left = th[ks[i0 - 1]] if i0 > 0 else None
+            right = th[ks[i1 + 1]] if i1 < len(ks) - 1 else None
+            if (left is None or left > t) and (right is None or right > t):
+                plateau = ks[i0:i1 + 1]
+                rep = min(plateau, key=lambda k: (-v2_distance_steps(k, ana["infeasible_k"]), k))
+                out.append({"interval_k": (a, b), "plateau_k": plateau, "rep_k": rep, "theta_coarse": t})
+    return out
+
+
+def v2_confirm(valleys: list[dict], eval_many, *, shift_max: int = V2_SHIFT_MAX, log=None) -> list[dict]:
+    """§4.1 の 4: 谷ごとの確認とずらし。eval_many: M_K の列 → 生産の網の行の列 (同じ M_K は 1 回だけ評価する窓口; 評価の順は
+    結果を変えない)。各回はまだ確認中の全部の谷の (中心 − 1, 中心, 中心 + 1) をまとめて評価する (並列を活かす; 谷どうしは独立)。
+    戻り: 谷の記録の列 (入力の順) — {interval, plateau, start, steps [{center, left_ok, center_ok, right_ok, action}],
+    final (格子の値 or None), final_k, discard_reason, n_moves}。"""
+    st = [{"v": v, "c": v["rep_k"], "moves": 0, "steps": [], "status": "active", "why": None} for v in valleys]
+    while True:
+        act = [s for s in st if s["status"] == "active"]
+        if not act:
+            break
+        need = sorted({k for s in act for k in (s["c"] - 1, s["c"], s["c"] + 1)})
+        got = {v2_k(r["M_K"]): r for r in eval_many([v2_M(k) for k in need])}
+        for s in act:
+            c = s["c"]
+            okl, okc, okr = (_feasible(got[c - 1]), _feasible(got[c]), _feasible(got[c + 1]))
+            step = {"center": v2_M(c), "left": v2_M(c - 1), "right": v2_M(c + 1), "left_ok": okl, "center_ok": okc, "right_ok": okr}
+            a, b = s["v"]["interval_k"]
+            if not okc:
+                s["status"], s["why"] = "discarded", f"中心 {v2_M(c):.2f} が生産の網で不成立 → 谷を捨てる"
+            elif okl and okr:
+                s["status"] = "final"
+                step["action"] = f"中心 {v2_M(c):.2f} と両隣が成立 → 谷の最終の代表"
+            elif not okl and not okr:
+                s["status"], s["why"] = "discarded", f"中心 {v2_M(c):.2f} の両隣が生産の網で不成立 → 谷を捨てる"
+            else:
+                dest = c + 1 if not okl else c - 1
+                side = "左" if not okl else "右"
+                if s["moves"] >= shift_max:
+                    s["status"], s["why"] = "discarded", (f"{side}隣 {v2_M(c - 1 if not okl else c + 1):.2f} が不成立だが、ずらしが上限 "
+                                                          f"{shift_max} 回 → 谷を捨てる")
+                elif not (a <= dest <= b):
+                    s["status"], s["why"] = "discarded", (f"{side}隣が不成立、移動先 {v2_M(dest):.2f} が候補の区間 "
+                                                          f"[{v2_M(a):.2f}, {v2_M(b):.2f}] の外 → 谷を捨てる")
+                else:
+                    step["action"] = f"{side}隣が不成立 → 反対側の {v2_M(dest):.2f} へずらす ({s['moves'] + 1} 回目)"
+                    s["c"], s["moves"] = dest, s["moves"] + 1
+            if s["status"] == "discarded":
+                step["action"] = s["why"]
+            s["steps"].append(step)
+        if log:
+            log("  谷の確認: " + "; ".join(f"{v2_M(s['v']['rep_k']):.2f} → {s['status']}"
+                                          + (f" ({v2_M(s['c']):.2f})" if s["status"] != "discarded" else "") for s in st))
+    out = []
+    for s in st:
+        v = s["v"]
+        fin = s["status"] == "final"
+        out.append({"interval": [v2_M(v["interval_k"][0]), v2_M(v["interval_k"][1])], "plateau": [v2_M(k) for k in v["plateau_k"]],
+                    "start": v2_M(v["rep_k"]), "theta_coarse": v["theta_coarse"], "steps": s["steps"], "n_moves": s["moves"],
+                    "final": (v2_M(s["c"]) if fin else None), "final_k": (s["c"] if fin else None),
+                    "discard_reason": (None if fin else s["why"])})
+    return out
+
+
+def v2_pick(finals: list[dict], *, tie_deg: float = V2_TIE_DEG) -> dict:
+    """§4.1 の 5: 最終の代表が決まった谷 (各 {M_K, theta_max_deg, distance_steps}) から、θ_min + tie_deg 以内の谷を同点の集合として
+    一度だけ作り、推定の距離が最大 → θ_max が小さい → M_K が小さい順で 1 つ選ぶ。入力の順に依らない。戻り: {chosen (入力の dict),
+    theta_min, tie_set (M_K の列、昇順)}。finals が空なら ValueError。"""
+    if not finals:
+        raise ValueError("比べる谷が無い")
+    tmin = min(float(f["theta_max_deg"]) for f in finals)
+    ties = [f for f in finals if float(f["theta_max_deg"]) <= tmin + tie_deg]
+    best = min(ties, key=lambda f: (-float(f["distance_steps"]), float(f["theta_max_deg"]), float(f["M_K"])))
+    return {"chosen": best, "theta_min": tmin, "tie_set": sorted(float(f["M_K"]) for f in ties)}
+
+
+def select_coarse_min_theta(eval_coarse, eval_prod, M_A: float, M_d: float, *, workers: tuple[int, int] = (1, 1),
+                            tie_deg: float = V2_TIE_DEG, shift_max: int = V2_SHIFT_MAX, inputs: dict | None = None,
+                            log=None) -> dict:
+    """規則 coarse_min_theta_v2 (plan tooling-nozzle-mknot-fast §4.1) で M_knot を選ぶ。
+
+    eval_coarse・eval_prod: M_K → 行 (`evaluate_mknot` の形; `ok`・`reasons`・`theta_max_deg` を見る)。粗い網 (N_s、L_s) と生産の網
+    (N_p、カードの L_total_tol) の評価を引数で受ける (要求カードは `make_eval_fn(base, N_s, L_total_tol=L_s)`・`make_eval_fn(base, N_p)`;
+    試験は合成の関数)。M_A・M_d: 探索の範囲 (`search_range` の戻り)。workers: (粗い網, 生産の網) の並列の数 (2 つの並列を同時に持たない)。
+    inputs: 実効の入力の記録 (r_t・N_s・L_s・N_p・L_p・x_end_margin; 記録だけ)。
+    例外 (MknotSelectionError、表つき): 粗い網の長さ合わせが全点で未収束・粗い網で成立点が無い・候補が無い・最終の代表が残る谷が無い。
+    戻り: {rule, chosen, chosen_row (生産の網の行), theta_max_deg, distance (推定の距離; 無限大なら None), reason, theta_min, tie_set,
+    valleys (谷ごとの確認とずらしの記録), final_three (選んだ点と両隣の生産の網の行), coarse_table (粗い掃引の全行), confirm_table
+    (生産の網の全行), candidates, intervals, grid, n_eval_coarse, n_eval_prod, settings, inputs, warnings, elapsed_s}。"""
+    t0 = time.time()
+    ks = v2_grid(M_A, M_d)
+    warnings: list[str] = []
+    if log:
+        log(f"粗い掃引: {len(ks)} 点 ({v2_M(ks[0]):.2f}〜{v2_M(ks[-1]):.2f}、0.05 刻み、並列 {workers[0]})")
+    with Evaluator(eval_coarse, workers[0], log) as evc:
+        crow = evc.many([v2_M(k) for k in ks], "coarse")
+        n_c = evc.n_eval
+    ctab = sorted(crow, key=lambda r: r["M_K"])
+    if all(_is_length_unconverged(r) for r in ctab):
+        raise MknotSelectionError(f"M_knot を選べない ({RULE_NAME_V2}): 粗い網の長さ合わせ (from_length) が全点で未収束", ctab)
+    if not any(_feasible(r) for r in ctab):
+        raise MknotSelectionError(f"M_knot を選べない ({RULE_NAME_V2}): 粗い網に成立点が無い (制約を満たす点が 0)", ctab)
+    ana = v2_coarse_analysis(ctab)
+    if not ana["candidates_k"]:
+        raise MknotSelectionError(f"M_knot を選べない ({RULE_NAME_V2}): 候補が無い (粗い網で両隣とも成立している成立点が 0)", ctab)
+    vs = v2_valleys(ana)
+    if len(vs) >= 2:
+        warnings.append(f"谷 (候補の区間ごとの θ_max の局所極小) が {len(vs)} 個 (粗い網の代表 "
+                        + ", ".join(f"{v2_M(v['rep_k']):.2f}" for v in vs) + ") — 全部を生産の網で確かめた")
+    if log:
+        log(f"候補の区間 {len(ana['intervals_k'])} 個・谷 {len(vs)} 個 (代表 " + ", ".join(f"{v2_M(v['rep_k']):.2f}" for v in vs)
+            + f") を生産の網で確かめる (並列 {workers[1]})")
+    with Evaluator(eval_prod, workers[1], log) as evp:
+        valleys = v2_confirm(vs, lambda Ms: evp.many(Ms, "confirm"), shift_max=shift_max, log=log)
+        prod = dict(evp.rows)
+        n_p = evp.n_eval
+    ptab = [prod[k] for k in sorted(prod)]
+    inf_k = ana["infeasible_k"]
+    for v in valleys:
+        if v["final"] is not None:
+            r = prod[_key(v["final"])]
+            v.update(theta_max_deg=float(r["theta_max_deg"]), distance=v2_distance(v["final_k"], inf_k),
+                     distance_steps=v2_distance_steps(v["final_k"], inf_k))
+        else:
+            v.update(theta_max_deg=None, distance=None, distance_steps=None)
+    finals = [{"M_K": v["final"], "theta_max_deg": v["theta_max_deg"], "distance_steps": v["distance_steps"], "valley": i}
+              for i, v in enumerate(valleys) if v["final"] is not None]
+    if not finals:
+        raise MknotSelectionError(
+            f"M_knot を選べない ({RULE_NAME_V2}): 生産の網で最終の代表が残る谷が無い ("
+            + "; ".join(f"谷 {v['start']:.2f}: {v['discard_reason']}" for v in valleys) + ")",
+            ctab + [dict(r, role="confirm") for r in ptab])
+    pk = v2_pick(finals, tie_deg=tie_deg)
+    best = pk["chosen"]
+    ck = v2_k(best["M_K"])
+    n_disc = sum(v["final"] is None for v in valleys)
+    if n_disc:
+        warnings.append(f"生産の網の確認で谷を {n_disc} 個捨てた")
+    dtxt = "∞ (粗い網に不成立の点なし)" if math.isinf(best["distance_steps"]) else f"{best['distance_steps'] / V2_K_PER_UNIT:.2f}"
+    reason = (f"代表が残った谷 {len(finals)} 個 (全 {len(valleys)} 個) の生産の網の θ_max の最小 {pk['theta_min']:.5f}° から "
+              f"{tie_deg:g}° 以内の同点の集合 {len(pk['tie_set'])} 個 ({', '.join(f'{m:.2f}' for m in pk['tie_set'])}) の中で "
+              + ("唯一の谷" if len(pk["tie_set"]) == 1 else "推定の距離が最大 (同じなら θ_max・M_K の小さい方)")
+              + f" → {v2_M(ck):.2f} (θ_max {best['theta_max_deg']:.5f}°、境目までの推定の距離 {dtxt})")
+    out = {"rule": RULE_NAME_V2, "M_A": float(M_A), "M_d": float(M_d),
+           "settings": {"k_per_unit": V2_K_PER_UNIT, "step": 1.0 / V2_K_PER_UNIT, "edge": V2_EDGE_STEPS / V2_K_PER_UNIT,
+                        "dist_offset": V2_DIST_OFFSET_STEPS / V2_K_PER_UNIT, "tie_deg": tie_deg, "shift_max": shift_max,
+                        "sin_min": SIN_MIN, "margin_min_deg": MARGIN_MIN_DEG},
+           "inputs": dict(inputs or {}),
+           "chosen": v2_M(ck), "chosen_row": prod[_key(v2_M(ck))], "theta_max_deg": float(best["theta_max_deg"]),
+           "distance": (None if math.isinf(best["distance_steps"]) else best["distance_steps"] / V2_K_PER_UNIT),
+           "reason": reason, "theta_min": pk["theta_min"], "tie_set": pk["tie_set"], "chosen_valley": best["valley"],
+           "valleys": valleys,
+           "final_three": [prod[_key(v2_M(k))] for k in (ck - 1, ck, ck + 1)],
+           "coarse_table": ctab, "confirm_table": ptab,
+           "candidates": [v2_M(k) for k in ana["candidates_k"]],
+           "intervals": [[v2_M(a), v2_M(b)] for a, b in ana["intervals_k"]],
+           "grid": [v2_M(ks[0]), v2_M(ks[-1]), len(ks)], "n_eval_coarse": n_c, "n_eval_prod": n_p,
+           "warnings": warnings, "elapsed_s": time.time() - t0}
+    if log:
+        log(f"選択 {out['chosen']:.2f}: {reason}")
     return out
