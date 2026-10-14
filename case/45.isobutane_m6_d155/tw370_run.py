@@ -46,6 +46,7 @@ usage (B、tw370_run.sh 経由、3 本を別のプロセスで同時に):
 """
 import argparse
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -235,15 +236,99 @@ def resources(where: str, disk_min: int = DISK_START_MIN) -> dict:
     return rec
 
 
+# --- 生成器が足した明示すべきキー (plan tooling-generator-defaults-and-launch-gate §5.1 #11・#26; h370_run.py と同じ関数) -----------
+# #11 以降の生成器は段の config に「明示すべきキー」を旧い実効値で足す (config_builder.finish_config → yaml_strict.insert_scalars:
+# 既にある写像へのキーの挿入だけ)。prepare_ns は足した後の設定を書き、足したキーを RECIPE_CONTEXT.json の explicit_added
+# {family, prestage, main} に残す。(5) の照合は足す前の設定で行い (照合の意味は足さない版と同じ)、足したのが記録どおりのキーの挿入だけで
+# あることは、除いた設定に生成器の仕上げを当て直して元の文字列に戻ることで確かめる。
+EXPLICIT_CONTEXT = "RECIPE_CONTEXT.json"
+
+
+def generator_finish(RA):
+    """生成器の段の config の仕上げ (config_builder.finish_config) があればその関数、無い版 (足さない旧い生成器) なら None。"""
+    name = RA.__package__ + ".config_builder"
+    try:
+        return importlib.import_module(name).finish_config
+    except ModuleNotFoundError as e:
+        if e.name != name:
+            raise
+        return None
+
+
+def explicit_record(run: Path) -> dict:
+    """prepare_ns が RECIPE_CONTEXT.json に書いた、足した明示すべきキー {family, prestage, main}。無ければ {} (足さない旧い生成器。
+    記録の無い準備に足したキーがあれば、除かずに比べるので照合で不成立になる)。"""
+    try:
+        rec = json.loads((Path(run) / EXPLICIT_CONTEXT).read_text())
+    except (OSError, ValueError):
+        return {}
+    return (rec.get("explicit_added") or {}) if isinstance(rec, dict) else {}
+
+
+def explicit_remove(text: str, keys) -> str:
+    """keys (点区切りのキー) の項目を text から除く (insert_scalars の逆: flow 形式は前の値の直後から自分の値の終わりまで、block 形式は行ごと)。
+    キーが無い・flow 形式の先頭の項目 (除くと書式が変わる) は ValueError。"""
+    import yaml
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    spans = []
+    for key in keys or ():
+        node, parts = root, key.split(".")
+        for i, part in enumerate(parts):
+            items = node.value if isinstance(node, yaml.MappingNode) else []
+            j = next((j for j, (k, _) in enumerate(items) if isinstance(k, yaml.ScalarNode) and k.value == part), None)
+            if j is None:
+                raise ValueError(f"足したキー {key} が設定に無い")
+            if i < len(parts) - 1:
+                node = items[j][1]
+                continue
+            k, v = items[j]
+            if node.flow_style and j > 0:
+                spans.append((items[j - 1][1].end_mark.index, v.end_mark.index))
+            elif not node.flow_style:
+                e = text.find("\n", v.end_mark.index)
+                spans.append((text.rfind("\n", 0, k.start_mark.index) + 1, len(text) if e < 0 else e + 1))
+            else:
+                raise ValueError(f"足したキー {key} が flow 形式の先頭の項目 (挿入でできる位置でない)")
+    for s, e in sorted(spans, reverse=True):
+        text = text[:s] + text[e:]
+    return text
+
+
+def explicit_strip(RA, text: str, added, bcond, family, tag=None) -> str:
+    """足す前の設定 = text から added (足したキー {キー: 値}) を除いたもの。family が None (記録が無い) なら text のまま。
+    除いた設定に生成器の仕上げ (finish_config) を当て直すと text に戻り、足すキーが added と同じことを確かめる (違えば ValueError)。"""
+    if family is None:
+        return text
+    fin = generator_finish(RA)
+    if fin is None:
+        raise ValueError(f"足したキーの記録 ({family}) があるのに、読み込んだ生成器に config_builder が無い")
+    base = explicit_remove(text, list(added or {}))
+    again, info = fin(base, bcond, family, tag=tag)
+    if again != text or set(info.get("explicit_added") or {}) != set(added or {}):
+        raise ValueError(f"足したキーを除いた設定に生成器の仕上げを当て直しても元に戻らない ({family}; 記録 {sorted(added or {})}、"
+                         f"仕上げ {sorted(info.get('explicit_added') or {})})")
+    return base
+
+
 # --- 前提の検査 (5): 設定 ------------------------------------------------------------------------------------------------
-def check_configs(RA, main: str, pre: str, ref: str, cap: float) -> dict:
+def check_configs(RA, main: str, pre: str, ref: str, cap: float, explicit: dict | None = None, bcond: str | None = None) -> dict:
     """本段の設定 main・前の段の元の設定 pre・参照 ref (run_0752 の solverConfig.yaml、上限 1.0) を照合する。
     本段と ref の差として許すのは nStepOuter (こちら 200000)・outStepInterval (同じ 2500 のはず)・mesh.axisSegmentRWeight (片側だけが明示の 1)
     と、cap ≠ 1 の腕の lineDtDirectionalCap (1.0 → cap)。S1・S2 は RA.ns_stage_configs(main, "full", cfg_pre=pre) で導き (C50 は回さないが
-    C1 が回した S1・S2 との照合に使う)、B0 だけのキーと本段の extraFields が無く implicitRelax 0.7 であること。"""
+    C1 が回した S1・S2 との照合に使う)、B0 だけのキーと本段の extraFields が無く implicitRelax 0.7 であること。
+    explicit (生成器が足した明示すべきキーの記録 {family, prestage, main}; explicit_record) があれば、main・pre から足したキーを除いた
+    足す前の設定で上の照合をし (段の値も足す前のもの)、起動する段の設定から足したキーを除くと足す前の段と同じことを確かめる。段の sha は
+    起動する (足した後の) 文字列のもの。bcond は除いた設定に生成器の仕上げを当て直すときの bcondConfig.yaml の文字列。"""
     M = RA._CFG_MISSING
     fails = []
-    dm, dr = RA._cfg_load(main), RA._cfg_load(ref)
+    ex = explicit or {}
+    try:
+        main_b = explicit_strip(RA, main, ex.get("main"), bcond, ex.get("family"))
+        pre_b = explicit_strip(RA, pre, ex.get("prestage"), bcond, ex.get("family"))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "failures": [f"(5) 生成器が足した明示すべきキー ({EXPLICIT_CONTEXT}) を除いて比べられない: {e!r}"],
+                "diff_vs_ref": {}, "stages": {}, "explicit_added": ex}
+    dm, dr = RA._cfg_load(main_b), RA._cfg_load(ref)
     diff = RA._cfg_diff_paths(dr, dm)
     shown = {".".join(map(str, k)): ["<無し>" if a is M else a, "<無し>" if b is M else b] for k, (a, b) in diff.items()}
     for k, (a, b) in diff.items():
@@ -263,15 +348,19 @@ def check_configs(RA, main: str, pre: str, ref: str, cap: float) -> dict:
     stages = {}
     try:
         pre_st, main_f, main_want = RA.ns_stage_configs(main, "full", cfg_pre=pre)
+        pre_st_b = RA.ns_stage_configs(main_b, "full", cfg_pre=pre_b)[0] if ex else pre_st     # 足す前の段 (照合はこちら)
+        differ = [t for (t, c, *_), (_, cb, *_) in zip(pre_st, pre_st_b) if explicit_remove(c, ex.get("prestage")) != cb]
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "failures": fails + [f"(5) ns_stage_configs が失敗: {e!r}"], "diff_vs_ref": shown, "stages": {}}
+        return {"ok": False, "failures": fails + [f"(5) ns_stage_configs が失敗: {e!r}"], "diff_vs_ref": shown, "stages": {}, "explicit_added": ex}
     if main_f != main:
         fails.append("(5) ns_stage_configs が本段の設定を変えた")
-    if [t for t, *_ in pre_st] != ["S1_soft", "S2_mid"]:
+    if [t for t, *_ in pre_st] != ["S1_soft", "S2_mid"] or [t for t, *_ in pre_st_b] != ["S1_soft", "S2_mid"]:
         fails.append(f"(5) 前の段が S1_soft・S2_mid でない: {[t for t, *_ in pre_st]}")
-    out_pre = RA._cfg_path_get(RA._cfg_load(pre), ("output",))
-    for tag, cfg in [("prestage_config", pre)] + [(t, c) for t, c, *_ in pre_st]:
-        d = RA._cfg_load(cfg)
+    if differ:
+        fails.append(f"(5) 起動する段の設定から足したキーを除いても足す前の段と同じにならない: {differ}")
+    out_pre = RA._cfg_path_get(RA._cfg_load(pre_b), ("output",))
+    for tag, cfg, cfg_b in [("prestage_config", pre, pre_b)] + [(t, c, cb) for (t, c, *_), (_, cb, *_) in zip(pre_st, pre_st_b)]:
+        d = RA._cfg_load(cfg_b)
         left = [".".join(p) for p in b0_only if RA._cfg_path_get(d, p) is not M]
         if left:
             fails.append(f"(5) {tag} に B0 のキー {left} がある")
@@ -286,7 +375,7 @@ def check_configs(RA, main: str, pre: str, ref: str, cap: float) -> dict:
             ("outStepInterval", ("time", "outStepInterval")), ("implicitRelax", ("time", "deltaT", "implicitRelax")))}}
     stages["main"] = {"sha256": sha256_text(main), "want": main_want}
     return {"ok": not fails, "failures": fails, "diff_vs_ref": shown, "stages": stages,
-            "stage_tags_by_sha": {v["sha256"]: k for k, v in stages.items() if k != "prestage_config"}}
+            "stage_tags_by_sha": {v["sha256"]: k for k, v in stages.items() if k != "prestage_config"}, "explicit_added": ex}
 
 
 # --- 前提の検査 (6): bcond・物性のファイル --------------------------------------------------------------------------------
@@ -966,7 +1055,9 @@ def main(argv=None) -> int:
     if not pre_p.is_file():
         items["5_config"] = {"ok": False, "failures": [f"(5) {RA.PRESTAGE_CONFIG} が無い (main_line が効いていない)"]}
     else:
-        items["5_config"] = check_configs(RA, main_txt, pre_p.read_text(), (HERE / CFG_REF / "solverConfig.yaml").read_text(), arm["cap"])
+        bc_p = run / "bcondConfig.yaml"
+        items["5_config"] = check_configs(RA, main_txt, pre_p.read_text(), (HERE / CFG_REF / "solverConfig.yaml").read_text(), arm["cap"],
+                                          explicit_record(run), bc_p.read_text() if bc_p.is_file() else None)
         nsc = info.get("ns_stage_configs") or {}
         st = items["5_config"].get("stages", {})
         rec_vs = {k: nsc.get(k) == st.get(k, {}).get("sha256") for k in ("S1_soft", "S2_mid", "main")}
@@ -1125,9 +1216,15 @@ def main_c50(a, RA, arm: dict, run: Path, pc: dict, t_start: float, mref: Path, 
     f5 = []
     if n % out_int:
         f5.append(f"(5) nStepOuter {n} が outStepInterval {out_int} で割り切れない (prepare_ns は間隔を直すので、ここでは止める)")
+    # 生成器が明示すべきキーを足す版 (plan tooling-generator-defaults-and-launch-gate §5.1 #11) は、足すキーを run の bcond (C1 の準備の
+    # もの) で決め、足したキーの記録 ex50 を (5) の照合に渡す (prepare_ns の RECIPE_CONTEXT.json と同じ中身)
+    import inspect
+    ex50 = {}
+    kw50 = {"record": ex50} if "record" in inspect.signature(RA._ns_configs).parameters else {}
     with tempfile.TemporaryDirectory(prefix="tw370_c50_cfg_") as td:
-        cfg_pre, cfg_main = RA._ns_configs(p, Path(td), n, out_int, None, None, ml)
-        gas_files = {f.name: (Path(td) / f.name).read_bytes() for f in Path(td).iterdir() if f.is_file()}
+        shutil.copy2(run / "bcondConfig.yaml", Path(td) / "bcondConfig.yaml")
+        cfg_pre, cfg_main = RA._ns_configs(p, Path(td), n, out_int, None, None, ml, **kw50)
+        gas_files = {f.name: (Path(td) / f.name).read_bytes() for f in Path(td).iterdir() if f.is_file() and f.name != "bcondConfig.yaml"}
     for gn, gb in gas_files.items():
         if not (run / gn).is_file() or (run / gn).read_bytes() != gb:
             f5.append(f"(5) _apply_gas_to_config が書く {gn} が C1 の準備のものと違う")
@@ -1151,7 +1248,8 @@ def main_c50(a, RA, arm: dict, run: Path, pc: dict, t_start: float, mref: Path, 
     (run / "prepare_info.json").write_text(json.dumps(info, indent=1))
     pc["prepared_files"] = sorted(f.name for f in run.iterdir())
     # (5) 本段の設定 (参照 run_0752、上限 50 を許す) と S1・S2 (C50 は回さないが、C1 が実際に回した設定と sha が同じこと)
-    items["5_config"] = check_configs(RA, cfg_main, cfg_pre, (HERE / CFG_REF / "solverConfig.yaml").read_text(), arm["cap"])
+    items["5_config"] = check_configs(RA, cfg_main, cfg_pre, (HERE / CFG_REF / "solverConfig.yaml").read_text(), arm["cap"],
+                                      ex50, (run / "bcondConfig.yaml").read_text())
     items["5_config"]["failures"] = f5 + items["5_config"]["failures"]
     st = items["5_config"].get("stages", {})
     c1_prev = [(s.get("tag"), s.get("nsteps"), s.get("config_sha256")) for s in (hj.get("c1_main_stage_started") or {}).get("previous_stages", [])]

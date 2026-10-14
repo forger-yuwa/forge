@@ -177,13 +177,19 @@ def test_constants():
 
 # ====================================================================================== B. 壁の出力・NS の段の設定
 def gen_ns_configs(rd: Path):
-    """問題 YAML から prepare_ns と同じ生成器で bcond・前の段の元の設定・本段の設定を作る (格子は偽物)。"""
+    """問題 YAML から prepare_ns と同じ生成器で bcond・前の段の元の設定・本段の設定を作る (格子は偽物)。生成器が明示すべきキーを足す版
+    (plan tooling-generator-defaults-and-launch-gate §5.1 #11) では、prepare_ns と同じく足したキーを RECIPE_CONTEXT.json に書く。"""
+    import inspect
     p = RA.load_problem(CASE / HR.NS_PROBLEM)
     ml = RA._main_line_spec(p)
     n, out_int, _ = RA._ns_steps(p, None)
     rd.mkdir(parents=True)
     (rd / "bcondConfig.yaml").write_text(RA._bcond_with_species(RA._bcond(p, euler=False, profile_ok=True), RA._tp_species_Y(p)))
-    cfg_ns, cfg_main = RA._ns_configs(p, rd, n, out_int, None, None, ml)
+    rec = {}
+    kw = {"record": rec} if "record" in inspect.signature(RA._ns_configs).parameters else {}
+    cfg_ns, cfg_main = RA._ns_configs(p, rd, n, out_int, None, None, ml, **kw)
+    if hasattr(RA, "write_recipe_context"):
+        RA.write_recipe_context(rd, CASE / HR.NS_PROBLEM, {"cfl_main": None, "implicit_relax": None}, rec)
     (rd / "solverConfig.yaml").write_text(cfg_main)
     (rd / RA.PRESTAGE_CONFIG).write_text(cfg_ns)
     with h5py.File(rd / "nozzle.h5", "w") as f:              # 偽の格子 (mesh_identity が読む最小の中身)
@@ -232,11 +238,64 @@ def test_wall_output_and_configs():
     (d / "prepare_info.json").write_text(json.dumps(info))
     r = HR.ns_config_checks(RA, d)
     check("NS の段の設定: prepare_info の本段の sha が違う → 不合格", not r["ok"] and not r["prepare_info_match"]["main"])
+    test_explicit_keys(rd, c)
     r = HR.ns_prepare_info_checks(json.loads((rd / "prepare_info.json").read_text()), None, prelaunch=True)
     check("NS の prepare_info (投入前の準備): 合格 (δ_r の CSV・H・壁温・B0・格子・CFD ピンの照合)", r["ok"], str(r["failures"]))
     bad = {**json.loads((rd / "prepare_info.json").read_text()), "wall_thermal": {"mode": "isothermal", "Tw": 300.0}}
     r = HR.ns_prepare_info_checks(bad, None, prelaunch=True)
     check("NS の prepare_info: 壁温 300 K → 不合格", not r["ok"] and any("370" in f for f in r["failures"]))
+
+
+def test_explicit_keys(rd: Path, c: dict):
+    """生成器が段の config に足した明示すべきキー (plan tooling-generator-defaults-and-launch-gate §5.1 #11・#26) を除いて比べる部品と、
+    その比べ方が NS の段の設定の検査を緩めないこと (足したキーの記録が無い・値が違う・記録と合わないと不合格)。旧い・新しい生成器の両方で。"""
+    t0 = "a: {x: 1, y: 2}\nb:\n  c: 3\n  d: 4\n"
+    check("explicit_remove: flow 形式の末尾の項目・block 形式の行を除くと足す前の文字列 (insert_scalars の逆)",
+          HR.explicit_remove('a: {x: 1, y: 2, p: 0, q: "lsq"}\nb:\n  c: 3\n  d: 4\n  r: 1.0\n', ["a.p", "a.q", "b.r"]) == t0)
+    check("explicit_remove: 無いキー・flow 形式の先頭の項目は例外",
+          raises(lambda: HR.explicit_remove(t0, ["a.z"]), ValueError) is not None and raises(lambda: HR.explicit_remove(t0, ["a.x"]), ValueError) is not None)
+
+    def variant(name, fn):
+        d = TMP / f"cfg_explicit_{name}"
+        shutil.copytree(rd, d)
+        fn(d)
+        info = json.loads((d / "prepare_info.json").read_text())       # sha の照合で止まらないよう、prepare_info の段の sha を書き換えた設定に合わせる
+        info["ns_stage_configs"] = RA.ns_stage_sha256((d / "solverConfig.yaml").read_text(), (d / RA.PRESTAGE_CONFIG).read_text())
+        (d / "prepare_info.json").write_text(json.dumps(info))
+        return HR.ns_config_checks(RA, d)
+
+    def edit_ctx(d, f):
+        p = d / HR.EXPLICIT_CONTEXT
+        j = json.loads(p.read_text())
+        f(j["explicit_added"])
+        p.write_text(json.dumps(j))
+
+    def sub(d, old, new):
+        for n in ("solverConfig.yaml", RA.PRESTAGE_CONFIG):
+            t = (d / n).read_text()
+            assert t.count(old) == 1, (n, old)
+            (d / n).write_text(t.replace(old, new))
+
+    if HR.generator_finish(RA) is None:
+        check("足したキーの記録 (旧い生成器): 記録は無く、足していない設定をそのまま比べる", HR.explicit_record(rd) == {} and c["explicit_added"] == {})
+        r = variant("fake_ctx", lambda d: (d / HR.EXPLICIT_CONTEXT).write_text(json.dumps(
+            {"explicit_added": {"family": "axismach_ns_b0", "prestage": {}, "main": {}}})))
+        check("足したキーの記録があるのに生成器に仕上げが無い → 不合格", not r["ok"] and any("config_builder" in f for f in r["failures"]), str(r["failures"]))
+        return
+    ex = HR.explicit_record(rd)
+    b0_off = {"time.deltaT.lineImplicit", "time.deltaT.lineDtDirectional", "time.deltaT.implicitThermalJacobian"}
+    check(f"足したキーの記録 (新しい生成器): 前の段 {len(ex.get('prestage') or {})}・本段 {len(ex.get('main') or {})} キー、前の段に B0 の切った値 "
+          "(lineImplicit・lineDtDirectional・implicitThermalJacobian 0)、合格の記録に写る",
+          b0_off <= set(ex.get("prestage") or {}) and not b0_off & set(ex.get("main") or {}) and c["explicit_added"] == ex
+          and all((ex.get("prestage") or {})[k] == 0 for k in b0_off), str(sorted(ex.get("prestage") or {})))
+    for name, fn, want in (
+            ("no_ctx", lambda d: (d / HR.EXPLICIT_CONTEXT).unlink(), "B0 のキー"),
+            ("value", lambda d: sub(d, "sstSigmaBlend: 1", "sstSigmaBlend: 0"), "元に戻らない"),
+            ("drop", lambda d: edit_ctx(d, lambda e: e["prestage"].pop("time.deltaT.lineImplicit")), None),
+            ("extra", lambda d: edit_ctx(d, lambda e: e["main"].__setitem__("space.limiter", 2)), "除いて比べられない"),
+            ("missing", lambda d: edit_ctx(d, lambda e: e["main"].__setitem__("space.limiterFoo", 1)), "設定に無い")):
+        r = variant(name, fn)
+        check(f"足したキーの負例 {name} → 不合格", not r["ok"] and (want is None or any(want in f for f in r["failures"])), str(r["failures"])[:300])
 
 
 # ====================================================================================== C. Euler の段の設定
@@ -248,7 +307,17 @@ def test_euler_stage_configs():
     cfg = RA._apply_gas_to_config(RA._config_euler_node(pe, HR.EU_STEPS, HR.EU_OUT, 4.0, 1), pe, rd)
     (rd / "solverConfig.yaml").write_text(cfg)
     (rd / "bcondConfig.yaml").write_text(RA._bcond_with_species(RA._bcond(pe, euler=True), RA._tp_species_Y(pe)))
-    want = HR.euler_stage_configs(RA, cfg, HR.EU_CFL, True)
+    want = HR.euler_stage_configs(RA, cfg, HR.EU_CFL, True, (rd / "bcondConfig.yaml").read_text())
+    no_bc = raises(lambda: HR.euler_stage_configs(RA, cfg, HR.EU_CFL, True), ValueError)
+    with Patch((HR, "generator_finish", lambda *a: None)):
+        bare = HR.euler_stage_configs(RA, cfg, HR.EU_CFL, True)
+    if HR.generator_finish(RA) is None:
+        check("Euler の段の導出 (旧い生成器): 明示すべきキーを足さない (bcond を渡しても渡さなくても同じ)", no_bc is None and want == bare)
+    else:
+        add = {t: RA._cfg_diff_paths(RA._cfg_load(bare[t]), RA._cfg_load(want[t])) for t in want}
+        check("Euler の段の導出 (新しい生成器): run_staged と同じ仕上げを当てる — 足す前との差はキーの追加だけ (既存の値は不変)・"
+              "bcond が無ければ導かない", no_bc is not None and all(add[t] and all(a is RA._CFG_MISSING for a, _ in add[t].values()) for t in want),
+              str({t: sorted(".".join(k) for k in v) for t, v in add.items()})[:300])
     got = []
 
     def fake_forge(run_dir):

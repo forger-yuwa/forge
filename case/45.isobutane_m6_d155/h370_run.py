@@ -536,9 +536,82 @@ def eff_settings(RA, cfg: str) -> dict:
     return {k: (lambda v: None if v is RA._CFG_MISSING else v)(RA._cfg_path_get(doc, pth)) for k, pth in CFG_KEYS.items()}
 
 
+# --- 生成器が足した明示すべきキー (plan tooling-generator-defaults-and-launch-gate §5.1 #11・#26) ------------------------------------
+# #11 以降の生成器は段の config に「明示すべきキー」を旧い実効値で足す (config_builder.finish_config → yaml_strict.insert_scalars:
+# 既にある写像へのキーの挿入だけ)。NS は prepare_ns が足した後の設定を書き、足したキーを RECIPE_CONTEXT.json の explicit_added
+# {family, prestage, main} に残す。Euler は run_staged が段ごとに起動の直前に足す。登録の検査は足す前の設定で行い (検査の意味は足さない版と
+# 同じ)、足したのが記録どおりのキーの挿入だけであることは、除いた設定に生成器の仕上げを当て直して元の文字列に戻ることで確かめる。
+EXPLICIT_CONTEXT = "RECIPE_CONTEXT.json"
+
+
+def generator_finish(RA):
+    """生成器の段の config の仕上げ (config_builder.finish_config) があればその関数、無い版 (足さない旧い生成器) なら None。"""
+    name = RA.__package__ + ".config_builder"
+    try:
+        return importlib.import_module(name).finish_config
+    except ModuleNotFoundError as e:
+        if e.name != name:
+            raise
+        return None
+
+
+def explicit_record(run: Path) -> dict:
+    """prepare_ns が RECIPE_CONTEXT.json に書いた、足した明示すべきキー {family, prestage, main}。無ければ {} (足さない旧い生成器。
+    記録の無い準備に足したキーがあれば、除かずに比べるので検査で不成立になる)。"""
+    rec = jload(Path(run) / EXPLICIT_CONTEXT)
+    return (rec.get("explicit_added") or {}) if isinstance(rec, dict) else {}
+
+
+def explicit_remove(text: str, keys) -> str:
+    """keys (点区切りのキー) の項目を text から除く (insert_scalars の逆: flow 形式は前の値の直後から自分の値の終わりまで、block 形式は行ごと)。
+    キーが無い・flow 形式の先頭の項目 (除くと書式が変わる) は ValueError。"""
+    import yaml
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    spans = []
+    for key in keys or ():
+        node, parts = root, key.split(".")
+        for i, part in enumerate(parts):
+            items = node.value if isinstance(node, yaml.MappingNode) else []
+            j = next((j for j, (k, _) in enumerate(items) if isinstance(k, yaml.ScalarNode) and k.value == part), None)
+            if j is None:
+                raise ValueError(f"足したキー {key} が設定に無い")
+            if i < len(parts) - 1:
+                node = items[j][1]
+                continue
+            k, v = items[j]
+            if node.flow_style and j > 0:
+                spans.append((items[j - 1][1].end_mark.index, v.end_mark.index))
+            elif not node.flow_style:
+                e = text.find("\n", v.end_mark.index)
+                spans.append((text.rfind("\n", 0, k.start_mark.index) + 1, len(text) if e < 0 else e + 1))
+            else:
+                raise ValueError(f"足したキー {key} が flow 形式の先頭の項目 (挿入でできる位置でない)")
+    for s, e in sorted(spans, reverse=True):
+        text = text[:s] + text[e:]
+    return text
+
+
+def explicit_strip(RA, text: str, added, bcond: str, family, tag=None) -> str:
+    """足す前の設定 = text から added (足したキー {キー: 値}) を除いたもの。family が None (記録が無い) なら text のまま。
+    除いた設定に生成器の仕上げ (finish_config) を当て直すと text に戻り、足すキーが added と同じことを確かめる (違えば ValueError)。"""
+    if family is None:
+        return text
+    fin = generator_finish(RA)
+    if fin is None:
+        raise ValueError(f"足したキーの記録 ({family}) があるのに、読み込んだ生成器に config_builder が無い")
+    base = explicit_remove(text, list(added or {}))
+    again, info = fin(base, bcond, family, tag=tag)
+    if again != text or set(info.get("explicit_added") or {}) != set(added or {}):
+        raise ValueError(f"足したキーを除いた設定に生成器の仕上げを当て直しても元に戻らない ({family}; 記録 {sorted(added or {})}、"
+                         f"仕上げ {sorted(info.get('explicit_added') or {})})")
+    return base
+
+
 def ns_config_checks(RA, run: Path) -> dict:
     """NS の段の実効設定 (ns_stage_configs で導く S1・S2・本段) が登録どおり (h370_problems.py prep-check の want と同じ)、S1・S2 に B0 の
-    キー・本段の output が無い、3 段の implicitRelax 0.7、sha が prepare_info の ns_stage_configs と同じ。手元の prep-check の sha は記録だけ。"""
+    キー・本段の output が無い、3 段の implicitRelax 0.7、sha が prepare_info の ns_stage_configs と同じ。手元の prep-check の sha は記録だけ。
+    生成器が明示すべきキーを足した準備 (RECIPE_CONTEXT.json の explicit_added) は、足す前の設定から導いた段で上の検査をし (stages の値も
+    足す前のもの)、起動する段の設定から足したキーを除くと足す前の段と同じことを確かめる。sha は起動する (足した後の) 文字列のもの。"""
     fails = []
     main = (run / "solverConfig.yaml").read_text()
     pre_p = run / RA.PRESTAGE_CONFIG
@@ -549,8 +622,24 @@ def ns_config_checks(RA, run: Path) -> dict:
         pre_st, main_eff, main_want = RA.ns_stage_configs(main, "full", cfg_pre=pre)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "failures": [f"ns_stage_configs が例外: {e!r}"]}
-    st = {tag: eff_settings(RA, cfg) for tag, cfg, _, _ in pre_st}
-    st["main"] = eff_settings(RA, main_eff)
+    ex = explicit_record(run)
+    pre_st_b, main_eff_b = pre_st, main_eff
+    if ex:
+        bc_p = run / "bcondConfig.yaml"
+        try:
+            bc = bc_p.read_text() if bc_p.is_file() else None
+            pre_b = explicit_strip(RA, pre, ex.get("prestage"), bc, ex.get("family"))
+            main_b = explicit_strip(RA, main, ex.get("main"), bc, ex.get("family"))
+            pre_st_b, main_eff_b, _ = RA.ns_stage_configs(main_b, "full", cfg_pre=pre_b)
+            differ = [t for (t, c, _, _), (_, cb, _, _) in zip(pre_st, pre_st_b) if explicit_remove(c, ex.get("prestage")) != cb]
+            differ += ["main"] if explicit_remove(main_eff, ex.get("main")) != main_eff_b else []
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "failures": [f"生成器が足した明示すべきキー ({EXPLICIT_CONTEXT}) を除いて比べられない: {e!r}"],
+                    "explicit_added": ex}
+        if differ or [t for t, *_ in pre_st] != [t for t, *_ in pre_st_b]:
+            fails.append(f"起動する段の設定から足したキーを除いても足す前の段と同じにならない: {differ}")
+    st = {tag: eff_settings(RA, cfg) for tag, cfg, _, _ in pre_st_b}
+    st["main"] = eff_settings(RA, main_eff_b)
     for tag, w in NS_STAGE_WANT.items():
         for k, v in w.items():
             if st.get(tag, {}).get(k) != v:
@@ -573,7 +662,7 @@ def ns_config_checks(RA, run: Path) -> dict:
     return {"ok": not fails, "failures": fails, "stages": st, "sha256": sha, "prepare_info_match": match,
             "local_prep_check_same (記録だけ)": {k: loc.get(k) == v for k, v in sha.items()},
             "stage_tags_by_sha": {v: k for k, v in sha.items() if k != "prestage_config"},
-            "previous_want": [("S1_soft", NS_PRE, sha["S1_soft"]), ("S2_mid", NS_PRE, sha["S2_mid"])]}
+            "previous_want": [("S1_soft", NS_PRE, sha["S1_soft"]), ("S2_mid", NS_PRE, sha["S2_mid"])], "explicit_added": ex}
 
 
 def phys_up_ok(info: dict) -> bool:
@@ -667,13 +756,21 @@ def mesh_identity(a: Path, b: Path) -> dict:
 
 
 # --- Euler の段の設定 (run_staged と同じ導出) ------------------------------------------------------------------------------------
-def euler_stage_configs(RA, cfg_main: str, cfl_main: float, mid_stage: bool) -> dict:
-    """runner_axismach.run_staged と同じ導出で、soft・mid・本段の起動直前の設定の文字列を返す (forge を回さずに sha を決める)。"""
+def euler_stage_configs(RA, cfg_main: str, cfl_main: float, mid_stage: bool, bcond: str | None = None) -> dict:
+    """runner_axismach.run_staged と同じ導出で、soft・mid・本段の起動直前の設定の文字列を返す (forge を回さずに sha を決める)。
+    生成器が段の config に明示すべきキーを足す版 (run_staged が起動の直前に config_builder.finish_config を当てる; plan
+    tooling-generator-defaults-and-launch-gate §5.1 #11) では、同じ仕上げ (機種 axismach_euler、段の tag、run の bcond) を当てた文字列。
+    その版で bcond が無ければ ValueError (足すキーは bcond の適用条件で決まる)。"""
     main = RA._cfg_set(cfg_main, {"cfl": cfl_main, "cfl_pseudo": cfl_main})
     out = {"soft": RA._cfg_set(RA._first_order(RA._cfg_set(main, {"cfl": 0.5, "cfl_pseudo": 0.5})), {"nStepOuter": EU_SOFT, "outStepInterval": EU_SOFT})}
     if mid_stage:
         out["mid"] = RA._cfg_set(RA._cfg_set(main, {"cfl": 1.0, "cfl_pseudo": 1.0}), {"nStepOuter": EU_SOFT, "outStepInterval": EU_SOFT})
     out["main"] = main
+    fin = generator_finish(RA)
+    if fin is not None:
+        if bcond is None:
+            raise ValueError("生成器が段の config に明示すべきキーを足す版では、段の設定の導出に run の bcondConfig.yaml が要る")
+        out = {t: fin(c, bcond, "axismach_euler", tag=t)[0] for t, c in out.items()}
     return out
 
 
@@ -695,8 +792,13 @@ def euler_prepare_checks(RA, run: Path, info: dict) -> dict:
     p = RA.load_problem(HERE / EU_PROBLEM)
     cfl = float(p.evaluate.get("cfl_main"))
     mid = bool(p.evaluate.get("mid_stage", p.is_semiperfect))
-    cfgs = euler_stage_configs(RA, (run / "solverConfig.yaml").read_text(), cfl, mid)
-    eff = {t: {k: RA._cfg_value(c, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")} for t, c in cfgs.items()}
+    bc_p = run / "bcondConfig.yaml"
+    try:
+        cfgs = euler_stage_configs(RA, (run / "solverConfig.yaml").read_text(), cfl, mid, bc_p.read_text() if bc_p.is_file() else None)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "failures": fails + [f"Euler の段の設定を導けない: {e!r}"], "stages": {}, "sha256": {}, "stage_tags_by_sha": {},
+                "cfl_main": cfl, "mid_stage": mid}
+    eff ={t: {k: RA._cfg_value(c, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")} for t, c in cfgs.items()}
     if (cfl, mid, eff["main"]["nStepOuter"], eff["main"]["outStepInterval"], eff["main"]["cfl"]) != (EU_CFL, True, EU_STEPS, EU_OUT, EU_CFL):
         fails.append(f"Euler の本段の設定が登録と違う (cfl_main {cfl}・mid {mid}・{eff['main']})")
     if eff["soft"]["convMethod"] != 0 or eff["soft"]["nStepOuter"] != EU_SOFT or eff.get("mid", {}).get("nStepOuter") != EU_SOFT:
