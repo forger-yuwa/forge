@@ -5,8 +5,8 @@
 問題 (make — 既にあれば生成した中身と一致することを確かめ、違えば止める; 手で編集しない):
 - NS: problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml ← problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml (#34、H・Gref・300 K) の行単位の複製。
   差は name・spec.wall_thermal.Tw (300 → 370)・evaluate (cfl_main を外し、implicit_relax 0.7・main_line (本段だけ B0)・nStepOuter 200000・
-  outStepInterval 2500・停止規則のキー (#36e: stop_rule・stop_rule_cap 200000・stop_rule_hold_steps 40000・stop_rule_thresholds; §6 V-h370 の値))。
-  evaluate は停止規則のキーを除いて V-g0c-chain (problem_d155_ns_prod_coldmesh_tw300_g0c_chain.yaml) と V-tw370 の C50 の evaluate と同じ
+  outStepInterval 2500・停止規則のキー (#36e: stop_rule・stop_rule_cap 200000・stop_rule_hold_steps 40000・stop_rule_thresholds; §6 V-h370 の値)・
+  統合ブランチだけ ns_steps 200000 (#36m))。evaluate は停止規則のキーと ns_steps を除いて V-g0c-chain (problem_d155_ns_prod_coldmesh_tw300_g0c_chain.yaml) と V-tw370 の C50 の evaluate と同じ
   (リミッタの基準値は今の形 C の系譜の値に固定; codex diagnose 3 で決着)。
 - Euler: problem_d155_euler_h_ref.yaml ← run_0174_euler_v5d_M_r1 を作った問題 problem_d155_euler_v5d_M.yaml。この作業ツリーには無いので
   moc_v5d.problem_texts (make-problems と同じ関数、--md-offset 6.8825162455159465e-06) で作り直し、V5d の起動の記録
@@ -75,17 +75,24 @@ STOP_RULE_LINES = ["  # 本段の停止規則 (§6 V-h370 の登録の値; §5.1
                    "  stop_rule_thresholds: {window: 20000, min_points: 9, r_mean_max: 5.0e-4, r_amp_max: 5.0e-3, theta_drift_max: 5.0e-4, "
                    "theta_amp_max: 5.0e-3, x_fracs: [0.419738616669543, 0.734542579171700, 0.986385749173426]}   # x_fracs = 40・70・94 r_t / x_w 95.2974"]
 STOP_RULE_KEYS = ("stop_rule", "stop_rule_cap", "stop_rule_hold_steps", "stop_rule_thresholds")
+# 統合ブランチだけ (§5.1 #36m、2026-10-14 親の判断): 統合後の prepare_ns は NS の本段の長さ (停止規則を使わない準備・見張りの途中で使えなく
+# なったときの fallback_steps) を `--steps` > `evaluate.ns_steps` > 60,000 で決め、`evaluate.nStepOuter` を読まない。M6 のブランチと同じ実効の
+# 設定 (200,000) にするため ns_steps を書く (M6 のブランチの YAML は run_0951 が sha を記録した登録の版なので変えない)
+NS_STEPS = 200000
+NS_STEPS_LINE = (f"  ns_steps: {NS_STEPS}   # 統合ブランチだけ (§5.1 #36m): prepare_ns は NS に nStepOuter を読まず fallback を ns_steps で決めるので、"
+                 "M6 のブランチと同じ 200,000 に")
 MAIN_LINE_LINE = ("  main_line: {line: dir, cap: 50, itj: 5, cfl: 4, relax: 0.7, limiter_ref: {ro: 0.8739869154, p: 387491.0573, a: 359.7712185}, "
                   "extra_fields: [res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, omg_prod, omg_dest, omg_cross, omg_trans, omg_axisym, dt_local]}")
 EVAL_NEW = ["evaluate:",
             "  nStepOuter: 200000   # 本段の step 数の上限 (S1・S2 の 3,000 step ずつは別枠、§6 V-h370 の予算。停止規則で止める)",
+            NS_STEPS_LINE,
             "  outStepInterval: 2500   # 停止規則の出力の間隔",
             "  implicit_relax: 0.7   # main_line.relax と同じ値 (前の段 S1・S2 にも効く; 生産の系譜 run_0182 の cold_pair.py prep と同じ)",
             "  # 本段だけ B0 (cold_cfl.py prep --line dir --itj 5 --cap 50 --cfl 4 --limiter-ref-from … --extra … と同じキー・書き方; §4.8-2・§5.1 #30)。",
             "  # リミッタの基準値は今の形 C の系譜 (V-g0c-chain・V-tw370 の C50) の値に固定 (codex diagnose 3 で決着: 今回の全本段で C 由来の値; §4.9)",
             MAIN_LINE_LINE] + STOP_RULE_LINES
 NS_ALLOWED = {"spec.wall_thermal.Tw", "evaluate.cfl_main", "evaluate.implicit_relax", "evaluate.main_line", "evaluate.nStepOuter",
-              "evaluate.outStepInterval"} | {f"evaluate.{k}" for k in STOP_RULE_KEYS}
+              "evaluate.outStepInterval", "evaluate.ns_steps"} | {f"evaluate.{k}" for k in STOP_RULE_KEYS}
 EU_ALLOWED = {"spec.r_throat", "geometry.physical_upstream", "mesh_euler.throat_refine", "evaluate.nStepOuter"}
 EU_THROAT_REFINE = 5.0          # §5.1 #36e (codex diagnose 3): 4 → 5 で生成の座標の max|δ_in − δ_r| 1.137e-3 → 7.96e-4 mm (codex の再計算)
 EU_NSTEP = 60000                # §6 V-h370: Euler の本段の上限 (出力 1000・cfl_main 2 は元の問題のまま)
@@ -245,14 +252,16 @@ def cmd_check(out_json=None) -> int:
     ns_ev = D["NS"]["evaluate"]
     pair("H300", "NS", NS_ALLOWED, {"spec.wall_thermal.Tw": (300.0, TW_NEW), "evaluate.cfl_main": (1.0, MISSING),
                                     "evaluate.implicit_relax": (MISSING, 0.7), "evaluate.nStepOuter": (12000, 200000),
-                                    "evaluate.outStepInterval": (1000, 2500), "evaluate.main_line": (MISSING, ns_ev.get("main_line")),
+                                    "evaluate.outStepInterval": (1000, 2500), "evaluate.ns_steps": (MISSING, NS_STEPS),
+                                    "evaluate.main_line": (MISSING, ns_ev.get("main_line")),
                                     "evaluate.stop_rule": (MISSING, True), "evaluate.stop_rule_cap": (MISSING, 200000),
                                     "evaluate.stop_rule_hold_steps": (MISSING, 40000),
                                     "evaluate.stop_rule_thresholds": (MISSING, STOP_RULE_THRESHOLDS)})
-    ns_ev_nosr = {k: v for k, v in ns_ev.items() if k not in STOP_RULE_KEYS}
+    # 比べる 2 つ (M6 のブランチの YAML) に無い統合ブランチだけの ns_steps (#36m) も除く
+    ns_ev_nosr = {k: v for k, v in ns_ev.items() if k not in STOP_RULE_KEYS and k != "ns_steps"}
     for ref in ("G0C_CHAIN", "C50"):
         if ns_ev_nosr != D[ref]["evaluate"]:
-            fails.append(f"NS の evaluate (停止規則のキーを除く) が {ref} の evaluate と違う: {diff_paths(D[ref]['evaluate'], ns_ev_nosr)}")
+            fails.append(f"NS の evaluate (停止規則のキー・ns_steps を除く) が {ref} の evaluate と違う: {diff_paths(D[ref]['evaluate'], ns_ev_nosr)}")
     pair("V5D_M", "EU", EU_ALLOWED, {"spec.r_throat": (D["V5D_M"]["spec"]["r_throat"], D["NS"]["spec"]["r_throat"]),
                                      "geometry.physical_upstream": (MISSING, D["NS"]["geometry"]["physical_upstream"]),
                                      "mesh_euler.throat_refine": (4.0, EU_THROAT_REFINE), "evaluate.nStepOuter": (12000, EU_NSTEP)})
@@ -302,13 +311,12 @@ def cmd_check(out_json=None) -> int:
     sr = SR.resolve_settings(pn.evaluate, nsteps_arg=None, n_main=n, n_main_source=n_src, out_int=out_int,
                              euler_ref="<投入の時に固定する run_0950 の res と sha256>", requested=None)
     rec["stop_rule_resolved"] = sr
-    # 統合ブランチ (integrate/design-flow-1、2026-10-14) の期待値: 問題 YAML は M6 のブランチで登録して run に使った版のまま変えない。
-    # 統合後の停止規則では `evaluate.stop_rule: true` は明示の要求 (explicit; 使えない設定は準備・起動の前に例外)、使えないときの本段の長さ
-    # fallback_steps は `--steps` > `evaluate.ns_steps` > 60,000 (RA.NS_STEPS_DEFAULT; `evaluate.nStepOuter` は Euler だけが読む) なので、
-    # M6 のブランチの 200,000 (evaluate.nStepOuter) ではなく 60,000。fallback_steps は見張りの途中で帯の位置を決められない UNAVAILABLE の
-    # ときだけ効く (上限 cap 200,000 は登録のまま)。
+    # 統合ブランチ (integrate/design-flow-1、2026-10-14) の期待値: 統合後の停止規則では `evaluate.stop_rule: true` は明示の要求 (explicit;
+    # 使えない設定は準備・起動の前に例外)。使えないときの本段の長さ fallback_steps は `--steps` > `evaluate.ns_steps` > 60,000
+    # (`evaluate.nStepOuter` は Euler だけが読む) なので、統合ブランチの YAML の ns_steps (#36m) で M6 のブランチと同じ 200,000 にする
+    # (上限 cap 200,000 は登録のまま)。
     want_sr = {"use": True, "requested": True, "explicit": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500,
-               "fallback_steps": RA.NS_STEPS_DEFAULT,
+               "fallback_steps": NS_STEPS, "fallback_steps_source": "evaluate.ns_steps",
                **{k: (list(v) if isinstance(v, list) else v) for k, v in STOP_RULE_THRESHOLDS.items()}}
     bad_sr = {k: sr.get(k) for k, v in want_sr.items() if sr.get(k) != v}
     if bad_sr:

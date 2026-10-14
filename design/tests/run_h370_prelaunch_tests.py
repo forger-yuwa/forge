@@ -218,10 +218,9 @@ def test_stop_rule_keys():
     eu.mkdir(exist_ok=True)
     sr = RA._stop_rule_settings(pn, None, str(eu), None)
     # 統合 (2026-10-14): NS の本段の fallback は --steps > evaluate.ns_steps > 60,000 (forge-f5 fb07daf8; evaluate.nStepOuter 200000 は NS に効かない)。
-    # 停止規則を使う本段は上限 200,000 のままなので、fallback は見張りの途中で帯が決まらないときの長さだけ (h370_problems.py check の
-    # 登録の値 200,000 とは違う — 問題 YAML に ns_steps を書くかは M6 の判断)
+    # 統合ブランチの問題 YAML は ns_steps 200000 を書く (plan §5.1 #36m) ので、fallback も M6 のブランチと同じ 200,000 (h370_problems.py check と同じ)
     want = {"requested": True, "explicit": True, "use": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500,
-            "fallback_steps": RA.NS_STEPS_DEFAULT,
+            "fallback_steps": 200000, "fallback_steps_source": "evaluate.ns_steps",
             "window": 20000, "min_points": 9, "r_mean_max": 5e-4, "r_amp_max": 5e-3, "theta_drift_max": 5e-4, "theta_amp_max": 5e-3,
             "x_fracs": [0.419738616669543, 0.734542579171700, 0.986385749173426]}
     bad = {k: sr.get(k) for k, v in want.items() if sr.get(k) != v}

@@ -116,6 +116,7 @@ mesh:
 
 evaluate:
   nStepOuter: 200000   # 本段の step 数の上限 (S1・S2 の 3,000 step ずつは別枠、§6 V-h370 の予算。停止規則で止める)
+  ns_steps: 200000   # 統合ブランチだけ (§5.1 #36m): prepare_ns は NS に nStepOuter を読まず fallback を ns_steps で決めるので、M6 のブランチと同じ 200,000 に
   outStepInterval: 2500   # 停止規則の出力の間隔
   implicit_relax: 0.7   # main_line.relax と同じ値 (前の段 S1・S2 にも効く; 生産の系譜 run_0182 の cold_pair.py prep と同じ)
   # 本段だけ B0 (cold_cfl.py prep --line dir --itj 5 --cap 50 --cfl 4 --limiter-ref-from … --extra … と同じキー・書き方; §4.8-2・§5.1 #30)。
