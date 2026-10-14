@@ -82,6 +82,8 @@ run_0004_roe_baseline
 > `case.h5.provenance.json` に書く。`mesh_provenance.py check <run_dir>` は run の `solverConfig.yaml`・`bcondConfig.yaml` とこの記録を
 > 照合する (記録なし・別メッシュの記録・変換時と違う要求値 (省略は省略とだけ一致)・壁の分類の変更は FAIL)。restart
 > (`restart_field.py`・初期場の貼り付け) は `/VALUE` だけを変えるので記録は有効なまま。run を複製するときは h5 と一緒に記録も写す。
+> 格子を **symlink** で置いた run は、記録をメッシュの**実体** (realpath) の隣で探す (記録は写さなくてよい。実体を差し替えれば
+> 不変部分のハッシュの照合で FAIL)。品質の結果 `<h5>.quality.json` も実体の隣を読み、測り直した結果は run の中にだけ書く。
 > 投入の関門 (`launch_gate.py`、下の「投入の関門」) が `run_case.sh` の起動の前にこの照合を呼ぶ。
 
 > **変換器の幾何の精度 (2026-10-10、plan `architecture-float-state-double-geometry` §4.6)**: `convertGmshToForge` は

@@ -14,10 +14,11 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
    その FAIL (削除・改名キー・`bndFirstOrder`・dual-time の緩和など、solver が起動を拒むかプロファイルの `forbid` と同じ類) と
    YAML の重複キー・merge key は FAIL、未知・誤配置のキーは宣言の欠落と同じ水準 (移行期 WARN・強制 FAIL)。
 2. **メッシュの実効条件**: `mesh_provenance.check_run` (変換時の記録 `<h5>.provenance.json` と run の config・bcond の照合)。
+   記録はメッシュの**実体** (realpath) の隣を探す (run が格子を symlink で置いても見つかる; plan §5.1 #23)。
 3. **メッシュの品質**: `check_mesh_quality.py <h5> --bcond bcondConfig.yaml --ar-max 5000` (§4.4: AR 1000 を超えるセルは
    壁法線の構造層で条件を確かめられたときだけ 5000 まで、AR の外れ値に SOFT-PASS を当てない)。`bcondConfig.yaml` が無い・読めない
    (`--bcond` を渡せない) run は FAIL。結果の再利用は check_mesh_quality の鍵 (メッシュの不変部分・壁の physID と面・閾値・
-   検査器の版) が全部一致したときだけ (`<h5>.quality.json`)。
+   検査器の版) が全部一致したときだけ (`<h5>.quality.json`。実体の隣と run の中の名前の隣を読み、書くのは run の中だけ)。
 4. **バイナリと省略値**: 起動するバイナリの sha256 と、宣言したプロファイルの内容のハッシュを記録する。このリポジトリの
    `solver_density_cuda/build/forge` でないバイナリ (対応の分からないバイナリ) は**拒否せず** WARN にする (旧・倍精度ビルドとの
    A/B を塞がない: plan §4.3 の 4)。省略の禁止は 1 の `fixed`・`explicit` の照合が担い、`key=~` の逸脱は実効値「未確定」で記録する。

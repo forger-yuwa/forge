@@ -443,6 +443,43 @@ d = make_run('inlet_class', kinds=dict(BCOND, inlet=(1, 'outlet_statPress')), co
 rc, out, started, gate = run_case(d)
 stopped(rc, out, started, gate, '入口の分類だけを変えた bcond')
 
+# symlink したメッシュ (plan §5.1 #23): 記録・品質の結果はメッシュの実体 (realpath) の隣を探す。以前は symlink の名前の隣を
+# 探して「記録の無いメッシュ」(移行期 WARN、強制で FAIL) にしていた
+src = make_run('symlink_src')
+rc, out, started, gate = run_case(src)
+launched(rc, out, started, gate, 'symlink の元の run (実体の隣に記録・品質の結果を書く)')
+d = make_run('symlink_run', record=False)
+os.unlink(os.path.join(d, 'mesh.h5'))
+os.symlink(os.path.join(src, 'mesh.h5'), os.path.join(d, 'mesh.h5'))
+before = sorted((f, os.path.getmtime(os.path.join(src, f))) for f in os.listdir(src))
+rc, out, started, gate = run_case(d)
+launched(rc, out, started, gate, 'メッシュを symlink で置いた run')
+check(not [k for a_, k in items(gate, 'WARN') + items(gate, 'FAIL') if a_ == '来歴'] and '来歴の記録と一致' in (field(gate, 'mesh_hash') or ''),
+      'symlink の run: 実体の隣の記録が見つかり来歴は PASS', str(items(gate, 'WARN')))
+check((field(gate, 'quality') or '').startswith('PASS (再利用 あり'), 'symlink の run: 実体の隣の品質の結果を再利用', field(gate, 'quality'))
+check(sorted((f, os.path.getmtime(os.path.join(src, f))) for f in os.listdir(src)) == before
+      and not os.path.exists(os.path.join(d, 'mesh.h5.provenance.json')),
+      'symlink の run の関門は実体のディレクトリに何も書かない (記録も写さない)')
+other_real = os.path.join(TMP, 'symlink_other.h5')
+write_mesh(other_real, shift=0.5)
+os.unlink(os.path.join(d, 'mesh.h5'))
+os.symlink(other_real, os.path.join(d, 'mesh.h5'))
+rc, out, started, gate = run_case(d, FORGE_LAUNCH_GATE='enforce')
+stopped(rc, out, started, gate, 'symlink の先を記録の無い別のメッシュに替えた (強制)')
+check(('来歴', 'symlink_other.h5.provenance.json') in items(gate, 'FAIL'), '記録の無い実体を名指し', str(items(gate, 'FAIL')))
+os.unlink(os.path.join(d, 'mesh.h5'))
+os.symlink(os.path.join(src, 'mesh.h5'), os.path.join(d, 'mesh.h5'))
+write_mesh(os.path.join(src, 'mesh.h5'), shift=0.25)         # 実体を別のメッシュに差し替える (記録は元のまま)
+q_src, q_run = os.path.join(src, 'mesh.h5.quality.json'), os.path.join(d, 'mesh.h5.quality.json')
+q_src_before, q_run_before = open(q_src).read(), open(q_run).read()     # q_run は上の symlink_other.h5 を測った結果
+rc, out, started, gate = run_case(d)
+stopped(rc, out, started, gate, 'symlink の実体を別のメッシュに差し替えた (記録は元のまま)')
+check(('来歴', '(provenance)') in items(gate, 'FAIL'), '記録と実体の不一致を名指しで FAIL', str(items(gate, 'FAIL')))
+check((field(gate, 'quality') or '').startswith('PASS (再利用 なし') and open(q_src).read() == q_src_before
+      and open(q_run).read() != q_run_before,
+      '品質の結果は鍵が違えば実体の隣・run の中のどちらも使わず、測り直した結果は run の中 (symlink の名前の隣) にだけ書く',
+      field(gate, 'quality'))
+
 # ------------------------------------------------------------------------------------------------ メッシュの品質の負例
 
 print('== メッシュの品質')

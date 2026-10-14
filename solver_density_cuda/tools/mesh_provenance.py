@@ -16,7 +16,9 @@
 | `mesh.wallDistExtraPhysIDs` | `wall_dist` の壁点集合 (`calcWallDistance_kdtree.cpp:141`) |
 | 境界の種類と physID | 壁 (`wall`・`wall_isothermal`) は `wall_dist` の壁点と入口角の帰属先 (`calcWallDistance_kdtree.cpp:142`、`gmshReader.hpp:1665`)、`inlet_*` は入口角の帰属元 (`gmshReader.hpp:1674`) |
 
-**記録** `<h5>.provenance.json` (h5 のパスの末尾に `.provenance.json`。`check_mesh_quality.py` の `<h5>.quality.json` と同じ置き方):
+**記録** `<h5>.provenance.json` (h5 の**実体** (realpath) のパスの末尾に `.provenance.json`。run が格子を symlink で置いても、
+変換の時に実体の隣に書いた記録を引く。記録は実体の不変部分のハッシュに結び付くので、symlink の先や実体を差し替えれば照合で FAIL。
+2026-10-15、plan §5.1 #23: 以前は symlink の名前の隣を探して、symlink の run を「記録の無いメッシュ」にしていた):
 
 - `conversion`: 上の 6 キーの**要求値** (変換時の config に書いた値。書いていなければ `null` = 変換器の既定)。
   `mesh.isAxisymmetric` は solver と同じ優先順 (`mesh` > 旧 `physProp`) で読む。
@@ -224,7 +226,15 @@ def mesh_parts(h5):
 
 
 def provenance_path(h5_path):
-    return str(h5_path) + SUFFIX
+    """記録のパス: メッシュの実体 (realpath) の末尾に `.provenance.json` (symlink の名前の隣ではない; 上の「記録」)。"""
+    return os.path.realpath(str(h5_path)) + SUFFIX
+
+
+def _mesh_desc(mesh_h5, name=None):
+    """メッセージ用のメッシュの名前。symlink なら実体も書く。"""
+    name = name or os.path.basename(mesh_h5)
+    real = os.path.realpath(mesh_h5)
+    return name if real == os.path.abspath(mesh_h5) else f'{name} (実体 {real} への symlink)'
 
 
 # ------------------------------------------------------------------------------------------------ config・bcond の読み取り
@@ -585,7 +595,9 @@ def check_run(run_dir, cfg_path=None, bcond_path=None):
     prov = provenance_path(mesh_h5)
     out['provenance'] = prov
     if not os.path.isfile(prov):
-        fails.append(('(provenance)', f'記録の無いメッシュ ({os.path.basename(prov)} が無い)。'
+        where = (os.path.basename(prov) if os.path.realpath(mesh_h5) == os.path.abspath(mesh_h5)
+                 else f'{prov}; {_mesh_desc(mesh_h5, mname.strip())}、記録は実体の隣を探す')
+        fails.append(('(provenance)', f'記録の無いメッシュ ({where} が無い)。'
                                       '`mesh_provenance.py convert` で変換し直す (今の config から過去の条件を推定して記録は作らない)'))
         return out
     try:
@@ -611,7 +623,7 @@ def check_run(run_dir, cfg_path=None, bcond_path=None):
         elif diff:
             hint = (' — 座標は同じで接続・境界の所属などが違う: 同じ .msh を別の条件 (境界の分類・nodeInletCornerWall・'
                     'axisCentroidShift 等) で変換した h5 に旧い記録か、変換の後に書き換えた h5')
-        fails.append(('(provenance)', f'記録が今の {os.path.basename(mesh_h5)} と一致しない (違う部分: {", ".join(diff) or "合成のみ"})'
+        fails.append(('(provenance)', f'記録が今の {_mesh_desc(mesh_h5)} と一致しない (違う部分: {", ".join(diff) or "合成のみ"})'
                                       f'{hint}。記録 {rec.get("mesh_file")} ({rec.get("created")})'))
     elif cur['parts']['initial_field'] != rec['parts'].get('initial_field'):
         notes.append(('(initial_field)', '初期場は変換の後に更新されている (restart・初期場の貼り付け。照合には使わない)'))

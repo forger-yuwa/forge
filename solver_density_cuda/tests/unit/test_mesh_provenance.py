@@ -261,6 +261,33 @@ def main():
         res = mp.check_run(dC)
         check(fail_keys(res) == ['(provenance)'], f'節点数の違う別メッシュ → FAIL {fail_keys(res)}')
 
+        print('=== symlink したメッシュ (#23): 記録は実体 (realpath) の隣を探す ===')
+        dR = E.run_dir(', discretization: "node", nodeInletCornerWall: 1')     # 実体を変換した run (記録は実体の隣)
+        E.convert(dR)
+        dL = E.run_dir(', discretization: "node", nodeInletCornerWall: 1')     # 同じ config・bcond で、格子は symlink
+        os.symlink(os.path.join(dR, 'mesh.h5'), os.path.join(dL, 'mesh.h5'))
+        res = mp.check_run(dL)
+        check(not res['fails'] and not res['warns'] and res['record'] is not None
+              and res['provenance'] == os.path.realpath(os.path.join(dR, 'mesh.h5')) + mp.SUFFIX,
+              f'symlink の run: 実体の隣の記録で PASS (以前は「記録の無いメッシュ」) {res["fails"]}')
+        rc, v, _ = cli('check', dL)
+        check(rc == 0 and v == 'VERDICT: PASS', f'CLI (symlink の run) → {v} (rc={rc})')
+        dN = E.run_dir(spec={'ni': 21, 'nj': 6, 'shift': 0.01})              # 記録の無い別のメッシュ
+        E.raw_convert(dN)
+        os.unlink(os.path.join(dL, 'mesh.h5'))
+        os.symlink(os.path.join(dN, 'mesh.h5'), os.path.join(dL, 'mesh.h5'))
+        res = mp.check_run(dL)
+        msg = dict(res['fails']).get('(provenance)', '')
+        check(fail_keys(res) == ['(provenance)'] and '記録の無いメッシュ' in msg and os.path.realpath(os.path.join(dN, 'mesh.h5')) in msg,
+              f'symlink の先を記録の無い別のメッシュに替える → FAIL (実体を名指し) {msg[:160]}')
+        os.unlink(os.path.join(dL, 'mesh.h5'))
+        os.symlink(os.path.join(dR, 'mesh.h5'), os.path.join(dL, 'mesh.h5'))
+        shutil.copyfile(os.path.join(dN, 'mesh.h5'), os.path.join(dR, 'mesh.h5'))   # 実体を差し替える (記録は元のまま)
+        res = mp.check_run(dL)
+        msg = dict(res['fails']).get('(provenance)', '')
+        check(fail_keys(res) == ['(provenance)'] and 'coord' in msg and 'symlink' in msg,
+              f'symlink の実体を別のメッシュに差し替える → FAIL {msg[:160]}')
+
         print('=== 負例 3: 入口の分類だけの変更 ===')
         # (a) 変換時 nodeInletCornerWall 1 の node、run の bcond で入口 (physID 1) を slip に
         write_bc(d0, {'inlet': (1, 'slip')})

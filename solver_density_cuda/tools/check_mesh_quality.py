@@ -45,7 +45,8 @@ node (median-dual) 変換の h5 は `/MESH/CONNE` が双対 CV (多角形/多面
   継ぎ目 (壁の physID が変わるだけで折れが小さい節点) は角部にしない。角部は報告 (節点の数・最大の折れ角と位置・角部のセルの
   φ の最大と位置) を分けるだけで、緩和の判定・近壁の WARN からは外さない (#8c)。
 - 結果の再利用: 鍵 (メッシュの不変部分のハッシュ・physID と壁の面の集合の対応・閾値・検査器の版) が一致したときだけ
-  `<h5>.quality.json` の結果を使う。再利用したかどうかを出力に書く (`--no-cache` で使わない)。
+  `<h5>.quality.json` の結果を使う。再利用したかどうかを出力に書く (`--no-cache` で使わない)。h5 が symlink なら実体 (realpath)
+  の隣の記録も読む (来歴の記録と同じ置き方、plan tooling-generator-defaults-and-launch-gate §5.1 #23)。書くのは渡したパスの隣だけ。
 - `--bcond` を渡さないときの VERDICT・終了コードは従来どおり (壁直交性は測らない)。その判定は投入の関門の合格の根拠に
   ならない旨を必ず 1 行出す。`--ar-max` を 1000 より上げると緩和の条件を確かめずに通す旧判定なので、その旨も注意として出す。
 """
@@ -912,30 +913,39 @@ def main():
         sys.exit(code)
 
     if cache_key is not None:
-        prev, why = None, None
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path) as fh:
-                    prev = json.load(fh)
-            except Exception as e:                       # noqa: BLE001
-                why = f"読めない ({e})"
-        else:
-            why = "記録なし"
-        if prev is not None:
-            pk = prev.get("key") or {}
-            diff = [k for k in ("checker", "checker_sha256", "mesh_invariant_sha256", "walls", "args") if pk.get(k) != cache_key[k]]
-            if not diff and "result" in prev:
-                res = prev["result"]
-                print(f"結果の再利用: {cache_path} (鍵が一致: メッシュの不変部分・壁の physID と面・閾値・検査器の版)")
-                for ln in res.get("lines", []):
-                    print(ln)
-                if a.json:
-                    with open(a.json, "w") as fh:
-                        json.dump({"verdict": res.get("verdict"), "exit": res.get("exit"), "reused": True,
-                                   "summary": res.get("summary")}, fh, ensure_ascii=False, indent=1)
-                sys.exit(int(res.get("exit", 1)))
-            why = "鍵が違う: " + ", ".join(diff)
-        print(f"結果の再利用: なし ({why})")
+        # 読む候補: メッシュの実体 (realpath) の隣 → 渡されたパス (symlink の名前) の隣。来歴の記録 (`mesh_provenance`) と同じく
+        # 実体の隣を引く (plan tooling-generator-defaults-and-launch-gate §5.1 #23)。結果は鍵 (メッシュの不変部分・壁の面・閾値・
+        # 検査器の版) で結び付くので、どちらから読んでも同じ。**書くのは渡されたパスの隣だけ** (symlink の先は別の run・別の
+        # セッションのディレクトリでありうるので、そこへは書かない)
+        real_cache = os.path.realpath(a.h5) + ".quality.json"
+        cands = [real_cache] + ([cache_path] if os.path.realpath(cache_path) != real_cache else [])
+        whys = []
+        for cp in cands:
+            prev, why = None, None
+            if os.path.exists(cp):
+                try:
+                    with open(cp) as fh:
+                        prev = json.load(fh)
+                except Exception as e:                   # noqa: BLE001
+                    why = f"読めない ({e})"
+            else:
+                why = "記録なし"
+            if prev is not None:
+                pk = prev.get("key") or {}
+                diff = [k for k in ("checker", "checker_sha256", "mesh_invariant_sha256", "walls", "args") if pk.get(k) != cache_key[k]]
+                if not diff and "result" in prev:
+                    res = prev["result"]
+                    print(f"結果の再利用: {cp} (鍵が一致: メッシュの不変部分・壁の physID と面・閾値・検査器の版)")
+                    for ln in res.get("lines", []):
+                        print(ln)
+                    if a.json:
+                        with open(a.json, "w") as fh:
+                            json.dump({"verdict": res.get("verdict"), "exit": res.get("exit"), "reused": True,
+                                       "summary": res.get("summary")}, fh, ensure_ascii=False, indent=1)
+                    sys.exit(int(res.get("exit", 1)))
+                why = "鍵が違う: " + ", ".join(diff)
+            whys.append(why if len(cands) == 1 else f"{'実体の隣' if cp == real_cache else '渡されたパスの隣'}: {why}")
+        print(f"結果の再利用: なし ({'; '.join(whys)})")
 
     if src_line is not None:
         say(src_line)
