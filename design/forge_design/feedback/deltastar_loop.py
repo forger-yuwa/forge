@@ -75,6 +75,10 @@ _STOP_OVERRIDABLE = ("NOT_USED", "CENSORED", "UNAVAILABLE")   # allow_not_reache
 # allow_unsettled で通せる条件 (§5.1 #36h、forge-f5 と合意): 実測が閾値を超えたときだけ (各 check の measured が真)。判定不能 (記録の欠け・
 # 窓を覆わない・点数の不足・非有限・δ の記録の held と欠測) は通さない
 _UNSETTLED_OVERRIDABLE = ("conservation", "two_windows")
+
+# 診断専用の run の印 (plan tooling-nozzle-isothermal-wall-chain §6 V-h370-diag、codex diagnose 2026-10-14 h370-diag-ns M1)。
+# この印のある run は受け渡しの関門に回さない (資格の無い Euler 参照で回した診断の場から壁の入力を作らない)。上書きでは通さない。
+DIAG_ONLY_MARKS = ("H370_DIAG_ONLY.json", "DIAGNOSTIC_ONLY.json")
 # 受け渡しの抽出の固定の条件 (§5.1 #36e (4)(5)、codex diagnose 3・§6 V-h370)。停止規則の帯の生成・見張りの中の出力ごとの δ の記録・
 # 関門の抽出で共通に使う (prepare_info の stop_rule.extract に写す):
 #   - 一定 x の断面への補間 remap_constant_x=True、端の補間範囲の不足は欠測 remap_edge="missing" (定数で外挿しない)
@@ -931,6 +935,9 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
     import shutil
     from ..evaluate import stop_rule as SR
     run_dir = Path(run_dir)
+    marks = [m for m in DIAG_ONLY_MARKS if (run_dir / m).exists()]
+    if marks:
+        raise HandoffBlocked(f"{run_dir} は診断専用の run ({marks[0]}) なので受け渡しの関門に回さない (§6 V-h370-diag; 上書きでは通さない)")
     why_nr = override_reason("allow_not_reached", allow_not_reached)
     why_uc = override_reason("allow_unconverged", allow_unconverged)
     why_us = override_reason("allow_unsettled", allow_unsettled)

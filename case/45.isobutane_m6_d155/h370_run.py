@@ -24,6 +24,19 @@ B で h370_run.sh から起動する (h370_prep.sh <commit> を先に通す)。
        本段の見張りは run_staged_ns の中の stop_rule.watch_main_stage。本段の直前 (MAIN_STAGE_STARTED を書いた後・forge の前) に通知の中身・
        資源を照合し、合わなければ本段の forge を起動させない。終わったら h370_judge.py (§6 V-h370 の判定) を回す。
   --phase all: (i) で資格を満たしたら同じプロセスで (ii) へ。
+  --phase ns-diag (§5.1 #36l・§6「V-h370-diag の事前登録」、codex diagnose `notes/reviews/2026-10-14-h370-diag-ns-diagnose.md`): **診断用**の
+       run_0951_h370_ns_b0。Euler の参照は run_0950 の res_60000.h5 を**未適格 (予備の資格 FAIL) のまま**診断専用に sha で固定し、正式の記録
+       (h370_euler_prequalify.json・h370_euler_ref_pin.json) とは別の _band_ab/half_inlet/h370_diag_euler_ref.json に残す (正式の記録は読むだけ;
+       read_pin の資格の検査を迂回するのはこの経路の中だけ)。感度の判定の参照 (run_0952・run_0953 の res_40000.h5) の sha も同じ記録に固定する。
+       準備・投入前の検査 (品質・δ_in・壁の出力・設定・停止規則・(i) の準備とのビット同一)・本段の直前の照合・NaN/Inf の見張り (停止規則)・資源は
+       (ii) と同じで、足すのは保存の容量の照合 (上限 200,000 / 出力 2,500 = 80 出力 × 1 出力の大きさ (投入前の準備の nozzle.h5) + 壁の出力 + 余裕
+       をディスクの空きと比べ、足りなければ forge を回さない) と、抽出器・見張りの版 (design の該当ファイルの sha) の記録。受け渡しの関門
+       (deltastar_loop.handoff_gate) は**呼ばない**、壁の更新・次の pass の自動実行もしない、正式の判定 (h370_judge.py の既定) も呼ばない
+       (update_conditions_met は常に偽; run に印 H370_DIAG_ONLY.json)。自動の延長はしない。このスクリプト・run_staged_ns・stop_rule は本段の
+       出力を消さない (run_staged_ns が消すのは S1・S2 の出力だけで本段の前、stop_rule.delete_after が消すのは停止の出力 s より後の出力だけ)。
+       終わったら終了の状態 (REACHED・CENSORED・実行の失敗) と停止の時刻 s・判定の窓 (CENSORED は「打切りの時点の診断の窓」= 末尾の 17 出力)・
+       本段の出力の完全性・run の全ファイルの sha の一覧 (H370_DIAG_SHA256.json)・check_convergence.py --segment --drop 3 の VERDICT (記録)・正式の記録が
+       書き換わっていないことを H370_DIAG_END.json に残す。感度の判定は別に `python3 h370_judge.py --diag-sens` (CFD 0 step)。
 
   コード : ~/forge-g0cchain (h370_prep.sh が commit に合わせる) の design/ を sys.path の先頭にして forge_design を読む。
   forge  : ~/forge-fgeom7-fp64 (sha256 7e95e5bbd8f50c9e…)、変換器は同じビルドの convertGmshToForge (711f4438…)。環境変数は V-tw370 と同じ
@@ -38,14 +51,17 @@ usage (B、h370_run.sh 経由):
   bash h370_run.sh --phase euler --commit <c> --dry-run r1   (回す前の確かめ: _h370_dry_r1_euler・_h370_dry_r1_ns に準備と検査だけ、forge は回さない)
   bash h370_run.sh --phase all --commit <c>                  ((i) → 資格 → (ii) → 判定)
   bash h370_run.sh --phase ns --commit <c>                   ((i) が済んでいて、(ii) だけを回すとき)
+  bash h370_run.sh --phase ns-diag --commit <c> --dry-run d1 (診断の経路の回す前の確かめ: _h370_dry_d1_nsdiag に準備と検査だけ)
+  bash h370_run.sh --phase ns-diag --commit <c>              (診断用の run_0951 (§6 V-h370-diag)。終わったら h370_judge.py --diag-sens)
   python3 h370_run.py --phase check-problems --commit <c>    (h370_prep.sh が呼ぶ: h370_problems.py check を作業ツリーの版で)
-終了コード: 0 正常 (dry-run の検査の合格を含む) / 1 中止 (環境・入力) / 2 前提の検査の不成立・資格の未達 (forge を回さない) /
+終了コード: 0 正常 (dry-run の検査の合格を含む) / 1 中止 (環境・入力) / 2 前提の検査の不成立・資格の未達・保存の容量の不足 (forge を回さない) /
            4 NS が停止の出力で壁の出力を書かない (書く設定を足すのは方針の変更なので親に返す)。
 """
 import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -117,6 +133,23 @@ DISK_MIN = 2 * 1024 ** 3                          # 走行中: これを切っ�
 GPU_FREE_MIN_MIB = 2048
 HOST_MIN_MIB = 4608
 EXIT_WALL_OUTPUT = 4
+# --- 診断の経路 (--phase ns-diag; §5.1 #36l・§6 V-h370-diag) -------------------------------------------------------------------
+PLAN_DIAG = ("plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36l・§6 V-h370-diag (codex diagnose "
+             "notes/reviews/2026-10-14-h370-diag-ns-diagnose.md)")
+DIAG_REF = "_band_ab/half_inlet/h370_diag_euler_ref.json"   # 診断専用の Euler の参照の固定 (正式の PIN・QUAL とは別; h370_judge.DIAG_REF と同じ)
+DIAG_SENS_REFS = {"A": ("run_0952_h370_euler_cfl2", "res_40000.h5"), "B": ("run_0953_h370_euler_cfl05", "res_40000.h5")}   # 感度の判定の腕
+DIAG_MARK = "H370_DIAG_ONLY.json"                 # 診断専用の run の印 (正式の判定・関門に回さない)
+DIAG_END = "H370_DIAG_END.json"                   # 終了の状態・判定の窓・保存の完全性の記録
+DIAG_SHA = "H370_DIAG_SHA256.json"                # 終了の時点の run の全ファイルの sha256 の一覧
+DIAG_CONV = "H370_DIAG_CONVERGENCE.txt"           # check_convergence.py --segment --drop 3 の出力 (記録)
+DIAG_STATUS = "未適格 (予備の資格 FAIL) — 診断専用。正式の資格・固定ではなく、受け渡し・壁の更新に使わない"
+DIAG_N_OUT = NS_CAP // NS_OUT                     # 本段の上限までの出力の数 (80)
+DIAG_EXTRA_OUT = 2                                # S1・S2 の出力 (本段の前に消す) の分
+DIAG_WALL_FRAC = 0.01                             # 1 出力の境界の出力 (res_<名前>_<id>_<step>.h5) の見積もり = nozzle.h5 × これ (case/45 run_0117
+                                                  # の実測: res_wall_3 232 KB / nozzle.h5 50 MB = 0.46 %、outlet・inlet を足しても 1 % 未満)
+DIAG_MARGIN = 1.10                                # 余裕 (×)、さらに走行中の停止の閾値 DISK_MIN を残す
+VERSION_FILES = ("evaluate/stop_rule.py", "metrics/deltastar.py", "feedback/deltastar_loop.py", "evaluate/runner_axismach.py",
+                 "evaluate/runner.py", "metrics/delta_in_check.py")   # 抽出器・見張り・準備の版 (forge_design の中の相対パス; h370_judge.VERSION_FILES と同じ)
 
 
 def now() -> str:
@@ -676,10 +709,12 @@ def euler_prepare_checks(RA, run: Path, info: dict) -> dict:
 # --- 観測だけの包み ---------------------------------------------------------------------------------------------------------------
 class Observer:
     """run_forge (前の段と Euler の全段) と _write_main_stage_started (NS の本段の直前) を包む。段の設定の sha が導いたものと違えば forge を
-    起動させない (例外)。NS の本段の直前は通知の中身・資源を照合し、不成立なら WATCH_ABORT を書いて例外 (本段の forge を起動させない)。"""
+    起動させない (例外)。NS の本段の直前は通知の中身・資源を照合し、不成立なら WATCH_ABORT を書いて例外 (本段の forge を起動させない)。
+    disk_min: 本段の前の資源の照合のディスクの空きの下限 (既定 DISK_START_MIN; 診断の経路は保存の容量の見積もりとの大きい方)。"""
 
-    def __init__(self, RA, run: Path, tags: dict, main_tag: str, prepared: dict | None = None):
+    def __init__(self, RA, run: Path, tags: dict, main_tag: str, prepared: dict | None = None, disk_min: int = DISK_START_MIN):
         self.RA, self.run, self.tags, self.main_tag, self.prep = RA, run, tags, main_tag, prepared or {}
+        self.disk_min = int(disk_min)
         self.orig = {"run_forge": RA.run_forge, "write_main": RA._write_main_stage_started}
 
     def install(self):
@@ -695,7 +730,7 @@ class Observer:
             jappend(self.run / "h370_stages.jsonl", {"event": "refused", "t": time.time(), "config_sha256": cfg_sha})
             raise RuntimeError(f"段の設定 {cfg_sha[:16]} が準備の時点で導いた段のどれとも違う — forge を起動しない")
         if tag == self.main_tag:
-            res = resources("本段の forge の前")
+            res = resources("本段の forge の前", self.disk_min)
             jappend(self.run / "h370_stages.jsonl", {"event": "resources", "tag": tag, **res})
             if not res["ok"]:
                 (self.run / "RESOURCE_STOP").write_text(now() + "\n" + "\n".join(res["failures"]) + "\n")
@@ -724,7 +759,7 @@ class Observer:
             fails.append(f"前の段の記録が導いた S1・S2 と違う: {got_prev}")
         if (rec.get("prestage_config") or {}).get("sha256") != self.prep.get("prestage_sha256"):
             fails.append("前の段の元の設定の sha256 が準備の時点と違う")
-        res = resources("本段の forge の前")
+        res = resources("本段の forge の前", self.disk_min)
         if not res["ok"]:
             fails += ["資源: " + f for f in res["failures"]]
         out = {"t": time.time(), "main_stage_started": rec, "resources": res, "failures": fails, "ok": not fails,
@@ -1008,6 +1043,299 @@ def phase_ns(a, RA, code: dict) -> int:
     return 0
 
 
+# --- 診断の経路 (--phase ns-diag; §5.1 #36l・§6 V-h370-diag) ---------------------------------------------------------------------
+def formal_records_state() -> dict:
+    """正式の記録 (予備の資格 QUAL・固定 PIN) の有無と sha256 (読むだけ。診断の経路はこれを書かない)。"""
+    out = {}
+    for name, rel in (("prequalify", QUAL), ("pin", PIN)):
+        p = HERE / rel
+        out[name] = {"file": rel, "exists": p.is_file(), "sha256": sha256_file(p) if p.is_file() else None}
+    return out
+
+
+def module_versions() -> dict:
+    """抽出器・見張り・準備の版: 読み込んだ forge_design の VERSION_FILES の sha256 (投入の時点に記録し、感度の判定が照合する)。"""
+    import forge_design
+    root = Path(forge_design.__file__).resolve().parent
+    return {n: (sha256_file(root / n) if (root / n).is_file() else None) for n in VERSION_FILES}
+
+
+def diag_euler_ref() -> dict:
+    """診断専用の Euler の参照の固定 (§6 V-h370-diag「状態と入力の固定」): run_0950 の res_60000.h5 を**未適格 (予備の資格 FAIL) のまま**
+    sha で固定し、感度の判定の腕 A・B (run_0952・run_0953 の res_40000.h5) の sha も固定して DIAG_REF に書く (無ければ O_EXCL で作る、
+    あれば今の sha と照合して違えば止める; 消さない・書き換えない)。正式の記録 (QUAL・PIN) は**読むだけ**: 予備の資格の記録があって
+    prequalified が偽であること (資格があるなら正式の --phase ns を使う)、正式の固定 PIN が無いこと、予備の資格の記録の末尾の出力の sha
+    (tail_outputs) に res_60000 があれば一致することを確かめる。read_pin の資格の検査を迂回するのはこの関数を呼ぶ診断の経路の中だけ。
+    戻り {"spec" (prepare_ns の euler_ref = {run (絶対パス), res, sha256}), "record", "formal_before"}。不成立は die。"""
+    formal = formal_records_state()
+    qual = jload(HERE / QUAL)
+    if qual is None:
+        die(f"{QUAL} が無い (予備の資格の判定が済んでいない) — 診断の経路は予備の資格 FAIL の参照を診断専用に使う経路")
+    if qual.get("prequalified") is not False:
+        die(f"{QUAL} の prequalified が偽でない ({qual.get('prequalified')!r}) — 資格があるなら正式の --phase ns を使う (診断の経路は未適格の参照のため)")
+    if formal["pin"]["exists"]:
+        die(f"正式の固定 {PIN} がある (予備の資格 FAIL なら書かれない) — 記録が食い違う。中身を確かめてから進める")
+    f = HERE / EU_RUN / f"res_{EU_STEPS}.h5"
+    if not f.is_file():
+        die(f"{f} が無い")
+    sha = sha256_file(f)
+    tail = {o.get("step"): o.get("sha256") for o in (qual.get("tail_outputs") or []) if isinstance(o, dict)}
+    cross = tail.get(EU_STEPS)
+    if cross is not None and cross != sha:
+        die(f"{EU_RUN}/res_{EU_STEPS}.h5 の sha256 {sha[:16]} が予備の資格の記録 (tail_outputs) の {str(cross)[:16]} と違う")
+    sens = {}
+    for arm, (rn, res) in DIAG_SENS_REFS.items():
+        g = HERE / rn / res
+        if not g.is_file():
+            die(f"感度の判定の腕 {arm} の参照 {rn}/{res} が無い (§6 V-h370-diag の入力)")
+        sens[arm] = {"run": rn, "res": res, "sha256": sha256_file(g)}
+    eref = {"run": EU_RUN, "res": f"res_{EU_STEPS}.h5", "step": EU_STEPS, "sha256": sha}
+    rec = {"plan": PLAN_DIAG, "created": now(), "kind": DIAG_STATUS, "qualified": False, "diagnostic_only": True,
+           "update_conditions_met": False, "euler_ref": eref, "sens_refs": sens,
+           "prequalify_record": {"file": QUAL, "sha256": formal["prequalify"]["sha256"], "prequalified": qual.get("prequalified"),
+                                 "rc": qual.get("rc"), "failures": (qual.get("failures") or [])[:4], "undecidable": (qual.get("undecidable") or [])[:4],
+                                 "tail_res_sha256": cross, "cross_check": ("一致" if cross is not None else "予備の資格の記録に無い (照合なし)")},
+           "formal_pin": formal["pin"],
+           "note": ("正式の記録 (予備の資格・固定) は読むだけで書き換えない。この記録は診断の NS (run_0951) の停止規則の帯・δ の記録・投入前の照合と、"
+                    "感度の判定 (h370_judge.py --diag-sens) が使う")}
+    p = HERE / DIAG_REF
+    old = jload(p)
+    if old is not None:
+        if (old.get("euler_ref"), old.get("sens_refs")) != (eref, sens):
+            die(f"{DIAG_REF} が既にあり、今の出力の sha と違う (記録 {old.get('euler_ref')} {old.get('sens_refs')}) — 消さない")
+        used = old
+    else:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, json.dumps(rec, indent=1, ensure_ascii=False).encode())
+        os.close(fd)
+        used = rec
+    return {"spec": {"run": str(HERE / EU_RUN), "res": f"res_{EU_STEPS}.h5", "sha256": sha}, "record": used, "formal_before": formal}
+
+
+def disk_free() -> int:
+    return shutil.disk_usage(HERE).free
+
+
+def capacity_check(run: Path, pre: Path) -> dict:
+    """保存の容量の照合 (§6 V-h370-diag「保存」): 本段の全期間の場と境界の出力を残すので、上限まで回したときの出力
+    (DIAG_N_OUT = 80 + S1・S2 の DIAG_EXTRA_OUT) × (1 出力の大きさ + 境界の出力) × 余裕 DIAG_MARGIN + 走行中の停止の閾値 DISK_MIN を、
+    今のディスクの空きと比べる。1 出力の大きさは投入前の準備 (pre、停止規則なし) の nozzle.h5 と、この run の nozzle.h5 の大きい方
+    (nozzle.h5 は格子と初期の場を持つので res_<step>.h5 より大きい = 多めの見積もり)。足りなければ不成立 (forge を回さない)。"""
+    sizes = {d.name: (d / "nozzle.h5").stat().st_size for d in (pre, run) if (d / "nozzle.h5").is_file()}
+    if pre.name not in sizes:
+        return {"ok": False, "failures": [f"1 出力の大きさを見積もる投入前の準備の nozzle.h5 ({pre.name}) が無い"], "nozzle_h5_bytes": sizes}
+    per = max(sizes.values())
+    wall = per * DIAG_WALL_FRAC
+    n = DIAG_N_OUT + DIAG_EXTRA_OUT
+    need = int(math.ceil(n * (per + wall) * DIAG_MARGIN)) + DISK_MIN
+    free = disk_free()
+    rec = {"nozzle_h5_bytes": sizes, "per_output_bytes": per, "boundary_per_output_bytes": int(wall), "n_outputs": n,
+           "margin": DIAG_MARGIN, "keep_free_bytes": DISK_MIN, "need_bytes": need, "free_bytes": free,
+           "need_gib": round(need / 2 ** 30, 2), "free_gib": round(free / 2 ** 30, 2),
+           "rule": (f"({DIAG_N_OUT} + {DIAG_EXTRA_OUT}) 出力 × (nozzle.h5 + 境界の出力 {DIAG_WALL_FRAC:g} 倍) × {DIAG_MARGIN} + 走行中の停止の閾値 "
+                    f"{DISK_MIN / 2 ** 30:.0f} GiB ≤ ディスクの空き")}
+    fails = [] if free >= need else [f"保存の容量が足りない: 要る {need / 2**30:.2f} GiB > 空き {free / 2**30:.2f} GiB ({rec['rule']})"]
+    return {"ok": not fails, "failures": fails, **rec}
+
+
+def files_sha256(run: Path, skip=()) -> dict:
+    """run の全ファイル (下のディレクトリを含む、symlink は辿らない) の {相対パス: sha256} と大きさの合計。"""
+    out, total = {}, 0
+    for p in sorted(run.rglob("*")):
+        rel = str(p.relative_to(run))
+        if p.is_symlink() or not p.is_file() or rel in skip:
+            continue
+        out[rel] = sha256_file(p)
+        total += p.stat().st_size
+    return {"n": len(out), "bytes": total, "files": out}
+
+
+def write_diag_mark(run: Path, dref: dict) -> None:
+    """診断専用の run の印 (h370_judge.py の正式の判定はこの印のある run を判定せず、受け渡しの関門を呼ばない)。"""
+    if run.is_dir() and not (run / DIAG_MARK).exists():
+        jdump(run / DIAG_MARK, {"plan": PLAN_DIAG, "created": now(), "diagnostic_only": True, "update_conditions_met": False,
+                                "euler_ref": dref["spec"], "euler_ref_status": DIAG_STATUS, "diag_euler_ref_record": DIAG_REF,
+                                "forbidden": ["受け渡しの関門 (deltastar_loop.handoff_gate)", "壁の更新", "次の pass の自動実行",
+                                              "診断の成果物を正式の受け渡しの表として公開すること", "#36h の上書き"],
+                                "sensitivity_judge": "python3 h370_judge.py --diag-sens"})
+
+
+def diag_end_record(RA, run: Path, rc_txt: str, run_end: dict, dref: dict, wall_dump_name) -> dict:
+    """診断の NS の終了の記録 (§6 V-h370-diag「実行・終了」「保存」): 終了の状態 REACHED・CENSORED・実行の失敗、停止の時刻 s (CENSORED は
+    最後の出力)、判定の窓 [s − 40,000, s] の 17 出力 (CENSORED は「打切りの時点の診断の窓」)、本段の出力 (場・境界の出力) の完全性、
+    停止規則の到達・中断・保持の記録、check_convergence.py --segment --drop 3 の VERDICT (記録)、run の全ファイルの sha の一覧
+    (DIAG_SHA)、正式の記録が書き換わっていないこと。何も消さない。"""
+    from forge_design.evaluate import stop_rule as SR
+    state = SR.read_state(run) or {}
+    rec = jload(run / SR.RECORD) or {}
+    st = state.get("status")
+    if rc_txt == "EXC" or not state:
+        kind = "実行の失敗"
+    elif st in ("REACHED", "CENSORED"):
+        kind = st
+    else:
+        kind = "実行の失敗"
+    out = {"plan": PLAN_DIAG, "created": now(), "diagnostic_only": True, "update_conditions_met": False, "run_rc": rc_txt,
+           "end_state": kind, "stop_rule_status": st, "stop_rule_state": state, "exception": (run_end.get("exception") or "")[-2000:] or None}
+    s = state.get("stop_step") if kind in ("REACHED", "CENSORED") else None
+    out["stop_step"] = s
+    if s is not None:
+        req = SR.required_window_steps(int(s), int(THRESHOLDS["window"]), NS_OUT)
+        out["window"] = {"steps": req, "range": [int(s) - 2 * int(THRESHOLDS["window"]), int(s)], "n": len(req),
+                         "kind": ("停止の時刻の窓 [s − 40,000, s] (2 窓 × 20,000、出力 2,500 ごと)" if kind == "REACHED" else
+                                  "打切りの時点の診断の窓 (上限の打切り CENSORED: 最後の出力 s で終わる末尾の 17 出力; §6 V-h370-diag で先に登録)"),
+                         "missing_res": [k for k in req if not (run / f"res_{k}.h5").is_file()],
+                         "missing_wall": ([k for k in req if not (run / wall_dump_name.replace("<step>", str(k))).is_file()] if wall_dump_name else None)}
+    steps = sorted(int(m.group(1)) for f in run.iterdir() if (m := re.fullmatch(r"res_(\d+)\.h5", f.name)) and int(m.group(1)) > 0)
+    last = steps[-1] if steps else None
+    want = list(range(NS_OUT, (last or 0) + 1, NS_OUT))
+    out["main_outputs"] = {"n": len(steps), "first": steps[0] if steps else None, "last": last,
+                           "gaps": [k for k in want if k not in steps], "off_grid": [k for k in steps if k % NS_OUT],
+                           "boundary_dumps": len([f for f in run.iterdir() if re.fullmatch(r"res_(?!nan_).+_\d+_\d+\.h5", f.name)]),
+                           "complete": bool(steps) and steps == want}
+    out["stop_rule"] = {"hold": rec.get("hold"), "deleted_after_stop": rec.get("deleted_after_stop"), "stop_sha256": rec.get("stop_sha256"),
+                        "band": {k: (rec.get("band") or {}).get(k) for k in ("step", "res_sha256", "euler_ref", "out_dir")},
+                        "n_rows": len(rec.get("rows") or []), "record": SR.RECORD,
+                        "note": "停止規則の全系列 (行)・到達・中断・保持の記録・参照から作った帯 (stop_rule_band/) は run に残す"}
+    try:
+        cmd = [sys.executable, str(RA.FORGE_TOOLS / "check_convergence.py"), "--segment", "--drop", "3", str(run)]
+        cv = subprocess.run(cmd, capture_output=True, text=True)
+        (run / DIAG_CONV).write_text(cv.stdout + cv.stderr)
+        out["convergence (記録)"] = {"cmd": " ".join(cmd[1:]), "rc": cv.returncode, "file": DIAG_CONV,
+                                     "verdict": [ln.strip() for ln in cv.stdout.splitlines() if ln.startswith("===") or ln.startswith("OVERALL")]}
+    except Exception as e:  # noqa: BLE001 — 記録だけ
+        out["convergence (記録)"] = {"error": repr(e)}
+    out["residual_png"] = (run / "residual_history.png").is_file()
+    after = formal_records_state()
+    out["formal_records"] = {"before": dref["formal_before"], "after": after, "unchanged": after == dref["formal_before"]}
+    shal = files_sha256(run, skip=(DIAG_SHA, DIAG_END))
+    jdump(run / DIAG_SHA, {"plan": PLAN_DIAG, "created": now(), **shal})
+    out["sha_list"] = {"file": DIAG_SHA, "n": shal["n"], "bytes": shal["bytes"]}
+    return out
+
+
+def phase_ns_diag(a, RA, code: dict) -> int:
+    """--phase ns-diag (§6 V-h370-diag): 上の docstring。正式の (ii) と同じ準備・検査・本段の直前の照合・見張りで、Euler の参照だけが
+    診断専用の固定 (diag_euler_ref)。関門・正式の判定・壁の更新・次の pass は呼ばない。"""
+    dry = a.dry_run
+    dref = diag_euler_ref()
+    run = HERE / (f"_h370_dry_{dry}_nsdiag" if dry else NS_RUN)
+    if run.exists():
+        die(f"{run} が既にある (既存の run は消さない; 診断の run 名は登録の {NS_RUN} のまま、未使用であること)")
+    pc = {"plan": PLAN_DIAG, "phase": "ns-diag", "diagnostic_only": True, "update_conditions_met": False, "created": now(), "run": run.name,
+          "dry_run": dry, "code": code, "euler_ref": dref["spec"], "euler_ref_status": DIAG_STATUS, "diag_euler_ref_record": DIAG_REF,
+          "sens_refs": dref["record"].get("sens_refs"), "formal_records_before": dref["formal_before"], "versions": module_versions(),
+          "failures": [], "ok": False}
+    pc["inputs"] = input_checks()
+    res0 = resources("起動の前")
+    pc["resources_start"] = res0
+    log(f"資源 {json.dumps(res0, ensure_ascii=False)}")
+    if not pc["inputs"]["ok"]:
+        die("入力が欠けているか登録と違う: " + "; ".join(pc["inputs"]["failures"]))
+    if not res0["ok"] and not dry:
+        die("資源が足りない (forge を回さない): " + "; ".join(res0["failures"]))
+    timing = Timing(run)
+    if not dry:
+        timing.start()
+    t_start = time.time()
+    log(f"診断の NS の prepare_ns ({NS_PROBLEM} → {run.name}、euler_ref {dref['spec']['res']} {dref['spec']['sha256'][:16]}… = {DIAG_STATUS})")
+    try:
+        info = RA.prepare_ns(HERE / NS_PROBLEM, run, delta_r_csv=str(HERE / CSV), offset="radial", euler_ref=dref["spec"])
+    except Exception as e:  # noqa: BLE001
+        tb = traceback.format_exc()
+        if isinstance(e, subprocess.CalledProcessError):
+            tb += f"\n--- stdout ---\n{(e.stdout or '')[-3000:]}\n--- stderr ---\n{(e.stderr or '')[-3000:]}"
+        log("prepare_ns が失敗:\n" + tb)
+        if run.is_dir():
+            write_diag_mark(run, dref)
+            fail_record(run, pc, [f"prepare_ns が失敗: {e!r}"])
+        timing.stop_evt.set()
+        return 2
+    write_diag_mark(run, dref)
+    (run / "START_EPOCH").write_text(f"{t_start:.6f}\n")
+    items = {}
+    items["N1_quality"] = quality_check(RA, run, 5000)
+    items["N2_delta_in"] = delta_in_check(run, HERE / EU_RUN)
+    items["N3_wall_output"] = wall_output_check(run)
+    items["N4_config"] = ns_config_checks(RA, run)
+    items["N5_prepare"] = ns_prepare_info_checks(info, dref["spec"], prelaunch=False)
+    pre = HERE / NS_PRELAUNCH
+    if pre.is_dir():
+        same = {n: (run / n).read_bytes() == (pre / n).read_bytes() for n in ("solverConfig.yaml", RA.PRESTAGE_CONFIG, "bcondConfig.yaml",
+                                                                             "nozzle.msh", "probe.yaml", "species_meta.yaml")
+                if (run / n).is_file() and (pre / n).is_file()}
+        mi = mesh_identity(run / "nozzle.h5", pre / "nozzle.h5")
+        fails7 = [f"(i) の投入前の準備と {n} が違う" for n, v in same.items() if not v] + ([] if mi["ok"] else [f"(i) の投入前の準備と nozzle.h5 が違う: {mi['differ']}"])
+        items["N7_same_as_prelaunch"] = {"ok": not fails7, "failures": fails7, "files": same, "nozzle_h5": mi, "prelaunch": NS_PRELAUNCH}
+    else:
+        items["N7_same_as_prelaunch"] = {"ok": False, "failures": [f"(i) の投入前の準備 {NS_PRELAUNCH} が無い (照合できない)"]}
+    items["N8_sha"] = {"nozzle_h5_initial": sha256_file(run / "nozzle.h5"), "nozzle_msh": sha256_file(run / "nozzle.msh"),
+                       "bcondConfig": sha256_file(run / "bcondConfig.yaml"), "solverConfig_main": sha256_file(run / "solverConfig.yaml"),
+                       "solverConfig_prestage": sha256_file(run / RA.PRESTAGE_CONFIG), "problem": sha256_file(HERE / NS_PROBLEM),
+                       "euler_ref": dref["spec"], "mesh_hashes": (info.get("mesh") or {}).get("hashes")}
+    items["D1_capacity"] = capacity_check(run, pre)
+    items["D2_prepared_files_sha256 (記録)"] = files_sha256(run, skip=("H370_PRECHECK.json", "timing.tsv"))
+    pc["items"] = items
+    pc["t_checked"] = time.time()
+    fails = collect_failures(items)
+    pc["failures"], pc["ok"] = fails, not fails
+    jdump(run / "H370_PRECHECK.json", pc)
+    cap = items["D1_capacity"]
+    log(f"診断の NS の投入前の検査 {'合格' if pc['ok'] else '不成立'}: 品質 {items['N1_quality'].get('check_mesh_quality_nozzle_h5')}、"
+        f"δ_in max {items['N2_delta_in'].get('judged', {}).get('max_abs_mm')} mm、壁の出力 {items['N3_wall_output']['ok']}、"
+        f"(i) の準備と同一 {items['N7_same_as_prelaunch']['ok']}、保存の容量 要る {cap.get('need_gib')} GiB / 空き {cap.get('free_gib')} GiB"
+        + ("" if pc["ok"] else " — " + "; ".join(fails)))
+    if not items["N3_wall_output"]["ok"]:
+        (run / "PRECHECK_FAILED").write_text(now() + "\n" + "\n".join(fails) + "\n")
+        log("NS が停止の出力で壁の出力を書かない設定 — 止めて親に返す (終了コード 4)")
+        timing.stop_evt.set()
+        return EXIT_WALL_OUTPUT
+    if dry:
+        log(f"--dry-run {dry}: 診断の NS の投入前の検査 {'合格' if pc['ok'] else '不成立'} (forge は回さない)")
+        return 0 if pc["ok"] else 2
+    if not pc["ok"]:
+        (run / "PRECHECK_FAILED").write_text(now() + "\n" + "\n".join(fails) + "\n")
+        log("前提の検査が不成立 — 診断の NS の forge を回さない")
+        timing.stop_evt.set()
+        return 2
+    # --- 実行: run_staged_ns (S1 → S2 → 本段; 本段は停止規則の見張り)。関門・正式の判定は呼ばない ---
+    st4 = items["N4_config"]
+    main_cap = RA._cfg_set(RA.ns_stage_configs((run / "solverConfig.yaml").read_text(), "full",
+                                                cfg_pre=(run / RA.PRESTAGE_CONFIG).read_text())[1], {"nStepOuter": NS_CAP})
+    prepared = {"main_sha256": sha256_text(main_cap), "prestage_sha256": st4["sha256"]["prestage_config"], "want_prev": st4["previous_want"]}
+    obs = Observer(RA, run, {k: v for k, v in st4["stage_tags_by_sha"].items() if v != "main"}, "main", prepared,
+                   disk_min=max(DISK_START_MIN, int(cap["need_bytes"])))
+    obs.install()
+    run_end = {"t_start": t_start, "phase": "ns-diag"}
+    try:
+        rc = RA.run_staged_ns(run, stages="full")
+        rc_txt = str(int(rc))
+        run_end["stop_rule"] = getattr(rc, "stop_rule", None)
+    except Exception:  # noqa: BLE001
+        run_end["exception"] = traceback.format_exc()
+        log("run_staged_ns が例外:\n" + run_end["exception"])
+        rc_txt = "EXC"
+    finally:
+        obs.uninstall()
+    (run / "RUN_RC").write_text(rc_txt + "\n")
+    timing.stop_evt.set()
+    timing.join(timeout=60)
+    run_end.update(t_end=time.time(), run_rc=rc_txt, main_started=(run / RA.MAIN_STAGE_STARTED).is_file())
+    jdump(run / "RUN_END.json", run_end)
+    try:
+        end = diag_end_record(RA, run, rc_txt, run_end, dref, items["N3_wall_output"].get("wall_dump_name"))
+    except Exception:  # noqa: BLE001 — 記録の失敗も残す (run は消さない)
+        end = {"plan": PLAN_DIAG, "diagnostic_only": True, "update_conditions_met": False, "run_rc": rc_txt, "end_state": "記録の失敗",
+               "exception": traceback.format_exc()[-3000:]}
+    jdump(run / DIAG_END, end)
+    log(f"{run.name} (診断) 終了 RUN_RC={rc_txt} 終了の状態 {end.get('end_state')} 停止の時刻 {end.get('stop_step')} "
+        f"本段の出力 {(end.get('main_outputs') or {}).get('n')} (欠け {(end.get('main_outputs') or {}).get('gaps')}) 正式の記録の書き換え "
+        f"{'なし' if (end.get('formal_records') or {}).get('unchanged') else 'あり・不明'} ({run_end['t_end'] - t_start:.0f} s) — "
+        "感度の判定は python3 h370_judge.py --diag-sens (関門・壁の更新は呼ばない)")
+    return 0
+
+
 # --- h370_problems.py check (作業ツリーの版で; h370_prep.sh が呼ぶ) ------------------------------------------------------------
 def check_problems(a) -> int:
     """作業ツリーの h370_problems.py を読み込み (HERE = 作業ツリーの case → design も作業ツリー)、V5d の起動の記録 (moc_v5d_run.log、
@@ -1031,7 +1359,7 @@ def check_problems(a) -> int:
 def main(argv=None) -> int:
     global LOG_TAG
     ap = argparse.ArgumentParser()
-    ap.add_argument("--phase", required=True, choices=("euler", "ns", "all", "check-problems"))
+    ap.add_argument("--phase", required=True, choices=("euler", "ns", "all", "check-problems", "ns-diag"))
     ap.add_argument("--commit", required=True, help="~/forge-g0cchain の HEAD であるべき commit (h370_prep.sh に渡したもの)")
     ap.add_argument("--dry-run", default=None, metavar="NAME",
                     help="準備と前提の検査だけを run_09xx を使わずに _h370_dry_<NAME>_* で行う (forge・資格の判定・判定は回さない)")
@@ -1045,6 +1373,8 @@ def main(argv=None) -> int:
         return check_problems(a)
     RA, code = code_checks(a)
     log(f"コード {json.dumps(code, ensure_ascii=False)}")
+    if a.phase == "ns-diag":
+        return phase_ns_diag(a, RA, code)
     if a.phase in ("euler", "all"):
         rc = phase_euler(a, RA, code)
         if rc != 0 or a.phase == "euler" or a.dry_run:

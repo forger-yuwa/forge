@@ -33,6 +33,14 @@
   G. h370_run.py の段取り (--dry-run・本番) を偽の準備 (本物の生成器の設定・偽の格子) で: 投入前の検査の合格・不成立・壁の出力が無い
      (終了コード 4)・既存の run で止まる・dry-run と不成立で forge を回さない・資格未達で NS に進まない・環境変数と固定の欠けで止まる・
      h370_problems.py check を作業ツリーの版で回す。
+  L. 診断の経路 (§5.1 #36l・§6 V-h370-diag; h370_run.py --phase ns-diag・h370_judge.py --diag-sens、forge なし):
+     (a) 診断の経路・感度の判定・診断の run への正式の判定のどれでも受け渡しの関門 (HOOKS と deltastar_loop.handoff_gate を例外を投げる偽物に
+     差し替え) が呼ばれない、正式の判定 (h370_judge.py の既定) も呼ばない; (b) 正式の記録 (予備の資格・固定) が書き換わらない (バイトで照合)・
+     診断の参照の固定は別のファイル; (c) 正式の --phase ns は変わらない (G・H のほか、診断の記録があっても read_pin・phase_ns は資格 FAIL で
+     止まる)、診断の経路は資格ありの記録・正式の固定・参照の sha の違いで止まる; (d) 保存の容量の不足で forge を回さない (見積もりの式も照合);
+     (e) 感度の分類 (結果 A・B・判定不能、17 出力の欠け、合否の変化、D が 0.01 mm をまたぐ時刻があっても最大で決まる) を単体・偽物の抽出の
+     全経路・本物の抽出 (diag_snapshot は stop_rule.delta_snapshot と同じ値) で; (f) 途中の出力を消さない (診断の経路の後に本段の全出力と
+     境界の出力が残り sha の一覧に入る、stop_rule.delete_after は停止の出力より後だけを消す、診断の関数・run_staged_ns の本段の部分に消す処理が無い)。
 usage: /home/sano/work/forge/design/.venv-opt/bin/python case/45.isobutane_m6_d155/test_h370_launch.py   (所要 約 8〜12 分; 終了コード 0 = ALL PASS)
 """
 from __future__ import annotations
@@ -1413,9 +1421,444 @@ def test_euler_wall_restore():
         check("負例: 壁ファイルの sha が prepare_info の記録と違う → 不成立", not r["ok"])
 
 
+# ====================================================================================== L. 診断の経路 (§5.1 #36l・§6 V-h370-diag)
+S_DIAG = 62500                                                          # 合成の診断の NS の停止の時刻 (窓 [22,500, 62,500] の 17 出力)
+ARM_RUNS = {"A": "run_0952_h370_euler_cfl2", "B": "run_0953_h370_euler_cfl05"}
+
+
+class GateCalled(AssertionError):
+    pass
+
+
+def gate_boom(calls):
+    """受け渡しの関門の偽物: 呼ばれたら記録して例外 (診断の経路では呼ばれてはいけない)。"""
+    def g(*a, **k):
+        calls.append(("handoff_gate", a, k))
+        raise GateCalled("受け渡しの関門が呼ばれた")
+    return g
+
+
+def diag_fake_case(qual_prequalified=False, pin=False) -> Path:
+    """診断の経路の偽の B の case dir: Euler run_0950 (res_60000)・腕 A・B (res_40000)・予備の資格の記録 (prequalified 偽、末尾の出力の sha)・
+    (i) の投入前の準備 _h370_prelaunch_ns (本物の生成器の設定・偽の格子)。"""
+    c = fake_case()
+    for rn, res in ((HR.EU_RUN, "res_60000.h5"), *HR.DIAG_SENS_REFS.values()):
+        (c / rn).mkdir(exist_ok=True)
+        (c / rn / res).write_bytes(f"euler {rn} {res}".encode())
+    sha60 = HR.sha256_file(c / HR.EU_RUN / "res_60000.h5")
+    (c / HR.QUAL).write_text(json.dumps({"prequalified": qual_prequalified, "rc": 1, "failures": ["check_convergence.py --segment --drop 3 が PASS でない"],
+                                         "undecidable": [], "tail_outputs": [{"res": "res_60000.h5", "step": 60000, "sha256": sha60}]}))
+    if pin:
+        (c / HR.PIN).write_text(json.dumps({"run": HR.EU_RUN, "res": "res_60000.h5", "sha256": sha60}))
+    with Patch((HR, "HERE", c)):
+        make_fake_prepare_ns()(c / HR.NS_PROBLEM, c / HR.NS_PRELAUNCH, delta_r_csv=str(c / HR.CSV))
+    return c
+
+
+def fake_prepare_ns_sr(problem, run, delta_r_csv=None, offset=None, euler_ref=None, stop_rule=None, **kw):
+    """prepare_ns の偽物 (本物の生成器の設定・偽の格子) に停止規則と Euler の参照の記録を足す (test H と同じ形)。"""
+    from forge_design.feedback.deltastar_loop import handoff_extract_settings
+    info = make_fake_prepare_ns()(problem, run, delta_r_csv=delta_r_csv)
+    sr = {"requested": True, "use": True, "cap": HR.NS_CAP, "hold_steps": HR.NS_HOLD, "out_step_interval": HR.NS_OUT, **HR.THRESHOLDS,
+          "extract": {**handoff_extract_settings(), "source": "試験"}, "euler_ref": euler_ref}
+    info.update(stop_rule=sr, euler_ref=euler_ref)
+    (Path(run) / "prepare_info.json").write_text(json.dumps(info))
+    return info
+
+
+def make_fake_staged_ns_diag(status="REACHED", last=S_DIAG, raise_exc=False, seen=None):
+    """run_staged_ns の偽物: 段の導出 → 本段の通知 (Observer が照合) → 本段の出力 (場・壁・出口の境界の出力、2,500 ごと) を last まで書き、
+    停止規則の記録と状態を書く (forge は回さない)。何も消さない。"""
+    def f(run, stages="full", **kw):
+        run = Path(run)
+        cfg_main = (run / "solverConfig.yaml").read_text()
+        cfg_pre = (run / RA.PRESTAGE_CONFIG).read_text()
+        pre, main, _ = RA.ns_stage_configs(cfg_main, stages, cfg_pre=cfg_pre)
+        done = [{"tag": t, "nsteps": n, "config_sha256": HR.sha256_text(cfg)} for t, cfg, n, _ in pre]
+        main = RA._cfg_set(main, {"nStepOuter": HR.NS_CAP})
+        (run / "solverConfig.yaml").write_text(main)
+        RA._write_main_stage_started(run, main, stages, done, cfg_pre)
+        if raise_exc:
+            raise RuntimeError("偽の見張りの例外")
+        steps = list(range(HR.NS_OUT, last + 1, HR.NS_OUT))
+        for k in steps:
+            (run / f"res_{k}.h5").write_bytes(f"field {k}".encode())
+            (run / f"res_{k}.xmf").write_text(f"xmf {k}")
+            (run / f"res_wall_3_{k}.h5").write_bytes(f"wall {k}".encode())
+            (run / f"res_outlet_2_{k}.h5").write_bytes(f"outlet {k}".encode())
+        (run / "stop_rule_band").mkdir(exist_ok=True)
+        (run / "stop_rule_band" / "delta_r_edge.csv").write_text("x_rt,y_ref,y_star,kappa_med,kappa_s,y_b\n")
+        hold = {"hold_steps": HR.NS_HOLD, "start": last - HR.NS_HOLD if status == "REACHED" else None, "reached": [10000, last - HR.NS_HOLD],
+                "breaks": [{"start": 10000, "broken_at": 12500, "why": "試験"}]}
+        SR.save_record(run, {"version": 1, "status": status, "rows": [{"step": k} for k in steps], "stop_step": last, "hold": hold,
+                             "band": {"step": 2500, "res_sha256": "x", "euler_ref": "試験", "out_dir": str(run / "stop_rule_band")}})
+        state = {"status": status, "stop_step": last, "last_output": last, "forge_rc": 143 if status == "REACHED" else 0, "hold": hold}
+        SR.write_state(run, state)
+        if seen is not None:
+            seen["steps"] = steps
+        return type("RC", (int,), {"stop_rule": state})(0)
+    return f
+
+
+def write_diag_case(case: Path, shape_b: float = 0.0, status: str = "REACHED", s_stop: int = S_DIAG) -> Path:
+    """診断の感度の判定の合成の case dir: Euler の参照 aux (run_0950・res_60000)・腕 A (run_0952・res_40000)・腕 B (run_0953・res_40000、形
+    shape_b)、診断の NS (run_0951、出力 17,500〜s_stop、窓 2 × 20,000 → 17 出力、停止規則の記録・状態・印・投入前の検査 (ns-diag・版)・
+    本段の直前の照合・sha の一覧・終了の記録)、診断の参照の固定 (DIAG_REF)。"""
+    case.mkdir(parents=True)
+    refs = {}
+    for key, rn, step, shape in (("aux", HJ.EU_RUN, 60000, 0.0), ("A", ARM_RUNS["A"], 40000, 0.0), ("B", ARM_RUNS["B"], 40000, shape_b)):
+        X, R, Q = synth_eu(X1 + 0.5, shape)
+        write_field_run(case / rn, X, R, Q, {}, (step,))
+        refs[key] = {"run": rn, "res": f"res_{step}.h5", "sha256": HJ.sha256_file(case / rn / f"res_{step}.h5")}
+    (case / "_band_ab/half_inlet").mkdir(parents=True)
+    (case / HJ.DIAG_REF).write_text(json.dumps({"euler_ref": {**refs["aux"], "step": 60000}, "sens_refs": {"A": refs["A"], "B": refs["B"]},
+                                                "qualified": False}))
+    spec_aux = {"run": str(case / HJ.EU_RUN), "res": "res_60000.h5", "sha256": refs["aux"]["sha256"]}
+    ns = case / HJ.NS_RUN
+    sr = SR.resolve_settings({"stop_rule": True, "stop_rule_thresholds": {"window": 20000}}, nsteps_arg=None, n_main=200000,
+                             n_main_source="試験", out_int=2500, euler_ref=spec_aux)
+    steps = list(range(s_stop - 45000, s_stop + 1, 2500))
+    X, R, Q = synth_ns()
+    write_field_run(ns, X, R, Q, {"wall_thermal": {"mode": "isothermal", "Tw": 370.0}, "physical_wall": {"domain": [X0, X1]},
+                                  "euler_ref": spec_aux, "stop_rule": sr}, steps, perturb=lambda st: 1.0 + 1e-6 * (st - s_stop) / 2500.0)
+    uc = SR.use_columns(ns)
+    rows = [{"step": st, "r": 1e-5, "exit_core_M": 5.99, "mdot_rt": 10.0} for st in steps]
+    rec = {"version": 1, "settings": sr, "status": status, "rows": rows, "stop_step": s_stop,
+           "delta_series": {"x": uc["x"].tolist(), "use_domain": [0.0, uc["x_w"]], "scale_m": uc["scale_m"], "extract": sr["extract"],
+                            "euler_ref": sr["euler_ref"], "span_steps": 40000}}
+    SR.save_record(ns, rec)
+    SR.write_state(ns, {"status": status, "stop_step": s_stop, "forge_rc": 143, "stop_sha256": HJ.sha256_file(ns / f"res_{s_stop}.h5")})
+    (ns / HJ.DIAG_MARK).write_text(json.dumps({"diagnostic_only": True, "update_conditions_met": False}))
+    (ns / "H370_PRECHECK.json").write_text(json.dumps({"ok": True, "phase": "ns-diag", "versions": HJ.module_versions()}))
+    (ns / "H370_MAIN_START.json").write_text(json.dumps({"ok": True}))
+    (ns / "RUN_RC").write_text("0\n")
+    (ns / "RUN_PROVENANCE.txt").write_text("forge_sha256: 7e95e5bbd8f50c9e0000\nenv         : FORGE_CUDA_BLOCKSIZE=128\n")
+    (ns / HJ.DIAG_END).write_text(json.dumps({"end_state": status, "stop_step": s_stop}))
+    (ns / HJ.DIAG_SHA).write_text(json.dumps(HR.files_sha256(ns, skip=(HJ.DIAG_SHA, HJ.DIAG_END))))
+    return case
+
+
+def fake_diag_snap(effect=None, mutate=None, calls=None):
+    """偽物の診断の抽出 (速い): δ_E = δ_target = 1e-3 r_t + effect(腕, 出力, x) [mm] / MMPR、帯の位置は一定。mutate(腕, 出力, d) で held・欠測・
+    例外を作る。腕は Euler の run の名前で見分ける (aux = run_0950)。"""
+    def g(run, step, spec, ext, x_use):
+        x = np.asarray(x_use, dtype=float)
+        name = Path(spec["run"]).name
+        arm = "aux" if name == HJ.EU_RUN else ("A" if name == ARM_RUNS["A"] else "B")
+        if calls is not None:
+            calls.append((arm, int(step)))
+        e = 1e-3 + (np.asarray(effect(arm, int(step), x), dtype=float) / MMPR if effect else 0.0) + 0.0 * x
+        d = {"delta_E": e.tolist(), "delta_target": e.tolist(), "held": [0] * len(x), "missing": [], "n_missing": 0, "n_held": 0, "lam": 1.0,
+             "res_sha256": None, "seconds": 0.0, "y_b": (0.1 + 0.0 * x).tolist(), "y_star": (0.08 + 0.0 * x).tolist()}
+        if mutate:
+            d = mutate(arm, int(step), d) or d
+        return d
+    return g
+
+
+def diag_judge(case: Path, extra=()) -> tuple:
+    rc = HJ.main(["--diag-sens", "--case-dir", str(case), "--design", str(ROOT / "design"), "--tools", str(TOOLS), *extra])
+    return rc, HJ.jload(case / HJ.DIAG_OUT)
+
+
+def test_diag_path():
+    print("== L. 診断の経路 (--phase ns-diag・--diag-sens; §5.1 #36l・§6 V-h370-diag)", flush=True)
+    import inspect
+    gate_calls, judge_calls = [], []
+    real_run = subprocess.run
+
+    def spy_run(cmd, *a, **k):
+        if any("h370_judge.py" in str(x) for x in cmd):
+            judge_calls.append(cmd)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        return real_run(cmd, *a, **k)
+    # --- 登録の値の写し ---
+    p_args = None
+    try:
+        HR.main(["--phase", "ns-diag", "--commit", "zz"])
+    except SystemExit as e:
+        p_args = e.code
+    check("L 定数: h370_judge.py の DIAG_* (参照の固定・印・終了の記録・sha の一覧・版のファイル) が h370_run.py と同じ・判定の窓 2 × 20,000・"
+          "出力 2,500・17 出力・腕 A/B の run が CFL の A/B (h370_euler_cfl_ab.sh) と同じ・--phase ns-diag を受け付ける",
+          (HJ.DIAG_REF, HJ.DIAG_MARK, HJ.DIAG_END, HJ.DIAG_SHA, HJ.VERSION_FILES) == (HR.DIAG_REF, HR.DIAG_MARK, HR.DIAG_END, HR.DIAG_SHA, HR.VERSION_FILES)
+          and HJ.DIAG_WINDOW == HR.THRESHOLDS["window"] and HJ.DIAG_OUT_INT == HR.NS_OUT
+          and len(SR.required_window_steps(S_DIAG, HJ.DIAG_WINDOW, HJ.DIAG_OUT_INT)) == HJ.DIAG_N_REQ == 17
+          and {a_: r_ for a_, (r_, _) in HR.DIAG_SENS_REFS.items()} == ARM_RUNS
+          and all(r_ in (CASE / "h370_euler_cfl_ab.sh").read_text() for r_ in ARM_RUNS.values())
+          and HR.DIAG_REF != HR.QUAL and HR.DIAG_REF != HR.PIN and p_args == 1, f"--phase ns-diag の終了 {p_args}")
+    # --- 診断の経路の本番 (偽の準備・偽の本段): (a) 関門を呼ばない・(b) 正式の記録を書き換えない・(f) 途中の出力を消さない ---
+    c = diag_fake_case()
+    qual_before = (c / HR.QUAL).read_bytes()
+    seen = {}
+    base = [(HR, "resources", lambda *a, **k: {"ok": True, "failures": []}), (HR, "WT", TMP / "no_worktree"), (HR, "HERE", c),
+            (HR, "quality_check", ok_item), (HR, "delta_in_check", ok_item), (HR, "disk_free", lambda: 64 * 2 ** 30),
+            (RA, "prepare_ns", fake_prepare_ns_sr), (subprocess, "run", spy_run), (DL, "handoff_gate", gate_boom(gate_calls)),
+            (HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)})]
+    with Patch(*base, (RA, "run_staged_ns", make_fake_staged_ns_diag(seen=seen))):
+        rc = HR.phase_ns_diag(args(phase="ns-diag", no_judge=False), RA, {})
+    run = c / HR.NS_RUN
+    pc = json.loads((run / "H370_PRECHECK.json").read_text())
+    end = json.loads((run / HR.DIAG_END).read_text())
+    shal = json.loads((run / HR.DIAG_SHA).read_text())
+    dref = json.loads((c / HR.DIAG_REF).read_text())
+    check(f"(a) 診断の経路の本番 (rc {rc}): 投入前の検査が合格 (phase ns-diag・版・保存の容量)・本段の直前の照合が合格・受け渡しの関門を呼ばない "
+          f"({len(gate_calls)} 回)・正式の判定 h370_judge.py を呼ばない ({len(judge_calls)} 回)・update_conditions_met は偽・診断の印",
+          rc == 0 and pc["ok"] and pc["phase"] == "ns-diag" and pc["update_conditions_met"] is False and set(pc["versions"]) == set(HR.VERSION_FILES)
+          and all(pc["versions"].values()) and pc["items"]["D1_capacity"]["ok"] and json.loads((run / "H370_MAIN_START.json").read_text())["ok"]
+          and not gate_calls and not judge_calls and end["update_conditions_met"] is False and (run / HR.DIAG_MARK).is_file()
+          and json.loads((run / HR.DIAG_MARK).read_text())["update_conditions_met"] is False, str(pc["failures"])[:300])
+    check("(a) Euler の参照は run_0950 の res_60000 (sha) を未適格のまま診断専用に: prepare_ns・停止規則・投入前の検査の euler_ref が DIAG_REF の固定、"
+          "記録の状態は「未適格 (予備の資格 FAIL)」",
+          pc["euler_ref"]["res"] == "res_60000.h5" and pc["euler_ref"]["sha256"] == dref["euler_ref"]["sha256"]
+          == HR.sha256_file(c / HR.EU_RUN / "res_60000.h5") and pc["items"]["N5_prepare"]["euler_ref"] == pc["euler_ref"]
+          and dref["qualified"] is False and "未適格" in dref["kind"] and dref["prequalify_record"]["cross_check"] == "一致"
+          and set(dref["sens_refs"]) == {"A", "B"} and all(len(v["sha256"]) == 64 for v in dref["sens_refs"].values()))
+    check("(b) 正式の記録 (予備の資格 h370_euler_prequalify.json) はバイトで同じ・正式の固定 h370_euler_ref_pin.json は作らない・終了の記録の照合も "
+          "「書き換えなし」・診断の参照の固定は別のファイル (h370_diag_euler_ref.json)",
+          (c / HR.QUAL).read_bytes() == qual_before and not (c / HR.PIN).exists() and end["formal_records"]["unchanged"] is True
+          and (c / HR.DIAG_REF).is_file() and HR.DIAG_REF.endswith("h370_diag_euler_ref.json"))
+    main_files = [f"res_{k}.h5" for k in seen["steps"]] + [f"res_wall_3_{k}.h5" for k in seen["steps"]] + [f"res_outlet_2_{k}.h5" for k in seen["steps"]]
+    check(f"(f) 本段の全出力 {len(seen['steps'])} 枚 (場・壁・出口の境界の出力・xmf) が診断の経路の後も残り、sha の一覧 ({shal['n']} ファイル) に入る・"
+          "停止規則の帯・記録・stage の記録も一覧に入る",
+          all((run / n).is_file() for n in main_files) and all(n in shal["files"] for n in main_files)
+          and "stop_rule_band/delta_r_edge.csv" in shal["files"] and "stop_rule.json" in shal["files"]
+          and shal["files"][f"res_{S_DIAG}.h5"] == HR.sha256_file(run / f"res_{S_DIAG}.h5"))
+    w = end.get("window") or {}
+    check(f"終了の記録: REACHED・停止の時刻 {end.get('stop_step')}・判定の窓 17 出力 (欠けなし)・本段の出力の完全性 (欠けなし)・到達と中断の履歴・"
+          f"check_convergence --segment の VERDICT (記録)",
+          end["end_state"] == "REACHED" and end["stop_step"] == S_DIAG and w.get("n") == 17 and w["steps"][0] == S_DIAG - 40000
+          and not w["missing_res"] and not w["missing_wall"] and w["kind"].startswith("停止の時刻の窓") and end["main_outputs"]["complete"]
+          and end["main_outputs"]["gaps"] == [] and end["stop_rule"]["hold"]["breaks"] and "rc" in end["convergence (記録)"]
+          and (run / HR.DIAG_CONV).is_file(), str(end.get("main_outputs")))
+    # (a) 正式の判定を診断の run に当てても関門を呼ばない
+    with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rcj, Rj = judge(c, ["--no-ab"])
+    check("(a) 正式の判定 (h370_judge.py の既定) を診断の run に当てる → 判定不能 (rc 2)・関門を呼ばない・update_conditions_met 偽",
+          rcj == 2 and not gate_calls and Rj["verdict"].startswith("判定不能") and "診断専用" in Rj["verdict"] and Rj["update_conditions_met"] is False)
+    # (c) 正式の --phase ns は変わらない: 診断の記録があっても資格 FAIL で止まる (read_pin の資格の検査は迂回されない)
+    with Patch((HR, "HERE", c)):
+        e1 = raises(HR.read_pin, SystemExit)
+        e2 = raises(lambda: HR.phase_ns(args(phase="ns"), RA, {}), SystemExit)
+    check("(c) 正式の --phase ns: 診断の参照の固定があっても read_pin・phase_ns は予備の資格 FAIL で止まる (迂回は診断の経路の中だけ)",
+          e1 is not None and e2 is not None)
+    # (c) 同じ診断の経路をもう一度 → 既存の run で止める (消さない)
+    with Patch(*base, (RA, "run_staged_ns", make_fake_staged_ns_diag())):
+        e3 = raises(lambda: HR.phase_ns_diag(args(phase="ns-diag"), RA, {}), SystemExit)
+    check("診断の経路: run_0951 が既にある → 止める (消さない)", e3 is not None and (run / f"res_{S_DIAG}.h5").is_file())
+    # CENSORED・実行の失敗
+    for name, kw, want in (("CENSORED", {"status": "CENSORED", "last": HR.NS_CAP}, "CENSORED"), ("失敗", {"raise_exc": True}, "実行の失敗")):
+        c2 = diag_fake_case()
+        with Patch(*base[:2], (HR, "HERE", c2), *base[3:], (RA, "run_staged_ns", make_fake_staged_ns_diag(**kw))):
+            rc2 = HR.phase_ns_diag(args(phase="ns-diag"), RA, {})
+        e2_ = json.loads((c2 / HR.NS_RUN / HR.DIAG_END).read_text())
+        rr = (c2 / HR.NS_RUN / "RUN_RC").read_text().strip()
+        ok_ = (e2_["end_state"] == want and (rr == "EXC" if want == "実行の失敗" else rr == "0")
+               and (e2_["stop_step"] is None if want == "実行の失敗" else (e2_["stop_step"] == HR.NS_CAP and e2_["window"]["kind"].startswith("打切りの時点")
+                                                                        and e2_["window"]["steps"][0] == HR.NS_CAP - 40000 and e2_["main_outputs"]["n"] == 80)))
+        check(f"終了の状態の区別: {name} → {e2_['end_state']} (RUN_RC {rr}{'、打切りの時点の診断の窓 = 末尾の 17 出力' if want == 'CENSORED' else ''})・"
+              "関門を呼ばない", rc2 == 0 and ok_ and not gate_calls, str({k: e2_.get(k) for k in ("end_state", "stop_step", "exception")})[:300])
+    # (c) 診断の経路の入口の検査: 資格ありの記録・正式の固定・記録の無い予備の資格・参照の sha の違い → 止める
+    for name, mk in (("予備の資格の記録が資格あり (prequalified 真)", lambda: diag_fake_case(qual_prequalified=True)),
+                     ("正式の固定 PIN がある", lambda: diag_fake_case(pin=True))):
+        c3 = mk()
+        with Patch((HR, "HERE", c3)):
+            e = raises(HR.diag_euler_ref, SystemExit)
+        check(f"(c) 診断の経路の入口: {name} → 止める (正式の --phase ns を使う・記録の食い違い)・診断の固定を書かない",
+              e is not None and not (c3 / HR.DIAG_REF).exists())
+    c3 = diag_fake_case()
+    (c3 / HR.QUAL).unlink()
+    with Patch((HR, "HERE", c3)):
+        e = raises(HR.diag_euler_ref, SystemExit)
+    check("(c) 予備の資格の記録が無い → 止める", e is not None)
+    c3 = diag_fake_case()
+    with Patch((HR, "HERE", c3)):
+        r1 = HR.diag_euler_ref()
+        (c3 / ARM_RUNS["B"] / "res_40000.h5").write_bytes(b"changed")
+        e = raises(HR.diag_euler_ref, SystemExit)
+    check("(c) 診断の参照の固定の後に腕 B の res_40000 の中身が変わる → 止める (固定を書き換えない)",
+          r1["spec"]["res"] == "res_60000.h5" and e is not None
+          and json.loads((c3 / HR.DIAG_REF).read_text())["sens_refs"]["B"]["sha256"] == r1["record"]["sens_refs"]["B"]["sha256"])
+    # --- (d) 保存の容量 ---
+    c4 = diag_fake_case()
+    calls4 = []
+    staged4 = lambda *a, **k: calls4.append("forge") or 0  # noqa: E731
+    with Patch(*base[:2], (HR, "HERE", c4), *base[3:5], (HR, "disk_free", lambda: 1 * 2 ** 30), *base[6:], (RA, "run_staged_ns", staged4)):
+        rc4 = HR.phase_ns_diag(args(phase="ns-diag"), RA, {})
+    pc4 = json.loads((c4 / HR.NS_RUN / "H370_PRECHECK.json").read_text())
+    d1 = pc4["items"]["D1_capacity"]
+    per = max(d1["nozzle_h5_bytes"].values())
+    want_need = int(np.ceil((HR.DIAG_N_OUT + HR.DIAG_EXTRA_OUT) * (per + per * HR.DIAG_WALL_FRAC) * HR.DIAG_MARGIN)) + HR.DISK_MIN
+    check(f"(d) 保存の容量の不足 (空き 1 GiB < 要る {d1['need_gib']} GiB) → 前提の不成立 (rc {rc4})・PRECHECK_FAILED・forge を回さない; 見積もり = "
+          f"(80 + 2) × (nozzle.h5 + 1 %) × 1.1 + 2 GiB",
+          rc4 == 2 and not calls4 and (c4 / HR.NS_RUN / "PRECHECK_FAILED").is_file() and not d1["ok"] and d1["need_bytes"] == want_need
+          and d1["n_outputs"] == 82 and HR.NS_PRELAUNCH in d1["nozzle_h5_bytes"] and any("保存の容量" in f for f in pc4["failures"]))
+    with Patch((HR, "disk_free", lambda: want_need)):
+        ok_eq = HR.capacity_check(c4 / HR.NS_RUN, c4 / HR.NS_PRELAUNCH)["ok"]
+    with Patch((HR, "disk_free", lambda: want_need - 1)):
+        ng_eq = HR.capacity_check(c4 / HR.NS_RUN, c4 / HR.NS_PRELAUNCH)["ok"]
+    check("(d) 容量の境目: 空き = 要る → 合格、1 バイト足りない → 不成立; 投入前の準備が無い → 不成立",
+          ok_eq and not ng_eq and not HR.capacity_check(c4 / HR.NS_RUN, c4 / "no_prelaunch")["ok"])
+    c5 = diag_fake_case()
+    q5 = (c5 / HR.QUAL).read_bytes()
+    calls5 = []
+    with Patch(*base[:2], (HR, "HERE", c5), *base[3:], (RA, "run_staged_ns", lambda *a, **k: calls5.append("forge") or 0)):
+        rc5 = HR.phase_ns_diag(args(phase="ns-diag", dry_run="d1"), RA, {})
+    pc5 = json.loads((c5 / "_h370_dry_d1_nsdiag" / "H370_PRECHECK.json").read_text())
+    check("--dry-run (診断の経路): 投入前の検査の合格 (rc 0)・forge を回さない・run_0951 を作らない・診断の印は dry の準備に・正式の記録は同じ",
+          rc5 == 0 and pc5["ok"] and not calls5 and not (c5 / HR.NS_RUN).exists() and (c5 / "_h370_dry_d1_nsdiag" / HR.DIAG_MARK).is_file()
+          and (c5 / HR.QUAL).read_bytes() == q5 and not (c5 / HR.PIN).exists(), str(pc5.get("failures"))[:200])
+    # --- (f) 消す処理 ---
+    dd = TMP / "delete_after"
+    dd.mkdir()
+    names = [f"res_{k}.h5" for k in (2500, 5000, 7500, 10000)] + [f"res_{k}.xmf" for k in (5000, 7500)] + \
+            [f"res_wall_3_{k}.h5" for k in (5000, 7500)] + ["res_nan_7500.h5", "stop_rule.json", "residual_history.csv"]
+    for n in names:
+        (dd / n).write_text("x")
+    gone = SR.delete_after(dd, 5000)
+    left = sorted(p.name for p in dd.iterdir())
+    check(f"(f) stop_rule.delete_after(s = 5,000) は s より後の出力 (場・xmf・境界) だけを消す (消した {gone})、s 以前・res_nan_*・記録は残す",
+          sorted(gone) == sorted(["res_7500.h5", "res_10000.h5", "res_7500.xmf", "res_wall_3_7500.h5"])
+          and set(left) == set(names) - set(gone))
+    srcs = {f"h370_run.{f.__name__}": inspect.getsource(f) for f in (HR.phase_ns_diag, HR.diag_end_record, HR.diag_euler_ref, HR.capacity_check,
+                                                                   HR.files_sha256, HR.write_diag_mark)}
+    srcs.update({f"h370_judge.{f.__name__}": inspect.getsource(f) for f in (HJ.diag_sens, HJ.diag_snapshot, HJ.diag_pair, HJ.classify_diag)})
+    bad = [n for n, s_ in srcs.items() if any(w_ in s_ for w_ in ("unlink(", "rmtree(", "os.remove(", "delete_after("))]
+    rs = inspect.getsource(RA.run_staged_ns)
+    tail_main = rs[rs.index("done = [_stage("):]
+    un = [ln.strip() for ln in tail_main.splitlines() if ".unlink(" in ln]
+    check(f"(f) 診断の関数に消す処理が無い ({bad or 'なし'})・run_staged_ns の本段の部分で消すのは前の段の残差の履歴の写し (residual_history.csv) だけ "
+          f"({un}; 前の段の res_* を消すのは本段の前の _stage の中)",
+          not bad and all("residual_history.csv" in ln for ln in un) and "for f in run_dir.glob(\"res_*\"):" in rs[:rs.index("done = [_stage(")])
+    # --- (e) 感度の分類 (単体) ---
+    req = SR.required_window_steps(S_DIAG, 20000, 2500)
+    P = lambda Ds, pfA=None, pfB=None, part=None: [{"step": k, "D_mm": (d if (pfA is None or pfA[i]) and (pfB is None or pfB[i]) else None),  # noqa: E731
+                                                     "pf_A": True if pfA is None else pfA[i], "pf_B": True if pfB is None else pfB[i],
+                                                     **({"D_partial_mm": part[i]} if part is not None else {})}
+                                                    for i, (k, d) in enumerate(zip(req, Ds))]
+    mixed = [0.008, 0.012] * 8 + [0.008]
+    one_pf = [True] * 17
+    one_pf[5] = False
+    both = [True] * 17
+    both[3] = False
+    for name, per_, want, code in (
+            ("全 17 出力で D 0.003 mm → 結果 A", P([0.003] * 17), "結果 A", "A"),
+            ("ちょうど 0.01 mm → 結果 A (≤)", P([0.01] * 17), "結果 A", "A"),
+            ("D が窓の中で 0.008/0.012 をまたぐ → 最大 0.012 で結果 B (時刻ごとに判定不能にしない; classify_ab なら U_time)", P(mixed), "結果 B", "B_D"),
+            ("1 出力だけ 0.0101 mm → 結果 B (最大で決まる)", P([0.001] * 16 + [0.0101]), "結果 B", "B_D"),
+            ("1 出力で入れ替えにより合否が変わる (A 否・B 合、D は小さい) → 結果 B", P([0.001] * 17, pfA=one_pf), "結果 B", "B_pf"),
+            ("両腕とも合否 否の出力 (有効な列の D 0.002) → 判定不能", P([0.001] * 17, pfA=both, pfB=both, part=[0.002] * 17), "判定不能", "U_both_invalid"),
+            ("両腕とも合否 否の出力でも有効な列の D 0.02 > 0.01 → 結果 B (D の下限が超える)", P([0.001] * 17, pfA=both, pfB=both, part=[0.02] * 17),
+             "結果 B", "B_D"),
+            ("17 出力のうち 1 つが無い → 判定不能 (縮めない)", P([0.001] * 17)[:-1] + [{"step": req[-1], "error_missing": "無い"}], "判定不能", "U_incomplete"),
+            ("16 出力しか渡されない → 判定不能", P([0.001] * 17)[1:], "判定不能", "U_incomplete"),
+            ("抽出の例外 (腕 B の 1 出力) → 判定不能", P([0.001] * 16) + [{"step": req[-1], "error_B": "RuntimeError"}], "判定不能", "U_error")):
+        cl = HJ.classify_diag(per_, req)
+        check(f"(e) 分類: {name}", cl["result"] == want and cl["code"] == code, f"{cl['result']} {cl['code']}: {cl['why'][:120]}")
+    check("(e) 分類: 必要な出力の集合が無い → 判定不能", HJ.classify_diag(P([0.001] * 17), [])["code"] == "U_required")
+    x3, F3 = np.array([10.0, 11.0, 12.0]), np.ones(3, dtype=bool)
+    dB = {"delta_E": [1e-3] * 3, "delta_target": [2e-3] * 3, "held": [0] * 3, "missing": [], "y_b": [0.1] * 3, "y_star": [0.08] * 3}
+    dA = {"delta_E": [1e-3, float("nan"), 1e-3 + 0.02 / 76.6], "delta_target": [2e-3] * 3, "held": [0] * 3, "missing": [1], "y_b": [0.1, 0.1, 0.11],
+          "y_star": [0.08] * 3}
+    r_ = HJ.diag_pair(S_DIAG, dA, dB, 76.6, x3, F3)
+    r2 = HJ.diag_pair(S_DIAG, dA, dA, 76.6, x3, F3)
+    check(f"(e) diag_pair: 腕 A の中ほどの欠測 → 合否 否・D なし・有効な列の差 {r_.get('D_partial_mm', 0):.4f} mm と帯の位置 y_b の差 "
+          f"{r_.get('band_y_b_max_diff_mm', 0):.3f} mm を記録 / 両腕とも同じ欠測 → D なし・有効な列の差 0",
+          r_["pf_A"] is False and r_["pf_B"] is True and r_["D_mm"] is None and abs(r_["D_partial_mm"] - 0.02) < 1e-9
+          and abs(r_["band_y_b_max_diff_mm"] - 0.766) < 1e-9 and r2["D_mm"] is None and r2["D_partial_mm"] == 0.0
+          and HJ.classify_diag([r2], [S_DIAG])["code"] == "U_both_invalid" and HJ.classify_diag([r_], [S_DIAG])["code"] == "B_pf")
+    # --- (e) 感度の判定の全経路 (偽物の抽出) ---
+    dbase = write_diag_case(TMP / "diag_base")
+    hooks = lambda snap: {"handoff_gate": gate_boom(gate_calls), "diag_snapshot": snap}  # noqa: E731
+
+    def run_diag(name, snap, prep=None, extra=()):
+        case = TMP / f"diag_{name}"
+        shutil.copytree(dbase, case, symlinks=True)
+        if prep:
+            prep(case)
+        with Patch((HJ, "HOOKS", hooks(snap)), (DL, "handoff_gate", gate_boom(gate_calls))):
+            return diag_judge(case, extra)
+    calls = []
+    rc, R = run_diag("A", fake_diag_snap(lambda arm, k, x: 0.003 * np.ones(len(x)) if arm == "B" else 0.0 * x, calls=calls))
+    check(f"(e) 全経路 (偽物の抽出): 両腕の差 0.003 mm → 結果 A (rc {rc})・17 出力 × (A・B・補助) = 51 抽出・比べる列は抽出の前に固定・update_conditions_met 偽・"
+          "関門を呼ばない・配列の npz",
+          rc == 0 and R["result"] == "結果 A" and R["code"] == "A" and len(calls) == 51 and sorted({k for _, k in calls}) == req
+          and abs(R["D_mm"]["max"] - 0.003) < 1e-9 and R["columns"]["n"] == R["columns"]["n_use"] and R["update_conditions_met"] is False
+          and not gate_calls and (TMP / "diag_A" / HJ.DIAG_NPZ).is_file() and R["window_kind"].startswith("停止の時刻の窓")
+          and all("max_abs_vs_A_mm" in a_ for a_ in R["aux_run_0950"]["per_output"]), str(R.get("why"))[:300])
+    npz = np.load(TMP / "diag_A" / HJ.DIAG_NPZ)
+    check("(e) 配列: 出力 17 × 使用域の列の δ_E・δ_target・held・y_b・y* (腕 A・B・補助)", npz["A_delta_E"].shape == (17, len(npz["x_use"]))
+          and {"B_y_b", "aux_delta_target", "A_held", "F", "steps"} <= set(npz.files))
+    rc, R = run_diag("mixed", fake_diag_snap(lambda arm, k, x: (0.012 if (k // 2500) % 2 else 0.008) * np.ones(len(x)) if arm == "B" else 0.0 * x))
+    check(f"(e) 全経路: D が窓の中で 0.008/0.012 をまたぐ → 最大 {R['D_mm']['max']:.3f} mm で結果 B ({R['code']}; 時刻ごとの判定不能にしない)",
+          R["result"] == "結果 B" and R["code"] == "B_D" and abs(R["D_mm"]["max"] - 0.012) < 1e-9 and abs(R["D_mm"]["min"] - 0.008) < 1e-9
+          and 0 < R["D_mm"]["n_over_tol"] < 17, str(R.get("why"))[:200])
+
+    def held_b(arm, k, d):
+        if arm == "B" and k == req[4]:
+            d["held"] = list(d["held"])
+            d["held"][len(d["held"]) // 2] = 1
+            d["n_held"] = 1
+        return d
+    rc, R = run_diag("pf", fake_diag_snap(mutate=held_b))
+    check(f"(e) 全経路: 1 出力で腕 B だけ比べる列の中に held → 合否が変わる → 結果 B ({R['code']})", R["result"] == "結果 B" and R["code"] == "B_pf",
+          str(R.get("why"))[:200])
+
+    def exc_a(arm, k, d):
+        if arm == "A" and k == req[7]:
+            raise RuntimeError("extract_and_merge: 単調性ガードで λ が上限を超えた (試験)")
+        return d
+    rc, R = run_diag("exc", fake_diag_snap(mutate=exc_a))
+    check(f"(e) 全経路: 抽出の例外 (腕 A の 1 出力) → 判定不能 ({R['code']}、rc {rc})", rc == 2 and R["result"] == "判定不能" and R["code"] == "U_error")
+    for name, prep, want in (
+            ("窓の 1 出力の res が無い", lambda cs: (cs / HJ.NS_RUN / f"res_{req[8]}.h5").unlink(), "が無い"),
+            ("窓の 1 出力の中身が sha の一覧と違う", lambda cs: shutil.copy(cs / HJ.NS_RUN / f"res_{req[0]}.h5", cs / HJ.NS_RUN / f"res_{req[1]}.h5"), "sha"),
+            ("腕 B の参照の sha が固定と違う", lambda cs: (cs / ARM_RUNS["B"] / "res_40000.h5").write_bytes(b"changed"), "参照 B"),
+            ("抽出器の版が投入の時点と違う", lambda cs: (cs / HJ.NS_RUN / "H370_PRECHECK.json").write_text(json.dumps(
+                {"ok": True, "phase": "ns-diag", "versions": {**HJ.module_versions(), "metrics/deltastar.py": "0" * 64}})), "版"),
+            ("診断の印が無い (正式の run)", lambda cs: (cs / HJ.NS_RUN / HJ.DIAG_MARK).unlink(), "診断の印"),
+            ("停止の状態 DIVERGED", lambda cs: SR.write_state(cs / HJ.NS_RUN, {"status": "DIVERGED", "stop_step": None}), "DIVERGED"),
+            ("抽出の条件が #36e の固定と違う (ω 0.7)", lambda cs: (lambda p_, r_: p_.write_text(json.dumps({**r_, "delta_series": {
+                **r_["delta_series"], "extract": {**r_["delta_series"]["extract"], "omega": 0.7}}})))(
+                cs / HJ.NS_RUN / SR.RECORD, json.loads((cs / HJ.NS_RUN / SR.RECORD).read_text())), "抽出の条件")):
+        calls = []
+        n_u = len(list(TMP.glob("diag_u*")))
+        rc, R = run_diag(f"u{n_u}", fake_diag_snap(calls=calls), prep=prep)
+        check(f"(e) 全経路: {name} → 判定不能 (rc {rc}、{R.get('code')})・抽出しない ({len(calls)} 回)", rc == 2 and R["result"] == "判定不能"
+              and R["code"] == "U_input" and not calls and any(want in u for u in R["undecidable"]) and R["update_conditions_met"] is False,
+              str(R.get("undecidable"))[:300])
+    ccase = write_diag_case(TMP / "diag_cens_base", status="CENSORED", s_stop=200000)
+    with Patch((HJ, "HOOKS", hooks(fake_diag_snap())), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rc, R = diag_judge(ccase)
+    check(f"(e) 全経路: CENSORED (最後の出力 200,000) → 打切りの時点の診断の窓 (末尾の 17 出力 160,000〜200,000) で判定 ({R['result']})",
+          R["result"] == "結果 A" and R["required"] == list(range(160000, 200001, 2500)) and R["window_kind"].startswith("打切りの時点"))
+    # --- (e) 本物の抽出 (diag_snapshot、プロセス並列): stop_rule.delta_snapshot と同じ値・結果 A・B ---
+    ns = dbase / HJ.NS_RUN
+    rec = json.loads((ns / SR.RECORD).read_text())
+    ext = {k: v for k, v in rec["delta_series"]["extract"].items() if k != "source"}
+    specB = {"run": str(dbase / ARM_RUNS["B"]), "res": "res_40000.h5", "sha256": HJ.sha256_file(dbase / ARM_RUNS["B"] / "res_40000.h5")}
+    d_sr = SR.delta_snapshot(ns, S_DIAG, specB, ext, rec["delta_series"]["x"])
+    d_dg = HJ.diag_snapshot(ns, S_DIAG, specB, ext, rec["delta_series"]["x"])
+    same = all(np.array_equal(np.asarray(d_sr[k], dtype=float), np.asarray(d_dg[k], dtype=float), equal_nan=True) for k in ("delta_E", "delta_target", "held")) \
+        and all(d_sr[k] == d_dg[k] for k in ("missing", "n_missing", "n_held", "lam", "res_sha256"))
+    check(f"(e) diag_snapshot は stop_rule.delta_snapshot と δ_E・δ_target・held・missing・λ・出力の sha が同じ値で、帯の位置 y_b・y* を足す "
+          f"(y_b の有限 {int(np.isfinite(d_dg['y_b']).sum())}/{len(d_dg['y_b'])})", same and np.isfinite(d_dg["y_b"]).all() and np.isfinite(d_dg["y_star"]).all())
+    with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rc, R = diag_judge(dbase)
+        rB_case = write_diag_case(TMP / "diag_real_B", shape_b=0.01)
+        rcB, RB = diag_judge(rB_case)
+    px = R.get("extractions", {}).get("parallel", {})
+    check(f"(e) 本物の抽出 (diag_snapshot、{px.get('mode')} {px.get('jobs')}、{px.get('seconds')} s): 腕 A・B の Euler が同じ場 → D 0 mm → 結果 A; "
+          f"腕 B の形を変える → D {RB.get('D_mm', {}).get('max', float('nan')):.4f} mm > 0.01 → 結果 B; 補助 (run_0950) の差も記録・関門を呼ばない",
+          rc == 0 and R["result"] == "結果 A" and R["D_mm"]["max"] == 0.0 and px.get("mode", "").startswith("process") and rcB == 0
+          and RB["result"] == "結果 B" and RB["code"] == "B_D" and RB["D_mm"]["max"] > HJ.TOL_MM and not gate_calls
+          and all(a_.get("max_abs_vs_A_mm") == 0.0 for a_ in R["aux_run_0950"]["per_output"])
+          and all(r_.get("band_y_b_max_diff_mm") is not None for r_ in RB["per_output"]), str((R.get("why"), RB.get("why")))[:300])
+
+
 def main() -> int:
     for t in (test_constants, test_wall_output_and_configs, test_euler_stage_configs, test_euler_qualify, test_classify_ab, test_ns_judge,
-              test_prelaunch_counterexamples, test_parallel_extraction, test_run_orchestration, test_ns_phase_and_parts, test_euler_wall_restore):
+              test_prelaunch_counterexamples, test_parallel_extraction, test_run_orchestration, test_ns_phase_and_parts, test_euler_wall_restore,
+              test_diag_path):
         try:
             t()
         except Exception:  # noqa: BLE001

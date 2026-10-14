@@ -77,7 +77,25 @@
   6. 設計を終える条件の量 (記録だけ; 最初の pass の判定には使わない): 使用域の未緩和の max|δ_E − δ_in|。
   判定: 「更新に進める条件」= 関門の proceed かつ 参照の最終の資格 (と 1 の基盤の不成立が無いこと)、抽出の参照の A/B は
   結果 A / 結果 B / 判定不能。
-usage: python3 h370_judge.py --euler-prequalify     python3 h370_judge.py [--no-ab] [--jobs N]
+  **診断専用の run** (印 H370_DIAG_ONLY.json か投入前の検査の phase ns-diag; §6 V-h370-diag) はこの判定をせず (判定不能、rc 2)、受け渡しの
+  関門を呼ばない。
+
+--diag-sens (§5.1 #36l・§6「V-h370-diag の事前登録」、codex diagnose `notes/reviews/2026-10-14-h370-diag-ns-diagnose.md`、CFD 0 step):
+  診断の NS (h370_run.py --phase ns-diag の run_0951) で Euler の参照の入れ替えへの δ_E の感度を測る → _band_ab/half_inlet/h370_diag_sens.json
+  (配列は h370_diag_sens_arrays.npz)。受け渡しの関門・正式の判定・壁の更新は呼ばない。update_conditions_met は常に偽。
+  - 入力: 停止の時刻 s (REACHED は停止の出力、CENSORED は最後の出力 = 「打切りの時点の診断の窓」) の [s − 40,000, s] の 2,500 ごとの全 17 出力
+    (登録の窓・間隔から列挙し、在ることと終了の時点の sha の一覧 H370_DIAG_SHA256.json との一致を確かめる; 欠ければ判定不能、縮めない)。
+    Euler の参照は _band_ab/half_inlet/h370_diag_euler_ref.json に固定した腕 A = run_0952_h370_euler_cfl2/res_40000.h5・腕 B =
+    run_0953_h370_euler_cfl05/res_40000.h5 (sha を照合)。補助 = 診断の NS の参照 run_0950 の res_60000 (記録だけ)。抽出の条件は停止規則の記録の
+    extract (= #36e で固定した受け渡しの条件: edge・remap_constant_x・端は欠測・ω 0.5・平滑化の λ 1・ノット 2・昇格の上限 ×1000) で、#36e と違えば
+    判定不能。抽出器・見張りの版 (forge_design の該当ファイルの sha) が投入の時点と違えば判定不能。
+  - 比べる列 F は抽出の前に座標と腕 A・B の Euler の補間できる範囲から決める (fixed_columns)。帯の選び方 (edge) は固定、選ばれる帯の位置は
+    参照ごとに抽出器が計算し直す (diag_snapshot が y_b・y* を記録)。
+  - 主の量 D = max over (17 出力 × F) |δ_E,B − δ_E,A| [mm] (未緩和の δ_E)。分類 (classify_diag; classify_ab の時刻ごとの U_time・σ_ref は
+    使わない): 入力の不足・抽出の例外 → 判定不能、入れ替えで合否 (F の中の held・欠測・非有限) が変わる → 結果 B、D > 0.01 mm → 結果 B
+    (最大で決める)、両腕とも合否 否の出力が残る → 判定不能、それ以外 (全入力が有効・D ≤ 0.01 mm・合否が同じ) → 結果 A。
+  - 抽出は 17 × 3 = 51 回 (run_snaps、既定の並列 3)。終了コード 0 結果 A・結果 B / 2 判定不能。
+usage: python3 h370_judge.py --euler-prequalify     python3 h370_judge.py [--no-ab] [--jobs N]     python3 h370_judge.py --diag-sens [--jobs N]
        (--no-ab は A/B と σ_ref を回さない = 参照の最終の資格を確かめないので、更新に進める条件は満たさない)
        (--jobs は抽出の並列数の上限 1〜4、既定 3。実際の並列数は min(上限, 空きメモリ / 1 抽出の最大メモリ SNAP_PEAK_MIB))
        (--case-dir・--design・--tools は試験用; 既定は B の ~/forge-g0cchain、無ければこの作業ツリー)
@@ -125,6 +143,19 @@ VERDICT_RE = re.compile(r"^\s+(\S+)\s*:\s(.*?)\s*(STEADY|DRIFTING|OSCILLATING|TR
 TOL_MM = 0.01                                 # 抽出の参照の A/B (§6 V-h370) と 2 窓の予算
 AB_DIR = "H370_AB"
 MARKERS = ("PRECHECK_FAILED", "WATCH_ABORT", "RESOURCE_STOP", "DISK_STOP", "WRITE_FAILED")
+# --- 診断の感度の判定 (--diag-sens; §5.1 #36l・§6 V-h370-diag)。名前は h370_run.py の DIAG_* と同じ (試験 L が照合) ------------------
+PLAN_DIAG = ("plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36l・§6 V-h370-diag (codex diagnose "
+             "notes/reviews/2026-10-14-h370-diag-ns-diagnose.md)")
+DIAG_REF = "_band_ab/half_inlet/h370_diag_euler_ref.json"   # 診断専用の Euler の参照と感度の腕 A・B の固定 (h370_run.py --phase ns-diag が書く)
+DIAG_MARK = "H370_DIAG_ONLY.json"                 # 診断専用の run の印
+DIAG_END = "H370_DIAG_END.json"                   # 診断の NS の終了の記録
+DIAG_SHA = "H370_DIAG_SHA256.json"                # 終了の時点の run の全ファイルの sha256 の一覧
+DIAG_OUT = "_band_ab/half_inlet/h370_diag_sens.json"
+DIAG_NPZ = "_band_ab/half_inlet/h370_diag_sens_arrays.npz"   # 出力 × 腕 × 使用域の列の δ_E・δ_target・held・帯の位置 (JSON に入れない配列)
+DIAG_WINDOW, DIAG_OUT_INT, DIAG_N_REQ = 20000, 2500, 17     # 登録の窓 (2 窓 × 20,000)・出力の間隔・判定の窓の出力の数
+DIAG_ARMS = ("A", "B")                            # 主の判定の腕 (A = run_0952 cfl 2、B = run_0953 cfl 0.5)。補助 aux = run_0950 (記録だけ)
+VERSION_FILES = ("evaluate/stop_rule.py", "metrics/deltastar.py", "feedback/deltastar_loop.py", "evaluate/runner_axismach.py",
+                 "evaluate/runner.py", "metrics/delta_in_check.py")
 
 
 def now() -> str:
@@ -700,6 +731,22 @@ def _snap_worker(task) -> dict:
     return _call_snap(SR.delta_snapshot, task)
 
 
+def _diag_snap_worker(task) -> dict:
+    """プロセス並列の子 (spawn) の抽出: 診断の感度の判定の `diag_snapshot` (§6 V-h370-diag)。"""
+    return _call_snap(diag_snapshot, task)
+
+
+def _process_worker(snap):
+    """snap が本物の抽出なら子プロセスで回す関数 (stop_rule.delta_snapshot → _snap_worker、diag_snapshot → _diag_snap_worker)、
+    それ以外 (試験の差し替え) は None (このプロセスで直列)。"""
+    from forge_design.evaluate import stop_rule as SR
+    if snap is SR.delta_snapshot:
+        return _snap_worker
+    if snap is diag_snapshot:
+        return _diag_snap_worker
+    return None
+
+
 @contextlib.contextmanager
 def _single_thread_env():
     """子プロセスの BLAS・OpenMP を 1 スレッドにする (並列の子どうしでコアを取り合わない)。spawn の子は起動の時点の環境変数を読む。"""
@@ -723,21 +770,22 @@ def run_snaps(tasks: list, snap, jobs: int = 1, progress=None) -> tuple:
     δ_target 最大 2.8e−17 r_t、held は同じ; 2026-10-14 の手元の実測)、
     直列と並列の値をビット同一にするには計算する環境をそろえる必要があるため。試験の差し替え (snap が別の関数) は子に渡せないので
     このプロセスで直列。結果は作業の順に並べる (抽出は互いに独立なので、並列でも記録の順・値は直列と同じ)。
-    戻り (結果 [{"ok": 抽出} | {"exc": 文}], 記録 {"n", "mode", "jobs", "seconds", "children_maxrss_mib"})。progress(i, n, 経過秒) は進み。"""
+    戻り (結果 [{"ok": 抽出} | {"exc": 文}], 記録 {"n", "mode", "jobs", "seconds", "children_maxrss_mib"})。progress(i, n, 経過秒) は進み。
+    診断の感度の判定の `diag_snapshot` (§6 V-h370-diag) も本物の抽出なので同じく子プロセスで回す (`_process_worker`)。"""
     import resource
     import time
-    from forge_design.evaluate import stop_rule as SR
     n = len(tasks)
     info = {"n": n, "mode": "in-process (serial)", "jobs": 1}
     t0 = time.time()
     out = [None] * n
-    if n and snap is SR.delta_snapshot:
+    worker = _process_worker(snap)
+    if n and worker is not None:
         import multiprocessing as mp
         from concurrent.futures import ProcessPoolExecutor, as_completed
         w = max(1, min(int(jobs), n))
         info.update(mode="process (spawn)", jobs=w, blas_threads=1)
         with _single_thread_env(), ProcessPoolExecutor(max_workers=w, mp_context=mp.get_context("spawn")) as ex:
-            futs = {ex.submit(_snap_worker, t): i for i, t in enumerate(tasks)}
+            futs = {ex.submit(worker, t): i for i, t in enumerate(tasks)}
             for m, f in enumerate(as_completed(futs), 1):
                 try:
                     out[futs[f]] = f.result()
@@ -746,7 +794,7 @@ def run_snaps(tasks: list, snap, jobs: int = 1, progress=None) -> tuple:
                 if progress:
                     progress(m, n, time.time() - t0)
     else:
-        if snap is not SR.delta_snapshot:
+        if worker is None:
             info["note"] = "抽出が差し替え (試験) なので子に渡さずこのプロセスで直列"
         for i, t in enumerate(tasks):
             out[i] = _call_snap(snap, t)
@@ -1112,6 +1160,12 @@ def ns_judge(case: Path, tools: Path, do_ab: bool, out_p: Path, jobs=None) -> in
         und.append(f"{NS_RUN} が無い")
         R["verdict"] = "判定不能: " + "; ".join(und)
         return finish(2)
+    if (run / DIAG_MARK).exists() or (jload(run / "H370_PRECHECK.json") or {}).get("phase") == "ns-diag":
+        # 診断専用の run (§6 V-h370-diag): 正式の判定をしない・受け渡しの関門を呼ばない (感度の判定は --diag-sens)
+        und.append(f"診断専用の run ({DIAG_MARK}、§6 V-h370-diag) — 正式の判定をせず受け渡しの関門を呼ばない (感度の判定は --diag-sens)")
+        R["update_conditions_met"] = False
+        R["verdict"] = "判定不能: " + "; ".join(und)
+        return finish(2)
     pin, qual = jload(case / PIN), jload(case / QUAL)
     spec = {"run": str(case / pin["run"]), "res": pin["res"], "sha256": pin["sha256"]} if pin else None
     R["euler_ref"] = spec
@@ -1227,9 +1281,358 @@ def ns_judge(case: Path, tools: Path, do_ab: bool, out_p: Path, jobs=None) -> in
     return finish(0)
 
 
+# ===================================================================================================== 診断の感度の判定 (§6 V-h370-diag)
+def module_versions() -> dict:
+    """抽出器・見張り・準備の版: 読み込んだ forge_design の VERSION_FILES の sha256 (h370_run.module_versions と同じ)。"""
+    import forge_design
+    root = Path(forge_design.__file__).resolve().parent
+    return {n: (sha256_file(root / n) if (root / n).is_file() else None) for n in VERSION_FILES}
+
+
+def diag_snapshot(run_dir, step: int, euler_ref, extract: dict, x_use) -> dict:
+    """診断の感度の判定の抽出 1 回 (§6 V-h370-diag): `stop_rule.delta_snapshot` と同じ抽出 (prepare_info.json・nozzle.h5・その res だけを
+    symlink した一時ディレクトリ、条件 `extract` = 受け渡しの固定の条件 (edge・一定 x の断面・端は欠測・ω・平滑化の λ・昇格の上限)、
+    使用域の列 x_use への x の一致の対応) に、選ばれた帯の位置 (delta_r_edge.csv の y_b・縁 y*) を足して返す。δ_E・δ_target・held・missing
+    は delta_snapshot と同じ値 (試験 L で照合)。抽出の表は一時ディレクトリに書いて捨てる (受け渡しの表として残さない)。帯の位置は参照
+    ごとに抽出器が計算し直す (帯の選び方 edge は固定)。"""
+    import time
+    from forge_design.feedback.deltastar_loop import extract_and_merge, read_delta_r_next
+    run_dir = Path(run_dir).resolve()
+    res = run_dir / f"res_{step}.h5"
+    t0 = time.time()
+    kw = {k: v for k, v in extract.items() if k != "source"}
+    with tempfile.TemporaryDirectory(prefix="h370_diag_") as td:
+        src = Path(td) / run_dir.name
+        src.mkdir()
+        for name in ("prepare_info.json", "nozzle.h5"):
+            (src / name).symlink_to(run_dir / name)
+        (src / res.name).symlink_to(res)
+        summ = extract_and_merge(src, euler_ref, out_dir=Path(td) / "out", **kw)
+        nx = read_delta_r_next(Path(td) / "out" / "delta_r_next.csv")
+        ep = Path(td) / "out" / "delta_r_edge.csv"
+        edge = np.loadtxt(ep, delimiter=",", skiprows=1, ndmin=2) if ep.is_file() else None
+    x_use = np.asarray(x_use, dtype=float)
+    xe = np.atleast_1d(np.asarray(nx["x_rt"], dtype=float))
+    if len(xe) == 0:
+        raise ValueError(f"res_{step}.h5 の抽出の表が空")
+    k = np.clip(np.searchsorted(xe, x_use), 0, len(xe) - 1)
+    hit = xe[k] == x_use
+    dE = np.where(hit, np.atleast_1d(nx["delta_E"])[k], np.nan)
+    dT = np.where(hit, np.atleast_1d(nx["delta_target"])[k], np.nan)
+    held = np.where(hit, np.atleast_1d(nx["held"])[k] != 0, False)
+    out = {"delta_E": dE.tolist(), "delta_target": dT.tolist(), "held": [int(v) for v in held],
+           "missing": [int(j) for j in np.where(~hit)[0]], "n_missing": int((~hit).sum()), "n_held": int(held.sum()),
+           "lam": summ["smooth"]["lam"], "res_sha256": sha256_file(res), "seconds": round(time.time() - t0, 2),
+           "not_extracted_n": (summ.get("not_extracted") or {}).get("n")}
+    if edge is not None and len(edge):
+        o = np.argsort(edge[:, 0], kind="stable")
+        xg = edge[o, 0]
+        j = np.clip(np.searchsorted(xg, x_use), 0, len(xg) - 1)
+        hb = xg[j] == x_use
+        out["y_b"] = np.where(hb, edge[o, 5][j], np.nan).tolist()
+        out["y_star"] = np.where(hb, edge[o, 2][j], np.nan).tolist()
+    else:
+        out["y_b"] = out["y_star"] = [float("nan")] * len(x_use)
+        out["band_note"] = "delta_r_edge.csv が無い (帯の位置を記録できない)"
+    return out
+
+
+def diag_pair(step: int, dA: dict, dB: dict, mm: float, x_use, F) -> dict:
+    """出力 1 つの腕 A・B の比較 (§6 V-h370-diag): 合否 pf と D_mm (両腕とも pf のとき F の max|δ_E,B − δ_E,A| [mm]) は `ab_pair` と同じ。
+    足すもの: D_partial_mm (どちらかが pf でないとき、両腕とも有限・held でない F の列だけの最大; D の下限なので 0.01 mm を超えれば結果 B の
+    根拠になる)、δ_target の差、帯の位置 (y_b・y*) の差、held・欠測の列の数。"""
+    r = ab_pair(step, dA, dB, mm, "抽出 (診断)", x_use, F)
+    if any(k.startswith("error") for k in r):
+        return r
+    xu = np.asarray(x_use, dtype=float)
+    eA, eB, tA, tB = _arr(dA, "delta_E"), _arr(dB, "delta_E"), _arr(dA, "delta_target"), _arr(dB, "delta_target")
+    hA, hB = np.asarray(dA.get("held", []), dtype=bool), np.asarray(dB.get("held", []), dtype=bool)
+    ok = F & np.isfinite(eA) & np.isfinite(eB) & ~hA & ~hB
+    r["n_valid_both"] = int(ok.sum())
+    if ok.any():
+        d = np.abs(eB - eA) * mm
+        j = int(np.flatnonzero(ok)[int(np.argmax(d[ok]))])
+        r["D_valid_mm"], r["x_at_D_valid"] = float(d[j]), float(xu[j])
+        okt = ok & np.isfinite(tA) & np.isfinite(tB)
+        if okt.any():
+            dt = np.abs(tB - tA) * mm
+            jt = int(np.flatnonzero(okt)[int(np.argmax(dt[okt]))])
+            r["Dt_valid_mm"], r["x_at_Dt_valid"] = float(dt[jt]), float(xu[jt])
+        if r.get("D_mm") is None:
+            r["D_partial_mm"] = r["D_valid_mm"]
+    if r.get("D_mm") is not None:
+        r["x_at_D"] = float(xu[r["i_at_D"]])
+    for name in ("y_b", "y_star"):
+        a, b = _arr(dA, name), _arr(dB, name)
+        if len(a) == len(b) == len(F):
+            m = F & np.isfinite(a) & np.isfinite(b)
+            r[f"band_{name}_max_diff_mm"] = float(np.max(np.abs(b - a)[m]) * mm) if m.any() else None
+            r[f"band_{name}_n_nonfinite_F"] = {"A": int((F & ~np.isfinite(a)).sum()), "B": int((F & ~np.isfinite(b)).sum())}
+    return r
+
+
+def classify_diag(per: list, required, tol: float = TOL_MM) -> dict:
+    """診断の感度の分類 (§6 V-h370-diag; `classify_ab` (時刻ごとの U_time・σ_ref) は流用しない): 戻り {"result", "code", "why", "D_max"}。
+    per: 出力ごとの `diag_pair` の戻り (無い出力は {"step", "error_missing"})。required: 判定の窓に入るべき 17 出力。順に:
+    入るべき出力の集合が無い・欠ける → 判定不能 (入力の不足)、抽出の例外 → 判定不能、どれかの出力で入れ替えにより合否 (pf: 例外なし・
+    比べる列 F の中に held・欠測・非有限なし) が変わる → 結果 B、D = 全出力 × F の max|δ_E,B − δ_E,A| が tol を超える (どちらかが pf でない
+    出力は両腕とも有効な列だけの最大 = D の下限で見る) → 結果 B、両腕とも pf でない出力がある (D を全列で出せない) → 判定不能、
+    それ以外 (全出力・全列で両腕とも有効、D ≤ tol、合否が同じ) → 結果 A。**最大で決める**: 窓の中で D が tol をまたぐ時刻があっても
+    max D > tol なら結果 B (時刻ごとに判定不能にしない)。"""
+    def res(result, code, why, dmax=None):
+        return {"result": result, "code": code, "why": why, "D_max": dmax}
+    if not required:
+        return res("判定不能", "U_required", "判定の窓に入るべき出力の集合が無い")
+    have = {r["step"] for r in per if "error_missing" not in r}
+    lack = [k for k in required if k not in have]
+    if lack:
+        return res("判定不能", "U_incomplete", f"判定の窓に入るべき {len(required)} 出力のうち比べられない出力 {len(lack)}: {lack[:8]} (縮めない)")
+    per = [r for r in per if r["step"] in set(required)]
+    err = [r["step"] for r in per if any(k.startswith("error") for k in r)]
+    if err:
+        return res("判定不能", "U_error", f"抽出の例外・比較の失敗 (出力 {err[:8]})")
+    vals = [(r["D_mm"], r["step"], r.get("x_at_D")) for r in per if r.get("D_mm") is not None] + \
+           [(r["D_partial_mm"], r["step"], r.get("x_at_D_valid")) for r in per if r.get("D_mm") is None and r.get("D_partial_mm") is not None]
+    top = max(vals, key=lambda v: v[0]) if vals else None
+    dmax = {"mm": top[0], "step": top[1], "x": top[2]} if top else None
+    pfd = [r for r in per if r["pf_A"] != r["pf_B"]]
+    over = [v for v in vals if v[0] > tol]
+    if pfd or over:
+        why = []
+        if pfd:
+            why.append("入れ替えで抽出の合否が変わる出力 " + "; ".join(f"{r['step']}: A {'合' if r['pf_A'] else '否'}・B {'合' if r['pf_B'] else '否'}"
+                                                           for r in pfd[:6]))
+        if over:
+            why.append(f"D = max|δ_E,B − δ_E,A| {top[0]:.4g} mm > {tol} mm (出力 {top[1]}・x {top[2]}; tol を超える出力 {len(over)} / {len(per)})")
+        return res("結果 B", "B_pf" if pfd else "B_D", "; ".join(why) + " — 「今回の参照の入れ替えが寸法の予算を超える」を退けない", dmax)
+    both = [r["step"] for r in per if r.get("D_mm") is None]
+    if both:
+        return res("判定不能", "U_both_invalid", f"両腕とも比べる列 F の中に held・欠測・非有限がある出力 {both[:8]} (D を全列で出せず、両腕の有効な列の"
+                                                  f"最大 {top[0] if top else None} mm ≤ {tol} mm)", dmax)
+    return res("結果 A", "A", f"全 {len(per)} 出力・比べる列 F の全列で両腕とも有効、D = max|δ_E,B − δ_E,A| {top[0]:.4g} mm ≤ {tol} mm (出力 {top[1]}・"
+                              f"x {top[2]})、合否が同じ — 「今回の参照の入れ替えが寸法の予算を超える」を退ける", dmax)
+
+
+def diag_sens(case: Path, tools: Path, out_p: Path, jobs=None) -> int:
+    """診断の感度の判定 (§6 V-h370-diag、CFD 0 step): 診断の NS (run_0951、印 H370_DIAG_ONLY.json) の停止の時刻 s (CENSORED は最後の出力) の
+    [s − 40,000, s] の 2,500 ごとの全 17 出力 (列挙して完全性・sha の一覧と照合; 欠ければ判定不能、縮めない) に、Euler の参照の
+    {run, res, sha256} だけを替えて (腕 A = run_0952 の res_40000・腕 B = run_0953 の res_40000、どちらも DIAG_REF の sha を照合) 抽出する
+    (`diag_snapshot`、条件は停止規則の記録の extract = 受け渡しの固定の条件、比べる列 F は抽出の前に座標と両腕の Euler の補間できる範囲から)。
+    D = max over (17 出力 × F) |δ_E,B − δ_E,A| [mm] (未緩和の δ_E) で `classify_diag`。δ_target・帯の位置・held・欠測・合否も記録する。補助:
+    run_0950 (res_60000、診断の NS の参照) で抽出した値との差 (記録だけ; 主の判定に使わない)。受け渡しの関門・正式の判定は呼ばない。
+    update_conditions_met は常に偽。終了コード 0 結果 A・結果 B / 2 判定不能。"""
+    from forge_design.evaluate import stop_rule as SR
+    from forge_design.feedback import deltastar_loop as DL
+    run = case / NS_RUN
+    R = {"plan": PLAN_DIAG, "created": now(), "run": NS_RUN, "case_dir": str(case),
+         "kind": "診断 (§6 V-h370-diag の感度の判定)。資格・受け渡し・壁の更新には使わない",
+         "scope": ("この固定の系列に対する感度の結論で、NS の収束・Euler の適格性・異なる参照で選ばれる停止の時刻の同等性を意味しない。"
+                   "結果 A でも残差の条件は外さない (§6 V-h370-diag のやらないこと)"),
+         "update_conditions_met": False, "result": "判定不能", "code": None, "why": None, "undecidable": [], "tol_mm": TOL_MM}
+    und = R["undecidable"]
+    arrays = {}
+
+    def finish(rc):
+        R["update_conditions_met"] = False
+        if arrays:
+            npz = case / DIAG_NPZ
+            npz.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(npz, **arrays)
+            R["arrays"] = {"file": DIAG_NPZ, "sha256": sha256_file(npz), "keys": sorted(arrays)}
+        if und:
+            R["result"], R["code"] = "判定不能", R.get("code") or "U_input"
+        if R["result"] == "判定不能" and not R.get("why"):
+            R["why"] = "; ".join(und)[:900]
+        jwrite(out_p, R)
+        print(f"== VERDICT V-h370-diag (感度の診断、更新・受け渡しには使わない): {R['result']} ({R.get('code')}) — {str(R.get('why'))[:600]}")
+        print(f"→ {out_p}")
+        return 0 if R["result"] in ("結果 A", "結果 B") else 2
+    if not run.is_dir():
+        und.append(f"{NS_RUN} が無い")
+        return finish(2)
+    # --- 1. 診断の run であること・記録 ---
+    mark, pc = jload(run / DIAG_MARK), jload(run / "H370_PRECHECK.json") or {}
+    ms, end = jload(run / "H370_MAIN_START.json") or {}, jload(run / DIAG_END)
+    R["records"] = {"diag_mark": bool(mark), "precheck_phase": pc.get("phase"), "precheck_ok": pc.get("ok"), "main_start_ok": ms.get("ok"),
+                    "diag_end": {k: (end or {}).get(k) for k in ("end_state", "stop_step", "window", "main_outputs", "formal_records", "run_rc")}}
+    if not mark or pc.get("phase") != "ns-diag":
+        und.append(f"診断の印 {DIAG_MARK} が無いか投入前の検査が診断の経路 (ns-diag) のものでない — 診断の経路で回した run でない")
+    if not pc.get("ok"):
+        und.append("投入前の検査 (H370_PRECHECK.json) が無いか不成立")
+    if not ms.get("ok"):
+        und.append("本段の直前の照合 (H370_MAIN_START.json) が無いか不成立")
+    for m in MARKERS:
+        if (run / m).is_file():
+            und.append(f"基盤の停止・不成立の印 {m}: {(run / m).read_text()[:200]}")
+    prov = (run / "RUN_PROVENANCE.txt").read_text() if (run / "RUN_PROVENANCE.txt").is_file() else ""
+    fsha = next((ln.split(":", 1)[1].strip() for ln in prov.splitlines() if ln.startswith("forge_sha256")), None)
+    envs = [ln.split(":", 1)[1].strip() for ln in prov.splitlines() if ln.startswith("env")]
+    R["records"]["provenance"] = {"forge_sha256": fsha, "env": envs}
+    if not (fsha or "").startswith(BIN_SHA) or "FORGE_CUDA_BLOCKSIZE=128" not in envs:
+        und.append(f"RUN_PROVENANCE.txt のバイナリ ({str(fsha)[:16]}) か FORGE_CUDA_BLOCKSIZE が登録と違う")
+    # --- 2. 終了の状態と停止の時刻 s ---
+    state = SR.read_state(run) or {}
+    status = state.get("status") or "MISSING"
+    s = state.get("stop_step")
+    R["stop"] = {"status": status, "stop_step": s, "last_output": state.get("last_output"), "hold": state.get("hold"), "note": state.get("note")}
+    if status not in ("REACHED", "CENSORED") or not isinstance(s, int):
+        und.append(f"終了の状態 {status} (停止の時刻 {s!r}) — 停止の時刻が決まらない (REACHED か CENSORED であること)")
+    elif end and (end.get("end_state"), end.get("stop_step")) != (status, s):
+        und.append(f"終了の記録 {DIAG_END} の状態・停止の時刻 ({end.get('end_state')}, {end.get('stop_step')}) が STOP_RULE_STATE.json と違う")
+    R["window_kind"] = ("停止の時刻の窓 [s − 40,000, s]" if status == "REACHED" else
+                        "打切りの時点の診断の窓 (上限の打切り CENSORED: 最後の出力で終わる末尾の 17 出力; §6 V-h370-diag で先に登録)"
+                        if status == "CENSORED" else None)
+    # --- 3. 停止規則の記録の窓・抽出の条件・使用域の列 ---
+    rec = jload(run / SR.RECORD) or {}
+    st, ds = rec.get("settings") or {}, rec.get("delta_series") or {}
+    if (st.get("window"), st.get("out_step_interval")) != (DIAG_WINDOW, DIAG_OUT_INT):
+        und.append(f"停止規則の窓・出力の間隔 ({st.get('window')}, {st.get('out_step_interval')}) が登録 ({DIAG_WINDOW}, {DIAG_OUT_INT}) と違う")
+    required = SR.required_window_steps(int(s), DIAG_WINDOW, DIAG_OUT_INT) if isinstance(s, int) and s >= 0 else []
+    R["required"] = required
+    if required and len(required) != DIAG_N_REQ:
+        und.append(f"判定の窓の出力が {len(required)} ({DIAG_N_REQ} であること)")
+    ext = {k: v for k, v in (ds.get("extract") or {}).items() if k != "source"}
+    R["extract"] = ext
+    if ext != DL.handoff_extract_settings():
+        und.append(f"停止規則の記録の抽出の条件 {ext} が #36e で固定した受け渡しの条件 {DL.handoff_extract_settings()} と違う")
+    try:
+        uc = SR.use_columns(run)
+        x_use = np.asarray(uc["x"], dtype=float)
+        mm = float(uc["scale_m"]) * 1e3
+        if [float(v) for v in ds.get("x") or []] != x_use.tolist():
+            und.append("停止規則の記録の使用域の列 (delta_series.x) が run の格子の使用域の列と違う")
+    except Exception as e:  # noqa: BLE001
+        und.append(f"使用域の列を読めない ({type(e).__name__}: {e})"[:300])
+        x_use, mm = np.zeros(0), None
+    # --- 4. 抽出器・見張りの版 (投入の時点と同じ) ---
+    vnow, vrun = module_versions(), pc.get("versions")
+    R["versions"] = {"now": vnow, "at_launch": vrun, "same": vnow == vrun}
+    if vnow != vrun:
+        und.append("抽出器・見張りの版 (forge_design の該当ファイルの sha) が投入の時点 (H370_PRECHECK.json の versions) と違う")
+    # --- 5. 判定の窓の 17 出力の完全性と sha の一覧 ---
+    shal = jload(run / DIAG_SHA) or {}
+    files = shal.get("files") or {}
+    comp = {"required": required, "missing_res": [], "sha_mismatch": [], "not_in_sha_list": [], "sha_list": DIAG_SHA if shal else None}
+    for k in required:
+        f = run / f"res_{k}.h5"
+        if not f.is_file():
+            comp["missing_res"].append(k)
+        elif f.name not in files:
+            comp["not_in_sha_list"].append(k)
+        elif sha256_file(f) != files[f.name]:
+            comp["sha_mismatch"].append(k)
+    R["completeness"] = comp
+    if not shal:
+        und.append(f"run の sha の一覧 {DIAG_SHA} が無い (診断の NS の終了の記録が書かれていない)")
+    if comp["missing_res"]:
+        und.append(f"判定の窓に入るべき出力 {comp['missing_res'][:8]} が無い (入力の不足; 縮めない)")
+    if comp["not_in_sha_list"] or comp["sha_mismatch"]:
+        und.append(f"判定の窓の出力の sha が終了の時点の一覧と合わない (一覧に無い {comp['not_in_sha_list'][:8]}・違う {comp['sha_mismatch'][:8]})")
+    # --- 6. 参照の固定 (DIAG_REF) と sha の照合 ---
+    dref = jload(case / DIAG_REF) or {}
+    specs, rdirs = {}, {}
+    for arm, r_ in (("A", (dref.get("sens_refs") or {}).get("A")), ("B", (dref.get("sens_refs") or {}).get("B")), ("aux", dref.get("euler_ref"))):
+        if not isinstance(r_, dict) or not r_.get("run") or not r_.get("res") or not r_.get("sha256"):
+            und.append(f"{DIAG_REF} に参照 {arm} の固定 {{run, res, sha256}} が無い")
+            continue
+        g = case / r_["run"] / r_["res"]
+        if not g.is_file() or sha256_file(g) != r_["sha256"]:
+            und.append(f"参照 {arm} の {r_['run']}/{r_['res']} が無いか sha256 が {DIAG_REF} の {r_['sha256'][:16]}… と違う")
+            continue
+        specs[arm] = {"run": str((case / r_["run"]).resolve()), "res": r_["res"], "sha256": r_["sha256"]}
+        rdirs[arm] = case / r_["run"]
+    R["refs"] = {k: {**v, "run": Path(v["run"]).name} for k, v in specs.items()}
+    info = jload(run / "prepare_info.json") or {}
+    eref = info.get("euler_ref") or {}
+    if "aux" in specs and (Path(str(eref.get("run", ""))).name, eref.get("res"), eref.get("sha256")) != \
+            (Path(specs["aux"]["run"]).name, specs["aux"]["res"], specs["aux"]["sha256"]):
+        und.append(f"診断の NS の prepare_info の euler_ref {eref} が {DIAG_REF} の固定 (run_0950) と違う")
+    if und:
+        return finish(2)
+    # --- 7. 比べる列 F (抽出の前に座標と両腕の Euler の補間できる範囲から) ---
+    try:
+        fx = fixed_columns(x_use, {a: rdirs[a] for a in DIAG_ARMS}, edge_tol=(ext.get("remap_edge") == "missing"))
+        fx_aux = fixed_columns(x_use, {"aux": rdirs["aux"]}, edge_tol=(ext.get("remap_edge") == "missing"))
+    except Exception as e:  # noqa: BLE001
+        und.append(f"比べる列を決められない ({type(e).__name__}: {e})"[:400])
+        return finish(2)
+    F = fx.pop("mask")
+    F_aux = fx_aux.pop("mask")
+    R["columns"] = {**fx, "aux_cover (記録)": {"n": int((F_aux & F).sum()), "excluded": fx_aux["excluded"]},
+                    "note": "抽出の前に座標だけで決めた比べる列 (NS の使用域の列 ∩ 腕 A・B の Euler の補間できる範囲)。この中の held・欠測・非有限は合格にしない"}
+    if not F.any():
+        und.append("比べる列 F が空")
+        return finish(2)
+    # --- 8. 抽出 (17 出力 × 腕 A・B + 補助 17) ---
+    snap = HOOKS.get("diag_snapshot", diag_snapshot)
+    tasks, keys = [], []
+    for k in required:
+        for arm in DIAG_ARMS + ("aux",):
+            tasks.append((run, k, specs[arm], ext, x_use))
+            keys.append((arm, k))
+    try:
+        pj = snap_jobs(jobs)
+    except ValueError as e:
+        und.append(str(e))
+        return finish(2)
+    R["parallel_plan"] = pj
+    prog_p = run / "h370_diag_sens_progress.log"
+
+    def progress(m, n, el):
+        if m == n or m % 3 == 0:
+            with open(prog_p, "a") as fh:
+                fh.write(f"{now()} 抽出 {m}/{n} (経過 {el:.0f} s、残りの見込み {el / m * (n - m):.0f} s、並列 {pj['jobs']})\n")
+    results, pinfo = run_snaps(tasks, snap, pj["jobs"], progress=progress)
+    got = {kk: (r_["ok"] if "ok" in r_ else {"error": r_["exc"][:300]}) for kk, r_ in zip(keys, results)}
+    R["extractions"] = {"n": len(tasks), "parallel": pinfo}
+    # --- 9. 出力ごとの比較・分類 ---
+    per = [diag_pair(k, got[("A", k)], got[("B", k)], mm, x_use, F) for k in required]
+    R["per_output"] = per
+    c = classify_diag(per, required)
+    R["result"], R["code"], R["why"], R["D_max"] = c["result"], c["code"], c["why"], c["D_max"]
+    Ds = [r["D_mm"] for r in per if r.get("D_mm") is not None]
+    R["D_mm"] = {"max": max(Ds) if Ds else None, "min": min(Ds) if Ds else None, "n_with_D": len(Ds), "n_outputs": len(per),
+                 "n_over_tol": sum(1 for d in Ds if d > TOL_MM), "per_output": {r["step"]: r.get("D_mm") for r in per},
+                 "note": "D の判定は全出力の最大で決める (窓の中で 0.01 mm をまたいでも時刻ごとに判定不能にしない)"}
+    # --- 10. 補助: run_0950 (診断の NS の参照) で抽出した値との差・停止規則の記録の δ との照合 (記録だけ) ---
+    rows = {r_["step"]: r_ for r_ in rec.get("rows") or [] if isinstance(r_, dict) and isinstance(r_.get("step"), int)}
+    aux = []
+    for k in required:
+        d0 = got[("aux", k)]
+        a_ = {"step": k}
+        if "error" in d0:
+            a_["error"] = d0["error"]
+        else:
+            e0 = _arr(d0, "delta_E")
+            for arm in DIAG_ARMS:
+                d_ = got[(arm, k)]
+                if "error" in d_:
+                    continue
+                e1 = _arr(d_, "delta_E")
+                m = F & np.isfinite(e0) & np.isfinite(e1)
+                a_[f"max_abs_vs_{arm}_mm"] = float(np.max(np.abs(e1 - e0)[m]) * mm) if m.any() else None
+            rd = (rows.get(k) or {}).get("delta")
+            if isinstance(rd, dict) and len(rd.get("delta_E") or []) == len(e0):
+                er = _arr(rd, "delta_E")
+                m = np.isfinite(er) & np.isfinite(e0)
+                a_["recorded_row_max_abs_diff_mm"] = float(np.max(np.abs(er - e0)[m]) * mm) if m.any() else None
+                a_["recorded_row_res_sha_same"] = rd.get("res_sha256") == d0.get("res_sha256")
+        aux.append(a_)
+    R["aux_run_0950"] = {"per_output": aux, "note": "補助の記録だけ (主の判定に使わない)。recorded_row は停止規則の見張りが同じ参照で記録した δ との差"}
+    # --- 11. 配列 (出力 × 腕 × 使用域の列) ---
+    arrays.update(steps=np.asarray(required, dtype=np.int64), x_use=x_use, F=F)
+    for arm in DIAG_ARMS + ("aux",):
+        for q in ("delta_E", "delta_target", "held", "y_b", "y_star"):
+            arrays[f"{arm}_{q}"] = np.array([(_arr(got[(arm, k)], q) if (len(_arr(got[(arm, k)], q)) == len(x_use))
+                                              else np.full(len(x_use), np.nan)) for k in required], dtype=float)
+    return finish(0)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--euler-prequalify", action="store_true", help="(i) Euler の参照の予備の資格の判定と固定")
+    ap.add_argument("--diag-sens", action="store_true",
+                    help="§6 V-h370-diag: 診断の NS (run_0951、ns-diag) の Euler 参照の入れ替えの感度 (CFD 0 step; 関門・正式の判定は呼ばない)")
     ap.add_argument("--no-ab", action="store_true",
                     help="抽出の参照の A/B と σ_ref を回さない (A/B は未実施、参照の最終の資格を確かめないので更新に進める条件は満たさない)")
     ap.add_argument("--case-dir", default=str(HERE))
@@ -1250,6 +1653,8 @@ def main(argv=None) -> int:
         sys.path.insert(0, str(design))
     if a.euler_prequalify:
         return euler_prequalify(case, tools)
+    if a.diag_sens:
+        return diag_sens(case, tools, Path(a.out) if a.out else case / DIAG_OUT, jobs=a.jobs)
     return ns_judge(case, tools, not a.no_ab, Path(a.out) if a.out else case / OUT, jobs=a.jobs)
 
 
