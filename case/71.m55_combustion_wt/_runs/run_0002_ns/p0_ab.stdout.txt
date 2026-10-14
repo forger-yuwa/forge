@@ -1,0 +1,15 @@
+[p0_ab] res_100000.h5: |A−B|/Pt max 1.032e-04 (interior 1.032e-04), exceed A 58851 B 58299 (A∩B 58101), P0/Pt−1 max A 6.164553e-03 B 6.165732e-03, |e_rec−e| max 1.979e-09 J/kg, 10 s
+[p0_ab] res_110000.h5: |A−B|/Pt max 7.159e-05 (interior 7.159e-05), exceed A 61687 B 61474 (A∩B 61296), P0/Pt−1 max A 5.701423e-03 B 5.715047e-03, |e_rec−e| max 2.095e-09 J/kg, 9 s
+[p0_ab] res_120000.h5: |A−B|/Pt max 5.930e-05 (interior 5.930e-05), exceed A 80210 B 79964 (A∩B 79746), P0/Pt−1 max A 5.135134e-03 B 5.129655e-03, |e_rec−e| max 2.561e-09 J/kg, 9 s
+[p0_ab] res_130000.h5: |A−B|/Pt max 7.560e-05 (interior 7.560e-05), exceed A 70835 B 69975 (A∩B 69892), P0/Pt−1 max A 4.549903e-03 B 4.547762e-03, |e_rec−e| max 2.212e-09 J/kg, 9 s
+[p0_ab] res_140000.h5: |A−B|/Pt max 4.268e-05 (interior 4.268e-05), exceed A 60229 B 58954 (A∩B 58873), P0/Pt−1 max A 3.598582e-03 B 3.601755e-03, |e_rec−e| max 2.095e-09 J/kg, 8 s
+[p0_ab] res_150000.h5: |A−B|/Pt max 3.060e-05 (interior 3.060e-05), exceed A 53155 B 52843 (A∩B 52812), P0/Pt−1 max A 2.951575e-03 B 2.953343e-03, |e_rec−e| max 2.212e-09 J/kg, 8 s
+[p0_ab] res_160000.h5: |A−B|/Pt max 8.590e-06 (interior 8.590e-06), exceed A 59176 B 58782 (A∩B 58735), P0/Pt−1 max A 2.364371e-03 B 2.364341e-03, |e_rec−e| max 2.445e-09 J/kg, 8 s
+[p0_ab] res_170000.h5: |A−B|/Pt max 2.606e-05 (interior 2.606e-05), exceed A 52420 B 52066 (A∩B 52007), P0/Pt−1 max A 2.231544e-03 B 2.231583e-03, |e_rec−e| max 2.212e-09 J/kg, 8 s
+[p0_ab] res_180000.h5: |A−B|/Pt max 7.641e-05 (interior 7.641e-05), exceed A 50395 B 50120 (A∩B 50089), P0/Pt−1 max A 2.334134e-03 B 2.334349e-03, |e_rec−e| max 2.212e-09 J/kg, 8 s
+[p0_ab] res_181000.h5: |A−B|/Pt max 7.601e-05 (interior 7.601e-05), exceed A 50161 B 49862 (A∩B 49819), P0/Pt−1 max A 2.340881e-03 B 2.340369e-03, |e_rec−e| max 2.212e-09 J/kg, 8 s
+[p0_ab] res_182000.h5: |A−B|/Pt max 6.721e-05 (interior 6.721e-05), exceed A 50244 B 49971 (A∩B 49935), P0/Pt−1 max A 2.347425e-03 B 2.347683e-03, |e_rec−e| max 1.979e-09 J/kg, 8 s
+[p0_ab] res_183000.h5: |A−B|/Pt max 7.231e-05 (interior 7.231e-05), exceed A 50441 B 50197 (A∩B 50166), P0/Pt−1 max A 2.357961e-03 B 2.357850e-03, |e_rec−e| max 2.328e-09 J/kg, 8 s
+[p0_ab] verdict: COMPOUND (一部だけ: 複合要因として記録)
+[p0_ab] max|A−B|/Pt all nodes per step: 100000:1.032e-04, 110000:7.159e-05, 120000:5.930e-05, 130000:7.560e-05, 140000:4.268e-05, 150000:3.060e-05, 160000:8.590e-06, 170000:2.606e-05, 180000:7.641e-05, 181000:7.601e-05, 182000:6.721e-05, 183000:7.231e-05
+[p0_ab] exceed A/B per step: 100000:58851/58299, 110000:61687/61474, 120000:80210/79964, 130000:70835/69975, 140000:60229/58954, 150000:53155/52843, 160000:59176/58782, 170000:52420/52066, 180000:50395/50120, 181000:50161/49862, 182000:50244/49971, 183000:50441/50197
