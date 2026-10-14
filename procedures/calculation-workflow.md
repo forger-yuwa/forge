@@ -378,7 +378,9 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
 - **何を見るか**: (1) 設定 — 宣言 (`RECIPE.json`) があれば、宣言したプロファイル・段・逸脱と照合する (`recipe_settings.py` と同じ規則:
   `fixed`・明示すべきキーの値と省略、禁止キー、プロファイルに無いキー、未知・誤った節のキー)。宣言の有無によらず、
   `check_solver_config.py` の FAIL (起動時に拒否されるキー・`bndFirstOrder`・dual-time の緩和など) と YAML の重複キー・merge key は
-  FAIL。宣言の無い run の未知・誤った節のキーは、宣言の欠落と同じく WARN の期間は WARN。(2) メッシュの実効条件 — `mesh_provenance.py check` (上の「変換時の条件の記録」)。
+  FAIL。宣言の無い run の未知・誤った節のキーは、宣言の欠落と同じく WARN の期間は WARN。宣言したプロファイルの**適用条件**
+  (次元 `2d_planar`・`2d_axisym`・`3d`、格子の種類 `structured`・`unstructured`、格子の node/cell) は変換の成果物 (来歴の記録、無ければ
+  h5 の primal のセルの型) から取って照合し、外れても取れなくても FAIL (plan §5.1 #28)。(2) メッシュの実効条件 — `mesh_provenance.py check` (上の「変換時の条件の記録」)。
   (3) メッシュの品質 — `check_mesh_quality.py <h5> --bcond bcondConfig.yaml --ar-max 5000` (AR 1000 を超えるセルは壁法線の構造層で
   条件を確かめたものだけ 5000 まで。`bcondConfig.yaml` の無い run は止まる)。(4) バイナリの sha256 (このリポジトリの `build/forge` で
   ないバイナリは WARN で記録するだけで止めない)。読めない・検査できない入力は FAIL。
@@ -395,6 +397,13 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
   禁止キー・メッシュの FAIL・宣言があるのに照合が FAIL・検査できない入力は今も止まる。
 - **`FORGE_LAUNCH_GATE`**: `warn` は `fixed`・明示すべきキーの不一致・省略だけを WARN に落とす (禁止キー・宣言の欠落 (強制時)・
   メッシュの FAIL・検査できない入力は落とさない)。`enforce` はその場で強制のモードにする (先行して確かめるため)。ほかの値は FAIL。
+- **旧キー**: `time.last.time`・旧 `physProp.isAxisymmetric` などの WARN・FAIL は `python3 solver_density_cuda/tools/migrate_solver_config.py
+  [--dry-run] <solverConfig.yaml>` で直せる (関門の文言が案内する。直したら宣言し直す)。
+- **起動の後** (plan §5.1 #29): forge の終了の後に `launch_gate.py <run_dir> --post-launch` が `forge_run.log` の起動のエコー
+  (`'scalarGradient' effective`・`'slauWallNormalChi' effective`・`detectNaNInterval`・二相拡散・`qAccumulatorFP64` の行) と config の
+  要求値を比べ、`LAUNCH_ECHO.txt` と `RUN_PROVENANCE.txt` の 1 行に残す。不一致 (実行したバイナリが要求値を採用していない)・確認不能
+  (出るはずのエコーが無い) は WARN で、run は止めない。forge がエコーしない量は「確認不能」の一覧に載る。別ビルド (`FORGE_BIN`) の
+  A/B では `LAUNCH_ECHO.txt` を見てから比べる。
 
 ## メッシュ変更後の restart (cross-mesh interpolation)
 
@@ -419,8 +428,10 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
     境界の所属・幾何で同一であることを確かめ、確かめられなければ何も書かずに停止する。res は格子を持たないので、
     **res の隣の `solverConfig.yaml` の `mesh.meshFileName`** をその場の格子とし、res の座標 (res の型で)・接続と照合する。
     res だけを別の場所へ写したときは **`--src-mesh <その run の格子>`** を付ける (無ければ停止)。
-    同じ `.msh` を変換し直した格子 (例: float32 → 倍精度の変換器) は座標の型・値が違うので別の格子として拒否される —
-    元の変換済み格子を使い続けるか、格子が違うものとして `interp_field.py` を使う。
+    同じ `.msh` を変換し直した格子 (例: float32 → 倍精度の変換器) は座標の型・値が違うので既定では別の格子として拒否される。
+    座標の精度だけを上げた変換し直しなら **`--allow-coord-upcast`** で通せる (接続・境界の所属・その他が同一で、新しい座標を古い型に
+    丸めると完全一致するときだけ。VERDICT と投入の関門の記録に「座標の精度の引き上げ」を残す。引き継いだ run は restart の跳ねを見る)。
+    それ以外は元の変換済み格子を使い続けるか、格子が違うものとして `interp_field.py` を使う。
 - 節点の並びが同じで壁だけ µm 動いたメッシュへの初期値は、skill `forge-aws-run` §3 の検査付き番号写像 (`case/45.isobutane_m6_d155/ic_index_map.py`) を使う。
 
 ## メッシュ品質チェック (計算前・必須)

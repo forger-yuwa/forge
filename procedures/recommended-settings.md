@@ -52,7 +52,21 @@
   `--deviate key=value --reason "1 行の理由"` (根拠 `--basis` は任意。キーを書かないなら `key=~`)、推奨に従わない試し計算は
   `--experiment --reason "..."` (外れたキーと理由だけを記録)。禁止キー・起動時に拒否されるキー・未知のキー・誤った節のキー・
   YAML の重複キーは、逸脱でも実験でも FAIL。一覧は `recipe_settings.py list`、中身は `recipe_settings.py show P`。
-- 投入の関門 (`run_case.sh` の起動前の照合) はまだ無い (plan §5.1 #10)。宣言は今は記録で、強制はしない。
+- **投入の関門** (2026-10-15、plan §5.1 #10・#28・#29): `run_case.sh` が forge の起動の前に `launch_gate.py` を回し (`LAUNCH_GATE.txt`)、
+  FAIL なら起動しない。**移行期** (強制の開始 = plan §4.7 の条件を満たすまで) は、**宣言の無い run・来歴の記録の無いメッシュは WARN で
+  起動する**。移行期でも止まるもの: 禁止キー・`check_solver_config.py` の FAIL (削除・改名キー・`bndFirstOrder`・dual-time の緩和など)・
+  YAML の重複キー・merge key、宣言した run の `fixed`・明示すべきキーの不一致と省略 (`FORGE_LAUNCH_GATE=warn` で WARN に落とせる)・
+  プロファイルに無いキー・未知のキー・適用条件の外 (次元・格子の種類・格子の node/cell は変換の成果物から取り、取れなければ照合できない
+  として止める)、メッシュの来歴の不一致・品質の FAIL、読めない入力。forge の終了の後は起動のエコー (`scalarGradient`・
+  `slauWallNormalChi` など) と要求値を照合して `LAUNCH_ECHO.txt` に残す (不一致・確認不能は WARN、止めない)。手順は
+  [`calculation-workflow.md`](calculation-workflow.md) の「投入の関門」。
+- **確かめた範囲** (段取り 1、2026-10-15): 設計チェーンの**代表 11 機種・30 段**の config が段の宣言を書き、自分のプロファイルの照合を
+  通る (`design/tests/run_generator_recipe_tests.py`)。**全経路ではない** (plan §5.1 #27): 宣言を結線していない経路 (`runner.main` の単段、
+  opt/polish の CPG)、宣言を書かない段 (axis-Mach NS の `ramp`、SERN の `warm_adapt`)、プロファイルの無い機種・構成 (風洞 NS v1、
+  `euler_loop` の cell、CPG の axis-Mach、断熱壁の axis-Mach NS) の run は宣言が無いので、移行期は WARN で起動する。
+- **段取り 1 の完了と計画全体の完了は別**: 段取り 1 (宣言と関門を移行期の WARN で入れ、生成器の数値は変えない) の残りは plan §5.1 #26
+  (case/45 の台本の互換の統合) と result 段の再レビュー。計画全体には、段取り 2 (生成器の既定を機種の生産レシピに揃える、#12)、
+  段取り 3 (§1 に寄せる受入、#15)、強制の開始 (§4.7: 上の未結線の経路・段・機種の解消) が残る。
 
 ## 1. 共通の基本設定 — 現行 (2026-09-08)
 

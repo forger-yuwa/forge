@@ -81,7 +81,7 @@ physProp:
 time:
   unsteady: 0
   dualTime: 0
-  last: {{nStepOuter: {steps}, time: 1.00}}
+  last: {{nStepOuter: {steps}}}
   deltaT: {{control: 1, dt: 0.00000001, cfl: 1.0, cfl_pseudo: {cfl}, blockDPLUR: 1, implicitRelax: 0.5, dt_min: 0.00000000001, dt_max: 1.0{key}}}
   outStepStart: 0
   outStepInterval: {out}

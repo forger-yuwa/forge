@@ -13,7 +13,8 @@ description: forge の solverConfig.yaml / bcondConfig.yaml を新規に組む�
    キーの意味に迷ったら `procedures/solver-settings.md`。
 3. **境界条件** (§1.1): 出口の種類 (亜音速 statPress + 逆流 Pt/Tt / 超音速 outflow か Ps 一致)、壁 (no-slip 変換で wall_dist)、
    node の `nodeInletCornerWall`。
-4. **段階起動** (§1.2): soft → mid → 本段。同一メッシュは index コピー、cross-mesh は `interp_field.py`。
+4. **段階起動** (§1.2): soft → mid → 本段。同一メッシュは `restart_field.py` (index コピー; 格子を持たない res だけを写したときは
+   `--src-mesh`、座標の精度だけを上げて変換し直した格子へは `--allow-coord-upcast`)、cross-mesh は `interp_field.py`。
    一様 IC から超音速/SST を直接始めない。初期 k/ω は非ゼロ。
 5. **SST なら壁処理を確認する**: **`wallTreatmentSST: 0` (低 Re 壁解像) を使う。`1` (壁関数) は使わない方針**
    (既定も 0。`1` を指定するとソルバが既知欠損を列挙して警告する)。
@@ -24,6 +25,11 @@ description: forge の solverConfig.yaml / bcondConfig.yaml を新規に組む�
    設定ミスを止める: 禁止キー、dual-time の `implicitRelax`、S3 が `convMethod 0` で不活性、FCT が作動しない組合せ、
    凝縮 dual-time の `passiveScalarScheme 0`)、`check_mesh_quality.py` の VERDICT、バイナリ鮮度 (`find ... -newer build/forge`)、
    `output.level` (既定 1; 診断が要るときだけ 2)、新しい `run_NNNN_<slug>` ディレクトリ。
+   **宣言**: `recipe_settings.py declare <run_dir> --profile P --stage S` (機種のプロファイルは `recipe_settings.py list`・
+   recommended-settings.md 付録 A)。外す値は `--deviate key=value --reason "<1 行>"`、推奨に従わない試し計算は
+   `--experiment --reason "<1 行>"`。`run_case.sh` の関門 (`LAUNCH_GATE.txt`) は移行期 (plan
+   tooling-generator-defaults-and-launch-gate §4.7) は宣言の無い run を WARN で通すが、宣言した run の照合の FAIL・禁止キー・
+   メッシュの FAIL は止める。起動の後は `LAUNCH_ECHO.txt` で要求値が実効値になったかを見る。
 7. **報告**: run パス、`check_convergence` / `check_quasisteady` の VERDICT、case README の run 一覧。
 
 **定常と非定常で分かれる設定** (間違えても残差には出ないので注意):
@@ -38,6 +44,7 @@ description: forge の solverConfig.yaml / bcondConfig.yaml を新規に組む�
 根拠と数値は [`recommended-settings.md`](../../../procedures/recommended-settings.md) §6 の dual-time 節。
 
 既存 config の点検を頼まれたら、§9 の表と突き合わせて「廃止キー / 旧既定 / 非推奨の組み合わせ」を列挙し、
-現行値への置換案を出す (勝手に書き換えない)。
+現行値への置換案を出す (勝手に書き換えない)。機械的に直せる旧キー (`time.last.time`・旧 `physProp.isAxisymmetric` など) は
+`migrate_solver_config.py --dry-run <solverConfig.yaml>` で確かめてから直す (直したら宣言し直す)。
 
 レシピを変えたら `recommended-settings.md` の該当節の日付を更新し、旧値を §9 に移す (plan 反映と同じく「決めた時点で書く」)。

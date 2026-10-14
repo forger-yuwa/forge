@@ -59,11 +59,18 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 **明示すべきキー** (値に依存するのに省略していたキー、plan §5.1 #16) を旧い実効値で足す (文字の挿入だけ。値は変わらない:
 `design/tests/run_generator_recipe_tests.py` が置き換えの前とのバイト同一 (例外 = 足したキー) を確かめる)、(2) 書いた後に段の宣言
 `RECIPE.json` (と段の写し `RECIPE_<tag>.json`) を書く。問題 YAML (と `--cfl` などの引数) が明示した数値の上書きは、出所 (問題 YAML の
-パスとキー) つきの理由のある逸脱に変換する。全段の config は自分のプロファイルに PASS する。
+パスとキー) つきの理由のある逸脱に変換する。**代表 11 機種・30 段**の config が自分のプロファイルに PASS することを
+`run_generator_recipe_tests.py` で確かめた。**全経路ではない** (plan §5.1 #27): 宣言を結線していない経路 (`runner.main` の単段、
+opt/polish の CPG)、宣言を書かない段 (axis-Mach NS の `ramp`、SERN の `warm_adapt`)、プロファイルの無い機種・構成 (風洞 NS v1、
+`euler_loop` の cell、CPG の axis-Mach、断熱壁の axis-Mach NS) は宣言を書かない (`RECIPE_<tag>.FAILED.json` に理由を残す段もある)。
 生成器の値を変えたらプロファイルも書き直す (`regen_profiles.py --write`、差は plan に書く)。
 手で作る run は `recipe_settings.py declare <run> --profile P --stage S` で宣言できる。投入の関門 `launch_gate.py` (`run_case.sh` が
-forge の前に呼ぶ、#10) は実装済みで、強制の開始は棚卸しの完了の後 (plan §4.7、それまで宣言の無い run は WARN)。
-生産レシピへの既定の揃えは後続 (plan §5.1 #12)。
+forge の前に呼ぶ、#10) は実装済み: 宣言した run は宣言のプロファイル・段・逸脱と、変換の成果物から取った次元・格子の種類 (#28) で照合し、
+FAIL なら起動しない。強制の開始は棚卸しの完了の後 (plan §4.7) で、それまでは宣言の無い run・来歴の記録の無いメッシュを WARN で起動する
+(禁止キー・宣言した run の照合の FAIL・メッシュの FAIL は今も止める)。forge の終了の後は起動のエコーと要求値を照合し `LAUNCH_ECHO.txt`
+に残す (#29、WARN のみ)。
+**段取り 1 の完了と計画全体の完了は別**: 段取り 1 の残りは #26 (case/45 の台本の互換の統合) と result 段の再レビュー。生産レシピへの
+既定の揃え (段取り 2、#12)・§1 に寄せる受入 (段取り 3、#15)・強制の開始は後続。
 
 ## 問題定義 YAML
 
