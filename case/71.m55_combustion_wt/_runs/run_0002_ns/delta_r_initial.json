@@ -1,0 +1,30 @@
+{
+ "model": "contur_momentum_integral",
+ "closure": "contur",
+ "a_crocco": 1.0,
+ "cf_scale": 1.0,
+ "n_scale": 1.0,
+ "thermal_bc": {
+  "mode": "prescribed_temperature",
+  "Tw": 350.0
+ },
+ "theta0_m": 0.0008398987246758711,
+ "theta0_source": "flat-plate virtual length 0.5 m (Re_x 4.52e+06)",
+ "x_virtual_m": 0.49999999999999994,
+ "rt_m": 0.0999084914252905,
+ "Pt": 3500000.0,
+ "Tt": 1250.0,
+ "gas": "semiperfect",
+ "smooth": {
+  "kind": "quintic_pspline",
+  "n_cp": 59,
+  "knot_spacing": 2.0,
+  "lam": 1.0,
+  "penalty_order": 3,
+  "resid_rel_rms": 0.0192689612851826,
+  "resid_abs_max": 0.000336193452696607,
+  "resid_rel_p95": 0.027768686929906663
+ },
+ "delta_r_throat": 0.0009176049291052592,
+ "delta_r_exit": 0.4937531935455059
+}

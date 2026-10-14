@@ -1,0 +1,13 @@
+  [segment] 判定区間 = mid -> main  (45000 行) -> /home/ubuntu/m55_diag_0002/seg_euler/run_0001_euler/residual_history_segment.csv
+
+=== /home/ubuntu/m55_diag_0002/seg_euler/run_0001_euler  [last step 14999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.81e-04 peak=2.71e-04 fin=1.55e-06 drop= 2.2dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=2.88e-01 peak=4.62e-01 fin=1.28e-03 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=6.36e-02 peak=8.31e-02 fin=5.55e-04 drop= 2.1dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=2.32e+02 peak=3.75e+02 fin=1.80e+00 drop= 2.3dec flat     <-- STALLED (plateau)
+  rms_roY0    : init=1.65e-04 peak=2.47e-04 fin=1.42e-06 drop= 2.2dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=1.55e-05 peak=2.32e-05 fin=1.33e-07 drop= 2.2dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE
+CHECK_CONVERGENCE_EXIT: 1

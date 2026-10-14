@@ -1,0 +1,18 @@
+[restart_field] species: SRC record resolved_species_29c12bc670fcc47a_69a6b6ada89f7932.yaml verified (integrity 69a6b6ada89f7932), destination species_hash 29c12bc670fcc47a (forge --resolve-species) matches -> inherit
+同一メッシュを確認 (MESH/COORD 一致, 465600 cells)
+移した保存量  : ['ro', 'roK', 'roOmega', 'roUx', 'roUy', 'roUz', 'roY0', 'roY1', 'roe']
+DST を残す    : ['wall_dist']
+⚠ 型の縮小 (float64 -> float64) で丸めが入った。**倍精度の場を種にするなら --keep-src-dtype を使うこと**:
+    roY0       相対 5.444e-08
+    roY1       相対 3.625e-08
+species 属性  : 継承 (species_input_unverified=0)
+VERDICT: OK (9 量を移した、うち 2 量は型の縮小で丸めあり)
+[restart_field] species: SRC record resolved_species_29c12bc670fcc47a_69a6b6ada89f7932.yaml verified (integrity 69a6b6ada89f7932), destination species_hash 29c12bc670fcc47a (forge --resolve-species) matches -> inherit
+同一メッシュを確認 (MESH/COORD 一致, 465600 cells)
+移した保存量  : ['ro', 'roK', 'roOmega', 'roUx', 'roUy', 'roUz', 'roY0', 'roY1', 'roe']
+DST を残す    : ['wall_dist']
+⚠ 型の縮小 (float64 -> float64) で丸めが入った。**倍精度の場を種にするなら --keep-src-dtype を使うこと**:
+    roY0       相対 5.443e-08
+    roY1       相対 3.625e-08
+species 属性  : 継承 (species_input_unverified=0)
+VERDICT: OK (9 量を移した、うち 2 量は型の縮小で丸めあり)

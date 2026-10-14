@@ -1,0 +1,29 @@
+{
+ "event": "main_stage_started",
+ "time": "2026-10-14T22:02:41+00:00",
+ "time_unix": 1792015361.756915,
+ "stages": "full",
+ "main_config": {
+  "file": "solverConfig.yaml",
+  "sha256": "9aefd8aafdaa275781c5b9d753ee214979d099416e115ff1f65f3775f0563fd7",
+  "nStepOuter": 200000
+ },
+ "initial_field": {
+  "file": "nozzle.h5",
+  "sha256": "aea53f5dc646b664f32fe1a0731839168d75f3a3810e4819fd1d8c6dedf882f8"
+ },
+ "previous_stages": [
+  {
+   "tag": "S1_soft",
+   "nsteps": 3000,
+   "config_sha256": "1a30c6d77b8b5fd590f9f83dcb4726dbc2609f93f05d639e8284fd54f87ea293"
+  },
+  {
+   "tag": "S2_mid",
+   "nsteps": 3000,
+   "config_sha256": "d7bb8dbe647b505daf1ac981ed909743f80daad311244ad5e4eb4563fe672619"
+  }
+ ],
+ "prestage_config": null,
+ "res_files_present": []
+}

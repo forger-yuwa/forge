@@ -1,0 +1,18 @@
+2026-10-14T23:13:01+00:00
+Filesystem        1B-blocks         Used   Available Use% Mounted on
+/dev/root      206900281344 190651846656 16231657472  93% /
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       193G  178G   16G  93% /
+
+2799718212	/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns
+1640406895	/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0001_euler
+
+100605412 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/res_183000.h5
+100605412 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/res_0.h5
+1170416 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/res_wall_3_183000.h5
+28896 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/res_outlet_2_183000.h5
+187637372 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/nozzle.h5
+109468246 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/residual_history.csv
+19755555 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns/forge_run.log
+106077312 /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0001_euler/res_12000.h5
+res_N.h5 の数 22  res_wall_3 の数 183  res_outlet_2 の数 183

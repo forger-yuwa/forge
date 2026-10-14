@@ -1,0 +1,89 @@
+{
+ "problem_sha256": "f1ae7ee163f0e74ae16e76d9db5bd8ed6e911bced4661439efe945aef815d8a5",
+ "nStepOuter_fallback": {
+  "n": 60000,
+  "source": "既定 60000",
+  "out_int": 1000,
+  "prepare_info": 60000
+ },
+ "main_line": null,
+ "stop_rule_cap": 200000,
+ "main_solverConfig_equal": true,
+ "main_solverConfig_sha256": {
+  "run": "9aefd8aafdaa275781c5b9d753ee214979d099416e115ff1f65f3775f0563fd7",
+  "regen": "9aefd8aafdaa275781c5b9d753ee214979d099416e115ff1f65f3775f0563fd7",
+  "MAIN_STAGE_STARTED": "9aefd8aafdaa275781c5b9d753ee214979d099416e115ff1f65f3775f0563fd7"
+ },
+ "prepare_ns_stage_configs": {
+  "prepare_info": {
+   "stages": "full",
+   "at": "prepare",
+   "S1_soft": "1a30c6d77b8b5fd590f9f83dcb4726dbc2609f93f05d639e8284fd54f87ea293",
+   "S2_mid": "d7bb8dbe647b505daf1ac981ed909743f80daad311244ad5e4eb4563fe672619",
+   "main": "0ffa0763b04610addf4c3249a2330378eb76d747173fbc7fb1684592f0c8283a",
+   "prestage_config": null
+  },
+  "regen": {
+   "stages": "full",
+   "at": "prepare",
+   "S1_soft": "1a30c6d77b8b5fd590f9f83dcb4726dbc2609f93f05d639e8284fd54f87ea293",
+   "S2_mid": "d7bb8dbe647b505daf1ac981ed909743f80daad311244ad5e4eb4563fe672619",
+   "main": "0ffa0763b04610addf4c3249a2330378eb76d747173fbc7fb1684592f0c8283a",
+   "prestage_config": null
+  },
+  "equal": true
+ },
+ "previous_stages_sha256": {
+  "S1_soft": {
+   "MAIN_STAGE_STARTED": "1a30c6d77b8b5fd590f9f83dcb4726dbc2609f93f05d639e8284fd54f87ea293",
+   "regen": "1a30c6d77b8b5fd590f9f83dcb4726dbc2609f93f05d639e8284fd54f87ea293",
+   "equal": true
+  },
+  "S2_mid": {
+   "MAIN_STAGE_STARTED": "d7bb8dbe647b505daf1ac981ed909743f80daad311244ad5e4eb4563fe672619",
+   "regen": "d7bb8dbe647b505daf1ac981ed909743f80daad311244ad5e4eb4563fe672619",
+   "equal": true
+  }
+ },
+ "forge_launches_cfg_fnv": {
+  "recorded": [
+   "2973d3515ea8d24",
+   "11f3819c32cbca4",
+   "d903391a098b4612"
+  ],
+  "regen_S1_S2_main": [
+   "2973d3515ea8d24",
+   "11f3819c32cbca4",
+   "d903391a098b4612"
+  ],
+  "equal": true
+ },
+ "bcond_equal": true,
+ "bcond_fnv": {
+  "recorded": [
+   "caea65b446a3ac75"
+  ],
+  "regen": "caea65b446a3ac75"
+ },
+ "species_meta_equal": true,
+ "problem_values": {
+  "Pt": 3500000.0,
+  "Tt": 1250.0,
+  "p_ambient": 2770.7447458188694,
+  "wall_thermal": {
+   "mode": "isothermal",
+   "Tw": 350.0
+  },
+  "cfl_main": 1.0,
+  "stop_rule_keys": {
+   "stop_rule": null,
+   "stop_rule_cap": null,
+   "stop_rule_hold_steps": null,
+   "stop_rule_thresholds": null,
+   "outStepInterval": 1000,
+   "ns_steps": null
+  }
+ },
+ "run_bcond": "inlet:  {physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {Y0: 0.91420000, Y1: 0.08580000, Pt: 3500000.0, Tt: 1250.0, k: 1.0, omega: 18000.0}}\noutlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {Ps: 2770.7447458188694, Pt: 2770.7447458188694, Tt: 300.0}}\nwall:   {physID: 3, kind: wall_isothermal,  outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: 350.0}}\naxis:   {physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }\n",
+ "verdict": "一致 (生成器どおり)"
+}

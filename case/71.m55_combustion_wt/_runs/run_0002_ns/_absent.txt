@@ -1,0 +1,2 @@
+STOP_RULE_STATE.json: 無い
+-rw-rw-r-- 1 ubuntu ubuntu 0 Oct 14 22:46 stop_rule.json.tmp
