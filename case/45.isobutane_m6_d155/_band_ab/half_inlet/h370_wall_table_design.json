@@ -1,0 +1,9944 @@
+{
+ "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36r の前半 (codex diagnose notes/reviews/2026-10-15-h370-wallres-timeband-result-diagnose.md の Major 4・5)",
+ "created": "2026-10-14T16:52:55+00:00",
+ "kind": "表の案と作り直した格子 (§5.1 #36r の前半)。CFD 0 step・NS は回さない・結果の解釈はしない",
+ "run": "run_0951_h370_ns_b0",
+ "run_dir": "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0951_h370_ns_b0",
+ "envelope": "/home/ubuntu/forge-g0cchain/case/45.isobutane_m6_d155/_band_ab/half_inlet/h370_wall_envelope.json",
+ "script": {
+  "head": "31e5795e2b361bc79f8f1d157ba1f3d8bc2e9219",
+  "script_dirty": false,
+  "script_sha256": "df211fae77d5c73c8f8d9bd884e37daf3f02efd25a2f28c546b928f36dcd0caa"
+ },
+ "errors": [],
+ "inputs": {
+  "envelope_sha256": "5e47d07ed33fd39f751c2648d254fa47a52af79ba75b4786384d87a210173a52",
+  "wall_repr_sha256": "251ac75b4ac59318c82c99a5312071bb89927b4b9fdaa9292d673b6832b2bbc5",
+  "prepare_info_sha256": "3c47778fe50bf09d3ff060f37510685f0496739ab5f06740501523a40dba0064",
+  "problem_yaml": "problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml",
+  "problem_sha256": "0d784f7c49922444f9e476579b3fee092f4188e7717354caf37184ba84250eea",
+  "problem_is_run_input": true,
+  "problem_mesh_equals_prepare_info_block": true,
+  "r_t_m": 0.07666536551630307
+ },
+ "control": {
+  "generator_sha256": "f563a6a6694d462a7d772d52dc655b6e8f5762ec715d20b2ecd9f42c6204367e",
+  "expected": "f563a6a6694d462a7d772d52dc655b6e8f5762ec715d20b2ecd9f42c6204367e",
+  "generator_sha_match": true,
+  "n_wall_nodes_mesh": 4719,
+  "n_wall_nodes_envelope": 4719,
+  "wall_node_x_max_abs_diff_m": 4.996003611e-13,
+  "wall_node_r_max_abs_diff_m": 5.001554726e-14,
+  "y1_generator_over_tool": [
+   0.9999999995,
+   1.0
+  ],
+  "area_weight_rel_diff_max": 4.831172129e-10,
+  "metrics": {
+   "cells": 750162,
+   "nodes": 755040,
+   "ni": 4719,
+   "nj": 160,
+   "ar_max": 4573.992789,
+   "skew_max": 0.3197514943,
+   "n_ar_gt_5000": 0,
+   "n_ar_gt_1000": 52655,
+   "skew_max_ar_gt_1000": 0.0007400913021,
+   "n_ar_gt_1000_skew_gt_0p1": 0
+  },
+  "envelope_estimate": {
+   "y1plus_est_max": 2.766082604,
+   "x_rt_at_max": -10.53019303,
+   "area_over1_pct": 2.932261993,
+   "area_over_target_pct": 3.589874149,
+   "n_over_target": 357,
+   "x_lt0": {
+    "y1plus_est_max": 2.766082604,
+    "area_over_target_pct": 3.589874149
+   },
+   "x_ge0": {
+    "y1plus_est_max": 0.5883502222,
+    "x_rt_at_max": 95.17545031,
+    "area_over1_pct": 0.0
+   }
+  },
+  "convert": {
+   "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/control",
+   "msh_sha256": "c5db9b643d74ddd8fc267b98229214fb99681d37f587819bc3ebef81f0444b22",
+   "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+   "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+   "converter_rc": 1,
+   "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+   "coord_sha256": "2167c94529be55c3617607421ad57b6aca79e5eb5acebdeb68087b7efae58ca2",
+   "quality": {
+    "rc": 0,
+    "lines": [
+     "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 750162 cells)",
+     "mode: 2D (x-y projection)",
+     "cells: 750162",
+     "aspect ratio : max=4574.0  p99=3395.1  mean=220.9  >5000: 0 (0.00%)",
+     "skewness     : max=0.320  p99=0.281  mean=0.029  >0.90: 0 (0.00%)",
+     "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+    ]
+   },
+   "ar_relax": {
+    "ar_threshold": 1000.0,
+    "skew_max": 0.1,
+    "ar_max_allowed": 5000.0,
+    "required": true,
+    "source": "nozzle.h5 (primal/cell 変換)",
+    "n_cells": 750162,
+    "max_ar": 4573.992788806282,
+    "max_skew": 0.31975149426940735,
+    "n_high_ar": 52655,
+    "max_skew_high_ar": 0.0007400913020996806,
+    "n_violations": 0,
+    "worst_high_ar": {
+     "x_over_rt": -5.978891414112477,
+     "r_over_rt": 3.102452256135555,
+     "ar": 1075.844439067135,
+     "skew": 0.0007400913020996806
+    },
+    "high_ar_x_range_over_rt": [
+     -12.48162259940079,
+     34.778512336031156
+    ],
+    "inlet_x_spread_m": 0.0,
+    "inlet_planar": true,
+    "outlet_x_spread_m": 0.0008787451688281323,
+    "outlet_planar": false,
+    "ok": false
+   },
+   "geometry_only": {
+    "rc": 0,
+    "lines": [
+     "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+     "  DOF 座標 = MESH/COORD (node)",
+     "  wall          n=   4719  y1 中央値 1.1047e-07  平均 2.2682e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+     "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+    ]
+   },
+   "coord_sha256_expected": "2167c94529be55c3617607421ad57b6aca79e5eb5acebdeb68087b7efae58ca2",
+   "coord_sha_match": true,
+   "y1_tool_over_envelope_y1": [
+    0.9999999995,
+    1.0
+   ]
+  }
+ },
+ "variants": [
+  {
+   "spec": {
+    "name": "T08",
+    "target": 0.8,
+    "spacing": null,
+    "thicken": false
+   },
+   "table": {
+    "ok": true,
+    "n_points": 149,
+    "n_var": 33,
+    "n_constraints": 1781,
+    "n_changed": 19,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 170.4635042
+    },
+    "binding": 19,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      7.85385e-07
+     ],
+     [
+      -12.0,
+      1.19484e-06
+     ],
+     [
+      -11.5,
+      1.27282e-06
+     ],
+     [
+      -11.0,
+      1.3119e-06
+     ],
+     [
+      -10.5,
+      1.3417e-06
+     ],
+     [
+      -10.0,
+      1.36404e-06
+     ],
+     [
+      -9.5,
+      1.38405e-06
+     ],
+     [
+      -9.0,
+      1.40533e-06
+     ],
+     [
+      -8.5,
+      1.43455e-06
+     ],
+     [
+      -8.0,
+      1.46567e-06
+     ],
+     [
+      -7.5,
+      1.49167e-06
+     ],
+     [
+      -7.0,
+      1.50645e-06
+     ],
+     [
+      -6.5,
+      1.50352e-06
+     ],
+     [
+      -6.0,
+      1.47884e-06
+     ],
+     [
+      -5.5,
+      1.42988e-06
+     ],
+     [
+      -5.0,
+      1.35983e-06
+     ],
+     [
+      -4.5,
+      1.27273e-06
+     ],
+     [
+      -4.0,
+      1.17363e-06
+     ],
+     [
+      -3.75,
+      1.11975e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": true,
+   "downstream_bit_identical": true,
+   "metrics": {
+    "cells": 750162,
+    "nodes": 755040,
+    "ni": 4719,
+    "nj": 160,
+    "ar_max": 14432.82206,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 1023,
+    "n_ar_gt_1000": 53952,
+    "skew_max_ar_gt_1000": 0.0007304181013,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 0,
+    "x_lt0": {
+     "ar_max": 14432.82206,
+     "n_ar_gt_5000": 1023,
+     "x_rt_ar_gt_5000": [
+      -12.5,
+      -6.19272783
+     ],
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.7999998959,
+    "x_rt_at_max": -5.989807793,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.7999998959,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 14,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      1.952369575e-07,
+      2.915429865e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.161488479e-07
+     ],
+     "y1plus_est_max": 0.7999998557,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 14432.82206,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.975700479e-07,
+      3.1567564e-07
+     ],
+     "y1_old_m": [
+      6.248392727e-07,
+      9.789113457e-07
+     ],
+     "y1plus_est_max": 0.7999954367,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 11440.04365,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.16958747e-07,
+      3.257672696e-07
+     ],
+     "y1_old_m": [
+      1.002099501e-06,
+      1.098212687e-06
+     ],
+     "y1plus_est_max": 0.7999978018,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 14346.36148,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 8,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.267520439e-07,
+      3.330777084e-07
+     ],
+     "y1_old_m": [
+      1.106704832e-06,
+      1.152337519e-06
+     ],
+     "y1plus_est_max": 0.7999973473,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 14306.7623,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.338679978e-07,
+      3.389745704e-07
+     ],
+     "y1_old_m": [
+      9.789035482e-07,
+      1.143692575e-06
+     ],
+     "y1plus_est_max": 0.7999982746,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 13846.39522,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 10,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.395105617e-07,
+      3.439046928e-07
+     ],
+     "y1_old_m": [
+      8.34654413e-07,
+      9.62198396e-07
+     ],
+     "y1plus_est_max": 0.7999810991,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 11743.84366,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 11,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.443828485e-07,
+      3.490184973e-07
+     ],
+     "y1_old_m": [
+      7.528336171e-07,
+      8.251939811e-07
+     ],
+     "y1plus_est_max": 0.7999974062,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 10177.88899,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.495062419e-07,
+      3.564683396e-07
+     ],
+     "y1_old_m": [
+      7.03767882e-07,
+      7.469647516e-07
+     ],
+     "y1plus_est_max": 0.7999954031,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 9130.258309,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.570433131e-07,
+      3.635568973e-07
+     ],
+     "y1_old_m": [
+      6.651546344e-07,
+      7.005879842e-07
+     ],
+     "y1plus_est_max": 0.7999952754,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 8232.884166,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 15,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      3.640302629e-07,
+      3.689749345e-07
+     ],
+     "y1_old_m": [
+      6.175694408e-07,
+      6.621826255e-07
+     ],
+     "y1plus_est_max": 0.7999866353,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 7385.995172,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 17,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      3.692087931e-07,
+      3.702420216e-07
+     ],
+     "y1_old_m": [
+      5.675204563e-07,
+      6.145192778e-07
+     ],
+     "y1plus_est_max": 0.7999970629,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 6560.151004,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 19,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      3.650832359e-07,
+      3.700949432e-07
+     ],
+     "y1_old_m": [
+      5.17422453e-07,
+      5.647244169e-07
+     ],
+     "y1plus_est_max": 0.7999994959,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 5810.316471,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 21,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.524503085e-07,
+      3.645576399e-07
+     ],
+     "y1_old_m": [
+      4.746490282e-07,
+      5.152068282e-07
+     ],
+     "y1plus_est_max": 0.7999880991,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 5239.709032,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.309886892e-07,
+      3.517052291e-07
+     ],
+     "y1_old_m": [
+      4.23128911e-07,
+      4.725782631e-07
+     ],
+     "y1plus_est_max": 0.7999998959,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4834.749695,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 29,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.030677421e-07,
+      3.299703247e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.207414451e-07
+     ],
+     "y1plus_est_max": 0.7999991422,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 4400.790306,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.696183206e-07,
+      3.021085427e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.7999905616,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 4020.449144,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.324468013e-07,
+      2.687629455e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.799993726,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3771.342305,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.316957792e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.7999987562,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3613.905112,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851781,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732722,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381578,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866105,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900217,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071054,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.552927699,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.805972,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 2.886564413,
+    "x_rt_at_max": -12.5,
+    "extra_columns_estimate": 129,
+    "x_rt_range_factor_gt_1": [
+     -12.5,
+     -6.19272783
+    ],
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/T08",
+    "msh_sha256": "c68fd909a607558914bc3c93df6d7583bb028cf789c5460c3ccb7d19ef57dccd",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "cb29741c5d1cae7a9c46a9247affe0fa294f77776c56a68c3e08e5a8206f9ea3",
+    "quality": {
+     "rc": 1,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 750162 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 750162",
+      "aspect ratio : max=14432.8  p99=3575.7  mean=233.4  >5000: 1023 (0.14%)",
+      "skewness     : max=0.320  p99=0.281  mean=0.029  >0.90: 0 (0.00%)",
+      "VERDICT: FAIL (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 750162,
+     "max_ar": 14432.822064997312,
+     "max_skew": 0.31975149426940735,
+     "n_high_ar": 53952,
+     "max_skew_high_ar": 0.0007304181012952111,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.978893652549758,
+      "r_over_rt": 3.102437209018221,
+      "ar": 1054.434029279251,
+      "skew": 0.0007304181012952111
+     },
+     "high_ar_x_range_over_rt": [
+      -12.48162259940079,
+      34.778512336031156
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4719  y1 中央値 1.1047e-07  平均 2.2530e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 3.148459271e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.7999998959,
+     "x_rt_at_max": -5.989807793,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.7999998959,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   }
+  },
+  {
+   "spec": {
+    "name": "T09",
+    "target": 0.9,
+    "spacing": null,
+    "thicken": false
+   },
+   "table": {
+    "ok": true,
+    "n_points": 149,
+    "n_var": 33,
+    "n_constraints": 1781,
+    "n_changed": 16,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 169.4712329
+    },
+    "binding": 16,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      8.83558e-07
+     ],
+     [
+      -12.0,
+      1.3442e-06
+     ],
+     [
+      -11.5,
+      1.43192e-06
+     ],
+     [
+      -11.0,
+      1.47589e-06
+     ],
+     [
+      -10.5,
+      1.50941e-06
+     ],
+     [
+      -10.0,
+      1.53454e-06
+     ],
+     [
+      -9.5,
+      1.55706e-06
+     ],
+     [
+      -9.0,
+      1.581e-06
+     ],
+     [
+      -8.5,
+      1.61387e-06
+     ],
+     [
+      -8.0,
+      1.64888e-06
+     ],
+     [
+      -7.5,
+      1.67813e-06
+     ],
+     [
+      -7.0,
+      1.69476e-06
+     ],
+     [
+      -6.5,
+      1.69146e-06
+     ],
+     [
+      -6.0,
+      1.66369e-06
+     ],
+     [
+      -5.5,
+      1.60862e-06
+     ],
+     [
+      -5.0,
+      1.52981e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": true,
+   "downstream_bit_identical": true,
+   "metrics": {
+    "cells": 750162,
+    "nodes": 755040,
+    "ni": 4719,
+    "nj": 160,
+    "ar_max": 12829.17698,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 827,
+    "n_ar_gt_1000": 53639,
+    "skew_max_ar_gt_1000": 0.0007303748929,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 0,
+    "x_lt0": {
+     "ar_max": 12829.17698,
+     "n_ar_gt_5000": 827,
+     "x_rt_ar_gt_5000": [
+      -12.5,
+      -6.843991943
+     ],
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.8999998038,
+    "x_rt_at_max": -5.008125474,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.8999998038,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 14,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.196415462e-07,
+      3.279870237e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.161488479e-07
+     ],
+     "y1plus_est_max": 0.8999997106,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 12829.17698,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.347674958e-07,
+      3.55134546e-07
+     ],
+     "y1_old_m": [
+      6.248392727e-07,
+      9.789113457e-07
+     ],
+     "y1plus_est_max": 0.8999980705,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 10168.94341,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.565780384e-07,
+      3.664887538e-07
+     ],
+     "y1_old_m": [
+      1.002099501e-06,
+      1.098212687e-06
+     ],
+     "y1plus_est_max": 0.8999965006,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 12752.3013,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 8,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.675965663e-07,
+      3.747118772e-07
+     ],
+     "y1_old_m": [
+      1.106704832e-06,
+      1.152337519e-06
+     ],
+     "y1plus_est_max": 0.8999960749,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 12717.10417,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.756008385e-07,
+      3.81345161e-07
+     ],
+     "y1_old_m": [
+      9.789035482e-07,
+      1.143692575e-06
+     ],
+     "y1plus_est_max": 0.8999951544,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 12307.92846,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 10,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.819483246e-07,
+      3.868936444e-07
+     ],
+     "y1_old_m": [
+      8.34654413e-07,
+      9.62198396e-07
+     ],
+     "y1plus_est_max": 0.8999807486,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 10439.00104,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 11,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.874316368e-07,
+      3.926467417e-07
+     ],
+     "y1_old_m": [
+      7.528336171e-07,
+      8.251939811e-07
+     ],
+     "y1plus_est_max": 0.8999992475,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 9046.990663,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.931954409e-07,
+      4.010272011e-07
+     ],
+     "y1_old_m": [
+      7.03767882e-07,
+      7.469647516e-07
+     ],
+     "y1plus_est_max": 0.8999963409,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 8115.7662,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      4.01674038e-07,
+      4.090018198e-07
+     ],
+     "y1_old_m": [
+      6.651546344e-07,
+      7.005879842e-07
+     ],
+     "y1plus_est_max": 0.8999953677,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 7318.113598,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 15,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      4.095343561e-07,
+      4.150971108e-07
+     ],
+     "y1_old_m": [
+      6.175694408e-07,
+      6.621826255e-07
+     ],
+     "y1plus_est_max": 0.8999856356,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 6565.324068,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 17,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      4.153602159e-07,
+      4.165231835e-07
+     ],
+     "y1_old_m": [
+      5.675204563e-07,
+      6.145192778e-07
+     ],
+     "y1plus_est_max": 0.8999986603,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 5831.240793,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 19,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      4.107186505e-07,
+      4.163576992e-07
+     ],
+     "y1_old_m": [
+      5.17422453e-07,
+      5.647244169e-07
+     ],
+     "y1plus_est_max": 0.899999455,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 5164.715374,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 21,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.965054336e-07,
+      4.101272971e-07
+     ],
+     "y1_old_m": [
+      4.746490282e-07,
+      5.152068282e-07
+     ],
+     "y1plus_est_max": 0.8999839706,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 4657.520374,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.723634267e-07,
+      3.956672428e-07
+     ],
+     "y1_old_m": [
+      4.23128911e-07,
+      4.725782631e-07
+     ],
+     "y1plus_est_max": 0.8999997289,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4297.566515,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 29,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.409515011e-07,
+      3.712177398e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.207414451e-07
+     ],
+     "y1plus_est_max": 0.8999998038,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 3911.802088,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.95113766e-07,
+      3.397340731e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.8996238555,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 3578.250641,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.875040948,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3464.901006,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.8595558847,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3409.74669,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851781,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732722,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381578,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866105,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900217,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071054,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.552927699,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.805972,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 2.565835396,
+    "x_rt_at_max": -12.5,
+    "extra_columns_estimate": 98,
+    "x_rt_range_factor_gt_1": [
+     -12.5,
+     -6.843991943
+    ],
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/T09",
+    "msh_sha256": "0e189f3ef937c4600c587405582981c02e2d5cffdc77a0c46e3f4f678f96340a",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "d5dfa2598d192cd20d0bb001047d4f6dc73112028de71b52416ab6b1fc360237",
+    "quality": {
+     "rc": 1,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 750162 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 750162",
+      "aspect ratio : max=12829.2  p99=3545.4  mean=230.3  >5000: 827 (0.11%)",
+      "skewness     : max=0.320  p99=0.281  mean=0.029  >0.90: 0 (0.00%)",
+      "VERDICT: FAIL (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 750162,
+     "max_ar": 12829.176979968763,
+     "max_skew": 0.31975149426940735,
+     "n_high_ar": 53639,
+     "max_skew_high_ar": 0.0007303748928685473,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.978893403259405,
+      "r_over_rt": 3.102438884927995,
+      "ar": 1046.265268815438,
+      "skew": 0.0007303748928685473
+     },
+     "high_ar_x_range_over_rt": [
+      -12.48162259940079,
+      34.778512336031156
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4719  y1 中央値 1.1047e-07  平均 2.2555e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 3.148481476e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.8999998038,
+     "x_rt_at_max": -5.008125474,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.8999998038,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   }
+  },
+  {
+   "spec": {
+    "name": "T08f",
+    "target": 0.8,
+    "spacing": 0.125,
+    "thicken": false
+   },
+   "table": {
+    "ok": true,
+    "n_points": 216,
+    "n_var": 100,
+    "n_constraints": 1781,
+    "n_changed": 72,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 171.3330818
+    },
+    "binding": 72,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      7.85384e-07
+     ],
+     [
+      -12.375,
+      1.06041e-06
+     ],
+     [
+      -12.25,
+      1.12611e-06
+     ],
+     [
+      -12.125,
+      1.16705e-06
+     ],
+     [
+      -12.0,
+      1.19408e-06
+     ],
+     [
+      -11.875,
+      1.21977e-06
+     ],
+     [
+      -11.75,
+      1.2398e-06
+     ],
+     [
+      -11.625,
+      1.25484e-06
+     ],
+     [
+      -11.5,
+      1.27241e-06
+     ],
+     [
+      -11.375,
+      1.28273e-06
+     ],
+     [
+      -11.25,
+      1.2929e-06
+     ],
+     [
+      -11.125,
+      1.30232e-06
+     ],
+     [
+      -11.0,
+      1.31184e-06
+     ],
+     [
+      -10.875,
+      1.31961e-06
+     ],
+     [
+      -10.75,
+      1.32718e-06
+     ],
+     [
+      -10.625,
+      1.33375e-06
+     ],
+     [
+      -10.5,
+      1.34289e-06
+     ],
+     [
+      -10.375,
+      1.34765e-06
+     ],
+     [
+      -10.25,
+      1.35329e-06
+     ],
+     [
+      -10.125,
+      1.35874e-06
+     ],
+     [
+      -10.0,
+      1.36401e-06
+     ],
+     [
+      -9.875,
+      1.3693e-06
+     ],
+     [
+      -9.75,
+      1.3744e-06
+     ],
+     [
+      -9.625,
+      1.37945e-06
+     ],
+     [
+      -9.5,
+      1.38402e-06
+     ],
+     [
+      -9.375,
+      1.38943e-06
+     ],
+     [
+      -9.25,
+      1.39471e-06
+     ],
+     [
+      -9.125,
+      1.40026e-06
+     ],
+     [
+      -9.0,
+      1.40557e-06
+     ],
+     [
+      -8.875,
+      1.41265e-06
+     ],
+     [
+      -8.75,
+      1.41983e-06
+     ],
+     [
+      -8.625,
+      1.42729e-06
+     ],
+     [
+      -8.5,
+      1.43488e-06
+     ],
+     [
+      -8.375,
+      1.44268e-06
+     ],
+     [
+      -8.25,
+      1.45042e-06
+     ],
+     [
+      -8.125,
+      1.45808e-06
+     ],
+     [
+      -8.0,
+      1.46561e-06
+     ],
+     [
+      -7.875,
+      1.47274e-06
+     ],
+     [
+      -7.75,
+      1.47949e-06
+     ],
+     [
+      -7.625,
+      1.4858e-06
+     ],
+     [
+      -7.5,
+      1.49155e-06
+     ],
+     [
+      -7.375,
+      1.49653e-06
+     ],
+     [
+      -7.25,
+      1.50072e-06
+     ],
+     [
+      -7.125,
+      1.50399e-06
+     ],
+     [
+      -7.0,
+      1.50634e-06
+     ],
+     [
+      -6.875,
+      1.50747e-06
+     ],
+     [
+      -6.75,
+      1.50749e-06
+     ],
+     [
+      -6.625,
+      1.50615e-06
+     ],
+     [
+      -6.5,
+      1.50343e-06
+     ],
+     [
+      -6.375,
+      1.49947e-06
+     ],
+     [
+      -6.25,
+      1.49403e-06
+     ],
+     [
+      -6.125,
+      1.48701e-06
+     ],
+     [
+      -6.0,
+      1.47865e-06
+     ],
+     [
+      -5.875,
+      1.46853e-06
+     ],
+     [
+      -5.75,
+      1.45703e-06
+     ],
+     [
+      -5.625,
+      1.44407e-06
+     ],
+     [
+      -5.5,
+      1.42981e-06
+     ],
+     [
+      -5.375,
+      1.41397e-06
+     ],
+     [
+      -5.25,
+      1.39692e-06
+     ],
+     [
+      -5.125,
+      1.3788e-06
+     ],
+     [
+      -5.0,
+      1.3597e-06
+     ],
+     [
+      -4.875,
+      1.33936e-06
+     ],
+     [
+      -4.75,
+      1.31813e-06
+     ],
+     [
+      -4.625,
+      1.29595e-06
+     ],
+     [
+      -4.5,
+      1.27272e-06
+     ],
+     [
+      -4.375,
+      1.24909e-06
+     ],
+     [
+      -4.25,
+      1.22459e-06
+     ],
+     [
+      -4.125,
+      1.19935e-06
+     ],
+     [
+      -4.0,
+      1.17356e-06
+     ],
+     [
+      -3.875,
+      1.14688e-06
+     ],
+     [
+      -3.75,
+      1.11975e-06
+     ],
+     [
+      -3.625,
+      1.09221e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.375,
+      1.0072851783581443e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.125,
+      9.108163192202903e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.875,
+      8.177216316033224e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.625,
+      7.316534853002471e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.375,
+      6.511073979736359e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.125,
+      5.778604696360529e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.875,
+      5.144809152767472e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.625,
+      4.592608929486596e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.375,
+      4.132052773912744e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.125,
+      3.784342948465432e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.875,
+      3.5646071022484393e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.625,
+      3.4698236245088887e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.375,
+      3.44931812136834e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ],
+     [
+      -0.125,
+      3.462767827619979e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": true,
+   "downstream_bit_identical": true,
+   "metrics": {
+    "cells": 750162,
+    "nodes": 755040,
+    "ni": 4719,
+    "nj": 160,
+    "ar_max": 14432.82599,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 1010,
+    "n_ar_gt_1000": 53937,
+    "skew_max_ar_gt_1000": 0.0007290670391,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 0,
+    "x_lt0": {
+     "ar_max": 14432.82599,
+     "n_ar_gt_5000": 1010,
+     "x_rt_ar_gt_5000": [
+      -12.5,
+      -6.215972946
+     ],
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.7999999103,
+    "x_rt_at_max": -11.2589966,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.7999999103,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 14,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      1.952369044e-07,
+      2.956293577e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.161488479e-07
+     ],
+     "y1plus_est_max": 0.799999638,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 14432.82599,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.975708462e-07,
+      3.156618086e-07
+     ],
+     "y1_old_m": [
+      6.248392727e-07,
+      9.789113457e-07
+     ],
+     "y1plus_est_max": 0.7999987776,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 11440.54492,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.168944319e-07,
+      3.257653527e-07
+     ],
+     "y1_old_m": [
+      1.002099501e-06,
+      1.098212687e-06
+     ],
+     "y1plus_est_max": 0.7999999103,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 14346.4459,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 8,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.267697055e-07,
+      3.332753654e-07
+     ],
+     "y1_old_m": [
+      1.106704832e-06,
+      1.152337519e-06
+     ],
+     "y1plus_est_max": 0.7999994001,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 14305.98904,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.341157144e-07,
+      3.389738848e-07
+     ],
+     "y1_old_m": [
+      9.789035482e-07,
+      1.143692575e-06
+     ],
+     "y1plus_est_max": 0.7999987617,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 13836.12938,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 10,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.39530108e-07,
+      3.43911222e-07
+     ],
+     "y1_old_m": [
+      8.34654413e-07,
+      9.62198396e-07
+     ],
+     "y1plus_est_max": 0.7999984177,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 11743.16759,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 11,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.443827866e-07,
+      3.490806502e-07
+     ],
+     "y1_old_m": [
+      7.528336171e-07,
+      8.251939811e-07
+     ],
+     "y1plus_est_max": 0.7999991462,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 10177.89082,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.495622141e-07,
+      3.565473292e-07
+     ],
+     "y1_old_m": [
+      7.03767882e-07,
+      7.469647516e-07
+     ],
+     "y1plus_est_max": 0.7999992081,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 9128.796365,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.571305571e-07,
+      3.635575178e-07
+     ],
+     "y1_old_m": [
+      6.651546344e-07,
+      7.005879842e-07
+     ],
+     "y1plus_est_max": 0.7999995364,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 8230.872942,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 15,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      3.640292564e-07,
+      3.689769725e-07
+     ],
+     "y1_old_m": [
+      6.175694408e-07,
+      6.621826255e-07
+     ],
+     "y1plus_est_max": 0.7999987777,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 7386.015594,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 17,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      3.692090567e-07,
+      3.704440256e-07
+     ],
+     "y1_old_m": [
+      5.675204563e-07,
+      6.145192778e-07
+     ],
+     "y1plus_est_max": 0.7999996042,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 6560.14632,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 19,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      3.650828552e-07,
+      3.701338233e-07
+     ],
+     "y1_old_m": [
+      5.17422453e-07,
+      5.647244169e-07
+     ],
+     "y1plus_est_max": 0.7999986617,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 5808.098412,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 21,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.524550585e-07,
+      3.646203941e-07
+     ],
+     "y1_old_m": [
+      4.746490282e-07,
+      5.152068282e-07
+     ],
+     "y1plus_est_max": 0.7999988807,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 5237.251283,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.309777993e-07,
+      3.517044678e-07
+     ],
+     "y1_old_m": [
+      4.23128911e-07,
+      4.725782631e-07
+     ],
+     "y1plus_est_max": 0.7999989344,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4833.449059,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 29,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.030661858e-07,
+      3.300188807e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.207414451e-07
+     ],
+     "y1plus_est_max": 0.7999998491,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 4399.220016,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.696548576e-07,
+      3.021055231e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.799999729,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 4019.764543,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.324558866e-07,
+      2.687638798e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.7999988827,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3770.753268,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.316836649e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.799998905,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3613.946968,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851781,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732722,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381578,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866105,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900217,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071054,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.552927699,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.805972,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 2.886565198,
+    "x_rt_at_max": -12.5,
+    "extra_columns_estimate": 125,
+    "x_rt_range_factor_gt_1": [
+     -12.5,
+     -6.215972946
+    ],
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/T08f",
+    "msh_sha256": "b5729883bb1ca0ad62804b6f9434fc50b9c4fe1c30eb957d083a31879f70606a",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "bbf23b57f99525b0c0c3c4b422266916f1f5c788745b7b59ad5ec99e5f8c360f",
+    "quality": {
+     "rc": 1,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 750162 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 750162",
+      "aspect ratio : max=14432.8  p99=3574.3  mean=233.2  >5000: 1010 (0.13%)",
+      "skewness     : max=0.320  p99=0.281  mean=0.029  >0.90: 0 (0.00%)",
+      "VERDICT: FAIL (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 750162,
+     "max_ar": 14432.825992444836,
+     "max_skew": 0.31975149426940735,
+     "n_high_ar": 53937,
+     "max_skew_high_ar": 0.0007290670390973889,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.978893655805245,
+      "r_over_rt": 3.102437187303281,
+      "ar": 1054.2025831561132,
+      "skew": 0.0007290670390973889
+     },
+     "high_ar_x_range_over_rt": [
+      -12.48162259940079,
+      34.778512336031156
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4719  y1 中央値 1.1047e-07  平均 2.2531e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 3.1486036e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.7999999103,
+     "x_rt_at_max": -11.2589966,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.7999999103,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   }
+  },
+  {
+   "spec": {
+    "name": "T09f",
+    "target": 0.9,
+    "spacing": 0.125,
+    "thicken": false
+   },
+   "table": {
+    "ok": true,
+    "n_points": 216,
+    "n_var": 100,
+    "n_constraints": 1781,
+    "n_changed": 63,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 170.3377019
+    },
+    "binding": 63,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      8.83557e-07
+     ],
+     [
+      -12.375,
+      1.19296e-06
+     ],
+     [
+      -12.25,
+      1.26688e-06
+     ],
+     [
+      -12.125,
+      1.31293e-06
+     ],
+     [
+      -12.0,
+      1.34334e-06
+     ],
+     [
+      -11.875,
+      1.37225e-06
+     ],
+     [
+      -11.75,
+      1.39477e-06
+     ],
+     [
+      -11.625,
+      1.4117e-06
+     ],
+     [
+      -11.5,
+      1.43146e-06
+     ],
+     [
+      -11.375,
+      1.44307e-06
+     ],
+     [
+      -11.25,
+      1.45451e-06
+     ],
+     [
+      -11.125,
+      1.46512e-06
+     ],
+     [
+      -11.0,
+      1.47582e-06
+     ],
+     [
+      -10.875,
+      1.48456e-06
+     ],
+     [
+      -10.75,
+      1.49308e-06
+     ],
+     [
+      -10.625,
+      1.50047e-06
+     ],
+     [
+      -10.5,
+      1.51075e-06
+     ],
+     [
+      -10.375,
+      1.5161e-06
+     ],
+     [
+      -10.25,
+      1.52245e-06
+     ],
+     [
+      -10.125,
+      1.52858e-06
+     ],
+     [
+      -10.0,
+      1.53451e-06
+     ],
+     [
+      -9.875,
+      1.54046e-06
+     ],
+     [
+      -9.75,
+      1.54621e-06
+     ],
+     [
+      -9.625,
+      1.55188e-06
+     ],
+     [
+      -9.5,
+      1.55702e-06
+     ],
+     [
+      -9.375,
+      1.56311e-06
+     ],
+     [
+      -9.25,
+      1.56905e-06
+     ],
+     [
+      -9.125,
+      1.57529e-06
+     ],
+     [
+      -9.0,
+      1.58127e-06
+     ],
+     [
+      -8.875,
+      1.58923e-06
+     ],
+     [
+      -8.75,
+      1.59731e-06
+     ],
+     [
+      -8.625,
+      1.6057e-06
+     ],
+     [
+      -8.5,
+      1.61424e-06
+     ],
+     [
+      -8.375,
+      1.62301e-06
+     ],
+     [
+      -8.25,
+      1.63173e-06
+     ],
+     [
+      -8.125,
+      1.64034e-06
+     ],
+     [
+      -8.0,
+      1.64881e-06
+     ],
+     [
+      -7.875,
+      1.65683e-06
+     ],
+     [
+      -7.75,
+      1.66443e-06
+     ],
+     [
+      -7.625,
+      1.67152e-06
+     ],
+     [
+      -7.5,
+      1.67799e-06
+     ],
+     [
+      -7.375,
+      1.6836e-06
+     ],
+     [
+      -7.25,
+      1.68831e-06
+     ],
+     [
+      -7.125,
+      1.69199e-06
+     ],
+     [
+      -7.0,
+      1.69463e-06
+     ],
+     [
+      -6.875,
+      1.69591e-06
+     ],
+     [
+      -6.75,
+      1.69593e-06
+     ],
+     [
+      -6.625,
+      1.69442e-06
+     ],
+     [
+      -6.5,
+      1.69136e-06
+     ],
+     [
+      -6.375,
+      1.6869e-06
+     ],
+     [
+      -6.25,
+      1.68078e-06
+     ],
+     [
+      -6.125,
+      1.67289e-06
+     ],
+     [
+      -6.0,
+      1.66348e-06
+     ],
+     [
+      -5.875,
+      1.65209e-06
+     ],
+     [
+      -5.75,
+      1.63916e-06
+     ],
+     [
+      -5.625,
+      1.62458e-06
+     ],
+     [
+      -5.5,
+      1.60853e-06
+     ],
+     [
+      -5.375,
+      1.59071e-06
+     ],
+     [
+      -5.25,
+      1.57153e-06
+     ],
+     [
+      -5.125,
+      1.55116e-06
+     ],
+     [
+      -5.0,
+      1.52967e-06
+     ],
+     [
+      -4.875,
+      1.50678e-06
+     ],
+     [
+      -4.75,
+      1.48294e-06
+     ],
+     [
+      -4.625,
+      1.4458631138904401e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.375,
+      1.3582557401108162e-06
+     ],
+     [
+      -4.25,
+      1.3251676559213185e-06
+     ],
+     [
+      -4.125,
+      1.2928856211987927e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.875,
+      1.2065843867711866e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.625,
+      1.1047576997695023e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.375,
+      1.0072851783581443e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.125,
+      9.108163192202903e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.875,
+      8.177216316033224e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.625,
+      7.316534853002471e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.375,
+      6.511073979736359e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.125,
+      5.778604696360529e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.875,
+      5.144809152767472e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.625,
+      4.592608929486596e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.375,
+      4.132052773912744e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.125,
+      3.784342948465432e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.875,
+      3.5646071022484393e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.625,
+      3.4698236245088887e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.375,
+      3.44931812136834e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ],
+     [
+      -0.125,
+      3.462767827619979e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": true,
+   "downstream_bit_identical": true,
+   "metrics": {
+    "cells": 750162,
+    "nodes": 755040,
+    "ni": 4719,
+    "nj": 160,
+    "ar_max": 12829.17866,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 813,
+    "n_ar_gt_1000": 53625,
+    "skew_max_ar_gt_1000": 0.000729026612,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 0,
+    "x_lt0": {
+     "ar_max": 12829.17866,
+     "n_ar_gt_5000": 813,
+     "x_rt_ar_gt_5000": [
+      -12.5,
+      -6.843991943
+     ],
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.8999998374,
+    "x_rt_at_max": -8.241884541,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.8999998374,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 14,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.196415174e-07,
+      3.325829712e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.161488479e-07
+     ],
+     "y1plus_est_max": 0.8999995928,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 12829.17866,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.347674508e-07,
+      3.551194542e-07
+     ],
+     "y1_old_m": [
+      6.248392727e-07,
+      9.789113457e-07
+     ],
+     "y1plus_est_max": 0.8999985543,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 10169.37556,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.565059252e-07,
+      3.664863818e-07
+     ],
+     "y1_old_m": [
+      1.002099501e-06,
+      1.098212687e-06
+     ],
+     "y1plus_est_max": 0.8999990095,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 12752.38383,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 8,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.676158123e-07,
+      3.749346262e-07
+     ],
+     "y1_old_m": [
+      1.106704832e-06,
+      1.152337519e-06
+     ],
+     "y1plus_est_max": 0.8999986951,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 12716.43838,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 9,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.758795636e-07,
+      3.813452854e-07
+     ],
+     "y1_old_m": [
+      9.789035482e-07,
+      1.143692575e-06
+     ],
+     "y1plus_est_max": 0.8999957036,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 12298.80179,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 10,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.819709536e-07,
+      3.868995412e-07
+     ],
+     "y1_old_m": [
+      8.34654413e-07,
+      9.62198396e-07
+     ],
+     "y1plus_est_max": 0.8999993321,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 10438.38261,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 11,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.874302438e-07,
+      3.927162789e-07
+     ],
+     "y1_old_m": [
+      7.528336171e-07,
+      8.251939811e-07
+     ],
+     "y1plus_est_max": 0.8999997061,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 9047.023192,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.932583137e-07,
+      4.011157287e-07
+     ],
+     "y1_old_m": [
+      7.03767882e-07,
+      7.469647516e-07
+     ],
+     "y1plus_est_max": 0.8999997815,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 8114.468679,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 13,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      4.017715602e-07,
+      4.090019591e-07
+     ],
+     "y1_old_m": [
+      6.651546344e-07,
+      7.005879842e-07
+     ],
+     "y1plus_est_max": 0.8999998374,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 7316.337267,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 15,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      4.095325773e-07,
+      4.150981158e-07
+     ],
+     "y1_old_m": [
+      6.175694408e-07,
+      6.621826255e-07
+     ],
+     "y1plus_est_max": 0.899998442,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 6565.352583,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 17,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      4.153594338e-07,
+      4.167498345e-07
+     ],
+     "y1_old_m": [
+      5.675204563e-07,
+      6.145192778e-07
+     ],
+     "y1plus_est_max": 0.8999995952,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 5831.251773,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 19,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      4.107185156e-07,
+      4.164002463e-07
+     ],
+     "y1_old_m": [
+      5.17422453e-07,
+      5.647244169e-07
+     ],
+     "y1plus_est_max": 0.899999723,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 5162.751961,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 21,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.965117553e-07,
+      4.101980587e-07
+     ],
+     "y1_old_m": [
+      4.746490282e-07,
+      5.152068282e-07
+     ],
+     "y1plus_est_max": 0.8999983525,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 4655.335896,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.723485959e-07,
+      3.956671312e-07
+     ],
+     "y1_old_m": [
+      4.23128911e-07,
+      4.725782631e-07
+     ],
+     "y1plus_est_max": 0.8999992879,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4296.405734,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 29,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.40951165e-07,
+      3.71269796e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.207414451e-07
+     ],
+     "y1plus_est_max": 0.8999993519,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 3910.433034,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.955064458e-07,
+      3.398702832e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.8999985926,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 3573.109674,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.875040948,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3464.901006,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.8595558847,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3409.74669,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851781,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732722,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381578,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866105,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900217,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071054,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.552927699,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.805972,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 2.565835732,
+    "x_rt_at_max": -12.5,
+    "extra_columns_estimate": 95,
+    "x_rt_range_factor_gt_1": [
+     -12.5,
+     -6.843991943
+    ],
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/T09f",
+    "msh_sha256": "4901453f47c056d46dc4cd225f8ab33abdaad207120b3d7223ea7396a1b2ccc7",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "1dfd426c3e67800c880aab06039ba512c3a3e55d32c09b4e33d874d02d395884",
+    "quality": {
+     "rc": 1,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 750162 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 750162",
+      "aspect ratio : max=12829.2  p99=3541.9  mean=230.1  >5000: 813 (0.11%)",
+      "skewness     : max=0.320  p99=0.281  mean=0.029  >0.90: 0 (0.00%)",
+      "VERDICT: FAIL (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 750162,
+     "max_ar": 12829.178659817992,
+     "max_skew": 0.31975149426940735,
+     "n_high_ar": 53625,
+     "max_skew_high_ar": 0.0007290266120173151,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.978893406550408,
+      "r_over_rt": 3.1024388629737625,
+      "ar": 1046.0317154469528,
+      "skew": 0.0007290266120173151
+     },
+     "high_ar_x_range_over_rt": [
+      -12.48162259940079,
+      34.778512336031156
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4719  y1 中央値 1.1047e-07  平均 2.2557e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 3.148481476e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.8999998374,
+     "x_rt_at_max": -8.241884541,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.8999998374,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   }
+  },
+  {
+   "spec": {
+    "name": "X08",
+    "target": 0.8,
+    "spacing": null,
+    "thicken": false,
+    "x_refine": {
+     "base": "T08",
+     "ar_goal": 4500.0
+    }
+   },
+   "x_refine": {
+    "ni": 4909,
+    "m": 190,
+    "alpha": 1.000666928,
+    "ar_goal": 4500.0,
+    "F_max": 3.18808033,
+    "x_rt_refined": [
+     -12.50000064,
+     -5.5
+    ],
+    "added_integral_over_h": 190.0,
+    "note": "参考 (方針の外): x_density_table の上流の値と ni も変える。採否は上位"
+   },
+   "table": {
+    "ok": true,
+    "n_points": 149,
+    "n_var": 33,
+    "n_constraints": 1971,
+    "n_changed": 19,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 170.4639095
+    },
+    "binding": 19,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      7.85385e-07
+     ],
+     [
+      -12.0,
+      1.19476e-06
+     ],
+     [
+      -11.5,
+      1.27231e-06
+     ],
+     [
+      -11.0,
+      1.31167e-06
+     ],
+     [
+      -10.5,
+      1.34178e-06
+     ],
+     [
+      -10.0,
+      1.36402e-06
+     ],
+     [
+      -9.5,
+      1.38407e-06
+     ],
+     [
+      -9.0,
+      1.40524e-06
+     ],
+     [
+      -8.5,
+      1.43464e-06
+     ],
+     [
+      -8.0,
+      1.46563e-06
+     ],
+     [
+      -7.5,
+      1.49154e-06
+     ],
+     [
+      -7.0,
+      1.50636e-06
+     ],
+     [
+      -6.5,
+      1.50354e-06
+     ],
+     [
+      -6.0,
+      1.47872e-06
+     ],
+     [
+      -5.5,
+      1.4299e-06
+     ],
+     [
+      -5.0,
+      1.35983e-06
+     ],
+     [
+      -4.5,
+      1.27273e-06
+     ],
+     [
+      -4.0,
+      1.17363e-06
+     ],
+     [
+      -3.75,
+      1.11975e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": false,
+   "downstream_shifted_columns": {
+    "shift": 190,
+    "x_max_abs_diff_m": 1.100008973e-12,
+    "r_max_abs_diff_m": 2.257638521e-13,
+    "bit_identical": false,
+    "note": "x ≥ 0 の列を、上流に足した列の数だけずらして元の格子と比べた"
+   },
+   "metrics": {
+    "cells": 780372,
+    "nodes": 785440,
+    "ni": 4909,
+    "nj": 160,
+    "ar_max": 4572.263504,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 0,
+    "n_ar_gt_1000": 55760,
+    "skew_max_ar_gt_1000": 0.0006708438456,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 30400,
+    "x_lt0": {
+     "ar_max": 4572.263504,
+     "n_ar_gt_5000": 0,
+     "x_rt_ar_gt_5000": null,
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.7999998557,
+    "x_rt_at_max": -12.5,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.7999998557,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 42,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      1.952369575e-07,
+      2.965304514e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.209461167e-07
+     ],
+     "y1plus_est_max": 0.7999998557,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 4571.195843,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 34,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.974552896e-07,
+      3.159181746e-07
+     ],
+     "y1_old_m": [
+      6.242584145e-07,
+      9.834378111e-07
+     ],
+     "y1plus_est_max": 0.7999995081,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 3657.750321,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 28,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.163905236e-07,
+      3.257008207e-07
+     ],
+     "y1_old_m": [
+      9.907363951e-07,
+      1.098138283e-06
+     ],
+     "y1plus_est_max": 0.7999983374,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 4496.548822,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 27,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.260762175e-07,
+      3.335373716e-07
+     ],
+     "y1_old_m": [
+      1.100826829e-06,
+      1.151332635e-06
+     ],
+     "y1plus_est_max": 0.7999990132,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 4494.462158,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 26,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.337525046e-07,
+      3.389128088e-07
+     ],
+     "y1_old_m": [
+      9.806224821e-07,
+      1.145424643e-06
+     ],
+     "y1plus_est_max": 0.7999776546,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 4423.387144,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 27,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.391095492e-07,
+      3.438860317e-07
+     ],
+     "y1_old_m": [
+      8.352839117e-07,
+      9.748440614e-07
+     ],
+     "y1plus_est_max": 0.7999956641,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 4235.544228,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 27,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.440773348e-07,
+      3.493144665e-07
+     ],
+     "y1_old_m": [
+      7.486508063e-07,
+      8.312417348e-07
+     ],
+     "y1plus_est_max": 0.7999989545,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 4254.364451,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.49591139e-07,
+      3.564367137e-07
+     ],
+     "y1_old_m": [
+      7.040904671e-07,
+      7.462903879e-07
+     ],
+     "y1plus_est_max": 0.7999955506,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 4273.362544,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.567287422e-07,
+      3.637571026e-07
+     ],
+     "y1_old_m": [
+      6.639188778e-07,
+      7.024353714e-07
+     ],
+     "y1plus_est_max": 0.7999969099,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 4272.684466,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      3.640138282e-07,
+      3.690916837e-07
+     ],
+     "y1_old_m": [
+      6.16066536e-07,
+      6.622275439e-07
+     ],
+     "y1plus_est_max": 0.7999949643,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 4238.346884,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 24,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      3.691921222e-07,
+      3.702165564e-07
+     ],
+     "y1_old_m": [
+      5.681070631e-07,
+      6.141037152e-07
+     ],
+     "y1plus_est_max": 0.7999064888,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 4237.017222,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      3.651025477e-07,
+      3.701893416e-07
+     ],
+     "y1_old_m": [
+      5.175369643e-07,
+      5.660930558e-07
+     ],
+     "y1plus_est_max": 0.7999964729,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 4271.248259,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.522713328e-07,
+      3.646993521e-07
+     ],
+     "y1_old_m": [
+      4.741456612e-07,
+      5.1572685e-07
+     ],
+     "y1plus_est_max": 0.7999964908,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 4332.627448,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 26,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.315742091e-07,
+      3.515615251e-07
+     ],
+     "y1_old_m": [
+      4.244397633e-07,
+      4.722841538e-07
+     ],
+     "y1plus_est_max": 0.7999043988,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4342.789573,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 30,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.03067811e-07,
+      3.307375649e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.22503735e-07
+     ],
+     "y1plus_est_max": 0.799999324,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 4250.535058,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.696183206e-07,
+      3.021085427e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.7999905615,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 4020.449145,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.324468012e-07,
+      2.687629455e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.7999937261,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3771.342305,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.316957792e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.7999987562,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3613.905113,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.87144152e-08,
+      1.413170817e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851781,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732723,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591772e-08,
+      6.856366354e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381579,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472985,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449097e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866103,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900219,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193508e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071055,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801059e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110797e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.552927699,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.805972,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 0.9144525577,
+    "x_rt_at_max": -0.1560612093,
+    "extra_columns_estimate": 0,
+    "x_rt_range_factor_gt_1": null,
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/X08",
+    "msh_sha256": "b1b6a8db6387b9f13c9949ac73c70a5c2370f44f1abec69112079eb85ace099f",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "50ff446588ced483e447c422c29c332485ae82c3f81093c1d21e30425fe56317",
+    "quality": {
+     "rc": 0,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 780372 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 780372",
+      "aspect ratio : max=4572.3  p99=3439.8  mean=224.4  >5000: 0 (0.00%)",
+      "skewness     : max=0.320  p99=0.280  mean=0.028  >0.90: 0 (0.00%)",
+      "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 780372,
+     "max_ar": 4572.263504347124,
+     "max_skew": 0.3197514942694222,
+     "n_high_ar": 55760,
+     "max_skew_high_ar": 0.0006708438455997149,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.745918634126871,
+      "r_over_rt": 3.06489223739575,
+      "ar": 1033.0737096745763,
+      "skew": 0.0006708438455997149
+     },
+     "high_ar_x_range_over_rt": [
+      -12.494179468377924,
+      34.778512336017684
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4909  y1 中央値 1.2735e-07  平均 2.1784e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 2.352906758e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.7999998557,
+     "x_rt_at_max": -12.5,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.7999998557,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   },
+   "x_density_table_x_lt0": [
+    [
+     -12.500000640558765,
+     5.238027997040362
+    ],
+    [
+     -12.25,
+     5.238027997040362
+    ],
+    [
+     -12.0,
+     4.3528790088596025
+    ],
+    [
+     -11.75,
+     4.172218816959556
+    ],
+    [
+     -11.5,
+     4.12227527789279
+    ],
+    [
+     -11.25,
+     3.2571578616625088
+    ],
+    [
+     -11.0,
+     3.1895396216828322
+    ],
+    [
+     -10.75,
+     3.1895396216828322
+    ],
+    [
+     -10.5,
+     3.154697831922363
+    ],
+    [
+     -10.25,
+     3.2594059311401677
+    ],
+    [
+     -10.0,
+     3.391149547781537
+    ],
+    [
+     -9.75,
+     3.3117203336887795
+    ],
+    [
+     -9.5,
+     3.2054942080308426
+    ],
+    [
+     -9.25,
+     3.1961026079697796
+    ],
+    [
+     -9.0,
+     3.1470087228378154
+    ],
+    [
+     -8.75,
+     3.1039288938355214
+    ],
+    [
+     -8.5,
+     3.068999643270344
+    ],
+    [
+     -8.25,
+     3.0428378060951426
+    ],
+    [
+     -8.0,
+     3.0342636926700877
+    ],
+    [
+     -7.75,
+     3.009651321833054
+    ],
+    [
+     -7.5,
+     3.001379905163359
+    ],
+    [
+     -7.25,
+     3.0004503947443544
+    ],
+    [
+     -7.0,
+     2.9852498627092445
+    ],
+    [
+     -6.75,
+     2.98449362516485
+    ],
+    [
+     -6.5,
+     3.016130379223541
+    ],
+    [
+     -6.25,
+     3.0293914928825307
+    ],
+    [
+     -6.0,
+     3.11945888618423
+    ],
+    [
+     -5.75,
+     3.198917774362458
+    ],
+    [
+     -5.5,
+     3.395590571046532
+    ],
+    [
+     -5.25,
+     3.57
+    ],
+    [
+     -5.0,
+     3.9646
+    ],
+    [
+     -4.75,
+     4.467
+    ],
+    [
+     -4.5,
+     4.8567
+    ],
+    [
+     -4.25,
+     5.2884
+    ],
+    [
+     -4.0,
+     5.9783
+    ],
+    [
+     -3.75,
+     6.876
+    ],
+    [
+     -3.5,
+     7.8853
+    ],
+    [
+     -3.25,
+     9.1184
+    ],
+    [
+     -3.0,
+     10.8222
+    ],
+    [
+     -2.75,
+     12.648
+    ],
+    [
+     -2.5,
+     14.9639
+    ],
+    [
+     -2.25,
+     17.6341
+    ],
+    [
+     -2.0,
+     21.1618
+    ],
+    [
+     -1.75,
+     24.813
+    ],
+    [
+     -1.5,
+     28.762
+    ],
+    [
+     -1.25,
+     32.9147
+    ],
+    [
+     -1.0,
+     35.786
+    ],
+    [
+     -0.75,
+     37.3689
+    ],
+    [
+     -0.5,
+     38.2933
+    ],
+    [
+     -0.25,
+     38.3901
+    ]
+   ]
+  },
+  {
+   "spec": {
+    "name": "X09",
+    "target": 0.9,
+    "spacing": null,
+    "thicken": false,
+    "x_refine": {
+     "base": "T09",
+     "ar_goal": 4500.0
+    }
+   },
+   "x_refine": {
+    "ni": 4867,
+    "m": 148,
+    "alpha": 1.00159553,
+    "ar_goal": 4500.0,
+    "F_max": 2.833844733,
+    "x_rt_refined": [
+     -12.50000064,
+     -6.0
+    ],
+    "added_integral_over_h": 148.0,
+    "note": "参考 (方針の外): x_density_table の上流の値と ni も変える。採否は上位"
+   },
+   "table": {
+    "ok": true,
+    "n_points": 149,
+    "n_var": 33,
+    "n_constraints": 1929,
+    "n_changed": 16,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 169.4715753
+    },
+    "binding": 16,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      8.83558e-07
+     ],
+     [
+      -12.0,
+      1.34385e-06
+     ],
+     [
+      -11.5,
+      1.43144e-06
+     ],
+     [
+      -11.0,
+      1.47571e-06
+     ],
+     [
+      -10.5,
+      1.5095e-06
+     ],
+     [
+      -10.0,
+      1.53454e-06
+     ],
+     [
+      -9.5,
+      1.55706e-06
+     ],
+     [
+      -9.0,
+      1.58093e-06
+     ],
+     [
+      -8.5,
+      1.61394e-06
+     ],
+     [
+      -8.0,
+      1.64885e-06
+     ],
+     [
+      -7.5,
+      1.67807e-06
+     ],
+     [
+      -7.0,
+      1.69478e-06
+     ],
+     [
+      -6.5,
+      1.69149e-06
+     ],
+     [
+      -6.0,
+      1.66369e-06
+     ],
+     [
+      -5.5,
+      1.60862e-06
+     ],
+     [
+      -5.0,
+      1.52981e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": false,
+   "downstream_shifted_columns": {
+    "shift": 148,
+    "x_max_abs_diff_m": 8.686384945e-13,
+    "r_max_abs_diff_m": 1.76192394e-13,
+    "bit_identical": false,
+    "note": "x ≥ 0 の列を、上流に足した列の数だけずらして元の格子と比べた"
+   },
+   "metrics": {
+    "cells": 773694,
+    "nodes": 778720,
+    "ni": 4867,
+    "nj": 160,
+    "ar_max": 4572.263504,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 0,
+    "n_ar_gt_1000": 54997,
+    "skew_max_ar_gt_1000": 0.0007296638974,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 23680,
+    "x_lt0": {
+     "ar_max": 4572.263504,
+     "n_ar_gt_5000": 0,
+     "x_rt_ar_gt_5000": null,
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.8999998039,
+    "x_rt_at_max": -5.008125474,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.8999998039,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 37,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.196415461e-07,
+      3.315060287e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.192272206e-07
+     ],
+     "y1plus_est_max": 0.8999997102,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 4568.587626,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 31,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.343401456e-07,
+      3.556511775e-07
+     ],
+     "y1_old_m": [
+      6.229395923e-07,
+      9.858741092e-07
+     ],
+     "y1plus_est_max": 0.8999992764,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 3655.951464,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.561103631e-07,
+      3.666228931e-07
+     ],
+     "y1_old_m": [
+      9.941038904e-07,
+      1.099346003e-06
+     ],
+     "y1plus_est_max": 0.89995774,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 4493.278584,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 23,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.670363006e-07,
+      3.750005469e-07
+     ],
+     "y1_old_m": [
+      1.102339294e-06,
+      1.15170932e-06
+     ],
+     "y1plus_est_max": 0.899999041,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 4489.794103,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 24,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.753348637e-07,
+      3.813463656e-07
+     ],
+     "y1_old_m": [
+      9.788843543e-07,
+      1.146991048e-06
+     ],
+     "y1plus_est_max": 0.8999962898,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 4427.696713,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 24,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.815851838e-07,
+      3.869262671e-07
+     ],
+     "y1_old_m": [
+      8.340621756e-07,
+      9.724985017e-07
+     ],
+     "y1plus_est_max": 0.8999914113,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 4235.408579,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 23,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.871718423e-07,
+      3.927880343e-07
+     ],
+     "y1_old_m": [
+      7.509866638e-07,
+      8.296873297e-07
+     ],
+     "y1plus_est_max": 0.8999963802,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 4250.790011,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 23,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.930659885e-07,
+      4.009854241e-07
+     ],
+     "y1_old_m": [
+      7.040838094e-07,
+      7.479369643e-07
+     ],
+     "y1plus_est_max": 0.8999956003,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 4272.103352,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      4.013555481e-07,
+      4.091489489e-07
+     ],
+     "y1_old_m": [
+      6.64348446e-07,
+      7.022251414e-07
+     ],
+     "y1plus_est_max": 0.899997051,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 4271.558769,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      4.094867033e-07,
+      4.151393876e-07
+     ],
+     "y1_old_m": [
+      6.170597153e-07,
+      6.624463646e-07
+     ],
+     "y1plus_est_max": 0.8999839131,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 4237.17303,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      4.153305937e-07,
+      4.16526983e-07
+     ],
+     "y1_old_m": [
+      5.676395382e-07,
+      6.148700449e-07
+     ],
+     "y1plus_est_max": 0.8999987506,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 4237.280069,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      4.107471143e-07,
+      4.164238185e-07
+     ],
+     "y1_old_m": [
+      5.175682071e-07,
+      5.653618334e-07
+     ],
+     "y1plus_est_max": 0.8999969012,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 4271.044255,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.965003047e-07,
+      4.102308183e-07
+     ],
+     "y1_old_m": [
+      4.74633312e-07,
+      5.155303011e-07
+     ],
+     "y1plus_est_max": 0.8999869002,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 4333.970803,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.723634267e-07,
+      3.956615052e-07
+     ],
+     "y1_old_m": [
+      4.23128911e-07,
+      4.725653325e-07
+     ],
+     "y1plus_est_max": 0.8999997289,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4293.237577,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 29,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.409515011e-07,
+      3.712177397e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.207414451e-07
+     ],
+     "y1plus_est_max": 0.8999998039,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 3911.802088,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.95113766e-07,
+      3.397340731e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.8996238554,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 3578.250641,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.8750409481,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3464.901006,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.8595558847,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3409.746691,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.87144152e-08,
+      1.413170818e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851785,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732723,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591773e-08,
+      6.85636635e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381576,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449099e-08,
+      4.594601224e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866105,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900217,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193505e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071055,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.552927699,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.660716291e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.805972,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 0.9144525576,
+    "x_rt_at_max": -0.1560612093,
+    "extra_columns_estimate": 0,
+    "x_rt_range_factor_gt_1": null,
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/X09",
+    "msh_sha256": "f040dbd94ccf2e588911322c9fed3278d10799da1431c9806f188c3af008a5e9",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "aa013b2aa3b29761f4e41a84f44bc6a4a3062ba849ce3293c83e5b53ea1b25f5",
+    "quality": {
+     "rc": 0,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 773694 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 773694",
+      "aspect ratio : max=4572.3  p99=3415.2  mean=223.3  >5000: 0 (0.00%)",
+      "skewness     : max=0.320  p99=0.280  mean=0.028  >0.90: 0 (0.00%)",
+      "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 773694,
+     "max_ar": 4572.263504325967,
+     "max_skew": 0.3197514942692995,
+     "n_high_ar": 54997,
+     "max_skew_high_ar": 0.0007296638974493261,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.978778338261188,
+      "r_over_rt": 3.1024217834648757,
+      "ar": 1045.21009690563,
+      "skew": 0.0007296638974493261
+     },
+     "high_ar_x_range_over_rt": [
+      -12.493455639043136,
+      34.778512336020626
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4867  y1 中央値 1.2337e-07  平均 2.1980e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 3.148470373e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.8999998039,
+     "x_rt_at_max": -5.008125474,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.8999998039,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   },
+   "x_density_table_x_lt0": [
+    [
+     -12.500000640558765,
+     4.658683681270632
+    ],
+    [
+     -12.25,
+     4.658683681270632
+    ],
+    [
+     -12.0,
+     3.8711477382460684
+    ],
+    [
+     -11.75,
+     3.710442207112111
+    ],
+    [
+     -11.5,
+     3.6663430700342317
+    ],
+    [
+     -11.25,
+     2.8969102251104433
+    ],
+    [
+     -11.0,
+     2.836770686555467
+    ],
+    [
+     -10.75,
+     2.836770686555467
+    ],
+    [
+     -10.5,
+     2.805775417471782
+    ],
+    [
+     -10.25,
+     2.8988940778075665
+    ],
+    [
+     -10.0,
+     3.0160119819718094
+    ],
+    [
+     -9.75,
+     2.9452459895666303
+    ],
+    [
+     -9.5,
+     2.8506541137458847
+    ],
+    [
+     -9.25,
+     2.8422119113133237
+    ],
+    [
+     -9.0,
+     2.7984697287883016
+    ],
+    [
+     -8.75,
+     2.7600817283930255
+    ],
+    [
+     -8.5,
+     2.7289477347910798
+    ],
+    [
+     -8.25,
+     2.7056005666541627
+    ],
+    [
+     -8.0,
+     2.697891569602387
+    ],
+    [
+     -7.75,
+     2.675904251606394
+    ],
+    [
+     -7.5,
+     2.6684454668596125
+    ],
+    [
+     -7.25,
+     2.6674954232192487
+    ],
+    [
+     -7.0,
+     2.653847172886192
+    ],
+    [
+     -6.75,
+     2.6530374360947016
+    ],
+    [
+     -6.5,
+     2.6810394257853933
+    ],
+    [
+     -6.25,
+     2.6926950340285853
+    ],
+    [
+     -6.0,
+     2.7726542860531396
+    ],
+    [
+     -5.75,
+     2.967
+    ],
+    [
+     -5.5,
+     3.2646
+    ],
+    [
+     -5.25,
+     3.57
+    ],
+    [
+     -5.0,
+     3.9646
+    ],
+    [
+     -4.75,
+     4.467
+    ],
+    [
+     -4.5,
+     4.8567
+    ],
+    [
+     -4.25,
+     5.2884
+    ],
+    [
+     -4.0,
+     5.9783
+    ],
+    [
+     -3.75,
+     6.876
+    ],
+    [
+     -3.5,
+     7.8853
+    ],
+    [
+     -3.25,
+     9.1184
+    ],
+    [
+     -3.0,
+     10.8222
+    ],
+    [
+     -2.75,
+     12.648
+    ],
+    [
+     -2.5,
+     14.9639
+    ],
+    [
+     -2.25,
+     17.6341
+    ],
+    [
+     -2.0,
+     21.1618
+    ],
+    [
+     -1.75,
+     24.813
+    ],
+    [
+     -1.5,
+     28.762
+    ],
+    [
+     -1.25,
+     32.9147
+    ],
+    [
+     -1.0,
+     35.786
+    ],
+    [
+     -0.75,
+     37.3689
+    ],
+    [
+     -0.5,
+     38.2933
+    ],
+    [
+     -0.25,
+     38.3901
+    ]
+   ]
+  },
+  {
+   "spec": {
+    "name": "X08f",
+    "target": 0.8,
+    "spacing": 0.125,
+    "thicken": false,
+    "x_refine": {
+     "base": "T08f",
+     "ar_goal": 4500.0
+    }
+   },
+   "x_refine": {
+    "ni": 4907,
+    "m": 188,
+    "alpha": 1.004883303,
+    "ar_goal": 4500.0,
+    "F_max": 3.188099089,
+    "x_rt_refined": [
+     -12.50000064,
+     -5.5
+    ],
+    "added_integral_over_h": 188.0,
+    "note": "参考 (方針の外): x_density_table の上流の値と ni も変える。採否は上位"
+   },
+   "table": {
+    "ok": true,
+    "n_points": 216,
+    "n_var": 100,
+    "n_constraints": 1969,
+    "n_changed": 72,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 171.3338389
+    },
+    "binding": 72,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      7.85384e-07
+     ],
+     [
+      -12.375,
+      1.05483e-06
+     ],
+     [
+      -12.25,
+      1.12591e-06
+     ],
+     [
+      -12.125,
+      1.16681e-06
+     ],
+     [
+      -12.0,
+      1.19418e-06
+     ],
+     [
+      -11.875,
+      1.21982e-06
+     ],
+     [
+      -11.75,
+      1.23954e-06
+     ],
+     [
+      -11.625,
+      1.25584e-06
+     ],
+     [
+      -11.5,
+      1.27148e-06
+     ],
+     [
+      -11.375,
+      1.28274e-06
+     ],
+     [
+      -11.25,
+      1.29288e-06
+     ],
+     [
+      -11.125,
+      1.30242e-06
+     ],
+     [
+      -11.0,
+      1.31169e-06
+     ],
+     [
+      -10.875,
+      1.31959e-06
+     ],
+     [
+      -10.75,
+      1.32715e-06
+     ],
+     [
+      -10.625,
+      1.33389e-06
+     ],
+     [
+      -10.5,
+      1.34251e-06
+     ],
+     [
+      -10.375,
+      1.3478e-06
+     ],
+     [
+      -10.25,
+      1.35329e-06
+     ],
+     [
+      -10.125,
+      1.35873e-06
+     ],
+     [
+      -10.0,
+      1.36401e-06
+     ],
+     [
+      -9.875,
+      1.36929e-06
+     ],
+     [
+      -9.75,
+      1.37441e-06
+     ],
+     [
+      -9.625,
+      1.37944e-06
+     ],
+     [
+      -9.5,
+      1.38403e-06
+     ],
+     [
+      -9.375,
+      1.38942e-06
+     ],
+     [
+      -9.25,
+      1.39471e-06
+     ],
+     [
+      -9.125,
+      1.40026e-06
+     ],
+     [
+      -9.0,
+      1.40558e-06
+     ],
+     [
+      -8.875,
+      1.41265e-06
+     ],
+     [
+      -8.75,
+      1.41983e-06
+     ],
+     [
+      -8.625,
+      1.42729e-06
+     ],
+     [
+      -8.5,
+      1.43488e-06
+     ],
+     [
+      -8.375,
+      1.44267e-06
+     ],
+     [
+      -8.25,
+      1.45041e-06
+     ],
+     [
+      -8.125,
+      1.45807e-06
+     ],
+     [
+      -8.0,
+      1.46561e-06
+     ],
+     [
+      -7.875,
+      1.47273e-06
+     ],
+     [
+      -7.75,
+      1.47949e-06
+     ],
+     [
+      -7.625,
+      1.48578e-06
+     ],
+     [
+      -7.5,
+      1.49152e-06
+     ],
+     [
+      -7.375,
+      1.49651e-06
+     ],
+     [
+      -7.25,
+      1.50072e-06
+     ],
+     [
+      -7.125,
+      1.50401e-06
+     ],
+     [
+      -7.0,
+      1.5063e-06
+     ],
+     [
+      -6.875,
+      1.50746e-06
+     ],
+     [
+      -6.75,
+      1.50742e-06
+     ],
+     [
+      -6.625,
+      1.50613e-06
+     ],
+     [
+      -6.5,
+      1.50344e-06
+     ],
+     [
+      -6.375,
+      1.49947e-06
+     ],
+     [
+      -6.25,
+      1.49399e-06
+     ],
+     [
+      -6.125,
+      1.487e-06
+     ],
+     [
+      -6.0,
+      1.47861e-06
+     ],
+     [
+      -5.875,
+      1.46851e-06
+     ],
+     [
+      -5.75,
+      1.45703e-06
+     ],
+     [
+      -5.625,
+      1.44402e-06
+     ],
+     [
+      -5.5,
+      1.42983e-06
+     ],
+     [
+      -5.375,
+      1.41397e-06
+     ],
+     [
+      -5.25,
+      1.39692e-06
+     ],
+     [
+      -5.125,
+      1.3788e-06
+     ],
+     [
+      -5.0,
+      1.3597e-06
+     ],
+     [
+      -4.875,
+      1.33936e-06
+     ],
+     [
+      -4.75,
+      1.31813e-06
+     ],
+     [
+      -4.625,
+      1.29595e-06
+     ],
+     [
+      -4.5,
+      1.27272e-06
+     ],
+     [
+      -4.375,
+      1.24909e-06
+     ],
+     [
+      -4.25,
+      1.22459e-06
+     ],
+     [
+      -4.125,
+      1.19935e-06
+     ],
+     [
+      -4.0,
+      1.17356e-06
+     ],
+     [
+      -3.875,
+      1.14688e-06
+     ],
+     [
+      -3.75,
+      1.11975e-06
+     ],
+     [
+      -3.625,
+      1.09221e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.375,
+      1.0072851783581443e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.125,
+      9.108163192202903e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.875,
+      8.177216316033224e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.625,
+      7.316534853002471e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.375,
+      6.511073979736359e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.125,
+      5.778604696360529e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.875,
+      5.144809152767472e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.625,
+      4.592608929486596e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.375,
+      4.132052773912744e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.125,
+      3.784342948465432e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.875,
+      3.5646071022484393e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.625,
+      3.4698236245088887e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.375,
+      3.44931812136834e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ],
+     [
+      -0.125,
+      3.462767827619979e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": false,
+   "downstream_shifted_columns": {
+    "shift": 188,
+    "x_max_abs_diff_m": 1.092015367e-12,
+    "r_max_abs_diff_m": 2.239874952e-13,
+    "bit_identical": false,
+    "note": "x ≥ 0 の列を、上流に足した列の数だけずらして元の格子と比べた"
+   },
+   "metrics": {
+    "cells": 780054,
+    "nodes": 785120,
+    "ni": 4907,
+    "nj": 160,
+    "ar_max": 4572.263507,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 0,
+    "n_ar_gt_1000": 55709,
+    "skew_max_ar_gt_1000": 0.0006708574829,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 30080,
+    "x_lt0": {
+     "ar_max": 4572.263507,
+     "n_ar_gt_5000": 0,
+     "x_rt_ar_gt_5000": null,
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.7999998545,
+    "x_rt_at_max": -5.251395153,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.7999998545,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 40,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      1.952368991e-07,
+      2.960404363e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.178785731e-07
+     ],
+     "y1plus_est_max": 0.7999996165,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 4558.073111,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 34,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.969265216e-07,
+      3.160042368e-07
+     ],
+     "y1_old_m": [
+      6.217144398e-07,
+      9.868244409e-07
+     ],
+     "y1plus_est_max": 0.7999989965,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 4213.994153,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 28,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.16355307e-07,
+      3.258680428e-07
+     ],
+     "y1_old_m": [
+      9.941306644e-07,
+      1.099199742e-06
+     ],
+     "y1plus_est_max": 0.799998713,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 4482.706761,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 26,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.261973866e-07,
+      3.334898698e-07
+     ],
+     "y1_old_m": [
+      1.101854043e-06,
+      1.152000287e-06
+     ],
+     "y1plus_est_max": 0.7999993844,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 4480.124031,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 27,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.337860938e-07,
+      3.389672474e-07
+     ],
+     "y1_old_m": [
+      9.791084334e-07,
+      1.147307019e-06
+     ],
+     "y1plus_est_max": 0.799998783,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 4419.194584,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 27,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.391558472e-07,
+      3.439238138e-07
+     ],
+     "y1_old_m": [
+      8.344144924e-07,
+      9.734312451e-07
+     ],
+     "y1plus_est_max": 0.7999997871,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 4226.886417,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 26,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.441047674e-07,
+      3.492194422e-07
+     ],
+     "y1_old_m": [
+      7.510234523e-07,
+      8.305336853e-07
+     ],
+     "y1plus_est_max": 0.7999977135,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 4241.890825,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 26,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.494289435e-07,
+      3.565136821e-07
+     ],
+     "y1_old_m": [
+      7.039661865e-07,
+      7.483177061e-07
+     ],
+     "y1plus_est_max": 0.7999991605,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 4263.866781,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.568112814e-07,
+      3.63765175e-07
+     ],
+     "y1_old_m": [
+      6.638722918e-07,
+      7.023216364e-07
+     ],
+     "y1plus_est_max": 0.7999981168,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 4263.323367,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      3.640289112e-07,
+      3.690922075e-07
+     ],
+     "y1_old_m": [
+      6.160841959e-07,
+      6.621835467e-07
+     ],
+     "y1plus_est_max": 0.7999995888,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 4228.856947,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 24,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      3.69226558e-07,
+      3.704410852e-07
+     ],
+     "y1_old_m": [
+      5.681710422e-07,
+      6.141240807e-07
+     ],
+     "y1plus_est_max": 0.7999989346,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 4236.310126,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      3.651171309e-07,
+      3.701931213e-07
+     ],
+     "y1_old_m": [
+      5.17613953e-07,
+      5.661587757e-07
+     ],
+     "y1plus_est_max": 0.7999980773,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 4273.409963,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.52291583e-07,
+      3.647495184e-07
+     ],
+     "y1_old_m": [
+      4.742010609e-07,
+      5.1579512e-07
+     ],
+     "y1plus_est_max": 0.7999995127,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 4323.140642,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 26,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.316265724e-07,
+      3.516121187e-07
+     ],
+     "y1_old_m": [
+      4.244643057e-07,
+      4.723415924e-07
+     ],
+     "y1plus_est_max": 0.7999995862,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4333.224537,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 30,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.030661858e-07,
+      3.307456564e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.225312052e-07
+     ],
+     "y1plus_est_max": 0.7999998545,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 4256.924311,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.696548576e-07,
+      3.02105523e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.799999729,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 4019.764543,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.324558866e-07,
+      2.687638799e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.7999988827,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3770.753268,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.31683665e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.799998905,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3613.946968,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.87144152e-08,
+      1.413170817e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851782,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732722,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591772e-08,
+      6.856366352e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381577,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306976,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191135e-08,
+      3.358449811e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263507,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449097e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.5417866103,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900219,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071054,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755896,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110797e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.5529276989,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.660716291e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.8059719,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 0.9144525581,
+    "x_rt_at_max": -0.1560612093,
+    "extra_columns_estimate": 0,
+    "x_rt_range_factor_gt_1": null,
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/X08f",
+    "msh_sha256": "24586fc2c0b996672a7cf27afc1d21ab9054f1d11602664222bbd342be26c03f",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "7763196c971582cd97fa7f7e2919e42e985b1b38dac9ffe0ffcf3b7423af9162",
+    "quality": {
+     "rc": 0,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 780054 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 780054",
+      "aspect ratio : max=4572.3  p99=3436.7  mean=224.2  >5000: 0 (0.00%)",
+      "skewness     : max=0.320  p99=0.280  mean=0.028  >0.90: 0 (0.00%)",
+      "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 780054,
+     "max_ar": 4572.2635066962785,
+     "max_skew": 0.319751494269229,
+     "n_high_ar": 55709,
+     "max_skew_high_ar": 0.0006708574828553853,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.7463478007080315,
+      "r_over_rt": 3.0649666272341785,
+      "ar": 1031.1553875801487,
+      "skew": 0.0006708574828553853
+     },
+     "high_ar_x_range_over_rt": [
+      -12.494196179368597,
+      34.77851233601779
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4907  y1 中央値 1.2725e-07  平均 2.1794e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 2.352973372e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.7999998545,
+     "x_rt_at_max": -5.251395153,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.7999998545,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   },
+   "x_density_table_x_lt0": [
+    [
+     -12.500000640558765,
+     5.253109896111398
+    ],
+    [
+     -12.25,
+     5.253109896111398
+    ],
+    [
+     -12.0,
+     3.7136116224795335
+    ],
+    [
+     -11.75,
+     4.183070011138241
+    ],
+    [
+     -11.5,
+     4.132067077474966
+    ],
+    [
+     -11.25,
+     3.2665984663305654
+    ],
+    [
+     -11.0,
+     3.1987842404333775
+    ],
+    [
+     -10.75,
+     3.1987842404333775
+    ],
+    [
+     -10.5,
+     3.162733841815914
+    ],
+    [
+     -10.25,
+     3.2667897885934565
+    ],
+    [
+     -10.0,
+     3.3994933831987066
+    ],
+    [
+     -9.75,
+     3.32043953590233
+    ],
+    [
+     -9.5,
+     3.2125434475272554
+    ],
+    [
+     -9.25,
+     3.203629877047002
+    ],
+    [
+     -9.0,
+     3.1539693564805553
+    ],
+    [
+     -8.75,
+     3.110061630708241
+    ],
+    [
+     -8.5,
+     3.0753061674151017
+    ],
+    [
+     -8.25,
+     3.048036164727987
+    ],
+    [
+     -8.0,
+     3.038927070532717
+    ],
+    [
+     -7.75,
+     3.014667261654409
+    ],
+    [
+     -7.5,
+     3.0042994588466683
+    ],
+    [
+     -7.25,
+     3.0044798230076633
+    ],
+    [
+     -7.0,
+     2.9855405348823965
+    ],
+    [
+     -6.75,
+     2.98707544055654
+    ],
+    [
+     -6.5,
+     3.013627510725572
+    ],
+    [
+     -6.25,
+     3.030714804230422
+    ],
+    [
+     -6.0,
+     3.114998932746549
+    ],
+    [
+     -5.75,
+     3.199901932706067
+    ],
+    [
+     -5.5,
+     3.3896107990908293
+    ],
+    [
+     -5.25,
+     3.57
+    ],
+    [
+     -5.0,
+     3.9646
+    ],
+    [
+     -4.75,
+     4.467
+    ],
+    [
+     -4.5,
+     4.8567
+    ],
+    [
+     -4.25,
+     5.2884
+    ],
+    [
+     -4.0,
+     5.9783
+    ],
+    [
+     -3.75,
+     6.876
+    ],
+    [
+     -3.5,
+     7.8853
+    ],
+    [
+     -3.25,
+     9.1184
+    ],
+    [
+     -3.0,
+     10.8222
+    ],
+    [
+     -2.75,
+     12.648
+    ],
+    [
+     -2.5,
+     14.9639
+    ],
+    [
+     -2.25,
+     17.6341
+    ],
+    [
+     -2.0,
+     21.1618
+    ],
+    [
+     -1.75,
+     24.813
+    ],
+    [
+     -1.5,
+     28.762
+    ],
+    [
+     -1.25,
+     32.9147
+    ],
+    [
+     -1.0,
+     35.786
+    ],
+    [
+     -0.75,
+     37.3689
+    ],
+    [
+     -0.5,
+     38.2933
+    ],
+    [
+     -0.25,
+     38.3901
+    ]
+   ]
+  },
+  {
+   "spec": {
+    "name": "X09f",
+    "target": 0.9,
+    "spacing": 0.125,
+    "thicken": false,
+    "x_refine": {
+     "base": "T09f",
+     "ar_goal": 4500.0
+    }
+   },
+   "x_refine": {
+    "ni": 4865,
+    "m": 146,
+    "alpha": 1.004682068,
+    "ar_goal": 4500.0,
+    "F_max": 2.833863074,
+    "x_rt_refined": [
+     -12.50000064,
+     -6.25
+    ],
+    "added_integral_over_h": 146.0,
+    "note": "参考 (方針の外): x_density_table の上流の値と ni も変える。採否は上位"
+   },
+   "table": {
+    "ok": true,
+    "n_points": 216,
+    "n_var": 100,
+    "n_constraints": 1927,
+    "n_changed": 63,
+    "lp": {
+     "status": 0,
+     "message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+     "objective": 170.3384109
+    },
+    "binding": 63,
+    "x_lt0": [
+     [
+      -12.500000640558765,
+      8.83557e-07
+     ],
+     [
+      -12.375,
+      1.18752e-06
+     ],
+     [
+      -12.25,
+      1.26629e-06
+     ],
+     [
+      -12.125,
+      1.31233e-06
+     ],
+     [
+      -12.0,
+      1.34341e-06
+     ],
+     [
+      -11.875,
+      1.37238e-06
+     ],
+     [
+      -11.75,
+      1.3945e-06
+     ],
+     [
+      -11.625,
+      1.41208e-06
+     ],
+     [
+      -11.5,
+      1.43117e-06
+     ],
+     [
+      -11.375,
+      1.44306e-06
+     ],
+     [
+      -11.25,
+      1.45451e-06
+     ],
+     [
+      -11.125,
+      1.46522e-06
+     ],
+     [
+      -11.0,
+      1.47567e-06
+     ],
+     [
+      -10.875,
+      1.48454e-06
+     ],
+     [
+      -10.75,
+      1.49302e-06
+     ],
+     [
+      -10.625,
+      1.50072e-06
+     ],
+     [
+      -10.5,
+      1.51036e-06
+     ],
+     [
+      -10.375,
+      1.51626e-06
+     ],
+     [
+      -10.25,
+      1.52245e-06
+     ],
+     [
+      -10.125,
+      1.52857e-06
+     ],
+     [
+      -10.0,
+      1.53451e-06
+     ],
+     [
+      -9.875,
+      1.54045e-06
+     ],
+     [
+      -9.75,
+      1.54621e-06
+     ],
+     [
+      -9.625,
+      1.55187e-06
+     ],
+     [
+      -9.5,
+      1.55703e-06
+     ],
+     [
+      -9.375,
+      1.5631e-06
+     ],
+     [
+      -9.25,
+      1.56905e-06
+     ],
+     [
+      -9.125,
+      1.57529e-06
+     ],
+     [
+      -9.0,
+      1.5813e-06
+     ],
+     [
+      -8.875,
+      1.58923e-06
+     ],
+     [
+      -8.75,
+      1.59731e-06
+     ],
+     [
+      -8.625,
+      1.6057e-06
+     ],
+     [
+      -8.5,
+      1.61424e-06
+     ],
+     [
+      -8.375,
+      1.623e-06
+     ],
+     [
+      -8.25,
+      1.63172e-06
+     ],
+     [
+      -8.125,
+      1.64033e-06
+     ],
+     [
+      -8.0,
+      1.64881e-06
+     ],
+     [
+      -7.875,
+      1.65682e-06
+     ],
+     [
+      -7.75,
+      1.66444e-06
+     ],
+     [
+      -7.625,
+      1.6715e-06
+     ],
+     [
+      -7.5,
+      1.67798e-06
+     ],
+     [
+      -7.375,
+      1.68356e-06
+     ],
+     [
+      -7.25,
+      1.68831e-06
+     ],
+     [
+      -7.125,
+      1.69199e-06
+     ],
+     [
+      -7.0,
+      1.69463e-06
+     ],
+     [
+      -6.875,
+      1.69589e-06
+     ],
+     [
+      -6.75,
+      1.6959e-06
+     ],
+     [
+      -6.625,
+      1.69439e-06
+     ],
+     [
+      -6.5,
+      1.69137e-06
+     ],
+     [
+      -6.375,
+      1.68687e-06
+     ],
+     [
+      -6.25,
+      1.68075e-06
+     ],
+     [
+      -6.125,
+      1.67289e-06
+     ],
+     [
+      -6.0,
+      1.66348e-06
+     ],
+     [
+      -5.875,
+      1.65209e-06
+     ],
+     [
+      -5.75,
+      1.63916e-06
+     ],
+     [
+      -5.625,
+      1.62458e-06
+     ],
+     [
+      -5.5,
+      1.60853e-06
+     ],
+     [
+      -5.375,
+      1.59071e-06
+     ],
+     [
+      -5.25,
+      1.57153e-06
+     ],
+     [
+      -5.125,
+      1.55116e-06
+     ],
+     [
+      -5.0,
+      1.52967e-06
+     ],
+     [
+      -4.875,
+      1.50678e-06
+     ],
+     [
+      -4.75,
+      1.48294e-06
+     ],
+     [
+      -4.625,
+      1.4458631138904401e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.375,
+      1.3582557401108162e-06
+     ],
+     [
+      -4.25,
+      1.3251676559213185e-06
+     ],
+     [
+      -4.125,
+      1.2928856211987927e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.875,
+      1.2065843867711866e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.625,
+      1.1047576997695023e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.375,
+      1.0072851783581443e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.125,
+      9.108163192202903e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.875,
+      8.177216316033224e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.625,
+      7.316534853002471e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.375,
+      6.511073979736359e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.125,
+      5.778604696360529e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.875,
+      5.144809152767472e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.625,
+      4.592608929486596e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.375,
+      4.132052773912744e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.125,
+      3.784342948465432e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.875,
+      3.5646071022484393e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.625,
+      3.4698236245088887e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.375,
+      3.44931812136834e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ],
+     [
+      -0.125,
+      3.462767827619979e-07
+     ]
+    ],
+    "x_ge0_unchanged": true,
+    "old_x_lt0": [
+     [
+      -12.500000640558765,
+      2.4786e-06
+     ],
+     [
+      -12.0,
+      2.4786e-06
+     ],
+     [
+      -11.5,
+      4.00778e-06
+     ],
+     [
+      -11.0,
+      4.4339e-06
+     ],
+     [
+      -10.5,
+      4.64881e-06
+     ],
+     [
+      -10.0,
+      3.92495e-06
+     ],
+     [
+      -9.5,
+      3.34114e-06
+     ],
+     [
+      -9.0,
+      3.00893e-06
+     ],
+     [
+      -8.5,
+      2.82911e-06
+     ],
+     [
+      -8.0,
+      2.67104e-06
+     ],
+     [
+      -7.5,
+      2.48777e-06
+     ],
+     [
+      -7.0,
+      2.3051e-06
+     ],
+     [
+      -6.5,
+      2.12906e-06
+     ],
+     [
+      -6.0,
+      1.98915e-06
+     ],
+     [
+      -5.5,
+      1.82768e-06
+     ],
+     [
+      -5.0,
+      1.61969e-06
+     ],
+     [
+      -4.5,
+      1.39217e-06
+     ],
+     [
+      -4.0,
+      1.26139e-06
+     ],
+     [
+      -3.75,
+      1.15416e-06
+     ],
+     [
+      -3.5,
+      1.05747e-06
+     ],
+     [
+      -3.25,
+      9.59482e-07
+     ],
+     [
+      -3.0,
+      8.64619e-07
+     ],
+     [
+      -2.75,
+      7.73368e-07
+     ],
+     [
+      -2.5,
+      6.92189e-07
+     ],
+     [
+      -2.25,
+      6.12464e-07
+     ],
+     [
+      -2.0,
+      5.45212e-07
+     ],
+     [
+      -1.75,
+      4.85482e-07
+     ],
+     [
+      -1.5,
+      4.34456e-07
+     ],
+     [
+      -1.25,
+      3.92994e-07
+     ],
+     [
+      -1.0,
+      3.64414e-07
+     ],
+     [
+      -0.75,
+      3.48681e-07
+     ],
+     [
+      -0.5,
+      3.45292e-07
+     ],
+     [
+      -0.25,
+      3.44572e-07
+     ]
+    ]
+   },
+   "wall_nodes_bit_identical": false,
+   "downstream_shifted_columns": {
+    "shift": 146,
+    "x_max_abs_diff_m": 8.57092175e-13,
+    "r_max_abs_diff_m": 1.737499034e-13,
+    "bit_identical": false,
+    "note": "x ≥ 0 の列を、上流に足した列の数だけずらして元の格子と比べた"
+   },
+   "metrics": {
+    "cells": 773376,
+    "nodes": 778400,
+    "ni": 4865,
+    "nj": 160,
+    "ar_max": 4572.263504,
+    "skew_max": 0.3197514943,
+    "n_ar_gt_5000": 0,
+    "n_ar_gt_1000": 54945,
+    "skew_max_ar_gt_1000": 0.0007290265921,
+    "n_ar_gt_1000_skew_gt_0p1": 0,
+    "nodes_change": 23360,
+    "x_lt0": {
+     "ar_max": 4572.263504,
+     "n_ar_gt_5000": 0,
+     "x_rt_ar_gt_5000": null,
+     "ar_max_control": 4573.992789
+    },
+    "radial_ratio_max": {
+     "x_lt0": 1.111183049,
+     "control_x_lt0": 1.111183049,
+     "all": 1.111183049,
+     "control_all": 1.111183049
+    }
+   },
+   "estimate": {
+    "y1plus_est_max": 0.8999995716,
+    "x_rt_at_max": -12.5,
+    "area_over1_pct": 0.0,
+    "area_over_target_pct": 0.0,
+    "n_over_target": 0,
+    "x_lt0": {
+     "y1plus_est_max": 0.8999995716,
+     "area_over_target_pct": 0.0
+    },
+    "x_ge0": {
+     "y1plus_est_max": 0.588350222,
+     "x_rt_at_max": 95.17545031,
+     "area_over1_pct": 0.0
+    }
+   },
+   "bins": [
+    {
+     "x_rt": [
+      -12.5,
+      -12.0
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      2.196415123e-07,
+      3.334184793e-07
+     ],
+     "y1_old_m": [
+      6.161488478e-07,
+      6.193647657e-07
+     ],
+     "y1plus_est_max": 0.8999995716,
+     "y1plus_env_max": 2.126039903,
+     "ar_wall_cell_max": 4559.540564,
+     "ar_wall_cell_max_control": 4573.992789
+    },
+    {
+     "x_rt": [
+      -12.0,
+      -11.5
+     ],
+     "n_nodes": 30,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.345111083e-07,
+      3.557706149e-07
+     ],
+     "y1_old_m": [
+      6.236992209e-07,
+      9.87917736e-07
+     ],
+     "y1plus_est_max": 0.8999987445,
+     "y1plus_env_max": 2.480077512,
+     "ar_wall_cell_max": 4194.111951,
+     "ar_wall_cell_max_control": 4516.276142
+    },
+    {
+     "x_rt": [
+      -11.5,
+      -11.0
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.561651864e-07,
+      3.667184459e-07
+     ],
+     "y1_old_m": [
+      9.961592937e-07,
+      1.099952868e-06
+     ],
+     "y1plus_est_max": 0.8999987572,
+     "y1plus_env_max": 2.696911065,
+     "ar_wall_cell_max": 4483.961258,
+     "ar_wall_cell_max_control": 4379.426152
+    },
+    {
+     "x_rt": [
+      -11.0,
+      -10.5
+     ],
+     "n_nodes": 23,
+     "n_nodes_control": 8,
+     "y1_new_m": [
+      3.671137118e-07,
+      3.752486553e-07
+     ],
+     "y1_old_m": [
+      1.102940745e-06,
+      1.1520879e-06
+     ],
+     "y1plus_est_max": 0.8999981898,
+     "y1plus_env_max": 2.766082604,
+     "ar_wall_cell_max": 4479.879526,
+     "ar_wall_cell_max_control": 4224.038505
+    },
+    {
+     "x_rt": [
+      -10.5,
+      -10.0
+     ],
+     "n_nodes": 24,
+     "n_nodes_control": 9,
+     "y1_new_m": [
+      3.755838189e-07,
+      3.813752715e-07
+     ],
+     "y1_old_m": [
+      9.780988183e-07,
+      1.146507133e-06
+     ],
+     "y1plus_est_max": 0.8999972643,
+     "y1plus_env_max": 2.738112414,
+     "ar_wall_cell_max": 4416.272186,
+     "ar_wall_cell_max_control": 4241.820115
+    },
+    {
+     "x_rt": [
+      -10.0,
+      -9.5
+     ],
+     "n_nodes": 24,
+     "n_nodes_control": 10,
+     "y1_new_m": [
+      3.816138417e-07,
+      3.869495216e-07
+     ],
+     "y1_old_m": [
+      8.336962983e-07,
+      9.717237936e-07
+     ],
+     "y1plus_est_max": 0.8999992383,
+     "y1plus_env_max": 2.267090086,
+     "ar_wall_cell_max": 4230.089751,
+     "ar_wall_cell_max_control": 4294.530423
+    },
+    {
+     "x_rt": [
+      -9.5,
+      -9.0
+     ],
+     "n_nodes": 23,
+     "n_nodes_control": 11,
+     "y1_new_m": [
+      3.871880619e-07,
+      3.928927053e-07
+     ],
+     "y1_old_m": [
+      7.508346792e-07,
+      8.293266838e-07
+     ],
+     "y1plus_est_max": 0.8999983059,
+     "y1plus_env_max": 1.916916151,
+     "ar_wall_cell_max": 4243.921181,
+     "ar_wall_cell_max_control": 4301.549133
+    },
+    {
+     "x_rt": [
+      -9.0,
+      -8.5
+     ],
+     "n_nodes": 23,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      3.931724805e-07,
+      4.010629249e-07
+     ],
+     "y1_old_m": [
+      7.040444644e-07,
+      7.477890962e-07
+     ],
+     "y1plus_est_max": 0.8999987847,
+     "y1plus_env_max": 1.709482266,
+     "ar_wall_cell_max": 4265.771588,
+     "ar_wall_cell_max_control": 4294.037457
+    },
+    {
+     "x_rt": [
+      -8.5,
+      -8.0
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 13,
+     "y1_new_m": [
+      4.014397331e-07,
+      4.091477864e-07
+     ],
+     "y1_old_m": [
+      6.643535293e-07,
+      7.021904678e-07
+     ],
+     "y1plus_est_max": 0.8999965246,
+     "y1plus_env_max": 1.569363446,
+     "ar_wall_cell_max": 4265.287288,
+     "ar_wall_cell_max_control": 4214.461409
+    },
+    {
+     "x_rt": [
+      -8.0,
+      -7.5
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 15,
+     "y1_new_m": [
+      4.094865188e-07,
+      4.151387226e-07
+     ],
+     "y1_old_m": [
+      6.171038732e-07,
+      6.62453036e-07
+     ],
+     "y1plus_est_max": 0.899999067,
+     "y1plus_env_max": 1.455190013,
+     "ar_wall_cell_max": 4230.810397,
+     "ar_wall_cell_max_control": 4081.277983
+    },
+    {
+     "x_rt": [
+      -7.5,
+      -7.0
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 17,
+     "y1_new_m": [
+      4.153275163e-07,
+      4.167492773e-07
+     ],
+     "y1_old_m": [
+      5.677010782e-07,
+      6.149149502e-07
+     ],
+     "y1plus_est_max": 0.8999987405,
+     "y1plus_env_max": 1.331532181,
+     "ar_wall_cell_max": 4239.053955,
+     "ar_wall_cell_max_control": 3961.685146
+    },
+    {
+     "x_rt": [
+      -7.0,
+      -6.5
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 19,
+     "y1_new_m": [
+      4.107569237e-07,
+      4.164377272e-07
+     ],
+     "y1_old_m": [
+      5.176152382e-07,
+      5.654237108e-07
+     ],
+     "y1plus_est_max": 0.8999987916,
+     "y1plus_env_max": 1.220557269,
+     "ar_wall_cell_max": 4276.06843,
+     "ar_wall_cell_max_control": 3824.367086
+    },
+    {
+     "x_rt": [
+      -6.5,
+      -6.0
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 21,
+     "y1_new_m": [
+      3.965111444e-07,
+      4.102876111e-07
+     ],
+     "y1_old_m": [
+      4.746474515e-07,
+      5.155702247e-07
+     ],
+     "y1plus_est_max": 0.8999983947,
+     "y1plus_env_max": 1.130334887,
+     "ar_wall_cell_max": 4326.31256,
+     "ar_wall_cell_max_control": 3717.039467
+    },
+    {
+     "x_rt": [
+      -6.0,
+      -5.5
+     ],
+     "n_nodes": 25,
+     "n_nodes_control": 25,
+     "y1_new_m": [
+      3.72348596e-07,
+      3.956671312e-07
+     ],
+     "y1_old_m": [
+      4.23128911e-07,
+      4.725782631e-07
+     ],
+     "y1plus_est_max": 0.8999992879,
+     "y1plus_env_max": 1.074941542,
+     "ar_wall_cell_max": 4296.405735,
+     "ar_wall_cell_max_control": 3606.187535
+    },
+    {
+     "x_rt": [
+      -5.5,
+      -5.0
+     ],
+     "n_nodes": 29,
+     "n_nodes_control": 29,
+     "y1_new_m": [
+      3.40951165e-07,
+      3.71269796e-07
+     ],
+     "y1_old_m": [
+      3.613974976e-07,
+      4.207414451e-07
+     ],
+     "y1plus_est_max": 0.8999993519,
+     "y1plus_env_max": 1.019876338,
+     "ar_wall_cell_max": 3910.433034,
+     "ar_wall_cell_max_control": 3460.383126
+    },
+    {
+     "x_rt": [
+      -5.0,
+      -4.5
+     ],
+     "n_nodes": 36,
+     "n_nodes_control": 36,
+     "y1_new_m": [
+      2.955064457e-07,
+      3.398702832e-07
+     ],
+     "y1_old_m": [
+      2.955064458e-07,
+      3.593967539e-07
+     ],
+     "y1plus_est_max": 0.8999985925,
+     "y1plus_env_max": 0.9516910989,
+     "ar_wall_cell_max": 3573.109674,
+     "ar_wall_cell_max_control": 3448.81732
+    },
+    {
+     "x_rt": [
+      -4.5,
+      -4.0
+     ],
+     "n_nodes": 44,
+     "n_nodes_control": 44,
+     "y1_new_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1_old_m": [
+      2.499020448e-07,
+      2.939755338e-07
+     ],
+     "y1plus_est_max": 0.8750409481,
+     "y1plus_env_max": 0.8750409481,
+     "ar_wall_cell_max": 3464.901006,
+     "ar_wall_cell_max_control": 3464.901006
+    },
+    {
+     "x_rt": [
+      -4.0,
+      -3.0
+     ],
+     "n_nodes": 133,
+     "n_nodes_control": 133,
+     "y1_new_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1_old_m": [
+      1.418464571e-07,
+      2.489447251e-07
+     ],
+     "y1plus_est_max": 0.8595558848,
+     "y1plus_env_max": 0.8595558847,
+     "ar_wall_cell_max": 3409.746691,
+     "ar_wall_cell_max_control": 3409.74669
+    },
+    {
+     "x_rt": [
+      -3.0,
+      -2.0
+     ],
+     "n_nodes": 251,
+     "n_nodes_control": 251,
+     "y1_new_m": [
+      6.87144152e-08,
+      1.413170818e-07
+     ],
+     "y1_old_m": [
+      6.871441523e-08,
+      1.413170817e-07
+     ],
+     "y1plus_est_max": 0.7278851785,
+     "y1plus_env_max": 0.7278851782,
+     "ar_wall_cell_max": 3599.732723,
+     "ar_wall_cell_max_control": 3599.732722
+    },
+    {
+     "x_rt": [
+      -2.0,
+      -1.0
+     ],
+     "n_nodes": 471,
+     "n_nodes_control": 471,
+     "y1_new_m": [
+      3.361591772e-08,
+      6.856366353e-08
+     ],
+     "y1_old_m": [
+      3.361591771e-08,
+      6.856366353e-08
+     ],
+     "y1plus_est_max": 0.6069381578,
+     "y1plus_env_max": 0.6069381578,
+     "ar_wall_cell_max": 4134.306974,
+     "ar_wall_cell_max_control": 4134.306976
+    },
+    {
+     "x_rt": [
+      -1.0,
+      0.0
+     ],
+     "n_nodes": 620,
+     "n_nodes_control": 620,
+     "y1_new_m": [
+      2.667191136e-08,
+      3.358449814e-08
+     ],
+     "y1_old_m": [
+      2.667191135e-08,
+      3.358449812e-08
+     ],
+     "y1plus_est_max": 0.5769472988,
+     "y1plus_env_max": 0.5769472989,
+     "ar_wall_cell_max": 4572.263504,
+     "ar_wall_cell_max_control": 4572.263504
+    },
+    {
+     "x_rt": [
+      0.0,
+      1.0
+     ],
+     "n_nodes": 556,
+     "n_nodes_control": 556,
+     "y1_new_m": [
+      2.672449096e-08,
+      4.594601221e-08
+     ],
+     "y1_old_m": [
+      2.672449099e-08,
+      4.594601221e-08
+     ],
+     "y1plus_est_max": 0.54178661,
+     "y1plus_env_max": 0.5417866106,
+     "ar_wall_cell_max": 4556.900222,
+     "ar_wall_cell_max_control": 4556.900217
+    },
+    {
+     "x_rt": [
+      1.0,
+      3.0
+     ],
+     "n_nodes": 548,
+     "n_nodes_control": 548,
+     "y1_new_m": [
+      4.600193508e-08,
+      1.145693649e-07
+     ],
+     "y1_old_m": [
+      4.600193506e-08,
+      1.145693649e-07
+     ],
+     "y1plus_est_max": 0.5401071055,
+     "y1plus_env_max": 0.5401071054,
+     "ar_wall_cell_max": 4144.096451,
+     "ar_wall_cell_max_control": 4144.096451
+    },
+    {
+     "x_rt": [
+      3.0,
+      5.0
+     ],
+     "n_nodes": 226,
+     "n_nodes_control": 226,
+     "y1_new_m": [
+      1.148759732e-07,
+      2.631801059e-07
+     ],
+     "y1_old_m": [
+      1.148759732e-07,
+      2.631801058e-07
+     ],
+     "y1plus_est_max": 0.5469105547,
+     "y1plus_env_max": 0.5469105546,
+     "ar_wall_cell_max": 4202.755895,
+     "ar_wall_cell_max_control": 4202.755896
+    },
+    {
+     "x_rt": [
+      5.0,
+      10.0
+     ],
+     "n_nodes": 201,
+     "n_nodes_control": 201,
+     "y1_new_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1_old_m": [
+      2.645110796e-07,
+      7.750377736e-07
+     ],
+     "y1plus_est_max": 0.5529276989,
+     "y1plus_env_max": 0.552927699,
+     "ar_wall_cell_max": 4418.247091,
+     "ar_wall_cell_max_control": 4418.247091
+    },
+    {
+     "x_rt": [
+      10.0,
+      40.0
+     ],
+     "n_nodes": 500,
+     "n_nodes_control": 500,
+     "y1_new_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1_old_m": [
+      7.804316542e-07,
+      5.649765676e-06
+     ],
+     "y1plus_est_max": 0.5800633008,
+     "y1plus_env_max": 0.5800633008,
+     "ar_wall_cell_max": 4455.326414,
+     "ar_wall_cell_max_control": 4455.326414
+    },
+    {
+     "x_rt": [
+      40.0,
+      94.0
+     ],
+     "n_nodes": 885,
+     "n_nodes_control": 885,
+     "y1_new_m": [
+      5.660716291e-06,
+      1.180282128e-05
+     ],
+     "y1_old_m": [
+      5.66071629e-06,
+      1.180282128e-05
+     ],
+     "y1plus_est_max": 0.5875618674,
+     "y1plus_env_max": 0.5875618676,
+     "ar_wall_cell_max": 828.8059719,
+     "ar_wall_cell_max_control": 828.805972
+    },
+    {
+     "x_rt": [
+      94.0,
+      null
+     ],
+     "n_nodes": 22,
+     "n_nodes_control": 22,
+     "y1_new_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1_old_m": [
+      1.180349983e-05,
+      1.182927101e-05
+     ],
+     "y1plus_est_max": 0.588350222,
+     "y1plus_env_max": 0.5883502222,
+     "ar_wall_cell_max": 396.0547904,
+     "ar_wall_cell_max_control": 396.0547904
+    }
+   ],
+   "x_refine_needed": {
+    "max_factor": 0.9144525576,
+    "x_rt_at_max": -0.1560612093,
+    "extra_columns_estimate": 0,
+    "x_rt_range_factor_gt_1": null,
+    "note": "壁のセルの AR ≒ 流れ方向の辺 / 第一層。流れ方向の間隔をこの倍率で細かくすれば AR ≤ 5000 (列の数は Σ (倍率 − 1) の見積もり)"
+   },
+   "convert": {
+    "workdir": "/home/ubuntu/forge-g0cchain/_tmp_36r/X09f",
+    "msh_sha256": "475a52c8dd52d5c42f662a34cfe7d9aca0feb7c4f617eedba4885c2b37d9f731",
+    "converter": "/home/ubuntu/forge-fgeom7-fp64/solver_density_cuda/build/convertGmshToForge",
+    "converter_sha256": "711f44389209e16d6ae3f8111f21faec31c9d3e0ba3382722e8d33a69579d7bf",
+    "converter_rc": 1,
+    "converter_exit_log": "rc=1: 終了時の既知の GPU エラー (HDF5 は書き終えていて MESH/COORD・VALUE がある) なので通した",
+    "coord_sha256": "08c5335e875ddb3018a33c1acccb18443e196276a7db6cf97e4e35a558c20614",
+    "quality": {
+     "rc": 0,
+     "lines": [
+      "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 773376 cells)",
+      "mode: 2D (x-y projection)",
+      "cells: 773376",
+      "aspect ratio : max=4572.3  p99=3412.7  mean=223.2  >5000: 0 (0.00%)",
+      "skewness     : max=0.320  p99=0.280  mean=0.028  >0.90: 0 (0.00%)",
+      "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+     ]
+    },
+    "ar_relax": {
+     "ar_threshold": 1000.0,
+     "skew_max": 0.1,
+     "ar_max_allowed": 5000.0,
+     "required": true,
+     "source": "nozzle.h5 (primal/cell 変換)",
+     "n_cells": 773376,
+     "max_ar": 4572.263504325848,
+     "max_skew": 0.31975149426990584,
+     "n_high_ar": 54945,
+     "max_skew_high_ar": 0.0007290265921156447,
+     "n_violations": 0,
+     "worst_high_ar": {
+      "x_over_rt": -5.97889340655108,
+      "r_over_rt": 3.102438862973863,
+      "ar": 1046.0317154699642,
+      "skew": 0.0007290265921156447
+     },
+     "high_ar_x_range_over_rt": [
+      -12.493468599686404,
+      34.77851233602078
+     ],
+     "inlet_x_spread_m": 0.0,
+     "inlet_planar": true,
+     "outlet_x_spread_m": 0.0008787451688281323,
+     "outlet_planar": false,
+     "ok": false
+    },
+    "geometry_only": {
+     "rc": 0,
+     "lines": [
+      "=== nozzle.h5  (geometry-only: y1 のみ) ===",
+      "  DOF 座標 = MESH/COORD (node)",
+      "  wall          n=   4865  y1 中央値 1.2303e-07  平均 2.1990e-06  最小 2.6672e-08  最大 1.1829e-05  (評価 100.0 %)",
+      "VERDICT: MEASURED (y1 のみ。y1+ は壁ダンプのある run で測ること)"
+     ]
+    },
+    "y1_tool_vs_generator_rel_max": 3.148348249e-11,
+    "y1_tool_eval_frac": 1.0,
+    "estimate_tool_y1": {
+     "y1plus_est_max": 0.8999995716,
+     "x_rt_at_max": -12.5,
+     "area_over1_pct": 0.0,
+     "area_over_target_pct": 0.0,
+     "n_over_target": 0,
+     "x_lt0": {
+      "y1plus_est_max": 0.8999995716,
+      "area_over_target_pct": 0.0
+     },
+     "x_ge0": {
+      "y1plus_est_max": 0.588350222,
+      "x_rt_at_max": 95.17545031,
+      "area_over1_pct": 0.0
+     }
+    }
+   },
+   "x_density_table_x_lt0": [
+    [
+     -12.500000640558765,
+     4.667928182355197
+    ],
+    [
+     -12.25,
+     4.667928182355197
+    ],
+    [
+     -12.0,
+     3.299747659974052
+    ],
+    [
+     -11.75,
+     3.7169792674033784
+    ],
+    [
+     -11.5,
+     3.671774355132873
+    ],
+    [
+     -11.25,
+     2.9027092711847593
+    ],
+    [
+     -11.0,
+     2.8424493450692903
+    ],
+    [
+     -10.75,
+     2.8424493450692903
+    ],
+    [
+     -10.5,
+     2.8104104117718736
+    ],
+    [
+     -10.25,
+     2.9028748412266667
+    ],
+    [
+     -10.0,
+     3.0207806280152436
+    ],
+    [
+     -9.75,
+     2.950487620680157
+    ],
+    [
+     -9.5,
+     2.8545539355128384
+    ],
+    [
+     -9.25,
+     2.846627567681218
+    ],
+    [
+     -9.0,
+     2.802465892672444
+    ],
+    [
+     -8.75,
+     2.763422703631662
+    ],
+    [
+     -8.5,
+     2.7325178947204187
+    ],
+    [
+     -8.25,
+     2.708258900736406
+    ],
+    [
+     -8.0,
+     2.7001282897568264
+    ],
+    [
+     -7.75,
+     2.6785470720879108
+    ],
+    [
+     -7.5,
+     2.669294052634496
+    ],
+    [
+     -7.25,
+     2.669422024064595
+    ],
+    [
+     -7.0,
+     2.6525413146891523
+    ],
+    [
+     -6.75,
+     2.6538623142796904
+    ],
+    [
+     -6.5,
+     2.6774012328205945
+    ],
+    [
+     -6.25,
+     2.6925417674723255
+    ],
+    [
+     -6.0,
+     2.7696
+    ],
+    [
+     -5.75,
+     2.967
+    ],
+    [
+     -5.5,
+     3.2646
+    ],
+    [
+     -5.25,
+     3.57
+    ],
+    [
+     -5.0,
+     3.9646
+    ],
+    [
+     -4.75,
+     4.467
+    ],
+    [
+     -4.5,
+     4.8567
+    ],
+    [
+     -4.25,
+     5.2884
+    ],
+    [
+     -4.0,
+     5.9783
+    ],
+    [
+     -3.75,
+     6.876
+    ],
+    [
+     -3.5,
+     7.8853
+    ],
+    [
+     -3.25,
+     9.1184
+    ],
+    [
+     -3.0,
+     10.8222
+    ],
+    [
+     -2.75,
+     12.648
+    ],
+    [
+     -2.5,
+     14.9639
+    ],
+    [
+     -2.25,
+     17.6341
+    ],
+    [
+     -2.0,
+     21.1618
+    ],
+    [
+     -1.75,
+     24.813
+    ],
+    [
+     -1.5,
+     28.762
+    ],
+    [
+     -1.25,
+     32.9147
+    ],
+    [
+     -1.0,
+     35.786
+    ],
+    [
+     -0.75,
+     37.3689
+    ],
+    [
+     -0.5,
+     38.2933
+    ],
+    [
+     -0.25,
+     38.3901
+    ]
+   ]
+  }
+ ],
+ "png": "h370_wall_table_design.png"
+}
