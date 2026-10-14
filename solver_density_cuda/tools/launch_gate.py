@@ -23,6 +23,9 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
    壁法線の構造層で条件を確かめられたときだけ 5000 まで、AR の外れ値に SOFT-PASS を当てない)。`bcondConfig.yaml` が無い・読めない
    (`--bcond` を渡せない) run は FAIL。結果の再利用は check_mesh_quality の鍵 (メッシュの不変部分・壁の physID と面・閾値・
    検査器の版) が全部一致したときだけ (`<h5>.quality.json`。実体の隣と run の中の名前の隣を読み、書くのは run の中だけ)。
+3b. **計算の後の判定に要る壁の出力** (`check_wall_output`、plan tooling-convergence-and-wall-resolution-gates §4.6-1): 壁解像の判定が
+   適用になる run (判定の仕様の wall_resolution.applies、または実効の粘性と境界条件 = `judge_run.wall_resolution_applies`) で、no-slip 壁
+   (kind wall*) の `outputHDFflg` が 1 でなければ FAIL (移行期でも; 計算の後では判定できず計算し直しになる)。
 4. **バイナリと省略値**: 起動するバイナリの sha256 と、宣言したプロファイルの内容のハッシュを記録する。このリポジトリの
    `solver_density_cuda/build/forge` でないバイナリ (対応の分からないバイナリ) は**拒否せず** WARN にする (旧・倍精度ビルドとの
    A/B を塞がない: plan §4.3 の 4)。省略の禁止は 1 の `fixed`・`explicit` の照合が担い、`key=~` の逸脱は実効値「未確定」で記録する。
@@ -51,6 +54,8 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
 | メッシュの記録 (`<h5>.provenance.json`) が無い | WARN | FAIL | 変えない |
 | メッシュの来歴の照合の FAIL (記録の不一致・変換時の条件・境界の分類・valueFileName の wall_dist) | FAIL | FAIL | 変えない |
 | 品質の FAIL / WARN・SOFT-PASS | FAIL / WARN | FAIL / WARN | 変えない |
+| 壁解像の判定が適用になる run の no-slip 壁の `outputHDFflg` が 1 でない | FAIL | FAIL | 変えない |
+| 壁解像の適用を決められない・判定の仕様が読めない・仕様の applies と実効の食い違い | WARN | WARN | — |
 | バイナリがこのリポジトリの build/forge でない・読めない | WARN (記録) | WARN (記録) | — |
 
 **モード** (plan §4.7): 強制の開始の条件 (起動の経路の棚卸しの完了と、各経路の宣言の方法・段間の負例の試験が揃うこと) を
@@ -99,7 +104,7 @@ BCOND_FILE = 'bcondConfig.yaml'
 DEFAULT_FORGE = os.path.join(ROOT, 'solver_density_cuda', 'build', 'forge')
 QUALITY_TOOL = os.path.join(HERE, 'check_mesh_quality.py')
 
-AREAS = ('モード', '宣言', '設定', '来歴', '品質', 'バイナリ', '関門', 'エコー')
+AREAS = ('モード', '宣言', '設定', '来歴', '品質', 'バイナリ', '関門', 'エコー', '壁の出力')
 
 
 def resolve_mode(environ=None):
@@ -376,6 +381,49 @@ def note_initial_field(run_dir, doc, out, info):
         info['initial_field'] = f'{os.path.basename(path)}: {mpv.coord_upcast_text(rec)}'
 
 
+# ------------------------------------------------------------------------------------------------ 計算の後の判定に要る壁の出力
+
+def check_wall_output(run_dir, doc, bcond_doc, out, info):
+    """壁解像の判定 (`judge_run.py` の wall_resolution) が適用になる run で、全 no-slip 壁 (kind wall*) の `outputHDFflg` が 1 かを
+    確かめる (plan tooling-convergence-and-wall-resolution-gates §4.6-1・§5.1 #12 後半)。適用は判定の仕様 (`JUDGE_SPEC.json`・
+    `judge.yaml` の wall_resolution.applies) **または**実効の粘性と境界条件 (`judge_run.wall_resolution_applies`: 定数粘性 viscMethod 0 も
+    粘性) で決める。適用になるのに壁の出力が無い壁があれば **FAIL (移行期でも止める)**: 計算の後では壁解像を判定できず (INDETERMINATE)、
+    計算し直しになるため。適用を決められない・仕様と実効が食い違う・仕様が読めないときは WARN (計算の後の判定は INDETERMINATE になる)。"""
+    if not isinstance(bcond_doc, dict) or not isinstance(doc, dict):
+        return                                      # 読めない config・bcond は他の検査が FAIL にする
+    import judge_run as JR
+    applies, why, walls = JR.wall_resolution_applies(doc, bcond_doc)
+    sp = JR.load_spec(run_dir)
+    spec_wr = (sp.get('spec') or {}).get('wall_resolution') if sp.get('spec') else None
+    if sp.get('error'):
+        out.add('WARN', '壁の出力', sp.get('path') or '(仕様)', f'判定の仕様を読めない: {sp["error"]} (計算の後の判定の仕様に依る項目は INDETERMINATE)')
+    if spec_wr is not None and applies is not None and spec_wr['applies'] != applies:
+        out.add('WARN', '壁の出力', sp.get('path'), f'仕様の wall_resolution.applies {spec_wr["applies"]} が実効の設定 ({why} → {applies}) と違う '
+                '(計算の後の壁解像は INDETERMINATE)')
+    need = applies is True or (spec_wr is not None and spec_wr['applies'])
+    if applies is None and spec_wr is None:
+        out.add('WARN', '壁の出力', BCOND_FILE, f'壁解像の判定の適用を決められない ({why}): 計算の後の壁解像は INDETERMINATE')
+    if not need:
+        info['wall_output'] = f'壁解像の判定は適用外 ({why})' if applies is False else f'適用を決められない ({why})'
+        return
+    lack = []
+    for name in sorted(walls):
+        v = bcond_doc.get(name) if isinstance(bcond_doc.get(name), dict) else {}
+        flg = v.get('outputHDFflg')
+        try:
+            ok = int(flg) == 1
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            lack.append(name)
+            out.add('FAIL', '壁の出力', f'{BCOND_FILE}:{name}',
+                    f'壁解像の判定が適用になる ({why if applies else "仕様の wall_resolution.applies"}) のに no-slip 壁 {name} の '
+                    f'outputHDFflg が {flg!r} (1 でない): 壁の出力 res_{name}_<physID>_<step>.h5 が無く、計算の後の壁解像を判定できない '
+                    '(計算し直しになる)。outputHDFflg: 1 にする')
+    info['wall_output'] = (f'no-slip 壁 {len(walls)} 枚の outputHDFflg ' + ('すべて 1' if not lack else f'1 でない: {", ".join(lack)}')
+                           + f' (壁解像の判定は適用: {why})')
+
+
 # ------------------------------------------------------------------------------------------------ 3. メッシュの品質
 
 def check_quality(mesh, bcond_path, out, info, dry_run=False):
@@ -497,6 +545,9 @@ def run_gate(run_dir, forge_bin=None, environ=None, dry_run=False):
         check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, info, mesh_kind=mesh_facts)
         out.items += pout.items
         note_initial_field(run_dir, doc, out, info)
+        # 計算の後の判定 (judge_run) が壁解像を判定できるよう、適用になる run の壁の出力を確かめる (plan
+        # tooling-convergence-and-wall-resolution-gates §4.6-1)
+        check_wall_output(run_dir, doc, bcond_doc, out, info)
         # 3. メッシュの品質
         mesh = (prov or {}).get('mesh')
         if mesh and os.path.isfile(mesh) and bcond_path is not None:
@@ -535,6 +586,8 @@ def render(out, info):
     if info.get('initial_field'):
         L.append(f'initial_field: {info["initial_field"]}')
     L.append(f'quality     : {info.get("quality", "-")}' + (f' [{info["quality_cmd"]}]' if info.get('quality_cmd') else ''))
+    if info.get('wall_output'):
+        L.append(f'wall_output : {info["wall_output"]}')
     L.append(f'forge_bin   : {info.get("forge_bin", "-")}')
     L.append(f'forge_sha256: {info.get("forge_sha256", "-")}')
     if info.get('forge_mtime'):

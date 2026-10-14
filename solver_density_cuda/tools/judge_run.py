@@ -17,7 +17,7 @@ r"""計算の後の判定を 1 本にまとめる (plan tooling-convergence-and-
 | --- | --- | --- |
 | `solver` | forge の終了コード (`--solver-rc`、無ければ前の判定の記録 (同じ `forge_run.log`)、無ければ `forge_run.log` の正常終了の行 `Time = … s (wall`)。0 は PASS、停止規則の見張りが止めた (143/137 かつ `STOP_RULE_STATE.json` が REACHED/DIVERGED) は PASS (正常な監視の停止)、他の非 0 は FAIL | 終了コードが分からない |
 | `nonfinite` | 残差の全履歴 (`residual_history.csv` と manifest の段の履歴の全行・全 `rms_*` 列) と最終の場 `res_<N>.h5` の `VALUE/*` の非有限。`--full-audit` で全 `res_<N>.h5` と境界の出力も。run の開始より後の `res_nan_*.h5` は FAIL | 履歴・最終の場が無い・読めない・`rms_*` 列が無い |
-| `physical` | 最終の場の `ro`>0・`P`>0・`T`>0 (`P`・`T` はあれば) | 最終の場・`ro` が無い |
+| `physical` | 最終の場の `ro`>0・`P`>0・`T`>0 (`P`・`T` はあれば) と**静圧 ≤ 全圧** (`total_quantities.total_state`: `VALUE/h0` から全温・全圧; `P > P0·(1 + PT_REL_TOL)` の点が 1 つでもあれば FAIL、P・T が有限で正なのに全圧が非有限の点も FAIL) | 最終の場・`ro` が無い・静圧 ≤ 全圧を確かめられない (`h0` が無い・`thermalMethod` が未対応・物性 (`cp`・`gamma`・種の記録) が読めない) |
 | `convergence` | `check_convergence.py` (仕様の mode: auto は manifest があれば `--segment`、無ければ**単段と確かめられたとき**だけ履歴全体)。PASS は終了 0、列の DIVERGED・RISING・STALLED・still converging・ABOVE FLOOR は FAIL | 判定不能の行・参照の拒否・単段と確かめられない・非定常で仕様が無い |
 | `stop_rule` | `STOP_RULE_STATE.json` (無ければ `stop_rule.json`) の状態を**そのまま** (`raw`) 記録。REACHED→PASS、CENSORED・DIVERGED・EXEC_ERROR→FAIL、UNAVAILABLE・NOT_USED→NOT_APPLICABLE | DATA_ERROR・MISSING (prepare_info.json が要求したのに状態が無い)・RUNNING・記録が読めない |
 | `quasisteady` | 仕様の量だけ (`check_quasisteady.classify_series`)。要求した量と評価した量の完全一致を照合。必須の量の FAIL (NONFINITE・DRIFTING・TRANSIENT-UNSETTLED・受け入れない OSCILLATING) は FAIL | 仕様が無い (対象未設定)・系列・列・量が無い・step の重複・逆行・点数や窓の不足・抽出が適用不能 |
@@ -36,8 +36,10 @@ FAIL・判定不能は参考として出すが総合には入れない。
 (run に `stage_manifest.json` がある、または親が `FORGE_JUDGE_DEFER=1` を渡した) では、`--from-run-case` の呼び出しは
 判定を確定せず、段の結果 (solver・残差の履歴とその時点の最新の場の非有限・物理性・`CONVERGENCE_VERDICT.txt` の副判定) を
 `RUN_VERDICT.json` の `stages` に足して `state: deferred` で書く (総合は既知の FAIL があれば FAIL、無ければ INDETERMINATE)。
-親 (runner) が段の記録・manifest・停止の記録の確定・出力の整理を終えた後に引数なしで呼んで一度だけ確定する (親側の結線は後半)。
-`--defer` は段の記録を強制する。
+親 (runner) が段の記録・manifest・停止の記録の確定・出力の整理を終えた後に引数なしで呼んで一度だけ確定する。設計チェーンの
+runner は全部の段 (S1・stages=none の本段を含む) で `FORGE_JUDGE_DEFER=1` を渡し、最後に `design/forge_design/evaluate/judge.finalize`
+で確定する (段の途中の例外でも、forge を起動していれば確定する)。手で段階起動した run は最後に引数なしで回す (Stop フックが
+`state: deferred` のまま終えるのを止める)。`--defer` は段の記録を強制する。
 
 **判定の仕様** (§4.6-1): run の `JUDGE_SPEC.json` (生成器が実行の前に書く) → 無ければ run の `judge.yaml` → case の
 `judge.yaml` (手書き) を読む。どれも無ければ準定常は「対象未設定」= INDETERMINATE (黙って省かない)、収束は auto、壁解像は
@@ -67,7 +69,10 @@ FAIL・判定不能は参考として出すが総合には入れない。
           #          theta・cf_retheta・cf_momentum; 任意で cf_x・cf_ytop・wall_law・mesh) を全 res_<N>.h5 から
           "segment": {"step_min": null, "step_max": null},  # 任意: 判定に使う step の区間 (両端を含む)
           "window": {"tail_frac": 0.4, "min_points": 4, "min_tail_span": 0},   # 末尾窓の割合・区間の最少点数・末尾窓の最少 step 幅
-          "thresholds": {"drift": 0.05, "osc": 0.10},       # classify の --drift・--osc
+          "criterion": "relative",             # 任意: relative (既定、classify_series の相対の drift・osc) | absolute (下)
+          "thresholds": {"drift": 0.05, "osc": 0.10},       # relative: classify の --drift・--osc
+          #  absolute (0 を横切る量、例 質量の収支 r): 末尾窓の |平均| ≤ abs_mean かつ 振幅 (最大 − 最小)/2 ≤ abs_amp で STEADY、
+          #  振幅の超過は OSCILLATING、|平均| の超過は OFFSET (受け入れられない)。"thresholds": {"abs_mean": 5e-4, "abs_amp": 5e-3}
           "accept": ["STEADY"],                # 合格にする判定 (OSCILLATING を入れたら平均±振幅で報告すること)
           "required": true                     # false なら参考 (総合に入れない)
         }]
@@ -75,8 +80,12 @@ FAIL・判定不能は参考として出すが総合には入れない。
       "wall_resolution": {                     # 任意 (無ければ実効の粘性と BC から決める)
         "applies": true,                       # 実効の設定と違えば INDETERMINATE (仕様と実効の食い違い)
         "reason": "...", "target": 1.0, "over_frac": 2.0  # check_wall_resolution の --target・--over-frac
-      }
+      },
+      "notes": ["..."]                         # 任意: 仕様を書いたものの注記 (RUN_VERDICT.txt に写す; 判定は変えない)
     }
+
+適用になる run で no-slip 壁の `outputHDFflg` が 1 でなければ、投入の関門 (`launch_gate.py`) が forge を起動しない (計算の後では壁解像を
+判定できず、計算し直しになるため; §4.6-1)。設計チェーンの生成器は機種の既定の仕様を `design/forge_design/evaluate/judge.py` で書く。
 
 手書きの run の `judge.yaml` の例 (平板の Cf を報告する run):
 
@@ -130,13 +139,19 @@ EXIT_ERROR = 3
 EXIT_DEFERRED = 4
 CHECK_ORDER = ("solver", "nonfinite", "physical", "convergence", "stop_rule", "quasisteady", "wall_resolution")
 DEFER_CHECKS = ("solver", "nonfinite", "physical")
-TOOLS = ("judge_run.py", "check_convergence.py", "check_quasisteady.py", "check_wall_resolution.py", "stage_manifest.py")
+TOOLS = ("judge_run.py", "check_convergence.py", "check_quasisteady.py", "check_wall_resolution.py", "stage_manifest.py",
+         "total_quantities.py")
 # 停止規則の状態 (design/forge_design/evaluate/stop_rule.py の STATES + NOT_USED、ここで足した MISSING・RUNNING) → 項目の状態
 STOP_STATUS = {"REACHED": "PASS", "CENSORED": "FAIL", "DIVERGED": "FAIL", "EXEC_ERROR": "FAIL", "DATA_ERROR": "INDETERMINATE",
                "UNAVAILABLE": "NOT_APPLICABLE", "NOT_USED": "NOT_APPLICABLE", "MISSING": "INDETERMINATE", "RUNNING": "INDETERMINATE"}
 MONITOR_STOP_RC = (143, 137, -15, -9)          # SIGTERM / SIGKILL (run_case.sh は 128+sig、Python の subprocess は −sig)
 QS_SNAPSHOT = ("shock", "asym", "machmax", "pmax", "theta", "cf_retheta", "cf_momentum")
-QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING")      # accept に書けるもの
+QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING")      # accept に書けるもの (absolute の OFFSET は書けない)
+QS_CRITERIA = ("relative", "absolute")
+# 静圧 ≤ 全圧の許容 (P > P0·(1 + PT_REL_TOL) を違反とする)。float32 の出力 (h0・T・P) の丸めで、よどみ点の近くの P/P0 − 1 は
+# 正になる (2026-10-15 実測、最終の場: case/57・case/56 の 25 run で最大 6.4e-7 (CPG 5.2e-7〜6.4e-7、TP 1.6e-7〜2.7e-7)、
+# case/45 run_0138_rerun_fullpath_blk4 (イソブタン TP) 1.0e-6; 倍精度の case/57 run_0016_t3a_lm_double は 1.1e-15)。許容はその約 10 倍
+PT_REL_TOL = 1.0e-5
 WALL_NEED = ("twall_x", "twall_y", "twall_z", "ro", "Ts")                       # check_wall_resolution.py の main と同じ
 CONV_FAIL_MARKS = ("<-- DIVERGED", "<-- RISING", "<-- STALLED", "<-- still converging", "<-- ABOVE FLOOR")
 _RES_RE = re.compile(r"^res_(\d+)\.h5$")
@@ -324,6 +339,13 @@ def normalize_spec(raw, from_json):
     if ver is not None and ver != SPEC_VERSION:
         raise SpecError("judge_spec_version %r は未対応 (対応は %d)" % (ver, SPEC_VERSION))
     out = {"judge_spec_version": SPEC_VERSION, "source": raw.get("source")}
+    notes = raw.get("notes")
+    if notes is not None:
+        if isinstance(notes, str):
+            notes = [notes]
+        if not isinstance(notes, list) or any(not isinstance(n, str) for n in notes):
+            raise SpecError("notes は文字列か文字列のリスト (%r)" % (notes,))
+        out["notes"] = list(notes)
     c = raw.get("convergence") or {}
     _only(c, ("mode", "drop", "tail", "reference", "floor_factor", "reason"), "convergence")
     mode = c.get("mode", "auto")
@@ -359,7 +381,7 @@ def normalize_spec(raw, from_json):
             items, names = [], set()
             for i, it in enumerate(qs):
                 w = "quasisteady.quantities[%d]" % i
-                _only(it, ("name", "definition", "unit", "region", "extractor", "segment", "window", "thresholds",
+                _only(it, ("name", "definition", "unit", "region", "extractor", "segment", "window", "criterion", "thresholds",
                            "accept", "required"), w)
                 nm = _need(it, "name", str, w, required=True)
                 if nm in names:
@@ -391,8 +413,20 @@ def normalize_spec(raw, from_json):
                 _only(sg, ("step_min", "step_max"), w + ".segment")
                 wn = it.get("window") or {}
                 _only(wn, ("tail_frac", "min_points", "min_tail_span"), w + ".window")
+                crit = it.get("criterion", "relative")
+                if crit not in QS_CRITERIA:
+                    raise SpecError("%s.criterion %r は %s のどれか" % (w, crit, list(QS_CRITERIA)))
                 th = it.get("thresholds") or {}
-                _only(th, ("drift", "osc"), w + ".thresholds")
+                if crit == "relative":
+                    _only(th, ("drift", "osc"), w + ".thresholds")
+                    thn = {"drift": _need(th, "drift", float, w + ".thresholds", 0.05),
+                           "osc": _need(th, "osc", float, w + ".thresholds", 0.10)}
+                else:
+                    _only(th, ("abs_mean", "abs_amp"), w + ".thresholds")
+                    thn = {"abs_mean": _need(th, "abs_mean", float, w + ".thresholds", required=True),
+                           "abs_amp": _need(th, "abs_amp", float, w + ".thresholds", required=True)}
+                if any(v <= 0.0 for v in thn.values()):
+                    raise SpecError("%s.thresholds は正の数 (%r)" % (w, thn))
                 acc = it.get("accept", ["STEADY"])
                 if not isinstance(acc, list) or not acc or any(a not in QS_VERDICTS for a in acc):
                     raise SpecError("%s.accept は %s の空でないリスト (%r)" % (w, list(QS_VERDICTS), acc))
@@ -407,9 +441,7 @@ def normalize_spec(raw, from_json):
                     "extractor": exn,
                     "segment": {"step_min": _need(sg, "step_min", float, w + ".segment", None),
                                 "step_max": _need(sg, "step_max", float, w + ".segment", None)},
-                    "window": win,
-                    "thresholds": {"drift": _need(th, "drift", float, w + ".thresholds", 0.05),
-                                   "osc": _need(th, "osc", float, w + ".thresholds", 0.10)},
+                    "window": win, "criterion": crit, "thresholds": thn,
                     "accept": list(acc), "required": _need(it, "required", bool, w, True)})
             out["quasisteady"] = {"quantities": items}
     wr = raw.get("wall_resolution")
@@ -697,9 +729,52 @@ def check_physical(run):
         return _check("INDETERMINATE", "%s を読めない (%s)" % (fn, type(e).__name__), **out)
     bad = {k: n for k, n in out["n_nonpositive"].items() if n}
     names = "・".join("%s>0" % k for k in out["min"])
+    pt_status, pt_why, out["static_le_total"] = check_static_le_total(run, fn)
+    fails = []
     if bad:
-        return _check("FAIL", "%s で 0 以下: %s (最小 %s)" % (fn, bad, {k: out["min"][k] for k in bad}), **out)
-    return _check("PASS", "%s (%s)" % (names, fn), **out)
+        fails.append("%s で 0 以下: %s (最小 %s)" % (fn, bad, {k: out["min"][k] for k in bad}))
+    if pt_status == "FAIL":
+        fails.append(pt_why)
+    if fails:
+        return _check("FAIL", "; ".join(fails + ([pt_why] if pt_status == "INDETERMINATE" else [])), **out)
+    if pt_status == "INDETERMINATE":
+        return _check("INDETERMINATE", "%s (%s) は PASS、%s" % (names, fn, pt_why), **out)
+    return _check("PASS", "%s・%s (%s)" % (names, pt_why, fn), **out)
+
+
+def check_static_le_total(run, fn):
+    """静圧 ≤ 全圧 (plan §5.1 #12a (6)): `total_quantities.total_state` (ソルバの `VALUE/h0` から全温・全圧; スクリプトで
+    T + u²/2c_p を組まない) で最終の場の P0 を作り、P > P0·(1 + PT_REL_TOL) の点を数える。P・T が有限で正なのに P0 が非有限の点も
+    違反 (h0 が負など)。戻り (PASS / FAIL / INDETERMINATE, 理由, 詳細)。h0 が無い・thermalMethod が未対応・物性が読めないときは
+    INDETERMINATE (total_state は SystemExit で止まるので BaseException で受ける)。"""
+    import numpy as np
+    import total_quantities as TQ
+    try:
+        st = TQ.total_state(run, os.path.join(run, fn))
+    except KeyboardInterrupt:
+        raise
+    except BaseException as e:                                                    # noqa: BLE001
+        return ("INDETERMINATE", "静圧 ≤ 全圧を確かめられない (total_quantities: %s: %s)" % (type(e).__name__, str(e)[:240]),
+                {"error": "%s: %s" % (type(e).__name__, str(e)[:400])})
+    P = np.asarray(st["P"], float)
+    T = np.asarray(st["T"], float)
+    P0 = np.asarray(st["P0"], float)
+    ok_in = np.isfinite(P) & np.isfinite(T) & (P > 0.0) & (T > 0.0)
+    nonfin = int(np.count_nonzero(ok_in & ~np.isfinite(P0)))
+    sel = ok_in & np.isfinite(P0)
+    rel = P[sel] / P0[sel] - 1.0
+    nbad = int(np.count_nonzero(rel > PT_REL_TOL))
+    det = {"method": st.get("method"), "h0_includes_k": st.get("includes_k"), "tol": PT_REL_TOL,
+           "n_points": int(np.count_nonzero(sel)), "n_violations": nbad, "n_nonfinite_P0": nonfin,
+           "max_P_over_P0_minus_1": (float(rel.max()) if rel.size else None), "warn": st.get("warn") or []}
+    if st.get("species_source"):
+        det["species_source"] = st["species_source"]
+    if not rel.size:
+        return "INDETERMINATE", "静圧 ≤ 全圧: P・T が有限で正の点が無い", det
+    if nbad or nonfin:
+        return ("FAIL", "静圧 > 全圧: %d 点 (P/P0 − 1 の最大 %.3e > 許容 %.0e)%s (%s)"
+                % (nbad, rel.max(), PT_REL_TOL, ("・全圧が非有限 %d 点" % nonfin) if nonfin else "", st.get("method")), det)
+    return "PASS", "P ≤ P0 (P/P0 − 1 の最大 %.2e ≤ 許容 %.0e; %s)" % (rel.max(), PT_REL_TOL, st.get("method")), det
 
 
 def confirm_single_stage(run):
@@ -844,6 +919,24 @@ def _series_csv(run, ex):
     return steps, vals, None
 
 
+def classify_absolute(steps, vals, tail_frac, abs_mean, abs_amp):
+    """0 を横切る量 (質量の収支 r など; 相対の drift・osc は平均が 0 に近いと意味を持たない) の判定: 末尾窓 (classify と同じ
+    k = max(3, ⌈tail_frac·n⌉) 点) の平均 m と振幅 a = (最大 − 最小)/2 で、|m| > abs_mean は OFFSET (受け入れられない)、
+    a > abs_amp は OSCILLATING (平均±振幅で報告)、どちらも満たせば STEADY。戻り (verdict, detail, (平均, 振幅))。
+    呼ぶ前に非有限・step の単調性・点数は検査済み (check_quasisteady の内側)。"""
+    k = max(3, int(math.ceil(tail_frac * len(vals))))
+    st, vt = list(steps)[-k:], [float(x) for x in vals][-k:]
+    m = sum(vt) / len(vt)
+    a = (max(vt) - min(vt)) / 2.0
+    detail = ("tail mean=%.4g (|平均| ≤ %g)  amp=%.4g (≤ %g)  [末尾 %d 点 step %g–%g]"
+              % (m, abs_mean, a, abs_amp, len(vt), st[0], st[-1]))
+    if abs(m) > abs_mean:
+        return "OFFSET", detail + "  -> |平均| が許容を超える", (m, a)
+    if a > abs_amp:
+        return "OSCILLATING", detail + "  -> report %.4g +/- %.2g" % (m, a), (m, a)
+    return "STEADY", detail, (m, a)
+
+
 def check_quasisteady(run, spec_info):
     spec = spec_info.get("spec")
     if spec_info.get("error"):
@@ -923,8 +1016,13 @@ def check_quasisteady(run, spec_info):
         if span < win["min_tail_span"]:
             results[nm] = _check("INDETERMINATE", "窓の不足: 末尾窓の step 幅 %g < min_tail_span %g" % (span, win["min_tail_span"]), **r)
             continue
-        verdict, detail, ma = cq.classify_series(s, v, win["tail_frac"], it["thresholds"]["drift"], it["thresholds"]["osc"],
-                                                 win["min_points"])
+        r["criterion"] = it["criterion"]
+        if it["criterion"] == "absolute":
+            verdict, detail, ma = classify_absolute(s, v, win["tail_frac"], it["thresholds"]["abs_mean"],
+                                                    it["thresholds"]["abs_amp"])
+        else:
+            verdict, detail, ma = cq.classify_series(s, v, win["tail_frac"], it["thresholds"]["drift"], it["thresholds"]["osc"],
+                                                     win["min_points"])
         r.update(verdict=verdict, detail=detail)
         if ma is not None:
             r.update(mean=float(ma[0]), amp=float(ma[1]))
@@ -1117,6 +1215,8 @@ def render_txt(v):
                                        "  (run の開始より後に書かれた)" if sp.get("written_after_start") else ""))
     if sp.get("error"):
         lines.append("  仕様の誤り: %s" % sp["error"])
+    for n in ((sp.get("spec") or {}).get("notes") or []):
+        lines.append("  仕様の注記: %s" % n)
     lines.append("  詳細     : %s (各判定の原文・道具と入力の識別)" % VERDICT_JSON)
     return "\n".join(lines) + "\n"
 

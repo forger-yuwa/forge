@@ -66,7 +66,7 @@ def check(cond, msg, detail=''):
 # ------------------------------------------------------------------------------------------------ 合成の run
 
 PROBLEM = {'mesh.meshFileName': 'mesh.h5', 'mesh.valueFileName': 'mesh.h5', 'gpu': 1, 'initial': 'uniform_p101325_u10',
-           'physProp.cp': 1004.5, 'physProp.gamma': 1.4, 'physProp.visc': 1.8e-5, 'physProp.thermCond': 0.0257,
+           'physProp.cp': 1004.5, 'physProp.gamma': 1.4, 'physProp.viscMethod': 1, 'physProp.visc': 1.8e-5, 'physProp.thermCond': 0.0257,
            'time.last.nStepOuter': 12000, 'time.outStepInterval': 2000, 'time.outStepStart': 0,
            'time.deltaT.dt': 1e-8, 'time.deltaT.dt_min': 1e-9, 'time.deltaT.dt_max': 1e-3, 'time.deltaT.cfl_pseudo': 4.0}
 BCOND = {'inlet': (1, 'inlet_Pressure'), 'outlet': (2, 'outlet_statPress'), 'wall': (3, 'wall'), 'bottom': (4, 'slip')}
@@ -95,9 +95,11 @@ def cfg_text(flat):
     return yaml.safe_dump(unflatten(flat), sort_keys=False)
 
 
-def bcond_text(kinds=None):
+def bcond_text(kinds=None, wall_out=1):
+    """壁 (kind wall*) の outputHDFflg は wall_out (既定 1: 計算の後の壁解像の判定に要る; 関門 check_wall_output)、他は 0。"""
     kinds = kinds or BCOND
-    return ''.join(f'{nm}: {{physID: {pid}, kind: {k}, outputHDFflg: 0, ints: , floats: }}\n' for nm, (pid, k) in kinds.items())
+    return ''.join(f'{nm}: {{physID: {pid}, kind: {k}, outputHDFflg: {wall_out if str(k).startswith("wall") else 0}, '
+                   'ints: , floats: }\n' for nm, (pid, k) in kinds.items())
 
 
 def write_mesh(path, ni=21, nj=6, L=1.0, H=0.2, first=None, shift=0.0, kinds=None, cells='quad'):
@@ -581,6 +583,53 @@ d = make_run('bcond_type', declare=False)
 open(os.path.join(d, 'bcondConfig.yaml'), 'w').write('wall: {physID: 3, type: wall_isothermal, Tw: 370.0}\n')
 rc, out, started, gate = run_case(d)
 stopped(rc, out, started, gate, 'kind の無い bcondConfig (検査不能)')
+
+# ------------------------------------------------------------------------------------------------ 計算の後の判定に要る壁の出力
+
+print('== 壁の出力 (計算の後の壁解像の判定; plan tooling-convergence-and-wall-resolution-gates §4.6-1)')
+d = make_run('wall_out0')
+open(os.path.join(d, 'bcondConfig.yaml'), 'w').write(bcond_text(wall_out=0))
+rc, out, started, gate = run_case(d)
+stopped(rc, out, started, gate, '粘性の run (宣言のプロファイル) の no-slip 壁の outputHDFflg 0')
+check(('壁の出力', 'bcondConfig.yaml:wall') in items(gate, 'FAIL') and 'outputHDFflg' in gate, '壁の名前と outputHDFflg を名指しで FAIL')
+rc, out, started, gate = run_case(d, FORGE_LAUNCH_GATE='warn')
+stopped(rc, out, started, gate, '壁の出力の欠落は FORGE_LAUNCH_GATE=warn でも落とさない')
+check('壁解像の判定は適用' in (field(gate, 'wall_output') or '') and '1 でない: wall' in (field(gate, 'wall_output') or ''),
+      'LAUNCH_GATE.txt の wall_output の行', field(gate, 'wall_output'))
+d = make_run('wall_out1')
+rc, out, started, gate = run_case(d)
+launched(rc, out, started, gate, '同じ run で壁の outputHDFflg 1')
+check('すべて 1' in (field(gate, 'wall_output') or ''), 'wall_output: すべて 1', field(gate, 'wall_output'))
+for visc, want_fail, why in (('0.0', False, '非粘性 (viscMethod 0・visc 0) は適用外 → 壁の出力が無くても起動する'),
+                             ('1.8e-5', True, '定数粘性 (viscMethod 0・visc > 0) は粘性 → 壁の出力が無ければ止める')):
+    d = make_run('wall_out_vm0_%s' % visc, declare=False)
+    flat0 = cfg_flat()
+    flat0['physProp.viscMethod'] = 0
+    flat0['physProp.visc'] = float(visc)
+    edit_config(d, flat=flat0, rebind=False)
+    open(os.path.join(d, 'bcondConfig.yaml'), 'w').write(bcond_text(wall_out=0))
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc_, f_, info_ = LG.run_gate(d, dry_run=True)
+    has = any(a == '壁の出力' and lv == 'FAIL' for lv, a, _, _ in f_.items)
+    check(has == want_fail, why, [it for it in f_.items if it[1] == '壁の出力'])
+d = make_run('wall_out_spec', declare=False)
+flat0 = cfg_flat()
+flat0['physProp.viscMethod'] = 0
+flat0['physProp.visc'] = 0.0
+edit_config(d, flat=flat0, rebind=False)
+open(os.path.join(d, 'bcondConfig.yaml'), 'w').write(bcond_text(wall_out=0))
+json.dump({'judge_spec_version': 1, 'wall_resolution': {'applies': True, 'reason': '試験'}}, open(os.path.join(d, 'JUDGE_SPEC.json'), 'w'))
+with contextlib.redirect_stdout(io.StringIO()):
+    rc_, f_, info_ = LG.run_gate(d, dry_run=True)
+wo = [it for it in f_.items if it[1] == '壁の出力']
+check(any(lv == 'FAIL' for lv, *_ in wo) and any(lv == 'WARN' and '実効' in m for lv, _, _, m in wo),
+      '仕様が applies true なら非粘性でも壁の出力を要求 (FAIL)・仕様と実効の食い違いは WARN', wo)
+json.dump({'judge_spec_version': 2}, open(os.path.join(d, 'JUDGE_SPEC.json'), 'w'))
+with contextlib.redirect_stdout(io.StringIO()):
+    rc_, f_, info_ = LG.run_gate(d, dry_run=True)
+wo = [it for it in f_.items if it[1] == '壁の出力']
+check(not any(lv == 'FAIL' for lv, *_ in wo) and any(lv == 'WARN' and '仕様を読めない' in m for lv, _, _, m in wo),
+      '読めない仕様は WARN (非粘性なので壁の出力は求めない)', wo)
 
 # ------------------------------------------------------------------------------------------------ 適用条件 (次元・格子の種類)
 

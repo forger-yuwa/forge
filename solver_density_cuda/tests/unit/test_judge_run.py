@@ -21,6 +21,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -66,10 +67,15 @@ def write_hist(path, n=200, d0=0.0, d1=-5.0, nan_at=None, steps=None):
             f.write('%d,-1,outer_end,%s\n' % (i if steps is None else steps[i], ','.join(vals)))
 
 
-def write_res(path, n, ro=1.2, nan_field=None):
+CP, GAMMA = 1004.5, 1.4
+H0_OK = CP * 300.0 + 0.5 * 10.0 ** 2          # h0 = c_p T + u²/2 (T 300 K・U 10 m/s): 全温 > 静温 → 全圧 > 静圧
+
+
+def write_res(path, n, ro=1.2, nan_field=None, h0=H0_OK):
+    """体積の出力。h0 (全エンタルピー、静圧 ≤ 全圧の判定が total_quantities で読む) は None なら書かない。"""
     with h5py.File(path, 'w') as f:
         for k, val in (('ro', ro), ('roUx', 10.0), ('roUy', 0.0), ('roUz', 0.0), ('roe', 2.5e5), ('P', 1.0e5), ('T', 300.0),
-                       ('Ux', 10.0), ('Uy', 0.0), ('Uz', 0.0), ('sonic', 340.0)):
+                       ('Ux', 10.0), ('Uy', 0.0), ('Uz', 0.0), ('sonic', 340.0)) + ((('h0', h0),) if h0 is not None else ()):
             a = np.full(n, val, float)
             if nan_field == k:
                 a[0] = np.nan
@@ -87,6 +93,10 @@ def wall_run(tag, case='control', steps=None, hist=True, res=(1000, S_LAST), spe
     walls = TG.wall_cases()[case]
     TG.make_wall_run(d, walls, steps if steps is not None else {'wall_a': [1000, S_LAST], 'wall_b': [1000, S_LAST]},
                      outlet=outlet)
+    cp_ = os.path.join(d, 'solverConfig.yaml')          # 静圧 ≤ 全圧 (total_quantities の CPG) に要る熱物性を足す
+    _t = open(cp_).read()
+    assert 'physProp: {' in _t, _t
+    open(cp_, 'w').write(_t.replace('physProp: {', 'physProp: {thermalMethod: 0, cp: %r, gamma: %r, ' % (CP, GAMMA), 1))
     with h5py.File(os.path.join(d, 'mesh.h5'), 'r') as f:
         n = len(f['MESH/COORD']) // 3
     if hist:
@@ -444,6 +454,65 @@ d = wall_run('neg_ro', spec=QS_NA)
 write_res(os.path.join(d, 'res_%d.h5' % S_LAST), nn, ro=-1.0)
 rc, v, _ = judge(d, '--solver-rc', '0')
 check(st(v, 'physical') == 'FAIL', '最終の場の ro ≤ 0 → 物理性 FAIL', why(v, 'physical'))
+print('== 静圧 ≤ 全圧 (total_quantities の h0 から; plan §5.1 #12a (6))')
+d = wall_run('pt_ok', spec=QS_NA)
+rc, v, _ = judge(d, '--solver-rc', '0')
+ph = v['checks']['physical']
+check(st(v, 'physical') == 'PASS' and ph['static_le_total']['n_violations'] == 0 and ph['static_le_total']['method'] == 'CPG'
+      and 'P ≤ P0' in why(v, 'physical'), 'h0 = c_p T + u²/2 → P ≤ P0 で PASS (CPG)', why(v, 'physical'))
+d = wall_run('pt_bad', spec=QS_NA)
+write_res(os.path.join(d, 'res_%d.h5' % S_LAST), nn, h0=CP * 290.0)          # 全温 290 K < 静温 300 K → 全圧 < 静圧
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'physical') == 'FAIL' and '静圧 > 全圧' in why(v, 'physical') and v['overall'] == 'FAIL' and rc == 1,
+      'h0 < c_p T (全温 < 静温) → 静圧 > 全圧で物理性 FAIL・総合 FAIL', why(v, 'physical'))
+tiny = CP * 300.0 * (1.0 - 1.6e-7)                                            # float32 の丸め相当 (P/P0 − 1 ≈ 5.6e-7; 実測の最大 6.4e-7・TP 1.0e-6)
+write_res(os.path.join(d, 'res_%d.h5' % S_LAST), nn, h0=tiny)
+rc, v, _ = judge(d, '--solver-rc', '0')
+mx = v['checks']['physical']['static_le_total']['max_P_over_P0_minus_1']
+check(st(v, 'physical') == 'PASS' and 0.0 < mx < JR.PT_REL_TOL, '丸め相当の P/P0 − 1 = %.1e は許容 %.0e の内側 → PASS' % (mx, JR.PT_REL_TOL),
+      why(v, 'physical'))
+write_res(os.path.join(d, 'res_%d.h5' % S_LAST), nn, h0=None)
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'physical') == 'INDETERMINATE' and '静圧 ≤ 全圧を確かめられない' in why(v, 'physical') and 'h0' in why(v, 'physical'),
+      'h0 が無い → 静圧 ≤ 全圧は判定不能 (ρ・P・T > 0 は PASS と書く)', why(v, 'physical'))
+write_res(os.path.join(d, 'res_%d.h5' % S_LAST), nn, h0=None, ro=-1.0)
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'physical') == 'FAIL', 'ρ ≤ 0 と静圧 ≤ 全圧の判定不能の併存 → FAIL (既知の FAIL を隠さない)', why(v, 'physical'))
+d = wall_run('pt_nocp', spec=QS_NA)
+_c = os.path.join(d, 'solverConfig.yaml')
+_t = open(_c).read()
+open(_c, 'w').write(_t.replace('cp: %r, ' % CP, ''))
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'physical') == 'INDETERMINATE' and 'cp' in why(v, 'physical'), '物性 (cp) が読めない → 静圧 ≤ 全圧は判定不能', why(v, 'physical'))
+
+print('== 絶対の判定 (0 を横切る量: 質量の収支)')
+CSV_R = {'kind': 'csv_column', 'file': 'force_history.csv', 'column': 'r'}
+ABS = {'criterion': 'absolute', 'thresholds': {'abs_mean': 5e-4, 'abs_amp': 5e-3}}
+d = wall_run('abs', spec=qspec(qitem('r', CSV_R, **ABS)))
+write_series(d, [(s_, 1e-4 * (-1) ** (s_ // 100)) for s_ in range(100, 2001, 100)], cols=('step', 'r'))
+rc, v, _ = judge(d, '--solver-rc', '0')
+q = v['checks']['quasisteady']['quantities']['r']
+check(st(v, 'quasisteady') == 'PASS' and q['verdict'] == 'STEADY' and q['criterion'] == 'absolute',
+      '|平均| ≤ 5e-4・振幅 ≤ 5e-3 → STEADY (0 を横切っても相対の drift を使わない)', why(v, 'quasisteady'))
+write_series(d, [(s_, 2e-3 + 1e-5 * (-1) ** (s_ // 100)) for s_ in range(100, 2001, 100)], cols=('step', 'r'))
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'quasisteady') == 'FAIL' and v['checks']['quasisteady']['quantities']['r']['verdict'] == 'OFFSET',
+      '|平均| 2e-3 > 5e-4 → OFFSET (受け入れられない) = FAIL', why(v, 'quasisteady'))
+write_series(d, [(s_, 1e-2 * (-1) ** (s_ // 100)) for s_ in range(100, 2001, 100)], cols=('step', 'r'))
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'quasisteady') == 'FAIL' and v['checks']['quasisteady']['quantities']['r']['verdict'] == 'OSCILLATING',
+      '振幅 1e-2 > 5e-3 → OSCILLATING (accept に無ければ FAIL)', why(v, 'quasisteady'))
+with open(os.path.join(d, 'JUDGE_SPEC.json'), 'w') as f:
+    json.dump(qspec(qitem('r', CSV_R, criterion='absolute', thresholds={'drift': 0.1})), f)
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(v['spec']['error'] and 'thresholds' in v['spec']['error'], 'absolute に drift・osc を書く (abs_mean・abs_amp が無い) → 仕様の誤り',
+      v['spec'].get('error'))
+with open(os.path.join(d, 'JUDGE_SPEC.json'), 'w') as f:
+    json.dump(dict(qspec(qitem('r', CSV_R, **ABS)), notes=['試験の注記: 生成器が書いた']), f)
+write_series(d, [(s_, 1e-4) for s_ in range(100, 2001, 100)], cols=('step', 'r'))
+rc, v, _ = judge(d, '--solver-rc', '0')
+check('仕様の注記: 試験の注記' in open(os.path.join(d, 'RUN_VERDICT.txt'), encoding='utf-8').read(), '仕様の notes を RUN_VERDICT.txt に写す')
+
 d = wall_run('nores', spec=QS_NA, res=())
 rc, v, _ = judge(d, '--solver-rc', '0')
 check(st(v, 'nonfinite') == 'INDETERMINATE' and st(v, 'physical') == 'INDETERMINATE' and st(v, 'wall_resolution') == 'INDETERMINATE',
@@ -528,7 +597,7 @@ with open('residual_history.csv', 'w') as f:
 n = len(h5py.File('mesh.h5', 'r')['MESH/COORD']) // 3
 for s in (100, 200):
     with h5py.File('res_%%d.h5' %% s, 'w') as h:
-        for k, val in (('ro', 1.2), ('P', 1e5), ('T', 300.0), ('roUx', 1.0)):
+        for k, val in (('ro', 1.2), ('P', 1e5), ('T', 300.0), ('roUx', 1.0), ('h0', 1004.5 * 300.0)):
             h.create_dataset('VALUE/' + k, data=np.full(n, val))
 print('Time = 0.010 s (wall, 200 steps, 0.05 ms/step)')
 sys.exit(int(os.environ.get('FAKE_FORGE_RC', '0')))
@@ -536,8 +605,9 @@ sys.exit(int(os.environ.get('FAKE_FORGE_RC', '0')))
 os.chmod(FAKE, os.stat(FAKE).st_mode | stat.S_IXUSR)
 
 
-def rc_run(tag, bcond=True, viscous=False):
-    """関門を通る node の小さな run (test_gate_bad_input の lg_run と同じ置き方、上辺が壁)。既定は非粘性 (壁解像は適用外)。"""
+def rc_run(tag, bcond=True, viscous=False, wall_out=0):
+    """関門を通る node の小さな run (test_gate_bad_input の lg_run と同じ置き方、上辺が壁)。既定は非粘性 (壁解像は適用外)。
+    wall_out: 壁の outputHDFflg (粘性の run で 0 なら関門が止める)。"""
     _n[0] += 1
     d = os.path.join(TMP, '%02d_rc_%s' % (_n[0], tag))
     os.makedirs(d)
@@ -557,10 +627,11 @@ def rc_run(tag, bcond=True, viscous=False):
         f['BCONDS/3'].attrs['bcondKind'] = 'wall'
     with open(os.path.join(d, 'solverConfig.yaml'), 'w') as fh:
         fh.write('mesh: {meshFileName: "mesh.h5", valueFileName: "mesh.h5", discretization: "node"}\n'
-                 'physProp: {viscMethod: 0, visc: %s, thermCond: 0.0}\n' % ('1.8e-5' if viscous else '0.0'))
+                 'physProp: {thermalMethod: 0, cp: 1004.5, gamma: 1.4, viscMethod: 0, visc: %s, thermCond: 0.0}\n'
+                 % ('1.8e-5' if viscous else '0.0'))
     if bcond:
         with open(os.path.join(d, 'bcondConfig.yaml'), 'w') as fh:
-            fh.write('wall: {physID: 3, kind: wall, outputHDFflg: 0, ints: , floats: }\n')
+            fh.write('wall: {physID: 3, kind: wall, outputHDFflg: %d, ints: , floats: }\n' % wall_out)
     with open(os.path.join(d, 'JUDGE_SPEC.json'), 'w') as fh:
         json.dump(QS_NA, fh)
     return d
@@ -589,8 +660,14 @@ check(v and st(v, 'wall_resolution') == 'NOT_APPLICABLE', '非粘性の run は�
 
 d = rc_run('visc_nowall_out', viscous=True)
 rc, out, v = run_case(d)
-check(rc == 0 and v and st(v, 'wall_resolution') == 'INDETERMINATE' and v['overall'] == 'INDETERMINATE',
-      '定数粘性の壁で壁の出力が無い (outputHDFflg 0) → 壁解像は判定不能・run_case の終了コードは solver のまま 0', f'rc {rc}')
+gate_txt = open(os.path.join(d, 'LAUNCH_GATE.txt'), encoding='utf-8').read() if os.path.exists(os.path.join(d, 'LAUNCH_GATE.txt')) else ''
+check(rc != 0 and not os.path.exists(os.path.join(d, 'FORGE_STARTED')) and v is None and '[壁の出力]' in gate_txt
+      and 'judge exit' not in out,
+      '定数粘性の壁で壁の出力が無い (outputHDFflg 0) → 投入の関門が止める (計算の後では壁解像を判定できない)・判定しない', f'rc {rc}')
+d = rc_run('visc_wall_out', viscous=True, wall_out=1)
+rc, out, v = run_case(d)
+check(rc == 0 and v and st(v, 'wall_resolution') == 'INDETERMINATE' and 'res_wall_3_200.h5' in why(v, 'wall_resolution'),
+      '同じ run で壁の outputHDFflg 1 → 起動する (偽の forge は壁の出力を書かないので壁解像は判定不能)', f'rc {rc} {why(v, "wall_resolution")}')
 
 d = rc_run('nobc', bcond=False)
 rc, out, v = run_case(d)
@@ -619,6 +696,103 @@ check(rc == 0 and v and v['state'] == 'deferred' and '[run_case] judge exit=4' i
 d = rc_run('defer_env')
 rc, out, v = run_case(d, FORGE_JUDGE_DEFER='1')
 check(rc == 0 and v and v['state'] == 'deferred', '親が FORGE_JUDGE_DEFER=1 を渡す → 段の記録だけ', f'rc {rc}')
+
+# ------------------------------------------------------------------------------------------------ Stop フック
+
+print('== Stop フック (hook_convergence_gate.py: 判定済みか・今の入力に対応するか、同じセッションの範囲)')
+HOOK = os.path.join(TOOLS, 'hook_convergence_gate.py')
+HROOT = os.path.join(TMP, 'hookroot')
+HHOME = os.path.join(TMP, 'hookhome')
+os.makedirs(os.path.join(HHOME, '.cache', 'forge-gate-claims'))
+with open(os.path.join(HHOME, '.cache', 'forge-gate-claims', 'sess1.txt'), 'w') as f:
+    f.write('01.mine\n')
+SRC = os.path.join(TMP, '01_pass')                       # 上の正例 (PASS の判定がある run) を写して使う
+
+
+def hook_run(case, name, verdict=True, age=200.0):
+    dst = os.path.join(HROOT, 'case', case, name)
+    shutil.copytree(SRC, dst)
+    for fn in ('RUN_VERDICT.json', 'RUN_VERDICT.txt'):
+        if os.path.exists(os.path.join(dst, fn)):
+            os.unlink(os.path.join(dst, fn))
+    if verdict:
+        judge(dst, '--solver-rc', '0')
+    t = time.time() - age
+    os.utime(os.path.join(dst, 'residual_history.csv'), (t, t))
+    return dst
+
+
+def hook(session='sess1'):
+    env = dict(os.environ, FORGE_GATE_ROOT=HROOT, HOME=HHOME)
+    r = subprocess.run([sys.executable, HOOK], input=json.dumps({'session_id': session} if session else {}), capture_output=True,
+                       text=True, env=env)
+    try:
+        return json.loads(r.stdout or '{}'), r
+    except ValueError:
+        return {'decision': 'parse-error'}, r
+
+
+ok_run = hook_run('01.mine', 'run_0001_ok')
+out, r = hook()
+check(out == {} and r.returncode == 0, '判定済み・今の入力に対応 (FRESH) → block しない', r.stdout + r.stderr)
+hook_run('01.mine', 'run_0002_fail')
+_v = json.load(open(os.path.join(HROOT, 'case', '01.mine', 'run_0002_fail', 'RUN_VERDICT.json')))
+write_hist(os.path.join(HROOT, 'case', '01.mine', 'run_0002_fail', 'residual_history.csv'), d0=-2.0, d1=-2.0)
+judge(os.path.join(HROOT, 'case', '01.mine', 'run_0002_fail'), '--solver-rc', '0')
+t_ = time.time() - 200
+os.utime(os.path.join(HROOT, 'case', '01.mine', 'run_0002_fail', 'residual_history.csv'), (t_, t_))
+_v = json.load(open(os.path.join(HROOT, 'case', '01.mine', 'run_0002_fail', 'RUN_VERDICT.json')))
+out, r = hook()
+check(out == {} and _v['overall'] == 'FAIL', 'FAIL を正しく判定した run → block しない (PASS を要求しない)', r.stdout)
+nov = hook_run('01.mine', 'run_0003_nov', verdict=False)
+out, r = hook()
+check(out.get('decision') == 'block' and 'run_0003_nov' in out.get('reason', '') and 'RUN_VERDICT.json が無い' in out['reason']
+      and 'run_0001_ok' not in out['reason'] and 'run_0002_fail' not in out['reason'], '判定の無い run → block (その run だけを名指し)',
+      out.get('reason'))
+judge(nov, '--solver-rc', '0')
+os.utime(os.path.join(nov, 'residual_history.csv'), (time.time() - 200,) * 2)
+out, r = hook()
+check(out == {}, 'judge_run.py を回した後は block しない', out.get('reason'))
+write_hist(os.path.join(nov, 'residual_history.csv'), d1=-6.0)
+os.utime(os.path.join(nov, 'residual_history.csv'), (time.time() - 200,) * 2)
+out, r = hook()
+check(out.get('decision') == 'block' and 'STALE' in out.get('reason', '') and 'residual_history.csv' in out['reason'],
+      '判定の後に入力 (残差の履歴) が変わった (古い判定) → block', out.get('reason'))
+judge(nov, '--solver-rc', '0')
+os.utime(os.path.join(nov, 'residual_history.csv'), (time.time() - 200,) * 2)
+dfr = hook_run('01.mine', 'run_0004_deferred', verdict=False)
+judge(dfr, '--defer', '--solver-rc', '0')
+out, r = hook()
+check(out.get('decision') == 'block' and 'run_0004_deferred' in out.get('reason', '') and 'deferred' in out['reason'],
+      '段の記録 (state deferred) のまま親が確定せずに終わった → block', out.get('reason'))
+with open(os.path.join(dfr, 'JUDGE_PENDING.json'), 'w') as f:
+    json.dump({'pid': os.getpid(), 'host': socket.gethostname()}, f)
+out, r = hook()
+check(out == {}, '親 (runner) が生きている (JUDGE_PENDING.json の pid) → 確定待ちとして block しない', out.get('reason'))
+with open(os.path.join(dfr, 'JUDGE_PENDING.json'), 'w') as f:
+    json.dump({'pid': 2 ** 22 + 12345, 'host': socket.gethostname()}, f)
+out, r = hook()
+check(out.get('decision') == 'block' and 'run_0004_deferred' in out.get('reason', ''), '親が死んでいる (pid が無い) → block', out.get('reason'))
+judge(dfr, '--solver-rc', '0')
+os.utime(os.path.join(dfr, 'residual_history.csv'), (time.time() - 200,) * 2)
+err = hook_run('01.mine', 'run_0005_error', verdict=False)
+orig = JR.check_physical
+JR.check_physical = lambda run: (_ for _ in ()).throw(RuntimeError('試験の例外'))
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    JR.main([err, '--solver-rc', '0'])
+JR.check_physical = orig
+os.utime(os.path.join(err, 'residual_history.csv'), (time.time() - 200,) * 2)
+out, r = hook()
+check(out == {}, '判定器の例外 (state error = 判定不能) を報告して終えるのは block しない', out.get('reason'))
+hook_run('01.mine', 'run_0006_active', verdict=False, age=10.0)
+out, r = hook()
+check(out == {}, '残差の履歴を書き込み中 (更新 120 s 未満) は見ない', out.get('reason'))
+hook_run('02.other', 'run_0001_theirs', verdict=False)
+out, r = hook()
+check(out == {}, '他のセッションの case (claim していない) の判定の無い run → このセッションは block しない', out.get('reason'))
+out, r = hook(session=None)
+check(out.get('decision') == 'block' and '02.other' in out.get('reason', ''),
+      'session_id が無ければ絞り込まず全件を見る (他の case の判定の無い run も block)', out.get('reason'))
 
 print()
 if fails:
