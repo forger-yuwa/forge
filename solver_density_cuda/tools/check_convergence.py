@@ -211,6 +211,8 @@ def build_segment_csv(run_dir):
     本段の低下桁数の基準にしてしまう事故が起きない (2026-09-19 codex Major 1)。
     列が段で違う場合は**共通列に落とさず**、区間内で列集合が一致することを要求する
     (共通列への縮退は検出したい誤合格を再導入する: 同 Major 2)。
+    区間の段の履歴が無い・空・step の行が無いときも None (判定不能) を返す。**欠けた段を飛ばして残りの段だけを
+    連結しない** (2026-10-15、plan tooling-convergence-and-wall-resolution-gates §4.6-3)。理由はここで印字する。
     """
     import csv as _csv
     import json as _json
@@ -221,6 +223,7 @@ def build_segment_csv(run_dir):
         return None
     segs = segments(_json.load(open(p)), load_launches(os.path.dirname(p)))
     if not segs:
+        print(f"  [segment] stage_manifest.json に段が無い  <-- 判定不能")
         return None
     seg = segs[-1]
     if any(st.get('chi_source') == 'ambiguous' for st in seg):
@@ -241,10 +244,15 @@ def build_segment_csv(run_dir):
             if len(seg) == 1 and os.path.exists(alt):
                 f = alt
             else:
-                continue
+                # **欠けた段を飛ばさない** (2026-10-15、plan tooling-convergence-and-wall-resolution-gates §4.6-3、
+                # codex plan 段 judge M3)。以前は `continue` で前段だけを連結し、本段の履歴が無いのに前段だけで合格していた
+                print(f"  [segment] 段 {st['tag']} の履歴 {st['history']} が無い (区間の段が欠けている)  <-- 判定不能")
+                return None
         r = list(_csv.reader(open(f)))
         if len(r) < 2:
-            continue
+            # 空の履歴の段も同じ (区間の一部を黙って落とさない; 2026-10-15)
+            print(f"  [segment] 段 {st['tag']} の履歴 {os.path.basename(f)} に行が無い  <-- 判定不能")
+            return None
         h = [c.strip() for c in r[0]]
         if hdr is None:
             hdr = h
@@ -254,7 +262,8 @@ def build_segment_csv(run_dir):
             return None
         body = [x for x in r[1:] if x and x[0].strip().lstrip('-').isdigit()]
         if not body:
-            continue
+            print(f"  [segment] 段 {st['tag']} の履歴 {os.path.basename(f)} に step の行が無い  <-- 判定不能")
+            return None
         n1 = int(body[-1][0])
         for x in body:
             x = list(x); x[0] = str(int(x[0]) + off); rows.append(x)
@@ -381,8 +390,12 @@ def main():
             if path is None:
                 # **判定不能は合格ではない** (AGENTS.md)。以前は未定義の `worst` を触って
                 # UnboundLocalError で落ち、呼び出し側から見ると「判定なし」で素通りしていた。
-                print(f"[{rd}] stage_manifest.json が無い -> --segment は使えない "
-                      f"(判定区間を人が明示すること)  <-- 判定不能")
+                if not os.path.exists(os.path.join(rd, 'stage_manifest.json')):
+                    print(f"[{rd}] stage_manifest.json が無い -> --segment は使えない "
+                          f"(判定区間を人が明示すること)  <-- 判定不能")
+                else:
+                    # 理由 (欠けた段・空の履歴・列の不一致・chi の食い違い) は build_segment_csv が上に出した
+                    print(f"[{rd}] 判定区間を作れない (理由は上) -> --segment では判定しない  <-- 判定不能")
                 all_pass = False
                 continue
         else:

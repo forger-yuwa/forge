@@ -25,6 +25,11 @@ OSCILLATING (リミットサイクル) は 0 扱いだが「平均±振幅」で
   OSCILLATING         : 末尾の振れ (max-min)/平均 > --osc だがトレンド小 (リミットサイクル → 平均±振幅で報告)
   TRANSIENT-UNSETTLED : スナップショットが少なすぎる / 全系列の極値が末尾にある (過渡が減衰しきっていない)
   STEADY              : 末尾が許容内で平坦
+  INDETERMINATE       : 判定不能 (2026-10-15): step が単調に増えない (重複・逆行)、要求した量が 1 つも評価できない
+                        (例: --quantity asym だけで上下対称でないメッシュ)、--series-cols が空。終了コード 1 (合格ではない)
+
+量の抽出だけを使う呼び出し側 (`judge_run.py`) は `build_extractors`・`extract_series` で系列を作り、判定は
+`classify_series` に渡す (抽出と判定を分けた; CLI の出力は変えていない)。
 """
 import sys, os, glob, argparse, math
 import numpy as np
@@ -273,6 +278,15 @@ def classify(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps, allow_nonfin
     good = np.isfinite(v) & np.isfinite(s)
     s, v = s[good], v[good]
     n = len(v)
+    # **時刻が進んでいない系列は判定しない** (2026-10-15、plan tooling-convergence-and-wall-resolution-gates §4.6-3、
+    # codex plan 段 judge M3)。step = [1,1,1,1]・値が一定の系列が STEADY になっていた (時間方向の進展を確かめていない)。
+    # step の重複・逆行は INDETERMINATE (判定不能; 合格ではない)
+    if n >= 2:
+        ds = np.diff(s)
+        n_dup, n_back = int(np.count_nonzero(ds == 0)), int(np.count_nonzero(ds < 0))
+        if n_dup or n_back:
+            return ('INDETERMINATE',
+                    f"step が単調に増えない (重複 {n_dup} か所・逆行 {n_back} か所) -> 判定不能", None)
     if n < min_snaps:
         return 'TRANSIENT-UNSETTLED', f"only {n} snapshot(s) (<{min_snaps})", None
     k = max(3, int(math.ceil(tail_frac * n)))
@@ -335,7 +349,8 @@ def _monotone_limit(s, v, frac=0.5, min_pts=5):
     return (lim, direction, rest / max(abs(last), 1e-30))
 
 
-SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3, 'NONFINITE': 4}
+# INDETERMINATE (2026-10-15): 評価した量が無い・step が単調に増えない (判定不能; 合格ではない)
+SEV = {'STEADY': 0, 'OSCILLATING': 1, 'TRANSIENT-UNSETTLED': 2, 'DRIFTING': 3, 'NONFINITE': 4, 'INDETERMINATE': 5}
 
 
 def classify_series(steps, vals, tail_frac, drift_tol, osc_tol, min_snaps):
@@ -362,6 +377,9 @@ def analyze_series_csv(path, cols, tail_frac, drift_tol, osc_tol, min_snaps):
     if missing or 'step' not in rows[0]:
         print(f"\n=== {path}  -> ERROR: missing column(s) {missing + ([] if 'step' in rows[0] else ['step'])} "
               f"(available: {sorted(rows[0].keys())}) ==="); return 4
+    if not cols:
+        # 判定する列が無いのに「評価していないのに ALL STEADY」にしない (2026-10-15、plan §4.6-3)
+        print(f"\n=== {path}  -> INDETERMINATE: --series-cols が空 (評価した量が無い) ==="); return SEV['INDETERMINATE']
     steps = [float(r['step']) for r in rows]
     worst = 0; lines = []
     for c in cols:
@@ -386,16 +404,9 @@ FLATPLATE = ['theta', 'cf_retheta', 'cf_momentum']
 WALL = ['wall_model_tau']
 
 
-def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, cf_x=0.6, cf_ytop=None,
-            wall_phys_id=None, wall_xmin=None, wall_xmax=None, wall_law='reichardt',
-            wall_axisym=False):
-    mesh = find_mesh(run_dir, mesh_arg)
-    if mesh is None:
-        print(f"\n=== {run_dir}  -> NO mesh (.h5 with /CELLS/centCoords) ==="); return 3
-    fs, steps = res_files(run_dir)
-    if len(fs) < 2:
-        print(f"\n=== {run_dir}  -> TRANSIENT-UNSETTLED (only {len(fs)} res_*.h5) ==="); return 2
-    cc = centroids(mesh)
+def build_extractors(cc, want, cf_x=0.6, cf_ytop=None, wall_law='reichardt'):
+    """スナップショットから量を抜き出す関数の表 {量: f(cc, VALUE) -> float}。**run 依存で適用不能な量は入らない**
+    (上下対称でないメッシュの asym 等)。呼び出し側は要求した量と表のキーを照合すること (`judge_run.py` は照合する)。"""
     extractors = {'shock': q_shock, 'machmax': q_machmax, 'pmax': q_pmax}
     if any(q in want for q in FLATPLATE):
         qt, qc = make_q_flatplate(cf_x, cf_ytop, wall_law)
@@ -406,6 +417,33 @@ def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, c
     qa = make_q_asym(cc)
     if qa:
         extractors['asym'] = qa
+    return extractors
+
+
+def extract_series(fs, cc, extractors, quantities):
+    """各スナップショット fs から量の系列 {量: [値, ...]} を作る (抽出の例外は NaN = 非有限として残す)。"""
+    series = {q: [] for q in quantities}
+    for f in fs:
+        V = h5py.File(f, 'r')['VALUE']
+        for q in quantities:
+            try:
+                series[q].append(extractors[q](cc, V))
+            except Exception:
+                series[q].append(float('nan'))
+    return series
+
+
+def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, cf_x=0.6, cf_ytop=None,
+            wall_phys_id=None, wall_xmin=None, wall_xmax=None, wall_law='reichardt',
+            wall_axisym=False):
+    mesh = find_mesh(run_dir, mesh_arg)
+    if mesh is None:
+        print(f"\n=== {run_dir}  -> NO mesh (.h5 with /CELLS/centCoords) ==="); return 3
+    fs, steps = res_files(run_dir)
+    if len(fs) < 2:
+        print(f"\n=== {run_dir}  -> TRANSIENT-UNSETTLED (only {len(fs)} res_*.h5) ==="); return 2
+    cc = centroids(mesh)
+    extractors = build_extractors(cc, want, cf_x, cf_ytop, wall_law)
     # 未知の量を黙って無視すると「評価していないのに ALL STEADY」になるので必ずエラーにする。
     # ただし判定は **固定集合** に対して行う (run 依存で適用不能な asym 等を unknown 扱いしない)。
     known = set(BUILTIN) | set(FLATPLATE) | set(WALL)
@@ -416,14 +454,13 @@ def analyze(run_dir, want, tail_frac, drift_tol, osc_tol, min_snaps, mesh_arg, c
         return 3
     # 適用不能な量 (非対称メッシュの asym 等) は従来どおり skip する
     quantities = [q for q in want if q in extractors]
-    series = {q: [] for q in quantities}
-    for f in fs:
-        V = h5py.File(f, 'r')['VALUE']
-        for q in quantities:
-            try:
-                series[q].append(extractors[q](cc, V))
-            except Exception:
-                series[q].append(float('nan'))
+    if not quantities and 'wall_model_tau' not in want:
+        # **評価した量が 1 つも無いのに STEADY にしない** (2026-10-15、plan tooling-convergence-and-wall-resolution-gates
+        # §4.6-3、codex plan 段 judge M3: `--quantity asym` だけで asym が適用不能だと、評価量ゼロ・severity 0 で STEADY だった)
+        print(f"\n=== {run_dir}  [{len(fs)} snapshots]  -> INDETERMINATE: 要求した量 {want} が 1 つも評価できない "
+              f"(適用不能: {[q for q in want if q not in extractors]}) ===")
+        return SEV['INDETERMINATE']
+    series = extract_series(fs, cc, extractors, quantities)
     worst = 0
     lines = []
     if 'wall_model_tau' in want:

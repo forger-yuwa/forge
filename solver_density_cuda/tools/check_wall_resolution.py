@@ -31,6 +31,16 @@ usage:
   python3 solver_density_cuda/tools/check_wall_resolution.py <mesh.h5> --geometry-only \
       [--bcond bcondConfig.yaml]
 
+群と時刻 (2026-10-15、plan tooling-nozzle-isothermal-wall-chain §5.1 #36q、codex diagnose 同日 Major 3):
+
+- `--groups` を渡したら、**指定した群が全部**壁ダンプに見つからなければ判定不能 (rc 2)。以前は見つかった群だけを
+  評価したので、合格する壁 1 つを残して別の壁の出力が欠けても PASS になった。
+- `--step` を渡したら、**その step の壁ダンプが無い群は判定不能** (rc 2)。以前は最新の step に黙って戻ったので、
+  停止の step の出力が欠けても別の時刻の値で PASS になった。`--step` を省いたときは従来どおり群ごとの最新。
+- `--groups` を省くと境界の出力 (`res_<群>_<physID>_<step>.h5`) を種類によらず全部拾う (出口の出力は `twall_*` が
+  無いので判定不能になる)。壁だけで判定したい呼び出し側は bcondConfig の kind が wall* の群を渡す。
+- 超過の数え方 `--weight` の既定は `point` (点数の割合) のまま。面積で判定したい呼び出し側は `--weight area` を明示する。
+
 `--geometry-only` は $y_1$ だけを出す ($y_1^+$ は $\tau_w$ が要るので出さない)。
 **入力値 (`first_wall_frac` など) は保証にならない**: 分布関数が公比上限で打ち切る・両側 tanh が
 要求どおり刻まないなどで、生成された格子の第一層厚は入力とずれる。既存 run の $y_1^+$ と
@@ -254,8 +264,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("--mesh", default=None, help="既定は <run>/mesh.h5")
-    ap.add_argument("--step", type=int, default=None, help="既定は最後の壁ダンプ")
-    ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は壁ダンプ全部)")
+    ap.add_argument("--step", type=int, default=None,
+                    help="既定は群ごとの最後の壁ダンプ。指定したら、その step の壁ダンプが無い群は判定不能 "
+                         "(最新の step に戻らない、2026-10-15)")
+    ap.add_argument("--groups", default=None,
+                    help="壁群名をカンマ区切り (既定は壁ダンプ全部)。指定した群が 1 つでも見つからなければ判定不能 (2026-10-15)")
     ap.add_argument("--target", type=float, default=1.0, help="低 Re の局所 y1+ 目標 (既定 1)")
     ap.add_argument("--over-frac", type=float, default=2.0,
                     help="目標超過を許す割合 [%%] (既定 2、数え方は --weight)。**判定はここで行う**: "
@@ -313,7 +326,7 @@ def main():
             found.setdefault((m.group(1), int(m.group(2))), []).append((int(m.group(3)), d))
     if not found:
         print("壁面ダンプ res_<群>_<physID>_<step>.h5 が無い: %s" % a.run); return 2
-    want = set(x.strip() for x in a.groups.split(",")) if a.groups else None
+    want = set(x.strip() for x in a.groups.split(",") if x.strip()) if a.groups else None
 
     print("=== %s  (wallTreatmentSST=%d) ===" % (a.run, wt))
     nb = dof_neighbors(mesh)
@@ -321,11 +334,27 @@ def main():
     worst_over = 0.0
     any_eval = False
     fails = []
+    # **指定した群は全部要る** (2026-10-15、§5.1 #36q)。見つかった群だけを評価すると、合格する壁 1 つを残して
+    # 別の壁の出力が欠けても PASS になる
+    if want:
+        have = set(nm for nm, _ in found)
+        for name in sorted(want - have):
+            print("  %-12s 壁ダンプ res_%s_<physID>_<step>.h5 が無い -> 判定不能" % (name, name))
+            fails.append("%s (壁ダンプが無い)" % name)
     for (name, pid), lst in sorted(found.items()):
         if want and name not in want:
             continue
-        step, path = sorted(lst)[-1] if a.step is None else \
-            next(((s, p) for s, p in lst if s == a.step), sorted(lst)[-1])
+        if a.step is None:
+            step, path = sorted(lst)[-1]
+        else:
+            # **指定の step に無ければ判定不能** (2026-10-15、§5.1 #36q)。最新の step に戻ると、停止の step の出力が
+            # 欠けても別の時刻の値で判定してしまう
+            hit = [(s, p) for s, p in lst if s == a.step]
+            if not hit:
+                print("  %-12s step %d の壁ダンプが無い (ある step: %s) -> 判定不能 (最新の step に戻らない)"
+                      % (name, a.step, ",".join(str(s) for s, _ in sorted(lst)[-3:])))
+                fails.append("%s (step %d の壁ダンプが無い)" % (name, a.step)); continue
+            step, path = hit[0]
         wd = None   # 対応づけ後に、使った座標系で測り直す
         if False:
             print("  %-12s BCONDS/%d がメッシュに無い -> 判定不能" % (name, pid)); fails.append(name); continue
@@ -465,10 +494,10 @@ def main():
         if frac < 90.0:
             fails.append("%s (評価できた%s %.1f %%)" % (name, unit, frac))
 
-    if not any_eval:
-        print("\nVERDICT: INDETERMINATE (評価できた壁が無い)"); return 2
     if fails:
         print("\nVERDICT: INDETERMINATE (判定不能: %s)" % ", ".join(fails)); return 2
+    if not any_eval:
+        print("\nVERDICT: INDETERMINATE (評価できた壁が無い)"); return 2
     if wt == 0:
         ok = worst_over <= a.over_frac
         print("\n最大 y1+ = %.3f (幾何的特異点では収束しないので判定には使わない) ; "
