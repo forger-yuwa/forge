@@ -12,9 +12,11 @@ B で h370_run.sh から起動する (h370_prep.sh <commit> を先に通す)。
        判定 check_wall_resolution.py に要る量) を書くか (prepare の時点の config で)、実効設定の sha。どれかが不成立なら forge を回さない。
        NS の正式の準備は Euler の参照の固定が要る (停止規則の帯・δ の記録が読む) ので、ここでは停止規則を使わない準備で格子と設定を確かめ、
        (ii) で正式の準備の格子・設定がこれとビット同一であることを確かめる。
-       終了後に h370_judge.py --euler-qualify で資格を判定し (全残差の check_convergence.py --segment PASS・NaN/Inf なし・出口 M・流量・
-       参照場の時系列の check_quasisteady.py の VERDICT)、満たせば本段の最後の出力と sha256 を _band_ab/half_inlet/h370_euler_ref_pin.json に
-       固定する。満たさなければ NS に進まない。
+       終了後に h370_judge.py --euler-prequalify で予備の資格を判定し (全残差の check_convergence.py --segment PASS・NaN/Inf なし・出口 M・
+       流量・参照場の時系列の check_quasisteady.py の VERDICT; §5.1 #36g (1))、満たせば本段の最後の出力と sha256 を
+       _band_ab/half_inlet/h370_euler_ref_pin.json に固定し、σ_ref の代わりの参照 (末尾の窓の代表の出力と sha) を記録する。満たさなければ NS に
+       進まない。最終の資格は NS の判定の σ_ref (h370_judge.py) で決める。このスクリプトと runner_axismach.run_staged は Euler の本段の出力を
+       消さない (run_staged が消すのは soft・mid の段の res_* だけで、本段の前)。
   (ii) --phase ns: 固定した {run, res, sha256} を euler_ref にして run_0951_h370_ns_b0 = problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml を
        prepare_ns(delta_r_csv=_band_ab/half_inlet/delta_r_initial_C.csv (sha 24251cb6…), offset radial) で準備し (CFD ピンは問題 YAML の
        run_0062_euler_wallfit_fit_r1_ext6k)、同じ検査 (品質・δ_in・壁の出力・設定・停止規則の設定・(i) の準備とのビット同一) の後、
@@ -71,7 +73,7 @@ NS_PRELAUNCH = "_h370_prelaunch_ns"               # (i) の前に NS の格子�
 CSV = "_band_ab/half_inlet/delta_r_initial_C.csv"
 CSV_SHA = "24251cb647226d6523109655c08c05210fdb8ba4a669aeaecb4407202945b918"
 PIN = "_band_ab/half_inlet/h370_euler_ref_pin.json"
-QUAL = "_band_ab/half_inlet/h370_euler_qualify.json"
+QUAL = "_band_ab/half_inlet/h370_euler_prequalify.json"   # h370_judge.QUAL と同じ (§5.1 #36g で h370_euler_qualify.json から改名)
 PREP_CHECK_REC = "_band_ab/half_inlet/h370_prep_check_tr5.json"      # 手元の prep-check (生成の座標) の記録 (照合は記録だけ)
 CFD_PIN_RUN = "run_0062_euler_wallfit_fit_r1_ext6k"
 CFD_PIN_FILES = ("prepare_info.json", "nozzle.h5", "res_6000.h5", "solverConfig.yaml", "bcondConfig.yaml")
@@ -857,25 +859,34 @@ def phase_euler(a, RA, code: dict) -> int:
     run_end.update(t_end=time.time(), run_rc=rc_txt, last_res=(res_steps(run)[-1].name if res_steps(run) else None))
     jdump(run / "RUN_END.json", run_end)
     log(f"{run.name} 終了 RUN_RC={rc_txt} 最後の出力 {run_end['last_res']} ({run_end['t_end'] - t_start:.0f} s)")
-    # --- 資格の判定 (h370_judge.py --euler-qualify) ---
-    q = subprocess.run([sys.executable, str(HERE / "h370_judge.py"), "--euler-qualify", "--design", str(WT / "design"),
+    # --- 予備の資格の判定 (h370_judge.py --euler-prequalify) ---
+    q = subprocess.run([sys.executable, str(HERE / "h370_judge.py"), "--euler-prequalify", "--design", str(WT / "design"),
                         "--tools", str(RA.FORGE_TOOLS)], cwd=str(HERE), capture_output=True, text=True)
     print(q.stdout[-8000:] + q.stderr[-3000:], flush=True)
-    log(f"Euler の資格の判定 rc={q.returncode} ({'満たす → 固定 ' + PIN if q.returncode == 0 else '満たさない・判定不能 → NS に進まない'})")
+    log(f"Euler の予備の資格の判定 rc={q.returncode} ({'満たす → 固定 ' + PIN if q.returncode == 0 else '満たさない・判定不能 → NS に進まない'})")
     return 0 if q.returncode == 0 else 2
 
 
 # --- (ii) NS ----------------------------------------------------------------------------------------------------------------------
 def read_pin() -> dict:
-    """固定した Euler の参照 (h370_judge.py --euler-qualify が書く) を読み、sha を照合する。戻り {spec, record, pin}。不成立は die。"""
+    """固定した Euler の参照 (h370_judge.py --euler-prequalify が書く) を読み、sha を照合する。σ_ref の代わりの参照 (予備の資格の
+    sigma_ref_snapshots、§5.1 #36g (2)) も在ることと sha を NS を回す前に確かめる (無ければ σ_ref を測れず、NS の後で更新に進めない)。
+    戻り {spec, record, pin}。不成立は die。"""
     pin, qual = jload(HERE / PIN), jload(HERE / QUAL)
     if not pin or not qual:
-        die(f"{PIN} か {QUAL} が無い (Euler の資格の判定が済んでいない)")
-    if not qual.get("qualified") or (qual.get("pin") or {}).get("sha256") != pin.get("sha256") or pin.get("run") != EU_RUN:
-        die(f"Euler の資格の記録と固定が合わない (qualified {qual.get('qualified')}、run {pin.get('run')})")
+        die(f"{PIN} か {QUAL} が無い (Euler の予備の資格の判定が済んでいない)")
+    if not qual.get("prequalified") or (qual.get("pin") or {}).get("sha256") != pin.get("sha256") or pin.get("run") != EU_RUN:
+        die(f"Euler の予備の資格の記録と固定が合わない (prequalified {qual.get('prequalified')}、run {pin.get('run')})")
     f = HERE / pin["run"] / pin["res"]
     if not f.is_file() or sha256_file(f) != pin["sha256"]:
         die(f"固定した Euler の参照 {f} が無いか sha256 が {pin['sha256'][:16]}… と違う")
+    alts = qual.get("sigma_ref_snapshots") or []
+    if not alts:
+        die(f"{QUAL} に σ_ref の代わりの参照 (sigma_ref_snapshots) が無い")
+    for a in alts:
+        g = HERE / pin["run"] / str(a.get("res"))
+        if not g.is_file() or sha256_file(g) != a.get("sha256"):
+            die(f"σ_ref の代わりの参照 {g} が無いか sha256 が予備の資格の記録と違う (Euler の出力が消された・書き換えられた)")
     spec = {"run": str(HERE / pin["run"]), "res": pin["res"], "sha256": pin["sha256"]}
     return {"spec": spec, "record": spec, "pin": pin}
 

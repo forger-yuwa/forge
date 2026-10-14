@@ -8,7 +8,10 @@ codex diagnose `notes/reviews/2026-10-14-half-inlet-370k-pass-inputs-diagnose.md
 δ_r(x) と一致するはず。違いになりうるのは Euler の壁の列間の線形補間・座標の丸め・1 本の B-spline の表現の差だけ。
 この照合を格子の座標だけで行う (場は要らないので CFD 0 step でよい):
 
-- 被覆: NS のすべての列が Euler の範囲 [xE[0] − 1e-9, xE[−1] + 1e-9] の内にあること (外の列は抽出器が黙って外す)。
+- 被覆: NS のすべての列が Euler の補間できる範囲の内にあること (外の列は抽出器が抽出しない)。範囲は抽出器・受け渡しの抽出と同じ
+  共通の関数 `deltastar.euler_cover_range` (§5.1 #36g、remap_edge="missing" の経路と同じ edge_tol=True): Euler の端の外側だけに
+  幾何の許容 (端の列の間隔 × 1e−4) を足し、許容の内側で端を越える列は端の列の値で評価する (浮動小数・法線のずらしによる端の位置の
+  差の吸収で、範囲の不足を隠すためではない。2026-10-14 の B の dry-run で出口の列が 1.68e−9 r_t 越えて被覆が落ちた件)。
 - x ≥ x_min (既定 0) の各列で |δ_in − δ_r(x)| ≤ tol。tol の既定 `DELTA_IN_TOL_MM` = 0.001 mm は、測る前に決めた値:
   codex diagnose 2 が参照の取り替えによる δ_E の差と δ_E・δ_target の時間の変動に置いた暫定の予算 0.01 mm の 1/10
   (参照そのものの幾何の食い違いが、予算の 1 割を超えて使わないこと)。
@@ -26,15 +29,19 @@ from pathlib import Path
 import numpy as np
 
 DELTA_IN_TOL_MM = 1.0e-3      # [mm] 予算 0.01 mm の 1/10 (上の docstring)
-X_RANGE_PAD = 1e-9            # 抽出器の範囲外の判定 (deltastar_from_core_matched_euler の extract_one) と同じ余裕 [r_t]
 REGIONS = {"throat_0_1": (0.0, 1.0), "x_1_40": (1.0, 40.0), "test_40_94": (40.0, 94.0), "end_94_exit": (94.0, np.inf)}
 
 
-def euler_wall_at(xE, rwE, x: float) -> float:
+def euler_wall_at(xE, rwE, x: float, rng: dict | None = None) -> float:
     """抽出器 (`deltastar_from_core_matched_euler` の `euler_q_at`) と同じ式で Euler の壁の半径を x へ補間する
-    (列 k = clip(searchsorted(xE, x) − 1)、重み w を [0, 1] に丸めた線形補間)。範囲外 (抽出器が列を外す x) は NaN。"""
+    (列 k = clip(searchsorted(xE, x) − 1)、重み w を [0, 1] に丸めた線形補間)。範囲外 (抽出器が列を外す x) は NaN。
+    範囲 rng は `deltastar.euler_cover_range(xE, edge_tol=True)` (受け渡しの抽出の remap_edge="missing" と同じ; 省けばここで作る)。
+    許容の内側で端を越える x は w の丸めで端の列の値になる。"""
+    from .deltastar import euler_cover_range, euler_covers
     x = float(x)
-    if x < xE[0] - X_RANGE_PAD or x > xE[-1] + X_RANGE_PAD:
+    if rng is None:
+        rng = euler_cover_range(xE, edge_tol=True)
+    if not euler_covers(x, rng):
         return float("nan")
     k = int(np.clip(np.searchsorted(xE, x) - 1, 0, len(xE) - 2))
     w = (x - xE[k]) / max(xE[k + 1] - xE[k], 1e-30)
@@ -67,11 +74,14 @@ def compare_delta_in(x_ns, rw_ns, x_eu, rw_eu, delta_r, scale_m: float, x_min: f
         raise ValueError("compare_delta_in: x・r は同じ長さの 1 次元の配列 (Euler は 2 列以上)")
     if not np.all(np.diff(x_eu) > 0):
         raise ValueError("compare_delta_in: Euler の列の x が単調増加でない")
-    rwE_at = np.array([euler_wall_at(x_eu, rw_eu, x) for x in x_ns])
+    from .deltastar import euler_cover_range
+    rng = euler_cover_range(x_eu, edge_tol=True)
+    rwE_at = np.array([euler_wall_at(x_eu, rw_eu, x, rng) for x in x_ns])
     d_in = rw_ns - rwE_at                                    # 抽出器の δ_in (同じ式・同じ順の演算)
     dr = np.asarray(delta_r(x_ns), dtype=float)
     err = d_in - dr
     unc = ~np.isfinite(rwE_at)
+    et = ~unc & ((x_ns < rng["x0"]) | (x_ns > rng["x1"]))     # 許容の内側で Euler の端を越え、端の列の値で評価した列 (記録)
     tol_rt = float(tol_mm) * 1e-3 / float(scale_m)
     sel = (x_ns >= x_min) & ~unc
     judged = _max_rec(err, x_ns, sel, scale_m)
@@ -80,6 +90,8 @@ def compare_delta_in(x_ns, rw_ns, x_eu, rw_eu, delta_r, scale_m: float, x_min: f
     out = {"pass": bool(ok_cov and ok_err), "covered": ok_cov, "n_cols_ns": int(len(x_ns)), "n_cols_euler": int(len(x_eu)),
            "n_uncovered": int(unc.sum()), "uncovered_x": [float(v) for v in x_ns[unc][:5]],
            "range_ns": [float(x_ns[0]), float(x_ns[-1])], "range_euler": [float(x_eu[0]), float(x_eu[-1])],
+           "euler_cover": rng, "n_edge_tol": int(et.sum()), "edge_tol_x": [float(v) for v in x_ns[et][:5]],
+           "edge_tol_beyond": [float(max(rng["x0"] - v, v - rng["x1"])) for v in x_ns[et][:5]],
            "x_min": float(x_min), "tol_mm": float(tol_mm), "tol_rt": tol_rt, "scale_m": float(scale_m), "judged": judged,
            "by_region": {k: _max_rec(err, x_ns, sel & (x_ns >= lo) & (x_ns < hi), scale_m) for k, (lo, hi) in REGIONS.items()},
            "upstream_x_lt_min": {**_max_rec(err, x_ns, (x_ns < x_min) & ~unc, scale_m),

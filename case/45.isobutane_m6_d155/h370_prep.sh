@@ -118,7 +118,7 @@ python3 h370_run.py --phase check-problems --commit $FULL > /tmp/h370_problems_c
 log "問題 YAML の検査: $(grep -E '^VERDICT' /tmp/h370_problems_check.out | tail -1) → _band_ab/half_inlet/h370_problems_B.json"
 
 # --- (e) 既存のもの・資源 ----------------------------------------------------------------------------------------------------
-for r in run_0950_h370_euler_ref run_0951_h370_ns_b0 _h370_prelaunch_ns _band_ab/half_inlet/h370_euler_ref_pin.json _band_ab/half_inlet/h370_euler_qualify.json; do
+for r in run_0950_h370_euler_ref run_0951_h370_ns_b0 _h370_prelaunch_ns _band_ab/half_inlet/h370_euler_ref_pin.json _band_ab/half_inlet/h370_euler_prequalify.json; do
   [ -e $C45/$r ] && log "注意: $r が既にある (h370_run.py は既存のものを使わずに止まる; 固定 pin は同じ中身なら使う)"
 done
 log "資源: ディスクの空き $(df -h --output=avail $C45 | tail -1) (起動の前に 20 GiB 以上が要る)、メモリ $(free -m | awk 'NR==2{print $7" MB available"}')、GPU $(nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader 2>&1)"

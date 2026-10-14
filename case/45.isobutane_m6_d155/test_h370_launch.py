@@ -9,13 +9,18 @@
      負例 (outputHDFflg 0・output.level 0・wallTreatmentSST 1・prepare_info の sha の不一致) で不合格。
   C. Euler の段の設定の導出 (euler_stage_configs) が runner_axismach.run_staged が実際に起動する設定 (soft・mid・本段) と sha で一致。
      Observer が導いた段の外の設定を拒む (forge を起動しない)。
-  D. Euler の資格 (h370_judge.py --euler-qualify) を合成の Euler の run で: 合格 → 固定 (res_60000・sha、参照の時間の変動を測る出力)、
-     2 回目は同じ固定を使う。負例: 出口 M・流量のドリフト (DRIFTING)、場の NaN、残差の停滞 (check_convergence NOT CONVERGED)、
-     既にある違う固定、run の欠け。
-  E. 抽出の参照の A/B の分類 (classify_ab) の単体の試験 (結果 A・B・判定不能の境界)。
+  D. Euler の予備の資格 (h370_judge.py --euler-prequalify、§5.1 #36g (1)) を合成の Euler の run で: 合格 → 固定 (res_60000・sha)・σ_ref の
+     代わりの参照 (末尾の窓の代表 40,000・45,000・50,000・55,000 と sha)・末尾の窓の全出力・スクリーニングの出力、2 回目は同じ固定を使う。
+     負例: 出口 M・流量のドリフト (DRIFTING)、場の NaN、残差の停滞 (check_convergence NOT CONVERGED)、既にある違う固定、run の欠け、
+     代わりの参照の出力が消された (判定不能)。
+  E. 抽出の参照の A/B の分類 (classify_ab)・参照の最終の資格 (reference_final)・1 出力の比較 (ab_pair) の単体の試験 (結果 A・B・判定不能の
+     境界、§5.1 #36g (3)〜(5))。codex の判定の基準の諮問の合成の反例 3 つ (中央 1 列の欠測・停止の 1 行だけ・途中の 1 出力だけの参照の感度
+     0.030 mm) が「結果 A」にならず理由つきで拒まれる。
   F. NS の判定 (h370_judge.py) を合成の NS・Euler の run (本物の抽出 stop_rule.delta_snapshot・extract_and_merge、関門と次の壁は偽物) で:
-     結果 A (腕 A = 範囲の短い同じ参照: 共通の列だけ比べ、範囲の外の列は除く)、結果 B (腕 A の参照の形を変える)、判定不能 (参照の時間の
-     変動 σ_ref が大きい)、関門で止まる、本段の直前の照合の記録が無い → 判定不能。
+     結果 A (腕 A = 範囲の短い同じ参照: 比べる列は座標と範囲から先に固定、範囲の外の列は除く; σ_ref は判定窓の全出力 × 代わりの参照 4 つ)、
+     結果 B (腕 A の参照の形を変える)、判定不能 (σ_ref が大きい → 参照の最終の資格なし → 更新に進めない; 代わりの参照の sha が違う →
+     σ_ref を測れない)、行が欠けても res があれば抽出し直して補う、反例 3 つの組み込みの版、比べる列の固定に出口の幾何の許容が効く、
+     関門で止まる、本段の直前の照合の記録が無い → 判定不能。
   G. h370_run.py の段取り (--dry-run・本番) を偽の準備 (本物の生成器の設定・偽の格子) で: 投入前の検査の合格・不成立・壁の出力が無い
      (終了コード 4)・既存の run で止まる・dry-run と不成立で forge を回さない・資格未達で NS に進まない・環境変数と固定の欠けで止まる・
      h370_problems.py check を作業ツリーの版で回す。
@@ -290,24 +295,33 @@ def make_eu_run(case: Path, drift: float = 0.0, nan_step=None, flat_resid: bool 
 
 
 def qualify(case: Path) -> int:
-    return HJ.main(["--euler-qualify", "--case-dir", str(case), "--design", str(ROOT / "design"), "--tools", str(TOOLS)])
+    return HJ.main(["--euler-prequalify", "--case-dir", str(case), "--design", str(ROOT / "design"), "--tools", str(TOOLS)])
 
 
 def test_euler_qualify():
-    print("== D. Euler の資格 (合成の run)", flush=True)
+    print("== D. Euler の予備の資格 (合成の run)", flush=True)
     case = TMP / "q_ok"
     run = make_eu_run(case)
     rc = qualify(case)
     q, pin = json.loads((case / HJ.QUAL).read_text()), HJ.jload(case / HJ.PIN)
     v = {c: d["verdict"] for c, d in q["quasisteady"]["verdicts"].items()}
-    check(f"合格: 資格あり (rc {rc})、資格の量 {len(v)} 列すべて STEADY、check_convergence --segment PASS",
-          rc == 0 and q["qualified"] and set(v) == set(HJ.QUAL_COLS) and set(v.values()) == {"STEADY"} and q["convergence"]["rc"] == 0,
-          str(q["failures"] + q["undecidable"]))
+    check(f"合格: 予備の資格あり (rc {rc})、資格の量 {len(v)} 列すべて STEADY、check_convergence --segment PASS、記録の名前は予備の資格 (prequalified)",
+          rc == 0 and q["prequalified"] and "qualified" not in q and set(v) == set(HJ.QUAL_COLS) and set(v.values()) == {"STEADY"}
+          and q["convergence"]["rc"] == 0 and HJ.QUAL.endswith("h370_euler_prequalify.json"), str(q["failures"] + q["undecidable"]))
     check("固定: 本段の最後の出力 res_60000.h5 とその sha256 (h370_euler_ref_pin.json)",
           pin is not None and pin["res"] == "res_60000.h5" and pin["sha256"] == HJ.sha256_file(run / "res_60000.h5") and pin["run"] == HJ.EU_RUN)
-    check("参照の時間の変動を測る出力: check_quasisteady の末尾の窓 (既定 0.4 → 24 出力) の始まり 37,000 と中ほど 49,000、sha つき",
-          [s["step"] for s in q["sensitivity_snapshots"]] == [37000, 49000] and q["quasisteady_tail_window"] == [37000, 60000]
-          and all(len(s["sha256"]) == 64 for s in q["sensitivity_snapshots"]))
+    sr = q["sigma_ref_snapshots"]
+    check("σ_ref の代わりの参照: 末尾の窓 [40,000, 60,000] の 5,000 step ごとの代表 40,000・45,000・50,000・55,000 (固定を除く)、sha つき; "
+          "末尾の窓の全 21 出力の sha も記録",
+          [o["step"] for o in sr] == [40000, 45000, 50000, 55000] and all(o["sha256"] == HJ.sha256_file(run / o["res"]) for o in sr)
+          and [o["step"] for o in q["tail_outputs"]] == list(range(40000, 60001, 1000))
+          and q["sigma_ref_selection"]["tail_window"] == [40000, 60000] and "340 抽出" in q["sigma_ref_selection"]["why"], str([o["step"] for o in sr]))
+    td = q.get("tail_field_dev") or {}
+    check("代表の選び方の裏付け (記録だけ): 末尾の窓の 20 出力の場の差と、代表の中・外の最大", len(td.get("per_output", [])) == 20
+          and td.get("max_rel_representatives") is not None and td.get("max_rel_others") is not None, str(td)[:200])
+    check("スクリーニングの出力: check_quasisteady の末尾の窓 (既定 0.4 → 24 出力) の始まり 37,000 と中ほど 49,000、sha つき",
+          [s_["step"] for s_ in q["screening_snapshots"]] == [37000, 49000] and q["quasisteady_tail_window"] == [37000, 60000]
+          and all(len(s_["sha256"]) == 64 for s_ in q["screening_snapshots"]))
     check("記録だけの量 (nozzle_report.metrics の η 0.1 の線の wave・overshoot・slope・range) の VERDICT も残る",
           set(q["quasisteady_record"]["record_cols (既定の閾値)"]["verdicts"]) == set(HJ.REC_COLS))
     rc2 = qualify(case)
@@ -319,7 +333,7 @@ def test_euler_qualify():
         make_eu_run(c, **kw)
         rc = qualify(c)
         q = json.loads((c / HJ.QUAL).read_text())
-        check(f"負例 {name}: 資格未達 (rc {rc})・固定を書かない", rc == want_rc and not q["qualified"] and not (c / HJ.PIN).exists()
+        check(f"負例 {name}: 未達 (rc {rc})・固定を書かない", rc == want_rc and not q["prequalified"] and not (c / HJ.PIN).exists()
               and any(want in f for f in q["failures"]), str(q["failures"])[:300])
     c = TMP / "q_conflict"
     shutil.copytree(case, c)
@@ -334,26 +348,94 @@ def test_euler_qualify():
     c = TMP / "q_short"
     make_eu_run(c, steps=range(1000, 50001, 1000))
     rc = qualify(c)
-    check("本段が上限 60,000 まで回っていない → 資格未達", rc == 1 and any("上限" in f for f in json.loads((c / HJ.QUAL).read_text())["failures"]))
+    check("本段が上限 60,000 まで回っていない → 未達 (rc 1)", rc == 1 and any("上限" in f for f in json.loads((c / HJ.QUAL).read_text())["failures"]))
+    c = TMP / "q_gap"
+    make_eu_run(c, steps=[s_ for s_ in range(1000, 60001, 1000) if s_ != 45000])
+    rc = qualify(c)
+    q = json.loads((c / HJ.QUAL).read_text())
+    check("σ_ref の代わりの参照の出力 (45,000) が消されている → 判定不能 (rc 2)・固定を書かない", rc == 2 and not (c / HJ.PIN).exists()
+          and any("45000" in u for u in q["undecidable"]), str(q["undecidable"])[:200])
 
 
 # ====================================================================================== E. A/B の分類
 def test_classify_ab():
-    print("== E. 抽出の参照の A/B の分類", flush=True)
+    print("== E. 抽出の参照の A/B の分類・参照の最終の資格・1 出力の比較 (単体)", flush=True)
+    req2 = [0, 1]
     per = lambda Ds, pf=None: [{"step": i, "D_mm": d, "pf_A": True if pf is None else pf[i], "pf_B": True} for i, d in enumerate(Ds)]  # noqa: E731
-    cases = [("全出力 0.003 mm・σ 0.001 → 結果 A", per([0.003, 0.002]), 0.001, "結果 A"),
-             ("全出力 0.02 mm・σ 0.001 → 結果 B", per([0.02, 0.03]), 0.001, "結果 B"),
-             ("窓の中で 0.01 mm をまたぐ (0.008・0.012) → 判定不能 (時間の変動)", per([0.008, 0.012]), 0.0, "判定不能"),
-             ("D 0.008・σ 0.005 → 判定不能 (参照の未整定)", per([0.008, 0.008]), 0.005, "判定不能"),
-             ("D 0.012・σ 0.005 → 判定不能 (参照の未整定)", per([0.012]), 0.005, "判定不能"),
-             ("合否が変わる出力 → 結果 B (D が小さくても)", per([0.001, 0.001], pf=[True, False]), 0.0, "結果 B"),
-             ("ちょうど 0.01 mm (max + σ) → 結果 A (≤)", per([0.009]), 0.001, "結果 A"),
-             ("抽出の失敗 → 判定不能", per([0.001]) + [{"step": 9, "error_A": "x"}], 0.0, "判定不能"),
-             ("σ を測れない → 判定不能", per([0.001]), None, "判定不能"),
-             ("出力が無い → 判定不能", [], 0.0, "判定不能")]
-    for name, p, sig, want in cases:
-        r, why = HJ.classify_ab(p, sig)
-        check(name, r == want, f"{r}: {why}")
+
+    def sig(mm, alts_pf=None, status="ok"):
+        """σ_ref の記録の形 (per_step の alts の pf_F は代わりの参照の時刻の腕 B の合否)。"""
+        ps = None if alts_pf is None else {k: {"alts": [{"res": f"res_{e}.h5", "pf_F": v} for e, v in enumerate(alts_pf)]} for k in req2}
+        return {"status": status, "mm": mm, "per_step": ps, "why": "試験"}
+    cases = [("全出力 0.003 mm・σ 0.001 → 結果 A", per([0.003, 0.002]), 0.001, "結果 A", "A"),
+             ("全出力 0.02 mm・σ 0.001 → 結果 B", per([0.02, 0.03]), 0.001, "結果 B", "B_D"),
+             ("窓の中で 0.01 mm をまたぐ (0.008・0.012) → 判定不能 (時間の変動)", per([0.008, 0.012]), 0.0, "判定不能", "U_time"),
+             ("D 0.008・σ 0.005 → 判定不能 (参照の未整定)", per([0.008, 0.008]), 0.005, "判定不能", "U_sigma_straddle"),
+             ("D 0.012・σ 0.005 → 判定不能 (参照の未整定)", per([0.012, 0.013]), 0.005, "判定不能", "U_sigma_straddle"),
+             ("合否が変わる出力・代わりの参照の全部で違いが保たれる → 結果 B (D が小さくても)",
+              [{"step": 0, "D_mm": None, "pf_A": False, "pf_B": True}, {"step": 1, "D_mm": 0.001, "pf_A": True, "pf_B": True}],
+              sig(0.0, [True, True]), "結果 B", "B_pf"),
+             ("合否が変わる出力・代わりの参照で確かめられない (per_step が無い) → 判定不能",
+              [{"step": 0, "D_mm": None, "pf_A": False, "pf_B": True}, {"step": 1, "D_mm": 0.001, "pf_A": True, "pf_B": True}],
+              0.0, "判定不能", "U_pf_unconfirmed"),
+             ("合否が変わる出力・代わりの参照の 1 つで違いが消える → 判定不能",
+              [{"step": 0, "D_mm": None, "pf_A": False, "pf_B": True}, {"step": 1, "D_mm": 0.001, "pf_A": True, "pf_B": True}],
+              sig(0.0, [True, False]), "判定不能", "U_pf_unconfirmed"),
+             ("両腕とも比べる列の中に欠測 (合否は同じ) → 判定不能 (比較を合格にしない)",
+              [{"step": 0, "D_mm": None, "pf_A": False, "pf_B": False}, {"step": 1, "D_mm": 0.001, "pf_A": True, "pf_B": True}],
+              0.0, "判定不能", "U_fixed_cols"),
+             ("ちょうど 0.01 mm (max + σ) → 結果 A (≤)", per([0.009, 0.009]), 0.001, "結果 A", "A"),
+             ("抽出の失敗 → 判定不能", per([0.001]) + [{"step": 1, "error_A": "x"}], 0.0, "判定不能", "U_error"),
+             ("σ を測れない → 判定不能", per([0.001, 0.001]), None, "判定不能", "U_sigma_unmeasurable"),
+             ("σ が判定不能 (代わりの参照で合否が変わる) → 判定不能", per([0.001, 0.001]), sig(0.001, status="undecidable"), "判定不能",
+              "U_sigma_undecidable"),
+             ("出力が無い → 判定不能", [], 0.0, "判定不能", "U_empty")]
+    for name, p_, sg, want, code in cases:
+        c = HJ.classify_ab(p_, sg, req2)
+        check(name, c["result"] == want and c["code"] == code, f"{c['result']} {c['code']}: {c['why'][:120]}")
+    c = HJ.classify_ab(per([0.001, 0.001]), 0.0, None)
+    check("必要な出力の集合が無い → 判定不能", c["result"] == "判定不能" and c["code"] == "U_required")
+    # --- codex の判定の基準の諮問の合成の反例 (2026-10-14-h370-judge-criteria-diagnose.md) ---
+    req17 = list(range(22500, 62501, 2500))
+    check("必要な出力の列挙: 停止 62,500・窓 20,000・間隔 2,500 の 2 窓 → 17 出力 (22,500〜62,500)",
+          SR.required_window_steps(62500, 20000, 2500) == req17 and len(req17) == 17)
+    c = HJ.classify_ab([{"step": 62500, "D_mm": 0.0, "pf_A": True, "pf_B": True}], 0.0, req17)
+    check(f"反例 2 (停止時の 1 行だけ): 必要な 17 出力のうち 16 を比べていない → 判定不能 ({c['why'][:60]}…)", c["result"] == "判定不能"
+          and c["code"] == "U_incomplete")
+    per17 = [{"step": k, "D_mm": 0.005, "pf_A": True, "pf_B": True} for k in req17]
+    ps = {k: {"alts": [{"res": "res_45000.h5", "pf_F": True, "max_mm_F": (0.030 if k == 42500 else 0.0)}]} for k in req17}
+    sg3 = {"status": "ok", "mm": max(a["max_mm_F"] for v in ps.values() for a in v["alts"]), "per_step": ps}
+    c = HJ.classify_ab(per17, sg3, req17)
+    rf = HJ.reference_final({"classify": c, "sigma_ref": sg3}, True)
+    check(f"反例 3 (17 出力で D 0.005 mm、停止の出力の感度 0・途中の 1 出力だけ代わりの参照で 0.030 mm): σ_ref = 全出力の最大 0.030 mm → "
+          f"判定不能 (参照の未整定)、参照の最終の資格なし ({c['code']})",
+          sg3["mm"] == 0.030 and c["result"] == "判定不能" and c["code"] == "U_sigma_straddle" and rf["qualified"] is False)
+    # 反例 1 (中央 1 列の欠測): 比べる列 F を先に固定 → 腕 A の F の中の欠測は合否の違い (結果 A にしない)
+    x3 = np.array([10.0, 11.0, 12.0])
+    F3 = np.ones(3, dtype=bool)
+    dB = {"delta_E": [1e-3] * 3, "delta_target": [2e-3] * 3, "held": [0] * 3, "missing": []}
+    dA = {"delta_E": [1e-3, float("nan"), 1e-3], "delta_target": [2e-3, float("nan"), 2e-3], "held": [0] * 3, "missing": [1]}
+    r1 = HJ.ab_pair(62500, dA, dB, 76.6, "記録", x3, F3)
+    check(f"反例 1 (中央 1 列だけ腕 A が欠測): ab_pair は比べる列 3 を保ち、腕 A は合否 否 (欠測 1・x {r1.get('x_bad_A')})・D は出さない",
+          r1["n_fixed"] == 3 and r1["pf_A"] is False and r1["pf_B"] is True and r1["D_mm"] is None and r1["check_A"]["n_missing"] == 1
+          and r1.get("x_bad_A") == [11.0], str(r1))
+    c1 = HJ.classify_ab([r1], {"status": "ok", "mm": 0.0, "per_step": {62500: {"alts": [{"res": "r", "pf_F": True}]}}}, [62500])
+    c1b = HJ.classify_ab([r1], 0.0, [62500])
+    check(f"反例 1: 代わりの参照でも腕 B が合 → 結果 B (合否の違い) / 代わりの参照で確かめられなければ判定不能 — どちらも結果 A ではない "
+          f"({c1['code']}・{c1b['code']})", c1["result"] == "結果 B" and c1["code"] == "B_pf" and c1b["result"] == "判定不能")
+    r_both = HJ.ab_pair(62500, dA, dA, 76.6, "記録", x3, F3)
+    check("両腕とも同じ列が欠測 → 合否は同じ (否)・D を出さない → 判定不能 (F の中の欠測)", r_both["D_mm"] is None
+          and HJ.classify_ab([r_both], 0.0, [62500])["code"] == "U_fixed_cols")
+    r_out = HJ.ab_pair(62500, dA, dB, 76.6, "記録", x3, np.array([True, False, True]))
+    check("欠測の列が座標で先に決めた比べる列の外 (範囲の外) なら比べない: 合否は同じ・D 0", r_out["pf_A"] and r_out["D_mm"] == 0.0)
+    # 参照の最終の資格 (reference_final)
+    mk = lambda code: {"classify": {"code": code, "result": "x", "why": "試験"}, "sigma_ref": {"mm": 0.001, "status": "ok"}}  # noqa: E731
+    check("参照の最終の資格: A・B・時間の変動の判定不能 → 資格あり / σ を測れない・判定不能・参照の未整定 → 資格なし / 出力の欠け・抽出の失敗・"
+          "F の中の欠測 → 確かめられない (None) / --no-ab → 確かめられない",
+          all(HJ.reference_final(mk(k), True)["qualified"] is True for k in ("A", "B_D", "B_pf", "U_time"))
+          and all(HJ.reference_final(mk(k), True)["qualified"] is False for k in ("U_sigma_unmeasurable", "U_sigma_undecidable", "U_sigma_straddle"))
+          and all(HJ.reference_final(mk(k), True)["qualified"] is None for k in ("U_incomplete", "U_error", "U_fixed_cols", "U_pf_unconfirmed"))
+          and HJ.reference_final(None, False)["qualified"] is None)
 
 
 # ====================================================================================== F. NS の判定
@@ -422,20 +504,25 @@ def write_eu_shape(rd: Path, step: int, shape: float):
         f["/VALUE/sonic"] = np.full(Q.size, 300.0)
 
 
-def make_ns_case(case: Path, alt_shape: float = 1e-4):
-    """合成の NS の判定の case dir: Euler B (run_0950、固定 res_60000、参照の時間の変動を測る res_37000・res_49000)・腕 A (run_0174、
-    範囲 x ≤ 19 の同じ形)・NS (run_0951、出力 52,500〜62,500、停止の出力 62,500、窓 5,000 の 2 窓)・記録一式。"""
+ALT_SHAPES = {40000: 1e-4, 45000: 8e-5, 50000: 5e-5, 55000: 2e-5}     # σ_ref の代わりの参照 (末尾の窓の代表) の形の小さな違い
+SCREEN_SHAPES = {37000: 1e-4, 49000: 5e-5}                              # スクリーニングの出力
+
+
+def make_ns_case(case: Path):
+    """合成の NS の判定の case dir: Euler B (run_0950、固定 res_60000、σ_ref の代わりの参照 res_40000〜55000、スクリーニング res_37000・
+    res_49000)・腕 A (run_0174、範囲 x ≤ 19 の同じ形)・NS (run_0951、出力 52,500〜62,500、停止の出力 62,500、窓 5,000 の 2 窓)・記録一式。"""
     case.mkdir(parents=True)
     eb = case / HJ.EU_RUN
     X, R, Q = synth_eu(X1 + 0.5)
     write_field_run(eb, X, R, Q, {}, (60000,))
-    write_eu_shape(eb, 37000, alt_shape)
-    write_eu_shape(eb, 49000, alt_shape / 2)
+    for st, sh in {**ALT_SHAPES, **SCREEN_SHAPES}.items():
+        write_eu_shape(eb, st, sh)
     pin = {"run": HJ.EU_RUN, "res": "res_60000.h5", "sha256": HJ.sha256_file(eb / "res_60000.h5"), "step": 60000}
     (case / "_band_ab/half_inlet").mkdir(parents=True)
     (case / HJ.PIN).write_text(json.dumps(pin))
-    qual = {"qualified": True, "pin": pin, "sensitivity_snapshots": [{"res": f"res_{s}.h5", "step": s, "sha256": HJ.sha256_file(eb / f"res_{s}.h5")}
-                                                                      for s in (37000, 49000)]}
+    snap = lambda steps: [{"res": f"res_{s_}.h5", "step": s_, "sha256": HJ.sha256_file(eb / f"res_{s_}.h5")} for s_ in steps]  # noqa: E731
+    qual = {"prequalified": True, "pin": pin, "sigma_ref_snapshots": snap(sorted(ALT_SHAPES)), "screening_snapshots": snap(sorted(SCREEN_SHAPES)),
+            "sigma_ref_selection": HJ.sigma_ref_selection(sorted([*ALT_SHAPES, 60000]))}
     (case / HJ.QUAL).write_text(json.dumps(qual))
     ea = case / HJ.OLD_EULER
     X, R, Q = synth_eu(19.0)
@@ -493,21 +580,50 @@ def judge(case: Path, extra=()) -> tuple:
     return rc, HJ.jload(case / HJ.OUT)
 
 
+def snap_hook(fn):
+    """本物の stop_rule.delta_snapshot の結果を fn(run, step, spec, d) で書き換える試験の差し替え (反例を組み込みで作る)。"""
+    def g(run, step, spec, ext, x_use):
+        return fn(run, step, spec, SR.delta_snapshot(run, step, spec, ext, x_use))
+    return g
+
+
+def mid_col(R):
+    """比べる列 F の中ほどの列の番号 (delta_series.x の番号)。"""
+    x = np.asarray(json.loads((R["_case"] / HJ.NS_RUN / SR.RECORD).read_text())["delta_series"]["x"])
+    lo, hi = R["ab"]["columns"]["x_range"]
+    return int(np.argmin(np.abs(x - 0.5 * (lo + hi))))
+
+
 def test_ns_judge():
     print("== F. NS の判定 (合成の NS・Euler の run、本物の抽出、関門と次の壁は偽物)", flush=True)
     base = make_ns_case(TMP / "ns_base")
-    with Patch((HJ, "HOOKS", {"handoff_gate": stub_gate(True), "next_wall_check": stub_next_wall})):
+    hooks = {"handoff_gate": stub_gate(True), "next_wall_check": stub_next_wall}
+    req = SR.required_window_steps(S_STOP, W_TEST, 2500)
+    with Patch((HJ, "HOOKS", dict(hooks))):
         case = TMP / "ns_A"
         shutil.copytree(base, case)
         rc, R = judge(case)
+        R["_case"] = case
         ab = R["ab"]
         srcs = {r.get("B_source", "")[:2] for r in ab["per_output"]}
-        check(f"結果 A: 腕 A = 範囲の短い同じ参照 (D max {ab.get('D_mm', {}).get('max', float('nan')):.4f} mm、σ_ref "
-              f"{ab['sigma_ref']['mm']:.2e} mm)", rc == 0 and ab["result"] == "結果 A" and ab["D_mm"]["max"] < HJ.TOL_MM, ab["why"])
-        ex = ab["excluded_from_A"]
-        check(f"範囲の外の列 (x > 19) は比べない: 腕 A が抽出しない列 {ex['n']}、x {ex['x_range']}",
-              ex["n"] == [3] and ex["x_range"][0] > 19.0 and ab["D_mm"]["x_common"][1] <= 19.0)
-        check("腕 B の値: stop_rule.json の記録 (sha が同じ) と、記録の無い出力は抽出し直し", srcs == {"記録", "抽出"}, str(srcs))
+        sg = ab["sigma_ref"]
+        check(f"結果 A: 腕 A = 範囲の短い同じ参照 (D max {ab.get('D_mm', {}).get('max', float('nan')):.4f} mm、σ_ref {sg['mm']:.2e} mm "
+              f"(使用域 {sg['mm_use']:.2e})、{ab['classify']['code']})", rc == 0 and ab["result"] == "結果 A" and ab["D_mm"]["max"] < HJ.TOL_MM
+              and sg["status"] == "ok", ab["why"])
+        cols = ab["columns"]
+        check(f"比べる列は抽出の前に座標と範囲から固定: 使用域 {cols['n_use']} 列のうち F {cols['n']} 列 (腕 A の範囲の外 {cols['excluded']['A']['n']} 列 "
+              f"x {cols['excluded']['A']['x_range']} は比べない)", cols["excluded"]["A"]["n"] == 3 and cols["excluded"]["A"]["x_range"][0] > 19.0
+              and cols["excluded"]["B"]["n"] == 0 and cols["n"] == cols["n_use"] - 3 and cols["x_range"][1] <= 19.0 and cols["edge_tol"])
+        check(f"判定窓の完全性: 入るべき出力 {ab['completeness']['n_required']} (出力の間隔 2,500 と 2 窓から列挙) をすべて比べた; 腕 B の値は記録 "
+              f"(sha が同じ) と、記録の無い出力は抽出し直し", ab["completeness"]["required"] == req and [r["step"] for r in ab["per_output"]] == req
+              and srcs == {"記録", "抽出"} and ab["completeness"]["reextracted_B"] == [req[1]], str(srcs))
+        check(f"σ_ref: 判定窓の全 {len(req)} 出力 × 代わりの参照 4 つ (40,000・45,000・50,000・55,000) で抽出し直した (合否の変化なし)",
+              sorted(int(k) for k in sg["per_step"]) == req and all(len(v["alts"]) == 4 and all(a_["pf_F"] and a_["pf_use"] and not a_["change"] for a_ in v["alts"])
+                                                    for v in sg["per_step"].values()) and sg["alts"] == [f"res_{k}.h5" for k in sorted(ALT_SHAPES)])
+        check("スクリーニング (停止の出力 × 37,000・49,000) は記録だけ", ab["screening"]["label"].startswith("スクリーニング")
+              and len(ab["screening"]["per_snapshot"]) == 2)
+        rf = R["reference_final"]
+        check(f"参照の最終の資格: あり ({rf['why'][:50]}…)", rf["qualified"] is True and rf["ab_code"] == "A")
         check(f"判定の全体: 「更新に進める条件をすべて満たす / 抽出の参照の A/B: 結果 A」({R['verdict'][:60]}…)",
               R["verdict"].startswith("更新に進める条件をすべて満たす") and "結果 A" in R["verdict"] and R["update_conditions_met"])
         st = ab["at_stop"]
@@ -520,6 +636,8 @@ def test_ns_judge():
               and "exit_core_M" in q["default"]["verdicts"], str(q.get("default", {}).get("missing")))
         check("関門は固定の Euler の参照・ω 0.5・上書きなしで呼ばれる",
               R["gate"]["proceed"] and R["stop"]["stop_sha256_match"] and R["stop"]["wall_dump_at_stop"] == [f"res_wall_3_{S_STOP}.h5"])
+        j_mid = mid_col(R)
+        mmpr = NS_S * 1e3
         # 結果 B: 腕 A の参照の形を変える
         case = TMP / "ns_B"
         shutil.copytree(base, case)
@@ -528,28 +646,98 @@ def test_ns_judge():
         write_field_run(case / HJ.OLD_EULER, X, Rr, Q, {}, (12000,))
         rc, R = judge(case)
         check(f"結果 B: 腕 A の参照の形を変える (D min {R['ab'].get('D_mm', {}).get('min', float('nan')):.4f} mm > 0.01 mm)",
-              rc == 0 and R["ab"]["result"] == "結果 B", R["ab"]["why"])
-        # 判定不能: 参照の時間の変動 σ_ref が大きい
+              rc == 0 and R["ab"]["result"] == "結果 B" and R["ab"]["classify"]["code"] == "B_D" and R["reference_final"]["qualified"] is True,
+              R["ab"]["why"])
+        # 判定不能: 代わりの参照 (45,000) の形が大きく違う → σ_ref が大きい → 参照の最終の資格なし → 更新に進めない
         case = TMP / "ns_sigma"
         shutil.copytree(base, case)
         eb = case / HJ.EU_RUN
-        write_eu_shape(eb, 37000, 0.003)
+        write_eu_shape(eb, 45000, 0.003)
         q = json.loads((case / HJ.QUAL).read_text())
-        q["sensitivity_snapshots"] = [{**s, "sha256": HJ.sha256_file(eb / s["res"])} for s in q["sensitivity_snapshots"]]
+        q["sigma_ref_snapshots"] = [{**s_, "sha256": HJ.sha256_file(eb / s_["res"])} for s_ in q["sigma_ref_snapshots"]]
         (case / HJ.QUAL).write_text(json.dumps(q))
         rc, R = judge(case)
-        check(f"判定不能: 参照の時間の変動 σ_ref {R['ab']['sigma_ref']['mm']:.4f} mm で 0.01 mm をまたぐ",
-              R["ab"]["result"] == "判定不能" and "参照の未整定" in R["ab"]["why"], R["ab"]["why"])
+        check(f"判定不能: σ_ref {R['ab']['sigma_ref']['mm']:.4f} mm で 0.01 mm をまたぐ (参照の未整定) → 参照の最終の資格なし → "
+              "関門が進めても更新に進める条件を満たさない",
+              R["ab"]["result"] == "判定不能" and R["ab"]["classify"]["code"] == "U_sigma_straddle" and R["reference_final"]["qualified"] is False
+              and R["gate"]["proceed"] and not R["update_conditions_met"] and R["verdict"].startswith("更新に進める条件を満たさない")
+              and "参照の最終の資格" in R["verdict"], R["ab"]["why"])
         case = TMP / "ns_sigma_sha"
         shutil.copytree(base, case)
         q = json.loads((case / HJ.QUAL).read_text())
-        q["sensitivity_snapshots"][0]["sha256"] = "0" * 64
+        q["sigma_ref_snapshots"][1]["sha256"] = "0" * 64
         (case / HJ.QUAL).write_text(json.dumps(q))
         rc, R = judge(case, ["--no-ab"])
-        check("--no-ab: A/B は未実施", R["ab"]["result"].startswith("未実施"))
+        check("--no-ab: A/B は未実施・参照の最終の資格を確かめていない → 更新に進める条件を満たさない",
+              R["ab"]["result"].startswith("未実施") and R["reference_final"]["qualified"] is None and not R["update_conditions_met"])
         rc, R = judge(case)
-        check("参照の時間の変動を測る出力の sha が違う → σ_ref を測れない → 判定不能", R["ab"]["result"] == "判定不能"
-              and R["ab"]["sigma_ref"]["mm"] is None)
+        check("代わりの参照の sha が違う → σ_ref を測れない → 判定不能・参照の最終の資格なし", R["ab"]["result"] == "判定不能"
+              and R["ab"]["sigma_ref"]["status"] == "unmeasurable" and R["ab"]["sigma_ref"]["mm"] is None
+              and R["reference_final"]["qualified"] is False and not R["update_conditions_met"])
+        # 行が欠けても res があれば抽出し直して補う (結果 A のまま)
+        case = TMP / "ns_rows"
+        shutil.copytree(base, case)
+        rp = case / HJ.NS_RUN / SR.RECORD
+        rec = json.loads(rp.read_text())
+        rec["rows"] = [r for r in rec["rows"] if r["step"] == S_STOP]
+        rp.write_text(json.dumps(rec))
+        rc, R = judge(case)
+        check("stop_rule.json に停止の行だけ (res は全部ある) → 入るべき出力を列挙して抽出し直して補う → 結果 A",
+              R["ab"]["result"] == "結果 A" and R["ab"]["completeness"]["rows_missing"] == req[:-1]
+              and R["ab"]["completeness"]["reextracted_B"] == req[:-1], R["ab"]["why"])
+        # 反例 2 (組み込み): 停止の行だけ・他の出力の res も無い → 判定不能
+        for k in req[:-1]:
+            (case / HJ.NS_RUN / f"res_{k}.h5").unlink()
+        rc, R = judge(case)
+        check(f"反例 2 (組み込み): 停止の 1 行だけで他の res も無い (再抽出で補えない) → 判定不能 ({R['ab']['classify']['code']})",
+              R["ab"]["result"] == "判定不能" and R["ab"]["classify"]["code"] == "U_incomplete" and R["ab"]["completeness"]["res_missing"] == req[:-1]
+              and not R["update_conditions_met"], R["ab"]["why"])
+    # 反例 1 (組み込み): 腕 A の中ほどの 1 列だけ欠測 (F の中) → 結果 A にしない
+    def hole(run, step, spec, d):
+        if str(Path(spec["run"]).resolve()).endswith(HJ.OLD_EULER):
+            d = {**d, "delta_E": list(d["delta_E"]), "missing": list(d["missing"]) + [j_mid]}
+            d["delta_E"][j_mid] = float("nan")
+        return d
+    with Patch((HJ, "HOOKS", {**hooks, "delta_snapshot": snap_hook(hole)})):
+        case = TMP / "ns_cx1"
+        shutil.copytree(base, case)
+        rc, R = judge(case)
+        per = R["ab"]["per_output"]
+        check(f"反例 1 (組み込み): 腕 A の比べる列の中ほど (x {per[0].get('x_bad_A')}) だけ欠測 → 比べる列は減らさず腕 A は合否 否 → "
+              f"代わりの参照の全部でも腕 B は合 → 結果 B ({R['ab']['classify']['code']}、結果 A ではない)",
+              R["ab"]["result"] == "結果 B" and R["ab"]["classify"]["code"] == "B_pf" and all(r["pf_A"] is False and r["n_fixed"] == R["ab"]["columns"]["n"]
+                                                                                             for r in per), R["ab"]["why"][:200])
+    # 反例 3 (組み込み): 途中の 1 出力だけ代わりの参照 (50,000) で δ_E が 0.030 mm 動く → 判定不能・参照の最終の資格なし
+    k_mid = req[2]
+
+    def bump(run, step, spec, d):
+        if spec.get("res") == "res_50000.h5" and step == k_mid:
+            d = {**d, "delta_E": list(d["delta_E"])}
+            d["delta_E"][j_mid] += 0.030 / mmpr
+        return d
+    with Patch((HJ, "HOOKS", {**hooks, "delta_snapshot": snap_hook(bump)})):
+        case = TMP / "ns_cx3"
+        shutil.copytree(base, case)
+        rc, R = judge(case)
+        sg = R["ab"]["sigma_ref"]
+        at = [a_["max_mm_F"] for a_ in sg["per_step"][str(k_mid)]["alts"] if a_["res"] == "res_50000.h5"]
+        check(f"反例 3 (組み込み): 停止の出力 {S_STOP} の感度は小さく、途中の出力 {k_mid} × res_50000 だけ 0.030 mm → σ_ref {sg['mm']:.4f} mm → "
+              f"判定不能 (参照の未整定)・参照の最終の資格なし・更新に進めない",
+              0.029 < sg["mm"] < 0.031 and at and abs(at[0] - sg["mm"]) < 1e-12 and R["ab"]["classify"]["code"] == "U_sigma_straddle"
+              and R["reference_final"]["qualified"] is False and not R["update_conditions_met"], R["ab"]["why"][:200])
+    # 比べる列の固定に出口の幾何の許容 (Euler の端の外側だけ、端の列の間隔 × 1e−4) が効く
+    xu = np.asarray(json.loads((base / HJ.NS_RUN / SR.RECORD).read_text())["delta_series"]["x"])
+    for name, short, want in (("1.68e−9 r_t 短い (変換の丸め)", 1.68e-9, True), ("0.07 r_t 短い (範囲の不足)", 0.07, False)):
+        rd = TMP / f"fx_{name[:4]}"
+        X, Rr, Q = synth_eu(X1)
+        X = X.copy()
+        X[-1, :] = xu[-1] - short
+        write_field_run(rd, X, Rr, Q, {}, (60000,))
+        fx = HJ.fixed_columns(xu, {"B": rd}, edge_tol=True)
+        fx0 = HJ.fixed_columns(xu, {"B": rd}, edge_tol=False)
+        check(f"比べる列の固定: Euler の端が NS の最後の列より {name} → 最後の列は {'F に入る' if want else '入らない (欠測のまま)'}"
+              f" (許容 {fx['cover']['B']['tol_hi']:.2e} r_t; 許容なし (±1e−9) では入らない)",
+              bool(fx["mask"][-1]) == want and not fx0["mask"][-1] and fx["mask"][:-2].all())
     with Patch((HJ, "HOOKS", {"handoff_gate": stub_gate(False), "next_wall_check": stub_next_wall})):
         case = TMP / "ns_blocked"
         shutil.copytree(base, case)
@@ -683,7 +871,7 @@ def test_run_orchestration():
         rr = json.loads((c / HR.EU_RUN / "RUN_END.json").read_text())
         check(f"本番: 検査の合格 → run_staged を cfl_main 2.0・mid_stage・full で呼ぶ → 資格が無い (偽の Euler) → rc 2 で NS に進まない",
               rc == 2 and calls and calls[-1][1] == {"cfl_main": 2.0, "mid_stage": True, "stages": "full"} and rr["run_rc"] == "0"
-              and (c / HR.QUAL).is_file() and not json.loads((c / HR.QUAL).read_text())["qualified"] and not (c / HR.PIN).exists(), str(calls[-1:]))
+              and (c / HR.QUAL).is_file() and not json.loads((c / HR.QUAL).read_text())["prequalified"] and not (c / HR.PIN).exists(), str(calls[-1:]))
         calls.clear()
         e = raises(lambda: HR.phase_ns(args(phase="ns"), RA, {}), SystemExit)
         check("固定が無い → NS を準備しない (止める)", e is not None and not (c / HR.NS_RUN).exists())
@@ -725,8 +913,12 @@ def test_ns_phase_and_parts():
     eb.mkdir()
     (eb / "res_60000.h5").write_bytes(b"euler")
     sha = HR.sha256_file(eb / "res_60000.h5")
+    for k in (40000, 45000, 50000, 55000):
+        (eb / f"res_{k}.h5").write_bytes(f"euler {k}".encode())
     (c / HR.PIN).write_text(json.dumps({"run": HR.EU_RUN, "res": "res_60000.h5", "sha256": sha}))
-    (c / HR.QUAL).write_text(json.dumps({"qualified": True, "pin": {"sha256": sha}}))
+    (c / HR.QUAL).write_text(json.dumps({"prequalified": True, "pin": {"sha256": sha},
+                                         "sigma_ref_snapshots": [{"res": f"res_{k}.h5", "step": k, "sha256": HR.sha256_file(eb / f"res_{k}.h5")}
+                                                                 for k in (40000, 45000, 50000, 55000)]}))
     fake_ns = make_fake_prepare_ns()
 
     def fake_prepare_ns_real(problem, run, delta_r_csv=None, offset=None, euler_ref=None, stop_rule=None, **kw):
@@ -804,7 +996,15 @@ def test_ns_phase_and_parts():
     # 部品
     with Patch((HR, "HERE", c2)):
         r = HR.read_pin()
-        check("read_pin: 固定 {run, res, sha256} を run の絶対パスで返す", r["spec"] == pin_rec)
+        check("read_pin: 固定 {run, res, sha256} を run の絶対パスで返す (σ_ref の代わりの参照 4 つも在って sha が合う)", r["spec"] == pin_rec)
+        (c2 / HR.EU_RUN / "res_45000.h5").unlink()
+        check("read_pin: σ_ref の代わりの参照の出力が消されている → NS を回す前に止める", raises(HR.read_pin, SystemExit) is not None)
+        (c2 / HR.EU_RUN / "res_45000.h5").write_bytes(b"euler 45000")
+        q_ = json.loads((c2 / HR.QUAL).read_text())
+        (c2 / HR.QUAL).write_text(json.dumps({**q_, "sigma_ref_snapshots": []}))
+        check("read_pin: 予備の資格の記録に σ_ref の代わりの参照が無い → 止める", raises(HR.read_pin, SystemExit) is not None)
+        (c2 / HR.QUAL).write_text(json.dumps(q_))
+        check("read_pin: 元に戻せば通る", HR.read_pin()["spec"] == pin_rec)
         (c2 / HR.EU_RUN / "res_60000.h5").write_bytes(b"changed")
         check("read_pin: 固定した出力の sha が違う → 止める", raises(HR.read_pin, SystemExit) is not None)
     a, b = TMP / "mi_a.h5", TMP / "mi_b.h5"

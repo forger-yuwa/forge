@@ -685,7 +685,10 @@ def two_window_check(rec: dict | None, step, tol_mm: float = HANDOFF_WINDOW_TOL_
     """δ_E・δ_target の隣り合う 2 窓の条件 (§6 V-h370): 停止の出力 s に対して W1 = [s − 2W, s − W]・W2 = [s − W, s] (閉区間、W は停止規則の
     窓)。stop_rule.json の行の `delta` (見張りの中の出力ごとの抽出、`stop_rule.delta_snapshot`) を読み、計算の後に抽出し直さない。
     各窓の全使用域 (delta_series.x の全列) で δ_E・δ_target の最大 − 最小 ≤ tol_mm、窓の平均どうしの差も全列で ≤ tol_mm [mm]。
-    各窓は min_points 点以上 (停止規則と同じ)、窓の全出力に欠測・held・抽出の失敗・飛ばしの無い記録があること。満たさなければ不合格。"""
+    各窓は min_points 点以上 (停止規則と同じ)、窓の全出力に欠測・held・抽出の失敗・飛ばしの無い記録があること。満たさなければ不合格。
+    窓に入るべき出力は記録にある行からではなく、出力の間隔 (settings.out_step_interval) から `stop_rule.required_window_steps` で列挙し、
+    行そのものが欠けた出力も不合格にする (§5.1 #36g、codex diagnose 2026-10-14 の Major「判定窓の完全性」; V-h370 では 17 出力)。"""
+    from ..evaluate.stop_rule import required_window_steps
     if rec is None or step is None:
         return {"pass": False, "why": "stop_rule.json か停止の出力 s が無い (出力ごとの δ の記録が要る)"}
     st, ds = rec.get("settings") or {}, rec.get("delta_series") or {}
@@ -701,7 +704,21 @@ def two_window_check(rec: dict | None, step, tol_mm: float = HANDOFF_WINDOW_TOL_
     if not rows or rows[0]["step"] > step - 2 * W:
         out["why"] = f"本段の履歴が 2 窓 [s − {2 * W}, s] を覆わない (最初の出力 {rows[0]['step'] if rows else None})"
         return out
-    wins = [[r for r in rows if lo <= r["step"] <= hi] for lo, hi in out["windows"]]
+    oi = st.get("out_step_interval")
+    try:
+        need = required_window_steps(int(step), W, oi)
+    except (TypeError, ValueError) as e:
+        out["why"] = f"2 窓に入るべき出力を列挙できない (settings.out_step_interval {oi!r}: {e})"
+        return out
+    have = {r["step"] for r in rows}
+    out["required"] = {"n": len(need), "first": need[0], "last": need[-1], "out_step_interval": int(oi)}
+    lack = [k for k in need if k not in have]
+    if lack:
+        out["why"] = f"2 窓に入るべき出力 {len(need)} のうち記録の行が無い出力 {len(lack)}: {lack[:8]}" + (" …" if len(lack) > 8 else "")
+        out["missing_rows"] = lack
+        return out
+    by = {r["step"]: r for r in rows}
+    wins = [[by[k] for k in need if lo <= k <= hi] for lo, hi in out["windows"]]
     out["n"] = [len(w) for w in wins]
     if min(out["n"]) < mp:
         out["why"] = f"窓の点数 {out['n']} (各 ≥ {mp} が要る)"
@@ -738,13 +755,16 @@ def two_window_check(rec: dict | None, step, tol_mm: float = HANDOFF_WINDOW_TOL_
 
 def coverage_check(summary: dict, delta_next, x_exit: float) -> dict:
     """抽出の全域の被覆と使用域の held・欠測 (§4.9): (i) NS のすべての列を抽出した (`not_extracted` が空: Euler の範囲の外・端の補間範囲の
-    不足 (欠測)・帯の計算の失敗が 1 列も無い)、(ii) 使用域 [0, x_e] の delta_r_next.csv に held が無く δ_E・δ_target が有限。"""
+    不足 (欠測)・帯の計算の失敗が 1 列も無い)、(ii) 使用域 [0, x_e] の delta_r_next.csv に held が無く δ_E・δ_target が有限。
+    Euler の範囲は抽出器の `deltastar.euler_cover_range` (§5.1 #36g: 端の外側だけの幾何の許容、許容の内側で端を越えた列は端の列の値;
+    その列は `edge_tol_cols` として記録に残す)。"""
     ne = (summary or {}).get("not_extracted")
     out = {"x_exit": float(x_exit), "pass": False}
     if not isinstance(ne, dict):
         out["why"] = "抽出の記録に not_extracted が無い (被覆を判定できない)"
         return out
-    out["not_extracted"] = {"n": ne["n"], "n_cols_ns": ne.get("n_cols_ns"), "x": ne["x"][:20], "reason": ne["reason"][:20]}
+    out["not_extracted"] = {"n": ne["n"], "n_cols_ns": ne.get("n_cols_ns"), "x": ne["x"][:20], "reason": ne["reason"][:20],
+                            "euler_cover": ne.get("euler_cover"), "edge_tol_cols": ne.get("edge_tol_cols")}
     nx = read_delta_r_next(delta_next)
     x = np.asarray(nx["x_rt"], dtype=float)
     use = (x >= 0.0) & (x <= float(x_exit) + 1e-9)

@@ -19,6 +19,10 @@ CFD・変換器は使わない (格子は生成器の座標、場は合成)。
      次の壁・Euler の参照の違い・ω の違い・抽出の例外 (sha の不一致)。上書きの 2 つでは足した条件を通さない。
   G. 次の壁の幾何 (`next_wall_check`、本物の壁の構築): 積分法の δ_r で合格、出口側に凹みを入れた δ で不合格。
   H. 1 出力あたりの抽出の時間 (`delta_snapshot`) を実寸の格子 (NS 4719 × 160・Euler 2000 × 97) で測る (--quick で省く)。
+  I. 出口の列の被覆 (§5.1 #36g、B の dry-run の発見): Euler の補間できる範囲 (`deltastar.euler_cover_range`) の幾何の許容 (端の外側だけ、
+     端の列の間隔 × 1e−4)。Euler の端が NS の最後の列より 1.68e−9 r_t 短い → 覆う・端の列の値で評価 (抽出器・δ_in の照合・関門の被覆・
+     δ の記録・帯の生成)、許容のちょうど外 → 欠測、0.07 r_t の不足 → 欠測、内側の列には効かない (ビット同一)、既定 (clamp) は ±1e−9 のまま。
+     2 窓に入るべき出力の列挙 (`stop_rule.required_window_steps`)。
 
 usage: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_h370_prelaunch_tests.py [--quick] [--pin <run_0062 のディレクトリ>]
   --pin が無ければ case/45 の run_0062_euler_wallfit_fit_r1_ext6k、無ければ /home/sano/work/forge の同じ run (環境変数 H370_PIN も可)。
@@ -501,6 +505,8 @@ def test_gate(eu, pin):
             ("2 窓: 後の窓の中で δ_target が 0.0115 mm 振れる",
              dict(delta_fn=lambda s, x: (np.full(len(x), 1e-3), np.full(len(x), 2e-3 + (1.5e-4 if s > 42500 else 0.0)))), {}, "2 窓"),
             ("2 窓: 窓の中の出力の δ の記録が無い (抽出の失敗)", dict(delta_fn=lambda s, x: None if s == 30000 else (np.full(len(x), 1e-3),) * 2), {}, "2 窓"),
+            ("2 窓: 記録の行そのものが欠けた出力 47,500 (入るべき出力を出力の間隔から列挙)",
+             dict(steps=[k for k in range(2500, 62501, 2500) if k != 47500]), {}, "記録の行が無い出力"),
             ("2 窓: 履歴が 2 窓を覆わない (停止 30,000)", dict(s_stop=30000), {}, "2 窓"),
             ("次の壁の幾何の健全性が不合格", {}, dict(nw=False), "次の壁"),
         ]
@@ -626,6 +632,115 @@ def test_timing(prod):
     return dt
 
 
+# ====================================================================================== I. 出口の列の被覆 (幾何の許容)
+def euler_ending(name: str, short: float):
+    """Euler の参照 run (列の x = linspace(X0 − 0.5, X1, 69) の最後の列だけを X1 − short に)。戻り (run dir, 固定の指定, 列の x)。"""
+    x = np.linspace(X0 - 0.5, X1, 69)
+    x[-1] = X1 - short
+    rw = rwE_f(x)
+    R = rw[:, None] * radial(NJ)[None, :]
+    X = np.repeat(x[:, None], NJ, axis=1)
+    rd = TMP / name
+    write_run(rd, X, R, core_q(X, R, rw[:, None]), {}, steps=(1000,))
+    return rd, {"run": str(rd), "res": "res_1000.h5", "sha256": DS._sha256_file(rd / "res_1000.h5")}, x
+
+
+def test_exit_cover(pin0):
+    print("== I. 出口の列の被覆: Euler の補間できる範囲の幾何の許容 (§5.1 #36g)", flush=True)
+    from forge_design.metrics.delta_in_check import compare_delta_in, wall_columns_from_run
+    xE = np.linspace(X0 - 0.5, X1 + 0.5, 70)
+    r = DS.euler_cover_range(xE)
+    r0 = DS.euler_cover_range(xE, edge_tol=False)
+    check("euler_cover_range: 許容は端の外側だけ (tol = 1e−4 × 端の列の間隔)、既定 (edge_tol=False) は ±1e−9",
+          r["tol_hi"] == 1e-4 * (xE[-1] - xE[-2]) and r["tol_lo"] == 1e-4 * (xE[1] - xE[0]) and r["hi"] == xE[-1] + r["tol_hi"]
+          and r["lo"] == xE[0] - r["tol_lo"] and r0["hi"] == xE[-1] + 1e-9 and r0["lo"] == xE[0] - 1e-9)
+    xx = np.array([xE[0] - 2 * r["tol_lo"], xE[0] - 0.5 * r["tol_lo"], xE[0], 3.0, xE[-1], xE[-1] + 0.5 * r["tol_hi"], xE[-1] + 2 * r["tol_hi"]])
+    check("euler_covers: 端の外側は許容の内だけを覆う", list(DS.euler_covers(xx, r)) == [False, True, True, True, True, True, False]
+          and DS.euler_covers(3.0, r) is True)
+    # NS (最後の列 x = X1) と、端が X1 − d の Euler
+    Xo, Ro, Qo = synth_ns(+1.0)
+    h0 = X1 - np.linspace(X0 - 0.5, X1, 69)[-2]
+    d_out = 1.001e-4 * h0 / (1.0 + 1.001e-4)            # 許容 1e−4 × (h0 − d) のちょうど外 (0.1 %)
+    cases = {"over": 1.68e-9, "just_out": d_out, "short": 0.07}
+    runs = {}
+    for k, d in cases.items():
+        eu, pin, x = euler_ending(f"eu_i_{k}", d)
+        rg = DS.euler_cover_range(wall_columns_from_run(eu)["x"])
+        rd = TMP / f"ns_i_{k}"
+        write_run(rd, Xo, Ro, Qo, ns_info(pin), steps=(2500,))
+        runs[k] = (eu, pin, rd, rg)
+    eu, pin, rd, rg = runs["just_out"]
+    check(f"前提: 「ちょうど外」の Euler の端は NS の最後の列より許容の 1.001 倍だけ短い (hi {rg['hi']:.15g} < X1 {X1}、差 / 許容 "
+          f"{(X1 - rg['x1']) / rg['tol_hi']:.4f})", rg["hi"] < X1 and 1.0005 < (X1 - rg["x1"]) / rg["tol_hi"] < 1.0015)
+    kw = dict(band_select="edge", remap_constant_x=True, remap_edge="missing")
+    eu, pin, rd, rg = runs["over"]
+    a = DS.deltastar_from_core_matched_euler(rd, pin, **kw)
+    ne = a["not_extracted"]
+    E = DS._load_structured(eu, res="res_1000.h5")
+    check(f"1.68e−9 r_t の越え: 全列を抽出 (not_extracted 0)、許容の内側で端を越えた列 {ne['edge_tol_cols']['x']}・越え "
+          f"{ne['edge_tol_cols']['beyond'][0]:.3g} r_t を記録、Euler の壁は端の列の値",
+          ne["n"] == 0 and len(a["x"]) == NI and ne["edge_tol_cols"]["n"] == 1 and ne["edge_tol_cols"]["x"] == [X1]
+          and abs(ne["edge_tol_cols"]["beyond"][0] - 1.68e-9) < 1e-12 and a["r_wall_euler"][-1] == E["r"][-1, -1]
+          and a["settings"]["euler_cover"]["edge_tol"], str(ne)[:300])
+    b = DS.deltastar_from_core_matched_euler(rd, pin, band_select="edge", remap_constant_x=True)
+    check("既定 (remap_edge='clamp') の経路は今と同じ ±1e−9: 1.68e−9 r_t の越えは Euler の範囲の外 (outside_euler)",
+          b["not_extracted"]["n"] == 1 and b["not_extracted"]["reason"] == ["outside_euler"] and "euler_cover" not in b["settings"])
+    for k, lab in (("just_out", "許容のちょうど外"), ("short", "0.07 r_t の不足")):
+        _, pk, rdk, _ = runs[k]
+        c_ = DS.deltastar_from_core_matched_euler(rdk, pk, **kw)
+        check(f"{lab}: 最後の列は欠測 (outside_euler、外挿しない)", c_["not_extracted"]["n"] == 1 and c_["not_extracted"]["x"] == [X1]
+              and c_["not_extracted"]["reason"] == ["outside_euler"] and c_["not_extracted"]["edge_tol_cols"]["n"] == 0)
+    # 内側の列には効かない: 許容をほぼ 0 にした抽出と、列ごとの値 (adaptive の帯 = 列ごとに独立) がビット同一
+    kw_a = dict(remap_constant_x=True, remap_edge="missing")
+    full = DS.deltastar_from_core_matched_euler(rd, pin, **kw_a)
+    old_frac = DS.EULER_EDGE_TOL_FRAC
+    DS.EULER_EDGE_TOL_FRAC = 1e-12
+    try:
+        tiny = DS.deltastar_from_core_matched_euler(rd, pin, **kw_a)
+    finally:
+        DS.EULER_EDGE_TOL_FRAC = old_frac
+    same = all(np.array_equal(full[q][:-1], tiny[q], equal_nan=True) for q in ("x", "delta_r_raw", "delta_in", "r_wall_euler", "alpha", "band_y_b"))
+    check("内側の列には効かない: 許容あり (最後の列を端の値で抽出) と許容ほぼ 0 (最後の列は欠測) の、内側の全列の列ごとの値がビット同一",
+          len(full["x"]) == NI and len(tiny["x"]) == NI - 1 and same)
+    # δ_in の照合 (delta_in_check.compare_delta_in): 同じ共通の範囲
+    xn = Xo[:, 0]
+    rwn = Ro[:, -1]
+    for k, want in (("over", True), ("just_out", False), ("short", False)):
+        eu, _, _, _ = runs[k]
+        W = wall_columns_from_run(eu)
+        rr = compare_delta_in(xn, rwn, W["x"], W["rw"], lambda x: dl_f(x), S_SC)
+        check(f"δ_in の照合 ({k}): 被覆 {'あり (許容の内側の列 ' + str(rr['n_edge_tol']) + ')' if want else 'なし (最後の列が外)'}",
+              rr["covered"] == want and rr["n_uncovered"] == (0 if want else 1) and rr["n_edge_tol"] == (1 if want else 0)
+              and rr["euler_cover"]["edge_tol"], str({q: rr[q] for q in ("covered", "n_uncovered", "n_edge_tol", "edge_tol_beyond")}))
+    eu, _, _, _ = runs["over"]
+    W = wall_columns_from_run(eu)
+    r1 = compare_delta_in(xn, rwn, W["x"], W["rw"], lambda x: dl_f(x), S_SC, return_arrays=True)
+    check("δ_in の照合: 許容の内側で越えた列の Euler の壁は端の列の値 (δ_in = NS の壁 − Euler の最後の列の壁)",
+          r1["arrays"]["r_wall_euler"][-1] == W["rw"][-1] and r1["arrays"]["delta_in"][-1] == rwn[-1] - W["rw"][-1])
+    # 関門の抽出と被覆・δ の記録・帯の生成 (受け渡しの条件 handoff_extract_settings)
+    eu, pin, rd, _ = runs["over"]
+    od = TMP / "i_handoff"
+    summ = DL.extract_and_merge(rd, pin, out_dir=od, **DL.handoff_extract_settings())
+    cov = DL.coverage_check(summ, od / "delta_r_next.csv", X1)
+    check("関門の抽出と被覆 (1.68e−9 r_t の越え): 全域の被覆の合格・許容の内側の列を記録", cov["pass"] and cov["not_extracted"]["n"] == 0
+          and cov["not_extracted"]["edge_tol_cols"]["n"] == 1, str(cov.get("why")))
+    _, pk, rdk, _ = runs["short"]
+    summ = DL.extract_and_merge(rdk, pk, out_dir=TMP / "i_handoff_short", **DL.handoff_extract_settings())
+    cov = DL.coverage_check(summ, TMP / "i_handoff_short" / "delta_r_next.csv", X1)
+    check("関門の被覆 (0.07 r_t の不足): 不合格 (outside_euler)", not cov["pass"] and cov["not_extracted"]["reason"] == ["outside_euler"])
+    uc = SR.use_columns(rd)
+    one = SR.delta_snapshot(rd, 2500, pin, {**DL.handoff_extract_settings(), "source": "試験"}, uc["x"])
+    band = SR.fix_band(rd, 2500, pin, TMP / "i_band", **SR.band_extract_kw(ns_info(pin)["stop_rule"]))
+    check("δ の記録 (delta_snapshot) は使用域の最後の列 (x_w) まで欠測 0、帯の生成 (fix_band) も全列",
+          uc["x"][-1] == X1 and one["n_missing"] == 0 and np.all(np.isfinite(one["delta_E"])) and len(band["x"]) == NI and band["x"][-1] == X1)
+    # 2 窓に入るべき出力の列挙
+    check("required_window_steps: 停止 62,500・窓 20,000・間隔 2,500 → 17 出力 (22,500〜62,500)、不正な引数は例外",
+          SR.required_window_steps(62500, 20000, 2500) == list(range(22500, 62501, 2500))
+          and raises(lambda: SR.required_window_steps(62500, 20000, None), ValueError) is not None
+          and raises(lambda: SR.required_window_steps(62500, 0, 2500), ValueError) is not None)
+    _ = pin0
+
+
 def main() -> int:
     print(f"出力: {TMP}  ピン: {PIN}", flush=True)
     prod = None
@@ -638,6 +753,7 @@ def main() -> int:
     test_recorder(pin)
     test_gate(eu, pin)
     test_next_wall()
+    test_exit_cover(pin)
     if prod is not None and not QUICK:
         test_timing(prod)
     elif QUICK:
