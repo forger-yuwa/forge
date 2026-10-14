@@ -84,6 +84,17 @@ void variables::registerSpecies(int nSpecies, int chemistry)
         for (const char* c : {"x", "y", "z"}) this->extraOnly_cellValNames.push_back("dY"+std::to_string(s)+"d"+c);   // extraFields 専用
     }
 
+    // 化学種の擬似時間刻み dt_local_sp (time.deltaT.speciesPrecondDt、plans/active/architecture-float-state-double-geometry.md
+    // §5.1 #26)。多成分のときだけ確保する。setDT_d_wrapper が書くのは lowMachPrecond>=2 かつ speciesPrecondDt 1/2 のときだけで、
+    // それ以外は確保時の 0 のまま (化学種は dt_local を読む)。output.extraFields で出せる (既定の出力には入れない)。
+    {
+        const std::string name = "dt_local_sp";
+        this->cellValNames.push_back(name);
+        this->c.emplace(name, std::vector<flow_float>{});
+        this->c_d.emplace(name, nullptr);
+        this->extraOnly_cellValNames.push_back(name);
+    }
+
     // 診断 (FORGE_SPECIES_RAW_DIAG=1): 再正規化前の生更新値 roYraw{s} を出力する (plan species-passive-scalar-unification §6-1 の
     // 制御試験: 受動トレーサは ΣρY=ρ 再正規化を受けないので比較対象は生更新値)。既定では登録しない。
     {
@@ -376,7 +387,8 @@ void variables::allocVariables(const int &useGPU , mesh& msh)
                 || cellValName == "wf_g"
                 || cellValName.rfind("lm", 0) == 0 || cellValName == "gammaEff" || cellValName == "gammaTr" || cellValName == "reTheta"
                 || cellValName == "roGamma" || cellValName == "roReth" || cellValName.find("_gamma") != std::string::npos
-                || cellValName.find("_reth") != std::string::npos || cellValName == "res_roGamma" || cellValName == "res_roReth") {
+                || cellValName.find("_reth") != std::string::npos || cellValName == "res_roGamma" || cellValName == "res_roReth"
+                || cellValName == "dt_local_sp") {   // 化学種の擬似時間刻み: 前処理×speciesPrecondDt 1/2 のときだけ書かれる
                 gpuErrchk( cudaMemset(this->c_d.at(cellValName), 0, (msh.nCells_all)*sizeof(flow_float)) );
             }
         }

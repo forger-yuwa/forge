@@ -1,0 +1,33 @@
+{
+ "true_mean": 6.027597476117179,
+ "G0": {
+  "n_core": 17,
+  "A_node_mean": 6.027926081204988,
+  "B_line_mean": 6.0276317589254775,
+  "A_minus_true_pct": 0.005451676046908105,
+  "B_minus_true_pct": 0.0005687640628693202
+ },
+ "G1": {
+  "n_core": 22,
+  "A_node_mean": 6.0276041411556065,
+  "B_line_mean": 6.027609206831141,
+  "A_minus_true_pct": 0.00011057537359082659,
+  "B_minus_true_pct": 0.00019461674420906405
+ },
+ "Gc": {
+  "n_core": 43,
+  "A_node_mean": 6.027588923496041,
+  "B_line_mean": 6.027601277628422,
+  "A_minus_true_pct": -0.00014189104650119688,
+  "B_minus_true_pct": 6.306843247649851e-05
+ },
+ "G2": {
+  "n_core": 43,
+  "A_node_mean": 6.027588923496041,
+  "B_line_mean": 6.027601277628422,
+  "A_minus_true_pct": -0.00014189104650119688,
+  "B_minus_true_pct": 6.306843247649851e-05
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

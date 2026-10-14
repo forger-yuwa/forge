@@ -102,6 +102,8 @@ void timeIntegration_d_wrapper(int loop , solverConfig& cfg , cudaConfig& cuda_c
 void lineThomasFactor_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , variables& var);
 // line-implicit: sweep カーネル保存の diag/K/rhs でライン block-Thomas を解き dq_new を上書き
 void lineThomas_d_wrapper(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
+// 診断 (FORGE_LINE_DUMP_FINAL=1、既定 off): 確定する補正に対する右辺を書き出す (timeIntegration_d.cu の説明を参照)。
+void lineDumpFinalRhs_wrapper(int nSweep, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var);
 
 // block DPLUR (古典 DPLUR) の sweep 間バッファ入れ替え。ドライバ側から各 sweep 後に呼ぶ。
 void swapBlockImplicitCorrectionBuffers(variables& var);

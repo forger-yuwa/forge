@@ -1,0 +1,73 @@
+{
+ "C": "run_0688_pp_c",
+ "P": "run_0689_pp_p3",
+ "config": {
+  "run_0688_pp_c": {
+   "lowMachPrecond": "0",
+   "precondEps": null,
+   "speciesImplicitCoupling": null,
+   "speciesPrecondDt": null,
+   "lineImplicit": "0",
+   "cfl_pseudo": "1"
+  },
+  "run_0689_pp_p3": {
+   "lowMachPrecond": "3",
+   "precondEps": null,
+   "speciesImplicitCoupling": null,
+   "speciesPrecondDt": null,
+   "lineImplicit": "0",
+   "cfl_pseudo": "1"
+  }
+ },
+ "dt": {
+  "island_median_measured_ratio": 6.03832659938297,
+  "island_median_expected_ratio": 6.038677037681561,
+  "island_median_measured_over_expected": 0.9999646421328916,
+  "island_p10_p90_measured_over_expected": [
+   0.9940245674094973,
+   1.005597769548337
+  ],
+  "island_median_M": 0.04123119478389961
+ },
+ "step0_rel_diff": {
+  "rms_ro": 6.272244881901461e-16,
+  "rms_roUx": 2.464447929784471e-14,
+  "rms_roUy": 3.460545677813519e-15,
+  "rms_roUz": 0.0,
+  "rms_roe": 8.956317179628269e-16,
+  "rms_roK": 6.667456021051901e-15,
+  "rms_roOmega": 2.0246702435175744e-12,
+  "rms_roY0": 6.860922414171939e-16,
+  "rms_roY1": 0.0,
+  "rms_dq_ro": 0.0,
+  "rms_dq_roUx": 0.0,
+  "rms_dq_roUy": 0.0,
+  "rms_dq_roUz": 0.0,
+  "rms_dq_roe": 0.0
+ },
+ "restart_bitwise": true,
+ "boundary_r": {
+  "C": {
+   "inlet": 1.0053858107280051,
+   "outlet": 0.9944183891804752,
+   "axis": 0.9648978450636168,
+   "wall": 1.2065408576370857
+  },
+  "P": {
+   "inlet": 0.9617789716664834,
+   "outlet": 0.9835818828641153,
+   "axis": 1.0291113636163594,
+   "wall": 1.4129098483965064
+  }
+ },
+ "Y0_ptp_20000": {
+  "run_0688_pp_c": 1.213251721310371e-12,
+  "run_0689_pp_p3": 1.2660872350522823e-11
+ },
+ "qualification": {
+  "precond_effective": true,
+  "same_start_and_rhs": true,
+  "boundary_not_frozen": true,
+  "composition_uniform": true
+ }
+}
