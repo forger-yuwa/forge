@@ -1,0 +1,50 @@
+{
+ "mesh": {
+  "discretization": "node",
+  "nj": 97,
+  "throat_refine": 4.0,
+  "throat_width": 3.0,
+  "wall_first_up_x0": -9.0,
+  "wall_first_up_x1": -4.0,
+  "wall_first_blend_x0": 1.0,
+  "wall_first_blend_x1": 17.0,
+  "ar_max": 5000,
+  "ni": null,
+  "wall_first_frac": null,
+  "wall_first_frac_throat": null,
+  "max_nodes": 1000000,
+  "max_nodes_reason": "ユーザ了承 2026-10-15: Pt 3.5 MPa・拡大部 8 m で y1+≤1 と壁際の AR≤5000 に ni≈10,200 (約 99 万点) が要る"
+ },
+ "geometry": {
+  "R": 5.004565618202197,
+  "r_inlet": 3.0027393709213186,
+  "L_U": 5.004565618202197,
+  "L_pipe": 5.004565618202197,
+  "Lc_mode": "from_length",
+  "L_total_tol": 0.005004565618202198,
+  "M_knot": 2.8,
+  "axis_law": "knot",
+  "start_line": "throat_char",
+  "n_start": 41,
+  "n_axis_inv": 2400,
+  "axis_dx0": 0.03,
+  "x_end_margin": 2.3,
+  "wall_mode": "cplus",
+  "exit_mode": "characteristic"
+ },
+ "spec": {
+  "Pt": 3500000.0,
+  "Tt": 1250.0,
+  "p_ambient": 2770.7447458188694,
+  "r_throat": 0.09990877093936801,
+  "M_design": 5.5,
+  "wall_thermal": {
+   "mode": "isothermal",
+   "Tw": 350.0
+  },
+  "sizing": {
+   "method": "throat",
+   "target_m": 0.1
+  }
+ }
+}

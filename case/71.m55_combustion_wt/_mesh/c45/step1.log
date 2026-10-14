@@ -1,0 +1,2 @@
+chain 7.3s  x_in -12.5 x_e 95.2968238943282  design x_in -12.5
+{'wall_first_frac': None, 'wall_first_frac_throat': None, 'wall_first_up_x0': None, 'wall_first_up_x1': None, 'frac_req_min_downstream': 2.796410419142835e-06, 'frac_req_min_throat': 6.576677622972153e-07, 'note': 'case/45 H の参考 (A は計算しない)'}

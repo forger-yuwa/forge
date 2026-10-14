@@ -1,0 +1,86 @@
+{
+ "note": "初期値 (合格の根拠ではない)。NS 後に check_wall_resolution.py の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥)",
+ "wall_first_frac": 2.4e-06,
+ "wall_first_frac_throat": 7.4e-07,
+ "ni": 6000,
+ "wall_first_up_x0": null,
+ "wall_first_up_x1": null,
+ "blend_choice": "C",
+ "blend_text": "上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)",
+ "blend_candidates": [
+  {
+   "label": "recipe",
+   "text": "雛形 (または問題) の値",
+   "wall_first_up_x0": -9.0,
+   "wall_first_up_x1": -4.0,
+   "ni_required_for_ar": 10177,
+   "ni": 6000,
+   "y1plus_est_max": 2.216254103755928,
+   "x_y1plus_est_max_rt": -9.99145660957065
+  },
+  {
+   "label": "B",
+   "text": "縮流部の全体をスロートの値 (up_x0 = 入口端 x_in、up_x1 = 縮流部の入口 −L_U)",
+   "wall_first_up_x0": -10.009131236404395,
+   "wall_first_up_x1": -5.004565618202197,
+   "ni_required_for_ar": 10177,
+   "ni": 6000,
+   "y1plus_est_max": 2.2161968793033546,
+   "x_y1plus_est_max_rt": -9.99145660957065
+  },
+  {
+   "label": "C",
+   "text": "上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)",
+   "wall_first_up_x0": null,
+   "wall_first_up_x1": null,
+   "ni_required_for_ar": 10177,
+   "ni": 6000,
+   "y1plus_est_max": 0.7968403255877253,
+   "x_y1plus_est_max_rt": -0.4152447796804626
+  }
+ ],
+ "wall_first_frac_raw": 2.4919324828489825e-06,
+ "x_wall_first_frac_rt": 6.003083179365062,
+ "wall_first_frac_throat_raw": 7.429341241453642e-07,
+ "x_wall_first_frac_throat_rt": -0.4153150041712177,
+ "y1_m_throat": 7.595935068942007e-08,
+ "y1_m_downstream_min": 5.150761894326623e-07,
+ "ni_required_for_ar": 10177,
+ "ar_max_limit": 5000.0,
+ "ar_max_wall_fast": 8230.371885373119,
+ "mesh_check": {
+  "ar_max": 8230.371886050452,
+  "x_at_max": 4.614756747622407,
+  "n_cells": 575904,
+  "nj": 97
+ },
+ "nodes": {
+  "n_nodes": 582000,
+  "ni": 6000,
+  "nj": 97,
+  "max_nodes": 1000000,
+  "max_nodes_reason": "ユーザ了承 2026-10-15: Pt 3.5 MPa・拡大部 8 m で y1+≤1 と壁際の AR≤5000 に ni≈10,200 (約 99 万点) が要る",
+  "max_nodes_source": "explicit"
+ },
+ "y1plus_est_max_with_blend": 0.7968403255877253,
+ "x_y1plus_est_max_rt": -0.4152447796804626,
+ "radial_growth_max": {
+  "downstream": 1.1192278030029004,
+  "throat": 1.1344481197299576
+ },
+ "inputs": {
+  "y1plus_target": 0.8,
+  "wall": "等温壁 Tw 350.0 K",
+  "mu": "Sutherland (空気: 1.716e-5 Pa s, 273.15 K, S 110.4 K)",
+  "Cf": "0.0592 Re_x*^-0.2 (x = 入口端からの壁の弧長)",
+  "T_ref": "Eckert T* = T_e(1 + 0.032 M² + 0.58 (T_w/T_e − 1))",
+  "flow_1d": "設計壁の面積比 r_w² の 1 次元等エントロピー (semiperfect)",
+  "y1plus_check": "mesh2d._x_stations の station ごと (入口の節点を除く)、配点は mesh2d と同じブレンド"
+ },
+ "warnings": [
+  "格子: 壁際の AR ≤ 5000 に要る ni 10177 が上限 6000 を超える — ni を 6000 にした (AR 8230; 第 1 層・ar_max・throat_refine を見直す)",
+  "格子: 実際の格子 (ni 6000) の AR の最大 8230 が ar_max 5000 を超える (x = 4.615 r_t)",
+  "格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.22 (x = -9.99 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.80 @ x = -0.42 r_t)",
+  "格子: wall_first_frac_throat 7.4e-07 < 1e-06 — float32 の座標では第 1 層が局所半径の 7.4e-07 倍で 約 6 ulp しかない。FP64 のビルドと msh の 17 桁の座標が要る (mesh2d.write_msh41_2d の既定は 10 桁)"
+ ]
+}

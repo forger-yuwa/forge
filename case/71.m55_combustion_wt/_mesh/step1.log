@@ -1,0 +1,23 @@
+geometry: {'R': 5.004565618202197, 'r_inlet': 3.0027393709213186, 'L_U': 5.004565618202197, 'L_pipe': 5.004565618202197, 'M_knot': 2.8, 'L_total_tol': 0.005004565618202198}
+mesh: {'discretization': 'node', 'nj': 97, 'throat_refine': 4.0, 'throat_width': 3.0, 'wall_first_up_x0': -9.0, 'wall_first_up_x1': -4.0, 'wall_first_blend_x0': 1.0, 'wall_first_blend_x1': 17.0, 'ar_max': 5000, 'ni': None, 'wall_first_frac': None, 'wall_first_frac_throat': None, 'max_nodes': 1000000, 'max_nodes_reason': 'ユーザ了承 2026-10-15: Pt 3.5 MPa・拡大部 8 m で y1+≤1 と壁際の AR≤5000 に ni≈10,200 (約 99 万点) が要る'}
+chain 7.7s  x_in -10.009131236404395 x_e 80.07365028691181 L_c 40.554941325089665
+wall pickled
+estimate_mesh 1.0s
+wall_first_frac : 2.4e-06
+wall_first_frac_throat : 7.4e-07
+ni : 6000
+ni_required_for_ar : 10177
+blend_choice : C
+wall_first_up_x0 : None
+wall_first_up_x1 : None
+wall_first_frac_raw : 2.4919324828489825e-06
+x_wall_first_frac_rt : 6.003083179365062
+wall_first_frac_throat_raw : 7.429341241453642e-07
+x_wall_first_frac_throat_rt : -0.4153150041712177
+ar_max_wall_fast : 8230.371885373119
+y1plus_est_max_with_blend : 0.7968403255877253
+x_y1plus_est_max_rt : -0.4152447796804626
+mesh_check : {'ar_max': 8230.371886050452, 'x_at_max': 4.614756747622407, 'n_cells': 575904, 'nj': 97}
+nodes : {'n_nodes': 582000, 'ni': 6000, 'nj': 97, 'max_nodes': 1000000, 'max_nodes_reason': 'ユーザ了承 2026-10-15: Pt 3.5 MPa・拡大部 8 m で y1+≤1 と壁際の AR≤5000 に ni≈10,200 (約 99 万点) が要る', 'max_nodes_source': 'explicit'}
+warnings : ['格子: 壁際の AR ≤ 5000 に要る ni 10177 が上限 6000 を超える — ni を 6000 にした (AR 8230; 第 1 層・ar_max・throat_refine を見直す)', '格子: 実際の格子 (ni 6000) の AR の最大 8230 が ar_max 5000 を超える (x = 4.615 r_t)', '格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.22 (x = -9.99 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.80 @ x = -0.42 r_t)', '格子: wall_first_frac_throat 7.4e-07 < 1e-06 — float32 の座標では第 1 層が局所半径の 7.4e-07 倍で 約 6 ulp しかない。FP64 のビルドと msh の 17 桁の座標が要る (mesh2d.write_msh41_2d の既定は 10 桁)']
+total 8.8s

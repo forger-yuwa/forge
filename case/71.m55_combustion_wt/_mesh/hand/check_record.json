@@ -1,0 +1,148 @@
+{
+ "problem": "problem_m55_ns.yaml",
+ "converter": "/home/ubuntu/forge-integ-dflow2/solver_density_cuda/build/convertGmshToForge",
+ "initializer": {
+  "initializer": {
+   "model": "contur"
+  },
+  "model": "contur_momentum_integral"
+ },
+ "r_t_m": 0.09990877093936801,
+ "converter_sha256": "b39d37fb974ac9fe0d39f4067ff276366fa94aa624ec1f3d947e64acf245b53b",
+ "ns": {
+  "run_dir": "/home/ubuntu/m55_mesh_hand/check/ns",
+  "n_nodes": 465600,
+  "ni": 4800,
+  "nj": 97,
+  "nodes_budget": {
+   "n_nodes": 465600,
+   "ni": 4800,
+   "nj": 97,
+   "max_nodes": 466000,
+   "max_nodes_reason": "ユーザ決定「a」2026-10-15: M5.5 の場所ごとの第一層 (M6 の比で補正) で約 465,600 点 (ni 4800 × nj 97; plan tooling-nozzle-card-local-mesh §5.1 #3a)",
+   "max_nodes_source": "explicit"
+  },
+  "quality_rc": 0,
+  "quality_verdict": "VERDICT: PASS (AR<= 5000, skew<= 0.90)",
+  "ar_relax": {
+   "ar_threshold": 1000.0,
+   "skew_max": 0.1,
+   "ar_max_allowed": 5000.0,
+   "required": true,
+   "source": "nozzle_qc.h5 (primal/cell 変換)",
+   "n_cells": 460704,
+   "max_ar": 4849.418720913685,
+   "max_skew": 0.4164577399331529,
+   "n_high_ar": 47607,
+   "max_skew_high_ar": 0.0015136982113585556,
+   "n_violations": 0,
+   "worst_high_ar": {
+    "x_over_rt": -4.159877302345157,
+    "r_over_rt": 2.9378987165038994,
+    "ar": 1066.9813191485578,
+    "skew": 0.0015136982113585556
+   },
+   "high_ar_x_range_over_rt": [
+    -10.003085666527808,
+    44.08751478573045
+   ],
+   "inlet_x_spread_m": 0.0,
+   "inlet_planar": true,
+   "outlet_x_spread_m": 0.0006213031159649773,
+   "outlet_planar": false,
+   "ok": false
+  },
+  "coord_dtype": "float64",
+  "coord_same_as_msh": true,
+  "coord_max_diff_m": 0.0,
+  "first_layer": {
+   "thick_over_req_max": 0.9999990461153383,
+   "x_at_max": -10.009131236404395,
+   "thick_over_table_minus1_absmax": 9.929710387268642e-10,
+   "thick_um_min": 0.03733760781500046,
+   "thick_um_max": 6.5569639384273755,
+   "n_over_req": 0
+  },
+  "y1plus_est_max": 0.7973645568466698,
+  "x_y1plus_est_max": -6.145378966811523,
+  "y1plus_cal_max": 0.7999992368922707,
+  "x_y1plus_cal_max": -10.009131236404395,
+  "by_segment": {
+   "pipe": {
+    "stations": 280,
+    "thick_over_req_max": 0.9999990461153383,
+    "thick_um_min": 0.2491059000019154,
+    "thick_um_max": 0.44618300807420797,
+    "y1plus_est_max": 0.7973645568466698,
+    "y1plus_cal_max": 0.7999992368922707
+   },
+   "contr": {
+    "stations": 409,
+    "thick_over_req_max": 0.9996978112203335,
+    "thick_um_min": 0.08607131016258399,
+    "thick_um_max": 0.27626386563621697,
+    "y1plus_est_max": 0.4798549493857602,
+    "y1plus_cal_max": 0.7997582489762669
+   },
+   "throat": {
+    "stations": 1842,
+    "thick_over_req_max": 0.999997778074412,
+    "thick_um_min": 0.03733760781500046,
+    "thick_um_max": 0.08587934203365416,
+    "y1plus_est_max": 0.39999911122976484,
+    "y1plus_cal_max": 0.7999982224595297
+   },
+   "div": {
+    "stations": 2269,
+    "thick_over_req_max": 0.999953512132892,
+    "thick_um_min": 0.0722507840849624,
+    "thick_um_max": 6.5569639384273755,
+    "y1plus_est_max": 0.39198177675609364,
+    "y1plus_cal_max": 0.7999628097063135
+   }
+  },
+  "dx_ratio_max": 1.0326315180732597,
+  "x_dx_ratio_max": -9.647757635890548,
+  "wall_chord_ratio_max": 1.0326315180732597,
+  "dx_min_rt": 0.0018107194881466504,
+  "dx_max_rt": 0.05303778452736907
+ },
+ "euler": {
+  "run_dir": "/home/ubuntu/m55_mesh_hand/check/euler",
+  "n_nodes": 465600,
+  "ni": 4800,
+  "nj": 97,
+  "nodes_budget": {
+   "n_nodes": 465600,
+   "ni": 4800,
+   "nj": 97,
+   "max_nodes": 466000,
+   "max_nodes_reason": "ユーザ決定「a」2026-10-15: Euler の ni は雛形の規則で NS と同じ (約 465,600 点、ni 4800 × nj 97)",
+   "max_nodes_source": "explicit"
+  },
+  "quality_rc": 0,
+  "quality_verdict": "VERDICT: PASS (AR<= 1000, skew<= 0.90)",
+  "ar_relax": {
+   "ar_threshold": 1000.0,
+   "skew_max": 0.1,
+   "ar_max_allowed": 1000.0,
+   "required": false,
+   "source": "nozzle_qc.h5 (primal/cell 変換)",
+   "n_cells": 460704,
+   "max_ar": 6.144806253943473,
+   "max_skew": 0.3981261461656235,
+   "n_high_ar": 0,
+   "max_skew_high_ar": null,
+   "n_violations": 0,
+   "inlet_x_spread_m": 0.0,
+   "inlet_planar": true,
+   "outlet_x_spread_m": 0.0,
+   "outlet_planar": true,
+   "ok": true
+  },
+  "dx_ratio_max": 1.0048592499095497,
+  "dx_min_rt": 0.005523822235535529,
+  "dx_max_rt": 0.022095196335968126
+ },
+ "time_s": 44.42521286010742
+}

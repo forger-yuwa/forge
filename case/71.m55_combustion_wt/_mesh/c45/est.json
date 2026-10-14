@@ -1,0 +1,9 @@
+{
+ "wall_first_frac": null,
+ "wall_first_frac_throat": null,
+ "wall_first_up_x0": null,
+ "wall_first_up_x1": null,
+ "frac_req_min_downstream": 2.796410419142835e-06,
+ "frac_req_min_throat": 6.576677622972153e-07,
+ "note": "case/45 H \u306e\u53c2\u8003 (A \u306f\u8a08\u7b97\u3057\u306a\u3044)"
+}
