@@ -65,6 +65,9 @@ echo "[run_case] forge exit=$rc"
 # 実効設定 (起動エコー) を RUN_PROVENANCE にも写す (plan convection-slau-wall-normal-chi-default §4.2)
 grep -h "^'slauWallNormalChi' effective" forge_run.log >> RUN_PROVENANCE.txt 2>/dev/null || true
 grep -h "^'scalarGradient' effective" forge_run.log >> RUN_PROVENANCE.txt 2>/dev/null || true
+# 起動のエコーと config の要求値の照合 (plan tooling-generator-defaults-and-launch-gate §5.1 #29): 不一致・確認不能を
+# LAUNCH_ECHO.txt に WARN で残す (起動の後なので止めない)
+python3 "$ROOT/solver_density_cuda/tools/launch_gate.py" "$PWD" --post-launch --forge-bin "$FORGE_EXE" || true
 
 echo "[run_case] convergence check ->"
 # 判定の終了コードを **握りつぶさず記録する**。段階起動では段ごとに未収束でも先へ進むのが正しいので

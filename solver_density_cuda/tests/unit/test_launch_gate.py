@@ -17,6 +17,9 @@ forge の代わりに偽のバイナリ (起動されたら印 `FORGE_STARTED` �
   2D/3D の取り違え (SERN 2D の宣言 + 六面体の格子、SERN 3D の宣言 + 四角形の格子) と構造/非構造の取り違え (SERN 2D の宣言 +
   三角形の格子) は名指しで FAIL、正しい組 (SERN 2D + 四角形、SERN 3D + 六面体) は通る。型を読めない格子は判定不能として
   宣言した run を FAIL (warn でも落とさない)。codex result 段 M2 の再現 (プロファイルの適用条件だけを `dimension: 3d` 等に) も FAIL。
+- 起動の後の実効値の照合 (plan §5.1 #29、`launch_gate.py --post-launch`): 起動のエコーを出す偽の forge で、要求どおりなら
+  `LAUNCH_ECHO.txt` は PASS、既定の違う偽のバイナリ (エコーで違う値を出す) は不一致を名指しで WARN (forge は止めない)、エコーの
+  無い量は「確認不能」(出るはずのエコーが無ければ WARN、forge が実効値を出さない量は NOTE の一覧)。
 
 メッシュは node 変換と同じ置き方の小さい合成の h5 (長方形の四角形の格子、上辺が壁。適用条件の試験は三角形・六面体・型を読めない
 格子も) を直接書き、来歴の記録は `mesh_provenance.build_record` で作る (変換器は使わない)。宣言は `recipe_settings.declare` で
@@ -684,6 +687,128 @@ r_ = RS.check_config(RC, cfg_text(s2), SERN2D, STAGE, bcond=yaml.safe_load(bcond
                      mesh={'node': False, 'cell_types': {'quad': 100}})
 check({k for k, _ in r_['fails']} == {'applies.discretization'} and not r_['unchecked'],
       'check_config: 格子そのものが cell (config は node) なら applies.discretization を名指しで FAIL', str(r_['fails']))
+
+# ------------------------------------------------------------------------------------------------ 起動の後の実効値のエコー
+
+print('== 起動の後の実効値のエコー (launch_gate.py --post-launch; plan §5.1 #29)')
+
+
+def fake_forge(name, lines, rc=0):
+    """起動のエコーの行を出す偽の forge (既定の違うバイナリの代わり)。"""
+    path = os.path.join(TMP, name)
+    with open(path, 'w') as fh:
+        fh.write('#!/bin/sh\n# 偽の forge (試験用): 起動のエコーを出し、印を書く\n')
+        for ln in lines:
+            fh.write("printf '%s\\n' " + "'" + ln.replace("'", "'\\''") + "'\n")
+        fh.write(f'echo started > FORGE_STARTED\nexit {rc}\n')
+    os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+    return path
+
+
+def echo_rows(text):
+    return [ln.split(':', 1)[1].strip() for ln in text.splitlines() if ln.startswith('echo        :')]
+
+
+def echo_items(text, level):
+    return items(text, level)
+
+
+FAKE_NEW = fake_forge('fake_forge_new.sh', ["'scalarGradient' effective: lsq (explicit)",
+                                            "'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: "
+                                            "mass-flux chi from face-normal Mach)"])
+FAKE_OLD = fake_forge('fake_forge_old.sh', ["'scalarGradient' effective: gg (default)",
+                                            "'slauWallNormalChi' effective: 0 (auto: node+nodeWallDirichlet+SLAU)  (off; bit-identical to "
+                                            "the pre-2026-09-23 flux)",
+                                            '[config] detectNaNInterval effective: 1'])
+d = make_run('echo_new', flat=dict(s2, detectNaNInterval=5), kinds=K_ISO, profile=SERN2D)
+rc, out, started, gate = run_case(d, FORGE_BIN=fake_forge('fake_forge_new_dn.sh', [
+    "'scalarGradient' effective: lsq (explicit)", "'slauWallNormalChi' effective: 1 (explicit)", '[config] detectNaNInterval effective: 5']))
+echo = open(os.path.join(d, 'LAUNCH_ECHO.txt'), encoding='utf-8').read()
+check(started and verdict(echo) == 'PASS' and 'VERDICT: PASS (不一致 0・確認不能 0' in echo,
+      '要求どおりのエコー → LAUNCH_ECHO.txt は PASS', echo[-800:])
+rows = echo_rows(echo)
+check(any(r.startswith('scalarGradient: 要求 lsq (mesh.scalarGradient)、実効 lsq (explicit) → 一致') for r in rows)
+      and any(r.startswith('slauWallNormalChi: 要求 1 (space.slauWallNormalChi)、実効 1 (explicit) → 一致') for r in rows)
+      and any(r.startswith('detectNaNInterval: 要求 5 (detectNaNInterval)、実効 5 → 一致') for r in rows),
+      'エコーのある量 (scalarGradient・slauWallNormalChi・detectNaNInterval) を要求値と照合して一致', str(rows))
+check(any(r.startswith('condTwoPhaseDiffusion: 要求なし (省略) → 対象外') for r in rows)
+      and any(r.startswith('qAccumulatorFP64: 要求なし (省略) → 対象外') for r in rows),
+      '出す条件に当たらないエコー (二相拡散・qAccumulatorFP64) は対象外と書く', str(rows))
+silent = [ln for ln in echo.splitlines() if ln.startswith('NOTE') and '(エコーしない量)' in ln]
+check(len(silent) == 1 and '確認不能' in silent[0] and 'space.limiter,' in silent[0] and 'time.nStepInner' in silent[0]
+      and 'mesh.scalarGradient' not in silent[0] and 'detectNaNInterval' not in silent[0],
+      'forge が実効値を出さない量 (エコーの条件に当たらない time.nStepInner を含む) は「確認不能」と一覧にする (NOTE)', str(silent)[:300])
+prov = open(os.path.join(d, 'RUN_PROVENANCE.txt'), encoding='utf-8').read()
+check('launch_echo : VERDICT PASS (不一致 0・確認不能 0; 詳細 LAUNCH_ECHO.txt)' in prov, 'RUN_PROVENANCE.txt に起動の後の照合の 1 行')
+
+# 既定の違う偽のバイナリ (エコーで違う値を出す): 不一致を名指しで WARN、forge は止めない (起動の後)
+d = make_run('echo_old', flat=dict(s2, detectNaNInterval=5), kinds=K_ISO, profile=SERN2D)
+rc, out, started, gate = run_case(d, FORGE_BIN=FAKE_OLD)
+echo = open(os.path.join(d, 'LAUNCH_ECHO.txt'), encoding='utf-8').read()
+check(rc == 0 and started and verdict(gate) in ('PASS', 'WARN'), '既定の違うバイナリでも関門は通り forge を起動する (照合は起動の後)')
+check(verdict(echo) == 'WARN' and {'mesh.scalarGradient', 'space.slauWallNormalChi', 'detectNaNInterval'} <= keys(echo, 'WARN')
+      and 'VERDICT: WARN (不一致 3・確認不能 0' in echo,
+      '既定の違う偽のバイナリ: scalarGradient (lsq → gg)・slauWallNormalChi (1 → 0)・detectNaNInterval (5 → 1) の不一致を名指しで WARN',
+      echo[-1500:])
+check(any('不一致: scalarGradient: 要求 lsq (mesh.scalarGradient) と forge の起動のエコーの実効 gg (default) が違う' in ln
+          for ln in echo.splitlines()), 'WARN の文に要求値と実効値を書く')
+check('launch_echo : VERDICT WARN (不一致 3・確認不能 0' in open(os.path.join(d, 'RUN_PROVENANCE.txt'), encoding='utf-8').read(),
+      'RUN_PROVENANCE.txt に WARN の 1 行')
+
+# エコーの無いバイナリ (既存の偽の forge は何も出さない): 常に出るはずのエコーの量は「確認不能」
+d = make_run('echo_none', flat=s2, kinds=K_ISO, profile=SERN2D)
+rc, out, started, gate = run_case(d)
+echo = open(os.path.join(d, 'LAUNCH_ECHO.txt'), encoding='utf-8').read()
+rows = echo_rows(echo)
+check(started and verdict(echo) == 'WARN' and {'mesh.scalarGradient', 'space.slauWallNormalChi'} == keys(echo, 'WARN')
+      and 'VERDICT: WARN (不一致 0・確認不能 2' in echo
+      and any(r.startswith('scalarGradient: 要求 lsq (mesh.scalarGradient) → 確認不能 (エコーが無い)') for r in rows),
+      'エコーの無い量は「確認不能」と書いて WARN', echo[-1200:])
+
+# 省略した量 (「書かない」の逸脱): 実効値を記録し、プロファイルの値と違えば書く (NOTE)
+fl = dict(s2)
+del fl['space.slauWallNormalChi']
+d = make_run('echo_omit', flat=fl, kinds=K_ISO, profile=SERN2D, deviate=['space.slauWallNormalChi=~'], reason='省略の試し')
+rc, out, started, gate = run_case(d, FORGE_BIN=FAKE_OLD)
+echo = open(os.path.join(d, 'LAUNCH_ECHO.txt'), encoding='utf-8').read()
+check(any(r.startswith('slauWallNormalChi: 要求なし (省略; プロファイル 1)、実効 0') and r.endswith('プロファイルの値 1 と違う [input/solverConfig.cpp:743]')
+          for r in echo_rows(echo)) and ('エコー', 'space.slauWallNormalChi') in echo_items(echo, 'NOTE')
+      and 'space.slauWallNormalChi' not in keys(echo, 'WARN'),
+      '省略した量は実効値をエコーから記録 (宣言のプロファイルの値と違えば書く; NOTE)', str(echo_rows(echo)))
+
+# log が無い・値の違うエコーが複数 (プロセス内)
+os.unlink(os.path.join(d, 'forge_run.log'))
+with contextlib.redirect_stdout(io.StringIO()):
+    _, eo, text = LG.run_post_launch(d, forge_bin=FAKE_OLD, dry_run=True)
+check(('WARN', 'forge_run.log') in [(lv, k) for lv, _, k, _ in eo.items] and '確認不能 (forge_run.log が無い)' in text,
+      'forge_run.log が無ければ確認不能 (WARN)')
+with open(os.path.join(d, 'forge_run.log'), 'w') as fh:
+    fh.write("'scalarGradient' effective: lsq (explicit)\n'scalarGradient' effective: gg (default)\n")
+with contextlib.redirect_stdout(io.StringIO()):
+    _, eo, text = LG.run_post_launch(d, forge_bin=FAKE_OLD, dry_run=True)
+check(any(lv == 'WARN' and k == 'mesh.scalarGradient' and m.startswith('確認不能: scalarGradient のエコーが 2 行あり値が違う')
+          for lv, _, k, m in eo.items), '値の違うエコーが複数なら確認不能 (WARN)', str(eo.items))
+
+# 凝縮の二相・qAccumulatorFP64 のエコー (forge の printf の書式どおりの行で正規表現を確かめる)
+tp_lines = ["'scalarGradient' effective: lsq (default)", "'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)",
+            '[twophase] condTwoPhaseDiffusion requested 1, state active, effective 1 (ok)',
+            '[twophase] condTwoPhaseSolver 1 (matched scalar-DPLUR: R = full residuals, D = point-diagonal denominators, advective '
+            'inflow off-diagonal, zero start (verified default)); effective implicitRelax 0.7, nStepInner 5, scalarCflMax -1 '
+            '(dt_local scale 1), condTwoPhaseRelax 0.5',
+            '[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 100 CV)']
+tp_flat = {'condensation.condensation': 1, 'condensation.condTwoPhaseDiffusion': 1, 'condensation.condTwoPhaseRelax': 0.5,
+           'time.deltaT.implicitRelax': 0.7, 'time.nStepInner': 4, 'time.deltaT.qAccumulatorFP64': 1}
+rows, eo = LG.check_echoes(d, tp_flat, tp_lines, {})
+want = {'condTwoPhaseDiffusion': '一致', 'implicitRelax (二相)': '一致', 'nStepInner (二相)': '不一致',
+        'condTwoPhaseRelax (二相)': '一致', 'qAccumulatorFP64': '一致'}
+got_st = {r.split(':', 1)[0]: r.rsplit('→ ', 1)[1].split(' [')[0] for r in rows}
+check(all(got_st.get(k) == v for k, v in want.items()) and [k for lv, _, k, _ in eo.items if lv == 'WARN'] == ['time.nStepInner'],
+      '二相の実効値 (implicitRelax・nStepInner・condTwoPhaseRelax)・qAccumulatorFP64 の「有効」の行を照合 (nStepInner 4 → 5 だけ不一致)',
+      str(got_st))
+rows, eo = LG.check_echoes(d, tp_flat, tp_lines[:3], {})
+check({k for lv, _, k, _ in eo.items if lv == 'WARN'} == {'time.deltaT.implicitRelax', 'time.nStepInner', 'condensation.condTwoPhaseRelax',
+                                                            'time.deltaT.qAccumulatorFP64'},
+      '二相拡散が有効なのに二相の実効値の行が無い・qAccumulatorFP64 1 なのに「有効」が無い → 確認不能', str(eo.items))
 
 # ------------------------------------------------------------------------------------------------ モード・入力
 

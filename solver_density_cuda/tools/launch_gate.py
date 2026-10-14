@@ -29,6 +29,12 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
 5. 結果を `<run_dir>/LAUNCH_GATE.txt` (VERDICT・モード・宣言・プロファイル・段・逸脱・FAIL・WARN・メッシュのハッシュ・品質・
    バイナリ) に書き、`RUN_PROVENANCE.txt` に 1 行写す。初期場の h5 に `restart_field.py --allow-coord-upcast` の記録
    (座標の精度の引き上げ; plan §5.1 #20b) があれば両方に写す (判定は変えない)。
+6. **起動の後** (`--post-launch`、plan §4.3 の 4 (c)・§5.1 #29): `run_case.sh` が forge の終了の後に呼ぶ。`forge_run.log` の
+   起動のエコー (forge が起動時に出す実効値の行、`ECHOES` の一覧) と config の要求値を比べ、`LAUNCH_ECHO.txt` に書いて
+   `RUN_PROVENANCE.txt` に 1 行写す。不一致と確認不能 (出るはずのエコーが無い・値の違うエコーが複数・log が無い) は WARN、
+   省略したキーの実効値 (宣言のプロファイルの値つき) と、forge が実効値を出さない量の一覧 (確認不能) は NOTE。起動の後なので
+   止めない (常に終了 0)。今のソースの既定を config に明示しても、実行したバイナリ (旧ビルド・倍精度ビルド) がその値を採用した
+   ことにはならないので、エコーのある量はここで確かめる。
 
 判定の規則 (検査できない入力はどのモードでも FAIL):
 
@@ -60,6 +66,7 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
     launch_gate.py RUN_DIR [--forge-bin BIN] [--dry-run]
       --forge-bin  起動するバイナリ (既定: 環境変数 FORGE_BIN、無ければ solver_density_cuda/build/forge。run_case.sh と同じ)
       --dry-run    判定を出すだけで LAUNCH_GATE.txt・RUN_PROVENANCE.txt・品質の結果の再利用ファイルを書かない
+    launch_gate.py RUN_DIR --post-launch [--forge-bin BIN] [--dry-run]   起動の後の照合 (LAUNCH_ECHO.txt; 常に終了 0)
 終了コード: 0 = PASS・WARN (起動してよい)、1 = FAIL (起動しない)、2 = 引数の誤り。
 """
 import argparse
@@ -92,7 +99,7 @@ BCOND_FILE = 'bcondConfig.yaml'
 DEFAULT_FORGE = os.path.join(ROOT, 'solver_density_cuda', 'build', 'forge')
 QUALITY_TOOL = os.path.join(HERE, 'check_mesh_quality.py')
 
-AREAS = ('モード', '宣言', '設定', '来歴', '品質', 'バイナリ', '関門')
+AREAS = ('モード', '宣言', '設定', '来歴', '品質', 'バイナリ', '関門', 'エコー')
 
 
 def resolve_mode(environ=None):
@@ -571,12 +578,236 @@ def _finish(run_dir, out, info, dry_run):
     return (1 if v == 'FAIL' else 0), out, info
 
 
+# ------------------------------------------------------------------------------------------------ 起動の後: 実効値のエコーの照合
+
+ECHO_FILE = 'LAUNCH_ECHO.txt'
+LOG_FILE = 'forge_run.log'
+ECHO_VERSION = 'launch-echo-v1'
+_TP_SOLVER = (r"^\[twophase\] condTwoPhaseSolver \d+ \(.*\); effective implicitRelax (?P<relax>[^,\s]+), nStepInner (?P<inner>\d+), "
+              r"scalarCflMax \S+ \(dt_local scale \S+\), condTwoPhaseRelax (?P<tprelax>\S+)\s*$")
+
+
+def _cond_on(flat, got):
+    return str(flat.get('condensation.condensation', 0)).strip() == '1' or 'condensation.condTwoPhaseDiffusion' in flat
+
+
+def _tp_active(flat, got):
+    e = got.get('condTwoPhaseDiffusion') or []
+    return bool(e) and e[-1]['v'] == '1'
+
+
+# forge が起動時に出す実効値の行 (起動のエコー) の一覧 (plan §4.3 の 4 (c)・§5.1 #29。`grep effective solver_density_cuda/` で
+# 確かめた forge 本体の出力。出典の行は 2026-10-15 の HEAD)。
+# (名前, 要求値の config のキー, 型, 行の正規表現, 値の組, 出す条件の説明, 出すか (flat, 解析済みのエコー) → bool, 出典)。
+# 型 'presence' は「有効」の行の有無が実効値 (行があれば 1)。
+ECHOES = (
+    ('scalarGradient', 'mesh.scalarGradient', 'str', r"^'scalarGradient' effective: (?P<v>\S+) \((?P<why>.*)\)\s*$", 'v',
+     '常に 1 行', lambda f, g: True, 'input/solverConfig.cpp:279'),
+    ('slauWallNormalChi', 'space.slauWallNormalChi', 'int', r"^'slauWallNormalChi' effective: (?P<v>-?\d+) \((?P<why>[^)]*)\)", 'v',
+     '常に 1 行', lambda f, g: True, 'input/solverConfig.cpp:743'),
+    ('detectNaNInterval', 'detectNaNInterval', 'int', r"^\[config\] detectNaNInterval effective: (?P<v>-?\d+)", 'v',
+     'config に書いたとき (か実効値が 1 でないとき)', lambda f, g: 'detectNaNInterval' in f, 'input/solverConfig.cpp:469'),
+    ('condTwoPhaseDiffusion', 'condensation.condTwoPhaseDiffusion', 'int',
+     r"^\[twophase\] condTwoPhaseDiffusion requested .+?, state (?P<why>\S+), effective (?P<v>\d+) \(.*\)\s*$", 'v',
+     '凝縮 (condensation.condensation 1) かキーを書いたとき', _cond_on, 'cuda_forge/condensationTransport_d.cu:743'),
+    ('implicitRelax (二相)', 'time.deltaT.implicitRelax', 'float', _TP_SOLVER, 'relax',
+     '二相拡散が有効のとき', _tp_active, 'cuda_forge/condensationTransport_d.cu:776'),
+    ('nStepInner (二相)', 'time.nStepInner', 'int', _TP_SOLVER, 'inner',
+     '二相拡散が有効のとき', _tp_active, 'cuda_forge/condensationTransport_d.cu:776'),
+    ('condTwoPhaseRelax (二相)', 'condensation.condTwoPhaseRelax', 'float', _TP_SOLVER, 'tprelax',
+     '二相拡散が有効のとき', _tp_active, 'cuda_forge/condensationTransport_d.cu:776'),
+    ('qAccumulatorFP64', 'time.deltaT.qAccumulatorFP64', 'presence', r"^\[qAccumulatorFP64\] 有効", None,
+     '有効にしたとき (「有効」の行)', lambda f, g: str(f.get('time.deltaT.qAccumulatorFP64', 0)).strip() == '1', 'main.cpp:3449'),
+)
+
+
+def parse_echoes(lines):
+    """forge_run.log の行 → {名前: [{v, why, line}]} (ECHOES の行に当たるものだけ)。"""
+    got = {}
+    for name, _key, kind, rx, grp, *_ in ECHOES:
+        pat = re.compile(rx)
+        for ln in lines:
+            m = pat.match(ln)
+            if m:
+                v = '1' if kind == 'presence' else m.group(grp)
+                why = m.groupdict().get('why') if grp == 'v' else None
+                got.setdefault(name, []).append({'v': v, 'why': why, 'line': ln.rstrip()})
+    return got
+
+
+def _echo_same(kind, req, eff, key):
+    import recipe_settings as RS
+    try:
+        if kind == 'str':
+            return RS.same(str(req), str(eff))
+        if kind in ('int', 'presence'):
+            r = int(str(req).strip())
+            if key == 'detectNaNInterval':
+                r = max(1, r)                       # forge は 1 未満を 1 にする (solverConfig.cpp:467)
+            return r == int(str(eff).strip())
+        r, e = float(req), float(eff)               # %.6g の表示なので相対 1e−5 まで
+        return abs(r - e) <= 1e-5 * max(1.0, abs(r))
+    except (TypeError, ValueError):
+        return False
+
+
+def _declared_values(run_dir):
+    """宣言 (RECIPE.json) のプロファイル・段の fixed・explicit の値と宣言の要約。読めなければ ({}, 要約)。"""
+    import recipe_settings as RS
+    p = os.path.join(run_dir, RECIPE_FILE)
+    if not os.path.isfile(p):
+        return {}, 'なし'
+    try:
+        decl = json.load(open(p, encoding='utf-8'))
+        prof, st = decl.get('profile'), decl.get('stage')
+        text = f'{RECIPE_FILE} (kind {decl.get("kind")}, profile {prof or "-"}, stage {st or "-"})'
+        if not prof or not st:
+            return {}, text
+        res = RS.resolve(RS.load_recipes(), prof)
+        tbl = res['stages'][st]
+        return {**tbl['fixed'], **tbl['explicit']}, text
+    except Exception as e:                          # noqa: BLE001
+        return {}, f'{RECIPE_FILE} を読めない ({type(e).__name__}: {e}; プロファイルの値は示さない)'
+
+
+def check_echoes(run_dir, flat, lines, prof_vals):
+    """起動のエコーと要求値 (config) を比べる。戻り (エコーの表の行 [str], Findings)。不一致・確認不能 (出るはずのエコーが無い・
+    値の違うエコーが複数) は WARN、省略 (要求値なし) の実効値とエコーしない量の一覧は NOTE。"""
+    import recipe_settings as RS
+    out, rows = Findings(), []
+    got = parse_echoes(lines) if lines is not None else {}
+    checked = set()                                 # この run でエコーと照合した (か、出るはずのエコーが無いと WARN にした) キー
+    for name, key, kind, _rx, _grp, when, expect, src in ECHOES:
+        hits = got.get(name) or []
+        req_txt = f'要求 {RS.show(flat[key])} ({key})' if key in flat else (
+            f'要求なし (省略{"; プロファイル " + RS.show(prof_vals[key]) if key in prof_vals else ""})')
+        if lines is None:
+            rows.append(f'{name}: {req_txt} → 確認不能 ({LOG_FILE} が無い) [{src}]')
+            continue
+        if hits:
+            vals = sorted({h['v'] for h in hits})
+            eff = hits[-1]
+            eff_txt = f'実効 {eff["v"]}' + (f' ({eff["why"]})' if eff.get('why') else '')
+            if len(vals) > 1:
+                out.add('WARN', 'エコー', key, f'確認不能: {name} のエコーが {len(hits)} 行あり値が違う ({", ".join(vals)}; どれが効いたか分からない。最後の行で照合した)')
+            if key in flat:
+                if _echo_same(kind, flat[key], eff['v'], key):
+                    st = '一致'
+                else:
+                    st = '不一致'
+                    out.add('WARN', 'エコー', key, f'不一致: {name}: {req_txt} と forge の起動のエコーの{eff_txt} が違う '
+                                                  f'(実行したバイナリはこの値を採用していない; {src})')
+            else:
+                st = '省略 (実効値を記録)'
+                if key in prof_vals and not _echo_same(kind, prof_vals[key], eff['v'], key):
+                    st += f'; プロファイルの値 {RS.show(prof_vals[key])} と違う'
+                out.add('NOTE', 'エコー', key, f'{name}: {req_txt}、{eff_txt}')
+            rows.append(f'{name}: {req_txt}、{eff_txt} → {st} [{src}]')
+            checked.add(key)
+        elif expect(flat, got):
+            checked.add(key)
+            rows.append(f'{name}: {req_txt} → 確認不能 (エコーが無い) [{src}]')
+            out.add('WARN', 'エコー', key, f'確認不能: {name}: forge の起動のエコーが {LOG_FILE} に無い (出す条件: {when})。'
+                                          'このバイナリが要求値を採用したかを確かめられない (エコーを出さない版・起動前に落ちた等)')
+        else:
+            rows.append(f'{name}: {req_txt} → 対象外 (エコーは {when}に出る) [{src}]')
+    if lines is None:
+        out.add('WARN', 'エコー', LOG_FILE, f'確認不能: {LOG_FILE} が無い・読めない (起動のエコーを確かめられない)')
+    # エコーの無い量: エコーの仕組みが無いキーと、エコーの出る条件にこの run が当たらないキー (例 二相拡散でない run の implicitRelax)
+    silent = sorted(k for k in flat if k not in checked)
+    if silent:
+        out.add('NOTE', 'エコー', '(エコーしない量)',
+                f'forge が起動時に実効値を出さない量 {len(silent)} 件は、要求値どおりに採用されたかを確かめられない (確認不能): '
+                + ', '.join(silent))
+    return rows, out
+
+
+def run_post_launch(run_dir, forge_bin=None, environ=None, dry_run=False):
+    """起動の後の照合 (`run_case.sh` が forge の終了の後に `launch_gate.py <run> --post-launch` で呼ぶ)。forge_run.log の起動の
+    エコーと config の要求値を比べ、`LAUNCH_ECHO.txt` に書き、`RUN_PROVENANCE.txt` に 1 行写す。起動の後なので止めない (常に 0)。
+    戻り (0, Findings, 本文)。"""
+    environ = os.environ if environ is None else environ
+    run_dir = os.path.abspath(run_dir)
+    L = [f'# 起動の後の実効値の照合 ({ECHO_VERSION}; solver_density_cuda/tools/launch_gate.py --post-launch、'
+         'plan tooling-generator-defaults-and-launch-gate §4.3 の 4 (c)・§5.1 #29)',
+         f'date        : {datetime.datetime.now().astimezone().isoformat(timespec="seconds")}',
+         f'run_dir     : {run_dir}']
+    out = Findings()
+    rows = []
+    try:
+        import recipe_settings as RS
+        flat = {}
+        cfg_path = os.path.join(run_dir, CONFIG_FILE)
+        try:
+            raw = open(cfg_path, 'rb').read()
+            doc, pf = RS.parse_config(raw.decode('utf-8', errors='replace'))
+            if doc is None:
+                out.add('WARN', 'エコー', CONFIG_FILE, f'確認不能: {CONFIG_FILE} を読めない (要求値が分からない): {pf}')
+            else:
+                flat = RS.flatten(doc)
+            L.append(f'config      : {CONFIG_FILE} (sha256 {hashlib.sha256(raw).hexdigest()})')
+        except OSError as e:
+            out.add('WARN', 'エコー', CONFIG_FILE, f'確認不能: {CONFIG_FILE} が無い (要求値が分からない): {e}')
+        log = os.path.join(run_dir, LOG_FILE)
+        lines = None
+        if os.path.isfile(log):
+            try:
+                with open(log, encoding='utf-8', errors='replace') as fh:
+                    lines = fh.read().splitlines()
+                L.append(f'log         : {LOG_FILE} ({len(lines)} 行, sha256 {sha256_file(log)})')
+            except OSError as e:
+                L.append(f'log         : {LOG_FILE} を読めない ({e})')
+        else:
+            L.append(f'log         : {LOG_FILE} が無い')
+        path = forge_bin or environ.get('FORGE_BIN') or DEFAULT_FORGE
+        L.append(f'forge_bin   : {path}')
+        try:
+            L.append(f'forge_sha256: {sha256_file(path)}')
+        except OSError:
+            L.append('forge_sha256: 不明 (無い・読めない)')
+        prof_vals, decl_txt = _declared_values(run_dir)
+        L.append(f'declaration : {decl_txt}')
+        rows, eo = check_echoes(run_dir, flat, lines, prof_vals)
+        out.items += eo.items
+    except Exception as e:                          # noqa: BLE001
+        out.add('WARN', 'エコー', '(例外)', f'確認不能: 照合の内部の例外: {type(e).__name__}: {e}')
+    for r in rows:
+        L.append(f'echo        : {r}')
+    for lv in ('WARN', 'NOTE'):
+        for level, area, key, msg in out.items:
+            if level == lv:
+                L.append(f'{lv:<4}        : [{area}] {key}: {msg}')
+    n_mis = sum(1 for lv, _, _, m in out.items if lv == 'WARN' and m.startswith('不一致'))
+    n_unk = sum(1 for lv, _, _, m in out.items if lv == 'WARN' and m.startswith('確認不能'))
+    v = 'WARN' if out.count('WARN') else 'PASS'
+    L.append(f'VERDICT: {v} (不一致 {n_mis}・確認不能 {n_unk}; 起動の後の記録なので止めない)')
+    text = '\n'.join(L) + '\n'
+    sys.stdout.write(text)
+    if not dry_run and os.path.isdir(run_dir):
+        try:
+            p = os.path.join(run_dir, ECHO_FILE)
+            tmp = f'{p}.tmp{os.getpid()}'
+            with open(tmp, 'w', encoding='utf-8') as fh:
+                fh.write(text)
+            os.replace(tmp, p)
+            with open(os.path.join(run_dir, PROV_FILE), 'a', encoding='utf-8') as fh:
+                fh.write(f'launch_echo : VERDICT {v} (不一致 {n_mis}・確認不能 {n_unk}; 詳細 {ECHO_FILE})\n')
+        except OSError as e:
+            print(f'[launch_gate] {ECHO_FILE} / {PROV_FILE} を書けない: {e}')
+    return 0, out, text
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('run_dir')
     ap.add_argument('--forge-bin', help='起動するバイナリ (既定: FORGE_BIN、無ければ solver_density_cuda/build/forge)')
     ap.add_argument('--dry-run', action='store_true', help='判定を出すだけでファイルを書かない')
+    ap.add_argument('--post-launch', action='store_true',
+                    help='起動の後の照合: forge_run.log の起動のエコーと config の要求値を比べ LAUNCH_ECHO.txt に書く (常に終了 0)')
     a = ap.parse_args(argv)
+    if a.post_launch:
+        rc, _, _ = run_post_launch(a.run_dir, a.forge_bin, dry_run=a.dry_run)
+        return rc
     rc, _, _ = run_gate(a.run_dir, a.forge_bin, dry_run=a.dry_run)
     return rc
 
