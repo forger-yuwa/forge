@@ -66,7 +66,9 @@ NS の後に `check_wall_resolution.py` (壁ごと・面積の重み・停止の
 
 | # | 項目 | 内容 | 担当 |
 | --- | --- | --- | --- |
-| 1 | plan 段レビュー | §4・§6 を codex に | F |
+| 1 | ~~plan 段レビュー~~ | 判断: 2026-10-15 NO-GO (C0/M7/m1) を全件採用 (§6.1)。§4・§6 は書き直して再レビュー | F |
+| 3a | **M5.5 の手組みの格子 (先行)** | ユーザ決定「a」(2026-10-15): case/71 の問題 YAML の mesh 節を、正規化した要求 f_req = c(x)·y₁,req/r_w の下包絡の表 (補間の区間の中も検査・物理壁で再検査)・流れ方向の密度の表・`throat_refine 1`・`wall_normal_layer [0.02, 0.8]`・`msh_digits 17`・`max_nodes` (ユーザ了承「a」、約 45 万) で手で組む。係数 c: 配管 1.0、縮流部 0.6、スロート・拡大部 0.5 (M6 の H の表 ÷ 見積もりの比の最小、初期格子の経験の係数)。品質: `check_mesh_quality --ar-max 5000`・`mesh_ar_relax_check`・変換後の第一層厚の照合。生成器の既定は変えない | O |
+| 5 | 成果物の対応 (M2) | `export/mesh_structure.py`・`deliverables.py` を壁法線の近壁層の格子でも作れるように (既定化の前提) | O |
 | 2 | 実装 | `estimate_mesh` の `local_v1`、雛形 (`axismach_explore_v1`・`axismach_final_v1`) の `mesh.method`・`first_layer_calibration`・`wall_normal_layer`、記録、試験 | O |
 | 3 | M5.5 のカードの生成 (AWS A) と Euler → NS | ユーザ了承の節点数で | O |
 | 4 | skill の手順 | `nozzle-design`・`design-intake` に格子の作り方と NS の後の壁解像の確認 | O |
@@ -85,6 +87,7 @@ NS の後に `check_wall_resolution.py` (壁ごと・面積の重み・停止の
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
 | --- | --- | --- | --- | --- |
+| plan | 2026-10-15 | [2026-10-15-tooling-nozzle-card-local-mesh-plan.md](../../notes/reviews/2026-10-15-tooling-nozzle-card-local-mesh-plan.md) | NO-GO (分類 incomplete: 見積もりの台本・出力と M6 の比の元の記録がこの作業ツリーに無い), C0/M7/m1 | **全件採用、進め方を 2 段に分ける**: M5.5 は先にケースだけの手組みの格子 (M6 の H と同じやり方; #3a) で進め、生成器の既定の変更 (#2) は指摘を直して再レビューの後。M1 (実寸の下包絡を半径で割ると補間で要求を超える: 反例 1.0607 倍) → f_req = c·y₁,req/r_w の下包絡を表にし、補間の区間の中も検査、物理壁でも実寸を再検査。M2 (`wall_normal_layer` で成果物 `mesh_structure.json`・STEP の再構築が作られない) → 既定化の前に成果物の対応 (#5)。M3 (補正の係数の根拠: H の表は冷却倍率を掛けた見込み、縮流部の比 0.61〜2.2 に係数 1.0 は保守側でない) → 「初期格子の経験の係数」と位置付け、元の run・step・比の分布を固定して commit、縮流部も比の最小 (0.6) に、補間後の c(x) が比を超えない検査。M4 (V2 の `--bcond` がこの枝の検査器に無い・AR 緩和の条件が未定量) → `runner.mesh_ar_relax_check` (AR > 1000 の全セルで skew ≤ 0.1) と変換後の第一層厚の照合・`msh_digits 17` を V2 に。M5 (V4 を記録だけで閉じられる) → 最終の完了は再調整の後の V4 PASS、全 no-slip 壁の同じ step の出力の存在、`check_convergence --segment`・壁量の系列の `check_quasisteady` を事前登録。M6 (見積もりと実生成の設定の契約・旧い overrides) → 見積もり・節点数・品質・実生成で同じパラメータの組み立て、雛形の旧キーの除去、明示の overrides の衝突は拒否、`mesh.ar_max` に従う。M7 (Euler の ni も変わる) → Euler の ni が NS と結合していることを明記し、M5 で出口 M・流量・δ_r の基準格子との差と準定常を受入に。m8 (参照の解決) → 再現の入力を case/71 に commit、関連 plan は統合の後に参照 |
 
 ## 7. 影響範囲
 
@@ -99,4 +102,5 @@ NS の後に `check_wall_resolution.py` (壁ごと・面積の重み・停止の
 
 ## 9. 変更ログ
 
+- `2026-10-15` — plan 段レビュー NO-GO (C0/M7/m1) を全件採用。M5.5 は手組みの格子 (#3a) で先行、生成器の既定化は書き直して再レビュー。
 - `2026-10-15` — 起票 (ユーザ「古いやり方でメッシュ作ってない？」、決定「a」)。見積もり (3 通りの作り方の ni・節点) と見積もりの式の偏り (M6 の H の表との比) を §3 に。
