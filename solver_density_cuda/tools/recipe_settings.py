@@ -717,8 +717,10 @@ def _load_bcond(path):
 
 
 def declare(run, profile=None, stage=None, deviate=None, reason=None, basis=None, experiment=False, out=None,
-            recipes=None, write=True):
-    """config を照合し、通れば宣言 (RECIPE.json) を書く。戻り (終了コード, 結果 dict, 書いた path or None)。"""
+            recipes=None, write=True, deviation_sources=None, extra=None):
+    """config を照合し、通れば宣言 (RECIPE.json) を書く。戻り (終了コード, 結果 dict, 書いた path or None)。
+    deviation_sources {キー: 出所}: 逸脱の記録に `source` として写す (生成器が問題 YAML の上書きを逸脱に変換したときの出所の
+    問題 YAML のパスとキー; plan §4.3 の 4b・§5.1 #11)。extra {項目: 値}: 宣言に足す項目 (生成器・段の tag など。既定の項目は上書きしない)。"""
     recipes = recipes or load_recipes()
     run_dir, cfg_path, bc_path = _read_run(run)
     if experiment and not (reason or '').strip():
@@ -744,12 +746,18 @@ def declare(run, profile=None, stage=None, deviate=None, reason=None, basis=None
            'profile_version': recipes.get('version'), 'profile_sha256': (res or {}).get('sha256'),
            'recipes_file': os.path.relpath(RECIPES, ROOT), 'recipes_sha256': recipes.get('_sha256'),
            'config': {'file': os.path.basename(cfg_path), 'sha256': hashlib.sha256(raw).hexdigest()},
-           'deviations': [{**a, 'reason': reason, 'basis': basis} for a in r['applied']],
+           'deviations': [{**a, 'reason': reason, 'basis': basis,
+                           **({'source': deviation_sources[a['key']]} if a['key'] in (deviation_sources or {}) else {})}
+                          for a in r['applied']],
            'warnings': [{'key': k, 'message': m} for k, m in r['warns']],
            'declared_at': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
            'tool': 'solver_density_cuda/tools/recipe_settings.py'}
     if experiment:
         rec.update({'reason': reason, 'basis': basis, 'off_profile': r['off_profile']})
+    clash = sorted(set(extra or {}) & set(rec))
+    if clash:
+        raise ValueError(f'宣言に足す項目 {clash} は既定の項目と重なる')
+    rec.update(extra or {})
     path = None
     if write:
         path = out or os.path.join(run_dir, 'RECIPE.json')
