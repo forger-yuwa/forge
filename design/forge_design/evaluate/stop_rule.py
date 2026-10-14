@@ -17,6 +17,13 @@ commit ごとの cherry-pick はせず、このファイルだけを写した (6
     回し、s₀ + H までの全ての出力で条件を保ったら REACHED (止める出力は s₀ + H 以後の最初の出力)。途中で外れたら到達を取り消して記録し、
     次の到達から数え直す。上限までに保ち切れなければ CENSORED (forge-25 が case/45 の H で使った「到達の後 4 万 step 続けて保持を確かめる」手順)。
   - 記録の `plan` の参照先をこの作業ツリーの plan にした。判定・量・見張り・forge の止め方は取り込み元のまま。
+  - (§5.1 #36e、codex diagnose 3) 帯の位置の抽出は受け渡しの抽出と同じ条件 (`deltastar_loop.handoff_extract_settings`: 一定 x の断面への補間
+    `remap_constant_x=True`・端の補間範囲の不足は欠測 `remap_edge="missing"`) で、Euler の参照は固定のスナップショット {run, res, sha256} も
+    指定できる (`deltastar.resolve_euler_ref`、sha が合わなければ使わない)。設定は prepare_info の stop_rule の `extract`・`euler_ref` に残る。
+  - (§5.1 #36e (7)) 見張りの中で出力ごとに δ_E・δ_target (抽出器の量、使用域 [0, x_w] の全列) を受け渡しと同じ条件で抽出し、
+    `stop_rule.json` の行の `delta` に残す (**判定には使わない記録の量**。受け渡しの関門の 2 窓の判定がこの記録を読み、計算の後に抽出し直さない)。
+    抽出は別スレッド 1 本で行い (`DeltaRecorder`)、停止の判定を待たせない。追いつかないときは最新の出力から 2 窓 (2W) より古い出力を
+    飛ばす (`skipped`; 停止の時刻 s ≥ 最新の出力なので、[s − 2W, s] に入らない出力だけ)。要求の断面の位置 (x_fracs × x_w) は `sections` に残す。
 
 **新しい規則であり、旧 `m9_watch.py` (§6.11、`case/45.isobutane_m6_d155/m9_watch.py`) と同等とは言わない**: m9_watch は窓の両端の差で傾向と振動を
 混ぜて判定し、断面・量・連続の到達の条件もここと違う (codex diagnose 2026-10-14、`notes/reviews/2026-10-14-half-inlet-370k-design-diagnose.md`)。
@@ -168,16 +175,21 @@ def resolve_settings(evaluate: dict, *, nsteps_arg, n_main: int, n_main_source: 
     使えない条件 (`use` = False と理由): euler_ref が無い、出力の間隔が窓に MIN_POINTS 点を入れられない (間隔 > W/(MIN_POINTS − 1))、
     上限が出力の間隔の倍数でない (forge は outStepInterval の倍数でしか res を書かないので、上限の出力が無く CENSORED を見分けられない;
     こちらで足した)。こちらの prepare_ns は要求したのに使えない設定を run dir を作る前に例外にする。"""
+    from ..feedback.deltastar_loop import handoff_extract_settings
+    from ..metrics.deltastar import resolve_euler_ref
     yaml_req, yaml_cap, th_over, hold = check_evaluate_keys(evaluate)
     th = thresholds(**th_over)
     if requested is None:
         requested, src = (yaml_req, "evaluate.stop_rule") if yaml_req is not None else (False, "既定 (使わない)")
     else:
         requested, src = bool(requested), "引数"
+    # euler_ref: run dir (str) か固定のスナップショット {run, res, sha256} (§5.1 #36e (6); ここでは形だけ検査、sha は prepare_ns・起動前に照合)
+    eref = resolve_euler_ref(euler_ref, verify=False)["record"] if euler_ref else None
     rec = {"requested": requested, "requested_source": src, "fallback_steps": int(n_main), "fallback_steps_source": n_main_source,
-           "out_step_interval": int(out_int), "euler_ref": (str(euler_ref) if euler_ref else None), **th,
+           "out_step_interval": int(out_int), "euler_ref": eref, **th,
            "thresholds_source": ({"evaluate.stop_rule_thresholds": sorted(th_over)} if th_over else "既定 (取り込み元のまま)"),
-           "hold_steps": hold}
+           "hold_steps": hold,
+           "extract": {**handoff_extract_settings(), "source": "feedback.deltastar_loop.handoff_extract_settings (§5.1 #36e)"}}
     if not requested:
         rec.update(use=False, reason="使わない指定", cap=None, cap_source=None)
         return rec
@@ -308,7 +320,10 @@ def snapshot(geo: RunGeometry, step: int, band: dict | None, x_fracs=X_FRACS, va
 
 # ------------------------------------------------------------------ 帯の位置 y_b (本段の最初の出力 × Euler 参照)
 def resolve_path(p) -> Path | None:
-    """prepare_info の euler_ref (相対なら cwd、無ければリポジトリ直下からの相対) を解決する。無ければ None。"""
+    """prepare_info の euler_ref (相対なら cwd、無ければリポジトリ直下からの相対) を解決する。無ければ None。固定のスナップショットの指定
+    {run, res, sha256} (§5.1 #36e) は run のディレクトリを解決する (sha の照合は `check_euler_ref`)。"""
+    if isinstance(p, dict):
+        p = p.get("run")
     if not p:
         return None
     cand = [Path(p)]
@@ -320,13 +335,44 @@ def resolve_path(p) -> Path | None:
     return None
 
 
+def euler_ref_spec(euler_ref):
+    """prepare_info の euler_ref を抽出器に渡す指定にする: run dir (str、`resolve_path` で解決) か固定のスナップショット
+    {run (解決した絶対パス), res, sha256}。見つからなければ None。"""
+    eu = resolve_path(euler_ref)
+    if eu is None:
+        return None
+    if isinstance(euler_ref, dict):
+        return {"run": str(eu), "res": euler_ref.get("res"), "sha256": euler_ref.get("sha256")}
+    return eu
+
+
+def check_euler_ref(euler_ref) -> dict:
+    """euler_ref を解決して固定のスナップショットなら sha256 を照合する (§5.1 #36e (6))。見つからない・sha が違えば ValueError。
+    戻り: `deltastar.resolve_euler_ref` の戻り。"""
+    from ..metrics.deltastar import resolve_euler_ref
+    spec = euler_ref_spec(euler_ref)
+    if spec is None:
+        raise ValueError(f"euler_ref が無い・見つからない ({euler_ref!r})")
+    return resolve_euler_ref(spec, verify=True)
+
+
+def band_extract_kw(sr: dict) -> dict:
+    """帯の位置の抽出 (`fix_band`) に渡す条件: 受け渡しの抽出と同じ一定 x の断面への補間と端の扱い (prepare_info の stop_rule.extract、
+    無ければ今の既定 `handoff_extract_settings`)。帯の位置は抽出器の縁の推定 (δ_r の平滑化・緩和の前) で決まるので、ω・平滑化・昇格の上限は
+    渡さない (昇格の上限で帯の位置が使えなくならないように)。"""
+    from ..feedback.deltastar_loop import handoff_extract_settings
+    ex = sr.get("extract") or handoff_extract_settings()
+    return {k: ex[k] for k in ("remap_constant_x", "remap_edge") if k in ex}
+
+
 def fix_band(run_dir, step: int, euler_ref, out_dir, **extract_kw) -> dict:
     """本段の最初の出力 res_<step>.h5 を Euler 参照で `extract_and_merge(.., band_select="edge")` と同じ抽出にかけ、帯の位置 y_b(x) [r_t] を返す
     (`delta_r_edge.csv` の y_b = 縁 y* の edge_c (1.25) 倍; さらに掛けない)。抽出は run の他の出力を読まないよう、prepare_info.json・
     nozzle.h5・その 1 つの res だけを一時ディレクトリに symlink して行う (`_load_structured` は最新の res を読むため)。
-    使えない (euler_ref が無い・抽出が失敗・y_b が有限でない) ときは Unavailable。"""
+    使えない (euler_ref が無い・抽出が失敗・y_b が有限でない) ときは Unavailable。euler_ref が固定のスナップショット {run, res, sha256} なら
+    その res を読み、sha が合わなければ Unavailable (§5.1 #36e (6))。extract_kw は `band_extract_kw` (一定 x の断面への補間・端の扱い)。"""
     run_dir = Path(run_dir).resolve(); od = Path(out_dir)
-    eu = resolve_path(euler_ref)
+    eu = euler_ref_spec(euler_ref)
     if eu is None:
         raise Unavailable(f"euler_ref が無い・見つからない ({euler_ref!r})")
     res = run_dir / f"res_{step}.h5"
@@ -346,9 +392,135 @@ def fix_band(run_dir, step: int, euler_ref, out_dir, **extract_kw) -> dict:
     x, yb = edge[:, 0], edge[:, 5]
     if len(x) < 2 or not np.all(np.isfinite(yb)) or not np.all(yb > 0):
         raise Unavailable(f"帯の位置 y_b が有限・正でない (点 {len(x)}、非有限 {int(np.count_nonzero(~np.isfinite(yb)))})")
-    return {"x": x.tolist(), "y_b": yb.tolist(), "step": int(step), "res_sha256": _sha256(res), "euler_ref": str(eu),
+    return {"x": x.tolist(), "y_b": yb.tolist(), "step": int(step), "res_sha256": _sha256(res),
+            "euler_ref": (eu if isinstance(eu, dict) else str(eu)),
             "extract": {"function": "feedback.deltastar_loop.extract_and_merge", "band_select": "edge", **{k: repr(v) for k, v in extract_kw.items()}},
             "out_dir": str(od), "seconds": round(time.time() - t0, 1)}
+
+
+# ------------------------------------------------------------------ 出力ごとの δ_E・δ_target の記録 (§5.1 #36e (7); 判定には使わない)
+DELTA_WAIT_S = 7200.0      # 本段の後に残りの抽出を待つ上限 [s] (抽出 1 本 ~2 分 × 追いつかない分; 飛ばす規則で 2W/出力の間隔 + 1 本まで)
+
+
+def use_columns(run_dir) -> dict:
+    """δ の記録の列: NS の列の x (抽出器の `_load_structured` と同じ式 COORD / S) のうち使用域 [0, x_w] (x_w = 設計壁の出口
+    physical_wall.domain[1]) の列。戻り {"x" (r_t、列の昇順), "i" (列の番号), "x_w", "scale_m"}。"""
+    run_dir = Path(run_dir)
+    info = json.loads((run_dir / "prepare_info.json").read_text())
+    ni, nj = int(info["mesh"]["ni"]), int(info["mesh"]["nj"])
+    S = float(info["scale_m"])
+    xw = float((info.get("physical_wall") or {})["domain"][1])
+    with h5py.File(run_dir / "nozzle.h5", "r") as h:
+        nc = h["/MESH/COORD"][:].reshape(-1, 3)
+    x = (nc[:, 0].reshape(ni, nj) / S)[:, 0]
+    sel = np.where((x >= 0.0) & (x <= xw + 1e-9))[0]
+    return {"x": x[sel], "i": sel, "x_w": xw, "scale_m": S}
+
+
+def delta_snapshot(run_dir, step: int, euler_ref, extract: dict, x_use) -> dict:
+    """出力 res_<step>.h5 1 つを受け渡しの抽出と同じ条件 (`extract` = `handoff_extract_settings`: edge・一定 x の断面への補間・端は欠測・
+    ω・平滑化の λ・昇格の上限、固定した Euler の参照) で抽出し、使用域の列 x_use の δ_E (未緩和の平滑化抽出)・δ_target (緩和・再平滑化の
+    後の次の壁の入力)・held を返す (r_t 単位、抽出しなかった列は NaN と `missing`)。抽出は run の他の出力を読まないよう一時ディレクトリに
+    prepare_info.json・nozzle.h5・その res だけを symlink して行い、出力の表は捨てる (行の値だけを stop_rule.json に残す)。"""
+    from ..feedback.deltastar_loop import extract_and_merge, read_delta_r_next
+    run_dir = Path(run_dir).resolve()
+    res = run_dir / f"res_{step}.h5"
+    t0 = time.time()
+    kw = {k: v for k, v in extract.items() if k != "source"}
+    with tempfile.TemporaryDirectory(prefix="stop_rule_delta_") as td:
+        src = Path(td) / run_dir.name
+        src.mkdir()
+        for name in ("prepare_info.json", "nozzle.h5"):
+            (src / name).symlink_to(run_dir / name)
+        (src / res.name).symlink_to(res)
+        summ = extract_and_merge(src, euler_ref, out_dir=Path(td) / "out", **kw)
+        nx = read_delta_r_next(Path(td) / "out" / "delta_r_next.csv")
+    x_use = np.asarray(x_use, dtype=float)
+    xe = np.atleast_1d(np.asarray(nx["x_rt"], dtype=float))
+    if len(xe) == 0:
+        raise ValueError(f"res_{step}.h5 の抽出の表が空")
+    # 列の対応は x の一致で取る (抽出器の x と use_columns の x は同じ式 COORD / S。表の x は '%.18e' で往復しても同じ値)
+    k = np.clip(np.searchsorted(xe, x_use), 0, len(xe) - 1)
+    hit = xe[k] == x_use
+    dE = np.where(hit, np.atleast_1d(nx["delta_E"])[k], np.nan)
+    dT = np.where(hit, np.atleast_1d(nx["delta_target"])[k], np.nan)
+    held = np.where(hit, np.atleast_1d(nx["held"])[k] != 0, False)
+    return {"delta_E": dE.tolist(), "delta_target": dT.tolist(), "held": [int(v) for v in held],
+            "missing": [int(j) for j in np.where(~hit)[0]], "n_missing": int((~hit).sum()), "n_held": int(held.sum()),
+            "lam": summ["smooth"]["lam"], "res_sha256": _sha256(res), "seconds": round(time.time() - t0, 2)}
+
+
+class DeltaRecorder:
+    """出力ごとの δ_E・δ_target の抽出 (`delta_snapshot`) を別スレッド 1 本で回す (停止の判定を抽出で待たせない)。submit した順に処理し、
+    最新の submit から span (= 2 窓 2W) より古い出力は抽出せず `skipped` にする (停止の時刻 s は最新の出力以後なので [s − 2W, s] に入らない)。
+    例外は行の `error` に残す (記録の量なので見張りは止めない)。"""
+
+    def __init__(self, run_dir, euler_ref, extract: dict, x_use, span: int) -> None:
+        import queue
+        import threading
+        self.run_dir, self.euler_ref, self.extract, self.x_use, self.span = Path(run_dir), euler_ref, dict(extract), list(x_use), int(span)
+        self._q = queue.Queue()
+        self._lock = threading.Lock()
+        self._done: dict = {}
+        self._latest = None
+        self._stop = False
+        self._t = threading.Thread(target=self._work, name="stop_rule_delta", daemon=True)
+        self._t.start()
+
+    def submit(self, step: int) -> None:
+        with self._lock:
+            self._latest = int(step) if self._latest is None else max(self._latest, int(step))
+        self._q.put(int(step))
+
+    def _work(self) -> None:
+        while True:
+            step = self._q.get()
+            try:
+                if step is None:
+                    return
+                with self._lock:
+                    latest, stop = self._latest, self._stop
+                if stop:
+                    out = {"error": "見張りが終わったので抽出しない"}
+                elif latest is not None and step < latest - self.span:
+                    out = {"skipped": f"最新の出力 {latest} から 2 窓 {self.span} step より古い (受け渡しの 2 窓に入らない)"}
+                else:
+                    try:
+                        out = delta_snapshot(self.run_dir, step, self.euler_ref, self.extract, self.x_use)
+                    except Exception as e:  # noqa: BLE001 — 記録の量の抽出の失敗は行に残す (見張りは止めない)
+                        out = {"error": f"{type(e).__name__}: {e}"}
+                with self._lock:
+                    self._done[step] = out
+            finally:
+                self._q.task_done()
+
+    def collect(self) -> dict:
+        """終わった抽出 {step: 結果} を取り出す (取り出した分は消す)。"""
+        with self._lock:
+            out, self._done = self._done, {}
+        return out
+
+    def finish(self, wait_s: float, abandon: bool = False) -> dict:
+        """残りの抽出を wait_s まで待って止める (abandon なら待たずに未着手を捨てる)。戻り: 取り出していない結果。"""
+        if abandon:
+            with self._lock:
+                self._stop = True
+        self._q.put(None)
+        self._t.join(timeout=max(float(wait_s), 0.0))
+        out = self.collect()
+        out["_unfinished"] = bool(self._t.is_alive())
+        return out
+
+
+def _attach_deltas(rows: list, got: dict) -> int:
+    """`DeltaRecorder` の結果を行の `delta` に付ける。付けた数を返す。"""
+    by = {r["step"]: r for r in rows}
+    n = 0
+    for st, d in got.items():
+        if isinstance(st, int) and st in by:
+            by[st]["delta"] = d
+            n += 1
+    return n
 
 
 # ------------------------------------------------------------------ 判定
@@ -615,7 +787,7 @@ def stop_forge(bash_pid: int, run_dir, term_wait_s: float = 180.0, kill_wait_s: 
 
 # ------------------------------------------------------------------ 見張り (run_staged_ns の本段)
 def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float = 60.0, term_wait_s: float = 180.0,
-                     kill_wait_s: float = 60.0, post_wait_s: float = 1800.0, read_tries: int = 3) -> dict:
+                     kill_wait_s: float = 60.0, post_wait_s: float = 1800.0, read_tries: int = 3, delta_wait_s: float = DELTA_WAIT_S) -> dict:
     """本段の forge を `run_case.sh` の子プロセスで起動し、停止規則で見張る。sr は prepare_info.json の stop_rule (use = True、cap が
     solverConfig の nStepOuter に書いてあること)。戻り: {status, stop_step, forge_rc, rc}。rc は呼ぶ側に返す終了コード
     (REACHED・CENSORED・UNAVAILABLE で ns_steps まで回った = 0、それ以外は非 0)。記録は `<run>/stop_rule.json`。
@@ -634,7 +806,17 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
     rec = {"version": 1, "plan": PLAN, "settings": sr, "status": "RUNNING",
            "started": _now(), "band": None, "unavailable": None, "rows": [], "judge_last": None, "tries": {},
            "timing": {"poll_s": poll_s, "settle_s": settle_s, "term_wait_s": term_wait_s, "kill_wait_s": kill_wait_s},
-           "hold": ({"hold_steps": hold, "start": None, "reached": [], "breaks": []} if hold else None)}
+           "hold": ({"hold_steps": hold, "start": None, "reached": [], "breaks": []} if hold else None),
+           # 要求の断面の位置 (x_fracs × x_w)。実際に選ばれた列の x は各行の x_theta_r_<比> (§6 V-h370)
+           "sections": [{"key": theta_key(f), "x_frac": float(f), "x_requested": float(f) * geo.x_wall_exit} for f in th["x_fracs"]]}
+    # 出力ごとの δ_E・δ_target の記録 (§5.1 #36e (7); 判定には使わない)。列は使用域 [0, x_w] の NS の列、条件は受け渡しの抽出と同じ
+    from ..feedback.deltastar_loop import handoff_extract_settings
+    ex = sr.get("extract") or {**handoff_extract_settings(), "source": "既定 (prepare_info の stop_rule に extract が無い)"}
+    uc = use_columns(run_dir)
+    rec["delta_series"] = {"x": uc["x"].tolist(), "use_domain": [0.0, uc["x_w"]], "scale_m": uc["scale_m"], "extract": ex,
+                           "euler_ref": sr.get("euler_ref"), "span_steps": 2 * int(th["window"]),
+                           "note": "判定には使わない記録の量。行の delta に δ_E (未緩和の平滑化抽出)・δ_target (緩和・再平滑化の後)・held [r_t]"}
+    recorder = DeltaRecorder(run_dir, euler_ref_spec(sr.get("euler_ref")), ex, uc["x"], 2 * int(th["window"]))
     save_record(run_dir, rec)
     t_launch = time.time()
     with open(run_dir / "run_case_stdout.log", "w") as log:
@@ -655,6 +837,8 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
 
     try:
         while True:
+            if _attach_deltas(rows, recorder.collect()):
+                save_record(run_dir, rec)
             done = proc.poll() is not None
             steps_now = res_steps(run_dir)
             for n in [m for m in steps_now if m > 0 and m not in seen]:
@@ -664,7 +848,7 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
                     V = read_values(run_dir / f"res_{n}.h5")
                     if rec["band"] is None and rec["unavailable"] is None:
                         try:
-                            rec["band"] = fix_band(run_dir, n, sr.get("euler_ref"), run_dir / BAND_DIR)
+                            rec["band"] = fix_band(run_dir, n, sr.get("euler_ref"), run_dir / BAND_DIR, **band_extract_kw(sr))
                         except Unavailable as e:
                             rec["unavailable"] = {"reason": str(e), "step": n,
                                                   "action": f"停止規則を使わず fallback_steps {fallback} step で止める"}
@@ -686,6 +870,8 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
                     if p:
                         stop = {"status": "DATA_ERROR", "step": n, "note": p}
                 rows.append(row)
+                if not row["nonfinite_all"]:
+                    recorder.submit(n)
                 if stop is None and rec["unavailable"] is None:
                     j = judge_rows(rows, **th)
                     row["judge"] = j
@@ -708,6 +894,7 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
             time.sleep(poll_s)
     except BaseException as e:
         # 見張りの例外でも forge を止めて状態を残す
+        _attach_deltas(rows, recorder.finish(0.0, abandon=True))
         rec["stop_forge"] = stop_forge(proc.pid, run_dir, term_wait_s, kill_wait_s) if proc.poll() is None else None
         rec.update(status="EXEC_ERROR", note=f"見張りの例外: {type(e).__name__}: {e}", finished=_now())
         save_record(run_dir, rec)
@@ -770,6 +957,12 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
         rec["deleted_after_stop"] = delete_after(run_dir, step)
     if step is not None and (run_dir / f"res_{step}.h5").exists() and status in ("REACHED", "DIVERGED", "UNAVAILABLE", "CENSORED"):
         rec["stop_sha256"] = _sha256(run_dir / f"res_{step}.h5")
+    # 残りの δ の抽出を待って行に付ける (止めた出力より後の出力は行に無い。抽出の時間は delta_series に)
+    left = recorder.finish(delta_wait_s)
+    rec["delta_series"]["unfinished_at_end"] = left.pop("_unfinished")
+    _attach_deltas(rows, left)
+    secs = [r["delta"]["seconds"] for r in rows if isinstance(r.get("delta"), dict) and "seconds" in r["delta"]]
+    rec["delta_series"]["seconds"] = ({"n": len(secs), "mean": float(np.mean(secs)), "max": float(np.max(secs))} if secs else {"n": 0})
     rec.update(status=status, stop_step=step, last_output=last, finished=_now())
     if status == "REACHED":
         rec["recorded_at_stop"] = window_summary(rows, step, th["window"])

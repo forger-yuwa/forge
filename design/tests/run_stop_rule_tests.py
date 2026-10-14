@@ -20,10 +20,15 @@
       保ったら到達 + H で止める、途中で外れて上限まで届かなければ CENSORED (外れた記録つき)。要求したのに
       euler_ref が見つからない run は forge を起動する前に例外。stop_rule=False は NOT_USED を記録して今までの経路。
   (c) 受け渡しの制御 (`handoff_gate` と `run_from_table`・`run_pass`・`run_pass0_integral`・CLI): 状態が REACHED で収束の判定が PASS のときだけ
-      抽出 (band_select="edge" を明示) と fixed_point.json に進む。REACHED でも収束の判定が不合格なら止める (`allow_unconverged` で進む)。
-      CENSORED・UNAVAILABLE・NOT_USED は止める (`allow_not_reached` で進む)。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なし (MISSING)・
-      収束の判定の DIVERGED・判定不能は上書きでも進まない。`run_pass` は前の pass の run の関門が不合格なら抽出・準備の前に止める
+      抽出 (band_select="edge"・remap_constant_x=True を明示) と fixed_point.json に進む。REACHED でも収束の判定が不合格なら止める
+      (`allow_unconverged` で進む)。CENSORED・UNAVAILABLE は止める (`allow_not_reached` で進む)。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なし
+      (MISSING)・収束の判定の DIVERGED・判定不能は上書きでも進まない。`run_pass` は前の pass の run の関門が不合格なら抽出・準備の前に止める
       (新しい run dir を作らない)。判定の結果は HANDOFF_GATE.json・HANDOFF_CONVERGENCE.txt に残る。CLI は止めたら終了コード 3。
+      **#36e で関門に足した条件** (保存則・局所 y₁⁺・δ の 2 窓・被覆・held・次の壁) のうち、局所 y₁⁺ (`wall_resolution_verdict`) と次の壁
+      (`next_wall_check`) は偽物で合格にし、δ の 2 窓は見張りの中の出力ごとの記録 (`stop_rule.delta_snapshot` の偽物) で満たす。2 窓
+      ([s − 4 万, s − 2 万]・[s − 2 万, s]) を覆うため、進む側の試験は到達の後の継続 2 万 step (hold 20,000・上限 45,000) で回す。
+      停止規則を使わない run (NOT_USED) は allow_not_reached でも保存則・2 窓の記録が無いので止める (#36e: 新しい条件は上書きで通さない)。
+      各条件の負例は `run_h370_prelaunch_tests.py`。
   (d) 指定の無い問題の回帰: prepare_info に stop_rule の無い run の `run_staged_ns` は今までの経路 (run_forge、本段の nStepOuter は準備のまま、
       stop_rule.json・STOP_RULE_STATE.json を書かない、戻りは int と等しい)。
 
@@ -451,6 +456,17 @@ def make_run(name: str, scenario: dict, *, interval=2500, fallback=10000, cap=40
 WATCH = {"poll_s": 0.1, "settle_s": 1.0, "term_wait_s": 3.0, "kill_wait_s": 5.0, "post_wait_s": 120.0}
 
 
+DELTA_CALLS = []
+
+
+def fake_delta(run_dir, step, euler_ref, extract, x_use):
+    """出力ごとの δ の抽出 (`stop_rule.delta_snapshot`) の偽物: 一定の δ_E・δ_target を返し、渡された条件を記録する。"""
+    DELTA_CALLS.append({"step": int(step), "extract": dict(extract), "euler_ref": euler_ref})
+    n = len(x_use)
+    return {"delta_E": [1e-3] * n, "delta_target": [1e-3] * n, "held": [0] * n, "missing": [], "n_missing": 0, "n_held": 0,
+            "lam": "1.0", "res_sha256": SR._sha256(Path(run_dir) / f"res_{step}.h5"), "seconds": 0.0}
+
+
 def fake_band(run_dir, step, euler_ref, out_dir, **kw):
     return {"x": [-5.0, 30.0], "y_b": [0.25, 0.25], "step": int(step), "res_sha256": SR._sha256(Path(run_dir) / f"res_{step}.h5"),
             "euler_ref": str(euler_ref), "extract": {"function": "試験の偽物"}, "out_dir": str(out_dir), "seconds": 0.0}
@@ -480,12 +496,25 @@ def state_ok(rc, st, status):
 
 def test_watcher():
     print("== (b) 偽の forge で本段の見張り・終了の状態", flush=True)
-    real_fix = SR.fix_band
-    SR.fix_band = fake_band
+    real_fix, real_delta = SR.fix_band, SR.delta_snapshot
+    SR.fix_band, SR.delta_snapshot = fake_band, fake_delta
     try:
+        DELTA_CALLS.clear()
         rd, _ = make_run("reach", {"dt": 0.25})
         rc, rec, st = run_case(rd)
         outs = outputs(rd)
+        xs_use = rec["delta_series"]["x"]
+        check("REACHED: 見張りの行に出力ごとの δ_E・δ_target (使用域 [0, x_w] の全列) が入る (§5.1 #36e (7); 判定には使わない記録)",
+              all(isinstance(r.get("delta"), dict) and len(r["delta"]["delta_E"]) == len(xs_use) == len(r["delta"]["delta_target"])
+                  for r in rec["rows"]) and len(xs_use) == int(np.sum(np.linspace(-5.0, 30.0, NI) <= X_E + 1e-9) - np.sum(np.linspace(-5.0, 30.0, NI) < 0.0))
+              and sorted(c["step"] for c in DELTA_CALLS) == [r["step"] for r in rec["rows"]]
+              and rec["delta_series"]["seconds"]["n"] == len(rec["rows"]),
+              f"行 {len(rec['rows'])}、δ の呼び出し {len(DELTA_CALLS)}、列 {len(xs_use)}")
+        ex = DELTA_CALLS[0]["extract"]
+        check("REACHED: 出力ごとの δ の抽出の条件は受け渡しと同じ (edge・remap_constant_x=True・端は欠測・ω 0.5・λ 1.0・昇格の上限 ×1000)",
+              all(ex.get(k) == v for k, v in DL.handoff_extract_settings().items()), json.dumps(ex, ensure_ascii=False))
+        check("REACHED: 要求の断面の位置 (x_fracs × x_w) を sections に記録",
+              [round(sc["x_requested"], 9) for sc in rec["sections"]] == [round(f * X_E, 9) for f in SR.X_FRACS])
         check("REACHED: 22,500 (間隔 2500 で窓が覆う最初の出力) で止める・rc 0",
               rc == 0 and rec["status"] == "REACHED" and rec["stop_step"] == 22500, f"rc {rc}、{rec['status']} {rec.get('stop_step')}")
         check("REACHED: 状態は STOP_RULE_STATE.json と戻り値の stop_rule で同じ (status・stop_step・forge rc・上限)",
@@ -603,7 +632,7 @@ def test_watcher():
         check("stages=full: 停止規則の系列は本段の出力だけ (最初の行 2,500・前の段の res_3000 を含まない)",
               rec["rows"][0]["step"] == 2500 and rec["band"]["step"] == 2500)
     finally:
-        SR.fix_band = real_fix
+        SR.fix_band, SR.delta_snapshot = real_fix, real_delta
 
 
 # ====================================================================================== (c) 受け渡しの制御
@@ -611,18 +640,30 @@ CALLS = []
 
 
 def fake_extract(prev_run, euler_run, omega=0.5, **kw):
-    """抽出の偽物: 呼ばれた引数を記録し、delta_r_next.csv の形だけ書く。"""
+    """抽出の偽物: 呼ばれた引数を記録し、delta_r_next.csv の形だけ書く (抽出しなかった列なし)。"""
     CALLS.append({"run": str(prev_run), "euler": str(euler_run), "omega": omega, **kw})
     od = Path(kw.get("out_dir") or prev_run)
     np.savetxt(od / "delta_r_next.csv", np.c_[[0.0, 1.0], [0.01, 0.01], [0.01, 0.01], [0.01, 0.01], [0, 0]], delimiter=",",
                header=",".join(DL.DELTA_R_NEXT_COLUMNS), comments="")
-    return {"omega": omega, "n_held": 0, "massflow": {}}
+    return {"omega": omega, "n_held": 0, "massflow": {}, "not_extracted": {"n": 0, "n_cols_ns": 2, "i": [], "x": [], "reason": []}}
+
+
+def fake_wall_resolution(run_dir, step=None):
+    return {"cmd": ["試験の偽物"], "rc": 0, "kind": "PASS", "verdict": ["VERDICT: PASS (試験の偽物)"], "output": "VERDICT: PASS (試験の偽物)\n"}
+
+
+def fake_next_wall(problem, delta_next):
+    return {"pass": True, "wall": "試験の偽物"}
+
+
+HOLD = {"hold": 20000, "cap": 45000}      # 到達 22,500 + 2 万 = 42,500 で止める (2 窓 [2,500, 22,500]・[22,500, 42,500] を覆う)
 
 
 def test_handoff():
     print("== (c) 受け渡しの制御 (handoff_gate・run_from_table・run_pass・run_pass0_integral・CLI)", flush=True)
     real = {"fix": SR.fix_band, "prep": RA.prepare_ns, "staged": RA.run_staged_ns, "collect": RA.collect,
-            "extract": DL.extract_and_merge, "card": DL.check_table_against_card}
+            "extract": DL.extract_and_merge, "card": DL.check_table_against_card, "delta": SR.delta_snapshot,
+            "wr": DL.wall_resolution_verdict, "nw": DL.next_wall_check}
     scen = {}
 
     def fake_prepare(problem, run_dir, **kw):
@@ -636,9 +677,10 @@ def test_handoff():
     def staged(run_dir, **kw):
         return real["staged"](run_dir, stop_rule_watch=WATCH, **kw)
 
-    SR.fix_band = fake_band
+    SR.fix_band, SR.delta_snapshot = fake_band, fake_delta
     RA.prepare_ns, RA.run_staged_ns, RA.collect = fake_prepare, staged, (lambda problem, run_dir: {"res_file": "試験"})
     DL.extract_and_merge, DL.check_table_against_card = fake_extract, (lambda problem, table: {"table": str(table), "checked": False})
+    DL.wall_resolution_verdict, DL.next_wall_check = fake_wall_resolution, fake_next_wall
     eu = str(EULER_DUMMY)
     try:
         def from_table(name, scenario, kw=None, **gate_kw):
@@ -651,32 +693,41 @@ def test_handoff():
 
         fast = {"dt": 0.1, "res_tau": 2000.0}         # 残差が 22,500 step で 4.9 桁下がる (収束の判定 PASS)
         slow = {"dt": 0.1, "res_tau": 50000.0}        # 0.2 桁しか下がらない (NOT CONVERGED)
-        rd, m, gate, calls = from_table("h_ok", fast)
-        check("REACHED + 収束の判定 PASS → 抽出へ進む (band_select='edge' を明示、fixed_point.json あり)",
+        rd, m, gate, calls = from_table("h_ok", fast, HOLD)
+        check("REACHED + 収束の判定 PASS + 足した条件 (保存則・2 窓・被覆・held) → 抽出へ進む (band_select='edge'・remap_constant_x=True・"
+              "端は欠測を明示、fixed_point.json・delta_r_next.csv を run の直下に写す)",
               gate["proceed"] and gate["stop_rule"]["status"] == "REACHED" and gate["convergence"]["kind"] == "PASS"
-              and len(calls) == 1 and calls[0]["band_select"] == "edge" and calls[0]["run"] == str(rd) and (rd / "fixed_point.json").exists()
+              and len(calls) == 1 and calls[0]["band_select"] == "edge" and calls[0]["remap_constant_x"] is True
+              and calls[0]["remap_edge"] == "missing" and calls[0]["max_lam_factor"] == 1000.0 and calls[0]["run"] == str(rd)
+              and (rd / "fixed_point.json").exists() and (rd / "delta_r_next.csv").exists()
+              and all(gate["checks"][c]["pass"] for c in ("conservation", "wall_resolution", "two_windows", "coverage", "next_wall"))
               and m["handoff_gate"]["proceed"], f"{gate['blocked_by']} {calls}")
         check("  判定の記録: HANDOFF_GATE.json (状態・収束の判定の行・上書きなし)・HANDOFF_CONVERGENCE.txt (check_convergence --segment の出力)",
-              gate["override"] == {"allow_not_reached": False, "allow_unconverged": False} and "--segment" in gate["convergence"]["cmd"]
+              {k: gate["override"][k] for k in ("allow_not_reached", "allow_unconverged")} == {"allow_not_reached": False, "allow_unconverged": False}
+              and "上書きでは通さない" in gate["override"]["scope"] and "--segment" in gate["convergence"]["cmd"]
+              and gate["convergence"]["cmd"][gate["convergence"]["cmd"].index("--drop") + 1] == "3"
               and (rd / DL.HANDOFF_CONVERGENCE).exists() and "OVERALL" in (rd / DL.HANDOFF_CONVERGENCE).read_text()
               and gate["extract"]["band_select"] == "edge")
         ok_run = rd
 
-        rd, m, gate, calls = from_table("h_unconv", slow)
+        rd, m, gate, calls = from_table("h_unconv", slow, HOLD)
         check("REACHED でも収束の判定が不合格 (NOT CONVERGED) → 抽出しない・fixed_point.json・delta_r_next.csv を作らない",
               not gate["proceed"] and gate["stop_rule"]["status"] == "REACHED" and gate["convergence"]["kind"] == "NOT_CONVERGED"
               and not calls and not (rd / "fixed_point.json").exists() and not (rd / "delta_r_next.csv").exists()
               and not m["handoff_gate"]["proceed"], f"{gate['blocked_by']}")
         blocked_run = rd
-        rd, m, gate, calls = from_table("h_unconv_allow", slow, allow_unconverged=True)
+        rd, m, gate, calls = from_table("h_unconv_allow", slow, HOLD, allow_unconverged=True)
         check("  allow_unconverged=True (明示の上書き) なら抽出へ進み、上書きを記録",
               gate["proceed"] and gate["override"]["allow_unconverged"] and len(calls) == 1 and calls[0]["band_select"] == "edge")
 
         rd, m, gate, calls = from_table("h_censored", {**fast, "osc_out": 0.01}, kw={"cap": 30000})
         check("CENSORED (rc 0) + 収束 PASS → 止める", not gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and not calls,
               f"{gate['stop_rule']['status']} {gate['convergence']['kind']}")
-        rd, m, gate, calls = from_table("h_censored_allow", {**fast, "osc_out": 0.01}, kw={"cap": 30000}, allow_not_reached=True)
-        check("  allow_not_reached=True なら CENSORED から進む (上書きを記録)", gate["proceed"] and gate["override"]["allow_not_reached"] and len(calls) == 1)
+        # 到達 22,500 の後の保持 4 万 step が上限 45,000 までに終わらない CENSORED (r は 0・2 窓 [5,000, 25,000]・[25,000, 45,000] を覆う)
+        rd, m, gate, calls = from_table("h_censored_allow", fast, kw={"hold": 40000, "cap": 45000}, allow_not_reached=True)
+        check("  allow_not_reached=True なら CENSORED (保持の途中で上限) から進む (上書きを記録; 足した条件は満たす)",
+              gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and gate["override"]["allow_not_reached"] and len(calls) == 1,
+              f"{gate['stop_rule']['status']} {gate['blocked_by']}")
 
         SR.fix_band = lambda *a, **k: (_ for _ in ()).throw(SR.Unavailable("試験: 抽出が失敗"))
         rd, m, gate, calls = from_table("h_unavail", fast)
@@ -693,8 +744,9 @@ def test_handoff():
         check("停止規則を使わない run (指定の無い問題、NOT_USED) → 既定は止める (従来は抽出へ進んだ)",
               not gate["proceed"] and gate["stop_rule"]["status"] == "NOT_USED" and not calls and SR.read_state(rd) is None)
         rd, m, gate, calls = from_table("h_notused_allow", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False}, allow_not_reached=True)
-        check("  allow_not_reached=True なら NOT_USED から進む (収束の判定 PASS のとき)", gate["proceed"] and len(calls) == 1
-              and calls[0]["band_select"] == "edge")
+        check("  allow_not_reached=True でも NOT_USED は止める (#36e: 保存則・2 窓の記録 stop_rule.json が無い。足した条件は上書きで通さない)",
+              not gate["proceed"] and not calls and not gate["checks"]["conservation"]["pass"] and not gate["checks"]["two_windows"]["pass"]
+              and gate["convergence"]["kind"] == "PASS", f"{gate['blocked_by']}")
 
         # MISSING: 停止規則を要求した run に状態の記録が無い (本段が終わっていない・記録が失われた)
         miss = TMP / "h_missing"
@@ -716,13 +768,13 @@ def test_handoff():
         ok, msg = raises(lambda: DL.run_pass("試験.yaml", eu, blocked_run, nxt, stages="none"), DL.HandoffBlocked, "前の pass")
         check("run_pass: 前の pass の run が関門で不合格 → 抽出・準備の前に止める (抽出を呼ばない・新しい run dir を作らない)",
               ok and not CALLS and not nxt.exists(), msg[:150])
-        scen["next"] = {"scenario": fast}
+        scen["next"] = {"scenario": fast, "kw": HOLD}
         CALLS.clear()
         nxt = TMP / "p_from_ok"
         info = DL.run_pass("試験.yaml", eu, ok_run, nxt, stages="none", prepare_only=True)
         pi = json.loads((nxt / "prepare_info.json").read_text())
-        check("run_pass: 前の pass の run が合格 → 前の run から band_select='edge' で抽出し、その delta_r_next.csv で準備する",
-              len(CALLS) == 1 and CALLS[0]["run"] == str(ok_run) and CALLS[0]["band_select"] == "edge"
+        check("run_pass: 前の pass の run が合格 → 前の run から band_select='edge'・remap_constant_x=True で抽出し、その delta_r_next.csv で準備する",
+              len(CALLS) == 1 and CALLS[0]["run"] == str(ok_run) and CALLS[0]["band_select"] == "edge" and CALLS[0]["remap_constant_x"] is True
               and Path(scen["next"]["prepare_kw"]["delta_r_csv"]) == ok_run / "delta_r_next.csv", f"{CALLS}")
         check("run_pass: 前の run の関門の結果を新しい run の prepare_info.json (handoff_from_prev) に残す (前の run には書かない)",
               pi.get("handoff_from_prev", {}).get("proceed") is True and pi["handoff_from_prev"]["run"] == str(ok_run)
@@ -737,7 +789,7 @@ def test_handoff():
 
         # --- run_pass0_integral: 同じ後段 ---
         CALLS.clear()
-        scen["next"] = {"scenario": fast}
+        scen["next"] = {"scenario": fast, "kw": HOLD}
         rd = TMP / "p0_ok"
         m = DL.run_pass0_integral("試験.yaml", eu, rd, None, initializer={"model": "contur"}, stages="none")
         check("run_pass0_integral: REACHED + PASS → band_select='edge' で抽出", m["handoff_gate"]["proceed"] and len(CALLS) == 1
@@ -754,7 +806,7 @@ def test_handoff():
         rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_unconv"),
                       "--stages", "none"])
         check("CLI --delta-r-csv: 関門が不合格 → 終了コード 3", rc == 3, f"rc {rc}")
-        scen["next"] = {"scenario": slow}
+        scen["next"] = {"scenario": slow, "kw": HOLD}
         rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_allow"),
                       "--stages", "none", "--allow-unconverged"])
         check("CLI --allow-unconverged → 進む (終了コード 0)", rc == 0, f"rc {rc}")
@@ -762,9 +814,10 @@ def test_handoff():
                       "--stages", "none"])
         check("CLI (run_pass): 前の pass の run が不合格 → 終了コード 3・run dir を作らない", rc == 3 and not (TMP / "cli_prev_blocked").exists())
     finally:
-        SR.fix_band = real["fix"]
+        SR.fix_band, SR.delta_snapshot = real["fix"], real["delta"]
         RA.prepare_ns, RA.run_staged_ns, RA.collect = real["prep"], real["staged"], real["collect"]
         DL.extract_and_merge, DL.check_table_against_card = real["extract"], real["card"]
+        DL.wall_resolution_verdict, DL.next_wall_check = real["wr"], real["nw"]
 
 
 # ====================================================================================== (d) 指定の無い問題の回帰

@@ -7,10 +7,11 @@
 積分法 (`integral_delta_r`) で作る。CFD・変換器は使わない (格子は生成器の座標)。
 
 1. `delta_r_zero`: 値と導関数が厳密に 0、`delta_r_from_table` と同じ属性
-2. `euler_reference_wall`: キー無しは設計壁そのもの (今と同じ)。H (δ_r = 0 の物理壁) は、設計壁 S の出口端の微小な減少 (設計壁の
-   ゲートは合格) が物理壁の厳密なゲートで落ち、§5.1 #36b の判断待ちの理由つきで止まる (ゲートを緩めない; 判断が出たら書き換える)。
-   参照の壁の定義 (直管・S(0) への 5 次 Hermite・S; 試験の中の `HRefWall`) と NS の H の物理壁の差は x ≥ 0 で δ_r、x < 0 で
-   x = 0 の δ_r の (値, 1 階, 2 階) への 5 次 Hermite
+2. `euler_reference_wall`: キー無しは設計壁そのもの (今と同じ)。H は **案 A (§5.1 #36e、codex diagnose 3)**: H の上流を付けた設計壁
+   (`UpstreamDesignWall`) で、下流は設計壁のゲート `monotone_gate` で合格 (S の出口端の微小な減少を含む)。物理壁のクラスに δ_r = 0 を
+   入れた壁は今も物理壁の厳密なゲートで落ちる (緩めていない; `THROAT_R1_TOL` = 1e-12 のまま)。参照の壁は試験の中の定義 (直管・S(0) への
+   5 次 Hermite・S; `HRefWall`) と x ≥ 0 でビット同一・x < 0 で 1e-14 以内。参照の壁と NS の H の物理壁の差は x ≥ 0 で δ_r、x < 0 で
+   x = 0 の δ_r の (値, 1 階, 2 階) への 5 次 Hermite (#36b の判断待ちの検査は案 A で置き換えた)
 3. Euler の prepare の入口の検査: H + ramp・H で mesh_euler 無し・キー無しで single_bspline / poly の明示は run dir を作る前に例外
 4. 照合の核 `compare_delta_in` の δ_in が抽出器 (`deltastar_from_core_matched_euler`) の δ_in とビット同一 (小さな合成の run)、
    `check_runs` が run の nozzle.h5 から同じ値を出す
@@ -34,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from forge_design.evaluate import runner_axismach as RA  # noqa: E402
 from forge_design.evaluate.runner_axismach import (build_physical_wall, delta_r_from_table, delta_r_zero, design_chain,  # noqa: E402
                                                    euler_reference_wall, integral_delta_r, load_problem)
-from forge_design.geometry.wall_axismach import monotone_gate  # noqa: E402
+from forge_design.geometry.wall_axismach import THROAT_R1_TOL, UpstreamDesignWall, monotone_gate  # noqa: E402
 from forge_design.geometry.wall_walldriven import _hermite_quintic, _poly_eval  # noqa: E402
 from forge_design.meshing.mesh2d import generate_axisym_mesh  # noqa: E402
 from forge_design.metrics.delta_in_check import DELTA_IN_TOL_MM, check_runs, compare_delta_in  # noqa: E402
@@ -103,14 +104,20 @@ scale = float(pC.spec["r_throat"])
 S = dC["wall"]
 w0, r0 = euler_reference_wall(pC, dC, scale)
 check("キー無し: 設計壁そのもの (同じ物体)・記録なし (今と同じ)", w0 is dC["wall"] and r0 is None)
-# H: δ_r ≡ 0 の物理壁は x ≥ 0 が設計壁 S そのもので、S の出口端の微小な減少 (設計壁のゲート monotone_gate は合格) が物理壁の厳密な
-# ゲート (スロートの後で r′ ≥ −1e-12) で落ちる。どちらで判定するかは plan §5.1 #36b の判断待ちなので、ゲートを緩めずに理由つきで
-# 止まることを確かめる (判断が出たらこの検査を書き換える)
+# H (案 A、§5.1 #36e): H の上流を付けた設計壁。下流は設計壁のゲート monotone_gate (S の出口端の微小な減少を含めて合格)、上流は単調な
+# 収縮・正の半径、全域の一意な大域最小、C² の継ぎ目。物理壁のクラスに δ_r = 0 を入れた壁は今も物理壁の厳密なゲートで落ちる (緩めていない)
 mgS = monotone_gate(S._spl, S.x0, S.x_e)
-e = raises(lambda: euler_reference_wall(pH, dH, scale), ValueError)
-check(f"H: δ_r = 0 の物理壁は設計壁 S の出口端 (r′ 最小 {mgS['min_r1']:.2e} at x {mgS['x_min_theta']:.2f}・D {mgS['D']:.1e} r_t、"
-      f"設計壁のゲート {mgS['pass']}) で物理壁の厳密なゲートに落ち、判断待ちの理由つきで止まる",
-      e is not None and "#36b の判断待ち" in e and "設計壁のゲート" in e and mgS["pass"] and mgS["min_r1"] < -1e-12)
+WEL, recH = euler_reference_wall(pH, dH, scale)
+gH = recH["gate"]
+check(f"H: 案 A の壁 (UpstreamDesignWall) は設計壁のゲートで合格 (S の出口端 r′ 最小 {mgS['min_r1']:.2e} at x {mgS['x_min_theta']:.2f}・"
+      f"D {mgS['D']:.1e} r_t)・上流の単調な収縮 (Q′ の最大 {gH['upstream']['max_r1_q']:.1e})・正の半径・一意な大域最小 (x_t {gH['global_min']['x_t']:.1e})・"
+      f"継ぎ目の跳び {gH['max_seam_jump']:.1e}",
+      isinstance(WEL, UpstreamDesignWall) and gH["pass"] and gH["downstream_monotone_gate"]["pass"] and mgS["pass"] and mgS["min_r1"] < -1e-12
+      and gH["upstream"]["monotone_contraction"] and gH["upstream"]["positive_radius"] and gH["global_min"]["pass"]
+      and gH["global_min"]["unique"] and not gH["global_min"]["monotone_after"] and recH["repr"] == "design_upstream" and not WEL.validate())
+e = raises(lambda: build_physical_wall(pHL, dH, scale, delta_r_x=delta_r_zero(S.x_in, S.x_e), offset="radial"), ValueError)
+check(f"物理壁のゲートは緩めていない: 物理壁のクラスに δ_r = 0 を入れた H の壁は今もスロートの後の r′ ≥ −{THROAT_R1_TOL:g} で落ちる "
+      f"({(e or '')[:50]}…)", THROAT_R1_TOL == 1e-12 and e is not None and "後で r′ ≥ 0 False" in e)
 
 
 class HRefWall:
@@ -132,9 +139,13 @@ class HRefWall:
         return out
 
 
-WEL = HRefWall(S, PU["r_inlet"], PU["L_U"])
+HREF = HRefWall(S, PU["r_inlet"], PU["L_U"])
 xd = np.r_[0.0, np.linspace(0.0, float(S.x_e), 200001)[1:]]
 xu = np.r_[np.linspace(-9.0, 0.0, 90001)[:-1], -1e-13]
+xa = np.linspace(float(S.x_in), -1e-13, 125001)
+check(f"案 A の壁 = 試験の中の参照の壁の定義: x ≥ 0 はビット同一 (S そのもの)、x < 0 の差 {np.max(np.abs(WEL.r(xa) - HREF.r(xa))):.1e} ≤ 1e-14 "
+      "(1・2 階も)", all(np.array_equal(WEL.r(xd, n), HREF.r(xd, n)) for n in range(3))
+      and max(float(np.max(np.abs(WEL.r(xa, n) - HREF.r(xa, n)))) for n in range(3)) <= 1e-14)
 # NS の H の物理壁 (build_physical_wall、区分表現) − 参照の壁: x ≥ 0 は δ_r、x < 0 は x = 0 の δ_r の (値, 1 階, 2 階) への 5 次 Hermite
 # (C² でつながる)。抽出器の δ_in は x < 0 でもこの差になる (旧い参照の −248 mm の形の差は入らない)
 _, drx, _ = integral_delta_r(pC, dC, pC.raw["deltastar_initializer"])

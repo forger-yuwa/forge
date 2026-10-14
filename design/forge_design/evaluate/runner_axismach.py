@@ -860,15 +860,17 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
 
     - `geometry.physical_upstream` が無い (今と同じ): 設計壁 (geometry の r_inlet・L_U・L_pipe の直管と縮流部 + MOC の設計壁)。
       `physical_wall_repr: single_bspline`・`pw_upstream: poly` の明示は物理壁の指定なので例外 (黙って無視しない)。
-    - ある (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36b): **補正 δ_r ≡ 0 の物理壁** (x ≥ 0 は凍結した設計壁 S、
-      x < 0 は physical_upstream の直管と S(0) への 5 次多項式)。δ* ループの固定の Euler の参照 (抽出器の δ_in = NS の壁 − この壁) に
-      使う。NS と同じ `build_physical_wall` を通すので、`pw_upstream` (poly だけ)・`physical_wall_repr` は prepare_ns と同じ意味で読み、
-      壁ファイル (`wall_repr.json`) を書く。prepare_info.json の `physical_upstream` と `euler_wall` に記録する。設計壁と CFD ピンの
-      照合は geometry の値のまま (design_chain)。"""
+    - ある (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36b、#36e で案 A に): **H の上流を付けた設計壁**
+      (`UpstreamDesignWall`: x ≥ 0 は凍結した設計壁 S、x < 0 は physical_upstream の直管と S(0) への 5 次多項式。下流は設計壁のゲート
+      `monotone_gate`、上流は単調な収縮・正の半径・一意な大域最小・C² の継ぎ目で判定)。δ* ループの固定の Euler の参照 (抽出器の δ_in =
+      NS の壁 − この壁) に使う。`pw_upstream` は poly だけ (_physical_upstream が ramp を拒む)。物理壁ではないので `physical_wall_repr` の
+      明示は例外。壁ファイル (`wall_repr.json`、種類 `design_upstream`) を書いて読み直し、復元した壁が元と一致することを確かめる。
+      prepare_info.json の `physical_upstream` と `euler_wall` に記録する。設計壁と CFD ピンの照合は geometry の値のまま (design_chain)。"""
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
-    # 物理壁だけの上流の形 (§5.1 #34) の検査 (不正値・joint でない壁・ramp は例外)。ある問題は δ_r = 0 の物理壁で格子を作る (§5.1 #36b)
+    # 物理壁だけの上流の形 (§5.1 #34) の検査 (不正値・joint でない壁・ramp は例外)。ある問題は H の上流を付けた設計壁で格子を作る
+    # (§5.1 #36b、#36e の案 A)
     pu = _physical_upstream(p.geometry)
     pwu = None
     if pu is None:
@@ -886,6 +888,10 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
                 raise ValueError("geometry.pw_upstream: poly は物理壁の指定 — Euler の prepare は physical_upstream の無い問題では設計壁で格子を作る")
     else:
         pwu = _pw_upstream(p.geometry)            # poly (既定・明示) だけ (_physical_upstream が ramp を拒む)
+        if _physical_wall_repr(p.geometry) is not None:
+            # 案 A (§5.1 #36e): Euler の参照の壁は H の上流を付けた設計壁 (区分表現) で物理壁ではない。物理壁の表現の指定を黙って無視しない
+            raise ValueError(f"geometry.physical_wall_repr: {_physical_wall_repr(p.geometry)} は物理壁の指定 — Euler の prepare は "
+                             "physical_upstream の問題を H の上流を付けた設計壁 (壁ファイル design_upstream) で準備する")
     # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
     m_eu = mesh_euler_block(p)
     run_dir = Path(run_dir)
@@ -894,7 +900,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     d = design_chain(p)
     require_moc_gate(p, d)                        # MOC の不合格は run dir を作る前に止める (2026-10-07)
     scale = float(p.spec["r_throat"])
-    # 壁: physical_upstream が無ければ設計壁そのもの (今と同じ)、あれば δ_r = 0 の物理壁 (検査の不合格は run dir を作る前に例外)
+    # 壁: physical_upstream が無ければ設計壁そのもの (今と同じ)、あれば H の上流を付けた設計壁 (ゲートの不合格は run dir を作る前に例外)
     wall, euler_wall = euler_reference_wall(p, d, scale, pwu=pwu)
     run_dir.mkdir(parents=True, exist_ok=False)
     mp = mesh_params_euler(p, scale)
@@ -966,12 +972,12 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
             "mesh": mesh_rec, "environment": environment_record()}
     if euler_wall is not None:
-        # δ_r = 0 の物理壁 (§5.1 #36b): 壁ファイル (書いて読み直し、復元した壁が今の壁と一致することを確かめる) と記録。キー無しは書かない
+        # H の上流を付けた設計壁 (§5.1 #36e の案 A): 壁ファイル (書いて読み直し、復元した壁が今の壁と一致することを確かめる) と記録。
+        # キー無しは書かない
         from ..geometry.wall_axismach import save_wall_file
-        if euler_wall["repr"] is not None:
-            wpath, wrec, wsha = save_wall_file(run_dir, wall, scale, euler_wall["repr"])
-            euler_wall["physical_wall"] = {"repr": euler_wall["repr"], "source": euler_wall["repr_source"], "file": wpath.name, "sha256": wsha,
-                                           **{k: wrec[k] for k in ("format", "version", "units", "origin", "domain", "domain_m", "physical_wall")}}
+        wpath, wrec, wsha = save_wall_file(run_dir, wall, scale, euler_wall["repr"])
+        euler_wall["wall_file"] = {"repr": euler_wall["repr"], "file": wpath.name, "sha256": wsha,
+                                   **{k: wrec[k] for k in ("format", "version", "units", "origin", "domain", "domain_m", "physical_wall")}}
         info["physical_upstream"] = euler_wall["physical_upstream"]
         info["euler_wall"] = euler_wall
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
@@ -1344,8 +1350,9 @@ def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar
 
 
 def delta_r_zero(x_lo: float, x_hi: float):
-    """補正 δ_r ≡ 0 の関数 (`delta_r_from_table` と同じ形: 値と導関数・`spline`・`x_range`)。Euler の参照の物理壁
-    (`euler_reference_wall`) が NS の物理壁と同じ構築 (`build_physical_wall`) を δ_r = 0 で通るために使う。係数がすべて 0 の 5 次の
+    """補正 δ_r ≡ 0 の関数 (`delta_r_from_table` と同じ形: 値と導関数・`spline`・`x_range`)。#36b では Euler の参照の物理壁が NS の物理壁と
+    同じ構築 (`build_physical_wall`) を δ_r = 0 で通るために使った (§5.1 #36e の案 A からは `euler_reference_wall` は使わない。試験・診断で
+    「δ_r = 0 の物理壁は今も物理壁のゲートで落ちる」ことを確かめるのに残す)。係数がすべて 0 の 5 次の
     補間スプラインなので値も導関数も厳密に 0 (S + 0 は S とビット同一)。表の範囲 [x_lo, x_hi] は壁の定義域を渡す
     (1 本の B-spline の壁は表が [0, x_e] を覆うことを要求する)。"""
     xt = np.linspace(float(x_lo), float(x_hi), 7)
@@ -1355,60 +1362,39 @@ def delta_r_zero(x_lo: float, x_hi: float):
 
 
 def euler_reference_wall(p: Problem, d: dict, scale: float, pwu: dict | None = None):
-    """Euler (`prepare`) の格子の壁 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36b)。戻り (wall, rec)。
+    """Euler (`prepare`) の格子の壁 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36b、§5.1 #36e で案 A に)。戻り (wall, rec)。
 
     - `geometry.physical_upstream` が無い: 設計壁 `d["wall"]` そのもの (今と同じ)。rec は None。
-    - ある: **補正 δ_r ≡ 0 の物理壁**。NS の物理壁と同じ構築 (`build_physical_wall`: pw_upstream poly・physical_wall_repr) に
-      δ_r = 0 (`delta_r_zero`) を渡す。x ≥ 0 は凍結した設計壁 S そのもの、x < 0 は直管 r_inlet と (−L_U, r_inlet, 0, 0) → x = 0 の S の
-      (r, r′, r″) の 5 次多項式 (物理壁だけの上流の形)。設計壁と CFD ピンの照合は geometry の r_inlet・L_U・L_pipe のまま
-      (`design_chain` が照合する。照合を外さない)。δ* ループの抽出器は δ_in = NS の壁 − この壁 と定義するので、境界層の補正を
-      足さない固定の Euler の参照に使う (NS の補正済みの物理壁を slip にした壁ではない — δ_in の基準が変わる; codex diagnose
-      2026-10-14)。物理壁の検査 (上流のゲート・必須属性・validate) の不合格は ValueError。
-      **未決 (2026-10-14)**: 上流のゲートの「スロートの後で r′ ≥ −1e-12」は S + δ_r の物理壁のための厳密な検査で、δ_r ≡ 0 では
-      設計壁 S の出口端の微小な減少 (case/45 の凍結した設計で r′ 最小 −4.0e-8・累積減少 6.1e-9 r_t、設計壁のゲートは合格) で落ちる。
-      どちらのゲートで判定するかは plan §5.1 #36b の判断待ちなので、緩めずに理由を足した ValueError で止める。
-    rec: prepare_info.json の `euler_wall` (種類・δ_r・上流の作り方とゲート・物理スロート・表現)。壁ファイルは呼び出し側が書く。"""
-    from ..geometry.wall_axismach import SingleBSplinePhysicalWall, check_required_attrs, monotone_gate
+    - ある: **H の上流を付けた設計壁** (`UpstreamDesignWall`; codex diagnose 3 `notes/reviews/2026-10-14-h370-registration-diagnose.md`
+      の案 A)。x ≥ 0 は凍結した設計壁 S そのもの、x < 0 は直管 r_inlet と (−L_U, r_inlet, 0, 0) → x = 0 の S の (r, r′, r″) の 5 次
+      多項式 (物理壁の `poly` の上流と同じ式)。δ* ループの抽出器は δ_in = NS の壁 − この壁 と定義するので、境界層の補正を足さない固定の
+      Euler の参照に使う (NS の補正済みの物理壁を slip にした壁ではない — δ_in の基準が変わる; codex diagnose 2026-10-14)。
+      ゲート: 下流 (x ≥ 0) は**設計壁のゲート** `monotone_gate`、上流は単調な収縮・正の半径、全域の一意な大域最小、x = −L_U・0 の C²
+      (`UpstreamDesignWall`)。**物理壁のクラス (`PhysicalNozzleWall`) とその厳密なゲート (`THROAT_R1_TOL`) は使わず、緩めもしない**
+      (#36b の「S の出口端の微小な減少が物理壁のゲートで落ちる」判断待ちは案 A で決着: この壁は物理壁ではない)。設計壁と CFD ピンの
+      照合は geometry の r_inlet・L_U・L_pipe のまま (`design_chain` が照合する。照合を外さない)。ゲート・validate の不合格は ValueError。
+    pwu: `_pw_upstream` の解決済みの値 (poly だけ。記録に使う)。
+    rec: prepare_info.json の `euler_wall` (種類・δ_r = 0・上流の形とゲート・スロート・壁ファイルの種類 `design_upstream`)。
+    壁ファイルは呼び出し側が書く。"""
+    from ..geometry.wall_axismach import DESIGN_UPSTREAM_KIND, UpstreamDesignWall
     pu = _physical_upstream(p.geometry)
     if pu is None:
         return d["wall"], None
     pwu = _pw_upstream(p.geometry) if pwu is None else pwu
-    dw = d["wall"]
-    try:
-        wall = build_physical_wall(p, d, scale, delta_r_x=delta_r_zero(dw.x_in, dw.x_e), offset="radial", pwu=pwu)
-    except ValueError as e:
-        if "後で r′ ≥ 0 False" not in str(e):
-            raise
-        # 物理壁の上流のゲート (wall_global_min、スロートの後で r′ ≥ −1e-12) は S + δ_r の物理壁のための厳密な検査。δ_r ≡ 0 では
-        # x ≥ 0 が凍結した設計壁 S そのものなので、S の出口端の微小な減少 (設計壁のゲート monotone_gate は r′ ≥ −tan(1e-4°)・
-        # 累積減少 ≤ 1e-7 r_t で通している) で落ちる。どちらのゲートで判定するかは決めていない (plan §5.1 #36b の判断待ち) ので、
-        # ゲートを緩めずに理由を足して止める
-        mg = monotone_gate(dw._spl, dw.x0, dw.x_e)
-        raise ValueError(
-            "Euler の参照の物理壁 (physical_upstream、δ_r = 0) が物理壁の上流のゲートの「スロートの後で r′ ≥ 0」で不合格 — x ≥ 0 は"
-            f"凍結した設計壁 S そのもので、S の最小の r′ = {mg['min_r1']:.3e} (x = {mg['x_min_theta']:.6g})・累積減少 D = {mg['D']:.3e} r_t "
-            f"(x {mg['x_D_peak']:.6g} → {mg['x_D']:.6g}) は設計壁のゲート (r′ ≥ {mg['r1_min']:g}・D ≤ {mg['d_max']:g}) では "
-            f"{'合格' if mg['pass'] else '不合格'}、物理壁の厳密なゲート (r′ ≥ −1e-12) では不合格。δ_r = 0 の壁をどちらのゲートで判定するかは "
-            f"plan tooling-nozzle-isothermal-wall-chain §5.1 #36b の判断待ち (元の例外: {e})") from e
-    check_required_attrs(wall)
+    if pwu["value"] != "poly":
+        raise ValueError(f"Euler の参照の壁 (physical_upstream) は pw_upstream poly だけ (受け取った {pwu['value']!r})")
+    wall = UpstreamDesignWall(d["wall"], {"r_U": pu["r_inlet"], "L_U": pu["L_U"], "L_pipe": pu["L_pipe"]})
     msgs = wall.validate()
     if msgs:
-        raise ValueError("Euler の参照の物理壁 (physical_upstream、δ_r = 0) が不合格: " + "; ".join(msgs))
-    req = _physical_wall_repr(p.geometry)
-    if req is not None:
-        repr_, repr_src = req, "explicit"
-    elif isinstance(wall, SingleBSplinePhysicalWall):
-        repr_, repr_src = "single_bspline", "default"
-    else:
-        repr_, repr_src = None, "default (1 本で表せないので区分表現のまま)"
-    rec = {"kind": "physical_upstream_delta_r_zero", "delta_r": 0.0,
-           "note": "補正 δ_r ≡ 0 の物理壁 (x ≥ 0 は設計壁 S、x < 0 は physical_upstream の直管と S(0) への 5 次多項式)",
+        raise ValueError("Euler の参照の壁 (H の上流を付けた設計壁) が不合格: " + "; ".join(msgs))
+    rec = {"kind": "design_with_physical_upstream", "delta_r": 0.0,
+           "note": ("H の上流を付けた設計壁 (案 A、§5.1 #36e): x ≥ 0 は設計壁 S、x < 0 は physical_upstream の直管と S(0) への 5 次多項式。"
+                    "物理壁ではない (境界層の補正なし)"),
            "physical_upstream": {"requested": pu, "wall": wall.physical_upstream},
            "pw_upstream": {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]},
-           "pw_upstream_gate": wall.upstream_gate,
-           "throat_physical": {"x": float(wall.x_throat), "r": float(wall.r_throat), "kappa": float(wall.kappa_throat)},
-           "repr": repr_, "repr_source": repr_src,
-           "single_bspline_default_skipped": getattr(wall, "single_bspline_default_skipped", None)}
+           "gate": wall.gate,
+           "throat": {"x": float(wall.x_throat), "r": float(wall.r_throat), "kappa": float(wall.kappa_throat)},
+           "repr": DESIGN_UPSTREAM_KIND}
     return wall, rec
 
 
@@ -1603,6 +1589,11 @@ def _stop_rule_settings(p: Problem, nsteps, euler_ref, stop_rule: bool | None) -
         why = [sr["reason"]] if not sr["use"] else []
         if euler_ref and SR.resolve_path(euler_ref) is None:
             why.append(f"euler_ref が見つからない ({euler_ref!r})")
+        elif isinstance(euler_ref, dict):
+            try:
+                SR.check_euler_ref(euler_ref)            # 固定のスナップショットの sha256 (§5.1 #36e (6))
+            except ValueError as e:
+                why.append(str(e))
         if why:
             raise ValueError(f"本段の停止規則を要求した ({sr['requested_source']}) が使えない: {'; '.join(why)}")
     return sr
@@ -1662,6 +1653,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       fallback_steps は `--steps` > `evaluate.nStepOuter` > 48,000 のまま。上限と違うと `ns_stage_configs.main` の sha256 は実際に回した
       本段と違うので、実際の本段は MAIN_STAGE_STARTED を見る)。θ_r の断面は設計壁の出口 (`physical_wall.domain[1]`) の比なので、壁ファイルの
       無い物理壁 (1 本の B-spline でも legacy でもない) では使えない (下で例外)。
+    - **`euler_ref`** (固定の Euler の参照): run dir (str; 今までどおり、抽出は最新の出力を読む) か、スナップショットの固定 {run, res, sha256}
+      (plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6); `metrics.deltastar.resolve_euler_ref`)。固定は run dir を作る前に sha256 を照合し
+      (違えば ValueError)、prepare_info.json の `euler_ref` (と停止規則の `stop_rule.euler_ref`) にそのまま残す。停止規則の帯・見張りの中の
+      出力ごとの δ の記録・受け渡しの関門の抽出はその固定のファイルを読む。
     """
     from ..feedback.deltastar import _sutherland
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, check_required_attrs, save_wall_file
@@ -1689,6 +1684,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         if "Tw_profile" in p.wall_thermal:
             raise ValueError("geometry.physical_upstream と spec.wall_thermal.Tw_profile の併用は未対応 (壁温分布の区切りの点 −L_U は "
                              "設計壁の値なので、物理壁の縮流部の始まりと食い違う)")
+    # 固定の Euler の参照 (§5.1 #36e (6)): スナップショットの指定 {run, res, sha256} は run dir を作る前に sha を照合する (ディレクトリだけは今と同じ)
+    from ..metrics.deltastar import resolve_euler_ref
+    euler_ref_rec = (resolve_euler_ref(euler_ref, verify=isinstance(euler_ref, dict))["record"] if euler_ref else None)
     # 本段の停止規則 (§5.1 #36a): キー・引数が無ければ None (今と同じ)。不正値・要求したのに使えない設定は run dir を作る前に例外
     sr_settings = _stop_rule_settings(p, nsteps, euler_ref, stop_rule)
     run_dir = Path(run_dir)
@@ -1745,7 +1743,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if init_info is not None:
         dstar_src = f"integral_bl:{init_info['model']} thermal_bc={init_info['thermal_bc']} (radial)"
     elif delta_r_csv is not None:
-        dstar_src = f"delta_r_csv:{delta_r_csv} (radial, core-matched Euler ref {euler_ref}, omega {omega})"
+        dstar_src = f"delta_r_csv:{delta_r_csv} (radial, core-matched Euler ref {euler_ref_rec}, omega {omega})"
     else:
         dstar_src = ("correlation_hist_v1" if dstar_csv is None else f"{dstar_csv} (blend {dstar_blend})") + f" ({offset})"
     msgs = wall.validate()
@@ -1853,7 +1851,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                                 "kappa": wall.kappa_throat,
                                 "dstar_throat_correlation": float(wall._dstar_hist(0.0)),
                                 "delta_r_throat_applied": float(wall.r_throat - 1.0)},
-            "offset": wall.offset_mode, "euler_ref": (str(euler_ref) if euler_ref else None),
+            "offset": wall.offset_mode, "euler_ref": euler_ref_rec,
             "pw_ramp_gate": (wall.ramp_gate if wall.pw_upstream == "ramp" else None),
             "initializer": init_info,
             "omega": omega, "prev_run": (str(prev_run) if prev_run else None),
@@ -2098,6 +2096,11 @@ def _stop_rule_for_main(run_dir: Path, stop_rule: bool | None) -> tuple:
         raise RuntimeError(f"{run_dir}: 本段の停止規則を要求したが使えない ({sr.get('reason')}) — forge を起動しない")
     if SR.resolve_path(sr.get("euler_ref")) is None:
         raise RuntimeError(f"{run_dir}: 本段の停止規則の euler_ref が見つからない ({sr.get('euler_ref')!r}) — forge を起動しない")
+    if isinstance(sr.get("euler_ref"), dict):
+        try:
+            SR.check_euler_ref(sr["euler_ref"])          # 固定のスナップショットの sha256 (§5.1 #36e (6))
+        except ValueError as ex:
+            raise RuntimeError(f"{run_dir}: 本段の停止規則の Euler の参照の固定が合わない ({ex}) — forge を起動しない") from ex
     try:
         SR.RunGeometry(run_dir)
     except (ValueError, KeyError, OSError) as ex:

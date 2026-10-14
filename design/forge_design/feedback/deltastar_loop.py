@@ -26,8 +26,12 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
 判定は `HANDOFF_GATE.json`・`HANDOFF_CONVERGENCE.txt` に残す。明示の上書き: `--allow-not-reached` (停止規則を使わない run・CENSORED・
 UNAVAILABLE から進む)・`--allow-unconverged` (収束の判定が NOT CONVERGED でも進む)。DIVERGED・EXEC_ERROR・DATA_ERROR・状態の記録なし・
 収束の判定の DIVERGED・判定不能は上書きでも進まない。止めたら CLI は終了コード 3。**壁の更新を次の pass へ自動でつながない** (1 pass ずつ
-呼び出し側が確かめる)。関門の合格は §4.9 の「更新に進む条件」(保存則・局所の y₁⁺・抽出の被覆・δ_E の隣り合う 2 窓の変動 ほか) の
-一部だけで、全部ではない。
+呼び出し側が確かめる)。2026-10-14 (§5.1 #36e、codex diagnose 3・§6 V-h370) から関門は §4.9 の「更新に進む条件」の残りも見る
+(上書きでは通さない): 保存則 (stop_rule.json の r の窓)・局所 y₁⁺ (`check_wall_resolution.py`)・δ_E と δ_target の隣り合う 2 窓
+(見張りの中の出力ごとの記録)・Euler の参照と ω が本段の記録と同じ、それを満たしたら固定の条件 (`handoff_extract_settings`: edge・一定 x の
+断面への補間・端は欠測・ω 0.5・λ 1.0・昇格の上限 ×1000) で抽出して全域の被覆・使用域の held と欠測・次の壁の幾何の健全性。全部満たしたときだけ
+抽出の表を run の直下に写す。Euler の参照は `--euler-ref-res res_<N>.h5 --euler-ref-sha256 HEX` でスナップショットを固定できる (sha が
+合わなければ例外; 無ければ今までどおり最新の出力)。
 
 推奨 (2026-09-04, case/45 run_0026 で検証): 収束済み NS 場からの warm start では
   `--stages none --cfl 5 --implicit-relax 0.7 --steps 12000`
@@ -56,11 +60,30 @@ from ..metrics.deltastar import deltastar_from_core_matched_euler, massflow_rati
 DELTA_R_NEXT_COLUMNS = ("x_rt", "delta_target", "delta_in_prev", "delta_E", "held")
 _DELTA_R_NEXT_OLD = ("x_rt", "delta_r", "delta_in_prev", "delta_r_use_smoothed", "held")
 
-# 受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a)
+# 受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、#36e で §4.9 の更新に進む条件の残りを足した)
 HANDOFF_GATE = "HANDOFF_GATE.json"            # 関門の判定の記録 (run ごと)
 HANDOFF_CONVERGENCE = "HANDOFF_CONVERGENCE.txt"   # 関門で回した check_convergence.py --segment の出力
+HANDOFF_WALL_RESOLUTION = "HANDOFF_WALL_RESOLUTION.txt"   # 関門で回した check_wall_resolution.py の出力 (§5.1 #36e)
+HANDOFF_EXTRACT_DIR = "handoff_extract"       # 関門の抽出の置き場 (合格したときだけ表を run の直下へ写す; §5.1 #36e)
 HANDOFF_BAND_SELECT = "edge"                  # 関門を通った後の抽出の帯の選び方 (2026-10-14 まで未指定 = 既定の adaptive)
 _STOP_OVERRIDABLE = ("NOT_USED", "CENSORED", "UNAVAILABLE")   # allow_not_reached で通せる停止の状態 (それ以外の非 REACHED は通さない)
+# 受け渡しの抽出の固定の条件 (§5.1 #36e (4)(5)、codex diagnose 3・§6 V-h370)。停止規則の帯の生成・見張りの中の出力ごとの δ の記録・
+# 関門の抽出で共通に使う (prepare_info の stop_rule.extract に写す):
+#   - 一定 x の断面への補間 remap_constant_x=True、端の補間範囲の不足は欠測 remap_edge="missing" (定数で外挿しない)
+#   - ω 0.5 (§6 V-h370 の登録)、平滑化は 2026-10-14 まで deltastar_loop が使っていた値 (extract_and_merge の既定) を明示して固定:
+#     λ 1.0・ノット 2.0 r_t・単調性ガードの λ の昇格は ×1, ×10, ×100, ×1000 の段 (extract_and_merge の段そのもの) で、その最後 ×1000 を
+#     上限として明示する (2026-10-14 までは上限の検査なし = ×1000 でも単調にならなければ黙って進んだ。今は抽出の例外 → 関門で止める)
+HANDOFF_EXTRACT = {"band_select": HANDOFF_BAND_SELECT, "remap_constant_x": True, "remap_edge": "missing"}
+HANDOFF_OMEGA = 0.5
+HANDOFF_SMOOTH = {"smooth_lam": 1.0, "knot_spacing": 2.0, "max_lam_factor": 1000.0}
+HANDOFF_WINDOW_TOL_MM = 0.01                  # 2 窓の δ_E・δ_target の最大−最小・窓の平均の差の上限 [mm] (§6 V-h370)
+HANDOFF_CONV_DROP = 3.0                       # check_convergence.py --segment --drop (§6 V-h370; ツールの既定と同じ値を明示)
+
+
+def handoff_extract_settings() -> dict:
+    """受け渡しの抽出の固定の条件 (帯の選び方・一定 x の断面への補間と端の扱い・ω・平滑化の λ とノット・昇格の上限)。
+    `extract_and_merge(run, euler_ref, out_dir=..., **handoff_extract_settings())` でそのまま渡せる形。"""
+    return {**HANDOFF_EXTRACT, "omega": HANDOFF_OMEGA, **HANDOFF_SMOOTH}
 
 
 class HandoffBlocked(RuntimeError):
@@ -137,6 +160,7 @@ def extract_and_merge(prev_run, euler_run, omega: float = 0.5, smooth_lam: float
     fin = np.isfinite(d_use) & (d_in > 1e-4)
     ratio = d_use[fin] / d_in[fin]
     summary = {"omega": omega, "smooth": {"kind": "quintic_pspline", "knot_spacing": knot_spacing, "lam": str(lam_used), **diag},
+               "max_lam_factor": max_lam_factor, "not_extracted": d.get("not_extracted"),
                "n_stations": int(len(d["x"])), "n_ok": int(d["ok"].sum()),
                "n_hard_ok": int(d["hard_ok"].sum()), "n_held": int(held.sum()),
                "use_over_in_median": float(np.median(ratio)) if fin.any() else None,
@@ -587,11 +611,12 @@ def stop_state(run_dir) -> dict:
 
 
 def convergence_verdict(run_dir) -> dict:
-    """`check_convergence.py --segment` (stage_manifest.json の最後の区間 = 方程式・BC・離散化が同じ本段) の判定 (plan §5.1 #36a)。
+    """`check_convergence.py --segment --drop 3` (stage_manifest.json の最後の区間 = 方程式・BC・離散化が同じ本段、全列) の判定 (plan §5.1 #36a;
+    `--drop 3` はツールの既定と同じ値を §6 V-h370 の登録どおり明示 #36e)。
     kind: PASS (終了コード 0) / DIVERGED (NaN/Inf) / UNDETERMINED (判定不能: stage_manifest・残差の履歴が無い ほか) / NOT_CONVERGED。
     2026-10-14 までの `run_pass` ほかは区間を指定せずに回して結果を捨てていた。"""
     from ..evaluate.runner import FORGE_TOOLS
-    cmd = [sys.executable, str(FORGE_TOOLS / "check_convergence.py"), "--segment", str(run_dir)]
+    cmd = [sys.executable, str(FORGE_TOOLS / "check_convergence.py"), "--segment", "--drop", f"{HANDOFF_CONV_DROP:g}", str(run_dir)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     out = r.stdout + r.stderr
     lines = [ln.strip() for ln in out.splitlines()
@@ -607,17 +632,198 @@ def convergence_verdict(run_dir) -> dict:
     return {"cmd": cmd, "rc": r.returncode, "kind": kind, "verdict": lines, "output": out}
 
 
-def handoff_gate(run_dir, *, allow_not_reached: bool = False, allow_unconverged: bool = False, write: bool = True) -> dict:
-    """受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、codex diagnose 2026-10-14): その run の場から抽出して
-    次の壁の入力 (`delta_r_next.csv`・`fixed_point.json`) を作ってよいか。
+# --- 受け渡しの関門の残りの条件 (§4.9 の「更新に進む条件」、§5.1 #36e (5)・§6 V-h370) ------------------------------------------
+def wall_resolution_verdict(run_dir, step=None) -> dict:
+    """局所 y₁⁺ (`check_wall_resolution.py`、目標は局所 y₁⁺ ≤ 1・超過の許容はツールの既定のまま)。step があれば `--step step` (停止の出力の
+    壁のダンプ)。kind: PASS (終了コード 0) / FAIL (1) / UNDETERMINED (それ以外 = 判定不能; 合格ではない)。"""
+    from ..evaluate.runner import FORGE_TOOLS
+    cmd = [sys.executable, str(FORGE_TOOLS / "check_wall_resolution.py"), str(run_dir)] + (["--step", str(int(step))] if step is not None else [])
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    kind = {0: "PASS", 1: "FAIL"}.get(r.returncode, "UNDETERMINED")
+    return {"cmd": cmd, "rc": r.returncode, "kind": kind, "verdict": [ln.strip() for ln in out.splitlines() if ln.startswith("VERDICT")],
+            "output": out}
+
+
+def _read_stop_record(run_dir) -> dict | None:
+    from ..evaluate import stop_rule as SR
+    p = Path(run_dir) / SR.RECORD
+    try:
+        return json.loads(p.read_text()) if p.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
+def conservation_check(rec: dict | None, step) -> dict:
+    """保存則 (質量の収支): stop_rule.json の行の r = (ṁ_in − ṁ_out)/ṁ_in の、停止の出力 s で終わる窓 [s − W, s] の平均と振幅
+    ((最大 − 最小)/2) が停止規則の閾値 (r_mean_max・r_amp_max) 以内。窓が本段の履歴に覆われ (最初の出力 ≤ s − W)、min_points 点以上で、
+    r が全部有限であること。記録が無い・s が無い・足りないときは不合格 (判定不能は合格ではない)。"""
+    if rec is None or step is None:
+        return {"pass": False, "why": "stop_rule.json か停止の出力 s が無い (停止規則を使っていない run は保存則を判定できない)"}
+    st = rec.get("settings") or {}
+    W, mp = int(st.get("window", 0)), int(st.get("min_points", 0))
+    rows = [r for r in rec.get("rows") or [] if isinstance(r.get("step"), int)]
+    out = {"step": int(step), "window": W, "min_points": mp, "r_mean_max": st.get("r_mean_max"), "r_amp_max": st.get("r_amp_max"),
+           "pass": False}
+    if not rows or not W or rows[0]["step"] > step - W:
+        out["why"] = f"本段の履歴が窓 [s − {W}, s] を覆わない"
+        return out
+    win = [r for r in rows if step - W <= r["step"] <= step]
+    rv = np.array([r.get("r", np.nan) for r in win], dtype=float)
+    out["n"] = len(win)
+    if len(win) < mp or not np.all(np.isfinite(rv)):
+        out["why"] = f"窓の点数 {len(win)} (≥ {mp} が要る) か r に非有限値"
+        return out
+    out["r_mean"], out["r_amp"] = float(rv.mean()), float((rv.max() - rv.min()) / 2.0)
+    out["pass"] = bool(abs(out["r_mean"]) <= float(st["r_mean_max"]) and out["r_amp"] <= float(st["r_amp_max"]))
+    if not out["pass"]:
+        out["why"] = f"|r の平均| {abs(out['r_mean']):.3e} (≤ {st['r_mean_max']}) か r の振幅 {out['r_amp']:.3e} (≤ {st['r_amp_max']})"
+    return out
+
+
+def two_window_check(rec: dict | None, step, tol_mm: float = HANDOFF_WINDOW_TOL_MM) -> dict:
+    """δ_E・δ_target の隣り合う 2 窓の条件 (§6 V-h370): 停止の出力 s に対して W1 = [s − 2W, s − W]・W2 = [s − W, s] (閉区間、W は停止規則の
+    窓)。stop_rule.json の行の `delta` (見張りの中の出力ごとの抽出、`stop_rule.delta_snapshot`) を読み、計算の後に抽出し直さない。
+    各窓の全使用域 (delta_series.x の全列) で δ_E・δ_target の最大 − 最小 ≤ tol_mm、窓の平均どうしの差も全列で ≤ tol_mm [mm]。
+    各窓は min_points 点以上 (停止規則と同じ)、窓の全出力に欠測・held・抽出の失敗・飛ばしの無い記録があること。満たさなければ不合格。"""
+    if rec is None or step is None:
+        return {"pass": False, "why": "stop_rule.json か停止の出力 s が無い (出力ごとの δ の記録が要る)"}
+    st, ds = rec.get("settings") or {}, rec.get("delta_series") or {}
+    W, mp = int(st.get("window", 0)), int(st.get("min_points", 0))
+    xs = np.asarray(ds.get("x") or [], dtype=float)
+    S = ds.get("scale_m")
+    out = {"step": int(step), "windows": [[step - 2 * W, step - W], [step - W, step]], "tol_mm": float(tol_mm), "n_cols": int(len(xs)),
+           "pass": False}
+    rows = [r for r in rec.get("rows") or [] if isinstance(r.get("step"), int)]
+    if not W or not len(xs) or S is None:
+        out["why"] = "stop_rule.json に窓・delta_series (列の x・scale_m) が無い"
+        return out
+    if not rows or rows[0]["step"] > step - 2 * W:
+        out["why"] = f"本段の履歴が 2 窓 [s − {2 * W}, s] を覆わない (最初の出力 {rows[0]['step'] if rows else None})"
+        return out
+    wins = [[r for r in rows if lo <= r["step"] <= hi] for lo, hi in out["windows"]]
+    out["n"] = [len(w) for w in wins]
+    if min(out["n"]) < mp:
+        out["why"] = f"窓の点数 {out['n']} (各 ≥ {mp} が要る)"
+        return out
+    bad = []
+    for w in wins:
+        for r in w:
+            d = r.get("delta")
+            if not isinstance(d, dict) or "delta_E" not in d:
+                bad.append(f"{r['step']}: " + ("記録なし" if not isinstance(d, dict) else str(d.get("error") or d.get("skipped") or "δ なし")))
+            elif len(d["delta_E"]) != len(xs) or d.get("n_missing") or d.get("n_held"):
+                bad.append(f"{r['step']}: 列の数 {len(d['delta_E'])} / 欠測 {d.get('n_missing')} / held {d.get('n_held')}")
+    if bad:
+        out["why"] = "窓の出力の δ の記録が使えない: " + "; ".join(bad[:6]) + (" …" if len(bad) > 6 else "")
+        return out
+    mm = float(S) * 1e3
+    worst, ok = {}, True
+    for q in ("delta_E", "delta_target"):
+        A = [np.array([r["delta"][q] for r in w], dtype=float) for w in wins]
+        if not all(np.all(np.isfinite(a)) for a in A):
+            out["why"] = f"{q} に非有限値"
+            return out
+        for name, v in (("range_W1", np.ptp(A[0], axis=0)), ("range_W2", np.ptp(A[1], axis=0)),
+                        ("mean_diff", np.abs(A[1].mean(axis=0) - A[0].mean(axis=0)))):
+            i = int(np.argmax(v))
+            worst[f"{q}.{name}"] = {"max_mm": float(v[i] * mm), "x_at_max": float(xs[i])}
+            ok &= bool(v[i] * mm <= tol_mm)
+    out["worst"] = worst
+    out["pass"] = ok
+    if not ok:
+        out["why"] = "; ".join(f"{k} {v['max_mm']:.4g} mm (x {v['x_at_max']:.4g})" for k, v in worst.items() if v["max_mm"] > tol_mm)
+    return out
+
+
+def coverage_check(summary: dict, delta_next, x_exit: float) -> dict:
+    """抽出の全域の被覆と使用域の held・欠測 (§4.9): (i) NS のすべての列を抽出した (`not_extracted` が空: Euler の範囲の外・端の補間範囲の
+    不足 (欠測)・帯の計算の失敗が 1 列も無い)、(ii) 使用域 [0, x_e] の delta_r_next.csv に held が無く δ_E・δ_target が有限。"""
+    ne = (summary or {}).get("not_extracted")
+    out = {"x_exit": float(x_exit), "pass": False}
+    if not isinstance(ne, dict):
+        out["why"] = "抽出の記録に not_extracted が無い (被覆を判定できない)"
+        return out
+    out["not_extracted"] = {"n": ne["n"], "n_cols_ns": ne.get("n_cols_ns"), "x": ne["x"][:20], "reason": ne["reason"][:20]}
+    nx = read_delta_r_next(delta_next)
+    x = np.asarray(nx["x_rt"], dtype=float)
+    use = (x >= 0.0) & (x <= float(x_exit) + 1e-9)
+    held = (np.asarray(nx["held"]) != 0) & use
+    nonfin = use & ~(np.isfinite(nx["delta_E"]) & np.isfinite(nx["delta_target"]))
+    out.update(n_use=int(use.sum()), n_held_use=int(held.sum()), n_nonfinite_use=int(nonfin.sum()),
+               x_held_use=[float(v) for v in x[held][:20]])
+    why = []
+    if ne["n"]:
+        why.append(f"抽出しなかった NS の列 {ne['n']} (理由 {sorted(set(ne['reason']))}、x {', '.join(f'{v:.4f}' for v in ne['x'][:6])})")
+    if out["n_held_use"]:
+        why.append(f"使用域の held {out['n_held_use']} 点")
+    if out["n_nonfinite_use"]:
+        why.append(f"使用域の δ_E・δ_target の非有限 {out['n_nonfinite_use']} 点")
+    out["pass"] = not why
+    if why:
+        out["why"] = "; ".join(why)
+    return out
+
+
+def next_wall_check(problem, delta_next) -> dict:
+    """次の壁の幾何の健全性: delta_r_next.csv の次の壁の入力 (第 2 列 δ_target) から `prepare_ns(delta_r_csv=...)` と同じ構築
+    (`design_chain` → `delta_r_from_table` → `build_physical_wall`、offset radial) で物理壁を作り、既存の壁のゲート (上流のゲート: 正の半径・
+    一意な最小・前後の単調性・継ぎ目、1 本の B-spline の作り直しの許容、必須属性、validate) を通るか。例外・validate の不合格は不合格。"""
+    from ..evaluate.runner_axismach import build_physical_wall, delta_r_from_table, design_chain, load_problem, require_moc_gate
+    from ..geometry.wall_axismach import check_required_attrs
+    if problem is None:
+        return {"pass": False, "why": "問題 YAML が渡されていない (次の壁を作れない)"}
+    try:
+        p = load_problem(problem)
+        d = design_chain(p)
+        require_moc_gate(p, d)
+        tbl = np.loadtxt(delta_next, delimiter=",", skiprows=1)
+        W = build_physical_wall(p, d, float(p.spec["r_throat"]), delta_r_x=delta_r_from_table(tbl[:, 0], tbl[:, 1]), offset="radial")
+        check_required_attrs(W)
+        msgs = W.validate()
+    except Exception as e:  # noqa: BLE001 — 壁のゲートの例外は不合格として記録する
+        return {"pass": False, "why": f"次の壁の構築が例外 ({type(e).__name__}: {e})"[:1200]}
+    g = getattr(W, "upstream_gate", None) or {}
+    out = {"pass": not msgs, "wall": type(W).__name__, "pw_upstream": getattr(W, "pw_upstream", None),
+           "throat": {"x": float(W.x_throat), "r": float(W.r_throat), "kappa": float(W.kappa_throat)},
+           "upstream_gate_pass": g.get("pass"), "validate": msgs}
+    if msgs:
+        out["why"] = "validate: " + "; ".join(msgs)
+    return out
+
+
+def _same_euler_ref(a, b) -> bool:
+    """2 つの Euler の参照の指定が同じ (run のディレクトリ・固定の res と sha256)。"""
+    from ..evaluate import stop_rule as SR
+    pa, pb = SR.resolve_path(a), SR.resolve_path(b)
+    if pa is None or pb is None or pa.resolve() != pb.resolve():
+        return False
+    fa = (a.get("res"), a.get("sha256")) if isinstance(a, dict) else (None, None)
+    fb = (b.get("res"), b.get("sha256")) if isinstance(b, dict) else (None, None)
+    return fa == fb
+
+
+def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None = None, allow_not_reached: bool = False,
+                 allow_unconverged: bool = False, write: bool = True, extract: bool = True) -> dict:
+    """受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a・#36e、codex diagnose 2026-10-14・diagnose 3、§6 V-h370):
+    その run の場から抽出して次の壁の入力 (`delta_r_next.csv`・`fixed_point.json`) を作ってよいか (§4.9 の「更新に進む条件」)。
     (a) 本段の停止の状態 (`stop_state`) が REACHED。`allow_not_reached` で NOT_USED・CENSORED・UNAVAILABLE も通す (明示の上書き)。
         DIVERGED・EXEC_ERROR・DATA_ERROR・MISSING は通さない。
-    (b) `convergence_verdict` が PASS。`allow_unconverged` で NOT_CONVERGED も通す (明示の上書き)。DIVERGED・UNDETERMINED は通さない
-        (判定不能は合格ではない)。
-    戻り: {proceed, blocked_by, stop_rule, convergence (出力の本文を除く), override, extract}。write なら run に HANDOFF_GATE.json
-    (原子的に) と HANDOFF_CONVERGENCE.txt を書く。**proceed は §4.9 の「更新に進む条件」の一部 (停止の状態・本段の全残差) だけ**で、
-    保存則・局所の y₁⁺・抽出の被覆・δ_E と δ_target の隣り合う 2 窓の変動・held の確認の代わりにならない (呼び出し側が別に確かめる)。"""
+    (b) `convergence_verdict` (`check_convergence.py --segment --drop 3`) が PASS。`allow_unconverged` で NOT_CONVERGED も通す (明示の上書き)。
+        DIVERGED・UNDETERMINED は通さない (判定不能は合格ではない)。
+    以下は **上書きでは通さない** (#36e; 既存の 2 つの上書きの範囲は (a)(b) のまま):
+    (c) 保存則 (`conservation_check`、stop_rule.json の r の窓)。(d) 局所 y₁⁺ (`wall_resolution_verdict` の PASS)。(e) δ_E・δ_target の
+        隣り合う 2 窓 (`two_window_check`、見張りの中の出力ごとの記録)。(f) Euler の参照が本段の記録 (停止規則の euler_ref) と同じ、ω が
+        固定の値 (`HANDOFF_OMEGA`) と同じ。
+    (a)〜(f) を満たしたときだけ抽出する (`extract`; run の HANDOFF_EXTRACT_DIR に、固定の条件 `handoff_extract_settings` = edge・一定 x の
+    断面への補間・端の欠測・ω・平滑化の λ・昇格の上限、Euler の参照は (f) の固定のスナップショット) → (g) 抽出の全域の被覆と使用域の held・
+    欠測なし (`coverage_check`)、(h) 次の壁の幾何の健全性 (`next_wall_check`、problem が要る)。抽出の例外 (昇格の上限を超えた単調性ガード・
+    sha の不一致ほか) も不合格。全部満たしたら抽出の表を run の直下に写す (`delta_r_next.csv` ほか; 不合格なら写さない)。
+    戻り: {proceed, blocked_by, stop_rule, convergence, checks, override, extract (settings・made・summary)}。write なら run に HANDOFF_GATE.json
+    (原子的に)・HANDOFF_CONVERGENCE.txt・HANDOFF_WALL_RESOLUTION.txt を書く (抽出は write でなくても HANDOFF_EXTRACT_DIR に書く)。"""
     import datetime
+    import shutil
+    from ..evaluate import stop_rule as SR
     run_dir = Path(run_dir)
     st = stop_state(run_dir)
     cv = convergence_verdict(run_dir)
@@ -637,15 +843,85 @@ def handoff_gate(run_dir, *, allow_not_reached: bool = False, allow_unconverged:
         else:
             blocked.append(f"収束の判定 {k} (check_convergence.py --segment の終了コード {cv['rc']}"
                            + ("; 明示の上書き allow_unconverged が無い)" if k == "NOT_CONVERGED" else "; 上書きでも通さない)"))
-    rec = {"version": 1, "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a",
+    # --- (c)〜(f): 記録から (上書きでは通さない) ---
+    try:
+        info = json.loads((run_dir / "prepare_info.json").read_text())
+    except (OSError, ValueError):
+        info = {}
+    sr = info.get("stop_rule") if isinstance(info.get("stop_rule"), dict) else {}
+    settings = dict(sr.get("extract") or handoff_extract_settings())
+    settings.pop("source", None)
+    rec_sr = _read_stop_record(run_dir)
+    step = st.get("stop_step")
+    if step is None and rec_sr is not None:
+        step = rec_sr.get("stop_step")
+    checks = {"stop_step": step}
+    checks["conservation"] = conservation_check(rec_sr, step)
+    wr = wall_resolution_verdict(run_dir, step)
+    checks["wall_resolution"] = {k_: v for k_, v in wr.items() if k_ != "output"}
+    checks["wall_resolution"]["pass"] = wr["kind"] == "PASS"
+    checks["two_windows"] = two_window_check(rec_sr, step)
+    run_eref = sr.get("euler_ref") or info.get("euler_ref")
+    use_eref = run_eref if run_eref else euler_ref
+    eref_ok = use_eref is not None and (euler_ref is None or run_eref is None or _same_euler_ref(euler_ref, run_eref))
+    checks["euler_ref"] = {"run": run_eref, "caller": (euler_ref if isinstance(euler_ref, dict) or euler_ref is None else str(euler_ref)),
+                           "pinned": isinstance(use_eref, dict), "pass": bool(eref_ok)}
+    om = HANDOFF_OMEGA if omega is None else float(omega)
+    checks["omega"] = {"caller": om, "fixed": settings.get("omega"), "pass": bool(om == settings.get("omega"))}
+    for name, label in (("conservation", "保存則 (質量の収支)"), ("wall_resolution", "局所 y₁⁺ (check_wall_resolution)"),
+                        ("two_windows", "δ_E・δ_target の 2 窓"), ("euler_ref", "Euler の参照 (本段の記録と同じ)"), ("omega", "ω (固定の値)")):
+        c = checks[name]
+        if not c["pass"]:
+            blocked.append(f"{label}: " + str(c.get("why") or c.get("kind") or c))
+    # --- (g)(h): 抽出 (a)〜(f) を満たしたときだけ ---
+    ext = {"band_select": HANDOFF_BAND_SELECT, "settings": settings, "dir": HANDOFF_EXTRACT_DIR, "made": None, "summary": None}
+    if blocked or not extract:
+        why = "前の条件で止めた" if blocked else "extract=False"
+        checks["coverage"] = {"pass": False, "evaluated": False, "why": why}
+        checks["next_wall"] = {"pass": False, "evaluated": False, "why": why}
+        if not blocked:
+            blocked.append("抽出をしていない (extract=False) — 被覆・held・次の壁を判定していない")
+    else:
+        od = run_dir / HANDOFF_EXTRACT_DIR
+        if od.exists():
+            shutil.rmtree(od)
+        od.mkdir(parents=True)
+        try:
+            summ = extract_and_merge(run_dir, SR.euler_ref_spec(use_eref) or use_eref, out_dir=od, **settings)
+            ext["summary"] = summ
+        except Exception as e:  # noqa: BLE001 — 抽出の例外 (昇格の上限・sha の不一致ほか) は関門の不合格
+            summ = None
+            blocked.append(f"抽出が例外 ({type(e).__name__}: {e})"[:600])
+            checks["coverage"] = {"pass": False, "evaluated": False, "why": "抽出が例外"}
+            checks["next_wall"] = {"pass": False, "evaluated": False, "why": "抽出が例外"}
+        if summ is not None:
+            dn = od / "delta_r_next.csv"
+            x_e = ((info.get("physical_wall") or {}).get("domain") or [None, None])[1]
+            if x_e is None:
+                x_e = float(np.max(np.loadtxt(dn, delimiter=",", skiprows=1)[:, 0]))
+            checks["coverage"] = coverage_check(summ, dn, float(x_e))
+            checks["next_wall"] = next_wall_check(problem, dn)
+            for name, label in (("coverage", "抽出の全域の被覆・使用域の held と欠測"), ("next_wall", "次の壁の幾何の健全性")):
+                if not checks[name]["pass"]:
+                    blocked.append(f"{label}: {checks[name].get('why')}")
+            if not blocked:
+                made = []
+                for f in ("delta_r_next.csv", "delta_r_equiv.csv", "delta_r_equiv_diag.json", "delta_r_extract_summary.json", "delta_r_edge.csv"):
+                    if (od / f).exists():
+                        shutil.copy2(od / f, run_dir / f)
+                        made.append(f)
+                ext["made"] = made
+    rec = {"version": 2, "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a・#36e (§6 V-h370)",
            "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
            "proceed": not blocked, "blocked_by": blocked,
-           "stop_rule": st, "convergence": {k_: v for k_, v in cv.items() if k_ != "output"},
-           "override": {"allow_not_reached": bool(allow_not_reached), "allow_unconverged": bool(allow_unconverged)},
-           "extract": {"band_select": HANDOFF_BAND_SELECT, "made": None},
-           "note": "proceed は抽出・次の壁の入力を作ってよいかの関門で、§4.9 の更新に進む条件の全部ではない。壁の更新は次の pass へ自動でつながない"}
+           "stop_rule": st, "convergence": {k_: v for k_, v in cv.items() if k_ != "output"}, "checks": checks,
+           "override": {"allow_not_reached": bool(allow_not_reached), "allow_unconverged": bool(allow_unconverged),
+                        "scope": "上書きは (a) 停止の状態・(b) 収束の判定だけ。保存則・y₁⁺・2 窓・参照・ω・被覆・held・次の壁は上書きでは通さない"},
+           "extract": ext,
+           "note": "proceed は §4.9 の「更新に進む条件」の全部を満たしたか (壁の更新は次の pass へ自動でつながない)。0.05 mm の固定点の条件は設計を終える用で、ここでは見ない"}
     if write:
         (run_dir / HANDOFF_CONVERGENCE).write_text(cv["output"])
+        (run_dir / HANDOFF_WALL_RESOLUTION).write_text(wr["output"])
         _write_json_atomic(run_dir / HANDOFF_GATE, rec)
     return rec
 
@@ -659,26 +935,29 @@ def _write_json_atomic(path: Path, rec: dict) -> None:
 def _print_gate(label: str, gate: dict) -> None:
     print(f"handoff gate ({label}): {'進む' if gate['proceed'] else '止める'} — 停止の状態 {gate['stop_rule']['status']}、"
           f"収束の判定 {gate['convergence']['kind']}" + (f"、理由: {'; '.join(gate['blocked_by'])}" if gate["blocked_by"] else "")
-          + (f"、上書き {gate['override']}" if any(gate["override"].values()) else ""), flush=True)
+          + (f"、上書き {({k: v for k, v in gate['override'].items() if k != 'scope'})}"
+             if any(v for k, v in gate["override"].items() if k != "scope") else ""), flush=True)
 
 
-def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached: bool, allow_unconverged: bool) -> dict:
-    """NS の後段 (`run_pass`・`run_pass0_integral`・`run_from_table` 共通): 受け渡しの関門 → 通れば抽出 (band_select="edge" を明示) と
-    fixed_point.json → 設計の標準出力。関門で止めたら抽出・fixed_point.json・delta_r_next.csv を作らない (標準出力は今までどおり作る)。
-    m (metrics) に関門の記録 `handoff_gate` を足して返す。"""
+def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached: bool, allow_unconverged: bool, problem=None) -> dict:
+    """NS の後段 (`run_pass`・`run_pass0_integral`・`run_from_table` 共通): 受け渡しの関門 (`handoff_gate`; 条件を満たせば関門の中で抽出し、
+    表を run の直下に写す) → 通れば fixed_point.json → 設計の標準出力。関門で止めたら fixed_point.json・delta_r_next.csv を run の直下に
+    作らない (標準出力は今までどおり作る)。m (metrics) に関門の記録 `handoff_gate` を足して返す。"""
     run_dir = Path(run_dir)
-    gate = handoff_gate(run_dir, allow_not_reached=allow_not_reached, allow_unconverged=allow_unconverged)
+    gate = handoff_gate(run_dir, problem=problem, euler_ref=euler_ref, omega=omega, allow_not_reached=allow_not_reached,
+                        allow_unconverged=allow_unconverged)
     print((run_dir / HANDOFF_CONVERGENCE).read_text(), flush=True)      # 収束の判定の出力 (今までは check_convergence がそのまま出した)
     _print_gate("new", gate)
     if gate["proceed"]:
-        fp = extract_and_merge(run_dir, euler_ref, omega=omega, band_select=HANDOFF_BAND_SELECT)
-        (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
-        print(f"{label}:", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
-        print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
-        gate["extract"]["made"] = ["fixed_point.json", "delta_r_next.csv"]
+        fp = gate["extract"]["summary"]
+        (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1, default=str))
+        print(f"{label}:", json.dumps({k: v for k, v in fp.items() if k != "massflow"}, default=str), flush=True)
+        print("massflow(new):", json.dumps(fp["massflow"], default=str), flush=True)
+        gate["extract"]["made"] = ["fixed_point.json"] + list(gate["extract"]["made"] or [])
         _write_json_atomic(run_dir / HANDOFF_GATE, gate)
     else:
-        print("handoff gate: 抽出 (fixed_point.json・delta_r_next.csv) を作らない — 判定は " + str(run_dir / HANDOFF_GATE), flush=True)
+        print("handoff gate: 抽出の表 (fixed_point.json・delta_r_next.csv) を run の直下に作らない — 判定は " + str(run_dir / HANDOFF_GATE),
+              flush=True)
     m["handoff_gate"] = gate
     _design_report(run_dir, euler_ref)
     return m
@@ -689,19 +968,20 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
              stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
              allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
     """前の pass の run (prev_run) から抽出して次の壁を作り、NS を準備・実行する 1 pass (自動で次の pass へはつながない)。
-    抽出の前に prev_run の受け渡しの関門 (`handoff_gate`、prev_run には書かない) を通し、不合格なら抽出・準備の前に `HandoffBlocked`
-    (新しい run dir を作らない)。関門の結果は新しい run の prepare_info.json の `handoff_from_prev` に残す。NS の後は `_after_ns`。
-    stop_rule: prepare_ns へ (None = 問題 YAML の evaluate.stop_rule、False = 使わない)。"""
+    prev_run の受け渡しの関門 (`handoff_gate`、HANDOFF_GATE.json は prev_run に書かない; 条件を満たせば関門の中で固定の条件で抽出し、表を
+    prev_run の直下に写す) が不合格なら準備の前に `HandoffBlocked` (新しい run dir を作らない)。関門の結果は新しい run の prepare_info.json
+    の `handoff_from_prev` に残す。NS の後は `_after_ns`。stop_rule: prepare_ns へ (None = 問題 YAML の evaluate.stop_rule、False = 使わない)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
     prev_run = Path(prev_run); run_dir = Path(run_dir)
-    gate_prev = handoff_gate(prev_run, allow_not_reached=allow_not_reached, allow_unconverged=allow_unconverged, write=False)
+    gate_prev = handoff_gate(prev_run, problem=problem, euler_ref=euler_ref, omega=omega, allow_not_reached=allow_not_reached,
+                             allow_unconverged=allow_unconverged, write=False)
     _print_gate("prev", gate_prev)
     if not gate_prev["proceed"]:
         raise HandoffBlocked(f"前の pass の run {prev_run} が受け渡しの関門で不合格 — 抽出・次の壁の作成へ進まない: "
                              + "; ".join(gate_prev["blocked_by"]))
-    summ = extract_and_merge(prev_run, euler_ref, omega=omega, band_select=HANDOFF_BAND_SELECT)
-    print("extract(prev):", json.dumps({k: v for k, v in summ.items() if k != "massflow"}), flush=True)
-    print("massflow(prev):", json.dumps(summ["massflow"]), flush=True)
+    summ = gate_prev["extract"]["summary"]
+    print("extract(prev):", json.dumps({k: v for k, v in summ.items() if k != "massflow"}, default=str), flush=True)
+    print("massflow(prev):", json.dumps(summ["massflow"], default=str), flush=True)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from or prev_run,
                       delta_r_csv=prev_run / "delta_r_next.csv", offset="radial",
                       euler_ref=euler_ref, omega=omega, prev_run=prev_run,
@@ -722,7 +1002,7 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
     # 受け渡しの関門 → 固定点差: 新 run から抽出し、入力 (= 新 run の壁 − Euler 壁) と比較
-    return _after_ns(run_dir, euler_ref, omega, m, "fixed_point(new)", allow_not_reached, allow_unconverged)
+    return _after_ns(run_dir, euler_ref, omega, m, "fixed_point(new)", allow_not_reached, allow_unconverged, problem=problem)
 
 
 def resolve_integral_initializer(problem) -> dict:
@@ -766,7 +1046,7 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged)
+    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem)
 
 
 def check_table_against_card(problem, table) -> dict:
@@ -824,7 +1104,7 @@ def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=No
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged)
+    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem)
 
 
 def _gate_rc(res) -> int:
@@ -836,7 +1116,11 @@ def _gate_rc(res) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="δ_r 固定点反復 (固定 Euler 基準)")
     ap.add_argument("--problem", required=True)
-    ap.add_argument("--euler-ref", required=True)
+    ap.add_argument("--euler-ref", required=True, help="固定の Euler の参照の run dir")
+    ap.add_argument("--euler-ref-res", default=None, metavar="RES",
+                    help="Euler の参照のスナップショットを固定する: 読む出力のファイル名 (res_<N>.h5)。--euler-ref-sha256 と一緒に書く "
+                         "(plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6)。無ければ今までどおり最新の出力)")
+    ap.add_argument("--euler-ref-sha256", default=None, metavar="HEX", help="--euler-ref-res の sha256 (合わなければ例外)")
     ap.add_argument("--prev", default=None, help="前 pass の NS run (抽出元・IC 既定)。--init-integral では不要")
     ap.add_argument("--run-dir", required=True)
     ap.add_argument("--omega", type=float, default=0.5)
@@ -874,6 +1158,13 @@ def main(argv=None) -> int:
                     help="受け渡しの関門の明示の上書き: check_convergence.py --segment が NOT CONVERGED でも抽出・次の壁の入力を作る "
                          "(DIVERGED・判定不能は通さない)")
     a = ap.parse_args(argv)
+    if (a.euler_ref_res is None) != (a.euler_ref_sha256 is None):
+        ap.error("--euler-ref-res と --euler-ref-sha256 は一緒に書く (Euler の参照のスナップショットの固定)")
+    if a.euler_ref_res is not None:
+        # 固定のスナップショット {run, res, sha256} (§5.1 #36e (6)): ここで形と sha を確かめる (違えば例外)
+        from ..metrics.deltastar import resolve_euler_ref
+        a.euler_ref = {"run": a.euler_ref, "res": a.euler_ref_res, "sha256": a.euler_ref_sha256}
+        resolve_euler_ref(a.euler_ref, verify=True)
     sr_arg = False if a.no_stop_rule else None      # None = 問題 YAML の evaluate.stop_rule (無ければ使わない)
     gate_kw = dict(allow_not_reached=a.allow_not_reached, allow_unconverged=a.allow_unconverged)
     if a.delta_r_csv is not None:
@@ -928,7 +1219,8 @@ def _design_report(run_dir, euler_ref):
         return
     try:
         from ..report.nozzle_report import make_report
-        print("design report:", make_report(run_dir, euler_ref), flush=True)
+        # 固定のスナップショットの指定 {run, res, sha256} は run dir を渡す (標準出力の図・評価量は診断で、Euler は最新の出力を読む)
+        print("design report:", make_report(run_dir, euler_ref["run"] if isinstance(euler_ref, dict) else euler_ref), flush=True)
     except BaseException as e:  # noqa: BLE001
         print(f"design report: 失敗 ({type(e).__name__}: {e}) — chain は続行", flush=True)
 

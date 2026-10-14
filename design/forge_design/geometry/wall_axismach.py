@@ -26,6 +26,9 @@ Hermite の端点条件 (同じ 0 と 1/R) の一致で C²。
 joint 壁の物理壁の上流の作り方 (`geometry.pw_upstream`: `poly` = 配管〜設計スロートの 5 次多項式 [既定] / `ramp` = 旧来の
 δ_r ランプ) と、物理スロートを物理壁の大域最小として求める `wall_global_min` も末尾
 (plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md §4.1)。
+
+δ* ループの固定の Euler の参照の壁 `UpstreamDesignWall` (H の上流を付けた設計壁、壁ファイルの種類 `design_upstream`) も末尾
+(plan tooling-nozzle-isothermal-wall-chain §4.9 codex diagnose 3 の案 A・§5.1 #36e)。
 """
 from __future__ import annotations
 
@@ -1834,6 +1837,147 @@ def check_required_attrs(wall) -> None:
         raise ValueError(f"物理壁 ({type(wall).__name__}, pw_upstream {wall.pw_upstream}) に必須属性が無い・None: {miss}")
 
 
+# --- H の上流を付けた設計壁 (Euler の参照の壁、plan tooling-nozzle-isothermal-wall-chain §4.9 codex diagnose 3 の案 A・§5.1 #36e) --------
+DESIGN_UPSTREAM_KIND = "design_upstream"            # 壁ファイルの表現の種類 (問題 YAML の physical_wall_repr には書けない)
+WALL_FILE_KINDS = PHYSICAL_WALL_REPRS + (DESIGN_UPSTREAM_KIND,)
+
+
+def _quintic_xi_extrema(c, n: int) -> tuple:
+    """ξ ∈ [0, 1] の 5 次多項式 Σ c[j] ξ^j の n 階微分 (ξ についての微分) の最小・最大 (端と n + 1 階微分の実根で厳密に評価)。
+    戻り: (最小, その ξ, 最大, その ξ)。"""
+    P = np.polynomial.Polynomial(np.asarray(c, dtype=float)).deriv(n)
+    crit = [0.0, 1.0]
+    if P.degree() >= 2:
+        crit += [float(z.real) for z in np.atleast_1d(P.deriv().roots()) if abs(z.imag) <= 1e-12 and 0.0 < z.real < 1.0]
+    xi = np.asarray(crit)
+    v = P(xi)
+    return float(v.min()), float(xi[int(np.argmin(v))]), float(v.max()), float(xi[int(np.argmax(v))])
+
+
+class UpstreamDesignWall:
+    r"""**H の上流を付けた設計壁** (δ* ループの固定の Euler の参照の壁; plan tooling-nozzle-isothermal-wall-chain §4.9 codex diagnose 3 の
+    案 A、§5.1 #36e)。物理壁ではない (境界層の補正 δ_r を持たない)。抽出器は δ_in = NS の物理壁 − この壁 と定義する。
+
+    - $x \ge 0$: 凍結した設計壁 S そのもの (`design.r(x)` をそのまま返す; 物理壁の `poly` に δ_r ≡ 0 を入れた S + 0 と同じ値)。
+    - $x < 0$: 直管 r_U ([x_in, −L_U)) と 5 次 Hermite Q ((−L_U, r_U, 0, 0) → x = 0 の S の (r, r′, r″)) — `PhysicalNozzleWall` の
+      `poly` の上流と同じ式・同じ関数 (`wall._hermite_quintic`・`wall._poly_eval`)。直管と Q の始点は `physical_upstream`
+      ({r_U, L_U, L_pipe}、`_resolve_physical_upstream` で検査) の値。
+
+    ゲート (`gate`、構築時に評価し不合格なら ValueError):
+    - 下流 [0, x_e]: **設計壁のゲート** `monotone_gate` (最小の r′ ≥ −tan(1e-4°)・累積減少 ≤ 1e-7 r_t) を設計壁 S の区間多項式に当てる。
+      物理壁の厳密なゲート (`THROAT_R1_TOL`、スロートの後で r′ ≥ −1e-12) は使わない (この壁は S + δ_r の物理壁ではないので。物理壁の
+      ゲートは緩めない)。
+    - 上流 [x_in, 0): 正の半径 (Q の最小を端と Q′ の根で厳密に) と単調な収縮 (Q′ の最大 ≤ `THROAT_R1_TOL`、端と Q″ の根で厳密に)。
+    - 全域の一意な大域最小 (`wall_global_min` の positive・unique・極小・それより低い候補なし。後ろの単調性 monotone_after は物理壁の
+      厳密な判定なので記録だけで、下流は上の設計壁のゲートで判定する)。
+    - x = −L_U・x = 0 の継ぎ目で値・1 階・2 階微分の跳び ≤ `POLY_SEAM_TOL` (C²)。
+    物理壁の上流の名目の U→T Hermite の検査 (μ ≤ 20・単調収縮) は `validate` (物理壁と同じ)。"""
+
+    def __init__(self, design_wall, physical_upstream: dict) -> None:
+        from .wall import _hermite_quintic, _poly_eval
+        if not isinstance(design_wall, JointFitCFDWall) or float(design_wall.x0) != 0.0:
+            raise ValueError("UpstreamDesignWall: 設計壁は始点 x0 = 0 の JointFitCFDWall (wall_repr: joint) に限る "
+                             f"(受け取った {type(design_wall).__name__})")
+        self.design = design_wall
+        self.up_ref, self.physical_upstream = _resolve_physical_upstream(design_wall, physical_upstream, "poly", True)
+        if self.physical_upstream is None:
+            raise ValueError("UpstreamDesignWall: physical_upstream ({r_U, L_U, L_pipe}) が要る")
+        self.r_U, self.L_U = float(self.up_ref.r_U), float(self.up_ref.L_U)
+        self.x_in, self.x_e = float(design_wall.x_in), float(design_wall.x_e)
+        self._herm_x0 = -self.L_U
+        self.pw_upstream = "poly"
+        L = self.L_U
+        e0 = [float(design_wall.r(np.array([0.0]), n)[0]) for n in range(3)]          # x = 0⁺ の S の (r, r′, r″)
+        self._q_c = _hermite_quintic(-L, 0.0, self.r_U, 0.0, 0.0, e0[0], e0[1], e0[2])
+        self._q_eval = _poly_eval
+        self.upstream_poly = {"coef": [float(v) for v in self._q_c], "basis": "Σ coef[j] ξ^j, ξ = (x + L_U)/L_U",
+                              "domain": [-L, 0.0],
+                              "end_conditions": {"x_minus_L_U": [self.r_U, 0.0, 0.0], "x_0": e0,
+                                                 "note": "x = −L_U で直管 (r_U, 0, 0)、x = 0 で設計壁 S の x = 0⁺ の (r, r′, r″) (境界層の補正なし)"}}
+        self.gate = self._gate(e0)
+        self.x_throat, self.r_throat, self.kappa_throat = (self.gate["global_min"][k] for k in ("x_t", "r_t", "kappa_t"))
+        if not self.gate["pass"]:
+            raise ValueError("UpstreamDesignWall (H の上流を付けた設計壁): ゲート不合格 — " + "; ".join(self.gate["reasons"]))
+
+    def _gate(self, e0) -> dict:
+        from .wall import _poly_eval
+        S, L = self.design, self.L_U
+        reasons = []
+        # 下流: 設計壁のゲート (S の区間多項式)
+        mg = monotone_gate(S._spl, float(S.x0), float(S.x_e))
+        if not mg.get("applicable", False) or not mg["pass"]:
+            reasons.append("下流 [0, x_e] の設計壁のゲート (monotone_gate) 不合格: " + "; ".join(mg.get("reasons") or [mg.get("reason", "")]))
+        # 上流: Q の値の最小 (正の半径) と Q′ の最大 (単調な収縮) を端と根で厳密に (ξ 基底、x′ = ξ′/L)
+        q_min, xi_qmin, _, _ = _quintic_xi_extrema(self._q_c, 0)
+        _, _, d1_max, xi_d1max = _quintic_xi_extrema(self._q_c, 1)
+        r1_max = d1_max / L
+        up = {"r_U": self.r_U, "q_min": q_min, "x_q_min": -L + L * xi_qmin, "positive_radius": bool(self.r_U > 0.0 and q_min > 0.0),
+              "max_r1": float(max(r1_max, 0.0)), "max_r1_q": float(r1_max), "x_max_r1_q": -L + L * xi_d1max, "r1_tol": THROAT_R1_TOL,
+              "monotone_contraction": bool(r1_max <= THROAT_R1_TOL), "note": "直管は r′ = 0、Q は端と Q″ の根で厳密に評価"}
+        if not up["positive_radius"]:
+            reasons.append(f"上流の半径が正でない (直管 {self.r_U!r}、Q の最小 {q_min!r} at x {up['x_q_min']:.6g})")
+        if not up["monotone_contraction"]:
+            reasons.append(f"上流が単調な収縮でない (Q′ の最大 {r1_max:.3e} > {THROAT_R1_TOL:g} at x {up['x_max_r1_q']:.6g})")
+        # 全域の一意な大域最小 (区間ごとの多項式から; 後ろの単調性は記録だけ)
+        br = np.unique(np.r_[self.x_in, -L, 0.0, np.asarray(S._spl.t, dtype=float), self.x_e])
+        br = br[((br >= 0.0) & (br <= self.x_e)) | np.isin(br, [self.x_in, -L])]
+        srch = wall_global_min(self.r, br)
+        gm = {k: srch[k] for k in ("x_t", "r_t", "kappa_t", "positive", "unique", "n_at_min", "x_t_is_local_min", "global_min_below_x_t",
+                                    "monotone_before", "max_r1_before", "monotone_after", "min_r1_after", "x_min_r1_after", "r1_tol",
+                                    "n_intervals", "poly_check_max_rel")}
+        gm["pass"] = bool(srch["positive"] and srch["unique"] and srch["x_t_is_local_min"] and not srch["global_min_below_x_t"])
+        gm["note"] = "monotone_after は物理壁の厳密な判定 (r′ ≥ −1e-12) で、この壁の判定には使わない (下流は monotone_gate)"
+        if not gm["pass"]:
+            reasons.append(f"一意な大域最小でない (正 {srch['positive']}、一意 {srch['unique']} ({srch['n_at_min']} か所)、極小 "
+                           f"{srch['x_t_is_local_min']}、より低い候補 {srch['global_min_below_x_t']}; x_t {srch['x_t']:.6g})")
+        # 継ぎ目 (−L_U・0) の値・1 階・2 階微分の跳び (左右の極限)
+        qL = [float(_poly_eval(self._q_c, -L, 0.0, np.array([-L]), n)[0]) for n in range(3)]
+        q0 = [float(_poly_eval(self._q_c, -L, 0.0, np.array([0.0]), n)[0]) for n in range(3)]
+        seams = [{"x": -L, "left": [self.r_U, 0.0, 0.0], "right": qL,
+                  **{f"jump_d{n}": float(abs(qL[n] - (self.r_U if n == 0 else 0.0))) for n in range(3)}},
+                 {"x": 0.0, "left": q0, "right": list(e0), **{f"jump_d{n}": float(abs(e0[n] - q0[n])) for n in range(3)}}]
+        seam_max = max(s_[f"jump_d{n}"] for s_ in seams for n in range(3))
+        if not seam_max <= POLY_SEAM_TOL:
+            reasons.append(f"継ぎ目の跳び {seam_max:.2e} > {POLY_SEAM_TOL:g} (C² でない)")
+        d2max, x_d2 = _quintic_d2_diff_absmax(self._q_c, np.asarray(self.up_ref._c, dtype=float), L)
+        return {"kind": DESIGN_UPSTREAM_KIND, "pass": not reasons, "reasons": reasons,
+                "downstream_monotone_gate": {k: mg.get(k) for k in ("applicable", "pass", "reasons", "min_r1", "min_theta_deg", "x_min_theta",
+                                                                    "D", "x_D", "x_D_peak", "r1_min", "d_max", "interval", "n_pieces")},
+                "upstream": up, "global_min": gm, "seams": seams, "max_seam_jump": float(seam_max), "limit_seam": POLY_SEAM_TOL,
+                "max_abs_d2_change_vs_H": float(d2max), "x_at_max_d2_change": float(x_d2),
+                "note": "案 A: 下流は設計壁のゲート、上流は単調な収縮・正の半径、全域の一意な大域最小、C² の継ぎ目。|Q″ − H″| は記録だけ"}
+
+    def r(self, x, deriv: int = 0):
+        x = np.asarray(x, dtype=float)
+        if deriv not in (0, 1, 2, 3):
+            raise ValueError("deriv は 0..3")
+        out = np.empty_like(x)
+        m_pipe = x < -self.L_U
+        m_q = (x >= -self.L_U) & (x < 0.0)
+        m_dn = x >= 0.0
+        out[m_pipe] = self.r_U if deriv == 0 else 0.0
+        if m_q.any():
+            out[m_q] = self._q_eval(self._q_c, -self.L_U, 0.0, x[m_q], deriv)
+        if m_dn.any():
+            out[m_dn] = self.design.r(x[m_dn], deriv)
+        return out
+
+    def theta(self, x):
+        return np.arctan(self.r(x, 1))
+
+    def kappa(self, x):
+        rp, rpp = self.r(x, 1), self.r(x, 2)
+        return rpp / (1.0 + rp * rp) ** 1.5
+
+    def validate(self, n: int = 4000) -> list:
+        """物理壁の上流の名目の U→T Hermite の検査 (μ ≤ 20・単調収縮; 物理壁と同じ) + ゲートの不合格の理由 + 標本の半径 > 0。"""
+        msgs = ["物理壁の上流 (physical_upstream) の U→T: " + m for m in self.up_ref.validate()]
+        msgs += list(self.gate["reasons"])
+        if np.any(self.r(np.linspace(self.x_in, self.x_e, n)) <= 0.0):
+            msgs.append("壁半径が非正")
+        return msgs
+
+
 def _delta_r_eval(spl, lo: float, hi: float):
     """δ_r の評価関数 (`runner_axismach.delta_r_from_table` と同じ規約: 表の範囲外は値を端値クリップ・導関数 0)。
     保存した δ_r の B-spline から legacy の物理壁を復元するのに使う。"""
@@ -1868,17 +2012,24 @@ def wall_file_record(wall, scale_m: float, kind: str) -> dict:
     kind = 'single_bspline' (wall は `SingleBSplinePhysicalWall`、上流は poly) / 'legacy' (wall は解析経路の `PhysicalNozzleWall` の区分表現)。
     長さは r_t 単位 (x_m = scale_m·x)。設計壁は直管 (r_U・x_in)・上流 Hermite (係数・区間 [−L_U, 0])・S (ノット・係数・
     有効域 [0, x_e]) を持つ。上流の方式 `pw_upstream` を最上位と物理壁に書く。物理壁は 1 本の B-spline か、legacy なら復元に要る全要素
-    (ramp: ランプと δ_r の B-spline と表の範囲 / poly: 多項式 Q の係数・基底・区間と δ_r の B-spline と表の範囲)。"""
-    if kind not in PHYSICAL_WALL_REPRS:
-        raise ValueError(f"wall_file_record: kind={kind!r} は {PHYSICAL_WALL_REPRS} のどれか")
+    (ramp: ランプと δ_r の B-spline と表の範囲 / poly: 多項式 Q の係数・基底・区間と δ_r の B-spline と表の範囲)。
+    kind = 'design_upstream' (`DESIGN_UPSTREAM_KIND`、plan tooling-nozzle-isothermal-wall-chain §5.1 #36e): wall は `UpstreamDesignWall`
+    (H の上流を付けた設計壁 = Euler の参照の壁)。`physical_wall` の欄に直管・多項式 Q (係数・基底・区間)・physical_upstream・ゲートの要約を
+    書く (δ_r は無い; x ≥ 0 は design_wall の S)。"""
+    if kind not in WALL_FILE_KINDS:
+        raise ValueError(f"wall_file_record: kind={kind!r} は {WALL_FILE_KINDS} のどれか")
     if kind == "single_bspline" and not isinstance(wall, SingleBSplinePhysicalWall):
         raise ValueError("wall_file_record: single_bspline には SingleBSplinePhysicalWall が要る")
     if kind == "legacy" and not (isinstance(wall, PhysicalNozzleWall) and wall.analytic and wall.offset_mode == "radial"):
         raise ValueError("wall_file_record: legacy の壁ファイルは joint 壁 + 解析経路 (offset radial) の PhysicalNozzleWall だけ")
+    if (kind == DESIGN_UPSTREAM_KIND) != isinstance(wall, UpstreamDesignWall):
+        raise ValueError(f"wall_file_record: {DESIGN_UPSTREAM_KIND} の壁ファイルは UpstreamDesignWall だけ、UpstreamDesignWall は "
+                         f"{DESIGN_UPSTREAM_KIND} だけ (kind={kind!r}, wall={type(wall).__name__})")
     mode = wall.pw_upstream
     if mode not in PW_UPSTREAMS:
         raise ValueError(f"wall_file_record: 物理壁の pw_upstream {mode!r} が {PW_UPSTREAMS} のどれでもない")
-    check_required_attrs(wall)
+    if kind != DESIGN_UPSTREAM_KIND:
+        check_required_attrs(wall)
     dw = wall.design
     if not isinstance(dw, JointFitCFDWall) or float(dw.x0) != 0.0:
         raise ValueError("wall_file_record: 設計壁は始点 x0 = 0 の JointFitCFDWall に限る")
@@ -1897,6 +2048,17 @@ def wall_file_record(wall, scale_m: float, kind: str) -> dict:
                 "max_err_vs_legacy": wall.fit_diag["max_err"], "tol": wall.fit_diag["tol"],
                 "construction": wall.fit_diag["construction"], "knot_removal": wall.fit_diag["knot_removal"],
                 "upstream_poly": wall.upstream_poly, "upstream_gate": _gate_summary(wall.upstream_gate)}
+    elif kind == DESIGN_UPSTREAM_KIND:
+        g = wall.gate
+        phys = {"kind": DESIGN_UPSTREAM_KIND, "pw_upstream": mode, "upstream_poly": wall.upstream_poly, "throat": throat,
+                "formula": "x < −L_U: r_U (直管) / −L_U ≤ x < 0: Q(x) (upstream_poly) / 0 ≤ x ≤ x_e: S(x) (design_wall の S、境界層の補正なし)",
+                "gate": {"pass": g["pass"], "reasons": g["reasons"],
+                         "downstream_monotone_gate": {k: g["downstream_monotone_gate"][k] for k in ("pass", "min_r1", "x_min_theta", "D", "r1_min",
+                                                                                                    "d_max")},
+                         "upstream": {k: g["upstream"][k] for k in ("positive_radius", "q_min", "monotone_contraction", "max_r1_q", "r1_tol")},
+                         "global_min": {k: g["global_min"][k] for k in ("pass", "x_t", "r_t", "unique", "n_at_min")},
+                         "max_seam_jump": g["max_seam_jump"], "limit_seam": g["limit_seam"]},
+                "note": "Euler の参照の壁 (H の上流を付けた設計壁; plan tooling-nozzle-isothermal-wall-chain §5.1 #36e の案 A)。物理壁ではない"}
     else:
         lo_t, hi_t = (float(v) for v in wall._dr.x_range)
         drec = {**_spline_rec(wall._dr.spline, lo_t, hi_t), "x_range": [lo_t, hi_t],
@@ -2080,6 +2242,56 @@ class _RestoredPolyPhysicalWall:
         return out
 
 
+class _RestoredUpstreamDesignWall:
+    """壁ファイル (design_upstream) から復元した H の上流を付けた設計壁: 直管 r_U / 多項式 Q / S (`UpstreamDesignWall` と同じ式・同じ関数;
+    plan tooling-nozzle-isothermal-wall-chain §5.1 #36e)。Q の端条件 (x = −L_U で (r_U, 0, 0)、x = 0 で S) が `POLY_SEAM_TOL` で
+    合わなければ例外 (壊れた壁ファイル)。定義域の外は例外 (外挿しない)。"""
+
+    def __init__(self, design: RestoredDesignWall, rec: dict) -> None:
+        from .wall import _poly_eval
+        self.design = design
+        self.pw_upstream = "poly"
+        pu, up = rec["physical_upstream"], rec["upstream_poly"]
+        miss = [k_ for k_ in ("r_U", "L_U", "L_pipe", "x_in") if not isinstance(pu, dict) or pu.get(k_) is None]
+        miss += [f"upstream_poly.{k_}" for k_ in ("coef", "domain") if not isinstance(up, dict) or up.get(k_) is None]
+        if miss:
+            raise ValueError(f"壁ファイル: design_upstream の physical_wall に必要な要素が無い: {miss}")
+        if float(pu["x_in"]) != design.x_in:
+            raise ValueError(f"壁ファイル: physical_upstream.x_in {pu['x_in']!r} ≠ 設計壁の x_in {design.x_in!r}")
+        self.L_U, self.r_U = float(pu["L_U"]), float(pu["r_U"])
+        self._q_c = np.asarray(up["coef"], dtype=float)
+        if self._q_c.shape != (6,) or not np.all(np.isfinite(self._q_c)):
+            raise ValueError(f"壁ファイル: upstream_poly.coef は有限の 6 個 (受け取った形 {self._q_c.shape})")
+        if [float(v) for v in up["domain"]] != [-self.L_U, 0.0]:
+            raise ValueError(f"壁ファイル: upstream_poly.domain {up['domain']} ≠ [−L_U, 0] = {[-self.L_U, 0.0]}")
+        self._q_eval = _poly_eval
+        self.x_in, self.x_e = design.x_in, design.x_e
+        L = self.L_U
+        qL = [float(_poly_eval(self._q_c, -L, 0.0, np.array([-L]), n)[0]) for n in range(3)]
+        q0 = [float(_poly_eval(self._q_c, -L, 0.0, np.array([0.0]), n)[0]) for n in range(3)]
+        e0 = [float(design.r(np.array([0.0]), n)[0]) for n in range(3)]
+        jump = max([abs(qL[0] - self.r_U), abs(qL[1]), abs(qL[2])] + [abs(q0[n] - e0[n]) for n in range(3)])
+        if not jump <= POLY_SEAM_TOL:
+            raise ValueError(f"壁ファイル: 多項式 Q の端条件が直管・設計壁 S と合わない (継ぎ目の跳び {jump:.2e} > {POLY_SEAM_TOL:g})")
+
+    def r(self, x, deriv: int = 0):
+        x = np.asarray(x, dtype=float)
+        if x.size and (float(np.min(x)) < self.x_in or float(np.max(x)) > self.x_e):
+            raise ValueError(f"復元した設計壁 (design_upstream): x が定義域 [{self.x_in:.9g}, {self.x_e:.9g}] の外 (外挿しない)")
+        if deriv not in (0, 1, 2, 3):
+            raise ValueError("deriv は 0..3")
+        out = np.empty_like(x)
+        m_pipe = x < -self.L_U
+        m_q = (x >= -self.L_U) & (x < 0.0)
+        m_dn = x >= 0.0
+        out[m_pipe] = self.r_U if deriv == 0 else 0.0
+        if m_q.any():
+            out[m_q] = self._q_eval(self._q_c, -self.L_U, 0.0, x[m_q], deriv)
+        if m_dn.any():
+            out[m_dn] = self.design.r(x[m_dn], deriv)
+        return out
+
+
 class _RestoredSingleBSplineWall:
     """壁ファイル (single_bspline) から復元した物理壁 (1 本の B-spline。定義域の外は例外)。"""
 
@@ -2102,6 +2314,8 @@ _WALL_FILE_KEYS = {
     ("legacy", "ramp"): ("kind", "pw_upstream", "ramp", "delta_r", "throat"),
     ("legacy", "poly"): ("kind", "pw_upstream", "upstream_poly", "delta_r", "throat"),
     ("single_bspline", "poly"): ("kind", "pw_upstream", "k", "t", "c", "domain", "joints", "throat", "upstream_poly"),
+    # H の上流を付けた設計壁 (Euler の参照の壁、plan tooling-nozzle-isothermal-wall-chain §5.1 #36e)。版 2 だけ
+    (DESIGN_UPSTREAM_KIND, "poly"): ("kind", "pw_upstream", "upstream_poly", "physical_upstream", "throat"),
 }
 
 
@@ -2109,6 +2323,7 @@ def load_wall_file(path) -> dict:
     """壁ファイル (`WALL_FILE`、run_dir を渡してもよい) を読み、物理壁と設計壁の評価関数を返す (共通の読み込み関数)。
     形式・版・表現の種類・上流の方式・必要な要素を検査し、欠けていたら ValueError。評価関数は有効域の外で例外 (外挿しない)。
     版 1 (上流の方式の記録が無い) は ramp として読む。版 2 の single_bspline は poly だけ (ramp + single_bspline は作れない)。
+    design_upstream (H の上流を付けた設計壁 = Euler の参照の壁、§5.1 #36e) は版 2・poly だけで、"physical" はその壁 (物理壁ではない)。
     戻り: {"record", "physical" (r(x, deriv)), "design" (RestoredDesignWall), "kind", "pw_upstream", "version", "scale_m",
     "domain", "throat"}。"""
     import json
@@ -2130,9 +2345,11 @@ def load_wall_file(path) -> dict:
     if isinstance(version, bool) or version not in WALL_FILE_VERSIONS_READ:
         raise ValueError(f"壁ファイル {p}: 版 {version!r} は未対応 (読める版 {WALL_FILE_VERSIONS_READ})")
     kind = rec["physical_wall_repr"]
-    if kind not in PHYSICAL_WALL_REPRS:
-        raise ValueError(f"壁ファイル {p}: physical_wall_repr {kind!r} は {PHYSICAL_WALL_REPRS} のどれでもない")
+    if kind not in WALL_FILE_KINDS:
+        raise ValueError(f"壁ファイル {p}: physical_wall_repr {kind!r} は {WALL_FILE_KINDS} のどれでもない")
     if version == 1:
+        if kind == DESIGN_UPSTREAM_KIND:
+            raise ValueError(f"壁ファイル {p}: {DESIGN_UPSTREAM_KIND} は版 2 だけ")
         mode = "ramp"                                                  # 旧形式: 方式の記録が無い → ランプ
         if "pw_upstream" in rec or "pw_upstream" in (rec.get("physical_wall") or {}):
             raise ValueError(f"壁ファイル {p}: 版 1 に pw_upstream がある (版と中身が食い違う)")
@@ -2141,8 +2358,8 @@ def load_wall_file(path) -> dict:
         mode = rec["pw_upstream"]
         if not isinstance(mode, str) or mode not in PW_UPSTREAMS:
             raise ValueError(f"壁ファイル {p}: pw_upstream {mode!r} は {PW_UPSTREAMS} のどれでもない")
-        if kind == "single_bspline" and mode != "poly":
-            raise ValueError(f"壁ファイル {p}: single_bspline は pw_upstream poly だけ (受け取った {mode!r})")
+        if kind in ("single_bspline", DESIGN_UPSTREAM_KIND) and mode != "poly":
+            raise ValueError(f"壁ファイル {p}: {kind} は pw_upstream poly だけ (受け取った {mode!r})")
     need(rec["units"], ("length", "scale_m"), "units")
     if rec["units"]["length"] != "r_t":
         raise ValueError(f"壁ファイル {p}: 長さの単位 {rec['units']['length']!r} は未対応 (r_t)")
@@ -2166,6 +2383,8 @@ def load_wall_file(path) -> dict:
         if [phys.lo, phys.hi] != dom:
             raise ValueError(f"壁ファイル {p}: 物理壁の有効域 {[phys.lo, phys.hi]} ≠ domain {dom}")
         physical = _RestoredSingleBSplineWall(phys, mode)
+    elif kind == DESIGN_UPSTREAM_KIND:
+        physical = _RestoredUpstreamDesignWall(design, ph)
     elif mode == "ramp":
         need(ph["delta_r"], ("k", "t", "c", "x_range"), "physical_wall.delta_r")
         physical = _RestoredLegacyPhysicalWall(design, ph)

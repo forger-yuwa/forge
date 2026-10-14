@@ -1,8 +1,9 @@
-# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2)・§5.1 #36b: H の固定の Euler の参照 (補正 δ_r = 0)。
+# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2・3)・§5.1 #36b・#36e: H の固定の Euler の参照 (補正 δ_r = 0、§6 V-h370)。
 #   h370_problems.py make が run_0174_euler_v5d_M_r1 の問題 problem_d155_euler_v5d_M.yaml (moc_v5d.py make-problems --md-offset
 #   6.8825162455159465e-06 の本文、sha256 cfee7f057648c21e… を確かめて使う) から作る (手で編集しない)。元との差は name・spec.r_throat (NS と同じ)・
-#   geometry.physical_upstream (NS と同じ H) だけ。δ_r = 0 は YAML のキーではなく Euler の prepare の経路の定義: x ≥ 0 は凍結した設計壁 S
-#   (main の出口の終点の修正の後)、x < 0 は直管 r 3.2425 と (−9, 3.2425, 0, 0) → x = 0 の S の (r, r′, r″) の 5 次 Hermite。格子は mesh_euler。
+#   geometry.physical_upstream (NS と同じ H)・mesh_euler.throat_refine (4 → 5)・evaluate.nStepOuter (12000 → 60000) だけ。δ_r = 0 は YAML の
+#   キーではなく Euler の prepare の経路の定義 (案 A、H の上流を付けた設計壁): x ≥ 0 は凍結した設計壁 S (main の出口の終点の修正の後)、
+#   x < 0 は直管 r 3.2425 と (−9, 3.2425, 0, 0) → x = 0 の S の (r, r′, r″) の 5 次 Hermite。格子は mesh_euler。
 #   CFD ピンの照合 (initial_line: cfd・run_0062) は geometry の r_inlet・L_U・L_pipe (凍結した設計) のまま。
 # ---- 以下は元の YAML ----
 # plan discretization-moc-axis-limit-and-corrector §6 V5d (登録 99431498): 腕 M (単調壁・analytic + converge: 腕 B に geometry.moc_axis_limit・moc_corrector の 2 行だけを足した)。
@@ -100,12 +101,12 @@ mesh:
 mesh_euler:
   ni: 2000
   nj: 97
-  throat_refine: 4.0
+  throat_refine: 5.0   # 4 → 5 (§5.1 #36e、codex diagnose 3: スロートの Euler の列を密にして生成の座標の max|δ_in − δ_r| 1.137e-3 → 7.96e-4 mm ≤ 0.001 mm。ni・nj は不変)
   throat_width: 3.0
   wall_first_frac: 0.005
 
 evaluate:
-  nStepOuter: 12000
+  nStepOuter: 60000   # 本段の上限 (§6 V-h370、#36e)。出力 1000・cfl_main 2 は元のまま
   outStepInterval: 1000
   cfl_main: 2.0
   mid_stage: true

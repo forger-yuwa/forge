@@ -1,16 +1,20 @@
-"""plan tooling-nozzle-isothermal-wall-chain §5.1 #36b・#36c (§4.9 codex diagnose 2): 370 K・H・B0 の NS の問題と、H の固定の Euler の参照
-(補正 δ_r = 0) の問題を作り、読み込んだ辞書の差が登録の差だけであることを検査し、CFD 0 step (変換器・forge を使わない) で準備の中身を確かめる。
+"""plan tooling-nozzle-isothermal-wall-chain §5.1 #36b・#36c (§4.9 codex diagnose 2)・#36e (codex diagnose 3、§6 V-h370): 370 K・H・B0 の NS の
+問題と、H の固定の Euler の参照 (補正 δ_r = 0) の問題を作り、読み込んだ辞書の差が登録の差だけであることを検査し、CFD 0 step (変換器・forge を
+使わない) で準備の中身を確かめる。
 
 問題 (make — 既にあれば生成した中身と一致することを確かめ、違えば止める; 手で編集しない):
 - NS: problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml ← problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml (#34、H・Gref・300 K) の行単位の複製。
   差は name・spec.wall_thermal.Tw (300 → 370)・evaluate (cfl_main を外し、implicit_relax 0.7・main_line (本段だけ B0)・nStepOuter 200000・
-  outStepInterval 2500)。evaluate は V-g0c-chain (problem_d155_ns_prod_coldmesh_tw300_g0c_chain.yaml) と V-tw370 の C50 の evaluate と同じ
-  (リミッタの基準値は今の形 C の系譜の値のまま)。
+  outStepInterval 2500・停止規則のキー (#36e: stop_rule・stop_rule_cap 200000・stop_rule_hold_steps 40000・stop_rule_thresholds; §6 V-h370 の値))。
+  evaluate は停止規則のキーを除いて V-g0c-chain (problem_d155_ns_prod_coldmesh_tw300_g0c_chain.yaml) と V-tw370 の C50 の evaluate と同じ
+  (リミッタの基準値は今の形 C の系譜の値に固定; codex diagnose 3 で決着)。
 - Euler: problem_d155_euler_h_ref.yaml ← run_0174_euler_v5d_M_r1 を作った問題 problem_d155_euler_v5d_M.yaml。この作業ツリーには無いので
   moc_v5d.problem_texts (make-problems と同じ関数、--md-offset 6.8825162455159465e-06) で作り直し、V5d の起動の記録
   (_band_ab/moc_v5d_run.log の input 行) の sha256 cfee7f05… と一致することを確かめてから使う。差は name・spec.r_throat (NS と同じ値)・
-  geometry.physical_upstream (NS と同じ H)。r_throat を NS に揃えるのは、抽出器の流量の比 (massflow_ratio) が実寸で取るため
-  (r_t 単位の Euler の解は r_t によらない)。δ_r = 0 は YAML のキーではなく Euler の prepare の経路の定義 (runner_axismach.euler_reference_wall)。
+  geometry.physical_upstream (NS と同じ H)・mesh_euler.throat_refine (4 → 5; #36e、ni 2000 × nj 97 は不変)・evaluate.nStepOuter (12000 → 60000;
+  #36e、本段の上限。出力 1000・cfl_main 2 は元のまま)。r_throat を NS に揃えるのは、抽出器の流量の比 (massflow_ratio) が実寸で取るため
+  (r_t 単位の Euler の解は r_t によらない)。δ_r = 0 は YAML のキーではなく Euler の prepare の経路の定義 (runner_axismach.euler_reference_wall、
+  #36e の案 A: H の上流を付けた設計壁)。
 δ_r (NS): prepare_ns(delta_r_csv=_band_ab/half_inlet/delta_r_initial_C.csv) の引数で渡す (YAML のキーにしない; prepare_ns の既存の契約、
   prepare_info.json の delta_r_csv に残る)。sha256 24251cb6… を検査する。
 
@@ -20,14 +24,17 @@ prep-check (CFD 0 step): prepare_ns の変換の前までを同じ関数で再�
   generate_axisym_mesh・_bcond・_ns_configs・ns_stage_configs)。格子の品質 (check_mesh_quality.metrics_vectorized を生成の座標に、
   ar_max 5000)・第一層の距離・S1・S2・本段の実効設定・bcond の壁温・300 K の H (#34) と格子がビット同一・生成器の sha256
   (prepare_info.mesh.hashes.generator_sha256 と同じ式) を記録する。Euler は design_chain の設計壁 S が NS と同じか、Euler の参照の壁
-  (euler_reference_wall) の結果、診断の参照の壁 (x ≥ 0 は S、x < 0 は直管と S(0) への 5 次 Hermite = #34 の A の定義) の Euler の格子
-  (mesh_euler) で抽出器の δ_in と NS の壁の入力 δ_r の照合 (metrics.delta_in_check、x ≥ 0 で ≤ 0.001 mm・全列の被覆)。
+  (euler_reference_wall、#36e の案 A の正式の経路) のゲート、診断の参照の壁 (#34 の A の定義 HRefWall) との一致、壁ファイルの保存 → 復元で
+  格子の座標がビット一致、Euler の格子 (mesh_euler、throat_refine 5) の品質 (生成の座標)、抽出器の δ_in と NS の壁の入力 δ_r の照合
+  (metrics.delta_in_check、x ≥ 0 で ≤ 0.001 mm・全列の被覆)。NS の格子で一定 x の断面への補間の端の補間範囲の不足の列の数 (受け渡しの抽出の
+  remap_edge="missing" で欠測になる列; 0 であること) と停止規則の要求の断面の位置 (x_fracs × x_w) も記録する。
   変換後の品質 (check_mesh_quality --ar-max 5000)・変換器の wall_dist (局所の法線の距離)・初期場は AWS で prepare_ns・prepare を回して確かめる。
 
 usage: /home/sano/work/forge/design/.venv-opt/bin/python h370_problems.py make|check|prep-check [--pin <run_0062 のディレクトリ>]
   --pin: CFD ピンの凍結元 (geometry.initial_line_run)。無ければこの case の run_0062_euler_wallfit_fit_r1_ext6k。照合は消さない
   (読み込む写しの initial_line_run だけを絶対パスに書き換える)。
-出力: _band_ab/half_inlet/h370_problems.json (check)・h370_prep_check.json (prep-check)。合格で rc 0、不成立で rc 1。"""
+出力: _band_ab/half_inlet/h370_problems.json (check)・h370_prep_check_tr5.json と h370_delta_in_tr5.csv (prep-check; #36e。throat_refine 4 の
+  旧い FAIL の記録 h370_prep_check.json・h370_delta_in.csv は消さずに残す)。合格で rc 0、不成立で rc 1。"""
 import argparse
 import hashlib
 import json
@@ -57,6 +64,17 @@ OUT = HERE / "_band_ab" / "half_inlet"
 PIN_DEFAULT = HERE / "run_0062_euler_wallfit_fit_r1_ext6k"
 TW_NEW = 370.0
 MISSING = "<無し>"
+# 停止規則 (§6 V-h370 の登録の値。キー名は stop_rule.py の thresholds・check_evaluate_keys。既定と同じ値も明示する; §5.1 #36e (3))
+STOP_RULE_X_FRACS = [0.419738616669543, 0.734542579171700, 0.986385749173426]     # 40・70・94 r_t / x_w (95.2974)
+STOP_RULE_THRESHOLDS = {"window": 20000, "min_points": 9, "r_mean_max": 5.0e-4, "r_amp_max": 5.0e-3, "theta_drift_max": 5.0e-4,
+                        "theta_amp_max": 5.0e-3, "x_fracs": STOP_RULE_X_FRACS}
+STOP_RULE_LINES = ["  # 本段の停止規則 (§6 V-h370 の登録の値; §5.1 #36e)。キー名は stop_rule.py の thresholds・check_evaluate_keys、既定と同じ値も明示",
+                   "  stop_rule: true",
+                   "  stop_rule_cap: 200000   # 本段の上限 (nStepOuter と同じ。自動の延長はしない)",
+                   "  stop_rule_hold_steps: 40000   # 最初の到達の後 4 万 step すべての出力で保つ (20 万の内数、外れたら数え直す)",
+                   "  stop_rule_thresholds: {window: 20000, min_points: 9, r_mean_max: 5.0e-4, r_amp_max: 5.0e-3, theta_drift_max: 5.0e-4, "
+                   "theta_amp_max: 5.0e-3, x_fracs: [0.419738616669543, 0.734542579171700, 0.986385749173426]}   # x_fracs = 40・70・94 r_t / x_w 95.2974"]
+STOP_RULE_KEYS = ("stop_rule", "stop_rule_cap", "stop_rule_hold_steps", "stop_rule_thresholds")
 MAIN_LINE_LINE = ("  main_line: {line: dir, cap: 50, itj: 5, cfl: 4, relax: 0.7, limiter_ref: {ro: 0.8739869154, p: 387491.0573, a: 359.7712185}, "
                   "extra_fields: [res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, omg_prod, omg_dest, omg_cross, omg_trans, omg_axisym, dt_local]}")
 EVAL_NEW = ["evaluate:",
@@ -64,11 +82,13 @@ EVAL_NEW = ["evaluate:",
             "  outStepInterval: 2500   # 停止規則の出力の間隔",
             "  implicit_relax: 0.7   # main_line.relax と同じ値 (前の段 S1・S2 にも効く; 生産の系譜 run_0182 の cold_pair.py prep と同じ)",
             "  # 本段だけ B0 (cold_cfl.py prep --line dir --itj 5 --cap 50 --cfl 4 --limiter-ref-from … --extra … と同じキー・書き方; §4.8-2・§5.1 #30)。",
-            "  # リミッタの基準値は今の形 C の系譜 (V-g0c-chain・V-tw370 の C50) の値のまま (H で変えるべきかは未決; §5.1 #36c)",
-            MAIN_LINE_LINE]
+            "  # リミッタの基準値は今の形 C の系譜 (V-g0c-chain・V-tw370 の C50) の値に固定 (codex diagnose 3 で決着: 今回の全本段で C 由来の値; §4.9)",
+            MAIN_LINE_LINE] + STOP_RULE_LINES
 NS_ALLOWED = {"spec.wall_thermal.Tw", "evaluate.cfl_main", "evaluate.implicit_relax", "evaluate.main_line", "evaluate.nStepOuter",
-              "evaluate.outStepInterval"}
-EU_ALLOWED = {"spec.r_throat", "geometry.physical_upstream"}
+              "evaluate.outStepInterval"} | {f"evaluate.{k}" for k in STOP_RULE_KEYS}
+EU_ALLOWED = {"spec.r_throat", "geometry.physical_upstream", "mesh_euler.throat_refine", "evaluate.nStepOuter"}
+EU_THROAT_REFINE = 5.0          # §5.1 #36e (codex diagnose 3): 4 → 5 で生成の座標の max|δ_in − δ_r| 1.137e-3 → 7.96e-4 mm (codex の再計算)
+EU_NSTEP = 60000                # §6 V-h370: Euler の本段の上限 (出力 1000・cfl_main 2 は元の問題のまま)
 NS_ONLY_GEOM = {"pw_upstream", "physical_wall_repr"}
 
 
@@ -127,10 +147,11 @@ def ns_text() -> str:
     if old != ["  nStepOuter: 12000", "  outStepInterval: 1000", "  cfl_main: 1.0"]:
         raise SystemExit(f"{H300.name} の evaluate の先頭 3 行が想定と違う ({old}) — 止める")
     lines[i0:i0 + 4] = EVAL_NEW
-    hdr = ("# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2)・§5.1 #36c: 370 K・H・Gref・B0 の最初の固定壁の pass の問題 (H・B0 による暫定の設計)。\n"
-           "#   h370_problems.py make が problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml (#34) から作る (手で編集しない)。元との差は name・\n"
-           "#   spec.wall_thermal.Tw (300 → 370)・evaluate (cfl_main を外し、implicit_relax 0.7・main_line (本段だけ B0)・nStepOuter 200000・\n"
-           "#   outStepInterval 2500) だけ。evaluate は V-g0c-chain・V-tw370 の C50 の evaluate と同じ。h370_problems.py check が読み込んだ辞書の差で確かめる。\n"
+    hdr = ("# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2・3)・§5.1 #36c・#36e: 370 K・H・Gref・B0 の最初の固定壁の pass の問題\n"
+           "#   (H・B0 による暫定の設計、§6 V-h370)。h370_problems.py make が problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml (#34) から作る (手で\n"
+           "#   編集しない)。元との差は name・spec.wall_thermal.Tw (300 → 370)・evaluate (cfl_main を外し、implicit_relax 0.7・main_line (本段だけ B0)・\n"
+           "#   nStepOuter 200000・outStepInterval 2500・停止規則のキー (#36e)) だけ。evaluate は停止規則のキーを除いて V-g0c-chain・V-tw370 の C50 の\n"
+           "#   evaluate と同じ。h370_problems.py check が読み込んだ辞書の差で確かめる。\n"
            f"#   δ_r は prepare_ns(delta_r_csv=_band_ab/half_inlet/delta_r_initial_C.csv) の引数で渡す (sha256 {CSV_SHA[:16]}…、#34 で作り直した断熱の\n"
            "#   積分法の表。「断熱の積分法から作った固定の形に 370 K を課す試験」; deltastar_initializer は delta_r_csv があると使われない)。\n"
            "#   壁温は bcondConfig の壁の行 (wall_isothermal Ts) にだけ出る。\n"
@@ -141,6 +162,25 @@ def ns_text() -> str:
 def eu_text(ns_doc: dict) -> str:
     src = v5d_m_text()
     lines = src.splitlines()
+    # mesh_euler.throat_refine 4 → 5 (#36e)。上の mesh (NS 用 G1) にも同じ前置きの行があるので mesh_euler の区画の中の行だけを置き換える
+    i_me = [i for i, ln in enumerate(lines) if ln.startswith("mesh_euler:")]
+    if len(i_me) != 1:
+        raise SystemExit(f"mesh_euler: の行が {len(i_me)} 行 — 止める")
+    j = i_me[0] + 1
+    while j < len(lines) and lines[j].startswith("  "):
+        if lines[j].startswith("  throat_refine: "):
+            if lines[j] != "  throat_refine: 4.0":
+                raise SystemExit(f"mesh_euler.throat_refine の行が想定と違う ({lines[j]!r}) — 止める")
+            lines[j] = (f"  throat_refine: {EU_THROAT_REFINE}   # 4 → 5 (§5.1 #36e、codex diagnose 3: スロートの Euler の列を密にして生成の座標の "
+                        "max|δ_in − δ_r| 1.137e-3 → 7.96e-4 mm ≤ 0.001 mm。ni・nj は不変)")
+            break
+        j += 1
+    else:
+        raise SystemExit("mesh_euler の区画に throat_refine が無い — 止める")
+    i_ev = replace_line(lines, "evaluate:", "evaluate:")
+    if lines[i_ev + 1:i_ev + 4] != ["  nStepOuter: 12000", "  outStepInterval: 1000", "  cfl_main: 2.0"]:
+        raise SystemExit(f"Euler の evaluate の先頭 3 行が想定と違う ({lines[i_ev + 1:i_ev + 4]}) — 止める")
+    lines[i_ev + 1] = f"  nStepOuter: {EU_NSTEP}   # 本段の上限 (§6 V-h370、#36e)。出力 1000・cfl_main 2 は元のまま"
     replace_line(lines, "name: ", "name: isobutane_m6_d155_euler_h_ref")   # 既存の Euler の問題の流儀 (isobutane_m6_d155_euler_*)
     rt = ns_doc["spec"]["r_throat"]
     replace_line(lines, "  r_throat: ", f"  r_throat: {rt!r}      # [m] NS (problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml) と同じ値 (抽出器の流量の比は実寸で取る)")
@@ -148,11 +188,12 @@ def eu_text(ns_doc: dict) -> str:
     i = replace_line(lines, "  wall_fit_mono_r2: ", [ln for ln in lines if ln.startswith("  wall_fit_mono_r2: ")][0])
     lines.insert(i + 1, f"  physical_upstream: {{r_inlet: {pu['r_inlet']}, L_U: {pu['L_U']}, L_pipe: {pu['L_pipe']}}}   # H (NS と同じ)。"
                         "Euler の prepare は補正 δ_r ≡ 0 の物理壁で格子を作る (euler_reference_wall)。r_inlet・L_U・L_pipe (上) は設計壁と CFD ピンの照合の値")
-    hdr = ("# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2)・§5.1 #36b: H の固定の Euler の参照 (補正 δ_r = 0)。\n"
+    hdr = ("# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2・3)・§5.1 #36b・#36e: H の固定の Euler の参照 (補正 δ_r = 0、§6 V-h370)。\n"
            "#   h370_problems.py make が run_0174_euler_v5d_M_r1 の問題 problem_d155_euler_v5d_M.yaml (moc_v5d.py make-problems --md-offset\n"
            f"#   {V5D_MD} の本文、sha256 {V5D_M_SHA[:16]}… を確かめて使う) から作る (手で編集しない)。元との差は name・spec.r_throat (NS と同じ)・\n"
-           "#   geometry.physical_upstream (NS と同じ H) だけ。δ_r = 0 は YAML のキーではなく Euler の prepare の経路の定義: x ≥ 0 は凍結した設計壁 S\n"
-           "#   (main の出口の終点の修正の後)、x < 0 は直管 r 3.2425 と (−9, 3.2425, 0, 0) → x = 0 の S の (r, r′, r″) の 5 次 Hermite。格子は mesh_euler。\n"
+           "#   geometry.physical_upstream (NS と同じ H)・mesh_euler.throat_refine (4 → 5)・evaluate.nStepOuter (12000 → 60000) だけ。δ_r = 0 は YAML の\n"
+           "#   キーではなく Euler の prepare の経路の定義 (案 A、H の上流を付けた設計壁): x ≥ 0 は凍結した設計壁 S (main の出口の終点の修正の後)、\n"
+           "#   x < 0 は直管 r 3.2425 と (−9, 3.2425, 0, 0) → x = 0 の S の (r, r′, r″) の 5 次 Hermite。格子は mesh_euler。\n"
            "#   CFD ピンの照合 (initial_line: cfd・run_0062) は geometry の r_inlet・L_U・L_pipe (凍結した設計) のまま。\n"
            "# ---- 以下は元の YAML ----\n")
     return hdr + "\n".join(lines) + "\n"
@@ -177,7 +218,7 @@ def cmd_make() -> int:
 
 
 def cmd_check(out_json=None) -> int:
-    fails, rec = [], {"plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c", "tool": "h370_problems.py check"}
+    fails, rec = [], {"plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c・#36e", "tool": "h370_problems.py check"}
     D = {"H300": load_strict(H300.read_text()), "NS": load_strict(NS.read_text()), "EU": load_strict(EU.read_text()),
          "V5D_M": load_strict(v5d_m_text()), "G0C_CHAIN": load_strict(G0C_CHAIN.read_text()), "C50": load_strict(C50.read_text())}
     rec["files"] = {"H300": [H300.name, sha(H300)], "NS": [NS.name, sha(NS)], "EU": [EU.name, sha(EU)],
@@ -204,12 +245,20 @@ def cmd_check(out_json=None) -> int:
     ns_ev = D["NS"]["evaluate"]
     pair("H300", "NS", NS_ALLOWED, {"spec.wall_thermal.Tw": (300.0, TW_NEW), "evaluate.cfl_main": (1.0, MISSING),
                                     "evaluate.implicit_relax": (MISSING, 0.7), "evaluate.nStepOuter": (12000, 200000),
-                                    "evaluate.outStepInterval": (1000, 2500), "evaluate.main_line": (MISSING, ns_ev.get("main_line"))})
+                                    "evaluate.outStepInterval": (1000, 2500), "evaluate.main_line": (MISSING, ns_ev.get("main_line")),
+                                    "evaluate.stop_rule": (MISSING, True), "evaluate.stop_rule_cap": (MISSING, 200000),
+                                    "evaluate.stop_rule_hold_steps": (MISSING, 40000),
+                                    "evaluate.stop_rule_thresholds": (MISSING, STOP_RULE_THRESHOLDS)})
+    ns_ev_nosr = {k: v for k, v in ns_ev.items() if k not in STOP_RULE_KEYS}
     for ref in ("G0C_CHAIN", "C50"):
-        if ns_ev != D[ref]["evaluate"]:
-            fails.append(f"NS の evaluate が {ref} の evaluate と違う: {diff_paths(D[ref]['evaluate'], ns_ev)}")
+        if ns_ev_nosr != D[ref]["evaluate"]:
+            fails.append(f"NS の evaluate (停止規則のキーを除く) が {ref} の evaluate と違う: {diff_paths(D[ref]['evaluate'], ns_ev_nosr)}")
     pair("V5D_M", "EU", EU_ALLOWED, {"spec.r_throat": (D["V5D_M"]["spec"]["r_throat"], D["NS"]["spec"]["r_throat"]),
-                                     "geometry.physical_upstream": (MISSING, D["NS"]["geometry"]["physical_upstream"])})
+                                     "geometry.physical_upstream": (MISSING, D["NS"]["geometry"]["physical_upstream"]),
+                                     "mesh_euler.throat_refine": (4.0, EU_THROAT_REFINE), "evaluate.nStepOuter": (12000, EU_NSTEP)})
+    eu_ev = D["EU"]["evaluate"]
+    if (eu_ev.get("outStepInterval"), eu_ev.get("cfl_main")) != (1000, 2.0):
+        fails.append(f"Euler の evaluate の出力の間隔・cfl_main が登録 (1000・2.0) と違う: {(eu_ev.get('outStepInterval'), eu_ev.get('cfl_main'))}")
     # Euler と NS の設計の入力 (gas・spec・dv・geometry) が同じ (NS だけのキーを除く)
     cross = {}
     for blk in ("gas", "spec", "dv", "geometry"):
@@ -244,6 +293,20 @@ def cmd_check(out_json=None) -> int:
     if rec["physical_upstream"]["ns"] != rec["physical_upstream"]["euler"]:
         fails.append("NS と Euler の physical_upstream の解決が違う")
     rec["mesh_euler"] = RA.mesh_euler_block(pe)
+    if (rec["mesh_euler"].get("ni"), rec["mesh_euler"].get("nj"), rec["mesh_euler"].get("throat_refine")) != (2000, 97, EU_THROAT_REFINE):
+        fails.append(f"Euler の mesh_euler が 2000 × 97・throat_refine {EU_THROAT_REFINE} でない: {rec['mesh_euler']}")
+    rec["euler_evaluate"] = {k: eu_ev.get(k) for k in ("nStepOuter", "outStepInterval", "cfl_main", "mid_stage")}
+    # 停止規則のキーの解決 (stop_rule.resolve_settings; euler_ref は投入の時に固定するので、ここでは形だけの仮の値)
+    from forge_design.evaluate import stop_rule as SR
+    n, out_int, n_src = RA._ns_steps(pn, None)
+    sr = SR.resolve_settings(pn.evaluate, nsteps_arg=None, n_main=n, n_main_source=n_src, out_int=out_int,
+                             euler_ref="<投入の時に固定する run_0950 の res と sha256>", requested=None)
+    rec["stop_rule_resolved"] = sr
+    want_sr = {"use": True, "requested": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500, "fallback_steps": 200000,
+               **{k: (list(v) if isinstance(v, list) else v) for k, v in STOP_RULE_THRESHOLDS.items()}}
+    bad_sr = {k: sr.get(k) for k, v in want_sr.items() if sr.get(k) != v}
+    if bad_sr:
+        fails.append(f"停止規則の解決が登録と違う: {bad_sr}")
     rec["fails"] = fails
     rec["VERDICT"] = "PASS" if not fails else "FAIL"
     OUT.mkdir(parents=True, exist_ok=True)
@@ -303,7 +366,7 @@ def first_layer(coords, ni: int, scale: float) -> dict:
 
 class HRefWall:
     """診断の参照の壁 (Euler の参照の壁の定義; #34 の A と同じ): 直管 r_inlet ([x_in, −L_U))・(−L_U, r_inlet, 0, 0) → x = 0 の S の
-    (r, r′, r″) の 5 次 Hermite ([−L_U, 0))・S (x ≥ 0)。euler_reference_wall が判断待ちで止まる間の δ_in の照合に使う。"""
+    (r, r′, r″) の 5 次 Hermite ([−L_U, 0))・S (x ≥ 0)。#36e からは正式の経路 (euler_reference_wall の案 A) と一致することの確認に使う。"""
 
     def __init__(self, design, r_U, L_U):
         from forge_design.geometry.wall_walldriven import _hermite_quintic
@@ -328,7 +391,7 @@ def cmd_prep_check(pin: Path) -> int:
     from forge_design.meshing.mesh2d import generate_axisym_mesh
     from forge_design.metrics.delta_in_check import compare_delta_in
     fails = []
-    rec = {"plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c", "tool": "h370_problems.py prep-check",
+    rec = {"plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c・#36e", "tool": "h370_problems.py prep-check",
            "environment": RA.environment_record(), "cfd_pin_dir": str(pin), "files": {NS.name: sha(NS), EU.name: sha(EU), "csv": sha(CSV)},
            "scope": "CFD 0 step: prepare_ns の変換の前までを同じ関数で再現 (変換器・forge は使わない)"}
     if sha(CSV) != CSV_SHA:
@@ -365,6 +428,21 @@ def cmd_prep_check(pin: Path) -> int:
         fails.append(f"NS の格子の品質 (生成の座標) が不合格: {rec['ns_mesh']['quality']}")
     if (ni, nj, mp.axis_cap_frac) != (4719, 160, 0.015):
         fails.append(f"NS の格子が Gref (4719 × 160・axis_cap_frac 0.015) でない: {(ni, nj, mp.axis_cap_frac)}")
+    # 一定 x の断面への補間の端の補間範囲の不足 (受け渡しの抽出の remap_edge="missing" で欠測になる列; 0 であること。#36e (4))
+    Xg = coords[:, 0].reshape(ni, nj) / scale
+    xt_ = Xg[:, 0]
+    miss_cols = np.zeros(ni, dtype=bool)
+    for j in range(nj):
+        miss_cols |= (xt_ < Xg[0, j]) | (xt_ > Xg[-1, j])
+    rec["ns_mesh"]["remap_constant_x"] = {"n_missing_cols": int(miss_cols.sum()), "x_missing": [float(v) for v in xt_[miss_cols][:20]],
+                                          "max_column_dx_rt": float(np.max(np.ptp(Xg, axis=1))),
+                                          "note": "生成の座標で、行 j の x の範囲が列の目標 x[:, 0] を覆わない列 (抽出で欠測になる)"}
+    if miss_cols.any():
+        fails.append(f"NS の格子で一定 x の断面への補間の範囲が足りない列 {int(miss_cols.sum())} (受け渡しの抽出で欠測になる)")
+    # 停止規則の要求の断面の位置 (x_fracs × x_w、x_w = 物理壁の出口) と最も近い列 (§6 V-h370)
+    x_w = float(wall.x_e)
+    rec["stop_rule_sections"] = [{"x_frac": f, "x_requested": f * x_w, "x_column": float(xt_[int(np.argmin(np.abs(xt_ - f * x_w)))])}
+                                 for f in STOP_RULE_X_FRACS]
     # 300 K の H (#34) と格子・壁がビット同一 (370 K の問題は壁温と evaluate だけが違う)
     p3 = load_pinned(H300, pin, td)
     d3 = RA.design_chain(p3)
@@ -431,23 +509,47 @@ def cmd_prep_check(pin: Path) -> int:
                            "monotone_gate_S": {k: monotone_gate(S._spl, S.x0, S.x_e)[k] for k in ("pass", "min_r1", "x_min_theta", "D", "x_D_peak", "x_D")}}
     if not same_S:
         fails.append("Euler と NS の設計壁 S がビット同一でない")
-    try:
-        _, er = RA.euler_reference_wall(pe, de, scale_e)
-        rec["euler_reference_wall"] = {"status": "built", "rec_kind": er["kind"]}
-    except ValueError as e:
-        rec["euler_reference_wall"] = {"status": "ValueError (判断待ち)", "message": str(e)[:600]}
-    Wd = HRefWall(S, pu["r_inlet"], pu["L_U"])
+    # 正式の Euler の参照の壁 (#36e の案 A: H の上流を付けた設計壁)。ゲートの不合格は例外
+    from forge_design.geometry.wall_axismach import DESIGN_UPSTREAM_KIND, load_wall_file, save_wall_file
+    wE, er = RA.euler_reference_wall(pe, de, scale_e)
+    rec["euler_reference_wall"] = {"status": "built", "type": type(wE).__name__, "repr": er["repr"], "throat": er["throat"],
+                                   "gate": {k: er["gate"][k] for k in ("pass", "reasons", "downstream_monotone_gate", "upstream", "max_seam_jump",
+                                                                       "max_abs_d2_change_vs_H")},
+                                   "global_min": {k: er["gate"]["global_min"][k] for k in ("pass", "x_t", "r_t", "unique", "monotone_after")}}
+    if not er["gate"]["pass"]:
+        fails.append(f"Euler の参照の壁のゲートが不合格: {er['gate']['reasons']}")
+    Wd = HRefWall(S, pu["r_inlet"], pu["L_U"])           # 診断の参照の壁 (#34 の A の定義) との一致
+    xa = np.linspace(float(S.x_in), -1e-13, 250001)
+    rec["euler_reference_wall"]["vs_HRefWall"] = {"x_ge_0_bit_identical": bool(all(np.array_equal(wE.r(xs, k), Wd.r(xs, k)) for k in range(3))),
+                                                  "x_lt_0_max_abs": float(max(np.max(np.abs(wE.r(xa, k) - Wd.r(xa, k))) for k in range(3)))}
     mpE = RA.mesh_params_euler(pe, scale_e)
-    cE, qE, bE = generate_axisym_mesh(Wd, mpE)
+    cE, qE, bE = generate_axisym_mesh(wE, mpE)
     niE = mpE.ni
-    rec["euler_mesh_diag"] = {"wall": "診断の参照の壁 (HRefWall: x ≥ 0 は S、x < 0 は直管と S(0) への 5 次 Hermite)", "ni": niE,
-                              "nj": cE.shape[0] // niE, "mesh_euler": RA.mesh_euler_block(pe), "generator_sha256": generator_sha256(cE, qE, bE),
-                              "quality": quality(cE, qE, float(RA.mesh_euler_block(pe).get("ar_max", 1000)))}
+    mE = RA.mesh_euler_block(pe)
+    rec["euler_mesh"] = {"wall": "正式の Euler の参照の壁 (euler_reference_wall、案 A)", "ni": niE, "nj": cE.shape[0] // niE, "mesh_euler": mE,
+                         "throat_refine": mpE.throat_refine, "generator_sha256": generator_sha256(cE, qE, bE),
+                         "quality": quality(cE, qE, float(mE.get("ar_max", 1000)))}
+    if not rec["euler_mesh"]["quality"]["pass"]:
+        fails.append(f"Euler の格子の品質 (生成の座標) が不合格: {rec['euler_mesh']['quality']}")
+    if (niE, rec["euler_mesh"]["nj"], mpE.throat_refine) != (2000, 97, EU_THROAT_REFINE):
+        fails.append(f"Euler の格子が 2000 × 97・throat_refine {EU_THROAT_REFINE} でない: {(niE, rec['euler_mesh']['nj'], mpE.throat_refine)}")
+    # 壁ファイルの保存 → 復元 → 同じ格子の生成: 座標・接続がビット一致 (#36e (1))
+    wdir = td / "wallfile"
+    wdir.mkdir()
+    wpath, _, wsha = save_wall_file(wdir, wE, scale_e, DESIGN_UPSTREAM_KIND)
+    back = load_wall_file(wpath)
+    cB, qB, bB = generate_axisym_mesh(back["physical"], mpE)
+    rec["euler_wall_file"] = {"kind": back["kind"], "sha256": wsha, "coords_bit_identical": bool(np.array_equal(cB, cE)),
+                              "quads_identical": bool(np.array_equal(qB, qE)),
+                              "bedges_identical": bool(all(np.array_equal(np.asarray(bB[g]), np.asarray(bE[g])) for g in bE))}
+    if not (rec["euler_wall_file"]["coords_bit_identical"] and rec["euler_wall_file"]["quads_identical"]
+            and rec["euler_wall_file"]["bedges_identical"]):
+        fails.append(f"壁ファイルから復元した壁の格子が元とビット一致しない: {rec['euler_wall_file']}")
     XN = coords[:, 0].reshape(ni, nj) / scale
     RN = coords[:, 1].reshape(ni, nj) / scale
     XE = cE[:, 0].reshape(niE, -1) / scale_e
     RE = cE[:, 1].reshape(niE, -1) / scale_e
-    res = compare_delta_in(XN[:, 0], RN[:, -1], XE[:, 0], RE[:, -1], drx, scale, r_ns_exact=wall.r, r_eu_exact=Wd.r, return_arrays=True)
+    res = compare_delta_in(XN[:, 0], RN[:, -1], XE[:, 0], RE[:, -1], drx, scale, r_ns_exact=wall.r, r_eu_exact=wE.r, return_arrays=True)
     arr = res.pop("arrays")
     rec["delta_in_check"] = res
     # 列の配置と補間の誤差の位置: x ≥ 0 で tol を超える列の範囲・数
@@ -455,7 +557,7 @@ def cmd_prep_check(pin: Path) -> int:
     over = (arr["x"] >= 0.0) & (np.abs(err) * scale * 1e3 > res["tol_mm"])
     rec["delta_in_check"]["over_tol"] = {"n": int(over.sum()), "x_range": ([float(arr["x"][over].min()), float(arr["x"][over].max())]
                                                                          if over.any() else None)}
-    np.savetxt(OUT / "h370_delta_in.csv", np.c_[arr["x"], arr["delta_in"], arr["delta_r"], err * scale * 1e3], delimiter=",",
+    np.savetxt(OUT / "h370_delta_in_tr5.csv", np.c_[arr["x"], arr["delta_in"], arr["delta_r"], err * scale * 1e3], delimiter=",",
                header="x_rt,delta_in_rt,delta_r_rt,err_mm", comments="")
     # 旧い参照 (run_0174、出口の終点の修正の前) の終端 95.2275815792169 の外の NS の列 (A/B で欠ける区間)
     x_e_old = 95.2275815792169
@@ -469,13 +571,18 @@ def cmd_prep_check(pin: Path) -> int:
                        "変換後の nozzle.h5 の /VALUE/wall_dist (双対の重心の距離) と第一層の局所の法線の距離・y₁⁺ の見込み",
                        "prepare_info.json の mesh.hashes.generator_sha256 がここの値と一致 (同じ環境なら; 違えば numpy・scipy の版の差を記録)",
                        "solverConfig_prestage.yaml・solverConfig.yaml・ns_stage_configs の sha256 とここの stage_sha256 の一致",
-                       "Euler の参照: euler_reference_wall のゲートの判断の後に prepare (変換器・品質・IC) と、check_runs (delta_in_check の CLI) で"
-                       "変換後の座標の δ_in の照合"]
-    (OUT / "h370_prep_check.json").write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str))
-    print(json.dumps({k: rec[k] for k in ("design", "ns_wall", "euler_design", "euler_reference_wall", "old_reference_uncovered_ns_cols")},
-                     ensure_ascii=False, indent=1, default=str)[:4000])
-    print(json.dumps({"ns_mesh": {k: rec["ns_mesh"][k] for k in ("ni", "nj", "quality", "first_layer", "same_as_tw300_h", "generator_sha256")},
-                      "euler_mesh_quality": rec["euler_mesh_diag"]["quality"], "stages": rec["stages"],
+                       "Euler の参照: prepare (変換器・品質・IC) の MESH_QUALITY.txt の VERDICT と、check_runs (delta_in_check の CLI) で"
+                       "変換後の座標の δ_in の照合 (≤ 0.001 mm)",
+                       "Euler の参照の資格を満たした時点の res と sha256 を固定して NS に渡す (deltastar_loop --euler-ref-res・--euler-ref-sha256)"]
+    rec["superseded_record"] = {"file": "h370_prep_check.json・h370_delta_in.csv",
+                                "note": "throat_refine 4・診断の参照の壁 (HRefWall) での照合の旧い FAIL (max 1.1367e-3 mm)。消さずに残す (§5.1 #36e)"}
+    (OUT / "h370_prep_check_tr5.json").write_text(json.dumps(rec, ensure_ascii=False, indent=1, default=str))
+    print(json.dumps({k: rec[k] for k in ("design", "ns_wall", "euler_design", "euler_reference_wall", "euler_wall_file",
+                                          "old_reference_uncovered_ns_cols", "stop_rule_sections")},
+                     ensure_ascii=False, indent=1, default=str)[:6000])
+    print(json.dumps({"ns_mesh": {k: rec["ns_mesh"][k] for k in ("ni", "nj", "quality", "first_layer", "same_as_tw300_h", "generator_sha256",
+                                                                "remap_constant_x")},
+                      "euler_mesh_quality": rec["euler_mesh"]["quality"], "stages": rec["stages"],
                       "delta_in": {k: rec["delta_in_check"][k] for k in ("pass", "covered", "judged", "by_region", "decomposition", "over_tol")}},
                      ensure_ascii=False, indent=1, default=str))
     print("\n".join(fails) if fails else "")

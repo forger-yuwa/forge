@@ -1,7 +1,8 @@
-# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2)・§5.1 #36c: 370 K・H・Gref・B0 の最初の固定壁の pass の問題 (H・B0 による暫定の設計)。
-#   h370_problems.py make が problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml (#34) から作る (手で編集しない)。元との差は name・
-#   spec.wall_thermal.Tw (300 → 370)・evaluate (cfl_main を外し、implicit_relax 0.7・main_line (本段だけ B0)・nStepOuter 200000・
-#   outStepInterval 2500) だけ。evaluate は V-g0c-chain・V-tw370 の C50 の evaluate と同じ。h370_problems.py check が読み込んだ辞書の差で確かめる。
+# plan tooling-nozzle-isothermal-wall-chain §4.9 (codex diagnose 2・3)・§5.1 #36c・#36e: 370 K・H・Gref・B0 の最初の固定壁の pass の問題
+#   (H・B0 による暫定の設計、§6 V-h370)。h370_problems.py make が problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml (#34) から作る (手で
+#   編集しない)。元との差は name・spec.wall_thermal.Tw (300 → 370)・evaluate (cfl_main を外し、implicit_relax 0.7・main_line (本段だけ B0)・
+#   nStepOuter 200000・outStepInterval 2500・停止規則のキー (#36e)) だけ。evaluate は停止規則のキーを除いて V-g0c-chain・V-tw370 の C50 の
+#   evaluate と同じ。h370_problems.py check が読み込んだ辞書の差で確かめる。
 #   δ_r は prepare_ns(delta_r_csv=_band_ab/half_inlet/delta_r_initial_C.csv) の引数で渡す (sha256 24251cb647226d65…、#34 で作り直した断熱の
 #   積分法の表。「断熱の積分法から作った固定の形に 370 K を課す試験」; deltastar_initializer は delta_r_csv があると使われない)。
 #   壁温は bcondConfig の壁の行 (wall_isothermal Ts) にだけ出る。
@@ -118,7 +119,12 @@ evaluate:
   outStepInterval: 2500   # 停止規則の出力の間隔
   implicit_relax: 0.7   # main_line.relax と同じ値 (前の段 S1・S2 にも効く; 生産の系譜 run_0182 の cold_pair.py prep と同じ)
   # 本段だけ B0 (cold_cfl.py prep --line dir --itj 5 --cap 50 --cfl 4 --limiter-ref-from … --extra … と同じキー・書き方; §4.8-2・§5.1 #30)。
-  # リミッタの基準値は今の形 C の系譜 (V-g0c-chain・V-tw370 の C50) の値のまま (H で変えるべきかは未決; §5.1 #36c)
+  # リミッタの基準値は今の形 C の系譜 (V-g0c-chain・V-tw370 の C50) の値に固定 (codex diagnose 3 で決着: 今回の全本段で C 由来の値; §4.9)
   main_line: {line: dir, cap: 50, itj: 5, cfl: 4, relax: 0.7, limiter_ref: {ro: 0.8739869154, p: 387491.0573, a: 359.7712185}, extra_fields: [res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, omg_prod, omg_dest, omg_cross, omg_trans, omg_axisym, dt_local]}
+  # 本段の停止規則 (§6 V-h370 の登録の値; §5.1 #36e)。キー名は stop_rule.py の thresholds・check_evaluate_keys、既定と同じ値も明示
+  stop_rule: true
+  stop_rule_cap: 200000   # 本段の上限 (nStepOuter と同じ。自動の延長はしない)
+  stop_rule_hold_steps: 40000   # 最初の到達の後 4 万 step すべての出力で保つ (20 万の内数、外れたら数え直す)
+  stop_rule_thresholds: {window: 20000, min_points: 9, r_mean_max: 5.0e-4, r_amp_max: 5.0e-3, theta_drift_max: 5.0e-4, theta_amp_max: 5.0e-3, x_fracs: [0.419738616669543, 0.734542579171700, 0.986385749173426]}   # x_fracs = 40・70・94 r_t / x_w 95.2974
   mid_stage: true
   tp_species: split_h2o   # dry でも pseudo と同一 (M4.2 検証済)。凝縮 restart を可能にしておく

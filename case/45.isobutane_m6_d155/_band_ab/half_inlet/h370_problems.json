@@ -1,5 +1,5 @@
 {
- "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c",
+ "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §5.1 #36b・#36c・#36e",
  "tool": "h370_problems.py check",
  "files": {
   "H300": [
@@ -8,11 +8,11 @@
   ],
   "NS": [
    "problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml",
-   "806194e355d8057046c7f86266f2a96cacdfe514726c9cd2f10fca85ab815c04"
+   "0d784f7c49922444f9e476579b3fee092f4188e7717354caf37184ba84250eea"
   ],
   "EU": [
    "problem_d155_euler_h_ref.yaml",
-   "8a69124f606042cb1f16ad2a81035a5f50477e86c65b68111f6717a425a436d8"
+   "0e54f48d3229d7812442284004ce457e0632a1f8c7277c1adb06a06bf9f8cafb"
   ],
   "V5D_M (作り直し)": [
    "problem_d155_euler_v5d_M.yaml",
@@ -69,12 +69,44 @@
    1000,
    2500
   ],
+  "evaluate.stop_rule": [
+   "<無し>",
+   true
+  ],
+  "evaluate.stop_rule_cap": [
+   "<無し>",
+   200000
+  ],
+  "evaluate.stop_rule_hold_steps": [
+   "<無し>",
+   40000
+  ],
+  "evaluate.stop_rule_thresholds": [
+   "<無し>",
+   {
+    "window": 20000,
+    "min_points": 9,
+    "r_mean_max": 0.0005,
+    "r_amp_max": 0.005,
+    "theta_drift_max": 0.0005,
+    "theta_amp_max": 0.005,
+    "x_fracs": [
+     0.419738616669543,
+     0.7345425791717,
+     0.986385749173426
+    ]
+   }
+  ],
   "spec.wall_thermal.Tw": [
    300.0,
    370.0
   ]
  },
  "V5D_M vs EU": {
+  "evaluate.nStepOuter": [
+   12000,
+   60000
+  ],
   "geometry.physical_upstream": [
    "<無し>",
    {
@@ -82,6 +114,10 @@
     "L_U": 9.0,
     "L_pipe": 3.5
    }
+  ],
+  "mesh_euler.throat_refine": [
+   4.0,
+   5.0
   ],
   "spec.r_throat": [
    0.0768075,
@@ -156,9 +192,60 @@
  "mesh_euler": {
   "ni": 2000,
   "nj": 97,
-  "throat_refine": 4.0,
+  "throat_refine": 5.0,
   "throat_width": 3.0,
   "wall_first_frac": 0.005
+ },
+ "euler_evaluate": {
+  "nStepOuter": 60000,
+  "outStepInterval": 1000,
+  "cfl_main": 2.0,
+  "mid_stage": true
+ },
+ "stop_rule_resolved": {
+  "requested": true,
+  "requested_source": "evaluate.stop_rule",
+  "fallback_steps": 200000,
+  "fallback_steps_source": "evaluate.nStepOuter",
+  "out_step_interval": 2500,
+  "euler_ref": "<投入の時に固定する run_0950 の res と sha256>",
+  "window": 20000,
+  "min_points": 9,
+  "r_mean_max": 0.0005,
+  "r_amp_max": 0.005,
+  "theta_drift_max": 0.0005,
+  "theta_amp_max": 0.005,
+  "x_fracs": [
+   0.419738616669543,
+   0.7345425791717,
+   0.986385749173426
+  ],
+  "thresholds_source": {
+   "evaluate.stop_rule_thresholds": [
+    "min_points",
+    "r_amp_max",
+    "r_mean_max",
+    "theta_amp_max",
+    "theta_drift_max",
+    "window",
+    "x_fracs"
+   ]
+  },
+  "hold_steps": 40000,
+  "extract": {
+   "band_select": "edge",
+   "remap_constant_x": true,
+   "remap_edge": "missing",
+   "omega": 0.5,
+   "smooth_lam": 1.0,
+   "knot_spacing": 2.0,
+   "max_lam_factor": 1000.0,
+   "source": "feedback.deltastar_loop.handoff_extract_settings (§5.1 #36e)"
+  },
+  "use": true,
+  "reason": null,
+  "cap": 200000,
+  "cap_source": "evaluate.stop_rule_cap"
  },
  "fails": [],
  "VERDICT": "PASS"
