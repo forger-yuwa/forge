@@ -305,6 +305,60 @@ def _pw_upstream(geometry: dict) -> dict:
     return {"value": value, "source": source, "requested": requested}
 
 
+# 物理壁だけの上流の形 `geometry.physical_upstream` のキー (geometry の r_inlet・L_U・L_pipe と同じ名前・同じ単位 r_t)
+PHYSICAL_UPSTREAM_KEYS = ("r_inlet", "L_U", "L_pipe")
+
+
+def _physical_upstream(geometry: dict) -> dict | None:
+    """geometry.physical_upstream を読んで検査する (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #34)。キー無しは None
+    (今と同じ: 物理壁の直管・多項式 Q の始点は geometry の r_inlet・L_U・L_pipe)。重い処理・run dir を作る前に呼ぶ。
+
+    `{r_inlet, L_U, L_pipe}` (r_t 単位、3 つとも必須) は**物理壁だけ**に効く上流の形: 直管の半径 r_inlet ([x_in, −L_U))・
+    多項式 Q の始点 (−L_U, r_inlet, 0, 0) (Q の終点は今と同じ x = 0 の S + δ_r の (r, r′, r″))。geometry の r_inlet・L_U・L_pipe は
+    設計壁 (MOC・CFD ピンの初期線の凍結元との照合、`design_chain`) の値のまま残す — 照合を弱めず、初期線を取り直さない。
+    条件 (違えば ValueError): mapping でキーがちょうど 3 つ・有限の数値 (真偽値は不可)・r_inlet > 1・L_U > 0・L_pipe > 0、
+    joint 壁 (wall_repr: joint) の pw_upstream poly (既定・明示とも; ramp は不可)、入口の位置 −(L_U + L_pipe) が設計の
+    −(geometry.L_U + geometry.L_pipe) と同じ (格子の区間・壁ファイルの定義域を変えない)、名目の U→T Hermite の
+    μ = L_U²/(R Δr) ≤ 20 (設計壁と同じ単調収縮の条件、R は geometry.R)。
+    戻り: {"r_inlet", "L_U", "L_pipe", "x_in", "mu", "frozen_design": {r_inlet, L_U, L_pipe}, "source": "geometry.physical_upstream"}。"""
+    if "physical_upstream" not in geometry:
+        return None
+    v = geometry["physical_upstream"]
+    if not isinstance(v, dict):
+        raise ValueError(f"geometry.physical_upstream は {{r_inlet, L_U, L_pipe}} の mapping (受け取った値: {v!r})")
+    unknown = sorted((str(k) for k in v if k not in PHYSICAL_UPSTREAM_KEYS))
+    missing = [k for k in PHYSICAL_UPSTREAM_KEYS if k not in v]
+    if unknown or missing:
+        raise ValueError(f"geometry.physical_upstream のキーが不正 (未知 {unknown}、欠け {missing}; {list(PHYSICAL_UPSTREAM_KEYS)} の 3 つとも書く)")
+    vals = {}
+    for k in PHYSICAL_UPSTREAM_KEYS:
+        x = v[k]
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not np.isfinite(float(x)):
+            raise ValueError(f"geometry.physical_upstream.{k} は有限の数値 (受け取った値: {x!r})")
+        vals[k] = float(x)
+    if not (vals["r_inlet"] > 1.0 and vals["L_U"] > 0.0 and vals["L_pipe"] > 0.0):
+        raise ValueError(f"geometry.physical_upstream: r_inlet > 1・L_U > 0・L_pipe > 0 であること ({vals})")
+    if str(geometry.get("wall_repr", "interp")) != "joint":
+        raise ValueError("geometry.physical_upstream は joint 壁 (wall_repr: joint) の物理壁の解析経路専用 "
+                         f"(wall_repr = {geometry.get('wall_repr', 'interp')!r})")
+    if _pw_upstream(geometry)["value"] != "poly":
+        raise ValueError("geometry.physical_upstream は pw_upstream: poly の物理壁だけ (ramp は設計壁の縮流部に δ_r を足す作り方なので、"
+                         "別の形の上流には当てられない)")
+    fd = {"r_inlet": float(geometry.get("r_inlet", 2.5)), "L_U": float(geometry.get("L_U", 3.5)),
+          "L_pipe": float(geometry.get("L_pipe", 0.5))}
+    x_in_d = -fd["L_U"] - fd["L_pipe"]
+    x_in = -vals["L_U"] - vals["L_pipe"]
+    if abs(x_in - x_in_d) > 1e-12 * max(1.0, abs(x_in_d)):
+        raise ValueError(f"geometry.physical_upstream: 入口の位置 −(L_U + L_pipe) = {x_in!r} が設計の −(geometry.L_U + geometry.L_pipe) "
+                         f"= {x_in_d!r} と違う (入口の位置を動かすのは未対応: 格子の区間・壁ファイルの定義域を設計壁と揃える)")
+    from ..geometry.wall_walldriven import UpstreamThroatPoly
+    up = UpstreamThroatPoly(r_U=vals["r_inlet"], R_t=float(geometry.get("R", 2.0)), L_U=vals["L_U"])
+    bad = up.validate()
+    if bad:
+        raise ValueError("geometry.physical_upstream の名目の U→T Hermite が設計の条件を満たさない: " + "; ".join(bad))
+    return {**vals, "x_in": x_in_d, "mu": float(up.mu), "frozen_design": fd, "source": "geometry.physical_upstream"}
+
+
 def _sizing_spec(spec: dict) -> dict | None:
     """spec.sizing (任意) を読む: 寸法 (spec.r_throat) をどちらで決めたかの記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing
     §4.2)。{method: exit | throat, target_m: 目標の出口半径 / 物理スロート半径 [m], note: 任意}。prepare_ns が prepare_info.json の
@@ -816,6 +870,10 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか (受け取った値: {v!r})")
         if v == "poly":
             raise ValueError("geometry.pw_upstream: poly は prepare_ns (joint 壁の物理壁) 専用 — Euler の prepare には物理壁が無い")
+    if "physical_upstream" in p.geometry:
+        # 物理壁だけの上流の形 (plan tooling-nozzle-isothermal-wall-chain §5.1 #34) は prepare_ns の物理壁だけ。Euler の設計壁で黙って無視しない
+        raise ValueError("geometry.physical_upstream は prepare_ns (物理壁) 専用 — Euler の prepare は設計壁 (geometry の r_inlet・L_U・L_pipe) "
+                         "で格子を作るので、この指定は効かない")
     # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
     m_eu = mesh_euler_block(p)
     run_dir = Path(run_dir)
@@ -1184,8 +1242,13 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
     同じ経路 (k_f の cf_scale・熱条件・平滑化) で δ_r を作り直すために渡す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。
     rtol: **診断用** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。`integral_bl` の RK45 の相対許容差を明示の引数で
     注入する。None = 渡さない (`integral_bl` の既定 1e-6、今の振る舞いのまま)。YAML のキーにはしない。実効値は
-    `res_init["solve_ivp"]["rtol"]` (solve_ivp に渡した値) に残る。"""
+    `res_init["solve_ivp"]["rtol"]` (solve_ivp に渡した値) に残る。
+    `geometry.physical_upstream` がある問題は ValueError (積分法は設計壁の縮流部を入口から前進積分するので、物理壁の別の形の上流の
+    境界層の履歴にならない。未対応のまま黙って設計壁の縮流部で数えない; plan tooling-nozzle-isothermal-wall-chain §5.1 #34)。"""
     from ..feedback.deltastar_integral import integral_bl
+    if _physical_upstream(p.geometry) is not None:
+        raise ValueError("積分法の初期壁 (deltastar_initializer) と geometry.physical_upstream の併用は未対応 — 積分法は設計壁の縮流部を "
+                         "前進積分するので物理壁の上流と別の形になる。δ_r は delta_r_csv で与える")
     scale = float(p.spec["r_throat"]) if scale is None else float(scale)
     wall_inv = d["wall_inv"]
     model = str(init_cfg.get("model", "contur"))
@@ -1229,16 +1292,20 @@ def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar
     """物理壁の構築 (`prepare_ns` と寸法の逆算 `deltastar_loop.solve_rt`・`solve_rt_throat` が共有する; plan
     tooling-nozzle-upstream-poly-and-throat-sizing §4.2「同じ壁の構築」)。`PhysicalNozzleWall` に `geometry.pw_ramp`・
     `geometry.pw_upstream` (`_pw_upstream` の解決済みの値) を渡し、`physical_wall_repr: single_bspline` なら 1 本の B-spline に
-    作り直す。scale: r_t [m] (相関 δ* の診断に使う。壁の形は r_t 単位)。"""
+    作り直す。scale: r_t [m] (相関 δ* の診断に使う。壁の形は r_t 単位)。
+    `geometry.physical_upstream` (`_physical_upstream`、plan tooling-nozzle-isothermal-wall-chain §5.1 #34) があれば、物理壁の直管と
+    多項式 Q の始点だけをその値にする (設計壁 `d["wall"]` は凍結した形のまま)。キー無しは今と同じ (引数も渡さない)。"""
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall
     pwu = _pw_upstream(p.geometry) if pwu is None else pwu
     # joint 壁の物理壁 (解析経路) の δ_r ランプ区間: geometry.pw_ramp (None = 既定、default_pw_ramp)。ゲート不合格は例外
     pw_ramp = p.geometry.get("pw_ramp")
+    pu = _physical_upstream(p.geometry)
+    pu_kw = {} if pu is None else {"physical_upstream": {"r_U": pu["r_inlet"], "L_U": pu["L_U"], "L_pipe": pu["L_pipe"]}}
     wall = PhysicalNozzleWall(d["wall"], d["wall_inv"], float(scale), float(p.spec["Pt"]),
                               float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
                               offset=offset, delta_r_x=delta_r_x,
                               ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)),
-                              upstream=pwu["value"])
+                              upstream=pwu["value"], **pu_kw)
     req = _physical_wall_repr(p.geometry)
     if req == "single_bspline":
         # 今の物理壁 (pw_upstream poly) を全域 1 本の 5 次 B-spline にノット挿入で作り直す (許容誤差・ゲート不合格は例外)
@@ -1451,6 +1518,12 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       処理はその設定のまま行い、最後に solverConfig.yaml を本段の設定に替える。`cfl_main`・`implicit_relax` との併記は run dir を
       作る前に例外。キー無しは今と同じ設定・同じファイル。prepare_info.json の `main_line` と `ns_stage_configs` (stages=full の
       S1・S2・本段の設定の sha256) に記録する。
+    - **`geometry.physical_upstream`** (任意、plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #34): 物理壁だけの上流の形
+      {r_inlet, L_U, L_pipe} (`_physical_upstream`)。設計壁・CFD ピンの照合は geometry の r_inlet・L_U・L_pipe のまま。
+      δ_r は `delta_r_csv` で与えること (積分法の初期壁・相関 δ* の経路は設計壁の縮流部で数えるので、run dir を作る前に例外)。
+      壁温分布 (Tw_profile) の区切りの点も設計壁の値なので、併用は run dir を作る前に例外。キー無しは今と同じ (prepare_info.json にも
+      書かない)。指定したときは prepare_info.json の `physical_upstream` に解決済みの値と凍結した設計の値を書く。第一層の厚さの表
+      (`mesh.wall_first_frac_table`) は局所半径との比なので、上流の半径を変えたら表も別に直す (このキーは格子の表を書き換えない)。
     """
     from ..feedback.deltastar import _sutherland
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, check_required_attrs, save_wall_file
@@ -1469,6 +1542,15 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     transport = p.transport_for_ns()
     # 本段だけの B0 (§5.1 #30): 不正値・cfl_main / implicit_relax との併記は run dir を作る前に例外
     main_line = _main_line_spec(p, cfl_main, implicit_relax)
+    # 物理壁だけの上流の形 (§5.1 #34): 不正値・δ_r の経路 (delta_r_csv だけ)・壁温分布との併用は run dir を作る前に例外
+    pu = _physical_upstream(p.geometry)
+    if pu is not None:
+        if delta_r_csv is None:
+            raise ValueError("geometry.physical_upstream は delta_r_csv の経路だけ (積分法の初期壁・相関 δ* は設計壁の縮流部で数えるので、"
+                             "物理壁の別の形の上流の境界層の履歴にならない)")
+        if "Tw_profile" in p.wall_thermal:
+            raise ValueError("geometry.physical_upstream と spec.wall_thermal.Tw_profile の併用は未対応 (壁温分布の区切りの点 −L_U は "
+                             "設計壁の値なので、物理壁の縮流部の始まりと食い違う)")
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
@@ -1661,6 +1743,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 上流の作り方の解決済みの値とゲート、寸法の記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1・§4.2)
     info["pw_upstream"] = {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]}
     info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
+    if pu is not None:
+        # 物理壁だけの上流の形 (§5.1 #34): 問題の値と、壁が使った値 (名目の U→T Hermite・凍結した設計の値)。キー無しは書かない
+        info["physical_upstream"] = {"requested": pu, "wall": wall.physical_upstream}
     info["sizing"] = _sizing_record(sizing, wall, scale)
     info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
     # 本段だけの B0 (§5.1 #30): 前の段の元の設定を PRESTAGE_CONFIG に置き、solverConfig.yaml を本段の設定に替える
