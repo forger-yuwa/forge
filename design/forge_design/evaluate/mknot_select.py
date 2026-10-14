@@ -20,6 +20,10 @@ case/42.isobutane_wt/compare_axislaw_D.py と同じ) + `wall_margin_diagnostics`
   - 選ぶ順序 (2026-10-14 確定、諮問 mknot-result-v6 の Major): (1) 制約が全部成立し、境目から ΔM_safe (0.05) 以上の候補に
     絞る (各境目 + ΔM_safe の点を評価して候補に足す) → (2) その中の θ_max の最小 → (3) 同点の規則: (1) の候補で (2) の最小との
     差 ≤ 1e-3° の集合から境目から最も遠い点。距離で除外される点の θ_max は選択を左右しない (記録の theta_min は距離の前の素の最小)。
+  - 境目の探し直しの上限 (2026-10-14 result 段レビュー M1、§5.1 #3d): 境目 + ΔM_safe の点が新しい成立の切り替わりを作ったら、
+    評価表 (全部の評価済みの点) から境目を求め直して選び直す。SETTLE_MAX (3) 回選び直しても境目の集合 (向きと成立側の端の列;
+    二分法の区間の不成立側の端だけの詰め直しは数えない) が変わるなら、古い境目での選択を返さず `MknotUndeterminedError`
+    (表つき; 警告だけで返さない)。
   - 選択値は評価した点の値のまま (格子の原点 M_A + 0.1 からの端数を丸めない; 表示だけ丸める)。
   - 成立点が無ければ例外 (表つき)。黙って 0.45 × M_d には戻さない。
   - 解像度のゲート (`resolution_gate`): n_axis_inv を 2 倍にして選んだ点の ±0.1 を 0.01 で詰め直し、境目も求め直す。
@@ -29,6 +33,9 @@ case/42.isobutane_wt/compare_axislaw_D.py と同じ) + `wall_margin_diagnostics`
     選び直した値 (同点の規則の後) が詰めの窓の端に来たら、同じ geometry のまま窓を上限つきで広げて (半幅 0.1 → 0.2 → 0.3、
     評価済みの点は使い回す) 選び直す。上限でも端なら「未確定」(2026-10-14 諮問 mknot-card-holes)。θ_max の最小の位置の端の判定
     (同点の規則の前) とは別の判定。
+    初回の窓・広げた窓とも、**N と 2N の両方**を ±(半幅 + ΔM_safe) まで評価し (窓の外は候補にしない)、それぞれの解像度で独立に
+    境目を求める (2026-10-14 result 段レビュー M2: N だけでは 2N にだけある窓の外の境目を見落とす)。選び直しで境目の集合が
+    上限まで収まらなければ未確定 (同 M1)。距離は最後に評価表 (全部の評価済みの点) から求め直した境目で判定する。
 
 候補 (選ばれうる点) は粗い格子・詰めの格子・境目 + ΔM_safe の点 (と解像度のゲート・V6 の格子の点)。二分法の点は境目を
 決めるためだけに使い、候補にしない。
@@ -51,6 +58,7 @@ SIN_MIN = 0.02            # 網の最小 sin 角の床 (sweep_axislaw_A_MK.py �
 MARGIN_MIN_DEG = 1.0      # 壁での余裕 min(μ_w − θ_w) の床 [°] (同 MARGIN_FLOOR_DEG)
 CANDIDATE_ROLES = ("coarse", "fine", "safe", "grid", "window")
 GATE_HALF_WIDTHS = (0.1, 0.2, 0.3)   # 解像度のゲートの窓の半幅の列 (§4.2 窓の端の選択: 選び直した値が端なら次へ広げる、上限 0.3)
+SETTLE_MAX = 3            # 境目の探し直し (境目 + ΔM_safe の点が新しい切り替わりを作ったときの選び直し) の上限 (§5.1 #3d、レビュー M1)
 _EPS = 1e-9
 
 
@@ -63,7 +71,8 @@ class MknotSelectionError(ValueError):
 
 
 class MknotUndeterminedError(MknotSelectionError):
-    """解像度のゲートが不合格 (選択は未確定)。`result` にゲートの結果。"""
+    """選択は未確定: 解像度のゲートが不合格、または境目の探し直しが上限 (SETTLE_MAX) に達しても境目の集合が変わる
+    (`select_mknot`・`reselect_common`; §5.1 #3d)。`result` にゲートの結果 (または探し直しの記録; rows_N・rows_2N が表)。"""
 
     def __init__(self, msg: str, result: dict):
         self.result = result
@@ -371,7 +380,15 @@ def find_boundaries(ev: Evaluator, bisect_tol: float, role: str = "bisect") -> l
 
 
 def _same_boundaries(a: list[dict], b: list[dict]) -> bool:
-    return [(x["kind"], x["lo"], x["hi"]) for x in a] == [(x["kind"], x["lo"], x["hi"]) for x in b]
+    """境目の集合が同じか。向きと成立側の端 (選び方が使う値: 距離と境目 + ΔM_safe の点) で比べる (§5.1 #3d)。区間の不成立側の
+    端だけが詰まった変化 (二分法の幅の中に不成立の点が足された) は選択を変えないので同じとみなす — 探し直しの上限で「境目が
+    変わった」と数えて未確定にしない。"""
+    return ([(x["kind"], float(x["feasible_end"])) for x in a] == [(x["kind"], float(x["feasible_end"])) for x in b])
+
+
+def _bounds_text(bs: list[dict]) -> str:
+    """境目の列の表示 (例外のメッセージ・ログ用): [(向き, 成立側の端)]。"""
+    return str([(b["kind"], round(b["feasible_end"], 6)) + ((b["source"],) if "source" in b else ()) for b in bs])
 
 
 def boundary_distance(M: float, boundaries: list[dict]) -> float:
@@ -478,9 +495,10 @@ def select_mknot(eval_fn, M_A: float, M_d: float, *, coarse: float = 0.1, fine: 
 
     粗い格子 M_A + coarse + coarse·k (M_d − coarse まで) → 成立点の θ_max の局所極小を全部 ±coarse を fine で詰める
     (同じ原点の格子) → 境目を二分法で幅 ≤ bisect_tol → 制約と境目からの距離 → 最小 → 同点の規則 (`apply_rule`;
-    境目 + ΔM_safe の点は探索の範囲 [M_A + coarse, 格子の上端] の中だけ評価する)。
-    戻り: {rule, chosen, chosen_row, table (全評価点), local_minima, windows, boundaries, reason, warnings, ...}。
-    成立点が無ければ MknotSelectionError (表つき)。"""
+    境目 + ΔM_safe の点は探索の範囲 [M_A + coarse, 格子の上端] の中だけ評価する)。境目 + ΔM_safe の点が新しい成立の切り替わりを
+    作ったら評価表から境目を求め直して選び直し、SETTLE_MAX 回でも境目の集合が変わるなら MknotUndeterminedError (表つき; §5.1 #3d)。
+    戻り: {rule, chosen, chosen_row, table (全評価点), local_minima, windows, boundaries, reason, warnings, ...}。boundaries は評価表の
+    全部の点から求めた境目 (選択に使った境目と同じ)。成立点が無ければ MknotSelectionError (表つき)。"""
     t0 = time.time()
     ratio = int(round(coarse / fine))
     if ratio < 1 or abs(ratio * fine - coarse) > 1e-12:
@@ -515,16 +533,24 @@ def select_mknot(eval_fn, M_A: float, M_d: float, *, coarse: float = 0.1, fine: 
         ev.many([grid(j) for j in sorted(js)], "fine")
         boundaries = find_boundaries(ev, bisect_tol)
         rule = None
-        for it in range(3):
+        for it in range(SETTLE_MAX):
             rule = apply_rule(ev.table(), boundaries, tie_deg=tie_deg, dM_safe=dM_safe,
                               safe_eval=lambda Ms: ev.many(Ms, "safe"), safe_range=(grid(0), grid(J_max)))
-            nb = find_boundaries(ev, bisect_tol)           # 境目 + ΔM_safe の点が新しい切り替わりを作ったら選び直す
+            nb = find_boundaries(ev, bisect_tol)           # 評価表 (全部の評価済みの点) から境目を求め直す
             if _same_boundaries(nb, boundaries):
+                boundaries = nb                             # 記録は評価表から求めた境目 (成立側の端は選択に使ったものと同じ)
                 break
-            if it == 2:                                     # 記録 (選択と境目) は選択に使った境目のまま揃える
-                warnings.append("境目 + ΔM_safe の点が 3 回の選び直しでも新しい成立の切り替わりを作る — 選択は直前の境目で判定した "
-                                f"(新しい境目 {[(b['kind'], round(b['feasible_end'], 6)) for b in nb]})")
-                break
+            if it == SETTLE_MAX - 1:
+                # 上限でも境目の集合が変わる: 古い境目での選択は返さない (§5.1 #3d、result 段レビュー M1 — 警告だけで返すと、
+                # 評価表に既にある境目から ΔM_safe 未満の点を合格として出す反例があった)
+                raise MknotUndeterminedError(
+                    f"選択は未確定: 境目 + ΔM_safe の点が {SETTLE_MAX} 回の選び直しの後も新しい成立の切り替わりを作る (境目の集合が"
+                    f"収まらない) — 古い境目での選択 {rule['chosen']!r} (選択に使った境目から {rule['distance']:.4g}) は返さない。"
+                    f"評価表から求め直した境目からは {boundary_distance(rule['chosen'], nb):.4g}; 選択に使った境目 {_bounds_text(boundaries)}、"
+                    f"求め直した境目 {_bounds_text(nb)}",
+                    {"stage": "select_mknot", "rows_N": ev.table(), "rows_2N": [], "boundaries_used": boundaries,
+                     "boundaries_latest": nb, "chosen_stale": rule["chosen"],
+                     "distance_stale_latest": boundary_distance(rule["chosen"], nb), "warnings": warnings})
             warnings.append("境目 + ΔM_safe の点が新しい成立の切り替わりを作った — 境目を求め直して選び直した")
             boundaries = nb
         table = ev.table()
@@ -565,17 +591,22 @@ def conservative_boundaries(bN: list[dict], b2: list[dict]) -> list[dict]:
 
 def reselect_common(evN: Evaluator, ev2: Evaluator, rows_N: list[dict], rows_2N: list[dict], *, tie_deg: float,
                     dM_safe: float, bisect_tol: float, safe_range=None, candidate_roles=CANDIDATE_ROLES,
-                    max_iter: int = 3, log=None) -> dict:
+                    max_iter: int = SETTLE_MAX, raise_unsettled: bool = True, log=None) -> dict:
     """N と 2N の**全部の境目** (`conservative_boundaries`; 対にしてまとめない) で両方の解像度の選択をそれぞれ選び直す
     (§4.2; 2N の境目が保守側へ動いたときに N の境目のままで判定しない・まとめた境目で距離を過大に見積もらない)。
     evN・ev2: 各解像度の Evaluator (境目を求め直し、境目 + ΔM_safe の点を評価する)。rows_N・rows_2N: 各解像度の候補の行
     (candidate_roles で絞る)。境目 + ΔM_safe の点は全部の境目について評価する (下の境目は +、上の境目は −)。それが新しい
-    成立の切り替わりを作ったら境目を求め直して選び直す (max_iter 回まで)。
-    戻り: {boundaries_N, boundaries_2N, common (全部の境目), N: apply_rule の戻り (選べなければ {chosen: None, error}), 2N: 同,
-    warnings}。"""
+    成立の切り替わりを作ったら評価表から境目を求め直して選び直す (max_iter 回まで)。
+    max_iter 回でも境目の集合が変わるなら選択は未確定 (§5.1 #3d、result 段レビュー M1): raise_unsettled なら
+    MknotUndeterminedError (表つき)、そうでなければ settled False を返す (呼び出し側が不合格にする; 解像度のゲートは
+    raise_unsettled=False で呼び、判定 settled に入れる)。古い境目での選択を合格として扱わない。
+    戻り: {boundaries_N, boundaries_2N, common (選択に使った全部の境目), N: apply_rule の戻り (選べなければ {chosen: None, error}),
+    2N: 同, settled, boundaries_N_latest・boundaries_2N_latest・common_latest (評価表から最後に求め直した境目; settled なら
+    選択に使った境目と同じ), warnings}。"""
     warnings = []
     bN, b2 = find_boundaries(evN, bisect_tol), find_boundaries(ev2, bisect_tol)
-    res, common = {}, []
+    nbN, nb2 = bN, b2
+    res, common, settled = {}, [], True
     for it in range(max_iter):
         common = conservative_boundaries(bN, b2)
         for tag, ev, rows in (("N", evN, rows_N), ("2N", ev2, rows_2N)):
@@ -587,10 +618,26 @@ def reselect_common(evN: Evaluator, ev2: Evaluator, rows_N: list[dict], rows_2N:
                 res[tag] = {"chosen": None, "error": str(e).splitlines()[0]}
         nbN, nb2 = find_boundaries(evN, bisect_tol), find_boundaries(ev2, bisect_tol)
         if _same_boundaries(nbN, bN) and _same_boundaries(nb2, b2):
+            bN, b2 = nbN, nb2                           # 記録は評価表から求めた境目 (成立側の端は選択に使ったものと同じ)
+            common = conservative_boundaries(bN, b2)
             break
-        if it == max_iter - 1:                          # 記録 (選択と境目) は選択に使った境目のまま揃える
-            warnings.append(f"境目 + ΔM_safe の点が {max_iter} 回の選び直しでも新しい成立の切り替わりを作る — 選択は直前の"
-                            "全部の境目で判定した")
+        if it == max_iter - 1:
+            # 上限でも境目の集合が変わる: 選択は未確定 (古い境目での選択を合格として返さない; §5.1 #3d)
+            settled = False
+            latest = conservative_boundaries(nbN, nb2)
+            msg = (f"選択は未確定: 境目 + ΔM_safe の点が {max_iter} 回の選び直しの後も新しい成立の切り替わりを作る (全部の境目の集合が"
+                   f"収まらない) — 古い境目での選択 N {res['N'].get('chosen')!r}・2N {res['2N'].get('chosen')!r} は使わない "
+                   f"(評価表から求め直した境目からの距離 "
+                   + "・".join(f"{tag} {('—' if res[tag].get('chosen') is None else format(boundary_distance(res[tag]['chosen'], latest), '.4g'))}"
+                               for tag in ("N", "2N"))
+                   + f"); 求め直した境目 {_bounds_text(latest)}")
+            warnings.append(msg)
+            if raise_unsettled:
+                raise MknotUndeterminedError(msg, {"stage": "reselect_common", "rows_N": evN.table(), "rows_2N": ev2.table(),
+                                                   "common_used": common, "common_latest": latest,
+                                                   "N": {k: v for k, v in res["N"].items() if k != "chosen_row"},
+                                                   "2N": {k: v for k, v in res["2N"].items() if k != "chosen_row"},
+                                                   "warnings": warnings})
             break
         warnings.append("境目 + ΔM_safe の点が新しい成立の切り替わりを作った — 全部の境目を求め直して選び直した")
         bN, b2 = nbN, nb2
@@ -599,8 +646,11 @@ def reselect_common(evN: Evaluator, ev2: Evaluator, rows_N: list[dict], rows_2N:
                                          + ("" if b["nearest_other"] is None else
                                             f", {b['nearest_other']['source']} の同じ向き {b['nearest_other']['offset']:+.6f}")
                                          + ")" for b in common)
-            + f" → 選び直し N {res['N'].get('chosen')!r}・2N {res['2N'].get('chosen')!r}")
-    return {"boundaries_N": bN, "boundaries_2N": b2, "common": common, "N": res["N"], "2N": res["2N"], "warnings": warnings}
+            + f" → 選び直し N {res['N'].get('chosen')!r}・2N {res['2N'].get('chosen')!r}"
+            + ("" if settled else f" — 未確定 (境目の探し直しが上限 {max_iter} 回)"))
+    return {"boundaries_N": bN, "boundaries_2N": b2, "common": common, "N": res["N"], "2N": res["2N"], "settled": settled,
+            "boundaries_N_latest": nbN, "boundaries_2N_latest": nb2, "common_latest": conservative_boundaries(nbN, nb2),
+            "warnings": warnings}
 
 
 def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_result: dict | None = None,
@@ -614,19 +664,28 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
     成立側の端からの距離で窓の候補から N と 2N の選択をそれぞれ選び直して比べる (`reselect_common`; 境目 + ΔM_safe の点は
     全部の境目について窓の中だけ評価)。
 
+    窓の外の文脈 (§5.1 #3d、2026-10-14 result 段レビュー M2): 初回の窓・広げた窓とも、**N と 2N の両方**を ±(半幅 + ΔM_safe) まで
+    fine の格子で評価し (役割 context; 候補にしない)、それぞれの解像度で独立に境目を求める (N だけを広げると、2N にだけある窓の
+    すぐ外の境目を見落として、そこから ΔM_safe 未満の点を合格にする反例があった)。
+    境目の探し直し (同 M1): 選び直しで境目の集合が SETTLE_MAX 回でも収まらなければ判定 settled が不合格 (古い境目での選択を
+    合格にしない)。距離の判定は、最後に評価表 (N・2N の全部の評価済みの点; 交差の評価を含む) から求め直した境目で行う
+    (選択に使った境目と食い違えば settled も不合格)。
+
     窓の端の選択 (plan §4.2、2026-10-14 諮問 mknot-card-holes の Major): 選び直した N・2N の値 (同点の規則の後) のどちらかが
     窓の端に来たら、同じ geometry・同じ chosen を中心に半幅を half_widths の次の値に広げ (既定 0.1 → 0.2 → 0.3; 評価済みの点は
     Evaluator が使い回す)、境目・距離・同点の規則を当て直して選び直す。平らな谷では同点の規則が境目から最も遠い点を選ぶので、
     端の選択は窓が選択を縛っている印であって、それだけで「未確定」にはしない (諮問の合成の例: 境目 1.65 / 2.25 で窓 1.95〜2.15
     の選択 1.95 は端、半幅 0.2 で同じ 1.95 が内部に入り距離 0.30)。上限の半幅でも端なら chosen_inside_* が不合格 (未確定)。
-    広げた窓では N を ±(半幅 + ΔM_safe) まで評価し (役割 context; 候補にしない)、窓の外 ΔM_safe 以内の境目も見る
-    (最初の窓の外の文脈は呼び出し側が渡す: select_mknot の表、カードの最終の組は ±(0.1 + ΔM_safe); plan §4.4)。
+    広げた窓でも N と 2N を ±(半幅 + ΔM_safe) まで評価して、窓の外 ΔM_safe 以内の境目を見る (上の「窓の外の文脈」)。
+    境目の探し直しが上限で収まらなければ窓は広げない (その窓で未確定)。
 
     判定 (全部で合格; 最後の窓で):
+      settled     選び直しの境目の探し直しが SETTLE_MAX 回以内に収まり、評価表から最後に求め直した境目が選択に使った境目と同じ
       change      全部の境目で選び直した N と 2N の選択値の差 ≤ max_change (0.01)
       ok_N・ok_2N 入力の選択点 (chosen) と選び直した 2 点が、その解像度で全部の制約を満たす
                   (選び直した 2 点は両方の解像度で評価する; 高い解像度だけ制約を破る選択点を通さない)
-      distance    選び直した 2 点から全部の境目まで ≥ ΔM_safe (入力の点の距離は distance_input に記録だけ)
+      distance    選び直した 2 点から全部の境目 (評価表から最後に求め直したもの) まで ≥ ΔM_safe (入力の点の距離は distance_input に
+                  記録だけ)
       edge_N・edge_2N  窓の中の成立点の θ_max の最小 (同点の規則の前) が窓の端に無い (窓を広げる契機にはしない; 別の判定)
       chosen_inside_N・chosen_inside_2N  選び直した値 (同点の規則の後) が窓の端に無い (上限の半幅まで広げた後)
     出力する値は選び直した N の値 `chosen_N` (§4.2; 入力の chosen をそのまま出すと境目から ΔM_safe 未満の値が出うる)。
@@ -657,7 +716,7 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
     out = {"N": int(N), "N2": int(2 * N), "chosen": float(chosen),
            "settings": {"fine": fine, "half_widths": hws, "tie_deg": tie_deg, "dM_safe": dM_safe,
                         "bisect_tol": bisect_tol, "max_change": max_change}}
-    n_ctx = int(math.ceil(dM_safe / fine - 1e-9)) if dM_safe > 0.0 else 0      # 広げた窓の外の文脈 (N、ΔM_safe ぶん)
+    n_ctx = int(math.ceil(dM_safe / fine - 1e-9)) if dM_safe > 0.0 else 0      # 窓の外の文脈 (N・2N、ΔM_safe ぶん)
 
     def grid(j: int) -> float:
         return round(float(chosen) + j * fine, 12)
@@ -681,41 +740,56 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
     steps = []
     for i, (hw, nh) in enumerate(zip(hws, nhs)):
         window = [grid(j) for j in range(-nh, nh + 1)]
+        # 窓の外の文脈 ±(半幅 + ΔM_safe): 初回の窓・広げた窓とも N と 2N の両方で評価する (候補にしない; §5.1 #3d、レビュー M2)
+        ctx = [grid(j) for j in range(-nh - n_ctx, nh + n_ctx + 1) if abs(j) > nh]
         with evN:
             if log:
-                log(f"解像度のゲート: N = {N} の窓 {window[0]:.6g}〜{window[-1]:.6g}" + ("" if i == 0 else f" (半幅 {hw:g} に広げた)"))
+                log(f"解像度のゲート: N = {N} の窓 {window[0]:.6g}〜{window[-1]:.6g}" + ("" if i == 0 else f" (半幅 {hw:g} に広げた)")
+                    + (f" と窓の外 ±{hw + dM_safe:g} まで" if ctx else ""))
             rows_N = evN.many(window, "window")
-            if i > 0 and n_ctx:
-                evN.many([grid(j) for j in range(-nh - n_ctx, nh + n_ctx + 1) if abs(j) > nh], "context")
+            if ctx:
+                evN.many(ctx, "context")
             bN = find_boundaries(evN, bisect_tol)
         near = [b for b in bN if abs(b["feasible_end"] - chosen) <= hw + dM_safe + _EPS]
         with ev2:
             if log:
-                log(f"解像度のゲート: 2N = {2 * N} の窓と N の境目の区間の両端 ({len(near)} 個)")
+                log(f"解像度のゲート: 2N = {2 * N} の窓" + (f" と窓の外 ±{hw + dM_safe:g} まで" if ctx else "")
+                    + f"、N の境目の区間の両端 ({len(near)} 個)")
             rows_2N = ev2.many(window, "window")
+            if ctx:
+                ev2.many(ctx, "context")
             if near:
                 ev2.many([v for b in near for v in (b["lo"], b["hi"])], "bracket")
             find_boundaries(ev2, bisect_tol)        # 2N の二分法は並列の中で (reselect_common は評価済みの点を使う)
-        # 全部の境目で両方を選び直す (候補は窓の点だけ; N の窓の点は select_mknot の表の行を再利用するので役割を窓に揃える)
+        # 全部の境目で両方を選び直す (候補は窓の点だけ; N の窓の点は select_mknot の表の行を再利用するので役割を窓に揃える)。
+        # 境目の探し直しが上限で収まらなければ settled False (下の判定で不合格; 古い境目での選択を合格にしない)
         rc = reselect_common(evN, ev2, [dict(r, role="window") for r in rows_N], [dict(r, role="window") for r in rows_2N],
                              tie_deg=tie_deg, dM_safe=dM_safe, bisect_tol=bisect_tol,
-                             safe_range=(window[0], window[-1]), candidate_roles=("window", "safe"), log=log)
+                             safe_range=(window[0], window[-1]), candidate_roles=("window", "safe"), raise_unsettled=False,
+                             log=log)
         cN, c2 = rc["N"].get("chosen"), rc["2N"].get("chosen")
         edge_vals = {tag: c for tag, c in (("N", cN), ("2N", c2)) if _at_end(c, window)}
         last = i == len(hws) - 1
         steps.append({"half_width": hw, "window": [window[0], window[-1]], "chosen_N": cN, "chosen_2N": c2,
                       "edge_values": edge_vals, "min_offset_N": _edge(rows_N, nh), "min_offset_2N": _edge(rows_2N, nh),
-                      "action": ("選び直した値は窓の内部" if not edge_vals else
+                      "settled": rc["settled"],
+                      "action": (f"境目の探し直しが上限 {SETTLE_MAX} 回で収まらない — 未確定 (窓は広げない)" if not rc["settled"] else
+                                 "選び直した値は窓の内部" if not edge_vals else
                                  f"選び直した値が上限の半幅 {hw:g} でも窓の端 — 未確定" if last else
                                  f"選び直した値が窓の端 → 半幅 {hws[i + 1]:g} に広げて選び直す")})
-        if log and edge_vals:
-            log(f"  半幅 {hw:g}: " + "・".join(f"{k} {v!r}" for k, v in edge_vals.items()) + f" が窓の端 — {steps[-1]['action']}")
-        if not edge_vals or last:
+        if log and (edge_vals or not rc["settled"]):
+            log(f"  半幅 {hw:g}: " + "・".join(f"{k} {v!r}" for k, v in edge_vals.items())
+                + (" が窓の端" if edge_vals else "") + f" — {steps[-1]['action']}")
+        if not edge_vals or last or not rc["settled"]:
             break
-    common = rc["common"]
     sel_pts = [float(chosen)] + [c for c in (cN, c2) if c is not None]
     at_N = {_key(r["M_K"]): r for r in evN.many(sel_pts, "cross")}          # 逐次 (with の外)
     at_2N = {_key(r["M_K"]): r for r in ev2.many(sel_pts, "cross")}
+    # 距離は評価表 (N・2N の全部の評価済みの点; 交差の評価を含む) から求め直した境目で判定する (§5.1 #3d、レビュー M1:
+    # 選び直しに使った境目の集合だけを信じない)。食い違えば選択に使った境目が古い = settled も不合格
+    bN_fin, b2_fin = find_boundaries(evN, bisect_tol), find_boundaries(ev2, bisect_tol)
+    common = conservative_boundaries(bN_fin, b2_fin)
+    same_fin = _same_boundaries(bN_fin, rc["boundaries_N"]) and _same_boundaries(b2_fin, rc["boundaries_2N"])
 
     def _bad(at, pts):
         return [m for m in pts if not _feasible(at[_key(m)])]
@@ -725,6 +799,7 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
     d2 = None if c2 is None else boundary_distance(c2, common)
     badN, bad2 = _bad(at_N, sel_pts), _bad(at_2N, sel_pts)
     checks = {
+        "settled": bool(rc["settled"]) and same_fin,
         "change": cN is not None and c2 is not None and abs(c2 - cN) <= max_change + _EPS,
         "ok_N": cN is not None and c2 is not None and not badN,
         "ok_2N": cN is not None and c2 is not None and not bad2,
@@ -734,6 +809,11 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
         "chosen_inside_2N": c2 is not None and "2N" not in edge_vals,
     }
     reasons = []
+    if not checks["settled"]:
+        reasons.append(f"境目の集合が収まらない — 古い境目での選択 N {cN!r}・2N {c2!r} は使わない ("
+                       + (f"選び直しの境目の探し直しが上限 {SETTLE_MAX} 回に達しても境目が変わる" if not rc["settled"] else
+                          "選び直しの後の評価 (交差) で評価表の境目が変わった")
+                       + f"; 選択に使った境目 {_bounds_text(rc['common'])}、評価表から求め直した境目 {_bounds_text(common)})")
     if not checks["change"]:
         reasons.append(f"全部の境目で選び直した 2N の値 {c2!r} が N の {cN!r} から {max_change:g} を超えて動く "
                        f"(N: {rc['N'].get('reason') or rc['N'].get('error')}; 2N: {rc['2N'].get('reason') or rc['2N'].get('error')})")
@@ -757,7 +837,9 @@ def resolution_gate(problem_dict: dict | None, chosen: float, N: int, *, select_
                 "chosen_N": cN, "chosen_N_reason": rc["N"].get("reason") or rc["N"].get("error"),
                 "chosen_2N": c2, "chosen_2N_reason": rc["2N"].get("reason") or rc["2N"].get("error"),
                 "moved_N": (None if cN is None else cN - float(chosen)),
-                "common_boundaries": common, "boundaries_N": rc["boundaries_N"], "boundaries_2N": rc["boundaries_2N"],
+                # 境目は評価表から最後に求め直したもの (距離の判定に使う)。選び直しに使った境目は common_boundaries_used に記録
+                "common_boundaries": common, "boundaries_N": bN_fin, "boundaries_2N": b2_fin,
+                "common_boundaries_used": rc["common"], "settled": checks["settled"],
                 "distance_to_conservative_boundary": dN, "distance_2N": d2,
                 "distance_input": boundary_distance(chosen, common),
                 "rule_N": {k: v for k, v in rc["N"].items() if k != "chosen_row"},
