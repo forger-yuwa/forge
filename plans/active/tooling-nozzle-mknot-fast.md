@@ -102,6 +102,17 @@
 - 逆 MOC の内部点の計算 (`interior_vec`、時間の 6〜7 割) の JIT 化: 生産の壁の数値が丸めの範囲で変わるので別の受入が要る (#4)。
 - パラスタの間は `overrides: {geometry.M_knot: <値>}` で固定し、最後の候補だけ自動にする手順を skill に書く (#5)。
 
+### 4.4 逆 MOC の 1 評価を速くする (ユーザ 2026-10-15「mocの改修も、jit化などおねがいしたい」; 起案、上位に諮る前)
+
+- **網の充填の JIT 化 (#4)**: 時間の 7〜8 割は `MocInverse.fill_levels` (`moc_inverse.py:279`) の段のループ (段数 N+40 を逐次、段ごとに `moc_kernel.interior_vec` の予測子・修正子を平均 5.1 パス、
+  numpy の小さな呼び出しの固定費が 2/3; §3)。この段のループ全体 (`interior_vec`・`_interior_pass`・`_src_vec`・`pm_mach_vec` (CPG と semiperfect の表の補間)・`MocFillDiag.add`・
+  `_interior_residual`・`source_branches` の集計) を numba の `@njit` で 1 つの関数にし、段の中は対ごとのスカラーのループで回す (同じ式・同じ順序。選択肢 `axis_limit`・`corrector`・`stats` を保つ)。
+  numpy の版は残し、環境変数 `FORGE_MOC_KERNEL=numpy` で選べるようにする (A/B と回帰の基準)。既定は numba。numba が無ければ例外 (黙って numpy に落ちない; 環境による結果の違いを避ける)。
+  依存: `numba 0.68.0`・`llvmlite 0.50.0` (numpy 2.5.2 と動くことを確かめた、2026-10-15)。design の venv (手元の `/home/sano/work/forge/design/.venv-opt`・AWS A/B の `~/forge-deliv/design/.venv-opt`) に `--no-deps` で入れ、numpy を変えない。
+- **L_c の使い回し (#6)**: `from_length` の L_c と x_F の反復列は M_K に依らない (§3、差 ≤ 1e−11 r_t)。同じ (問題、N、`L_total_tol`、`x_end_margin`) の評価の間で、収束した L_c を初期値に渡し、
+  最初の評価で |x_F − L_total| ≤ tol なら 1 回で終える (違えば今の反復に戻る)。`inverse_design` の呼び出しが 1/3〜1/4、メモリも同じ比で減る見込み。キャッシュは評価のプロセスの中だけ (ファイルに残さない)。
+- 数値は丸めの範囲で変わりうる (超越関数の実装・演算の順序・L_c の初期値) ので、§6 V5・V6 の受入で縛る。
+
 ### 4.9 書き直す前の案の記録 (2026-10-15)
 
 - 粗い網で `select_mknot`・`resolution_gate` を回し 2400 で 11 点確かめる案 → diagnose M1 (4800 にだけある不成立を見落とす) で却下。
@@ -120,8 +131,8 @@
 | 3a | `methods/design/overview.md` の選び方の節 | 規則 `coarse_min_theta_v2` (§4.1) の説明に置き換え、旧の規則は「旧版」として短く残す。実装の前に。**実装 (2026-10-15、implementer)**: 「$M_K$ の選び方」を §4.1 の 1〜6・r_t の固定点と終了の条件・自動調整での破棄・並列・捕捉 2・計時・受け入れた限界の説明に置き換え、旧版 `min_theta_max_v1` は 1 段落に。`methods/index.md` はファイルの増減が無いので変更なし (design/overview.md の行のまま) | O |
 | 3 | 実装 | `mknot_select.py` に規則 `coarse_min_theta_v2` (§4.1)、`evaluate_mknot` の捕捉を 2 つに・並列 (§4.2)、`wt_card.py` の M_knot の流れ (最初と最終の r_t、実効の入力での終了、自動調整での破棄、計時の改修)、記録、V1・V2 の試験。**実装 (2026-10-15、implementer)**: `mknot_select.py` に `select_coarse_min_theta` (部品 `v2_grid`・`v2_coarse_analysis`・`v2_valleys`・`v2_confirm`・`v2_pick`)、`evaluate_mknot` の捕捉を最後の 2 つ (`_CAPTURE_KEEP`)・`L_total_tol` の上書き・行に長さ合わせの記録 (L_c・符号つきの残差・停止の理由・実効の入力)。`wt_card.py` の M_knot の流れ (最初の r_t で選ぶ → 固定点 → 出力と同じ実効の入力で選び直し、一致で終了・違えば固定点のやり直し最大 2 回、自動調整で評価を捨てる、`_clock` で選択と再固定点を計時し `card_elapsed_s` と並べる)、並列 `mknot_workers` (1 評価のピーク 600: 0.15 GB・2400: 1.04 GB、case/70 (a) を手元で測定、case/71 は未測定 → #3b で測り直す)、記録 `_mknot_record_v2` (照合 `mknot_card_log_check` は規則の名前で読み分け、旧の記録も照合できる)。試験 `design/tests/run_mknot_v2_tests.py` (V1 (i)〜(vi)、`--real` で (vii)) 34 + 8 ok・`run_mknot_v2_card_tests.py` (V2) 42 ok。(vii) は基準 4e0b9f9e の evaluate_mknot とも基準の欄が全部一致。既存の `run_mknot_select_tests.py` 97 ok・`run_wt_card_tests.py`・`run_wt_card_profile_tests.py`・`run_mesh_size_guard_tests.py`・`run_tests.py` 通過 (旧の規則の合成の流れの試験は `run_wt_card_tests.py` から外した)。`run_deltastar_root_zone_tests.py --card` はこの作業ツリーに case/70 の run が無く該当部分を飛ばした | O |
 | 3b | V3・V4 (AWS A) | 新旧の A/B と計時。**結果 (2026-10-15、§6.2)**: (a) 全部 ✓・191 s (BLAS 1 スレッド)、(b) ①②④ ✓・③ は格子の節点数の上限のユーザ判断待ち | O |
-| 4 | 逆 MOC の内部点の計算の JIT 化 (後回し) | 別の受入 (同じ入力で壁の差の上限) を登録してから | F |
-| 6 | L_c の使い回し (候補、後回し) | `from_length` の L_c が M_K に依らないこと (§3) を使い、(問題、N) ごとに L_c を 1 回解いて使い回せば `inverse_design` の呼び出しが 1/3〜1/4 になり、メモリも減る見込み。数値は 1e−11 r_t の桁で変わりうるので、#4 と同じく別の受入を登録してから | F |
+| 4 | 逆 MOC の網の充填の JIT 化 (§4.4) | ユーザ依頼 2026-10-15。plan 段レビュー (§4.4・§6 V5・V6) の後に実装 | O |
+| 6 | L_c の使い回し (§4.4) | `from_length` の L_c が M_K に依らないこと (§3) を使い、(問題、N) ごとに L_c を 1 回解いて使い回せば `inverse_design` の呼び出しが 1/3〜1/4 になり、メモリも減る見込み。数値は 1e−11 r_t の桁で変わりうるので、#4 と同じく別の受入を登録してから | F |
 | 5 | skill の手順 | `nozzle-design`・`design-intake` にパラスタの間は M_knot を固定する手順と所要の目安 | O |
 
 ## 6. 検証
@@ -144,6 +155,10 @@
   併記: 新の出力から旧の評価表の境目 (`N_p`・`2N_p`、r_t と実効の geometry が同じときだけ) までの距離。
 - **V4 所要 (完了条件)**: AWS A で、M_knot に起因する再固定点・再評価を含めて計時し、(a)・(b) とも M_knot の部分が 600 s 以下。`elapsed_s` を無条件に信用せず、内訳とカード全体の壁時計の時間と照合する。未達なら plan は未完了。
 - 判定不能 (例外・未収束で比べられない) は合格にしない。
+- **V5 JIT の受入** (§4.4、CFD 0 step): 同じ入力で `FORGE_MOC_KERNEL=numpy` と numba の網 (`levels`) と壁を比べる。対象: M5 (case/70 の c2b)・M5.5 (case/71)・M6 (case/45 の生産の問題; CPG と semiperfect、`axis_limit` legacy/analytic、`corrector` fixed2/converge の組を試験で)、N 600・2400。
+  合格: 網の有限の点の位置の差の最大 ≤ 1e−10 r_t、θ・ν の差 ≤ 1e−10 rad、有限・欠損の印 (NaN の位置) が完全に同じ、壁の位置の差 ≤ 1e−10 r_t、θ_max の差 ≤ 1e−8°、`evaluate_mknot` の判定の欄 (ok・reasons・成立の判定) が同じ、
+  `stats` の分類の数が同じ。design の既存の試験が全部通る (許容差は変えない)。所要: N 2400 の 1 評価が 3 倍以上速い (AWS A、同じ条件で)。
+- **V6 L_c の使い回しの受入**: 同じ M_K の評価で、使い回しの有無の行の数値の欄の差 ≤ 1e−9 (相対) と判定の欄が同じ (M5・M5.5、N 600・2400、M_K を 5 点)。`inverse_design` の呼び出しの回数とメモリのピークを記録。
 
 ### 6.2 V3・V4 の結果 (2026-10-15、AWS A、commit 66be034c (+ BLAS の修正)、作業 `~/mknot_v3`・`~/mknot_v3_blas1`)
 
@@ -177,6 +192,7 @@
 
 ## 9. 変更ログ
 
+- `2026-10-15` — ユーザ依頼「mocの改修も、jit化などおねがいしたい」: §4.4 (網の充填の JIT・L_c の使い回し) と §6 V5・V6 を起案。
 - `2026-10-15` — V3・V4 の結果を §6.2 に。並列の評価のプロセスの BLAS を 1 スレッドに (569 s → 191 s)。(b) の寸法ゲートは格子の節点数の上限のユーザ判断待ち。
 - `2026-10-15` — 旧の規則で case/71 のカードの生成が最終の組の 4800 の長さ合わせで止まった (§3)。V3 (b) の旧の腕を最初の r_t の組に補足 (新の結果を見る前)。
 - `2026-10-15` — plan 段レビュー v2 (GO-with-changes C0/M4/m2) を全件採用: §4.1 の手順 (候補の区間・谷ごとの確認とずらし・一度だけの同点・実効の入力での終了・計時)、§6 V1・V2 に反例。
