@@ -680,8 +680,11 @@ $L_{k-1}[i]$ (C⁻ 担体) と $L_{k-1}[i+1]$ (C⁺ 担体) から作られる�
 (放射源流 n_ax 300)、受入は位置 $\le10^{-10}\,r_t$・θ/ν $\le10^{-10}$ rad。`FORGE_MOC_KERNEL=numpy` で numpy の版を選べる
 (A/B の基準; 「既定はビット同一」の過去の保証は numpy の版について)。単位過程の関数を差し替える試験・台本は numba の版には
 効かないので、差し替えを検出したら止める。速さは超越関数 (Newton の $\arctan$、$\tan$・$\arcsin$・$\sin$・$\cos$) の
-計算量で決まり、放射源流 n_ax 2400・analytic + converge の充填で numpy の版 8.0 s に対し 3.2 s (手元)。
-計画 [tooling-nozzle-mknot-fast](../../plans/active/tooling-nozzle-mknot-fast.md) §4.4・§4.5、受入は同 §6 V5。
+計算量で決まり、放射源流 n_ax 2400・analytic + converge の充填で numpy の版 8.0 s に対し 2.4〜2.9 s (手元)。
+C⁺ 流束閉包の壁 (`cplus_flux_wall`、float の γ と `GasSemiPerfect`) と網の検査の段ごとの走査
+(`characteristic_topology_diagnostics` の隣接間隔と点の堆積) も numba の関数で回す (どちらも numpy の書き方と出力が完全一致)。
+したがって numba は backend の選択にかかわらず要る。
+計画 [tooling-nozzle-mknot-fast](../../plans/active/tooling-nozzle-mknot-fast.md) §4.4〜§4.6、受入は同 §6 V5・§6.4。
 
 | | 流線積分 (`streamline`) | **C⁺ 流束閉包 (`cplus`)** |
 | --- | --- | --- |

@@ -27,6 +27,8 @@
     両方とも同じ backend で行う (`prepare_info.json` の `environment.moc_kernel`)。
     design の venv に `numba 0.68.0`・`llvmlite 0.50.0` を **`--no-deps`** で入れる (`.venv-opt/bin/pip install --no-deps numba==0.68.0
     llvmlite==0.50.0`; numpy を変えると δ_r が動く)。numba が無いと ImportError で止まる (黙って numpy の版に落ちない)。
+    `cplus_flux_wall` と網の検査 (`characteristic_topology_diagnostics`) も numba を使う (出力は numpy の書き方と完全一致) ので、
+    `FORGE_MOC_KERNEL=numpy` でも numba は要る。
     環境変数 `FORGE_MOC_KERNEL=numpy` で numpy の版 (A/B と回帰の基準)、他の値は ValueError。初回はコンパイルに数秒〜十数秒かかり、
     結果は `geometry/__pycache__` にキャッシュされる。試験: `design/tests/run_moc_jit_tests.py [--real]`。
 

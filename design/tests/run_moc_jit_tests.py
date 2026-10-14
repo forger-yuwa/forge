@@ -9,9 +9,11 @@
      (NaN は NaN、範囲外は端の値、表の節点はそのままの値)
   3. 放射源流の網 (CPG γ 1.4、2 解像度) と semi-perfect の表 (case/71 の燃焼ガス) で、4 つの組 (legacy/analytic × fixed2/converge) と
      `fill_levels`・`fill_arrays` の両方で、網の NaN の位置が同じ、位置 ≤ 1e−10 r_t・θ/ν ≤ 1e−10 rad、集計 (`last_diag`) の整数
-     (分類の数・分岐の数・位置の添字・反復回数の分布) が同じ、実数 (位置・残差) は許容差の中。`AXIS_LIMIT_FRAC` を実行時に変えても同じ
+     (分類の数・分岐の数・位置の添字) が同じ、実数 (位置・残差) は許容差の中。反復回数の分布と最終残差の最大の位置は記録だけ
+     (収束の許容差・丸めの境目で入れ替わる)。`AXIS_LIMIT_FRAC` を実行時に変えても同じ
   4. 異常系 (plan 段 jit の M2): もともとの欠損・反復中の非有限・平行な特性線・軸より下・反復の上限・θ_r の欠如 (ValueError の文) を
-     両方の backend の `fill_levels` に通し、段・対ごとの状態 (`PAIR_*`)・反復回数・源項の分岐が同じ、最終残差が許容差の中、
+     両方の backend の `fill_levels` に通し、段・対ごとの状態 (`PAIR_*`)・源項の分岐が同じ、反復回数は収束した対で ±1 まで
+     (更新量が収束の許容差のちょうど境目にある対は丸めで 1 回ずれうる; 件数を記録)、最終残差が許容差の中、
      棄却の位置・`moc_gate` の判定が同じ (段・対ごとの値は `MocFillDiag.add` の入力を両方の backend で記録して比べる)
 --real (V5 の実データ、所要 10〜20 分、最大 RSS 約 3 GB):
   5. M5 (case/70 c2b)・M5.5 (case/71 のカード)・M6 (case/45 の生産の問題、CFD の初期線) を N 600 (L_total_tol 0.1 r_t) と
@@ -168,16 +170,25 @@ def run_both(init, al, co, thr=None, gas=G, how="fill_levels", **kw):
     return out
 
 
+N_ITER_DIFF = [0]                                # 反復回数が ±1 ずれた対の数 (記録)
+
+
 def rec_matches(ra, rb):
-    """段ごとの記録の照合: 状態・反復回数・分岐は完全一致、最終残差は NaN の位置が同じで差 ≤ TOL_RES。戻り: 違いの一覧。"""
+    """段ごとの記録の照合: 状態・分岐は完全一致、反復回数は収束した対だけ ±1 まで (更新量が収束の許容差のちょうど境目にある対は
+    丸めで 1 回ずれうる; plan §6 V5 の受入は分類の数で、回数は含めない)、最終残差は NaN の位置が同じで差 ≤ TOL_RES。戻り: 違いの一覧。"""
     errs = []
     if list(ra) != list(rb):
         return [f"段の並び numpy {list(ra)[:5]}… ({len(ra)}) vs numba {list(rb)[:5]}… ({len(rb)})"]
     for k in ra:
         a, b = ra[k], rb[k]
-        for key in ("status", "n_iter", "branch"):
+        for key in ("status", "branch"):
             if not np.array_equal(a[key], b[key]):
                 errs.append(f"段 {k} の {key}")
+        dn = np.abs(a["n_iter"] - b["n_iter"])
+        conv = a["status"] == PAIR_CONVERGED
+        if np.any(dn[~conv] != 0) or np.any(dn[conv] > 1):
+            errs.append(f"段 {k} の n_iter")
+        N_ITER_DIFF[0] += int(np.count_nonzero(dn))
         for key in ("rg", "rc"):
             fa, fb = np.isfinite(a[key]), np.isfinite(b[key])
             if not np.array_equal(fa, fb) or float(np.max(np.abs(a[key] - b[key])[fa], initial=0.0)) > TOL_RES:
@@ -190,6 +201,7 @@ def compare(label, res, gate_wall=None, thr_info=None):
     nan_same, dx, da = lev_diff(a[0], b[0])
     da_ = dict(a[1]); db_ = dict(b[1])
     ra, rb = da_.pop("resid"), db_.pop("resid")
+    ia, ib = da_.pop("iters"), db_.pop("iters")        # 反復回数の分布は記録 (±1 のずれは rec_matches で見る)
     # 最終残差は丸めの大きさ (~1e-15) なので、最大の値は許容差で比べ、最大になる段・対 (at_*) は丸めで入れ替わるので比べない
     dd = close_obj(da_, db_, TOL_X) + (close_obj({k: v for k, v in ra.items() if not k.startswith("at_")},
                                                  {k: v for k, v in rb.items() if not k.startswith("at_")}, TOL_RES)
@@ -202,6 +214,80 @@ def compare(label, res, gate_wall=None, thr_info=None):
     check(f"{label}: 段・対ごとの状態・反復回数・源項の分岐が同じ、最終残差が許容差の中" + (f" ({te[:3]})" if te else ""), not te)
     check(f"{label}: moc_gate の判定が同じ (pass {ga['pass']}、理由 {len(ga['reasons'])} 件)", not close_obj(ga, gb, TOL_RES))
     return a[1]
+
+
+class RefDiag(MocFillDiag):
+    """集計の参照 (2026-10-15 の高速化 (plan §4.6 (a)) の前の `MocFillDiag.add` の写し)。高速版の出力と完全一致を見る。"""
+
+    def add(self, level: int, Ax, Ar, Bx, Br, xP, rP, st: dict, below):  # noqa: C901
+        status = np.array(st["status"], dtype=np.int8)
+        status[(status == PAIR_CONVERGED) & below] = PAIR_BELOW_AXIS
+        status[(status == PAIR_DONE) & below] = PAIR_BELOW_AXIS
+        n_it = st["n_iter"]
+        c = self.counts
+        c["input"] += int(status.size)
+        for key, code in (("missing", PAIR_MISSING), ("geom_parallel", PAIR_GEOM),
+                          ("geom_below_axis", PAIR_BELOW_AXIS), ("iter_nonfinite", PAIR_NONFINITE),
+                          ("iter_maxiter", PAIR_MAXITER), ("converged", PAIR_CONVERGED),
+                          ("done_fixed", PAIR_DONE)):
+            c[key] += int(np.sum(status == code))
+        self.n_levels = max(self.n_levels, int(level))
+        done = (status == PAIR_CONVERGED) | (status == PAIR_DONE)
+        if np.any(done):
+            v, cnt = np.unique(n_it[done], return_counts=True)
+            for a, b in zip(v.tolist(), cnt.tolist()):
+                self.iter_hist[int(a)] = self.iter_hist.get(int(a), 0) + int(b)
+        for key, arr in (("geom_max", st["resid_geom"]), ("comp_max", st["resid_comp"])):
+            fa = np.where(np.isfinite(arr), arr, -1.0)
+            if fa.size and fa.max() > self.resid[key]:
+                j = int(np.argmax(fa))
+                self.resid[key] = float(fa[j])
+                self.resid["at_" + key.split("_")[0]] = [int(level), j, float(xP[j]), float(rP[j])]
+        b = st["branch"]
+        valid = status != PAIR_MISSING
+        for key in ("axis_analytic", "axis_borrow", "axis_zero"):
+            self.branch[key] += int(np.sum(np.where(valid, b[key], 0)))
+        for key, (xp, rp, ro) in (("frac_A", (Ax, Ar, Br)), ("frac_B", (Bx, Br, Ar)),
+                                  ("frac_PA", (xP, np.maximum(rP, 0.0), Ar)),
+                                  ("frac_PB", (xP, np.maximum(rP, 0.0), Br))):
+            m = b[key] & valid
+            nm = int(np.sum(m))
+            self.branch[key] += nm
+            if nm:
+                idx = np.flatnonzero(m)
+                self.frac_rng = [min(self.frac_rng[0], float(xp[idx].min())), max(self.frac_rng[1], float(xp[idx].max())),
+                                 min(self.frac_rng[2], float(rp[idx].min())), max(self.frac_rng[3], float(rp[idx].max()))]
+                for j in idx[: max(self.CAP - len(self.frac_pos), 0)]:
+                    self.frac_pos.append([int(level), int(j), key, float(xp[j]), float(rp[j]), float(ro[j])])
+        self.branch["P_on_axis"] += int(np.sum(b["P_on_axis"] & ((status == PAIR_CONVERGED) | (status == PAIR_DONE))))
+        for code, kind in ((PAIR_GEOM, "parallel"), (PAIR_BELOW_AXIS, "below_axis")):
+            for j in np.flatnonzero(status == code):
+                self.geom.append((int(level), int(j), kind, float(Ax[j]), float(Ar[j]), float(Bx[j]), float(Br[j])))
+        for code, kind in ((PAIR_NONFINITE, "nonfinite"), (PAIR_MAXITER, "maxiter")):
+            for j in np.flatnonzero(status == code)[: max(self.CAP - len(self.fail), 0)]:
+                self.fail.append([int(level), int(j), kind, int(n_it[j]), float(Ax[j]), float(Ar[j]),
+                                  float(Bx[j]), float(Br[j])])
+
+
+
+class TeeDiag(MocFillDiag):
+    """高速版の `add` と同じ入力を参照 (`RefDiag`) にも渡す。"""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.ref = RefDiag(*a, **k)
+
+    def add(self, level, Ax, Ar, Bx, Br, xP, rP, st, below):
+        cp = lambda v: np.array(v, copy=True)  # noqa: E731
+        st2 = {k: ({kk: cp(vv) for kk, vv in v.items()} if isinstance(v, dict) else cp(v)) for k, v in st.items()}
+        self.ref.add(level, cp(Ax), cp(Ar), cp(Bx), cp(Br), cp(xP), cp(rP), st2, cp(below))
+        super().add(level, Ax, Ar, Bx, Br, xP, rP, st, below)
+
+
+class TeeMOC(InverseMOC):
+    def _new_diag(self):
+        self._tee = TeeDiag(self.axis_limit, self.corrector, self.n_corr, self.tol, self.max_corr)
+        return self._tee
 
 
 # --- 1. backend の選び方 ----------------------------------------------------------------------------------------------
@@ -382,6 +468,98 @@ for be in ("numpy", "numba"):
 backend(None)
 check(f"θ_r の欠如: 両方とも同じ文の ValueError ({msgs['numba']})", msgs["numpy"] is not None and msgs["numpy"] == msgs["numba"])
 
+# --- 4b. 集計の高速版 (plan §4.6 (a)) ----------------------------------------------------------------------------------------
+print("== 4b. 集計 (MocFillDiag.add) の高速版が以前の書き方と完全一致")
+
+
+def tee_check(label, init, al, co, thr=None, **kw):
+    for be in ("numpy", "numba"):
+        backend(be)
+        inv = TeeMOC(gamma=G, axis_limit=al, corrector=co, **kw)
+        inv.fill_levels(init, axis_thr=thr if al == "analytic" else None)
+        dd = same_obj(inv._tee.ref.summary(), inv.last_diag)
+        check(f"{label} {al}+{co} ({be}): 集計が以前の書き方と完全一致 (辞書の順・型まで)" + (f" ({dd[:3]})" if dd else ""), not dd)
+    backend(None)
+
+
+init = RAD.build_init(300, 41)
+thr, _ = axis_theta_r_init(init, 300, lambda x: RAD.src_M(x, 0.0), G, target_dM=RAD.src_dMdx_axis, M_line_axis=RAD.src_M(RAD.X1, 0.0))
+for al, co in MODES:
+    tee_check("放射源流 n_ax 300", init, al, co, thr)
+for lab, (init_a, thr_a, _need) in abn.items():
+    for al, co in MODES:
+        if al == "analytic" and thr_a is None:
+            continue
+        tee_check(lab, init_a, al, co, thr_a)
+tee_check("放射源流 max_corr 1", RAD.build_init(60, 13), "legacy", "converge", max_corr=1)
+cap0, frac0 = MocFillDiag.CAP, MK.AXIS_LIMIT_FRAC
+MocFillDiag.CAP, MK.AXIS_LIMIT_FRAC = 1, 0.4          # 位置の記録の上限 (先頭 CAP 件) で切る経路と frac の分岐
+try:
+    tee_check("CAP 1・AXIS_LIMIT_FRAC 0.4", RAD.build_init(60, 13), "legacy", "converge", max_corr=1)
+    tee_check("CAP 1・AXIS_LIMIT_FRAC 0.4 (軸より下)", abn["軸より下 (軸の点が上流から下流の順)"][0], "legacy", "fixed2")
+finally:
+    MocFillDiag.CAP, MK.AXIS_LIMIT_FRAC = cap0, frac0
+
+# --- 4c. 網の検査の高速版 (plan §4.6 (2)) -----------------------------------------------------------------------------------
+print("== 4c. 網の検査 (characteristic_topology_diagnostics) が高速化の前 (git 57f73940) と一致")
+import importlib.util  # noqa: E402
+REF_COMMIT = "57f73940"                               # §4.6 の前 (簡素化した JIT の commit)。参照の版 (変えないこと)
+_src = subprocess.run(["git", "-C", str(ROOT), "show", f"{REF_COMMIT}:design/forge_design/geometry/moc_diagnostics.py"],
+                      capture_output=True, text=True)
+if _src.returncode != 0:
+    SKIPPED.append(f"4c 網の検査の参照 (git show {REF_COMMIT} に失敗: {_src.stderr[:100]!r})")
+else:
+    with tempfile.TemporaryDirectory() as _td:
+        _f = Path(_td) / "moc_diagnostics_ref.py"
+        _f.write_text(_src.stdout)
+        _spec = importlib.util.spec_from_file_location("forge_design.geometry._moc_diagnostics_ref", _f)
+        MDREF = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(MDREF)
+    from forge_design.geometry import moc_diagnostics as MD  # noqa: E402
+    rng = np.random.default_rng(3)
+    for n_ax in (60, 300):
+        lev = InverseMOC(axis_limit="legacy", corrector="converge").fill_levels(RAD.build_init(n_ax, 13))
+        lev_f = lev.copy()                            # 向きの反転を入れる
+        lev_f[5:9, 10:14, :2] = lev_f[5:9, 10:14, :2][:, ::-1]
+        lev_p = lev.copy()                            # 点の堆積を入れる (段 k の点 i+4..i+6 を点 i の近くへ)
+        for k in rng.choice(np.arange(2, n_ax // 2), 12, replace=False):
+            fin = np.flatnonzero(np.isfinite(lev_p[k, :, 0]))
+            for i in rng.choice(fin[5:-10], 6, replace=False):
+                sp = np.hypot(*(lev_p[k, i + 1, :2] - lev_p[k, i, :2]))
+                for o in (4, 5, 6):
+                    lev_p[k, i + o, :2] = lev_p[k, i, :2] + rng.uniform(-0.3, 0.3, 2) * sp
+        wall = np.column_stack([np.linspace(0.0, 6.0, 50), np.full(50, 1.0)])
+        for lab, L in (("そのまま", lev), ("反転入り", lev_f), ("堆積入り", lev_p)):
+            for kw in ({}, {"seam_x_max": 2.0, "seam_i_pad": 5, "seam_k_max": 10, "wall": wall}):
+                a = MDREF.characteristic_topology_diagnostics(L, n_ax, **kw)
+                b = MD.characteristic_topology_diagnostics(L, n_ax, **kw)
+                la, lb = a.pop("pileup_locs_interior"), b.pop("pileup_locs_interior")
+                d = same_obj(a, b)
+                # 位置の一覧 (記録、先頭 20 件) は段・添字の順に変えた: 20 件以下なら集合が同じ、超えたら件数だけ
+                locs_ok = len(la) == len(lb) and (sorted(la) == sorted(lb) or a["pileup_pairs_interior"] > 20)
+                check(f"網の検査 n_ax {n_ax} {lab} {'seam・壁つき' if kw else '既定'}: 位置の一覧以外が完全一致 (反転 "
+                      f"{a['n_orientation_flip']}・堆積 {a['pileup_pairs']}/{a['pileup_pairs_interior']})、位置の一覧 {len(lb)} 件"
+                      + (f" ({d[:3]})" if d else ""), not d and locs_ok)
+
+# --- 4d. C⁺ 流束閉包の壁の numba の版 (plan §4.6 (3)) ----------------------------------------------------------------------------
+print("== 4d. cplus_flux_wall の numba の版が numpy の書き方と完全一致")
+from forge_design.geometry.moc_inverse import _flux_along, cplus_flux_wall  # noqa: E402
+_ft = MI._flux_table
+for lab, gas_, n_ax in (("CPG γ 1.4", G, 300), ("CPG γ 1.25", 1.25, 120), ("semi-perfect (case/71 の燃焼ガス)", gas71, 120)):
+    init = RAD.build_init(n_ax, 25) if gas_ is not gas71 else init_g
+    lev = InverseMOC(gamma=gas_, axis_limit="legacy", corrector="converge").fill_levels(init)
+    cum0 = np.zeros(len(init))
+    cum0[n_ax:] = _flux_along(init[n_ax:], gas_)
+    for f in (1.0, 0.8, 1.3):
+        md = float(cum0[-1]) * f
+        a = cplus_flux_wall(lev, cum0, md, gas_)
+        MI._flux_table = lambda g: None                 # numpy の書き方 (他のガスの経路) を通す
+        try:
+            b = cplus_flux_wall(lev, cum0, md, gas_)
+        finally:
+            MI._flux_table = _ft
+        check(f"cplus_flux_wall {lab} m*×{f}: numba の版 {a.shape} が numpy の書き方と完全一致", bits_equal(a, b))
+
 # --- 5・6. 実データ (--real) ----------------------------------------------------------------------------------------------
 if REAL:
     print("== 5. 実データ (V5)")
@@ -512,5 +690,6 @@ if REAL:
 else:
     print("== 5・6 (実データ・所要) は --real のときだけ (飛ばした)")
 
+print(f"info 合成の照合で修正子の回数が ±1 ずれた対: {N_ITER_DIFF[0]} 対 (収束の許容差の境目、記録)")
 print(f"\n{'FAIL ' + str(FAIL) if FAIL else 'ALL OK'}" + (f" (飛ばした: {SKIPPED})" if SKIPPED else ""))
 sys.exit(1 if FAIL else (2 if SKIPPED else 0))

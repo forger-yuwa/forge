@@ -106,6 +106,20 @@ def _nb_gas(g):
     raise ValueError(f"numba の版の網の充填はこのガスを扱わない ({type(g).__name__})。{MOC_KERNEL_ENV}=numpy で回す")
 
 
+def _flux_table(g):
+    """`cplus_flux_wall` の numba の版の質量流束の経路: float の γ は CPG の式、`GasSemiPerfect` は M・流束の表、他は None。"""
+    if isinstance(g, (bool, np.bool_)):
+        return None
+    if isinstance(g, (int, float, np.integer, np.floating)):
+        from .moc_fill_nb import GAS_CPG
+        return GAS_CPG, float(g), np.zeros(1), np.zeros(1)
+    from ..gas.semiperfect import GasSemiPerfect
+    if type(g) is GasSemiPerfect:
+        from .moc_fill_nb import GAS_TABLE
+        return GAS_TABLE, 0.0, np.ascontiguousarray(g._M, dtype=float), np.ascontiguousarray(g._flux, dtype=float)
+    return None
+
+
 def field_interpolator(pts):
     r"""全計算点の Delaunay を **1 回だけ**作り、$(\theta, \nu)$ をまとめて返す補間器。
 
@@ -156,23 +170,28 @@ class MocFillDiag:
         self.n_levels = 0
 
     def add(self, level: int, Ax, Ar, Bx, Br, xP, rP, st: dict, below):
+        # 段ごとに呼ぶので numpy の呼び出しの数を抑える (分類の数は bincount 1 回、該当の無い分類は飛ばす;
+        # 出力は以前の書き方と同じ、plan tooling-nozzle-mknot-fast §4.6)
         status = np.array(st["status"], dtype=np.int8)
-        status[(status == PAIR_CONVERGED) & below] = PAIR_BELOW_AXIS
-        status[(status == PAIR_DONE) & below] = PAIR_BELOW_AXIS
+        done = (status == PAIR_CONVERGED) | (status == PAIR_DONE)
+        mb = done & below
+        if mb.any():
+            status[mb] = PAIR_BELOW_AXIS
+            done &= ~mb
         n_it = st["n_iter"]
+        nc = np.bincount(status.astype(np.intp), minlength=7)
         c = self.counts
         c["input"] += int(status.size)
         for key, code in (("missing", PAIR_MISSING), ("geom_parallel", PAIR_GEOM),
                           ("geom_below_axis", PAIR_BELOW_AXIS), ("iter_nonfinite", PAIR_NONFINITE),
                           ("iter_maxiter", PAIR_MAXITER), ("converged", PAIR_CONVERGED),
                           ("done_fixed", PAIR_DONE)):
-            c[key] += int(np.sum(status == code))
+            c[key] += int(nc[code])
         self.n_levels = max(self.n_levels, int(level))
-        done = (status == PAIR_CONVERGED) | (status == PAIR_DONE)
-        if np.any(done):
-            v, cnt = np.unique(n_it[done], return_counts=True)
-            for a, b in zip(v.tolist(), cnt.tolist()):
-                self.iter_hist[int(a)] = self.iter_hist.get(int(a), 0) + int(b)
+        if nc[PAIR_CONVERGED] + nc[PAIR_DONE]:
+            h = np.bincount(np.asarray(n_it[done], dtype=np.intp))
+            for a in np.flatnonzero(h).tolist():
+                self.iter_hist[a] = self.iter_hist.get(a, 0) + int(h[a])
         for key, arr in (("geom_max", st["resid_geom"]), ("comp_max", st["resid_comp"])):
             fa = np.where(np.isfinite(arr), arr, -1.0)
             if fa.size and fa.max() > self.resid[key]:
@@ -180,29 +199,34 @@ class MocFillDiag:
                 self.resid[key] = float(fa[j])
                 self.resid["at_" + key.split("_")[0]] = [int(level), j, float(xP[j]), float(rP[j])]
         b = st["branch"]
-        valid = status != PAIR_MISSING
+        n_miss = int(nc[PAIR_MISSING])
+        valid = status != PAIR_MISSING if n_miss else None
         for key in ("axis_analytic", "axis_borrow", "axis_zero"):
-            self.branch[key] += int(np.sum(np.where(valid, b[key], 0)))
+            self.branch[key] += int(np.sum(b[key] if valid is None else np.where(valid, b[key], 0)))
         for key, (xp, rp, ro) in (("frac_A", (Ax, Ar, Br)), ("frac_B", (Bx, Br, Ar)),
-                                  ("frac_PA", (xP, np.maximum(rP, 0.0), Ar)),
-                                  ("frac_PB", (xP, np.maximum(rP, 0.0), Br))):
-            m = b[key] & valid
-            nm = int(np.sum(m))
+                                  ("frac_PA", (xP, None, Ar)), ("frac_PB", (xP, None, Br))):
+            m = b[key] if valid is None else (b[key] & valid)
+            nm = int(np.count_nonzero(m))
+            if not nm:
+                continue
             self.branch[key] += nm
-            if nm:
-                idx = np.flatnonzero(m)
-                self.frac_rng = [min(self.frac_rng[0], float(xp[idx].min())), max(self.frac_rng[1], float(xp[idx].max())),
-                                 min(self.frac_rng[2], float(rp[idx].min())), max(self.frac_rng[3], float(rp[idx].max()))]
-                for j in idx[: max(self.CAP - len(self.frac_pos), 0)]:
-                    self.frac_pos.append([int(level), int(j), key, float(xp[j]), float(rp[j]), float(ro[j])])
-        self.branch["P_on_axis"] += int(np.sum(b["P_on_axis"] & ((status == PAIR_CONVERGED) | (status == PAIR_DONE))))
+            idx = np.flatnonzero(m)
+            rpi = np.maximum(rP[idx], 0.0) if rp is None else rp[idx]
+            xpi = xp[idx]
+            self.frac_rng = [min(self.frac_rng[0], float(xpi.min())), max(self.frac_rng[1], float(xpi.max())),
+                             min(self.frac_rng[2], float(rpi.min())), max(self.frac_rng[3], float(rpi.max()))]
+            for q, j in enumerate(idx[: max(self.CAP - len(self.frac_pos), 0)]):
+                self.frac_pos.append([int(level), int(j), key, float(xpi[q]), float(rpi[q]), float(ro[j])])
+        self.branch["P_on_axis"] += int(np.count_nonzero(b["P_on_axis"] & done))
         for code, kind in ((PAIR_GEOM, "parallel"), (PAIR_BELOW_AXIS, "below_axis")):
-            for j in np.flatnonzero(status == code):
-                self.geom.append((int(level), int(j), kind, float(Ax[j]), float(Ar[j]), float(Bx[j]), float(Br[j])))
+            if nc[code]:
+                for j in np.flatnonzero(status == code):
+                    self.geom.append((int(level), int(j), kind, float(Ax[j]), float(Ar[j]), float(Bx[j]), float(Br[j])))
         for code, kind in ((PAIR_NONFINITE, "nonfinite"), (PAIR_MAXITER, "maxiter")):
-            for j in np.flatnonzero(status == code)[: max(self.CAP - len(self.fail), 0)]:
-                self.fail.append([int(level), int(j), kind, int(n_it[j]), float(Ax[j]), float(Ar[j]),
-                                  float(Bx[j]), float(Br[j])])
+            if nc[code]:
+                for j in np.flatnonzero(status == code)[: max(self.CAP - len(self.fail), 0)]:
+                    self.fail.append([int(level), int(j), kind, int(n_it[j]), float(Ax[j]), float(Ar[j]),
+                                      float(Bx[j]), float(Br[j])])
 
     def summary(self) -> dict:
         h = self.iter_hist
@@ -586,7 +610,16 @@ def cplus_flux_wall(levels: np.ndarray, init_cum: np.ndarray, mdot_star: float,
 
     `init_cum[m]`: 起点 $L_0[m]$ までに**すでに軸から流れている**流束。初期値線上の
     点なら軸からその点までの累積、軸上の点なら 0。
-    戻り: (n,4) [x, r, theta, M] を x 昇順で。"""
+    戻り: (n,4) [x, r, theta, M] を x 昇順で。
+
+    float の γ と `GasSemiPerfect` では線ごとのループを numba の版 (`moc_fill_nb.cplus_flux_wall_nb`、同じ式・同じ累積の順序で
+    出力は完全一致; 2026-10-15 plan tooling-nozzle-mknot-fast §4.6 (3)) で回す。他のガスは下の numpy の書き方。"""
+    kind = _flux_table(gamma)
+    if kind is not None:
+        nb = _load_nb()
+        w = nb.cplus_flux_wall_nb(*(levels[..., c] for c in (0, 1, 2, 4)),
+                                  np.ascontiguousarray(init_cum, dtype=float), float(mdot_star), *kind)
+        return w[np.argsort(w[:, 0])] if len(w) else np.asarray([], dtype=float)
     n = levels.shape[1]
     out = []
     for m in range(n - 1, -1, -1):
