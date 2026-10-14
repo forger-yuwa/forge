@@ -30,7 +30,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 | 壁温 (分布) | `wall: {thermal: isothermal, Tw_profile: {s: [...], Tw_K: [...]}}` (s: 入口直管 −2→−1・縮流部 −1→0・拡大部 0→1) か `{x_m: [...], Tw_K: [...]}` (実寸、原点は設計スロート)、または `Tw_profile_csv: <カードからの相対パス>` | **長さを振るなら s** (分布が長さに追従)。表は全長を覆うこと (足りなければ止まる)。s の表は s = 0 を点として含み、直管長 > 0 (直管なしは x_m)。NS は `wall_profile_3.csv` (`wallProfile: 1`)、積分法は同じ表を実効の r_t で読む。run の `wall_temperature_profile.json` と CSV が正本 (書き換えると段の起動・成果物で止まる)。Fluent は `fluent/wall_temperature.prof` (壁面中心の値; Fluent での読み込みは未確認) |
 | ガス | `gas: {preset: air}` か `gas: {species: {...}}` | 空気の M5 以上は出口の N₂ 液化を生成器が警告する |
 | 寸法の許容差 | `tolerances: {length_m, diameter_m}` | 既定値は仮。ユーザの実用公差を聞いて書く (出荷ゲートの基準) |
-| knot のマッハ数 M_knot | 書かない (既定 = 自動) か `overrides: {geometry.M_knot: auto}`。固定するなら `overrides: {geometry.M_knot: 2.1}` | **既定は自動** (2026-10-14): 長さを固定して最大壁角が最小の M_knot を、網の検査・余裕 ≥ 1°・成立の境目から 0.05 以上の範囲で選ぶ (plan `tooling-nozzle-mknot-auto`)。カードの生成に数十分かかる (M5 で 45 分以上) — **AWS で回す**。記録は YAML の `_card.M_knot_rule` (要約) と card_log |
+| knot のマッハ数 M_knot | 書かない (既定 = 自動) か `overrides: {geometry.M_knot: auto}`。固定するなら `overrides: {geometry.M_knot: 2.1}` | **既定は自動** (規則 `coarse_min_theta_v2`、2026-10-15、plan `tooling-nozzle-mknot-fast`): 粗い網 (600) で M_K = 0.05 刻みを掃き、両隣も成立する区間の谷を生産の網 (2400) で確かめて、最大壁角が最小の谷を選ぶ (同点は成立の境目から遠い方)。**M_knot の部分の所要は AWS (4 並列) で 1〜2 分** (case/70 で 81 s; 旧の規則は 45〜98 分)。手元は `FORGE_MKNOT_WORKERS=1` で数分。design の venv に numba (0.68.0、`--no-deps`) が要る。**パラスタの間は固定する**: 代表の 1 枚を自動で生成して `_card.M_knot_rule` の値を読み、振る間は `overrides: {geometry.M_knot: <その値>}` で固定、最後の候補だけ自動に戻して選び直す (長さ・R・M_d を大きく変えたら代表を取り直す)。記録は YAML の `_card.M_knot_rule` (要約) と card_log |
 
 流れ (正本は手順書 §1・§2。ここでは新しい入口と出口だけ):
 
