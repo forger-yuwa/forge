@@ -382,8 +382,24 @@ def _call(args):
     return r
 
 
+_WORKER_BLAS_LIMIT = None
+
+
+def _worker_init():
+    """並列の評価のプロセスで BLAS・OpenMP のスレッドを 1 本にする。親で numpy を読み込んだ後に fork するので環境変数では効かない。
+    AWS A (物理 2 コア・4 vCPU) で 4 並列のとき、各プロセスが OpenBLAS のスレッドを 4 本ずつ持つと取り合いで遅くなった
+    (case/70 のカードの M_knot: 569 s → スレッド 1 本で 191 s、選ぶ値は同じ; plan tooling-nozzle-mknot-fast §6.2)。"""
+    global _WORKER_BLAS_LIMIT
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:          # 無ければ従来どおり (遅くなるだけで結果は変わらない)
+        return
+    _WORKER_BLAS_LIMIT = threadpool_limits(limits=1)
+
+
 class Evaluator:
-    """M_K → 行 の評価の窓口 (同じ M_K は 1 回だけ評価する)。workers > 1 なら ProcessPoolExecutor で並列。"""
+    """M_K → 行 の評価の窓口 (同じ M_K は 1 回だけ評価する)。workers > 1 なら ProcessPoolExecutor で並列
+    (各プロセスの BLAS は 1 スレッド: `_worker_init`)。"""
 
     def __init__(self, fn, workers: int = 1, log=None):
         self.fn, self.workers, self.log = fn, int(max(1, workers)), log
@@ -393,7 +409,7 @@ class Evaluator:
 
     def __enter__(self):
         if self.workers > 1:
-            self._pool = ProcessPoolExecutor(max_workers=self.workers)
+            self._pool = ProcessPoolExecutor(max_workers=self.workers, initializer=_worker_init)
         return self
 
     def __exit__(self, *exc):

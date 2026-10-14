@@ -3,7 +3,7 @@
 ## メタ
 
 - **area**: `tooling` (`design/forge_design/evaluate/mknot_select.py`・`design/forge_design/intake/wt_card.py`・逆 MOC)
-- **status**: `draft` (2026-10-15 起票。ユーザ決定「a」= 選び方の単純化で §4・§6 を書き直し、plan 段レビューへ)
+- **status**: `in_progress` (2026-10-15。実装・V1・V2 済み、V3 (b) の寸法ゲートがユーザ判断待ち)
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) 「軸 Mach 則 (knot)」の $M_K$ の選び方
   - skill `nozzle-design`・`design-intake` (カードの生成の所要)
@@ -119,7 +119,7 @@
 | 2b | ~~codex plan 段レビュー (書き直し後)~~ | 判断: 2026-10-15 GO-with-changes (C0/M4/m2、`notes/reviews/2026-10-15-tooling-nozzle-mknot-fast-plan-v2.md`) — 全件採用、§4.1 の手順を区間・谷ごとの確認とずらし・一度だけの同点・実効の入力での終了判定・計時に書き直し、§6 V1・V2 に反例を足した | F |
 | 3a | `methods/design/overview.md` の選び方の節 | 規則 `coarse_min_theta_v2` (§4.1) の説明に置き換え、旧の規則は「旧版」として短く残す。実装の前に。**実装 (2026-10-15、implementer)**: 「$M_K$ の選び方」を §4.1 の 1〜6・r_t の固定点と終了の条件・自動調整での破棄・並列・捕捉 2・計時・受け入れた限界の説明に置き換え、旧版 `min_theta_max_v1` は 1 段落に。`methods/index.md` はファイルの増減が無いので変更なし (design/overview.md の行のまま) | O |
 | 3 | 実装 | `mknot_select.py` に規則 `coarse_min_theta_v2` (§4.1)、`evaluate_mknot` の捕捉を 2 つに・並列 (§4.2)、`wt_card.py` の M_knot の流れ (最初と最終の r_t、実効の入力での終了、自動調整での破棄、計時の改修)、記録、V1・V2 の試験。**実装 (2026-10-15、implementer)**: `mknot_select.py` に `select_coarse_min_theta` (部品 `v2_grid`・`v2_coarse_analysis`・`v2_valleys`・`v2_confirm`・`v2_pick`)、`evaluate_mknot` の捕捉を最後の 2 つ (`_CAPTURE_KEEP`)・`L_total_tol` の上書き・行に長さ合わせの記録 (L_c・符号つきの残差・停止の理由・実効の入力)。`wt_card.py` の M_knot の流れ (最初の r_t で選ぶ → 固定点 → 出力と同じ実効の入力で選び直し、一致で終了・違えば固定点のやり直し最大 2 回、自動調整で評価を捨てる、`_clock` で選択と再固定点を計時し `card_elapsed_s` と並べる)、並列 `mknot_workers` (1 評価のピーク 600: 0.15 GB・2400: 1.04 GB、case/70 (a) を手元で測定、case/71 は未測定 → #3b で測り直す)、記録 `_mknot_record_v2` (照合 `mknot_card_log_check` は規則の名前で読み分け、旧の記録も照合できる)。試験 `design/tests/run_mknot_v2_tests.py` (V1 (i)〜(vi)、`--real` で (vii)) 34 + 8 ok・`run_mknot_v2_card_tests.py` (V2) 42 ok。(vii) は基準 4e0b9f9e の evaluate_mknot とも基準の欄が全部一致。既存の `run_mknot_select_tests.py` 97 ok・`run_wt_card_tests.py`・`run_wt_card_profile_tests.py`・`run_mesh_size_guard_tests.py`・`run_tests.py` 通過 (旧の規則の合成の流れの試験は `run_wt_card_tests.py` から外した)。`run_deltastar_root_zone_tests.py --card` はこの作業ツリーに case/70 の run が無く該当部分を飛ばした | O |
-| 3b | V3・V4 (AWS A) | 新旧の A/B と計時 | O |
+| 3b | V3・V4 (AWS A) | 新旧の A/B と計時。**結果 (2026-10-15、§6.2)**: (a) 全部 ✓・191 s (BLAS 1 スレッド)、(b) ①②④ ✓・③ は格子の節点数の上限のユーザ判断待ち | O |
 | 4 | 逆 MOC の内部点の計算の JIT 化 (後回し) | 別の受入 (同じ入力で壁の差の上限) を登録してから | F |
 | 6 | L_c の使い回し (候補、後回し) | `from_length` の L_c が M_K に依らないこと (§3) を使い、(問題、N) ごとに L_c を 1 回解いて使い回せば `inverse_design` の呼び出しが 1/3〜1/4 になり、メモリも減る見込み。数値は 1e−11 r_t の桁で変わりうるので、#4 と同じく別の受入を登録してから | F |
 | 5 | skill の手順 | `nozzle-design`・`design-intake` にパラスタの間は M_knot を固定する手順と所要の目安 | O |
@@ -145,6 +145,17 @@
 - **V4 所要 (完了条件)**: AWS A で、M_knot に起因する再固定点・再評価を含めて計時し、(a)・(b) とも M_knot の部分が 600 s 以下。`elapsed_s` を無条件に信用せず、内訳とカード全体の壁時計の時間と照合する。未達なら plan は未完了。
 - 判定不能 (例外・未収束で比べられない) は合格にしない。
 
+### 6.2 V3・V4 の結果 (2026-10-15、AWS A、commit 66be034c (+ BLAS の修正)、作業 `~/mknot_v3`・`~/mknot_v3_blas1`)
+
+- **(a) M5 c2b** (カード = 旧 V4 の card_log の `card` をそのまま書き出したもの): 新の出力 2.05 (最終の組 r_t 0.024974004 m、θ_max 15.16503°、両隣 2.00・2.10 も 2400 で成立)。
+  旧の出力 2.069270614 (r_t 0.024973968 m、θ_max 15.164286°)。① 成立 ✓、② 差 +0.00074° ≤ 0.01° ✓、③ 寸法ゲート PASS ✓、④ 要求カードは同じ ✓。
+  併記: 旧の評価表の境目 (下 1.972396、2N) からの距離 0.078。最終の組では候補の区間が 2 つ (谷 2.05・4.10)、谷 4.10 も 2400 で確かめて比べた。
+- **(b) M5.5 case/71**: 最初の組 (r_t 0.1 m) で新 2.80 (θ_max 12.07776°)、旧 2.826102303 を同じ組・2400 で評価し直して 12.07636° → ② 差 +0.00140° ≤ 0.01° ✓。
+  最終の組 (r_t 0.09990877 m) で新 2.80 (12.05662°、両隣成立) ① ✓。参考: 旧の最終の組の 2.826102 の 2400 の行 12.05515° (差 +0.00147°)。
+  **③ 寸法ゲートは未判定**: カードの生成が M_knot の後の NS の格子の見積もりで止まった (ni 6000 × nj 97 = 58.2 万 > 上限 30 万、AR ≤ 4850 に要る ni 10,177)。節点数の上限はユーザの了承が要る (2026-10-15 に問い合わせ中)。④ ✓。
+- **V4 (所要)**: (a) M_knot 569 s (選択 327 + 241 s、再固定点 0、カード全体 634 s) ≤ 600 s ✓ — ただし 4 並列の各プロセスが OpenBLAS のスレッドを 4 本ずつ持ち、物理 2 コアで取り合っていた (負荷 11)。
+  並列の各プロセスの BLAS を 1 スレッドに (`mknot_select._worker_init`、threadpoolctl) すると **191 s** (粗い掃引 74 点 305 s → 55 s、選ぶ値は同じ 2.05)。(b) M_knot 144 s (BLAS の修正の前)。旧の規則は (a) 5,339 s、(b) 約 98 分で失敗。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -166,6 +177,7 @@
 
 ## 9. 変更ログ
 
+- `2026-10-15` — V3・V4 の結果を §6.2 に。並列の評価のプロセスの BLAS を 1 スレッドに (569 s → 191 s)。(b) の寸法ゲートは格子の節点数の上限のユーザ判断待ち。
 - `2026-10-15` — 旧の規則で case/71 のカードの生成が最終の組の 4800 の長さ合わせで止まった (§3)。V3 (b) の旧の腕を最初の r_t の組に補足 (新の結果を見る前)。
 - `2026-10-15` — plan 段レビュー v2 (GO-with-changes C0/M4/m2) を全件採用: §4.1 の手順 (候補の区間・谷ごとの確認とずらし・一度だけの同点・実効の入力での終了・計時)、§6 V1・V2 に反例。
 - `2026-10-15` — **ユーザ決定「a」**: 選び方を単純化する (規則 `coarse_min_theta_v2`、§4.0・§4.1)。§1・§2・§4・§6 を書き直し。前の plan 段レビュー (GO-with-changes) は書き直す前の案に対するもので、M1 (谷の取り違え) は §4.1 の 3、M3 (V4 を完了条件に) は §6 V4、m4 は §4.2、m5 は V1 (vi) に反映、M2 (最初と最終のゲートの分離) はゲートを外したので対象外。
