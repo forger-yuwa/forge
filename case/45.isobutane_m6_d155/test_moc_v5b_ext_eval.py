@@ -563,11 +563,18 @@ check("ISEN が良い向きに大差 → IC 依存あり (両側) で保留", ou
 
 
 # === 延長の準備 (prep-child・restart_field・verify-child) を合成の h5 で ===============================================
-def make_h5(path: Path, vals: dict, coord):
+def make_h5(path: Path, vals: dict, coord, res=False):
+    """res=False は node の変換済みの格子の代わり (/MESH/CONNE は CV ごと、primal の接続は /VIZMESH/CONNE)、res=True は forge の
+    res と同じく /MESH/CONNE に primal の接続だけ (restart_field.py は res をその run の格子に座標・接続で結び付ける: plan
+    tooling-generator-defaults-and-launch-gate §5.1 #20)。"""
     import h5py
     with h5py.File(path, "w") as f:
         f.create_dataset("MESH/COORD", data=coord)
-        f.create_dataset("VIZMESH/CONNE", data=np.arange(12, dtype=np.int32))
+        if res:
+            f.create_dataset("MESH/CONNE", data=np.arange(12, dtype=np.int32))
+        else:
+            f.create_dataset("MESH/CONNE", data=np.array([x for i in range(len(coord)) for x in (1, i)], dtype=np.int32))
+            f.create_dataset("VIZMESH/CONNE", data=np.arange(12, dtype=np.int32))
         for k, v in vals.items():
             f.create_dataset(f"VALUE/{k}", data=v)
 
@@ -580,9 +587,9 @@ def make_parent_h5(d: Path, n=40, seed=0, drop_in_nozzle=()):
     res = {k: rng.random(n).astype(np.float32) for k in names if k != "wall_dist"}
     res["h0"] = rng.random(n).astype(np.float32)
     make_h5(d / "nozzle.h5", noz, coord)
-    make_h5(d / "res_18000.h5", res, coord)
+    make_h5(d / "res_18000.h5", res, coord, res=True)
     for s in (17000,):
-        make_h5(d / f"res_{s}.h5", res, coord)
+        make_h5(d / f"res_{s}.h5", res, coord, res=True)
 
 
 def mock_parent_full(root: Path, run: str, k: int, drop_in_nozzle=()):

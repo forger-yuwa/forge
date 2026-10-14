@@ -385,6 +385,12 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
   **`interp_field.py` は同一メッシュに使わない** — cross-mesh 用で原始量から保存量を組み直すため、
   `roUx = ρ·Ux` の丸めで元の保存量に戻らない (2026-09-23, case/56 で `roUy` が最大 1.6 % ずれた)。
   `case/*/restart_field.py` の古い実装も原始量から組み直すので使わないこと。
+  - **同一メッシュの検査** (2026-10-15): 書き込みの前に、SRC と DST の格子が座標 (格納の型のまま)・接続・CV の順・
+    境界の所属・幾何で同一であることを確かめ、確かめられなければ何も書かずに停止する。res は格子を持たないので、
+    **res の隣の `solverConfig.yaml` の `mesh.meshFileName`** をその場の格子とし、res の座標 (res の型で)・接続と照合する。
+    res だけを別の場所へ写したときは **`--src-mesh <その run の格子>`** を付ける (無ければ停止)。
+    同じ `.msh` を変換し直した格子 (例: float32 → 倍精度の変換器) は座標の型・値が違うので別の格子として拒否される —
+    元の変換済み格子を使い続けるか、格子が違うものとして `interp_field.py` を使う。
 - 節点の並びが同じで壁だけ µm 動いたメッシュへの初期値は、skill `forge-aws-run` §3 の検査付き番号写像 (`case/45.isobutane_m6_d155/ic_index_map.py`) を使う。
 
 ## メッシュ品質チェック (計算前・必須)

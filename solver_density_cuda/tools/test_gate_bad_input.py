@@ -19,6 +19,9 @@
 
 `mesh_provenance.py check` (2026-10-15 新設、plan tooling-generator-defaults-and-launch-gate §5.1 #7) も記録の無い・壊れた・
 別メッシュの記録を合格にしないことをここで見る。
+
+`restart_field.py` の同一メッシュの検査 (2026-10-15、同 plan §5.1 #20): 座標を ~1e−8 変えた別の入力 (float32 では同じ)・
+接続だけ違う入力・接続の無い格子・格子を決められない res が、修正前は**通っていた** (終了 0)。
 """
 import csv
 import os
@@ -292,6 +295,73 @@ def main():
     chk("壊れた記録 -> 非ゼロ終了", rc != 0 and last == "VERDICT: FAIL", "rc=%d %s" % (rc, last))
     shutil.rmtree(da, ignore_errors=True)
     shutil.rmtree(db, ignore_errors=True)
+
+    # 同一メッシュの restart (restart_field.py、plan tooling-generator-defaults-and-launch-gate §5.1 #20)。
+    # 2026-10-15 まで、座標を float32 に丸めて比べ、接続を見ず、座標が無くても続行していた (codex diagnose の再現)。
+    # 別の格子を「同一メッシュ」にしない (詳しい負例は tests/unit/test_restart_field_mesh_identity.py)。
+    print("=== restart_field: 同一メッシュでない入力 ===")
+    rf_tool = os.path.join(HERE, "restart_field.py")
+    rroot = tempfile.mkdtemp()
+    xs = 0.1234567891 + np.linspace(0.0, 1.3, 5)
+    base = np.c_[np.repeat(xs, 3), np.tile(np.linspace(0.0, 0.7, 3), 5), np.zeros(15)]
+    quads = [[i * 3 + j, (i + 1) * 3 + j, (i + 1) * 3 + j + 1, i * 3 + j + 1] for i in range(4) for j in range(2)]
+
+    def rf_run(name, coord=base, conne=quads, drop=()):
+        d = os.path.join(rroot, name)
+        os.makedirs(d)
+        with open(os.path.join(d, "solverConfig.yaml"), "w") as fh:
+            fh.write('mesh: {meshFileName: "mesh.h5", valueFileName: "mesh.h5", discretization: "node"}\n'
+                     'physProp: {thermalMethod: 0}\n')
+        with h5py.File(os.path.join(d, "mesh.h5"), "w") as f:
+            f.create_dataset("MESH/COORD", data=np.asarray(coord, np.float64).ravel())
+            f.create_dataset("MESH/CONNE", data=np.array([x for n in range(15) for x in (1, n)], np.int32))
+            f.create_dataset("VIZMESH/CONNE", data=np.array([x for q in conne for x in [5] + q], np.int32))
+            f.create_dataset("BCONDS/1/iCells", data=np.array([0, 3, 6, 9, 12], np.int32))
+            f["BCONDS/1"].attrs["bcondKind"] = "wall"
+            for k in ("ro", "roUx", "roUy", "roUz", "roe"):
+                f.create_dataset("VALUE/" + k, data=np.ones(15, np.float32))
+            f.create_dataset("VALUE/wall_dist", data=np.asarray(coord)[:, 1])
+            for k in drop:
+                del f[k]
+        return d
+
+    def rf_res(d):
+        """forge の出力と同じ置き方の res (float32 の座標・primal の接続・/VALUE だけ)。"""
+        with h5py.File(os.path.join(d, "mesh.h5"), "r") as m, h5py.File(os.path.join(d, "res_10.h5"), "w") as f:
+            f.create_dataset("MESH/COORD", data=np.asarray(m["MESH/COORD"]).astype(np.float32))
+            f.create_dataset("MESH/CONNE", data=np.asarray(m["VIZMESH/CONNE"]))
+            for k in ("ro", "roUx", "roUy", "roUz", "roe"):
+                f.create_dataset("VALUE/" + k, data=np.full(15, 2.0, np.float32))
+        return os.path.join(d, "res_10.h5")
+
+    def rf_call(src, dst):
+        env = dict(os.environ, FORGE_BIN="/nonexistent/forge")
+        env.pop("FORGE_ALLOW_UNVERIFIED_SPECIES", None)
+        r = subprocess.run([sys.executable, rf_tool, src, dst], capture_output=True, text=True, env=env)
+        return r.returncode, (r.stdout + r.stderr).strip().splitlines()
+
+    ra = rf_run("a")
+    res_a = rf_res(ra)
+    pert = base * (1.0 + 1e-8)
+    pert = np.where(pert.astype(np.float32) == base.astype(np.float32), pert, base)   # float32 では元と同じ
+    q2 = [list(q) for q in quads]
+    q2[0] = q2[0][1:] + q2[0][:1]
+    for name, d in (("座標を ~1e-8 変えた別の入力 (float32 では同じ; codex の再現)", rf_run("pert", coord=pert)),
+                    ("接続だけ違う入力", rf_run("conne", conne=q2)),
+                    ("宛先の格子に /MESH/CONNE が無い", rf_run("noconne", drop=("MESH/CONNE",)))):
+        rc, lines = rf_call(res_a, os.path.join(d, "mesh.h5"))
+        chk("restart_field: %s -> 非ゼロ終了" % name, rc != 0 and any("REFUSED" in ln for ln in lines),
+            "rc=%d %s" % (rc, (lines or [""])[0][:90]))
+    lone = os.path.join(rroot, "lone")
+    os.makedirs(lone)
+    shutil.copy(res_a, lone)
+    rc, lines = rf_call(os.path.join(lone, "res_10.h5"), os.path.join(rf_run("copy_a"), "mesh.h5"))
+    chk("restart_field: 格子を決められない res (隣に config なし) -> 非ゼロ終了", rc != 0 and any("REFUSED" in ln for ln in lines),
+        "rc=%d %s" % (rc, (lines or [""])[0][:90]))
+    rc, lines = rf_call(res_a, os.path.join(rroot, "copy_a", "mesh.h5"))
+    chk("restart_field: 同じ格子の複製 -> 従来どおり合格", rc == 0 and lines[-1].startswith("VERDICT: OK"),
+        "rc=%d %s" % (rc, lines[-1][:60] if lines else ""))
+    shutil.rmtree(rroot, ignore_errors=True)
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

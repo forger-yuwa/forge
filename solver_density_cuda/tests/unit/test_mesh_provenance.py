@@ -397,11 +397,13 @@ def main():
             n = f['VALUE/ro'].shape[0]
             rng = np.random.default_rng(7)
             g['MESH/COORD'] = np.asarray(f['MESH/COORD'])
+            g['MESH/CONNE'] = np.asarray(f['VIZMESH/CONNE'])  # forge の node の出力は primal の接続 (output.cpp:154)
             for k in ('ro', 'roUx', 'roUy', 'roUz', 'roe'):
                 g['VALUE/' + k] = (np.asarray(f['VALUE/' + k]) + rng.random(n)).astype(np.float32)
             g['VALUE/wall_dist'] = np.asarray(f['VALUE/wall_dist']).astype(np.float32)
             g['VALUE/P'] = np.ones(n, np.float32)
-        r = subprocess.run([sys.executable, os.path.join(TOOLS, 'restart_field.py'), res_h5, mesh_h5],
+        # res は run の外に置いたので、その場の格子を --src-mesh で与える (restart_field.py の同一メッシュの検査、plan §5.1 #20)
+        r = subprocess.run([sys.executable, os.path.join(TOOLS, 'restart_field.py'), res_h5, mesh_h5, '--src-mesh', mesh_h5],
                            capture_output=True, text=True)
         check(r.returncode == 0 and 'VERDICT: OK' in r.stdout, f'restart_field.py rc={r.returncode} {r.stdout.strip().splitlines()[-1:]}')
         with h5py.File(mesh_h5, 'r') as f, h5py.File(res_h5, 'r') as g:

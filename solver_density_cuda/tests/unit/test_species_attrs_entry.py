@@ -79,6 +79,18 @@ def same_values(a, b):
     return a.keys() == b.keys() and all(np.array_equal(a[k], b[k]) for k in a)
 
 
+def add_mesh(h5, res=False):
+    """合成の h5 に格子の接続を足す (restart_field.py は座標・接続で同一メッシュを確かめる: plan
+    tooling-generator-defaults-and-launch-gate §5.1 #20)。res=False は変換済みの格子の代わり (境界の所属も持つ)、
+    res=True は forge の res と同じく /MESH/CONNE だけ。座標は write_h5 の /MESH/COORD のまま (全 run で同じ)。"""
+    with h5py.File(h5, "r+") as f:
+        n = f["MESH/COORD"].shape[0] // 3
+        f.create_dataset("MESH/CONNE", data=np.array([x for i in range(n) for x in (1, i)], dtype=np.int32))
+        if not res:
+            f.create_dataset("BCONDS/1/iCells", data=np.array([0], dtype=np.int32))
+            f["BCONDS/1"].attrs["bcondKind"] = "wall"
+
+
 ALLOW = {"FORGE_ALLOW_UNVERIFIED_SPECIES": "1"}
 
 
@@ -119,6 +131,10 @@ def main():
             db = yaml.safe_load(open(os.path.join(d, "species_db.yaml"))); db.pop("H2O")
             yaml.safe_dump(db, open(os.path.join(d, "species_db.yaml"), "w"), sort_keys=False)
         write_h5(os.path.join(d, h5), ro, Y0, T0)
+        add_mesh(os.path.join(d, h5), res=(h5 != "in.h5"))
+        if h5 != "in.h5":                       # res の run にもその場の格子 (meshFileName の in.h5) を置く
+            write_h5(os.path.join(d, "in.h5"), ro1, Y0, T0)
+            add_mesh(os.path.join(d, "in.h5"))
         return d
 
     try:
@@ -163,9 +179,10 @@ def main():
         # (a) 保存場だけコピー (記録なし) → 照合不能で停止
         lone = os.path.join(root, "lone"); os.makedirs(lone); shutil.copy(srcres, lone)
         d = run_dir("lone_dst")
-        rc, out = tool("restart_field.py", os.path.join(lone, "res_10.h5"), os.path.join(d, "in.h5"))
+        lone_mesh = ("--src-mesh", os.path.join(src, "in.h5"))   # 隣に config の無い res はその場の格子を明示する (#20)
+        rc, out = tool("restart_field.py", os.path.join(lone, "res_10.h5"), os.path.join(d, "in.h5"), *lone_mesh)
         check(rc != 0 and "UNVERIFIABLE" in out, f"(a) field copied without its record -> UNVERIFIABLE, stops (rc={rc})", out[-600:])
-        rc, out = tool("restart_field.py", os.path.join(lone, "res_10.h5"), os.path.join(d, "in.h5"), "--force-species")
+        rc, out = tool("restart_field.py", os.path.join(lone, "res_10.h5"), os.path.join(d, "in.h5"), *lone_mesh, "--force-species")
         check(rc == 0 and attrs(os.path.join(d, "in.h5")) == {}, f"(a) same with --force-species -> copies without attributes (rc={rc})")
 
         # (i) 未検証の SRC → 既定で停止 (DST 不変); 許可 (環境変数 / --force-species) で写し、DST の既存属性を消す
@@ -222,7 +239,7 @@ def main():
         # SRC の記録が隣に無い印付きの場 → 宛先の記録 (同じハッシュ) で通る
         lonem = os.path.join(root, "lone_marked"); os.makedirs(lonem); shutil.copy(smres, lonem)
         d = run_dir("marked_lone_dst")
-        rc, out = tool("restart_field.py", os.path.join(lonem, "res_10.h5"), os.path.join(d, "in.h5"))
+        rc, out = tool("restart_field.py", os.path.join(lonem, "res_10.h5"), os.path.join(d, "in.h5"), "--src-mesh", os.path.join(sm, "in.h5"))
         at = attrs(os.path.join(d, "in.h5"))
         rec, why = fs.find_record(os.path.join(d, "in.h5"))
         check(rc == 0 and at.get("species_hash") == r["hash"] and at.get("species_input_unverified") == 1 and rec is not None,
@@ -255,6 +272,7 @@ def main():
         s2 = os.path.join(root, "src_unvNone", "res_10.h5")
         nocfg = os.path.join(root, "nocfg"); os.makedirs(nocfg)
         write_h5(os.path.join(nocfg, "in.h5"), ro1, Y0, T0)
+        add_mesh(os.path.join(nocfg, "in.h5"))
         before = values(os.path.join(nocfg, "in.h5"))
         rc, out = tool("restart_field.py", s2, os.path.join(nocfg, "in.h5"))
         check(rc != 0 and "no solverConfig.yaml" in out and same_values(before, values(os.path.join(nocfg, "in.h5"))),

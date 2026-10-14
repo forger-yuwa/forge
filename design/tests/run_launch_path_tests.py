@@ -87,9 +87,15 @@ def fields(n=N, step=0, sst=False, wd_offset=0.0):
     return {k: np.asarray(a, dtype=np.float64) for k, a in v.items()}
 
 
-def write_h5(path, v, n=N):
+def write_h5(path, v, n=N, mesh=False):
+    """res (forge の出力と同じく /MESH/COORD・/MESH/CONNE・/VALUE) を書く。mesh=True は変換済みの格子の代わり (境界の所属も持つ;
+    restart_field.py は res をその run の格子に座標・接続で結び付ける: plan §5.1 #20)。"""
     with h5py.File(path, "w") as f:
         f.create_dataset("MESH/COORD", data=np.column_stack([np.linspace(0, 1, n), np.zeros(n), np.zeros(n)]).ravel())
+        f.create_dataset("MESH/CONNE", data=np.array([x for i in range(n) for x in (1, i)], dtype=np.int32))
+        if mesh:
+            f.create_dataset("BCONDS/3/iCells", data=np.arange(n, dtype=np.int32))
+            f["BCONDS/3"].attrs["bcondKind"] = "slip"
         for k, a in v.items():
             f.create_dataset(f"VALUE/{k}", data=a)
 
@@ -131,7 +137,7 @@ def wt_dir(tag, cfg, sst=False):
     rd.mkdir()
     (rd / "solverConfig.yaml").write_text(cfg)
     (rd / "bcondConfig.yaml").write_text(BCOND)
-    write_h5(rd / "nozzle.h5", fields(sst=sst))
+    write_h5(rd / "nozzle.h5", fields(sst=sst), mesh=True)
     return rd
 
 
