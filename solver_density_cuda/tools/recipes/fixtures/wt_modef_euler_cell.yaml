@@ -1,0 +1,37 @@
+# ① 軸対称風洞ノズル (モード F) — Phase 3 v1 検証用 (Md=4)
+name: wt_m4
+type: wind_tunnel_axisym
+gas: {gamma: 1.4, cp: 1004.5}
+
+spec:
+  Pt: 1.0e6          # 入口全圧 [Pa]
+  Tt: 800.0          # 入口全温 [K]
+  p_ambient: 1000.0  # 出口背圧 [Pa] (超音速流出 — 実質未使用)
+  r_throat: 0.010    # スロート半径 [m]
+  M_design: 4.0      # 設計マッハ (D_e は従属)
+
+dv:
+  L_ax:   {value: 14.0, min: 10.0, max: 20.0}   # 目標 Bézier の軸スパン / rt
+  mc_cp1: {value: 2.0,  min: 1.3,  max: 3.0}    # 自由 CP (単調)
+  mc_cp2: {value: 2.9,  min: 1.6,  max: 3.6}
+  mc_cp3: {value: 3.6,  min: 2.0,  max: 3.95}
+
+geometry:
+  R: 2.0             # スロート円弧 (Ru=Rd 単一 — モード F)
+  blend_len: 0.0     # 曲率ブレンド無効 (撤回済み — plan §9.1)
+  r_inlet: 2.5
+  L_pipe: 0.5
+  L_contract: 3.0
+  phi_u_deg: 25.0
+  n_axis_inv: 500    # 逆マーチの軸解像度
+  n_start: 41
+
+mesh:
+  ni: 321
+  nj: 65
+  wall_first_frac: 5.0e-3
+  throat_refine: 3.0
+
+evaluate:
+  nStepOuter: 12000
+  outStepInterval: 4000

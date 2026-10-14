@@ -96,6 +96,84 @@ check("(d) A (space.limiterScaled: 1 を明記): PASS", not rA["fails"] and not 
 check("(d) B (space.limiterScaled だけ削除): 同じキーを名指しで FAIL",
       {k for k, _ in rB["fails"]} == {"space.limiterScaled"} and not rB["warns"], f"fails {[k for k, _ in rB['fails']]}")
 
+# (e) #17 代表の問題 YAML の固定の写し: 書き写しは写しを読み、元 (case) との違いは別の検査で WARN、相対パスは元の所在で解決
+import contextlib  # noqa: E402
+import io  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+
+import yaml  # noqa: E402
+
+man = RG.verify_fixtures()
+check("(e) 全機種の写しが MANIFEST の記録どおり (元のパス = SPECS の problem、写しの sha256)",
+      set(man) == {sp["name"] for sp in RG.SPECS} and all(man[sp["name"]]["source"] == sp["problem"] for sp in RG.SPECS))
+st = RG.fixture_status()
+print("     元と写しの比較 (情報、WARN は失敗にしない): " + ", ".join(f"{n}={s}" for n, s, _ in st))
+BELL = next(sp for sp in RG.SPECS if sp["name"] == "bell_tp_ns_sst")
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    fx = td / "fixtures"
+    shutil.copytree(RG.FIXTURE_DIR, fx)
+    # 相対パスは元の問題 YAML の所在で解決する (写しの所在・作業ディレクトリではない)
+    p = RG.materialize(BELL, td / "w1", fixture_dir=fx)
+    raw = yaml.safe_load(p.read_text())
+    base = (RG.ROOT / BELL["problem"]).resolve().parent
+    got = {k: raw[s][k] for s, k in (("gas", "exhaust"), ("geometry", "rao_wall_file"), ("geometry", "rao_offset_file"))}
+    want = {k: str((base / v).resolve()) for k, v in
+            {"exhaust": "exhaust_lox_lh2_pc100_of6.yaml",
+             "rao_wall_file": "rao_m/rao_corrprod_parts/L100_corr_vext_n321_wall.npz",
+             "rao_offset_file": "rao_m/rao_corrprod_parts/L100_corr_vext_n321_offset.npz"}.items()}
+    check("(e) 写しの相対パス (gas.exhaust・rao_wall_file・rao_offset_file) が元の問題 YAML の所在の絶対パスになる",
+          got == want and all(Path(v).is_file() for v in got.values()), f"{got}")
+    from forge_design.probdef import load_problem  # noqa: E402
+    pp = load_problem(p)
+    check("(e) 作業ディレクトリに置いた写しを load_problem が読める (gas.exhaust の解決を含む)",
+          pp.name == yaml.safe_load((fx / "bell_tp_ns_sst.yaml").read_text())["name"])
+    # 書き写しは写しの中身を使う (元ではない): 写しの name だけ変えると置いた問題の name が変わる
+    fake = yaml.safe_load((fx / "bell_tp_ns_sst.yaml").read_text())
+    fake["name"] = "regen_fixture_probe"
+    (fx / "bell_tp_ns_sst.yaml").write_text(yaml.safe_dump(fake, allow_unicode=True, sort_keys=False))
+    raw2 = yaml.safe_load(RG.materialize(BELL, td / "w2", fixture_dir=fx).read_text())
+    check("(e) materialize は写しの中身を使う (元の case の YAML を読まない)", raw2["name"] == "regen_fixture_probe")
+    # 写しを手で書き換えると (MANIFEST の sha256 と違う) 書き写しの前に止まる
+    try:
+        RG.verify_fixtures(fixture_dir=fx)
+        check("(e) 写しの手での書き換えは止まる", False, "例外にならない")
+    except RuntimeError as e:
+        check("(e) 写しの手での書き換えは機種を名指しで止まる", "bell_tp_ns_sst" in str(e) and "sha256" in str(e), str(e)[:200])
+    # 既知のキーの外に、元の所在に実在するファイルの相対パスがあれば止まる (黙って作業ディレクトリ基準で解決しない)
+    fake = yaml.safe_load((RG.FIXTURE_DIR / "bell_tp_ns_sst.yaml").read_text())
+    fake["evaluate"]["some_table_file"] = "rao_m/rao_corrprod_parts/L100_corr_vext_n321_wall.npz"
+    (fx / "bell_tp_ns_sst.yaml").write_text(yaml.safe_dump(fake, allow_unicode=True, sort_keys=False))
+    try:
+        RG.materialize(BELL, td / "w3", fixture_dir=fx)
+        check("(e) 未知のキーの相対パスは止まる", False, "例外にならない")
+    except RuntimeError as e:
+        check("(e) 未知のキーの相対パス (元の所在に実在) は名指しで止まる", "evaluate.some_table_file" in str(e), str(e)[:200])
+    # 写しの更新: 元のバイト列を写し、MANIFEST を書き直す (更新の後は記録どおり)
+    done = RG.refresh_fixtures(["bell_tp_ns_sst"], fixture_dir=fx, today="2026-10-15")
+    check("(e) --refresh-fixture: 元のバイト列の写しと MANIFEST の sha256 を書き直す",
+          (fx / "bell_tp_ns_sst.yaml").read_bytes() == (RG.ROOT / BELL["problem"]).read_bytes()
+          and done[0][2] == man["bell_tp_ns_sst"]["sha256"] and RG.verify_fixtures(fixture_dir=fx) is not None)
+    # 元と違う写しは別の検査 (--check-fixtures) で WARN、終了 0。元が無いのも WARN
+    root = td / "root"
+    src = root / BELL["problem"]
+    src.parent.mkdir(parents=True)
+    src.write_bytes((RG.ROOT / BELL["problem"]).read_bytes() + "\n# case 側の編集\n".encode())
+    saved = (RG.ROOT, RG.FIXTURE_DIR)
+    RG.ROOT, RG.FIXTURE_DIR = root, fx
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = RG.main(["--check-fixtures"])
+        out = buf.getvalue()
+        st2 = dict((n, s) for n, s, _ in RG.fixture_status())
+    finally:
+        RG.ROOT, RG.FIXTURE_DIR = saved
+    check("(e) 元と違う写しは --check-fixtures で WARN・終了 0 (元の無いものも WARN)",
+          rc == 0 and st2["bell_tp_ns_sst"] == "differs" and "WARN bell_tp_ns_sst" in out
+          and all(s == "missing" for n, s in st2.items() if n != "bell_tp_ns_sst"), f"rc {rc} {out[:300]}")
+
 print(f"\n#11 の例外表 (明示すべきキー) の延べ数: {EXCEPTIONS} (機種 {len(RG.SPECS)}・全段)")
 print(f"\n{'ALL PASS' if FAIL == 0 else f'FAIL {FAIL}'}")
 sys.exit(1 if FAIL else 0)

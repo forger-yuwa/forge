@@ -1,0 +1,50 @@
+# forge_design 問題定義 — ③ベル (M) 特性曲線モードの壁を TP の Euler で回す (plan tooling-nozzle-bell-two-mode §5.1 #6 (W1)・(W2)、§6 V2)。
+# 壁: geometry.bell_mode moc_rao — 生成器の壁ファイル rao_m/rao_t6_parts/L100_n321_mq2_wall.npz (円弧 kernel・Hall n 321 の初期線・
+#   Goursat m = q = 320、S1 を通った停留輪郭 — plan §4.4・§5.1 #5) を rao_axisym.load_rao_wall で読む (生成器は回さない)。BE は罰則付き
+#   5 次 B-spline (B で r・r' を拘束 = C1)。収縮部 (U→T 5 次 Hermite) と入口直管は (D) と同じ部品・同じ寸法 spec (スロートで C2)。
+#   壁ファイルの L (終点 x_E)・ε (r_E²)・R_t・排気ファイルが下の dv / spec / geometry / gas と合わなければ prepare が止まる。
+# 用途 (§5.1 #6 (W2)): V2 (Euler の推力と MOC の F_cs が相対 0.2 % 以内) と CFD ピンの凍結源 (#6 (W3))。V2 の参照値 (生成器の F_cs・F_wall
+#   を N・η に換算、式は runner.rao_moc_reference) は prepare が WALL_DESIGN.json の moc_reference に書く:
+#   F_cs 1,144,659 N (η 0.987530)・F_wall 1,144,672 N (η 0.987542)、F_1D 1,159,113 N、ṁ_MOC/ṁ_1D 0.989706 (Hall n 321 の初期線)。
+# Euler の設定 (§4.1): evaluate.model euler → viscMethod 0・visc 0・thermCond 0・turbulence none・壁 slip (SST の項は書かない)。
+# 格子は壁際を細分しない (case/45 で NS 用の壁際細分化格子の Euler はスロートの全温が整定しなかった): 全断面で一様な wall_first_frac 0.005
+#   (case/45 の Euler の既定と同じ等比、壁の第一セル / 軸側 ≈ 1/2.6)、壁法線の近壁層・スロートの別指定・AR 緩和は使わない
+#   (runner._check_euler_mesh が止める)。ni・nj・x 方向の配点は NS の (D) の格子 (problem_bell_tp_d_moo.yaml) と同じ。
+# python -m forge_design.evaluate.runner <この YAML> <run> --prepare-only (格子・config・品質の確認)、本番は --staged。
+name: bell_tp_m_euler_eps50_L100
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  L_over_rt: {value: 22.657533530077966, fixed: true}   # 15° 円錐長の 100 %。壁ファイルが決める L との照合用 (相対 1e-9)
+
+geometry:
+  bell_mode: moc_rao
+  rao_wall_file: rao_m/rao_t6_parts/L100_n321_mq2_wall.npz
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 0.005           # 全断面で一様 (壁に寄せない)
+  throat_refine: 8.0
+  throat_width: 3.0
+
+evaluate:
+  model: euler
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 30000          # 本段
+  outStepInterval: 1500      # 本段の res の間隔 = 本段長の 1/20
+  cfl_main: 4.0

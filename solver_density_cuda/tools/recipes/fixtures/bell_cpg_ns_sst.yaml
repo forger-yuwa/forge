@@ -1,0 +1,39 @@
+# forge_design 問題定義 (Phase 2: ③ベル TOP 直接幾何 dv — 親計画 §4.6③ 2026-08-13 改訂)
+# 条件は problem_bell_smoke.yaml と同一 (Pt 4 MPa / Tt 1500 K / rt 10 mm / eps 9)。
+# dv = (theta_n(=theta_a), theta_e, L/rt) の 3 変数、下流壁 = TOP 放物線。
+name: bell_top_smoke
+type: thruster_bell
+gas: {gamma: 1.4, cp: 1004.5}
+
+spec:
+  Pt: 4.0e6          # 入口全圧 [Pa]
+  Tt: 1500.0         # 入口全温 [K]
+  p_ambient: 20000.0 # 背圧 [Pa] (高空条件・過膨張剥離を避ける)
+  r_throat: 0.010    # スロート半径 [m] (閉ループ派生の初期値)
+  eps: 9.0           # 面積比 Ae/At
+
+dv:
+  theta_a_deg: {value: 20.0, min: 12.0, max: 30.0}  # 初期膨張角 θn
+  theta_e_deg: {value: 8.0,  min: 4.0,  max: 14.0}  # 出口壁角 θe (θn > 弦勾配 > θe 必須)
+  L_over_rt:   {value: 7.0,  min: 5.0,  max: 12.0}
+
+geometry:
+  bell_type: top     # 下流壁 = TOP 放物線 (Pa で θn・出口で θe 接続の 2 次 Bézier)
+  r_inlet: 2.5
+  L_pipe: 0.5
+  L_contract: 3.0
+  Ru: 1.5
+  Rd: 0.4
+  phi_u_deg: 25.0
+
+mesh:
+  ni: 221
+  nj: 65
+  wall_first_frac: 5.0e-3
+  throat_refine: 3.0
+
+evaluate:
+  turbulence: sst
+  nStepOuter: 12000
+  outStepInterval: 4000
+  objectives: [eta_cf, length]

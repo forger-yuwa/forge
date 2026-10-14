@@ -17,10 +17,29 @@
     design/.venv-opt/bin/python solver_density_cuda/tools/recipes/regen_profiles.py --write    # recommended_settings.yaml を書き換える
     design/.venv-opt/bin/python solver_density_cuda/tools/recipes/regen_profiles.py --check    # YAML と一致するか (違えば終了 1)
 
-forge・変換器・AWS は使わない。case の問題 YAML (追跡済み) を読む。
+forge・変換器・AWS は使わない。
+
+代表の問題 YAML は**固定の写し** `recipes/fixtures/<機種>.yaml` を読む (plan §5.1 #17)。case の問題 YAML を直接読むと、case 側の
+編集 (別の作業の比較・較正のやり直し) で書き写しの結果が黙って変わり、推奨値の変更が承認を経ずに入る。写しの元のパスと sha256 は
+`fixtures/MANIFEST.yaml` にあり、`SPECS` の `problem` (= 元のパス、プロファイルの `transcribed_from.problem`) と食い違うか、
+写しの sha256 が記録と違えば (写しを手で書き換えた) 止まる。
+写しの中の相対パス (`gas.exhaust`・`geometry.rao_wall_file` など、問題 YAML の所在を基準に解決するもの) は**元の問題 YAML の所在**で
+解決する (`materialize`: 作業ディレクトリに置く写しで、そのキーを元の所在の絶対パスに直す。既知のキーの外で元の所在に実在する
+ファイルの相対パスがあれば止まる)。
+
+    design/.venv-opt/bin/python solver_density_cuda/tools/recipes/regen_profiles.py --check-fixtures   # 写しと元の違い (WARN、終了 0)
+
+**写しの更新の手順** (写しの更新は推奨値の変更の承認ではない):
+1. `--check-fixtures` で元と違う写しを見る (WARN)。違いは case 側の編集であって、それだけでは書き写しの結果は何も変わらない。
+2. 代表を新しい元に替えると決めたら `--refresh-fixture <機種> ...` (または `all`) で写しと MANIFEST を書き直す (元のバイト列の写し)。
+3. `--check` を回す。一致すれば推奨値は変わらないので、写しの更新だけを commit してよい。
+4. 不一致なら推奨値 (生成区間) が変わる。これは推奨値の変更なので、差を plan に書いて上位の判断を得てから `--write` する
+   (判断を得るまで写しの更新も commit しない。戻すときは `git checkout` で写しと MANIFEST を戻す)。
 """
 import argparse
 import contextlib
+import datetime
+import hashlib
 import io
 import json
 import os
@@ -41,7 +60,11 @@ import yaml  # noqa: E402
 import recipe_settings as RS  # noqa: E402
 
 YAML_PATH = HERE / "recommended_settings.yaml"
-BEGIN = "  # >>> BEGIN GENERATED: recipes/regen_profiles.py (手で編集しない) >>>"
+FIXTURE_DIR = HERE / "fixtures"
+MANIFEST_NAME = "MANIFEST.yaml"
+# 問題 YAML の所在を基準に解決する相対パスのキーのうち、opt/driver の PROBLEM_PATH_KEYS (absolutize_problem_paths) に無いもの
+EXTRA_PATH_KEYS = (("geometry", "initial_line_run"),)   # runner_axismach.py:447
+BEGIN ="  # >>> BEGIN GENERATED: recipes/regen_profiles.py (手で編集しない) >>>"
 END = "  # <<< END GENERATED <<<"
 PLAN = "plans/active/tooling-generator-defaults-and-launch-gate.md"
 DATE = "2026-10-14"
@@ -379,6 +402,137 @@ SPECS = [
 ]
 
 
+# ------------------------------------------------------------------------------------------------ 代表の問題 YAML の固定の写し
+
+def _sha256(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def fixture_path(sp, fixture_dir=None):
+    return Path(fixture_dir or FIXTURE_DIR) / f"{sp['name']}.yaml"
+
+
+def load_manifest(fixture_dir=None):
+    """MANIFEST.yaml → {機種: {source, sha256, copied}}。無い・読めない・形が違えば RuntimeError。"""
+    path = Path(fixture_dir or FIXTURE_DIR) / MANIFEST_NAME
+    if not path.is_file():
+        raise RuntimeError(f"{path} が無い (代表の問題 YAML の写しの記録)")
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    fx = doc.get("fixtures")
+    if not isinstance(fx, dict) or any(not isinstance(v, dict) or not {"source", "sha256"} <= set(v) for v in fx.values()):
+        raise RuntimeError(f"{path}: `fixtures` の各項目に source・sha256 が要る")
+    return fx
+
+
+def verify_fixtures(specs=None, fixture_dir=None):
+    """写しが MANIFEST の記録どおりか (元のパス = SPECS の problem、写しの sha256 = 記録)。違えば RuntimeError。
+    元 (case の問題 YAML) との違いはここでは見ない (`fixture_status`、WARN)。"""
+    man = load_manifest(fixture_dir)
+    errs = []
+    for sp in (specs or SPECS):
+        ent, fp = man.get(sp["name"]), fixture_path(sp, fixture_dir)
+        if ent is None:
+            errs.append(f"{sp['name']}: MANIFEST に記録が無い")
+        elif ent["source"] != sp["problem"]:
+            errs.append(f"{sp['name']}: MANIFEST の元 {ent['source']} と SPECS の problem {sp['problem']} が違う")
+        elif not fp.is_file():
+            errs.append(f"{sp['name']}: 写し {fp} が無い")
+        elif _sha256(fp) != ent["sha256"]:
+            errs.append(f"{sp['name']}: 写し {fp.name} の sha256 が MANIFEST の記録と違う (写しを手で書き換えた; "
+                        "元から取り直すなら --refresh-fixture)")
+    if errs:
+        raise RuntimeError("代表の問題 YAML の写しが記録と合わない:\n  " + "\n  ".join(errs))
+    return man
+
+
+def fixture_status(specs=None, fixture_dir=None, root=None):
+    """写しと元 (case の問題 YAML) の比較: [(機種, 'same' | 'differs' | 'missing', 説明)]。differs・missing は WARN の扱い
+    (元の編集だけでは書き写しの結果は変わらない。写しを更新するかは docstring の手順)。"""
+    man = load_manifest(fixture_dir)
+    out = []
+    for sp in (specs or SPECS):
+        ent = man.get(sp["name"]) or {}
+        src = Path(root or ROOT) / sp["problem"]
+        if not src.is_file():
+            out.append((sp["name"], "missing", f"元 {sp['problem']} が無い (写しは {ent.get('copied', '?')} に取った)"))
+        elif _sha256(src) != ent.get("sha256"):
+            out.append((sp["name"], "differs", f"元 {sp['problem']} が写し (sha256 {str(ent.get('sha256'))[:12]}…、"
+                                               f"{ent.get('copied', '?')}) と違う (今 {_sha256(src)[:12]}…)"))
+        else:
+            out.append((sp["name"], "same", sp["problem"]))
+    return out
+
+
+def refresh_fixtures(names, specs=None, fixture_dir=None, root=None, today=None):
+    """元の問題 YAML のバイト列を写しにし、MANIFEST を書き直す。[(機種, 旧 sha256, 新 sha256)] を返す。"""
+    specs = specs or SPECS
+    fdir = Path(fixture_dir or FIXTURE_DIR)
+    by_name = {sp["name"]: sp for sp in specs}
+    if names == ["all"]:
+        names = list(by_name)
+    unknown = [n for n in names if n not in by_name]
+    if unknown:
+        raise RuntimeError(f"機種 {unknown} は SPECS に無い ({sorted(by_name)})")
+    path = fdir / MANIFEST_NAME
+    man = load_manifest(fdir) if path.is_file() else {}
+    fdir.mkdir(parents=True, exist_ok=True)
+    done = []
+    for n in names:
+        sp = by_name[n]
+        data = (Path(root or ROOT) / sp["problem"]).read_bytes()
+        fixture_path(sp, fdir).write_bytes(data)
+        old = (man.get(n) or {}).get("sha256")
+        man[n] = {"source": sp["problem"], "sha256": hashlib.sha256(data).hexdigest(),
+                  "copied": str(today or datetime.date.today())}
+        done.append((n, old, man[n]["sha256"]))
+    order = [sp["name"] for sp in specs if sp["name"] in man] + sorted(set(man) - set(by_name))
+    head = ("# 代表の問題 YAML の固定の写しの記録 (regen_profiles.py が読む; plan tooling-generator-defaults-and-launch-gate §5.1 #17)。\n"
+            "# 手で編集しない: 写しの更新は `regen_profiles.py --refresh-fixture` (手順は regen_profiles.py の docstring)。\n"
+            "# source = 元の問題 YAML (リポジトリ基準)、sha256 = 写し (= 写した時の元) のバイト列、copied = 写した日。\n")
+    path.write_text(head + yaml.safe_dump({"version": 1, "fixtures": {k: man[k] for k in order}}, sort_keys=False,
+                                          allow_unicode=True, width=10000), encoding="utf-8")
+    return done
+
+
+def _path_leaves(d, pre=()):
+    if isinstance(d, dict):
+        for k, v in d.items():
+            yield from _path_leaves(v, pre + (str(k),))
+    elif isinstance(d, list):
+        for i, v in enumerate(d):
+            yield from _path_leaves(v, pre + (f"[{i}]",))
+    else:
+        yield pre, d
+
+
+def materialize(sp, work, fixture_dir=None, root=None):
+    """写しを作業ディレクトリに置き、問題 YAML の所在を基準に解決する相対パスを**元の問題 YAML の所在**の絶対パスに直す
+    (opt/driver の `absolutize_problem_paths` の 4 キーと `EXTRA_PATH_KEYS`)。既知のキーの外に、元の所在に実在するファイルを指す
+    相対パス (`/` か拡張子を含む文字列) があれば止まる (黙って作業ディレクトリ基準で解決しない)。置いたパスを返す。"""
+    from forge_design.opt.driver import PROBLEM_PATH_KEYS, absolutize_problem_paths
+    base = (Path(root or ROOT) / sp["problem"]).resolve().parent
+    raw = yaml.safe_load(fixture_path(sp, fixture_dir).read_text(encoding="utf-8"))
+    out = absolutize_problem_paths(raw, base)
+    for path in EXTRA_PATH_KEYS:
+        cur = out
+        for k in path[:-1]:
+            cur = cur.get(k) if isinstance(cur, dict) else None
+        if isinstance(cur, dict) and isinstance(cur.get(path[-1]), str) and cur[path[-1]] \
+                and not Path(cur[path[-1]]).is_absolute():
+            cur[path[-1]] = str((base / cur[path[-1]]).resolve())
+    known = {tuple(k) for k in PROBLEM_PATH_KEYS} | set(EXTRA_PATH_KEYS)
+    stray = [(".".join(k), v) for k, v in _path_leaves(out)
+             if k not in known and isinstance(v, str) and v and "\n" not in v and not Path(v).is_absolute()
+             and ("/" in v or Path(v).suffix) and (base / v).exists()]
+    if stray:
+        raise RuntimeError(f"{sp['name']}: 写しに元の所在 ({base}) 基準と思われる相対パスがある {stray}。"
+                           "解決の基準を確かめて EXTRA_PATH_KEYS に足す")
+    dst = Path(work) / "problem" / Path(sp["problem"]).name
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(yaml.safe_dump(out, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return dst
+
+
 # ------------------------------------------------------------------------------------------------ 書き写し
 
 def stage_fixed(recipes, cfg_text, stage="main"):
@@ -405,9 +559,10 @@ def build_profiles(recipes, specs=None, keep=False):
     """全機種を回して生成区間のプロファイル (dict) と、段ごとの config を返す。"""
     profiles, configs = {}, {}
     table = RS.explicit_table(recipes)                 # 旧い実効値の出所を今のソースで確かめる (合わなければ RecipeError)
+    verify_fixtures(specs)                             # 写しが MANIFEST の記録どおり (元との違いは見ない: fixture_status)
     for sp in (specs or SPECS):
         work = Path(tempfile.mkdtemp(prefix=f"regen_{sp['name']}_"))
-        problem = ROOT / sp["problem"]
+        problem = materialize(sp, work)                # 固定の写し (相対パスは元の問題 YAML の所在で解決)
         stages, bcond = sp["run"](problem, work)
         fixed, explicit, legs = {}, {}, {}
         for st, cfg in stages:
@@ -456,8 +611,29 @@ def main(argv=None):
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--write", action="store_true", help="recommended_settings.yaml の生成区間を書き換える")
     g.add_argument("--check", action="store_true", help="生成区間が今の生成器の出力と一致するか (違えば終了 1)")
+    g.add_argument("--check-fixtures", action="store_true",
+                   help="代表の問題 YAML の写しと元 (case) の違いを WARN で出す (終了 0。写しが記録と合わなければ終了 1)")
+    g.add_argument("--refresh-fixture", nargs="+", metavar="機種",
+                   help="元の問題 YAML を写し直して MANIFEST を書く (`all` で全機種)。推奨値の変更の承認ではない (docstring の手順)")
     ap.add_argument("--keep", action="store_true", help="作業ディレクトリを消さない")
     a = ap.parse_args(argv)
+    if a.check_fixtures:
+        try:
+            verify_fixtures()
+        except RuntimeError as e:
+            print(f"FAIL {e}")
+            return 1
+        st = fixture_status()
+        for n, s, msg in st:
+            print(f"{'ok  ' if s == 'same' else 'WARN'} {n}: {msg}")
+        nw = sum(s != "same" for _, s, _ in st)
+        print(f"写し {len(st)} 本、元と違う・元が無い {nw} 本" + (" (写しの更新は docstring の手順。推奨値の変更の承認とは別)" if nw else ""))
+        return 0
+    if a.refresh_fixture:
+        for n, old, new in refresh_fixtures(a.refresh_fixture):
+            print(f"写した: {n} ({(old or '記録なし')[:12]} → {new[:12]})")
+        print("次に --check: 不一致なら推奨値の変更なので、差を plan に書いて判断を得てから --write (docstring の手順)")
+        return 0
     text = YAML_PATH.read_text(encoding="utf-8")
     recipes = RS.load_recipes(text=text)
     profiles, _ = build_profiles(recipes, keep=a.keep)
@@ -465,7 +641,8 @@ def main(argv=None):
     cur, i, j = current_block(text)
     if a.check:
         ok = cur == block
-        print("一致" if ok else "不一致: `regen_profiles.py --write` で書き直す (生成器の出力が変わった)")
+        print("一致" if ok else "不一致: 生成器の出力か代表の問題 YAML の写しが変わった。推奨値の変更なので、差を plan に書いて"
+                                 "判断を得てから `regen_profiles.py --write` で書き直す")
         return 0 if ok else 1
     if a.write:
         new = text[:i] + block + text[j:]

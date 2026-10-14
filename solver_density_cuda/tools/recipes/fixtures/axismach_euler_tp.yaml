@@ -1,0 +1,93 @@
+# plan tooling-nozzle-throat-monotone-r2 §5.1 #5・§6 E1 (2026-10-06): Euler A/B の腕 B (単調壁)。problem_d155_euler_pin_G1_recal.yaml (腕 A = 現行壁) の写しに
+#   geometry.wall_fit_mono_r2: [0.0, 1.5] (joint 壁の当てはめで [0, 1.5] r_t の r″ を単調非増加に拘束) だけを足したもの。他は腕 A と同一。
+#   name も腕 A と同じにしない (run の来歴で取り違えないため)。
+# plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f E2: G1 の出口較正をやり直した壁 (Md_moc_offset = −4.16e-4 − (5.999207 − 6) = +3.770e-04; G1 run_0111+0112 の末尾 5 枚平均)。元は §5.1 #11f 手順 2 腕 G1: 生産 NS 細分格子と同じ格子パラメータ (problem_d155_ns_finemesh_pin.yaml の mesh ブロック)。壁・凍結線・ガス・BC は G0/G1 で同一 (2026-10-06)
+# plan verification-m6-axis-wave-mesh-su2 §5.1 #15 (補間壁 vs 同時当てはめ壁の Euler A/B): run_0037 の Euler 問題を r_t 0.0768075 (C2 最終) と n_axis_inv 2400 にした版 (2026-10-05)
+# ② イソブタン燃焼ガス M6 / 出口径 1.55 m (物理壁定義) — 最短ロバスト点の Euler 検証
+# 条件 (2026-08-31 ユーザ指示): Pt 5.5 MPa / Tt 1600 K / φ=0.9 組成 (case/42 と同一) /
+#   出口径 1.55 m は δ* 込み物理壁で定義 / 全長最小化 / 出口 M ≈ 6 厳密。
+# 最短探索 (search_shortest.py, 基準 = plans/accepted/tooling-nozzle-shortest-robust-axis.md
+#   margin≥1°・topo≥0.02・hard gate・単峰, n1200 確認):
+#   R2: L_c=39.3/M_K=2.7 x_F=95.104 r_t (勝者) / R3: 39.7/2.8 x_F=95.433 → R2 採用。
+# r_t 導出: 物理出口半径 0.775 m = r_t·(A/A*)^0.5 + δ*_exit。semi-perfect Tt1600 の
+#   A/A*(M6)=88.21 (r_F/r_t=9.392)。δ*_exit 初期推定 0.66 r_t (case/42 run_0105 実測
+#   0.783 r_t を Re・全長でスケール) → r_t = 0.775/(9.392+0.66) = 0.0771 m。
+#   NS v3 の δ* 実測後に r_t を 1 回補正する (設計は r_t 単位で不変)。
+# p_ambient: P/Pt(M6, semi-perfect Tt1600) = 4.067e-4 × 5.5 MPa = 2237 Pa。
+# 凝縮の事前見積り: 出口 T 233.5 K vs H2O 飽和 263.9 K (x_H2O 0.1356, pH2O 303 Pa)
+#   = −30 K 過冷却 → dry 前提は出口近傍で破れる。方針 (a): 本 run は dry、採用点で
+#   凝縮 ON restart 再評価 (split_h2o は最初から有効にしておく)。
+name: isobutane_m6_d155_euler_pin_G1_recal_mono
+type: wind_tunnel_axisym_axismach
+gas:
+  model: semiperfect
+  species: {CO2: 0.1677, H2O: 0.0858, O2: 0.0220, N2: 0.7245}
+  transport: {CO2: cea, O2: cea, N2: cea, H2O: custom:h2o_iapws_cea_v1}   # main 統合後の prepare が要求 (Euler では粘性に使わない)
+  # 参照値 (semi-perfect では NASA-9 が優先。IC 初期推定と CPG フォールバック):
+  gamma: 1.27354        # γ* (スロート 1409 K, Tt 1600)
+  cp: 1360.0            # cp(T*=1409 K)
+
+spec:
+  Pt: 5.5e6
+  Tt: 1600.0
+  p_ambient: 2237.0
+  r_throat: 0.0768075      # [m] 最終補正 (run_0025 の壁に載せた δ_r,exit 0.688 r_t で出口半径 0.775 m 合わせ; solve_rt 2026-09-04)
+  M_design: 6.0
+
+dv:
+  L_c: {value: 39.3, min: 20.0, max: 80.0}   # 最短ロバスト境界 (margin 1.002°)
+
+geometry:
+  R: 2.0
+  r_inlet: 6.485        # 入口配管の物理半径 0.5 m / r_t (収縮比 A_in/A* = 42.1)
+  L_U: 12.0             # μ = L_U²/(RΔr) = 13.1 ≤ 20 (単調収縮 OK)
+  L_pipe: 0.5
+  start_line: throat_char
+  n_start: 41
+  n_axis_inv: 2400
+  axis_dx0: 0.03
+  x_end_margin: 2.3
+  wall_mode: cplus
+  exit_mode: characteristic
+  axis_law: knot
+  M_knot: 2.7
+  Lc_mode: explicit
+  # 生産経路の CFD ピン (plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f, 2026-10-06): 試作 pincal と同じ壁を spec.M_design=6 + Md_moc_offset で (二重補正しない)
+  initial_line: cfd
+  initial_line_run: run_0062_euler_wallfit_fit_r1_ext6k
+  initial_line_res: res_6000.h5
+  wall_repr: joint
+  wall_fit_mono_r2: [0.0, 1.5]   # r″ 単調拘束の区間 [a, b] r_t (plan tooling-nozzle-throat-monotone-r2 §4.1)
+  Md_moc_offset: 3.7700e-04
+
+mesh:
+  discretization: node
+  ni: 2000
+  nj: 97
+  wall_first_frac: 1.3e-5
+  wall_first_frac_throat: 4.5e-6
+  wall_first_up_x0: -9.0
+  wall_first_up_x1: -4.0
+  wall_first_blend_x0: 1.0
+  wall_first_blend_x1: 17.0
+  throat_refine: 4.0
+  throat_width: 3.0
+  ar_max: 5000
+
+# Euler の格子 (runner_axismach.prepare が読む。NS の prepare_ns は上の mesh を読む)。2026-10-07 の移行 (plan
+#   verification-case45-euler-total-enthalpy §4・§6 E3): 壁に寄せない配点 = 全断面で壁の第 1 間隔の比 0.005 の等比
+#   (スロートの別指定なし・軸側の cap なし)。ni 2000 × nj 97 と軸方向の配置 (throat_refine・throat_width) は今の評価条件
+#   (G1 の軸方向と同じ; 全ケースの既定ではない)。壁に寄せた G1 の Euler はスロート付近の全温が整定しなかった (同 plan §9 E2)。
+mesh_euler:
+  ni: 2000
+  nj: 97
+  throat_refine: 4.0
+  throat_width: 3.0
+  wall_first_frac: 0.005
+
+evaluate:
+  nStepOuter: 12000
+  outStepInterval: 1000
+  cfl_main: 2.0
+  mid_stage: true
+  tp_species: split_h2o   # dry でも pseudo と同一 (M4.2 検証済)。凝縮 restart を可能にしておく

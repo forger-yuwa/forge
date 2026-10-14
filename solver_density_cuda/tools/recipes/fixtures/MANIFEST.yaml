@@ -1,0 +1,49 @@
+# 代表の問題 YAML の固定の写しの記録 (regen_profiles.py が読む; plan tooling-generator-defaults-and-launch-gate §5.1 #17)。
+# 手で編集しない: 写しの更新は `regen_profiles.py --refresh-fixture` (手順は regen_profiles.py の docstring)。
+# source = 元の問題 YAML (リポジトリ基準)、sha256 = 写し (= 写した時の元) のバイト列、copied = 写した日。
+version: 1
+fixtures:
+  bell_cpg_ns_sst:
+    source: case/40.nozzle_design_tool/problem_bell_top.yaml
+    sha256: 24a8223277356753bd9aaf9b6f06d0831ff73a70868282cf672354ef7d94c5a5
+    copied: '2026-10-15'
+  bell_tp_ns_sst:
+    source: case/68.bell_two_mode/problem_bell_tp_m_ns_l100_corr.yaml
+    sha256: c8884cec1c4f639dd1f23aafd60b67741e03b07d5ecfe66c4d312c7120ac1c34
+    copied: '2026-10-15'
+  bell_tp_euler:
+    source: case/68.bell_two_mode/problem_bell_tp_m_euler_l100.yaml
+    sha256: db91c882fa4834b4313a8a940e379885511a0ca1434c6a21f0017652920ca119
+    copied: '2026-10-15'
+  wt_modef_euler_cell:
+    source: case/41.wind_tunnel_design/problem_m4.yaml
+    sha256: 6b4cbc8612d8bbe833b4dc46d2274d94ac9f2b365ecad9fe3aec9b03c5c02506
+    copied: '2026-10-15'
+  wt_feedback_euler_node:
+    source: case/41.wind_tunnel_design/problem_m4_b10.yaml
+    sha256: b7424037b2725eb66e6c862c9e73bea0557e1d28fa6d8fda7303e350d8c460b3
+    copied: '2026-10-15'
+  axismach_euler_tp:
+    source: case/45.isobutane_m6_d155/problem_d155_euler_pin_G1_recal_mono.yaml
+    sha256: 9f8f32efa0904598d40884893079d28c5711af43966a56e3c3f0339dcbf97a5c
+    copied: '2026-10-15'
+  axismach_ns_sst_tp:
+    source: case/45.isobutane_m6_d155/problem_d155_ns_prod_coldmesh_tw300.yaml
+    sha256: e72e98e791deccc8f93fbd826e4c7345125840aefaa9265198e5097503e23613
+    copied: '2026-10-15'
+  axismach_ns_sst_tp_b0:
+    source: case/45.isobutane_m6_d155/problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml
+    sha256: 524c56acc0167d3e802f4521194ea16bdd7aac42337db6c2bda8186b630de0a0
+    copied: '2026-10-15'
+  walldriven_euler_cpg:
+    source: case/41.wind_tunnel_design/problem_m4_walldriven.yaml
+    sha256: a7d1cdaad1c5c5f45912b3d2742157c5330de6a3b294e55304607e8749639a05
+    copied: '2026-10-15'
+  sern2d_finite_base_frozen_tp_sst:
+    source: case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml
+    sha256: a454feba7ef92d0116cb21363ea7c07596cf03a065dcb1d1be5f6b215f1d63c7
+    copied: '2026-10-15'
+  sern3d_frozen_tp_sst:
+    source: case/46.sern_design/problem_3d_prod_m6on_g2.yaml
+    sha256: 7aa8f686930c89fde1924c65c26345e9d2c616cbbb2c4043bd7ea962e0e6fbc5
+    copied: '2026-10-15'
