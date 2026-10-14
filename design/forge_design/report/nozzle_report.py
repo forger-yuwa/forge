@@ -452,13 +452,20 @@ def wall_resolution(run, F, over_frac=None):
     """壁解像の正式値: `solver_density_cuda/tools/check_wall_resolution.py` を no-slip 壁全部 (bcondConfig の kind が wall*) で
     実行し、出力 (壁ごとの y₁⁺ 平均・p99・最大・評価面積・目標超過面積・最大の位置・VERDICT) を解析する。
     最大の位置は壁ダンプ `res_<群>_<physID>_<step>.h5` の座標 (index) から x/r_t, r/r_t に直す。
-    over_frac: 目標超過を許す面積割合 [%] (None = ツール既定)。"""
+    over_frac: 目標超過を許す面積割合 [%] (None = ツール既定)。
+    受け渡しの関門 (`deltastar_loop.wall_resolution_verdict`) と同じ選び方・重み (2026-10-15、plan tooling-nozzle-isothermal-wall-chain
+    §5.1 #36q): 壁の群だけを `--groups`、`--weight area` を明示 (ツールの既定は point; それまでは点数の割合で判定していた)、報告する場
+    F (res_<N>.h5) の step を `--step` (ツールはその step の出力が無い壁・見つからない壁を判定不能にする)。2026-10-08 にツールの出力が
+    「面積割合」「点数割合」に分かれてから、下の解析の正規表現が合わずに壁ごとの値・超過の面積を拾えていなかったのも直した。"""
     run = Path(run)
     bc = yaml.safe_load((run / "bcondConfig.yaml").read_text()) or {}
     walls = [k for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("wall")]
     if not walls:
         return {"verdict": "INDETERMINATE", "reason": "no-slip 壁が無い"}
-    cmd = [sys.executable, str(TOOLS / "check_wall_resolution.py"), str(run), "--groups", ",".join(walls)]
+    cmd = [sys.executable, str(TOOLS / "check_wall_resolution.py"), str(run), "--groups", ",".join(walls), "--weight", "area"]
+    m = re.fullmatch(r"res_(\d+)\.h5", str(F.get("res") or ""))
+    if m:
+        cmd += ["--step", m.group(1)]
     if over_frac is not None:
         cmd += ["--over-frac", str(float(over_frac))]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -468,7 +475,7 @@ def wall_resolution(run, F, over_frac=None):
     m = re.search(r"^VERDICT: (\S+)(.*)$", txt, re.M)
     out["verdict"] = m.group(1) if m else "INDETERMINATE"
     out["verdict_line"] = m.group(0).strip() if m else None
-    m = re.search(r"目標 ([0-9.eE+-]+) を超える面積 最大 ([0-9.]+) % \(許容 ([0-9.eE+-]+) %\)", txt)
+    m = re.search(r"目標 ([0-9.eE+-]+) を超える面積割合 最大 ([0-9.]+) % \(許容 ([0-9.eE+-]+) %\)", txt)
     if m:
         out.update(target=float(m.group(1)), over_area_pct=float(m.group(2)), over_area_allow_pct=float(m.group(3)))
     m = re.search(r"最大 y1\+ = ([0-9.]+)", txt)
@@ -476,7 +483,7 @@ def wall_resolution(run, F, over_frac=None):
         out["y1p_max"] = float(m.group(1))
     S = F["S"]
     for mm in re.finditer(r"^  (\S+)\s+step\s+(\d+)\s+y1 = ([0-9.e+-]+) m\s+y1\+ 平均\s+([0-9.]+) / p99\s+([0-9.]+) / 最大\s+([0-9.]+)\n"
-                          r"\s+評価できた面積割合 ([0-9.]+) % ; y1\+ > \S+ が ([0-9.]+) % ; 最大の位置 index (\d+)", txt, re.M):
+                          r"\s+評価できた面積割合 ([0-9.]+) % ; y1\+ > \S+ が面積割合 ([0-9.]+) % ; 最大の位置 index (\d+)", txt, re.M):
         name, step = mm.group(1), int(mm.group(2))
         w = dict(step=step, y1_median_m=float(mm.group(3)), y1p_mean=float(mm.group(4)), y1p_p99=float(mm.group(5)),
                  y1p_max=float(mm.group(6)), evaluated_area_pct=float(mm.group(7)), over_area_pct=float(mm.group(8)),

@@ -645,16 +645,116 @@ def convergence_verdict(run_dir) -> dict:
 
 
 # --- 受け渡しの関門の残りの条件 (§4.9 の「更新に進む条件」、§5.1 #36e (5)・§6 V-h370) ------------------------------------------
+# 関門の局所 y₁⁺ の判定 (§5.1 #36q、codex diagnose 2026-10-15 Major 2・3)
+WALL_RESOLUTION_WEIGHT = "area"      # 超過の数え方 (ツールの既定 point は使わない; run_0951 で点数 4.344 %・面積 2.932 %)
+WALL_DUMP_NEED = ("twall_x", "twall_y", "twall_z", "ro", "Ts")   # 壁の出力に要る量 (check_wall_resolution.py の main と同じ)
+
+
+def no_slip_walls(run_dir) -> dict:
+    """run の bcondConfig.yaml の kind が wall* の境界 (no-slip 壁) → {名前: physID}。読めない・physID が無ければ例外。
+    nozzle_report.wall_resolution と同じ選び方 (slip・出口・入口・軸は入れない)。"""
+    import yaml
+    bc = yaml.safe_load((Path(run_dir) / "bcondConfig.yaml").read_text())
+    if not isinstance(bc, dict):
+        raise ValueError("bcondConfig.yaml が mapping でない")
+    return {str(k): int(v["physID"]) for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("wall")}
+
+
+def wall_dumps_at_step(run_dir, walls: dict, step: int) -> dict:
+    """停止の step の全 no-slip 壁の出力 `res_<名前>_<physID>_<step>.h5` が揃っているか (§5.1 #36q (a))。壁ごとに {file, ok, why}。
+    ファイルが無い (ある step も記録する)・読めない・要る量 (`WALL_DUMP_NEED` と MESH/COORD) が無い・属性 step がファイル名の step と
+    違う (時刻違い) → ok False。"""
+    import re
+
+    import h5py
+    run_dir, step = Path(run_dir), int(step)
+    out = {}
+    for name, pid in walls.items():
+        f = run_dir / f"res_{name}_{pid}_{step}.h5"
+        e = {"file": f.name, "ok": False}
+        if not f.is_file():
+            pat = re.compile(rf"res_{re.escape(name)}_{pid}_(\d+)\.h5")
+            have = sorted(int(m.group(1)) for m in (pat.fullmatch(p.name) for p in run_dir.glob(f"res_{name}_{pid}_*.h5")) if m)
+            e.update(why=f"停止の step {step} の出力が無い", steps_present=have[-5:], n_steps_present=len(have))
+        else:
+            try:
+                with h5py.File(f, "r") as h:
+                    miss = [k for k in WALL_DUMP_NEED if f"VALUE/{k}" not in h] + ([] if "MESH/COORD" in h else ["MESH/COORD"])
+                    st = h.attrs.get("step")
+                if miss:
+                    e["why"] = f"要る量 {','.join(miss)} が無い"
+                elif st is not None and int(st) != step:
+                    e["why"] = f"属性 step {int(st)} がファイル名の step {step} と違う (時刻違い)"
+                else:
+                    e["ok"] = True
+            except OSError as ex:
+                e["why"] = f"読めない ({type(ex).__name__}: {ex})"[:300]
+        out[name] = e
+    return out
+
+
 def wall_resolution_verdict(run_dir, step=None) -> dict:
-    """局所 y₁⁺ (`check_wall_resolution.py`、目標は局所 y₁⁺ ≤ 1・超過の許容はツールの既定のまま)。step があれば `--step step` (停止の出力の
-    壁のダンプ)。kind: PASS (終了コード 0) / FAIL (1) / UNDETERMINED (それ以外 = 判定不能; 合格ではない)。"""
+    """局所 y₁⁺ (`check_wall_resolution.py`、目標は局所 y₁⁺ ≤ 1・超過の許容はツールの既定のまま) を停止の出力 s の全 no-slip 壁で
+    (§5.1 #36q、codex diagnose 2026-10-15 Major 2・3)。
+    (a) bcondConfig.yaml の kind が wall* の全 physID (`no_slip_walls`) について、s の出力が揃っていることを先に確かめる
+        (`wall_dumps_at_step`)。s が無い・bcondConfig が読めない・壁が無い・欠けた壁・読めない・要る量が無い・時刻違い → UNDETERMINED
+        (ツールは回さない)。(b) 壁の群だけを `--groups` で渡す (出口などの境界の出力を判定に入れない)。(c) `--weight area` を明示する
+        (ツールの既定は point)。`--step s` も渡す (ツールは s が無い群・見つからない群を判定不能にする)。
+    ツールの出力の壁ごとの行が全部の壁・step s で揃っていなければ、終了コードによらず UNDETERMINED。
+    kind: PASS (終了コード 0) / FAIL (1) / UNDETERMINED (それ以外 = 判定不能; 合格ではない、関門では上書きでも通さない)。why に理由。
+    2026-10-14 までは群も重みも渡さず、step が無いと最新に戻るツールに任せていた (出口の出力のある run では壁の結果によらず判定不能、
+    出口の出力の無い run では点数の割合で判定し、一部の壁の欠測・時刻違いを見逃し得た)。"""
+    import re
+
     from ..evaluate.runner import FORGE_TOOLS
-    cmd = [sys.executable, str(FORGE_TOOLS / "check_wall_resolution.py"), str(run_dir)] + (["--step", str(int(step))] if step is not None else [])
+    run_dir = Path(run_dir)
+    res = {"cmd": None, "rc": None, "kind": "UNDETERMINED", "verdict": [], "step": None if step is None else int(step),
+           "weight": WALL_RESOLUTION_WEIGHT, "walls": None, "dumps": None}
+
+    def undetermined(why: str, text: str = "") -> dict:
+        line = f"VERDICT: UNDETERMINED (関門の事前の確かめ: {why}; check_wall_resolution.py は回していない)"
+        res.update(why=why, verdict=[line], output=text + line + "\n")
+        return res
+
+    if step is None:
+        return undetermined("停止の step が無い (局所 y₁⁺ は停止の step の全 no-slip 壁の出力で判定する)")
+    try:
+        walls = no_slip_walls(run_dir)
+    except Exception as e:  # noqa: BLE001 — 読めない bcondConfig は判定不能
+        return undetermined(f"bcondConfig.yaml から no-slip 壁を引けない ({type(e).__name__}: {e})"[:400])
+    res["walls"] = walls
+    if not walls:
+        return undetermined("bcondConfig.yaml に no-slip 壁 (kind が wall*) が無い")
+    dumps = wall_dumps_at_step(run_dir, walls, int(step))
+    res["dumps"] = dumps
+    bad = [n for n, e in dumps.items() if not e["ok"]]
+    if bad:
+        text = "".join(f"  {n:<12s} {dumps[n]['file']}: {'OK' if dumps[n]['ok'] else dumps[n]['why']}\n" for n in walls)
+        return undetermined(f"停止の step {int(step)} の壁の出力が揃っていない: "
+                            + "; ".join(f"{n} ({dumps[n]['why']})" for n in bad), text)
+    cmd = [sys.executable, str(FORGE_TOOLS / "check_wall_resolution.py"), str(run_dir), "--step", str(int(step)),
+           "--groups", ",".join(walls), "--weight", WALL_RESOLUTION_WEIGHT]
     r = subprocess.run(cmd, capture_output=True, text=True)
     out = r.stdout + r.stderr
     kind = {0: "PASS", 1: "FAIL"}.get(r.returncode, "UNDETERMINED")
-    return {"cmd": cmd, "rc": r.returncode, "kind": kind, "verdict": [ln.strip() for ln in out.splitlines() if ln.startswith("VERDICT")],
-            "output": out}
+    rows = {m.group(1): int(m.group(2)) for m in re.finditer(r"^  (\S+)\s+step\s+(\d+)\s+y1 = ", out, re.M)}
+    res.update(cmd=cmd, rc=r.returncode, kind=kind, verdict=[ln.strip() for ln in out.splitlines() if ln.startswith("VERDICT")],
+               output=out, rows=rows)
+    m = re.search(r"を超える面積割合 最大 ([0-9.]+) % \(許容 ([0-9.eE+-]+) %\)", out)
+    if m:
+        res.update(over_area_pct=float(m.group(1)), over_area_allow_pct=float(m.group(2)))
+    if kind != "UNDETERMINED":
+        off = sorted(n for n in walls if rows.get(n) != int(step)) + sorted(n for n in rows if n not in walls)
+        if off:
+            why = f"ツールの壁ごとの行が全部の壁・step {int(step)} で揃っていない ({', '.join(off)}; 行 {rows})"
+            res.update(kind="UNDETERMINED", why=why, output=out + f"[関門] UNDETERMINED: {why}\n")
+            return res
+    if kind == "FAIL":
+        res["why"] = (f"FAIL (y₁⁺ > 1 の面積の割合 {res.get('over_area_pct')} % > 許容 {res.get('over_area_allow_pct')} %)"
+                      if "over_area_pct" in res else "FAIL")
+    elif kind == "UNDETERMINED":
+        res["why"] = res["verdict"][-1] if res["verdict"] else f"check_wall_resolution.py の終了コード {r.returncode} (VERDICT 行が無い)"
+    return res
 
 
 def _read_stop_record(run_dir) -> dict | None:

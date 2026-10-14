@@ -53,6 +53,16 @@
      同じ)・結果 A (腕 B だけ x 3〜5 で 0.02 mm)・判定不能 (held・腕 A の非有限と 1e−9 r_t の再現の不成立 (腕 B を回さない)・先頭の時刻の再現の不成立・
      帯の固定の不成立・例外・入力の照合)、帯の固定が全時刻に同じ値 (腕 B の 17 回すべてに k₀ の腕 A の全列の帯)・2 窓・代表の列の check_quasisteady・
      梯子の変化の数え方; 本物の抽出で record_ladder が値を変えず梯子の写しが全列で合う、本物の全経路で腕 A の再現・先頭の時刻の再現がビット同一。
+  O. 受け渡しの関門の局所 y₁⁺ (§5.1 #36q; deltastar_loop.wall_resolution_verdict と本物の check_wall_resolution.py、forge なし) を 2 枚の
+     no-slip 壁と出口の出力を持つ合成の run (solver_density_cuda/tools/test_gate_bad_input.make_wall_run) で: 事前登録の受入 — 対照 (両壁とも
+     停止の step に有効な出力) は PASS (--step s・--groups は bcond の wall* の群だけ・--weight area)、片方の壁の停止の step の出力だけを欠くと
+     UNDETERMINED (ツールを回さない)、停止の step が無い (古い step だけ) と UNDETERMINED、面積と点数で合否が逆になる入力は面積で判定 (両向き)、
+     出口の出力があっても壁だけで判定 (群なしのツールは出口で判定不能になる入力)。ほか: 壁の出力が 1 つも無い壁・要る量 (twall) の欠け・
+     属性 step の時刻違い・停止の step なし・no-slip 壁なし・bcondConfig なし → UNDETERMINED、ツールの壁ごとの行の欠け・step 違い → 終了コード 0 でも
+     UNDETERMINED、受け渡しの関門 (handoff_gate、他の条件は偽物で合格) で UNDETERMINED は 3 つの上書きでも止まり対照は止めない。run_0951 の
+     停止の出力の形の合成 (壁 4,719 点・超過 205 点・面積の割合 2.932 %・出口の出力・古い step 97,500) は FAIL・面積の割合を写す (点数なら
+     4.344 %)。環境変数 H370_RUN0951_DIR に run_0951 の停止の出力の写し (bcondConfig・solverConfig・nozzle.h5・res_152500.h5・
+     res_wall_3_152500.h5・res_outlet_2_152500.h5) があれば、それも新しい関門に通して FAIL を確かめる。
 usage: /home/sano/work/forge/design/.venv-opt/bin/python case/45.isobutane_m6_d155/test_h370_launch.py   (所要 約 8〜12 分; 終了コード 0 = ALL PASS)
 """
 from __future__ import annotations
@@ -2362,10 +2372,148 @@ def test_time_band():
           str(R.get("why"))[:300])
 
 
+# ====================================================================================== O. 受け渡しの関門の局所 y₁⁺ (§5.1 #36q)
+RUN0951_OVER_AREA_M2, RUN0951_AREA_M2 = 0.850252596933461, 28.996474362873958   # h370_wallres_split.json (§5.1 #36o) の wall の値
+
+
+def run0951_like(d: Path, S: int = 152500, old: int = 97500) -> Path:
+    """run_0951 の停止の出力の形の合成: 壁 1 枚 (wall・physID 3・wall_isothermal) 4,719 点のうち先頭 205 点が y₁⁺ 1.5 (残り 0.5)、
+    超過の面積の割合が記録 (h370_wallres_split.json の 0.850252596933461 / 28.996474362873958 m² = 2.932 %) と同じになるよう超過の区間と
+    残りの間隔を変える (半径一定の直線の壁: 超過の面積 = L1 + h2/2、全長 1)。出口の出力あり・古い step (97,500) の出力もある。
+    実際の壁の形・y₁⁺ の分布ではない (関門の経路と重みの確認用)。"""
+    import test_gate_bad_input as TGB
+    n, n_over = 4719, 205
+    m = n - n_over
+    f = RUN0951_OVER_AREA_M2 / RUN0951_AREA_M2
+    L1 = (f - 0.5 / m) / (1.0 - 0.5 / m)
+    xs = np.concatenate([np.linspace(0.0, L1, n_over), L1 + (1.0 - L1) * np.arange(1, m + 1) / m])
+    y1p = np.where(np.arange(n) < n_over, 1.5, 0.5)
+    return Path(TGB.make_wall_run(str(d), {3: ("wall", "wall_isothermal", 0.2486, xs, y1p)}, {"wall": [old, S]}))
+
+
+def test_wall_resolution_gate():
+    print("== O. 受け渡しの関門の局所 y₁⁺ (§5.1 #36q)", flush=True)
+    import h5py
+    import test_gate_bad_input as TGB
+    from forge_design.evaluate import runner as RN
+    C = TGB.wall_cases()
+    S, OLD = 2000, 1000
+    both = {"wall_a": [OLD, S], "wall_b": [OLD, S]}
+    root = TMP / "wallres_gate"
+
+    def mk(name, walls, steps, **kw) -> Path:
+        return Path(TGB.make_wall_run(str(root / name), walls, steps, **kw))
+
+    def arg(g, key):
+        c = g.get("cmd") or []
+        return c[c.index(key) + 1] if key in c else None
+
+    # --- 事前登録の受入 ---
+    d = mk("control", C["control"], both)
+    g = DL.wall_resolution_verdict(d, S)
+    check("O 対照 (2 枚の no-slip 壁とも停止の step に有効な出力・出口の出力あり) → PASS; --step s・--groups は bcond の wall* だけ "
+          "(wall_a,wall_b)・--weight area・ツールの行が両壁とも step s",
+          g["kind"] == "PASS" and g["walls"] == {"wall_a": 3, "wall_b": 5} and arg(g, "--groups") == "wall_a,wall_b"
+          and arg(g, "--weight") == "area" and arg(g, "--step") == str(S) and g["rows"] == {"wall_a": S, "wall_b": S}
+          and all(e["ok"] for e in g["dumps"].values()), f"{g['kind']} {g['verdict']} rows={g.get('rows')}")
+    rc_all, v_all, _ = TGB.run_cwr(str(d), "--step", S, "--weight", "area")
+    check("O 出口の出力があっても壁だけで判定 (同じ入力をツールに群なしで渡すと出口で判定不能 = 2026-10-14 までの関門の呼び方)",
+          g["kind"] == "PASS" and "outlet" not in (arg(g, "--groups") or "") and rc_all == 2 and "outlet" in v_all, f"群なし rc {rc_all} {v_all}")
+    d = mk("b_old_only", C["control"], {"wall_a": [OLD, S], "wall_b": [OLD]})
+    g = DL.wall_resolution_verdict(d, S)
+    check("O 片方の壁 (wall_b) の停止の step の出力だけを欠く (古い step はある) → UNDETERMINED、ツールは回さない (古い step に戻らない)",
+          g["kind"] == "UNDETERMINED" and g["cmd"] is None and g["dumps"]["wall_a"]["ok"] and not g["dumps"]["wall_b"]["ok"]
+          and g["dumps"]["wall_b"]["steps_present"] == [OLD] and "wall_b" in g["why"], g.get("why"))
+    d = mk("old_only", C["control"], {"wall_a": [OLD], "wall_b": [OLD]})
+    g = DL.wall_resolution_verdict(d, S)
+    check("O 停止の step が無い (両壁とも古い step だけ) → UNDETERMINED", g["kind"] == "UNDETERMINED" and g["cmd"] is None
+          and not any(e["ok"] for e in g["dumps"].values()), g.get("why"))
+    for name, want, want_pt in (("inv_point_fail", "PASS", 1), ("inv_area_fail", "FAIL", 0)):
+        d = mk(name, C[name], both)
+        g = DL.wall_resolution_verdict(d, S)
+        rp, vp, _ = TGB.run_cwr(str(d), "--step", S, "--groups", "wall_a,wall_b", "--weight", "point")
+        check(f"O 面積の割合と点数の割合で合否が逆になる入力 ({name}) → 面積で判定 {want} (超過の面積 {g.get('over_area_pct')} %; "
+              f"同じ入力を点数で数えると rc {rp})",
+              g["kind"] == want and rp == want_pt and arg(g, "--weight") == "area" and g.get("over_area_allow_pct") == 2.0, f"{g['verdict']} / point {vp}")
+    # --- ほかの判定不能 ---
+    d = mk("b_absent", C["control"], {"wall_a": [OLD, S]})
+    g = DL.wall_resolution_verdict(d, S)
+    check("O 壁 (wall_b) の出力が 1 つも無い → UNDETERMINED", g["kind"] == "UNDETERMINED" and g["dumps"]["wall_b"]["n_steps_present"] == 0, g.get("why"))
+    d = mk("no_twall", C["control"], both)
+    with h5py.File(d / f"res_wall_b_5_{S}.h5", "a") as f:
+        del f["VALUE/twall_x"]
+    g = DL.wall_resolution_verdict(d, S)
+    check("O 停止の step の壁の出力に twall_x が無い → UNDETERMINED", g["kind"] == "UNDETERMINED" and "twall_x" in g["dumps"]["wall_b"]["why"], g.get("why"))
+    d = mk("attr_step", C["control"], both)
+    with h5py.File(d / f"res_wall_a_3_{S}.h5", "a") as f:
+        f.attrs["step"] = np.int64(OLD)
+    g = DL.wall_resolution_verdict(d, S)
+    with h5py.File(d / f"res_wall_a_3_{S}.h5", "a") as f:
+        f.attrs["step"] = np.int64(S)
+    g2 = DL.wall_resolution_verdict(d, S)
+    check("O 壁の出力の属性 step がファイル名の step と違う (時刻違い) → UNDETERMINED、同じなら PASS",
+          g["kind"] == "UNDETERMINED" and "時刻違い" in g["dumps"]["wall_a"]["why"] and g2["kind"] == "PASS", g.get("why"))
+    d = mk("control2", C["control"], both)
+    g = DL.wall_resolution_verdict(d, None)
+    check("O 停止の step が無い (step=None) → UNDETERMINED (最新の出力で判定しない)", g["kind"] == "UNDETERMINED" and g["cmd"] is None, g.get("why"))
+    (d / "bcondConfig.yaml").write_text((d / "bcondConfig.yaml").read_text().replace("kind: wall_isothermal", "kind: slip").replace("kind: wall,", "kind: slip,"))
+    g = DL.wall_resolution_verdict(d, S)
+    check("O bcondConfig に no-slip 壁 (kind が wall*) が無い → UNDETERMINED", g["kind"] == "UNDETERMINED" and g["walls"] == {}, g.get("why"))
+    (d / "bcondConfig.yaml").unlink()
+    g = DL.wall_resolution_verdict(d, S)
+    check("O bcondConfig.yaml が無い → UNDETERMINED", g["kind"] == "UNDETERMINED" and g["walls"] is None, g.get("why"))
+    # --- ツールの壁ごとの行の照合 (偽のツール: 終了コード 0・VERDICT PASS) ---
+    fake = root / "fake_tools"
+    fake.mkdir(parents=True, exist_ok=True)
+    d = root / "control"
+    for label, rows in (("wall_b の行が無い", [("wall_a", S)]), ("wall_b の行が古い step", [("wall_a", S), ("wall_b", OLD)])):
+        body = "".join(f'print("  {n:<12s} step {st:6d}  y1 = 1.000e-05 m  y1+ 平均   0.500 / p99   0.500 / 最大   0.500")\n' for n, st in rows)
+        (fake / "check_wall_resolution.py").write_text(body + 'print("VERDICT: PASS (偽物)")\n')
+        with Patch((RN, "FORGE_TOOLS", fake)):
+            g = DL.wall_resolution_verdict(d, S)
+        check(f"O ツールの壁ごとの行が揃わない ({label}) → 終了コード 0 でも UNDETERMINED", g["kind"] == "UNDETERMINED" and g["rc"] == 0
+              and "揃っていない" in g["why"], g.get("why"))
+    # --- 受け渡しの関門 (他の条件は偽物で合格) ---
+    def gate(run):
+        with Patch((DL, "stop_state", lambda r: {"status": "REACHED", "stop_step": S, "source": "試験の偽物"}),
+                   (DL, "convergence_verdict", lambda r: {"cmd": ["試験の偽物"], "rc": 0, "kind": "PASS", "verdict": [], "output": "偽物\n"}),
+                   (DL, "conservation_check", lambda rec, s: {"pass": True}), (DL, "two_window_check", lambda rec, s: {"pass": True})):
+            return DL.handoff_gate(run, euler_ref={"run": "試験", "res": "res_1.h5", "sha256": "0"}, allow_not_reached="試験",
+                                   allow_unconverged="試験", allow_unsettled="試験", extract=False)
+    g_ok = gate(root / "control")
+    g_ng = gate(root / "b_old_only")
+    txt = (root / "b_old_only" / DL.HANDOFF_WALL_RESOLUTION).read_text()
+    check("O 受け渡しの関門: 停止の step の壁の出力の欠け (UNDETERMINED) は 3 つの上書きでも止まる・対照は局所 y₁⁺ で止めない・"
+          "HANDOFF_WALL_RESOLUTION.txt に理由",
+          any("局所 y₁⁺" in b for b in g_ng["blocked_by"]) and not g_ng["proceed"] and not any("局所 y₁⁺" in b for b in g_ok["blocked_by"])
+          and g_ok["checks"]["wall_resolution"]["pass"] and "UNDETERMINED" in txt and "wall_b" in txt,
+          str([b for b in g_ng["blocked_by"] if "局所" in b])[:300])
+    # --- run_0951 の停止の出力の形の合成 ---
+    d = run0951_like(root / "run0951_like")
+    g = DL.wall_resolution_verdict(d, 152500)
+    prof = root / "run0951_like_prof.csv"
+    TGB.run_cwr(str(d), "--step", 152500, "--groups", "wall", "--weight", "area", "--profile-csv", prof)
+    a = np.loadtxt(root / "run0951_like_prof_wall.csv", delimiter=",", skiprows=1)
+    over_area = 100.0 * float(a[a[:, 4] > 1.0, 9].sum() / a[:, 9].sum())
+    over_pt = 100.0 * float(np.mean(a[:, 4] > 1.0))
+    rc_old, v_old, _ = TGB.run_cwr(str(d), "--step", 152500)
+    check(f"O run_0951 の停止の出力の形の合成 (壁 4,719 点・超過 205 点・出口・古い step) → 新しい関門は FAIL (面積の割合 {over_area:.3f} %、"
+          f"ツールの表示 {g.get('over_area_pct')} %; 点数なら {over_pt:.3f} %)、2026-10-14 までの呼び方 (群・重みなし) は rc {rc_old}",
+          g["kind"] == "FAIL" and abs(over_area - 2.932) < 5e-4 and abs(over_pt - 4.344) < 5e-4 and g.get("over_area_pct") == 2.9
+          and rc_old == 2 and arg(g, "--groups") == "wall", f"{g['verdict']} / 旧 {v_old}")
+    real = os.environ.get("H370_RUN0951_DIR")
+    if real and Path(real, "res_wall_3_152500.h5").is_file():
+        g = DL.wall_resolution_verdict(Path(real), 152500)
+        check(f"O run_0951 の停止の出力の写し ({real}) → 新しい関門は FAIL (超過の面積 {g.get('over_area_pct')} %)",
+              g["kind"] == "FAIL" and g.get("over_area_pct") == 2.9 and arg(g, "--groups") == "wall", str(g["verdict"]))
+    else:
+        print("     (H370_RUN0951_DIR が無いので run_0951 の実データは見ない; 合成の形で代えた)", flush=True)
+
+
 def main() -> int:
     for t in (test_constants, test_wall_output_and_configs, test_euler_stage_configs, test_euler_qualify, test_classify_ab, test_ns_judge,
               test_prelaunch_counterexamples, test_parallel_extraction, test_run_orchestration, test_ns_phase_and_parts, test_euler_wall_restore,
-              test_diag_path, test_fixed_band, test_time_band):
+              test_diag_path, test_fixed_band, test_time_band, test_wall_resolution_gate):
         try:
             t()
         except Exception:  # noqa: BLE001

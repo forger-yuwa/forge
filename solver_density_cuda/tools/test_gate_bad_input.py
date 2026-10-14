@@ -16,9 +16,17 @@
 | 〃 `classify_series` | step が全点 NaN・値は一定 | `STEADY` |
 | `check_mesh_quality` | 体積ゼロの四面体 | AR 1.732 / skew 0.500 = 通常合格 |
 | 〃 | 1001 セル中 1 セルが NaN 座標 | `SOFT-PASS`, exit 0 |
+| `check_wall_resolution` (2026-10-15, §5.1 #36q) | `--groups a,b` で b の壁ダンプが無い | a だけで判定して PASS |
+| 〃 | `--step S` で b の S の壁ダンプが無い (古い step はある) | b は最新の step に戻って PASS |
+| 〃 | `--step S` の壁ダンプがどの壁にも無い (古い step だけ) | 最新の step で PASS |
+
+`check_wall_resolution` の合成の run は `make_wall_run` (2 枚の no-slip 壁 + 出口の出力、node 方式・軸対称; forge なし)。
+受け渡しの関門 (`deltastar_loop.wall_resolution_verdict`) の受入は同じ合成の run で
+`case/45.isobutane_m6_d155/test_h370_launch.py` の O で見る。
 """
 import csv
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -53,6 +61,158 @@ def write_csv(rows, cols):
         w.writerow(cols)
         w.writerows(rows)
     return path
+
+
+# --- check_wall_resolution の合成の run (§5.1 #36q) ---------------------------------------------------------------
+WALL_VISC, WALL_RO, WALL_DR = 1.8e-5, 1.2, 1.0e-5      # 粘性 (viscMethod 0)・壁の密度・第一内部節点までの距離 [m]
+
+
+def wall_tau(y1p):
+    """y₁⁺ = dr √(ρ τ) / μ になる接線の壁応力 τ。"""
+    return (np.asarray(y1p, float) * WALL_VISC / WALL_DR) ** 2 / WALL_RO
+
+
+def make_wall_run(d, walls, steps, outlet=True, axisym=True):
+    """no-slip 壁を持つ node 方式の小さな run を d に作る (forge なし; check_wall_resolution.py がそのまま読める形)。
+    walls: {physID: (名前, kind, r, xs, y1p)} — 壁は半径 r 一定の x 方向の線、各壁節点の内側 WALL_DR に第一内部節点。y1p は壁節点ごとの
+    y₁⁺ (接線の壁応力 twall_x をそこから決める)。steps: {名前: [step, ...]} — その壁の出力 `res_<名前>_<physID>_<step>.h5` を書く step
+    (無い名前は書かない)。outlet: 出口の出力 `res_outlet_2_<step>.h5` (twall_* なし) を全 step に書く。壁の出力の点の順は逆順
+    (順序を仮定しない)。要素は Polyline (CONNE code 2)、軸対称なら面積は 2πr を掛ける。"""
+    import h5py
+    os.makedirs(d, exist_ok=True)
+    coords, wall_ids, planes, bc = [], {}, [], {}
+    for pid, (_, _, r, xs, _) in walls.items():
+        w0 = len(coords)
+        coords += [[x, r, 0.0] for x in xs]
+        wall_ids[pid] = list(range(w0, w0 + len(xs)))
+        i0 = len(coords)
+        coords += [[x, r - WALL_DR, 0.0] for x in xs]
+        ip = []
+        for i, x in enumerate(xs):
+            ds = 0.5 * ((x - xs[i - 1]) if i > 0 else 0.0) + 0.5 * ((xs[i + 1] - x) if i < len(xs) - 1 else 0.0)
+            ip.append(len(planes))
+            planes.append((w0 + i, None, [0.0, ds, 0.0], ds))          # 壁の境界面 (外向き +y)
+        for i in range(len(xs)):
+            planes.append((w0 + i, i0 + i, [0.0, -1.0, 0.0], 1.0))      # 壁節点と第一内部節点の間の面
+        bc[pid] = ip
+    st, sv, sa = [], [], []
+    for c0, c1, n, a in planes:
+        st += ([1, c0, 1, c0] if c1 is None else [2, c0, c1, 2, c0, c1])
+        sv.append(n); sa.append(a)
+    coords = np.asarray(coords, float)
+    with h5py.File(os.path.join(d, "mesh.h5"), "w") as f:
+        f.create_dataset("MESH/COORD", data=coords.ravel())
+        f.create_dataset("CELLS/centCoords", data=coords.ravel())
+        f.create_dataset("PLANES/STRUCT", data=np.asarray(st, np.int32))
+        f.create_dataset("PLANES/surfVect", data=np.asarray(sv, float).ravel())
+        f.create_dataset("PLANES/surfArea", data=np.asarray(sa, float))
+        for pid in walls:
+            f.create_dataset("BCONDS/%d/iCells" % pid, data=np.asarray(wall_ids[pid], np.int32))
+            f.create_dataset("BCONDS/%d/iPlanes" % pid, data=np.asarray(bc[pid], np.int32))
+    with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+        f.write('mesh: {discretization: "node", isAxisymmetric: %d, meshFileName: "mesh.h5"}\n'
+                "physProp: {viscMethod: 0, visc: %r}\nturbulence: {model: \"sst\", wallTreatmentSST: 0}\n" % (int(axisym), WALL_VISC))
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write("inlet:  {physID: 1, kind: inlet_Pressure, outputHDFflg: 0, ints: , floats: {Pt: 1.0e5, Tt: 300.0}}\n")
+        f.write("outlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {Ps: 1.0e3}}\n")
+        for pid, (nm, kind, *_r) in walls.items():
+            f.write("%s: {physID: %d, kind: %s, outputHDFflg: 1, ints: , floats: {Ts: 300.0}}\n" % (nm, pid, kind))
+        f.write("axis:   {physID: 4, kind: axis, outputHDFflg: 0, ints: , floats: }\n")
+    all_steps = sorted(set(s_ for v in steps.values() for s_ in v))
+    for pid, (nm, _, r, xs, y1p) in walls.items():
+        n = len(xs)
+        perm = list(range(n))[::-1]
+        loc = {g: k for k, g in enumerate(perm)}                         # 壁の節点の番号 (x の順) -> 出力の中の番号
+        conne = []
+        for i in range(n - 1):
+            conne += [2, 2, loc[i], loc[i + 1]]
+        tau = wall_tau(y1p)
+        for st_ in steps.get(nm, []):
+            with h5py.File(os.path.join(d, "res_%s_%d_%d.h5" % (nm, pid, st_)), "w") as f:
+                f.create_dataset("MESH/COORD", data=coords[[wall_ids[pid][i] for i in perm]].ravel())
+                f.create_dataset("MESH/CONNE", data=np.asarray(conne, np.int64))
+                vals = {"ro": np.full(n, WALL_RO), "Ts": np.full(n, 300.0), "Ps": np.full(n, 1.0e5),
+                        "twall_x": tau, "twall_y": np.zeros(n), "twall_z": np.zeros(n)}
+                for k, v in vals.items():
+                    f.create_dataset("VALUE/" + k, data=np.asarray(v, float)[perm])
+    if outlet:
+        for st_ in all_steps:
+            with h5py.File(os.path.join(d, "res_outlet_2_%d.h5" % st_), "w") as f:
+                f.create_dataset("MESH/COORD", data=np.asarray([[0.4, 0.0, 0.0], [0.4, 0.01, 0.0]]).ravel())
+                f.create_dataset("MESH/CONNE", data=np.asarray([2, 2, 0, 1], np.int64))
+                for k in ("ro", "Ts", "Ps"):
+                    f.create_dataset("VALUE/" + k, data=np.ones(2))
+    return d
+
+
+def wall_cases():
+    """2 枚の no-slip 壁 (wall_a: wall_isothermal・r 0.01、wall_b: wall・r 0.05) の入力の組 (§5.1 #36q の事前登録の受入)。
+    control: 両壁とも y₁⁺ ≤ 1 (0.5・0.6)。inv_point_fail: wall_a の端の 10 点 (x < 1 mm の細かい要素) だけ y₁⁺ 1.5 →
+    点数の割合 10/31 で FAIL・面積の割合 約 0.5 % で PASS。inv_area_fail: wall_b の 1 点 (両隣が 5 cm の要素) だけ y₁⁺ 1.5 →
+    点数の割合 1/102 で PASS・面積の割合 約 48 % で FAIL。"""
+    xa = np.linspace(0.0, 0.1, 21)
+    xb = np.linspace(0.2, 0.3, 11)
+    xa_c = np.concatenate([np.linspace(0.0, 0.001, 11)[:-1], np.linspace(0.001, 0.1, 21)])
+    xb_c = np.concatenate([np.linspace(0.2, 0.205, 100), [0.255, 0.305]])
+    ya_c = np.where(np.arange(len(xa_c)) < 10, 1.5, 0.5)
+    yb_c = np.where(np.arange(len(xb_c)) == 100, 1.5, 0.6)
+    return {
+        "control": {3: ("wall_a", "wall_isothermal", 0.01, xa, np.full(len(xa), 0.5)),
+                    5: ("wall_b", "wall", 0.05, xb, np.full(len(xb), 0.6))},
+        "inv_point_fail": {3: ("wall_a", "wall_isothermal", 0.01, xa_c, ya_c),
+                           5: ("wall_b", "wall", 0.05, xb, np.full(len(xb), 0.6))},
+        "inv_area_fail": {3: ("wall_a", "wall_isothermal", 0.01, xa, np.full(len(xa), 0.5)),
+                          5: ("wall_b", "wall", 0.05, xb_c, yb_c)},
+    }
+
+
+def run_cwr(d, *args):
+    r = subprocess.run([sys.executable, os.path.join(HERE, "check_wall_resolution.py"), d] + [str(a) for a in args],
+                       capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    v = [ln.strip() for ln in out.splitlines() if ln.startswith("VERDICT")]
+    return r.returncode, (v[-1] if v else out.strip().splitlines()[-1:]), out
+
+
+def wall_resolution_cases():
+    """check_wall_resolution.py の群と時刻 (§5.1 #36q): 指定の群が全部無ければ・指定の step が無ければ判定不能、面積と点数の重み。"""
+    import shutil
+    print("=== check_wall_resolution: 群の欠け・step の欠け (§5.1 #36q) ===")
+    C = wall_cases()
+    S, OLD = 2000, 1000
+    both = {"wall_a": [OLD, S], "wall_b": [OLD, S]}
+    root = tempfile.mkdtemp(prefix="cwr_gate_")
+    try:
+        d = make_wall_run(os.path.join(root, "control"), C["control"], both)
+        rc, v, _ = run_cwr(d, "--step", S, "--groups", "wall_a,wall_b", "--weight", "area")
+        chk("対照 (両壁とも停止の step に出力) -> PASS", rc == 0, "rc=%d %s" % (rc, v))
+        rc, v, _ = run_cwr(d, "--groups", "wall_a,wall_b", "--weight", "area")
+        chk("--step を省けば従来どおり群ごとの最新で PASS", rc == 0, "rc=%d %s" % (rc, v))
+        rc, v, _ = run_cwr(d, "--step", S, "--weight", "area")
+        chk("--groups なしは出口の出力 (twall なし) を拾って判定不能 (従来どおり)", rc == 2, "rc=%d %s" % (rc, v))
+
+        d = make_wall_run(os.path.join(root, "b_old_only"), C["control"], {"wall_a": [OLD, S], "wall_b": [OLD]})
+        rc, v, out = run_cwr(d, "--step", S, "--groups", "wall_a,wall_b", "--weight", "area")
+        chk("片方の壁 (wall_b) の停止の step の出力だけ欠く -> 判定不能 (最新の step に戻らない)",
+            rc == 2 and "wall_b" in v, "rc=%d %s" % (rc, v))
+
+        d = make_wall_run(os.path.join(root, "b_absent"), C["control"], {"wall_a": [OLD, S]})
+        rc, v, _ = run_cwr(d, "--step", S, "--groups", "wall_a,wall_b", "--weight", "area")
+        chk("指定の群 wall_b の出力が 1 つも無い -> 判定不能 (見つかった群だけで判定しない)",
+            rc == 2 and "wall_b" in v, "rc=%d %s" % (rc, v))
+
+        d = make_wall_run(os.path.join(root, "old_only"), C["control"], {"wall_a": [OLD], "wall_b": [OLD]})
+        rc, v, _ = run_cwr(d, "--step", S, "--groups", "wall_a,wall_b", "--weight", "area")
+        chk("停止の step がどの壁にも無い (古い step だけ) -> 判定不能", rc == 2, "rc=%d %s" % (rc, v))
+
+        for name, want_pt, want_ar in (("inv_point_fail", 1, 0), ("inv_area_fail", 0, 1)):
+            d = make_wall_run(os.path.join(root, name), C[name], both)
+            rp, vp, _ = run_cwr(d, "--step", S, "--groups", "wall_a,wall_b", "--weight", "point")
+            ra, va, _ = run_cwr(d, "--step", S, "--groups", "wall_a,wall_b", "--weight", "area")
+            chk("%s: 点数の割合と面積の割合で合否が逆 (point rc %d・area rc %d)" % (name, want_pt, want_ar),
+                rp == want_pt and ra == want_ar, "point rc=%d %s | area rc=%d %s" % (rp, vp, ra, va))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def main():
@@ -246,6 +406,8 @@ def main():
     chk("単引用符でも層流と SST が別キー", sm.stage_key(sq_l, "") != sm.stage_key(sq_s, ""),
         "none=%s sst=%s" % (sm.stage_key(sq_l, "").get("turbulence.model"),
                             sm.stage_key(sq_s, "").get("turbulence.model")))
+
+    wall_resolution_cases()
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1
