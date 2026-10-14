@@ -128,6 +128,13 @@ CFG_KEYS = {"cfl": ("time", "deltaT", "cfl"), "cfl_pseudo": ("time", "deltaT", "
             "blockDPLUR": ("time", "deltaT", "blockDPLUR"), "timeIntegration": ("time", "timeIntegration"),
             "nStepInner": ("time", "nStepInner"), "limiter": ("space", "limiter"), "wallTreatmentSST": ("turbulence", "wallTreatmentSST")}
 B0_ONLY = ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap", "implicitThermalJacobian", "limiterRoRef", "limiterPRef", "limiterARef")
+# S1・S2 に B0 を入れない検査 (§6 V-h370) はキーの有無でなく実効値で見る (plan tooling-generator-defaults-and-launch-gate §5.1 #26・
+# §6.1 result (段取り 1) M1)。B0 だけのキーを書いていないときの実効値 = ソルバの既定 (solverConfig.cpp:372・389・390・453・713〜715;
+# どれも B0 を切った値) を明示したものは書いていないのと同じ (#11 以降の生成器は前の段に lineImplicit・lineDtDirectional・
+# implicitThermalJacobian 0 を明示すべきキーとして足す)。それ以外の値 (型の違う値・真偽値を含む) は B0 が残っているとみなす。
+# h370_problems.B0_OFF・tw370_run.B0_OFF・vgc_run.B0_OFF と同じ (test_h370_launch.py A で照合)
+B0_OFF = {"lineImplicit": 0, "lineDtDirectional": 0, "lineDtDirectionalCap": 0.0, "implicitThermalJacobian": 0,
+          "limiterRoRef": 0.0, "limiterPRef": 0.0, "limiterARef": 0.0}
 DISK_START_MIN = 20 * 1024 ** 3                   # 起動の前・本段の forge の前 (NS の本段は出力 1 枚 ~0.2 GB × 最大 80 枚 + 壁の出力)
 DISK_MIN = 2 * 1024 ** 3                          # 走行中: これを切ったら自分の forge を止める
 GPU_FREE_MIN_MIB = 2048
@@ -536,6 +543,21 @@ def eff_settings(RA, cfg: str) -> dict:
     return {k: (lambda v: None if v is RA._CFG_MISSING else v)(RA._cfg_path_get(doc, pth)) for k, pth in CFG_KEYS.items()}
 
 
+def b0_off_value(v, off) -> bool:
+    """B0 だけのキーの値 v (書いていなければ None) の実効値が、書いていないとき (off = B0_OFF の値) と同じか。整数のキーは整数だけ、
+    実数のキーは整数か実数を認める (真偽値は認めない)。"""
+    if v is None:
+        return True
+    if isinstance(v, bool):
+        return False
+    return (type(v) is int and v == off) if isinstance(off, int) else (type(v) in (int, float) and float(v) == off)
+
+
+def b0_left(st: dict) -> list:
+    """段の設定の値 st ({キー: 値}、eff_settings) のうち、B0 だけのキーで実効値が書いていないときと違うもの (B0 が残っている)。"""
+    return [k for k in B0_ONLY if not b0_off_value(st.get(k), B0_OFF[k])]
+
+
 # --- 生成器が足した明示すべきキー (plan tooling-generator-defaults-and-launch-gate §5.1 #11・#26) ------------------------------------
 # #11 以降の生成器は段の config に「明示すべきキー」を旧い実効値で足す (config_builder.finish_config → yaml_strict.insert_scalars:
 # 既にある写像へのキーの挿入だけ)。NS は prepare_ns が足した後の設定を書き、足したキーを RECIPE_CONTEXT.json の explicit_added
@@ -609,7 +631,8 @@ def explicit_strip(RA, text: str, added, bcond: str, family, tag=None) -> str:
 
 def ns_config_checks(RA, run: Path) -> dict:
     """NS の段の実効設定 (ns_stage_configs で導く S1・S2・本段) が登録どおり (h370_problems.py prep-check の want と同じ)、S1・S2 に B0 の
-    キー・本段の output が無い、3 段の implicitRelax 0.7、sha が prepare_info の ns_stage_configs と同じ。手元の prep-check の sha は記録だけ。
+    キー (起動する段の実効値で: 書いていないときの値 B0_OFF の明示は無いのと同じ; b0_left)・本段の output が無い、3 段の implicitRelax 0.7、
+    sha が prepare_info の ns_stage_configs と同じ。手元の prep-check の sha は記録だけ。
     生成器が明示すべきキーを足した準備 (RECIPE_CONTEXT.json の explicit_added) は、足す前の設定から導いた段で上の検査をし (stages の値も
     足す前のもの)、起動する段の設定から足したキーを除くと足す前の段と同じことを確かめる。sha は起動する (足した後の) 文字列のもの。"""
     fails = []
@@ -644,10 +667,13 @@ def ns_config_checks(RA, run: Path) -> dict:
         for k, v in w.items():
             if st.get(tag, {}).get(k) != v:
                 fails.append(f"{tag} の {k} = {st.get(tag, {}).get(k)!r} ({v!r} であること)")
+    # S1・S2 の B0 は起動する (足した後の) 段の実効値で見る: 書いていないときの値 B0_OFF の明示は B0 なし、それ以外は B0 あり。
+    # 足す前の段は起動する段からキーを除いただけなので、起動する段に B0 が無ければ足す前の段にも無い
+    st_run = {tag: eff_settings(RA, cfg) for tag, cfg, _, _ in pre_st}
     for tag in ("S1_soft", "S2_mid"):
-        left = [k for k in B0_ONLY if st[tag][k] is not None]
-        if left or st[tag]["output"] is not None:
-            fails.append(f"{tag} に B0 のキー {left} (output {st[tag]['output']}) が残っている")
+        left = b0_left(st_run[tag])
+        if left or st_run[tag]["output"] is not None or st[tag]["output"] is not None:
+            fails.append(f"{tag} に B0 のキー {left} (書いていないときと違う実効値; output {st_run[tag]['output']}) が残っている")
     if not all(st[t]["implicitRelax"] == 0.7 for t in st):
         fails.append(f"implicitRelax が 3 段で 0.7 でない: {[st[t]['implicitRelax'] for t in st]}")
     sha = {tag: sha256_text(cfg) for tag, cfg, _, _ in pre_st}

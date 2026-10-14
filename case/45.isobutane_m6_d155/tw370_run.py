@@ -24,7 +24,7 @@
            と VALUE/wall_dist が参照 (G0: run_0754_t2_d2/nozzle.h5 → _tr/q32_init.h5 ba859e02、G0c: run_0804_sp_g0c の入力 6f8fcda6d97482e3) と
            ビット一致。(3) check_mesh_quality.py --ar-max (G0 5000・G0c 10000) が PASS、AR > 5000 のセルを記録。(4) ドナー・移した後・本段の初期の場の
            sha256。(5) 本段の solverConfig.yaml が run_0752_t2_d1 (上限 1.0) と nStepOuter・outStepInterval・mesh.axisSegmentRWeight の明示
-           (と C50 の lineDtDirectionalCap 50) 以外でキーごとに一致、S1・S2 に B0 のキーが無く implicitRelax 0.7。壁温は solverConfig に出ない。
+           (と C50 の lineDtDirectionalCap 50) 以外でキーごとに一致、S1・S2 に B0 のキーが無く (実効値で) implicitRelax 0.7。壁温は solverConfig に出ない。
            (6) bcondConfig.yaml が run_0804_sp_g0c と壁の行の Ts (300.0 → 370.0) だけ違い、species_meta.yaml・resolved_species_*.yaml が同じ
            (forge が起動時に書く記録は本段の直前に照合し直す)。(7) R0 の移しが保存量・乱流量・組成でドナーとビット一致。
            (8) C50 の本段の入力が C1 の本段の入力と格子・保存量・乱流量・組成でビット一致 (ファイルの sha256 も)。
@@ -242,6 +242,28 @@ def resources(where: str, disk_min: int = DISK_START_MIN) -> dict:
 # {family, prestage, main} に残す。(5) の照合は足す前の設定で行い (照合の意味は足さない版と同じ)、足したのが記録どおりのキーの挿入だけで
 # あることは、除いた設定に生成器の仕上げを当て直して元の文字列に戻ることで確かめる。
 EXPLICIT_CONTEXT = "RECIPE_CONTEXT.json"
+# 前の段の元の設定・S1・S2 に B0 を入れない検査 (5) は、キーの有無でなく実効値で見る (同 §5.1 #26・§6.1 result (段取り 1) M1; h370_run.py と
+# 同じ表)。値 = B0 だけのキーを書いていないときの実効値 (ソルバの既定、solverConfig.cpp:372・389・390・453・713〜715; どれも B0 を切った値)。
+# この値の明示 (#11 以降の生成器が前の段に足す lineImplicit・lineDtDirectional・implicitThermalJacobian 0) は書いていないのと同じ、
+# それ以外の値 (型の違う値・真偽値・null を含む) と表に無い B0 のキーの明示は B0 が残っている。
+B0_OFF = {"lineImplicit": 0, "lineDtDirectional": 0, "lineDtDirectionalCap": 0.0, "implicitThermalJacobian": 0,
+          "limiterRoRef": 0.0, "limiterPRef": 0.0, "limiterARef": 0.0}
+
+
+def b0_left(RA, doc, paths) -> list:
+    """読み込んだ設定 doc の B0 だけのパス paths のうち、実効値が書いていないとき (B0_OFF) と違うもの (点区切り)。整数のキーは整数だけ、
+    実数のキーは整数か実数を書いていないときの値と同じとみなす。"""
+    out = []
+    for p in paths:
+        v = RA._cfg_path_get(doc, p)
+        if v is RA._CFG_MISSING:
+            continue
+        off = B0_OFF.get(p[-1])
+        same = off is not None and not isinstance(v, bool) and (
+            (type(v) is int and v == off) if isinstance(off, int) else (type(v) in (int, float) and float(v) == off))
+        if not same:
+            out.append(".".join(p))
+    return out
 
 
 def generator_finish(RA):
@@ -315,7 +337,8 @@ def check_configs(RA, main: str, pre: str, ref: str, cap: float, explicit: dict 
     """本段の設定 main・前の段の元の設定 pre・参照 ref (run_0752 の solverConfig.yaml、上限 1.0) を照合する。
     本段と ref の差として許すのは nStepOuter (こちら 200000)・outStepInterval (同じ 2500 のはず)・mesh.axisSegmentRWeight (片側だけが明示の 1)
     と、cap ≠ 1 の腕の lineDtDirectionalCap (1.0 → cap)。S1・S2 は RA.ns_stage_configs(main, "full", cfg_pre=pre) で導き (C50 は回さないが
-    C1 が回した S1・S2 との照合に使う)、B0 だけのキーと本段の extraFields が無く implicitRelax 0.7 であること。
+    C1 が回した S1・S2 との照合に使う)、B0 だけのキー (起動する設定の実効値で見る: 書いていないときの値 B0_OFF の明示は無いのと同じ、b0_left) と本段の
+    extraFields が無く implicitRelax 0.7 であること。
     explicit (生成器が足した明示すべきキーの記録 {family, prestage, main}; explicit_record) があれば、main・pre から足したキーを除いた
     足す前の設定で上の照合をし (段の値も足す前のもの)、起動する段の設定から足したキーを除くと足す前の段と同じことを確かめる。段の sha は
     起動する (足した後の) 文字列のもの。bcond は除いた設定に生成器の仕上げを当て直すときの bcondConfig.yaml の文字列。"""
@@ -361,9 +384,10 @@ def check_configs(RA, main: str, pre: str, ref: str, cap: float, explicit: dict 
     out_pre = RA._cfg_path_get(RA._cfg_load(pre_b), ("output",))
     for tag, cfg, cfg_b in [("prestage_config", pre, pre_b)] + [(t, c, cb) for (t, c, *_), (_, cb, *_) in zip(pre_st, pre_st_b)]:
         d = RA._cfg_load(cfg_b)
-        left = [".".join(p) for p in b0_only if RA._cfg_path_get(d, p) is not M]
+        # B0 は起動する (足した後の) 設定の実効値で見る (書いていないときの値 B0_OFF の明示は B0 なし)。足す前の設定はキーを除いただけ
+        left = b0_left(RA, RA._cfg_load(cfg), b0_only)
         if left:
-            fails.append(f"(5) {tag} に B0 のキー {left} がある")
+            fails.append(f"(5) {tag} に B0 のキー {left} がある (書いていないときと違う実効値)")
         o = RA._cfg_path_get(d, ("output",))
         if o != out_pre or (isinstance(o, dict) and "extraFields" in o):
             fails.append(f"(5) {tag} の output が前の段の元の設定と違うか extraFields がある ({'<無し>' if o is M else o!r})")

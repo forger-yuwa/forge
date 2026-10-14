@@ -132,6 +132,28 @@ def stop_own_forge(run: Path) -> bool:
 # {family, prestage, main} に残す。(5) の照合は足す前の設定で行い (照合の意味は足さない版と同じ)、足したのが記録どおりのキーの挿入だけで
 # あることは、除いた設定に生成器の仕上げを当て直して元の文字列に戻ることで確かめる。
 EXPLICIT_CONTEXT = "RECIPE_CONTEXT.json"
+# 前の段の元の設定・S1・S2 に B0 を入れない検査 (5) は、キーの有無でなく実効値で見る (同 §5.1 #26・§6.1 result (段取り 1) M1; h370_run.py と
+# 同じ表)。値 = B0 だけのキーを書いていないときの実効値 (ソルバの既定、solverConfig.cpp:372・389・390・453・713〜715; どれも B0 を切った値)。
+# この値の明示 (#11 以降の生成器が前の段に足す lineImplicit・lineDtDirectional・implicitThermalJacobian 0) は書いていないのと同じ、
+# それ以外の値 (型の違う値・真偽値・null を含む) と表に無い B0 のキーの明示は B0 が残っている。
+B0_OFF = {"lineImplicit": 0, "lineDtDirectional": 0, "lineDtDirectionalCap": 0.0, "implicitThermalJacobian": 0,
+          "limiterRoRef": 0.0, "limiterPRef": 0.0, "limiterARef": 0.0}
+
+
+def b0_left(RA, doc, paths) -> list:
+    """読み込んだ設定 doc の B0 だけのパス paths のうち、実効値が書いていないとき (B0_OFF) と違うもの (点区切り)。整数のキーは整数だけ、
+    実数のキーは整数か実数を書いていないときの値と同じとみなす。"""
+    out = []
+    for p in paths:
+        v = RA._cfg_path_get(doc, p)
+        if v is RA._CFG_MISSING:
+            continue
+        off = B0_OFF.get(p[-1])
+        same = off is not None and not isinstance(v, bool) and (
+            (type(v) is int and v == off) if isinstance(off, int) else (type(v) in (int, float) and float(v) == off))
+        if not same:
+            out.append(".".join(p))
+    return out
 
 
 def generator_finish(RA):
@@ -204,8 +226,9 @@ def explicit_strip(RA, text: str, added, bcond, family, tag=None) -> str:
 def check_configs(RA, main: str, pre: str, ref: str, explicit: dict | None = None, bcond: str | None = None) -> dict:
     """本段の設定 main・前の段の元の設定 pre (PRESTAGE_CONFIG)・B0 の参照 ref (run_0717 の solverConfig.yaml) を照合する。
     本段と ref の差として許すのは nStepOuter (こちら 200000)・outStepInterval (こちら 2500)・mesh.axisSegmentRWeight (片側だけが明示の 1)。
-    S1・S2 は RA.ns_stage_configs(main, "full", cfg_pre=pre) で導き、B0 だけのキー (ライン陰解法・上限・ITJ・リミッタの基準値) と本段の
-    extraFields が無く、implicitRelax 0.7 であること。戻り {ok, failures, diff_vs_b0_ref, stages: {tag: {sha256, cfl, ...}}}。
+    S1・S2 は RA.ns_stage_configs(main, "full", cfg_pre=pre) で導き、B0 だけのキー (ライン陰解法・上限・ITJ・リミッタの基準値; 起動する設定の
+    実効値で見る: 書いていないときの値 B0_OFF の明示は無いのと同じ、b0_left) と本段の extraFields が無く、implicitRelax 0.7 であること。
+    戻り {ok, failures, diff_vs_b0_ref, stages: {tag: {sha256, cfl, ...}}}。
     explicit (生成器が足した明示すべきキーの記録 {family, prestage, main}; explicit_record) があれば、main・pre から足したキーを除いた
     足す前の設定で上の照合をし (段の値も足す前のもの)、起動する段の設定から足したキーを除くと足す前の段と同じことを確かめる。段の sha は
     起動する (足した後の) 文字列のもの。bcond は除いた設定に生成器の仕上げを当て直すときの bcondConfig.yaml の文字列。"""
@@ -248,9 +271,10 @@ def check_configs(RA, main: str, pre: str, ref: str, explicit: dict | None = Non
     out_pre = RA._cfg_path_get(RA._cfg_load(pre_b), ("output",))
     for tag, cfg, cfg_b in [("prestage_config", pre, pre_b)] + [(t, c, cb) for (t, c, *_), (_, cb, *_) in zip(pre_st, pre_st_b)]:
         d = RA._cfg_load(cfg_b)
-        left = [".".join(p) for p in b0_only if RA._cfg_path_get(d, p) is not M]
+        # B0 は起動する (足した後の) 設定の実効値で見る (書いていないときの値 B0_OFF の明示は B0 なし)。足す前の設定はキーを除いただけ
+        left = b0_left(RA, RA._cfg_load(cfg), b0_only)
         if left:
-            fails.append(f"(5) {tag} に B0 のキー {left} がある")
+            fails.append(f"(5) {tag} に B0 のキー {left} がある (書いていないときと違う実効値)")
         o = RA._cfg_path_get(d, ("output",))
         if o != out_pre or (isinstance(o, dict) and "extraFields" in o):
             fails.append(f"(5) {tag} の output が前の段の元の設定と違うか extraFields がある ({'<無し>' if o is M else o!r})")

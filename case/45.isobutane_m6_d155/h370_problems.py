@@ -97,6 +97,12 @@ EU_ALLOWED = {"spec.r_throat", "geometry.physical_upstream", "mesh_euler.throat_
 EU_THROAT_REFINE = 5.0          # §5.1 #36e (codex diagnose 3): 4 → 5 で生成の座標の max|δ_in − δ_r| 1.137e-3 → 7.96e-4 mm (codex の再計算)
 EU_NSTEP = 60000                # §6 V-h370: Euler の本段の上限 (出力 1000・cfl_main 2 は元の問題のまま)
 NS_ONLY_GEOM = {"pw_upstream", "physical_wall_repr"}
+# prep-check の S1・S2 に B0 を入れない検査は、キーの有無でなく実効値で見る (plan tooling-generator-defaults-and-launch-gate §5.1 #26・
+# §6.1 result (段取り 1) M1)。値 = B0 だけのキーを書いていないときの実効値 (ソルバの既定、solverConfig.cpp:372・389・390・453・713〜715;
+# どれも B0 を切った値)。これを明示したもの (#11 以降の生成器が前の段に足す lineImplicit・lineDtDirectional・implicitThermalJacobian 0) は
+# 書いていないのと同じ、それ以外の値 (型の違う値・真偽値を含む) は B0 が残っている。h370_run.B0_OFF と同じ (test_h370_launch.py A で照合)
+B0_OFF = {"lineImplicit": 0, "lineDtDirectional": 0, "lineDtDirectionalCap": 0.0, "implicitThermalJacobian": 0,
+          "limiterRoRef": 0.0, "limiterPRef": 0.0, "limiterARef": 0.0}
 
 
 def sha(p) -> str:
@@ -399,6 +405,53 @@ class HRefWall:
         return out
 
 
+def b0_off_value(v, off) -> bool:
+    """B0 だけのキーの値 v (書いていなければ None) の実効値が、書いていないとき (off = B0_OFF の値) と同じか。整数のキーは整数だけ、
+    実数のキーは整数か実数を認める (真偽値は認めない)。h370_run.b0_off_value と同じ。"""
+    if v is None:
+        return True
+    if isinstance(v, bool):
+        return False
+    return (type(v) is int and v == off) if isinstance(off, int) else (type(v) in (int, float) and float(v) == off)
+
+
+def ns_stage_checks(RA, cfg_ns: str, cfg_main: str) -> tuple:
+    """prep-check の段の設定の検査: 前の段の元の設定 cfg_ns・本段の設定 cfg_main (_ns_configs の戻り) から prepare_ns と同じ
+    ns_stage_configs で S1・S2・本段を導き、登録の値 (want)、S1・S2 に B0 が無い (実効値で: B0_OFF の明示は無いのと同じ)・本段の
+    output が無い、3 段の implicitRelax 0.7 を確かめる。戻り (段の実効設定 {tag: {キー: 値 (書いていなければ None)}}, 不成立の一覧)。"""
+    pre, cfg_main_eff, main_want = RA.ns_stage_configs(cfg_main, "full", cfg_pre=cfg_ns)
+    keys = {"cfl": ("time", "deltaT", "cfl"), "cfl_pseudo": ("time", "deltaT", "cfl_pseudo"), "convMethod": ("space", "convMethod"),
+            "nStepOuter": ("time", "last", "nStepOuter"), "outStepInterval": ("time", "outStepInterval"),
+            "implicitRelax": ("time", "deltaT", "implicitRelax"), "lineImplicit": ("time", "deltaT", "lineImplicit"),
+            "lineDtDirectional": ("time", "deltaT", "lineDtDirectional"), "lineDtDirectionalCap": ("time", "deltaT", "lineDtDirectionalCap"),
+            "implicitThermalJacobian": ("time", "deltaT", "implicitThermalJacobian"), "limiterRoRef": ("space", "limiterRoRef"),
+            "limiterPRef": ("space", "limiterPRef"), "limiterARef": ("space", "limiterARef"), "output": ("output",),
+            "blockDPLUR": ("time", "deltaT", "blockDPLUR"), "timeIntegration": ("time", "timeIntegration"),
+            "nStepInner": ("time", "nStepInner"), "limiter": ("space", "limiter")}
+
+    def eff(cfg):
+        doc = RA._cfg_load(cfg)
+        return {k: (lambda v: None if v is RA._CFG_MISSING else v)(RA._cfg_path_get(doc, pth)) for k, pth in keys.items()}
+    fails = []
+    stages = {tag: eff(cfg) for tag, cfg, _, _ in pre}
+    stages["main"] = eff(cfg_main_eff)
+    want = {"S1_soft": {"cfl": 0.5, "convMethod": 0, "nStepOuter": 3000}, "S2_mid": {"cfl": 1.0, "convMethod": 0, "nStepOuter": 3000},
+            "main": {"cfl": 4.0, "nStepOuter": 200000, "outStepInterval": 2500, "lineImplicit": 1, "lineDtDirectional": 1,
+                     "lineDtDirectionalCap": 50.0, "implicitThermalJacobian": 5, "limiterRoRef": 0.8739869154, "limiterPRef": 387491.0573,
+                     "limiterARef": 359.7712185}}
+    for tag, w in want.items():
+        for k, v in w.items():
+            if stages.get(tag, {}).get(k) != v:
+                fails.append(f"{tag} の {k} = {stages.get(tag, {}).get(k)!r} ({v!r} であること)")
+    for tag in ("S1_soft", "S2_mid"):
+        left = [k for k in B0_OFF if not b0_off_value(stages[tag][k], B0_OFF[k])]     # 実効値で見る (キーの有無でなく)
+        if left or stages[tag]["output"] is not None:
+            fails.append(f"{tag} に B0 のキー {left} (書いていないときと違う実効値; output {stages[tag]['output']}) が残っている")
+    if not all(stages[t]["implicitRelax"] == 0.7 for t in stages):
+        fails.append(f"implicitRelax が 3 段で 0.7 でない: {[stages[t]['implicitRelax'] for t in stages]}")
+    return stages, fails
+
+
 def cmd_prep_check(pin: Path) -> int:
     from forge_design.evaluate import runner_axismach as RA
     from forge_design.geometry.wall_axismach import check_required_attrs, monotone_gate
@@ -478,38 +531,10 @@ def cmd_prep_check(pin: Path) -> int:
     rd = td / "cfg"
     rd.mkdir()
     cfg_ns, cfg_main = RA._ns_configs(pn, rd, n, out_int, cfl_main, implicit_relax, main_line)
-    pre, cfg_main_eff, main_want = RA.ns_stage_configs(cfg_main, "full", cfg_pre=cfg_ns)
-    keys = {"cfl": ("time", "deltaT", "cfl"), "cfl_pseudo": ("time", "deltaT", "cfl_pseudo"), "convMethod": ("space", "convMethod"),
-            "nStepOuter": ("time", "last", "nStepOuter"), "outStepInterval": ("time", "outStepInterval"),
-            "implicitRelax": ("time", "deltaT", "implicitRelax"), "lineImplicit": ("time", "deltaT", "lineImplicit"),
-            "lineDtDirectional": ("time", "deltaT", "lineDtDirectional"), "lineDtDirectionalCap": ("time", "deltaT", "lineDtDirectionalCap"),
-            "implicitThermalJacobian": ("time", "deltaT", "implicitThermalJacobian"), "limiterRoRef": ("space", "limiterRoRef"),
-            "limiterPRef": ("space", "limiterPRef"), "limiterARef": ("space", "limiterARef"), "output": ("output",),
-            "blockDPLUR": ("time", "deltaT", "blockDPLUR"), "timeIntegration": ("time", "timeIntegration"),
-            "nStepInner": ("time", "nStepInner"), "limiter": ("space", "limiter")}
-
-    def eff(cfg):
-        doc = RA._cfg_load(cfg)
-        return {k: (lambda v: None if v is RA._CFG_MISSING else v)(RA._cfg_path_get(doc, pth)) for k, pth in keys.items()}
-    stages = {tag: eff(cfg) for tag, cfg, _, _ in pre}
-    stages["main"] = eff(cfg_main_eff)
+    stages, st_fails = ns_stage_checks(RA, cfg_ns, cfg_main)
     rec["stages"] = stages
     rec["stage_sha256"] = RA.ns_stage_sha256(cfg_main, cfg_ns)
-    want = {"S1_soft": {"cfl": 0.5, "convMethod": 0, "nStepOuter": 3000}, "S2_mid": {"cfl": 1.0, "convMethod": 0, "nStepOuter": 3000},
-            "main": {"cfl": 4.0, "nStepOuter": 200000, "outStepInterval": 2500, "lineImplicit": 1, "lineDtDirectional": 1,
-                     "lineDtDirectionalCap": 50.0, "implicitThermalJacobian": 5, "limiterRoRef": 0.8739869154, "limiterPRef": 387491.0573,
-                     "limiterARef": 359.7712185}}
-    for tag, w in want.items():
-        for k, v in w.items():
-            if stages.get(tag, {}).get(k) != v:
-                fails.append(f"{tag} の {k} = {stages.get(tag, {}).get(k)!r} ({v!r} であること)")
-    for tag in ("S1_soft", "S2_mid"):
-        left = [k for k in ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap", "implicitThermalJacobian", "limiterRoRef",
-                            "limiterPRef", "limiterARef") if stages[tag][k] is not None]
-        if left or stages[tag]["output"] is not None:
-            fails.append(f"{tag} に B0 のキー {left} (output {stages[tag]['output']}) が残っている")
-    if not all(stages[t]["implicitRelax"] == 0.7 for t in stages):
-        fails.append(f"implicitRelax が 3 段で 0.7 でない: {[stages[t]['implicitRelax'] for t in stages]}")
+    fails += st_fails
     # --- Euler の参照 ---
     pe = load_pinned(EU, pin, td)
     de = RA.design_chain(pe)

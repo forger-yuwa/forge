@@ -7,6 +7,9 @@
   B. 壁の出力の検査 (wall_output_check) と NS の段の設定の検査 (ns_config_checks) を、問題 YAML から本物の生成器 (_bcond・_ns_configs) で
      作った bcond・設定に当てる: 合格 (壁 wall_isothermal・outputHDFflg 1・Ts 370、本段の output.level 1、wallTreatmentSST 0、間隔 2,500)。
      負例 (outputHDFflg 0・output.level 0・wallTreatmentSST 1・prepare_info の sha の不一致) で不合格。
+     S1・S2 の B0 の検査は実効値で (plan tooling-generator-defaults-and-launch-gate §5.1 #26・§6.1 result (段取り 1) M1): 書いていないときの値
+     (B0_OFF; 4 つの台本で同じ表、値はソルバの既定と型ごと照合) の明示は合格、0 以外・整数のキーの 0.0 は不合格。prep-check の段の設定の検査
+     (h370_problems.ns_stage_checks) も同じ生成器の設定と同じ負例で (B2)。旧い・新しい生成器の両方で。
   C. Euler の段の設定の導出 (euler_stage_configs) が runner_axismach.run_staged が実際に起動する設定 (soft・mid・本段) と sha で一致。
      Observer が導いた段の外の設定を拒む (forge を起動しない)。
   D. Euler の予備の資格 (h370_judge.py --euler-prequalify、§5.1 #36g (1)・#36i (M1)) を合成の Euler の run で: 合格 → 固定 (res_60000・sha)・
@@ -173,6 +176,54 @@ def test_constants():
     env = lambda p: [ln.strip() for ln in (CASE / p).read_text().splitlines() if ln.strip().startswith(("export FORGE", "for v in $(compgen"))]  # noqa: E731
     check("h370_run.sh の FORGE_* の設定 (export・unset) が tw370_run.sh と同じ行", env("h370_run.sh") == env("tw370_run.sh") and len(env("h370_run.sh")) == 4,
           str(env("h370_run.sh")))
+    test_b0_off_table()
+
+
+def test_b0_off_table():
+    """S1・S2 に B0 を入れない検査を実効値で見る表と判定 (plan tooling-generator-defaults-and-launch-gate §5.1 #26・§6.1 result (段取り 1) M1):
+    h370_run・h370_problems・tw370_run・vgc_run の B0_OFF が同じ、キーが B0_ONLY と生成器の B0 だけのパスと同じ、値がソルバの既定
+    (solverConfig.cpp の getOptionalValidatedValue の既定) と型ごと同じ、生成器が前の段に書いてよい B0 の切った値 (_MAIN_LINE_OFF、
+    新しい生成器だけ) と同じ。判定は書いていない・既定の明示を B0 なし、0 以外・型の違う値・真偽値を B0 ありとする。"""
+    import re
+    import h370_problems as HP
+    import tw370_run as TR
+    import vgc_run as VG
+    check("B0_OFF (書いていないときの実効値の表) が h370_run・h370_problems・tw370_run・vgc_run で同じ、キーが B0_ONLY・生成器の B0 だけのパスと同じ",
+          HR.B0_OFF == HP.B0_OFF == TR.B0_OFF == VG.B0_OFF and set(HR.B0_OFF) == set(HR.B0_ONLY)
+          and {p[-1] for p in RA._MAIN_LINE_ONLY_PATHS if p != ("output",)} == set(HR.B0_ONLY), str(HR.B0_OFF))
+    src = (ROOT / "solver_density_cuda" / "input" / "solverConfig.cpp").read_text()
+    got = {}
+    for k in HR.B0_OFF:
+        m = re.findall(r'getOptionalValidatedValue<(\w+)>\(\s*\w+,\s*"' + k + r'",\s*([^,]+),', src)
+        got[k] = [(t, (int(v) if t == "int" else float(v))) for t, v in m]
+    check("B0_OFF の値がソルバの既定 (solverConfig.cpp の getOptionalValidatedValue、整数のキーは int・実数のキーは実数) と型ごと同じ",
+          all(len(got[k]) == 1 and got[k][0][1] == v and type(got[k][0][1]) is type(v) for k, v in HR.B0_OFF.items()), str(got))
+    off = getattr(RA, "_MAIN_LINE_OFF", None)
+    check(f"生成器の B0 の切った値 (_MAIN_LINE_OFF): {'無し (旧い生成器)' if off is None else {p[-1]: v for p, v in off.items()}} が B0_OFF と同じ",
+          off is None or all(HR.B0_OFF.get(p[-1]) == v and type(HR.B0_OFF.get(p[-1])) is type(v) for p, v in off.items()))
+    cases = [({}, []), ({"lineImplicit": 0, "lineDtDirectional": 0, "implicitThermalJacobian": 0}, []),
+             ({"lineDtDirectionalCap": 0.0, "limiterRoRef": 0, "limiterPRef": 0.0, "limiterARef": 0.0}, []),
+             ({"lineImplicit": 1}, ["lineImplicit"]), ({"implicitThermalJacobian": 5}, ["implicitThermalJacobian"]),
+             ({"lineDtDirectional": 1, "lineDtDirectionalCap": 50.0}, ["lineDtDirectional", "lineDtDirectionalCap"]),
+             ({"limiterRoRef": 0.8739869154}, ["limiterRoRef"]), ({"lineImplicit": 0.0}, ["lineImplicit"]),
+             ({"lineImplicit": False}, ["lineImplicit"]), ({"implicitThermalJacobian": "0"}, ["implicitThermalJacobian"])]
+    paths = sorted(p for p in RA._MAIN_LINE_ONLY_PATHS if p != ("output",))
+    res = []
+    for vals, want in cases:
+        st = {k: vals.get(k) for k in HR.B0_ONLY}
+        hp = [k for k in HP.B0_OFF if not HP.b0_off_value(st[k], HP.B0_OFF[k])]
+        doc = {"time": {"deltaT": {k: v for k, v in vals.items() if k.startswith(("line", "implicit"))}},
+               "space": {k: v for k, v in vals.items() if k.startswith("limiter")}}
+        tw = [p.split(".")[-1] for p in TR.b0_left(RA, doc, paths)]
+        vg = [p.split(".")[-1] for p in VG.b0_left(RA, doc, paths)]
+        res.append((vals, sorted(HR.b0_left(st)), sorted(hp), sorted(tw), sorted(vg), sorted(want)))
+    check("B0 の実効値の判定 (h370_run.b0_left・h370_problems.b0_off_value・tw370_run/vgc_run.b0_left): 書いていない・既定 (0・0.0、実数の"
+          "キーの 0) の明示は B0 なし、1・ITJ 5・上限 50・基準値・整数のキーの 0.0・false・\"0\" は B0 あり",
+          all(a == b == c == d == w for _, a, b, c, d, w in res), str([r for r in res if not (r[1] == r[2] == r[3] == r[4] == r[5])]))
+    nul = TR.b0_left(RA, {"time": {"deltaT": {"lineImplicit": None}}}, [("time", "deltaT", "lineImplicit")])
+    unk = TR.b0_left(RA, {"time": {"deltaT": {"lineFoo": 0}}}, [("time", "deltaT", "lineFoo")])
+    check("tw370_run/vgc_run.b0_left: null の明示・表に無い B0 のキーの明示は B0 あり", nul == ["time.deltaT.lineImplicit"]
+          and unk == ["time.deltaT.lineFoo"] and VG.b0_left(RA, {"time": {"deltaT": {"lineFoo": 0}}}, [("time", "deltaT", "lineFoo")]) == unk)
 
 
 # ====================================================================================== B. 壁の出力・NS の段の設定
@@ -239,6 +290,8 @@ def test_wall_output_and_configs():
     r = HR.ns_config_checks(RA, d)
     check("NS の段の設定: prepare_info の本段の sha が違う → 不合格", not r["ok"] and not r["prepare_info_match"]["main"])
     test_explicit_keys(rd, c)
+    test_b0_effective(rd)
+    test_prep_stage_checks()
     r = HR.ns_prepare_info_checks(json.loads((rd / "prepare_info.json").read_text()), None, prelaunch=True)
     check("NS の prepare_info (投入前の準備): 合格 (δ_r の CSV・H・壁温・B0・格子・CFD ピンの照合)", r["ok"], str(r["failures"]))
     bad = {**json.loads((rd / "prepare_info.json").read_text()), "wall_thermal": {"mode": "isothermal", "Tw": 300.0}}
@@ -289,13 +342,102 @@ def test_explicit_keys(rd: Path, c: dict):
           b0_off <= set(ex.get("prestage") or {}) and not b0_off & set(ex.get("main") or {}) and c["explicit_added"] == ex
           and all((ex.get("prestage") or {})[k] == 0 for k in b0_off), str(sorted(ex.get("prestage") or {})))
     for name, fn, want in (
-            ("no_ctx", lambda d: (d / HR.EXPLICIT_CONTEXT).unlink(), "B0 のキー"),
             ("value", lambda d: sub(d, "sstSigmaBlend: 1", "sstSigmaBlend: 0"), "元に戻らない"),
-            ("drop", lambda d: edit_ctx(d, lambda e: e["prestage"].pop("time.deltaT.lineImplicit")), None),
+            ("drop", lambda d: edit_ctx(d, lambda e: e["prestage"].pop("time.deltaT.lineImplicit")), "元に戻らない"),
             ("extra", lambda d: edit_ctx(d, lambda e: e["main"].__setitem__("space.limiter", 2)), "除いて比べられない"),
             ("missing", lambda d: edit_ctx(d, lambda e: e["main"].__setitem__("space.limiterFoo", 1)), "設定に無い")):
         r = variant(name, fn)
         check(f"足したキーの負例 {name} → 不合格", not r["ok"] and (want is None or any(want in f for f in r["failures"])), str(r["failures"])[:300])
+    # 記録が無い (除かずに比べる): 前の段に残るのは B0 の切った値 0 で、書いていないときと同じ実効値なので合格 (§5.1 #26・§6.1 result
+    # (段取り 1) M1: キーの有無でなく実効値で見る。#26 の前はキーがあるだけで不合格だった)。0 以外の値の負例は test_b0_effective
+    r = variant("no_ctx", lambda d: (d / HR.EXPLICIT_CONTEXT).unlink())
+    check("足したキーの記録が無い → 除かずに比べ、前の段に残る B0 の切った値 (lineImplicit 0) は書いていないときと同じ実効値で合格",
+          r["ok"] and r["explicit_added"] == {} and r["stages"]["S1_soft"]["lineImplicit"] == 0 and r["stages"]["S2_mid"]["lineImplicit"] == 0,
+          str(r["failures"])[:300])
+
+
+def set_flow_key(text: str, path, token: str) -> str:
+    """設定の文字列の flow 形式の写像 (time.deltaT・space) のキー path の値を token にする: あれば値のトークンだけを置き換え
+    (yaml_strict.replace_scalars)、無ければ写像の先頭に足す。"""
+    import yaml_strict as YS
+    if RA._cfg_path_get(RA._cfg_load(text), tuple(path)) is not RA._CFG_MISSING:
+        return YS.replace_scalars(text, {tuple(path): token})
+    blk = {"deltaT": "deltaT: {", "space": "space: {"}[path[-2]]
+    assert text.count(blk) == 1, (blk, text.count(blk))
+    return text.replace(blk, f"{blk}{path[-1]}: {token}, ", 1)
+
+
+# 前の段に書く B0 だけのキーの値と合否 (True = 合格): 0 以外・整数のキーの 0.0 は B0 あり、書いていないときの値の明示は B0 なし
+B0_CASES = (("lineImplicit", "1", False), ("implicitThermalJacobian", "5", False), ("lineDtDirectional", "1", False),
+            ("limiterRoRef", "0.8739869154", False), ("lineImplicit", "0.0", False),
+            ("lineImplicit", "0", True), ("lineDtDirectionalCap", "0.0", True), ("limiterPRef", "0", True))
+
+
+def test_b0_effective(rd: Path):
+    """S1・S2 の B0 の検査を実効値で (plan tooling-generator-defaults-and-launch-gate §5.1 #26・§6.1 result (段取り 1) M1) — h370_run.ns_config_checks:
+    前の段の元の設定に B0 だけのキーを書いた run (足したキーの記録なし) を当てる。生成器の ns_stage_configs 自身の検査 (B0 のキーの残り;
+    旧い生成器はキーがあるだけで、新しい生成器は _MAIN_LINE_OFF 以外の値で例外) はそのキーだけ外して (_MAIN_LINE_ONLY_PATHS から除く)、
+    台本の検査だけで判定させる。0 以外の値は不合格 (V-h370 の登録の判定「B0 の前段に line/ITJ を入れない」のまま)、書いていないときの値の
+    明示は合格。外さなければ生成器の検査が先に止める (二重)。"""
+    def variant(name, key, token, bypass=True):
+        path = HR.CFG_KEYS[key]
+        d = TMP / f"cfg_b0_{name}"
+        shutil.copytree(rd, d)
+        (d / HR.EXPLICIT_CONTEXT).unlink(missing_ok=True)
+        (d / RA.PRESTAGE_CONFIG).write_text(set_flow_key((d / RA.PRESTAGE_CONFIG).read_text(), path, token))
+        with Patch(*([(RA, "_MAIN_LINE_ONLY_PATHS", RA._MAIN_LINE_ONLY_PATHS - {path})] if bypass else [])):
+            info = json.loads((d / "prepare_info.json").read_text())
+            try:
+                info["ns_stage_configs"] = RA.ns_stage_sha256((d / "solverConfig.yaml").read_text(), (d / RA.PRESTAGE_CONFIG).read_text())
+            except ValueError:
+                pass                                                   # 生成器の検査で止まる (bypass=False)
+            (d / "prepare_info.json").write_text(json.dumps(info))
+            return HR.ns_config_checks(RA, d)
+
+    for key, token, want_ok in B0_CASES:
+        r = variant(f"{key}_{token}", key, token)
+        hit = [f for f in r["failures"] if "B0 のキー" in f and key in f]
+        check(f"NS の段の設定: 前の段に {key}: {token} (記録なし、生成器の検査を外す) → {'合格' if want_ok else '不合格 (B0 のキー)'}",
+              (r["ok"] and r["stages"]["S1_soft"][key] is not None) if want_ok else (not r["ok"] and len(hit) == 2),
+              str(r["failures"])[:300])
+    r = variant("lineImplicit_1_gen", "lineImplicit", "1", bypass=False)
+    check("NS の段の設定: 前の段に lineImplicit: 1 (生成器の検査を外さない) → 生成器の ns_stage_configs が先に止めて不合格",
+          not r["ok"] and any("ns_stage_configs" in f for f in r["failures"]), str(r["failures"])[:300])
+
+
+def test_prep_stage_checks():
+    """prep-check (h370_problems.py) の段の設定の検査 h370_problems.ns_stage_checks を、prep-check と同じ引数の解決で本物の生成器
+    (_ns_configs) から作った設定に当てる (plan tooling-generator-defaults-and-launch-gate §5.1 #26・§6.1 result (段取り 1) M1: 新しい生成器は
+    前の段に lineImplicit・lineDtDirectional・implicitThermalJacobian 0 を足し、キーの有無で見る旧い検査はこれだけで不合格にしていた)。
+    負例は test_b0_effective と同じ値を前の段の元の設定に書き、生成器の ns_stage_configs 自身の検査はそのキーだけ外す。"""
+    print("== B2. prep-check の段の設定の検査 (h370_problems.ns_stage_checks、本物の生成器の設定)", flush=True)
+    import h370_problems as HP
+    pn = RA.load_problem(HP.NS)                         # prep-check は CFD ピンだけを書き換えた写しを読む (設定の組み立てには効かない)
+    main_line = RA._main_line_spec(pn, None, None)
+    n = int(pn.evaluate.get("nStepOuter", 48000))
+    out_int = int(pn.evaluate.get("outStepInterval", max(n // 6, 1)))
+    rd = TMP / "prep_cfg"
+    rd.mkdir()
+    cfg_ns, cfg_main = RA._ns_configs(pn, rd, n, out_int, float(pn.evaluate.get("cfl_main", 1.0)), pn.evaluate.get("implicit_relax"), main_line)
+    stages, fails = HP.ns_stage_checks(RA, cfg_ns, cfg_main)
+    new = HR.generator_finish(RA) is not None
+    pres = {t: sorted(k for k in HP.B0_OFF if stages[t][k] is not None) for t in ("S1_soft", "S2_mid")}
+    want_pres = sorted(["implicitThermalJacobian", "lineDtDirectional", "lineImplicit"]) if new else []
+    check(f"prep-check の段の設定 ({'新しい' if new else '旧い'}生成器): 合格、S1・S2 に書いてある B0 のキー {pres['S1_soft']} はすべて 0 "
+          f"(キーの有無で見る #26 の前の検査なら {'不合格' if pres['S1_soft'] else '合格'})",
+          not fails and pres["S1_soft"] == pres["S2_mid"] == want_pres and all(stages[t][k] == 0 for t in pres for k in pres[t])
+          and stages["main"]["lineImplicit"] == 1 and stages["main"]["implicitThermalJacobian"] == 5, str(fails))
+    for key, token, want_ok in B0_CASES:
+        path = HR.CFG_KEYS[key]
+        bad = set_flow_key(cfg_ns, path, token)
+        with Patch((RA, "_MAIN_LINE_ONLY_PATHS", RA._MAIN_LINE_ONLY_PATHS - {path})):
+            st_b, f_b = HP.ns_stage_checks(RA, bad, cfg_main)
+        hit = [f for f in f_b if "B0 のキー" in f and key in f]
+        check(f"prep-check の段の設定: 前の段に {key}: {token} (生成器の検査を外す) → {'合格' if want_ok else '不合格 (S1・S2 の B0 のキー)'}",
+              (not f_b and st_b["S1_soft"][key] is not None) if want_ok else len(hit) == 2, str(f_b)[:300])
+    msg = raises(lambda: HP.ns_stage_checks(RA, set_flow_key(cfg_ns, HR.CFG_KEYS["lineImplicit"], "1"), cfg_main), ValueError)
+    check("prep-check の段の設定: 前の段に lineImplicit: 1 (生成器の検査を外さない) → 生成器の ns_stage_configs が先に例外",
+          msg is not None and "B0" in msg, str(msg)[:200])
 
 
 # ====================================================================================== C. Euler の段の設定
