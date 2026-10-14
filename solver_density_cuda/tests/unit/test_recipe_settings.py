@@ -5,6 +5,7 @@
 implicitRelax・未知のキー・誤った節のキー・YAML の重複キー・merge key・理由の無い逸脱・段の不一致 (soft の宣言で 2 次の config)・
 プロファイルに無いキー。advisory の範囲外は WARN で終了 0。正例: プロファイルの値で組んだ config・#4 の実在の正当な config
 (「実験」の宣言)。継承の衝突 (違う値・違う種類・2 つの親・循環) は読み込み時に例外。「実験」の宣言は理由が無いと書けない。
+文書の同期: procedures/recommended-settings.md の生成区間 = `recipe_settings.py --doc` (plan §5.1 #5)。
 生成器の出力そのものの正例と書き写しの台本の一致は design/tests/run_recipe_profiles_tests.py (design の venv が要る)。
 """
 import json
@@ -263,6 +264,12 @@ ok, msg = raises(BASE + '  c: {inherits: b, stages: {main: {fixed: {time.nStepIn
 check(not ok and msg == '例外にならない', '鎖の中で同じキーに同じ値は通る')
 ok, msg = raises(BASE.replace('version: 1', 'version: 1\nversion: 2'), '重複キー')
 check(ok, f'推奨設定のファイルの重複キーも拒否 ({msg})')
+
+# --- 文書の同期: recommended-settings.md の生成区間 = YAML から作った表 (plan §5.1 #5・§6.2「文書の同期」) -----------------
+doc = os.path.join(root, 'procedures', 'recommended-settings.md')
+check(RS.doc_block(open(doc, encoding='utf-8').read()) is not None, 'recommended-settings.md に生成区間の印がある')
+check(RS.update_doc(doc, RC, check_only=True),
+      'recommended-settings.md の生成区間 = recipe_settings.py --doc (違えば `--doc --write procedures/recommended-settings.md`)')
 
 if fails == 0:
     shutil.rmtree(TMP, ignore_errors=True)

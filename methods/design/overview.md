@@ -47,6 +47,17 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 | `opt` | サロゲート MOO ループ (**実装済み**): `ehvi` (2目的 EHVI 閉形式・MC照合済) / `doe` (LHS) / `surrogate` (SMT KRG) / `moo` (NSGA-II+EHVI infill) / `driver` (バッチ評価: 2段起動・VERDICT/物理ゲート・warm seed) / `polish` (チャンク継続+ηドリフトゲート)。実行は `design/.venv-opt` |
 | `menu` | 特殊解析メニュー (凝縮・高度スイープ — Phase 3〜) |
 
+### 解析設定の出所 (機種の推奨設定 = プロファイル、2026-10-14)
+
+生成器 (`evaluate/runner*.py`) の solverConfig は、機種と段ごとの推奨設定 (プロファイル。値の正本は
+`solver_density_cuda/tools/recipes/recommended_settings.yaml`、表は `procedures/recommended-settings.md` 付録 A) から組む方針
+(plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-generator-defaults-and-launch-gate.md) §4.0〜§4.2)。
+**段取り 1 (今) は書き写しの照合だけ**で、生成器の出力は変えていない: 各生成器が今書く設定を `recipes/regen_profiles.py` が
+代表の問題で全段の起動列を偽の forge で作って書き写し、`design/tests/run_recipe_profiles_tests.py` が書き写しと生成器の出力の一致
+(全段の config が自分のプロファイルに PASS) を確かめる。生成器の値を変えたらプロファイルも書き直す (`regen_profiles.py --write`、差は plan に書く)。
+手で作る run は `recipe_settings.py declare <run> --profile P --stage S` で宣言できる。共通の組み立て関数と `RECIPE.json` の自動の書き出し、
+生産レシピへの既定の揃え、投入の関門は後続 (plan §5.1 #10〜#12)。
+
 ## 問題定義 YAML
 
 1 案件 = 1 YAML。全パラメータは 3 区分で宣言する:

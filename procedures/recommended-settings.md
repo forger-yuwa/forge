@@ -9,6 +9,12 @@
 - 記憶や過去の run の config をコピーする前に、必ずこのファイルと突き合わせる (古い run の config には
   廃止キー・旧既定が残っている)。
 - 新しい config を書くときは `.claude/skills/forge-config` (Claude) の手順どおり、解析種別 → 該当節 → 段階起動 → 検証の順で組む。
+- **値の正本は機械可読のファイル** (2026-10-14、plan [tooling-generator-defaults-and-launch-gate](../plans/active/tooling-generator-defaults-and-launch-gate.md) §4.0・§4.1):
+  機種と段ごとの推奨設定 (プロファイル) の値の正本は
+  [`solver_density_cuda/tools/recipes/recommended_settings.yaml`](../solver_density_cuda/tools/recipes/recommended_settings.yaml)。
+  **§1 は機種に依らない共通部分と、機種の決まっていない手書きの run の既定** (YAML の `common_node_ns_sst`・`common_node_euler`)。
+  設計チェーンの機種ごとの値は [付録 A](#付録-a-機種と段ごとの推奨設定-生成区間) (YAML から生成した表) を見る。本文の値と YAML が
+  食い違ったら YAML が正しい (本文を直す)。照合と宣言は §0.1。
 
 ## 0. 解析種別の選び方
 
@@ -20,6 +26,22 @@
 | 多成分 semi-perfect (TP)・凝縮・化学 | §3 | case/16 (TP+凝縮), 28, 44, 47 |
 | 非定常 (LES/DES, 音響, 周期箱) | §6 | case/09, 18, 38, 39 |
 | 変換メッシュ (Fluent/非直交) | §7 | case/24〜27 |
+| 設計チェーンの機種 (ベル・風洞 axis-Mach・wall-driven・SERN など) | 付録 A (機種のプロファイル) | case/40, 41, 45, 46, 68 |
+
+### 0.1 機種と段ごとの推奨設定 (プロファイル) — 現行 (2026-10-14)
+
+- **プロファイル** = 機種と段 (`soft`・`mid`・`main`、SERN の層流暖機 `warm_lam` など) ごとの推奨設定。各キーは `fixed` (違えば FAIL)、
+  `advisory` (推奨の範囲。外れたら WARN)、`forbid` (書けば FAIL) のどれか。どれにも無いキーは、問題 YAML の物理条件・入出力のキー
+  (気体の物性・組成・本段の長さ・出力の間隔・`pRef` など、YAML の `problem_keys`) でなければ FAIL。
+- **段取り 1 (2026-10-14)**: 設計チェーンの機種のプロファイルは**今の生成器が実際に書く設定の書き写し**
+  (`recipes/regen_profiles.py` が代表の問題で全段の起動列を作って取る。手で写さない)。§1 と違うキーは付録 A の「§1 との差」に
+  受入の状態「未」で載せてある。機種の生産レシピに揃えるのは段取り 2、§1 に寄せるのは受入の計算を事前登録してから (plan §6.4)。
+- **手書きの run の照合と宣言**: `python3 solver_density_cuda/tools/recipe_settings.py check <run_dir> --profile P --stage S`
+  (書かずに照合)、`... declare <run_dir> --profile P --stage S` (通れば `RECIPE.json` を書く)。プロファイルから外す値は
+  `--deviate key=value --reason "1 行の理由"` (根拠 `--basis` は任意)、推奨に従わない試し計算は
+  `--experiment --reason "..."` (外れたキーと理由だけを記録)。禁止キー・起動時に拒否されるキー・未知のキー・誤った節のキー・
+  YAML の重複キーは、逸脱でも実験でも FAIL。一覧は `recipe_settings.py list`、中身は `recipe_settings.py show P`。
+- 投入の関門 (`run_case.sh` の起動前の照合) はまだ無い (plan §5.1 #10)。宣言は今は記録で、強制はしない。
 
 ## 1. 共通の基本設定 — 現行 (2026-09-08)
 
@@ -148,7 +170,10 @@ turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaun
 - `katoLaunder: 1` はノズル喉のよどみ偽生産抑制用。平板など剪断層主体では 0 でも可 (A/B で無影響)。
 - **壁処理: `wallTreatmentSST: 0` (低 Re 壁解像) を使う。`1` (SST 壁関数) は使わない** (2026-09-20 ユーザ方針)。
   **ソルバ既定も 0 に変更**し、`1` を指定すると起動時に既知欠損を列挙した警告が出る。
-  設計チェーンの生成器もハードコードをやめ、`evaluate.wall_treatment_sst` (既定 0) にした。
+  設計チェーンの生成器で `evaluate.wall_treatment_sst` (既定 0) を読んで書くのは **SERN (`runner_sern`) だけ**。③ベル TP
+  (`runner._solver_config_tp`) は `wallTreatmentSST: 0` を書き、`evaluate.wall_treatment_sst` が 0 以外なら止める。風洞の NS
+  (`runner_wt._config_sst_node`、axis-Mach の NS も) は `wallTreatmentSST: 0` を直書き、③ベル CPG (`runner._solver_config`) は書かない
+  (= ソルバ既定 0)。機種ごとの実際の値は付録 A (2026-10-14 訂正: 旧記述「生成器は `evaluate.wall_treatment_sst` を読む」は SERN だけの話だった)。
 
   **使わない理由** (積み上がった既知欠損):
 
@@ -188,15 +213,22 @@ turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 0, katoLaun
 ## 3. 多成分 semi-perfect (TP)・凝縮・化学 — 現行 (2026-09-07)
 
 ```yaml
-physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.yaml, thermoHrefTemp: 298.15, ...}
+physProp: {thermalMethod: 2, thermoHrefTemp: 298.15,
+           species: [{name: "MIXDRY", lump: {"CO2": 0.1255, "O2": 0.0226, "N2": 0.8518}, basis: mole}, "H2O"], ...}
 ```
+
+(設計チェーンの生成器が書く形: 2026-10-14 訂正。lump の係数はソルバが起動時に構成種から合成するので、合成済みの擬似種の
+`species_db.yaml` も `speciesDBFile` も書かない。ソルバ内蔵で解決できない実種があるときだけ、その生エントリを
+`species_db_external.yaml` に置いて `speciesDBFile` で渡す。lump 内の値は全桁のモル分率。上の数値は例で、生成器は
+`evaluate.tp_species` (例 `split_h2o` = 乾き成分を MIXDRY にまとめて H2O を残す) から作る)
 
 - **`thermoHrefTemp: 298.15` は必須** (絶対基準 h では χ_eos が桁違いになり TP×node 軸対称が発散 [isobutane-wt-semiperfect])。
 - **LJ パラメータの出典 `physProp.ljSource` は書かない (既定 `[gri30, svehla1962]`)** — 現行 (2026-10-01, plan
   [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。#14 前の run を同じ物性で
   再現・継続するときだけ `ljSource: [legacy_v1]` を明示する (旧既定 = §9)。既定変更の影響 (H2・OH・H・O・NO・CO の LJ が GRI 値に) の
   確認は plan #14-L2 で進行中。
-- 種 DB は `forge_design.gas.semiperfect.mixture_pseudo_species_split` (乾き空気を擬似種 MIXDRY にまとめ H2O を残す)。
+- 輸送種の配置は `evaluate.tp_species` (`forge_design.gas.composition` の `SpeciesLayout`、例 `split_h2o` は乾き空気を lump MIXDRY に
+  まとめ H2O を残す)。config には lump 記法 (`solver_species_config`・`physprop_species_flow`) で書く (上の例)。
 - TP 陰解法の `cfl_pseudo` は 0.5〜2 から上げる (H2O 生成エンタルピーの増幅で上限が低い)。**`implicitRelax: 0.7` を付ければ 6〜8 まで可**
   (2026-09-16 case/44 va3 M4.19 node Euler 軸対称 TP 2 種 + 非平衡凝縮 `run_0181`–`0189`: cfl 6/8 + relax 0.7 は乾き一様場からの起動でも安定で場・残差床が cfl 2 と同じ;
   relax 無しの cfl 6 は軸列の EOS 床洗浄で発散 [implicit-cfl-ceiling-eos-floor と同じ機構]、relax 無しの cfl 4 は完走するが残差床が 2〜10 倍高い)。
@@ -235,8 +267,12 @@ physProp: {thermalMethod: 2, species: [MIXDRY, H2O], speciesDBFile: species_db.y
 
 ## 4. Euler 設計評価 (design chain) — 現行 (2026-09-04)
 
-`design/forge_design/evaluate/runner.py` が生成する config が正本: 全域 2 次 (`convMethod 1, limiter 2`) + 陰解法
-`timeIntegration 11, blockDPLUR 1, cfl_pseudo 4`, `nStepInner 5`, `lowMachPrecond 0`, 壁 `slip`。
+**値は機種ごとのプロファイル (付録 A) が正本** (2026-10-14 訂正: 旧記述「`runner.py` が生成する config が正本」は誤り。
+③ベル CPG の `runner._solver_config` は `viscMethod 1` 固定で NS (層流・SST) しか作れない)。Euler の設計評価の config を作るのは
+`runner_wt._config_euler_node` (axis-Mach Euler・wall-driven・帰還 `euler_loop`。① モード F の `runner_wt.prepare(euler=True)` は
+cell の `_config_euler`) と、③ベル TP の `runner._solver_config_tp` (`evaluate.model: euler`)。今の生成器の値は
+全域 2 次 (`convMethod 1, limiter 2`) + 陰解法 `timeIntegration 11, blockDPLUR 1`、本段 `cfl_pseudo 4` (axis-Mach は問題 YAML の
+`evaluate.cfl_main`)、`nStepInner 5` (§1 の 4 と違う。③ベル TP は 4)、`lowMachPrecond 0`、壁 `slip`。§1 との差と受入の状態は付録 A。
 δ* (排除厚) は CONTUR 初期壁 + 固定 Euler 基準・帯局所抽出 1 pass ([deltastar-production-recipe])、質量流量ゲート必須。
 
 **軸対称ノズルの物理壁 (NS) — 現行 (2026-10-07)**: joint 壁 (`wall_repr: joint`) の物理壁の上流は **`geometry.pw_upstream: poly`**
@@ -358,8 +394,615 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `wall_dist` を双対重心から測る変換 | バグ (2026-09-08 修正) | ノード座標 (コード側) |
 | 内蔵種の LJ = #14 前の単一の値 (GRI-Mech 3.0 と Svehla 1962 の混在、`physProp.ljSource` 無し) | 2026-10-01 まで既定 | 既定 `[gri30, svehla1962]` (書かない)。旧 run の再現・継続だけ `ljSource: [legacy_v1]` |
 
+## 付録 A. 機種と段ごとの推奨設定 (生成区間)
+
+下の表は `solver_density_cuda/tools/recipes/recommended_settings.yaml` から `python3 solver_density_cuda/tools/recipe_settings.py --doc --write procedures/recommended-settings.md` で生成した (手で編集しない。試験 `solver_density_cuda/tests/unit/test_recipe_settings.py` が YAML との一致を確かめる)。設計チェーンの機種のプロファイルは 2026-10-14 の生成器の書き写し (§0.1)。共通プロファイル (`common_*`) は §1・§1.1・§1.2・§2 の値。
+
+<!-- BEGIN GENERATED: recipe_settings.py --doc (手で編集しない。正本は solver_density_cuda/tools/recipes/recommended_settings.yaml) -->
+
+推奨設定のファイルの版 1。プロファイルの一覧 (`python3 solver_density_cuda/tools/recipe_settings.py list`):
+
+| プロファイル | 機種 | 適用条件 | 段 | 根拠 |
+| --- | --- | --- | --- | --- |
+| `common_node_ns_sst` | 機種の決まっていない手書きの node NS (SST・低 Re 壁) の定常 run | discretization node, time steady, physics ns_sst | soft → mid → main | §1・§1.1・§1.2・§2 2026-09-08 (§1・§2)・2026-09-07 (§1.1・§1.2) |
+| `common_node_euler` | 機種の決まっていない手書きの node Euler (slip 壁) の定常 run | discretization node, time steady, physics euler | soft → mid → main | §1・§1.1・§1.2 2026-09-08 (§1)・2026-09-07 (§1.1・§1.2) |
+| `bell_cpg_ns_sst` | ③ベル CPG (node SST・断熱壁、opt/driver の CPG 評価) | dimension 2d_axisym, discretization node, axisymmetric true, physics ns_sst, gas cpg, wall noslip_adiabatic, mesh structured, time steady | soft → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `bell_tp_ns_sst` | ③ベル TP (凍結組成の lump、node SST・低 Re・断熱壁) | dimension 2d_axisym, discretization node, axisymmetric true, physics ns_sst, gas tp, wall noslip_adiabatic, mesh structured, time steady | soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `bell_tp_euler` | ③ベル TP Euler (slip 壁、(M) 特性曲線モードの評価) | dimension 2d_axisym, discretization node, axisymmetric true, physics euler, gas tp, wall slip, mesh structured, time steady | soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `wt_modef_euler_cell` | ① 風洞 モード F (Euler、cell) | dimension 2d_axisym, discretization cell, axisymmetric true, physics euler, gas cpg, wall slip, mesh structured, time steady | soft → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `wt_feedback_euler_node` | ① 風洞 B10 の帰還 (feedback/euler_loop、Euler node、段階起動なし) | dimension 2d_axisym, discretization node, axisymmetric true, physics euler, gas cpg, wall slip, mesh structured, time steady | main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `axismach_euler_tp` | ① 風洞 axis-Mach Euler (TP、slip 壁) | dimension 2d_axisym, discretization node, axisymmetric true, physics euler, gas tp, wall slip, mesh structured, time steady | soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `axismach_ns_sst_tp` | ① 風洞 axis-Mach NS (TP、SST 低 Re、等温壁、main_line なし) | dimension 2d_axisym, discretization node, axisymmetric true, physics ns_sst, gas tp, wall isothermal, mesh structured, time steady | soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `axismach_ns_sst_tp_b0` | ① 風洞 axis-Mach NS (TP、SST 低 Re、等温壁、本段に main_line の B0) | dimension 2d_axisym, discretization node, axisymmetric true, physics ns_sst, gas tp, wall isothermal, mesh structured, time steady | soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `walldriven_euler_cpg` | ① 風洞 wall-driven (Euler、node) | dimension 2d_axisym, discretization node, axisymmetric true, physics euler, gas cpg, wall slip, mesh structured, time steady | soft → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `sern2d_finite_base_frozen_tp_sst` | ⑤ SERN 2D 有限ベース (frozen TP、node SST、等温壁、既定の作動点) | dimension 2d_planar, discretization node, axisymmetric false, physics ns_sst, gas tp, wall isothermal, mesh structured, time steady | warm_lam → soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+| `sern3d_frozen_tp_sst` | ⑤ SERN 3D (frozen TP、node SST、等温壁、既定の作動点) | dimension 3d, discretization node, axisymmetric false, physics ns_sst, gas tp, wall isothermal, mesh structured, time steady | warm_lam → soft → mid → main | plans/active/tooling-generator-defaults-and-launch-gate.md §4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6 2026-10-14 |
+
+**読み方**: 各表の値は `fixed` (宣言したプロファイルと違えば FAIL、理由つきの逸脱で通す)、`〜` の範囲と「任意」は `advisory` (外れたら WARN)。本段 (main) 以外の列の「=」は本段と同じ値、空欄はその段では照合しない (本段の長さ `time.last.nStepOuter` は問題 YAML のキー)。表に無いキーは、問題 YAML の物理条件・入出力のキー (`problem_keys`) か無視するキー以外は「プロファイルに無いキー」として FAIL (逸脱を宣言すれば通す)。禁止キーは書けば FAIL。
+
+#### `common_node_ns_sst`
+
+recommended-settings.md §1・§1.1・§1.2・§2。本段の cfl_pseudo は目安 4〜6 (advisory)。
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 任意 |
+| `mesh.axisymMethod` | = | = | 0 (書くなら) |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 任意 |
+| `mesh.nodeInletCornerWall` | = | = | 1 |
+| `mesh.nodeWallDirichlet` | = | = | 1 |
+| `output.level` | = | = | 1 / 2 のどれか |
+| `physProp.thermCondMethod` | = | = | 任意 |
+| `physProp.thermalMethod` | = | = | 0 / 2 のどれか |
+| `physProp.thermoFloat` | = | = | 1 (書くなら) |
+| `physProp.viscMethod` | = | = | 1 / 2 のどれか |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | 1 |
+| `space.limiter` | 0 | 0 | 2 |
+| `space.limiterScaled` | = | = | 1 (書くなら) |
+| `space.venkatK` | = | = | 0.05 (書くなら) |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | = | = | 任意 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4〜6 (目安) |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.implicitRelax` | = | = | 0.7 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 (書くなら) |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 2000 | 2000 | 8000〜12000 (目安) |
+| `time.nStepInner` | 10 | 10 | 4 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.dilatationCorrection` | = | = | 2 |
+| `turbulence.katoLaunder` | = | = | 1 |
+| `turbulence.model` | = | = | sst |
+| `turbulence.scalarDiffusion` | = | = | 1 |
+| `turbulence.turbulentPrandtl` | = | = | 0.9 |
+| `turbulence.wallTreatmentSST` | = | = | 0 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+#### `common_node_euler`
+
+recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1.1 (Euler の壁は slip)。viscMethod 0 は定数粘性なので visc・thermCond も 0。§1 は soft・mid の nStepInner を node NS (10) にしか決めていないので任意。
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 任意 |
+| `mesh.axisymMethod` | = | = | 0 (書くなら) |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 任意 |
+| `mesh.nodeInletCornerWall` | = | = | 任意 |
+| `mesh.nodeWallDirichlet` | = | = | 任意 |
+| `output.level` | = | = | 1 / 2 のどれか |
+| `physProp.thermCond` | = | = | 0.0 |
+| `physProp.thermalMethod` | = | = | 0 / 2 のどれか |
+| `physProp.thermoFloat` | = | = | 1 (書くなら) |
+| `physProp.visc` | = | = | 0.0 |
+| `physProp.viscMethod` | = | = | 0 |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | 1 |
+| `space.limiter` | 0 | 0 | 2 |
+| `space.limiterScaled` | = | = | 1 (書くなら) |
+| `space.venkatK` | = | = | 0.05 (書くなら) |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | = | = | 任意 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4 (目安) |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.implicitRelax` | = | = | 0.7 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 (書くなら) |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 2000 | 2000 | 8000〜12000 (目安) |
+| `time.nStepInner` | 任意 | 任意 | 4 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.model` | = | = | none |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+#### `bell_cpg_ns_sst`
+
+書き写し: generator `runner._solver_config + opt/driver の soft (別ディレクトリ)`、problem `case/40.nozzle_design_tool/problem_bell_top.yaml`、call `opt.driver.Campaign.evaluate (prepare・forge・collect を差し替え)`
+
+| キー | soft | main |
+| --- | --- | --- |
+| `mesh.axisCentroidShift` | = | 1 |
+| `mesh.discretization` | = | node |
+| `mesh.isAxisymmetric` | = | 1 |
+| `mesh.nodeWallDirichlet` | = | 1 |
+| `physProp.thermalMethod` | = | 0 |
+| `physProp.viscMethod` | = | 1 |
+| `solver` | = | SLAU |
+| `space.convMethod` | 0 | 1 |
+| `space.limiter` | = | 2 |
+| `time.deltaT.blockDPLUR` | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 4.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 4.0 |
+| `time.deltaT.control` | = | 1 |
+| `time.deltaT.detectNaN` | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | 0 |
+| `time.dualTime` | = | 0 |
+| `time.last.nStepOuter` | 3000 |  |
+| `time.nStepInner` | = | 5 |
+| `time.timeIntegration` | = | 11 |
+| `time.unsteady` | = | 0 |
+| `turbulence.dilatationCorrection` | = | 2 |
+| `turbulence.katoLaunder` | = | 1 |
+| `turbulence.model` | = | sst |
+| `turbulence.scalarDiffusion` | = | 1 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_ns_sst`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `mesh.nodeInletCornerWall` | soft, main | 1 | 書かない (solver 既定 不明) | 未 |
+| `space.limiter` | soft | 0 | 2 | 未 |
+| `time.deltaT.implicitRelax` | soft, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.last.nStepOuter` | soft | 2000 | 3000 | 未 |
+| `time.nStepInner` | soft | 10 | 5 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+| `turbulence.turbulentPrandtl` | soft, main | 0.9 | 書かない (solver 既定 0.85) | 未 |
+
+#### `bell_tp_ns_sst`
+
+書き写し: generator `runner._solver_config_tp (TP_STAGES)`、problem `case/68.bell_two_mode/problem_bell_tp_m_ns_l100_corr.yaml`、call `runner.run_staged_tp (prepare・forge を差し替え)`
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 1 |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 1 |
+| `mesh.nodeInletCornerWall` | = | = | 1 |
+| `mesh.nodeWallDirichlet` | = | = | 1 |
+| `output.level` | = | = | 1 |
+| `physProp.thermalMethod` | = | = | 2 |
+| `physProp.viscMethod` | = | = | 2 |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | 1 |
+| `space.limiter` | 0 | 0 | 2 |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 1.0 | 4.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4.0 |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.implicitRelax` | = | = | 0.7 |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 2000 | 2000 |  |
+| `time.nStepInner` | 10 | 10 | 4 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.dilatationCorrection` | = | = | 2 |
+| `turbulence.katoLaunder` | = | = | 1 |
+| `turbulence.model` | = | = | sst |
+| `turbulence.scalarDiffusion` | = | = | 1 |
+| `turbulence.turbulentPrandtl` | = | = | 0.9 |
+| `turbulence.wallTreatmentSST` | = | = | 0 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+#### `bell_tp_euler`
+
+書き写し: generator `runner._solver_config_tp (TP_STAGES、evaluate.model: euler)`、problem `case/68.bell_two_mode/problem_bell_tp_m_euler_l100.yaml`、call `runner.run_staged_tp (prepare・forge を差し替え)`
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 1 |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 1 |
+| `output.level` | = | = | 1 |
+| `physProp.thermCond` | = | = | 0.0 |
+| `physProp.thermalMethod` | = | = | 2 |
+| `physProp.visc` | = | = | 0.0 |
+| `physProp.viscMethod` | = | = | 0 |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | 1 |
+| `space.limiter` | 0 | 0 | 2 |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 1.0 | 4.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4.0 |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.implicitRelax` | = | = | 0.7 |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 2000 | 2000 |  |
+| `time.nStepInner` | 10 | 10 | 4 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.model` | = | = | none |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+#### `wt_modef_euler_cell`
+
+書き写し: generator `runner_wt._config_euler (cell 固定) + run_staged の文字列置換`、problem `case/41.wind_tunnel_design/problem_m4.yaml`、call `runner_wt.main (prepare・forge を差し替え)`
+
+| キー | soft | main |
+| --- | --- | --- |
+| `mesh.discretization` | = | cell |
+| `mesh.isAxisymmetric` | = | 1 |
+| `physProp.thermCond` | = | 0.0 |
+| `physProp.thermalMethod` | = | 0 |
+| `physProp.visc` | = | 0.0 |
+| `physProp.viscMethod` | = | 0 |
+| `solver` | = | SLAU |
+| `space.convMethod` | 0 | 1 |
+| `space.limiter` | = | 2 |
+| `time.deltaT.blockDPLUR` | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 4.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 4.0 |
+| `time.deltaT.control` | = | 1 |
+| `time.deltaT.detectNaN` | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | 0 |
+| `time.dualTime` | = | 0 |
+| `time.last.nStepOuter` | 3000 |  |
+| `time.nStepInner` | 10 | 5 |
+| `time.timeIntegration` | = | 11 |
+| `time.unsteady` | = | 0 |
+| `turbulence.model` | = | none |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_euler`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `mesh.discretization` | soft, main | node | cell | 未 |
+| `space.limiter` | soft | 0 | 2 | 未 |
+| `time.deltaT.implicitRelax` | soft, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.last.nStepOuter` | soft | 2000 | 3000 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+
+#### `wt_feedback_euler_node`
+
+書き写し: generator `runner_wt._config_euler_node (euler_loop の cold のパス)`、problem `case/41.wind_tunnel_design/problem_m4_b10.yaml`、call `euler_loop の `_cfg(n, n // 4)` (n = 24000)`
+
+| キー | main |
+| --- | --- |
+| `mesh.axisCentroidShift` | 1 |
+| `mesh.discretization` | node |
+| `mesh.isAxisymmetric` | 1 |
+| `physProp.thermCond` | 0.0 |
+| `physProp.thermalMethod` | 0 |
+| `physProp.visc` | 0.0 |
+| `physProp.viscMethod` | 0 |
+| `solver` | SLAU |
+| `space.convMethod` | 1 |
+| `space.limiter` | 2 |
+| `time.deltaT.blockDPLUR` | 1 |
+| `time.deltaT.cfl` | 4.0 |
+| `time.deltaT.cfl_pseudo` | 4.0 |
+| `time.deltaT.control` | 1 |
+| `time.deltaT.detectNaN` | 1 |
+| `time.deltaT.lowMachPrecond` | 0 |
+| `time.dualTime` | 0 |
+| `time.nStepInner` | 5 |
+| `time.timeIntegration` | 11 |
+| `time.unsteady` | 0 |
+| `turbulence.model` | none |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_euler`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `time.deltaT.implicitRelax` | main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+
+#### `axismach_euler_tp`
+
+書き写し: generator `runner_wt._config_euler_node → runner_axismach._apply_gas_to_config + run_staged (_cfg_set)`、problem `case/45.isobutane_m6_d155/problem_d155_euler_pin_G1_recal_mono.yaml`、call `runner_axismach.main (prepare・forge を差し替え)`
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 1 |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 1 |
+| `physProp.thermCond` | = | = | 0.0 |
+| `physProp.thermalMethod` | = | = | 2 |
+| `physProp.visc` | = | = | 0.0 |
+| `physProp.viscMethod` | = | = | 0 |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | = | 1 |
+| `space.limiter` | = | = | 2 |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 1.0 | 2.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 2.0 |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 3000 | 3000 |  |
+| `time.nStepInner` | = | = | 5 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.model` | = | = | none |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_euler`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `space.convMethod` | mid | 0 | 1 | 未 |
+| `space.limiter` | soft, mid | 0 | 2 | 未 |
+| `time.deltaT.cfl_pseudo` | main | 4 (目安) | 2.0 | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.last.nStepOuter` | soft, mid | 2000 | 3000 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+
+#### `axismach_ns_sst_tp`
+
+書き写し: generator `runner_wt._config_sst_node → _apply_gas_to_config(viscous) + ns_stage_configs`、problem `case/45.isobutane_m6_d155/problem_d155_ns_prod_coldmesh_tw300.yaml`、call `runner_axismach._ns_configs → run_staged_ns(stages=full) (forge を差し替え)`
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 1 |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 1 |
+| `mesh.nodeWallDirichlet` | = | = | 1 |
+| `physProp.thermalMethod` | = | = | 2 |
+| `physProp.viscMethod` | = | = | 2 |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | 1 |
+| `space.limiter` | = | = | 2 |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | 0.5 | = | 1.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | = | 1.0 |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 3000 | 3000 |  |
+| `time.nStepInner` | 10 | 10 | 5 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.dilatationCorrection` | = | = | 2 |
+| `turbulence.katoLaunder` | = | = | 1 |
+| `turbulence.model` | = | = | sst |
+| `turbulence.scalarDiffusion` | = | = | 1 |
+| `turbulence.turbulentPrandtl` | = | = | 0.9 |
+| `turbulence.wallTreatmentSST` | = | = | 0 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_ns_sst`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `mesh.nodeInletCornerWall` | soft, mid, main | 1 | 書かない (solver 既定 不明) | 未 |
+| `space.limiter` | soft, mid | 0 | 2 | 未 |
+| `time.deltaT.cfl_pseudo` | main | 4〜6 (目安) | 1.0 | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.last.nStepOuter` | soft, mid | 2000 | 3000 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+
+#### `axismach_ns_sst_tp_b0`
+
+書き写し: generator `runner_wt._config_sst_node → _apply_gas_to_config(viscous) → _apply_main_line + ns_stage_configs (PRESTAGE_CONFIG)`、problem `case/45.isobutane_m6_d155/problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml`、call `runner_axismach._ns_configs → run_staged_ns(stages=full) (forge を差し替え)`
+
+| キー | soft | mid | main |
+| --- | --- | --- | --- |
+| `mesh.axisCentroidShift` | = | = | 1 |
+| `mesh.discretization` | = | = | node |
+| `mesh.isAxisymmetric` | = | = | 1 |
+| `mesh.nodeWallDirichlet` | = | = | 1 |
+| `output.level` |  |  | 1 |
+| `physProp.thermalMethod` | = | = | 2 |
+| `physProp.viscMethod` | = | = | 2 |
+| `solver` | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | 1 |
+| `space.limiter` | = | = | 2 |
+| `time.deltaT.blockDPLUR` | = | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 1.0 | 4.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4.0 |
+| `time.deltaT.control` | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | 1 |
+| `time.deltaT.implicitRelax` | = | = | 0.7 |
+| `time.deltaT.implicitThermalJacobian` |  |  | 5 |
+| `time.deltaT.lineDtDirectional` |  |  | 1 |
+| `time.deltaT.lineDtDirectionalCap` |  |  | 50.0 |
+| `time.deltaT.lineImplicit` |  |  | 1 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 |
+| `time.dualTime` | = | = | 0 |
+| `time.last.nStepOuter` | 3000 | 3000 |  |
+| `time.nStepInner` | 10 | 10 | 5 |
+| `time.timeIntegration` | = | = | 11 |
+| `time.unsteady` | = | = | 0 |
+| `turbulence.dilatationCorrection` | = | = | 2 |
+| `turbulence.katoLaunder` | = | = | 1 |
+| `turbulence.model` | = | = | sst |
+| `turbulence.scalarDiffusion` | = | = | 1 |
+| `turbulence.turbulentPrandtl` | = | = | 0.9 |
+| `turbulence.wallTreatmentSST` | = | = | 0 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_ns_sst`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `mesh.nodeInletCornerWall` | soft, mid, main | 1 | 書かない (solver 既定 不明) | 未 |
+| `space.limiter` | soft, mid | 0 | 2 | 未 |
+| `time.last.nStepOuter` | soft, mid | 2000 | 3000 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+
+#### `walldriven_euler_cpg`
+
+書き写し: generator `runner_wt._config_euler_node + run_staged の文字列置換`、problem `case/41.wind_tunnel_design/problem_m4_walldriven.yaml`、call `runner_walldriven.main (prepare・forge を差し替え)`
+
+| キー | soft | main |
+| --- | --- | --- |
+| `mesh.axisCentroidShift` | = | 1 |
+| `mesh.discretization` | = | node |
+| `mesh.isAxisymmetric` | = | 1 |
+| `physProp.thermCond` | = | 0.0 |
+| `physProp.thermalMethod` | = | 0 |
+| `physProp.visc` | = | 0.0 |
+| `physProp.viscMethod` | = | 0 |
+| `solver` | = | SLAU |
+| `space.convMethod` | 0 | 1 |
+| `space.limiter` | = | 2 |
+| `time.deltaT.blockDPLUR` | = | 1 |
+| `time.deltaT.cfl` | 0.5 | 4.0 |
+| `time.deltaT.cfl_pseudo` | 0.5 | 4.0 |
+| `time.deltaT.control` | = | 1 |
+| `time.deltaT.detectNaN` | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | 0 |
+| `time.dualTime` | = | 0 |
+| `time.last.nStepOuter` | 3000 |  |
+| `time.nStepInner` | = | 5 |
+| `time.timeIntegration` | = | 11 |
+| `time.unsteady` | = | 0 |
+| `turbulence.model` | = | none |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_euler`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `space.limiter` | soft | 0 | 2 | 未 |
+| `time.deltaT.implicitRelax` | soft, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.last.nStepOuter` | soft | 2000 | 3000 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+
+#### `sern2d_finite_base_frozen_tp_sst`
+
+書き写し: generator `runner_sern._solver_config + run_staged の正規表現・文字列置換 (問題の opt: の梯子)`、problem `case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml`、call `runner_sern.main (prepare・forge・restart を差し替え)`
+
+| キー | warm_lam | soft | mid | main |
+| --- | --- | --- | --- | --- |
+| `mesh.discretization` | = | = | = | node |
+| `mesh.isAxisymmetric` | = | = | = | 0 |
+| `mesh.nodeWallDirichlet` | = | = | = | 1 |
+| `physProp.thermalMethod` | = | = | = | 2 |
+| `physProp.viscMethod` | = | = | = | 2 |
+| `solver` | = | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | = | 1 |
+| `space.limiter` | = | = | = | 2 |
+| `space.limiterScaled` | = | = | = | 1 |
+| `space.venkatK` | = | = | = | 0.05 |
+| `time.deltaT.blockDPLUR` | = | = | = | 1 |
+| `time.deltaT.cfl` | 0.1 | 0.1 | 0.1 | 0.5 |
+| `time.deltaT.cfl_pseudo` | 0.1 | 0.1 | 0.1 | 0.5 |
+| `time.deltaT.control` | = | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | = | = | 0 |
+| `time.dualTime` | = | = | = | 0 |
+| `time.last.nStepOuter` | 4000 | 4000 | 4000 |  |
+| `time.nStepInner` | = | = | = | 5 |
+| `time.timeIntegration` | = | = | = | 11 |
+| `time.unsteady` | = | = | = | 0 |
+| `turbulence.dilatationCorrection` |  | = | = | 2 |
+| `turbulence.katoLaunder` |  | = | = | 1 |
+| `turbulence.model` | none | = | = | sst |
+| `turbulence.scalarDiffusion` |  | = | = | 1 |
+| `turbulence.wallTreatmentSST` |  | = | = | 0 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_ns_sst`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `mesh.nodeInletCornerWall` | soft, mid, main | 1 | 書かない (solver 既定 不明) | 未 |
+| `space.convMethod` | mid | 0 | 1 | 未 |
+| `space.limiter` | soft, mid | 0 | 2 | 未 |
+| `time.deltaT.cfl_pseudo` | soft | 0.5 | 0.1 | 未 |
+| `time.deltaT.cfl_pseudo` | mid | 1.0 | 0.1 | 未 |
+| `time.deltaT.cfl_pseudo` | main | 4〜6 (目安) | 0.5 | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.last.nStepOuter` | soft, mid | 2000 | 4000 | 未 |
+| `time.nStepInner` | soft, mid | 10 | 5 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+| `turbulence.turbulentPrandtl` | soft, mid, main | 0.9 | 書かない (solver 既定 0.85) | 未 |
+
+#### `sern3d_frozen_tp_sst`
+
+書き写し: generator `runner_sern._solver_config + run_staged の正規表現・文字列置換 (問題の opt: の梯子)`、problem `case/46.sern_design/problem_3d_prod_m6on_g2.yaml`、call `runner_sern3d.main (prepare・forge・restart を差し替え)`
+
+| キー | warm_lam | soft | mid | main |
+| --- | --- | --- | --- | --- |
+| `mesh.discretization` | = | = | = | node |
+| `mesh.isAxisymmetric` | = | = | = | 0 |
+| `mesh.nodeWallDirichlet` | = | = | = | 1 |
+| `physProp.thermalMethod` | = | = | = | 2 |
+| `physProp.viscMethod` | = | = | = | 2 |
+| `solver` | = | = | = | SLAU |
+| `space.convMethod` | 0 | 0 | = | 1 |
+| `space.limiter` | = | = | = | 2 |
+| `space.limiterScaled` | = | = | = | 1 |
+| `space.venkatK` | = | = | = | 0.05 |
+| `time.deltaT.blockDPLUR` | = | = | = | 1 |
+| `time.deltaT.cfl` | 0.2 | 0.2 | 0.2 | 0.25 |
+| `time.deltaT.cfl_pseudo` | 0.2 | 0.2 | 0.2 | 0.25 |
+| `time.deltaT.control` | = | = | = | 1 |
+| `time.deltaT.detectNaN` | = | = | = | 1 |
+| `time.deltaT.lowMachPrecond` | = | = | = | 0 |
+| `time.dualTime` | = | = | = | 0 |
+| `time.last.nStepOuter` | 2000 | 2000 | 2000 |  |
+| `time.nStepInner` | = | = | = | 5 |
+| `time.timeIntegration` | = | = | = | 11 |
+| `time.unsteady` | = | = | = | 0 |
+| `turbulence.dilatationCorrection` |  | = | = | 2 |
+| `turbulence.katoLaunder` |  | = | = | 1 |
+| `turbulence.model` | none | = | = | sst |
+| `turbulence.scalarDiffusion` |  | = | = | 1 |
+| `turbulence.wallTreatmentSST` |  | = | = | 0 |
+
+禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
+
+照合しない: `time.deltaT.dt`、`time.deltaT.dt_min`、`time.deltaT.dt_max` (定常 (unsteady 0) では効かない (plan §3.2))
+
+§1 (`common_node_ns_sst`) との差:
+
+| キー | 段 | §1 | この機種 | 受入 |
+| --- | --- | --- | --- | --- |
+| `mesh.nodeInletCornerWall` | soft, mid, main | 1 | 書かない (solver 既定 不明) | 未 |
+| `space.convMethod` | mid | 0 | 1 | 未 |
+| `space.limiter` | soft, mid | 0 | 2 | 未 |
+| `time.deltaT.cfl_pseudo` | soft | 0.5 | 0.2 | 未 |
+| `time.deltaT.cfl_pseudo` | mid | 1.0 | 0.2 | 未 |
+| `time.deltaT.cfl_pseudo` | main | 4〜6 (目安) | 0.25 | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.nStepInner` | soft, mid | 10 | 5 | 未 |
+| `time.nStepInner` | main | 4 | 5 | 未 |
+| `turbulence.turbulentPrandtl` | soft, mid, main | 0.9 | 書かない (solver 既定 0.85) | 未 |
+
+<!-- END GENERATED: recipe_settings.py --doc -->
+
 ## 変更ログ
 
+- `2026-10-14` — 値の正本を機械可読の `solver_density_cuda/tools/recipes/recommended_settings.yaml` (機種と段ごとのプロファイル) に移し、§1 を「機種に依らない共通部分と機種の決まっていない手書きの run の既定」と位置づけた (冒頭・§0.1)。機種ごとの値の表を付録 A (`recipe_settings.py --doc` の生成区間) に置いた。古い記述 3 件を訂正: §4「`runner.py` が生成する config が正本」、§2「生成器は `evaluate.wall_treatment_sst` を読む」(SERN だけ)、§3 の化学種の例 (生成器の lump 記法に)。plan [tooling-generator-defaults-and-launch-gate](../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #5・#6。
 - `2026-10-07` — §4 に軸対称ノズルの物理壁 (NS) の現行 (`geometry.pw_upstream: poly`、寸法は `solve_rt` / `solve_rt_throat`) を追加、§9 に `geometry.pw_ramp`・CFD 前の旧 `solve_rt` を旧設定として (plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md))。
 
 - `2026-10-01` — §3 に LJ の出典 `physProp.ljSource` (既定 `[gri30, svehla1962]`、旧 run の再現は `[legacy_v1]`) を追加、§9 に旧既定 (plan [thermophysics-solver-owned-species-db](../plans/active/thermophysics-solver-owned-species-db.md) §4.10 #14)。
