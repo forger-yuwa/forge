@@ -122,7 +122,8 @@
 | 2c | 境目を全部残す・記録の名前 | **済 (2026-10-14、1e178365)**: N・2N の境目を全部残す (`pair_tol` 削除)、`row_chosen_*` を選び直した点の行に (入力の点は `row_input_*`)。試験 75 ok (V2(k) 追加)。V1a 2.069270614・距離 0.0975・ゲート PASS、V6 2.07/2.07・距離 0.0981 (前回と同じ) | O |
 | 3 | カードへの組み込み | **済 (2026-10-14、1e178365)**: 既定は自動、数値は今と同じ (V3 合格: 生成物が一致・探索を呼ばない)。最初の r_t で探索とゲート → 固定点 → 最終の組でゲート、差 > 0.01 で組み直し (最大 2 回)、差 ≤ 0.01 は確かめ直し。評価の並列 1/1。**V4 final 合格** (2.069270614、r_t 0.024973969 m、寸法 PASS、距離 0.0963、ゲート PASS、45 分)。**V4 explore は未了 (AWS)**。実装担当の穴 1〜7 は諮問 | O |
 | 3b | 窓の端の拡張・YAML の要約・台本 | **済 (2026-10-14)**: `resolution_gate` は選び直した値が窓の端なら半幅 0.1 → 0.2 → 0.3 に広げて選び直す (上限で端なら `chosen_inside_*` で未確定; θ_max の最小の位置の端 `edge_*` は別の判定)。広げた窓では N を ±(半幅 + ΔM_safe) まで評価して窓のすぐ外の境目を見る (無いと境目から 0.03 の点を PASS する反例)。YAML の `_card.M_knot_rule` は要約 (約 2.5 kB、全部なら 48 kB) で、card_log の `M_knot_rule` (全部の記録) を正規化 JSON にした sha256 で結ぶ (card_log のファイルの sha256 は YAML の sha256 を含むので循環する)。`monotone_gate_ab.py` は自動のカードで M_knot 2.25 を明示。試験 89 ok (手元の軽いもの) | O |
-| 3c | 重い検証 (AWS A) | V4 explore・V4 final (最終のコード)・V3 (`mknot_card_v34.py v3 --old-rev d9f554f4`)・`run_wt_card_tests.py --slow`・`run_mesh_size_guard_tests.py`・`run_deltastar_root_zone_tests.py --card` を AWS A の `~/forge-deliv` で 1 本ずつ | O |
+| 3c | 重い検証 (AWS A) | **済 (2026-10-14、b2528f7f、AWS A `~/forge-deliv`、評価の並列 1/1)**: 選び方の試験 ALL OK、V3 PASS (数値の M_knot のカード 2 枚で生成物が一致・探索を呼ばない)、`run_wt_card_tests.py --slow` ALL OK、`run_mesh_size_guard_tests.py` ALL OK、`run_deltastar_root_zone_tests.py --card` ALL PASS、**V4 final・explore とも M_knot 2.069270614・ゲート PASS (窓を広げず)・寸法 PASS (拡大部長 +0.37 mm、物理スロート径 −2〜−4e-8 m)・YAML の要約 2.6 kB と card_log の照合 ok**、所要 74 分・67 分 (目安 15 分を超える)、V1a 2.069270614・ゲート PASS・距離 0.0975 (前回と同じ)。出力 `case/70.m5_air_wt_demo/_mknot_card_v4_3b/` (ログは `aws_logs/`)、`_mknot_select/v1a_b2528f7f_aws.json` | O |
+| 6 | 所要の短縮 | V4 で 1 枚 67〜74 分 (並列 1/1; 最初の r_t と最終の組でゲートを 2 回)。差 0 のときは最初の r_t のゲートの結果を使い回す・評価の並列を AWS で増やすなど (今は記録だけ) | O |
 | 4 | skill・methods・手順書 | **済 (2026-10-14)**: `methods/design/overview.md` の $M_K$ の選び方、skill `nozzle-design` (カードの行・道具の行)・`design-intake` (聞かなくてよい・固定のときだけ書く・AWS で)、`procedures/nozzle-design-workflow.md` §0 の表 | O |
 | 5 | result 段 | 諮問とレビュー | F |
 
@@ -195,3 +196,4 @@
 - 2026-10-14: 諮問 (mknot-card-holes) を採用: 窓の端は上限つきで広げて選び直す、YAML は要約だけ、穴 (2)〜(4) は実装担当の選択を採る。§5.1 #3b (修正)・#3c (AWS の重い検証)。
 - 2026-10-14: §5.1 #3b を実装。実装担当の判断 (card_log の記録の sha256・広げた窓の外の文脈 ±(半幅 + ΔM_safe)) を採用: §4.2・§4.4 の記述の意味をこの形に読む。重い検証は #3c (AWS A)。
 - 2026-10-14: §5.1 #4 済 (methods・skill 2 つ・手順書)。
+- 2026-10-14: §5.1 #3c 済 (AWS A): V3・V4 final/explore・V1a・既存の重い試験すべて合格。V4 の M_knot 2.069270614 (最初の r_t と最終の組で同じ、窓を広げず)、所要 67〜74 分 (目安超え → #6)。
