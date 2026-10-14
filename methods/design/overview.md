@@ -53,10 +53,14 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 `solver_density_cuda/tools/recipes/recommended_settings.yaml`、表は `procedures/recommended-settings.md` 付録 A) から組む方針
 (plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-generator-defaults-and-launch-gate.md) §4.0〜§4.2)。
 **段取り 1 (今) は書き写しの照合だけ**で、生成器の出力は変えていない: 各生成器が今書く設定を `recipes/regen_profiles.py` が
-代表の問題で全段の起動列を偽の forge で作って書き写し、`design/tests/run_recipe_profiles_tests.py` が書き写しと生成器の出力の一致
-(全段の config が自分のプロファイルに PASS) を確かめる。生成器の値を変えたらプロファイルも書き直す (`regen_profiles.py --write`、差は plan に書く)。
-手で作る run は `recipe_settings.py declare <run> --profile P --stage S` で宣言できる。共通の組み立て関数と `RECIPE.json` の自動の書き出し、
-生産レシピへの既定の揃え、投入の関門は後続 (plan §5.1 #10〜#12)。
+代表の問題 (固定の写し `recipes/fixtures/`、plan §5.1 #17) で全段の起動列を偽の forge で作って書き写し、
+`design/tests/run_recipe_profiles_tests.py` が書き写しと生成器の出力の一致を確かめる。今の生成器の config は、その段の**明示すべきキー**
+(プロファイルの `explicit`。生成器が省略している値に依存するキー、plan §5.1 #16) の省略だけで自分のプロファイルに FAIL し、
+そのキーを旧い実効値で足すと PASS する (生成器に明示させるのは #11。それまでは生成器の config そのままでは照合を通らない)。
+生成器の値を変えたらプロファイルも書き直す (`regen_profiles.py --write`、差は plan に書く)。
+手で作る run は `recipe_settings.py declare <run> --profile P --stage S` で宣言できる。投入の関門 `launch_gate.py` (`run_case.sh` が
+forge の前に呼ぶ、#10) は実装済みで、強制の開始は棚卸しの完了の後 (plan §4.7、それまで宣言の無い run は WARN)。
+共通の組み立て関数と `RECIPE.json` の自動の書き出し、生産レシピへの既定の揃えは後続 (plan §5.1 #11・#12)。
 
 ## 問題定義 YAML
 

@@ -101,7 +101,10 @@ output: {level: 1}                                      # 保存量 + 原始量 
 ### 1.0a 壁隣接面の $\chi$ (`space.slauWallNormalChi`) — 現行 (2026-09-27)
 
 **既定は auto = 実効 1** (node ∧ `nodeWallDirichlet: 1` ∧ SLAU/SLAU2 のとき。それ以外は 0。2026-09-26 ユーザ決定、
-plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md))。**書かない**のが推奨。
+plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau-wall-normal-chi-default.md))。
+**機種のプロファイル (付録 A) では `slauWallNormalChi: 1` を明示する** (auto と同じ値。省略は既定が変わるとバイナリで値が変わるので、
+明示すべきキーにしている: plan [tooling-generator-defaults-and-launch-gate](../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #16・#16a (2))。
+機種の決まっていない手書きの run では書かなくてよい (auto で 1)。
 旧挙動 (2026-09-25 以前の結果) の再現だけ `slauWallNormalChi: 0` を明記する (演算はビット同一)。起動ログに実効値と解決理由が 1 行出る。
 
 - **検証 (2026-09-27)**: 省略 (auto 1) と明示 0 を同じ起点から分岐し、SERN 2D 3 作動点の力係数 5 列 (差区間が R5n 帯内)、
@@ -1162,6 +1165,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 
 ## 変更ログ
 
+- `2026-10-15` — §1.0a の `slauWallNormalChi` の文言を「書かないのが推奨」から「機種のプロファイルでは 1 を明示 (明示すべきキー)、手書きの run では書かなくてよい」に直した (plan [tooling-generator-defaults-and-launch-gate](../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #16a (2)・#22)。付録 A の明示すべきキーの基準の表で、`mesh.axisymMethod`・`mesh.axisSegmentRWeight` の条件を `mesh.isAxisymmetric 1` から `applies.axisymmetric true` (旧キー `physProp.isAxisymmetric` も solver と同じ優先順で読む) に (同 #21)。
 - `2026-10-15` — §0.1 の照合の規則を直した: `fixed`・`explicit` の省略は出所によらず FAIL (今のソースの既定との一致で通さない)、省略を試すのは `key=~` + 理由の逸脱 (実効値は未確定として記録)。機種・段ごとの明示すべきキー (`explicit`、旧い実効値と出所つき) と基準の表を付録 A に追加、推奨設定のファイルを版 2 に (plan [tooling-generator-defaults-and-launch-gate](../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #16)。
 - `2026-10-14` — 値の正本を機械可読の `solver_density_cuda/tools/recipes/recommended_settings.yaml` (機種と段ごとのプロファイル) に移し、§1 を「機種に依らない共通部分と機種の決まっていない手書きの run の既定」と位置づけた (冒頭・§0.1)。機種ごとの値の表を付録 A (`recipe_settings.py --doc` の生成区間) に置いた。古い記述 3 件を訂正: §4「`runner.py` が生成する config が正本」、§2「生成器は `evaluate.wall_treatment_sst` を読む」(SERN だけ)、§3 の化学種の例 (生成器の lump 記法に)。plan [tooling-generator-defaults-and-launch-gate](../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #5・#6。
 - `2026-10-07` — §4 に軸対称ノズルの物理壁 (NS) の現行 (`geometry.pw_upstream: poly`、寸法は `solve_rt` / `solve_rt_throat`) を追加、§9 に `geometry.pw_ramp`・CFD 前の旧 `solve_rt` を旧設定として (plan [tooling-nozzle-upstream-poly-and-throat-sizing](../plans/accepted/tooling-nozzle-upstream-poly-and-throat-sizing.md))。

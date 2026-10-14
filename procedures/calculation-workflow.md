@@ -436,10 +436,9 @@ python3 solver_density_cuda/tools/check_mesh_quality.py <run_dir>/mesh.h5
 - 近壁を細分化 (wall-resolved, 第一セル数μm) すると AR が増えやすい。**接線方向セルを細かくしすぎず、AR が 1000 を超えないよう第一セル厚と接線長のバランスを取る**。
 - **AR 緩和 (2026-09-12 ユーザ決定)**: 壁法線に沿った構造格子の境界層層 (スキュー無し) に限り **AR ≤ 5000** まで可。`check_mesh_quality.py mesh.h5 --ar-max 5000` で判定し (設計チェーンは問題 YAML `mesh.ar_max: 5000`)、README/台帳に「AR 緩和 (≤5000)」と明記する。冷却壁 (T_w 300 K) は同じ第一セルで y⁺ が ×5〜6 に上がり、AR ≤ 1000 のままではスロート y⁺≈1 が取れない (case/44: ni 2 万級が要る) ことが動機。裏付けは plan `tooling-nozzle-isothermal-wall-chain` §8-3 の A/B (AR 846 vs 4140)。
 - 「メッシュできた」「収束した」と報告する応答には、本ツールの品質 VERDICT も根拠として併記する。
-- なお `check_mesh_quality.py` は **primal (cell) 変換の h5 専用**で、median-dual (node) 変換した
-  h5 を渡すと `CONNE が NumberOfElements より短い` で落ちる (ツール側の制約)。node メッシュの
-  品質ゲートは、**同じ `.msh` を `discretization: "cell"` で変換した h5** に対して実行する
-  (primal 形状は同一なので AR/skew の判定として妥当)。
+- median-dual (node) 変換の h5 もそのまま渡す: `/VIZMESH/CONNE` (primal セル) があればそれを測る (冒頭の注記、
+  `check_mesh_quality.py` の出力の `source: /VIZMESH/CONNE ...` の行で確かめられる)。**cell で変換し直す必要はない**
+  (2026-09-08 までの「primal (cell) 変換の h5 専用」の制約は解消済み。投入の関門 `launch_gate.py` も node の h5 をそのまま測る)。
 
 ## node モードのメッシュは平面 2D で作る (2D 問題・必須)
 
