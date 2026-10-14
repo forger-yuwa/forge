@@ -77,6 +77,7 @@
 
 **収束確認 (必須・NaN チェックとは別)**: 「NaN が無い」=「収束した」ではない。結果を使う/報告する前に、各保存量の残差が**実際に下がりきっているか**を必ず確認すること。
 
+- **計算の後の判定の正本は `RUN_VERDICT.txt`** (2026-10-15): `run_case.sh` が forge の後に `judge_run.py` を自動で回し (設計チェーンの段階起動は親が全段の後に 1 度だけ確定、手で段階起動した run は最後に `judge_run.py <run_dir>`)、収束 (判定区間つき)・準定常・非有限・物理性 (静圧 ≤ 全圧を含む)・停止規則・壁解像を 1 つにまとめる。**「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合 (`OVERALL`) と各判定の行を貼る**。FAIL・INDETERMINATE はそのまま報告してよい (Stop フックは判定が無い・古い・未確定の run だけを止める)。手書きの run で準定常の量を判定させるには `judge.yaml` を case か run に置く (書き方は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md)「計算の後の判定」)。下の `check_convergence.py` の VERDICT は収束の副判定として残る。
 - **判定は手作業の目視ではなく `solver_density_cuda/tools/check_convergence.py <run_dir> ...` を実行して行う** (本ルールの実体化ツール)。全残差列の低下桁数・トレンド・NaN を判定し `PASS / NOT CONVERGED / DIVERGED` を返す。**「収束した」「一致した」と報告する応答には、このツールの VERDICT を根拠として必ず貼ること** (これを怠り `rms_ro` だけで「収束」と誤報告した事例があるため、ツール経由を必須とする)。未収束なら「未収束」と明記し、未収束のトランジェント同士の場の比較を「一致」と表現しない。
 - **`rms_ro` だけで判断しない**。`residual_history.csv` の **全列** (`rms_ro`,`rms_roUx`,`rms_roUy`,`rms_roUz`,`rms_roe`、RANS 時は `rms_roK`,`rms_roOmega`) のトレンドを見る。`rms_ro` が低くても、運動量 (特に軸対称の `rms_roUy`) や乱流 (`rms_roK`/`rms_roOmega`) が**下げ止まり・横ばい・上昇**していれば未収束。実例: 軸対称 SST で `rms_ro`≈3e-5 でも `rms_roUy`≈1e-2 停滞・`rms_roK` 増大=近軸が未収束だった ([architecture-axisym-axis-singularity.md](plans/accepted/architecture-axisym-axis-singularity.md))。
 - **残差プラトーは「収束」ではない**。下げ止まる場合は、積分量 (massflux/推力/出口諸量) が**定常化**しているか、場が**発達しきっている**かを併せて確認する (リミットサイクルの可能性)。
@@ -281,7 +282,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 上位の判断役は高価・低速なので**判断の場面だけ**に使い、実装・run・後処理は下位モデルに寄せる。
 分担の軸は「難しさ」ではなく**「誤りをツールで判定できるか」**である。収束・準定常・メッシュ品質・plan 構造は
 判定ツールがあるので下位モデルに任せてよい。**ただしフックが保証するのは「判定を実行した痕跡があること」までで、
-判定の中身・対象量・判定区間が揃っているかは保証しない** (Stop フックは `CONVERGENCE_VERDICT.txt` の有無と時刻だけを見る。
+判定の中身・対象量・判定区間が揃っているかは保証しない** (Stop フックは `RUN_VERDICT.json` があるか・今の入力に対応するか・段階起動で確定したかだけを見る (2026-10-15)。
 更新後 120 秒未満・180 分超の run は対象外)。**必要な VERDICT が揃ったことの確認は主セッション (親) の責任**である。
 ツールでも拾えないのは**もっともらしいが誤った真因**と
 **設計判断**で、これを誤ると GPU 時間と日数を失う (トークン代より高い)。過去の撤回 (抽出アーチファクトを物理と誤認、

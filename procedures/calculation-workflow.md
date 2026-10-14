@@ -414,7 +414,8 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
 `judge_run.py` の docstring が正本。
 
 - **項目**: `solver` (終了コード)・`nonfinite` (残差の全履歴 + 最終の場の非有限; 途中の全場は `--full-audit`)・`physical`
-  (`ro`・`P`・`T` > 0)・`convergence` (`check_convergence.py`; manifest があれば `--segment`、無ければ単段と確かめられたときだけ
+  (`ro`・`P`・`T` > 0 と静圧 ≤ 全圧: `total_quantities.py` で `VALUE/h0` から全圧を作り、`P > P0·(1 + 1e-5)` の点があれば FAIL;
+  `h0` が無い・物性が読めなければ判定不能)・`convergence` (`check_convergence.py`; manifest があれば `--segment`、無ければ単段と確かめられたときだけ
   履歴全体)・`stop_rule` (`STOP_RULE_STATE.json` の状態をそのまま)・`quasisteady` (**仕様の量だけ**)・`wall_resolution` (粘性
   (`viscMethod 0` の定数粘性も) と no-slip 壁があれば、全 no-slip 壁の最後の step の出力で `check_wall_resolution.py --weight area`)。
   各項目は PASS / FAIL / INDETERMINATE (判定不能) / NOT_APPLICABLE。
@@ -423,7 +424,7 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
   段の記録だけ 4。`run_case.sh` の終了コードは今までどおり solver の終了コード (`FORGE_STRICT_CONVERGENCE=1` の意味も変えない)。
   `CONVERGENCE_VERDICT.txt` は収束の副判定 (履歴全体) として残る。関門で forge を起動しなかったときは判定しない。
 - **判定の仕様**: 準定常で見る量・収束の扱い (継続の run の `from_floor`・非定常の `not_applicable`)・壁解像の閾値は、run の
-  `JUDGE_SPEC.json` (設計チェーンの生成器が実行の前に書く; 生成器の結線は後半) か、手書きの run なら `judge.yaml` (run か case に置く)
+  `JUDGE_SPEC.json` (設計チェーンの生成器が実行の前に機種の既定を書く: `design/forge_design/evaluate/judge.py` の `spec_*`) か、手書きの run なら `judge.yaml` (run か case に置く)
   に書く。**どちらも無ければ準定常は「対象未設定」= INDETERMINATE** (黙って省かない)。報告する派生量が無い run は
   `quasisteady: {not_applicable: <理由>}` と書く。例 (平板の Cf を報告する run の `judge.yaml`):
 
@@ -440,14 +441,22 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
   wall_resolution: {applies: true, reason: 低 Re SST の平板}          # 実効の粘性・BC と食い違えば判定不能
   ```
 
+  0 を横切る量 (質量の収支など) は `criterion: absolute` と `thresholds: {abs_mean: …, abs_amp: …}` (末尾窓の |平均| と振幅) で書く。
   未知のキー・型の誤り・重複キーは仕様の誤りで、仕様に依る項目はすべて判定不能になる (綴り違いが黙って既定に落ちない)。
   run の開始より後に書いた `judge.yaml` は `written_after_start` が記録される。
 - **段階起動の run**: run に `stage_manifest.json` があるか、親が `FORGE_JUDGE_DEFER=1` を渡したとき、`run_case.sh` の呼び出しは
   判定を確定せず段の結果 (solver・残差の履歴と最新の場の非有限・物理性・副判定) を `RUN_VERDICT.json` の `stages` に足す
   (`state: deferred`)。総合は親 (runner) が段の記録・停止の記録を確定した後に `judge_run.py <run_dir>` で一度だけ確定する。
+  設計チェーンの runner は全部の段で `FORGE_JUDGE_DEFER=1` を渡し、`judge.Staged` / `judge.finalize` で確定する (段の途中の例外でも
+  起動していれば確定)。**手で段階起動した run は最後に `judge_run.py <run_dir>` を回す** (回さないと Stop フックが止める)。
 - **古い判定**: `judge_run.py <run_dir> --check-fresh` が、判定の後に入力 (config・残差の履歴・manifest・停止の記録・仕様・
   系列の CSV・出力の一覧) が変わったかを返す (0 対応 / 1 変わった / 2 判定が無い)。
-- **報告**: 「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合の行と各項目の行を貼る (AGENTS.md への追記は後半)。
+- **壁の出力**: 壁解像が適用になる run (粘性 + no-slip 壁、または仕様の `wall_resolution.applies`) で no-slip 壁の `outputHDFflg` が
+  1 でなければ、投入の関門 (`launch_gate.py`) が forge を起動しない (終わってからでは壁解像を判定できず計算し直しになる)。
+- **Stop フック**: `hook_convergence_gate.py` は、このセッションが回した case の最近の run について、判定が無い・古い
+  (`--check-fresh` が STALE)・段階起動で確定していない (親が生きていない) ものがあればターンの終了を止める。**FAIL・判定不能を
+  正しく報告して終えるのは止めない**。
+- **報告**: 「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合の行と各項目の行を貼る (AGENTS.md「収束確認」)。
 
 ## メッシュ変更後の restart (cross-mesh interpolation)
 
