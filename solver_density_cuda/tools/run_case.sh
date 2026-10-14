@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # forge を run ディレクトリで実行し、終了後に必ず check_convergence.py を走らせて
 # VERDICT を CONVERGENCE_VERDICT.txt に残す + 残差プロットを生成する。
+# その後に judge_run.py が全項目の判定を RUN_VERDICT.{json,txt} に書く (段階起動の run では段の記録だけ)。
 #
 # 使い方:  run_case.sh [run_dir]        (省略時は $PWD)
 #   バックグラウンド長時間 run も:  nohup run_case.sh <run_dir> &
@@ -79,6 +80,11 @@ echo "CONVERGENCE_EXIT: $conv_rc" >> CONVERGENCE_VERDICT.txt
 cat CONVERGENCE_VERDICT.txt
 python3 "$ROOT/solver_density_cuda/tools/plot_implicit_residuals.py" \
     --input residual_history.csv --output residual_history.png > /dev/null 2>&1 || true
+# 計算の後の判定を 1 本に (plan tooling-convergence-and-wall-resolution-gates §4.6): RUN_VERDICT.{json,txt}。
+# 上の CONVERGENCE_VERDICT.txt は収束の副判定として残す。段階起動の run (stage_manifest.json がある・FORGE_JUDGE_DEFER=1) では
+# 段の結果だけを記録し (state deferred)、総合は親が確定する。判定の終了コードは run_case の終了コードに入れない (solver が基本)。
+python3 "$ROOT/solver_density_cuda/tools/judge_run.py" . --from-run-case --solver-rc "$rc"
+echo "[run_case] judge exit=$? (RUN_VERDICT.txt)"
 if [ "${FORGE_STRICT_CONVERGENCE:-0}" != "0" ] && [ "$rc" -eq 0 ] && [ "$conv_rc" -ne 0 ]; then
     echo "[run_case] FORGE_STRICT_CONVERGENCE=1 かつ収束判定が非ゼロ ($conv_rc) -> 失敗として返す"
     exit "$conv_rc"
