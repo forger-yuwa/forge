@@ -396,12 +396,49 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
     return info
 
 
+def _staged_launch(run_dir: Path, sm, bc_text: str, cfg: str, tag: str, launch=None) -> int:
+    """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し (`launch`、既定はこのモジュールの run_forge)、
+    段の履歴を `residual_history_<tag>.csv` に写して `stage_manifest.json` に段を足す (失敗した段も診断用に残す;
+    runner_axismach.run_staged と同じ記録の仕方)。walldriven の段階起動も使う (plan tooling-generator-defaults-and-launch-gate
+    §4.5・§5.1 #9)。"""
+    import shutil
+    (run_dir / "solverConfig.yaml").write_text(cfg)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
+    rc = (launch or run_forge)(run_dir)
+    hist = run_dir / "residual_history.csv"
+    if hist.exists():
+        shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+    sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+    sm.write()
+    return rc
+
+
+def _staged_handoff(run_dir: Path, res_h5: Path, cfg: str, tag: str, mesh_h5: str = "nozzle.h5") -> None:
+    """同一メッシュの段間の引き継ぎ: 段終了ゲート (必要保存量が揃い、有限で ρ>0; runner_axismach.stage_gate) を通った最終場だけを
+    `restart_field.py` (保存量の index コピー・ビット一致の検査・`wall_dist` は宛先のまま・化学種の属性の継承) で初期場に写す。
+    ゲートに落ちたら RuntimeError で次段を起動しない。2026-10-14 まで `interp_field.py` (cross-mesh 用、原始量から保存量を組み直す)
+    を使っていた (AGENTS.md「メッシュ変更後の restart」の規則違反; plan tooling-generator-defaults-and-launch-gate §4.5)。"""
+    from .runner_axismach import _restart_same_mesh, stage_gate
+    probs = stage_gate(res_h5, cfg)
+    if probs:
+        raise RuntimeError(f"段 {tag} の最終場 {Path(res_h5).name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                           + "\n    ".join(probs))
+    _restart_same_mesh(res_h5, run_dir / mesh_h5)
+
+
 def run_staged(problem_path, run_dir, nsteps=None) -> None:
     """soft 段 (1次+cfl0.5, 3000 step) → 本段 — bell と同じ 2 段起動を config
     書換えで同一 run dir 内実行 (soft 完走後に本 config へ戻し restart なしで
-    冷間から回すのでなく、soft の最終場を IC に採用する)。"""
+    冷間から回すのでなく、soft の最終場を IC に採用する)。
+    段間は段終了ゲート + `restart_field.py` (`_staged_handoff`)。段ごとの実効設定を `stage_manifest.json` に、
+    段の残差履歴を `residual_history_<tag>.csv` (tag = soft / main) に残す (2026-10-14、plan
+    tooling-generator-defaults-and-launch-gate §5.1 #9)。段の config の文字列は従来と同じ。"""
+    from .runner_axismach import _stage_manifest_cls
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
+    sm = _stage_manifest_cls()(run_dir)
     cfg_soft = cfg_main.replace("cfl: 4.0, cfl_pseudo: 4.0", "cfl: 0.5, cfl_pseudo: 0.5")
     cfg_soft = cfg_soft.replace("convMethod: 1", "convMethod: 0")
     # node y+~1 SST の確定レシピ ([[node-yp1-dual-geometry-float32-fix]]):
@@ -411,20 +448,16 @@ def run_staged(problem_path, run_dir, nsteps=None) -> None:
     import re
     cfg_soft = re.sub(r"nStepOuter: \d+", "nStepOuter: 3000", cfg_soft)
     cfg_soft = re.sub(r"outStepInterval: \d+", "outStepInterval: 3000", cfg_soft)
-    (run_dir / "solverConfig.yaml").write_text(cfg_soft)
-    run_forge(run_dir)
+    _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft")
     res = sorted(run_dir.glob("res_[0-9]*.h5"),
                  key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
     if not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
         raise RuntimeError("soft 段が失敗")
-    # soft 最終場を nozzle.h5 の IC に移植 (同一メッシュ → interp は index 一致)
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                    str(res[-1]), str(run_dir / "nozzle.h5")],
-                   env=_ENV, check=True, capture_output=True, text=True)
+    # soft 最終場を nozzle.h5 の IC に移植 (同一メッシュ: 段終了ゲート + restart_field.py の index コピー)
+    _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
     for f in run_dir.glob("res_*"):
         f.unlink()
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    run_forge(run_dir)
+    _staged_launch(run_dir, sm, bc_text, cfg_main, "main")
 
 
 def collect(problem_path, run_dir) -> dict:

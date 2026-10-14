@@ -111,27 +111,32 @@ def run_staged(run_dir) -> int:
     軸反射が壁へ戻る位置で準 1D IC との不整合過渡が最大になる)。**段階起動だけで
     十分** (run_0043: 円錐のみ・戻しテーパなしでも段階起動なら NaN なし完走)。
     divergence-and-startup の標準手順 (易しい条件で立ち上げ→引き継ぎ) に従う。
+
+    段間は段終了ゲート + `restart_field.py` (`runner_wt._staged_handoff`; 2026-10-14 まで `interp_field.py`)。段ごとの実効設定を
+    `stage_manifest.json` に、段の残差履歴を `residual_history_<tag>.csv` (tag = soft / main) に残す (plan
+    tooling-generator-defaults-and-launch-gate §5.1 #9)。段の config の文字列は従来と同じ。
     """
     import re
+    from .runner_axismach import _stage_manifest_cls
+    from .runner_wt import _staged_handoff, _staged_launch
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
+    sm = _stage_manifest_cls()(run_dir)
     cfg_soft = cfg_main.replace("cfl: 4.0, cfl_pseudo: 4.0", "cfl: 0.5, cfl_pseudo: 0.5")
     cfg_soft = cfg_soft.replace("convMethod: 1", "convMethod: 0")
     cfg_soft = re.sub(r"nStepOuter: \d+", "nStepOuter: 3000", cfg_soft)
     cfg_soft = re.sub(r"outStepInterval: \d+", "outStepInterval: 3000", cfg_soft)
-    (run_dir / "solverConfig.yaml").write_text(cfg_soft)
-    rc = run_forge(run_dir)
+    rc = _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", launch=run_forge)
     res = sorted(run_dir.glob("res_[0-9]*.h5"),
                  key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
     if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
         raise RuntimeError("soft 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                    str(res[-1]), str(run_dir / "nozzle.h5")],
-                   env=_ENV, check=True, capture_output=True, text=True)
+    _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
     for f in run_dir.glob("res_*"):
         f.unlink()
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    return _staged_launch(run_dir, sm, bc_text, cfg_main, "main", launch=run_forge)
 
 
 def main(argv=None) -> int:

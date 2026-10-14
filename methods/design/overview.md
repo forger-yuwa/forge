@@ -1211,6 +1211,14 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 
 `run_staged` (Euler) も `run_staged_ns` と同じく、各段 (soft・mid) の restart 前に段終了ゲート (`stage_gate`) をかけ、段ごとの `residual_history_<tag>.csv` (tag = soft / mid / main) と `stage_manifest.json` を残す。段の CFL・step 数は変えていない。
 
+**他の runner の段の記録 (2026-10-14、plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #9)**:
+`runner_wt.run_staged` (① モード F)・`runner_walldriven.run_staged` も段 (`soft`・`main`) ごとに `stage_manifest.json` と
+`residual_history_<tag>.csv` を残し、段間は段終了ゲート + `restart_field.py` (`runner_wt._staged_handoff`。それまでは同一メッシュに
+`interp_field.py` を使っていた)。`runner_sern.run_staged` (2D・3D・`opt/driver_sern`) は段 (`warm_adapt`・`warm_cfl<c>`・`soft_cfl<c>`・
+`mid_cfl<c>`・`main`) ごとに manifest と `residual_<tag>.csv` を残す (段間は `restart_by_index` のままで、段終了ゲートは無い)。
+段の config の文字列は変えていない。起動の全経路の表は
+[`notes/investigations/2026-10-14-launch-path-inventory.md`](../../notes/investigations/2026-10-14-launch-path-inventory.md)。
+
 
 **外部ファイル参照 (2026-10-06)**: ファイル名を取る設定キーは完全修飾パスで検査する (拡張子では判定しない)。`mesh.meshFileName`/`valueFileName` は `nozzle.h5` だけ、`physProp.speciesDBFile` は run 内の実在する `species_db_external.yaml` か空だけを通し、`physProp.chemistry.mechanismFile`・`conjugate:` ブロック (暗黙に `conjugate_state_<id>.h5` を読む)・bcond の `inletProfile`/`wallProfile`・その他ファイル参照に見えるキーは値によらず作成前に拒否する (v1 対象外)。
 

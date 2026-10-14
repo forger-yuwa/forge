@@ -877,6 +877,39 @@ def _archive_stage(run_dir, tag: str) -> None:
             pass
 
 
+def _stage_manifest(run_dir, append: bool = False):
+    """段の記録 `stage_manifest.json` (`solver_density_cuda/tools/stage_manifest.py` の StageManifest)。append=True で既存の記録の
+    段に足す (前の呼び出しの段が残っている run で本段だけを回す `stages="main"`・`"none"`)。2026-10-14 から (plan
+    tooling-generator-defaults-and-launch-gate §4.5・§5.1 #9: SERN は段の記録を書いておらず `check_convergence.py --segment` が使えなかった)。"""
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from stage_manifest import StageManifest
+    sm = StageManifest(run_dir)
+    mp = Path(run_dir) / "stage_manifest.json"
+    if append and mp.exists():
+        sm.stages = [dict(st) for st in json.loads(mp.read_text())["stages"]]
+    return sm
+
+
+def _launch_stage(run_dir, sm, cfg: str, tag: str) -> int:
+    """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し、段の履歴を `residual_<tag>.csv` に退避
+    (`_archive_stage`) して段を `stage_manifest.json` に足す (失敗した段も診断用に残す)。同じ tag が既にあれば `_2`, `_3` … を付ける
+    (CFL の梯子が同じ値を繰り返しても履歴を上書きしない)。段の config の文字列はこの関数では変えない。"""
+    run_dir = Path(run_dir)
+    used = {st["tag"] for st in sm.stages}
+    base, k = tag, 2
+    while tag in used:
+        tag, k = f"{base}_{k}", k + 1
+    (run_dir / "solverConfig.yaml").write_text(cfg)
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で退避しない
+    rc = run_forge(run_dir)
+    _archive_stage(run_dir, tag)
+    bc = run_dir / "bcondConfig.yaml"
+    sm.add(tag, cfg, bc.read_text() if bc.exists() else "", history=f"residual_{tag}.csv")
+    sm.write()
+    return rc
+
+
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
                warm_lam_ramp=None, soft_ramp=None,
@@ -894,7 +927,11 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
 
     warm_src: **別作動点の収束 run ディレクトリ**。与えると層流暖機と soft を飛ばし、`warm_from_run` で
     熱力学整合リマップ → **適応段** (1 次, soft CFL, warm_adapt_steps) → mid → 本段 とする。
-    NPR が大きく違う作動点間 (m6_on 35.4 ↔ m4_off 2.8) では使わないこと (§5.1-1c)。"""
+    NPR が大きく違う作動点間 (m6_on 35.4 ↔ m4_off 2.8) では使わないこと (§5.1-1c)。
+
+    段の記録 (2026-10-14、plan tooling-generator-defaults-and-launch-gate §5.1 #9): 各段 (適応段 warm_adapt・層流暖機 warm_cfl*・
+    soft_cfl*・mid_cfl*・本段 main) の実効設定を `stage_manifest.json` に、残差履歴を `residual_<tag>.csv` に残す (`_launch_stage`)。
+    段間の引き継ぎ (`restart_by_index`) と段の config の文字列は従来と同じ。"""
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
         else (run_dir / "solverConfig.yaml").read_text()
@@ -903,10 +940,11 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-        (run_dir / "solverConfig.yaml").write_text(cfg_main)
-        return run_forge(run_dir)
+        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), cfg_main, "main")
     if stages == "none":
-        return run_forge(run_dir)
+        # 本段だけ (solverConfig.yaml をそのまま回す; 従来どおり config は書き換えない)
+        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), (run_dir / "solverConfig.yaml").read_text(), "main")
+    sm = _stage_manifest(run_dir)
     if warm_src is not None:      # 別作動点からの warm start: 暖機と soft を飛ばし、適応段だけ入れる
         info_warm = warm_from_run(run_dir, warm_src)
         (run_dir / "WARM_START.json").write_text(json.dumps(info_warm, indent=1))
@@ -914,8 +952,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         ad = ad.replace("convMethod: 1", f"convMethod: {soft_conv}")
         ad = re.sub(r"nStepOuter: \d+", f"nStepOuter: {warm_adapt_steps}", ad)
         ad = re.sub(r"outStepInterval: \d+", f"outStepInterval: {warm_adapt_steps}", ad)
-        (run_dir / "solverConfig.yaml").write_text(ad)
-        rc = run_forge(run_dir)
+        rc = _launch_stage(run_dir, sm, ad, "warm_adapt")
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("warm start の適応段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
@@ -938,17 +975,15 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
             lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", lam0)
             lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", lam)
             lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", lam)
-            (run_dir / "solverConfig.yaml").write_text(lam)
-            rc = run_forge(run_dir)
+            rc = _launch_stage(run_dir, sm, lam, f"warm_cfl{c:g}")
             res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
             if rc != 0 or not res:
                 raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
-            _archive_stage(run_dir, f"warm_cfl{c:g}")
             restart_by_index(res[-1], run_dir / MESH)
             for f in run_dir.glob("res_*"):
                 f.unlink()
     if warm_src is not None:      # soft は適応段で代替済み → mid へ
-        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
+        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, sm=sm)
     # soft 段も **CFL ramp** できる (`opt.soft_ramp`, 2026-09-19)。暖機で ramp が効いた (固定 0.5 は step 30 で
     # 発散するのに ramp なら 1.0 まで到達) のと同じ理屈。固定 soft_cfl 1.0 は設計によって
     # `rms_roY1` (排気∩外気のせん断層) が上昇するので、段階昇圧で通す。
@@ -959,20 +994,19 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
         soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", soft)
         soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", soft)
-        (run_dir / "solverConfig.yaml").write_text(soft)
-        rc = run_forge(run_dir)
+        rc = _launch_stage(run_dir, sm, soft, f"soft_cfl{c:g}")
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
-        _archive_stage(run_dir, f"soft_cfl{c:g}")
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp)
+    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp, sm=sm)
 
 
-def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None) -> int:
-    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。"""
+def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None, sm=None) -> int:
+    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。sm = 段の記録 (無ければ新しく作る)。"""
+    sm = sm if sm is not None else _stage_manifest(run_dir)
     if mid_steps > 0:      # mid 段: 2 次に上げるが CFL は soft のまま (次数と CFL を同時に上げない)
         legs = [(float(c), max(int(mid_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
             if soft_ramp else [(float(soft_cfl), int(mid_steps))]
@@ -980,9 +1014,7 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
             mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
             mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", mid)
             mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", mid)
-            (run_dir / "solverConfig.yaml").write_text(mid)
-            rc = run_forge(run_dir)
-            _archive_stage(run_dir, f"mid_cfl{c:g}")
+            rc = _launch_stage(run_dir, sm, mid, f"mid_cfl{c:g}")
             if _ci < len(legs) - 1:
                 _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
                 if rc != 0 or not _r:
@@ -996,8 +1028,7 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    return _launch_stage(run_dir, sm, cfg_main, "main")
 
 
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
