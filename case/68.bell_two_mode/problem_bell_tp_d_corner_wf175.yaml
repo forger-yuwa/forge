@@ -1,0 +1,65 @@
+name: bell_tp_d_eps50_moo_wn
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: /home/ubuntu/forge-thruster/case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml
+  transport:
+    H2O: custom:h2o_iapws_cea_v1
+    H2: cea
+    OH: cea
+    H: cea
+    O: cea
+    O2: cea
+spec:
+  p_ambient: 0.0
+  r_throat: 0.14
+  eps: 50.0
+dv:
+  theta_max_deg:
+    value: 45.0
+    min: 20.0
+    max: 45.0
+  theta_e_deg:
+    value: 2.0
+    min: 2.0
+    max: 20.0
+  L_over_rt:
+    value: 13.594520118046779
+    min: 13.594520118046779
+    max: 22.657533530077966
+geometry:
+  bell_mode: direct_bspline
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 1.75e-05
+  wall_first_frac_throat: 3.5e-06
+  wall_first_blend_x0: 0.3
+  wall_first_blend_x1: 14.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  wall_normal_layer:
+  - 0.02
+  - 0.8
+  wall_normal_end_stations: 20
+  ar_max: 5000
+evaluate:
+  turbulence: sst
+  stages:
+  - soft
+  - mid
+  - main
+  stage_steps:
+    soft: 2000
+    mid: 2000
+  nStepOuter: 60000
+  outStepInterval: 3000
+  cfl_main: 4.0
+  objectives:
+  - eta_cf
+  - length

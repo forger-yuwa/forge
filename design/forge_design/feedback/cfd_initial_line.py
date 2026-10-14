@@ -50,8 +50,10 @@ def _check_run_config(rd: Path, info: dict) -> dict:
         errs.append(f"physProp.viscMethod={pp.get('viscMethod')!r}, visc={pp.get('visc')!r} (Euler = viscMethod 0 かつ visc 0 でない)")
     if str(turb.get("model", "")).lower() != "none":
         errs.append(f"turbulence.model={turb.get('model')!r} (乱流なしでない)")
+    # 物理壁 = 軸・対称・入口・出口以外。③ベルの超音速出口 `outflow` (evaluate/runner.py の `_bcond_config_tp`) は出口であって
+    # 壁ではない (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #6 W3: 名前の接頭辞だけで分けていたので壁と数えて拒否していた)
     walls = {k: v for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).lower()
-             not in ("axis", "symmetry") and not str(v.get("kind", "")).lower().startswith(("inlet", "outlet"))}
+             not in ("axis", "symmetry", "outflow") and not str(v.get("kind", "")).lower().startswith(("inlet", "outlet"))}
     if not walls:
         errs.append("bcondConfig に物理壁が無い")
     for k, v in walls.items():
@@ -59,6 +61,8 @@ def _check_run_config(rd: Path, info: dict) -> dict:
             errs.append(f"壁 {k}: kind={v.get('kind')!r} (slip でない)")
     if info.get("viscous") not in (None, False, "none", "euler"):
         errs.append(f"prepare_info.viscous={info.get('viscous')!r}")
+    if info.get("flow_model") not in (None, "euler"):                 # ③ベルの prepare_info の流れのモデル (evaluate.model)
+        errs.append(f"prepare_info.flow_model={info.get('flow_model')!r}")
     if errs:
         raise ValueError("CFD ピン: 凍結源が node・軸対称・Euler (slip) の run でない — " + "; ".join(errs))
     return {"discretization": "node", "isAxisymmetric": 1, "viscMethod": 0, "visc": 0.0, "turbulence": "none",
@@ -155,6 +159,21 @@ def _check_effective_thermo(eff: dict, info_gas: dict | None, info_species: dict
         if list(names) != list(info_species["transported"]):
             errs.append(f"physProp.species の種名 {names} vs 凍結源の prepare_info.species.transported {info_species['transported']}")
         checked.append("meta.species.transported")
+    # ③ベルの凍結源 (prepare_info.gas が排気ファイルの記録 `exhaust` を持つ; evaluate/runner.py の `_prepare_tp`): 入口の Pt・Tt は
+    # 燃焼室の Pc・Tc、physProp.species の種名は prepare_info.gas.species (2026-10-12, plan bell-two-mode §5.1 #6 W3)
+    ex_meta = (info_gas or {}).get("exhaust") if isinstance(info_gas, dict) else None
+    if ex_meta is not None:
+        for k, km in (("Tt", "Tc_K"), ("Pt", "Pc_Pa")):
+            if ex_meta.get(km) is None:
+                errs.append(f"凍結源の prepare_info.gas.exhaust に {km} が無い (入口 {k} を照合できない)")
+            elif rel(inl[k], ex_meta[km]):
+                errs.append(f"入口 {k}: 凍結源の BC {inl[k]} vs 凍結源の prepare_info.gas.exhaust.{km} {ex_meta[km]}")
+            checked.append(f"meta.gas.exhaust.{km}")
+        if info_gas.get("species") is not None:
+            names = [s["name"] if isinstance(s, dict) else s for s in (pp["species"] or [])]
+            if list(names) != list(info_gas["species"]):
+                errs.append(f"physProp.species の種名 {names} vs 凍結源の prepare_info.gas.species {info_gas['species']}")
+            checked.append("meta.gas.species")
     # (2) 使う側の問題 (spec.Pt・spec.Tt・gas)
     if not exp:
         return
@@ -220,10 +239,13 @@ def load_run_field(run_dir, res=None, n_tail: int = 1):
     # 熱力学ハッシュには実効の入口 BC も入れる (入口 Tt だけ替えた凍結源でハッシュが不変だった; codex diagnose 2026-10-06)
     thermo = {"gas": info.get("gas"), "gamma_hall": info.get("gamma_hall"),
               "physProp": {k: v for k, v in (yaml_physprop(rd)).items()}, "inlet": eff["inlet"]}
+    shape = {"R": info.get("R"), "L_U": info.get("L_U"), "scale_m": S,
+             "x_in_mesh": float(X[0, 0]), "r_U_mesh": float(R[0, -1])}
+    if info.get("bell_mode") and info.get("R") is None:
+        shape.update(_bell_shape(rd))                                    # ③ベルの凍結源 (寸法 spec は WALL_DESIGN.json)
     src = {"run": str(rd), "res": [f.name for f in files],
            "config": cfg_checked, "effective": eff, "species_meta": info.get("species"),
-           "shape": {"R": info.get("R"), "L_U": info.get("L_U"), "scale_m": S,
-                     "x_in_mesh": float(X[0, 0]), "r_U_mesh": float(R[0, -1])},
+           "shape": shape,
            "gamma_hall": info.get("gamma_hall"), "gas": info.get("gas"),
            "sha256_16": {"snapshot": snap[0] if len(snap) == 1 else snap,
                          "thermo": _sha16(json.dumps(thermo, sort_keys=True, default=str).encode())},
@@ -231,9 +253,87 @@ def load_run_field(run_dir, res=None, n_tail: int = 1):
     return (X, R, np.mean(Ms, 0).reshape(ni, -1), np.mean(Ts, 0).reshape(ni, -1), src)
 
 
+def _bell_shape(rd: Path) -> dict:
+    """③ベルの凍結源 (evaluate/runner.py) の寸法 spec。prepare_info は ① の `R`・`L_U` を持たないので、prepare が書く
+    `WALL_DESIGN.json` の `spec` (R_t・L_U・L_pipe・contraction_ratio。`geometry.bell_mode` の壁の記録) から取る。
+    無ければ空 (R・L_U は None のまま → `check_source_matches` が照合できない項目として返す)。"""
+    p = Path(rd) / "WALL_DESIGN.json"
+    if not p.exists():
+        return {"shape_source": None}
+    spec = (json.loads(p.read_text()) or {}).get("spec") or {}
+    out = {"shape_source": "WALL_DESIGN.json:spec"}
+    if spec.get("R_t") is not None:
+        out["R"] = float(spec["R_t"])
+    for k in ("L_U", "L_pipe", "contraction_ratio"):
+        if spec.get(k) is not None:
+            out[k] = float(spec[k])
+    return out
+
+
 def yaml_physprop(rd: Path) -> dict:
     import yaml
     return dict((yaml.safe_load((Path(rd) / "solverConfig.yaml").read_text()) or {}).get("physProp") or {})
+
+
+# ③ベルの気体の照合キー (`_check_exhaust_gas`)。排気ファイルの記録 (`RocketExhaust.summary`) の `source` (パス) は機械ごとに
+# 違うので比べない。輸送物性 (visc_ref・thermCond_ref・transport) は Euler の凍結源では使わないので比べない。
+BELL_EXHAUST_KEYS = ("name", "Tc_K", "Pc_Pa", "X", "Y", "href_T", "reactants", "freeze", "products", "omitted_species_sum",
+                     "cea_program")
+BELL_GAS_KEYS = ("R", "cp_ref", "gamma_ref", "thermoHrefTemp", "species", "mode")
+
+
+def _same_value(a, b, tol: float = 1e-12) -> bool:
+    """入れ子の dict・list・数・文字列の一致 (数は相対 tol)。"""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return set(a) == set(b) and all(_same_value(a[k], b[k], tol) for k in a)
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same_value(x, y, tol) for x, y in zip(a, b))
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(float(a) - float(b)) <= tol * max(1.0, abs(float(b)))
+    return a == b
+
+
+def _check_exhaust_gas(g_src: dict, g_me: dict, errs: list) -> None:
+    """③ベルの凍結源の気体 (prepare_info.gas = `evaluate.runner.tp_gas_record` + species・mode) と使う側
+    (`expected_bell_source` の gas) を照合する: 排気ファイルの記録 `exhaust` の `BELL_EXHAUST_KEYS` と `BELL_GAS_KEYS` (数は相対 1e-12)。"""
+    ex_s, ex_m = g_src.get("exhaust"), g_me.get("exhaust")
+    if not isinstance(ex_s, dict) or not isinstance(ex_m, dict):
+        errs.append(f"gas.exhaust: 凍結源 {type(ex_s).__name__} vs 使う側 {type(ex_m).__name__} (排気ファイルの凍結 TP どうしでない)")
+        return
+    for k in BELL_EXHAUST_KEYS:
+        if not _same_value(ex_s.get(k), ex_m.get(k)):
+            errs.append(f"gas.exhaust.{k}: 凍結源 {ex_s.get(k)!r} vs 使う側 {ex_m.get(k)!r}")
+    for k in BELL_GAS_KEYS:
+        if not _same_value(g_src.get(k), g_me.get(k)):
+            errs.append(f"gas.{k}: 凍結源 {g_src.get(k)!r} vs 使う側 {g_me.get(k)!r}")
+
+
+def expected_bell_source(p) -> dict:
+    """③ベルの問題 (`probdef.load_problem` の Problem、`gas.exhaust` の TP) から、凍結源が持つべき寸法・気体・実効入口条件
+    (`check_source_matches` の expect と R) を作る。書く側 (evaluate/runner.py の `rao_bell_spec`・`tp_gas_record`・
+    `_prepare_tp`・`_bcond_config_tp`・`_solver_config_tp`) と同じ規則: 寸法は `BellC2Spec` (R_t・r_U = √CR・L_U・L_pipe)、
+    gas = tp_gas_record + 輸送種名・mode、入口 = Pt・Tt (spec = 排気ファイルの Pc・Tc)、単一輸送種なので Y キー無し、
+    thermalMethod 2・species = `solver_species_config` の items・thermoHrefTemp = 排気ファイルの基準温度。
+    多種の輸送 (入口に Y0.. を repr で書く) は ① の照合 (8 桁丸め) と規則が違うので未対応 (ValueError)。
+    戻り: {"R": R_t, "expect": {...}}。"""
+    from ..evaluate.runner import _is_tp, rao_bell_spec, tp_gas_record
+    from ..gas.composition import solver_species_config
+    if p.exhaust is None or not _is_tp(p):
+        raise ValueError("expected_bell_source: gas.exhaust の TP の問題だけ (③ベル)")
+    layout = p.species_layout()
+    if layout.n != 1:
+        raise ValueError(f"expected_bell_source: 輸送種が {layout.n} 個 — 多種の入口組成の照合は未対応")
+    spec = rao_bell_spec(p)
+    rec = tp_gas_record(p)
+    items, _ = solver_species_config(layout)
+    gas = {**rec, "species": list(layout.species), "mode": layout.mode}
+    inlet = {"Pt": float(p.spec["Pt"]), "Tt": float(p.spec["Tt"]), "Y": None, "thermalMethod": 2, "species": items,
+             "thermoHrefTemp": float(rec["thermoHrefTemp"])}
+    return {"R": float(spec.R_t),
+            "expect": {"gas": gas, "r_U": float(spec.r_U), "L_U": float(spec.L_U), "L_pipe": float(spec.L_pipe),
+                       "inlet_thermo": inlet}}
 
 
 def check_source_matches(src: dict, R: float, gamma: float, expect: dict | None = None,
@@ -262,6 +362,11 @@ def check_source_matches(src: dict, R: float, gamma: float, expect: dict | None 
     if g_me is not None:
         if not g_src:
             unchecked.append("gas")
+        elif "exhaust" in g_me or "exhaust" in g_src:
+            # ③ベル (排気ファイルの凍結 TP、`expected_bell_source`): ① の gas の形 (kind・Tt・Y) を持たないので、下の比較は
+            # 何も比べずに通ってしまう — 排気ファイルの記録と熱力学の参照値で照合する
+            _check_exhaust_gas(g_src, g_me, errs)
+            checked.append("gas.exhaust")
         else:
             if str(g_src.get("kind")) != str(g_me.get("kind")):
                 errs.append(f"gas.kind: {g_src.get('kind')} vs {g_me.get('kind')}")
@@ -277,6 +382,8 @@ def check_source_matches(src: dict, R: float, gamma: float, expect: dict | None 
         L_U, r_U, L_pipe = float(expect["L_U"]), float(expect["r_U"]), float(expect.get("L_pipe", 0.5))
         if sh.get("L_U") is not None and abs(float(sh["L_U"]) - L_U) > 1e-12:
             errs.append(f"L_U: 凍結源 {sh['L_U']} vs 使う側 {L_U}")
+        if sh.get("L_pipe") is not None and abs(float(sh["L_pipe"]) - L_pipe) > 1e-12:     # ③ベルの凍結源だけが持つ
+            errs.append(f"L_pipe: 凍結源 {sh['L_pipe']} vs 使う側 {L_pipe}")
         if abs(sh["x_in_mesh"] - (-L_U - L_pipe)) > tol_wall:
             errs.append(f"入口位置 (L_U+L_pipe): 凍結源のメッシュ x_in {sh['x_in_mesh']:.6f} vs 使う側 {-L_U - L_pipe:.6f}")
         if abs(sh["r_U_mesh"] - r_U) > tol_wall:
@@ -403,6 +510,25 @@ class CFDPinnedThroat(HallThroat):
         r = np.broadcast_to(np.asarray(r, float), x.shape)
         out = np.array([self._field(a, b)[1] for a, b in zip(x, r)])
         return out if out.size > 1 else float(out[0])
+
+
+def moc_initial_line(throat: CFDPinnedThroat, g, n: int) -> dict:
+    r"""CFD ピンのスロート C⁻ 線を前進 MOC (`geometry.moc_forward.forward_moc`) と ③ の生成器 (`rao_axisym.design_rao` の `line`)
+    の初期線の形にする (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #6 W3)。Hall の初期線 (`moc_forward._hall_line_raw`)
+    と同じ規約: `throat_characteristic(n)` の $n$ 点 ($r$ 等間隔、軸→壁、壁点 $(0,1)$・θ 0、軸端 $r=0$・θ 0)、軸端の
+    $\theta_r$ は軸アンカー $(M_A, M'_A)$ (`axis_anchor(x0_cfd)`: $M_A$ = 線の軸端の M、$M'_A$ = CFD の軸の evenfit の窓フィット)
+    から `moc_kernel.axis_theta_r(M_A, M'_A, g)`。$M''_A$ (Hall の式) は使わない。
+    戻り dict: `x`・`r`・`M`・`theta`・`thr_axis` と来歴 (`source` = `"cfd_pinned"`・`R`・`gamma_hall`・`M_axis_anchor`・
+    `Mp_axis_anchor`・`x_axis`・`cfd` [run・res・照合結果・ハッシュ])。"""
+    from ..geometry.moc_kernel import axis_theta_r
+    x, r, M, th = throat.throat_characteristic(n=int(n))
+    M_A, Mp_A, _ = (float(v) for v in throat.axis_anchor(throat.x0_cfd))
+    thr0 = float(axis_theta_r(M_A, Mp_A, g))
+    src = throat.source or {}
+    return {"x": np.asarray(x, dtype=float), "r": np.asarray(r, dtype=float), "M": np.asarray(M, dtype=float),
+            "theta": np.asarray(th, dtype=float), "thr_axis": thr0, "R": float(throat.R), "gamma_hall": float(throat.g),
+            "source": "cfd_pinned", "M_axis_anchor": M_A, "Mp_axis_anchor": Mp_A, "x_axis": float(throat.x0_cfd),
+            "cfd": {k: src.get(k) for k in ("run", "res", "match", "sha256_16")}}
 
 
 def pinned_factory(run_dir, res=None, expect: dict | None = None):

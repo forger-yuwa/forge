@@ -1,0 +1,460 @@
+{
+ "plan": "plans/active/tooling-nozzle-bell-two-mode.md §5.1 #6 (W3 の続き)・#8",
+ "commit": "4084c92dd6754ccfc2d6fbb2e64a2d42db638088",
+ "design_tree_dirty": [
+  " M design/forge_design/geometry/rao_axisym.py",
+  " M design/tests/run_rao_axisym_tests.py"
+ ],
+ "source_sha256_16": {
+  "design/forge_design/geometry/rao_axisym.py": "572586807e811a13",
+  "design/forge_design/feedback/cfd_initial_line.py": "103406cf2b6b2178",
+  "design/forge_design/gas/isentrope.py": "a9b195b562d56fa7",
+  "design/forge_design/geometry/moc_forward.py": "f9949ce3fa00f772",
+  "design/forge_design/geometry/moc_kernel.py": "fe8c2e5d40f71471",
+  "design/forge_design/evaluate/runner.py": "6b3faa7a76888608"
+ },
+ "setup": {
+  "gas": "EXH (RocketExhaust.moc_gas)",
+  "exhaust": "case/68.bell_two_mode/exhaust_lox_lh2_pc100_of6.yaml",
+  "R_t": 1.0,
+  "eps": 50.0,
+  "p_a": 0.0,
+  "kernel": "arc",
+  "accept_rule": "det_D > 0",
+  "L_rt": null,
+  "L_frac": null,
+  "n_line": 321,
+  "dr_default": "3.2/n",
+  "mq_default": "n (2026-10-12)",
+  "initial_line": "CFD ピン (run_0015_tp_m_euler_l100/res_30000.h5、moc_initial_line n 321・r 等間隔)",
+  "note": "L_k ごとの setup は rao_pin.json の setup_by_tag。L100 は run_pin_line.py design の記録",
+  "initial_line_detail": {
+   "run": "run_0015_tp_m_euler_l100",
+   "res": "res_30000.h5",
+   "cfd": {
+    "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+    "res": [
+     "res_30000.h5"
+    ],
+    "match": {
+     "checked": [
+      "R",
+      "gas.exhaust",
+      "L_U",
+      "r_U",
+      "L_pipe",
+      "contraction_shape",
+      "meta.gas.exhaust.Tc_K",
+      "meta.gas.exhaust.Pc_Pa",
+      "meta.gas.species",
+      "inlet.Pt",
+      "inlet.Tt",
+      "inlet.Y",
+      "physProp.thermalMethod",
+      "physProp.species",
+      "physProp.thermoHrefTemp"
+     ],
+     "unchecked": [
+      "gamma_hall"
+     ]
+    },
+    "sha256_16": {
+     "snapshot": "c1271cbb67b8cdd1",
+     "thermo": "a0fc9bd18f2cfdde",
+     "line": "e8bd021adff43eda"
+    }
+   },
+   "x_axis": 0.6535007773011583,
+   "M_axis_anchor": 1.3315662388504297,
+   "Mp_axis_anchor": 0.7489923001660992,
+   "thr_axis": 0.1856141653586971,
+   "sha256_16": "06885f029fe3910c"
+  },
+  "L_fracs": [
+   0.7,
+   0.8,
+   0.9,
+   1.0,
+   0.6
+  ]
+ },
+ "hall_n161_to_n321": {
+  "L70": {
+   "theta_B_deg": 0.0011017531374690748,
+   "theta_E_deg": 0.00027274728209114585,
+   "theta_max_deg": 0.0022336887947815853
+  },
+  "L100": {
+   "theta_B_deg": 0.0012572353783149026,
+   "theta_E_deg": 0.00019551731144673568,
+   "theta_max_deg": 0.003846077982160523
+  }
+ },
+ "rows": {
+  "L70": {
+   "tag": "L70_pin_n321",
+   "status": "ok",
+   "why": null,
+   "L_frac": 0.7,
+   "L_rt": 15.860273471054576,
+   "time_s": 1556.7023627758026,
+   "theta_B_deg": 36.115619742096726,
+   "theta_E_deg": 10.90445489451133,
+   "theta_max_deg": 36.117867092158626,
+   "x_E": 15.860273471054509,
+   "x_E_minus_L": -6.750155989720952e-14,
+   "det_D": 0.10120850860127492,
+   "de": -0.12434705098560049,
+   "theta_E_le_theta_B": true,
+   "thrust_rel_diff": -1.660309398163359e-05,
+   "mdot_rel_diff": -1.481400943018333e-05,
+   "closure_norm": 2.303290168882821e-05,
+   "dkappa_B": -0.9973436263467509,
+   "kappaW_B": 0.0026563736532490673,
+   "g_tilde": -0.1675848388297015,
+   "M_E": 4.130820019930552,
+   "x_D": 6.840453857845335,
+   "eta_D": 68.84130247758843,
+   "goursat_nfail": 0,
+   "n_wall_missing": 0,
+   "F_cs": 8.543565491971082,
+   "F_wall": 8.543707341591883,
+   "isp_ratio": 0.9845618705615485,
+   "eta_cs": 0.9772981452042189,
+   "eta_wall": 0.9773143713771718,
+   "mstar_ratio_1d": 0.9926223779586479,
+   "n_candidates": 1,
+   "n_rejected": 0,
+   "n_lost": 0,
+   "n_policy_holes": 0,
+   "hall": {
+    "source": "case/68.bell_two_mode/rao_m/rao_t6_parts/L70_n321.json",
+    "n": 321,
+    "theta_B_deg": 36.092705406388994,
+    "theta_E_deg": 10.908406569600546,
+    "theta_max_deg": 36.09757357566094
+   },
+   "dtheta_B_deg_vs_hall": 0.022914335707731937,
+   "dtheta_E_deg_vs_hall": -0.003951675089215456,
+   "dtheta_max_deg_vs_hall": 0.020293516497687847,
+   "load_check": {
+    "L_k": 15.860273471054576,
+    "x_end": 15.860273471054509,
+    "x_end_rel": -4.218847493575595e-15,
+    "eps_wall": 50.00000000000071,
+    "R_t": 1.0,
+    "generator_L_rt": 15.860273471054576,
+    "setup_L_rt": 15.860273471054576,
+    "setup_L_frac": 0.7,
+    "setup_eps": 50.0,
+    "setup_R_t": 1.0,
+    "setup_source": "setup_by_tag",
+    "setup_equals_expected": true,
+    "ok": true,
+    "last_point_minus_E": [
+     2.0890412690377502e-05,
+     9.700784392663309e-06
+    ],
+    "fit_info": {
+     "resid_max": 2.0551794646328503e-05,
+     "lam": 1.7782794100389227e-07,
+     "n_dkappa_sign_changes": 2,
+     "theta_max_BE_deg": 36.11574921519396,
+     "kappa_B_plus": 0.0005206766677180142
+    }
+   }
+  },
+  "L80": {
+   "tag": "L80_pin_n321",
+   "status": "ok",
+   "why": null,
+   "L_frac": 0.8,
+   "L_rt": 18.126026824062375,
+   "time_s": 1462.2750101089478,
+   "theta_B_deg": 33.066896495308114,
+   "theta_E_deg": 8.625368734305814,
+   "theta_max_deg": 33.37044517579474,
+   "x_E": 18.126026824062283,
+   "x_E_minus_L": -9.237055564881302e-14,
+   "det_D": 0.33861642222578936,
+   "de": -0.04840059015744323,
+   "theta_E_le_theta_B": true,
+   "thrust_rel_diff": -1.4817915029157907e-05,
+   "mdot_rel_diff": -1.1355051011811575e-05,
+   "closure_norm": 1.1469878670796197e-05,
+   "dkappa_B": -0.9632078552291877,
+   "kappaW_B": 0.036792144770812295,
+   "g_tilde": -0.0917231381449174,
+   "M_E": 4.200501030030481,
+   "x_D": 6.842042339692627,
+   "eta_D": 55.76274305666172,
+   "goursat_nfail": 0,
+   "n_wall_missing": 0,
+   "F_cs": 8.603987933183111,
+   "F_wall": 8.604115426345217,
+   "isp_ratio": 0.9915249624696656,
+   "eta_cs": 0.9842098660519986,
+   "eta_wall": 0.9842244499901646,
+   "mstar_ratio_1d": 0.9926223779586479,
+   "n_candidates": 1,
+   "n_rejected": 0,
+   "n_lost": 0,
+   "n_policy_holes": 0,
+   "hall": {
+    "source": "case/68.bell_two_mode/rao_m/rao_lk_n161.json (L_frac 0.8)",
+    "n": 161,
+    "status": "ok",
+    "theta_B_deg": 33.031787231472485,
+    "theta_E_deg": 8.629809421372924,
+    "theta_max_deg": 33.3513895746753
+   },
+   "dtheta_B_deg_vs_hall": 0.03510926383562918,
+   "dtheta_E_deg_vs_hall": -0.00444068706710965,
+   "dtheta_max_deg_vs_hall": 0.01905560111944027,
+   "load_check": {
+    "L_k": 18.126026824062375,
+    "x_end": 18.126026824062283,
+    "x_end_rel": -5.10702591327572e-15,
+    "eps_wall": 49.99999999999947,
+    "R_t": 1.0,
+    "generator_L_rt": 18.126026824062375,
+    "setup_L_rt": 18.126026824062375,
+    "setup_L_frac": 0.8,
+    "setup_eps": 50.0,
+    "setup_R_t": 1.0,
+    "setup_source": "setup_by_tag",
+    "setup_equals_expected": true,
+    "ok": true,
+    "last_point_minus_E": [
+     1.0604954656656673e-05,
+     4.369559869488171e-06
+    ],
+    "fit_info": {
+     "resid_max": 4.320278448766146e-06,
+     "lam": 1e-08,
+     "n_dkappa_sign_changes": 1,
+     "theta_max_BE_deg": 33.37024311696388,
+     "kappa_B_plus": 0.03692435805240033
+    }
+   }
+  },
+  "L90": {
+   "tag": "L90_pin_n321",
+   "status": "ok",
+   "why": null,
+   "L_frac": 0.9,
+   "L_rt": 20.39178017707017,
+   "time_s": 1302.0431714057922,
+   "theta_B_deg": 31.16376962072679,
+   "theta_E_deg": 6.759953940169756,
+   "theta_max_deg": 31.792013676416296,
+   "x_E": 20.391780177070284,
+   "x_E_minus_L": 1.1368683772161603e-13,
+   "det_D": 0.5374089167151368,
+   "de": -0.035375926627214255,
+   "theta_E_le_theta_B": true,
+   "thrust_rel_diff": -1.3833920682872722e-05,
+   "mdot_rel_diff": -9.663759462644088e-06,
+   "closure_norm": 8.537299366699976e-06,
+   "dkappa_B": -0.9425736488440708,
+   "kappaW_B": 0.057426351155929214,
+   "g_tilde": -0.07712387820895537,
+   "M_E": 4.260628232661246,
+   "x_D": 6.995715056018998,
+   "eta_D": 45.85332507294715,
+   "goursat_nfail": 0,
+   "n_wall_missing": 0,
+   "F_cs": 8.638280200769241,
+   "F_wall": 8.638399702052375,
+   "isp_ratio": 0.9954768089384644,
+   "eta_cs": 0.9881325572911851,
+   "eta_wall": 0.9881462270386068,
+   "mstar_ratio_1d": 0.9926223779586479,
+   "n_candidates": 1,
+   "n_rejected": 0,
+   "n_lost": 0,
+   "n_policy_holes": 0,
+   "hall": {
+    "source": "case/68.bell_two_mode/rao_m/rao_lk_n161.json (L_frac 0.9)",
+    "n": 161,
+    "status": "ok",
+    "theta_B_deg": 31.122571187330173,
+    "theta_E_deg": 6.76456194051724,
+    "theta_max_deg": 31.772772565564825
+   },
+   "dtheta_B_deg_vs_hall": 0.041198433396616,
+   "dtheta_E_deg_vs_hall": -0.004608000347483987,
+   "dtheta_max_deg_vs_hall": 0.019241110851471177,
+   "load_check": {
+    "L_k": 20.39178017707017,
+    "x_end": 20.391780177070284,
+    "x_end_rel": 5.551115123125783e-15,
+    "eps_wall": 50.00000000000062,
+    "R_t": 1.0,
+    "generator_L_rt": 20.39178017707017,
+    "setup_L_rt": 20.39178017707017,
+    "setup_L_frac": 0.9,
+    "setup_eps": 50.0,
+    "setup_R_t": 1.0,
+    "setup_source": "setup_by_tag",
+    "setup_equals_expected": true,
+    "ok": true,
+    "last_point_minus_E": [
+     8.005468558280882e-06,
+     2.9661344607134765e-06
+    ],
+    "fit_info": {
+     "resid_max": 4.360910429657139e-06,
+     "lam": 5.623413251903491e-09,
+     "n_dkappa_sign_changes": 2,
+     "theta_max_BE_deg": 31.79191078429583,
+     "kappa_B_plus": 0.058107898996557286
+    }
+   }
+  },
+  "L100": {
+   "tag": "L100_pin_n321",
+   "status": "ok",
+   "why": null,
+   "L_frac": 1.0,
+   "L_rt": 22.657533530077966,
+   "time_s": 1282.2336556911469,
+   "theta_B_deg": 29.80086497410853,
+   "theta_E_deg": 5.250644989348473,
+   "theta_max_deg": 30.72645660884354,
+   "x_E": 22.657533530077565,
+   "x_E_minus_L": -4.014566457044566e-13,
+   "det_D": 0.7279576590055868,
+   "de": -0.029189122475996726,
+   "theta_E_le_theta_B": true,
+   "thrust_rel_diff": -1.2999081285094002e-05,
+   "mdot_rel_diff": -8.343432951935389e-06,
+   "closure_norm": 6.7118287008661905e-06,
+   "dkappa_B": -0.9255978803640035,
+   "kappaW_B": 0.07440211963599652,
+   "g_tilde": -0.06903865976419413,
+   "M_E": 4.314070701940195,
+   "x_D": 7.190200617303672,
+   "eta_D": 37.828821858552544,
+   "goursat_nfail": 0,
+   "n_wall_missing": 0,
+   "F_cs": 8.657620801647429,
+   "F_wall": 8.657733342763965,
+   "isp_ratio": 0.9977056229150539,
+   "eta_cs": 0.9903449279206548,
+   "eta_wall": 0.9903578014948732,
+   "mstar_ratio_1d": 0.9926223779586479,
+   "n_candidates": 1,
+   "n_rejected": 0,
+   "n_lost": 0,
+   "n_policy_holes": 0,
+   "hall": {
+    "source": "case/68.bell_two_mode/rao_m/rao_t6_parts/L100_n321.json",
+    "n": 321,
+    "theta_B_deg": 29.7563746957668,
+    "theta_E_deg": 5.255403700978247,
+    "theta_max_deg": 30.712340380755972
+   },
+   "dtheta_B_deg_vs_hall": 0.044490278341729805,
+   "dtheta_E_deg_vs_hall": -0.004758711629774481,
+   "dtheta_max_deg_vs_hall": 0.014116228087569738
+  },
+  "L60": {
+   "tag": "L60_pin_n321",
+   "status": "infeasible",
+   "why": "中の根なし: x_E − L の符号が変わる枝なし (θ_B 12.00〜49.99°、枝 2 本: 枝 0: θ_B 25.12〜37.49°・x_E − L +1.64〜+27.1; 枝 1: θ_B 36.08〜49.99°・x_E − L -7.75〜-6.67)",
+   "L_frac": 0.6,
+   "L_rt": 13.594520118046779,
+   "time_s": 1116.3224709033966,
+   "scan": {
+    "n_rejected": 0,
+    "n_lost": 0,
+    "branches": {
+     "0": {
+      "family_det_sign": 1,
+      "points": [
+       {
+        "s_B": 0.43850195312500007,
+        "theta_B_deg": 25.124311222305963,
+        "eta_D": 0.2571719930855261,
+        "x_E_minus_L": 27.14876294981334
+       },
+       {
+        "s_B": 0.4645,
+        "theta_B_deg": 26.61388958382674,
+        "eta_D": 14.802285969173123,
+        "x_E_minus_L": 18.73502418761217
+       },
+       {
+        "s_B": 0.5155000000000001,
+        "theta_B_deg": 29.53597433899394,
+        "eta_D": 36.16697715089896,
+        "x_E_minus_L": 9.589883088396396
+       },
+       {
+        "s_B": 0.5665,
+        "theta_B_deg": 32.458059094161136,
+        "eta_D": 52.74519154716989,
+        "x_E_minus_L": 5.166769600077943
+       },
+       {
+        "s_B": 0.6175,
+        "theta_B_deg": 35.380143849328334,
+        "eta_D": 65.99144800371269,
+        "x_E_minus_L": 2.6938292884905497
+       },
+       {
+        "s_B": 0.654255859375,
+        "theta_B_deg": 37.486099463892195,
+        "eta_D": 73.63267881902264,
+        "x_E_minus_L": 1.635123161447126
+       }
+      ]
+     },
+     "1": {
+      "family_det_sign": -1,
+      "points": [
+       {
+        "s_B": 0.6296523437499999,
+        "theta_B_deg": 36.07642185739551,
+        "eta_D": 109.29476243263925,
+        "x_E_minus_L": -6.870608966958108
+       },
+       {
+        "s_B": 0.6685,
+        "theta_B_deg": 38.30222860449553,
+        "eta_D": 112.74046055791284,
+        "x_E_minus_L": -6.667214969241447
+       },
+       {
+        "s_B": 0.7195,
+        "theta_B_deg": 41.22431335966273,
+        "eta_D": 118.28858306424446,
+        "x_E_minus_L": -6.67586186975685
+       },
+       {
+        "s_B": 0.7705000000000001,
+        "theta_B_deg": 44.146398114829935,
+        "eta_D": 124.61826793157442,
+        "x_E_minus_L": -6.927306039179243
+       },
+       {
+        "s_B": 0.8215000000000001,
+        "theta_B_deg": 47.06848286999713,
+        "eta_D": 131.16280995400243,
+        "x_E_minus_L": -7.314028015970239
+       },
+       {
+        "s_B": 0.8725,
+        "theta_B_deg": 49.99056762516433,
+        "eta_D": 137.47675588850026,
+        "x_E_minus_L": -7.754610541225379
+       }
+      ]
+     }
+    },
+    "scan_mid_n": 14
+   }
+  }
+ }
+}

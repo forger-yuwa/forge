@@ -1,0 +1,347 @@
+{
+ "what": "③ベル (M) の δ_r 抽出 (一定 x の断面・帯位置の感度・受理) — plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-1)",
+ "tag": "L70",
+ "role": "検証用 (較正には使わない)",
+ "ns_run": "case/68.bell_two_mode/run_0020_tp_m_ns_l70",
+ "euler_run": "case/68.bell_two_mode/run_0023_tp_m_euler_l70_pin",
+ "wall": {
+  "wall_file": "case/68.bell_two_mode/rao_m/rao_pin_parts/L70_pin_n321_wall.npz",
+  "sha256": "b1ca544470959223abfb87df618d845dc48538dab4f5ecd344f8c8fed1f02f31",
+  "ns_run_matches": true,
+  "euler_run_matches": true
+ },
+ "settings": {
+  "method": "band",
+  "k_band": 1.5,
+  "k_band_sens": [
+   1.125,
+   2.25
+  ],
+  "band_min_frac": 0.02,
+  "band_width": 0.5,
+  "slope_max": 0.01,
+  "band_growth": 1.25,
+  "max_retry": 14,
+  "fit_from": 1.0,
+  "band_smooth_x": 0.0,
+  "band_select": "adaptive",
+  "plateau_tol": 0.003,
+  "plateau_kmax": 9,
+  "edge": null,
+  "gate_band_rms": 0.005,
+  "core_frac": 0.3,
+  "core_frac_sens": [
+   0.25,
+   0.35
+  ],
+  "n_axis_skip": 1,
+  "outer_frac": 0.25,
+  "smooth_lam": 0.001,
+  "gate_core_rms": 0.01,
+  "gate_sens": 0.05,
+  "gate_sens_floor": 0.0,
+  "refine": 4,
+  "ns_res": "res_60000.h5",
+  "euler_res": "res_30000.h5",
+  "remap_constant_x": true,
+  "remap_max_column_dx": 0.3574771142857136,
+  "remap_clamped_points": 0,
+  "ns_run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0020_tp_m_ns_l70",
+  "euler_run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0023_tp_m_euler_l70_pin",
+  "yb_sens_factors": [
+   0.75,
+   1.5,
+   2.0
+  ]
+ },
+ "massflow": {
+  "x_E_ns": 15.860273471054509,
+  "x_E_ns_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "remap_constant_x_ns": true,
+  "mdot_ns": 268.330348966074,
+  "mdot_ns_spread": 0.0003393331424385422,
+  "res_ns": "res_60000.h5",
+  "x_E_euler": 15.860273471054509,
+  "x_E_euler_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "remap_constant_x_euler": true,
+  "mdot_euler": 268.8680522306155,
+  "mdot_euler_spread": 1.578968228313964e-05,
+  "res_euler": "res_30000.h5",
+  "mdot_ratio": 0.9980001221413978,
+  "r_throat_eff": 0.9989995606312336,
+  "r_throat_phys": 1.0000000214285714,
+  "cd_rel": 0.9980000793699655,
+  "delta_r_throat_eff": 0.0010004607973377322,
+  "delta_r_throat_given": 2.1428571361781223e-08
+ },
+ "massflow_column_note": "列のまま (列内で x が変わる) の流量の帳簿 — −ρU_r dx の項が落ちるので③では使わない (記録)",
+ "massflow_column": {
+  "x_E_ns": 15.860273471054509,
+  "x_E_ns_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "mdot_ns": 258.30050709034856,
+  "mdot_ns_spread": 0.020022224265272812,
+  "res_ns": "res_60000.h5",
+  "x_E_euler": 15.860273471054509,
+  "x_E_euler_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "mdot_euler": 268.8680522306155,
+  "mdot_euler_spread": 1.578968228313964e-05,
+  "res_euler": "res_30000.h5",
+  "mdot_ratio": 0.9606961665672243,
+  "r_throat_eff": 0.980151093743829,
+  "r_throat_phys": 1.0000000214285714,
+  "cd_rel": 0.960696125394533,
+  "delta_r_throat_eff": 0.019848927684742335,
+  "delta_r_throat_given": 2.1428571361781223e-08
+ },
+ "n_sections": 1201,
+ "n_ok": 116,
+ "n_hard_ok": 1201,
+ "reasons": {
+  "yb_sens": 1085
+ },
+ "uncertainty": {
+  "computed": true,
+  "accept_rel": 0.05,
+  "region": "x >= 0 (スロート〜出口)",
+  "factors": [
+   0.75,
+   1.5,
+   2.0
+  ],
+  "accepted": false,
+  "n_region": 739,
+  "n_nonfinite": 0,
+  "n_over": 739,
+  "u_max": 0.6155931487989462,
+  "x_at_u_max": 13.014759664285714,
+  "u_outward_max_region": 0.26008646740447305,
+  "bands": [
+   {
+    "x_lo": null,
+    "x_hi": 0.0,
+    "n": 462,
+    "u_max": 1.0258158412559393,
+    "frac_over": 0.7489177489177489,
+    "u_outward_max": 1.0258158412559393,
+    "rel_f0.75_min": -0.5491354671335029,
+    "rel_f0.75_max": 0.02420628859211349,
+    "rel_f1.5_min": -0.014676286321976966,
+    "rel_f1.5_max": 0.5360235641985132,
+    "rel_f2_min": -0.02498338539753226,
+    "rel_f2_max": 1.0258158412559393
+   },
+   {
+    "x_lo": 0.0,
+    "x_hi": 0.5,
+    "n": 85,
+    "u_max": 0.12129300647779526,
+    "frac_over": 1.0,
+    "u_outward_max": 0.0935755617576792,
+    "rel_f0.75_min": -0.12129300647779526,
+    "rel_f0.75_max": -0.05461988361889478,
+    "rel_f1.5_min": 0.019835048872467204,
+    "rel_f1.5_max": 0.07065725334434322,
+    "rel_f2_min": 0.019608630532388226,
+    "rel_f2_max": 0.0935755617576792
+   },
+   {
+    "x_lo": 0.5,
+    "x_hi": 1.0,
+    "n": 81,
+    "u_max": 0.26008646740447305,
+    "frac_over": 1.0,
+    "u_outward_max": 0.26008646740447305,
+    "rel_f0.75_min": -0.18866612744340566,
+    "rel_f0.75_max": -0.09285538930512054,
+    "rel_f1.5_min": -0.07319903915727406,
+    "rel_f1.5_max": 0.13629867943001814,
+    "rel_f2_min": 0.010031239361954446,
+    "rel_f2_max": 0.26008646740447305
+   },
+   {
+    "x_lo": 1.0,
+    "x_hi": 2.0,
+    "n": 137,
+    "u_max": 0.13622879435279475,
+    "frac_over": 1.0,
+    "u_outward_max": 0.0731483855348506,
+    "rel_f0.75_min": -0.13622879435279475,
+    "rel_f0.75_max": -0.09122860163417959,
+    "rel_f1.5_min": 0.01493134910305588,
+    "rel_f1.5_max": 0.05775446825249977,
+    "rel_f2_min": 0.015060027514928003,
+    "rel_f2_max": 0.0731483855348506
+   },
+   {
+    "x_lo": 2.0,
+    "x_hi": 4.0,
+    "n": 158,
+    "u_max": 0.44937263604307887,
+    "frac_over": 1.0,
+    "u_outward_max": 0.0189840295650906,
+    "rel_f0.75_min": -0.44937263604307887,
+    "rel_f0.75_max": -0.13712795760594898,
+    "rel_f1.5_min": 0.0029953928168832892,
+    "rel_f1.5_max": 0.01488010363881342,
+    "rel_f2_min": 0.0005808944872409075,
+    "rel_f2_max": 0.0189840295650906
+   },
+   {
+    "x_lo": 4.0,
+    "x_hi": 8.0,
+    "n": 109,
+    "u_max": 0.5577640074201877,
+    "frac_over": 1.0,
+    "u_outward_max": 0.03326156148667987,
+    "rel_f0.75_min": -0.5577640074201877,
+    "rel_f0.75_max": -0.1175789044690073,
+    "rel_f1.5_min": -0.00517481974435941,
+    "rel_f1.5_max": 0.03136431793254332,
+    "rel_f2_min": -0.008168379844226754,
+    "rel_f2_max": 0.03326156148667987
+   },
+   {
+    "x_lo": 8.0,
+    "x_hi": 16.0,
+    "n": 169,
+    "u_max": 0.6155931487989462,
+    "frac_over": 1.0,
+    "u_outward_max": 0.024539127172755023,
+    "rel_f0.75_min": -0.6155931487989462,
+    "rel_f0.75_max": -0.08796879713867498,
+    "rel_f1.5_min": -0.001832908287602246,
+    "rel_f1.5_max": 0.024539127172755023,
+    "rel_f2_min": -0.006553842818455116,
+    "rel_f2_max": 0.022599985225432394
+   }
+  ]
+ },
+ "band_y_b_over_rw_at_stations": {
+  "x0.5": 0.02,
+  "x1": 0.02,
+  "x2": 0.02,
+  "x4": 0.019999999999999997,
+  "x8": 0.025,
+  "x16": 0.0390625,
+  "exit": 0.0390625
+ },
+ "band_retry_at_stations": {
+  "x0.5": 0.0,
+  "x1": 0.0,
+  "x2": 0.0,
+  "x4": 0.0,
+  "x8": 1.0,
+  "x16": 3.0,
+  "exit": 3.0
+ },
+ "delta_r_raw_at_stations": {
+  "x0.5": 0.0022091943824864334,
+  "x1": 0.0047802782857132835,
+  "x2": 0.009165637711274858,
+  "x4": 0.017953859686426713,
+  "x8": 0.03793194454224257,
+  "x16": 0.08804723003729986,
+  "exit": 0.08804723003729986
+ },
+ "delta_r_smooth_at_stations": {
+  "x0.5": 0.0022229933756372305,
+  "x1": 0.004778800637423416,
+  "x2": 0.009165022809591902,
+  "x4": 0.017945123280015452,
+  "x8": 0.037907863532465204,
+  "x16": 0.08804244005642871,
+  "exit": 0.08804244005642871
+ },
+ "remap_compare": {
+  "rows": [
+   {
+    "station": "0.5",
+    "x": 0.5,
+    "raw_column": 0.0017787883758109118,
+    "raw_constx": 0.0022091943824864334,
+    "raw_rel_change": 0.2419658305217498,
+    "smooth_column": 0.0017903812187445506,
+    "smooth_constx": 0.0022229933756372305,
+    "smooth_rel_change": 0.24163130866399252
+   },
+   {
+    "station": "1",
+    "x": 1.0,
+    "raw_column": 0.003367331503942323,
+    "raw_constx": 0.0047802782857132835,
+    "raw_rel_change": 0.41960430094772216,
+    "smooth_column": 0.0033674683864437153,
+    "smooth_constx": 0.004778800637423416,
+    "smooth_rel_change": 0.4191077952390718
+   },
+   {
+    "station": "2",
+    "x": 2.0,
+    "raw_column": 0.006598749325739857,
+    "raw_constx": 0.009165637711274858,
+    "raw_rel_change": 0.38899619591886814,
+    "smooth_column": 0.006597787766464343,
+    "smooth_constx": 0.009165022809591902,
+    "smooth_rel_change": 0.3891054295769356
+   },
+   {
+    "station": "4",
+    "x": 4.0,
+    "raw_column": 0.014497015802684619,
+    "raw_constx": 0.017953859686426713,
+    "raw_rel_change": 0.23845210150781115,
+    "smooth_column": 0.014497524855656247,
+    "smooth_constx": 0.017945123280015452,
+    "smooth_rel_change": 0.23780600196826818
+   },
+   {
+    "station": "8",
+    "x": 8.0,
+    "raw_column": 0.0346092617171269,
+    "raw_constx": 0.03793194454224257,
+    "raw_rel_change": 0.09600559677559928,
+    "smooth_column": 0.034612775609477384,
+    "smooth_constx": 0.037907863532465204,
+    "smooth_rel_change": 0.09519860412713
+   },
+   {
+    "station": "16",
+    "x": 16.0,
+    "raw_column": 0.08804723003729986,
+    "raw_constx": 0.08804723003729986,
+    "raw_rel_change": 0.0,
+    "smooth_column": 0.0881147325829689,
+    "smooth_constx": 0.08804244005642871,
+    "smooth_rel_change": -0.0008204363154835637
+   },
+   {
+    "station": "exit",
+    "x": 15.860273471428568,
+    "raw_column": 0.08804723003729986,
+    "raw_constx": 0.08804723003729986,
+    "raw_rel_change": 0.0,
+    "smooth_column": 0.0881147325829689,
+    "smooth_constx": 0.08804244005642871,
+    "smooth_rel_change": -0.0008204363154835637
+   }
+  ],
+  "max_rel_change_expansion": 0.5689126432780967,
+  "x_at_max": 0.6499741155714286,
+  "remap_max_column_dx": 0.3574771142857136
+ },
+ "files": {
+  "npz": "dstar_l70_ns_run0020_constx.npz",
+  "remap_csv": "dstar_l70_remap_compare.csv",
+  "bands_csv": "dstar_l70_uncert_bands.csv"
+ },
+ "provenance": {
+  "commit": "e69d56e735b62ef9e61555152c97db0fe4ec708a",
+  "dirty": [],
+  "source_sha256_16": {
+   "design/forge_design/metrics/deltastar.py": "542ba8b45a4ac66d",
+   "design/forge_design/metrics/bell_deltastar.py": "e368ab5545ee41ba",
+   "design/forge_design/feedback/deltastar_integral.py": "99fa7120d2d24134",
+   "case/68.bell_two_mode/rao_m/run_bell_dstar.py": "0b25292af6e68abd"
+  }
+ }
+}

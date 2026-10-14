@@ -1,0 +1,97 @@
+MAKE-PROBLEMS: OK (6.8825162455159465e-06、書いた なし (同じ中身); E4 の採用 OK)
+CHECK-PROBLEMS: OK
+CHECK-SHARE: OK
+date        : 2026-10-07T06:03:56+00:00
+mode        : 本番
+plan        : plans/active/discretization-moc-axis-limit-and-corrector.md §6 V5d (登録 99431498)
+md_offset   : 6.8825162455159465e-06  share_e4v: --share-e4v  NPAR: 3
+arms        : run_0171_euler_v5d_B_r1,run_0172_euler_v5d_B_r2,run_0164_euler_e4_recal_d1,run_0174_euler_v5d_M_r1,run_0175_euler_v5d_M_r2,run_0176_euler_v5d_M_r3  (geom_ref run_0171_euler_v5d_B_r1)
+order       : run_0171_euler_v5d_B_r1 run_0174_euler_v5d_M_r1 run_0172_euler_v5d_B_r2 run_0175_euler_v5d_M_r2 run_0176_euler_v5d_M_r3
+steps       : soft 3000 main 54000 out 1000 win13 42000 54000 tail5 50000 54000
+input       : moc_v5d_eval.py c4411de53f2d7af3d2c49e5b150b6217d33f4cf821abcc715b28e9d4300c9de8
+input       : moc_v5d.py c365ae33f012cdf9a6402c828f125084014648694cd018f5ced48286ffc690f1
+input       : run_moc_v5d.sh aeb65d61c1c442e7be3cc89fe4a76d10f0f9ea89300075c1fd5c7372b531d2a5
+input       : eval_wallfit_euler.py 7a0fbdd9d12a1e405831b321d8c94fb1f96dbab282f5cf40ec4b3f4fd74c1ff2
+input       : e4_recal_eval.py 954aeae366ab0e951660c42745eb6be7540b43adda0a98b0c2a8edbb51f76b90
+input       : moc_v5_euler_eval.py f7efa2ca7b13e0a7e55a8b536beac7295f36837903f6cbe53830c833abbedb4c
+input       : euler_t0_e2_eval.py 848e86f0f326ca33cbad276e0bb7a6ec8c7fb9bd1214df0df07c45b45adc9587
+input       : euler_t0_e2.py 199e42408515ccf1c2904fc1942f28f525b6552e58c3b0bf28e24de840c57ab5
+input       : problem_d155_euler_v5d_B.yaml 567b261d236d5387b800f185258a7f60c061a0ad105e90737d400df4c4a69823
+input       : problem_d155_euler_v5d_M.yaml cfee7f057648c21ef1cfd51a167397c4490ab2ee6a6f8fee31df7fcf84fdaf92
+input       : problem_d155_euler_e4_recal_d0.yaml 73538ad162949cd1c34199f711796838c955c432c4d1081d5c717e57b1ea0abd
+input       : problem_d155_euler_pin_G1_recal_mono_moc.yaml e961d594f37a1d14cd4aeae3ba733161d930663fbf824d779cad6c7adc6e8914
+git_head    : d9f0d248989fc93f6667bdac8e512f3018c2bc90
+git_status  : 
+forge_bin   : /home/ubuntu/forge-wallfit-bin/solver_density_cuda/build/forge 6b47811bad9daa6807fb3f1e0808a1472c8791b572c2b7c6053fd9e225fa57d8
+forge_ref   : run_0143_euler_wallfit_monoG1_r1 6b47811bad9daa6807fb3f1e0808a1472c8791b572c2b7c6053fd9e225fa57d8  run_0164_euler_e4_recal_d1 6b47811bad9daa6807fb3f1e0808a1472c8791b572c2b7c6053fd9e225fa57d8
+converter   : /home/ubuntu/forge-wallfit-bin/solver_density_cuda/build/convertGmshToForge b46dae6954c7578b86d59e88230318ef18064717736ba5e72f616a8d0d870d13 (wrapper /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/conv_tolerant.sh)
+CASE_RUNS   : .
+WATCH_SEC   : 60  FORGE_CUDA_BLOCKSIZE: 128  MIN_FREE_GB: 9.0
+disk        : /dev/root       193G  169G   25G  88% /
+LAUNCH-RECORD: /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/_band_ab/moc_v5d_launch.json
+[paste_isentropic_ic] species: initial field stamped with species_hash 29c12bc670fcc47a (record resolved_species_29c12bc670fcc47a.yaml; datum 298.15 K, species ['MIXDRY', 'H2O'])
+B problem_d155_euler_v5d_B.yaml | mesh {"ni": 2000, "nj": 97, "wall_first_frac": 0.005, "source": "mesh_euler"} | moc {'axis_limit': 'legacy', 'corrector': 'fixed2'} gate None | M4 consistent | VERDICT: PASS (AR<= 1000, skew<= 0.90)
+B 実効のメッシュ: 壁側 (/r_w) スロート [0.00499990945433156, 0.005000084520835507] 下流 x≥17 [0.004999907540178358, 0.005000093927875915] | IC max|T0−1600| 0.01064 K (OK) | Md_moc_offset 6.8825162455159465e-06 | x_E 39.80895834812345 | run_0164 との照合 OK
+[paste_isentropic_ic] species: initial field stamped with species_hash 29c12bc670fcc47a (record resolved_species_29c12bc670fcc47a.yaml; datum 298.15 K, species ['MIXDRY', 'H2O'])
+M problem_d155_euler_v5d_M.yaml | mesh {"ni": 2000, "nj": 97, "wall_first_frac": 0.005, "source": "mesh_euler"} | moc {'axis_limit': 'analytic', 'corrector': 'converge'} gate True | M4 consistent | VERDICT: PASS (AR<= 1000, skew<= 0.90)
+M 実効のメッシュ: 壁側 (/r_w) スロート [0.00499990945433156, 0.005000084520835507] 下流 x≥17 [0.004999896327127892, 0.005000108202534886] | IC max|T0−1600| 0.01064 K (OK) | Md_moc_offset 6.8825162455159465e-06 | x_E 39.80895834812345
+cross-check: OK | 壁 M − B 最大 6.19158677298004e-06 m (x 0.4047900705067778 r_t) 見分けられる節点 1394 (自腕 1394) | x_E {'B': 39.80895834812345, 'M': 39.80895834812345}
+VERIFY-PREP: OK
+VERIFY-PREP: OK
+VERIFY-PREP: OK
+VERIFY-PREP: OK
+VERIFY-PREP: OK
+started run_0171_euler_v5d_B_r1 (job 2465)  2026-10-07T06:04:34+00:00
+started run_0174_euler_v5d_M_r1 (job 2474)  2026-10-07T06:04:34+00:00
+started run_0172_euler_v5d_B_r2 (job 2483)  2026-10-07T06:04:34+00:00
+started run_0175_euler_v5d_M_r2 (job 3875)  2026-10-07T06:13:09+00:00
+started run_0176_euler_v5d_M_r3 (job 3946)  2026-10-07T06:13:13+00:00
+done run_0171_euler_v5d_B_r1 forge exit=0
+done run_0174_euler_v5d_M_r1 forge exit=0
+done run_0172_euler_v5d_B_r2 forge exit=0
+done run_0175_euler_v5d_M_r2 forge exit=0
+done run_0176_euler_v5d_M_r3 forge exit=0
+run_0171_euler_v5d_B_r1: === run_0171_euler_v5d_B_r1  [last step 53999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+run_0174_euler_v5d_M_r1: === run_0174_euler_v5d_M_r1  [last step 53999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+run_0172_euler_v5d_B_r2: === run_0172_euler_v5d_B_r2  [last step 53999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+run_0175_euler_v5d_M_r2: === run_0175_euler_v5d_M_r2  [last step 53999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+run_0176_euler_v5d_M_r3: === run_0176_euler_v5d_M_r3  [last step 53999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+run_0164_euler_e4_recal_d1: === run_0164_euler_e4_recal_d1  [last step 53999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) === (E4 の投入スクリプトが書いたもの。書き直さない)
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+run_0171_euler_v5d_B_r1: ok  dX_E +0.000e+00 dX_F +0.000e+00
+run_0172_euler_v5d_B_r2: ok  dX_E +0.000e+00 dX_F +0.000e+00
+run_0164_euler_e4_recal_d1: ok  dX_E +0.000e+00 dX_F +0.000e+00
+run_0174_euler_v5d_M_r1: ok  dX_E +0.000e+00 dX_F +1.273e-08
+run_0175_euler_v5d_M_r2: ok  dX_E +0.000e+00 dX_F +1.273e-08
+run_0176_euler_v5d_M_r3: ok  dX_E +0.000e+00 dX_F +1.273e-08
+SERIES: 6/6 ok -> /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/_band_ab/wallfit_series_v5d.json
+/usr/local/lib/python3.12/dist-packages/matplotlib/projections/__init__.py:63: UserWarning: Unable to import Axes3D. This may be due to multiple versions of Matplotlib being installed (e.g. as a system package and as a pip package). As a result, the 3D projection is not available.
+  warnings.warn("Unable to import Axes3D. This may be due to multiple versions of "
+評価器 moc_v5d_eval.py sha256 c4411de53f2d7af3d2c49e5b150b6217d33f4cf821abcc715b28e9d4300c9de8  (登録 99431498)  較正値 6.8825162455159465e-06  共用 True  腕 B ['run_0171_euler_v5d_B_r1', 'run_0172_euler_v5d_B_r2', 'run_0164_euler_e4_recal_d1']  腕 M ['run_0174_euler_v5d_M_r1', 'run_0175_euler_v5d_M_r2', 'run_0176_euler_v5d_M_r3']
+量                                  Δq        B 平均        M 平均      D=M−B    2·SE_D (D+2SE)/Δq   検出  判定
+M_wave_eta0.1                1.00e-03 0.007128448 0.007102827  -2.56e-05  4.12e-05       0.02   なし  許容幅内
+P_wave_eta0.1                1.00e-02  0.04580425  0.04548076  -3.23e-04  9.21e-05      -0.02   あり  許容幅内
+overshoot_eta0.1             3.00e-03    0.010277 0.004177565  -6.10e-03  5.80e-05      -2.01   あり  許容幅内
+overshoot_exitnorm_eta0.1    3.00e-03  0.01020832 0.003429838  -6.78e-03  6.06e-05      -2.24   あり  許容幅内
+P_slope_abs_eta0.1           3.00e-02  0.05708832 0.007524969  -4.96e-02  6.47e-05      -1.65   あり  許容幅内
+exit_M_dev                   1.80e-04 4.120323e-06 4.486206e-05  +4.07e-05  6.19e-07       0.23   あり  許容幅内
+exit_core_M                       nan    6.000004    6.000045  +4.07e-05  6.19e-07        nan   あり  記録のみ (出口較正に使う)
+準定常 run_0171_euler_v5d_B_r1: exit_M_dev 絶対許容内 | 残差 停滞のみ (NOT CONVERGED、全不合格列が STALLED/plateau; PASS ではない)
+準定常 run_0172_euler_v5d_B_r2: exit_M_dev 絶対許容内 | 残差 停滞のみ (NOT CONVERGED、全不合格列が STALLED/plateau; PASS ではない)
+準定常 run_0164_euler_e4_recal_d1: exit_M_dev 絶対許容内 | 残差 停滞のみ (NOT CONVERGED、全不合格列が STALLED/plateau; PASS ではない)
+準定常 run_0174_euler_v5d_M_r1: overshoot_eta0.1 保留, overshoot_exitnorm_eta0.1 保留, P_slope_abs_eta0.1 保留, exit_M_dev 保留 | 残差 停滞のみ (NOT CONVERGED、全不合格列が STALLED/plateau; PASS ではない)
+準定常 run_0175_euler_v5d_M_r2: exit_M_dev 保留 | 残差 停滞のみ (NOT CONVERGED、全不合格列が STALLED/plateau; PASS ではない)
+準定常 run_0176_euler_v5d_M_r3: overshoot_exitnorm_eta0.1 保留, exit_M_dev 保留 | 残差 停滞のみ (NOT CONVERGED、全不合格列が STALLED/plateau; PASS ではない)
+前提不成立 run_0171_euler_v5d_B_r1: M_wave_eta0.1 の 13 枚の幅 0.000257 > Δq/10 = 0.0001 / overshoot_eta0.1 の 13 枚の幅 0.000347 > Δq/10 = 0.0003 / overshoot_exitnorm_eta0.1 の 13 枚の幅 0.00033 > Δq/10 = 0.0003
+前提不成立 run_0172_euler_v5d_B_r2: M_wave_eta0.1 の 13 枚の幅 0.00037 > Δq/10 = 0.0001 / overshoot_eta0.1 の 13 枚の幅 0.000344 > Δq/10 = 0.0003 / overshoot_exitnorm_eta0.1 の 13 枚の幅 0.000373 > Δq/10 = 0.0003
+前提不成立 run_0164_euler_e4_recal_d1: M_wave_eta0.1 の 13 枚の幅 0.00028 > Δq/10 = 0.0001
+前提不成立 run_0174_euler_v5d_M_r1: [P2b] win13: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.12644601922999998)]) / 準定常でない量 (両窓 STEADY でなく、exit_M_dev の絶対許容内の例外にも当たらない): overshoot_eta0.1 TRANSIENT-UNSETTLED (win13), overshoot_eta0.1 TRANSIENT-UNSETTLED (tail5); overshoot_exitnorm_eta0.1 OSCILLATING (win13), overshoot_exitnorm_eta0.1 DRIFTING (tail5); P_slope_abs_eta0.1 TRANSIENT-UNSETTLED (tail5); exit_M_dev DRIFTING (tail5) [絶対許容内の例外に当たらない: 末尾 10 枚の E4 が 適用外 (最大絶対値 4.7e-05 > 1.8e-05); 13 枚の最大絶対値 4.7e-05 > 1.8e-05] / M_wave_eta0.1 の 13 枚の幅 0.000307 > Δq/10 = 0.0001 / overshoot_eta0.1 の 13 枚の幅 0.000385 > Δq/10 = 0.0003 / overshoot_exitnorm_eta0.1 の 13 枚の幅 0.000376 > Δq/10 = 0.0003
+前提不成立 run_0175_euler_v5d_M_r2: [P2b] win13: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.1133661004)]) / [P2b] tail5: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.1005641629)]) / 準定常でない量 (両窓 STEADY でなく、exit_M_dev の絶対許容内の例外にも当たらない): exit_M_dev OSCILLATING (win13), exit_M_dev TRANSIENT-UNSETTLED (tail5) [絶対許容内の例外に当たらない: 末尾 10 枚の E4 が 適用外 (最大絶対値 4.75e-05 > 1.8e-05); 13 枚の最大絶対値 4.75e-05 > 1.8e-05] / M_wave_eta0.1 の 13 枚の幅 0.000252 > Δq/10 = 0.0001 / overshoot_eta0.1 の 13 枚の幅 0.000323 > Δq/10 = 0.0003 / overshoot_exitnorm_eta0.1 の 13 枚の幅 0.00034 > Δq/10 = 0.0003
+前提不成立 run_0176_euler_v5d_M_r3: [P2b] win13: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.11800630943000001)]) / 準定常でない量 (両窓 STEADY でなく、exit_M_dev の絶対許容内の例外にも当たらない): overshoot_exitnorm_eta0.1 TRANSIENT-UNSETTLED (tail5); exit_M_dev OSCILLATING (win13), exit_M_dev DRIFTING (tail5) [絶対許容内の例外に当たらない: 末尾 10 枚の E4 が 適用外 (最大絶対値 4.68e-05 > 1.8e-05); 13 枚の最大絶対値 4.68e-05 > 1.8e-05] / M_wave_eta0.1 の 13 枚の幅 0.000141 > Δq/10 = 0.0001
+出口較正 (出口コア M): D +4.074e-05  |D| + 2SE 4.136e-05 (≤ 0.0001)  → 保留 (判別不能; 較正は変えない) — 前提不成立
+  参考 (M_common): D +4.932e-05  |D| + 2SE 5.045e-05  → 据え置き (Md_moc_offset を変えない。「据え置き」は両腕に共通の較正値を変える必要がないという意味で、M = 6 の達成の証明ではない (達成は armM_M6 で別に判定))
+腕 M の M = 6: 判別不能 (前提の未達)  {'run_0174_euler_v5d_M_r1': {'within': True, 'max_abs_dev': 5.1474344721746945e-05, 'mean_win13': 6.000048436732678}, 'run_0175_euler_v5d_M_r2': {'within': True, 'max_abs_dev': 5.303374468734745e-05, 'mean_win13': 6.000048588421891}, 'run_0176_euler_v5d_M_r3': {'within': True, 'max_abs_dev': 5.100196272511681e-05, 'mean_win13': 6.000047617800017}}
+総合: 保留 (前提不成立): run_0171_euler_v5d_B_r1: M_wave_eta0.1 の 13 枚の幅 0.000257 > Δq/10 = 0.0001, overshoot_eta0.1 の 13 枚の幅 0.000347 > Δq/10 = 0.0003, overshoot_exitnorm_eta0.1 の 13 枚の幅 0.00033 > Δq/10 = 0.0003; run_0172_euler_v5d_B_r2: M_wave_eta0.1 の 13 枚の幅 0.00037 > Δq/10 = 0.0001, overshoot_eta0.1 の 13 枚の幅 0.000344 > Δq/10 = 0.0003, overshoot_exitnorm_eta0.1 の 13 枚の幅 0.000373 > Δq/10 = 0.0003; run_0164_euler_e4_recal_d1: M_wave_eta0.1 の 13 枚の幅 0.00028 > Δq/10 = 0.0001; run_0174_euler_v5d_M_r1: [P2b] win13: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.12644601922999998)]), 準定常でない量 (両窓 STEADY でなく、exit_M_dev の絶対許容内の例外にも当たらない): overshoot_eta0.1 TRANSIENT-UNSETTLED (win13), overshoot_eta0.1 TRANSIENT-UNSETTLED (tail5); overshoot_exitnorm_eta0.1 OSCILLATING (win13), overshoot_exitnorm_eta0.1 DRIFTING (tail5); P_slope_abs_eta0.1 TRANSIENT-UNSETTLED (tail5); exit_M_dev DRIFTING (tail5) [絶対許容内の例外に当たらない: 末尾 10 枚の E4 が 適用外 (最大絶対値 4.7e-05 > 1.8e-05); 13 枚の最大絶対値 4.7e-05 > 1.8e-05], M_wave_eta0.1 の 13 枚の幅 0.000307 > Δq/10 = 0.0001, overshoot_eta0.1 の 13 枚の幅 0.000385 > Δq/10 = 0.0003, overshoot_exitnorm_eta0.1 の 13 枚の幅 0.000376 > Δq/10 = 0.0003; run_0175_euler_v5d_M_r2: [P2b] win13: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.1133661004)]), [P2b] tail5: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.1005641629)]), 準定常でない量 (両窓 STEADY でなく、exit_M_dev の絶対許容内の例外にも当たらない): exit_M_dev OSCILLATING (win13), exit_M_dev TRANSIENT-UNSETTLED (tail5) [絶対許容内の例外に当たらない: 末尾 10 枚の E4 が 適用外 (最大絶対値 4.75e-05 > 1.8e-05); 13 枚の最大絶対値 4.75e-05 > 1.8e-05], M_wave_eta0.1 の 13 枚の幅 0.000252 > Δq/10 = 0.0001, overshoot_eta0.1 の 13 枚の幅 0.000323 > Δq/10 = 0.0003, overshoot_exitnorm_eta0.1 の 13 枚の幅 0.00034 > Δq/10 = 0.0003; run_0176_euler_v5d_M_r3: [P2b] win13: [] 不成立の列 1/27 (例 [('max_dn_wall', 0.11800630943000001)]), 準定常でない量 (両窓 STEADY でなく、exit_M_dev の絶対許容内の例外にも当たらない): overshoot_exitnorm_eta0.1 TRANSIENT-UNSETTLED (tail5); exit_M_dev OSCILLATING (win13), exit_M_dev DRIFTING (tail5) [絶対許容内の例外に当たらない: 末尾 10 枚の E4 が 適用外 (最大絶対値 4.68e-05 > 1.8e-05); 13 枚の最大絶対値 4.68e-05 > 1.8e-05], M_wave_eta0.1 の 13 枚の幅 0.000141 > Δq/10 = 0.0001
+注: 指定の等エントロピーの初期化 (各腕 1 つの prep を 3 本に複製) での比較であり、IC に依存しないとは言わない。停滞のみの NOT CONVERGED は収束の証明ではない。SE は自己相関を補正しない実務の指標で、保証された信頼限界・厳密な非劣化を主張しない
+-> /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/_band_ab/moc_v5d_eval.json
+ALLDONE

@@ -1,0 +1,48 @@
+# forge_design 問題定義 — ③ベル 2 モード比較の共通評価器 (TP) の推力会計とゲートの確認用 (plan tooling-nozzle-bell-two-mode §5.1 #2b)。
+# 形状・ガス・作動点は problem_bell_tp_top.yaml (#2a の起動確認) と同じ。違いは段階起動 (soft → mid → 本段) を同じ run・同じメッシュで
+# 回すための evaluate ブロックだけ (python -m forge_design.evaluate.runner <この YAML> <run> --staged)。
+#   - 段の間は restart_field.py (同一メッシュの index コピー)、段ごとの実効設定は stage_manifest.json (check_convergence --segment 用)
+#   - 本段の res を outStepInterval ごとに書き、推力の CV 会計の時系列 (thrust_history.csv) を準定常ゲートに使う
+# 設計の比較ではない (2 モードの壁は §4.2 の C2 構成で別に作る)。
+name: bell_tp_top_eps50_2b
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  theta_a_deg: {value: 32.0, min: 20.0, max: 40.0}
+  theta_e_deg: {value: 9.0,  min: 4.0,  max: 14.0}
+  L_over_rt:   {value: 18.0, min: 12.0, max: 24.0}
+
+geometry:
+  bell_type: top
+  r_inlet: 2.5
+  L_pipe: 0.5
+  L_contract: 3.0
+  Ru: 1.5
+  Rd: 0.4
+  phi_u_deg: 25.0
+
+mesh:
+  discretization: node
+  ni: 561
+  nj: 121
+  wall_first_frac: 2.5e-5   # #2a と同じ (スロートで 3.5 µm)
+  throat_refine: 3.0
+  ar_max: 1000
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 12000          # 本段
+  outStepInterval: 1000      # 本段の res の間隔 (推力の時系列 12 点)
+  cfl_main: 4.0
+  objectives: [eta_cf, length]
