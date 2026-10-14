@@ -10,6 +10,8 @@ implicitRelax・未知のキー・誤った節のキー・YAML の重複キー�
 `space.limiterScaled`)、省略を通すのは `key=~` + 理由の逸脱だけ (実効値は未確定として記録)、明示すべきキーの旧い実効値の出所は
 今のソースで確かめる (合わなければ例外)。プロファイルの値で組む正例の config は `fixed` と `explicit` の両方を書く
 (#16 で `explicit` を足したので、`fixed` だけで組んだ config は機種のプロファイルに FAIL する)。
+#11 (2026-10-15) から生成器が明示すべきキーを書くので、機種のプロファイルの `explicit` は空 (キーは `fixed`)。`explicit` の仕組みの
+試験は、SERN 2D 本段の #16 の例外表 (238d2706 の `explicit`) を `fixed` から `explicit` に戻したプロファイル (`RC16`) で行う。
 生成器の出力そのものの正例と書き写しの台本の一致は design/tests/run_recipe_profiles_tests.py (design の venv が要る)。
 """
 import json
@@ -63,10 +65,10 @@ PROBLEM = {'mesh.meshFileName': 'nozzle.h5', 'mesh.valueFileName': 'nozzle.h5', 
            'time.deltaT.dt': 1e-8, 'time.deltaT.dt_min': 1e-9, 'time.deltaT.dt_max': 1e-3}
 
 
-def cfg_of(profile, stage, edit=None, extra=None, explicit=True):
+def cfg_of(profile, stage, edit=None, extra=None, explicit=True, rc=None):
     """プロファイルの段の fixed・explicit (明示すべきキー、#16) と問題のキーで組んだ config の文字列。
-    explicit=False は fixed だけ (= 今の生成器と同じく明示すべきキーを省いた config)。"""
-    res = RS.resolve(RC, profile)
+    explicit=False は fixed だけ (= 明示すべきキーを省いた config)。rc は推奨設定 (既定 RC)。"""
+    res = RS.resolve(rc or RC, profile)
     flat = dict(PROBLEM)
     flat.update(res['stages'][stage]['fixed'])
     if explicit:
@@ -198,26 +200,39 @@ r = RS.check_config(RC, cfg_of('common_node_ns_sst', 'main', edit=lambda d: d['t
                     'common_node_ns_sst', 'main')
 check(fail_keys(r) == {'turbulence.scalarDiffusion'},
       f'共通プロファイルでも fixed の省略は FAIL (scalarDiffusion: solver の既定 1 = プロファイル 1) ({sorted(fail_keys(r))})')
-# 明示すべきキー (explicit) の省略・違う値・逸脱
-ex_main = RS.resolve(RC, SERN)['stages']['main']['explicit']
+# 明示すべきキー (explicit) の省略・違う値・逸脱。#11 から機種のプロファイルの explicit は空なので、SERN 2D 本段の #16 の例外表
+# (238d2706 の explicit、design/tests/fixtures/generator_launch_before_11.json の写し) を fixed から explicit に戻した RC16 で試す
+EX_SERN_MAIN_16 = {'mesh.scalarGradient': 'lsq', 'physProp.thermoFloat': 1, 'space.slauWallNormalChi': 1,
+                   'time.deltaT.implicitRelax': 1.0, 'time.deltaT.implicitThermalJacobian': 0, 'time.deltaT.lineDtDirectional': 0,
+                   'time.deltaT.lineImplicit': 0, 'turbulence.sstEnergyIncludesK': 0, 'turbulence.sstNodeWallKPin': 1,
+                   'turbulence.sstOmegaProdFromPk': 1, 'turbulence.sstSigmaBlend': 1, 'turbulence.turbulentPrandtl': 0.85}
+check(RS.resolve(RC, SERN)['stages']['main']['explicit'] == {}
+      and all(RS.same(RS.resolve(RC, SERN)['stages']['main']['fixed'].get(k), v) for k, v in EX_SERN_MAIN_16.items()),
+      '#11: SERN 2D 本段の #16 の例外表のキーは fixed に旧い実効値で入り、explicit は空')
+import yaml as _yaml  # noqa: E402
+_doc16 = _yaml.safe_load(open(RS.RECIPES, encoding='utf-8').read())
+_st16 = _doc16['profiles'][SERN]['stages']['main']
+_st16['explicit'] = {k: _st16['fixed'].pop(k) for k in EX_SERN_MAIN_16}
+RC16 = RS.load_recipes(text=_yaml.safe_dump(_doc16, sort_keys=False, allow_unicode=True))
+ex_main = RS.resolve(RC16, SERN)['stages']['main']['explicit']
 check({'mesh.scalarGradient', 'time.deltaT.implicitRelax', 'turbulence.turbulentPrandtl'} <= set(ex_main),
-      f'SERN 2D 本段の明示すべきキーに scalarGradient・implicitRelax・turbulentPrandtl がある ({sorted(ex_main)})')
-r = RS.check_config(RC, cfg_of(SERN, 'main', edit=lambda d: d['mesh'].pop('scalarGradient')), SERN, 'main')
+      f'(RC16) SERN 2D 本段の明示すべきキーに scalarGradient・implicitRelax・turbulentPrandtl がある ({sorted(ex_main)})')
+r = RS.check_config(RC16, cfg_of(SERN, 'main', edit=lambda d: d['mesh'].pop('scalarGradient'), rc=RC16), SERN, 'main')
 check(fail_keys(r) == {'mesh.scalarGradient'} and any('明示すべきキー' in m for k, m in r['fails']),
       f'明示すべきキーの省略は名指しで FAIL ({sorted(fail_keys(r))})')
-r = RS.check_config(RC, cfg_of(SERN, 'main', extra={'mesh.scalarGradient': 'gg'}), SERN, 'main')
+r = RS.check_config(RC16, cfg_of(SERN, 'main', extra={'mesh.scalarGradient': 'gg'}, rc=RC16), SERN, 'main')
 check(fail_keys(r) == {'mesh.scalarGradient'}, f'明示すべきキーの値が旧い実効値と違えば FAIL ({sorted(fail_keys(r))})')
-r = RS.check_config(RC, cfg_of(SERN, 'main', extra={'mesh.scalarGradient': 'gg'}), SERN, 'main',
+r = RS.check_config(RC16, cfg_of(SERN, 'main', extra={'mesh.scalarGradient': 'gg'}, rc=RC16), SERN, 'main',
                     deviations={'mesh.scalarGradient': 'gg'})
 check(not r['fails'] and r['applied'] == [{'key': 'mesh.scalarGradient', 'value': 'gg', 'profile_value': 'lsq'}],
       '明示すべきキーも理由つきの逸脱で外せる')
-# 今の生成器と同じく明示すべきキーを省いた config (TP の温度反転の条件 thermoHrefTemp は問題のキーなので足す)
-gen_like = cfg_of(SERN, 'main', explicit=False, extra={'physProp.thermoHrefTemp': 298.15})
-r = RS.check_config(RC, gen_like, SERN, 'main')
+# 明示すべきキーを省いた config (#11 の前の生成器と同じ; TP の温度反転の条件 thermoHrefTemp は問題のキーなので足す)
+gen_like = cfg_of(SERN, 'main', explicit=False, extra={'physProp.thermoHrefTemp': 298.15}, rc=RC16)
+r = RS.check_config(RC16, gen_like, SERN, 'main')
 check(fail_keys(r) == set(ex_main) and not r['warns'],
-      f'fixed だけの config (今の生成器と同じ) は明示すべきキーの省略だけで FAIL ({len(fail_keys(r))} キー = 例外表 {len(ex_main)})')
+      f'fixed だけの config (#11 の前の生成器と同じ) は明示すべきキーの省略だけで FAIL ({len(fail_keys(r))} キー = 例外表 {len(ex_main)})')
 BC_ISO = {'inlet': {'kind': 'inlet_Pressure'}, 'wall': {'kind': 'wall_isothermal'}, 'outlet': {'kind': 'outflow'}}
-check(RS.explicit_for(RC, gen_like, BC_ISO) == ex_main, 'explicit_for (書き写しの台本の計算) = プロファイルの explicit')
+check(RS.explicit_for(RC16, gen_like, BC_ISO) == ex_main, 'explicit_for (書き写しの台本・生成器の計算) = プロファイルの explicit')
 d = run_dir('omit_decl', cfg_of(SERN, 'main', edit=lambda d: d['space'].pop('limiterScaled')))
 rc, r, path = RS.declare(d, SERN, 'main', deviate=['space.limiterScaled=~'], reason='省略の試し', recipes=RC)
 rec = json.load(open(path)) if path else {}
@@ -261,7 +276,8 @@ def to_legacy_axi(d):
     d['physProp']['isAxisymmetric'] = 1
 
 
-leg = cfg_of(AXI, 'main', explicit=False, edit=to_legacy_axi)
+# 軸対称の条件の明示すべきキー (axisymMethod・axisSegmentRWeight) を省いた旧キーだけの config (#11 から機種の fixed に入っているので消す)
+leg = cfg_of(AXI, 'main', explicit=False, edit=lambda d: (to_legacy_axi(d), d['mesh'].pop('axisSegmentRWeight', None)))
 ex_leg = RS.explicit_for(RC, leg, BC_AXI)
 check('mesh.axisymMethod' in ex_leg and 'mesh.axisSegmentRWeight' in ex_leg,
       f'旧キーだけの軸対称の config でも明示すべきキーの軸対称の条件 (applies.axisymmetric) が当たる ({sorted(k for k in ex_leg if "axis" in k)})')

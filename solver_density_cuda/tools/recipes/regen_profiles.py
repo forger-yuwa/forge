@@ -11,6 +11,9 @@
 明示すべきキー (plan §5.1 #16): YAML の `explicit_keys` の基準に当たるのに段の config が書いていないキーを、その段の `explicit` に
 旧い実効値 (書き写しに使ったソルバの既定) で載せる (`recipe_settings.explicit_for`)。旧い実効値の出所は今のソースで確かめ、
 合わなければ止まる (`recipe_settings.explicit_table`)。照合では `explicit` も `fixed` と同じく省略が FAIL。
+#11 (2026-10-15) から生成器が段の config に明示すべきキーを旧い実効値で書く (`forge_design.evaluate.config_builder`) ので、
+書き写すと `explicit` は空になり、キーは `fixed` に入る (値は #16 の `explicit` と同じ; design/tests/run_generator_recipe_tests.py)。
+`explicit` は生成器がまた省略を始めたとき (または新しい明示すべきキーを足したとき) に表に出る。
 §1 との差 (`differs_from_recommended`) は `recipe_settings.compute_differs` で共通プロファイルと比べて作る。
 
     design/.venv-opt/bin/python solver_density_cuda/tools/recipes/regen_profiles.py            # 生成区間を出す
@@ -221,13 +224,12 @@ def run_wt_modef(problem, work):
 
 
 def run_wt_feedback(problem, work):
-    """① 風洞 B10 の帰還 (feedback/euler_loop): パスごとに本段 1 段。cold のパスの config (`_cfg(n, n // 4)`、n = max(24000, 12000))。"""
+    """① 風洞 B10 の帰還 (feedback/euler_loop): パスごとに本段 1 段。cold のパスの config (`euler_loop.pass_config`、n = max(24000, 12000))。"""
     from forge_design.evaluate import runner_wt as W
+    from forge_design.feedback import euler_loop as EL
     from forge_design.probdef import load_problem
     p = load_problem(problem)
-    use_node = str(p.mesh.get("discretization", "node")).lower() == "node"
-    n = max(24000, 12000)
-    cfg = (W._config_euler_node(p, n, max(n // 4, 1), 4.0, 1) if use_node else W._config_euler(p, n, max(n // 4, 1), 4.0, 1))
+    cfg, _ = EL.pass_config(p, max(24000, 12000))
     return [("main", cfg)], yaml.safe_load(W._bcond(p, euler=True))
 
 
@@ -240,19 +242,14 @@ def run_axismach_euler(problem, work):
     rd = work / "run"
 
     def fake_prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None):
-        # runner_axismach.prepare の n・out_int・config (`_config_euler_node` → `_apply_gas_to_config` → cfl・relax の置換)・bcond と同じ
+        # runner_axismach.prepare の n・out_int・config (`_euler_config` = `_config_euler_node` → `_apply_gas_to_config` → cfl・relax)・bcond と同じ
         p = load_problem(problem_path)
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=False)
         n = nsteps or int(p.evaluate.get("nStepOuter", 12000))
         out_int = int(p.evaluate.get("outStepInterval", max(n // 3, 1)))
         (run_dir / "bcondConfig.yaml").write_text(A._bcond_with_species(W._bcond(p, euler=True), A._tp_species_Y(p)))
-        cfg_e = A._apply_gas_to_config(W._config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
-        if cfl_main is not None:
-            cfg_e = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {float(cfl_main)}, cfl_pseudo: {float(cfl_main)}", cfg_e)
-        if implicit_relax is not None:
-            cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
-        (run_dir / "solverConfig.yaml").write_text(cfg_e)
+        (run_dir / "solverConfig.yaml").write_text(A._euler_config(p, run_dir, n, out_int, cfl_main, implicit_relax))
         return {}
 
     with patched([(A, "prepare", fake_prepare), (A, "run_forge", cap), (A, "collect", lambda *a: {})] + _common_patches()):
@@ -269,11 +266,14 @@ def run_axismach_ns(problem, work):
     rd = work / "run"
     rd.mkdir(parents=True)
     p = load_problem(problem)
-    # prepare_ns の該当行と同じ (n・out_int は `_ns_steps`、main_line は `_main_line_spec`、設定は `_ns_configs`、bcond)
+    # prepare_ns の該当行と同じ (n・out_int は `_ns_steps`、main_line は `_main_line_spec`、設定は `_ns_configs`、bcond、
+    # 段の宣言の文脈 RECIPE_CONTEXT.json = `write_recipe_context`)
     n, out_int, _ = A._ns_steps(p, None)
     ml = A._main_line_spec(p, None, None)
     (rd / "bcondConfig.yaml").write_text(A._bcond_with_species(W._bcond(p, euler=False, profile_ok=True), A._tp_species_Y(p)))
-    cfg_ns, cfg_main = A._ns_configs(p, rd, n, out_int, None, None, ml)
+    rec = {}
+    cfg_ns, cfg_main = A._ns_configs(p, rd, n, out_int, None, None, ml, record=rec)
+    A.write_recipe_context(rd, problem, {"cfl_main": None, "implicit_relax": None}, rec)
     (rd / "solverConfig.yaml").write_text(cfg_main if ml is not None else cfg_ns)
     if ml is not None:
         (rd / A.PRESTAGE_CONFIG).write_text(cfg_ns)

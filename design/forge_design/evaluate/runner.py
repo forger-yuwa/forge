@@ -1036,12 +1036,15 @@ def tp_stage_plan(p: Problem, stages=None) -> list:
 def _tp_stage_run(p: Problem, run_dir: Path, sm, bc_text: str, tag: str, stage: str, n: int, out_int: int) -> Path:
     """1 段を回す: config を書き、forge を起動し、段の残差履歴を `residual_history_<tag>.csv` に写して manifest に足す。
     最終 res が step n まで届かない・forge が非 0・段終了ゲート (必要保存量が有限で ρ>0; runner_axismach.stage_gate) に
-    落ちたら RuntimeError (次段へ進まない)。戻り値は段の最終 res。"""
+    落ちたら RuntimeError (次段へ進まない)。戻り値は段の最終 res。
+    config は書く前に明示すべきキーを旧い実効値で足し、書いた後に段の宣言 RECIPE.json を書く (機種 bell_tp; plan
+    tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder`)。問題 YAML の上書き (cfl_main・stage_steps) は出所つきの逸脱。"""
     import shutil
 
+    from . import config_builder as CB
     from .runner_axismach import stage_gate
-    cfg = _solver_config_tp(p, n, out_int, stage)
-    (run_dir / "solverConfig.yaml").write_text(cfg)
+    cfg = CB.launch_stage(run_dir, _solver_config_tp(p, n, out_int, stage), bc_text, tag, "bell_tp", problem=p.path,
+                          generator="runner._tp_stage_run (run_staged_tp・continue_tp)")
     (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
     rc = run_forge(run_dir)
     hist = run_dir / "residual_history.csv"

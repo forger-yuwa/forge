@@ -40,10 +40,10 @@
   **今のソースの既定がプロファイルの値と同じでも通さない** (2026-10-14 の版 1 は通していた)。省略そのものを試すときは
   `--deviate key=~ --reason "1 行の理由"` (「書かない」の逸脱) で宣言する。`RECIPE.json` の逸脱には実効値「未確定」が付く。
 - **明示すべきキー** (`explicit`、plan §5.1 #16): 値に依存するのに設計チェーンの生成器が書いていなかったキー (`scalarGradient`・
-  `implicitRelax`・`slauWallNormalChi`・`limiterScaled` など) を、機種・段ごとに旧い実効値 (書き写しに使ったソルバの既定、出所つき) で
-  付録 A の表に「(明示すべき)」として載せてある。基準と出所は付録 A の「明示すべきキーの基準」(YAML の `explicit_keys`)。
-  **今の生成器の config はこれらのキーの省略で FAIL する** (生成器に書かせるのは plan §5.1 #11。そのときこの一覧を
-  「足してよいキーと旧い実効値」の例外表にする)。手書きの run でこの機種のプロファイルを宣言するなら、表の値を書く。
+  `implicitRelax`・`slauWallNormalChi`・`limiterScaled` など)。基準と出所は付録 A の「明示すべきキーの基準」(YAML の `explicit_keys`)。
+  **2026-10-15 (plan §5.1 #11) から生成器が段の config に旧い実効値 (書き写しに使ったソルバの既定) で書く**
+  (`design/forge_design/evaluate/config_builder.py`) ので、付録 A の機種の表では普通の値 (`fixed`) として載り、値は変わっていない。
+  生成器がまた省略を始めると「(明示すべき)」の値として表れる。手書きの run でこの機種のプロファイルを宣言するなら、表の値を書く。
 - **段取り 1 (2026-10-14)**: 設計チェーンの機種のプロファイルは**今の生成器が実際に書く設定の書き写し**
   (`recipes/regen_profiles.py` が代表の問題で全段の起動列を作って取る。手で写さない)。§1 と違うキーは付録 A の「§1 との差」に
   受入の状態「未」で載せてある。機種の生産レシピに揃えるのは段取り 2、§1 に寄せるのは受入の計算を事前登録してから (plan §6.4)。
@@ -560,29 +560,29 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | main |
 | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | 1 |
-| `mesh.axisSegmentRWeight` | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | 1 |
+| `mesh.axisymMethod` | = | 0 |
 | `mesh.discretization` | = | node |
 | `mesh.isAxisymmetric` | = | 1 |
 | `mesh.nodeWallDirichlet` | = | 1 |
-| `mesh.scalarGradient` | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | lsq |
 | `physProp.thermalMethod` | = | 0 |
 | `physProp.viscMethod` | = | 1 |
 | `solver` | = | SLAU |
 | `space.convMethod` | 0 | 1 |
 | `space.limiter` | = | 2 |
-| `space.limiterScaled` | = | 1 (明示すべき) |
-| `space.slauWallNormalChi` | = | 1 (明示すべき) |
-| `space.venkatK` | = | 0.05 (明示すべき) |
+| `space.limiterScaled` | = | 1 |
+| `space.slauWallNormalChi` | = | 1 |
+| `space.venkatK` | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | 1 |
 | `time.deltaT.cfl` | 0.5 | 4.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | 4.0 |
 | `time.deltaT.control` | = | 1 |
 | `time.deltaT.detectNaN` | = | 1 |
-| `time.deltaT.implicitRelax` | = | 1.0 (明示すべき) |
-| `time.deltaT.implicitThermalJacobian` | = | 0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | 1.0 |
+| `time.deltaT.implicitThermalJacobian` | = | 0 |
+| `time.deltaT.lineDtDirectional` | = | 0 |
+| `time.deltaT.lineImplicit` | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | 0 |
 | `time.dualTime` | = | 0 |
 | `time.last.nStepOuter` | 3000 |  |
@@ -593,12 +593,12 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `turbulence.katoLaunder` | = | 1 |
 | `turbulence.model` | = | sst |
 | `turbulence.scalarDiffusion` | = | 1 |
-| `turbulence.sstEnergyIncludesK` | = | 0 (明示すべき) |
-| `turbulence.sstNodeWallKPin` | = | 1 (明示すべき) |
-| `turbulence.sstOmegaProdFromPk` | = | 1 (明示すべき) |
-| `turbulence.sstSigmaBlend` | = | 1 (明示すべき) |
-| `turbulence.turbulentPrandtl` | = | 0.85 (明示すべき) |
-| `turbulence.wallTreatmentSST` | = | 0 (明示すべき) |
+| `turbulence.sstEnergyIncludesK` | = | 0 |
+| `turbulence.sstNodeWallKPin` | = | 1 |
+| `turbulence.sstOmegaProdFromPk` | = | 1 |
+| `turbulence.sstSigmaBlend` | = | 1 |
+| `turbulence.turbulentPrandtl` | = | 0.85 |
+| `turbulence.wallTreatmentSST` | = | 0 |
 
 禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
 
@@ -610,11 +610,11 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | --- | --- | --- | --- | --- |
 | `mesh.nodeInletCornerWall` | soft, main | 1 | 書かない (solver 既定 不明) | 未 |
 | `space.limiter` | soft | 0 | 2 | 未 |
-| `time.deltaT.implicitRelax` | soft, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, main | 0.7 | 1.0 | 未 |
 | `time.last.nStepOuter` | soft | 2000 | 3000 | 未 |
 | `time.nStepInner` | soft | 10 | 5 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
-| `turbulence.turbulentPrandtl` | soft, main | 0.9 | 書かない (solver 既定 0.85) | 未 |
+| `turbulence.turbulentPrandtl` | soft, main | 0.9 | 0.85 | 未 |
 
 #### `bell_tp_ns_sst`
 
@@ -623,33 +623,33 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | mid | main |
 | --- | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | = | 1 |
-| `mesh.axisSegmentRWeight` | = | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | = | 1 |
+| `mesh.axisymMethod` | = | = | 0 |
 | `mesh.discretization` | = | = | node |
 | `mesh.isAxisymmetric` | = | = | 1 |
 | `mesh.nodeInletCornerWall` | = | = | 1 |
 | `mesh.nodeWallDirichlet` | = | = | 1 |
-| `mesh.scalarGradient` | = | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | = | lsq |
 | `output.level` | = | = | 1 |
 | `physProp.thermalMethod` | = | = | 2 |
-| `physProp.thermoFloat` | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | 1 |
 | `physProp.viscMethod` | = | = | 2 |
 | `solver` | = | = | SLAU |
 | `space.convMethod` | 0 | 0 | 1 |
 | `space.limiter` | 0 | 0 | 2 |
-| `space.limiterScaled` |  |  | 1 (明示すべき) |
-| `space.slauWallNormalChi` | = | = | 1 (明示すべき) |
-| `space.venkatK` |  |  | 0.05 (明示すべき) |
+| `space.limiterScaled` |  |  | 1 |
+| `space.slauWallNormalChi` | = | = | 1 |
+| `space.venkatK` |  |  | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | 1 |
 | `time.deltaT.cfl` | 0.5 | 1.0 | 4.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4.0 |
 | `time.deltaT.control` | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | 1 |
 | `time.deltaT.implicitRelax` | = | = | 0.7 |
-| `time.deltaT.implicitThermalJacobian` | = | = | 0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | = | 0 (明示すべき) |
-| `time.deltaT.lowMachPrecond` | = | = | 0 (明示すべき) |
+| `time.deltaT.implicitThermalJacobian` | = | = | 0 |
+| `time.deltaT.lineDtDirectional` | = | = | 0 |
+| `time.deltaT.lineImplicit` | = | = | 0 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 |
 | `time.dualTime` | = | = | 0 |
 | `time.last.nStepOuter` | 2000 | 2000 |  |
 | `time.nStepInner` | 10 | 10 | 4 |
@@ -659,10 +659,10 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `turbulence.katoLaunder` | = | = | 1 |
 | `turbulence.model` | = | = | sst |
 | `turbulence.scalarDiffusion` | = | = | 1 |
-| `turbulence.sstEnergyIncludesK` | = | = | 0 (明示すべき) |
-| `turbulence.sstNodeWallKPin` | = | = | 1 (明示すべき) |
-| `turbulence.sstOmegaProdFromPk` | = | = | 1 (明示すべき) |
-| `turbulence.sstSigmaBlend` | = | = | 1 (明示すべき) |
+| `turbulence.sstEnergyIncludesK` | = | = | 0 |
+| `turbulence.sstNodeWallKPin` | = | = | 1 |
+| `turbulence.sstOmegaProdFromPk` | = | = | 1 |
+| `turbulence.sstSigmaBlend` | = | = | 1 |
 | `turbulence.turbulentPrandtl` | = | = | 0.9 |
 | `turbulence.wallTreatmentSST` | = | = | 0 |
 
@@ -677,30 +677,30 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | mid | main |
 | --- | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | = | 1 |
-| `mesh.axisSegmentRWeight` | = | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | = | 1 |
+| `mesh.axisymMethod` | = | = | 0 |
 | `mesh.discretization` | = | = | node |
 | `mesh.isAxisymmetric` | = | = | 1 |
 | `output.level` | = | = | 1 |
 | `physProp.thermCond` | = | = | 0.0 |
 | `physProp.thermalMethod` | = | = | 2 |
-| `physProp.thermoFloat` | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | 1 |
 | `physProp.visc` | = | = | 0.0 |
 | `physProp.viscMethod` | = | = | 0 |
 | `solver` | = | = | SLAU |
 | `space.convMethod` | 0 | 0 | 1 |
 | `space.limiter` | 0 | 0 | 2 |
-| `space.limiterScaled` |  |  | 1 (明示すべき) |
-| `space.venkatK` |  |  | 0.05 (明示すべき) |
+| `space.limiterScaled` |  |  | 1 |
+| `space.venkatK` |  |  | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | 1 |
 | `time.deltaT.cfl` | 0.5 | 1.0 | 4.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4.0 |
 | `time.deltaT.control` | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | 1 |
 | `time.deltaT.implicitRelax` | = | = | 0.7 |
-| `time.deltaT.lineDtDirectional` | = | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | = | 0 (明示すべき) |
-| `time.deltaT.lowMachPrecond` | = | = | 0 (明示すべき) |
+| `time.deltaT.lineDtDirectional` | = | = | 0 |
+| `time.deltaT.lineImplicit` | = | = | 0 |
+| `time.deltaT.lowMachPrecond` | = | = | 0 |
 | `time.dualTime` | = | = | 0 |
 | `time.last.nStepOuter` | 2000 | 2000 |  |
 | `time.nStepInner` | 10 | 10 | 4 |
@@ -718,7 +718,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 
 | キー | soft | main |
 | --- | --- | --- |
-| `mesh.axisymMethod` | = | 0 (明示すべき) |
+| `mesh.axisymMethod` | = | 0 |
 | `mesh.discretization` | = | cell |
 | `mesh.isAxisymmetric` | = | 1 |
 | `physProp.thermCond` | = | 0.0 |
@@ -733,9 +733,9 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `time.deltaT.cfl_pseudo` | 0.5 | 4.0 |
 | `time.deltaT.control` | = | 1 |
 | `time.deltaT.detectNaN` | = | 1 |
-| `time.deltaT.implicitRelax` | = | 1.0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | 1.0 |
+| `time.deltaT.lineDtDirectional` | = | 0 |
+| `time.deltaT.lineImplicit` | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | 0 |
 | `time.dualTime` | = | 0 |
 | `time.last.nStepOuter` | 3000 |  |
@@ -754,7 +754,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | --- | --- | --- | --- | --- |
 | `mesh.discretization` | soft, main | node | cell | 未 |
 | `space.limiter` | soft | 0 | 2 | 未 |
-| `time.deltaT.implicitRelax` | soft, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, main | 0.7 | 1.0 | 未 |
 | `time.last.nStepOuter` | soft | 2000 | 3000 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
 
@@ -765,8 +765,8 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | main |
 | --- | --- |
 | `mesh.axisCentroidShift` | 1 |
-| `mesh.axisSegmentRWeight` | 1 (明示すべき) |
-| `mesh.axisymMethod` | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | 1 |
+| `mesh.axisymMethod` | 0 |
 | `mesh.discretization` | node |
 | `mesh.isAxisymmetric` | 1 |
 | `physProp.thermCond` | 0.0 |
@@ -776,16 +776,16 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `solver` | SLAU |
 | `space.convMethod` | 1 |
 | `space.limiter` | 2 |
-| `space.limiterScaled` | 1 (明示すべき) |
-| `space.venkatK` | 0.05 (明示すべき) |
+| `space.limiterScaled` | 1 |
+| `space.venkatK` | 0.05 |
 | `time.deltaT.blockDPLUR` | 1 |
 | `time.deltaT.cfl` | 4.0 |
 | `time.deltaT.cfl_pseudo` | 4.0 |
 | `time.deltaT.control` | 1 |
 | `time.deltaT.detectNaN` | 1 |
-| `time.deltaT.implicitRelax` | 1.0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | 1.0 |
+| `time.deltaT.lineDtDirectional` | 0 |
+| `time.deltaT.lineImplicit` | 0 |
 | `time.deltaT.lowMachPrecond` | 0 |
 | `time.dualTime` | 0 |
 | `time.nStepInner` | 5 |
@@ -801,7 +801,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 
 | キー | 段 | §1 | この機種 | 受入 |
 | --- | --- | --- | --- | --- |
-| `time.deltaT.implicitRelax` | main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | main | 0.7 | 1.0 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
 
 #### `axismach_euler_tp`
@@ -811,29 +811,29 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | mid | main |
 | --- | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | = | 1 |
-| `mesh.axisSegmentRWeight` | = | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | = | 1 |
+| `mesh.axisymMethod` | = | = | 0 |
 | `mesh.discretization` | = | = | node |
 | `mesh.isAxisymmetric` | = | = | 1 |
-| `mesh.scalarGradient` | = | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | = | lsq |
 | `physProp.thermCond` | = | = | 0.0 |
 | `physProp.thermalMethod` | = | = | 2 |
-| `physProp.thermoFloat` | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | 1 |
 | `physProp.visc` | = | = | 0.0 |
 | `physProp.viscMethod` | = | = | 0 |
 | `solver` | = | = | SLAU |
 | `space.convMethod` | 0 | = | 1 |
 | `space.limiter` | = | = | 2 |
-| `space.limiterScaled` | = | = | 1 (明示すべき) |
-| `space.venkatK` | = | = | 0.05 (明示すべき) |
+| `space.limiterScaled` | = | = | 1 |
+| `space.venkatK` | = | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | 1 |
 | `time.deltaT.cfl` | 0.5 | 1.0 | 2.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 2.0 |
 | `time.deltaT.control` | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | 1 |
-| `time.deltaT.implicitRelax` | = | = | 1.0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | = | 1.0 |
+| `time.deltaT.lineDtDirectional` | = | = | 0 |
+| `time.deltaT.lineImplicit` | = | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | = | 0 |
 | `time.dualTime` | = | = | 0 |
 | `time.last.nStepOuter` | 3000 | 3000 |  |
@@ -853,7 +853,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `space.convMethod` | mid | 0 | 1 | 未 |
 | `space.limiter` | soft, mid | 0 | 2 | 未 |
 | `time.deltaT.cfl_pseudo` | main | 4 (目安) | 2.0 | 未 |
-| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 1.0 | 未 |
 | `time.last.nStepOuter` | soft, mid | 2000 | 3000 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
 
@@ -864,30 +864,30 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | mid | main |
 | --- | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | = | 1 |
-| `mesh.axisSegmentRWeight` | = | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | = | 1 |
+| `mesh.axisymMethod` | = | = | 0 |
 | `mesh.discretization` | = | = | node |
 | `mesh.isAxisymmetric` | = | = | 1 |
 | `mesh.nodeWallDirichlet` | = | = | 1 |
-| `mesh.scalarGradient` | = | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | = | lsq |
 | `physProp.thermalMethod` | = | = | 2 |
-| `physProp.thermoFloat` | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | 1 |
 | `physProp.viscMethod` | = | = | 2 |
 | `solver` | = | = | SLAU |
 | `space.convMethod` | 0 | 0 | 1 |
 | `space.limiter` | = | = | 2 |
-| `space.limiterScaled` | = | = | 1 (明示すべき) |
-| `space.slauWallNormalChi` | = | = | 1 (明示すべき) |
-| `space.venkatK` | = | = | 0.05 (明示すべき) |
+| `space.limiterScaled` | = | = | 1 |
+| `space.slauWallNormalChi` | = | = | 1 |
+| `space.venkatK` | = | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | 1 |
 | `time.deltaT.cfl` | 0.5 | = | 1.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | = | 1.0 |
 | `time.deltaT.control` | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | 1 |
-| `time.deltaT.implicitRelax` | = | = | 1.0 (明示すべき) |
-| `time.deltaT.implicitThermalJacobian` | = | = | 0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | = | 1.0 |
+| `time.deltaT.implicitThermalJacobian` | = | = | 0 |
+| `time.deltaT.lineDtDirectional` | = | = | 0 |
+| `time.deltaT.lineImplicit` | = | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | = | 0 |
 | `time.dualTime` | = | = | 0 |
 | `time.last.nStepOuter` | 3000 | 3000 |  |
@@ -898,10 +898,10 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `turbulence.katoLaunder` | = | = | 1 |
 | `turbulence.model` | = | = | sst |
 | `turbulence.scalarDiffusion` | = | = | 1 |
-| `turbulence.sstEnergyIncludesK` | = | = | 0 (明示すべき) |
-| `turbulence.sstNodeWallKPin` | = | = | 1 (明示すべき) |
-| `turbulence.sstOmegaProdFromPk` | = | = | 1 (明示すべき) |
-| `turbulence.sstSigmaBlend` | = | = | 1 (明示すべき) |
+| `turbulence.sstEnergyIncludesK` | = | = | 0 |
+| `turbulence.sstNodeWallKPin` | = | = | 1 |
+| `turbulence.sstOmegaProdFromPk` | = | = | 1 |
+| `turbulence.sstSigmaBlend` | = | = | 1 |
 | `turbulence.turbulentPrandtl` | = | = | 0.9 |
 | `turbulence.wallTreatmentSST` | = | = | 0 |
 
@@ -916,7 +916,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `mesh.nodeInletCornerWall` | soft, mid, main | 1 | 書かない (solver 既定 不明) | 未 |
 | `space.limiter` | soft, mid | 0 | 2 | 未 |
 | `time.deltaT.cfl_pseudo` | main | 4〜6 (目安) | 1.0 | 未 |
-| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 1.0 | 未 |
 | `time.last.nStepOuter` | soft, mid | 2000 | 3000 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
 
@@ -927,32 +927,32 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | mid | main |
 | --- | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | = | 1 |
-| `mesh.axisSegmentRWeight` | = | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | = | 1 |
+| `mesh.axisymMethod` | = | = | 0 |
 | `mesh.discretization` | = | = | node |
 | `mesh.isAxisymmetric` | = | = | 1 |
 | `mesh.nodeWallDirichlet` | = | = | 1 |
-| `mesh.scalarGradient` | = | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | = | lsq |
 | `output.level` |  |  | 1 |
 | `physProp.thermalMethod` | = | = | 2 |
-| `physProp.thermoFloat` | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | 1 |
 | `physProp.viscMethod` | = | = | 2 |
 | `solver` | = | = | SLAU |
 | `space.convMethod` | 0 | 0 | 1 |
 | `space.limiter` | = | = | 2 |
-| `space.limiterScaled` | = | = | 1 (明示すべき) |
-| `space.slauWallNormalChi` | = | = | 1 (明示すべき) |
-| `space.venkatK` | = | = | 0.05 (明示すべき) |
+| `space.limiterScaled` | = | = | 1 |
+| `space.slauWallNormalChi` | = | = | 1 |
+| `space.venkatK` | = | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | 1 |
 | `time.deltaT.cfl` | 0.5 | 1.0 | 4.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | 1.0 | 4.0 |
 | `time.deltaT.control` | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | 1 |
 | `time.deltaT.implicitRelax` | = | = | 0.7 |
-| `time.deltaT.implicitThermalJacobian` | 0 (明示すべき) | 0 (明示すべき) | 5 |
-| `time.deltaT.lineDtDirectional` | 0 (明示すべき) | 0 (明示すべき) | 1 |
+| `time.deltaT.implicitThermalJacobian` | 0 | 0 | 5 |
+| `time.deltaT.lineDtDirectional` | 0 | 0 | 1 |
 | `time.deltaT.lineDtDirectionalCap` |  |  | 50.0 |
-| `time.deltaT.lineImplicit` | 0 (明示すべき) | 0 (明示すべき) | 1 |
+| `time.deltaT.lineImplicit` | 0 | 0 | 1 |
 | `time.deltaT.lowMachPrecond` | = | = | 0 |
 | `time.dualTime` | = | = | 0 |
 | `time.last.nStepOuter` | 3000 | 3000 |  |
@@ -963,10 +963,10 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `turbulence.katoLaunder` | = | = | 1 |
 | `turbulence.model` | = | = | sst |
 | `turbulence.scalarDiffusion` | = | = | 1 |
-| `turbulence.sstEnergyIncludesK` | = | = | 0 (明示すべき) |
-| `turbulence.sstNodeWallKPin` | = | = | 1 (明示すべき) |
-| `turbulence.sstOmegaProdFromPk` | = | = | 1 (明示すべき) |
-| `turbulence.sstSigmaBlend` | = | = | 1 (明示すべき) |
+| `turbulence.sstEnergyIncludesK` | = | = | 0 |
+| `turbulence.sstNodeWallKPin` | = | = | 1 |
+| `turbulence.sstOmegaProdFromPk` | = | = | 1 |
+| `turbulence.sstSigmaBlend` | = | = | 1 |
 | `turbulence.turbulentPrandtl` | = | = | 0.9 |
 | `turbulence.wallTreatmentSST` | = | = | 0 |
 
@@ -990,8 +990,8 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | soft | main |
 | --- | --- | --- |
 | `mesh.axisCentroidShift` | = | 1 |
-| `mesh.axisSegmentRWeight` | = | 1 (明示すべき) |
-| `mesh.axisymMethod` | = | 0 (明示すべき) |
+| `mesh.axisSegmentRWeight` | = | 1 |
+| `mesh.axisymMethod` | = | 0 |
 | `mesh.discretization` | = | node |
 | `mesh.isAxisymmetric` | = | 1 |
 | `physProp.thermCond` | = | 0.0 |
@@ -1001,16 +1001,16 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `solver` | = | SLAU |
 | `space.convMethod` | 0 | 1 |
 | `space.limiter` | = | 2 |
-| `space.limiterScaled` | = | 1 (明示すべき) |
-| `space.venkatK` | = | 0.05 (明示すべき) |
+| `space.limiterScaled` | = | 1 |
+| `space.venkatK` | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | 1 |
 | `time.deltaT.cfl` | 0.5 | 4.0 |
 | `time.deltaT.cfl_pseudo` | 0.5 | 4.0 |
 | `time.deltaT.control` | = | 1 |
 | `time.deltaT.detectNaN` | = | 1 |
-| `time.deltaT.implicitRelax` | = | 1.0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | 1.0 |
+| `time.deltaT.lineDtDirectional` | = | 0 |
+| `time.deltaT.lineImplicit` | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | 0 |
 | `time.dualTime` | = | 0 |
 | `time.last.nStepOuter` | 3000 |  |
@@ -1028,7 +1028,7 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | キー | 段 | §1 | この機種 | 受入 |
 | --- | --- | --- | --- | --- |
 | `space.limiter` | soft | 0 | 2 | 未 |
-| `time.deltaT.implicitRelax` | soft, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, main | 0.7 | 1.0 | 未 |
 | `time.last.nStepOuter` | soft | 2000 | 3000 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
 
@@ -1041,25 +1041,25 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `mesh.discretization` | = | = | = | node |
 | `mesh.isAxisymmetric` | = | = | = | 0 |
 | `mesh.nodeWallDirichlet` | = | = | = | 1 |
-| `mesh.scalarGradient` | = | = | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | = | = | lsq |
 | `physProp.thermalMethod` | = | = | = | 2 |
-| `physProp.thermoFloat` | = | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | = | 1 |
 | `physProp.viscMethod` | = | = | = | 2 |
 | `solver` | = | = | = | SLAU |
 | `space.convMethod` | 0 | 0 | = | 1 |
 | `space.limiter` | = | = | = | 2 |
 | `space.limiterScaled` | = | = | = | 1 |
-| `space.slauWallNormalChi` | = | = | = | 1 (明示すべき) |
+| `space.slauWallNormalChi` | = | = | = | 1 |
 | `space.venkatK` | = | = | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | = | 1 |
 | `time.deltaT.cfl` | 0.1 | 0.1 | 0.1 | 0.5 |
 | `time.deltaT.cfl_pseudo` | 0.1 | 0.1 | 0.1 | 0.5 |
 | `time.deltaT.control` | = | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | = | 1 |
-| `time.deltaT.implicitRelax` | = | = | = | 1.0 (明示すべき) |
-| `time.deltaT.implicitThermalJacobian` | = | = | = | 0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | = | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | = | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | = | = | 1.0 |
+| `time.deltaT.implicitThermalJacobian` | = | = | = | 0 |
+| `time.deltaT.lineDtDirectional` | = | = | = | 0 |
+| `time.deltaT.lineImplicit` | = | = | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | = | = | 0 |
 | `time.dualTime` | = | = | = | 0 |
 | `time.last.nStepOuter` | 4000 | 4000 | 4000 |  |
@@ -1070,11 +1070,11 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `turbulence.katoLaunder` |  | = | = | 1 |
 | `turbulence.model` | none | = | = | sst |
 | `turbulence.scalarDiffusion` |  | = | = | 1 |
-| `turbulence.sstEnergyIncludesK` |  | = | = | 0 (明示すべき) |
-| `turbulence.sstNodeWallKPin` |  | = | = | 1 (明示すべき) |
-| `turbulence.sstOmegaProdFromPk` |  | = | = | 1 (明示すべき) |
-| `turbulence.sstSigmaBlend` |  | = | = | 1 (明示すべき) |
-| `turbulence.turbulentPrandtl` |  | = | = | 0.85 (明示すべき) |
+| `turbulence.sstEnergyIncludesK` |  | = | = | 0 |
+| `turbulence.sstNodeWallKPin` |  | = | = | 1 |
+| `turbulence.sstOmegaProdFromPk` |  | = | = | 1 |
+| `turbulence.sstSigmaBlend` |  | = | = | 1 |
+| `turbulence.turbulentPrandtl` |  | = | = | 0.85 |
 | `turbulence.wallTreatmentSST` |  | = | = | 0 |
 
 禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
@@ -1091,11 +1091,11 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `time.deltaT.cfl_pseudo` | soft | 0.5 | 0.1 | 未 |
 | `time.deltaT.cfl_pseudo` | mid | 1.0 | 0.1 | 未 |
 | `time.deltaT.cfl_pseudo` | main | 4〜6 (目安) | 0.5 | 未 |
-| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 1.0 | 未 |
 | `time.last.nStepOuter` | soft, mid | 2000 | 4000 | 未 |
 | `time.nStepInner` | soft, mid | 10 | 5 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
-| `turbulence.turbulentPrandtl` | soft, mid, main | 0.9 | 書かない (solver 既定 0.85) | 未 |
+| `turbulence.turbulentPrandtl` | soft, mid, main | 0.9 | 0.85 | 未 |
 
 #### `sern3d_frozen_tp_sst`
 
@@ -1106,25 +1106,25 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `mesh.discretization` | = | = | = | node |
 | `mesh.isAxisymmetric` | = | = | = | 0 |
 | `mesh.nodeWallDirichlet` | = | = | = | 1 |
-| `mesh.scalarGradient` | = | = | = | lsq (明示すべき) |
+| `mesh.scalarGradient` | = | = | = | lsq |
 | `physProp.thermalMethod` | = | = | = | 2 |
-| `physProp.thermoFloat` | = | = | = | 1 (明示すべき) |
+| `physProp.thermoFloat` | = | = | = | 1 |
 | `physProp.viscMethod` | = | = | = | 2 |
 | `solver` | = | = | = | SLAU |
 | `space.convMethod` | 0 | 0 | = | 1 |
 | `space.limiter` | = | = | = | 2 |
 | `space.limiterScaled` | = | = | = | 1 |
-| `space.slauWallNormalChi` | = | = | = | 1 (明示すべき) |
+| `space.slauWallNormalChi` | = | = | = | 1 |
 | `space.venkatK` | = | = | = | 0.05 |
 | `time.deltaT.blockDPLUR` | = | = | = | 1 |
 | `time.deltaT.cfl` | 0.2 | 0.2 | 0.2 | 0.25 |
 | `time.deltaT.cfl_pseudo` | 0.2 | 0.2 | 0.2 | 0.25 |
 | `time.deltaT.control` | = | = | = | 1 |
 | `time.deltaT.detectNaN` | = | = | = | 1 |
-| `time.deltaT.implicitRelax` | = | = | = | 1.0 (明示すべき) |
-| `time.deltaT.implicitThermalJacobian` | = | = | = | 0 (明示すべき) |
-| `time.deltaT.lineDtDirectional` | = | = | = | 0 (明示すべき) |
-| `time.deltaT.lineImplicit` | = | = | = | 0 (明示すべき) |
+| `time.deltaT.implicitRelax` | = | = | = | 1.0 |
+| `time.deltaT.implicitThermalJacobian` | = | = | = | 0 |
+| `time.deltaT.lineDtDirectional` | = | = | = | 0 |
+| `time.deltaT.lineImplicit` | = | = | = | 0 |
 | `time.deltaT.lowMachPrecond` | = | = | = | 0 |
 | `time.dualTime` | = | = | = | 0 |
 | `time.last.nStepOuter` | 2000 | 2000 | 2000 |  |
@@ -1135,11 +1135,11 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `turbulence.katoLaunder` |  | = | = | 1 |
 | `turbulence.model` | none | = | = | sst |
 | `turbulence.scalarDiffusion` |  | = | = | 1 |
-| `turbulence.sstEnergyIncludesK` |  | = | = | 0 (明示すべき) |
-| `turbulence.sstNodeWallKPin` |  | = | = | 1 (明示すべき) |
-| `turbulence.sstOmegaProdFromPk` |  | = | = | 1 (明示すべき) |
-| `turbulence.sstSigmaBlend` |  | = | = | 1 (明示すべき) |
-| `turbulence.turbulentPrandtl` |  | = | = | 0.85 (明示すべき) |
+| `turbulence.sstEnergyIncludesK` |  | = | = | 0 |
+| `turbulence.sstNodeWallKPin` |  | = | = | 1 |
+| `turbulence.sstOmegaProdFromPk` |  | = | = | 1 |
+| `turbulence.sstSigmaBlend` |  | = | = | 1 |
+| `turbulence.turbulentPrandtl` |  | = | = | 0.85 |
 | `turbulence.wallTreatmentSST` |  | = | = | 0 |
 
 禁止: `mesh.bndFirstOrder` (使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md))
@@ -1156,10 +1156,10 @@ recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1
 | `time.deltaT.cfl_pseudo` | soft | 0.5 | 0.2 | 未 |
 | `time.deltaT.cfl_pseudo` | mid | 1.0 | 0.2 | 未 |
 | `time.deltaT.cfl_pseudo` | main | 4〜6 (目安) | 0.25 | 未 |
-| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 書かない (solver 既定 1.0) | 未 |
+| `time.deltaT.implicitRelax` | soft, mid, main | 0.7 | 1.0 | 未 |
 | `time.nStepInner` | soft, mid | 10 | 5 | 未 |
 | `time.nStepInner` | main | 4 | 5 | 未 |
-| `turbulence.turbulentPrandtl` | soft, mid, main | 0.9 | 書かない (solver 既定 0.85) | 未 |
+| `turbulence.turbulentPrandtl` | soft, mid, main | 0.9 | 0.85 | 未 |
 
 <!-- END GENERATED: recipe_settings.py --doc -->
 

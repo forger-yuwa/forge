@@ -3,13 +3,14 @@
 
 (a) 書き写しの台本 (`solver_density_cuda/tools/recipes/regen_profiles.py`) の出力 = `recommended_settings.yaml` の生成区間
     (生成器の出力が変わったら、ここで落ちる。直し方は `regen_profiles.py --write` で書き直し、差を plan に書く)。
-(b) 各生成器を代表の問題で回した**全段の起動列**の config を、それぞれのプロファイルの段に照合する。#16 (2026-10-15) から
-    `fixed`・`explicit` の省略は FAIL なので、今の生成器の config は**その段の明示すべきキー (`explicit`) の省略だけ**で FAIL する
-    (これは #11 で生成器に書かせる例外表のキー。黙って通さず、FAIL のキーの集合 = 例外表であることを確かめる)。
-    例外表のキーを旧い実効値で足した config (#11 で生成器が書く形) は PASS (FAIL も WARN も無し)。
+(b) 各生成器を代表の問題で回した**全段の起動列**の config を、それぞれのプロファイルの段に照合する: PASS (FAIL も WARN も無し)。
+    #16 (2026-10-15) から `fixed`・`explicit` の省略は FAIL で、#11 (2026-10-15) までは生成器の config がその段の明示すべきキーの
+    省略だけで FAIL していた (例外表)。#11 から生成器が明示すべきキーを旧い実効値で書くので PASS に戻った (書き写すとキーは `fixed`
+    に入り `explicit` は空; 置き換えの前とのバイト同一と例外表は design/tests/run_generator_recipe_tests.py)。`explicit` が空でない段が
+    あれば (生成器がまた省略を始めた)、FAIL のキーの集合 = その段の `explicit` であることを確かめ、足すと PASS することも見る。
 (c) 負例: 生成器の本段の config を前段 (soft) として宣言すると FAIL (段の不一致を名指し)、別の機種のプロファイルで宣言すると FAIL。
-(d) #16 の判別 A/B (2026-10-15 codex diagnose、forge 0 step): SERN 2D 本段の生成器の config (例外表のキーを足した形) で
-    A = `space.limiterScaled: 1` を明記 → PASS、B = そのキーだけ削除 → 同じキーを名指しで FAIL。
+(d) #16 の判別 A/B (2026-10-15 codex diagnose、forge 0 step): SERN 2D 本段の生成器の config (#11 から明示すべきキーを書く) で
+    A = `space.limiterScaled: 1` を明記 (生成器の config そのまま) → PASS、B = そのキーだけ削除 → 同じキーを名指しで FAIL。
 forge・変換器は使わない (段の config は偽の forge で取る)。recipe_settings.py の単体の負例は
 solver_density_cuda/tests/unit/test_recipe_settings.py。
 """
@@ -67,11 +68,15 @@ for sp in RG.SPECS:
         r = RS.check_config(recipes, cfg, name, st, bcond=None)
         fk = {k for k, _ in r["fails"]}
         EXCEPTIONS += len(ex)
-        check(f"(b) {name}/{st}: 生成器の config の FAIL は #11 の例外表のキー (明示すべきキー {len(ex)} 個) の省略だけ",
+        if not ex:
+            check(f"(b) {name}/{st}: 生成器の config がプロファイルに PASS (FAIL も WARN も無し)",
+                  not r["fails"] and not r["warns"], f"fails {r['fails'][:3]} warns {r['warns'][:3]}")
+            continue
+        check(f"(b) {name}/{st}: 生成器の config の FAIL は明示すべきキー ({len(ex)} 個) の省略だけ (生成器がまた省略している)",
               fk == set(ex) and all("明示すべきキー" in m for _, m in r["fails"]) and not r["warns"],
               f"FAIL のうち例外表に無い {sorted(fk - set(ex))[:3]}、例外表で FAIL しない {sorted(set(ex) - fk)[:3]}、warns {r['warns'][:3]}")
         r = RS.check_config(recipes, with_keys(cfg, add=ex), name, st, bcond=None)
-        check(f"(b) {name}/{st}: 例外表のキーを旧い実効値で足した config (#11 の形) がプロファイルに PASS",
+        check(f"(b) {name}/{st}: 明示すべきキーを旧い実効値で足した config がプロファイルに PASS",
               not r["fails"] and not r["warns"], f"fails {r['fails'][:3]} warns {r['warns'][:3]}")
     main = [c for st, c in stages if st == "main"][-1]
     if any(st == "soft" for st, _ in stages):
@@ -82,7 +87,7 @@ for sp in RG.SPECS:
     r = RS.check_config(recipes, main, other, "main")
     check(f"(c) {name}: 別の機種のプロファイル ({other}) で宣言すると FAIL", bool(r["fails"]), sorted({k for k, _ in r["fails"]})[:5])
 
-# (d) #16 の判別 A/B: SERN 2D 本段の生成器の config (例外表のキーを足した形)
+# (d) #16 の判別 A/B: SERN 2D 本段の生成器の config (#11 から明示すべきキーを書く; explicit が空でなければ足した形)
 SERN = "sern2d_finite_base_frozen_tp_sst"
 main = [c for st, c in configs[SERN] if st == "main"][-1]
 ex = RS.resolve(recipes, SERN)["stages"]["main"]["explicit"]
@@ -174,6 +179,6 @@ with tempfile.TemporaryDirectory() as td:
           rc == 0 and st2["bell_tp_ns_sst"] == "differs" and "WARN bell_tp_ns_sst" in out
           and all(s == "missing" for n, s in st2.items() if n != "bell_tp_ns_sst"), f"rc {rc} {out[:300]}")
 
-print(f"\n#11 の例外表 (明示すべきキー) の延べ数: {EXCEPTIONS} (機種 {len(RG.SPECS)}・全段)")
+print(f"\n生成器が省略している明示すべきキー (プロファイルの explicit) の延べ数: {EXCEPTIONS} (機種 {len(RG.SPECS)}・全段; #11 から 0 のはず)")
 print(f"\n{'ALL PASS' if FAIL == 0 else f'FAIL {FAIL}'}")
 sys.exit(1 if FAIL else 0)

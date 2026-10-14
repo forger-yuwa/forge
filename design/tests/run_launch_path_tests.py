@@ -17,6 +17,11 @@ forge の代わりに res_<n>.h5 (実際の HDF5) と residual_history.csv を�
     差し替え (呼ばれた回数だけ見る)。
 
 `--golden` は段の config の sha256 を出すだけ (変更前のコードで回して固定値を作るため; forge・restart は差し替え)。
+
+#11 (2026-10-15、plan §5.1 #11) から、機種のプロファイルに合う段の config (ここでは runner_wt の Euler cell と walldriven) には生成器が
+明示すべきキーを旧い実効値で足し、段の宣言 RECIPE.json・RECIPE_<tag>.json を書く。バイト同一の比較は、宣言の `explicit_added` の
+断片を除いた文字列で行う (足したキーの値と例外表の一致は design/tests/run_generator_recipe_tests.py)。合うプロファイルの無い config
+(NS v1 の node SST・CPG の SERN) は今までどおりバイト同一で、宣言も書かない。
 """
 import argparse
 import hashlib
@@ -173,6 +178,26 @@ def golden_of(cfgs):
     return sha("\n=====\n".join(cfgs))
 
 
+def strip_explicit(cfg, added):
+    """#11 で生成器が足した明示すべきキー (宣言の explicit_added) の断片を除く (flow 形式の `, key: 値`)。断片が 1 か所に決まらなければ
+    AssertionError。"""
+    from forge_design.evaluate.config_builder import _token
+    for k, v in (added or {}).items():
+        frag = f", {k.split('.')[-1]}: {_token(v)}"
+        assert cfg.count(frag) == 1, (k, frag)
+        cfg = cfg.replace(frag, "", 1)
+    return cfg
+
+
+def stripped(rd, cfgs, tags):
+    """段の config から、その段の宣言 (RECIPE_<tag>.json) の explicit_added を除いた文字列の列 (宣言の無い段はそのまま)。"""
+    out = []
+    for cfg, tag in zip(cfgs, tags):
+        p = Path(rd) / f"RECIPE_{tag}.json"
+        out.append(strip_explicit(cfg, json.loads(p.read_text()).get("explicit_added")) if p.exists() else cfg)
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ SERN (段の梯子)
 SERN_CFG = '''mesh: {discretization: "node", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: "sern.h5", valueFileName: "sern.h5"}
 gpu: 1
@@ -240,8 +265,13 @@ if args.golden:
 for tag, cfg, sst in (("wt_euler_cell", CFG_EULER_CELL, False), ("wt_sst_node", CFG_SST_NODE, True)):
     rd, f, err = run_wt(tag, cfg, sst=sst)
     check(f"(a) {tag}: 例外なしで soft → 本段 (forge 2 回)", err is None and len(f.cfgs) == 2, str(err)[:200])
-    check(f"(a) {tag}: 段の config は変更前とバイト同一", golden_of(f.cfgs) == GOLDEN[tag], golden_of(f.cfgs)[:16])
-    check(f"(a) {tag}: 本段の config = prepare の config (書き換えない)", f.cfgs[-1] == cfg)
+    base = stripped(rd, f.cfgs, ["soft", "main"])
+    check(f"(a) {tag}: 段の config は変更前とバイト同一 (#11 の明示すべきキーの断片を除いて)", golden_of(base) == GOLDEN[tag],
+          golden_of(base)[:16])
+    check(f"(a) {tag}: 本段の config = prepare の config (#11 の明示すべきキーを除いて書き換えない)", base[-1] == cfg)
+    decl = (rd / "RECIPE_main.json").exists() and (rd / "RECIPE_soft.json").exists()
+    check(f"(a) {tag}: 段の宣言 (#11): Euler cell (wt_modef_euler_cell に合う) は soft・main を宣言、NS v1 は宣言しない (config もそのまま)",
+          decl if not sst else (not list(rd.glob("RECIPE*")) and f.cfgs[-1] == cfg))
     check(f"(a) {tag}: stage_manifest の段は soft → main", manifest_tags(rd) == ["soft", "main"], manifest_tags(rd))
     check(f"(a) {tag}: 段の履歴 residual_history_soft/main.csv",
           (rd / "residual_history_soft.csv").exists() and (rd / "residual_history_main.csv").exists())
@@ -280,7 +310,9 @@ for mod, name in ((RW, "runner_wt"), (RD, "walldriven")):
 # --- (c) walldriven ----------------------------------------------------------------------------------------------------
 rd, f, err = run_wt("walldriven", CFG_EULER_NODE, mod=RD)
 check("(c) walldriven: 例外なしで soft → 本段", err is None and len(f.cfgs) == 2, str(err)[:200])
-check("(c) walldriven: 段の config は変更前とバイト同一", golden_of(f.cfgs) == GOLDEN["walldriven"], golden_of(f.cfgs)[:16])
+check("(c) walldriven: 段の config は変更前とバイト同一 (#11 の明示すべきキーの断片を除いて)",
+      golden_of(stripped(rd, f.cfgs, ["soft", "main"])) == GOLDEN["walldriven"], golden_of(stripped(rd, f.cfgs, ["soft", "main"]))[:16])
+check("(c) walldriven: 段の宣言 RECIPE_soft・RECIPE_main (#11)", (rd / "RECIPE_soft.json").exists() and (rd / "RECIPE_main.json").exists())
 check("(c) walldriven: stage_manifest の段は soft → main", manifest_tags(rd) == ["soft", "main"], manifest_tags(rd))
 v = read_value(rd / "nozzle.h5")
 check("(c) walldriven: 初期場 = soft の最終場 (restart_field.py)、wall_dist は宛先のまま",

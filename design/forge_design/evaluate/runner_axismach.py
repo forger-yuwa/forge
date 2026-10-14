@@ -998,11 +998,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node 変換 (node config を書いてから変換 — 必須) + 等エントロピー IC
-    cfg_e = _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
-    if cfl_main is not None:
-        cfg_e = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {float(cfl_main)}, cfl_pseudo: {float(cfl_main)}", cfg_e)
-    if implicit_relax is not None:
-        cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    cfg_e = _euler_config(p, run_dir, n, out_int, cfl_main, implicit_relax)
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
     run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
@@ -1048,6 +1044,18 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
         info["euler_wall"] = euler_wall
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
+
+
+def _euler_config(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None) -> str:
+    """Euler の本段の config (prepare が書く文字列): `_config_euler_node` → `_apply_gas_to_config` (TP の physProp) → 引数 cfl_main の
+    cfl・cfl_pseudo (YAML 上の位置で書き換え; 2026-10-15 まで正規表現。書く文字列は同じ) → 引数 implicit_relax の挿入
+    (`blockDPLUR: 1,` の直後; 位置を変えると文字列が変わるので文字列置換のまま)。書き写しの台本 (recipes/regen_profiles.py) も使う。"""
+    cfg_e = _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
+    if cfl_main is not None:
+        cfg_e = _cfg_set(cfg_e, {"cfl": float(cfl_main), "cfl_pseudo": float(cfl_main)})
+    if implicit_relax is not None:
+        cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    return cfg_e
 
 
 # 段階起動の段 config の変更 (plan tooling-rerun-conditions §4.9、codex result 段 #2)。
@@ -1138,19 +1146,29 @@ def _cfg_check(cfg_text: str, want: dict, label: str) -> None:
 
 
 def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, stages: str = "full",
-               mesh_h5: str = "nozzle.h5") -> int:
+               mesh_h5: str = "nozzle.h5", recipe: dict | None = None) -> int:
     """soft 段 (1次+cfl0.5, 3000 step) → [mid 段 (2次+cfl1, 3000 step)] → 本段。
     walldriven W3 と同方式・段階起動必須。`cfl_main` で本段 CFL を上書き
     (semi-perfect TP は cfl4 で本段 step ~60 に爆発 — case/42 実測。TP は cfl≤2 が実績
     [[cutler-cpg-vs-tp-dplur-sst]])。`mid_stage=True` で 2 次化と CFL 上げを分離する。
     `run_staged_ns` と同じく、段ごとの実効設定を `stage_manifest.json` に記録し、段の残差履歴を
     `residual_history_<tag>.csv` に残す (tag = soft / mid / main)。段の最終 res の必要保存量が非有限・ρ≤0 なら
-    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9、codex result 段 3 回目 #3)。"""
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9、codex result 段 3 回目 #3)。
+    各段の config は書く前に明示すべきキーを旧い実効値で足し、書いた後に段の宣言 RECIPE.json を書く (機種 axismach_euler;
+    plan tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder`)。recipe {problem, args}: 問題 YAML の所在と引数による
+    上書き (`main` の `--cfl`・`--implicit-relax`) — 問題 YAML・引数の上書きを宣言の逸脱 (出所つき) に変換するのに使う。"""
     import shutil
+    from . import config_builder as CB
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
+    rcp = recipe or {}
+
+    def _launch_cfg(cfg, tag):
+        """段の config を仕上げて書き、宣言する (forge の起動の直前)。戻り: 書いた config。"""
+        return CB.launch_stage(run_dir, cfg, bc_text, tag, "axismach_euler", problem=rcp.get("problem"), args=rcp.get("args"),
+                               generator="runner_axismach.run_staged")
     if cfl_main is not None:
         cfg_main = _cfg_set(cfg_main, {"cfl": cfl_main, "cfl_pseudo": cfl_main})
     main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")}
@@ -1167,7 +1185,7 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
     def _stage(cfg, nsteps, label, want):
         cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
         _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, label)
-        (run_dir / "solverConfig.yaml").write_text(cfg)
+        cfg = _launch_cfg(cfg, label)
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
         _record(cfg, label)
@@ -1190,7 +1208,7 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
             mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
             _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
     _cfg_check(cfg_main, main_want, "main")
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
+    cfg_main = _launch_cfg(cfg_main, "main")
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
     rc = run_forge(run_dir)
     _record(cfg_main, "main")
@@ -1269,8 +1287,15 @@ def main(argv=None) -> int:
     pp = load_problem(a.problem)
     import time as _t
     t0 = _t.time()
+    # 宣言の逸脱の出所 (plan tooling-generator-defaults-and-launch-gate §5.1 #11): 引数は問題 YAML より優先
+    args = {}
+    if a.cfl is not None:
+        args["main"] = {k: {"name": "--cfl", "value": a.cfl} for k in ("time.deltaT.cfl", "time.deltaT.cfl_pseudo")}
+    if a.implicit_relax is not None:
+        args["*"] = {"time.deltaT.implicitRelax": {"name": "--implicit-relax", "value": a.implicit_relax}}
     rc = run_staged(a.run_dir, cfl_main=(a.cfl if a.cfl is not None else pp.evaluate.get("cfl_main")),
-                    mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)), stages=a.stages)
+                    mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)), stages=a.stages,
+                    recipe={"problem": a.problem, "args": args})
     print(f"forge exit={rc} (wall {_t.time() - t0:.0f} s, stages={a.stages})")
     print(json.dumps(collect(a.problem, a.run_dir), indent=1))
     return rc
@@ -1480,6 +1505,10 @@ _LIMITER_REF_KEYS = (("ro", "limiterRoRef"), ("p", "limiterPRef"), ("a", "limite
 _MAIN_LINE_ONLY_PATHS = ({("time", "deltaT", k) for k in ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap",
                                                          "implicitThermalJacobian")}
                          | {("space", k) for _, k in _LIMITER_REF_KEYS} | {("output",)})
+# B0 だけのキーのうち、前の段に「切った値」(省略と同じ実効値) で書いてよいもの: 明示すべきキー (plan
+# tooling-generator-defaults-and-launch-gate §5.1 #11・#16) として `_ns_configs` が前の段の元の設定に旧い実効値で足す
+_MAIN_LINE_OFF = {("time", "deltaT", "lineImplicit"): 0, ("time", "deltaT", "lineDtDirectional"): 0,
+                  ("time", "deltaT", "implicitThermalJacobian"): 0}
 # 前の段の元の設定と本段の設定の差として許すパス (B0 のパス + cfl・cfl_pseudo・implicitRelax)
 _MAIN_LINE_PATHS = (_MAIN_LINE_ONLY_PATHS
                     | {("time", "deltaT", k) for k in ("cfl", "cfl_pseudo", "implicitRelax")})
@@ -1608,19 +1637,32 @@ def _apply_main_line(cfg: str, ml: dict) -> str:
     return text
 
 
-def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None, main_line: dict | None = None):
+def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None, main_line: dict | None = None,
+                record: dict | None = None):
     """NS の (前の段の元の設定, 本段の設定) を返す。`main_line` (`_main_line_spec` の戻り値) が None なら 2 つは同じ文字列で、
     従来の prepare_ns の組み立てと同じ (`_config_sst_node` → `_apply_gas_to_config` → implicit_relax の挿入)。
-    `_apply_gas_to_config` は run_dir に species_meta.yaml などを書く (従来どおり 1 回だけ呼ぶ)。"""
+    `_apply_gas_to_config` は run_dir に species_meta.yaml などを書く (従来どおり 1 回だけ呼ぶ)。
+    最後に、機種のプロファイル (axismach_ns / B0 は axismach_ns_b0) に合えば明示すべきキーを旧い実効値で足す
+    (plan tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder.finish_config`; 前の段の元の設定と本段の設定を
+    別々に。B0 は足す前の設定に当てる)。S1・S2 (ns_stage_configs) と本段はこの 2 つから作るので、段の config と prepare_info の
+    ns_stage_configs の sha256 は足した後の文字列のもの。bcond は run_dir/bcondConfig.yaml (無ければ prepare_ns と同じ組み立て)。
+    record (dict) を渡すと足したキーを {family, prestage, main} で返す (prepare_ns が RECIPE_CONTEXT.json に写す)。"""
+    from . import config_builder as CB
     cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
     implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
     cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
     if implicit_relax is not None:
         # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
         cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
-    if main_line is None:
-        return cfg_ns, cfg_ns
-    return cfg_ns, _apply_main_line(cfg_ns, main_line)
+    bc_p = Path(run_dir) / "bcondConfig.yaml"
+    bc = bc_p.read_text() if bc_p.exists() else _bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p))
+    fam = "axismach_ns" if main_line is None else "axismach_ns_b0"
+    cfg_main = cfg_ns if main_line is None else _apply_main_line(cfg_ns, main_line)
+    cfg_ns_f, fin_pre = CB.finish_config(cfg_ns, bc, fam)
+    cfg_main_f, fin_main = (cfg_ns_f, fin_pre) if main_line is None else CB.finish_config(cfg_main, bc, fam)
+    if record is not None:
+        record.update(family=fam, prestage=fin_pre["explicit_added"], main=fin_main["explicit_added"])
+    return cfg_ns_f, cfg_main_f
 
 
 def _ns_steps(p: Problem, nsteps=None) -> tuple:
@@ -1669,6 +1711,18 @@ def _stop_rule_settings(p: Problem, nsteps, euler_ref, stop_rule: bool | None) -
         if why:
             sr.update(use=False, reason="; ".join(why))
     return sr
+
+
+def write_recipe_context(run_dir, problem_path, args: dict, explicit: dict | None = None) -> Path:
+    """`RECIPE_CONTEXT.json` (plan tooling-generator-defaults-and-launch-gate §5.1 #11): run_staged_ns が段の宣言を書くときに読む、
+    問題 YAML の所在・prepare_ns の引数 (cfl_main・implicit_relax、None は書かない)・`_ns_configs` が足した明示すべきキー。
+    run_staged_ns は prepare_ns と別の呼び出し (case の台本・deltastar_loop) からも回るので、run に置く。"""
+    from . import config_builder as CB
+    p = CB.write_context(run_dir, "runner_axismach.prepare_ns", problem_path, args)
+    rec = json.loads(p.read_text())
+    rec["explicit_added"] = dict(explicit or {})
+    p.write_text(json.dumps(rec, indent=1, ensure_ascii=False))
+    return p
 
 
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
@@ -1739,6 +1793,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    recipe_args = {"cfl_main": cfl_main, "implicit_relax": implicit_relax}     # 引数そのもの (宣言の逸脱の出所; RECIPE_CONTEXT.json)
     # 物理壁の表現 (§4.4): 不正値と未対応の設計壁は run dir を作る前・設計チェーンの前に例外
     pw_repr = _physical_wall_repr(p.geometry)
     if pw_repr is not None and str(p.geometry.get("wall_repr", "interp")) != "joint":
@@ -1893,7 +1948,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)。main_line があっても変換・初期場の処理は B0 を
     # 当てる前の設定で行い、本段の設定 (cfg_main) への切り替えは最後に行う (§5.1 #30)
-    cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line)
+    explicit_rec = {}
+    cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line, record=explicit_rec)
+    write_recipe_context(run_dir, problem_path, recipe_args, explicit_rec)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
     run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
@@ -2074,11 +2131,13 @@ def ns_stage_configs(cfg_main: str, stages: str = "full", ramp=None, ramp_steps:
         _add(_ns_prestage(src, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
         if cfg_pre is not None:
             # S1・S2 にライン陰解法・上限・ITJ・リミッタの基準値が無く、出力の指定は前の段の元の設定のまま (本段の extraFields が無い)
+            # (明示すべきキーとして B0 を切った値 0 で書いたもの `_MAIN_LINE_OFF` は残ってよい: 省略と同じ実効値)
             out_pre = _cfg_path_get(_cfg_load(cfg_pre), ("output",))
             for tag, cfg, _, _ in pre:
                 doc = _cfg_load(cfg)
                 left = [".".join(pth) for pth in sorted(_MAIN_LINE_ONLY_PATHS - {("output",)})
-                        if _cfg_path_get(doc, pth) is not _CFG_MISSING]
+                        if _cfg_path_get(doc, pth) is not _CFG_MISSING
+                        and not (pth in _MAIN_LINE_OFF and _cfg_path_get(doc, pth) == _MAIN_LINE_OFF[pth])]
                 if _cfg_path_get(doc, ("output",)) != out_pre:
                     left.append("output")
                 if left:
@@ -2264,6 +2323,16 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     (run_dir / SR.STATE).unlink(missing_ok=True)             # 前の呼び出しの停止の状態を今回の結果と取り違えない
     sm = _stage_manifest_cls()(run_dir)
+    from . import config_builder as CB
+    fam = "axismach_ns" if cfg_pre is None else "axismach_ns_b0"
+    added = (CB.load_context(run_dir).get("explicit_added") or {})
+
+    def _declare(tag, prestage):
+        """段の宣言 RECIPE.json (plan tooling-generator-defaults-and-launch-gate §5.1 #11)。config は prepare_ns (`_ns_configs`) が
+        明示すべきキーを足したものから作っているので、ここでは足さない (足すと ns_stage_configs・prepare_info の sha256 と違う)。
+        問題 YAML・prepare_ns の引数 (RECIPE_CONTEXT.json) の上書きは出所つきの逸脱にする。"""
+        CB.declare_stage(run_dir, tag, fam, generator="runner_axismach.run_staged_ns",
+                         finished={"explicit_added": added.get("prestage" if prestage else "main") or {}})
 
     def _check_wall_profile(tag):
         """壁温分布の正本の照合 (一様・断熱の run では load_run_profile が None を返すだけ)。"""
@@ -2284,6 +2353,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         _check_wall_profile(tag)                                     # 壁温分布の正本 (前段の restart の後も) — config を書く前 (main の §4.2)
         _cfg_check(cfg, want, tag)                                   # 起動前に実効値を検査
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        _declare(tag, prestage=(cfg_pre is not None and not tag.startswith("R")))
         sha = _sha256_file(run_dir / "solverConfig.yaml")
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
@@ -2309,6 +2379,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     _check_wall_profile("main")
     _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
+    _declare("main", prestage=False)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
     _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
     state = None

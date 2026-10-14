@@ -396,13 +396,19 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
     return info
 
 
-def _staged_launch(run_dir: Path, sm, bc_text: str, cfg: str, tag: str, launch=None) -> int:
+def _staged_launch(run_dir: Path, sm, bc_text: str, cfg: str, tag: str, launch=None, recipe: dict | None = None) -> int:
     """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し (`launch`、既定はこのモジュールの run_forge)、
     段の履歴を `residual_history_<tag>.csv` に写して `stage_manifest.json` に段を足す (失敗した段も診断用に残す;
     runner_axismach.run_staged と同じ記録の仕方)。walldriven の段階起動も使う (plan tooling-generator-defaults-and-launch-gate
-    §4.5・§5.1 #9)。"""
+    §4.5・§5.1 #9)。
+    recipe {family, problem, generator} (plan §5.1 #11): config を書く前に明示すべきキーを旧い実効値で足し (機種のプロファイルに
+    合うときだけ; `config_builder.finish_config`)、書いた後に段の宣言 RECIPE.json を書く (`config_builder.declare_stage`)。
+    family が無ければ従来どおり config をそのまま書く。manifest には書いた config を記録する。"""
     import shutil
-    (run_dir / "solverConfig.yaml").write_text(cfg)
+    from . import config_builder as CB
+    rcp = recipe or {}
+    cfg = CB.launch_stage(run_dir, cfg, bc_text, tag, rcp.get("family"), problem=rcp.get("problem"),
+                          generator=rcp.get("generator"))
     (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
     rc = (launch or run_forge)(run_dir)
     hist = run_dir / "residual_history.csv"
@@ -432,23 +438,25 @@ def run_staged(problem_path, run_dir, nsteps=None) -> None:
     冷間から回すのでなく、soft の最終場を IC に採用する)。
     段間は段終了ゲート + `restart_field.py` (`_staged_handoff`)。段ごとの実効設定を `stage_manifest.json` に、
     段の残差履歴を `residual_history_<tag>.csv` (tag = soft / main) に残す (2026-10-14、plan
-    tooling-generator-defaults-and-launch-gate §5.1 #9)。段の config の文字列は従来と同じ。"""
+    tooling-generator-defaults-and-launch-gate §5.1 #9)。段の config の文字列は従来と同じ。
+    2026-10-15 (plan §5.1 #11): soft 段の値は YAML 上の位置で書き換え (`config_builder.set_scalars` = `yaml_strict.replace_scalars`;
+    旧: 文字列置換・正規表現。prepare が書く本段からの文字列は同じ)、各段は明示すべきキーを足して宣言を書く (機種 wt_modef =
+    モード F の Euler cell。NS v1 の node SST は書き写したプロファイルが無いので config は変えず宣言もしない)。"""
+    from . import config_builder as CB
     from .runner_axismach import _stage_manifest_cls
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
     sm = _stage_manifest_cls()(run_dir)
-    cfg_soft = cfg_main.replace("cfl: 4.0, cfl_pseudo: 4.0", "cfl: 0.5, cfl_pseudo: 0.5")
-    cfg_soft = cfg_soft.replace("convMethod: 1", "convMethod: 0")
-    # node y+~1 SST の確定レシピ ([[node-yp1-dual-geometry-float32-fix]]):
+    recipe = {"family": "wt_modef", "problem": problem_path, "generator": "runner_wt.run_staged"}
+    # soft 段: cfl 0.5・1 次・3000 step。node y+~1 SST の確定レシピ ([[node-yp1-dual-geometry-float32-fix]]):
     # soft 段は nStepInner 10 (壁 ω ~1e10 の剛性対策。cfl4 直投入は step ~69 で
     # roOmega NaN — run_0028 初回で再確認)
-    cfg_soft = cfg_soft.replace("nStepInner: 5", "nStepInner: 10")
-    import re
-    cfg_soft = re.sub(r"nStepOuter: \d+", "nStepOuter: 3000", cfg_soft)
-    cfg_soft = re.sub(r"outStepInterval: \d+", "outStepInterval: 3000", cfg_soft)
-    _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft")
+    cfg_soft = CB.set_scalars(cfg_main, {"time.deltaT.cfl": "0.5", "time.deltaT.cfl_pseudo": "0.5", "space.convMethod": "0",
+                                         "time.nStepInner": "10", "time.last.nStepOuter": "3000",
+                                         "time.outStepInterval": "3000"})
+    _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", recipe=recipe)
     res = sorted(run_dir.glob("res_[0-9]*.h5"),
                  key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
     if not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
@@ -457,7 +465,7 @@ def run_staged(problem_path, run_dir, nsteps=None) -> None:
     _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
     for f in run_dir.glob("res_*"):
         f.unlink()
-    _staged_launch(run_dir, sm, bc_text, cfg_main, "main")
+    _staged_launch(run_dir, sm, bc_text, cfg_main, "main", recipe=recipe)
 
 
 def collect(problem_path, run_dir) -> dict:

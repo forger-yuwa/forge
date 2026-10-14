@@ -190,9 +190,11 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
 
 
 def run_staged(run_dir, stages="full", soft_steps=2000, soft_cfl=0.5, soft_conv=0,
-               warm_lam_steps=0, warm_lam_cfl=0.2, mid_steps=0):
+               warm_lam_steps=0, warm_lam_cfl=0.2, mid_steps=0, problem=None):
+    """runner_sern.run_staged (段の宣言の機種は sern3d; plan tooling-generator-defaults-and-launch-gate §5.1 #11)。"""
     return R2.run_staged(run_dir, stages, soft_steps, soft_cfl=soft_cfl, soft_conv=soft_conv,
-                         warm_lam_steps=warm_lam_steps, warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps)
+                         warm_lam_steps=warm_lam_steps, warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps,
+                         recipe={"family": "sern3d", "problem": problem, "generator": "runner_sern3d.run_staged"})
 
 
 def warm_from_same_mesh(run_dir, res_h5, keep_turb: bool = True) -> None:
@@ -373,7 +375,7 @@ def main(argv=None):
     rc = run_staged(a.run_dir, a.stages, int(o.get("soft_steps", a.soft_steps)),
                     soft_cfl=float(o.get("soft_cfl", 0.5)), soft_conv=int(o.get("soft_conv", 0)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
-                    mid_steps=int(o.get("mid_steps", 0)))
+                    mid_steps=int(o.get("mid_steps", 0)), problem=a.problem)
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
     print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
     g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}"); return rc

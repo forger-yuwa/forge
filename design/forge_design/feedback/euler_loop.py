@@ -180,6 +180,19 @@ def _snaps_of(rd: Path) -> list:
     return out
 
 
+def pass_config(p, n: int, use_node: bool | None = None) -> tuple:
+    """パス (と継続チャンク) の solverConfig: node は `runner_wt._config_euler_node`、cell は `_config_euler` (n step、出力 n/4)。
+    機種のプロファイル (wt_feedback = node) に合えば明示すべきキーを旧い実効値で足す (plan tooling-generator-defaults-and-launch-gate
+    §5.1 #11、`config_builder.finish_config`; cell は書き写したプロファイルが無いので変えない)。戻り (config, 仕上げの記録)。
+    書き写しの台本 (recipes/regen_profiles.py) も使う。"""
+    from ..evaluate import config_builder as CB
+    if use_node is None:
+        use_node = str(p.mesh.get("discretization", "node")).lower() == "node"
+    oi = max(n // 4, 1)
+    cfg = runner_wt._config_euler_node(p, n, oi, 4.0, 1) if use_node else runner_wt._config_euler(p, n, oi, 4.0, 1)
+    return CB.finish_config(cfg, runner_wt._bcond(p, euler=True), "wt_feedback", tag="main")
+
+
 def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
              tol_rel: float = 0.005, clip_deg: float = 0.5, nsteps=None,
              map_mode: str = "frozen", gate_mode: str = "formal",
@@ -222,8 +235,11 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
     x_reach_mode = d.get("x_reach_mode", "moc")
     # node/cell は problem YAML の `mesh.discretization` で選ぶ (既定 node — B10)
     use_node = str(p.mesh.get("discretization", "node")).lower() == "node"
-    _cfg = ((lambda n_, oi: runner_wt._config_euler_node(p, n_, oi, 4.0, 1)) if use_node
-            else (lambda n_, oi: runner_wt._config_euler(p, n_, oi, 4.0, 1)))
+    from ..evaluate import config_builder as CB
+
+    def _declare(d, fin):
+        """パス・継続チャンクの段の宣言 RECIPE.json (forge の起動の直前; plan tooling-generator-defaults-and-launch-gate §5.1 #11)。"""
+        CB.declare_stage(d, "main", "wt_feedback", finished=fin, problem=problem_path, generator="feedback.euler_loop.run_loop")
 
     def make_ax2w(cm):
         r"""軸→壁の逆引き。`np.interp` は範囲外を端値へ**黙ってクランプ**するため、
@@ -308,8 +324,8 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
             # 射影ドリフト 12k=0.0079 → 24k=0.0036)。
             # pass ≥2 (warm): CHUNK ずつの適応継続なのでここは 1 チャンク分。
             n = CHUNK if warm else max(nsteps or 24000, 12000)
-            (rd / "solverConfig.yaml").write_text(
-                _cfg(n, max(n // 4, 1)))
+            cfg_pass, fin_pass = pass_config(p, n, use_node)
+            (rd / "solverConfig.yaml").write_text(cfg_pass)
             (rd / "bcondConfig.yaml").write_text(runner_wt._bcond(p, euler=True))
             (rd / "probe.yaml").write_text(PROBE_STUB)
             subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
@@ -324,6 +340,7 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
                 paste_isentropic_ic(rd / "nozzle.h5", wall, scale,
                                     float(p.spec["Pt"]), float(p.spec["Tt"]),
                                     p.gamma, p.cp)
+            _declare(rd, fin_pass)
             run_forge(rd)
             # === 適応停止: 軸 M 判定が合格 (STEADY / OSCILLATING+平均精度) に
             # なるまで CHUNK 継続 === cold パスにも適用する (正式 PASS は第 1
@@ -343,13 +360,14 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
                 last = _snaps_of(rd)[-1]   # 直近チャンクの最終場 (継続 IC)
                 shutil.copy(rd / "nozzle.h5", cd / "nozzle.h5")  # メッシュは全チャンク同一
                 # 継続チャンクは常に CHUNK step (cold 第 1 チャンクが長くても)
-                (cd / "solverConfig.yaml").write_text(
-                    _cfg(CHUNK, max(CHUNK // 4, 1)))
+                cfg_chunk, fin_chunk = pass_config(p, CHUNK, use_node)
+                (cd / "solverConfig.yaml").write_text(cfg_chunk)
                 for cf in ("bcondConfig.yaml", "probe.yaml"):
                     shutil.copy(rd / cf, cd / cf)
                 subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
                                 str(last[1]), str(cd / "nozzle.h5")],
                                env=_ENV, check=True, capture_output=True, text=True)
+                _declare(cd, fin_chunk)
                 run_forge(cd)
         eff = _chunk_dirs(rd)[-1]   # 最終チャンク = 評価に使う場
         res = sorted(eff.glob("res_[0-9]*.h5"), key=_steps_of)

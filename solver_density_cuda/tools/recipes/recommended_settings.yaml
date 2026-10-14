@@ -60,6 +60,9 @@ problem_keys:
 # (`regen_profiles.py` は出力済みのキーしか拾わない)。省略の値は実行するバイナリの既定で決まる。そこで次のキーを、
 # 各機種・段の config に「書いていない」かつ `when` が成り立つとき、その段の `explicit` に旧い実効値で載せる
 # (`regen_profiles.py` が作る。#11 で生成器に書かせるときの「足してよいキーと旧い実効値」の例外表)。
+# #11 (2026-10-15) から生成器が段の config にこれらのキーを旧い実効値で書く (`design/forge_design/evaluate/config_builder.py`)
+# ので、機種のプロファイルではキーが `fixed` に入り `explicit` は空 (値は #16 の `explicit` と同じ。例外表の写しは
+# design/tests/fixtures/generator_launch_before_11.json)。生成器がまた省略を始めると `explicit` に表れる。
 #
 # 載せるキーの基準 (basis): 問題 YAML のキー (`problem_keys`) でも変換時に効くキー (下の除外) でもなく、省略が起動時の例外になる
 # 必須キーでもなく、次のどれかに当たるもの。
@@ -409,19 +412,29 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 0
           physProp.viscMethod: 1
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -432,17 +445,6 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
@@ -452,19 +454,29 @@ profiles:
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 0
           physProp.viscMethod: 1
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 4.0
           time.deltaT.cfl_pseudo: 4.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
@@ -474,17 +486,6 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
@@ -510,7 +511,7 @@ profiles:
       - soft
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.last.nStepOuter
       stages:
@@ -535,7 +536,7 @@ profiles:
       - soft
       - main
       recommended: '0.9'
-      this: 書かない (solver 既定 0.85)
+      this: '0.85'
       acceptance: 未
   bell_tp_ns_sst:
     inherits: steady_base
@@ -562,22 +563,31 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeInletCornerWall: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           output.level: 1
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 0
+          space.slauWallNormalChi: 1
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
           time.nStepInner: 10
@@ -587,41 +597,40 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
-          time.deltaT.lowMachPrecond: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
       mid:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeInletCornerWall: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           output.level: 1
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 0
+          space.slauWallNormalChi: 1
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 1.0
           time.deltaT.cfl_pseudo: 1.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
           time.nStepInner: 10
@@ -631,41 +640,42 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
-          time.deltaT.lowMachPrecond: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeInletCornerWall: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           output.level: 1
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 4.0
           time.deltaT.cfl_pseudo: 4.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 4
           time.timeIntegration: 11
@@ -674,24 +684,12 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
-          time.deltaT.lowMachPrecond: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
     differs_from_recommended: []
   bell_tp_euler:
     inherits: steady_base
@@ -718,11 +716,14 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           output.level: 1
           physProp.thermCond: 0.0
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.visc: 0.0
           physProp.viscMethod: 0
           solver: SLAU
@@ -734,27 +735,26 @@ profiles:
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
           time.nStepInner: 10
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          physProp.thermoFloat: 1
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
-          time.deltaT.lowMachPrecond: 0
       mid:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           output.level: 1
           physProp.thermCond: 0.0
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.visc: 0.0
           physProp.viscMethod: 0
           solver: SLAU
@@ -766,52 +766,47 @@ profiles:
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
           time.nStepInner: 10
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          physProp.thermoFloat: 1
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
-          time.deltaT.lowMachPrecond: 0
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           output.level: 1
           physProp.thermCond: 0.0
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.visc: 0.0
           physProp.viscMethod: 0
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 4.0
           time.deltaT.cfl_pseudo: 4.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 4
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
-          time.deltaT.lowMachPrecond: 0
     differs_from_recommended: []
   wt_modef_euler_cell:
     inherits: steady_base
@@ -837,6 +832,7 @@ profiles:
     stages:
       soft:
         fixed:
+          mesh.axisymMethod: 0
           mesh.discretization: cell
           mesh.isAxisymmetric: 1
           physProp.thermCond: 0.0
@@ -851,6 +847,9 @@ profiles:
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -858,13 +857,9 @@ profiles:
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisymMethod: 0
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
       main:
         fixed:
+          mesh.axisymMethod: 0
           mesh.discretization: cell
           mesh.isAxisymmetric: 1
           physProp.thermCond: 0.0
@@ -879,17 +874,15 @@ profiles:
           time.deltaT.cfl_pseudo: 4.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisymMethod: 0
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
     differs_from_recommended:
     - key: mesh.discretization
       stages:
@@ -909,7 +902,7 @@ profiles:
       - soft
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.last.nStepOuter
       stages:
@@ -948,6 +941,8 @@ profiles:
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           physProp.thermCond: 0.0
@@ -957,31 +952,28 @@ profiles:
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 4.0
           time.deltaT.cfl_pseudo: 4.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
     differs_from_recommended:
     - key: time.deltaT.implicitRelax
       stages:
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.nStepInner
       stages:
@@ -1014,20 +1006,29 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
+          mesh.scalarGradient: lsq
           physProp.thermCond: 0.0
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.visc: 0.0
           physProp.viscMethod: 0
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1035,33 +1036,32 @@ profiles:
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
       mid:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
+          mesh.scalarGradient: lsq
           physProp.thermCond: 0.0
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.visc: 0.0
           physProp.viscMethod: 0
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 1.0
           time.deltaT.cfl_pseudo: 1.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1069,49 +1069,38 @@ profiles:
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
+          mesh.scalarGradient: lsq
           physProp.thermCond: 0.0
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.visc: 0.0
           physProp.viscMethod: 0
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 2.0
           time.deltaT.cfl_pseudo: 2.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
     differs_from_recommended:
     - key: space.convMethod
       stages:
@@ -1138,7 +1127,7 @@ profiles:
       - mid
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.last.nStepOuter
       stages:
@@ -1178,19 +1167,30 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1201,40 +1201,39 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
       mid:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 1.0
           time.deltaT.cfl_pseudo: 1.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1245,40 +1244,39 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 1.0
           time.deltaT.cfl_pseudo: 1.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
@@ -1288,24 +1286,12 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
     differs_from_recommended:
     - key: mesh.nodeInletCornerWall
       stages:
@@ -1334,7 +1320,7 @@ profiles:
       - mid
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.last.nStepOuter
       stages:
@@ -1374,20 +1360,30 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1398,40 +1394,39 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
       mid:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 1.0
           time.deltaT.cfl_pseudo: 1.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
           time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1442,35 +1437,31 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           output.level: 1
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 4.0
           time.deltaT.cfl_pseudo: 4.0
@@ -1490,20 +1481,12 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.turbulentPrandtl: 0.9
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.limiterScaled: 1
-          space.slauWallNormalChi: 1
-          space.venkatK: 0.05
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
     differs_from_recommended:
     - key: mesh.nodeInletCornerWall
       stages:
@@ -1558,6 +1541,8 @@ profiles:
       soft:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           physProp.thermCond: 0.0
@@ -1567,11 +1552,16 @@ profiles:
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 3000
@@ -1579,17 +1569,11 @@ profiles:
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
       main:
         fixed:
           mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
           mesh.discretization: node
           mesh.isAxisymmetric: 1
           physProp.thermCond: 0.0
@@ -1599,25 +1583,22 @@ profiles:
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 4.0
           time.deltaT.cfl_pseudo: 4.0
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.axisSegmentRWeight: 1
-          mesh.axisymMethod: 0
-          space.limiterScaled: 1
-          space.venkatK: 0.05
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
     differs_from_recommended:
     - key: space.limiter
       stages:
@@ -1630,7 +1611,7 @@ profiles:
       - soft
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.last.nStepOuter
       stages:
@@ -1671,18 +1652,25 @@ profiles:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.1
           time.deltaT.cfl_pseudo: 0.1
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 4000
@@ -1690,31 +1678,30 @@ profiles:
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
       soft:
         fixed:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.1
           time.deltaT.cfl_pseudo: 0.1
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 4000
@@ -1725,37 +1712,36 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
           turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
       mid:
         fixed:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.1
           time.deltaT.cfl_pseudo: 0.1
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 4000
@@ -1766,37 +1752,36 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
           turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
       main:
         fixed:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.5
           time.deltaT.cfl_pseudo: 0.5
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
@@ -1806,20 +1791,12 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
           turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
     differs_from_recommended:
     - key: mesh.nodeInletCornerWall
       stages:
@@ -1866,7 +1843,7 @@ profiles:
       - mid
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.last.nStepOuter
       stages:
@@ -1894,7 +1871,7 @@ profiles:
       - mid
       - main
       recommended: '0.9'
-      this: 書かない (solver 既定 0.85)
+      this: '0.85'
       acceptance: 未
   sern3d_frozen_tp_sst:
     inherits: steady_base
@@ -1923,18 +1900,25 @@ profiles:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.2
           time.deltaT.cfl_pseudo: 0.2
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
@@ -1942,31 +1926,30 @@ profiles:
           time.timeIntegration: 11
           time.unsteady: 0
           turbulence.model: none
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
       soft:
         fixed:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 0
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.2
           time.deltaT.cfl_pseudo: 0.2
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
@@ -1977,37 +1960,36 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
           turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
       mid:
         fixed:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.2
           time.deltaT.cfl_pseudo: 0.2
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.last.nStepOuter: 2000
@@ -2018,37 +2000,36 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
           turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
       main:
         fixed:
           mesh.discretization: node
           mesh.isAxisymmetric: 0
           mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
           physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
           physProp.viscMethod: 2
           solver: SLAU
           space.convMethod: 1
           space.limiter: 2
           space.limiterScaled: 1
+          space.slauWallNormalChi: 1
           space.venkatK: 0.05
           time.deltaT.blockDPLUR: 1
           time.deltaT.cfl: 0.25
           time.deltaT.cfl_pseudo: 0.25
           time.deltaT.control: 1
           time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
           time.deltaT.lowMachPrecond: 0
           time.dualTime: 0
           time.nStepInner: 5
@@ -2058,20 +2039,12 @@ profiles:
           turbulence.katoLaunder: 1
           turbulence.model: sst
           turbulence.scalarDiffusion: 1
-          turbulence.wallTreatmentSST: 0
-        explicit:
-          mesh.scalarGradient: lsq
-          physProp.thermoFloat: 1
-          space.slauWallNormalChi: 1
-          time.deltaT.implicitRelax: 1.0
-          time.deltaT.implicitThermalJacobian: 0
-          time.deltaT.lineDtDirectional: 0
-          time.deltaT.lineImplicit: 0
           turbulence.sstEnergyIncludesK: 0
           turbulence.sstNodeWallKPin: 1
           turbulence.sstOmegaProdFromPk: 1
           turbulence.sstSigmaBlend: 1
           turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
     differs_from_recommended:
     - key: mesh.nodeInletCornerWall
       stages:
@@ -2118,7 +2091,7 @@ profiles:
       - mid
       - main
       recommended: '0.7'
-      this: 書かない (solver 既定 1.0)
+      this: '1.0'
       acceptance: 未
     - key: time.nStepInner
       stages:
@@ -2139,6 +2112,6 @@ profiles:
       - mid
       - main
       recommended: '0.9'
-      this: 書かない (solver 既定 0.85)
+      this: '0.85'
       acceptance: 未
   # <<< END GENERATED <<<

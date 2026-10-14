@@ -68,6 +68,20 @@ REQUIRED_SCALAR_GRADIENT = "lsq"
 REQUIRED_WALL_NORMAL_CHI = 1   # 2026-09-26 から node+SLAU の既定 (auto)。明示 0 の評価は別の応答関数なので混ぜない
 
 
+def _retry_args(kw: dict) -> dict:
+    """緩レシピ (step 倍・cfl 半分) の段の値の出所 (段の宣言の逸脱の source.argument; plan tooling-generator-defaults-and-launch-gate
+    §5.1 #11)。値は run_staged に渡した値。"""
+    cfl = ("time.deltaT.cfl", "time.deltaT.cfl_pseudo")
+    def a(what, v):
+        return {"name": f"driver_sern の緩レシピ ({what})", "value": v}
+    return {"warm_lam": {**{k: a("opt.warm_lam_cfl × 0.5", kw["warm_lam_cfl"]) for k in cfl},
+                         "time.last.nStepOuter": a("opt.warm_lam_steps × 2", kw["warm_lam_steps"])},
+            "soft": {**{k: a("opt.soft_cfl × 0.5", kw["soft_cfl"]) for k in cfl},
+                     "time.last.nStepOuter": a("opt.soft_steps × 2", kw["soft_steps"])},
+            "mid": {**{k: a("opt.soft_cfl × 0.5", kw["soft_cfl"]) for k in cfl},
+                    "time.last.nStepOuter": a("opt.mid_steps × 2", kw["mid_steps"])}}
+
+
 def _learnable(r: dict) -> bool:
     """学習・Pareto に使ってよい行: PASS・現行の flag_policy・全作動点の実効 scalarGradient が lsq かつ実効 chi が 1。
     不明 (None) は除外 (codex result 2026-09-27 chi-default M4: 日付と scalarGradient だけでは chi 0/1/不明が混ざる)。"""
@@ -153,8 +167,12 @@ class SernCampaign:
                 continue
             info = R.prepare(prob, rd, op=op)
             self._check_design(info)
+            # 段の宣言の文脈 (plan tooling-generator-defaults-and-launch-gate §5.1 #11): 緩レシピの段の値は driver の引数 (opt の倍・半分)
+            recipe = {"family": "sern2d", "problem": prob, "generator": f"opt.driver_sern._eval_op ({op}{suffix or ' 標準レシピ'})"}
+            if suffix == "_retry":
+                recipe["args"] = _retry_args(kw)
             try:
-                rc = R.run_staged(rd, "full", **kw)
+                rc = R.run_staged(rd, "full", **kw, recipe=recipe)
             except RuntimeError as e:      # 起動段で落ちた: 壁出力が無いので次の梯子へ
                 last = (rd, 1, {"gates": {"verdict": "FAIL", "fail_class": "DIVERGED", "reasons": [str(e)[:200]]}}, True)
                 print(f"   [{tag}/{op}{suffix}] {e}", flush=True)

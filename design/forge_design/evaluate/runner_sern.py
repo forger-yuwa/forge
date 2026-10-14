@@ -891,29 +891,65 @@ def _stage_manifest(run_dir, append: bool = False):
     return sm
 
 
-def _launch_stage(run_dir, sm, cfg: str, tag: str) -> int:
+def _sern_recipe(run_dir, recipe: dict | None) -> dict:
+    """段の宣言の文脈 (plan tooling-generator-defaults-and-launch-gate §5.1 #11): {family, problem, generator, note, args}。
+    family の既定は prepare_info.json の dim (3 なら sern3d、それ以外 sern2d)、problem の既定は prepare_info.json の problem。"""
+    rcp = dict(recipe or {})
+    if "family" not in rcp or "problem" not in rcp:
+        try:
+            info = json.loads((Path(run_dir) / "prepare_info.json").read_text())
+        except (OSError, ValueError):
+            info = {}
+        rcp.setdefault("family", "sern3d" if int(info.get("dim", 2) or 2) == 3 else "sern2d")
+        rcp.setdefault("problem", info.get("problem"))
+    rcp.setdefault("generator", "runner_sern.run_staged")
+    return rcp
+
+
+def _launch_stage(run_dir, sm, cfg: str, tag: str, recipe: dict | None = None) -> int:
     """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し、段の履歴を `residual_<tag>.csv` に退避
     (`_archive_stage`) して段を `stage_manifest.json` に足す (失敗した段も診断用に残す)。同じ tag が既にあれば `_2`, `_3` … を付ける
-    (CFL の梯子が同じ値を繰り返しても履歴を上書きしない)。段の config の文字列はこの関数では変えない。"""
+    (CFL の梯子が同じ値を繰り返しても履歴を上書きしない)。
+    config は書く前に明示すべきキーを旧い実効値で足し (機種のプロファイルに合うときだけ)、書いた後に段の宣言 RECIPE.json を書く
+    (plan tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder`; recipe は `_sern_recipe`)。manifest には書いた config。"""
+    from . import config_builder as CB
     run_dir = Path(run_dir)
     used = {st["tag"] for st in sm.stages}
     base, k = tag, 2
     while tag in used:
         tag, k = f"{base}_{k}", k + 1
-    (run_dir / "solverConfig.yaml").write_text(cfg)
+    rcp = _sern_recipe(run_dir, recipe)
+    bc = run_dir / "bcondConfig.yaml"
+    bc_text = bc.read_text() if bc.exists() else ""
+    cfg = CB.launch_stage(run_dir, cfg, bc_text, tag, rcp["family"], problem=rcp.get("problem"), args=rcp.get("args"),
+                          generator=rcp.get("generator"), note=rcp.get("note"))
     (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で退避しない
     rc = run_forge(run_dir)
     _archive_stage(run_dir, tag)
-    bc = run_dir / "bcondConfig.yaml"
-    sm.add(tag, cfg, bc.read_text() if bc.exists() else "", history=f"residual_{tag}.csv")
+    sm.add(tag, cfg, bc_text, history=f"residual_{tag}.csv")
     sm.write()
     return rc
+
+
+def _ladder_cfg(cfg: str, cfl=None, steps=None, conv=None) -> str:
+    """段の梯子の config: cfl・cfl_pseudo、nStepOuter・outStepInterval、convMethod を YAML 上の位置で書き換える
+    (`config_builder.set_scalars`; 2026-10-15 まで正規表現・文字列置換。トークンは従来と同じ書き方 `f"{値}"` なので書く文字列も同じ。
+    plan tooling-generator-defaults-and-launch-gate §5.1 #11)。"""
+    from . import config_builder as CB
+    up = {}
+    if cfl is not None:
+        up.update({"time.deltaT.cfl": f"{cfl}", "time.deltaT.cfl_pseudo": f"{cfl}"})
+    if steps is not None:
+        up.update({"time.last.nStepOuter": f"{steps}", "time.outStepInterval": f"{steps}"})
+    if conv is not None:
+        up["space.convMethod"] = f"{conv}"
+    return CB.set_scalars(cfg, up) if up else cfg
 
 
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
                warm_lam_ramp=None, soft_ramp=None,
-               warm_src=None, warm_adapt_steps: int = 500) -> int:
+               warm_src=None, warm_adapt_steps: int = 500, recipe: dict | None = None) -> int:
     """soft_cfl / soft_conv: soft 段の CFL と convMethod (既定 0.5 / 1 次)。3D SST の後縁 3 重点など、1 次でも
     立ち上がりが厳しいケースで下げる。
 
@@ -931,7 +967,10 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
 
     段の記録 (2026-10-14、plan tooling-generator-defaults-and-launch-gate §5.1 #9): 各段 (適応段 warm_adapt・層流暖機 warm_cfl*・
     soft_cfl*・mid_cfl*・本段 main) の実効設定を `stage_manifest.json` に、残差履歴を `residual_<tag>.csv` に残す (`_launch_stage`)。
-    段間の引き継ぎ (`restart_by_index`) と段の config の文字列は従来と同じ。"""
+    段間の引き継ぎ (`restart_by_index`) と段の config の文字列は従来と同じ。
+    2026-10-15 (plan §5.1 #11): 段の値 (cfl・段の長さ・次数) は YAML 上の位置で書き換え (`_ladder_cfg`; 層流暖機の turbulence の
+    置き換えだけはキーを消すので正規表現のまま)、各段は明示すべきキーを足して宣言を書く (`_launch_stage`)。recipe
+    {family, problem, generator, note, args}: 宣言の文脈 (`_sern_recipe`; args は driver_sern の緩レシピなど引数による段の値)。"""
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
         else (run_dir / "solverConfig.yaml").read_text()
@@ -940,19 +979,17 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), cfg_main, "main")
+        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), cfg_main, "main", recipe)
     if stages == "none":
-        # 本段だけ (solverConfig.yaml をそのまま回す; 従来どおり config は書き換えない)
-        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), (run_dir / "solverConfig.yaml").read_text(), "main")
+        # 本段だけ (solverConfig.yaml をそのまま回す; 段の値は書き換えない。明示すべきキーは足す)
+        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), (run_dir / "solverConfig.yaml").read_text(), "main",
+                             recipe)
     sm = _stage_manifest(run_dir)
     if warm_src is not None:      # 別作動点からの warm start: 暖機と soft を飛ばし、適応段だけ入れる
         info_warm = warm_from_run(run_dir, warm_src)
         (run_dir / "WARM_START.json").write_text(json.dumps(info_warm, indent=1))
-        ad = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
-        ad = ad.replace("convMethod: 1", f"convMethod: {soft_conv}")
-        ad = re.sub(r"nStepOuter: \d+", f"nStepOuter: {warm_adapt_steps}", ad)
-        ad = re.sub(r"outStepInterval: \d+", f"outStepInterval: {warm_adapt_steps}", ad)
-        rc = _launch_stage(run_dir, sm, ad, "warm_adapt")
+        ad = _ladder_cfg(cfg_main, cfl=soft_cfl, conv=soft_conv, steps=warm_adapt_steps)
+        rc = _launch_stage(run_dir, sm, ad, "warm_adapt", recipe)
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("warm start の適応段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
@@ -964,7 +1001,7 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         lam0 = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
         if 'model: "none"' not in lam0:
             raise RuntimeError("層流暖機: turbulence 行の置換に失敗 (solverConfig の書式が変わった)")
-        lam0 = lam0.replace("convMethod: 1", "convMethod: 0")
+        lam0 = _ladder_cfg(lam0, conv=0)
         # **CFL ramp** (2026-09-19 ユーザ提案): 暖機は固定 CFL だと 0.1 が上限だが、場が育つにつれ上げられる。
         # ソルバ側に ramp が無いので runner が forge を複数回起動して段階昇圧する
         # (風洞チェーン `runner_axismach.run_staged_ns(stages="ramp")` と同じ方式)。
@@ -972,10 +1009,8 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         legs = [(float(c), int(warm_lam_steps / max(len(warm_lam_ramp), 1))) for c in warm_lam_ramp] \
             if warm_lam_ramp else [(float(warm_lam_cfl), int(warm_lam_steps))]
         for c, n_leg in legs:
-            lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", lam0)
-            lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", lam)
-            lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", lam)
-            rc = _launch_stage(run_dir, sm, lam, f"warm_cfl{c:g}")
+            lam = _ladder_cfg(lam0, cfl=c, steps=n_leg)
+            rc = _launch_stage(run_dir, sm, lam, f"warm_cfl{c:g}", recipe)
             res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
             if rc != 0 or not res:
                 raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
@@ -983,38 +1018,35 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
             for f in run_dir.glob("res_*"):
                 f.unlink()
     if warm_src is not None:      # soft は適応段で代替済み → mid へ
-        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, sm=sm)
+        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, sm=sm, recipe=recipe)
     # soft 段も **CFL ramp** できる (`opt.soft_ramp`, 2026-09-19)。暖機で ramp が効いた (固定 0.5 は step 30 で
     # 発散するのに ramp なら 1.0 まで到達) のと同じ理屈。固定 soft_cfl 1.0 は設計によって
     # `rms_roY1` (排気∩外気のせん断層) が上昇するので、段階昇圧で通す。
     _soft_legs = [(float(c), max(int(soft_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
         if soft_ramp else [(float(soft_cfl), int(soft_steps))]
     for c, n_leg in _soft_legs:
-        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-        soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
-        soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", soft)
-        soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", soft)
-        rc = _launch_stage(run_dir, sm, soft, f"soft_cfl{c:g}")
+        soft = _ladder_cfg(cfg_main, cfl=c, conv=soft_conv, steps=n_leg)
+        rc = _launch_stage(run_dir, sm, soft, f"soft_cfl{c:g}", recipe)
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp, sm=sm)
+    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp, sm=sm, recipe=recipe)
 
 
-def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None, sm=None) -> int:
-    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。sm = 段の記録 (無ければ新しく作る)。"""
+def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None, sm=None,
+                      recipe: dict | None = None) -> int:
+    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。sm = 段の記録 (無ければ新しく作る)。
+    recipe は段の宣言の文脈 (run_staged と同じ)。"""
     sm = sm if sm is not None else _stage_manifest(run_dir)
     if mid_steps > 0:      # mid 段: 2 次に上げるが CFL は soft のまま (次数と CFL を同時に上げない)
         legs = [(float(c), max(int(mid_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
             if soft_ramp else [(float(soft_cfl), int(mid_steps))]
         for _ci, (c, n_leg) in enumerate(legs):
-            mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-            mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", mid)
-            mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", mid)
-            rc = _launch_stage(run_dir, sm, mid, f"mid_cfl{c:g}")
+            mid = _ladder_cfg(cfg_main, cfl=c, steps=n_leg)
+            rc = _launch_stage(run_dir, sm, mid, f"mid_cfl{c:g}", recipe)
             if _ci < len(legs) - 1:
                 _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
                 if rc != 0 or not _r:
@@ -1028,7 +1060,7 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
         restart_by_index(res[-1], run_dir / MESH)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    return _launch_stage(run_dir, sm, cfg_main, "main")
+    return _launch_stage(run_dir, sm, cfg_main, "main", recipe)
 
 
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
@@ -1099,7 +1131,8 @@ def main(argv=None):
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
                     warm_lam_ramp=o.get("warm_lam_ramp"), soft_ramp=o.get("soft_ramp"),
                     mid_steps=int(o.get("mid_steps", 0)),
-                    warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
+                    warm_adapt_steps=int(o.get("warm_adapt_steps", 500)),
+                    recipe={"family": "sern2d", "problem": a.problem, "generator": "runner_sern.main"})
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
     print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
     g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}")
