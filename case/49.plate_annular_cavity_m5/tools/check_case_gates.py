@@ -109,6 +109,21 @@ def residual_inconclusive(out, rc):
     return ("判定不能" in (out or "")) or (rc is not None and rc >= 2)
 
 
+def wall_gate(rd, over_frac):
+    """[4] 壁解像。受け渡しの関門と同じ規則で判定する (2026-10-15、plan tooling-nozzle-isothermal-wall-chain §5.1 #36q・#36s):
+    bcondConfig の全 no-slip 壁 (kind wall*) を、評価の step (最終の主スナップショット res_<step>.h5 = cavity_eval の場の step) の
+    出力で、面積の重みで。共通の関数 `forge_design.feedback.deltastar_loop.wall_resolution_verdict` を呼ぶ (全壁の出力が揃って
+    いなければツールを回さず判定不能)。それまでは群も step も渡さず (出口などの境界の出力も拾い、群ごとの最新の step に戻り得た)、
+    重みはツールの既定 point (点数の割合) だった。戻り (rc 0 PASS / 1 FAIL / 2 判定不能, 出力, 関数の記録, step)。"""
+    sys.path.insert(0, str(ROOT / "design"))
+    from forge_design.feedback.deltastar_loop import wall_resolution_verdict
+    rd = Path(rd)
+    snaps = sorted((p for p in rd.glob("res_*.h5") if re.fullmatch(r"res_\d+\.h5", p.name)), key=lambda p: int(p.stem.split("_")[1]))
+    st = int(snaps[-1].stem.split("_")[1]) if snaps else None
+    w = wall_resolution_verdict(rd, st, over_frac=over_frac)
+    return {"PASS": 0, "FAIL": 1}.get(w["kind"], 2), w.get("output") or "", w, st
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
@@ -215,18 +230,18 @@ def main():
         fails.append("準定常")
         notes.append(out3)
 
-    # --- 4. 壁解像 ---
-    rc4, out4 = run([py, str(STOOLS / "check_wall_resolution.py"), str(rd),
-                     "--over-frac", str(a.yplus_frac)])
+    # --- 4. 壁解像 (wall_gate: 全 no-slip 壁・最終の主スナップショットの step・面積の重み) ---
+    rc4, out4, w4, st4 = wall_gate(rd, a.yplus_frac)
     v4 = next((l for l in out4.splitlines() if l.startswith("VERDICT")), "")
     tag4 = "OK" if rc4 == 0 else ("**FAIL**" if a.yplus_blocking else "**制約あり**")
     print("[4] 壁解像 y1+     : %s   %s" % (tag4, v4.strip()))
+    print("      step %s・壁 %s・重み %s" % (st4, ",".join(w4.get("walls") or {}) or "-", w4["weight"]))
     if rc4 != 0:
         # **step を増やしても変わらない**ので既定ではブロックしない。報告時に添える制約にする。
         worst_lines = [l.strip() for l in out4.splitlines() if "y1+ >" in l]
         for l in worst_lines:
             print("      %s" % l)
-        (fails if a.yplus_blocking else caveats).append("壁解像 (y1+ 超過)")
+        (fails if a.yplus_blocking else caveats).append("壁解像 (y1+ 超過)" if rc4 == 1 else "壁解像 (判定不能)")
 
     # --- 5. 保存性 (開口の質量収支と CV エネルギー収支) ---
     j = rd / "cavity_eval.json"

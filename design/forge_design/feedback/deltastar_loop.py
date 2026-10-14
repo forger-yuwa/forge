@@ -693,7 +693,7 @@ def wall_dumps_at_step(run_dir, walls: dict, step: int) -> dict:
     return out
 
 
-def wall_resolution_verdict(run_dir, step=None) -> dict:
+def wall_resolution_verdict(run_dir, step=None, over_frac: float | None = None) -> dict:
     """局所 y₁⁺ (`check_wall_resolution.py`、目標は局所 y₁⁺ ≤ 1・超過の許容はツールの既定のまま) を停止の出力 s の全 no-slip 壁で
     (§5.1 #36q、codex diagnose 2026-10-15 Major 2・3)。
     (a) bcondConfig.yaml の kind が wall* の全 physID (`no_slip_walls`) について、s の出力が揃っていることを先に確かめる
@@ -703,7 +703,9 @@ def wall_resolution_verdict(run_dir, step=None) -> dict:
     ツールの出力の壁ごとの行が全部の壁・step s で揃っていなければ、終了コードによらず UNDETERMINED。
     kind: PASS (終了コード 0) / FAIL (1) / UNDETERMINED (それ以外 = 判定不能; 合格ではない、関門では上書きでも通さない)。why に理由。
     2026-10-14 までは群も重みも渡さず、step が無いと最新に戻るツールに任せていた (出口の出力のある run では壁の結果によらず判定不能、
-    出口の出力の無い run では点数の割合で判定し、一部の壁の欠測・時刻違いを見逃し得た)。"""
+    出口の出力の無い run では点数の割合で判定し、一部の壁の欠測・時刻違いを見逃し得た)。
+    over_frac: 超過の面積の許容 [%] (`--over-frac`; None ならツールの既定 2 %)。同じ規則で判定するほかの呼び出し元 (ベル・TP の
+    `opt/driver.gate_wall_resolution`、case/49 の `check_case_gates` [4]; §5.1 #36s) が使う。"""
     import re
 
     from ..evaluate.runner import FORGE_TOOLS
@@ -734,6 +736,8 @@ def wall_resolution_verdict(run_dir, step=None) -> dict:
                             + "; ".join(f"{n} ({dumps[n]['why']})" for n in bad), text)
     cmd = [sys.executable, str(FORGE_TOOLS / "check_wall_resolution.py"), str(run_dir), "--step", str(int(step)),
            "--groups", ",".join(walls), "--weight", WALL_RESOLUTION_WEIGHT]
+    if over_frac is not None:
+        cmd += ["--over-frac", repr(float(over_frac))]
     r = subprocess.run(cmd, capture_output=True, text=True)
     out = r.stdout + r.stderr
     kind = {0: "PASS", 1: "FAIL"}.get(r.returncode, "UNDETERMINED")

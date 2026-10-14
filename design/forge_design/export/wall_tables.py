@@ -693,9 +693,10 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
         else:
             qs["result"] = "FAIL"
     out["quasisteady"] = qs
-    # 3. 壁解像
+    # 3. 壁解像 (受け渡しの関門と同じく面積の重み; plan tooling-nozzle-isothermal-wall-chain §5.1 #36s。2026-10-15 までは
+    #    ツールの既定 point = 点数の割合だった)
     wr = {"tool": "check_wall_resolution.py"}
-    args = [TOOLS / "check_wall_resolution.py", run_dir, "--step", st, "--groups", ",".join(names)]
+    args = [TOOLS / "check_wall_resolution.py", run_dir, "--step", st, "--groups", ",".join(names), "--weight", "area"]
     rc_, txt = _run_tool(args, python)
     wr.update(cmd=" ".join(str(a) for a in args), exit=rc_,
               verdict_line=next((ln.strip() for ln in txt.splitlines() if ln.startswith("VERDICT")), None))

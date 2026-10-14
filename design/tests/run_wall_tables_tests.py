@@ -194,6 +194,10 @@ def make_synth(td: Path, axi=True, steps=(100,), qf="valid", tw=5.0, residual=Fa
             with h5py.File(td / f"res_{nm}_{pid}_{st}.h5", "w") as f:
                 f.attrs["step"] = np.int32(st)
                 f["MESH/COORD"] = coords[[wall_ids[pid][i] for i in perm]].ravel()
+                # 要素 (Polyline: [2, 2, 節点, 節点]、ダンプの中の番号) — forge の壁ダンプと同じく持たせる (thermal_use の壁解像は
+                # 面積の重みで判定するので要る; plan tooling-nozzle-isothermal-wall-chain §5.1 #36s)
+                loc = {g: k for k, g in enumerate(perm)}
+                f["MESH/CONNE"] = np.array([v for i in range(len(xs) - 1) for v in (2, 2, loc[i], loc[i + 1])], dtype=np.int64)
                 vals = {"ro": np.full(len(xs), SYN_RO), "Ps": np.full(len(xs), 1.0e5), "Ts": np.full(len(xs), 300.0),
                         "twall_x": np.full(len(xs), tw), "twall_y": np.zeros(len(xs)), "twall_z": np.zeros(len(xs)),
                         "qwall": -1.01 * q, "iface_q_eff": q_eff_old}
@@ -510,6 +514,9 @@ def run(out: Path):
     INFO["synthetic_thermal_use_pass"] = {k: th[k]["result"] for k in ("convergence", "quasisteady", "wall_resolution")}
     check(f"thermal_use (合成: 収束・定常・y1+ < 1・valid): {th['verdict']} = PASS ({INFO['synthetic_thermal_use_pass']})",
           th["verdict"] == "PASS" and th["quasisteady"]["verdict_line"] is not None and th["wall_resolution"]["verdict_line"].startswith("VERDICT: PASS"))
+    check(f"thermal_use の壁解像は対象の step・全壁の群・面積の重み (受け渡しの関門と同じ; plan tooling-nozzle-isothermal-wall-chain "
+          f"§5.1 #36s): {th['wall_resolution']['cmd'].split('check_wall_resolution.py', 1)[-1]}",
+          th["wall_resolution"]["cmd"].endswith("--weight area") and f"--step {th['step']}" in th["wall_resolution"]["cmd"])
     th2 = WT.thermal_use(syn / "pass", step=300)
     check(f"thermal_use: 最終でない step は収束の区間を切り出さず未評価 ({th2['verdict']}: {th2['convergence'].get('reason')})",
           th2["verdict"] == "未評価" and th2["convergence"]["result"] == "未評価")

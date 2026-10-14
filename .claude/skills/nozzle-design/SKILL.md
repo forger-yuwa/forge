@@ -90,7 +90,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 | NS (CFD 前の積分法の壁) | `python -m forge_design.feedback.deltastar_loop --problem P.yaml --euler-ref EULER --init-integral --run-dir RUN [--ic-from RUN] [--stages full\|none] [--prepare-only]` (`interfaceDiag` を足す台本の例: `case/70.m5_air_wt_demo/run_ns_ifacediag.sh`) |
 | NS (補正の表の壁) | `deltastar_loop --problem P.yaml --euler-ref EULER --delta-r-csv P_delta_r.csv --ic-from RUN --run-dir RUN` |
 | 同じメッシュで続きを回す | `solver_density_cuda/tools/restart_field.py RES.h5 NEW/nozzle.h5` → `runner_axismach.run_staged_ns(RUN, "none")` (Euler は `run_staged`) |
-| メッシュ品質・収束・準定常・壁解像 | `check_mesh_quality.py`・`check_convergence.py RUN --segment`・`check_quasisteady.py`・`check_wall_resolution.py RUN --mesh RUN/nozzle.h5 --groups wall` |
+| メッシュ品質・収束・準定常・壁解像 | `check_mesh_quality.py`・`check_convergence.py RUN --segment`・`check_quasisteady.py`・壁解像は `deltastar_loop.wall_resolution_verdict(RUN, STEP)` (= `check_wall_resolution.py RUN --step STEP --groups <bcondConfig の kind wall* の全群> --weight area`。STEP は判定する出力 (停止の step)、全壁の STEP の出力が揃わなければ判定不能) |
 | 出口コア M・流量の系列と準定常 | `case/70.m5_air_wt_demo/qs_series.py RUN [--tail 0.4 --drift 5e-5 --osc 5e-5]` (出口 M の合否は専用の許容) |
 | 残差の図 | `solver_density_cuda/tools/plot_residual.py RUN/residual_history.csv -o RUN/residual_history.png --all` |
 | 標準の報告 (図・評価量・pptx) | `python -m forge_design.report.nozzle_report RUN --euler EULER` → `build_pptx.py RUN/report` (`.venv-pptx`) |

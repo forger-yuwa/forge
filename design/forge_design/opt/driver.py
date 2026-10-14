@@ -292,18 +292,27 @@ def gate_mesh_quality(run_dir) -> dict:
     return out
 
 
-def gate_wall_resolution(run_dir, groups: str = "wall", target: float = 1.0) -> dict:
-    """(v-b) 局所 y1+ (`check_wall_resolution.py --groups wall`; 第一内部ノード距離と接線 traction、ソルバの ypls は使わない)
-    が PASS (y1+ > target の点の割合が既定の許容 2 % 以下)。出力を WALL_RESOLUTION_VERDICT.txt に残す。"""
-    r = subprocess.run([sys.executable, _tool("check_wall_resolution.py"), str(run_dir), "--groups", groups,
-                        "--target", repr(float(target))], capture_output=True, text=True, env=runner._ENV)
-    txt = r.stdout + r.stderr
-    Path(run_dir, "WALL_RESOLUTION_VERDICT.txt").write_text(txt)
+def gate_wall_resolution(run_dir, step: int | None = None) -> dict:
+    """(v-b) 局所 y1+ (`check_wall_resolution.py`; 第一内部ノード距離と接線 traction、ソルバの ypls は使わない) が PASS
+    (y1+ > 1 の面積の割合が既定の許容 2 % 以下)。受け渡しの関門と同じ規則 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36q・#36s):
+    `deltastar_loop.wall_resolution_verdict` で、bcondConfig の全 no-slip 壁 (kind wall*) を step の出力で、面積の重みで判定する
+    (全壁の出力が揃っていなければツールを回さず判定不能 = 不合格)。step の既定は最終の主スナップショット res_<step>.h5
+    (`runner.collect` が推力の会計に使う res_file と同じ)。出力を WALL_RESOLUTION_VERDICT.txt に残す。
+    2026-10-15 までは群を `wall` に固定し、step を渡さず (群ごとの最新に戻る)、重みはツールの既定 point (点数の割合) だった。"""
+    from ..feedback.deltastar_loop import wall_resolution_verdict
+    run_dir = Path(run_dir)
+    if step is None:
+        rs = runner._res_sorted(run_dir)
+        step = int(rs[-1].stem.split("_")[1]) if rs else None
+    w = wall_resolution_verdict(run_dir, step)
+    txt = w.get("output") or ""
+    (run_dir / "WALL_RESOLUTION_VERDICT.txt").write_text(txt)
     v = [l.strip() for l in txt.splitlines() if l.strip().startswith("VERDICT")]
-    ok = r.returncode == 0 and bool(v) and v[-1].startswith("VERDICT: PASS")
+    ok = w["kind"] == "PASS" and bool(v) and v[-1].startswith("VERDICT: PASS")
     over = [l.strip() for l in txt.splitlines() if "y1+ >" in l]
     return {"ok": ok, "verdict": v[-1] if v else "判定不能 (VERDICT 行が無い)", "detail": over[-1] if over else None,
-            "file": "WALL_RESOLUTION_VERDICT.txt"}
+            "file": "WALL_RESOLUTION_VERDICT.txt", "kind": w["kind"], "step": step, "walls": w.get("walls"),
+            "weight": w.get("weight"), "why": w.get("why")}
 
 
 def combine_tp_gates(g: dict) -> tuple:
@@ -348,12 +357,15 @@ def tp_gates(run_dir, metrics: dict, qs: dict | None = None, cv_tol: float = TP_
     if wm is not None and (flow_model == "euler") != (wm == "slip"):
         raise ValueError(f"tp_gates: flow_model {flow_model} と推力の会計の内壁の扱い wall_model {wm} が食い違う")
     run_dir = Path(run_dir)
+    rf = str(metrics.get("res_file") or "")
+    st = rf[4:-3] if rf.startswith("res_") and rf.endswith(".h5") else ""
+    wr_step = int(st) if st.isdigit() else None          # (v-b) は推力の会計と同じ step (無ければ最終の主スナップショット)
     g = {"convergence": gate_convergence(run_dir),
          "quasisteady": gate_quasisteady(run_dir / "thrust_history.csv", qs=qs),
          "physics": gate_physics(metrics, phys_bounds),
          "cv": gate_cv(metrics, cv_tol),
          "mesh_quality": gate_mesh_quality(run_dir),
-         "wall_resolution": (gate_wall_resolution_skipped() if flow_model == "euler" else gate_wall_resolution(run_dir))}
+         "wall_resolution": (gate_wall_resolution_skipped() if flow_model == "euler" else gate_wall_resolution(run_dir, wr_step))}
     status, fc, note = combine_tp_gates(g)
     # 残差の VERDICT は合格でも併記する (NOT CONVERGED (stalled) を GATES.json の上位に残す; plan §4.1 (i))
     rnote = g["convergence"].get("note") or ""

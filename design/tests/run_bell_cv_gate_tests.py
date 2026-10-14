@@ -483,6 +483,33 @@ check("(v) 例外の条件を満たせば AR ≤ 5000 の格子を通す", DR.ga
 (tmp / "wr").mkdir()
 gw = DR.gate_wall_resolution(tmp / "wr")
 check("(v) 壁ダンプの無い run の y1+ は判定不能 = 不合格", not gw["ok"], gw["verdict"])
+# (v-b) は受け渡しの関門と同じ規則 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36s): bcond の全 no-slip 壁・停止の step
+# (既定は最終の主スナップショット)・面積の重み。合成の run は test_gate_bad_input.make_wall_run (2 枚の no-slip 壁 + 出口の出力)
+import test_gate_bad_input as TGB  # noqa: E402
+
+_WC = TGB.wall_cases()
+_both = {"wall_a": [1000, 2000], "wall_b": [1000, 2000]}
+
+
+def _wall_run(name, walls, steps, snaps=(1000, 2000)):
+    d = Path(TGB.make_wall_run(str(tmp / name), walls, steps))
+    for s_ in snaps:                                   # 主スナップショット (vis_lam の無い空の HDF5)
+        h5py.File(d / f"res_{s_}.h5", "w").close()
+    return d
+
+
+gw = DR.gate_wall_resolution(_wall_run("wr_ctrl", _WC["control"], _both))
+check("(v-b) 対照: 両壁 (wall_a・wall_b) とも最終の step 2000 に出力 → PASS (群 wall に固定しない・面積)",
+      gw["ok"] and gw["step"] == 2000 and sorted(gw["walls"]) == ["wall_a", "wall_b"] and gw["weight"] == "area", str(gw))
+gw = DR.gate_wall_resolution(_wall_run("wr_b_old", _WC["control"], {"wall_a": [1000, 2000], "wall_b": [1000]}))
+check("(v-b) wall_b の最終の step の出力だけ欠く → 判定不能 = 不合格 (最新の step に戻らない)",
+      not gw["ok"] and gw["kind"] == "UNDETERMINED" and "wall_b" in (gw["why"] or ""), gw["verdict"])
+gw = DR.gate_wall_resolution(_wall_run("wr_area", _WC["inv_area_fail"], _both))
+check("(v-b) 点数の割合 1/102 では通るが面積の割合 約 48 % の入力 → FAIL (面積で判定)", not gw["ok"] and gw["kind"] == "FAIL", gw["verdict"])
+gw = DR.gate_wall_resolution(_wall_run("wr_point", _WC["inv_point_fail"], _both))
+check("(v-b) 点数の割合 10/31 では落ちるが面積の割合 約 0.5 % の入力 → PASS", gw["ok"], gw["verdict"])
+gw = DR.gate_wall_resolution(_wall_run("wr_step", _WC["control"], _both), step=1000)
+check("(v-b) step を渡せばその step (推力の会計の res_file) で判定", gw["ok"] and gw["step"] == 1000, str(gw.get("step")))
 
 okg = {"ok": True}
 allok = {k: okg for k in ("convergence", "quasisteady", "physics", "cv", "mesh_quality", "wall_resolution")}
