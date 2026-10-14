@@ -46,6 +46,25 @@ plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-gen
 は参照 run から新しい run を作る (`restart_field.py` + 場の検査) が起動はしない。case 配下のスクリプト (case/45 の `tw370_run.py`・`h370_run.py`・`cold_pair.py`
 など) は `A.prepare_ns`・`A.run_staged_ns` を呼ぶので §1 の表の行 11 と同じ経路 (`cold_cfl.py prep` のように自前で config を書き換えるものは棚卸しの対象外)。
 
+### 1.1 経路とプロファイル (2026-10-14、plan §5.1 #6 の後)
+
+各経路の段を書き写したプロファイル (`solver_density_cuda/tools/recipes/recommended_settings.yaml`、`recipe_settings.py list`)。
+`RECIPE.json` (宣言) はまだどの生成器も書かない (共通の組み立て関数で書かせるのは plan §5.1 #11)。手で作る run は
+`recipe_settings.py declare` で書ける。
+
+| 行 | 経路 | プロファイル (段) | 書き写しに使った代表の問題 |
+| --- | --- | --- | --- |
+| 1・5・6 | ③ベル CPG (`runner.main`・opt/driver・polish) | `bell_cpg_ns_sst` (soft → main) | case/40 `problem_bell_top.yaml` (opt/driver の CPG 評価) |
+| 2・3・4 | ③ベル TP (`--stage`・`--staged`・`--continue-from`) | `bell_tp_ns_sst` / `bell_tp_euler` (soft → mid → main) | case/68 `problem_bell_tp_m_ns_l100_corr.yaml` / `problem_bell_tp_m_euler_l100.yaml` |
+| 7 | ① 風洞 モード F (`runner_wt.main`) | `wt_modef_euler_cell` (soft → main) | case/41 `problem_m4.yaml` |
+| 8 | ① 風洞 NS v1 (`runner_wt.prepare(euler=False)`) | なし (design の中に呼び出し元が無い) | — |
+| 9 | ① 風洞 B10 の帰還 (`euler_loop`) | `wt_feedback_euler_node` (main だけ) | case/41 `problem_m4_b10.yaml` |
+| 10 | ① axis-Mach Euler (`runner_axismach.main`) | `axismach_euler_tp` (soft → mid → main) | case/45 `problem_d155_euler_pin_G1_recal_mono.yaml` |
+| 11 | ① axis-Mach NS (`prepare_ns` → `run_staged_ns`) | `axismach_ns_sst_tp` / `axismach_ns_sst_tp_b0` (S1_soft → S2_mid → main) | case/45 `problem_d155_ns_prod_coldmesh_tw300.yaml` / `..._tw370_cgref_h_b0.yaml` (main_line の B0)。`stages=ramp` は書き写していない |
+| 12 | ① wall-driven (`runner_walldriven.main`) | `walldriven_euler_cpg` (soft → main) | case/41 `problem_m4_walldriven.yaml` |
+| 13・15 | ⑤ SERN 2D (`runner_sern.main`・driver_sern) | `sern2d_finite_base_frozen_tp_sst` (warm_lam → soft → mid → main) | case/46 `problem_moo_frozen_tp_cycle3op.yaml` (既定の作動点)。warm start の適応段は書き写していない |
+| 14 | ⑤ SERN 3D (`runner_sern3d.main`) | `sern3d_frozen_tp_sst` (warm_lam → soft → mid → main) | case/46 `problem_3d_prod_m6on_g2.yaml` |
+
 ## 2. 段の作り方の詳細 (書き写しの対象)
 
 | 生成器 | 本段の値 (このコミット) | 前段の作り方 |
