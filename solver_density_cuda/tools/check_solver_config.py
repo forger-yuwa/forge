@@ -64,7 +64,10 @@ def _spec():
     """solverConfig が受理する**完全修飾パス**の一覧を config_key_inventory から借りる。
 
     戻り (values, sections, rejected): `values` は値を読むパス、`sections` は節、`rejected` は
-    起動時に落とすパス (削除済みキー・改名済みキー)。抽出に失敗したら None を返し、検査を飛ばす。"""
+    起動時に落とすパス (削除済みキー・改名済みキー)。抽出に失敗したら None を返し、検査を飛ばす。
+    節は solverConfig.cpp の変数の束縛 (`auto cj = config["conjugate"];`) から導く (2026-10-14。手書きの
+    対応表では `conjugate.mode`・`conjugate.gate` を取りこぼしていた。plan tooling-generator-defaults-and-launch-gate #4)。
+    静的に一覧へ入れられない書き方は `config_key_inventory.extract_keys_with_report` が報告し、試験が数を固定する。"""
     global _SPEC
     if _SPEC is not None:
         return _SPEC

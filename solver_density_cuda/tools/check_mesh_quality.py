@@ -22,8 +22,29 @@ node (median-dual) 変換の h5 は `/MESH/CONNE` が双対 CV (多角形/多面
 セル) があればそちらを測る (品質は primal の性質。cell 変換をやり直す必要はない)。
 計算は VTK セル型ごとに numpy でベクトル化 (2026-09-08: 2M セル hex で 15 分 → 数秒)。`--loop` で旧の
 セル毎ループ (検証用) を使う。
+
+壁直交性と AR の緩和条件 (`--bcond bcondConfig.yaml`、plan tooling-generator-defaults-and-launch-gate §4.4・§5.1 #8、2026-10-14):
+- 壁の bcond (`wall`・`wall_isothermal`) の各境界面 (2D は辺) について、隣接セルの「壁上の節点から壁の外の節点へ向かう辺」
+  (横断辺) と壁法線のなす角 φ を測る。四角形・六面体・プリズム (三角形の面から入る層) が対象で、三角形・四面体・ピラミッドと
+  四角形の面から入るプリズムは「対象外」として数だけ出す。境界面は node 変換なら `/BCONDS/<physID>/vizBfaceNodes`、
+  cell 変換なら `iPlanes` → `/PLANES/STRUCT` の primal 節点で、bcond の physID と対応づける。
+- 壁から層を数える: 壁の面から入ったセルの向かいの面を渡って隣へ進む (層 1, 2, ...)。層のセルの φ は「入った面の法線と
+  横断辺のなす角」、内角は横断辺を含む側面の角の 90° からのずれ。
+- **AR の緩和**: 1000 < AR <= `--ar-max` (最大 5000) のセルは、壁の構造層の中にあり、その壁の層 1..K (K = 緩和の対象セルの
+  最も深い層) の全セル (角部を除く) で φ <= `--phi-construct` かつ内角のずれ <= `--theta-tol` のときだけ認める。確かめられない
+  セル (層の外・層でない型・退化) は認めない。**緩和の対象セルには SOFT-PASS (0.1 % 未満の外れ値) を当てない**。
+- **閾値は構成の判定であって精度の限界ではない**: `--phi-construct`・`--theta-tol` は「層が壁法線に沿って作られたか」を
+  分けるための暫定値 (半径方向の線の 40° 傾斜壁 φ = 40° と壁法線の層 φ ≈ 0 の間)。どこまで傾いてよいかの精度の予算は
+  壁応力・熱流束・δ* の A/B で別に決める (plan §4.4・§6.4)。
+- AR <= 1000 の近壁 (層 1) で φ > `--phi-construct` のセルは WARN (数・最大 φ・位置)。FAIL にしない。
+- 角部 (2 つの壁 physID が会う節点、または壁の面の法線が `--corner-angle` 以上折れる節点) に接するセルは通常の壁と分けて数え、
+  層の条件 (全セル) からは外す。角部のセル自身が緩和の対象なら、そのセルが条件を満たすときだけ認める。
+- 結果の再利用: 鍵 (メッシュの不変部分のハッシュ・physID と壁の面の集合の対応・閾値・検査器の版) が一致したときだけ
+  `<h5>.quality.json` の結果を使う。再利用したかどうかを出力に書く (`--no-cache` で使わない)。
+- `--bcond` を渡さないときの VERDICT・終了コードは従来どおり (壁直交性は測らない; `--ar-max` を 1000 より上げると
+  緩和の条件を確かめずに通す旧判定なので、その旨を注意として出す)。
 """
-import sys, os, argparse
+import sys, os, argparse, hashlib, json
 import numpy as np
 import h5py
 
@@ -195,25 +216,647 @@ def metrics_vectorized(coord, conn, offs, types, is3d):
     return ars, skews
 
 
+# ---------------------------------------------------------------------------------------------------------------------------
+# 壁直交性と AR の緩和条件 (plan tooling-generator-defaults-and-launch-gate §4.4・§5.1 #8、2026-10-14)
+# ---------------------------------------------------------------------------------------------------------------------------
+CHECKER_VERSION = "wall-ortho-v1"
+AR_BASE = 1000.0               # AGENTS.md の既定の上限。これを超え --ar-max 以下のセルが「緩和の対象」
+AR_RELAX_CAP = 5000.0          # 緩和の上限 (AGENTS.md の例外、2026-09-12 ユーザ決定)
+WALL_KINDS = ("wall", "wall_isothermal")
+# 構成の判定の暫定値 (精度の限界ではない; plan §4.4・§5.1 #8 の記録)。2026-10-14 の測定 (格納 float64):
+#   - 半径方向の線の 40° 傾斜壁 (合成): φ = 40.00°。半径方向の線は傾斜 θ_w の壁で φ = θ_w。
+#   - case/45 の生産の格子 (problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml、wall_normal_layer [0.02, 0.8]、
+#     ni 4719・nj 160): 層 1 の φ 最大 0.06°、AR > 1000 の層 1..19 で φ 最大 0.07°・内角のずれ最大 0.07°。
+#     同じ壁で wall_normal_layer なし (半径方向の線) にすると φ 最大 26.6° (壁の傾き 26.6°)。
+#   5° は生産の 0.07° の約 70 倍、傾き 5° を超える壁の半径方向の線は拒む。曲面壁で節点ごとの法線に置いた線は
+#   φ ≈ (1 セルあたりの壁の折れ角)/2 なので、折れ角 10°/セルまでは通る。内角のずれも同じ値 (生産で 0.07°)。
+PHI_CONSTRUCT_DEFAULT = 5.0    # [deg]
+THETA_TOL_DEFAULT = 5.0        # [deg] 緩和の対象の層の内角の 90° からのずれ
+CORNER_ANGLE_DEFAULT = 45.0    # [deg] 壁の面の法線がこれ以上折れる節点を角部とする (分類のための値)
+PHI_BINS = (1.0, 5.0, 10.0, 20.0)
+
+# 2D (平面の三角形・四角形) の局所の辺。3D は FACES_3D。
+FACES_2D = {5: [(0, 1), (1, 2), (2, 0)], 9: [(0, 1), (1, 2), (2, 3), (3, 0)]}
+# 層として進める (入った面 → 向かいの面)。三角形・四面体・ピラミッドと、四角形の面から入るプリズムは層でない
+OPPOSITE = {9: {0: 2, 1: 3, 2: 0, 3: 1}, 12: {0: 1, 1: 0, 2: 4, 4: 2, 3: 5, 5: 3}, 13: {0: 1, 1: 0}}
+CELL_EDGES = {
+    9: [(0, 1), (1, 2), (2, 3), (3, 0)],
+    12: [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)],
+    13: [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (0, 3), (1, 4), (2, 5)],
+}
+VTK_NAME = {5: "三角形", 9: "四角形", 10: "四面体", 12: "六面体", 13: "プリズム", 14: "ピラミッド"}
+
+
+def _local_faces(vtk, topo3d):
+    return FACES_3D.get(vtk, []) if topo3d else FACES_2D.get(vtk, [])
+
+
+def _layer_geometry(vtk, lf, topo3d):
+    """(型, 入った面) → (入った面の局所節点, 横断辺 [(壁側, 外側)], 側面の多角形)。層として進めないなら None。"""
+    if lf not in OPPOSITE.get(vtk, {}) or (vtk == 9) == topo3d:
+        return None
+    faces = _local_faces(vtk, topo3d)
+    ent, opp = faces[lf], faces[OPPOSITE[vtk][lf]]
+    trans = []
+    for u, v in CELL_EDGES[vtk]:
+        if u in ent and v in opp:
+            trans.append((u, v))
+        elif v in ent and u in opp:
+            trans.append((v, u))
+    if vtk == 9:
+        lat = [(0, 1, 2, 3)]                 # 2D の四角形は自身が側面 (横断辺と壁に沿う辺の角)
+    else:
+        lat = [f for i, f in enumerate(faces) if i not in (lf, OPPOSITE[vtk][lf])]
+    return ent, trans, lat
+
+
+def _face_normals(P):
+    """P: (n, k, 3)。k == 2 は x-y 面内の辺の法線 (2D)、k >= 3 は Newell の法線。正規化しない。"""
+    if P.shape[1] == 2:
+        t = P[:, 1] - P[:, 0]
+        return np.stack([t[:, 1], -t[:, 0], np.zeros(len(t))], 1)
+    return np.cross(P, np.roll(P, -1, axis=1)).sum(axis=1)
+
+
+def _phi_deg(E, n):
+    """E: (n, m, 3) 辺、n: (n, 3) 面の法線 → (n, m) のなす角 [deg] (0 = 法線に沿う)。退化は NaN。"""
+    ne = np.linalg.norm(E, axis=2)
+    nn = np.linalg.norm(n, axis=1)[:, None]
+    den = ne * nn
+    with np.errstate(invalid="ignore", divide="ignore"):
+        c = np.abs(np.einsum("ijk,ik->ij", E, n)) / den
+    return np.where(den > 0, np.degrees(np.arccos(np.clip(c, 0.0, 1.0))), np.nan)
+
+
+def _poly_angles(P):
+    """P: (n, k, 3) 多角形 → (n, k) の内角 [deg]。退化は NaN。"""
+    a = np.roll(P, 1, axis=1) - P
+    b = np.roll(P, -1, axis=1) - P
+    den = np.linalg.norm(a, axis=2) * np.linalg.norm(b, axis=2)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        c = np.einsum("ijk,ijk->ij", a, b) / den
+    return np.where(den > 0, np.degrees(np.arccos(np.clip(c, -1.0, 1.0))), np.nan)
+
+
+def _round_allow_deg(Ea_len, ra, rb):
+    """辺 (長さ Ea_len、両端の丸めの上限 ra, rb) の向きの丸めの上限 [deg] (小角近似、90° で打ち切り)。"""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        v = np.where(Ea_len > 0, (ra + rb) / Ea_len, np.inf)
+    return np.degrees(np.minimum(v, np.pi / 2))
+
+
+def _face_keys(nodes, nnodes):
+    """(n, k <= 4) の節点 → 向きと順序によらない面の鍵 (k1, k2)。k1 は大きい 2 節点 (2D の辺でも一意になる側)、
+    k2 は残り (パディング -1 を含む)。主キー k1 で二分探索するので、k1 が区別できない並べ方にしない。"""
+    s = np.full((len(nodes), 4), -1, dtype=np.int64)
+    s[:, :nodes.shape[1]] = nodes
+    s.sort(axis=1)
+    m = np.int64(nnodes + 1)
+    return (s[:, 2] + 1) * m + (s[:, 3] + 1), (s[:, 0] + 1) * m + (s[:, 1] + 1)
+
+
+def read_bcond_kinds(path):
+    """bcondConfig.yaml → {physID: (名前, kind)}。読めなければ例外。"""
+    import yaml
+    with open(path) as fh:
+        y = yaml.safe_load(fh) or {}
+    out = {}
+    for nm, d in y.items():
+        if isinstance(d, dict) and "physID" in d and "kind" in d:
+            out[int(d["physID"])] = (str(nm), str(d["kind"]))
+    if not out:
+        raise ValueError("physID と kind を持つ境界が 1 つも無い")
+    return out
+
+
+def _planes_offsets(st):
+    """cell 変換の /PLANES/STRUCT ([nNodes, nodes..., nCells, cells...] の繰り返し) → 各面の先頭 (nNodes の位置)。
+    全体を Python のリストにしない (3D の数百万面で GB 単位になる)。"""
+    offs, i, n = [], 0, len(st)
+    while i < n:
+        offs.append(i)
+        i += 1 + int(st[i])
+        i += 1 + int(st[i])
+    return np.asarray(offs, dtype=np.int64)
+
+
+def read_boundary_faces(f, pids):
+    """{physID: [節点の配列, ...]} (primal の節点)。node 変換は vizBfaceNodes、cell 変換は iPlanes → PLANES/STRUCT。
+    取れない physID は None。"""
+    out, planes = {}, None
+    for pid in pids:
+        key = "BCONDS/%d" % pid
+        if key not in f:
+            out[pid] = None
+            continue
+        g = f[key]
+        if "vizBfaceNodes" in g and "vizBfaceSizes" in g:
+            nodes = np.asarray(g["vizBfaceNodes"], dtype=np.int64)
+            sizes = np.asarray(g["vizBfaceSizes"], dtype=np.int64)
+            out[pid] = np.split(nodes, np.cumsum(sizes)[:-1]) if len(sizes) else []
+        elif "iPlanes" in g and "PLANES/STRUCT" in f and "VIZMESH" not in f:
+            if planes is None:
+                st = np.asarray(f["PLANES/STRUCT"], dtype=np.int64)
+                planes = (st, _planes_offsets(st))
+            st, po = planes
+            out[pid] = [st[po[i] + 1:po[i] + 1 + st[po[i]]] for i in np.asarray(g["iPlanes"], dtype=np.int64)]
+        else:
+            out[pid] = None
+    return out
+
+
+def _sha_update_ds(h, f, name):
+    if name in f:
+        d = np.ascontiguousarray(np.asarray(f[name]))
+        h.update(f"{name}|{d.dtype.str}|{d.shape}|".encode())
+        h.update(d.tobytes())
+
+
+def mesh_invariant_sha(f):
+    """メッシュの不変部分 (座標・接続・境界の所属) のハッシュ。/VALUE (restart で変わる) は含めない。"""
+    h = hashlib.sha256()
+    for name in ("MESH/COORD", "MESH/CONNE", "VIZMESH/CONNE"):
+        _sha_update_ds(h, f, name)
+    if "BCONDS" in f:
+        for k in sorted(f["BCONDS"], key=lambda x: int(x) if str(x).isdigit() else 0):
+            for ds in ("iPlanes", "iBPlanes", "iCells", "vizBfaceNodes", "vizBfaceSizes"):
+                _sha_update_ds(h, f, "BCONDS/%s/%s" % (k, ds))
+    return h.hexdigest()
+
+
+def _faces_sha(faces):
+    """壁の面の集合 (向き・順序によらない) のハッシュ。"""
+    keys = sorted(tuple(sorted(int(x) for x in fc)) for fc in faces)
+    return hashlib.sha256(json.dumps(keys).encode()).hexdigest()
+
+
+def checker_sha():
+    h = hashlib.sha256()
+    for fn in (os.path.abspath(__file__), os.path.join(os.path.dirname(os.path.abspath(__file__)), "res_h5_to_vtu.py")):
+        with open(fn, "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()
+
+
+def node_rounding_radius(coord3):
+    """節点の位置の丸め誤差の上限 [長さ] (格納の dtype の ulp の半分 × √3)。float32 の h5 では薄い層の辺の向きが
+    ulp / 層厚 [rad] だけ揺れる (AR 4000・座標 0.5 m・層厚 1 µm で約 6°)。構成の判定はこれを差し引いて行う。"""
+    c = np.abs(np.asarray(coord3))
+    ulp = np.spacing(c.astype(c.dtype if np.issubdtype(c.dtype, np.floating) else np.float64))
+    return (np.sqrt(3.0) * 0.5 * ulp.max(axis=1)).astype(np.float64)
+
+
+def wall_orthogonality(coord3, conn, offs, types, walls, ars, a, rnode=None):
+    """壁直交性・層・AR の緩和の判定。walls: {physID: (名前, kind, [面の節点の配列])} (壁だけ)。
+    rnode: 節点の丸め誤差の上限 (node_rounding_radius)。**判定は格納された座標そのもの (ソルバが計算に使う形) の φ・内角で行う**。
+    丸めの上限は、条件を満たさない理由が格納精度の揺れの範囲か (丸めを差し引けば満たすか) を分けて出すためだけに使う。
+
+    戻り dict: lines (出力行)・n_unverified (緩和の対象で確かめられないセル)・warn (近壁の φ の WARN 数)・
+    indeterminate (判定不能の理由のリスト)・summary (JSON 用)。"""
+    lines, indet = [], []
+    say = lines.append
+    conn = np.asarray(conn, dtype=np.int64)
+    offs = np.asarray(offs, dtype=np.int64)
+    types = np.asarray(types).astype(np.int64)
+    ncells, nnodes = len(offs), len(coord3)
+    starts = np.r_[0, offs[:-1]]
+    P3 = np.asarray(coord3, dtype=np.float64)
+    R3 = np.zeros(nnodes) if rnode is None else np.asarray(rnode, dtype=np.float64)
+    topo3d = bool(np.isin(types, list(VTK_3D)).any())
+    maxlf = 6 if topo3d else 4
+
+    # --- 面の表 (セルの局所の面 → 隣のセル・隣での局所の面) ---
+    K1, K2, FC, FL = [], [], [], []
+    for t in np.unique(types):
+        faces = _local_faces(int(t), topo3d)
+        sel = np.flatnonzero(types == t)
+        for lf, fc in enumerate(faces):
+            k1, k2 = _face_keys(conn[starts[sel][:, None] + np.asarray(fc)[None, :]], nnodes)
+            K1.append(k1); K2.append(k2); FC.append(sel); FL.append(np.full(len(sel), lf, dtype=np.int64))
+    K1 = np.concatenate(K1); K2 = np.concatenate(K2); FC = np.concatenate(FC); FL = np.concatenate(FL)
+    order = np.lexsort((K2, K1))
+    s1, s2 = K1[order], K2[order]
+    nbr_c = np.full((ncells, maxlf), -1, dtype=np.int64)
+    nbr_l = np.full((ncells, maxlf), -1, dtype=np.int64)
+    same = np.flatnonzero((s1[1:] == s1[:-1]) & (s2[1:] == s2[:-1]))
+    ia, ib = order[same], order[same + 1]
+    nbr_c[FC[ia], FL[ia]] = FC[ib]; nbr_l[FC[ia], FL[ia]] = FL[ib]
+    nbr_c[FC[ib], FL[ib]] = FC[ia]; nbr_l[FC[ib], FL[ib]] = FL[ia]
+    opp_tab = np.full((16, maxlf), -1, dtype=np.int64)
+    for t, mp in OPPOSITE.items():
+        if (t == 9) != topo3d:
+            for i, j in mp.items():
+                opp_tab[t, i] = j
+
+    def lookup(nodes_list):
+        """境界面 → (セル, 局所の面)。見つからない・2 つ以上のセルに属する面は -1。"""
+        if not nodes_list:
+            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+        kk = max(len(x) for x in nodes_list)
+        arr = np.full((len(nodes_list), kk), -1, dtype=np.int64)
+        for i, x in enumerate(nodes_list):
+            arr[i, :len(x)] = x
+        q1, q2 = _face_keys(arr, nnodes)
+        # パディング (-1) は _face_keys の鍵で 0 番の扱いになり、局所の面の鍵 (-1 パディング) と一致する
+        lo = np.searchsorted(s1, q1, "left"); hi = np.searchsorted(s1, q1, "right")
+        cell = np.full(len(q1), -1, dtype=np.int64); lfo = np.full(len(q1), -1, dtype=np.int64)
+        for i in range(len(q1)):
+            hit = [order[j] for j in range(lo[i], hi[i]) if s2[j] == q2[i]]
+            if len(hit) == 1:
+                cell[i], lfo[i] = FC[hit[0]], FL[hit[0]]
+        return cell, lfo
+
+    # --- 層ごとの φ・内角 (グループ = (型, 入った面)) ---
+    def layer_metrics(cells, lfs):
+        """戻り (φ, 内角のずれ, φ の下限, 内角のずれの下限, 層の型か)。下限は丸めの上限を差し引いた値。"""
+        phi = np.full(len(cells), np.nan); ang = np.full(len(cells), np.nan)
+        phl = np.full(len(cells), np.nan); anl = np.full(len(cells), np.nan)
+        is_layer = np.zeros(len(cells), dtype=bool)
+        if not len(cells):
+            return phi, ang, phl, anl, is_layer
+        code = types[cells] * 16 + lfs
+        for cval in np.unique(code):
+            t, lf = int(cval // 16), int(cval % 16)
+            g = _layer_geometry(t, lf, topo3d)
+            if g is None:
+                continue
+            ent, trans, lat = g
+            idx = np.flatnonzero(code == cval)
+            nn = offs[cells[idx]] - starts[cells[idx]]
+            ids = conn[starts[cells[idx]][:, None] + np.arange(int(nn[0]))[None, :]]
+            P, R = P3[ids], R3[ids]
+
+            def rowmax(x):
+                return np.where(np.isnan(x).any(axis=1), np.nan, np.nan_to_num(x, nan=0.0).max(axis=1))
+
+            ph, pl = _phi_parts(P, R, ent, trans)
+            phi[idx], phl[idx] = rowmax(ph), rowmax(pl)
+            dev, dlo = np.zeros(len(idx)), np.zeros(len(idx))
+            for poly in lat:
+                dv, dl = _angle_dev_parts(P[:, list(poly)], R[:, list(poly)])
+                dev = np.where(np.isnan(dev), np.nan, np.maximum(dev, rowmax(dv)))
+                dlo = np.where(np.isnan(dlo), np.nan, np.maximum(dlo, rowmax(dl)))
+            ang[idx], anl[idx] = dev, dlo
+            is_layer[idx] = True
+        return phi, ang, phl, anl, is_layer
+
+    def _phi_parts(P, R, ent, trans):
+        """横断辺ごとの (φ, φ の下限)。下限 = φ − (辺と入った面の法線の向きの丸めの上限)、0 で打ち切り。"""
+        E = P[:, [v for _, v in trans]] - P[:, [u for u, _ in trans]]
+        ph = _phi_deg(E, _face_normals(P[:, list(ent)]))
+        al = _round_allow_deg(np.linalg.norm(E, axis=2), R[:, [u for u, _ in trans]], R[:, [v for _, v in trans]])
+        F = P[:, list(ent)]; RF = R[:, list(ent)]
+        fl = np.linalg.norm(np.roll(F, -1, axis=1) - F, axis=2)
+        fa = _round_allow_deg(fl, RF, np.roll(RF, -1, axis=1)).max(axis=1)
+        return ph, np.where(np.isnan(ph), np.nan, np.maximum(ph - al - fa[:, None], 0.0))
+
+    def _angle_dev_parts(Q, RQ):
+        """多角形の角ごとの (内角の 90° からのずれ, その下限)。下限は角を挟む 2 辺の向きの丸めの上限を差し引く。"""
+        A = _poly_angles(Q)
+        la = np.linalg.norm(np.roll(Q, 1, axis=1) - Q, axis=2)
+        lb = np.linalg.norm(np.roll(Q, -1, axis=1) - Q, axis=2)
+        al = _round_allow_deg(la, RQ, np.roll(RQ, 1, axis=1)) + _round_allow_deg(lb, RQ, np.roll(RQ, -1, axis=1))
+        dv = np.abs(A - 90.0)
+        return dv, np.where(np.isnan(A), np.nan, np.maximum(dv - al, 0.0))
+
+    def centroid(c):
+        return P3[conn[starts[c]:offs[c]]].mean(axis=0)
+
+    def fmt_xyz(x):
+        return "(%.6g, %.6g, %.6g)" % tuple(x)
+
+    # --- 角部の節点 (2 つの壁 physID が会う、または壁の面の法線が corner-angle 以上折れる) ---
+    wall_count = np.zeros(nnodes, dtype=np.int64)
+    pair_node, pair_n = [], []
+    for pid, (_, _, faces) in walls.items():
+        if faces is None:
+            continue
+        nodes_pid = np.unique(np.concatenate(faces)) if faces else np.zeros(0, np.int64)
+        wall_count[nodes_pid] += 1
+        for fc in faces:
+            pts = P3[fc][None]
+            n = _face_normals(pts)[0]
+            ln = np.linalg.norm(n)
+            if ln > 0:
+                for v in fc:
+                    pair_node.append(int(v)); pair_n.append(n / ln)
+    corner_node = wall_count >= 2
+    if pair_node:
+        pn = np.asarray(pair_node); nv = np.asarray(pair_n)
+        _, first = np.unique(pn, return_index=True)
+        ref = np.zeros((nnodes, 3)); ref[pn[first]] = nv[first]
+        cosv = np.abs(np.einsum("ij,ij->i", nv, ref[pn]))
+        bent = pn[cosv < np.cos(np.radians(a.corner_angle))]
+        corner_node[bent] = True
+    corner_cell = np.maximum.reduceat(corner_node[conn].astype(np.int8), starts).astype(bool) if ncells else np.zeros(0, bool)
+
+    # --- 壁ごと: 層 1 の横断辺の φ と、壁からの層の行進 ---
+    summary = {"walls": [], "phi_max": None, "n_walls": 0}
+    Ls, PHIs, ANGs, PLOs, ALOs, LAYs, wpids = [], [], [], [], [], [], []
+    all_phi_max = None
+    say("wall orthogonality (--bcond): 壁 %d 本 (kind %s)、構成の判定 φ <= %.3g°・内角 90±%.3g° (暫定; 精度の限界ではない)、"
+        "角部の折れ角 %.3g°" % (len(walls), "/".join(WALL_KINDS), a.phi_construct, a.theta_tol, a.corner_angle))
+    say("  φ・内角のずれは格納された座標 (ソルバが使う形) で測る。節点の位置の丸めの上限 %.3g (格納 %s)"
+        % ((float(R3.max()) if nnodes else 0.0), np.asarray(coord3).dtype))
+    if not walls:
+        say("  対象の壁 0 (bcond に wall・wall_isothermal が無い)")
+    for pid in sorted(walls):
+        name, kind, faces = walls[pid]
+        if faces is None:
+            say("  壁 %s (physID %d, %s): h5 に境界面が無い (BCONDS/%d の vizBfaceNodes・iPlanes) → 判定不能" % (name, pid, kind, pid))
+            indet.append("physID %d の境界面が無い" % pid)
+            continue
+        c0, l0 = lookup(faces)
+        bad = int((c0 < 0).sum())
+        if bad:
+            say("  壁 %s (physID %d, %s): 境界面 %d 個を primal セルに対応づけられない → 判定不能" % (name, pid, kind, bad))
+            indet.append("physID %d の面 %d 個が primal セルと対応しない" % (pid, bad))
+            continue
+        _, _, _, _, lay0 = layer_metrics(c0, l0)
+        # 層 1 の横断辺 (面ごと) の φ と位置 (壁側の節点)
+        edge_phi, edge_lo, edge_xyz, edge_corner = [], [], [], []
+        code = types[c0] * 16 + l0
+        for cval in np.unique(code):
+            t, lf = int(cval // 16), int(cval % 16)
+            g = _layer_geometry(t, lf, topo3d)
+            if g is None:
+                continue
+            ent, trans, _ = g
+            idx = np.flatnonzero(code == cval)
+            nn = int(offs[c0[idx[0]]] - starts[c0[idx[0]]])
+            ids = conn[starts[c0[idx]][:, None] + np.arange(nn)[None, :]]
+            P = P3[ids]
+            ph, pl = _phi_parts(P, R3[ids], ent, trans)
+            for j, (u, _) in enumerate(trans):
+                edge_phi.append(ph[:, j]); edge_lo.append(pl[:, j]); edge_xyz.append(P[:, u])
+                edge_corner.append(corner_cell[c0[idx]])
+        n_out = int((~lay0).sum())
+        out_types = {}
+        for t in types[c0[~lay0]]:
+            out_types[VTK_NAME.get(int(t), str(int(t)))] = out_types.get(VTK_NAME.get(int(t), str(int(t))), 0) + 1
+        rec = {"physID": pid, "name": name, "kind": kind, "faces": len(faces), "target_faces": int(lay0.sum()),
+               "excluded_faces": n_out, "excluded_types": out_types}
+        line = "  壁 %s (physID %d, %s): 境界面 %d、対象 %d、対象外 %d%s" % (
+            name, pid, kind, len(faces), int(lay0.sum()), n_out,
+            (" (" + ", ".join("%s %d" % kv for kv in sorted(out_types.items())) + ")") if n_out else "")
+        say(line)
+        if edge_phi:
+            ephi = np.concatenate(edge_phi); elo = np.concatenate(edge_lo)
+            exyz = np.concatenate(edge_xyz); ecor = np.concatenate(edge_corner)
+            for lab, m in (("通常", ~ecor), ("角部", ecor)):
+                if not m.any():
+                    continue
+                v = ephi[m]
+                if np.isnan(v).any():
+                    say("    %s: 対象辺 %d のうち退化 (長さ 0) %d → 判定不能" % (lab, int(m.sum()), int(np.isnan(v).sum())))
+                    indet.append("physID %d の退化した辺" % pid)
+                    v = np.nan_to_num(v, nan=0.0)
+                k = int(np.argmax(v))
+                rmax = float(np.nanmax(v - np.nan_to_num(elo[m], nan=0.0)))      # 丸めの上限 (φ − 下限) の最大
+                bins = "  ".join(">%g°: %d" % (b, int((v > b).sum())) for b in PHI_BINS)
+                say("    %s: 対象辺 %d (面ごと)、φ 最大 %.2f° @ %s  %s  (丸めの上限 最大 %.2f°)"
+                    % (lab, int(m.sum()), float(v[k]), fmt_xyz(exyz[m][k]), bins, rmax))
+                rec["edges_" + ("corner" if lab == "角部" else "regular")] = {
+                    "n": int(m.sum()), "phi_max": float(v[k]), "at": [float(x) for x in exyz[m][k]],
+                    "bins": {str(b): int((v > b).sum()) for b in PHI_BINS}, "rounding_max_deg": rmax}
+                if lab == "通常":
+                    all_phi_max = float(v[k]) if all_phi_max is None else max(all_phi_max, float(v[k]))
+        summary["walls"].append(rec)
+        # 層の行進 (向かいの面を渡る)
+        L = np.zeros(ncells, dtype=np.int64); PHI = np.full(ncells, np.nan); ANG = np.full(ncells, np.nan)
+        PLO = np.full(ncells, np.nan); ALO = np.full(ncells, np.nan); LAY = np.zeros(ncells, dtype=bool)
+        cur_c, cur_l, depth = c0, l0, 1
+        while len(cur_c) and depth <= ncells:
+            keep = L[cur_c] == 0
+            cur_c, cur_l = cur_c[keep], cur_l[keep]
+            cur_c, first = np.unique(cur_c, return_index=True)
+            cur_l = cur_l[first]
+            if not len(cur_c):
+                break
+            ph, an, pl, al, ly = layer_metrics(cur_c, cur_l)
+            L[cur_c] = depth; PHI[cur_c] = ph; ANG[cur_c] = an; PLO[cur_c] = pl; ALO[cur_c] = al; LAY[cur_c] = ly
+            op = opp_tab[types[cur_c], cur_l]
+            ok = ly & (op >= 0)
+            nc = np.where(ok, nbr_c[cur_c, np.maximum(op, 0)], -1)
+            nl = np.where(ok, nbr_l[cur_c, np.maximum(op, 0)], -1)
+            m = nc >= 0
+            cur_c, cur_l = nc[m], nl[m]
+            depth += 1
+        Ls.append(L); PHIs.append(PHI); ANGs.append(ANG); PLOs.append(PLO); ALOs.append(ALO); LAYs.append(LAY); wpids.append(pid)
+    summary["n_walls"] = len(walls)
+    summary["phi_max"] = all_phi_max
+
+    # --- AR の緩和 (1000 < AR <= --ar-max) ---
+    n_unverified, relax = 0, {"n_target": 0, "n_verified": 0, "n_unverified": 0}
+    T = np.flatnonzero((ars > AR_BASE) & (ars <= a.ar_max))
+    if a.ar_max > AR_BASE:
+        relax["n_target"] = int(len(T))
+        reasons = {"層の外": 0, "層でない型・退化": 0, "層の条件": 0, "層の条件 (丸めの範囲)": 0, "角部の条件": 0}
+        verified = np.zeros(len(T), dtype=bool)
+        if len(T) and Ls:
+            Lt = np.stack([L[T] for L in Ls])                       # (壁, 対象)
+            reached = Lt > 0
+            big = np.iinfo(np.int64).max
+            Lm = np.where(reached, Lt, big)
+            minL = Lm.min(axis=0)
+            assigned = reached & (Lm == minL[None, :])
+            band_ok, band_lo_ok = [], []
+
+            def cond(ph, an):
+                return bool(len(ph)) and np.isfinite(ph).all() and np.isfinite(an).all() \
+                    and bool((ph <= a.phi_construct).all()) and bool((an <= a.theta_tol).all())
+
+            for w in range(len(Ls)):
+                aw = assigned[w]
+                if not aw.any():
+                    band_ok.append(False); band_lo_ok.append(False)
+                    continue
+                K = int(Lt[w][aw].max())
+                band = (Ls[w] >= 1) & (Ls[w] <= K) & LAYs[w] & ~corner_cell
+                okb = cond(PHIs[w][band], ANGs[w][band])
+                band_ok.append(okb)
+                band_lo_ok.append(cond(PLOs[w][band], ALOs[w][band]))
+                cb = np.flatnonzero(band)
+                if len(cb):
+                    kp = cb[int(np.nanargmax(np.nan_to_num(PHIs[w][cb], nan=np.inf)))]
+                    ka = cb[int(np.nanargmax(np.nan_to_num(ANGs[w][cb], nan=np.inf)))]
+                    say("  AR 緩和の層 (壁 physID %d): 層 1..%d の %d セル (角部を除く)、φ 最大 %.2f° @ %s、内角のずれ最大 %.2f° @ %s → %s"
+                        % (wpids[w], K, len(cb), float(PHIs[w][kp]), fmt_xyz(centroid(kp)), float(ANGs[w][ka]),
+                           fmt_xyz(centroid(ka)), "条件を満たす" if okb else (
+                               "条件を満たさない (丸めの上限を差し引けば満たす: 格納精度で確かめられない。FP64 の変換か層を厚く)"
+                               if band_lo_ok[-1] else "条件を満たさない")))
+            for i, c in enumerate(T):
+                if not reached[:, i].any():
+                    reasons["層の外"] += 1
+                    continue
+                ok_any, why = False, "層の条件"
+                for w in np.flatnonzero(assigned[:, i]):
+                    if not LAYs[w][c] or not np.isfinite(PHIs[w][c]) or not np.isfinite(ANGs[w][c]):
+                        why = "層でない型・退化"
+                        continue
+                    if corner_cell[c]:
+                        if PHIs[w][c] <= a.phi_construct and ANGs[w][c] <= a.theta_tol:
+                            ok_any = True
+                        else:
+                            why = "角部の条件"
+                    elif band_ok[w]:
+                        ok_any = True
+                    elif band_lo_ok[w]:
+                        why = "層の条件 (丸めの範囲)"
+                if ok_any:
+                    verified[i] = True
+                else:
+                    reasons[why] += 1
+        elif len(T):
+            reasons["層の外"] = int(len(T))
+        n_unverified = int((~verified).sum())
+        relax.update(n_verified=int(verified.sum()), n_unverified=n_unverified,
+                     reasons={k: v for k, v in reasons.items() if v})
+        say("AR 緩和 (%.0f < AR <= %.0f): 対象 %d セル → 壁法線の構造層として確認 %d、確認できない %d%s"
+            % (AR_BASE, a.ar_max, len(T), int(verified.sum()), n_unverified,
+               (" (" + ", ".join("%s %d" % kv for kv in reasons.items() if kv[1]) + ")") if n_unverified else ""))
+        if n_unverified:
+            bad = T[~verified]
+            k = bad[int(np.argmax(ars[bad]))]
+            say("  確認できないセルの AR 最大 %.1f @ %s (SOFT-PASS を当てない → FAIL)" % (float(ars[k]), fmt_xyz(centroid(k))))
+    summary["relax"] = relax
+
+    # --- 近壁 (層 1) の φ の WARN (AR <= 1000) ---
+    n_warn, n_warn_corner, n_warn_round, wmax, wat = 0, 0, 0, None, None
+    for w in range(len(Ls)):
+        m = (Ls[w] == 1) & LAYs[w] & (ars <= AR_BASE) & (np.nan_to_num(PHIs[w], nan=0.0) > a.phi_construct)
+        n_warn_corner += int((m & corner_cell).sum())
+        m = m & ~corner_cell
+        n_warn += int(m.sum())
+        n_warn_round += int((m & (np.nan_to_num(PLOs[w], nan=0.0) <= a.phi_construct)).sum())
+        if m.any():
+            cs = np.flatnonzero(m)
+            k = cs[int(np.argmax(PHIs[w][cs]))]
+            if wmax is None or PHIs[w][k] > wmax:
+                wmax, wat = float(PHIs[w][k]), centroid(k)
+    if n_warn:
+        say("WARN 近壁 (層 1、AR <= %.0f) で φ > %.3g°: %d セル (角部を除く)、φ 最大 %.2f° @ %s%s%s"
+            % (AR_BASE, a.phi_construct, n_warn, wmax, fmt_xyz(wat),
+               ("  [角部 %d セルは数だけ]" % n_warn_corner) if n_warn_corner else "",
+               ("  [うち %d セルは丸めの上限の範囲]" % n_warn_round) if n_warn_round else ""))
+    elif n_warn_corner:
+        say("  近壁の角部で φ > %.3g°: %d セル (角部は WARN にしない)" % (a.phi_construct, n_warn_corner))
+    summary["warn_near_wall"] = {"n": n_warn, "n_corner": n_warn_corner, "n_within_rounding": n_warn_round, "phi_max": wmax,
+                                 "at": None if wat is None else [float(x) for x in wat]}
+    return {"lines": lines, "n_unverified": n_unverified, "warn": n_warn, "indeterminate": indet, "summary": summary}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("h5")
-    ap.add_argument("--ar-max", type=float, default=1000.0)
+    ap.add_argument("--ar-max", type=float, default=1000.0,
+                    help="AR の上限 (既定 1000、最大 %.0f)。1000 を超える値は --bcond があれば壁法線の構造層のセルだけに効く" % AR_RELAX_CAP)
     ap.add_argument("--skew-max", type=float, default=0.9)
     ap.add_argument("--mode", choices=["auto", "2d", "3d"], default="auto")
     ap.add_argument("--loop", action="store_true", help="旧のセル毎ループで計算 (検証用, 遅い)")
     ap.add_argument("--no-vizmesh", action="store_true", help="/VIZMESH があっても /MESH/CONNE を測る")
+    ap.add_argument("--bcond", default=None,
+                    help="bcondConfig.yaml。壁 (wall・wall_isothermal) の physID を h5 の BCONDS/<physID> と対応づけ、"
+                         "壁直交性 φ と AR の緩和の条件を判定する")
+    ap.add_argument("--phi-construct", type=float, default=PHI_CONSTRUCT_DEFAULT,
+                    help="構成の判定の φ の上限 [deg] (暫定 %.3g)。層が壁法線に沿って作られたかを分ける値で、"
+                         "精度の限界ではない (どこまで傾いてよいかは壁応力・熱流束の A/B で別に決める)" % PHI_CONSTRUCT_DEFAULT)
+    ap.add_argument("--theta-tol", type=float, default=THETA_TOL_DEFAULT,
+                    help="緩和の対象の層の内角の 90° からのずれの上限 [deg] (暫定 %.3g、構成の判定)" % THETA_TOL_DEFAULT)
+    ap.add_argument("--corner-angle", type=float, default=CORNER_ANGLE_DEFAULT,
+                    help="壁の面の法線がこれ以上折れる節点を角部として分けて数える [deg] (既定 %.3g)" % CORNER_ANGLE_DEFAULT)
+    ap.add_argument("--no-cache", action="store_true", help="<h5>.quality.json の結果を再利用しない (書きもしない)")
+    ap.add_argument("--json", default=None, help="判定の要約を JSON で書く (--bcond のとき)")
     a = ap.parse_args()
+    if a.ar_max > AR_RELAX_CAP:
+        ap.error("--ar-max は %.0f まで (AGENTS.md の AR 緩和の上限)。指定 %g" % (AR_RELAX_CAP, a.ar_max))
 
+    out_lines = []
+
+    def say(msg):
+        print(msg)
+        out_lines.append(msg)
+
+    walls, bc_kinds, cache_key, cache_path = None, None, None, None
     with h5py.File(a.h5, "r") as f:
         coord3 = np.array(f["MESH/COORD"]).reshape(-1, 3)
         if "VIZMESH/CONNE" in f and not a.no_vizmesh:
             # node (median-dual) 変換: primal セル (可視化トポロジ) を測る
             conne = np.array(f["VIZMESH/CONNE"]); ncells = int(f["VIZMESH"].attrs["nVizCells"])
-            print(f"source: /VIZMESH/CONNE (primal cells of a node-converted mesh, {ncells} cells)")
+            src_line = f"source: /VIZMESH/CONNE (primal cells of a node-converted mesh, {ncells} cells)"
         else:
             conne = np.array(f["MESH/CONNE"])
             ncells = f["VALUE/ro"].shape[0] if "VALUE/ro" in f else None
+            src_line = None
+        if a.bcond is not None:
+            try:
+                bc_kinds = read_bcond_kinds(a.bcond)
+            except Exception as e:                       # noqa: BLE001
+                print(f"--bcond {a.bcond} を読めない: {e}")
+                print("VERDICT: FAIL (判定不能: 壁の bcond が分からない)")
+                sys.exit(1)
+            wpids = sorted(p for p, (_, k) in bc_kinds.items() if k in WALL_KINDS)
+            faces = read_boundary_faces(f, wpids)
+            walls = {p: (bc_kinds[p][0], bc_kinds[p][1], faces[p]) for p in wpids}
+            if not a.no_cache:
+                cache_path = a.h5 + ".quality.json"
+                cache_key = {
+                    "checker": CHECKER_VERSION, "checker_sha256": checker_sha(),
+                    "mesh_invariant_sha256": mesh_invariant_sha(f),
+                    "walls": {str(p): (None if faces[p] is None else _faces_sha(faces[p])) for p in wpids},
+                    "args": {"ar_max": a.ar_max, "skew_max": a.skew_max, "mode": a.mode, "no_vizmesh": a.no_vizmesh,
+                             "phi_construct": a.phi_construct, "theta_tol": a.theta_tol, "corner_angle": a.corner_angle},
+                }
+            h5_kinds = {}
+            if "BCONDS" in f:
+                for k in f["BCONDS"]:
+                    kk = f["BCONDS"][k].attrs.get("bcondKind")
+                    h5_kinds[int(k)] = kk.decode() if isinstance(kk, bytes) else (None if kk is None else str(kk))
+
+    def finish(code, verdict, summary=None):
+        """--bcond のとき: 結果を <h5>.quality.json に書き (鍵つき)、--json を書いて終わる。"""
+        if cache_path is not None:
+            tmp = f"{cache_path}.tmp{os.getpid()}"
+            try:
+                with open(tmp, "w") as fh:          # 書きかけを別の検査が読まないよう、別名に書いてから置き換える
+                    json.dump({"key": cache_key, "result": {"exit": code, "verdict": verdict, "lines": out_lines,
+                                                            "summary": summary}}, fh, ensure_ascii=False, indent=1)
+                os.replace(tmp, cache_path)
+            except OSError as e:
+                print(f"(結果を {cache_path} に書けない: {e})")
+        if a.json:
+            with open(a.json, "w") as fh:
+                json.dump({"verdict": verdict, "exit": code, "reused": False, "summary": summary}, fh, ensure_ascii=False, indent=1)
+        sys.exit(code)
+
+    if cache_key is not None:
+        prev, why = None, None
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path) as fh:
+                    prev = json.load(fh)
+            except Exception as e:                       # noqa: BLE001
+                why = f"読めない ({e})"
+        else:
+            why = "記録なし"
+        if prev is not None:
+            pk = prev.get("key") or {}
+            diff = [k for k in ("checker", "checker_sha256", "mesh_invariant_sha256", "walls", "args") if pk.get(k) != cache_key[k]]
+            if not diff and "result" in prev:
+                res = prev["result"]
+                print(f"結果の再利用: {cache_path} (鍵が一致: メッシュの不変部分・壁の physID と面・閾値・検査器の版)")
+                for ln in res.get("lines", []):
+                    print(ln)
+                if a.json:
+                    with open(a.json, "w") as fh:
+                        json.dump({"verdict": res.get("verdict"), "exit": res.get("exit"), "reused": True,
+                                   "summary": res.get("summary")}, fh, ensure_ascii=False, indent=1)
+                sys.exit(int(res.get("exit", 1)))
+            why = "鍵が違う: " + ", ".join(diff)
+        print(f"結果の再利用: なし ({why})")
+
+    if src_line is not None:
+        say(src_line)
     if ncells is None:
         # count from CONNE
         from res_h5_to_vtu import _count_cells
@@ -226,7 +869,7 @@ def main():
         is3d = bool(np.isin(types, list(VTK_3D)).any()) and nz > 2
     else:
         is3d = (a.mode == "3d")
-    print(f"mode: {'3D (per-face skew / edge AR)' if is3d else '2D (x-y projection)'}")
+    say(f"mode: {'3D (per-face skew / edge AR)' if is3d else '2D (x-y projection)'}")
 
     coord = coord3 if is3d else coord3[:, :2]
     if a.loop:
@@ -262,27 +905,62 @@ def main():
             fatal.append("体積の符号が混在 (正 %d / 負 %d) = 向きの不整合" % (pos, neg))
         good = vols[np.isfinite(vols) & (vols != 0.0)]
         if good.size:
-            print("cell volume  : |V| min=%.3e  median=%.3e  max=%.3e  (0 or 非有限: %d)"
-                  % (np.abs(good).min(), np.median(np.abs(good)), np.abs(good).max(),
-                     nv_bad + nz_bad))
+            say("cell volume  : |V| min=%.3e  median=%.3e  max=%.3e  (0 or 非有限: %d)"
+                % (np.abs(good).min(), np.median(np.abs(good)), np.abs(good).max(),
+                   nv_bad + nz_bad))
     if fatal:
-        print("FATAL: " + " / ".join(fatal))
-        print("VERDICT: FAIL (メッシュとして成立していない。形状品質の外れ値許容は適用しない)")
+        say("FATAL: " + " / ".join(fatal))
+        say("VERDICT: FAIL (メッシュとして成立していない。形状品質の外れ値許容は適用しない)")
+        if a.bcond is not None:
+            finish(1, "FAIL", {"fatal": fatal})
         sys.exit(1)
 
     ar_bad = int((ars > a.ar_max).sum())
     sk_bad = int((skews > a.skew_max).sum())
-    print(f"cells: {ncells}")
-    print(f"aspect ratio : max={ars.max():.1f}  p99={np.percentile(ars,99):.1f}  "
-          f"mean={ars.mean():.1f}  >{a.ar_max:.0f}: {ar_bad} ({100*ar_bad/ncells:.2f}%)")
-    print(f"skewness     : max={skews.max():.3f}  p99={np.percentile(skews,99):.3f}  "
-          f"mean={skews.mean():.3f}  >{a.skew_max:.2f}: {sk_bad} ({100*sk_bad/ncells:.2f}%)")
-    ok = (ars.max() <= a.ar_max) and (skews.max() <= a.skew_max)
-    # 少数の外れ値は許容するソフト判定も併記
-    soft = (ar_bad <= 0.001 * ncells) and (sk_bad <= 0.001 * ncells)
-    print(f"VERDICT: {'PASS' if ok else ('SOFT-PASS (<0.1% outliers)' if soft else 'FAIL')} "
-          f"(AR<= {a.ar_max:.0f}, skew<= {a.skew_max:.2f})")
-    sys.exit(0 if (ok or soft) else 1)
+    say(f"cells: {ncells}")
+    say(f"aspect ratio : max={ars.max():.1f}  p99={np.percentile(ars,99):.1f}  "
+        f"mean={ars.mean():.1f}  >{a.ar_max:.0f}: {ar_bad} ({100*ar_bad/ncells:.2f}%)")
+    say(f"skewness     : max={skews.max():.3f}  p99={np.percentile(skews,99):.3f}  "
+        f"mean={skews.mean():.3f}  >{a.skew_max:.2f}: {sk_bad} ({100*sk_bad/ncells:.2f}%)")
+    if a.bcond is None:
+        if a.ar_max > AR_BASE:
+            say(f"注意: --bcond なしの --ar-max {a.ar_max:.0f} は旧判定 (緩和の条件 = 壁法線の構造層を確かめずに "
+                f"AR <= {a.ar_max:.0f} を通す)。関門・新しいメッシュは --bcond bcondConfig.yaml を渡すこと")
+        ok = (ars.max() <= a.ar_max) and (skews.max() <= a.skew_max)
+        # 少数の外れ値は許容するソフト判定も併記
+        soft = (ar_bad <= 0.001 * ncells) and (sk_bad <= 0.001 * ncells)
+        say(f"VERDICT: {'PASS' if ok else ('SOFT-PASS (<0.1% outliers)' if soft else 'FAIL')} "
+            f"(AR<= {a.ar_max:.0f}, skew<= {a.skew_max:.2f})")
+        sys.exit(0 if (ok or soft) else 1)
+
+    # --- 壁直交性と AR の緩和の条件 (--bcond) ---
+    mism = sorted(p for p in walls if p in h5_kinds and h5_kinds[p] not in WALL_KINDS)
+    mism += sorted(p for p, (_, k) in bc_kinds.items() if k not in WALL_KINDS and h5_kinds.get(p) in WALL_KINDS)
+    if mism:
+        say("注意: 変換時の bcondKind と --bcond の kind の壁・非壁が違う physID: %s (メッシュの来歴の照合は関門の別の検査)"
+            % ", ".join("%d (h5 %s / bcond %s)" % (p, h5_kinds.get(p), bc_kinds[p][1]) for p in sorted(set(mism))))
+    missing = sorted(set(bc_kinds) - set(h5_kinds)) if h5_kinds else []
+    if missing:
+        say("注意: --bcond の physID が h5 の BCONDS に無い: %s" % ", ".join(str(p) for p in missing))
+    wo = wall_orthogonality(coord3, conn, offs, types, walls, ars, a, rnode=node_rounding_radius(coord3))
+    for ln in wo["lines"]:
+        say(ln)
+    n_unv = wo["n_unverified"]
+    ok = (ar_bad == 0) and (sk_bad == 0) and (n_unv == 0)
+    soft = (n_unv == 0) and (ar_bad <= 0.001 * ncells) and (sk_bad <= 0.001 * ncells)
+    verdict = "PASS" if ok else ("SOFT-PASS" if soft else "FAIL")
+    if verdict != "FAIL" and wo["indeterminate"]:
+        verdict = "FAIL"
+        say("判定不能: " + "; ".join(wo["indeterminate"]))
+    if verdict != "FAIL" and wo["warn"]:
+        verdict = "WARN"
+    detail = {"PASS": "", "SOFT-PASS": " (<0.1% outliers)", "FAIL": "",
+              "WARN": " (近壁の φ > %.3g°%s)" % (a.phi_construct, "; <0.1% outliers" if not ok else "")}[verdict]
+    relax_txt = (f", {AR_BASE:.0f} < AR <= {a.ar_max:.0f} は壁法線の構造層だけ" if a.ar_max > AR_BASE else "")
+    say(f"VERDICT: {verdict}{detail} (AR<= {min(a.ar_max, AR_BASE):.0f}{relax_txt}, skew<= {a.skew_max:.2f}, "
+        f"構成 φ<= {a.phi_construct:.3g}°)")
+    summary = dict(wo["summary"], ar_bad=ar_bad, skew_bad=sk_bad, ncells=int(ncells), indeterminate=wo["indeterminate"])
+    finish(0 if verdict != "FAIL" else 1, verdict, summary)
 
 
 if __name__ == "__main__":

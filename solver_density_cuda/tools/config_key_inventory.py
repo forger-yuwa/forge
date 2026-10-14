@@ -6,6 +6,8 @@
 
 数え方 (2026-09-18 第 2 次改訂; codex plan レビュー 2 の指摘 2/3/4):
   - 抽出は**コメントを除いたソース**に対して行う (コメント中のキー名を live と数えない)。
+  - 変数がどの節を指すかは**ソースの束縛から導く** (`auto cj = config["conjugate"];` → `conjugate`)。
+    ヘルパの引数は括弧の対応で分け、第 4 引数 (表示用の節名) は束縛が解けないときだけ使う (2026-10-14)。
   - **節そのもの** (`time.deltaT` など) と**値を読むキー**を分ける。節は `--all` でしか出さない。
   - **拒否専用の参照** (起動時に落とすためだけに見ているキー) は `rejected` 印をつけ live から外す。
   - **必須キーの既定値は「なし」**。ヘルパ第 4 引数はエラー表示用の節名であって既定値ではない。
@@ -31,11 +33,15 @@ SRC_CPP = os.path.join(ROOT, 'solver_density_cuda', 'input', 'solverConfig.cpp')
 SRC_HPP = SRC_CPP.replace('.cpp', '.hpp')
 JSON_DEFAULT = os.path.join(os.environ.get('TMPDIR', '/tmp'), 'key_inventory.json')
 
-# ヘルパ呼び出しの第 1 引数 (変数名) → YAML 上の節パス
-VAR2PATH = {'deltaT': 'time.deltaT', 'last': 'time.last', 'turb': 'turbulence', 'cond': 'condensation',
-            'ch': 'physProp.chemistry', 'physProp': 'physProp', 'space': 'space', 'out': 'output',
-            'config': '', 'time': 'time', 'mesh': 'mesh'}
-TOP_SECTIONS = ('mesh', 'time', 'space', 'turbulence', 'condensation', 'physProp', 'output')
+# YAML ノードの添字の連鎖 `var["a"]["b"]` (添字は文字列リテラルだけ)。変数がどの節を指すかはソースの束縛から導く
+# (2026-10-14 まで手書きの対応表 VAR2PATH で引いていたため、表に無い `cj` (conjugate)・`g` (conjugate.gate) を
+#  取りこぼし、ソルバが受理する `conjugate.mode`・`conjugate.gate` を誤検出した。plan tooling-generator-defaults-and-launch-gate #4)。
+_CHAIN = r'(\w+)((?:\s*\[\s*"[A-Za-z0-9_]+"\s*\])*)'
+_LIT = re.compile(r'"([A-Za-z0-9_]+)"')
+_NOT_MEMBER = r'(?<![\w.])(?<!->)'                     # `a.b["x"]`・`a->b["x"]` のメンバ参照は対象外
+_DECL = r'(?:\bconst\s+)?(?:\bauto\b|\bYAML::Node\b)\s*&?\s*'
+# 拒否の文言 (起動時に落とすための参照を、値を読む参照と分ける)
+_REMOVAL_MSG = re.compile(r'no longer supported|撤去|廃止')
 
 
 def strip_comments(src):
@@ -61,13 +67,142 @@ def strip_comments(src):
     return ''.join(out)
 
 
+def _match_close(src, i):
+    """src[i] が開き括弧 ( [ { のとき、対応する閉じ括弧の位置を返す (文字列・文字リテラルは飛ばす)。無ければ -1。"""
+    pairs = {'(': ')', '[': ']', '{': '}'}
+    stack, j, n = [], i, len(src)
+    while j < n:
+        c = src[j]
+        if c in '"\'':
+            k = j + 1
+            while k < n and src[k] != c:
+                k += 2 if src[k] == '\\' else 1
+            j = k + 1
+            continue
+        if c in pairs:
+            stack.append(pairs[c])
+        elif c in ')]}':
+            if not stack or stack.pop() != c:
+                return -1
+            if not stack:
+                return j
+        j += 1
+    return -1
+
+
+def _split_args(src, i):
+    """src[i] == '(' の呼び出しの引数を最上位のカンマで分ける。戻り (引数のリスト, 閉じ括弧の位置)。
+
+    既定値に括弧を含む呼び出し (`std::string("local1d")`、`(a == 1) ? 0.05 : 1.0`) を正規表現で読むと
+    第 4 引数を落とす (2026-10-14 まで `conjugate.mode` が節名なしで抽出されていた原因の一つ)。"""
+    end = _match_close(src, i)
+    if end < 0:
+        return None, -1
+    args, depth, start, j = [], 0, i + 1, i + 1
+    while j < end:
+        c = src[j]
+        if c in '"\'':
+            k = j + 1
+            while k < end and src[k] != c:
+                k += 2 if src[k] == '\\' else 1
+            j = k + 1
+            continue
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            args.append(src[start:j].strip())
+            start = j + 1
+        j += 1
+    args.append(src[start:end].strip())
+    return args, end
+
+
+def _guarded_body(src, pos):
+    """pos が `if (...)` の条件の中にあれば、その if が守る文 (ブロックか 1 文) を返す。無ければ None。"""
+    lo = max(0, pos - 400)
+    for m in reversed(list(re.finditer(r'\bif\s*\(', src[lo:pos]))):
+        op = lo + m.end() - 1
+        cl = _match_close(src, op)
+        if cl < 0 or cl < pos:
+            continue
+        k = cl + 1
+        while k < len(src) and src[k].isspace():
+            k += 1
+        if k < len(src) and src[k] == '{':
+            e = _match_close(src, k)
+            return src[k:e + 1] if e > 0 else None
+        e = src.find(';', k)
+        return src[k:e + 1] if e > 0 else None
+    return None
+
+
+class _NodeScope:
+    """YAML ノードを指す変数 (`auto cj = config["conjugate"];` など) の束縛をソースから集めて、位置ごとに解決する。
+
+    - 根: `YAML::Node X = YAML::LoadFile(...)`。
+    - 別名: `auto X = Y["a"]["b"];` / `const YAML::Node X = Y["a"];` (Y は根か別名)。
+    - 範囲 for の要素: `for (const auto& X : Y["a"])` は列の要素 (値の中身) で、設定のパスではない。
+    同名の変数は**その位置より前の最後の束縛**で解決する (C++ の有効範囲の近似。違えば解決不能として報告に出る)。"""
+
+    def __init__(self, src):
+        self.defs = collections.defaultdict(list)          # 変数 → [(位置, ('path'|'elem', パスの部品) | None)]
+        events = []
+        for m in re.finditer(_DECL + r'(\w+)\s*=\s*([^;]*);', src):
+            events.append((m.start(), m.group(1), 'path', m.group(2).strip()))
+        for m in re.finditer(r'\bfor\s*\(\s*' + _DECL + r'(\w+)\s*:\s*([^)]*)\)', src):
+            events.append((m.start(), m.group(1), 'elem', m.group(2).strip()))
+        for pos, var, kind, rhs in sorted(events):
+            val = None
+            if kind == 'path' and re.match(r'YAML::Load(?:File)?\s*\(', rhs):
+                val = ('path', ())
+            else:
+                mm = re.fullmatch(_CHAIN, rhs)
+                if mm:
+                    base = self.resolve(mm.group(1), pos)
+                    if base is not None and base[0] == 'path':
+                        val = (kind, base[1] + tuple(_LIT.findall(mm.group(2))))
+                    elif base is not None:
+                        val = base                          # 列の要素の中身の別名も、列の要素のまま
+            self.defs[var].append((pos, val))
+
+    def resolve(self, var, pos):
+        """戻り ('path', 部品) / ('elem', 列のパスの部品) / None (YAML ノードと分からない・解決できない)。"""
+        cand = [v for p, v in self.defs.get(var, []) if p < pos]
+        return cand[-1] if cand else None
+
+    def is_node_var(self, var, pos):
+        """var が pos の時点で YAML ノードの束縛を持つ変数として宣言されたことがあるか (解決できたかは問わない)。"""
+        return any(p < pos for p, _ in self.defs.get(var, []))
+
+
 def extract_keys(src):
     """戻り {path: {...}}。path は 'time.deltaT.dt' のような完全修飾。
 
     kind: 'value' (値を読む) / 'section' (節そのもの) / 'rejected' (拒否専用の参照)。
     default: 既定値の文字列。required なら None、解決できなければ '?'。
     """
-    keys = {}
+    return extract_keys_with_report(src)[0]
+
+
+def extract_keys_with_report(src):
+    """extract_keys と同じ表に加え、静的に解決できなかった参照の報告を返す。戻り (keys, report)。
+
+    report は [{'line', 'why', 'text'}]。why の種類:
+      - 'unresolved-node': YAML ノードの変数だが、どの節を指すかをソースから導けない (ヘルパの表示用の節名で代用した)。
+      - 'list-element': 列の要素への添字 (値キーの中身。設定のパスではないので表に入れない)。
+      - 'dynamic-subscript': 文字列リテラルでない添字 (ループ形の拒否表・削除表の書き方以外)。
+      - 'conditional-reject': 値を読むキーを、別の設定値の条件付きで拒否している (静的な一覧では表せない)。
+      - 'label-mismatch': ヘルパの表示用の節名と、束縛から導いた節が違う (表示の誤り。抽出は束縛を使う)。
+    """
+    keys, report = {}, []
+    refs = collections.defaultdict(set)                     # path → {'read', 'reject', 'reject-loop'}
+    reject_line = {}                                        # path → 拒否している行 (報告用)
+    scope = _NodeScope(src)
+
+    def line(pos):
+        return src.count('\n', 0, pos) + 1
 
     def add(path, typ, dflt, required, how, member=None):
         e = keys.setdefault(path, {'type': typ, 'default': dflt, 'required': required,
@@ -78,63 +213,128 @@ def extract_keys(src):
             e['member'] = member
         e['required'] = e['required'] or required
         e['how'].add(how)
+        # 読むパスの親は必ず写像 (節)。親だけを読む参照が無くても節として載せる
+        parts = path.split('.')
+        for i in range(1, len(parts)):
+            keys.setdefault('.'.join(parts[:i]), {'type': '-', 'default': None, 'required': False,
+                                                  'how': set(), 'member': None, 'kind': 'value'})['how'].add('prefix')
         return e
 
-    def sec_of(var, secstr):
-        if '[' in var:
-            inner = re.findall(r'"([A-Za-z0-9_]+)"', var)
-            base = '' if var.startswith('config') else VAR2PATH.get(var.split('[')[0], var.split('[')[0])
-            return '.'.join([p for p in [base] + inner if p])
-        return (secstr or VAR2PATH.get(var, var)).strip()
-
-    # 1) 必須ヘルパ: getValidatedValue<T>(sec, "key", "section.path")  — 第 3 引数はエラー表示用の節名
-    pat_req = (r'getValidatedValue<([^>]+)>\(\s*(\w+(?:\[\s*"[A-Za-z0-9_]+"\s*\])*)\s*,\s*'
-               r'"([A-Za-z0-9_]+)"\s*(?:,\s*"([^"]*)")?\s*\)')
-    for m in re.finditer(pat_req, src):
-        typ, var, key, secstr = m.groups()
-        sec = sec_of(var, secstr)
-        add('.'.join([p for p in [sec, key] if p]), typ.strip(), None, True, 'helper-required')
-
-    # 2) 任意ヘルパ: getOptionalValidatedValue<T>(sec, "key", default, "section.path")
-    pat_opt = (r'getOptionalValidatedValue<([^>]+)>\(\s*(\w+(?:\[\s*"[A-Za-z0-9_]+"\s*\])*)\s*,\s*'
-               r'"([A-Za-z0-9_]+)"\s*,\s*([^,\)]+?)\s*(?:,\s*"([^"]*)")?\s*\)')
-    for m in re.finditer(pat_opt, src):
-        typ, var, key, dflt, secstr = m.groups()
-        sec = sec_of(var, secstr)
-        add('.'.join([p for p in [sec, key] if p]), typ.strip(), dflt.strip(), False, 'helper-optional')
-
-    # 3) 直接参照 config["a"]["b"] / sec["key"]
-    for m in re.finditer(r'(config|[a-zA-Z_]\w*)((?:\[\s*"[A-Za-z0-9_]+"\s*\])+)', src):
-        var, chain = m.groups()
-        parts = re.findall(r'"([A-Za-z0-9_]+)"', chain)
-        if var == 'config':
-            path = '.'.join(parts)
+    # 1) ヘルパ: getValidatedValue<T>(node, "key"[, "label"]) / getOptionalValidatedValue<T>(node, "key", default[, "label"])
+    #    引数は括弧の対応で分ける。節は第 1 引数の束縛から導き、表示用の節名 (label) は束縛が解けないときだけ使う。
+    for m in re.finditer(r'\b(getValidatedValue|getOptionalValidatedValue)\s*<', src):
+        i, depth = m.end(), 1
+        while i < len(src) and depth:
+            depth += {'<': 1, '>': -1}.get(src[i], 0)
+            i += 1
+        typ = src[m.end():i - 1].strip()
+        k = i
+        while k < len(src) and src[k].isspace():
+            k += 1
+        if k >= len(src) or src[k] != '(':
+            continue                                        # 定義側 (template の宣言) など
+        args, _ = _split_args(src, k)
+        required = m.group(1) == 'getValidatedValue'
+        if not args or len(args) < (2 if required else 3):
+            report.append({'line': line(m.start()), 'why': 'unresolved-node', 'text': src[m.start():k + 80].split('\n')[0]})
+            continue
+        km = re.fullmatch(r'"([A-Za-z0-9_]+)"', args[1])
+        label_arg = args[2] if required and len(args) > 2 else (args[3] if not required and len(args) > 3 else None)
+        lm = re.fullmatch(r'"([^"]*)"', label_arg) if label_arg is not None else None
+        label = lm.group(1).strip() if lm else None
+        nm = re.fullmatch(_CHAIN, args[0])
+        val = scope.resolve(nm.group(1), m.start()) if nm else None
+        if not km:
+            report.append({'line': line(m.start()), 'why': 'dynamic-subscript', 'text': f'{m.group(1)}({args[0]}, {args[1]}, ...)'})
+            continue
+        if val is not None and val[0] == 'path':
+            sec = '.'.join(val[1] + tuple(_LIT.findall(nm.group(2))))
+            if label is not None and label != sec:
+                report.append({'line': line(m.start()), 'why': 'label-mismatch',
+                               'text': f'{args[0]}, "{km.group(1)}": 表示 "{label}" / 束縛 "{sec}"'})
         else:
-            base = VAR2PATH.get(var)
-            if base is None:
+            report.append({'line': line(m.start()), 'why': 'unresolved-node',
+                           'text': f'{m.group(1)}({args[0]}, "{km.group(1)}") — 表示用の節名 "{label}" で代用'})
+            if label is None:
                 continue
-            path = '.'.join([p for p in [base] + parts if p])
-        if not path or (len(path.split('.')) > 1 and path.split('.')[0] not in TOP_SECTIONS):
+            sec = label
+        path = '.'.join([p for p in [sec, km.group(1)] if p])
+        dflt = None
+        if not required:
+            dflt = args[2].strip()
+            sm = re.fullmatch(r'std::string\s*\(\s*("[^"]*")\s*\)', dflt)
+            if sm:
+                dflt = sm.group(1)
+        add(path, typ, dflt, required, 'helper-required' if required else 'helper-optional')
+        refs[path].add('read')
+
+    # 2) 直接参照 X["a"]["b"] (X は根・別名)。if の条件の中で、守る文が拒否の文言で落とすなら拒否専用。
+    for m in re.finditer(_NOT_MEMBER + r'(\w+)((?:\s*\[\s*"[A-Za-z0-9_]+"\s*\])+)', src):
+        var, chain = m.groups()
+        val = scope.resolve(var, m.start())
+        if val is None:
+            if scope.is_node_var(var, m.start()):
+                report.append({'line': line(m.start()), 'why': 'unresolved-node', 'text': m.group(0)})
+            continue
+        if val[0] == 'elem':
+            report.append({'line': line(m.start()), 'why': 'list-element',
+                           'text': f'{m.group(0)} (列 {".".join(val[1])} の要素)'})
+            continue
+        path = '.'.join(val[1] + tuple(_LIT.findall(chain)))
+        if re.match(r'\s*\[', src[m.end():]):
+            add(path, '?', None, False, 'prefix')          # `config["mesh"][k]` の親: 節であって、この参照は値も拒否も表さない
             continue
         # 同じ文の代入先メンバ (this->meshRenumber = config["mesh"]["renumber"]...) を既定値の引き当てに使う
         line_start = src.rfind('\n', 0, m.start()) + 1
         stmt_end = src.find(';', m.end())
         stmt = src[line_start:stmt_end if stmt_end > 0 else m.end()]
         mm = re.search(r'this->(\w+)\s*=', stmt)
-        e = add(path, '?', None, False, 'direct', mm.group(1) if mm else None)
-        # 拒否専用の参照: 同じ文の直後に "no longer supported" の throw がある
-        tail = src[m.end():m.end() + 400]
-        if '.IsDefined()' in stmt and 'no longer supported' in tail:
-            e['kind'] = 'rejected'
+        add(path, '?', None, False, 'direct', mm.group(1) if mm else None)
+        body = _guarded_body(src, m.start())
+        if body is not None and re.search(r'\bthrow\b|\bexit\s*\(', body) and _REMOVAL_MSG.search(body):
+            refs[path].add('reject')
+            reject_line.setdefault(path, line(m.start()))
+        else:
+            refs[path].add('read')
 
-    # 4) ループ形の拒否表: for (const char* k : {"A","B"}) { if (sec[k]) { ...exit/throw... } }
-    for m in re.finditer(r'for\s*\(\s*const char\*\s*(\w+)\s*:\s*\{([^}]*)\}\s*\)\s*\{\s*'
-                         r'if\s*\(\s*(\w+(?:\[\s*"[A-Za-z0-9_]+"\s*\])*)\s*\[\s*\1\s*\]', src):
-        _, lst, var = m.groups()
-        sec = sec_of(var, None)
-        for key in re.findall(r'"([A-Za-z0-9_]+)"', lst):
-            add('.'.join([p for p in [sec, key] if p]), '-', None, False, 'rejected-loop')['kind'] = 'rejected'
-    return keys
+    # 3) ループ形の拒否表: for (const char* k : {"A","B"}) [{] if (X[k]) ...throw/exit...
+    loop_spans = []
+    for m in re.finditer(r'\bfor\s*\(\s*const\s+char\s*\*\s*(\w+)\s*:\s*\{([^}]*)\}\s*\)\s*\{?\s*'
+                         r'if\s*\(\s*' + _CHAIN + r'\s*\[\s*\1\s*\]', src):
+        _, lst, var, chain = m.groups()
+        val = scope.resolve(var, m.start())
+        if val is None or val[0] != 'path':
+            report.append({'line': line(m.start()), 'why': 'unresolved-node', 'text': m.group(0)[:80]})
+            continue
+        body = _guarded_body(src, m.end() - 1)
+        if body is None or not re.search(r'\bthrow\b|\bexit\s*\(', body):
+            continue
+        loop_spans.append((m.start(), m.end()))
+        sec = val[1] + tuple(_LIT.findall(chain))
+        for key in _LIT.findall(lst):
+            path = '.'.join(sec + (key,))
+            add(path, '-', None, False, 'rejected-loop')
+            refs[path].add('reject-loop')
+            reject_line.setdefault(path, line(m.start()))
+
+    # 4) 文字列リテラルでない添字 (ループ形の拒否表・削除表 removed[] の走査は上と removed_keys() が読む)
+    rm = re.search(r'\bfor\s*\(\s*const\s+auto\s*&\s*\w+\s*:\s*removed\s*\)', src)
+    if rm:
+        e = src.find('{', rm.end())
+        loop_spans.append((rm.start(), _match_close(src, e) if e >= 0 else rm.end()))
+    for m in re.finditer(_NOT_MEMBER + r'(\w+)((?:\s*\[\s*"[A-Za-z0-9_]+"\s*\])*)\s*\[\s*(?!["\s])([^\]]+)\]', src):
+        val = scope.resolve(m.group(1), m.start())
+        if val is None or val[0] != 'path' or any(a <= m.start() <= b for a, b in loop_spans):
+            continue
+        report.append({'line': line(m.start()), 'why': 'dynamic-subscript', 'text': m.group(0)})
+
+    # 拒否専用の判定: どこかで値として読むパスは拒否にしない (条件付きの拒否は報告に回す)
+    for path, r in refs.items():
+        if r and r <= {'reject', 'reject-loop'}:
+            keys[path]['kind'] = 'rejected'
+        elif 'reject-loop' in r or 'reject' in r:
+            report.append({'line': reject_line.get(path, 0), 'why': 'conditional-reject', 'text': path})
+    return keys, report
 
 
 def removed_keys(src):
@@ -190,6 +390,7 @@ def main():
     src = strip_comments(raw)
     keys = extract_keys(src)
     gone = removed_keys(src)
+    _, unresolved = extract_keys_with_report(src)
 
     # 節そのもの (他のパスの真の接頭辞) は値キーでない
     allpaths = set(keys)
@@ -265,6 +466,10 @@ def main():
     live = [r for r in rows if r['kind'] == 'value']
     print(f'live な値キー (完全修飾パス) {len(live)} / 節 {len([r for r in rows if r["kind"]=="section"])} / '
           f'拒否専用 {len([r for r in rows if r["kind"]=="rejected"])} / 起動時拒否 {len([r for r in rows if r["kind"]=="removed"])}')
+    if unresolved:
+        cnt = collections.Counter(r['why'] for r in unresolved)
+        print('静的に一覧へ入れなかった参照: ' + ', '.join(f'{k} {v}' for k, v in sorted(cnt.items()))
+              + ' (list-element は値キーの中身、conditional-reject は別の設定値に依る拒否)')
     print(f'run config {nconf} 本 ({len(trees)} worktree, 内容違いの同名 {dup_conflict} 本を別設定として計上)')
     if nfail:
         print(f'**読み取り失敗 {len(nfail)} 本 (集計は不完全)**: ' + ', '.join(p for p, _ in nfail[:5]))
