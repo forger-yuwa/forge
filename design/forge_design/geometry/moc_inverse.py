@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
@@ -26,6 +28,81 @@ from .moc_kernel import (AXIS_LIMIT_MODES, AXIS_R_EPS, CORR_MAX, CORR_TOL,
                          PAIR_GEOM, PAIR_MAXITER, PAIR_MISSING, PAIR_NONFINITE,
                          RESID_TOL, KernelMOC, _Pt, axis_theta_r, interior_vec,
                          pm_mach, pm_mach_vec, pm_nu, source_branches)
+
+
+# --- 網の充填の backend (plans/active/tooling-nozzle-mknot-fast.md §4.4、受入は §6 V5) -----------------------------------
+# `fill_levels` の段のループは既定で numba の版 (`moc_fill_nb.fill_levels_nb`)。環境変数 `FORGE_MOC_KERNEL=numpy` で
+# numpy の版 (A/B と回帰の基準)。他の値は ValueError。numba が無ければ ImportError (黙って numpy の版に落ちない)。
+# `fill_arrays`・`fill` は numpy の版のまま。
+MOC_KERNEL_ENV = "FORGE_MOC_KERNEL"
+MOC_KERNELS = ("numba", "numpy")
+# numba の版は単位過程を内側に持つので、試験・台本が差し替えた関数は効かない。差し替えを検出したら止める (黙って無視しない)。
+_UNIT_NAMES_MK = ("interior_vec", "_interior_pass", "_interior_residual", "_src_vec", "_sin_over_r_vec", "mu_vec",
+                  "pm_mach_vec", "pm_nu", "source_branches")
+_UNITS_MK = {k: getattr(_mk, k) for k in _UNIT_NAMES_MK}
+
+
+def moc_kernel_backend() -> str:
+    """`fill_levels` の backend (`FORGE_MOC_KERNEL`、未設定は `numba`)。呼ぶたびに読む (試験で切り替えるため)。"""
+    v = os.environ.get(MOC_KERNEL_ENV)
+    if v is None:
+        return "numba"
+    if v not in MOC_KERNELS:
+        raise ValueError(f"{MOC_KERNEL_ENV} は {MOC_KERNELS} のどれか (受け取った値: {v!r})")
+    return v
+
+
+def moc_kernel_record() -> dict:
+    """記録用 (prepare_info.json の environment): backend と numba・llvmlite の版。numba の版は import せずに読む。"""
+    from importlib import metadata
+    rec = {"backend": moc_kernel_backend()}
+    for pkg in ("numba", "llvmlite"):
+        try:
+            rec[pkg] = metadata.version(pkg)
+        except metadata.PackageNotFoundError:
+            rec[pkg] = None
+    return rec
+
+
+def _load_nb():
+    try:
+        from . import moc_fill_nb
+    except ImportError as e:
+        raise ImportError(f"逆 MOC の網の充填の既定 ({MOC_KERNEL_ENV} 未設定 = numba) に numba が要る ({e})。"
+                          f"numpy の版を使うなら {MOC_KERNEL_ENV}=numpy") from e
+    return moc_fill_nb
+
+
+def _check_units_unpatched():
+    """単位過程の関数が差し替えられていたら止める (numba の版には効かないので、結果が黙って変わる)。"""
+    bad = [k for k in _UNIT_NAMES_MK if getattr(_mk, k) is not _UNITS_MK[k]]
+    if globals()["interior_vec"] is not _UNITS_MK["interior_vec"]:
+        bad.append("moc_inverse.interior_vec")
+    if bad:
+        raise RuntimeError(f"単位過程が差し替えられている ({', '.join(bad)})。numba の版には効かないので、"
+                           f"差し替えを使うなら {MOC_KERNEL_ENV}=numpy で回す")
+
+
+def _nb_gas(g):
+    """ν→M の経路 (numba の版): (種類, γ, 表 ν, 表 M)。float の γ・`GasCPG`・CPG の `Isentrope` は CPG の Newton、
+    `GasSemiPerfect` は表の線形補間。それ以外のガス (TP の `Isentrope` の Hermite の Newton など) は扱わない (ValueError)。"""
+    from . import moc_fill_nb as _nb
+    empty = np.zeros(1)
+    if isinstance(g, (bool, np.bool_)):
+        raise ValueError(f"γ に bool は使えない (受け取った値: {g!r})")
+    if isinstance(g, (int, float, np.integer, np.floating)):
+        return _nb.GAS_CPG, float(g), empty, empty
+    from ..gas.isentrope import Isentrope
+    from ..gas.semiperfect import GasCPG, GasSemiPerfect
+    if type(g) is GasCPG or (type(g) is Isentrope and g.cpg):
+        return _nb.GAS_CPG, float(g.gamma_ref), empty, empty
+    if type(g) is GasSemiPerfect:
+        tx = np.ascontiguousarray(g._nu, dtype=float)
+        ty = np.ascontiguousarray(g._M, dtype=float)
+        if tx.ndim != 1 or tx.shape != ty.shape or tx.size < 1:
+            raise ValueError(f"GasSemiPerfect の表の形が不正 (ν {tx.shape}, M {ty.shape})")
+        return _nb.GAS_TABLE, 0.0, tx, ty
+    raise ValueError(f"numba の版の網の充填はこのガスを扱わない ({type(g).__name__})。{MOC_KERNEL_ENV}=numpy で回す")
 
 
 def field_interpolator(pts):
@@ -144,6 +221,29 @@ class MocFillDiag:
                 "geom_rejects": [list(g) for g in self.geom[: self.CAP]],
                 "_geom_all": list(self.geom),         # moc_gate の判定用 (記録からは外す)
                 "iter_failures": self.fail, "n_levels": int(self.n_levels)}
+
+
+def _diag_from_nb(diag: MocFillDiag, res) -> MocFillDiag:
+    """`moc_fill_nb.fill_levels_nb` の戻り値から `MocFillDiag` の欄を組み立てる (`add` を段ごとに呼んだのと同じ中身・同じ順)。"""
+    from .moc_fill_nb import BRANCH_KEYS, COUNT_KEYS, FAIL_KINDS, FRAC_KEYS, GEOM_KINDS
+    (_err, _err_n, counts, hist, hist_order, resid_max, resid_at_i, resid_at_f, resid_has, branch, frac_rng,
+     fp_i, fp_f, g_i, g_f, fl_i, fl_f, n_levels) = res
+    diag.counts = {k: int(counts[i]) for i, k in enumerate(COUNT_KEYS)}
+    diag.iter_hist = {int(v): int(hist[v]) for v in hist_order}
+    for q, key in enumerate(("geom", "comp")):
+        diag.resid[key + "_max"] = float(resid_max[q])
+        diag.resid["at_" + key] = ([int(resid_at_i[q, 0]), int(resid_at_i[q, 1]), float(resid_at_f[q, 0]),
+                                    float(resid_at_f[q, 1])] if resid_has[q] else None)
+    diag.branch = {k: int(branch[i]) for i, k in enumerate(BRANCH_KEYS)}
+    diag.frac_pos = [[int(a[0]), int(a[1]), FRAC_KEYS[int(a[2])], float(b[0]), float(b[1]), float(b[2])]
+                     for a, b in zip(fp_i, fp_f)]
+    diag.frac_rng = [float(v) for v in frac_rng]
+    diag.geom = [(int(a[0]), int(a[1]), GEOM_KINDS[int(a[2])], float(b[0]), float(b[1]), float(b[2]), float(b[3]))
+                 for a, b in zip(g_i, g_f)]
+    diag.fail = [[int(a[0]), int(a[1]), FAIL_KINDS[int(a[2])], int(a[3]), float(b[0]), float(b[1]), float(b[2]),
+                  float(b[3])] for a, b in zip(fl_i, fl_f)]
+    diag.n_levels = int(n_levels)
+    return diag
 
 
 def _posthoc_stats(A, B, out, n_corr: int) -> dict:
@@ -291,7 +391,12 @@ class InverseMOC(KernelMOC):
         つまり三角充填の網と特性線網は同じもので、走査順が違うだけ。
 
         `axis_thr`: `fill_arrays` と同じ。対の集計 (欠損 = 死んだ対を含む) は `self.last_diag`。
+
+        段のループは既定で numba の版 (`moc_fill_nb`、同じ式・同じ順序)、`FORGE_MOC_KERNEL=numpy` で下の numpy の版
+        (`moc_kernel_backend`)。
         """
+        if moc_kernel_backend() == "numba":
+            return self._fill_levels_nb(init_front, axis_thr)
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
         th = np.array([p.th for p in init_front], dtype=float)
@@ -323,6 +428,35 @@ class InverseMOC(KernelMOC):
             out[k, :len(x)] = np.column_stack([x, r, th, nu, M])
             live = ok
         self.last_diag = diag.summary()
+        return out
+
+    def _fill_levels_nb(self, init_front, axis_thr=None, trace=None) -> np.ndarray:
+        """`fill_levels` の numba の版 (段 0 と入力の検査は numpy の版と同じ、段のループは `moc_fill_nb.fill_levels_nb`)。
+        `trace`: 試験用 (`moc_fill_nb.trace_arrays(n)` の戻り値を渡すと段・対ごとの状態・回数・残差・分岐を書き込む)。"""
+        nb = _load_nb()
+        _check_units_unpatched()
+        x = np.array([p.x for p in init_front], dtype=float)
+        r = np.array([p.r for p in init_front], dtype=float)
+        th = np.array([p.th for p in init_front], dtype=float)
+        nu = np.array([p.nu for p in init_front], dtype=float)
+        M = np.array([p.M for p in init_front], dtype=float)
+        n = len(x)
+        thr = self._front_thr(n, axis_thr)
+        gas_kind, gam, tx, ty = _nb_gas(self.g)
+        out = np.full((n, n, 5), np.nan)
+        out[0] = np.column_stack([x, r, th, nu, M])
+        analytic = self.axis_limit == "analytic"
+        mode = (nb.MODE_CONVERGE if self.corrector == "converge" else
+                nb.MODE_FIXED2 if analytic else nb.MODE_LEGACY_FIXED2)
+        thr0 = np.full(n, np.nan) if thr is None else np.ascontiguousarray(thr, dtype=float)
+        res = nb.fill_levels_nb(out, x, r, th, nu, M, thr0, analytic, mode, int(self.n_corr), float(self.tol),
+                                int(self.max_corr), float(self.delta), gas_kind, gam, tx, ty,
+                                float(_mk.AXIS_LIMIT_FRAC), float(AXIS_R_EPS), int(MocFillDiag.CAP),
+                                *(nb.no_trace() if trace is None else trace))
+        if int(res[0]) == nb.ERR_LACK_THR:
+            raise ValueError(f"axis_limit='analytic': 軸上の既知点 {int(res[1])} 対に θ_r が無い "
+                             "(初期前線の軸端点には axis_thr を渡すこと)")
+        self.last_diag = _diag_from_nb(self._new_diag(), res).summary()
         return out
 
     # -- 壁流線 ---------------------------------------------------------------

@@ -672,6 +672,17 @@ $L_{k-1}[i]$ (C⁻ 担体) と $L_{k-1}[i+1]$ (C⁺ 担体) から作られる�
 (`cplus_lines`。反対角線の傾きが $\tan(\theta+\mu)$ に一致することを機械精度 6.6e-15 で検証済み)。
 物理出口 $F$ も $E$ 発の C⁺ = 網の反対角線なので、**Delaunay は設計経路から完全に消える**。
 
+**網の充填の実装 (2026-10-15)**: 段のループ (段数 $N+40$ を逐次、段の中の対は独立) は既定で numba の版
+(`geometry/moc_fill_nb.py` の `fill_levels_nb`) で回す。numpy の版は段ごとに小さな配列演算を 5 回前後呼ぶ固定費が支配していた
+(N 2400 で 1 評価の 7〜8 割)。numba の版は段の中を対ごとのスカラーのループにし、**同じ式・同じ演算の順序** (float64、
+`fastmath=False`) で書いたので、網・集計 (`last_diag`) とも numpy の版と**ビット同一**になる。そのための約束が 2 つある:
+ν→M の CPG の Newton は numpy の版と同じ集合 (段の全部の対など) について配列全体の収束で止める (要素ごとに止めると、先に収束した
+要素の追加の反復が 1 ulp 動きうる)、semi-perfect の表の補間は `np.interp` の C 実装 (二分探索の推測・傾きの式・NaN の扱い) を写す。
+超越関数は numpy も numba も libm を呼ぶ環境でビット同一 (numpy が AVX512 の SVML を使う機械では ulp の差が出うる)。
+`FORGE_MOC_KERNEL=numpy` で numpy の版を選べる (A/B の基準)。単位過程の関数を差し替える試験・台本は numba の版には効かないので、
+差し替えを検出したら止める。`fill_arrays`・`fill` (流線積分の経路) は numpy の版のまま。
+計画 [tooling-nozzle-mknot-fast](../../plans/active/tooling-nozzle-mknot-fast.md) §4.4、受入は同 §6 V5。
+
 | | 流線積分 (`streamline`) | **C⁺ 流束閉包 (`cplus`)** |
 | --- | --- | --- |
 | 壁の出所 | 場を作った後に補間場から探す | 網を作る過程で出る |

@@ -10,7 +10,7 @@
 - **related_plans**:
   - [`tooling-nozzle-mknot-auto.md`](../accepted/tooling-nozzle-mknot-auto.md) (accepted、forge-f5) — §5.1 #6「所要の短縮 (非阻害)」の引き継ぎ先がこの plan。**ユーザ決定 (2026-10-15) で選び方を単純化する** (規則 `min_theta_max_v1` の 2N のゲート・窓の拡張・同点の規則・二分法を外す; §4.1)
 - **created**: `2026-10-15`
-- **owner**: `M6ノズルの設計` セッション (作業ツリー `forge-mknot` / `feature/mknot-fast`、main 4b1708ac から)
+- **owner**: `forge-7d` セッション (2026-10-15 に `M6ノズルの設計` から引き継ぎ、`notes/sessions/2026-10-15-moc-speedup-handoff.md`; 作業ツリー `forge-mknot` / `feature/mknot-fast`、main 4b1708ac から)
 
 ## 1. 目的
 
@@ -113,6 +113,32 @@
 - **L_c の使い回し (#6)**: `from_length` の L_c と x_F の反復列は M_K に依らない (§3、差 ≤ 1e−11 r_t)。同じ (問題、N、`L_total_tol`、`x_end_margin`) の評価の間で、収束した L_c を初期値に渡し、
   最初の評価で |x_F − L_total| ≤ tol なら 1 回で終える (違えば今の反復に戻る)。`inverse_design` の呼び出しが 1/3〜1/4、メモリも同じ比で減る見込み。キャッシュは評価のプロセスの中だけ (ファイルに残さない)。
 - 数値は丸めの範囲で変わりうる (超越関数の実装・演算の順序・L_c の初期値) ので、§6 V5・V6 の受入で縛る。
+- **実装の細部 (2026-10-15、forge-7d、引き継ぎの「判断が要る点」)**: (1) numba の版が扱うガスは float の γ・`GasCPG`・CPG の
+  `Isentrope` (CPG の Newton) と `GasSemiPerfect` (表の線形補間) だけで、それ以外 (TP の `Isentrope` の Hermite の Newton など) は
+  ValueError (`FORGE_MOC_KERNEL=numpy` を案内)。生産の逆 MOC に渡るのは float の γ と `GasSemiPerfect` だけ (`runner_axismach.py:425`)
+  なので、黙って numpy の版に落とすより止める方を選んだ。(2) `prepare_info.json` の `environment` に `moc_kernel`
+  (backend・numba・llvmlite の版) を足す。(3) 単位過程の関数 (`moc_kernel` の `interior_vec`・`_sin_over_r_vec`・`pm_mach_vec` など、
+  `moc_inverse.interior_vec`) が差し替えられていたら numba の版は RuntimeError (差し替えは numba の版に効かず結果が黙って変わる。
+  例: `case/45.isobutane_m6_d155/throat_moc_restart_test.py` の `kernel(...)`; その台本は `FORGE_MOC_KERNEL=numpy` で回す)。
+  (4) `FORGE_MOC_KERNEL` の空文字列も ValueError (未設定だけが既定)。
+
+### 4.5 JIT の簡素化 (2026-10-15 ユーザ決定「処理が複雑化する懸念があり、下記の修正盛り込みたい JIT対応のあと。bit一致に特に意味がないとも思っています」)
+
+最初の組み込み (§5.1 #4、commit は §9) は numpy の版と**ビット同一**にするため、(a) `np.interp` の C 実装 (二分探索の推測を含む) の写しと
+(b) ν→M の Newton を numpy の版と同じ集合について**配列全体**で止める約束、(c) 集計 (`MocFillDiag.add`) の numba での書き直し (約 150 行)
+を抱えていた。カーネルは約 650 行で、単位過程や集計を変えるたびに 2 か所を直す必要がある。ユーザ決定でこれを外す:
+
+1. **ビット同一をやめ、許容差で照合する** (§6 V5 の許容差のまま)。ν→M の CPG の Newton は**対ごとに**止め、**前の反復の M から始める**
+   (同じ |ΔM| < 1e−13・上限 60 回)。表の補間は素直な二分探索と線形の式 (範囲外は端の値、NaN は NaN)。
+2. **集計を Python に戻す**: numba は段のループと数値だけを計算し、段ごとの対の状態 (分類の前の生の状態)・反復回数・最終残差・
+   源項の分岐・新点の x・r・軸より下の印を返す。Python 側は既存の `MocFillDiag.add` を段ごとにそのまま呼ぶ (集計の実装は 1 つ)。
+3. 速度の見込み (手元の実測、放射源流 n_ax 2400・analytic + converge): numpy の版 7.9 s、ビット同一の numba の版 4.0 s
+   (Newton を配列全体で毎回同じ初期値から回すのが支配的)、`MocFillDiag.add` の段ごとの呼び出しは計 0.49 s。
+   前の M から始める Newton で numba の部分が縮む見込み (受入は §6 V5 の「3 倍」のまま、AWS A で測る)。
+4. 既存の試験 `run_moc_axis_limit_tests.py` の 8 (実装前のコードとのビット同一) は **numpy の版**の後方互換の試験として残し、新しい側を
+   `FORGE_MOC_KERNEL=numpy` で回す。numba の版と numpy の版の照合は `run_moc_jit_tests.py` (V5) が許容差で受け持つ。
+5. 生産の既定 (analytic + converge) の壁は numpy の版と丸めの範囲で違う (V5 の許容差 ≤ 1e−10 r_t で縛る)。legacy + fixed2 の
+   「従来とビット同一」(plan discretization-moc-axis-limit-and-corrector) は numpy の版についての保証になる。
 
 ### 4.9 書き直す前の案の記録 (2026-10-15)
 
@@ -132,7 +158,8 @@
 | 3a | `methods/design/overview.md` の選び方の節 | 規則 `coarse_min_theta_v2` (§4.1) の説明に置き換え、旧の規則は「旧版」として短く残す。実装の前に。**実装 (2026-10-15、implementer)**: 「$M_K$ の選び方」を §4.1 の 1〜6・r_t の固定点と終了の条件・自動調整での破棄・並列・捕捉 2・計時・受け入れた限界の説明に置き換え、旧版 `min_theta_max_v1` は 1 段落に。`methods/index.md` はファイルの増減が無いので変更なし (design/overview.md の行のまま) | O |
 | 3 | 実装 | `mknot_select.py` に規則 `coarse_min_theta_v2` (§4.1)、`evaluate_mknot` の捕捉を 2 つに・並列 (§4.2)、`wt_card.py` の M_knot の流れ (最初と最終の r_t、実効の入力での終了、自動調整での破棄、計時の改修)、記録、V1・V2 の試験。**実装 (2026-10-15、implementer)**: `mknot_select.py` に `select_coarse_min_theta` (部品 `v2_grid`・`v2_coarse_analysis`・`v2_valleys`・`v2_confirm`・`v2_pick`)、`evaluate_mknot` の捕捉を最後の 2 つ (`_CAPTURE_KEEP`)・`L_total_tol` の上書き・行に長さ合わせの記録 (L_c・符号つきの残差・停止の理由・実効の入力)。`wt_card.py` の M_knot の流れ (最初の r_t で選ぶ → 固定点 → 出力と同じ実効の入力で選び直し、一致で終了・違えば固定点のやり直し最大 2 回、自動調整で評価を捨てる、`_clock` で選択と再固定点を計時し `card_elapsed_s` と並べる)、並列 `mknot_workers` (1 評価のピーク 600: 0.15 GB・2400: 1.04 GB、case/70 (a) を手元で測定、case/71 は未測定 → #3b で測り直す)、記録 `_mknot_record_v2` (照合 `mknot_card_log_check` は規則の名前で読み分け、旧の記録も照合できる)。試験 `design/tests/run_mknot_v2_tests.py` (V1 (i)〜(vi)、`--real` で (vii)) 34 + 8 ok・`run_mknot_v2_card_tests.py` (V2) 42 ok。(vii) は基準 4e0b9f9e の evaluate_mknot とも基準の欄が全部一致。既存の `run_mknot_select_tests.py` 97 ok・`run_wt_card_tests.py`・`run_wt_card_profile_tests.py`・`run_mesh_size_guard_tests.py`・`run_tests.py` 通過 (旧の規則の合成の流れの試験は `run_wt_card_tests.py` から外した)。`run_deltastar_root_zone_tests.py --card` はこの作業ツリーに case/70 の run が無く該当部分を飛ばした | O |
 | 3b | V3・V4 (AWS A) | 新旧の A/B と計時。**結果 (2026-10-15、§6.2)**: (a) 全部 ✓・191 s (BLAS 1 スレッド)、(b) ①②④ ✓・③ は格子の節点数の上限のユーザ判断待ち | O |
-| 4 | 逆 MOC の網の充填の JIT 化 (§4.4) | ユーザ依頼 2026-10-15。plan 段レビュー (§4.4・§6 V5・V6) の後に実装。途中 (2026-10-15、WIP commit 9865cdc1) | O |
+| 4 | 逆 MOC の網の充填の JIT 化 (§4.4) | ユーザ依頼 2026-10-15。plan 段レビュー (§4.4・§6 V5・V6) の後に実装。途中 (2026-10-15、WIP commit 9865cdc1)。**組み込み (2026-10-15、forge-7d)**: `moc_inverse.fill_levels` の既定を numba の版に (`moc_kernel_backend`・`_fill_levels_nb`・`_diag_from_nb`・`_nb_gas`・差し替えの検出)、記録 `moc_kernel_record`、試験 `design/tests/run_moc_jit_tests.py` (合成 ALL OK: 4 つの組・semi-perfect・異常系で網・集計・段ごとの状態がビット同一)、文書 (`procedures/nozzle-design-workflow.md` の計算環境、`methods/design/overview.md`)。残り: V5 の実データ (`--real`) と AWS A の所要、V4 の回し直し | O |
+| 4b | JIT の簡素化 (§4.5、ユーザ決定 2026-10-15) | ビット同一の写しをやめ (Newton は対ごと・前の M から、補間は素直に)、集計を Python の `MocFillDiag.add` に戻す。試験 `run_moc_jit_tests.py` を許容差の照合に、`run_moc_axis_limit_tests.py` 8 の新しい側を numpy の版に。合格: §6 V5 (合成と `--real`) と既存の design の試験 | O |
 | 6 | ~~L_c の使い回し (§4.4)~~ **後回し** (plan 段 jit の M1: 反例で M_K によらないと言えない) | `from_length` の L_c が M_K に依らないこと (§3) を使い、(問題、N) ごとに L_c を 1 回解いて使い回せば `inverse_design` の呼び出しが 1/3〜1/4 になり、メモリも減る見込み。数値は 1e−11 r_t の桁で変わりうるので、#4 と同じく別の受入を登録してから | F |
 | 5 | skill の手順 | `nozzle-design`・`design-intake` にパラスタの間は M_knot を固定する手順と所要の目安 | O |
 
@@ -194,6 +221,9 @@
 - [ ] `status: done`、§9 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` を同期
 
 ## 9. 変更ログ
+
+- `2026-10-15` — **ユーザ決定**: JIT を簡素化する (§4.5、#4b): ビット同一をやめて許容差で照合、Newton は対ごと・前の M から、集計は Python の `MocFillDiag.add`。
+- `2026-10-15` — (forge-7d、引き継ぎ) JIT (#4) を組み込んだ: 既定 numba・`FORGE_MOC_KERNEL=numpy`、扱わないガス・単位過程の差し替えは例外、`environment` に backend の記録。合成の V5 (4 つの組・semi-perfect・異常系) はビット同一。
 
 - `2026-10-15` — plan 段 jit (GO-with-changes C0/M2/m2) を全件採用: L_c の使い回しは後回し、V5 に両方の backend の異常系の受入。
 - `2026-10-15` — ユーザ依頼「mocの改修も、jit化などおねがいしたい」: §4.4 (網の充填の JIT・L_c の使い回し) と §6 V5・V6 を起案。

@@ -51,6 +51,18 @@ GEOM_KINDS = ("parallel", "below_axis")
 FAIL_KINDS = ("nonfinite", "maxiter")
 
 
+def no_trace():
+    """`fill_levels_nb` の末尾の引数 (trace を使わないとき): trace=False と大きさ 1 の配列。"""
+    return (False, np.zeros((1, 1), np.int8), np.zeros((1, 1), np.int64), np.zeros((1, 1)), np.zeros((1, 1)),
+            np.zeros((1, 8, 1), np.int8))
+
+
+def trace_arrays(n: int):
+    """`fill_levels_nb` の末尾の引数 (試験用の trace、n = 初期前線の点の数)。書かれない欄は状態・回数 −1、残差 NaN、分岐 0。"""
+    return (True, np.full((n, n), -1, np.int8), np.full((n, n), -1, np.int64), np.full((n, n), np.nan),
+            np.full((n, n), np.nan), np.zeros((n, 8, n), np.int8))
+
+
 @njit(cache=True)
 def _nmax(a, b):
     """`np.maximum` (どちらかが NaN なら NaN)。"""
