@@ -354,6 +354,27 @@ gl = [ln for ln in open(os.path.join(up, 'RUN_PROVENANCE.txt'), encoding='utf-8'
 check(len(gl) == 1 and '初期場 mesh.h5: 座標の精度の引き上げ' in gl[0], 'RUN_PROVENANCE.txt の関門の行に初期場の来歴', str(gl))
 check(field(open(os.path.join(good, 'LAUNCH_GATE.txt'), encoding='utf-8').read(), 'initial_field') is None,
       '記録の無い run は initial_field の行を書かない')
+# 負例 (plan tooling-convergence-and-wall-resolution-gates §5.1 #12b (6)・#14): 初期場の来歴の記録が読めない (JSON でない) run。
+# 旧: note_initial_field が AREAS に無い区分 '初期場' を使い、Findings.add の assert が落ちて関門の内部の例外 (FAIL) で起動しなかった。
+# 判定は変えない (読めない旨を既存の区分 '来歴' の NOTE に残し、initial_field の行は書かない)
+bad_up = make_run('coord_upcast_unreadable')
+with h5py.File(os.path.join(bad_up, 'mesh.h5'), 'r+') as f:
+    f.attrs[MP.COORD_UPCAST_ATTR] = '{not json'
+_def = LG.DEFAULT_FORGE
+LG.DEFAULT_FORGE = FAKE_FORGE
+try:
+    rc_, res_, info_ = gate_inproc(bad_up, forge_bin=FAKE_FORGE, environ={}, dry_run=True)
+finally:
+    LG.DEFAULT_FORGE = _def
+notes_ = [(a, k) for lv, a, k, m in res_.items if lv == 'NOTE' and '初期場の来歴の記録を読めない' in m]
+check(rc_ == 0 and res_.verdict() == 'PASS' and notes_ == [('来歴', 'mesh.h5')] and '来歴' in LG.AREAS
+      and not any(a == '関門' for _, a, _, _ in res_.items) and not info_.get('initial_field'),
+      '初期場の来歴の記録が読めない run は区分 来歴 の NOTE だけ (関門の内部の例外にしない; 判定は PASS のまま)', str(res_.items))
+rc, out, started, gate = run_case(bad_up)
+launched(rc, out, started, gate, '初期場の来歴の記録が読めない run')
+check(('来歴', 'mesh.h5') in items(gate, 'NOTE') and keys(gate, 'FAIL') == set() and items(gate, 'WARN') == [('バイナリ', FAKE_FORGE)]
+      and field(gate, 'initial_field') is None,
+      'LAUNCH_GATE.txt に区分 来歴 の NOTE、FAIL 無し・WARN はバイナリだけ、initial_field の行は書かない', gate[-800:])
 
 # ------------------------------------------------------------------------------------------------ 設定の負例 (宣言あり)
 

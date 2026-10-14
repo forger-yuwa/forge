@@ -375,7 +375,9 @@ def note_initial_field(run_dir, doc, out, info):
     try:
         rec = mpv.read_coord_upcast(path)
     except (OSError, ValueError) as e:
-        out.add('NOTE', '初期場', os.path.basename(path), f'初期場の来歴の記録を読めない: {e}')
+        # 区分は既存の '来歴' (旧: AREAS に無い '初期場' で Findings.add の assert が落ち、関門の内部の例外 = FAIL で起動しなかった;
+        # plan tooling-convergence-and-wall-resolution-gates §5.1 #12b (6)・#14)
+        out.add('NOTE', '来歴', os.path.basename(path), f'初期場の来歴の記録を読めない: {e}')
         return
     if rec is not None:
         info['initial_field'] = f'{os.path.basename(path)}: {mpv.coord_upcast_text(rec)}'
