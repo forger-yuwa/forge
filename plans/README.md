@@ -25,6 +25,7 @@
 
 | Plan | area | 概要 |
 | --- | --- | --- |
+| [tooling-nozzle-card-local-mesh.md](active/tooling-nozzle-card-local-mesh.md) | `tooling / design` | **要求カードの格子を場所ごとの第一層と流れ方向の密度で作る** (2026-10-15 起票, draft; ユーザ「古いやり方でメッシュ作ってない？」): 雛形の 2 値の第一層を、見積もりの y₁,req(x) (M6 の NS の表で補正) の表・AR ≤ 4850 の流れ方向の密度の表・`wall_normal_layer` に。M5.5 は 99 万 → 約 31〜45 万点 |
 | [tooling-nozzle-mknot-fast.md](active/tooling-nozzle-mknot-fast.md) | `tooling / design` | **M_knot の自動選択を単純にして速くする** (2026-10-15 起票, in_progress (V3 (b) の寸法ゲート待ち)、mknot-auto §5.1 #6 の引き継ぎ; ユーザ「劇的に早くしてほしい」「フローがややこしくなって結構しんどい」→ 決定「a」): 規則 `coarse_min_theta_v2` = 粗い網 (600) で 0.05 刻みに 1 回掃き、両隣も成立する点の θ_max の谷を生産の網 (2400) で比べて選び、両隣を 2400 で確かめる。2N のゲート・窓の拡張・同点の規則・二分法は外す (4800 でだけ現れる不成立の検出は失う、ユーザ承知)。目標 600 s 以下 |
 | [tooling-stage-manifest-launch-binding.md](active/tooling-stage-manifest-launch-binding.md) | `tooling` | **段の区間判定を起動記録に結び付ける** (2026-09-27 起票、gradient-scalar-lsq #2g): 同じ YAML を旧→新バイナリで起動すると最後の起動の実効値で全段が上書きされ、別作用素の段が 1 区間に連結される欠陥 (codex M7)。起動記録にバイナリ id、段と起動を設定ハッシュ + 起動順で単調対応、実効 `scalarGradient`・`slauWallNormalChi`・バイナリを hard キーに。draft・**後回し (2026-09-27 ユーザ決定)**: 起動 ID と履歴の直接対応で §4/§6 は確定済み、codex plan 段 GO-with-changes (Major 4) の反映は再開時 |
 | [boundary-node-rotational-periodic.md](active/boundary-node-rotational-periodic.md) | `boundary` | **node 周期 (seam 合算経路) の回転周期対応** (2026-09-26 ユーザ指示)。member ごとの root 相対角でベクトル量 (運動量・勾配・速度勾配テンソル・陰解法対角) にだけ回転をはさむ、スカラーは恒等。90° 環状セクタ vs 全周で同値性、SLAU + slauWallNormalChi を検証。draft・codex plan 段が先 |
