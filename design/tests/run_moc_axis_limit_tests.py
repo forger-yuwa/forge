@@ -17,6 +17,9 @@ plan: plans/accepted/discretization-moc-axis-limit-and-corrector.md §5.1 #3 (§
 8. 既定のビット同一: 実装前のコミット (BASE) の package を `git archive` で取り出し、
    (a) 放射源流の網 (fill_levels) と (b) case/45 単調壁の問題の MOC 点群・当てはめ後の係数とノットが完全一致。
    (b) は凍結源 run_0062 が要る ($CASE_RUNS、既定 /home/sano/work/forge/case/45.isobutane_m6_d155)。
+   (b) の新しい側は出口の切り方を実装前の規則 (`wall[:, 0] <= x_F`) に戻して比べる (2026-10-13 plan
+   tooling-nozzle-deltastar-band-root-zone §5.1 #4c で切り方を意図して変えた — この問題では実装前の切り方が x_F の壁点を
+   落としていた)。今の切り方は別に、実装前の表 + x_F の 1 点 (先頭はビット同一) であることを見る。
 
 usage: python3 design/tests/run_moc_axis_limit_tests.py
   凍結源が無ければ 8 (b) と case/45 依存の項目を飛ばして exit 2 (合格扱いにしない)。
@@ -387,7 +390,20 @@ if sys.argv[4] == "1":
     if len(sys.argv) > 7 and sys.argv[7] == "explicit_legacy":
         # 2026-10-07 から既定は analytic + converge。旧方式はキーの明示で再現する (変更前のコードはキーを知らないので新しい側だけ)
         p.geometry["moc_axis_limit"], p.geometry["moc_corrector"] = "legacy", "fixed2"
-    d = design_chain(p)
+        # 出口の切り方は 2026-10-13 (plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c) に意図して変えた。今の切り方の表を
+        # 別に取り、ビット同一の比べ方は実装前の規則 (wall[:, 0] <= x_F) に戻して行う
+        d_cut = design_chain(p)
+        out.update(wall_inv_cut=d_cut["wall_inv"], x_F=float(d_cut["exit"]["x_F"]),
+                   x_F_appended=bool(d_cut["exit"]["x_F_appended"]))
+        new_cut = MI._cut_wall_at_exit
+        MI._cut_wall_at_exit = lambda w, xF: (w[w[:, 0] <= xF], {})
+        try:
+            d = design_chain(p)
+        finally:
+            MI._cut_wall_at_exit = new_cut
+    else:
+        d = design_chain(p)
+        out.update(x_F=float(d["exit"]["x_F"]))
     out.update(wall_inv=d["wall_inv"], c=d["wall"]._spl.c, t=d["wall"]._spl.t)
 np.savez(sys.argv[3], **out)
 '''
@@ -421,6 +437,15 @@ with tempfile.TemporaryDirectory() as td:
                 check(f"ビット同一 (b): case/45 単調壁の MOC 点群 ({a['wall_inv'].shape}) が実装前と完全一致 (新しい側は legacy・fixed2 を明示)", same("wall_inv"))
                 check(f"ビット同一 (b): 当てはめ後の係数 ({a['c'].shape}) とノット ({a['t'].shape}) が完全一致",
                       same("c") and same("t"))
+                # 今の出口の切り方 (§5.1 #4c): 実装前の切り方が x_F の壁点を落としていた (x_F − x_e ≥ 1e-9 r_t) ので、
+                # 今の表は実装前の表 + 末尾の x_F の 1 点 (先頭はビット同一)
+                wa, wc = a["wall_inv"], b["wall_inv_cut"]
+                gap_base = float(a["x_F"]) - float(wa[-1, 0])
+                check(f"出口の切り方 (b): 実装前は x_F の壁点を落としていた (x_F − x_e {gap_base:.4e} r_t ≥ 1e-9)、"
+                      f"今は x_F の 1 点を足す ({wa.shape} → {wc.shape}、先頭はビット同一、終点 = x_F)",
+                      float(a["x_F"]) == float(b["x_F"]) and gap_base >= 1e-9 and bool(b["x_F_appended"])
+                      and wc.shape == (wa.shape[0] + 1, wa.shape[1]) and np.array_equal(wc[:-1], wa)
+                      and float(wc[-1, 0]) == float(b["x_F"]))
             else:
                 SKIPPED.append(f"8 (b) case/45 のビット同一 (凍結源 {RUNS} が無い)")
 

@@ -1,0 +1,304 @@
+{
+ "arms": {
+  "run_0752_t2_d1": {
+   "prec": "fp64",
+   "status": "REACHED",
+   "reach_step_watch": 142500,
+   "n_rows": 57,
+   "reach_recomputed": [
+    "REACH",
+    142500
+   ],
+   "reached": true,
+   "at_reach": {
+    "theta_r_40": 0.07715853484350887,
+    "theta_r_70": 0.1140364018831086,
+    "theta_r_94": 0.12683174092127203,
+    "Q_w": 9214801.271433536,
+    "deficit": 0.004051232551964337
+   },
+   "window_points": 9,
+   "drift_at_reach": [
+    0.044612426607448796,
+    0.04064374521373093,
+    0.03813083447272714
+   ],
+   "rms_median": {
+    "rms_ro": 2.984733407028311e-07,
+    "rms_roUx": 7.430720859825345e-05,
+    "rms_roUy": 8.174379598860308e-05,
+    "rms_roUz": 0.0,
+    "rms_roe": 0.3508363228710785,
+    "rms_roK": 0.0001844288979919873,
+    "rms_roOmega": 1475.239370028163,
+    "rms_roY0": 2.72487718591631e-07,
+    "rms_roY1": 2.557366686408623e-08
+   },
+   "sum_abs_res_ro_2pi": 0.2347958019320638,
+   "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.07714  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1268  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.216e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0002"
+   }
+  },
+  "run_0754_t2_d2": {
+   "prec": "fp64",
+   "status": "REACHED",
+   "reach_step_watch": 142500,
+   "n_rows": 57,
+   "reach_recomputed": [
+    "REACH",
+    142500
+   ],
+   "reached": true,
+   "at_reach": {
+    "theta_r_40": 0.07715854179385317,
+    "theta_r_70": 0.11403640284007821,
+    "theta_r_94": 0.1268317503103269,
+    "Q_w": 9214806.269472446,
+    "deficit": 0.004193467178871161
+   },
+   "window_points": 9,
+   "drift_at_reach": [
+    0.04458580298365433,
+    0.0406056378718489,
+    0.03814512661954872
+   ],
+   "rms_median": {
+    "rms_ro": 2.986990153013757e-07,
+    "rms_roUx": 7.497584990551574e-05,
+    "rms_roUy": 8.178509571587514e-05,
+    "rms_roUz": 0.0,
+    "rms_roe": 0.3511077018163235,
+    "rms_roK": 0.0001844197532173265,
+    "rms_roOmega": 1475.273378495137,
+    "rms_roY0": 2.726972210463543e-07,
+    "rms_roY1": 2.55933292054271e-08
+   },
+   "sum_abs_res_ro_2pi": 0.23730677591563382,
+   "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.07714  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1268  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.216e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     122500,
+     142500
+    ],
+    "drift_osc": "0.0002"
+   }
+  },
+  "run_0753_t2_f1": {
+   "prec": "float",
+   "status": "REACHED",
+   "reach_step_watch": 140000,
+   "n_rows": 56,
+   "reach_recomputed": [
+    "REACH",
+    140000
+   ],
+   "reached": true,
+   "at_reach": {
+    "theta_r_40": 0.07711861754946625,
+    "theta_r_70": 0.11397883538169751,
+    "theta_r_94": 0.12676734486867502,
+    "Q_w": 9214839.433076827,
+    "deficit": 0.00675632618367672
+   },
+   "window_points": 9,
+   "drift_at_reach": [
+    0.04426230848557644,
+    0.04045048139125207,
+    0.036862155757733106
+   ],
+   "rms_median": {
+    "rms_ro": 3.689061429668072e-07,
+    "rms_roUx": 0.0002195555280195549,
+    "rms_roUy": 0.0001353089028270915,
+    "rms_roUz": 0.0,
+    "rms_roe": 0.4719615280628204,
+    "rms_roK": 0.0001888163242256269,
+    "rms_roOmega": 1457.686767578125,
+    "rms_roY0": 3.371592640633025e-07,
+    "rms_roY1": 3.182771024512476e-08
+   },
+   "sum_abs_res_ro_2pi": 0.3829008717410043,
+   "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.0771  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1267  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.217e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0002"
+   }
+  },
+  "run_0755_t2_f2": {
+   "prec": "float",
+   "status": "REACHED",
+   "reach_step_watch": 140000,
+   "n_rows": 56,
+   "reach_recomputed": [
+    "REACH",
+    140000
+   ],
+   "reached": true,
+   "at_reach": {
+    "theta_r_40": 0.0771201819678975,
+    "theta_r_70": 0.11398033701194343,
+    "theta_r_94": 0.12677015710745998,
+    "Q_w": 9214300.981279891,
+    "deficit": 0.006019728723913431
+   },
+   "window_points": 9,
+   "drift_at_reach": [
+    0.04448794504789966,
+    0.0400968884926689,
+    0.03708119121086373
+   ],
+   "rms_median": {
+    "rms_ro": 3.659779110876116e-07,
+    "rms_roUx": 0.0002035898651229218,
+    "rms_roUy": 0.0001345779746770859,
+    "rms_roUz": 0.0,
+    "rms_roe": 0.467107743024826,
+    "rms_roK": 0.0001890307612484321,
+    "rms_roOmega": 1457.828735351562,
+    "rms_roY0": 3.344952119732625e-07,
+    "rms_roY1": 3.157830619215929e-08
+   },
+   "sum_abs_res_ro_2pi": 0.37501665910995724,
+   "check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+   "check_quasisteady theta_r_40,theta_r_70,theta_r_94": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "theta_r_40      : tail mean=0.0771  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+     "theta_r_94      : tail mean=0.1267  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0001"
+   },
+   "check_quasisteady Q_w": {
+    "overall": "OVERALL: NOT ALL STEADY (see above)",
+    "per_quantity": [
+     "Q_w             : tail mean=9.216e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+    ],
+    "window_steps": [
+     120000,
+     140000
+    ],
+    "drift_osc": "0.0002"
+   }
+  },
+  "fp64 の 2 本の差 [%]": {
+   "theta_r_40": 9.007874908706505e-06,
+   "theta_r_70": 8.391790681397222e-07,
+   "theta_r_94": 7.402764322807135e-06,
+   "Q_w": 5.4239247956693074e-05
+  },
+  "float の 2 本の差 [%]": {
+   "theta_r_40": 0.002028587234775165,
+   "theta_r_70": 0.0013174641071714227,
+   "theta_r_94": 0.0022184252481333446,
+   "Q_w": -0.005843311767355263
+  }
+ },
+ "flags": [
+  "run_0753_t2_f1 対 run_0752_t2_d1: theta_r_40 -0.0517 %",
+  "run_0753_t2_f1 対 run_0752_t2_d1: theta_r_70 -0.0505 %",
+  "run_0753_t2_f1 対 run_0752_t2_d1: theta_r_94 -0.0508 %",
+  "run_0753_t2_f1 対 run_0752_t2_d1: rms_roUx 中央値 float 2.196e-04 > 2 × FP64 7.431e-05",
+  "run_0753_t2_f1 対 run_0754_t2_d2: theta_r_40 -0.0517 %",
+  "run_0753_t2_f1 対 run_0754_t2_d2: theta_r_70 -0.0505 %",
+  "run_0753_t2_f1 対 run_0754_t2_d2: theta_r_94 -0.0508 %",
+  "run_0753_t2_f1 対 run_0754_t2_d2: rms_roUx 中央値 float 2.196e-04 > 2 × FP64 7.498e-05",
+  "run_0755_t2_f2 対 run_0752_t2_d1: rms_roUx 中央値 float 2.036e-04 > 2 × FP64 7.431e-05",
+  "run_0755_t2_f2 対 run_0754_t2_d2: rms_roUx 中央値 float 2.036e-04 > 2 × FP64 7.498e-05"
+ ],
+ "undecidable": [],
+ "pairs": {
+  "run_0753_t2_f1 対 run_0752_t2_d1": {
+   "theta_r_40": -0.05173412652739366,
+   "theta_r_70": -0.05048081179384802,
+   "theta_r_94": -0.0507728208485105,
+   "Q_w": 0.0004141341974372876,
+   "sum_abs_res_ro_ratio": 1.6307824441077248
+  },
+  "run_0753_t2_f1 対 run_0754_t2_d2": {
+   "theta_r_40": -0.05174312974134597,
+   "theta_r_70": -0.05048165054928472,
+   "theta_r_94": -0.050780219853693305,
+   "Q_w": 0.00035989475427638634,
+   "sum_abs_res_ro_ratio": 1.6135269221184456
+  },
+  "run_0755_t2_f2 対 run_0752_t2_d1": {
+   "theta_r_40": -0.049706588764505254,
+   "theta_r_70": -0.049164012753252995,
+   "theta_r_94": -0.04855552195745405,
+   "Q_w": -0.005429201769070267,
+   "sum_abs_res_ro_ratio": 1.5972034253766818
+  },
+  "run_0755_t2_f2 対 run_0754_t2_d2": {
+   "theta_r_40": -0.04971559216109561,
+   "theta_r_70": -0.04916485151973999,
+   "theta_r_94": -0.048562921126778257,
+   "Q_w": -0.005483438042851403,
+   "sum_abs_res_ro_ratio": 1.5803032073693564
+  }
+ },
+ "verdict": "結果 B (フラグあり: run_0753_t2_f1 対 run_0752_t2_d1: theta_r_40 -0.0517 %; run_0753_t2_f1 対 run_0752_t2_d1: theta_r_70 -0.0505 %; run_0753_t2_f1 対 run_0752_t2_d1: theta_r_94 -0.0508 %; run_0753_t2_f1 対 run_0752_t2_d1: rms_roUx 中央値 float 2.196e-04 > 2 × FP64 7.431e-05; run_0753_t2_f1 対 run_0754_t2_d2: theta_r_40 -0.0517 %; run_0753_t2_f1 対 run_0754_t2_d2: theta_r_70 -0.0505 %)"
+}

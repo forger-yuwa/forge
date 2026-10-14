@@ -792,7 +792,7 @@ check("(M): CPG (TP でない) の moc_rao は止める", "moc_rao" in m and not
 
 # prepare の変換器の手前まで (変換器は偽物: 品質検査用の cell 変換は生成した格子の四角形の h5 を書き、本変換で止める)。
 # 品質の判定は本物の check_mesh_quality.py (既定 AR ≤ 1000・skew ≤ 0.9、AR 緩和なし)
-_orig_conv = runner._run_converter
+_orig_conv = runner.run_converter
 for tag, lab in (("l100", "L100_n321_mq2"), ("l70", "L70_n321_mq2")):
     PROBLEM_M = CASE68 / f"problem_bell_tp_m_euler_{tag}.yaml"
     pm = load_problem(PROBLEM_M)
@@ -801,18 +801,19 @@ for tag, lab in (("l100", "L100_n321_mq2"), ("l70", "L70_n321_mq2")):
     cm, qm, bm = generate_axisym_mesh(wm, mpm)
     seen = []
 
-    def _fake_conv(conv, msh, out, run_dir, _c=cm, _q=qm, _seen=seen):
+    def _fake_conv(args, cwd, env=None, _c=cm, _q=qm, _seen=seen):
+        out, run_dir = str(args[-1]), cwd
         _seen.append((out, (Path(run_dir) / "solverConfig.yaml").read_text()))
         if out == "nozzle_qc.h5":
             write_qc_h5(Path(run_dir) / out, _c, _q)
             return
         raise _StopAtConverter(out)
-    runner._run_converter = _fake_conv
+    runner.run_converter = _fake_conv
     rd = tmp / f"prep_m_{tag}"
     try:
         e = raises(lambda: runner.prepare(PROBLEM_M, rd), _StopAtConverter)
     finally:
-        runner._run_converter = _orig_conv
+        runner.run_converter = _orig_conv
     check(f"(M) prepare {tag}: 変換器の手前まで通る (品質検査用の cell 変換 → 本変換で停止)",
           e == "nozzle.h5" and [s[0] for s in seen] == ["nozzle_qc.h5", "nozzle.h5"], str(e))
     write_msh41_2d(tmp / f"ref_{tag}.msh", cm, qm, bm)

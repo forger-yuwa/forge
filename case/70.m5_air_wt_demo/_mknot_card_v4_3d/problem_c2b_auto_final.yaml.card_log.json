@@ -1,0 +1,3843 @@
+{
+ "generator": "forge_design.intake.wt_card",
+ "generated": "2026-10-14T07:55:34",
+ "card_path": "/home/ubuntu/forge-deliv/case/70.m5_air_wt_demo/_mknot_card_v4/card_c2b_auto_final.yaml",
+ "card_sha256": "b97be3e14aa32a9478b56947b2accb67d2a0bd27cd62018aa28de95020662629",
+ "out": "/home/ubuntu/forge-deliv/case/70.m5_air_wt_demo/_mknot_card_v4/problem_c2b_auto_final.yaml",
+ "out_sha256": "624142329ac6869e013a618ff5b37973d05e2a1cdd503d48281e12c629474206",
+ "card": {
+  "format": "forge.wt_card/v1",
+  "name": "m5_air_demo_c2b",
+  "gas": {
+   "preset": "air"
+  },
+  "conditions": {
+   "Pt": 3000000.0,
+   "Tt": 1250.0
+  },
+  "M_exit": 5.0,
+  "throat": {
+   "diameter_physical_m": 0.05
+  },
+  "inlet": {
+   "radius_m": 0.15,
+   "pipe_length_m": 0.2,
+   "contraction_length_m": 0.3
+  },
+  "divergent_length_m": 1.2,
+  "wall": {
+   "thermal": "isothermal",
+   "Tw": 350.0
+  },
+  "p_ambient": "design",
+  "tolerances": {
+   "length_m": 0.001,
+   "diameter_m": 2e-05
+  },
+  "recipe": "axismach_final_v1",
+  "overrides": {
+   "deltastar_initializer.model": "contur",
+   "deltastar_initializer.a_crocco": 1.0,
+   "deltastar_initializer.cf_scale": 0.8246498920214053,
+   "deltastar_initializer.n_scale": 1.0,
+   "mesh.wall_first_frac": 1.15e-05,
+   "mesh.wall_first_frac_throat": 2.75e-06
+  }
+ },
+ "mapping": [
+  {
+   "card_key": "conditions.Pt",
+   "card_value": 3000000.0,
+   "yaml_key": "spec.Pt",
+   "yaml_value": 3000000.0,
+   "rule": "そのまま [Pa]"
+  },
+  {
+   "card_key": "conditions.Tt",
+   "card_value": 1250.0,
+   "yaml_key": "spec.Tt",
+   "yaml_value": 1250.0,
+   "rule": "そのまま [K]"
+  },
+  {
+   "card_key": "M_exit",
+   "card_value": 5.0,
+   "yaml_key": "spec.M_design",
+   "yaml_value": 5.0,
+   "rule": "そのまま"
+  },
+  {
+   "card_key": "throat.diameter_physical_m",
+   "card_value": 0.05,
+   "yaml_key": "spec.r_throat",
+   "yaml_value": 0.024973968248658388,
+   "rule": "物理スロート径: CFD 前の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2)"
+  },
+  {
+   "card_key": "throat.curvature (雛形)",
+   "card_value": "(無し)",
+   "yaml_key": "geometry.R",
+   "yaml_value": 2.0,
+   "rule": "曲率半径 / r_t (設計壁のスロートの曲率; 物理壁は境界層の分だけわずかに違う)"
+  },
+  {
+   "card_key": "inlet.radius_m",
+   "card_value": 0.15,
+   "yaml_key": "geometry.r_inlet",
+   "yaml_value": 6.006254132562936,
+   "rule": "/ r_t"
+  },
+  {
+   "card_key": "inlet.pipe_length_m",
+   "card_value": 0.2,
+   "yaml_key": "geometry.L_pipe",
+   "yaml_value": 8.008338843417249,
+   "rule": "/ r_t"
+  },
+  {
+   "card_key": "inlet.contraction_length_m",
+   "card_value": 0.3,
+   "yaml_key": "geometry.L_U",
+   "yaml_value": 12.012508265125872,
+   "rule": "/ r_t"
+  },
+  {
+   "card_key": "divergent_length_m",
+   "card_value": 1.2,
+   "yaml_key": "dv.L_total",
+   "yaml_value": 48.05003306050349,
+   "rule": "/ r_t (Lc_mode: from_length)"
+  },
+  {
+   "card_key": "tolerances.length_m",
+   "card_value": 0.001,
+   "yaml_key": "geometry.L_total_tol",
+   "yaml_value": 0.02002084710854312,
+   "rule": "/ 2 / r_t"
+  },
+  {
+   "card_key": "wall",
+   "card_value": {
+    "thermal": "isothermal",
+    "Tw": 350.0
+   },
+   "yaml_key": "spec.wall_thermal",
+   "yaml_value": {
+    "mode": "isothermal",
+    "Tw": 350.0
+   },
+   "rule": "thermal → mode"
+  },
+  {
+   "card_key": "p_ambient",
+   "card_value": "design",
+   "yaml_key": "spec.p_ambient",
+   "yaml_value": 5138.646661132853,
+   "rule": "design: 設計出口静圧 (semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)、M 5.0、p/Pt 1.712882e-03)"
+  },
+  {
+   "card_key": "gas",
+   "card_value": {
+    "preset": "air"
+   },
+   "yaml_key": "gas.species",
+   "yaml_value": {
+    "N2": 0.7552,
+    "O2": 0.2314,
+    "AR": 0.0129,
+    "CO2": 0.0005
+   },
+   "rule": "質量分率 (model semiperfect、transport は雛形)"
+  },
+  {
+   "card_key": "recipe",
+   "card_value": "axismach_final_v1",
+   "yaml_key": "geometry・mesh・mesh_euler・evaluate",
+   "yaml_value": "(雛形の構成キー)",
+   "rule": "M_knot は自動 (雛形 axismach_final_v1 の M_knot_factor は使わない)"
+  },
+  {
+   "card_key": "M_knot (自動)",
+   "card_value": "auto",
+   "yaml_key": "geometry.M_knot",
+   "yaml_value": 2.069270614,
+   "rule": "自動 (規則 min_theta_max_v1): 最終の組 (r_t 0.024973968248658388 m) の解像度のゲートで選び直した N の値 chosen_N (θ_max 15.16429°、全部の境目から 0.0963 ≥ ΔM_safe 0.05、ゲート PASS (n_axis_inv 2400/4800: 2.069270614/2.079270614); 雛形の M_knot_factor 0.45 は使わない)"
+  },
+  {
+   "card_key": "overrides.deltastar_initializer.model",
+   "card_value": "contur",
+   "yaml_key": "deltastar_initializer.model",
+   "yaml_value": "contur",
+   "rule": "上書き (雛形/生成値: None)"
+  },
+  {
+   "card_key": "overrides.deltastar_initializer.a_crocco",
+   "card_value": 1.0,
+   "yaml_key": "deltastar_initializer.a_crocco",
+   "yaml_value": 1.0,
+   "rule": "上書き (雛形/生成値: None)"
+  },
+  {
+   "card_key": "overrides.deltastar_initializer.cf_scale",
+   "card_value": 0.8246498920214053,
+   "yaml_key": "deltastar_initializer.cf_scale",
+   "yaml_value": 0.8246498920214053,
+   "rule": "上書き (雛形/生成値: None)"
+  },
+  {
+   "card_key": "overrides.deltastar_initializer.n_scale",
+   "card_value": 1.0,
+   "yaml_key": "deltastar_initializer.n_scale",
+   "yaml_value": 1.0,
+   "rule": "上書き (雛形/生成値: None)"
+  },
+  {
+   "card_key": "overrides.mesh.wall_first_frac",
+   "card_value": 1.15e-05,
+   "yaml_key": "mesh.wall_first_frac",
+   "yaml_value": 1.15e-05,
+   "rule": "上書き (雛形/生成値: None)"
+  },
+  {
+   "card_key": "overrides.mesh.wall_first_frac_throat",
+   "card_value": 2.75e-06,
+   "yaml_key": "mesh.wall_first_frac_throat",
+   "yaml_value": 2.75e-06,
+   "rule": "上書き (雛形/生成値: None)"
+  }
+ ],
+ "warnings": [
+  "格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.51 (x = -19.97 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.69 @ x = -0.33 r_t)"
+ ],
+ "r_t": {
+  "method": "physical_throat_solved",
+  "text": "CFD 前の solve_rt_throat (δ: 積分法の初期壁、prepare_ns と同じ経路) で物理スロート半径 0.025 m に合わせた 固定点 (外側 2 回、最後の |Δr_t|/r_t 0.00e+00 ≤ 1e-06、内側の許容差 2.5e-08 m)。CFD 前の寸法は初期見積もり — NS 後に deltastar_loop --solve-rt-throat --prev で解き直し、その r_t を生成器の --r-throat に渡して長さを割り直す",
+  "r_t_m": 0.024973968248658388,
+  "history": [
+   {
+    "iter": 0,
+    "r_t_in_m": 0.025,
+    "r_t_out_m": 0.024973968248658388,
+    "rel_change": 0.001041270053664528,
+    "inner_residual_m": 6.6163934886454e-09,
+    "inner_n_iter": 2,
+    "physical_throat_r_m": 0.02500000661639349,
+    "physical_throat_x_m": -4.3070206737211076e-05,
+    "exit_radius_m": 0.13885076732101148,
+    "time_s": 20.291722059249878,
+    "M_K": 2.069270614,
+    "stage": "r_t の固定点"
+   },
+   {
+    "iter": 1,
+    "r_t_in_m": 0.024973968248658388,
+    "r_t_out_m": 0.024973968248658388,
+    "rel_change": 0.0,
+    "inner_residual_m": -1.7653700765118963e-08,
+    "inner_n_iter": 1,
+    "physical_throat_r_m": 0.024999982346299236,
+    "physical_throat_x_m": -4.230049567694125e-05,
+    "exit_radius_m": 0.13885557455233988,
+    "time_s": 23.431748867034912,
+    "M_K": 2.069270614,
+    "stage": "r_t の固定点"
+   }
+  ],
+  "inner_tol_m": 2.5e-08,
+  "rel_tol": 1e-06,
+  "max_outer": 10,
+  "sizing_result": {
+   "r_t_m": 0.024973968248658388,
+   "sizing": "throat",
+   "target_m": 0.025,
+   "residual_m": -1.7653700765118963e-08,
+   "n_iter": 1,
+   "tol_R_m": 2.5e-08,
+   "tol_R_m_source": "explicit",
+   "pw_upstream": "poly",
+   "physical_wall_repr": "SingleBSplinePhysicalWall",
+   "physical_throat": {
+    "x_rt": -0.00169378351312726,
+    "r_rt": 1.0010416485430682,
+    "kappa_rt": 0.500723478149332,
+    "x_m": -4.230049567694125e-05,
+    "r_m": 0.024999982346299236
+   },
+   "exit_radius_m": 0.13885557455233988,
+   "x_e_rt": 48.064769795960494,
+   "length_m": 1.200368034763392,
+   "delta_r_source": {
+    "kind": "integral_delta_r (prepare_ns と同じ経路)",
+    "settings": {
+     "model": "contur_momentum_integral",
+     "thermal_bc": {
+      "mode": "prescribed_temperature",
+      "Tw": 350.0
+     },
+     "cf_scale": 0.8246498920214053,
+     "n_scale": 1.0,
+     "a_crocco": 1.0,
+     "closure": "contur",
+     "theta0_m": 0.00048059595297529785,
+     "x_virtual_m": 0.2
+    },
+    "smooth": "quintic_pspline",
+    "integral_rtol": 1e-06,
+    "integral_rtol_injected": false
+   },
+   "r_t_problem_m": 0.024973968248658388,
+   "R_throat_m": 0.025,
+   "delta_r_route": "cfd_before: integral_delta_r (prepare_ns と同じ経路)",
+   "initializer": {
+    "model": "contur",
+    "a_crocco": 1.0,
+    "cf_scale": 0.8246498920214053,
+    "n_scale": 1.0
+   }
+  }
+ },
+ "auto_adjust": [],
+ "L_total_tol_relaxed": null,
+ "moc_field": {
+  "x_F": 48.064769795960494,
+  "x_e": 48.064769795960494,
+  "x_F_minus_x_e_rt": 0.0,
+  "x_wall_full_end": 55.92155549224153,
+  "spacing_end": 0.03386545558761611,
+  "margin_to_field_end_rt": 7.856785696281037,
+  "n_beyond_x_F": 233,
+  "x_axis_end": 81.7639129839398,
+  "pinned": false,
+  "x_F_minus_x_e_m": 0.0,
+  "x_end_margin": 2.3
+ },
+ "moc_evals": [
+  {
+   "stage": "r_t 反復 0 (solve_rt_throat)",
+   "r_t_m": 0.025,
+   "n_axis_inv": 2400,
+   "x_end_margin": 2.3,
+   "L_total_tol": 0.02,
+   "L_total_target_rt": 47.99999999999999,
+   "evals": [
+    {
+     "L_c": 21.585884026447495,
+     "x_F_rt": 47.93360221265919,
+     "x_e_rt": 47.93360221265919,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": -0.06639778734080437,
+     "x_wall_full_end_rt": 55.81340267047066,
+     "spacing_end_rt": 0.03381888608385708,
+     "n_beyond_x_F": 234,
+     "x_axis_end_rt": 81.65233244817146,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -3.694822225952521e-13,
+     "cut_dropped_node_at_x_F": true
+    },
+    {
+     "L_c": 21.6522818137883,
+     "x_F_rt": 48.018891654128026,
+     "x_e_rt": 48.018891654128026,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": 0.018891654128033508,
+     "x_wall_full_end_rt": 55.871302392492375,
+     "spacing_end_rt": 0.033846598009631634,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.71873023551227,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -1.3500311979441904e-13,
+     "cut_dropped_node_at_x_F": true
+    }
+   ],
+   "outcome": "ok"
+  },
+  {
+   "stage": "r_t 反復 1 (solve_rt_throat)",
+   "r_t_m": 0.024973968248658388,
+   "n_axis_inv": 2400,
+   "x_end_margin": 2.3,
+   "L_total_tol": 0.02002084710854312,
+   "L_total_target_rt": 48.05003306050349,
+   "evals": [
+    {
+     "L_c": 21.63591708695099,
+     "x_F_rt": 48.01454204843145,
+     "x_e_rt": 48.01454204843145,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": -0.0354910120720362,
+     "x_wall_full_end_rt": 55.865368223171046,
+     "spacing_end_rt": 0.0338397679952962,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.70236550867496,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -7.105427357601002e-15,
+     "cut_dropped_node_at_x_F": true
+    },
+    {
+     "L_c": 21.671408099023026,
+     "x_F_rt": 48.02397659731068,
+     "x_e_rt": 48.02397659731068,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": -0.026056463192809076,
+     "x_wall_full_end_rt": 55.878239297254716,
+     "spacing_end_rt": 0.03385458060368762,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.73785652074699,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -1.0658141036401503e-13,
+     "cut_dropped_node_at_x_F": true
+    },
+    {
+     "L_c": 21.697464562215835,
+     "x_F_rt": 48.064769795960494,
+     "x_e_rt": 48.064769795960494,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": 0.014736735457006489,
+     "x_wall_full_end_rt": 55.92155549224153,
+     "spacing_end_rt": 0.03386545558761611,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.7639129839398,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -1.1368683772161603e-13,
+     "cut_dropped_node_at_x_F": true
+    }
+   ],
+   "outcome": "ok"
+  },
+  {
+   "stage": "最終",
+   "r_t_m": 0.024973968248658388,
+   "n_axis_inv": 2400,
+   "x_end_margin": 2.3,
+   "L_total_tol": 0.02002084710854312,
+   "L_total_target_rt": 48.05003306050349,
+   "evals": [
+    {
+     "L_c": 21.63591708695099,
+     "x_F_rt": 48.01454204843145,
+     "x_e_rt": 48.01454204843145,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": -0.0354910120720362,
+     "x_wall_full_end_rt": 55.865368223171046,
+     "spacing_end_rt": 0.0338397679952962,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.70236550867496,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -7.105427357601002e-15,
+     "cut_dropped_node_at_x_F": true
+    },
+    {
+     "L_c": 21.671408099023026,
+     "x_F_rt": 48.02397659731068,
+     "x_e_rt": 48.02397659731068,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": -0.026056463192809076,
+     "x_wall_full_end_rt": 55.878239297254716,
+     "spacing_end_rt": 0.03385458060368762,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.73785652074699,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -1.0658141036401503e-13,
+     "cut_dropped_node_at_x_F": true
+    },
+    {
+     "L_c": 21.697464562215835,
+     "x_F_rt": 48.064769795960494,
+     "x_e_rt": 48.064769795960494,
+     "x_F_minus_x_e_rt": 0.0,
+     "x_F_minus_x_e_m": 0.0,
+     "x_F_minus_L_total_rt": 0.014736735457006489,
+     "x_wall_full_end_rt": 55.92155549224153,
+     "spacing_end_rt": 0.03386545558761611,
+     "n_beyond_x_F": 233,
+     "x_axis_end_rt": 81.7639129839398,
+     "pinned": false,
+     "x_F_minus_nearest_node_rt": -1.1368683772161603e-13,
+     "cut_dropped_node_at_x_F": true
+    }
+   ],
+   "outcome": "ok",
+   "L_c": 21.697464562215835,
+   "field": {
+    "x_E": 22.225170960251813,
+    "x_A": 0.5277063980359783,
+    "x_F": 48.064769795960494,
+    "x_e": 48.064769795960494,
+    "x_F_minus_x_e_rt": 0.0,
+    "x_wall_full_end": 55.92155549224153,
+    "spacing_end": 0.03386545558761611,
+    "margin_to_field_end_rt": 7.856785696281037,
+    "n_wall_full": 914,
+    "n_wall": 682,
+    "n_beyond_x_F": 233,
+    "x_axis_end": 81.7639129839398,
+    "n_frozen": 0,
+    "pinned": false,
+    "x_F_minus_nearest_node_rt": -1.1368683772161603e-13,
+    "cut_dropped_node_at_x_F": true
+   }
+  }
+ ],
+ "design_chain": {
+  "time_s": 21.290586709976196,
+  "L_c": 21.697464562215835,
+  "Lc_window": [
+   0.01,
+   400.0
+  ],
+  "Lc_solve": {
+   "L_total_target": 48.05003306050349,
+   "xF_residual": 0.014736735457006489,
+   "n_design_evals": 3,
+   "tol": 0.02002084710854312
+  },
+  "x_E": 22.225170960251813,
+  "M_knot": 2.069270614,
+  "qa": {
+   "x_F": 48.064769795960494,
+   "r_F": 5.273818314461654,
+   "r_F_pred_1d": 5.2840412277259965,
+   "r_F_err_rel": -0.0019346770442859595,
+   "xF_minus_xE": 25.83959883570868,
+   "xF_minus_xE_pred": 25.886409575516517,
+   "theta_max_deg": 15.164285640750986,
+   "theta_exit_deg": 4.4163393279486445e-21,
+   "M_wall_exit": 5.000000000000001,
+   "kappa0_fit": 0.43366459611442293,
+   "kappa0_R_ratio": 0.8673291922288459,
+   "kappa0_fit_resid": 0.000365507886406935,
+   "violations": []
+  }
+ },
+ "mesh_estimate": {
+  "note": "初期値 (合格の根拠ではない)。NS 後に check_wall_resolution.py の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥)",
+  "wall_first_frac": 1.15e-05,
+  "wall_first_frac_throat": 2.75e-06,
+  "ni": 1830,
+  "wall_first_up_x0": null,
+  "wall_first_up_x1": null,
+  "blend_choice": "C",
+  "blend_text": "上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)",
+  "blend_candidates": [
+   {
+    "label": "recipe",
+    "text": "雛形 (または問題) の値",
+    "wall_first_up_x0": -9.0,
+    "wall_first_up_x1": -4.0,
+    "ni_required_for_ar": 1829,
+    "ni": 1830,
+    "y1plus_est_max": 2.5145384420058834,
+    "x_y1plus_est_max_rt": -19.974899759411006
+   },
+   {
+    "label": "B",
+    "text": "縮流部の全体をスロートの値 (up_x0 = 入口端 x_in、up_x1 = 縮流部の入口 −L_U)",
+    "wall_first_up_x0": -20.020847108543123,
+    "wall_first_up_x1": -12.012508265125872,
+    "ni_required_for_ar": 1829,
+    "ni": 1830,
+    "y1plus_est_max": 2.5143502238806392,
+    "x_y1plus_est_max_rt": -19.974899759411006
+   },
+   {
+    "label": "C",
+    "text": "上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)",
+    "wall_first_up_x0": null,
+    "wall_first_up_x1": null,
+    "ni_required_for_ar": 1829,
+    "ni": 1830,
+    "y1plus_est_max": 0.6948520570402502,
+    "x_y1plus_est_max_rt": -0.32633229481071885
+   }
+  ],
+  "wall_first_frac_raw": 1.3645134307940279e-05,
+  "x_wall_first_frac_rt": 6.004879953203382,
+  "wall_first_frac_throat_raw": 3.166139857726235e-06,
+  "x_wall_first_frac_throat_rt": -0.3270824189154524,
+  "y1_m_throat": 8.10944830107085e-08,
+  "y1_m_downstream_min": 8.073068533360971e-07,
+  "ni_required_for_ar": 1829,
+  "ar_max_limit": 5000.0,
+  "ar_max_wall_fast": 4845.3220987039485,
+  "mesh_check": {
+   "ar_max": 4845.322098572744,
+   "x_at_max": 4.087426047589393,
+   "n_cells": 175584,
+   "nj": 97
+  },
+  "nodes": {
+   "n_nodes": 177510,
+   "ni": 1830,
+   "nj": 97,
+   "max_nodes": 300000,
+   "max_nodes_reason": null,
+   "max_nodes_source": "default"
+  },
+  "y1plus_est_max_with_blend": 0.6948520570402502,
+  "x_y1plus_est_max_rt": -0.32633229481071885,
+  "radial_growth_max": {
+   "downstream": 1.0989764330946235,
+   "throat": 1.1174688295956632
+  },
+  "inputs": {
+   "y1plus_target": 0.8,
+   "wall": "等温壁 Tw 350.0 K",
+   "mu": "Sutherland (空気: 1.716e-5 Pa s, 273.15 K, S 110.4 K)",
+   "Cf": "0.0592 Re_x*^-0.2 (x = 入口端からの壁の弧長)",
+   "T_ref": "Eckert T* = T_e(1 + 0.032 M² + 0.58 (T_w/T_e − 1))",
+   "flow_1d": "設計壁の面積比 r_w² の 1 次元等エントロピー (semiperfect)",
+   "y1plus_check": "mesh2d._x_stations の station ごと (入口の節点を除く)、配点は mesh2d と同じブレンド"
+  },
+  "warnings": [
+   "格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.51 (x = -19.97 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.69 @ x = -0.33 r_t)"
+  ]
+ },
+ "nodes": {
+  "mesh": {
+   "n_nodes": 177510,
+   "ni": 1830,
+   "nj": 97,
+   "max_nodes": 300000,
+   "max_nodes_reason": null,
+   "max_nodes_source": "default"
+  },
+  "mesh_euler": {
+   "n_nodes": 177510,
+   "ni": 1830,
+   "nj": 97,
+   "max_nodes": 300000,
+   "max_nodes_reason": null,
+   "max_nodes_source": "default"
+  }
+ },
+ "liquefaction": {
+  "T_exit_K": 221.80269419656008,
+  "p_exit_Pa": 5138.646661132853,
+  "M_exit": 5.0,
+  "method": "semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)",
+  "antoine_N2": {
+   "A": 3.7362,
+   "B": 264.651,
+   "C": -6.788,
+   "range_K": [
+    63.0,
+    126.0
+   ],
+   "form": "log10(P/bar) = A − B/(T + C)"
+  },
+  "x_N2": 0.7808559254579436,
+  "p_N2_Pa": 4012.542694180266,
+  "p_sat_N2_Pa": null,
+  "supersaturated": false,
+  "warning": null,
+  "verdict": "出口静温 221.80 K が Antoine の範囲 (63〜126 K) より高い (N₂ の臨界温度 126.2 K 付近より上) — 液化しない"
+ },
+ "dimensions": {
+  "rows": [
+   {
+    "name": "inlet_radius",
+    "card_m": 0.15,
+    "measured_m": 0.15,
+    "diff_m": 0.0,
+    "tol_m": 1e-05,
+    "pass": true,
+    "how": "設計壁の r(x_in) × r_t"
+   },
+   {
+    "name": "pipe_length",
+    "card_m": 0.2,
+    "measured_m": 0.20000000000000007,
+    "diff_m": 5.551115123125783e-17,
+    "tol_m": 0.001,
+    "pass": true,
+    "how": "設計壁の直管/縮流部の接合位置 − 入口端 (直管区間の |r − r_in| の最大 0.00e+00 r_t)"
+   },
+   {
+    "name": "contraction_length",
+    "card_m": 0.3,
+    "measured_m": 0.2999999999965127,
+    "diff_m": -3.487266031498848e-12,
+    "tol_m": 0.001,
+    "pass": true,
+    "how": "接合位置 → 設計スロート (r の最小 x = -1.396e-10 r_t)"
+   },
+   {
+    "name": "divergent_length",
+    "card_m": 1.2,
+    "measured_m": 1.200368034763392,
+    "diff_m": 0.00036803476339208885,
+    "tol_m": 0.001,
+    "pass": true,
+    "how": "設計壁の終点 x_e × r_t (設計スロートが原点)"
+   },
+   {
+    "name": "throat_diameter_physical",
+    "card_m": 0.05,
+    "measured_m": 0.04999996469259847,
+    "diff_m": -3.5307401530237925e-08,
+    "tol_m": 2e-05,
+    "pass": true,
+    "how": "solve_rt_throat の物理スロート半径 × 2 (CFD 前の δ)"
+   }
+  ],
+  "pass": true,
+  "r_t_m": 0.024973968248658388,
+  "x_e_rt": 48.064769795960494,
+  "x_F_moc_rt": 48.064769795960494,
+  "x_F_minus_x_e_m": 0.0,
+  "Lc_solve": {
+   "L_total_target": 48.05003306050349,
+   "xF_residual": 0.014736735457006489,
+   "n_design_evals": 3,
+   "tol": 0.02002084710854312
+  },
+  "x_throat_design_rt": -1.3963586875654835e-10,
+  "r_throat_design_rt": 0.9999999999999982,
+  "note": "設計壁から測った寸法 (§4.2a の前段)。最終の合格は成果物 (STEP・メッシュ) から測る出荷ゲートで判定する"
+ },
+ "time_s": 5404.345365762711,
+ "euler_companion": "/home/ubuntu/forge-deliv/case/70.m5_air_wt_demo/_mknot_card_v4/problem_c2b_auto_final_euler.yaml",
+ "M_knot_rule": {
+  "rule": "min_theta_max_v1",
+  "mode": "auto",
+  "source": "カードに geometry.M_knot を書いていない (既定は自動)",
+  "chosen": 2.069270614,
+  "chosen_from": "最終の組の解像度のゲートで選び直した N の値 chosen_N (plan §4.2・§4.3)",
+  "r_t_m": 0.024973968248658388,
+  "first_r_t_m": 0.025,
+  "n_axis_inv": 2400,
+  "theta_max_deg": 15.164285640750986,
+  "margin_deg": 4.279482236796098,
+  "min_sin_angle": 0.05126266196431718,
+  "mpp_sign_changes": 1,
+  "x_K": 2.3163978195758674,
+  "moc_gate_ok": true,
+  "theta_max_deg_final_chain": 15.164285640750986,
+  "distance_to_boundary": 0.09625000000000017,
+  "dM_safe": 0.05,
+  "boundaries": [
+   {
+    "kind": "lower",
+    "feasible_end": 1.972395614,
+    "lo": 1.971614364,
+    "hi": 1.972395614,
+    "source": "2N",
+    "nearest_other": {
+     "source": "N",
+     "feasible_end": 1.973020614,
+     "offset": 0.0006249999999998757
+    },
+    "reasons_infeasible": [
+     "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+    ]
+   },
+   {
+    "kind": "lower",
+    "feasible_end": 1.973020614,
+    "lo": 1.972395614,
+    "hi": 1.973020614,
+    "source": "N",
+    "nearest_other": {
+     "source": "2N",
+     "feasible_end": 1.972395614,
+     "offset": -0.0006249999999998757
+    },
+    "reasons_infeasible": [
+     "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+    ]
+   }
+  ],
+  "constraints_at_output": {
+   "N": {
+    "M_K": 2.069270614,
+    "ok": true,
+    "reasons": [],
+    "role": "window",
+    "theta_max_deg": 15.164285640750986,
+    "margin_deg": 4.279482236796098,
+    "min_sin_angle": 0.05126266196431718,
+    "mpp_sign_changes": 1,
+    "x_K": 2.3163978195758674,
+    "L_c": 21.697464562215835,
+    "moc_gate_ok": true,
+    "moc_gate_pass": true,
+    "n_axis": 2400
+   },
+   "2N": {
+    "M_K": 2.069270614,
+    "ok": true,
+    "reasons": [],
+    "role": "window",
+    "theta_max_deg": 15.17063661461698,
+    "margin_deg": 4.276962631714767,
+    "min_sin_angle": 0.04353543674325991,
+    "mpp_sign_changes": 1,
+    "x_K": 2.3161314706800775,
+    "L_c": 21.687743878000894,
+    "moc_gate_ok": true,
+    "moc_gate_pass": true,
+    "n_axis": 4800
+   }
+  },
+  "gate": {
+   "N": 2400,
+   "N2": 4800,
+   "chosen": 2.069270614,
+   "window": [
+    1.969270614,
+    2.169270614
+   ],
+   "half_width": 0.1,
+   "n_widen": 0,
+   "widen": [
+    {
+     "half_width": 0.1,
+     "window": [
+      1.969270614,
+      2.169270614
+     ],
+     "chosen_N": 2.069270614,
+     "chosen_2N": 2.079270614,
+     "edge_values": {},
+     "min_offset_N": -1,
+     "min_offset_2N": -1,
+     "settled": true,
+     "action": "選び直した値は窓の内部"
+    }
+   ],
+   "edge_values": {},
+   "settings": {
+    "fine": 0.01,
+    "half_widths": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "tie_deg": 0.001,
+    "dM_safe": 0.05,
+    "bisect_tol": 0.001,
+    "max_change": 0.01
+   },
+   "pass": true,
+   "checks": {
+    "settled": true,
+    "change": true,
+    "ok_N": true,
+    "ok_2N": true,
+    "distance": true,
+    "edge_N": true,
+    "edge_2N": true,
+    "chosen_inside_N": true,
+    "chosen_inside_2N": true
+   },
+   "reasons": [],
+   "warnings": [],
+   "chosen_N": 2.069270614,
+   "chosen_N_reason": "同点の規則 (最小 2.05927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.0224, 2.02302 を評価)",
+   "chosen_2N": 2.079270614,
+   "chosen_2N_reason": "同点の規則 (最小 2.05927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.0224, 2.02302 を評価)",
+   "moved_N": 0.0,
+   "distance_to_conservative_boundary": 0.09625000000000017,
+   "distance_2N": 0.10624999999999996,
+   "distance_input": 0.09625000000000017,
+   "min_offset_N": -1,
+   "min_offset_2N": -1,
+   "elapsed_s": 2661.8582005500793,
+   "boundaries_all": [
+    {
+     "kind": "lower",
+     "feasible_end": 1.972395614,
+     "lo": 1.971614364,
+     "hi": 1.972395614,
+     "source": "2N",
+     "nearest_other": {
+      "source": "N",
+      "feasible_end": 1.973020614,
+      "offset": 0.0006249999999998757
+     },
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ]
+    },
+    {
+     "kind": "lower",
+     "feasible_end": 1.973020614,
+     "lo": 1.972395614,
+     "hi": 1.973020614,
+     "source": "N",
+     "nearest_other": {
+      "source": "2N",
+      "feasible_end": 1.972395614,
+      "offset": -0.0006249999999998757
+     },
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ]
+    }
+   ],
+   "rows_selected": {
+    "2.069270614": {
+     "at_N": {
+      "M_K": 2.069270614,
+      "ok": true,
+      "reasons": [],
+      "role": "window",
+      "theta_max_deg": 15.164285640750986,
+      "margin_deg": 4.279482236796098,
+      "min_sin_angle": 0.05126266196431718,
+      "mpp_sign_changes": 1,
+      "x_K": 2.3163978195758674,
+      "L_c": 21.697464562215835,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 2400
+     },
+     "at_2N": {
+      "M_K": 2.069270614,
+      "ok": true,
+      "reasons": [],
+      "role": "window",
+      "theta_max_deg": 15.17063661461698,
+      "margin_deg": 4.276962631714767,
+      "min_sin_angle": 0.04353543674325991,
+      "mpp_sign_changes": 1,
+      "x_K": 2.3161314706800775,
+      "L_c": 21.687743878000894,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 4800
+     }
+    },
+    "2.079270614": {
+     "at_N": {
+      "M_K": 2.079270614,
+      "ok": true,
+      "reasons": [],
+      "role": "window",
+      "theta_max_deg": 15.165331707879949,
+      "margin_deg": 4.2845741904693195,
+      "min_sin_angle": 0.05114968173901992,
+      "mpp_sign_changes": 1,
+      "x_K": 2.3389863420377472,
+      "L_c": 21.697464562215835,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 2400
+     },
+     "at_2N": {
+      "M_K": 2.079270614,
+      "ok": true,
+      "reasons": [],
+      "role": "window",
+      "theta_max_deg": 15.171232312348396,
+      "margin_deg": 4.28214757385698,
+      "min_sin_angle": 0.043376250962030787,
+      "mpp_sign_changes": 1,
+      "x_K": 2.338716836061369,
+      "L_c": 21.687743878000894,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 4800
+     }
+    }
+   }
+  },
+  "gate_first": {
+   "N": 2400,
+   "N2": 4800,
+   "chosen": 2.069270614,
+   "window": [
+    1.969270614,
+    2.169270614
+   ],
+   "half_width": 0.1,
+   "n_widen": 0,
+   "widen": [
+    {
+     "half_width": 0.1,
+     "window": [
+      1.969270614,
+      2.169270614
+     ],
+     "chosen_N": 2.069270614,
+     "chosen_2N": 2.079270614,
+     "edge_values": {},
+     "min_offset_N": -1,
+     "min_offset_2N": -1,
+     "settled": true,
+     "action": "選び直した値は窓の内部"
+    }
+   ],
+   "edge_values": {},
+   "settings": {
+    "fine": 0.01,
+    "half_widths": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "tie_deg": 0.001,
+    "dM_safe": 0.05,
+    "bisect_tol": 0.001,
+    "max_change": 0.01
+   },
+   "pass": true,
+   "checks": {
+    "settled": true,
+    "change": true,
+    "ok_N": true,
+    "ok_2N": true,
+    "distance": true,
+    "edge_N": true,
+    "edge_2N": true,
+    "chosen_inside_N": true,
+    "chosen_inside_2N": true
+   },
+   "reasons": [],
+   "warnings": [],
+   "chosen_N": 2.069270614,
+   "chosen_N_reason": "同点の規則 (最小 2.05927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.02177, 2.0224 を評価)",
+   "chosen_2N": 2.079270614,
+   "chosen_2N_reason": "同点の規則 (最小 2.05927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 16 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.02177, 2.0224 を評価)",
+   "moved_N": 0.0,
+   "distance_to_conservative_boundary": 0.09687500000000004,
+   "distance_2N": 0.10687499999999983,
+   "distance_input": 0.09687500000000004,
+   "min_offset_N": -1,
+   "min_offset_2N": -1,
+   "elapsed_s": 1683.725625038147,
+   "boundaries_all": [
+    {
+     "kind": "lower",
+     "feasible_end": 1.971770614,
+     "lo": 1.971145614,
+     "hi": 1.971770614,
+     "source": "2N",
+     "nearest_other": {
+      "source": "N",
+      "feasible_end": 1.972395614,
+      "offset": 0.0006250000000000977
+     },
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ]
+    },
+    {
+     "kind": "lower",
+     "feasible_end": 1.972395614,
+     "lo": 1.971770614,
+     "hi": 1.972395614,
+     "source": "N",
+     "nearest_other": {
+      "source": "2N",
+      "feasible_end": 1.971770614,
+      "offset": -0.0006250000000000977
+     },
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ]
+    },
+    {
+     "kind": "upper",
+     "feasible_end": 4.355051864,
+     "lo": 4.355051864,
+     "hi": 4.355833114,
+     "source": "N",
+     "nearest_other": null,
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)"
+     ]
+    }
+   ],
+   "rows_selected": {
+    "2.069270614": {
+     "at_N": {
+      "M_K": 2.069270614,
+      "ok": true,
+      "reasons": [],
+      "role": "fine",
+      "theta_max_deg": 15.191683280928602,
+      "margin_deg": 4.268466247670403,
+      "min_sin_angle": 0.05115308756863626,
+      "mpp_sign_changes": 1,
+      "x_K": 2.3151583681009846,
+      "L_c": 21.6522818137883,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 2400
+     },
+     "at_2N": {
+      "M_K": 2.069270614,
+      "ok": true,
+      "reasons": [],
+      "role": "window",
+      "theta_max_deg": 15.202299353698065,
+      "margin_deg": 4.264215496651012,
+      "min_sin_angle": 0.043217942385767635,
+      "mpp_sign_changes": 1,
+      "x_K": 2.3146784120252137,
+      "L_c": 21.634821328067268,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 4800
+     }
+    },
+    "2.079270614": {
+     "at_N": {
+      "M_K": 2.079270614,
+      "ok": true,
+      "reasons": [],
+      "role": "fine",
+      "theta_max_deg": 15.192453950862134,
+      "margin_deg": 4.273656631137955,
+      "min_sin_angle": 0.05104267782557263,
+      "mpp_sign_changes": 1,
+      "x_K": 2.337732197409332,
+      "L_c": 21.6522818137883,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 2400
+     },
+     "at_2N": {
+      "M_K": 2.079270614,
+      "ok": true,
+      "reasons": [],
+      "role": "window",
+      "theta_max_deg": 15.20286842278262,
+      "margin_deg": 4.269498524133599,
+      "min_sin_angle": 0.043060603544455636,
+      "mpp_sign_changes": 1,
+      "x_K": 2.3372465504890556,
+      "L_c": 21.634821328067268,
+      "moc_gate_ok": true,
+      "moc_gate_pass": true,
+      "n_axis": 4800
+     }
+    }
+   }
+  },
+  "gate_first_reused": false,
+  "selection": {
+   "rule": "min_theta_max_v1",
+   "M_A": 1.229270614396492,
+   "M_d": 5.0,
+   "settings": {
+    "coarse": 0.1,
+    "fine": 0.01,
+    "tie_deg": 0.001,
+    "dM_safe": 0.05,
+    "bisect_tol": 0.001,
+    "sin_min": 0.02,
+    "margin_min_deg": 1.0,
+    "grid_origin": 1.329270614396492
+   },
+   "chosen": 2.069270614,
+   "distance_to_boundary": 0.09687500000000004,
+   "reason": "同点の規則 (最小 2.05927 との差 ≤ 0.001° の中で境目から最も遠い点) (境目から ΔM_safe 0.05 以上の候補 34 点の中; ΔM_safe 未満の 6 点を除外; 境目 + ΔM_safe の点 2.0224, 4.30505 を評価)",
+   "constrained": false,
+   "theta_min": {
+    "M_K": 2.059270614,
+    "theta_max_deg": 15.190879730451021,
+    "distance": 0.08687499999999981,
+    "excluded_by_distance": false
+   },
+   "theta_min_admissible": {
+    "M_K": 2.059270614,
+    "theta_max_deg": 15.190879730451021,
+    "distance": 0.08687499999999981
+   },
+   "tie_set": [
+    2.049270614,
+    2.059270614,
+    2.069270614
+   ],
+   "excluded_by_distance": [
+    1.979270614,
+    1.989270614,
+    1.999270614,
+    2.009270614,
+    2.019270614,
+    4.329270614
+   ],
+   "safe_points": [
+    {
+     "M_K": 2.022395614,
+     "ok": true,
+     "theta_max_deg": 15.194265512676097,
+     "distance": 0.050000000000000044,
+     "reasons": []
+    },
+    {
+     "M_K": 4.305051864,
+     "ok": true,
+     "theta_max_deg": 20.32725788381426,
+     "distance": 0.04999999999999982,
+     "reasons": []
+    }
+   ],
+   "local_minima": [
+    {
+     "M_K": 2.029270614,
+     "theta_max_deg": 15.193548785929023
+    }
+   ],
+   "windows": [
+    [
+     1.929270614396,
+     2.129270614396
+    ]
+   ],
+   "warnings": [],
+   "n_eval": 67,
+   "elapsed_s": 992.7902143001556,
+   "boundaries": [
+    {
+     "kind": "lower",
+     "feasible_end": 1.972395614,
+     "lo": 1.971770614,
+     "hi": 1.972395614,
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ]
+    },
+    {
+     "kind": "upper",
+     "feasible_end": 4.355051864,
+     "lo": 4.355051864,
+     "hi": 4.355833114,
+     "reasons_infeasible": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)"
+     ]
+    }
+   ]
+  },
+  "events": [
+   {
+    "stage": "最初の r_t",
+    "attempt": 0,
+    "r_t_m": 0.025,
+    "geometry": {
+     "n_axis_inv": 2400,
+     "x_end_margin": 2.3,
+     "L_total_tol": 0.02
+    },
+    "M_K_in": 2.069270614,
+    "M_K_used_in_fixed_point": null,
+    "chosen_N": 2.069270614,
+    "chosen_2N": 2.079270614,
+    "diff_vs_used": null,
+    "gate_pass": true,
+    "gate_n_widen": 0,
+    "gate_half_width": 0.1,
+    "distance": 0.09687500000000004,
+    "action": "select_mknot の選択 2.069270614 → ゲートで選び直した chosen_N 2.069270614 を r_t の固定点の M_K に固定",
+    "elapsed_s": 2676.6912803649902
+   },
+   {
+    "stage": "最終の組 (最終の組で詰め直し (N・2N とも ±(半幅 + ΔM_safe)))",
+    "attempt": 0,
+    "r_t_m": 0.024973968248658388,
+    "geometry": {
+     "n_axis_inv": 2400,
+     "x_end_margin": 2.3,
+     "L_total_tol": 0.02002084710854312
+    },
+    "M_K_in": 2.069270614,
+    "M_K_used_in_fixed_point": 2.069270614,
+    "chosen_N": 2.069270614,
+    "chosen_2N": 2.079270614,
+    "diff_vs_used": 0.0,
+    "gate_pass": true,
+    "gate_n_widen": 0,
+    "gate_half_width": 0.1,
+    "distance": 0.09625000000000017,
+    "action": "chosen_N = r_t の固定点に使った M_K — その組を出力 (寸法は最終の設計チェーンで測る)",
+    "elapsed_s": 2661.9201288223267
+   }
+  ],
+  "redo": 0,
+  "workers": {
+   "N": 1,
+   "2N": 1,
+   "available_gb": 14.155220031738281,
+   "per_eval_gb_N": 1.3,
+   "per_eval_gb_2N": 3.9408630729270353
+  },
+  "elapsed_s": 5338.611528158188,
+  "recipe_M_knot_factor": 0.45,
+  "recipe_M_knot_value_unused": 2.25,
+  "note": "雛形の M_knot_factor は使わない (記録だけ; plan tooling-nozzle-mknot-auto §4.4)",
+  "table": {
+   "select": [
+    {
+     "M_K": 1.329270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.266 が 1/R=0.500 から 47% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.429270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.311 が 1/R=0.500 から 38% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.529270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.346 が 1/R=0.500 から 31% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.629270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.372 が 1/R=0.500 から 26% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.729270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.393 が 1/R=0.500 から 21% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.829270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.408 が 1/R=0.500 から 18% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.929270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.939270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "fine",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.949270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "fine",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.959270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "fine",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.969270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "fine",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.971770614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.972395614,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 15.208452672763414,
+     "margin_deg": 4.219796145864728,
+     "min_sin_angle": 0.05267221517012083,
+     "mpp_sign_changes": 1,
+     "x_K": 2.0982209001587364,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.973020614,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 15.208159465925705,
+     "margin_deg": 4.2201000511745725,
+     "min_sin_angle": 0.05266898956200484,
+     "mpp_sign_changes": 1,
+     "x_K": 2.099610509087323,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.974270614,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 15.207565839923042,
+     "margin_deg": 4.220708525800829,
+     "min_sin_angle": 0.052662579635281356,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1023901106111915,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.979270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.20554997770553,
+     "margin_deg": 4.223167730645403,
+     "min_sin_angle": 0.05255314187457492,
+     "mpp_sign_changes": 1,
+     "x_K": 2.113513637427001,
+     "L_c": 21.65228181378817,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.989270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.202669277521709,
+     "margin_deg": 4.2281539453511,
+     "min_sin_angle": 0.05242129121681724,
+     "mpp_sign_changes": 1,
+     "x_K": 2.135785329522965,
+     "L_c": 21.65228181378817,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.999270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.19977980134286,
+     "margin_deg": 4.2331388543383275,
+     "min_sin_angle": 0.05221164266287121,
+     "mpp_sign_changes": 1,
+     "x_K": 2.158089994519899,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.009270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.196863243785474,
+     "margin_deg": 4.237954276178985,
+     "min_sin_angle": 0.05207496531555036,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1804277792989977,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.019270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.194578522246628,
+     "margin_deg": 4.242876683194295,
+     "min_sin_angle": 0.0518963449068148,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2027988318368887,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.022395614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.194265512676097,
+     "margin_deg": 4.244439366170052,
+     "min_sin_angle": 0.05183490407199335,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2097966317808044,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.029270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.193548785929023,
+     "margin_deg": 4.247905485393866,
+     "min_sin_angle": 0.051717735790206595,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2252033012142083,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.039270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.192481594766946,
+     "margin_deg": 4.2530386457768525,
+     "min_sin_angle": 0.05159310859748497,
+     "mpp_sign_changes": 1,
+     "x_K": 2.24764133763161,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.049270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.191412869265369,
+     "margin_deg": 4.258277021688492,
+     "min_sin_angle": 0.051471763510342106,
+     "mpp_sign_changes": 1,
+     "x_K": 2.270113092414691,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.059270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.190879730451021,
+     "margin_deg": 4.263390116883446,
+     "min_sin_angle": 0.05126657857970072,
+     "mpp_sign_changes": 1,
+     "x_K": 2.292618718031219,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.069270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.191683280928602,
+     "margin_deg": 4.268466247670403,
+     "min_sin_angle": 0.05115308756863626,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3151583681009846,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.079270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.192453950862134,
+     "margin_deg": 4.273656631137955,
+     "min_sin_angle": 0.05104267782557263,
+     "mpp_sign_changes": 1,
+     "x_K": 2.337732197409332,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.089270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.19321382271976,
+     "margin_deg": 4.2789579550991945,
+     "min_sin_angle": 0.050855282950313156,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3603403619170127,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.099270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.193969196675038,
+     "margin_deg": 4.2843697499228215,
+     "min_sin_angle": 0.05075215625667036,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3829830187761813,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.109270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.196593945289054,
+     "margin_deg": 4.289790526534014,
+     "min_sin_angle": 0.050652209208315195,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4056603263414744,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.119270614,
+     "ok": true,
+     "reasons": [],
+     "role": "fine",
+     "theta_max_deg": 15.199186303610317,
+     "margin_deg": 4.295015777535476,
+     "min_sin_angle": 0.050481327600998264,
+     "mpp_sign_changes": 1,
+     "x_K": 2.428372444182318,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.129270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.201738671822227,
+     "margin_deg": 4.300338030421944,
+     "min_sin_angle": 0.05038011762843294,
+     "mpp_sign_changes": 1,
+     "x_K": 2.451119533096465,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.229270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.24841146076927,
+     "margin_deg": 4.352397543001847,
+     "min_sin_angle": 0.0493167935124454,
+     "mpp_sign_changes": 1,
+     "x_K": 2.680550112337681,
+     "L_c": 21.65228181378805,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.329270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.326932858766952,
+     "margin_deg": 4.3925356635759165,
+     "min_sin_angle": 0.04852129645978512,
+     "mpp_sign_changes": 1,
+     "x_K": 2.913664334499837,
+     "L_c": 21.65228181378783,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.429270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.43066893960778,
+     "margin_deg": 4.41349160502819,
+     "min_sin_angle": 0.047839332286240335,
+     "mpp_sign_changes": 1,
+     "x_K": 3.1506455404519227,
+     "L_c": 21.65228181378734,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.529270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.557812078473098,
+     "margin_deg": 4.413256940869771,
+     "min_sin_angle": 0.04733975720533895,
+     "mpp_sign_changes": 1,
+     "x_K": 3.39169280395507,
+     "L_c": 21.652281813786807,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.629270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.703319686339118,
+     "margin_deg": 4.393339932501802,
+     "min_sin_angle": 0.04697300432587472,
+     "mpp_sign_changes": 1,
+     "x_K": 3.6370228892605936,
+     "L_c": 21.652281813786104,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.729270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 15.86776357202304,
+     "margin_deg": 4.3557879188522595,
+     "min_sin_angle": 0.046692092175880585,
+     "mpp_sign_changes": 1,
+     "x_K": 3.8868725334803362,
+     "L_c": 21.65228181378518,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.829270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 16.04650404294724,
+     "margin_deg": 4.303385736209349,
+     "min_sin_angle": 0.0465299990473733,
+     "mpp_sign_changes": 1,
+     "x_K": 4.141501122109305,
+     "L_c": 21.652281813783674,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.929270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 16.243857443875672,
+     "margin_deg": 4.238055273922699,
+     "min_sin_angle": 0.04639904545354179,
+     "mpp_sign_changes": 1,
+     "x_K": 4.401193843799655,
+     "L_c": 21.652281813782245,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.029270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 16.45522375295172,
+     "margin_deg": 4.1619382318208595,
+     "min_sin_angle": 0.04638733682872707,
+     "mpp_sign_changes": 1,
+     "x_K": 4.666265433669435,
+     "L_c": 21.652281813780505,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.129270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 16.68377632586995,
+     "margin_deg": 4.074620653270801,
+     "min_sin_angle": 0.046404461312585916,
+     "mpp_sign_changes": 1,
+     "x_K": 4.937064645170505,
+     "L_c": 21.652281813778437,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.229270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 16.928331317903197,
+     "margin_deg": 3.9795713051758623,
+     "min_sin_angle": 0.04653431783494453,
+     "mpp_sign_changes": 1,
+     "x_K": 5.2139796317262554,
+     "L_c": 21.652281813775474,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.329270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 17.19133703410834,
+     "margin_deg": 3.874968143664104,
+     "min_sin_angle": 0.04668378610633384,
+     "mpp_sign_changes": 1,
+     "x_K": 5.49744447511271,
+     "L_c": 21.65228181377242,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.429270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 17.46983585364895,
+     "margin_deg": 3.7631320148580123,
+     "min_sin_angle": 0.04687826980298735,
+     "mpp_sign_changes": 1,
+     "x_K": 5.787947174191588,
+     "L_c": 21.65228181376883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.529270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 17.76659526597744,
+     "margin_deg": 3.644346438970293,
+     "min_sin_angle": 0.04718428148877438,
+     "mpp_sign_changes": 1,
+     "x_K": 6.086039514276106,
+     "L_c": 21.652281813764276,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.629270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 18.074574700379976,
+     "margin_deg": 3.518637841443538,
+     "min_sin_angle": 0.047477630725170014,
+     "mpp_sign_changes": 1,
+     "x_K": 6.3923493883320255,
+     "L_c": 21.652281813759245,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.729270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 18.392927502184754,
+     "margin_deg": 3.3847317041141163,
+     "min_sin_angle": 0.04790085685101727,
+     "mpp_sign_changes": 1,
+     "x_K": 6.707596358305793,
+     "L_c": 21.65228181375317,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.829270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 18.71917280728226,
+     "margin_deg": 3.243708419168111,
+     "min_sin_angle": 0.048318040352508945,
+     "mpp_sign_changes": 1,
+     "x_K": 7.032611563153343,
+     "L_c": 21.652281813745176,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 3.929270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 19.051190950765907,
+     "margin_deg": 3.0953007201784812,
+     "min_sin_angle": 0.04885256582944698,
+     "mpp_sign_changes": 1,
+     "x_K": 7.368363556610103,
+     "L_c": 21.652281813736536,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.029270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 19.386811249721074,
+     "margin_deg": 2.9390453144221462,
+     "min_sin_angle": 0.049431080036694816,
+     "mpp_sign_changes": 1,
+     "x_K": 7.715992387859333,
+     "L_c": 21.652281813726475,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.129270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 19.723997420885997,
+     "margin_deg": 2.774317848643611,
+     "min_sin_angle": 0.04979242012134688,
+     "mpp_sign_changes": 1,
+     "x_K": 8.076855386930056,
+     "L_c": 21.652281813714367,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.229270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 20.067168908987288,
+     "margin_deg": 2.600308959952931,
+     "min_sin_angle": 0.05017842667807242,
+     "mpp_sign_changes": 1,
+     "x_K": 8.452589978485054,
+     "L_c": 21.652281813699865,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.305051864,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 20.32725788381426,
+     "margin_deg": 2.4609670824439025,
+     "min_sin_angle": 0.050542690093057535,
+     "mpp_sign_changes": 1,
+     "x_K": 8.748442716645581,
+     "L_c": 21.652281813687054,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.329270614,
+     "ok": true,
+     "reasons": [],
+     "role": "coarse",
+     "theta_max_deg": 20.411876965746238,
+     "margin_deg": 2.415986827634988,
+     "min_sin_angle": 0.05064363661242655,
+     "mpp_sign_changes": 1,
+     "x_K": 8.84520197041801,
+     "L_c": 21.652281813682457,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.354270614,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 20.498974369327026,
+     "margin_deg": 2.3673609992394526,
+     "min_sin_angle": 0.05076851212800543,
+     "mpp_sign_changes": 1,
+     "x_K": 8.946271970633525,
+     "L_c": 21.652281813677405,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.355051864,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 20.501695552196274,
+     "margin_deg": 2.365822957774717,
+     "min_sin_angle": 0.05078001333050813,
+     "mpp_sign_changes": 1,
+     "x_K": 8.94945035440519,
+     "L_c": 21.652281813677256,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 4.355833114,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.357395614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.20° > 0.2°)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.360520614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.21° > 0.2°)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.366770614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.21° > 0.2°)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.379270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.23° > 0.2°)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.429270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.28° > 0.2°)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.529270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.49° > 0.2°)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.629270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: axis-Mach 壁フィルタ不合格: 壁 spline リンギング (テーブル点上の θ 乖離 0.89° > 0.2°)"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.729270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: RuntimeError: joint_fit_wall(mono_r2): 有効制約法が 200 回で収束しない"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    },
+    {
+     "M_K": 4.829270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: RuntimeError: joint_fit_wall(mono_r2): 有効制約法が 200 回で収束しない"
+     ],
+     "role": "coarse",
+     "n_axis": null
+    }
+   ],
+   "gate_first_N_added": [
+    {
+     "M_K": 1.919270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.419 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 2.021770614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.194327987178015,
+     "margin_deg": 4.24412643872948,
+     "min_sin_angle": 0.05183704482437758,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2083968105037326,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.139270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.204270655643638,
+     "margin_deg": 4.305752862420783,
+     "min_sin_angle": 0.050276917477966206,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4739017551223066,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.149270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.207661901402085,
+     "margin_deg": 4.311260399613877,
+     "min_sin_angle": 0.05014267827554142,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4967192735573303,
+     "L_c": 21.6522818137883,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.159270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.212037683697508,
+     "margin_deg": 4.316559815811523,
+     "min_sin_angle": 0.05005875150895113,
+     "mpp_sign_changes": 1,
+     "x_K": 2.519572252963033,
+     "L_c": 21.65228181378817,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.169270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.216369135501443,
+     "margin_deg": 4.321767538500762,
+     "min_sin_angle": 0.04989920603653414,
+     "mpp_sign_changes": 1,
+     "x_K": 2.542460859187124,
+     "L_c": 21.65228181378817,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.179270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.220669203473461,
+     "margin_deg": 4.32704883920915,
+     "min_sin_angle": 0.04980820396407157,
+     "mpp_sign_changes": 1,
+     "x_K": 2.565385259374519,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.189270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.22493006595815,
+     "margin_deg": 4.332403216678776,
+     "min_sin_angle": 0.0497197068911747,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5883456219760386,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.199270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.230311429442372,
+     "margin_deg": 4.337456973627883,
+     "min_sin_angle": 0.049633834077552876,
+     "mpp_sign_changes": 1,
+     "x_K": 2.611342116775423,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.209270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.236400914389435,
+     "margin_deg": 4.342416260317084,
+     "min_sin_angle": 0.049473778839017296,
+     "mpp_sign_changes": 1,
+     "x_K": 2.6343749148893694,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.219270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.242426905289584,
+     "margin_deg": 4.3474356358586315,
+     "min_sin_angle": 0.049394253972178434,
+     "mpp_sign_changes": 1,
+     "x_K": 2.6574441887958256,
+     "L_c": 21.6522818137881,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    }
+   ],
+   "gate_first_2N": [
+    {
+     "M_K": 1.919270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.420 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.929270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.939270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.949270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.959270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.969270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "window",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.970520614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.971145614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.971770614,
+     "ok": true,
+     "reasons": [],
+     "role": "bracket",
+     "theta_max_deg": 15.219177754317199,
+     "margin_deg": 4.2152874594345136,
+     "min_sin_angle": 0.045546228533192054,
+     "mpp_sign_changes": 1,
+     "x_K": 2.0964070295845776,
+     "L_c": 21.63482132806726,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.972395614,
+     "ok": true,
+     "reasons": [],
+     "role": "bracket",
+     "theta_max_deg": 15.218910937395998,
+     "margin_deg": 4.215586905061506,
+     "min_sin_angle": 0.04554877642153488,
+     "mpp_sign_changes": 1,
+     "x_K": 2.0977961540642283,
+     "L_c": 21.63482132806726,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.979270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.216263755782364,
+     "margin_deg": 4.218903759151788,
+     "min_sin_angle": 0.0453572116454331,
+     "mpp_sign_changes": 1,
+     "x_K": 2.113084968957954,
+     "L_c": 21.63482132806726,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.989270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.21290777172805,
+     "margin_deg": 4.223814279489697,
+     "min_sin_angle": 0.04518009678588211,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1353509568289,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.999270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.209917394260879,
+     "margin_deg": 4.228730777348687,
+     "min_sin_angle": 0.045004713385676694,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1576499188822216,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.009270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.207476602420446,
+     "margin_deg": 4.23365711504503,
+     "min_sin_angle": 0.04461806955262654,
+     "mpp_sign_changes": 1,
+     "x_K": 2.17998200205163,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.019270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.20545025168657,
+     "margin_deg": 4.238688042204324,
+     "min_sin_angle": 0.04444784294401568,
+     "mpp_sign_changes": 1,
+     "x_K": 2.202347354361667,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.021770614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.205073189460036,
+     "margin_deg": 4.23996159824962,
+     "min_sin_angle": 0.04445819411997009,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2079439081945287,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.022395614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.204977052544109,
+     "margin_deg": 4.240280470833844,
+     "min_sin_angle": 0.04425071833021472,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2093433732764294,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.029270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.20392908378789,
+     "margin_deg": 4.243704343604313,
+     "min_sin_angle": 0.044279301804298454,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2247461249461504,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.039270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.202822997267162,
+     "margin_deg": 4.2487561737995625,
+     "min_sin_angle": 0.04390536196453331,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2471784640530945,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.049270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.202221186416022,
+     "margin_deg": 4.2539166315970585,
+     "min_sin_angle": 0.043741679026853934,
+     "mpp_sign_changes": 1,
+     "x_K": 2.269644523063157,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.059270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.201983939780428,
+     "margin_deg": 4.2590277554553015,
+     "min_sin_angle": 0.04357964588992006,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2921444544957867,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.069270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.202299353698065,
+     "margin_deg": 4.264215496651012,
+     "min_sin_angle": 0.043217942385767635,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3146784120252137,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.079270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.20286842278262,
+     "margin_deg": 4.269498524133599,
+     "min_sin_angle": 0.043060603544455636,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3372465504890556,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.089270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.204097588534033,
+     "margin_deg": 4.274716724995733,
+     "min_sin_angle": 0.04290485295127666,
+     "mpp_sign_changes": 1,
+     "x_K": 2.359849025905535,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.099270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.205406891809425,
+     "margin_deg": 4.280047263892049,
+     "min_sin_angle": 0.04255488869123812,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3824859954808595,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.109270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.207544754560733,
+     "margin_deg": 4.285396430911946,
+     "min_sin_angle": 0.04240362338399011,
+     "mpp_sign_changes": 1,
+     "x_K": 2.405157617626436,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.119270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.209650701370542,
+     "margin_deg": 4.290737773692298,
+     "min_sin_angle": 0.042253902407469776,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4278640519699435,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.129270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.212555736355021,
+     "margin_deg": 4.296173300898344,
+     "min_sin_angle": 0.0419153213450631,
+     "mpp_sign_changes": 1,
+     "x_K": 2.450605459366397,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.139270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.215560962770109,
+     "margin_deg": 4.301492425978796,
+     "min_sin_angle": 0.04176992788218865,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4733820019141355,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.149270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.219049971225987,
+     "margin_deg": 4.3069011954074075,
+     "min_sin_angle": 0.041439494061738635,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4961938429695825,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.159270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.222944189807327,
+     "margin_deg": 4.312204486086516,
+     "min_sin_angle": 0.041298313925579415,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5190411471570826,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.169270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.226939289586895,
+     "margin_deg": 4.317545005958249,
+     "min_sin_angle": 0.04115852622330819,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5419240803836556,
+     "L_c": 21.63482132806726,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.179270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.231711629713464,
+     "margin_deg": 4.322769163597854,
+     "min_sin_angle": 0.04083873535382877,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5648428098562226,
+     "L_c": 21.63482132806726,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.189270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.236445376006222,
+     "margin_deg": 4.328005155972634,
+     "min_sin_angle": 0.04070300983491414,
+     "mpp_sign_changes": 1,
+     "x_K": 2.587797504092663,
+     "L_c": 21.63482132806726,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.199270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.241775632658593,
+     "margin_deg": 4.333084298632301,
+     "min_sin_angle": 0.040568723757541156,
+     "mpp_sign_changes": 1,
+     "x_K": 2.6107883329378097,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.209270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.247376465315352,
+     "margin_deg": 4.338169586494671,
+     "min_sin_angle": 0.04025919969047063,
+     "mpp_sign_changes": 1,
+     "x_K": 2.633815467575746,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.219270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.253038249004607,
+     "margin_deg": 4.343058556708233,
+     "min_sin_angle": 0.04012872794646461,
+     "mpp_sign_changes": 1,
+     "x_K": 2.6568790805482494,
+     "L_c": 21.634821328067268,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    }
+   ],
+   "gate_final_N": [
+    {
+     "M_K": 1.919270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.419 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.929270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.420 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.939270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.949270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.959270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.969270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "window",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.971770614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.972395614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.973020614,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 15.182737439160055,
+     "margin_deg": 4.2309606666384845,
+     "min_sin_angle": 0.05287056097517537,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1007083306228416,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.974270614,
+     "ok": true,
+     "reasons": [],
+     "role": "bisect",
+     "theta_max_deg": 15.182177472914384,
+     "margin_deg": 4.2315576664834715,
+     "min_sin_angle": 0.05286424184911545,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1034897736392373,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.979270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.17993944894546,
+     "margin_deg": 4.2339671077674295,
+     "min_sin_angle": 0.05274984440010503,
+     "mpp_sign_changes": 1,
+     "x_K": 2.114620665920522,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.989270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.176180576259517,
+     "margin_deg": 4.238859561805175,
+     "min_sin_angle": 0.05252827001672009,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1369070864823425,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 1.999270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.173551731826654,
+     "margin_deg": 4.2438519131880765,
+     "min_sin_angle": 0.052397251105079444,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1592264765466136,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.009270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.170909690624875,
+     "margin_deg": 4.248944797289085,
+     "min_sin_angle": 0.05218951052853536,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1815789828706125,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.019270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.168243913163352,
+     "margin_deg": 4.253844535350165,
+     "min_sin_angle": 0.05206702489574849,
+     "mpp_sign_changes": 1,
+     "x_K": 2.203964753300668,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.022395614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.167412293806231,
+     "margin_deg": 4.2553780209884,
+     "min_sin_angle": 0.052053532291525775,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2109671518163334,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.023020614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.167247839989162,
+     "margin_deg": 4.255685419250292,
+     "min_sin_angle": 0.05205088734256665,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2123680234796734,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.029270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.166601593575841,
+     "margin_deg": 4.258776204391448,
+     "min_sin_angle": 0.05193749133879176,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2263839367869678,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.039270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.165816580012873,
+     "margin_deg": 4.2638136374111815,
+     "min_sin_angle": 0.05171324421353025,
+     "mpp_sign_changes": 1,
+     "x_K": 2.248836683395889,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.049270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.1649944708715,
+     "margin_deg": 4.268957241227434,
+     "min_sin_angle": 0.05158926179452687,
+     "mpp_sign_changes": 1,
+     "x_K": 2.271323144317394,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.059270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.164165516899802,
+     "margin_deg": 4.274207536732333,
+     "min_sin_angle": 0.051468457451455035,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2938434718835388,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.069270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.164285640750986,
+     "margin_deg": 4.279482236796098,
+     "min_sin_angle": 0.05126266196431718,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3163978195758674,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.079270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.165331707879949,
+     "margin_deg": 4.2845741904693195,
+     "min_sin_angle": 0.05114968173901992,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3389863420377472,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.089270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.166334630826416,
+     "margin_deg": 4.289778091749832,
+     "min_sin_angle": 0.05103992241009244,
+     "mpp_sign_changes": 1,
+     "x_K": 2.361609195087936,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.099270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.16732518735258,
+     "margin_deg": 4.295093352025145,
+     "min_sin_angle": 0.05085174039042181,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3842665357329156,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.109270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.168742777202754,
+     "margin_deg": 4.300517614062163,
+     "min_sin_angle": 0.0507492749378211,
+     "mpp_sign_changes": 1,
+     "x_K": 2.406958522181691,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.119270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.17159129246588,
+     "margin_deg": 4.3060536070083675,
+     "min_sin_angle": 0.050649626618696326,
+     "mpp_sign_changes": 1,
+     "x_K": 2.429685313854425,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.129270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.174415840464563,
+     "margin_deg": 4.31127694774585,
+     "min_sin_angle": 0.05047820124256597,
+     "mpp_sign_changes": 1,
+     "x_K": 2.452447071396007,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.139270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.177190374347813,
+     "margin_deg": 4.316592900106605,
+     "min_sin_angle": 0.050385427420132224,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4752439566945497,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.149270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.179941538783536,
+     "margin_deg": 4.32200161758564,
+     "min_sin_angle": 0.050292003473606274,
+     "mpp_sign_changes": 1,
+     "x_K": 2.498076132890022,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.159270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.183988537767753,
+     "margin_deg": 4.3275008412811955,
+     "min_sin_angle": 0.05019185661041661,
+     "mpp_sign_changes": 1,
+     "x_K": 2.520943764387822,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.169270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.188589461226114,
+     "margin_deg": 4.332807085393439,
+     "min_sin_angle": 0.05005582952222574,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5438470168748055,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.179270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.193131571986473,
+     "margin_deg": 4.3379877391964845,
+     "min_sin_angle": 0.049974570091993756,
+     "mpp_sign_changes": 1,
+     "x_K": 2.566786057332853,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.189270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.1976407143476,
+     "margin_deg": 4.343242833732208,
+     "min_sin_angle": 0.04982316025074984,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5897610540512086,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.199270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.202117384872878,
+     "margin_deg": 4.348560673216855,
+     "min_sin_angle": 0.049734944996603844,
+     "mpp_sign_changes": 1,
+     "x_K": 2.612772176642502,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.209270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.208156873777533,
+     "margin_deg": 4.353543251522225,
+     "min_sin_angle": 0.04964912000410169,
+     "mpp_sign_changes": 1,
+     "x_K": 2.635819596058799,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    },
+    {
+     "M_K": 2.219270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.214447435628205,
+     "margin_deg": 4.358461442435787,
+     "min_sin_angle": 0.04956561323174124,
+     "mpp_sign_changes": 1,
+     "x_K": 2.658903484602685,
+     "L_c": 21.697464562215835,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 2400
+    }
+   ],
+   "gate_final_2N": [
+    {
+     "M_K": 1.919270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.419 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.929270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.939270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.949270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.959270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "context",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.969270614,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "window",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.970833114,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.971614364,
+     "ok": false,
+     "reasons": [
+      "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+     ],
+     "role": "bisect",
+     "n_axis": null
+    },
+    {
+     "M_K": 1.972395614,
+     "ok": true,
+     "reasons": [],
+     "role": "bracket",
+     "theta_max_deg": 15.188670588420168,
+     "margin_deg": 4.2282849843083845,
+     "min_sin_angle": 0.045891560188700206,
+     "mpp_sign_changes": 1,
+     "x_K": 2.0990820820716922,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.973020614,
+     "ok": true,
+     "reasons": [],
+     "role": "bracket",
+     "theta_max_deg": 15.188421302308363,
+     "margin_deg": 4.228588545541323,
+     "min_sin_angle": 0.04589407563856489,
+     "mpp_sign_changes": 1,
+     "x_K": 2.10047241391667,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.979270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.185938204120726,
+     "margin_deg": 4.231653080452842,
+     "min_sin_angle": 0.045697975570291476,
+     "mpp_sign_changes": 1,
+     "x_K": 2.114382770875936,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.989270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.182308829497316,
+     "margin_deg": 4.236513057096927,
+     "min_sin_angle": 0.04551877387737507,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1366660266779527,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 1.999270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.179245193460691,
+     "margin_deg": 4.241411322931514,
+     "min_sin_angle": 0.045341352154478015,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1589822527229074,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.009270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.176616742421858,
+     "margin_deg": 4.2464135612917735,
+     "min_sin_angle": 0.044950845589320124,
+     "mpp_sign_changes": 1,
+     "x_K": 2.1813315957935546,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.019270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.174466959847086,
+     "margin_deg": 4.251373609824031,
+     "min_sin_angle": 0.0447786075754845,
+     "mpp_sign_changes": 1,
+     "x_K": 2.203714203766148,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.022395614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.173792069218432,
+     "margin_deg": 4.25293209171059,
+     "min_sin_angle": 0.044791442132334214,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2107156141813014,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.023020614,
+     "ok": true,
+     "reasons": [],
+     "role": "safe",
+     "theta_max_deg": 15.173655528849647,
+     "margin_deg": 4.253244971044249,
+     "min_sin_angle": 0.04479403922924021,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2121162882338568,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.029270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.17280172688671,
+     "margin_deg": 4.256395347849763,
+     "min_sin_angle": 0.044608031251252185,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2261302256178372,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.039270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.171568272921096,
+     "margin_deg": 4.261524964693995,
+     "min_sin_angle": 0.044230364763376565,
+     "mpp_sign_changes": 1,
+     "x_K": 2.248579811443924,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.049270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.170828549043225,
+     "margin_deg": 4.266579918697789,
+     "min_sin_angle": 0.044064717120662185,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2710631124640304,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.059270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.170510382298998,
+     "margin_deg": 4.271735577240975,
+     "min_sin_angle": 0.04390080771565187,
+     "mpp_sign_changes": 1,
+     "x_K": 2.2935802810393566,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.069270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.17063661461698,
+     "margin_deg": 4.276962631714767,
+     "min_sin_angle": 0.04353543674325991,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3161314706800775,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.079270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.171232312348396,
+     "margin_deg": 4.28214757385698,
+     "min_sin_angle": 0.043376250962030787,
+     "mpp_sign_changes": 1,
+     "x_K": 2.338716836061369,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.089270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.172163955049147,
+     "margin_deg": 4.287446069559526,
+     "min_sin_angle": 0.04321866114094994,
+     "mpp_sign_changes": 1,
+     "x_K": 2.3613365330332687,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.099270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.173667401914186,
+     "margin_deg": 4.292756358125713,
+     "min_sin_angle": 0.042865204045478396,
+     "mpp_sign_changes": 1,
+     "x_K": 2.38399071863301,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.109270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.175337385086337,
+     "margin_deg": 4.298082272055075,
+     "min_sin_angle": 0.042712152893550265,
+     "mpp_sign_changes": 1,
+     "x_K": 2.406679551099808,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.119270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.177745338684307,
+     "margin_deg": 4.303514580223549,
+     "min_sin_angle": 0.04256064235731115,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4294031898871933,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.129270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.180121880960419,
+     "margin_deg": 4.308842947329402,
+     "min_sin_angle": 0.04221860810202569,
+     "mpp_sign_changes": 1,
+     "x_K": 2.452161795672871,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.139270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.183382727087468,
+     "margin_deg": 4.314266206212362,
+     "min_sin_angle": 0.04207146565085547,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4749555303772146,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.149270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.186651237390649,
+     "margin_deg": 4.31962717094602,
+     "min_sin_angle": 0.041925808531570304,
+     "mpp_sign_changes": 1,
+     "x_K": 2.4977845571743624,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.159270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.190497504263286,
+     "margin_deg": 4.325006414722202,
+     "min_sin_angle": 0.04159485088461085,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5206490405020747,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.169270614,
+     "ok": true,
+     "reasons": [],
+     "role": "window",
+     "theta_max_deg": 15.194650228974469,
+     "margin_deg": 4.330330212839141,
+     "min_sin_angle": 0.041453389572895356,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5435491460839335,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.179270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.199001848904363,
+     "margin_deg": 4.3356277388836375,
+     "min_sin_angle": 0.041313394161869785,
+     "mpp_sign_changes": 1,
+     "x_K": 2.56648504093426,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.189270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.204029025071042,
+     "margin_deg": 4.340845840612176,
+     "min_sin_angle": 0.04099306721790148,
+     "mpp_sign_changes": 1,
+     "x_K": 2.5894568933803224,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.199270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.209012184108394,
+     "margin_deg": 4.346028747618288,
+     "min_sin_angle": 0.04085713864650311,
+     "mpp_sign_changes": 1,
+     "x_K": 2.6124648730697184,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.209270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.214698405578442,
+     "margin_deg": 4.35107685286951,
+     "min_sin_angle": 0.04054449133546601,
+     "mpp_sign_changes": 1,
+     "x_K": 2.6355091509888733,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    },
+    {
+     "M_K": 2.219270614,
+     "ok": true,
+     "reasons": [],
+     "role": "context",
+     "theta_max_deg": 15.22054668961111,
+     "margin_deg": 4.3561163833627425,
+     "min_sin_angle": 0.040412428438833664,
+     "mpp_sign_changes": 1,
+     "x_K": 2.658589899480296,
+     "L_c": 21.687743878000894,
+     "moc_gate_ok": true,
+     "moc_gate_pass": true,
+     "n_axis": 4800
+    }
+   ]
+  }
+ }
+}

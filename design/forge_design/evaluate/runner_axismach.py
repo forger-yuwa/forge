@@ -40,10 +40,12 @@ from ..geometry.moc_inverse import inverse_design
 from ..geometry.transonic import HallThroat
 from ..geometry.wall_axismach import (PHYSICAL_WALL_REPRS, PW_UPSTREAM_DEFAULT, PW_UPSTREAMS, AxisMachCFDWall,
                                       area_ratio_isentropic, wall_qa)
-from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
+from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, node_count, radial_node_count, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
+from ..wall_temperature import check_covers, integral_thermal_bc, load_run_profile, to_x_m, write_run_files
+from ..wall_temperature import anchors_from_design as _wt_anchors
 from .ic import paste_isentropic_ic, stamp_isentropic_ic_species
-from .runner import FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
+from .runner import run_converter, FORGE_TOOLS, PROBE_STUB, _ENV, converter_path, run_forge
 from .runner_wt import (_bcond, _config_euler, _config_euler_node,
                         _config_sst_node)
 
@@ -301,6 +303,60 @@ def _pw_upstream(geometry: dict) -> dict:
         raise ValueError("geometry.physical_wall_repr: single_bspline は pw_upstream: poly の壁だけ (ramp のランプ区間は 5 次の "
                          "B-spline で厳密に表せない; plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1b)")
     return {"value": value, "source": source, "requested": requested}
+
+
+# 物理壁だけの上流の形 `geometry.physical_upstream` のキー (geometry の r_inlet・L_U・L_pipe と同じ名前・同じ単位 r_t)
+PHYSICAL_UPSTREAM_KEYS = ("r_inlet", "L_U", "L_pipe")
+
+
+def _physical_upstream(geometry: dict) -> dict | None:
+    """geometry.physical_upstream を読んで検査する (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #34)。キー無しは None
+    (今と同じ: 物理壁の直管・多項式 Q の始点は geometry の r_inlet・L_U・L_pipe)。重い処理・run dir を作る前に呼ぶ。
+
+    `{r_inlet, L_U, L_pipe}` (r_t 単位、3 つとも必須) は**物理壁だけ**に効く上流の形: 直管の半径 r_inlet ([x_in, −L_U))・
+    多項式 Q の始点 (−L_U, r_inlet, 0, 0) (Q の終点は今と同じ x = 0 の S + δ_r の (r, r′, r″))。geometry の r_inlet・L_U・L_pipe は
+    設計壁 (MOC・CFD ピンの初期線の凍結元との照合、`design_chain`) の値のまま残す — 照合を弱めず、初期線を取り直さない。
+    条件 (違えば ValueError): mapping でキーがちょうど 3 つ・有限の数値 (真偽値は不可)・r_inlet > 1・L_U > 0・L_pipe > 0、
+    joint 壁 (wall_repr: joint) の pw_upstream poly (既定・明示とも; ramp は不可)、入口の位置 −(L_U + L_pipe) が設計の
+    −(geometry.L_U + geometry.L_pipe) と同じ (格子の区間・壁ファイルの定義域を変えない)、名目の U→T Hermite の
+    μ = L_U²/(R Δr) ≤ 20 (設計壁と同じ単調収縮の条件、R は geometry.R)。
+    戻り: {"r_inlet", "L_U", "L_pipe", "x_in", "mu", "frozen_design": {r_inlet, L_U, L_pipe}, "source": "geometry.physical_upstream"}。"""
+    if "physical_upstream" not in geometry:
+        return None
+    v = geometry["physical_upstream"]
+    if not isinstance(v, dict):
+        raise ValueError(f"geometry.physical_upstream は {{r_inlet, L_U, L_pipe}} の mapping (受け取った値: {v!r})")
+    unknown = sorted((str(k) for k in v if k not in PHYSICAL_UPSTREAM_KEYS))
+    missing = [k for k in PHYSICAL_UPSTREAM_KEYS if k not in v]
+    if unknown or missing:
+        raise ValueError(f"geometry.physical_upstream のキーが不正 (未知 {unknown}、欠け {missing}; {list(PHYSICAL_UPSTREAM_KEYS)} の 3 つとも書く)")
+    vals = {}
+    for k in PHYSICAL_UPSTREAM_KEYS:
+        x = v[k]
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not np.isfinite(float(x)):
+            raise ValueError(f"geometry.physical_upstream.{k} は有限の数値 (受け取った値: {x!r})")
+        vals[k] = float(x)
+    if not (vals["r_inlet"] > 1.0 and vals["L_U"] > 0.0 and vals["L_pipe"] > 0.0):
+        raise ValueError(f"geometry.physical_upstream: r_inlet > 1・L_U > 0・L_pipe > 0 であること ({vals})")
+    if str(geometry.get("wall_repr", "interp")) != "joint":
+        raise ValueError("geometry.physical_upstream は joint 壁 (wall_repr: joint) の物理壁の解析経路専用 "
+                         f"(wall_repr = {geometry.get('wall_repr', 'interp')!r})")
+    if _pw_upstream(geometry)["value"] != "poly":
+        raise ValueError("geometry.physical_upstream は pw_upstream: poly の物理壁だけ (ramp は設計壁の縮流部に δ_r を足す作り方なので、"
+                         "別の形の上流には当てられない)")
+    fd = {"r_inlet": float(geometry.get("r_inlet", 2.5)), "L_U": float(geometry.get("L_U", 3.5)),
+          "L_pipe": float(geometry.get("L_pipe", 0.5))}
+    x_in_d = -fd["L_U"] - fd["L_pipe"]
+    x_in = -vals["L_U"] - vals["L_pipe"]
+    if abs(x_in - x_in_d) > 1e-12 * max(1.0, abs(x_in_d)):
+        raise ValueError(f"geometry.physical_upstream: 入口の位置 −(L_U + L_pipe) = {x_in!r} が設計の −(geometry.L_U + geometry.L_pipe) "
+                         f"= {x_in_d!r} と違う (入口の位置を動かすのは未対応: 格子の区間・壁ファイルの定義域を設計壁と揃える)")
+    from ..geometry.wall_walldriven import UpstreamThroatPoly
+    up = UpstreamThroatPoly(r_U=vals["r_inlet"], R_t=float(geometry.get("R", 2.0)), L_U=vals["L_U"])
+    bad = up.validate()
+    if bad:
+        raise ValueError("geometry.physical_upstream の名目の U→T Hermite が設計の条件を満たさない: " + "; ".join(bad))
+    return {**vals, "x_in": x_in_d, "mu": float(up.mu), "frozen_design": fd, "source": "geometry.physical_upstream"}
 
 
 def _sizing_spec(spec: dict) -> dict | None:
@@ -694,7 +750,10 @@ def _mesh_params_from(m: dict, scale, ni, nj, wall_first_frac) -> Mesh2DParams:
                         wall_first_up_x0=opt("wall_first_up_x0"), wall_first_up_x1=opt("wall_first_up_x1"),
                         axis_gap_frac=opt("axis_gap_frac"), axis_cap_frac=opt("axis_cap_frac"),
                         wall_first_frac_table=m.get("wall_first_frac_table"), x_density_table=m.get("x_density_table"),
-                        wall_normal_layer=m.get("wall_normal_layer"), scale=scale)
+                        wall_normal_layer=m.get("wall_normal_layer"),
+                        # 区間の局所の並べ直し (NS の mesh だけ。MESH_EULER_KEYS に無いので mesh_euler には書けない;
+                        # plan tooling-nozzle-isothermal-wall-chain §4.8-1・§5.1 #29)
+                        x_respace=m.get("x_respace"), scale=scale)
 
 
 def mesh_params(p, scale, ni, nj, wall_first_frac):
@@ -712,10 +771,69 @@ def mesh_params(p, scale, ni, nj, wall_first_frac):
 #   (同 plan §9 E2。全域 0.005 の配点は同じ窓で全領域 |T₀ − Tt| ≤ 0.103 K)。
 # - mesh だけがあって mesh_euler が無い問題は移行先を示して止める (黙って NS の配点を使わない・指定を無視して既定に落とさない)。
 MESH_EULER_DEFAULTS = {"ni": 321, "nj": 65, "wall_first_frac": 5.0e-3}
-# mesh_euler に書けるキー (_mesh_params_from が読むもの + 品質検査の ar_max + node 固定の discretization)。それ以外は書き誤りとして止める
+# mesh_euler に書けるキー (_mesh_params_from が読むもの + 品質検査の ar_max + node 固定の discretization + 節点数の上限の許可)。
+# それ以外は書き誤りとして止める
 MESH_EULER_KEYS = ("ni", "nj", "wall_first_frac", "throat_refine", "throat_width", "wall_first_frac_throat",
                    "wall_first_blend_x0", "wall_first_blend_x1", "wall_first_up_x0", "wall_first_up_x1",
-                   "axis_gap_frac", "axis_cap_frac", "ar_max", "discretization")
+                   "axis_gap_frac", "axis_cap_frac", "ar_max", "discretization", "max_nodes", "max_nodes_reason")
+
+# 2D 軸対称の格子の節点数の上限 (2026-10-14, plan tooling-nozzle-mesh-size-guard §4.2): Euler・NS とも 30 万点 (Euler の ni は明示が無ければ
+# NS と同じなので同じ値; 雛形 1600〜2000 × 97 = 15.5〜19.4 万、M6 生産の NS 19.4 万の 1.5 倍)。超える格子は問題 YAML のブロック
+# (mesh / mesh_euler) に max_nodes (正の整数) と max_nodes_reason (空でない文字列) を組で書けば、その値まで許す (ユーザの了承を取ってから書く)。
+# 判定は run dir を作る前・設計チェーンの前に、実効の節点数 (mesh2d.node_count; axis_gap_frac の導出 nj を含む) で行う。
+MAX_NODES_2D = 300_000
+NS_STEPS_DEFAULT = 60_000      # NS の本段の既定の step 数 (2026-10-14 ユーザ決定、手順書 §2 ⑥ の最終 NS の標準。evaluate.ns_steps で上書き)
+
+
+def node_budget(m: dict, block: str) -> dict:
+    """格子のブロックの節点数の上限 {max_nodes, max_nodes_reason, max_nodes_source ("default" / "explicit")}。
+    max_nodes と max_nodes_reason は組で書く (片方だけ・正の整数でない値・空の理由は ValueError)。"""
+    m = m or {}
+    v, why = m.get("max_nodes"), m.get("max_nodes_reason")
+    if v is None and why is None:
+        return {"max_nodes": MAX_NODES_2D, "max_nodes_reason": None, "max_nodes_source": "default"}
+    errs = []
+    if v is None:
+        errs.append(f"{block}.max_nodes_reason だけがあり {block}.max_nodes (許す節点数) が無い")
+    elif isinstance(v, bool) or not isinstance(v, (int, np.integer)) or int(v) <= 0:
+        errs.append(f"{block}.max_nodes は正の整数 (受け取った値: {v!r})")
+    if why is None:
+        errs.append(f"{block}.max_nodes だけがあり理由 {block}.max_nodes_reason が無い")
+    elif not isinstance(why, str) or not why.strip():
+        errs.append(f"{block}.max_nodes_reason は空でない文字列 (受け取った値: {why!r})")
+    if errs:
+        raise ValueError("節点数の上限の許可は max_nodes と max_nodes_reason を組で書く: " + "; ".join(errs))
+    return {"max_nodes": int(v), "max_nodes_reason": why, "max_nodes_source": "explicit"}
+
+
+def check_node_budget(mp: Mesh2DParams, m: dict, block: str, allow_hint: str | None = None) -> dict:
+    """格子を作る前の節点数の判定 (plan tooling-nozzle-mesh-size-guard §4.2)。実効の節点数 (mesh2d.node_count、上限を超えたら数えるのを
+    打ち切る) が上限 (`node_budget`) を超えたら ValueError (実効の節点数・ni・nj・上限・許可の書き方)。allow_hint は許可の書き方の文言
+    (既定は問題 YAML のブロックに書く形; 文言の {n_nodes} は数えた節点数に置き換える)。
+    戻り値 {n_nodes, ni, nj, max_nodes, max_nodes_reason, max_nodes_source}。"""
+    b = node_budget(m, block)
+    lim = b["max_nodes"]
+    ni = int(mp.ni)
+    n = node_count(mp, limit=lim)
+    nj, exact = radial_node_count(mp, max_nj=lim // max(ni, 1))
+    if n > lim:
+        how = (allow_hint or f"問題 YAML の {block} に max_nodes: {{n_nodes}} と max_nodes_reason: \"<理由>\" を組で書く"
+               ).replace("{n_nodes}", str(n) if exact else f"<{n} 以上>")
+        src = "既定 MAX_NODES_2D" if b["max_nodes_source"] == "default" else f"明示: {b['max_nodes_reason']}"
+        more = "" if exact else " 以上"
+        derived = "、nj は axis_gap_frac からの導出値" if mp.axis_gap_frac is not None else ""
+        raise ValueError(
+            f"{block} の格子の実効の節点数 {n}{more} (ni {ni} × nj {int(nj)}{more}{derived}) が上限 {lim} ({src}) を超える — "
+            f"格子を作らずに止めた。上限を超える格子はユーザの了承を取ってから {how} (了承なしに書かない)。"
+            "超えないようにするなら ni・nj・axis_gap_frac (・要求カードなら第 1 層と ar_max) を見直す")
+    return {"n_nodes": int(n), "ni": ni, "nj": int(nj), **b}
+
+
+def _check_generated_nodes(coords, nodes: dict, block: str) -> None:
+    """格子を作った後の照合: 実際の節点数が事前の数え (mesh2d.node_count) と違えば止める (事前の判定が当てにならないため)。"""
+    if int(coords.shape[0]) != int(nodes["n_nodes"]):
+        raise RuntimeError(f"{block}: 生成した格子の節点数 {coords.shape[0]} が事前の数え (mesh2d.node_count) {nodes['n_nodes']} と"
+                           " 一致しない — 事前の節点数の判定が当てにならないので止める")
 
 
 def mesh_euler_block(p) -> dict:
@@ -785,44 +903,74 @@ def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
             "topology_datasets": names, "msh_sha256": hm.hexdigest(), "generator_sha256": hg.hexdigest()}
 
 
-def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges) -> dict:
+def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges, nodes: dict) -> dict:
     """prepare_info.json の mesh 欄: 従来の ni・nj・wall_first_frac (読む側: nozzle_report・metrics.deltastar・cfd_initial_line) に、
     全 Mesh2DParams・採用元のブロック名・問題に書かれたブロックの有無と中身・座標と接続のハッシュを足す
-    (plan verification-case45-euler-total-enthalpy §4、2026-10-07)。"""
+    (plan verification-case45-euler-total-enthalpy §4、2026-10-07)。nodes (`check_node_budget` の戻り値) から節点数と上限・理由・
+    上限の出所 (default / explicit) も書く (plan tooling-nozzle-mesh-size-guard §4.2、2026-10-14)。"""
     import dataclasses
     return {"ni": mp.ni, "nj": int(nj), "wall_first_frac": mp.wall_first_frac,
             "source": source, "blocks_present": {b: (b in (p.raw or {})) for b in ("mesh", "mesh_euler")},
             "block": dict((p.raw or {}).get(source) or {}), "params": dataclasses.asdict(mp),
+            "n_nodes": int(coords.shape[0]),
+            **{k: nodes[k] for k in ("max_nodes", "max_nodes_reason", "max_nodes_source")},
             "hashes": _mesh_hashes(run_dir, coords, quads, bedges)}
 
 
 def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:
+    """**Euler (slip 壁) の run** を準備する。格子は `mesh_euler`、壁は `euler_reference_wall`:
+
+    - `geometry.physical_upstream` が無い (今と同じ): 設計壁 (geometry の r_inlet・L_U・L_pipe の直管と縮流部 + MOC の設計壁)。
+      `physical_wall_repr: single_bspline`・`pw_upstream: poly` の明示は物理壁の指定なので例外 (黙って無視しない)。
+    - ある (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36b、#36e で案 A に): **H の上流を付けた設計壁**
+      (`UpstreamDesignWall`: x ≥ 0 は凍結した設計壁 S、x < 0 は physical_upstream の直管と S(0) への 5 次多項式。下流は設計壁のゲート
+      `monotone_gate`、上流は単調な収縮・正の半径・一意な大域最小・C² の継ぎ目で判定)。δ* ループの固定の Euler の参照 (抽出器の δ_in =
+      NS の壁 − この壁) に使う。`pw_upstream` は poly だけ (_physical_upstream が ramp を拒む)。物理壁ではないので `physical_wall_repr` の
+      明示は例外。壁ファイル (`wall_repr.json`、種類 `design_upstream`) を書いて読み直し、復元した壁が元と一致することを確かめる。
+      prepare_info.json の `physical_upstream` と `euler_wall` に記録する。設計壁と CFD ピンの照合は geometry の値のまま (design_chain)。"""
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
-    if _physical_wall_repr(p.geometry) == "single_bspline":
-        # 物理壁の表現 (plan tooling-nozzle-wall-single-bspline §4.2) は NS の物理壁 (prepare_ns) だけ。Euler の設計壁で黙って無視しない
-        raise ValueError("geometry.physical_wall_repr: single_bspline は prepare_ns (物理壁) 専用 — Euler の prepare には物理壁が無い")
-    if "pw_upstream" in p.geometry:
-        # 上流の作り方 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1) は joint 壁の物理壁の解析経路だけ。
-        # 値は検査し、poly の明示は例外 (Euler の設計壁で黙って無視しない)。ramp (移行で明示した旧来の作り方) は通す
-        v = p.geometry["pw_upstream"]
-        if not isinstance(v, str) or v not in PW_UPSTREAMS:
-            raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか (受け取った値: {v!r})")
-        if v == "poly":
-            raise ValueError("geometry.pw_upstream: poly は prepare_ns (joint 壁の物理壁) 専用 — Euler の prepare には物理壁が無い")
+    # 物理壁だけの上流の形 (§5.1 #34) の検査 (不正値・joint でない壁・ramp は例外)。ある問題は H の上流を付けた設計壁で格子を作る
+    # (§5.1 #36b、#36e の案 A)
+    pu = _physical_upstream(p.geometry)
+    pwu = None
+    if pu is None:
+        if _physical_wall_repr(p.geometry) == "single_bspline":
+            # 物理壁の表現 (plan tooling-nozzle-wall-single-bspline §4.2) は物理壁だけ。Euler の設計壁で黙って無視しない
+            raise ValueError("geometry.physical_wall_repr: single_bspline は物理壁の指定 — Euler の prepare は physical_upstream の無い問題では"
+                             "設計壁で格子を作る")
+        if "pw_upstream" in p.geometry:
+            # 上流の作り方 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1) は joint 壁の物理壁の解析経路だけ。
+            # 値は検査し、poly の明示は例外 (Euler の設計壁で黙って無視しない)。ramp (移行で明示した旧来の作り方) は通す
+            v = p.geometry["pw_upstream"]
+            if not isinstance(v, str) or v not in PW_UPSTREAMS:
+                raise ValueError(f"geometry.pw_upstream は {' / '.join(repr(c) for c in PW_UPSTREAMS)} のどれか (受け取った値: {v!r})")
+            if v == "poly":
+                raise ValueError("geometry.pw_upstream: poly は物理壁の指定 — Euler の prepare は physical_upstream の無い問題では設計壁で格子を作る")
+    else:
+        pwu = _pw_upstream(p.geometry)            # poly (既定・明示) だけ (_physical_upstream が ramp を拒む)
+        if _physical_wall_repr(p.geometry) is not None:
+            # 案 A (§5.1 #36e): Euler の参照の壁は H の上流を付けた設計壁 (区分表現) で物理壁ではない。物理壁の表現の指定を黙って無視しない
+            raise ValueError(f"geometry.physical_wall_repr: {_physical_wall_repr(p.geometry)} は物理壁の指定 — Euler の prepare は "
+                             "physical_upstream の問題を H の上流を付けた設計壁 (壁ファイル design_upstream) で準備する")
     # Euler の格子は mesh_euler (mesh は読まない)。無い・不正なら run dir を作る前・設計チェーンの前に止める (2026-10-07)
     m_eu = mesh_euler_block(p)
+    # 節点数の上限 (plan tooling-nozzle-mesh-size-guard §4.2): 実効の節点数で run dir を作る前・設計チェーンの前に判定する
+    # (節点数は scale によらないので scale 1 の Mesh2DParams で数える)
+    nodes = check_node_budget(mesh_params_euler(p, 1.0), m_eu, "mesh_euler")
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
     d = design_chain(p)
     require_moc_gate(p, d)                        # MOC の不合格は run dir を作る前に止める (2026-10-07)
-    run_dir.mkdir(parents=True, exist_ok=False)
-    wall = d["wall"]
     scale = float(p.spec["r_throat"])
+    # 壁: physical_upstream が無ければ設計壁そのもの (今と同じ)、あれば H の上流を付けた設計壁 (ゲートの不合格は run dir を作る前に例外)
+    wall, euler_wall = euler_reference_wall(p, d, scale, pwu=pwu)
+    run_dir.mkdir(parents=True, exist_ok=False)
     mp = mesh_params_euler(p, scale)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
+    _check_generated_nodes(coords, nodes, "mesh_euler")
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges)
     # 記録: 目標軸分布 (x0 → x_E) と設計壁
     law = d["law"]
@@ -840,8 +988,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     # 品質検査は cell 変換の一時コピー (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(m_eu.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
@@ -857,10 +1004,9 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if implicit_relax is not None:
         cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
-    mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
+    mesh_rec = _mesh_record(p, mp, "mesh_euler", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges, nodes)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -891,6 +1037,15 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
             "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
             "mesh": mesh_rec, "environment": environment_record()}
+    if euler_wall is not None:
+        # H の上流を付けた設計壁 (§5.1 #36e の案 A): 壁ファイル (書いて読み直し、復元した壁が今の壁と一致することを確かめる) と記録。
+        # キー無しは書かない
+        from ..geometry.wall_axismach import save_wall_file
+        wpath, wrec, wsha = save_wall_file(run_dir, wall, scale, euler_wall["repr"])
+        euler_wall["wall_file"] = {"repr": euler_wall["repr"], "file": wpath.name, "sha256": wsha,
+                                   **{k: wrec[k] for k in ("format", "version", "units", "origin", "domain", "domain_m", "physical_wall")}}
+        info["physical_upstream"] = euler_wall["physical_upstream"]
+        info["euler_wall"] = euler_wall
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -1181,8 +1336,13 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
     同じ経路 (k_f の cf_scale・熱条件・平滑化) で δ_r を作り直すために渡す (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.2)。
     rtol: **診断用** (plan tooling-nozzle-upstream-poly-and-throat-sizing §6 U2c)。`integral_bl` の RK45 の相対許容差を明示の引数で
     注入する。None = 渡さない (`integral_bl` の既定 1e-6、今の振る舞いのまま)。YAML のキーにはしない。実効値は
-    `res_init["solve_ivp"]["rtol"]` (solve_ivp に渡した値) に残る。"""
+    `res_init["solve_ivp"]["rtol"]` (solve_ivp に渡した値) に残る。
+    `geometry.physical_upstream` がある問題は ValueError (積分法は設計壁の縮流部を入口から前進積分するので、物理壁の別の形の上流の
+    境界層の履歴にならない。未対応のまま黙って設計壁の縮流部で数えない; plan tooling-nozzle-isothermal-wall-chain §5.1 #34)。"""
     from ..feedback.deltastar_integral import integral_bl
+    if _physical_upstream(p.geometry) is not None:
+        raise ValueError("積分法の初期壁 (deltastar_initializer) と geometry.physical_upstream の併用は未対応 — 積分法は設計壁の縮流部を "
+                         "前進積分するので物理壁の上流と別の形になる。δ_r は delta_r_csv で与える")
     scale = float(p.spec["r_throat"]) if scale is None else float(scale)
     wall_inv = d["wall_inv"]
     model = str(init_cfg.get("model", "contur"))
@@ -1190,7 +1350,9 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
         raise ValueError(f"deltastar_initializer.model={model!r} は未対応 (contur のみ)")
     # 熱境界条件は spec.wall_thermal が単一ソース (plan tooling-nozzle-isothermal-wall-chain §4.1)。
     # initializer/YAML の thermal_bc 指定は無視し、食い違えば警告する (NS と積分法が別の壁温を読む状態を作らない)。
-    tbc = p.wall_thermal_bc_integral
+    # 壁温分布の表は**ここで解決した同じ scale** で換算する (integral_bl に渡す scale と同じ; 寸法の逆算の試しの r_t を含む。
+    # plan tooling-nozzle-wall-temperature-profile §4.2 の契約)。一様・断熱は wall_thermal_bc_integral と同じ dict
+    tbc = integral_thermal_bc(p, d, scale)
     if init_cfg.get("thermal_bc") and dict(init_cfg["thermal_bc"]) != tbc:
         print(f"[prepare_ns] warning: initializer.thermal_bc={init_cfg['thermal_bc']} は無視 (spec.wall_thermal={p.wall_thermal} を使用)")
     res_init = integral_bl(d["wall"], wall_inv, _gam_or_gas(p), p.cp, float(p.spec["Pt"]), float(p.spec["Tt"]),
@@ -1224,16 +1386,20 @@ def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar
     """物理壁の構築 (`prepare_ns` と寸法の逆算 `deltastar_loop.solve_rt`・`solve_rt_throat` が共有する; plan
     tooling-nozzle-upstream-poly-and-throat-sizing §4.2「同じ壁の構築」)。`PhysicalNozzleWall` に `geometry.pw_ramp`・
     `geometry.pw_upstream` (`_pw_upstream` の解決済みの値) を渡し、`physical_wall_repr: single_bspline` なら 1 本の B-spline に
-    作り直す。scale: r_t [m] (相関 δ* の診断に使う。壁の形は r_t 単位)。"""
+    作り直す。scale: r_t [m] (相関 δ* の診断に使う。壁の形は r_t 単位)。
+    `geometry.physical_upstream` (`_physical_upstream`、plan tooling-nozzle-isothermal-wall-chain §5.1 #34) があれば、物理壁の直管と
+    多項式 Q の始点だけをその値にする (設計壁 `d["wall"]` は凍結した形のまま)。キー無しは今と同じ (引数も渡さない)。"""
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall
     pwu = _pw_upstream(p.geometry) if pwu is None else pwu
     # joint 壁の物理壁 (解析経路) の δ_r ランプ区間: geometry.pw_ramp (None = 既定、default_pw_ramp)。ゲート不合格は例外
     pw_ramp = p.geometry.get("pw_ramp")
+    pu = _physical_upstream(p.geometry)
+    pu_kw = {} if pu is None else {"physical_upstream": {"r_U": pu["r_inlet"], "L_U": pu["L_U"], "L_pipe": pu["L_pipe"]}}
     wall = PhysicalNozzleWall(d["wall"], d["wall_inv"], float(scale), float(p.spec["Pt"]),
                               float(p.spec["Tt"]), _gam_or_gas(p), p.cp, dstar_x=dstar_x,
                               offset=offset, delta_r_x=delta_r_x,
                               ramp=(None if pw_ramp is None else tuple(float(v) for v in pw_ramp)),
-                              upstream=pwu["value"])
+                              upstream=pwu["value"], **pu_kw)
     req = _physical_wall_repr(p.geometry)
     if req == "single_bspline":
         # 今の物理壁 (pw_upstream poly) を全域 1 本の 5 次 B-spline にノット挿入で作り直す (許容誤差・ゲート不合格は例外)
@@ -1249,11 +1415,268 @@ def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar
     return wall
 
 
+def delta_r_zero(x_lo: float, x_hi: float):
+    """補正 δ_r ≡ 0 の関数 (`delta_r_from_table` と同じ形: 値と導関数・`spline`・`x_range`)。#36b では Euler の参照の物理壁が NS の物理壁と
+    同じ構築 (`build_physical_wall`) を δ_r = 0 で通るために使った (§5.1 #36e の案 A からは `euler_reference_wall` は使わない。試験・診断で
+    「δ_r = 0 の物理壁は今も物理壁のゲートで落ちる」ことを確かめるのに残す)。係数がすべて 0 の 5 次の
+    補間スプラインなので値も導関数も厳密に 0 (S + 0 は S とビット同一)。表の範囲 [x_lo, x_hi] は壁の定義域を渡す
+    (1 本の B-spline の壁は表が [0, x_e] を覆うことを要求する)。"""
+    xt = np.linspace(float(x_lo), float(x_hi), 7)
+    f = delta_r_from_table(xt, np.zeros_like(xt))
+    f.is_zero = True
+    return f
+
+
+def euler_reference_wall(p: Problem, d: dict, scale: float, pwu: dict | None = None):
+    """Euler (`prepare`) の格子の壁 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36b、§5.1 #36e で案 A に)。戻り (wall, rec)。
+
+    - `geometry.physical_upstream` が無い: 設計壁 `d["wall"]` そのもの (今と同じ)。rec は None。
+    - ある: **H の上流を付けた設計壁** (`UpstreamDesignWall`; codex diagnose 3 `notes/reviews/2026-10-14-h370-registration-diagnose.md`
+      の案 A)。x ≥ 0 は凍結した設計壁 S そのもの、x < 0 は直管 r_inlet と (−L_U, r_inlet, 0, 0) → x = 0 の S の (r, r′, r″) の 5 次
+      多項式 (物理壁の `poly` の上流と同じ式)。δ* ループの抽出器は δ_in = NS の壁 − この壁 と定義するので、境界層の補正を足さない固定の
+      Euler の参照に使う (NS の補正済みの物理壁を slip にした壁ではない — δ_in の基準が変わる; codex diagnose 2026-10-14)。
+      ゲート: 下流 (x ≥ 0) は**設計壁のゲート** `monotone_gate`、上流は単調な収縮・正の半径、全域の一意な大域最小、x = −L_U・0 の C²
+      (`UpstreamDesignWall`)。**物理壁のクラス (`PhysicalNozzleWall`) とその厳密なゲート (`THROAT_R1_TOL`) は使わず、緩めもしない**
+      (#36b の「S の出口端の微小な減少が物理壁のゲートで落ちる」判断待ちは案 A で決着: この壁は物理壁ではない)。設計壁と CFD ピンの
+      照合は geometry の r_inlet・L_U・L_pipe のまま (`design_chain` が照合する。照合を外さない)。ゲート・validate の不合格は ValueError。
+    pwu: `_pw_upstream` の解決済みの値 (poly だけ。記録に使う)。
+    rec: prepare_info.json の `euler_wall` (種類・δ_r = 0・上流の形とゲート・スロート・壁ファイルの種類 `design_upstream`)。
+    壁ファイルは呼び出し側が書く。"""
+    from ..geometry.wall_axismach import DESIGN_UPSTREAM_KIND, UpstreamDesignWall
+    pu = _physical_upstream(p.geometry)
+    if pu is None:
+        return d["wall"], None
+    pwu = _pw_upstream(p.geometry) if pwu is None else pwu
+    if pwu["value"] != "poly":
+        raise ValueError(f"Euler の参照の壁 (physical_upstream) は pw_upstream poly だけ (受け取った {pwu['value']!r})")
+    wall = UpstreamDesignWall(d["wall"], {"r_U": pu["r_inlet"], "L_U": pu["L_U"], "L_pipe": pu["L_pipe"]})
+    msgs = wall.validate()
+    if msgs:
+        raise ValueError("Euler の参照の壁 (H の上流を付けた設計壁) が不合格: " + "; ".join(msgs))
+    rec = {"kind": "design_with_physical_upstream", "delta_r": 0.0,
+           "note": ("H の上流を付けた設計壁 (案 A、§5.1 #36e): x ≥ 0 は設計壁 S、x < 0 は physical_upstream の直管と S(0) への 5 次多項式。"
+                    "物理壁ではない (境界層の補正なし)"),
+           "physical_upstream": {"requested": pu, "wall": wall.physical_upstream},
+           "pw_upstream": {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]},
+           "gate": wall.gate,
+           "throat": {"x": float(wall.x_throat), "r": float(wall.r_throat), "kappa": float(wall.kappa_throat)},
+           "repr": DESIGN_UPSTREAM_KIND}
+    return wall, rec
+
+
+# --- 本段だけの陰解法 B0 (`evaluate.main_line`; plan tooling-nozzle-isothermal-wall-chain §4.8-2・§5.1 #30) ---------------
+# case/45 の生産の陰解法 B0 (壁法線のライン陰解法・方向別の擬似 dt とその伸びの上限・implicitThermalJacobian・cfl・implicitRelax・
+# リミッタの基準値の固定・出力の量) を、段階起動の前の段 (S1・S2) には付けずに本段だけに書く。キーと書き方は case/45 の
+# `cold_cfl.py prep --line dir --itj … --cap … --cfl … --limiter-ref-from … --extra …` と同じ (implicitRelax だけは prepare_ns の
+# `implicit_relax` と同じく blockDPLUR の直後に挿入する。B0 の系譜 run_0182 → run_0183 → run_0483 の本段の書き方)。
+# 前の段の元の設定 (B0 を当てる前) は run の PRESTAGE_CONFIG に置き、run_staged_ns が S1・S2 をそこから作る (本段の設定から
+# CFL・次数・nStepInner だけを変えて作ると S1 にもライン陰解法・上限・ITJ が残る; codex diagnose 2026-10-13)。
+PRESTAGE_CONFIG = "solverConfig_prestage.yaml"
+MAIN_STAGE_STARTED = "MAIN_STAGE_STARTED"
+_MAIN_LINE_KEYS = ("line", "cap", "itj", "cfl", "relax", "limiter_ref", "extra_fields")
+_MAIN_LINE_REQUIRED = ("line", "cap", "itj", "cfl", "relax", "limiter_ref")     # extra_fields (出力の量) だけは任意
+_LIMITER_REF_KEYS = (("ro", "limiterRoRef"), ("p", "limiterPRef"), ("a", "limiterARef"))
+# B0 だけが書くパス (前の段の設定に残っていてはいけない)。cfl・cfl_pseudo・implicitRelax は前の段にもありうるので含めない
+_MAIN_LINE_ONLY_PATHS = ({("time", "deltaT", k) for k in ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap",
+                                                         "implicitThermalJacobian")}
+                         | {("space", k) for _, k in _LIMITER_REF_KEYS} | {("output",)})
+# 前の段の元の設定と本段の設定の差として許すパス (B0 のパス + cfl・cfl_pseudo・implicitRelax)
+_MAIN_LINE_PATHS = (_MAIN_LINE_ONLY_PATHS
+                    | {("time", "deltaT", k) for k in ("cfl", "cfl_pseudo", "implicitRelax")})
+_CFG_MISSING = object()
+
+
+def _cfg_diff_paths(a, b, path=()) -> dict:
+    """読み込んだ 2 つの設定の差 {パス: (a の値, b の値)}。片側にしか無いキーは _CFG_MISSING
+    (case/45 の make_ns_n012_problems.diff_paths と同じ定義)。"""
+    out = {}
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b), key=str):
+            out.update(_cfg_diff_paths(a.get(k, _CFG_MISSING), b.get(k, _CFG_MISSING), path + (k,)))
+        return out
+    if a is _CFG_MISSING or b is _CFG_MISSING or type(a) is not type(b) or a != b:
+        out[path] = (a, b)
+    return out
+
+
+def _cfg_path_get(doc, path):
+    """読み込んだ設定の path (キーの tuple) の値。無ければ _CFG_MISSING。"""
+    v = doc
+    for k in path:
+        if not isinstance(v, dict) or k not in v:
+            return _CFG_MISSING
+        v = v[k]
+    return v
+
+
+def _main_line_spec(p: Problem, cfl_main=None, implicit_relax=None) -> dict | None:
+    """`evaluate.main_line` を読んで検査し、解決した値を返す (キー無しは None = 今と同じ設定・同じ段)。
+    {line: dir, cap, itj, cfl, relax, limiter_ref: {ro, p, a}, extra_fields: [...]}。本段の cfl・implicitRelax は main_line が
+    決めるので、引数・YAML の `cfl_main` と同時に指定したら ValueError (どちらが効くかを曖昧にしない)。`implicit_relax` は
+    前の段 (S1・S2) にも効く値なので、main_line.relax と同じ値のときだけ併記を許す (2026-10-13 親の決定: 生産の系譜 run_0182 は
+    `prepare_ns(implicit_relax=0.7)` で S1・S2 も 0.7。違う値は ValueError)。
+    line は dir (lineImplicit 1 + lineDtDirectional 1) だけ。未知のキー・欠けたキー・範囲外の値も ValueError。"""
+    ml = p.evaluate.get("main_line")
+    if ml is None:
+        return None
+    if not isinstance(ml, dict):
+        raise ValueError(f"evaluate.main_line は mapping であること ({ml!r})")
+    clash = [w for w, on in (("引数 cfl_main", cfl_main is not None), ("evaluate.cfl_main", "cfl_main" in p.evaluate)) if on]
+    if clash:
+        raise ValueError(f"evaluate.main_line と {', '.join(clash)} は同時に指定できない "
+                         "(本段の cfl は main_line の cfl で決める。前の段は S1 0.5・S2 1.0 のまま)")
+    unknown = sorted(set(ml) - set(_MAIN_LINE_KEYS), key=str)
+    missing = [k for k in _MAIN_LINE_REQUIRED if k not in ml]
+    if unknown or missing:
+        raise ValueError(f"evaluate.main_line のキーが不正 (未知 {unknown}、欠け {missing}; 使えるのは {list(_MAIN_LINE_KEYS)})")
+    if ml["line"] != "dir":
+        raise ValueError(f"evaluate.main_line.line は dir だけ (lineImplicit 1 + lineDtDirectional 1; 指定 {ml['line']!r})")
+
+    def _pos(name, v, hi=None):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(float(v)) or float(v) <= 0.0 \
+                or (hi is not None and float(v) > hi):
+            raise ValueError(f"evaluate.main_line.{name} は有限の正の数{'' if hi is None else f' (≤ {hi})'}であること ({v!r})")
+        return float(v)
+    itj = ml["itj"]
+    if isinstance(itj, bool) or not isinstance(itj, int) or not 0 <= itj <= 7 or ((itj & 4) and not (itj & 1)):
+        # ソルバの検査 (solverConfig.cpp: 0..7、ビット 4 はビット 1 が要る) と同じ
+        raise ValueError(f"evaluate.main_line.itj は 0..7 の整数 (ビット 4 はビット 1 と一緒に) であること ({itj!r})")
+    lr = ml["limiter_ref"]
+    if not isinstance(lr, dict) or set(lr) != {k for k, _ in _LIMITER_REF_KEYS}:
+        raise ValueError(f"evaluate.main_line.limiter_ref は {{ro, p, a}} の 3 つだけを持つ mapping であること ({lr!r})")
+    refs = {sk: _pos(f"limiter_ref.{k}", lr[k]) for k, sk in _LIMITER_REF_KEYS}
+    ex = ml.get("extra_fields")
+    if ex is not None and (not isinstance(ex, list) or not ex or len(set(map(str, ex))) != len(ex)
+                           or any(not isinstance(s, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s) for s in ex)):
+        raise ValueError(f"evaluate.main_line.extra_fields は重複の無い量の名前の空でないリストであること ({ex!r})")
+    relax = _pos("relax", ml["relax"], hi=1.0)
+    ir = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
+    if ir is not None and float(ir) != relax:
+        raise ValueError(f"implicit_relax ({ir!r}、前の段にも効く) は evaluate.main_line.relax ({relax!r}) と同じ値に限る "
+                         "(違う値を前の段と本段に分けて書く形は決めていない)")
+    return {"line": "dir", "cap": _pos("cap", ml["cap"]), "itj": int(itj), "cfl": _pos("cfl", ml["cfl"]),
+            "relax": relax, "prestage_relax": (None if ir is None else float(ir)), "limiter_ref": refs,
+            "extra_fields": (list(ex) if ex else None)}
+
+
+def _apply_main_line(cfg: str, ml: dict) -> str:
+    """前の段の元の設定 cfg に B0 (`_main_line_spec` の解決済みの値) を当てた本段の設定を返す。キー・書き方・前提の検査は
+    case/45 の `cold_cfl.py prep` と同じ (cfl・cfl_pseudo の値の置換 → output → space の先頭にリミッタの基準値 →
+    deltaT の先頭に lineImplicit・lineDtDirectional → implicitThermalJacobian → lineDtDirectionalCap の順)。implicitRelax は
+    prepare_ns の `implicit_relax` と同じく `blockDPLUR: 1,` の直後に挿入する。読み直して、元との差が B0 のパスだけで値が
+    指定どおりであることを確かめる (違えば ValueError)。"""
+    doc = _cfg_load(cfg)
+    tm = doc.get("time")
+    dt = tm.get("deltaT") if isinstance(tm, dict) else None
+    sp = doc.get("space")
+    if not isinstance(dt, dict) or not isinstance(sp, dict):
+        raise ValueError("solverConfig に time.deltaT・space の mapping が無い — main_line を書けない")
+    if int(dt.get("blockDPLUR", 0)) != 1 or int(tm.get("timeIntegration", 0)) != 11 or int(dt.get("lowMachPrecond", 0)) >= 2:
+        raise ValueError("lineImplicit は timeIntegration 11 + blockDPLUR 1 + lowMachPrecond < 2 専用 — main_line を書けない")
+    pre_relax = _cfg_path_get(doc, ("time", "deltaT", "implicitRelax"))
+    if pre_relax is not _CFG_MISSING and float(pre_relax) != float(ml["relax"]):
+        raise ValueError(f"前の段の元の設定の implicitRelax ({pre_relax!r}) が main_line.relax ({ml['relax']!r}) と違う")
+    have = [".".join(pth) for pth in sorted(_MAIN_LINE_ONLY_PATHS)
+            if _cfg_path_get(doc, pth) is not _CFG_MISSING and (pth != ("output",) or ml["extra_fields"])]
+    if have:
+        raise ValueError(f"前の段の元の設定に既に {have} がある — main_line を重ねて書けない")
+    if cfg.count("deltaT: {") != 1 or cfg.count("space: {") != 1 or cfg.count("blockDPLUR: 1,") != 1:
+        raise ValueError("deltaT・space が 1 つのフロー形式でないか `blockDPLUR: 1,` が 1 か所でない — main_line の足し方を決めていない")
+    text = _cfg_set(cfg, {"cfl": ml["cfl"], "cfl_pseudo": ml["cfl"]})
+    if ml["extra_fields"]:
+        text = text.rstrip("\n") + "\noutput: {level: 1, extraFields: [" + ", ".join(ml["extra_fields"]) + "]}\n"
+    text = text.replace("space: {", "space: {" + ", ".join(f"{k}: {float(v)!r}" for k, v in ml["limiter_ref"].items()) + ", ", 1)
+    text = text.replace("deltaT: {", "deltaT: {lineImplicit: 1, lineDtDirectional: 1, ", 1)
+    text = text.replace("deltaT: {", f"deltaT: {{implicitThermalJacobian: {int(ml['itj'])}, ", 1)
+    text = text.replace("deltaT: {", f"deltaT: {{lineDtDirectionalCap: {float(ml['cap'])!r}, ", 1)
+    if pre_relax is _CFG_MISSING:          # 前の段に implicitRelax が無いときだけ本段に挿入 (あれば同じ値を引き継ぐ)
+        text = text.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(ml['relax'])},", 1)
+    want = {("time", "deltaT", "lineImplicit"): 1, ("time", "deltaT", "lineDtDirectional"): 1,
+            ("time", "deltaT", "lineDtDirectionalCap"): float(ml["cap"]),
+            ("time", "deltaT", "implicitThermalJacobian"): int(ml["itj"]),
+            ("time", "deltaT", "cfl"): float(ml["cfl"]), ("time", "deltaT", "cfl_pseudo"): float(ml["cfl"]),
+            ("time", "deltaT", "implicitRelax"): float(ml["relax"]),
+            **{("space", k): float(v) for k, v in ml["limiter_ref"].items()}}
+    if ml["extra_fields"]:
+        want[("output",)] = {"level": 1, "extraFields": list(ml["extra_fields"])}
+    after = _cfg_load(text)
+    stray = sorted(set(_cfg_diff_paths(doc, after)) - set(want), key=str)
+    bad = {".".join(pth): _cfg_path_get(after, pth) for pth, v in want.items()
+           if _cfg_path_get(after, pth) is _CFG_MISSING or _cfg_path_get(after, pth) != v}
+    if stray or bad:
+        raise ValueError(f"main_line を当てた本段の設定を読み直したら想定と違う (B0 以外の差 {stray}、値の違い {bad})")
+    return text
+
+
+def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None, main_line: dict | None = None):
+    """NS の (前の段の元の設定, 本段の設定) を返す。`main_line` (`_main_line_spec` の戻り値) が None なら 2 つは同じ文字列で、
+    従来の prepare_ns の組み立てと同じ (`_config_sst_node` → `_apply_gas_to_config` → implicit_relax の挿入)。
+    `_apply_gas_to_config` は run_dir に species_meta.yaml などを書く (従来どおり 1 回だけ呼ぶ)。"""
+    cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
+    implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
+    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
+    if implicit_relax is not None:
+        # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
+        cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    if main_line is None:
+        return cfg_ns, cfg_ns
+    return cfg_ns, _apply_main_line(cfg_ns, main_line)
+
+
+def _ns_steps(p: Problem, nsteps=None) -> tuple:
+    """NS の本段の step 数・出力の間隔とその出所 (n, out_int, n の出所)。prepare_ns と停止規則の設定 (`_stop_rule_settings`) が共有する
+    (M6 の版が prepare_ns の中の式を関数に出した; plan tooling-nozzle-isothermal-wall-chain §5.1 #36a)。
+    step 数は 2026-10-14 のユーザ決定「1 ok」(forge-f5 fb07daf8、plan tooling-nozzle-cooled-wall-ns-settling §4.5) のとおり、引数 nsteps
+    (`--steps`) > `evaluate.ns_steps` > `NS_STEPS_DEFAULT` (60,000)。`evaluate.nStepOuter` は Euler (`prepare`) だけが読む
+    (雛形の 12,000 が NS にも効いて本段が短すぎた)。停止規則を使うときの本段の長さは上限 (`stop_rule.resolve_settings` の cap) で、
+    この n は使わない・使えないときの長さ (`fallback_steps`)。"""
+    if nsteps:
+        n, src = int(nsteps), "引数 (--steps)"
+    elif p.evaluate.get("ns_steps") is not None:
+        n, src = int(p.evaluate["ns_steps"]), "evaluate.ns_steps"
+    else:
+        n, src = NS_STEPS_DEFAULT, f"既定 {NS_STEPS_DEFAULT}"
+    out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
+    if n % out_int:
+        # forge は outStepInterval の倍数でしか res を書かない → 最終 step の res が残るよう n を割り切る間隔に直す
+        out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
+    return n, out_int, src
+
+
+def _stop_rule_settings(p: Problem, nsteps, euler_ref, stop_rule: bool | None) -> dict:
+    """本段の停止規則の設定 (`stop_rule.resolve_settings`; plan tooling-nozzle-cooled-wall-ns-settling §4.6・
+    plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a)。**既定で使う** (問題 YAML に `evaluate.stop_rule` が無く引数 stop_rule も
+    None)。使えない (euler_ref が無い・見つからない・固定のスナップショットの sha が合わない、出力の間隔が窓に 9 点を入れられない、
+    上限が出力の間隔の倍数でない) とき:
+      - **明示** (`evaluate.stop_rule: true` か引数 stop_rule=True; 記録 `explicit`): ValueError (prepare_ns は run dir を作る前に呼ぶ)。
+      - **既定**: `use` = False と理由 (`reason`) を記録して返す (本段は fallback_steps の長さ; run_staged_ns が UNAVAILABLE を書く)。
+    `evaluate.stop_rule: false`・引数 stop_rule=False は使わない (requested = False)。"""
+    from . import stop_rule as SR
+    n, out_int, n_src = _ns_steps(p, nsteps)
+    sr = SR.resolve_settings(p.evaluate, nsteps_arg=nsteps, n_main=n, n_main_source=n_src, out_int=out_int,
+                             euler_ref=euler_ref, requested=stop_rule)
+    if sr["requested"]:
+        why = [sr["reason"]] if not sr["use"] else []
+        if euler_ref and SR.resolve_path(euler_ref) is None:
+            why.append(f"euler_ref が見つからない ({euler_ref!r})")
+        elif isinstance(euler_ref, dict):
+            try:
+                SR.check_euler_ref(euler_ref)            # 固定のスナップショットの sha256 (§5.1 #36e (6))
+            except ValueError as e:
+                why.append(str(e))
+        if why and sr["explicit"]:
+            raise ValueError(f"本段の停止規則を要求した ({sr['requested_source']}) が使えない: {'; '.join(why)}")
+        if why:
+            sr.update(use=False, reason="; ".join(why))
+    return sr
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
                omega: float | None = None, prev_run=None, initializer=None,
-               cfl_main: float | None = None, implicit_relax: float | None = None) -> dict:
+               cfl_main: float | None = None, implicit_relax: float | None = None,
+               stop_rule: bool | None = None) -> dict:
     r"""**物理壁 (inviscid + δ*) の RANS run** を準備する (A12)。
 
     plan: plans/active/tooling-nozzle-axismach-viscous-deltastar.md。
@@ -1281,8 +1704,37 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       解決済みの値は prepare_info.json の `pw_upstream` に、`poly` のゲートは `pw_upstream_gate` に書く。
     - **`spec.sizing`** (任意、§4.2): 寸法の決め方 {method: exit | throat, target_m}。prepare_info.json の `sizing` に、実際の物理壁の
       物理スロート半径・出口半径 [m] と目標との差を書く (キー無しは method = null = 未記録)。
+    - **`evaluate.main_line`** (任意、plan tooling-nozzle-isothermal-wall-chain §4.8-2・§5.1 #30): 本段だけに B0 (ライン陰解法・方向別の
+      擬似 dt の上限・implicitThermalJacobian・cfl・implicitRelax・リミッタの基準値・出力の量) を当てる (`_main_line_spec`・
+      `_apply_main_line`)。B0 を当てる前の設定を `PRESTAGE_CONFIG` に置き (run_staged_ns が S1・S2 をそこから作る)、変換・初期場の
+      処理はその設定のまま行い、最後に solverConfig.yaml を本段の設定に替える。`cfl_main`・`implicit_relax` との併記は run dir を
+      作る前に例外。キー無しは今と同じ設定・同じファイル。prepare_info.json の `main_line` と `ns_stage_configs` (stages=full の
+      S1・S2・本段の設定の sha256) に記録する。
+    - **`geometry.physical_upstream`** (任意、plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #34): 物理壁だけの上流の形
+      {r_inlet, L_U, L_pipe} (`_physical_upstream`)。設計壁・CFD ピンの照合は geometry の r_inlet・L_U・L_pipe のまま。
+      δ_r は `delta_r_csv` で与えること (積分法の初期壁・相関 δ* の経路は設計壁の縮流部で数えるので、run dir を作る前に例外)。
+      壁温分布 (Tw_profile) の区切りの点も設計壁の値なので、併用は run dir を作る前に例外。キー無しは今と同じ (prepare_info.json にも
+      書かない)。指定したときは prepare_info.json の `physical_upstream` に解決済みの値と凍結した設計の値を書く。第一層の厚さの表
+      (`mesh.wall_first_frac_table`) は局所半径との比なので、上流の半径を変えたら表も別に直す (このキーは格子の表を書き換えない)。
+    - **本段の停止規則** (plan tooling-nozzle-cooled-wall-ns-settling §4.6・plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、
+      `stop_rule.py`; 旧 m9_watch と同等とは言わない新しい規則、`_stop_rule_settings`): **既定で使う** (問題 YAML に `evaluate.stop_rule` が
+      無ければ使う、forge-f5 の版・ユーザ決定)。`evaluate.stop_rule: false` か引数 `stop_rule=False` (CLI `--no-stop-rule`) で使わない。
+      `evaluate.stop_rule_cap` (上限 = 到達 + 保持を含む本段の step 数、既定 200,000; 引数 nsteps があればそれ)・`evaluate.stop_rule_thresholds`
+      (閾値・窓・断面の比 x_fracs の上書き)・`evaluate.stop_rule_hold_steps` (到達の後の継続、既定 `stop_rule.HOLD_STEPS_DEFAULT` = 40,000)。
+      使えない (euler_ref が無い・見つからない・固定の sha が合わない、出力の間隔、上限が出力の間隔の倍数でない、設計壁の出口
+      `physical_wall.domain` の無い物理壁) とき: `evaluate.stop_rule: true` か引数 `stop_rule=True` の**明示**なら例外 (壁の出口の検査だけは
+      物理壁を作った後なので run dir を作った後、他は run dir を作る前; M6 の版)、**既定**なら `use` = False と理由を記録して本段を
+      fallback_steps (`--steps` > `evaluate.ns_steps` > 60,000) で回す (run_staged_ns が UNAVAILABLE を記録; forge-f5 の版)。決めた設定は
+      prepare_info.json の `stop_rule` に書き、使うときは `run_staged_ns` が本段の nStepOuter を上限に書き換えて見張る (ここで書く solverConfig の
+      nStepOuter は fallback_steps のまま。上限と違うと `ns_stage_configs.main` の sha256 は実際に回した本段と違うので、実際の本段は
+      MAIN_STAGE_STARTED を見る)。θ_r の断面は設計壁の出口 (`physical_wall.domain[1]`) の比。
+    - **`euler_ref`** (固定の Euler の参照): run dir (str; 今までどおり、抽出は最新の出力を読む) か、スナップショットの固定 {run, res, sha256}
+      (plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6); `metrics.deltastar.resolve_euler_ref`)。固定は run dir を作る前に sha256 を照合し
+      (違えば ValueError)、prepare_info.json の `euler_ref` (と停止規則の `stop_rule.euler_ref`) にそのまま残す。停止規則の帯・見張りの中の
+      出力ごとの δ の記録・受け渡しの関門の抽出はその固定のファイルを読む。
     """
     from ..feedback.deltastar import _sutherland
+    from . import stop_rule as SR
     from ..geometry.wall_axismach import PhysicalNozzleWall, SingleBSplinePhysicalWall, check_required_attrs, save_wall_file
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
@@ -1297,6 +1749,27 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     sizing = _sizing_spec(p.spec)
     # 種ごとの輸送物性 (#9b): TP の NS は gas.transport 必須。run dir を作る前・設計チェーンの前に検査する
     transport = p.transport_for_ns()
+    # 節点数の上限 (plan tooling-nozzle-mesh-size-guard §4.2): 実効の節点数で run dir を作る前・設計チェーンの前に判定する
+    # (節点数は scale によらないので scale 1 で数える。既定の ni・nj・第 1 層は下の格子と同じ ns_mesh_defaults)
+    ns_mesh_defaults = {"ni": 561, "nj": 97, "wall_first_frac": 4.5e-5}
+    nodes = check_node_budget(mesh_params(p, 1.0, **ns_mesh_defaults), p.mesh, "mesh")
+    # 本段だけの B0 (§5.1 #30): 不正値・cfl_main / implicit_relax との併記は run dir を作る前に例外
+    main_line = _main_line_spec(p, cfl_main, implicit_relax)
+    # 物理壁だけの上流の形 (§5.1 #34): 不正値・δ_r の経路 (delta_r_csv だけ)・壁温分布との併用は run dir を作る前に例外
+    pu = _physical_upstream(p.geometry)
+    if pu is not None:
+        if delta_r_csv is None:
+            raise ValueError("geometry.physical_upstream は delta_r_csv の経路だけ (積分法の初期壁・相関 δ* は設計壁の縮流部で数えるので、"
+                             "物理壁の別の形の上流の境界層の履歴にならない)")
+        if "Tw_profile" in p.wall_thermal:
+            raise ValueError("geometry.physical_upstream と spec.wall_thermal.Tw_profile の併用は未対応 (壁温分布の区切りの点 −L_U は "
+                             "設計壁の値なので、物理壁の縮流部の始まりと食い違う)")
+    # 固定の Euler の参照 (§5.1 #36e (6)): スナップショットの指定 {run, res, sha256} は run dir を作る前に sha を照合する (ディレクトリだけは今と同じ)
+    from ..metrics.deltastar import resolve_euler_ref
+    euler_ref_rec = (resolve_euler_ref(euler_ref, verify=isinstance(euler_ref, dict))["record"] if euler_ref else None)
+    # 本段の停止規則 (§5.1 #36a): 既定で使う。不正値と、明示 (evaluate.stop_rule: true) なのに使えない設定は run dir を作る前に例外
+    # (既定なら使えない理由を記録して fallback_steps で回す)
+    sr_settings = _stop_rule_settings(p, nsteps, euler_ref, stop_rule)
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
@@ -1351,12 +1824,20 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     if init_info is not None:
         dstar_src = f"integral_bl:{init_info['model']} thermal_bc={init_info['thermal_bc']} (radial)"
     elif delta_r_csv is not None:
-        dstar_src = f"delta_r_csv:{delta_r_csv} (radial, core-matched Euler ref {euler_ref}, omega {omega})"
+        dstar_src = f"delta_r_csv:{delta_r_csv} (radial, core-matched Euler ref {euler_ref_rec}, omega {omega})"
     else:
         dstar_src = ("correlation_hist_v1" if dstar_csv is None else f"{dstar_csv} (blend {dstar_blend})") + f" ({offset})"
     msgs = wall.validate()
     if msgs:
         raise ValueError("物理壁フィルタ不合格: " + "; ".join(msgs))
+    # 壁温分布 (plan tooling-nozzle-wall-temperature-profile §4.2): 表が最終の物理壁 (入口端〜出口端) を覆うか検査し、run に実行条件の
+    # 正本 2 つ (wall_temperature_profile.json・wall_profile_3.csv; physID 3 = _bcond の壁) を書いて sha256 を prepare_info に記録する。
+    # 一様・断熱は今までどおり p.wall_thermal をそのまま記録する
+    wt_rec = p.wall_thermal
+    if "Tw_profile" in wt_rec:
+        x_tab, _ = to_x_m(wt_rec["Tw_profile"], _wt_anchors(p, d, scale))
+        check_covers(x_tab, float(wall.x_in) * scale, float(wall.x_e) * scale, f"最終の物理壁 (入口端〜出口端、scale = {scale!r} m)")
+        wt_rec = {**wt_rec, "files": write_run_files(run_dir, p, d, scale, wall_id=3)}
     pw_info = None
     # 実効の表現: 明示 (legacy / single_bspline) か、キー無しの poly の既定 (1 本で表せれば single_bspline)
     pw_source = "explicit" if pw_repr is not None else None
@@ -1371,8 +1852,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             pw_info["fit"] = wall.fit_diag
     elif getattr(wall, "single_bspline_default_skipped", None):
         pw_info = {"repr": None, "source": "default (1 本で表せないので区分表現のまま)", "reason": wall.single_bspline_default_skipped}
-    mp = mesh_params(p, scale, ni=561, nj=97, wall_first_frac=4.5e-5)
+    mp = mesh_params(p, scale, **ns_mesh_defaults)
     coords, quads, bedges = generate_axisym_mesh(wall, mp)
+    _check_generated_nodes(coords, nodes, "mesh")
     # msh の座標の桁数 (mesh.msh_digits、既定 10 = 従来どおり; 冷却壁の薄い第一層は 17、plan tooling-nozzle-isothermal-wall-chain §5.1 #16)
     write_msh41_2d(run_dir / "nozzle.msh", coords, quads, bedges, digits=int(p.mesh.get("msh_digits", 10)))
     law = d["law"]
@@ -1386,20 +1868,21 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     xs_p = np.linspace(wall.x_throat, wall.x_e, 1500)
     np.savetxt(run_dir / "wall_physical.csv", np.c_[xs_p * scale, wall.r(xs_p) * scale],
                delimiter=",", header="x_m,r_m", comments="")
-    n = nsteps or int(p.evaluate.get("nStepOuter", 48000))
-    out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
-    if n % out_int:
-        # forge は outStepInterval の倍数でしか res を書かない → 最終 step の res が残るよう n を割り切る間隔に直す
-        out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
+    # NS の本段の step 数 (2026-10-14 ユーザ決定「1 ok」: 何も指定しないときは手順書の標準の 60,000 step)。`evaluate.nStepOuter` は Euler (`prepare`) だけが読む
+    # (雛形の 12,000 が NS にも効いて本段が短すぎた)。優先: 引数 nsteps (`--steps`) > `evaluate.ns_steps` > NS_STEPS_DEFAULT (`_ns_steps`)。
+    # 停止規則を使うときは run_staged_ns が本段を上限 (stop_rule.cap) に書き換えるので、ここの n は使わない・使えないときの長さ
+    n, out_int, n_src = _ns_steps(p, nsteps)     # forge は outStepInterval の倍数でしか res を書かないので n を割り切る間隔に直す
+    if not nsteps and p.evaluate.get("nStepOuter") is not None and p.evaluate.get("ns_steps") is None:
+        print(f"[prepare_ns] 本段 {n} step ({n_src})。evaluate.nStepOuter {p.evaluate['nStepOuter']} は Euler だけが読む (2026-10-14 から)", flush=True)
     cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
     implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
-    (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False), _tp_species_Y(p)))
+    # 壁温分布なら壁の行に wallProfile: 1 (CSV は上で書いた。この runner だけが profile_ok=True)
+    (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p)))
     (run_dir / "probe.yaml").write_text(PROBE_STUB)
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
         _apply_gas_to_config(_config_euler(p, n, out_int, 4.0, 1), p, run_dir))
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
     q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                        capture_output=True, text=True)
@@ -1408,16 +1891,13 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     (run_dir / "nozzle_qc.h5").unlink()
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
-    # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)
-    cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
-    if implicit_relax is not None:
-        # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
-        cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)。main_line があっても変換・初期場の処理は B0 を
+    # 当てる前の設定で行い、本段の設定 (cfg_main) への切り替えは最後に行う (§5.1 #30)
+    cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
-    subprocess.run([str(converter_path()), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
-    mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges)
+    mesh_rec = _mesh_record(p, mp, "mesh", coords.shape[0] // mp.ni, run_dir, coords, quads, bedges, nodes)
     paste_isentropic_ic(run_dir / "nozzle.h5", wall, scale,
                         float(p.spec["Pt"]), float(p.spec["Tt"]), p.gamma, p.cp,
                         gas=(None if str(p.evaluate.get('cfd_gas', 'same')) == 'cpg' else p.gas_model),
@@ -1458,7 +1938,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                                 "kappa": wall.kappa_throat,
                                 "dstar_throat_correlation": float(wall._dstar_hist(0.0)),
                                 "delta_r_throat_applied": float(wall.r_throat - 1.0)},
-            "offset": wall.offset_mode, "euler_ref": (str(euler_ref) if euler_ref else None),
+            "offset": wall.offset_mode, "euler_ref": euler_ref_rec,
             "pw_ramp_gate": (wall.ramp_gate if wall.pw_upstream == "ramp" else None),
             "initializer": init_info,
             "omega": omega, "prev_run": (str(prev_run) if prev_run else None),
@@ -1471,8 +1951,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "wall_fit": d["wall_fit"],      # 設計壁の当てはめ (joint: spline・mono_r2 ほか; plan tooling-nozzle-throat-monotone-r2 §5.1 #5 M4)
             "Md": d["Md"], "Md_moc_offset": d["Md_moc_offset"], "R": d["R"],
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
-            "nStepOuter": n, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
-            "wall_thermal": p.wall_thermal,
+            "nStepOuter": n, "nStepOuter_source": n_src, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
+            "stop_rule": sr_settings,       # 停止規則 (plan tooling-nozzle-cooled-wall-ns-settling §4.6): 使うか・上限・閾値・使わない理由
+            "wall_thermal": wt_rec,         # 分布なら Tw_profile と正本 2 つの sha256 (files) も
             "ic_from": str(ic_from) if ic_from else None,
             "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}
     if transport is not None:
@@ -1484,8 +1965,29 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 上流の作り方の解決済みの値とゲート、寸法の記録 (plan tooling-nozzle-upstream-poly-and-throat-sizing §4.1・§4.2)
     info["pw_upstream"] = {"value": wall.pw_upstream, "source": pwu["source"], "requested": pwu["requested"]}
     info["pw_upstream_gate"] = (wall.upstream_gate if wall.pw_upstream == "poly" else None)
+    if pu is not None:
+        # 物理壁だけの上流の形 (§5.1 #34): 問題の値と、壁が使った値 (名目の U→T Hermite・凍結した設計の値)。キー無しは書かない
+        info["physical_upstream"] = {"requested": pu, "wall": wall.physical_upstream}
     info["sizing"] = _sizing_record(sizing, wall, scale)
     info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
+    # 本段だけの B0 (§5.1 #30): 前の段の元の設定を PRESTAGE_CONFIG に置き、solverConfig.yaml を本段の設定に替える
+    # (cfl_main・implicit_relax の記録は本段の値にする)。キー無しはファイルを書かない
+    info["main_line"] = None
+    if main_line is not None:
+        (run_dir / PRESTAGE_CONFIG).write_text(cfg_ns)
+        (run_dir / "solverConfig.yaml").write_text(cfg_main)
+        info["cfl_main"], info["implicit_relax"] = main_line["cfl"], main_line["relax"]
+        info["main_line"] = {**main_line, "source": "evaluate.main_line", "prestage_config": PRESTAGE_CONFIG}
+    info["ns_stage_configs"] = ns_stage_sha256(cfg_main, cfg_ns if main_line is not None else None)
+    # 本段の停止規則 (§5.1 #36a; run_staged_ns が読む)。θ_r の断面は設計壁の出口 (physical_wall.domain[1]) の比なので、壁ファイルを
+    # 書かない区分表現の物理壁では使えない: 明示なら例外 (M6 の版)、既定なら使えない理由を記録して fallback_steps で回す (forge-f5 の版)
+    if sr_settings["use"] and not (isinstance(pw_info, dict) and isinstance(pw_info.get("domain"), (list, tuple))):
+        why = ("θ_r の断面を設計壁の出口 (prepare_info.physical_wall.domain[1]) の比で決めるが、この物理壁は壁ファイルを書かない"
+               "区分表現 (physical_wall.domain が無い)")
+        if sr_settings["explicit"]:
+            raise ValueError(f"本段の停止規則は {why} — physical_wall_repr を指定する")
+        sr_settings.update(use=False, reason=why)
+    info["stop_rule"] = sr_settings
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
 
@@ -1536,24 +2038,239 @@ def _stage_manifest_cls():
     return StageManifest
 
 
-def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> int:
+def _ns_prestage(cfg: str, cfl: float) -> str:
+    """前段: CFL を cfl に、空間 1 次、nStepInner 5 → 10 (従来どおり; 5 以外は据え置き)。"""
+    cfg = _first_order(_cfg_set(cfg, {"cfl": cfl, "cfl_pseudo": cfl}))
+    if _cfg_num(_cfg_get(_cfg_load(cfg), "nStepInner")) == 5.0:
+        cfg = _cfg_set(cfg, {"nStepInner": 10})
+    return cfg
+
+
+def ns_stage_configs(cfg_main: str, stages: str = "full", ramp=None, ramp_steps: int = 1000, cfg_pre: str | None = None):
+    """`run_staged_ns` の段の設定を、forge を回さずに導く。戻り: (前の段 [(tag, 実効設定, step 数, 起動前の要求値)],
+    本段の実効設定, 本段の起動前の要求値)。前の段の実効設定は step 数・出力の間隔まで書いた起動直前の文字列。
+    `cfg_pre` (main_line の run の PRESTAGE_CONFIG = B0 を当てる前の設定) があれば S1・S2 はそこから作り
+    (§5.1 #30)、本段との差が B0 のパスと段の長さだけであること、S1・S2 に B0 だけのキーが残っていないことを検査する
+    (違えば ValueError)。`cfg_pre` があるときの stages="ramp" は定義していないので ValueError。"""
+    n_main = _cfg_value(cfg_main, "nStepOuter")
+    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
+    if cfg_pre is not None:
+        len_paths = {("time", "last", "nStepOuter"), ("time", "outStepInterval")}
+        stray = sorted(set(_cfg_diff_paths(_cfg_load(cfg_pre), _cfg_load(cfg_main))) - _MAIN_LINE_PATHS - len_paths, key=str)
+        if stray:
+            raise ValueError(f"{PRESTAGE_CONFIG} と本段の設定の差が B0 (main_line) のパスと段の長さ以外にもある: "
+                             + ", ".join(".".join(map(str, pth)) for pth in stray) + " — 段の設定を作らない")
+        if stages == "ramp":
+            raise ValueError("main_line (前の段の元の設定がある run) の stages='ramp' は定義していない — 'full' か 'none' を使う")
+    pre = []
+
+    def _add(cfg, nsteps, tag, want):
+        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
+        pre.append((tag, cfg, nsteps, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}))
+
+    if stages == "full":
+        src = cfg_main if cfg_pre is None else cfg_pre
+        _add(_ns_prestage(src, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+        _add(_ns_prestage(src, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
+        if cfg_pre is not None:
+            # S1・S2 にライン陰解法・上限・ITJ・リミッタの基準値が無く、出力の指定は前の段の元の設定のまま (本段の extraFields が無い)
+            out_pre = _cfg_path_get(_cfg_load(cfg_pre), ("output",))
+            for tag, cfg, _, _ in pre:
+                doc = _cfg_load(cfg)
+                left = [".".join(pth) for pth in sorted(_MAIN_LINE_ONLY_PATHS - {("output",)})
+                        if _cfg_path_get(doc, pth) is not _CFG_MISSING]
+                if _cfg_path_get(doc, ("output",)) != out_pre:
+                    left.append("output")
+                if left:
+                    raise ValueError(f"前の段 {tag} の設定に B0 のキー {left} が残っている — 段の設定を作らない")
+    elif stages == "ramp":
+        ramp = tuple(ramp or (1.0, 2.0, 3.5))
+        for i, c in enumerate(ramp):
+            _add(_cfg_set(cfg_main, {"cfl": c, "cfl_pseudo": c}), int(ramp_steps), f"R{i + 1}_cfl{c:g}",
+                 {"convMethod": main_want["convMethod"], "cfl": c, "cfl_pseudo": c})
+        n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
+        # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
+        out_int = main_want["outStepInterval"]
+        n_main = max((n_main // out_int) * out_int, out_int)
+        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
+    elif stages != "none":
+        raise ValueError("stages は 'full' / 'none' / 'ramp'")
+    return pre, cfg_main, {**main_want, "nStepOuter": n_main}
+
+
+def _sha256_bytes(b: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(b).hexdigest()
+
+
+def _sha256_file(path) -> str | None:
+    """ファイルの sha256 (無ければ None)。"""
+    import hashlib
+    path = Path(path)
+    if not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def ns_stage_sha256(cfg_main: str, cfg_pre: str | None = None) -> dict:
+    """prepare_info.json の `ns_stage_configs`: prepare の時点の本段の設定から stages="full" で導いた S1・S2・本段の
+    設定の sha256 (`ns_stage_configs` と同じ導出、UTF-8 の文字列の sha256 = 書いたファイルの sha256)。呼び出し側が後で
+    solverConfig.yaml を書き換えたら実際に回した設定は MAIN_STAGE_STARTED (`previous_stages`・`main_config`) を見る。"""
+    pre, main, _ = ns_stage_configs(cfg_main, "full", cfg_pre=cfg_pre)
+    return {"stages": "full", "at": "prepare",
+            **{tag: _sha256_bytes(cfg.encode()) for tag, cfg, _, _ in pre},
+            "main": _sha256_bytes(main.encode()),
+            "prestage_config": (None if cfg_pre is None else _sha256_bytes(cfg_pre.encode()))}
+
+
+def _write_main_stage_started(run_dir: Path, cfg_main: str, stages: str, done: list, cfg_pre: str | None) -> dict:
+    """本段の通知 MAIN_STAGE_STARTED (JSON) を書く。本段の設定への切り替え (solverConfig.yaml) と前の段の出力の処理 (最終場の
+    restart と res_* の削除) の後、forge を起動する直前に呼ぶ。外の見張り (case/45 の m9_watch.py など) はこのファイルが
+    出てから起動する (前の段の res_3000.h5 を本段の出力と取り違えない; codex diagnose 2026-10-13)。一時ファイルに書いて
+    rename する (読みかけの JSON を見せない)。中身: 時刻、本段の設定と本段の初期の場 (mesh.valueFileName) の sha256、
+    前の段の tag・step 数・設定の sha256、前の段の元の設定 (main_line の run だけ)、この時点で残っている res_*。"""
+    import datetime
+    import os
+    import time
+    vf = str((_cfg_load(cfg_main).get("mesh") or {}).get("valueFileName", "nozzle.h5"))
+    rec = {"event": "main_stage_started", "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+           "time_unix": time.time(), "stages": stages,
+           "main_config": {"file": "solverConfig.yaml", "sha256": _sha256_file(run_dir / "solverConfig.yaml"),
+                           "nStepOuter": _cfg_value(cfg_main, "nStepOuter")},
+           "initial_field": {"file": vf, "sha256": _sha256_file(run_dir / vf)},
+           "previous_stages": list(done),
+           "prestage_config": (None if cfg_pre is None
+                               else {"file": PRESTAGE_CONFIG, "sha256": _sha256_file(run_dir / PRESTAGE_CONFIG)}),
+           "res_files_present": sorted(f.name for f in run_dir.glob("res_*"))}
+    tmp = run_dir / (MAIN_STAGE_STARTED + ".tmp")
+    tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False))
+    os.replace(tmp, run_dir / MAIN_STAGE_STARTED)
+    return rec
+
+
+class StagedRC(int):
+    """`run_staged_ns` の戻り (plan tooling-nozzle-isothermal-wall-chain §5.1 #36a): 今までどおりの終了コード (int として比べる・書ける) に
+    本段の停止の状態 `stop_rule` (STOP_RULE_STATE.json と同じ中身から version・plan を除いた dict; 停止規則を要求していない run は None) を
+    付けたもの。**終了コードで停止の状態を決めない** (停止規則の本段は CENSORED・一部の UNAVAILABLE でも 0)。"""
+
+    def __new__(cls, rc, stop_rule: dict | None = None):
+        obj = super().__new__(cls, int(rc))
+        obj.stop_rule = stop_rule
+        return obj
+
+    @property
+    def status(self) -> str | None:
+        """停止の状態 (REACHED / CENSORED / DIVERGED / EXEC_ERROR / DATA_ERROR / UNAVAILABLE / NOT_USED)。要求していない run は None。"""
+        return None if self.stop_rule is None else self.stop_rule.get("status")
+
+
+def _stop_rule_for_main(run_dir: Path, stop_rule: bool | None) -> tuple:
+    """本段で停止規則を使うか: (prepare_info の stop_rule, 使う, 使えない理由)。
+    - prepare_info・その stop_rule が無い (2026-10-14 より前の準備)・要求していない (`evaluate.stop_rule: false`・`--no-stop-rule` で準備)・
+      引数 stop_rule=False は (sr, False, None) で今までどおり。
+    - 要求したのに使えない (prepare の記録が use でない・euler_ref が見つからない・固定の sha が合わない・θ_r の断面の基準
+      physical_wall.domain や構造格子が読めない) とき: **明示** (`stop_rule.is_explicit`: `evaluate.stop_rule: true`・引数 True で準備) なら
+      RuntimeError — S1 の前・forge を起動する前 (M6 の版)。**既定** (キー無しで準備) なら (sr, False, 理由) — 本段は prepare の長さ
+      (fallback_steps) で回し、UNAVAILABLE を記録する (forge-f5 の版)。
+    - stop_rule=True は prepare が要求していなければ ValueError (上限・閾値の記録が無い)。"""
+    from . import stop_rule as SR
+    pi = run_dir / "prepare_info.json"
+    sr = json.loads(pi.read_text()).get("stop_rule") if pi.exists() else None
+    requested = isinstance(sr, dict) and bool(sr.get("requested"))
+    if stop_rule is True and not requested:
+        raise ValueError(f"{run_dir}: run_staged_ns(stop_rule=True) だが prepare_info.json に停止規則の要求が無い "
+                         "(問題 YAML の evaluate.stop_rule を false にしないで準備する)")
+    if not requested or stop_rule is False:
+        return sr, False, None
+    why = None
+    if not sr.get("use"):
+        why = f"prepare で使えないと記録 ({sr.get('reason')})"
+    elif SR.resolve_path(sr.get("euler_ref")) is None:
+        why = f"euler_ref が見つからない ({sr.get('euler_ref')!r})"
+    elif isinstance(sr.get("euler_ref"), dict):
+        try:
+            SR.check_euler_ref(sr["euler_ref"])          # 固定のスナップショットの sha256 (§5.1 #36e (6))
+        except ValueError as ex:
+            why = f"Euler の参照の固定が合わない ({ex})"
+    if why is None:
+        try:
+            SR.RunGeometry(run_dir)
+        except (ValueError, KeyError, OSError) as ex:
+            why = f"格子・断面の基準を読めない ({type(ex).__name__}: {ex})"
+    if why is None:
+        return sr, True, None
+    if SR.is_explicit(sr) or stop_rule is True:
+        raise RuntimeError(f"{run_dir}: 本段の停止規則を明示で要求したが使えない: {why} — forge を起動しない")
+    return sr, False, why
+
+
+def _stop_state_record(run_dir: Path, w: dict, sr: dict) -> dict:
+    """見張り (`stop_rule.watch_main_stage`) の戻りと詳しい記録 stop_rule.json から、STOP_RULE_STATE.json に書く終了の状態を作る。"""
+    from . import stop_rule as SR
+    rec = json.loads((run_dir / SR.RECORD).read_text())
+    return {"status": w["status"], "stop_step": w["stop_step"], "last_output": rec.get("last_output"),
+            "forge_rc": w["forge_rc"], "run_case_rc": rec.get("run_case_rc"), "rc": int(w["rc"]),
+            "cap": int(sr["cap"]), "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
+            "hold": rec.get("hold"), "stop_sha256": rec.get("stop_sha256"), "note": rec.get("note"), "unavailable": rec.get("unavailable"),
+            "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": rec.get("finished")}
+
+
+def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
+                  stop_rule_watch: dict | None = None) -> int:
     """NS の起動。stages:
     - "full" (既定・run_0030 レシピ): soft (1次 cfl0.5 ni10, 3000 step) → mid (1次 cfl1, 3000) → 本段 (2次 cfl_main)。
     - "none": 本段だけ (収束済み NS 場からの warm start 用)。
     - "ramp": 2 次のまま cfl を `ramp` (例 (1, 2, 3.5)) の順に各 ramp_steps だけ回して本段 cfl_main へ
       (forge に CFL ランプ機能は無いので restart で段階化する。本段の step 数はランプ分を差し引く)。
-    各段の最終場を IC に引き継ぐ。
+    各段の最終場を IC に引き継ぐ。段の設定は `ns_stage_configs` で導く。run に PRESTAGE_CONFIG (prepare_ns が
+    `evaluate.main_line` のときに書く、B0 を当てる前の設定) があれば S1・S2 はそこから作り、本段だけが B0 になる (§5.1 #30)。
     段ごとの実効設定を `stage_manifest.json` に記録し (`check_convergence.py --segment` 用)、段の残差履歴を
     `residual_history_<tag>.csv` に残す (段の res_* は従来どおり消す)。段の最終 res の必要保存量が非有限・ρ≤0 なら
-    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。"""
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9)。
+    本段の設定への切り替えと前の段の出力の処理の後、forge を起動する直前に通知 MAIN_STAGE_STARTED を書く
+    (`_write_main_stage_started`; 前の呼び出しの通知は最初に消す)。
+    壁温分布の run は**各段の起動前** (前段の restart の後を含む) に run の正本 (wall_temperature_profile.json・wall_profile_<id>.csv) を
+    prepare_info.json の sha256 と照合し、合わなければ config を書く前・forge を起動する前に ValueError で止める
+    (`wall_temperature.load_run_profile`; plan tooling-nozzle-wall-temperature-profile §4.2)。一様・断熱の run は何もしない。
+
+    **本段の停止規則** (plan tooling-nozzle-cooled-wall-ns-settling §4.6・plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、`stop_rule.py`;
+    旧 m9_watch と同等とは言わない新しい規則): prepare_info.json の `stop_rule` が要求していて使える (`use`) なら、本段の nStepOuter を上限
+    (`cap`: `--steps` > `evaluate.stop_rule_cap` > 200,000、到達 + 保持を含む) に書き換えて solverConfig・stage_manifest.json・MAIN_STAGE_STARTED
+    に記録し、forge を子プロセスで持ったまま見張る (`stop_rule.watch_main_stage`; REACHED・DIVERGED で止めて後の出力を消す、詳しい記録は
+    stop_rule.json)。**前の段 (S1・S2・ramp) には当てない**。本段の後に終了の状態を STOP_RULE_STATE.json に 1 度だけ書き、戻り値 (`StagedRC`) の
+    `stop_rule` にも付ける。要求したのに使えない (`_stop_rule_for_main`) とき: **明示** (`evaluate.stop_rule: true` で準備) なら S1 の前・forge を
+    起動する前に RuntimeError (M6 の版)、**既定** (キー無しで準備) なら stop_rule.json に UNAVAILABLE と理由を書き、本段は prepare の長さ
+    (fallback_steps = `--steps` > `evaluate.ns_steps` > 60,000) で今までどおり回して、状態 UNAVAILABLE を STOP_RULE_STATE.json に書く (forge-f5 の版)。
+    `stop_rule=False` (CLI `--no-stop-rule` の後に呼ぶとき) は要求を打ち消して今までの経路で回し、状態 NOT_USED を記録する。prepare_info.json に
+    `stop_rule` の無い run (2026-10-14 より前の準備) と要求していない run (`evaluate.stop_rule: false`) は今までと同じ (STOP_RULE_STATE.json も
+    書かない)。`stop_rule_watch` は見張りの時間の設定 (試験用; poll_s・settle_s ほか)。
+    戻り: forge の終了コード (`StagedRC`、int のまま比べられる)。停止規則のときは REACHED・CENSORED・一部の UNAVAILABLE = 0、
+    それ以外は非 0 — **合否は終了コードでなく状態 (`rc.stop_rule["status"]`・STOP_RULE_STATE.json) で決める**。"""
     import shutil
+    from . import stop_rule as SR
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    pre_path = run_dir / PRESTAGE_CONFIG
+    cfg_pre = pre_path.read_text() if pre_path.is_file() else None
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
-    n_main = _cfg_value(cfg_main, "nStepOuter")
-    main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
+    pre, cfg_main, main_want = ns_stage_configs(cfg_main, stages, ramp, ramp_steps, cfg_pre)
+    # 停止規則: 明示の要求なのに使えなければここで例外 (S1 の前・forge を起動しない)。既定の要求で使えなければ sr_why に理由 (本段で UNAVAILABLE)
+    sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
+    (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
+    (run_dir / SR.STATE).unlink(missing_ok=True)             # 前の呼び出しの停止の状態を今回の結果と取り違えない
     sm = _stage_manifest_cls()(run_dir)
+
+    def _check_wall_profile(tag):
+        """壁温分布の正本の照合 (一様・断熱の run では load_run_profile が None を返すだけ)。"""
+        try:
+            load_run_profile(run_dir)
+        except ValueError as ex:
+            raise ValueError(f"段 {tag}: 壁温分布の照合で不合格 — forge を起動しない: {ex}") from ex
 
     def _record(cfg, tag):
         """段の残差履歴を段名つきで残し、manifest に段を足して書く (失敗した段も診断用に残す)。"""
@@ -1564,9 +2281,10 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         sm.write()
 
     def _stage(cfg, nsteps, tag, want):
-        cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
-        _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, tag)   # 起動前に実効値を検査
+        _check_wall_profile(tag)                                     # 壁温分布の正本 (前段の restart の後も) — config を書く前 (main の §4.2)
+        _cfg_check(cfg, want, tag)                                   # 起動前に実効値を検査
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        sha = _sha256_file(run_dir / "solverConfig.yaml")
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
         _record(cfg, tag)
@@ -1581,36 +2299,49 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         _restart_same_mesh(res[-1], run_dir / "nozzle.h5")    # 同一メッシュ: index コピー (旧: interp_field.py)
         for f in run_dir.glob("res_*"):
             f.unlink()
+        return {"tag": tag, "nsteps": nsteps, "config_sha256": sha}
 
-    def _pre(cfg, cfl):
-        """前段: CFL を cfl に、空間 1 次、nStepInner 5 → 10 (従来どおり; 5 以外は据え置き)。"""
-        cfg = _first_order(_cfg_set(cfg, {"cfl": cfl, "cfl_pseudo": cfl}))
-        if _cfg_num(_cfg_get(_cfg_load(cfg), "nStepInner")) == 5.0:
-            cfg = _cfg_set(cfg, {"nStepInner": 10})
-        return cfg
-
-    if stages == "full":
-        _stage(_pre(cfg_main, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
-        _stage(_pre(cfg_main, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
-    elif stages == "ramp":
-        ramp = tuple(ramp or (1.0, 2.0, 3.5))
-        for i, c in enumerate(ramp):
-            st = _cfg_set(cfg_main, {"cfl": c, "cfl_pseudo": c})
-            _stage(st, int(ramp_steps), f"R{i + 1}_cfl{c:g}",
-                   {"convMethod": main_want["convMethod"], "cfl": c, "cfl_pseudo": c})
-        n_main = max(n_main - int(ramp_steps) * len(ramp), int(ramp_steps))
-        # 最終 res が書かれるよう outStepInterval の倍数に丸める (forge は outStepInterval の倍数でしか res を書かない)
-        out_int = main_want["outStepInterval"]
-        n_main = max((n_main // out_int) * out_int, out_int)
-        cfg_main = _cfg_set(cfg_main, {"nStepOuter": n_main})
-    elif stages != "none":
-        raise ValueError("stages は 'full' / 'none' / 'ramp'")
-    _cfg_check(cfg_main, {**main_want, "nStepOuter": n_main}, "main")
+    done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
+    if sr_use:
+        # 停止規則の上限を本段の nStepOuter に (manifest・通知の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
+        cfg_main = _cfg_set(cfg_main, {"nStepOuter": int(sr["cap"])})
+        main_want = {**main_want, "nStepOuter": int(sr["cap"])}
+    _check_wall_profile("main")
+    _cfg_check(cfg_main, main_want, "main")
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
-    rc = run_forge(run_dir)
+    _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
+    state = None
+    if sr_use:
+        w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
+        rc = w["rc"]
+        state = _stop_state_record(run_dir, w, sr)
+        print(f"[stop_rule] 本段: {w['status']} (止めた/最後の出力 {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
+              f"{run_dir / SR.STATE}", flush=True)
+    elif sr_why is not None:
+        # 既定の要求 (キー無しで準備) で使えない: 理由を記録し、本段は prepare の長さ (fallback_steps) で今までどおり回す (forge-f5 の版)
+        n_main = int(main_want["nStepOuter"])
+        urec = {"version": 1, "plan": SR.PLAN, "settings": sr, "status": "UNAVAILABLE", "reason": sr_why,
+                "action": f"停止規則を使わず本段を nStepOuter {n_main} で回す", "started": SR._now()}
+        SR.save_record(run_dir, urec)
+        print(f"[stop_rule] 使えない ({sr_why}) — 本段は {n_main} step", flush=True)
+        rc = run_forge(run_dir)
+        forge_rc = SR._forge_exit(run_dir)
+        urec.update(forge_rc=forge_rc, run_case_rc=int(rc), finished=SR._now())
+        SR.save_record(run_dir, urec)
+        state = {"status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
+                 "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
+                 "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": urec["finished"]}
+    else:
+        rc = run_forge(run_dir)
+        if sr is not None and sr.get("requested"):
+            # prepare は要求したが引数 stop_rule=False で使わなかった: 打ち消したことを状態として残す (受け渡しの関門は NOT_USED と見る)
+            state = {"status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
+                     "cap": None, "fallback_steps": int(sr["fallback_steps"])}
     _record(cfg_main, "main")
-    return rc
+    if state is not None:
+        SR.write_state(run_dir, state)
+    return StagedRC(rc, state)
 
 
 if __name__ == "__main__":

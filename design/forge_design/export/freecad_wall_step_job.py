@@ -8,6 +8,11 @@ mode = write: 次数・制御点 (x, y) [mm]・異なるノット [mm]・重複�
 mode = read:  `Part.Shape().read()` で読み直し、辺の数・曲線の型・次数・ノット・重複度・制御点・重み・辺の助変数の範囲と
               頂点の座標 (実際の端点) と、指定した助変数 u での位置・1 階・2 階微分 (`getD2`) を返す。`revolve` が真なら x 軸まわりに 360° 回して回転面 (内面) を作り、
               型・妥当性 (`isValid`)・面積を返す。
+mode = surface: 2D の STEP (`step2d`、辺 1 本) を読み、辺を x 軸まわりに 360° 回した面 (内面) を殻にして `exportStep` で
+              3D の STEP (`step3d`) に書き、`MeshPart.meshFromShape(LinearDeflection, AngularDeflection)` で STL (`stl`、mm) を書く。
+              書いた 3D の STEP を `Part.Shape().read()` で読み直し、面の数・妥当性・面積・bbox を返す。面積は `Shape.Area` と、
+              母線のノット区間ごとに切り出した面の和 (`readback_area_knot_split_mm2`、検査にはこちらを使う; `_area_knot_split`)
+              (plans/accepted/tooling-nozzle-wt-deliverables.md §4.2 の cad/、case/45 の `cad_deliverables.py` の surface を一般化)。
 """
 import json
 import os
@@ -57,11 +62,54 @@ def _read(job):
     return out
 
 
+def _area_knot_split(shape):
+    """読み直した回転面の面積を、母線 (`BasisCurve`) のノット区間ごとに面を切り出して足す。
+    `Shape.Area` (OCC の GProp) は長い B-spline を母線にした 1 枚の回転面では求積が粗い (case/45 の生産の壁で
+    相対 −4.1e-4、`toNurbs()` してからでも +1.6e-4。ノット区間ごとに分けた和は ∫2πr ds と 1e-14 で一致; 2026-10-13 測定)。
+    回転面でない面があれば None (呼び出し側で不合格にする)。"""
+    tot = 0.0
+    for f in shape.Faces:
+        srf = f.Surface
+        bc = getattr(srf, "BasisCurve", None)
+        if bc is None or not hasattr(bc, "getKnots"):
+            return None
+        u0, u1, v0, v1 = f.ParameterRange               # 回転面: U = 回転角、V = 母線の助変数
+        vs = [v0] + [float(k) for k in bc.getKnots() if v0 < k < v1] + [v1]
+        tot += sum(srf.toShape(u0, u1, a, b).Area for a, b in zip(vs[:-1], vs[1:]))
+    return float(tot)
+
+
+def _surface(job):
+    import MeshPart  # noqa: PLC0415  (freecadcmd の中でだけ import できる)
+    s = Part.Shape()
+    s.read(job["step2d"])
+    if len(s.Edges) != 1:
+        raise ValueError(f"2D の STEP の辺が 1 本でない ({len(s.Edges)} 本): {job['step2d']}")
+    e = s.Edges[0]
+    face = e.revolve(Vector(0, 0, 0), Vector(1, 0, 0), 360)
+    shell = Part.Shell([face]) if face.ShapeType == "Face" else face
+    shell.exportStep(job["step3d"])
+    lin, ang = float(job["linear_deflection_mm"]), float(job["angular_deflection"])
+    m = MeshPart.meshFromShape(Shape=shell, LinearDeflection=lin, AngularDeflection=ang)
+    m.write(job["stl"])
+    rd = Part.Shape()
+    rd.read(job["step3d"])
+    bb = rd.BoundBox
+    return {"shape_type": shell.ShapeType, "is_valid": bool(shell.isValid()), "area_mm2": float(shell.Area),
+            "surface_type": (type(shell.Faces[0].Surface).__name__ if shell.Faces else None),
+            "readback_faces": len(rd.Faces), "readback_valid": bool(rd.isValid()), "readback_area_mm2": float(rd.Area),
+            "readback_area_knot_split_mm2": _area_knot_split(rd),
+            "readback_bbox_mm": [bb.XMin, bb.YMin, bb.ZMin, bb.XMax, bb.YMax, bb.ZMax],
+            "stl_triangles": int(m.CountFacets), "stl_points": int(m.CountPoints), "stl_area_mm2": float(m.Area),
+            "stl_linear_deflection_mm": lin, "stl_angular_deflection_rad": ang}
+
+
 def main():
     job = json.load(open(os.environ["WALL_STEP_JOB"]))
     try:
         res = {"ok": True, "freecad_version": list(FreeCAD.Version()[:3])}
-        res.update(_write(job) if job["mode"] == "write" else _read(job))
+        # write・read の振り分けは従来どおり (surface 以外の mode は従来の分岐をそのまま通る)
+        res.update(_write(job) if job["mode"] == "write" else (_surface(job) if job["mode"] == "surface" else _read(job)))
     except Exception:  # noqa: BLE001 — 失敗は呼び出し側に文字列で返す
         res = {"ok": False, "error": traceback.format_exc()}
     with open(job["result"], "w") as f:

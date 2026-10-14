@@ -38,10 +38,17 @@ def mu_suth(T):
     return 1.716e-5 * (T / 273.0) ** 1.5 * (273.0 + 111.0) / (T + 111.0)
 
 
+# 明示的に許すほかの格子 (ni, nj): G0c = G0 の縮流部 x/r_t −8〜−2 だけ流れ方向を粗くした格子 (float plan §5.1 #22・#25、make_g0c.py)。
+# 2026-10-12: G0 の ni で割り切れない格子は今まで止めていた。G0c だけを名前つきで足す (ほかの格子は従来どおり止める)。
+EXTRA_GRIDS = {4467 * 121: (4467, 121, "G0c")}
+
+
 def mesh_info(n_nodes):
     z = np.load(OUTD / "theta_run_0181_ns_coldmesh_ad_100000.npz")
     ni = len(z["x"]); S = float(z["scale"])
     if n_nodes % ni:
+        if n_nodes in EXTRA_GRIDS:
+            return EXTRA_GRIDS[n_nodes][0], EXTRA_GRIDS[n_nodes][1], S
         raise SystemExit(f"節点数 {n_nodes} が ni {ni} で割り切れない (格子が違う)")
     return ni, n_nodes // ni, S
 
@@ -86,6 +93,7 @@ def reduce_fields(xy, ro, ux, uy, T, k, h0_with_k, ni, nj, S, yb_x, yb, h0=None)
     dTdn = c0 * TT[:, -1] + c1 * TT[:, -2] + c2 * TT[:, -3]
     Tw = TT[:, -1]; muw = mu_suth(Tw)
     out["tau_w"] = muw * np.abs(dudn); out["q_w"] = muw * CP / PR * dTdn; out["T_w"] = Tw; out["x_w"] = x[:, -1]
+    out["tau_w_signed"] = muw * dudn          # 2026-10-12 (float plan §6.58、codex): 逆向きのせん断を区別するため符号つきも出す (tau_w は従来どおり絶対値)
     ok = np.isfinite(out["qdyn_e"])                       # C_f は帯の外縁 (y_b) の ρ_e u_e²/2 で割る (壁の x へ補間)
     out["c_f"] = out["tau_w"] / np.interp(x[:, -1], xt[ok], out["qdyn_e"][ok], left=np.nan, right=np.nan)
     ds = np.linalg.norm(np.diff(P0, axis=0), axis=1); rwm = P0[:, 1]

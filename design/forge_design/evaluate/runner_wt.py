@@ -26,7 +26,7 @@ from ..feedback.deltastar import deltastar_offset
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic
-from .runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
+from .runner import run_converter, FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
 
 
 def design_chain(p: Problem, viscous: bool) -> dict:
@@ -275,13 +275,14 @@ initial: "uniform_p101325_u10"
 """
 
 
-def _bcond(p: Problem, euler: bool) -> str:
+def _bcond(p: Problem, euler: bool, profile_ok: bool = False) -> str:
     Pt, Tt = float(p.spec["Pt"]), float(p.spec["Tt"])
     pa = float(p.spec.get("p_ambient", 1000.0))
-    # 壁行は Problem.wall_bcond_line (spec.wall_thermal が単一ソース: 断熱 wall / 等温 wall_isothermal+Ts)
+    # 壁行は Problem.wall_bcond_line (spec.wall_thermal が単一ソース: 断熱 wall / 等温 wall_isothermal+Ts)。
+    # profile_ok: 壁温分布の CSV を run に書く呼び出し側 (runner_axismach.prepare_ns) だけが True (それ以外で分布の問題なら例外)
     return f"""inlet:  {{physID: 1, kind: inlet_Pressure,   outputHDFflg: 0, ints: , floats: {{Pt: {Pt}, Tt: {Tt}, k: 1.0, omega: 18000.0}}}}
 outlet: {{physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {{Ps: {pa}, Pt: {pa}, Tt: 300.0}}}}
-wall:   {p.wall_bcond_line(euler, phys_id=3, output=1)}
+wall:   {p.wall_bcond_line(euler, phys_id=3, output=1, profile_ok=profile_ok)}
 axis:   {{physID: 4, kind: axis,             outputHDFflg: 0, ints: , floats: }}
 """
 
@@ -331,8 +332,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
         # 品質ツールは node 形式の CONNE を読めない (cell 前提)。品質は primal
         # メッシュの性質なので **cell 変換の一時コピーで検査**してから node 変換。
         (run_dir / "solverConfig.yaml").write_text(_config_euler(p, n, out_int, 4.0, 1))
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                            capture_output=True, text=True)
@@ -342,8 +342,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
         if q.returncode != 0:
             raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     (run_dir / "solverConfig.yaml").write_text(cfg)
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     if euler:
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV, capture_output=True, text=True)

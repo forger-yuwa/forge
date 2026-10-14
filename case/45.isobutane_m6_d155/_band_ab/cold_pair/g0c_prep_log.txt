@@ -1,0 +1,39 @@
+== 開始 2026-10-11T13:36:13+00:00 変換器 711f44389209e16d msh 285f0fa4ecc0ed1c
+変換 rc=0 7151146525854e98
+== 閉性 (hoop_verify_conv.py check --rw)
+_g0c/nozzle.h5: nNodes 540507 nPlanes 1085602 (interior 1076426) /PLANES/rSurfVect present: True shape (3256806,) dtype float64
+  planar closure Σ±S_x: max|.|/Σ|S| 1.109e-16, max|.|/A 1.809e-12, CVs over 100·ε64·Σ|S|: 0
+  planar closure Σ±S_y: max|.|/Σ|S| 2.140e-16, max|.|/A 3.195e-09, CVs over 100·ε64·Σ|S|: 0
+  r-weighted closure (rSurfVect): max E_x 9.223e-10  max E_y 2.335e-09  CVs over 100·ε64·(A+Σ|W|): x 0 y 0  (rSurfVect z max |.| 0.0e+00)
+  (reference) r̄·S on the same file: max E_x 6.079e-04  max E_y 3.287e-03
+  orientation: faces with W·S <= 0 among W != 0: 0; faces with W == 0: 4467 (centroid r of those: max 0.0e+00)
+  interior faces: rebuilt W vs rSurfVect max |ΔW|/|W| 0.000e+00 (bit-equal 1076426/1076426); rebuilt S vs surfVect max 0.000e+00
+  boundary half faces (9176, unmapped 0): rebuilt W vs rSurfVect max |ΔW|/|W| 0.000e+00; rebuilt S vs surfVect max |ΔS|/|S| 0.000e+00; rebuilt centroid vs centCoords max |Δc|/|S| 1.563e-10
+  rc=0
+== 格子の品質 (--ar-max 10000)
+source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 535920 cells)
+mode: 2D (x-y projection)
+cells: 535920
+aspect ratio : max=8704.6  p99=3951.2  mean=309.2  >10000: 0 (0.00%)
+skewness     : max=0.457  p99=0.264  mean=0.015  >0.90: 0 (0.00%)
+VERDICT: PASS (AR<= 10000, skew<= 0.90)
+  rc=0
+== 格子の品質 (既定・参考)
+aspect ratio : max=8704.6  p99=3951.2  mean=309.2  >1000: 50766 (9.47%)
+VERDICT: FAIL (AR<= 1000, skew<= 0.90)
+[g0c] 宛先に roY* を作った: ['roY0', 'roY1']
+interp_field rc=0 interp _tr/q32_init.h5 -> _g0c/q32_init.h5: 540507 dst cells, moved ['ro', 'roUx', 'roUy', 'roUz', 'roe', 'roK', 'roOmega', 'roY0', 'roY1'] (wall_dist kept)
+[interp_field] 最近傍距離: max 1.307e-03, 0 の DST 節点 499851 / 540507
+[Q32] G0c の保存量 9 つを float32 に丸めた (変わった値 0 個)
+== 照合 (g0c_check.py: 実際の G0 の入力と)
+ "pre_coords_bit_equal": true,
+ "post_coords_bit_equal": true,
+ "pre_values_not_bit_equal": {},
+ "post_values_not_bit_equal": {},
+ "seg_nearest_dist_rt": {
+ "seg_same_j_fraction": 0.9989209603452927,
+ "seg_j_mismatch_max": 2,
+VERDICT: 照合 OK (区間の外は座標と 9 保存量がビット一致)
+  rc=0
+共通の入力 _g0c/q32_init.h5 sha 6f8fcda6d97482e3
+== 終了 2026-10-11T13:37:01+00:00

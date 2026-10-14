@@ -64,15 +64,28 @@ class Problem:
         raise ValueError(f"gas.model '{kind}' は未知 (cpg | semiperfect | frozen_tp)")
 
     # --- 壁の熱境界条件 (2026-09-12, plan tooling-nozzle-isothermal-wall-chain §4.1) ---
-    # spec.wall_thermal: {mode: adiabatic} (既定) | {mode: isothermal, Tw: <K>}。
+    # spec.wall_thermal: {mode: adiabatic} (既定) | {mode: isothermal, Tw: <K>} | {mode: isothermal, Tw_profile: {s | x_m: [...], Tw_K: [...]}}。
     # bcond (wall / wall_isothermal+Ts)・積分法初期壁 (thermal_bc)・帳簿の 3 箇所が全てここを読む (単一ソース)。
+    # 壁温分布 (Tw_profile、2026-10-13 plan tooling-nozzle-wall-temperature-profile §4.1) の検査・実寸への写しは wall_temperature.py
     @property
     def wall_thermal(self) -> dict:
         wt = self.spec.get("wall_thermal") or {"mode": "adiabatic"}
         mode = str(wt.get("mode", "adiabatic"))
         if mode == "adiabatic":
+            if "Tw_profile" in wt or "Tw_profile_csv" in wt:
+                raise ValueError("spec.wall_thermal.Tw_profile は mode: isothermal 専用 (断熱に壁温の表は書かない)")
             return {"mode": "adiabatic"}
         if mode == "isothermal":
+            if "Tw_profile_csv" in wt:
+                raise ValueError("spec.wall_thermal.Tw_profile_csv は要求カード専用 — 問題 YAML には Tw_profile の表を書く "
+                                 "(生成器がカードの表を写す)")
+            if "Tw_profile" in wt:
+                if "Tw" in wt:
+                    raise ValueError("spec.wall_thermal の Tw (一様) と Tw_profile (表) は排他 — どちらか 1 つ")
+                from .wall_temperature import parse_profile, representative_Tw
+                prof = parse_profile(wt["Tw_profile"])
+                # 代表値 = 設計スロート (s = 0 / x = 0) の値。bcond の Ts の既定値・帳簿用 (ソルバは CSV で上書きする; §4.2)
+                return {"mode": "isothermal", "Tw": representative_Tw(prof), "Tw_profile": prof}
             Tw = float(wt["Tw"])
             if not Tw > 0.0:
                 raise ValueError("spec.wall_thermal.Tw は正の温度 [K]")
@@ -81,18 +94,31 @@ class Problem:
 
     @property
     def wall_thermal_bc_integral(self) -> dict:
-        """積分法初期壁 (`feedback/deltastar_integral.integral_bl`) に渡す thermal_bc。"""
+        """積分法初期壁 (`feedback/deltastar_integral.integral_bl`) に渡す thermal_bc (一様・断熱)。
+        壁温分布は表の換算に実効の r_t と設計の区切りの点が要るので、`wall_temperature.integral_thermal_bc(p, d, scale)` を使う。"""
         wt = self.wall_thermal
+        if "Tw_profile" in wt:
+            raise ValueError("壁温分布 (spec.wall_thermal.Tw_profile) の thermal_bc は scale (実効の r_t) と設計の区切りの点に依る — "
+                             "`wall_temperature.integral_thermal_bc(p, d, scale)` を使う")
         if wt["mode"] == "isothermal":
             return {"mode": "prescribed_temperature", "Tw": wt["Tw"]}
         return {"mode": "adiabatic"}
 
-    def wall_bcond_line(self, euler: bool, phys_id: int = 3, output: int = 1) -> str:
-        """forge bcondConfig の壁 1 行。Euler は slip、NS は wall_thermal に従い wall / wall_isothermal (Ts)。"""
+    def wall_bcond_line(self, euler: bool, phys_id: int = 3, output: int = 1, profile_ok: bool = False) -> str:
+        """forge bcondConfig の壁 1 行。Euler は slip、NS は wall_thermal に従い wall / wall_isothermal (Ts)。
+        壁温分布の等温壁は `ints: {wallProfile: 1}` を付ける (`Ts` は代表値; ソルバは run の `wall_profile_<physID>.csv` で上書きする)。
+        CSV を書く runner (`runner_axismach.prepare_ns`) だけが profile_ok=True で呼ぶ。それ以外の runner (SERN など) で分布の問題を
+        受けたら例外 (CSV の無い run を作らない)。一様・断熱の行は profile_ok に依らず変更前と同一。"""
         if euler:
             return f"{{physID: {phys_id}, kind: slip,             outputHDFflg: {output}, ints: , floats: }}"
         wt = self.wall_thermal
         if wt["mode"] == "isothermal":
+            if "Tw_profile" in wt:
+                if not profile_ok:
+                    raise ValueError("この runner は壁温分布 (spec.wall_thermal.Tw_profile) に未対応 (CSV を書かない) — "
+                                     "対応は runner_axismach.prepare_ns だけ (plan tooling-nozzle-wall-temperature-profile §2)")
+                return (f"{{physID: {phys_id}, kind: wall_isothermal,  outputHDFflg: {output}, ints: {{wallProfile: 1}}, "
+                        f"floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {wt['Tw']}}}}}")
             return (f"{{physID: {phys_id}, kind: wall_isothermal,  outputHDFflg: {output}, ints: , "
                     f"floats: {{Ux: 0.0, Uy: 0.0, Uz: 0.0, Ts: {wt['Tw']}}}}}")
         return f"{{physID: {phys_id}, kind: wall,             outputHDFflg: {output}, ints: , floats: }}"
