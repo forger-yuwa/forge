@@ -34,7 +34,7 @@ if rows and ser:
                 dec = "STOP"
     rec["decision"] = dec
     st["checks"].append(rec)
-    if dec == "STOP":
+    if dec == "STOP" and st.get("stop_step") is None:   # 最初に止める条件を満たした出力だけを記録する (2026-10-14: 止めた後の出力で上書きしていた。判定は STOP_RULE を使うので結果は不変)
         st["stop_step"] = s
 stp.write_text(json.dumps(st, ensure_ascii=False, indent=1))
 print(dec)
