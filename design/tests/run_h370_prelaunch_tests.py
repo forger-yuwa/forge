@@ -17,8 +17,18 @@ CFD・変換器は使わない (格子は生成器の座標、場は合成)。
   F. 受け渡しの関門の各条件 (合成の run・本物の抽出、収束・y₁⁺・次の壁は偽物で切り替え): 全部満たせば進む・表を run の直下に写す。
      負例で止まる: 保存則・y₁⁺ (FAIL・判定不能)・被覆 (端の欠測)・使用域の held・2 窓 (窓の中の振れ・窓の平均の差・記録の欠け・覆わない)・
      次の壁・Euler の参照の違い・ω の違い・抽出の例外 (sha の不一致)。上書きの 2 つでは足した条件を通さない。
+     落ち着きの条件の上書き (§5.1 #36h): `allow_unsettled` (理由の文字列) は保存則・2 窓の**実測の超過**だけを通し、settled: false・
+     unsettled_overrides (理由・r の平均と振幅と窓・2 窓の変動の最大とその量・窓・x)・δ_E の作り方 (最新の出力 1 枚) を HANDOFF_GATE.json と
+     抽出の要約 (run の直下・handoff_extract) に残す。上書き 3 つを全部渡しても通さない: 2 窓の判定不能 (記録なし・行の欠け・覆わない・
+     δ の記録の held・欠測)・保存則の判定不能 (非有限・点数の不足)・停止の状態 DIVERGED・y₁⁺ (FAIL・判定不能)・被覆 (端の欠測)・使用域の
+     held・次の壁・Euler の参照・ω・sha の不一致。上書きを渡しても要らなかった (全部満たす) run は settled: true。呼び出し側の作り方の口
+     (`extractor` + `delta_e_source`): 作り方を記録する、片方だけ・不正な記録は ValueError、その抽出にも被覆・held の条件が掛かる。
   G. 次の壁の幾何 (`next_wall_check`、本物の壁の構築): 積分法の δ_r で合格、出口側に凹みを入れた δ で不合格。
   H. 1 出力あたりの抽出の時間 (`delta_snapshot`) を実寸の格子 (NS 4719 × 160・Euler 2000 × 97) で測る (--quick で省く)。
+  I. 出口の列の被覆 (§5.1 #36g、B の dry-run の発見): Euler の補間できる範囲 (`deltastar.euler_cover_range`) の幾何の許容 (端の外側だけ、
+     端の列の間隔 × 1e−4)。Euler の端が NS の最後の列より 1.68e−9 r_t 短い → 覆う・端の列の値で評価 (抽出器・δ_in の照合・関門の被覆・
+     δ の記録・帯の生成)、許容のちょうど外 → 欠測、0.07 r_t の不足 → 欠測、内側の列には効かない (ビット同一)、既定 (clamp) は ±1e−9 のまま。
+     2 窓に入るべき出力の列挙 (`stop_rule.required_window_steps`)。
 
 usage: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_h370_prelaunch_tests.py [--quick] [--pin <run_0062 のディレクトリ>]
   --pin が無ければ case/45 の run_0062_euler_wallfit_fit_r1_ext6k、無ければ /home/sano/work/forge の同じ run (環境変数 H370_PIN も可)。
@@ -508,6 +518,8 @@ def test_gate(eu, pin):
             ("2 窓: 後の窓の中で δ_target が 0.0115 mm 振れる",
              dict(delta_fn=lambda s, x: (np.full(len(x), 1e-3), np.full(len(x), 2e-3 + (1.5e-4 if s > 42500 else 0.0)))), {}, "2 窓"),
             ("2 窓: 窓の中の出力の δ の記録が無い (抽出の失敗)", dict(delta_fn=lambda s, x: None if s == 30000 else (np.full(len(x), 1e-3),) * 2), {}, "2 窓"),
+            ("2 窓: 記録の行そのものが欠けた出力 47,500 (入るべき出力を出力の間隔から列挙)",
+             dict(steps=[k for k in range(2500, 62501, 2500) if k != 47500]), {}, "記録の行が無い出力"),
             ("2 窓: 履歴が 2 窓を覆わない (停止 30,000)", dict(s_stop=30000), {}, "2 窓"),
             ("次の壁の幾何の健全性が不合格", {}, dict(nw=False), "次の壁"),
         ]
@@ -555,7 +567,7 @@ def test_gate(eu, pin):
         g = run(rd)
         check(f"負例 本段の記録の Euler の参照の sha が合わない → 抽出の例外で止める ({'; '.join(g['blocked_by'])[:70]}…)",
               not g["proceed"] and any("抽出が例外" in b for b in g["blocked_by"]))
-        # 上書きの 2 つでは足した条件を通さない
+        # 上書きの 2 つでは足した条件を通さない (#36h から上書きは理由の文字列)
         rd = gate_run("g_override", pin, r_fn=lambda s: 1e-3)
         g = run(rd, conv="NOT_CONVERGED", euler_ref=pin, allow_not_reached="試験: 上書き", allow_unconverged="試験: 上書き")
         check("上書き (allow_not_reached・allow_unconverged) は収束の判定だけを通し、保存則の不合格は通さない",
@@ -564,9 +576,149 @@ def test_gate(eu, pin):
         g = run(rd, wr="FAIL", euler_ref=pin, allow_not_reached="試験: 上書き", allow_unconverged="試験: 上書き")
         check("上書きは CENSORED を通すが、局所 y₁⁺ の FAIL は通さない",
               not g["proceed"] and any("局所 y₁⁺" in b for b in g["blocked_by"]) and not any("停止の状態" in b for b in g["blocked_by"]))
+        test_gate_unsettled(eu, pin, run, held_extract, real, spy)
     finally:
         for k, v in real.items():
             setattr(DL, k, v)
+
+
+def test_gate_unsettled(eu, pin, run, held_extract, real, spy):
+    """F の続き: 落ち着きの条件の上書き allow_unsettled (§5.1 #36h、forge-f5 と合意)。"""
+    print("== F2. 落ち着きの条件の上書き (allow_unsettled、§5.1 #36h)", flush=True)
+    US = "試験: 実用として 5 枚平均で区切る (case/70 相当)"
+    ALL = dict(allow_not_reached="試験: 未到達", allow_unconverged="試験: 未収束", allow_unsettled=US)
+    mm = S_SC * 1e3
+    jitter = lambda s, x: (np.full(len(x), 1e-3 + (1.7e-4 if s == 52500 else 0.0)), np.full(len(x), 2e-3))  # noqa: E731
+
+    def marks(rd):
+        """run の直下と handoff_extract の抽出の要約の印 (無ければ None)。"""
+        out = []
+        for f in (rd / "delta_r_extract_summary.json", rd / DL.HANDOFF_EXTRACT_DIR / "delta_r_extract_summary.json"):
+            out.append(json.loads(f.read_text()) if f.exists() else None)
+        return out
+
+    # --- 正例: 保存則の実測の超過 (r の窓の平均 1e-3 > 5e-4) ---
+    rd = gate_run("u_cons", pin, r_fn=lambda s: 1e-3)
+    g = run(rd, euler_ref=pin, allow_unsettled=US)
+    saved = json.loads((rd / DL.HANDOFF_GATE).read_text())
+    uo = g["unsettled_overrides"]
+    m_top, m_ext = marks(rd)
+    check("allow_unsettled (理由つき): 保存則の実測の超過 (r の平均 1e-3) を通す → 進む・表を run の直下に写す",
+          g["proceed"] and not g["blocked_by"] and (rd / "delta_r_next.csv").exists() and g["override"]["applied"] == ["allow_unsettled"],
+          f"{g['blocked_by']}")
+    check("  記録: settled: false・unsettled_overrides に保存則の実測 (r の平均 1e-3・振幅 0・窓 [42,500, 62,500]・閾値・点数 9・理由)",
+          saved["settled"] is False and len(uo) == 1 and uo[0]["override"] == "allow_unsettled" and uo[0]["condition"] == "conservation"
+          and abs(uo[0]["r_mean"] - 1e-3) < 1e-12 and uo[0]["r_amp"] == 0.0 and uo[0]["window"] == [42500, 62500]
+          and uo[0]["r_mean_max"] == 5e-4 and uo[0]["r_amp_max"] == 5e-3 and uo[0]["n"] == 9 and uo[0]["reason"] == US
+          and saved["override"]["allow_unsettled_reason"] == US and saved["unsettled_overrides"] == uo, f"{uo}")
+    des = saved["delta_e_source"]
+    check("  δ_E の作り方: 最新の出力 1 枚 (kind single_snapshot・res_62500.h5・停止の出力と同じ・関門の抽出)",
+          des["kind"] == "single_snapshot" and des["n_snapshots"] == 1 and des["res"] == "res_62500.h5" and des["steps"] == [62500]
+          and des["is_stop_output"] is True and "extract_and_merge" in des["provider"], f"{des}")
+    check("  印を抽出の要約に写す (run の直下と handoff_extract の delta_r_extract_summary.json; grep '\"settled\": false')",
+          m_top is not None and m_ext is not None and m_top["settled"] is False and m_top["unsettled_overrides"] == uo
+          and m_top["delta_e_source"] == des and m_ext["settled"] is False
+          and all('"settled": false' in f.read_text() for f in (rd / DL.HANDOFF_GATE, rd / "delta_r_extract_summary.json")))
+    # --- 正例: 2 窓の実測の超過 (後の窓の中で δ_E が 0.013 mm 振れる) ---
+    rd = gate_run("u_2w", pin, delta_fn=jitter)
+    g = run(rd, euler_ref=pin, allow_unsettled=US)
+    uo = g["unsettled_overrides"]
+    check("allow_unsettled: 2 窓の実測の超過を通す → 進む、記録は変動の最大 (0.013 mm)・どの量か (delta_E.range_W2)・窓・x・超えた量の全部",
+          g["proceed"] and g["settled"] is False and len(uo) == 1 and uo[0]["condition"] == "two_windows"
+          and uo[0]["quantity"] == "delta_E.range_W2" and abs(uo[0]["max_mm"] - 1.7e-4 * mm) < 1e-9
+          and uo[0]["windows"] == [[22500, 42500], [42500, 62500]] and uo[0]["tol_mm"] == 0.01
+          and set(uo[0]["exceeded"]) == {"delta_E.range_W2"} and uo[0]["x_at_max"] is not None and uo[0]["reason"] == US,
+          f"{g['blocked_by']} {uo}")
+    # --- 正例: 3 つ全部 (CENSORED + 保存則 + 2 窓) ---
+    rd = gate_run("u_all", pin, status="CENSORED", r_fn=lambda s: 1e-3, delta_fn=jitter)
+    g = run(rd, euler_ref=pin, allow_not_reached="試験: 未到達", allow_unsettled=US)
+    check("allow_not_reached + allow_unsettled: CENSORED・保存則・2 窓をまとめて通す → 進む、unsettled_overrides は停止の状態・保存則・2 窓の順",
+          g["proceed"] and g["settled"] is False and [u["condition"] for u in g["unsettled_overrides"]] == ["stop_state", "conservation", "two_windows"]
+          and g["unsettled_overrides"][0]["status"] == "CENSORED" and g["override"]["applied"] == ["allow_not_reached", "allow_unsettled"],
+          f"{g['blocked_by']} {g['unsettled_overrides']}")
+    # --- 上書きを渡しても要らなかった run は settled: true ---
+    rd = gate_run("u_notneeded", pin)
+    g = run(rd, euler_ref=pin, **ALL)
+    check("上書き 3 つを渡しても全部の条件を満たす run → settled: true・unsettled_overrides: []・applied: [] (使わずに通った)",
+          g["proceed"] and g["settled"] is True and g["unsettled_overrides"] == [] and g["override"]["applied"] == []
+          and marks(rd)[0]["settled"] is True, f"{g['blocked_by']}")
+    # --- 既定 (上書きなし) は今までどおり: 保存則の超過で止める ---
+    rd = gate_run("u_default", pin, r_fn=lambda s: 1e-3)
+    g = run(rd, euler_ref=pin)
+    check("既定 (allow_unsettled なし) は今までどおり保存則の超過で止める (settled: false の記録、抽出しない)",
+          not g["proceed"] and any("保存則" in b for b in g["blocked_by"]) and g["settled"] is False and g["unsettled_overrides"] == []
+          and not (rd / "delta_r_next.csv").exists())
+
+    # --- 負例: 上書き 3 つを全部渡しても通さない ---
+    def held_rec(step, key):
+        def mod(rd):
+            rec = json.loads((rd / SR.RECORD).read_text())
+            for r in rec["rows"]:
+                if r["step"] == step:
+                    r["delta"][key] = 1
+            SR.save_record(rd, rec)
+        return mod
+    neg = [
+        ("2 窓の判定不能: 窓の中の出力の δ の記録が無い (抽出の失敗)",
+         dict(delta_fn=lambda s, x: None if s == 30000 else (np.full(len(x), 1e-3),) * 2), {}, None, "2 窓"),
+        ("2 窓の判定不能: 記録の行が欠けた出力 47,500", dict(steps=[k for k in range(2500, 62501, 2500) if k != 47500]), {}, None,
+         "記録の行が無い出力"),
+        ("2 窓の判定不能: 履歴が 2 窓を覆わない (停止 30,000)", dict(s_stop=30000), {}, None, "2 窓"),
+        ("2 窓: δ の記録の held (出力 50,000)", {}, {}, held_rec(50000, "n_held"), "2 窓"),
+        ("2 窓: δ の記録の欠測 (出力 50,000)", {}, {}, held_rec(50000, "n_missing"), "2 窓"),
+        ("保存則の判定不能: r の非有限 (出力 50,000)", dict(r_fn=lambda s: float("nan") if s == 50000 else 0.0), {}, None, "保存則"),
+        ("保存則の判定不能: 窓の点数の不足 (出力の間隔 5,000)", dict(steps=list(range(5000, 62501, 5000))), {}, None, "保存則"),
+        ("停止の状態 DIVERGED", dict(status="DIVERGED"), {}, None, "停止の状態"),
+        ("局所 y₁⁺: FAIL", {}, dict(wr="FAIL"), None, "局所 y₁⁺"),
+        ("局所 y₁⁺: 判定不能", {}, dict(wr="UNDETERMINED"), None, "局所 y₁⁺"),
+        ("被覆: 端の補間範囲の不足 (欠測)", dict(ns=-1.0), {}, None, "被覆"),
+        ("次の壁の幾何の健全性", {}, dict(nw=False), None, "次の壁"),
+    ]
+    for i, (lab, mk, rkw, mod, key) in enumerate(neg):
+        rd = gate_run(f"u_neg{i}", pin, **mk)
+        if mod is not None:
+            mod(rd)
+        g = run(rd, euler_ref=pin, **{**ALL, **rkw})
+        check(f"負例 (上書き 3 つ) {lab} → 止める ({'; '.join(g['blocked_by'])[:100]}…)",
+              not g["proceed"] and any(key in b for b in g["blocked_by"]) and not (rd / "delta_r_next.csv").exists())
+    rd = gate_run("u_neg_held", pin)
+    DL.extract_and_merge = held_extract
+    g = run(rd, euler_ref=pin, **ALL)
+    DL.extract_and_merge = spy
+    check("負例 (上書き 3 つ) 使用域の held 1 点 → 止める", not g["proceed"] and g["checks"]["coverage"]["n_held_use"] == 1
+          and not (rd / "delta_r_next.csv").exists())
+    rd = gate_run("u_neg_eref", pin)
+    g = run(rd, euler_ref=str(eu), **ALL)
+    check("負例 (上書き 3 つ) Euler の参照が本段の記録と違う → 止める", not g["proceed"] and not g["checks"]["euler_ref"]["pass"])
+    g = run(rd, euler_ref=pin, omega=0.4, **ALL)
+    check("負例 (上書き 3 つ) ω 0.4 → 止める", not g["proceed"] and not g["checks"]["omega"]["pass"])
+    rd = gate_run("u_neg_sha", pin, euler_ref={**pin, "sha256": "f" * 64})
+    g = run(rd, **ALL)
+    check("負例 (上書き 3 つ) Euler の参照の sha の不一致 → 抽出の例外で止める", not g["proceed"] and any("抽出が例外" in b for b in g["blocked_by"]))
+
+    # --- 呼び出し側の δ_E の作り方の口 (extractor + delta_e_source) ---
+    win = {"kind": "window_mean", "n_snapshots": 5, "steps": [42500, 47500, 52500, 57500, 62500], "tool": "試験の偽物"}
+    rd = gate_run("u_caller", pin, r_fn=lambda s: 1e-3)
+    g = run(rd, euler_ref=pin, allow_unsettled=US, extractor=lambda *a, **k: real["extract_and_merge"](*a, **k), delta_e_source=win)
+    m_top = marks(rd)[0]
+    check("口: extractor + delta_e_source (5 枚の窓の平均の記録) → その抽出で進み、作り方を HANDOFF_GATE.json と抽出の要約に残す (provider caller)",
+          g["proceed"] and g["delta_e_source"]["kind"] == "window_mean" and g["delta_e_source"]["n_snapshots"] == 5
+          and g["delta_e_source"]["steps"] == win["steps"] and "caller" in g["delta_e_source"]["provider"]
+          and m_top["delta_e_source"] == g["delta_e_source"] and m_top["settled"] is False, f"{g['blocked_by']} {g.get('delta_e_source')}")
+    for lab, kw in (("extractor だけ", dict(extractor=spy)), ("delta_e_source だけ", dict(delta_e_source=win)),
+                    ("kind が空", dict(extractor=spy, delta_e_source={**win, "kind": " "})),
+                    ("n_snapshots 0", dict(extractor=spy, delta_e_source={**win, "n_snapshots": 0})),
+                    ("n_snapshots が bool", dict(extractor=spy, delta_e_source={**win, "n_snapshots": True})),
+                    ("delta_e_source が mapping でない", dict(extractor=spy, delta_e_source="window_mean"))):
+        e = raises(lambda kw=kw: DL.handoff_gate(rd, problem="試験.yaml", euler_ref=pin, write=False, **kw), ValueError)
+        check(f"口の負例: {lab} → ValueError (作り方の記録と抽出を食い違わせない)", e is not None, str(e)[:100])
+    rd = gate_run("u_caller_held", pin)
+    g = run(rd, euler_ref=pin, extractor=held_extract, delta_e_source=win, **ALL)
+    check("口の負例: 呼び出し側の抽出にも被覆・held の条件が掛かる (使用域の held 1 点 → 上書き 3 つでも止める)",
+          not g["proceed"] and g["checks"]["coverage"]["n_held_use"] == 1 and not (rd / "delta_r_next.csv").exists())
+    rd = gate_run("u_caller_bad", pin)
+    g = run(rd, euler_ref=pin, extractor=lambda *a, **k: None, delta_e_source=win)
+    check("口の負例: 呼び出し側の抽出が要約を返さない → 抽出の例外で止める", not g["proceed"] and any("抽出が例外" in b for b in g["blocked_by"]))
 
 
 # ====================================================================================== G. 次の壁の幾何 (本物の構築)
@@ -633,6 +785,115 @@ def test_timing(prod):
     return dt
 
 
+# ====================================================================================== I. 出口の列の被覆 (幾何の許容)
+def euler_ending(name: str, short: float):
+    """Euler の参照 run (列の x = linspace(X0 − 0.5, X1, 69) の最後の列だけを X1 − short に)。戻り (run dir, 固定の指定, 列の x)。"""
+    x = np.linspace(X0 - 0.5, X1, 69)
+    x[-1] = X1 - short
+    rw = rwE_f(x)
+    R = rw[:, None] * radial(NJ)[None, :]
+    X = np.repeat(x[:, None], NJ, axis=1)
+    rd = TMP / name
+    write_run(rd, X, R, core_q(X, R, rw[:, None]), {}, steps=(1000,))
+    return rd, {"run": str(rd), "res": "res_1000.h5", "sha256": DS._sha256_file(rd / "res_1000.h5")}, x
+
+
+def test_exit_cover(pin0):
+    print("== I. 出口の列の被覆: Euler の補間できる範囲の幾何の許容 (§5.1 #36g)", flush=True)
+    from forge_design.metrics.delta_in_check import compare_delta_in, wall_columns_from_run
+    xE = np.linspace(X0 - 0.5, X1 + 0.5, 70)
+    r = DS.euler_cover_range(xE)
+    r0 = DS.euler_cover_range(xE, edge_tol=False)
+    check("euler_cover_range: 許容は端の外側だけ (tol = 1e−4 × 端の列の間隔)、既定 (edge_tol=False) は ±1e−9",
+          r["tol_hi"] == 1e-4 * (xE[-1] - xE[-2]) and r["tol_lo"] == 1e-4 * (xE[1] - xE[0]) and r["hi"] == xE[-1] + r["tol_hi"]
+          and r["lo"] == xE[0] - r["tol_lo"] and r0["hi"] == xE[-1] + 1e-9 and r0["lo"] == xE[0] - 1e-9)
+    xx = np.array([xE[0] - 2 * r["tol_lo"], xE[0] - 0.5 * r["tol_lo"], xE[0], 3.0, xE[-1], xE[-1] + 0.5 * r["tol_hi"], xE[-1] + 2 * r["tol_hi"]])
+    check("euler_covers: 端の外側は許容の内だけを覆う", list(DS.euler_covers(xx, r)) == [False, True, True, True, True, True, False]
+          and DS.euler_covers(3.0, r) is True)
+    # NS (最後の列 x = X1) と、端が X1 − d の Euler
+    Xo, Ro, Qo = synth_ns(+1.0)
+    h0 = X1 - np.linspace(X0 - 0.5, X1, 69)[-2]
+    d_out = 1.001e-4 * h0 / (1.0 + 1.001e-4)            # 許容 1e−4 × (h0 − d) のちょうど外 (0.1 %)
+    cases = {"over": 1.68e-9, "just_out": d_out, "short": 0.07}
+    runs = {}
+    for k, d in cases.items():
+        eu, pin, x = euler_ending(f"eu_i_{k}", d)
+        rg = DS.euler_cover_range(wall_columns_from_run(eu)["x"])
+        rd = TMP / f"ns_i_{k}"
+        write_run(rd, Xo, Ro, Qo, ns_info(pin), steps=(2500,))
+        runs[k] = (eu, pin, rd, rg)
+    eu, pin, rd, rg = runs["just_out"]
+    check(f"前提: 「ちょうど外」の Euler の端は NS の最後の列より許容の 1.001 倍だけ短い (hi {rg['hi']:.15g} < X1 {X1}、差 / 許容 "
+          f"{(X1 - rg['x1']) / rg['tol_hi']:.4f})", rg["hi"] < X1 and 1.0005 < (X1 - rg["x1"]) / rg["tol_hi"] < 1.0015)
+    kw = dict(band_select="edge", remap_constant_x=True, remap_edge="missing")
+    eu, pin, rd, rg = runs["over"]
+    a = DS.deltastar_from_core_matched_euler(rd, pin, **kw)
+    ne = a["not_extracted"]
+    E = DS._load_structured(eu, res="res_1000.h5")
+    check(f"1.68e−9 r_t の越え: 全列を抽出 (not_extracted 0)、許容の内側で端を越えた列 {ne['edge_tol_cols']['x']}・越え "
+          f"{ne['edge_tol_cols']['beyond'][0]:.3g} r_t を記録、Euler の壁は端の列の値",
+          ne["n"] == 0 and len(a["x"]) == NI and ne["edge_tol_cols"]["n"] == 1 and ne["edge_tol_cols"]["x"] == [X1]
+          and abs(ne["edge_tol_cols"]["beyond"][0] - 1.68e-9) < 1e-12 and a["r_wall_euler"][-1] == E["r"][-1, -1]
+          and a["settings"]["euler_cover"]["edge_tol"], str(ne)[:300])
+    b = DS.deltastar_from_core_matched_euler(rd, pin, band_select="edge", remap_constant_x=True)
+    check("既定 (remap_edge='clamp') の経路は今と同じ ±1e−9: 1.68e−9 r_t の越えは Euler の範囲の外 (outside_euler)",
+          b["not_extracted"]["n"] == 1 and b["not_extracted"]["reason"] == ["outside_euler"] and "euler_cover" not in b["settings"])
+    for k, lab in (("just_out", "許容のちょうど外"), ("short", "0.07 r_t の不足")):
+        _, pk, rdk, _ = runs[k]
+        c_ = DS.deltastar_from_core_matched_euler(rdk, pk, **kw)
+        check(f"{lab}: 最後の列は欠測 (outside_euler、外挿しない)", c_["not_extracted"]["n"] == 1 and c_["not_extracted"]["x"] == [X1]
+              and c_["not_extracted"]["reason"] == ["outside_euler"] and c_["not_extracted"]["edge_tol_cols"]["n"] == 0)
+    # 内側の列には効かない: 許容をほぼ 0 にした抽出と、列ごとの値 (adaptive の帯 = 列ごとに独立) がビット同一
+    kw_a = dict(remap_constant_x=True, remap_edge="missing")
+    full = DS.deltastar_from_core_matched_euler(rd, pin, **kw_a)
+    old_frac = DS.EULER_EDGE_TOL_FRAC
+    DS.EULER_EDGE_TOL_FRAC = 1e-12
+    try:
+        tiny = DS.deltastar_from_core_matched_euler(rd, pin, **kw_a)
+    finally:
+        DS.EULER_EDGE_TOL_FRAC = old_frac
+    same = all(np.array_equal(full[q][:-1], tiny[q], equal_nan=True) for q in ("x", "delta_r_raw", "delta_in", "r_wall_euler", "alpha", "band_y_b"))
+    check("内側の列には効かない: 許容あり (最後の列を端の値で抽出) と許容ほぼ 0 (最後の列は欠測) の、内側の全列の列ごとの値がビット同一",
+          len(full["x"]) == NI and len(tiny["x"]) == NI - 1 and same)
+    # δ_in の照合 (delta_in_check.compare_delta_in): 同じ共通の範囲
+    xn = Xo[:, 0]
+    rwn = Ro[:, -1]
+    for k, want in (("over", True), ("just_out", False), ("short", False)):
+        eu, _, _, _ = runs[k]
+        W = wall_columns_from_run(eu)
+        rr = compare_delta_in(xn, rwn, W["x"], W["rw"], lambda x: dl_f(x), S_SC)
+        check(f"δ_in の照合 ({k}): 被覆 {'あり (許容の内側の列 ' + str(rr['n_edge_tol']) + ')' if want else 'なし (最後の列が外)'}",
+              rr["covered"] == want and rr["n_uncovered"] == (0 if want else 1) and rr["n_edge_tol"] == (1 if want else 0)
+              and rr["euler_cover"]["edge_tol"], str({q: rr[q] for q in ("covered", "n_uncovered", "n_edge_tol", "edge_tol_beyond")}))
+    eu, _, _, _ = runs["over"]
+    W = wall_columns_from_run(eu)
+    r1 = compare_delta_in(xn, rwn, W["x"], W["rw"], lambda x: dl_f(x), S_SC, return_arrays=True)
+    check("δ_in の照合: 許容の内側で越えた列の Euler の壁は端の列の値 (δ_in = NS の壁 − Euler の最後の列の壁)",
+          r1["arrays"]["r_wall_euler"][-1] == W["rw"][-1] and r1["arrays"]["delta_in"][-1] == rwn[-1] - W["rw"][-1])
+    # 関門の抽出と被覆・δ の記録・帯の生成 (受け渡しの条件 handoff_extract_settings)
+    eu, pin, rd, _ = runs["over"]
+    od = TMP / "i_handoff"
+    summ = DL.extract_and_merge(rd, pin, out_dir=od, **DL.handoff_extract_settings())
+    cov = DL.coverage_check(summ, od / "delta_r_next.csv", X1)
+    check("関門の抽出と被覆 (1.68e−9 r_t の越え): 全域の被覆の合格・許容の内側の列を記録", cov["pass"] and cov["not_extracted"]["n"] == 0
+          and cov["not_extracted"]["edge_tol_cols"]["n"] == 1, str(cov.get("why")))
+    _, pk, rdk, _ = runs["short"]
+    summ = DL.extract_and_merge(rdk, pk, out_dir=TMP / "i_handoff_short", **DL.handoff_extract_settings())
+    cov = DL.coverage_check(summ, TMP / "i_handoff_short" / "delta_r_next.csv", X1)
+    check("関門の被覆 (0.07 r_t の不足): 不合格 (outside_euler)", not cov["pass"] and cov["not_extracted"]["reason"] == ["outside_euler"])
+    uc = SR.use_columns(rd)
+    one = SR.delta_snapshot(rd, 2500, pin, {**DL.handoff_extract_settings(), "source": "試験"}, uc["x"])
+    band = SR.fix_band(rd, 2500, pin, TMP / "i_band", **SR.band_extract_kw(ns_info(pin)["stop_rule"]))
+    check("δ の記録 (delta_snapshot) は使用域の最後の列 (x_w) まで欠測 0、帯の生成 (fix_band) も全列",
+          uc["x"][-1] == X1 and one["n_missing"] == 0 and np.all(np.isfinite(one["delta_E"])) and len(band["x"]) == NI and band["x"][-1] == X1)
+    # 2 窓に入るべき出力の列挙
+    check("required_window_steps: 停止 62,500・窓 20,000・間隔 2,500 → 17 出力 (22,500〜62,500)、不正な引数は例外",
+          SR.required_window_steps(62500, 20000, 2500) == list(range(22500, 62501, 2500))
+          and raises(lambda: SR.required_window_steps(62500, 20000, None), ValueError) is not None
+          and raises(lambda: SR.required_window_steps(62500, 0, 2500), ValueError) is not None)
+    _ = pin0
+
+
 def main() -> int:
     print(f"出力: {TMP}  ピン: {PIN}", flush=True)
     prod = None
@@ -645,6 +906,7 @@ def main() -> int:
     test_recorder(pin)
     test_gate(eu, pin)
     test_next_wall()
+    test_exit_cover(pin)
     if prod is not None and not QUICK:
         test_timing(prod)
     elif QUICK:

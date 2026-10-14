@@ -64,7 +64,10 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
   キー無しで使えない (euler_ref が無い等) ときは理由を記録して `ns_steps` の長さで回し、`evaluate.stop_rule: true` を明示したときだけ準備の前に例外。
   使わないときは `--no-stop-rule` か `evaluate.stop_rule: false` で、本段は `--steps` > `evaluate.ns_steps` > 60,000。
   `evaluate.nStepOuter` は Euler の本段だけ。冷却壁の case/70 は入口の直管の質量の過渡で未到達になる (plan `tooling-nozzle-cooled-wall-ns-settling` §6 S-stop)。
-  未到達の run から次の壁を作るのは `deltastar_loop --allow-not-reached "<理由>"` (理由は必須、`HANDOFF_GATE.json` に残る) の明示の上書きだけ。
+  未到達の run から次の壁を作るのは `deltastar_loop --allow-not-reached "<理由>"` の明示の上書きだけ。窓の質量の収支・直近 2 窓の δ_E・δ_target の
+  実測が閾値を超える run (case/70 の r 0.7〜1.4 % など) はさらに `--allow-unsettled "<理由>"` が要る (plan `tooling-nozzle-isothermal-wall-chain`
+  §5.1 #36h)。理由は必須で、`HANDOFF_GATE.json` (version 3) に理由・実測の値と `settled: false` が残る。判定不能 (記録の欠け等)・被覆・held・次の壁・
+  局所 y₁⁺ は上書きでは通らない。
 - **計算は手元の PC でなく AWS で** (2026-10-14 ユーザ「ローカルで計算かけない方がいいかも」、手元の PC がメモリ不足で落ちた)。skill `forge-aws-run`。
 
 ## メッシュの規模 (作る前に示す; AGENTS.md「メッシュの規模は作る前に示す」)

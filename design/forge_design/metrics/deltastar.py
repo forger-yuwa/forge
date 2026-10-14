@@ -73,6 +73,49 @@ def deltastar_from_run(mesh_h5, res_h5, wall_xy, scale: float,
 # --- 固定 Euler 基準のコア整合質量欠損抽出 (plans/active/tooling-nozzle-deltastar-core-matched-euler.md) ----
 REMAP_EDGES = ("clamp", "missing")
 _EULER_REF_KEYS = ("run", "res", "sha256")
+EULER_RANGE_PAD = 1e-9          # 既定 (remap_edge="clamp") の Euler の範囲の余裕 [r_t] (2026-10-14 までの全経路の値)
+EULER_EDGE_TOL_FRAC = 1.0e-4    # remap_edge="missing" の端の外側の幾何の許容 = Euler の端の列の間隔 × これ (§5.1 #36g)
+
+
+def euler_cover_range(xE, edge_tol: bool = True) -> dict:
+    """Euler の参照の「補間できる範囲」[lo, hi] (r_t) を決める共通の関数 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36g)。
+    抽出器 (`deltastar_from_core_matched_euler` の列の被覆と `not_extracted` の理由)・δ_in の照合 (`delta_in_check`)・停止規則の帯の生成と
+    δ の記録・受け渡しの関門の抽出と被覆 (いずれも抽出器を通る)・V-h370 の判定の A/B の比べる列が、すべてこれを呼ぶ。
+
+    edge_tol=True (remap_edge="missing" の経路): lo = xE[0] − tol_lo、hi = xE[−1] + tol_hi、tol = EULER_EDGE_TOL_FRAC (1e−4) × その端の
+    列の間隔 (tol_lo = 1e−4 (xE[1] − xE[0])、tol_hi = 1e−4 (xE[−1] − xE[−2]))。許容は**端の外側だけ**に足し、内側の列の被覆と評価
+    (列 k と重み w の補間) は変えない。許容の内側で端を越える列は、抽出器の補間 (`euler_q_at`: 重み w を [0, 1] に丸める) により
+    **端の列の値**で評価される。数学的には端の外側の微小区間 (幅 tol) への**定数の延長**であり、これを「外挿ではない」とは呼ばない
+    (plan §5.1 #36i (v)、codex diagnose `notes/reviews/2026-10-14-h370-prelaunch-review-diagnose.md`)。
+    **この許容は、同一の端点の丸め (本来同じ座標の端の列が、格子のファイルの桁数の違いで 1e−9 r_t 程度ずれる) を吸収するためのもので、
+    範囲の不足を隠すためではない**。2026-10-14 の B の dry-run で、変換後の座標の NS の最後の列 x = 95.29740274407894 が Euler の参照の端
+    95.29740274239427 を 1.68e−9 r_t 越えて被覆が落ちた (Euler の格子は msh の座標を既定の 10 桁で書くので、出口の x × r_t =
+    7.306010214129155 m が 7.306010214 m に丸まり、÷ r_t = 95.29740274239427 と一致する。NS の格子は 17 桁なので生成の値のまま)。この種の
+    差 (≲ 1e−8 r_t) は許容 (端の間隔の 1e−4 倍) より十分小さく、範囲の不足 (旧い run_0174 の終端 95.2276 と NS の 95.2974 の 0.07 r_t) は
+    許容より桁違いに大きいので、後者は今どおり欠測になる。
+    edge_tol=False (既定の remap_edge="clamp" の経路): 今までどおり ±EULER_RANGE_PAD (1e−9 r_t) — 既定の呼び出し元の結果は変えない。
+    戻り: {"lo", "hi", "x0", "x1", "tol_lo", "tol_hi", "edge_tol", "frac" (edge_tol のとき)}。"""
+    xE = np.asarray(xE, dtype=float)
+    if xE.ndim != 1 or len(xE) < 2:
+        raise ValueError("euler_cover_range: Euler の列の x は 2 列以上の 1 次元の配列")
+    if edge_tol:
+        tl = EULER_EDGE_TOL_FRAC * float(xE[1] - xE[0])
+        th = EULER_EDGE_TOL_FRAC * float(xE[-1] - xE[-2])
+        if not (tl > 0.0 and th > 0.0):
+            raise ValueError("euler_cover_range: Euler の端の列の間隔が正でない (x が単調増加でない)")
+    else:
+        tl = th = EULER_RANGE_PAD
+    out = {"lo": float(xE[0]) - tl, "hi": float(xE[-1]) + th, "x0": float(xE[0]), "x1": float(xE[-1]), "tol_lo": tl, "tol_hi": th,
+           "edge_tol": bool(edge_tol)}
+    if edge_tol:
+        out["frac"] = EULER_EDGE_TOL_FRAC
+    return out
+
+
+def euler_covers(x, rng: dict):
+    """x (スカラーか配列) が `euler_cover_range` の範囲 [lo, hi] の内か (閉区間)。スカラーなら bool、配列なら bool の配列。"""
+    c = (np.asarray(x, dtype=float) >= rng["lo"]) & (np.asarray(x, dtype=float) <= rng["hi"])
+    return bool(c) if np.ndim(c) == 0 else c
 
 
 def _sha256_file(path) -> str:
@@ -537,12 +580,16 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
 
     euler_run: run dir (最新の出力を読む; 今の挙動) か固定のスナップショットの指定 {run, res, sha256} (`resolve_euler_ref`、sha が合わなければ
     ValueError; plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6))。remap_edge: `_load_structured` の remap_constant_x の端の扱い
-    ("clamp" 既定 = 今の挙動 / "missing" = 補間範囲の足りない列を欠測にして抽出しない; §5.1 #36e (4))。
+    ("clamp" 既定 = 今の挙動 / "missing" = 補間範囲の足りない列を欠測にして抽出しない; §5.1 #36e (4))。Euler の範囲の外の列の判定は
+    `euler_cover_range` (§5.1 #36g): "missing" の経路は Euler の端の外側だけに幾何の許容 (端の列の間隔 × 1e−4) を足し、許容の内側で
+    端を越える列は端の列の値で評価する (同一の端点の丸めを吸収する許容 = 微小区間の定数の延長; 範囲の不足は今どおり欠測)。
+    "clamp" は ±1e−9 のまま。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿、抽出しなかった NS の列
     `not_extracted` ({n, i, x, reason}; reason は outside_euler (Euler の範囲の外)・remap_missing (端の補間範囲の不足)・no_result
-    (帯の計算が結果を返さない))。`out_dir` を与えると `delta_r_equiv.csv` / `delta_r_equiv_diag.json` を書く。"""
+    (帯の計算が結果を返さない)。"missing" の経路では範囲 `euler_cover` と許容の内側で端を越えた列 `edge_tol_cols` も付く)。
+    `out_dir` を与えると `delta_r_equiv.csv` / `delta_r_equiv_diag.json` を書く。"""
     import json
     from pathlib import Path
     from scipy.interpolate import make_smoothing_spline
@@ -552,6 +599,13 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     miss_cols = set(N.get("remap_missing_cols", {}).get("i", []))      # 端の補間範囲の不足で欠測にした列 (remap_edge="missing")
     xE = E["x"][:, 0]
     rwE_col = E["r"][:, -1]
+    # Euler の補間できる範囲 (§5.1 #36g、`euler_cover_range`): "missing" の経路は端の外側だけに幾何の許容 (端の列の間隔 × 1e−4) を足し、
+    # 許容の内側で端を越える列は euler_q_at (w を [0, 1] に丸める) で端の列の値になる (同一の端点の丸めを吸収する許容 = 微小区間の
+    # 定数の延長、§5.1 #36i (v))。"clamp" (既定) は今までどおり ±1e−9
+    cover = euler_cover_range(xE, edge_tol=(remap_edge == "missing"))
+
+    def covered(x) -> bool:
+        return cover["lo"] <= x <= cover["hi"]
 
     def euler_q_at(x, r):
         """Euler 場を (x, r) へ: 列間線形 × 列内線形 (r>壁は壁値)。"""
@@ -565,7 +619,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
 
     def extract_one(i, fc, y_b_fixed=None):
         x = float(N["x"][i, 0]); r0 = N["r"][i]; q0 = N["q"][i]
-        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9 or i in miss_cols:
+        if not covered(x) or i in miss_cols:
             return None
         _, rwE = euler_q_at(x, r0[:1])
         if method == "band":
@@ -611,7 +665,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         ii, xs_e, din_e, rw_e_l, yl, dl = [], [], [], [], [], []
         for i in range(N["x"].shape[0]):
             x = float(N["x"][i, 0])
-            if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9 or i in miss_cols:
+            if not covered(x) or i in miss_cols:
                 continue
             _, rwE = euler_q_at(x, N["r"][i][:1])
             rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
@@ -634,7 +688,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
 
     def extract_plateau(i):
         x = float(N["x"][i, 0])
-        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9 or i in miss_cols:
+        if not covered(x) or i in miss_cols:
             return None
         _, rwE = euler_q_at(x, N["r"][i][:1])
         rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
@@ -760,10 +814,16 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     done = {r_["i"] for r_ in rows}
     xs_all = N["x"][:, 0]
     ne = [i for i in range(len(xs_all)) if i not in done]
-    why = ["remap_missing" if i in miss_cols else ("outside_euler" if (xs_all[i] < xE[0] - 1e-9 or xs_all[i] > xE[-1] + 1e-9)
-                                                    else "no_result") for i in ne]
+    why = ["remap_missing" if i in miss_cols else ("outside_euler" if not covered(float(xs_all[i])) else "no_result") for i in ne]
     out["not_extracted"] = {"n": len(ne), "n_cols_ns": int(len(xs_all)), "i": [int(i) for i in ne],
                             "x": [float(xs_all[i]) for i in ne], "reason": why}
+    if cover["edge_tol"]:
+        # 幾何の許容 (§5.1 #36g) の内側で Euler の端を越え、端の列の値で評価した NS の列 (記録; 範囲の不足を隠していないことを後で見る)
+        et = [i for i in range(len(xs_all)) if covered(float(xs_all[i])) and not (cover["x0"] <= float(xs_all[i]) <= cover["x1"])]
+        rec_et = {"n": len(et), "i": [int(i) for i in et], "x": [float(xs_all[i]) for i in et],
+                  "beyond": [float(max(cover["x0"] - xs_all[i], xs_all[i] - cover["x1"])) for i in et]}
+        out["not_extracted"].update(euler_cover=cover, edge_tol_cols=rec_et)
+        out["settings"].update(euler_cover=cover, edge_tol_cols=rec_et)
     out["massflow"] = massflow_ratio(ns_run, euler_run)
     if edge is not None:
         out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])

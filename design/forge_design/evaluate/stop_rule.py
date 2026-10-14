@@ -25,6 +25,9 @@ tooling-nozzle-cooled-wall-ns-settling §4.6、ユーザ決定・諮問 stop-rul
     出力だけ)。要求の断面の位置 (x_fracs × x_w) は `sections` に残す。
   - θ_r の断面の基準は設計壁の出口 `physical_wall.domain[1]` (60de8125 の修正; 軸 Mach 則の終点 x_E ではない)。判定・量・見張り・forge の
     止め方は forge-f5 の版のまま。
+  - (§5.1 #36g) 帯の生成と δ の記録は抽出器 (remap_edge="missing") を通るので、Euler の参照の補間できる範囲は共通の
+    `deltastar.euler_cover_range` (端の外側だけに幾何の許容 = 端の列の間隔 × 1e−4、許容の内側で端を越える列は端の列の値) になる。
+    2 窓に入るべき出力は `required_window_steps` (出力の間隔から列挙; 記録にある行だけから作らない) で決める。
 
 **新しい規則であり、旧 `m9_watch.py` (§6.11、`case/45.isobutane_m6_d155/m9_watch.py`) と同等とは言わない**: m9_watch は窓の両端の差で傾向と振動を
 混ぜて判定し、断面・量・連続の到達の条件もここと違う (codex diagnose 2026-10-14、`notes/reviews/2026-10-14-half-inlet-370k-design-diagnose.md`)。
@@ -138,6 +141,19 @@ def thresholds(**kw) -> dict:
 
 def theta_key(frac: float) -> str:
     return f"theta_r_{float(frac):g}"
+
+
+def required_window_steps(step: int, window: int, out_int: int, n_windows: int = 2) -> list:
+    """停止の出力 s で終わる n_windows 窓 [s − n W, s] (閉区間) に入るべき出力の step を、出力の間隔から列挙する (昇順)。
+    plan tooling-nozzle-isothermal-wall-chain §5.1 #36g (codex diagnose 2026-10-14 の Major「判定窓の完全性」): 記録 (stop_rule.json の行) に
+    ある出力だけから窓を作ると、行そのものの欠けを検出できない。forge は outStepInterval の倍数で res を書き、s もその倍数なので、
+    必要な出力は s − k·Δ (k = 0..⌊n W/Δ⌋)。V-h370 (W 20,000・Δ 2,500・2 窓) では 17 出力。引数が整数でなければ ValueError。"""
+    vals = {"step": step, "window": window, "out_int": out_int, "n_windows": n_windows}
+    for k, v in vals.items():
+        if isinstance(v, bool) or not isinstance(v, (int, np.integer)) or (v < 0 if k == "step" else v <= 0):
+            raise ValueError(f"required_window_steps: {k} は {'0 以上' if k == 'step' else '正'}の整数 ({v!r})")
+    s, n, d = int(step), int(n_windows) * int(window), int(out_int)
+    return sorted(s - k * d for k in range(n // d + 1))
 
 
 # ------------------------------------------------------------------ 設定 (prepare_ns が prepare_info.json の stop_rule に書く)

@@ -302,7 +302,13 @@ def cmd_check(out_json=None) -> int:
     sr = SR.resolve_settings(pn.evaluate, nsteps_arg=None, n_main=n, n_main_source=n_src, out_int=out_int,
                              euler_ref="<投入の時に固定する run_0950 の res と sha256>", requested=None)
     rec["stop_rule_resolved"] = sr
-    want_sr = {"use": True, "requested": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500, "fallback_steps": 200000,
+    # 統合ブランチ (integrate/design-flow-1、2026-10-14) の期待値: 問題 YAML は M6 のブランチで登録して run に使った版のまま変えない。
+    # 統合後の停止規則では `evaluate.stop_rule: true` は明示の要求 (explicit; 使えない設定は準備・起動の前に例外)、使えないときの本段の長さ
+    # fallback_steps は `--steps` > `evaluate.ns_steps` > 60,000 (RA.NS_STEPS_DEFAULT; `evaluate.nStepOuter` は Euler だけが読む) なので、
+    # M6 のブランチの 200,000 (evaluate.nStepOuter) ではなく 60,000。fallback_steps は見張りの途中で帯の位置を決められない UNAVAILABLE の
+    # ときだけ効く (上限 cap 200,000 は登録のまま)。
+    want_sr = {"use": True, "requested": True, "explicit": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500,
+               "fallback_steps": RA.NS_STEPS_DEFAULT,
                **{k: (list(v) if isinstance(v, list) else v) for k, v in STOP_RULE_THRESHOLDS.items()}}
     bad_sr = {k: sr.get(k) for k, v in want_sr.items() if sr.get(k) != v}
     if bad_sr:
