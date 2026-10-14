@@ -1,0 +1,17 @@
+problem_bell_tp_m_ns_l100.yaml M jump at 0: euler_up 1.1812386113984565 moc 1.1812335132555591
+  [-4,0) C_moc/C_euler-1 mean +0.003% max|0.037%
+  [0,0.41) C_moc/C_euler-1 mean -0.003% max|0.111%
+  [0.41,1.17) C_moc/C_euler-1 mean -0.278% max|0.299%
+  [1.17,2) C_moc/C_euler-1 mean -0.264% max|0.284%
+  [2,8) C_moc/C_euler-1 mean -0.176% max|0.241%
+  [8,16) C_moc/C_euler-1 mean -0.074% max|0.106%
+  [16,99) C_moc/C_euler-1 mean -0.030% max|0.048%
+  exit 0.13245493526103758 0.13250643842468168 -0.0388684234942871 %
+problem_bell_tp_m_ns_l70.yaml M jump at 0: euler_up 1.1812386113984565 moc 1.1812335132555591
+  [-4,0) C_moc/C_euler-1 mean -0.000% max|0.043%
+  [0,0.41) C_moc/C_euler-1 mean +0.001% max|0.105%
+  [0.41,1.17) C_moc/C_euler-1 mean -0.472% max|0.620%
+  [1.17,2) C_moc/C_euler-1 mean -0.394% max|0.461%
+  [2,8) C_moc/C_euler-1 mean -0.233% max|0.337%
+  [8,16) C_moc/C_euler-1 mean -0.089% max|0.131%
+  exit 0.08598348306979808 0.08594409707013284 0.045827463441838745 %

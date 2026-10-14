@@ -1,0 +1,470 @@
+{
+ "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #34",
+ "tool": "half_inlet_ab.py",
+ "environment": {
+  "python": "3.12.3",
+  "executable": "/home/sano/work/forge/design/.venv-opt/bin/python",
+  "numpy": "2.5.2",
+  "scipy": "1.18.0",
+  "host": "DESKTOP-S8N5ES6"
+ },
+ "gref_sha256": "85b13b3ddc75e25b4abf3e2865113906a6360f833308d2267f137fc37f90fa62",
+ "cfd_pin_dir": "/home/sano/work/forge/case/45.isobutane_m6_d155/run_0062_euler_wallfit_fit_r1_ext6k",
+ "design": {
+  "n_wall_inv": 610,
+  "x_in": -12.5,
+  "x_e": 95.29740274407894,
+  "x_F": 95.29740274407894,
+  "L_c": 39.3,
+  "cfd_pin": {
+   "source": "cfd",
+   "run": "/home/sano/work/forge/case/45.isobutane_m6_d155/run_0062_euler_wallfit_fit_r1_ext6k",
+   "res": [
+    "res_6000.h5"
+   ],
+   "x0": 0.5089583481234511,
+   "anchor": [
+    1.2147584415478936,
+    0.6352781033834302,
+    0.024552692376932278
+   ],
+   "mstar": 3.131109875057595,
+   "sha256_16": {
+    "snapshot": "b1cc31ea78113457",
+    "thermo": "cb08f7398369bad5",
+    "line": "da98a6f954ed620b"
+   },
+   "config": {
+    "discretization": "node",
+    "isAxisymmetric": 1,
+    "viscMethod": 0,
+    "visc": 0.0,
+    "turbulence": "none",
+    "walls": {
+     "wall": "slip"
+    }
+   },
+   "match": {
+    "checked": [
+     "R",
+     "gamma_hall",
+     "gas",
+     "L_U",
+     "r_U",
+     "L_pipe",
+     "contraction_shape",
+     "meta.gas.Tt",
+     "meta.species.Y_transport",
+     "meta.species.transported",
+     "inlet.Pt",
+     "inlet.Tt",
+     "inlet.Y",
+     "physProp.thermalMethod",
+     "physProp.species",
+     "physProp.thermoHrefTemp"
+    ],
+    "unchecked": []
+   }
+  }
+ },
+ "delta_r": {
+  "source": "integral_delta_r (problem_d155_ns_prod.yaml、断熱、修正後の設計)",
+  "csv": "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/half_inlet/ab5/delta_r_initial_C.csv",
+  "sha256": "24251cb647226d6523109655c08c05210fdb8ba4a669aeaecb4407202945b918",
+  "x_range": [
+   -12.499999,
+   95.29740274407894
+  ],
+  "throat": 0.0013927337502350164,
+  "exit": 0.7329474993463961
+ },
+ "yaml_C": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgref_c.yaml",
+  "status": "unchanged"
+ },
+ "gref_tables_on_fixed_wall": "例外 (想定どおり): x_density_table: 表の x 範囲 [-12.500000640558765, 95.2275815792169] が格子の範囲 [-12.5, 95.29740274407894] を覆わない (端値で外挿しない)",
+ "yaml_H": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgref_h.yaml",
+  "status": "unchanged"
+ },
+ "AB": {
+  "wall_A_minus_B": {
+   "d0": {
+    "max": 3.2862601528904634e-14,
+    "x": -3.694569156849912
+   },
+   "d1": {
+    "max": 1.6153745008296028e-14,
+    "x": -0.88962309233368
+   },
+   "d2": {
+    "max": 7.275957614183426e-12,
+    "x": 0.0026122637651351255
+   }
+  },
+  "wall_pass": true,
+  "x_ge_0_vs_C": {
+   "A": {
+    "d0": {
+     "max": 0.0,
+     "x": 0.0
+    },
+    "d1": {
+     "max": 0.0,
+     "x": 0.0
+    },
+    "d2": {
+     "max": 0.0,
+     "x": 0.0
+    }
+   },
+   "B": {
+    "d0": {
+     "max": 4.440892098500626e-16,
+     "x": 0.00015099999999999988
+    },
+    "d1": {
+     "max": 1.4210854715202004e-14,
+     "x": 0.0018037832445561008
+    },
+    "d2": {
+     "max": 7.275957614183426e-12,
+     "x": 0.0026122637651351255
+    }
+   }
+  },
+  "x_ge_0_pass": true,
+  "mesh_x_ge_0_cols_vs_C": {
+   "A_bit_equal": true,
+   "B_bit_equal": false,
+   "B_max_abs_m": 2.3489240066898454e-16,
+   "n_cols": 2938
+  },
+  "stations_same_A_B_C": true,
+  "first_layer": {
+   "B_over_A_max_rel": 0.0007247282603359828,
+   "x_at_max": -8.743273153966989,
+   "pass": true,
+   "A_over_C_range": [
+    0.9999999988012033,
+    1.0000000011303678
+   ],
+   "B_over_C_range": [
+    0.9992752717327081,
+    1.0004203665832798
+   ]
+  },
+  "quality": {
+   "C": {
+    "cells": 750162,
+    "ar_max": 4573.992789404581,
+    "ar_p99": 3536.2460236021284,
+    "skew_max": 0.45809227115240264,
+    "ar_gt_5000": 0,
+    "skew_gt_0.9": 0,
+    "pass": true,
+    "quad_at_ar_max": 2225
+   },
+   "A": {
+    "cells": 750162,
+    "ar_max": 4573.9927890123445,
+    "ar_p99": 3395.1872241364845,
+    "skew_max": 0.31975149426952176,
+    "ar_gt_5000": 0,
+    "skew_gt_0.9": 0,
+    "pass": true,
+    "quad_at_ar_max": 2225
+   },
+   "B": {
+    "cells": 750162,
+    "ar_max": 4573.992788806282,
+    "ar_p99": 3395.0547320328606,
+    "skew_max": 0.31975149426940735,
+    "ar_gt_5000": 0,
+    "skew_gt_0.9": 0,
+    "pass": true,
+    "quad_at_ar_max": 2225
+   }
+  },
+  "tol": {
+   "wall_rt": 1e-08,
+   "first_layer_rel": 0.01,
+   "ar_max": 5000,
+   "skew_max": 0.9
+  },
+  "pass": true
+ },
+ "H_wall": {
+  "cfd_pin_match_H_problem": {
+   "checked": [
+    "R",
+    "gamma_hall",
+    "gas",
+    "L_U",
+    "r_U",
+    "L_pipe",
+    "contraction_shape",
+    "meta.gas.Tt",
+    "meta.species.Y_transport",
+    "meta.species.transported",
+    "inlet.Pt",
+    "inlet.Tt",
+    "inlet.Y",
+    "physProp.thermalMethod",
+    "physProp.species",
+    "physProp.thermoHrefTemp"
+   ],
+   "unchecked": []
+  },
+  "physical_upstream": {
+   "r_U": 3.2425,
+   "L_U": 9.0,
+   "L_pipe": 3.5,
+   "x_in": -12.5,
+   "x_contraction": -9.0,
+   "mu": 18.06020066889632,
+   "R_t": 2.0,
+   "nominal_hermite": {
+    "coef": [
+     3.2425,
+     0.0,
+     0.0,
+     -2.1750000000000185,
+     -6.862499999999972,
+     6.794999999999989
+    ],
+    "basis": "Σ coef[j] ξ^j, ξ = (x + L_U)/L_U",
+    "domain": [
+     -9.0,
+     0.0
+    ],
+    "end_conditions": [
+     [
+      3.2425,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.5
+     ]
+    ]
+   },
+   "frozen_design": {
+    "r_U": 6.485,
+    "L_U": 12.0,
+    "L_pipe": 0.5,
+    "x_in": -12.5
+   },
+   "note": "物理壁の直管 r_U・多項式 Q の始点 (−L_U, r_U, 0, 0) だけをこの値にする。設計壁 (MOC・CFD ピンの照合) は frozen_design のまま"
+  },
+  "throat": {
+   "x": -0.001552220271703539,
+   "r": 1.0013916826514275,
+   "kappa": 0.5006916250549565
+  },
+  "upstream_gate": {
+   "pass": true,
+   "max_abs_d2_change_vs_H": 0.001182602312739145,
+   "max_seam_jump": 6.661338147750939e-16,
+   "H_ref": "physical_upstream の名目の U→T Hermite ((r_U, 0, 0) → (1, 0, 1/R)、設計壁の Hermite ではない)"
+  },
+  "join_at_x0_A": [
+   1.0013922860287021,
+   0.0007775647116686213,
+   0.5011826023127502
+  ],
+  "wall_file": "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/half_inlet/ab5/wall_repr_H.json",
+  "wall_file_sha256": "d67277d2629e9b5b6c2598ee4fc491f295a50cc306cd73983038f1e9941a4ea4",
+  "C_throat": {
+   "x": -0.0015519050659090132,
+   "r": 1.0013916827330989,
+   "kappa": 0.500895086710369
+  }
+ },
+ "vs_old": {
+  "old_wall": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep/wall_repr.json",
+  "old_wall_sha256": "a7131fd8d52f600995f4373b2e257826a830f6761c30675bf5c78e7e7f7227f7",
+  "domain_old": [
+   -12.5,
+   95.22757793472597
+  ],
+  "domain_new": [
+   -12.5,
+   95.29740274407894
+  ],
+  "x_e_shift_rt": 0.06982480935296564,
+  "x_e_shift_mm": 5.353144531151289,
+  "table_end_old": 95.2275815792169,
+  "table_end_new": 95.2975,
+  "ni_old": 4719,
+  "ni_new": 4719,
+  "ni_to_keep_mean_spacing": 4720.146700696412,
+  "station_shift": {
+   "max_abs_rt": 0.06982480935296564,
+   "x_at_max": 95.29740274407894,
+   "at_x0_col": 0.0006863239961578298,
+   "first": 0.0,
+   "last": 0.06982480935296564
+  },
+  "join_old_H_vs_forge25_record": {
+   "r": 0.0,
+   "r1": 0.0,
+   "r2": 0.0
+  },
+  "station_shift_by_region": {
+   "pipe_contraction_x_lt_0": 0.0009217063465749575,
+   "throat_0_1": 0.001328717637189225,
+   "x_1_40": 0.05638619931474409,
+   "test_40_94": 0.06949884527180927,
+   "end_94_old_end": 0.06982480935296564
+  },
+  "C_new_minus_C_old_by_region": {
+   "pipe_contraction_x_lt_0": {
+    "d0": 6.1898477294874965e-06,
+    "d1": 3.3490133937719158e-06,
+    "d2": 1.0629014110044577e-06
+   },
+   "throat_0_1": {
+    "d0": 6.046063555809056e-06,
+    "d1": 3.259007137657033e-06,
+    "d2": 4.39189713953847e-05
+   },
+   "x_1_40": {
+    "d0": 2.35619029762546e-05,
+    "d1": 2.101054119130197e-06,
+    "d2": 3.927230480149646e-06
+   },
+   "test_40_94": {
+    "d0": 3.4599627262821286e-05,
+    "d1": 7.15964760752974e-06,
+    "d2": 3.7895494049422496e-06
+   },
+   "end_94_old_end": {
+    "d0": 4.365707286879683e-05,
+    "d1": 1.2421250985994448e-05,
+    "d2": 5.950554914591066e-06
+   }
+  },
+  "design_S_new_minus_old_by_region": {
+   "throat_0_1": {
+    "d0": 2.3951394201304765e-09,
+    "d1": 2.714600452480287e-07,
+    "d2": 4.263422003081274e-05
+   },
+   "x_1_40": {
+    "d0": 4.980729162440412e-10,
+    "d1": 2.5116186908036298e-08,
+    "d2": 1.5357188074410777e-06
+   },
+   "test_40_94": {
+    "d0": 1.3492904571421604e-09,
+    "d1": 9.091927547690325e-09,
+    "d2": 6.390158713287519e-08
+   },
+   "end_94_old_end": {
+    "d0": 6.606521552043887e-09,
+    "d1": 4.815990450879326e-08,
+    "d2": 5.886068379368226e-07
+   }
+  },
+  "delta_r_new_minus_old_by_region": {
+   "throat_0_1": {
+    "d0": 6.045920714292663e-06,
+    "d1": 3.259007137657033e-06,
+    "d2": 2.3814872704974732e-06
+   },
+   "x_1_40": {
+    "d0": 2.3561902969149173e-05,
+    "d1": 2.1010541380039882e-06,
+    "d2": 2.519526165700725e-06
+   },
+   "test_40_94": {
+    "d0": 3.459963966001567e-05,
+    "d1": 7.168739535077379e-06,
+    "d2": 3.779347616972295e-06
+   },
+   "end_94_old_end": {
+    "d0": 4.365914274195859e-05,
+    "d1": 1.2379749001922846e-05,
+    "d2": 5.7263875987700885e-06
+   }
+  },
+  "H_new_B_minus_H_old_by_region": {
+   "pipe_contraction_x_lt_0": {
+    "d0": 3.855933178531501e-06,
+    "d1": 3.3157013339668584e-06,
+    "d2": 1.3170434420908816e-06
+   },
+   "throat_0_1": {
+    "d0": 6.046063555809056e-06,
+    "d1": 3.259007148037618e-06,
+    "d2": 4.39189713953847e-05
+   },
+   "x_1_40": {
+    "d0": 2.35619029762546e-05,
+    "d1": 2.101054119130197e-06,
+    "d2": 3.927230480149646e-06
+   },
+   "test_40_94": {
+    "d0": 3.4599627262821286e-05,
+    "d1": 7.15964760752974e-06,
+    "d2": 3.7895494049422496e-06
+   },
+   "end_94_old_end": {
+    "d0": 4.365707286879683e-05,
+    "d1": 1.2421250985994448e-05,
+    "d2": 5.950554914591066e-06
+   }
+  },
+  "C_new_minus_C_old": {
+   "d0": {
+    "max": 4.365707286879683e-05,
+    "x": 95.2273344322953
+   },
+   "d1": {
+    "max": 1.2421250985994448e-05,
+    "x": 95.2273344322953
+   },
+   "d2": {
+    "max": 4.39189713953847e-05,
+    "x": 0.3817896279174331
+   }
+  },
+  "H_new_A_minus_H_old": {
+   "d0": {
+    "max": 4.365707286879683e-05,
+    "x": 95.2273344322953
+   },
+   "d1": {
+    "max": 1.2421250985994448e-05,
+    "x": 95.2273344322953
+   },
+   "d2": {
+    "max": 4.39189713953847e-05,
+    "x": 0.3817896279174331
+   }
+  },
+  "H_new_B_minus_H_old": {
+   "d0": {
+    "max": 4.365707286879683e-05,
+    "x": 95.2273344322953
+   },
+   "d1": {
+    "max": 1.2421250985994448e-05,
+    "x": 95.2273344322953
+   },
+   "d2": {
+    "max": 4.39189713953847e-05,
+    "x": 0.3817896279174331
+   }
+  },
+  "join_new_minus_old": [
+   3.3685668316962847e-06,
+   3.259007137657033e-06,
+   -4.13250068942439e-07
+  ],
+  "old_table_end_check": "例外 (想定どおり): SingleBSplinePhysicalWall: δ_r の表の範囲 [-12.499999, 95.2254899] が設計スロート 0 から出口 95.2974027 までを覆わない (表の外は端値延長で導関数 0 — 1 本の 5 次 B-spline で表せない)"
+ }
+}

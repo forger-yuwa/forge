@@ -1,0 +1,772 @@
+{
+ "plan": "plans/active/tooling-nozzle-bell-two-mode.md §5.1 #6 (W3)・§6 V2",
+ "decision_record": "notes/reviews/2026-10-12-bell-m-v2-euler-diagnostician.md",
+ "commit": "d0389af472005213eb8c3ea09f95cd7e90fe7cb8",
+ "design_tree_dirty": [
+  " M design/forge_design/feedback/cfd_initial_line.py",
+  " M design/forge_design/geometry/rao_axisym.py"
+ ],
+ "source_sha256_16": {
+  "design/forge_design/geometry/rao_axisym.py": "1e0906b437fa0e8b",
+  "design/forge_design/feedback/cfd_initial_line.py": "103406cf2b6b2178",
+  "design/forge_design/gas/isentrope.py": "a9b195b562d56fa7",
+  "design/forge_design/geometry/moc_forward.py": "f9949ce3fa00f772",
+  "design/forge_design/geometry/moc_kernel.py": "fe8c2e5d40f71471",
+  "design/forge_design/evaluate/runner.py": "6b3faa7a76888608"
+ },
+ "setup": {
+  "problem_expect": "case/68.bell_two_mode/problem_bell_tp_m_euler_l100.yaml",
+  "res": "res_30000.h5",
+  "n_line": 321,
+  "freeze": "run_0015_tp_m_euler_l100",
+  "mstar_expect": [
+   0.9926,
+   0.0002
+  ],
+  "grid_line": {
+   "mstar_ratio": 0.0001,
+   "theta_rad": 0.0001
+  },
+  "mdot_drift_line": 1e-05,
+  "mstar_definition": "線を横切る等エントロピー写像の流量 (rao_axisym.line_integrals、3 次スプライン + GL) / ṁ_1D (ρ*a*πr_t²)。trapezoid は moc_forward._line_flux (中点則)"
+ },
+ "hall": {
+  "source": "hall_throat_characteristic",
+  "n": 321,
+  "x_axis": 0.7223751907627057,
+  "M_axis": 1.3851968119957154,
+  "M_wall": 1.2030655933411034,
+  "M_min": 1.1569859921742969,
+  "thr_axis": 0.2023395288631681,
+  "Mp_axis_anchor": 0.7234942659163794,
+  "check_initial_line": {
+   "n": 321,
+   "M_min": 1.1569859921742969,
+   "wall_dr": 0.0,
+   "wall_dtheta": -8.720444749583769e-18,
+   "thr_axis": 0.2023395288631681
+  },
+  "mstar_nd": 3.109251726996941,
+  "mstar_ratio_1d": 0.9897055633371509,
+  "mstar_ratio_1d_trapezoid": 0.9897050533296398,
+  "T_line_nd": 5.729634190719191,
+  "saw2_theta": {
+   "n": 319,
+   "max_abs": 1.4176353168998795e-06,
+   "j_at_max": 319,
+   "median_abs": 8.831999154981351e-07,
+   "alt_frac": 0.0
+  },
+  "saw2_M": {
+   "n": 319,
+   "max_abs": 2.7510242958106446e-06,
+   "j_at_max": 319,
+   "median_abs": 2.439849956181739e-06,
+   "alt_frac": 0.0
+  },
+  "sha256_16": "9514793e8d3f9e79",
+  "compat_mismatch_2001": -0.010859020006054473,
+  "front": {
+   "k0": 64,
+   "x_wall": 0.30056304496789843,
+   "all_ok_to_axis": true,
+   "front_sha256_16": "a3cd89ad360bf1b8",
+   "march_end": {
+    "reason": "front_cap",
+    "front": 120,
+    "detail": "前線の上限 120"
+   },
+   "band_k0_minus_j": [
+    -6,
+    12
+   ],
+   "band_r_range": [
+    0.6230432593987901,
+    0.7373031810971246
+   ],
+   "dev_from_smooth": {
+    "th": {
+     "max_abs_dev_in_band": 0.0014528681460235227,
+     "k0_minus_j_at_max": 4,
+     "max_abs_dev_outside_band": 0.0,
+     "ddev_sign_alt_frac_in_band": 0.5882352941176471
+    },
+    "M": {
+     "max_abs_dev_in_band": 0.002550627765117497,
+     "k0_minus_j_at_max": 4,
+     "max_abs_dev_outside_band": 2.220446049250313e-16,
+     "ddev_sign_alt_frac_in_band": 0.5882352941176471
+    }
+   },
+   "dr_increment_sign_alt_frac_in_band": 0.6666666666666666,
+   "dr_increment_sign_alt_frac_outside_band": 0.03678929765886288,
+   "thr_axis_first_fronts": [
+    -1.0026629801075304,
+    0.9612827017906636,
+    -0.294431069382509,
+    0.6927129079885168,
+    -0.11872769558932411,
+    0.5667761284901849,
+    0.017732334348727157,
+    0.4812006206847005,
+    0.11568091415675247,
+    0.4253601163211751,
+    0.18495660691944163,
+    0.39031158681268574
+   ]
+  }
+ },
+ "runs": {
+  "run_0015_tp_m_euler_l100": {
+   "match": {
+    "checked": [
+     "R",
+     "gas.exhaust",
+     "L_U",
+     "r_U",
+     "L_pipe",
+     "contraction_shape",
+     "meta.gas.exhaust.Tc_K",
+     "meta.gas.exhaust.Pc_Pa",
+     "meta.gas.species",
+     "inlet.Pt",
+     "inlet.Tt",
+     "inlet.Y",
+     "physProp.thermalMethod",
+     "physProp.species",
+     "physProp.thermoHrefTemp"
+    ],
+    "unchecked": [
+     "gamma_hall"
+    ],
+    "unchecked_reasons": {
+     "gamma_hall": "③の凍結源の prepare_info は Hall の γ を持たない (evaluate/runner.py)。γ_Hall を使うのは M″_A (Hall の式) だけで、③の初期線 (`moc_initial_line`) は M_A・M′_A だけを使う — 照合の対象外"
+    },
+    "R_used": 1.0,
+    "gamma_hall_used": 1.1975971721396326
+   },
+   "cfd": {
+    "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0015_tp_m_euler_l100",
+    "res": [
+     "res_30000.h5"
+    ],
+    "match": {
+     "checked": [
+      "R",
+      "gas.exhaust",
+      "L_U",
+      "r_U",
+      "L_pipe",
+      "contraction_shape",
+      "meta.gas.exhaust.Tc_K",
+      "meta.gas.exhaust.Pc_Pa",
+      "meta.gas.species",
+      "inlet.Pt",
+      "inlet.Tt",
+      "inlet.Y",
+      "physProp.thermalMethod",
+      "physProp.species",
+      "physProp.thermoHrefTemp"
+     ],
+     "unchecked": [
+      "gamma_hall"
+     ]
+    },
+    "sha256_16": {
+     "snapshot": "c1271cbb67b8cdd1",
+     "thermo": "a0fc9bd18f2cfdde",
+     "line": "e8bd021adff43eda"
+    }
+   },
+   "mdot_drift": {
+    "steps": [
+     15000,
+     30000
+    ],
+    "n": 11,
+    "line": 1e-05,
+    "mdot_exit_kg_s": {
+     "first": 268.86953850482894,
+     "last": 268.86956209173997,
+     "mean": 268.86954089484686,
+     "rel_last_minus_first": 8.772622941406605e-08,
+     "rel_max_minus_min": 3.0338257745729666e-07
+    },
+    "mdot_in_kg_s": {
+     "first": 268.8695653915875,
+     "last": 268.8695333483721,
+     "mean": 268.8695372558519,
+     "rel_last_minus_first": -1.1917756001536902e-07,
+     "rel_max_minus_min": 3.9278416081303517e-07
+    },
+    "mdot_ratio_1d": {
+     "first": 0.9926296306608918,
+     "last": 0.9926297177405473,
+     "mean": 0.9926296394845117,
+     "rel_last_minus_first": 8.772622942389586e-08,
+     "rel_max_minus_min": 3.0338257745385146e-07
+    },
+    "within_line": true,
+    "final_mdot_ratio_1d": 0.9926297177405473
+   },
+   "line": {
+    "source": "cfd_pinned",
+    "n": 321,
+    "x_axis": 0.6535007773011583,
+    "M_axis": 1.3315662388504297,
+    "M_wall": 1.1812335132555591,
+    "M_min": 1.131696448018012,
+    "thr_axis": 0.1856141653586971,
+    "Mp_axis_anchor": 0.7489923001660992,
+    "check_initial_line": {
+     "n": 321,
+     "M_min": 1.131696448018012,
+     "wall_dr": 0.0,
+     "wall_dtheta": 0.0,
+     "thr_axis": 0.1856141653586971
+    },
+    "mstar_nd": 3.1184151703837193,
+    "mstar_ratio_1d": 0.9926223779586479,
+    "mstar_ratio_1d_trapezoid": 0.9926219404505778,
+    "T_line_nd": 5.739886339907553,
+    "saw2_theta": {
+     "n": 319,
+     "max_abs": 3.843044541584502e-06,
+     "j_at_max": 318,
+     "median_abs": 7.235541470002049e-07,
+     "alt_frac": 0.012578616352201259
+    },
+    "saw2_M": {
+     "n": 319,
+     "max_abs": 4.534259129651552e-05,
+     "j_at_max": 319,
+     "median_abs": 2.303882311927019e-06,
+     "alt_frac": 0.018867924528301886
+    },
+    "sha256_16": "06885f029fe3910c",
+    "minus_hall": {
+     "max_abs_dtheta": 0.008397550436648103,
+     "dtheta_at_max": -0.008397550436648103,
+     "r_at_max_dtheta": 0.6062500000000001,
+     "max_abs_dM": 0.05363057314528574,
+     "dM_at_max": -0.05363057314528574,
+     "r_at_max_dM": 0.0,
+     "max_abs_dx": 0.06887441346154743,
+     "dx_at_max": -0.06887441346154743,
+     "r_at_max_dx": 0.0,
+     "dmstar_ratio_1d": 0.0029168146214970533,
+     "mstar_rel": 0.002947153910767053,
+     "dx_axis": -0.06887441346154743,
+     "dthr_axis": -0.016725363504471014,
+     "dM_axis": -0.05363057314528574
+    },
+    "compat_mismatch_2001": 9.423539805986786e-05,
+    "front": {
+     "k0": 68,
+     "x_wall": 0.30201326723016053,
+     "all_ok_to_axis": true,
+     "front_sha256_16": "5cc885cffd115398",
+     "march_end": {
+      "reason": "front_cap",
+      "front": 120,
+      "detail": "前線の上限 120"
+     },
+     "band_k0_minus_j": [
+      -6,
+      12
+     ],
+     "band_r_range": [
+      0.6374073102443363,
+      0.7560737264972899
+     ],
+     "dev_from_smooth": {
+      "th": {
+       "max_abs_dev_in_band": 2.533270388899167e-05,
+       "k0_minus_j_at_max": 6,
+       "max_abs_dev_outside_band": 0.0,
+       "ddev_sign_alt_frac_in_band": 0.058823529411764705
+      },
+      "M": {
+       "max_abs_dev_in_band": 8.923239909419678e-05,
+       "k0_minus_j_at_max": 6,
+       "max_abs_dev_outside_band": 0.0,
+       "ddev_sign_alt_frac_in_band": 0.058823529411764705
+      }
+     },
+     "dr_increment_sign_alt_frac_in_band": 0.05555555555555555,
+     "dr_increment_sign_alt_frac_outside_band": 0.016722408026755852,
+     "thr_axis_first_fronts": [
+      0.19349478785677024,
+      0.2052897658936951,
+      0.2165972065920077,
+      0.22534653267453092,
+      0.2363204241101877,
+      0.24547171604337728,
+      0.2530623043189677,
+      0.26124980144497245,
+      0.26965754317695145,
+      0.2758329894180221,
+      0.2824681877913838,
+      0.28924337226872304
+     ]
+    },
+    "mstar_vs_euler_rel": -7.394279828765171e-06,
+    "mstar_minus_expect": 2.2377958647901153e-05,
+    "mstar_within_expect": true
+   },
+   "anchor": {
+    "M_A": 1.3315662388504297,
+    "Mp_A": 0.7489923001660992,
+    "x_A": 0.6535007773011583
+   }
+  },
+  "run_0016_tp_m_euler_l70": {
+   "match": {
+    "checked": [
+     "R",
+     "gas.exhaust",
+     "L_U",
+     "r_U",
+     "L_pipe",
+     "contraction_shape",
+     "meta.gas.exhaust.Tc_K",
+     "meta.gas.exhaust.Pc_Pa",
+     "meta.gas.species",
+     "inlet.Pt",
+     "inlet.Tt",
+     "inlet.Y",
+     "physProp.thermalMethod",
+     "physProp.species",
+     "physProp.thermoHrefTemp"
+    ],
+    "unchecked": [
+     "gamma_hall"
+    ],
+    "unchecked_reasons": {
+     "gamma_hall": "③の凍結源の prepare_info は Hall の γ を持たない (evaluate/runner.py)。γ_Hall を使うのは M″_A (Hall の式) だけで、③の初期線 (`moc_initial_line`) は M_A・M′_A だけを使う — 照合の対象外"
+    },
+    "R_used": 1.0,
+    "gamma_hall_used": 1.1975971721396326
+   },
+   "cfd": {
+    "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0016_tp_m_euler_l70",
+    "res": [
+     "res_30000.h5"
+    ],
+    "match": {
+     "checked": [
+      "R",
+      "gas.exhaust",
+      "L_U",
+      "r_U",
+      "L_pipe",
+      "contraction_shape",
+      "meta.gas.exhaust.Tc_K",
+      "meta.gas.exhaust.Pc_Pa",
+      "meta.gas.species",
+      "inlet.Pt",
+      "inlet.Tt",
+      "inlet.Y",
+      "physProp.thermalMethod",
+      "physProp.species",
+      "physProp.thermoHrefTemp"
+     ],
+     "unchecked": [
+      "gamma_hall"
+     ]
+    },
+    "sha256_16": {
+     "snapshot": "155a1c8767523164",
+     "thermo": "a0fc9bd18f2cfdde",
+     "line": "00beaadce20e9a3b"
+    }
+   },
+   "mdot_drift": {
+    "steps": [
+     15000,
+     30000
+    ],
+    "n": 11,
+    "line": 1e-05,
+    "mdot_exit_kg_s": {
+     "first": 268.8688920806895,
+     "last": 268.86886956530503,
+     "mean": 268.86888248110444,
+     "rel_last_minus_first": -8.37411314995134e-08,
+     "rel_max_minus_min": 1.3661440900392873e-07
+    },
+    "mdot_in_kg_s": {
+     "first": 268.86891774915324,
+     "last": 268.8688718857132,
+     "mean": 268.8688926272135,
+     "rel_last_minus_first": -1.7057919792077787e-07,
+     "rel_max_minus_min": 3.0904614121910737e-07
+    },
+    "mdot_ratio_1d": {
+     "first": 0.9926272441512174,
+     "last": 0.9926271610274917,
+     "mean": 0.99262720871086,
+     "rel_last_minus_first": -8.374113156577379e-08,
+     "rel_max_minus_min": 1.3661440901029723e-07
+    },
+    "within_line": true,
+    "final_mdot_ratio_1d": 0.9926271610274917
+   },
+   "line": {
+    "source": "cfd_pinned",
+    "n": 321,
+    "x_axis": 0.6534977391906714,
+    "M_axis": 1.3315759305502564,
+    "M_wall": 1.1812286296965766,
+    "M_min": 1.1316946402759476,
+    "thr_axis": 0.18563770980060856,
+    "Mp_axis_anchor": 0.7490693847671218,
+    "check_initial_line": {
+     "n": 321,
+     "M_min": 1.1316946402759476,
+     "wall_dr": 0.0,
+     "wall_dtheta": 0.0,
+     "thr_axis": 0.18563770980060856
+    },
+    "mstar_nd": 3.1184158461752878,
+    "mstar_ratio_1d": 0.9926225930697852,
+    "mstar_ratio_1d_trapezoid": 0.9926221561834195,
+    "T_line_nd": 5.739887087406991,
+    "saw2_theta": {
+     "n": 319,
+     "max_abs": 3.840394416601813e-06,
+     "j_at_max": 318,
+     "median_abs": 7.149000540215139e-07,
+     "alt_frac": 0.012578616352201259
+    },
+    "saw2_M": {
+     "n": 319,
+     "max_abs": 4.5322557940319363e-05,
+     "j_at_max": 319,
+     "median_abs": 2.30235894449482e-06,
+     "alt_frac": 0.018867924528301886
+    },
+    "sha256_16": "4a9101e9d0235844",
+    "minus_hall": {
+     "max_abs_dtheta": 0.008398273824960958,
+     "dtheta_at_max": -0.008398273824960958,
+     "r_at_max_dtheta": 0.6062500000000001,
+     "max_abs_dM": 0.05362088144545907,
+     "dM_at_max": -0.05362088144545907,
+     "r_at_max_dM": 0.0,
+     "max_abs_dx": 0.06887745157203429,
+     "dx_at_max": -0.06887745157203429,
+     "r_at_max_dx": 0.0,
+     "dmstar_ratio_1d": 0.002917029732634301,
+     "mstar_rel": 0.0029473712593859336,
+     "dx_axis": -0.06887745157203429,
+     "dthr_axis": -0.016701819062559548,
+     "dM_axis": -0.05362088144545907
+    },
+    "compat_mismatch_2001": 8.9685223117357e-05,
+    "front": {
+     "k0": 68,
+     "x_wall": 0.30201136705459647,
+     "all_ok_to_axis": true,
+     "front_sha256_16": "c908db928e2199fa",
+     "march_end": {
+      "reason": "front_cap",
+      "front": 120,
+      "detail": "前線の上限 120"
+     },
+     "band_k0_minus_j": [
+      -6,
+      12
+     ],
+     "band_r_range": [
+      0.6374040329101484,
+      0.7560704671534252
+     ],
+     "dev_from_smooth": {
+      "th": {
+       "max_abs_dev_in_band": 2.5209117655689006e-05,
+       "k0_minus_j_at_max": 6,
+       "max_abs_dev_outside_band": 0.0,
+       "ddev_sign_alt_frac_in_band": 0.058823529411764705
+      },
+      "M": {
+       "max_abs_dev_in_band": 8.907250205369976e-05,
+       "k0_minus_j_at_max": 6,
+       "max_abs_dev_outside_band": 2.220446049250313e-16,
+       "ddev_sign_alt_frac_in_band": 0.058823529411764705
+      }
+     },
+     "dr_increment_sign_alt_frac_in_band": 0.05555555555555555,
+     "dr_increment_sign_alt_frac_outside_band": 0.016722408026755852,
+     "thr_axis_first_fronts": [
+      0.19330954179074103,
+      0.20545717199599958,
+      0.21646610374165914,
+      0.2254541269424055,
+      0.23623042846528888,
+      0.24553881427869084,
+      0.25300486483611573,
+      0.26129750330129387,
+      0.2696165660569449,
+      0.27586617198790064,
+      0.2824384221197368,
+      0.2892637704530946
+     ]
+    },
+    "mstar_vs_euler_rel": -4.601886675947853e-06,
+    "mstar_minus_expect": 2.259306978513731e-05,
+    "mstar_within_expect": true
+   },
+   "anchor": {
+    "M_A": 1.3315759305502564,
+    "Mp_A": 0.7490693847671218,
+    "x_A": 0.6534977391906714
+   }
+  },
+  "run_0017_tp_m_euler_l100_fine": {
+   "match": {
+    "checked": [
+     "R",
+     "gas.exhaust",
+     "L_U",
+     "r_U",
+     "L_pipe",
+     "contraction_shape",
+     "meta.gas.exhaust.Tc_K",
+     "meta.gas.exhaust.Pc_Pa",
+     "meta.gas.species",
+     "inlet.Pt",
+     "inlet.Tt",
+     "inlet.Y",
+     "physProp.thermalMethod",
+     "physProp.species",
+     "physProp.thermoHrefTemp"
+    ],
+    "unchecked": [
+     "gamma_hall"
+    ],
+    "unchecked_reasons": {
+     "gamma_hall": "③の凍結源の prepare_info は Hall の γ を持たない (evaluate/runner.py)。γ_Hall を使うのは M″_A (Hall の式) だけで、③の初期線 (`moc_initial_line`) は M_A・M′_A だけを使う — 照合の対象外"
+    },
+    "R_used": 1.0,
+    "gamma_hall_used": 1.1975971721396326
+   },
+   "cfd": {
+    "run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0017_tp_m_euler_l100_fine",
+    "res": [
+     "res_30000.h5"
+    ],
+    "match": {
+     "checked": [
+      "R",
+      "gas.exhaust",
+      "L_U",
+      "r_U",
+      "L_pipe",
+      "contraction_shape",
+      "meta.gas.exhaust.Tc_K",
+      "meta.gas.exhaust.Pc_Pa",
+      "meta.gas.species",
+      "inlet.Pt",
+      "inlet.Tt",
+      "inlet.Y",
+      "physProp.thermalMethod",
+      "physProp.species",
+      "physProp.thermoHrefTemp"
+     ],
+     "unchecked": [
+      "gamma_hall"
+     ]
+    },
+    "sha256_16": {
+     "snapshot": "b7600d3247923e1d",
+     "thermo": "a0fc9bd18f2cfdde",
+     "line": "420ab07b36bc90b3"
+    }
+   },
+   "mdot_drift": {
+    "steps": [
+     15000,
+     30000
+    ],
+    "n": 11,
+    "line": 1e-05,
+    "mdot_exit_kg_s": {
+     "first": 268.86791175499434,
+     "last": 268.86798099147273,
+     "mean": 268.86796127697676,
+     "rel_last_minus_first": 2.575110774337535e-07,
+     "rel_max_minus_min": 3.1081630093773657e-07
+    },
+    "mdot_in_kg_s": {
+     "first": 268.8679001805988,
+     "last": 268.86786852824986,
+     "mean": 268.8679724826445,
+     "rel_last_minus_first": -1.1772450482275253e-07,
+     "rel_max_minus_min": 1.705956703586785e-06
+    },
+    "mdot_ratio_1d": {
+     "first": 0.9926236249225829,
+     "last": 0.9926238805342091,
+     "mean": 0.9926238077509815,
+     "rel_last_minus_first": 2.575110774119353e-07,
+     "rel_max_minus_min": 3.1081630085339845e-07
+    },
+    "within_line": true,
+    "final_mdot_ratio_1d": 0.9926238805342091
+   },
+   "line": {
+    "source": "cfd_pinned",
+    "n": 321,
+    "x_axis": 0.6535145260755089,
+    "M_axis": 1.3316195249025577,
+    "M_wall": 1.1812246835153135,
+    "M_min": 1.1316963336443777,
+    "thr_axis": 0.18568471330885772,
+    "Mp_axis_anchor": 0.7491784258877211,
+    "check_initial_line": {
+     "n": 321,
+     "M_min": 1.1316963336443777,
+     "wall_dr": 0.0,
+     "wall_dtheta": 0.0,
+     "thr_axis": 0.18568471330885772
+    },
+    "mstar_nd": 3.118412905563375,
+    "mstar_ratio_1d": 0.9926216570439419,
+    "mstar_ratio_1d_trapezoid": 0.9926212208411578,
+    "T_line_nd": 5.739883850455763,
+    "saw2_theta": {
+     "n": 319,
+     "max_abs": 3.833234786866505e-06,
+     "j_at_max": 318,
+     "median_abs": 7.063772087794601e-07,
+     "alt_frac": 0.015723270440251572
+    },
+    "saw2_M": {
+     "n": 319,
+     "max_abs": 4.528076618576238e-05,
+     "j_at_max": 319,
+     "median_abs": 2.298866353001028e-06,
+     "alt_frac": 0.025157232704402517
+    },
+    "sha256_16": "fee6dfb3cc44df29",
+    "minus_hall": {
+     "max_abs_dtheta": 0.008397764690451053,
+     "dtheta_at_max": -0.008397764690451053,
+     "r_at_max_dtheta": 0.6062500000000001,
+     "max_abs_dM": 0.05357728709315768,
+     "dM_at_max": -0.05357728709315768,
+     "r_at_max_dM": 0.0,
+     "max_abs_dx": 0.06886066468719687,
+     "dx_at_max": -0.06886066468719687,
+     "r_at_max_dx": 0.0,
+     "dmstar_ratio_1d": 0.0029160937067910786,
+     "mstar_rel": 0.002946425497456495,
+     "dx_axis": -0.06886066468719687,
+     "dthr_axis": -0.016654815554310393,
+     "dM_axis": -0.05357728709315768
+    },
+    "compat_mismatch_2001": 6.858517848341156e-05,
+    "front": {
+     "k0": 68,
+     "x_wall": 0.3020067455643201,
+     "all_ok_to_axis": true,
+     "front_sha256_16": "7f139100c21e5fa9",
+     "march_end": {
+      "reason": "front_cap",
+      "front": 120,
+      "detail": "前線の上限 120"
+     },
+     "band_k0_minus_j": [
+      -6,
+      12
+     ],
+     "band_r_range": [
+      0.6373932289867988,
+      0.7560566685272406
+     ],
+     "dev_from_smooth": {
+      "th": {
+       "max_abs_dev_in_band": 2.722580305825062e-05,
+       "k0_minus_j_at_max": 6,
+       "max_abs_dev_outside_band": 5.551115123125783e-17,
+       "ddev_sign_alt_frac_in_band": 0.058823529411764705
+      },
+      "M": {
+       "max_abs_dev_in_band": 9.262991228009554e-05,
+       "k0_minus_j_at_max": 6,
+       "max_abs_dev_outside_band": 0.0,
+       "ddev_sign_alt_frac_in_band": 0.058823529411764705
+      }
+     },
+     "dr_increment_sign_alt_frac_in_band": 0.05555555555555555,
+     "dr_increment_sign_alt_frac_outside_band": 0.010033444816053512,
+     "thr_axis_first_fronts": [
+      0.19244168221713023,
+      0.2063839986810225,
+      0.21578150577461977,
+      0.2260349950059662,
+      0.23581222848937258,
+      0.24593687964272606,
+      0.25257908187345646,
+      0.261705011140308,
+      0.26938144907320627,
+      0.2759003159803119,
+      0.282418166382446,
+      0.2894584472501269
+     ]
+    },
+    "mstar_vs_euler_rel": -2.2400128697475097e-06,
+    "mstar_minus_expect": 2.165704394185841e-05,
+    "mstar_within_expect": true
+   },
+   "anchor": {
+    "M_A": 1.3316195249025577,
+    "Mp_A": 0.7491784258877211,
+    "x_A": 0.6535145260755089
+   }
+  }
+ },
+ "pairs": {
+  "run_0016_tp_m_euler_l70_minus_run_0015_tp_m_euler_l100": {
+   "max_abs_dtheta": 2.44807774917033e-06,
+   "dtheta_at_max": 2.44807774917033e-06,
+   "r_at_max_dtheta": 0.39687500000000003,
+   "max_abs_dM": 9.691699826674949e-06,
+   "dM_at_max": 9.691699826674949e-06,
+   "r_at_max_dM": 0.0,
+   "max_abs_dx": 3.6789638043766004e-06,
+   "dx_at_max": -3.6789638043766004e-06,
+   "r_at_max_dx": 0.125,
+   "dmstar_ratio_1d": 2.1511113724777767e-07,
+   "mstar_rel": 2.167099413252771e-07,
+   "dx_axis": -3.038110486852652e-06,
+   "dthr_axis": 2.3544441911466096e-05,
+   "dM_axis": 9.691699826674949e-06,
+   "what": "照合 (依存域は x_B より上流 — 一致するはず)"
+  },
+  "run_0017_tp_m_euler_l100_fine_minus_run_0015_tp_m_euler_l100": {
+   "max_abs_dtheta": 4.734491125585674e-06,
+   "dtheta_at_max": -4.734491125585674e-06,
+   "r_at_max_dtheta": 0.9625,
+   "max_abs_dM": 5.3286052128065364e-05,
+   "dM_at_max": 5.3286052128065364e-05,
+   "r_at_max_dM": 0.0,
+   "max_abs_dx": 1.3748774350563764e-05,
+   "dx_at_max": 1.3748774350563764e-05,
+   "r_at_max_dx": 0.0,
+   "dmstar_ratio_1d": -7.20914705974883e-07,
+   "mstar_rel": -7.262728727308598e-07,
+   "dx_axis": 1.3748774350563764e-05,
+   "dthr_axis": 7.054795016062099e-05,
+   "dM_axis": 5.3286052128065364e-05,
+   "what": "格子確認 (c): ni 1801・nj 181 (×1.5)",
+   "registered_line": {
+    "mstar_ratio": 0.0001,
+    "theta_rad": 0.0001
+   },
+   "within_registered_line": true
+  }
+ },
+ "time_s": 9.661920547485352
+}

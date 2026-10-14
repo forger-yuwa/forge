@@ -1,0 +1,141 @@
+{
+ "plan": "plans/active/tooling-nozzle-bell-two-mode.md §5.1 #7 (7b-4)",
+ "frozen_script": "judge_corrected_wall.py",
+ "settings": {
+  "X_CAL": 1.17,
+  "R_C": 6.5,
+  "NX": 4001,
+  "PW_REDUCTION": 0.3,
+  "edge": "dstar_l100_ns_run0019_constx_edge.npz"
+ },
+ "gate": {
+  "vext": {
+   "run": "case/68.bell_two_mode/run_0026_tp_m_ns_l100_corr_vext",
+   "res": "res_60000.h5",
+   "gates_ok": true
+  },
+  "vzero": {
+   "run": "case/68.bell_two_mode/run_0027_tp_m_ns_l100_corr_vzero",
+   "res": "res_60000.h5",
+   "gates_ok": true
+  },
+  "target": {
+   "run": "case/68.bell_two_mode/run_0024_tp_m_euler_l100_inv",
+   "res": "res_30000.h5",
+   "gates_ok": true
+  },
+  "target_fine": {
+   "run": "case/68.bell_two_mode/run_0025_tp_m_euler_l100_inv_fine",
+   "res": "res_30000.h5",
+   "gates_ok": true
+  },
+  "U_ns": {
+   "run": "case/68.bell_two_mode/run_0019_tp_m_ns_l100",
+   "res": "res_60000.h5",
+   "gates_ok": true
+  },
+  "U_eu": {
+   "run": "case/68.bell_two_mode/run_0018_tp_m_euler_l100_pin",
+   "res": "res_30000.h5",
+   "gates_ok": true
+  }
+ },
+ "metrics": {
+  "U": {
+   "pw": 0.021541460293521872,
+   "pw_t": 0.008737894818419533,
+   "pw_max_cal": 0.04887100673832001,
+   "axM": 0.13125971337831216,
+   "exM": 0.04849791971091317,
+   "edM": 0.024574670001071636,
+   "edM_n_outside_euler": 0,
+   "eta_ns": 0.9821548383300407,
+   "eta_euler": 0.9903617951995115
+  },
+  "Vext": {
+   "pw": 0.0073874529350583884,
+   "pw_t": 0.004042726134457092,
+   "pw_max_cal": 0.008727761562940306,
+   "axM": 0.09684526942994942,
+   "exM": 0.01065890427511562,
+   "edM": 0.0017842684924862854,
+   "edM_n_outside_euler": 0,
+   "eta_ns": 0.9821897950846878,
+   "eta_euler": 0.9907192234257396
+  },
+  "Vzero": {
+   "pw": 0.007469258967392804,
+   "pw_t": 0.0086331929692564,
+   "pw_max_cal": 0.034271770311563254,
+   "axM": 0.12774798628575423,
+   "exM": 0.01120248110276009,
+   "edM": 0.002572690550582086,
+   "edM_n_outside_euler": 0,
+   "eta_ns": 0.9821751319604008,
+   "eta_euler": 0.9907192234257396
+  },
+  "Vext_fine": {
+   "pw": 0.0073835090221739865,
+   "pw_t": 0.00408686230745217,
+   "pw_max_cal": 0.008691272283787632,
+   "axM": 0.11391163806568239,
+   "exM": 0.011355457604895544,
+   "edM": 0.001817367771108198,
+   "edM_n_outside_euler": 0,
+   "eta_ns": 0.9821897950846878,
+   "eta_euler": 0.9907122947396217
+  },
+  "Vzero_fine": {
+   "pw": 0.007469234508732165,
+   "pw_t": 0.00865782494801793,
+   "pw_max_cal": 0.034461220106115076,
+   "axM": 0.14044766436075987,
+   "exM": 0.011798051745715004,
+   "edM": 0.0025910309894406017,
+   "edM_n_outside_euler": 0,
+   "eta_ns": 0.9821751319604008,
+   "eta_euler": 0.9907122947396217
+  }
+ },
+ "uncertainty": {
+  "pw": 3.9439128844019275e-06,
+  "axM": 0.017066368635732965,
+  "exM": 0.0006965533297799247,
+  "edM": 3.309927862191263e-05,
+  "pw_t": 4.413617299507764e-05
+ },
+ "u_eta": 6.928686117846361e-06,
+ "variant_sensitivity": {
+  "pw": 8.180603233441577e-05,
+  "axM": 0.030902716855804813,
+  "exM": 0.0005435768276444708,
+  "edM": 0.0007884220580958005,
+  "pw_t": 0.004590466834799308
+ },
+ "s_eta": 1.4663124286995455e-05,
+ "judge": {
+  "Vext": {
+   "pw_reduction": 0.6570588607087141,
+   "primary": true,
+   "secondary": {
+    "axM": true,
+    "exM": true,
+    "edM": true
+   },
+   "pass": true,
+   "d_eta": 3.495675464715298e-05
+  },
+  "Vzero": {
+   "pw_reduction": 0.653261252226293,
+   "primary": true,
+   "secondary": {
+    "axM": true,
+    "exM": true,
+    "edM": true
+   },
+   "pass": true,
+   "d_eta": 2.0293630360157522e-05
+  }
+ },
+ "verdict": "補正は効く (推定区間 x < 1.17 の採り方に依らない)"
+}

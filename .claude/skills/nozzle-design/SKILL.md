@@ -30,6 +30,7 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 | 壁温 (分布) | `wall: {thermal: isothermal, Tw_profile: {s: [...], Tw_K: [...]}}` (s: 入口直管 −2→−1・縮流部 −1→0・拡大部 0→1) か `{x_m: [...], Tw_K: [...]}` (実寸、原点は設計スロート)、または `Tw_profile_csv: <カードからの相対パス>` | **長さを振るなら s** (分布が長さに追従)。表は全長を覆うこと (足りなければ止まる)。s の表は s = 0 を点として含み、直管長 > 0 (直管なしは x_m)。NS は `wall_profile_3.csv` (`wallProfile: 1`)、積分法は同じ表を実効の r_t で読む。run の `wall_temperature_profile.json` と CSV が正本 (書き換えると段の起動・成果物で止まる)。Fluent は `fluent/wall_temperature.prof` (壁面中心の値; Fluent での読み込みは未確認) |
 | ガス | `gas: {preset: air}` か `gas: {species: {...}}` | 空気の M5 以上は出口の N₂ 液化を生成器が警告する |
 | 寸法の許容差 | `tolerances: {length_m, diameter_m}` | 既定値は仮。ユーザの実用公差を聞いて書く (出荷ゲートの基準) |
+| knot のマッハ数 M_knot | 書かない (既定 = 自動) か `overrides: {geometry.M_knot: auto}`。固定するなら `overrides: {geometry.M_knot: 2.1}` | **既定は自動** (2026-10-14): 長さを固定して最大壁角が最小の M_knot を、網の検査・余裕 ≥ 1°・成立の境目から 0.05 以上の範囲で選ぶ (plan `tooling-nozzle-mknot-auto`)。カードの生成に数十分かかる (M5 で 45 分以上) — **AWS で回す**。記録は YAML の `_card.M_knot_rule` (要約) と card_log |
 
 流れ (正本は手順書 §1・§2。ここでは新しい入口と出口だけ):
 
@@ -53,6 +54,51 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 - 熱量の列の状態が `valid` 以外、または `thermal_use` が `PASS` でない表を、1 次元熱伝導の入力として「使える」と書かない。
 - STEP を CAD で編集した後のメッシュの作り直しは `deliverables/mesh/rebuild_from_step.py` (x(u) を解いて station に合わせる)。
   編集後の形状の格子品質は `check_mesh_quality.py` で確かめる。
+
+## 計算の長さの既定 (2026-10-14)
+
+- NS の本段は**停止規則つきで既定 20 万 step を上限**に回す (2026-10-14 ユーザ決定; `run_staged_ns`、`prepare_info.euler_ref` が要る)。2 万 step の窓で、
+  入口−出口の質量の収支 r (|平均| ≤ 0.05 %・振幅 ≤ 0.5 %) と θ_r (設計壁の出口 x_w に対する x/x_w 0.4・0.7・0.95、平均の変化 2 万 step あたり ≤ 0.05 %・
+  振幅 ≤ 0.5 %) を満たした後、**さらに 4 万 step その条件を保った出力で止める** (`evaluate.stop_rule_hold_steps`、既定 40,000; 途中で外れたら数え直す。
+  上限 20 万は到達 + 保持を含む)。上限に届けば「未到達」(合格でない)。記録は run の `stop_rule.json`・`STOP_RULE_STATE.json`。
+  キー無しで使えない (euler_ref が無い等) ときは理由を記録して `ns_steps` の長さで回し、`evaluate.stop_rule: true` を明示したときだけ準備の前に例外。
+  使わないときは `--no-stop-rule` か `evaluate.stop_rule: false` で、本段は `--steps` > `evaluate.ns_steps` > 60,000。
+  `evaluate.nStepOuter` は Euler の本段だけ。冷却壁の case/70 は入口の直管の質量の過渡で未到達になる (plan `tooling-nozzle-cooled-wall-ns-settling` §6 S-stop)。
+  未到達の run から次の壁を作るのは `deltastar_loop --allow-not-reached "<理由>"` の明示の上書きだけ。窓の質量の収支・直近 2 窓の δ_E・δ_target の
+  実測が閾値を超える run (case/70 の r 0.7〜1.4 % など) はさらに `--allow-unsettled "<理由>"` が要る (plan `tooling-nozzle-isothermal-wall-chain`
+  §5.1 #36h)。理由は必須で、`HANDOFF_GATE.json` (version 3) に理由・実測の値と `settled: false` が残る。判定不能 (記録の欠け等)・被覆・held・次の壁・
+  局所 y₁⁺ は上書きでは通らない。
+- **計算は手元の PC でなく AWS で** (2026-10-14 ユーザ「ローカルで計算かけない方がいいかも」、手元の PC がメモリ不足で落ちた)。skill `forge-aws-run`。
+
+## メッシュの規模 (作る前に示す; AGENTS.md「メッシュの規模は作る前に示す」)
+
+- 要求カードの生成・`prepare`・`prepare_ns` の前に、**節点数** (Euler・NS。生成器は YAML のコメントと標準出力に `# 節点数` を出す) と時間の見込みを応答に書く。
+  目安 (手元の GPU、2026-10-14): Euler 17.5 万点で 1 万 step 約 36 s (3.6 ms/step)、NS 15〜17 万点の本段で 1 万 step 約 80 s。
+- 上限は 2D で **30 万点** (Euler・NS 共通)。超えると生成器・prepare が格子を作る前に止まる。超える格子が要るなら**ユーザの了承を取ってから** `overrides: {mesh.max_nodes: N,
+  mesh.max_nodes_reason: "…", mesh_euler.max_nodes: N, mesh_euler.max_nodes_reason: "…"}` を書く。NS の ni は壁際の AR (≤ 0.97 × 5000) から決まり、第 1 層が薄い (Re が高い)
+  と上限 6000 まで増える — まず第 1 層・`ar_max`・`throat_refine` を見直す。
+- Euler の ni は NS と同じ (減らすと Euler の解が動く: case/70 で ni 600 の出口 M +3.8e-4、plan `tooling-nozzle-mesh-size-guard` §4.1)。明示の `mesh_euler.ni` は保持される。
+
+## まず使うツール (新しく書かない; AGENTS.md「既存ツールの再利用を最優先」)
+
+検証・判定・後処理のスクリプトを新しく書く前に、この表から探す。足りないときだけ書き、応答に「既存の何が足りなかったか」を 1 行書く。
+
+| やりたいこと | 使うもの |
+| --- | --- |
+| 実寸の要求 → 問題 YAML (r_t の固定点・Euler 用の写し) | `python -m forge_design.intake.wt_card CARD --out P.yaml` (NS 後の δ_E で作り直すなら `--ns-correction RUN --delta-next CSV`) |
+| Euler を回す | `python -m forge_design.evaluate.runner_axismach P_euler.yaml RUN --steps N --stages soft` |
+| NS (CFD 前の積分法の壁) | `python -m forge_design.feedback.deltastar_loop --problem P.yaml --euler-ref EULER --init-integral --run-dir RUN [--ic-from RUN] [--stages full\|none] [--prepare-only]` (`interfaceDiag` を足す台本の例: `case/70.m5_air_wt_demo/run_ns_ifacediag.sh`) |
+| NS (補正の表の壁) | `deltastar_loop --problem P.yaml --euler-ref EULER --delta-r-csv P_delta_r.csv --ic-from RUN --run-dir RUN` |
+| 同じメッシュで続きを回す | `solver_density_cuda/tools/restart_field.py RES.h5 NEW/nozzle.h5` → `runner_axismach.run_staged_ns(RUN, "none")` (Euler は `run_staged`) |
+| メッシュ品質・収束・準定常・壁解像 | `check_mesh_quality.py`・`check_convergence.py RUN --segment`・`check_quasisteady.py`・`check_wall_resolution.py RUN --mesh RUN/nozzle.h5 --groups wall` |
+| 出口コア M・流量の系列と準定常 | `case/70.m5_air_wt_demo/qs_series.py RUN [--tail 0.4 --drift 5e-5 --osc 5e-5]` (出口 M の合否は専用の許容) |
+| 残差の図 | `solver_density_cuda/tools/plot_residual.py RUN/residual_history.csv -o RUN/residual_history.png --all` |
+| 標準の報告 (図・評価量・pptx) | `python -m forge_design.report.nozzle_report RUN --euler EULER` → `build_pptx.py RUN/report` (`.venv-pptx`) |
+| 成果物一式 (STEP・gmsh・Fluent・Excel) | `python -m forge_design.export.deliverables RUN --card CARD --problem P.yaml` |
+| δ* の抽出 (1 枚・指定のスナップショット) | `deltastar_loop.extract_and_merge(NS, EULER, band_select="edge", out_dir=...)`; スナップショットを指定する例 `case/70.m5_air_wt_demo/band_c_ab.py`・`band_persist_ab.py` |
+| M_knot を自動で選ぶ (要求カードの既定) / 長さ固定で振る | 自動はカードの生成器 (`forge_design.intake.wt_card`、`evaluate/mknot_select.py`)。振るだけなら `case/70.m5_air_wt_demo/mknot_sweep.py PROBLEM_euler.yaml OUT.json [--n-axis N] M_K ...` |
+| 遅い量 (熱量・排除厚さ・流量・出口 M) の時系列 | `case/70.m5_air_wt_demo/slow_mode_probe.py OUT.json RUN[:OFFSET] ...` |
+| 寸法の逆算の A/B・壁温の δ_r → 物理壁の A/B | `case/70.m5_air_wt_demo/sizing_ab.py`・`walltemp_wall_ab.py` (手本) |
 
 ## 最初に決めること
 

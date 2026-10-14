@@ -1,0 +1,44 @@
+{
+ "G1": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cg1.yaml",
+  "nj": 75,
+  "axis_cap_frac": 0.03,
+  "identical_except_name_nj_cap": true
+ },
+ "Gc": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgc.yaml",
+  "nj": 122,
+  "axis_cap_frac": 0.015,
+  "identical_except_name_nj_cap": true
+ },
+ "G2": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cg2.yaml",
+  "nj": 170,
+  "axis_cap_frac": 0.015,
+  "identical_except_name_nj_cap": true
+ },
+ "Gref": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgref.yaml",
+  "nj": 160,
+  "axis_cap_frac": 0.015,
+  "identical_except_name_nj_cap": true
+ },
+ "G1x": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cg1x.yaml",
+  "ni": 3086,
+  "nj": 75,
+  "axis_cap_frac": 0.03,
+  "ar_max": 10000,
+  "xfactor": 2.0
+ },
+ "Grefx": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgrefx.yaml",
+  "ni": 3086,
+  "nj": 160,
+  "axis_cap_frac": 0.015,
+  "ar_max": 10000,
+  "xfactor": 2.0
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

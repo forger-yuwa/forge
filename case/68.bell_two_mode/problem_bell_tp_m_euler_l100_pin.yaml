@@ -1,0 +1,51 @@
+# forge_design 問題定義 — ③ベル (M) の **CFD ピン版** の壁を TP の Euler で回す (plan tooling-nozzle-bell-two-mode §5.1 #6 (W3)・§6 V2 の
+# ピン版の事前登録)。problem_bell_tp_m_euler_l100.yaml (run_0015 = Hall 版の壁) と同じ格子・段・設定で、**壁ファイルだけ**差し替え。
+# 壁: geometry.bell_mode moc_rao — 生成器の壁ファイル rao_m/rao_pin_parts/L100_pin_n321_wall.npz (円弧 kernel・CFD ピンの初期線
+#   [凍結源 run_0015_tp_m_euler_l100/res_30000.h5 のスロート C⁻ 線、n 321・r 等間隔 — feedback.cfd_initial_line.moc_initial_line]・
+#   Goursat m = q = n = 321) を rao_axisym.load_rao_wall で読む (生成器は回さない; 台本 rao_m/run_pin_line.py design)。
+#   キャンペーンの要約 rao_m/rao_pin.json の setup (排気ファイル・ε・R_t・p_a・初期線) が WALL_DESIGN.json に写る。
+#   壁ファイルの L (終点 x_E)・ε (r_E²)・R_t・排気ファイルが下の dv / spec / geometry / gas と合わなければ prepare が止まる。
+# 用途: V2 のピン版 (事前登録 §6 V2: 主 |F_Euler/F_MOC − 1| ≤ 0.2 %、内訳 1 |ṁ_MOC(ピン線)/ṁ_Euler − 1| ≤ 2e-4、
+#   内訳 2 |(F/ṁ)_Euler/(F/ṁ)_MOC − 1| ≤ 5e-4)。V2 の参照値 (生成器の F_cs・F_wall を N・η に換算、ṁ_MOC/ṁ_1D) は prepare が
+#   WALL_DESIGN.json の moc_reference に書く (rao_m/rao_pin.json の v2_problem.moc_reference): F_cs 1,147,922 N (η 0.990345)・
+#   F_wall 1,147,936 N (η 0.990358)、F_1D 1,159,113 N、ṁ_MOC/ṁ_1D 0.992622 (CFD ピン線; Hall 版は 0.989706)。
+# Euler の設定 (§4.1): evaluate.model euler → viscMethod 0・visc 0・thermCond 0・turbulence none・壁 slip (SST の項は書かない)。
+# 格子は壁際を細分しない (全断面で一様な wall_first_frac 0.005、run_0015 と同じ)。
+# python -m forge_design.evaluate.runner <この YAML> <run> --prepare-only (格子・config・品質の確認)、本番は --staged。
+name: bell_tp_m_euler_eps50_L100_pin
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  L_over_rt: {value: 22.657533530077966, fixed: true}   # 15° 円錐長の 100 %。壁ファイルが決める L との照合用 (相対 1e-9)
+
+geometry:
+  bell_mode: moc_rao
+  rao_wall_file: rao_m/rao_pin_parts/L100_pin_n321_wall.npz
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 0.005           # 全断面で一様 (壁に寄せない)
+  throat_refine: 8.0
+  throat_width: 3.0
+
+evaluate:
+  model: euler
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 30000          # 本段
+  outStepInterval: 1500      # 本段の res の間隔 = 本段長の 1/20
+  cfl_main: 4.0

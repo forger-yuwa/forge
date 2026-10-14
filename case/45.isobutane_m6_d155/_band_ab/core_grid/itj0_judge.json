@@ -1,0 +1,61 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.40",
+ "changed": "run_0627_cg_gref_itj0",
+ "control": "run_0619_cg_gref_b0_ctl",
+ "region": {
+  "10000-15000": {
+   "res_ro": {
+    "ratio": 0.9715033104428,
+    "share_ratio": 0.9830869935413635
+   },
+   "res_roe": {
+    "ratio": 0.8396030088675939,
+    "share_ratio": 1.0058372709085313
+   },
+   "res_roUx": {
+    "ratio": 0.9327592180041664,
+    "share_ratio": 0.8652123453155804
+   },
+   "res_roUy": {
+    "ratio": 0.8617334460979935,
+    "share_ratio": 0.9481185039887641
+   },
+   "res_roK": {
+    "ratio": 0.9668739258315998,
+    "share_ratio": 0.3738867086280766
+   },
+   "res_roOmega": {
+    "ratio": 0.8087130052152182,
+    "share_ratio": 0.49934161363830715
+   }
+  },
+  "15000-20000": {
+   "res_ro": {
+    "ratio": 0.9434762843759404,
+    "share_ratio": 0.9647614248467814
+   },
+   "res_roe": {
+    "ratio": 0.8330454651042181,
+    "share_ratio": 0.9997253611289495
+   },
+   "res_roUx": {
+    "ratio": 0.8648056570323324,
+    "share_ratio": 0.723775607145458
+   },
+   "res_roUy": {
+    "ratio": 0.8208086248146427,
+    "share_ratio": 0.8630723951546189
+   },
+   "res_roK": {
+    "ratio": 0.9969925548331691,
+    "share_ratio": 0.352083707690581
+   },
+   "res_roOmega": {
+    "ratio": 0.7288435848903176,
+    "share_ratio": 0.3624154236193815
+   }
+  }
+ },
+ "control_stall": true,
+ "result": "B: 変更しても縮流部の停滞が続き、集中の場所も維持"
+}

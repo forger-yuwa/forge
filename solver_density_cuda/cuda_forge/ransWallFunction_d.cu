@@ -6,6 +6,7 @@
 
 #include "cuda_forge/cudaWrapper.cuh"
 #include "cuda_forge/wallLaw_d.cuh"
+#include "cuda_forge/wallRepPoint_d.cuh"
 
 // SST automatic wall treatment の摩擦速度 u_τ を Reichardt 普遍速度則の逆解きで求める。
 // 理論は methods/turbulence/theory.md §6.5 (a)。粘性低層・バッファ・対数を 1 式で繋ぐため
@@ -75,13 +76,12 @@ __global__ void compute_wall_friction_sst_d(
     flow_float* rep_id, flow_float* rep_y, flow_float* rep_dist,
     flow_float* rep_cos, flow_float* rep_toff, flow_float* rep_wdratio,
     flow_float* rep_nx, flow_float* rep_ny, flow_float* rep_nz,
-    // node-centered (isNode=1): bplane_cell は壁ノード W (u=0,Dirichlet)。代表内部点を選ぶための
-    // CV 座標と CSR 隣接。SU2 Normal_Neighbor 流。cell モード (isNode=0) では未使用 (nullptr 可)。
+    // node-centered (isNode=1): bplane_cell は壁ノード W (u=0,Dirichlet)。代表内部点 (SU2 Normal_Neighbor 流) は
+    // 境界面ごとに読み込み時に作ってある (wallRepPoint_d.cu、段 ②: double の値の位置から。選び方は従来どおり)。
+    //   wrp_irep: 代表内点 (候補なし -1) / wrp_dn: 壁内向き距離 / wrp_dist: |x_I − x_W| / wrp_cos: dn/|d|。
+    // cell モード (isNode=0) では未使用 (nullptr 可)。
     int isNode,
-    geom_int nNormalPlanes,
-    geom_int* cell_planes_index, geom_int* cell_planes, geom_int* plane_cells,
-    geom_int* wall_flag,
-    geom_float* ccx, geom_float* ccy, geom_float* ccz,
+    const geom_int* wrp_irep, const flow_float* wrp_dn, const flow_float* wrp_dist, const flow_float* wrp_cos,
     // node: 壁ノードに τ_w=ρu_τ² を格納 (viscousFlux_d の AddTauWall 再スケール用)。cell では書かない (-1 維持)。
     flow_float* Tau_Wall,
     // node: 第一内層ノードの k Dirichlet 値 (保存量 ρ·k_wf, SU2 SetTurbVars_WF 流) を格納。cell では書かない (-1 維持)。
@@ -137,31 +137,14 @@ __global__ void compute_wall_friction_sst_d(
     //   cell: irep=ic (壁隣接内部セル), y=wall_dist[ic]  … 従来挙動 (ビット不変)。
     //   node: ic=壁ノード W は u=0/wall_dist≈0 で退化するため、W の入射内部双対面から壁内向き法線 -n
     //         との cos 最大の内部ノード I を SU2 Normal_Neighbor として選び irep=I, y=(x_I-x_W)·(-n)。
+    //         選択は読み込み時に境界面ごとに済ませてある (wrp_*、wallRepPoint_d.cu)。
     geom_int irep = ic;
     flow_float y  = max(wall_dist[ic], kSmall);
     if (isNode != 0) {
-        flow_float best_cos = static_cast<flow_float>(-2.0);
-        geom_int   bestI = -1;
-        flow_float bestDn = kSmall;
-        flow_float bestDist = kSmall;
-        const flow_float xw = ccx[ic], yw = ccy[ic], zw = ccz[ic];
-        for (geom_int j = cell_planes_index[ic]; j < cell_planes_index[ic + 1]; ++j) {
-            const geom_int ipn = cell_planes[j];
-            if (ipn >= nNormalPlanes) continue;                 // 内部双対面のみ
-            const geom_int a = plane_cells[2 * ipn + 0];
-            const geom_int b = plane_cells[2 * ipn + 1];
-            const geom_int cand = (a == ic) ? b : a;
-            if (wall_flag[cand] != 0) continue;                 // 内部ノードのみ
-            const flow_float dx = ccx[cand] - xw;
-            const flow_float dy = ccy[cand] - yw;
-            const flow_float dz = ccz[cand] - zw;
-            const flow_float dist = sqrt(dx * dx + dy * dy + dz * dz);
-            if (dist <= kSmall) continue;
-            const flow_float dn_in = -(dx * nx + dy * ny + dz * nz);  // 壁内向き距離 (>0 が内部側)
-            if (dn_in <= static_cast<flow_float>(0.0)) continue;
-            const flow_float cosv = dn_in / dist;               // 内向き法線との cos
-            if (cosv > best_cos) { best_cos = cosv; bestI = cand; bestDn = dn_in; bestDist = dist; }
-        }
+        const geom_int   bestI    = wrp_irep[ib];
+        const flow_float bestDn   = wrp_dn[ib];
+        const flow_float bestDist = wrp_dist[ib];
+        const flow_float best_cos = wrp_cos[ib];
         if (bestI < 0) {                                        // 代表点なし: 退避
             utau_b[ib] = static_cast<flow_float>(0.0);
             ypls_b[ib] = static_cast<flow_float>(0.0);
@@ -546,6 +529,15 @@ void computeWallFrictionSST_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
         }
     }
 
+    // node の代表内点 (段 ②、plans/active/architecture-float-state-double-geometry.md §4.2 3.)。初回に全壁 bcond の分を作る。
+    static const WallRepPoints noRep{};
+    const WallRepPoints& wrp = (isNode != 0) ? wallRepPoints(cuda_cfg, msh, var, bc) : noRep;
+    if (isNode != 0 && wrp.nb != static_cast<geom_int>(bc.iPlanes.size())) {
+        fprintf(stderr, "[wallFunction] representative points missing for bcond physID %d (%d faces, built %d)\n",
+                (int)bc.physID, (int)bc.iPlanes.size(), (int)wrp.nb);
+        std::exit(1);
+    }
+
     compute_wall_friction_sst_d<<<cuda_cfg.dimGrid_bplane , cuda_cfg.dimBlock>>>(
         static_cast<geom_int>(bc.iPlanes.size()),
         bc.map_bplane_plane_d,
@@ -569,12 +561,9 @@ void computeWallFrictionSST_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg ,
         var.c_d.count("rep_nx") ? var.c_d["rep_nx"] : nullptr,
         var.c_d.count("rep_ny") ? var.c_d["rep_ny"] : nullptr,
         var.c_d.count("rep_nz") ? var.c_d["rep_nz"] : nullptr,
-        // node: SU2 Normal_Neighbor 代表内部点選択用 (cell では未使用)
+        // node: SU2 Normal_Neighbor 代表内部点 (境界面ごと、読み込み後に 1 回作る。cell では未使用)
         isNode,
-        msh.nNormalPlanes,
-        msh.map_cell_planes_index_d, msh.map_cell_planes_d, msh.map_plane_cells_d,
-        msh.wall_flag_d,
-        var.c_d["ccx"], var.c_d["ccy"], var.c_d["ccz"],
+        wrp.irep_d, wrp.dn_d, wrp.dist_d, wrp.cos_d,
         var.c_d["Tau_Wall"],
         // node k Dirichlet ゲート: wallTreatmentSST==1 かつ nodeKwfDirichlet==1 のときだけ roK_wf を書く (既定 OFF)。
         (cfg.wallTreatmentSST == 1 && cfg.nodeKwfDirichlet == 1) ? 1 : 0, var.c_d["roK_wf"],

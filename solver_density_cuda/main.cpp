@@ -67,6 +67,13 @@
 #include <highfive/H5File.hpp>
 #include "input/speciesDB.hpp"
 #include "cuda_forge/viscousFlux_d.cuh"
+#include "cuda_forge/geomAbDiag.hpp"   // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / _REF; plan architecture-float-state-double-geometry §4.2c)
+#include "cuda_forge/geomStage2Dump.hpp"   // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP; 同 plan §6.3)
+#include "cuda_forge/hoopClosureDiag.hpp"  // 診断 FORGE_DIAG_HOOP_CLOSURE (plan axisymmetric-freestream-hoop-gauge §4.6 の 3・5)
+#include "cuda_forge/commitLossDiag.hpp"   // 診断 FORGE_DIAG_COMMIT_LOSS (同 plan §4.5・§6 V4 の記録)
+#include "cuda_forge/stageDumpDiag.hpp"    // 診断 FORGE_DIAG_STAGE_DUMP (同 plan §5.1 #17・§6.30)
+#include "cuda_forge/qaccAdoptDiag.hpp"    // 診断 FORGE_DIAG_QACC_ADOPT (同 plan §5.1 #18・§6.34)
+#include "cuda_forge/quantizeStateDiag.hpp" // 診断 FORGE_DIAG_QUANTIZE_STATE (同 plan §5.1 #19・§6.36)
 #include "cuda_forge/updateCenterVelocity_d.cuh"
 #include "cuda_forge/interpVelocity_c2p_d.cuh"
 #include "cuda_forge/timeIntegration_d.cuh"
@@ -2096,6 +2103,8 @@ void blockDPLURSolve(StepContext& s, int subiter = 0)
         // 最終 commit を整合させる。cell/非周期では no-op。
         periodicMirrorDq_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     }
+    // 診断 (FORGE_LINE_DUMP_FINAL=1、既定 off): 確定する補正 δ_K に対する右辺を書き出す。solve・swap・commit はしない。
+    if (useBlock && s.cfg.lineImplicit == 1) lineDumpFinalRhs_wrapper(nSweep, s.cfg, s.cuda_cfg, s.msh, s.var);
 }
 
 // 1 回の非線形（擬似時間）更新。定常・dual-time 共有の核。
@@ -2355,11 +2364,15 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
     if (eosCoupled) {
         s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
             speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // roY_N = roY
+            // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off): 自己点検の step の次の step なら roY{s}N・M の表せない値を数える (読むだけ)
+            if (quantizeStateDiag::speciesPending()) quantizeStateDiag::afterSpeciesUpdateOuter(s.msh , s.var , s.iStep);
             speciesEOSCrossPredictInject_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
         });
     }
 
     passiveSaveRhoPre_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // 受動種の φ_N δρ 項用に更新前 ρ を退避 (#19)
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): 対象の step だけ、solve の直前の ro..roe (Q_asm) と res_ro..res_roe (R) を読む (読むだけ)
+    if (stageDumpDiag::active()) stageDumpDiag::beforeSolve(s.cfg , s.msh , s.var);
     blockDPLURSolve(s);
     s.profiler.measureWall(ProfileSection::UpdateInner, [&]() {
         if (s.cfg.blockDPLUR == 1) {
@@ -2401,6 +2414,8 @@ void implicitNonlinearUpdate(StepContext& s, int inner_index)
                 speciesEOSFinalCommit_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
             } else {
                 speciesUpdateOuter_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);   // roY_N = roY_M = roY
+                // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off): 自己点検の step の次の step なら roY{s}N・M の表せない値を数える (読むだけ)
+                if (quantizeStateDiag::speciesPending()) quantizeStateDiag::afterSpeciesUpdateOuter(s.msh , s.var , s.iStep);
                 if (speciesImplicitCoupled(s.cfg, s.var)) {
                     speciesImplicitDPLURSolve_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
                 } else {
@@ -2511,16 +2526,30 @@ void advanceExplicitRK(StepContext& s)
 void advanceImplicitSteady(StepContext& s)
 {
     // baseline (roN) は前ステップ末尾 / 初期化の updateVariablesOuter で設定済み（ro == roN）。
+    // 診断 FORGE_DIAG_COMMIT_LOSS (既定 off): step 番号を知らせ、計る step なら commit の直後の集計を 1 行にする。
+    const bool commitLoss = commitLossDiag::enabled();
+    if (commitLoss) commitLossDiag::beginStep(s.iStep);
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): 対象の step なら step の頭の ro..roe (Q0) を読む (読むだけ)
+    if (stageDumpDiag::enabled()) stageDumpDiag::beginStep(s.cfg , s.msh , s.var , s.iStep);
     implicitNonlinearUpdate(s, 0);
+    if (commitLoss) commitLossDiag::endStep();
 
     // **最後の更新のあとにもピンを当てる**: dq_roe=0 なので更新は roe を step 冒頭の値へ戻す。
     // ここで当てないと、出力される保存量と次ステップの基準 (roN) が等温条件を満たさず、
     // ρ が動くほど roe/(ρ c_v T_w) がずれていく (実測: 壁ノードの roe が 1000 step ビット不変)。
     applyNodeIsothermalWallPin(s.cfg , s.cuda_cfg , s.msh , s.var);
 
+    // 診断 FORGE_DIAG_QACC_ADOPT (既定 off): 対象の step なら reconcile (updateVariablesOuter) の直前に Q と Qacc を読み、
+    // 量ごとの採用の mask (Q != (float)Qacc) を書く (読むだけ)
+    if (qaccAdoptDiag::enabled()) qaccAdoptDiag::beforeReconcile(s.cfg , s.msh , s.var , s.iStep);
+    // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off、FP64 のビルド専用): 保存量を全 CV で float32 に丸めて戻す (次の step の基準 Q_N・Q_M は
+    // この値から写される)
+    if (quantizeStateDiag::enabled()) quantizeStateDiag::quantize(s.cuda_cfg , s.msh , s.var , s.iStep);
     s.profiler.measureWall(ProfileSection::UpdateOuter, [&]() {
         updateVariablesOuter(s.cfg , s.cuda_cfg , s.msh , s.var , s.mat_ns);
     });
+    // 診断 FORGE_DIAG_QUANTIZE_STATE (既定 off): 自己点検の step なら Q・Q_N・Q_M の表せない値を数える (読むだけ)
+    if (quantizeStateDiag::enabled()) quantizeStateDiag::afterUpdateOuter(s.msh , s.var , s.iStep);
     // FP64 影アキュムレータの**計器**: reconcile が採用したセル数 (§4.4)。
     // 「上書き型の writer に書き換えられた保存量の数」であり、run ごとに**期待値を事前登録して
     // 突き合わせる** (case/56 なら等温壁ノード数、case/09 や case/44 なら 0)。
@@ -2539,6 +2568,8 @@ void advanceImplicitSteady(StepContext& s)
     // 再計算され、ここで計算した cfl/dt_local は使われる前に上書きされる純粋な無駄 (~80µs/step の setCFL
     // カーネル×3)。cfg.dt も dt_local に効かず cosmetic。max cfl/dt 表示は冒頭 setDT が monitorInterval ごとに行う。
     s.residual_logger.logOuterEnd(s.iStep);
+    // 診断 FORGE_DIAG_STAGE_DUMP (既定 off): step の末尾の ro..roe (q_final) を読み、h5 を書く (読むだけ)
+    if (stageDumpDiag::active()) stageDumpDiag::endStep(s.cfg , s.msh , s.var);
 }
 
 // 非定常 dual-time 陰解法。1 物理ステップ = 時間レベルシフト → 擬似時間サブ反復（BDF 物理時間項つき
@@ -2938,6 +2969,23 @@ static int runTpFacesDiag(const char* path, solverConfig& cfg, cudaConfig& cuda_
     printf("[tp-faces] wrote %s (%ld faces, %ld nodes); exiting without any update\n", path, d.nFaces, d.nNodes);
     fflush(stdout);
     return 0;
+}
+
+// ---- 診断 V0 (plans/active/architecture-float-state-double-geometry.md §4.2c; FORGE_DIAG_GEOMAB_DUMP / _REF=<h5>, 既定 off) -------
+// 組立 (assembleResidualPre + Post) を 1 回だけ通す (= 1 step 目の組立)。粘性 (viscousFlux_d) と SST k/ω の拡散
+// (scalar_diffusion_multi_d) の本番の起動の直前・直後で geomAbDiag のフックが、入力の記録と旧腕・新腕 (DUMP) /
+// 入力の上書きと参照腕 (REF) の評価、旧腕と本番の寄与の照合を行う。境界条件・EOS・勾配・乱流モデル・commit は
+// 腕ごとにやり直さない。h5 を書いて、時間更新へ進まず終了する (res_0 出力なし)。詳細は cuda_forge/geomAbDiag.hpp。
+static int runGeomAbDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, matrix& mat_ns, variables& var,
+                         fluct_variables& fluct, point_probes& pprobes, RuntimeProfiler& profiler,
+                         ResidualCsvLogger& residual_logger, ImplicitDiagLogger& implicit_diag_logger)
+{
+    if (!geomAbDiag::begin(cfg, msh, var)) return EXIT_FAILURE;
+    StepContext s{cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger, 0};
+    geomAbDiag::arm(true);
+    assembleResidual(s, 1);
+    geomAbDiag::arm(false);
+    return geomAbDiag::finish(cfg, msh, var);
 }
 
 // ---- 診断 G3-b (plans/active/condensation-two-phase-default.md §5.1 #4g3; FORGE_DIAG_TP_UPDATE=<出力 h5>, 既定 off) ---------------
@@ -3355,6 +3403,11 @@ int main(int argc, char** argv) {
         // **v1a の対応範囲** (§5.1 S1a)。どれも原理的な制限ではなく「まだ Qacc を扱っていない」だけで、
         // S1b-①〜④ で順に外す。**黙って劣化させるくらいなら拒否する** (codex plan M5)。
         const char* why = nullptr;
+        // 軸対称の診断用の通し (plans/active/architecture-float-state-double-geometry.md §5.1 #18・§6.34)。
+        // 軸ピン (axisSymmetryPin_d.cuh) は Q_N と同じ射影を Qacc にも当てるが、rollout plan の S1b-① の合格条件
+        // (case/44 の回帰・改善ゲート) は未検証なので、既定では拒否のまま。環境変数が "1" のときだけ軸対称の拒否を外す。
+        const char* axisymDiagEnv = std::getenv("FORGE_QACC_AXISYM_DIAG");
+        const bool axisymDiag = (axisymDiagEnv != nullptr && std::strcmp(axisymDiagEnv, "1") == 0);
         // **検証済みの経路だけ通す** (2026-09-24, codex result-2 M5)。
         // 以前は node / GPU の検査が無く、**cell も CPU 経路も素通り**していた。
         // CPU の commit (`update.cpp` の applyScalarImplicitCorrection 等) は FP32 のままなので、
@@ -3368,10 +3421,11 @@ int main(int argc, char** argv) {
             why = "v1a は timeIntegration=11 のみ (陽解法 tI 1/4 は S1b-④、tI 3 は凸結合なので Qacc_N/Qacc_M が要る)";
         else if (cfg.unsteady != 0)
             why = "v1a は unsteady=0 のみ (dual-time は QaccN/QaccNN の shift が要る。陽解法 unsteady は S1b-④)";
-        else if (cfg.isAxisymmetric != 0)
-            // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisymmetricSource_d.cu:312-323)。
-            // Qacc は Q_N を読まないので、その射影を Qacc に当てるまでは対応できない。
-            why = "node 軸対称は S1b-① 待ち (軸ピンが commit の基準 roeN/roUyN を射影するため)";
+        else if (cfg.isAxisymmetric != 0 && !axisymDiag)
+            // enforceAxisSymmetry は commit の**基準** roeN/roUyN を射影する (axisSymmetryPin_d.cuh)。
+            // その射影は Qacc にも当てる (§5.1 #18) が、S1b-① の合格条件は未検証なので診断用の環境変数でだけ通す。
+            why = "node 軸対称は S1b-① 待ち (軸ピンの Qacc への射影は実装済みだが合格条件は未検証。"
+                  "診断用には FORGE_QACC_AXISYM_DIAG=1)";
         else if (cfg.sstEnergyIncludesK != 0)
             // ransTransport_d.cu:175 は roe への**増分**なので、Qacc にも同じ増分を当てる必要がある。
             why = "sstEnergyIncludesK=1 は S1b-② 待ち (roe への増分を Qacc にも当てる必要がある)";
@@ -3382,7 +3436,7 @@ int main(int argc, char** argv) {
         if (why != nullptr) {
             fprintf(stderr, "[qAccumulatorFP64] 拒否: %s\n", why);
             fprintf(stderr, "[qAccumulatorFP64] v1a の対応: GPU・node・timeIntegration=11 && unsteady=0、block/scalar DPLUR、"
-                            "軸対称なし、周期なし、sstEnergyIncludesK=0\n");
+                            "軸対称なし (FORGE_QACC_AXISYM_DIAG=1 で診断用のみ)、周期なし、sstEnergyIncludesK=0\n");
             exit(1);
         }
         // 確保と初期化は initializeSimulation の中 (updateVariablesOuter の直後) で隣接して行う。
@@ -3393,6 +3447,11 @@ int main(int argc, char** argv) {
             exit(1);
         }
         printf("[qAccumulatorFP64] 有効: 保存量 5 本の正本を FP64 に置く (内点 %ld CV)\n", (long)msh.nCells);
+        if (cfg.isAxisymmetric != 0) {
+            // ここに来るのは FORGE_QACC_AXISYM_DIAG=1 のときだけ (上の拒否)。結果を対応完了と取り違えないよう毎回出す。
+            printf("[qAccumulatorFP64] **診断用**: FORGE_QACC_AXISYM_DIAG=1 で node 軸対称を通す。軸ピンは Q_N と同じ射影を "
+                   "Qacc にも当てる。rollout plan (time_integration-fp64-accumulator-rollout) の S1b-① の合格条件は未検証\n");
+        }
         // **対象は流れの 5 本だけ**。乱流・化学種・凝縮モーメント・受動種・遷移モデルの保存量は
         // **float32 のまま**で、commit の丸めを受ける経路に残る。拒否はしない (case/56 では
         // 全域 FP64 ビルドと物理量が 0.00-3.77 % で一致しており実害が出ていない) が、
@@ -3412,6 +3471,10 @@ int main(int argc, char** argv) {
             }
         }
     }
+    // 診断 FORGE_DIAG_QUANTIZE_STATE=1 (+ FORGE_DIAG_QUANTIZE_STATE_CHECK=<step,...>、既定 1。既定 off): FP64 のビルドで定常の陰解法の
+    // 各 step の末尾に保存量を float32 に丸める (plan architecture-float-state-double-geometry §5.1 #19・§6.36)。対応外の構成は
+    // ここで止める (float のビルド・定常の陰解法以外・qAccumulatorFP64 1・cell・gpu 0)。
+    quantizeStateDiag::init(cfg, msh, var, scalarResidualEnabled(cfg));
 
     // line-implicit (plans/active/time_integration-line-implicit.md): 壁法線ラインを構築。
     // blockDPLUR==1 専用・完全前処理 (lowMachPrecond>=2) とは併用不可。
@@ -3425,6 +3488,15 @@ int main(int argc, char** argv) {
                cfg.lineViscousDtRelief != (flow_float)0.0 || cfg.lineDtDirectional != 0) {
         fprintf(stderr, "[lineImplicit] lineKFreeze/lineViscCoupling/lineViscousDtRelief require lineImplicit=1\n");
         exit(1);
+    }
+    // 診断 FORGE_DIAG_HOOP_CLOSURE=<h5> (既定 off): デバイスに渡した最終の面ベクトル・面積・A_planar から、壁・軸の射影と独立に
+    // 各 CV の閉性を double で計算して書く (起動時に 1 回。計算は続ける)。plans/active/axisymmetric-freestream-hoop-gauge.md §4.6 の 3・5。
+    hoopClosureDiag::runIfRequested(cfg, msh, var);
+    // 診断 段 ② (FORGE_DIAG_GEOM_STAGE2_DUMP=<h5>; 既定 off): 読み込み時に作った量と接続 (ラインの接続・周期の相手・LSQ の係数・
+    // 壁の代表内点・軸対称の closure・d1/d2・delta_les) を、本番の値と段 ① までの作り方の作り直しの両方で書いて終了する
+    // (時間更新・res_0 出力なし)。float と FP64 のビルドの出力を突き合わせる。plans/active/architecture-float-state-double-geometry.md §6.3。
+    if (const char* e = getenv("FORGE_DIAG_GEOM_STAGE2_DUMP"); e != nullptr && *e != '\0') {
+        return geomStage2Dump::run(e, cfg, cuda_cfg, msh, var);
     }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
 
@@ -3440,6 +3512,12 @@ int main(int argc, char** argv) {
     if (const char* e = getenv("FORGE_DIAG_TP_UPDATE"); e != nullptr && *e != '\0') {
         return runTpUpdateDiag(e, cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
     }
+    // 診断 V0 (FORGE_DIAG_GEOMAB_DUMP / FORGE_DIAG_GEOMAB_REF=<h5>; 既定 off): 組立 1 回の粘性・k/ω 拡散の面の流束を
+    // 旧腕・新腕 (DUMP、float のビルド) / 参照腕 (REF、FP64 のビルド) で書いて終了する (更新・res_0 出力なし)。
+    // plans/active/architecture-float-state-double-geometry.md §4.2c。
+    if (geomAbDiag::mode() != 0) {
+        return runGeomAbDiag(cfg, cuda_cfg, msh, mat_ns, var, fluct, pprobes, profiler, residual_logger, implicit_diag_logger);
+    }
 
     writeInitialOutputs(cfg , msh , var);
 
@@ -3454,6 +3532,15 @@ int main(int argc, char** argv) {
         twoPhaseAudit_d_wrapper(cfg, cuda_cfg, msh, var, iStepAudit, final);
     };
     twoPhaseAudit(0, false);
+    // 診断 FORGE_DIAG_COMMIT_LOSS=<N> (既定 off): 定常の陰解法の commit で丸めで消えた更新を N step ごとに数える
+    // (plan architecture-float-state-double-geometry §4.5・§6 V4 の記録)。未設定なら何も確保しない。
+    commitLossDiag::init(cfg, msh, var);
+    // 診断 FORGE_DIAG_STAGE_DUMP=<h5> (+ FORGE_DIAG_STAGE_STEP=<n>、既定 1。既定 off): 定常の陰解法の 1 step の更新を段ごとに
+    // (Q0・Q_asm・R・b・d・q・q_final) 節点ごとに double で書く (plan architecture-float-state-double-geometry §5.1 #17・§6.30)。
+    stageDumpDiag::init(cfg, msh);
+    // 診断 FORGE_DIAG_QACC_ADOPT=<接頭辞> (+ FORGE_DIAG_QACC_ADOPT_STEPS=<step,...>、既定 1。既定 off): qAccumulatorFP64 の
+    // reconcile が採用する節点を量ごとに <接頭辞>_<step>.h5 に書く (plan architecture-float-state-double-geometry §5.1 #18・§6.34)。
+    qaccAdoptDiag::init(cfg, msh, var);
     cout << "Start Calculation \n";
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
@@ -3474,6 +3561,10 @@ int main(int argc, char** argv) {
     twoPhaseCorrGateLog(cfg, cfg.mainLoopCount(), true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
     twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
+    commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
+    stageDumpDiag::finalize();   // 対象の step に達しなかったらその旨を出す (無効なら何もしない)
+    qaccAdoptDiag::finalize();   // 書かなかった対象の step があればその旨を出す (無効なら何もしない)
+    quantizeStateDiag::finalize();   // 点検しなかった対象の step があればその旨を出す (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
     printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),

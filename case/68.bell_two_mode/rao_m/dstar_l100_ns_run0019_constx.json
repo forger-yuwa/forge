@@ -1,0 +1,367 @@
+{
+ "what": "③ベル (M) の δ_r 抽出 (一定 x の断面・帯位置の感度・受理) — plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-1)",
+ "tag": "L100",
+ "role": "較正用 (kδ は L100 だけで決める)",
+ "ns_run": "case/68.bell_two_mode/run_0019_tp_m_ns_l100",
+ "euler_run": "case/68.bell_two_mode/run_0018_tp_m_euler_l100_pin",
+ "wall": {
+  "wall_file": "case/68.bell_two_mode/rao_m/rao_pin_parts/L100_pin_n321_wall.npz",
+  "sha256": "4ea98e9db67eafd7d8c5e8f84e9969dffad9260d225e67fedc059c557c4681eb",
+  "ns_run_matches": true,
+  "euler_run_matches": true
+ },
+ "settings": {
+  "method": "band",
+  "k_band": 1.5,
+  "k_band_sens": [
+   1.125,
+   2.25
+  ],
+  "band_min_frac": 0.02,
+  "band_width": 0.5,
+  "slope_max": 0.01,
+  "band_growth": 1.25,
+  "max_retry": 14,
+  "fit_from": 1.0,
+  "band_smooth_x": 0.0,
+  "band_select": "adaptive",
+  "plateau_tol": 0.003,
+  "plateau_kmax": 9,
+  "edge": null,
+  "gate_band_rms": 0.005,
+  "core_frac": 0.3,
+  "core_frac_sens": [
+   0.25,
+   0.35
+  ],
+  "n_axis_skip": 1,
+  "outer_frac": 0.25,
+  "smooth_lam": 0.001,
+  "gate_core_rms": 0.01,
+  "gate_sens": 0.05,
+  "gate_sens_floor": 0.0,
+  "refine": 4,
+  "ns_res": "res_60000.h5",
+  "euler_res": "res_30000.h5",
+  "remap_constant_x": true,
+  "remap_max_column_dx": 0.2817457678571431,
+  "remap_clamped_points": 0,
+  "ns_run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0019_tp_m_ns_l100",
+  "euler_run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0018_tp_m_euler_l100_pin",
+  "yb_sens_factors": [
+   0.75,
+   1.5,
+   2.0
+  ]
+ },
+ "massflow": {
+  "x_E_ns": 22.657533530077565,
+  "x_E_ns_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "remap_constant_x_ns": true,
+  "mdot_ns": 268.3361435874158,
+  "mdot_ns_spread": 0.0003096624895952517,
+  "res_ns": "res_60000.h5",
+  "x_E_euler": 22.657533530077565,
+  "x_E_euler_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "remap_constant_x_euler": true,
+  "mdot_euler": 268.86989436278,
+  "mdot_euler_spread": 1.678780622467369e-05,
+  "res_euler": "res_30000.h5",
+  "mdot_ratio": 0.9980148362217006,
+  "r_throat_eff": 0.9990069250118843,
+  "r_throat_phys": 1.00000028,
+  "cd_rel": 0.9980142773336269,
+  "delta_r_throat_eff": 0.0009933549881158132,
+  "delta_r_throat_given": 2.8000000007466497e-07
+ },
+ "massflow_column_note": "列のまま (列内で x が変わる) の流量の帳簿 — −ρU_r dx の項が落ちるので③では使わない (記録)",
+ "massflow_column": {
+  "x_E_ns": 22.657533530077565,
+  "x_E_ns_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "mdot_ns": 260.18196024872145,
+  "mdot_ns_spread": 0.018411576246294095,
+  "res_ns": "res_60000.h5",
+  "x_E_euler": 22.657533530077565,
+  "x_E_euler_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "mdot_euler": 268.86989436278,
+  "mdot_euler_spread": 1.678780622467369e-05,
+  "res_euler": "res_30000.h5",
+  "mdot_ratio": 0.9676872186279952,
+  "r_throat_eff": 0.9837109426188139,
+  "r_throat_phys": 1.00000028,
+  "cd_rel": 0.9676866767233803,
+  "delta_r_throat_eff": 0.01628933738118621,
+  "delta_r_throat_given": 2.8000000007466497e-07
+ },
+ "n_sections": 1201,
+ "n_ok": 103,
+ "n_hard_ok": 1201,
+ "reasons": {
+  "yb_sens": 1098
+ },
+ "uncertainty": {
+  "computed": true,
+  "accept_rel": 0.05,
+  "region": "x >= 0 (スロート〜出口)",
+  "factors": [
+   0.75,
+   1.5,
+   2.0
+  ],
+  "accepted": false,
+  "n_region": 789,
+  "n_nonfinite": 0,
+  "n_over": 789,
+  "u_max": 0.6196029639507564,
+  "x_at_u_max": 10.887304964285713,
+  "u_outward_max_region": 0.16848490689513496,
+  "bands": [
+   {
+    "x_lo": null,
+    "x_hi": 0.0,
+    "n": 412,
+    "u_max": 1.020263627044212,
+    "frac_over": 0.75,
+    "u_outward_max": 1.020263627044212,
+    "rel_f0.75_min": -0.5468714663656594,
+    "rel_f0.75_max": 0.01763750836666291,
+    "rel_f1.5_min": -0.01662048757836198,
+    "rel_f1.5_max": 0.5154663753984323,
+    "rel_f2_min": -0.02331094287307324,
+    "rel_f2_max": 1.020263627044212
+   },
+   {
+    "x_lo": 0.0,
+    "x_hi": 0.5,
+    "n": 75,
+    "u_max": 0.1165546478361569,
+    "frac_over": 1.0,
+    "u_outward_max": 0.09053406280832885,
+    "rel_f0.75_min": -0.1165546478361569,
+    "rel_f0.75_max": -0.05489197948437431,
+    "rel_f1.5_min": 0.019857143287160785,
+    "rel_f1.5_max": 0.06878786389701191,
+    "rel_f2_min": 0.019531819721454978,
+    "rel_f2_max": 0.09053406280832885
+   },
+   {
+    "x_lo": 0.5,
+    "x_hi": 1.0,
+    "n": 73,
+    "u_max": 0.16848490689513496,
+    "frac_over": 1.0,
+    "u_outward_max": 0.16848490689513496,
+    "rel_f0.75_min": -0.13523296296173498,
+    "rel_f0.75_max": -0.07760240107432385,
+    "rel_f1.5_min": 0.0005577591913120416,
+    "rel_f1.5_max": 0.12223979911268099,
+    "rel_f2_min": 0.03186061346160938,
+    "rel_f2_max": 0.16848490689513496
+   },
+   {
+    "x_lo": 1.0,
+    "x_hi": 2.0,
+    "n": 123,
+    "u_max": 0.15828303776312472,
+    "frac_over": 1.0,
+    "u_outward_max": 0.041398915988897854,
+    "rel_f0.75_min": -0.15828303776312472,
+    "rel_f0.75_max": -0.07403818973228338,
+    "rel_f1.5_min": 0.009633754045941386,
+    "rel_f1.5_max": 0.03448380601421245,
+    "rel_f2_min": 0.011381965784025136,
+    "rel_f2_max": 0.041398915988897854
+   },
+   {
+    "x_lo": 2.0,
+    "x_hi": 4.0,
+    "n": 140,
+    "u_max": 0.5555293427473316,
+    "frac_over": 1.0,
+    "u_outward_max": 0.03701779182523806,
+    "rel_f0.75_min": -0.5555293427473316,
+    "rel_f0.75_max": -0.12424346730053155,
+    "rel_f1.5_min": -0.0026596158753477346,
+    "rel_f1.5_max": 0.03701779182523806,
+    "rel_f2_min": -0.0023582233662176083,
+    "rel_f2_max": 0.035971960826122897
+   },
+   {
+    "x_lo": 4.0,
+    "x_hi": 8.0,
+    "n": 97,
+    "u_max": 0.5567313784321013,
+    "frac_over": 1.0,
+    "u_outward_max": 0.03053992559079885,
+    "rel_f0.75_min": -0.5567313784321013,
+    "rel_f0.75_max": -0.12195440523063156,
+    "rel_f1.5_min": -0.002891458551256643,
+    "rel_f1.5_max": 0.0301236180690786,
+    "rel_f2_min": -0.004109312214898569,
+    "rel_f2_max": 0.03053992559079885
+   },
+   {
+    "x_lo": 8.0,
+    "x_hi": 16.0,
+    "n": 153,
+    "u_max": 0.6196029639507564,
+    "frac_over": 1.0,
+    "u_outward_max": 0.03159507368832065,
+    "rel_f0.75_min": -0.6196029639507564,
+    "rel_f0.75_max": -0.07661467163265033,
+    "rel_f1.5_min": -0.002512670581107171,
+    "rel_f1.5_max": 0.03148008810883553,
+    "rel_f2_min": -0.004737729421255074,
+    "rel_f2_max": 0.03159507368832065
+   },
+   {
+    "x_lo": 16.0,
+    "x_hi": null,
+    "n": 128,
+    "u_max": 0.6042203518067608,
+    "frac_over": 1.0,
+    "u_outward_max": 0.025229592940502622,
+    "rel_f0.75_min": -0.6042203518067608,
+    "rel_f0.75_max": -0.08452093092989998,
+    "rel_f1.5_min": -0.0023612703325550702,
+    "rel_f1.5_max": 0.025229592940502622,
+    "rel_f2_min": -0.0025706436573054575,
+    "rel_f2_max": 0.025115978943610052
+   }
+  ]
+ },
+ "band_y_b_over_rw_at_stations": {
+  "x0.5": 0.02,
+  "x1": 0.02,
+  "x2": 0.02,
+  "x4": 0.025,
+  "x8": 0.03125,
+  "x16": 0.048828125,
+  "exit": 0.06103515625
+ },
+ "band_retry_at_stations": {
+  "x0.5": 0.0,
+  "x1": 0.0,
+  "x2": 0.0,
+  "x4": 1.0,
+  "x8": 2.0,
+  "x16": 4.0,
+  "exit": 5.0
+ },
+ "delta_r_raw_at_stations": {
+  "x0.5": 0.0021987206820731375,
+  "x1": 0.004163660158392747,
+  "x2": 0.00799163950701201,
+  "x4": 0.016492707507537556,
+  "x8": 0.03656704112142272,
+  "x16": 0.08615151230962646,
+  "exit": 0.13441348559274768
+ },
+ "delta_r_smooth_at_stations": {
+  "x0.5": 0.0021899955074942707,
+  "x1": 0.004163443280164958,
+  "x2": 0.00799182039021766,
+  "x4": 0.016508476066283848,
+  "x8": 0.036570292372693845,
+  "x16": 0.08614947229721451,
+  "exit": 0.1344238499409857
+ },
+ "remap_compare": {
+  "rows": [
+   {
+    "station": "0.5",
+    "x": 0.5,
+    "raw_column": 0.0017764768565238025,
+    "raw_constx": 0.0021987206820731375,
+    "raw_rel_change": 0.2376860829898897,
+    "smooth_column": 0.0017785300785967855,
+    "smooth_constx": 0.0021899955074942707,
+    "smooth_rel_change": 0.2313514029642505
+   },
+   {
+    "station": "1",
+    "x": 1.0,
+    "raw_column": 0.0031796274875758187,
+    "raw_constx": 0.004163660158392747,
+    "raw_rel_change": 0.3094804893535392,
+    "smooth_column": 0.003179662842052955,
+    "smooth_constx": 0.004163443280164958,
+    "smooth_rel_change": 0.3093977213875996
+   },
+   {
+    "station": "2",
+    "x": 2.0,
+    "raw_column": 0.006199210098418033,
+    "raw_constx": 0.00799163950701201,
+    "raw_rel_change": 0.2891383547480322,
+    "smooth_column": 0.0061989577173291125,
+    "smooth_constx": 0.00799182039021766,
+    "smooth_rel_change": 0.28922001966179267
+   },
+   {
+    "station": "4",
+    "x": 4.0,
+    "raw_column": 0.013771376830517696,
+    "raw_constx": 0.016492707507537556,
+    "raw_rel_change": 0.19760774180467755,
+    "smooth_column": 0.013767825110566984,
+    "smooth_constx": 0.016508476066283848,
+    "smooth_rel_change": 0.19906201115333588
+   },
+   {
+    "station": "8",
+    "x": 8.0,
+    "raw_column": 0.03256203392123268,
+    "raw_constx": 0.03656704112142272,
+    "raw_rel_change": 0.1229962234508486,
+    "smooth_column": 0.03254717750304647,
+    "smooth_constx": 0.036570292372693845,
+    "smooth_rel_change": 0.1236087175077103
+   },
+   {
+    "station": "16",
+    "x": 16.0,
+    "raw_column": 0.08223932089167223,
+    "raw_constx": 0.08615151230962646,
+    "raw_rel_change": 0.04757081376082217,
+    "smooth_column": 0.08215358961442472,
+    "smooth_constx": 0.08614947229721451,
+    "smooth_rel_change": 0.04863917330385514
+   },
+   {
+    "station": "exit",
+    "x": 22.657533528571424,
+    "raw_column": 0.13441348559274768,
+    "raw_constx": 0.13441348559274768,
+    "raw_rel_change": 0.0,
+    "smooth_column": 0.13444410297090092,
+    "smooth_constx": 0.1344238499409857,
+    "smooth_rel_change": -0.00015064275388576576
+   }
+  ],
+  "max_rel_change_expansion": 0.31348251431427765,
+  "x_at_max": 1.2040570257142855,
+  "remap_max_column_dx": 0.2817457678571431
+ },
+ "files": {
+  "npz": "dstar_l100_ns_run0019_constx.npz",
+  "remap_csv": "dstar_l100_remap_compare.csv",
+  "bands_csv": "dstar_l100_uncert_bands.csv"
+ },
+ "provenance": {
+  "commit": "b95fe6a165e3a8980a68cf44dd7a5296b5c0941b",
+  "dirty": [
+   " M design/forge_design/feedback/deltastar_integral.py",
+   " M design/forge_design/metrics/deltastar.py",
+   "?? case/68.bell_two_mode/rao_m/run_bell_dstar.py",
+   "?? design/forge_design/metrics/bell_deltastar.py",
+   "?? design/tests/run_bell_deltastar_tests.py"
+  ],
+  "source_sha256_16": {
+   "design/forge_design/metrics/deltastar.py": "c6f536c22f487110",
+   "design/forge_design/metrics/bell_deltastar.py": "00609d4ea676ac33",
+   "design/forge_design/feedback/deltastar_integral.py": "99fa7120d2d24134",
+   "case/68.bell_two_mode/rao_m/run_bell_dstar.py": "e92f91acc7608d66"
+  }
+ }
+}

@@ -19,6 +19,10 @@
       今のコードの側は逆 MOC の出口の切り方を直す前の規則に戻して回す (2026-10-13 plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c で
       意図して変えた; 両問題とも直す前の切り方が x_F の壁点を落としていた)。今の切り方では壁の長さに依るファイルだけが違い、設計壁の終点が
       下流へ動くことを別に見る。
+      変更前のコードの側の変換器は包んで回す (終了時の既知の GPU エラーを今の `runner.run_converter` と同じ条件でだけ通す)。prepare_info の
+      比較からは、統合 (integrate/design-flow-1) で今の側にだけ増えた記録のうち値が既定 = 無効のもの (mesh.params の格子の表・層・再配置の
+      null、main_line の null、段の設定の sha256 の記録 ns_stage_configs) を外し、外したキーを表示する。case/45 の CFD ピンの所在 (問題の
+      initial_line_run を置いた case の直下) は環境変数 FORGE_C45_PIN_DIR で上書きできる (既定は手元の case/45)。
 
 forge の計算は回さない (変換器と `forge --resolve-species` は prepare が使う)。出力は WALL_TEMP_TEST_OUT (無ければ一時ディレクトリで、
 全部合格なら最後に消す; run の写しで 700 MB ほどになる)。
@@ -28,8 +32,11 @@ forge の計算は回さない (変換器と `forge --resolve-species` は prepa
 """
 import ast
 import copy
+import hashlib
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -58,7 +65,9 @@ from forge_design.probdef import load_problem  # noqa: E402
 C70 = REPO / "case" / "70.m5_air_wt_demo" / "problem_m5_air_c2b.yaml"           # 一様 350 K
 C70_RUN = REPO / "case" / "70.m5_air_wt_demo" / "run_0010_ns_c2b_final"           # 一様の既存 run (読むだけ)
 C45 = REPO / "case" / "45.isobutane_m6_d155" / "problem_d155_ns_prod.yaml"        # 断熱 (生産)
-C45_PIN_DIR = Path("/home/sano/work/forge/case/45.isobutane_m6_d155")              # initial_line_run (CFD ピン) の所在 (読むだけ)
+# initial_line_run (CFD ピン) の所在 = 問題の initial_line_run (run 名) を置いた case の直下 (読むだけ)。別マシン (AWS) では
+# FORGE_C45_PIN_DIR で上書きする (無ければ手元の case/45)
+C45_PIN_DIR = Path(os.environ.get("FORGE_C45_PIN_DIR") or "/home/sano/work/forge/case/45.isobutane_m6_d155")
 REF_COMMIT = "138e83b2dab18451eaddc35cd185075932d8f6f7"   # 壁温分布の配管を入れる前の commit (V4 の「変更前」)
 KEEP_OUT = bool(os.environ.get("WALL_TEMP_TEST_OUT"))
 OUT = Path(os.environ.get("WALL_TEMP_TEST_OUT") or tempfile.mkdtemp(prefix="wall_temp_tests_"))
@@ -469,6 +478,7 @@ if rcA == 0 and rcB == 0:
 
 # ======================================================================================================
 print("== V4 後方互換 (一様・断熱は変更前と同一)", flush=True)
+print(f"   case/45 の CFD ピンの所在 (FORGE_C45_PIN_DIR): {C45_PIN_DIR}", flush=True)
 
 
 def ref_source(rel: str) -> str:
@@ -527,15 +537,102 @@ shutil.rmtree(ref_root, ignore_errors=True); ref_root.mkdir()
 arc = subprocess.run(f"git -C {REPO} archive {REF_COMMIT} design solver_density_cuda/data | tar -x -C {ref_root}",
                      shell=True, capture_output=True, text=True)
 check("V4: 変更前のコード (git archive REF_COMMIT design solver_density_cuda/data) を展開", arc.returncode == 0, arc.stderr[-200:])
-CMP_FILES = ("bcondConfig.yaml", "solverConfig.yaml", "delta_r_initial.json", "delta_r_initial.csv", "wall_design.csv",
+# 変更前のコードの側の変換器: REF_COMMIT の prepare は変換器の非 0 終了をそのまま失敗にする (subprocess.run(check=True))。AWS の変換器は
+# HDF5 を書き終えた後の GPU の後片付けで `GPUassert: invalid argument` を出して rc 1 で抜ける (既知・無害) ので、今のコードの側
+# (runner.run_converter が通す) と条件を揃えるため、変更前の側だけ変換器を包む。包みは今のコードの run_converter をそのまま呼ぶ
+# (= 同じ条件: stdout に `Write Input HDF5`・stderr に `GPUassert: invalid argument`・出力の HDF5 に MESH/COORD と VALUE) ので、
+# それ以外の非 0 は今どおり失敗になる。呼び出しごとに REF_CONV_LOG に 1 行 (変換器の rc・包みの終了コード) を残す
+REAL_CONVERTER = os.environ["FORGE_CONVERTER"]
+REF_CONV_LOG = OUT / "ref_converter_wrap.log"
+REF_CONV_PY = OUT / "ref_converter_wrap.py"
+REF_CONV_SH = OUT / "ref_converter_wrap.sh"
+REF_CONV_LOG.unlink(missing_ok=True)
+REF_CONV_PY.write_text(f'''import json, os, subprocess, sys
+sys.path.insert(0, {str(DESIGN)!r})
+from forge_design.evaluate.runner import run_converter
+args = sys.argv[1:]
+try:
+    r = run_converter(args, cwd=os.getcwd())
+    rc, code = r.returncode, 0
+except subprocess.CalledProcessError as e:
+    r, rc, code = e, e.returncode, e.returncode
+except OSError as e:          # 変換器が無い・実行できない
+    r, rc, code = subprocess.CompletedProcess(args, 127, "", f"{{type(e).__name__}}: {{e}}\\n"), None, 127
+sys.stdout.write(r.stdout or "")
+sys.stderr.write(r.stderr or "")
+with open({str(REF_CONV_LOG)!r}, "a") as f:
+    f.write(json.dumps({{"cwd": os.getcwd(), "args": args[1:], "rc": rc, "exit": code}}) + "\\n")
+sys.exit(code)
+''')
+REF_CONV_SH.write_text("#!/bin/sh\nexec " + " ".join(shlex.quote(a) for a in (PY, str(REF_CONV_PY), REAL_CONVERTER)) + ' "$@"\n')
+REF_CONV_SH.chmod(0o755)
+REF_ENV = {"FORGE_CONVERTER": str(REF_CONV_SH)}
+
+
+_ABSENT = object()
+
+
+def _diff_paths(a, b, pre=""):
+    """prepare_info の違う場所 (dict は降りる)。片側にだけあるキーは (変更前だけ)・(今だけ) を付ける。表示用 (判定は json の文字列で)。"""
+    if isinstance(a, dict) and isinstance(b, dict):
+        return [p_ for k in sorted(set(a) | set(b), key=str) for p_ in _diff_paths(a.get(k, _ABSENT), b.get(k, _ABSENT), f"{pre}{k}.")]
+    if a is _ABSENT or b is _ABSENT:
+        return [pre.rstrip(".") + (" (今だけ)" if a is _ABSENT else " (変更前だけ)")]
+    return [] if a == b else [pre.rstrip(".")]
+
+
+# 統合 (integrate/design-flow-1) で M6 のブランチから入った prepare_info の記録のうち、変更前に無く、値が既定 = 無効を表すもの。
+# 今の側にだけ在り、この既定の値のときだけ比較から外す (値が入っていれば比較に残して FAIL にする — 違いを黙って隠さない):
+#   mesh.params の wall_first_frac_table・wall_normal_layer・x_density_table・x_respace: Mesh2DParams に足した格子の表・層・再配置の指定。
+#     null = 使わない (従来の格子の作り方)。格子そのものは mesh.hashes (座標・接続・生成器の出力の sha256) で比べ続ける
+#   main_line: 本段だけの B0 (evaluate.main_line)。null = 指定なし (本段の設定は従来どおり。設定そのものは solverConfig.yaml で比べる)
+#   physical_upstream: 物理壁だけの上流の形。キー無しの問題では書かれない (書かれていれば null でないので比較に残る)
+#   mesh.params の wall_normal_end_stations: 統合の 2 回目 (integrate/design-flow-2) でベルのブランチから入った、壁法線の層を
+#     入口・出口の断面で半径方向へ戻す断面数 (plan tooling-nozzle-bell-two-mode §5.1 #2d)。null = 使わない (従来どおり全断面)
+INTEG_NULL_KEYS = (("mesh", "params", "wall_first_frac_table"), ("mesh", "params", "wall_normal_layer"),
+                   ("mesh", "params", "x_density_table"), ("mesh", "params", "x_respace"),
+                   ("mesh", "params", "wall_normal_end_stations"),
+                   ("main_line",), ("physical_upstream",))
+
+
+def drop_integration_defaults(pi_o: dict, pi_n: dict, run_new: Path) -> list:
+    """INTEG_NULL_KEYS と ns_stage_configs を、今の側 (pi_n) にだけ在り既定 (null・段の設定の記録) のときだけ pi_n から外す。戻り: 外したキー。
+    ns_stage_configs (prepare の時点で導いた S1・S2・本段の設定の sha256) は設定そのものでなく記録なので、本段の sha256 が書いた
+    solverConfig.yaml と一致し、B0 の前の段の元の設定 (prestage_config) が無い (main_line を使っていない) ときだけ外す。"""
+    dropped = []
+    for path in INTEG_NULL_KEYS:
+        d_o, d_n = pi_o, pi_n
+        for k in path[:-1]:
+            d_o = d_o.get(k) if isinstance(d_o, dict) else None
+            d_n = d_n.get(k) if isinstance(d_n, dict) else None
+        k = path[-1]
+        if isinstance(d_n, dict) and k in d_n and d_n[k] is None and not (isinstance(d_o, dict) and k in d_o):
+            d_n.pop(k)
+            dropped.append(".".join(path) + " = null")
+    ns = pi_n.get("ns_stage_configs")
+    cfg_sha = hashlib.sha256((run_new / "solverConfig.yaml").read_bytes()).hexdigest()
+    if ("ns_stage_configs" not in pi_o and isinstance(ns, dict) and ns.get("stages") == "full" and ns.get("at") == "prepare"
+            and ns.get("main") == cfg_sha and ns.get("prestage_config") is None and pi_n.get("main_line") is None):
+        pi_n.pop("ns_stage_configs")
+        dropped.append("ns_stage_configs (段の設定の sha256 の記録; 本段 = solverConfig.yaml・prestage_config なし)")
+    return dropped
+
+
+CMP_FILES =("bcondConfig.yaml", "solverConfig.yaml", "delta_r_initial.json", "delta_r_initial.csv", "wall_design.csv",
              "wall_physical.csv", "target_axis_M.csv", "wall_repr.json", "probe.yaml", "MESH_QUALITY.txt")
+def _cmp_bytes(f, path):
+    # NS の本段の step 数 (2026-10-14 に既定を 60,000 に変えた、runner_axismach.NS_STEPS_DEFAULT) は比べない — 下で値を別に確かめる
+    b = path.read_bytes()
+    return re.sub(rb"nStepOuter: \d+", b"nStepOuter: N", b) if f == "solverConfig.yaml" else b
+
+
 for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断熱)", pf45)):
     if label.startswith("case/45") and not (C45_PIN_DIR / raw45["geometry"]["initial_line_run"]).exists():
         print(f"   {label}: CFD ピンの run が無いので prepare の比較を飛ばした")
         continue
     tag = "c70" if label.startswith("case/70") else "c45"
     r_old, r_new = OUT / f"v4_{tag}_before", OUT / f"v4_{tag}_after"
-    rc_o, log_o = prepare_cli(ref_root / "design", prob, r_old)
+    rc_o, log_o = prepare_cli(ref_root / "design", prob, r_old, env_extra=REF_ENV)      # 変換器は包んで回す (上の REF_CONV_SH)
     # 今のコードは出口の切り方を直す前の規則に戻して比べる (§5.1 #4c: c2b・case/45 生産は直す前の切り方が x_F の壁点を落としていた;
     # case/70 exit_cut_ab.py)。今の切り方の差は下で別に見る
     rc_n, log_n = prepare_cli(DESIGN, prob, r_new, old_exit_cut=True)
@@ -543,19 +640,38 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
         check(f"V4 {label}: prepare-only (変更前・今) が通る", False, (log_o if rc_o else log_n)[-300:])
         continue
     diff = [f for f in CMP_FILES if (r_old / f).exists() != (r_new / f).exists()
-            or ((r_old / f).exists() and (r_old / f).read_bytes() != (r_new / f).read_bytes())]
+            or ((r_old / f).exists() and _cmp_bytes(f, r_old / f) != _cmp_bytes(f, r_new / f))]
     pi_o = json.loads((r_old / "prepare_info.json").read_text()); pi_n = json.loads((r_new / "prepare_info.json").read_text())
     for pi_ in (pi_o, pi_n):          # 実行環境 (git の状態・時刻) と壁の当てはめの所要時間 [s] (壁時計) は比べない
         pi_.pop("environment", None)
         if isinstance(pi_.get("physical_wall"), dict) and isinstance(pi_["physical_wall"].get("fit"), dict):
             pi_["physical_wall"]["fit"].pop("build_seconds", None)
-    pi_same = json.dumps(pi_o, sort_keys=True) == json.dumps(pi_n, sort_keys=True)
-    pi_diff = sorted(k for k in set(pi_o) | set(pi_n) if pi_o.get(k) != pi_n.get(k))
+    # mesh 欄の節点数と上限 (2026-10-14 に足したキー、plan tooling-nozzle-mesh-size-guard §4.2) は変更前に無いので比べない。
+    # 節点数は今の記録が実際の座標数であることだけを見る
+    nodes_ok = pi_n.get("mesh", {}).get("n_nodes") == pi_n.get("mesh", {}).get("ni", 0) * pi_n.get("mesh", {}).get("nj", 0)
+    for k in ("n_nodes", "max_nodes", "max_nodes_reason", "max_nodes_source"):
+        pi_n.get("mesh", {}).pop(k, None)
+    # NS の本段の step 数: 変更前は evaluate.nStepOuter (雛形の 12,000) を読み、今は既定 60,000 (evaluate.ns_steps が無いとき)
+    ns_o, ns_n, ns_src = pi_o.pop("nStepOuter", None), pi_n.pop("nStepOuter", None), pi_n.pop("nStepOuter_source", None)
+    check(f"V4 {label}: NS の本段の step 数は既定 {RA.NS_STEPS_DEFAULT} (evaluate.ns_steps が無いとき; 変更前は evaluate.nStepOuter)",
+          ns_n == RA.NS_STEPS_DEFAULT and str(ns_src).startswith("既定"), f"変更前 {ns_o} → 今 {ns_n} ({ns_src})")
+    # 停止規則の設定 (2026-10-14 に足したキー、plan tooling-nozzle-cooled-wall-ns-settling §4.6) は変更前に無いので比べない。
+    # 既定 (要求あり・上限 200,000・使わないときの本段 = NS_STEPS_DEFAULT) であることを別に見る
+    sr_n = pi_n.pop("stop_rule", None) or {}
+    check(f"V4 {label}: 停止規則の設定は既定 (要求あり・上限 200,000・使わないときの本段 {RA.NS_STEPS_DEFAULT})",
+          sr_n.get("requested") is True and sr_n.get("cap") == 200000 and sr_n.get("fallback_steps") == RA.NS_STEPS_DEFAULT
+          and "stop_rule" not in pi_o, str({k: sr_n.get(k) for k in ("requested", "use", "cap", "cap_source", "fallback_steps", "reason")}))
+    # 統合で今の側にだけ増えた既定 (null・段の設定の記録) のキーは比べない (上の INTEG_NULL_KEYS・drop_integration_defaults)
+    dropped = drop_integration_defaults(pi_o, pi_n, r_new)
+    print(f"   {label}: 比較から外した統合の記録 (今の側にだけ在り既定の値) {dropped if dropped else 'なし'}", flush=True)
+    pi_same = nodes_ok and json.dumps(pi_o, sort_keys=True) == json.dumps(pi_n, sort_keys=True)
+    pi_diff = _diff_paths(pi_o, pi_n)
     extra = [f.name for f in r_new.iterdir() if f.name == WTP.RUN_JSON or f.name.startswith("wall_profile_")]
     present = [f for f in CMP_FILES if (r_new / f).exists()]
     check(f"V4 {label}: prepare-only の生成物が変更前とバイト同一 ({len(present)} 個 + prepare_info から environment・"
-          "physical_wall.fit.build_seconds を除いたもの)、壁温の JSON・CSV を書かない", not diff and pi_same and not extra,
-          f"違うファイル {diff}、prepare_info の違うキー {pi_diff}、余分 {extra}")
+          "physical_wall.fit.build_seconds・mesh の節点数と上限・stop_rule・統合で増えた既定の記録を除いたもの)、壁温の JSON・CSV を書かない",
+          not diff and pi_same and not extra,
+          f"違うファイル {diff}、prepare_info の違う場所 {pi_diff}、余分 {extra}、mesh.n_nodes = ni × nj {nodes_ok}、外した記録 {len(dropped)} 個")
     check(f"V4 {label}: 一様・断熱の run の load_run_profile は None", WTP.load_run_profile(r_new) is None)
     v4[label + " prepare"] = bool(not diff and pi_same and not extra)
     # 今の切り方 (§5.1 #4c): 違うのは壁の長さに依るファイルだけで、設計壁の終点が直す前より下流 (x_F) に動く
@@ -566,12 +682,15 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
         continue
     wall_dep = {"delta_r_initial.json", "delta_r_initial.csv", "wall_design.csv", "wall_physical.csv", "wall_repr.json", "MESH_QUALITY.txt"}
     diff_c = [f for f in CMP_FILES if (r_old / f).exists() != (r_cut / f).exists()
-              or ((r_old / f).exists() and (r_old / f).read_bytes() != (r_cut / f).read_bytes())]
+              or ((r_old / f).exists() and _cmp_bytes(f, r_old / f) != _cmp_bytes(f, r_cut / f))]
     dom_o = json.loads((r_old / "wall_repr.json").read_text())["domain"]
     dom_c = json.loads((r_cut / "wall_repr.json").read_text())["domain"]
     check(f"V4 {label}: 今の切り方は壁の長さに依るファイルだけが違い、設計壁の終点が直す前より下流 (入口端は同じ)",
           set(diff_c) <= wall_dep and dom_c[0] == dom_o[0] and dom_c[1] > dom_o[1],
           f"違うファイル {diff_c}、終点 {dom_o[1]!r} → {dom_c[1]!r} (差 {dom_c[1] - dom_o[1]:.6e} r_t)")
+_conv = [json.loads(ln) for ln in REF_CONV_LOG.read_text().splitlines() if ln.strip()] if REF_CONV_LOG.exists() else []
+print(f"   変更前の側の変換器 (包み): {len(_conv)} 回、うち終了時の既知の GPU エラー (rc ≠ 0) を通した "
+      f"{sum(1 for c_ in _conv if c_['rc'] != 0 and c_['exit'] == 0)} 回、失敗のまま {sum(1 for c_ in _conv if c_['exit'] != 0)} 回", flush=True)
 SUMMARY["V4"] = v4
 
 # --- codex result レビュー 2026-10-13 m1: s = 0 を点として含まない s の表は拒否 (代表値と実際のスロートの温度の食い違いを作らない) ---

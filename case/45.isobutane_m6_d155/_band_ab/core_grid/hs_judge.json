@@ -1,0 +1,402 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.104",
+ "runs": {
+  "L": "run_0917_hs_b0",
+  "P": "run_0918_hs_point"
+ },
+ "offset_main_steps": 100000,
+ "info": {
+  "run_0917_hs_b0": {
+   "restart_bitwise_9": true,
+   "prepared": true,
+   "RUN_RC": "143",
+   "STOP_RULE": 62500,
+   "n_series": 26,
+   "last_step": 65000,
+   "contiguous": true,
+   "finite_physical": true,
+   "diverged": false,
+   "first_reach": 22500,
+   "normal_end": true
+  },
+  "run_0918_hs_point": {
+   "restart_bitwise_9": true,
+   "prepared": true,
+   "RUN_RC": "143",
+   "STOP_RULE": 42500,
+   "n_series": 18,
+   "last_step": 45000,
+   "contiguous": true,
+   "finite_physical": true,
+   "diverged": false,
+   "first_reach": 22500,
+   "normal_end": true
+  }
+ },
+ "valid": true,
+ "L": {
+  "first_reach_cont": 22500,
+  "N_reached_main": 122500,
+  "stop_cont": 62500,
+  "N_confirmed_main": 162500,
+  "reached_within_budget": true,
+  "confirmed": true,
+  "qual": {
+   "s_end": 62500,
+   "n": 17,
+   "q": {
+    "theta_r_w65_75": {
+     "mu": 0.1216811139513125,
+     "d": 0.0011394667471888908,
+     "U": 0.0030916580068966163,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "theta_r_w65_75  : tail mean=0.1217  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.121681 (最終比 +0.000 %)] STEADY",
+     "ok": true
+    },
+    "theta_r_w84_94": {
+     "mu": 0.1321496156921875,
+     "d": 0.00135915862060409,
+     "U": 0.0036516994238362664,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "theta_r_w84_94  : tail mean=0.1321  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.13215 (最終比 +0.000 %)] STEADY",
+     "ok": true
+    },
+    "delta_loc_w65_75": {
+     "mu": 0.398617351709375,
+     "d": 0.0005392561199828661,
+     "U": 0.0014240293165530683,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "delta_loc_w65_75: tail mean=0.3986  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.398618 (最終比 +0.000 %)] STEADY",
+     "ok": true
+    },
+    "delta_loc_w84_94": {
+     "mu": 0.5509210198694375,
+     "d": 0.0005690781275987224,
+     "U": 0.0014817628228692998,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "delta_loc_w84_94: tail mean=0.5509  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.550921 (最終比 +0.000 %)] STEADY",
+     "ok": true
+    },
+    "Q_w": {
+     "mu": 9966163.577765625,
+     "d": 0.00038981445102146897,
+     "U": 0.0010646591792362091,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "Q_w             : tail mean=9.966e+06  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 9.96616e+06 (最終比 -0.000 %)] STEADY",
+     "ok": true
+    },
+    "exit_M_line": {
+     "mu": 6.02589444954625,
+     "d": 3.091748722807738e-05,
+     "U": 8.254875429366641e-05,
+     "tau": 0.05,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "exit_M_line     : tail mean=6.026  drift=0.0%/tail  fluct=0.0%            STEADY",
+     "ok": true
+    },
+    "eta0.0_mean_pct": {
+     "mu": 0.3630500167804375,
+     "d": 1.810258687501287e-05,
+     "U": 5.3247219562457815e-05,
+     "tau": 0.05,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "eta0.0_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%            STEADY",
+     "ok": true
+    },
+    "eta0.1_mean_pct": {
+     "mu": 0.3619618705616875,
+     "d": 2.122994462494532e-05,
+     "U": 5.7305345312508305e-05,
+     "tau": 0.05,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "eta0.1_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.00362 (最終比 -0.000 %)] STEADY",
+     "ok": true
+    }
+   },
+   "nonfinite": 0,
+   "ok": true
+  }
+ },
+ "P": {
+  "stop_cont_after_switch": 42500,
+  "first_reach_after_switch": 22500,
+  "qualified": true,
+  "qual": {
+   "s_end": 42500,
+   "n": 17,
+   "q": {
+    "theta_r_w65_75": {
+     "mu": 0.1216791541660625,
+     "d": 0.012190788020891371,
+     "U": 0.029331028233310016,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "theta_r_w65_75  : tail mean=0.1217  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.121681 (最終比 +0.000 %)] STEADY",
+     "ok": true
+    },
+    "theta_r_w84_94": {
+     "mu": 0.1321471081655625,
+     "d": 0.013899670038174647,
+     "U": 0.032973910793335635,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "theta_r_w84_94  : tail mean=0.1321  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.13215 (最終比 +0.001 %)] STEADY",
+     "ok": true
+    },
+    "delta_loc_w65_75": {
+     "mu": 0.3986114126319375,
+     "d": 0.00707471403698086,
+     "U": 0.01288595567255851,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "delta_loc_w65_75: tail mean=0.3986  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.398618 (最終比 +0.000 %)] STEADY",
+     "ok": true
+    },
+    "delta_loc_w84_94": {
+     "mu": 0.5509126907180626,
+     "d": 0.006880228462458791,
+     "U": 0.012475932252173697,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "delta_loc_w84_94: tail mean=0.5509  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.550922 (最終比 +0.001 %)] STEADY",
+     "ok": true
+    },
+    "Q_w": {
+     "mu": 9966234.870690625,
+     "d": 0.0038794157536958277,
+     "U": 0.009703044749811589,
+     "tau": 1.5,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "Q_w             : tail mean=9.966e+06  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 9.96618e+06 (最終比 -0.000 %)] STEADY",
+     "ok": true
+    },
+    "exit_M_line": {
+     "mu": 6.0258980196625,
+     "d": 0.00037066905716839194,
+     "U": 0.0008055708434078285,
+     "tau": 0.05,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "exit_M_line     : tail mean=6.026  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 6.02589 (最終比 -0.000 %)] STEADY",
+     "ok": true
+    },
+    "eta0.0_mean_pct": {
+     "mu": 0.3630846543200625,
+     "d": 0.00023316659787497862,
+     "U": 0.00052753207393752,
+     "tau": 0.05,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "eta0.0_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.00363 (最終比 -0.000 %)] STEADY",
+     "ok": true
+    },
+    "eta0.1_mean_pct": {
+     "mu": 0.3620035104056875,
+     "d": 0.0002805024818124946,
+     "U": 0.0006312719403124833,
+     "tau": 0.05,
+     "steady": true,
+     "asym_ok": true,
+     "qs": "eta0.1_mean_pct : tail mean=1.004  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.00362 (最終比 -0.000 %)] STEADY",
+     "ok": true
+    }
+   },
+   "nonfinite": 0,
+   "ok": true
+  }
+ },
+ "budget": {
+  "theta_r_w65_75": {
+   "dmu": 0.0016106170883840169,
+   "U_L": 0.0030916580068966163,
+   "U_P": 0.029331028233310016,
+   "p_diff": 0.02,
+   "B": 0.054033303328590646,
+   "tau": 1.5,
+   "ok": true
+  },
+  "theta_r_w84_94": {
+   "dmu": 0.0018975266729747231,
+   "U_L": 0.0036516994238362664,
+   "U_P": 0.032973910793335635,
+   "p_diff": 0.02,
+   "B": 0.058523136890146626,
+   "tau": 1.5,
+   "ok": true
+  },
+  "delta_loc_w65_75": {
+   "dmu": 0.0014899416447454116,
+   "U_L": 0.0014240293165530683,
+   "U_P": 0.01288595567255851,
+   "p_diff": 0.046,
+   "B": 0.061799926633856986,
+   "tau": 1.5,
+   "ok": true
+  },
+  "delta_loc_w84_94": {
+   "dmu": 0.0015118822846657358,
+   "U_L": 0.0014817628228692998,
+   "U_P": 0.012475932252173697,
+   "p_diff": 0.046,
+   "B": 0.06146957735970873,
+   "tau": 1.5,
+   "ok": true
+  },
+  "Q_w": {
+   "dmu": 0.0007153446203626383,
+   "U_L": 0.0010646591792362091,
+   "U_P": 0.009703044749811589,
+   "p_diff": 0.018,
+   "B": 0.029483048549410435,
+   "tau": 1.5,
+   "ok": true
+  },
+  "exit_M_line": {
+   "dmu": 5.92462109065083e-05,
+   "U_L": 8.254875429366641e-05,
+   "U_P": 0.0008055708434078285,
+   "p_diff": 0.0012,
+   "B": 0.002147365808608003,
+   "tau": 0.05,
+   "ok": true
+  },
+  "eta0.0_mean_pct": {
+   "dmu": 3.4637539624959857e-05,
+   "U_L": 5.3247219562457815e-05,
+   "U_P": 0.00052753207393752,
+   "p_diff": 0.0028,
+   "B": 0.0034154168331249376,
+   "tau": 0.05,
+   "ok": true
+  },
+  "eta0.1_mean_pct": {
+   "dmu": 4.1639844000018744e-05,
+   "U_L": 5.7305345312508305e-05,
+   "U_P": 0.0006312719403124833,
+   "p_diff": 0.0028,
+   "B": 0.0035302171296250104,
+   "tau": 0.05,
+   "ok": true
+  }
+ },
+ "result": "A: 今回の起点・条件で、B0 は停止規則に到達し、point の参照に対して 8 量とも許容内",
+ "shape_H_point_minus_C_point_pct": {
+  "theta_r_w65_75": {
+   "mu_H_point": 0.1216791541660625,
+   "mu_C_point": 0.11393123824393751,
+   "diff": 6.800519367248484,
+   "U_H_point_on_C_scale": 0.031325690488929386,
+   "U_C_point": 0.01760442820891698,
+   "p": 0.02
+  },
+  "theta_r_w84_94": {
+   "mu_H_point": 0.1321471081655625,
+   "mu_C_point": 0.124351857132125,
+   "diff": 6.268704958024845,
+   "U_H_point_on_C_scale": 0.03504094797409216,
+   "U_C_point": 0.01698280732603321,
+   "p": 0.02
+  },
+  "delta_loc_w65_75": {
+   "mu_H_point": 0.3986114126319375,
+   "mu_C_point": 0.401157516852125,
+   "diff": -0.6346893958679128,
+   "U_H_point_on_C_scale": 0.012804169878348542,
+   "U_C_point": 0.001757180959792,
+   "p": 0.046
+  },
+  "delta_loc_w84_94": {
+   "mu_H_point": 0.5509126907180626,
+   "mu_C_point": 0.552882932026125,
+   "diff": -0.35635777375912003,
+   "U_H_point_on_C_scale": 0.012431473297744154,
+   "U_C_point": 0.0015798716323676338,
+   "p": 0.046
+  },
+  "Q_w": {
+   "mu_H_point": 9966234.870690625,
+   "mu_C_point": 9210814.546190625,
+   "diff": 8.201449727509976,
+   "U_H_point_on_C_scale": 0.010498835087005182,
+   "U_C_point": 0.015204457763616397,
+   "p": 0.018
+  },
+  "exit_M_line": {
+   "mu_H_point": 6.0258980196625,
+   "mu_C_point": 6.0279336909425005,
+   "diff": -0.033770631602326365,
+   "U_H_point_on_C_scale": 0.0008052987970460054,
+   "U_C_point": 0.00020404695442021313,
+   "p": 0.0012
+  },
+  "eta0.0_mean_pct": {
+   "mu_H_point": 0.3630846543200625,
+   "mu_C_point": 0.4030533299656875,
+   "diff": -0.03996867564562501,
+   "U_H_point_on_C_scale": 0.00052753207393752,
+   "U_C_point": 0.0001995565743125316,
+   "p": 0.0028
+  },
+  "eta0.1_mean_pct": {
+   "mu_H_point": 0.3620035104056875,
+   "mu_C_point": 0.40182869121681253,
+   "diff": -0.039825180811125016,
+   "U_H_point_on_C_scale": 0.0006312719403124833,
+   "U_C_point": 0.00020079615118745453,
+   "p": 0.0028
+  }
+ },
+ "m9_like_first_reach": {
+  "run_0917_hs_b0": 22500,
+  "run_0918_hs_point": 22500
+ },
+ "convergence": {
+  "run_0917_hs_b0": [
+   "=== /home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/run_0917_hs_b0  [last step 65620]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===",
+   "  rms_ro      : init=8.28e-08 peak=9.62e-08 fin=8.43e-08 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roUx    : init=1.29e-05 peak=1.48e-05 fin=1.29e-05 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roUy    : init=1.22e-05 peak=1.37e-05 fin=1.25e-05 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roUz    : all-zero (inactive, skip)",
+   "  rms_roe     : init=7.24e-02 peak=7.80e-02 fin=7.18e-02 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roK     : init=1.47e-05 fin=3.68e-06 drop= 0.6dec flat     <-- STALLED (plateau)",
+   "  rms_roOmega : init=2.33e+01 peak=2.46e+01 fin=2.28e+01 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roY0    : init=5.55e-08 peak=6.45e-08 fin=5.66e-08 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roY1    : init=5.21e-09 peak=6.05e-09 fin=5.31e-09 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "",
+   "OVERALL: CHECK FAILURES ABOVE"
+  ],
+  "run_0918_hs_point": [
+   "=== /home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/run_0918_hs_point  [last step 45521]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===",
+   "  rms_ro      : init=8.28e-08 peak=8.89e-08 fin=7.52e-08 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roUx    : init=1.29e-05 fin=1.14e-05 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roUy    : init=1.22e-05 peak=1.62e-05 fin=1.45e-05 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roUz    : all-zero (inactive, skip)",
+   "  rms_roe     : init=7.24e-02 peak=9.52e-02 fin=7.10e-02 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roK     : init=1.47e-05 peak=1.63e-05 fin=3.25e-06 drop= 0.7dec flat     <-- STALLED (plateau)",
+   "  rms_roOmega : init=2.33e+01 peak=2.66e+01 fin=2.47e+01 drop= 0.0dec flat     <-- STALLED (plateau)",
+   "  rms_roY0    : init=5.55e-08 peak=5.97e-08 fin=5.14e-08 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roY1    : init=5.21e-09 peak=5.60e-09 fin=4.83e-09 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "",
+   "OVERALL: CHECK FAILURES ABOVE"
+  ]
+ },
+ "note": "N は H の本段の通算 (起点は C の B0 の場を移した後の起動段 4,000 step の後)。他のセッションの開始の場・壁温・形・ガスでの必要 step 数として使わない (§4.104)。"
+}

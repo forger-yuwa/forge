@@ -1,0 +1,6 @@
+B3 rc=0 sec=7
+B2 rc=0 sec=7
+B1 rc=0 sec=7
+A1 rc=0 sec=7
+A3 rc=0 sec=7
+A2 rc=0 sec=8

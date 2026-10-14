@@ -1,0 +1,8 @@
+{
+ "field": "run_0010 res_55000 x run_0012",
+ "max_abs_diff_band55_vs_band50_rt": 0.0005150164340176639,
+ "at_x": 5.604501247406006,
+ "mean_of_5_with_1_switched_rt": 0.00010300328680353278,
+ "criterion_rt": 0.0001,
+ "verdict": "FAIL"
+}

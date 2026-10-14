@@ -106,9 +106,10 @@ public:
     int qAccumulatorFP64 = 0;
     // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md)。lineImplicit==1 専用。
     int lineKFreeze = 0;              // 1: dual-time サブ反復間で K/diag/LU を凍結 (subiter 0 のみ構築)
-    int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α)
+    int lineViscCoupling = 0;         // 1: line 面にスカラー粘性結合 K+=α·I (対角 2α→α) / 2: 薄層の粘性・熱伝導の Jacobian (K と対角) / 3: 2 + スカラーの対角も残す (診断)
     flow_float lineViscousDtRelief = 0.0;  // θ: on-line セルの擬似 dt 粘性項を (1−θ) 倍
     int lineDtDirectional = 0;        // 1: 方向別 dt — line 面の λ (音響込み) を CFL の max から除外
+    flow_float lineDtDirectionalCap = 0.0;  // 方向別 dt の伸びの上限 R (Δτ ≤ R·Δτ_point)。0 = 上限なし (従来どおり)。plan time_integration-implicit-thermal-jacobian §4.4
     // 軸対称 near-axis 安定化: 擬似時間スペクトル半径に軸項 λ_axis=β·(|u_r|+c)·A_planar を加える。
     // 近軸 (r→0) で Δτ∝CFL·r/(|u_r|+c) を自然に与え半径運動量不安定を抑える。0=不変 (既定)。
     flow_float axisTimestepBeta = 0.0;
@@ -129,7 +130,20 @@ public:
                                      // 1: 緩和整合 scalar-DPLUR (流れ block と同一 dt_local/implicitRelax/nStepInner
                                      //    sweep で ρY_s を緩和し、要因2 の擬似時間緩和ミスマッチを解消)。
                                      // 詳細: plans/accepted/thermophysics-species-implicit-coupling.md。
+    // 多成分 × lowMachPrecond>=2 (定常擬似時間) の化学種の擬似時間刻み (plans/active/architecture-float-state-double-geometry.md
+    // §5.1 #26、chem のブランチの 876ec8b4 の移植)。前処理 Γ_c は流れ 5 変数の擬似時間項だけを変え、分離更新の ρY_s は
+    // 前処理されないので、拡大後の Δτ' で進めると組成と密度の前線が擬似時間で別の速さで進み、異組成の接触面で P が暴走する。
+    //   0: 流れと同じ拡大後の Δτ' (旧挙動、A/B 用) / 1: 拡大前の Δτ (既定) / 2: Δτ'·β (β = lowMachBeta)。
+    // 効くのは化学種の scalar-DPLUR (speciesImplicitCoupling 1/2) だけ。speciesImplicitCoupling 0 の point-implicit と受動種は対象外。
+    // lowMachPrecond<2 では何もしない (化学種は dt_local を読む・ビット不変)。
+    int speciesPrecondDt = 1;
     int implicitSolvePrecision = 0; // block-DPLUR 線形 solve の内部精度。0: float (既定・高速), 1: double。
+    // block-DPLUR のエネルギー行の熱伝導 Jacobian (ビットマスク、既定 0 = 従来どおりビット同一)。
+    //   ビット 1: 内部の node 間面でエネルギー行の粘性対角 (ρE にかかるスカラー) を k_face·δ/dcc·(γ/cp)·∂e/∂Q に置き換える。
+    //   ビット 2: 等温壁の節点のエネルギー行を単位行から拘束の行 [−e_w,0,0,0,1] に替える (原因の切り分け用)。
+    //   ビット 4 (ビット 1 と併用): エネルギー行にも従来のスカラーを残し、温度の項はその上に足す (行ごとの減衰の基準をそろえる)。
+    // node・timeIntegration 11・blockDPLUR 1・lowMachPrecond<2 専用。plans/active/time_integration-implicit-thermal-jacobian.md。
+    int implicitThermalJacobian = 0;
     // 受動スカラ (排気トレーサ roXi・凝縮モーメント) の輸送経路 (plans/active/species-passive-scalar-unification.md §4.1)。
     //   0: 旧汎用スカラ経路 (scalarTransport_d 1 次風上・拡散なし・緩和なし; A/B 用・旧挙動とビット不変)
     //   1: 化学種経路 (species カーネルの受動種: S3 面再構成 [speciesFaceReconstruction>=2, SLAU]・トレーサ Fick 拡散・
@@ -431,6 +445,13 @@ public:
     // (case/43: 生産 NS y+1.5 で 59%、実害は壁 P で ~3 Pa = 4e-5)、その偽半径力を根本から消す。
     // axisRFloor>0 のときは従来どおり (床の閉性補正が同じ配列を使うため) 常に有効。
     int hoopAreaFromClosure = 0;
+
+    // 軸対称 r 重み (axisymMethod 0) の面ベクトルを、区間ごとに半径を掛けて足した W_f = Σ_k r_k S_k
+    // (変換器の /PLANES/rSurfVect) にする (1: 既定) / 今の r̄_f·S_f (0: A/B と古い run の再現用)。
+    // 折れた双対面を 1 本にまとめてから重心の半径を掛けると Σ r_k S_k と食い違い、FP64 でも軸の近くに偽の半径力が立つ
+    // (plans/active/axisymmetric-freestream-hoop-gauge.md §4.5)。使うのは /PLANES/rSurfVect があり、node・平面の 2D・
+    // isAxisymmetric 1・axisymMethod 0・axisRFloor 0 のときだけ。それ以外は 1 でも今の r̄_f·S_f のまま (起動時に 1 行出す)。
+    int axisSegmentRWeight = 1;
 
     // 離散化レイアウト。"cell": cell-centered FVM (既定・従来)、"node": node-centered
     // (中点双対 median-dual) FVM。methods/discretization/ 参照。

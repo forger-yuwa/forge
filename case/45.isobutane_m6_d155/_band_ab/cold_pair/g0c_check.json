@@ -1,0 +1,27 @@
+{
+ "ni": [
+  4719,
+  4467
+ ],
+ "coord_dtype": [
+  "float64",
+  "float64"
+ ],
+ "pre_coords_bit_equal": true,
+ "post_coords_bit_equal": true,
+ "post_cols": [
+  4030,
+  4030
+ ],
+ "max_abs_coord_diff_outside_rt": 0.0,
+ "pre_values_not_bit_equal": {},
+ "post_values_not_bit_equal": {},
+ "seg_nearest_dist_rt": {
+  "max": 0.017046127089311948,
+  "p99": 0.009999055351664734,
+  "median": 0.002850709425849878
+ },
+ "seg_same_j_fraction": 0.9989209603452927,
+ "seg_j_mismatch_max": 2,
+ "verdict": "照合 OK (区間の外は座標と 9 保存量がビット一致)"
+}

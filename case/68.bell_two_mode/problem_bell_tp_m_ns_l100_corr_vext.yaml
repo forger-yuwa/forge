@@ -1,0 +1,53 @@
+# forge_design 問題定義 — ③ベル (M) L100 の **δ* 補正壁** を NS で評価する (plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-4) の事前登録)。
+# 物理壁 = 補正後の非粘性壁 (ε_inv ≈ 48.0905、rao_m/rao_corr_parts/L100_inv_eps48p0905_pin_n321_wall.npz) + δ(x) (固定 x の半径方向)、
+# δ(x) = kδ·C(x)·S(x) (kδ 1.0289、C = contur_v2 [run_0018 の縁、凍結した一発補正]、3 次の平滑化スプライン・終点は較正値に一致)。
+# V-ext: 較正式 kδ·C(x) を x < 1.17 (推定区間) へ延長し、x ∈ [0, 0.41] の 5 次の立ち上げでスロートの r・r′・r″ を保つ。
+# 物理壁の出口半径は √50 (ε 50)、物理スロート (r・r′・r″) は固定。NS 設定・格子族・段は run_0019 (problem_bell_tp_m_ns_l100.yaml) と同じ。
+# 判定 (事前登録): 狙い = problem_bell_tp_m_euler_l100_inv.yaml の Euler。壁圧の誤差が補正なし (run_0019 vs run_0018) から 30 % 以上減る、
+#   軸上・出口の Mach 分布と境界層の外縁の Mach を悪化させない (不確かさ以上に)、η は Δη と不確かさを報告。
+name: bell_tp_m_ns_eps50_L100_corr_vext
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  L_over_rt: {value: 22.657533530077966, fixed: true}   # 15° 円錐長 22.6575 の 100 %。壁ファイルが決める L との照合用 (相対 1e-9)
+
+geometry:
+  bell_mode: moc_rao
+  rao_wall_file: rao_m/rao_corr_parts/L100_inv_eps48p0905_pin_n321_wall.npz   # 補正後の非粘性壁 (ε_inv)
+  rao_offset_file: rao_m/rao_corr_parts/offset_vext.npz   # 物理壁 = 非粘性壁 + δ(x)
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 1.25e-5         # 下流 (x ≥ wall_first_blend_x1) の第一セル厚 / 局所半径 ((D) の MOO と同じ — plan §5.1 #8a′)
+  wall_first_frac_throat: 3.5e-6   # x ≤ wall_first_blend_x0 (上流は全域この値)
+  wall_first_blend_x0: 0.3
+  wall_first_blend_x1: 14.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  wall_normal_layer: [0.02, 0.8]   # 近壁を壁法線に (局所半径比 d_n, d_b)
+  wall_normal_end_stations: 20     # 入口・出口の 20 断面で半径方向の配置へ戻す (面を平面に保つ)
+  ar_max: 5000                     # AR 緩和 (≤5000): 壁法線の構造層 (AGENTS.md の例外)
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 60000          # 本段
+  outStepInterval: 3000      # 本段の res の間隔 = 本段長の 1/20 (推力の時系列 20 点、末尾窓 8 点)
+  cfl_main: 4.0
+  objectives: [eta_cf, length]

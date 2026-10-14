@@ -1,0 +1,760 @@
+{
+ "arms": {
+  "P0": "run_0806_tp_p0",
+  "P3": "run_0807_tp_p3"
+ },
+ "windows": {
+  "W1": [
+   15000,
+   17500,
+   false
+  ],
+  "W2": [
+   17500,
+   20000,
+   true
+  ]
+ },
+ "undecidable": [],
+ "global": {
+  "rms_ro": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 2.148400491021727e-06
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.66183300230793e-06
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.001506916400832896
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0016962221715075354
+    }
+   },
+   "ratio_W1": 701.4131709289655,
+   "ratio_W2": 1020.6935168286142,
+   "P3_W2_over_W1": 1.12562460038925,
+   "worsening": true
+  },
+  "rms_roUx": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0006338192683776483
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.00048122145199807085
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.19370943090394188
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.24132538690902994
+    }
+   },
+   "ratio_W1": 305.6225024521092,
+   "ratio_W2": 501.48509777988323,
+   "P3_W2_over_W1": 1.2458112430710728,
+   "worsening": true
+  },
+  "rms_roUy": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0008883412307143457
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0006493473446565673
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.29727159114341273
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.33640140782529704
+    }
+   },
+   "ratio_W1": 334.6367148852997,
+   "ratio_W2": 518.060804580969,
+   "P3_W2_over_W1": 1.131629855820992,
+   "worsening": true
+  },
+  "rms_roUz": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "p0_median_zero": true,
+   "worsening": false
+  },
+  "rms_roe": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.660349076085385
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.228615708551307
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1388.373191718942
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1608.952887349731
+    }
+   },
+   "ratio_W1": 836.1935521368301,
+   "ratio_W2": 1309.5656161249067,
+   "P3_W2_over_W1": 1.1588763719628508,
+   "worsening": true
+  },
+  "rms_roK": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0028561637096655244
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.001995298693524116
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.2391879434427708
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.24655441293006575
+    }
+   },
+   "ratio_W1": 83.74447957354002,
+   "ratio_W2": 123.56767121147107,
+   "P3_W2_over_W1": 1.0307978294443485,
+   "worsening": true
+  },
+  "rms_roOmega": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 2651.640068529676
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 2378.7376391879197
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 233516.83701898734
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 299624.4980831378
+    }
+   },
+   "ratio_W1": 88.0650582220503,
+   "ratio_W2": 125.95945561504924,
+   "P3_W2_over_W1": 1.28309590823541,
+   "worsening": true
+  },
+  "rms_roY0": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.9639996852186673e-06
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.519201258652682e-06
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0013771102275533045
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.001549926581146753
+    }
+   },
+   "ratio_W1": 701.1763993230886,
+   "ratio_W2": 1020.2246557650433,
+   "P3_W2_over_W1": 1.1254920268078243,
+   "worsening": true
+  },
+  "rms_roY1": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.8432637571818684e-07
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 1.425809093660002e-07
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0001292453045651579
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.000145464559867109
+    }
+   },
+   "ratio_W1": 701.1764000761272,
+   "ratio_W2": 1020.22466060801,
+   "P3_W2_over_W1": 1.1254920274010751,
+   "worsening": true
+  },
+  "rms_dq_ro": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "p0_median_zero": true,
+   "worsening": false
+  },
+  "rms_dq_roUx": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "p0_median_zero": true,
+   "worsening": false
+  },
+  "rms_dq_roUy": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "p0_median_zero": true,
+   "worsening": false
+  },
+  "rms_dq_roUz": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "p0_median_zero": true,
+   "worsening": false
+  },
+  "rms_dq_roe": {
+   "P0": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    },
+    "W2": {
+     "n_finite": 2500,
+     "n_nonfinite": 0,
+     "median": 0.0
+    }
+   },
+   "p0_median_zero": true,
+   "worsening": false
+  }
+ },
+ "local": {
+  "Σ|res_ro| (x/r_t ∈ [−8, −2))": {
+   "P0": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 0.12326807060396397
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 0.0968195828084231
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 77.2993455613722
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 93.14533736932627
+    }
+   },
+   "ratio_W1": 627.0832761690558,
+   "ratio_W2": 962.0505962480023,
+   "P3_W2_over_W1": 1.2049951612510492,
+   "worsening": true
+  },
+  "Σ|res_roUx| (x/r_t ∈ [−8, −2))": {
+   "P0": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 54.549802456946765
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 41.80570050830063
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 15276.635019901996
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 19332.56939228605
+    }
+   },
+   "ratio_W1": 280.0493188212556,
+   "ratio_W2": 462.43859467077976,
+   "P3_W2_over_W1": 1.2654991997321456,
+   "worsening": true
+  },
+  "Σ|res_roUy| (x/r_t ∈ [−8, −2))": {
+   "P0": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 73.06701387746412
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 55.171855504583476
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 21273.59126482559
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 26436.58513087803
+    }
+   },
+   "ratio_W1": 291.1517815755018,
+   "ratio_W2": 479.1679541878336,
+   "P3_W2_over_W1": 1.2426949827972436,
+   "worsening": true
+  },
+  "Σ|res_roe| (x/r_t ∈ [−8, −2))": {
+   "P0": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 133660.98336900247
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 102106.26710804278
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 91455015.36648524
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 108278808.59269372
+    }
+   },
+   "ratio_W1": 684.2312024145613,
+   "ratio_W2": 1060.4521314849314,
+   "P3_W2_over_W1": 1.183957032414143,
+   "worsening": true
+  },
+  "Σ|res_roK| (x/r_t ∈ [−8, −2))": {
+   "P0": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 3.377695463028762
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 2.5650476143767067
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 238.36355879098755
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 1063.5153105732536
+    }
+   },
+   "ratio_W1": 70.56987860511504,
+   "ratio_W2": 414.61815547298613,
+   "P3_W2_over_W1": 4.461736164569568,
+   "worsening": true
+  },
+  "Σ|res_roOmega| (x/r_t ∈ [−8, −2))": {
+   "P0": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 12717411.541009268
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 10460721.833328346
+    }
+   },
+   "P3": {
+    "W1": {
+     "n_finite": 5,
+     "n_nonfinite": 0,
+     "median": 2115127184.8780873
+    },
+    "W2": {
+     "n_finite": 6,
+     "n_nonfinite": 0,
+     "median": 2270419748.377547
+    }
+   },
+   "ratio_W1": 166.31742851582112,
+   "ratio_W2": 217.0423594616467,
+   "P3_W2_over_W1": 1.0734199648180542,
+   "worsening": true
+  }
+ },
+ "records": {
+  "P0 timing": {
+   "samples": 30,
+   "exclusive": false,
+   "max_forge": 5,
+   "others": [
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_005 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006"
+   ],
+   "per_step_ms": 43.46146341886887,
+   "per_step_span": [
+    2585,
+    19889
+   ],
+   "last_step": 19889,
+   "last_step_reached_s": 872.6177263259888,
+   "T_forge_end_s (forge_run.log の更新時刻 − 起動)": 878.0810692310333
+  },
+  "P0 RUN_RC": "0",
+  "P3 timing": {
+   "samples": 68,
+   "exclusive": false,
+   "max_forge": 6,
+   "others": [
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007",
+    "/home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_006 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_007 /home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007",
+    "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007",
+    "/home/ubuntu/forge-wallfit/case/45.isobutane_m6_d155/run_0810_vgc_chain /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0033_soo_d_l80_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0034_soo_d_l90_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0035_soo_d_l100_s0/doe_007 /home/ubuntu/forge-thruster/case/68.bell_two_mode/run_0032_soo_d_l70_s0/doe_008"
+   ],
+   "per_step_ms": 104.5984743452097,
+   "per_step_span": [
+    2726,
+    19999
+   ],
+   "last_step": 19999,
+   "last_step_reached_s": 2017.5329933166504,
+   "T_forge_end_s (forge_run.log の更新時刻 − 起動)": 2010.378481388092
+  },
+  "P3 RUN_RC": "0",
+  "局所の出力の step (P0・P3 の数)": [
+   41,
+   41
+  ],
+  "P0 step 20000 (未収束の値)": {
+   "Q_w": 9303963.884085223,
+   "M_exit_mean_r_le_0.8 (軸の行を除く)": 6.027995041727681,
+   "M_exit_max_r_le_0.95 (軸の行を除く)": 6.0308719413093455,
+   "M_exit_axis": 6.036813065018448,
+   "theta_r_40": 0.07733008960037147,
+   "delta_loc_40": 0.17570324022439188,
+   "theta_r_70": 0.11438312017180152,
+   "delta_loc_70": 0.40256932046527716,
+   "theta_r_94": 0.12727296217456363,
+   "delta_loc_94": 0.5790106693076726
+  },
+  "P0 check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_roUx    : init=4.26e-01 fin=4.13e-04 drop= 2.9dec falling  <-- still converging",
+    "rms_roe     : init=1.37e+02 fin=1.03e+00 drop= 2.0dec falling  <-- still converging",
+    "rms_roK     : init=9.34e-04 peak=9.75e-03 fin=1.59e-03 drop= 0.6dec falling  <-- still converging",
+    "rms_roOmega : init=6.44e+04 peak=9.33e+04 fin=2.06e+03 drop= 1.6dec falling  <-- still converging"
+   ]
+  },
+  "P3 step 20000 (未収束の値)": {
+   "Q_w": 12860663.899504445,
+   "M_exit_mean_r_le_0.8 (軸の行を除く)": 6.050806948859248,
+   "M_exit_max_r_le_0.95 (軸の行を除く)": 6.074115001781249,
+   "M_exit_axis": 6.039303823269365,
+   "theta_r_40": 0.10160286094421345,
+   "delta_loc_40": 0.1198773351887894,
+   "theta_r_70": 0.1459013566499756,
+   "delta_loc_70": 0.3204833379940588,
+   "theta_r_94": 0.16041245119065017,
+   "delta_loc_94": 0.4790135783921503
+  },
+  "P3 check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_ro      : init=4.24e-03 fin=1.63e-03 drop= 0.4dec rising   <-- RISING (divergent)",
+    "rms_roUx    : init=4.26e-01 fin=2.34e-01 drop= 0.3dec rising   <-- RISING (divergent)",
+    "rms_roUy    : init=9.79e-01 fin=3.17e-01 drop= 0.5dec rising   <-- RISING (divergent)",
+    "rms_roe     : init=1.37e+02 peak=1.68e+03 fin=1.59e+03 drop= 0.0dec rising   <-- RISING (divergent)",
+    "rms_roK     : init=9.34e-04 peak=2.70e-01 fin=2.54e-01 drop= 0.0dec rising   <-- RISING (divergent)",
+    "rms_roOmega : init=6.44e+04 peak=6.37e+05 fin=4.90e+05 drop= 0.4dec rising   <-- RISING (divergent)",
+    "rms_roY0    : init=3.88e-03 fin=1.49e-03 drop= 0.4dec rising   <-- RISING (divergent)",
+    "rms_roY1    : init=3.64e-04 fin=1.40e-04 drop= 0.4dec rising   <-- RISING (divergent)"
+   ]
+  },
+  "P3 − P0 の相対差 [%] (step 20000、記録)": {
+   "Q_w": 38.2277925809997,
+   "theta_r_40": 31.388520909880576,
+   "theta_r_70": 27.55497177453651,
+   "theta_r_94": 26.038121883761495
+  }
+ },
+ "qualification": {
+  "status": "成立",
+  "passes": {
+   "Q1": true,
+   "Q2": true,
+   "Q3": true,
+   "Q4": true,
+   "Q5": true,
+   "Q6": true
+  },
+  "failed": [],
+  "undecidable": []
+ },
+ "p0_median_zero (比を作らず別記)": [
+  "全域 rms_roUz",
+  "全域 rms_dq_ro",
+  "全域 rms_dq_roUx",
+  "全域 rms_dq_roUy",
+  "全域 rms_dq_roUz",
+  "全域 rms_dq_roe"
+ ],
+ "nonfinite_in_windows (比の判定から分けた)": {},
+ "worsening": [
+  "全域 rms_ro",
+  "全域 rms_roUx",
+  "全域 rms_roUy",
+  "全域 rms_roe",
+  "全域 rms_roK",
+  "全域 rms_roOmega",
+  "全域 rms_roY0",
+  "全域 rms_roY1",
+  "局所 Σ|res_ro| (x/r_t ∈ [−8, −2))",
+  "局所 Σ|res_roUx| (x/r_t ∈ [−8, −2))",
+  "局所 Σ|res_roUy| (x/r_t ∈ [−8, −2))",
+  "局所 Σ|res_roe| (x/r_t ∈ [−8, −2))",
+  "局所 Σ|res_roK| (x/r_t ∈ [−8, −2))",
+  "局所 Σ|res_roOmega| (x/r_t ∈ [−8, −2))"
+ ],
+ "verdict": "結果 A (持続する悪化あり: 全域 rms_ro, 全域 rms_roUx, 全域 rms_roUy, 全域 rms_roe, 全域 rms_roK, 全域 rms_roOmega, 全域 rms_roY0, 全域 rms_roY1, 局所 Σ|res_ro| (x/r_t ∈ [−8, −2)), 局所 Σ|res_roUx| (x/r_t ∈ [−8, −2)), 局所 Σ|res_roUy| (x/r_t ∈ [−8, −2)), 局所 Σ|res_roe| (x/r_t ∈ [−8, −2)), 局所 Σ|res_roK| (x/r_t ∈ [−8, −2)), 局所 Σ|res_roOmega| (x/r_t ∈ [−8, −2))) → この設定の長い試験を打ち切る (この条件では継続の対象から外した。低マッハの前処理は効かないとは言わない)"
+}

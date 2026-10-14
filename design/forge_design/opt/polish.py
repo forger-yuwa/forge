@@ -8,6 +8,10 @@
 CLI: design/.venv-opt/bin/python -m forge_design.opt.polish <campaign_dir>
      (campaign の pareto.json の全点をポリッシュし polish.jsonl /
       pareto_polished.json を書く)
+
+TP 経路 (plan tooling-nozzle-bell-two-mode §4.1・§5.1 #2b) は `polish_run_tp`: `runner.prepare` 経由の再補間 (CPG 経路の
+現行実装。名前に反して同一メッシュの継続ではない) をやめ、restart_field.py による同一メッシュの継続とゲートの再判定にする。
+CPG 経路は従来どおり。
 """
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from ..evaluate import runner
+from ..probdef import load_problem
 from .ehvi import nondominated_mask
 
 
@@ -27,9 +32,39 @@ def _last_res(d: Path):
     return rs[-1] if rs else None
 
 
+def polish_run_tp(prob_yaml, run_dir, eta0: float, tol: float = 3e-4, max_chunks: int = 2) -> dict:
+    """TP 経路の polish (plan tooling-nozzle-bell-two-mode §4.1、§5.1 #2b): **同一メッシュの継続** (`runner.continue_tp` =
+    restart_field.py で親の最終 res を写し、本段をもう 1 段; 段の履歴と manifest を引き継ぐので収束判定は親の本段と連結した
+    区間)。チャンクごとに受理ゲート (i)〜(v) (`driver.tp_gates`) を判定し直し、|Δη| < tol **かつ**ゲート PASS で頭打ちとする
+    (η の前後差だけでは終了しない)。継続 run は `<tag>_pK`。"""
+    from .driver import tp_gates
+    run_dir = Path(run_dir)
+    prev = run_dir
+    eta_prev = float(eta0)
+    hist, gates = [eta_prev], []
+    settled = False
+    for k in range(1, max_chunks + 1):
+        nd = run_dir.parent / f"{run_dir.name}_p{k}"
+        if not nd.exists():  # 再開可能
+            runner.continue_tp(prob_yaml, prev, nd)
+        out = runner.collect(prob_yaml, nd)
+        g = tp_gates(nd, out)
+        eta = float(out["eta_cf"])
+        hist.append(eta)
+        gates.append({"run": nd.name, "status": g["status"], "fail_class": g["fail_class"], "note": g["note"]})
+        drift, eta_prev, prev = abs(eta - eta_prev), eta, nd
+        if drift < tol and g["status"] == "PASS":
+            settled = True
+            break
+    return {"eta_final": eta_prev, "eta_hist": hist, "settled": settled, "chunks": len(hist) - 1,
+            "gates": gates, "path": "tp"}
+
+
 def polish_run(prob_yaml, run_dir, eta0: float, tol: float = 3e-4,
                max_chunks: int = 2) -> dict:
-    """run_dir の解を η が頭打ちするまでチャンク継続する。"""
+    """run_dir の解を η が頭打ちするまでチャンク継続する。TP 経路は `polish_run_tp` (同一メッシュの継続 + ゲート)。"""
+    if runner._is_tp(load_problem(prob_yaml)):
+        return polish_run_tp(prob_yaml, run_dir, eta0, tol=tol, max_chunks=max_chunks)
     run_dir = Path(run_dir)
     prev_res = _last_res(run_dir)
     eta_prev = float(eta0)

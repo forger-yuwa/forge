@@ -26,7 +26,7 @@ from ..feedback.deltastar import deltastar_offset
 from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import Problem, dv_value, load_problem
 from .ic import paste_isentropic_ic
-from .runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
+from .runner import run_converter, FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
 
 
 def design_chain(p: Problem, viscous: bool) -> dict:
@@ -332,8 +332,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
         # 品質ツールは node 形式の CONNE を読めない (cell 前提)。品質は primal
         # メッシュの性質なので **cell 変換の一時コピーで検査**してから node 変換。
         (run_dir / "solverConfig.yaml").write_text(_config_euler(p, n, out_int, 4.0, 1))
-        subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"],
-                       cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+        run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle_qc.h5"], cwd=run_dir, env=_ENV)
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV,
                            capture_output=True, text=True)
@@ -343,8 +342,7 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
         if q.returncode != 0:
             raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     (run_dir / "solverConfig.yaml").write_text(cfg)
-    subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
-                   cwd=run_dir, env=_ENV, check=True, capture_output=True, text=True)
+    run_converter([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     if euler:
         q = subprocess.run([sys.executable, str(FORGE_TOOLS / "check_mesh_quality.py"),
                             "nozzle.h5", "--ar-max", str(int(p.mesh.get("ar_max", 1000)))], cwd=run_dir, env=_ENV, capture_output=True, text=True)
