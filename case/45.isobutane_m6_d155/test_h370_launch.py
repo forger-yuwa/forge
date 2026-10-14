@@ -47,6 +47,12 @@
      帯の固定が両腕に同じ値で渡る (腕 A に #36l の npz の A_y_b、腕 B に腕 A が使った全列の帯)、#36l の記録との照合・#36l と同じ照合の不成立で
      抽出しない; 本物の抽出 (diag_snapshot_fixed) で、自分の帯を固定すると diag_snapshot とビット同一・使用域の外は自分の帯・腕 B に腕 A の帯が
      そのまま入る・差し替えが元に戻る、本物の全経路 (L の #36l の記録) で腕 A の再現がビット同一・34 抽出・両腕の帯が同じ。
+  N. 帯の時間方向の扱いの A/B (§5.1 #36p; h370_judge.py --diag-time-band、forge なし): 分類 (classify_time: 結果 A = D_time > 0.01 mm・結果 B・
+     判定不能 (腕 A の再現・先頭の時刻の再現・held・例外・出力の欠け)) を単体で; 梯子の交差の区間の写し (ladder_crossings) を本物の
+     deltastar.edge_band_positions の y* と照合 (途中の交差・最初の点・交差なし・点の不足・区間 2 つ); 偽物の抽出の全経路で結果 B (両腕の時間変化が
+     同じ)・結果 A (腕 B だけ x 3〜5 で 0.02 mm)・判定不能 (held・腕 A の非有限と 1e−9 r_t の再現の不成立 (腕 B を回さない)・先頭の時刻の再現の不成立・
+     帯の固定の不成立・例外・入力の照合)、帯の固定が全時刻に同じ値 (腕 B の 17 回すべてに k₀ の腕 A の全列の帯)・2 窓・代表の列の check_quasisteady・
+     梯子の変化の数え方; 本物の抽出で record_ladder が値を変えず梯子の写しが全列で合う、本物の全経路で腕 A の再現・先頭の時刻の再現がビット同一。
 usage: /home/sano/work/forge/design/.venv-opt/bin/python case/45.isobutane_m6_d155/test_h370_launch.py   (所要 約 8〜12 分; 終了コード 0 = ALL PASS)
 """
 from __future__ import annotations
@@ -2099,10 +2105,267 @@ def test_fixed_band():
           str(R.get("why"))[:300])
 
 
+# ====================================================================================== N. 帯の時間方向の扱いの A/B (§5.1 #36p)
+TB_K0 = S_DIAG - 40000                                                  # 合成の判定の窓の先頭 k₀ (22,500)
+
+
+def tb_aux_mm(k, x):
+    """#36l の偽物の記録の aux (run_0950) の δ_E の時間変化 [mm] (腕 A がこれを再現する)。"""
+    return 0.004 * (k - TB_K0) / 40000.0 + 0.0 * np.asarray(x, dtype=float)
+
+
+def tb_yb(k):
+    """#36l の偽物の記録の aux の帯 (各出力で選び直した帯、出力で動く) [r_t]。"""
+    return 0.1 + 0.001 * (k - TB_K0) / 2500.0
+
+
+def fake_time_snap(effB=None, mutate=None, calls=None, a_offset=None, jump_col=None):
+    """偽物の #36p の抽出 (速い; diag_snapshot_fixed の record_ladder の形)。腕は band の fill_own で見分ける (腕 A = 空の表・fill_own、
+    腕 B = 表・fill_own なし)。選び直した帯 = tb_yb(k) (全列)、使った帯 = 表から x の完全一致で引く (表に無い列は fill_own なら選び直した帯、
+    そうでなければ例外 = 本物と同じ)。δ_E = δ_target = 1e-3 + [tb_aux_mm(k) + (腕 B なら effB(k, x))] / MMPR + (腕 A なら a_offset(k)) [r_t]。
+    band_detail: 交差の区間 k_hi = 10 (jump_col の列は k ≥ k₀ + 20,000 で 13)。calls に (腕, 出力, band) を足す。mutate(腕, 出力, d) で held・
+    例外・帯の崩れを作る。"""
+    def g(run, step, spec, ext, x_use, band):
+        k = int(step)
+        x = np.asarray(x_use, dtype=float)
+        arm = "A" if band.get("fill_own") else "B"
+        if calls is not None:
+            calls.append((arm, k, band))
+        xa = np.concatenate([np.asarray(X_OUT, dtype=float), x])
+        lut = dict(zip(np.asarray(band["x"], dtype=float).tolist(), np.asarray(band["y_b"], dtype=float).tolist()))
+        nat = tb_yb(k) + 0.0 * xa
+        hit = np.array([v in lut for v in xa.tolist()])
+        if not hit.all() and not band.get("fill_own"):
+            raise ValueError("固定する帯の表に無い列 (偽物)")
+        yb = np.array([lut[v] if h else nat[i] for i, (v, h) in enumerate(zip(xa.tolist(), hit))])
+        e = 1e-3 + (tb_aux_mm(k, x) + (np.asarray(effB(k, x), dtype=float) if (effB and arm == "B") else 0.0)) / MMPR
+        if arm == "A" and a_offset:
+            e = e + a_offset(k)
+        n, na = len(X_OUT), len(xa)
+        khi = np.full(na, 10)
+        if jump_col is not None and k >= TB_K0 + 20000:
+            khi[n + jump_col] = 13
+        det = {"y_star": [0.08] * na, "kappa": [0.0] * na, "kappa_med": [0.0] * na, "kappa_s": [0.0] * na, "y_ref": [0.05] * na,
+               "y_lo": [0.079] * na, "y_hi": [0.081] * na, "k_lo": (khi - 1).tolist(), "k_hi": khi.tolist(), "n_cross": [1] * na,
+               "k_second": [-1] * na, "n_fin": [40] * na, "fin_lo": [0] * na, "fin_hi": [39] * na, "j": khi.tolist(), "copy_consistent": [True] * na}
+        d = {"delta_E": e.tolist(), "delta_target": e.tolist(), "held": [0] * len(x), "missing": [], "n_missing": 0, "n_held": 0, "lam": "1.0",
+             "res_sha256": None, "seconds": 0.0, "y_b": yb[n:].tolist(), "y_star": (0.08 + 0.0 * x).tolist(), "y_b_natural": nat[n:].tolist(),
+             "delta_r_raw": (0.9 * e).tolist(), "band_all": {"x": xa.tolist(), "y_b": yb.tolist(), "y_b_natural": nat.tolist()},
+             "band_fill": {"n_table": int(hit.sum()), "n_own": int((~hit).sum()), "x_own_range": None, "edge_table_matches_fixed": True},
+             "band_detail": det}
+        if mutate:
+            d = mutate(arm, k, d) or d
+        return d
+    return g
+
+
+def time_judge(case: Path, extra=()) -> tuple:
+    rc = HJ.main(["--diag-time-band", "--case-dir", str(case), "--design", str(ROOT / "design"), "--tools", str(TOOLS), *extra])
+    return rc, HJ.jload(case / HJ.TIME_OUT)
+
+
+def test_time_band():
+    print("== N. 帯の時間方向の扱いの A/B (--diag-time-band; §5.1 #36p)", flush=True)
+    import inspect
+    gate_calls = []
+    req = SR.required_window_steps(S_DIAG, 20000, 2500)
+    # --- 分類 (単体) ---
+    P = lambda Ds, err=None, bad=None: [{"step": k, "Dt_mm": (None if bad and i in bad else d), "pf_A": True, "pf_B": not (bad and i in bad),  # noqa: E731
+                                         **({"error_B": "RuntimeError"} if err and i in err else {}), "x_at_Dt": 4.0}
+                                        for i, (k, d) in enumerate(zip(req, Ds))]
+    for name, per_, repro, head, want, code in (
+            ("全 17 出力で D_time 0.003 mm → 結果 B (選び直しだけが 0.01 mm 超の時間変化を生む、を退ける)", P([0.003] * 17), True, True, "結果 B", "B"),
+            ("ちょうど 0.01 mm → 結果 B (≤)", P([0.01] * 17), True, True, "結果 B", "B"),
+            ("1 出力だけ 0.0101 mm → 結果 A (選び直しが予算を超える時間変化を生む)", P([0.0] + [0.001] * 15 + [0.0101]), True, True, "結果 A", "A_D"),
+            ("腕 A の再現 (#36l の aux) の不成立 → 判定不能", P([0.001] * 17), False, True, "判定不能", "U_repro"),
+            ("先頭の時刻 k₀ の再現の不成立 → 判定不能 (D が小さくても)", P([0.001] * 17), True, False, "判定不能", "U_head"),
+            ("1 出力で held・非有限 (D_time なし) → 判定不能", P([0.001] * 17, bad={5}), True, True, "判定不能", "U_invalid"),
+            ("抽出の例外・帯の固定の不成立 → 判定不能", P([0.001] * 17, err={8}), True, True, "判定不能", "U_error"),
+            ("17 出力のうち 1 つが無い → 判定不能 (縮めない)", P([0.001] * 17)[:-1], True, True, "判定不能", "U_incomplete")):
+        cl = HJ.classify_time(per_, req, repro, head)
+        check(f"N 分類: {name}", cl["result"] == want and cl["code"] == code, f"{cl['result']} {cl['code']}: {cl['why'][:120]}")
+    check("N 分類: 必要な出力の集合が無い → 判定不能", HJ.classify_time(P([0.001] * 17), [], True, True)["code"] == "U_required")
+    # --- 梯子の交差の区間の写し (本物の deltastar.edge_band_positions と照合) ---
+    y = 0.02 * (1.25 ** (1 / 8)) ** np.arange(120)
+
+    def col(t):
+        if t == 0:                                                       # 途中で交差 (梯子の 4 点目が非有限 = 元の添字の対応を試す)
+            d = 1.0 - 0.5 * np.exp(-y / 0.03)
+            d[3] = np.nan
+            return d
+        if t == 1:                                                       # 最初の点で満たす
+            return np.ones_like(y)
+        if t == 2:                                                       # 交差なし
+            return y.copy()
+        if t == 3:                                                       # 正・有限の点が 2 つだけ
+            d = np.full_like(y, np.nan)
+            d[:2] = 1.0
+            return d
+        return np.where(y < 0.05, 1.0, np.where(y < 0.1, 1 + (y - 0.05) / 0.05, 2.0))   # |R| < ε の区間が 2 つ
+    kinds = [i % 5 for i in range(15)]
+    yl, dl = [y.copy() for _ in kinds], [col(t) for t in kinds]
+    pos = DS.edge_band_positions(np.arange(15.0), yl, dl, np.zeros(15), np.ones(15))
+    lc = HJ.ladder_crossings(yl, dl)
+    cc = HJ.ladder_copy_consistent({**lc, "y_star": pos["y_star"]})
+    check(f"N 梯子の交差の区間の写し: 本物の edge_band_positions の y* が全列で区間に入る ({int(cc.sum())}/15)・途中の交差 (k_lo {lc['k_lo'][0]}, "
+          f"k_hi {lc['k_hi'][0]}、4 点目の非有限を飛ばした元の添字)・最初の点 (k_lo −1, k_hi 0)・交差なし (n_cross 0, y* NaN)・点の不足 (n_cross −1)・"
+          f"区間 2 つ (n_cross 2, k_second {lc['k_second'][4]})",
+          cc.all() and lc["k_hi"][0] == lc["k_lo"][0] + 1 and lc["k_lo"][0] > 3 and lc["n_fin"][0] == 119
+          and (lc["k_lo"][1], lc["k_hi"][1]) == (-1, 0) and lc["n_cross"][2] == 0 and not np.isfinite(pos["y_star"][2])
+          and lc["n_cross"][3] == -1 and lc["n_cross"][4] == 2 and lc["k_second"][4] > lc["k_hi"][4])
+    bad = dict(lc)
+    bad["y_star"] = np.where(np.arange(15) == 0, pos["y_star"] * 1.1, pos["y_star"])
+    check("N 梯子の写しの検査: y* が区間の外なら合わないと出る", not HJ.ladder_copy_consistent(bad)[0] and HJ.ladder_copy_consistent(bad)[1:].all())
+    # --- 全経路 (偽物の抽出): #36l の偽物の記録 (aux の δ_E・帯が出力で動く) ---
+    tbase = write_diag_case(TMP / "time_base")
+
+    def mut36(arm, k, d):
+        if arm == "aux":
+            d["y_b"] = [tb_yb(k)] * len(d["y_b"])
+        return d
+    with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls), "diag_snapshot": fake_diag_snap(
+            lambda arm, k, x: tb_aux_mm(k, x) if arm == "aux" else 0.0 * x, mutate=mut36)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rc36, R36 = diag_judge(tbase)
+    check(f"N 前提: #36l の偽物の記録 (aux の δ_E が窓で 0.004 mm 動き、帯も動く; rc {rc36})", rc36 == 0 and (tbase / HJ.DIAG_NPZ).is_file())
+
+    def run_time(name, snap, prep=None):
+        case = TMP / f"time_{name}"
+        shutil.copytree(tbase, case, symlinks=True)
+        if prep:
+            prep(case)
+        with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls), "diag_snapshot_time": snap}), (DL, "handoff_gate", gate_boom(gate_calls))):
+            return time_judge(case)
+    calls = []
+    rc, R = run_time("B", fake_time_snap(calls=calls, jump_col=5))
+    arms = [a_ for a_, _, _ in calls]
+    bB = [b_ for a_, _, b_ in calls if a_ == "B"]
+    xa_all = np.concatenate([np.asarray(X_OUT), np.load(tbase / HJ.DIAG_NPZ)["x_use"]])
+    okB = all(b_["fill_own"] is False and np.array_equal(np.asarray(b_["x"], dtype=float), xa_all)
+              and np.array_equal(np.asarray(b_["y_b"], dtype=float), np.full(len(xa_all), tb_yb(TB_K0))) for b_ in bB)
+    tw = R.get("two_windows", {})
+    check(f"N 全経路 (偽物の抽出): 両腕の時間変化が同じ (腕 A は帯が動き、腕 B は k₀ の帯) → D_time {R.get('D_time_mm', {}).get('max')} mm → 結果 B "
+          f"(rc {rc})・34 抽出 (腕 A 17 → 腕 B 17)・腕 A の再現 (ビット同一)・先頭の時刻の再現・update_conditions_met 偽・関門を呼ばない",
+          rc == 0 and R["result"] == "結果 B" and R["code"] == "B" and arms == ["A"] * 17 + ["B"] * 17 and R["D_time_mm"]["max"] == 0.0
+          and R["repro_A"]["ok"] is True and R["repro_A"]["bitwise_all"] is True and R["head_repro"]["ok"] is True and R["k0"] == TB_K0
+          and R["update_conditions_met"] is False and not gate_calls and R["extractions"]["n"] == 34, str(R.get("why"))[:300])
+    check("N 帯の固定が全時刻に同じ値: 腕 B の 17 回の抽出すべてに k₀ の腕 A の帯 (上流の列を含む全列、fill_own なし) が渡り、使った帯も全出力で同じ "
+          f"(band_B_fixed_ok {sum(1 for r_ in R['per_output'] if r_.get('band_B_fixed_ok'))}/17)・腕 A には固定の表を渡さない",
+          okB and len(bB) == 17 and all(r_.get("band_B_fixed_ok") is True for r_ in R["per_output"]) and R["band_B"]["n_cols_x_lt_0"] == len(X_OUT)
+          and all(len(b_["x"]) == 0 and b_["fill_own"] is True for a_, _, b_ in calls if a_ == "A"))
+    npz = np.load(TMP / "time_B" / HJ.TIME_NPZ)
+    check(f"N 併記: 2 窓 (腕 A の δ_E の窓の最大 − 最小 {tw.get('A', {}).get('delta_E', {}).get('W1', {}).get('range_max_mm')} mm・平均の差 "
+          f"{tw.get('A', {}).get('delta_E', {}).get('mean_diff', {}).get('max_mm')} mm = 窓 20,000 で 0.002 mm)・代表の列の check_quasisteady (両腕)・"
+          f"梯子の変化 (飛び {R.get('ladder_A', {}).get('flags_total', {}).get('jump_gt1')} 列)・配列",
+          abs(tw["A"]["delta_E"]["W1"]["range_max_mm"] - 0.002) < 1e-9 and abs(tw["A"]["delta_E"]["mean_diff"]["max_mm"] - 0.002) < 1e-9
+          and abs(tw["B"]["delta_E"]["W2"]["range_max_mm"] - 0.002) < 1e-9 and tw["A"]["delta_E"]["W1"]["n_outputs"] == 9
+          and all(set(R["quasisteady"][a_]["verdicts"]) == set(R["quasisteady"]["cols"]) for a_ in ("A", "B"))
+          and {"dE_40", "dE_70", "dE_94", "dE_x3to5_Dtmax"} == set(R["quasisteady"]["cols"])
+          and R["ladder_A"]["flags_total"]["jump_gt1"] == 1 and R["ladder_A"]["flags_total"]["interval_changed"] == 1
+          and R["ladder_B_equals_A"]["k_hi"] is True and {"A_lad_k_hi", "B_band_kappa_s", "D_time_kx_mm", "A_delta_r_raw", "B_y_b_natural",
+                                                          "A_delta_E_range_W1_x_mm"} <= set(npz.files)
+          and np.array_equal(npz["A_delta_E"], np.load(tbase / HJ.DIAG_NPZ)["aux_delta_E"]), str(R.get("quasisteady"))[:300])
+    effA = lambda k, x: np.where((x >= 3.0) & (x < 5.0), 0.02 * (k - TB_K0) / 40000.0, 0.0)  # noqa: E731
+    rc, R = run_time("A", fake_time_snap(effB=effA))
+    sec = {tuple(s_["x_range"][:1]): s_ for s_ in R.get("sections", [])}
+    check(f"N 全経路: 腕 B だけ x 3〜5 で窓の終わりに 0.02 mm 動く → D_time {R.get('D_time_mm', {}).get('max')} mm → 結果 A ({R.get('code')})・"
+          f"区間 3〜5 が最大・代表の列 dE_x3to5_Dtmax が x 3〜5",
+          rc == 0 and R["result"] == "結果 A" and R["code"] == "A_D" and abs(R["D_time_mm"]["max"] - 0.02) < 1e-12 and 3.0 <= R["D_max"]["x"] < 5.0
+          and abs(sec[(3.0,)]["D_time"]["max_mm"] - 0.02) < 1e-12 and sec[(1.0,)]["D_time"]["max_mm"] == 0.0
+          and 3.0 <= R["quasisteady"]["cols"]["dE_x3to5_Dtmax"]["x"] < 5.0, str(R.get("why"))[:300])
+
+    def held_b(arm, k, d):
+        if arm == "B" and k == req[4]:
+            d["held"] = list(d["held"])
+            d["held"][len(d["held"]) // 2] = 1
+        return d
+    rc, R = run_time("held", fake_time_snap(mutate=held_b))
+    check(f"N 全経路: 腕 B の 1 出力の比べる列の中に held → 判定不能 ({R['code']}、rc {rc})", rc == 2 and R["result"] == "判定不能" and R["code"] == "U_invalid")
+
+    def nan_a(arm, k, d):
+        if arm == "A" and k == req[10]:
+            d["delta_E"] = list(d["delta_E"])
+            d["delta_E"][7] = float("nan")
+        return d
+    rc, R = run_time("nan", fake_time_snap(mutate=nan_a))
+    check(f"N 全経路: 腕 A の 1 列が非有限 (#36l は有限) → 腕 A の再現の不成立で判定不能 ({R['code']})", rc == 2 and R["code"] == "U_repro")
+    calls = []
+    rc, R = run_time("repro", fake_time_snap(calls=calls, a_offset=lambda k: 1e-9 if k == req[3] else 0.0))
+    check(f"N 腕 A の再現の不成立 (1 出力で δ_E が #36l の aux と 1e−9 r_t 違う) → 判定不能 ({R['code']}、rc {rc})・腕 B は回さない "
+          f"({sum(1 for a_, _, _ in calls if a_ == 'B')} 回)",
+          rc == 2 and R["code"] == "U_repro" and abs(R["repro_A"]["max_abs_delta_E_rt"] - 1e-9) < 1e-15 and not any(a_ == "B" for a_, _, _ in calls))
+    rc, R = run_time("head", fake_time_snap(effB=lambda k, x: 0.001 + 0.0 * x))
+    check(f"N 先頭の時刻の再現の不成立 (腕 B が全出力で 0.001 mm ずれる = k₀ でも違う; D_time は 0) → 判定不能 ({R['code']}、rc {rc})",
+          rc == 2 and R["code"] == "U_head" and R["head_repro"]["ok"] is False)
+
+    def unfix(arm, k, d):
+        if arm == "B" and k == req[6]:
+            d["band_all"] = {**d["band_all"], "y_b": [v + 1e-3 for v in d["band_all"]["y_b"]]}
+        return d
+    rc, R = run_time("unfix", fake_time_snap(mutate=unfix))
+    check(f"N 帯の固定の不成立 (腕 B の 1 出力の使った帯が k₀ の帯と違う) → 判定不能 ({R['code']}、rc {rc})",
+          rc == 2 and R["code"] == "U_error" and any("error_band_B" in r_ for r_ in R["per_output"]))
+
+    def exc_b(arm, k, d):
+        if arm == "B" and k == req[9]:
+            raise ValueError("固定する帯の表に無い列 (試験)")
+        return d
+    rc, R = run_time("exc", fake_time_snap(mutate=exc_b))
+    check(f"N 腕 B の 1 出力の抽出の不成立 → 判定不能 ({R['code']}、rc {rc})", rc == 2 and R["code"] == "U_error")
+    for name, prep, want in (
+            ("#36l の記録が無い", lambda cs: (cs / HJ.DIAG_OUT).unlink(), "#36l の記録"),
+            ("参照 aux (run_0950) の sha が固定と違う", lambda cs: (cs / HJ.EU_RUN / "res_60000.h5").write_bytes(b"changed"), "参照 aux"),
+            ("#36l と同じ照合: 窓の 1 出力の res が無い", lambda cs: (cs / HJ.NS_RUN / f"res_{req[8]}.h5").unlink(), "が無い")):
+        calls = []
+        n_u = len(list(TMP.glob("time_u*")))
+        rc, R = run_time(f"u{n_u}", fake_time_snap(calls=calls), prep=prep)
+        check(f"N 入力の照合: {name} → 判定不能 (rc {rc}、{R.get('code')})・抽出しない ({len(calls)} 回)", rc == 2 and R["code"] == "U_input"
+              and not calls and any(want in u for u in R["undecidable"]), str(R.get("undecidable"))[:300])
+    srcs = {f.__name__: inspect.getsource(f) for f in (HJ.diag_time_band, HJ.classify_time, HJ.ladder_crossings, HJ.ladder_copy_consistent,
+                                                        HJ.window_stats, HJ.ladder_change_summary, HJ._cmp_arr)}
+    bad_ = [n for n, s_ in srcs.items() if any(w_ in s_ for w_ in ("unlink(", "rmtree(", "os.remove(", "delete_after(", "handoff_gate", "update_wall"))]
+    check(f"N 帯の時間方向の A/B の関数に消す処理・関門・壁の更新の呼び出しが無い ({bad_ or 'なし'})", not bad_ and not gate_calls)
+    # --- 本物の抽出 (diag_snapshot_fixed の record_ladder、プロセス並列) ---
+    rb = TMP / "diag_real_B"                                    # L の本物の #36l の記録があれば使う
+    if not (rb / HJ.DIAG_OUT).is_file():
+        rb = write_diag_case(TMP / "time_real_src", shape_b=0.01)
+        with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+            diag_judge(rb)
+    ns = rb / HJ.NS_RUN
+    rec = json.loads((ns / SR.RECORD).read_text())
+    ext = {k: v for k, v in rec["delta_series"]["extract"].items() if k != "source"}
+    xu = np.asarray(rec["delta_series"]["x"], dtype=float)
+    spec = {"run": str(rb / HJ.EU_RUN), "res": "res_60000.h5", "sha256": HJ.sha256_file(rb / HJ.EU_RUN / "res_60000.h5")}
+    f0 = HJ.diag_snapshot_fixed(ns, S_DIAG, spec, ext, xu, {"x": [], "y_b": [], "fill_own": True})
+    f1 = HJ.diag_snapshot_fixed(ns, S_DIAG, spec, ext, xu, {"x": [], "y_b": [], "fill_own": True, "record_ladder": True})
+    same = all(np.array_equal(np.asarray(f0[q], dtype=float), np.asarray(f1[q], dtype=float), equal_nan=True)
+               for q in ("delta_E", "delta_target", "held", "y_b", "y_star", "delta_r_raw"))
+    bd = f1.get("band_detail") or {}
+    check(f"N 本物の抽出: record_ladder は値を変えない (δ_E・δ_target・held・帯・y*・生の δ_r がビット同一)・band_detail は帯を決めた全列 "
+          f"({len(bd.get('k_hi', []))} 列) で、交差の区間の写しが抽出器の y* と全列で合う ({int(np.sum(bd.get('copy_consistent', [])))})・"
+          "record_ladder なしでは band_detail を付けない",
+          same and "band_detail" not in f0 and len(bd.get("k_hi", [])) == len(f1["band_all"]["x"]) and all(bd["copy_consistent"])
+          and np.array_equal(np.asarray(bd["y_star"], dtype=float)[np.isin(f1["band_all"]["x"], xu)], np.asarray(f1["y_star"], dtype=float), equal_nan=True))
+    rcase = TMP / "time_real"
+    shutil.copytree(rb, rcase, symlinks=True)
+    with Patch((HJ, "HOOKS", {"handoff_gate": gate_boom(gate_calls)}), (DL, "handoff_gate", gate_boom(gate_calls))):
+        rc, R = time_judge(rcase)
+    px = (R.get("extractions") or {}).get("B") or {}
+    dt = (R.get("D_time_mm") or {}).get("max")
+    check(f"N 本物の全経路 ({px.get('mode')} {px.get('jobs')}): 腕 A が #36l の aux をビット同一で再現 ({R.get('repro_A', {}).get('bitwise_all')})・"
+          f"先頭の時刻の再現 ({R.get('head_repro', {}).get('ok')})・34 抽出・腕 B の帯が全出力で k₀ の帯・梯子の写しが全出力で合う "
+          f"(合わない列 {R.get('ladder_A', {}).get('flags_total', {}).get('copy_inconsistent')})・腕 B の梯子 = 腕 A・D_time {dt} mm で分類 {R.get('result')}",
+          rc == 0 and R["repro_A"]["ok"] is True and R["repro_A"]["bitwise_all"] is True and R["head_repro"]["ok"] is True
+          and R["head_repro"]["delta_E"]["bitwise"] is True and R["extractions"]["n"] == 34 and px.get("mode", "").startswith("process")
+          and all(r_.get("band_B_fixed_ok") is True for r_ in R["per_output"]) and R["ladder_A"]["flags_total"]["copy_inconsistent"] == 0
+          and all(v for q, v in R["ladder_B_equals_A"].items() if q != "note")
+          and R["result"] == ("結果 A" if dt > HJ.TOL_MM else "結果 B") and not gate_calls and R["band_B"]["n_cols_x_lt_0"] > 0,
+          str(R.get("why"))[:300])
+
+
 def main() -> int:
     for t in (test_constants, test_wall_output_and_configs, test_euler_stage_configs, test_euler_qualify, test_classify_ab, test_ns_judge,
               test_prelaunch_counterexamples, test_parallel_extraction, test_run_orchestration, test_ns_phase_and_parts, test_euler_wall_restore,
-              test_diag_path, test_fixed_band):
+              test_diag_path, test_fixed_band, test_time_band):
         try:
             t()
         except Exception:  # noqa: BLE001
