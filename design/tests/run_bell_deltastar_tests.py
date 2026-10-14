@@ -34,6 +34,8 @@ from forge_design.metrics import bell_deltastar as bd  # noqa: E402
 from forge_design.metrics import deltastar as ds  # noqa: E402
 
 BASE_COMMIT = "06089ab5"          # 変更前 (③の拡張の前) のコミット
+MAIN_BASE = "81e92491"            # (4) の基準: 取り込んだ main (2026-10-15)。③の追加が main の①の既定の抽出を変えないことを見る
+                                  # (06089ab5 と比べると main 側の正当な変更 [not_extracted の鍵など] まで差に数えてしまう)
 fails = []
 _BASE_TMP = []
 
@@ -44,12 +46,13 @@ def check(name, ok, detail=""):
         fails.append(name)
 
 
-def load_base(relpath, modname):
-    """基準コミットのモジュールを読み込む (パッケージ内の名前で — 相対 import のため)。取れなければ None。"""
+def load_base(relpath, modname, commit=None):
+    """基準コミット (既定 BASE_COMMIT) のモジュールを読み込む (パッケージ内の名前で — 相対 import のため)。取れなければ None。"""
+    commit = commit or BASE_COMMIT
     try:
-        src = subprocess.run(["git", "show", f"{BASE_COMMIT}:{relpath}"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+        src = subprocess.run(["git", "show", f"{commit}:{relpath}"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
     except Exception as e:                                           # noqa: BLE001
-        print(f"基準コミット {BASE_COMMIT} の {relpath} が取れない: {e}")
+        print(f"基準コミット {commit} の {relpath} が取れない: {e}")
         return None
     d = Path(tempfile.mkdtemp(prefix="bell_dstar_base_")); _BASE_TMP.append(d)
     tmp = d / Path(relpath).name
@@ -207,13 +210,13 @@ check("(3b) edge の判定: 局所縁・帯が縁の外・平滑化の前後の�
       and np.array_equal(E["held"], (o_e["x"] < 3.0) | (o_e["x"] > o_e["x"].max() - 3.0)) and np.all(np.isfinite(E["y_star"])),
       f"all_pass {acc_e['all_pass']}、不成立 " + ", ".join(f"{k} {acc_e['summary'][k]['n_fail']}" for k in acc_e["criteria"]))
 
-# (4) ①の既定がビット同一
-base_ds = load_base("design/forge_design/metrics/deltastar.py", "forge_design.metrics._deltastar_base")
+# (4) ①の既定がビット同一 (基準 = 取り込んだ main の deltastar.py)
+base_ds = load_base("design/forge_design/metrics/deltastar.py", "forge_design.metrics._deltastar_base", commit=MAIN_BASE)
 WT = {"x_E": 8.0}
 ns1 = write_run(TMP / "wt_ns", 3.0, WT, lambda X, R, st: q_ns(X, R))
 eu1 = write_run(TMP / "wt_eu", 0.0, WT, lambda X, R, st: Q(X))
 if base_ds is None:
-    check("(4) 基準コミットのモジュールが読める", False, BASE_COMMIT)
+    check("(4) 基準コミットのモジュールが読める", False, MAIN_BASE)
 else:
     cases = [{}, {"band_select": "edge", "remap_constant_x": True}, {"band_smooth_x": 4.0}, {"method": "core"}]
     for kw in cases:
