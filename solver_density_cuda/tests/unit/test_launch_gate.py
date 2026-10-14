@@ -384,6 +384,13 @@ check(('設定', 'space.notAKey') in items(gate, 'WARN'), '宣言の無い run �
 rc, out, started, gate = run_case(d, FORGE_LAUNCH_GATE='enforce')
 stopped(rc, out, started, gate, '宣言の無い run の未知のキー (強制)')
 check('space.notAKey' in keys(gate, 'FAIL'), '強制では宣言の無い run の未知のキーも名指しで FAIL')
+# migrate_solver_config.py が直せるキー (time.last.time・旧 physProp.isAxisymmetric) は文言で migrate を案内する (plan §5.1 #25)
+d = make_run('undeclared_lasttime', flat=dict(base, **{'time.last.time': 1.0, 'physProp.isAxisymmetric': 0}), declare=False)
+rc, out, started, gate = run_case(d)
+launched(rc, out, started, gate, '宣言の無い run の time.last.time・旧 physProp.isAxisymmetric (移行期)', want=('WARN',))
+_mig = [ln for ln in gate.splitlines() if ln.startswith('WARN') and ('time.last.time' in ln or 'physProp.isAxisymmetric' in ln)]
+check(len(_mig) == 2 and all('migrate_solver_config.py' in ln for ln in _mig),
+      'LAUNCH_GATE.txt の time.last.time・physProp.isAxisymmetric の WARN が migrate_solver_config.py を案内する', str(_mig))
 d = make_run('undeclared_rejected', flat=dict(base, **{'space.limiterMatchRecon': 1}), declare=False)
 rc, out, started, gate = run_case(d)
 stopped(rc, out, started, gate, '宣言の無い run の solver が起動時に拒否するキー (移行期でも)')

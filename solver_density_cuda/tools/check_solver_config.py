@@ -17,6 +17,8 @@
   - solver が読まないキー・**誤った節に書かれたキー** (WARN) と、起動時に拒否されるキー (FAIL)
   - 旧キー `physProp.isAxisymmetric` (WARN。solver は deprecated として読み、`mesh.isAxisymmetric` があればそちらが優先:
     `solverConfig.cpp:945`・`:953`)。軸対称の実効値は `effective_axisymmetric` (ほかのツールも同じ関数で読む)
+  - `migrate_solver_config.py` が直せるキー (`time.last.time`・旧 `physProp.isAxisymmetric`・段階移行キー) の WARN・FAIL には
+    そのツールの案内を付ける (`migrate_hint`; 投入の関門の文言にもそのまま写る)
 
 使い方: check_solver_config.py RUN_DIR|solverConfig.yaml [...]   (VERDICT PASS/WARN/FAIL, exit 0/0/1)
 WARN は「意図的ならよい」もの、FAIL は「まず直すべき」もの。
@@ -75,6 +77,28 @@ def _twophase_state():
     return _TPS
 
 
+_MIG = None
+
+
+def migrate_hint(path):
+    """`migrate_solver_config.py` が直せるキー (`handled_paths`: 段階移行キー・`time.last.time`・旧 `physProp.isAxisymmetric` など) なら
+    WARN・FAIL の文言に足す案内 (それ以外は '')。plan tooling-generator-defaults-and-launch-gate §5.1 #17a (1)・#25。"""
+    global _MIG
+    if _MIG is None:
+        try:
+            import importlib.util
+            here = os.path.dirname(os.path.abspath(__file__))
+            spec = importlib.util.spec_from_file_location('migrate_solver_config', os.path.join(here, 'migrate_solver_config.py'))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _MIG = mod.handled_paths()
+        except Exception:
+            _MIG = {}
+    act = _MIG.get(path)
+    return (f'。`python3 solver_density_cuda/tools/migrate_solver_config.py <run の dir か solverConfig.yaml>` で直せる ({act})'
+            if act else '')
+
+
 _SPEC = None
 
 
@@ -129,15 +153,16 @@ def unknown_keys(y):
             ks = str(k)
             p = '.'.join(path + [ks])
             if p in rejected:
-                fails.append((p, 'solver が起動時に拒否するキー (削除済み・改名済み)。recommended-settings.md §9.1 の移行先を見ること'))
+                fails.append((p, 'solver が起動時に拒否するキー (削除済み・改名済み)。recommended-settings.md §9.1 の移行先を見ること'
+                                 + migrate_hint(p)))
             elif p in values:
                 continue                     # 値キー: 中身 (リスト・マップ) には立ち入らない
             elif p in sections:
                 walk(v, path + [ks])
             elif ks in by_leaf:
-                warns.append((p, '節の位置が違う (黙って無視される)。正しくは ' + ' / '.join(sorted(by_leaf[ks]))))
+                warns.append((p, '節の位置が違う (黙って無視される)。正しくは ' + ' / '.join(sorted(by_leaf[ks])) + migrate_hint(p)))
             else:
-                warns.append((p, 'solverConfig が読まないキー (綴り違い・旧キー・別ブランチのキー)。黙って無視される'))
+                warns.append((p, 'solverConfig が読まないキー (綴り違い・旧キー・別ブランチのキー)。黙って無視される' + migrate_hint(p)))
 
     walk(y, [])
     return fails, warns
@@ -180,10 +205,12 @@ def check(y, bcond=None):
             same_v = str(mesh['isAxisymmetric']).strip() == str(pp['isAxisymmetric']).strip()
             warns.append(('physProp.isAxisymmetric',
                           f'旧キー (deprecated)。mesh.isAxisymmetric {mesh["isAxisymmetric"]} が優先され、この値 {pp["isAxisymmetric"]} は効かない'
-                          + ('' if same_v else ' (値が食い違う: 実効は mesh 側)') + '。physProp 側を消す'))
+                          + ('' if same_v else ' (値が食い違う: 実効は mesh 側)') + '。physProp 側を消す'
+                          + migrate_hint('physProp.isAxisymmetric')))
         else:
             warns.append(('physProp.isAxisymmetric',
-                          f'旧キー (deprecated)。solver は読む (実効 {pp["isAxisymmetric"]}) が、mesh.isAxisymmetric に移すこと'))
+                          f'旧キー (deprecated)。solver は読む (実効 {pp["isAxisymmetric"]}) が、mesh.isAxisymmetric に移すこと'
+                          + migrate_hint('physProp.isAxisymmetric')))
 
     if dual:
         if relax is not None and float(relax) < 1.0:

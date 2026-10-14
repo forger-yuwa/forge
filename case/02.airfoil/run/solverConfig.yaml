@@ -13,7 +13,6 @@ physProp:
 time: 
   last: 
     nStepOuter: 5000
-    time: 0.1 # [second]
   deltaT:  
     control: 0 # 0:use dt , 1:use cfl
     dt: 0.00005

@@ -95,6 +95,20 @@ check('mesh.gradLSQDegenThresh' in keys(f), 'a key the solver rejects at startup
 y = cfg(); y['time']['last']['time'] = 1.0
 f, w = csc.check(y)
 check('time.last.time' in keys(w), 'time.last.time is not read by the solver and must WARN')
+# migrate_solver_config.py が直せるキーの WARN・FAIL はそのツールを案内する (plan tooling-generator-defaults-and-launch-gate §5.1 #25)
+wm = dict(w)
+check('migrate_solver_config.py' in wm.get('time.last.time', '') and '(消す)' in wm.get('time.last.time', ''),
+      f'the time.last.time WARN points to migrate_solver_config.py ({wm.get("time.last.time")})')
+y = cfg(); y['time']['last']['control'] = 0
+f, w = csc.check(y)
+check('migrate_solver_config.py' in dict(f).get('time.last.control', ''), f'the time.last.control FAIL points to migrate ({dict(f).get("time.last.control")})')
+y = cfg(); y['physProp']['isAxisymmetric'] = 1
+f, w = csc.check(y)
+check('migrate_solver_config.py' in dict(w).get('physProp.isAxisymmetric', '') and 'mesh.isAxisymmetric へ移す' in dict(w)['physProp.isAxisymmetric'],
+      f'the legacy isAxisymmetric WARN points to migrate ({dict(w).get("physProp.isAxisymmetric")})')
+y = cfg(); y['time']['last']['tiem'] = 1.0
+f, w = csc.check(y)
+check('migrate_solver_config.py' not in dict(w).get('time.last.tiem', 'x'), 'keys migrate does not handle get no migrate hint')
 
 # 正しい位置のキーは素通りする (偽陽性の回帰)
 y = cfg(); y['mesh']['primPack'] = 1; y['time']['deltaT']['blockDPLURDqPack'] = 1

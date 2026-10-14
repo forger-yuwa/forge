@@ -6,8 +6,14 @@ config からこれらを外しておく**必要がある。外さないと過�
 
 取り除くもの:
   `mesh.meshFormat` / `physProp.isCompressible` / `physProp.ro` / `time.last.control` — solver が読まないか合法値が 1 つ。
+  `time.last.time` — solver が読まない (`time.last` で読むのは `nStepOuter` だけ; 終了時刻に見えて意味の無い値。
+  plan tooling-generator-defaults-and-launch-gate §5.1 #17a (1)・#25、accepted の config-key-pruning §5.2・§5.3 f)。
   `time.deltaT.detectNaNInterval` — **値は捨てない**。トップレベルに無ければそちらへ**移送**する
   (この別名は無効キーではなく、書いた値が実際に効く)。トップレベルに既にあればそちらが優先なので別名だけ捨てる。
+  `physProp.isAxisymmetric` (旧キー、solver は deprecated として読む: `solverConfig.cpp:945`) — **値は捨てない**。
+  `mesh.isAxisymmetric` が無ければ同じ値を `mesh` 節へ**移送**する (書いた値の文字のまま)。`mesh.isAxisymmetric` があれば
+  そちらが優先 (`solverConfig.cpp:953`) で旧キーは効かないので、旧キーだけ捨てる (実効値は変わらない)。どちらかの値が空 (`~`;
+  solver は起動時に止まる)・`mesh` 節が無いときは触らず手動対応として報告する (plan §5.1 #17a (3)・#25)。
 
 **壊さないための取り決め** (codex plan-5):
   - **節を特定してから編集する**。`time.last.control` を消すつもりで `time.deltaT.control` を消さない。
@@ -32,8 +38,17 @@ import re
 import sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-DROP = [('mesh', 'meshFormat'), ('physProp', 'isCompressible'), ('physProp', 'ro'), ('time.last', 'control')]
+DROP = [('mesh', 'meshFormat'), ('physProp', 'isCompressible'), ('physProp', 'ro'), ('time.last', 'control'), ('time.last', 'time')]
 MOVE = ('time.deltaT', 'detectNaNInterval')
+AXI = ('physProp', 'isAxisymmetric')                # → mesh.isAxisymmetric (mesh 側が無いときだけ値を移す)
+
+
+def handled_paths():
+    """このツールが直すキー → 何をするか (check_solver_config の WARN・FAIL の文言でこのツールを案内するのに使う)。"""
+    out = {f'{sec}.{key}': '消す' for sec, key in DROP}
+    out[f'{MOVE[0]}.{MOVE[1]}'] = 'トップレベルの detectNaNInterval へ移す'
+    out[f'{AXI[0]}.{AXI[1]}'] = 'mesh.isAxisymmetric へ移す (mesh 側があれば旧キーを消す)'
+    return out
 
 
 def get(node, path):
@@ -90,6 +105,56 @@ def plan_for(y):
         move = None if MOVE[1] in y else n[MOVE[1]]   # トップレベルに**キーがあれば**そちらが優先 (値が null でも)
         drops.append(MOVE)
     return drops, move
+
+
+def plan_axisym(y):
+    """physProp.isAxisymmetric の扱い。戻り (消すか, mesh へ移す値 or None, 手動対応の理由 or None)。"""
+    pp = y.get(AXI[0]) if isinstance(y, dict) else None
+    if not isinstance(pp, dict) or AXI[1] not in pp:
+        return False, None, None
+    if pp[AXI[1]] is None:
+        return False, None, 'physProp.isAxisymmetric が空 (~)。solver は起動時に止まる。値を決めて mesh.isAxisymmetric に書く'
+    mesh = y.get('mesh')
+    if isinstance(mesh, dict) and AXI[1] in mesh:
+        if mesh[AXI[1]] is None:
+            return False, None, 'mesh.isAxisymmetric が空 (~)。solver は起動時に止まる。値を決めて書く'
+        return True, None, None                     # mesh 側が優先: 旧キーは効かないので消すだけ (実効値は不変)
+    if not isinstance(mesh, dict):
+        return False, None, 'mesh 節が無い・写像でない (physProp.isAxisymmetric の移し先が無い)'
+    return True, pp[AXI[1]], None
+
+
+def scalar_token(text, sec, key):
+    """節 sec の中のキー key の値の文字 (コメント・区切りを除く)。無ければ None。"""
+    span = section_span(text, sec)
+    if span is None:
+        return None
+    a, b, is_flow = span
+    pat = (re.compile(r'(?:^|[{,\s])' + re.escape(key) + r'[ \t]*:[ \t]*([^,}\n#]*)') if is_flow
+           else re.compile(r'^[ \t]*' + re.escape(key) + r'[ \t]*:[ \t]*([^\n#]*)', re.M))
+    m = pat.search(text[a:b])
+    return m.group(1).strip() if m and m.group(1).strip() else None
+
+
+def insert_key(text, sec, key, token):
+    """節 sec の末尾に `key: token` を足す (フロー形は `}` の前、ブロック形は最後の項目の行の次に同じ字下げで)。無理なら None。"""
+    span = section_span(text, sec)
+    if span is None:
+        return None
+    a, b, is_flow = span
+    body = text[a:b]
+    if is_flow:
+        at = a + len(body.rstrip())
+        return text[:at] + (', ' if body.strip() else '') + f'{key}: {token}' + text[at:]
+    lines = body.split('\n')
+    items = [i for i, l in enumerate(lines) if l.strip() and not l.lstrip().startswith('#')]
+    if not items:
+        return None
+    first = lines[items[0]]
+    ind = first[:len(first) - len(first.lstrip())]
+    last = items[-1]
+    lines.insert(last + 1, f'{ind}{key}: {token}')
+    return text[:a] + '\n'.join(lines) + text[b:]
 
 
 def section_span(text, sec):
@@ -165,16 +230,31 @@ def edit_text(text, drops, move):
 
 
 def migrate_one(text):
-    """戻り: (新しい本文 or None, 状態文字列)。`None` なら書き換えない。"""
+    """戻り: (新しい本文 or None, 状態文字列)。`None` なら書き換えない。状態は 'ok' (消しただけ)・'moved' (値の移送を含む)・
+    'clean'・'skip: 理由' (手動対応)・'fail: 理由'。"""
     import yaml
     why = unsafe_reason(text)
     if why:
         return None, 'skip: ' + why
     y = yaml.safe_load(text) or {}
     drops, move = plan_for(y)
+    axi_drop, axi_val, axi_why = plan_axisym(y)
+    if axi_why:
+        return None, 'skip: ' + axi_why
+    axi_tok = None
+    if axi_drop:
+        if axi_val is not None:
+            axi_tok = scalar_token(text, AXI[0], AXI[1])
+            if axi_tok is None:
+                return None, 'skip: physProp.isAxisymmetric の値の文字を取り出せない (手で mesh.isAxisymmetric に移す)'
+        drops.append(AXI)
     if not drops:
         return None, 'clean'
     out = edit_text(text, drops, move)
+    if axi_tok is not None:
+        out = insert_key(out, 'mesh', AXI[1], axi_tok)
+        if out is None:
+            return None, 'fail: mesh 節に isAxisymmetric を足せない'
     want = copy.deepcopy(y)
     for sec, key in drops:
         n = get(want, sec)
@@ -182,6 +262,8 @@ def migrate_one(text):
             n.pop(key, None)
     if move is not None:
         want['detectNaNInterval'] = move
+    if axi_tok is not None:
+        want['mesh'][AXI[1]] = axi_val
     try:
         got = yaml.safe_load(out) or {}
     except Exception as e:
@@ -189,7 +271,7 @@ def migrate_one(text):
     if got != want:
         d = sorted(k for k in set(list(got) + list(want)) if got.get(k) != want.get(k))
         return None, f'fail: 期待と一致しない (差分節 {d})'
-    return out, ('moved' if move is not None else 'ok')
+    return out, ('moved' if (move is not None or axi_tok is not None) else 'ok')
 
 
 def main():
@@ -225,7 +307,8 @@ def main():
 
     rel = lambda p: os.path.relpath(p, os.path.dirname(ROOT))
     print(f'対象 {len(files)} 本: 移送 {n["ok"] + n["moved"]} 本 '
-          f'(うち detectNaNInterval をトップレベルへ {n["moved"]} 本) / 既に清潔 {n["clean"]} 本 / '
+          f'(うち値の移送 (detectNaNInterval → トップレベル・physProp.isAxisymmetric → mesh) を含む {n["moved"]} 本) / '
+          f'既に清潔 {n["clean"]} 本 / '
           f'手動対応 {len(skipped)} 本 / 失敗 {len(failed)} 本'
           + ('  [--dry-run: 書き込みなし]' if a.dry_run else ''))
     for f, why in skipped:

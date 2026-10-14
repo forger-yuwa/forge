@@ -15,7 +15,6 @@ time:
   dualTime: 0
   last:
     nStepOuter: 8000
-    time: 1.00
   deltaT:
     control: 1
     dt: 0.00001
