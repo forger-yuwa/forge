@@ -1,0 +1,497 @@
+<title>point・ライン陰解法</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 製図用紙に黒鉛の線。point = 青緑、ライン = 藍。左に目次、本文は 1 段 (幅 ≤ 46rem) */
+:root {
+  --bg: #f5f7f8;
+  --panel: #ffffff;
+  --ink: #18212b;
+  --muted: #566170;
+  --rule: #d6dde4;
+  --point: #0d7a6b;
+  --point-soft: #dff1ed;
+  --line: #3a4bc0;
+  --line-soft: #e4e7fa;
+  --warn: #a95c08;
+  --warn-soft: #fbefdf;
+  --code-bg: #eef1f4;
+  --font-display: "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --font-body: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161c; --panel: #171e26; --ink: #e2e8ef; --muted: #9aa5b3; --rule: #2b3440;
+    --point: #3cc0a9; --point-soft: #12302b; --line: #93a0ff; --line-soft: #1c2244;
+    --warn: #e7a056; --warn-soft: #33240f; --code-bg: #1e2630; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161c; --panel: #171e26; --ink: #e2e8ef; --muted: #9aa5b3; --rule: #2b3440;
+  --point: #3cc0a9; --point-soft: #12302b; --line: #93a0ff; --line-soft: #1c2244;
+  --warn: #e7a056; --warn-soft: #33240f; --code-bg: #1e2630; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-body); font-size: 15.5px; line-height: 1.85;
+  margin: 0; padding-inline: 16px; padding-block: 0 4rem;
+}
+.wrap { max-width: 72rem; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 2.5rem; }
+@media (min-width: 1040px) { .wrap { grid-template-columns: 14rem minmax(0, 1fr); } }
+header.top { max-width: 72rem; margin: 0 auto; padding-block: 2.6rem 1.6rem; border-bottom: 1px solid var(--rule); margin-bottom: 2rem; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(1.7rem, 4vw, 2.4rem); line-height: 1.35; margin: 0.4rem 0 0.8rem; text-wrap: balance; }
+.lede { max-width: 46rem; color: var(--muted); margin: 0; }
+nav.toc { font-size: 0.86rem; line-height: 1.6; }
+@media (min-width: 1040px) { nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 1.5rem); align-self: start; } }
+nav.toc ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; counter-reset: s; }
+nav.toc li { counter-increment: s; }
+nav.toc a { color: var(--muted); text-decoration: none; display: grid; grid-template-columns: 1.6rem 1fr; }
+nav.toc a::before { content: counter(s) "."; font-family: var(--font-mono); font-size: 0.8rem; }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink); }
+main { min-width: 0; max-width: 46rem; }
+section { padding-block: 0.4rem 1.6rem; }
+section + section { border-top: 1px solid var(--rule); padding-top: 1.8rem; }
+h2 { font-family: var(--font-display); font-size: 1.45rem; line-height: 1.45; margin: 0 0 1rem; text-wrap: balance; }
+h2 .num { font-family: var(--font-mono); font-size: 0.95rem; color: var(--muted); margin-right: 0.6rem; font-weight: 400; }
+h3 { font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
+p { margin: 0 0 0.9rem; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 3px; overflow-wrap: anywhere; }
+a { color: var(--line); }
+.eq { overflow-x: auto; overflow-y: hidden; padding: 0.4rem 0; margin: 0.4rem 0 1rem; }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.04em; padding: 0.05rem 0.5rem; border-radius: 999px; vertical-align: 0.1em; }
+.tag.pt { background: var(--point-soft); color: var(--point); }
+.tag.ln { background: var(--line-soft); color: var(--line); }
+.callout { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 0.8rem 1rem; margin: 1rem 0 1.2rem; border-radius: 0 4px 4px 0; }
+.callout p:last-child { margin-bottom: 0; }
+.twocol { display: grid; grid-template-columns: 1fr; gap: 1rem; margin: 1rem 0 1.4rem; }
+@media (min-width: 720px) { .twocol { grid-template-columns: 1fr 1fr; } }
+.card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 0.9rem 1rem; min-width: 0; }
+.card h4 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.card.pt { border-top: 3px solid var(--point); }
+.card.ln { border-top: 3px solid var(--line); }
+.card p { font-size: 0.92rem; margin: 0 0 0.5rem; }
+.tbl { overflow-x: auto; margin: 0.6rem 0 1.4rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; line-height: 1.6; min-width: 34rem; }
+th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 700; color: var(--muted); font-size: 0.82rem; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: 0.85rem; }
+figure { margin: 1rem 0 1.4rem; }
+figure .frame { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 0.8rem; overflow-x: auto; }
+figcaption { font-size: 0.84rem; color: var(--muted); margin-top: 0.45rem; }
+svg { display: block; max-width: 100%; height: auto; }
+svg text { font-family: var(--font-body); fill: var(--ink); }
+svg .mut { fill: var(--muted); }
+svg .grid { stroke: var(--rule); stroke-width: 1; fill: none; }
+svg .wall { fill: var(--muted); }
+svg .lnF { stroke: var(--line); stroke-width: 3.2; fill: none; }
+svg .ptF { stroke: var(--point); stroke-width: 2; stroke-dasharray: 5 4; fill: none; }
+svg .nodeL { fill: var(--line); }
+svg .nodeP { fill: var(--panel); stroke: var(--muted); stroke-width: 1.2; }
+svg .blkL { fill: var(--line); }
+svg .blkLs { fill: var(--line-soft); stroke: var(--line); stroke-width: 0.8; }
+svg .blkP { fill: var(--point); opacity: 0.55; }
+svg .blkD { fill: var(--ink); }
+svg .frameR { fill: none; stroke: var(--rule); }
+dl.sym { display: grid; grid-template-columns: minmax(5rem, auto) 1fr; gap: 0.3rem 1rem; font-size: 0.9rem; margin: 0.6rem 0 1rem; }
+dl.sym dt { font-family: var(--font-mono); }
+dl.sym dd { margin: 0; color: var(--muted); }
+.src { font-size: 0.8rem; color: var(--muted); }
+pre.mermaid { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 0.8rem; overflow-x: auto; }
+footer { max-width: 72rem; margin: 3rem auto 0; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: 0.82rem; color: var(--muted); }
+:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+</style>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [["\\(", "\\)"]], displayMath: [["\\[", "\\]"]], tags: "none" },
+  svg: { fontCache: "global" },
+  options: { enableMenu: false }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg-full.js" async></script>
+
+<header class="top">
+  <div class="eyebrow">forge / time integration / steady implicit</div>
+  <h1>point 陰解法とライン陰解法</h1>
+  <p class="lede">forge の定常陰解法 (block DPLUR) について、point 版とライン版のそれぞれで、何を線形化し、どの結合を陰に解き、どの結合を前の反復の値で済ませるかをまとめる。設定と数値は case/45 (イソブタン燃焼ガス M6 ノズル、2D 軸対称、node、等温壁 300 K) に合わせた。式はコード (<code>timeIntegration_d.cu</code>・<code>setDT_d.cu</code>・<code>update_d.cu</code>・<code>speciesTransport_d.cu</code>) から起こした。</p>
+</header>
+
+<div class="wrap">
+<nav class="toc" aria-label="目次">
+  <ol>
+    <li><a href="#s-overview">1 step の流れ</a></li>
+    <li><a href="#s-frame">共通の枠組み</a></li>
+    <li><a href="#s-jac">平均流の 5×5 ヤコビアン</a></li>
+    <li><a href="#s-point">point 陰解法</a></li>
+    <li><a href="#s-line">ライン陰解法</a></li>
+    <li><a href="#s-dt">擬似時間刻み Δτ</a></li>
+    <li><a href="#s-visc">ライン上の粘性ヤコビアン</a></li>
+    <li><a href="#s-turb">乱流 (SST k–ω)</a></li>
+    <li><a href="#s-species">化学種</a></li>
+    <li><a href="#s-compare">比較と case/45 の実測</a></li>
+    <li><a href="#s-sym">記号</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="s-overview">
+<h2><span class="num">1</span>1 step の流れ</h2>
+<p>定常計算の 1 step は「残差を 1 回組む → 局所の擬似時間刻みを決める → 線形系を sweep で解く → 保存量に 1 回だけ足す」の順に進む。平均流の 5 式 (ρ, ρu, ρv, ρw, ρE) を 5×5 ブロックで解き、そのあとで乱流の k・ω と化学種を別々に (segregated) 更新する。point とライン陰解法の違いは、線形系の解き方 (下図の分岐) と擬似時間刻みの決め方の 2 か所に限られる。</p>
+<pre class="mermaid">
+flowchart TD
+  A["残差を組む r = −R(Qⁿ)<br/>SLAU 2 次 + 粘性 + SST + 化学種 + 軸対称ソース"] --> B["擬似時間刻み Δτᵢ<br/>point: 全部の面で決める<br/>ライン: ライン外の面だけ + 上限 R"]
+  B --> C{"節点はラインに載るか"}
+  C -- "載らない" --> D["point: 対角ブロック Dᵢ を組み<br/>5×5 を解く"]
+  C -- "載る" --> E["sweep 0: Dₖ と K⁻ₖ, K⁺ₖ を保存し<br/>Thomas の分解 (1 step に 1 回)"]
+  E --> F["各 sweep: 右辺 bₖ を組み<br/>Thomas の代入"]
+  D --> G["sweep を Nₛ = 5 回 (Jacobi)"]
+  F --> G
+  G --> H["commit: Q = Qⁿ + ΔQ"]
+  H --> I["SST k, ω: 点陰的に更新"]
+  I --> J["化学種 ρYₛ: 点陰的に更新 → ΣρYₛ = ρ に再正規化"]
+</pre>
+<p class="src">出典: <code>main.cpp</code> の <code>implicitNonlinearUpdate</code>・<code>blockDPLURSolve</code> (2048〜2100 行付近)。</p>
+</section>
+
+<section id="s-frame">
+<h2><span class="num">2</span>共通の枠組み</h2>
+<p>節点 \(i\) の双対 CV (体積 \(V_i\)、軸対称では 1 ラジアンあたり) について、定常の問題は \(R_i(Q)=0\) である。forge は残差を符号を反転した形 \(r_i=-R_i\) (配列 <code>res_*</code>) で持つ。擬似時間 \(\tau\) の後退オイラーを線形化すると</p>
+<div class="eq">\[
+\frac{V_i}{\Delta\tau_i}\,\Delta Q_i+\sum_j\frac{\partial R_i}{\partial Q_j}\,\Delta Q_j \;=\; r_i(Q^n)
+\]</div>
+<p>となる。左辺のヤコビアンは厳密でなく、1 次風上の流束ベクトル分割 (FVS) を節点 \(i\) の状態で組んだ近似である。右辺 \(r_i\) だけが 2 次精度の SLAU・粘性・ソースを含む。近似の左辺を \(D_i\) (対角ブロック) と \(K_f\) (面 \(f\) の向こうの節点 \(j(f)\) との結合ブロック) で書くと、解く式は</p>
+<div class="eq">\[
+D_i\,\Delta Q_i-\sum_{f\in\partial i}K_f\,\Delta Q_{j(f)} \;=\; r_i
+\]</div>
+<p>である。左辺を変えても、収束先 \(r=0\) は変わらない (defect correction)。左辺の近似の質が決めるのは、収束までの道筋、安定に使える擬似時間刻みの上限、そして残差がどこで下げ止まるかである。point とライン陰解法は同じ \(D_i\)・\(K_f\) を使い、どの \(K_f\) を同じ反復の中で厳密に解くかだけが違う。</p>
+<div class="callout"><p>case/45 の run (バイナリ lineL) では、状態と残差の型 <code>flow_float</code> を double にしたビルドを使っている。point の 5×5 の解法は <code>implicitSolvePrecision: 0</code> の既定で float、ライン上の Thomas 法は常に double で計算する。</p></div>
+</section>
+
+<section id="s-jac">
+<h2><span class="num">3</span>平均流の 5×5 ヤコビアン</h2>
+<h3>流束ベクトル分割</h3>
+<p>面 \(f\) の単位法線 \(n_f\)、面積 \(S_f\)、法線速度 \(U_n=u\cdot n_f\)、音速 \(c\) とする。固有値は \(\Lambda=\mathrm{diag}(U_n-c,\,U_n,\,U_n,\,U_n,\,U_n+c)\) である。せん断とエントロピーの 3 つの固有値は等しいので、\(R\,\mathrm{diag}(g)\,L\) は音響の右固有ベクトル \(r_1,r_5\) と左固有ベクトル \(l_1,l_5\) だけで書ける (<code>accumulate_split_jacobian_cf</code>)。</p>
+<div class="eq">\[
+M_i(g)=g_2\,I+(g_1-g_2)\,r_1l_1^{\mathsf T}+(g_5-g_2)\,r_5l_5^{\mathsf T},\qquad
+A^{+}_f=M_i(\Lambda^{+}),\quad K_f=S_f\,M_i\big((-\Lambda)^{+}\big)
+\]</div>
+<p>ここで \(\Lambda^{+}=\max(\Lambda,0)\)、\((-\Lambda)^{+}=\max(-\Lambda,0)\) で、どちらも非負である。\(A^{+}_f\) は対角へ、\(K_f\) は隣との結合へ入る。<strong>どちらも節点 \(i\) 自身の状態 \((\rho_i,u_i,H_{t,i},c_i)\) で組む</strong> (隣の状態は使わない)。</p>
+<p>熱的完全気体 (TP、<code>thermalMethod: 2</code>) では、比熱比が一定のときにだけ成り立つ \(h=c^2/(\gamma-1)\) が使えない。そこで一般の状態方程式の固有ベクトルを使う (\(\kappa=\gamma-1\)、\(\chi=c^2-\kappa h\)、\(H_t=h+\tfrac12|u|^2\))。</p>
+<div class="eq">\[
+r_{1,5}=\begin{bmatrix}1\\ u\mp c\,n\\ H_t\mp c\,U_n\end{bmatrix},\qquad
+r_{\text{contact}}=\begin{bmatrix}1\\ u\\ H_t-c^2/\kappa\end{bmatrix}
+\]</div>
+
+<h3>対角ブロック \(D_i\)</h3>
+<div class="eq">\[
+D_i=\frac{V_i}{\Delta\tau_i}I+\sum_{f\in\partial i}S_f\,A^{+}_f+\sum_{f\in\text{内部}}\Lambda^{\nu}_f\,I+J^{T}_i+J^{\text{axi}}_i
+\]</div>
+<p><strong>粘性の対角</strong> \(\Lambda^{\nu}_f\) は粘性流束の法線拡散項の微分の大きさに合わせたスカラーで、5 行すべてに同じ値が入る。</p>
+<div class="eq">\[
+\Lambda^{\nu}_f=2\,\nu_i\,\frac{\delta_f}{|\Delta x_f|},\qquad
+\delta_f=\frac{|\Delta x_f|\,S_f^{2}}{|\Delta x_f\cdot S_f|},\qquad
+\nu_i=\frac{\mu_{\text{cfg}}+\mu_{t,i}}{\rho_i}
+\]</div>
+<p>\(\mu_{\text{cfg}}\) は設定値 <code>physProp.visc</code> (case/45 は 1.8×10⁻⁵ Pa·s) で、実際の \(\mu(T)\) ではない。この値は剛性の見積もりとしてだけ使われ、Δτ と陰解法の対角にしか効かない。node の境界の半割面には粘性の対角を置かない。</p>
+<p><strong>エネルギー行の熱伝導</strong> \(J^{T}_i\) (<code>implicitThermalJacobian: 5</code>): スカラーの対角は \(\rho E\) にかかるだけなので、\(\rho E\) がほぼ動かずに \(\rho\) と \(T\) が入れ替わる等圧のモードを抑えない。キー 5 (ビット 1 + 4) は、行 4 のスカラーを残したうえで、内部の面ごとに温度の微分を足す。</p>
+<div class="eq">\[
+D_i[4,:]\mathrel{+}=\Lambda^{T}_f\,\frac{\gamma_i}{c_{p,i}}\,\frac{\partial e}{\partial Q}\Big|_i,\qquad
+\Lambda^{T}_f=k_f\frac{\delta_f}{|\Delta x_f|},\qquad
+\frac{\partial e}{\partial Q}=\frac1\rho\Big[-\big(e-\tfrac12|u|^2\big),\,-u,\,-v,\,-w,\,1\Big]
+\]</div>
+<p>\(k_f=f\,k_0+(1-f)\,k_1+c_{p,f}\,\mu_{t,f}/Pr_t\) は残差の熱伝導と同じ式である。近傍との結合 (非対角) は入れない。</p>
+<p><strong>軸対称のソース</strong> \(J^{\text{axi}}_i\): 半径方向の運動量 (行 2) だけに、フープの圧力と粘性の項の微分が入る (\(A\) は双対 CV の平面面積、\(r_{\text{eff}}=V/A\))。</p>
+<div class="eq">\[
+D_i[2,:]\mathrel{+}=-A\,(\gamma-1)\Big[\tfrac12|u|^2,\,-u,\,-v,\,-w,\,1\Big]+\frac{2(\mu_{\text{cfg}}+\mu_t)}{r_{\text{eff}}}\,A\,\frac{\partial v}{\partial Q},\qquad
+\frac{\partial v}{\partial Q}=\frac1\rho\,[-v,0,1,0,0]
+\]</div>
+
+<h3>境界の拘束の行</h3>
+<p>node では壁や軸の節点の値を Dirichlet で固定する。その成分は線形系の中でも動かないように、行を単位行に替え、右辺を 0 にする。同じ行は \(K_f\) でも 0 にする。</p>
+<div class="tbl"><table>
+<thead><tr><th>節点</th><th>置き換える行</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>no-slip 壁 (<code>nodeWallDirichlet</code>)</td><td>行 1〜3 → 単位行</td><td>\(\Delta(\rho u)=\Delta(\rho v)=\Delta(\rho w)=0\)。連続とエネルギーの行は残る</td></tr>
+<tr><td>等温壁</td><td>行 4 → 単位行 (粘性入りのライン値 2・3 では \([-e_w,0,0,0,1]\))</td><td>壁温 300 K は次の境界の適用で入れ直す。後者は \(\Delta T_w=0\) を線形系の中で満たす</td></tr>
+<tr><td>軸</td><td>行 2 → 単位行</td><td>\(\Delta(\rho v)=0\) (\(u_r=0\))</td></tr>
+</tbody></table></div>
+<p class="src">出典: <code>timeIntegration_d.cu</code> の <code>implicit_defect_correction_block_d</code> (775〜1240 行)、<code>block_dplur_jacobian_d.cuh</code>。</p>
+</section>
+
+<section id="s-point">
+<h2><span class="num">4</span>point 陰解法 <span class="tag pt">point</span></h2>
+<p>point 陰解法は、各節点で 5×5 の対角ブロックだけを逆に解き、隣の補正は前の sweep の値を使う Jacobi 反復である。\(\omega\) は <code>implicitRelax</code> (0.7)、sweep の回数 \(N_s\) は <code>nStepInner</code> (5) である。</p>
+<div class="eq">\[
+\Delta Q_i^{(s+1)}=\omega\,D_i^{-1}\Big(r_i+\sum_{f\in\partial i}K_f\,\Delta Q_{j(f)}^{(s)}\Big),\qquad s=0,\dots,N_s-1,\qquad \Delta Q^{(0)}=0
+\]</div>
+<div class="eq">\[
+Q_i\leftarrow Q_i^n+\Delta Q_i^{(N_s)}
+\]</div>
+<ul>
+<li>sweep の間 \(Q\)・残差・\(D_i\) は固定し、補正 \(\Delta Q\) の 2 つの配列を入れ替えるだけにする (古典 DPLUR)。</li>
+<li>5×5 の系は部分ピボット付きのガウス消去で、sweep ごとに解き直す。ピボットが \(10^{-20}\) を下回ると補正を 0 にする。</li>
+<li>どの方向の結合も 1 sweep に 1 節点ずつしか伝わらない。壁法線のように格子が細い方向では、この遅れと、細い格子で決まる小さな \(\Delta\tau\) (§6) の両方が収束を遅くする。</li>
+</ul>
+</section>
+
+<section id="s-line">
+<h2><span class="num">5</span>ライン陰解法 <span class="tag ln">line</span></h2>
+<h3>ラインの作り方</h3>
+<p>壁の節点を種にして、最初は最も近い隣 (最短の辺 = 壁法線)、2 歩目からは進む向きに最も揃った隣 (なす角 45° 以内) へ鎖を伸ばす (<code>mesh.cpp</code> の <code>buildImplicitLines</code>)。3 節点未満の鎖はラインにしない。case/45 の構造格子では、各列がそのまま壁から軸までのライン 1 本になる (4719 本 × 121 節点、全 570999 CV を覆う)。実験用の環境変数 <code>FORGE_LINE_MAXLEN=N</code> を使うと、壁から \(N\) 節点で打ち切る。その先の節点は point で解かれる。</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 560 300" role="img" aria-label="壁から伸びるライン。ライン上の面は Thomas 法で厳密に結合し、ライン外の面は前の sweep の値で結合する">
+  <rect x="40" y="262" width="400" height="10" class="wall"/>
+  <text x="40" y="292" class="mut" font-size="12">壁 (等温 300 K、no-slip)</text>
+  <!-- 壁法線方向に等比で伸びる格子 (下が壁) -->
+  <g class="grid">
+    <line x1="40" y1="262" x2="440" y2="262"/><line x1="40" y1="255" x2="440" y2="255"/><line x1="40" y1="246" x2="440" y2="246"/>
+    <line x1="40" y1="234" x2="440" y2="234"/><line x1="40" y1="218" x2="440" y2="218"/><line x1="40" y1="197" x2="440" y2="197"/>
+    <line x1="40" y1="169" x2="440" y2="169"/><line x1="40" y1="132" x2="440" y2="132"/><line x1="40" y1="84" x2="440" y2="84"/>
+    <line x1="40" y1="22" x2="440" y2="22"/>
+    <line x1="40" y1="22" x2="40" y2="262"/><line x1="120" y1="22" x2="120" y2="262"/><line x1="200" y1="22" x2="200" y2="262"/>
+    <line x1="280" y1="22" x2="280" y2="262"/><line x1="360" y1="22" x2="360" y2="262"/><line x1="440" y1="22" x2="440" y2="262"/>
+  </g>
+  <!-- ライン ℓ (中央の列) -->
+  <line x1="200" y1="262" x2="200" y2="22" class="lnF"/>
+  <!-- ライン外の結合 (横) -->
+  <line x1="120" y1="218" x2="200" y2="218" class="ptF"/><line x1="200" y1="218" x2="280" y2="218" class="ptF"/>
+  <line x1="120" y1="132" x2="200" y2="132" class="ptF"/><line x1="200" y1="132" x2="280" y2="132" class="ptF"/>
+  <g>
+    <circle cx="200" cy="262" r="4.5" class="nodeL"/><circle cx="200" cy="255" r="4" class="nodeL"/><circle cx="200" cy="246" r="4" class="nodeL"/>
+    <circle cx="200" cy="234" r="4" class="nodeL"/><circle cx="200" cy="218" r="4.5" class="nodeL"/><circle cx="200" cy="197" r="4" class="nodeL"/>
+    <circle cx="200" cy="169" r="4" class="nodeL"/><circle cx="200" cy="132" r="4.5" class="nodeL"/><circle cx="200" cy="84" r="4" class="nodeL"/>
+    <circle cx="200" cy="22" r="4" class="nodeL"/>
+    <circle cx="120" cy="218" r="3.5" class="nodeP"/><circle cx="280" cy="218" r="3.5" class="nodeP"/>
+    <circle cx="120" cy="132" r="3.5" class="nodeP"/><circle cx="280" cy="132" r="3.5" class="nodeP"/>
+  </g>
+  <text x="212" y="16" font-size="12">ライン ℓ (壁 → 軸、case/45 は 121 節点)</text>
+  <g font-size="12.5">
+    <line x1="458" y1="60" x2="486" y2="60" class="lnF"/><text x="492" y="64">ライン面</text>
+    <text x="458" y="82" class="mut" font-size="11">Thomas 法で</text><text x="458" y="97" class="mut" font-size="11">厳密に結合</text>
+    <line x1="458" y1="140" x2="486" y2="140" class="ptF"/><text x="492" y="144">ライン外</text>
+    <text x="458" y="162" class="mut" font-size="11">前の sweep の</text><text x="458" y="177" class="mut" font-size="11">補正で結合</text>
+  </g>
+  <text x="18" y="150" class="mut" font-size="11" transform="rotate(-90 18 150)">壁法線 (等比 1.07〜1.09)</text>
+</svg>
+</div>
+<figcaption>図 1. 壁から伸びるライン (模式)。縦の格子間隔は壁で最も細かく、軸へ向かって等比で広がる。ライン上の隣との結合は Thomas 法で同じ反復の中で解き、流れ方向の隣との結合は前の sweep の補正を右辺に回す。</figcaption>
+</figure>
+
+<h3>ライン上の線形系</h3>
+<p>ライン \(\ell\) の節点を壁側から \(k=1,\dots,N_\ell\) と番号付ける。\(D_k\) は point と同じ対角ブロック、\(K^{-}_k\)・\(K^{+}_k\) は前後の隣との結合ブロックである。ライン外の面の結合だけを右辺に回すと、ライン 1 本ごとにブロック三重対角の系になる。</p>
+<div class="eq">\[
+D_k\,x_k-K^{-}_k\,x_{k-1}-K^{+}_k\,x_{k+1}=b_k^{(s)},\qquad
+b_k^{(s)}=r_k+\sum_{f\in\partial k,\;f\notin\ell}K_f\,\Delta Q_{j(f)}^{(s)}
+\]</div>
+<p>\(K^{\pm}_k\) は point と同じ関数に単位ベクトルを 5 回入れて列ごとに取り出す。したがって point とライン陰解法の違いは、ヤコビアンそのものではなく、ライン面の結合を同じ反復の中で解くか、前の sweep の値で済ませるかにある。拘束の行 (§3) では \(K^{\pm}_k\) の同じ行を 0 にする。</p>
+
+<figure>
+<div class="frame">
+<svg viewBox="0 0 560 250" role="img" aria-label="ライン 3 本 × 4 節点の行列。ライン内のブロック三重対角は陰に、ライン間の結合は遅れで扱う">
+  <text x="10" y="18" font-size="12.5">節点をラインごとに並べた行列 (ライン 3 本 × 4 節点、各マスが 5×5 ブロック)</text>
+  <g transform="translate(20,32)">
+    <rect x="0" y="0" width="192" height="192" class="frameR"/>
+    <!-- 対角 D -->
+    <g class="blkD"><rect x="0" y="0" width="16" height="16"/><rect x="16" y="16" width="16" height="16"/><rect x="32" y="32" width="16" height="16"/><rect x="48" y="48" width="16" height="16"/>
+    <rect x="64" y="64" width="16" height="16"/><rect x="80" y="80" width="16" height="16"/><rect x="96" y="96" width="16" height="16"/><rect x="112" y="112" width="16" height="16"/>
+    <rect x="128" y="128" width="16" height="16"/><rect x="144" y="144" width="16" height="16"/><rect x="160" y="160" width="16" height="16"/><rect x="176" y="176" width="16" height="16"/></g>
+    <!-- ライン内 K± -->
+    <g class="blkL"><rect x="16" y="0" width="16" height="16"/><rect x="0" y="16" width="16" height="16"/><rect x="32" y="16" width="16" height="16"/><rect x="16" y="32" width="16" height="16"/><rect x="48" y="32" width="16" height="16"/><rect x="32" y="48" width="16" height="16"/>
+    <rect x="80" y="64" width="16" height="16"/><rect x="64" y="80" width="16" height="16"/><rect x="96" y="80" width="16" height="16"/><rect x="80" y="96" width="16" height="16"/><rect x="112" y="96" width="16" height="16"/><rect x="96" y="112" width="16" height="16"/>
+    <rect x="144" y="128" width="16" height="16"/><rect x="128" y="144" width="16" height="16"/><rect x="160" y="144" width="16" height="16"/><rect x="144" y="160" width="16" height="16"/><rect x="176" y="160" width="16" height="16"/><rect x="160" y="176" width="16" height="16"/></g>
+    <!-- ライン間 (流れ方向) の結合 = 遅れ -->
+    <g class="blkP"><rect x="64" y="0" width="16" height="16"/><rect x="80" y="16" width="16" height="16"/><rect x="96" y="32" width="16" height="16"/><rect x="112" y="48" width="16" height="16"/>
+    <rect x="0" y="64" width="16" height="16"/><rect x="16" y="80" width="16" height="16"/><rect x="32" y="96" width="16" height="16"/><rect x="48" y="112" width="16" height="16"/>
+    <rect x="128" y="64" width="16" height="16"/><rect x="144" y="80" width="16" height="16"/><rect x="160" y="96" width="16" height="16"/><rect x="176" y="112" width="16" height="16"/>
+    <rect x="64" y="128" width="16" height="16"/><rect x="80" y="144" width="16" height="16"/><rect x="96" y="160" width="16" height="16"/><rect x="112" y="176" width="16" height="16"/></g>
+  </g>
+  <g font-size="12.5" transform="translate(240,60)">
+    <rect x="0" y="0" width="14" height="14" class="blkD"/><text x="22" y="12">Dₖ: 対角ブロック (point と同じ)</text>
+    <rect x="0" y="34" width="14" height="14" class="blkL"/><text x="22" y="46">K±ₖ: ライン内 → Thomas 法で陰に</text>
+    <rect x="0" y="68" width="14" height="14" class="blkP"/><text x="22" y="80">ライン間 (流れ方向) → 前の sweep の値</text>
+    <text x="0" y="118" class="mut" font-size="11.5">point 陰解法では黒以外がすべて「前の sweep の値」になる。</text>
+    <text x="0" y="136" class="mut" font-size="11.5">ライン陰解法では藍のブロックが陰に入り、</text>
+    <text x="0" y="154" class="mut" font-size="11.5">遅れが残るのは青緑 (流れ方向) だけになる。</text>
+  </g>
+</svg>
+</div>
+<figcaption>図 2. 節点をラインごとに並べたときの行列の形 (模式)。ライン内はブロック三重対角で、ライン間の結合はライン 1 本ぶん離れた位置に現れる。</figcaption>
+</figure>
+
+<h3>block Thomas 法</h3>
+<p>分解は 1 step に 1 回 (sweep 0) だけ行う。代入は sweep ごとに行う (<code>lineThomasFactor_d</code>・<code>lineThomasSolve_d</code>)。5×5 の各ブロックは部分ピボット付き LU を double で計算し、1 本のラインを 1 スレッドが壁から順に処理する。</p>
+<div class="eq">\[
+\text{分解:}\quad \tilde M_1=D_1,\qquad \tilde M_k=D_k-K^{-}_k\,W_{k-1},\qquad W_k=\tilde M_k^{-1}K^{+}_k
+\]</div>
+<div class="eq">\[
+\text{代入 (前進):}\quad y_1=\tilde M_1^{-1}b_1,\qquad y_k=\tilde M_k^{-1}\big(b_k+K^{-}_k\,y_{k-1}\big)
+\]</div>
+<div class="eq">\[
+\text{代入 (後退):}\quad x_{N_\ell}=y_{N_\ell},\qquad x_k=y_k+W_k\,x_{k+1},\qquad \Delta Q_k^{(s+1)}=\omega\,x_k
+\]</div>
+<p>この漸化式は 1 本のラインの中で前の節点の結果を待つ逐次計算であり、並列に回せるのはラインの本数 (case/45 では 4719) だけである。1 step のうち Thomas 法 (分解 1 回 + 代入 5 回) は、配列を並べ替えた版 (<code>FORGE_LINE_LAYOUT=2</code>) で約 12.6 ms (分解 4.58 ms + 代入 1.60 ms × 5)、従来の配列で約 15.3 ms を占める。ncu の計測では SM あたり 2 warp しか載らず、メモリの読み込み待ちが律速だった。Thomas 法の時間はラインの長さにほぼ比例する。§10 のふるいでは、ラインを 1 節点短くするごとに 1 step が約 0.11 ms 縮んだ (121 → 100・64・48 節点で −2.2・−6.2・−7.9 ms)。</p>
+</section>
+
+<section id="s-dt">
+<h2><span class="num">6</span>擬似時間刻み Δτ</h2>
+<p>面ごとに特性速度 \(\lambda_f\) と幅 \(\Delta x_f\) を決め、節点では最も厳しい面で \(\Delta\tau\) を決める。\(\mathrm{CFL}_\tau\) は <code>cfl_pseudo</code> (4) である。</p>
+<div class="eq">\[
+\lambda_f=|\bar u_f\cdot n_f|+c_{i_0}+\frac{2(\mu_{\text{cfg}}+\mu_{t,f})}{\rho_f\,\Delta x_f},\qquad
+\Delta x_f=\frac{\min(V_0,V_1)}{S_f}
+\]</div>
+<div class="twocol">
+  <div class="card pt"><h4><span class="tag pt">point</span> 全部の面</h4>
+  <p>\[\Delta\tau_i^{\text{pt}}=\mathrm{CFL}_\tau\,\min_{f\in\partial i}\frac{\Delta x_f}{\lambda_f}\]</p>
+  <p>壁際では壁法線の \(\Delta x_f\) が極端に小さい (case/45 の第 1 層は 0.8〜12 µm)。そのため \(\Delta\tau\) は壁法線の音響の時間で決まる。</p></div>
+  <div class="card ln"><h4><span class="tag ln">line</span> 方向別 (<code>lineDtDirectional: 1</code>)</h4>
+  <p>\[\Delta\tau_i=\min\!\Big(\mathrm{CFL}_\tau\min_{f\notin\ell}\frac{\Delta x_f}{\lambda_f},\;R\,\Delta\tau_i^{\text{pt}}\Big)\]</p>
+  <p>ライン面は Thomas 法で厳密に解くので、刻みの判定から外す。残るのは流れ方向の面なので、\(\Delta\tau\) はおよそ縦横比の分だけ伸びる。上限 \(R\) (<code>lineDtDirectionalCap</code>、値 0 のラインは 50、粘性入りのラインは上限なし) で伸びを抑える。</p></div>
+</div>
+<ul>
+<li>除外されるのはライン上の隣との内部面だけである。壁の節点の境界の半割面は残るので、壁の節点自身の \(\Delta\tau\) は point と同じになる。伸びるのは壁の 1 つ内側からである。</li>
+<li>\(\Delta\tau\) の配列 (<code>dt_local</code>) は乱流と化学種の更新でもそのまま使う (§8・§9)。したがって方向別の刻みと上限 \(R\) は k・ω と化学種にも効く。</li>
+<li>\(\Delta\tau\) が伸びると、1 層目の拡散数 \(\nu\Delta\tau/\Delta y^2\) が O(10) になる (case/45 で約 23)。スカラーの粘性対角と熱伝導の対角 (§3) が、ここで初めて効き始める。</li>
+</ul>
+<p class="src">出典: <code>setDT_d.cu</code> の <code>setCFL_pln_d</code>・<code>setCFL_cell_d</code> (100〜200 行)。</p>
+</section>
+
+<section id="s-visc">
+<h2><span class="num">7</span>ライン上の粘性ヤコビアン</h2>
+<p>ライン面の \(K^{\pm}\) を流束ベクトル分割だけで作ると、壁際 (\(U_n\approx0\)) ではせん断とエントロピーの固有値 \(U_n\) が 0 に近く、これらのモードがライン方向にほとんど結合しない。<code>lineViscCoupling</code> はライン面に粘性の結合を足す。</p>
+<div class="tbl"><table>
+<thead><tr><th>値</th><th>ライン面の対角</th><th>ライン面の \(K^{\pm}\)</th></tr></thead>
+<tbody>
+<tr><td>0 (既定、case/45 の値 0 のライン)</td><td>スカラー \(\Lambda^{\nu}_f I\) (+ キー 5 の熱伝導)</td><td>流束ベクトル分割だけ</td></tr>
+<tr><td>1</td><td>\(\tfrac12\Lambda^{\nu}_f I\)</td><td>\(+\tfrac12\Lambda^{\nu}_f I\) (1 次元の拡散行 \([-\alpha,2\alpha,-\alpha]\))</td></tr>
+<tr><td>2</td><td>薄層の \(D\)</td><td>薄層の \(K\)</td></tr>
+<tr><td>3 (case/45 の粘性入りのライン)</td><td>スカラー \(\Lambda^{\nu}_f I\) を残し、薄層の \(D\) を足す</td><td>薄層の \(K\)</td></tr>
+</tbody></table></div>
+<p>薄層のモデルは、自節点 \(i\) の残差への寄与を次の形とみなして微分したものである (\(\beta=\mu_f\delta_f/|\Delta x_f|\)、\(\kappa=k_f\delta_f/|\Delta x_f|\)、\(P=I+\tfrac13 nn^{\mathsf T}\)、\(\bar u=f_iu_i+(1-f_i)u_j\))。</p>
+<div class="eq">\[
+R_i\supset\Big[\,0,\;\;\beta P\,\Delta u,\;\;\kappa\,\Delta T+(\beta P\,\Delta u)\cdot\bar u\,\Big],\qquad
+D\mathrel{+}=-\frac{\partial R_i}{\partial Q_i},\qquad K\mathrel{+}=\frac{\partial R_i}{\partial Q_j}
+\]</div>
+<div class="eq">\[
+\frac{\partial u}{\partial Q}=\frac1\rho\,[-u,\;I_3,\;0],\qquad
+\frac{\partial T}{\partial Q}=\frac{\gamma}{c_p}\frac1\rho\,\big[-(e-\tfrac12|u|^2),\;-u^{\mathsf T},\;1\big]
+\]</div>
+<p>連続の行には何も足さない。診断用の環境変数 <code>FORGE_LVC_TERMS</code> は項を選ぶマスクで、ビット 1 = 運動量の D/K、ビット 2 = 熱伝導の K、ビット 4 = 粘性の仕事の D/K を表す。熱伝導の D は常に入る。case/45 の粘性入りのライン (L5) はマスク 5 で、運動量と仕事を入れ、熱伝導の K を入れない。隣が速度の Dirichlet (壁) なら運動量と仕事の K を 0 にし、隣が等温壁なら熱伝導の K を 0 にする。\(P\) は現在の離散残差の厳密な微分ではなく、前処理として選んだ近似である。</p>
+</section>
+
+<section id="s-turb">
+<h2><span class="num">8</span>乱流 (SST k–ω)</h2>
+<p>k と ω はライン陰解法の 5×5 ブロックに入らない。平均流を commit したあと、<strong>同じ残差の評価</strong>から点陰的に 1 回だけ更新する (<code>applySSTPointImplicit_d</code>)。近傍との結合は持たず、陰に扱うのは消散と輸送の対角だけである。生成項は前の値のまま右辺に置く。</p>
+<div class="eq">\[
+D_\phi=\frac{V}{\Delta\tau}+V\,\frac{\partial\mathcal D_\phi}{\partial(\rho\phi)}+\Lambda^{T}_\phi,\qquad
+\delta(\rho\phi)=\omega\,\frac{r_{\rho\phi}}{D_\phi},\qquad \phi\in\{k,\omega\}
+\]</div>
+<div class="eq">\[
+\frac{\partial\mathcal D_k}{\partial(\rho k)}=\beta^{*}\omega,\qquad
+\frac{\partial\mathcal D_\omega}{\partial(\rho\omega)}=2\beta\omega,\qquad
+\Lambda^{T}_\phi=\sum_{f}\frac{\max(\dot m_f^{\text{out}},0)}{\rho_i}+\sum_f\frac{\mu+\sigma_\phi\mu_t}{\rho_i}\frac{\delta_f}{|\Delta x_f|}
+\]</div>
+<ul>
+<li>\(\Lambda^{T}_\phi\) は 1 次風上の移流と 2 点の拡散の自己ヤコビアンで、壁際の陽的な拡散の制約を外すために入れる。生成項を陰に入れると対角を弱めて発散するので、入れない。</li>
+<li>更新後に \(\rho k\ge0\)、\(\rho\omega\ge10^{-20}\) に切る。node の壁の節点では ω を Dirichlet で固定し (\(\delta\omega=0\))、k は通常どおり更新する。</li>
+<li>\(\Delta\tau\) は平均流と同じ <code>dt_local</code> で、緩和係数も同じ \(\omega\) (0.7) を使う。ライン陰解法では方向別の伸びた \(\Delta\tau\) がそのまま k・ω にも使われ、上限 \(R\) は両方に効く。</li>
+<li>平均流への影響は、次の step の残差と対角に入る \(\mu_t\) を通して伝わる (平均流のヤコビアンに k・ω の列はない)。</li>
+</ul>
+</section>
+
+<section id="s-species">
+<h2><span class="num">9</span>化学種</h2>
+<p>case/45 は 2 成分の熱的完全気体 (入口で \(Y_0=0.9142\)、\(Y_1=0.0858\)) で、化学反応は解かない。化学種の保存量 \(\rho Y_s\) も 5×5 ブロックに入らず、乱流のあとで点陰的に 1 回更新する (<code>speciesImplicitCoupling: 0</code>、既定)。</p>
+<div class="eq">\[
+\rho Y_s\leftarrow\rho Y_s^{\,n}+\omega_Y\,\frac{\Delta\tau\,r_s/V}{1+\Delta\tau\,\big(J_s+\Lambda^{T}_s/V\big)}
+\]</div>
+<p>\(\omega_Y\) は <code>speciesImplicitRelax</code> (1.0)、\(J_s\) はソースのヤコビアン (反応がなければ 0)、\(\Lambda^{T}_s\) は移流と拡散の対角で、k・ω と同じ形である。更新のあと、負の値を 0 に切ってから総和が密度に合うように比例配分する。</p>
+<div class="eq">\[
+\rho Y_s\leftarrow\max(\rho Y_s,0)\cdot\frac{\rho}{\sum_r\max(\rho Y_r,0)}
+\]</div>
+<ul>
+<li>組成が平均流に効くのは、残差 (流束・状態方程式) と、ヤコビアンの係数 \(\gamma,\,c,\,H_t,\,\chi\) を通してである。ヤコビアンは各 step の組成で組み直すが、sweep の中では固定する。</li>
+<li>平均流と化学種を同じ線形系で解く方式 (<code>speciesImplicitCoupling: 1</code> = 化学種の scalar DPLUR、<code>2</code> = ρE と ρY のブロック三角の結合) も実装されているが、case/45 では使っていない。</li>
+</ul>
+<p class="src">出典: <code>speciesTransport_d.cu</code> の <code>speciesTimeIntegration_d_wrapper</code> (1011 行)・<code>species_renormalize_d</code> (171 行)、<code>scalarTransport_d.cu</code> の <code>scalarTimeIntegration_d</code>。</p>
+</section>
+
+<section id="s-compare">
+<h2><span class="num">10</span>比較と case/45 の実測</h2>
+<div class="tbl"><table>
+<thead><tr><th></th><th><span class="tag pt">point</span></th><th><span class="tag ln">line</span></th></tr></thead>
+<tbody>
+<tr><td>陰に解く結合</td><td>節点内の 5×5 だけ</td><td>節点内の 5×5 + ライン上の隣 (壁法線)</td></tr>
+<tr><td>前の sweep の値で済ませる結合</td><td>すべての隣</td><td>ライン外の隣 (流れ方向)</td></tr>
+<tr><td>Δτ を決める面</td><td>全部の面</td><td>ライン外の面 (上限 \(R\cdot\Delta\tau^{\text{pt}}\))</td></tr>
+<tr><td>分解</td><td>毎 sweep、節点ごとに 5×5 (float)</td><td>1 step に 1 回、block Thomas 法 (double)</td></tr>
+<tr><td>k・ω と化学種</td><td>点陰的 (同じ Δτ)</td><td>点陰的 (方向別の Δτ を共有)</td></tr>
+<tr><td>収束先</td><td colspan="2">同じ \(r(Q)=0\) (左辺は道筋と安定性と下げ止まりにだけ効く)</td></tr>
+</tbody></table></div>
+
+<h3>1 step の時間 (GPU 専有、lineL バイナリ、1000 step × 3 本)</h3>
+<div class="tbl"><table>
+<thead><tr><th>構成</th><th class="num">ms/step</th><th>出典</th></tr></thead>
+<tbody>
+<tr><td>point (cfl 4)</td><td class="num">17.83</td><td><code>m9_unit.json</code></td></tr>
+<tr><td>ライン 値 0 + 方向別 + 上限 50 + キー 5 (従来の配列)</td><td class="num">34.79</td><td><code>m9_unit.json</code></td></tr>
+<tr><td>ライン 粘性入り (値 3・マスク 5、上限なし)</td><td class="num">36.90</td><td><code>m9_unit.json</code></td></tr>
+<tr><td>ライン 値 0 + Thomas の配列の並べ替え (<code>FORGE_LINE_LAYOUT=2</code>、ビット一致)</td><td class="num">32.14</td><td>plan §6.12</td></tr>
+</tbody></table></div>
+
+<h3>1 step の時間のふるい (ライン長の上限・sweep の回数)</h3>
+<p>基準 B0 (値 0 + 上限 50 + <code>FORGE_LINE_LAYOUT=2</code>) と各案を、B0 で挟んで交互に 1000 step ずつ回した (3 巡、巡ごとに順を変えた)。隣り合う B0 どうしの差の最大は 0.066 ms だった。ライン長 64 の部分被覆でも、並べ替えた配列の Thomas 法の結果は従来とビット単位で一致した (<code>run_0372_ml64_cmp</code>)。</p>
+<div class="tbl"><table>
+<thead><tr><th>案</th><th class="num">ms/step (3 巡)</th><th class="num">B0 との差</th></tr></thead>
+<tbody>
+<tr><td>B0 (ライン 121 節点、sweep 5)</td><td class="num">32.11〜32.16</td><td class="num">—</td></tr>
+<tr><td>ライン長 100 (<code>FORGE_LINE_MAXLEN=100</code>)</td><td class="num">29.92〜29.95</td><td class="num">−6.8 %</td></tr>
+<tr><td>ライン長 64</td><td class="num">25.89〜25.93</td><td class="num">−19.3 %</td></tr>
+<tr><td>ライン長 48</td><td class="num">24.20〜24.23</td><td class="num">−24.7 %</td></tr>
+<tr><td>sweep 3 回 (<code>nStepInner: 3</code>)</td><td class="num">27.34〜27.36</td><td class="num">−14.9 %</td></tr>
+<tr><td>sweep 2 回</td><td class="num">24.94〜24.95</td><td class="num">−22.4 %</td></tr>
+</tbody></table></div>
+<p>この測定は 1 step の時間だけで、水準に届くまでの step 数がどう変わるかは測っていない。ラインを短くすると、ライン外になった節点は point と同じ遅れと Δτ に戻る。sweep を減らすと、流れ方向の結合が弱くなる。どちらも step 数を増やしうるので、総時間で比べる必要がある。</p>
+<p class="src">出典: <code>case/45.isobutane_m6_d155/run_0373〜0375_scr_*</code>、判定 <code>_band_ab/cold_pair/scr_judge.json</code>、plan §6.16。</p>
+<h3>水準に届くまでの step 数と時間</h3>
+<p>水準は「流量欠損 ≤ 0.1 kg/s かつ θ_r のドリフト ≤ 0.05 %/2 万 step」で、出発点は <code>run_0183</code> の 10 万 step 目の場である。総時間は step 数に専有の単価を掛けて見積もった。</p>
+<div class="tbl"><table>
+<thead><tr><th>腕</th><th class="num">step 数</th><th class="num">時間 [h]</th><th>備考</th></tr></thead>
+<tbody>
+<tr><td>ライン 値 0 + 上限 50</td><td class="num">120,000</td><td class="num">≈ 1.16</td><td>古いバイナリの系列から事後に数えた</td></tr>
+<tr><td>ライン 粘性入り、上限なし</td><td class="num">115,000</td><td class="num">≈ 1.18</td><td><code>run_0353_m9_L5</code></td></tr>
+<tr><td>point だけ</td><td class="num">—</td><td class="num">—</td><td>水準だけの基準では数えていない。参照値からの差も含めた旧基準では 61 万 step、3.03 h</td></tr>
+</tbody></table></div>
+<div class="callout"><p>ライン 2 腕とも <code>check_convergence</code> は NOT CONVERGED (残差が横ばい) である。表の時間は水準に届くまでの比較に限る。止まったあとの θ_r は、ラインが point より約 0.1 % 高い値で揺れ (揺れの幅は 0.01 %)、point はまだ動いている。どちらの値が \(r=0\) に近いかは決まっていない。</p></div>
+<p class="src">数値の出典: plan <code>time_integration-line-implicit-speed.md</code> の §6.12・§6.14・§6.15、case/45 README の run 一覧。</p>
+</section>
+
+<section id="s-sym">
+<h2><span class="num">11</span>記号</h2>
+<dl class="sym">
+<dt>\(Q\)</dt><dd>保存量 \((\rho,\rho u,\rho v,\rho w,\rho E)^{\mathsf T}\)</dd>
+<dt>\(r_i\)</dt><dd>残差 (<code>res_*</code>)。\(r=-R\)、収束で 0</dd>
+<dt>\(D_i\)</dt><dd>対角ブロック (5×5)</dd>
+<dt>\(K_f,\,K^{\pm}_k\)</dt><dd>隣との結合ブロック。\(K=S_f\,M_i((-\Lambda)^+)\) (+ 粘性の結合)</dd>
+<dt>\(\Delta\tau_i\)</dt><dd>局所の擬似時間刻み (<code>dt_local</code>)</dd>
+<dt>\(\omega\)</dt><dd><code>implicitRelax</code> (0.7)。乱流の更新にも使う</dd>
+<dt>\(N_s\)</dt><dd>sweep の回数 <code>nStepInner</code> (5)</dd>
+<dt>\(\ell,\,k\)</dt><dd>ラインと、その上の壁からの番号</dd>
+<dt>\(R\)</dt><dd>方向別 Δτ の伸びの上限 <code>lineDtDirectionalCap</code></dd>
+<dt>\(\delta_f,\,\Delta x_f\)</dt><dd>拡散の幾何係数 \(|\Delta x|S^2/|\Delta x\cdot S|\) と、隣の節点までのベクトル</dd>
+<dt>\(\mu_{\text{cfg}}\)</dt><dd>設定値 <code>physProp.visc</code>。Δτ と陰解法の対角にだけ使う</dd>
+</dl>
+</section>
+
+</main>
+</div>
+
+<footer>
+2026-10-10 時点のコード (ブランチ <code>feature/nozzle-wall-fit-and-pipeline</code>) と case/45 の設定に基づく。理論と実装の正本は <code>methods/time_integration/theory.md</code>・<code>implementation.md</code>、ラインの速度の検討は <code>plans/active/time_integration-line-implicit-speed.md</code>。
+</footer>

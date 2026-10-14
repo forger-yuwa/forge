@@ -1,0 +1,270 @@
+{
+ "undecidable": [],
+ "arms": {
+  "G1": {
+   "run": "run_0760_gg_c1",
+   "status": "REACHED",
+   "reach_step": 170000
+  },
+  "G2a": {
+   "run": "run_0761_gg_c50a",
+   "status": "REACHED",
+   "reach_step": 80000
+  },
+  "G2b": {
+   "run": "run_0762_gg_c50b",
+   "status": "REACHED",
+   "reach_step": 80000
+  },
+  "T2a": {
+   "run": "run_0752_t2_d1",
+   "status": "REACHED",
+   "reach_step": 142500
+  },
+  "T2b": {
+   "run": "run_0754_t2_d2",
+   "status": "REACHED",
+   "reach_step": 142500
+  }
+ },
+ "pairs": {
+  "G2a/G1": {
+   "theta_r_40": 0.07340786087667495,
+   "theta_r_70": 0.06518526272532996,
+   "theta_r_94": 0.060213321794873494,
+   "delta_loc_40": -0.006898192326867753,
+   "delta_loc_70": -0.0006807072183597274,
+   "delta_loc_94": -0.0006570816051918611,
+   "Q_w_proxy": -0.06815414786635507,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.375939200158245,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.3117525009551758,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0004807381216354045,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.212681892836048e-05,
+   "mdot_in": 0.0017284102211795633,
+   "mdot_out": 0.0025057265538828816,
+   "Hdot_in": 0.0019542603823278905,
+   "Hdot_out": -0.0010696291776387792,
+   "許容内": true
+  },
+  "G2b/G1": {
+   "theta_r_40": 0.07349035162986756,
+   "theta_r_70": 0.0653495835435489,
+   "theta_r_94": 0.060387031323854,
+   "delta_loc_40": -0.00692427348410957,
+   "delta_loc_70": -0.0007558739097701351,
+   "delta_loc_94": -0.0006867048773552719,
+   "Q_w_proxy": -0.06832184174005858,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.361817439936597,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.31474347741215875,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.00048266776597749583,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.23901814975678e-05,
+   "mdot_in": 0.0016966995850045594,
+   "mdot_out": 0.0025428554615904864,
+   "Hdot_in": 0.00192351891792111,
+   "Hdot_out": -0.0010408951242205017,
+   "許容内": true
+  },
+  "G1/T2a": {
+   "theta_r_40": -0.0010639868638641424,
+   "theta_r_70": -0.0010426518287604055,
+   "theta_r_94": -0.0010088952163042658,
+   "delta_loc_40": 0.00020726325177262565,
+   "delta_loc_70": -4.724085666893257e-05,
+   "delta_loc_94": -6.149502465563145e-06,
+   "Q_w_proxy": 0.02990816463301261,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.789636391498975,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.28474277709943996,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 6.333112692935572e-06,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 1.360658380593223e-06,
+   "mdot_in": 0.001036444713907528,
+   "mdot_out": -4.745046238872335e-05,
+   "Hdot_in": 0.0010352548801072707,
+   "Hdot_out": -1.83323078530433e-06,
+   "許容内": true
+  },
+  "G1/T2b": {
+   "theta_r_40": -0.0010729946421188339,
+   "theta_r_70": -0.001043490999071787,
+   "theta_r_94": -0.0010162979053929342,
+   "delta_loc_40": 0.00019703375259372678,
+   "delta_loc_70": -5.134076072050307e-05,
+   "delta_loc_94": 5.212882800889076e-07,
+   "Q_w_proxy": 0.029853909192520085,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.7195634321118408,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.28476445144582574,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 6.6792126860448775e-06,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 1.3335591326970395e-06,
+   "mdot_in": 0.0008927520220285162,
+   "mdot_out": -4.164453973296136e-05,
+   "Hdot_in": 0.000893295777758527,
+   "Hdot_out": 5.657301099855172e-06,
+   "許容内": true
+  },
+  "G2a/T2a": {
+   "theta_r_40": 0.07234309296281403,
+   "theta_r_70": 0.06414193124123567,
+   "theta_r_94": 0.05920381908924606,
+   "delta_loc_40": -0.006690943372512858,
+   "delta_loc_70": -0.0007279477534567387,
+   "delta_loc_94": -0.0006632310672501749,
+   "Q_w_proxy": -0.03826636688809056,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.5188221650067034,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.2529583499077318,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.00047440500894246895,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.247807050733474e-05,
+   "mdot_in": 0.002764872849103463,
+   "mdot_out": 0.0024582749025153223,
+   "Hdot_in": 0.002989535494011139,
+   "Hdot_out": -0.0010714623888153122,
+   "許容内": true
+  },
+  "G2a/T2b": {
+   "theta_r_40": 0.07233407857214201,
+   "theta_r_70": 0.06414109152390891,
+   "theta_r_94": 0.05919641194275239,
+   "delta_loc_40": -0.006701172166041229,
+   "delta_loc_70": -0.0007320476295999663,
+   "delta_loc_94": -0.0006565603203370616,
+   "Q_w_proxy": -0.03832058535124994,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.3967807790321755,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.19473490372180902,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0004743624566154736,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.227735158653741e-05,
+   "mdot_in": 0.002621177673625278,
+   "mdot_out": 0.0024640809706516303,
+   "Hdot_in": 0.0028475736174118993,
+   "Hdot_out": -0.0010639719370510673,
+   "許容内": true
+  },
+  "G2b/T2a": {
+   "theta_r_40": 0.07242558283831586,
+   "theta_r_70": 0.0643062503461606,
+   "theta_r_94": 0.05937752686567944,
+   "delta_loc_40": -0.006717024583811329,
+   "delta_loc_70": -0.0008031144093577574,
+   "delta_loc_94": -0.0006928543375919016,
+   "Q_w_proxy": -0.03843411091595389,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.5383595073972034,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.2630315769112585,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.00047633465328456026,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.274143307654207e-05,
+   "mdot_in": 0.002733161884265247,
+   "mdot_out": 0.0024954037926050885,
+   "Hdot_in": 0.002958793711351848,
+   "Hdot_out": -0.0010427283359237963,
+   "許容内": true
+  },
+  "G2b/T2b": {
+   "theta_r_40": 0.07241656844021326,
+   "theta_r_70": 0.06430541062745491,
+   "theta_r_94": 0.05937011970632659,
+   "delta_loc_40": -0.006727253374671728,
+   "delta_loc_70": -0.0008072142824192228,
+   "delta_loc_94": -0.000686183592654895,
+   "Q_w_proxy": -0.03848832928813023,
+   "q_w_proxy 超過の節点": 0,
+   "q_w_proxy 最大の相対差 [%]": 0.41917818126528306,
+   "tau_w_signed 超過の節点": 0,
+   "tau_w_signed 最大の相対差 [%]": 0.204856647937815,
+   "τ_w の符号の反転の数 (候補 / 参照)": [
+    0,
+    0
+   ],
+   "M_exit 最大 |ΔM| (r/r_e ≤ 0.95、軸の行を除く)": 0.0004762921009575649,
+   "M_exit 平均 |ΔM| (r/r_e ≤ 0.8)": 3.254071415574474e-05,
+   "mdot_in": 0.0025894667543529285,
+   "mdot_out": 0.002501209862897072,
+   "Hdot_in": 0.002816831878392915,
+   "Hdot_out": -0.001035237882007218,
+   "許容内": true
+  }
+ },
+ "records": {
+  "G1 check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_roe     : init=1.37e+02 fin=3.51e-01 drop= 2.6dec flat     <-- STALLED (plateau)",
+    "rms_roK     : init=9.34e-04 peak=2.80e-03 fin=1.93e-04 drop= 1.2dec flat     <-- STALLED (plateau)",
+    "rms_roOmega : init=6.44e+04 peak=9.12e+04 fin=1.55e+03 drop= 1.8dec flat     <-- STALLED (plateau)"
+   ]
+  },
+  "G1 check_quasisteady (末尾 2 万 step)": [
+   "theta_r_40      : tail mean=0.07714  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.114  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1268  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.219e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+  ],
+  "G2a check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_roe     : init=1.37e+02 peak=1.97e+02 fin=4.67e-01 drop= 2.5dec falling  <-- still converging",
+    "rms_roK     : init=9.34e-04 peak=2.47e-03 fin=1.62e-04 drop= 1.2dec flat     <-- STALLED (plateau)",
+    "rms_roOmega : init=6.44e+04 peak=9.02e+04 fin=1.15e+03 drop= 1.9dec flat     <-- STALLED (plateau)"
+   ]
+  },
+  "G2a check_quasisteady (末尾 2 万 step)": [
+   "theta_r_40      : tail mean=0.0772  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1141  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1269  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.212e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+  ],
+  "G2b check_convergence": {
+   "overall": "OVERALL: CHECK FAILURES ABOVE",
+   "failed": [
+    "rms_roe     : init=1.37e+02 peak=1.97e+02 fin=5.39e-01 drop= 2.6dec falling  <-- still converging",
+    "rms_roK     : init=9.34e-04 peak=2.47e-03 fin=1.61e-04 drop= 1.2dec flat     <-- STALLED (plateau)",
+    "rms_roOmega : init=6.44e+04 peak=9.02e+04 fin=1.18e+03 drop= 1.9dec flat     <-- STALLED (plateau)"
+   ]
+  },
+  "G2b check_quasisteady (末尾 2 万 step)": [
+   "theta_r_40      : tail mean=0.0772  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_70      : tail mean=0.1141  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "theta_r_94      : tail mean=0.1269  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING",
+   "Q_w             : tail mean=9.212e+06  drift=0.0%/tail  fluct=0.0%  (extremum at tail-end) DRIFTING"
+  ]
+ },
+ "verdict": "結果 A (G0c で上限 50 と 1 の停止の出力が全指標で許容内)",
+ "adoption": "G0 との出力の互換性: 許容内 (全組)"
+}

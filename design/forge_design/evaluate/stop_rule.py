@@ -1,7 +1,35 @@
-r"""NS の本段の停止規則 (plan tooling-nozzle-cooled-wall-ns-settling §4.6、2026-10-14 ユーザ決定・諮問 stop-rule を全件採用)。
+r"""NS の本段の停止規則 (plan tooling-nozzle-cooled-wall-ns-settling §4.6・plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a・#36e、2026-10-14)。
 
-M6 の見張り (`case/45.isobutane_m6_d155/m9_watch.py`、forge-integ-1005 の feature/nozzle-wall-fit-and-pipeline) の考え方を設計チェーンに移す。
-M6 の判定 (窓の両端の差) は傾向と振動を混ぜるので、**平均の変化と振幅を分けて**判定する。
+**由来と統合** (2026-10-14、main への統合 1 回目で 2 つの版を 1 つにした):
+forge-f5 の feature/nozzle-cooled-wall-settling (66364fff に θ_r の断面の基準を設計壁の出口に直した 60de8125 を重ねた版、plan
+tooling-nozzle-cooled-wall-ns-settling §4.6、ユーザ決定・諮問 stop-rule を全件採用) を、M6 の feature/nozzle-wall-fit-and-pipeline が
+写して変えた版 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36a・#36e) を土台にし、使うかどうかの既定を forge-f5 の版に戻した。
+  - **既定で使う** (forge-f5、ユーザ決定): 問題 YAML に `evaluate.stop_rule` が無ければ使う。使えない (euler_ref が無い・見つからない・
+    出力の間隔・上限が出力の間隔の倍数でない・設計壁の出口が無い) ときは forge-f5 の版の動き = UNAVAILABLE を記録し、本段を `fallback_steps`
+    (`--steps` > `evaluate.ns_steps` > 60,000) の長さで回す。
+  - **`evaluate.stop_rule: true` を明示** (または関数の引数 stop_rule=True) したときだけ、使えない設定を `prepare_ns` が run dir を作る前に・
+    `run_staged_ns` が forge を起動する前に例外にする (M6 の版の動き; 記録 `explicit`)。`evaluate.stop_rule: false`・CLI `--no-stop-rule` は使わない。
+  - 到達の後の継続 `evaluate.stop_rule_hold_steps` (M6 の版で足した) の**既定は `HOLD_STEPS_DEFAULT` = 40,000 step** (ユーザ決定、forge-f5 経由;
+    値はこの 1 か所の定数)。最初に条件を満たした出力 s₀ の後も回し、s₀ + H までの全ての出力で条件を保ったら REACHED (止める出力は s₀ + H
+    以後の最初の出力)。途中で外れたら到達を取り消して `hold.breaks` に記録し、次の到達から数え直す。上限 (`cap`) は到達 + 保持を含む本段の
+    step 数で、保持の途中で上限に届いたら CENSORED。0 を書けば最初の到達で止める (forge-f5 の版の動き)。
+  - M6 の版で足したものは残す: 終了の状態の記録 `STOP_RULE_STATE.json` (`write_state`・`read_state`; `stop_rule.json` は見張りの途中も
+    書き換わる詳しい記録、こちらは本段が終わった後に 1 度だけ書く状態の印)、問題 YAML の `evaluate.stop_rule_thresholds` (`thresholds` と
+    同じキー; 例 case/45 の試験部の断面 x = 40・70・94 r_t は `x_fracs` に x / x_w を書く。既定は forge-f5 の版のまま)、上限の倍数の検査、
+    (§5.1 #36e) 帯の位置の抽出を受け渡しの抽出と同じ条件 (`deltastar_loop.handoff_extract_settings`: 一定 x の断面への補間
+    `remap_constant_x=True`・端の補間範囲の不足は欠測 `remap_edge="missing"`) で行うこと、Euler の参照の固定 {run, res, sha256}
+    (`deltastar.resolve_euler_ref`、sha が合わなければ使わない)、(§5.1 #36e (7)) 見張りの中で出力ごとに δ_E・δ_target (抽出器の量、使用域
+    [0, x_w] の全列) を受け渡しと同じ条件で抽出して `stop_rule.json` の行の `delta` に残すこと (**判定には使わない記録の量**。受け渡しの
+    関門の 2 窓の判定がこの記録を読み、計算の後に抽出し直さない)。抽出は別スレッド 1 本で行い (`DeltaRecorder`)、停止の判定を待たせない。
+    追いつかないときは最新の出力から 2 窓 (2W) より古い出力を飛ばす (`skipped`; 停止の時刻 s ≥ 最新の出力なので、[s − 2W, s] に入らない
+    出力だけ)。要求の断面の位置 (x_fracs × x_w) は `sections` に残す。
+  - θ_r の断面の基準は設計壁の出口 `physical_wall.domain[1]` (60de8125 の修正; 軸 Mach 則の終点 x_E ではない)。判定・量・見張り・forge の
+    止め方は forge-f5 の版のまま。
+
+**新しい規則であり、旧 `m9_watch.py` (§6.11、`case/45.isobutane_m6_d155/m9_watch.py`) と同等とは言わない**: m9_watch は窓の両端の差で傾向と振動を
+混ぜて判定し、断面・量・連続の到達の条件もここと違う (codex diagnose 2026-10-14、`notes/reviews/2026-10-14-half-inlet-370k-design-diagnose.md`)。
+ここは M6 の考え方を移したうえで、**平均の変化と振幅を分けて**判定する別の規則として登録する。m9_watch の到達の step・結果をこの規則の結果として読み替えない。
+REACHED は「この規則の量が停止の条件を満たした」の意味に限り、収束・設計の量の定常・壁の更新に進む条件 (§4.9) の合格ではない。
 
 判定量 (出力 res_<N>.h5 ごと、N > 0):
   - 質量の収支 $r = (\dot m_{in} - \dot m_{out})/\dot m_{in}$: 入口 (列 i = 0)・出口 (列 i = ni − 1) の列の折れ線を通る流束
@@ -22,12 +50,17 @@ M6 の判定 (窓の両端の差) は傾向と振動を混ぜるので、**平�
   - θ_r (各断面): $D_\theta$ = |後半の平均 − 前半の平均| / |窓の平均| × W / (後半の平均の step − 前半の平均の step) ≤ 0.05 % (2 万 step あたりに換算;
     諮問の Major)、振幅 (最大 − 最小)/2 / |窓の平均| ≤ 0.5 %。前半・後半は窓の中点 s − W/2 で分け、**中点ちょうどの出力は後半に入れる**
     (点数が奇数で等間隔のとき。諮問の計算と同じ割り方。換算するので線形の系列では割り方に依らない)。換算しない値も `D_raw` として記録する。
-  - 満たした最初の出力で REACHED (連続は要らない; 諮問 (b))。非有限で DIVERGED。REACHED は「指定の量の停止の条件を満たした」の意味に限り、
-    収束・設計の量の定常の VERDICT とは別。
+  - 満たした最初の出力で REACHED (連続は要らない; 諮問 (b))。ただし hold_steps (既定 `HOLD_STEPS_DEFAULT`) > 0 のときは上の「到達の後の継続」。
+    非有限で DIVERGED。REACHED は「指定の量の停止の条件を満たした」の意味に限り、収束・設計の量の定常の VERDICT とは別。
 
 状態: REACHED / CENSORED (上限まで正常に回って届かない) / DIVERGED (非有限、または forge の detectNaN) / EXEC_ERROR (forge が上限より前に異常終了・
 見張りの例外) / DATA_ERROR (出力が読めない・判定量が有限でない) / UNAVAILABLE (停止規則を使えない: euler_ref が無い・抽出できない・出力の間隔が
 窓に 9 点を入れられない — 本段は ns_steps の長さで回す)。記録は `<run>/stop_rule.json` (一時ファイル → rename で原子的に書く)。
+明示 (`evaluate.stop_rule: true`) の run は準備・起動の時点で使えないと分かったら例外で止めるので、UNAVAILABLE は見張りの途中で帯の位置を
+決められないとき (本段は prepare の nStepOuter = fallback_steps の出力で止める) だけ出る。既定 (キー無し) の run は準備・起動の時点で使えなくても
+UNAVAILABLE を記録して fallback_steps の長さで回す。本段が終わったら `run_staged_ns` が終了の状態を `<run>/STOP_RULE_STATE.json` に
+1 度だけ書く (`write_state`)。`run_staged_ns` の終了コード (REACHED・CENSORED・一部の UNAVAILABLE で 0) で合否を決めず、この状態を直接見る
+(`feedback.deltastar_loop.handoff_gate`)。
 
 見張り (`watch_main_stage`): `run_case.sh` を子プロセス (新しいプロセスグループ) で持ったまま、書き終わった res を判定し、REACHED・DIVERGED で forge に
 SIGTERM → 待って SIGKILL (止まったことを /proc で確かめる)、止めた出力より後の res を消す。forge の終了コードは `run_case.sh` の
@@ -59,8 +92,12 @@ R_AMP_MAX = 5e-3           # r の振幅 ≤ 0.5 %
 THETA_DRIFT_MAX = 5e-4     # D_θ ≤ 0.05 % / 2 万 step
 THETA_AMP_MAX = 5e-3       # θ_r の振幅 / |平均| ≤ 0.5 %
 X_FRACS = (0.4, 0.7, 0.95)
-CAP_DEFAULT = 200_000      # 停止規則を使うときの本段の上限 (諮問 (c)、M6 と同じ)
+CAP_DEFAULT = 200_000      # 停止規則を使うときの本段の上限 (諮問 (c)、M6 と同じ)。到達 + 保持を含む本段の step 数
+HOLD_STEPS_DEFAULT = 40_000   # 到達の後の継続の既定 (2026-10-14 ユーザ決定、forge-f5 経由)。evaluate.stop_rule_hold_steps で上書き (0 = 最初の到達で止める)
 STATES = ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR", "UNAVAILABLE")
+STATE = "STOP_RULE_STATE.json"      # 本段の終了の状態 (run_staged_ns が本段の後に 1 度だけ書く; M6 の版で足した)
+PLAN = ("plans/active/tooling-nozzle-cooled-wall-ns-settling.md §4.6・plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a "
+        "(2026-10-14 統合: 既定で使う・明示のときだけ使えない設定を例外・保持の既定 40,000)")
 RECORD = "stop_rule.json"
 BAND_DIR = "stop_rule_band"
 _RES_RE = re.compile(r"res_(\d+)\.h5")
@@ -73,14 +110,29 @@ class Unavailable(Exception):
 
 
 def thresholds(**kw) -> dict:
-    """判定の閾値・窓・断面 (既定は §4.6)。未知のキーは拒否する。"""
+    """判定の閾値・窓・断面 (既定は §4.6)。未知のキーは拒否する。値の検査 (M6 の版で足した、問題 YAML の `evaluate.stop_rule_thresholds` も
+    ここを通る): window・min_points は正の整数 (min_points ≥ 2)、4 つの閾値は有限の正の数、x_fracs は (0, 1] の有限の数の空でない
+    重複の無いリスト (設計壁の出口 x_w に対する比; 断面は x_fracs × x_w に最も近い列)。"""
     d = dict(window=WINDOW, min_points=MIN_POINTS, r_mean_max=R_MEAN_MAX, r_amp_max=R_AMP_MAX,
              theta_drift_max=THETA_DRIFT_MAX, theta_amp_max=THETA_AMP_MAX, x_fracs=list(X_FRACS))
     bad = set(kw) - set(d)
     if bad:
         raise ValueError(f"停止規則の未知の設定 {sorted(bad)}")
     d.update(kw)
-    d["x_fracs"] = [float(v) for v in d["x_fracs"]]
+    for k in ("window", "min_points"):
+        v = d[k]
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0 or (k == "min_points" and v < 2):
+            raise ValueError(f"停止規則の {k} は正の整数{' (≥ 2)' if k == 'min_points' else ''} ({v!r})")
+    for k in ("r_mean_max", "r_amp_max", "theta_drift_max", "theta_amp_max"):
+        v = d[k]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(v) or v <= 0:
+            raise ValueError(f"停止規則の {k} は有限の正の数 ({v!r})")
+    xf = d["x_fracs"]
+    if (not isinstance(xf, (list, tuple)) or not xf
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(v) or not 0.0 < v <= 1.0 for v in xf)
+            or len({float(v) for v in xf}) != len(xf) or len({theta_key(v) for v in xf}) != len(xf)):
+        raise ValueError(f"停止規則の x_fracs は (0, 1] の数の空でない重複の無いリスト ({xf!r})")
+    d["x_fracs"] = [float(v) for v in xf]
     return d
 
 
@@ -89,9 +141,13 @@ def theta_key(frac: float) -> str:
 
 
 # ------------------------------------------------------------------ 設定 (prepare_ns が prepare_info.json の stop_rule に書く)
+EVALUATE_KEYS = ("stop_rule", "stop_rule_cap", "stop_rule_thresholds", "stop_rule_hold_steps")
+
+
 def check_evaluate_keys(evaluate: dict) -> tuple:
-    """問題 YAML の `evaluate.stop_rule` (true / false) と `evaluate.stop_rule_cap` (正の整数) を検査して (stop_rule, cap) を返す
-    (無ければ None)。不正値は ValueError (prepare_ns は run dir を作る前に呼ぶ)。"""
+    """問題 YAML の `evaluate.stop_rule` (true / false)・`evaluate.stop_rule_cap` (正の整数)・`evaluate.stop_rule_thresholds`
+    (`thresholds` のキーの mapping)・`evaluate.stop_rule_hold_steps` (0 以上の整数) を検査して (stop_rule, cap, 閾値の上書き, hold) を返す
+    (無ければ None・None・{}・`HOLD_STEPS_DEFAULT`; hold は null も既定)。不正値は ValueError (prepare_ns は run dir を作る前に呼ぶ)。"""
     req = cap = None
     if "stop_rule" in evaluate:
         req = evaluate["stop_rule"]
@@ -101,23 +157,60 @@ def check_evaluate_keys(evaluate: dict) -> tuple:
         cap = evaluate["stop_rule_cap"]
         if isinstance(cap, bool) or not isinstance(cap, int) or cap <= 0:
             raise ValueError(f"evaluate.stop_rule_cap は正の整数 ({cap!r})")
-    return req, cap
+    over = evaluate.get("stop_rule_thresholds") or {}
+    if not isinstance(over, dict):
+        raise ValueError(f"evaluate.stop_rule_thresholds は mapping ({over!r})")
+    thresholds(**over)                          # 未知のキー・不正値はここで ValueError
+    hold = evaluate.get("stop_rule_hold_steps")
+    if hold is None:
+        hold = HOLD_STEPS_DEFAULT
+    if isinstance(hold, bool) or not isinstance(hold, int) or hold < 0:
+        raise ValueError(f"evaluate.stop_rule_hold_steps は 0 以上の整数 ({hold!r})")
+    return req, cap, dict(over), int(hold)
+
+
+def is_explicit(sr: dict | None) -> bool:
+    """prepare_info の stop_rule が**明示の要求** (`evaluate.stop_rule: true` か引数 stop_rule=True) か。明示なら使えない設定は例外、
+    既定 (キー無し) なら UNAVAILABLE を記録して fallback_steps で回す。統合 (2026-10-14) より前の記録 (`explicit` が無い) は
+    requested_source で決める ("evaluate.stop_rule"・"引数" は明示、"既定 (使う)" は既定)。"""
+    if not isinstance(sr, dict) or not sr.get("requested"):
+        return False
+    if "explicit" in sr:
+        return bool(sr["explicit"])
+    return sr.get("requested_source") in ("evaluate.stop_rule", "引数")
 
 
 def resolve_settings(evaluate: dict, *, nsteps_arg, n_main: int, n_main_source: str, out_int: int, euler_ref,
                      requested: bool | None = None) -> dict:
-    """停止規則の設定を決める。requested: None なら `evaluate.stop_rule` (無ければ使う)、False なら使わない (関数の引数・CLI の --no-stop-rule)。
-    上限: 引数 nsteps_arg (`--steps`) があればそれ、無ければ `evaluate.stop_rule_cap` (既定 200,000)。
+    """停止規則の設定を決める。requested: None なら `evaluate.stop_rule` (**無ければ使う** = 既定)、True / False は関数の引数・
+    CLI の --no-stop-rule。`explicit` は明示の要求 (引数 True か `evaluate.stop_rule: true`) — 明示なら呼ぶ側 (`prepare_ns`・`run_staged_ns`)
+    は使えない設定を例外にし、既定なら `use` = False と理由を記録して本段を fallback_steps で回す。
+    上限: 引数 nsteps_arg (`--steps`) があればそれ、無ければ `evaluate.stop_rule_cap` (既定 200,000)。上限は到達 + 保持を含む本段の step 数。
     使わない・使えないときの本段の長さは n_main (prepare_ns の `--steps` > `evaluate.ns_steps` > 60,000) — `fallback_steps` に記録する。
-    使えない条件 (`use` = False と理由): euler_ref が無い、出力の間隔が窓に MIN_POINTS 点を入れられない (間隔 > W/(MIN_POINTS − 1))。"""
-    th = thresholds()
-    yaml_req, yaml_cap = check_evaluate_keys(evaluate)
+    使えない条件 (`use` = False と理由): euler_ref が無い、出力の間隔が窓に MIN_POINTS 点を入れられない (間隔 > W/(MIN_POINTS − 1))、
+    上限が出力の間隔の倍数でない (forge は outStepInterval の倍数でしか res を書かないので、上限の出力が無く CENSORED を見分けられない)。"""
+    from ..feedback.deltastar_loop import handoff_extract_settings
+    from ..metrics.deltastar import resolve_euler_ref
+    yaml_req, yaml_cap, th_over, hold = check_evaluate_keys(evaluate)
+    th = thresholds(**th_over)
     if requested is None:
-        requested, src = (yaml_req, "evaluate.stop_rule") if yaml_req is not None else (True, "既定 (使う)")
+        if yaml_req is not None:
+            requested, src, explicit = yaml_req, "evaluate.stop_rule", bool(yaml_req)
+        else:
+            requested, src, explicit = True, "既定 (使う)", False
     else:
         requested, src = bool(requested), "引数"
-    rec = {"requested": requested, "requested_source": src, "fallback_steps": int(n_main), "fallback_steps_source": n_main_source,
-           "out_step_interval": int(out_int), "euler_ref": (str(euler_ref) if euler_ref else None), **th}
+        explicit = requested
+    # euler_ref: run dir (str) か固定のスナップショット {run, res, sha256} (§5.1 #36e (6); ここでは形だけ検査、sha は prepare_ns・起動前に照合)
+    eref = resolve_euler_ref(euler_ref, verify=False)["record"] if euler_ref else None
+    rec = {"requested": requested, "requested_source": src, "explicit": explicit,
+           "fallback_steps": int(n_main), "fallback_steps_source": n_main_source,
+           "out_step_interval": int(out_int), "euler_ref": eref, **th,
+           "thresholds_source": ({"evaluate.stop_rule_thresholds": sorted(th_over)} if th_over else "既定"),
+           "hold_steps": hold,
+           "hold_steps_source": ("evaluate.stop_rule_hold_steps" if evaluate.get("stop_rule_hold_steps") is not None
+                                 else f"既定 {HOLD_STEPS_DEFAULT}"),
+           "extract": {**handoff_extract_settings(), "source": "feedback.deltastar_loop.handoff_extract_settings (§5.1 #36e)"}}
     if not requested:
         rec.update(use=False, reason="使わない指定", cap=None, cap_source=None)
         return rec
@@ -133,9 +226,11 @@ def resolve_settings(evaluate: dict, *, nsteps_arg, n_main: int, n_main_source: 
     if int(out_int) * (th["min_points"] - 1) > th["window"]:
         why.append(f"出力の間隔 {int(out_int)} step では窓 {th['window']} step に {th['min_points']} 点が入らない "
                    f"(evaluate.outStepInterval ≤ {th['window'] // (th['min_points'] - 1)})")
+    if int(cap) % int(out_int):
+        why.append(f"上限 {int(cap)} step が出力の間隔 {int(out_int)} step の倍数でない (上限の出力が書かれず CENSORED を見分けられない)")
     rec.update(use=not why, reason=("; ".join(why) or None), cap=cap, cap_source=cap_src)
-    if cap < th["window"] + int(out_int):
-        rec["note"] = f"上限 {cap} では最初の出力から窓 {th['window']} step を覆えない (必ず CENSORED)"
+    if cap < th["window"] + int(out_int) + hold:
+        rec["note"] = (f"上限 {cap} では最初の出力から窓 {th['window']} step を覆って保持 {hold} step を終えられない (必ず CENSORED)")
     return rec
 
 
@@ -246,7 +341,10 @@ def snapshot(geo: RunGeometry, step: int, band: dict | None, x_fracs=X_FRACS, va
 
 # ------------------------------------------------------------------ 帯の位置 y_b (本段の最初の出力 × Euler 参照)
 def resolve_path(p) -> Path | None:
-    """prepare_info の euler_ref (相対なら cwd、無ければリポジトリ直下からの相対) を解決する。無ければ None。"""
+    """prepare_info の euler_ref (相対なら cwd、無ければリポジトリ直下からの相対) を解決する。無ければ None。固定のスナップショットの指定
+    {run, res, sha256} (§5.1 #36e) は run のディレクトリを解決する (sha の照合は `check_euler_ref`)。"""
+    if isinstance(p, dict):
+        p = p.get("run")
     if not p:
         return None
     cand = [Path(p)]
@@ -258,13 +356,44 @@ def resolve_path(p) -> Path | None:
     return None
 
 
+def euler_ref_spec(euler_ref):
+    """prepare_info の euler_ref を抽出器に渡す指定にする: run dir (str、`resolve_path` で解決) か固定のスナップショット
+    {run (解決した絶対パス), res, sha256}。見つからなければ None。"""
+    eu = resolve_path(euler_ref)
+    if eu is None:
+        return None
+    if isinstance(euler_ref, dict):
+        return {"run": str(eu), "res": euler_ref.get("res"), "sha256": euler_ref.get("sha256")}
+    return eu
+
+
+def check_euler_ref(euler_ref) -> dict:
+    """euler_ref を解決して固定のスナップショットなら sha256 を照合する (§5.1 #36e (6))。見つからない・sha が違えば ValueError。
+    戻り: `deltastar.resolve_euler_ref` の戻り。"""
+    from ..metrics.deltastar import resolve_euler_ref
+    spec = euler_ref_spec(euler_ref)
+    if spec is None:
+        raise ValueError(f"euler_ref が無い・見つからない ({euler_ref!r})")
+    return resolve_euler_ref(spec, verify=True)
+
+
+def band_extract_kw(sr: dict) -> dict:
+    """帯の位置の抽出 (`fix_band`) に渡す条件: 受け渡しの抽出と同じ一定 x の断面への補間と端の扱い (prepare_info の stop_rule.extract、
+    無ければ今の既定 `handoff_extract_settings`)。帯の位置は抽出器の縁の推定 (δ_r の平滑化・緩和の前) で決まるので、ω・平滑化・昇格の上限は
+    渡さない (昇格の上限で帯の位置が使えなくならないように)。"""
+    from ..feedback.deltastar_loop import handoff_extract_settings
+    ex = sr.get("extract") or handoff_extract_settings()
+    return {k: ex[k] for k in ("remap_constant_x", "remap_edge") if k in ex}
+
+
 def fix_band(run_dir, step: int, euler_ref, out_dir, **extract_kw) -> dict:
     """本段の最初の出力 res_<step>.h5 を Euler 参照で `extract_and_merge(.., band_select="edge")` と同じ抽出にかけ、帯の位置 y_b(x) [r_t] を返す
     (`delta_r_edge.csv` の y_b = 縁 y* の edge_c (1.25) 倍; さらに掛けない)。抽出は run の他の出力を読まないよう、prepare_info.json・
     nozzle.h5・その 1 つの res だけを一時ディレクトリに symlink して行う (`_load_structured` は最新の res を読むため)。
-    使えない (euler_ref が無い・抽出が失敗・y_b が有限でない) ときは Unavailable。"""
+    使えない (euler_ref が無い・抽出が失敗・y_b が有限でない) ときは Unavailable。euler_ref が固定のスナップショット {run, res, sha256} なら
+    その res を読み、sha が合わなければ Unavailable (§5.1 #36e (6))。extract_kw は `band_extract_kw` (一定 x の断面への補間・端の扱い)。"""
     run_dir = Path(run_dir).resolve(); od = Path(out_dir)
-    eu = resolve_path(euler_ref)
+    eu = euler_ref_spec(euler_ref)
     if eu is None:
         raise Unavailable(f"euler_ref が無い・見つからない ({euler_ref!r})")
     res = run_dir / f"res_{step}.h5"
@@ -284,9 +413,135 @@ def fix_band(run_dir, step: int, euler_ref, out_dir, **extract_kw) -> dict:
     x, yb = edge[:, 0], edge[:, 5]
     if len(x) < 2 or not np.all(np.isfinite(yb)) or not np.all(yb > 0):
         raise Unavailable(f"帯の位置 y_b が有限・正でない (点 {len(x)}、非有限 {int(np.count_nonzero(~np.isfinite(yb)))})")
-    return {"x": x.tolist(), "y_b": yb.tolist(), "step": int(step), "res_sha256": _sha256(res), "euler_ref": str(eu),
+    return {"x": x.tolist(), "y_b": yb.tolist(), "step": int(step), "res_sha256": _sha256(res),
+            "euler_ref": (eu if isinstance(eu, dict) else str(eu)),
             "extract": {"function": "feedback.deltastar_loop.extract_and_merge", "band_select": "edge", **{k: repr(v) for k, v in extract_kw.items()}},
             "out_dir": str(od), "seconds": round(time.time() - t0, 1)}
+
+
+# ------------------------------------------------------------------ 出力ごとの δ_E・δ_target の記録 (§5.1 #36e (7); 判定には使わない)
+DELTA_WAIT_S = 7200.0      # 本段の後に残りの抽出を待つ上限 [s] (抽出 1 本 ~2 分 × 追いつかない分; 飛ばす規則で 2W/出力の間隔 + 1 本まで)
+
+
+def use_columns(run_dir) -> dict:
+    """δ の記録の列: NS の列の x (抽出器の `_load_structured` と同じ式 COORD / S) のうち使用域 [0, x_w] (x_w = 設計壁の出口
+    physical_wall.domain[1]) の列。戻り {"x" (r_t、列の昇順), "i" (列の番号), "x_w", "scale_m"}。"""
+    run_dir = Path(run_dir)
+    info = json.loads((run_dir / "prepare_info.json").read_text())
+    ni, nj = int(info["mesh"]["ni"]), int(info["mesh"]["nj"])
+    S = float(info["scale_m"])
+    xw = float((info.get("physical_wall") or {})["domain"][1])
+    with h5py.File(run_dir / "nozzle.h5", "r") as h:
+        nc = h["/MESH/COORD"][:].reshape(-1, 3)
+    x = (nc[:, 0].reshape(ni, nj) / S)[:, 0]
+    sel = np.where((x >= 0.0) & (x <= xw + 1e-9))[0]
+    return {"x": x[sel], "i": sel, "x_w": xw, "scale_m": S}
+
+
+def delta_snapshot(run_dir, step: int, euler_ref, extract: dict, x_use) -> dict:
+    """出力 res_<step>.h5 1 つを受け渡しの抽出と同じ条件 (`extract` = `handoff_extract_settings`: edge・一定 x の断面への補間・端は欠測・
+    ω・平滑化の λ・昇格の上限、固定した Euler の参照) で抽出し、使用域の列 x_use の δ_E (未緩和の平滑化抽出)・δ_target (緩和・再平滑化の
+    後の次の壁の入力)・held を返す (r_t 単位、抽出しなかった列は NaN と `missing`)。抽出は run の他の出力を読まないよう一時ディレクトリに
+    prepare_info.json・nozzle.h5・その res だけを symlink して行い、出力の表は捨てる (行の値だけを stop_rule.json に残す)。"""
+    from ..feedback.deltastar_loop import extract_and_merge, read_delta_r_next
+    run_dir = Path(run_dir).resolve()
+    res = run_dir / f"res_{step}.h5"
+    t0 = time.time()
+    kw = {k: v for k, v in extract.items() if k != "source"}
+    with tempfile.TemporaryDirectory(prefix="stop_rule_delta_") as td:
+        src = Path(td) / run_dir.name
+        src.mkdir()
+        for name in ("prepare_info.json", "nozzle.h5"):
+            (src / name).symlink_to(run_dir / name)
+        (src / res.name).symlink_to(res)
+        summ = extract_and_merge(src, euler_ref, out_dir=Path(td) / "out", **kw)
+        nx = read_delta_r_next(Path(td) / "out" / "delta_r_next.csv")
+    x_use = np.asarray(x_use, dtype=float)
+    xe = np.atleast_1d(np.asarray(nx["x_rt"], dtype=float))
+    if len(xe) == 0:
+        raise ValueError(f"res_{step}.h5 の抽出の表が空")
+    # 列の対応は x の一致で取る (抽出器の x と use_columns の x は同じ式 COORD / S。表の x は '%.18e' で往復しても同じ値)
+    k = np.clip(np.searchsorted(xe, x_use), 0, len(xe) - 1)
+    hit = xe[k] == x_use
+    dE = np.where(hit, np.atleast_1d(nx["delta_E"])[k], np.nan)
+    dT = np.where(hit, np.atleast_1d(nx["delta_target"])[k], np.nan)
+    held = np.where(hit, np.atleast_1d(nx["held"])[k] != 0, False)
+    return {"delta_E": dE.tolist(), "delta_target": dT.tolist(), "held": [int(v) for v in held],
+            "missing": [int(j) for j in np.where(~hit)[0]], "n_missing": int((~hit).sum()), "n_held": int(held.sum()),
+            "lam": summ["smooth"]["lam"], "res_sha256": _sha256(res), "seconds": round(time.time() - t0, 2)}
+
+
+class DeltaRecorder:
+    """出力ごとの δ_E・δ_target の抽出 (`delta_snapshot`) を別スレッド 1 本で回す (停止の判定を抽出で待たせない)。submit した順に処理し、
+    最新の submit から span (= 2 窓 2W) より古い出力は抽出せず `skipped` にする (停止の時刻 s は最新の出力以後なので [s − 2W, s] に入らない)。
+    例外は行の `error` に残す (記録の量なので見張りは止めない)。"""
+
+    def __init__(self, run_dir, euler_ref, extract: dict, x_use, span: int) -> None:
+        import queue
+        import threading
+        self.run_dir, self.euler_ref, self.extract, self.x_use, self.span = Path(run_dir), euler_ref, dict(extract), list(x_use), int(span)
+        self._q = queue.Queue()
+        self._lock = threading.Lock()
+        self._done: dict = {}
+        self._latest = None
+        self._stop = False
+        self._t = threading.Thread(target=self._work, name="stop_rule_delta", daemon=True)
+        self._t.start()
+
+    def submit(self, step: int) -> None:
+        with self._lock:
+            self._latest = int(step) if self._latest is None else max(self._latest, int(step))
+        self._q.put(int(step))
+
+    def _work(self) -> None:
+        while True:
+            step = self._q.get()
+            try:
+                if step is None:
+                    return
+                with self._lock:
+                    latest, stop = self._latest, self._stop
+                if stop:
+                    out = {"error": "見張りが終わったので抽出しない"}
+                elif latest is not None and step < latest - self.span:
+                    out = {"skipped": f"最新の出力 {latest} から 2 窓 {self.span} step より古い (受け渡しの 2 窓に入らない)"}
+                else:
+                    try:
+                        out = delta_snapshot(self.run_dir, step, self.euler_ref, self.extract, self.x_use)
+                    except Exception as e:  # noqa: BLE001 — 記録の量の抽出の失敗は行に残す (見張りは止めない)
+                        out = {"error": f"{type(e).__name__}: {e}"}
+                with self._lock:
+                    self._done[step] = out
+            finally:
+                self._q.task_done()
+
+    def collect(self) -> dict:
+        """終わった抽出 {step: 結果} を取り出す (取り出した分は消す)。"""
+        with self._lock:
+            out, self._done = self._done, {}
+        return out
+
+    def finish(self, wait_s: float, abandon: bool = False) -> dict:
+        """残りの抽出を wait_s まで待って止める (abandon なら待たずに未着手を捨てる)。戻り: 取り出していない結果。"""
+        if abandon:
+            with self._lock:
+                self._stop = True
+        self._q.put(None)
+        self._t.join(timeout=max(float(wait_s), 0.0))
+        out = self.collect()
+        out["_unfinished"] = bool(self._t.is_alive())
+        return out
+
+
+def _attach_deltas(rows: list, got: dict) -> int:
+    """`DeltaRecorder` の結果を行の `delta` に付ける。付けた数を返す。"""
+    by = {r["step"]: r for r in rows}
+    n = 0
+    for st, d in got.items():
+        if isinstance(st, int) and st in by:
+            by[st]["delta"] = d
+            n += 1
+    return n
 
 
 # ------------------------------------------------------------------ 判定
@@ -339,9 +594,29 @@ def row_data_problem(row: dict, x_fracs=X_FRACS) -> str | None:
     return f"判定量が有限でない: {', '.join(bad)}" if bad else None
 
 
-def first_stop(rows: list, **th) -> dict | None:
-    """保存済みの系列の最初の終わり {status: REACHED / DIVERGED / DATA_ERROR, k, step, judge}。無ければ None。"""
+def _hold_step(hs: dict, ok: bool, step: int, hold: int, why=None) -> bool:
+    """到達の後の継続 (`hold_steps`; M6 の版で足した、既定 `HOLD_STEPS_DEFAULT`) の状態 hs = {start, reached, breaks} を出力 1 つぶん
+    進め、REACHED にするかを返す。
+    条件を満たした最初の出力 s₀ から数え、step − s₀ ≥ hold になった出力で True。途中で条件が外れたら到達を取り消して breaks に記録し、
+    次に満たした出力から数え直す。hold 0 は条件を満たした出力で True (forge-f5 の版の「最初の到達で止める」と同じ)。"""
+    if not ok:
+        if hs.get("start") is not None:
+            hs["breaks"].append({"start": hs["start"], "broken_at": int(step), "why": why})
+            hs["start"] = None
+        return False
+    if hs.get("start") is None:
+        hs["start"] = int(step)
+        hs["reached"].append(int(step))
+    return int(step) - hs["start"] >= int(hold)
+
+
+def first_stop(rows: list, hold_steps: int = 0, **th) -> dict | None:
+    """保存済みの系列の最初の終わり {status: REACHED / DIVERGED / DATA_ERROR, k, step, judge}。無ければ None。
+    hold_steps > 0 は到達の後 hold_steps の間すべての出力で条件を保った出力を REACHED にし、`hold` に経過を付ける。**関数の既定 0 は
+    最初の到達** (系列の再生用); 見張り (`watch_main_stage`) と同じ結果にするには prepare_info の stop_rule.hold_steps (既定
+    `HOLD_STEPS_DEFAULT`) を渡す。"""
     fr = th.get("x_fracs", X_FRACS)
+    hs = {"start": None, "reached": [], "breaks": []}
     for k, row in enumerate(rows):
         if row.get("nonfinite_all"):
             return {"status": "DIVERGED", "k": k, "step": row["step"], "judge": None}
@@ -349,8 +624,11 @@ def first_stop(rows: list, **th) -> dict | None:
         if p:
             return {"status": "DATA_ERROR", "k": k, "step": row["step"], "judge": None, "note": p}
         j = judge_rows(rows, k, **th)
-        if j["ok"]:
-            return {"status": "REACHED", "k": k, "step": row["step"], "judge": j}
+        if _hold_step(hs, j["ok"], row["step"], hold_steps, j.get("why")):
+            out = {"status": "REACHED", "k": k, "step": row["step"], "judge": j}
+            if hold_steps:
+                out["hold"] = {"hold_steps": int(hold_steps), **hs}
+            return out
     return None
 
 
@@ -370,6 +648,25 @@ def save_record(run_dir, rec: dict) -> Path:
     tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False, default=_json_default))
     os.replace(tmp, p)
     return p
+
+
+def write_state(run_dir, state: dict) -> Path:
+    """本段の終了の状態 `<run>/STOP_RULE_STATE.json` を原子的に書く (一時ファイル → rename; M6 の版で足した)。state は少なくとも status を持つ。
+    `run_staged_ns` が本段の後に 1 度だけ書く。見張りの途中の記録 (stop_rule.json、status は RUNNING から変わる) と違い、このファイルが
+    あれば本段は終わっている (無いのに prepare_info が停止規則を要求していれば、本段が終わっていないか記録が失われた)。"""
+    if state.get("status") not in STATES + ("NOT_USED",):
+        raise ValueError(f"停止の状態 {state.get('status')!r} は {STATES + ('NOT_USED',)} のどれか")
+    p = Path(run_dir) / STATE
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps({"version": 1, "plan": PLAN, **state}, indent=1, ensure_ascii=False, default=_json_default))
+    os.replace(tmp, p)
+    return p
+
+
+def read_state(run_dir) -> dict | None:
+    """`<run>/STOP_RULE_STATE.json` を読む (無ければ None)。"""
+    p = Path(run_dir) / STATE
+    return json.loads(p.read_text()) if p.exists() else None
 
 
 def _json_default(o):
@@ -514,7 +811,7 @@ def stop_forge(bash_pid: int, run_dir, term_wait_s: float = 180.0, kill_wait_s: 
 
 # ------------------------------------------------------------------ 見張り (run_staged_ns の本段)
 def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float = 60.0, term_wait_s: float = 180.0,
-                     kill_wait_s: float = 60.0, post_wait_s: float = 1800.0, read_tries: int = 3) -> dict:
+                     kill_wait_s: float = 60.0, post_wait_s: float = 1800.0, read_tries: int = 3, delta_wait_s: float = DELTA_WAIT_S) -> dict:
     """本段の forge を `run_case.sh` の子プロセスで起動し、停止規則で見張る。sr は prepare_info.json の stop_rule (use = True、cap が
     solverConfig の nStepOuter に書いてあること)。戻り: {status, stop_step, forge_rc, rc}。rc は呼ぶ側に返す終了コード
     (REACHED・CENSORED・UNAVAILABLE で ns_steps まで回った = 0、それ以外は非 0)。記録は `<run>/stop_rule.json`。
@@ -525,13 +822,27 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
     run_dir = Path(run_dir).resolve()
     th = {k: sr[k] for k in ("window", "min_points", "r_mean_max", "r_amp_max", "theta_drift_max", "theta_amp_max", "x_fracs")}
     cap = int(sr["cap"]); fallback = int(sr["fallback_steps"])
+    # 到達の後の継続 (0 = 最初の到達で止める)。prepare_info の stop_rule.hold_steps (resolve_settings の既定 HOLD_STEPS_DEFAULT)。
+    # 統合 (2026-10-14) より前に準備した run の記録にキーが無ければ 0 (準備した時の動きのまま)
+    hold = int(sr.get("hold_steps") or 0)
     pre = [n for n in res_steps(run_dir) if n > 0]
     if pre:
         raise RuntimeError(f"{run_dir}: 本段の起動前に出力 res_{pre[0]}.h5 ほか {len(pre)} 個がある — 停止規則の系列に混ざるので起動しない")
     geo = RunGeometry(run_dir)
-    rec = {"version": 1, "plan": "plans/active/tooling-nozzle-cooled-wall-ns-settling.md §4.6", "settings": sr, "status": "RUNNING",
+    rec = {"version": 1, "plan": PLAN, "settings": sr, "status": "RUNNING",
            "started": _now(), "band": None, "unavailable": None, "rows": [], "judge_last": None, "tries": {},
-           "timing": {"poll_s": poll_s, "settle_s": settle_s, "term_wait_s": term_wait_s, "kill_wait_s": kill_wait_s}}
+           "timing": {"poll_s": poll_s, "settle_s": settle_s, "term_wait_s": term_wait_s, "kill_wait_s": kill_wait_s},
+           "hold": ({"hold_steps": hold, "start": None, "reached": [], "breaks": []} if hold else None),
+           # 要求の断面の位置 (x_fracs × x_w)。実際に選ばれた列の x は各行の x_theta_r_<比> (§6 V-h370)
+           "sections": [{"key": theta_key(f), "x_frac": float(f), "x_requested": float(f) * geo.x_wall_exit} for f in th["x_fracs"]]}
+    # 出力ごとの δ_E・δ_target の記録 (§5.1 #36e (7); 判定には使わない)。列は使用域 [0, x_w] の NS の列、条件は受け渡しの抽出と同じ
+    from ..feedback.deltastar_loop import handoff_extract_settings
+    ex = sr.get("extract") or {**handoff_extract_settings(), "source": "既定 (prepare_info の stop_rule に extract が無い)"}
+    uc = use_columns(run_dir)
+    rec["delta_series"] = {"x": uc["x"].tolist(), "use_domain": [0.0, uc["x_w"]], "scale_m": uc["scale_m"], "extract": ex,
+                           "euler_ref": sr.get("euler_ref"), "span_steps": 2 * int(th["window"]),
+                           "note": "判定には使わない記録の量。行の delta に δ_E (未緩和の平滑化抽出)・δ_target (緩和・再平滑化の後)・held [r_t]"}
+    recorder = DeltaRecorder(run_dir, euler_ref_spec(sr.get("euler_ref")), ex, uc["x"], 2 * int(th["window"]))
     save_record(run_dir, rec)
     t_launch = time.time()
     with open(run_dir / "run_case_stdout.log", "w") as log:
@@ -552,6 +863,8 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
 
     try:
         while True:
+            if _attach_deltas(rows, recorder.collect()):
+                save_record(run_dir, rec)
             done = proc.poll() is not None
             steps_now = res_steps(run_dir)
             for n in [m for m in steps_now if m > 0 and m not in seen]:
@@ -561,7 +874,7 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
                     V = read_values(run_dir / f"res_{n}.h5")
                     if rec["band"] is None and rec["unavailable"] is None:
                         try:
-                            rec["band"] = fix_band(run_dir, n, sr.get("euler_ref"), run_dir / BAND_DIR)
+                            rec["band"] = fix_band(run_dir, n, sr.get("euler_ref"), run_dir / BAND_DIR, **band_extract_kw(sr))
                         except Unavailable as e:
                             rec["unavailable"] = {"reason": str(e), "step": n,
                                                   "action": f"停止規則を使わず fallback_steps {fallback} step で止める"}
@@ -583,11 +896,17 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
                     if p:
                         stop = {"status": "DATA_ERROR", "step": n, "note": p}
                 rows.append(row)
+                if not row["nonfinite_all"]:
+                    recorder.submit(n)
                 if stop is None and rec["unavailable"] is None:
                     j = judge_rows(rows, **th)
                     row["judge"] = j
                     rec["judge_last"] = j
-                    if j["ok"]:
+                    if hold:
+                        if _hold_step(rec["hold"], j["ok"], n, hold, j.get("why")):
+                            stop = {"status": "REACHED", "step": n,
+                                    "note": f"最初の到達 {rec['hold']['start']} の後 {hold} step のすべての出力で条件を保った"}
+                    elif j["ok"]:
                         stop = {"status": "REACHED", "step": n}
                 if stop is None and rec["unavailable"] is not None and n >= fallback:
                     stop = {"status": "UNAVAILABLE", "step": n, "note": f"停止規則を使えないので fallback_steps {fallback} の出力で止めた"}
@@ -601,6 +920,7 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
             time.sleep(poll_s)
     except BaseException as e:
         # 見張りの例外でも forge を止めて状態を残す
+        _attach_deltas(rows, recorder.finish(0.0, abandon=True))
         rec["stop_forge"] = stop_forge(proc.pid, run_dir, term_wait_s, kill_wait_s) if proc.poll() is None else None
         rec.update(status="EXEC_ERROR", note=f"見張りの例外: {type(e).__name__}: {e}", finished=_now())
         save_record(run_dir, rec)
@@ -647,6 +967,8 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
             rec["note"] = stop["note"]
     elif forge_rc == 0 and last >= cap:
         status, step = ("UNAVAILABLE" if rec["unavailable"] is not None else "CENSORED"), last
+        if status == "CENSORED" and hold and rec["hold"]["start"] is not None:
+            rec["note"] = f"到達 {rec['hold']['start']} の後の {hold} step の保持が上限 {cap} までに終わらない (保持の途中で上限)"
     elif forge_rc not in (None, 0) and sorted(run_dir.glob("res_nan_*.h5")):
         status, step = "DIVERGED", None
         nan_files = sorted(run_dir.glob("res_nan_*.h5"))
@@ -661,6 +983,12 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
         rec["deleted_after_stop"] = delete_after(run_dir, step)
     if step is not None and (run_dir / f"res_{step}.h5").exists() and status in ("REACHED", "DIVERGED", "UNAVAILABLE", "CENSORED"):
         rec["stop_sha256"] = _sha256(run_dir / f"res_{step}.h5")
+    # 残りの δ の抽出を待って行に付ける (止めた出力より後の出力は行に無い。抽出の時間は delta_series に)
+    left = recorder.finish(delta_wait_s)
+    rec["delta_series"]["unfinished_at_end"] = left.pop("_unfinished")
+    _attach_deltas(rows, left)
+    secs = [r["delta"]["seconds"] for r in rows if isinstance(r.get("delta"), dict) and "seconds" in r["delta"]]
+    rec["delta_series"]["seconds"] = ({"n": len(secs), "mean": float(np.mean(secs)), "max": float(np.max(secs))} if secs else {"n": 0})
     rec.update(status=status, stop_step=step, last_output=last, finished=_now())
     if status == "REACHED":
         rec["recorded_at_stop"] = window_summary(rows, step, th["window"])

@@ -1,0 +1,112 @@
+{
+ "undecidable": [],
+ "pre": {
+  "評価域の節点数 (内点 / 境界)": [
+   83310,
+   1499
+  ],
+  "run_0598_rq_e1 自己点検": [
+   "[quantizeState] step 1: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 roUy 0 roUz 0 roK 0 roOmega 0 roY0 0 roY1 0 / 合計 0 (0 が期待。全 CV 580679、丸めのカーネルの直前と直後の生のビットの比較)",
+   "[quantizeState] step 1: 表せない値 roe 0 (Q) / roeN 0 (Q_N) / roeM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)",
+   "[quantizeState] step 2000: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 roUy 0 roUz 0 roK 0 roOmega 0 roY0 0 roY1 0 / 合計 0 (0 が期待。全 CV 580679、丸めのカーネルの直前と直後の生のビットの比較)",
+   "[quantizeState] step 2000: 表せない値 roe 0 (Q) / roeN 0 (Q_N) / roeM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)"
+  ],
+  "run_0599_rq_e2 自己点検": [
+   "[quantizeState] step 1: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 roUy 0 roUz 0 roK 0 roOmega 0 roY0 0 roY1 0 / 合計 0 (0 が期待。全 CV 580679、丸めのカーネルの直前と直後の生のビットの比較)",
+   "[quantizeState] step 1: 表せない値 roe 0 (Q) / roeN 0 (Q_N) / roeM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)",
+   "[quantizeState] step 2000: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 roUy 0 roUz 0 roK 0 roOmega 0 roY0 0 roY1 0 / 合計 0 (0 が期待。全 CV 580679、丸めのカーネルの直前と直後の生のビットの比較)",
+   "[quantizeState] step 2000: 表せない値 roe 0 (Q) / roeN 0 (Q_N) / roeM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)"
+  ],
+  "run_0620_rq_e3 自己点検": [
+   "[quantizeState] step 1: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 roUy 0 roUz 0 roK 0 roOmega 0 roY0 0 roY1 0 / 合計 0 (0 が期待。全 CV 580679、丸めのカーネルの直前と直後の生のビットの比較)",
+   "[quantizeState] step 1: 表せない値 roe 0 (Q) / roeN 0 (Q_N) / roeM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)",
+   "[quantizeState] step 2000: 選ばなかった量の丸め前後の変化 ro 0 roUx 0 roUy 0 roUz 0 roK 0 roOmega 0 roY0 0 roY1 0 / 合計 0 (0 が期待。全 CV 580679、丸めのカーネルの直前と直後の生のビットの比較)",
+   "[quantizeState] step 2000: 表せない値 roe 0 (Q) / roeN 0 (Q_N) / roeM 0 (Q_M) / 合計 0 (全 CV 580679、updateVariablesOuter の直後)"
+  ]
+ },
+ "records": {
+  "run_0595_rq_c1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0596_rq_c2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0597_rq_c3 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0598_rq_e1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0599_rq_e2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0620_rq_e3 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0621_rq_f1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0622_rq_f2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0623_rq_f3 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "F の初期化の差 (res_0、C との最大相対差)": {
+   "ro": 0.0,
+   "roUx": 0.0,
+   "roUy": 0.0,
+   "roUz": 0.0,
+   "roe": 0.0005521971241912674,
+   "roK": 0.0,
+   "roOmega": 3.015369144917437e-07,
+   "roY0": 5.480182155494153e-08,
+   "roY1": 6.383980705987354e-08
+  },
+  "参照の a (A・B・B')": {
+   "A": 0.2166450756978814,
+   "B": 1.2186234538473582,
+   "Bp": 1.2146666975484044
+  },
+  "境界の節点の a (記録)": {
+   "C": [
+    0.031849759579411274,
+    0.07340822358636659,
+    0.03980302161407464
+   ],
+   "E": [
+    0.04377565869154929,
+    0.01743094610840328,
+    0.0313275278628741
+   ],
+   "F": [
+    1.0456598551060683,
+    0.998218299300352,
+    1.0418471900475825
+   ]
+  },
+  "|v_s| の評価域の RMS": {
+   "1000": 0.0002228852933569105,
+   "1500": 0.0005640871633624316,
+   "2000": 0.0030385911621049733
+  }
+ },
+ "a": {
+  "C": [
+   0.21640674325330014,
+   0.21653053540271575,
+   0.21658095908301359
+  ],
+  "E": [
+   0.22324047636556063,
+   0.21837149414342885,
+   0.22517953744925231
+  ],
+  "F": [
+   1.1252865670165066,
+   1.0365742952859518,
+   1.225290210819345
+  ]
+ },
+ "compare": {
+  "E": {
+   "e": 0.005757756739737441,
+   "se": 0.002025731933823276,
+   "df": 2.0026128707939774,
+   "t": 6.195159288915319,
+   "L": -0.006791975266940219,
+   "U": 0.0183074887464151
+  },
+  "F": {
+   "e": 0.9125442784609248,
+   "se": 0.05451011166300898,
+   "df": 2.000003606157746,
+   "t": 6.205332723448493,
+   "L": 0.5742908987996238,
+   "U": 1.2507976581222258
+  }
+ },
+ "verdict": "結果 B: ρE 単独の末尾の量子化では、その成分は出ない (第 1 仮説を退ける)"
+}

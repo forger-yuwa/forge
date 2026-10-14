@@ -1,0 +1,369 @@
+{
+ "undecidable": [],
+ "pre": {
+  "run_0061_li_f32a check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0062_li_f32b check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0063_li_f64a check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0064_li_f64b check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "線 (lines, covered, total, %, maxLen)": {
+   "run_0061_li_f32a": [
+    "1001",
+    "102102",
+    "106080",
+    "96.2",
+    "102"
+   ],
+   "run_0062_li_f32b": [
+    "1001",
+    "102102",
+    "106080",
+    "96.2",
+    "102"
+   ],
+   "run_0063_li_f64a": [
+    "1001",
+    "102102",
+    "106080",
+    "96.2",
+    "102"
+   ],
+   "run_0064_li_f64b": [
+    "1001",
+    "102102",
+    "106080",
+    "96.2",
+    "102"
+   ]
+  },
+  "step 0 の θ の精度間の相対差": {
+   "theta_0.3": -4.980830163218422e-07,
+   "theta_0.6": -7.636368708257564e-07,
+   "theta_0.9": 1.6221454009283317e-07
+  }
+ },
+ "table": {
+  "theta_0.3": {
+   "W1": {
+    "e": -1.2675255252474237e-05,
+    "E": 7.967852373782578e-05,
+    "mu32": -9.307316726717241e-05,
+    "mu64": -8.039791201469817e-05
+   },
+   "W2": {
+    "e": 2.206068249598612e-06,
+    "E": 8.73007866281314e-05,
+    "mu32": -7.814778301816015e-05,
+    "mu64": -8.035385126775877e-05
+   }
+  },
+  "theta_0.6": {
+   "W1": {
+    "e": 4.878135150210674e-06,
+    "E": 2.6152304806563307e-05,
+    "mu32": -0.0001275261161693583,
+    "mu64": -0.00013240425131956897
+   },
+   "W2": {
+    "e": 4.133415449842818e-06,
+    "E": 2.8797152114529525e-05,
+    "mu32": -0.0001282377812272744,
+    "mu64": -0.00013237119667711722
+   }
+  },
+  "theta_0.9": {
+   "W1": {
+    "e": 2.720283052616042e-07,
+    "E": 1.0969404223560924e-05,
+    "mu32": -0.00010040144433986654,
+    "mu64": -0.00010067347264512814
+   },
+   "W2": {
+    "e": 7.160173205865861e-07,
+    "E": 1.3574776240892042e-05,
+    "mu32": -9.993020995122642e-05,
+    "mu64": -0.00010064622727181301
+   }
+  },
+  "dstar_0.3": {
+   "W1": {
+    "e": 1.7412511441713323e-06,
+    "E": 5.764410821565893e-05,
+    "mu32": -0.00021318312940321778,
+    "mu64": -0.0002149243805473891
+   },
+   "W2": {
+    "e": 2.5083484321958044e-05,
+    "E": 6.847804858224141e-05,
+    "mu32": -0.00018982286778566345,
+    "mu64": -0.0002149063521076215
+   }
+  },
+  "Cf_0.3": {
+   "W1": {
+    "e": 3.4006528471569917e-06,
+    "E": 1.2779041366459961e-05,
+    "mu32": -0.00010440200376634838,
+    "mu64": -0.00010780265661350537
+   },
+   "W2": {
+    "e": 6.102190417176849e-06,
+    "E": 2.6097555125085512e-05,
+    "mu32": -0.00010170834471229865,
+    "mu64": -0.0001078105351294755
+   }
+  },
+  "qw_0.3": {
+   "W1": {
+    "e": 7.954259841059705e-06,
+    "E": 2.1231796564132337e-05,
+    "mu32": -7.591771870905432e-05,
+    "mu64": -8.387197855011402e-05
+   },
+   "W2": {
+    "e": 8.264535794091346e-06,
+    "E": 2.644563075468339e-05,
+    "mu32": -7.56283634225218e-05,
+    "mu64": -8.389289921661315e-05
+   }
+  },
+  "dstar_0.6": {
+   "W1": {
+    "e": -5.200094212027459e-05,
+    "E": 0.0007631103032404758,
+    "mu32": -0.00015030970435536865,
+    "mu64": -9.830876223509406e-05
+   },
+   "W2": {
+    "e": -6.0171114818224295e-05,
+    "E": 0.0007657608670707628,
+    "mu32": -0.00015846379750602128,
+    "mu64": -9.829268268779699e-05
+   }
+  },
+  "Cf_0.6": {
+   "W1": {
+    "e": 1.8505827349719482e-06,
+    "E": 1.567676719679072e-05,
+    "mu32": -8.856034325198064e-05,
+    "mu64": -9.041092598695259e-05
+   },
+   "W2": {
+    "e": 1.5987713035638178e-06,
+    "E": 1.403177373044182e-05,
+    "mu32": -8.881772457676884e-05,
+    "mu64": -9.041649588033266e-05
+   }
+  },
+  "qw_0.6": {
+   "W1": {
+    "e": 3.1936295841587543e-06,
+    "E": 2.4421615521737274e-05,
+    "mu32": -7.002894927732038e-05,
+    "mu64": -7.322257886147913e-05
+   },
+   "W2": {
+    "e": 1.379262631299915e-06,
+    "E": 1.9710322941775385e-05,
+    "mu32": -7.18595379224639e-05,
+    "mu64": -7.323880055376382e-05
+   }
+  },
+  "dstar_0.9": {
+   "W1": {
+    "e": -2.4028755006415766e-06,
+    "E": 1.6339799362464812e-05,
+    "mu32": -5.830654959456563e-05,
+    "mu64": -5.5903674093924055e-05
+   },
+   "W2": {
+    "e": -1.4814011781056434e-06,
+    "E": 1.0342054644271228e-05,
+    "mu32": -5.737185849022399e-05,
+    "mu64": -5.5890457312118345e-05
+   }
+  },
+  "Cf_0.9": {
+   "W1": {
+    "e": 9.498550852252087e-07,
+    "E": 7.592357673864272e-06,
+    "mu32": -9.21720304148519e-05,
+    "mu64": -9.31218855000771e-05
+   },
+   "W2": {
+    "e": -2.2649621120194522e-06,
+    "E": 1.0734310330556536e-05,
+    "mu32": -9.5390675555419e-05,
+    "mu64": -9.312571344339955e-05
+   }
+  },
+  "qw_0.9": {
+   "W1": {
+    "e": 2.4696467264542836e-06,
+    "E": 1.0739726290189536e-05,
+    "mu32": -9.469005550643914e-05,
+    "mu64": -9.715970223289343e-05
+   },
+   "W2": {
+    "e": -2.053676855882339e-06,
+    "E": 1.7839541039316027e-05,
+    "mu32": -9.922286421936726e-05,
+    "mu64": -9.716918736348492e-05
+   }
+  },
+  "CD": {
+   "W1": {
+    "e": 6.520677463895866e-07,
+    "E": 3.0573282471862626e-06,
+    "mu32": -0.00011767672398897493,
+    "mu64": -0.00011832879173536452
+   },
+   "W2": {
+    "e": 2.34860131124499e-07,
+    "E": 2.044506443547807e-06,
+    "mu32": -0.00011810634396423163,
+    "mu64": -0.00011834120409535613
+   }
+  },
+  "HF": {
+   "W1": {
+    "e": 1.1378244527719347e-06,
+    "E": 3.3515365593190046e-06,
+    "mu32": -0.0001125839811230263,
+    "mu64": -0.00011372180557579824
+   },
+   "W2": {
+    "e": 3.439591987902267e-07,
+    "E": 2.2860055969156293e-06,
+    "mu32": -0.00011340319927418878,
+    "mu64": -0.00011374715847297901
+   }
+  }
+ },
+ "records": {
+  "run_0061_li_f32a 方向別 dt のログ": [
+   "'lineDtDirectional' in 'time.deltaT': 1",
+   "'lineDtDirectionalCap' in 'time.deltaT': 50"
+  ],
+  "run_0062_li_f32b 方向別 dt のログ": [
+   "'lineDtDirectional' in 'time.deltaT': 1",
+   "'lineDtDirectionalCap' in 'time.deltaT': 50"
+  ],
+  "run_0063_li_f64a 方向別 dt のログ": [
+   "'lineDtDirectional' in 'time.deltaT': 1",
+   "'lineDtDirectionalCap' in 'time.deltaT': 50"
+  ],
+  "run_0064_li_f64b 方向別 dt のログ": [
+   "'lineDtDirectional' in 'time.deltaT': 1",
+   "'lineDtDirectionalCap' in 'time.deltaT': 50"
+  ],
+  "res_0 の保存量の精度間の最大相対差": {
+   "ro": 0.0,
+   "roUx": 0.0,
+   "roUy": 0.0,
+   "roUz": 0.0,
+   "roe": 1.501678952152454e-07,
+   "roK": 5.125543788161275e-08,
+   "roOmega": 2.1471937228326638e-07
+  },
+  "theta_0.3 の窓で je が step 0 から変わった run": [],
+  "theta_0.6 の窓で je が step 0 から変わった run": [
+   "run_0061_li_f32a",
+   "run_0062_li_f32b"
+  ],
+  "theta_0.9 の窓で je が step 0 から変わった run": [],
+  "逆符号の大差 (−e − E ≥ 0.005)": [],
+  "θ 以外の大差 (|e| − E ≥ 0.005、記録)": [],
+  "run_0061_li_f32a check_quasisteady": [
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0061_li_f32a/li_window_series.csv  [13 rows, steps 24000..48000]  -> DRIFTING ===",
+   "  theta_0.3       : tail mean=0.0004074  drift=0.0%/tail  fluct=0.0%  -> report 0.0004074 +/- 3.2e-08 OSCILLATING",
+   "  theta_0.6       : tail mean=0.0007346  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  theta_0.9       : tail mean=0.001033  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  dstar_0.3       : tail mean=0.001967  drift=0.0%/tail  fluct=0.0%  -> report 0.001967 +/- 1.1e-07 OSCILLATING",
+   "  dstar_0.6       : tail mean=0.003417  drift=0.0%/tail  fluct=0.1%         DRIFTING",
+   "  dstar_0.9       : tail mean=0.004773  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0061_li_f32a  [14 snapshots, steps 0..48000]  -> DRIFTING ===",
+   "  shock    : tail mean=-0.04855  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  machmax  : tail mean=4.194  drift=0.0%/tail  fluct=0.0%            STEADY",
+   "  pmax     : tail mean=7561  drift=0.1%/tail  fluct=0.1%             DRIFTING",
+   "OVERALL: NOT ALL STEADY (see above)",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0061_li_f32a/li_window_series.csv  [13 rows, steps 24000..48000]  -> STEADY ===",
+   "  Cf_0.3          : tail mean=0.002333  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  qw_0.3          : tail mean=1.061e+05  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  Cf_0.6          : tail mean=0.002096  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  qw_0.6          : tail mean=9.521e+04  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  Cf_0.9          : tail mean=0.001971  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  qw_0.9          : tail mean=8.949e+04  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  CD              : tail mean=0.002267  drift=0.0%/tail  fluct=0.0%         STEADY"
+  ],
+  "run_0062_li_f32b check_quasisteady": [
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0062_li_f32b/li_window_series.csv  [13 rows, steps 24000..48000]  -> DRIFTING ===",
+   "  theta_0.3       : tail mean=0.0004074  drift=0.0%/tail  fluct=0.0%  -> report 0.0004074 +/- 2.6e-08 OSCILLATING",
+   "  theta_0.6       : tail mean=0.0007346  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  theta_0.9       : tail mean=0.001033  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  dstar_0.3       : tail mean=0.001967  drift=0.0%/tail  fluct=0.0%  -> report 0.001967 +/- 1.4e-07 OSCILLATING",
+   "  dstar_0.6       : tail mean=0.003417  drift=0.0%/tail  fluct=0.1%  (extremum at tail-end) DRIFTING",
+   "  dstar_0.9       : tail mean=0.004773  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0062_li_f32b  [14 snapshots, steps 0..48000]  -> DRIFTING ===",
+   "  shock    : tail mean=-0.04855  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  machmax  : tail mean=4.194  drift=0.0%/tail  fluct=0.0%            STEADY",
+   "  pmax     : tail mean=7561  drift=0.1%/tail  fluct=0.1%             DRIFTING",
+   "OVERALL: NOT ALL STEADY (see above)",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0062_li_f32b/li_window_series.csv  [13 rows, steps 24000..48000]  -> STEADY ===",
+   "  Cf_0.3          : tail mean=0.002333  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  qw_0.3          : tail mean=1.061e+05  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  Cf_0.6          : tail mean=0.002096  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  qw_0.6          : tail mean=9.521e+04  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  Cf_0.9          : tail mean=0.001971  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  qw_0.9          : tail mean=8.949e+04  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  CD              : tail mean=0.002267  drift=0.0%/tail  fluct=0.0%         STEADY"
+  ],
+  "run_0063_li_f64a check_quasisteady": [
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0063_li_f64a/li_window_series.csv  [13 rows, steps 24000..48000]  -> STEADY ===",
+   "  theta_0.3       : tail mean=0.0004074  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  theta_0.6       : tail mean=0.0007346  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.000734613 (最終比 +0.000 %)] STEADY",
+   "  theta_0.9       : tail mean=0.001033  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00103329 (最終比 +0.000 %)] STEADY",
+   "  dstar_0.3       : tail mean=0.001967  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00196686 (最終比 +0.000 %)] STEADY",
+   "  dstar_0.6       : tail mean=0.003418  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00341764 (最終比 +0.000 %)] STEADY",
+   "  dstar_0.9       : tail mean=0.004773  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00477258 (最終比 +0.000 %)] STEADY",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0063_li_f64a  [14 snapshots, steps 0..48000]  -> DRIFTING ===",
+   "  shock    : tail mean=-0.04855  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  machmax  : tail mean=4.194  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 4.19358 (最終比 -0.000 %)] STEADY",
+   "  pmax     : tail mean=7561  drift=0.1%/tail  fluct=0.1%  (extremum at tail-end) DRIFTING",
+   "OVERALL: NOT ALL STEADY (see above)",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0063_li_f64a/li_window_series.csv  [13 rows, steps 24000..48000]  -> STEADY ===",
+   "  Cf_0.3          : tail mean=0.002333  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.00233317 (最終比 -0.000 %)] STEADY",
+   "  qw_0.3          : tail mean=1.061e+05  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  Cf_0.6          : tail mean=0.002096  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.00209606 (最終比 -0.000 %)] STEADY",
+   "  qw_0.6          : tail mean=9.521e+04  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 95208.1 (最終比 -0.000 %)] STEADY",
+   "  Cf_0.9          : tail mean=0.001971  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.0019712 (最終比 -0.000 %)] STEADY",
+   "  qw_0.9          : tail mean=8.949e+04  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 89485.8 (最終比 -0.000 %)] STEADY",
+   "  CD              : tail mean=0.002267  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.0022674 (最終比 -0.000 %)] STEADY"
+  ],
+  "run_0064_li_f64b check_quasisteady": [
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0064_li_f64b/li_window_series.csv  [13 rows, steps 24000..48000]  -> STEADY ===",
+   "  theta_0.3       : tail mean=0.0004074  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  theta_0.6       : tail mean=0.0007346  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.000734613 (最終比 +0.000 %)] STEADY",
+   "  theta_0.9       : tail mean=0.001033  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00103329 (最終比 +0.000 %)] STEADY",
+   "  dstar_0.3       : tail mean=0.001967  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00196686 (最終比 +0.000 %)] STEADY",
+   "  dstar_0.6       : tail mean=0.003418  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00341764 (最終比 +0.000 %)] STEADY",
+   "  dstar_0.9       : tail mean=0.004773  drift=0.0%/tail  fluct=0.0%  [単調増加; 増分減衰から漸近値 0.00477258 (最終比 +0.000 %)] STEADY",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0064_li_f64b  [14 snapshots, steps 0..48000]  -> DRIFTING ===",
+   "  shock    : tail mean=-0.04855  drift=0.0%/tail  fluct=0.0%         STEADY",
+   "  machmax  : tail mean=4.194  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 4.19358 (最終比 -0.000 %)] STEADY",
+   "  pmax     : tail mean=7561  drift=0.1%/tail  fluct=0.1%  (extremum at tail-end) DRIFTING",
+   "OVERALL: NOT ALL STEADY (see above)",
+   "=== /home/ubuntu/forge-wallfit/case/48.flat_plate_cooled_m4/run_0064_li_f64b/li_window_series.csv  [13 rows, steps 24000..48000]  -> STEADY ===",
+   "  Cf_0.3          : tail mean=0.002333  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.00233317 (最終比 -0.000 %)] STEADY",
+   "  qw_0.3          : tail mean=1.061e+05  drift=0.0%/tail  fluct=0.0%        STEADY",
+   "  Cf_0.6          : tail mean=0.002096  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.00209606 (最終比 -0.000 %)] STEADY",
+   "  qw_0.6          : tail mean=9.521e+04  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 95208.1 (最終比 -0.000 %)] STEADY",
+   "  Cf_0.9          : tail mean=0.001971  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.0019712 (最終比 -0.000 %)] STEADY",
+   "  qw_0.9          : tail mean=8.949e+04  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 89485.8 (最終比 -0.000 %)] STEADY",
+   "  CD              : tail mean=0.002267  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 0.0022674 (最終比 -0.000 %)] STEADY"
+  ],
+  "§6.21 の旧判定器 (記録)": [
+   "== VERDICT §6.21: 判定不能: run_0061_li_f32a: 系列の step がそろわない (25 点); run_0062_li_f32b: 系列の step がそろわない (25 点); run_0063_li_f64a: 系列の step がそろわない (25 点); run_0064_li_f64b: 系列の step がそろわない (25 点)"
+  ]
+ },
+ "verdict": "結果 B (再現せず): 3 断面・両窓とも |e| + E ≤ 0.0005"
+}

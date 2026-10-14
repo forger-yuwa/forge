@@ -1,0 +1,130 @@
+{
+ "undecidable": [],
+ "checks": {
+  "バイナリ・入力": [
+   "1f9ff32232da8823",
+   "74954e7be5ef38a8",
+   "3baafa3d23d31e5e"
+  ],
+  "float のビルド (rqc_build.log)": "1f9ff32232da8823",
+  "run_0738_qs_q1 自己点検": [
+   "[quantizeState] step 1: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 549683、updateVariablesOuter の直後)",
+   "[quantizeState] step 1: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 549683、step 2 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 1: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 540507) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 2750: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 549683、updateVariablesOuter の直後)",
+   "[quantizeState] step 2750: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 549683、step 2751 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 2750: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 540507) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 3000: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 549683、updateVariablesOuter の直後)"
+  ],
+  "run_0738_qs_q1 (b) 0 でない (全 CV)": {
+   "roY0N": 244,
+   "roY1N": 244,
+   "roY0M": 244,
+   "roY1M": 244
+  },
+  "run_0741_qs_q2 自己点検": [
+   "[quantizeState] step 1: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 549683、updateVariablesOuter の直後)",
+   "[quantizeState] step 1: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 549683、step 2 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 1: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 540507) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 2750: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 549683、updateVariablesOuter の直後)",
+   "[quantizeState] step 2750: 表せない値 roY0N 244 roY1N 244 (roY_N) / roY0M 244 roY1M 244 (roY_M) / 合計 976 (全 CV 549683、step 2751 の化学種の更新の頭 (speciesUpdateOuter の直後))",
+   "[quantizeState] step 2750: 注意: 表せない値がある (0 を期待)。内点 (ic < nCells 540507) に限ると roY0N 121 roY1N 121 (roY_N) / roY0M 121 roY1M 121 (roY_M) / 合計 484。入口のピン (scalarDirichletPin 1、121 節点) を除く内点では roY0N 0 roY1N 0 (roY_N) / roY0M 0 roY1M 0 (roY_M) / 合計 0",
+   "[quantizeState] step 3000: 表せない値 ro 0 roUx 0 roUy 0 roUz 0 roe 0 roK 0 roOmega 0 roY0 0 roY1 0 (Q) / roN 0 roUxN 0 roUyN 0 roUzN 0 roeN 0 roKN 0 roOmegaN 0 (Q_N) / roM 0 roUxM 0 roUyM 0 roUzM 0 roeM 0 roKM 0 roOmegaM 0 (Q_M) / 合計 0 (全 CV 549683、updateVariablesOuter の直後)"
+  ],
+  "run_0741_qs_q2 (b) 0 でない (全 CV)": {
+   "roY0N": 244,
+   "roY1N": 244,
+   "roY0M": 244,
+   "roY1M": 244
+  },
+  "陽性対照 (両窓で min E_F ≥ 10 N)": [
+   true,
+   true
+  ]
+ },
+ "records": {
+  "run_0737_qs_c1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   8.017312581155504e-07,
+   8.977663172664391e-07
+  ],
+  "run_0740_qs_c2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   7.988511042606842e-07,
+   8.743079850675115e-07
+  ],
+  "run_0738_qs_q1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   6.916966340407679e-07,
+   1.2841750732026082e-06
+  ],
+  "run_0741_qs_q2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   6.958143023156965e-07,
+   1.5071462331658986e-06
+  ],
+  "run_0739_qs_f1 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   1.8107153831472474e-05,
+   2.952445279515814e-05
+  ],
+  "run_0742_qs_f2 rms_ro の窓平均 (2,000〜2,500 / 2,500〜3,000)": [
+   1.778729727415404e-05,
+   2.8614516206289408e-05
+  ],
+  "C1 と F1 の res_0 の最大相対差": {
+   "ro": 0.0,
+   "roUx": 0.0,
+   "roUy": 0.0,
+   "roUz": 0.0,
+   "roe": 4.898228981705645e-05,
+   "roK": 0.0,
+   "roOmega": 2.9717075391536324e-07,
+   "roY0": 5.0785408087957415e-08,
+   "roY1": 5.987245353956763e-08
+  },
+  "評価域の節点数": 3378,
+  "run_0737_qs_c1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0740_qs_c2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0738_qs_q1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0741_qs_q2 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0739_qs_f1 check_convergence": "OVERALL: CHECK FAILURES ABOVE",
+  "run_0742_qs_f2 check_convergence": "OVERALL: CHECK FAILURES ABOVE"
+ },
+ "E": {
+  "W1": {
+   "N": 0.021992311176633167,
+   "E": {
+    "run_0737_qs_c1": 0.01099615558831519,
+    "run_0740_qs_c2": 0.010996155588317973,
+    "run_0738_qs_q1": 0.4223605177737283,
+    "run_0741_qs_q2": 0.3359363825126236,
+    "run_0739_qs_f1": 18.50728579190643,
+    "run_0742_qs_f2": 18.278426917970442
+   },
+   "max_abs_dT": {
+    "run_0737_qs_c1": 0.09857140955568866,
+    "run_0740_qs_c2": 0.09857140955591603,
+    "run_0738_qs_q1": 3.8196159241615533,
+    "run_0741_qs_q2": 3.957393989072443,
+    "run_0739_qs_f1": 130.5134404502976,
+    "run_0742_qs_f2": 132.02578139054776
+   }
+  },
+  "W2": {
+   "N": 0.07692155968975692,
+   "E": {
+    "run_0737_qs_c1": 0.03846077984487936,
+    "run_0740_qs_c2": 0.03846077984487757,
+    "run_0738_qs_q1": 1.2336073049191905,
+    "run_0741_qs_q2": 1.4675901148679138,
+    "run_0739_qs_f1": 27.279242368523928,
+    "run_0742_qs_f2": 26.807358895502926
+   },
+   "max_abs_dT": {
+    "run_0737_qs_c1": 0.4226310044882666,
+    "run_0740_qs_c2": 0.4226310044882666,
+    "run_0738_qs_q1": 14.632017246604164,
+    "run_0741_qs_q2": 16.739526561399316,
+    "run_0739_qs_f1": 186.66829461842963,
+    "run_0742_qs_f2": 187.37849969655463
+   }
+  }
+ },
+ "verdict": "結果 B: 末尾の 9 量の量子化は float の差の 1 割以下 (「継続場では量子化だけで十分」をこの起点・3,000 step に限って退ける)"
+}

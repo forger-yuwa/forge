@@ -58,9 +58,13 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 ## 計算の長さの既定 (2026-10-14)
 
 - NS の本段は**停止規則つきで既定 20 万 step を上限**に回す (2026-10-14 ユーザ決定; `run_staged_ns`、`prepare_info.euler_ref` が要る)。2 万 step の窓で、
-  入口−出口の質量の収支 r (|平均| ≤ 0.05 %・振幅 ≤ 0.5 %) と θ_r (x/x_E 0.4・0.7・0.95、平均の変化 2 万 step あたり ≤ 0.05 %・振幅 ≤ 0.5 %) を満たした最初の出力で止める。
-  上限に届けば「未到達」(合格でない)。記録は run の `stop_rule.json`。使わないときは `--no-stop-rule` か `evaluate.stop_rule: false` で、本段は `--steps` > `evaluate.ns_steps` > 60,000。
+  入口−出口の質量の収支 r (|平均| ≤ 0.05 %・振幅 ≤ 0.5 %) と θ_r (設計壁の出口 x_w に対する x/x_w 0.4・0.7・0.95、平均の変化 2 万 step あたり ≤ 0.05 %・
+  振幅 ≤ 0.5 %) を満たした後、**さらに 4 万 step その条件を保った出力で止める** (`evaluate.stop_rule_hold_steps`、既定 40,000; 途中で外れたら数え直す。
+  上限 20 万は到達 + 保持を含む)。上限に届けば「未到達」(合格でない)。記録は run の `stop_rule.json`・`STOP_RULE_STATE.json`。
+  キー無しで使えない (euler_ref が無い等) ときは理由を記録して `ns_steps` の長さで回し、`evaluate.stop_rule: true` を明示したときだけ準備の前に例外。
+  使わないときは `--no-stop-rule` か `evaluate.stop_rule: false` で、本段は `--steps` > `evaluate.ns_steps` > 60,000。
   `evaluate.nStepOuter` は Euler の本段だけ。冷却壁の case/70 は入口の直管の質量の過渡で未到達になる (plan `tooling-nozzle-cooled-wall-ns-settling` §6 S-stop)。
+  未到達の run から次の壁を作るのは `deltastar_loop --allow-not-reached "<理由>"` (理由は必須、`HANDOFF_GATE.json` に残る) の明示の上書きだけ。
 - **計算は手元の PC でなく AWS で** (2026-10-14 ユーザ「ローカルで計算かけない方がいいかも」、手元の PC がメモリ不足で落ちた)。skill `forge-aws-run`。
 
 ## メッシュの規模 (作る前に示す; AGENTS.md「メッシュの規模は作る前に示す」)

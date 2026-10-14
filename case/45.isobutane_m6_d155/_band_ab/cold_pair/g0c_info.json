@@ -1,0 +1,22 @@
+{
+ "commit": "96197821",
+ "msh_digits": 17,
+ "ni_G0": 4719,
+ "ni_G0c": 4467,
+ "nj": 121,
+ "seg_cols_G0": 589,
+ "seg_cols_G0c": 337,
+ "seg_x": [
+  -7.9904141994955165,
+  -2.0011935536971586
+ ],
+ "pre_cols_bit_equal": true,
+ "post_cols_bit_equal": true,
+ "n_pre": 100,
+ "n_post": 4029,
+ "joint_dx_ratio": [
+  0.996353849689775,
+  0.999047549870138
+ ],
+ "seg_dx_max_ratio_vs_G0": 1.7409326881737353
+}

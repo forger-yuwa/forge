@@ -222,6 +222,12 @@ void solverConfig::read(std::string fname)
         if (config["mesh"]["hoopAreaFromClosure"]) {
             this->hoopAreaFromClosure = config["mesh"]["hoopAreaFromClosure"].as<int>();
         }
+        if (config["mesh"]["axisSegmentRWeight"]) {
+            this->axisSegmentRWeight = config["mesh"]["axisSegmentRWeight"].as<int>();
+            if (this->axisSegmentRWeight != 0 && this->axisSegmentRWeight != 1) {
+                throw std::runtime_error("'axisSegmentRWeight' in 'mesh' must be 0 (r̄_f·S_f) or 1 (Σ r_k S_k, default).");
+            }
+        }
         for (const char* k : {"nodeAxisDirichlet", "nodeMidpointFx", "nodeValueAtNode", "nodeReconEdgeMidpoint", "nodeAxisUrDirichlet"}) {
             if (config["mesh"][k]) {
                 std::cerr << "[config] mesh." << k << " は撤去されました (node の整合セットは常時 ON, "
@@ -373,16 +379,25 @@ void solverConfig::read(std::string fname)
         this->blockDPLURDqPack = getOptionalValidatedValue<int>(deltaT, "blockDPLURDqPack", 0, "time.deltaT");
         // line-implicit v2 試作 (plans/active/time_integration-line-implicit-viscous-v2.md):
         //   lineKFreeze: dual-time のサブ反復間で K/diag/LU 分解を凍結 (subiter 0 のみ抽出・分解)。
-        //   lineViscCoupling: line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)。
+        //   lineViscCoupling: 1 = line 面にスカラー粘性結合 (K += α·I, 対角は 2α→α で真の [−α,2α,−α] 化)、
+        //                     2 = 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian)、
+        //                     3 = 2 + スカラーの対角も残す (診断)。
         //   lineViscousDtRelief: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍に割引 (θ∈[0,1])。
         this->lineKFreeze = getOptionalValidatedValue<int>(deltaT, "lineKFreeze", 0, "time.deltaT");
         this->lineViscCoupling = getOptionalValidatedValue<int>(deltaT, "lineViscCoupling", 0, "time.deltaT");
         this->lineViscousDtRelief = getOptionalValidatedValue<double>(deltaT, "lineViscousDtRelief", 0.0, "time.deltaT");
         this->lineDtDirectional = getOptionalValidatedValue<int>(deltaT, "lineDtDirectional", 0, "time.deltaT");
+        this->lineDtDirectionalCap = getOptionalValidatedValue<flow_float>(deltaT, "lineDtDirectionalCap", 0.0, "time.deltaT");
         this->blockDPLUR = getOptionalValidatedValue<int>(deltaT, "blockDPLUR", 0, "time.deltaT");
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
+        // 多成分 × lowMachPrecond>=2 の化学種の擬似時間刻み (既定 1 = 前処理で拡大する前の Δτ。§5.1 #26)。lowMachPrecond<2 では効かない。
+        this->speciesPrecondDt = getOptionalValidatedValue<int>(deltaT, "speciesPrecondDt", 1, "time.deltaT");
+        if (this->speciesPrecondDt < 0 || this->speciesPrecondDt > 2) {
+            throw std::runtime_error("time.deltaT.speciesPrecondDt must be 0 (expanded dtau' as the flow), "
+                                     "1 (unexpanded dtau, default) or 2 (dtau' * beta).");
+        }
         // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。元 plan が「診断オプションとして残置」と決めている。
         this->multispeciesRhoYCommonLimiter = getOptionalValidatedValue<int>(deltaT, "multispeciesRhoYCommonLimiter", 0, "time.deltaT");
         // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。
@@ -434,6 +449,8 @@ void solverConfig::read(std::string fname)
         this->axisTimestepBeta = getOptionalValidatedValue<flow_float>(deltaT, "axisTimestepBeta", 0.0, "time.deltaT");
         // block-DPLUR 線形 solve の内部精度: 既定 0 (float・従来高速)。1 で double 化 (軸対称近軸の根治用)。
         this->implicitSolvePrecision = getOptionalValidatedValue<int>(deltaT, "implicitSolvePrecision", 0, "time.deltaT");
+        // エネルギー行の熱伝導 Jacobian (ビットマスク、既定 0)。plans/active/time_integration-implicit-thermal-jacobian.md。
+        this->implicitThermalJacobian = getOptionalValidatedValue<int>(deltaT, "implicitThermalJacobian", 0, "time.deltaT");
         // Ducros リミタ 1 次化: 既定 0 (off・使わない; MUSCL 2 次のまま)。1 で衝撃近傍の強制 1 次化 (従来挙動)。
         this->ducrosLimiter = getOptionalValidatedValue<int>(deltaT, "ducrosLimiter", 0, "time.deltaT");
         // NaN 検知診断モード: 既定 0 で従来挙動 (検査なし・ビット不変)。1 で検査 (fused device フラグ)。
@@ -1400,6 +1417,54 @@ void solverConfig::initTimeIntegrationScheme(int timeIntegration){
                 "implicitSolvePrecision==1 (double solve) is not supported with lowMachPrecond>=2 "
                 "(preconditioned block DPLUR: 2=RHS+LHS, 3=LHS-only). Use lowMachPrecond 0 or 1.");
         }
+    }
+
+    // implicitThermalJacobian (エネルギー行の熱伝導 Jacobian / 等温壁の拘束の行) の範囲チェック。
+    // 実装したのは node の block DPLUR (非 precond) だけなので、他の経路では黙って効かない事故を防ぐため止める。
+    if (this->implicitThermalJacobian < 0 || this->implicitThermalJacobian > 7) {
+        throw std::runtime_error("implicitThermalJacobian must be 0..7 (bit 1: thermal Jacobian, bit 2: isothermal-wall constraint row, "
+                                 "bit 4: keep the scalar viscous diagonal on the energy row as well).");
+    }
+    if ((this->implicitThermalJacobian & 4) != 0 && (this->implicitThermalJacobian & 1) == 0) {
+        throw std::runtime_error("implicitThermalJacobian bit 4 (keep the scalar on the energy row) requires bit 1.");
+    }
+    if (this->lineDtDirectionalCap < 0.0) {
+        throw std::runtime_error("lineDtDirectionalCap must be >= 0 (0 = no cap).");
+    }
+    if (this->lineDtDirectionalCap > 0.0 && (this->lineImplicit != 1 || this->lineDtDirectional == 0)) {
+        throw std::runtime_error("lineDtDirectionalCap > 0 requires lineImplicit 1 and lineDtDirectional 1.");
+    }
+    // lineViscCoupling 2 (薄層の粘性・熱伝導の Jacobian をライン面の K と対角に、plan time_integration-line-viscous-jacobian §4.3)。
+    // 導出した組み合わせ (node・block DPLUR・heatCorrSU2 0・強制の等温壁・低 Re の壁) だけを許す。
+    // 3 = 2 + ライン面のスカラー 2ν·δ/dcc を全行の対角にも残す (診断用、plan §6.4)。
+    if (this->lineViscCoupling < 0 || this->lineViscCoupling > 3) {
+        throw std::runtime_error("lineViscCoupling must be 0, 1, 2 or 3.");
+    }
+    if (this->lineViscCoupling >= 2) {
+        if (this->discretization != "node" || this->lineImplicit != 1)
+            throw std::runtime_error("lineViscCoupling 2 requires mesh.discretization node and lineImplicit 1.");
+        if (timeIntegration != 11 || this->blockDPLUR != 1)
+            throw std::runtime_error("lineViscCoupling 2 requires timeIntegration==11 and blockDPLUR==1.");
+        if (this->lowMachPrecond >= 2)
+            throw std::runtime_error("lineViscCoupling 2 is not supported with lowMachPrecond>=2.");
+        if (this->heatCorrSU2 != 0)
+            throw std::runtime_error("lineViscCoupling 2 is derived for heatCorrSU2 0 only.");
+        if (this->nodeIsothermalEnergyBC == 1)
+            throw std::runtime_error("lineViscCoupling 2 cannot be combined with mesh.nodeIsothermalEnergyBC 1 (weak isothermal wall).");
+        if (this->wallTreatmentSST != 0)
+            throw std::runtime_error("lineViscCoupling 2 is derived for the low-Re wall (wallTreatmentSST 0) only.");
+    }
+    if (this->implicitThermalJacobian != 0) {
+        if (this->discretization != "node")
+            throw std::runtime_error("implicitThermalJacobian!=0 requires mesh.discretization node.");
+        if (timeIntegration != 11 || this->blockDPLUR != 1)
+            throw std::runtime_error("implicitThermalJacobian!=0 requires timeIntegration==11 and blockDPLUR==1.");
+        if (this->lowMachPrecond >= 2)
+            throw std::runtime_error("implicitThermalJacobian!=0 is not supported with lowMachPrecond>=2.");
+        if (this->lineViscCoupling == 1)
+            throw std::runtime_error("implicitThermalJacobian!=0 cannot be combined with lineViscCoupling 1 (the scalar line viscous coupling acts on rho*E); use lineViscCoupling 2.");
+        if (this->nodeIsothermalEnergyBC == 1)
+            throw std::runtime_error("implicitThermalJacobian!=0 cannot be combined with mesh.nodeIsothermalEnergyBC 1 (weak isothermal diagonal).");
     }
 
 }

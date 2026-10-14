@@ -161,6 +161,47 @@ $\Delta\mathbf Q_{\text{new}} = D_i^{-1}\,\text{RHS}$ を解く。`cfg.implicitR
 > precond (`implicit_defect_correction_block_precond_d`) の 3 箇所。**LHS のみの変更**で defect-correction の
 > 定常解は不変（planar 回帰 bump で base/fix 場が $L2\sim10^{-5}$ 一致・RANS で残差レベル同一を確認）。
 
+#### エネルギー行の熱伝導 Jacobian (`implicitThermalJacobian`、2026-10-09、既定 0 = 従来どおり)
+
+上の粘性対角 $\Lambda^{\nu}_f I$ はエネルギー行にも同じスカラーを $\Delta(\rho E)$ に掛ける。熱伝導の残差
+$k_f\,(T_j-T_i)\,\delta/|\Delta\mathbf{cc}|$ が反応するのは $T$ なので、$\rho E$ がほとんど動かずに $\rho$ と $T$ が入れ替わる
+等圧のエントロピーのモードをこの対角は抑えない。普段は $V/\Delta\tau$ がそれを隠すが、方向別の擬似 dt
+(`lineDtDirectional`) で $V/\Delta\tau$ が縦横比の分だけ小さくなると、300 K の等温壁の 1 層目でこのモードが育つ
+(plan [tooling-nozzle-isothermal-wall-chain](../../plans/active/tooling-nozzle-isothermal-wall-chain.md) §5.1 #27)。
+
+`time.deltaT.implicitThermalJacobian` はビットマスク (既定 0 = 従来どおり、ビット同一)。block DPLUR (`implicit_defect_correction_block_d`、ST = float/double とも)、
+node 離散化だけで効く。
+
+**ビット 1 (熱伝導の Jacobian)**: 内部の node 間面について、エネルギー行 (行 4) の $\Lambda^{\nu}_f$ を熱伝導の Jacobian に置き換える
+(連続・運動量の行は従来どおり $\Lambda^{\nu}_f$):
+
+$$
+D_i[4,:] \mathrel{+}= \Lambda^{T}_f\,\frac{\gamma_i}{c_{p,i}}\,\frac{\partial e}{\partial \mathbf Q_i},\qquad
+\Lambda^{T}_f=k_f\,\frac{\delta}{|\Delta\mathbf{cc}|},\qquad
+k_f = f\,k_0+(1-f)\,k_1+\bigl(f\,c_{p,0}+(1-f)\,c_{p,1}\bigr)\frac{f\,\mu_{t,0}+(1-f)\,\mu_{t,1}}{Pr_t},
+$$
+
+$$
+e=\frac{\rho E}{\rho}-\tfrac12|\mathbf u|^2,\quad
+\frac{\partial e}{\partial\rho}=-\frac{e-\tfrac12|\mathbf u|^2}{\rho},\quad
+\frac{\partial e}{\partial(\rho u_k)}=-\frac{u_k}{\rho},\quad
+\frac{\partial e}{\partial(\rho E)}=\frac1\rho .
+$$
+
+$k_f$ は熱伝導の残差 ([`viscousFlux_d.cu`](../../solver_density_cuda/cuda_forge/viscousFlux_d.cu) の `tc_face`) と同じ式 ($k$ = `thermCond`、$c_p$ = `cp`、$f$ = `fx`)。
+物性と $\gamma$ は凍結し ($c_v=c_p/\gamma$)、熱伝導の非直交補正と近傍との結合 (非対角) は従来どおり入れない。
+$\partial T/\partial\mathbf Q=(\gamma/c_p)\,\partial e/\partial\mathbf Q$ は TP でも厳密 (T を求める前に Y を正規化するので、$\rho Y$ を凍結して $\rho$ が動いても Y は変わらない)。
+$e$ の基準点 (TP の `thermoHrefTemp`) によらず $\Lambda^{T}_f\,\Delta T$ の減衰になる。壁の節点と内部節点の間の面も node 間面なので、壁への熱伝導は 1 層目の対角に入る。
+
+**ビット 4 (ビット 1 と併用、キー 5)**: 行 4 にも従来のスカラー $\Lambda^{\nu}_f$ を残し、温度の項はその上に足す。ビット 1 だけだと、行 0〜3 (スカラー) と行 4 (温度) で減衰の基準が食い違い、温度を変えない補正で行 4 だけ減衰が抜けて高速域に偽の $\Delta T$ を作る (μ_t の大きい境界層の外側で point の cfl 4 が 922 step で発散した)。
+
+**ビット 2 (等温壁の拘束の行)**: 等温壁の節点の行 4 を単位行から $[-e_w,0,0,0,1]$ (rhs 0、$e_w=\rho E_w/\rho_w$) に替え、
+$\Delta(\rho E)_w=e_w\,\Delta\rho_w$ を線形系の中で満たす (後段の壁温のピン $\rho E=\rho\,e(T_w)$ と一致させる)。原因の切り分け用。
+
+**LHS だけの変更なので定常解 (不動点) は変わらない** (到達の保証ではない)。`lineViscCoupling: 1`・`nodeIsothermalEnergyBC: 1`・`lowMachPrecond>=2`・`blockDPLUR 0`・
+`timeIntegration` ≠ 11・cell 離散化との併用は起動時に拒否する。検証と経緯は plan
+[time_integration-implicit-thermal-jacobian](../../plans/active/time_integration-implicit-thermal-jacobian.md)。
+
 > **2026-06 修正**: 旧コードは対角に $A^{+}$ ではなく $|\widetilde A|$ を、近傍に $-A^{-}$ ではなく $+|\widetilde A|$ を
 > 使っていた（符号付き分割でなく絶対値の誤用）。対角が upwind 自己 Jacobian と不一致・近傍結合が逆符号となり、
 > block DPLUR は収束せず発散していた。`build_jacobian_split` による $A^{+}/{-}A^{-}$ 分割でこれを修正。
@@ -314,6 +355,35 @@ LHS は従来の $A^\pm$（物理音速 `sonic`）のまま。低マッハ前処
   ([`theory.md`](theory.md) 参照)。収束は $(\Delta\tau'/V)\Gamma_c^{-1}A_c$ の固有値 $\lambda'$ で一様に前処理される。
   ※当初フラックスも $\hat A_\Gamma=\Gamma_c^{-1}A_c$ のスペクトル半径分割で前処理したが、別系で過散逸ゆえ撤回 (上記が正)。
 - **その他**: 粘性スペクトル半径・軸対称ソースヤコビアン・dual-time 物理 BDF 項 (非前処理) も倍精度で踏襲。
+- **node の行の処理 (2026-10-12、[plan](../../plans/active/architecture-float-state-double-geometry.md) §5.1 #26)**:
+  標準の `implicit_defect_correction_block_d` と**同じ印・同じ条件**で、wrapper が `axis_ur_flag`・`wall_flag`・
+  `iso_wall_flag`・`isNode` を渡す (それ以前の本カーネルはこれを持たず、node では境界の節点の更新がほぼ凍結し、
+  軸・壁の拘束の成分も 0 にならなかった。plan §6.57)。
+  - 境界半割面 (`other_ic >= nCells` = ゴースト側) の粘性対角は `isNode` のとき課さない (標準の `!(isNode && !has_nbr)`)。
+    境界ノードは境界面上に乗るので node→ghost が退化し、$2\nu\delta/d_{cc}$ が対角を支配して $\Delta Q\approx0$ になるため。
+    対流 $A^+S$ は自節点の状態と面法線だけで組むので境界半割面でも残す (標準と同じ)。
+  - 拘束の行: 軸の roUy 行 (node × 軸対称、軸対称ソース Jacobian の後で上書き)・壁の運動量 3 行 (`nodeWallDirichlet 1`)・
+    等温壁の roe 行 (`nodeWallDirichlet 1` かつ `mesh.nodeIsothermalEnergyBC != 1`。弱形式ではエネルギー行を残す) で、
+    $D_0$ の行を単位行・$b$ の成分を 0 にする。さらにランク 1 項の $g$ の成分を 0 にする ($\gamma g r^\top$ の行 $k$ は
+    $g_k r^\top$ なので、$D=D_0+\gamma g r^\top$ の行も単位行のまま。$y_k=b_k=0$・$z_k=g_k=0$ → $x_k=0$)。
+    拘束の無い行の $D$ は変わらない。$D_0$ の拘束の列で部分ピボットの行交換が起きると、標準の block カーネルと同じく
+    $x_k$ は丸めのぶんだけ 0 から外れうる。
+  - 標準の経路にあって本カーネルに無いもの: 弱形式の等温壁の近似対角 (`weakIsoDiag`)、`implicitThermalJacobian`
+    (`lowMachPrecond >= 2` とは起動時に拒否)、line-implicit (同じく拒否)、SU2 流の軸対称ソース Jacobian (`axisymMethod 1`)、
+    対角キャッシュ・近傍 dq の AoS。軸対称ソース Jacobian の $[2][0]$ は本カーネルだけ $\chi_{hoop}$ を足す。
+  - 単体試験 [`tests/unit/test_precond_node_rows.cu`](../../solver_density_cuda/tests/unit/test_precond_node_rows.cu):
+    $\beta<1$ (0.0225) で拘束の行の $\Delta Q$ が厳密に 0、拘束の無い成分が $(D_{UU})^{-1}b_U$ に一致、
+    isNode が外す量が境界半割面の $2\nu\delta/d_{cc}$ に一致、`isNode 0`・印なし (cell と同じ経路) の出力が移植前とビット一致。
+- **化学種の擬似時間刻み `speciesPrecondDt` (2026-10-12、同 §5.1 #26)**: 前処理は流れ 5 変数の擬似時間項だけを
+  $\Gamma_c$ で変え、`dt_local` は下の `setDTlocal_precond_scale_d` で拡大される。分離更新の $\rho Y_s$ は前処理されないので、
+  拡大後の $\Delta\tau'$ で進めると組成と密度の前線が擬似時間で別の速さで進む。`time.deltaT.speciesPrecondDt` (既定 1) で
+  化学種の刻み `dt_local_sp` を選ぶ: 1 = 拡大前の $\Delta\tau$ (`setDT_d_wrapper` が拡大の前に退避)、2 = $\Delta\tau'\beta$
+  (`setDTlocal_species_beta_d`)、0 = 拡大後の $\Delta\tau'$ (旧挙動)。読むのは化学種の scalar-DPLUR
+  (`speciesTransport_d.cu` の `dplurSweepOnce`、`speciesImplicitCoupling` 1/2) だけで、刻みのポインタは呼び出し側が
+  `speciesPseudoDt` で明示的に渡す。受動種 (同じ `dplurSweepOnce` を共有) と `speciesImplicitCoupling 0` の point-implicit
+  (`scalarTimeIntegration_d`) は対象外で `dt_local` のまま。`dt_local_sp` は多成分のときだけ確保し
+  (`variables::registerSpecies`、確保時に 0)、書くのは `lowMachPrecond >= 2` かつ `speciesPrecondDt` 1/2 のときだけ。
+  `lowMachPrecond < 2` では化学種は `dt_local` を読む (ビット不変)。
 - **`SLAU_d`** は `lowMachPrecond==1||==2` で `c'` 散逸を使う (==2 は散逸是正を併用、==3 は RHS 散逸を触らず `c_hat`)。
   $\beta=1$ で $\Gamma_c=I$・$\Delta\tau'=\Delta\tau$・フラックス同一ゆえ現行カーネルと同一組み立て (倍精度の丸め差 ~1e-7、解一致)。
 
@@ -362,7 +432,9 @@ roe→0.5 に収束する一方、scalar は cfl_pseudo=1 で 12000 step でも�
 
 `setDT_d_wrapper` ([`setDT_d.cu`](../../solver_density_cuda/cuda_forge/setDT_d.cu)) が
 セル中心スペクトル半径を集計して `dt_local[ic] = CFL * V / λ_max` を書き込む。
-`cfg.dt`, `cfg.cfl` で挙動を制御。
+`cfg.dt`, `cfg.cfl` で挙動を制御。`lowMachPrecond >= 2` では `setDTlocal_precond_scale_d` が `dt_local` を前処理
+スペクトル半径に合わせて拡大し、多成分で `speciesPrecondDt` 1/2 のときは化学種用の `dt_local_sp` も書く
+(上の `implicit_defect_correction_block_precond_d` の節)。
 
 **setDT の低マッハ前処理は不採用** (2026-06 検証)。`setCFL_pln_d` のスペクトル半径の音速 `sonic` を
 前処理音速 `c'` に置換する案は、低マッハ域で `dt_local` を増大させ陰解法対角 `V/Δτ` を縮め、block DPLUR の
@@ -484,6 +556,17 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
 - **`lineViscCoupling: 1`**: line 面にスカラー粘性結合 K += α·I (α=ν_eff·δ/dcc)、対角は
   2α→α で line 内に真の拡散行 [−α, 2α, −α] を完成。**圧縮性 pseudo-dt の壁法線律速は音響
   (λ_visc/λ_ac = 2ν/(Δn·c) ≪ 1) なので効果は僅差** — 意味を持つのは Δn < 2ν/c の超極薄セルのみ。
+  ただしこの見積もりは擬似 dt が壁法線の音響で決まる場合 (point と同じ Δτ) のもので、`lineDtDirectional` で Δτ が縦横比の分だけ伸びると
+  1 層目の拡散数 νΔτ/Δn² は O(10) になる (case/45 で約 23)。
+- **`lineViscCoupling: 2` (2026-10-09 実装・検証中、plan [time_integration-line-viscous-jacobian](../../plans/active/time_integration-line-viscous-jacobian.md))**: ライン面の K と対角に
+  薄層の粘性・熱伝導の Jacobian を入れる (連続の行 0、運動量の行は速度の微分に $P=I+\tfrac13\hat n\hat n^{\mathsf T}$、エネルギーの行は温度の微分と粘性の仕事)。
+  K = −A⁻ の固有値はせん断・エントロピーで $V$ (面の法線速度) なので、壁際 ($V\approx0$) のラインではこれらのモードが対流の Jacobian では結合しない。値 1 との違いは、
+  連続の行に拡散を入れないことと、エネルギーの行を ρE でなく T で結合すること。
+  式は共通関数 `block_dplur::accumulate_thinlayer_visc_jacobian` (`block_dplur_jacobian_d.cuh`): 流束モデル $R_i\supset[0,\ \beta P\Delta u,\ \kappa\Delta T+(\beta P\Delta u)\cdot\bar u]$、
+  $\beta=\mu_f\delta/|\Delta\mathbf{cc}|$・$\kappa=k_f\delta/|\Delta\mathbf{cc}|$ (残差と同じ面の値、層流は節点の `vis_lam`)、$\bar u=f_iu_i+(1-f_i)u_j$ から
+  $D\mathrel{+}=-\partial R_i/\partial Q_i$、$K\mathrel{+}=\partial R_i/\partial Q_j$。$P$ は現在の離散残差の厳密な微分ではなく前処理行列としての近似。
+  隣が速度の Dirichlet の壁なら運動量・仕事の K を、等温壁なら熱伝導の K を 0 にし、等温壁の節点の行 4 は $\Delta(\rho E)_w-e_w\Delta\rho_w=0$ (ΔT_w = 0)。
+  単体照合 `solver_density_cuda/tools/test_line_visc_jacobian.cpp` (中心差分・零空間 $\delta\rho(1,u,v,w,E)$・等温壁の拘束・短いラインの解)。
 - **`lineViscousDtRelief: θ`**: on-line セルの擬似 dt 粘性スペクトル半径を (1−θ) 倍 (`setDT_d`
   で面ごとに割引、対流+音響分は残す)。θ=1 でも安定 (上と同じ理由で利得も僅差)。
 - **`lineDtDirectional: 1`**: 方向別 dt — line 面 (Thomas が厳密に解く結合) の λ を音響込みで
@@ -496,6 +579,23 @@ lag から **block 三重対角の直接解 (block-Thomas, 1 ライン 1 スレ�
   同時間ならより深い収束・ωバースト低減。定常 (M6) と dual-time DDES で律速モードが違う点に注意。
   サブ反復収縮の残る律速候補は off-line lag / segregated SST / 2次 KEEP RHS×1次 FVS LHS の
   defect-correction 不整合の 3 者。
+
+### Thomas の配列の並び (LAYOUT2 が既定、2026-10-10)
+
+計画: [`plans/active/time_integration-line-implicit-speed.md`](../../plans/active/time_integration-line-implicit-speed.md) §5.1 #10・#12・#13、§6.7〜§6.19。
+
+block Thomas は 1 ライン 1 スレッドで壁から順に解く逐次計算なので、ライン数が少ない (case/45 で 4719 本、SM あたり 2 warp) とメモリの読み込み待ちが律速になる。
+従来は因子 (LU・W = M̃⁻¹K⁺・ピボット) と中間解 y を節点番号の並び (`節点 × 25 + 成分`) に置いていたため、同じ段の節点を読む 32 本のラインの読み込みがメモリ上で離れ、1 命令あたり約 31 セクタを取りに行っていた (ncu)。
+
+- **LAYOUT2 (既定)**: 因子・y・K⁻ の写しを `(段 k × 成分数 + 成分) × ライン数 + ライン` の並びに置き (隣のラインが隣り合う)、さらに前の節点の W と y をレジスタに持って次の節点へ渡す (逐次の連鎖からメモリ待ちを 1 段減らす)。カーネルは `lineThomasFactorLP_d`・`lineThomasSolveLP_d`。
+  - 数値は従来とビット単位で一致する (case/45 全被覆・部分被覆・粘性入り、case/56 の長さがばらつくライン、case/39 の 3D・周期・dual-time・`lineKFreeze` 0/1、FP64 と float の両ビルド)。
+  - case/45 で 1 step 34.79 → 32.14 ms (−7.6 %)。分解 5.41 → 4.58 ms、代入 1.98 → 1.60 ms/回。
+  - 並べ替えた配列は「最長のライン × 本数」の区画を取る (1 区画 645 B、case/45 で +365 MB)。従来の並びの配列も比較・診断のために残る。
+- **並びの決め方** (`lineLayoutResolve`、最初の factor/solve で一度だけ、確保の前に決めて共有する):
+  - `FORGE_LINE_LAYOUT=0/1/2` で明示。`0` = 従来、`1` = 並べ替えだけ。明示の 1・2 と診断のスイッチ (`FORGE_LINE_INV`・`F32`・`PAR`・`MONO`・`DEBUG_POINT`・`NOOP`) の組み合わせ、明示時の確保の失敗は起動時に止める。
+  - 未指定なら LAYOUT2。ただし、診断のスイッチがある・区画が被覆 CV の 1.5 倍を超える (ラインの長さのばらつきが大きい)・並べ替えた配列を確保できない、のどれかなら従来の並びに戻す。
+  - どれを選んだかは起動ログの `[line] Thomas の配列の並び: …` の 1 行に出る。試験用に `FORGE_LINE_LAYOUT_SLOT_RATIO` (区画比の上限) と `FORGE_LINE_LAYOUT_FAKE_OOM=1` (確保の失敗の模擬) がある。
+- 比較 (`FORGE_LINE_COMPARE=1`) は、既定では LAYOUT2 と従来の LU を別のバッファで解いてビット列で比べる。並列版と比べるときは `FORGE_LINE_LAYOUT=0 FORGE_LINE_PAR=1`。
 
 ## 既知の TODO / 注意点
 

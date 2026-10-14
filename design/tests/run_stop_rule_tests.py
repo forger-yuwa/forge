@@ -1,23 +1,46 @@
 #!/usr/bin/env python3
-"""NS の本段の停止規則 (`evaluate/stop_rule.py`、plan tooling-nozzle-cooled-wall-ns-settling §4.6・§5.1 #1c) の試験 — §6 S-stop (a)(b)。
+"""NS の本段の停止規則 (`evaluate/stop_rule.py`) と受け渡しの制御 (`feedback/deltastar_loop.handoff_gate`) の試験
+(plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a)。
 
-  (a) 合成の系列 (`judge_rows`・`first_stop`、forge 0 step): 一定 → 窓が 2 万 step を覆い 9 点以上になった最初の出力で REACHED
-      (間隔 1000 は 21,000、2500 は 22,500)、θ_r の平均の線形の変化 0.1 %/2 万 step → 届かない、**θ_r が 2 万 step に 0.08 % 単調に増える系列 (r = 0)
-      → 9 点・21 点とも届かない (D_θ ≈ 0.07997 %)、換算しない前後半の差 (D_raw) は 0.044982 %・0.041983 % で閾値 0.05 % を下回る = 換算しなければ
-      止めてしまう** (諮問 stop-rule の判別 A/B; codex の計算と同じ数値)、振幅 1 %・平均の変化 0 → 届かない、振幅 0.1 %・平均の変化 0 → REACHED、
-      r の平均 0.06 % → 届かない (0.04 % なら REACHED)、r の振幅 0.6 % → 届かない、非有限 → DIVERGED、窓の点数 8 → 届かない、
-      間隔 3000 (窓に 7 点) → 届かない、場が有限で判定量が NaN → DATA_ERROR、閾値は引数で変えられる。設定 (`resolve_settings`) の既定・上限の出所・
-      使えない条件・YAML の不正値。量の式: 合成の構造格子で θ_r・入口と出口の流量が M6 の `cold_xcheck.reduce_fields` (forge-integ-1005、
-      読むだけ; 無ければ skip) と一致、出口コア M・流量が `nozzle_report.load_field` からの定義 (`qs_series.py` と同じ式) と一致。
-  (b) 偽の forge (`FORGE_BIN` を res を書く台本に差し替え、本物の `run_case.sh` 経由) で `run_staged_ns(stages="none")` の本段の見張り:
-      REACHED で止めて後の出力を消す (止めた出力の sha256、forge の終了コード 143、run_case.sh の後処理が走る)、SIGTERM を無視する forge は
-      SIGKILL で止める、上限で CENSORED (rc 0)、途中の異常終了で EXEC_ERROR (forge の rc 3 を取り違えない)、非有限で DIVERGED、forge の
-      detectNaN (res_nan_* + rc 1) で DIVERGED、読めない出力で DATA_ERROR (書きかけを残した異常終了は EXEC_ERROR)、抽出が使えないとき fallback_steps の出力で止める (UNAVAILABLE)、euler_ref が無い run と
-      stop_rule=False は今までの経路 (本段は prepare の長さ)。どの run も solverConfig と stage_manifest.json の本段の nStepOuter が実際の上限。
-      帯の位置 (`fix_band`) は偽物に差し替える (本物の抽出は case/70 の replay `stop_rule_replay.py` で通す)。
+停止規則は forge-f5 の feature/nozzle-cooled-wall-settling 60de8125 から取り込んだ (同 `design/tests/run_stop_rule_tests.py` の (a)(b) と
+断面の基準の試験を、この作業ツリー向けに直して写し、閾値の YAML・到達の後の継続・(c)(d) を足した)。旧 `m9_watch.py` (§6.11) と同等とは
+言わない新しい規則として試す。forge-f5 の版の試験は `run_stop_rule_settling_tests.py` に改名して残した。
+**2026-10-14 の統合 (main への統合 1 回目) で仕様を 1 つにした**: 既定で使う (キー無し = 要求、使えなければ UNAVAILABLE を記録して
+fallback_steps で回す)・`evaluate.stop_rule: true` の明示のときだけ使えない設定を例外・到達の後の継続の既定 40,000 (`SR.HOLD_STEPS_DEFAULT`)・
+NS の本段の長さ (fallback) は `--steps` > `evaluate.ns_steps` > 60,000 (`evaluate.nStepOuter` は読まない)・受け渡しの上書きは理由の文字列が必須。
+この試験の期待値もそれに合わせて直した (直した所は各 check の名前に「統合」と書いた)。
 
-実行 (forge-deliv の直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_stop_rule_tests.py [--quick]
-所要: (a) < 5 s、(b) 約 30 s (偽の forge 13 本)。--quick は (b) を省く。出力は一時ディレクトリ (全部合格なら消す)。
+  (a) 合成の系列 (`judge_rows`・`first_stop`、forge 0 step) と設定 (`resolve_settings`・`runner_axismach._stop_rule_settings`): 取り込み元と同じ
+      判定の数値 (REACHED の出力・平均の変化の換算・振幅・r・非有限・窓の点数・DATA_ERROR)。設定は**既定 = 使う** (統合; explicit でない)、
+      明示 (evaluate.stop_rule: true) で上限が出力の間隔の倍数でない・euler_ref が無い・見つからない設定は run dir を作る前に例外、既定なら
+      理由を記録して use = False (例外にしない)。stop_rule_cap・stop_rule_thresholds だけの指定は既定の要求に効く。量の式: 合成の構造格子で θ_r・入口と出口の流量が M6 の `cold_xcheck.reduce_fields` と一致、出口コア M・流量が
+      `nozzle_report.load_field` からの定義と一致。断面の基準は設計壁の出口 physical_wall.domain[1] (x_E ではない; 無ければ例外)、
+      `evaluate.stop_rule_thresholds.x_fracs` で case/45 の試験部の断面 x = 40・70・94 r_t を指定できる。閾値の YAML の不正値は例外。
+      到達の後の継続 (`hold_steps`、既定 40,000): 保てば到達 + H で REACHED、外れたら取り消して数え直す、保ち切れなければ届かない。
+  (b) 偽の forge (`FORGE_BIN` を res を書く台本に差し替え、本物の `run_case.sh` 経由) で `run_staged_ns` の本段の見張り: REACHED (止めて後の出力を
+      消す・SIGTERM・SIGTERM を無視する forge は SIGKILL)・CENSORED (rc 0 でも状態は CENSORED)・EXEC_ERROR・DIVERGED (非有限・detectNaN)・
+      DATA_ERROR・UNAVAILABLE (見張りの途中で帯の位置が決まらない; rc 0)。**どの場合も状態を STOP_RULE_STATE.json と戻り値の `stop_rule` で
+      直接返す** (rc 0 の CENSORED・UNAVAILABLE を REACHED と取り違えない)。stages="full" では S1・S2 に当てず本段だけ。到達の後の継続:
+      保ったら到達 + H で止める、途中で外れて上限まで届かなければ CENSORED (外れた記録つき)。要求したのに
+      euler_ref が見つからない run は、明示の要求なら forge を起動する前に例外、既定の要求なら UNAVAILABLE を記録して fallback_steps で回す
+      (統合; forge-f5 の版の動き)。prepare で使えないと記録した既定の要求も同じ。stop_rule=False は NOT_USED を記録して今までの経路。
+  (c) 受け渡しの制御 (`handoff_gate` と `run_from_table`・`run_pass`・`run_pass0_integral`・CLI): 状態が REACHED で収束の判定が PASS のときだけ
+      抽出 (band_select="edge"・remap_constant_x=True を明示) と fixed_point.json に進む。REACHED でも収束の判定が不合格なら止める
+      (`allow_unconverged` で進む)。CENSORED・UNAVAILABLE は止める (`allow_not_reached` で進む)。上書きは理由の文字列 (統合; True・空は
+      ValueError、CLI は `--allow-unconverged "<理由>"`、理由は HANDOFF_GATE.json の override に残る)。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なし
+      (MISSING)・収束の判定の DIVERGED・判定不能は上書きでも進まない。`run_pass` は前の pass の run の関門が不合格なら抽出・準備の前に止める
+      (新しい run dir を作らない)。判定の結果は HANDOFF_GATE.json・HANDOFF_CONVERGENCE.txt に残る。CLI は止めたら終了コード 3。
+      **#36e で関門に足した条件** (保存則・局所 y₁⁺・δ の 2 窓・被覆・held・次の壁) のうち、局所 y₁⁺ (`wall_resolution_verdict`) と次の壁
+      (`next_wall_check`) は偽物で合格にし、δ の 2 窓は見張りの中の出力ごとの記録 (`stop_rule.delta_snapshot` の偽物) で満たす。2 窓
+      ([s − 4 万, s − 2 万]・[s − 2 万, s]) を覆うため、進む側の試験は到達の後の継続 2 万 step (hold 20,000・上限 45,000) で回す。
+      停止規則の記録の無い run (統合前の準備、NOT_USED) は allow_not_reached でも保存則・2 窓の記録が無いので止める (#36e: 新しい条件は上書きで通さない)。
+      各条件の負例は `run_h370_prelaunch_tests.py`。
+  (d) 停止規則の記録の無い準備 (統合前・2026-10-14 より前の prepare_info に stop_rule が無い run) の回帰: `run_staged_ns` は今までの経路
+      (run_forge、本段の nStepOuter は準備のまま、stop_rule.json・STOP_RULE_STATE.json を書かない、戻りは int と等しい)。統合後はキーの無い
+      問題も要求するので、「指定の無い問題 = 今と同じ」の回帰はここでは見ない ((a) の設定と (b) の既定の UNAVAILABLE で見る)。
+
+実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_stop_rule_tests.py [--quick]
+所要: (a) < 5 s、(b)〜(d) 約 1〜2 分 (偽の forge 約 25 本)。--quick は (b)〜(d) を省く。出力は一時ディレクトリ (全部合格なら消す)。
 """
 from __future__ import annotations
 
@@ -29,6 +52,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 import h5py
@@ -45,9 +69,29 @@ sys.path.insert(0, str(DESIGN))
 
 from forge_design.evaluate import runner_axismach as RA  # noqa: E402
 from forge_design.evaluate import stop_rule as SR  # noqa: E402
+from forge_design.feedback import deltastar_loop as DL  # noqa: E402
 
-C70_RUN = ROOT / "case" / "70.m5_air_wt_demo" / "run_0010b_ns_c2b_cont60k"     # solverConfig・bcondConfig の雛形 (読むだけ)
-M6_XCHECK = Path("/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/cold_xcheck.py")   # M6 の式 (読むだけ)
+M6_XCHECK = ROOT / "case" / "45.isobutane_m6_d155" / "cold_xcheck.py"     # M6 の式 (読むだけ)
+# 偽の forge の run の solverConfig の雛形 (取り込み元は case/70 の run の写しを読んだ; この作業ツリーには無いので文字列で持つ)
+TEMPLATE_CFG = '''mesh: {discretization: "node", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}
+gpu: 1
+solver: "SLAU"
+physProp: {thermalMethod: 0, viscMethod: 1, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1004.5, gamma: 1.4}
+time:
+  unsteady: 0
+  dualTime: 0
+  last: {nStepOuter: 10000}
+  deltaT: {control: 1, dt: 1e-8, cfl: 4.0, cfl_pseudo: 4.0, dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 0, detectNaN: 1}
+  outStepStart: 0
+  outStepInterval: 2500
+  timeIntegration: 11
+  nStepInner: 5
+space: {convMethod: 1, limiter: 2}
+turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}
+initial: "uniform_p101325_u10"
+output: {level: 1}
+'''
+TEMPLATE_BC = "wall: {physID: 3, type: wall_isothermal, Tw: 370.0}\n"
 FAIL = 0
 
 
@@ -60,6 +104,15 @@ def check(name, cond, detail=""):
 
 def skip(name, why):
     print(f"skip {name}  [{why}]", flush=True)
+
+
+def raises(fn, exc=Exception, must=""):
+    """fn() が exc を投げ、文言に must を含むか。戻り (ok, 文言)。"""
+    try:
+        fn()
+    except exc as e:  # noqa: BLE001
+        return (must in str(e)), str(e)
+    return False, "例外にならない"
 
 
 # ====================================================================================== (a) 合成の系列
@@ -80,7 +133,7 @@ def stop_step(rows, **th):
 
 
 def test_synthetic():
-    print("== (a) 合成の系列", flush=True)
+    print("== (a) 合成の系列 (取り込み元と同じ数値)", flush=True)
     s1k = list(range(1000, 60001, 1000))
     s25 = list(range(2500, 60001, 2500))
     check("一定 (間隔 1000) → 履歴が 2 万 step を覆う最初の出力 21,000 で REACHED", stop_step(rows_of(s1k)) == ("REACHED", 21000),
@@ -95,7 +148,6 @@ def test_synthetic():
     t = j["theta"][SR.theta_key(0.4)]
     check("  その D_θ ≈ 0.1 % (換算あり)", abs(t["D"] - 1e-3 / 1.0005) < 1e-9, f"D {t['D']:.6e}")
 
-    # 0.08 %/2 万 step の単調な系列 (r = 0): 9 点と 21 点 — 諮問の判別 A/B
     for n_pts, steps in ((9, list(range(2500, 22501, 2500))), (21, list(range(1000, 21001, 1000)))):
         th8 = lambda s, s0=steps[0]: 1e-3 * (1.0 + 8e-4 * (s - s0) / 20000.0)  # noqa: E731
         rows = rows_of(steps, theta=th8)
@@ -104,18 +156,15 @@ def test_synthetic():
         want_raw = {9: 0.044982e-2, 21: 0.041983e-2}[n_pts]
         check(f"0.08 %/2 万 step の単調な系列 ({n_pts} 点、窓 {j['n_window']} 点) → 届かない (D_θ = {t['D'] * 100:.6f} %)",
               stop_step(rows) is None and j["n_window"] == n_pts and abs(t["D"] - 8e-4 / 1.0004) < 1e-10)
-        check(f"  換算しない前後半の差 D_raw = {t['D_raw'] * 100:.6f} % ≤ 0.05 % (換算しなければ止めてしまう; codex の {want_raw * 100:.6f} %)",
+        check(f"  換算しない前後半の差 D_raw = {t['D_raw'] * 100:.6f} % ≤ 0.05 % (換算しなければ止めてしまう)",
               abs(t["D_raw"] - want_raw) < 5e-9 and t["D_raw"] <= SR.THETA_DRIFT_MAX and t["amp"] <= SR.THETA_AMP_MAX,
               f"振幅 {t['amp'] * 100:.6f} %")
         check(f"  閾値は引数で変えられる (theta_drift_max 1e-3 なら {n_pts} 点の系列で REACHED)",
               stop_step(rows, theta_drift_max=1e-3) == ("REACHED", steps[-1]))
 
     sinus = lambda a: (lambda s: 1e-3 * (1.0 + a * math.sin(2 * math.pi * ((s // 1000) - 1) / 10.0)))  # noqa: E731
-    check("振幅 1 %・平均の変化 0 (周期 1 万 step の正弦) → 届かない", stop_step(rows_of(s1k, theta=sinus(1e-2))) is None,
-          f"振幅 {SR.judge_rows(rows_of(s1k, theta=sinus(1e-2)), 20)['theta'][SR.theta_key(0.4)]['amp'] * 100:.4f} %")
-    j = SR.judge_rows(rows_of(s1k, theta=sinus(1e-3)), 20)
-    check("振幅 0.1 %・平均の変化 0 → 21,000 で REACHED", stop_step(rows_of(s1k, theta=sinus(1e-3))) == ("REACHED", 21000),
-          f"D {j['theta'][SR.theta_key(0.4)]['D']:.3e}、振幅 {j['theta'][SR.theta_key(0.4)]['amp']:.3e}")
+    check("振幅 1 %・平均の変化 0 (周期 1 万 step の正弦) → 届かない", stop_step(rows_of(s1k, theta=sinus(1e-2))) is None)
+    check("振幅 0.1 %・平均の変化 0 → 21,000 で REACHED", stop_step(rows_of(s1k, theta=sinus(1e-3))) == ("REACHED", 21000))
     check("r の平均 0.06 % → 届かない", stop_step(rows_of(s1k, r=lambda s: 6e-4)) is None)
     check("r の平均 0.04 % → REACHED", stop_step(rows_of(s1k, r=lambda s: 4e-4)) == ("REACHED", 21000))
     check("r の振幅 0.6 % (交互 ±0.6 %) → 届かない", stop_step(rows_of(s1k, r=lambda s: 6e-3 * (-1) ** (s // 1000))) is None)
@@ -131,44 +180,143 @@ def test_synthetic():
     rows[5][SR.theta_key(0.95)] = float("nan")
     check("場が有限で判定量 (θ_r) が NaN → DATA_ERROR", stop_step(rows) == ("DATA_ERROR", 6000))
 
-    print("== (a) 設定 (resolve_settings)", flush=True)
-    kw = dict(nsteps_arg=None, n_main=60000, n_main_source="既定 60000", out_int=1000, euler_ref="case/x/run_euler")
+    print("== (a) 設定 (resolve_settings・_stop_rule_settings; 統合後の既定 = 使う)", flush=True)
+    kw = dict(nsteps_arg=None, n_main=200000, n_main_source="evaluate.ns_steps", out_int=2500, euler_ref="case/x/run_euler")
     d = SR.resolve_settings({}, **kw)
-    check("既定: 使う・上限 200,000・閾値は §4.6", d["use"] and d["requested"] and d["cap"] == 200000 and d["cap_source"].startswith("既定")
+    check("統合: キー無し → 使う (既定の要求、explicit でない)", d["requested"] and d["use"] and not d["explicit"]
+          and d["requested_source"] == "既定 (使う)",
+          json.dumps({k: d[k] for k in ("requested", "use", "explicit", "requested_source")}, ensure_ascii=False))
+    d = SR.resolve_settings({"stop_rule": True}, **kw)
+    check("統合: evaluate.stop_rule: true → 明示の要求 (explicit)", d["explicit"] and d["requested_source"] == "evaluate.stop_rule")
+    check("統合: 引数 requested=True → 明示、evaluate.stop_rule: false → 要求なし (explicit でない)",
+          SR.resolve_settings({}, **kw, requested=True)["explicit"] and not SR.resolve_settings({"stop_rule": False}, **kw)["requested"]
+          and not SR.resolve_settings({"stop_rule": False}, **kw)["explicit"])
+    check("evaluate.stop_rule: true → 使う・上限 200,000・閾値は取り込み元のまま", d["use"] and d["requested"] and d["cap"] == 200000
           and d["window"] == 20000 and d["min_points"] == 9 and d["r_mean_max"] == 5e-4 and d["theta_drift_max"] == 5e-4
-          and d["x_fracs"] == [0.4, 0.7, 0.95] and d["fallback_steps"] == 60000, json.dumps(d, ensure_ascii=False)[:200])
-    check("--steps 90000 → 上限 90000 (引数)", SR.resolve_settings({}, **{**kw, "nsteps_arg": 90000, "n_main": 90000})["cap"] == 90000)
-    check("evaluate.stop_rule_cap 150000 → 上限 150000", SR.resolve_settings({"stop_rule_cap": 150000}, **kw)["cap"] == 150000)
-    check("evaluate.stop_rule: false → 使わない", not SR.resolve_settings({"stop_rule": False}, **kw)["use"])
+          and d["x_fracs"] == [0.4, 0.7, 0.95] and d["fallback_steps"] == 200000, json.dumps(d, ensure_ascii=False)[:200])
+    check("evaluate.stop_rule_cap 150000 → 上限 150000", SR.resolve_settings({"stop_rule": True, "stop_rule_cap": 150000}, **kw)["cap"] == 150000)
+    check("--steps 90000 → 上限 90000 (引数)", SR.resolve_settings({"stop_rule": True}, **{**kw, "nsteps_arg": 90000})["cap"] == 90000)
     check("引数 requested=False → 使わない (YAML が true でも)", not SR.resolve_settings({"stop_rule": True}, **kw, requested=False)["use"])
-    d = SR.resolve_settings({}, **{**kw, "euler_ref": None})
-    check("euler_ref が無い → 使えない (理由を記録)", d["requested"] and not d["use"] and "euler_ref" in d["reason"], d["reason"])
-    d = SR.resolve_settings({}, **{**kw, "out_int": 5000})
+    d = SR.resolve_settings({"stop_rule": True, "stop_rule_cap": 151000}, **kw)
+    check("上限 151,000 が出力の間隔 2,500 の倍数でない → 使えない (こちらで足した)", not d["use"] and "倍数" in d["reason"], d["reason"])
+    d = SR.resolve_settings({"stop_rule": True}, **{**kw, "out_int": 5000})
     check("出力の間隔 5000 → 使えない (窓に 9 点が入らない)", not d["use"] and "出力の間隔" in d["reason"], d["reason"])
-    check("出力の間隔 2500 → 使える", SR.resolve_settings({}, **{**kw, "out_int": 2500})["use"])
     for bad, msg in (({"stop_rule": "yes"}, "true / false"), ({"stop_rule_cap": 0}, "正の整数"), ({"stop_rule_cap": 1.5e5}, "正の整数")):
-        try:
-            SR.resolve_settings(bad, **kw); ok, e = False, "例外にならない"
-        except ValueError as ex:
-            ok, e = msg in str(ex), str(ex)
+        ok, e = raises(lambda bad=bad: SR.resolve_settings(bad, **kw), ValueError, msg)
         check(f"YAML の不正値 {bad} → ValueError", ok, e)
+
+    print("== (a) 閾値の YAML (evaluate.stop_rule_thresholds)・到達の後の継続 (evaluate.stop_rule_hold_steps)", flush=True)
+    xw45 = 95.2974                 # case/45 の修正後の設計壁の出口 [r_t] (§5.1 #34、終点 95.22758 → 95.29740)
+    f45 = [40.0 / xw45, 70.0 / xw45, 94.0 / xw45]
+    d = SR.resolve_settings({"stop_rule": True, "stop_rule_thresholds": {"x_fracs": f45, "r_mean_max": 1e-3}}, **kw)
+    check("stop_rule_thresholds: x_fracs (case/45 の 40・70・94 r_t) と r_mean_max を上書き、他は既定、出所を記録",
+          d["use"] and d["x_fracs"] == f45 and d["r_mean_max"] == 1e-3 and d["r_amp_max"] == SR.R_AMP_MAX
+          and d["thresholds_source"] == {"evaluate.stop_rule_thresholds": ["r_mean_max", "x_fracs"]}, str(d["x_fracs"]))
+    d0 = SR.resolve_settings({"stop_rule": True}, **kw)
+    check("統合: キー無しは閾値の出所が既定・hold_steps は既定 40,000 (SR.HOLD_STEPS_DEFAULT、出所も記録)",
+          d0["thresholds_source"] == "既定" and d0["hold_steps"] == SR.HOLD_STEPS_DEFAULT == 40000
+          and d0["hold_steps_source"] == "既定 40000", str({k: d0[k] for k in ("thresholds_source", "hold_steps", "hold_steps_source")}))
+    check("統合: stop_rule_hold_steps 0 → 0 (最初の到達で止める)・null → 既定 40,000",
+          SR.resolve_settings({"stop_rule_hold_steps": 0}, **kw)["hold_steps"] == 0
+          and SR.resolve_settings({"stop_rule_hold_steps": 0}, **kw)["hold_steps_source"] == "evaluate.stop_rule_hold_steps"
+          and SR.resolve_settings({"stop_rule_hold_steps": None}, **kw)["hold_steps"] == 40000)
+    d = SR.resolve_settings({"stop_rule_cap": 60000}, **kw)
+    check("統合: 上限 60,000 < 窓 2 万 + 出力の間隔 + 保持 4 万 → 必ず CENSORED の注記",
+          d["use"] and "保持 40000" in (d.get("note") or ""), str(d.get("note")))
+    d = SR.resolve_settings({"stop_rule": True, "stop_rule_thresholds": {"window": 40000}}, **kw)
+    check("window 40000 にすると出力の間隔 2500 でも窓に 9 点以上 (使える)", d["use"] and d["window"] == 40000)
+    for bad, msg in (({"stop_rule_thresholds": {"x_frac": [0.5]}}, "未知"), ({"stop_rule_thresholds": {"x_fracs": [0.5, 1.2]}}, "x_fracs"),
+                     ({"stop_rule_thresholds": {"x_fracs": []}}, "x_fracs"), ({"stop_rule_thresholds": {"x_fracs": [0.5, 0.5]}}, "x_fracs"),
+                     ({"stop_rule_thresholds": {"r_mean_max": -1e-3}}, "r_mean_max"), ({"stop_rule_thresholds": {"min_points": 1}}, "min_points"),
+                     ({"stop_rule_thresholds": [0.4]}, "mapping"), ({"stop_rule_hold_steps": -1}, "hold_steps"),
+                     ({"stop_rule_hold_steps": 1.5}, "hold_steps")):
+        ok, e = raises(lambda bad=bad: SR.resolve_settings({"stop_rule": True, **bad}, **kw), ValueError, msg)
+        check(f"不正値 {bad} → ValueError", ok, e[:120])
+    # 到達の後の継続 (合成の系列; 間隔 1000、一定なら 21,000 で最初に届く)
+    st = SR.first_stop(rows_of(s1k), hold_steps=10000)
+    check("hold 10,000: 一定の系列は最初の到達 21,000 の後 10,000 step 保って 31,000 で REACHED",
+          st["status"] == "REACHED" and st["step"] == 31000 and st["hold"]["reached"] == [21000] and not st["hold"]["breaks"], str(st and st.get("hold")))
+    check("hold 0 は取り込み元と同じ (21,000、hold の記録を付けない)", SR.first_stop(rows_of(s1k), hold_steps=0)["step"] == 21000
+          and "hold" not in SR.first_stop(rows_of(s1k), hold_steps=0))
+    spike = rows_of(s1k, r=lambda s: 2e-2 if s == 25000 else 0.0)        # 25,000 だけ r = 2 % (平均・振幅とも外れる)
+    st = SR.first_stop(spike, hold_steps=10000)
+    br = st["hold"]["breaks"] if st else None
+    check("hold 10,000: 21,000 で届き 25,000 で外れる → 取り消して記録、窓から外れた後に再び届いた出力から数え直して REACHED",
+          st is not None and br and br[0]["start"] == 21000 and br[0]["broken_at"] == 25000 and st["step"] == st["hold"]["start"] + 10000
+          and st["hold"]["start"] > 25000, str(st and st["hold"]))
+    check("hold が系列より長い → 届かない", SR.first_stop(rows_of(s1k[:35]), hold_steps=20000) is None)
+
+    P = lambda ev: types.SimpleNamespace(evaluate=ev)  # noqa: E731
+    eu = TMP / "euler_dummy"
+    eu.mkdir(exist_ok=True)
+    d = RA._stop_rule_settings(P({"nStepOuter": 60000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: _stop_rule_settings: キー無し・引数 None → 既定で要求して使う (prepare_info に stop_rule を書く; explicit でない)",
+          d is not None and d["requested"] and d["use"] and not d["explicit"] and d["cap"] == 200000, str(d and d.get("reason")))
+    check("_stop_rule_settings: evaluate.stop_rule: false → 要求なしの記録 (使わない)",
+          (lambda d: d is not None and not d["requested"] and not d["use"])(RA._stop_rule_settings(P({"stop_rule": False}), None, str(eu), None)))
+    d = RA._stop_rule_settings(P({"stop_rule": True, "ns_steps": 200000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: _stop_rule_settings: stop_rule true・ns_steps 200000・出力 2500 → 使う (上限 200,000・fallback 200,000)",
+          d["use"] and d["cap"] == 200000 and d["fallback_steps"] == 200000 and d["fallback_steps_source"] == "evaluate.ns_steps"
+          and d["out_step_interval"] == 2500, str(d.get("reason")))
+    d = RA._stop_rule_settings(P({"stop_rule": True, "nStepOuter": 200000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: _stop_rule_settings: evaluate.nStepOuter 200000 は NS に効かない (fallback は既定 60,000; 上限は 200,000)",
+          d["use"] and d["cap"] == 200000 and d["fallback_steps"] == RA.NS_STEPS_DEFAULT == 60000
+          and d["fallback_steps_source"] == "既定 60000", str({k: d[k] for k in ("fallback_steps", "fallback_steps_source")}))
+    ok_ev = {"stop_rule": True, "ns_steps": 200000, "outStepInterval": 2500}
+    bad_cases = (("euler_ref が無い", None, None, "euler_ref が無い"),
+                 ("euler_ref が見つからない", None, str(TMP / "no_such_euler"), "見つからない"),
+                 ("上限が出力の間隔の倍数でない", {"stop_rule_cap": 151000}, str(eu), "倍数"),
+                 ("出力の間隔が窓に 9 点を入れられない (ns_steps 既定 60000 を割り切らない 7000 → 20000 に直る)",
+                  {"outStepInterval": 7000, "ns_steps": None}, str(eu), "9 点が入らない"))
+    for name, ev_over, er, msg in bad_cases:
+        ev = {k: v for k, v in {**ok_ev, **(ev_over or {})}.items() if v is not None}
+        ok, e = raises(lambda ev=ev, er=er: RA._stop_rule_settings(P(ev), None, er, None), ValueError, msg)
+        check(f"_stop_rule_settings: 明示 (stop_rule true) で {name} → ValueError (prepare_ns は run dir を作る前に呼ぶ)",
+              ok and e.count(";") == 0, e[:140])
+        ev_def = {k: v for k, v in ev.items() if k != "stop_rule"}
+        try:
+            d = RA._stop_rule_settings(P(ev_def), None, er, None); e = None
+        except ValueError as ex:
+            d, e = None, str(ex)
+        check(f"統合: _stop_rule_settings: 既定 (キー無し) で {name} → 例外にせず use = False と理由を記録 (本段は fallback_steps)",
+              d is not None and d["requested"] and not d["explicit"] and not d["use"] and msg in (d["reason"] or ""), e or str(d and d["reason"]))
+    d = RA._stop_rule_settings(P({"stop_rule_cap": 150000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: stop_rule_cap だけ (stop_rule が無い) → 既定の要求に効く (上限 150,000; 例外にしない)",
+          d["requested"] and d["use"] and d["cap"] == 150000 and d["cap_source"] == "evaluate.stop_rule_cap")
+    d = RA._stop_rule_settings(P({"stop_rule_thresholds": {"x_fracs": [0.5]}, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: stop_rule_thresholds だけ (stop_rule が無い) → 既定の要求に効く (x_fracs [0.5]; 例外にしない)",
+          d["requested"] and d["use"] and d["x_fracs"] == [0.5])
+    # prepare_ns の本段の step 数・出力の間隔 (統合: forge-f5 fb07daf8 の規則 --steps > evaluate.ns_steps > 60,000; nStepOuter は読まない)
+    def want_steps(ev, nsteps):
+        n = nsteps or (int(ev["ns_steps"]) if ev.get("ns_steps") is not None else 60000)
+        out_int = int(ev.get("outStepInterval", max(n // 6, 1)))
+        if n % out_int:
+            out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
+        return n, out_int
+    cases = [({}, None), ({"nStepOuter": 60000}, None), ({"nStepOuter": 200000, "outStepInterval": 2500}, None),
+             ({"ns_steps": 12001}, None), ({"ns_steps": 50000, "outStepInterval": 3000}, None), ({}, 9000), ({"outStepInterval": 7}, 100),
+             ({"nStepOuter": 12000, "ns_steps": 90000}, None)]
+    check("統合: _ns_steps (prepare_ns の本段の step 数・出力の間隔) は --steps > evaluate.ns_steps > 60,000 (evaluate.nStepOuter は読まない)",
+          all(RA._ns_steps(P(ev), ns)[:2] == want_steps(ev, ns) for ev, ns in cases)
+          and [RA._ns_steps(P(ev), ns)[2] for ev, ns in cases[:6]] == ["既定 60000", "既定 60000", "既定 60000", "evaluate.ns_steps",
+                                                                        "evaluate.ns_steps", "引数 (--steps)"])
 
 
 # ====================================================================================== 合成の構造格子 (量の式・偽の forge)
 NI, NJ, SCALE, X_E = 41, 13, 0.025, 20.0
 
 
-def synth_geometry():
-    x = np.linspace(-5.0, 30.0, NI)
-    rw = 1.0 + 0.02 * (x + 5.0)
+def synth_geometry(x0=-5.0, x1=30.0):
+    x = np.linspace(x0, x1, NI)
+    rw = 1.0 + 0.02 * (x - x0)
     X = np.repeat(x[:, None], NJ, axis=1)
     R = rw[:, None] * np.linspace(0.0, 1.0, NJ)[None, :] ** 0.7      # 壁へ寄せる
     return X, R
 
 
-def synth_base():
+def synth_base(x0=-5.0, x1=30.0):
     """流量が各列で 1 (同じ折れ線の式で) になる合成の場 (float64; 偽の forge が float32 で書く前の基準)。"""
-    X, R = synth_geometry()
+    X, R = synth_geometry(x0, x1)
     rw = R[:, -1:]
     y = rw - R; delta = 0.15 * rw
     u = 1700.0 * np.minimum(1.0, np.maximum(y / delta, 0.0) ** (1.0 / 7.0))
@@ -178,8 +326,8 @@ def synth_base():
     return {"ro": ro, "Ux": u, "Uy": np.zeros_like(u), "T": T, "P": ro * 287.0 * T, "sonic": np.sqrt(1.4 * 287.0 * T), "k": np.full_like(ro, 1.0)}
 
 
-def write_mesh(run_dir: Path):
-    X, R = synth_geometry()
+def write_mesh(run_dir: Path, x0=-5.0, x1=30.0):
+    X, R = synth_geometry(x0, x1)
     coord = np.c_[X.ravel() * SCALE, R.ravel() * SCALE, np.zeros(NI * NJ)].astype(np.float32)
     with h5py.File(run_dir / "nozzle.h5", "w") as h:
         h["MESH/COORD"] = coord.ravel()
@@ -202,16 +350,14 @@ def test_quantities():
     row = SR.snapshot(geo, 1000, band)
     check("合成の場: r = (ṁ_in − ṁ_out)/ṁ_in ≈ −0.003 (出口の列の ρ を 1.003 倍)", abs(row["r"] + 0.003) < 2e-6, f"r {row['r']:.7f}")
     check("θ_r の断面は x/x_E = 0.4・0.7・0.95 に最も近い列",
-          all(abs(row[f"x_{SR.theta_key(f)}"] - f * X_E) <= 35.0 / (NI - 1) / 2 + 1e-12 for f in SR.X_FRACS),
-          str([round(row[f"x_{SR.theta_key(f)}"], 4) for f in SR.X_FRACS]))
-    # 記録の量: nozzle_report.load_field と qs_series.py の式
+          all(abs(row[f"x_{SR.theta_key(f)}"] - f * X_E) <= 35.0 / (NI - 1) / 2 + 1e-12 for f in SR.X_FRACS))
     from forge_design.report.nozzle_report import load_field
     F = load_field(rd, "res_1000.h5")
     eta = F["R"][-1] / F["R"][-1, -1]; core = (eta >= 0.05) & (eta <= 0.7)
     m = 2 * np.pi * np.trapezoid(F["V"]["ro"] * F["V"]["Ux"] * F["R"], F["R"], axis=1)
     xs = F["X"][:, 0]
     want = {"exit_core_M": float(F["V"]["M"][-1][core].mean()), "mdot_rt": float(np.median(m[(xs > -2.5) & (xs < X_E)]))}
-    check("出口コア M・流量が nozzle_report.load_field からの定義 (qs_series.py) とビット同一",
+    check("出口コア M・流量が nozzle_report.load_field からの定義とビット同一",
           row["exit_core_M"] == want["exit_core_M"] and row["mdot_rt"] == want["mdot_rt"], f"{row['exit_core_M']!r} {want['exit_core_M']!r}")
     if not M6_XCHECK.exists():
         skip("θ_r・流量が M6 の cold_xcheck.reduce_fields と一致", f"{M6_XCHECK} が無い")
@@ -226,15 +372,49 @@ def test_quantities():
     o = XC.reduce_fields(xy, ro, ux, uy, T, k, False, NI, NJ, SCALE, np.array(band["x"]), np.array(band["y_b"]))
     th_m6 = [float(o["theta_r"][int(np.argmin(np.abs(o["x"] - f * X_E)))]) for f in SR.X_FRACS]
     th_new = [row[SR.theta_key(f)] for f in SR.X_FRACS]
-    check("θ_r が M6 の reduce_fields (同じ y_b、fac 1.0) とビット同一", th_new == th_m6, f"{th_new} vs {th_m6}")
+    check("θ_r が M6 の reduce_fields (同じ y_b、fac 1.0) とビット同一 (式が同じことの確認で、判定の規則の同等ではない)", th_new == th_m6,
+          f"{th_new} vs {th_m6}")
     check("入口・出口の流量が M6 の reduce_fields とビット同一",
-          row["mdot_in"] == float(o["mdot_in"]) and row["mdot_out"] == float(o["mdot_out"]), f"{row['mdot_in']!r} {float(o['mdot_in'])!r}")
+          row["mdot_in"] == float(o["mdot_in"]) and row["mdot_out"] == float(o["mdot_out"]))
+
+
+def test_station_reference():
+    """θ_r の断面の基準は設計壁 (物理壁) の出口 prepare_info.physical_wall.domain[1] (取り込み元 60de8125 の修正)。x_E (軸 Mach 則の終点) では
+    ない。断面の比は evaluate.stop_rule_thresholds.x_fracs で変えられ、case/45 の試験部の 40・70・94 r_t を指定できる。"""
+    print("== (a) 断面の基準 (設計壁の出口) と x_fracs の指定", flush=True)
+    x0, xw = -12.5, 95.2974                                  # case/45 の H の入口と修正後の設計壁の出口 [r_t] (間隔 約 2.7 r_t の合成の格子)
+    rd = TMP / "station_fixture"
+    rd.mkdir()
+    write_mesh(rd, x0, xw)
+    (rd / "prepare_info.json").write_text(json.dumps({"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": 39.81, "Md": 6.0,
+                                                       "physical_wall": {"domain": [x0, xw]}}))
+    with h5py.File(rd / "res_1000.h5", "w") as h:
+        for k, v in synth_base(x0, xw).items():
+            h[f"VALUE/{k}"] = v.ravel().astype(np.float32)
+    geo = SR.RunGeometry(rd)
+    band = {"x": [x0, xw], "y_b": [0.25, 0.25]}
+    dx = (xw - x0) / (NI - 1)
+    row = SR.snapshot(geo, 1000, band)
+    check("断面の基準 x_w = physical_wall.domain[1] (95.2974)、x_E (39.81) ではない",
+          geo.x_wall_exit == xw and geo.x_E == 39.81, f"x_w {geo.x_wall_exit}")
+    got = [row[f"x_{SR.theta_key(f)}"] for f in SR.X_FRACS]
+    check("既定の断面は x/x_w = 0.4・0.7・0.95 に最も近い列 (38.1・66.7・90.5 r_t 付近)",
+          all(abs(g - f * xw) <= dx / 2 + 1e-9 for g, f in zip(got, SR.X_FRACS)), str([round(g, 3) for g in got]))
+    f45 = [40.0 / xw, 70.0 / xw, 94.0 / xw]
+    th = SR.thresholds(x_fracs=f45)
+    row = SR.snapshot(geo, 1000, band, th["x_fracs"])
+    got = [row[f"x_{SR.theta_key(f)}"] for f in th["x_fracs"]]
+    check("x_fracs = 40/x_w・70/x_w・94/x_w → 断面は 40・70・94 r_t に最も近い列 (M6 の §6.11 の断面; 規則は同等でない)",
+          all(abs(g - x) <= dx / 2 + 1e-9 for g, x in zip(got, (40.0, 70.0, 94.0))), str([round(g, 3) for g in got]))
+    (rd / "prepare_info.json").write_text(json.dumps({"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": 39.81}))
+    ok, e = raises(lambda: SR.RunGeometry(rd), ValueError, "physical_wall.domain")
+    check("physical_wall.domain の無い run は RunGeometry が例外 (断面の基準を決めない)", ok, e[:100])
 
 
 # ====================================================================================== (b) 偽の forge と本段の見張り
 FAKE_SRC = r'''#!{py}
 """偽の forge (試験用): solverConfig の nStepOuter・outStepInterval に従って res_<N>.h5 を書く。fake_scenario.json の指定で
-出口の列の ρ を交互に揺らす・途中で異常終了・非有限を書く・detectNaN のように止まる・SIGTERM を無視する。"""
+出口の列の ρ を交互に揺らす・途中で異常終了・非有限を書く・detectNaN のように止まる・SIGTERM を無視する・残差の減り方 (res_tau)。"""
 import json, re, signal, sys, time
 import h5py, numpy as np
 cfg = open("solverConfig.yaml").read()
@@ -245,13 +425,14 @@ if sc.get("ignore_term"):
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 base = dict(np.load("fake_base.npz"))
 nj = int(sc["nj"])
+tau = float(sc.get("res_tau", 5000.0))
 cols = ["rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe", "rms_roK", "rms_roOmega"]
 hist = open("residual_history.csv", "w")
 hist.write("step,inner,phase," + ",".join(cols) + "\n")
 def write(name, step, k):
     V = {{key: v.copy() for key, v in base.items()}}
     a = float(sc.get("osc_out", 0.0))
-    if a:
+    if a and step >= int(sc.get("osc_from", 0)):
         V["ro"][-nj:] *= 1.0 + a * (-1) ** k
     if sc.get("nan_at") == step:
         V["T"][7] = np.nan
@@ -265,7 +446,7 @@ while step < n_outer:
     nxt = min(step + interval, n_outer)
     time.sleep(float(sc.get("dt", 0.2)))
     for s in range(step + 1, nxt + 1, max(interval // 10, 1)):
-        hist.write(f"{{s}},-1,outer_end," + ",".join(f"{{1e-3 * np.exp(-s / 5000.0):.6e}}" for _ in cols) + "\n")
+        hist.write(f"{{s}},-1,outer_end," + ",".join(f"{{1e-3 * np.exp(-s / tau):.6e}}" for _ in cols) + "\n")
     hist.flush()
     step, k = nxt, k + 1
     if sc.get("exit_at") == step:
@@ -282,31 +463,56 @@ print("fake forge end", flush=True)
 sys.exit(0)
 '''
 
+EULER_DUMMY = TMP / "euler_dummy"
 
-def make_run(name: str, scenario: dict, *, interval=2500, fallback=10000, cap=40000, euler_ref="EULER", use=True, requested=True):
-    """偽の forge 用の run (prepare_ns の出力の形: prepare_info.json の stop_rule・solverConfig の nStepOuter = fallback)。"""
+
+def make_run(name: str, scenario: dict, *, interval=2500, fallback=10000, cap=40000, euler_ref=True, requested=True, with_sr=True,
+             hold=0):
+    """偽の forge 用の run (prepare_ns の出力の形: prepare_info.json の stop_rule・solverConfig の nStepOuter = fallback)。
+    with_sr=False は統合前の準備 (prepare_info に stop_rule が無い)。requested: True = `evaluate.stop_rule: true` (明示)、False = 使わない、
+    None = キー無し (統合後の既定の要求)。hold: 整数なら `evaluate.stop_rule_hold_steps`、"default" ならキーを書かない (既定 40,000)。
+    戻り (run_dir, prepare_info の中身)。"""
     rd = TMP / name
     rd.mkdir()
     write_mesh(rd)
     np.savez(rd / "fake_base.npz", **{k: v.ravel() for k, v in synth_base().items()})
     (rd / "fake_scenario.json").write_text(json.dumps({"nj": NJ, **scenario}))
-    cfg = (C70_RUN / "solverConfig.yaml").read_text()
-    cfg = RA._cfg_set(cfg, {"nStepOuter": fallback, "outStepInterval": interval})
+    cfg = RA._cfg_set(TEMPLATE_CFG, {"nStepOuter": fallback, "outStepInterval": interval})
     (rd / "solverConfig.yaml").write_text(cfg)
-    shutil.copy2(C70_RUN / "bcondConfig.yaml", rd / "bcondConfig.yaml")
-    eu = TMP / "euler_dummy"
-    eu.mkdir(exist_ok=True)
-    sr = SR.resolve_settings({}, nsteps_arg=None, n_main=fallback, n_main_source="試験", out_int=interval,
-                             euler_ref=(str(eu) if euler_ref else None), requested=requested)
-    sr["cap"] = cap if sr.get("cap") is not None else None
-    (rd / "prepare_info.json").write_text(json.dumps({"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": X_E,
-                                                       "physical_wall": {"domain": [-5.0, X_E]},
-                                                       "wall_thermal": {"mode": "isothermal", "Tw": 350.0}, "stop_rule": sr,
-                                                       "euler_ref": sr["euler_ref"]}))
-    return rd
+    (rd / "bcondConfig.yaml").write_text(TEMPLATE_BC)
+    (rd / "MESH_QUALITY.txt").write_text("VERDICT: PASS (試験の偽物)\n")
+    EULER_DUMMY.mkdir(exist_ok=True)
+    info = {"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": X_E, "physical_wall": {"domain": [-5.0, X_E]},
+            "wall_thermal": {"mode": "isothermal", "Tw": 370.0},
+            "euler_ref": str(EULER_DUMMY) if euler_ref else None, "nStepOuter": fallback, "cfl_main": 4.0,
+            "throat_physical": {}, "dstar_source": "試験", "initializer": None}
+    if with_sr:
+        ev = {} if hold == "default" else {"stop_rule_hold_steps": hold}
+        if requested is not None:
+            ev["stop_rule"] = requested
+        sr = SR.resolve_settings(ev, nsteps_arg=None, n_main=fallback, n_main_source="試験", out_int=interval,
+                                 euler_ref=str(EULER_DUMMY), requested=None)
+        if sr.get("cap") is not None:
+            sr["cap"] = cap
+        if not euler_ref:
+            sr["euler_ref"] = str(TMP / "no_such_euler")         # 準備の後に euler_ref が消えた run
+        info["stop_rule"] = sr
+    (rd / "prepare_info.json").write_text(json.dumps(info))
+    return rd, info
 
 
 WATCH = {"poll_s": 0.1, "settle_s": 1.0, "term_wait_s": 3.0, "kill_wait_s": 5.0, "post_wait_s": 120.0}
+
+
+DELTA_CALLS = []
+
+
+def fake_delta(run_dir, step, euler_ref, extract, x_use):
+    """出力ごとの δ の抽出 (`stop_rule.delta_snapshot`) の偽物: 一定の δ_E・δ_target を返し、渡された条件を記録する。"""
+    DELTA_CALLS.append({"step": int(step), "extract": dict(extract), "euler_ref": euler_ref})
+    n = len(x_use)
+    return {"delta_E": [1e-3] * n, "delta_target": [1e-3] * n, "held": [0] * n, "missing": [], "n_missing": 0, "n_held": 0,
+            "lam": "1.0", "res_sha256": SR._sha256(Path(run_dir) / f"res_{step}.h5"), "seconds": 0.0}
 
 
 def fake_band(run_dir, step, euler_ref, out_dir, **kw):
@@ -324,146 +530,422 @@ def main_nstep(rd):
     return int(st[-1]["soft"]["nStepOuter"]) if st else None
 
 
-def run_case(rd, **kw):
-    rc = RA.run_staged_ns(rd, stages="none", stop_rule_watch=WATCH, **kw)
+def run_case(rd, stages="none", **kw):
+    rc = RA.run_staged_ns(rd, stages=stages, stop_rule_watch=WATCH, **kw)
     rec = json.loads((rd / SR.RECORD).read_text()) if (rd / SR.RECORD).exists() else None
-    return rc, rec
+    return rc, rec, SR.read_state(rd)
+
+
+def state_ok(rc, st, status):
+    """戻り値の付加情報と STOP_RULE_STATE.json が同じ状態を持つか。"""
+    return (st is not None and st["status"] == status and getattr(rc, "stop_rule", None) is not None
+            and rc.stop_rule["status"] == status and rc.stop_rule == {k: v for k, v in st.items() if k not in ("version", "plan")})
 
 
 def test_watcher():
-    print("== (b) 偽の forge で本段の見張り", flush=True)
-    FAKE_FORGE.write_text(FAKE_SRC.format(py=sys.executable))
-    FAKE_FORGE.chmod(FAKE_FORGE.stat().st_mode | stat.S_IXUSR)
-    real_fix = SR.fix_band
-    SR.fix_band = fake_band
+    print("== (b) 偽の forge で本段の見張り・終了の状態", flush=True)
+    real_fix, real_delta = SR.fix_band, SR.delta_snapshot
+    SR.fix_band, SR.delta_snapshot = fake_band, fake_delta
     try:
-        # --- REACHED: 一定の場 → 22,500 で止めて後の出力を消す ---
-        rd = make_run("reach", {"dt": 0.25})
-        rc, rec = run_case(rd)
+        DELTA_CALLS.clear()
+        rd, _ = make_run("reach", {"dt": 0.25})
+        rc, rec, st = run_case(rd)
         outs = outputs(rd)
+        xs_use = rec["delta_series"]["x"]
+        check("REACHED: 見張りの行に出力ごとの δ_E・δ_target (使用域 [0, x_w] の全列) が入る (§5.1 #36e (7); 判定には使わない記録)",
+              all(isinstance(r.get("delta"), dict) and len(r["delta"]["delta_E"]) == len(xs_use) == len(r["delta"]["delta_target"])
+                  for r in rec["rows"]) and len(xs_use) == int(np.sum(np.linspace(-5.0, 30.0, NI) <= X_E + 1e-9) - np.sum(np.linspace(-5.0, 30.0, NI) < 0.0))
+              and sorted(c["step"] for c in DELTA_CALLS) == [r["step"] for r in rec["rows"]]
+              and rec["delta_series"]["seconds"]["n"] == len(rec["rows"]),
+              f"行 {len(rec['rows'])}、δ の呼び出し {len(DELTA_CALLS)}、列 {len(xs_use)}")
+        ex = DELTA_CALLS[0]["extract"]
+        check("REACHED: 出力ごとの δ の抽出の条件は受け渡しと同じ (edge・remap_constant_x=True・端は欠測・ω 0.5・λ 1.0・昇格の上限 ×1000)",
+              all(ex.get(k) == v for k, v in DL.handoff_extract_settings().items()), json.dumps(ex, ensure_ascii=False))
+        check("REACHED: 要求の断面の位置 (x_fracs × x_w) を sections に記録",
+              [round(sc["x_requested"], 9) for sc in rec["sections"]] == [round(f * X_E, 9) for f in SR.X_FRACS])
         check("REACHED: 22,500 (間隔 2500 で窓が覆う最初の出力) で止める・rc 0",
               rc == 0 and rec["status"] == "REACHED" and rec["stop_step"] == 22500, f"rc {rc}、{rec['status']} {rec.get('stop_step')}")
-        check("REACHED: 止めた出力より後の res を消した (残る最後の出力 = 22,500)、境界の res_* も",
-              max(outs) == 22500 and not [f.name for f in rd.iterdir() if SR._OUT_RE.fullmatch(f.name) and int(SR._OUT_RE.fullmatch(f.name).group(1)) > 22500],
-              f"消した {rec.get('deleted_after_stop')}、残り {outs[-3:]}")
-        check("REACHED: 止めた出力の sha256 を記録", rec.get("stop_sha256") == SR._sha256(rd / "res_22500.h5"))
+        check("REACHED: 状態は STOP_RULE_STATE.json と戻り値の stop_rule で同じ (status・stop_step・forge rc・上限)",
+              state_ok(rc, st, "REACHED") and st["stop_step"] == 22500 and st["forge_rc"] == 143 and st["cap"] == 40000
+              and st["record"] == SR.RECORD and st["stop_sha256"] == SR._sha256(rd / "res_22500.h5"), json.dumps(st, ensure_ascii=False)[:200])
+        check("REACHED: 止めた出力より後の res を消した (残る最後の出力 = 22,500)", max(outs) == 22500, f"消した {rec.get('deleted_after_stop')}")
         check("REACHED: forge だけに SIGTERM (止まったことを確かめた)・forge の rc 143",
-              rec["stop_forge"]["stopped"] and rec["stop_forge"]["signals"] == ["SIGTERM"] and rec["forge_rc"] == 143,
-              json.dumps(rec.get("stop_forge"), ensure_ascii=False))
+              rec["stop_forge"]["stopped"] and rec["stop_forge"]["signals"] == ["SIGTERM"] and rec["forge_rc"] == 143)
         vp = rd / "CONVERGENCE_VERDICT.txt"
         check("REACHED: run_case.sh の後処理 (収束判定) が止めた後に走った", rec["postprocess"]["by"] == "run_case.sh" and vp.exists()
               and "CONVERGENCE_EXIT" in vp.read_text(), str(rec.get("postprocess")))
         check("REACHED: solverConfig と stage_manifest.json の本段の nStepOuter = 上限 40,000",
               RA._cfg_value((rd / "solverConfig.yaml").read_text(), "nStepOuter") == 40000 and main_nstep(rd) == 40000, str(main_nstep(rd)))
-        check("REACHED: 系列・判定の内訳・y_b の出所・記録だけの量を残す",
-              len(rec["rows"]) >= 9 and rec["rows"][-1]["judge"]["ok"] and rec["band"]["step"] == 2500
-              and "exit_core_M" in rec["recorded_at_stop"] and (rd / "stop_rule.json.tmp").exists() is False)
+        ms = json.loads((rd / RA.MAIN_STAGE_STARTED).read_text())
+        check("REACHED: 通知 MAIN_STAGE_STARTED の本段の nStepOuter = 上限 (見張りの前に書いた)",
+              ms["main_config"]["nStepOuter"] == 40000 and ms["time_unix"] <= Path(rd / "run_case_stdout.log").stat().st_mtime)
 
-        # --- SIGTERM を無視する forge → SIGKILL ---
-        rd = make_run("reach_ignore_term", {"dt": 0.25, "ignore_term": True}, cap=200000)   # 上限まで回ると term_wait より長い
-        rc, rec = run_case(rd)
+        rd, _ = make_run("reach_ignore_term", {"dt": 0.25, "ignore_term": True}, cap=200000)
+        rc, rec, st = run_case(rd)
         check("SIGTERM を無視する forge → 待って SIGKILL で止めた (REACHED、forge の rc 137)",
-              rc == 0 and rec["status"] == "REACHED" and rec["stop_forge"]["signals"] == ["SIGTERM", "SIGKILL"] and rec["stop_forge"]["stopped"]
+              rc == 0 and state_ok(rc, st, "REACHED") and rec["stop_forge"]["signals"] == ["SIGTERM", "SIGKILL"]
               and rec["forge_rc"] == 137 and max(outputs(rd)) == 22500, json.dumps(rec.get("stop_forge"), ensure_ascii=False))
 
-        # --- CENSORED: 出口の列の ρ を ±1 % 交互 → r の振幅 1 % で届かない、上限 30,000 で正常終了 ---
-        rd = make_run("censored", {"dt": 0.05, "osc_out": 0.01}, cap=30000)
-        rc, rec = run_case(rd)
-        check("CENSORED: 上限 30,000 まで正常に回って届かない (rc 0、forge rc 0)",
-              rc == 0 and rec["status"] == "CENSORED" and rec["stop_step"] == 30000 and rec["forge_rc"] == 0 and max(outputs(rd)) == 30000,
-              f"{rec['status']} {rec.get('stop_step')} rc {rc} forge {rec.get('forge_rc')}; 最後の判定 {rec['judge_last'].get('why')}")
-        check("CENSORED: 本段の nStepOuter (solverConfig・manifest) = 上限 30,000", main_nstep(rd) == 30000)
+        rd, _ = make_run("censored", {"dt": 0.05, "osc_out": 0.01}, cap=30000)
+        rc, rec, st = run_case(rd)
+        check("CENSORED: 上限 30,000 まで正常に回って届かない — **rc は 0 だが状態は CENSORED** (rc で REACHED と取り違えない)",
+              rc == 0 and state_ok(rc, st, "CENSORED") and st["stop_step"] == 30000 and st["forge_rc"] == 0 and max(outputs(rd)) == 30000,
+              f"{st and st['status']} rc {rc}")
 
-        # --- EXEC_ERROR: 15,000 で異常終了 (rc 3) ---
-        rd = make_run("exec_error", {"dt": 0.05, "exit_at": 15000, "exit_code": 3})
-        rc, rec = run_case(rd)
+        rd, _ = make_run("exec_error", {"dt": 0.05, "exit_at": 15000, "exit_code": 3})
+        rc, rec, st = run_case(rd)
         check("EXEC_ERROR: 上限より前の異常終了 (forge rc 3 を取り違えない)",
-              rc == 3 and rec["status"] == "EXEC_ERROR" and rec["forge_rc"] == 3 and rec["last_output"] == 12500,
-              f"{rec['status']} rc {rc} forge {rec.get('forge_rc')} {rec.get('note')}")
+              rc == 3 and state_ok(rc, st, "EXEC_ERROR") and st["forge_rc"] == 3 and st["last_output"] == 12500, f"{st}")
 
-        # --- DIVERGED: 12,500 に NaN ---
-        rd = make_run("diverged", {"dt": 0.25, "nan_at": 12500})
-        rc, rec = run_case(rd)
+        rd, _ = make_run("diverged", {"dt": 0.25, "nan_at": 12500})
+        rc, rec, st = run_case(rd)
         check("DIVERGED: 非有限の出力 12,500 で止めて後の出力を消す (rc ≠ 0)",
-              rc != 0 and rec["status"] == "DIVERGED" and rec["stop_step"] == 12500 and max(outputs(rd)) == 12500
-              and rec.get("stop_sha256") == SR._sha256(rd / "res_12500.h5"), f"{rec['status']} {rec.get('stop_step')} rc {rc} {rec.get('note')}")
+              rc != 0 and state_ok(rc, st, "DIVERGED") and st["stop_step"] == 12500 and max(outputs(rd)) == 12500, f"{st}")
 
-        # --- DIVERGED (forge の detectNaN: res_nan_ + rc 1) ---
-        rd = make_run("detect_nan", {"dt": 0.05, "detect_nan_at": 10000})
-        rc, rec = run_case(rd)
+        rd, _ = make_run("detect_nan", {"dt": 0.05, "detect_nan_at": 10000})
+        rc, rec, st = run_case(rd)
         check("DIVERGED: forge の detectNaN (res_nan_10000.h5 + rc 1) は EXEC_ERROR でなく DIVERGED",
-              rc == 1 and rec["status"] == "DIVERGED" and "detectNaN" in rec.get("note", ""), f"{rec['status']} rc {rc} {rec.get('note')}")
+              rc == 1 and state_ok(rc, st, "DIVERGED") and "detectNaN" in (st.get("note") or ""), f"{st}")
 
-        # --- DATA_ERROR: 読めない出力 (forge は続く) → 3 回読み直して止める ---
-        rd = make_run("data_error", {"dt": 0.25, "corrupt_at": 7500})
-        rc, rec = run_case(rd)
+        rd, _ = make_run("data_error", {"dt": 0.25, "corrupt_at": 7500})
+        rc, rec, st = run_case(rd)
         check("DATA_ERROR: 読めない出力 7,500 を 3 回読み直して forge を止める (rc ≠ 0)",
-              rc != 0 and rec["status"] == "DATA_ERROR" and rec["stop_step"] == 7500 and rec["tries"].get("7500") == 3
-              and rec["stop_forge"]["stopped"], f"{rec['status']} {rec.get('stop_step')} rc {rc} {rec.get('note')}")
-        # --- 書きかけの出力を残して異常終了 → DATA_ERROR でなく EXEC_ERROR ---
-        rd = make_run("crash_partial", {"dt": 0.05, "corrupt_at": 7500, "exit_after_corrupt": True})
-        rc, rec = run_case(rd)
+              rc != 0 and state_ok(rc, st, "DATA_ERROR") and st["stop_step"] == 7500 and rec["tries"].get("7500") == 3, f"{st}")
+        rd, _ = make_run("crash_partial", {"dt": 0.05, "corrupt_at": 7500, "exit_after_corrupt": True})
+        rc, rec, st = run_case(rd)
         check("書きかけの出力を残して forge が rc 3 で終わる → EXEC_ERROR (DATA_ERROR と取り違えない)",
-              rc == 3 and rec["status"] == "EXEC_ERROR" and rec["forge_rc"] == 3 and "書きかけ" in rec.get("note", ""),
-              f"{rec['status']} rc {rc} {rec.get('note')}")
+              rc == 3 and state_ok(rc, st, "EXEC_ERROR") and "書きかけ" in (st.get("note") or ""), f"{st}")
 
-        # --- 抽出が使えない → fallback_steps (10,000) の出力で止める ---
         def no_band(*a, **k):
             raise SR.Unavailable("試験: 抽出が失敗")
         SR.fix_band = no_band
-        rd = make_run("unavailable_mid", {"dt": 0.25})
-        rc, rec = run_case(rd)
-        check("抽出が使えない → UNAVAILABLE、fallback_steps 10,000 の出力で止めて後を消す (rc 0)",
-              rc == 0 and rec["status"] == "UNAVAILABLE" and rec["stop_step"] == 10000 and max(outputs(rd)) == 10000
-              and "抽出が失敗" in rec["unavailable"]["reason"], f"{rec['status']} {rec.get('stop_step')} rc {rc}")
+        rd, _ = make_run("unavailable_mid", {"dt": 0.25})
+        rc, rec, st = run_case(rd)
+        check("見張りの途中で帯の位置が決まらない → UNAVAILABLE、fallback_steps 10,000 の出力で止める — **rc は 0 だが状態は UNAVAILABLE**",
+              rc == 0 and state_ok(rc, st, "UNAVAILABLE") and st["stop_step"] == 10000 and max(outputs(rd)) == 10000
+              and "抽出が失敗" in st["unavailable"]["reason"], f"{st}")
         SR.fix_band = fake_band
 
-        # --- euler_ref が無い run: 今までの経路 (本段は prepare の長さ 10,000)、UNAVAILABLE を記録 ---
-        rd = make_run("no_euler_ref", {"dt": 0.02}, euler_ref=None)
-        rc, rec = run_case(rd)
-        check("euler_ref が無い → 停止規則を使わず本段は prepare の長さ 10,000 (UNAVAILABLE と理由を記録、manifest も 10,000)",
-              rc == 0 and rec["status"] == "UNAVAILABLE" and "euler_ref" in rec["reason"] and max(outputs(rd)) == 10000
-              and main_nstep(rd) == 10000 and rec.get("forge_rc") == 0, f"{rec['status']} {rec.get('reason')}")
+        rd, _ = make_run("no_euler_ref", {"dt": 0.02}, euler_ref=False)
+        ok, msg = raises(lambda: run_case(rd), RuntimeError, "euler_ref")
+        check("明示の要求 (evaluate.stop_rule: true) なのに euler_ref が見つからない → forge を起動する前に RuntimeError",
+              ok and not (rd / "run_case_stdout.log").exists() and SR.read_state(rd) is None, msg[:120])
 
-        # --- stop_rule=False (関数の引数): 今までの経路、記録なし ---
-        rd = make_run("arg_false", {"dt": 0.02})
-        rc, rec = run_case(rd, stop_rule=False)
-        check("stop_rule=False → 使わない (stop_rule.json なし・本段は prepare の長さ 10,000)",
-              rc == 0 and rec is None and max(outputs(rd)) == 10000 and main_nstep(rd) == 10000)
+        # --- 統合: 既定の要求 (キー無し) で使えない → UNAVAILABLE を記録して fallback_steps で回す (forge-f5 の版の動き) ---
+        rd, _ = make_run("default_no_euler_ref", {"dt": 0.02}, euler_ref=False, requested=None)
+        rc, rec, st = run_case(rd)
+        ms = json.loads((rd / RA.MAIN_STAGE_STARTED).read_text())
+        check("統合: 既定の要求で euler_ref が見つからない → 例外にせず本段は fallback_steps 10,000 (UNAVAILABLE と理由を記録、rc 0、"
+              "manifest・通知も 10,000)",
+              rc == 0 and rec["status"] == "UNAVAILABLE" and "euler_ref" in rec["reason"] and state_ok(rc, st, "UNAVAILABLE")
+              and max(outputs(rd)) == 10000 and main_nstep(rd) == 10000 and ms["main_config"]["nStepOuter"] == 10000
+              and rec.get("forge_rc") == 0 and st["fallback_steps"] == 10000, f"{st}")
+        rd, _ = make_run("default_prep_unusable", {"dt": 0.02}, interval=5000, requested=None)
+        rc, rec, st = run_case(rd)
+        check("統合: 既定の要求で prepare が使えないと記録 (出力の間隔 5000) → UNAVAILABLE、本段は fallback_steps 10,000 (rc 0)",
+              rc == 0 and state_ok(rc, st, "UNAVAILABLE") and "出力の間隔" in st["reason"] and max(outputs(rd)) == 10000
+              and main_nstep(rd) == 10000, f"{st}")
+        rd, _ = make_run("explicit_prep_unusable", {"dt": 0.02}, interval=5000, requested=True)
+        ok, msg = raises(lambda: run_case(rd), RuntimeError, "明示")
+        check("明示の要求で prepare が使えないと記録 → forge を起動する前に RuntimeError (状態は書かない)",
+              ok and not (rd / "run_case_stdout.log").exists() and SR.read_state(rd) is None, msg[:120])
 
-        # --- prepare で使わない指定 (evaluate.stop_rule: false) → 記録なし ---
-        rd = make_run("yaml_false", {"dt": 0.02}, requested=False)
-        rc, rec = run_case(rd)
-        check("prepare で使わない指定 → 今までの経路 (記録なし・本段 10,000)", rc == 0 and rec is None and max(outputs(rd)) == 10000)
+        rd, _ = make_run("arg_false", {"dt": 0.02})
+        rc, rec, st = run_case(rd, stop_rule=False)
+        check("stop_rule=False → 使わない (stop_rule.json なし・本段は prepare の長さ 10,000)・状態 NOT_USED を記録",
+              rc == 0 and rec is None and max(outputs(rd)) == 10000 and main_nstep(rd) == 10000 and state_ok(rc, st, "NOT_USED"), f"{st}")
 
-        # --- 起動前に出力が残っている run は起動しない ---
-        rd = make_run("stale_output", {"dt": 0.02})
+        rd, _ = make_run("yaml_false", {"dt": 0.02}, requested=False)
+        rc, rec, st = run_case(rd)
+        check("prepare で使わない指定 (evaluate.stop_rule: false) → 今までの経路 (記録・状態なし・本段 10,000)",
+              rc == 0 and rec is None and st is None and max(outputs(rd)) == 10000 and getattr(rc, "stop_rule", "x") is None)
+
+        rd, _ = make_run("stale_output", {"dt": 0.02})
         (rd / "res_5000.h5").write_bytes(b"")
+        ok, msg = raises(lambda: RA.run_staged_ns(rd, stages="none", stop_rule_watch=WATCH), RuntimeError, "起動しない")
+        check("本段の起動前に res_<N> (N > 0) がある → forge を起動しない (状態は書かない = 記録なし)",
+              ok and not (rd / "run_case_stdout.log").exists() and SR.read_state(rd) is None, msg[:120])
+
+        # --- 到達の後の継続 (hold_steps) ---
+        rd, _ = make_run("hold_ok", {"dt": 0.2}, hold=10000)
+        rc, rec, st = run_case(rd)
+        check("hold 10,000: 22,500 で届いた後 10,000 step 保って 32,500 で REACHED (後の出力を消す)",
+              state_ok(rc, st, "REACHED") and st["stop_step"] == 32500 and st["hold"]["reached"] == [22500] and not st["hold"]["breaks"]
+              and max(outputs(rd)) == 32500 and st["hold_steps"] == 10000, f"{st and (st['status'], st['stop_step'], st.get('hold'))}")
+        rd, _ = make_run("hold_break", {"dt": 0.05, "osc_out": 0.01, "osc_from": 25000}, hold=10000, cap=40000)
+        rc, rec, st = run_case(rd)
+        br = (st or {}).get("hold", {}).get("breaks") or []
+        check("hold 10,000: 22,500 で届き 25,000 から出口の ρ が ±1 % 振れて外れる → 取り消しを記録、上限 40,000 で CENSORED (rc 0)",
+              rc == 0 and state_ok(rc, st, "CENSORED") and br and br[0]["start"] == 22500 and br[0]["broken_at"] == 25000
+              and st["stop_step"] == 40000, f"{st and (st['status'], st.get('hold'))}")
+        rd, _ = make_run("hold_cut", {"dt": 0.05}, hold=20000, cap=30000)
+        rc, rec, st = run_case(rd)
+        check("hold 20,000 が上限 30,000 までに終わらない → CENSORED (保持の途中と記録)",
+              state_ok(rc, st, "CENSORED") and "保持の途中" in (st.get("note") or ""), f"{st and (st['status'], st.get('note'))}")
+        rd, _ = make_run("hold_default", {"dt": 0.05}, hold="default", requested=None, cap=70000)
+        rc, rec, st = run_case(rd)
+        check("統合: キー無し (既定の要求・保持の既定 40,000) → 22,500 で届いた後 4 万 step 保って 62,500 で REACHED",
+              state_ok(rc, st, "REACHED") and st["stop_step"] == 62500 and st["hold_steps"] == 40000 and st["hold"]["reached"] == [22500]
+              and max(outputs(rd)) == 62500, f"{st and (st['status'], st['stop_step'], st.get('hold_steps'))}")
+
+        # --- stages="full": S1・S2 には当てず本段だけ (S1・S2 は 3,000 step の通常の起動) ---
+        orig = (RA.stage_gate, RA._restart_same_mesh)
+        RA.stage_gate, RA._restart_same_mesh = (lambda res, cfg: []), (lambda res, mesh: None)
         try:
-            RA.run_staged_ns(rd, stages="none", stop_rule_watch=WATCH); ok, msg = False, "例外にならない"
-        except RuntimeError as e:
-            ok, msg = "起動しない" in str(e) and not (rd / "run_case_stdout.log").exists(), str(e)
-        check("本段の起動前に res_<N> (N > 0) がある → forge を起動しない", ok, msg[:120])
+            rd, _ = make_run("full_stages", {"dt": 0.1})
+            rc, rec, st = run_case(rd, stages="full")
+        finally:
+            RA.stage_gate, RA._restart_same_mesh = orig
+        man = json.loads((rd / "stage_manifest.json").read_text())
+        steps = [(s["tag"], int(s["soft"]["nStepOuter"])) for s in man["stages"]]
+        check("stages=full: S1_soft・S2_mid は 3,000 step のまま、本段だけ上限 40,000 で見張る (REACHED 22,500)",
+              steps == [("S1_soft", 3000), ("S2_mid", 3000), ("main", 40000)] and state_ok(rc, st, "REACHED") and st["stop_step"] == 22500,
+              f"{steps} {st and st['status']}")
+        check("stages=full: 停止規則の系列は本段の出力だけ (最初の行 2,500・前の段の res_3000 を含まない)",
+              rec["rows"][0]["step"] == 2500 and rec["band"]["step"] == 2500)
     finally:
-        SR.fix_band = real_fix
+        SR.fix_band, SR.delta_snapshot = real_fix, real_delta
 
 
-def test_station_reference():
-    """θ_r の断面の基準は設計壁 (物理壁) の出口 (prepare_info.physical_wall.domain[1])。prepare_info.x_E (軸 Mach 則の終点) ではない
-    (2026-10-14 M6ノズルの設計・forge-25 の指摘: case/45 で x_E 39.81 r_t を基準にして断面が 15.9・27.9・37.8 r_t になっていた)。"""
-    import json as _json
-    d = ROOT / "case" / "70.m5_air_wt_demo" / "run_0010b_ns_c2b_cont60k"
-    if not (d / "nozzle.h5").exists():
-        skip("断面の基準", f"{d} の nozzle.h5 が無い")
-        return
-    info = _json.loads((d / "prepare_info.json").read_text())
-    geo = SR.RunGeometry(d)
-    xw = float(info["physical_wall"]["domain"][1])
-    check("θ_r の断面の基準は設計壁の出口 (physical_wall.domain[1]) で、x_E (軸 Mach 則の終点) ではない",
-          geo.x_wall_exit == xw and abs(xw - float(info["x_E"])) > 1.0, f"x_w {xw:.4f}、x_E {float(info['x_E']):.4f} r_t")
-    xs = [f * geo.x_wall_exit for f in SR.X_FRACS]
-    check("断面は x/x_w = 0.4・0.7・0.95 (case/70 c2b で 19.2・33.6・45.6 r_t 付近)", all(abs(a - b) < 1e-12 for a, b in zip(xs, [0.4 * xw, 0.7 * xw, 0.95 * xw])),
-          [round(x, 3) for x in xs])
+# ====================================================================================== (c) 受け渡しの制御
+CALLS = []
+
+
+def fake_extract(prev_run, euler_run, omega=0.5, **kw):
+    """抽出の偽物: 呼ばれた引数を記録し、delta_r_next.csv の形だけ書く (抽出しなかった列なし)。"""
+    CALLS.append({"run": str(prev_run), "euler": str(euler_run), "omega": omega, **kw})
+    od = Path(kw.get("out_dir") or prev_run)
+    np.savetxt(od / "delta_r_next.csv", np.c_[[0.0, 1.0], [0.01, 0.01], [0.01, 0.01], [0.01, 0.01], [0, 0]], delimiter=",",
+               header=",".join(DL.DELTA_R_NEXT_COLUMNS), comments="")
+    return {"omega": omega, "n_held": 0, "massflow": {}, "not_extracted": {"n": 0, "n_cols_ns": 2, "i": [], "x": [], "reason": []}}
+
+
+def fake_wall_resolution(run_dir, step=None):
+    return {"cmd": ["試験の偽物"], "rc": 0, "kind": "PASS", "verdict": ["VERDICT: PASS (試験の偽物)"], "output": "VERDICT: PASS (試験の偽物)\n"}
+
+
+def fake_next_wall(problem, delta_next):
+    return {"pass": True, "wall": "試験の偽物"}
+
+
+HOLD = {"hold": 20000, "cap": 45000}      # 到達 22,500 + 2 万 = 42,500 で止める (2 窓 [2,500, 22,500]・[22,500, 42,500] を覆う)
+
+
+def test_handoff():
+    print("== (c) 受け渡しの制御 (handoff_gate・run_from_table・run_pass・run_pass0_integral・CLI)", flush=True)
+    real = {"fix": SR.fix_band, "prep": RA.prepare_ns, "staged": RA.run_staged_ns, "collect": RA.collect,
+            "extract": DL.extract_and_merge, "card": DL.check_table_against_card, "delta": SR.delta_snapshot,
+            "wr": DL.wall_resolution_verdict, "nw": DL.next_wall_check}
+    scen = {}
+
+    def fake_prepare(problem, run_dir, **kw):
+        s = scen["next"]
+        rd, info = make_run(Path(run_dir).name, s["scenario"], **s.get("kw", {}))
+        if rd != Path(run_dir):
+            raise AssertionError(f"{rd} != {run_dir}")
+        s["prepare_kw"] = kw
+        return info
+
+    def staged(run_dir, **kw):
+        return real["staged"](run_dir, stop_rule_watch=WATCH, **kw)
+
+    SR.fix_band, SR.delta_snapshot = fake_band, fake_delta
+    RA.prepare_ns, RA.run_staged_ns, RA.collect = fake_prepare, staged, (lambda problem, run_dir: {"res_file": "試験"})
+    DL.extract_and_merge, DL.check_table_against_card = fake_extract, (lambda problem, table: {"table": str(table), "checked": False})
+    DL.wall_resolution_verdict, DL.next_wall_check = fake_wall_resolution, fake_next_wall
+    eu = str(EULER_DUMMY)
+    try:
+        def from_table(name, scenario, kw=None, **gate_kw):
+            scen["next"] = {"scenario": scenario, "kw": kw or {}}
+            CALLS.clear()
+            rd = TMP / name
+            m = DL.run_from_table("試験.yaml", eu, TMP / "table.csv", rd, stages="none", **gate_kw)
+            gate = json.loads((rd / DL.HANDOFF_GATE).read_text())
+            return rd, m, gate, list(CALLS)
+
+        fast = {"dt": 0.1, "res_tau": 2000.0}         # 残差が 22,500 step で 4.9 桁下がる (収束の判定 PASS)
+        slow = {"dt": 0.1, "res_tau": 50000.0}        # 0.2 桁しか下がらない (NOT CONVERGED)
+        rd, m, gate, calls = from_table("h_ok", fast, HOLD)
+        check("REACHED + 収束の判定 PASS + 足した条件 (保存則・2 窓・被覆・held) → 抽出へ進む (band_select='edge'・remap_constant_x=True・"
+              "端は欠測を明示、fixed_point.json・delta_r_next.csv を run の直下に写す)",
+              gate["proceed"] and gate["stop_rule"]["status"] == "REACHED" and gate["convergence"]["kind"] == "PASS"
+              and len(calls) == 1 and calls[0]["band_select"] == "edge" and calls[0]["remap_constant_x"] is True
+              and calls[0]["remap_edge"] == "missing" and calls[0]["max_lam_factor"] == 1000.0 and calls[0]["run"] == str(rd)
+              and (rd / "fixed_point.json").exists() and (rd / "delta_r_next.csv").exists()
+              and all(gate["checks"][c]["pass"] for c in ("conservation", "wall_resolution", "two_windows", "coverage", "next_wall"))
+              and m["handoff_gate"]["proceed"], f"{gate['blocked_by']} {calls}")
+        check("  判定の記録: HANDOFF_GATE.json (状態・収束の判定の行・上書きなし)・HANDOFF_CONVERGENCE.txt (check_convergence --segment の出力)",
+              {k: gate["override"][k] for k in ("allow_not_reached", "allow_unconverged")} == {"allow_not_reached": False, "allow_unconverged": False}
+              and "上書きでは通さない" in gate["override"]["scope"] and "--segment" in gate["convergence"]["cmd"]
+              and gate["convergence"]["cmd"][gate["convergence"]["cmd"].index("--drop") + 1] == "3"
+              and (rd / DL.HANDOFF_CONVERGENCE).exists() and "OVERALL" in (rd / DL.HANDOFF_CONVERGENCE).read_text()
+              and gate["extract"]["band_select"] == "edge")
+        ok_run = rd
+
+        rd, m, gate, calls = from_table("h_unconv", slow, HOLD)
+        check("REACHED でも収束の判定が不合格 (NOT CONVERGED) → 抽出しない・fixed_point.json・delta_r_next.csv を作らない",
+              not gate["proceed"] and gate["stop_rule"]["status"] == "REACHED" and gate["convergence"]["kind"] == "NOT_CONVERGED"
+              and not calls and not (rd / "fixed_point.json").exists() and not (rd / "delta_r_next.csv").exists()
+              and not m["handoff_gate"]["proceed"], f"{gate['blocked_by']}")
+        blocked_run = rd
+        rd, m, gate, calls = from_table("h_unconv_allow", slow, HOLD, allow_unconverged="試験: 収束の判定の上書き")
+        check("  allow_unconverged=\"<理由>\" (明示の上書き) なら抽出へ進み、上書きと理由を記録 (統合: 理由は必須)",
+              gate["proceed"] and gate["override"]["allow_unconverged"] and len(calls) == 1 and calls[0]["band_select"] == "edge"
+              and gate["override"]["allow_unconverged_reason"] == "試験: 収束の判定の上書き"
+              and gate["override"]["allow_not_reached_reason"] is None)
+        for bad in (True, "", "   "):
+            ok, e = raises(lambda bad=bad: DL.handoff_gate(blocked_run, allow_unconverged=bad, write=False), ValueError, "理由")
+            check(f"  統合: allow_unconverged={bad!r} (理由が無い) → ValueError", ok, e[:100])
+        ok, e = raises(lambda: DL.handoff_gate(blocked_run, allow_not_reached=True, write=False), ValueError, "理由")
+        check("  統合: allow_not_reached=True (理由が無い) → ValueError", ok, e[:100])
+        scen["next"] = {"scenario": slow, "kw": HOLD}
+        ok, e = raises(lambda: DL.run_from_table("試験.yaml", eu, TMP / "table.csv", TMP / "h_bool_override", stages="none",
+                                                 allow_not_reached=True), ValueError, "理由")
+        check("  統合: run_from_table に理由の無い上書き → NS の前に ValueError (run dir を作らない)",
+              ok and not (TMP / "h_bool_override").exists(), e[:100])
+
+        rd, m, gate, calls = from_table("h_censored", {**fast, "osc_out": 0.01}, kw={"cap": 30000})
+        check("CENSORED (rc 0) + 収束 PASS → 止める", not gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and not calls,
+              f"{gate['stop_rule']['status']} {gate['convergence']['kind']}")
+        # 到達 22,500 の後の保持 4 万 step が上限 45,000 までに終わらない CENSORED (r は 0・2 窓 [5,000, 25,000]・[25,000, 45,000] を覆う)
+        rd, m, gate, calls = from_table("h_censored_allow", fast, kw={"hold": 40000, "cap": 45000},
+                                        allow_not_reached="試験: 冷却壁の入口の直管で未到達が普通 (case/70 相当)")
+        check("  allow_not_reached=\"<理由>\" なら CENSORED (保持の途中で上限) から進む (上書きと理由を記録; 足した条件は満たす)",
+              gate["proceed"] and gate["stop_rule"]["status"] == "CENSORED" and gate["override"]["allow_not_reached"] and len(calls) == 1
+              and gate["override"]["allow_not_reached_reason"].startswith("試験: 冷却壁")
+              and json.loads((rd / DL.HANDOFF_GATE).read_text())["override"]["allow_not_reached_reason"].startswith("試験: 冷却壁"),
+              f"{gate['stop_rule']['status']} {gate['blocked_by']}")
+
+        SR.fix_band = lambda *a, **k: (_ for _ in ()).throw(SR.Unavailable("試験: 抽出が失敗"))
+        rd, m, gate, calls = from_table("h_unavail", fast)
+        SR.fix_band = fake_band
+        check("UNAVAILABLE (rc 0) → 止める", not gate["proceed"] and gate["stop_rule"]["status"] == "UNAVAILABLE" and not calls)
+
+        both = dict(allow_not_reached="試験: 上書き", allow_unconverged="試験: 上書き")
+        rd, m, gate, calls = from_table("h_unavail_default", fast, kw={"requested": None, "euler_ref": False}, **both)
+        check("統合: 既定の要求で使えない (UNAVAILABLE、本段は fallback) は上書き (理由つき) でも保存則・2 窓の記録が無いので止める",
+              not gate["proceed"] and gate["stop_rule"]["status"] == "UNAVAILABLE" and not calls
+              and not gate["checks"]["conservation"]["pass"], f"{gate['blocked_by']}")
+        rd, m, gate, calls = from_table("h_diverged", {**fast, "nan_at": 12500}, **both)
+        check("DIVERGED は上書き (allow_not_reached・allow_unconverged) でも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "DIVERGED"
+              and not calls, f"{gate['blocked_by']}")
+        rd, m, gate, calls = from_table("h_exec", {**fast, "exit_at": 15000}, **both)
+        check("EXEC_ERROR は上書きでも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "EXEC_ERROR" and not calls)
+
+        rd, m, gate, calls = from_table("h_notused", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False})
+        check("停止規則の記録の無い run (統合前の準備、NOT_USED) → 既定は止める (従来は抽出へ進んだ)",
+              not gate["proceed"] and gate["stop_rule"]["status"] == "NOT_USED" and not calls and SR.read_state(rd) is None)
+        rd, m, gate, calls = from_table("h_notused_allow", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False},
+                                        allow_not_reached="試験: 上書き")
+        check("  allow_not_reached (理由つき) でも NOT_USED は止める (#36e: 保存則・2 窓の記録 stop_rule.json が無い。足した条件は上書きで通さない)",
+              not gate["proceed"] and not calls and not gate["checks"]["conservation"]["pass"] and not gate["checks"]["two_windows"]["pass"]
+              and gate["convergence"]["kind"] == "PASS", f"{gate['blocked_by']}")
+
+        # MISSING: 停止規則を要求した run に状態の記録が無い (本段が終わっていない・記録が失われた)
+        miss = TMP / "h_missing"
+        shutil.copytree(ok_run, miss)
+        (miss / SR.STATE).unlink()
+        g = DL.handoff_gate(miss, **both)
+        check("記録なし (MISSING) は上書きでも止める", not g["proceed"] and g["stop_rule"]["status"] == "MISSING", f"{g['blocked_by']}")
+        # 収束の判定不能 (stage_manifest.json が無い) は上書きでも止める
+        und = TMP / "h_undetermined"
+        shutil.copytree(ok_run, und)
+        (und / "stage_manifest.json").unlink()
+        g = DL.handoff_gate(und, **both)
+        check("収束の判定不能 (--segment に stage_manifest.json が無い) は上書きでも止める", not g["proceed"]
+              and g["convergence"]["kind"] == "UNDETERMINED", f"{g['convergence']['verdict']}")
+
+        # --- run_pass: 前の pass の run の関門 (抽出・次の壁の作成の前) ---
+        CALLS.clear()
+        nxt = TMP / "p_from_blocked"
+        ok, msg = raises(lambda: DL.run_pass("試験.yaml", eu, blocked_run, nxt, stages="none"), DL.HandoffBlocked, "前の pass")
+        check("run_pass: 前の pass の run が関門で不合格 → 抽出・準備の前に止める (抽出を呼ばない・新しい run dir を作らない)",
+              ok and not CALLS and not nxt.exists(), msg[:150])
+        scen["next"] = {"scenario": fast, "kw": HOLD}
+        CALLS.clear()
+        nxt = TMP / "p_from_ok"
+        info = DL.run_pass("試験.yaml", eu, ok_run, nxt, stages="none", prepare_only=True)
+        pi = json.loads((nxt / "prepare_info.json").read_text())
+        check("run_pass: 前の pass の run が合格 → 前の run から band_select='edge'・remap_constant_x=True で抽出し、その delta_r_next.csv で準備する",
+              len(CALLS) == 1 and CALLS[0]["run"] == str(ok_run) and CALLS[0]["band_select"] == "edge" and CALLS[0]["remap_constant_x"] is True
+              and Path(scen["next"]["prepare_kw"]["delta_r_csv"]) == ok_run / "delta_r_next.csv", f"{CALLS}")
+        check("run_pass: 前の run の関門の結果を新しい run の prepare_info.json (handoff_from_prev) に残す (前の run には書かない)",
+              pi.get("handoff_from_prev", {}).get("proceed") is True and pi["handoff_from_prev"]["run"] == str(ok_run)
+              and info.get("handoff_from_prev") is not None)
+        CALLS.clear()
+        scen["next"] = {"scenario": slow}
+        nxt = TMP / "p_run_unconv"
+        m = DL.run_pass("試験.yaml", eu, ok_run, nxt, stages="none")
+        check("run_pass: 新しい run の本段の後、関門が不合格なら固定点の抽出 (fixed_point.json) へ進まない (前の run からの抽出 1 回だけ)",
+              len(CALLS) == 1 and CALLS[0]["run"] == str(ok_run) and not (nxt / "fixed_point.json").exists()
+              and not m["handoff_gate"]["proceed"], f"{CALLS}")
+
+        # --- run_pass0_integral: 同じ後段 ---
+        CALLS.clear()
+        scen["next"] = {"scenario": fast, "kw": HOLD}
+        rd = TMP / "p0_ok"
+        m = DL.run_pass0_integral("試験.yaml", eu, rd, None, initializer={"model": "contur"}, stages="none")
+        check("run_pass0_integral: REACHED + PASS → band_select='edge' で抽出", m["handoff_gate"]["proceed"] and len(CALLS) == 1
+              and CALLS[0]["band_select"] == "edge" and (rd / "fixed_point.json").exists())
+        CALLS.clear()
+        scen["next"] = {"scenario": {**fast, "osc_out": 0.01}, "kw": {"cap": 30000}}
+        rd = TMP / "p0_censored"
+        m = DL.run_pass0_integral("試験.yaml", eu, rd, None, initializer={"model": "contur"}, stages="none")
+        check("run_pass0_integral: CENSORED → 抽出しない", not m["handoff_gate"]["proceed"] and not CALLS)
+
+        # --- CLI: 止めたら終了コード 3、前の run が不合格なら 3 ---
+        (TMP / "table.csv").write_text("x_rt,delta_r\n0,0\n")
+        scen["next"] = {"scenario": slow}
+        rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_unconv"),
+                      "--stages", "none"])
+        check("CLI --delta-r-csv: 関門が不合格 → 終了コード 3", rc == 3, f"rc {rc}")
+        scen["next"] = {"scenario": slow, "kw": HOLD}
+        rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"), "--run-dir", str(TMP / "cli_allow"),
+                      "--stages", "none", "--allow-unconverged", "試験: CLI の上書き"])
+        g = json.loads((TMP / "cli_allow" / DL.HANDOFF_GATE).read_text())
+        check("CLI --allow-unconverged \"<理由>\" → 進む (終了コード 0)、理由を HANDOFF_GATE.json に残す",
+              rc == 0 and g["override"]["allow_unconverged_reason"] == "試験: CLI の上書き", f"rc {rc}")
+        for argv_tail, label in ((["--allow-unconverged", "  "], "空の理由"), (["--allow-not-reached"], "理由なし")):
+            try:
+                DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--delta-r-csv", str(TMP / "table.csv"),
+                         "--run-dir", str(TMP / "cli_bad_override"), "--stages", "none", *argv_tail])
+                ok, e = False, "終了しない"
+            except SystemExit as ex:
+                ok, e = ex.code == 2, f"SystemExit {ex.code}"
+            check(f"統合: CLI {' '.join(argv_tail)!r} ({label}) → 引数の誤り (終了コード 2)・run dir を作らない",
+                  ok and not (TMP / "cli_bad_override").exists(), e)
+        rc = DL.main(["--problem", "試験.yaml", "--euler-ref", eu, "--prev", str(blocked_run), "--run-dir", str(TMP / "cli_prev_blocked"),
+                      "--stages", "none"])
+        check("CLI (run_pass): 前の pass の run が不合格 → 終了コード 3・run dir を作らない", rc == 3 and not (TMP / "cli_prev_blocked").exists())
+    finally:
+        SR.fix_band, SR.delta_snapshot = real["fix"], real["delta"]
+        RA.prepare_ns, RA.run_staged_ns, RA.collect = real["prep"], real["staged"], real["collect"]
+        DL.extract_and_merge, DL.check_table_against_card = real["extract"], real["card"]
+        DL.wall_resolution_verdict, DL.next_wall_check = real["wr"], real["nw"]
+
+
+# ====================================================================================== (d) 指定の無い問題の回帰
+def test_regression():
+    print("== (d) 停止規則の記録の無い準備の回帰 (統合前・2026-10-14 より前の prepare_info に stop_rule が無い run)", flush=True)
+    rd, _ = make_run("reg_no_sr", {"dt": 0.02}, with_sr=False)
+    cfg0 = (rd / "solverConfig.yaml").read_text()
+    seen = []
+    real_forge = RA.run_forge
+
+    def spy(run_dir):
+        seen.append((run_dir / "solverConfig.yaml").read_text())
+        return real_forge(run_dir)
+
+    RA.run_forge = spy
+    try:
+        rc = RA.run_staged_ns(rd, stages="none")
+    finally:
+        RA.run_forge = real_forge
+    check("本段は今までどおり run_forge (run_case.sh) で準備の長さ 10,000 まで、solverConfig は準備のまま",
+          len(seen) == 1 and seen[0] == cfg0 and max(outputs(rd)) == 10000 and main_nstep(rd) == 10000)
+    check("stop_rule.json・STOP_RULE_STATE.json を書かない、戻りは int と等しい (stop_rule None)",
+          not (rd / SR.RECORD).exists() and SR.read_state(rd) is None and rc == 0 and isinstance(rc, int) and rc.stop_rule is None
+          and json.dumps({"rc": rc}) == '{"rc": 0}' and f"{rc}" == "0")
 
 
 def main() -> int:
@@ -472,11 +954,13 @@ def main() -> int:
     test_quantities()
     test_station_reference()
     if QUICK:
-        skip("(b) 偽の forge", "--quick")
-    elif not C70_RUN.exists():
-        skip("(b) 偽の forge", f"{C70_RUN} が無い (solverConfig の雛形)")
+        skip("(b)〜(d) 偽の forge", "--quick")
     else:
+        FAKE_FORGE.write_text(FAKE_SRC.format(py=sys.executable))
+        FAKE_FORGE.chmod(FAKE_FORGE.stat().st_mode | stat.S_IXUSR)
         test_watcher()
+        test_handoff()
+        test_regression()
     print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'}")
     if FAIL == 0:
         shutil.rmtree(TMP, ignore_errors=True)

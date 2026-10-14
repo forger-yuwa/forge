@@ -71,31 +71,114 @@ def deltastar_from_run(mesh_h5, res_h5, wall_xy, scale: float,
 
 
 # --- 固定 Euler 基準のコア整合質量欠損抽出 (plans/active/tooling-nozzle-deltastar-core-matched-euler.md) ----
-def _load_structured(run_dir):
-    """node 構造格子 run (index = i*nj + j) を (info, x[ni,nj], r[ni,nj], q=ρUx[ni,nj]) で返す (r_t 単位)。"""
+REMAP_EDGES = ("clamp", "missing")
+_EULER_REF_KEYS = ("run", "res", "sha256")
+
+
+def _sha256_file(path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def resolve_euler_ref(spec, verify: bool = True) -> dict:
+    """Euler の参照の指定を解決する (plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6)、codex diagnose 3: 抽出器は参照の
+    ディレクトリの最新の出力を読むので、計算中の Euler を参照すると停止の帯と後段の抽出の参照が変わりうる)。
+
+    - str / Path (**ディレクトリだけ、今の挙動**): {"run": Path(spec) (そのまま), "res": None (最新の res_<N>.h5), "pinned": False}。
+    - mapping {"run": ディレクトリ, "res": "res_<N>.h5" (ファイル名だけ), "sha256": 64 桁の 16 進} (**固定のスナップショット**): run は
+      そのまま (相対なら cwd、無ければリポジトリ直下から)。verify なら <run>/<res> の sha256 を計算して指定と一致することを確かめ、
+      無い・違えば ValueError (sha が合わなければ使わない)。
+    戻り: {"run", "res", "sha256", "pinned", "record" (JSON に書ける形: ディレクトリだけなら str、固定なら mapping)}。"""
+    import re
+    from pathlib import Path
+    if isinstance(spec, (str, Path)):
+        return {"run": Path(spec), "res": None, "sha256": None, "pinned": False, "record": str(spec)}
+    if not isinstance(spec, dict):
+        raise ValueError(f"Euler の参照の指定は run dir (str) か {{run, res, sha256}} の mapping (受け取った {spec!r})")
+    if set(spec) != set(_EULER_REF_KEYS):
+        raise ValueError(f"Euler の参照の固定の指定はキー {list(_EULER_REF_KEYS)} ちょうど (受け取った {sorted(spec)})")
+    run, res, sha = spec["run"], spec["res"], spec["sha256"]
+    if not isinstance(run, (str, Path)) or not str(run):
+        raise ValueError(f"Euler の参照の run が不正 ({run!r})")
+    if not isinstance(res, str) or not re.fullmatch(r"res_\d+\.h5", res):
+        raise ValueError(f"Euler の参照の res は res_<N>.h5 のファイル名 (ディレクトリを含まない) ({res!r})")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ValueError(f"Euler の参照の sha256 は 64 桁の小文字の 16 進 ({sha!r})")
+    cand = [Path(run)] + ([] if Path(run).is_absolute() else [Path(__file__).resolve().parents[3] / run])
+    rd = next((c for c in cand if c.is_dir()), Path(run))
+    if verify:
+        f = rd / res
+        if not f.is_file():
+            raise ValueError(f"Euler の参照の固定のスナップショット {f} が無い")
+        got = _sha256_file(f)
+        if got != sha:
+            raise ValueError(f"Euler の参照の固定のスナップショット {f} の sha256 {got[:16]}… が指定 {sha[:16]}… と違う — 使わない")
+    return {"run": rd, "res": res, "sha256": sha, "pinned": True, "record": {"run": str(run), "res": res, "sha256": sha}}
+
+
+def _load_structured(run_dir, remap_constant_x: bool = False, remap_edge: str = "clamp", res: str | None = None):
+    """node 構造格子 run (index = i*nj + j) を (info, x[ni,nj], r[ni,nj], q=ρUx[ni,nj]) で返す (r_t 単位)。
+    res: 読む出力のファイル名 (None = 最新の res_<N>.h5; 今の挙動)。Euler の参照の固定 (`resolve_euler_ref`) が使う。
+
+    remap_constant_x (2026-10-08, plan tooling-nozzle-isothermal-wall-chain §5.1 #21、codex diagnose): 近壁を壁法線に沿わせた格子
+    (`mesh2d.wall_normal_layer`) では列 i の中で x が変わる (x ≈ 40 で列内の幅 0.15 r_t)。True なら各行 j に沿って x 方向に線形補間し、
+    列 i を壁の station の x (= 軸の x、x[i, 0]) の一定 x の断面にそろえる。行の x の範囲の外 (端の補間範囲の不足) の扱いは remap_edge:
+    "clamp" (既定、今の挙動) は端値 (両端の数列だけ)、"missing" (§5.1 #36e (4)、codex diagnose 3「端の補間範囲の不足を定数の外挿で
+    隠して全域合格にしない」) はその列を欠測にする (列の r・q を NaN にし、`remap_missing_cols` に列の番号と x を記録。抽出器はその列を
+    抽出せず not_extracted に記録する)。False (既定) は従来どおり列をそのまま使う (列内で x が一定の格子では両者は一致する)。"""
     import json
     from pathlib import Path
+    if remap_edge not in REMAP_EDGES:
+        raise ValueError(f"remap_edge={remap_edge!r} は {REMAP_EDGES} のどれか")
     run_dir = Path(run_dir)
     info = json.loads((run_dir / "prepare_info.json").read_text())
     ni, nj = int(info["mesh"]["ni"]), int(info["mesh"]["nj"])
     S = float(info["scale_m"])
     with h5py.File(run_dir / "nozzle.h5") as f:
         nc = f["/MESH/COORD"][:].reshape(-1, 3)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda p: int(p.stem.split("_")[1]))[-1]
+    if res is None:
+        res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda p: int(p.stem.split("_")[1]))[-1]
+    else:
+        res = run_dir / res
     with h5py.File(res) as f:
         q = f["/VALUE/ro"][:] * f["/VALUE/Ux"][:]
     if len(q) != ni * nj or len(nc) != ni * nj:
         raise ValueError(f"{run_dir}: node 構造格子 run でない (VALUE {len(q)}, COORD {len(nc)}, ni*nj {ni*nj})")
-    return dict(info=info, S=S, res=res.name,
-                x=nc[:, 0].reshape(ni, nj) / S, r=nc[:, 1].reshape(ni, nj) / S, q=q.reshape(ni, nj))
+    x = nc[:, 0].reshape(ni, nj) / S; r = nc[:, 1].reshape(ni, nj) / S; q = q.reshape(ni, nj)
+    out = dict(info=info, S=S, res=res.name, x=x, r=r, q=q)
+    if remap_constant_x:
+        xt = x[:, 0].copy()                                  # 列の目標の x (軸の節点 = 壁の station の x)
+        rr = np.empty_like(r); qq = np.empty_like(q)
+        clamped = 0
+        outside = np.zeros(ni, dtype=bool)
+        for j in range(nj):
+            xj = x[:, j]
+            if not np.all(np.diff(xj) > 0):
+                raise ValueError(f"{run_dir}: 行 {j} の x が単調でない (remap_constant_x)")
+            oj = (xt < xj[0]) | (xt > xj[-1])
+            clamped += int(np.sum(oj))
+            outside |= oj
+            rr[:, j] = np.interp(xt, xj, r[:, j]); qq[:, j] = np.interp(xt, xj, q[:, j])
+        out.update(x=np.repeat(xt[:, None], nj, axis=1), r=rr, q=qq, remap_constant_x=True, remap_clamped_points=clamped,
+                   remap_max_column_dx=float(np.max(np.ptp(x, axis=1))), remap_edge=remap_edge)
+        if remap_edge == "missing":
+            miss = np.where(outside)[0]
+            rr[miss, :] = np.nan; qq[miss, :] = np.nan
+            out["remap_missing_cols"] = {"i": [int(i) for i in miss], "x": [float(v) for v in xt[miss]]}
+    return out
 
 
 def massflow_ratio(ns_run, euler_run) -> dict:
     """NS/Euler 質量流量比 → 有効スロート半径・質量流量由来の等価スロート補正量 (r_t 単位)。
-    列ごとに 2π∫ρUx r dr (台形則)、x∈(−2.5, x_E) の中央値を採用。"""
+    列ごとに 2π∫ρUx r dr (台形則)、x∈(−2.5, x_E) の中央値を採用。euler_run は run dir か固定の指定 (`resolve_euler_ref`)。"""
     out = {}
-    for tag, rd in (("ns", ns_run), ("euler", euler_run)):
-        d = _load_structured(rd)
+    eref = resolve_euler_ref(euler_run)
+    for tag, rd, res in (("ns", ns_run, None), ("euler", eref["run"], eref["res"])):
+        d = _load_structured(rd, res=res)
         S = d["S"]
         # 実寸の流量 2π∫ρU_x r dr [kg/s]: 被積分 q·(r S) と積分変数 (r S) で S は 2 乗 (2026-10-08 修正: 以前は被積分にも S² を掛けて
         # 3 乗になり、絶対値が S 倍に小さく、r_t の違う run どうしの比も S の比だけずれていた。診断の帳簿だけで使う値)
@@ -423,7 +506,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       edge_eps: float = 0.003, edge_c: float = 1.25, edge_window: float = 3.0,
                                       edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.125, edge_y0_fac: float = 1.2,
                                       edge_min_frac: float = 0.016, edge_ymax_frac: float = 0.5, edge_ref_min_frac: float = 0.0133,
-                                      edge_y0_shift: float = 1.0, edge_persist: int = 1, return_ladders: bool = False) -> dict:
+                                      edge_y0_shift: float = 1.0, edge_persist: int = 1, return_ladders: bool = False,
+                                      remap_constant_x: bool = False, remap_edge: str = "clamp") -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
 
     定義 (plan §4.2–4.4):
@@ -451,14 +535,21 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
       edge_persist は縁の交点に要求する持続の段数 (`edge_band_positions` の persist; 既定 1 = 2026-10-13 までの抽出とビット同一。
       > 1 は opt-in、plan tooling-nozzle-cooled-wall-ns-settling §4.2b・§4.4)。
 
+    euler_run: run dir (最新の出力を読む; 今の挙動) か固定のスナップショットの指定 {run, res, sha256} (`resolve_euler_ref`、sha が合わなければ
+    ValueError; plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6))。remap_edge: `_load_structured` の remap_constant_x の端の扱い
+    ("clamp" 既定 = 今の挙動 / "missing" = 補間範囲の足りない列を欠測にして抽出しない; §5.1 #36e (4))。
+
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
-    core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿。
-    `out_dir` を与えると `delta_r_equiv.csv` / `delta_r_equiv_diag.json` を書く。"""
+    core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿、抽出しなかった NS の列
+    `not_extracted` ({n, i, x, reason}; reason は outside_euler (Euler の範囲の外)・remap_missing (端の補間範囲の不足)・no_result
+    (帯の計算が結果を返さない))。`out_dir` を与えると `delta_r_equiv.csv` / `delta_r_equiv_diag.json` を書く。"""
     import json
     from pathlib import Path
     from scipy.interpolate import make_smoothing_spline
-    N = _load_structured(ns_run)
-    E = _load_structured(euler_run)
+    N = _load_structured(ns_run, remap_constant_x=remap_constant_x, remap_edge=remap_edge)
+    eref = resolve_euler_ref(euler_run)
+    E = _load_structured(eref["run"], res=eref["res"])
+    miss_cols = set(N.get("remap_missing_cols", {}).get("i", []))      # 端の補間範囲の不足で欠測にした列 (remap_edge="missing")
     xE = E["x"][:, 0]
     rwE_col = E["r"][:, -1]
 
@@ -474,7 +565,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
 
     def extract_one(i, fc, y_b_fixed=None):
         x = float(N["x"][i, 0]); r0 = N["r"][i]; q0 = N["q"][i]
-        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9:
+        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9 or i in miss_cols:
             return None
         _, rwE = euler_q_at(x, r0[:1])
         if method == "band":
@@ -489,6 +580,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         if res is None:
             return None
         res["x"] = x
+        res["i"] = int(i)
         return res
 
     main_par = k_band if method == "band" else core_frac
@@ -519,7 +611,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         ii, xs_e, din_e, rw_e_l, yl, dl = [], [], [], [], [], []
         for i in range(N["x"].shape[0]):
             x = float(N["x"][i, 0])
-            if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9:
+            if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9 or i in miss_cols:
                 continue
             _, rwE = euler_q_at(x, N["r"][i][:1])
             rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
@@ -542,7 +634,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
 
     def extract_plateau(i):
         x = float(N["x"][i, 0])
-        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9:
+        if x < xE[0] - 1e-9 or x > xE[-1] + 1e-9 or i in miss_cols:
             return None
         _, rwE = euler_q_at(x, N["r"][i][:1])
         rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
@@ -658,7 +750,20 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                              outer_frac=outer_frac, smooth_lam=smooth_lam, gate_core_rms=gate_core_rms,
                              gate_sens=gate_sens, gate_sens_floor=gate_sens_floor, refine=refine,
                              ns_res=N["res"], euler_res=E["res"],
-                             ns_run=str(ns_run), euler_run=str(euler_run)))
+                             **({"remap_constant_x": True, "remap_max_column_dx": N["remap_max_column_dx"],
+                                 "remap_clamped_points": N["remap_clamped_points"]} if remap_constant_x else {}),
+                             **({"remap_edge": remap_edge, "remap_missing_cols": N.get("remap_missing_cols")}
+                                if remap_constant_x and remap_edge != "clamp" else {}),
+                             **({"euler_ref_pinned": eref["record"]} if eref["pinned"] else {}),
+                             ns_run=str(ns_run), euler_run=(str(eref["run"]) if eref["pinned"] else str(euler_run))))
+    # 抽出しなかった NS の列 (§5.1 #36e: 受け渡しの関門が全域の被覆・使用域の欠測を判定する)
+    done = {r_["i"] for r_ in rows}
+    xs_all = N["x"][:, 0]
+    ne = [i for i in range(len(xs_all)) if i not in done]
+    why = ["remap_missing" if i in miss_cols else ("outside_euler" if (xs_all[i] < xE[0] - 1e-9 or xs_all[i] > xE[-1] + 1e-9)
+                                                    else "no_result") for i in ne]
+    out["not_extracted"] = {"n": len(ne), "n_cols_ns": int(len(xs_all)), "i": [int(i) for i in ne],
+                            "x": [float(xs_all[i]) for i in ne], "reason": why}
     out["massflow"] = massflow_ratio(ns_run, euler_run)
     if edge is not None:
         out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])
