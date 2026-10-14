@@ -51,6 +51,21 @@ check('time.deltaT.passiveFct' in keys(w), 'passiveFct 1 with a non-SLAU solver 
 f, w = csc.check(cfg(sfr=0, fct=1))
 check('time.deltaT.passiveFct' in keys(w), 'passiveFct 1 with speciesFaceReconstruction 0 must WARN')
 
+# passiveFct の省略 (既定 1) は「作動する構成なら使う」既定: 定常・RK の通常の config で作動しないのは正しい動作なので警告しない。
+# 明示した有効化 (passiveFct: 1) が作動しないときだけ警告する (2026-10-15 codex diagnose 案 5、plan §5.1 #10)。
+def drop_fct(y):
+    del y['time']['deltaT']['passiveFct']
+    return y
+
+for name, y in (('steady (unsteady 0)', cfg(unsteady=0, dualTime=0, ti=4)), ('RK (dualTime 0)', cfg(dualTime=0, ti=3)),
+                ('dual-time with KEEP', cfg(solver='KEEP')), ('dual-time with SFR 0', cfg(sfr=0))):
+    f, w = csc.check(drop_fct(y))
+    check('time.deltaT.passiveFct' not in keys(w), f'omitted passiveFct ({name}) must not WARN (default, not a request)')
+f, w = csc.check(cfg(unsteady=0, dualTime=0, ti=4, fct=1))
+check('time.deltaT.passiveFct' in keys(w), 'explicit passiveFct 1 in a steady run must still WARN (the request never activates)')
+f, w = csc.check(cfg(unsteady=0, dualTime=0, ti=4, fct=0))
+check('time.deltaT.passiveFct' not in keys(w), 'explicit passiveFct 0 must not WARN')
+
 f, w = csc.check(cfg(speciesImplicitCoupling=0))
 check('time.deltaT.speciesImplicitCoupling' in keys(w), 'S3 with coupling 0 must WARN')
 

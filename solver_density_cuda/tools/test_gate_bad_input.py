@@ -22,6 +22,10 @@
 
 `restart_field.py` の同一メッシュの検査 (2026-10-15、同 plan §5.1 #20): 座標を ~1e−8 変えた別の入力 (float32 では同じ)・
 接続だけ違う入力・接続の無い格子・格子を決められない res が、修正前は**通っていた** (終了 0)。
+
+`launch_gate.py` (投入の関門、2026-10-15、同 plan §5.1 #10): それまで `run_case.sh` は設定・メッシュを照合せずに forge を起動していた
+(未知のキーは check_solver_config で WARN・終了 0、AR 6000 の層や bcondConfig の無い run も起動)。検査できない入力・メッシュの FAIL・
+禁止キー (`FORGE_LAUNCH_GATE=warn` でも)・`FORGE_LAUNCH_GATE` の綴り違いを「起動してよい」にしない。
 """
 import csv
 import os
@@ -362,6 +366,72 @@ def main():
     chk("restart_field: 同じ格子の複製 -> 従来どおり合格", rc == 0 and lines[-1].startswith("VERDICT: OK"),
         "rc=%d %s" % (rc, lines[-1][:60] if lines else ""))
     shutil.rmtree(rroot, ignore_errors=True)
+
+    # 投入の関門 (launch_gate.py、plan tooling-generator-defaults-and-launch-gate §5.1 #10)。2026-10-15 まで run_case.sh は
+    # 設定・メッシュを照合せずに forge を起動していた (check_solver_config の未知のキーは WARN・終了 0、品質の検査は呼ばれない)。
+    # 検査できない入力・メッシュの FAIL・禁止キーを「起動してよい」にしない (詳しい負例は tests/unit/test_launch_gate.py)。
+    print("=== launch_gate: 投入の関門 ===")
+    lg_tool = os.path.join(HERE, "launch_gate.py")
+    lroot = tempfile.mkdtemp()
+
+    def lg_run(name, cfg_extra="", first=None, bcond=True):
+        d = os.path.join(lroot, name)
+        os.makedirs(d)
+        ni, nj = 11, 4
+        ys = np.linspace(0.0, 0.2, nj) if first is None else np.r_[np.linspace(0.0, 0.2 - first, nj - 1), 0.2]
+        X, Y = np.meshgrid(np.linspace(0.0, 1.0, ni), ys, indexing="ij")
+        nid = lambda i, j: i * nj + j                                                   # noqa: E731
+        quads = [[nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)] for i in range(ni - 1) for j in range(nj - 1)]
+        wall = [(nid(i, nj - 1), nid(i + 1, nj - 1)) for i in range(ni - 1)]
+        with h5py.File(os.path.join(d, "mesh.h5"), "w") as f:
+            f.create_dataset("MESH/COORD", data=np.c_[X.ravel(), Y.ravel(), np.zeros(ni * nj)].ravel())
+            f.create_dataset("MESH/CONNE", data=np.array([x for n in range(ni * nj) for x in (1, n)], np.int64))
+            f.create_dataset("VIZMESH/CONNE", data=np.array([x for q in quads for x in [5] + q], np.int64))
+            f["VIZMESH"].attrs["nVizCells"] = len(quads)
+            f.create_dataset("VALUE/wall_dist", data=0.2 - Y.ravel())
+            f.create_dataset("BCONDS/3/vizBfaceNodes", data=np.array(wall, np.int64).ravel())
+            f.create_dataset("BCONDS/3/vizBfaceSizes", data=np.full(len(wall), 2, np.int64))
+            f["BCONDS/3"].attrs["bcondKind"] = "wall"
+        with open(os.path.join(d, "solverConfig.yaml"), "w") as fh:
+            fh.write('mesh: {meshFileName: "mesh.h5", valueFileName: "mesh.h5", discretization: "node"}\n' + cfg_extra)
+        if bcond:
+            with open(os.path.join(d, "bcondConfig.yaml"), "w") as fh:
+                fh.write("wall: {physID: 3, kind: wall, outputHDFflg: 0, ints: , floats: }\n")
+        return d
+
+    def lg_call(d, env_extra=None):
+        env = dict(os.environ)
+        env.pop("FORGE_LAUNCH_GATE", None)
+        env.update(env_extra or {})
+        r = subprocess.run([sys.executable, lg_tool, d, "--dry-run", "--forge-bin", os.path.join(lroot, "no_forge")],
+                           capture_output=True, text=True, env=env)
+        last = [ln for ln in r.stdout.splitlines() if ln.startswith("VERDICT")]
+        return r.returncode, (last or [r.stdout.strip()[-120:]])[-1]
+
+    rc, last = lg_call(lg_run("ok"))
+    chk("launch_gate: 宣言なし・記録なし・品質 PASS (移行期) -> 起動してよい (WARN)", rc == 0 and last.startswith("VERDICT: WARN"),
+        "rc=%d %s" % (rc, last[:60]))
+    for name, d, env in (("宣言なし + 強制の未知のキー (check_solver_config では WARN・終了 0)", lg_run("unknown", "space: {notAKey: 1}\n"),
+                          {"FORGE_LAUNCH_GATE": "enforce"}),
+                         ("宣言なしの起動時に拒否されるキー (移行期でも)", lg_run("rejected", "space: {limiterMatchRecon: 1}\n"), None),
+                         ("bcondConfig.yaml が無い (--bcond を渡せない)", lg_run("nobc", bcond=False), None),
+                         ("AR 6000 の壁の層 (緩和の上限 5000 を超える)", lg_run("ar6000", first=0.1 / 6000.0), None),
+                         ("FORGE_LAUNCH_GATE の綴り違い", lg_run("typo"), {"FORGE_LAUNCH_GATE": "wran"}),
+                         ("宣言なし + FORGE_LAUNCH_GATE=enforce", lg_run("enforce"), {"FORGE_LAUNCH_GATE": "enforce"})):
+        rc, last = lg_call(d, env)
+        chk("launch_gate: %s -> 非ゼロ終了" % name, rc != 0 and last.startswith("VERDICT: FAIL"), "rc=%d %s" % (rc, last[:60]))
+    d = lg_run("bnd_warn")
+    with open(os.path.join(d, "solverConfig.yaml"), "w") as fh:
+        fh.write('mesh: {meshFileName: "mesh.h5", valueFileName: "mesh.h5", discretization: "node", bndFirstOrder: 1}\n')
+    rc, last = lg_call(d, {"FORGE_LAUNCH_GATE": "warn"})
+    chk("launch_gate: bndFirstOrder + FORGE_LAUNCH_GATE=warn (禁止は落とさない) -> 非ゼロ終了",
+        rc != 0 and last.startswith("VERDICT: FAIL"), "rc=%d %s" % (rc, last[:60]))
+    d = lg_run("broken_decl")
+    with open(os.path.join(d, "RECIPE.json"), "w") as fh:
+        fh.write("{")
+    rc, last = lg_call(d)
+    chk("launch_gate: 読めない宣言 (RECIPE.json) -> 非ゼロ終了", rc != 0 and last.startswith("VERDICT: FAIL"), "rc=%d %s" % (rc, last[:60]))
+    shutil.rmtree(lroot, ignore_errors=True)
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

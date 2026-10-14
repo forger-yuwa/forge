@@ -49,6 +49,15 @@ FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
   done
 } > RUN_PROVENANCE.txt
 
+# --- 投入の関門 (plan tooling-generator-defaults-and-launch-gate §4.3): 宣言・設定・メッシュの来歴と品質・バイナリを照合し、
+# 0 でなければ forge を起動しない。照合の中身は launch_gate.py (LAUNCH_GATE.txt、RUN_PROVENANCE.txt に 1 行)。
+python3 "$ROOT/solver_density_cuda/tools/launch_gate.py" "$PWD" --forge-bin "$FORGE_EXE"
+gate_rc=$?
+if [ "$gate_rc" -ne 0 ]; then
+    echo "[run_case] launch gate exit=$gate_rc -> forge を起動しない (LAUNCH_GATE.txt)"
+    exit "$gate_rc"
+fi
+
 # FORGE_BIN で別ビルドの forge を指定できる (A/B 回帰で旧バイナリを回す用途。既定は build/forge)
 "${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}" > forge_run.log 2>&1
 rc=$?

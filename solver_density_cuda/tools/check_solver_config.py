@@ -7,7 +7,8 @@
     同じ物理時刻の解が nSub 依存になる; §6 dual-time 節)
   - dual-time の `cfl_pseudo` が小さすぎる / `nSubIterDualTime` が少なすぎる (必要な nSub は cfl_pseudo で決まる)
   - 受動スカラの 2 次面移流 (`speciesFaceReconstruction` ≥ 2) が `convMethod 0` で不活性
-  - FCT (`passiveFct 1`) が作動しない組み合わせ (SLAU 以外 / SFR < 2 / dual-time でない)
+  - FCT を明示 (`passiveFct: 1`) したのに作動しない組み合わせ (SLAU 以外 / SFR < 2 / dual-time でない)。省略 (既定 1) は
+    「作動する構成なら使う」既定なので、定常・RK の通常の config で作動しないのは正しい動作として警告しない
   - 凝縮 dual-time で `passiveScalarScheme 0` (モーメントに BDF 物理時間項が付かない)
   - `speciesFaceReconstruction` ≥ 2 と `speciesImplicitCoupling 0` の組 (定常で発散)
   - 二相拡散 (`condTwoPhaseDiffusion`) の実効状態 (tools/twophase_state.py; plan condensation-two-phase-default §4-2):
@@ -143,6 +144,7 @@ def check(y, bcond=None):
     relax = dT.get('implicitRelax')
     sfr = int(dT.get('speciesFaceReconstruction', 0) or 0)
     scheme = int(dT.get('passiveScalarScheme', 1) or 0)
+    fct_written = 'passiveFct' in dT
     fct = int(dT.get('passiveFct', 1) or 0)
     conv = sp.get('convMethod')
     coupling = dT.get('speciesImplicitCoupling')
@@ -176,7 +178,10 @@ def check(y, bcond=None):
             warns.append(('time.deltaT.speciesImplicitCoupling',
                           'S3 と coupling 0 の組は定常で組成せん断層から発散する (solver-settings.md)'))
 
-    if scheme == 1 and fct == 1:
+    # 明示した有効化 (passiveFct: 1) が作動しないときだけ警告する。省略 (既定 1) を「1 を書いた」と同じに扱うと、
+    # FCT と無関係な定常・RK の config にも毎回 WARN が出ていた (2026-10-15 codex diagnose 案 5、
+    # plan tooling-generator-defaults-and-launch-gate §5.1 #10)
+    if fct_written and scheme == 1 and fct == 1:
         why = []
         if solver not in ('SLAU', 'SLAU2'):
             why.append(f'solver {solver or "未指定"} (SLAU 系でない)')

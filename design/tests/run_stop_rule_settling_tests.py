@@ -78,7 +78,9 @@ turbulence: {model: "sst", scalarDiffusion: 1, dilatationCorrection: 2, katoLaun
 initial: "uniform_p101325_u10"
 output: {level: 1}
 '''
-TEMPLATE_BC = "wall: {physID: 3, type: wall_isothermal, Tw: 370.0}\n"
+# 投入の関門 (run_case.sh → launch_gate.py、plan tooling-generator-defaults-and-launch-gate §5.1 #10) が bcond の kind と壁の面を
+# 読むので、forge の bcondConfig と同じ書き方 (kind・floats) にした (旧い雛形の `type:` は forge も関門も読めない)
+TEMPLATE_BC = "wall: {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Tw: 370.0}}\n"
 FAIL = 0
 
 
@@ -224,8 +226,20 @@ def synth_base():
 def write_mesh(run_dir: Path):
     X, R = synth_geometry()
     coord = np.c_[X.ravel() * SCALE, R.ravel() * SCALE, np.zeros(NI * NJ)].astype(np.float32)
+    # 投入の関門 (launch_gate.py) がメッシュの品質 (check_mesh_quality.py --bcond) を見るので、node 変換と同じ置き方の primal の接続
+    # (/VIZMESH/CONNE) と壁 (physID 3 = 上辺) の面も書く (座標だけの h5 は検査できない入力として止まる)
+    nid = lambda i, j: i * NJ + j                                                       # noqa: E731
+    quads = [[nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)] for i in range(NI - 1) for j in range(NJ - 1)]
+    wall = [(nid(i, NJ - 1), nid(i + 1, NJ - 1)) for i in range(NI - 1)]
     with h5py.File(run_dir / "nozzle.h5", "w") as h:
         h["MESH/COORD"] = coord.ravel()
+        h["MESH/CONNE"] = np.array([x for n in range(NI * NJ) for x in (1, n)], dtype=np.int64)
+        h["VIZMESH/CONNE"] = np.array([x for q in quads for x in [5] + q], dtype=np.int64)
+        h["VIZMESH"].attrs["nVizCells"] = np.int64(len(quads))
+        b = h.create_group("BCONDS/3")
+        b["vizBfaceNodes"] = np.array([n for e in wall for n in e], dtype=np.int64)
+        b["vizBfaceSizes"] = np.full(len(wall), 2, dtype=np.int64)
+        b.attrs["bcondKind"] = "wall_isothermal"
 
 
 def test_quantities():

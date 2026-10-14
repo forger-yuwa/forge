@@ -82,7 +82,7 @@ run_0004_roe_baseline
 > `case.h5.provenance.json` に書く。`mesh_provenance.py check <run_dir>` は run の `solverConfig.yaml`・`bcondConfig.yaml` とこの記録を
 > 照合する (記録なし・別メッシュの記録・変換時と違う要求値 (省略は省略とだけ一致)・壁の分類の変更は FAIL)。restart
 > (`restart_field.py`・初期場の貼り付け) は `/VALUE` だけを変えるので記録は有効なまま。run を複製するときは h5 と一緒に記録も写す。
-> 投入の関門 (`launch_gate.py`、§5.1 #10) がこの照合を呼ぶ予定。
+> 投入の関門 (`launch_gate.py`、下の「投入の関門」) が `run_case.sh` の起動の前にこの照合を呼ぶ。
 
 > **変換器の幾何の精度 (2026-10-10、plan `architecture-float-state-double-geometry` §4.6)**: `convertGmshToForge` は
 > どのビルド (float / FP64) でも、座標・面ベクトル・面積・面重心・体積・CV 重心・壁距離を double で計算し、
@@ -365,6 +365,33 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
 **収束場からの restart (交差 restart・cfl/緩和の入れ替え) の判定は `check_convergence.py --from-floor <参照 run>`** を使う。既定判定は「ピークからの低下桁数 ≥3」なので、収束場から再開した run は init=fin=床で必ず `NOT CONVERGED (stalled/plateau)` になる (2026-09-17 case/16 run_0478–0480 で実害)。`--from-floor REF_RUN` (別名 `--reference-floor`) は参照 run の末尾床 (`--tail` 20 % の平均) を列ごとに取り、対象 run の**全期間ピークと末尾平均がともに床の `--floor-factor` 倍 (既定 1.5) 以内**なら `PASS (within 1.5x of reference floor …)`、超えれば `NOT CONVERGED (residual left the reference floor)`、NaN は `DIVERGED` を返し、列ごとの床比 (末尾/床, ピーク/床) を印字する。参照 run 自体は通常判定で PASS していること (床が収束床であること) が前提。`run_case.sh` は既定判定しか走らせないので、restart run では手動で回して VERDICT を README に貼る。
 
 `.claude/settings.json` のフックでこれを強制する: **PreToolUse** が直接 `build/forge` 実行を deny、**Stop** が「最近 forge を回したのに収束チェックしていない run」があるとターン終了を block する (実行方法に依らずファイル状態で検査)。これにより「衝撃波位置の安定や `rms_ro` 単独で収束と判断する」近道を構造的に防ぐ。**収束/一致を主張する応答では VERDICT 行を引用する**。
+
+### 投入の関門 (`launch_gate.py`、2026-10-15)
+
+`run_case.sh` は forge を起動する直前に `solver_density_cuda/tools/launch_gate.py <run_dir>` を呼び、**FAIL なら forge を起動しない**
+(plan `tooling-generator-defaults-and-launch-gate` §4.3・§5.1 #10)。結果は `<run_dir>/LAUNCH_GATE.txt` (VERDICT・モード・宣言・
+プロファイルとその内容のハッシュ・段・逸脱・FAIL/WARN・メッシュの不変部分のハッシュ・品質・バイナリの sha256) に残り、
+`RUN_PROVENANCE.txt` に 1 行写る。起動の前に確かめるだけなら `launch_gate.py <run_dir> --dry-run`。
+
+- **何を見るか**: (1) 設定 — 宣言 (`RECIPE.json`) があれば、宣言したプロファイル・段・逸脱と照合する (`recipe_settings.py` と同じ規則:
+  `fixed`・明示すべきキーの値と省略、禁止キー、プロファイルに無いキー、未知・誤った節のキー)。宣言の有無によらず、
+  `check_solver_config.py` の FAIL (起動時に拒否されるキー・`bndFirstOrder`・dual-time の緩和など) と YAML の重複キー・merge key は
+  FAIL。宣言の無い run の未知・誤った節のキーは、宣言の欠落と同じく WARN の期間は WARN。(2) メッシュの実効条件 — `mesh_provenance.py check` (上の「変換時の条件の記録」)。
+  (3) メッシュの品質 — `check_mesh_quality.py <h5> --bcond bcondConfig.yaml --ar-max 5000` (AR 1000 を超えるセルは壁法線の構造層で
+  条件を確かめたものだけ 5000 まで。`bcondConfig.yaml` の無い run は止まる)。(4) バイナリの sha256 (このリポジトリの `build/forge` で
+  ないバイナリは WARN で記録するだけで止めない)。読めない・検査できない入力は FAIL。
+- **宣言**: 推奨のプロファイルに従う run は `python3 solver_density_cuda/tools/recipe_settings.py declare <run_dir> --profile P --stage S`
+  (一覧は `recipe_settings.py list`、値は [`recommended-settings.md`](recommended-settings.md) 付録 A)。照合が通ったときだけ
+  `RECIPE.json` (config の sha256 つき) を書く。**宣言の後に config を書き換えたら宣言し直す** (sha256 が違うと関門は FAIL)。
+- **逸脱**: プロファイルと違う値は `--deviate key=value --reason "<1 行>"` (根拠 `--basis` は任意)。キーを書かないこと自体を試すときは
+  `--deviate key=~ --reason "..."` (実効値は「未確定」と記録)。禁止キー (`bndFirstOrder` など) は逸脱にできない。
+- **実験の宣言**: 推奨に従わない試し計算は `recipe_settings.py declare <run_dir> --experiment --reason "<1 行>"` (外れたキーは自動で
+  記録する。禁止キー・check_solver_config の FAIL・未知のキー・重複キーは実験でも FAIL)。
+- **WARN の期間**: 強制の開始 (plan §4.7: 起動の経路の棚卸しの完了と、各経路の宣言の方法・段間の負例の試験が揃うこと) までは、
+  **宣言の無い run・来歴の記録の無いメッシュは WARN で起動する** (設計チェーンの生成器が宣言を書くのは plan §5.1 #11 から)。
+  禁止キー・メッシュの FAIL・宣言があるのに照合が FAIL・検査できない入力は今も止まる。
+- **`FORGE_LAUNCH_GATE`**: `warn` は `fixed`・明示すべきキーの不一致・省略だけを WARN に落とす (禁止キー・宣言の欠落 (強制時)・
+  メッシュの FAIL・検査できない入力は落とさない)。`enforce` はその場で強制のモードにする (先行して確かめるため)。ほかの値は FAIL。
 
 ## メッシュ変更後の restart (cross-mesh interpolation)
 

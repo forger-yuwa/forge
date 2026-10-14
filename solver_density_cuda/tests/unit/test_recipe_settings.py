@@ -116,6 +116,15 @@ for prof in ('common_node_ns_sst', 'common_node_euler', 'bell_tp_ns_sst', 'axism
         r = RS.check_config(RC, cfg_of(prof, st), prof, st)
         check(not r['fails'] and not r['warns'], f'正例 {prof}/{st}: PASS (fails {sorted(fail_keys(r))} warns {sorted(warn_keys(r))})')
 
+# passiveFct の警告は check_solver_config 本体が「明示した有効化が作動しない」ときだけ出す (plan §5.1 #10)。
+# 照合の側で「省略なら落とす」は撤去した: 定常の正例 (省略) は上で WARN 0、明示した 1 は WARN が残る
+r = RS.check_config(RC, cfg_of('common_node_ns_sst', 'main', extra={'time.deltaT.passiveFct': 1}), 'common_node_ns_sst', 'main')
+check('time.deltaT.passiveFct' in warn_keys(r), f'定常で passiveFct: 1 を明示すると「作動しない」の WARN が残る ({sorted(warn_keys(r))})')
+check(r['fixed_fails'] == [], f'プロファイルに無いキーは fixed の不一致に数えない ({r["fixed_fails"]})')
+r = RS.check_config(RC, cfg_of('bell_tp_ns_sst', 'main', extra={'time.nStepInner': 5}), 'bell_tp_ns_sst', 'main')
+check([k for k, _ in r['fixed_fails']] == ['time.nStepInner'] and set(r['fixed_fails']) <= set(r['fails']),
+      f'fixed_fails = fixed の値の不一致 (関門の FORGE_LAUNCH_GATE=warn が WARN に落とす分) ({r["fixed_fails"]})')
+
 # --- 負例: nStepInner (逸脱の宣言なし / あり / 値の食い違い / 理由なし) -------------------------------------------------
 txt = cfg_of('bell_tp_ns_sst', 'main', extra={'time.nStepInner': 5})
 r = RS.check_config(RC, txt, 'bell_tp_ns_sst', 'main')

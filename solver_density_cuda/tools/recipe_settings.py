@@ -554,9 +554,10 @@ def _applies_match(want, got):
 def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, bcond=None, experiment=False):
     """config をプロファイルの段と照合する。戻り dict:
     fails/warns [(キー, 説明)]、applied (宣言どおりの逸脱 [{key, value, profile_value}])、off_profile (実験で外れたキー)、
-    profile (解決したプロファイル、無ければ None)。"""
+    profile (解決したプロファイル、無ければ None)、fixed_fails (fails のうち `fixed`・`explicit` の値の不一致・省略によるもの。
+    投入の関門 `launch_gate.py` が `FORGE_LAUNCH_GATE=warn` のときだけ WARN に落とす; plan §4.3・§5.1 #10)。"""
     import check_solver_config as csc
-    fails, warns, applied, off = [], [], [], []
+    fails, warns, applied, off, fixed_fails = [], [], [], [], []
     deviations = dict(deviations or {})
     res = None
     doc, pf = parse_config(cfg_text)
@@ -573,7 +574,7 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
     elif not experiment:
         fails.append(('(profile)', 'プロファイルの宣言が無い (--profile / 実験なら --experiment)'))
     if doc is None:
-        return {'fails': fails, 'warns': warns, 'applied': applied, 'off_profile': off, 'profile': res}
+        return {'fails': fails, 'warns': warns, 'applied': applied, 'off_profile': off, 'profile': res, 'fixed_fails': []}
 
     # --- check_solver_config (起動時拒否・禁止・dual-time の緩和など) と未知・誤配置のキー (ここでは FAIL) ---
     _, uk_w = csc.unknown_keys(doc)              # 起動時拒否 (unknown_keys の fails) は csc.check の fails に含まれる
@@ -582,20 +583,18 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
     fails += [(k, m) for k, m in cf]
     fails += [(k, m + ' (宣言の照合では FAIL)') for k, m in uk_w]
     flat = flatten(doc)
-    # passiveFct の「1 だが作動しない」は、キーを書いていない (既定のまま) 定常の config にも出る。書いた値の誤りを知らせる
-    # 警告なので、書いていない config では落とす (check_solver_config 側の扱いは plan §5.1 #10 で直す)
-    warns += [(k, m) for k, m in cw if k not in ukw_keys
-              and not (k == 'time.deltaT.passiveFct' and k not in flat)]
+    warns += [(k, m) for k, m in cw if k not in ukw_keys]
     if res is None or res['abstract'] or stage not in res['stages']:
         if experiment:
             for k in deviations:
                 warns.append((k, '実験の宣言では逸脱を個別に宣言しない (外れたキーは自動で記録する)'))
-        return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res}
+        return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res,
+                'fixed_fails': []}
 
     st = res['stages'][stage]
     fixed, adv, expl = st['fixed'], st['advisory'], st['explicit']
 
-    def off_or_fail(key, msg, actual, want):
+    def off_or_fail(key, msg, actual, want, kind=None):
         if experiment:
             off.append({'key': key, 'value': actual, 'profile_value': want, 'note': msg})
             return
@@ -609,8 +608,12 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
                 applied.append({'key': key, 'value': actual, 'profile_value': want})
                 return
             fails.append((key, f'逸脱の宣言 {show(dv)} と config の値 {show(actual)} が違う'))
+            if kind in ('fixed', 'explicit'):
+                fixed_fails.append(fails[-1])
             return
         fails.append((key, msg))
+        if kind in ('fixed', 'explicit'):
+            fixed_fails.append(fails[-1])
 
     # 禁止 (逸脱にもできない)
     for k, why in res['forbid'].items():
@@ -630,10 +633,10 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
             if k in flat:
                 got = flat[k]
                 if not same(got, want):
-                    off_or_fail(k, f'{what} (config は {show(got)})', got, want)
+                    off_or_fail(k, f'{what} (config は {show(got)})', got, want, kind)
             else:
                 off_or_fail(k, f'書いていない ({what}。省略の実効値は実行するバイナリで決まるので照合に使わない。'
-                               f'省略を試すなら --deviate {k}=~ --reason "...")', None, want)
+                               f'省略を試すなら --deviate {k}=~ --reason "...")', None, want, kind)
     # advisory
     for k, spec in adv.items():
         if k in flat:
@@ -673,7 +676,8 @@ def check_config(recipes, cfg_text, profile=None, stage=None, deviations=None, b
                 off.append({'key': f'applies.{k}', 'value': got_app[k], 'profile_value': want, 'note': msg})
             else:
                 fails.append((f'applies.{k}', msg))
-    return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res}
+    return {'fails': _dedupe(fails), 'warns': _dedupe(warns), 'applied': applied, 'off_profile': off, 'profile': res,
+            'fixed_fails': _dedupe(fixed_fails)}
 
 
 def _dedupe(items):
