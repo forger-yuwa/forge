@@ -22,4 +22,12 @@ wall: {thermal: isothermal, Tw: 350.0}
 p_ambient: design                        # 設計出口静圧 (等エントロピー、semiperfect)
 tolerances: {length_m: 1.0e-3, diameter_m: 2.0e-5}   # 雛形の仮の値 (ユーザ「よくわからん」)
 recipe: axismach_explore_v1
-overrides: {}
+# 格子の節点数 (2026-10-15): 全圧 3.5 MPa で y1+ ≤ 1 の第 1 層が薄く (壁 2.4 µm・スロート 0.74 µm)、拡大部 8 m で壁際の AR ≤ 0.97 × 5000 に
+# ni 約 10,177 が要る (旧の規則のカードの生成の見積もり、AWS A の card_gen.log)。上限 NI_CAP 6000 と節点数の上限 30 万を超えるので、
+# ユーザの了承 (2026-10-15「おけ」) の上で ni を明示し、NS・Euler (ni は NS と同じ; 雛形の規則) の節点数の上限を 100 万に許す。
+overrides:
+  mesh.ni: 10200
+  mesh.max_nodes: 1000000
+  mesh.max_nodes_reason: "ユーザ了承 2026-10-15: Pt 3.5 MPa・拡大部 8 m で y1+≤1 と壁際の AR≤5000 に ni≈10,200 (約 99 万点) が要る"
+  mesh_euler.max_nodes: 1000000
+  mesh_euler.max_nodes_reason: "ユーザ了承 2026-10-15: Euler の ni は雛形の規則で NS と同じ (約 99 万点)"
