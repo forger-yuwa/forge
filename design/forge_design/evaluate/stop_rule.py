@@ -6,7 +6,8 @@ M6 の判定 (窓の両端の差) は傾向と振動を混ぜるので、**平�
 判定量 (出力 res_<N>.h5 ごと、N > 0):
   - 質量の収支 $r = (\dot m_{in} - \dot m_{out})/\dot m_{in}$: 入口 (列 i = 0)・出口 (列 i = ni − 1) の列の折れ線を通る流束
     $2\pi\int(\rho u_x\,dr - \rho u_r\,dx)\,r$ (M6 の `cold_xcheck.reduce_fields` と同じ式)。
-  - 境界層の運動量厚さ $\theta_r$ を $x/x_E$ = 0.4・0.7・0.95 の断面で (x_E は prepare_info の設計壁の出口、r_t 単位)。各行 j を x 方向に補間した
+  - 境界層の運動量厚さ $\theta_r$ を $x/x_w$ = 0.4・0.7・0.95 の断面で ($x_w$ は設計壁 (物理壁) の出口 `prepare_info.physical_wall.domain[1]`、r_t 単位;
+    `prepare_info.x_E` は軸 Mach 則の終点で別物 — 2026-10-14 まで誤って x_E を使っていた、M6ノズルの設計・forge-25 の指摘)。各行 j を x 方向に補間した
     一定 x の断面で、帯の外縁 $y_b$ の $(\rho_e, u_e)$ を縁にした面積で等価な厚さ
     $\theta_r = r_w - \sqrt{r_w^2 - 2\int_{r_b}^{r_w}\rho u(u_e-u)\,r\,dr/(\rho_e u_e^2)}$ (`reduce_fields` と同じ式、断面は最も近い列)。
   - $y_b(x)$ は**本段の最初の出力**を固定 Euler 参照 (`prepare_info.euler_ref`) で `extract_and_merge(.., band_select="edge")` と同じ抽出にかけた
@@ -209,6 +210,11 @@ class RunGeometry:
         self.info = info
         self.ni, self.nj = int(info["mesh"]["ni"]), int(info["mesh"]["nj"])
         self.S = float(info["scale_m"]); self.x_E = float(info["x_E"])
+        pw = info.get("physical_wall") or {}
+        dom = pw.get("domain") if isinstance(pw, dict) else None
+        if not (isinstance(dom, (list, tuple)) and len(dom) == 2):
+            raise ValueError(f"{self.run_dir}: prepare_info.physical_wall.domain が無い (θ_r の断面の基準 = 設計壁の出口を決められない)")
+        self.x_wall_exit = float(dom[1])     # θ_r の断面の基準 (設計壁の出口)。x_E (軸 Mach 則の終点) ではない
         nc = _read_coords(self.run_dir)
         if nc.shape[0] != self.ni * self.nj:
             raise ValueError(f"{self.run_dir}: 節点数 {nc.shape[0]} が ni × nj = {self.ni * self.nj} でない (構造格子の node run でない)")
@@ -231,7 +237,7 @@ def snapshot(geo: RunGeometry, step: int, band: dict | None, x_fracs=X_FRACS, va
     mi, mo = mass_flows(geo.X, geo.R, RO, UX, UY, geo.S)
     row.update(mdot_in=mi, mdot_out=mo, r=(mi - mo) / mi if mi != 0 else float("nan"))
     if band is not None:
-        xs = [f * geo.x_E for f in x_fracs]
+        xs = [f * geo.x_wall_exit for f in x_fracs]
         for f, (x0, th) in zip(x_fracs, theta_r_sections(geo.X, geo.R, RO, UX, np.asarray(band["x"]), np.asarray(band["y_b"]), xs)):
             row[theta_key(f)] = th; row[f"x_{theta_key(f)}"] = x0
     row.update(recorded_quantities(geo.Xf, geo.Rf, {k: V[k].reshape(sh) for k in ("ro", "Ux", "Uy", "sonic")}, geo.x_E))

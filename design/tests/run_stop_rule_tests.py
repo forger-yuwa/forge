@@ -190,7 +190,8 @@ def test_quantities():
     rd = TMP / "q_fixture"
     rd.mkdir()
     write_mesh(rd)
-    (rd / "prepare_info.json").write_text(json.dumps({"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": X_E, "Md": 5.0}))
+    (rd / "prepare_info.json").write_text(json.dumps({"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": X_E, "Md": 5.0,
+                                                       "physical_wall": {"domain": [-5.0, X_E]}}))   # 合成では設計壁の出口 = X_E (断面は従来と同じ)
     B = synth_base()
     B["ro"][-1] *= 1.003                                    # 出口の列の流量を 0.3 % 増やす → r = −0.003
     with h5py.File(rd / "res_1000.h5", "w") as h:
@@ -299,6 +300,7 @@ def make_run(name: str, scenario: dict, *, interval=2500, fallback=10000, cap=40
                              euler_ref=(str(eu) if euler_ref else None), requested=requested)
     sr["cap"] = cap if sr.get("cap") is not None else None
     (rd / "prepare_info.json").write_text(json.dumps({"mesh": {"ni": NI, "nj": NJ}, "scale_m": SCALE, "x_E": X_E,
+                                                       "physical_wall": {"domain": [-5.0, X_E]},
                                                        "wall_thermal": {"mode": "isothermal", "Tw": 350.0}, "stop_rule": sr,
                                                        "euler_ref": sr["euler_ref"]}))
     return rd
@@ -446,10 +448,29 @@ def test_watcher():
         SR.fix_band = real_fix
 
 
+def test_station_reference():
+    """θ_r の断面の基準は設計壁 (物理壁) の出口 (prepare_info.physical_wall.domain[1])。prepare_info.x_E (軸 Mach 則の終点) ではない
+    (2026-10-14 M6ノズルの設計・forge-25 の指摘: case/45 で x_E 39.81 r_t を基準にして断面が 15.9・27.9・37.8 r_t になっていた)。"""
+    import json as _json
+    d = ROOT / "case" / "70.m5_air_wt_demo" / "run_0010b_ns_c2b_cont60k"
+    if not (d / "nozzle.h5").exists():
+        skip("断面の基準", f"{d} の nozzle.h5 が無い")
+        return
+    info = _json.loads((d / "prepare_info.json").read_text())
+    geo = SR.RunGeometry(d)
+    xw = float(info["physical_wall"]["domain"][1])
+    check("θ_r の断面の基準は設計壁の出口 (physical_wall.domain[1]) で、x_E (軸 Mach 則の終点) ではない",
+          geo.x_wall_exit == xw and abs(xw - float(info["x_E"])) > 1.0, f"x_w {xw:.4f}、x_E {float(info['x_E']):.4f} r_t")
+    xs = [f * geo.x_wall_exit for f in SR.X_FRACS]
+    check("断面は x/x_w = 0.4・0.7・0.95 (case/70 c2b で 19.2・33.6・45.6 r_t 付近)", all(abs(a - b) < 1e-12 for a, b in zip(xs, [0.4 * xw, 0.7 * xw, 0.95 * xw])),
+          [round(x, 3) for x in xs])
+
+
 def main() -> int:
     print(f"出力: {TMP}", flush=True)
     test_synthetic()
     test_quantities()
+    test_station_reference()
     if QUICK:
         skip("(b) 偽の forge", "--quick")
     elif not C70_RUN.exists():
