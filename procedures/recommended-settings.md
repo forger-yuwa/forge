@@ -451,8 +451,8 @@ anchor / alias / merge key を含むもの (節どうしが同じ実体を共有
 | `space.slauWallNormalChi` | mesh.discretization node, solver [SLAU, SLAU2], applies.wall [isothermal, noslip_adiabatic], mesh.nodeWallDirichlet [1, 書かない] | 1 | solverConfig.cpp:731-740 | 壁隣接面の SLAU の χ (省略は auto。2026-09-26 から node ∧ nodeWallDirichlet 1 ∧ SLAU で 1、それ以前は 0。作用するのは wall・wall_isothermal の節点だけ) |
 | `space.slauWallNormalChi` | mesh.discretization node, solver [SLAU, SLAU2], applies.wall [isothermal, noslip_adiabatic], mesh.nodeWallDirichlet {not: [1, 書かない]} | 0 | solverConfig.cpp:731-740 | 壁隣接面の SLAU の χ (省略は auto。2026-09-26 から node ∧ nodeWallDirichlet 1 ∧ SLAU で 1、それ以前は 0。作用するのは wall・wall_isothermal の節点だけ) |
 | `mesh.nodeWallDirichlet` | mesh.discretization node, applies.wall [isothermal, noslip_adiabatic] | 1 | solverConfig.hpp:472 | node の壁の速度の Dirichlet (wall・wall_isothermal の節点だけに作用する) |
-| `mesh.axisymMethod` | mesh.isAxisymmetric 1, physProp.axisymMethod [書かない] | 0 | solverConfig.hpp:432 | 軸対称の定式化 |
-| `mesh.axisSegmentRWeight` | mesh.discretization node, mesh.isAxisymmetric 1, mesh.axisymMethod [0, 書かない], physProp.axisymMethod [書かない], mesh.axisRFloor [0, 書かない] | 1 | solverConfig.hpp:454 | 軸対称の r 重みを双対面の区間ごとに掛ける (既定 1 は 2026-10-10 から。node・axisymMethod 0・axisRFloor 0 のときだけ効く) |
+| `mesh.axisymMethod` | applies.axisymmetric true, physProp.axisymMethod [書かない] | 0 | solverConfig.hpp:432 | 軸対称の定式化 |
+| `mesh.axisSegmentRWeight` | mesh.discretization node, applies.axisymmetric true, mesh.axisymMethod [0, 書かない], physProp.axisymMethod [書かない], mesh.axisRFloor [0, 書かない] | 1 | solverConfig.hpp:454 | 軸対称の r 重みを双対面の区間ごとに掛ける (既定 1 は 2026-10-10 から。node・axisymMethod 0・axisRFloor 0 のときだけ効く) |
 | `physProp.thermoFloat` | physProp.thermalMethod 2, physProp.thermoHrefTemp {gt: 0} | 1 | solverConfig.hpp:627・solverConfig.cpp:1094-1101 | TP の温度反転 (既定 1 は 2026-09-12 から。thermoHrefTemp が無いと 0 に落ちる) |
 | `turbulence.turbulentPrandtl` | applies.physics ns_sst | 0.85 | solverConfig.cpp:920 | 乱流プラントル数 (§2 は 0.9、省略は 0.85) |
 | `turbulence.scalarDiffusion` | applies.physics ns_sst | 1 | solverConfig.cpp:842 | k/ω の拡散 |

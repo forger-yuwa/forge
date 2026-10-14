@@ -72,6 +72,17 @@ def mu_of(T, cfg):
     return None            # 多成分 (Chapman-Enskog/Wilke) は組成が要る -> 判定不能
 
 
+def run_axisymmetric(cfg):
+    """run の config が軸対称か (面積の重みに 2πr を掛けるか)。solver と同じ優先順 (`mesh.isAxisymmetric`、無ければ旧
+    `physProp.isAxisymmetric`) で読む (`check_solver_config.effective_axisymmetric`; 2026-10-15 までは mesh だけを見て、
+    旧キーだけの軸対称の run を平面として重みを作っていた)。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import check_solver_config as csc
+    return csc.effective_axisymmetric(cfg or {}) == 1
+
+
 def face_centroids(xyz, conne):
     """XDMF Mixed の CONNE から面重心を作る (セルごとの壁ダンプ用)。"""
     nn = {2: 2, 4: 3, 5: 4, 6: 4, 16: 6, 9: 8}
@@ -288,7 +299,7 @@ def main():
         print("mesh h5 が無い (config の mesh.meshFileName も見た): %s" % (mesh or a.run))
         return 2
     wt = int(((cfg or {}).get("turbulence", {}) or {}).get("wallTreatmentSST", 0))
-    axisym = bool(int(((cfg or {}).get("mesh", {}) or {}).get("isAxisymmetric", 0) or 0))
+    axisym = run_axisymmetric(cfg)
 
     if a.geometry_only:
         return geometry_only(mesh, a)

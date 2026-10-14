@@ -520,14 +520,16 @@ def parse_deviations(items, reason=None, basis=None):
 
 
 def derive_applies(doc, bcond=None):
-    """config (と bcond) から適用条件の値を導く (照合・書き写しに使う)。"""
+    """config (と bcond) から適用条件の値を導く (照合・書き写しに使う)。軸対称は solver と同じ優先順
+    (`mesh.isAxisymmetric`、無ければ旧 `physProp.isAxisymmetric`: `check_solver_config.effective_axisymmetric`)。"""
+    import check_solver_config as csc
     flat = flatten(doc)
     tb = str(flat.get('turbulence.model', 'none')).strip().lower()
     vm = flat.get('physProp.viscMethod')
     physics = ('ns_sst' if tb.startswith('sst') else
                ('euler' if (tb in ('none', '') and vm is not None and int(vm) == 0) else 'ns_laminar'))
     out = {'discretization': str(flat.get('mesh.discretization', 'cell')).strip().strip('"').lower(),
-           'axisymmetric': int(flat.get('mesh.isAxisymmetric', 0) or 0) == 1,
+           'axisymmetric': csc.effective_axisymmetric(doc) == 1,
            'gas': 'tp' if int(flat.get('physProp.thermalMethod', 0) or 0) == 2 else 'cpg',
            'physics': physics,
            'time': 'dual_time' if int(flat.get('time.dualTime', 0) or 0) == 1 else
@@ -539,7 +541,9 @@ def derive_applies(doc, bcond=None):
     return out
 
 
-# 適用条件 → それを決める config のキー (derive_applies と同じ対応)
+# 適用条件 → それを決める config のキー (derive_applies と同じ対応)。軸対称は旧 physProp.isAxisymmetric でも決まるが、
+# mesh.isAxisymmetric を書けばそちらが優先されるので、段の fixed が mesh.isAxisymmetric を持てば fixed の照合で足りる
+# (書いていなければ fixed の省略で FAIL)
 APPLIES_KEYS = {'discretization': ('mesh.discretization',), 'axisymmetric': ('mesh.isAxisymmetric',),
                 'gas': ('physProp.thermalMethod',), 'physics': ('turbulence.model', 'physProp.viscMethod'),
                 'time': ('time.unsteady', 'time.dualTime')}

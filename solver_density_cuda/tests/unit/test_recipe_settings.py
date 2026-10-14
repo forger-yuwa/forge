@@ -242,6 +242,38 @@ for tag, old, new in (('inventory', "source: {inventory: '1.0', at: solverConfig
     except RS.RecipeError as e:
         check('変わった' in str(e), f'出所 ({tag}) が今のソースと合わなければ例外 ({str(e)[:80]}…)')
 
+# --- #21: 旧キー physProp.isAxisymmetric (solver と同じ優先順: mesh が優先、無ければ旧 physProp) ----------------------------
+# 2026-10-15 までは derive_applies が mesh.isAxisymmetric だけを見て、旧キーだけの軸対称の config を平面と読んでいた
+for tag, doc, want in (('mesh だけ 1', {'mesh': {'isAxisymmetric': 1}}, True),
+                       ('旧 physProp だけ 1 (負例: 旧実装は平面)', {'physProp': {'isAxisymmetric': 1}}, True),
+                       ('mesh 0・physProp 1 (mesh が優先)', {'mesh': {'isAxisymmetric': 0}, 'physProp': {'isAxisymmetric': 1}}, False),
+                       ('mesh 1・physProp 0 (mesh が優先)', {'mesh': {'isAxisymmetric': 1}, 'physProp': {'isAxisymmetric': 0}}, True),
+                       ('どちらも無し', {'mesh': {}}, False)):
+    got = RS.derive_applies(doc)['axisymmetric']
+    check(got is want, f'derive_applies の軸対称: {tag} → {want} (得た {got})')
+AXI = 'axismach_ns_sst_tp'
+BC_AXI = {'inlet': {'kind': 'inlet_Pressure'}, 'wall': {'kind': 'wall_isothermal'}, 'axis': {'kind': 'axis'}}
+
+
+def to_legacy_axi(d):
+    d['mesh'].pop('isAxisymmetric')
+    d['mesh'].pop('axisymMethod', None)
+    d['physProp']['isAxisymmetric'] = 1
+
+
+leg = cfg_of(AXI, 'main', explicit=False, edit=to_legacy_axi)
+ex_leg = RS.explicit_for(RC, leg, BC_AXI)
+check('mesh.axisymMethod' in ex_leg and 'mesh.axisSegmentRWeight' in ex_leg,
+      f'旧キーだけの軸対称の config でも明示すべきキーの軸対称の条件 (applies.axisymmetric) が当たる ({sorted(k for k in ex_leg if "axis" in k)})')
+r = RS.check_config(RC, cfg_of(AXI, 'main', edit=to_legacy_axi), AXI, 'main')
+check({'mesh.isAxisymmetric', 'physProp.isAxisymmetric'} <= fail_keys(r) and 'physProp.isAxisymmetric' in warn_keys(r),
+      f'軸対称の機種で mesh.isAxisymmetric を旧キーに替えると、mesh 側の省略とプロファイルに無い旧キーで FAIL、旧キーは WARN '
+      f'({sorted(fail_keys(r))}・warns {sorted(warn_keys(r))})')
+r = RS.check_config(RC, cfg_of(SERN, 'main', edit=lambda d: d['physProp'].__setitem__('isAxisymmetric', 1)), SERN, 'main')
+check(fail_keys(r) == {'physProp.isAxisymmetric'} and any('効かない' in m for k, m in r['warns'] if k == 'physProp.isAxisymmetric'),
+      f'平面の機種に旧キー 1 を足しても mesh 0 が優先 (適用条件は平面のまま)、旧キーはプロファイルに無いキーで FAIL・効かない旨の WARN '
+      f'({sorted(fail_keys(r))})')
+
 # --- 負例: YAML の重複キー・merge key ---------------------------------------------------------------------------------
 base = cfg_of('bell_tp_ns_sst', 'main')
 dup = base.replace('  nStepInner: 4\n', '  nStepInner: 4\n  nStepInner: 5\n', 1)

@@ -110,6 +110,28 @@ y = cfg(); y['space']['limiterMatchRecon'] = 1
 f, w = csc.check(y)
 check('space.limiterMatchRecon' in keys(f), 'limiterMatchRecon is rejected by the solver at startup and must FAIL')
 
+# 旧キー physProp.isAxisymmetric (plan tooling-generator-defaults-and-launch-gate §5.1 #21): solver は deprecated として読む
+# (mesh 側が優先: solverConfig.cpp:945・:953) ので FAIL にしない。WARN で移行を促し、mesh と両方あれば physProp 側が効かないと出す
+for tag, mesh, pp, want in (('mesh only', {'isAxisymmetric': 1}, {}, 1), ('legacy only', {}, {'isAxisymmetric': 1}, 1),
+                            ('mesh 0 wins over legacy 1', {'isAxisymmetric': 0}, {'isAxisymmetric': 1}, 0),
+                            ('mesh 1 wins over legacy 0', {'isAxisymmetric': 1}, {'isAxisymmetric': 0}, 1),
+                            ('neither', {}, {}, 0), ('legacy as a string', {}, {'isAxisymmetric': '1'}, 1),
+                            ('empty mesh value falls back', {'isAxisymmetric': None}, {'isAxisymmetric': 1}, 1)):
+    got = csc.effective_axisymmetric({'mesh': mesh, 'physProp': pp})
+    check(got == want, f'effective_axisymmetric ({tag}): expected {want}, got {got}')
+y = cfg(); y['physProp']['isAxisymmetric'] = 1
+f, w = csc.check(y); wk = dict(w)
+check('physProp.isAxisymmetric' not in keys(f) and 'physProp.isAxisymmetric' in wk and 'mesh.isAxisymmetric' in wk['physProp.isAxisymmetric'],
+      f'legacy physProp.isAxisymmetric alone is accepted with a WARN that names mesh.isAxisymmetric ({wk.get("physProp.isAxisymmetric")})')
+check('physProp.isAxisymmetric' not in {k for k, _ in csc.unknown_keys(y)[1]}, 'the legacy key is read by the solver, so it is not an unknown key')
+y = cfg(); y['physProp']['isAxisymmetric'] = 1; y['mesh']['isAxisymmetric'] = 0
+f, w = csc.check(y); wk = dict(w)
+check('physProp.isAxisymmetric' in wk and '効かない' in wk['physProp.isAxisymmetric'] and '食い違う' in wk['physProp.isAxisymmetric'],
+      f'legacy key overridden by a different mesh value must say it has no effect ({wk.get("physProp.isAxisymmetric")})')
+y = cfg(); y['mesh']['isAxisymmetric'] = 1
+f, w = csc.check(y)
+check('physProp.isAxisymmetric' not in keys(w) and 'mesh.isAxisymmetric' not in keys(w), 'mesh.isAxisymmetric alone is clean')
+
 # ---- 受理キーの一覧の完全性 (plan tooling-generator-defaults-and-launch-gate §5.1 #4、codex plan 段 M1) ----
 # 抽出は手書きの対応表でなく、ソースの束縛 (`auto cj = config["conjugate"];`) から節を導く。
 import re, yaml

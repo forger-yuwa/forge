@@ -15,6 +15,8 @@
     指定 ON (明示 1、既定 ON 後は省略も) で未対応 (c) (dual-time 凝縮 NS 等) は FAIL (ソルバが起動を止める)、
     構造的に適用できない (b) は WARN、既定 ON 後の明示 0 (包絡内) は WARN (旧作用素)。dual-time + Euler は通す
   - solver が読まないキー・**誤った節に書かれたキー** (WARN) と、起動時に拒否されるキー (FAIL)
+  - 旧キー `physProp.isAxisymmetric` (WARN。solver は deprecated として読み、`mesh.isAxisymmetric` があればそちらが優先:
+    `solverConfig.cpp:945`・`:953`)。軸対称の実効値は `effective_axisymmetric` (ほかのツールも同じ関数で読む)
 
 使い方: check_solver_config.py RUN_DIR|solverConfig.yaml [...]   (VERDICT PASS/WARN/FAIL, exit 0/0/1)
 WARN は「意図的ならよい」もの、FAIL は「まず直すべき」もの。
@@ -41,6 +43,21 @@ def load_bcond(cfg_path):
             return yaml.safe_load(f) or {}
     except Exception:
         return None
+
+
+def effective_axisymmetric(y):
+    """軸対称の実効値 (0/1 の整数)。solver と同じ優先順: `mesh.isAxisymmetric` を書いていればそれ、無ければ旧
+    `physProp.isAxisymmetric` (deprecated の読み)、どちらも無ければ 0 (`solverConfig.cpp:945`・`:953`、
+    `mesh_provenance.requested_conversion` と同じ)。値が `~` (空) のキーは書いていない扱い (solver は空の値を int に変換できず
+    起動時に止まる。ここでは判定のツールを止めないために読み飛ばす)。整数に読めなければ ValueError。
+    軸対称を config から判定するツール (recipe_settings・check_wall_resolution・check_lsq_gradient) はこれを使う
+    (2026-10-15、plan tooling-generator-defaults-and-launch-gate §5.1 #21: mesh だけを見て旧キーの軸対称を平面と読んでいた)。"""
+    for sec in ('mesh', 'physProp'):
+        d = y.get(sec) if isinstance(y, dict) else None
+        if isinstance(d, dict) and d.get('isAxisymmetric') is not None:
+            v = d['isAxisymmetric']
+            return int(v.strip().strip('"\'')) if isinstance(v, str) else int(v)
+    return 0
 
 
 _TPS = None
@@ -155,6 +172,18 @@ def check(y, bcond=None):
 
     if mesh.get('bndFirstOrder') is not None:
         fails.append(('mesh.bndFirstOrder', '使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md)'))
+
+    # 旧キー physProp.isAxisymmetric: solver は受理する (deprecated の読み、recommended-settings §9 の「opt-in のまま残置」) ので
+    # FAIL にしない。mesh 側が優先なので、両方を書くと physProp 側は効かない (solverConfig.cpp:945・:953)
+    if isinstance(pp, dict) and pp.get('isAxisymmetric') is not None:
+        if mesh.get('isAxisymmetric') is not None:
+            same_v = str(mesh['isAxisymmetric']).strip() == str(pp['isAxisymmetric']).strip()
+            warns.append(('physProp.isAxisymmetric',
+                          f'旧キー (deprecated)。mesh.isAxisymmetric {mesh["isAxisymmetric"]} が優先され、この値 {pp["isAxisymmetric"]} は効かない'
+                          + ('' if same_v else ' (値が食い違う: 実効は mesh 側)') + '。physProp 側を消す'))
+        else:
+            warns.append(('physProp.isAxisymmetric',
+                          f'旧キー (deprecated)。solver は読む (実効 {pp["isAxisymmetric"]}) が、mesh.isAxisymmetric に移すこと'))
 
     if dual:
         if relax is not None and float(relax) < 1.0:

@@ -195,14 +195,14 @@ explicit_keys:
     why: 軸対称の定式化
     basis: [§1・§2]
     cases:
-      - when: {mesh.isAxisymmetric: 1, physProp.axisymMethod: [null]}
+      - when: {applies.axisymmetric: true, physProp.axisymMethod: [null]}
         value: 0
         source: {file: solver_density_cuda/input/solverConfig.hpp, text: 'int axisymMethod = 0;', at: solverConfig.hpp:432}
   mesh.axisSegmentRWeight:
     why: 軸対称の r 重みを双対面の区間ごとに掛ける (既定 1 は 2026-10-10 から。node・axisymMethod 0・axisRFloor 0 のときだけ効く)
     basis: [既定の変更]
     cases:
-      - when: {mesh.discretization: node, mesh.isAxisymmetric: 1, mesh.axisymMethod: [0, null], physProp.axisymMethod: [null], mesh.axisRFloor: [0, null]}
+      - when: {mesh.discretization: node, applies.axisymmetric: true, mesh.axisymMethod: [0, null], physProp.axisymMethod: [null], mesh.axisRFloor: [0, null]}
         value: 1
         source: {file: solver_density_cuda/input/solverConfig.hpp, text: 'int axisSegmentRWeight = 1;', at: solverConfig.hpp:454}
   physProp.thermoFloat:

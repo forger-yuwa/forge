@@ -173,7 +173,10 @@ if (run / "res_6000.h5").exists():
             ("viscMethod 0 だが visc ≠ 0", lambda c: c["physProp"].update({"visc": 1.8e-5}), None),
             ("乱流 SST のみ", lambda c: c.update({"turbulence": {"model": "SST"}}), None),
             ("壁が no-slip", None, lambda b: b["wall"].update({"kind": "wall"})),
-            ("cell 離散化", lambda c: c["mesh"].update({"discretization": "cell"}), None)):
+            ("cell 離散化", lambda c: c["mesh"].update({"discretization": "cell"}), None),
+            # 軸対称は solver と同じ優先順 (mesh が優先、無ければ旧 physProp; plan tooling-generator-defaults-and-launch-gate §5.1 #21)
+            ("mesh.isAxisymmetric 0 (旧 physProp 1 は mesh に負ける)",
+             lambda c: (c["mesh"].update({"isAxisymmetric": 0}), c["physProp"].update({"isAxisymmetric": 1})), None)):
         td = Path(tempfile.mkdtemp(prefix="cfdpin_bad_"))
         for fn in ("nozzle.h5", "res_6000.h5"):
             (td / fn).symlink_to(run / fn)
@@ -200,6 +203,16 @@ if (run / "res_6000.h5").exists():
     (td / "bcondConfig.yaml").write_text(yaml.safe_dump(yaml.safe_load((run / "bcondConfig.yaml").read_text())))
     ok_t = pinned_factory(td, "res_6000.h5")(2.0, d["gamma_hall"])
     check("対照: 設定を変えずに書き直した凍結源は受理", ok_t.x0_cfd == il["x0"])
+    # 旧キー physProp.isAxisymmetric だけの軸対称 (solver は軸対称で回す) も受理する (2026-10-15 までは mesh だけを見て拒否していた)
+    cfg = yaml.safe_load((run / "solverConfig.yaml").read_text())
+    cfg["mesh"].pop("isAxisymmetric")
+    cfg["physProp"]["isAxisymmetric"] = 1
+    (td / "solverConfig.yaml").write_text(yaml.safe_dump(cfg))
+    try:
+        ok_l = pinned_factory(td, "res_6000.h5")(2.0, d["gamma_hall"])
+        check("旧キー physProp.isAxisymmetric だけの軸対称の凍結源は受理", ok_l.x0_cfd == il["x0"])
+    except ValueError as e:
+        check(f"旧キー physProp.isAxisymmetric だけの軸対称の凍結源は受理 ({str(e)[:100]}…)", False)
 
     # --- 実効入口・熱力学条件 (codex diagnose 2026-10-06 result-interpretation の判別 A/B を回帰化) ----------
     # 凍結源の入力を一時ディレクトリへ写し (h5 は symlink、元 run は書き換えない)、入口 BC・physProp だけを変える。

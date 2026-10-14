@@ -166,8 +166,10 @@ def conditions(run, F):
         fl = b.get("floats") or {}
         val = ", ".join(f"{k} {v:g}" if isinstance(v, (int, float)) else f"{k} {v}" for k, v in fl.items()) or "—"
         bcrows.append([str(b.get("physID")), name, str(b.get("kind")), val])
+    # 軸対称は solver と同じ優先順 (mesh.isAxisymmetric、無ければ旧 physProp.isAxisymmetric; solverConfig.cpp:945・:953)
+    axi = mesh.get("isAxisymmetric") if mesh.get("isAxisymmetric") is not None else pp.get("isAxisymmetric")
     num = [
-        ["離散化", f"{mesh.get('discretization', '?')} 中心、軸対称 {'あり' if mesh.get('isAxisymmetric') else 'なし'}"],
+        ["離散化", f"{mesh.get('discretization', '?')} 中心、軸対称 {'あり' if int(axi or 0) == 1 else 'なし'}"],
         ["対流スキーム", f"{cfg.get('solver', '?')}、convMethod {sp.get('convMethod')} (2 次)、limiter {sp.get('limiter')}" + (f"、limiterScaled {sp['limiterScaled']}" if 'limiterScaled' in sp else "")],
         ["時間積分", f"定常 (擬似時間)、timeIntegration {tm.get('timeIntegration')}、blockDPLUR {dT.get('blockDPLUR')}、CFL {dT.get('cfl')}、implicitRelax {dT.get('implicitRelax', '—')}"],
         ["step 数", f"{tm.get('last', {}).get('nStepOuter')} (出力間隔 {tm.get('outStepInterval')})"],

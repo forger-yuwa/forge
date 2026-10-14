@@ -44,8 +44,12 @@ def _check_run_config(rd: Path, info: dict) -> dict:
     errs = []
     if str(mesh.get("discretization")) != "node":
         errs.append(f"mesh.discretization={mesh.get('discretization')!r} (node でない)")
-    if int(mesh.get("isAxisymmetric", 0) or 0) != 1:
-        errs.append(f"mesh.isAxisymmetric={mesh.get('isAxisymmetric')!r} (軸対称でない)")
+    # 軸対称は solver と同じ優先順 (mesh.isAxisymmetric、無ければ旧 physProp.isAxisymmetric; solverConfig.cpp:945・:953、
+    # solver_density_cuda/tools/check_solver_config.effective_axisymmetric と同じ)
+    axi = mesh.get("isAxisymmetric") if mesh.get("isAxisymmetric") is not None else pp.get("isAxisymmetric")
+    if int(axi or 0) != 1:
+        errs.append(f"mesh.isAxisymmetric={mesh.get('isAxisymmetric')!r}・physProp.isAxisymmetric={pp.get('isAxisymmetric')!r} "
+                    "(軸対称でない)")
     if int(pp.get("viscMethod", -1)) != 0 or float(pp.get("visc", -1.0)) != 0.0:
         errs.append(f"physProp.viscMethod={pp.get('viscMethod')!r}, visc={pp.get('visc')!r} (Euler = viscMethod 0 かつ visc 0 でない)")
     if str(turb.get("model", "")).lower() != "none":
