@@ -19,6 +19,16 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
   design/.venv-opt/bin/python -m forge_design.feedback.deltastar_loop --problem P.yaml --euler-ref EULER_RUN \
       --delta-r-csv P_delta_r.csv --prev PREV_RUN --run-dir RUN [--stages none --cfl 1 --steps 60000] [--prepare-only]
 
+受け渡しの関門 (2026-10-14, plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、codex diagnose 2026-10-14): `run_pass`・`run_from_table`・
+`run_pass0_integral` は NS の本段の後 (`run_pass` は前の pass の run から次の壁を作る前にも) `handoff_gate` を通し、
+(a) 本段の停止の状態 (`STOP_RULE_STATE.json`; run_staged_ns の終了コードでは決めない) が REACHED、(b) `check_convergence.py --segment`
+(本段の区間) が PASS のときだけ抽出 (`band_select="edge"` を明示) と次の壁の入力 (`delta_r_next.csv`・`fixed_point.json`) へ進む。
+判定は `HANDOFF_GATE.json`・`HANDOFF_CONVERGENCE.txt` に残す。明示の上書き: `--allow-not-reached` (停止規則を使わない run・CENSORED・
+UNAVAILABLE から進む)・`--allow-unconverged` (収束の判定が NOT CONVERGED でも進む)。DIVERGED・EXEC_ERROR・DATA_ERROR・状態の記録なし・
+収束の判定の DIVERGED・判定不能は上書きでも進まない。止めたら CLI は終了コード 3。**壁の更新を次の pass へ自動でつながない** (1 pass ずつ
+呼び出し側が確かめる)。関門の合格は §4.9 の「更新に進む条件」(保存則・局所の y₁⁺・抽出の被覆・δ_E の隣り合う 2 窓の変動 ほか) の
+一部だけで、全部ではない。
+
 推奨 (2026-09-04, case/45 run_0026 で検証): 収束済み NS 場からの warm start では
   `--stages none --cfl 5 --implicit-relax 0.7 --steps 12000`
 (soft/mid 6000 step は不要、cfl 5 + relax 0.7 で 5000〜9000 step で cfl1/24000 step と同じ残差水準・出口 M は 8000 step で凍結。
@@ -45,6 +55,16 @@ from ..metrics.deltastar import deltastar_from_core_matched_euler, massflow_rati
 # 第 2 列を壁入力として読む既存の読み手 (prepare_ns の delta_r_csv 等) の挙動は変わらない。
 DELTA_R_NEXT_COLUMNS = ("x_rt", "delta_target", "delta_in_prev", "delta_E", "held")
 _DELTA_R_NEXT_OLD = ("x_rt", "delta_r", "delta_in_prev", "delta_r_use_smoothed", "held")
+
+# 受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a)
+HANDOFF_GATE = "HANDOFF_GATE.json"            # 関門の判定の記録 (run ごと)
+HANDOFF_CONVERGENCE = "HANDOFF_CONVERGENCE.txt"   # 関門で回した check_convergence.py --segment の出力
+HANDOFF_BAND_SELECT = "edge"                  # 関門を通った後の抽出の帯の選び方 (2026-10-14 まで未指定 = 既定の adaptive)
+_STOP_OVERRIDABLE = ("NOT_USED", "CENSORED", "UNAVAILABLE")   # allow_not_reached で通せる停止の状態 (それ以外の非 REACHED は通さない)
+
+
+class HandoffBlocked(RuntimeError):
+    """受け渡しの関門が不合格 (前の pass の run から次の壁を作らない)。"""
 
 
 def read_delta_r_next(path) -> dict:
@@ -546,20 +566,148 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
     return out
 
 
+def stop_state(run_dir) -> dict:
+    """run の本段の停止の状態 (plan §5.1 #36a)。`STOP_RULE_STATE.json` (run_staged_ns が本段の後に書く) があればその status。
+    無ければ prepare_info.json の stop_rule を見て、要求していれば MISSING (本段が終わっていないか記録が失われた)、
+    要求していない (指定の無い問題・2026-10-14 より前の準備) なら NOT_USED。run_staged_ns の終了コードは見ない
+    (CENSORED・一部の UNAVAILABLE でも 0 なので)。"""
+    from ..evaluate import stop_rule as SR
+    run_dir = Path(run_dir)
+    st = SR.read_state(run_dir)
+    if st is not None:
+        return {"status": st.get("status"), "source": SR.STATE, "stop_step": st.get("stop_step"), "forge_rc": st.get("forge_rc")}
+    try:
+        sr = json.loads((run_dir / "prepare_info.json").read_text()).get("stop_rule")
+    except (OSError, ValueError):
+        sr = None
+    if isinstance(sr, dict) and sr.get("requested"):
+        return {"status": "MISSING", "source": f"prepare_info.json は停止規則を要求しているのに {SR.STATE} が無い "
+                                                "(本段が終わっていないか記録が無い)"}
+    return {"status": "NOT_USED", "source": "prepare_info.json (停止規則を使わない run)"}
+
+
+def convergence_verdict(run_dir) -> dict:
+    """`check_convergence.py --segment` (stage_manifest.json の最後の区間 = 方程式・BC・離散化が同じ本段) の判定 (plan §5.1 #36a)。
+    kind: PASS (終了コード 0) / DIVERGED (NaN/Inf) / UNDETERMINED (判定不能: stage_manifest・残差の履歴が無い ほか) / NOT_CONVERGED。
+    2026-10-14 までの `run_pass` ほかは区間を指定せずに回して結果を捨てていた。"""
+    from ..evaluate.runner import FORGE_TOOLS
+    cmd = [sys.executable, str(FORGE_TOOLS / "check_convergence.py"), "--segment", str(run_dir)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    lines = [ln.strip() for ln in out.splitlines()
+             if ln.startswith("===") or ln.startswith("OVERALL") or "判定不能" in ln or "NO residual_history" in ln or "empty residual" in ln]
+    if r.returncode == 0:
+        kind = "PASS"
+    elif any("-> DIVERGED" in ln for ln in lines):
+        kind = "DIVERGED"
+    elif r.returncode != 1 or any(("判定不能" in ln or "NO residual_history" in ln or "empty residual" in ln) for ln in lines):
+        kind = "UNDETERMINED"
+    else:
+        kind = "NOT_CONVERGED"
+    return {"cmd": cmd, "rc": r.returncode, "kind": kind, "verdict": lines, "output": out}
+
+
+def handoff_gate(run_dir, *, allow_not_reached: bool = False, allow_unconverged: bool = False, write: bool = True) -> dict:
+    """受け渡しの関門 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、codex diagnose 2026-10-14): その run の場から抽出して
+    次の壁の入力 (`delta_r_next.csv`・`fixed_point.json`) を作ってよいか。
+    (a) 本段の停止の状態 (`stop_state`) が REACHED。`allow_not_reached` で NOT_USED・CENSORED・UNAVAILABLE も通す (明示の上書き)。
+        DIVERGED・EXEC_ERROR・DATA_ERROR・MISSING は通さない。
+    (b) `convergence_verdict` が PASS。`allow_unconverged` で NOT_CONVERGED も通す (明示の上書き)。DIVERGED・UNDETERMINED は通さない
+        (判定不能は合格ではない)。
+    戻り: {proceed, blocked_by, stop_rule, convergence (出力の本文を除く), override, extract}。write なら run に HANDOFF_GATE.json
+    (原子的に) と HANDOFF_CONVERGENCE.txt を書く。**proceed は §4.9 の「更新に進む条件」の一部 (停止の状態・本段の全残差) だけ**で、
+    保存則・局所の y₁⁺・抽出の被覆・δ_E と δ_target の隣り合う 2 窓の変動・held の確認の代わりにならない (呼び出し側が別に確かめる)。"""
+    import datetime
+    run_dir = Path(run_dir)
+    st = stop_state(run_dir)
+    cv = convergence_verdict(run_dir)
+    blocked = []
+    s = st["status"]
+    if s != "REACHED":
+        if allow_not_reached and s in _STOP_OVERRIDABLE:
+            pass
+        else:
+            blocked.append(f"停止の状態 {s} (REACHED が要る"
+                           + (f"; allow_not_reached で通せるのは {'・'.join(_STOP_OVERRIDABLE)} だけ)" if s not in _STOP_OVERRIDABLE
+                              else "; 明示の上書き allow_not_reached が無い)"))
+    k = cv["kind"]
+    if k != "PASS":
+        if allow_unconverged and k == "NOT_CONVERGED":
+            pass
+        else:
+            blocked.append(f"収束の判定 {k} (check_convergence.py --segment の終了コード {cv['rc']}"
+                           + ("; 明示の上書き allow_unconverged が無い)" if k == "NOT_CONVERGED" else "; 上書きでも通さない)"))
+    rec = {"version": 1, "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a",
+           "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+           "proceed": not blocked, "blocked_by": blocked,
+           "stop_rule": st, "convergence": {k_: v for k_, v in cv.items() if k_ != "output"},
+           "override": {"allow_not_reached": bool(allow_not_reached), "allow_unconverged": bool(allow_unconverged)},
+           "extract": {"band_select": HANDOFF_BAND_SELECT, "made": None},
+           "note": "proceed は抽出・次の壁の入力を作ってよいかの関門で、§4.9 の更新に進む条件の全部ではない。壁の更新は次の pass へ自動でつながない"}
+    if write:
+        (run_dir / HANDOFF_CONVERGENCE).write_text(cv["output"])
+        _write_json_atomic(run_dir / HANDOFF_GATE, rec)
+    return rec
+
+
+def _write_json_atomic(path: Path, rec: dict) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False, default=str))
+    os.replace(tmp, path)
+
+
+def _print_gate(label: str, gate: dict) -> None:
+    print(f"handoff gate ({label}): {'進む' if gate['proceed'] else '止める'} — 停止の状態 {gate['stop_rule']['status']}、"
+          f"収束の判定 {gate['convergence']['kind']}" + (f"、理由: {'; '.join(gate['blocked_by'])}" if gate["blocked_by"] else "")
+          + (f"、上書き {gate['override']}" if any(gate["override"].values()) else ""), flush=True)
+
+
+def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached: bool, allow_unconverged: bool) -> dict:
+    """NS の後段 (`run_pass`・`run_pass0_integral`・`run_from_table` 共通): 受け渡しの関門 → 通れば抽出 (band_select="edge" を明示) と
+    fixed_point.json → 設計の標準出力。関門で止めたら抽出・fixed_point.json・delta_r_next.csv を作らない (標準出力は今までどおり作る)。
+    m (metrics) に関門の記録 `handoff_gate` を足して返す。"""
+    run_dir = Path(run_dir)
+    gate = handoff_gate(run_dir, allow_not_reached=allow_not_reached, allow_unconverged=allow_unconverged)
+    print((run_dir / HANDOFF_CONVERGENCE).read_text(), flush=True)      # 収束の判定の出力 (今までは check_convergence がそのまま出した)
+    _print_gate("new", gate)
+    if gate["proceed"]:
+        fp = extract_and_merge(run_dir, euler_ref, omega=omega, band_select=HANDOFF_BAND_SELECT)
+        (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
+        print(f"{label}:", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
+        print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
+        gate["extract"]["made"] = ["fixed_point.json", "delta_r_next.csv"]
+        _write_json_atomic(run_dir / HANDOFF_GATE, gate)
+    else:
+        print("handoff gate: 抽出 (fixed_point.json・delta_r_next.csv) を作らない — 判定は " + str(run_dir / HANDOFF_GATE), flush=True)
+    m["handoff_gate"] = gate
+    _design_report(run_dir, euler_ref)
+    return m
+
+
 def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=None,
              prepare_only: bool = False, nsteps=None, cfl_main=None, implicit_relax=None,
-             stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
+             stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
+             allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
+    """前の pass の run (prev_run) から抽出して次の壁を作り、NS を準備・実行する 1 pass (自動で次の pass へはつながない)。
+    抽出の前に prev_run の受け渡しの関門 (`handoff_gate`、prev_run には書かない) を通し、不合格なら抽出・準備の前に `HandoffBlocked`
+    (新しい run dir を作らない)。関門の結果は新しい run の prepare_info.json の `handoff_from_prev` に残す。NS の後は `_after_ns`。
+    stop_rule: prepare_ns へ (None = 問題 YAML の evaluate.stop_rule、False = 使わない)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
-    from ..evaluate.runner import FORGE_TOOLS
     prev_run = Path(prev_run); run_dir = Path(run_dir)
-    summ = extract_and_merge(prev_run, euler_ref, omega=omega)
+    gate_prev = handoff_gate(prev_run, allow_not_reached=allow_not_reached, allow_unconverged=allow_unconverged, write=False)
+    _print_gate("prev", gate_prev)
+    if not gate_prev["proceed"]:
+        raise HandoffBlocked(f"前の pass の run {prev_run} が受け渡しの関門で不合格 — 抽出・次の壁の作成へ進まない: "
+                             + "; ".join(gate_prev["blocked_by"]))
+    summ = extract_and_merge(prev_run, euler_ref, omega=omega, band_select=HANDOFF_BAND_SELECT)
     print("extract(prev):", json.dumps({k: v for k, v in summ.items() if k != "massflow"}), flush=True)
     print("massflow(prev):", json.dumps(summ["massflow"]), flush=True)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from or prev_run,
                       delta_r_csv=prev_run / "delta_r_next.csv", offset="radial",
                       euler_ref=euler_ref, omega=omega, prev_run=prev_run,
-                      cfl_main=cfl_main, implicit_relax=implicit_relax)
+                      cfl_main=cfl_main, implicit_relax=implicit_relax, stop_rule=stop_rule)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
+    info["handoff_from_prev"] = gate_prev
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
     print(json.dumps({k: info[k] for k in ("throat_physical", "dstar_source", "mesh", "nStepOuter", "cfl_main")}, indent=1), flush=True)
     print(Path(run_dir, "MESH_QUALITY.txt").read_text().splitlines()[-1], flush=True)
@@ -568,19 +716,13 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     import time as _t
     t0 = _t.time()
     rc = run_staged_ns(run_dir, stages=stages, ramp=ramp, ramp_steps=ramp_steps)
-    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages})", flush=True)
+    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages}; 停止の状態 {stop_state(run_dir)['status']})", flush=True)
     m = collect(problem, run_dir)
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "check_convergence.py"), str(run_dir)], check=False)
-    # 固定点差: 新 run から抽出し、入力 (= 新 run の壁 − Euler 壁) と比較
-    fp = extract_and_merge(run_dir, euler_ref, omega=omega)
-    (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
-    print("fixed_point(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
-    print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
-    _design_report(run_dir, euler_ref)
-    return m
+    # 受け渡しの関門 → 固定点差: 新 run から抽出し、入力 (= 新 run の壁 − Euler 壁) と比較
+    return _after_ns(run_dir, euler_ref, omega, m, "fixed_point(new)", allow_not_reached, allow_unconverged)
 
 
 def resolve_integral_initializer(problem) -> dict:
@@ -599,16 +741,16 @@ def resolve_integral_initializer(problem) -> dict:
 
 def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, prepare_only: bool = False,
                        nsteps=None, omega: float = 0.5, cfl_main=None, implicit_relax=None,
-                       stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
-    """pass 0: 積分法 (CONTUR) 初期壁で NS を立て、終了後に抽出して次 pass 用 delta_r_next.csv まで作る。
+                       stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
+                       allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
+    """pass 0: 積分法 (CONTUR) 初期壁で NS を立て、終了後に受け渡しの関門 (`_after_ns`) を通れば抽出して次 pass 用 delta_r_next.csv まで作る。
     initializer=None なら problem YAML の `deltastar_initializer` (無ければ断熱 contur)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
-    from ..evaluate.runner import FORGE_TOOLS
     run_dir = Path(run_dir)
     # thermal_bc は prepare_ns 側で spec.wall_thermal から決める (ここでは model のみ)
     init = initializer if initializer is not None else resolve_integral_initializer(problem)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, initializer=init,
-                      euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax)
+                      euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax, stop_rule=stop_rule)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
     print(json.dumps({k: info[k] for k in ("throat_physical", "dstar_source", "initializer", "mesh", "nStepOuter", "cfl_main")},
@@ -619,18 +761,12 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     import time as _t
     t0 = _t.time()
     rc = run_staged_ns(run_dir, stages=stages, ramp=ramp, ramp_steps=ramp_steps)
-    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages})", flush=True)
+    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages}; 停止の状態 {stop_state(run_dir)['status']})", flush=True)
     m = collect(problem, run_dir)
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "check_convergence.py"), str(run_dir)], check=False)
-    fp = extract_and_merge(run_dir, euler_ref, omega=omega)
-    (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
-    print("extract(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
-    print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
-    _design_report(run_dir, euler_ref)
-    return m
+    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged)
 
 
 def check_table_against_card(problem, table) -> dict:
@@ -657,19 +793,21 @@ def check_table_against_card(problem, table) -> dict:
 
 
 def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=None, prepare_only: bool = False, nsteps=None,
-                   omega: float = 0.5, cfl_main=None, implicit_relax=None, stages: str = "full", ramp=None, ramp_steps: int = 1000) -> dict:
+                   omega: float = 0.5, cfl_main=None, implicit_relax=None, stages: str = "full", ramp=None, ramp_steps: int = 1000,
+                   stop_rule: bool | None = None, allow_not_reached: bool = False, allow_unconverged: bool = False) -> dict:
     """補正の表 TABLE (`wt_card --ns-correction` が問題 YAML の横に書く `<stem>_delta_r.csv`、または `--solve-rt-throat --prev` の
     `--delta-r-out`) で物理壁を作り、NS を準備・実行する (plan tooling-nozzle-deltastar-band-root-zone §4.3 3):
-    `prepare_ns(delta_r_csv=TABLE, offset="radial")` → `run_staged_ns` → collect → 抽出 (`fixed_point.json`) → 設計の標準出力
-    (`run_pass` と同じ後段)。表は緩和しない (omega は後段の抽出の delta_r_next.csv にだけ使う)。問題 YAML の `_card.ns_correction` が
+    `prepare_ns(delta_r_csv=TABLE, offset="radial")` → `run_staged_ns` → collect → 受け渡しの関門 (`_after_ns`、plan
+    tooling-nozzle-isothermal-wall-chain §5.1 #36a) → 通れば抽出 (`fixed_point.json`) → 設計の標準出力 (`run_pass` と同じ後段)。
+    表は緩和しない (omega は後段の抽出の delta_r_next.csv にだけ使う)。問題 YAML の `_card.ns_correction` が
     あれば TABLE の sha256 を照合する (`check_table_against_card`、違えば run dir を作る前に例外)。照合の結果は prepare_info.json の
-    `delta_r_table` に書く。"""
+    `delta_r_table` に書く。表は呼び出し側が渡すので、前の run の関門はここでは見ない (prev_run は記録と初期場だけ)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
-    from ..evaluate.runner import FORGE_TOOLS
     run_dir = Path(run_dir)
     chk = check_table_against_card(problem, table)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, delta_r_csv=table, offset="radial",
-                      euler_ref=euler_ref, omega=None, prev_run=prev_run, cfl_main=cfl_main, implicit_relax=implicit_relax)
+                      euler_ref=euler_ref, omega=None, prev_run=prev_run, cfl_main=cfl_main, implicit_relax=implicit_relax,
+                      stop_rule=stop_rule)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
     info["delta_r_table"] = chk
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
@@ -681,18 +819,18 @@ def run_from_table(problem, euler_ref, table, run_dir, ic_from=None, prev_run=No
     import time as _t
     t0 = _t.time()
     rc = run_staged_ns(run_dir, stages=stages, ramp=ramp, ramp_steps=ramp_steps)
-    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages})", flush=True)
+    print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages}; 停止の状態 {stop_state(run_dir)['status']})", flush=True)
     m = collect(problem, run_dir)
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "check_convergence.py"), str(run_dir)], check=False)
-    fp = extract_and_merge(run_dir, euler_ref, omega=omega)
-    (run_dir / "fixed_point.json").write_text(json.dumps(fp, indent=1))
-    print("extract(new):", json.dumps({k: v for k, v in fp.items() if k != "massflow"}), flush=True)
-    print("massflow(new):", json.dumps(fp["massflow"]), flush=True)
-    _design_report(run_dir, euler_ref)
-    return m
+    return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged)
+
+
+def _gate_rc(res) -> int:
+    """CLI の終了コード: 関門で止めた (run の後段の handoff_gate が proceed でない) なら 3、それ以外 0 (prepare-only は 0)。"""
+    gate = res.get("handoff_gate") if isinstance(res, dict) else None
+    return 3 if (gate is not None and not gate["proceed"]) else 0
 
 
 def main(argv=None) -> int:
@@ -705,7 +843,8 @@ def main(argv=None) -> int:
     ap.add_argument("--ic-from", default=None)
     ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--prepare-only", action="store_true")
-    ap.add_argument("--extract-only", action="store_true", help="抽出と delta_r_next.csv だけ作る")
+    ap.add_argument("--extract-only", action="store_true",
+                    help="抽出と delta_r_next.csv だけ作る (受け渡しの関門を通さない手作業の抽出; 帯は extract_and_merge の既定 adaptive)")
     ap.add_argument("--init-integral", action="store_true",
                     help="pass 0: 積分法 (CONTUR) 初期壁で NS を立てる (YAML の deltastar_initializer を使う)")
     ap.add_argument("--init-thermal", default=None, help="廃止 (2026-09-12): 壁温は problem YAML の spec.wall_thermal が単一ソース")
@@ -725,17 +864,28 @@ def main(argv=None) -> int:
                     help="補正の表 (wt_card --ns-correction が YAML の横に書く <stem>_delta_r.csv など) で物理壁を作って NS を準備・実行する "
                          "(prepare_ns(delta_r_csv=TABLE, offset=radial) → run_staged_ns)。YAML の _card.ns_correction があれば TABLE の "
                          "sha256 を照合する。IC は --ic-from (無ければ --prev)。--init-integral とは排他")
+    ap.add_argument("--no-stop-rule", action="store_true",
+                    help="本段の停止規則を使わない (問題 YAML の evaluate.stop_rule: true を打ち消す; plan tooling-nozzle-isothermal-wall-chain "
+                         "§5.1 #36a)。YAML に evaluate.stop_rule が無ければ今までどおり使わない")
+    ap.add_argument("--allow-not-reached", action="store_true",
+                    help="受け渡しの関門の明示の上書き: 本段の停止の状態が REACHED でない run (停止規則を使わない NOT_USED・CENSORED・"
+                         "UNAVAILABLE) からも抽出・次の壁の入力を作る。DIVERGED・EXEC_ERROR・DATA_ERROR・記録なしは通さない")
+    ap.add_argument("--allow-unconverged", action="store_true",
+                    help="受け渡しの関門の明示の上書き: check_convergence.py --segment が NOT CONVERGED でも抽出・次の壁の入力を作る "
+                         "(DIVERGED・判定不能は通さない)")
     a = ap.parse_args(argv)
+    sr_arg = False if a.no_stop_rule else None      # None = 問題 YAML の evaluate.stop_rule (無ければ使わない)
+    gate_kw = dict(allow_not_reached=a.allow_not_reached, allow_unconverged=a.allow_unconverged)
     if a.delta_r_csv is not None:
         clash = [n for n, v in (("--init-integral", a.init_integral), ("--extract-only", a.extract_only),
                                 ("--solve-rt", a.solve_rt is not None), ("--solve-rt-throat", a.solve_rt_throat is not None)) if v]
         if clash:
             ap.error(f"--delta-r-csv と {', '.join(clash)} は排他")
         ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
-        run_from_table(a.problem, a.euler_ref, a.delta_r_csv, a.run_dir, ic_from=(a.ic_from or a.prev), prev_run=a.prev,
-                       prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
-                       stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
-        return 0
+        res = run_from_table(a.problem, a.euler_ref, a.delta_r_csv, a.run_dir, ic_from=(a.ic_from or a.prev), prev_run=a.prev,
+                             prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
+                             stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps, stop_rule=sr_arg, **gate_kw)
+        return _gate_rc(res)
     if a.solve_rt is not None:
         r = solve_rt(a.problem, a.solve_rt, prev_run=a.prev, euler_run=a.euler_ref)
         print(json.dumps(r, indent=1, default=str))
@@ -753,17 +903,22 @@ def main(argv=None) -> int:
         if a.init_thermal:
             ap.error("--init-thermal は廃止。spec.wall_thermal (problem YAML) で指定する")
         ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
-        run_pass0_integral(a.problem, a.euler_ref, a.run_dir, a.ic_from, initializer=init,
-                           prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl,
-                           implicit_relax=a.implicit_relax, stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
-        return 0
+        res = run_pass0_integral(a.problem, a.euler_ref, a.run_dir, a.ic_from, initializer=init,
+                                 prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl,
+                                 implicit_relax=a.implicit_relax, stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps,
+                                 stop_rule=sr_arg, **gate_kw)
+        return _gate_rc(res)
     if not a.prev:
         ap.error("--prev が必要 (--init-integral でなければ)")
     ramp = tuple(float(v) for v in a.ramp.split(",")) if a.ramp else None
-    run_pass(a.problem, a.euler_ref, a.prev, a.run_dir, omega=a.omega, ic_from=a.ic_from,
-             prepare_only=a.prepare_only, nsteps=a.steps, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
-             stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps)
-    return 0
+    try:
+        res = run_pass(a.problem, a.euler_ref, a.prev, a.run_dir, omega=a.omega, ic_from=a.ic_from,
+                       prepare_only=a.prepare_only, nsteps=a.steps, cfl_main=a.cfl, implicit_relax=a.implicit_relax,
+                       stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps, stop_rule=sr_arg, **gate_kw)
+    except HandoffBlocked as e:
+        print(f"handoff gate: {e}", flush=True)
+        return 3
+    return _gate_rc(res)
 
 
 

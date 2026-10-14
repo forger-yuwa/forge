@@ -12,7 +12,8 @@
    既往の定義 (forge-25 の cg_hi_prep.py: (−9, 3.2425, 0, 0) → x = 0 の C の (r, r′, r″) の 5 次 Hermite) と 1e-12 以内、
    ゲート (|Q″ − H″| の H は物理壁の上流の名目の Hermite)、μ、凍結した設計の記録、validate
 4. 壁ファイル: legacy と single_bspline の往復 (legacy は physical_upstream で直管・Q の区間を復元)、壊れた記録は例外
-5. チェーンの関数: 積分法 (`integral_delta_r`) と prepare_ns (delta_r_csv 無し・Tw_profile) と Euler の prepare は run dir を作る前に例外、
+5. チェーンの関数: 積分法 (`integral_delta_r`) と prepare_ns (delta_r_csv 無し・Tw_profile) は run dir を作る前に例外、
+   Euler の prepare (δ_r = 0 の物理壁の経路、§5.1 #36b; 詳しくは run_euler_h_ref_tests.py) は mesh_euler の無い問題で run dir を作る前に止まる、
    design_chain は設計壁の値のまま (physical_upstream で設計が変わらない)
 
 usage: design/.venv-opt/bin/python design/tests/run_physical_upstream_tests.py   (所要 1 分程度)
@@ -219,8 +220,10 @@ e = raises(lambda: RA.prepare_ns(yB, rd, delta_r_csv=str(csv)))
 check(f"prepare_ns: 不正な physical_upstream → run dir を作る前に例外 ({(e or '')[:40]}…)",
       e is not None and "physical_upstream" in e and not rd.exists())
 e = raises(lambda: RA.prepare(yH, TMP / "never_euler"))
-check(f"Euler の prepare: physical_upstream は例外 (物理壁が無い) ({(e or '')[:40]}…)",
-      e is not None and "physical_upstream" in e and not (TMP / "never_euler").exists())
+# 2026-10-14 (§5.1 #36b): Euler の prepare は physical_upstream の問題を δ_r = 0 の物理壁で準備する経路に変えた (試験は
+# run_euler_h_ref_tests.py)。この問題には mesh_euler が無いので、physical_upstream の検査を通った後、run dir を作る前に mesh_euler で止まる
+check(f"Euler の prepare: physical_upstream の問題 (mesh_euler 無し) は run dir を作る前に mesh_euler で止まる ({(e or '')[:40]}…)",
+      e is not None and "mesh_euler" in e and not (TMP / "never_euler").exists())
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'}")
 sys.exit(1 if FAIL else 0)

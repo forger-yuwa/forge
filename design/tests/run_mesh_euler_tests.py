@@ -176,6 +176,8 @@ STD = ("problem_d155_euler_pin_G1_recal.yaml", "problem_d155_euler_pin_G1_recal_
        "problem_d155_euler_pin_G1_recal_mono_moc.yaml", "problem_d155_euler_t0cluster_u5em3.yaml",
        "problem_d155_euler_e4_recal_d0.yaml")
 STD = STD + tuple(sorted(f.name for f in C45.glob("problem_d155_euler_e4_recal_d[1-9].yaml")))   # E4 の段 2 (make-d1 が作る)
+# H の固定の Euler の参照 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36b、h370_problems.py make が run_0174 の問題から作る; 格子は同じ mesh_euler)
+STD = STD + ("problem_d155_euler_h_ref.yaml",)
 KEEP = ("problem_d155_euler_t0cluster_g1.yaml", "problem_d155_euler_pin_G1.yaml", "problem_d155_euler_pin_G0.yaml",
         "problem_d155_euler_c2final_n2400.yaml", "problem_d155_euler_c2final_n2400_pincal.yaml", "problem_d155_R2_Lc39.3_tp.yaml",
         "problem_d155_R2_Lc39.3_tp_Lpipe10.yaml", "problem_d155_R2_Lc39.3_tp_rt77p02.yaml", "problem_d155_cpg_euler.yaml",
