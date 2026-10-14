@@ -14,7 +14,9 @@ runner_sern の 2D/3D (driver_sern を含む)・feedback/euler_loop) は、forge
    **問題 YAML が明示した数値の上書き** (CFL の梯子・`cfl_main` など、プロファイルの `fixed` と違う値; plan §4.3 の 4b) は
    理由つきの逸脱に変換する: プロファイルとの照合で FAIL したキーのうち、生成器がそのキーを決めるのに読む問題 YAML のキー
    (`PROBLEM_SOURCES`) が問題 YAML に書いてあるもの・生成器が受け取った引数で決まったもの (`args`) を、出所 (問題 YAML のパスと
-   キーと値・引数) つきの逸脱にする。理由の 1 行は共用 (`DEVIATION_REASON`)。それでも通らない (出所の分からない違い・禁止キー・
+   キーと値・引数) つきの逸脱にする。問題 YAML に書いていないキーは**生成器の既定** (`GENERATOR_DEFAULTS`・`GENERATOR_WRITES`、
+   出所 `generator_default`: 関数名と値。driver_sern の `opt.soft_steps` 1500、gas.transport の無い SERN の viscMethod 1 など;
+   plan §5.1 #27) も出所にする。理由の 1 行は共用 (`DEVIATION_REASON`)。それでも通らない (出所の分からない違い・禁止キー・
    未知のキー・書き写していない段) ときは宣言を書かず、`RECIPE_<tag>.FAILED.json` に FAIL を残す (関門は宣言の無い run と
    して扱う: 移行期は WARN、強制の後は FAIL)。合うプロファイルの無い config は宣言しない (古い宣言は config の sha256 が
    違えば消す)。
@@ -40,8 +42,8 @@ PLAN = "plans/active/tooling-generator-defaults-and-launch-gate.md"
 
 RECIPE = "RECIPE.json"
 CONTEXT = "RECIPE_CONTEXT.json"
-DEVIATION_REASON = ("問題 YAML・呼び出しの引数が明示した上書き (生成器が逸脱に自動で変換、出所は source; "
-                    "plan tooling-generator-defaults-and-launch-gate §4.3 の 4b)")
+DEVIATION_REASON = ("問題 YAML・呼び出しの引数が明示した上書き、または問題 YAML に書いていないときの生成器の既定 "
+                    "(生成器が逸脱に自動で変換、出所は source; plan tooling-generator-defaults-and-launch-gate §4.3 の 4b・§5.1 #27)")
 
 # 生成器の機種 → 候補プロファイル (適用条件の合う最初のものを選ぶ)。書き写した機種だけ (plan §5.1 #6・棚卸し §1.1)
 FAMILIES = {
@@ -108,6 +110,58 @@ PROBLEM_SOURCES = {
     "sern3d": {**_SERN_LADDER, "soft": {**_SERN_LADDER["soft"], "space.convMethod": ("opt.soft_conv",)}},
 }
 
+# 生成器の既定 (generator_default; plan §5.1 #27・#11a (3))。問題 YAML にキーが書いていないとき生成器が使う値も逸脱の出所にする
+# (driver_sern は `opt.soft_steps` が無ければ 1500 で回すが、書き写しの代表の問題は 4000 を書いていたので、出所が無く宣言が FAILED に
+# なった)。出所の記録は {"generator_default": {"function": 既定を持つ関数, "key": 問題 YAML のキー, "value": 既定, ...}}。
+# (1) GENERATOR_DEFAULTS: family → 問題 YAML のキー → [(関数, 生成器の名前の集合 (宣言の generator の先頭の語) か None = どれでも,
+#     既定)]。既定は「問題 YAML のキーの値」として PROBLEM_SOURCES の同じキーの検査に当てる (梯子の脚の分け方なども同じ)。
+#     PROBLEM_SOURCES の候補のキーが問題 YAML に無いときだけ使う (書いてあればそちらが出所)。
+# (2) GENERATOR_WRITES: family → 段 (`*` は全段) → config のキー → [(関数, 問題 YAML のキー, 書く値)]: 問題 YAML のキーが無いとき
+#     生成器が config に書く値 (None = 書かない; `finish_config` が旧い実効値で明示したキーはその値とも照合する)。
+# 各値の該当行: runner_sern.main (opt: の既定)・opt/driver_sern.SernCampaign._eval_op (同)・runner_sern3d.run_staged と main
+# (同、--soft-steps の既定 2000)・runner_sern.prepare (cfl_main 4.0)・runner_sern3d.prepare (1.0)・runner_sern._solver_config
+# (limiter 2・limiter_scaled 1・venkat_k・wall_treatment_sst 0、gas.transport が無ければ viscMethod 1 + thermCondMethod 1、
+# implicit_relax・slau_wall_normal_chi・node_inlet_corner_wall は無ければ書かない)・runner_axismach._euler_config
+# (_config_euler_node の cfl 4.0)・runner_axismach._ns_configs (cfl_main 1.0、implicit_relax は無ければ書かない)・
+# runner._solver_config_tp (cfl_main 4.0)・runner.TP_STAGE_STEPS (soft・mid 2000)。B0 の main_line の各キーは必須 (既定なし)。
+_SERN_SC = "runner_sern._solver_config"
+
+
+def _sern_defaults(entry: str, ladder: dict, prepare: str, cfl_main: float) -> dict:
+    out = {f"opt.{k}": [(entry, {entry}, v)] for k, v in ladder.items()}
+    out["evaluate.cfl_main"] = [(prepare, None, cfl_main)]
+    out.update({"evaluate.limiter": [(_SERN_SC, None, 2)], "evaluate.limiter_scaled": [(_SERN_SC, None, 1)],
+                "evaluate.wall_treatment_sst": [(_SERN_SC, None, 0)]})
+    return out
+
+
+_SERN_MAIN_OPT = {"soft_steps": 3000, "soft_cfl": 0.5, "warm_lam_steps": 0, "warm_lam_cfl": 0.2, "mid_steps": 0}
+_SERN_DRV_OPT = {"soft_steps": 1500, "soft_cfl": 0.5, "warm_lam_steps": 0, "warm_lam_cfl": 0.2, "mid_steps": 0}
+_SERN3D_OPT = {"soft_steps": 2000, "soft_cfl": 0.5, "soft_conv": 0, "warm_lam_steps": 0, "warm_lam_cfl": 0.2, "mid_steps": 0}
+_SERN2D_DEFAULTS = _sern_defaults("runner_sern.main", _SERN_MAIN_OPT, "runner_sern.prepare", 4.0)
+for _k, _v in _SERN_DRV_OPT.items():
+    _SERN2D_DEFAULTS[f"opt.{_k}"].append(("opt.driver_sern._eval_op", {"opt.driver_sern._eval_op"}, _v))
+GENERATOR_DEFAULTS = {
+    "sern2d": _SERN2D_DEFAULTS,
+    "sern3d": _sern_defaults("runner_sern3d.run_staged", _SERN3D_OPT, "runner_sern3d.prepare", 1.0),
+    "axismach_euler": {"evaluate.cfl_main": [("runner_axismach._euler_config", None, 4.0)]},
+    "axismach_ns": {"evaluate.cfl_main": [("runner_axismach._ns_configs", None, 1.0)]},
+    "bell_tp": {"evaluate.cfl_main": [("runner._solver_config_tp", None, 4.0)],
+                "evaluate.stage_steps.soft": [("runner.TP_STAGE_STEPS", None, 2000)],
+                "evaluate.stage_steps.mid": [("runner.TP_STAGE_STEPS", None, 2000)]},
+}
+_SERN_WRITES = {"*": {"physProp.viscMethod": [(_SERN_SC, "gas.transport", 1)],
+                      "physProp.thermCondMethod": [(_SERN_SC, "gas.transport", 1)],
+                      "time.deltaT.implicitRelax": [(_SERN_SC, "evaluate.implicit_relax", None)],
+                      "space.slauWallNormalChi": [(_SERN_SC, "mesh.slau_wall_normal_chi", None)],
+                      "mesh.nodeInletCornerWall": [(_SERN_SC, "mesh.node_inlet_corner_wall", None)]}}
+GENERATOR_WRITES = {
+    "sern2d": _SERN_WRITES,
+    "sern3d": _SERN_WRITES,
+    "axismach_ns": {"*": {"time.deltaT.implicitRelax": [("runner_axismach._ns_configs", "evaluate.implicit_relax", None)]}},
+    "axismach_ns_b0": {"*": {"time.deltaT.implicitRelax": [("runner_axismach._main_line_spec", "evaluate.implicit_relax", None)]}},
+}
+
 
 # ------------------------------------------------------------------------------------------------ 道具
 
@@ -170,10 +224,23 @@ def stage_of(tag: str) -> str | None:
     return None
 
 
+def _nest(flat: dict) -> dict:
+    """{点区切りのキー: 値} → 入れ子の dict。"""
+    out = {}
+    for k, v in flat.items():
+        cur = out
+        segs = k.split(".")
+        for s_ in segs[:-1]:
+            cur = cur.setdefault(s_, {})
+        cur[segs[-1]] = v
+    return out
+
+
 def select_profile(rc, family: str, doc: dict, bcond, stage: str | None = None) -> str | None:
     """family の候補のうち、config・bcond の適用条件 (導けるもの: 離散化・軸対称・物理・気体・壁・時間) が合う最初のプロファイル。
     段 stage がプロファイルにあり、その段の `fixed` が適用条件を決めるキーを全部持つなら、その条件は適用条件の値でなく段の `fixed` の
-    値で比べる (check_config と同じ扱い: 例 SERN の層流暖機は SST の機種の段だが turbulence.model none を fixed に持つ)。"""
+    値が決める区分 (`derive_applies`) で比べる (check_config と同じ扱い: 例 SERN の層流暖機は SST の機種の段だが turbulence.model none を
+    fixed に持つ)。fixed の値そのものとの違い (viscMethod 1 と 2 など) は宣言の照合 (check_config) と逸脱の出所が扱う。"""
     RS, _ = _tools()
     if family not in FAMILIES:
         raise ValueError(f"未知の生成器の機種 {family!r} ({sorted(FAMILIES)})")
@@ -188,7 +255,10 @@ def select_profile(rc, family: str, doc: dict, bcond, stage: str | None = None) 
         for k, v in res["applies"].items():
             cols = RS.APPLIES_KEYS.get(k)
             if cols and all(c in fixed for c in cols):
-                ok &= all(RS.same(flat.get(c), fixed[c]) for c in cols)
+                # 段の fixed の値が決める区分と config の区分を比べる (2026-10-15、plan §5.1 #27: 値そのものを比べていたので、
+                # gas.transport の無い SERN の viscMethod 1 (プロファイルは 2、どちらも ns_sst) がどのプロファイルにも合わず、
+                # 宣言も FAILED の記録も書かなかった。値の違いは check_config の fixed の照合と逸脱の出所で扱う)
+                ok &= RS.derive_applies(_nest({c: fixed[c] for c in cols})).get(k) == got.get(k, RS.derive_applies(doc).get(k))
             elif k in got:
                 ok &= RS._applies_match(v, got[k])
         if ok:
@@ -297,10 +367,47 @@ def _source_ok(check, pv, cv, raw) -> tuple[bool, dict]:
     raise ValueError(f"PROBLEM_SOURCES の検査 {check!r} が未知")
 
 
-def _source_for(family, stage, key, cv, raw, problem, args):
+def _generator_id(generator) -> str | None:
+    """宣言の生成器の名前 ("opt.driver_sern._eval_op (m6_on 標準レシピ)" など) → 関数名 (先頭の語)。"""
+    return str(generator).split()[0] if generator and str(generator).split() else None
+
+
+def _default_source(family, stage, key, cv, raw, cands, generator, explicit) -> dict | None:
+    """問題 YAML に書いていないキーについて、生成器の既定 (GENERATOR_DEFAULTS・GENERATOR_WRITES) が config の値 cv を説明するか。
+    戻り {"generator_default": {...}} か None。cands は PROBLEM_SOURCES の候補 [(問題 YAML のキー, 検査)]、explicit は finish_config が
+    旧い実効値で明示したキー {キー: 値}。"""
+    RS, _ = _tools()
+    gid = _generator_id(generator)
+    for k, chk in cands:
+        if _dig(raw or {}, k)[0]:
+            continue
+        for fn, gens, dflt in GENERATOR_DEFAULTS.get(family, {}).get(k, ()):
+            if gens is not None and gid not in gens:
+                continue
+            good, more = _source_ok(chk, dflt, cv, raw or {})
+            if good:
+                rec = {"function": fn, "key": k, "value": dflt, "note": "問題 YAML に書いていないので生成器の既定"}
+                if more:
+                    rec["with"] = more
+                return {"generator_default": rec}
+    table = GENERATOR_WRITES.get(family, {})
+    for fn, k, val in list(table.get(stage, {}).get(key, ())) + list(table.get("*", {}).get(key, ())):
+        if _dig(raw or {}, k)[0]:
+            continue
+        if RS.same(val, cv) if val is not None else (cv is None or (key in (explicit or {}) and RS.same(explicit[key], cv))):
+            rec = {"function": fn, "key": k, "value": None, "config_value": val,
+                   "note": (f"問題 YAML に {k} が無いので生成器は {key} を {RS.show(val)} と書く" if val is not None else
+                            f"問題 YAML に {k} が無いので生成器は {key} を書かない"
+                            + (f" (finish_config が旧い実効値 {RS.show(explicit[key])} で明示)" if key in (explicit or {}) else ""))}
+            return {"generator_default": rec}
+    return None
+
+
+def _source_for(family, stage, key, cv, raw, problem, args, generator=None, explicit=None):
     """FAIL したキー (config の値 cv、書いていなければ None) の出所。引数 (args[段 or *][キー]、値が config と同じとき) が
     あればそれ (引数は問題 YAML より優先)、無ければ PROBLEM_SOURCES の候補のうち問題 YAML に書いてあって検査に合うもの
-    (キーと値)。どれも無ければ None。"""
+    (キーと値)、それも無ければ問題 YAML に書いていない候補についての生成器の既定 (`_default_source`; plan §5.1 #27)。
+    どれも無ければ None。"""
     RS, _ = _tools()
     arg = ((args or {}).get(stage) or {}).get(key) or ((args or {}).get("*") or {}).get(key)
     if arg and ("value" not in arg or RS.same(arg["value"], cv)):
@@ -322,7 +429,10 @@ def _source_for(family, stage, key, cv, raw, problem, args):
             present[k] = v
             present.update(more)
     if not present:
-        return None
+        dsrc = _default_source(family, stage, key, cv, raw, cands, generator, explicit)
+        if dsrc is not None and problem:
+            dsrc["problem"] = _rel(problem)
+        return dsrc
     return {"problem": _rel(problem), "keys": present}
 
 
@@ -399,7 +509,8 @@ def declare_stage(run_dir, tag: str, family: str, *, finished: dict | None = Non
         for k, _m in r0["fails"]:
             if k in devs or k.startswith("(") or k.startswith("applies."):
                 continue
-            src = _source_for(family, stage, k, flat.get(k), raw, problem, args)
+            src = _source_for(family, stage, k, flat.get(k), raw, problem, args, generator=generator,
+                              explicit=extra["explicit_added"])
             if src is not None:
                 devs[k], srcs[k] = flat.get(k), src
     code, r, path = RS.declare(run_dir, prof, stage, [f"{k}={_dev_token(v)}" for k, v in devs.items()],

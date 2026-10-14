@@ -20,6 +20,9 @@ forge・変換器は使わない (段の config は `recipes/regen_profiles.py` 
     LAUNCH_GATE.txt の設定・宣言に FAIL・WARN が無い (メッシュは合成の h5 と来歴の記録)。
 (f) 負例: 出所の分からない違い (手で変えた CFL) は宣言を書かず RECIPE_<tag>.FAILED.json に残す (関門は宣言の無い run として扱う)、
     合うプロファイルの無い config (風洞 NS v1) は変えず、宣言もしない。前の段の宣言 (config が違う) は消す。
+(h) 生成器の既定 (plan §5.1 #27): 問題 YAML に書いていないキーの生成器の既定 (SERN 2D の opt.soft_steps 3000・cfl_main 4.0、
+    gas.transport 無しの viscMethod 1・thermCondMethod 1、driver_sern の opt.soft_steps 1500) が出所 generator_default つきの逸脱になり
+    宣言が書ける (関門と同じ照合が通る)。既定は生成器ごと (driver_sern の 1500 は runner_sern.main の段としては FAILED)。
 
 実行: design/.venv-opt/bin/python design/tests/run_generator_recipe_tests.py   (約 1 分)
 """
@@ -298,6 +301,92 @@ LAUNCHES.clear()
 rd, prob = rerun("axismach_euler_tp", lambda r: None, "arg", argv_extra=["--cfl", "3.5"])
 ds = expect(rd, prob, {"main": {k: (3.5, None, "--cfl") for k in CFL}, "soft": {}, "mid": {}})
 recheck(rd, "axismach_euler_tp", ds, {d["generator"]["tag"]: c for (_, c, d, _) in LAUNCHES if d})
+
+# ------------------------------------------------------------------------------------------------ (h) 生成器の既定
+print("== (h) 生成器の既定を逸脱の出所に (plan §5.1 #27): 問題 YAML に書いていないキーの生成器の既定")
+
+
+def gd_of(d, k):
+    return ((devs_of(d).get(k) or {}).get("source") or {}).get("generator_default") or {}
+
+
+def expect_gd(rd, want, label):
+    """want {tag: {キー: (値, 関数, 問題 YAML のキー)}}。段の宣言の逸脱が want とちょうど同じで、出所が generator_default。"""
+    ds = decls(rd)
+    for tag, w in want.items():
+        d = ds.get(tag) or {}
+        dv = devs_of(d)
+        good = bool(d) and set(dv) == set(w)
+        for k, (val, fn, key) in w.items():
+            g = gd_of(d, k)
+            good &= RS.same((dv.get(k) or {}).get("value"), val) and g.get("function") == fn and g.get("key") == key
+        check(f"(h) {label}/{tag}: 逸脱 = {sorted(w) or 'なし'} (出所 generator_default)", good,
+              json.dumps({k: {kk: x.get(kk) for kk in ("value", "source")} for k, x in dv.items()}, ensure_ascii=False)[:300])
+    check(f"(h) {label}: FAILED の宣言が無い", not list(rd.glob("RECIPE_*.FAILED.json")), [f.name for f in rd.glob("RECIPE_*.FAILED.json")])
+    return ds
+
+
+# runner_sern.main: opt.soft_steps を書かない → 既定 3000 (代表の問題は 4000)。evaluate.cfl_main を書かない → runner_sern.prepare の 4.0
+LAUNCHES.clear()
+rd, prob = rerun("sern2d_finite_base_frozen_tp_sst",
+                 lambda r: (r["opt"].pop("soft_steps"), r["evaluate"].pop("cfl_main")), "gd_main")
+ds = expect_gd(rd, {"soft_cfl0.1": {"time.last.nStepOuter": (3000, "runner_sern.main", "opt.soft_steps")},
+                    "main": {k: (4.0, "runner_sern.prepare", "evaluate.cfl_main") for k in CFL},
+                    "warm_cfl0.1": {}, "mid_cfl0.1": {}}, "SERN 2D runner_sern.main")
+recheck(rd, "sern2d_finite_base_frozen_tp_sst", ds, {d["generator"]["tag"]: c for (_, c, d, _) in LAUNCHES if d})
+# gas.transport を書かない → runner_sern._solver_config は viscMethod 1 (空気の Sutherland) + thermCondMethod 1。以前は viscMethod が
+# 段の fixed (2) と違うだけでどのプロファイルにも合わず、宣言も FAILED の記録も書かなかった
+LAUNCHES.clear()
+rd, prob = rerun("sern2d_finite_base_frozen_tp_sst", lambda r: r["gas"].pop("transport"), "gd_transport")
+_tr = {"physProp.viscMethod": (1, "runner_sern._solver_config", "gas.transport"),
+       "physProp.thermCondMethod": (1, "runner_sern._solver_config", "gas.transport")}
+ds = expect_gd(rd, {t: dict(_tr) for t in ("warm_cfl0.1", "soft_cfl0.1", "mid_cfl0.1", "main")}, "SERN 2D gas.transport なし")
+recheck(rd, "sern2d_finite_base_frozen_tp_sst", ds, {d["generator"]["tag"]: c for (_, c, d, _) in LAUNCHES if d})
+
+
+def run_driver_sern(edit, tag, generator=None):
+    """opt/driver_sern.SernCampaign._eval_op の標準レシピ (prepare・forge・collect・設計の検査を差し替え)。generator を与えると、
+    同じ段の値で runner_sern.run_staged を宣言の生成器の名前だけ変えて回す (既定が生成器ごとであることを見る)。"""
+    from forge_design.evaluate import runner_sern as S
+    from forge_design.opt import driver_sern as DS
+    sp = next(x for x in RG.SPECS if x["name"] == "sern2d_finite_base_frozen_tp_sst")
+    work = TMP / f"h_{tag}"
+    work.mkdir()
+    prob = RG.materialize(sp, work)
+    raw = yaml.safe_load(prob.read_text(encoding="utf-8"))
+    edit(raw)
+    prob.write_text(yaml.safe_dump(raw, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    cap = RG.Capture()
+    pats = [(S, "prepare", RG._sern_fake_prepare(S, False)), (S, "run_forge", cap), (S, "restart_by_index", lambda res, mesh, **k: None),
+            (S, "collect", lambda *a, **k: {"gates": {"verdict": "PASS", "fail_class": None, "reasons": []}}),
+            (DS.SernCampaign, "_check_design", lambda self, info: None)]
+    with RG.patched(pats):
+        camp = DS.SernCampaign(prob, work / "campaign")
+        op = camp.ops[0]["name"]
+        if generator is None:
+            rd_, rc_, out_, deg_ = RG._quiet(camp._eval_op, prob, "e1", op, {})
+        else:                                       # _eval_op の標準レシピと同じ段の値 (driver_sern.py の ladder[0])
+            oc = camp.optcfg
+            rd_ = work / "campaign" / f"e1_{op}"
+            S.prepare(prob, rd_, op=op)
+            RG._quiet(S.run_staged, rd_, "full", soft_steps=int(oc.get("soft_steps", 1500)), soft_cfl=float(oc.get("soft_cfl", 0.5)),
+                      warm_lam_steps=int(oc.get("warm_lam_steps", 0)), warm_lam_cfl=float(oc.get("warm_lam_cfl", 0.2)),
+                      mid_steps=int(oc.get("mid_steps", 0)), warm_adapt_steps=int(oc.get("warm_adapt_steps", 500)),
+                      recipe={"family": "sern2d", "problem": prob, "generator": generator})
+    return Path(rd_)
+
+
+rd = run_driver_sern(lambda r: r["opt"].pop("soft_steps"), "drv")
+expect_gd(rd, {"soft_cfl0.1": {"time.last.nStepOuter": (1500, "opt.driver_sern._eval_op", "opt.soft_steps")},
+               "warm_cfl0.1": {}, "mid_cfl0.1": {}, "main": {}}, "driver_sern の標準レシピ")
+rd = run_driver_sern(lambda r: r["opt"].pop("soft_steps"), "drv_as_main", generator="runner_sern.main")
+fj = rd / "RECIPE_soft_cfl0.1.FAILED.json"
+check("(h) 既定は生成器ごと: driver_sern の 1500 を runner_sern.main (既定 3000) の段として宣言しようとすると FAILED",
+      fj.exists() and {f["key"] for f in json.loads(fj.read_text())["fails"]} == {"time.last.nStepOuter"},
+      fj.read_text()[:300] if fj.exists() else sorted(f.name for f in rd.glob("RECIPE_*")))
+# 問題 YAML に書いてあれば既定は使わない (書いた値が出所): 代表の問題の値どおりなら逸脱なし
+rd = run_driver_sern(lambda r: None, "drv_written")
+expect_gd(rd, {"soft_cfl0.1": {}, "warm_cfl0.1": {}, "mid_cfl0.1": {}, "main": {}}, "driver_sern (opt.soft_steps を書いた問題)")
 
 # ------------------------------------------------------------------------------------------------ (f) 負例
 print("== (f) 負例: 出所の分からない違い・合うプロファイルの無い config")

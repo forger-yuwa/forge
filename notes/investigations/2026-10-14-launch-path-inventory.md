@@ -99,3 +99,32 @@ opt/polish の CPG のチャンク継続)、3 は `runner_sern.restart_by_index`
   (層流暖機・soft・mid の梯子、CFL の梯子、warm start、`stages=main`・`none`) の段の config が変更前 (570790e8) とバイト同一、`stage_manifest.json` の段の並び、
   段の履歴、`restart_field.py` による初期場のビット一致と `wall_dist` の保持、restart の負例 (保存量 roe が無い・roUx に Inf・ρ<0・NS で roOmega が無い・
   節点数の違う res) で本段を起動しないこと。
+
+## 5. 段の宣言の結線 (2026-10-15、plan §5.1 #27 の後)
+
+§1 の経路ごとに、forge を起動する段が宣言 `RECIPE.json` を持つか (`config_builder.launch_stage`・`declare_stage`)。読んだのは
+`feature/generator-defaults-launch-gate` の #19・#20b・#25 の後 (957cd17d)。「宣言あり」は合うプロファイルと段があり、問題 YAML・引数・
+**生成器の既定** (#27: `config_builder.GENERATOR_DEFAULTS`・`GENERATOR_WRITES`、出所 `generator_default` = 関数名と値) の出所で
+逸脱を説明できるときに宣言を書くという意味 (説明できない違いは `RECIPE_<tag>.FAILED.json`)。
+
+| 行 | 経路 | 宣言 |
+| --- | --- | --- |
+| 1 | `R.main` (CPG の単段 = `R.prepare` → `R.run_forge`) | **結線していない** (宣言を書く呼び出しが無い) |
+| 2 | `R.main --stage S` (TP の単段) | **結線していない** (同) |
+| 3・4 | `R.run_staged_tp`・`R.continue_tp` (`opt/driver`・`opt/polish` の TP) | あり (`bell_tp`) |
+| 5 | `opt/driver` CPG の評価 (soft → 本段) | あり (`bell_cpg`、soft・本段) |
+| 6 | `opt/polish` CPG (`runner.continue_cpg` → `runner.run_forge`) | **結線していない** |
+| 7 | `W.main` (モード F、Euler cell) | あり (`wt_modef`) |
+| 8 | `W.prepare(euler=False)` → `W.run_staged` (NS v1、node SST) | **宣言しない**: 合うプロファイルが無い (書き写していない; design の中に呼び出し元が無い) |
+| 9 | `euler_loop` (パス・継続チャンク) | node はあり (`wt_feedback`)。cell は合うプロファイルが無く宣言しない |
+| 10 | `A.main` (axis-Mach Euler) | TP はあり (`axismach_euler`)。CPG の axis-Mach は合うプロファイルが無く宣言しない |
+| 11 | `A.prepare_ns` → `A.run_staged_ns` | `full`・`none` はあり (`axismach_ns`・`axismach_ns_b0`)。**`stages="ramp"` の段 `R<i>_cfl<c>` は FAILED** (段 ramp がプロファイルに無い)。断熱壁の NS は合うプロファイルが無く宣言しない |
+| 12 | `D.main` (walldriven) | あり (`walldriven`) |
+| 13・15 | `S.main`・`opt/driver_sern` (SERN 2D) | 層流暖機・soft・mid・本段はあり (`sern2d`; #27 で driver_sern の `opt.soft_steps` 1500・gas.transport の無い問題の viscMethod 1 などを生成器の既定の出所に)。**warm start の適応段 `warm_adapt` は FAILED** (段がプロファイルに無い) |
+| 14 | `S3.main` (SERN 3D) | あり (`sern3d`) |
+
+**強制の開始 (plan §4.7) の前に残るもの** (#27 の時点): (a) 結線していない経路 — 行 1・2 (`runner.main` の単段)・行 6 (opt/polish の CPG)、
+(b) 宣言を書かない段 — axis-Mach NS の `ramp`・SERN の `warm_adapt` (プロファイルに段が無い)、(c) プロファイルの無い機種・構成 —
+WT NS v1 (行 8)・euler_loop の cell・CPG の axis-Mach・断熱壁の axis-Mach NS。(a) は宣言を書く呼び出しを足すか経路を退役させる、
+(b)・(c) は書き写すか「実験」の宣言で回すかの判断が要る。生成器の既定の表は PROBLEM_SOURCES に載っているキーの分だけ (B0 の
+`main_line` の各キーは必須で既定が無い)。
