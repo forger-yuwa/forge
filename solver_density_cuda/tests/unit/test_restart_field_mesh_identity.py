@@ -6,6 +6,8 @@
 合格条件 (§5.1 #20): 座標を格納の精度のまま比べる、接続・CV の順・境界の所属を照合する、座標・接続が無ければ FAIL。
 codex の再現 (座標を約 1e−8 変えた別の入力; float32 に丸めると元と同じ) と接続だけ違う入力が FAIL、正常な同一メッシュの
 restart (同じ run の res → その run の格子、親の res → 親の格子の複製、変換済みの入力 → 複製) が PASS。
+§5.1 #20b (`--allow-coord-upcast`): 同じ .msh の float32 と倍精度の 2 つの変換 (合成; 幾何は精度の差だけ違う) で旗ありなら通り
+(VERDICT と DST の記録に旧 → 新の不変部分の sha256)、旗なし・接続や境界が 1 か所違う・丸めても違う座標・狭める向きは FAIL。
 
 変換器・forge は使わない。格子は変換済みの h5 と同じ置き方の小さな合成 (node は /MESH/CONNE が CV ごと・/VIZMESH/CONNE が
 primal の四角形、cell は /MESH/CONNE が四角形; /PLANES・/CELLS・/BCONDS を持つ)、res は forge の出力と同じく
@@ -338,6 +340,55 @@ def main():
         ok, info = refused(os.path.join(d11, 'val.h5'), os.path.join(d, 'res_100.h5'), os.path.join(d11, 'val.h5'),
                            want=('DST', '座標が格子'))
         check(ok, '(N11) DST の値のファイルが宛先 run の格子の場でない → FAIL', info)
+
+        print('=== 座標の精度だけを上げた再変換への引き継ぎ (--allow-coord-upcast、§5.1 #20b) ===')
+        sys.path.insert(0, os.path.dirname(TOOL))
+        import mesh_provenance as mpv
+        # 同じ .msh の 2 つの変換: 旧 = float32 の座標 (旧い変換器)、新 = 倍精度の座標 (幾何は精度の差だけ違う: 体積を 1e-6 相対)
+        du = E.run_dir(coord_dtype=np.float32)
+        old_m = os.path.join(du, 'mesh.h5')
+        write_res(os.path.join(du, 'res_100.h5'), old_m)
+        dv = E.run_dir(volume_scale=1.0 + 1e-6)
+        new_m = os.path.join(dv, 'mesh.h5')
+        pa, pb = mpv.mesh_parts(old_m), mpv.mesh_parts(new_m)
+        check(pa['parts']['geometry'] != pb['parts']['geometry'] and pa['parts']['coord'] != pb['parts']['coord']
+              and all(pa['parts'][k] == pb['parts'][k] for k in ('topology', 'boundary', 'other')),
+              '(U0) 前提: 旧と新の格子は座標 (型) と幾何だけが違う')
+        ok, info = refused(new_m, os.path.join(du, 'res_100.h5'), new_m, want=('部分 coord', '--allow-coord-upcast'))
+        check(ok, '(U1) 旗なし: 座標の型だけ違う再変換は別の格子として拒む (#20a (4))、案内に --allow-coord-upcast', info)
+        before = sha(new_m)
+        rc, out = tool(os.path.join(du, 'res_100.h5'), new_m, '--allow-coord-upcast', '--dry-run')
+        check(rc == 0 and '座標の精度の引き上げ' in out and sha(new_m) == before, '(U2) 旗あり --dry-run: 通るが何も書かない', out[-400:])
+        ok, out = accepted(os.path.join(du, 'res_100.h5'), new_m, '--allow-coord-upcast')
+        vl = [ln for ln in out.splitlines() if ln.startswith('VERDICT:')]
+        rec = mpv.read_coord_upcast(new_m)
+        check(ok and len(vl) == 1 and '座標の精度の引き上げ' in vl[0] and pa['invariant'][:16] in vl[0] and pb['invariant'][:16] in vl[0]
+              and '幾何の最大相対差' in out and 'restart の跳ね' in out,
+              '(U3) 旗あり: 通る (保存量を index コピー)、VERDICT に「座標の精度の引き上げ (旧 → 新 の不変部分の sha256)」', out[-700:])
+        check(rec is not None and rec['src_invariant'] == pa['invariant'] and rec['dst_invariant'] == pb['invariant']
+              and rec['src_coord_dtype'] == 'float32' and rec['dst_coord_dtype'] == 'float64' and rec['geometry_max_rel_diff'] > 0
+              and mpv.mesh_parts(new_m)['invariant'] == pb['invariant'],
+              '(U3) DST のルートに記録 (旧・新の不変部分の sha256・座標の型・幾何の差)、格子の不変部分のハッシュは変わらない', str(rec)[:300])
+        # 負例 (旗あり): 接続が 1 か所違う・境界が 1 か所違う・丸めても座標が違う・型が同じ・広げる向きが逆
+        for tag, kw, want in (('接続が 1 か所違う', dict(quads=q2), ('topology',)),
+                              ('境界の所属が 1 か所違う', dict(wall=w0[:-1]), ('boundary',)),
+                              ('丸めても座標が違う', dict(coord=c0 + [1e-3, 0, 0]), ('丸めても',)),
+                              ('座標の型が同じ (float32) で幾何だけ違う', dict(coord_dtype=np.float32, volume_scale=1.5),
+                               ('座標が同一で幾何だけ違う',))):
+            dz = E.run_dir(**kw)
+            mz = os.path.join(dz, 'mesh.h5')
+            ok, info = refused(mz, os.path.join(du, 'res_100.h5'), mz, '--allow-coord-upcast',
+                               want=('--allow-coord-upcast でも通さない',) + want)
+            check(ok, f'(U4) 旗あり: {tag} → FAIL、DST 不変', info)
+        dz = E.run_dir(coord_dtype=np.float32)
+        mz = os.path.join(dz, 'mesh.h5')
+        ok, info = refused(mz, os.path.join(d, 'res_100.h5'), mz, '--allow-coord-upcast', want=('精度の引き上げでない',))
+        check(ok, '(U4) 旗あり: 倍精度の格子 → float32 の格子 (狭める向き) → FAIL', info)
+        # 旗なしの restart (新しい格子の場で上書き) は記録を消す
+        write_res(os.path.join(dv, 'res_200.h5'), new_m, seed=3)
+        ok, out = accepted(os.path.join(dv, 'res_200.h5'), new_m)
+        check(ok and mpv.read_coord_upcast(new_m) is None and '座標の精度の引き上げ' not in out,
+              '(U5) その後の旗なしの restart (同じ格子の場) は記録を消す', out[-400:])
     finally:
         shutil.rmtree(E.root, ignore_errors=True)
     print('ALL PASS' if fails == 0 else f'{fails} FAIL')

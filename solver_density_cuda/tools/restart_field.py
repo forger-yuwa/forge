@@ -35,6 +35,16 @@ SRC と DST がそれぞれ載っている**格子** (変換済みの forge 入�
    バイト単位で。型が違えば別の入力)・`topology` (接続・CV の順・再番号・個数)・`boundary` (境界の所属と `bcondKind`)・
    `geometry` (面ベクトル・体積・重心)・`other` (分類していない位置) のハッシュがすべて一致。`wall_dist` は DST のものを残すので
    比べず、違えば注記だけ出す。どちらの格子も `/MESH/COORD`・`/MESH/CONNE` が無ければ停止する。
+4. **座標の精度だけを上げた再変換への引き継ぎ** (`--allow-coord-upcast`、plan §5.1 #20b・#20a (4)、2026-10-15): 3 は座標の型だけ違う
+   同じ `.msh` の再変換 (float32 の変換器 → 倍精度の変換器) を別の格子として拒む。旧い float32 の格子の場を倍精度の格子へ移すときだけ、
+   明示してこの逃げ道を使う。条件: `topology`・`boundary`・`other` が同一、座標は SRC の格子の方が狭い浮動小数の型で、DST の格子の座標を
+   その型に丸めると SRC の格子の座標と**完全一致**、`geometry` は違ってよい (同じ座標から計算した精度の差; 最大の相対差を報告)。
+   それ以外 (型が同じ・広げる向きが逆・丸めても違う座標・接続や境界の違い) は 3 と同じく停止する。通ったときは VERDICT の行に
+   「座標の精度の引き上げ (旧 → 新 = 格子の不変部分の sha256、`mesh_provenance` の mesh-parts)」を書き、DST の h5 のルートの属性
+   `restart_coord_upcast` (JSON。`mesh_provenance.COORD_UPCAST_ATTR`; 格子の不変部分のハッシュには入らない) に記録する。投入の関門
+   (`launch_gate.py`) がその記録を `LAUNCH_GATE.txt` と `RUN_PROVENANCE.txt` に写す (`run_case.sh` は起動ごとに `RUN_PROVENANCE.txt` を
+   書き直すので、ここから直接は書かない)。旧い場の保存量は新しい双対の体積で読み直されるので、引き継いだ run は段の判定で
+   「restart の跳ね」を見る (skill forge-aws-run §3)。この記録は旗なしの restart (同じ格子の場で上書き) で消す。
 
 **化学種の属性** (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3b): 書き込み前に SRC の属性
 (`species_hash` ほか) と SRC の隣の解決済み記録 (完全性ハッシュ再計算) を検証し、宛先 run (`--dst-run`, 既定は DST の隣) を
@@ -180,8 +190,54 @@ def _differing_members(fa, fb, ma, mb):
     return out
 
 
-def check_same_mesh(src, dst, src_mesh_arg=None, dst_run=None):
-    """書き込みの前に SRC と DST が同一メッシュの上の場であることを確かめる。戻り = 報告の行。MeshIdentityError で停止。"""
+def _coord_upcast(sm, dm, pa, pb, diff):
+    """SRC の格子 sm と DST の格子 dm の違い diff (部分の名前) が「座標の精度の引き上げ」だけか (上の 4)。
+    戻り (記録 dict, None) か (None, 拒む理由)。"""
+    if not set(diff) <= {"coord", "geometry"}:
+        return None, (f"部分 {', '.join(p for p in diff if p not in ('coord', 'geometry'))} も違う "
+                      "(--allow-coord-upcast は座標の精度だけの違いに限る: topology・boundary・other は同一が要る)")
+    if "coord" not in diff:
+        return None, "座標が同一で幾何だけ違う (座標の精度の引き上げではない)"
+    with h5py.File(sm, "r") as fa, h5py.File(dm, "r") as fb:
+        ca, cb = fa["MESH/COORD"], fb["MESH/COORD"]
+        if ca.dtype.kind != "f" or cb.dtype.kind != "f" or not ca.dtype.itemsize < cb.dtype.itemsize:
+            return None, (f"座標の型 SRC の格子 {ca.dtype} → DST の格子 {cb.dtype} は精度の引き上げでない "
+                          "(SRC の格子の方が狭い浮動小数の型のときだけ)")
+        if ca.shape != cb.shape:
+            return None, f"座標の形が違う ({ca.shape} / {cb.shape})"
+        a, b = np.asarray(ca), np.asarray(cb)
+        rb = b.astype(a.dtype)
+        if not np.array_equal(a, rb):
+            nd = int(np.count_nonzero(a != rb))
+            return None, (f"DST の格子の座標を {a.dtype} に丸めても SRC の格子の座標と {nd}/{a.size} 成分で違う "
+                          "(同じ .msh の再変換でない)")
+        geo, worst = 0.0, None
+        ga, gb = set(pa["members"].get("geometry", [])), set(pb["members"].get("geometry", []))
+        if ga != gb:
+            return None, f"幾何の位置の集合が違う ({sorted(ga ^ gb)[:4]})"
+        for k in sorted(ga):
+            if "@" in k:
+                continue
+            da, db = fa[k], fb[k]
+            if da.shape != db.shape:
+                return None, f"幾何 {k} の形が違う ({da.shape} / {db.shape})"
+            if da.dtype.kind != "f" or db.dtype.kind != "f":
+                continue
+            x, y = np.asarray(da, np.float64), np.asarray(db, np.float64)
+            scale = float(np.max(np.abs(y))) if y.size else 0.0
+            r = float(np.max(np.abs(x - y))) / scale if scale > 0 else 0.0
+            if r > geo:
+                geo, worst = r, k
+    rec = {"kind": "coord_upcast", "tool": "restart_field.py --allow-coord-upcast",
+           "src_mesh": os.path.abspath(sm), "src_coord_dtype": str(ca.dtype), "src_invariant": pa["invariant"],
+           "dst_mesh": os.path.abspath(dm), "dst_coord_dtype": str(cb.dtype), "dst_invariant": pb["invariant"],
+           "parts_scheme": mpv.PARTS_SCHEME, "geometry_max_rel_diff": geo, "geometry_max_rel_diff_at": worst}
+    return rec, None
+
+
+def check_same_mesh(src, dst, src_mesh_arg=None, dst_run=None, allow_coord_upcast=False):
+    """書き込みの前に SRC と DST が同一メッシュの上の場であることを確かめる。戻り = (報告の行, 座標の精度の引き上げの記録か None)。
+    MeshIdentityError で停止。allow_coord_upcast は上の 4。"""
     lines = []
     sm, s_how = _resolve_mesh(src, "SRC", src_mesh_arg, os.path.dirname(os.path.abspath(src)), "--src-mesh")
     dm, d_how = _resolve_mesh(dst, "DST", None, dst_run or os.path.dirname(os.path.abspath(dst)), "")
@@ -194,22 +250,35 @@ def check_same_mesh(src, dst, src_mesh_arg=None, dst_run=None):
             lines.append(f"{what} の格子: {mesh} ({how}) — {os.path.basename(h5)} の {_bind_to_mesh(h5, mesh, what)}")
     if _same_file(sm, dm):
         lines.append("SRC と DST の格子は同じファイル")
-        return lines
+        return lines, None
     pa, pb = mpv.mesh_parts(sm), mpv.mesh_parts(dm)
     diff = [p for p in SAME_PARTS if pa["parts"][p] != pb["parts"][p]]
+    upcast = None
     if diff:
-        with h5py.File(sm, "r") as fa, h5py.File(dm, "r") as fb:
-            det = []
-            for p in diff:
-                mem = _differing_members(fa, fb, pa["members"].get(p, []), pb["members"].get(p, []))
-                det.append(f"{p}: " + (", ".join(mem[:8]) + (f" ほか {len(mem) - 8}" if len(mem) > 8 else "") if mem else "(位置は同じで属性の並び等)"))
-        raise MeshIdentityError(f"SRC の格子 {sm} と DST の格子 {dm} が違う (部分 {', '.join(diff)}):\n    " + "\n    ".join(det)
-                                + "\n  同一メッシュでないので interp_field.py を使う (同じ .msh を変換し直した格子でも、座標の型・値・接続が"
-                                  "違えば別の入力)")
-    lines.append(f"SRC と DST の格子が一致: 座標 (格納の型のまま)・接続・CV の順・境界の所属・幾何 (mesh_parts {mpv.PARTS_SCHEME})")
+        why = None
+        if allow_coord_upcast:
+            upcast, why = _coord_upcast(sm, dm, pa, pb, diff)
+        if upcast is None:
+            with h5py.File(sm, "r") as fa, h5py.File(dm, "r") as fb:
+                det = []
+                for p in diff:
+                    mem = _differing_members(fa, fb, pa["members"].get(p, []), pb["members"].get(p, []))
+                    det.append(f"{p}: " + (", ".join(mem[:8]) + (f" ほか {len(mem) - 8}" if len(mem) > 8 else "") if mem else "(位置は同じで属性の並び等)"))
+            raise MeshIdentityError(f"SRC の格子 {sm} と DST の格子 {dm} が違う (部分 {', '.join(diff)}):\n    " + "\n    ".join(det)
+                                    + (f"\n  --allow-coord-upcast でも通さない: {why}" if why else "")
+                                    + "\n  同一メッシュでないので interp_field.py を使う (同じ .msh を変換し直した格子でも、座標の型・値・接続が"
+                                      "違えば別の入力。座標の精度だけを上げた再変換なら --allow-coord-upcast)")
+        lines.append(f"座標の精度の引き上げ (--allow-coord-upcast): SRC の格子 {sm} (座標 {upcast['src_coord_dtype']}) → DST の格子 {dm} "
+                     f"(座標 {upcast['dst_coord_dtype']})。topology・boundary・other は同一、DST の座標を {upcast['src_coord_dtype']} に丸めると"
+                     f" SRC と完全一致、幾何の最大相対差 {upcast['geometry_max_rel_diff']:.3e}"
+                     + (f" ({upcast['geometry_max_rel_diff_at']})" if upcast['geometry_max_rel_diff_at'] else "")
+                     + f"。格子の不変部分の sha256 {upcast['src_invariant'][:16]} → {upcast['dst_invariant'][:16]} ({mpv.PARTS_SCHEME})")
+        lines.append("注記: 旧い場の保存量は新しい双対の体積で読み直される。引き継いだ run は段の判定で restart の跳ねを見る")
+    else:
+        lines.append(f"SRC と DST の格子が一致: 座標 (格納の型のまま)・接続・CV の順・境界の所属・幾何 (mesh_parts {mpv.PARTS_SCHEME})")
     if pa["parts"]["wall_dist"] != pb["parts"]["wall_dist"]:
         lines.append("注記: wall_dist は SRC の格子と違う (DST のものを残す)")
-    return lines
+    return lines, upcast
 
 
 ap = argparse.ArgumentParser()
@@ -225,13 +294,20 @@ ap.add_argument("--dst-run", help="宛先 run ディレクトリ (solverConfig.y
 ap.add_argument("--forge", help="--resolve-species を持つ forge (既定: FORGE_BIN, solver_density_cuda/build/forge)")
 ap.add_argument("--force-species", action="store_true",
                 help="化学種の不一致・記録の欠落でも保存量を写す (属性は付けない = 未検証のまま)")
+ap.add_argument("--allow-coord-upcast", action="store_true",
+                help="座標の精度だけを上げた同じ .msh の再変換 (float32 の格子 → 倍精度の格子) への引き継ぎを許す。"
+                     "接続・境界・その他は同一、DST の座標を SRC の格子の型に丸めると完全一致のときだけ (docstring の 4)")
 a = ap.parse_args()
 
-# --- 同一メッシュの検査 (書き込み前、化学種の解決より先; plan tooling-generator-defaults-and-launch-gate §5.1 #20) ---
+# --- 同一メッシュの検査 (書き込み前、化学種の解決より先; plan tooling-generator-defaults-and-launch-gate §5.1 #20・#20b) ---
 try:
-    mesh_lines = check_same_mesh(a.src, a.dst, a.src_mesh, a.dst_run)
+    mesh_lines, upcast = check_same_mesh(a.src, a.dst, a.src_mesh, a.dst_run, allow_coord_upcast=a.allow_coord_upcast)
 except (MeshIdentityError, OSError) as e:
     sys.exit(f"[restart_field] REFUSED (nothing written): 同一メッシュと確かめられない: {e}")
+if upcast is not None:
+    import datetime
+    upcast.update({"src": os.path.abspath(a.src), "dst": os.path.abspath(a.dst),
+                   "date": datetime.datetime.now().astimezone().isoformat(timespec="seconds")})
 
 # --- 化学種: SRC の記録を検証し、宛先を解決して継承できるか決める (書き込み前; §4.3) ---
 try:
@@ -313,6 +389,9 @@ with h5py.File(a.src, "r") as s, h5py.File(a.dst, "r" if a.dry_run else "r+") as
         for n, rel in narrowed:
             print(f"    {n:<10} 相対 {rel:.3e}")
     fsp.commit_inherit(d, species_plan)
+    # 初期場の来歴: 座標の精度の引き上げなら記録し、旗なしの restart (同じ格子の場) なら前の記録を消す (docstring の 4)
+    mpv.write_coord_upcast(d, upcast)
     print(f"species 属性  : {('継承 (species_input_unverified=%d)' % species_plan['species_input_unverified']) if species_plan else 'なし (未検証のまま)'}")
     print(f"VERDICT: OK ({len(moved)} 量を移した"
-          f"{'、うち ' + str(len(narrowed)) + ' 量は型の縮小で丸めあり' if narrowed else '、SRC とビット一致'})")
+          f"{'、うち ' + str(len(narrowed)) + ' 量は型の縮小で丸めあり' if narrowed else '、SRC とビット一致'}"
+          f"{'、' + mpv.coord_upcast_text(upcast) if upcast else ''})")

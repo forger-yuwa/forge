@@ -23,7 +23,8 @@ forge を起動しない。照合の中身はここに置く (`run_case.sh` は�
    `solver_density_cuda/build/forge` でないバイナリ (対応の分からないバイナリ) は**拒否せず** WARN にする (旧・倍精度ビルドとの
    A/B を塞がない: plan §4.3 の 4)。省略の禁止は 1 の `fixed`・`explicit` の照合が担い、`key=~` の逸脱は実効値「未確定」で記録する。
 5. 結果を `<run_dir>/LAUNCH_GATE.txt` (VERDICT・モード・宣言・プロファイル・段・逸脱・FAIL・WARN・メッシュのハッシュ・品質・
-   バイナリ) に書き、`RUN_PROVENANCE.txt` に 1 行写す。
+   バイナリ) に書き、`RUN_PROVENANCE.txt` に 1 行写す。初期場の h5 に `restart_field.py --allow-coord-upcast` の記録
+   (座標の精度の引き上げ; plan §5.1 #20b) があれば両方に写す (判定は変えない)。
 
 判定の規則 (検査できない入力はどのモードでも FAIL):
 
@@ -303,6 +304,29 @@ def check_provenance(run_dir, mode, out, info):
     return res
 
 
+def note_initial_field(run_dir, doc, out, info):
+    """初期場の来歴: run が読む初期場の h5 (`mesh.valueFileName`、無ければ `mesh.meshFileName`) に `restart_field.py
+    --allow-coord-upcast` の記録 (`mesh_provenance.COORD_UPCAST_ATTR`) があれば LAUNCH_GATE.txt と RUN_PROVENANCE.txt に写す
+    (plan §5.1 #20b。`run_case.sh` は起動ごとに RUN_PROVENANCE.txt を書き直すので、記録は h5 に置いてここで写す)。判定は変えない。"""
+    import mesh_provenance as mpv
+    mesh = (doc or {}).get('mesh') if isinstance(doc, dict) else None
+    if not isinstance(mesh, dict):
+        return
+    name = mesh.get('valueFileName') or mesh.get('meshFileName')
+    if not isinstance(name, str) or not name.strip():
+        return
+    path = os.path.join(run_dir, name.strip())
+    if not os.path.isfile(path):
+        return                                      # 無いファイルは来歴の照合 (check_provenance) が扱う
+    try:
+        rec = mpv.read_coord_upcast(path)
+    except (OSError, ValueError) as e:
+        out.add('NOTE', '初期場', os.path.basename(path), f'初期場の来歴の記録を読めない: {e}')
+        return
+    if rec is not None:
+        info['initial_field'] = f'{os.path.basename(path)}: {mpv.coord_upcast_text(rec)}'
+
+
 # ------------------------------------------------------------------------------------------------ 3. メッシュの品質
 
 def check_quality(mesh, bcond_path, out, info, dry_run=False):
@@ -419,6 +443,7 @@ def run_gate(run_dir, forge_bin=None, environ=None, dry_run=False):
         check_settings(run_dir, cfg_raw, doc, parse_fails, bcond_doc, mode, out, info)
         # 2. メッシュの実効条件
         prov = check_provenance(run_dir, mode, out, info) if doc is not None else None
+        note_initial_field(run_dir, doc, out, info)
         # 3. メッシュの品質
         mesh = (prov or {}).get('mesh')
         if mesh and os.path.isfile(mesh) and bcond_path is not None:
@@ -452,6 +477,8 @@ def render(out, info):
                  f'{eff}; 理由 {d.get("reason")}' + (f'; 根拠 {d["basis"]}' if d.get('basis') else '') + ')')
     L.append(f'mesh        : {info.get("mesh") or "-"}')
     L.append(f'mesh_hash   : {info.get("mesh_hash", "-")}')
+    if info.get('initial_field'):
+        L.append(f'initial_field: {info["initial_field"]}')
     L.append(f'quality     : {info.get("quality", "-")}' + (f' [{info["quality_cmd"]}]' if info.get('quality_cmd') else ''))
     L.append(f'forge_bin   : {info.get("forge_bin", "-")}')
     L.append(f'forge_sha256: {info.get("forge_sha256", "-")}')
@@ -486,7 +513,8 @@ def _finish(run_dir, out, info, dry_run):
                     f'{"; FORGE_LAUNCH_GATE=warn" if mf.get("warn") else ""}; '
                     f'profile {info.get("profile") or "-"}; stage {info.get("stage") or "-"}; '
                     f'FAIL {out.count("FAIL")}・WARN {out.count("WARN")}; forge_sha256 {str(info.get("forge_sha256", "-"))[:16]}; '
-                    f'詳細 {OUT_FILE})\n')
+                    + (f'初期場 {info["initial_field"]}; ' if info.get('initial_field') else '')
+                    + f'詳細 {OUT_FILE})\n')
             with open(os.path.join(run_dir, PROV_FILE), 'a', encoding='utf-8') as fh:
                 fh.write(line)
         except OSError as e:

@@ -10,6 +10,7 @@ forge の代わりに偽のバイナリ (起動されたら印 `FORGE_STARTED` �
 - `FORGE_LAUNCH_GATE=warn` は `fixed`・`explicit` の不一致・省略だけを WARN に落とし、`forbid`・未知のキー・宣言の欠落 (強制時)・
   メッシュの FAIL・検査不能は落とさない。
 - バイナリの sha256 とプロファイルの内容のハッシュが `LAUNCH_GATE.txt` に記録され、`RUN_PROVENANCE.txt` に 1 行写る。
+  初期場の h5 に `restart_field.py --allow-coord-upcast` の記録があれば両方に写る (判定は変えない; plan §5.1 #20b)。
 - 移行期 (既定) は宣言の無い run・記録の無いメッシュを WARN で起動し、強制のモード (`FORGE_LAUNCH_GATE=enforce`・定数
   `ENFORCE`) では止める。
 
@@ -279,6 +280,23 @@ check(rc_ == 0 and res_.verdict() == 'PASS', '既定の build/forge (と同じ�
 rc_, res_, info_ = gate_inproc(good, forge_bin=os.path.join(TMP, 'no_such_forge'), environ={}, dry_run=True)
 check(rc_ == 0 and info_['forge_sha256'].startswith('不明') and ('バイナリ', os.path.join(TMP, 'no_such_forge')) in
       [(a, k) for lv, a, k, _ in res_.items if lv == 'WARN'], '無いバイナリは記録 (不明) と WARN (関門は止めない)')
+
+# 初期場の来歴 (restart_field.py --allow-coord-upcast の記録、plan §5.1 #20b): 判定は変えず、LAUNCH_GATE.txt と RUN_PROVENANCE.txt に写す
+up = make_run('coord_upcast')
+rec_up = {'kind': 'coord_upcast', 'tool': 'restart_field.py --allow-coord-upcast', 'src_coord_dtype': 'float32',
+          'src_invariant': 'a' * 64, 'dst_coord_dtype': 'float64', 'dst_invariant': 'b' * 64, 'parts_scheme': MP.PARTS_SCHEME,
+          'date': '2026-10-15T00:00:00+09:00'}
+with h5py.File(os.path.join(up, 'mesh.h5'), 'r+') as f:
+    MP.write_coord_upcast(f, rec_up)
+rc, out, started, gate = run_case(up)
+launched(rc, out, started, gate, '初期場に座標の精度の引き上げの記録がある run')
+check('座標の精度の引き上げ' in (field(gate, 'initial_field') or '') and 'a' * 16 + ' → float64 の格子 ' + 'b' * 16 in field(gate, 'initial_field')
+      and '来歴の記録と一致' in (field(gate, 'mesh_hash') or ''),
+      'LAUNCH_GATE.txt に初期場の来歴 (旧 → 新の不変部分の sha256)、ルートの記録は格子の来歴の照合を変えない', field(gate, 'initial_field'))
+gl = [ln for ln in open(os.path.join(up, 'RUN_PROVENANCE.txt'), encoding='utf-8').read().splitlines() if ln.startswith('launch_gate :')]
+check(len(gl) == 1 and '初期場 mesh.h5: 座標の精度の引き上げ' in gl[0], 'RUN_PROVENANCE.txt の関門の行に初期場の来歴', str(gl))
+check(field(open(os.path.join(good, 'LAUNCH_GATE.txt'), encoding='utf-8').read(), 'initial_field') is None,
+      '記録の無い run は initial_field の行を書かない')
 
 # ------------------------------------------------------------------------------------------------ 設定の負例 (宣言あり)
 

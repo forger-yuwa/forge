@@ -225,6 +225,47 @@ def mesh_parts(h5):
             f.close()
 
 
+# ------------------------------------------------------------------------------------------------ 初期場の来歴 (座標の精度の引き上げ)
+
+# restart_field.py --allow-coord-upcast が DST の h5 のルートに書く記録 (JSON; plan §5.1 #20b)。ルートの属性は mesh_parts のハッシュに
+# 入らない (part_of の '' → None) ので、記録を書いても格子の不変部分・来歴の照合は変わらない。投入の関門 (launch_gate.py) が
+# LAUNCH_GATE.txt と RUN_PROVENANCE.txt に写す。
+COORD_UPCAST_ATTR = 'restart_coord_upcast'
+
+
+def coord_upcast_text(rec):
+    """記録 → 1 行の説明「座標の精度の引き上げ (旧 → 新)」(旧・新 = 格子の不変部分の sha256 の先頭 16 桁)。"""
+    return (f'座標の精度の引き上げ ({rec.get("src_coord_dtype")} の格子 {rec.get("src_invariant", "?")[:16]} → '
+            f'{rec.get("dst_coord_dtype")} の格子 {rec.get("dst_invariant", "?")[:16]}; 格子の不変部分の sha256 '
+            f'{rec.get("parts_scheme", PARTS_SCHEME)}; restart_field.py --allow-coord-upcast {rec.get("date", "")})')
+
+
+def write_coord_upcast(h5, rec):
+    """開いた h5py.File (書き込み可) のルートに記録を書く。rec が None なら前の記録を消す (同じ格子の場で上書きした初期場)。"""
+    if rec is None:
+        if COORD_UPCAST_ATTR in h5.attrs:
+            del h5.attrs[COORD_UPCAST_ATTR]
+        return
+    h5.attrs[COORD_UPCAST_ATTR] = json.dumps(rec, ensure_ascii=False, sort_keys=True)
+
+
+def read_coord_upcast(h5_path):
+    """h5 のルートの記録 → dict (無ければ None)。読めない・形式が違えば ValueError。"""
+    import h5py
+    with h5py.File(h5_path, 'r') as f:
+        if COORD_UPCAST_ATTR not in f.attrs:
+            return None
+        v = f.attrs[COORD_UPCAST_ATTR]
+    t = _text(v)
+    try:
+        rec = json.loads(t) if t is not None else None
+    except ValueError as e:
+        raise ValueError(f'{COORD_UPCAST_ATTR} を JSON として読めない: {e}') from None
+    if not isinstance(rec, dict) or rec.get('kind') != 'coord_upcast':
+        raise ValueError(f'{COORD_UPCAST_ATTR} の形式が違う ({str(t)[:80]!r})')
+    return rec
+
+
 def provenance_path(h5_path):
     """記録のパス: メッシュの実体 (realpath) の末尾に `.provenance.json` (symlink の名前の隣ではない; 上の「記録」)。"""
     return os.path.realpath(str(h5_path)) + SUFFIX
