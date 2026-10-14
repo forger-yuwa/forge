@@ -9,6 +9,8 @@ plan: plans/active/tooling-nozzle-mknot-auto.md §6 V1a・V6 (§5.1 #2・#2b・#
        同点; 0.01 の格子なので詰めは格子そのもの)。各解像度の境目だけで選んだ値 (#2 の V6 と同じ選び方) も記録する (合否には
        使わない)。
        合格 (§6 V6): 選択値の差 ≤ 0.01・両方の選択点が両方の解像度で全部の制約を満たす・選択点から全部の境目まで ≥ 0.05。
+       距離は評価表 (全部の評価済みの点) から求め直した境目で測り、選び直しの境目の探し直しが上限 (3 回) で収まらなければ
+       不合格 (settled; §5.1 #3d、result 段レビュー M1)。
        不合格でも表と判定を JSON に残す (境目が動いたのか最小が動いたのかを表で区別)。
   v1a  固定の入力の再現: select_mknot を全範囲で回す (N 2400)。合格 (§6 V1a): (a) 選んだ点が 2.03〜2.10 で保守的な境目から ≥ 0.05、
        (b) 評価の値が _mknot_sweep/low_end_N2400.json・low_end2_N2400.json・res_N2400.json と同じ M_K で相対 1e-9。
@@ -96,9 +98,9 @@ def run_v6(raw, workers, workers_2n, log):
         evs[N] = ev
     # 全部の境目 (2400 と 4800 の両方、まとめない) で両方を選び直す (§4.2; 候補は 0.01 の格子と境目 + ΔM_safe の点)
     grid_rows = {N: [r for r in evs[N].table() if r.get("role") == "grid"] for N in (2400, 4800)}
+    # 境目の探し直しが上限で収まらなければ未確定 (settled False → 不合格; §5.1 #3d、result 段レビュー M1)
     rc = MS.reselect_common(evs[2400], evs[4800], grid_rows[2400], grid_rows[4800], tie_deg=1e-3, dM_safe=0.05,
-                            bisect_tol=1e-3, safe_range=rng, candidate_roles=("grid", "safe"), log=log)
-    common = rc["common"]
+                            bisect_tol=1e-3, safe_range=rng, candidate_roles=("grid", "safe"), raise_unsettled=False, log=log)
     for N, tag in ((2400, "N"), (4800, "2N")):
         rule = rc[tag]
         if rule.get("chosen") is not None:
@@ -116,6 +118,12 @@ def run_v6(raw, workers, workers_2n, log):
         for c, src in ((c24, 2400), (c48, 4800)):
             if c is not None:
                 cross[f"chosen_{src}_at_{N}"] = _slim(at[MS._key(c)])
+    # 距離は評価表 (全部の評価済みの点; 交差の評価を含む) から求め直した境目で判定する (§5.1 #3d、レビュー M1)。
+    # 選び直しに使った境目 (rc["common"]) と食い違えば settled も不合格
+    b_fin = {N: MS.find_boundaries(evs[N], 1e-3) for N in (2400, 4800)}
+    common = MS.conservative_boundaries(b_fin[2400], b_fin[4800])
+    settled = (rc["settled"] and MS._same_boundaries(b_fin[2400], rc["boundaries_N"])
+               and MS._same_boundaries(b_fin[4800], rc["boundaries_2N"]))
     evs = {N: evs[N].table() for N in (2400, 4800)}
     rows_at = {N: {MS._key(r["M_K"]): r for r in evs[N]} for N in (2400, 4800)}
 
@@ -124,6 +132,7 @@ def run_v6(raw, workers, workers_2n, log):
         return bool(r and MS._feasible(r))
 
     checks = {
+        "settled": settled,
         "diff_le_0p01": c24 is not None and c48 is not None and abs(c24 - c48) <= 0.01 + 1e-9,
         "constraints_both": all(ok_at(c, N) for c in (c24, c48) for N in (2400, 4800)),
         "distance_ge_0p05": all(c is not None and MS.boundary_distance(c, common) >= 0.05 - 1e-9 for c in (c24, c48)),
@@ -134,7 +143,7 @@ def run_v6(raw, workers, workers_2n, log):
             "distance_4800": (None if c48 is None else MS.boundary_distance(c48, common)),
             "conservative_boundary": [max((b["feasible_end"] for b in common if b["kind"] == "lower"), default=None),
                                       min((b["feasible_end"] for b in common if b["kind"] == "upper"), default=None)],
-            "common_boundaries": common, "reselect_warnings": rc["warnings"],
+            "common_boundaries": common, "common_boundaries_used": rc["common"], "reselect_warnings": rc["warnings"],
             "chosen_own_boundary": {str(N): res[N]["rule_own_boundary"].get("chosen") for N in (2400, 4800)}}
     # 表 (0.01 の格子と二分法の点)
     allM = sorted(set(rows_at[2400]) | set(rows_at[4800]))

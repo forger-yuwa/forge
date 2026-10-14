@@ -26,9 +26,19 @@ V2 (合成の評価、設計チェーンは回さない):
       広げない。広げた窓は N を ±(半幅 + ΔM_safe) まで評価して窓の外の境目を見る
   (m) カードの YAML の要約 (wt_card の `_mknot_record` → `_mknot_yaml_summary`、§4.4; 設計チェーンは回さない): 掃引の表は card_log だけ、
       YAML の `_card.M_knot_rule` の行 ≤ 4 kB、card_log の記録の sha256 で結び、`mknot_card_log_check` で照合できる
+  (n) 境目の探し直しの上限 (§5.1 #3d、result 段レビュー M1 の反例): 成立 M ≥ 2.0037、不成立の区間 (2.053, 2.055)・(2.105, 2.107)・
+      (2.157, 2.159)、θ = 15 + 10 (M − 2.02)²。境目 + 0.05 の点が次々に次の不成立の区間に落ち、3 回目の選び直しでも境目が増える
+      → select_mknot は未確定 (以前は 2.16 を「距離 0.0529」として返したが、評価表の境目 2.159268 から 0.0007)。区間が 2 つなら
+      3 回目で収まり、評価表から求め直した境目から 0.05 以上の点を選ぶ。ゲートもこの入力 (2.16、と同じ連鎖を窓の中に置いた入力) を
+      PASS にしない (settled・distance が不合格)。reselect_common は既定で例外
+  (o) 窓の外を N と 2N の両方で (§5.1 #3d、result 段レビュー M2 の反例): 入力 2.00・窓 [1.90, 2.10]・θ = 15 + 100 (M − 2.08)²・成立の上限
+      N 2.30 / 2N 2.12 (カードの最終の組と同じく N の ±0.15 の表を渡す) → 2N の境目 [2.12, 2.120625] を見つけ、2.08 (距離 0.04) を
+      除外して 2.07 (= 2.12 − 0.05) を選ぶ (以前は境目なし・距離 ∞ で 2.08 を PASS)。下側の鏡像 (成立の下限 N 1.70 / 2N 1.88、
+      最小 1.92 → 1.93)。広げた窓でも 2N を窓の外まで評価する例 (入力 2.05、最小 1.88、2N の下限 1.84: 半幅 0.2 に広げて 1.89)
 V1b (M6 の目的の回帰): case/42.isobutane_wt/sweep_axislaw_A_MK_summary.csv の L_c 45・50 (n_axis 600) の記録を評価に差し替え、
   境目の距離と同点の規則を切った設定 (ΔM_safe 0、tie 0) で L_c 45 → 2.6・50 → 2.7 を選ぶ (余裕最大の 3.0・3.1 を選んだら取り違え)。
-  既定の設定 (tie 1e-3°・ΔM_safe 0.05) の選択値も記録する (合否なし)。CSV は 0.1 刻みなので格子は coarse = fine = 0.1、原点は
+  既定の設定 (tie 1e-3°・ΔM_safe 0.05) の選択値も記録する (合否なし)。CSV に無い点を不成立にするので、既定の設定では境目 + 0.05 の
+  点が CSV の間の不成立に次々に落ちて境目が収まらず、§5.1 #3d の後は未確定 (例外) になる — それも記録する。CSV は 0.1 刻みなので格子は coarse = fine = 0.1、原点は
   CSV の 1.5 に合わせて M_A = 1.4 (M_d = 6)。CSV に無い点 (0.1 刻みの外・二分法の点・4.0 より上) は「記録なし」= 不成立 (保守側)。
   CSV に無い列: n_crossings_sampled・pileup_pairs_interior・壁 QA の違反は hard_gate (compare_axislaw_D.py の hard) に畳まれている
   → hard_gate True なら 0 / 空、False なら不成立の理由に「hard_gate False」を足す。
@@ -558,6 +568,130 @@ check("(m) mknot_card_log_check: 書いた YAML の要約と card_log の記録�
       and bad_chk["sha256_card_log"] != bad_chk["sha256_yaml"] and bad_y["ok"] is False and bad_y["summary_matches"] is False,
       f"{ok_chk['ok']} / 表 {bad_chk['ok']} {bad_chk['summary_matches']} / 要約 {bad_y['ok']} {bad_y['summary_matches']}")
 
+print("== V2 (n) 境目の探し直しの上限 (§5.1 #3d、result 段レビュー M1 の反例): 上限でも境目が変わるなら未確定")
+GAPS_N = ((2.053, 2.055), (2.105, 2.107), (2.157, 2.159))
+
+
+def chain_fn(lo, gaps, c):
+    """成立 M_K ≥ lo、ただし開区間 gaps は不成立。θ_max = 15 + 10 (M_K − c)² (最小 c は下の境目の近く)。"""
+    def fn(M):
+        if M < lo or any(a < M < b for a, b in gaps):
+            return infeasible(M)
+        return row(M, 15.0 + 10.0 * (M - c) ** 2)
+    return fn
+
+
+def rederived(fn, rows):
+    """評価表 (rows) だけから境目を求め直す (呼び出し側が持つ境目を信じない独立の検算; 二分法済みなら評価は増えない)。"""
+    ev = MS.Evaluator(fn)
+    ev.seed(rows)
+    return MS.find_boundaries(ev, 1e-3)
+
+
+def ends(bs):
+    return [(b["kind"], round(b["feasible_end"], 6)) + ((b["source"],) if "source" in b else ()) for b in bs]
+
+
+f_n = chain_fn(2.0037, GAPS_N, 2.02)
+# 規則から導いた期待: 下の境目 2.00375 + 0.05 = 2.05375 は区間 1 に落ちる (1 回目で区間 1 の境目が増える) → 区間 1 の上の端 2.05531 + 0.05 =
+# 2.10531 は区間 2 (2 回目) → 区間 2 の上の端 2.10707 + 0.05 = 2.15707 は区間 3 (3 回目でも増える) → 上限 3 回で未確定
+try:
+    sel(f_n)
+    check("(n) 区間 3 つ: select_mknot は未確定 (例外)", False)
+except MS.MknotUndeterminedError as e:
+    res_n = e.result
+    bl = res_n["boundaries_latest"]
+    check("(n) 区間 3 つ: 境目 + 0.05 の点が 3 回とも次の区間に落ち、3 回目の選び直しでも境目が増える → 未確定 (古い境目での選択 2.16 は"
+          "返さない; 選択に使った境目からは 0.0529 だが評価表から求め直した境目 2.159268 からは 0.0007)",
+          "未確定" in str(e) and "返さない" in str(e) and near(res_n["chosen_stale"], 2.16) and res_n["distance_stale_latest"] < 1e-3
+          and len(res_n["boundaries_used"]) == 5 and len(bl) == 7 and abs(bl[-1]["feasible_end"] - 2.159268) < 1e-5
+          and len(e.table) == len(res_n["rows_N"]) > 0 and MS._same_boundaries(rederived(f_n, e.table), bl),
+          f"stale {res_n['chosen_stale']!r} 距離 {res_n['distance_stale_latest']!r} 境目 {ends(bl)}")
+f_n2 = chain_fn(2.0037, GAPS_N[:2], 2.02)
+r_n2 = sel(f_n2)
+b_n2 = rederived(f_n2, r_n2["table"])
+check("(n) 区間 2 つ: 3 回目の選び直しで境目が収まる → 評価表から求め直した境目から ≥ 0.05 の点 (区間 2 の上の端 + 0.05) を選ぶ",
+      MS._same_boundaries(b_n2, r_n2["boundaries"]) and len(b_n2) == 5 and MS.boundary_distance(r_n2["chosen"], b_n2) >= 0.05 - 1e-9
+      and near(r_n2["chosen"], b_n2[-1]["feasible_end"] + 0.05, 1e-9) and sum("選び直した" in w for w in r_n2["warnings"]) == 2,
+      f"chosen {r_n2['chosen']!r} 境目 {ends(b_n2)} 警告 {len(r_n2['warnings'])}")
+g_n = MS.resolution_gate(None, 2.16, 600, workers=(1, 1), eval_factory=lambda n: f_n, raise_on_fail=False)
+d_n = MS.boundary_distance(g_n["chosen_N"], MS.conservative_boundaries(rederived(f_n, g_n["rows_N"]), rederived(f_n, g_n["rows_2N"])))
+check("(n) ゲート (入力 2.16、同じ評価): PASS にしない — 選び直しの境目の探し直しが上限で収まらず settled 不合格、評価表から求め直した"
+      "境目まで 0.0007 で distance 不合格 (以前は全部の判定が成立して PASS)",
+      g_n["pass"] is False and g_n["checks"]["settled"] is False and g_n["checks"]["distance"] is False and d_n < 0.05
+      and near(g_n["distance_to_conservative_boundary"], d_n, 1e-12), f"{g_n['checks']} 距離 {d_n!r}")
+f_ng = chain_fn(2.2037, tuple((a + 0.2, b + 0.2) for a, b in GAPS_N), 2.22)       # 同じ連鎖をゲートの窓 2.20〜2.40 の中に置く
+try:
+    MS.resolution_gate(None, 2.30, 600, workers=(1, 1), eval_factory=lambda n: f_ng)
+    check("(n) ゲート (連鎖を窓の中に置く): 未確定 (例外)", False)
+except MS.MknotUndeterminedError as e:
+    r_ = e.result
+    check("(n) ゲート (連鎖を窓の中に置く): 上限で境目が収まらない → 未確定 (窓は広げない; 以前は 2.36 を PASS)",
+          r_["checks"]["settled"] is False and r_["n_widen"] == 0 and "上限" in r_["widen"][-1]["action"]
+          and r_["widen"][-1]["settled"] is False and "収まらない" in str(e), f"{r_['checks']} {r_['widen'][-1]['action']}")
+win_n = [round(2.30 + 0.01 * j, 12) for j in range(-10, 11)]
+evN_n, ev2_n = MS.Evaluator(f_ng), MS.Evaluator(f_ng)
+rN_n = [dict(r, role="window") for r in evN_n.many(win_n, "window")]
+r2_n = [dict(r, role="window") for r in ev2_n.many(win_n, "window")]
+try:
+    MS.reselect_common(evN_n, ev2_n, rN_n, r2_n, tie_deg=1e-3, dM_safe=0.05, bisect_tol=1e-3, safe_range=(win_n[0], win_n[-1]),
+                       candidate_roles=("window", "safe"))
+    check("(n) reselect_common (既定 raise_unsettled): 上限で境目が収まらなければ例外", False)
+except MS.MknotUndeterminedError as e:
+    check("(n) reselect_common (既定 raise_unsettled): 上限で境目が収まらなければ例外 (表つき; 古い境目での選択を返さない)",
+          e.result["stage"] == "reselect_common" and len(e.table) > 0 and "使わない" in str(e), str(e).splitlines()[0][:160])
+
+print("== V2 (o) 窓の外を N と 2N の両方で (§5.1 #3d、result 段レビュー M2 の反例)")
+
+
+def limit_pair(side, limN, lim2, c):
+    """成立の上限 (side 'upper') / 下限 ('lower') が N と 2N で違う評価の組。θ_max = 15 + 100 (M_K − c)²。"""
+    def mk(lim):
+        def fn(M):
+            if (M > lim) if side == "upper" else (M < lim):
+                return infeasible(M)
+            return row(M, 15.0 + 100.0 * (M - c) ** 2)
+        return fn
+    return mk(limN), mk(lim2)
+
+
+def same_as_table(g, fN, f2):
+    """ゲートの境目 (common_boundaries) が評価表から求め直した境目と同じ (距離の判定は評価表の境目で行う)。"""
+    rb = MS.conservative_boundaries(rederived(fN, g["rows_N"]), rederived(f2, g["rows_2N"]))
+    return [(b["kind"], b["lo"], b["hi"], b["source"]) for b in rb] == [(b["kind"], b["lo"], b["hi"], b["source"]) for b in g["common_boundaries"]]
+
+
+# 規則から導いた期待: 2N の窓の外 (±0.15) の評価で 2N だけの境目 (成立側の端 2.12 / 1.88) が見つかり、最小 2.08 / 1.92 は距離 0.04 で
+# 除外 → 境目 + 0.05 の点 2.07 / 1.93 (θ 15.01; 同点の集合はこの 1 点) を選び、窓の内部・両方の解像度で成立・距離 0.05 で PASS。
+# 出力は chosen_N (§4.2) なので入力 2.00 からは 0.07 動く (カードでは r_t の固定点のやり直しになる)
+for side, limN, lim2, c, want_b, want_c in (("upper", 2.30, 2.12, 2.08, (2.12, 2.120625), 2.07),
+                                           ("lower", 1.70, 1.88, 1.92, (1.879375, 1.88), 1.93)):
+    fN_o, f2_o = limit_pair(side, limN, lim2, c)
+    ctx_o = [dict(fN_o(round(2.00 + 0.01 * j, 12)), role="context") for j in range(-15, 16)]     # カードの最終の組と同じ N の ±0.15
+    g_o = MS.resolution_gate(None, 2.00, 600, select_result={"settings": {}, "table": ctx_o}, workers=(1, 1),
+                             eval_factory=lambda n, fN_o=fN_o, f2_o=f2_o: fN_o if n == 600 else f2_o, raise_on_fail=False)
+    b2_o = [b for b in g_o["common_boundaries"] if b["source"] == "2N"]
+    check(f"(o) {side}: 2N を窓の外まで評価して 2N だけの境目 [{want_b[0]}, {want_b[1]}] を見つけ、最小 {c} (距離 0.04 < 0.05) を除外して "
+          f"{want_c} を選ぶ (以前は境目なし・距離 ∞ で {c} を PASS)",
+          len(b2_o) == 1 and b2_o[0]["kind"] == side and near(b2_o[0]["lo"], want_b[0]) and near(b2_o[0]["hi"], want_b[1])
+          and not [b for b in g_o["common_boundaries"] if b["source"] == "N"]
+          and near(MS.boundary_distance(c, g_o["common_boundaries"]), 0.04, 1e-9)
+          and any(near(x, c) for x in g_o["rule_N"]["excluded_by_distance"]) and any(near(x, c) for x in g_o["rule_2N"]["excluded_by_distance"])
+          and g_o["pass"] and near(g_o["chosen_N"], want_c) and near(g_o["chosen_2N"], want_c)
+          and g_o["distance_to_conservative_boundary"] >= 0.05 - 1e-9 and g_o["distance_2N"] >= 0.05 - 1e-9
+          and any(r.get("role") == "context" and abs(r["M_K"] - 2.00) > 0.1 + 1e-9 for r in g_o["rows_2N"])
+          and same_as_table(g_o, fN_o, f2_o),
+          f"pass {g_o['pass']} chosen {g_o['chosen_N']!r}/{g_o['chosen_2N']!r} 境目 {ends(g_o['common_boundaries'])} {g_o['checks']}")
+fN_w, f2_w = limit_pair("lower", 1.50, 1.84, 1.88)
+g_w = MS.resolution_gate(None, 2.05, 600, workers=(1, 1), eval_factory=lambda n: fN_w if n == 600 else f2_w, raise_on_fail=False)
+check("(o) 広げた窓: 半幅 0.1 では選択 1.95 が窓の端 → 0.2 に広げ、2N の窓の外 (1.80〜1.84) で 2N だけの下の境目 1.84 を見つけ、最小 1.88 "
+      "(距離 0.04) を除外して 1.89 (以前は 2N の窓の外を見ずに 1.88 を PASS)",
+      g_w["pass"] and g_w["n_widen"] == 1 and near(g_w["chosen_N"], 1.89) and near(g_w["chosen_2N"], 1.89)
+      and [(b["kind"], b["source"]) for b in g_w["common_boundaries"]] == [("lower", "2N")]
+      and near(g_w["common_boundaries"][0]["feasible_end"], 1.84) and any(near(x, 1.88) for x in g_w["rule_N"]["excluded_by_distance"])
+      and same_as_table(g_w, fN_w, f2_w),
+      f"pass {g_w['pass']} 広げた {g_w['n_widen']} chosen {g_w['chosen_N']!r}/{g_w['chosen_2N']!r} 境目 {ends(g_w['common_boundaries'])}")
+
 # ---------------------------------------------------------------------------------------------------------------------
 print("== V1b M6 の目的の回帰 (sweep_axislaw_A_MK_summary.csv、n_axis 600)")
 recs = {}
@@ -598,14 +732,18 @@ for L_c, want, want_margin in ((45.0, 2.6, 3.0), (50.0, 2.7, 3.1)):
     feas = [x for x in feas if x["ok"]]
     mx = max(feas, key=lambda x: x["margin_deg"])
     r_off = MS.select_mknot(fn, 1.4, 6.0, coarse=0.1, fine=0.1, tie_deg=0.0, dM_safe=0.0, workers=1)
-    r_def = MS.select_mknot(fn, 1.4, 6.0, coarse=0.1, fine=0.1, workers=1)
-    v1b[L_c] = (r_off["chosen"], r_def["chosen"])
+    try:
+        r_def = MS.select_mknot(fn, 1.4, 6.0, coarse=0.1, fine=0.1, workers=1)
+        def_txt, def_chosen = (f"選択 {r_def['chosen']!r} ({r_def['reason']}; 境目 "
+                               f"{[(x['kind'], round(x['feasible_end'], 4)) for x in r_def['boundaries']]})"), r_def["chosen"]
+    except MS.MknotUndeterminedError as e:          # CSV に無い点 = 不成立で境目 + 0.05 の点が連鎖する (§5.1 #3d の後は未確定)
+        def_txt, def_chosen = f"未確定 ({str(e).splitlines()[0][:200]})", None
+    v1b[L_c] = (r_off["chosen"], def_chosen)
     check(f"V1b L_c {L_c:g}: CSV の記録 26 点 (1.5〜4.0)", len(tab) == 26, f"{len(tab)} 点")
     check(f"V1b L_c {L_c:g}: 余裕最大は {want_margin} (取り違えの検出の前提)", near(mx["M_K"], want_margin, 1e-6), f"{mx['M_K']}")
     check(f"V1b L_c {L_c:g}: 規則を切った設定 (ΔM_safe 0・tie 0) で {want} を選ぶ", near(r_off["chosen"], want, 1e-6),
           f"chosen {r_off['chosen']!r} θ {r_off['chosen_row']['theta_max_deg']:.4f}° 余裕 {r_off['chosen_row']['margin_deg']:.3f}°")
-    print(f"   L_c {L_c:g}: 既定の設定 (tie 1e-3°・ΔM_safe 0.05、格子 0.1) の選択 {r_def['chosen']!r} ({r_def['reason']}; "
-          f"境目 {[(x['kind'], round(x['feasible_end'], 4)) for x in r_def['boundaries']]}) — 記録 (合否なし)")
+    print(f"   L_c {L_c:g}: 既定の設定 (tie 1e-3°・ΔM_safe 0.05、格子 0.1) の {def_txt} — 記録 (合否なし)")
 print(f"   V1b の選択値 (規則を切った設定, 既定の設定): {v1b}")
 
 print(f"\n{'ALL OK' if FAIL == 0 else f'{FAIL} FAIL'}")

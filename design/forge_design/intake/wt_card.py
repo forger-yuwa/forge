@@ -21,6 +21,7 @@ plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §
    最初の r_t で `mknot_select.select_mknot` → `resolution_gate` (規則 min_theta_max_v1) の `chosen_N` を選び、r_t の固定点の間は固定する。
    収束した最終の組で詰めと解像度のゲートを回し直し、`chosen_N` が固定点に使った M_K から 0.01 を超えて動いたら r_t の固定点をやり直す
    (最大 2 回)。ゲートで選び直した値が詰めの窓の端なら、窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す (上限でも端なら例外; §5.1 #3b)。
+   ゲートは窓の外 ±(半幅 + ΔM_safe) を N・2N の両方で評価し、境目の探し直しが上限 (3 回) で収まらなければ例外 (§5.1 #3d)。
    記録は card_log の `M_knot_rule` (掃引の表を含む全部)・YAML の `_card.M_knot_rule` (要約だけ; card_log の記録の sha256 で結ぶ)・
    YAML のコメント。数値の `overrides: {geometry.M_knot: x}` は今と同じ (探索しない)。
 
@@ -1361,7 +1362,7 @@ class _Retry(Exception):
 # ---------------------------------------------------------------------------------------------------- M_knot の自動の選択 (記録)
 
 MKNOT_GATE_HALF_WIDTHS = (0.1, 0.2, 0.3)   # ゲートの窓の半幅の列 (§4.2 窓の端の選択; mknot_select.GATE_HALF_WIDTHS と同じ値を明示して渡す)
-MKNOT_GATE_HALF_WIDTH = MKNOT_GATE_HALF_WIDTHS[0]   # 詰めとゲートの最初の窓の半幅 (最終の組の N の文脈 ±(この値 + ΔM_safe) の幅)
+MKNOT_GATE_HALF_WIDTH = MKNOT_GATE_HALF_WIDTHS[0]   # 詰めとゲートの最初の窓の半幅 (窓の外の文脈 ±(この値 + ΔM_safe) は N・2N とも)
 _MKNOT_ROW_KEYS = ("M_K", "ok", "reasons", "role", "theta_max_deg", "margin_deg", "min_sin_angle", "mpp_sign_changes", "x_K", "L_c",
                    "moc_gate_ok", "moc_gate_pass", "n_axis")
 
@@ -1650,9 +1651,9 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     M_knot が自動のカード (plan tooling-nozzle-mknot-auto §4.3; knot の軸則のとき):
     - 最初の r_t (径/2、`--r-throat` ならその値) で `select_mknot` → `resolution_gate`、出力の `chosen_N` を r_t の固定点の M_K に固定する。
       上の自動調整 (n_axis_inv の倍化・L_total_tol の緩和・x_end_margin の変更) が起きたら、その geometry で最初の r_t から選び直す。
-    - 収束した最終の組 (r_t, M_K, 実効の geometry) で詰め (±0.1、0.01 刻み) と解像度のゲートを回す (最初の r_t と違えば N の評価は
-      ±(0.1 + ΔM_safe) に広げて境目を求める)。`chosen_N` と固定点に使った M_K の差 > 0.01 なら chosen_N で r_t の固定点を前の r_t から
-      やり直す (最大 MKNOT_REDO_MAX 回、超えたら RuntimeError)。差 ≤ 0.01 で値が違えば、出力する組 (chosen_N、最後の r_t) で r_t の固定点の
+    - 収束した最終の組 (r_t, M_K, 実効の geometry) で詰め (±0.1、0.01 刻み) と解像度のゲートを回す (ゲートは N と 2N の両方を
+      ±(半幅 + ΔM_safe) まで評価して、それぞれの解像度で境目を求める; §5.1 #3d)。`chosen_N` と固定点に使った M_K の差 > 0.01 なら
+      chosen_N で r_t の固定点を前の r_t からやり直す (最大 MKNOT_REDO_MAX 回、超えたら RuntimeError)。差 ≤ 0.01 で値が違えば、出力する組 (chosen_N、最後の r_t) で r_t の固定点の
       1 回を回し直して寸法の残差を確かめる (|Δr_t|/r_t ≤ rel_tol でなければやり直しに数える)。出力する組の最終の設計チェーンの θ_max が
       ゲートのその組の評価と一致することも確かめる (`_mknot_record`)。
     - ゲートで選び直した値 (同点の規則の後) が詰めの窓の端なら、同じ組のまま窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す
@@ -1912,9 +1913,10 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         mk["t"] += time.time() - t0
 
     def mk_gate(rt, M_c):
-        """(rt, M_c) を中心に詰めと解像度のゲート。同じ r_t・geometry の探索の表があれば再利用し、無ければ N の評価を
-        ±(最初の半幅 + ΔM_safe) に広げて境目を求める (窓の候補から ΔM_safe 以内の境目を全部見るため)。ゲートが窓を広げたときの
-        窓の外の文脈 ±(広げた半幅 + ΔM_safe) は resolution_gate が N で評価する。"""
+        """(rt, M_c) を中心に詰めと解像度のゲート。同じ r_t・geometry の探索の表があれば再利用し、無ければ評価を作り直す。
+        窓の外の文脈 ±(半幅 + ΔM_safe) は、初回の窓・広げた窓とも resolution_gate が **N と 2N の両方**で評価して、それぞれの
+        解像度で境目を求める (plan §4.4・§5.1 #3d、result 段レビュー M2: 以前はここで N だけを ±(0.1 + ΔM_safe) に広げていて、
+        2N にだけある窓の外の境目を見落とした)。"""
         from ..evaluate import mknot_select as MS
         base = mk_base(rt, M_K=M_c)
         N, sel = mk["N"], mk["sel"]
@@ -1925,14 +1927,10 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             ctx = {"settings": st, "table": list(mk["seedN"].values())}
             seed2, how = list(mk["seed2"].values()), "最初の r_t と同じ組 (探索とゲートの評価を再利用)"
         else:
-            n = int(round((MKNOT_GATE_HALF_WIDTH + st["dM_safe"]) / st["fine"]))
-            Ms = [round(M_c + j * st["fine"], 12) for j in range(-n, n + 1)]
-            mlog(f"最終の組 r_t {rt!r} m: M_K {M_c!r} の前後 ±{MKNOT_GATE_HALF_WIDTH + st['dM_safe']:g} を n_axis_inv {N} で評価 "
-                 f"({len(Ms)} 点、並列 {wk['N']})")
-            with MS.Evaluator(MS.make_eval_fn(base, N), wk["N"], mlog) as ev:
-                ev.many(Ms, "context")
-                ctx = {"settings": st, "table": ev.table()}
-            seed2, how = None, "最終の組で詰め直し (N は ±(半幅 + ΔM_safe))"
+            mlog(f"最終の組 r_t {rt!r} m: M_K {M_c!r} の前後 ±{MKNOT_GATE_HALF_WIDTH + st['dM_safe']:g} を n_axis_inv {N}・{2 * N} の"
+                 f"両方で評価 (resolution_gate の窓と窓の外の文脈、並列 {wk['N']}・{wk['2N']})")
+            ctx = {"settings": st, "table": []}
+            seed2, how = None, "最終の組で詰め直し (N・2N とも ±(半幅 + ΔM_safe))"
         g = MS.resolution_gate(base, M_c, N, select_result=ctx, seed_2N=seed2, half_widths=MKNOT_GATE_HALF_WIDTHS,
                                workers=(wk["N"], wk["2N"]), log=mlog)
         if mk_key(rt) == mk["key"]:
