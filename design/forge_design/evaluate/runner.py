@@ -684,6 +684,9 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
             "scale_m": scale, "exit_1d": exit1d,
             "mesh": {"ni": mp.ni, "nj": mp.nj, "cells": int(quads.shape[0])}}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
+    # 計算の後の判定の仕様 (機種の既定: CPG は check_quasisteady の既定の量; plan tooling-convergence-and-wall-resolution-gates §4.6-1)
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_snapshot("runner.prepare (CPG)"))
     return info
 
 
@@ -933,6 +936,9 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
             **({"bell_mode": bell_mode(p)} if bell_mode(p) else {}), **({"flow_model": "euler"} if euler else {}),
             **(extra_info or {}), "environment": _environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    # 計算の後の判定の仕様 (機種の既定: tp_gates (ii) の列; plan tooling-convergence-and-wall-resolution-gates §4.6-1)
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_bell("runner.prepare (TP)"))
     return info
 
 
@@ -993,9 +999,12 @@ def _smooth_wall_entropy(h5path, gamma: float, cp: float, npass: int = 10, gas=N
 
 
 def run_forge(run_dir) -> int:
-    """run_case.sh 経由で forge を実行 (収束判定・残差 png も生成される)。"""
+    """run_case.sh 経由で forge を実行 (収束の副判定・残差 png も生成される)。`FORGE_JUDGE_DEFER=1` を渡すので run_case.sh の
+    `judge_run.py` は段の結果だけを記録する (`state: deferred`)。**総合の判定は呼んだ側が出力の整理の後に `judge.finalize` で一度だけ
+    確定する** (段階起動は `judge.Staged`; plan tooling-convergence-and-wall-resolution-gates §4.6-2・§5.1 #12)。"""
+    from . import judge as J
     r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())],
-                       env=_ENV, capture_output=True, text=True)
+                       env=J.defer_env(_ENV), capture_output=True, text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
     return r.returncode
 
@@ -1076,19 +1085,22 @@ def run_staged_tp(problem_path, run_dir, warm_from=None, stages=None) -> dict:
     plan = tp_stage_plan(p, stages)
     if warm_from is None and plan[0][1] != "soft":
         raise ValueError("TP の冷間 IC は soft 段で起動する (recommended-settings §1.2)")
+    from . import judge as J
     info = prepare(problem_path, run_dir, nsteps=plan[0][2], warm_from=warm_from, stage=plan[0][1])
     run_dir = Path(run_dir)
     bc_text = (run_dir / "bcondConfig.yaml").read_text()
     sm = _stage_manifest_cls()(run_dir)
-    for k, (tag, st, n, oi) in enumerate(plan):
-        last = _tp_stage_run(p, run_dir, sm, bc_text, tag, st, n, oi)
-        if k == len(plan) - 1:
-            break
-        _restart_same_mesh(last, run_dir / "nozzle.h5")          # 同一メッシュ: index コピー
-        for f in run_dir.glob("res_*"):
-            f.unlink()
-    info["stages"] = [{"tag": t, "stage": s, "nStepOuter": n, "outStepInterval": oi} for t, s, n, oi in plan]
-    (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    # 総合の判定は全段の後に 1 度だけ (段の途中の例外でも起動していれば; 系列 thrust_history.csv は確定の時点に書く)
+    with J.Staged(run_dir, "runner.run_staged_tp", series=lambda: write_thrust_history_run(p, run_dir)):
+        for k, (tag, st, n, oi) in enumerate(plan):
+            last = _tp_stage_run(p, run_dir, sm, bc_text, tag, st, n, oi)
+            if k == len(plan) - 1:
+                break
+            _restart_same_mesh(last, run_dir / "nozzle.h5")          # 同一メッシュ: index コピー
+            for f in run_dir.glob("res_*"):
+                f.unlink()
+        info["stages"] = [{"tag": t, "stage": s, "nStepOuter": n, "outStepInterval": oi} for t, s, n, oi in plan]
+        (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
     return info
 
 
@@ -1147,7 +1159,11 @@ def continue_tp(problem_path, src_run, new_run, nsteps=None) -> dict:
     info = {**info_src, "run_dir": str(new_run), "continued_from": str(res[-1].resolve()),
             "stages": info_src.get("stages", []) + [{"tag": tag, "stage": "main", "nStepOuter": n, "outStepInterval": oi}]}
     (new_run / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
-    _tp_stage_run(p, new_run, sm, bc_text, tag, "main", n, oi)
+    # 判定の仕様 (manifest に親の段を写したので収束は auto = 親の本段と連結した区間) と、本段の後の総合の判定の確定
+    from . import judge as J
+    J.write_spec(new_run, J.spec_bell("runner.continue_tp"))
+    with J.Staged(new_run, "runner.continue_tp", series=lambda: write_thrust_history_run(p, new_run)):
+        _tp_stage_run(p, new_run, sm, bc_text, tag, "main", n, oi)
     return info
 
 
@@ -1191,6 +1207,12 @@ def continue_cpg(problem_path, src_run, new_run, nsteps=None) -> dict:
     info = json.loads(ip.read_text()) if ip.exists() else {"problem": str(problem_path)}
     info = {**info, "run_dir": str(new_run), "nsteps": n, "continued_from": str(res[-1].resolve())}
     (new_run / "prepare_info.json").write_text(json.dumps(info, indent=1))
+    # 判定の仕様: 継続元と同じ数値設定 (stage_manifest の hard キー; opt/polish のチャンク) なら収束は継続元の床から
+    # (`--from-floor`)、違えば (opt/driver の soft → 本段) auto。起動と総合の判定の確定は呼び出し側 (run_forge → judge.finalize)
+    from . import judge as J
+    same = J.same_numerics((src_run / "solverConfig.yaml").read_text(), (new_run / "solverConfig.yaml").read_text(),
+                           (src_run / "bcondConfig.yaml").read_text(), (new_run / "bcondConfig.yaml").read_text())
+    J.write_spec(new_run, J.spec_snapshot("runner.continue_cpg", from_floor=(os.path.relpath(src_run, new_run) if same else None)))
     return info
 
 
@@ -1252,6 +1274,11 @@ def write_thrust_history(path, rows) -> Path:
         for o in rows:
             w.writerow([o["step"]] + [("" if o.get(c) is None else repr(float(o[c]))) for c in THRUST_HISTORY_COLS])
     return path
+
+
+def write_thrust_history_run(p: Problem, run_dir) -> Path:
+    """判定の系列 (`judge.spec_bell` の thrust_history.csv) を確定の時点に書く: collect と同じ `thrust_history_tp` → `write_thrust_history`。"""
+    return write_thrust_history(Path(run_dir) / "thrust_history.csv", thrust_history_tp(p, run_dir))
 
 
 def collect(problem_path, run_dir) -> dict:
@@ -1351,9 +1378,12 @@ def main(argv=None):
     print(json.dumps(info, indent=1))
     if a.prepare_only:
         return 0
-    rc = run_forge(a.run_dir)
-    out = collect(a.problem, a.run_dir)
-    print(json.dumps(out, indent=1))
+    # 1 段の run: 出力の整理 (collect が thrust_history.csv を書く) の後に総合の判定を確定する (関門で止まった起動は判定しない)
+    from . import judge as J
+    with J.Staged(a.run_dir, "runner.main"):
+        rc = run_forge(a.run_dir)
+        out = collect(a.problem, a.run_dir)
+        print(json.dumps(out, indent=1))
     return rc
 
 

@@ -22,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..evaluate import judge
 from ..evaluate import runner
 from ..probdef import load_problem
 from .ehvi import nondominated_mask
@@ -70,9 +71,11 @@ def polish_run(prob_yaml, run_dir, eta0: float, tol: float = 3e-4,
         if not nd.exists():  # 再開可能
             # 同一形状の継続: 前のチャンクの変換済みの格子を写し、最終場を段終了ゲート + restart_field.py で初期場に
             # (`runner.continue_cpg`; 2026-10-15 まで prepare で格子を作り直して interp_field.py。plan
-            # tooling-generator-defaults-and-launch-gate §5.1 #19)
+            # tooling-generator-defaults-and-launch-gate §5.1 #19)。判定の仕様 (同じ数値設定なので継続元の床から) は continue_cpg が書き、
+            # 総合の判定は起動の後に 1 度だけ確定する (CPG の判定の量は res から; plan tooling-convergence-and-wall-resolution-gates §4.6-2)
             runner.continue_cpg(prob_yaml, prev, nd)
-            runner.run_forge(nd)
+            with judge.Staged(nd, "opt.polish.polish_run (CPG のチャンク)"):
+                runner.run_forge(nd)
         out = runner.collect(prob_yaml, nd)
         eta = float(out["eta_cf"])
         hist.append(eta)

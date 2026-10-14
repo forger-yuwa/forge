@@ -266,8 +266,9 @@ def metrics(run, F, euler=None):
 
 
 # ------------------------------------------------------------------ 量別の準定常 VERDICT (--verdicts)
-# check_quasisteady.py の VERDICT と同じ綴りだけを受ける (それ以外は打ち間違いとして拒否する)
-QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING", "NONFINITE")
+# check_quasisteady.py の VERDICT と同じ綴りだけを受ける (それ以外は打ち間違いとして拒否する)。INDETERMINATE (判定不能: step の重複・逆行、
+# 評価量ゼロなど; 2026-10-15 plan tooling-convergence-and-wall-resolution-gates §4.6-3 で check_quasisteady・judge_run が返す) も載せられる
+QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING", "NONFINITE", "INDETERMINATE")
 # 評価量の表の行に対応するキー (判定するのは r/r_w = 0.1 の線; r=0 は併記のみ)。これ以外のキーは表の末尾に別行で載せる
 QS_KEYS = ("wave_eta0.1", "overshoot_eta0.1", "slope_eta0.1", "range_eta0.1", "exit_core_M", "mdot_ratio", "condensation")
 

@@ -61,6 +61,7 @@ import numpy as np
 import yaml
 
 from ..evaluate import config_builder as CB
+from ..evaluate import judge
 from ..evaluate import runner
 from ..geometry.wall import NozzleWall
 from ..probdef import load_problem
@@ -484,7 +485,9 @@ class Campaign:
             # 明示すべきキーを足して書き、段の宣言 RECIPE.json を書く (機種 bell_cpg の soft; config_builder)
             CB.launch_stage(stage, cfg, (stage / "bcondConfig.yaml").read_text(), "soft", "bell_cpg", problem=prob,
                             generator="opt.driver.Campaign.evaluate (CPG の soft)")
-            runner.run_forge(stage)
+            # soft 段の run (別の run dir) の総合の判定を起動の後に確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2)
+            with judge.Staged(stage, "opt.driver.Campaign.evaluate (CPG の soft)"):
+                runner.run_forge(stage)
             sres = sorted(stage.glob("res_[0-9]*.h5"),
                           key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
             if (not sres
@@ -502,8 +505,10 @@ class Campaign:
                 raise
             CB.launch_stage(run_dir, (run_dir / "solverConfig.yaml").read_text(), (run_dir / "bcondConfig.yaml").read_text(),
                             "main", "bell_cpg", problem=prob, generator="opt.driver.Campaign.evaluate (CPG の本段)")
-            runner.run_forge(run_dir)
-            out = runner.collect(prob, run_dir)
+            # 本段の run の総合の判定は出力の整理 (collect) の後に 1 度だけ確定する (仕様は continue_cpg が書いた)
+            with judge.Staged(run_dir, "opt.driver.Campaign.evaluate (CPG の本段)"):
+                runner.run_forge(run_dir)
+                out = runner.collect(prob, run_dir)
             verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text()
             qs = self._quasisteady(run_dir)
             eta = out.get("eta_cf")

@@ -397,7 +397,8 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
 
 
 def _staged_launch(run_dir: Path, sm, bc_text: str, cfg: str, tag: str, launch=None, recipe: dict | None = None) -> int:
-    """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し (`launch`、既定はこのモジュールの run_forge)、
+    """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し (`launch`、既定はこのモジュールの run_forge =
+    `FORGE_JUDGE_DEFER=1`; 総合の判定は呼び出し側が全段の後に `judge.Staged` で確定する)、
     段の履歴を `residual_history_<tag>.csv` に写して `stage_manifest.json` に段を足す (失敗した段も診断用に残す;
     runner_axismach.run_staged と同じ記録の仕方)。walldriven の段階起動も使う (plan tooling-generator-defaults-and-launch-gate
     §4.5・§5.1 #9)。
@@ -472,16 +473,20 @@ def run_staged(problem_path, run_dir, nsteps=None) -> None:
     cfg_soft = CB.set_scalars(cfg_main, {"time.deltaT.cfl": "0.5", "time.deltaT.cfl_pseudo": "0.5", "space.convMethod": "0",
                                          "time.nStepInner": "10", "time.last.nStepOuter": "3000",
                                          "time.outStepInterval": "3000"})
-    _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", recipe=recipe)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"),
-                 key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-    if not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
-        raise RuntimeError("soft 段が失敗")
-    # soft 最終場を nozzle.h5 の IC に移植 (同一メッシュ: 段終了ゲート + restart_field.py の index コピー)
-    _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
-    for f in run_dir.glob("res_*"):
-        f.unlink()
-    _staged_launch(run_dir, sm, bc_text, cfg_main, "main", recipe=recipe)
+    # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は最初の起動の前に、総合は本段の後に 1 度だけ
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_snapshot("runner_wt.run_staged"))
+    with J.Staged(run_dir, "runner_wt.run_staged"):
+        _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", recipe=recipe)
+        res = sorted(run_dir.glob("res_[0-9]*.h5"),
+                     key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+        if not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
+            raise RuntimeError("soft 段が失敗")
+        # soft 最終場を nozzle.h5 の IC に移植 (同一メッシュ: 段終了ゲート + restart_field.py の index コピー)
+        _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+        _staged_launch(run_dir, sm, bc_text, cfg_main, "main", recipe=recipe)
 
 
 def collect(problem_path, run_dir) -> dict:

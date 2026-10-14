@@ -863,7 +863,11 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
 
 
 def run_forge(run_dir) -> int:
-    r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=_ENV, capture_output=True, text=True)
+    """run_case.sh 経由で forge を起動する。`FORGE_JUDGE_DEFER=1` を渡すので run_case.sh の judge_run.py は段の結果だけを記録し、
+    総合の判定は `run_staged` が全段の後に確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2・§5.1 #12)。"""
+    from .judge import defer_env
+    r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=defer_env(_ENV), capture_output=True,
+                       text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
     return r.returncode
 
@@ -975,7 +979,61 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
     (plan §5.1 #19; 次の段の config を渡し、層流暖機 → SST で足す roK・roOmega の初期値を分けて検査する)。
     2026-10-15 (plan §5.1 #11): 段の値 (cfl・段の長さ・次数) は YAML 上の位置で書き換え (`_ladder_cfg`; 層流暖機の turbulence の
     置き換えだけはキーを消すので正規表現のまま)、各段は明示すべきキーを足して宣言を書く (`_launch_stage`)。recipe
-    {family, problem, generator, note, args}: 宣言の文脈 (`_sern_recipe`; args は driver_sern の緩レシピなど引数による段の値)。"""
+    {family, problem, generator, note, args}: 宣言の文脈 (`_sern_recipe`; args は driver_sern の緩レシピなど引数による段の値)。
+
+    計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12、2026-10-15): 最初の起動の前に判定の仕様
+    `JUDGE_SPEC.json` (`judge.spec_sern`: sern_gates の量) を書き、全部の段 (stages=main・none の本段を含む) を FORGE_JUDGE_DEFER=1 で起動して
+    (`run_forge`)、段の記録の後に系列 force_history.csv を書いて (`write_force_series`) 総合の判定を 1 度だけ確定する (`judge.Staged`;
+    段の途中の例外でも起動していれば確定する)。"""
+    from . import judge as J
+    run_dir = Path(run_dir)
+    rcp = _sern_recipe(run_dir, recipe)
+    cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
+        else (run_dir / "solverConfig.yaml").read_text()
+    J.write_spec(run_dir, J.spec_sern(rcp["generator"], viscous=_sern_viscous(run_dir, cfg_main)))
+    with J.Staged(run_dir, rcp["generator"], series=lambda: write_force_series(run_dir, rcp.get("problem"))):
+        return _run_staged(run_dir, stages, soft_steps=soft_steps, soft_cfl=soft_cfl, soft_conv=soft_conv, warm_lam_steps=warm_lam_steps,
+                           warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps, warm_lam_ramp=warm_lam_ramp, soft_ramp=soft_ramp,
+                           warm_src=warm_src, warm_adapt_steps=warm_adapt_steps, recipe=recipe)
+
+
+def _sern_viscous(run_dir, cfg_main: str) -> bool:
+    """目的量の選び方 (sern_gates.objective_key: 壁の摩擦の出力があれば C_T_with_shear) を実行の前に決める: 実効の粘性と no-slip 壁
+    (`judge_run.wall_resolution_applies`) が非粘性と決まるときだけ False (C_T)。決められないときは粘性側 (C_T_with_shear が無ければ判定不能)。"""
+    from .judge import _judge_mod
+    JR = _judge_mod()
+    import yaml_strict
+    try:
+        bc = yaml_strict.load((Path(run_dir) / "bcondConfig.yaml").read_text())
+        cfg = yaml_strict.load(cfg_main)
+    except Exception:  # noqa: BLE001
+        return True
+    return JR.wall_resolution_applies(cfg, bc)[0] is not False
+
+
+def write_force_series(run_dir, problem) -> Path:
+    """判定の系列 force_history.csv (`judge.spec_sern`) を確定の時点に書く: collect と同じ力の計算 (2D `_force_hist`、3D
+    `runner_sern3d._force_hist3d`) → `write_force_history_csv`。力の出力が無ければ ValueError (判定はその量を判定不能にする)。"""
+    if not problem:
+        raise ValueError("問題 YAML が分からない (recipe・prepare_info.json の problem)")
+    run_dir = Path(run_dir)
+    p = load_problem(problem)
+    info = json.loads((run_dir / "prepare_info.json").read_text())
+    if int(info.get("dim", 2) or 2) == 3:
+        from .runner_sern3d import _force_hist3d
+        hist = _force_hist3d(p, run_dir, info)
+    else:
+        hist = _force_hist(p, run_dir, info)
+    if not hist:
+        raise ValueError("力の出力 (壁の境界の res_<名前>_<id>_<step>.h5) が無い")
+    return write_force_history_csv(run_dir / "force_history.csv", hist)
+
+
+def _run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
+                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
+                warm_lam_ramp=None, soft_ramp=None,
+                warm_src=None, warm_adapt_steps: int = 500, recipe: dict | None = None) -> int:
+    """`run_staged` の段の実行 (本体; 判定の仕様と確定は `run_staged`)。"""
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
         else (run_dir / "solverConfig.yaml").read_text()
@@ -1069,17 +1127,22 @@ def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, s
     return _launch_stage(run_dir, sm, cfg_main, "main", recipe)
 
 
+def _force_hist(p, run_dir, info) -> list:
+    """2D の力係数の履歴 (collect と判定の系列 `write_force_series` が共有する; 式は sern_forces.force_history)。"""
+    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]
+    xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
+    return force_history(run_dir, p_a=en["P"], F_ideal=info["F_ideal_N_per_m"], H=H, x_ref=float(xr) * H, y_ref=float(yr) * H,
+                         mdot_u_in=ex["ro"] * ex["u"] ** 2 * H, p_in=ex["P"],
+                         twall_on_fluid=(info.get("discretization", "cell") == "cell"))
+
+
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
     """力係数履歴 + 受理ゲート (plan §5.1 R1)。metrics.json / force_history.csv は out_dir (既定 run_dir) に書く
     (再判定で元 run を汚さない)。rc は forge の終了コード (None なら run_case_stdout.log から読む)。"""
     p = load_problem(problem_path)
     run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
-    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]
-    xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
-    hist = force_history(run_dir, p_a=en["P"], F_ideal=info["F_ideal_N_per_m"], H=H, x_ref=float(xr) * H, y_ref=float(yr) * H,
-                         mdot_u_in=ex["ro"] * ex["u"] ** 2 * H, p_in=ex["P"],
-                         twall_on_fluid=(info.get("discretization", "cell") == "cell"))
+    hist = _force_hist(p, run_dir, info)
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []

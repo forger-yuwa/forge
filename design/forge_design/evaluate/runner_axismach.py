@@ -1203,17 +1203,22 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
         for f in run_dir.glob("res_*"):
             f.unlink()
 
-    if stages != "none":
-        soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
-        _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
-        if mid_stage and stages == "full":
-            mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
-            _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
-    _cfg_check(cfg_main, main_want, "main")
-    cfg_main = _launch_cfg(cfg_main, "main")
-    (run_dir / "residual_history.csv").unlink(missing_ok=True)
-    rc = run_forge(run_dir)
-    _record(cfg_main, "main")
+    # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は最初の起動の前に書き、全部の段を
+    # FORGE_JUDGE_DEFER=1 で起動して (run_forge)、本段の記録の後に総合を 1 度だけ確定する (系列 judge_series.csv は確定の時点に書く)
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_axismach("runner_axismach.run_staged", euler=True))
+    with J.Staged(run_dir, "runner_axismach.run_staged", series=lambda: J.write_axismach_series(run_dir)):
+        if stages != "none":
+            soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
+            _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+            if mid_stage and stages == "full":
+                mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
+                _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
+        _cfg_check(cfg_main, main_want, "main")
+        cfg_main = _launch_cfg(cfg_main, "main")
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)
+        rc = run_forge(run_dir)
+        _record(cfg_main, "main")
     return rc
 
 
@@ -2375,6 +2380,9 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     pre, cfg_main, main_want = ns_stage_configs(cfg_main, stages, ramp, ramp_steps, cfg_pre)
     # 停止規則: 明示の要求なのに使えなければここで例外 (S1 の前・forge を起動しない)。既定の要求で使えなければ sr_why に理由 (本段で UNAVAILABLE)
     sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
+    # 計算の後の判定の仕様 (§4.6-1; 本段で停止規則を使う run は θ_r も)。最初の起動の前に書く
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_axismach("runner_axismach.run_staged_ns", stop_rule=(sr if sr_use else None)))
     (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     (run_dir / SR.STATE).unlink(missing_ok=True)             # 前の呼び出しの停止の状態を今回の結果と取り違えない
     sm = _stage_manifest_cls()(run_dir)
@@ -2426,47 +2434,51 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
             f.unlink()
         return {"tag": tag, "nsteps": nsteps, "config_sha256": sha}
 
-    done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
-    if sr_use:
-        # 停止規則の上限を本段の nStepOuter に (manifest・通知の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
-        cfg_main = _cfg_set(cfg_main, {"nStepOuter": int(sr["cap"])})
-        main_want = {**main_want, "nStepOuter": int(sr["cap"])}
-    _check_wall_profile("main")
-    _cfg_check(cfg_main, main_want, "main")
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    _declare("main", prestage=False)
-    (run_dir / "residual_history.csv").unlink(missing_ok=True)
-    _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
-    state = None
-    if sr_use:
-        w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
-        rc = w["rc"]
-        state = _stop_state_record(run_dir, w, sr)
-        print(f"[stop_rule] 本段: {w['status']} (止めた/最後の出力 {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
-              f"{run_dir / SR.STATE}", flush=True)
-    elif sr_why is not None:
-        # 既定の要求 (キー無しで準備) で使えない: 理由を記録し、本段は prepare の長さ (fallback_steps) で今までどおり回す (forge-f5 の版)
-        n_main = int(main_want["nStepOuter"])
-        urec = {"version": 1, "plan": SR.PLAN, "settings": sr, "status": "UNAVAILABLE", "reason": sr_why,
-                "action": f"停止規則を使わず本段を nStepOuter {n_main} で回す", "started": SR._now()}
-        SR.save_record(run_dir, urec)
-        print(f"[stop_rule] 使えない ({sr_why}) — 本段は {n_main} step", flush=True)
-        rc = run_forge(run_dir)
-        forge_rc = SR._forge_exit(run_dir)
-        urec.update(forge_rc=forge_rc, run_case_rc=int(rc), finished=SR._now())
-        SR.save_record(run_dir, urec)
-        state = {"status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
-                 "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
-                 "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": urec["finished"]}
-    else:
-        rc = run_forge(run_dir)
-        if sr is not None and sr.get("requested"):
-            # prepare は要求したが引数 stop_rule=False で使わなかった: 打ち消したことを状態として残す (受け渡しの関門は NOT_USED と見る)
-            state = {"status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
-                     "cap": None, "fallback_steps": int(sr["fallback_steps"])}
-    _record(cfg_main, "main")
-    if state is not None:
-        SR.write_state(run_dir, state)
+    # 全部の段 (S1・stages=none の本段を含む) を FORGE_JUDGE_DEFER=1 で起動し、本段の記録・停止の状態の記録 (見張りの
+    # stop_rule.postprocess を含む) の後に総合の判定を 1 度だけ確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2)
+    with J.Staged(run_dir, "runner_axismach.run_staged_ns", series=lambda: J.write_axismach_series(run_dir)) as judged:
+        done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
+        if sr_use:
+            # 停止規則の上限を本段の nStepOuter に (manifest・通知の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
+            cfg_main = _cfg_set(cfg_main, {"nStepOuter": int(sr["cap"])})
+            main_want = {**main_want, "nStepOuter": int(sr["cap"])}
+        _check_wall_profile("main")
+        _cfg_check(cfg_main, main_want, "main")
+        (run_dir / "solverConfig.yaml").write_text(cfg_main)
+        _declare("main", prestage=False)
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)
+        _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
+        state = None
+        if sr_use:
+            w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
+            rc = w["rc"]
+            state = _stop_state_record(run_dir, w, sr)
+            print(f"[stop_rule] 本段: {w['status']} (止めた/最後の出力 {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
+                  f"{run_dir / SR.STATE}", flush=True)
+        elif sr_why is not None:
+            # 既定の要求 (キー無しで準備) で使えない: 理由を記録し、本段は prepare の長さ (fallback_steps) で今までどおり回す (forge-f5 の版)
+            n_main = int(main_want["nStepOuter"])
+            urec = {"version": 1, "plan": SR.PLAN, "settings": sr, "status": "UNAVAILABLE", "reason": sr_why,
+                    "action": f"停止規則を使わず本段を nStepOuter {n_main} で回す", "started": SR._now()}
+            SR.save_record(run_dir, urec)
+            print(f"[stop_rule] 使えない ({sr_why}) — 本段は {n_main} step", flush=True)
+            rc = run_forge(run_dir)
+            forge_rc = SR._forge_exit(run_dir)
+            urec.update(forge_rc=forge_rc, run_case_rc=int(rc), finished=SR._now())
+            SR.save_record(run_dir, urec)
+            state = {"status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
+                     "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
+                     "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": urec["finished"]}
+        else:
+            rc = run_forge(run_dir)
+            if sr is not None and sr.get("requested"):
+                # prepare は要求したが引数 stop_rule=False で使わなかった: 打ち消したことを状態として残す (受け渡しの関門は NOT_USED と見る)
+                state = {"status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
+                         "cap": None, "fallback_steps": int(sr["fallback_steps"])}
+        _record(cfg_main, "main")
+        if state is not None:
+            SR.write_state(run_dir, state)
+        judged.solver_rc = (state or {}).get("forge_rc")       # 本段の forge の終了コード (停止規則・UNAVAILABLE の記録; 無ければ判定が決める)
     return StagedRC(rc, state)
 
 

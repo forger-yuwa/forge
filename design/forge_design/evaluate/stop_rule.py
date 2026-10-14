@@ -714,7 +714,8 @@ def delete_after(run_dir, step: int) -> list:
 
 
 def postprocess(run_dir) -> dict:
-    """`run_case.sh` と同じ後処理 (check_convergence.py → CONVERGENCE_VERDICT.txt、plot_implicit_residuals.py → residual_history.png)。"""
+    """`run_case.sh` と同じ後処理 (check_convergence.py → CONVERGENCE_VERDICT.txt、plot_implicit_residuals.py → residual_history.png)。
+    計算の後の判定 (judge_run.py) はここでは回さない: 本段の総合は run_staged_ns が停止の状態の記録の後に `judge.finalize` で確定する。"""
     from .runner import FORGE_TOOLS, _ENV
     run_dir = Path(run_dir)
     with open(run_dir / "CONVERGENCE_VERDICT.txt", "w") as fh:
@@ -861,8 +862,11 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
     recorder = DeltaRecorder(run_dir, euler_ref_spec(sr.get("euler_ref")), ex, uc["x"], 2 * int(th["window"]))
     save_record(run_dir, rec)
     t_launch = time.time()
+    # FORGE_JUDGE_DEFER=1: run_case.sh の judge_run.py は本段の結果だけを記録し、総合の判定は run_staged_ns が停止の状態の記録の後に
+    # 確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2・§5.1 #12)
+    from .judge import defer_env
     with open(run_dir / "run_case_stdout.log", "w") as log:
-        proc = subprocess.Popen([str(FORGE_TOOLS / "run_case.sh"), str(run_dir)], env=_ENV, stdout=log, stderr=subprocess.STDOUT,
+        proc = subprocess.Popen([str(FORGE_TOOLS / "run_case.sh"), str(run_dir)], env=defer_env(_ENV), stdout=log, stderr=subprocess.STDOUT,
                                 start_new_session=True)
     rec["run_case_pid"] = proc.pid
     stop = None                      # {"status", "step", ...}: 見張りが止めると決めた出力

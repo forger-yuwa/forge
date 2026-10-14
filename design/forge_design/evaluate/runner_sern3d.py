@@ -333,14 +333,20 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     return out
 
 
+def _force_hist3d(p, run_dir, info) -> list:
+    """3D の力係数の履歴 (collect と判定の系列 `runner_sern.write_force_series` が共有する)。"""
+    run_dir = Path(run_dir)
+    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]; xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
+    steps = sorted({int(f.stem.split("_")[-1]) for f in run_dir.glob("res_ramp_*_[0-9]*.h5")})
+    return [forces3d(run_dir, s, en["P"], info["F_ideal_N_per_m"], info["half_W_m"], H, float(xr) * H, float(yr) * H,
+                     ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell"),
+                     half_W_vehicle=info.get("half_W_vehicle_m")) for s in steps]
+
+
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
     p = load_problem(problem_path); run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
-    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]; xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
-    steps = sorted({int(f.stem.split("_")[-1]) for f in run_dir.glob("res_ramp_*_[0-9]*.h5")})
-    hist = [forces3d(run_dir, s, en["P"], info["F_ideal_N_per_m"], info["half_W_m"], H, float(xr) * H, float(yr) * H,
-                     ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell"),
-                     half_W_vehicle=info.get("half_W_vehicle_m")) for s in steps]
+    hist = _force_hist3d(p, run_dir, info)
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []

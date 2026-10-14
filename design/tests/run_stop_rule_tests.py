@@ -600,6 +600,26 @@ def test_watcher():
         ms = json.loads((rd / RA.MAIN_STAGE_STARTED).read_text())
         check("REACHED: 通知 MAIN_STAGE_STARTED の本段の nStepOuter = 上限 (見張りの前に書いた)",
               ms["main_config"]["nStepOuter"] == 40000 and ms["time_unix"] <= Path(rd / "run_case_stdout.log").stat().st_mtime)
+        # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12 後半): 本段は FORGE_JUDGE_DEFER=1 で起動し
+        # (run_case.sh の judge_run は段の記録だけ)、停止の状態の記録の後に run_staged_ns が総合を 1 度だけ確定する
+        v = json.loads((rd / "RUN_VERDICT.json").read_text())
+        ck = v.get("checks", {})
+        sp = json.loads((rd / "JUDGE_SPEC.json").read_text())
+        meta = json.loads((rd / "judge_series.json").read_text())
+        check("判定: 停止規則で止めた本段 → state final・段の記録 (deferred) は参考で 1 つ・solver は正常な監視の停止 (143・REACHED)・"
+              "stop_rule PASS・JUDGE_PENDING.json を消した",
+              v["state"] == "final" and len(v.get("stages") or []) == 1 and ck["solver"]["status"] == "PASS"
+              and ck["solver"].get("monitor_stop") and ck["solver"]["rc"] == 143 and ck["stop_rule"]["status"] == "PASS"
+              and ck["stop_rule"]["raw"] == "REACHED" and not (rd / "JUDGE_PENDING.json").exists(),
+              json.dumps({k: (c.get("status"), c.get("reason", "")[:80]) for k, c in ck.items()}, ensure_ascii=False))
+        qn = sorted((ck.get("quasisteady", {}).get("quantities") or {}))
+        check("判定の仕様と系列: 生成器が JUDGE_SPEC.json (出口コア M・質量の収支 (絶対)・θ_r × 3) を書き、系列は停止規則の記録の行 "
+              "(STOP_RULE_STATE.json の record_sha256 と一致) から",
+              sp["source"] == "generator:runner_axismach.run_staged_ns"
+              and [q["name"] for q in sp["quasisteady"]["quantities"]] == ["exit_core_M", "mass_imbalance_r"] + [SR.theta_key(f) for f in SR.X_FRACS]
+              and qn == sorted(q["name"] for q in sp["quasisteady"]["quantities"]) and meta["source"]["kind"] == "stop_rule.json"
+              and meta["source"]["n_rows"] == len(rec["rows"]) and ck["quasisteady"]["quantities"]["mass_imbalance_r"]["criterion"] == "absolute",
+              json.dumps({"qn": qn, "meta": meta}, ensure_ascii=False)[:300])
 
         rd, _ = make_run("reach_ignore_term", {"dt": 0.25, "ignore_term": True}, cap=200000)
         rc, rec, st = run_case(rd)
@@ -612,11 +632,19 @@ def test_watcher():
         check("CENSORED: 上限 30,000 まで正常に回って届かない — **rc は 0 だが状態は CENSORED** (rc で REACHED と取り違えない)",
               rc == 0 and state_ok(rc, st, "CENSORED") and st["stop_step"] == 30000 and st["forge_rc"] == 0 and max(outputs(rd)) == 30000,
               f"{st and st['status']} rc {rc}")
+        v = json.loads((rd / "RUN_VERDICT.json").read_text())
+        check("判定: CENSORED → stop_rule FAIL・総合 FAIL (solver は rc 0 で PASS; 終了コードで合否を決めない)",
+              v["state"] == "final" and v["checks"]["stop_rule"]["status"] == "FAIL" and v["checks"]["solver"]["status"] == "PASS"
+              and v["overall"] == "FAIL", v.get("overall_reason"))
 
         rd, _ = make_run("exec_error", {"dt": 0.05, "exit_at": 15000, "exit_code": 3})
         rc, rec, st = run_case(rd)
         check("EXEC_ERROR: 上限より前の異常終了 (forge rc 3 を取り違えない)",
               rc == 3 and state_ok(rc, st, "EXEC_ERROR") and st["forge_rc"] == 3 and st["last_output"] == 12500, f"{st}")
+        v = json.loads((rd / "RUN_VERDICT.json").read_text())
+        check("判定: solver の異常終了 (forge rc 3) → solver FAIL・stop_rule FAIL (EXEC_ERROR)・総合 FAIL",
+              v["state"] == "final" and v["checks"]["solver"]["status"] == "FAIL" and v["checks"]["solver"]["rc"] == 3
+              and v["checks"]["stop_rule"]["raw"] == "EXEC_ERROR" and v["overall"] == "FAIL", v.get("overall_reason"))
 
         rd, _ = make_run("diverged", {"dt": 0.25, "nan_at": 12500})
         rc, rec, st = run_case(rd)

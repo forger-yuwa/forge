@@ -129,15 +129,20 @@ def run_staged(run_dir, problem_path=None) -> int:
     recipe = {"family": "walldriven", "problem": problem_path, "generator": "runner_walldriven.run_staged"}
     cfg_soft = CB.set_scalars(cfg_main, {"time.deltaT.cfl": "0.5", "time.deltaT.cfl_pseudo": "0.5", "space.convMethod": "0",
                                          "time.last.nStepOuter": "3000", "time.outStepInterval": "3000"})
-    rc = _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", launch=run_forge, recipe=recipe)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"),
-                 key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-    if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
-        raise RuntimeError("soft 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
-    _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
-    for f in run_dir.glob("res_*"):
-        f.unlink()
-    return _staged_launch(run_dir, sm, bc_text, cfg_main, "main", launch=run_forge, recipe=recipe)
+    # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は最初の起動の前に、総合は本段の後に 1 度だけ
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_snapshot("runner_walldriven.run_staged"))
+    with J.Staged(run_dir, "runner_walldriven.run_staged"):
+        rc = _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", launch=run_forge, recipe=recipe)
+        res = sorted(run_dir.glob("res_[0-9]*.h5"),
+                     key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+        if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
+            raise RuntimeError("soft 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
+        _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+        rc = _staged_launch(run_dir, sm, bc_text, cfg_main, "main", launch=run_forge, recipe=recipe)
+    return rc
 
 
 def main(argv=None) -> int:

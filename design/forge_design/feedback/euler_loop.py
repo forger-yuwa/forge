@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import load_problem
 from .. import evaluate
 from ..evaluate.ic import paste_isentropic_ic
+from ..evaluate import judge as J
 from ..evaluate.runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
 from ..evaluate import runner_wt
 
@@ -360,7 +362,10 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
                                     float(p.spec["Pt"]), float(p.spec["Tt"]),
                                     p.gamma, p.cp)
             _declare(rd, fin_pass)
-            run_forge(rd)
+            # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は起動の前に、総合は起動の後に 1 度だけ
+            J.write_spec(rd, J.spec_snapshot("feedback.euler_loop.run_loop (パス)"))
+            with J.Staged(rd, "feedback.euler_loop.run_loop (パス)"):
+                run_forge(rd)
             # === 適応停止: 軸 M 判定が合格 (STEADY / OSCILLATING+平均精度) に
             # なるまで CHUNK 継続 === cold パスにも適用する (正式 PASS は第 1
             # チャンクの過渡で判定するので継続しても壊れない — conv/eff 分離)。
@@ -379,7 +384,14 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
                 # 同じ格子の継続: 段終了ゲート + restart_field.py (旧: interp_field.py; plan §5.1 #19)
                 cd = start_cont_chunk(rd, j, last[1], cfg_chunk)
                 _declare(cd, fin_chunk)
-                run_forge(cd)
+                # 継続チャンクは直前のチャンクと同じ数値設定なら収束をその床から判定する (`--from-floor`)
+                prev_d = Path(last[1]).parent
+                same = J.same_numerics((prev_d / "solverConfig.yaml").read_text(), (cd / "solverConfig.yaml").read_text(),
+                                       (prev_d / "bcondConfig.yaml").read_text(), (cd / "bcondConfig.yaml").read_text())
+                J.write_spec(cd, J.spec_snapshot("feedback.euler_loop.run_loop (継続チャンク)",
+                                                 from_floor=(os.path.relpath(prev_d, cd) if same else None)))
+                with J.Staged(cd, "feedback.euler_loop.run_loop (継続チャンク)"):
+                    run_forge(cd)
         eff = _chunk_dirs(rd)[-1]   # 最終チャンク = 評価に使う場
         res = sorted(eff.glob("res_[0-9]*.h5"), key=_steps_of)
         prev_res = res[-1]
