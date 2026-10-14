@@ -16,6 +16,9 @@
 | 〃 `classify_series` | step が全点 NaN・値は一定 | `STEADY` |
 | `check_mesh_quality` | 体積ゼロの四面体 | AR 1.732 / skew 0.500 = 通常合格 |
 | 〃 | 1001 セル中 1 セルが NaN 座標 | `SOFT-PASS`, exit 0 |
+
+`mesh_provenance.py check` (2026-10-15 新設、plan tooling-generator-defaults-and-launch-gate §5.1 #7) も記録の無い・壊れた・
+別メッシュの記録を合格にしないことをここで見る。
 """
 import csv
 import os
@@ -246,6 +249,49 @@ def main():
     chk("単引用符でも層流と SST が別キー", sm.stage_key(sq_l, "") != sm.stage_key(sq_s, ""),
         "none=%s sst=%s" % (sm.stage_key(sq_l, "").get("turbulence.model"),
                             sm.stage_key(sq_s, "").get("turbulence.model")))
+
+    # メッシュの来歴 (mesh_provenance.py check、plan tooling-generator-defaults-and-launch-gate §5.1 #7)。
+    # 記録が無い・壊れている・別メッシュのものを「照合できた」にしない (詳しい負例は tests/unit/test_mesh_provenance.py)。
+    print("=== mesh_provenance: 記録の無い・壊れた・別メッシュの記録 ===")
+    import mesh_provenance as mpv
+    mp_tool = os.path.join(HERE, "mesh_provenance.py")
+
+    def mp_run(d, shift=0.0):
+        with h5py.File(os.path.join(d, "mesh.h5"), "w") as f:
+            f.create_dataset("MESH/COORD", data=np.array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0], float) + shift)
+            f.create_dataset("MESH/CONNE", data=np.array([5, 0, 1, 2, 3], np.int64))
+            f.create_dataset("VALUE/ro", data=np.ones(1, np.float32))
+            f.create_dataset("VALUE/wall_dist", data=np.ones(1))
+            f.create_dataset("BCONDS/1/iCells", data=np.array([0], np.int64))
+            f["BCONDS/1"].attrs["bcondKind"] = "wall"
+        cfg = 'mesh: {meshFileName: "mesh.h5", valueFileName: "mesh.h5", discretization: "cell"}\n'
+        bc = "wall: {physID: 1, kind: wall, outputHDFflg: 0, ints: , floats: }\n"
+        for nm, txt in (("solverConfig.yaml", cfg), ("bcondConfig.yaml", bc)):
+            with open(os.path.join(d, nm), "w") as fh:
+                fh.write(txt)
+        return cfg, bc
+
+    def mp_check(d):
+        r = subprocess.run([sys.executable, mp_tool, "check", d], capture_output=True, text=True)
+        return r.returncode, (r.stdout.strip().splitlines() or [""])[-1]
+
+    da, db = tempfile.mkdtemp(), tempfile.mkdtemp()
+    cfg, bc = mp_run(da)
+    rc, last = mp_check(da)
+    chk("記録の無いメッシュ -> 非ゼロ終了", rc != 0 and last == "VERDICT: FAIL", "rc=%d %s" % (rc, last))
+    mpv.write_record(os.path.join(da, "mesh.h5"), mpv.build_record(os.path.join(da, "mesh.h5"), cfg, bc))
+    rc, last = mp_check(da)
+    chk("正常な記録 -> 従来どおり合格", rc == 0 and last == "VERDICT: PASS", "rc=%d %s" % (rc, last))
+    mp_run(db, shift=0.5)
+    shutil.copy(os.path.join(da, "mesh.h5.provenance.json"), os.path.join(db, "mesh.h5.provenance.json"))
+    rc, last = mp_check(db)
+    chk("別メッシュの記録 -> 非ゼロ終了", rc != 0 and last == "VERDICT: FAIL", "rc=%d %s" % (rc, last))
+    with open(os.path.join(da, "mesh.h5.provenance.json"), "w") as fh:
+        fh.write("{")
+    rc, last = mp_check(da)
+    chk("壊れた記録 -> 非ゼロ終了", rc != 0 and last == "VERDICT: FAIL", "rc=%d %s" % (rc, last))
+    shutil.rmtree(da, ignore_errors=True)
+    shutil.rmtree(db, ignore_errors=True)
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

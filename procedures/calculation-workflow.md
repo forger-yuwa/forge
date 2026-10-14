@@ -66,12 +66,23 @@ run_0004_roe_baseline
 3. 必要なら新しい `run_*` 内の `solverConfig.yaml` などを調整する。
 4. `mesh/` に入り、Gmsh で `.geo` から `.msh` を生成する。
 5. 生成した `.msh` を新しい `run_*` ディレクトリへコピーする。
-6. その新しい `run_*` ディレクトリで `convertGmshToForge` を実行し、HDF5 に変換する。
+6. その新しい `run_*` ディレクトリで `convertGmshToForge` を実行し、HDF5 に変換する。**変換は `mesh_provenance.py convert` 経由で行い**、
+   変換時の実効条件の記録 `<h5>.provenance.json` を残す (下の「変換時の条件の記録」)。
 7. 実行する `forge` バイナリが最新ソースで再ビルドされているか確認する (下記「実行前のバイナリ鮮度チェック」)。
 8. 同じ新しい `run_*` ディレクトリで `forge` を実行する。
 9. 実行後、その新しい `run_*` ディレクトリで `residual_history.csv` から `residual_history.png` を生成する。
 
 重要なのは、`solverConfig.yaml` がある新しい `run_*` ディレクトリを起点に変換と実行を行うことです。
+
+> **変換時の条件の記録 (2026-10-15、plan `tooling-generator-defaults-and-launch-gate` §4.3 の 2・§5.1 #7)**: `mesh.discretization`・
+> `nodeInletCornerWall`・`axisCentroidShift`・`renumber`・`isAxisymmetric`・`wallDistExtraPhysIDs` と境界の種類 (壁・入口の分類) は
+> **変換の結果を決め、格子に焼き込まれる** (`nodeInletCornerWall` などは forge の起動時の値が効かないので、run の config と食い違っても気づかずに回る)。`python3 solver_density_cuda/tools/mesh_provenance.py convert case.msh case.h5`
+> (変換器は `--converter`・`FORGE_CONVERTER`・`FORGE_BIN` のビルド・`build/` の順に探す) は変換器を回し、変換時の config の要求値・
+> 全境界の種類と physID・変換器と `.msh` の sha256・成果物の不変部分 (座標・接続・幾何・境界の所属・`wall_dist`) のハッシュを
+> `case.h5.provenance.json` に書く。`mesh_provenance.py check <run_dir>` は run の `solverConfig.yaml`・`bcondConfig.yaml` とこの記録を
+> 照合する (記録なし・別メッシュの記録・変換時と違う要求値 (省略は省略とだけ一致)・壁の分類の変更は FAIL)。restart
+> (`restart_field.py`・初期場の貼り付け) は `/VALUE` だけを変えるので記録は有効なまま。run を複製するときは h5 と一緒に記録も写す。
+> 投入の関門 (`launch_gate.py`、§5.1 #10) がこの照合を呼ぶ予定。
 
 > **変換器の幾何の精度 (2026-10-10、plan `architecture-float-state-double-geometry` §4.6)**: `convertGmshToForge` は
 > どのビルド (float / FP64) でも、座標・面ベクトル・面積・面重心・体積・CV 重心・壁距離を double で計算し、
@@ -120,8 +131,8 @@ gmsh -3 input.geo -o case.msh -format msh4
 # 生成メッシュを run ディレクトリへコピー
 cp case.msh ../run_0004_slau_implicit_check/
 
-# <case>/run_0004_slau_implicit_check で実行
-convertGmshToForge case.msh case.h5
+# <case>/run_0004_slau_implicit_check で実行 (変換して case.h5.provenance.json も書く)
+python3 /home/sano/work/forge/solver_density_cuda/tools/mesh_provenance.py convert case.msh case.h5
 # forge 実行前に build/forge が stale でないか確認 (「実行前のバイナリ鮮度チェック」参照)
 forge
 python3 /home/sano/work/forge/solver_density_cuda/tools/plot_implicit_residuals.py \

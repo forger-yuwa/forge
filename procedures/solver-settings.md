@@ -489,6 +489,8 @@ node (median-dual) で入口 (`inlet_*`) と no-slip 壁が角ノードを共有
 **`convertGmshToForge` 実行時の solverConfig に置く**と、入口エッジの壁ノード側半割面を壁 bcond に帰属させて回避する
 ([methods/discretization.md](../methods/discretization.md) §7.2 (D))。solver 実行時には読むだけで挙動は変わらない (メッシュに焼き込まれる)。
 既定 0。入口壁角を slip で逃がす旧回避 (case/47 run_0006–0008) は不要になる。2D/3D とも対応 (3D は 2026-09-07)。
+変換時の値は `mesh_provenance.py convert` が `<h5>.provenance.json` に記録し、`mesh_provenance.py check <run_dir>` が run の config と照合する
+(`wallDistExtraPhysIDs` も同じ。[calculation-workflow.md](calculation-workflow.md) の「変換時の条件の記録」)。
 
 ## mesh.axisSegmentRWeight — 軸対称 r 重みを区間ごとに掛ける (2026-10-10)
 
