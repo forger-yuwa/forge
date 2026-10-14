@@ -1,6 +1,6 @@
 r"""軸 Mach 則 (knot) の knot のマッハ数 M_knot を、長さを固定したまま選ぶ (最大壁角の最小化、規則 `min_theta_max_v1`)。
 
-plan: plans/active/tooling-nozzle-mknot-auto.md §4.1・§4.2 (§5.1 #2・#2b・#2c・#3b)。設計計算だけで CFD は回さない。
+plan: plans/accepted/tooling-nozzle-mknot-auto.md §4.1・§4.2 (§5.1 #2・#2b・#2c・#3b)。設計計算だけで CFD は回さない。
 
 評価 (`evaluate_mknot`) は case/70.m5_air_wt_demo/mknot_sweep.py の `one()` と同じ組み合わせ:
 design_chain + `inverse_design` の捕捉 + `characteristic_topology_diagnostics` (seam の除外は
