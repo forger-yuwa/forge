@@ -1,0 +1,21 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.42",
+ "cap50": "cap50",
+ "cap1": "cap1",
+ "qualification": {
+  "same_input": false,
+  "backward_error": true,
+  "solved_40": true
+ },
+ "island_u5_cap50": {
+  "ro": 0.00035553032589666383,
+  "roe": 0.0009061611117848675,
+  "all5": 0.0009170374650011162
+ },
+ "island_u5_cap1": {
+  "ro": 0.0006014420338416317,
+  "roe": 0.0016431226564960178,
+  "all5": 0.001623036420634095
+ },
+ "result": "判定不能 (資格不足: same_input)"
+}

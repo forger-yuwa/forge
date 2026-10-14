@@ -1,0 +1,31 @@
+{
+ "plan": "plans/active/tooling-nozzle-core-grid.md §4.98",
+ "dir": "/home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/core_grid/prep_Hi",
+ "downstream_max_diff_rt": 1.4210854715202004e-14,
+ "x_station_max_diff_rt": 0.0,
+ "first_layer_ratio_min_max": [
+  0.9999999988450572,
+  1.000000001136177
+ ],
+ "wall_kink_max_deg": 0.1289803647284762,
+ "mesh_quality_tail": [
+  "source: /VIZMESH/CONNE (primal cells of a node-converted mesh, 750162 cells)",
+  "mode: 2D (x-y projection)",
+  "cells: 750162",
+  "aspect ratio : max=4572.9  p99=3394.3  mean=220.9  >5000: 0 (0.00%)",
+  "skewness     : max=0.320  p99=0.281  mean=0.029  >0.90: 0 (0.00%)",
+  "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+ ],
+ "mesh_quality_pass": true,
+ "ic_nonfinite": 0,
+ "ic_min_ro": 0.014256942255978807,
+ "qualification": {
+  "downstream_same": true,
+  "x_station_same": true,
+  "first_layer_within_1pct": true,
+  "mesh_quality_pass": true,
+  "wall_kink_le_2deg": true,
+  "ic_finite_positive": true
+ },
+ "pass": true
+}

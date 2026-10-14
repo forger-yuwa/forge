@@ -163,7 +163,8 @@ def resolve_euler_ref(spec, verify: bool = True) -> dict:
     return {"run": rd, "res": res, "sha256": sha, "pinned": True, "record": {"run": str(run), "res": res, "sha256": sha}}
 
 
-def _load_structured(run_dir, remap_constant_x: bool = False, remap_edge: str = "clamp", res: str | None = None):
+def _load_structured(run_dir, remap_constant_x: bool = False, remap_edge: str = "clamp", res: str | None = None,
+                     res_name: str | None = None):
     """node 構造格子 run (index = i*nj + j) を (info, x[ni,nj], r[ni,nj], q=ρUx[ni,nj]) で返す (r_t 単位)。
     res: 読む出力のファイル名 (None = 最新の res_<N>.h5; 今の挙動)。Euler の参照の固定 (`resolve_euler_ref`) が使う。
 
@@ -172,7 +173,8 @@ def _load_structured(run_dir, remap_constant_x: bool = False, remap_edge: str = 
     列 i を壁の station の x (= 軸の x、x[i, 0]) の一定 x の断面にそろえる。行の x の範囲の外 (端の補間範囲の不足) の扱いは remap_edge:
     "clamp" (既定、今の挙動) は端値 (両端の数列だけ)、"missing" (§5.1 #36e (4)、codex diagnose 3「端の補間範囲の不足を定数の外挿で
     隠して全域合格にしない」) はその列を欠測にする (列の r・q を NaN にし、`remap_missing_cols` に列の番号と x を記録。抽出器はその列を
-    抽出せず not_extracted に記録する)。False (既定) は従来どおり列をそのまま使う (列内で x が一定の格子では両者は一致する)。"""
+    抽出せず not_extracted に記録する)。False (既定) は従来どおり列をそのまま使う (列内で x が一定の格子では両者は一致する)。
+    res_name (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-1) M3): `res` の別名 (③ベルの δ_r の時系列が使う)。指定したファイルが無ければ FileNotFoundError。"""
     import json
     from pathlib import Path
     if remap_edge not in REMAP_EDGES:
@@ -183,10 +185,14 @@ def _load_structured(run_dir, remap_constant_x: bool = False, remap_edge: str = 
     S = float(info["scale_m"])
     with h5py.File(run_dir / "nozzle.h5") as f:
         nc = f["/MESH/COORD"][:].reshape(-1, 3)
+    if res is None and res_name is not None:
+        res = res_name
     if res is None:
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda p: int(p.stem.split("_")[1]))[-1]
     else:
-        res = run_dir / res
+        res = run_dir / str(res)
+        if not res.is_file():
+            raise FileNotFoundError(f"{run_dir}: スナップショット {res.name} が無い")
     with h5py.File(res) as f:
         q = f["/VALUE/ro"][:] * f["/VALUE/Ux"][:]
     if len(q) != ni * nj or len(nc) != ni * nj:
@@ -215,19 +221,47 @@ def _load_structured(run_dir, remap_constant_x: bool = False, remap_edge: str = 
     return out
 
 
-def massflow_ratio(ns_run, euler_run) -> dict:
+def _exit_x(info: dict):
+    """流量の帳簿の区間の下流端 x_E (r_t 単位) と出所。①風洞の run は prepare_info の `x_E`。③ベルの run (prepare_info に
+    `bell_mode` があり `x_E` が無い — 2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-1)) は壁の設計の L
+    (`wall_design.L` = 出口面、領域の下流端) を使う。どちらも無ければ (None, 理由)。"""
+    if "x_E" in info:
+        return float(info["x_E"]), "prepare_info.x_E"
+    wd = info.get("wall_design") or {}
+    if info.get("bell_mode") and wd.get("L") is not None:
+        return float(wd["L"]), "prepare_info.wall_design.L (bell の出口面; x_E 無し)"
+    return None, "prepare_info に x_E も (bell の) wall_design.L も無い"
+
+
+def massflow_ratio(ns_run, euler_run, ns_res: str | None = None, remap_constant_x: bool = False) -> dict:
     """NS/Euler 質量流量比 → 有効スロート半径・質量流量由来の等価スロート補正量 (r_t 単位)。
-    列ごとに 2π∫ρUx r dr (台形則)、x∈(−2.5, x_E) の中央値を採用。euler_run は run dir か固定の指定 (`resolve_euler_ref`)。"""
+    列ごとに 2π∫ρUx r dr (台形則)、x∈(−2.5, x_E) の中央値を採用。euler_run は run dir か固定の指定 (`resolve_euler_ref`)。
+    x_E は `_exit_x` (①は prepare_info.x_E、③ベルは wall_design.L)。どちらも無い run は止めずに帳簿を省き、
+    `{"skipped": True, "reason": ...}` を返す (黙って省かない)。ns_res: NS のスナップショット名 (None = 最新; `_load_structured`)。
+    remap_constant_x: 列を一定 x の断面に直してから積分する (`_load_structured` の同名; False = 従来どおり列のまま)。列の中で x が
+    変わる格子では 2π∫ρU_x r dr は断面の流量でない (−ρU_r dx の項が落ちる): ③ L100 の NS (列内 0.28 r_t) で列のままは
+    260.17 kg/s・断面間の散らばり 1.8 %、一定 x は 268.34 kg/s・0.03 % (run の出口の流量 268.36; 2026-10-12)。"""
     out = {}
     eref = resolve_euler_ref(euler_run)
-    for tag, rd, res in (("ns", ns_run, None), ("euler", eref["run"], eref["res"])):
-        d = _load_structured(rd, res=res)
+    for tag, rd, res in (("ns", ns_run, ns_res), ("euler", eref["run"], eref["res"])):
+        d = _load_structured(rd, remap_constant_x=remap_constant_x, res=res)
         S = d["S"]
         # 実寸の流量 2π∫ρU_x r dr [kg/s]: 被積分 q·(r S) と積分変数 (r S) で S は 2 乗 (2026-10-08 修正: 以前は被積分にも S² を掛けて
         # 3 乗になり、絶対値が S 倍に小さく、r_t の違う run どうしの比も S の比だけずれていた。診断の帳簿だけで使う値)
         m = 2 * np.pi * np.trapezoid(d["q"] * d["r"] * S, d["r"] * S, axis=1)
         xs = d["x"][:, 0]
-        sel = (xs > -2.5) & (xs < d["info"]["x_E"])
+        x_E, x_E_src = _exit_x(d["info"])
+        if x_E is None:
+            skip = {"skipped": True, "reason": f"{tag} run {rd}: {x_E_src} — 流量の帳簿 (x∈(−2.5, x_E) の中央値) を省いた"}
+            skip.update({k: v for k, v in out.items() if k.startswith("res_")})
+            skip[f"res_{tag}"] = d["res"]
+            return skip
+        if x_E_src != "prepare_info.x_E":                   # ①の run (x_E あり) では鍵を増やさない (戻り値を従来とビット同一に保つ)
+            out[f"x_E_{tag}"] = x_E
+            out[f"x_E_{tag}_source"] = x_E_src
+        if remap_constant_x:
+            out[f"remap_constant_x_{tag}"] = True
+        sel = (xs > -2.5) & (xs < x_E)
         out[f"mdot_{tag}"] = float(np.median(m[sel]))
         out[f"mdot_{tag}_spread"] = float(m[sel].std() / np.median(m[sel]))
         out[f"res_{tag}"] = d["res"]
@@ -458,14 +492,20 @@ def pspline_uniform(x, v, knot: float, lam: float = 1.0, weights=None, k: int = 
 def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, c: float = 1.25,
                         window: float = 3.0, knot: float = 6.0, edge_ratio: float = 1.25,
                         ref_min_frac: float = 0.0133, lam: float = 1.0, crossing: str = "quadratic",
-                        hold_lo: float | None = 3.0, hold_hi_from_end: float | None = 3.0) -> dict:
+                        hold_lo: float | None = 3.0, hold_hi_from_end: float | None = 3.0, persist: int = 1) -> dict:
     r"""帯の位置を「境界層の縁の連続推定 → x 方向平滑化 → その c 倍」で決める (band_select="edge"、純関数)。
 
     plan verification-m6-axis-wave-mesh-su2 §5.1 #7a (diagnostician 2026-10-04 推薦 E)。各断面 i で、帯を固定した
     δ_r の梯子 (y_ladders[i], d_ladders[i]) から $R(y)=\delta_r(\text{edge\_ratio}\,y)/\delta_r(y)-1$ を作り
-    (log y で線形補間)、$|R|<\varepsilon$ を初めて満たす y を**格子点間の線形補間で**求めて縁 $y^*$ とする (無ければ NaN)。
+    (log y で線形補間)、**そこから persist 段続けて** $|R|<\varepsilon$ を満たす最初の段を交点の段とし、その段と 1 つ内側の段の間を
+    **格子点間の線形補間で**解いて縁 $y^*$ とする (無ければ NaN)。persist = 1 は「$|R|<\varepsilon$ を初めて満たす段」(2026-10-13 までの式)。
+    既定は persist = 1。persist > 1 (opt-in) は一番内側の段で R が偶然 ±ε の中に入るだけの交点を拾わない (冷却壁のスロート付近で y* の有無が
+    場のわずかな違いで切り替わっていた) が、K = 4 は帯の 1 段の揺れを消せず不採用 (plan tooling-nozzle-cooled-wall-ns-settling §4.2b・§4.4)。
     $\kappa=\ln(y^*/y_{ref})$, $y_{ref}=\max(\delta_{in}, f\,r_w)$ を x 方向に移動中央値 (半幅 window) → 3 次 P-spline
     (ノット knot, λ) で平滑化し、$y_b=c\,y_{ref}e^{\tilde\kappa}$。NaN の断面は y_b 側をスプラインで埋める (δ_r 側の穴にしない)。"""
+    persist = int(persist)
+    if persist < 1:
+        raise ValueError(f"persist={persist} は 1 以上")
     x = np.asarray(x, dtype=float); n = len(x)
     d_in = np.asarray(d_in, dtype=float); r_w = np.asarray(r_w, dtype=float)
     y_ref = np.maximum(np.maximum(d_in, 0.0), ref_min_frac * r_w)
@@ -481,7 +521,15 @@ def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, 
         if m.sum() < 2:
             continue
         Rabs = np.abs(np.interp(lq[m], ly, dd) / dd[m] - 1.0) - eps
-        j = int(np.argmax(Rabs < 0.0)) if np.any(Rabs < 0.0) else -1
+        hit = Rabs < 0.0
+        if persist > 1:
+            # 持続: 段 j から persist 段 (j … j+persist−1) がすべて |R| < ε のときだけ j を候補にする (梯子の外へははみ出さない)。
+            # 選んだ j の 1 つ内側の段は必ず |R| ≥ ε (そうでなければ j−1 が先の候補) なので、下の交点の補間は今と同じ 2 段の間で解く
+            run = np.zeros_like(hit)
+            if len(hit) >= persist:
+                run[:len(hit) - persist + 1] = np.lib.stride_tricks.sliding_window_view(hit, persist).all(axis=1)
+            hit = run
+        j = int(np.argmax(hit)) if np.any(hit) else -1
         if j < 0:
             continue
         L = ly[m]
@@ -535,8 +583,9 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                       edge_eps: float = 0.003, edge_c: float = 1.25, edge_window: float = 3.0,
                                       edge_knot: float = 6.0, edge_step: float = 1.25 ** 0.125, edge_y0_fac: float = 1.2,
                                       edge_min_frac: float = 0.016, edge_ymax_frac: float = 0.5, edge_ref_min_frac: float = 0.0133,
-                                      edge_y0_shift: float = 1.0, return_ladders: bool = False,
-                                      remap_constant_x: bool = False, remap_edge: str = "clamp") -> dict:
+                                      edge_y0_shift: float = 1.0, edge_persist: int = 1, return_ladders: bool = False,
+                                      remap_constant_x: bool = False, remap_edge: str = "clamp", ns_res: str | None = None,
+                                      yb_sens_factors=None) -> dict:
     r"""**固定 Euler 基準・コア整合**の半径方向等価排除厚 $\delta_r(x)$ を NS 全列で抽出する。
 
     定義 (plan §4.2–4.4):
@@ -561,6 +610,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     - "edge" (2026-10-04, diagnostician 推薦 E, plan §5.1 #7a): 帯を細かい梯子 (比 edge_step) で固定して δ_r(y) を測り、
       `edge_band_positions` で縁 y* を連続推定 → x 平滑 → y_b = edge_c × 縁 に帯を固定して測る。感度欄は c×0.8 / c×1.25。
       edge_y0_shift は梯子の位相試験用 (始点の倍率)。return_ladders=True で梯子と縁を戻り値に含める (試験用)。
+      edge_persist は縁の交点に要求する持続の段数 (`edge_band_positions` の persist; 既定 1 = 2026-10-13 までの抽出とビット同一。
+      > 1 は opt-in、plan tooling-nozzle-cooled-wall-ns-settling §4.2b・§4.4)。
 
     euler_run: run dir (最新の出力を読む; 今の挙動) か固定のスナップショットの指定 {run, res, sha256} (`resolve_euler_ref`、sha が合わなければ
     ValueError; plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6))。remap_edge: `_load_structured` の remap_constant_x の端の扱い
@@ -568,6 +619,13 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     `euler_cover_range` (§5.1 #36g): "missing" の経路は Euler の端の外側だけに幾何の許容 (端の列の間隔 × 1e−4) を足し、許容の内側で
     端を越える列は端の列の値で評価する (同一の端点の丸めを吸収する許容 = 微小区間の定数の延長; 範囲の不足は今どおり欠測)。
     "clamp" は ±1e−9 のまま。
+
+    帯位置の感度 `yb_sens_factors` (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #7 (7b-1)、codex diagnose M2; method="band" のみ):
+    同じ壁 (delta_in = 0) では帯の始点が $\max(k_{band}\delta_{in}, f_{min}r_w)=f_{min}r_w$ になり、k_band の感度系列は主系列と
+    ビット一致して感度にならない。そこで各断面で**実際に選ばれた帯位置** $y_b$ (`band_y_b`) を倍率 f 倍に固定して測り直し
+    (`y_b_fixed`)、`delta_r_sens_yb` (n, 倍率の数) に返す。主系列との相対差の最大が gate_sens (下限 gate_sens_floor) を超えた
+    断面は soft の理由 `yb_sens` を付ける (全倍率が NaN なら `yb_sens_nan`)。None (既定) は計算しない (戻り値は従来どおり)。
+    ns_res: NS のスナップショット名 (None = 最新; `_load_structured`)。δ_r の時系列用 (流量の帳簿にも同じ名前を渡す)。
 
     戻り値: dict of arrays (x, r_wall_euler, r_wall_ns, delta_in, alpha, core_rms, core_rms_noaxis,
     core_maxdev, mass_deficit, delta_r_raw, delta_r_smooth, delta_r_sens (n,2), ok, reason) と mdot 帳簿、抽出しなかった NS の列
@@ -577,7 +635,9 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
     import json
     from pathlib import Path
     from scipy.interpolate import make_smoothing_spline
-    N = _load_structured(ns_run, remap_constant_x=remap_constant_x, remap_edge=remap_edge)
+    if yb_sens_factors is not None and method != "band":
+        raise ValueError("yb_sens_factors は method='band' でのみ使える (帯位置 y_b の感度)")
+    N = _load_structured(ns_run, remap_constant_x=remap_constant_x, remap_edge=remap_edge, res=ns_res)
     eref = resolve_euler_ref(euler_run)
     E = _load_structured(eref["run"], res=eref["res"])
     miss_cols = set(N.get("remap_missing_cols", {}).get("i", []))      # 端の補間範囲の不足で欠測にした列 (remap_edge="missing")
@@ -619,6 +679,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
             return None
         res["x"] = x
         res["i"] = int(i)
+        res["i_col"] = i                                # 帯位置の感度 (yb_sens_factors) で同じ列を測り直すため
         return res
 
     main_par = k_band if method == "band" else core_frac
@@ -664,7 +725,8 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                 ds.append(rk["delta_r"] if (rk is not None and np.isfinite(rk["delta_r"])) else np.nan)
             ii.append(i); xs_e.append(x); din_e.append(d_in); rw_e_l.append(rwN); yl.append(np.array(ys)); dl.append(np.array(ds))
         pos = edge_band_positions(np.array(xs_e), yl, dl, np.array(din_e), np.array(rw_e_l), eps=edge_eps, c=edge_c,
-                                  window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac)
+                                  window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac,
+                                  persist=edge_persist)
         edge = dict(i=ii, x=np.array(xs_e), y_b=pos["y_b"], y_star=pos["y_star"], kappa_s=pos["kappa_s"],
                     kappa_med=pos["kappa_med"], y_ref=pos["y_ref"], ladders_y=yl, ladders_d=dl)
         edge_map = {i: k for k, i in enumerate(ii)}
@@ -730,9 +792,19 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
             continue
         base["delta_r_sens"] = [s["delta_r"] if s else np.nan for s in sens]
         rows.append(base)
+    if yb_sens_factors is not None:
+        # 帯位置の感度 (codex M2): 実際に選ばれた y_b を倍率で動かして固定し測り直す
+        for r_ in rows:
+            yb_sel = float(r_.get("band_y_b", np.nan))
+            ss = [extract_one(int(r_["i_col"]), main_par, y_b_fixed=yb_sel * float(f)) if np.isfinite(yb_sel) else None
+                  for f in yb_sens_factors]
+            r_["delta_r_sens_yb"] = [s_["delta_r"] if s_ else np.nan for s_ in ss]
+            r_["_yb_sens_rows"] = ss                    # 感度帯の診断 (停止条件の量) を返すため
     x = np.array([r_["x"] for r_ in rows])
     draw = np.array([r_["delta_r"] for r_ in rows])
     sens = np.array([r_["delta_r_sens"] for r_ in rows])
+    sens_yb = (np.array([r_["delta_r_sens_yb"] for r_ in rows], dtype=float).reshape(len(rows), len(yb_sens_factors))
+               if yb_sens_factors is not None else None)
     # negative_deficit は 2026-09-12 から soft (符号付き δ_r を採用: 冷却壁では物理)。hard は根なし/NaN と、帯局所の探索域の参照が
     # 非正 (nonpos_ref)・探索区間の F が非単調 (nonmono_zone) (2026-10-13, plan tooling-nozzle-deltastar-band-root-zone §4.1)
     HARD = ("no_root", "nan", "no_plateau", "nonpos_ref", "nonmono_zone")
@@ -745,6 +817,12 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         elif r_["core_rms_noaxis"] > gate_core_rms: rs.append("core_shape")
         if np.isfinite(draw[k]) and draw[k] > 0 and np.all(np.isfinite(sens[k])):
             if np.max(np.abs(sens[k] - draw[k])) > max(gate_sens * draw[k], gate_sens_floor): rs.append("core_frac_sens")
+        if sens_yb is not None and np.isfinite(draw[k]) and draw[k] > 0:
+            fin_yb = np.isfinite(sens_yb[k])
+            if not fin_yb.any():
+                rs.append("yb_sens_nan")
+            elif np.max(np.abs(sens_yb[k][fin_yb] - draw[k])) > max(gate_sens * draw[k], gate_sens_floor):
+                rs.append("yb_sens")
         if np.isfinite(r_["outer_share"]) and r_["outer_share"] < 0.8: rs.append("deficit_not_near_wall")
         if not np.isfinite(draw[k]): rs.append("nan")
         ok[k] = len(rs) == 0
@@ -780,7 +858,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                              plateau_tol=plateau_tol, plateau_kmax=plateau_kmax,
                              edge=(dict(eps=edge_eps, c=edge_c, window=edge_window, knot=edge_knot, step=edge_step,
                                         y0_fac=edge_y0_fac, min_frac=edge_min_frac, ymax_frac=edge_ymax_frac,
-                                        ref_min_frac=edge_ref_min_frac, y0_shift=edge_y0_shift)
+                                        ref_min_frac=edge_ref_min_frac, y0_shift=edge_y0_shift, persist=int(edge_persist))
                                    if band_select == "edge" else None),
                              gate_band_rms=gate_band_rms,
                              core_frac=core_frac, core_frac_sens=list(core_frac_sens), n_axis_skip=n_axis_skip,
@@ -793,6 +871,18 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                                 if remap_constant_x and remap_edge != "clamp" else {}),
                              **({"euler_ref_pinned": eref["record"]} if eref["pinned"] else {}),
                              ns_run=str(ns_run), euler_run=(str(eref["run"]) if eref["pinned"] else str(euler_run))))
+    if sens_yb is not None:                         # 既定 (None) では鍵を増やさない (戻り値・diag JSON を従来どおりに保つ)
+        out["delta_r_sens_yb"] = sens_yb
+        out["settings"]["yb_sens_factors"] = [float(f) for f in yb_sens_factors]
+        # 帯の診断 (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #7 の edge の A/B): 主系列の帯の比の切片 a (適応の停止条件
+        # a ≥ 0.95 α に使う量) と、感度帯 (n, 倍率の数) ごとの停止条件の量。固定帯では再試行しないので、条件の違反は理由に残らない —
+        # ここで量を返し、判定は呼び出し側 (`bell_deltastar`) が行う
+        out["band_ratio_a"] = np.array([r_.get("band_ratio_a", np.nan) for r_ in rows])
+        for key in ("band_y_b", "band_slope", "band_rms", "band_deficit_share", "band_ratio_a", "alpha", "mass_deficit"):
+            out["yb_sens_" + key] = np.array([[(s_[key] if s_ is not None else np.nan) for s_ in r_["_yb_sens_rows"]] for r_ in rows],
+                                             dtype=float).reshape(len(rows), len(yb_sens_factors))
+        out["yb_sens_reason"] = np.array([[(",".join(s_["reason"]) if s_ is not None else "none") for s_ in r_["_yb_sens_rows"]]
+                                          for r_ in rows]).reshape(len(rows), len(yb_sens_factors))
     # 抽出しなかった NS の列 (§5.1 #36e: 受け渡しの関門が全域の被覆・使用域の欠測を判定する)
     done = {r_["i"] for r_ in rows}
     xs_all = N["x"][:, 0]
@@ -807,7 +897,7 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                   "beyond": [float(max(cover["x0"] - xs_all[i], xs_all[i] - cover["x1"])) for i in et]}
         out["not_extracted"].update(euler_cover=cover, edge_tol_cols=rec_et)
         out["settings"].update(euler_cover=cover, edge_tol_cols=rec_et)
-    out["massflow"] = massflow_ratio(ns_run, euler_run)
+    out["massflow"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res)
     if edge is not None:
         out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])
         if return_ladders:

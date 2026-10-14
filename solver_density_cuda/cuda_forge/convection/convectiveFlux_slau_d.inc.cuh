@@ -661,6 +661,14 @@ __global__ void SLAU_d
             }
         }
 
+        // 診断 (FORGE_DIAG_CONV_FACES、既定 0 で全面): 面の種類で平均流の残差への加算を絞る (convectiveFlux_common_d.cuh)。
+        bool addConvRes = true;
+        if (g_diagConvFaceMode != 0) {
+            const bool isLineFace = (ic1 < nCells) && g_diagLinePrev != nullptr
+                                    && (g_diagLinePrev[ic0] == ic1 || g_diagLineNext[ic0] == ic1);
+            addConvRes = (g_diagConvFaceMode == 1) ? !isLineFace : ((g_diagConvFaceMode == 2) ? isLineFace : false);
+        }
+        if (addConvRes) {
         atomicAdd(&res_ro[ic0]  , -res_ro_temp);
         atomicAdd(&res_roUx[ic0], -res_roUx_temp);
         atomicAdd(&res_roUy[ic0], -res_roUy_temp);
@@ -672,6 +680,7 @@ __global__ void SLAU_d
         atomicAdd(&res_roUy[ic1], res_roUy_temp);
         atomicAdd(&res_roUz[ic1], res_roUz_temp);
         atomicAdd(&res_roe[ic1] , res_roe_temp);
+        }
     }
 
     __syncthreads();

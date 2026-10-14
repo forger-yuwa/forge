@@ -79,6 +79,26 @@ def load_yaml_str(path):
 BUILTIN_MW = {"N2": 0.0280134, "O2": 0.0319988, "AR": 0.039948, "CO2": 0.0440095, "HE": 0.0040026,
               "H2O": 0.0180153, "WATER": 0.0180153, "AIR": 0.0289647}
 
+# forge がビルド時に埋め込む共通データ (cuda_forge/CMakeLists.txt の FORGE_SPECIES_DATA_YAML)。BUILTIN_MW に無い種
+# (H・O・OH など) の MW はここから引く。BUILTIN_MW を先に引くのは既存の署名を変えないため。
+SPECIES_DATA_YAML = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "data", "species", "forge_species_v1.yaml")
+_DATA_MW = None
+
+
+def _data_mw():
+    """共通データの {id/別名: MW} (初回だけ読む)。ファイルが無ければ空。"""
+    global _DATA_MW
+    if _DATA_MW is None:
+        d = load_yaml_str(SPECIES_DATA_YAML) if os.path.exists(SPECIES_DATA_YAML) else {}
+        mw = {}
+        for e in ((d or {}).get("species") or []):
+            if "MW" in e:
+                for n in [e["id"], *(e.get("aliases") or [])]:
+                    mw[str(n)] = float(e["MW"])
+        _DATA_MW = mw
+    return _DATA_MW
+
 
 def _find_ci(d, name):
     """dict d を大文字小文字無視で引く (完全一致優先)。"""
@@ -125,7 +145,9 @@ def species_info(run_dir):
             return float(e["MW"])
         mw = _find_ci(BUILTIN_MW, n)
         if mw is None:
-            raise KeyError(f"species {n}: MW が species_db.yaml にも内蔵表にも無い")
+            mw = _find_ci(_data_mw(), n)
+        if mw is None:
+            raise KeyError(f"species {n}: MW が species_db.yaml にも内蔵表にも共通データ ({SPECIES_DATA_YAML}) にも無い")
         return float(mw)
 
     MW = {}

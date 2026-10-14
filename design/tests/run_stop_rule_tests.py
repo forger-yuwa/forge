@@ -4,21 +4,26 @@
 
 停止規則は forge-f5 の feature/nozzle-cooled-wall-settling 60de8125 から取り込んだ (同 `design/tests/run_stop_rule_tests.py` の (a)(b) と
 断面の基準の試験を、この作業ツリー向けに直して写し、閾値の YAML・到達の後の継続・(c)(d) を足した)。旧 `m9_watch.py` (§6.11) と同等とは
-言わない新しい規則として試す。
+言わない新しい規則として試す。forge-f5 の版の試験は `run_stop_rule_settling_tests.py` に改名して残した。
+**2026-10-14 の統合 (main への統合 1 回目) で仕様を 1 つにした**: 既定で使う (キー無し = 要求、使えなければ UNAVAILABLE を記録して
+fallback_steps で回す)・`evaluate.stop_rule: true` の明示のときだけ使えない設定を例外・到達の後の継続の既定 40,000 (`SR.HOLD_STEPS_DEFAULT`)・
+NS の本段の長さ (fallback) は `--steps` > `evaluate.ns_steps` > 60,000 (`evaluate.nStepOuter` は読まない)・受け渡しの上書きは理由の文字列が必須。
+この試験の期待値もそれに合わせて直した (直した所は各 check の名前に「統合」と書いた)。
 
   (a) 合成の系列 (`judge_rows`・`first_stop`、forge 0 step) と設定 (`resolve_settings`・`runner_axismach._stop_rule_settings`): 取り込み元と同じ
-      判定の数値 (REACHED の出力・平均の変化の換算・振幅・r・非有限・窓の点数・DATA_ERROR)。設定は**こちらの既定 = 使わない**
-      (evaluate.stop_rule が無ければ prepare_info にも書かない)、上限が出力の間隔の倍数でない・euler_ref が無い・stop_rule_cap だけの指定は
-      run dir を作る前に例外。量の式: 合成の構造格子で θ_r・入口と出口の流量が M6 の `cold_xcheck.reduce_fields` と一致、出口コア M・流量が
+      判定の数値 (REACHED の出力・平均の変化の換算・振幅・r・非有限・窓の点数・DATA_ERROR)。設定は**既定 = 使う** (統合; explicit でない)、
+      明示 (evaluate.stop_rule: true) で上限が出力の間隔の倍数でない・euler_ref が無い・見つからない設定は run dir を作る前に例外、既定なら
+      理由を記録して use = False (例外にしない)。stop_rule_cap・stop_rule_thresholds だけの指定は既定の要求に効く。量の式: 合成の構造格子で θ_r・入口と出口の流量が M6 の `cold_xcheck.reduce_fields` と一致、出口コア M・流量が
       `nozzle_report.load_field` からの定義と一致。断面の基準は設計壁の出口 physical_wall.domain[1] (x_E ではない; 無ければ例外)、
       `evaluate.stop_rule_thresholds.x_fracs` で case/45 の試験部の断面 x = 40・70・94 r_t を指定できる。閾値の YAML の不正値は例外。
-      到達の後の継続 (`hold_steps`): 保てば到達 + H で REACHED、外れたら取り消して数え直す、保ち切れなければ届かない。
+      到達の後の継続 (`hold_steps`、既定 40,000): 保てば到達 + H で REACHED、外れたら取り消して数え直す、保ち切れなければ届かない。
   (b) 偽の forge (`FORGE_BIN` を res を書く台本に差し替え、本物の `run_case.sh` 経由) で `run_staged_ns` の本段の見張り: REACHED (止めて後の出力を
       消す・SIGTERM・SIGTERM を無視する forge は SIGKILL)・CENSORED (rc 0 でも状態は CENSORED)・EXEC_ERROR・DIVERGED (非有限・detectNaN)・
       DATA_ERROR・UNAVAILABLE (見張りの途中で帯の位置が決まらない; rc 0)。**どの場合も状態を STOP_RULE_STATE.json と戻り値の `stop_rule` で
       直接返す** (rc 0 の CENSORED・UNAVAILABLE を REACHED と取り違えない)。stages="full" では S1・S2 に当てず本段だけ。到達の後の継続:
       保ったら到達 + H で止める、途中で外れて上限まで届かなければ CENSORED (外れた記録つき)。要求したのに
-      euler_ref が見つからない run は forge を起動する前に例外。stop_rule=False は NOT_USED を記録して今までの経路。
+      euler_ref が見つからない run は、明示の要求なら forge を起動する前に例外、既定の要求なら UNAVAILABLE を記録して fallback_steps で回す
+      (統合; forge-f5 の版の動き)。prepare で使えないと記録した既定の要求も同じ。stop_rule=False は NOT_USED を記録して今までの経路。
   (c) 受け渡しの制御 (`handoff_gate` と `run_from_table`・`run_pass`・`run_pass0_integral`・CLI): 状態が REACHED で収束の判定が PASS のときだけ
       抽出 (band_select="edge"・remap_constant_x=True を明示) と fixed_point.json に進む。REACHED でも収束の判定が不合格なら止める
       (`allow_unconverged` で進む)。CENSORED・UNAVAILABLE は止める (`allow_not_reached` で進む)。上書きは理由の文字列 (§5.1 #36h、統合
@@ -29,15 +34,17 @@
       **#36e で関門に足した条件** (保存則・局所 y₁⁺・δ の 2 窓・被覆・held・次の壁) のうち、局所 y₁⁺ (`wall_resolution_verdict`) と次の壁
       (`next_wall_check`) は偽物で合格にし、δ の 2 窓は見張りの中の出力ごとの記録 (`stop_rule.delta_snapshot` の偽物) で満たす。2 窓
       ([s − 4 万, s − 2 万]・[s − 2 万, s]) を覆うため、進む側の試験は到達の後の継続 2 万 step (hold 20,000・上限 45,000) で回す。
-      停止規則を使わない run (NOT_USED) は allow_not_reached でも保存則・2 窓の記録が無いので止める (#36e: 新しい条件は上書きで通さない)。
+      停止規則の記録の無い run (統合前の準備、NOT_USED) は allow_not_reached・allow_unsettled でも保存則・2 窓の記録が無い (判定不能) ので止める
+      (#36e: 新しい条件は上書きで通さない; #36h: 判定不能は allow_unsettled でも通さない)。
       **落ち着きの条件の上書き (§5.1 #36h)**: 上書きなしで通った受け渡しは `settled: true`・`unsettled_overrides: []`・δ_E の作り方
       `delta_e_source` (kind single_snapshot) を HANDOFF_GATE.json と fixed_point.json に残す。CENSORED を allow_not_reached で通すと
       `settled: false` と上書きの記録 (状態・理由) が HANDOFF_GATE.json・fixed_point.json・run の直下の delta_r_extract_summary.json に入り、
       その run を前の pass にした `run_pass` の新しい run の prepare_info.json (handoff_from_prev) にも写る。偽の forge の出口の密度の振動
       (r の振幅 1 %) で CENSORED: allow_not_reached だけなら保存則で止める、`--allow-unsettled "<理由>"` を足せば進み、保存則の実測 (r の平均と
       振幅・窓) を記録する (CLI)。各条件の負例 (上書きで通さない条件) は `run_h370_prelaunch_tests.py` の F。
-  (d) 指定の無い問題の回帰: prepare_info に stop_rule の無い run の `run_staged_ns` は今までの経路 (run_forge、本段の nStepOuter は準備のまま、
-      stop_rule.json・STOP_RULE_STATE.json を書かない、戻りは int と等しい)。
+  (d) 停止規則の記録の無い準備 (統合前・2026-10-14 より前の prepare_info に stop_rule が無い run) の回帰: `run_staged_ns` は今までの経路
+      (run_forge、本段の nStepOuter は準備のまま、stop_rule.json・STOP_RULE_STATE.json を書かない、戻りは int と等しい)。統合後はキーの無い
+      問題も要求するので、「指定の無い問題 = 今と同じ」の回帰はここでは見ない ((a) の設定と (b) の既定の UNAVAILABLE で見る)。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_stop_rule_tests.py [--quick]
 所要: (a) < 5 s、(b)〜(d) 約 1〜2 分 (偽の forge 約 25 本)。--quick は (b)〜(d) を省く。出力は一時ディレクトリ (全部合格なら消す)。
@@ -180,12 +187,17 @@ def test_synthetic():
     rows[5][SR.theta_key(0.95)] = float("nan")
     check("場が有限で判定量 (θ_r) が NaN → DATA_ERROR", stop_step(rows) == ("DATA_ERROR", 6000))
 
-    print("== (a) 設定 (resolve_settings・_stop_rule_settings; こちらの既定 = 使わない)", flush=True)
-    kw = dict(nsteps_arg=None, n_main=200000, n_main_source="evaluate.nStepOuter", out_int=2500, euler_ref="case/x/run_euler")
+    print("== (a) 設定 (resolve_settings・_stop_rule_settings; 統合後の既定 = 使う)", flush=True)
+    kw = dict(nsteps_arg=None, n_main=200000, n_main_source="evaluate.ns_steps", out_int=2500, euler_ref="case/x/run_euler")
     d = SR.resolve_settings({}, **kw)
-    check("キー無し → 使わない (取り込み元は使う)", not d["requested"] and not d["use"] and d["requested_source"] == "既定 (使わない)",
-          json.dumps({k: d[k] for k in ("requested", "use", "requested_source")}, ensure_ascii=False))
+    check("統合: キー無し → 使う (既定の要求、explicit でない)", d["requested"] and d["use"] and not d["explicit"]
+          and d["requested_source"] == "既定 (使う)",
+          json.dumps({k: d[k] for k in ("requested", "use", "explicit", "requested_source")}, ensure_ascii=False))
     d = SR.resolve_settings({"stop_rule": True}, **kw)
+    check("統合: evaluate.stop_rule: true → 明示の要求 (explicit)", d["explicit"] and d["requested_source"] == "evaluate.stop_rule")
+    check("統合: 引数 requested=True → 明示、evaluate.stop_rule: false → 要求なし (explicit でない)",
+          SR.resolve_settings({}, **kw, requested=True)["explicit"] and not SR.resolve_settings({"stop_rule": False}, **kw)["requested"]
+          and not SR.resolve_settings({"stop_rule": False}, **kw)["explicit"])
     check("evaluate.stop_rule: true → 使う・上限 200,000・閾値は取り込み元のまま", d["use"] and d["requested"] and d["cap"] == 200000
           and d["window"] == 20000 and d["min_points"] == 9 and d["r_mean_max"] == 5e-4 and d["theta_drift_max"] == 5e-4
           and d["x_fracs"] == [0.4, 0.7, 0.95] and d["fallback_steps"] == 200000, json.dumps(d, ensure_ascii=False)[:200])
@@ -207,8 +219,17 @@ def test_synthetic():
     check("stop_rule_thresholds: x_fracs (case/45 の 40・70・94 r_t) と r_mean_max を上書き、他は既定、出所を記録",
           d["use"] and d["x_fracs"] == f45 and d["r_mean_max"] == 1e-3 and d["r_amp_max"] == SR.R_AMP_MAX
           and d["thresholds_source"] == {"evaluate.stop_rule_thresholds": ["r_mean_max", "x_fracs"]}, str(d["x_fracs"]))
-    check("キー無しは閾値の出所が既定・hold_steps 0", SR.resolve_settings({"stop_rule": True}, **kw)["thresholds_source"] == "既定 (取り込み元のまま)"
-          and SR.resolve_settings({"stop_rule": True}, **kw)["hold_steps"] == 0)
+    d0 = SR.resolve_settings({"stop_rule": True}, **kw)
+    check("統合: キー無しは閾値の出所が既定・hold_steps は既定 40,000 (SR.HOLD_STEPS_DEFAULT、出所も記録)",
+          d0["thresholds_source"] == "既定" and d0["hold_steps"] == SR.HOLD_STEPS_DEFAULT == 40000
+          and d0["hold_steps_source"] == "既定 40000", str({k: d0[k] for k in ("thresholds_source", "hold_steps", "hold_steps_source")}))
+    check("統合: stop_rule_hold_steps 0 → 0 (最初の到達で止める)・null → 既定 40,000",
+          SR.resolve_settings({"stop_rule_hold_steps": 0}, **kw)["hold_steps"] == 0
+          and SR.resolve_settings({"stop_rule_hold_steps": 0}, **kw)["hold_steps_source"] == "evaluate.stop_rule_hold_steps"
+          and SR.resolve_settings({"stop_rule_hold_steps": None}, **kw)["hold_steps"] == 40000)
+    d = SR.resolve_settings({"stop_rule_cap": 60000}, **kw)
+    check("統合: 上限 60,000 < 窓 2 万 + 出力の間隔 + 保持 4 万 → 必ず CENSORED の注記",
+          d["use"] and "保持 40000" in (d.get("note") or ""), str(d.get("note")))
     d = SR.resolve_settings({"stop_rule": True, "stop_rule_thresholds": {"window": 40000}}, **kw)
     check("window 40000 にすると出力の間隔 2500 でも窓に 9 点以上 (使える)", d["use"] and d["window"] == 40000)
     for bad, msg in (({"stop_rule_thresholds": {"x_frac": [0.5]}}, "未知"), ({"stop_rule_thresholds": {"x_fracs": [0.5, 1.2]}}, "x_fracs"),
@@ -235,35 +256,57 @@ def test_synthetic():
     P = lambda ev: types.SimpleNamespace(evaluate=ev)  # noqa: E731
     eu = TMP / "euler_dummy"
     eu.mkdir(exist_ok=True)
-    check("_stop_rule_settings: キー無し・引数 None → None (prepare_info に stop_rule を書かない = 今と同じ)",
-          RA._stop_rule_settings(P({"nStepOuter": 60000}), None, str(eu), None) is None)
+    d = RA._stop_rule_settings(P({"nStepOuter": 60000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: _stop_rule_settings: キー無し・引数 None → 既定で要求して使う (prepare_info に stop_rule を書く; explicit でない)",
+          d is not None and d["requested"] and d["use"] and not d["explicit"] and d["cap"] == 200000, str(d and d.get("reason")))
     check("_stop_rule_settings: evaluate.stop_rule: false → 要求なしの記録 (使わない)",
           (lambda d: d is not None and not d["requested"] and not d["use"])(RA._stop_rule_settings(P({"stop_rule": False}), None, str(eu), None)))
+    d = RA._stop_rule_settings(P({"stop_rule": True, "ns_steps": 200000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: _stop_rule_settings: stop_rule true・ns_steps 200000・出力 2500 → 使う (上限 200,000・fallback 200,000)",
+          d["use"] and d["cap"] == 200000 and d["fallback_steps"] == 200000 and d["fallback_steps_source"] == "evaluate.ns_steps"
+          and d["out_step_interval"] == 2500, str(d.get("reason")))
     d = RA._stop_rule_settings(P({"stop_rule": True, "nStepOuter": 200000, "outStepInterval": 2500}), None, str(eu), None)
-    check("_stop_rule_settings: stop_rule true・nStepOuter 200000・出力 2500 → 使う (上限 200,000・fallback 200,000)",
-          d["use"] and d["cap"] == 200000 and d["fallback_steps"] == 200000 and d["out_step_interval"] == 2500, str(d.get("reason")))
-    ok_ev = {"stop_rule": True, "nStepOuter": 200000, "outStepInterval": 2500}
-    for name, ev, er, msg in (("euler_ref が無い", ok_ev, None, "euler_ref が無い"),
-                              ("euler_ref が見つからない", ok_ev, str(TMP / "no_such_euler"), "見つからない"),
-                              ("上限が出力の間隔の倍数でない", {**ok_ev, "stop_rule_cap": 151000}, str(eu), "倍数"),
-                              ("出力の間隔が窓に 9 点を入れられない (nStepOuter 48000 を割り切らない 2500 → 16000 に直る)",
-                               {"stop_rule": True, "outStepInterval": 2500, "stop_rule_cap": 192000}, str(eu), "9 点が入らない"),
-                              ("stop_rule_cap だけ (stop_rule が無い)", {"stop_rule_cap": 150000}, str(eu), "stop_rule_cap"),
-                              ("stop_rule_thresholds だけ (stop_rule が無い)", {"stop_rule_thresholds": {"x_fracs": [0.5]}}, str(eu),
-                               "stop_rule_thresholds")):
+    check("統合: _stop_rule_settings: evaluate.nStepOuter 200000 は NS に効かない (fallback は既定 60,000; 上限は 200,000)",
+          d["use"] and d["cap"] == 200000 and d["fallback_steps"] == RA.NS_STEPS_DEFAULT == 60000
+          and d["fallback_steps_source"] == "既定 60000", str({k: d[k] for k in ("fallback_steps", "fallback_steps_source")}))
+    ok_ev = {"stop_rule": True, "ns_steps": 200000, "outStepInterval": 2500}
+    bad_cases = (("euler_ref が無い", None, None, "euler_ref が無い"),
+                 ("euler_ref が見つからない", None, str(TMP / "no_such_euler"), "見つからない"),
+                 ("上限が出力の間隔の倍数でない", {"stop_rule_cap": 151000}, str(eu), "倍数"),
+                 ("出力の間隔が窓に 9 点を入れられない (ns_steps 既定 60000 を割り切らない 7000 → 20000 に直る)",
+                  {"outStepInterval": 7000, "ns_steps": None}, str(eu), "9 点が入らない"))
+    for name, ev_over, er, msg in bad_cases:
+        ev = {k: v for k, v in {**ok_ev, **(ev_over or {})}.items() if v is not None}
         ok, e = raises(lambda ev=ev, er=er: RA._stop_rule_settings(P(ev), None, er, None), ValueError, msg)
-        check(f"_stop_rule_settings: {name} → ValueError (prepare_ns は run dir を作る前に呼ぶ)", ok and e.count(";") == 0, e[:140])
-    # prepare_ns の本段の step 数・出力の間隔は関数に出す前の式と同じ (回帰)
-    def old_steps(ev, nsteps):
-        n = nsteps or int(ev.get("nStepOuter", 48000))
+        check(f"_stop_rule_settings: 明示 (stop_rule true) で {name} → ValueError (prepare_ns は run dir を作る前に呼ぶ)",
+              ok and e.count(";") == 0, e[:140])
+        ev_def = {k: v for k, v in ev.items() if k != "stop_rule"}
+        try:
+            d = RA._stop_rule_settings(P(ev_def), None, er, None); e = None
+        except ValueError as ex:
+            d, e = None, str(ex)
+        check(f"統合: _stop_rule_settings: 既定 (キー無し) で {name} → 例外にせず use = False と理由を記録 (本段は fallback_steps)",
+              d is not None and d["requested"] and not d["explicit"] and not d["use"] and msg in (d["reason"] or ""), e or str(d and d["reason"]))
+    d = RA._stop_rule_settings(P({"stop_rule_cap": 150000, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: stop_rule_cap だけ (stop_rule が無い) → 既定の要求に効く (上限 150,000; 例外にしない)",
+          d["requested"] and d["use"] and d["cap"] == 150000 and d["cap_source"] == "evaluate.stop_rule_cap")
+    d = RA._stop_rule_settings(P({"stop_rule_thresholds": {"x_fracs": [0.5]}, "outStepInterval": 2500}), None, str(eu), None)
+    check("統合: stop_rule_thresholds だけ (stop_rule が無い) → 既定の要求に効く (x_fracs [0.5]; 例外にしない)",
+          d["requested"] and d["use"] and d["x_fracs"] == [0.5])
+    # prepare_ns の本段の step 数・出力の間隔 (統合: forge-f5 fb07daf8 の規則 --steps > evaluate.ns_steps > 60,000; nStepOuter は読まない)
+    def want_steps(ev, nsteps):
+        n = nsteps or (int(ev["ns_steps"]) if ev.get("ns_steps") is not None else 60000)
         out_int = int(ev.get("outStepInterval", max(n // 6, 1)))
         if n % out_int:
             out_int = next(n // k for k in (3, 2, 4, 6, 1) if n % k == 0)
         return n, out_int
     cases = [({}, None), ({"nStepOuter": 60000}, None), ({"nStepOuter": 200000, "outStepInterval": 2500}, None),
-             ({"nStepOuter": 12001}, None), ({"nStepOuter": 50000, "outStepInterval": 3000}, None), ({}, 9000), ({"outStepInterval": 7}, 100)]
-    check("_ns_steps (prepare_ns の本段の step 数・出力の間隔) は関数に出す前の式と同じ",
-          all(RA._ns_steps(P(ev), ns)[:2] == old_steps(ev, ns) for ev, ns in cases))
+             ({"ns_steps": 12001}, None), ({"ns_steps": 50000, "outStepInterval": 3000}, None), ({}, 9000), ({"outStepInterval": 7}, 100),
+             ({"nStepOuter": 12000, "ns_steps": 90000}, None)]
+    check("統合: _ns_steps (prepare_ns の本段の step 数・出力の間隔) は --steps > evaluate.ns_steps > 60,000 (evaluate.nStepOuter は読まない)",
+          all(RA._ns_steps(P(ev), ns)[:2] == want_steps(ev, ns) for ev, ns in cases)
+          and [RA._ns_steps(P(ev), ns)[2] for ev, ns in cases[:6]] == ["既定 60000", "既定 60000", "既定 60000", "evaluate.ns_steps",
+                                                                        "evaluate.ns_steps", "引数 (--steps)"])
 
 
 # ====================================================================================== 合成の構造格子 (量の式・偽の forge)
@@ -433,7 +476,9 @@ EULER_DUMMY = TMP / "euler_dummy"
 def make_run(name: str, scenario: dict, *, interval=2500, fallback=10000, cap=40000, euler_ref=True, requested=True, with_sr=True,
              hold=0):
     """偽の forge 用の run (prepare_ns の出力の形: prepare_info.json の stop_rule・solverConfig の nStepOuter = fallback)。
-    with_sr=False は指定の無い問題の準備 (prepare_info に stop_rule が無い)。戻り (run_dir, prepare_info の中身)。"""
+    with_sr=False は統合前の準備 (prepare_info に stop_rule が無い)。requested: True = `evaluate.stop_rule: true` (明示)、False = 使わない、
+    None = キー無し (統合後の既定の要求)。hold: 整数なら `evaluate.stop_rule_hold_steps`、"default" ならキーを書かない (既定 40,000)。
+    戻り (run_dir, prepare_info の中身)。"""
     rd = TMP / name
     rd.mkdir()
     write_mesh(rd)
@@ -449,8 +494,11 @@ def make_run(name: str, scenario: dict, *, interval=2500, fallback=10000, cap=40
             "euler_ref": str(EULER_DUMMY) if euler_ref else None, "nStepOuter": fallback, "cfl_main": 4.0,
             "throat_physical": {}, "dstar_source": "試験", "initializer": None}
     if with_sr:
-        sr = SR.resolve_settings({"stop_rule": requested, "stop_rule_hold_steps": hold}, nsteps_arg=None, n_main=fallback,
-                                 n_main_source="試験", out_int=interval, euler_ref=str(EULER_DUMMY), requested=None)
+        ev = {} if hold == "default" else {"stop_rule_hold_steps": hold}
+        if requested is not None:
+            ev["stop_rule"] = requested
+        sr = SR.resolve_settings(ev, nsteps_arg=None, n_main=fallback, n_main_source="試験", out_int=interval,
+                                 euler_ref=str(EULER_DUMMY), requested=None)
         if sr.get("cap") is not None:
             sr["cap"] = cap
         if not euler_ref:
@@ -587,7 +635,26 @@ def test_watcher():
 
         rd, _ = make_run("no_euler_ref", {"dt": 0.02}, euler_ref=False)
         ok, msg = raises(lambda: run_case(rd), RuntimeError, "euler_ref")
-        check("要求したのに euler_ref が見つからない → forge を起動する前に RuntimeError (取り込み元は本段を ns_steps で回す)",
+        check("明示の要求 (evaluate.stop_rule: true) なのに euler_ref が見つからない → forge を起動する前に RuntimeError",
+              ok and not (rd / "run_case_stdout.log").exists() and SR.read_state(rd) is None, msg[:120])
+
+        # --- 統合: 既定の要求 (キー無し) で使えない → UNAVAILABLE を記録して fallback_steps で回す (forge-f5 の版の動き) ---
+        rd, _ = make_run("default_no_euler_ref", {"dt": 0.02}, euler_ref=False, requested=None)
+        rc, rec, st = run_case(rd)
+        ms = json.loads((rd / RA.MAIN_STAGE_STARTED).read_text())
+        check("統合: 既定の要求で euler_ref が見つからない → 例外にせず本段は fallback_steps 10,000 (UNAVAILABLE と理由を記録、rc 0、"
+              "manifest・通知も 10,000)",
+              rc == 0 and rec["status"] == "UNAVAILABLE" and "euler_ref" in rec["reason"] and state_ok(rc, st, "UNAVAILABLE")
+              and max(outputs(rd)) == 10000 and main_nstep(rd) == 10000 and ms["main_config"]["nStepOuter"] == 10000
+              and rec.get("forge_rc") == 0 and st["fallback_steps"] == 10000, f"{st}")
+        rd, _ = make_run("default_prep_unusable", {"dt": 0.02}, interval=5000, requested=None)
+        rc, rec, st = run_case(rd)
+        check("統合: 既定の要求で prepare が使えないと記録 (出力の間隔 5000) → UNAVAILABLE、本段は fallback_steps 10,000 (rc 0)",
+              rc == 0 and state_ok(rc, st, "UNAVAILABLE") and "出力の間隔" in st["reason"] and max(outputs(rd)) == 10000
+              and main_nstep(rd) == 10000, f"{st}")
+        rd, _ = make_run("explicit_prep_unusable", {"dt": 0.02}, interval=5000, requested=True)
+        ok, msg = raises(lambda: run_case(rd), RuntimeError, "明示")
+        check("明示の要求で prepare が使えないと記録 → forge を起動する前に RuntimeError (状態は書かない)",
               ok and not (rd / "run_case_stdout.log").exists() and SR.read_state(rd) is None, msg[:120])
 
         rd, _ = make_run("arg_false", {"dt": 0.02})
@@ -622,6 +689,11 @@ def test_watcher():
         rc, rec, st = run_case(rd)
         check("hold 20,000 が上限 30,000 までに終わらない → CENSORED (保持の途中と記録)",
               state_ok(rc, st, "CENSORED") and "保持の途中" in (st.get("note") or ""), f"{st and (st['status'], st.get('note'))}")
+        rd, _ = make_run("hold_default", {"dt": 0.05}, hold="default", requested=None, cap=70000)
+        rc, rec, st = run_case(rd)
+        check("統合: キー無し (既定の要求・保持の既定 40,000) → 22,500 で届いた後 4 万 step 保って 62,500 で REACHED",
+              state_ok(rc, st, "REACHED") and st["stop_step"] == 62500 and st["hold_steps"] == 40000 and st["hold"]["reached"] == [22500]
+              and max(outputs(rd)) == 62500, f"{st and (st['status'], st['stop_step'], st.get('hold_steps'))}")
 
         # --- stages="full": S1・S2 には当てず本段だけ (S1・S2 は 3,000 step の通常の起動) ---
         orig = (RA.stage_gate, RA._restart_same_mesh)
@@ -780,6 +852,10 @@ def test_handoff():
         check("UNAVAILABLE (rc 0) → 止める", not gate["proceed"] and gate["stop_rule"]["status"] == "UNAVAILABLE" and not calls)
 
         both = dict(allow_not_reached="試験: 上書き", allow_unconverged="試験: 上書き", allow_unsettled="試験: 上書き")
+        rd, m, gate, calls = from_table("h_unavail_default", fast, kw={"requested": None, "euler_ref": False}, **both)
+        check("統合: 既定の要求で使えない (UNAVAILABLE、本段は fallback) は上書き 3 つ (理由つき、allow_unsettled を含む) でも保存則・2 窓の記録が無い (判定不能) ので止める",
+              not gate["proceed"] and gate["stop_rule"]["status"] == "UNAVAILABLE" and not calls
+              and not gate["checks"]["conservation"]["pass"] and not gate["checks"]["conservation"].get("measured"), f"{gate['blocked_by']}")
         rd, m, gate, calls = from_table("h_diverged", {**fast, "nan_at": 12500}, **both)
         check("DIVERGED は上書き (allow_not_reached・allow_unconverged・allow_unsettled) でも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "DIVERGED"
               and not calls, f"{gate['blocked_by']}")
@@ -787,7 +863,7 @@ def test_handoff():
         check("EXEC_ERROR は上書きでも止める", not gate["proceed"] and gate["stop_rule"]["status"] == "EXEC_ERROR" and not calls)
 
         rd, m, gate, calls = from_table("h_notused", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False})
-        check("停止規則を使わない run (指定の無い問題、NOT_USED) → 既定は止める (従来は抽出へ進んだ)",
+        check("停止規則の記録の無い run (統合前の準備、NOT_USED) → 既定は止める (従来は抽出へ進んだ)",
               not gate["proceed"] and gate["stop_rule"]["status"] == "NOT_USED" and not calls and SR.read_state(rd) is None)
         rd, m, gate, calls = from_table("h_notused_allow", {**fast, "dt": 0.02, "res_tau": 1000.0}, kw={"with_sr": False}, **both)
         check("  上書き 3 つ (理由つき、allow_unsettled を含む) でも NOT_USED は止める (#36e: 保存則・2 窓の記録 stop_rule.json が無い = 判定不能。"
@@ -917,7 +993,7 @@ def test_handoff():
 
 # ====================================================================================== (d) 指定の無い問題の回帰
 def test_regression():
-    print("== (d) 指定の無い問題の回帰 (prepare_info に stop_rule が無い run)", flush=True)
+    print("== (d) 停止規則の記録の無い準備の回帰 (統合前・2026-10-14 より前の prepare_info に stop_rule が無い run)", flush=True)
     rd, _ = make_run("reg_no_sr", {"dt": 0.02}, with_sr=False)
     cfg0 = (rd / "solverConfig.yaml").read_text()
     seen = []

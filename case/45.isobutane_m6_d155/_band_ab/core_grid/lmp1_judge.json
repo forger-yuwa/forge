@@ -1,0 +1,44 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.80",
+ "R": "run_0686_lmp_r",
+ "L": "run_0687_lmp_1",
+ "qualification": {
+  "control_stall": false,
+  "control_reproduces_0619": false,
+  "lmp_effective": true,
+  "control_finite": true
+ },
+ "ratios_L_over_R": {
+  "10000-15000": {
+   "contraction_res_ro": null,
+   "contraction_res_roe": null,
+   "contraction_res_roUx": null,
+   "contraction_res_roUy": null,
+   "contraction_res_roK": null,
+   "contraction_res_roOmega": null,
+   "outside_res_ro": null,
+   "outside_res_roUx": null,
+   "outside_res_roUy": null,
+   "outside_res_roe": null
+  },
+  "15000-20000": {
+   "contraction_res_ro": null,
+   "contraction_res_roe": null,
+   "contraction_res_roUx": null,
+   "contraction_res_roUy": null,
+   "contraction_res_roK": null,
+   "contraction_res_roOmega": null,
+   "outside_res_ro": null,
+   "outside_res_roUx": null,
+   "outside_res_roUy": null,
+   "outside_res_roe": null
+  }
+ },
+ "result": "B: L が発散 (非有限)。「`=1` だけで緩和できる」を退ける (低マッハの機構そのものは退けない)",
+ "saw_P": {},
+ "quantities_rel_diff_L_minus_R": {},
+ "lowMachPrecond": {
+  "R": 0,
+  "L": 1
+ }
+}

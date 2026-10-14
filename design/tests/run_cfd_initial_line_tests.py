@@ -261,8 +261,104 @@ if (run / "res_6000.h5").exists():
     except ValueError as e:
         check(f"pinned_factory 単独でも入口 Tt 1500 (prepare_info.gas.Tt 1600 と不整合) を拒否 ({str(e)[:90]}…)",
               "prepare_info" in str(e))
+
+    # --- ① の既定の挙動が ③ の拡張 (2026-10-12, plan bell-two-mode §5.1 #6 W3) で変わらない -------------------------
+    # 値は拡張前の HEAD (b16ecff3) で同じ design_chain を回したもの (壁 r(x) の sha 23791e10d7724281 も一致を確認済み)
+    want_sha = {"snapshot": "b1cc31ea78113457", "thermo": "cb08f7398369bad5", "line": "da98a6f954ed620b"}
+    want_checked = ["R", "gamma_hall", "gas", "L_U", "r_U", "L_pipe", "contraction_shape", "meta.gas.Tt",
+                    "meta.species.Y_transport", "meta.species.transported", "inlet.Pt", "inlet.Tt", "inlet.Y",
+                    "physProp.thermalMethod", "physProp.species", "physProp.thermoHrefTemp"]
+    from forge_design.feedback.cfd_initial_line import load_run_field  # noqa: E402
+    _src1 = load_run_field(run, "res_6000.h5")[4]
+    check(f"① の既定は拡張前とビット同一: 線・snapshot・熱力学のハッシュ ({il['sha256_16']})・x0 ({il['x0']!r})・照合の項目・"
+          f"shape のキー ({sorted(_src1['shape'])})",
+          il["sha256_16"] == want_sha and il["x0"] == 0.5089583481234511 and il["match"]["checked"] == want_checked
+          and il["match"]["unchecked"] == [] and sorted(_src1["shape"]) == ["L_U", "R", "r_U_mesh", "scale_m", "x_in_mesh"])
 else:
     print("skip: res_6000.h5 が無いので design_chain (cfd) と凍結入力契約の検査を省略")
+
+# --- ③ベルの凍結源 (2026-10-12, plan tooling-nozzle-bell-two-mode §5.1 #6 W3) ------------------------------------------
+# 凍結源 = case/68 の Hall 版 (M) 壁の TP Euler (evaluate/runner.py、単一 lump 種 EXH・出口 outflow・WALL_DESIGN.json の寸法 spec)。
+# 検証 run は git 管理外なので、無ければこの節を飛ばす (合格扱いの行は出さない)。
+RUN3 = ROOT / "case/68.bell_two_mode/run_0015_tp_m_euler_l100"
+PROB3 = ROOT / "case/68.bell_two_mode/problem_bell_tp_m_euler_l100.yaml"
+if (RUN3 / "res_30000.h5").exists():
+    import copy as _copy  # noqa: E402
+    import tempfile  # noqa: E402
+
+    import yaml  # noqa: E402
+
+    from forge_design.feedback.cfd_initial_line import expected_bell_source, moc_initial_line, pinned_factory  # noqa: E402
+    from forge_design.geometry import moc_forward as mf  # noqa: E402
+    from forge_design.geometry import rao_axisym as ra  # noqa: E402
+    from forge_design.probdef import load_problem as load_problem3  # noqa: E402
+    p3 = load_problem3(PROB3)
+    eb = expected_bell_source(p3)
+    ig3 = ra.as_isentrope(p3.gas_model)
+    g3 = float(ig3.moc.gamma_throat())
+    th3 = pinned_factory(RUN3, "res_30000.h5", eb["expect"])(eb["R"], g3)
+    m3 = th3.source["match"]
+    want3 = {"R", "gas.exhaust", "L_U", "r_U", "L_pipe", "contraction_shape", "meta.gas.exhaust.Tc_K", "meta.gas.exhaust.Pc_Pa",
+             "meta.gas.species", "inlet.Pt", "inlet.Tt", "inlet.Y", "physProp.thermalMethod", "physProp.species",
+             "physProp.thermoHrefTemp"}
+    check(f"③: 凍結源 run_0015 (出口 outflow・slip 壁・EXH) を受理し、寸法・排気・入口・physProp を照合済みと記録 "
+          f"(照合できない {m3['unchecked']}、欠け {sorted(want3 - set(m3['checked']))})",
+          want3 <= set(m3["checked"]) and m3["unchecked"] == ["gamma_hall"])
+    ln3 = moc_initial_line(th3, ig3.moc, 321)
+    W3 = mf._Wall(ra.KernelWall(1.0, c=0.0, s_lin=0.5, theta_cap=float(np.arcsin(1.0 / ln3["M"][-1])) - np.deg2rad(5.0)), 10.0)
+    codes3, _, info3 = mf._check_line(ln3, W3, ig3.moc)
+    check(f"③: ピン線 (n 321・r 等間隔) が前進 MOC の初期線の検査 `_check_line` を通る (符号 {codes3 or 'なし'}・壁 Δr "
+          f"{info3.get('wall_dr')})、壁点 (0, 1, θ 0)・軸端 r 0・θ_r 有限 ({ln3['thr_axis']:.6f})",
+          not codes3 and ln3["x"][-1] == 0.0 and ln3["r"][-1] == 1.0 and ln3["theta"][-1] == 0.0 and ln3["r"][0] == 0.0
+          and np.isfinite(ln3["thr_axis"]) and float(np.max(np.abs(np.diff(ln3["r"]) - 1.0 / 320))) <= 1e-15)
+
+    def _src3(edit_bc=None, edit_cfg=None, edit_info=None, edit_wd=None, drop_wd=False):
+        td = Path(tempfile.mkdtemp(prefix="cfdpin3_"))
+        for fn in ("nozzle.h5", "res_30000.h5"):
+            (td / fn).symlink_to(RUN3 / fn)
+        info = json.loads((RUN3 / "prepare_info.json").read_text())
+        cfg = yaml.safe_load((RUN3 / "solverConfig.yaml").read_text())
+        bc = yaml.safe_load((RUN3 / "bcondConfig.yaml").read_text())
+        wd = json.loads((RUN3 / "WALL_DESIGN.json").read_text())
+        for f, obj in ((edit_info, info), (edit_cfg, cfg), (edit_bc, bc), (edit_wd, wd)):
+            if f:
+                f(obj)
+        (td / "prepare_info.json").write_text(json.dumps(info))
+        (td / "solverConfig.yaml").write_text(yaml.safe_dump(cfg))
+        (td / "bcondConfig.yaml").write_text(yaml.safe_dump(bc))
+        if not drop_wd:
+            (td / "WALL_DESIGN.json").write_text(json.dumps(wd))
+        return td
+
+    def _make3(td, expect=None):
+        return pinned_factory(td, "res_30000.h5", eb["expect"] if expect is None else expect)(eb["R"], g3)
+    ok3 = _make3(_src3())
+    check("③ 対照: 設定を変えずに書き直した凍結源は受理し、同じ線 (ハッシュ一致)",
+          ok3.source["sha256_16"]["line"] == th3.source["sha256_16"]["line"])
+    exp_bad = _copy.deepcopy(eb["expect"])
+    exp_bad["gas"]["exhaust"]["X"]["H2O"] = 0.70
+    exp_cpg = {**_copy.deepcopy(eb["expect"]), "gas": {"kind": "semiperfect", "Tt": 3523.96, "Y": {"EXH": 1.0}}}
+    for label, kw, expect, key in (
+            ("壁が no-slip (wall)", {"edit_bc": lambda b: b["wall"].update({"kind": "wall"})}, None, "slip でない"),
+            ("乱流 SST", {"edit_cfg": lambda c: c.update({"turbulence": {"model": "SST"}})}, None, "乱流なし"),
+            ("prepare_info.flow_model ns", {"edit_info": lambda i: i.update({"flow_model": "ns"})}, None, "flow_model"),
+            ("prepare_info.gas.exhaust.Tc_K 3000 (入口 Tt と不整合)",
+             {"edit_info": lambda i: i["gas"]["exhaust"].update({"Tc_K": 3000.0})}, None, "Tc_K"),
+            ("入口 Pt 5 MPa", {"edit_bc": lambda b: b["inlet"]["floats"].update({"Pt": 5.0e6})}, None, "入口 Pt"),
+            ("寸法 spec の R_t 2", {"edit_wd": lambda w: w["spec"].update({"R_t": 2.0})}, None, "R:"),
+            ("寸法 spec の L_pipe 0.5", {"edit_wd": lambda w: w["spec"].update({"L_pipe": 0.5})}, None, "L_pipe"),
+            ("使う側の排気組成が違う (H2O の X)", {}, exp_bad, "gas.exhaust.X"),
+            ("使う側が ① の気体の形 (kind・Tt・Y)", {}, exp_cpg, "gas.exhaust")):
+        try:
+            _make3(_src3(**kw), expect)
+            check(f"③: {label} を拒否", False)
+        except ValueError as e:
+            check(f"③: {label} を拒否 ({str(e)[:100]}…)", key in str(e))
+    m_nowd = _make3(_src3(drop_wd=True)).source["match"]
+    check(f"③: WALL_DESIGN.json が無い凍結源は R_t を照合できない項目として返す (黙って照合済みにしない; unchecked {m_nowd['unchecked']})",
+          "R" in m_nowd["unchecked"] and "R" not in m_nowd["checked"])
+else:
+    print(f"skip: {RUN3}/res_30000.h5 が無いので ③ベルの凍結源の検査を省略")
 
 # codex result 2026-10-06 Major 1: CLI の __main__ が全関数定義より後にあること (前にあると _design_report 未定義で NameError)
 import ast as _ast  # noqa: E402

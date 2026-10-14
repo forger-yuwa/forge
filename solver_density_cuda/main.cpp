@@ -2103,6 +2103,8 @@ void blockDPLURSolve(StepContext& s, int subiter = 0)
         // 最終 commit を整合させる。cell/非周期では no-op。
         periodicMirrorDq_d_wrapper(s.cfg , s.cuda_cfg , s.msh , s.var);
     }
+    // 診断 (FORGE_LINE_DUMP_FINAL=1、既定 off): 確定する補正 δ_K に対する右辺を書き出す。solve・swap・commit はしない。
+    if (useBlock && s.cfg.lineImplicit == 1) lineDumpFinalRhs_wrapper(nSweep, s.cfg, s.cuda_cfg, s.msh, s.var);
 }
 
 // 1 回の非線形（擬似時間）更新。定常・dual-time 共有の核。

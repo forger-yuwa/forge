@@ -32,11 +32,12 @@
 | `spec` | `Pt`, `Tt`, `p_ambient`, `r_throat` [m], `M_design`、任意で `sizing` | **出口径は直接書けない** (`D_e` は未実装)。出口半径は `r_throat` × MOC の面積比 + δ で決まる。物理出口径に合わせるには `solve_rt`、物理スロート径から決めるには `solve_rt_throat` (§1 ④)。どちらで決めたかを `sizing: {method: exit \| throat, target_m: …}` に書くと `prepare_info.json` の `sizing` に目標との差が出る |
 | `gas` | `model: semiperfect`, `species` (組成), `transport` | Tt > 600 K・燃焼ガスは semiperfect。条件を変えたら `geometry.r_inlet` も付け替える |
 | `dv` | `L_c.value` | 軸 law の長さ。runner は `min/max` を使わない |
-| `geometry` | `R` (スロート曲率半径/r_t)、`r_inlet` (入口配管半径/**r_t 単位**)、`L_U` (縮流部長)、`L_pipe`、`axis_law: knot`、`M_knot`、`Lc_mode`、`start_line: throat_char`、`wall_mode: cplus`、`n_axis_inv` | `Lc_mode`: `explicit` (L_c を使う、許容窓の外は例外) / `max` / `from_length` (`dv.L_total` から L_c を解く)。r_t を変えても r_inlet・L_total は r_t 単位のまま (実寸がずれる) |
+| `geometry` | `R` (スロート曲率半径/r_t)、`r_inlet` (入口配管半径/**r_t 単位**)、`L_U` (縮流部長)、`L_pipe`、`axis_law: knot`、`M_knot`、`Lc_mode`、`start_line: throat_char`、`wall_mode: cplus`、`n_axis_inv` | `Lc_mode`: `explicit` (L_c を使う、許容窓の外は例外) / `max` / `from_length` (`dv.L_total` から L_c を解く)。r_t を変えても r_inlet・L_total は r_t 単位のまま (実寸がずれる) **要求カードでは M_knot は既定で自動** (最大壁角が最小・成立の境目から 0.05 以上、2026-10-14; plan `tooling-nozzle-mknot-auto`)。 |
 | `geometry` (生産レシピ) | `initial_line: cfd` + `initial_line_run`/`initial_line_res`、`wall_repr: joint`、`Md_moc_offset`、`pw_upstream: poly` | §2 ⑤ 参照。新規設計の初回は `initial_line: hall`・`wall_repr: interp` (既定) でよい。`pw_ramp` は旧設定 (`pw_upstream: ramp` と組で使う。`poly` と併記すると例外) |
 | `mesh` | `ni`, `nj`, `wall_first_frac` (+ `_throat`・ブレンド)、`throat_refine`、`throat_width`、`axis_cap_frac`、`ar_max` | **NS (`prepare_ns`) の格子**。壁解像 PASS の格子を使う (§2 ⑥)。Euler には効かない (2026-10-07 から) |
 | `mesh_euler` | `mesh` と同じキー (未知のキーは例外) | **Euler (`prepare`) の格子** (2026-10-07、plan `verification-case45-euler-total-enthalpy` §4)。`mesh` からは補完しない。既定は全断面で `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし、ni × nj は 321 × 65)。**`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる** (旧格子の記録を再現するなら `mesh` の全キーを写す)。case/45 は ni 2000 × nj 97・軸方向は G1 と同じ (`throat_refine 4`・`throat_width 3`)・全域 0.005 |
-| `evaluate` | `nStepOuter`, `outStepInterval`, `cfl_main`, `tp_species`, `condensation` | 凝縮は `tp_species: split_h2o` + `condensation` |
+| `evaluate` | `nStepOuter` (**Euler の本段だけ**)、`ns_steps` (NS の本段、既定 60,000)、`outStepInterval`, `cfl_main`, `tp_species`, `condensation` | 凝縮は `tp_species: split_h2o` + `condensation`。**NS の本段の step 数は `--steps` > `evaluate.ns_steps` > 既定 60,000** (2026-10-14 ユーザ決定。以前は雛形の `nStepOuter` 12,000 が NS にも効いて短すぎた)。`prepare_info.json` の `nStepOuter_source` に出所。**NS の本段は既定で停止規則つき・上限 20 万 step** (2026-10-14 ユーザ決定; `evaluate.stop_rule`・`stop_rule_cap`、記録は run の `stop_rule.json`、plan `tooling-nozzle-cooled-wall-ns-settling` §4.6) |
+| `mesh`・`mesh_euler` の上限 | `max_nodes`, `max_nodes_reason` (組で書く) | **2D の節点数の上限 30 万点** (2026-10-14、plan `tooling-nozzle-mesh-size-guard`)。生成器・`prepare`・`prepare_ns` が格子を作る前に実効の節点数 (`axis_gap_frac` の導出 nj を含む) で判定して止まる。引き上げはユーザの了承を取ってから理由と組で書く (AGENTS.md「メッシュの規模は作る前に示す」)。`prepare_info.json` の mesh 欄に `n_nodes` |
 
 新しい問題は既存の YAML を複製して作る。複製元のコメントに残る古い設定 (`M_design` の試作較正値、
 `mesh.bndFirstOrder`、廃止キー) を持ち込まない ([`recommended-settings.md`](recommended-settings.md) §9)。
@@ -100,6 +101,7 @@
    カードの寸法ゲートは**設計壁から測った値**で、最終の合格は成果物 (STEP・メッシュ) の出荷寸法ゲート。
    **冷却壁の注意**: case/70 (T_w/T_aw ≈ 0.3) の NS は、残差が床に着いた後も出口 M・流量が 10 万 step 単位で動き続けた (plan §5.1 #11)。
    作り直しの入力の δ_E と最終の出口 M は、長い窓の系列で動きが止まったか (出口 M は末尾の変化と推定の残りの変化 ≤ 2.5e-4) を確かめてから使う。
+   **作り直しの入力の δ_E は、整定した場の 5 枚の窓 (5k ごと) で各枚の抽出 (帯は各枚で選ぶ、既定) の点ごとの平均にする** (2026-10-13、plan `tooling-nozzle-cooled-wall-ns-settling` §4.4)。1 枚だけでは、梯子が平らにならない区間 (冷却壁のスロート付近・直管・縮流部) で帯位置が切り替わり、局所で δ_E が 5e-4 r_t 動く。5 枚の平均でも 1 枚の切り替わりで 1e-4 r_t 程度は残る (既知の限界)。
 5. **形を見る・出す** — 最終 NS の run から成果物一式を 1 コマンドで出す (plan
    [`tooling-nozzle-wt-deliverables`](../plans/accepted/tooling-nozzle-wt-deliverables.md)、2026-10-13):
    ```

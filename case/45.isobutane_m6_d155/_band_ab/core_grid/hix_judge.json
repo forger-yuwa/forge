@@ -1,0 +1,156 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.100",
+ "C_fixed_window": [
+  "run_0912_hi_c_main",
+  [
+   40000,
+   60000
+  ]
+ ],
+ "H": "run_0916_hi_h_cont",
+ "H_windows_cont_steps": [
+  [
+   0,
+   20000
+  ],
+  [
+   20000,
+   40000
+  ]
+ ],
+ "offset": 60000,
+ "qualification": {
+  "restart_bitwise_9": true,
+  "settings_same_as_H_main": true,
+  "completed_and_20_outputs": true,
+  "finite_physical": true
+ },
+ "ratio_H_over_Cfixed": {
+  "W3": {
+   "contraction_res_ro": 0.02085402551336081,
+   "contraction_res_roe": 0.006999516290430426,
+   "contraction_res_roUx": 0.0601489862284147,
+   "contraction_res_roUy": 0.18753840857910964,
+   "contraction_res_roK": 0.038578361667230214,
+   "contraction_res_roOmega": 0.45815649815578136,
+   "outside_res_ro": 0.08804028379806175,
+   "outside_res_roUx": 0.06350733605651815,
+   "outside_res_roUy": 0.1445177391110091,
+   "outside_res_roe": 0.13183150034399607,
+   "throatwall_res_ro": 0.06479035559540816,
+   "throatwall_res_roe": 0.23884305797732136
+  },
+  "W4": {
+   "contraction_res_ro": 0.019088532008854655,
+   "contraction_res_roe": 0.005936889520311174,
+   "contraction_res_roUx": 0.05429534783021451,
+   "contraction_res_roUy": 0.17389031693217724,
+   "contraction_res_roK": 0.04044508898173772,
+   "contraction_res_roOmega": 0.43649759631049495,
+   "outside_res_ro": 0.07459008393835653,
+   "outside_res_roUx": 0.04865796265101083,
+   "outside_res_roUy": 0.13471193882673704,
+   "outside_res_roe": 0.1089699969602961,
+   "throatwall_res_ro": 0.05347722648369677,
+   "throatwall_res_roe": 0.09205476400357816
+  }
+ },
+ "d_H": {
+  "res_ro": 0.915340397786747,
+  "res_roe": 0.8481856851205489
+ },
+ "result": "A: H の縮流部の残差の改善は、継続の 4 万 step (本段の通算 60k〜100k) でも固定した C の停滞の水準の 1/3 以下に保たれた",
+ "phys_quasisteady": {
+  "theta_r_w65_75": {
+   "verdict": "STEADY",
+   "detail": "tail mean=0.1216  drift=0.1%/tail  fluct=0.1%  [単調増加; 増分減衰から漸近値 0.121686 (最終比 +0.041 %)]",
+   "n": 40,
+   "first": 0.119938891223,
+   "last": 0.121635808391,
+   "w3_mean": 0.12080779088959996,
+   "w4_mean": 0.1215426080279
+  },
+  "Q_w": {
+   "verdict": "STEADY",
+   "detail": "tail mean=9.969e+06  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 9.96603e+06 (最終比 -0.015 %)]",
+   "n": 40,
+   "first": 10024466.8525,
+   "last": 9967484.37324,
+   "w3_mean": 9994396.398395501,
+   "w4_mean": 9970323.995237498
+  }
+ },
+ "phys_tool_stdout": [
+  "=== /home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/core_grid/hix_phys_series.csv  [40 rows, steps 61000..100000]  -> STEADY ===",
+  "  theta_r_w65_75  : tail mean=0.1216  drift=0.1%/tail  fluct=0.1%  [単調増加; 増分減衰から漸近値 0.121686 (最終比 +0.041 %)] STEADY",
+  "  Q_w             : tail mean=9.969e+06  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 9.96603e+06 (最終比 -0.015 %)] STEADY",
+  "",
+  "OVERALL: ALL STEADY"
+ ],
+ "reading": "A かつ θ_r・Q_w が STEADY: 観測した改善がこの二量の過渡中だけだった、を退ける",
+ "convergence": {
+  "cont_only": [
+   "=== /home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/run_0916_hi_h_cont  [last step 39999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===",
+   "  rms_ro      : init=1.02e-07 peak=1.03e-07 fin=8.61e-08 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roUx    : init=2.68e-05 peak=2.68e-05 fin=1.32e-05 drop= 0.3dec flat     <-- STALLED (plateau)",
+   "  rms_roUy    : init=1.40e-05 peak=1.43e-05 fin=1.24e-05 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roUz    : all-zero (inactive, skip)",
+   "  rms_roe     : init=7.48e-02 peak=8.14e-02 fin=7.09e-02 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roK     : init=4.04e-04 fin=1.47e-05 drop= 1.3dec falling  <-- still converging",
+   "  rms_roOmega : init=2.40e+01 peak=2.70e+01 fin=2.34e+01 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roY0    : init=7.18e-08 peak=7.24e-08 fin=5.77e-08 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "  rms_roY1    : init=6.74e-09 peak=6.80e-09 fin=5.42e-09 drop= 0.1dec flat     <-- STALLED (plateau)",
+   "",
+   "OVERALL: CHECK FAILURES ABOVE"
+  ],
+  "main_plus_cont": [
+   "=== /home/ubuntu/forge-coregrid/case/45.isobutane_m6_d155/_band_ab/core_grid/hix_concat_main_cont  [last step 39999]  -> PASS (converged) ===",
+   "  rms_ro      : init=1.40e-04 fin=8.61e-08 drop= 3.2dec flat   ",
+   "  rms_roUx    : init=1.78e-01 fin=1.32e-05 drop= 4.1dec falling",
+   "  rms_roUy    : init=5.19e-02 peak=5.60e-02 fin=1.24e-05 drop= 3.7dec flat   ",
+   "  rms_roUz    : all-zero (inactive, skip)",
+   "  rms_roe     : init=2.79e+02 fin=7.09e-02 drop= 3.6dec flat   ",
+   "  rms_roK     : init=3.36e-02 peak=4.54e-01 fin=1.47e-05 drop= 4.1dec falling",
+   "  rms_roOmega : init=1.65e+05 peak=4.02e+05 fin=2.34e+01 drop= 4.2dec flat   ",
+   "  rms_roY0    : init=1.28e-04 fin=5.77e-08 drop= 3.3dec flat   ",
+   "  rms_roY1    : init=1.20e-05 fin=5.42e-09 drop= 3.3dec flat   ",
+   "",
+   "OVERALL: ALL PASS"
+  ]
+ },
+ "series_contraction_ro_H": [
+  [
+   65000,
+   9.20301979466644
+  ],
+  [
+   70000,
+   9.134327314413142
+  ],
+  [
+   75000,
+   8.771535734817828
+  ],
+  [
+   80000,
+   8.33150153491955
+  ],
+  [
+   85000,
+   8.360139591838106
+  ],
+  [
+   90000,
+   8.436190112555073
+  ],
+  [
+   95000,
+   8.065767221021236
+  ],
+  [
+   100000,
+   8.014092308108811
+  ]
+ ],
+ "note": "継続の窓 W3 の始めには再開直後の残差の跳ねが入る (C の固定窓には無い)。A に不利な向き。"
+}

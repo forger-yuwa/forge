@@ -8,7 +8,7 @@
   ],
   "NS": [
    "problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml",
-   "0d784f7c49922444f9e476579b3fee092f4188e7717354caf37184ba84250eea"
+   "524c56acc0167d3e802f4521194ea16bdd7aac42337db6c2bda8186b630de0a0"
   ],
   "EU": [
    "problem_d155_euler_h_ref.yaml",
@@ -63,6 +63,10 @@
   ],
   "evaluate.nStepOuter": [
    12000,
+   200000
+  ],
+  "evaluate.ns_steps": [
+   "<無し>",
    200000
   ],
   "evaluate.outStepInterval": [
@@ -205,8 +209,9 @@
  "stop_rule_resolved": {
   "requested": true,
   "requested_source": "evaluate.stop_rule",
+  "explicit": true,
   "fallback_steps": 200000,
-  "fallback_steps_source": "evaluate.nStepOuter",
+  "fallback_steps_source": "evaluate.ns_steps",
   "out_step_interval": 2500,
   "euler_ref": "<投入の時に固定する run_0950 の res と sha256>",
   "window": 20000,
@@ -232,6 +237,7 @@
    ]
   },
   "hold_steps": 40000,
+  "hold_steps_source": "evaluate.stop_rule_hold_steps",
   "extract": {
    "band_select": "edge",
    "remap_constant_x": true,

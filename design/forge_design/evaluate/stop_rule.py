@@ -1,29 +1,30 @@
-r"""NS の本段の停止規則 (plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a、2026-10-14)。
+r"""NS の本段の停止規則 (plan tooling-nozzle-cooled-wall-ns-settling §4.6・plan tooling-nozzle-isothermal-wall-chain §4.9・§5.1 #36a・#36e、2026-10-14)。
 
-**取り込み元**: forge-f5 の feature/nozzle-cooled-wall-settling **60de8125** の同名ファイル (2026-10-14 の最新。規則を足した 66364fff に、
-θ_r の断面の基準を軸 Mach 則の終点 x_E から設計壁の出口 physical_wall.domain[1] に直した 60de8125 を重ねたもの; 間の 719dfbf4 の版は 66364fff と同一。
-plan tooling-nozzle-cooled-wall-ns-settling §4.6、2026-10-14 ユーザ決定・諮問 stop-rule を全件採用。その §4.6 はこの作業ツリーの同 plan には無い)。
-commit ごとの cherry-pick はせず、このファイルだけを写した (66364fff は `runner_axismach.run_staged_ns` も書き換えていて、こちらの組み替え済みの
-段の構成と衝突する)。取り込み元から変えた所:
-  - **問題 YAML に `evaluate.stop_rule` が無ければ使わない** (取り込み元は既定で使う)。指定の無い問題の準備・実行は取り込む前と同一 (§5.1 #36a の回帰)。
-  - 要求したのに使えない (euler_ref が無い・出力の間隔・上限が出力の間隔の倍数でない) ときは、取り込み元は本段を ns_steps で回して UNAVAILABLE と
-    記録するが、こちらは `prepare_ns` が run dir を作る前に・`run_staged_ns` が forge を起動する前に例外で止める (`resolve_settings` の
-    上限の倍数の検査はこちらで足した)。見張りの途中で帯の位置を決められないときの UNAVAILABLE (fallback_steps の出力で止める) は取り込み元のまま。
-  - 終了の状態の記録 `STOP_RULE_STATE.json` (`write_state`・`read_state`) を足した (`stop_rule.json` は見張りの途中も書き換わる詳しい記録、
-    こちらは本段が終わった後に 1 度だけ書く状態の印)。
-  - 問題 YAML から閾値・窓・断面を変えられる (`evaluate.stop_rule_thresholds`、`thresholds` と同じキー; 例 case/45 の試験部の断面
-    x = 40・70・94 r_t は `x_fracs` に x / x_w を書く)。既定は取り込み元のまま。
-  - 到達の後の継続 (`evaluate.stop_rule_hold_steps`、既定 0 = 取り込み元どおり最初の到達で止める): H > 0 なら最初に条件を満たした出力 s₀ の後も
-    回し、s₀ + H までの全ての出力で条件を保ったら REACHED (止める出力は s₀ + H 以後の最初の出力)。途中で外れたら到達を取り消して記録し、
-    次の到達から数え直す。上限までに保ち切れなければ CENSORED (forge-25 が case/45 の H で使った「到達の後 4 万 step 続けて保持を確かめる」手順)。
-  - 記録の `plan` の参照先をこの作業ツリーの plan にした。判定・量・見張り・forge の止め方は取り込み元のまま。
-  - (§5.1 #36e、codex diagnose 3) 帯の位置の抽出は受け渡しの抽出と同じ条件 (`deltastar_loop.handoff_extract_settings`: 一定 x の断面への補間
-    `remap_constant_x=True`・端の補間範囲の不足は欠測 `remap_edge="missing"`) で、Euler の参照は固定のスナップショット {run, res, sha256} も
-    指定できる (`deltastar.resolve_euler_ref`、sha が合わなければ使わない)。設定は prepare_info の stop_rule の `extract`・`euler_ref` に残る。
-  - (§5.1 #36e (7)) 見張りの中で出力ごとに δ_E・δ_target (抽出器の量、使用域 [0, x_w] の全列) を受け渡しと同じ条件で抽出し、
-    `stop_rule.json` の行の `delta` に残す (**判定には使わない記録の量**。受け渡しの関門の 2 窓の判定がこの記録を読み、計算の後に抽出し直さない)。
-    抽出は別スレッド 1 本で行い (`DeltaRecorder`)、停止の判定を待たせない。追いつかないときは最新の出力から 2 窓 (2W) より古い出力を
-    飛ばす (`skipped`; 停止の時刻 s ≥ 最新の出力なので、[s − 2W, s] に入らない出力だけ)。要求の断面の位置 (x_fracs × x_w) は `sections` に残す。
+**由来と統合** (2026-10-14、main への統合 1 回目で 2 つの版を 1 つにした):
+forge-f5 の feature/nozzle-cooled-wall-settling (66364fff に θ_r の断面の基準を設計壁の出口に直した 60de8125 を重ねた版、plan
+tooling-nozzle-cooled-wall-ns-settling §4.6、ユーザ決定・諮問 stop-rule を全件採用) を、M6 の feature/nozzle-wall-fit-and-pipeline が
+写して変えた版 (plan tooling-nozzle-isothermal-wall-chain §5.1 #36a・#36e) を土台にし、使うかどうかの既定を forge-f5 の版に戻した。
+  - **既定で使う** (forge-f5、ユーザ決定): 問題 YAML に `evaluate.stop_rule` が無ければ使う。使えない (euler_ref が無い・見つからない・
+    出力の間隔・上限が出力の間隔の倍数でない・設計壁の出口が無い) ときは forge-f5 の版の動き = UNAVAILABLE を記録し、本段を `fallback_steps`
+    (`--steps` > `evaluate.ns_steps` > 60,000) の長さで回す。
+  - **`evaluate.stop_rule: true` を明示** (または関数の引数 stop_rule=True) したときだけ、使えない設定を `prepare_ns` が run dir を作る前に・
+    `run_staged_ns` が forge を起動する前に例外にする (M6 の版の動き; 記録 `explicit`)。`evaluate.stop_rule: false`・CLI `--no-stop-rule` は使わない。
+  - 到達の後の継続 `evaluate.stop_rule_hold_steps` (M6 の版で足した) の**既定は `HOLD_STEPS_DEFAULT` = 40,000 step** (ユーザ決定、forge-f5 経由;
+    値はこの 1 か所の定数)。最初に条件を満たした出力 s₀ の後も回し、s₀ + H までの全ての出力で条件を保ったら REACHED (止める出力は s₀ + H
+    以後の最初の出力)。途中で外れたら到達を取り消して `hold.breaks` に記録し、次の到達から数え直す。上限 (`cap`) は到達 + 保持を含む本段の
+    step 数で、保持の途中で上限に届いたら CENSORED。0 を書けば最初の到達で止める (forge-f5 の版の動き)。
+  - M6 の版で足したものは残す: 終了の状態の記録 `STOP_RULE_STATE.json` (`write_state`・`read_state`; `stop_rule.json` は見張りの途中も
+    書き換わる詳しい記録、こちらは本段が終わった後に 1 度だけ書く状態の印)、問題 YAML の `evaluate.stop_rule_thresholds` (`thresholds` と
+    同じキー; 例 case/45 の試験部の断面 x = 40・70・94 r_t は `x_fracs` に x / x_w を書く。既定は forge-f5 の版のまま)、上限の倍数の検査、
+    (§5.1 #36e) 帯の位置の抽出を受け渡しの抽出と同じ条件 (`deltastar_loop.handoff_extract_settings`: 一定 x の断面への補間
+    `remap_constant_x=True`・端の補間範囲の不足は欠測 `remap_edge="missing"`) で行うこと、Euler の参照の固定 {run, res, sha256}
+    (`deltastar.resolve_euler_ref`、sha が合わなければ使わない)、(§5.1 #36e (7)) 見張りの中で出力ごとに δ_E・δ_target (抽出器の量、使用域
+    [0, x_w] の全列) を受け渡しと同じ条件で抽出して `stop_rule.json` の行の `delta` に残すこと (**判定には使わない記録の量**。受け渡しの
+    関門の 2 窓の判定がこの記録を読み、計算の後に抽出し直さない)。抽出は別スレッド 1 本で行い (`DeltaRecorder`)、停止の判定を待たせない。
+    追いつかないときは最新の出力から 2 窓 (2W) より古い出力を飛ばす (`skipped`; 停止の時刻 s ≥ 最新の出力なので、[s − 2W, s] に入らない
+    出力だけ)。要求の断面の位置 (x_fracs × x_w) は `sections` に残す。
+  - θ_r の断面の基準は設計壁の出口 `physical_wall.domain[1]` (60de8125 の修正; 軸 Mach 則の終点 x_E ではない)。判定・量・見張り・forge の
+    止め方は forge-f5 の版のまま。
   - (§5.1 #36g) 帯の生成と δ の記録は抽出器 (remap_edge="missing") を通るので、Euler の参照の補間できる範囲は共通の
     `deltastar.euler_cover_range` (端の外側だけに幾何の許容 = 端の列の間隔 × 1e−4、許容の内側で端を越える列は端の列の値) になる。
     2 窓に入るべき出力は `required_window_steps` (出力の間隔から列挙; 記録にある行だけから作らない) で決める。
@@ -52,14 +53,15 @@ REACHED は「この規則の量が停止の条件を満たした」の意味に
   - θ_r (各断面): $D_\theta$ = |後半の平均 − 前半の平均| / |窓の平均| × W / (後半の平均の step − 前半の平均の step) ≤ 0.05 % (2 万 step あたりに換算;
     諮問の Major)、振幅 (最大 − 最小)/2 / |窓の平均| ≤ 0.5 %。前半・後半は窓の中点 s − W/2 で分け、**中点ちょうどの出力は後半に入れる**
     (点数が奇数で等間隔のとき。諮問の計算と同じ割り方。換算するので線形の系列では割り方に依らない)。換算しない値も `D_raw` として記録する。
-  - 満たした最初の出力で REACHED (連続は要らない; 諮問 (b)。hold_steps > 0 のときは上の「到達の後の継続」)。非有限で DIVERGED。REACHED は「指定の量の停止の条件を満たした」の意味に限り、
-    収束・設計の量の定常の VERDICT とは別。
+  - 満たした最初の出力で REACHED (連続は要らない; 諮問 (b))。ただし hold_steps (既定 `HOLD_STEPS_DEFAULT`) > 0 のときは上の「到達の後の継続」。
+    非有限で DIVERGED。REACHED は「指定の量の停止の条件を満たした」の意味に限り、収束・設計の量の定常の VERDICT とは別。
 
 状態: REACHED / CENSORED (上限まで正常に回って届かない) / DIVERGED (非有限、または forge の detectNaN) / EXEC_ERROR (forge が上限より前に異常終了・
 見張りの例外) / DATA_ERROR (出力が読めない・判定量が有限でない) / UNAVAILABLE (停止規則を使えない: euler_ref が無い・抽出できない・出力の間隔が
 窓に 9 点を入れられない — 本段は ns_steps の長さで回す)。記録は `<run>/stop_rule.json` (一時ファイル → rename で原子的に書く)。
-こちらでは準備・起動の時点で使えないと分かったら例外で止めるので、UNAVAILABLE は見張りの途中で帯の位置を決められないときだけ出る
-(本段は prepare の nStepOuter = fallback_steps の出力で止める)。本段が終わったら `run_staged_ns` が終了の状態を `<run>/STOP_RULE_STATE.json` に
+明示 (`evaluate.stop_rule: true`) の run は準備・起動の時点で使えないと分かったら例外で止めるので、UNAVAILABLE は見張りの途中で帯の位置を
+決められないとき (本段は prepare の nStepOuter = fallback_steps の出力で止める) だけ出る。既定 (キー無し) の run は準備・起動の時点で使えなくても
+UNAVAILABLE を記録して fallback_steps の長さで回す。本段が終わったら `run_staged_ns` が終了の状態を `<run>/STOP_RULE_STATE.json` に
 1 度だけ書く (`write_state`)。`run_staged_ns` の終了コード (REACHED・CENSORED・一部の UNAVAILABLE で 0) で合否を決めず、この状態を直接見る
 (`feedback.deltastar_loop.handoff_gate`)。
 
@@ -93,11 +95,12 @@ R_AMP_MAX = 5e-3           # r の振幅 ≤ 0.5 %
 THETA_DRIFT_MAX = 5e-4     # D_θ ≤ 0.05 % / 2 万 step
 THETA_AMP_MAX = 5e-3       # θ_r の振幅 / |平均| ≤ 0.5 %
 X_FRACS = (0.4, 0.7, 0.95)
-CAP_DEFAULT = 200_000      # 停止規則を使うときの本段の上限 (諮問 (c)、M6 と同じ)
+CAP_DEFAULT = 200_000      # 停止規則を使うときの本段の上限 (諮問 (c)、M6 と同じ)。到達 + 保持を含む本段の step 数
+HOLD_STEPS_DEFAULT = 40_000   # 到達の後の継続の既定 (2026-10-14 ユーザ決定、forge-f5 経由)。evaluate.stop_rule_hold_steps で上書き (0 = 最初の到達で止める)
 STATES = ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR", "UNAVAILABLE")
-STATE = "STOP_RULE_STATE.json"      # 本段の終了の状態 (run_staged_ns が本段の後に 1 度だけ書く; こちらで足した)
-PLAN = ("plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a (取り込み元 feature/nozzle-cooled-wall-settling 60de8125、"
-        "plan tooling-nozzle-cooled-wall-ns-settling §4.6)")
+STATE = "STOP_RULE_STATE.json"      # 本段の終了の状態 (run_staged_ns が本段の後に 1 度だけ書く; M6 の版で足した)
+PLAN = ("plans/active/tooling-nozzle-cooled-wall-ns-settling.md §4.6・plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a "
+        "(2026-10-14 統合: 既定で使う・明示のときだけ使えない設定を例外・保持の既定 40,000)")
 RECORD = "stop_rule.json"
 BAND_DIR = "stop_rule_band"
 _RES_RE = re.compile(r"res_(\d+)\.h5")
@@ -110,7 +113,7 @@ class Unavailable(Exception):
 
 
 def thresholds(**kw) -> dict:
-    """判定の閾値・窓・断面 (既定は §4.6)。未知のキーは拒否する。値の検査 (こちらで足した、問題 YAML の `evaluate.stop_rule_thresholds` も
+    """判定の閾値・窓・断面 (既定は §4.6)。未知のキーは拒否する。値の検査 (M6 の版で足した、問題 YAML の `evaluate.stop_rule_thresholds` も
     ここを通る): window・min_points は正の整数 (min_points ≥ 2)、4 つの閾値は有限の正の数、x_fracs は (0, 1] の有限の数の空でない
     重複の無いリスト (設計壁の出口 x_w に対する比; 断面は x_fracs × x_w に最も近い列)。"""
     d = dict(window=WINDOW, min_points=MIN_POINTS, r_mean_max=R_MEAN_MAX, r_amp_max=R_AMP_MAX,
@@ -159,8 +162,8 @@ EVALUATE_KEYS = ("stop_rule", "stop_rule_cap", "stop_rule_thresholds", "stop_rul
 
 def check_evaluate_keys(evaluate: dict) -> tuple:
     """問題 YAML の `evaluate.stop_rule` (true / false)・`evaluate.stop_rule_cap` (正の整数)・`evaluate.stop_rule_thresholds`
-    (`thresholds` のキーの mapping; こちらで足した)・`evaluate.stop_rule_hold_steps` (0 以上の整数; こちらで足した) を検査して
-    (stop_rule, cap, 閾値の上書き, hold) を返す (無ければ None・None・{}・0)。不正値は ValueError (prepare_ns は run dir を作る前に呼ぶ)。"""
+    (`thresholds` のキーの mapping)・`evaluate.stop_rule_hold_steps` (0 以上の整数) を検査して (stop_rule, cap, 閾値の上書き, hold) を返す
+    (無ければ None・None・{}・`HOLD_STEPS_DEFAULT`; hold は null も既定)。不正値は ValueError (prepare_ns は run dir を作る前に呼ぶ)。"""
     req = cap = None
     if "stop_rule" in evaluate:
         req = evaluate["stop_rule"]
@@ -174,37 +177,55 @@ def check_evaluate_keys(evaluate: dict) -> tuple:
     if not isinstance(over, dict):
         raise ValueError(f"evaluate.stop_rule_thresholds は mapping ({over!r})")
     thresholds(**over)                          # 未知のキー・不正値はここで ValueError
-    hold = evaluate.get("stop_rule_hold_steps", 0)
+    hold = evaluate.get("stop_rule_hold_steps")
     if hold is None:
-        hold = 0
+        hold = HOLD_STEPS_DEFAULT
     if isinstance(hold, bool) or not isinstance(hold, int) or hold < 0:
         raise ValueError(f"evaluate.stop_rule_hold_steps は 0 以上の整数 ({hold!r})")
     return req, cap, dict(over), int(hold)
 
 
+def is_explicit(sr: dict | None) -> bool:
+    """prepare_info の stop_rule が**明示の要求** (`evaluate.stop_rule: true` か引数 stop_rule=True) か。明示なら使えない設定は例外、
+    既定 (キー無し) なら UNAVAILABLE を記録して fallback_steps で回す。統合 (2026-10-14) より前の記録 (`explicit` が無い) は
+    requested_source で決める ("evaluate.stop_rule"・"引数" は明示、"既定 (使う)" は既定)。"""
+    if not isinstance(sr, dict) or not sr.get("requested"):
+        return False
+    if "explicit" in sr:
+        return bool(sr["explicit"])
+    return sr.get("requested_source") in ("evaluate.stop_rule", "引数")
+
+
 def resolve_settings(evaluate: dict, *, nsteps_arg, n_main: int, n_main_source: str, out_int: int, euler_ref,
                      requested: bool | None = None) -> dict:
-    """停止規則の設定を決める。requested: None なら `evaluate.stop_rule` (**無ければ使わない**; 取り込み元は使う)、True / False は関数の引数・
-    CLI の --no-stop-rule。
-    上限: 引数 nsteps_arg (`--steps`) があればそれ、無ければ `evaluate.stop_rule_cap` (既定 200,000)。
-    使わない・使えないときの本段の長さは n_main (prepare_ns の `--steps` > `evaluate.nStepOuter` > 48,000) — `fallback_steps` に記録する。
+    """停止規則の設定を決める。requested: None なら `evaluate.stop_rule` (**無ければ使う** = 既定)、True / False は関数の引数・
+    CLI の --no-stop-rule。`explicit` は明示の要求 (引数 True か `evaluate.stop_rule: true`) — 明示なら呼ぶ側 (`prepare_ns`・`run_staged_ns`)
+    は使えない設定を例外にし、既定なら `use` = False と理由を記録して本段を fallback_steps で回す。
+    上限: 引数 nsteps_arg (`--steps`) があればそれ、無ければ `evaluate.stop_rule_cap` (既定 200,000)。上限は到達 + 保持を含む本段の step 数。
+    使わない・使えないときの本段の長さは n_main (prepare_ns の `--steps` > `evaluate.ns_steps` > 60,000) — `fallback_steps` に記録する。
     使えない条件 (`use` = False と理由): euler_ref が無い、出力の間隔が窓に MIN_POINTS 点を入れられない (間隔 > W/(MIN_POINTS − 1))、
-    上限が出力の間隔の倍数でない (forge は outStepInterval の倍数でしか res を書かないので、上限の出力が無く CENSORED を見分けられない;
-    こちらで足した)。こちらの prepare_ns は要求したのに使えない設定を run dir を作る前に例外にする。"""
+    上限が出力の間隔の倍数でない (forge は outStepInterval の倍数でしか res を書かないので、上限の出力が無く CENSORED を見分けられない)。"""
     from ..feedback.deltastar_loop import handoff_extract_settings
     from ..metrics.deltastar import resolve_euler_ref
     yaml_req, yaml_cap, th_over, hold = check_evaluate_keys(evaluate)
     th = thresholds(**th_over)
     if requested is None:
-        requested, src = (yaml_req, "evaluate.stop_rule") if yaml_req is not None else (False, "既定 (使わない)")
+        if yaml_req is not None:
+            requested, src, explicit = yaml_req, "evaluate.stop_rule", bool(yaml_req)
+        else:
+            requested, src, explicit = True, "既定 (使う)", False
     else:
         requested, src = bool(requested), "引数"
+        explicit = requested
     # euler_ref: run dir (str) か固定のスナップショット {run, res, sha256} (§5.1 #36e (6); ここでは形だけ検査、sha は prepare_ns・起動前に照合)
     eref = resolve_euler_ref(euler_ref, verify=False)["record"] if euler_ref else None
-    rec = {"requested": requested, "requested_source": src, "fallback_steps": int(n_main), "fallback_steps_source": n_main_source,
+    rec = {"requested": requested, "requested_source": src, "explicit": explicit,
+           "fallback_steps": int(n_main), "fallback_steps_source": n_main_source,
            "out_step_interval": int(out_int), "euler_ref": eref, **th,
-           "thresholds_source": ({"evaluate.stop_rule_thresholds": sorted(th_over)} if th_over else "既定 (取り込み元のまま)"),
+           "thresholds_source": ({"evaluate.stop_rule_thresholds": sorted(th_over)} if th_over else "既定"),
            "hold_steps": hold,
+           "hold_steps_source": ("evaluate.stop_rule_hold_steps" if evaluate.get("stop_rule_hold_steps") is not None
+                                 else f"既定 {HOLD_STEPS_DEFAULT}"),
            "extract": {**handoff_extract_settings(), "source": "feedback.deltastar_loop.handoff_extract_settings (§5.1 #36e)"}}
     if not requested:
         rec.update(use=False, reason="使わない指定", cap=None, cap_source=None)
@@ -224,8 +245,8 @@ def resolve_settings(evaluate: dict, *, nsteps_arg, n_main: int, n_main_source: 
     if int(cap) % int(out_int):
         why.append(f"上限 {int(cap)} step が出力の間隔 {int(out_int)} step の倍数でない (上限の出力が書かれず CENSORED を見分けられない)")
     rec.update(use=not why, reason=("; ".join(why) or None), cap=cap, cap_source=cap_src)
-    if cap < th["window"] + int(out_int):
-        rec["note"] = f"上限 {cap} では最初の出力から窓 {th['window']} step を覆えない (必ず CENSORED)"
+    if cap < th["window"] + int(out_int) + hold:
+        rec["note"] = (f"上限 {cap} では最初の出力から窓 {th['window']} step を覆って保持 {hold} step を終えられない (必ず CENSORED)")
     return rec
 
 
@@ -590,9 +611,10 @@ def row_data_problem(row: dict, x_fracs=X_FRACS) -> str | None:
 
 
 def _hold_step(hs: dict, ok: bool, step: int, hold: int, why=None) -> bool:
-    """到達の後の継続 (`hold_steps`; こちらで足した) の状態 hs = {start, reached, breaks} を出力 1 つぶん進め、REACHED にするかを返す。
+    """到達の後の継続 (`hold_steps`; M6 の版で足した、既定 `HOLD_STEPS_DEFAULT`) の状態 hs = {start, reached, breaks} を出力 1 つぶん
+    進め、REACHED にするかを返す。
     条件を満たした最初の出力 s₀ から数え、step − s₀ ≥ hold になった出力で True。途中で条件が外れたら到達を取り消して breaks に記録し、
-    次に満たした出力から数え直す。hold 0 は条件を満たした出力で True (取り込み元の「最初の到達で止める」と同じ)。"""
+    次に満たした出力から数え直す。hold 0 は条件を満たした出力で True (forge-f5 の版の「最初の到達で止める」と同じ)。"""
     if not ok:
         if hs.get("start") is not None:
             hs["breaks"].append({"start": hs["start"], "broken_at": int(step), "why": why})
@@ -606,7 +628,9 @@ def _hold_step(hs: dict, ok: bool, step: int, hold: int, why=None) -> bool:
 
 def first_stop(rows: list, hold_steps: int = 0, **th) -> dict | None:
     """保存済みの系列の最初の終わり {status: REACHED / DIVERGED / DATA_ERROR, k, step, judge}。無ければ None。
-    hold_steps > 0 (こちらで足した) は到達の後 hold_steps の間すべての出力で条件を保った出力を REACHED にし、`hold` に経過を付ける。"""
+    hold_steps > 0 は到達の後 hold_steps の間すべての出力で条件を保った出力を REACHED にし、`hold` に経過を付ける。**関数の既定 0 は
+    最初の到達** (系列の再生用); 見張り (`watch_main_stage`) と同じ結果にするには prepare_info の stop_rule.hold_steps (既定
+    `HOLD_STEPS_DEFAULT`) を渡す。"""
     fr = th.get("x_fracs", X_FRACS)
     hs = {"start": None, "reached": [], "breaks": []}
     for k, row in enumerate(rows):
@@ -643,7 +667,7 @@ def save_record(run_dir, rec: dict) -> Path:
 
 
 def write_state(run_dir, state: dict) -> Path:
-    """本段の終了の状態 `<run>/STOP_RULE_STATE.json` を原子的に書く (一時ファイル → rename; こちらで足した)。state は少なくとも status を持つ。
+    """本段の終了の状態 `<run>/STOP_RULE_STATE.json` を原子的に書く (一時ファイル → rename; M6 の版で足した)。state は少なくとも status を持つ。
     `run_staged_ns` が本段の後に 1 度だけ書く。見張りの途中の記録 (stop_rule.json、status は RUNNING から変わる) と違い、このファイルが
     あれば本段は終わっている (無いのに prepare_info が停止規則を要求していれば、本段が終わっていないか記録が失われた)。"""
     if state.get("status") not in STATES + ("NOT_USED",):
@@ -814,7 +838,9 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
     run_dir = Path(run_dir).resolve()
     th = {k: sr[k] for k in ("window", "min_points", "r_mean_max", "r_amp_max", "theta_drift_max", "theta_amp_max", "x_fracs")}
     cap = int(sr["cap"]); fallback = int(sr["fallback_steps"])
-    hold = int(sr.get("hold_steps") or 0)      # 到達の後の継続 (こちらで足した; 0 = 最初の到達で止める)
+    # 到達の後の継続 (0 = 最初の到達で止める)。prepare_info の stop_rule.hold_steps (resolve_settings の既定 HOLD_STEPS_DEFAULT)。
+    # 統合 (2026-10-14) より前に準備した run の記録にキーが無ければ 0 (準備した時の動きのまま)
+    hold = int(sr.get("hold_steps") or 0)
     pre = [n for n in res_steps(run_dir) if n > 0]
     if pre:
         raise RuntimeError(f"{run_dir}: 本段の起動前に出力 res_{pre[0]}.h5 ほか {len(pre)} 個がある — 停止規則の系列に混ざるので起動しない")

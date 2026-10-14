@@ -1,0 +1,14 @@
+{
+ "Grefc": {
+  "file": "problem_d155_ns_prod_coldmesh_tw300_cgrefc.yaml",
+  "ni": 4467,
+  "seg_cols_ref": 589,
+  "seg_cols_new": 337,
+  "seg_x": [
+   -7.9904141994955165,
+   -2.0011935536971586
+  ]
+ },
+ "problem": "problem_d155_ns_prod_coldmesh_tw300.yaml",
+ "wall_ref": "/home/sano/work/forge-integ-1005/case/45.isobutane_m6_d155/_band_ab/prod_confirm/prep"
+}

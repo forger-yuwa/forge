@@ -1,0 +1,152 @@
+{
+ "run": "run_0917_hs_b0",
+ "arm": "b0",
+ "first_reach": 22500,
+ "checks": [
+  {
+   "s": 2500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 5000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 7500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 10000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 12500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 15000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 17500,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 20000,
+   "stop_ok_at_s": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 22500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 25000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 27500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 30000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 32500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 35000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 37500,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 40000,
+   "stop_ok_at_s": true,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 42500,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 45000,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 47500,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 50000,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 52500,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 55000,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 57500,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 60000,
+   "stop_ok_at_s": true,
+   "stop_held_40k": false,
+   "decision": "CONTINUE"
+  },
+  {
+   "s": 62500,
+   "stop_ok_at_s": true,
+   "stop_held_40k": true,
+   "qual_ok": true,
+   "qual_fail": [],
+   "decision": "STOP"
+  },
+  {
+   "s": 65000,
+   "stop_ok_at_s": true,
+   "stop_held_40k": true,
+   "qual_ok": true,
+   "qual_fail": [],
+   "decision": "STOP"
+  }
+ ],
+ "stop_step": 65000
+}

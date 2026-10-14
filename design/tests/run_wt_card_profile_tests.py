@@ -65,9 +65,11 @@ def raises(fn, *needles):
 
 
 def card(**kw):
-    """M5 の例のカードを設計スロート径 0.050 m にした写し (kw で上書き、None は削除)。"""
+    """M5 の例のカードを設計スロート径 0.050 m・数値の M_knot 2.25 (= 旧既定の 0.45 × M_exit; M_knot の既定は自動になったので
+    期待を変えずに回す、plan tooling-nozzle-mknot-auto §6 V3) にした写し (kw で上書き、None は削除)。"""
     c = copy.deepcopy(BASE)
     c["throat"] = {"diameter_design_m": 0.050}
+    c["overrides"] = {"geometry.M_knot": 2.25}
     for k, v in kw.items():
         if v is None:
             c.pop(k, None)

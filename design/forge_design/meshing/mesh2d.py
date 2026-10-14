@@ -63,6 +63,12 @@ class Mesh2DParams:
     # 傾斜壁 (縮流部で最大 40°) では半径方向の線が壁と直交せず、AR の大きい近壁セルにスキューが入る (AGENTS.md の AR ≤ 5000 の例外の外)。
     # 壁の第一セル厚は法線距離 = d になる (半径方向の配置では法線距離 = d·cos θ_w)。
     wall_normal_layer: tuple | list | None = None
+    # --- 壁法線の層を入口・出口の断面で半径方向の配置へ戻す (2026-10-11, plan tooling-nozzle-bell-two-mode §4.1 (v)・§5.1 #2d) ---
+    # None なら従来どおり (壁法線の層は全断面)。整数 n を指定すると、両端の n 断面で層の重み beta を smoothstep で 0 へ落とし、
+    # 端の断面 (入口 i = 0・出口 i = ni − 1) を x 一定の平面に保つ。出口の壁角が 0 でないベル (θ_e ≠ 0) では、法線の層のままだと
+    # 出口の節点が下流へずれて出口面が平面でなくなる。戻す区間の近壁セルは半径方向の線になるので、AR の大きいセルが無い位置で戻すこと
+    # (AGENTS.md の AR ≤ 5000 の例外は AR > 1000 のセルのスキュー ≤ 0.1 が条件。呼び出し側が検査する)。
+    wall_normal_end_stations: int | None = None
     # --- 区間の局所の並べ直し (2026-10-13, plan tooling-nozzle-isothermal-wall-chain §4.8-1・§5.1 #29) ---
     # None なら従来どおり (既存の格子はビット同一)。[{x0, x1, blend, factor, ni_ref}] (区間は 1 つだけ) を指定すると、
     # x の station を ni_ref 列で従来どおり (_x_stations) 置いてから、区間 [x0, x1] の中だけ流れ方向の密度を max(1, d/factor) 側へ
@@ -220,8 +226,11 @@ def _radial_fracs(nj: int, first_frac: float) -> np.ndarray:
     return s / s[-1]
 
 
-def _radial_fracs_capped(nj_base: int, first_frac: float, cap: float) -> np.ndarray:
-    """壁側は `_radial_fracs(nj_base, first_frac)` と同じ第一セル・比 q の等比、間隔が `cap` に達したら軸まで一様。"""
+def _capped_layout(nj_base: int, first_frac: float, cap: float, max_nj: int | None = None) -> tuple:
+    """`_radial_fracs_capped` の配点の内訳 (壁側の等比の間隔の list (壁側から)、残り rest、軸側の一様の区間の数 m)。径方向の点数は
+    len(等比) + m + 1。一様の部分はリストを作らない (m は式で決まる; 極小の cap でも巨大な確保をしない)。
+    max_nj を渡すと、点数の下限 len(等比) + 2 が max_nj を超えた時点で等比の数え上げをやめ (等比, None, None) を返す
+    (plan tooling-nozzle-mesh-size-guard §4.2)。max_nj なしの算術は従来の `_radial_fracs_capped` と同じ (生成座標は不変)。"""
     s0 = _radial_fracs(nj_base, first_frac)
     g0 = np.diff(s0)[::-1]                      # 壁側から
     q = g0[1] / g0[0]
@@ -230,8 +239,16 @@ def _radial_fracs_capped(nj_base: int, first_frac: float, cap: float) -> np.ndar
     while g < cap and sum(gaps) + g < 1.0:
         gaps.append(g)
         g *= q
+        if max_nj is not None and len(gaps) + 2 > max_nj:
+            return gaps, None, None
     rest = 1.0 - sum(gaps)
     m = int(np.ceil(rest / cap - 1e-12))
+    return gaps, rest, m
+
+
+def _radial_fracs_capped(nj_base: int, first_frac: float, cap: float) -> np.ndarray:
+    """壁側は `_radial_fracs(nj_base, first_frac)` と同じ第一セル・比 q の等比、間隔が `cap` に達したら軸まで一様。"""
+    gaps, rest, m = _capped_layout(nj_base, first_frac, cap)
     gaps = gaps + [rest / m] * m
     s = np.concatenate([[0.0], np.cumsum(gaps[::-1])])
     return s / s[-1]
@@ -271,6 +288,40 @@ def _radial_fracs_capfixed(nj: int, first_frac: float, cap: float) -> tuple[np.n
     return s, ratio
 
 
+def radial_node_count(prm: Mesh2DParams, max_nj: int | None = None) -> tuple:
+    """`generate_axisym_mesh` が作る径方向の点数 (実効の nj) を、格子を作らずに返す。戻り値 (nj, 正確か)。
+    axis_gap_frac のときは導出値 (壁側の等比 + 軸側の一様; `_capped_layout`)、それ以外は prm.nj。
+    max_nj を渡すと、nj がそれを超えると分かった時点で数えるのをやめ (下限 > max_nj, False) を返す。
+    併用できない指定の組は ValueError (generate_axisym_mesh もこの関数で nj を決めるので、判定は 1 か所)。"""
+    if prm.axis_cap_frac is not None:
+        if prm.axis_gap_frac is not None:
+            raise ValueError("axis_cap_frac と axis_gap_frac は同時に指定できない")
+        return prm.nj, True
+    if prm.axis_gap_frac is not None:
+        if prm.wall_first_frac_throat is not None or prm.wall_first_frac_table is not None:
+            raise ValueError("axis_gap_frac と wall_first_frac_throat・wall_first_frac_table の併用は未対応")
+        if max_nj is not None and int(prm.nj) - 1 > max_nj:
+            # 配列を作る前の打ち切り (2026-10-14 result 段レビュー M1: `_capped_layout` は指定 nj の `_radial_fracs` を作るので、nj が極端に大きいと
+            # 数える前に巨大な配列を確保していた)。実効の nj ≥ 指定 nj − 1: 等比の部分は元の配点の先頭の区間そのままで、残りの区間はどれも cap 以上
+            # (q ≥ 1 なので打ち切った後の区間は大きくなる一方) だから一様の区間の数 m = ceil(rest / cap) は残りの区間の数以上になる。
+            # 前提は `_radial_fracs` の等比の配点が正常なこと (nj が大きく第 1 層が薄いと Newton が退化して第 1 層 0 になる既存の欠陥がある; その格子は品質検査で落ちる)。
+            return int(prm.nj) - 1, False
+        gaps, _, m = _capped_layout(prm.nj, prm.wall_first_frac, prm.axis_gap_frac, max_nj)
+        if m is None:
+            return len(gaps) + 2, False
+        return len(gaps) + m + 1, True
+    return prm.nj, True
+
+
+def node_count(prm: Mesh2DParams, limit: int | None = None) -> int:
+    """`generate_axisym_mesh` が作る節点数 (ni × 実効の nj) を、格子を作らずに返す (plan tooling-nozzle-mesh-size-guard §4.2)。
+    limit を渡すと、超えると分かった時点で数えるのをやめて limit + 1 以上の値を返す (極小の axis_gap_frac でも巨大な確保をしない)。"""
+    ni = int(prm.ni)
+    max_nj = None if limit is None else int(limit) // max(ni, 1)
+    nj, _ = radial_node_count(prm, max_nj)
+    return ni * int(nj)
+
+
 def generate_axisym_mesh(wall, prm: Mesh2DParams):
     """wall: NozzleWall。戻り値 (coords (N,3) [m], quads (M,4), 境界辺 dict)。"""
     if prm.x_respace is None:
@@ -281,22 +332,19 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
         if len(xs) != prm.ni:          # 列の数は並べ直しで決まる。ni と違えば黙って作らない
             raise ValueError(f"x_respace: 並べ直した列の数 {len(xs)} が mesh.ni {prm.ni} と違う (ni に {len(xs)} を書く; {info})")
     rw = wall.r(xs)
-    ni, nj = prm.ni, prm.nj
+    ni = prm.ni
+    nj, _ = radial_node_count(prm)      # 実効の nj (axis_gap_frac では導出値)。事前の判定 (node_count) と同じ決まり方
     X = np.repeat(xs[:, None], nj, axis=1)
     if prm.axis_cap_frac is not None:
-        if prm.axis_gap_frac is not None:
-            raise ValueError("axis_cap_frac と axis_gap_frac は同時に指定できない")
         fr = _first_frac_profile(xs, prm)
         R = np.empty((ni, nj))
         for i in range(ni):
             si, _ = _radial_fracs_capfixed(nj, float(fr[i]), float(prm.axis_cap_frac))
             R[i, :] = rw[i] * si
     elif prm.axis_gap_frac is not None:
-        if prm.wall_first_frac_throat is not None or prm.wall_first_frac_table is not None:
-            raise ValueError("axis_gap_frac と wall_first_frac_throat・wall_first_frac_table の併用は未対応")
-        s = _radial_fracs_capped(nj, prm.wall_first_frac, prm.axis_gap_frac)
-        nj = len(s)
-        X = np.repeat(xs[:, None], nj, axis=1)
+        s = _radial_fracs_capped(prm.nj, prm.wall_first_frac, prm.axis_gap_frac)
+        if len(s) != nj:
+            raise RuntimeError(f"axis_gap_frac: 径方向の点数 {len(s)} が radial_node_count の {nj} と一致しない")
         R = rw[:, None] * s[None, :]
     elif prm.wall_first_frac_throat is None and prm.wall_first_frac_table is None:
         s = _radial_fracs(nj, prm.wall_first_frac)
@@ -307,6 +355,8 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
         R = np.empty((ni, nj))
         for i in range(ni):
             R[i, :] = rw[i] * _radial_fracs(nj, float(fr[i]))
+    if prm.wall_normal_end_stations is not None and prm.wall_normal_layer is None:
+        raise ValueError("wall_normal_end_stations は wall_normal_layer と組で指定する")
     if prm.wall_normal_layer is not None:
         dn, db = (float(v) for v in prm.wall_normal_layer)
         if not (0.0 < dn < db < 1.0):
@@ -321,6 +371,13 @@ def generate_axisym_mesh(wall, prm: Mesh2DParams):
         d = rw[:, None] - R                                  # 壁からの (半径方向の配置での) 距離 [r*]
         t = np.clip((d / rw[:, None] - dn) / (db - dn), 0.0, 1.0)
         beta = 1.0 - t * t * (3.0 - 2.0 * t)                 # 1 (d ≤ d_n) → 0 (d ≥ d_b)
+        if prm.wall_normal_end_stations is not None:
+            ne = prm.wall_normal_end_stations
+            if isinstance(ne, bool) or int(ne) != ne or not (1 <= int(ne) <= (ni - 1) // 2):
+                raise ValueError(f"wall_normal_end_stations: 1 以上 (ni − 1)/2 以下の整数にする ({ne!r}, ni {ni})")
+            ii = np.arange(ni)
+            te = np.clip(np.minimum(ii, ni - 1 - ii) / float(ne), 0.0, 1.0)
+            beta = beta * (te * te * (3.0 - 2.0 * te))[:, None]  # 端の断面 (i = 0, ni − 1) で 0 = 半径方向の配置
         Xn = xs[:, None] + d * (drw / nrm)[:, None]          # 壁点 + d·内向き法線 (r′, −1)/√(1 + r′²)
         Rn = rw[:, None] - d / nrm[:, None]
         X = X + beta * (Xn - X)

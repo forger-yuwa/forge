@@ -1,0 +1,77 @@
+{
+ "C": "run_0688_pp_c",
+ "Cprime": "run_0691_pp_c2500",
+ "P2": "run_0690_pp_p2",
+ "restart_bitwise": {
+  "run_0688_pp_c": true,
+  "run_0691_pp_c2500": true,
+  "run_0690_pp_p2": true
+ },
+ "config_diff_P2_vs_C": [
+  ">            dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 2, detectNaN: 1}"
+ ],
+ "config_diff_Cprime_vs_C": [
+  ">   last: {nStepOuter: 2500}"
+ ],
+ "effective": {
+  "lowMachPrecond_P2": "2",
+  "lowMachPrecond_Cprime": "0",
+  "keys_absent_in_P2_yaml": true,
+  "source_defaults": {
+   "precondEps": 0.15,
+   "speciesImplicitCoupling": 0,
+   "speciesPrecondDt": 1
+  }
+ },
+ "dt": {
+  "island_median_measured_ratio": 6.038389886464435,
+  "island_median_expected_ratio": 6.038688554857364,
+  "island_median_measured_over_expected": 0.9999664202550003,
+  "island_p10_p90_measured_over_expected": [
+   0.9940290473033493,
+   1.0055947564531373
+  ],
+  "island_median_abs_sonic_rel_diff": 0.00085376641574475,
+  "island_median_M": 0.041230394108772245
+ },
+ "boundary_r": {
+  "Cprime": {
+   "inlet": 2.3225620301718752,
+   "outlet": 0.9947117569710575,
+   "axis": 0.960962235460366,
+   "wall": 1.2066305486750968
+  },
+  "P2": {
+   "inlet": 2.017170122808266,
+   "outlet": 1.0464968586869965,
+   "axis": 1.0931485393194753,
+   "wall": 1.4790790442781085
+  }
+ },
+ "Y0_ptp_20000_P2": 1.4302559137036042e-11,
+ "C_identity": {
+  "forge_sha256": {
+   "run_0688_pp_c": "d58ed78797fc23e6794398d0bf85cb9265ed49acfd1165e0201eae853dc43375",
+   "run_0691_pp_c2500": "d58ed78797fc23e6794398d0bf85cb9265ed49acfd1165e0201eae853dc43375",
+   "run_0690_pp_p2": "d58ed78797fc23e6794398d0bf85cb9265ed49acfd1165e0201eae853dc43375"
+  },
+  "C_has_outside_columns": true,
+  "C_outputs": [
+   2500,
+   5000,
+   7500,
+   10000,
+   12500,
+   15000,
+   17500,
+   20000
+  ]
+ },
+ "qualification": {
+  "same_start_and_config": true,
+  "effective_values": true,
+  "precond_dt_effective": true,
+  "boundary_not_frozen_and_composition": true,
+  "control_identity": true
+ }
+}

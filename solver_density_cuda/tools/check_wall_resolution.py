@@ -375,7 +375,18 @@ def main():
             dmax, src, jmap, dof_xyz = best
             scale = float(np.median(np.linalg.norm(np.diff(wxyz[:min(len(wxyz), 200)], axis=0),
                                                    axis=1)))
-            if dmax > 1e-6 * max(scale, 1e-12) + 1e-12:
+            tol = 1e-6 * max(scale, 1e-12) + 1e-12
+            # 壁ダンプの座標が float32 (forge の float ビルドの境界ダンプ) でメッシュの座標が倍精度 (2026-10 の変換器は
+            # MESH/COORD を float64 で書く) のときは、ダンプ側の丸め (≤ 0.5 ulp ≈ 6e-8 |x|) だけずれて厳密一致しない
+            # (case/68 run_0007: 最大 1.19e-7 m で判定不能になった)。許容に float32 の丸め幅を足すが、**壁 DOF の最小間隔の
+            # 1/4 未満**に収まるときだけ (対応づけが一意である範囲でだけ緩める; 2026-10-11)。
+            if wxyz.dtype == np.float32 and dof_xyz.dtype != np.float32:
+                tol32 = 2.0 * float(np.finfo(np.float32).eps) * float(np.abs(wxyz).max())
+                dd, _ = cKDTree(dof_xyz[icells]).query(dof_xyz[icells], k=2)
+                gap = float(dd[:, 1].min()) if len(icells) > 1 else 0.0
+                if tol32 < 0.25 * gap:
+                    tol = max(tol, tol32)
+            if dmax > tol:
                 print("  %-12s 壁ダンプ節点を DOF に対応づけられない (最良 %s で最大 %.3e m) -> 判定不能"
                       % (name, src, dmax))
                 fails.append(name); continue

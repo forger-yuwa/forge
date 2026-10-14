@@ -1,0 +1,53 @@
+{
+ "run": "run_0617_cg_gref_d1_cap50",
+ "base": "run_0608_cg_gref_cont_k1/res_60000.h5",
+ "ni": 4719,
+ "nj": 160,
+ "steps": [
+  2000,
+  2032
+ ],
+ "comp": {
+  "a_pressure": {
+   "rms_contraction": 0.00022584269848481176,
+   "rms_island": 0.0007674739551851232,
+   "rms_all": 8.892118983448137e-05,
+   "mean_island": 6.49434838145846e-06,
+   "frac_positive_island": 0.5029749256268593,
+   "adjcorr_x_contraction": 0.8258910090117476,
+   "adjcorr_r_contraction": 0.9255914030346827
+  },
+  "s_entropy": {
+   "rms_contraction": 0.004266135134171923,
+   "rms_island": 0.014042511333107662,
+   "rms_all": 0.0016810115508388433,
+   "mean_island": -5.1852687289915834e-05,
+   "frac_positive_island": 0.4753506162345941,
+   "adjcorr_x_contraction": 0.9213493052961729,
+   "adjcorr_r_contraction": 0.958345896760749
+  },
+  "du_over_c": {
+   "rms_contraction": 0.00010307130893834243,
+   "rms_island": 0.00030819325139824007,
+   "rms_all": 5.418692445322244e-05,
+   "mean_island": 1.7701576057397326e-06,
+   "frac_positive_island": 0.5352741181470463,
+   "adjcorr_x_contraction": 0.8957930357003233,
+   "adjcorr_r_contraction": 0.992200754734007
+  },
+  "dv_over_c": {
+   "rms_contraction": 0.00014285703736643314,
+   "rms_island": 0.00043640750837529107,
+   "rms_all": 6.210522306212799e-05,
+   "mean_island": -4.7236634924584755e-06,
+   "frac_positive_island": 0.4699320016999575,
+   "adjcorr_x_contraction": 0.8962435134830024,
+   "adjcorr_r_contraction": 0.9889480811935581
+  }
+ },
+ "island_velocity": {
+  "rms_dut_over_c": 0.0003530917344713045,
+  "rms_dun_over_c": 0.0004009498978947299,
+  "mach_island_median": 0.043392688168530896
+ }
+}

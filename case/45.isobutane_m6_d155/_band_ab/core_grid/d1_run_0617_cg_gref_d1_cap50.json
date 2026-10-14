@@ -1,0 +1,521 @@
+{
+ "run": "run_0617_cg_gref_d1_cap50",
+ "ni": 4719,
+ "nj": 160,
+ "n": 755040,
+ "steps": [
+  2000,
+  2032
+ ],
+ "vars": {
+  "ro": {
+   "live_nodes": 754883,
+   "alt_nodes": 20,
+   "alt_residual_share": 8.1164873500357e-07,
+   "alt_amp_rms": 0.00021582169298331604,
+   "lag1_median_live": [
+    0.8876784075925757,
+    0.8882032010569809
+   ],
+   "lag1_median_top_residual": [
+    0.9998247215653426,
+    0.9998389906055152
+   ],
+   "top_residual_share": 0.6735875888766509,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     7,
+     13,
+     0
+    ],
+    "x_hist": [
+     20,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     581,
+     174
+    ],
+    "x_hist": [
+     755,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 4.817000376149925e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 6.752904182737273e-11,
+     "nodes": 312128
+    }
+   }
+  },
+  "roUx": {
+   "live_nodes": 750321,
+   "alt_nodes": 38,
+   "alt_residual_share": 5.420442265080139e-07,
+   "alt_amp_rms": 0.002490931408939323,
+   "lag1_median_live": [
+    0.9604361176937993,
+    0.9610545705794808
+   ],
+   "lag1_median_top_residual": [
+    0.9990747644567315,
+    0.9989413718229715
+   ],
+   "top_residual_share": 0.44640408500441875,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     3,
+     35,
+     0
+    ],
+    "x_hist": [
+     38,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     720,
+     35
+    ],
+    "x_hist": [
+     755,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 1.0271981197620838e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 2.702931021671878e-10,
+     "nodes": 161120
+    }
+   }
+  },
+  "roUy": {
+   "live_nodes": 745602,
+   "alt_nodes": 15,
+   "alt_residual_share": 2.4436734829653557e-07,
+   "alt_amp_rms": 0.0008253770235756473,
+   "lag1_median_live": [
+    0.9469967801198094,
+    0.9477831048412773
+   ],
+   "lag1_median_top_residual": [
+    0.9993885685924505,
+    0.9993560856269288
+   ],
+   "top_residual_share": 0.32804166689490266,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     15,
+     0
+    ],
+    "x_hist": [
+     15,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     30,
+     725
+    ],
+    "x_hist": [
+     755,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 2.0959985908251145e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 5.060044396286322e-14,
+     "nodes": 10112
+    }
+   }
+  },
+  "roe": {
+   "live_nodes": 755033,
+   "alt_nodes": 25,
+   "alt_residual_share": 1.6855264727440602e-05,
+   "alt_amp_rms": 116.82875428707639,
+   "lag1_median_live": [
+    0.9364783954506809,
+    0.9364701075703753
+   ],
+   "lag1_median_top_residual": [
+    0.9998335491137555,
+    0.9998649018762018
+   ],
+   "top_residual_share": 0.6726444955563132,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     9,
+     16,
+     0
+    ],
+    "x_hist": [
+     25,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     593,
+     162
+    ],
+    "x_hist": [
+     755,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 4.776246919840031e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 3.461016917718662e-10,
+     "nodes": 161120
+    }
+   }
+  },
+  "roK": {
+   "live_nodes": 615844,
+   "alt_nodes": 20,
+   "alt_residual_share": 7.633309925941245e-10,
+   "alt_amp_rms": 0.000268848881367636,
+   "lag1_median_live": [
+    0.9928522775040531,
+    0.9928453918166688
+   ],
+   "lag1_median_top_residual": [
+    0.999451602421082,
+    0.999440821738728
+   ],
+   "top_residual_share": 0.11658569949888332,
+   "alt_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     5,
+     15,
+     0
+    ],
+    "x_hist": [
+     20,
+     0,
+     0,
+     0,
+     0
+    ]
+   },
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     48,
+     707
+    ],
+    "x_hist": [
+     13,
+     393,
+     178,
+     171,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 1.0645996805541549e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 7.342470931003651e-11,
+     "nodes": 156032
+    }
+   }
+  },
+  "roOmega": {
+   "live_nodes": 193422,
+   "alt_nodes": 0,
+   "alt_residual_share": 0.0,
+   "alt_amp_rms": 0.0,
+   "lag1_median_live": [
+    0.8883323656577404,
+    0.8906257455598585
+   ],
+   "lag1_median_top_residual": [
+    0.1820729784988114,
+    0.12254812517304244
+   ],
+   "top_residual_share": 0.8009696177513752,
+   "alt_where": null,
+   "top_residual_where": {
+    "j_from_wall_hist": [
+     0,
+     755,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "x_hist": [
+     153,
+     602,
+     0,
+     0,
+     0
+    ]
+   },
+   "proposed_vs_actual": {
+    "interior": {
+     "lost_frac": 1.2529091032931441e-10,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 5.708515358277058e-10,
+     "nodes": 156032
+    }
+   }
+  }
+ },
+ "bins": {
+  "j_from_wall": [
+   0,
+   1,
+   2,
+   5,
+   10,
+   20,
+   40,
+   80,
+   160
+  ],
+  "x_over_rt": [
+   -13,
+   -2,
+   2,
+   12,
+   40,
+   96
+  ]
+ },
+ "commit_loss": {
+  "ro|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 1576.2103274481185,
+   "S_act": 1576.2103274481196
+  },
+  "ro|boundary": {
+   "n_req": 312128,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 2.277753002480495,
+   "S_act": 2.2777530024806842
+  },
+  "roUx|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 175188.44384058058,
+   "S_act": 175188.44384058143
+  },
+  "roUx|boundary": {
+   "n_req": 161120,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 49.87333065304887,
+   "S_act": 49.873330652946095
+  },
+  "roUy|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 163516.80504520674,
+   "S_act": 163516.8050452069
+  },
+  "roUy|boundary": {
+   "n_req": 10112,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 1.1217423917286315,
+   "S_act": 1.1217423917286313
+  },
+  "roUz|interior": {
+   "n_req": 0,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.0,
+   "S_act": 0.0
+  },
+  "roUz|boundary": {
+   "n_req": 0,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.0,
+   "S_act": 0.0
+  },
+  "roe|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 866195576.7839863,
+   "S_act": 866195576.783986
+  },
+  "roe|boundary": {
+   "n_req": 161120,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 108076.70643788931,
+   "S_act": 108076.70643782745
+  },
+  "roK|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 271040.55212167266,
+   "S_act": 271040.55212167057
+  },
+  "roK|boundary": {
+   "n_req": 156032,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.27880594832211403,
+   "S_act": 0.2788059483220803
+  },
+  "roOmega|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 41429390335.93275,
+   "S_act": 41429390335.93071
+  },
+  "roOmega|boundary": {
+   "n_req": 156032,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 59.32771519953546,
+   "S_act": 59.327715198760416
+  },
+  "roY0|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 1869.107219588099,
+   "S_act": 1869.107219588098
+  },
+  "roY0|boundary": {
+   "n_req": 307008,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 8.9161240417951,
+   "S_act": 8.91612404179477
+  },
+  "roY1|interior": {
+   "n_req": 23849152,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 175.42047630830982,
+   "S_act": 175.42047630830982
+  },
+  "roY1|boundary": {
+   "n_req": 307008,
+   "n_lost": 0,
+   "n_clip": 0,
+   "S_req": 0.8368009656343486,
+   "S_act": 0.836800965634276
+  }
+ }
+}

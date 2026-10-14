@@ -18,6 +18,12 @@
 // roUy 対角に α·A_planar·c を加える。revolved 軸面積 (r_f·S→0) が落とす半径音響スペクトル半径を
 // planar 面積 A_pl で補うもの。near-axis radial-momentum 不安定 (case/28 TP) の最小修正診断。
 __device__ float g_axisDiagAlpha = 0.0f;
+// 診断 (FORGE_LINE_DUMP_FINAL_SPLIT、既定 0 でビット不変。plan tooling-nozzle-core-grid §4.52): 書き出し中の外反復の最後に、
+// 左辺の対流 (閉形式 FVS) の面の寄与を面の種類で外して組み直す。1 = ライン外の面 (has_nbr かつライン面でない) を外す、
+// 2 = ライン面を外す、3 = 両方を外す、ビット 4 = ライン面の熱伝導の近傍作用を右辺に足す (§4.56)。
+// g_diagForceStoreDiag = 1 のときは loop > 0 でもライン上の対角を配列へ書く (書き出し用)。
+__device__ int g_diagSkipConvLHS = 0;
+__device__ int g_diagForceStoreDiag = 0;
 
 namespace block_dplur {
 
@@ -844,7 +850,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         const bool cached = (useDiagCache != 0) && (loop > 0) && !onLine;
         // ライン上の節点の対角は storeLU の sweep (Thomas の因子を作る sweep) でしか使わない。それ以外の sweep では
         // 組んでも捨てるだけなので組まない (plan time_integration-line-implicit-speed §4.3 案 A、数値は不変)。
-        const bool skipDiag = cached || (onLine && storeLU == 0);
+        // 診断 (g_diagForceStoreDiag、既定 0): 書き出しの組み直しでは loop > 0 でも対角を組む (plan tooling-nozzle-core-grid §4.53)。
+        const bool skipDiag = cached || (onLine && storeLU == 0 && g_diagForceStoreDiag == 0);
         ST nu_eff = static_cast<ST>(0.0);
         if (!skipDiag) nu_eff = (static_cast<ST>(laminar_visc) + max(static_cast<ST>(vis_turb[ic]), static_cast<ST>(0.0))) / density;
         bool rowDec[5] = {false, false, false, false, false};
@@ -875,6 +882,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         ST neighbor_accum[5];
         block_dplur::zero5(neighbor_accum);
         ST dbgLineViscSum = static_cast<ST>(0.0);   // デバッグ: ライン面のスカラー粘性の対角の和 (値 2 で外した量)
+        ST dbgOffViscSum = static_cast<ST>(0.0);    // デバッグ: ライン外の面のスカラー粘性の対角の和 (plan tooling-nozzle-core-grid §4.50)
 
         const geom_int plane_begin = cell_planes_index[ic];
         const geom_int plane_end = cell_planes_index[ic + 1];
@@ -917,7 +925,11 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     sdq[4] = face_area * static_cast<ST>(dq_old_4[other_ic]);
                 }
             }
-            if (skipDiag) {
+            // 診断 (g_diagSkipConvLHS、既定 0): 対流の面の寄与 (対角と近傍) を面の種類で外す。
+            const bool diagSkipConv = (g_diagSkipConvLHS != 0) &&
+                (((g_diagSkipConvLHS & 1) != 0 && has_nbr && !isLineFace) || ((g_diagSkipConvLHS & 2) != 0 && isLineFace));
+            if (diagSkipConv) {
+            } else if (skipDiag) {
                 block_dplur::accumulate_split_jacobian_cf<ST, false>(
                     gamma, nx, ny, nz, velocity_x, velocity_y, velocity_z,
                     local_sonic, local_Ht, thermallyPerfect != 0,
@@ -974,7 +986,7 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                 // 粘性対角は residual の粘性流束 Jacobian (2ν·ss²/dcc_dot_s = 2ν·delta/dcc) と整合させる
                 // (旧 face_area·(2ν/delta) は ≈2ν に潰れ近軸で r 重み喪失・ゼロ面積面にスプリアス。詳細は site1 コメント)。
                 const ST viscous_diag = static_cast<ST>(2.0) * nu_eff * delta / dcc;
-                if (isLineFace) dbgLineViscSum += viscous_diag;
+                if (isLineFace) dbgLineViscSum += viscous_diag; else dbgOffViscSum += viscous_diag;
                 if (isLineFace && lineViscCoupling >= 2) {
                     // 薄層の粘性・熱伝導の Jacobian (plan time_integration-line-viscous-jacobian §4.1)。ライン面では従来の
                     // スカラー 2ν·δ/dcc の代わりに、残差と同じ面の μ_f・k_f で D (自節点) と K (ライン上の隣) を組む。
@@ -1048,6 +1060,19 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
                     diag_block[4][2] += -cfac * velocity_y;
                     diag_block[4][3] += -cfac * velocity_z;
                     diag_block[4][4] += cfac;
+                    // 診断 (g_diagSkipConvLHS のビット 4、既定 0。plan tooling-nozzle-core-grid §4.56): ライン面の熱伝導の近傍作用
+                    // K_θ δ_j = ∂R_i/∂Q_j · δ_j = κ_f (γ_j/cp_j)/ρ_j [−(e_j − ½|u_j|²) δρ_j − u_j·δ(ρu)_j + δ(ρE)_j] を右辺へ足す
+                    // (物性・γ は凍結、自節点の対角は上で足したものだけで二重に足さない)。書き出しの組み直しでだけ使う。
+                    if ((g_diagSkipConvLHS & 4) != 0 && isLineFace) {
+                        const ST rj = max(static_cast<ST>(ro[other_ic]), static_cast<ST>(1.0e-30));
+                        const ST uxj = static_cast<ST>(Ux[other_ic]), uyj = static_cast<ST>(Uy[other_ic]), uzj = static_cast<ST>(Uz[other_ic]);
+                        const ST q2j = uxj * uxj + uyj * uyj + uzj * uzj;
+                        const ST ej = static_cast<ST>(roe[other_ic]) / rj - static_cast<ST>(0.5) * q2j;
+                        const ST cj = (k_face * delta / dcc) * (static_cast<ST>(gamma_arr[other_ic]) / max(static_cast<ST>(cpArr[other_ic]), static_cast<ST>(1.0e-30))) / rj;
+                        neighbor_accum[4] += cj * (-(ej - static_cast<ST>(0.5) * q2j) * static_cast<ST>(dq_old_0[other_ic])
+                                                   - uxj * static_cast<ST>(dq_old_1[other_ic]) - uyj * static_cast<ST>(dq_old_2[other_ic])
+                                                   - uzj * static_cast<ST>(dq_old_3[other_ic]) + static_cast<ST>(dq_old_4[other_ic]));
+                    }
                 } else {
                     block_dplur::add_identity_scaled(diag_block, viscous_diag);
                     // **診断専用 A/B** (codex 2026-09-21、既定はコンパイルから除外されビット不変)。
@@ -1070,7 +1095,10 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
         for (int i = 0; i < 5; ++i) {
             rhs[i] += neighbor_accum[i];
         }
-        if (dbgLineVisc != nullptr && storeLU != 0) dbgLineVisc[ic] = static_cast<flow_float>(dbgLineViscSum);
+        if (dbgLineVisc != nullptr && storeLU != 0) {
+            dbgLineVisc[ic] = static_cast<flow_float>(dbgLineViscSum);
+            dbgLineVisc[(size_t)nCells_all + ic] = static_cast<flow_float>(dbgOffViscSum);   // 後半はライン外の面の和 (確保は 2·nCells_all)
+        }
 
         // 軸対称ソース項のヤコビアンを対角ブロックに加える（roUy 行 = index 2）。詳細は実装ドキュメント参照。
         // axisRFloor 帯 (r 床, ソース不課) は Jacobian も課さない。
@@ -1185,7 +1213,8 @@ __global__ void __launch_bounds__(BLOCK_DPLUR_THREADS, BLOCK_DPLUR_MINBLOCKS) im
             // line-implicit: 点解せず Thomas カーネル用に保存する。
             //   diag: 状態凍結ゆえ storeLU (loop==0) のみ / rhs: ライン外 lag 込みなので毎 sweep。
             //   dq_new は Thomas が上書きする (保険で前回反復値を置く)。
-            if (storeLU != 0) {
+            //   診断 (g_diagForceStoreDiag、既定 0): 書き出しのために loop > 0 でも対角を書く。
+            if (storeLU != 0 || g_diagForceStoreDiag != 0) {
                 diag_00[ic]=static_cast<flow_float>(diag_block[0][0]); diag_01[ic]=static_cast<flow_float>(diag_block[0][1]); diag_02[ic]=static_cast<flow_float>(diag_block[0][2]); diag_03[ic]=static_cast<flow_float>(diag_block[0][3]); diag_04[ic]=static_cast<flow_float>(diag_block[0][4]);
                 diag_10[ic]=static_cast<flow_float>(diag_block[1][0]); diag_11[ic]=static_cast<flow_float>(diag_block[1][1]); diag_12[ic]=static_cast<flow_float>(diag_block[1][2]); diag_13[ic]=static_cast<flow_float>(diag_block[1][3]); diag_14[ic]=static_cast<flow_float>(diag_block[1][4]);
                 diag_20[ic]=static_cast<flow_float>(diag_block[2][0]); diag_21[ic]=static_cast<flow_float>(diag_block[2][1]); diag_22[ic]=static_cast<flow_float>(diag_block[2][2]); diag_23[ic]=static_cast<flow_float>(diag_block[2][3]); diag_24[ic]=static_cast<flow_float>(diag_block[2][4]);
@@ -1581,8 +1610,8 @@ static void initOnce(mesh& msh) {
         if (!hit) continue;
         for (geom_int p = off[l]; p < off[l + 1]; ++p) { g.nodes.push_back(cells[p]); g.lineOf.push_back(l); }
     }
-    gpuErrchk(cudaMalloc((void**)&g.viscBuf, sizeof(flow_float) * msh.nCells_all));
-    gpuErrchk(cudaMemset(g.viscBuf, 0, sizeof(flow_float) * msh.nCells_all));
+    gpuErrchk(cudaMalloc((void**)&g.viscBuf, sizeof(flow_float) * 2 * msh.nCells_all));   // 前半: ライン面、後半: ライン外の面のスカラー粘性の対角の和
+    gpuErrchk(cudaMemset(g.viscBuf, 0, sizeof(flow_float) * 2 * msh.nCells_all));
     printf("[lineDump] %s: factor %d 回目、%zu 節点 (要求 %zu 節点を含むライン)\n", g.dir.c_str(), g.targetCall, g.nodes.size(), want.size());
 }
 template<typename T>
@@ -1630,6 +1659,7 @@ static void atFactor(solverConfig& cfg, mesh& msh, variables& var) {
     putAoS25("Kprev", msh.line_Kprev_d, n);
     putAoS25("Knext", msh.line_Knext_d, n);
     put<flow_float>("scalar_visc_line", {g.viscBuf}, n);
+    put<flow_float>("scalar_visc_off", {g.viscBuf + n}, n);
     put<flow_float>("dt_vol", {var.c_d["dt_local"], var.c_d["volume"]}, n);
     put<geom_int>("flags_wall_iso_axis", {msh.wall_flag_d, msh.iso_wall_flag_d, msh.axis_flag_d}, (size_t)msh.nCells);   // フラグは節点の範囲 (nCells) で確保
     put<flow_float>("state_ro_roU_roe_cp_gamma", {var.c_d["ro"], var.c_d["roUx"], var.c_d["roUy"], var.c_d["roUz"], var.c_d["roe"], var.c_d["cp"], var.c_d["gamma"]}, n);
@@ -1645,6 +1675,49 @@ static void afterSolve(mesh& msh, variables& var) {
     ++g.sweep;
 }
 } // namespace line_dump
+
+// 確定する補正に対する右辺の書き出し (診断、既定 off。plan tooling-nozzle-core-grid §4.48、codex 2026-10-11 mismatch):
+// FORGE_LINE_DUMP_FINAL=1 のとき、書き出し中の外反復で sweep の輪が終わった後 (最後の swap の後) に、dq_block_old (= 確定する補正 δ_K) を
+// 近傍の補正として右辺 b(δ_K) = R − Nδ_K を 1 回だけ組み直し、rhs_final・dqold_final を書く。状態・係数は変えず、solve・swap・commit はしない
+// (dq_block_new は作業領域として上書きされるが、確定は dq_block_old を使うので結果に影響しない。line の K の格納は loop > 0 なので起きない)。
+static bool lineDumpFinalEnabled() {
+    static const bool v = [](){ const char* e = getenv("FORGE_LINE_DUMP_FINAL"); return e && atoi(e) != 0; }();
+    return v;
+}
+void lineDumpFinalRhs_wrapper(int nSweep, solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var)
+{
+    if (!lineDumpFinalEnabled() || !line_dump::g.on || line_dump::g.sweep < 0) return;
+    timeIntegration_d_wrapper(nSweep, cfg, cuda_cfg, msh, var, 0);
+    gpuErrchk(cudaDeviceSynchronize());
+    const size_t n = msh.nCells_all;
+    line_dump::put<flow_float>("rhs_final", {var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"]}, n);
+    line_dump::put<flow_float>("dqold_final", {var.c_d["dq_block_old_0"], var.c_d["dq_block_old_1"], var.c_d["dq_block_old_2"], var.c_d["dq_block_old_3"], var.c_d["dq_block_old_4"]}, n);
+    printf("[lineDump] 確定する補正に対する右辺を書いた (sweep %d の後)\n", nSweep);
+    // 診断 (FORGE_LINE_DUMP_FINAL_SPLIT=1、既定 off。plan tooling-nozzle-core-grid §4.52): 同じ δ・同じ状態で、左辺の対流の面の寄与を
+    // 面の種類で外して右辺と対角を組み直し、D_s{m}・rhs_s{m}final を書く (m = 1 ライン外を外す、2 ライン面を外す、3 両方、
+    // 4 = 対流はそのままでライン面の熱伝導の近傍作用を右辺に足す §4.56)。
+    // 最後に通常の組み立て (m = 0) をもう一度して対角の配列を元に戻し、D_check・rhs_check を書く (D・rhs_final と一致するはず)。
+    const char* splitEnv = getenv("FORGE_LINE_DUMP_FINAL_SPLIT");
+    if (splitEnv != nullptr && atoi(splitEnv) != 0) {
+        const int one = 1, zero = 0;
+        std::vector<const flow_float*> Dcols;
+        for (int i = 0; i < 5; ++i) for (int j = 0; j < 5; ++j) Dcols.push_back(var.c_d["diag_block_" + std::to_string(i) + std::to_string(j)]);
+        const std::vector<const flow_float*> Rcols = {var.c_d["rhs_block_0"], var.c_d["rhs_block_1"], var.c_d["rhs_block_2"], var.c_d["rhs_block_3"], var.c_d["rhs_block_4"]};
+        for (int m : {1, 2, 3, 4, 0}) {   // 4: ライン面の熱伝導の近傍作用を右辺に足す (§4.56)
+            gpuErrchk(cudaMemcpyToSymbol(g_diagSkipConvLHS, &m, sizeof(int)));
+            gpuErrchk(cudaMemcpyToSymbol(g_diagForceStoreDiag, &one, sizeof(int)));
+            timeIntegration_d_wrapper(nSweep, cfg, cuda_cfg, msh, var, 0);
+            gpuErrchk(cudaDeviceSynchronize());
+            const std::string tag = (m == 0) ? std::string("check") : ("s" + std::to_string(m));
+            line_dump::put<flow_float>("D_" + tag, Dcols, n);
+            line_dump::put<flow_float>("rhs_" + tag + "final", Rcols, n);
+        }
+        gpuErrchk(cudaMemcpyToSymbol(g_diagSkipConvLHS, &zero, sizeof(int)));
+        gpuErrchk(cudaMemcpyToSymbol(g_diagForceStoreDiag, &zero, sizeof(int)));
+        printf("[lineDump] 左辺の対流の面の寄与を外した組み直しを書いた (ライン外・ライン面・両方・確認)\n");
+    }
+    line_dump::g.sweep = -1;   // この外反復の書き出しを閉じる
+}
 
 // 診断: 値 2/3 の薄層の項のマスク (FORGE_LVC_TERMS、既定 7 = 全部。plan time_integration-line-viscous-jacobian §6.8)
 static int lineViscTermsEnv() {

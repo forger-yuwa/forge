@@ -355,7 +355,11 @@ $n_{\rm axis}$=2000・終端特性線出口・差分は `start_line` と `ni` �
 $M_{d,\rm MOC}=M_d+\Delta M_{\rm cal}$ にする 1 係数較正。CFD ピンでは $m^*$ が Hall 比 $+4.2\times10^{-4}$ 動き、
 Euler の出口コア $M$ が設計値からずれる (case/45: 6.000416) ので、その偏差を打ち消す
 (粗い Euler 格子 [ni 1100 × nj 65] での当初値 $\Delta M_{\rm cal}=-4.16\times10^{-4}$)。**較正は Euler 専用の格子 `mesh_euler` (壁に寄せない配点) で行う** (2026-10-07、plan verification-case45-euler-total-enthalpy §4)。
-Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
+Euler の `prepare` は問題 YAML の `mesh_euler` を、NS の `prepare_ns` は `mesh` を読み、混ぜて補完しない (`mesh_euler` の無い問題は Euler の `prepare` が移行先を示して止まる)。
+**節点数の上限** (2026-10-14、plan tooling-nozzle-mesh-size-guard): `prepare`・`prepare_ns`・要求カードの生成器は、実効の節点数 (`mesh2d.node_count`: ni × 実効の nj。`axis_gap_frac` では nj が導出値) を
+格子を作る前に数え、2D の上限 30 万点 (`runner_axismach.MAX_NODES_2D`) を超えたら止まる。`mesh.max_nodes`・`mesh_euler.max_nodes` と `max_nodes_reason` の組で引き上げる (片方だけは誤り)。
+`prepare_info.json` の mesh 欄に `n_nodes`・`max_nodes`・`max_nodes_reason`・`max_nodes_source` を残す。要求カードの生成器は Euler の ni に NS の ni を写す (明示の `mesh_euler.ni` は保持)。
+切り離さない理由: case/70 で Euler の ni だけを 1800 → 900 → 600 にすると出口コア M が +1.5e-4・+3.8e-4 動き (case/70 の感度評価; 収束次数は未確定)、出口較正は Euler から設計に入る。`mesh_euler` の既定は全断面で壁の第 1 間隔の比 `wall_first_frac` 0.005 の等比 (スロートの別指定なし・軸側の cap なし)。
 理由: NS と同じ壁に寄せた配点 (case/45 の G1: 1.3e-5・スロート 4.5e-6) の Euler は、スロート付近の全温が $T_t$ を数百 K 超えたまま整定せず、全域 0.005 の配点では同じ窓で全領域 $|T_0-T_t|\le0.103$ K だった (同 plan §9 E2。原因 [薄いセル・縦横比か、整定しない収束か] は切り分けていない)。
 旧方針「生産 NS と同じ格子パラメータの Euler で較正」(plan tooling-nozzle-cfd-pinned-initial-line §5.1 #11f。Euler の出口コア $M$ は格子に依存し、case/45 で 1100 × 65 → G1 で $-7.9\times10^{-4}$) は取り下げた。case/45 の旧値 $\Delta M_{\rm cal}=+3.770\times10^{-4}$ は G1 の Euler 由来で、2000 × 97・全域 0.005 の `mesh_euler` でやり直した (同 plan §6 E4・E4V: 出口コア $M$ は最終断面の $\eta\in[0.05,0.7]$ を NS の基準格子 G1 の固定の $\eta$ の列に線形補間した平均)。**現行値は $\Delta M_{\rm cal}=6.8825\times10^{-6}$** (2026-10-07、E4V run_0164 で 13 枚すべて $|M-6|\le3.1\times10^{-6}$。適用範囲: legacy MOC・単調壁・凍結の初期線 run_0062・`mesh_euler` 2000 × 97 の Euler)。Euler の較正の合格を NS に移せるとは限らないので、NS の出口 $M$ は NS で判定する。**報告・評価の $M_d$ (`prepare_info` の `Md`、`collect` の基準) は
 `spec.M_design` のまま**で、較正値は `prepare_info` の `Md_moc_offset` に別記録する。Euler の性質として据え置き、
@@ -396,6 +400,8 @@ $s_K=2\Delta M_2/L_2$、$L_1=2\Delta M_1/(M'_A+s_K)$ (台形則、1 次元 bisec
 DOF は $(L_c, M_K)$ で **$L_c$ に上限なし**。ゲートは quintic と同じ。
 M6/R3 では $L_c$ 25 でまだ fold (Δθ 3.9°)、35 で θ_max 17.5° < μ_w 19° (Δθ 0.9°)、45 で 14° (M4.2 並)。
 **全長は $L_c+55\,r_t$ 以上** (出口 1 m で ≥ 5 m) が M6 の物理的必然。
+
+**$M_K$ の選び方 (2026-10-14 実装、要求カードの既定; plan [`tooling-nozzle-mknot-auto`](../../plans/accepted/tooling-nozzle-mknot-auto.md))**: 長さ (from_length で $L_c$ が決まる) を固定して $M_K$ を振る。制約は 網の内部の反転 0・交差 0・重なり 0・最小 sin 角 ≥ 0.02・壁での余裕 $\min(\mu_w-\theta_w)\ge1°$・軸則の $M''$ の符号反転 ≤ 1・prepare の入口と同じ MOC のゲート。成り立たなくなる境目は、成立と不成立が隣り合う区間を二分法で幅 ≤ 0.001 まで詰め、逆 MOC の解像度 N と 2N の両方で求めて**全部残す**。選ぶ順序は (1) 制約と全部の境目から $\Delta M_K\ge0.05$ → (2) その中の**最大壁角 $\theta_{\max}$ の最小** → (3) 同点 (最小との差 ≤ 1e-3°) の中で境目から最も遠い点。解像度のゲートで N・2N をそれぞれ選び直して差 ≤ 0.01 を確かめ、出力はゲートで選び直した N の値 (選び直した値が窓の端なら窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す)。要求カードは最初の $r_t$ で選び、$r_t$ の固定点の後の最終の組でゲートを当て直し、固定点に使った値との差 > 0.01 なら組み直す (最大 2 回)。M6 の記録 (L_c 45・50、n_axis 600) に対しては、安全距離と同点の規則を切った目的関数の回帰で 2.6・2.7 を再現する (余裕最大は 3.0・3.1 で別; 既定の設定では CSV に無い点を不成立として扱うため未確定になり、実形状の不成立を意味しない)。既定の規則全体を実データで確かめたのは M5 (case/70) だけ。$M_K$ は長さを変えない (case/70 M5 で $L_c$ 21.49 が全点同じ)。M5 (case/70) は 2.0693 (境目 約 1.972 から 0.097)。数値の `overrides: {geometry.M_knot: x}` は今までどおり固定 (探索しない)。記録は YAML の `_card.M_knot_rule` (要約) と card_log の `M_knot_rule` (掃引の表を含む全部)。所要は手元の目安を超える (V4 で 45 分) ので重い計算は AWS で。
 
 **$M_K$ 感度 (2026-08-17, M6/R3)**: $L_c\in\{30,35,40,45,50,60\}$、
 $M_K=1.5$〜4.0 (0.1 刻み) を n_axis 600 で全 156 点、代表点を 1200/2400 で再評価した。
@@ -802,7 +808,8 @@ $x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3
    (35ab6821; 旧検査は出口直前のほぼ平行な区間の 1e-9 r_t 級の減少で r_t ごとにまばらに落ち、点の間の狭い収縮は見逃していた)。cplus の閉包で x_F が終端の壁点の丸め下に来たときは
    その点を落とさず補間した交点を足す (de35cb0b; 旧規則では壁 = メッシュ = STEP が 1 点間隔短く、case/70 で 0.85 mm・case/45 生産で 5.35 mm)。
    **既知の限界**: 冷却壁 (case/70、T_w/T_aw ≈ 0.3) の NS には非常に遅いモードがあり、残差が床に着いた後も出口 M と流量が 10 万 step 単位で動き続ける。NS 後の作り直しの固定点はこのモードが
-   定常になってからでないと閉じない (plan [`tooling-nozzle-cooled-wall-ns-settling`](../../plans/active/tooling-nozzle-cooled-wall-ns-settling.md))。内側 30 % コアの単一倍率 α とコア RMS は診断
+   定常になってからでないと閉じない (plan [`tooling-nozzle-cooled-wall-ns-settling`](../../plans/active/tooling-nozzle-cooled-wall-ns-settling.md))。
+   **帯位置の切り替わり (2026-10-13)**: 縁 y* は梯子の R(y) が最初に |R| < ε を満たす段。梯子が平らにならない区間 (冷却壁のスロート付近など) では一番内側の段の R が偶然 ε の中に入るかで y* が「その段」と「NaN」に分かれ、1 枚ごとに δ_E が局所で 5e-4 r_t 動く。持続 (`edge_persist`、K 段続けて |R| < ε) は K = 4 で窓をまたぐ再現性と case/45 の非劣化を満たさず不採用 (既定 1)。設計の入力は 5 枚の窓の平均 (1 枚の切り替わりで 1.03e-4 r_t が残る既知の限界)。内側 30 % コアの単一倍率 α とコア RMS は診断
    (同じ $x$ でコア全体を合わせる方式は、上流の壁 δ 誤差が特性線で下流の軸へ運ぶ波を欠損に取り込み反復が収縮しなかった —
    case/45 run_0019)。実測: 壁の異なる 3 つの NS 場から同じ $\delta_r(x)$ が ±1 % で出る。
    壁更新は半径方向 $r^{k+1}_{phys} = r_{inv} + (1-\omega)\delta^k_{in} + \omega\,\delta^k_{ext}$ ($\omega$=0.5 → 1.0)。
@@ -1250,6 +1257,16 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 必要な第一セルが入口直管・スロートと試験部で 40 倍違うため、smoothstep 1 本では y₁⁺ ≤ 1 と AR ≤ 5000 を同時に満たせなかった。
 設計は `case/45.isobutane_m6_d155/cold_pair_mesh.py` (断熱 NS の y₁⁺ 分布 × 局所の冷却倍率 → 第一セルの表、AR の上限 → 密度の表、ni 4496 × nj 121)。
 
+**主流と軸付近の間隔の上限 `axis_cap_frac`** (2026-10-10 記載、plan tooling-nozzle-core-grid §4.2): 各列で壁から $g_k=\min(f_i q_i^k,\,c)$
+($f_i$ は第一セル厚/局所半径、$c$ = `axis_cap_frac`) とし、$\sum_k g_k=1$ になる比 $q_i$ を列ごとに二分法で解く (`mesh2d._radial_fracs_capfixed`)。
+nj は全列で共通なので、第一セルが最も薄い列 (スロート) で $q_i$ が最大になる。`generate_axisym_mesh` は解いた $q_i$ を返さないので、
+比の上限は呼び出し側で同じ関数を使って確かめる (`case/45.isobutane_m6_d155/core_grid_mesh.py select`)。
+第一セルの表 (`wall_first_frac_table`)・壁法線の層 (`wall_normal_layer`) と併用できる (`axis_gap_frac` とは併用不可)。
+**$c$ は壁法線の層で座標を動かす前の分布のパラメータ**であり、物理的な間隔の上限ではない。層のつなぎ目 ($d_n<d<d_b$) では半径方向の辺が
+$c\,r_w$ を最大 25 % 超える (case/45、$c=0.03$)。軸から変形の及ばない範囲 ($d\ge d_b$) では $c\,r_w$ のまま。
+主流の節点は $\eta=j\,c$ に固定されるので、$f$ が $x$ で急に変わっても格子線は折れにくい。逆の形 (比を全列で固定し、上限を列ごとに解く) は、
+上限が $f$ に敏感 ($dc/df\approx-1.4\times10^4$) で、case/45 の入口〜縮流部で格子線が最大 20.9° 折れた (同 plan §4.9)。
+
 **積分法 (CONTUR) の熱力学・輸送の整合** (2026-10-08、plan §4.7、実装中): 今の CONTUR は温度分布 (Eq. 69) を温度で書き、断熱壁温を
 一定 γ の式に縁の局所 γ_e を入れて作り (燃焼ガスでは全温を超える)、粘性は空気の Sutherland、運動量式の加速の項も一定 γ の式である。
 `closure_version: contur_v2` では、温度分布をエンタルピーで書き ($h(v)$ の 2 次式 → $T = h^{-1}$)、$h_{aw} = h_e + r(h_0 - h_e)$、
@@ -1264,6 +1281,23 @@ metrics の壁熱流束積分 $Q_w$・実測 y₁⁺) に入る。δ\* 抽出 (�
 2 run から目的量の感度ブラケットを取り、設計公差より小さければ断熱設計 + ロバスト性記録、大きければ公称 $T_w$ で設計
 (等温 δ\* 反復)、壁温不確かさが支配するならシナリオを作動点として束ねたロバスト MOO。$T_w(x)$ 未知の連成は
 フル CHT の前に「弱 CHT ループ」(NS の $q_w$ → 1D 壁伝導 + 冷却剤モデル → $T_w(x)$ → `wallProfile`) を使う。
+
+## ③ベルの TP 排気評価 (2026-10-11、plan [tooling-nozzle-bell-two-mode](../../plans/active/tooling-nozzle-bell-two-mode.md))
+
+③ベルの評価器は、問題 YAML に `gas.model: semiperfect` と `gas.exhaust: <排気ファイル>` を書いたときだけ TP のロケット排気で動く (書かなければ従来の CPG とビット同一)。
+
+- **排気ファイル** (`gas/rocket_exhaust.py`、schema `forge_rocket_exhaust_v1`): CEA2 (FCEA2) で推進剤・燃焼室圧・O/F から燃焼室の平衡組成と温度を解き、燃焼室で凍結した組成を記録する。反応物の状態、凍結位置、CEA の凍結計算の表、来歴を同じファイルに残す。生成物は forge の熱物性・輸送データにある種に限り、除いた種は `omitted_species` に書く (LOX/LH2・10 MPa・O/F 6 では H2・O2・H2O・OH・H・O、除いた HO2・H2O2・O3 の影響はモル分率 4.5e-5)。
+- **共通の契約** (`RocketExhaust`): 同じ質量分率・種 DB・燃焼室温度から、MOC 用の `GasSemiPerfect`、forge の lump `EXH` (`thermalMethod: 2`、`thermoHrefTemp: 298.15`、`viscMethod: 2` + 輸送物性)、1D 計算用の `FrozenGas` を作る。3 つの気体で $R$ と $h(T)$ が一致することを試験で確かめる。
+- **1D 理想値** (`ideal_1d`): 凍結 TP の等エントロピー膨張で、凍結音速でチョークする。$\dot m_{1D}$・出口状態・$F_{1D}$ は CEA の凍結計算と $\varepsilon$ 10〜100 で相対 6.8e-5 以内 (`design/tests/run_bell_tp_tests.py`)。
+- **runner の TP 経路**: 真空の出口は `outflow`、IC と壁の平滑化は TP の $e(T)$ で組む、段は soft → mid → main (`prepare(..., stage=)`)。段の継続は同一メッシュの `restart_field.py` (`StageManifest` で区間を記録)。
+- **推力の検査体積 (CV) 会計** (`metrics/extract.py` の `thrust_cv`): 入口面・内壁・出口面で閉じた CV の全境界で $\Pi_x=\int[\rho u_x(\mathbf u\cdot\mathbf n)+(p-p_a)n_x-(\boldsymbol\tau_{eff}\mathbf n)_x]\,2\pi r\,ds$ を積み、壁会計 (入口面 + 内壁) と出口面会計 (出口面、粘性応力込み) を出す。node の壁の摩擦は `twall` の符号を反転して牽引力にする。圧力は保存量から TP の $e(T)$ を逆に解いて復元する (`tp_pressure_from_conserved`)。CV 残差 $cv=(F_{wall}-F_{exit})/F_{1D}$。$\eta=F/F_{1D,vac}(\varepsilon)$ は出口面会計を主、壁会計を照合とする。runner がスナップショットごとの時系列を `thrust_history.csv` に書く。壁ダンプに `twall` が無いときは止める (Euler の slip 壁だけ `wall_model="slip"` で内壁の traction を 0 にする — 下の Euler の項)。
+- **受理ゲート** (`opt/driver.py` の `tp_gates`、plan §4.1): (i) 残差は `check_convergence --segment` の VERDICT を記録し、FAIL は DIVERGED と有意な末尾上昇だけ (`NOT CONVERGED (stalled)` は併記)、(ii) 壁会計・出口面会計・$\eta$ (出口面・壁) を drift・osc 1.5e-4、$\dot m$ を 1e-3 で `check_quasisteady --series-csv` が STEADY (末尾窓 8 点以上、本段の出力間隔は本段長の 1/20)、(iv) 最終スナップショットの $|cv|\le1\times10^{-4}$、(v) メッシュ品質 (壁法線の近壁層で AR ≤ 5000 のときは AR > 1000 の全セルでスキュー ≤ 0.1 を `MESH_AR_RELAX.json` に記録) と局所 $y_1^+$。`--gate-only` で既存 run を判定し直せる。継続 (`opt/polish.py` の `polish_run_tp`) は同一メッシュの `restart_field.py`。`space.pRef` は置かない (燃焼室と出口で静圧が 3 桁違い、代表値が無い)。
+- **格子**: `mesh.wall_normal_layer` (壁法線の近壁層、`meshing/mesh2d.py`) で $y_1^+\le1$ と AR ≤ 5000 を両立させ、`mesh.wall_normal_end_stations` で入口・出口面の数ステーションを平面 (半径線) に戻す。TOP の基準ケースで $y_1^+$ 最大 0.82・AR 最大 2700 (case/68 run_0008)。
+- **拡大部の作り方** (`geometry.bell_mode`): 既定は従来の `bell_type` (TOP・hermite)。**`direct_bspline` = (D) 直接モード** (`geometry/wall_bell_c2.py` の `design_bell_c2`): 拡大部を等間隔 16 区間の clamped 5 次 B-spline にし、スロート ($r=1,r'=0,r''=1/R_t$)・最大壁角の点 $x_m$ ($r'=\tan\theta_{max},r''=0$)・出口 ($r=\sqrt\varepsilon,r'=\tan\theta_e$) の 7 拘束の下で $\int(r''')^2dx$ を最小化する。設計変数は $(L,\theta_e,\theta_{max})$、$x_m$ は 0.5〜4.0 $r_t$ を走査した成立区間 (端は二分法で 1e-6 $r_t$ まで詰める) の中で $J$ 最小を黄金分割で内部決定する。成立条件は $r'\ge0$、$[0,x_m]$ で $r''\ge-tol$・$[x_m,L]$ で $r''\le tol$、$|\kappa|\le1/R_t$。成立しなければ `WallInfeasible` (理由つき) を driver に返す。壁の決定は `WALL_DESIGN.json` に記録する。
+- **`moc_rao` = (M) 特性曲線モード** (2026-10-12、plan §5.1 #6 (W1)): runner は生成器 (`geometry/rao_axisym.py` の `design_rao`) を回さず、生成器の壁ファイル `geometry.rao_wall_file` (`<tag>_wall.npz` と同じディレクトリの記録 `<tag>.json`) を `load_rao_wall` で読む。壁は `RaoWall` (円弧 kernel は閉じた式、BE は罰則付き 5 次 B-spline で B の $r,r'$ と E の $r,r'$ を拘束 — T4 の評価と同じ作り方) に (D) と同じ収縮部 (U→T 5 次 Hermite) と入口直管をつないだ `geometry/wall.py` の `RaoBellWall` で、スロートで C2、B で C1 (曲率は跳ぶ: L100 で $\Delta\kappa_B=-0.922$、L70 で $-0.998$)。dv は照合用の `L_over_rt` だけで、壁ファイルの $L$ (終点 $x_E$)・$\varepsilon$ ($r_E^2$)・$R_t$ (円弧の $1/\kappa_B$)・排気ファイル (キャンペーンの要約の `setup`) が問題と相対 1e-9 で合わなければ run ディレクトリを作る前に止める。`WALL_DESIGN.json` に壁ファイルと記録の sha256・生成条件・照合・接合・当てはめの記録と、生成器の推力の 2 会計を runner の単位に換算した参照値 (`rao_moc_reference`: $F\,[\mathrm N]=F_{nd}\,\rho^*a^{*2}r_t^2-p_a\pi(r_Er_t)^2$、$\eta=F/F_{1D}$; $\rho^*,a^*$ は同じ凍結 TP の 1D スロート状態) を残す。
+- **Euler** (`evaluate.model: euler`、既定 `ns`; plan §4.1「Euler の設定」): `viscMethod: 0`・`visc: 0.0`・`thermCond: 0.0` (`viscMethod: 0` は定数粘性なので係数も 0)・`turbulence: none`・物理壁は `slip`。node のキーは `isAxisymmetric`・`axisCentroidShift` だけ (`nodeWallDirichlet`・`nodeInletCornerWall` は wall / wall_isothermal の節点にだけ作用するので書かない)。段・陰解法・出力は NS と同じ。格子は壁際を細分しない: 壁法線の近壁層・スロートだけ詰める第一セル・AR 緩和は書けない (case/45 で NS 用の壁際細分化格子の Euler はスロート付近の全温が整定しなかった)。推力の CV 会計は同じ式で、`thrust_cv(..., wall_model="slip")` が内壁の粘性 traction を 0 とし壁ダンプを読まない (forge の slip 境界の壁ダンプには `twall` が無い)。場の $\mu_{eff}$ (vis_lam + vis_turb) が境界の全 DOF で 0 でなければ止め、NS (既定 `wall_model="viscous"`) で壁ダンプに `twall` が無ければ止める (摩擦を黙って 0 にしない)。開境界の粘性項は式のままで、`viscMethod: 0` の vis_lam = visc = 0 なので 0。時系列は NS と同じ step の集合 (step 0 を入れない)。(M) の run では metrics に MOC の参照値との差 $\eta-\eta_{cs}$ (出口面・壁会計) と推力の相対差を載せる。受理ゲートは (i)〜(iv)・メッシュ品質が NS と同じで、壁解像 ($y_1^+$) は回さず GATES.json に「対象外 (slip 壁で境界層が無い)」と書いて ok 扱い (`tp_gates(..., flow_model="euler")`)。
+- **前進 MOC ゲート** (`geometry/moc_forward.py`、①の配列版 `interior_vec` の analytic・converge 経路を共用): 与えた壁で前進 MOC を解き、C⁻ 間隔比の最小・反転・交差から pass / reject / undecidable を返す (初期線不整合と軸近傍 j ≤ 2 は undecidable)。初期線は Hall (R_t ≤ 1 で n ≤ 321 に制限)。③の真空の比較では制約にせず `MOC_GATE.json` に記録だけする (④の基部と海面作動で使う)。
+- **変換器の終了時の GPUassert** (`evaluate/runner.py` の `run_converter`、main の 2026-10-13 の版に統一): HDF5 を書き終えた後の GPU の後片付けで落ちる既知の症状で、出力に MESH/COORD と VALUE があるときだけ通し、出力の隣に `<stem>_converter_exit.log` を残す (③ベルの 2026-10-11 版 `_run_converter` は 2026-10-15 の main の取り込みで置き換えた)。
 
 ## 実寸の要求カードと成果物一式 (STEP・gmsh・Fluent・Excel) — 2026-10-13 実装・検証済み
 

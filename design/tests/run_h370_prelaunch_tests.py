@@ -217,7 +217,10 @@ def test_stop_rule_keys():
     eu = TMP / "euler_dummy_c"
     eu.mkdir(exist_ok=True)
     sr = RA._stop_rule_settings(pn, None, str(eu), None)
-    want = {"requested": True, "use": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500, "fallback_steps": 200000,
+    # 統合 (2026-10-14): NS の本段の fallback は --steps > evaluate.ns_steps > 60,000 (forge-f5 fb07daf8; evaluate.nStepOuter 200000 は NS に効かない)。
+    # 統合ブランチの問題 YAML は ns_steps 200000 を書く (plan §5.1 #36m) ので、fallback も M6 のブランチと同じ 200,000 (h370_problems.py check と同じ)
+    want = {"requested": True, "explicit": True, "use": True, "cap": 200000, "hold_steps": 40000, "out_step_interval": 2500,
+            "fallback_steps": 200000, "fallback_steps_source": "evaluate.ns_steps",
             "window": 20000, "min_points": 9, "r_mean_max": 5e-4, "r_amp_max": 5e-3, "theta_drift_max": 5e-4, "theta_amp_max": 5e-3,
             "x_fracs": [0.419738616669543, 0.734542579171700, 0.986385749173426]}
     bad = {k: sr.get(k) for k, v in want.items() if sr.get(k) != v}
@@ -232,7 +235,10 @@ def test_stop_rule_keys():
           ex == DL.handoff_extract_settings() == {"band_select": "edge", "remap_constant_x": True, "remap_edge": "missing", "omega": 0.5,
                                                    "smooth_lam": 1.0, "knot_spacing": 2.0, "max_lam_factor": 1000.0}, str(ex))
     p3 = RA.load_problem(HP.H300)
-    check("停止規則のキーの無い問題 (300 K の H) は今と同じ (None = prepare_info に書かない)", RA._stop_rule_settings(p3, None, str(eu), None) is None)
+    d3 = RA._stop_rule_settings(p3, None, str(eu), None)
+    check("統合: 停止規則のキーの無い問題 (300 K の H) は既定の要求 (explicit でない; 保持の既定 40,000、prepare_info に書く)",
+          d3 is not None and d3["requested"] and not d3["explicit"] and d3["hold_steps"] == 40000,
+          str(d3 and {k: d3.get(k) for k in ("requested", "explicit", "use", "reason")}))
 
 
 # ====================================================================================== 合成の構造格子 (D〜G)

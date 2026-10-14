@@ -1,0 +1,149 @@
+{
+ "A_cfl4": {
+  "run": "run_0601_cg_start_g1x_cfl4",
+  "last_step": 1999,
+  "cols": {
+   "rms_ro": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.009835539720718472,
+    "tail_median_200": 0.0017649948716070354,
+    "ratio": 0.1794507390264604
+   },
+   "rms_roUx": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.7353154908143252,
+    "tail_median_200": 0.1250773846778991,
+    "ratio": 0.17010029877023555
+   },
+   "rms_roUy": {
+    "nonfinite": 0,
+    "base_max_100_300": 2.557723560570148,
+    "tail_median_200": 0.3877349097036741,
+    "ratio": 0.1515937514440549
+   },
+   "rms_roUz": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.0,
+    "tail_median_200": 0.0,
+    "ratio": null
+   },
+   "rms_roe": {
+    "nonfinite": 0,
+    "base_max_100_300": 1675.330561444651,
+    "tail_median_200": 270.7152154198763,
+    "ratio": 0.1615891344967983
+   },
+   "rms_roK": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.2536078044686733,
+    "tail_median_200": 0.12524832737097402,
+    "ratio": 0.4938662184840026
+   },
+   "rms_roOmega": {
+    "nonfinite": 0,
+    "base_max_100_300": 1188178.83163775,
+    "tail_median_200": 250952.8144781126,
+    "ratio": 0.2112079493389112
+   },
+   "rms_roY0": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.0089900287717878,
+    "tail_median_200": 0.001613552633922018,
+    "ratio": 0.17948247718467975
+   },
+   "rms_roY1": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.0008437215687082189,
+    "tail_median_200": 0.00015143499344212678,
+    "ratio": 0.17948455871998334
+   }
+  },
+  "res": "res_2000.h5",
+  "field_nonfinite": 0,
+  "min": {
+   "ro": 0.013850442761357995,
+   "T": 230.4872439655068,
+   "P": 2137.3940016234487
+  },
+  "residual_nonfinite": 0,
+  "exploded": [],
+  "undecidable_cols": [
+   "rms_roUz"
+  ],
+  "pass": true
+ },
+ "B_cfl05": {
+  "run": "run_0602_cg_start_g1x_cfl05",
+  "last_step": 1999,
+  "cols": {
+   "rms_ro": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.002981600337256145,
+    "tail_median_200": 0.00016073366756866276,
+    "ratio": 0.053908522064556756
+   },
+   "rms_roUx": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.7867445538832639,
+    "tail_median_200": 0.10035962274795054,
+    "ratio": 0.12756316170552326
+   },
+   "rms_roUy": {
+    "nonfinite": 0,
+    "base_max_100_300": 1.769584546821312,
+    "tail_median_200": 0.08951179352811492,
+    "ratio": 0.05058350768766833
+   },
+   "rms_roUz": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.0,
+    "tail_median_200": 0.0,
+    "ratio": null
+   },
+   "rms_roe": {
+    "nonfinite": 0,
+    "base_max_100_300": 4322.030392717957,
+    "tail_median_200": 265.76704097994644,
+    "ratio": 0.06149124759227246
+   },
+   "rms_roK": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.3944521081408205,
+    "tail_median_200": 0.16900575271533455,
+    "ratio": 0.4284569640454274
+   },
+   "rms_roOmega": {
+    "nonfinite": 0,
+    "base_max_100_300": 212949.93906776,
+    "tail_median_200": 22957.43011772844,
+    "ratio": 0.10780669963198937
+   },
+   "rms_roY0": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.002724492389486423,
+    "tail_median_200": 0.0001469400328323065,
+    "ratio": 0.05393299441735833
+   },
+   "rms_roY1": {
+    "nonfinite": 0,
+    "base_max_100_300": 0.0002557009023738326,
+    "tail_median_200": 1.3790717675672124e-05,
+    "ratio": 0.05393300355080566
+   }
+  },
+  "res": "res_2000.h5",
+  "field_nonfinite": 0,
+  "min": {
+   "ro": 0.013852093668474518,
+   "T": 230.6411604036546,
+   "P": 2144.8892304836936
+  },
+  "residual_nonfinite": 0,
+  "exploded": [],
+  "undecidable_cols": [
+   "rms_roUz"
+  ],
+  "pass": true
+ },
+ "VERDICT": "両腕が通過 → 本段から直接始める"
+}

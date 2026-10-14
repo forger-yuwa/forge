@@ -57,6 +57,11 @@ __device__ unsigned int  g_ledgerFaceCap   = 0;
 // 指定面の指定節点側の再構成速度 3 成分だけをセル値に戻す (plan tooling-nozzle-sern-3d §5.1 R5h の 1 変数 A/B)。生産で使わない。
 __device__ long long g_diagVelCellFace = -1;
 __device__ long long g_diagVelCellNode = -1;
+// 診断 (env FORGE_DIAG_CONV_FACES、既定 0 = 全面でビット不変。plan tooling-nozzle-core-grid §4.52): SLAU の平均流の残差への加算を面の種類で絞る。
+// 1 = ライン外の面 (ライン上の隣どうしでない面、境界面を含む) だけ、2 = ライン面だけ、3 = どの面も加えない。**右辺を変える診断**で生産で使わない。
+__device__ int g_diagConvFaceMode = 0;
+__device__ const geom_int* g_diagLinePrev = nullptr;
+__device__ const geom_int* g_diagLineNext = nullptr;
 // speciesFaceReconstruction==1: Y_s を ρ/Y 勾配 + min(ψ_ρ,ψ_Y) で face へ再構成し thermo/species 流束で
 // 同一 face 組成を使う (proper S2/S3)。wrapper で cfg.speciesFaceReconstruction を設定。
 __device__ int g_speciesFaceRecon = 0;

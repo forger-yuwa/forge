@@ -1,0 +1,131 @@
+{
+ "registration": "plans/active/tooling-nozzle-core-grid.md §4.94",
+ "old_Q0_GI_vs_GB_rel": 6.691426677182487e-14,
+ "arms": {
+  "GI": {
+   "old": {
+    "contraction": {
+     "normN": 9.355560712804685,
+     "ell": 0.7125400423051108,
+     "norm_halfdR": 13.129873631436729,
+     "prop_err_T": 0.18419731535239042,
+     "prop_err_P": 0.23807188638396148,
+     "prop_err_sonic": 0.33412649545146156
+    },
+    "contraction_wall1_10": {
+     "normN": 1260.153143958559,
+     "ell": 0.7387074934799157,
+     "norm_halfdR": 1705.8892120103023,
+     "prop_err_T": 0.014481190616969872,
+     "prop_err_P": 0.06539618392118318,
+     "prop_err_sonic": 0.24850696702537453
+    },
+    "island": {
+     "normN": 0.2736688761944323,
+     "ell": 1.2667774638776594,
+     "norm_halfdR": 0.21603547899938186
+    },
+    "wall_interior": {
+     "normN": 7677.759165323866,
+     "ell": 0.3673200607433833,
+     "norm_halfdR": 20902.09598077926
+    }
+   },
+   "new": {
+    "contraction": {
+     "normN": 0.5459752793090306,
+     "ell": 0.04678504968455091,
+     "norm_halfdR": 11.669866399422022,
+     "prop_err_T": 2.103259839693638e-06,
+     "prop_err_P": 2.0376986389486715e-05,
+     "prop_err_sonic": 1.5148491965744023e-06
+    },
+    "contraction_wall1_10": {
+     "normN": 53.036475599088554,
+     "ell": 0.03535033859442517,
+     "norm_halfdR": 1500.3102574936165,
+     "prop_err_T": 6.13191915354663e-07,
+     "prop_err_P": 3.211499421289807e-08,
+     "prop_err_sonic": 8.594013006057738e-07
+    },
+    "island": {
+     "normN": 0.027954189439973572,
+     "ell": 0.21257919573406267,
+     "norm_halfdR": 0.13150011854849786
+    },
+    "wall_interior": {
+     "normN": 17.858823985843816,
+     "ell": 0.0008822199048166839,
+     "norm_halfdR": 20243.052654263898
+    }
+   }
+  },
+  "GB": {
+   "old": {
+    "contraction": {
+     "normN": 8.992479232662978,
+     "ell": 1.6914403227924788,
+     "norm_halfdR": 5.316462609698738,
+     "prop_err_T": 0.14440535222419645,
+     "prop_err_P": 1.0669111136745857,
+     "prop_err_sonic": 0.23622626465969299
+    },
+    "contraction_wall1_10": {
+     "normN": 1212.3231196069567,
+     "ell": 1.73047043044846,
+     "norm_halfdR": 700.5743052730332,
+     "prop_err_T": 0.0217984726106751,
+     "prop_err_P": 1.270580082501087,
+     "prop_err_sonic": 0.39238077864555887
+    },
+    "island": {
+     "normN": 0.2695043034295005,
+     "ell": 1.6501757899844185,
+     "norm_halfdR": 0.16331854161552403
+    },
+    "wall_interior": {
+     "normN": 7461.8354876992125,
+     "ell": 1.6656573643418218,
+     "norm_halfdR": 4479.814184742448
+    }
+   },
+   "new": {
+    "contraction": {
+     "normN": 0.04338205640012475,
+     "ell": 0.01780113048302844,
+     "norm_halfdR": 2.4370394027213673,
+     "prop_err_T": 2.1967475164223116e-06,
+     "prop_err_P": 0.3523463842502515,
+     "prop_err_sonic": 1.6057612175961502e-06
+    },
+    "contraction_wall1_10": {
+     "normN": 0.5474308947729517,
+     "ell": 0.0018161579891509082,
+     "norm_halfdR": 301.4225073166058,
+     "prop_err_T": 4.391656664093944e-07,
+     "prop_err_P": 4.082599802388028e-07,
+     "prop_err_sonic": 2.8855054421095667e-07
+    },
+    "island": {
+     "normN": 0.02490639566612124,
+     "ell": 0.28189438701121217,
+     "norm_halfdR": 0.08835364169606756
+    },
+    "wall_interior": {
+     "normN": 15.96611224785519,
+     "ell": 0.007191237865661344,
+     "norm_halfdR": 2220.217512772658
+    }
+   }
+  }
+ },
+ "qualification": {
+  "thermoFloat0": true,
+  "restart_bitwise": true,
+  "half_input_same": true,
+  "switch_line": true,
+  "finite_completed": true,
+  "old_Q0_gamma_independent": true
+ },
+ "result": "A: 熱物性の評価の経路の切り替え (thermoFloat 1 → 0) で比例しない成分の大半が消えた (この状態・補正の方向で)"
+}

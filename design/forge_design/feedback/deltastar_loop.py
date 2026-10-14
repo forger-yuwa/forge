@@ -604,9 +604,9 @@ def solve_rt_throat(problem, R_throat_m: float, prev_run=None, delta_r_out=None,
 
 def stop_state(run_dir) -> dict:
     """run の本段の停止の状態 (plan §5.1 #36a)。`STOP_RULE_STATE.json` (run_staged_ns が本段の後に書く) があればその status。
-    無ければ prepare_info.json の stop_rule を見て、要求していれば MISSING (本段が終わっていないか記録が失われた)、
-    要求していない (指定の無い問題・2026-10-14 より前の準備) なら NOT_USED。run_staged_ns の終了コードは見ない
-    (CENSORED・一部の UNAVAILABLE でも 0 なので)。"""
+    無ければ prepare_info.json の stop_rule を見て、要求していれば MISSING (本段が終わっていないか記録が失われた)、要求していない
+    (`evaluate.stop_rule: false`・`--no-stop-rule` で準備・2026-10-14 より前の準備; キー無しの問題は統合後は要求する) なら NOT_USED。
+    run_staged_ns の終了コードは見ない (CENSORED・一部の UNAVAILABLE でも 0 なので)。"""
     from ..evaluate import stop_rule as SR
     run_dir = Path(run_dir)
     st = SR.read_state(run_dir)
@@ -1125,7 +1125,7 @@ def run_pass(problem, euler_ref, prev_run, run_dir, omega: float = 0.5, ic_from=
     prev_run の直下に写す) が不合格なら準備の前に `HandoffBlocked` (新しい run dir を作らない)。関門の結果は新しい run の prepare_info.json
     の `handoff_from_prev` に残す (前の run の関門が落ち着きの条件を上書きで通したら、その `settled: false`・`unsettled_overrides` も
     ここに入る = 落ち着いていない場から作った壁の run; §5.1 #36h)。NS の後は `_after_ns`。stop_rule: prepare_ns へ (None = 問題 YAML の
-    evaluate.stop_rule、False = 使わない)。allow_not_reached・allow_unconverged・allow_unsettled は上書きの理由の文字列 (`override_reason`;
+    evaluate.stop_rule、キー無しは使う; False = 使わない)。allow_not_reached・allow_unconverged・allow_unsettled は上書きの理由の文字列 (`override_reason`;
     前の run と新しい run の関門の両方に効く)。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
     _check_overrides(allow_not_reached, allow_unconverged, allow_unsettled)
@@ -1314,8 +1314,10 @@ def main(argv=None) -> int:
                          "(prepare_ns(delta_r_csv=TABLE, offset=radial) → run_staged_ns)。YAML の _card.ns_correction があれば TABLE の "
                          "sha256 を照合する。IC は --ic-from (無ければ --prev)。--init-integral とは排他")
     ap.add_argument("--no-stop-rule", action="store_true",
-                    help="本段の停止規則を使わない (問題 YAML の evaluate.stop_rule: true を打ち消す; plan tooling-nozzle-isothermal-wall-chain "
-                         "§5.1 #36a)。YAML に evaluate.stop_rule が無ければ今までどおり使わない")
+                    help="本段の停止規則を使わない (問題 YAML の evaluate.stop_rule を打ち消す; plan tooling-nozzle-cooled-wall-ns-settling §4.6・"
+                         "plan tooling-nozzle-isothermal-wall-chain §5.1 #36a)。既定は使う = 上限 --steps か evaluate.stop_rule_cap か 200,000 "
+                         "(到達 + 保持を含む) まで回し、r と θ_r の条件を満たして保持 (evaluate.stop_rule_hold_steps、既定 40,000) を終えた出力で止める。"
+                         "使わないときの本段は --steps > evaluate.ns_steps > 60,000 step")
     ap.add_argument("--allow-not-reached", default=None, metavar="理由",
                     help="受け渡しの関門の明示の上書き (理由の文字列が必須、HANDOFF_GATE.json に残す): 本段の停止の状態が REACHED でない run "
                          "(停止規則を使わない NOT_USED・CENSORED・UNAVAILABLE) からも抽出・次の壁の入力を作る。DIVERGED・EXEC_ERROR・"
@@ -1340,7 +1342,7 @@ def main(argv=None) -> int:
         from ..metrics.deltastar import resolve_euler_ref
         a.euler_ref = {"run": a.euler_ref, "res": a.euler_ref_res, "sha256": a.euler_ref_sha256}
         resolve_euler_ref(a.euler_ref, verify=True)
-    sr_arg = False if a.no_stop_rule else None      # None = 問題 YAML の evaluate.stop_rule (無ければ使わない)
+    sr_arg = False if a.no_stop_rule else None      # None = 問題 YAML の evaluate.stop_rule (無ければ使う)
     gate_kw = dict(allow_not_reached=a.allow_not_reached, allow_unconverged=a.allow_unconverged, allow_unsettled=a.allow_unsettled)
     if a.delta_r_csv is not None:
         clash = [n for n, v in (("--init-integral", a.init_integral), ("--extract-only", a.extract_only),

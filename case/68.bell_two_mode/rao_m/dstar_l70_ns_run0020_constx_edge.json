@@ -1,0 +1,488 @@
+{
+ "what": "③ベル (M) の δ_r 抽出の A/B (帯の選び方 adaptive → edge だけ) — plan tooling-nozzle-bell-two-mode §5.1 #7「次の A/B (事前登録)」",
+ "tag": "L70",
+ "ns_run": "case/68.bell_two_mode/run_0020_tp_m_ns_l70",
+ "euler_run": "case/68.bell_two_mode/run_0023_tp_m_euler_l70_pin",
+ "wall": {
+  "wall_file": "case/68.bell_two_mode/rao_m/rao_pin_parts/L70_pin_n321_wall.npz",
+  "sha256": "b1ca544470959223abfb87df618d845dc48538dab4f5ecd344f8c8fed1f02f31",
+  "ns_run_matches": true,
+  "euler_run_matches": true
+ },
+ "settings": {
+  "method": "band",
+  "k_band": 1.5,
+  "k_band_sens": [
+   1.125,
+   2.25
+  ],
+  "band_min_frac": 0.02,
+  "band_width": 0.5,
+  "slope_max": 0.01,
+  "band_growth": 1.25,
+  "max_retry": 14,
+  "fit_from": 1.0,
+  "band_smooth_x": 0.0,
+  "band_select": "edge",
+  "plateau_tol": 0.003,
+  "plateau_kmax": 9,
+  "edge": {
+   "eps": 0.003,
+   "c": 1.25,
+   "window": 3.0,
+   "knot": 6.0,
+   "step": 1.0282855942978897,
+   "y0_fac": 1.2,
+   "min_frac": 0.016,
+   "ymax_frac": 0.5,
+   "ref_min_frac": 0.0133,
+   "y0_shift": 1.0
+  },
+  "gate_band_rms": 0.005,
+  "core_frac": 0.3,
+  "core_frac_sens": [
+   0.25,
+   0.35
+  ],
+  "n_axis_skip": 1,
+  "outer_frac": 0.25,
+  "smooth_lam": 0.001,
+  "gate_core_rms": 0.01,
+  "gate_sens": 0.05,
+  "gate_sens_floor": 0.0,
+  "refine": 4,
+  "ns_res": "res_60000.h5",
+  "euler_res": "res_30000.h5",
+  "remap_constant_x": true,
+  "remap_max_column_dx": 0.3574771142857136,
+  "remap_clamped_points": 0,
+  "ns_run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0020_tp_m_ns_l70",
+  "euler_run": "/home/sano/work/forge-thruster/case/68.bell_two_mode/run_0023_tp_m_euler_l70_pin",
+  "yb_sens_factors": [
+   0.75,
+   1.5,
+   2.0
+  ]
+ },
+ "massflow": {
+  "x_E_ns": 15.860273471054509,
+  "x_E_ns_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "remap_constant_x_ns": true,
+  "mdot_ns": 268.330348966074,
+  "mdot_ns_spread": 0.0003393331424385422,
+  "res_ns": "res_60000.h5",
+  "x_E_euler": 15.860273471054509,
+  "x_E_euler_source": "prepare_info.wall_design.L (bell の出口面; x_E 無し)",
+  "remap_constant_x_euler": true,
+  "mdot_euler": 268.8680522306155,
+  "mdot_euler_spread": 1.578968228313964e-05,
+  "res_euler": "res_30000.h5",
+  "mdot_ratio": 0.9980001221413978,
+  "r_throat_eff": 0.9989995606312336,
+  "r_throat_phys": 1.0000000214285714,
+  "cd_rel": 0.9980000793699655,
+  "delta_r_throat_eff": 0.0010004607973377322,
+  "delta_r_throat_given": 2.1428571361781223e-08
+ },
+ "n_sections": 1201,
+ "n_region": 739,
+ "acceptance": {
+  "region": "x >= 0",
+  "n_region": 739,
+  "accept_rel": 0.05,
+  "factors": [
+   0.75,
+   1.5,
+   2.0
+  ],
+  "criteria": [
+   "sens",
+   "main_stop",
+   "sens_stop",
+   "edge_found",
+   "band_outside_edge"
+  ],
+  "all_pass": false,
+  "summary": {
+   "sens": {
+    "n_fail": 95,
+    "x_first": 0.5773971928571429,
+    "x_last": 15.860273471428568
+   },
+   "main_stop": {
+    "n_fail": 0
+   },
+   "sens_stop": {
+    "n_fail": 125,
+    "x_first": 9.189917485714286,
+    "x_last": 15.860273471428568
+   },
+   "edge_found": {
+    "n_fail": 0
+   },
+   "band_outside_edge": {
+    "n_fail": 174,
+    "x_first": 0.42797831528571423,
+    "x_last": 1.6944939885714285
+   },
+   "main_stop_parts": {
+    "slope": {
+     "n_fail": 0
+    },
+    "a_core": {
+     "n_fail": 0
+    },
+    "clean": {
+     "n_fail": 0
+    },
+    "fit": {
+     "n_fail": 0
+    },
+    "root": {
+     "n_fail": 0
+    }
+   },
+   "sens_stop_parts": {
+    "f0.75": {
+     "slope": {
+      "n_fail": 125,
+      "x_first": 9.189917485714286,
+      "x_last": 15.860273471428568
+     },
+     "a_core": {
+      "n_fail": 0
+     },
+     "clean": {
+      "n_fail": 0
+     },
+     "fit": {
+      "n_fail": 62,
+      "x_first": 13.014759664285714,
+      "x_last": 15.860273471428568
+     },
+     "root": {
+      "n_fail": 0
+     }
+    },
+    "f1.5": {
+     "slope": {
+      "n_fail": 0
+     },
+     "a_core": {
+      "n_fail": 0
+     },
+     "clean": {
+      "n_fail": 0
+     },
+     "fit": {
+      "n_fail": 0
+     },
+     "root": {
+      "n_fail": 0
+     }
+    },
+    "f2": {
+     "slope": {
+      "n_fail": 0
+     },
+     "a_core": {
+      "n_fail": 0
+     },
+     "clean": {
+      "n_fail": 0
+     },
+     "fit": {
+      "n_fail": 0
+     },
+     "root": {
+      "n_fail": 0
+     }
+    }
+   },
+   "all": {
+    "n_fail": 302,
+    "x_first": 0.42797831528571423,
+    "x_last": 15.860273471428568
+   }
+  }
+ },
+ "uncertainty": {
+  "computed": true,
+  "accept_rel": 0.05,
+  "region": "x >= 0 (スロート〜出口)",
+  "factors": [
+   0.75,
+   1.5,
+   2.0
+  ],
+  "accepted": false,
+  "n_region": 739,
+  "n_nonfinite": 0,
+  "n_over": 95,
+  "u_max": 0.2108528361744793,
+  "x_at_u_max": 15.720330171428571,
+  "u_outward_max_region": 0.1959492566095333,
+  "bands": [
+   {
+    "x_lo": null,
+    "x_hi": 0.0,
+    "n": 462,
+    "u_max": 0.8388154250727996,
+    "frac_over": 0.006493506493506494,
+    "u_outward_max": 0.8388154250727996,
+    "rel_f0.75_min": -0.25374225332203726,
+    "rel_f0.75_max": 0.010842303949733078,
+    "rel_f1.5_min": -0.01438167382592661,
+    "rel_f1.5_max": 0.43121353372772575,
+    "rel_f2_min": -0.022027051371797227,
+    "rel_f2_max": 0.8388154250727996
+   },
+   {
+    "x_lo": 0.0,
+    "x_hi": 0.5,
+    "n": 85,
+    "u_max": 0.03762113887167425,
+    "frac_over": 0.0,
+    "u_outward_max": 0.013626159082422068,
+    "rel_f0.75_min": -0.03762113887167425,
+    "rel_f0.75_max": 0.0045264053025866596,
+    "rel_f1.5_min": -0.008690062443248006,
+    "rel_f1.5_max": 0.013626159082422068,
+    "rel_f2_min": -0.011299216515106045,
+    "rel_f2_max": 0.009642614637068288
+   },
+   {
+    "x_lo": 0.5,
+    "x_hi": 1.0,
+    "n": 81,
+    "u_max": 0.1959492566095333,
+    "frac_over": 0.49382716049382713,
+    "u_outward_max": 0.1959492566095333,
+    "rel_f0.75_min": -0.11735910182443338,
+    "rel_f0.75_max": 0.06291841311127733,
+    "rel_f1.5_min": -0.12422706177784262,
+    "rel_f1.5_max": 0.17026773547932078,
+    "rel_f2_min": -0.09656920176150278,
+    "rel_f2_max": 0.1959492566095333
+   },
+   {
+    "x_lo": 1.0,
+    "x_hi": 2.0,
+    "n": 137,
+    "u_max": 0.026379466947801314,
+    "frac_over": 0.0,
+    "u_outward_max": 0.014626423234807921,
+    "rel_f0.75_min": -0.026379466947801314,
+    "rel_f0.75_max": -0.00767418360354229,
+    "rel_f1.5_min": -0.0013441548698047508,
+    "rel_f1.5_max": 0.014626423234807921,
+    "rel_f2_min": -0.0009504839977248391,
+    "rel_f2_max": 0.009505697696059377
+   },
+   {
+    "x_lo": 2.0,
+    "x_hi": 4.0,
+    "n": 158,
+    "u_max": 0.0082752491017539,
+    "frac_over": 0.0,
+    "u_outward_max": 0.0082752491017539,
+    "rel_f0.75_min": -0.007659953101384202,
+    "rel_f0.75_max": 0.0024920511217916314,
+    "rel_f1.5_min": -0.003145451726054516,
+    "rel_f1.5_max": 0.0082752491017539,
+    "rel_f2_min": -0.004243125577036019,
+    "rel_f2_max": 0.005701524288052661
+   },
+   {
+    "x_lo": 4.0,
+    "x_hi": 8.0,
+    "n": 109,
+    "u_max": 0.024181155596907034,
+    "frac_over": 0.0,
+    "u_outward_max": 0.013006348133360709,
+    "rel_f0.75_min": -0.024181155596907034,
+    "rel_f0.75_max": 0.0028809259183730698,
+    "rel_f1.5_min": -0.006086638374722335,
+    "rel_f1.5_max": 0.008070236469096633,
+    "rel_f2_min": -0.013006348133360709,
+    "rel_f2_max": 0.011270340550158218
+   },
+   {
+    "x_lo": 8.0,
+    "x_hi": 16.0,
+    "n": 169,
+    "u_max": 0.2108528361744793,
+    "frac_over": 0.3254437869822485,
+    "u_outward_max": 0.010743271807522192,
+    "rel_f0.75_min": -0.2108528361744793,
+    "rel_f0.75_max": -0.02467851368938142,
+    "rel_f1.5_min": -0.0047030859991922195,
+    "rel_f1.5_max": 0.0027552101351728557,
+    "rel_f2_min": -0.010743271807522192,
+    "rel_f2_max": 0.008360721395303186
+   }
+  ]
+ },
+ "edge_positions": {
+  "n_missing_y_star_region": 0,
+  "missing_runs_region": [],
+  "n_held_region": 465,
+  "held_rule": "x < 3 と x > 出口 − 3 は P-spline の値を保持 (edge_band_positions)",
+  "y_b_over_y_star_region": {
+   "min": 0.22746325964174743,
+   "max": 2.553398105987805
+  },
+  "y_smooth_over_y_star_region": {
+   "min": 0.1819706077133979,
+   "max": 2.0427184847902438
+  },
+  "band_outside_edge_fail_runs": [
+   [
+    0.42797831528571423,
+    0.6136075619285715,
+    32
+   ],
+   [
+    0.6317706583571427,
+    0.6317706583571427,
+    1
+   ],
+   [
+    0.6439017742142856,
+    0.6621328642142856,
+    4
+   ],
+   [
+    0.6804067406428571,
+    1.5520669764285713,
+    133
+   ],
+   [
+    1.6715895707142856,
+    1.6944939885714285,
+    4
+   ]
+  ]
+ },
+ "fail_runs": {
+  "sens": [
+   [
+    0.5773971928571429,
+    0.6015206034999999,
+    5
+   ],
+   [
+    0.6317706583571427,
+    0.6439017742142856,
+    3
+   ],
+   [
+    0.6560512257142856,
+    0.8470219728571428,
+    32
+   ],
+   [
+    13.341294028571427,
+    15.860273471428568,
+    55
+   ]
+  ],
+  "main_stop": [],
+  "sens_stop": [
+   [
+    9.189917485714286,
+    9.796135807142855,
+    14
+   ],
+   [
+    9.936059364285713,
+    9.936059364285713,
+    1
+   ],
+   [
+    10.21592087142857,
+    10.729026928571427,
+    12
+   ],
+   [
+    11.055556892857142,
+    11.52203212142857,
+    11
+   ],
+   [
+    11.755270478571427,
+    12.221747749999999,
+    11
+   ],
+   [
+    12.361691007142857,
+    15.860273471428568,
+    76
+   ]
+  ],
+  "edge_found": [],
+  "band_outside_edge": [
+   [
+    0.42797831528571423,
+    0.6136075619285715,
+    32
+   ],
+   [
+    0.6317706583571427,
+    0.6317706583571427,
+    1
+   ],
+   [
+    0.6439017742142856,
+    0.6621328642142856,
+    4
+   ],
+   [
+    0.6804067406428571,
+    1.5520669764285713,
+    133
+   ],
+   [
+    1.6715895707142856,
+    1.6944939885714285,
+    4
+   ]
+  ]
+ },
+ "delta_r_raw_at_stations": {
+  "adaptive": {
+   "x0.5": 0.0022091943824864334,
+   "x1": 0.0047802782857132835,
+   "x2": 0.009165637711274858,
+   "x4": 0.017953859686426713,
+   "x8": 0.03793194454224257,
+   "x16": 0.08804723003729986,
+   "exit": 0.08804723003729986
+  },
+  "edge": {
+   "x0.5": 0.002374925047767411,
+   "x1": 0.005067771444896705,
+   "x2": 0.00930354494169582,
+   "x4": 0.01818827301171942,
+   "x8": 0.03879213678855963,
+   "x16": 0.08811677079072222,
+   "exit": 0.08811677079072222
+  }
+ },
+ "files": {
+  "npz": "dstar_l70_ns_run0020_constx_edge.npz",
+  "json": "dstar_l70_ns_run0020_constx_edge.json",
+  "bands": "dstar_l70_uncert_bands_edge.csv",
+  "diag": "dstar_l70_edge_diag_bands.csv"
+ },
+ "provenance": {
+  "commit": "0f8fa283c67debc02946c6b0653d7c46eb856e36",
+  "dirty": [],
+  "source_sha256_16": {
+   "design/forge_design/metrics/deltastar.py": "542ba8b45a4ac66d",
+   "design/forge_design/metrics/bell_deltastar.py": "e368ab5545ee41ba",
+   "design/forge_design/feedback/deltastar_integral.py": "99fa7120d2d24134",
+   "case/68.bell_two_mode/rao_m/run_bell_dstar.py": "0b25292af6e68abd"
+  }
+ }
+}

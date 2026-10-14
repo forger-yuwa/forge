@@ -1,0 +1,205 @@
+{
+ "A": "run_0617_cg_gref_d1_cap50",
+ "B": "run_0618_cg_gref_d1_cap1",
+ "vars": {
+  "ro": {
+   "A_alt_nodes": 20,
+   "A_alt_residual_share": 8.1164873500357e-07,
+   "B_over_A_amp_at_A_alt": 0.05603635288902772,
+   "A_top_lag1": [
+    0.9998247215653426,
+    0.9998389906055152
+   ],
+   "B_top_lag1": [
+    0.9995249447382233,
+    0.9995001100611622
+   ],
+   "A_lost": {
+    "interior": {
+     "lost_frac": 4.817000376149925e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 6.752904182737273e-11,
+     "nodes": 312128
+    }
+   },
+   "B_lost": {
+    "interior": {
+     "lost_frac": 3.077803182889294e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 4.009818011750977e-11,
+     "nodes": 312128
+    }
+   }
+  },
+  "roUx": {
+   "A_alt_nodes": 38,
+   "A_alt_residual_share": 5.420442265080139e-07,
+   "B_over_A_amp_at_A_alt": 0.12595550094842395,
+   "A_top_lag1": [
+    0.9990747644567315,
+    0.9989413718229715
+   ],
+   "B_top_lag1": [
+    0.9965105076544536,
+    0.9983516644465268
+   ],
+   "A_lost": {
+    "interior": {
+     "lost_frac": 1.0271981197620838e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 2.702931021671878e-10,
+     "nodes": 161120
+    }
+   },
+   "B_lost": {
+    "interior": {
+     "lost_frac": 2.0656873080445538e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 2.4691061020473377e-10,
+     "nodes": 161120
+    }
+   }
+  },
+  "roUy": {
+   "A_alt_nodes": 15,
+   "A_alt_residual_share": 2.4436734829653557e-07,
+   "B_over_A_amp_at_A_alt": 0.22583598733688334,
+   "A_top_lag1": [
+    0.9993885685924505,
+    0.9993560856269288
+   ],
+   "B_top_lag1": [
+    0.9991786737060973,
+    0.9996753843443171
+   ],
+   "A_lost": {
+    "interior": {
+     "lost_frac": 2.0959985908251145e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 5.060044396286322e-14,
+     "nodes": 10112
+    }
+   },
+   "B_lost": {
+    "interior": {
+     "lost_frac": 4.1406447147674e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 2.025683534630112e-13,
+     "nodes": 10112
+    }
+   }
+  },
+  "roe": {
+   "A_alt_nodes": 25,
+   "A_alt_residual_share": 1.6855264727440602e-05,
+   "B_over_A_amp_at_A_alt": 0.05535042946974874,
+   "A_top_lag1": [
+    0.9998335491137555,
+    0.9998649018762018
+   ],
+   "B_top_lag1": [
+    0.9980244216193341,
+    0.9979557038430407
+   ],
+   "A_lost": {
+    "interior": {
+     "lost_frac": 4.776246919840031e-12,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 3.461016917718662e-10,
+     "nodes": 161120
+    }
+   },
+   "B_lost": {
+    "interior": {
+     "lost_frac": 3.026873089527195e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 4.224882994294418e-10,
+     "nodes": 161120
+    }
+   }
+  },
+  "roK": {
+   "A_alt_nodes": 20,
+   "A_alt_residual_share": 7.633309925941245e-10,
+   "B_over_A_amp_at_A_alt": 0.04626143875044668,
+   "A_top_lag1": [
+    0.999451602421082,
+    0.999440821738728
+   ],
+   "B_top_lag1": [
+    0.9994843217604451,
+    0.9991457057062367
+   ],
+   "A_lost": {
+    "interior": {
+     "lost_frac": 1.0645996805541549e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 7.342470931003651e-11,
+     "nodes": 156032
+    }
+   },
+   "B_lost": {
+    "interior": {
+     "lost_frac": 1.1707738543532172e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 8.276745823379388e-11,
+     "nodes": 156032
+    }
+   }
+  },
+  "roOmega": {
+   "A_alt_nodes": 0,
+   "A_alt_residual_share": 0.0,
+   "B_over_A_amp_at_A_alt": null,
+   "A_top_lag1": [
+    0.1820729784988114,
+    0.12254812517304244
+   ],
+   "B_top_lag1": [
+    0.8870694104397306,
+    0.8951895407702706
+   ],
+   "A_lost": {
+    "interior": {
+     "lost_frac": 1.2529091032931441e-10,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 5.708515358277058e-10,
+     "nodes": 156032
+    }
+   },
+   "B_lost": {
+    "interior": {
+     "lost_frac": 5.043886965721721e-11,
+     "nodes": 23849152
+    },
+    "boundary": {
+     "lost_frac": 8.39817829646195e-10,
+     "nodes": 156032
+    }
+   }
+  }
+ },
+ "result": "判定不能 (混在・中間)"
+}

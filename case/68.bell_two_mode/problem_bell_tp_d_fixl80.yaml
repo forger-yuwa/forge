@@ -1,0 +1,50 @@
+# forge_design 問題定義 — ③ベル (D) の**長さ固定の単目的の再最適化** L80 (plan tooling-nozzle-bell-two-mode §5.1 #8b、V3 の (D) 列)。
+# problem_bell_tp_d_moo.yaml と同じ (ガス・寸法・格子・段・ゲート) で、L を 80 % に固定し (θ_max, θ_e) を振る。目的は η_exit だけ。
+# キャンペーン: python -m forge_design.opt.driver <この YAML> <run> --soo --n-doe 12 --n-max 40 --n-confirm 8 --window 8 --tol 1e-4 --seed 0|1
+name: bell_tp_d_eps50_fixl80
+type: thruster_bell
+gas:
+  model: semiperfect
+  exhaust: exhaust_lox_lh2_pc100_of6.yaml
+  transport: {H2O: custom:h2o_iapws_cea_v1, H2: cea, OH: cea, H: cea, O: cea, O2: cea}
+
+spec:
+  p_ambient: 0.0     # 真空の設計点 [Pa]
+  r_throat: 0.14     # スロート半径 [m] (plan §8-1 の仮値)
+  eps: 50.0
+
+dv:
+  theta_max_deg: {value: 25.0, min: 20.0, max: 45.0}
+  theta_e_deg:   {value: 10.0, min: 2.0,  max: 20.0}
+  L_over_rt:     {value: 18.126026824062375, fixed: true}   # 15° 円錐長 22.6575 の 80 % (固定)
+
+geometry:
+  bell_mode: direct_bspline
+  R_t: 1.0
+  contraction_ratio: 3.0
+  L_U: 3.0
+  L_pipe: 1.0
+
+mesh:
+  discretization: node
+  ni: 1201
+  nj: 121
+  wall_first_frac: 1.25e-5         # 下流 (x ≥ wall_first_blend_x1) の第一セル厚 / 局所半径。2.5e-5 (run_0010) は doe_002 で y1+ 1.10、
+                                   # 1.75e-5 は範囲の角で 1.21 (run_0012)、1.25e-5 で 0.88 (run_0013) — plan §5.1 #8a′
+  wall_first_frac_throat: 3.5e-6   # x ≤ wall_first_blend_x0 (上流は全域この値): スロートで 0.49 µm、入口直管で 0.85 µm
+  wall_first_blend_x0: 0.3
+  wall_first_blend_x1: 14.0
+  throat_refine: 8.0
+  throat_width: 3.0
+  wall_normal_layer: [0.02, 0.8]   # 近壁を壁法線に (局所半径比 d_n, d_b)
+  wall_normal_end_stations: 20     # 入口・出口の 20 断面で半径方向の配置へ戻す (面を平面に保つ)
+  ar_max: 5000                     # AR 緩和 (≤5000): 壁法線の構造層 (AGENTS.md の例外)
+
+evaluate:
+  turbulence: sst
+  stages: [soft, mid, main]
+  stage_steps: {soft: 2000, mid: 2000}
+  nStepOuter: 60000          # 本段
+  outStepInterval: 3000      # 本段の res の間隔 = 本段長の 1/20 (推力の時系列 20 点、末尾窓 8 点)
+  cfl_main: 4.0
+  objectives: [eta_cf]
