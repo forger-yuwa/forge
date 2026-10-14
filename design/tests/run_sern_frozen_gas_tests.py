@@ -142,21 +142,40 @@ if yml.exists():
         # restart 照合は実 config + DB の署名 (codex result-2 M2): 元/先とも TP 2 種 + tracer の config を置く
         _db = ('"EXH":\n  MW: 0.0244\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n'
                '"AMB":\n  MW: 0.0289\n  nasa9_low: [0,0,3.5,0,0,0,0,-1000,5]\n  nasa9_high: [0,0,3.5,0,0,0,0,-1000,5]\n')
-        _cfg = 'physProp: {thermalMethod: 2, species: ["EXH", "AMB"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15, tracer: exhaust}\n'
+        # 2026-10-15 から restart_by_index は段終了ゲート + restart_field.py (plan tooling-generator-defaults-and-launch-gate §5.1 #19):
+        # res は格子 (run の solverConfig.yaml の mesh.meshFileName) に座標・接続で結び付け、宛先は変換済みの格子 (/BCONDS を持つ)。
+        # restart_field.py は宛先 /VALUE にある量だけを写すので、宛先の初期場は roXi を持つ (prepare の IC = write_ic_arrays が作る)
+        _cfg = ('mesh: {meshFileName: "sern.h5"}\n'
+                'physProp: {thermalMethod: 2, species: ["EXH", "AMB"], speciesDBFile: "species_db.yaml", thermoHrefTemp: 298.15, tracer: exhaust}\n')
+
+        def _h5(path, value, mesh=True):
+            with h5py.File(path, "w") as f:
+                f["MESH/COORD"] = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]); f["MESH/CONNE"] = np.array([1, 0, 1, 1], dtype=np.int32)
+                if mesh:
+                    f["BCONDS/3/iCells"] = np.arange(2, dtype=np.int32); f["BCONDS/3"].attrs["bcondKind"] = "wall"
+                v = f.create_group("VALUE")
+                for k, a in value.items():
+                    v[k] = a
         for sub in ("src", "dst"):
             (Path(td) / sub).mkdir(); (Path(td) / sub / "solverConfig.yaml").write_text(_cfg); (Path(td) / sub / "species_db.yaml").write_text(_db)
         src = Path(td) / "src" / "res.h5"; dst = Path(td) / "dst" / "sern.h5"
-        with h5py.File(src, "w") as f:
-            v = f.create_group("VALUE"); v["ro"] = np.array([2.0, 2.0]); v["roUx"] = np.array([1.0, 1.0]); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.array([5.0, 5.0])
-            v["roY0"] = np.array([0.8, 0.8]); v["roY1"] = np.array([1.2, 1.2]); v["roXi"] = np.array([0.4, 0.4]); v["wall_dist"] = np.array([9.0, 9.0])
-        with h5py.File(dst, "w") as f:
-            v = f.create_group("VALUE"); v["ro"] = np.array([1.0, 1.0]); v["roUx"] = np.zeros(2); v["roUy"] = np.zeros(2); v["roUz"] = np.zeros(2); v["roe"] = np.ones(2)
-            v["roY0"] = np.array([1.0, 1.0]); v["roY1"] = np.zeros(2); v["wall_dist"] = np.array([1.0, 1.0])
+        _ic = {"ro": np.array([1.0, 1.0]), "roUx": np.zeros(2), "roUy": np.zeros(2), "roUz": np.zeros(2), "roe": np.ones(2),
+               "roY0": np.array([1.0, 1.0]), "roY1": np.zeros(2), "roXi": np.zeros(2), "wall_dist": np.array([1.0, 1.0])}
+        _h5(Path(td) / "src" / "sern.h5", _ic)
+        _h5(src, {"ro": np.array([2.0, 2.0]), "roUx": np.array([1.0, 1.0]), "roUy": np.zeros(2), "roUz": np.zeros(2), "roe": np.array([5.0, 5.0]),
+                  "roY0": np.array([0.8, 0.8]), "roY1": np.array([1.2, 1.2]), "roXi": np.array([0.4, 0.4]), "wall_dist": np.array([9.0, 9.0])},
+            mesh=False)
+        _h5(dst, _ic)
         R.restart_by_index(src, dst)
         with h5py.File(dst) as f:
             ok = (f["VALUE/roY0"][0] == 0.8 and f["VALUE/roY1"][0] == 1.2 and "roXi" in f["VALUE"] and abs(f["VALUE/roXi"][0] - 0.4) < 1e-7
                   and f["VALUE/wall_dist"][0] == 1.0 and abs((f["VALUE/roY0"][0] + f["VALUE/roY1"][0]) / f["VALUE/ro"][0] - 1.0) < 1e-12)
         check("restart_by_index: roY0/roY1/roXi を引き継ぎ ΣρY = ρ、wall_dist は触らない", bool(ok))
+        _h5(dst, {k: a for k, a in _ic.items() if k != "roXi"})
+        try:
+            R.restart_by_index(src, dst); check("restart_by_index: 宛先の初期場に roXi が無ければ止める (旧: 宛先に作っていた)", False)
+        except RuntimeError as ex:
+            check("restart_by_index: 宛先の初期場に roXi が無ければ止める (旧: 宛先に作っていた)", "roXi: 宛先の初期場" in str(ex), str(ex)[:80])
         # 署名照合: 係数の摂動・トレーサ設定の違い・種順序の矛盾を検出する (codex result-2 M2)
         bad = Path(td) / "bad"; bad.mkdir(); (bad / "solverConfig.yaml").write_text(_cfg)
         (bad / "species_db.yaml").write_text(_db.replace("3.5,0,0,0,0,-1000,5]\n  nasa9_high", "4.5,0,0,0,0,-1000,5]\n  nasa9_high", 1))

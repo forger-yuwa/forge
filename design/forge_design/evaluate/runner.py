@@ -1151,6 +1151,49 @@ def continue_tp(problem_path, src_run, new_run, nsteps=None) -> dict:
     return info
 
 
+# CPG の同一形状の継続で継続元の run から写すもの (変換済みの格子とその来歴の記録・入力・品質の記録)。res・ログ・VERDICT・config は写さない
+CPG_CONTINUE_COPY = ("nozzle.h5", "nozzle.h5.provenance.json", "nozzle.xmf", "nozzle.msh", "contour.csv", "bcondConfig.yaml",
+                     "probe.yaml", "MESH_QUALITY.txt")
+
+
+def continue_cpg(problem_path, src_run, new_run, nsteps=None) -> dict:
+    """CPG (`thruster_bell` の 1 段 config) の**同一形状の継続**: 継続元の run の**変換済みの格子をそのまま**新しい run に写し
+    (作り直さない)、継続元の最終 res を段終了ゲート (必要保存量・有限・ρ>0; 継続元の config で) に通してから `restart_field.py`
+    (保存量の index コピー・ビット一致の検査・`wall_dist` は宛先のまま) で初期場にする (`runner_wt._staged_handoff`)。config は
+    `prepare` の CPG と同じ `_solver_config(p, n, 出力の間隔)` (n 既定 `evaluate.nStepOuter` 12000、間隔 `evaluate.outStepInterval`
+    既定 n/3)。forge は起動しない。ゲート・`restart_field.py` に落ちたら RuntimeError (呼び出し側は起動しない)。
+    使う所: opt/driver の CPG の soft (`<tag>_stgA`) → 本段、opt/polish の CPG のチャンク継続。2026-10-15 まで両方とも
+    `prepare(warm_from=...)` で同じ幾何から格子を作り直し `interp_field.py` (cross-mesh 用、最近傍) で移していた
+    (plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19: 作り直した格子へ index コピーもしない)。node の `prepare` が
+    最近傍補間の後に掛けていた壁エントロピーの平滑化 (`_smooth_wall_entropy`) は補間の市松の除去なので、index コピーには掛けない。
+    戻り値は新しい run の prepare_info (継続元のものに run_dir・nsteps・continued_from を足す)。"""
+    import shutil
+
+    from .runner_wt import _staged_handoff
+    p = load_problem(problem_path)
+    if _is_tp(p):
+        raise ValueError("continue_cpg は CPG 経路専用 (TP は continue_tp)")
+    src_run, new_run = Path(src_run), Path(new_run)
+    res = _res_sorted(src_run)
+    if not res:
+        raise FileNotFoundError(f"{src_run}: 継続元の res_*.h5 が無い")
+    if not (src_run / "nozzle.h5").exists():
+        raise FileNotFoundError(f"{src_run}: 継続元の変換済みの格子 nozzle.h5 が無い")
+    n = nsteps or int(p.evaluate.get("nStepOuter", 12000))
+    oi = int(p.evaluate.get("outStepInterval", max(n // 3, 1)))
+    new_run.mkdir(parents=True, exist_ok=False)
+    for name in CPG_CONTINUE_COPY:
+        if (src_run / name).exists():
+            shutil.copy2(src_run / name, new_run / name)
+    (new_run / "solverConfig.yaml").write_text(_solver_config(p, n, oi))
+    _staged_handoff(new_run, res[-1], (src_run / "solverConfig.yaml").read_text(), src_run.name, "nozzle.h5")
+    ip = src_run / "prepare_info.json"
+    info = json.loads(ip.read_text()) if ip.exists() else {"problem": str(problem_path)}
+    info = {**info, "run_dir": str(new_run), "nsteps": n, "continued_from": str(res[-1].resolve())}
+    (new_run / "prepare_info.json").write_text(json.dumps(info, indent=1))
+    return info
+
+
 def tp_iso_k(run_dir) -> bool:
     """run の solverConfig の `turbulence.sstIsotropicStress` (−(2/3)ρk δij を応力に足すか; 既定 0)。重複キーは拒否。"""
     from .runner_axismach import _cfg_load

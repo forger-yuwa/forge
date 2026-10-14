@@ -144,7 +144,8 @@ def _manifest_stages(rd, cfgs):
 
 def _common_patches():
     from forge_design.evaluate import runner_axismach as A
-    return [(A, "stage_gate", lambda res, cfg: []), (A, "_restart_same_mesh", lambda res, mesh: None)]
+    return [(A, "stage_gate", lambda res, cfg: []), (A, "_restart_same_mesh", lambda res, mesh, **k: None),
+            (A, "next_stage_init_problems", lambda *a, **k: ([], {}))]
 
 
 def run_bell_cpg(problem, work):
@@ -164,12 +165,22 @@ def run_bell_cpg(problem, work):
         (run_dir / "bcondConfig.yaml").write_text(R._bcond_config(p))
         return {}
 
+    def fake_continue(prob, src_run, new_run, nsteps=None):
+        # runner.continue_cpg の config の行 (n・出力の間隔・`_solver_config`) と同じ。bcond は継続元から写す (格子・restart は無し)
+        p = load_problem(prob)
+        new_run = Path(new_run)
+        new_run.mkdir(parents=True, exist_ok=False)
+        n = nsteps or int(p.evaluate.get("nStepOuter", 12000))
+        (new_run / "solverConfig.yaml").write_text(R._solver_config(p, n, int(p.evaluate.get("outStepInterval", max(n // 3, 1)))))
+        (new_run / "bcondConfig.yaml").write_text((Path(src_run) / "bcondConfig.yaml").read_text())
+        return {}
+
     raw = yaml.safe_load(Path(problem).read_text())
     camp = DRV.Campaign(problem, work / "campaign", seed_res=str(work / "seed_res.h5"))
     x = [float(raw["dv"][k]["value"]) for k in camp.dv_order]
     fake_collect = lambda prob, rd: {"eta_cf": 0.97, "mdot_kg_s": camp.mdot_1d, "thrust_N": 1.0,
                                      "res_file": sorted(Path(rd).glob("res_*.h5"))[-1].name}
-    with patched([(R, "prepare", fake_prepare), (R, "run_forge", cap), (R, "collect", fake_collect),
+    with patched([(R, "prepare", fake_prepare), (R, "continue_cpg", fake_continue), (R, "run_forge", cap), (R, "collect", fake_collect),
                   (DRV.Campaign, "_diverged", lambda self, rd, out: False),
                   (DRV.Campaign, "_quasisteady", lambda self, rd: "ALL STEADY"),
                   (DRV.Campaign, "_warm_for", lambda self, x: work / "seed_res.h5")]):
@@ -339,7 +350,7 @@ def run_sern2d(problem, work):
     cap = Capture()
     rd = work / "run"
     with patched([(S, "prepare", _sern_fake_prepare(S, False)), (S, "run_forge", cap), (S, "collect", _sern_collect),
-                  (S, "restart_by_index", lambda res, mesh: None)]):
+                  (S, "restart_by_index", lambda res, mesh, **k: None)]):
         _quiet(S.main, [str(problem), str(rd)])
     return _manifest_stages(rd, cap.cfgs), yaml.safe_load((rd / "bcondConfig.yaml").read_text())
 
@@ -351,7 +362,7 @@ def run_sern3d(problem, work):
     cap = Capture()
     rd = work / "run"
     with patched([(S3, "prepare", _sern_fake_prepare(S3, True)), (S, "run_forge", cap), (S3, "collect", _sern_collect),
-                  (S, "restart_by_index", lambda res, mesh: None)]):
+                  (S, "restart_by_index", lambda res, mesh, **k: None)]):
         _quiet(S3.main, [str(problem), str(rd)])
     return _manifest_stages(rd, cap.cfgs), yaml.safe_load((rd / "bcondConfig.yaml").read_text())
 

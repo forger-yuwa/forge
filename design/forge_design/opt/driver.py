@@ -491,8 +491,15 @@ class Campaign:
                     or int("".join(c for c in sres[-1].stem if c.isdigit())) < n_stage
                     or self._diverged(stage, {"eta_cf": 0.9})):
                 raise RuntimeError("soft 段が発散または最終場未出力")
-            # 本段 (12000 step, 全域 2 次 + cfl4)
-            runner.prepare(prob, run_dir, warm_from=sres[-1])
+            # 本段 (12000 step, 全域 2 次 + cfl4)。soft 段の変換済みの格子を写して使い、soft の最終場を段終了ゲート +
+            # restart_field.py で初期場にする (2026-10-15 まで同じ幾何から格子を作り直して interp_field.py; plan
+            # tooling-generator-defaults-and-launch-gate §5.1 #19)。ゲート落ちは soft 段の失敗として扱う (RETRYABLE)
+            try:
+                runner.continue_cpg(prob, stage, run_dir)
+            except RuntimeError as e:
+                if "段終了ゲート" in str(e):
+                    raise RuntimeError(f"soft 段の最終場が段終了ゲートで不合格: {e}") from None
+                raise
             CB.launch_stage(run_dir, (run_dir / "solverConfig.yaml").read_text(), (run_dir / "bcondConfig.yaml").read_text(),
                             "main", "bell_cpg", problem=prob, generator="opt.driver.Campaign.evaluate (CPG の本段)")
             runner.run_forge(run_dir)

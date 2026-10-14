@@ -87,6 +87,12 @@ plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-gen
 4. **段の config の書き換えの方式** (正規表現・文字列置換): YAML の位置の方式 (`yaml_strict.replace_scalars`) に揃える (plan §5.1 #11)。#9 では config の文字列を変えていない
    (変更前とのバイト同一を `design/tests/run_launch_path_tests.py` で固定)。
 
+**#19 の後 (2026-10-15)**: 1〜3 は段終了ゲート + `restart_field.py` (`runner_wt._staged_handoff`) に揃えた。1 は `euler_loop.start_cont_chunk`
+(パスの格子の写しへ)、2 は `runner.continue_cpg` (継続元の変換済みの格子を写して使い、作り直さない。opt/driver の CPG の soft → 本段と
+opt/polish の CPG のチャンク継続)、3 は `runner_sern.restart_by_index` (次の段の config を渡し、層流暖機 → SST で足す roK・roOmega の
+初期値を前の段のゲートと分けて検査する: `runner_axismach.next_stage_init_problems`)。負例は `design/tests/run_launch_path_tests.py` (g)〜(i)。
+残る同一格子の index コピーは `runner_sern3d.warm_from_same_mesh` (試験からだけ呼ぶ、段終了ゲートなし)。
+
 ## 4. 確かめたこと
 
 - `design/tests/run_launch_path_tests.py` (forge の代わりに実際の HDF5 を書く偽の forge): runner_wt (Euler cell・NS node SST)・walldriven・SERN

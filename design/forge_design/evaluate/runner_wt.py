@@ -419,17 +419,33 @@ def _staged_launch(run_dir: Path, sm, bc_text: str, cfg: str, tag: str, launch=N
     return rc
 
 
-def _staged_handoff(run_dir: Path, res_h5: Path, cfg: str, tag: str, mesh_h5: str = "nozzle.h5") -> None:
+def _staged_handoff(run_dir: Path, res_h5: Path, cfg: str, tag: str, mesh_h5: str = "nozzle.h5", cfg_next: str | None = None,
+                    env=None) -> None:
     """同一メッシュの段間の引き継ぎ: 段終了ゲート (必要保存量が揃い、有限で ρ>0; runner_axismach.stage_gate) を通った最終場だけを
     `restart_field.py` (保存量の index コピー・ビット一致の検査・`wall_dist` は宛先のまま・化学種の属性の継承) で初期場に写す。
     ゲートに落ちたら RuntimeError で次段を起動しない。2026-10-14 まで `interp_field.py` (cross-mesh 用、原始量から保存量を組み直す)
-    を使っていた (AGENTS.md「メッシュ変更後の restart」の規則違反; plan tooling-generator-defaults-and-launch-gate §4.5)。"""
-    from .runner_axismach import _restart_same_mesh, stage_gate
+    を使っていた (AGENTS.md「メッシュ変更後の restart」の規則違反; plan tooling-generator-defaults-and-launch-gate §4.5)。
+    cfg は res を作った段の config。cfg_next (次の段の config; 2026-10-15、plan §5.1 #19) があれば、次の段の必要保存量が宛先にあることと、
+    次の段で足す量 (層流暖機 → SST の roK・roOmega) の初期値を前の段のゲートと分けて検査する (`runner_axismach.next_stage_init_problems`;
+    None は前の段と同じ量)。どちらかに落ちたら書き込まずに RuntimeError。env は `restart_field.py` の子プロセスの環境。"""
+    from .runner_axismach import _restart_same_mesh, next_stage_init_problems, stage_gate
     probs = stage_gate(res_h5, cfg)
     if probs:
         raise RuntimeError(f"段 {tag} の最終場 {Path(res_h5).name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
                            + "\n    ".join(probs))
-    _restart_same_mesh(res_h5, run_dir / mesh_h5)
+    probs, src_of = next_stage_init_problems(res_h5, run_dir / mesh_h5, cfg, cfg_next)
+    if probs:
+        raise RuntimeError(f"段 {tag} の次の段の初期場 {mesh_h5} が段間の引き継ぎの検査で不合格 — 次段へ進まない:\n    "
+                           + "\n    ".join(probs))
+    if env is None:
+        _restart_same_mesh(res_h5, run_dir / mesh_h5)       # 包み・差し替え (res, mesh) の 2 引数の形のまま呼ぶ
+    else:
+        _restart_same_mesh(res_h5, run_dir / mesh_h5, env=env)
+    if src_of:
+        with (run_dir / "restart_field.log").open("a") as f:
+            f.write(f"[handoff] 段 {tag} → 次の段で足す量の初期値: "
+                    + ", ".join(f"{k} ({'前の段の res の値を写した' if s == 'SRC' else '宛先の初期場のまま'})" for k, s in src_of.items())
+                    + "\n")
 
 
 def run_staged(problem_path, run_dir, nsteps=None) -> None:

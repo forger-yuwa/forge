@@ -168,8 +168,8 @@ def _chunk_dirs(rd: Path) -> list:
 def _snaps_of(rd: Path) -> list:
     """全チャンクを通しの step に直したスナップショット列 [(step, res, mesh)]。
 
-    各チャンクの res_0 は直前チャンク最終場の貼り直し (同一メッシュ最近傍 = 恒等)
-    なので通し step は「オフセット + チャンク内 step」。判定側は dstep>0 の対のみ
+    各チャンクの res_0 は直前チャンク最終場の貼り直し (同一メッシュの index コピー = ビット一致; 2026-10-15 まで
+    最近傍補間) なので通し step は「オフセット + チャンク内 step」。判定側は dstep>0 の対のみ
     使うため res_0 の重複は無害。"""
     out, off = [], 0
     for d in _chunk_dirs(rd):
@@ -178,6 +178,25 @@ def _snaps_of(rd: Path) -> list:
         if res:
             off += _steps_of(res[-1])
     return out
+
+
+def start_cont_chunk(rd: Path, j: int, last_res: Path, cfg_chunk: str) -> Path:
+    """継続チャンク `rd/cont_<j>` を準備する (forge は起動しない; 呼び出し側が宣言を書いて起動する)。パスの格子 (`rd/nozzle.h5`;
+    メッシュは全チャンク同一) と bcond・probe を写し、config を書き、直前のチャンクの最終場 `last_res` を段終了ゲート
+    (必要保存量・有限・ρ>0; res を作ったチャンクの config で) に通してから `restart_field.py` (保存量の index コピー、ビット一致の検査、
+    `wall_dist` は宛先のまま) で初期場に写す (`runner_wt._staged_handoff`)。ゲート・`restart_field.py` に落ちたら RuntimeError
+    (チャンクを起動しない)。2026-10-15 まで同じ格子へ `interp_field.py` (cross-mesh 用、原始量から保存量を組み直す) を使っていた
+    (AGENTS.md「メッシュ変更後の restart」の規則違反; plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19)。戻り: チャンクの dir。"""
+    import shutil
+    cd = rd / f"cont_{j}"
+    cd.mkdir(exist_ok=True)
+    shutil.copy(rd / "nozzle.h5", cd / "nozzle.h5")  # メッシュは全チャンク同一
+    (cd / "solverConfig.yaml").write_text(cfg_chunk)
+    for cf in ("bcondConfig.yaml", "probe.yaml"):
+        shutil.copy(rd / cf, cd / cf)
+    last_res = Path(last_res)
+    runner_wt._staged_handoff(cd, last_res, (last_res.parent / "solverConfig.yaml").read_text(), last_res.parent.name, "nozzle.h5")
+    return cd
 
 
 def pass_config(p, n: int, use_node: bool | None = None) -> tuple:
@@ -348,25 +367,17 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
             # DRIFTING (系統移動) と OSCILLATING で平均がまだ粗い場合に継続 —
             # 後者は追いサンプルで平均の標準誤差が締まる。
             from ..evaluate.health import axis_M_series_steady, axis_ok
-            import shutil
             for j in range(1, MAX_WARM_CHUNKS):
                 ax = axis_M_series_steady(
                     rd, scale, (x0 + 0.3) * scale, (x_eval_end - 0.2) * scale,
                     snaps=_snaps_of(rd))
                 if axis_ok(ax):
                     break
-                cd = rd / f"cont_{j}"
-                cd.mkdir(exist_ok=True)
                 last = _snaps_of(rd)[-1]   # 直近チャンクの最終場 (継続 IC)
-                shutil.copy(rd / "nozzle.h5", cd / "nozzle.h5")  # メッシュは全チャンク同一
                 # 継続チャンクは常に CHUNK step (cold 第 1 チャンクが長くても)
                 cfg_chunk, fin_chunk = pass_config(p, CHUNK, use_node)
-                (cd / "solverConfig.yaml").write_text(cfg_chunk)
-                for cf in ("bcondConfig.yaml", "probe.yaml"):
-                    shutil.copy(rd / cf, cd / cf)
-                subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                                str(last[1]), str(cd / "nozzle.h5")],
-                               env=_ENV, check=True, capture_output=True, text=True)
+                # 同じ格子の継続: 段終了ゲート + restart_field.py (旧: interp_field.py; plan §5.1 #19)
+                cd = start_cont_chunk(rd, j, last[1], cfg_chunk)
                 _declare(cd, fin_chunk)
                 run_forge(cd)
         eff = _chunk_dirs(rd)[-1]   # 最終チャンク = 評価に使う場

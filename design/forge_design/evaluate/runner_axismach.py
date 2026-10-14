@@ -199,11 +199,13 @@ def _stamp_ic_species(p: Problem, run_dir) -> str | None:
                                        [float(layout.entries[s].MW) for s in species], _tp_species_Y(p))
 
 
-def _restart_same_mesh(res_h5, mesh_h5) -> None:
+def _restart_same_mesh(res_h5, mesh_h5, env=None) -> None:
     """同一メッシュの段間引き継ぎ: `restart_field.py` (保存量の index コピー、SRC とビット一致を検査; 化学種の属性を継承)。
-    `interp_field.py` (cross-mesh 用) は原始量から保存量を組み直すので同一メッシュには使わない (AGENTS.md「メッシュ変更後の restart」)。"""
+    `interp_field.py` (cross-mesh 用) は原始量から保存量を組み直すので同一メッシュには使わない (AGENTS.md「メッシュ変更後の restart」)。
+    env: 子プロセスの環境 (既定は import 時の `_ENV`)。呼んだ時点の環境 (その実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` など) を
+    渡すときに使う (SERN の `restart_by_index` は 2026-10-15 まで同じプロセスの中で写していた)。"""
     r = subprocess.run([sys.executable, str(FORGE_TOOLS / "restart_field.py"), str(res_h5), str(mesh_h5)],
-                       env=_ENV, capture_output=True, text=True)
+                       env=_ENV if env is None else env, capture_output=True, text=True)
     with (Path(mesh_h5).parent / "restart_field.log").open("a") as f:
         f.write(r.stdout + r.stderr)
     if r.returncode != 0:
@@ -2086,6 +2088,59 @@ def stage_gate(res_h5, cfg_text: str) -> list:
     req = required_conserved_from_cfg(_cfg_load(cfg_text))
     probs, _ = field_problems(res_h5, req, species_bounds=False)
     return probs
+
+
+# 次の段で足す量の初期値の下限 (量: (下限, 下限を含むか))。ω = 0 は ν_t = k/ω を発散させる
+_INIT_LOWER = {"roK": (0.0, True), "roOmega": (0.0, False)}
+
+
+def next_stage_init_problems(res_h5, mesh_h5, cfg_prev: str, cfg_next: str | None = None) -> tuple:
+    """同一メッシュの段間で、次の段が始まる初期場 (`restart_field.py` で写した後の宛先の /VALUE) を検査する
+    (plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19)。段終了ゲート (`stage_gate`) は前の段の必要保存量を SRC で見る。
+    ここはそれと分けて:
+
+    1. 次の段の必要保存量がすべて宛先の /VALUE にある (`restart_field.py` は宛先にある量だけを写すので、無い量は次の段に渡らない)。
+    2. 次の段で足す量 (次の段の必要保存量 − 前の段の必要保存量。層流暖機 → SST の roK・roOmega) は前の段が解いていないので
+       段終了ゲートは見ない。`restart_field.py` と同じ規則で決まる値 (SRC にあれば SRC、無ければ宛先) が 1 次元で節点数が合い、
+       有限で、roK ≥ 0・roOmega > 0 か。
+
+    cfg_next が None なら次の段は前の段と同じ量を解く (足す量なし)。戻り (問題のリスト, {足す量: 'SRC' か '宛先'})。"""
+    import h5py
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from rerun_conditions import required_conserved_from_cfg
+    req_prev = required_conserved_from_cfg(_cfg_load(cfg_prev))
+    req_next = req_prev if cfg_next is None else required_conserved_from_cfg(_cfg_load(cfg_next))
+    added = [k for k in req_next if k not in req_prev]
+    probs, src_of = [], {}
+    with h5py.File(res_h5, "r") as fs, h5py.File(mesh_h5, "r") as fd:
+        if "VALUE" not in fd:
+            return [f"宛先 {Path(mesh_h5).name} に /VALUE が無い"], src_of
+        sv = fs["VALUE"] if "VALUE" in fs else {}
+        dv = fd["VALUE"]
+        n = dv["ro"].shape[0] if "ro" in dv else None
+        for k in req_next:
+            if k not in dv:
+                probs.append(f"{k}: 宛先の初期場 {Path(mesh_h5).name} に無い (restart_field.py は宛先にある量だけを写す)")
+        for k in added:
+            if k not in dv:
+                continue
+            src_of[k] = "SRC" if k in sv else "宛先"
+            a = np.asarray(sv[k] if k in sv else dv[k])
+            what = f"{k} (次の段で足す量、{src_of[k]} の値)"
+            if a.ndim != 1 or (n is not None and a.shape[0] != n):
+                probs.append(f"{what}: 形 {a.shape} が節点数 {n} と合わない")
+                continue
+            bad = int(np.count_nonzero(~np.isfinite(a)))
+            if bad:
+                probs.append(f"{what}: 非有限 {bad}/{a.size} 点")
+                continue
+            if k in _INIT_LOWER:
+                lo, incl = _INIT_LOWER[k]
+                nb = int(np.count_nonzero(a < lo if incl else a <= lo))
+                if nb:
+                    probs.append(f"{what}: {'<' if incl else '≤'} {lo:g} が {nb} 点")
+    return probs, src_of
 
 
 def _stage_manifest_cls():
