@@ -211,3 +211,4 @@ M6 の `m9_watch.py` (case/45 専用、forge-integ-1005 の feature/nozzle-wall-
 - 2026-10-14: 諮問 (stop-rule) を全件採用: θ_r の平均の変化は 2 万 step あたりに換算、y_b は euler_ref の帯で固定、連続は要らない、上限 20 万、出口 M は記録だけ。
 - 2026-10-14: §5.1 #1c 済 (66364fff)。S-stop (a)(b) 合格、(c) は 3 run とも未到達 (r が直管の質量の過渡を捉え、出口 M と同期)。既定・r の測り方・上限はユーザ判断 (#1d)。
 - 2026-10-14: ユーザ決定 (§4.6、§5.1 #1d): 停止規則は既定で使う・上限 20 万、r は入口の列のまま。計算は手元でなく AWS で。
+- 2026-10-14: M6ノズルの設計 (feature/nozzle-wall-fit-and-pipeline) が `stop_rule.py` (66364fff) を写して、自分の `run_staged_ns` (本段だけ B0・`MAIN_STAGE_STARTED`) に見張りを組み込む (その plan tooling-nozzle-isothermal-wall-chain §5.1 #36a)。両ブランチが main に入るときの `run_staged_ns` の衝突は M6 側で解く (同セッションの連絡)。
