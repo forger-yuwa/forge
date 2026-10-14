@@ -1,5 +1,5 @@
 {
- "problem": "/home/sano/work/forge-deliv/case/70.m5_air_wt_demo/problem_m5_air_ns2_euler.yaml",
+ "problem": "/home/ubuntu/forge-deliv/case/70.m5_air_wt_demo/problem_m5_air_ns2_euler.yaml",
  "grid": [
   1.9,
   1.91,
@@ -113,7 +113,7 @@
      "moc_gate_pass": true,
      "moc_gate_ok": true,
      "moc_gate_reason": null,
-     "time_s": 16.033554077148438
+     "time_s": 22.44796347618103
     }
    },
    "rule": {
@@ -189,7 +189,7 @@
      "moc_gate_pass": true,
      "moc_gate_ok": true,
      "moc_gate_reason": null,
-     "time_s": 16.033554077148438
+     "time_s": 22.44796347618103
     }
    },
    "boundaries_after_reselect": [
@@ -284,7 +284,7 @@
      "moc_gate_pass": true,
      "moc_gate_ok": true,
      "moc_gate_reason": null,
-     "time_s": 29.807937622070312
+     "time_s": 41.92913579940796
     }
    },
    "rule": {
@@ -360,7 +360,7 @@
      "moc_gate_pass": true,
      "moc_gate_ok": true,
      "moc_gate_reason": null,
-     "time_s": 29.807937622070312
+     "time_s": 41.92913579940796
     }
    },
    "boundaries_after_reselect": [
@@ -404,7 +404,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 16.033554077148438
+   "time_s": 22.44796347618103
   },
   "chosen_4800_at_2400": {
    "M_K": 2.07,
@@ -431,7 +431,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 16.033554077148438
+   "time_s": 22.44796347618103
   },
   "chosen_2400_at_4800": {
    "M_K": 2.07,
@@ -458,7 +458,7 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 29.807937622070312
+   "time_s": 41.92913579940796
   },
   "chosen_4800_at_4800": {
    "M_K": 2.07,
@@ -485,11 +485,12 @@
    "moc_gate_pass": true,
    "moc_gate_ok": true,
    "moc_gate_reason": null,
-   "time_s": 29.807937622070312
+   "time_s": 41.92913579940796
   }
  },
  "judgment": {
   "checks": {
+   "settled": true,
    "diff_le_0p01": true,
    "constraints_both": true,
    "distance_ge_0p05": true
@@ -505,6 +506,40 @@
    null
   ],
   "common_boundaries": [
+   {
+    "kind": "lower",
+    "feasible_end": 1.970625,
+    "lo": 1.97,
+    "hi": 1.970625,
+    "width": 0.0006250000000000977,
+    "source": "2N",
+    "reasons_infeasible": [
+     "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+    ],
+    "nearest_other": {
+     "source": "N",
+     "feasible_end": 1.971875,
+     "offset": 0.0012499999999999734
+    }
+   },
+   {
+    "kind": "lower",
+    "feasible_end": 1.971875,
+    "lo": 1.97125,
+    "hi": 1.971875,
+    "width": 0.0006250000000000977,
+    "source": "N",
+    "reasons_infeasible": [
+     "設計チェーンが例外: ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)"
+    ],
+    "nearest_other": {
+     "source": "2N",
+     "feasible_end": 1.970625,
+     "offset": -0.0012499999999999734
+    }
+   }
+  ],
+  "common_boundaries_used": [
    {
     "kind": "lower",
     "feasible_end": 1.970625,
@@ -556,7 +591,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.417 が 1/R=0.500 から 17% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 14.227803230285645
+    "time_s": 20.042593479156494
    },
    "N4800": {
     "M_K": 1.9,
@@ -567,7 +602,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.417 が 1/R=0.500 から 17% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 19.287267923355103
+    "time_s": 35.41215229034424
    }
   },
   {
@@ -581,7 +616,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.418 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 14.373584508895874
+    "time_s": 19.708978414535522
    },
    "N4800": {
     "M_K": 1.91,
@@ -592,7 +627,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.419 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 21.18576169013977
+    "time_s": 35.54444742202759
    }
   },
   {
@@ -606,7 +641,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.420 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 11.416380643844604
+    "time_s": 19.636621952056885
    },
    "N4800": {
     "M_K": 1.92,
@@ -617,7 +652,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.420 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 19.1995906829834
+    "time_s": 35.47369599342346
    }
   },
   {
@@ -631,7 +666,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 11.791739702224731
+    "time_s": 19.95829963684082
    },
    "N4800": {
     "M_K": 1.93,
@@ -642,7 +677,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.421 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 21.181363582611084
+    "time_s": 35.40442991256714
    }
   },
   {
@@ -656,7 +691,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 11.41695761680603
+    "time_s": 19.966346979141235
    },
    "N4800": {
     "M_K": 1.94,
@@ -667,7 +702,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.422 が 1/R=0.500 から 16% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 21.077391386032104
+    "time_s": 35.37266182899475
    }
   },
   {
@@ -681,7 +716,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 11.430058479309082
+    "time_s": 19.857216358184814
    },
    "N4800": {
     "M_K": 1.95,
@@ -692,7 +727,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.423 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 19.07233715057373
+    "time_s": 35.38346529006958
    }
   },
   {
@@ -706,7 +741,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 13.655861616134644
+    "time_s": 19.929754495620728
    },
    "N4800": {
     "M_K": 1.96,
@@ -717,7 +752,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.424 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 21.247283935546875
+    "time_s": 35.50745868682861
    }
   },
   {
@@ -731,7 +766,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 13.706117153167725
+    "time_s": 19.914311408996582
    },
    "N4800": {
     "M_K": 1.97,
@@ -742,7 +777,7 @@
     "role": "grid",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 19.152282238006592
+    "time_s": 35.44527459144592
    }
   },
   {
@@ -773,7 +808,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.414366722106934
+    "time_s": 41.87164354324341
    }
   },
   {
@@ -787,7 +822,7 @@
     "role": "bisect",
     "n_axis": null,
     "error": "ValueError: 壁 QA 不合格: スロート曲率不整合: MOC 壁の要求 κ₀=0.425 が 1/R=0.500 から 15% 乖離 (設計の自己不整合 — L_c が短すぎる兆候)",
-    "time_s": 10.271799802780151
+    "time_s": 19.822596311569214
    },
    "N4800": {
     "M_K": 1.97125,
@@ -814,7 +849,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 27.486543893814087
+    "time_s": 42.205620765686035
    }
   },
   {
@@ -844,7 +879,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 11.396910905838013
+    "time_s": 21.795129776000977
    },
    "N4800": null
   },
@@ -875,7 +910,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.286977052688599
+    "time_s": 21.812139749526978
    },
    "N4800": {
     "M_K": 1.9725,
@@ -902,7 +937,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.941901922225952
+    "time_s": 42.040475845336914
    }
   },
   {
@@ -932,7 +967,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 11.456547975540161
+    "time_s": 21.840134859085083
    },
    "N4800": {
     "M_K": 1.975,
@@ -959,7 +994,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.663628339767456
+    "time_s": 42.125617265701294
    }
   },
   {
@@ -989,7 +1024,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.537124633789062
+    "time_s": 22.320600032806396
    },
    "N4800": {
     "M_K": 1.98,
@@ -1016,7 +1051,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.193304777145386
+    "time_s": 41.8528094291687
    }
   },
   {
@@ -1046,7 +1081,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 14.96469259262085
+    "time_s": 22.82266092300415
    },
    "N4800": {
     "M_K": 1.99,
@@ -1073,7 +1108,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.289029359817505
+    "time_s": 41.87223696708679
    }
   },
   {
@@ -1103,7 +1138,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.816381216049194
+    "time_s": 22.519832134246826
    },
    "N4800": {
     "M_K": 2.0,
@@ -1130,7 +1165,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.245672941207886
+    "time_s": 41.86818718910217
    }
   },
   {
@@ -1160,7 +1195,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.10841178894043
+    "time_s": 22.4315447807312
    },
    "N4800": {
     "M_K": 2.01,
@@ -1187,7 +1222,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 27.42499351501465
+    "time_s": 41.70414876937866
    }
   },
   {
@@ -1217,7 +1252,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 14.904312133789062
+    "time_s": 22.48429536819458
    },
    "N4800": {
     "M_K": 2.02,
@@ -1244,7 +1279,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 26.151696920394897
+    "time_s": 42.03434348106384
    }
   },
   {
@@ -1274,7 +1309,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.901406526565552
+    "time_s": 21.830414295196533
    },
    "N4800": {
     "M_K": 2.020625,
@@ -1301,7 +1336,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.9009051322937
+    "time_s": 42.09321641921997
    }
   },
   {
@@ -1331,7 +1366,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.34586787223816
+    "time_s": 21.776071310043335
    },
    "N4800": {
     "M_K": 2.021875,
@@ -1358,7 +1393,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.080046892166138
+    "time_s": 42.362300872802734
    }
   },
   {
@@ -1388,7 +1423,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.24348521232605
+    "time_s": 22.55726385116577
    },
    "N4800": {
     "M_K": 2.03,
@@ -1415,7 +1450,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 27.7737033367157
+    "time_s": 41.93923258781433
    }
   },
   {
@@ -1445,7 +1480,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 14.899297952651978
+    "time_s": 22.9322772026062
    },
    "N4800": {
     "M_K": 2.04,
@@ -1472,7 +1507,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.04707145690918
+    "time_s": 42.11399483680725
    }
   },
   {
@@ -1502,7 +1537,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.282800912857056
+    "time_s": 22.47514843940735
    },
    "N4800": {
     "M_K": 2.05,
@@ -1529,7 +1564,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.378977298736572
+    "time_s": 42.06192398071289
    }
   },
   {
@@ -1559,7 +1594,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 17.608004093170166
+    "time_s": 22.34695839881897
    },
    "N4800": {
     "M_K": 2.06,
@@ -1586,7 +1621,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.380892515182495
+    "time_s": 41.84751033782959
    }
   },
   {
@@ -1616,7 +1651,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 16.033554077148438
+    "time_s": 22.44796347618103
    },
    "N4800": {
     "M_K": 2.07,
@@ -1643,7 +1678,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.807937622070312
+    "time_s": 41.92913579940796
    }
   },
   {
@@ -1673,7 +1708,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.901381969451904
+    "time_s": 22.499017000198364
    },
    "N4800": {
     "M_K": 2.08,
@@ -1700,7 +1735,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.621817111968994
+    "time_s": 41.73301100730896
    }
   },
   {
@@ -1730,7 +1765,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.45895767211914
+    "time_s": 22.301140546798706
    },
    "N4800": {
     "M_K": 2.09,
@@ -1757,7 +1792,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.126935958862305
+    "time_s": 41.86539888381958
    }
   },
   {
@@ -1787,7 +1822,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.458343267440796
+    "time_s": 22.05420160293579
    },
    "N4800": {
     "M_K": 2.1,
@@ -1814,7 +1849,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 32.340903759002686
+    "time_s": 41.67867875099182
    }
   },
   {
@@ -1844,7 +1879,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 14.895801544189453
+    "time_s": 22.49377155303955
    },
    "N4800": {
     "M_K": 2.11,
@@ -1871,7 +1906,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 31.73099684715271
+    "time_s": 41.821571588516235
    }
   },
   {
@@ -1901,7 +1936,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 12.400986194610596
+    "time_s": 22.23179602622986
    },
    "N4800": {
     "M_K": 2.12,
@@ -1928,7 +1963,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 30.387956619262695
+    "time_s": 41.73216915130615
    }
   },
   {
@@ -1958,7 +1993,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 12.846309661865234
+    "time_s": 22.327956676483154
    },
    "N4800": {
     "M_K": 2.13,
@@ -1985,7 +2020,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.253070831298828
+    "time_s": 42.04640197753906
    }
   },
   {
@@ -2015,7 +2050,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 14.46846890449524
+    "time_s": 22.958906412124634
    },
    "N4800": {
     "M_K": 2.14,
@@ -2042,7 +2077,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.31508159637451
+    "time_s": 42.08094644546509
    }
   },
   {
@@ -2072,7 +2107,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.000622510910034
+    "time_s": 22.291195392608643
    },
    "N4800": {
     "M_K": 2.15,
@@ -2099,7 +2134,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.377023220062256
+    "time_s": 42.04489231109619
    }
   },
   {
@@ -2129,7 +2164,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.785664558410645
+    "time_s": 21.6993625164032
    },
    "N4800": {
     "M_K": 2.16,
@@ -2156,7 +2191,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 26.54849123954773
+    "time_s": 42.07487893104553
    }
   },
   {
@@ -2186,7 +2221,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.41113829612732
+    "time_s": 21.805700302124023
    },
    "N4800": {
     "M_K": 2.17,
@@ -2213,7 +2248,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.3394832611084
+    "time_s": 42.1207160949707
    }
   },
   {
@@ -2243,7 +2278,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 12.79650330543518
+    "time_s": 21.699374198913574
    },
    "N4800": {
     "M_K": 2.18,
@@ -2270,7 +2305,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.3030686378479
+    "time_s": 42.04942846298218
    }
   },
   {
@@ -2300,7 +2335,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 15.092969179153442
+    "time_s": 21.85147476196289
    },
    "N4800": {
     "M_K": 2.19,
@@ -2327,7 +2362,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 28.04772138595581
+    "time_s": 42.19758605957031
    }
   },
   {
@@ -2357,7 +2392,7 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 13.938385248184204
+    "time_s": 21.728276252746582
    },
    "N4800": {
     "M_K": 2.2,
@@ -2384,9 +2419,9 @@
     "moc_gate_pass": true,
     "moc_gate_ok": true,
     "moc_gate_reason": null,
-    "time_s": 29.469916343688965
+    "time_s": 42.039119243621826
    }
   }
  ],
- "elapsed_s": 1299.2198913097382
+ "elapsed_s": 2302.9884889125824
 }
