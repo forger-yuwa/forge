@@ -32,3 +32,24 @@ H の表は 300 K 用に断熱 NS の y₁⁺ × 冷却倍率 8.5〜9.4 で作�
 | `hand/ns/`・`hand/euler/` | `MESH_QUALITY.txt`・`MESH_AR_RELAX.json`、NS の `first_layer_check.csv` (壁の断面ごとの実寸・c·y₁,req・比) |
 
 係数 c(x): 配管 1.0・縮流部 0.6・スロート付近 0.5・拡大部 0.49 (拡大部は比の最小 0.49874 が 0.5 を下回るので有効 2 桁に切り下げ。0.5 なら ni 4,780)。
+
+## 最終の雛形での作り直し (2026-10-15、plan §5.1 #3b)
+
+カードの雛形を `axismach_final_v1` に替えて (`../card_m55.yaml`; 探索の雛形の物理壁では NS の停止規則が使えない) AWS A `~/forge-cardmesh` (94790833)
+で生成 → `../problem_m55_final_card.yaml`・`../problem_m55_final_card_euler.yaml` (M_knot 自動 2.80、r_t 0.0999084914252905 m、寸法 PASS)。
+`hand_mesh.py build --plan-item "§5.1 #3b" --axis-cap-frac 0.03` で `mesh`・`mesh_euler` を置き換えて `../problem_m55_final.yaml` (NS) を書き、
+Euler 用の写し `../problem_m55_final_euler.yaml` を生成器と同じ `wt_card.write_euler_companion` で書く (生成器の写しと mesh・mesh_euler 以外が同じことを照合)。
+係数・正規化・流れ方向の作り方は #3a と同じ (ni 4,800)。**径方向** (ユーザ 2026-10-15「上限3%」): NS は `axis_cap_frac 0.03` (壁の第一セルから等比、
+間隔 / r_w が 0.03 で軸まで一様) で、nj は全断面で `mesh2d._radial_fracs_capfixed` の隣接比の最大 ≤ 1.2 の最小 = 92 (比の最大 1.19744、nj 91 では 1.20130;
+最も薄い第一セルのスロート付近で決まる)。NS 441,600 点・Euler 465,600 点 (Euler は nj 97 のまま)。検査は FP64 の変換器
+(`~/forge-integ-dflow2-fp64`、2fd36b0c) で `hand_mesh.py check` (作業ディレクトリ A `~/m55_final/`)。記録は `hand/final/`:
+
+| ファイル | 中身 |
+| --- | --- |
+| `hand/final/card_gen.log` | カードの生成 (最終の雛形) |
+| `hand/final/build.log`・`build_record.json`・`build_record.csv` | 係数・第一層の表・ni・径方向の nj の決定・Euler の写しの照合 |
+| `hand/final/check.log`・`check_record.json` | NS (nj 92): 品質・AR 緩和・変換後の第一層厚・見積もりの y₁⁺・区間ごとの径方向 (軸側のセル / r_w・隣接比)、Euler |
+| `hand/final/ns/`・`hand/final/euler/` | `MESH_QUALITY.txt`・`MESH_AR_RELAX.json`、NS の `first_layer_check.csv` |
+| `hand/final/check_nj97.log`・`check_record_nj97.json` | 径方向を変える前 (雛形の nj 97 の等比) の同じ検査 (参考) |
+| `hand/final/euler_prepare.log` | `run_0001_euler` の準備 (`runner_axismach --prepare-only`) |
+| `hand/final/ns_prep_probe.log` | NS の準備の試行 (`deltastar_loop --init-integral --prepare-only`、A の使い捨てのディレクトリ; 停止規則 use・上限 200,000 の確認。消した) |

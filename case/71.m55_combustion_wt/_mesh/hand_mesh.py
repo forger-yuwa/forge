@@ -15,6 +15,11 @@ build: カードから作った問題 YAML (problem_m55_card.yaml) の mesh・me
      (throat_refine 4・throat_width 3) で ni 2000 にしたときの各位置の間隔) の逆数の上包絡。AR (壁際のセルの max 辺 / min 辺) と
      dx ≤ h_cap を満たす最小の ni を二分法で求め、10 の倍数に切り上げる。throat_refine 1・wall_normal_layer [0.02, 0.8]・msh_digits 17。
   5. mesh_euler の ni は NS と同じ (雛形の規則)。max_nodes・max_nodes_reason を両方に書く。
+  5b. --axis-cap-frac c を渡したとき (#3b、ユーザ 2026-10-15「上限3%」): NS の径方向を mesh2d の axis_cap_frac (nj 固定版: 各断面で壁の
+     第一セルから比 q_i の等比、間隔 / r_w が c に達したら軸まで一様) にし、nj は全断面で `mesh2d._radial_fracs_capfixed` の隣接比の
+     最大 ≤ --radial-ratio-max (既定 1.2) になる最小の値。流れ方向・第一層の表・mesh_euler (nj を含む) は変えない。
+  6. 最終の雛形 (axismach_final_v1: physical_wall_repr・pw_upstream を持つ; §5.1 #3b) の問題なら、Euler 用の写し <out の stem>_euler.yaml を
+     生成器と同じ `wt_card.write_euler_companion` で書き、生成器が書いた <problem の stem>_euler.yaml と mesh・mesh_euler 以外が同じことを確かめる。
 check: 置き換えた問題 YAML の NS の格子を prepare_ns と同じ経路 (設計チェーン → 積分法の δ_r → build_physical_wall → mesh_params →
        generate_axisym_mesh → msh 17 桁 → 変換) で作り、forge を起動せずに検査する: check_mesh_quality --ar-max・mesh_ar_relax_check・変換後の
        第一層厚と表の照合・見積もりの y1+・節点数・dx の比。Euler の格子 (prepare と同じ経路) も節点数と品質。
@@ -315,10 +320,40 @@ def build(a):
     if a.sanity:
         log(f"--sanity: 係数 {a.sanity}・半径 {NORM} で ni {ni_min} → {ni}、節点 {n_nodes:,} (YAML は書かない)")
         return
+    # ---- 4b. 径方向 (--axis-cap-frac): 全断面で隣接比の最大 ≤ radial_ratio_max の最小の nj
+    radial_rec = None
+    if a.axis_cap_frac is not None:
+        cap, qlim = float(a.axis_cap_frac), float(a.radial_ratio_max)
+        fr_st = interp_f(ft, xs)            # 各断面の第一セル / 局所半径 (mesh2d._first_frac_profile と同じ log 線形)
+
+        def rad_ratio(nj_, frs):
+            return max(M2._radial_fracs_capfixed(int(nj_), float(f), cap)[1] for f in frs)
+        nj_lo = int(math.ceil(1.0 + (1.0 - float(fr_st.max())) / cap)) + 1      # 和が 1 になる最小 (fr + (n−1)c ≥ 1) の 1 つ上から
+        fmin = [float(fr_st.min())]          # 比は第一セルが薄いほど大きい: 最小の第一セルで探し、全断面で確かめる
+        lo_n, hi_n = nj_lo, nj_lo
+        while rad_ratio(hi_n, fmin) > qlim:
+            lo_n, hi_n = hi_n, hi_n * 2
+        while hi_n - lo_n > 1:
+            mid = (lo_n + hi_n) // 2
+            lo_n, hi_n = (lo_n, mid) if rad_ratio(mid, fmin) <= qlim else (mid, hi_n)
+        nj_cap = hi_n
+        q_all = rad_ratio(nj_cap, fr_st)
+        q_prev = rad_ratio(nj_cap - 1, fr_st)
+        if not (q_all <= qlim < q_prev):
+            raise RuntimeError(f"径方向の nj の決定が全断面で成り立たない (nj {nj_cap}: 比の最大 {q_all}、nj − 1: {q_prev})")
+        nj = nj_cap
+        n_nodes = ni * nj
+        radial_rec = {"axis_cap_frac": cap, "radial_ratio_max": qlim, "nj": nj, "ratio_max_all_stations": q_all,
+                      "ratio_max_nj_minus_1": q_prev, "first_frac_min": float(fr_st.min()), "first_frac_max": float(fr_st.max()),
+                      "x_first_frac_min": float(xs[int(np.argmin(fr_st))]), "nj_template": int(prob_dict["mesh"]["nj"])}
+        log(f"径方向: axis_cap_frac {cap}・比 ≤ {qlim} → nj {nj} (比の最大 {q_all:.5f}; nj {nj - 1} では {q_prev:.5f}; 最も薄い第一セル "
+            f"{fr_st.min():.4e} @ x {radial_rec['x_first_frac_min']:.3f})  節点 {n_nodes:,} (雛形の nj {radial_rec['nj_template']})")
     # ---- 5. 置き換えた問題 YAML
+    rad_txt = ("" if radial_rec is None else
+               f"; 径方向は axis_cap_frac {radial_rec['axis_cap_frac']:g}・比 ≤ {radial_rec['radial_ratio_max']:g} (ユーザ 2026-10-15)")
     reason_ns = (f"ユーザ決定「a」2026-10-15: M5.5 の場所ごとの第一層 (M6 の比で補正) で約 {n_nodes:,} 点 (ni {ni} × nj {nj}; "
-                 "plan tooling-nozzle-card-local-mesh §5.1 #3a)")
-    reason_eu = f"ユーザ決定「a」2026-10-15: Euler の ni は雛形の規則で NS と同じ (約 {n_nodes:,} 点、ni {ni} × nj {{nj_e}})"
+                 f"plan tooling-nozzle-card-local-mesh {a.plan_item}{rad_txt})")
+    reason_eu = "ユーザ決定「a」2026-10-15: Euler の ni は雛形の規則で NS と同じ (約 {n_eu:,} 点、ni {ni} × nj {nj_e})"
     max_ns = int(math.ceil(n_nodes / 1000.0) * 1000)
     me = dict(prob_dict["mesh_euler"])
     nj_e = int(me.get("nj", RA.MESH_EULER_DEFAULTS["nj"]))
@@ -337,7 +372,7 @@ def build(a):
     old_mesh = dict(prob_dict["mesh"])
     mesh_txt = (
         "mesh:\n"
-        "  # 手組みの格子 (plan tooling-nozzle-card-local-mesh §5.1 #3a、ユーザ決定「a」2026-10-15)。_mesh/hand_mesh.py build が作る (手で編集しない)。\n"
+        f"  # 手組みの格子 (plan tooling-nozzle-card-local-mesh {a.plan_item}、ユーザ決定「a」2026-10-15)。_mesh/hand_mesh.py build が作る (手で編集しない)。\n"
         "  # 生成器の見積もり (第一層 2 値) は使わない。第一層の表 = f_req = c(x)·y1,req(x)/max(r_設計壁, r_物理壁) の下包絡 (log 線形; 補間の区間の中も\n"
         f"  # 刻み {CHECK_DX} r_t で表 ≤ f_req を検査)。y1,req は estimate_mesh と同じ式 (y1+ 目標 0.8、入口の端は s = {S_C} r_t の値で頭打ち)、\n"
         f"  # c: 配管 {C_PIPE}・縮流部 {C_CONTR}・スロート付近 {C_THROAT}・拡大部 {C_DIV} (初期格子の経験の係数: M6 の H の表 ÷ 見積もりの比の区間の最小以下、\n"
@@ -351,24 +386,30 @@ def build(a):
         f"  wall_first_frac_table: {fmt_table(ft, 6)}\n"
         f"  x_density_table: {fmt_table(dt, 5)}\n"
         f"  wall_normal_layer: [{WALL_NORMAL_LAYER[0]}, {WALL_NORMAL_LAYER[1]}]   # 近壁を壁法線に (局所半径比 d_n, d_b; M6 の H と同じ)\n"
-        f"  msh_digits: {MSH_DIGITS}\n"
+        + ("" if radial_rec is None else
+           f"  axis_cap_frac: {radial_rec['axis_cap_frac']:g}   # 径方向 (ユーザ 2026-10-15「上限3%」): 壁の第一セルから等比、間隔 / r_w が {radial_rec['axis_cap_frac']:g} で"
+           f"軸まで一様。nj {nj} は全断面で隣接比 ≤ {radial_rec['radial_ratio_max']:g} の最小 (mesh2d._radial_fracs_capfixed、比の最大 "
+           f"{radial_rec['ratio_max_all_stations']:.5f})\n")
+        + (f"  msh_digits: {MSH_DIGITS}\n"
         "  throat_refine: 1.0\n"
         "  throat_width: 1.0\n"
         f"  ar_max: {int(ar_max)}\n"
         f"  max_nodes: {max_ns}\n"
-        f"  max_nodes_reason: \"{reason_ns}\"\n")
+        f"  max_nodes_reason: \"{reason_ns}\"\n"))
     me_new = {k: v for k, v in me.items() if k not in ("ni", "max_nodes", "max_nodes_reason")}
     eu_lines = ["mesh_euler:\n",
                 "  # ni は NS (mesh) と同じ (雛形の規則; plan tooling-nozzle-mesh-size-guard §4.1)。_mesh/hand_mesh.py build が書く\n",
                 f"  ni: {ni}\n"]
     for k, v in me_new.items():
         eu_lines.append(f"  {k}: {v}\n")
-    eu_lines += [f"  max_nodes: {max_eu}\n", f"  max_nodes_reason: \"{reason_eu.format(nj_e=nj_e)}\"\n"]
+    eu_lines += [f"  max_nodes: {max_eu}\n", f"  max_nodes_reason: \"{reason_eu.format(n_eu=n_eu, ni=ni, nj_e=nj_e)}\"\n"]
     i0, i1 = block_span("mesh")
     lines[i0:i1] = [mesh_txt]
     j0, j1 = block_span("mesh_euler")
     lines[j0:j1] = ["".join(eu_lines)]
-    hdr = (f"# case/71 M5.5 の Euler・NS の問題 (plan tooling-nozzle-card-local-mesh §5.1 #3a)。{Path(a.problem).name} (要求カードの生成器の出力、\n"
+    final = any(k in prob_dict.get("geometry", {}) for k in ("physical_wall_repr", "pw_upstream"))   # 最終の雛形 (Euler は写しで回す)
+    use = (f"NS の問題 (Euler は {Path(a.out_yaml).stem}_euler.yaml)" if final else "Euler・NS の問題")
+    hdr = (f"# case/71 M5.5 の {use} (plan tooling-nozzle-card-local-mesh {a.plan_item})。{Path(a.problem).name} (要求カードの生成器の出力、\n"
            "# card_m55.yaml の overrides mesh.ni 3000 は生成のためだけ) の mesh・mesh_euler を _mesh/hand_mesh.py build で置き換えたもの (手で編集しない)。\n"
            "# 他のキー・_card の記録 (mesh_estimate を含む) は生成器の出力のまま (_card.mesh_estimate は旧い見積もりで、この格子ではない)。\n")
     out = Path(a.out_yaml)
@@ -383,7 +424,24 @@ def build(a):
     if not (np.array_equal(t_ft, ft) and np.array_equal(t_dt, dt)):
         raise RuntimeError("書いた YAML の表が作った表と一致しない")
     changed = sorted(k for k in set(old_mesh) | set(p2.mesh) if old_mesh.get(k) != p2.mesh.get(k))
-    rec = {"plan": "tooling-nozzle-card-local-mesh §5.1 #3a", "problem_in": str(a.problem), "problem_out": str(out),
+    # ---- 6. 最終の雛形なら Euler 用の写し (生成器と同じ関数) と、生成器の写しとの照合 (mesh・mesh_euler 以外が同じ)
+    eu_rec = None
+    if final:
+        eo = W.write_euler_companion(out)
+        ref = Path(a.problem).with_name(Path(a.problem).stem + "_euler" + Path(a.problem).suffix)
+        if eo is None or not ref.exists():
+            raise RuntimeError(f"最終の雛形の問題なのに Euler の写しが書けない・生成器の写し {ref} が無い")
+        d_eo, d_ref, d_out = (yaml.safe_load(open(f)) for f in (eo, ref, out))
+        diff = sorted(k for k in set(d_eo) | set(d_ref) if k not in ("mesh", "mesh_euler") and d_eo.get(k) != d_ref.get(k))
+        if diff or d_eo["mesh_euler"] != d_out["mesh_euler"] or d_eo["mesh"] != d_out["mesh"]:
+            raise RuntimeError(f"Euler の写しが生成器の写しと mesh・mesh_euler 以外で違う ({diff}) か、NS の格子の節と違う")
+        if any(k in d_eo["geometry"] for k in ("physical_wall_repr", "pw_upstream")):
+            raise RuntimeError("Euler の写しに物理壁のキーが残っている")
+        eu_rec = {"file": str(eo), "generator_copy": str(ref), "same_except_mesh": True,
+                  "geometry_keys_dropped": sorted(set(d_out["geometry"]) - set(d_eo["geometry"]))}
+        log(f"Euler の写し: {eo} (生成器の写し {ref.name} と mesh・mesh_euler 以外が同じ; 除いたキー {eu_rec['geometry_keys_dropped']})")
+    rec = {"plan": f"tooling-nozzle-card-local-mesh {a.plan_item}", "problem_in": str(a.problem), "problem_out": str(out),
+           "euler_companion": eu_rec, "radial": radial_rec,
            "r_t_m": rt, "x_U": x_U, "design_wall": [float(wd.x_in), float(wd.x_e)], "physical_wall": [xp0, xp1],
            "initializer": init_rec, "ar_max": ar_max, "ar_limit": ARM, "y1plus_target": W.Y1PLUS_TARGET, "s_c_rt": S_C,
            "formula_check_rel_max": rel, "coef": {"pipe": C_PIPE, "contr": C_CONTR, "throat": C_THROAT, "div": C_DIV, "blend": BLEND,
@@ -492,6 +550,19 @@ def check(a):
     chord = np.hypot(np.diff(xw), np.diff(rw_))
     qc = chord[1:] / chord[:-1]
     segs = {"pipe": xs <= x_U, "contr": (xs >= x_U) & (xs <= -X_THROAT_HALF), "throat": np.abs(xs) <= X_THROAT_HALF, "div": xs >= X_THROAT_HALF}
+    # 径方向の配点 (変換後の座標): 軸側のセルの高さ / 局所半径、j の線に沿った隣接間隔の比 (断面ごとの最大) を区間ごとに
+    dsj = np.hypot(np.diff(X, axis=1), np.diff(Rr, axis=1))           # (ni, nj − 1)、軸 → 壁
+    qj = dsj[:, 1:] / dsj[:, :-1]
+    q_st = np.max(np.maximum(qj, 1.0 / qj), axis=1)
+    h_ax = (Rr[:, 1] - Rr[:, 0]) / Rr[:, -1]
+    x_half = 0.5 * float(wp.x_e)
+    rsegs = {"pipe": xs <= x_U, "contr": (xs > x_U) & (xs < -X_THROAT_HALF), "throat": np.abs(xs) <= X_THROAT_HALF,
+             "div_front": (xs > X_THROAT_HALF) & (xs <= x_half), "div_rear": xs > x_half}
+    radial = {k: {"stations": int(mk.sum()), "axis_cell_over_rw_min": float(h_ax[mk].min()), "axis_cell_over_rw_max": float(h_ax[mk].max()),
+                  "ratio_max_min": float(q_st[mk].min()), "ratio_max_max": float(q_st[mk].max())} for k, mk in rsegs.items()}
+    radial["all"] = {"stations": len(xs), "axis_cell_over_rw_min": float(h_ax.min()), "axis_cell_over_rw_max": float(h_ax.max()),
+                     "ratio_max_min": float(q_st.min()), "ratio_max_max": float(q_st.max()), "x_ratio_max": float(xs[int(np.argmax(q_st))]),
+                     "axis_cap_frac": p.mesh.get("axis_cap_frac")}
     by_seg = {}
     for k, mk in segs.items():
         mk1 = mk.copy()
@@ -508,7 +579,7 @@ def check(a):
                                  "n_over_req": int((ratio > 1.0).sum())},
                  "y1plus_est_max": float(y1p_est[kp]), "x_y1plus_est_max": float(xs[1:][kp]),
                  "y1plus_cal_max": float(y1p_cal.max()), "x_y1plus_cal_max": float(xs[int(np.argmax(y1p_cal))]),
-                 "by_segment": by_seg,
+                 "by_segment": by_seg, "radial": radial,
                  "dx_ratio_max": float(max(qd[kq], 1 / qd[kq])), "x_dx_ratio_max": float(X[kq + 1, 0]),
                  "wall_chord_ratio_max": float(np.max(np.maximum(qc, 1 / qc))),
                  "dx_min_rt": float(dxs.min()), "dx_max_rt": float(dxs.max())}
@@ -519,6 +590,10 @@ def check(a):
     for k, v in by_seg.items():
         log(f"  {k:<7s} 断面 {v['stations']:5d}  実寸/(c·y1,req) 最大 {v['thick_over_req_max']:.5f}  厚さ {v['thick_um_min']:.4f}–{v['thick_um_max']:.3f} µm  "
             f"見積もりの y1+ 最大 {v['y1plus_est_max']:.4f}  補正 y1+ 最大 {v['y1plus_cal_max']:.4f}")
+    log(f"NS: 径方向 (axis_cap_frac {p.mesh.get('axis_cap_frac')}、nj {nj}): 断面ごとの隣接比の最大の範囲・軸側のセルの高さ / 局所半径")
+    for k, v in radial.items():
+        log(f"  {k:<9s} 断面 {v['stations']:5d}  隣接比の最大 {v['ratio_max_min']:.4f}–{v['ratio_max_max']:.4f}  "
+            f"軸側のセル / r_w {v['axis_cell_over_rw_min']:.5f}–{v['axis_cell_over_rw_max']:.5f}")
     np.savetxt(rd / "first_layer_check.csv", np.c_[xs, wp.r(xs), thick, req, y1raw, ratio], delimiter=",",
                header="x_rt,r_physical_rt,thick_m,c_y1req_m,y1req_raw_m,thick_over_req", comments="")
     # ---- Euler (prepare の格子の経路)
@@ -555,6 +630,10 @@ def main():
     ap.add_argument("--out-yaml")
     ap.add_argument("--record", required=True)
     ap.add_argument("--run-dir")
+    ap.add_argument("--axis-cap-frac", type=float, default=None,
+                    help="NS の径方向を mesh2d の axis_cap_frac にする (#3b、ユーザ 2026-10-15「上限3%」は 0.03)。nj は --radial-ratio-max で決める")
+    ap.add_argument("--radial-ratio-max", type=float, default=1.2, help="--axis-cap-frac の nj を決める全断面の隣接比の上限")
+    ap.add_argument("--plan-item", default="§5.1 #3a", help="YAML の注記と記録に書く plan の項目 (#3a の再現は既定のまま)")
     ap.add_argument("--sanity", type=float, default=None,
                     help="見積もり (plan §3 の (C)) の再現の確認: 全区間の係数をこの値、半径は設計壁で ni だけを出す (YAML は書かない)")
     a = ap.parse_args()

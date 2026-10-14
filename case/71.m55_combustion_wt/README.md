@@ -16,12 +16,14 @@
 | 壁 | 等温 350 K | ユーザ指示 |
 | 許容差 | 雛形の仮の値 (長さ 1 mm・径 0.02 mm) | ユーザ「よくわからん」 |
 | 凝縮 | 計算しない (dry の NS まで) | ユーザ指示 |
-| 格子の節点数 | NS・Euler とも ni 4,800 × nj 97 = 465,600 (手組みの格子 `problem_m55_ns.yaml`) | ユーザ決定「a」(2026-10-15): 見積もりの偏りを M6 の実績で補正した約 45 万点で Euler → NS (上限 30 万を超えることは了承済み)。それ以前に ni 10,200・約 99 万点を一度了承 → 同日取り下げ (「あまりにメッシュ多すぎる、古いやり方で作ってない？」) |
+| 格子の節点数 | NS・Euler とも ni 4,800 × nj 97 = 465,600 (手組みの格子 `problem_m55_ns.yaml`)。#3b (最終の雛形) から NS は ni 4,800 × nj 92 = 441,600 (径方向 `axis_cap_frac 0.03`・比 ≤ 1.2、ユーザ 2026-10-15「上限3%」; `problem_m55_final.yaml`)、Euler は 465,600 のまま (`problem_m55_final_euler.yaml`) | ユーザ決定「a」(2026-10-15): 見積もりの偏りを M6 の実績で補正した約 45 万点で Euler → NS (上限 30 万を超えることは了承済み)。それ以前に ni 10,200・約 99 万点を一度了承 → 同日取り下げ (「あまりにメッシュ多すぎる、古いやり方で作ってない？」) |
 
 ## 計算 run 一覧
 
 | run | 目的・主要設定差分 | 主要結果・成果物 | 状態 |
 | --- | --- | --- | --- |
+| `run_0001_euler` | Euler (slip) の参照 (AWS A)。`problem_m55_final_euler.yaml` (最終の雛形の Euler の写し)、格子 ni 4,800 × nj 97 = 465,600 (全域 0.005)、`runner_axismach` の `--stages full` (soft 3,000 → mid 3,000 → 本段 cfl 1・12,000)、FP64 のビルド (`~/forge-integ-dflow2-fp64`、2fd36b0c)・`FORGE_CUDA_BLOCKSIZE=128` | 準備のみ (2026-10-15、`--prepare-only`): 品質 PASS (AR 最大 6.1)・初期場の非有限 0・座標 float64 | 準備済み (未起動) |
+| `run_0002_ns` | NS pass 0 (AWS A): `deltastar_loop --init-integral --stages full` (CONTUR の積分法の初期壁、停止規則・上限 200,000)、`problem_m55_final.yaml` (手組みの格子 ni 4,800 × nj 92 = 441,600、`axis_cap_frac 0.03`)、Euler の参照 `run_0001_euler`、FP64 のビルド | — | 予定 |
 
 ## 経緯
 
@@ -29,3 +31,4 @@
 - 2026-10-15: 新の規則 `coarse_min_theta_v2` (feature/mknot-fast) で M_knot 2.80 (144 s) → NS の格子の節点数の上限 (30 万) で停止 → ユーザ了承で ni・上限を明示。
 - 2026-10-15: ユーザが 99 万点の了承を取り下げ。今のカードの格子の見積もりは第一層を 2 値で持つ古いやり方で、拡大部全体が最も厳しい場所の薄い第一層になる。場所ごとの第一層 (`wall_first_frac_table`) と流れ方向の密度 (`x_density_table`) で見積もり直してから格子を決める。新の規則での生成は M_knot の最終の組の途中で止めた (A `~/m55_card/`、結果なし)。
 - 2026-10-15 (plan `tooling-nozzle-card-local-mesh` §5.1 #3a): カードに `mesh.ni: 3000` (生成のためだけ) を足して AWS A `~/forge-cardmesh` (479723ab) で生成 → `problem_m55_card.yaml` (M_knot 自動 2.80、r_t 0.09990877093936801 m、177 s)。その `mesh`・`mesh_euler` を `_mesh/hand_mesh.py build` で手組みの格子 (場所ごとの第一層の表・流れ方向の密度の表・壁法線の近壁層・17 桁) に置き換えて `problem_m55_ns.yaml` (Euler・NS の両方に使う)。CFD 前の物理壁で作った格子の検査 (forge は起動しない、A `~/m55_mesh_hand/check/`): NS `check_mesh_quality --ar-max 5000` PASS (AR 最大 4849.4)・AR > 1000 の 47,607 セルのスキュー最大 0.0015 (違反 0; 出口面は非平面 0.62 mm で記録だけ)・変換後の第一層厚 ≤ c·y₁,req (全 4,800 断面)・見積もりの y₁⁺ 最大 0.797。Euler PASS (AR 最大 6.1)。再現の入力と記録は `_mesh/` ([`_mesh/README.md`](_mesh/README.md))。
+- 2026-10-15 (plan §5.1 #3b): カードの雛形を `axismach_final_v1` に替えて (探索の雛形の物理壁では NS の停止規則が使えない) AWS A `~/forge-cardmesh` (94790833) で生成 → `problem_m55_final_card.yaml`・`_euler.yaml` (M_knot 自動 2.80 で不変、r_t 0.0999084914252905 m、寸法 PASS、194 s)。`_mesh/hand_mesh.py build` で手組みの格子に置き換えて `problem_m55_final.yaml` (NS)・`problem_m55_final_euler.yaml` (Euler)。NS の径方向はユーザ決定 (「上限3%」) で `axis_cap_frac 0.03`・nj 92 (隣接比の最大 1.1974)。検査 (FP64 の変換器、forge は起動しない): NS 品質 PASS (AR 最大 4849.0)・AR 緩和 違反 0 (AR > 1000 の 36,115 セル、スキュー最大 0.0015)・第一層 実寸 / (c·y₁,req) 最大 0.9999997 (超過 0)・見積もりの y₁⁺ 最大 0.797・軸側のセル / r_w 0.030 (全断面); Euler PASS (AR 最大 6.1)。`run_0001_euler` を準備 (未起動)。記録は `_mesh/hand/final/` ([`_mesh/README.md`](_mesh/README.md))。
