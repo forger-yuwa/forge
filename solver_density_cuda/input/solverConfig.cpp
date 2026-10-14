@@ -392,12 +392,6 @@ void solverConfig::read(std::string fname)
         // 多成分 TP 陰解法の化学種更新方式: 既定 0 (従来 segregated 点陰的・ビット不変)。
         // 1 で緩和整合 scalar-DPLUR (流れ block と同一緩和。plan thermophysics-species-implicit-coupling.md)。
         this->speciesImplicitCoupling = getOptionalValidatedValue<int>(deltaT, "speciesImplicitCoupling", 0, "time.deltaT");
-        // 多成分 × lowMachPrecond>=2 の化学種の擬似時間刻み (既定 1 = 前処理で拡大する前の Δτ。§5.1 #26)。lowMachPrecond<2 では効かない。
-        this->speciesPrecondDt = getOptionalValidatedValue<int>(deltaT, "speciesPrecondDt", 1, "time.deltaT");
-        if (this->speciesPrecondDt < 0 || this->speciesPrecondDt > 2) {
-            throw std::runtime_error("time.deltaT.speciesPrecondDt must be 0 (expanded dtau' as the flow), "
-                                     "1 (unexpanded dtau, default) or 2 (dtau' * beta).");
-        }
         // multispeciesRhoYCommonLimiter: opt-in 診断 (既定 0・ビット不変)。元 plan が「診断オプションとして残置」と決めている。
         this->multispeciesRhoYCommonLimiter = getOptionalValidatedValue<int>(deltaT, "multispeciesRhoYCommonLimiter", 0, "time.deltaT");
         // 受動スカラ経路の切替と緩和 (plans/active/species-passive-scalar-unification.md §4.1/§4.2)。既定は旧経路 (ビット不変)。

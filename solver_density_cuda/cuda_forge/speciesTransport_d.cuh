@@ -68,14 +68,6 @@ void speciesTimeIntegration_d_wrapper(int loop, solverConfig& cfg, cudaConfig& c
 // 緩和整合 scalar-DPLUR (speciesImplicitCoupling==1 かつ nSpecies>=2) が有効か。
 bool speciesImplicitCoupled(solverConfig& cfg, variables& var);
 
-// 化学種の擬似時間刻み (time.deltaT.speciesPrecondDt、plans/active/architecture-float-state-double-geometry.md §5.1 #26)。
-// lowMachPrecond>=2 かつ speciesPrecondDt 1/2 かつ多成分 (dt_local_sp を確保済み) のとき true。このとき setDT_d_wrapper が
-// dt_local_sp を書き、化学種の scalar-DPLUR (speciesImplicitCoupling 1/2) がそれを読む。受動種 (トレーサ・凝縮モーメント) と
-// speciesImplicitCoupling 0 の point-implicit (scalarTimeIntegration_d) は対象外で、従来どおり dt_local を読む。
-bool speciesPrecondDtActive(const solverConfig& cfg, const variables& var);
-// 化学種の scalar-DPLUR が読む擬似時間刻み: 上が true なら dt_local_sp、それ以外は dt_local (従来どおり・ビット不変)。
-flow_float* speciesPseudoDt(const solverConfig& cfg, variables& var);
-
 // 緩和整合 scalar-DPLUR ソルバ。凍結残差に対し δ(ρY_s) を nStepInner 回 Jacobi sweep で緩和し
 // (流れ block と同一 implicitRelax/sweep)、ρY_s=ρY_s^N+δ(ρY_s) を commit する。
 // 呼び出し前に speciesUpdateOuter で ρY_s^N=ρY_s を取り、呼び出し後に renormalize/primitive すること。

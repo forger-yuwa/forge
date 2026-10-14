@@ -4,7 +4,6 @@
 
 #include "setDT_d.cuh"
 #include "lowMachPrecond_d.cuh"   // Phase 4: β・c' で Δτ' を前処理スペクトル半径に合わせて拡大
-#include "cuda_forge/speciesTransport_d.cuh"   // speciesPrecondDtActive (化学種の擬似時間刻み dt_local_sp、§5.1 #26)
 
 
 __global__ void setCFL_pln_d
@@ -275,28 +274,6 @@ __global__ void setDTlocal_precond_scale_d
     }
 }
 
-// 化学種の擬似時間刻み (speciesPrecondDt 2): dt_local_sp = Δτ'·β (Δτ' は上の拡大後の dt_local、β = lowMachBeta を
-// [1e-6, 1] に収める)。前処理の Γ_c が低マッハで擬似時間の進みを β 倍に縮めるのに化学種の刻みを合わせる案。
-__global__ void setDTlocal_species_beta_d
-(
- flow_float precondEps,
- geom_int nCells,
- const flow_float* Ux, const flow_float* Uy, const flow_float* Uz,
- const flow_float* sonic,
- const flow_float* dt_local,
- flow_float* dt_local_sp
-)
-{
-    geom_int ic = blockDim.x*blockIdx.x + threadIdx.x;
-    if (ic < nCells) {
-        const flow_float c = max(sonic[ic], static_cast<flow_float>(1.0e-8));
-        const flow_float vmag = sqrt(Ux[ic]*Ux[ic] + Uy[ic]*Uy[ic] + Uz[ic]*Uz[ic]);
-        const flow_float beta = lowMachBeta(c, vmag, precondEps);
-        const flow_float beta_c = min(max(beta, static_cast<flow_float>(1.0e-6)), static_cast<flow_float>(1.0));
-        dt_local_sp[ic] = dt_local[ic] * beta_c;
-    }
-}
-
 
 // 診断: 出口近傍の局所 dt キャップ (壁∩出口コーナー不安定の切り分け用, env ゲート)。
 //   FORGE_DT_OUTLET_SCALE (0<s<1) と FORGE_DT_OUTLET_XMIN [m] の両方を与えると、
@@ -415,14 +392,6 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
     // Phase 4: 完全前処理モード (LHS) では擬似時間刻みを前処理スペクトル半径基準に拡大する。
     // lowMachPrecond==2 (RHS+LHS) / ==3 (LHS のみ) の双方で擬似時間項は前処理されるため両方で適用する。
     if (cfg.lowMachPrecond >= 2) {
-        // 化学種の擬似時間刻み dt_local_sp (speciesPrecondDt 1/2、多成分のみ。§5.1 #26)。化学種の scalar-DPLUR は
-        // speciesPseudoDt でこれを読む。非アクティブ (前処理なし・speciesPrecondDt 0・単成分) では書かず、化学種は
-        // dt_local を読む (従来どおり)。出口近傍の dt キャップ (下の診断 env) は dt_local だけに掛かる。
-        const bool spDt = speciesPrecondDtActive(cfg, var);
-        if (spDt && cfg.speciesPrecondDt == 1) {
-            // 1: 前処理で拡大する前の Δτ (物理スペクトル半径基準) を退避する
-            gpuErrchk( cudaMemcpy(var.c_d["dt_local_sp"], var.c_d["dt_local"], sizeof(flow_float)*msh.nCells_all, cudaMemcpyDeviceToDevice) );
-        }
         setDTlocal_precond_scale_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
             cfg.precondEps,
             msh.nCells,
@@ -432,15 +401,6 @@ void setDT_d_wrapper(solverConfig& cfg , cudaConfig& cuda_cfg , mesh& msh , vari
             var.c_d["dt_local"]
         );
         gpuErrchk( cudaPeekAtLastError() );
-        if (spDt && cfg.speciesPrecondDt == 2) {
-            // 2: 拡大後の Δτ' に β を掛ける
-            setDTlocal_species_beta_d<<<cuda_cfg.dimGrid_cell , cuda_cfg.dimBlock>>> (
-                cfg.precondEps, msh.nCells,
-                var.c_d["Ux"], var.c_d["Uy"], var.c_d["Uz"], var.c_d["sonic"],
-                var.c_d["dt_local"], var.c_d["dt_local_sp"]
-            );
-            gpuErrchk( cudaPeekAtLastError() );
-        }
         gpuErrchkKernelSync();
     }
 
