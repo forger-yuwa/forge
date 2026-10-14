@@ -268,6 +268,8 @@
 | 18 | ~~CFL の上書きの扱い~~ | 判断: 2026-10-15 codex diagnose — `fixed` に残し、明示の上書きを理由つきの逸脱に変換 (§4.3 の 4b、実装は #11) | F |
 | 19 | 残りの同一格子の引き継ぎ (§4.5) | `euler_loop` の継続チャンクを段終了ゲート + `restart_field.py` に、SERN の `restart_by_index` に段終了ゲート (層流 → SST は前段の必須量と次段の乱流量の初期化を分ける)、CPG のベルの継続は元の変換済み格子を再利用。合格: 各経路で restart の負例 (#9 の 5 種) で次の段を起動しない、SERN の試験が `restart_by_index` を差し替えずに通る | O |
 | 20 | `restart_field.py` の同一性の検査 (§4.5) | 座標を格納の精度のまま比べる、接続・CV の順・境界の所属を照合する、座標・接続が無ければ FAIL。合格: codex の再現 (座標を約 1e−8 変えた別の入力) と接続だけ違う入力が FAIL、今の正常な同一メッシュの restart (#9 の試験・既存の run の複製) が PASS。同じ型の甘さを `interp_field.py`・`case/60 tools/stack_init.py`・他の restart の経路で探して報告する | O |
+| 7b | ~~#7 の実装で出た判断 3 点~~ | 判断: 2026-10-15 (主セッション、2026-10-15 codex diagnose の「省略は既定値で代用しない」と §4.3 の 2「変換時の実効設定を記録して照合」の適用として採用): (1) 照合するキーを 6 つ (`discretization`・`nodeInletCornerWall`・`wallDistExtraPhysIDs` に `axisCentroidShift`・`renumber`・`isAxisymmetric` を足す) — どれも変換時に効くので §4.3 の 2 の範囲。(2) 入口の分類の変更は、`nodeInletCornerWall: 0` を明記した node と cell では WARN (変換に効かない: `gmshReader.hpp:1674`)、省略なら FAIL。(3) 変換時の省略と run の既定値の明記は不一致 (FAIL)。手書きの run で誤拒否に見えたら、理由つきの逸脱ではなく変換時と run の mesh 節を揃えるよう案内する (§4.7 の周知に入れる) | F |
+| 21 | 旧キー `physProp.isAxisymmetric` の読み落とし (#7 の自己点検で発見) | solver は今も `physProp.isAxisymmetric` を読む (`solverConfig.cpp:945`、mesh 側が優先)。`recipe_settings.py:379` (derive_applies)・`check_wall_resolution.py:291` は旧キーを読まず、`check_solver_config.py` にも扱いが無い。`mesh_provenance.py` と同じ優先順で読むよう揃え、負例 (旧キーだけの軸対称の config) を試験に足す | O |
 | 15 | §1 に寄せる受入の事前登録 (§6.4) | 機種・キーごとに受入の run・判定区間・量・許容差を書いて上位に諮る。`pRef` の確認、limiter の段の値、壁直交性の精度の予算 (`check_wall_resolution.py` と局所の τ_w・q_w の比較を含む) | F |
 
 ## 6. 検証
