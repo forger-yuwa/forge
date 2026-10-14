@@ -29,7 +29,12 @@
 
 ## 4. JIT の WIP の状態
 
-(subagent の報告を受けたら私がここに追記し、あなたに SendMessage で知らせる。)
+WIP commit 9865cdc1 (カーネル)・6da0e172 (plan #4 の行に「途中」)。subagent の報告の写し:
+
+- **済み**: `design/forge_design/geometry/moc_fill_nb.py` の `@njit(cache=True)` の `fill_levels_nb` (段のループ全体: 予測子・修正子、最終残差、源項の端点、μ、ν→M (CPG の Newton と表の補間 (`np.interp` の C 実装を写した) を別経路)、源項の分岐、`MocFillDiag.add` の集計)。モード 3 つ (`MODE_LEGACY_FIXED2`・`MODE_FIXED2`・`MODE_CONVERGE`)。analytic で θ_r が無いときはエラーコードと件数を返す。試験用の trace の引数。n=5 でコンパイル・実行のみ確認 (初回 8.2 s)。**numpy の版との照合はしていない、試験は全部未実行**。
+- **残り**: (a) `moc_inverse.py` への組み込み (`FORGE_MOC_KERNEL`、未設定は numba、`numpy` も選べる、他の値は ValueError、numba は遅れて import)、(b) 戻り値から `MocFillDiag` を組み立てる `_diag_from_nb` (エラーコード 1 は interior_vec と同じ文の ValueError)、(c) ガスの振り分け (float の γ・`GasCPG`・cpg の `Isentrope` → CPG、`GasSemiPerfect` → 表、他は例外)、(d) 段 0 は Python 側で `out` を埋めて渡す、`frac`・`eps`・`cap` は実行時の引数、(e) `design/tests/run_moc_jit_tests.py` (V5 (1)(2) と計測)、(f) 依存の追記 (`procedures/development-environment.md`)、(g) 既存の試験と計測。
+- **罠**: (1) `run_moc_axis_limit_tests.py` の 8(a)(b) は legacy+fixed2 の `fill_levels` と case/45 の壁が実装前とビット同一を要求する → 既定を numba にするならビット同一が要る。カーネルは丸めまで合わせる設計。(2) `pm_mach_vec` の Newton は配列全体で |dM| < 1e−13 まで回す (先に収束した要素も回り 1 ulp 動きうる; NaN の対が 1 つでもあると全部が 60 回) → カーネルも numpy の版と同じ集合で回している (fixed2: 段の全部の対、converge: 反復中の対、最終残差: 収束した対、段の終わり: 段の全部の点 (ok でない点は ν=0))。対ごとに止める「最適化」はビット同一を壊す。(3) 手元 (X86_V3、AVX512 なし) では numpy の sin・cos・tan・arcsin・arctan・sqrt と libm と numba (`fastmath=False`) がビット一致 (各 200 万点)、numba の SVML は無効。AWS が AVX512 の型なら numpy が SVML を使って ulp が違いうる → CPU の機能を記録。(4) FMA の縮約が無いことは未確認 (最初の照合で見る)。(5) 細部: frac_pos・fail の上限 200 は件数の通算、geom は全件、iter_hist は段ごとに昇順、resid の位置は段の中の最初の最大で通算より厳密に大きいときだけ更新。converge で収束しても軸より下の対は BELOW_AXIS に上書き。範囲は `fill_levels` だけ (`fill_arrays`・`fill` は numpy のまま)。
+- **判断が要る点**: numba の版が扱えないガスを例外にするか (subagent の案は例外)、`prepare_info.json` の environment に numba の版を足すか。
 
 ## 5. 連絡
 
