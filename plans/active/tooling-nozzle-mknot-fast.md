@@ -45,6 +45,12 @@
 - **旧の規則で case/71 のカードの生成が失敗した (2026-10-14 14:50〜16:28 UTC、AWS A `~/forge-m55/case/71.m55_combustion_wt/card_gen.log`、main 4b1708ac + 05ecd56e、並列 1/1)**:
   最初の r_t 0.1 m で探索とゲートが PASS (chosen_N 2.826102303、境目から 1.4175、3,773 s)、r_t の固定点で 0.0999088 m (27 s)。最終の組のゲートで、2N = 4800 の窓 21 点・窓の外 10 点が**全点** `from_length 未収束 (|x_F − L_total| = 0.0123 > tol 0.005)` (カードの長さ公差 1 mm / 2 / r_t = 0.005 r_t)、`MknotUndeterminedError` で止まった (約 98 分)。同じ組の N = 2400 は全点で長さ合わせが通った。
   4800 の網が使えるかはカードの長さの許容差と r_t で変わる (最初の r_t では通った)。旧の規則の 2N のゲートは、仮定の反例でなく実際のカードで、網を細かくしたことによる長さ合わせの不成立で止まった。
+- **測定のエージェントの最終報告 (2026-10-15、台本と結果は A の `~/mknot_prof/`・scratchpad の `mknot_prof/`)**:
+  - 1 評価の 7〜8 割は逆 MOC の網の充填 `fill_levels` (段数 N+40 の逐次の Python ループ、段ごとに小さな numpy 呼び出し; 2400 で段あたり平均 5.1 パス、Python の関数呼び出しは逆 MOC 1 回あたり約 300 万回)。`inverse_design` 1 回の時間は t ≈ 1.9 ms·N + 0.41 µs·N² (600・4800 で当てはめ、1200・2400 で 4 % 以内)。網の充填の中の診断が 17〜19 %、網の検査が 7〜18 %。
+  - **`from_length` の L_c は M_K に依らない**: L_c と x_F の反復列は、どの N でも M_K の違う評価の間で一致 (差 ≤ 1e−11 r_t)。それでも 1 評価の中で `inverse_design` を 1〜4 回呼んでいる (a 2400 で 3 回、b 4800 で 4 回)。
+  - 600 は L_total_tol 0.05 でも全点未収束 (残差は M_K に依らず a 0.0761・b 0.0863 r_t)、0.1 なら使える (`inverse_design` 1 回)。1200 は 0.05 で未収束 0 点。
+  - (b) の下の境目は 600 で約 1.58〜1.60 (2400 は 1.41): 600 では壁の当てはめの検査 (θ の乖離 0.24° > 0.2°) で落ちる点がある。上の境目は同じ (4.2531)。谷の最小は (a) 600・1200 で 2.04・2400 で 2.07、(b) 2.81・2.83。
+  - A は物理 2 コア (4 vCPU)。CPU を使うプロセスが 3 本並ぶと 1 評価が 15〜40 % 遅くなった。
 - 過去の例: M6 (case/42) の M_K の掃引は n_axis 600 で行っていた (`sweep_axislaw_A_MK_summary.csv`、plan mknot-auto §6 V1b)。
 - 2400 と 4800 の θ_max の差は 0.001〜0.002° (谷 2.00〜2.10 の中の θ_max の差 0.006° と同じ桁)。生産の網 2400 は壁そのもの (出口の特性線の交点・壁の末尾) のために決まった値で (1200 → 2400 で x_F 95.2453 → 95.2965 r_t、plan `verification-m6-axis-wave-mesh-su2` #13)、M_K の選択のためではない。
 
@@ -115,6 +121,7 @@
 | 3 | 実装 | `mknot_select.py` に規則 `coarse_min_theta_v2` (§4.1)、`evaluate_mknot` の捕捉を 2 つに・並列 (§4.2)、`wt_card.py` の M_knot の流れ (最初と最終の r_t、実効の入力での終了、自動調整での破棄、計時の改修)、記録、V1・V2 の試験。**実装 (2026-10-15、implementer)**: `mknot_select.py` に `select_coarse_min_theta` (部品 `v2_grid`・`v2_coarse_analysis`・`v2_valleys`・`v2_confirm`・`v2_pick`)、`evaluate_mknot` の捕捉を最後の 2 つ (`_CAPTURE_KEEP`)・`L_total_tol` の上書き・行に長さ合わせの記録 (L_c・符号つきの残差・停止の理由・実効の入力)。`wt_card.py` の M_knot の流れ (最初の r_t で選ぶ → 固定点 → 出力と同じ実効の入力で選び直し、一致で終了・違えば固定点のやり直し最大 2 回、自動調整で評価を捨てる、`_clock` で選択と再固定点を計時し `card_elapsed_s` と並べる)、並列 `mknot_workers` (1 評価のピーク 600: 0.15 GB・2400: 1.04 GB、case/70 (a) を手元で測定、case/71 は未測定 → #3b で測り直す)、記録 `_mknot_record_v2` (照合 `mknot_card_log_check` は規則の名前で読み分け、旧の記録も照合できる)。試験 `design/tests/run_mknot_v2_tests.py` (V1 (i)〜(vi)、`--real` で (vii)) 34 + 8 ok・`run_mknot_v2_card_tests.py` (V2) 42 ok。(vii) は基準 4e0b9f9e の evaluate_mknot とも基準の欄が全部一致。既存の `run_mknot_select_tests.py` 97 ok・`run_wt_card_tests.py`・`run_wt_card_profile_tests.py`・`run_mesh_size_guard_tests.py`・`run_tests.py` 通過 (旧の規則の合成の流れの試験は `run_wt_card_tests.py` から外した)。`run_deltastar_root_zone_tests.py --card` はこの作業ツリーに case/70 の run が無く該当部分を飛ばした | O |
 | 3b | V3・V4 (AWS A) | 新旧の A/B と計時 | O |
 | 4 | 逆 MOC の内部点の計算の JIT 化 (後回し) | 別の受入 (同じ入力で壁の差の上限) を登録してから | F |
+| 6 | L_c の使い回し (候補、後回し) | `from_length` の L_c が M_K に依らないこと (§3) を使い、(問題、N) ごとに L_c を 1 回解いて使い回せば `inverse_design` の呼び出しが 1/3〜1/4 になり、メモリも減る見込み。数値は 1e−11 r_t の桁で変わりうるので、#4 と同じく別の受入を登録してから | F |
 | 5 | skill の手順 | `nozzle-design`・`design-intake` にパラスタの間は M_knot を固定する手順と所要の目安 | O |
 
 ## 6. 検証
