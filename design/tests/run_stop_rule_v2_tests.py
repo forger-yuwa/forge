@@ -272,11 +272,18 @@ def make_run(name: str, scenario: dict, *, hold: int | None = 38000, cap: int = 
     return rd
 
 
-WATCH = {"poll_s": 0.02, "stop_wait_s": 2.0, "term_wait_s": 3.0, "kill_wait_s": 5.0, "post_wait_s": 120.0}
+# 見張りの時間 (stop_rule.watch_main_stage_v2)。stop_wait_s は「要求を置いてから run_case.sh (子プロセス) が終わるまで」の上限で、
+# forge の終了の後の run_case.sh の後処理 (check_convergence.py・残差の図; python の起動 2 回) も含む。2.0 s では負荷のあるとき
+# (CPU を 16 本の空回しで埋めた手元の再現、2026-10-16) に後処理が間に合わず、正しく止まった run まで timeout に分類された
+# (REACHED・保持の既定・崩れ・終了コード 3 の 6 件)。正常に止まる場合は run_case.sh が終わった時点で見張りが抜けるので、上限を
+# 大きくしても試験は長くならない。要求を無視する forge の試験 (timeout) だけは短い上限 TIMEOUT_STOP_WAIT_S を使う
+# (偽の forge は要求の後も 1 格子点ごとに 0.4 s 以上かけて 10 格子点を回るので、負荷があっても先に上限が来る)。
+WATCH = {"poll_s": 0.02, "stop_wait_s": 120.0, "term_wait_s": 3.0, "kill_wait_s": 5.0, "post_wait_s": 120.0}
+TIMEOUT_STOP_WAIT_S = 2.0
 
 
-def run_case(rd, **kw):
-    rc = RA.run_staged_ns(rd, stages="none", stop_rule_watch=WATCH, **kw)
+def run_case(rd, watch: dict | None = None, **kw):
+    rc = RA.run_staged_ns(rd, stages="none", stop_rule_watch={**WATCH, **(watch or {})}, **kw)
     rec = json.loads((rd / SR.RECORD).read_text()) if (rd / SR.RECORD).exists() else None
     return rc, rec, SR.read_state(rd)
 
@@ -517,7 +524,7 @@ def test_watcher():
 
         # --- 要求を無視する forge → 時間切れで kill ---
         rd = make_run("timeout", {"ignore_stop": True, "pace": 0.4})
-        rc, rec, st = run_case(rd)
+        rc, rec, st = run_case(rd, watch={"stop_wait_s": TIMEOUT_STOP_WAIT_S})
         check("要求を無視する forge → stop_wait_s の後に kill → FAILED (timeout; REACHED にしない)",
               state_ok(rc, st, "FAILED") and "timeout" in st["failures"] and rec["stop_forge"]["stopped"]
               and rec["stop_forge"]["signals"][:1] == ["SIGTERM"], f"{st and st['failures']} {rec.get('stop_forge')}")

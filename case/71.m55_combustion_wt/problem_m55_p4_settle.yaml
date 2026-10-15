@@ -1,6 +1,7 @@
 # problem_m55_p3_b0.yaml の写しに evaluate.ns_output と evaluate.settle (判定の基準のプリセット wt_nozzle_v1、試験部の線の x 範囲 4.0〜7.95 m) を
 # 足しただけの例 (plan tooling-settle-convergence-and-monitor §5.1 #6、2026-10-16)。main_line (B0) とリミッタの基準値の固定は p3_b0 のまま
-# (同じ設計の系列の続き; 自動にするなら limiter_ref を消す、run の記録を継承するなら limiter_ref: {from_run: <run>})。
+# (同じ設計の系列の続き; 自動にするなら limiter_ref: auto、limiter_ref を省くと NS の初期場の元 (prepare_ns の ic_from) の基準値を継承
+# (plan §5.1 #6b)、別の run の記録を継承するなら limiter_ref: {from_run: <run>})。
 # run_0010_ns_b0 用: problem_m55_p3.yaml の写しで、evaluate の cfl_main を外して main_line (B0) を足しただけ。
 # case/71 M5.5 の NS の問題 (Euler は problem_m55_p3_euler.yaml) (plan tooling-nozzle-card-local-mesh §5.1 #3t)。problem_m55_p3_card.yaml (要求カードの生成器の出力、
 # card_m55.yaml の overrides mesh.ni 3000 は生成のためだけ) の mesh・mesh_euler を _mesh/hand_mesh.py build で置き換えたもの (手で編集しない)。

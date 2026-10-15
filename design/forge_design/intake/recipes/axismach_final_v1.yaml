@@ -63,8 +63,9 @@ evaluate:
   # cfl_main を消すだけでは Euler が既定の cfl 4 に変わる — codex diagnose 2026-10-15 m55-three-coef M4)
   cfl_euler: 1.0
   # NS の本段は B0 = 壁法線のライン陰解法 (ユーザ決定 2026-10-15「line implicitを規定化」、plan tooling-settle-convergence-and-monitor §4.5・
-  # card plan §5.1 #3r)。前の段 S1・S2 は point のまま。limiter_ref を書かない = 自動 (forge が本段の開始の場で決めて run の limiter_ref.json に
-  # 書く; 同じ設計の系列の続きは overrides の evaluate.main_line.limiter_ref: {from_run: <run>} で継承)。B0 を使わないなら
+  # card plan §5.1 #3r)。前の段 S1・S2 は point のまま。limiter_ref を書かない = 初期場の元 (prepare_ns の ic_from・前の pass) が NS の run なら
+  # その基準値を継承、Euler の run・元が無いなら自動 (forge が本段の開始の場で決めて run の limiter_ref.json に書く; plan
+  # tooling-settle-convergence-and-monitor §5.1 #6b)。継承しないなら overrides の evaluate.main_line.limiter_ref: auto。B0 を使わないなら
   # overrides で evaluate.main_line: point と evaluate.cfl_main を書く
   main_line: {line: dir, cap: 50, itj: 5, cfl: 4, relax: 0.7}
   # NS だけの出力 (同 plan §4.1・§4.5): 境界・節点・流量・残差の判定は 2,000 step ごと、全場は 20,000 step ごと (と最後・止めた step)。
