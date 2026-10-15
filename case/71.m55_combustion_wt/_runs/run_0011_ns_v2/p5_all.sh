@@ -5,7 +5,9 @@
 # 使い方: bash p5_all.sh run_0012_ns_free   /   bash p5_all.sh run_0011_ns_v2
 set -uo pipefail
 R=${1:?run_0012_ns_free か run_0011_ns_v2}
-case "$R" in run_0011_ns_v2) M=v2;; run_0012_ns_free) M=off;; *) echo "知らない run: $R"; exit 1;; esac
+# run_0013_ns_free260: codex diagnose 2026-10-16 settle-run0012-result の (i) — run_0012 から本段の上限だけ 260,000 に (plan §6 (1′))
+N=200000
+case "$R" in run_0011_ns_v2) M=v2;; run_0012_ns_free) M=off;; run_0013_ns_free260) M=off; N=260000;; *) echo "知らない run: $R"; exit 1;; esac
 C=$HOME/forge-cardmesh/case/71.m55_combustion_wt
 D=$HOME/forge-cardmesh/design
 PY=$HOME/venv-cardmesh/bin/python
@@ -27,9 +29,40 @@ test -e "$C/$R" && die "$R が既にある"
 log "prepare $R (stop-rule $M)"
 ( cd "$D" && $PY "$S" prepare --problem "$C/problem_m55_p4_settle.yaml" --ic-from "$C/run_0008_ns_b0" --run-dir "$C/$R" \
     --euler-run "$C/run_0009_euler" --euler-res res_12000.h5 --euler-sha256 "$EUSHA" \
-    --forge-bin "$FORGE_BIN" --forge-sha256 "$FBSHA" --stop-rule "$M" --nsteps 200000 ) > "$W/prepare_$R.log" 2>&1 \
+    --forge-bin "$FORGE_BIN" --forge-sha256 "$FBSHA" --stop-rule "$M" --nsteps "$N" ) > "$W/prepare_$R.log" 2>&1 \
     || die "prepare $R rc $? (prepare_$R.log)"
 tail -1 "$C/$R/MESH_QUALITY.txt" | tee -a "$W/chain.log"
+if [ "$R" = run_0013_ns_free260 ]; then
+    # run_0012 と設定を比べる: 差は本段の nStepOuter (と settle_criteria の作成時刻・出所) だけのはず
+    $PY - "$C/run_0012_ns_free" "$C/$R" <<'PYC' 2>&1 | tee -a "$W/chain.log" || die "run_0012 と設定の差が要求と違う"
+import sys, yaml
+from pathlib import Path
+a, b = Path(sys.argv[1]), Path(sys.argv[2])
+def flat(d, pre=()):
+    out = {}
+    if isinstance(d, dict):
+        for k, v in d.items():
+            out.update(flat(v, pre + (k,)))
+    else:
+        out[pre] = d
+    return out
+bad = []
+for name, allow in (("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("solverConfig_prestage.yaml", set()),
+                    ("bcondConfig.yaml", set()), ("settle_criteria.yaml", None)):
+    fa, fb = flat(yaml.safe_load((a / name).read_text())), flat(yaml.safe_load((b / name).read_text()))
+    diff = sorted(k for k in set(fa) | set(fb) if fa.get(k, "<無>") != fb.get(k, "<無>"))
+    if allow is None:
+        allow = {k for k in diff if k and k[0] == "source"}
+    extra = [k for k in diff if k not in allow]
+    print(name, "差:", [".".join(map(str, k)) for k in diff])
+    if extra:
+        bad.append((name, extra))
+if (a / "settle_nodes.txt").read_bytes() != (b / "settle_nodes.txt").read_bytes():
+    bad.append(("settle_nodes.txt", "違う"))
+print("設定の比較:", "OK" if not bad else f"NG {bad}")
+sys.exit(1 if bad else 0)
+PYC
+fi
 log "run $R"
 ( cd "$D" && $PY "$S" run --run-dir "$C/$R" ) > "$C/$R/p5_ns.driver.log" 2>&1
 log "run $R 終了 rc $?"
