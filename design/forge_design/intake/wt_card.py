@@ -100,11 +100,12 @@ MKNOT_WORKERS_ENV = "FORGE_MKNOT_WORKERS"
 # numba の版 (numba・LLVM の読み込みで 約 0.11 GB 増える)、case/70 c2b と case/71 の最大を切り上げた値、MKNOT_EVAL_PEAK_SOURCE)。
 # 測った N の間は両対数で補間、上は (N/N_max)^MKNOT_EVAL_PEAK_EXP で外挿 (指数は捕捉を限る前の 2400 → 4800 の実測 1.28 → 3.86 GB から)、
 # 下は最小の N の値のまま
-MKNOT_EVAL_PEAK_GB = {600: 0.27, 2400: 1.31}
+MKNOT_EVAL_PEAK_GB = {600: 0.27, 2400: 1.31, 4800: 4.52}   # 4800 は 2026-10-16 の実測 (下の SOURCE の末尾; forge-7d の提案)
 MKNOT_EVAL_PEAK_EXP = 1.6
 MKNOT_EVAL_PEAK_SOURCE = ("2026-10-15 AWS B (g5.xlarge)、feature/mknot-fast f7e185c4 (numba の版)、新しいプロセスで 1 評価: case/70 c2b "
                           "(problem_c2b_auto_final.yaml、M_K 2.05) N 600 (L_total_tol 0.1 r_t) 0.263 GB・N 2400 1.302 GB、case/71 (r_t 0.1 m、"
-                          "M_K 2.80) N 600 0.260 GB・N 2400 1.057 GB。引き継ぎ時点 9468e0d0 (numpy の版) は同じ順に 0.157・1.084・0.150・0.842 GB")
+                          "M_K 2.80) N 600 0.260 GB・N 2400 1.057 GB。引き継ぎ時点 9468e0d0 (numpy の版) は同じ順に 0.157・1.084・0.150・0.842 GB"
+                          "; 4800: 2026-10-16 手元 (WSL、12 コア)、feature/card-local-mesh 686f90c3、試走のカード A (M_K 2.65) の 1 評価を新しいプロセスで /usr/bin/time -v、ru_maxrss 4,514,676 KiB → 4.51 を切り上げ (2400 → 4800 の指数 1.72〜1.79 > MKNOT_EVAL_PEAK_EXP 1.6)")
 
 # カードのキー
 _TOP_REQUIRED = ("format", "name", "gas", "conditions", "M_exit", "throat", "inlet", "divergent_length_m", "wall")
