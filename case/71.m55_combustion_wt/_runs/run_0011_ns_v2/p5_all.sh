@@ -47,7 +47,7 @@ def flat(d, pre=()):
         out[pre] = d
     return out
 bad = []
-for name, allow in (("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("solverConfig_prestage.yaml", set()),
+for name, allow in (("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("solverConfig_prestage.yaml", {("time", "last", "nStepOuter")}),   # S1・S2 は nStepOuter 3000 を明示で書く (runner_axismach.ns_stage_configs); 実際の S1・S2 の設定は起動の後に MAIN_STAGE_STARTED の sha256 で照らす
                     ("bcondConfig.yaml", set()), ("settle_criteria.yaml", None)):
     fa, fb = flat(yaml.safe_load((a / name).read_text())), flat(yaml.safe_load((b / name).read_text()))
     diff = sorted(k for k in set(fa) | set(fb) if fa.get(k, "<無>") != fb.get(k, "<無>"))
