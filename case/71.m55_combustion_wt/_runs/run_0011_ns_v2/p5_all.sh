@@ -58,7 +58,8 @@ for name, allow in [("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("s
     print(name, "差:", [".".join(map(str, k)) for k in diff])
     if extra:
         bad.append((name, extra))
-if (a / "settle_nodes.txt").read_bytes() != (b / "settle_nodes.txt").read_bytes():
+nodes = lambda d: [l for l in (d / "settle_nodes.txt").read_text().splitlines() if l.strip() and not l.lstrip().startswith("#")]
+if nodes(a) != nodes(b):   # 先頭のコメント (プリセットの名前) は比べない
     bad.append(("settle_nodes.txt", "違う"))
 print("設定の比較:", "OK" if not bad else f"NG {bad}")
 sys.exit(1 if bad else 0)
