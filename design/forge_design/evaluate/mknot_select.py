@@ -1,7 +1,7 @@
 r"""軸 Mach 則 (knot) の knot のマッハ数 M_knot を、長さを固定したまま選ぶ (最大壁角の最小化)。
 
 規則は 2 つ:
-  - `coarse_min_theta_v2` (要求カードの既定、2026-10-15〜; plan plans/active/tooling-nozzle-mknot-fast.md §4.1・§4.2):
+  - `coarse_min_theta_v2` (要求カードの既定、2026-10-15〜; plan plans/accepted/tooling-nozzle-mknot-fast.md §4.1・§4.2):
     `select_coarse_min_theta`。0.05 の格子 (整数 k、M_K = k/20) を粗い網 (N_s = N_p/4、長さの許容差 0.1 r_t) で 1 回掃き、
     候補の区間ごとの θ_max の局所極小を生産の網 (N_p、カードの L_total_tol) で前後と確かめ (ずらしは最大 3 回)、代表が残った谷を
     一度だけ作る同点の集合 (θ_min + 0.01°) から推定の距離が最大の谷を選ぶ。詳細は下の「規則 coarse_min_theta_v2」の節。
