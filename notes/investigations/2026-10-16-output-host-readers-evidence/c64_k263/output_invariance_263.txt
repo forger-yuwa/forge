@@ -1,0 +1,656 @@
+# FORGE_DIAG_OUTPUT_INVARIANCE: step 263 (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1c, §6 V1 (f′)・(g′))
+# 数値更新 0 step。各腕の前に S0 (writeStepOutputs の直前の状態) へ戻し、writeStepOutputs の出力の処理だけを実行して比べた。
+# 腕 A: 要求なし
+# 腕 B: SNAPSHOT_REQUEST、節点の出力・流量の積算は止める
+# 腕 C: SNAPSHOT_REQUEST、節点の出力・流量の積算は起動時の設定のまま
+# 腕 A2: 要求なし (B・C の後)
+# 比べた配列: device 311 個 (2.2 MB)、host 318 個 (2.2 MB)。flow_float = 8 bytes
+# 比べないもの: 数値のモジュールのファイル内 static な device の作業配列 (出力の関数から届かない)、cfg (出力の関数は const で受ける)、残差の記録 (writeStepOutputs に渡らない)
+# 戻した直後の device の不一致 (配列数): A 0 B 0 C 0 A2 0
+# 腕 B の記録: SNAPSHOT_DONE に step 263 (DONE +1 行・FAILED +0 行・要求 消えた)
+# 腕 C の記録: SNAPSHOT_DONE に step 263 (DONE +1 行・FAILED +0 行・要求 消えた)
+#
+# 腕どうしの差 (配列の数):
+#   A-B: device 0、host 59 — host c:Ht host c:P host c:T host c:Ux host c:Uy host c:ro host c:roUx host c:roUy host c:roe host c:sonic host b1:Ps host b1:Ts host b1:ro host b1:roUx host b1:roe host b2:Ts host b2:Ux host b2:Uy host b2:ro host b2:roUx host b2:roUy host b2:roe host b3:Ps host b3:Ts host b3:Ux host b3:Uy host b3:ro host b3:roUx host b3:roUy host b3:roe host b4:Ps host b4:Ts host b4:Ux host b4:Uy host b4:ro host b4:roUx host b4:roUy host b4:roe host b5:Ps host b5:ifaceFw ...
+#   A-C: device 0、host 59 — host c:Ht host c:P host c:T host c:Ux host c:Uy host c:ro host c:roUx host c:roUy host c:roe host c:sonic host b1:Ps host b1:Ts host b1:ro host b1:roUx host b1:roe host b2:Ts host b2:Ux host b2:Uy host b2:ro host b2:roUx host b2:roUy host b2:roe host b3:Ps host b3:Ts host b3:Ux host b3:Uy host b3:ro host b3:roUx host b3:roUy host b3:roe host b4:Ps host b4:Ts host b4:Ux host b4:Uy host b4:ro host b4:roUx host b4:roUy host b4:roe host b5:Ps host b5:ifaceFw ...
+#   A-A2: device 0、host 0
+#   B-C: device 0、host 0
+#   B-A2: device 0、host 59 — host c:Ht host c:P host c:T host c:Ux host c:Uy host c:ro host c:roUx host c:roUy host c:roe host c:sonic host b1:Ps host b1:Ts host b1:ro host b1:roUx host b1:roe host b2:Ts host b2:Ux host b2:Uy host b2:ro host b2:roUx host b2:roUy host b2:roe host b3:Ps host b3:Ts host b3:Ux host b3:Uy host b3:ro host b3:roUx host b3:roUy host b3:roe host b4:Ps host b4:Ts host b4:Ux host b4:Uy host b4:ro host b4:roUx host b4:roUy host b4:roe host b5:Ps host b5:ifaceFw ...
+#   C-A2: device 0、host 59 — host c:Ht host c:P host c:T host c:Ux host c:Uy host c:ro host c:roUx host c:roUy host c:roe host c:sonic host b1:Ps host b1:Ts host b1:ro host b1:roUx host b1:roe host b2:Ts host b2:Ux host b2:Uy host b2:ro host b2:roUx host b2:roUy host b2:roe host b3:Ps host b3:Ts host b3:Ux host b3:Uy host b3:ro host b3:roUx host b3:roUy host b3:roe host b4:Ps host b4:Ts host b4:Ux host b4:Uy host b4:ro host b4:roUx host b4:roUy host b4:roe host b5:Ps host b5:ifaceFw ...
+#
+# 列: 名前 要素数 bytes | 腕ごとに S0 からの差の要素数 (0 = ビット同一) と最大絶対差 | s0twin = S0 で host の写しが対応の device と違う要素の数 (- = 対応なし) | 変わった host の写しが S0 の device と同一か
+# S0 で host の写しが device と違う配列: 117 個
+name n bytes A.nDiff A.maxAbs B.nDiff B.maxAbs C.nDiff C.maxAbs A2.nDiff A2.maxAbs s0twin twin
+dev:c:A_closure_x 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:A_closure_y 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:A_planar 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Ht 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:P 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Pk_diag 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Qw_Wall 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Rmix 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:T 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:TN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Tau_Wall 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Taw_HTnx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Taw_HTny 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Taw_HTnz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Taw_Prim_Overlay 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Taw_diag 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Ux 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:UxN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Uy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:UyN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:Uz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:UzN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:axisym_aux0 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:axisym_aux1 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:axisym_aux2 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:axisym_divU 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:axisym_uy_over_r 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:ccx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:ccy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:ccz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:cfl 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:cfl_pseudo 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:cp 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dAux0dx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dAux0dy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dAux1dy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dAux2dx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dKdx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dKdy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dKdz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dOmegadx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dOmegady 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dOmegadz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dPdx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dPdy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dPdz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dTdx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dTdy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dTdz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUxdx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUxdy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUxdz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUydx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUydy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUydz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUzdx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUzdy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dUzdz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:deltaP 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:delta_les 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_00 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_01 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_02 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_03 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_04 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_10 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_11 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_12 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_13 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_14 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_20 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_21 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_22 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_23 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_24 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_30 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_31 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_32 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_33 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_34 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_40 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_41 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_42 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_43 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:diag_block_44 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:divU 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:divU*vol 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:divU_star 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_new_0 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_new_1 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_new_2 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_new_3 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_new_4 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_old_0 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_old_1 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_old_2 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_old_3 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_block_old_4 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roUx_new 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roUx_old 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roUy_new 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roUy_old 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roUz_new 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roUz_old 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_ro_new 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_ro_old 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roe_new 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dq_roe_old 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:drodx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:drody 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:drodz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:dt_local 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:ducros 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:fd_shield 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:fe_iddes 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:gamma 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:k 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:l_des 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:limiter_P 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:limiter_T 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:limiter_Ux 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:limiter_Uy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:limiter_Uz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:limiter_ro 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:omega 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:rd_des 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_ro 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roK 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roK_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roOmega 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roOmega_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roUx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roUx_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roUy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roUy_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roUz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roUz_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_ro_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roe 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:res_roe_m 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:rhs_block_0 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:rhs_block_1 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:rhs_block_2 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:rhs_block_3 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:rhs_block_4 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:ro 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roK 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roKM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roKN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roKNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roK_wf 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roOmega 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roOmegaM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roOmegaN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roOmegaNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roOmega_wf 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUx 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUxM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUxN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUxNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUy 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUyM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUyN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUyNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUz 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUzM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUzN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roUzNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roe 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roeM 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roeN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:roeNN 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:ros 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:scalarDirichletPin 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:sonic 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:src_jac_k 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:src_jac_omega 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:sstF1 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:thermCond 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:transport_diag_k 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:transport_diag_omega 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:vis_lam 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:vis_turb 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:volume 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:wall_dist 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:wall_y_eff 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:wf_irep_flag 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:c:wf_pk 1195 9560 0 0 0 0 0 0 0 0 - -
+dev:p:cfl_pln 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:cfl_pseudo_pln 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:dcc 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:fx 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:ge_x 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:ge_y 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:ge_z 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:gr0_x 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:gr0_y 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:gr0_z 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:gr1_x 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:gr1_y 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:gr1_z 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:massflux 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:pcx 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:pcy 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:pcz 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:ss 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:ss_planar 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:sx 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:sx_planar 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:sy 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:sy_planar 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:sz 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:p:sz_planar 2154 17232 0 0 0 0 0 0 0 0 - -
+dev:b1:Ps 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:Pt 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:Ts 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:Tt 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:Ux 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:Uy 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:Uz 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:k 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:omega 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:ro 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:roUx 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:roUy 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:roUz 17 136 0 0 0 0 0 0 0 0 - -
+dev:b1:roe 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Ps 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Pt 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Ts 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Tt 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Ux 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Uy 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:Uz 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:kb 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:omegab 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:ro 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:roUx 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:roUy 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:roUz 17 136 0 0 0 0 0 0 0 0 - -
+dev:b2:roe 17 136 0 0 0 0 0 0 0 0 - -
+dev:b3:Ps 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:Pt 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:Ts 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:Tt 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:Ux 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:Uy 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:Uz 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:kb 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:omegab 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:ro 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:roUx 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:roUy 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:roUz 61 488 0 0 0 0 0 0 0 0 - -
+dev:b3:roe 61 488 0 0 0 0 0 0 0 0 - -
+dev:b4:Ps 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:Pt 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:Ts 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:Tt 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:Ux 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:Uy 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:Uz 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:kb 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:omegab 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:ro 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:roUx 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:roUy 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:roUz 11 88 0 0 0 0 0 0 0 0 - -
+dev:b4:roe 11 88 0 0 0 0 0 0 0 0 - -
+dev:b5:Ps 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:Pt 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:Ts 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:Tt 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:Ux 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:Uy 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:Uz 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ifaceFw 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ifaceRconv 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ifaceRpre 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ifaceRraw 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ifaceRro 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:kb 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:omegab 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:qwall 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ro 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:roUx 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:roUy 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:roUz 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:roe 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:twall_x 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:twall_y 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:twall_z 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:utau 41 328 0 0 0 0 0 0 0 0 - -
+dev:b5:ypls 41 328 0 0 0 0 0 0 0 0 - -
+dev:b6:Ps 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:Pt 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:Ts 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:Tt 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:Ux 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:Uy 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:Uz 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:kb 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:omegab 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:ro 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:roUx 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:roUy 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:roUz 11 88 0 0 0 0 0 0 0 0 - -
+dev:b6:roe 11 88 0 0 0 0 0 0 0 0 - -
+host c:A_closure_x 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:A_closure_y 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:A_planar 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Ht 1195 9560 0 0 1195 599.411 1195 599.411 0 0 1195 B:=dev C:=dev 
+host c:P 1195 9560 0 0 1178 163.699 1178 163.699 0 0 1178 B:=dev C:=dev 
+host c:Pk_diag 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Qw_Wall 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Rmix 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:T 1195 9560 0 0 1195 0.596726 1195 0.596726 0 0 1195 B:=dev C:=dev 
+host c:TN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Tau_Wall 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Taw_HTnx 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Taw_HTny 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Taw_HTnz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Taw_Prim_Overlay 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Taw_diag 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Ux 1195 9560 0 0 1094 20.7341 1094 20.7341 0 0 1094 B:=dev C:=dev 
+host c:UxN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Uy 1195 9560 0 0 1094 2.2593 1094 2.2593 0 0 1094 B:=dev C:=dev 
+host c:UyN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:Uz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:UzN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:axisym_aux0 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:axisym_aux1 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:axisym_aux2 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:axisym_divU 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:axisym_uy_over_r 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:ccx 1195 9560 0 0 0 0 0 0 0 0 1175 -
+host c:ccy 1195 9560 0 0 0 0 0 0 0 0 1069 -
+host c:ccz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:cfl 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:cfl_pseudo 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:cp 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:dAux0dx 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dAux0dy 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dAux1dy 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dAux2dx 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dKdx 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dKdy 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dKdz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dOmegadx 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dOmegady 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dOmegadz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dPdx 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dPdy 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dPdz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dTdx 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dTdy 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dTdz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dUxdx 1195 9560 0 0 0 0 0 0 0 0 998 -
+host c:dUxdy 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dUxdz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dUydx 1195 9560 0 0 0 0 0 0 0 0 998 -
+host c:dUydy 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dUydz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dUzdx 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dUzdy 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dUzdz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:deltaP 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:delta_les 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:diag_block_00 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_01 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_02 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_03 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_04 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_10 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_11 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_12 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_13 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_14 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_20 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_21 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_22 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_23 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_24 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_30 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_31 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_32 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_33 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_34 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_40 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_41 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_42 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_43 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:diag_block_44 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:divU 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:divU*vol 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:divU_star 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_block_new_0 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dq_block_new_1 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:dq_block_new_2 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:dq_block_new_3 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_block_new_4 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:dq_block_old_0 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:dq_block_old_1 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:dq_block_old_2 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:dq_block_old_3 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_block_old_4 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:dq_roUx_new 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roUx_old 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roUy_new 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roUy_old 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roUz_new 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roUz_old 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_ro_new 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_ro_old 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roe_new 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dq_roe_old 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:drodx 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:drody 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:drodz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:dt_local 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:ducros 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:fd_shield 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:fe_iddes 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:gamma 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:k 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:l_des 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:limiter_P 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:limiter_T 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:limiter_Ux 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:limiter_Uy 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:limiter_Uz 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:limiter_ro 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:omega 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:rd_des 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_ro 1195 9560 0 0 0 0 0 0 0 0 1037 -
+host c:res_roK 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roK_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roOmega 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roOmega_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roUx 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:res_roUx_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roUy 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:res_roUy_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roUz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roUz_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_ro_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:res_roe 1195 9560 0 0 0 0 0 0 0 0 996 -
+host c:res_roe_m 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:rhs_block_0 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:rhs_block_1 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:rhs_block_2 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:rhs_block_3 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:rhs_block_4 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:ro 1195 9560 0 0 1195 0.00346264 1195 0.00346264 0 0 1195 B:=dev C:=dev 
+host c:roK 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roKM 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roKN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roKNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roK_wf 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roM 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:roN 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:roNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roOmega 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roOmegaM 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roOmegaN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roOmegaNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roOmega_wf 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roUx 1195 9560 0 0 1111 24.4564 1111 24.4564 0 0 1111 B:=dev C:=dev 
+host c:roUxM 1195 9560 0 0 0 0 0 0 0 0 1111 -
+host c:roUxN 1195 9560 0 0 0 0 0 0 0 0 1111 -
+host c:roUxNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roUy 1195 9560 0 0 1094 2.65866 1094 2.65866 0 0 1094 B:=dev C:=dev 
+host c:roUyM 1195 9560 0 0 0 0 0 0 0 0 1094 -
+host c:roUyN 1195 9560 0 0 0 0 0 0 0 0 1094 -
+host c:roUyNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roUz 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roUzM 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roUzN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roUzNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:roe 1195 9560 0 0 1195 722.381 1195 722.381 0 0 1195 B:=dev C:=dev 
+host c:roeM 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:roeN 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:roeNN 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:ros 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:scalarDirichletPin 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:sonic 1195 9560 0 0 1195 0.345123 1195 0.345123 0 0 1195 B:=dev C:=dev 
+host c:src_jac_k 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:src_jac_omega 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:sstF1 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:thermCond 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:transport_diag_k 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:transport_diag_omega 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:vis_lam 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:vis_turb 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:volume 1195 9560 0 0 0 0 0 0 0 0 1195 -
+host c:wall_dist 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:wall_y_eff 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:wf_irep_flag 1195 9560 0 0 0 0 0 0 0 0 0 -
+host c:wf_pk 1195 9560 0 0 0 0 0 0 0 0 0 -
+host p:cfl_pln 2154 17232 0 0 0 0 0 0 0 0 2154 -
+host p:cfl_pseudo_pln 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:dcc 2154 17232 0 0 0 0 0 0 0 0 1996 -
+host p:fx 2154 17232 0 0 0 0 0 0 0 0 2154 -
+host p:ge_x 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:ge_y 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:ge_z 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:gr0_x 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:gr0_y 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:gr0_z 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:gr1_x 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:gr1_y 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:gr1_z 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:massflux 2154 17232 0 0 0 0 0 0 0 0 2035 -
+host p:pcx 2154 17232 0 0 0 0 0 0 0 0 2154 -
+host p:pcy 2154 17232 0 0 0 0 0 0 0 0 2091 -
+host p:pcz 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:ss 2154 17232 0 0 0 0 0 0 0 0 2154 -
+host p:ss_planar 2154 17232 0 0 0 0 0 0 0 0 2154 -
+host p:sx 2154 17232 0 0 0 0 0 0 0 0 1076 -
+host p:sx_planar 2154 17232 0 0 0 0 0 0 0 0 1076 -
+host p:sy 2154 17232 0 0 0 0 0 0 0 0 1158 -
+host p:sy_planar 2154 17232 0 0 0 0 0 0 0 0 1158 -
+host p:sz 2154 17232 0 0 0 0 0 0 0 0 0 -
+host p:sz_planar 2154 17232 0 0 0 0 0 0 0 0 0 -
+host b1:Ps 17 136 0 0 17 64.5784 17 64.5784 0 0 17 B:=dev C:=dev 
+host b1:Pt 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:Ts 17 136 0 0 17 300.055 17 300.055 0 0 17 B:=dev C:=dev 
+host b1:Tt 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:Ux 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:Uy 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:Uz 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:k 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:omega 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:ro 17 136 0 0 17 0.000535694 17 0.000535694 0 0 17 B:=dev C:=dev 
+host b1:roUx 17 136 0 0 17 40.8768 17 40.8768 0 0 17 B:=dev C:=dev 
+host b1:roUy 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:roUz 17 136 0 0 0 0 0 0 0 0 0 -
+host b1:roe 17 136 0 0 17 254184 17 254184 0 0 17 B:=dev C:=dev 
+host b1:diagVar 0 0 0 0 0 0 0 0 0 0 - -
+host b2:Ps 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:Pt 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:Ts 17 136 0 0 17 300 17 300 0 0 17 B:=dev C:=dev 
+host b2:Tt 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:Ux 17 136 0 0 17 34.9072 17 34.9072 0 0 17 B:=dev C:=dev 
+host b2:Uy 17 136 0 0 17 0.00391371 17 0.00391371 0 0 17 B:=dev C:=dev 
+host b2:Uz 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:kb 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:omegab 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:ro 17 136 0 0 17 1.17683 17 1.17683 0 0 17 B:=dev C:=dev 
+host b2:roUx 17 136 0 0 17 41.0797 17 41.0797 0 0 17 B:=dev C:=dev 
+host b2:roUy 17 136 0 0 17 0.00460577 17 0.00460577 0 0 17 B:=dev C:=dev 
+host b2:roUz 17 136 0 0 0 0 0 0 0 0 0 -
+host b2:roe 17 136 0 0 17 254029 17 254029 0 0 17 B:=dev C:=dev 
+host b2:diagVar 0 0 0 0 0 0 0 0 0 0 - -
+host b3:Ps 61 488 0 0 61 101380 61 101380 0 0 61 B:=dev C:=dev 
+host b3:Pt 61 488 0 0 0 0 0 0 0 0 0 -
+host b3:Ts 61 488 0 0 61 300.047 61 300.047 0 0 61 B:=dev C:=dev 
+host b3:Tt 61 488 0 0 0 0 0 0 0 0 0 -
+host b3:Ux 61 488 0 0 61 35.0636 61 35.0636 0 0 61 B:=dev C:=dev 
+host b3:Uy 61 488 0 0 3 8.67362e-19 3 8.67362e-19 0 0 3 B:=dev C:=dev 
+host b3:Uz 61 488 0 0 0 0 0 0 0 0 0 -
+host b3:kb 61 488 0 0 0 0 0 0 0 0 0 -
+host b3:omegab 61 488 0 0 0 0 0 0 0 0 0 -
+host b3:ro 61 488 0 0 61 1.17729 61 1.17729 0 0 61 B:=dev C:=dev 
+host b3:roUx 61 488 0 0 61 41.2649 61 41.2649 0 0 61 B:=dev C:=dev 
+host b3:roUy 61 488 0 0 3 1.02078e-18 3 1.02078e-18 0 0 3 B:=dev C:=dev 
+host b3:roUz 61 488 0 0 0 0 0 0 0 0 0 -
+host b3:roe 61 488 0 0 61 254160 61 254160 0 0 61 B:=dev C:=dev 
+host b3:diagVar 0 0 0 0 0 0 0 0 0 0 - -
+host b4:Ps 11 88 0 0 11 101477 11 101477 0 0 11 B:=dev C:=dev 
+host b4:Pt 11 88 0 0 0 0 0 0 0 0 0 -
+host b4:Ts 11 88 0 0 11 300.597 11 300.597 0 0 11 B:=dev C:=dev 
+host b4:Tt 11 88 0 0 0 0 0 0 0 0 0 -
+host b4:Ux 11 88 0 0 10 34.7167 10 34.7167 0 0 10 B:=dev C:=dev 
+host b4:Uy 11 88 0 0 1 1.11022e-16 1 1.11022e-16 0 0 1 B:=dev C:=dev 
+host b4:Uz 11 88 0 0 0 0 0 0 0 0 0 -
+host b4:kb 11 88 0 0 0 0 0 0 0 0 0 -
+host b4:omegab 11 88 0 0 0 0 0 0 0 0 0 -
+host b4:ro 11 88 0 0 11 1.17746 11 1.17746 0 0 11 B:=dev C:=dev 
+host b4:roUx 11 88 0 0 10 40.874 10 40.874 0 0 10 B:=dev C:=dev 
+host b4:roUy 11 88 0 0 1 1.30724e-16 1 1.30724e-16 0 0 1 B:=dev C:=dev 
+host b4:roUz 11 88 0 0 0 0 0 0 0 0 0 -
+host b4:roe 11 88 0 0 11 254181 11 254181 0 0 11 B:=dev C:=dev 
+host b4:diagVar 0 0 0 0 0 0 0 0 0 0 - -
+host b5:Ps 41 328 0 0 41 20.6612 41 20.6612 0 0 41 B:=dev C:=dev 
+host b5:Pt 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:Ts 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:Tt 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:Ux 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:Uy 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:Uz 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:ifaceFw 41 328 0 0 41 0.24405 41 0.24405 0 0 41 B:=dev C:=dev 
+host b5:ifaceRconv 41 328 0 0 41 0.972787 41 0.972787 0 0 41 B:=dev C:=dev 
+host b5:ifaceRpre 41 328 0 0 41 0.972787 41 0.972787 0 0 41 B:=dev C:=dev 
+host b5:ifaceRraw 41 328 0 0 41 0.960778 41 0.960778 0 0 41 B:=dev C:=dev 
+host b5:ifaceRro 41 328 0 0 41 3.22381e-06 41 3.22381e-06 0 0 41 B:=dev C:=dev 
+host b5:kb 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:omegab 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:qwall 41 328 0 0 41 442.816 41 442.816 0 0 41 B:=dev C:=dev 
+host b5:ro 41 328 0 0 41 0.000568711 41 0.000568711 0 0 41 B:=dev C:=dev 
+host b5:roUx 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:roUy 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:roUz 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:roe 41 328 0 0 41 51.6529 41 51.6529 0 0 41 B:=dev C:=dev 
+host b5:twall_x 41 328 0 0 41 3.04489 41 3.04489 0 0 41 B:=dev C:=dev 
+host b5:twall_y 41 328 0 0 41 0.058863 41 0.058863 0 0 41 B:=dev C:=dev 
+host b5:twall_z 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:utau 41 328 0 0 41 0.0962205 41 0.0962205 0 0 41 B:=dev C:=dev 
+host b5:ypls 41 328 0 0 0 0 0 0 0 0 0 -
+host b5:diagVar 4884 4884 0 0 2758 250 2758 250 0 0 - -
+host b6:Ps 11 88 0 0 11 101363 11 101363 0 0 11 B:=dev C:=dev 
+host b6:Pt 11 88 0 0 0 0 0 0 0 0 0 -
+host b6:Ts 11 88 0 0 11 300.516 11 300.516 0 0 11 B:=dev C:=dev 
+host b6:Tt 11 88 0 0 0 0 0 0 0 0 0 -
+host b6:Ux 11 88 0 0 10 34.7463 10 34.7463 0 0 10 B:=dev C:=dev 
+host b6:Uy 11 88 0 0 1 8.67362e-19 1 8.67362e-19 0 0 1 B:=dev C:=dev 
+host b6:Uz 11 88 0 0 0 0 0 0 0 0 0 -
+host b6:kb 11 88 0 0 0 0 0 0 0 0 0 -
+host b6:omegab 11 88 0 0 0 0 0 0 0 0 0 -
+host b6:ro 11 88 0 0 11 1.17694 11 1.17694 0 0 11 B:=dev C:=dev 
+host b6:roUx 11 88 0 0 10 40.8927 10 40.8927 0 0 10 B:=dev C:=dev 
+host b6:roUy 11 88 0 0 1 1.02079e-18 1 1.02079e-18 0 0 1 B:=dev C:=dev 
+host b6:roUz 11 88 0 0 0 0 0 0 0 0 0 -
+host b6:roe 11 88 0 0 11 254061 11 254061 0 0 11 B:=dev C:=dev 
+host b6:diagVar 0 0 0 0 0 0 0 0 0 0 - -
+host conjugate:solid 11918 11918 0 0 0 0 0 0 0 0 - -
+#
+# DEVICE: 腕の間で全配列がビット同一
+# HOST: **腕の間で差あり** (上の表の twin 列: 出力が D2H で写した値か)
+OUTPUT_INVARIANCE_VERDICT: FAIL (device の差 0、host の差 236、戻しの不一致 0; 腕の組の合計)
