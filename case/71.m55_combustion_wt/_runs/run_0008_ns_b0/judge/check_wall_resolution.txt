@@ -1,0 +1,7 @@
+=== /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0008_ns_b0  (wallTreatmentSST=0) ===
+  wall         step  90000  y1 = 1.363e-07 m  y1+ 平均   0.479 / p99   0.776 / 最大   0.999
+               評価できた面積割合 100.0 % ; y1+ > 1 が面積割合 0.0 % ; 最大の位置 index 0 (x -1, y 0.3)  ; ソルバ ypls 平均 0.174
+
+最大 y1+ = 0.999 (幾何的特異点では収束しないので判定には使わない) ; **目標 1 を超える面積割合 最大 0.0 % (許容 2 %)**
+VERDICT: PASS (壁解像)
+CHECK_WALL_RESOLUTION_EXIT: 0

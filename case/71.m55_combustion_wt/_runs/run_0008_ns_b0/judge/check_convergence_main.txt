@@ -1,0 +1,14 @@
+
+=== /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0008_ns_b0  [last step 92488]  -> PASS (converged) ===
+  rms_ro      : init=6.23e-05 peak=6.77e-05 fin=6.53e-08 drop= 3.0dec flat   
+  rms_roUx    : init=4.50e-02 peak=8.40e-02 fin=1.81e-05 drop= 3.7dec flat   
+  rms_roUy    : init=2.86e-02 peak=3.08e-02 fin=9.95e-06 drop= 3.5dec flat   
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=3.84e+01 peak=8.81e+01 fin=6.29e-02 drop= 3.1dec flat   
+  rms_roK     : init=8.13e-01 peak=9.66e-01 fin=5.21e-06 drop= 5.3dec flat   
+  rms_roOmega : init=9.09e+05 fin=3.76e+01 drop= 4.4dec flat   
+  rms_roY0    : init=5.70e-05 peak=6.18e-05 fin=4.74e-08 drop= 3.1dec flat   
+  rms_roY1    : init=5.35e-06 peak=5.80e-06 fin=4.45e-09 drop= 3.1dec flat   
+
+OVERALL: ALL PASS
+EXIT 0

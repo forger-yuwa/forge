@@ -1,0 +1,9 @@
+
+=== /home/ubuntu/m55_diag_0007/out/v5c_series.csv  [100 rows, steps 2000..200000]  -> DRIFTING ===
+  maxabs_eta0.1   : tail mean=0.222  drift=2.2%/tail  fluct=2.5%            STEADY
+  halfamp_eta0.1  : tail mean=0.07944  drift=1.0%/tail  fluct=1.1%          STEADY
+  maxabs_axis     : tail mean=0.2269  drift=3.0%/tail  fluct=3.0%           STEADY
+  halfamp_axis    : tail mean=0.09274  drift=5.3%/tail  fluct=5.3%          DRIFTING
+
+OVERALL: NOT ALL STEADY (see above)
+CHECK_QUASISTEADY_EXIT: 1
