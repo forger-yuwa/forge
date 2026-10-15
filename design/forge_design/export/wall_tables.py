@@ -4,6 +4,8 @@ r"""Excel 向けの壁の表 (plans/accepted/tooling-nozzle-wt-deliverables.md �
 - `cfd_wall_table`: CFD の壁節点ごとの壁面量表 `wall_cfd_nodes.csv` [SI] と状態 `wall_cfd_nodes.status.json`。
 - `wall_heat_series`: 全 `res_<壁名>_<physID>_<step>.h5` の総熱量の時系列 (`check_quasisteady.py --series-csv` の入力)。
 - `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・熱量の準定常 [総熱量と壁の全節点の熱量、16 区間の和は補助]・壁解像・熱量の状態)。
+  収束の道具は run_case.sh・受け渡しの関門と同じ規則 (`settle.select_judge`; plan tooling-settle-convergence-and-monitor §5.1 #7b):
+  `settle_criteria.yaml` のある run の本段は `check_settled.py --bind` (停止規則 v2 の再評価と照合)、それ以外は今どおり `check_convergence.py`。
 - `write_xlsx`: 上の CSV と条件・注記を `.xlsx` に (`.venv-pptx` の xlsxwriter を subprocess で呼ぶ)。
 - `table_x_mm`: 形状表の x の点 (粗 1 mm・スロート付近 0.1 mm)。設計壁と物理壁の比較の表 (`wall_compare.py`) も同じ点を使う。
 
@@ -637,11 +639,77 @@ def _mirror_for_segment(run_dir: Path, td: Path) -> list:
     return copied
 
 
+def _judge_selection(run_dir: Path) -> dict:
+    """収束の判定の道具の選択 (run_case.sh・stop_rule.postprocess・受け渡しの関門と同じ `settle.select_judge`)。"""
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import settle
+    return settle.select_judge(run_dir)
+
+
+def _settled_convergence(run_dir: Path, st: int, last_step: int, sel: dict, python=None) -> dict:
+    """新方式 (settle_criteria.yaml のある run の本段・手で組んだ run) の収束: `check_settled.py <run> --bind --end-step <st> --no-write
+    --json` (本段の起動・基準との照合の後に判定; run ディレクトリに書かない)。終了コード 0 → PASS、1 (NOT_SETTLED)・2 (DIVERGED) →
+    FAIL、3 (INDETERMINATE: 照合の不一致・判定不能) ほか → 未評価。停止規則 v2 の再評価 (STOP_RULE_STATE.json の reeval) が同じ終端に
+    あれば、量の判定 (digest)・verdict が一致することも確かめ、食い違えば未評価 (記録どうしが合わない場を熱設計に使わない)。
+    verdict_line には道具の名前を入れる (成果物の xlsx の注記・status.json にどちらの道具かが残る)。"""
+    conv = {"tool": "check_settled.py --bind", "selection": {k: sel.get(k) for k in ("tool", "mode", "why", "problems")}}
+    if st != last_step:
+        conv.update(result="未評価", reason=f"スナップショット step {st} が最終の壁ダンプ {last_step} でない (判定の終端を切り出さない)")
+        return conv
+    args = [TOOLS / "check_settled.py", run_dir, "--bind", "--no-write", "--json", "--end-step", st]
+    rc_, txt = _run_tool(args, python)
+    conv["cmd"] = " ".join(str(a) for a in args)
+    conv["exit"] = rc_
+    lines = txt.splitlines()
+    vl = next((ln.strip() for ln in reversed(lines) if ln.startswith("VERDICT:")), None)
+    res = None
+    try:
+        a = lines.index("{")
+        b = max(i for i, ln in enumerate(lines) if ln == "}")
+        res = json.loads("\n".join(lines[a:b + 1]))
+    except ValueError:
+        res = None
+    if res is not None:
+        conv["judged"] = {"end_step": res.get("end_step"), "terminal_step": res.get("terminal_step"), "stop_step": res.get("stop_step"),
+                          "verdict": res.get("verdict"), "criteria_sha256": (res.get("criteria") or {}).get("sha256"),
+                          "quantities": {str(q.get("name")): q.get("verdict") for q in res.get("quantities") or []}}
+    where = (f"終端 {res.get('terminal_step')}" + (f"・停止の観測 {res.get('stop_step')}" if res.get("stop_step") is not None else "")
+             if res is not None else f"end_step {st}")
+    conv["verdict_line"] = f"{vl or 'VERDICT: (行なし)'} [check_settled.py --bind、{where}]"
+    result = {0: "PASS", 1: "FAIL", 2: "FAIL"}.get(rc_, "未評価")
+    if result == "未評価":
+        conv["reason"] = vl or f"check_settled.py の終了コード {rc_} (VERDICT の行が無い)"
+    # 停止規則 v2 の再評価との一致 (同じ終端のとき)
+    try:
+        from ..evaluate import stop_rule as SR
+        stt = SR.read_state(run_dir)
+    except Exception:  # noqa: BLE001 — 読めなければ照合しない (記録に残す)
+        stt = None
+    ve = (stt or {}).get("reeval") if isinstance(stt, dict) and stt.get("method") == "v2" else None
+    if isinstance(ve, dict) and ve.get("end_step") == st:
+        same = res is not None and SR.quantities_digest(res) == ve.get("digest") and res.get("verdict") == ve.get("verdict")
+        conv["stop_rule_reeval"] = {"end_step": ve.get("end_step"), "verdict": ve.get("verdict"), "matches": bool(same),
+                                    "state_status": stt.get("status")}
+        if not same and result == "PASS":
+            result = "未評価"
+            conv["reason"] = (f"停止規則 v2 の再評価 (終端 {ve.get('end_step')}、{ve.get('verdict')}) と今の判定が食い違う "
+                              "(記録どうしが合わない場を熱設計に使わない)")
+    else:
+        conv["stop_rule_reeval"] = {"compared": False, "why": ("停止規則 v2 の記録が無い" if not isinstance(ve, dict)
+                                                               else f"再評価の終端 {ve.get('end_step')} が対象の step {st} と違う")}
+    conv["result"] = result
+    return conv
+
+
 def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     """壁面量を熱設計に使えるか (plan §4.5): 対象 snapshot と同じ区間の `check_convergence.py` (`stage_manifest.json` があれば
     `--segment`)・総熱量の時系列に `check_quasisteady.py --series-csv`・`check_wall_resolution.py` の 3 つが合格し、熱量の状態が
     `valid` のときだけ `PASS`。不合格があれば `FAIL`、判定材料が無ければ `未評価`。各ツールの VERDICT 行を返す。
-    ツールは run ディレクトリに書かせない (収束の --segment は入力を一時ディレクトリに写して回す)。"""
+    ツールは run ディレクトリに書かせない (収束の --segment は入力を一時ディレクトリに写して回す)。
+    収束の道具は `settle.select_judge` で選ぶ (plan tooling-settle-convergence-and-monitor §5.1 #7b): settle_criteria.yaml のある run の
+    本段・手で組んだ run は `_settled_convergence` (check_settled.py --bind)、それ以外 (基準の無い run・前の段・本段でない起動) は今どおり。
+    基準のある run は判定不能でも check_convergence.py へ落とさない。"""
     run_dir = Path(run_dir)
     T = _build_table(run_dir, step, False, wall_ids, with_y1plus=False)
     st, heat = T["step"], T["status"]
@@ -650,6 +718,20 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     out = {"run_dir": str(run_dir), "step": st, "walls": {str(b["pid"]): b["name"] for b in T["blocks"]},
            "heat_status": heat, "heat_per_wall": {str(k): v["status"] for k, v in T["per_wall"].items()}}
     # 1. 収束
+    sel = _judge_selection(run_dir) if os.path.lexists(run_dir / "settle_criteria.yaml") else None
+    if sel is not None and sel["tool"] == "check_settled.py":
+        conv = _settled_convergence(run_dir, st, last_step, sel, python)
+    else:
+        conv = _legacy_convergence(run_dir, st, last_step, python)
+        if sel is not None:
+            conv["selection"] = {k: sel.get(k) for k in ("tool", "mode", "why")}
+    out["convergence"] = conv
+    _thermal_use_rest(out, run_dir, T, st, heat, names, python)
+    return out
+
+
+def _legacy_convergence(run_dir: Path, st, last_step, python=None) -> dict:
+    """今までの収束 (`check_convergence.py`; stage_manifest.json があれば --segment を一時ディレクトリで)。"""
     conv = {"tool": "check_convergence.py"}
     if st != last_step:
         conv.update(result="未評価", reason=f"スナップショット step {st} が最終の壁ダンプ {last_step} でない (区間を切り出さない)")
@@ -674,7 +756,12 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
                                    if "NO residual_history" in ln or "判定不能" in ln or "empty residual" in ln), None)
         else:
             conv["result"] = "FAIL"
-    out["convergence"] = conv
+    return conv
+
+
+def _thermal_use_rest(out: dict, run_dir: Path, T: dict, st, heat, names, python=None) -> None:
+    """thermal_use の 2. 総熱量の準定常・3. 壁解像・総合の判定 (out に書く; 収束は out["convergence"] に入っている)。"""
+    conv = out["convergence"]
     # 2. 総熱量の準定常
     qs = {"tool": "check_quasisteady.py --series-csv"}
     if heat != "valid":
@@ -718,7 +805,6 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
         out["verdict"] = "未評価"
     out["rule"] = ("収束・熱量の準定常 (総熱量と壁の全節点の熱量; 最悪で判定)・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、"
                    "不合格 (熱量 nonfinite を含む) があれば FAIL、他は未評価")
-    return out
 
 
 # ---------------------------------------------------------------------------------------------------------------------

@@ -54,7 +54,7 @@ PowerPoint にまとめる (2026-10-05 ユーザ指示でルール化)。設計�
 | 2 | 解析領域と境界 | `nozzle.h5` の格子 (間引き表示) と境界パッチを physID ごとに色分け、スロート近傍の拡大 |
 | 3 | 境界条件 | `bcondConfig.yaml` から転記 (physID・境界名・kind・値) |
 | 4 | 解析設定と物性 | 離散化・対流スキーム・時間積分・step 数・乱流モデル・格子・初期場・壁の δ_r の出所・凝縮設定 / 気体・粘性・熱伝導・r_t・設計 M |
-| 5 | 判定ゲート | `check_convergence` (OVERALL と不合格の列)・`check_mesh_quality`・NaN/Inf・量別の準定常 VERDICT と判定区間 (`--verdicts`; 無ければ「VERDICT 未指定」)・準定常 (末尾 5 枚の変動)・壁解像 y₁⁺ — **不合格・未収束もそのまま載せる** |
+| 5 | 判定ゲート | 収束 (`CONVERGENCE_VERDICT.txt` の 1 行目の道具に従う: `check_convergence` は OVERALL と不合格の列、`settle_criteria.yaml` のある run の本段の `check_settled` は VERDICT と SETTLED でない量; 2026-10-16)・`check_mesh_quality`・NaN/Inf・量別の準定常 VERDICT と判定区間 (`--verdicts`; 無ければ「VERDICT 未指定」)・準定常 (末尾 5 枚の変動)・壁解像 y₁⁺ — **不合格・未収束もそのまま載せる** |
 | 6 | 評価量 (表) | 上の 1〜5 の表。列は r=0 / r/r_w=0.1 / VERDICT / 判定区間 / 備考 (末尾 5 枚の幅と `--verdicts` の note) |
 | 7 | 評価量 (図) | 試験部の M/M_d − 1 の図 (r=0 と r/r_w=0.1、Euler 参照も重ねる) |
 | 8〜 | コンタ | マッハ数・M/M_d − 1 (±0.5 %) / (r_t/p)∂p/∂x・数値シュリーレン log10(\|∇ρ\| r_t/ρ) / 静圧・静温 / 凝縮 ON: 液滴の質量分率 g・過冷却度 T_sat − T・過飽和度 S |
@@ -91,5 +91,6 @@ PowerPoint にまとめる (2026-10-05 ユーザ指示でルール化)。設計�
 
 - README の冒頭に、**寸法の出荷ゲート** (`DIMENSIONS.json`: STEP とメッシュから測った入口半径・直管長・縮流部長・スロート径・
   スロート→出口長と、要求カードの公差) と `thermal_use` が出る。ゲートが FAIL の成果物は渡さない。
+- `thermal_use` の収束は run_case.sh・受け渡しの関門と同じ規則で道具を選ぶ (2026-10-16): `settle_criteria.yaml` のある run の本段は `check_settled.py --bind` (停止規則 v2 の再評価と照合; 食い違えば未評価)、それ以外は `check_convergence.py`。どちらを使ったかは `thermal_use.convergence.tool` と、注記・status.json の収束の行 (`[check_settled.py --bind、終端 …]`) に残る。
 - 軸対称の壁への熱量は `iface_Qf_eff` (1 rad あたりの積分値) × 2π から作る。`iface_q_eff` は軸対称では r·q で熱流束ではない。
 - `deliverables/` は run の成果物なので commit しない。

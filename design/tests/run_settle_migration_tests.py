@@ -27,9 +27,14 @@ forge_launches.jsonl・solverConfig.yaml) は runner_axismach と forge と同�
       停止規則の後処理 `stop_rule.postprocess` も同じ選択。
   (d) Stop フック (`hook_convergence_gate.py` を一時の根に写して): 両方の道具の CONVERGENCE_VERDICT.txt で block しない、無い・古いと
       今どおり block、案内文に選択の規則と「通過は合格ではない」。
+  (e) #7b 残りの読み手 (同じ選択の規則): 成果物の `wall_tables.thermal_use` (新方式の run は check_settled.py --bind・停止規則の
+      再評価と照合・道具の名前を verdict_line に; 照合の不一致・再評価との食い違いは未評価、NOT_SETTLED は FAIL、前の段は今どおり)、
+      旧方式の run は変更前 (HEAD の wall_tables を git から読む) と出力がビット同一。`deliverables.part_excel` の status.json に載る。
+      設計の報告の収束の欄 (`nozzle_report.convergence_gate_row`) は 1 行目の TOOL で読み分け、旧い形・旧方式は変更前と同じ。
+      `hook_forge_guard.py` の案内文。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_settle_migration_tests.py
-所要: 約 1〜2 分 (本物の δ_E の抽出 3 回)。出力は一時ディレクトリ (全部合格なら消す)。
+所要: 約 1 分 (本物の δ_E の抽出 3 回)。出力は一時ディレクトリ (全部合格なら消す)。
 """
 from __future__ import annotations
 
@@ -215,21 +220,35 @@ def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_n
     (STOPPED_AT なし)。delta_from: 同じ場の別の run の δ_E の抽出を写す (場は同じなので抽出も同じ; 試験の時間を縮める)。"""
     rd = TMP / name
     rd.mkdir()
-    k, cap = (26001, 100000) if kind == "REACHED" else (26000, 26000)
+    k, cap = steps_of(kind)
     X, R, Q = synth_ns()
     write_field(rd, X, R, Q, steps=(0, k))
     info = ns_info(pin)
     (rd / "prepare_info.json").write_text(json.dumps(info))
-    (rd / ST.CRITERIA_FILE).write_text(yaml.safe_dump(criteria(), allow_unicode=True, sort_keys=False))
     (rd / "solverConfig.yaml").write_text(CFG_TEXT % cap)
+    return finish_v2(rd, kind=kind, resid_fn=resid_fn, mdot_fn=mdot_fn, skip_nodes=skip_nodes,
+                     delta=("from", delta_from) if delta_from is not None else ("extract", info))
+
+
+def steps_of(kind):
+    """(停止の step, 上限): REACHED は協調停止 26,001・上限 100,000、CENSORED は上限 = 停止の step 26,000。"""
+    return (26001, 100000) if kind == "REACHED" else (26000, 26000)
+
+
+def finish_v2(rd: Path, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta=None) -> Path:
+    """run (場・solverConfig.yaml は置いてある) に停止規則 v2 の記録一式を書く: 基準・起動の記録・本段の開始の記録・forge の出力の形の
+    データ・STOPPED_AT・停止の step の再評価 (SETTLE_VERDICT.json)・stop_rule.json・STOP_RULE_STATE.json。
+    delta: ("extract", prepare_info) = 本物の抽出、("from", run) = 同じ場の別の run の抽出を写す、None = δ_E の記録なし (関門には使えない)。"""
+    k, cap = steps_of(kind)
+    (rd / ST.CRITERIA_FILE).write_text(yaml.safe_dump(criteria(), allow_unicode=True, sort_keys=False))
     with open(rd / "forge_launches.jsonl", "w") as f:                  # 前の段 (S1) の起動 → 本段の起動
         f.write(json.dumps({"time": 1, "cfg_fnv": "0123456789abcdef"}) + "\n")
     write_launch(rd)
     write_main_notice(rd, cap)
     write_data(rd, k, resid_fn=resid_fn, mdot_fn=mdot_fn, skip_nodes=skip_nodes)
     if kind == "REACHED":
-        files = [{"path": f, "bytes": (rd / f).stat().st_size} for f in (f"res_{k}.h5", f"res_nodes_{k}.h5", "boundary_massflux.csv",
-                                                                         "residual_history.csv")]
+        files = [{"path": f, "bytes": (rd / f).stat().st_size} for f in ("boundary_massflux.csv", "residual_history.csv")
+                 + tuple(f_ for f_ in (f"res_{k}.h5", f"res_nodes_{k}.h5") if (rd / f_).exists())]
         (rd / SR.STOPPED_AT).write_text(json.dumps({"status": "ok", "step": k, "residual_step": k - 1, "request": "{}",
                                                     "nStepOuter": cap, "files": files}, indent=2) + "\n")
     # 停止の step の再評価 (watch_main_stage_v2 と同じ: 新しい RunData・end_step = 停止の step → SETTLE_VERDICT.json)
@@ -239,13 +258,20 @@ def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_n
     pv = ST.write_verdict(rd, r, data)
     reeval = {**SR.judge_summary(r), "end_source": r.get("end_source"), "file": ST.VERDICT_FILE, "sha256": SR._sha256(pv)}
     od = rd / SR.V2_DIR / f"delta_E_{k}"
-    if delta_from is None:
-        delta = SR.extract_delta_e(rd, k, SR.euler_ref_spec(info["stop_rule"]["euler_ref"]), od)
+    sr_info = None
+    if delta is None:
+        de = None
+    elif delta[0] == "extract":
+        sr_info = delta[1]["stop_rule"]
+        de = SR.extract_delta_e(rd, k, SR.euler_ref_spec(sr_info["euler_ref"]), od)
     else:
-        shutil.copytree(delta_from / SR.V2_DIR / f"delta_E_{k}", od)
-        delta = json.loads((delta_from / SR.RECORD).read_text())["delta_E"]
-        delta["dir"] = str(od)
-    rec = {"version": 2, "method": "v2", "plan": SR.V2_PLAN, "status": kind, "started": SR._now(), "prepare_stop_rule": info["stop_rule"],
+        shutil.copytree(delta[1] / SR.V2_DIR / f"delta_E_{k}", od)
+        de = json.loads((delta[1] / SR.RECORD).read_text())["delta_E"]
+        de["dir"] = str(od)
+    if sr_info is None and (rd / "prepare_info.json").exists():
+        sr_info = json.loads((rd / "prepare_info.json").read_text()).get("stop_rule")
+    res_k = rd / f"res_{k}.h5"
+    rec = {"version": 2, "method": "v2", "plan": SR.V2_PLAN, "status": kind, "started": SR._now(), "prepare_stop_rule": sr_info,
            "cap": cap, "criteria": {"path": lc["path"], "sha256": lc["sha256"], "out_step_interval": DT, "start_step": 0, "W": W,
                                     "min_points": W // DT + 1, "hold": 0, "hold_source": "settle_criteria.yaml の hold", "first_judgeable": 2 * W + DT},
            "note": None, "judgements": [], "hold": {"hold_steps": 0, "start": 26000, "reached": [26000], "breaks": []},
@@ -253,8 +279,8 @@ def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_n
            "forge_rc": 0, "run_case_rc": 0,
            "stopped_at": ({"present": True, "step": k, "sha256": SR._sha256(rd / SR.STOPPED_AT), "problems": []} if kind == "REACHED"
                           else {"present": False, "step": None, "sha256": None, "problems": []}),
-           "reeval": reeval, "stop_sha256": SR._sha256(rd / f"res_{k}.h5"), "status_note": "試験", "failures": [], "reason": None,
-           "stop_step": k, "last_output": k, "delta_E": delta, "finished": SR._now()}
+           "reeval": reeval, "stop_sha256": SR._sha256(res_k) if res_k.exists() else None, "status_note": "試験", "failures": [],
+           "reason": None, "stop_step": k, "last_output": k, "delta_E": de, "finished": SR._now()}
     SR.save_record(rd, rec)
     SR.write_state(rd, SR._v2_state(rd, rec, 0))
     return rd
@@ -732,6 +758,151 @@ def test_hook(rc_main: Path, rc_legacy: Path):
           str(out)[:200])
 
 
+# ====================================================================================== (e) #7b 残りの読み手
+_TMPDIR_RE = __import__("re").compile(r"/tmp/thermal_use_(conv|qs)_[A-Za-z0-9_]+")
+
+
+def _norm(o) -> str:
+    return _TMPDIR_RE.sub(lambda m: f"/tmp/thermal_use_{m.group(1)}_<TMP>", json.dumps(o, ensure_ascii=False, default=str))
+
+
+def _load_ref(relpath: str, modname: str):
+    """変更前 (HEAD) のモジュールを git から読み、同じパッケージの中の名前で読み込む (相対 import を同じに解く)。"""
+    import importlib.util
+    src = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{relpath}"], capture_output=True, text=True, check=True).stdout
+    f = TMP / "ref_tree" / Path(relpath).parent / (modname.rsplit(".", 1)[-1] + ".py")   # 同じ深さに置く (REPO = parents[3])
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(src)
+    spec = importlib.util.spec_from_file_location(modname, f)
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[modname] = m
+    spec.loader.exec_module(m)
+    for k_ in ("REPO", "TOOLS"):                          # 道具は今の作業ツリーのもの (比べるのは wall_tables の中身だけ)
+        if hasattr(m, k_):
+            setattr(m, k_, getattr(sys.modules[modname.rsplit(".", 1)[0] + "." + Path(relpath).stem], k_))
+    return m
+
+
+def _old_gate_row(run: Path):
+    """変更前の nozzle_report.conditions の収束の行 (同じ式を写したもの)。"""
+    cv = run / "CONVERGENCE_VERDICT.txt"
+    if not cv.exists():
+        return None
+    t = cv.read_text().splitlines()
+    overall = next((l.strip() for l in t if "OVERALL" in l), "?")
+    worst = [l.strip() for l in t if l.strip().startswith("rms_") and "<--" in l][:3]
+    return ["収束 (check_convergence)", overall + (" — " + "; ".join(worst) if worst else "")]
+
+
+def test_readers():
+    print("== (e) #7b 新方式の run を読む残りの読み手 (成果物の thermal_use・設計の報告の収束の欄・forge の直接実行の案内)", flush=True)
+    sys.path.insert(0, str(DESIGN / "tests"))
+    import run_wall_tables_tests as RWT
+    from forge_design.export import deliverables as DLV
+    from forge_design.export import wall_tables as WT
+    from forge_design.report import nozzle_report as NR
+    ref = _load_ref("design/forge_design/export/wall_tables.py", "forge_design.export._wall_tables_ref")
+    wsteps = (18000, 20000, 22000, 24000, 26000, 26001)
+
+    # --- 旧方式 (基準なし): thermal_use は変更前とビット同一 (一時ディレクトリの道だけ置き換え) ---
+    L = TMP / "wt_legacy"
+    RWT.make_synth(L, steps=(100, 200, 300, 400, 500), tw=1e-5, residual=True)
+    new, old = WT.thermal_use(L), ref.thermal_use(L)
+    check("thermal_use (旧方式の run、基準なし): 変更前の wall_tables と出力がビット同一 (一時ディレクトリの道を除く)・check_convergence.py・PASS",
+          _norm(new) == _norm(old) and new["convergence"]["tool"] == "check_convergence.py" and new["verdict"] == "PASS",
+          f"{new['verdict']} / {old['verdict']}")
+    Lf = TMP / "wt_legacy_fail"
+    RWT.make_synth(Lf, steps=(100, 200, 300), tw=1e-5, residual=False)
+    with open(Lf / "residual_history.csv", "w") as f:
+        f.write("step,inner,phase,rms_ro,rms_roUx,rms_roUy,rms_roUz,rms_roe\n")
+        for i in range(300):
+            f.write(f"{i},-1,outer_end,1e-4,1e-4,1e-4,0,1e-4\n")
+    new, old = WT.thermal_use(Lf), ref.thermal_use(Lf)
+    check("thermal_use (旧方式の run、残差が下がらない): 変更前とビット同一 (収束 FAIL)",
+          _norm(new) == _norm(old) and new["convergence"]["result"] == old["convergence"]["result"] == "FAIL")
+
+    # --- 新方式 (本段 + 基準): check_settled.py --bind・停止規則の再評価と照合 ---
+    V = TMP / "wt_v2"
+    RWT.make_synth(V, steps=wsteps, tw=1e-5, residual=False)
+    finish_v2(V, kind="REACHED", delta=None)
+    th = WT.thermal_use(V)
+    c = th["convergence"]
+    check("thermal_use (新方式の run): 収束は check_settled.py --bind (終端 26,000・停止の観測 26,001)、SETTLED → PASS、停止規則 v2 の"
+          "再評価と量の判定が一致、check_convergence を回さない",
+          c["tool"] == "check_settled.py --bind" and c["result"] == "PASS" and c["judged"]["end_step"] == 26001
+          and c["judged"]["terminal_step"] == 26000 and c["stop_rule_reeval"]["matches"] is True
+          and "VERDICT: SETTLED" in c["verdict_line"] and "[check_settled.py --bind、終端 26000・停止の観測 26001]" in c["verdict_line"]
+          and "check_convergence" not in json.dumps(c, ensure_ascii=False) and c["selection"]["mode"] == "main",
+          json.dumps({k: c.get(k) for k in ("result", "verdict_line", "reason")}, ensure_ascii=False))
+    check(f"thermal_use (新方式の run): 準定常・壁解像は今どおり ({th['quasisteady']['result']}・{th['wall_resolution']['result']}) で総合 {th['verdict']}",
+          th["verdict"] == "PASS" and th["quasisteady"]["tool"] == "check_quasisteady.py --series-csv")
+    check("thermal_use (新方式の run): run ディレクトリに書かない (SETTLE_VERDICT.json は停止規則の再評価のまま)",
+          json.loads((V / ST.VERDICT_FILE).read_text())["end_step"] == 26001
+          and SR._sha256(V / ST.VERDICT_FILE) == SR.read_state(V)["reeval"]["sha256"])
+    # 成果物 (deliverables.part_excel): status.json・xlsx の注記に新方式の判定と道具が載る
+    out = TMP / "deliv_v2"
+    rx = DLV.part_excel(V, out)
+    sj = json.loads((out / "excel" / "wall_cfd_nodes.status.json").read_text())
+    tc = sj["thermal_use"]["convergence"]
+    check("成果物 (part_excel): wall_cfd_nodes.status.json の thermal_use の収束が check_settled.py の判定 (道具の名前つき)・PASS",
+          tc["result"] == "PASS" and "check_settled.py --bind" in (tc["verdict_line"] or "") and sj["use_for_thermal_design"] is True
+          and rx["thermal_use"]["convergence"]["tool"] == "check_settled.py --bind", json.dumps(tc, ensure_ascii=False))
+    # 照合の不一致・再評価との食い違い・未収束・前の段
+    Vb = clone(V, "wt_v2_bind")
+    with open(Vb / ST.CRITERIA_FILE, "a") as f:
+        f.write("# 準備の後に書き換えた\n")
+    c = WT.thermal_use(Vb)["convergence"]
+    check("thermal_use: 基準の sha256 が本段の記録と違う → check_settled.py の INDETERMINATE → 収束 未評価 (check_convergence へ落とさない)",
+          c["tool"] == "check_settled.py --bind" and c["result"] == "未評価" and "照合の不一致" in (c.get("reason") or ""), str(c.get("reason")))
+    Vr = clone(V, "wt_v2_reeval")
+    rewrite_records(Vr, lambda rec: rec["reeval"].update(digest="0" * 64))
+    c = WT.thermal_use(Vr)["convergence"]
+    check("thermal_use: 停止規則 v2 の再評価 (STOP_RULE_STATE の digest) と今の判定が食い違う → 未評価",
+          c["result"] == "未評価" and c["stop_rule_reeval"]["matches"] is False and "食い違う" in (c.get("reason") or ""), str(c.get("reason")))
+    Vn = TMP / "wt_v2_rising"
+    RWT.make_synth(Vn, steps=wsteps, tw=1e-5, residual=False)
+    finish_v2(Vn, kind="REACHED", resid_fn=lambda s: 1e-4 * 10.0 ** (s / 20000.0), delta=None)
+    th = WT.thermal_use(Vn)
+    check("thermal_use: 残差が上がり続ける (NOT_SETTLED) → 収束 FAIL・総合 FAIL",
+          th["convergence"]["result"] == "FAIL" and th["verdict"] == "FAIL" and "NOT_SETTLED" in th["convergence"]["verdict_line"])
+    Vp = clone(V, "wt_v2_premain")
+    (Vp / ST.MAIN_STAGE_RECORD).unlink()
+    c = WT.thermal_use(Vp)["convergence"]
+    check("thermal_use: 前の段 (MAIN_STAGE_STARTED なし) → 今どおり check_convergence.py (選択の記録つき)",
+          c["tool"] == "check_convergence.py" and c["selection"]["mode"] == "pre_main")
+
+    # --- 設計の報告 (nozzle_report.convergence_gate_row): 道具に応じて VERDICT を読む ---
+    Vc = clone(V, "rep_v2")
+    write_launch(Vc)
+    SR.postprocess(Vc)
+    row = NR.convergence_gate_row(Vc)
+    check("報告の収束の欄 (新方式の run、CONVERGENCE_VERDICT.txt の 1 行目 TOOL: check_settled.py) → 見出し「収束 (check_settled)」・VERDICT: SETTLED",
+          row == ["収束 (check_settled)", "VERDICT: SETTLED"], str(row))
+    Vcn = clone(Vn, "rep_v2_rising")
+    write_launch(Vcn)
+    SR.postprocess(Vcn)
+    row = NR.convergence_gate_row(Vcn)
+    check("報告の収束の欄 (新方式・NOT_SETTLED) → VERDICT: NOT_SETTLED と SETTLED でない量", row[0] == "収束 (check_settled)"
+          and row[1].startswith("VERDICT: NOT_SETTLED") and "[NOT_SETTLED  ] residual" in row[1], str(row))
+    Lc = clone(L, "rep_legacy")
+    SR.postprocess(Lc)                                   # 1 行目 TOOL: check_convergence.py の形
+    row = NR.convergence_gate_row(Lc)
+    check("報告の収束の欄 (旧方式、TOOL: check_convergence.py の形) → 今までと同じ見出しと値 (OVERALL の行)",
+          row == _old_gate_row(Lc) and row[0] == "収束 (check_convergence)" and row[1].startswith("OVERALL"), str(row))
+    Lo = clone(L, "rep_legacy_old_format")
+    txt = (Lc / "CONVERGENCE_VERDICT.txt").read_text().split("\n", 1)[1]      # TOOL の行の無い 2026-10-16 より前の形
+    (Lo / "CONVERGENCE_VERDICT.txt").write_text(txt)
+    check("報告の収束の欄 (TOOL の行の無い旧い CONVERGENCE_VERDICT.txt) → 変更前と同じ", NR.convergence_gate_row(Lo) == _old_gate_row(Lo))
+    check("報告の収束の欄: CONVERGENCE_VERDICT.txt が無い → 行を出さない (今どおり)", NR.convergence_gate_row(TMP / "euler") is None)
+
+    # --- forge の直接実行を弾くフックの案内 ---
+    p = subprocess.run([sys.executable, str(TOOLS / "hook_forge_guard.py")], input=json.dumps({"tool_input": {"command": "build/forge"}}),
+                       capture_output=True, text=True, timeout=60)
+    r = json.loads(p.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+    check("hook_forge_guard: 直接の forge の実行を弾き、案内に道具の選択 (check_settled.py・check_convergence.py・--select) を書く",
+          json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny" and "check_settled.py" in r and "--select" in r, r[:200])
+
+
 def main() -> int:
     print(f"出力: {TMP}", flush=True)
     eu, pin = make_euler()
@@ -739,6 +910,7 @@ def main() -> int:
     test_migration(pin, A)
     rc_main, rc_legacy = test_run_case(A)
     test_hook(rc_main, rc_legacy)
+    test_readers()
     print(f"\n{NCHK - FAIL}/{NCHK} ok — {'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (一時ディレクトリ {TMP})", flush=True)
     if FAIL == 0:
         shutil.rmtree(TMP, ignore_errors=True)

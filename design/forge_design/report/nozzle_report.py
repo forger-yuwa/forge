@@ -152,6 +152,28 @@ def pspline(x, v, knot=10.0, lam=1.0):
 
 
 # ------------------------------------------------------------------ 条件 (境界条件・数値設定・物性・ゲート)
+_SETTLED_BAD_RE = re.compile(r"^\s*\[(NOT_SETTLED|DIVERGED|INDETERMINATE)\s*\]")
+
+
+def convergence_gate_row(run) -> list | None:
+    """判定ゲートの表の収束の行 [見出し, 値] (CONVERGENCE_VERDICT.txt が無ければ None)。道具は run_case.sh が 1 行目に書いた
+    `TOOL: <道具> (...)` で決める (plan tooling-settle-convergence-and-monitor §4.9 の 2・§5.1 #7b): check_settled.py なら最後の
+    `VERDICT:` の行と SETTLED でない量 (最大 3)、それ以外 (1 行目に TOOL の無い 2026-10-16 より前の run を含む) は今までどおり
+    check_convergence.py の OVERALL の行と `<--` の付いた列。"""
+    cv = Path(run) / "CONVERGENCE_VERDICT.txt"
+    if not cv.exists():
+        return None
+    t = cv.read_text().splitlines()
+    tool = t[0][len("TOOL: "):].split(" ", 1)[0] if t and t[0].startswith("TOOL: ") else None
+    if tool == "check_settled.py":
+        v = next((l.strip() for l in reversed(t) if l.startswith("VERDICT:")), "?")
+        bad = [l.strip() for l in t if _SETTLED_BAD_RE.match(l)][:3]
+        return ["収束 (check_settled)", v + (" — " + "; ".join(bad) if bad else "")]
+    overall = next((l.strip() for l in t if "OVERALL" in l), "?")
+    worst = [l.strip() for l in t if l.strip().startswith("rms_") and "<--" in l][:3]
+    return ["収束 (check_convergence)", overall + (" — " + "; ".join(worst) if worst else "")]
+
+
 def conditions(run, F):
     run = Path(run)
     cfg = _yaml_flow(run / "solverConfig.yaml"); bc = _yaml_flow(run / "bcondConfig.yaml")
@@ -187,12 +209,9 @@ def conditions(run, F):
         ["設計マッハ数", f"{info.get('Md', '—')}"],
     ]
     gates = []
-    cv = run / "CONVERGENCE_VERDICT.txt"
-    if cv.exists():
-        t = cv.read_text().splitlines()
-        overall = next((l.strip() for l in t if "OVERALL" in l), "?")
-        worst = [l.strip() for l in t if l.strip().startswith("rms_") and "<--" in l][:3]
-        gates.append(["収束 (check_convergence)", overall + (" — " + "; ".join(worst) if worst else "")])
+    row = convergence_gate_row(run)
+    if row is not None:
+        gates.append(row)
     mq = run / "MESH_QUALITY.txt"
     if mq.exists():
         gates.append(["メッシュ品質 (check_mesh_quality)", next((l.strip() for l in mq.read_text().splitlines()[::-1] if "VERDICT" in l), "?")])
