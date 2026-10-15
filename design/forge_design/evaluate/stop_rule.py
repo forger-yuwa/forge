@@ -1052,7 +1052,8 @@ CONTROL_FILES = (STOP_REQUEST, STOPPED_AT, SNAPSHOT_REQUEST)   # forge は起動
 CRITERIA_FILE = "settle_criteria.yaml"     # = settle.CRITERIA_FILE (preflight_v2 で照合)
 FORGE_RESIDUAL = "residual_history.csv"    # forge が書く名前 (オンラインの判定はこの名前の入力だけを読む)
 FORGE_MASSFLUX = "boundary_massflux.csv"
-V2_STOP_WAIT_S = 900.0                     # STOP_REQUEST を置いてから forge が終わるのを待つ上限 [s] (超えたら非常時として kill、REACHED にしない)
+V2_STOP_WAIT_S = 900.0                     # STOP_REQUEST を置いてから forge が終わるのを待つ上限 [s] (超えたら非常時として kill、REACHED にしない;
+                                           # forge の終了は `[run_case] forge exit=`、run_case.sh の後処理は数えない — §5.1 #5b)
 YB_SENS_FACTOR = 1.25                      # δ_E の帯の位置の感度の倍率 (card plan #3z・case/71 _runs/run_0010_ns_b0/band_ab.py と同じ)
 REQUEST_MAX_BYTES = 4000                   # forge は STOP_REQUEST の先頭 4 KiB を STOPPED_AT の request に写す
 _V2_NODE_KINDS = ("exit_core_mach", "line_mach", "exit_flow_angle")
@@ -1490,7 +1491,9 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
        forge の終了コード 0・STOPPED_AT が検査に通る・要求の後に崩れない・再評価が SETTLED」のすべて。
     5. 要求を置かずに forge が終わった: 終了コード 0・STOPPED_AT なし・上限の全場ありなら CENSORED (保持の途中なら note)、それ以外は FAILED。
     6. REACHED・CENSORED は止めた step (CENSORED は上限) の全場から δ_E を 1 回抽出する (`extract_delta_e`; 失敗は記録して状態は変えない)。
-    非常時 (要求の後 stop_wait_s 待っても終わらない・見張りの例外) だけ forge を kill し (`stop_forge`)、FAILED にする。"""
+    非常時 (要求の後 stop_wait_s 待っても forge が終わらない・見張りの例外) だけ forge を kill し (`stop_forge`)、FAILED にする。stop_wait_s は
+    forge の終了 (run_case_stdout.log の `[run_case] forge exit=`) までで測り、run_case.sh の後処理 (check_convergence.py・残差の図) の時間は
+    数えない (§5.1 #5b): 上限を超えた時点で forge が終わっていれば時間切れにせず (記録 `stop_wait`)、後処理は post_wait_s まで待つ。"""
     from .runner import FORGE_TOOLS, _ENV
     S = _settle()
     run_dir = Path(run_dir).resolve()
@@ -1528,6 +1531,7 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
     after_breaks = []          # 要求の後に SETTLED でなかった格子点
     killed = None
     reached_after_exit = None  # forge が終わった後に保持を満たした格子点 (要求を置けない)
+    forge_exited = False       # 要求の後 stop_wait_s を超えた時点で forge は終わっていた (run_case.sh の後処理の途中; §5.1 #5b)
     next_s = first
 
     def place(kind, s, why):
@@ -1542,7 +1546,8 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
 
     try:
         while True:
-            done = proc.poll() is not None
+            # forge が終わっていれば (forge_exited) 出力は出そろっているので、run_case.sh の終了と同じに残りの格子点を判定して抜ける
+            done = proc.poll() is not None or forge_exited
             lim = massflux_last_step(mf_csv)
             while lim is not None and next_s <= lim and (done or residual_row_ready(res_csv, next_s - 1)):
                 s = next_s
@@ -1574,6 +1579,16 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
             if done:
                 break
             if req is not None and time.time() - req["t"] > stop_wait_s:
+                # stop_wait_s は forge が終わるまでの上限で、run_case.sh の後処理 (check_convergence.py・残差の図) は数えない (§5.1 #5b)。
+                # forge の終了の印は run_case.sh が forge の直後に書く `[run_case] forge exit=<rc>` (run_case_stdout.log は起動のときに
+                # 作り直すので前の起動の行は無い)。終わっていれば時間切れにせず、後処理は下の proc.wait(post_wait_s) が待つ
+                fx = _forge_exit(run_dir)
+                if fx is not None:
+                    forge_exited = True
+                    rec["stop_wait"] = {"forge_exit_seen": _now(), "forge_rc": fx, "waited_s": round(time.time() - req["t"], 3),
+                                        "stop_wait_s": stop_wait_s,
+                                        "note": "要求の後 stop_wait_s を超えたが forge は終わっていた (run_case.sh の後処理の途中) — 時間切れにしない"}
+                    continue
                 killed = stop_forge(proc.pid, run_dir, term_wait_s, kill_wait_s)
                 rec["stop_forge"] = killed
                 break

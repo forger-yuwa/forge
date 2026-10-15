@@ -27,6 +27,9 @@ res_nodes_i.h5 → 流量の行 i の順に書き (流量の行が完成の印)�
         (stopped_at_invalid)。
       - 上限で止まる → CENSORED (保持の途中と記録、δ_E は上限の step で 1 回)。
       - 要求を無視する forge → stop_wait_s の後に kill → FAILED (timeout; REACHED にしない)。
+      - forge は要求で止まったが run_case.sh の後処理 (check_convergence.py) が stop_wait_s を超える → 時間切れにせず REACHED
+        (§5.1 #5b; forge の終了は run_case_stdout.log の `[run_case] forge exit=`)。後処理は PATH の先頭に置いた python3 の包み
+        (check_convergence.py のときだけ眠ってから本物を exec) で遅らせる。
       - 残差が非有限 → DIVERGED の判定で STOP_REQUEST → FAILED (diverged)。基準に無い残差の列が値を持つ → 未設定の判定で止めて FAILED
         (criteria_unset)。
       - 起動前に STOP_REQUEST が残っている → forge を起動せず RuntimeError (ファイルは消さない)。基準の誤り・出力の設定の不足も起動しない。
@@ -63,6 +66,7 @@ sys.path.insert(0, str(DESIGN))
 from forge_design.evaluate import runner_axismach as RA  # noqa: E402
 from forge_design.evaluate import settle_presets as SP  # noqa: E402
 from forge_design.evaluate import stop_rule as SR  # noqa: E402
+from forge_design.evaluate import runner as RN  # noqa: E402
 
 ST = SR._settle()
 FAIL = 0
@@ -280,6 +284,33 @@ def make_run(name: str, scenario: dict, *, hold: int | None = 38000, cap: int = 
 # (偽の forge は要求の後も 1 格子点ごとに 0.4 s 以上かけて 10 格子点を回るので、負荷があっても先に上限が来る)。
 WATCH = {"poll_s": 0.02, "stop_wait_s": 120.0, "term_wait_s": 3.0, "kill_wait_s": 5.0, "post_wait_s": 120.0}
 TIMEOUT_STOP_WAIT_S = 2.0
+# 後処理が stop_wait_s を超える試験 (§5.1 #5b): 要求から forge の終了までは偽の forge で 1 s 未満 (負荷があっても数 s)、後処理は
+# check_convergence.py の前に SLOW_POST_S 眠るので、stop_wait_s を超えた時点で forge は終わっていて run_case.sh は後処理の途中
+SLOW_STOP_WAIT_S = 6.0
+SLOW_POST_S = 15
+
+
+class slow_postprocess:
+    """run_case.sh の後処理を遅らせる: PATH の先頭に python3 の包みを置き、check_convergence.py のときだけ seconds 眠ってから本物の
+    python3 を exec する (見張りが run_case.sh に渡す環境 runner._ENV を一時的に書き換える; 偽の forge は sys.executable で動くので影響しない)。"""
+
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+
+    def __enter__(self):
+        real = shutil.which("python3", path=RN._ENV.get("PATH"))
+        d = TMP / "slow_python3"
+        d.mkdir(exist_ok=True)
+        w = d / "python3"
+        w.write_text("#!/bin/sh\ncase \"$1\" in *check_convergence.py) sleep %s;; esac\nexec %s \"$@\"\n" % (self.seconds, real))
+        w.chmod(0o755)
+        self.saved = RN._ENV.get("PATH")
+        RN._ENV["PATH"] = f"{d}:{self.saved}"
+        return self
+
+    def __exit__(self, *exc):
+        RN._ENV["PATH"] = self.saved
+        return False
 
 
 def run_case(rd, watch: dict | None = None, **kw):
@@ -528,6 +559,25 @@ def test_watcher():
         check("要求を無視する forge → stop_wait_s の後に kill → FAILED (timeout; REACHED にしない)",
               state_ok(rc, st, "FAILED") and "timeout" in st["failures"] and rec["stop_forge"]["stopped"]
               and rec["stop_forge"]["signals"][:1] == ["SIGTERM"], f"{st and st['failures']} {rec.get('stop_forge')}")
+        check("要求を無視する forge: forge の終了を見ていない (stop_wait の記録なし) — 止まらない forge は今どおり時間切れ",
+              "stop_wait" not in rec, str(rec.get("stop_wait")))
+
+        # --- forge は止まったが run_case.sh の後処理が stop_wait_s を超える → 時間切れにしない (§5.1 #5b) ---
+        DELTA_CALLS.clear()
+        rd = make_run("slow_post", {})
+        with slow_postprocess(SLOW_POST_S):
+            rc, rec, st = run_case(rd, watch={"stop_wait_s": SLOW_STOP_WAIT_S})
+        sw = rec.get("stop_wait") or {}
+        check(f"後処理が遅い (check_convergence.py の前に {SLOW_POST_S} s) が forge は止まった → stop_wait_s {SLOW_STOP_WAIT_S} s を超えても "
+              "REACHED (rc 0・80,001・failures なし)",
+              rc == 0 and state_ok(rc, st, "REACHED") and st["stop_step"] == 80001 and st["failures"] == [] and st["forge_rc"] == 0,
+              f"{st and (st['status'], st['failures'], st.get('reason'))}")
+        check("後処理が遅い: 新しい経路を通った (stop_wait の記録: forge の終了 rc 0 を stop_wait_s の後に見た)・forge を kill していない",
+              sw.get("forge_rc") == 0 and sw.get("waited_s", 0) > SLOW_STOP_WAIT_S and sw.get("stop_wait_s") == SLOW_STOP_WAIT_S
+              and rec.get("stop_forge") is None, json.dumps(sw, ensure_ascii=False)[:300])
+        check("後処理が遅い: run_case.sh の後処理が終わるまで待った (CONVERGENCE_VERDICT.txt を run_case.sh が書いた)・δ_E は 80,001 で 1 回",
+              rec["postprocess"] == {"by": "run_case.sh"} and "CONVERGENCE_EXIT" in (rd / "CONVERGENCE_VERDICT.txt").read_text()
+              and [c_["step"] for c_ in DELTA_CALLS] == [80001] and not rec.get("run_case_killed"), str(rec.get("postprocess")))
 
         # --- 非有限の残差 → DIVERGED の判定で止める ---
         rd = make_run("diverged", {"nan_at": 50000})
