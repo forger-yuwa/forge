@@ -20,6 +20,10 @@ V2:
   ほか: 設計スロート径 (固定点なし: 最初の選択がそのまま最終)、本物の r_t の固定点で 1 回 (--slow でなくても回す、約 1 分)、
   記録 (粗い掃引の全行・谷ごとの確認の行・選択の理由・N_s・L_s・N_p、YAML の要約の行 ≤ 4 kB、mknot_card_log_check、Euler の写し)、
   並列の数 (mknot_workers: 上限 4・CPU 数・0.7 × MemAvailable / ピーク、FORGE_MKNOT_WORKERS、取れなければ 1、算出 0 は評価の前に例外)。
+選択の中の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh §5.1 #6d; plan tooling-nozzle-mknot-fast §4.1 の拡張):
+  (6d-a) 谷 1 つで中心が生産の網で未収束 → n_axis_inv を倍にして粗い掃引から選び直して選べる、(6d-b) 谷 2 つで片方だけ未収束 → 発火する
+  (今までは黙って他方)、(6d-c) 制約による不成立だけ → 発火しない、(6d-d) 粗い網が全点で未収束 → 発火する、(6d-e) 倍化でも止まり緩和で
+  通る (on_stall と同じ順)、(6d-f) 使い切ったら例外。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_mknot_v2_card_tests.py
 所要: 約 3〜5 分 (手元、1 プロセス; FORGE_MKNOT_WORKERS=1 を立てて回す)。
@@ -89,9 +93,14 @@ class Harness:
     centers: 選択 (粗い網の評価の関数を作る呼び出し) ごとの谷の中心 (足りなければ最後の値)。stall_on / short_on: solve_rt_throat の
     何回目で from_length の停止 / 場の不足の例外を出すか。pin_on: 最終の設計チェーンの何回目を「場の終点に張り付き」にするか。"""
 
-    def __init__(self, centers, *, stall_on=(), short_on=(), pin_on=(), fake_solve=True):
+    def __init__(self, centers, *, stall_on=(), short_on=(), pin_on=(), fake_solve=True, extra=None, unconv=None, coarse_unconv=None,
+                 bad=None):
         self.centers, self.stall_on, self.short_on, self.pin_on = list(centers), set(stall_on), set(short_on), set(pin_on)
         self.fake_solve = fake_solve
+        # §5.1 #6d の試験: extra = 2 つ目の谷 (中心, θ の底) (合成だけ)。unconv(選択の番号, M_K, N_p, L_p) が真なら生産の網の行を
+        # 長さ合わせの未収束 (from_length 未収束) に、coarse_unconv(選択の番号, M_K, N_s) が真なら粗い網の行を同じく未収束に、
+        # bad(選択の番号, M_K, N_p) が真なら生産の網の行を制約で不成立 (壁での余裕 0.5°) にする
+        self.extra, self.unconv, self.coarse_unconv, self.bad = extra, unconv, coarse_unconv, bad
         self.clock = 0.0
         self.sel: list = []
         self.solves: list = []
@@ -103,13 +112,15 @@ class Harness:
     def c_of(self, i):
         return self.centers[min(i, len(self.centers) - 1)]
 
-    @staticmethod
-    def _row(M, c, rt, N, L, xem):
+    def _row(self, M, c, rt, N, L, xem):
         M = float(M)
-        if abs(M - c) > 0.3 + 1e-9:
-            r = {"M_K": M, "theta_max_deg": 14.0, "margin_deg": 0.5}
-        else:
+        ex = self.extra
+        if abs(M - c) <= 0.3 + 1e-9:
             r = {"M_K": M, "theta_max_deg": 15.0 + 10.0 * (M - c) ** 2, "margin_deg": 4.0}
+        elif ex is not None and abs(M - ex[0]) <= 0.3 + 1e-9:
+            r = {"M_K": M, "theta_max_deg": ex[1] + 10.0 * (M - ex[0]) ** 2, "margin_deg": 4.0}
+        else:
+            r = {"M_K": M, "theta_max_deg": 14.0, "margin_deg": 0.5}
         r.update(min_sin_angle=0.05, mpp_sign_changes=1, mpp_quality_ok=True, n_flip_interior=0, n_crossings_sampled=0,
                  pileup_pairs_interior=0, qa_violations=[], moc_gate_ok=True, moc_gate_reason=None, n_axis=int(N), r_t_m=rt,
                  L_total_tol=float(L), x_end_margin=xem, L_c=21.5, L_residual_rt=0.0, length_stop="合成")
@@ -129,6 +140,8 @@ class Harness:
             def coarse(M):
                 self.clock += 1.0
                 S["n_eval"] += 1
+                if self.coarse_unconv is not None and self.coarse_unconv(S["idx"], float(M), int(n_axis_inv)):
+                    return self._unconv_row(M, rt, n_axis_inv, L_total_tol, xem)
                 return self._row(M, S["c"], rt, n_axis_inv, L_total_tol, xem)
             return coarse
         S = self.sel[-1]
@@ -137,10 +150,28 @@ class Harness:
         def prod(M):
             self.clock += 1.0
             S["n_eval"] += 1
+            if self.unconv is not None and self.unconv(S["idx"], float(M), int(n_axis_inv), S["L_p"]):
+                return self._unconv_row(M, rt, n_axis_inv, S["L_p"], xem)
+            if self.bad is not None and self.bad(S["idx"], float(M), int(n_axis_inv)):
+                r = self._row(M, S["c"], rt, n_axis_inv, S["L_p"], xem)
+                r.update(margin_deg=0.5)
+                r["reasons"] = MS.feasibility_reasons(r)
+                r["ok"] = not r["reasons"]
+                return r
             if abs(float(M) - S["c"]) < 1e-9:
                 return REAL_EVAL(base, float(M), n_axis_inv)     # 選ぶ点は本物 (最終の設計チェーンの θ_max と照合される)
             return self._row(M, S["c"], rt, n_axis_inv, S["L_p"], xem)
         return prod
+
+    @staticmethod
+    def _unconv_row(M, rt, N, L, xem):
+        """長さ合わせが許容に届かずに止まった行 (evaluate_mknot が design_chain の from_length の例外を捕まえた形)。"""
+        r = {"M_K": float(M), "error": f"ValueError: Lc_mode: from_length 未収束 (|x_F − L_total| = 0.0172 > tol {float(L):.3g}) — 合成",
+             "n_axis": None, "n_axis_input": int(N), "r_t_m": rt, "L_total_tol": float(L), "x_end_margin": xem, "L_residual_rt": -0.0172,
+             "length_stop": "from_length 未収束 (改善停止か反復上限; 最良の |x_F − L_total| > L_total_tol)"}
+        r["reasons"] = MS.feasibility_reasons(r)
+        r["ok"] = not r["reasons"]
+        return r
 
     def solve(self, problem, R_throat_m, prev_run=None, delta_r_out=None, delta_next=None, max_iter=None, tol_R_m=None,
               _delta_supplier=None):
@@ -440,6 +471,109 @@ if err is None:
 else:
     check("本物の固定点: build_problem が通る", False, err[:300])
 print(f"   (本物の固定点) {dt:.0f} s")
+
+print("== §5.1 #6d 選択の中の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh; plan tooling-nozzle-mknot-fast §4.1 の拡張)")
+
+
+def stall_of(full, i):
+    x = full["selections"][i]
+    return x.get("stall")
+
+
+h = Harness([2.10], unconv=lambda i, M, N, L: N == 600 and abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_a")
+if err is None:
+    raw, full, summ = verify_output("(6d-a) 谷 1 つの中心が未収束", h, logd, text, chk)
+    st = stall_of(full, 0)
+    aa = raw["_card"]["auto_adjust"]
+    check("(6d-a) 谷 1 つで中心が生産の網 600 で未収束 → 選べない例外を捕まえて n_axis_inv 600 → 1200 (on_stall と同じ)、評価を捨てて "
+          "粗い掃引 (300) から選び直して 2.10 を選ぶ。記録: 最初の選択の stall (生産の網・600・M_K 2.1・谷 2.10)・調整・捨てた印",
+          raw["geometry"]["M_knot"] == 2.1 and raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1
+          and [(a["key"], a["from"], a["to"]) for a in aa] == [("geometry.n_axis_inv", 600, 1200)]
+          and "M_knot の選択" in aa[0]["reason"] and "生産の網 n_axis_inv 600" in aa[0]["reason"]
+          and [(sv["N_s"], sv["N_p"], sv["r_t"]) for sv in h.sel] == [(150, 600, 0.025), (300, 1200, 0.025), (300, 1200, rstar(2.10))]
+          and h.sel[1]["n_eval"] == h.sel[0]["n_eval"]
+          and st is not None and st["grid"] == "prod" and st["n_axis_inv"] == 600 and [r["M_K"] for r in st["rows"]] == [2.1]
+          and st["valleys"] == [{"start": 2.1, "final": None, "discard_reason": st["valleys"][0]["discard_reason"], "unconverged": [2.1]}]
+          and st["selected_unused"] is None and st["action"] == [{"key": "geometry.n_axis_inv", "from": 600, "to": 1200}]
+          and [x["discarded"] for x in full["selections"]] == [True, False, False] and full["selections"][0]["chosen"] is None
+          and "geometry.n_axis_inv 600 → 1200" in full["discarded"][0]["reason"]
+          and summ["selections"][0]["stall"]["grid"] == "prod" and summ["selections"][0]["stall"]["M_K"] == [2.1],
+          f"選択 {[(sv['N_s'], sv['N_p'], sv['r_t']) for sv in h.sel]} 調整 {[(a['key'], a['from'], a['to']) for a in aa]} stall {st}")
+    check("(6d-a) YAML のコメントと標準出力の要約の行に停止と調整が出る",
+          "長さ合わせの未収束 (生産の網 n_axis_inv 600" in text and "geometry.n_axis_inv 600 → 1200" in text, "")
+else:
+    check("(6d-a) build_problem が通る", False, err[:400])
+print(f"   (6d-a) {dt:.0f} s")
+
+h = Harness([2.10], extra=(3.00, 30.0), unconv=lambda i, M, N, L: N == 600 and abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_b")
+if err is None:
+    raw, full, summ = verify_output("(6d-b) 谷 2 つで片方だけ未収束", h, logd, text, chk)
+    st = stall_of(full, 0)
+    check("(6d-b) 谷 2 つ (2.10・3.00) で 2.10 の中心だけ生産の網 600 で未収束: 今までは 2.10 を捨てて 3.00 を黙って選んでいた → 選べた値 3.00 を"
+          "使わずに n_axis_inv 1200 で粗い掃引から選び直し、2 つの谷を同じ網で比べて 2.10 を選ぶ",
+          raw["geometry"]["M_knot"] == 2.1 and raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1
+          and st is not None and st["grid"] == "prod" and st["selected_unused"] == 3.0 and [r["M_K"] for r in st["rows"]] == [2.1]
+          and [v["unconverged"] for v in st["valleys"]] == [[2.1], []] and full["selections"][0]["chosen"] is None
+          and full["n_valleys"] == 2 and full["n_valleys_final"] == 2,
+          f"出力 {raw['geometry']['M_knot']} n_axis_inv {raw['geometry']['n_axis_inv']} stall {st and {k: st[k] for k in ('selected_unused', 'valleys')}}")
+else:
+    check("(6d-b) build_problem が通る", False, err[:400])
+print(f"   (6d-b) {dt:.0f} s")
+
+h = Harness([2.10], bad=lambda i, M, N: abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_c")
+check("(6d-c) 制約による不成立だけ (中心 2.10 が生産の網で壁での余裕 0.5°): 調整しない — 今までどおり MknotSelectionError、選び直しも"
+      "固定点も無い",
+      err is not None and "MknotSelectionError" in err and "生産の網で最終の代表が残る谷が無い" in err and len(h.sel) == 1 and h.solves == [],
+      (err or "")[:200])
+h = Harness([2.10], extra=(3.00, 30.0), bad=lambda i, M, N: abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_c2")
+check("(6d-c) 谷 2 つで片方が制約で不成立: 調整しない (長さの停止ではない) — 他方 3.00 を選ぶ (合成の行なので最後の照合で止まるのは試験の作り)、"
+      "選び直しは無い",
+      len(h.sel) >= 1 and all(sv["N_p"] == 600 for sv in h.sel) and (err is None or "MknotSelectionError" not in err)
+      and (logd is None or not logd["auto_adjust"]),
+      f"選択 {[(sv['N_p'], sv['c']) for sv in h.sel]} err {(err or '')[:120]}")
+
+h = Harness([2.10], coarse_unconv=lambda i, M, N: N == 150)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_d")
+if err is None:
+    raw, full, summ = verify_output("(6d-d) 粗い網が全点で未収束", h, logd, text, chk)
+    st = stall_of(full, 0)
+    check("(6d-d) 粗い網 150 が全点で未収束 → n_axis_inv 600 → 1200 (粗い網 300) で選び直す",
+          raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1 and st is not None and st["grid"] == "coarse"
+          and st["n_axis_inv"] == 150 and st["L_total_tol"] == 0.1 and len(st["rows"]) == full["selection"]["grid"][2]
+          and [(sv["N_s"], sv["N_p"]) for sv in h.sel] == [(150, 600), (300, 1200), (300, 1200)],
+          f"選択 {[(sv['N_s'], sv['N_p']) for sv in h.sel]} stall {st and st['grid']}")
+else:
+    check("(6d-d) build_problem が通る", False, err[:400])
+print(f"   (6d-d) {dt:.0f} s")
+
+h = Harness([2.10], unconv=lambda i, M, N, L: L < 0.05 - 1e-12 and abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_e")
+if err is None:
+    raw, full, summ = verify_output("(6d-e) 倍化でも止まり緩和で通る", h, logd, text, chk)
+    aa = raw["_card"]["auto_adjust"]
+    check("(6d-e) 600 でも 1200 でも未収束、L_total_tol 0.05 で通る: on_stall と同じ順 (n_axis_inv 600 → 1200 → L_total_tol 0.04 → 0.05 と "
+          "n_axis_inv を雛形 600 に戻す)、そのたびに粗い掃引から選び直す",
+          raw["geometry"]["L_total_tol"] == 0.05 and raw["geometry"]["n_axis_inv"] == 600 and full["n_restart"] == 2
+          and [(a["key"], a["from"], a["to"]) for a in aa] == [("geometry.n_axis_inv", 600, 1200), ("geometry.L_total_tol", 0.04, 0.05),
+                                                                ("geometry.n_axis_inv", 1200, 600)]
+          and raw["_card"]["L_total_tol_relaxed"] is not None
+          and [(sv["N_p"], sv["L_p"]) for sv in h.sel] == [(600, 0.04), (1200, 0.04), (600, 0.05), (600, 0.05)]
+          and [x.get("stall") is not None for x in full["selections"]] == [True, True, False, False],
+          f"選択 {[(sv['N_p'], sv['L_p']) for sv in h.sel]} 調整 {[(a['key'], a['from'], a['to']) for a in aa]}")
+else:
+    check("(6d-e) build_problem が通る", False, err[:400])
+print(f"   (6d-e) {dt:.0f} s")
+
+h = Harness([2.10], unconv=lambda i, M, N, L: abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_PHYS, "s_f")
+check("(6d-f) 倍化・緩和の後も未収束: on_stall と同じく 3 回目で例外 (ValueError、YAML を書かない)、選択は 3 回 (600・1200・600 (0.05))",
+      err is not None and err.startswith("ValueError") and "内部許容差を 0.05 r_t に緩めても" in err and "M_knot の選択" in err
+      and [(sv["N_p"], sv["L_p"]) for sv in h.sel] == [(600, 0.04), (1200, 0.04), (600, 0.05)] and h.solves == [],
+      f"選択 {[(sv['N_p'], sv['L_p']) for sv in h.sel]} {(err or '')[:160]}")
 
 print(f"\n{'ALL OK' if FAIL == 0 else f'{FAIL} FAIL'}")
 sys.exit(1 if FAIL else 0)

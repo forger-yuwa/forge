@@ -18,6 +18,8 @@ V1 (合成の評価、設計チェーンは回さない; (vii) だけ実際の�
         case/70 problem_m5_air_ns2_euler.yaml の 3 点、N 600 (L_total_tol 0.1 r_t = 粗い網) と N 2400 (カードの L_total_tol = 生産の網))。
         捕捉の外を採るように細工する (design_chain の後に逆 MOC を 2 回足す) と行の error・ok=False で、選択に使われない
   ほか: 格子 (整数 k、M_K = k/20、両端から 0.05 以上内側)。
+  (6d)  長さ合わせの停止の判定 `v2_length_stall` (plan tooling-nozzle-card-local-mesh §5.1 #6d): 生産の網の未収束の行 (選べない例外・
+        選べた結果の両方)・粗い網の全点未収束は停止、制約による不成立 (中心・成立点なし・候補なし) と全部成立は停止でない
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_mknot_v2_tests.py [--real]
 所要: 数秒 (--real で 約 1.5 分: 実際の問題の評価 14 回; 1 プロセスで逐次、最大 RSS 約 1.3 GB)。
@@ -308,6 +310,45 @@ expect_raise("(vi) 候補なし (成立点が 1 つおき = 両隣とも成立�
              lambda: sel(lambda M: row(M, 15.0) if MS.v2_k(M) % 2 == 0 else bad(M), lambda M: row(M, 15.0)), "候補が無い")
 e = expect_raise("(vi) 一部だけ未収束で残りが不成立 → 「成立点が無い」(全点未収束ではない)",
                  lambda: sel(lambda M: row(M, None, error=UNC) if M < 2.0 else bad(M), lambda M: row(M, 15.0)), "成立点が無い")
+
+print("== 長さ合わせの停止の判定 v2_length_stall (plan tooling-nozzle-card-local-mesh §5.1 #6d; §4.1 の拡張)")
+UNCP = "ValueError: Lc_mode: from_length 未収束 (|x_F − L_total| = 0.0172 > tol 0.00476)"
+
+
+def unc_row(M, res=-0.0172):
+    r = row(M, None, error=UNCP)
+    r.update(L_residual_rt=res, length_stop="from_length 未収束")
+    return r
+
+
+e = expect_raise("(6d) 谷 1 つの中心が生産の網で未収束 → 谷が残らず例外",
+                 lambda: sel(one_valley(), lambda M: unc_row(M) if near(M, 2.00) else row(M, 15.0 + (M - 2.0) ** 2)), "谷が無い")
+st = MS.v2_length_stall(error=e) if e is not None else None
+check("(6d) その例外は長さの停止 (生産の網・M_K 2.00・谷 2.00 の確認で未収束・最良の残差 0.0172・選べた値なし)",
+      st is not None and st["grid"] == "prod" and [r["M_K"] for r in st["rows"]] == [2.0] and st["best_abs_residual_rt"] == 0.0172
+      and [(v["start"], v["unconverged"]) for v in st["valleys"]] == [(2.0, [2.0])] and st["selected"] is None
+      and e.detail.get("stage") == "no_final_valley", str(st))
+r2 = sel(two_valley_coarse, lambda M: unc_row(M) if near(M, 2.00) else row(M, 15.0 + min(2.0 * (M - 2.0) ** 2, 400.0 * (M - 3.45) ** 2)))
+st = MS.v2_length_stall(result=r2)
+check("(6d) 谷 2 つで 2.00 の中心だけ未収束: 選択は 3.45 で黙って成功する (警告だけ) が、判定は長さの停止を返す (選べた値 3.45)",
+      near(r2["chosen"], 3.45) and st is not None and st["grid"] == "prod" and near(st["selected"], 3.45)
+      and [v["unconverged"] for v in st["valleys"]] == [[2.0], []], str(st and {k: st[k] for k in ("selected", "valleys")}))
+e = expect_raise("(6d) 中心が制約で不成立 (壁での余裕) → 谷が残らず例外", lambda: sel(one_valley(), prod_with(ks(2.00))), "谷が無い")
+check("(6d) 制約による不成立は長さの停止でない (None)", e is not None and MS.v2_length_stall(error=e) is None, "")
+r3 = sel(one_valley(), prod_with(set()))
+check("(6d) 全部成立の選択は長さの停止でない (None)", MS.v2_length_stall(result=r3) is None, "")
+e = expect_raise("(6d) 粗い網の長さ合わせが全点で未収束 → 例外", lambda: sel(lambda M: unc_row(M, 0.102), lambda M: row(M, 15.0)), "全点で未収束")
+st = MS.v2_length_stall(error=e) if e is not None else None
+check("(6d) 粗い網の全点未収束は長さの停止 (粗い網・全点の行・最良の残差 0.102)",
+      st is not None and st["grid"] == "coarse" and len(st["rows"]) == len(e.table) and st["best_abs_residual_rt"] == 0.102
+      and st["valleys"] == [] and e.detail.get("stage") == "coarse_length", str(st and st["grid"]))
+e = expect_raise("(6d) 粗い網で成立点なし (制約) → 例外", lambda: sel(lambda M: bad(M), lambda M: row(M, 15.0)), "成立点が無い")
+check("(6d) 粗い網で成立点なし・候補なしは長さの停止でない (None)", e is not None and MS.v2_length_stall(error=e) is None, "")
+try:
+    MS.v2_length_stall()
+    check("(6d) result と error のどちらでもない → ValueError", False)
+except ValueError:
+    check("(6d) result と error のどちらでもない → ValueError", True)
 
 # ---------------------------------------------------------------------------------------------------------------------
 if REAL:

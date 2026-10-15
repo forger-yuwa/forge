@@ -356,15 +356,43 @@ def calibrate_run(run_dir, delta_next=None, delta_in: str = "grid", x_far_m: flo
     }
 
 
+def yaml_float(v) -> str:
+    """float を PyYAML (YAML 1.1) が**数として**読む文字列にする (桁は repr のまま、往復で同じ float)。repr の `-5e-05` のように
+    仮数に小数点の無い指数の形は、PyYAML の float の規則 (小数点が要る) に合わず文字列と読まれるので `-5.0e-05` にする
+    (plan tooling-nozzle-card-local-mesh §5.1 #6d)。有限でない値と、読み直して同じ float にならない値は ValueError。"""
+    import yaml
+    x = float(v)
+    if not np.isfinite(x):
+        raise ValueError(f"yaml_float: 有限でない値 {x!r}")
+    r = repr(x)
+    m, sep, e = r.partition("e")
+    if sep and "." not in m:
+        r = f"{m}.0e{e}"
+    back = yaml.safe_load(r)
+    if not isinstance(back, float) or back != x:
+        raise ValueError(f"yaml_float: {r!r} を YAML で読み直すと {back!r} ({type(back).__name__}) で {x!r} に戻らない")
+    return r
+
+
 def overrides_yaml(overrides: dict, run_dir, scale_m: float) -> str:
-    """カードの `overrides` に貼る断片 (YAML)。値は repr (往復で同じ float)。"""
+    """カードの `overrides` に貼る断片 (YAML)。数は `yaml_float` (PyYAML が数として読み、往復で同じ float)。書いた断片を読み直して
+    overrides と同じ値・型 (数は float) に戻ることを確かめる (戻らなければ RuntimeError)。"""
+    import yaml
     lines = [f"# contur_calibrate ({PLAN}): {Path(run_dir).name} (r_t {scale_m!r} m) の δ_E に合わせた 3 係数",
              "# δ = (c₀ + c₁·x_m)·δ_CONTUR + δ₀ (x_m は設計スロートからの実寸 [m])。新しい r_t でも同じ係数を CONTUR に当てる",
              "overrides:"]
     for k in OVERRIDE_KEYS:
         v = overrides[k]
-        lines.append(f"  {k}: {v if isinstance(v, str) else repr(float(v))}")
-    return "\n".join(lines) + "\n"
+        lines.append(f"  {k}: {v if isinstance(v, str) else yaml_float(v)}")
+    text = "\n".join(lines) + "\n"
+    back = (yaml.safe_load(text) or {}).get("overrides") or {}
+    def same(k):
+        v, w = overrides[k], back.get(k)
+        return w == v if isinstance(v, str) else (isinstance(w, float) and w == float(v))
+    bad = [k for k in OVERRIDE_KEYS if not same(k)]
+    if bad:
+        raise RuntimeError(f"overrides の断片を読み直すと値・型が違う: {[(k, back.get(k), overrides[k]) for k in bad]}")
+    return text
 
 
 def write_outputs(rec: dict, out_dir) -> dict:

@@ -6,6 +6,7 @@
  (2) Δx 重み: 同じ関数を列の寄せ方だけ変えて標本化しても c₁ がほぼ同じ (等重みより近い)。
  (3) 合成の run: 2 係数・3 係数・pass 0 (係数なし) の壁から目標の係数を取り戻す。停止規則 v2 の抽出の表を探す・sha256 の照合・
      状態が ok でない・held・delta_r_csv の壁・係数の不一致で止める。overrides の断片が YAML で同じ値に戻り、生成器の検査を通る。
+     絶対値が 1e−4 未満の係数も PyYAML が float で読む形 (`-5.0e-05`) で書く (`yaml_float`、§5.1 #6d)。
  (4) CLI: 書く・--no-write・止めたら終了コード 1。
 実データ (手元に記録の写しがあるとき):
  (5) case/71 run_0008 (2 係数の壁) → §4.3 の 3 係数 (c₀ 0.6779482479245829・c₁ 0.021036335310539667 /m・δ₀ −3.057205936466481e−4 m)
@@ -31,6 +32,14 @@ from forge_design.evaluate import runner_axismach as RA  # noqa: E402
 import contur_calibrate_fixture as FX  # noqa: E402
 
 FAIL, SKIPPED = [], []
+
+
+def _raises(fn, *a):
+    try:
+        fn(*a)
+    except ValueError:
+        return True
+    return False
 
 
 def check(name, ok, detail=""):
@@ -148,6 +157,18 @@ with tempfile.TemporaryDirectory() as td:
     ov = yaml.safe_load(rec["overrides_yaml"])["overrides"]
     check("(3) overrides の断片が YAML で同じ値 (float の往復) に戻り、model: contur を含む",
           ov == rec["overrides"] and ov["deltastar_initializer.model"] == "contur" and set(ov) == set(CC.OVERRIDE_KEYS))
+    # 絶対値が 1e−4 未満の係数 (repr が `-5e-05` の形; PyYAML は小数点の無い指数を文字列と読む) も数として往復する (§5.1 #6d)
+    small = {"deltastar_initializer.model": "contur", "deltastar_initializer.delta_scale": 0.6758982547606354,
+             "deltastar_initializer.delta_scale_slope_per_m": 2e-05, "deltastar_initializer.delta_offset_m": -5e-05}
+    txt = CC.overrides_yaml(small, td / "run_small", 0.1049)
+    back = yaml.safe_load(txt)["overrides"]
+    check("(3) 小さい係数 (2e−5 /m・−5e−5 m) の断片: `2.0e-05`・`-5.0e-05` と書き、PyYAML が float で同じ値に読む",
+          back == small and all(isinstance(back[k], float) for k in CC.OVERRIDE_KEYS[1:])
+          and "slope_per_m: 2.0e-05\n" in txt and "offset_m: -5.0e-05\n" in txt, txt.splitlines()[-2:])
+    edge = (5e-324, 1e16, -1.5e-300, 0.0, -0.0, 123456789.0, 1e-4, 0.6779482479245829)
+    check("(3) yaml_float: 端の値 (最小の非正規化数・1e16・0・−0 ほか) も float で同じ値に読み戻る、nan・inf は ValueError",
+          all(isinstance(yaml.safe_load(CC.yaml_float(v)), float) and yaml.safe_load(CC.yaml_float(v)) == v for v in edge)
+          and all(_raises(CC.yaml_float, v) for v in (float("nan"), float("inf"))), [CC.yaml_float(v) for v in edge])
     init_cfg = {k.split(".", 1)[1]: v for k, v in ov.items()}
     two = RA._two_coef(init_cfg)
     check("(3) 生成器の検査 (runner_axismach._two_coef・_slope_coef) を通る",

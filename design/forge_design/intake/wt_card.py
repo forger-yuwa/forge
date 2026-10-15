@@ -1420,7 +1420,8 @@ def mknot_workers(N_s: int, N_p: int) -> dict:
     min(CPU 数, MKNOT_WORKERS_MAX, ⌊MKNOT_MEM_FRACTION × MemAvailable / 1 評価のピーク⌋)。MemAvailable が取れなければ 1。
     環境変数 FORGE_MKNOT_WORKERS (正の整数) で上限を下げる (正の整数でなければ ValueError)。算出が 0 なら評価の前に RuntimeError
     (メモリ不足で落ちる前に理由を出す)。戻り: {coarse, prod, N_s, N_p, cpu, cap, cap_env, available_gb, per_eval_gb_coarse,
-    per_eval_gb_prod, by_mem_coarse, by_mem_prod, peak_source}。"""
+    per_eval_gb_prod, peak_extrapolated_coarse, peak_extrapolated_prod (測った N より上で外挿した見積もりか), by_mem_coarse, by_mem_prod,
+    peak_source}。"""
     cpu = _cpu_count()
     env = os.environ.get(MKNOT_WORKERS_ENV)
     cap = MKNOT_WORKERS_MAX
@@ -1440,6 +1441,8 @@ def mknot_workers(N_s: int, N_p: int) -> dict:
         peak = mknot_eval_peak_gb(N)
         by_mem = None if avail is None else int(math.floor(MKNOT_MEM_FRACTION * avail / peak))
         out[f"per_eval_gb_{tag}"] = peak
+        # 測った N の外 (上) の値は外挿 (MKNOT_EVAL_PEAK_EXP) — 記録に残す (§5.1 #6d: 自動調整の倍化で 4800 の網になる)
+        out[f"peak_extrapolated_{tag}"] = bool(float(N) > max(MKNOT_EVAL_PEAK_GB))
         out[f"by_mem_{tag}"] = by_mem
         out[tag] = 1 if avail is None else min(cpu, cap, by_mem)
     bad = [t for t in ("coarse", "prod") if out[t] < 1]
@@ -1804,7 +1807,12 @@ def _mknot_yaml_summary_v2(rec: dict, card_log_name: str) -> dict:
                      "n_moves": v["n_moves"], "discarded": v["final"] is None} for v in s["valleys"]],
         "grid": s["grid"], "n_eval": {"coarse": s["n_eval_coarse"], "prod": s["n_eval_prod"]},
         "first_reused": rec["first_reused"],
-        "selections": [{k: x.get(k) for k in ("stage", "attempt", "r_t_m", "N_p", "chosen", "discarded")} for x in rec["selections"]],
+        "selections": [{**{k: x.get(k) for k in ("stage", "attempt", "r_t_m", "N_p", "chosen", "discarded")},
+                        **({"stall": {"grid": x["stall"]["grid"], "n_axis_inv": x["stall"]["n_axis_inv"],
+                                      "L_total_tol": x["stall"]["L_total_tol"], "n_rows": len(x["stall"]["rows"]),
+                                      "M_K": [r["M_K"] for r in x["stall"]["rows"]][:10],
+                                      "action": x["stall"].get("action")}} if x.get("stall") else {})}
+                       for x in rec["selections"]],
         "events": [{k: e.get(k) for k in ("stage", "r_t_m", "M_K_used_in_fixed_point", "chosen", "same")} for e in rec["events"]],
         "redo": rec["redo"], "n_restart": rec["n_restart"],
         "workers": {k: (rec["workers"] or {}).get(k) for k in ("coarse", "prod")},
@@ -1849,7 +1857,13 @@ def _mknot_summary_lines_v2(mkr: dict, card_log_name: str | None = None) -> list
                    + (f"代表 {v['final']:.2f}、θ_max {v['theta_max_deg']:.5f}°、推定の距離 {_mknot_dist_v2(v['distance'])}"
                       if v["final"] is not None else f"捨てた — {_one_line(v['discard_reason'])[:160]}"))
     for x in mkr["selections"]:
-        out.append(f"  選択 [{x['stage']}] 試行 {x['attempt']}、r_t {x['r_t_m']!r} m、n_axis_inv {x['N_s']}/{x['N_p']} → {x['chosen']!r} "
+        st = x.get("stall")
+        res = (f"長さ合わせの未収束 ({'粗い網' if st['grid'] == 'coarse' else '生産の網'} n_axis_inv {st['n_axis_inv']}・L_total_tol "
+               f"{st['L_total_tol']:.4g} r_t: M_K {', '.join(f'{r['M_K']:g}' for r in st['rows'][:6])}{' …' if len(st['rows']) > 6 else ''}"
+               f"; {st['outcome'][:80]}) → " + (", ".join(f"{a['key']} {a['from']!r} → {a['to']!r}" for a in st["action"])
+                                                if isinstance(st.get("action"), list) else str(st.get("action")))
+               if st else repr(x["chosen"]))
+        out.append(f"  選択 [{x['stage']}] 試行 {x['attempt']}、r_t {x['r_t_m']!r} m、n_axis_inv {x['N_s']}/{x['N_p']} → {res} "
                    f"(評価 {x['n_eval_coarse']} + {x['n_eval_prod']} 点、{x['elapsed_s']:.0f} s)"
                    + (" — 自動調整で捨てた" if x.get("discarded") else ""))
     for e in mkr["events"]:
@@ -1904,6 +1918,11 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
       回、超えたら RuntimeError)。同じ実効の入力の選択は使い回す (設計スロート径・--r-throat・--no-solve では最初の選択がそのまま最終)。
     - 自動調整 (n_axis_inv の倍化・L_total_tol の緩和・x_end_margin の変更) が起きたら、それまでの評価を全部捨て、N_s・N_p・許容差・並列の
       数を設定し直して最初の r_t の選択からやり直す。
+    - **選択の中の長さ合わせの停止** (plan tooling-nozzle-card-local-mesh §5.1 #6d; plan tooling-nozzle-mknot-fast §4.1 の拡張): 生産の網の行に
+      from_length の未収束が 1 つでもある (選べた結果でも; その行は不成立として扱われ、谷を捨てて別の谷を選んでいるかもしれない)、
+      または粗い網が全点で未収束なら、選んだ値を使わず、上の from_length の停止と同じ `on_stall` (同じ状態・同じ順) で自動調整して
+      最初の r_t の粗い掃引からやり直す (`mk_stall`)。制約による不成立 (成立点なし・候補なし・中心が制約で落ちる) では調整しない。
+      記録は card_log の M_knot_rule.selections の stall (網・許容・未収束の M_K と谷・選べた値・調整) と auto_adjust。
     - 計時 (`_clock`): 全部の選択 (捨てたものを含む) と、選び直した M_K での r_t の固定点のやり直しの時間を `M_knot_rule.elapsed_s` に入れ、
       記録の時点のカード全体の時間 `card_elapsed_s` と並べる (内訳は `timing`)。最初の r_t の固定点はカードの通常の流れなので含めない。
     - 記録は card_log の `M_knot_rule` に全部 (粗い掃引の全行・谷ごとの確認の行・選択の理由・N_s・L_s・N_p)、YAML の `_card.M_knot_rule`
@@ -1952,12 +1971,16 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     def cur(key, rt):
         return make(rt)["geometry"].get(key)
 
-    def on_stall(ex, rt, calls):
+    def on_stall(ex, rt, calls, info=None):
+        """from_length の停止の自動調整 (1 回目 n_axis_inv を 2 倍 → 2 回目 L_total_tol を L_TOTAL_TOL_RELAXED に緩め n_axis_inv を雛形に
+        戻す → 3 回目は例外)。設計チェーン (chain_logged・outer_step) と M_knot の選択 (mk_stall、§5.1 #6d) が同じ状態 (auto・
+        auto_adjust・relaxed) を進める。info: 理由の文 (無ければ calls の逆 MOC の記録から作る)。"""
         nonlocal relaxed
-        L_tgt = float(make(rt)["dv"]["L_total"]["value"])
-        best = min((abs(c["x_F"] - L_tgt) for c in calls if np.isfinite(c["x_F"])), default=float("nan"))
-        tol_now = float(cur("L_total_tol", rt))
-        info = f"{STALL_TEXT}: 最良の |x_F − L_total| {best:.3g} r_t > L_total_tol {tol_now:.3g} r_t (r_t {rt!r} m)"
+        if info is None:
+            L_tgt = float(make(rt)["dv"]["L_total"]["value"])
+            best = min((abs(c["x_F"] - L_tgt) for c in calls if np.isfinite(c["x_F"])), default=float("nan"))
+            tol_now = float(cur("L_total_tol", rt))
+            info = f"{STALL_TEXT}: 最良の |x_F − L_total| {best:.3g} r_t > L_total_tol {tol_now:.3g} r_t (r_t {rt!r} m)"
         if "n_axis_inv" not in auto and relaxed is None:
             n0 = int(base_geom["n_axis_inv"])
             auto["n_axis_inv"] = 2 * n0
@@ -2130,6 +2153,42 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             "stage": stage, "attempt": mk["attempt"], "r_t_m": rt, "M_K_used_in_fixed_point": M_used, "chosen": sel["chosen"],
             "same": (None if M_used is None else sel["chosen"] == M_used), "inputs": sel["inputs"], "action": action}))
 
+    def mk_stall(st, ex, rt, stage, inp, wk, dt, n_c, n_p):
+        """M_knot の選択の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh §5.1 #6d; plan tooling-nozzle-mknot-fast §4.1 の拡張)。
+        st は `mknot_select.v2_length_stall` の記録 (生産の網に未収束の行が 1 つでもある / 粗い網が全点で未収束)。設計チェーンと同じ
+        `on_stall` で auto・auto_adjust を進め (n_axis_inv の倍化 → L_total_tol の緩和と n_axis_inv を雛形に戻す → 例外)、この選択を
+        記録 (mk["runs"] の stall: 網・許容・未収束の M_K と谷・選べた値 (使わない)・調整) して _Retry する。やり直しは mk_start の
+        既存の経路 (新しい自動調整 → それまでの評価を捨てて最初の r_t の粗い掃引から選び直す; 網・許容の違う谷を比べない)。"""
+        coarse = st["grid"] == "coarse"
+        N, tol = (inp["N_s"], inp["L_s"]) if coarse else (inp["N_p"], inp["L_p"])
+        net = "粗い網" if coarse else "生産の網"
+        where = "全点" if coarse else "M_K " + "・".join(f"{r['M_K']:g}" for r in st["rows"])
+        vtxt = "; ".join(f"谷 {v['start']:.2f} の確認で未収束 {', '.join(f'{m:g}' for m in v['unconverged'])}"
+                         for v in st["valleys"] if v["unconverged"])
+        best = st["best_abs_residual_rt"]
+        got = (f"選べた値 {st['selected']!r} は使わない" if ex is None else f"選べない ({str(ex).splitlines()[0][:160]})")
+        info = (f"{STALL_TEXT} — M_knot の選択 ({stage}) の{net} n_axis_inv {N}・L_total_tol {tol:.4g} r_t で長さ合わせが未収束 ({where}"
+                + (f"; {vtxt}" if vtxt else "") + f")、最良の |x_F − L_total| {'不明' if best is None else f'{best:.3g}'} r_t、{got} "
+                f"(r_t {rt!r} m)")
+        rec = {"stage": stage, "attempt": mk["attempt"], "r_t_m": float(rt), "N_s": inp["N_s"], "N_p": inp["N_p"], "L_p": inp["L_p"],
+               "x_end_margin": inp["x_end_margin"], "chosen": None, "n_eval_coarse": int(n_c), "n_eval_prod": int(n_p), "elapsed_s": dt,
+               "discarded": False, "workers": {k: wk.get(k) for k in ("coarse", "prod", "per_eval_gb_prod", "peak_extrapolated_prod")},
+               "stall": {"grid": st["grid"], "n_axis_inv": N, "L_total_tol": tol, "rows": st["rows"], "best_abs_residual_rt": best,
+                         "valleys": st["valleys"], "selected_unused": st["selected"], "outcome": got}}
+        n_aa = len(auto_adjust)
+        try:
+            on_stall(ex, rt, [], info=info)
+        except ValueError:
+            rec["stall"]["action"] = "自動調整を使い切った (n_axis_inv の倍化と L_total_tol の緩和の後も未収束) — 例外"
+            mk["runs"].append(_plain(rec))
+            raise
+        rec["stall"]["action"] = [{k: a[k] for k in ("key", "from", "to")} for a in auto_adjust[n_aa:]]
+        mk["runs"].append(_plain(rec))
+        mlog(f"{stage}: {net}の長さ合わせが未収束 ({where}) — "
+             + "、".join(f"{a['key']} {a['from']!r} → {a['to']!r}" for a in auto_adjust[n_aa:])
+             + " にして粗い掃引から選び直す")
+        raise _Retry() from ex
+
     def mk_select(rt, stage):
         """出力と同じ形の実効の入力 (r_t・auto を当てた geometry) で規則 coarse_min_theta_v2 の選択を 1 回回す (§4.1 の 1〜5)。
         同じ実効の入力の選択は mk["sel"] に置いて使い回す。時間は M_knot の時間 (mk_seg) に入れる。"""
@@ -2154,10 +2213,20 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
             if bad:
                 raise RuntimeError(f"M_knot: 評価の行の M_A が探索の範囲の M_A {rng['M_A']!r} と違う ({bad[:5]}) — 範囲が揃っていない")
             sel.update(workers=wk, stage=stage, attempt=mk["attempt"])
+        except MS.MknotSelectionError as ex:
+            dt = mk_seg("select", stage, t0)
+            st = MS.v2_length_stall(error=ex)
+            if st is None:                   # 制約による本当の不成立 (長さの停止ではない): 今までどおり例外
+                raise
+            mk_stall(st, ex, rt, stage, inp, wk, dt, sum(1 for r in ex.table if r.get("role", "coarse") == "coarse"),
+                     sum(1 for r in ex.table if r.get("role") == "confirm"))
         except BaseException:
             mk_seg("select", stage, t0)
             raise
         dt = mk_seg("select", stage, t0)
+        st = MS.v2_length_stall(result=sel)
+        if st is not None:                   # 選べたが生産の網に長さの未収束の行がある (その谷を不成立として捨てたかもしれない)
+            mk_stall(st, None, rt, stage, inp, wk, dt, sel["n_eval_coarse"], sel["n_eval_prod"])
         sel["elapsed_s_card"] = dt
         mk["sel"][mk_key(rt)] = sel
         mk["runs"].append(_plain({"stage": stage, "attempt": mk["attempt"], "r_t_m": float(rt), "N_s": inp["N_s"], "N_p": N_p,
@@ -2171,7 +2240,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         """最初の r_t の選択 (§4.1)。自動調整で実効の入力が変わったときは、それまでの評価 (選択) を全部捨てて最初からやり直す。"""
         new_aa = auto_adjust[mk["aa_seen"]:]
         mk["aa_seen"] = len(auto_adjust)
-        if mk["key"] is None:
+        if mk["key"] is None and not new_aa:
             stage = "最初の r_t"
         else:
             why = "; ".join(f"{a['key']} {a['from']!r} → {a['to']!r}" for a in new_aa) or "実効の入力が変わった"

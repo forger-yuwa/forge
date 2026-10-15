@@ -43,14 +43,14 @@ flowchart TD
 | 段 | 内容 | GPU | 時間の目安 (実測) |
 | --- | --- | --- | --- |
 | 0 | 準備 (clone・ビルド・Python 環境・FreeCAD) | ビルドに nvcc | float のビルド 2 分 46 秒 (手元 RTX 3060・4 並列)、Python 環境 1 分 |
-| 2 | `wt_card` (M_knot の自動を含む) | なし | 1〜4 分 (手元 12 コア; §2 の表) |
+| 2 | `wt_card` (M_knot の自動を含む) | なし | 1〜5 分 (手元 12 コア; 長さ合わせの自動調整があると数分; §2 の表) |
 | 3 | 格子 (`hand_mesh.py`) | なし (変換器は CPU で動く) | build 24 s・check 40 s (手元) |
 | 4 | Euler (前の段 6,000 step + 本段 12,000 step) | 使う | 準備 20 s (手元)。計算は AWS g5.xlarge (A10G)・FP64 で 227 s (case/71 run_0001_euler) |
 | 5 | NS (前の段 6,000 step + 本段は停止規則まで、上限 200,000 step) | 使う | 準備 26 s (手元)。計算は AWS g5.xlarge・FP64 で前の段を含め約 23 分 (case/71 run_0011_ns_v2: 本段 46,202 step で停止)。この PC の値は §5.1 で測る |
 | 6・8 | `contur_calibrate`・`wt_qualify` | なし | 数秒 (試走: 0.5 s・2.6 s) |
 | 9 | 成果物 (`deliverables`) | なし (FreeCAD) | 未計測 |
 
-GPU の段 (4・5) の時間は GPU と精度 (float・FP64) で大きく変わる。GeForce は FP64 の演算が遅い。§5.1 の試しの値で見積もり直し、人に伝える。
+GPU の段 (4・5) の時間は GPU で大きく変わる (既定は float のビルド、§0.4)。§5.1 の試しの値で見積もり直し、人に伝える。
 
 ## 0. 準備 (1 回だけ)
 
@@ -106,10 +106,10 @@ ls -la solver_density_cuda/.build-native/relwithdebinfo/forge solver_density_cud
 - **成功の印**: `EXIT_CODE=0`、ログの最後に `[build_native_wsl] Built: …/forge`、`forge` と `convertGmshToForge` の 2 つのファイルがある。
 - **止まったら人に見せるもの**: `tail -n 40 ~/forge/build_float.log`。メモリ不足で落ちたら `FORGE_BUILD_JOBS=2` にしてよいか人に聞く。
 
-### 0.4 ビルド (FP64) と精度の選択
+### 0.4 ビルド (FP64、任意)
 
-**どちらの精度で回すか: ユーザの決定に従う** (2026-10-16 時点で未決。case/71 で float と FP64 を比べている: plan `tooling-nozzle-card-local-mesh` §6 V8)。
-決まったら、この行と §0.8 の `qs_env.sh` の `FORGE_BUILD` の行を書き換える。
+**既定は float のビルド (§0.3)** (2026-10-16 ユーザ決定; case/71 の float と FP64 の比較は plan `tooling-nozzle-card-local-mesh` §6 V8)。
+FP64 は、壁の局所の熱流を節点ごとに使う場面で確かめるときだけ作る (人に言われたとき)。この節は飛ばしてよい。
 
 FP64 は `solver_density_cuda/flowFormat.hpp` の typedef 4 行を書き換えてビルドし直したもので、実行時のスイッチではない。
 float と別のビルドの置き場 (`.build-native/fp64`) に最初から作る (差分ビルドを使い回さない)。書き換えたファイルはビルドの後に元に戻す。
@@ -194,7 +194,7 @@ export FORGE=$HOME/forge
 export CASE=$FORGE/case/NN.name                   # このノズルの case (§1.1 で書き換える)
 export T=p0                                       # 壁の版 (§7 で書き換える): p0 = CONTUR の式のまま / p1 = 較正した壁 / p2 = 較正し直した壁
 export PY=$FORGE/design/.venv-opt/bin/python
-export FORGE_BUILD=$FORGE/solver_density_cuda/.build-native/relwithdebinfo   # float。FP64 なら $FORGE/solver_density_cuda/.build-native/fp64 (§0.4)
+export FORGE_BUILD=$FORGE/solver_density_cuda/.build-native/relwithdebinfo   # float (既定)。FP64 で確かめるときだけ $FORGE/solver_density_cuda/.build-native/fp64 (§0.4)
 export FORGE_BIN=$FORGE_BUILD/forge
 export FORGE_CONVERTER=$FORGE_BUILD/convertGmshToForge
 export FORGE_CUDA_BLOCKSIZE=128                   # 流束のカーネルのレジスタの上限 (procedures/development-environment.md)。float・FP64 とも要る
@@ -216,7 +216,7 @@ ls -la $FORGE_BIN $FORGE_CONVERTER $FREECADCMD
 ```
 
 - **成功の印**: `import ok` と 3 つのファイルが出る。
-- FP64 で回すと決まったら (§0.4)、`FORGE_BUILD` の行を `export FORGE_BUILD=$FORGE/solver_density_cuda/.build-native/fp64` にする。
+- FP64 で確かめるとき (§0.4、人に言われたときだけ) は、`FORGE_BUILD` の行を `export FORGE_BUILD=$FORGE/solver_density_cuda/.build-native/fp64` にする。
 
 ## 1. 要求カード
 
@@ -355,24 +355,29 @@ grep -E '^EXIT_CODE|^real|^寸法|^→|M_knot: 自動|M_knot の所要|^[A-Za-z_
 - **成功の印**: `EXIT_CODE=0`、`M_knot: 自動 … → geometry.M_knot X`、`寸法 (設計壁から): PASS`、`→ …/problem_p0_card.yaml` と `→ …/problem_p0_card_euler.yaml`。
 - 次の警告は出てよい (§3 の格子で置き換える): 「実際の格子 (ni 3000) の AR の最大 … が ar_max 5000 を超える」、
   「wall_first_frac_throat … < 1e-06 — float32 の座標では …」、「雛形のブレンド … に決め直した」。
+- **長さ合わせの自動調整** (plan `tooling-nozzle-card-local-mesh` §5.1 #6d): M_knot の選択の中で長さ合わせ (`from_length`) が許容に届かないと、
+  `wt_card` が自分で `n_axis_inv` を 2400 → 4800 にし、それでも届かなければ内部の許容差を 0.05 r_t に緩めて (`n_axis_inv` は 2400 に戻す)、
+  粗い掃引から選び直す。ログに「長さ合わせが未収束 … にして粗い掃引から選び直す」、結果に「自動調整: geometry.n_axis_inv 2400 → 4800」などが
+  出る。これは止まった印ではない。4800 の網は 1 評価に約 4.3 GB のメモリを使う (手元で実測) ので、メモリの小さい PC では並列が 1 になり、
+  M_knot に数分掛かる。
 - **止まったら人に見せるもの**: 上の確認の出力 (例外の行を含む) と `tail -n 40 $CASE/_log/wt_card_$T.log` (M_knot の掃引の表)。特に次は人の判断が要る:
-  - `MknotSelectionError: M_knot を選べない …` (M_knot の自動の規則で選べない; 2026-10-16 の試走で起きた。下の表)。
-  - `寸法 (設計壁から): FAIL`、`μ = … > 20`、`R < 0.5` などのカードの値の不整合。
+  - `寸法 (設計壁から): FAIL` (`EXIT_CODE=2`)。内部の許容差を緩めた (結果に「L_total_tol … → 0.05」) ときに、設計の長さがカードの公差を
+    外れることがある (下の表の試走 B)。カードの公差を変えるか、そのまま進めるかは人が決める。
+  - `ValueError: … 内部許容差を 0.05 r_t に緩めても … 形状が成立しない` (自動調整を使い切った)。
+  - `MknotSelectionError: M_knot を選べない …` (制約による不成立: 成立点が無い・候補が無い・谷の中心が制約で落ちる)。
+  - `μ = … > 20`、`R < 0.5` などのカードの値の不整合。
   - `MemoryError`・`Killed` (メモリ不足)。環境変数 `FORGE_MKNOT_WORKERS=1` で M_knot の評価の並列を 1 にできる (遅くなる)。付けて打ち直してよいかを人に聞く。
 
-| カード (2026-10-16、手元 12 コア・メモリ 12 GB) | 結果 | 時間 |
+| カード (2026-10-16、手元 12 コア・メモリ 12 GB、#6d の後) | 結果 | 時間 |
 | --- | --- | --- |
-| case/71 の `card_m55.yaml` (変えない) | M_knot 2.80 (AWS と同じ)、寸法 PASS | 55 s (M_knot 36 s、並列 4) |
-| 試走 A: case/71 から全圧 −10 %・全温 −5 %・物理スロート径 +5 %・拡大部の長さ −5 % | `MknotSelectionError`: 生産の網 (`n_axis_inv` 2400) の長さ合わせ (`from_length`) が 3 点とも残差 0.0172 r_t (許容 0.00476 r_t) で止まり、ただ 1 つの谷 2.65 を捨てた | 22 s で停止 |
-| 試走 B: A の拡大部の長さを 8.0 m に戻す | `MknotSelectionError`: 同じ型 (残差 0.00548 r_t > 0.00476 r_t、谷 2.70 を捨てた) | 26 s で停止 |
-| 試走 C: 全圧 −10 %・全温 −5 % だけ (寸法は case/71 のまま) | 最初の r_t では 2.85 を選んだが、解いた r_t (0.0999065 m) での選び直しで粗い網の 87 点がすべて残差 0.102 r_t > 0.1 r_t で止まり `MknotSelectionError` | 49 s で停止 |
-| A + `overrides: {geometry.n_axis_inv: 4800}` (試走の診断。この手順書では使わない) | M_knot 2.65、寸法 PASS (拡大部の長さ −0.48 mm) | 3 分 34 秒 (M_knot 164 s、生産の網はメモリで並列 1) |
+| case/71 の `card_m55.yaml` (変えない) | M_knot 2.80 (AWS・#6d の前と同じ)、調整なし、寸法 PASS (拡大部の長さ +0.044 mm) | 48 s (M_knot 35 s、並列 4) |
+| 試走 A: case/71 から全圧 −10 %・全温 −5 %・物理スロート径 +5 %・拡大部の長さ −5 % | 生産の網 2400 で 2.60〜2.70 が残差 0.0172 r_t (許容 0.00476) → `n_axis_inv` 4800 で M_knot 2.65、寸法 PASS (−0.477 mm) | 3 分 50 秒 (M_knot 181 s) |
+| 試走 B: A の拡大部の長さを 8.0 m に戻す | 2400 で残差 0.00548 r_t、4800 でも 0.0125 r_t → 許容差を 0.05 r_t に緩め `n_axis_inv` 2400 で M_knot 2.70。**寸法 FAIL** (拡大部の長さ −1.366 mm > 公差 1 mm、`EXIT_CODE=2`) | 2 分 37 秒 (M_knot 138 s) |
+| 試走 C: 全圧 −10 %・全温 −5 % だけ (寸法は case/71 のまま) | 最初の r_t では 2400 で 2.85 を選べたが、解いた r_t での選び直しで粗い網 600 の全点が残差 0.102 r_t > 0.1 r_t → `n_axis_inv` 4800 で最初から選び直して M_knot 2.85、寸法 PASS (+0.381 mm) | 4 分 47 秒 (M_knot 206 s) |
+| (#6d の前) 試走 A・B・C | 3 枚とも `MknotSelectionError` で止まった (選択の中に自動調整が無かった) | 22〜49 s で停止 |
 | threadpoolctl の無い環境で A | 粗い掃引 (86 点) が 3 分で終わらず止めた (入れた後は 14 s) | — |
 
-3 枚とも、長さ合わせの残差は M_K に依らず同じ値だった (原因は未確定)。
-`wt_card` は M_knot を選んだ後の設計チェーンでは同じ停止を自動で直す (`n_axis_inv` を 2 倍 → 内部の許容差を 0.05 r_t に緩める; `wt_card.py` の `on_stall`) が、
-M_knot の選択の中 (`mk_select`) では直さずに谷を捨てる。2026-10-16 の今のコードでは、case/71 から入口条件や寸法を少し変えただけで §2 が止まりうる (試走では 3 枚とも止まった)。
-`n_axis_inv` を上げる・M_knot を固定するなどは設計の決め方を変えるので、AI は試さずに人に返す。
+長さ合わせの残差は、どの停止でも M_K に依らず同じ値だった (原因は未確定)。
 
 ## 3. 格子 (`hand_mesh.py`)
 
@@ -402,7 +407,7 @@ grep -E 'VERDICT|違反|節点|超える断面|y1\+ の最大' $CASE/_log/hand_m
 - **成功の印**: 2 つとも `EXIT_CODE=0`。`check` の出力に `VERDICT: PASS` が 2 回 (NS・Euler)、`AR 緩和 違反 0`、`超える断面 0`。
   `problem_p0.yaml` (NS 用) と `problem_p0_euler.yaml` (Euler 用) がある。`出口面 非平面 (出口の x の広がり …)` は出てよい (case/71 も 0.62 mm で記録だけ)。
 - **人に知らせる (止まらなくても)**: NS と Euler の節点数 (`check` の出力の `NS: 節点 …`・`Euler: 節点 …`)。case/71 は NS 442,520 点・Euler 466,570 点。
-  NS が 600,000 点を超えたら、計算時間が延びるので進めてよいか人に聞く。
+  NS が 600,000 点を超えたら、次へ進まずに人に聞く (計算時間が延びる)。
 - **止まったら人に見せるもの**: `tail -n 40` の 2 つのログ。品質の関門 (`VERDICT: FAIL`・`違反` が 0 でない・`RuntimeError`) で止まったら、
   係数や格子の作り方を変えずに人に聞く (この台本は case/71 用で、外れた寸法では関門に掛かりうる)。
 
@@ -466,12 +471,13 @@ sha256sum $CASE/$EU/res_12000.h5
 - `CONVERGENCE_VERDICT.txt` の `NOT CONVERGED (stalled/plateau)` は出てよい (case/71 の Euler も残差は 1.5〜2.5 桁で横ばい。M6 の Euler と同じ型)。
 - **止まったら人に見せるもの**: `tail -n 40 $CASE/_log/euler_$T.log`、`tail -n 5 $CASE/$EU/forge_run.log`、上の Python の出力。
   `too many resources requested for launch` が出たら `FORGE_CUDA_BLOCKSIZE` が 128 になっているかを確かめて人に聞く。
-  `M_axis_exit` が M_exit から 0.05 % 以上ずれる・`dM_max_rel_Md` が 0.005 を超えるときも人に見せる (合否ではなく、case/71 から外れた目安)。
+  `M_axis_exit` が M_exit から 0.05 % 以上ずれる・`dM_max_rel_Md` が 0.005 を超えるときも、次へ進まずに人に見せる。
 
 ## 5. NS (`deltastar_loop --init-integral`、停止規則 v2)
 
 壁は `deltastar_initializer` (p0 は CONTUR の式のまま) で作る。前の段 (soft 3,000・mid 3,000 step) の後、本段は B0 (ライン陰解法) で回り、
-停止規則 v2 (残差・流量の収支・目的の量の 3 条件) を満たしたところで止まり、その場から δ_E を 1 回抽出する。上限は本段 200,000 step。
+停止規則 v2 (流量の収支と目的の量が落ち着いたか) を満たしたところで止まり、その場から δ_E を 1 回抽出する。上限は本段 200,000 step。
+判定の基準は雛形の既定 (`evaluate.settle` のプリセット; 残差を外した `wt_nozzle_v3` に替わる予定) で、**残差は監視しない、発散の見張りだけ**。
 
 ### 5.1 最初に本段 2,000 step で時間を測る (p0 のときだけ)
 
@@ -504,7 +510,7 @@ PYC
 
 - **成功の印**: `EXIT_CODE=0` か `EXIT_CODE=3` (停止規則を使わないので受け渡しの関門が「止める」を返すのが正常)、`Time = … ms/step` の行がある。
 - **人に知らせる**: 本段の ms/step と見込み。case/71 は本段 46,202 step で止まった (上限 200,000)。p0・p1 (・p2) の NS が 2〜3 本と Euler が 2〜3 本要る。
-  見込みが長すぎると人が判断したら、精度 (§0.4) やこの先の進め方を人が決める。
+  見込みが長すぎると人が判断したら、この先の進め方を人が決める。
 - **止まったら人に見せるもの**: `tail -n 40 $CASE/_log/ns_timing.log`、`tail -n 5 $CASE/run_0002_ns_timing/forge_run.log`。
 - この run は時間を測るだけ。README の状態は「破棄予定」。消すのは人に言われたとき。
 
@@ -580,7 +586,7 @@ cat $CASE/$NS/contur_calibrate/contur_overrides.yaml
   (`deltastar_initializer.model: contur` と 3 係数)。
 - **人に知らせる**: 新しい係数と、今の壁と較正後の射影の誤差の要約 (ログの「誤差」の行)。
   参考: case/71 の 3 係数は c₀ 0.678・c₁ 0.0210 /m・δ₀ −0.306 mm (2 係数の壁の NS から)、2 係数は c 0.852・δ₀ −0.322 mm (CONTUR の式のままの NS から)。
-  c₀ が 0.3〜1.5 の外、|δ₀| が 2 mm を超えるなら、進む前に人に見せる (合否ではなく、case/71 から外れた目安)。
+  c₀ が 0.3〜1.5 の外、|δ₀| が 2 mm を超えるなら、次へ進まずに人に見せる。
 - **止まったら人に見せるもの**: `cat $CASE/_log/contur_calibrate_$T.log`。
 
 ## 7. 係数をカードに入れて §2〜§5 をやり直す (p1)
@@ -600,9 +606,9 @@ source ~/forge/qs_env.sh && echo "T=$T EU=$EU NS=$NS PREV=$PREV COEF=$COEF" && l
 
 ### 7.2 係数を入れたカード `card_p1.yaml`
 
-`card_p0.yaml` の `deltastar_initializer.*` の行を、道具が書いた断片 (`COEF`) の 4 つの値に置き換える。値は手で写さない。
-断片の値は Python の `repr` の書き方なので、絶対値が 0.0001 より小さい値は `-5e-05` のように小数点の無い指数の形になり、PyYAML は数でなく文字列と読む。
-下の台本は同じ値を `-5.0e-05` の形で書き、読み直して断片の値と完全に一致することを確かめる。
+`card_p0.yaml` の `deltastar_initializer.*` の行を、道具が書いた断片 (`COEF`) の 4 行に置き換える。値は手で写さない。
+断片の数は PyYAML が数として読む書き方 (`-5.0e-05` など; `contur_calibrate.yaml_float`、plan §5.1 #6d) で書かれている。下の台本は行をそのまま写し、
+読み直して断片と同じ値・数であることを確かめる。
 
 ```bash
 source ~/forge/qs_env.sh
@@ -613,20 +619,15 @@ KEYS = ("deltastar_initializer.delta_scale", "deltastar_initializer.delta_scale_
 lines = [l for l in open(src).read().splitlines() if not l.strip().startswith("deltastar_initializer.")]
 if not lines[-1].strip().startswith("mesh.ni: 3000"):
     sys.exit("card_p0.yaml の最後が overrides の mesh.ni の行でない (§1.2 の雛形どおりでない) — 人に見せる")
+add = [l for l in open(frag).read().splitlines() if l.startswith("  deltastar_initializer.")]
 ov = yaml.safe_load(open(frag))["overrides"]
-if sorted(ov) != sorted(("deltastar_initializer.model",) + KEYS) or ov["deltastar_initializer.model"] != "contur":
-    sys.exit(f"{frag} のキーが想定と違う ({sorted(ov)}) — 人に見せる")
-def num(v):
-    r = repr(float(v))
-    m, _, e = r.partition("e")
-    return r if not e or "." in m else f"{m}.0e{e}"
-add = [f"  # 3 係数: {frag} の値 (procedures/design-chain-quickstart.md §7.2)", "  deltastar_initializer.model: contur"]
-add += [f"  {k}: {num(ov[k])}" for k in KEYS]
-open(out, "w").write("\n".join(lines + add) + "\n")
+if len(add) != 4 or sorted(ov) != sorted(("deltastar_initializer.model",) + KEYS) or ov["deltastar_initializer.model"] != "contur":
+    sys.exit(f"{frag} の行・キーが想定と違う ({sorted(ov)}) — 人に見せる")
+open(out, "w").write("\n".join(lines + [f"  # 3 係数: {frag} をそのまま写した (procedures/design-chain-quickstart.md §7.2)"] + add) + "\n")
 back = yaml.safe_load(open(out))["overrides"]
-bad = [k for k in KEYS if not isinstance(back[k], float) or back[k] != float(ov[k])]
+bad = [k for k in KEYS if not isinstance(back[k], float) or back[k] != ov[k]]
 print({k: back[k] for k in KEYS})
-sys.exit(f"読み直した値が断片と違う: {bad}" if bad else 0)
+sys.exit(f"読み直した値が数でない・断片と違う: {bad} — 人に見せる" if bad else 0)
 PYC
 echo "EXIT_CODE=$?"
 ```
@@ -704,7 +705,7 @@ cat $CASE/_log/wt_qualify_final_$T.log
 | 成果物の一覧 | `deliverables/MANIFEST.json` | `verdict`・`failed_parts`・`skipped` |
 | 壁の熱量を熱設計に使えるか | `deliverables/excel/wall_cfd_nodes.status.json` (README の冒頭にも出る) | `thermal_use.verdict` が `PASS` か (`未評価` なら理由の `reason`・`convergence` を人に見せる) |
 | 計算が止まった理由 | `STOP_RULE_STATE.json` | `status` (`REACHED` が正常)・`stop_step` |
-| 収束の判定 | `CONVERGENCE_VERDICT.txt` (1 行目が使った道具、最後の `VERDICT:` の行が判定)・`SETTLE_VERDICT.json` の `verdict` | 停止規則 v2 の 3 条件 (残差・流量の収支・目的の量) の判定。`SETTLED` が正常 |
+| 収束の判定 | `CONVERGENCE_VERDICT.txt` (1 行目が使った道具、最後の `VERDICT:` の行が判定)・`SETTLE_VERDICT.json` の `verdict` | 停止規則 v2 の判定 (流量の収支・目的の量; 残差は発散の見張りだけ)。`SETTLED` が正常 |
 | 報告 (図と PowerPoint) | `report/<run>_report.pptx`・`report/fig_*.png`・`report/report.json` | コンタ、軸・出口・壁の線グラフ、評価量 ([`nozzle-design-outputs.md`](nozzle-design-outputs.md)) |
 | 残差 | `residual_history.png` | |
 | 境界層の厚みの較正 | p0 の NS の `contur_calibrate/CONTUR_CALIBRATION.json` | 係数と、今の壁・較正後の射影の誤差 |
@@ -722,7 +723,7 @@ GitHub から素の clone (`feature/card-local-mesh`、1de17d21) を作業用の
 | --- | --- |
 | §0.2〜§0.6・§0.8 | 通った。float のビルド 2 分 46 秒、FP64 のビルド 2 分 34 秒 (`flowFormat.hpp` は元に戻った)。§0.7 の FreeCAD・フォントは手元の既存のものを使った (URL は 2026-10-16 に存在を確かめた) |
 | §1 | 通った。試走のカード A は case/71 から全圧 3.15 MPa (−10 %)・全温 1,187.5 K (−5 %)・物理スロート径 0.210 m (+5 %)・拡大部の長さ 7.6 m (−5 %)。§1.3 の確かめは、診断で足した `geometry.n_axis_inv` を「変えてはいけない欄の変更」として止めた |
-| §2 | **止まった**: 試走のカード 3 枚 (A・B・C) とも `MknotSelectionError` (§2 の表)。人に返す型の停止で、手順書では直さない。case/71 のカードそのままなら通った (55 s) |
+| §2 | 最初の試走では A・B・C とも `MknotSelectionError` で止まった (M_knot の選択の中に長さ合わせの自動調整が無かった)。plan §5.1 #6d でコードを直した後は 3 枚とも選択を通った (A・C は寸法 PASS、B は許容差を緩めた結果の寸法 FAIL で人に返す型; §2 の表)。case/71 のカードは前と同じ M_knot 2.80 |
 | §3〜§4.1・NS の準備 | §2 を `n_axis_inv` 4800 の診断のカードで通した後に続けて通した: 格子 NS 411,240 点 (ni 4,470 × nj 92)・Euler 433,590 点、品質 PASS・AR 緩和 違反 0、Euler の準備 PASS、NS の準備 (時間の試しと本番の両方の設定) PASS |
 | §5.4・§6・§8 の確認の塊 | case/71 の run の写し (run_0009_euler・run_0014_chain_v2) で打ち、Euler の確認・停止規則 v2 の確認・3 係数の較正・判定 (`escalate`、case/71 の結果と同じ) が出た |
 
@@ -731,4 +732,7 @@ GitHub から素の clone (`feature/card-local-mesh`、1de17d21) を作業用の
 - §0.5 に threadpoolctl を足した (無いと M_knot の並列の評価がスレッドを取り合い、粗い掃引が 3 分で終わらなかった。入れた後は 14 s)。
 - §5.1 の時間の試しを本段 1,000 step から 2,000 step にした (本段の step 数が出力の間隔 2,000 の倍数でないと準備が `ValueError` で止まった)。
 - §2 の確認のコマンドに例外の行 (`…Error: …`) を出すようにした (`tail` では M_knot の掃引の表しか見えなかった)。
-- §7.2 で 3 係数を YAML の数として書くようにした (絶対値が 0.0001 未満の値は `repr` の形 `-5e-05` だと PyYAML が文字列と読む)。
+- 係数の断片の数の書き方: 絶対値が 0.0001 未満の値は `repr` の形 `-5e-05` だと PyYAML が文字列と読む。最初は §7.2 の台本で書き直したが、
+  plan §5.1 #6d で `contur_calibrate`・`wt_qualify` が `-5.0e-05` の形で書くように直したので、§7.2 は行をそのまま写して確かめるだけにした。
+- M_knot の選択の中の長さ合わせの停止を `wt_card` が自動で調整するようにした (plan §5.1 #6d、§2)。
+- ビルドの既定を float にした (2026-10-16 ユーザ決定; FP64 は §0.4 の任意の手順)。判定は残差を監視せず発散の見張りだけ (§5)。
