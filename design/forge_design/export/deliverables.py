@@ -538,7 +538,10 @@ def part_dimensions(run: Path, out: Path, card_path) -> dict:
         # 弦の形状誤差は配布するメッシュ (run の nozzle.msh = mesh/nozzle.msh) と配布する STEP から測る (codex result レビュー 2 回目 M1)
         chord = dg.chord_from_mesh(step, run / "nozzle.msh") if (run / "nozzle.msh").exists() else None
         res["chord"] = chord
-        g = dg.evaluate_gate(card, sd, md, dt, chord)
+        # 直管と縮流部の接合: STEP の曲線から決めた接合を越える区間の壁節点の半径を曲線と照合 (plan tooling-nozzle-card-local-mesh §5.1 #3j)
+        junction = dg.junction_from_mesh(step, run / "nozzle.msh", sd["straight"]["x_end_mm"]) if (run / "nozzle.msh").exists() else None
+        res["junction"] = junction
+        g = dg.evaluate_gate(card, sd, md, dt, chord, junction)
         res.update(g)
         res["card"] = str(card_path)
         res["card_sha256"] = _sha(Path(card_path))

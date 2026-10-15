@@ -20,6 +20,8 @@ C = Path(sys.argv[1]); O = Path(sys.argv[2]); O.mkdir(parents=True, exist_ok=Tru
 NS = C / "run_0003_ns_cont"
 info = json.loads((NS / "prepare_info.json").read_text())
 er = info["euler_ref"] if isinstance(info.get("euler_ref"), dict) else None
+if er is None:                                                 # prepare_info が run dir の文字列のときは停止規則の記録の固定の参照
+    er = json.loads((NS / "stop_rule.json").read_text())["settings"].get("euler_ref")
 if er is None or not str(er.get("sha256", "")).startswith("93cb88b0"):
     raise SystemExit(f"run_0003_ns_cont の euler_ref が想定と違う: {info.get('euler_ref')}")
 EREF = {"run": str(C / "run_0001_euler"), "res": er["res"], "sha256": er["sha256"]}   # 固定の参照 (sha256 は prepare_info の完全な値)

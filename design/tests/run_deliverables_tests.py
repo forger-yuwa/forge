@@ -14,6 +14,11 @@ FreeCAD・gmsh が要る (無ければ飛ばす)。作業は一時ディレク�
   FP64 の座標でないと薄い第 1 層を測れない (FORGE_CONVERTER で指定) ので、元と作り直しの判定が同じことだけを合否にする。
   規則の照合 (prepare_info.json の mesh.params の wall_normal_layer・wall_normal_end_stations): part_mesh で実施されて通り、
   同じ格子で傾きを (1 + 1e-6) 倍・d_n を 1 % ずらすと StructureError、パラメータ無しでは通って「未実施」と書く。
+
+寸法ゲートの直管と縮流部の接合の照合 (plan tooling-nozzle-card-local-mesh §5.1 #3j、codex diagnose 2026-10-15 E(ii)):
+- (J) fixture (FIX) と case/71 run_0005_ns の成果物 (M55_DELIV、FORGE_DELIV_M55_DIR で指定; 無ければ飛ばす) で、接合を STEP の曲線から
+  決め入口端から設計スロート x = 0 までの壁節点の半径を曲線と NODE_EQ_MM で照合: 基準 PASS、接合を ±1 節点の間隔ずらした曲線・
+  直管の節点の 1e-5 mm で FAIL、照合が欠けたら PASS にしない。旧の「接合点を挟む 2 節点の区間」は参考の記録 (必須から外した)。
 """
 import hashlib
 import json
@@ -35,6 +40,10 @@ CFG_TEMPLATE = Path(os.environ.get("FORGE_DELIV_CFG_TEMPLATE",
 FIXTURE_WN_DEFAULT = "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/m55_deliv/fixtures/m55_wn"
 FIX_WN = Path(os.environ.get("FORGE_DELIV_FIXTURE_WN", FIXTURE_WN_DEFAULT))
 BASE_COMMIT = "6d4334e3"     # v2 を入れる前の mesh_structure.py (v1 の出力のビット同一の基準)
+REPO = Path(__file__).resolve().parents[2]
+# 直管と縮流部の接合の照合 (#3j) の実データ: case/71 run_0005_ns の成果物 (接合の 0.08 mm 下流に節点があり、旧の区間の検査が誤って落ちた)
+M55_DELIV = Path(os.environ.get("FORGE_DELIV_M55_DIR", str(REPO / "case/71.m55_combustion_wt/run_0005_ns/deliverables")))
+M55_CARD = Path(os.environ.get("FORGE_DELIV_M55_CARD", str(REPO / "case/71.m55_combustion_wt/card_m55.yaml")))
 fails = 0
 
 
@@ -199,9 +208,105 @@ def wn_fixture_tests() -> None:
               f"β が [0, 1] の外に出た節点 {st1['checks']['n_beta_clamped']})")
 
 
+def shifted_junction_r(C, u_range, xj: float, r_in: float, xw, rw, d: float):
+    """接合を d [mm] ずらした曲線の半径を壁節点の x で返す (負例用)。入口端・直管の半径・設計スロート x = 0 は固定:
+    x ≤ xj + d は入口半径、xj + d < x ≤ 0 は縮流部 [xj, 0] を [xj + d, 0] に線形に写した曲線、x > 0 は元の節点のまま。"""
+    from forge_design.export import dimension_gate as dg
+    r = rw.copy()
+    r[xw <= xj + d] = r_in
+    mid = (xw > xj + d) & (xw <= 0.0)
+    r[mid] = dg.curve_r_at_x(C, u_range, xj + (xw[mid] - xj - d) * (0.0 - xj) / (0.0 - xj - d))[0]
+    return r
+
+
+def junction_tests(tag: str, card: dict, sd: dict, md: dict, ch: dict, step: Path, msh: Path) -> dict:
+    """(J) 直管と縮流部の接合の照合 (plan tooling-nozzle-card-local-mesh §5.1 #3j、codex diagnose 2026-10-15 E(ii)):
+    接合は STEP の曲線から決め、入口端から設計スロート x = 0 までの壁節点の半径を節点の x で評価した曲線と NODE_EQ_MM で照合する。
+    (a) 基準は PASS、(b) 接合を ±1 節点の間隔ずらした曲線で作り直した節点の半径は FAIL、(c) 直管の節点の半径を 1e-5 mm 動かすと FAIL、
+    (d) 照合が欠けた・評価できない・別の接合で照合した・設計スロートまで照合していないものは PASS にしない。"""
+    import numpy as np
+    from forge_design.export import dimension_gate as dg
+    from forge_design.export.wall_step import read_step
+    rd = read_step(step)
+    C = dg._bspline(rd)[0]
+    ur = (float(rd["first"]), float(rd["last"]))
+    xw, rw = dg.wall_nodes_mm(msh)
+    xj = float(sd["straight"]["x_end_mm"])
+    jn = dg.junction_from_mesh(step, msh, xj)
+    g = dg.evaluate_gate(card, sd, md, None, ch, jn)
+    mv = g["mesh_vs_step"]
+    ok_a = jn.get("status") == "ok" and mv.get("straight_junction_pass") is True and g["verdict"] == "PASS"
+    check(f"(J-a {tag}) 基準: 接合の照合 PASS・寸法ゲート PASS", ok_a,
+          f"最大 |節点 r − 曲線 r| {jn.get('max_abs_mm', float('nan')):.2e} mm @ x {jn.get('x_of_max_mm', float('nan')):.4f} mm・"
+          f"節点 {jn.get('n_nodes')} (接合の上流 {jn.get('n_upstream')}・下流 {jn.get('n_downstream')})・接合 x {xj} mm・"
+          f"接合を挟む節点の間隔 {jn.get('spacing_at_junction_mm', float('nan')):.4f} mm・定義域の外 "
+          f"{(jn.get('evaluation') or {}).get('outside_domain_max_mm', float('nan')):.1e} mm・verdict {g['verdict']} {jn.get('status')}")
+    if jn.get("status") != "ok":
+        return jn
+
+    def regate(r_new, x_junction=xj, x_hi=0.0):
+        j2 = dg.junction_match(C, ur, x_junction, xw, r_new, x_hi)
+        return j2, dg.evaluate_gate(card, sd, md, None, ch, j2)
+
+    h = float(jn["spacing_at_junction_mm"])
+    for k in (+1.0, -1.0):
+        j2, g2 = regate(shifted_junction_r(C, ur, xj, float(sd["inlet_radius_mm"]), xw, rw, k * h))
+        check(f"(J-b {tag}) 接合を {k:+.0f} 節点の間隔 ({k * h:+.4f} mm) ずらした曲線 (入口端・設計スロート x = 0 は固定) で作り直した"
+              "節点の半径 → 照合 FAIL・寸法ゲート FAIL",
+              j2.get("status") == "ok" and g2["mesh_vs_step"].get("straight_junction_pass") is False and g2["verdict"] == "FAIL",
+              f"最大 |差| {j2.get('max_abs_mm', float('nan')):.3e} mm @ x {j2.get('x_of_max_mm', float('nan')):.3f} mm")
+    i_up = int(np.flatnonzero(xw <= xj)[-1])                        # 接合の直前の直管の節点
+    i_mid = int(np.argmin(np.abs(xw - 0.5 * (xw[0] + xj))))         # 直管の中ほどの節点
+    i_dn = int(np.flatnonzero(xw > xj)[0])                          # 接合の直後の節点 (縮流部)
+    for name, i, dr in (("直管の接合の直前の節点", i_up, +1e-5), ("直管の中ほどの節点", i_mid, -1e-5), ("接合の直後の節点", i_dn, +1e-5)):
+        r2 = rw.copy(); r2[i] += dr
+        j2, g2 = regate(r2)
+        check(f"(J-c {tag}) {name} (x {xw[i]:.3f} mm) の半径を {dr:+.0e} mm 動かす → 照合 FAIL・寸法ゲート FAIL",
+              g2["mesh_vs_step"].get("straight_junction_pass") is False and g2["verdict"] == "FAIL",
+              f"最大 |差| {j2.get('max_abs_mm', float('nan')):.3e} mm @ x {j2.get('x_of_max_mm', float('nan')):.3f} mm")
+    check(f"(J-d {tag}) 接合の照合が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card, sd, md, None, ch, None)["verdict"] == "未判定")
+    check(f"(J-d {tag}) 接合の照合が評価できない (status ≠ ok) なら PASS にしない (未判定)",
+          dg.evaluate_gate(card, sd, md, None, ch, {"status": "曲線を評価できない: 試験"})["verdict"] == "未判定")
+    j2, g2 = regate(rw, x_junction=xj + h)
+    check(f"(J-d {tag}) STEP の接合と別の位置 (+1 節点の間隔) で照合したもの → FAIL",
+          g2["verdict"] == "FAIL" and g2["mesh_vs_step"]["straight_junction_checks"]["junction_is_step_straight_end"] is False)
+    j2, g2 = regate(rw, x_hi=xj - 1.0)
+    check(f"(J-d {tag}) 接合の手前までしか照合していないもの (設計スロートまで照合せず、接合の下流の節点なし) → FAIL",
+          g2["verdict"] == "FAIL" and not g2["mesh_vs_step"]["straight_junction_checks"]["nodes_downstream"]
+          and not g2["mesh_vs_step"]["straight_junction_checks"]["covers_to_design_throat"])
+    return jn
+
+
+def m55_junction_tests() -> None:
+    """(J-e) case/71 run_0005_ns の成果物 (接合の 0.08 mm 下流に節点、旧の区間の検査が誤って FAIL) で接合の照合が PASS し、寸法ゲート全体が PASS。"""
+    from forge_design.export import dimension_gate as dg
+    from forge_design.export import wall_step
+    step, msh = M55_DELIV / "cad" / "wall_physical.step", M55_DELIV / "mesh" / "nozzle.msh"
+    if not (step.exists() and msh.exists() and M55_CARD.exists()):
+        print(f"skip (J-e): case/71 run_0005_ns の成果物が無い ({M55_DELIV}; FORGE_DELIV_M55_DIR で指定)")
+        return
+    if not Path(wall_step.FREECADCMD).exists():
+        print(f"skip (J-e): freecadcmd が無い ({wall_step.FREECADCMD})")
+        return
+    card = yaml.safe_load(M55_CARD.read_text())
+    sd = dg.step_dimensions(step)
+    md = dg.mesh_dimensions(msh)
+    ch = dg.chord_from_mesh(step, msh)
+    jn = junction_tests("case/71 run_0005_ns", card, sd, md, ch, step, msh)
+    g = dg.evaluate_gate(card, sd, md, None, ch, jn)
+    mv = g["mesh_vs_step"]
+    check("(J-e) case/71 run_0005_ns: 旧の区間の検査は false (参考の記録) で、接合の照合と寸法ゲート全体は PASS",
+          mv.get("straight_end_in_mesh_interval") is False and mv.get("straight_junction_pass") is True and g["verdict"] == "PASS",
+          f"旧の区間 {md['straight_end_interval_mm']} mm・STEP の接合 {sd['straight']['x_end_mm']} mm・"
+          f"照合 最大 {jn.get('max_abs_mm', float('nan')):.2e} mm @ x {jn.get('x_of_max_mm', float('nan')):.4f} mm "
+          f"({jn.get('n_nodes')} 節点)・接合の直後の節点 x {(jn.get('node_after_junction') or {}).get('x_mm', float('nan')):.4f} mm の "
+          f"r − r_in {(jn.get('node_after_junction') or {}).get('r_node_minus_r_in_mm', float('nan')):.2e} mm")
+
+
 def main() -> int:
     structure_tests()
     wn_fixture_tests()
+    m55_junction_tests()
     if not (FIX / "wall_repr.json").exists() or not (FIX / "nozzle.msh").exists():
         print(f"skip: fixture が無い ({FIX})。tests/make_deliverables_fixture.py で作る")
         print(f"FAIL 件数: {fails}")
@@ -258,17 +363,23 @@ def main() -> int:
     from forge_design.export import wall_step
     md = dg.mesh_dimensions(FIX / "nozzle.msh")
     chm = dg.chord_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")   # 弦の検査は必須 (欠けたら未判定)
-    check("(M1) 基準: 生産の設計値のカード・メッシュ・弦あり → PASS", dg.evaluate_gate(card_ok, sd, md, None, chm)["verdict"] == "PASS")
+    jnf = dg.junction_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh", sd["straight"]["x_end_mm"])   # 接合の照合も必須 (#3j)
+    check("(M1) 基準: 生産の設計値のカード・メッシュ・弦・接合の照合あり → PASS", dg.evaluate_gate(card_ok, sd, md, None, chm, jnf)["verdict"] == "PASS")
     for name, mut in (("入口半径 +10 mm", lambda m: m.__setitem__("inlet_radius_mm", m["inlet_radius_mm"] + 10.0)),
                       ("スロート半径 +10 mm", lambda m: m["throat_physical"].__setitem__("r_mm", m["throat_physical"]["r_mm"] + 10.0)),
-                      ("直管の終端の区間を別の位置に", lambda m: m.__setitem__("straight_end_interval_mm", [0.0, 1.0])),
                       ("出口端 +0.01 mm", lambda m: m.__setitem__("x_end_mm", m["x_end_mm"] + 0.01))):
         m2 = copy.deepcopy(md); mut(m2)
-        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2, None, chm)["verdict"] == "FAIL")
+        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2, None, chm, jnf)["verdict"] == "FAIL")
+    # #3j: 接合点を挟む 2 節点の区間 (straight_end_in_mesh_interval) は参考の記録 (合否は接合の照合 straight_junction_pass)
+    m2 = copy.deepcopy(md); m2["straight_end_interval_mm"] = [0.0, 1.0]
+    g_iv = dg.evaluate_gate(card_ok, sd, m2, None, chm, jnf)
+    check("(M1→#3j) 直管の終端の区間 (参考) を別の位置に → 記録は false・必須でない (合否は接合の照合で PASS のまま)",
+          g_iv["mesh_vs_step"]["straight_end_in_mesh_interval"] is False and "straight_end_in_mesh_interval" not in g_iv["mesh_vs_step"]["required"]
+          and "straight_end_in_mesh_interval" in g_iv["mesh_vs_step"]["reference_only"] and g_iv["verdict"] == "PASS", g_iv["verdict"])
     check("(M1) 弦の形状誤差 50 µm → FAIL",
-          dg.evaluate_gate(card_ok, sd, md, None, {"status": "ok", "min_um": -50.0, "max_um": 3.0})["verdict"] == "FAIL")
+          dg.evaluate_gate(card_ok, sd, md, None, {"status": "ok", "min_um": -50.0, "max_um": 3.0}, jnf)["verdict"] == "FAIL")
     card_nt = {k: v for k, v in card_ok.items() if k != "tolerances"}
-    g_nt = dg.evaluate_gate(card_nt, sd, md, None, chm)
+    g_nt = dg.evaluate_gate(card_nt, sd, md, None, chm, jnf)
     check("(M4) 公差を省いたカードは生成器と同じ既定の公差で判定 (止まらない)",
           g_nt["verdict"] == "PASS" and all(v.startswith("default") for v in g_nt["tolerances_source"].values()), g_nt["tolerances_source"])
     with tempfile.TemporaryDirectory(prefix="deliv_m2_") as td2:
@@ -286,12 +397,13 @@ def main() -> int:
     # ---- codex result レビュー 2 回目の負例 ----
     md0 = dg.mesh_dimensions(FIX / "nozzle.msh")
     m3 = copy.deepcopy(md0); m3["x_start_mm"] += 10.0
-    check("(R2-M1) メッシュの入口端を 10 mm ずらす (直管が短い) → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m3, None, chm)["verdict"] == "FAIL")
+    check("(R2-M1) メッシュの入口端を 10 mm ずらす (直管が短い) → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m3, None, chm, jnf)["verdict"] == "FAIL")
     ch = dg.chord_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")
     check(f"(R2-M1) 弦の形状誤差を配布メッシュと STEP から測る (最大 {max(abs(ch['min_mm']), abs(ch['max_mm'])):.2e} mm) → 基準は PASS",
-          dg.evaluate_gate(card_ok, sd, md0, None, ch)["verdict"] == "PASS")
-    check("(R2-M1) 弦の検査が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, md0, None, None)["verdict"] == "未判定")
-    check("(R2-M1) メッシュの測定が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, None, None, ch)["verdict"] == "未判定")
+          dg.evaluate_gate(card_ok, sd, md0, None, ch, jnf)["verdict"] == "PASS")
+    check("(R2-M1) 弦の検査が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, md0, None, None, jnf)["verdict"] == "未判定")
+    check("(R2-M1) メッシュの測定が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, None, None, ch, jnf)["verdict"] == "未判定")
+    junction_tests("M6 fixture", card_ok, sd, md0, ch, FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import run_wall_tables_tests as RWT
     from forge_design.export import wall_tables as WT

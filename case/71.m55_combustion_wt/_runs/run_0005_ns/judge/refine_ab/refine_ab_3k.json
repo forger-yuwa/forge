@@ -1,0 +1,111 @@
+{
+ "saved_raw_vs_A": {
+  "max_abs_mm": 0.0,
+  "n_nan_mismatch": 0,
+  "bit_identical": true
+ },
+ "yb_used_equals_saved": {
+  "4": true,
+  "32": true
+ },
+ "judge_1_3.5m": {
+  "max_abs_dE_mm": 0.008667417293636594,
+  "x_m_at": 3.125441551068081,
+  "max_abs_dtheta_deg": 0.0018053790571590511,
+  "x_m_at_theta": 2.7810402581750977,
+  "max_abs_draw_mm": 0.13831287342035756,
+  "raw_adjacent_step_max_mm": {
+   "A4": 0.2633149098455055,
+   "B32": 0.055041090838368355
+  },
+  "raw_adjacent_step_p99_mm": {
+   "A4": 0.17086404349848866,
+   "B32": 0.05054171321252664
+  },
+  "n_hard_fail": {
+   "A4": 0,
+   "B32": 0
+  }
+ },
+ "all_0_8m": {
+  "max_abs_dE_mm": 0.008667417293636594,
+  "x_m_at": 3.125441551068081,
+  "max_abs_dtheta_deg": 0.0025402374653544224,
+  "x_m_at_theta": 8.00004446586103,
+  "max_abs_draw_mm": 0.13831287342035756,
+  "raw_adjacent_step_max_mm": {
+   "A4": 0.2633149098455055,
+   "B32": 0.055041090838368355
+  },
+  "raw_adjacent_step_p99_mm": {
+   "A4": 0.07334236738227884,
+   "B32": 0.041348530263953756
+  },
+  "n_hard_fail": {
+   "A4": 0,
+   "B32": 0
+  }
+ },
+ "tolerance": {
+  "max_abs_dE_mm": 0.01,
+  "max_abs_dtheta_deg": 0.01
+ },
+ "result": "B (両方以内)",
+ "saved_dE_vs_A": {
+  "max_abs_mm": 0.0
+ },
+ "saved_hard_vs_A": {
+  "n_diff": 0
+ },
+ "two_coef": {
+  "calibration": {
+   "4": {
+    "c": 0.8520732797553449,
+    "delta0_mm": -0.32200509886341855,
+    "Et_mm": -0.24396474054766942,
+    "Ee_mm": 41.710886240767486
+   },
+   "32": {
+    "c": 0.8521097090995027,
+    "delta0_mm": -0.3220881479352409,
+    "Et_mm": -0.24404445310004108,
+    "Ee_mm": 41.71260025622161
+   }
+  },
+  "endpoint_abs_dE_mm": {
+   "throat": 7.971255237165797e-05,
+   "exit": 0.0017140154541266384
+  },
+  "max_abs_dcorr_mm_x_ge_0": 0.0017140154541319139,
+  "x_m_at_dcorr": 8.00004446586103,
+  "max_abs_dtheta_2coef_deg_x_ge_0": 1.6118212160076695e-05,
+  "x_m_at_dtheta": 4.349390761195442,
+  "hard_same_between_arms": true,
+  "tolerance": {
+   "endpoint_abs_dE_mm": 0.01,
+   "max_abs_dcorr_mm": 0.01,
+   "max_abs_dtheta_deg": 0.01
+  },
+  "result": "すべて以内 (標本化の依存を 2 係数の阻害要因から外す)"
+ },
+ "smooth_diag": {
+  "4": {
+   "n_cp": 36.0,
+   "knot_spacing": 2.0,
+   "lam": 1.0,
+   "penalty_order": 3.0,
+   "resid_rel_rms": 1.4934686314788042,
+   "resid_abs_max": 0.0048837758114602175,
+   "resid_rel_p95": 0.588023048673357
+  },
+  "32": {
+   "n_cp": 36.0,
+   "knot_spacing": 2.0,
+   "lam": 1.0,
+   "penalty_order": 3.0,
+   "resid_rel_rms": 1.4612341104829962,
+   "resid_abs_max": 0.0048944939572043164,
+   "resid_rel_p95": 0.5698329387558638
+  }
+ }
+}
