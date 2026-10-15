@@ -1,0 +1,4 @@
+2026-10-15T13:12:02+00:00
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       290G  230G   61G  80% /
+4893164198	/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0010_ns_b0

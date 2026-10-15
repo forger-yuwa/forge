@@ -1,0 +1,13 @@
+
+=== /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0010_ns_b0  [last step 88519]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=9.86e-06 peak=1.24e-05 fin=4.07e-08 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roUx    : init=1.20e-02 peak=1.68e-02 fin=1.76e-05 drop= 3.0dec flat     <-- STALLED (plateau)
+  rms_roUy    : init=6.58e-03 fin=9.90e-06 drop= 2.8dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=9.91e+00 peak=1.51e+01 fin=8.05e-02 drop= 2.3dec flat     <-- STALLED (plateau)
+  rms_roK     : init=4.98e-02 peak=8.53e-02 fin=5.19e-06 drop= 4.2dec flat   
+  rms_roOmega : init=7.00e+04 fin=3.55e+01 drop= 3.3dec flat   
+  rms_roY0    : init=9.01e-06 peak=1.13e-05 fin=3.41e-08 drop= 2.5dec flat     <-- STALLED (plateau)
+  rms_roY1    : init=8.46e-07 peak=1.06e-06 fin=3.20e-09 drop= 2.5dec flat     <-- STALLED (plateau)
+
+OVERALL: CHECK FAILURES ABOVE

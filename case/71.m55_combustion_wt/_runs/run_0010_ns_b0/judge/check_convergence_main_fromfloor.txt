@@ -1,0 +1,14 @@
+reference floor from /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0008_ns_b0 (normal criterion PASS at step 92488; tail 20% mean), factor 1.5; columns ['rms_ro', 'rms_roK', 'rms_roOmega', 'rms_roUx', 'rms_roUy', 'rms_roY0', 'rms_roY1', 'rms_roe']; inactive ['rms_roUz']
+
+=== /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0010_ns_b0  [last step 88519]  -> NOT CONVERGED (residual left the reference floor, or column mismatch) ===
+  rms_ro      : ref_floor=6.54e-08 tail=4.08e-08 (x0.62) peak=1.24e-05 (x189.38) fin=4.07e-08  <-- ABOVE FLOOR (peak)
+  rms_roUx    : ref_floor=1.82e-05 tail=1.75e-05 (x0.96) peak=1.68e-02 (x926.98) fin=1.76e-05  <-- ABOVE FLOOR (peak)
+  rms_roUy    : ref_floor=1.01e-05 tail=1.01e-05 (x1.00) peak=6.58e-03 (x652.12) fin=9.90e-06  <-- ABOVE FLOOR (peak)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : ref_floor=6.33e-02 tail=8.01e-02 (x1.27) peak=1.51e+01 (x237.93) fin=8.05e-02  <-- ABOVE FLOOR (peak)
+  rms_roK     : ref_floor=5.21e-06 tail=5.18e-06 (x0.99) peak=8.53e-02 (x16358.83) fin=5.19e-06  <-- ABOVE FLOOR (peak)
+  rms_roOmega : ref_floor=3.59e+01 tail=3.56e+01 (x0.99) peak=7.00e+04 (x1948.07) fin=3.55e+01  <-- ABOVE FLOOR (peak)
+  rms_roY0    : ref_floor=4.76e-08 tail=3.41e-08 (x0.72) peak=1.13e-05 (x237.72) fin=3.41e-08  <-- ABOVE FLOOR (peak)
+  rms_roY1    : ref_floor=4.47e-09 tail=3.20e-09 (x0.72) peak=1.06e-06 (x237.72) fin=3.20e-09  <-- ABOVE FLOOR (peak)
+
+OVERALL: CHECK FAILURES ABOVE

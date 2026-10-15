@@ -162,7 +162,11 @@ def _mesh_quality(msh: Path, run: Path, ar_max: float) -> dict:
         return {"verdict": "未判定", "reason": "convertGmshToForge が見つからない (FORGE_CONVERTER で指定)"}
     if not (run / "solverConfig.yaml").exists() or not (run / "bcondConfig.yaml").exists():
         return {"verdict": "未判定", "reason": "run に solverConfig.yaml / bcondConfig.yaml が無い (変換の設定を作れない)"}
-    cfg = (run / "solverConfig.yaml").read_text()
+    # 本段だけの陰解法 B0 (`evaluate.main_line`) の run は、本段の設定に node 専用のキー (implicitThermalJacobian など) が入っていて
+    # cell の変換が拒む (2026-10-15 case/71 run_0010_ns_b0)。B0 を当てる前の元の設定 (runner_axismach.PRESTAGE_CONFIG) があればそれを使う
+    from ..evaluate.runner_axismach import PRESTAGE_CONFIG
+    src_cfg = run / PRESTAGE_CONFIG if (run / PRESTAGE_CONFIG).exists() else run / "solverConfig.yaml"
+    cfg = src_cfg.read_text()
     cfg = cfg.replace('discretization: "node"', 'discretization: "cell"').replace(", axisCentroidShift: 1, nodeWallDirichlet: 1", "")
     import re
     cfg = re.sub(r'meshFileName: "[^"]*"', 'meshFileName: "nozzle_qc.h5"', cfg)
@@ -180,7 +184,7 @@ def _mesh_quality(msh: Path, run: Path, ar_max: float) -> dict:
     lines = [ln for ln in q.stdout.splitlines() if ln.strip()]
     v = next((ln for ln in reversed(lines) if ln.startswith("VERDICT")), "VERDICT: ?")
     return {"verdict": "PASS" if v.startswith("VERDICT: PASS") else "FAIL", "verdict_line": v, "ar_max": ar_max,
-            "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv)}
+            "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv), "config_source": src_cfg.name}
 
 
 def _wall_slope(run: Path, coords, bedges) -> tuple:

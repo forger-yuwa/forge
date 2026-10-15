@@ -1,0 +1,12 @@
+
+=== /home/ubuntu/m55_diag_0010/out/stop_rule_series.csv  [43 rows, steps 2000..86000]  -> STEADY ===
+  r               : tail mean=3.51e-05  drift=0.1%/tail  fluct=0.6%         STEADY
+  mdot_in         : tail mean=121.4  drift=0.0%/tail  fluct=0.0%            STEADY
+  mdot_out        : tail mean=121.4  drift=0.0%/tail  fluct=0.0%            STEADY
+  theta_r_0.4     : tail mean=0.05271  drift=0.0%/tail  fluct=0.0%          STEADY
+  theta_r_0.7     : tail mean=0.07892  drift=0.0%/tail  fluct=0.0%          STEADY
+  theta_r_0.95    : tail mean=0.08951  drift=0.0%/tail  fluct=0.0%          STEADY
+  exit_core_M     : tail mean=5.503  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: ALL STEADY
+CHECK_QUASISTEADY_EXIT: 0
