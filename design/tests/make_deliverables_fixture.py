@@ -3,8 +3,10 @@
 壁ファイルのある準備ディレクトリ (wall_repr.json・prepare_info.json・bcondConfig.yaml。例: case/45 の生産の確認
 `_band_ab/prod_confirm/prep`) から、
 - `nozzle.msh` を prepare_info.json の格子パラメータで mesh2d から作り直し、記録された生成器と msh の sha256 と一致することを確かめる
+  (座標の桁数は prepare_info.json の `mesh.block.msh_digits`、無ければ 10 = 生成器の既定)
 - `step/wall_physical.step` を wall_step で書く (FreeCAD が要る)
-を OUT に置く。試験は環境変数 FORGE_DELIV_FIXTURE=OUT で使う。
+を OUT に置く。試験は環境変数 FORGE_DELIV_FIXTURE=OUT で使う (壁法線の近壁層の格子の run から作ったものは
+FORGE_DELIV_FIXTURE_WN=OUT; plan tooling-nozzle-card-local-mesh §5.1 #5)。solverConfig.yaml があれば写す (格子品質の変換に使う)。
 
 usage (design/ を cwd に):
   .venv-opt/bin/python tests/make_deliverables_fixture.py PREP_DIR OUT_DIR
@@ -31,7 +33,7 @@ def _upd(h, name, a):
 def main(prep, out) -> int:
     prep, out = Path(prep), Path(out)
     (out / "step").mkdir(parents=True, exist_ok=True)
-    for n in ("wall_repr.json", "prepare_info.json", "bcondConfig.yaml", "wall_physical.csv", "wall_design.csv"):
+    for n in ("wall_repr.json", "prepare_info.json", "bcondConfig.yaml", "wall_physical.csv", "wall_design.csv", "solverConfig.yaml"):
         if (prep / n).exists():
             shutil.copy2(prep / n, out / n)
     info = json.loads((prep / "prepare_info.json").read_text())
@@ -43,10 +45,11 @@ def main(prep, out) -> int:
     _upd(hg, "quads", np.asarray(quads, dtype=np.int64))
     for g in ("inlet", "outlet", "wall", "axis"):
         _upd(hg, g, np.asarray(bedges[g], dtype=np.int64))
-    write_msh41_2d(out / "nozzle.msh", coords, quads, bedges)
+    digits = int((m.get("block") or {}).get("msh_digits", 10))       # runner_axismach と同じ (mesh.msh_digits、既定 10)
+    write_msh41_2d(out / "nozzle.msh", coords, quads, bedges, digits=digits)
     ok_gen = hg.hexdigest() == m["hashes"]["generator_sha256"]
     ok_msh = hashlib.sha256((out / "nozzle.msh").read_bytes()).hexdigest() == m["hashes"]["msh_sha256"]
-    print(f"generator sha256 一致: {ok_gen} / msh sha256 一致: {ok_msh}")
+    print(f"generator sha256 一致: {ok_gen} / msh sha256 一致: {ok_msh} (座標 {digits} 桁)")
     data = wall_step.step_curve_data(W["record"])
     wall_step.write_step(data, out / "step" / "wall_physical.step")
     print(f"fixture: {out}")

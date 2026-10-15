@@ -7,8 +7,8 @@ forge にも forge_design にも依存しない (標準ライブラリ・numpy�
 
 - STEP: 単位 mm、$x$ 軸 = 流れ方向 (回転軸)、$y$ = 半径 ($r \ge 0$ の上半分)、$z=0$ の平面曲線 1 本
   (forge の `export/wall_step.py` が書く形。CAD で編集した曲線でもよい)。
-- STRUCTURE_JSON: `mesh_structure.json` (`forge.mesh_structure/v1`、接続の規則 `mesh2d_ij_v1`)。station $x_i$ [mm]、
-  半径方向の比 $s_{ij}$、物理名とタグ。
+- STRUCTURE_JSON: `mesh_structure.json` (`forge.mesh_structure/v1` か `/v2`、接続の規則 `mesh2d_ij_v1`)。station $x_i$ [mm]、
+  半径方向の比 $s_{ij}$、物理名とタグ。v2 (壁法線の近壁層の格子; 節点の規則 `wall_normal_blend_v1`) は重み $\beta_{ij}$ も。
 - 出力 (座標は m):
   - `OUT_PREFIX.msh`: **forge の変換器 (`convertGmshToForge`) に入れる形**。forge の `meshing/mesh2d.py` の `write_msh41_2d` と
     同じ書式 (msh4.1 ASCII、節点ブロック 1 つ・面 1・曲線 4、節点・要素番号は元の msh と同じでファイル順に 1..N) で、座標だけ
@@ -26,8 +26,14 @@ forge にも forge_design にも依存しない (標準ライブラリ・numpy�
 3. 各 station で **$x(u)=x_i$ を $u$ について解く** (標本で挟んでから二分法と割線法 (はさみうち) を交互に、
    $|x(u_i)-x_i|\le10^{-9}$ mm まで)。CAD で編集した曲線では $x(u)=u$ が成り立たないため ($u$ をそのまま $x$ に使わない)。
    曲線の端と端の station の差が $10^{-6}$ mm 以内ならその端の助変数を使い、曲線が station より長ければ $u_0$・$u_{n_i-1}$ で切る。
-4. 壁半径 $r_w(x_i)=r(u_i)$、節点 $(x_i,\ s_{ij}\,r_w(x_i))$。節点の $x$ は station のまま (縦線を保つ)。
-5. 軸・入口・出口の直線と面を OCC で作り (壁は STEP の曲線そのもの)、全体を mm → m に縮める。
+4. 壁半径 $r_w(x_i)=r(u_i)$。v1 は節点 $(x_i,\ s_{ij}\,r_w(x_i))$ (節点の $x$ は station のまま、縦線を保つ)。
+   v2 は各 station の $u_i$ で曲線の導関数から壁の傾き $r'_i = (dr/du)/(dx/du)$ を出し、forge の `meshing/mesh2d.py` の
+   `wall_normal_layer` と同じ式で置く: $(x,r)_{ij} = P_i + (1-\beta_{ij})\,d_{ij}\,(0,-1) + \beta_{ij}\,d_{ij}\,n_i$、
+   $P_i = (x_i, r_w(x_i))$、$n_i = (r'_i,-1)/\sqrt{1+r_i'^2}$、$d_{ij} = r_w(x_i)\,(1-s_{ij})$ (壁と軸の節点は $x = x_i$)。
+   構造ファイルの `wall_slope` (元の壁の傾き) は使わず、差だけを記録する (CAD で曲線を直したら傾きも STEP に従う)。
+5. 軸・入口・出口の直線と面を OCC で作り (壁は STEP の曲線そのもの)、全体を mm → m に縮める。v2 の入口・出口も OCC の直線
+   ($x$ 一定) のままで、端の列の節点は規則どおりに置くので端の断面の $\beta\,d\,r'/\sqrt{1+r'^2}$ だけ直線から外れる
+   (外れる量を比較の JSON の `end_columns` に書く。forge の `wall_normal_end_stations` で端を戻した格子は 0)。
    節点を角の点・各曲線の内点 (壁は助変数 $u_i$ つき)・面の内点に、要素を線分 (型 1)・四角形 (型 3) で載せる。
    節点番号は元の msh と同じ $i\,n_j+j+1$、要素番号も元と同じ並び (四角形が先、境界辺は構造ファイルの順)。
 6. 物理グループ (名前・タグは構造ファイルどおり) を付けて書く (gmsh で `_cad.msh`・`_v22.msh`・`.cgns`、自前の書き出し器で
@@ -36,6 +42,8 @@ forge にも forge_design にも依存しない (標準ライブラリ・numpy�
    全要素で一致、(b) 節点の距離の最大 [mm] と各 station の第 1 層厚に対する比の最大、(c) 物理グループの名前・タグ・要素数の
    一致を JSON に書く。加えて (d) `.msh` を直接読んで forge の形 (節点ブロック 1 つ・節点番号と要素番号がファイル順に 1..N) か。
    判定 (plan §6 V3): 両方の msh で最大距離 ≤ 1e-5 mm かつ比 ≤ 0.01、(a)・(c) が一致、(d) が成り立てば `verdict: PASS`。
+   第 1 層厚は元の msh の壁の節点と $j = n_j-2$ の節点の半径の差 (v2 も同じ。壁法線の層では法線方向の厚さ × cos θ_w で、
+   厚さより小さいので比の判定は厳しい側)。
 
 終了コード: 0 = 成功 (比較ありなら PASS)、1 = 比較が FAIL、2 = 入力を拒否 (理由を標準エラーに書く)、
 3 = 形状の組み立て中のその他のエラー (gmsh・OCC)。
@@ -54,7 +62,9 @@ from pathlib import Path
 import numpy as np
 
 FORMAT = "forge.mesh_structure/v1"
+FORMAT_V2 = "forge.mesh_structure/v2"
 CONNECTIVITY = "mesh2d_ij_v1"
+NODE_RULE_V2 = "wall_normal_blend_v1"
 SIDES = ("inlet", "outlet", "wall", "axis")
 PLANE_TOL_MM = 1e-9      # 曲線の |z| の許容
 END_TOL_MM = 1e-6        # 曲線の端と端の station の差の許容 (これ以内は曲線の端を使う)
@@ -75,8 +85,8 @@ class RebuildError(ValueError):
 
 def load_structure(path) -> dict:
     st = json.loads(Path(path).read_text(encoding="utf-8"))
-    if st.get("format") != FORMAT or st.get("connectivity") != CONNECTIVITY:
-        raise RebuildError(f"構造ファイルの format/connectivity が {FORMAT}/{CONNECTIVITY} でない "
+    if st.get("format") not in (FORMAT, FORMAT_V2) or st.get("connectivity") != CONNECTIVITY:
+        raise RebuildError(f"構造ファイルの format/connectivity が {FORMAT} か {FORMAT_V2}/{CONNECTIVITY} でない "
                            f"({st.get('format')}/{st.get('connectivity')})")
     ni, nj = int(st["ni"]), int(st["nj"])
     x = np.asarray(st["x_mm"], dtype=np.float64)
@@ -95,7 +105,18 @@ def load_structure(path) -> dict:
     order = list(st.get("element_tag_order") or [surf[0], *SIDES])
     if order[0] != surf[0] or sorted(order[1:]) != sorted(SIDES):
         raise RebuildError(f"構造ファイルの element_tag_order が不正 ({order})")
-    return {"raw": st, "ni": ni, "nj": nj, "x": x, "S": S, "phys": phys, "surf": surf[0], "order": order}
+    B = rp = None
+    if st["format"] == FORMAT_V2:
+        if st.get("node_rule") != NODE_RULE_V2:
+            raise RebuildError(f"v2 の構造ファイルの節点の規則 node_rule が {NODE_RULE_V2} でない ({st.get('node_rule')!r})")
+        B = np.asarray(st.get("beta"), dtype=np.float64)
+        if B.shape != (ni, nj) or not (np.all(np.isfinite(B)) and B.min() >= 0.0 and B.max() <= 1.0):
+            raise RebuildError("v2 の構造ファイルの重み beta が (ni, nj) で 0〜1 の有限の値でない")
+        rp = np.asarray(st.get("wall_slope"), dtype=np.float64)
+        if rp.shape != (ni,) or not np.all(np.isfinite(rp)):
+            raise RebuildError("v2 の構造ファイルの wall_slope が長さ ni の有限の列でない")
+    return {"raw": st, "format": st["format"], "ni": ni, "nj": nj, "x": x, "S": S, "beta": B, "wall_slope": rp,
+            "phys": phys, "surf": surf[0], "order": order}
 
 
 def connectivity(ni: int, nj: int):
@@ -264,6 +285,17 @@ def trim_curve(gmsh, tag: int, cuts: list[float], keep_range: tuple[float, float
 # 形状と節点・要素
 # --------------------------------------------------------------------------------------------
 
+def wall_normal_blend_xr(x, rw, rp, S, B):
+    """規則 `wall_normal_blend_v1` の節点 (X, R) (ni, nj)。forge の `meshing/mesh2d.py` の wall_normal_layer と同じ式
+    (forge_design の `export/mesh_structure.py` の同名の関数と同じ)。x・rw: station の x と壁半径、rp: 壁の傾き dr/dx、
+    S・B: 比 s と重み β。d = r_w (1 − s)、X = x + β·d·r′/√(1 + r′²)、R = r_w − (1 − β)·d − β·d/√(1 + r′²)。"""
+    nrm = np.sqrt(1.0 + rp * rp)
+    d = rw[:, None] * (1.0 - S)
+    X = x[:, None] + B * (d * (rp / nrm)[:, None])
+    R = rw[:, None] - (1.0 - B) * d - B * (d / nrm[:, None])
+    return X, R
+
+
 def build(gmsh, stc: dict, step: str, n_sample: int) -> dict:
     ni, nj, x_st, S = stc["ni"], stc["nj"], stc["x"], stc["S"]
     occ = gmsh.model.occ
@@ -271,6 +303,13 @@ def build(gmsh, stc: dict, step: str, n_sample: int) -> dict:
     cc = curve_checks(gmsh, wall, x_st, n_sample)
     sv = solve_stations(gmsh, wall, x_st, cc)
     u = sv["u"]
+    rp = None
+    if stc["format"] == FORMAT_V2:
+        # 壁の傾き r′ = (dr/du)/(dx/du) を各 station の u_i で (切る前の曲線で; OCC の分割は助変数を保つ)
+        Dw = np.asarray(gmsh.model.getDerivative(1, wall, u.tolist()), dtype=np.float64).reshape(-1, 3)
+        if not (np.all(np.isfinite(Dw)) and np.all(cc["sgn"] * Dw[:, 0] > 0)):
+            raise RebuildError("station で曲線の dx/du が 0 か非有限 (壁の傾きを出せない)")
+        rp = Dw[:, 1] / Dw[:, 0]
     cuts = []
     if sv["trim"]["inlet"]:
         cuts.append(float(u[0]))
@@ -299,8 +338,26 @@ def build(gmsh, stc: dict, step: str, n_sample: int) -> dict:
     occ.dilate(gmsh.model.getEntities(), 0.0, 0.0, 0.0, MM_TO_M, MM_TO_M, MM_TO_M)
     occ.synchronize()
     # 節点 (m)。番号 i·nj + j + 1
-    R = S * sv["r_wall_mm"][:, None]
-    X = np.repeat(x_st[:, None], nj, axis=1)
+    v2 = None
+    if rp is None:
+        R = S * sv["r_wall_mm"][:, None]
+        X = np.repeat(x_st[:, None], nj, axis=1)
+    else:
+        X, R = wall_normal_blend_xr(x_st, sv["r_wall_mm"], rp, S, stc["beta"])
+        rp0 = stc["wall_slope"]
+        dsl = np.abs(rp - rp0)
+        ends = {}
+        for side, i, xl in (("inlet", 0, xw0), ("outlet", ni - 1, xw1)):
+            dx = np.abs(X[i] - xl)
+            ends[side] = {"line_x_mm": xl, "max_abs_dx_mm": float(dx.max()), "at_j": int(np.argmax(dx)),
+                          "station_x_minus_line_mm": float(x_st[i] - xl)}
+        ends["note"] = ("入口・出口は OCC の直線 (x = line_x_mm) のまま。端の列の節点は規則どおりに置くので、端の断面の "
+                        "β·d·r′/√(1 + r′²) だけ直線から外れる (forge の wall_normal_end_stations で端を戻した格子は 0)")
+        v2 = {"node_rule": NODE_RULE_V2, "end_columns": ends,
+              "wall_slope": {"source": "STEP の曲線の (dr/du)/(dx/du) を各 station の u_i で",
+                             "step_minus_structure_max_abs": float(dsl.max()), "at_station": int(np.argmax(dsl)),
+                             "range": [float(rp.min()), float(rp.max())],
+                             "note": "構造ファイルの wall_slope (元の格子の壁の傾き) は作り直しに使わない (差は情報)"}}
     XYZ = np.zeros((ni, nj, 3))
     XYZ[..., 0] = X * MM_TO_M
     XYZ[..., 1] = R * MM_TO_M
@@ -348,7 +405,7 @@ def build(gmsh, stc: dict, step: str, n_sample: int) -> dict:
     stations["trimmed"] = [s for s, v in sv["trim"].items() if v]
     stations["wall_u_range"] = [float(u.min()), float(u.max())]
     return {"curve": info, "stations": stations, "r_wall_mm": sv["r_wall_mm"], "u_wall": u,
-            "coords": XYZ.reshape(-1, 3)}
+            "coords": XYZ.reshape(-1, 3), "v2": v2}
 
 
 def write_msh41_forge(path, coords, quads, bedges, phys: dict, curve_order, surf_name: str, digits: int = 17) -> None:
@@ -637,6 +694,10 @@ def main(argv=None) -> int:
         print(f"rebuild: ni {stc['ni']} nj {stc['nj']} 曲線 {rep['curve']['direction']} 助変数 {rep['curve']['param_range']} "
               f"x(u)−u 最大 {rep['curve']['x_minus_u_max_abs_mm']:.3e} mm、解の残差 {rep['stations']['max_solve_residual_mm']:.2e} mm "
               f"(反復 {rep['stations']['n_iter']})、切った端 {rep['stations']['trimmed'] or 'なし'}")
+        if rep["v2"] is not None:
+            ec, ws = rep["v2"]["end_columns"], rep["v2"]["wall_slope"]
+            print(f"  v2 ({NODE_RULE_V2}): 壁の傾き (STEP − 構造ファイル) 最大 {ws['step_minus_structure_max_abs']:.2e}、"
+                  f"端の列の直線からの外れ 入口 {ec['inlet']['max_abs_dx_mm']:.3e} mm・出口 {ec['outlet']['max_abs_dx_mm']:.3e} mm")
         label = {"msh41": "forge の変換器に入れる形 (元と同じ番号)", "msh41_cad": "CAD 要素つき (gmsh・Fluent 用)",
                  "msh22": "msh2.2 (番号は gmsh が振り直す)", "cgns": "CGNS (番号・物理タグは gmsh が振り直す)"}
         for k, v in files.items():
@@ -645,6 +706,11 @@ def main(argv=None) -> int:
             cmp_ = compare(gmsh, stc, a.compare, files)
             doc = {"format": "forge.mesh_rebuild_compare/v1", "step": str(a.step), "structure": str(a.structure),
                    "outputs": files, "curve": rep["curve"], "stations": rep["stations"], **cmp_}
+            if rep["v2"] is not None:                # v2 (壁法線の近壁層の格子) だけ: 節点の規則・端の列・壁の傾き
+                doc["structure_format"] = stc["format"]
+                doc.update(rep["v2"])
+                doc["first_layer_note"] = ("b_distance の第 1 層厚は v1 と同じ半径の差 (壁法線の層では法線方向の厚さ × cos θ_w = "
+                                           "厚さより小さいので比の判定は厳しい側)")
             path = f"{a.out_prefix}_compare.json"
             Path(path).write_text(json.dumps(_jsonable(doc), ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
             bd = cmp_["b_distance"]

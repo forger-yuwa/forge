@@ -10,6 +10,15 @@
 - V3(d): 変換器 (FORGE_CONVERTER、既定は solver_density_cuda/.build-native/relwithdebinfo/convertGmshToForge) があれば、
   元の msh と作り直した `.msh` を cell の config (FORGE_QC_CONFIG の solverConfig.yaml を cell に直したもの) で変換し、
   `check_mesh_quality.py --ar-max 5000` がどちらも PASS。作業はテンポラリ (run ディレクトリには書かない)。
+- 壁法線の近壁層の格子 (v2、plan tooling-nozzle-card-local-mesh §5.1 #5, 2026-10-15):
+  (6) 縦線の格子の v1 の出力が変更前 (git の BASE_COMMIT の mesh_structure.py) と JSON のバイト列で一致 (傾きを渡しても同じ)。
+  (7) mesh2d の wall_normal_layer [0.02, 0.8] の小さな格子 (直管 + 傾きのある壁、wall_normal_end_stations なし / 3) で v2 を抽出し、
+      作り直した座標が元と ≤ 1e-12 L (配列・17 桁の msh・JSON の往復)。傾きを ±1e-6 ずらすと自己検査で StructureError、
+      傾きを渡さない非縦線の格子は StructureError (理由に「壁の傾きを渡す」)。
+      規則のパラメータ (wall_normal_layer・wall_normal_end_stations) を渡すと規則の照合が実施され、傾きを (1 + 1e-6) 倍・d_n を
+      1 % ずらす・端の断面の数を変える・不正なパラメータはどれも StructureError。渡さなければ通り checks に「未実施」と書く。
+  (8) 同じ壁を厳密に表す B-spline の STEP から作り直して比較が PASS・端の列の直線からの外れを記録、傾きを (1 + 1e-4) 倍した構造
+      (規則のパラメータ無し = 定数倍は自己検査を通る) は比較が FAIL (1 + 1e-6 倍は許容 1e-5 mm の内なので記録だけ)。
 
 fixture は環境変数 FORGE_DELIV_FIXTURE (既定は下の FIXTURE_DEFAULT)、gmsh の python は FORGE_MESH_PYTHON
 (既定は .venv-mesh)。無ければ該当の試験を飛ばしたと出力する。作業フォルダは終わりに消す (FORGE_KEEP_TMP=1 で残す)。
@@ -35,6 +44,7 @@ from forge_design.meshing.mesh2d import PHYS, Mesh2DParams, _radial_fracs, gener
 from forge_design.export.rebuild_from_step import forge_format_check, write_msh41_forge  # noqa: E402
 
 FIXTURE_DEFAULT = "/tmp/claude-1000/-home-sano-work-forge/bd18adac-85f4-4627-811b-8f3186867995/scratchpad/fixtures/m6_prod"
+BASE_COMMIT = "6d4334e3"     # v2 を入れる前の mesh_structure.py (v1 の出力のビット同一の基準; plan tooling-nozzle-card-local-mesh §5.1 #5)
 REBUILD = HERE.parents[1] / "forge_design" / "export" / "rebuild_from_step.py"
 CONVERTER_DEFAULT = HERE.parents[2] / "solver_density_cuda" / ".build-native" / "relwithdebinfo" / "convertGmshToForge"
 QC_TOOL = HERE.parents[2] / "solver_density_cuda" / "tools" / "check_mesh_quality.py"
@@ -427,6 +437,260 @@ else:
                 check(f"(5) V3(d) {nm}: cell 変換 → check_mesh_quality --ar-max 5000 が PASS",
                       q.returncode == 0 and "VERDICT: PASS" in q.stdout, " / ".join(lines) or q.stderr[-300:])
                 (d / "nozzle_qc.h5").unlink(missing_ok=True)
+
+# ------------------------------------------------------------------------------------------
+# 6. 縦線の格子の v1 の出力が変更前とビット同一 (plan tooling-nozzle-card-local-mesh §5.1 #5)
+# ------------------------------------------------------------------------------------------
+import importlib.util  # noqa: E402
+
+from forge_design.export import mesh_structure as MS  # noqa: E402
+
+
+def base_module():
+    """BASE_COMMIT の mesh_structure.py を git から読んで import する (無ければ None と理由)。"""
+    r = subprocess.run(["git", "-C", str(HERE.parents[2]), "show", f"{BASE_COMMIT}:design/forge_design/export/mesh_structure.py"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None, r.stderr.strip()[:200]
+    p = tmp / "mesh_structure_base.py"
+    p.write_text(r.stdout, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("mesh_structure_base", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod, None
+
+
+def jbytes(st):
+    return json.dumps(st, ensure_ascii=False, indent=1).encode("utf-8")
+
+
+BASE, why = base_module()
+if BASE is None:
+    skip("(6) v1 のビット同一", f"git から {BASE_COMMIT} の mesh_structure.py を読めない: {why}")
+else:
+    prm_t = Mesh2DParams(ni=31, nj=12, scale=0.05, axis_cap_frac=0.2, throat_refine=1.0,
+                         wall_first_frac_table=[[-2.0, 1e-3], [0.0, 2e-4], [6.0, 5e-3]], x_density_table=[[-2.0, 1.0], [0.0, 3.0], [6.0, 0.5]])
+    ct, qt, bt = generate_axisym_mesh(Wall, prm_t)
+    write_msh41_2d(tmp / "tab17.msh", ct, qt, bt, digits=17)
+    cases = [("10 桁の msh (structure_from_msh)", lambda m: m.structure_from_msh(syn)),
+             ("17 桁の msh・第 1 層の表・軸側の上限", lambda m: m.structure_from_msh(tmp / "tab17.msh")),
+             ("配列 (s_common)", lambda m: m.extract_structure(coords, quads, bedges)),
+             ("配列 (第 1 層が x で変わる)", lambda m: m.extract_structure(cv, qv, bv))]
+    if has_fx:
+        cases.append(("M6 fixture の msh", lambda m: m.structure_from_msh(fx / "nozzle.msh")))
+    for nm, fn in cases:
+        j0, j1 = jbytes(fn(BASE)), jbytes(fn(MS))
+        check(f"(6a) v1 の出力が {BASE_COMMIT} と JSON のバイト列で一致: {nm}", j0 == j1, f"{len(j1)} B")
+    # 縦線の格子は傾きを渡しても v1 (渡さないときと同じ)
+    xs_syn = c1[8::9, 0] / 0.05
+    st_s = MS.extract_structure(c1, q1, b1, phys=p1, msh_sha256=sha256_file(syn), source=syn.name,
+                                wall_slope=0.2 * xs_syn, wall_slope_source={"test": "Wall の r′"})
+    check("(6b) 縦線の格子に傾きを渡しても v1 で、変更前の structure_from_msh と JSON のバイト列で一致",
+          st_s["format"] == MS.FORMAT and jbytes(st_s) == jbytes(BASE.structure_from_msh(syn)))
+    fx_ok = True
+    for nm in ("tab17.msh",):
+        cpb = tmp / f"cp_{nm}"
+        shutil.copyfile(tmp / nm, cpb)
+        MS.write_structure_json(MS.structure_from_msh(cpb), tmp / "new.json")
+        BASE.write_structure_json(BASE.structure_from_msh(cpb), tmp / "old.json")
+        fx_ok &= (tmp / "new.json").read_bytes() == (tmp / "old.json").read_bytes()
+    check("(6c) write_structure_json で書いたファイルも変更前とバイト一致", fx_ok)
+
+
+# ------------------------------------------------------------------------------------------
+# 7. 壁法線の近壁層の格子 → v2 (配列・msh)
+# ------------------------------------------------------------------------------------------
+class WallS:
+    """直管 (x < −2、r′ = 0) + 2 次の壁 r = 1 + 0.05 x² [r*]。r(x, 1) を返す (mesh2d が解析的な傾きを使う)。"""
+    x_in, x_e = -3.0, 4.0
+
+    @staticmethod
+    def r(x, deriv=0):
+        x = np.asarray(x, dtype=float)
+        if deriv == 0:
+            return np.where(x < -2.0, 1.2, 1.0 + 0.05 * x * x)
+        if deriv == 1:
+            return np.where(x < -2.0, 0.0, 0.1 * x)
+        raise ValueError("deriv は 0, 1")
+
+
+def wn_mesh(wall, ne, ni=41, nj=17, scale=0.05):
+    prm_w = Mesh2DParams(ni=ni, nj=nj, wall_first_frac=0.01, throat_refine=2.0, scale=scale,
+                         wall_normal_layer=[0.02, 0.8], wall_normal_end_stations=ne)
+    c, q, b = generate_axisym_mesh(wall, prm_w)
+    xw = c[:, 0].reshape(ni, nj)[:, -1] / scale
+    return c, q, b, np.asarray(wall.r(xw, 1), dtype=float)
+
+
+for ne in (None, 3):
+    tag = f"end_stations {ne}"
+    cw, qw, bw, rpw = wn_mesh(WallS, ne)
+    rule = {"wall_normal_layer": [0.02, 0.8], "wall_normal_end_stations": ne, "source": {"test": "wn_mesh の Mesh2DParams"}}
+    Lw = float(cw[-17, 0] - cw[0, 0])
+    ok, msg = raises(lambda: extract_structure(cw, qw, bw), StructureError, "壁の傾きを渡す")
+    check(f"(7a) [{tag}] 傾きを渡さない非縦線の格子は StructureError (理由に「壁の傾きを渡す」)", ok, msg[-90:])
+    stw = extract_structure(cw, qw, bw, wall_slope=rpw, wall_slope_source={"test": "WallS.r(x, 1)"})
+    Sw, Bw = structure_s(stw), np.asarray(stw["beta"])
+    check(f"(7b) [{tag}] format v2・節点の規則・s と beta が (ni, nj)・傾きと出典",
+          stw["format"] == "forge.mesh_structure/v2" and stw["node_rule"] == "wall_normal_blend_v1" and Sw.shape == (41, 17)
+          and Bw.shape == (41, 17) and np.array_equal(np.asarray(stw["wall_slope"]), rpw) and stw["wall_slope_source"]["test"] == "WallS.r(x, 1)")
+    errw = np.abs(structure_coords(stw) - cw).max() / Lw
+    check(f"(7b) [{tag}] 配列: 作り直した座標が元と ≤ 1e-12 L", errw <= 1e-12, f"{errw:.2e} L・自己検査 {stw['checks']['self_check']['max_dist_mm']:.2e} mm")
+    check(f"(7b) [{tag}] s は 0 → 1 の狭義増加・β は [0, 1]・軸の β = 0",
+          np.all(Sw[:, 0] == 0) and np.all(Sw[:, -1] == 1) and np.all(np.diff(Sw, axis=1) > 0) and Bw.min() >= 0 and Bw.max() <= 1
+          and np.all(Bw[:, 0] == 0))
+    flat = np.abs(rpw) <= 1e-12
+    check(f"(7c) [{tag}] 直管 (r′ = 0) の station は β = 0 (縦線)", flat.sum() == stw["checks"]["n_flat_stations"] > 0
+          and np.all(Bw[flat] == 0), f"{int(flat.sum())} station")
+    if ne is None:
+        check(f"(7c) [{tag}] 近壁 (d ≤ 0.02 r_w) の β は 1 (傾きのある station)", np.allclose(Bw[~flat, -2], 1.0, rtol=0, atol=1e-9))
+    else:
+        check(f"(7c) [{tag}] 端の断面 (i = 0・ni − 1) は β = 0 (端を戻す)", np.all(Bw[0] == 0) and np.all(Bw[-1] == 0))
+    # 17 桁の msh を経由
+    mp = tmp / f"wn_{ne}.msh"
+    write_msh41_2d(mp, cw, qw, bw, digits=17)
+    cr, qr, br, pr = read_msh41_mesh2d(mp)
+    xr = cr[16::17, 0] / 0.05
+    stm = extract_structure(cr, qr, br, phys=pr, msh_sha256=sha256_file(mp), source=mp.name, wall_slope=WallS.r(xr, 1),
+                            rule_params=rule)
+    write_structure_json(stm, tmp / f"wn_{ne}.json")
+    stl = load_structure_json(tmp / f"wn_{ne}.json")
+    e17 = np.abs(structure_coords(stl) - cr).max() / Lw
+    e0 = np.abs(cr - cw).max() / Lw
+    check(f"(7d) [{tag}] 17 桁の msh → v2 → JSON の往復: 作り直しが読んだ msh と ≤ 1e-12 L (msh の丸め {e0:.1e} L)・規則の照合も通る",
+          e17 <= 1e-12 and stl["format"] == "forge.mesh_structure/v2" and stl["checks"]["rule_check"]["status"] == "実施"
+          and stl["rule_params"]["wall_normal_end_stations"] == ne, f"{e17:.2e} L")
+    for eps in (1e-6, -1e-6):
+        ok, msg = raises(lambda: extract_structure(cw, qw, bw, wall_slope=rpw + eps), StructureError, "自己検査")
+        check(f"(7e) [{tag}] 傾きを {eps:+g} ずらすと自己検査 (作り直し) で StructureError (規則のパラメータ無しでも)", ok, msg[:110])
+    # 規則の照合 (plan §5.1 #5 の判断 2026-10-15)
+    check(f"(7g) [{tag}] 規則のパラメータ無し: 今までどおり通り、checks に「規則の照合: 未実施」・rule_params は null",
+          stw["checks"]["rule_check"]["status"] == "未実施 (パラメータ無し)" and stw["rule_params"] is None)
+    stg = extract_structure(cw, qw, bw, wall_slope=rpw, wall_slope_source={"test": "WallS.r(x, 1)"}, rule_params=rule)
+    rcg = stg["checks"]["rule_check"]
+    check(f"(7g) [{tag}] 正しいパラメータ: 規則の照合を実施して ≤ 1e-7 mm かつ第 1 層厚の 1e-3・rule_params と出典を記録",
+          rcg["status"] == "実施" and rcg["max_dist_mm"] <= 1e-7 and rcg["max_dist_over_first_layer"] <= 1e-3
+          and stg["rule_params"] == {"wall_normal_layer": [0.02, 0.8], "wall_normal_end_stations": ne, "source": rule["source"]}
+          and jbytes({k: v for k, v in stg.items() if k not in ("rule_params", "checks")})
+          == jbytes({k: v for k, v in stw.items() if k not in ("rule_params", "checks")}),
+          f"{rcg['max_dist_mm']:.2e} mm・{rcg['max_dist_over_first_layer']:.2e}・|β_規則 − β_解| {rcg['beta_rule_minus_solved_max_abs']:.1e}")
+    ok, msg = raises(lambda: extract_structure(cw, qw, bw, wall_slope=rpw * (1.0 + 1e-6), rule_params=rule), StructureError, "規則の照合")
+    check(f"(7g) [{tag}] 傾きを (1 + 1e-6) 倍 (r′ と同じ符号のずれ) は規則の照合で StructureError", ok, msg[:150])
+    sts = extract_structure(cw, qw, bw, wall_slope=rpw * (1.0 + 1e-6))
+    print(f"     (記録) [{tag}] 同じ (1 + 1e-6) 倍でも規則のパラメータ無しでは自己検査を通る "
+          f"(β が [0, 1] の外に出た節点 {sts['checks']['n_beta_clamped']}; 規則の照合 {sts['checks']['rule_check']['status']})")
+    rule_dn = dict(rule, wall_normal_layer=[0.02 * 1.01, 0.8])
+    ok, msg = raises(lambda: extract_structure(cw, qw, bw, wall_slope=rpw, rule_params=rule_dn), StructureError, "規則の照合")
+    check(f"(7g) [{tag}] d_n を 1 % ずらしたパラメータは規則の照合で StructureError", ok, msg[:150])
+    rule_ne = dict(rule, wall_normal_end_stations=3 if ne is None else 4)
+    ok, msg = raises(lambda: extract_structure(cw, qw, bw, wall_slope=rpw, rule_params=rule_ne), StructureError, "規則の照合")
+    check(f"(7g) [{tag}] 端の断面の数 (wall_normal_end_stations) を変えたパラメータは規則の照合で StructureError", ok, msg[:100])
+    ok, msg = raises(lambda: extract_structure(cw, qw, bw, wall_slope=rpw, rule_params=dict(rule, wall_normal_layer=[0.8, 0.02])),
+                     StructureError, "0 < d_n < d_b < 1")
+    check(f"(7g) [{tag}] 不正なパラメータ (d_n > d_b) は StructureError", ok, msg[:100])
+ok, msg = raises(lambda: extract_structure(cw, qw, bw, wall_slope=rpw[:-1]), StructureError, "wall_slope")
+check("(7f) 傾きの長さが ni でなければ拒否", ok, msg[:80])
+bad = dict(stl, node_rule="other")
+(tmp / "bad_rule.json").write_text(json.dumps(bad))
+ok, msg = raises(lambda: load_structure_json(tmp / "bad_rule.json"), StructureError, "node_rule")
+check("(7f) v2 の node_rule が違えば load_structure_json が拒否", ok)
+
+
+# ------------------------------------------------------------------------------------------
+# 8. v2 の STEP からの作り直し (gmsh)
+# ------------------------------------------------------------------------------------------
+class WallQ:
+    """2 次の壁 r = 1 + 0.05 x² [r*] (x ∈ [−2, 4])。2 次の Bézier 1 本で厳密に表せる (STEP の曲線と傾きが一致)。"""
+    x_in, x_e = -2.0, 4.0
+
+    @staticmethod
+    def r(x, deriv=0):
+        x = np.asarray(x, dtype=float)
+        if deriv == 0:
+            return 1.0 + 0.05 * x * x
+        if deriv == 1:
+            return 0.1 * x
+        raise ValueError("deriv は 0, 1")
+
+
+BEZ = r'''
+import sys, json, gmsh
+gmsh.initialize(); gmsh.option.setNumber("General.Terminal", 0)
+P, out = json.loads(sys.argv[1]), sys.argv[2]
+pts = [gmsh.model.occ.addPoint(x, r, 0.0) for x, r in P]
+gmsh.model.occ.addBSpline(pts, degree=2, knots=[P[0][0], P[-1][0]], multiplicities=[3, 3])
+gmsh.model.occ.synchronize(); gmsh.write(out); gmsh.finalize()
+'''
+if MPY is None:
+    skip("(8) v2 の STEP からの作り直し", "gmsh の python (.venv-mesh) が見つからない")
+else:
+    sc = 0.05 * 1e3                                    # r* → mm
+    x0, x1 = WallQ.x_in, WallQ.x_e
+    poles = [[x0 * sc, float(WallQ.r(x0)) * sc], [0.5 * (x0 + x1) * sc, float(WallQ.r(x0) + WallQ.r(x0, 1) * 0.5 * (x1 - x0)) * sc],
+             [x1 * sc, float(WallQ.r(x1)) * sc]]
+    bz = tmp / "bez.py"
+    bz.write_text(BEZ)
+    stepq = tmp / "wallq.step"
+    r = subprocess.run([MPY, str(bz), json.dumps(poles), str(stepq)], capture_output=True, text=True)
+    check("(8) 2 次の Bézier の STEP を書けた", r.returncode == 0 and stepq.exists(), r.stderr[-200:])
+    for ne in (None, 3):
+        tag = f"end_stations {ne}"
+        cq, qq, bq, rpq = wn_mesh(WallQ, ne)
+        mq = tmp / f"wq_{ne}.msh"
+        write_msh41_2d(mq, cq, qq, bq, digits=17)
+        crq, qrq, brq, prq = read_msh41_mesh2d(mq)
+        stq = extract_structure(crq, qrq, brq, phys=prq, msh_sha256=sha256_file(mq), source=mq.name,
+                                wall_slope=WallQ.r(crq[16::17, 0] / 0.05, 1))
+        jq = tmp / f"wq_{ne}.json"
+        write_structure_json(stq, jq)
+        r = rebuild(stepq, jq, tmp / f"wq_{ne}_out", compare=mq)
+        cjq = json.loads((tmp / f"wq_{ne}_out_compare.json").read_text()) if (tmp / f"wq_{ne}_out_compare.json").exists() else {}
+        bd = cjq.get("b_distance", {})
+        check(f"(8a) [{tag}] v2 の作り直しの比較が PASS (終了コード 0)", r.returncode == 0 and cjq.get("verdict") == "PASS",
+              f"最大距離 {bd.get('max_dist_mm', float('nan')):.3e} mm・第 1 層厚比 {bd.get('max_dist_over_first_layer', float('nan')):.3e}"
+              + ("" if r.returncode == 0 else f" / {r.stderr[-300:]}"))
+        if cjq:
+            ec = cjq["end_columns"]
+            check(f"(8a) [{tag}] 比較の JSON に v2 の記録 (format・規則・端の列・壁の傾き (STEP − 構造) ≤ 1e-9)",
+                  cjq["structure_format"] == "forge.mesh_structure/v2" and cjq["node_rule"] == "wall_normal_blend_v1"
+                  and cjq["wall_slope"]["step_minus_structure_max_abs"] <= 1e-9 and cjq["c_physical_groups"]["match"]
+                  and cjq["cad_msh"]["b_distance"]["max_dist_mm"] <= 1e-5,
+                  f"傾きの差 {cjq['wall_slope']['step_minus_structure_max_abs']:.2e}")
+            Xo = crq[:, 0].reshape(41, 17) * 1e3
+            exp_in, exp_out = float(np.abs(Xo[0] - Xo[0, -1]).max()), float(np.abs(Xo[-1] - Xo[-1, -1]).max())
+            check(f"(8a) [{tag}] 端の列の直線からの外れ (入口 {ec['inlet']['max_abs_dx_mm']:.3e} mm・出口 {ec['outlet']['max_abs_dx_mm']:.3e} mm) "
+                  "が元の格子の端の列の x のばらつきと一致" + (" (端を戻した格子は 0)" if ne else " (> 0)"),
+                  abs(ec["inlet"]["max_abs_dx_mm"] - exp_in) <= 1e-9 and abs(ec["outlet"]["max_abs_dx_mm"] - exp_out) <= 1e-9
+                  and ((exp_in == 0.0 and exp_out == 0.0) if ne else (exp_in > 1e-3 and exp_out > 1e-3)),
+                  f"元 入口 {exp_in:.3e}・出口 {exp_out:.3e} mm")
+    # 傾きを定数倍した構造 (全 station で r′ と同じ符号のずれ): 自己検査は通る。STEP の傾きで置き直すと元から d·Δr′ だけ外れる
+    # (1 + 1e-6 倍はこの格子 (d ≤ 0.8 r_w = 40 mm) で 1e-5 mm 未満 = V3 の許容の内、1 + 1e-4 倍は許容の外で比較が FAIL)
+    mq = tmp / "wq_None.msh"
+    crq, qrq, brq, prq = read_msh41_mesh2d(mq)
+    for fac in (1e-6, 1e-4):
+        try:
+            stb = extract_structure(crq, qrq, brq, phys=prq, wall_slope=WallQ.r(crq[16::17, 0] / 0.05, 1) * (1.0 + fac))
+        except StructureError as e:
+            check(f"(8b) 傾きを (1 + {fac:g}) 倍した構造が自己検査を通る (定数倍は自己検査では見えない)", False, str(e)[:80])
+            continue
+        jb = tmp / f"wq_bad_{fac:g}.json"
+        write_structure_json(stb, jb)
+        r = rebuild(stepq, jb, tmp / f"wq_bad_{fac:g}_out", compare=mq)
+        cpath = tmp / f"wq_bad_{fac:g}_out_compare.json"
+        cjb = json.loads(cpath.read_text()) if cpath.exists() else {}
+        dmax = cjb.get("b_distance", {}).get("max_dist_mm", float("nan"))
+        if fac == 1e-6:
+            print(f"     (記録) 傾きを (1 + 1e-6) 倍した構造: 自己検査は通り、作り直しの比較は {cjb.get('verdict')} (最大距離 {dmax:.3e} mm、"
+                  "許容 1e-5 mm の内)")
+        else:
+            check(f"(8b) 傾きを (1 + {fac:g}) 倍した構造 (規則のパラメータ無し = 自己検査は通る) は STEP からの作り直しの比較が (b) で FAIL (終了コード 1)",
+                  r.returncode == 1 and cjb.get("verdict") == "FAIL" and any("(b)" in s for s in cjb.get("fail_reasons", [])),
+                  f"最大距離 {dmax:.3e} mm")
+    # v1 の比較の JSON には v2 の項目を足さない
+    if (tmp / "ext_out_compare.json").exists():
+        cj1 = json.loads((tmp / "ext_out_compare.json").read_text())
+        check("(8c) v1 の比較の JSON に v2 の項目 (structure_format・end_columns・wall_slope) が無い",
+              not any(k in cj1 for k in ("structure_format", "end_columns", "wall_slope", "node_rule")))
 
 if os.environ.get("FORGE_KEEP_TMP"):
     print(f"作業フォルダを残した: {tmp}")

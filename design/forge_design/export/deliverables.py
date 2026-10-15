@@ -181,6 +181,57 @@ def _mesh_quality(msh: Path, run: Path, ar_max: float) -> dict:
             "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv)}
 
 
+def _wall_slope(run: Path, coords, bedges) -> tuple:
+    """壁法線の近壁層の格子 (構造ファイル v2) に渡す station ごとの壁の傾き r′ = dr/dx (plan tooling-nozzle-card-local-mesh §5.1 #5)。
+    run の壁ファイル (`load_wall_file(run)["physical"]` の r(x, 1)) を壁の節点の x [m] / scale_m (r_t 単位) で評価する。
+    壁の節点の x が定義域の外に丸めの分 (定義域の幅の 1e-9 以内) だけ出ていれば端で評価する。戻り値は (傾き, 出典 dict, None)、
+    作れないときは (None, None, 理由)。縦線の格子では extract_structure が傾きを使わない (v1 の出力は渡しても同じ)。"""
+    from ..geometry.wall_axismach import load_wall_file
+    try:
+        W = load_wall_file(run)
+        ni, nj = len(bedges["wall"]) + 1, len(bedges["inlet"]) + 1
+        if coords.shape[0] != ni * nj:
+            raise ValueError(f"節点数 {coords.shape[0]} が ni·nj = {ni * nj} でない")
+        scale = float(W["scale_m"])
+        x = np.asarray(coords[:, 0], dtype=float).reshape(ni, nj)[:, -1] / scale
+        lo, hi = (float(v) for v in W["domain"])
+        tol = 1e-9 * (hi - lo)
+        if x.min() < lo - tol or x.max() > hi + tol:
+            raise ValueError(f"壁の節点の x [{x.min():.12g}, {x.max():.12g}] r_t が壁ファイルの定義域 [{lo:.12g}, {hi:.12g}] の外")
+        xc = np.clip(x, lo, hi)
+        rp = np.asarray(W["physical"].r(xc, 1), dtype=float)
+        if rp.shape != x.shape or not np.all(np.isfinite(rp)):
+            raise ValueError("壁の傾きが非有限か形が違う")
+    except Exception as e:  # noqa: BLE001 — 作れなければ理由を返す (縦線の格子は傾きなしで v1 を作る)
+        return None, None, f"{type(e).__name__}: {e}"
+    src = {"file": Path(W["path"]).name, "sha256": _sha(Path(W["path"])), "kind": W["kind"], "scale_m": scale,
+           "how": "load_wall_file(run)['physical'].r(x, 1)、x = 壁の節点の x [m] / scale_m (r_t 単位)",
+           "n_clipped_to_domain": int(np.sum(xc != x))}
+    return rp, src, None
+
+
+def _rule_params(run: Path, msh_sha256: str) -> tuple:
+    """構造ファイル v2 の規則の照合に渡す mesh2d の規則のパラメータ (plan tooling-nozzle-card-local-mesh §5.1 #5 の判断)。
+    run の prepare_info.json の `mesh.params` (生成に使った Mesh2DParams そのもの; `mesh.block` は問題 YAML の mesh 節で、
+    wall_normal_end_stations を書かないことがある) の `wall_normal_layer`・`wall_normal_end_stations` (キーが無ければ null =
+    Mesh2DParams の既定) を取る。出典に prepare_info.json の sha256 と、そこに記録された msh の sha256 が run の nozzle.msh と
+    一致するかを書く。戻り値は (rule_params, None)、取れないときは (None, 理由)。"""
+    p = run / "prepare_info.json"
+    try:
+        info = json.loads(p.read_text())
+        mesh = info["mesh"]
+        prm = mesh["params"]
+        wnl = prm.get("wall_normal_layer")
+        if wnl is None:
+            raise ValueError("prepare_info.json の mesh.params に wall_normal_layer が無い (null)")
+    except Exception as e:  # noqa: BLE001 — 取れなければ理由を返す (規則の照合は未実施になる)
+        return None, f"{type(e).__name__}: {e}"
+    rec = (mesh.get("hashes") or {}).get("msh_sha256")
+    src = {"file": p.name, "sha256": _sha(p), "key": "mesh.params",
+           "msh_sha256_recorded": rec, "msh_sha256_matches": None if rec is None else rec == msh_sha256}
+    return {"wall_normal_layer": list(wnl), "wall_normal_end_stations": prm.get("wall_normal_end_stations"), "source": src}, None
+
+
 def part_mesh(run: Path, out: Path) -> dict:
     from . import mesh_structure as ms
     _need(run, ["nozzle.msh"])
@@ -190,14 +241,27 @@ def part_mesh(run: Path, out: Path) -> dict:
     res = {"msh41": "mesh/nozzle.msh", "msh41_sha256": _sha(d / "nozzle.msh")}
     res["msh22"] = _gmsh(_MSH22, d / "nozzle.msh", d / "nozzle_v22.msh")
     coords, quads, bedges, tags = ms.read_msh41_mesh2d(d / "nozzle.msh")
+    # 壁の傾きは壁法線の近壁層の格子 (縦線でない) の構造ファイル v2 に要る。縦線の格子は渡しても v1 のまま (出力は今までと同じ)
+    slope, slope_src, slope_why = _wall_slope(run, coords, bedges)
+    # 規則のパラメータ (v2 の規則の照合; 取れなければ照合は未実施と記録される)
+    rule, rule_why = _rule_params(run, res["msh41_sha256"])
     try:
-        st = ms.extract_structure(coords, quads, bedges)
-    except Exception as e:  # noqa: BLE001 — 縦線でない格子などは構造ファイルを作らず理由を書く
-        res["structure"] = f"作らない: {type(e).__name__}: {e}"
+        st = ms.extract_structure(coords, quads, bedges, wall_slope=slope, wall_slope_source=slope_src, rule_params=rule)
+    except Exception as e:  # noqa: BLE001 — 規則に従わない格子・壁の傾きを作れない非縦線の格子は構造ファイルを作らず理由を書く
+        res["structure"] = f"作らない: {type(e).__name__}: {e}" + (f" (壁の傾きを作れない: {slope_why})" if slope_why else "")
         return res
     ms.write_structure_json(st, d / "mesh_structure.json")
     shutil.copy2(HERE / "rebuild_from_step.py", d / "rebuild_from_step.py")
     res["structure"] = "mesh/mesh_structure.json"
+    res["structure_format"] = st["format"]
+    if st["format"] == ms.FORMAT_V2:                 # 壁法線の近壁層の格子: 節点の規則・自己検査・規則の照合・出典
+        res["structure_node_rule"] = st["node_rule"]
+        res["structure_self_check"] = st["checks"]["self_check"]
+        res["structure_rule_check"] = st["checks"]["rule_check"]
+        res["structure_wall_slope_source"] = st["wall_slope_source"]
+        res["structure_rule_params"] = st["rule_params"]
+        if rule is None:
+            res["structure_rule_params_missing"] = rule_why
     step = out / "cad" / "wall_physical.step"
     if step.exists():
         q = subprocess.run([GMSH_PYTHON, str(d / "rebuild_from_step.py"), str(step), str(d / "mesh_structure.json"),
@@ -530,7 +594,7 @@ def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
          "## フォルダ", "",
          "| フォルダ | 中身 |", "| --- | --- |",
          "| `cad/` | `wall_physical.step` (2D の壁曲線、5 次 B-spline 1 本)・`wall_surface.step` (3D の内面)・`wall_surface.stl`・検査の JSON |",
-         "| `mesh/` | `nozzle.msh` (解析に使った msh4.1)・`nozzle_v22.msh` (msh2.2、番号は gmsh が振り直す)・`mesh_structure.json`・`rebuild_from_step.py` (STEP から同じ構造で作り直す: `python rebuild_from_step.py STEP mesh_structure.json OUT [--compare nozzle.msh]`、gmsh が要る)・その実行例 `rebuilt_from_step*` |",
+         "| `mesh/` | `nozzle.msh` (解析に使った msh4.1)・`nozzle_v22.msh` (msh2.2、番号は gmsh が振り直す)・`mesh_structure.json` (構造ファイル: 半径方向の格子線の格子は v1、壁法線の近壁層の格子は v2 = 節点の規則 `wall_normal_blend_v1` と重み β・壁の傾き)・`rebuild_from_step.py` (STEP から同じ構造で作り直す: `python rebuild_from_step.py STEP mesh_structure.json OUT [--compare nozzle.msh]`、gmsh が要る)・その実行例 `rebuilt_from_step*` |",
          "| | 作り直しの出力: `OUT.msh` = forge の変換器に入れる形 (元と同じ番号・書式、座標 17 桁)、`OUT_cad.msh` = 壁の節点が STEP の曲線に分類された gmsh の msh4.1 (**forge の変換器には入れない**: ファイル内の節点の順が番号順でない)、`OUT_v22.msh`・`OUT.cgns` (番号・物理タグは gmsh が振り直す。物理名で対応付ける) |",
          "| `fluent/` | `nozzle_2d_axi.msh` (Fluent 形式、境界の名前と型つき)・`nozzle_2d_axi.cgns`・`boundary_conditions.md` (動作圧 0 Pa で絶対圧を入れる) |",
          "| `excel/` | `wall_shape_mm.csv` (形状表)・`wall_cfd_nodes.csv` (壁節点ごとの圧力・温度・せん断・熱量)・`conditions.csv`・`nozzle_tables.xlsx` |", "",
@@ -542,6 +606,10 @@ def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
          "- 壁の両端の節点 (入口・出口の角) の熱量は信頼できない (別の壁との境目で再構成勾配との比が 2〜4 倍になった例がある。原因は未確認)。"
          "`excel/wall_cfd_nodes.status.json` の `end_nodes` を見る。",
          "- STEP を CAD で編集したら `rebuild_from_step.py` で作り直し、`check_mesh_quality.py` で格子品質を確かめる。",
+         "- 壁法線の近壁層の格子 (`mesh_structure.json` が v2) の作り直しは、STEP の曲線の傾きで近壁の節点を壁の法線上に置く。"
+         "入口・出口の面は直線 (x 一定) のままなので、端の列の節点が直線から外れることがある (外れる量は `mesh/rebuilt_from_step_compare.json` の `end_columns`)。"
+         "構造ファイルを作るときに、格子の生成の記録 (run の `prepare_info.json` の `mesh.params`) の規則のパラメータで節点を置き直して元と照合した"
+         " (`MANIFEST.json` の `structure_rule_check`。記録が無ければ「未実施」)。",
          f"- STL (`cad/wall_surface.stl`) は表示・形の確認用の近似: 弦誤差の設定 {_stl_setting(man)}。寸法の正本は STEP。",
          "- CGNS (`fluent/nozzle_2d_axi.cgns`) を Fluent で読むと**境界の型は付かない** (入口・出口・壁・軸を Fluent 側で付け直す)。"
          "gmsh で読み直すと物理タグの番号も振り直されるので、境界は**名前**で対応付ける。型つきの Fluent 形式は `fluent/nozzle_2d_axi.msh`。", ""]
