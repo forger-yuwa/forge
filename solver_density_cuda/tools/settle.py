@@ -128,7 +128,13 @@ CAT_THRESHOLD = "threshold"
 CAT_DATA = "data"
 CAT_UNSET = "unset"
 CAT_NONFINITE = "nonfinite"
-CAT_LABEL = {CAT_THRESHOLD: "閾値の超過", CAT_DATA: "データ不足", CAT_UNSET: "未設定", CAT_NONFINITE: "非有限"}
+CAT_GRID = "grid"
+CAT_LABEL = {CAT_THRESHOLD: "閾値の超過", CAT_DATA: "データ不足", CAT_UNSET: "未設定", CAT_NONFINITE: "非有限",
+             CAT_GRID: "格子と線の定義の不整合"}
+# 線の補間で軸の節点 (j = 0) が持ってよい重みの上限 (codex diagnose 2026-10-16 settle-v1-and-line-height Major 3)。
+# η が第 1 層の η₁ と丸めの差で一致する列では重みは ~1e−8、η₁ > η の格子では軸の節点の値が線に混ざる (軸の節点を避けて
+# 近軸の線を取る意図が崩れる) ので判定不能にする。
+AXIS_WEIGHT_MAX = 1.0e-6
 
 KIND_RESIDUAL = "residual"
 KIND_MASS = "mass_balance"
@@ -910,7 +916,7 @@ class _Q:
         cats = {x["category"] for x in self.r["reasons"]}
         if CAT_NONFINITE in cats:
             v = "DIVERGED"
-        elif CAT_DATA in cats or CAT_UNSET in cats:
+        elif CAT_DATA in cats or CAT_UNSET in cats or CAT_GRID in cats:
             v = "INDETERMINATE"
         elif CAT_THRESHOLD in cats:
             v = "NOT_SETTLED"
@@ -1187,11 +1193,12 @@ def exit_flow_angle_of(obs: dict, ni: int, nj: int, eta_range) -> np.ndarray:
     return np.degrees(np.arctan2(obs["uy"][ix][core], obs["ux"][ix][core]))
 
 
-def eta_line_nodes(obs: dict, key: str, eta: float, xq, ni: int, nj: int) -> np.ndarray:
+def eta_line_nodes(obs: dict, key: str, eta: float, xq, ni: int, nj: int, diag: dict | None = None) -> np.ndarray:
     """`nozzle_report.eta_line` と同じ計算を節点の部分集合で行う。全節点と同じ値になる条件を確かめ、満たさなければ _DataMissing。
 
     eta_line: xa = X[:, 0]; i = clip(searchsorted(xa, xq) − 1, 0, len − 2); w = (xq − xa[i])/(xa[i+1] − xa[i]);
-    列 ii の値 = np.interp(eta, R[ii]/R[ii, −1], Q[ii]); out = (1 − w) v(i) + w v(i+1)。"""
+    列 ii の値 = np.interp(eta, R[ii]/R[ii, −1], Q[ii]); out = (1 − w) v(i) + w v(i+1)。
+    diag (dict) を渡すと、列ごとの補間の対 (j の組) の数と、軸の節点 (j = 0) の重みの最大 `axis_weight_max` を入れる。"""
     xq = np.asarray(xq)
     cols = obs["cols"]
     jj = obs["j"]
@@ -1227,6 +1234,13 @@ def eta_line_nodes(obs: dict, key: str, eta: float, xq, ni: int, nj: int) -> np.
                 raise _DataMissing(f"列 {int(col)}: 軸の節点が無い")
         elif k < len(xp) - 1 and js[k + 1] != js[k] + 1:
             raise _DataMissing(f"列 {int(col)}: η {eta} を挟む節点 j = {int(js[k])}・{int(js[k + 1])} が隣り合わない (節点の表に足りない)")
+        if diag is not None and 0 <= k < len(xp) - 1:
+            pair = (int(js[k]), int(js[k + 1]))
+            diag.setdefault("pairs", {})
+            diag["pairs"][pair] = diag["pairs"].get(pair, 0) + 1
+            if js[k] == 0:   # 軸の節点と第 1 層の間で補間する列: 軸の節点の重み 1 − (η − η_0)/(η_1 − η_0)
+                wax = float(1.0 - (eta - xp[k]) / (xp[k + 1] - xp[k]))
+                diag["axis_weight_max"] = max(diag.get("axis_weight_max", 0.0), wax)
         vcol[int(col)] = np.interp(eta, xp, Qv[ix])
     v0 = np.asarray([vcol[int(c)] for c in c0])
     v1 = np.asarray([vcol[int(c)] for c in c1])
@@ -1323,9 +1337,12 @@ def _eval_line(q: dict, ctx: dict) -> dict:
             S = st["scale_m"]
             xq = np.linspace(q["x_range_m"][0] / S, q["x_range_m"][1] / S, q["n"])
             res = []
+            diags = []
             for s in C + ([stop] if stop is not None else []):
                 obs = _node_obs(ctx, q, s, Q)
-                res.append(line_quantities(eta_line_nodes(obs, "M", q["eta"], xq, st["ni"], st["nj"]), q["Md"]))
+                dg = {}
+                res.append(line_quantities(eta_line_nodes(obs, "M", q["eta"], xq, st["ni"], st["nj"], diag=dg), q["Md"]))
+                diags.append(dg)
             rc = res[:len(C)]
             maxabs = np.asarray([r["maxabs"] for r in rc])
             halfamp = np.asarray([r["halfamp"] for r in rc])
@@ -1336,6 +1353,13 @@ def _eval_line(q: dict, ctx: dict) -> dict:
             else:
                 stop_vals = None
             Q.r["values"]["xq_r_t"] = [float(xq[0]), float(xq[-1]), int(len(xq))]
+            wax = max(d.get("axis_weight_max", 0.0) for d in diags)
+            Q.r["values"]["interp_pairs"] = {f"{a}-{b}": n for (a, b), n in sorted(diags[-1].get("pairs", {}).items())}
+            Q.r["values"]["axis_weight_max"] = wax
+            if wax > AXIS_WEIGHT_MAX:
+                Q.reason(CAT_GRID, f"線 η {q['eta']} の補間に軸の節点が重み {wax:.3g} で入る (> {AXIS_WEIGHT_MAX:g}; 第 1 層の η が線より上)"
+                         " — 近軸の線の定義が格子に合わない。η を第 1 層以上にするか格子を見直す")
+                return Q.finish()
     except _NonFinite as e:
         Q.reason(CAT_NONFINITE, str(e))
         return Q.finish()

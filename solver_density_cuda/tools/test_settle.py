@@ -142,7 +142,7 @@ def base_criteria(**over):
             {"kind": "mass_balance", "inlet": [1], "outlet": [2],
              "thresholds": {"mean_abs": 5e-4, "swing": 5e-3, "mdot_change_rel": 1e-4, "provisional": True}},
             {"kind": "exit_core_mach", "eta_range": [0.05, 0.7], "thresholds": {"tol": 0.1 * 0.0005 * MD, "provisional": True}},
-            {"kind": "line_mach", "eta": 0.03, "x_range_m": [3 * S, 20 * S], "n": 2001, "Md": MD,
+            {"kind": "line_mach", "eta": 0.15, "x_range_m": [3 * S, 20 * S], "n": 2001, "Md": MD,
              "thresholds": {"tol_maxabs": 0.01, "tol_halfamp": 0.005, "tol_pos": 0.01, "provisional": True}},
             {"kind": "exit_flow_angle", "eta_range": [0.05, 0.7], "thresholds": {"tol": 0.01, "provisional": True}},
             {"kind": "wall_heat_nodes", "walls": [{"name": "wall", "physID": 3}], "axisymmetric": True,
@@ -549,6 +549,26 @@ def test_negative_extra():
     chk("X12 iface_Qf_eff が NaN (適用外) → INDETERMINATE (データ不足)", cats(qres(res, "wall_heat_nodes")) == {settle.CAT_DATA})
 
 
+def test_axis_weight():
+    print("=== 線の補間に軸の節点が入る格子 (codex diagnose 2026-10-16 Major 3) ===")
+    # 合成の格子の第 1 層は η₁ = 1/9 ≈ 0.111。η 0.03 の線は軸の節点と第 1 層の間で補間され、軸の節点の重みは約 0.73
+    crit = base_criteria()
+    for q in crit["quantities"]:
+        if q["kind"] == "line_mach":
+            q["eta"] = 0.03
+    run = build("x20_axis_weight", criteria=crit)
+    res = settle.judge(run)
+    q = qres(res, "line_mach")
+    chk("X20 η 0.03 < η₁ の線 → INDETERMINATE (格子と線の定義の不整合)、軸の節点の重みを記録",
+        q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_GRID} and q["values"].get("axis_weight_max", 0) > 0.5
+        and res["verdict"] == "INDETERMINATE", f"{q['verdict']} {cats(q)} w {q['values'].get('axis_weight_max')}")
+    run = build("x21_axis_weight_ok")
+    q = qres(settle.judge(run), "line_mach")
+    chk("X21 η 0.15 (第 1・2 層の間) は軸の節点の重み 0 で SETTLED、補間の対を記録",
+        q["verdict"] == "SETTLED" and q["values"].get("axis_weight_max") == 0.0 and set(q["values"].get("interp_pairs", {})) == {"1-2"},
+        f"{q['verdict']} {q['values'].get('interp_pairs')} {q['values'].get('axis_weight_max')}")
+
+
 def test_verdict_file():
     print("=== SETTLE_VERDICT.json ===")
     run = build("v01_file", end=80000, stop=80001)
@@ -589,6 +609,7 @@ def main():
     test_positive()
     test_negative_v2()
     test_negative_extra()
+    test_axis_weight()
     test_verdict_file()
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{NCHK - len(FAILS)}/{NCHK} OK")
