@@ -17,13 +17,15 @@ plan: plans/accepted/tooling-nozzle-wt-deliverables.md §4.1 (1〜6)、検証 §
    壁温分布のカードでは断面ごとの局所の $T_w(x)$ を使う (plan tooling-nozzle-wall-temperature-profile §4.3)。
 5. **空気の液化の事前警告** (`liquefaction_check`): 出口の静温・静圧と N₂ の飽和蒸気圧 (Antoine) を比べる (止めない)。
 6. **雛形** (`recipes/*.yaml`) の構成キーを写し、カードの `overrides` を最後に当てる (上書きは `_card` 節とコメントに残す)。
-7. **knot の M_knot** (plan tooling-nozzle-mknot-auto §4.3・§4.4): 既定は自動 (カードに書かない、または `overrides: {geometry.M_knot: auto}`)。
-   最初の r_t で `mknot_select.select_mknot` → `resolution_gate` (規則 min_theta_max_v1) の `chosen_N` を選び、r_t の固定点の間は固定する。
-   収束した最終の組で詰めと解像度のゲートを回し直し、`chosen_N` が固定点に使った M_K から 0.01 を超えて動いたら r_t の固定点をやり直す
-   (最大 2 回)。ゲートで選び直した値が詰めの窓の端なら、窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す (上限でも端なら例外; §5.1 #3b)。
-   ゲートは窓の外 ±(半幅 + ΔM_safe) を N・2N の両方で評価し、境目の探し直しが上限 (3 回) で収まらなければ例外 (§5.1 #3d)。
-   記録は card_log の `M_knot_rule` (掃引の表を含む全部)・YAML の `_card.M_knot_rule` (要約だけ; card_log の記録の sha256 で結ぶ)・
-   YAML のコメント。数値の `overrides: {geometry.M_knot: x}` は今と同じ (探索しない)。
+7. **knot の M_knot** (plan tooling-nozzle-mknot-fast §4.1・§4.2、規則 `coarse_min_theta_v2`; 前身 tooling-nozzle-mknot-auto): 既定は自動
+   (カードに書かない、または `overrides: {geometry.M_knot: auto}`)。最初の r_t で `mknot_select.select_coarse_min_theta` (粗い網 N_s =
+   N_p/4・L_s 0.1 r_t で 0.05 の格子を掃き、谷ごとに生産の網 N_p で確かめる) で選び、r_t の固定点を回し、出力と同じ実効の入力
+   (r_t・n_axis_inv・L_total_tol・x_end_margin) で選び直す。選び直した値が固定点に使った M_K と同じなら終了、違えばその値で固定点を
+   やり直す (最大 2 回)。自動調整 (下の 1. の n_axis_inv・L_total_tol、x_end_margin) が起きたら評価を全部捨てて最初の選択からやり直す。
+   評価の並列は min(CPU 数, 4, ⌊0.7 × MemAvailable / 1 評価のピーク⌋) (`FORGE_MKNOT_WORKERS` で上限を下げる)。記録は card_log の
+   `M_knot_rule` (粗い掃引の全行・谷ごとの確認の行を含む全部)・YAML の `_card.M_knot_rule` (要約だけ; card_log の記録の sha256 で結ぶ)・
+   YAML のコメント。数値の `overrides: {geometry.M_knot: x}` は今と同じ (探索しない)。旧の規則 min_theta_max_v1 はカードから呼ばない
+   (旧の記録の照合 `mknot_card_log_check` は規則の名前で読み分ける)。
 
 `_card` 節は問題 YAML の最上位に置く記録 (ソルバ・設計チェーンは読まない。`probdef.load_problem` は未知の最上位キーを拒否しない)。
 
@@ -42,6 +44,7 @@ import datetime
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 import tempfile
@@ -84,15 +87,24 @@ N2_ANTOINE_RANGE_K = (63.0, 126.0)
 # YAML 1.2 の 10 進の浮動小数 (PyYAML が文字列と読む `3.0e6` を数値として受けるため)
 _YAML12_FLOAT = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 
-# knot の M_knot の自動の選択 (plan tooling-nozzle-mknot-auto §4.3・§4.4; 規則は evaluate/mknot_select.py の min_theta_max_v1)
+# knot の M_knot の自動の選択 (plan tooling-nozzle-mknot-fast §4.1・§4.2; 規則は evaluate/mknot_select.py の coarse_min_theta_v2)
 MKNOT_AUTO = "auto"                  # overrides の geometry.M_knot に書ける「自動」(書かないのと同じ)
-MKNOT_MOVE_TOL = 0.01                # 最終の組のゲートの chosen_N と r_t の固定点に使った M_K の差の上限 (§4.3; ゲートの max_change と同じ値)
-MKNOT_REDO_MAX = 2                   # その差が上限を超えたときの r_t の固定点のやり直しの上限 (§4.3)
-MKNOT_EVAL_MEM_GB_2400 = 1.3         # evaluate_mknot の 1 評価のピークのメモリ [GB] (case/70 M5・n_axis_inv 2400 で 1.28 GB、4800 で 3.86 GB;
-MKNOT_EVAL_MEM_EXP = 1.6             # 2026-10-14 実測)。N の (N/2400)^1.6 で見積もる
-# M_knot の評価の並列の数 (N, 2N)。2026-10-14: 手元の PC は他の計算と共用で、N を 2 並列にした生成の最中にメモリ不足で PC が落ちた
-# → N・2N とも 1 (取り決め 2026-10-14)
-MKNOT_WORKERS = (1, 1)
+MKNOT_REDO_MAX = 2                   # 選び直した M_K が固定点に使った M_K と違うときの r_t の固定点のやり直しの上限 (§4.1)
+# 評価の並列 (§4.2): min(CPU 数, MKNOT_WORKERS_MAX, ⌊MKNOT_MEM_FRACTION × MemAvailable / 1 評価のピーク⌋)、粗い網と生産の網で別々に。
+# 算出が 0 なら評価の前に例外、MemAvailable が取れなければ 1。環境変数 FORGE_MKNOT_WORKERS (正の整数) で上限を下げる
+# (2026-10-14: 手元の PC で 2〜4 並列とユーザの計算が重なってメモリ不足で落ちた — 手元では FORGE_MKNOT_WORKERS=1 で回す)。
+MKNOT_WORKERS_MAX = 4
+MKNOT_MEM_FRACTION = 0.7
+MKNOT_WORKERS_ENV = "FORGE_MKNOT_WORKERS"
+# evaluate_mknot の 1 評価のピーク [GB] (新しいプロセスで 1 評価したときの最大 RSS; 捕捉を最後の 2 つに限った後、逆 MOC の単位過程は
+# numba の版 (numba・LLVM の読み込みで 約 0.11 GB 増える)、case/70 c2b と case/71 の最大を切り上げた値、MKNOT_EVAL_PEAK_SOURCE)。
+# 測った N の間は両対数で補間、上は (N/N_max)^MKNOT_EVAL_PEAK_EXP で外挿 (指数は捕捉を限る前の 2400 → 4800 の実測 1.28 → 3.86 GB から)、
+# 下は最小の N の値のまま
+MKNOT_EVAL_PEAK_GB = {600: 0.27, 2400: 1.31}
+MKNOT_EVAL_PEAK_EXP = 1.6
+MKNOT_EVAL_PEAK_SOURCE = ("2026-10-15 AWS B (g5.xlarge)、feature/mknot-fast f7e185c4 (numba の版)、新しいプロセスで 1 評価: case/70 c2b "
+                          "(problem_c2b_auto_final.yaml、M_K 2.05) N 600 (L_total_tol 0.1 r_t) 0.263 GB・N 2400 1.302 GB、case/71 (r_t 0.1 m、"
+                          "M_K 2.80) N 600 0.260 GB・N 2400 1.057 GB。引き継ぎ時点 9468e0d0 (numpy の版) は同じ順に 0.157・1.084・0.150・0.842 GB")
 
 # カードのキー
 _TOP_REQUIRED = ("format", "name", "gas", "conditions", "M_exit", "throat", "inlet", "divergent_length_m", "wall")
@@ -536,7 +548,7 @@ def card_to_problem(card, r_t_m: float, M_knot: float | None = None) -> dict:
     """要求カードと r_t [m] → 問題 YAML の dict (純関数; 雛形のファイルを読むだけ)。§4.1 の 1・3・6。
 
     M_knot (plan tooling-nozzle-mknot-auto §4.4): 自動のカード (M_knot_mode auto) では `geometry.M_knot` に M_knot を置く
-    (値は `build_problem` が規則 min_theta_max_v1 で選ぶ; 雛形の M_knot_factor は使わない)。knot の軸則で M_knot が無ければ
+    (値は `build_problem` が規則 coarse_min_theta_v2 で選ぶ; plan tooling-nozzle-mknot-fast。雛形の M_knot_factor は使わない)。knot の軸則で M_knot が無ければ
     ValueError (黙って 0.45 × M_exit に戻さない)。knot でない軸則では M_knot を使わないので `geometry.M_knot` を書かない。
     数値の overrides.geometry.M_knot のカードは今と同じ (雛形の M_knot_factor × M_exit を置いてから overrides で上書き)。
 
@@ -658,7 +670,7 @@ def card_to_problem(card, r_t_m: float, M_knot: float | None = None) -> dict:
         if str(g.get("axis_law", "quintic")) != "knot":
             g.pop("M_knot")                 # knot でない軸則は M_knot を使わない (探索もしない)
         elif M_knot is None:
-            raise ValueError("要求カード → 問題: geometry.M_knot は自動 (規則 min_theta_max_v1; plan tooling-nozzle-mknot-auto) — 値は "
+            raise ValueError("要求カード → 問題: geometry.M_knot は自動 (規則 coarse_min_theta_v2; plan tooling-nozzle-mknot-fast) — 値は "
                              "build_problem が選ぶ。card_to_problem には選んだ値を M_knot= で渡す (固定するならカードの overrides に "
                              "geometry.M_knot: <数値>)")
     dr = R_in / rt - 1.0
@@ -1361,10 +1373,12 @@ class _Retry(Exception):
 
 # ---------------------------------------------------------------------------------------------------- M_knot の自動の選択 (記録)
 
-MKNOT_GATE_HALF_WIDTHS = (0.1, 0.2, 0.3)   # ゲートの窓の半幅の列 (§4.2 窓の端の選択; mknot_select.GATE_HALF_WIDTHS と同じ値を明示して渡す)
-MKNOT_GATE_HALF_WIDTH = MKNOT_GATE_HALF_WIDTHS[0]   # 詰めとゲートの最初の窓の半幅 (窓の外の文脈 ±(この値 + ΔM_safe) は N・2N とも)
 _MKNOT_ROW_KEYS = ("M_K", "ok", "reasons", "role", "theta_max_deg", "margin_deg", "min_sin_angle", "mpp_sign_changes", "x_K", "L_c",
                    "moc_gate_ok", "moc_gate_pass", "n_axis")
+# 規則 coarse_min_theta_v2 の行の記録: 上に加えて長さ合わせ (符号つきの残差・停止の理由)・実効の入力 (r_t・L_total_tol・x_end_margin)・
+# 1 評価の時間 (plan tooling-nozzle-mknot-fast §4.1 の 1)
+_MKNOT_ROW_KEYS_V2 = _MKNOT_ROW_KEYS + ("L_residual_rt", "length_stop", "L_total_tol", "r_t_m", "x_end_margin", "n_axis_input", "time_s")
+_clock = time.time                   # M_knot とカード全体の計時の時計 (試験で合成の時計に差し替える)
 
 
 def _mem_available_gb() -> float | None:
@@ -1378,21 +1392,64 @@ def _mem_available_gb() -> float | None:
     return None
 
 
-def mknot_workers(N: int) -> dict:
-    """M_knot の評価の並列の数 (MKNOT_WORKERS: N・2N とも 1、2026-10-14 の取り決め) と、開始前に使えるメモリ (MemAvailable) と
-    1 評価のメモリの見積もり (MKNOT_EVAL_MEM_GB_2400 × (N/2400)^MKNOT_EVAL_MEM_EXP; 記録と `_mknot_mem_check` に使う)。"""
-    return {"N": int(MKNOT_WORKERS[0]), "2N": int(MKNOT_WORKERS[1]), "available_gb": _mem_available_gb(),
-            "per_eval_gb_N": MKNOT_EVAL_MEM_GB_2400 * (N / 2400.0) ** MKNOT_EVAL_MEM_EXP,
-            "per_eval_gb_2N": MKNOT_EVAL_MEM_GB_2400 * (2.0 * N / 2400.0) ** MKNOT_EVAL_MEM_EXP}
+def mknot_eval_peak_gb(N: int) -> float:
+    """evaluate_mknot の 1 評価のピーク [GB] の見積もり (MKNOT_EVAL_PEAK_GB: 測った N の間は両対数で補間、最大の N より上は
+    (N/N_max)^MKNOT_EVAL_PEAK_EXP で外挿、最小の N より下は最小の N の値のまま)。"""
+    tab = sorted(MKNOT_EVAL_PEAK_GB.items())
+    N = float(N)
+    if N <= tab[0][0]:
+        return float(tab[0][1])
+    if N >= tab[-1][0]:
+        return float(tab[-1][1]) * (N / tab[-1][0]) ** MKNOT_EVAL_PEAK_EXP
+    for (n0, g0), (n1, g1) in zip(tab[:-1], tab[1:]):
+        if n0 <= N <= n1:
+            a = math.log(g1 / g0) / math.log(n1 / n0)
+            return float(g0) * (N / n0) ** a
+    raise AssertionError("mknot_eval_peak_gb: 補間の区間が見つからない")
 
 
-def _mknot_mem_check(wk: dict, N: int) -> None:
-    """2N の 1 評価のメモリの見積もりが使えるメモリを超えるなら、評価を始める前に止める (メモリ不足で落ちる前に理由を出す)。
-    n_axis_inv の倍化 (from_length の停止の自動調整) の後は 2N が 4 倍の解像度になる。"""
-    if wk["available_gb"] is not None and wk["per_eval_gb_2N"] > wk["available_gb"]:
-        raise RuntimeError(f"M_knot: 解像度のゲートの 2N = {2 * N} の 1 評価のメモリの見積もり {wk['per_eval_gb_2N']:.1f} GB が使えるメモリ "
-                           f"{wk['available_gb']:.1f} GB を超える — メモリの大きい環境 (AWS) で生成するか、M_knot を数値で与える "
-                           "(overrides の geometry.M_knot)")
+def _cpu_count() -> int:
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return max(1, int(os.cpu_count() or 1))
+
+
+def mknot_workers(N_s: int, N_p: int) -> dict:
+    """M_knot の評価の並列の数 (plan tooling-nozzle-mknot-fast §4.2): 粗い網 (N_s) と生産の網 (N_p) のそれぞれで
+    min(CPU 数, MKNOT_WORKERS_MAX, ⌊MKNOT_MEM_FRACTION × MemAvailable / 1 評価のピーク⌋)。MemAvailable が取れなければ 1。
+    環境変数 FORGE_MKNOT_WORKERS (正の整数) で上限を下げる (正の整数でなければ ValueError)。算出が 0 なら評価の前に RuntimeError
+    (メモリ不足で落ちる前に理由を出す)。戻り: {coarse, prod, N_s, N_p, cpu, cap, cap_env, available_gb, per_eval_gb_coarse,
+    per_eval_gb_prod, by_mem_coarse, by_mem_prod, peak_source}。"""
+    cpu = _cpu_count()
+    env = os.environ.get(MKNOT_WORKERS_ENV)
+    cap = MKNOT_WORKERS_MAX
+    cap_env = None
+    if env is not None and env.strip() != "":
+        try:
+            cap_env = int(env)
+        except ValueError:
+            cap_env = None
+        if cap_env is None or cap_env < 1:
+            raise ValueError(f"環境変数 {MKNOT_WORKERS_ENV} は正の整数 (M_knot の評価の並列の上限; 受け取った値: {env!r})")
+        cap = min(cap, cap_env)
+    avail = _mem_available_gb()
+    out = {"N_s": int(N_s), "N_p": int(N_p), "cpu": cpu, "cap": cap, "cap_env": cap_env, "available_gb": avail,
+           "mem_fraction": MKNOT_MEM_FRACTION, "peak_source": MKNOT_EVAL_PEAK_SOURCE}
+    for tag, N in (("coarse", N_s), ("prod", N_p)):
+        peak = mknot_eval_peak_gb(N)
+        by_mem = None if avail is None else int(math.floor(MKNOT_MEM_FRACTION * avail / peak))
+        out[f"per_eval_gb_{tag}"] = peak
+        out[f"by_mem_{tag}"] = by_mem
+        out[tag] = 1 if avail is None else min(cpu, cap, by_mem)
+    bad = [t for t in ("coarse", "prod") if out[t] < 1]
+    if bad:
+        raise RuntimeError("M_knot: 評価の並列の数の算出が 0 — "
+                           + "、".join(f"{'粗い網' if t == 'coarse' else '生産の網'} (n_axis_inv {out['N_s' if t == 'coarse' else 'N_p']}) の "
+                                      f"1 評価のピークの見積もり {out[f'per_eval_gb_{t}']:.2f} GB > {MKNOT_MEM_FRACTION} × 使えるメモリ "
+                                      f"{avail:.2f} GB" for t in bad)
+                           + " — メモリの大きい環境 (AWS) で生成するか、M_knot を数値で与える (overrides の geometry.M_knot)")
+    return out
 
 
 def _plain(v):
@@ -1458,8 +1515,17 @@ def _mknot_widen_text(g: dict) -> str:
     return f"窓を {n} 回広げた (半幅 {g['widen'][0]['half_width']:g} → {g['half_width']:g}; {edges})"
 
 
+def _is_v2(mkr: dict) -> bool:
+    """記録が規則 coarse_min_theta_v2 のものか (旧の min_theta_max_v1 の記録と読み分ける)。"""
+    from ..evaluate.mknot_select import RULE_NAME_V2
+    return mkr.get("rule") == RULE_NAME_V2
+
+
 def _mknot_rule_text(mkr: dict) -> str:
-    """M_knot の記録の 1 行の説明 (geometry.M_knot のコメント・対応表)。mkr は card_log の記録 (全部) か YAML の要約。"""
+    """M_knot の記録の 1 行の説明 (geometry.M_knot のコメント・対応表)。mkr は card_log の記録 (全部) か YAML の要約。
+    規則の名前で読み分ける (coarse_min_theta_v2 → `_mknot_rule_text_v2`、それ以外は旧の min_theta_max_v1 の記録)。"""
+    if _is_v2(mkr):
+        return _mknot_rule_text_v2(mkr)
     if mkr.get("mode") != "auto":
         return f"自動 ({mkr.get('rule')}) — {mkr.get('reason')}"
     g = mkr["gate"]
@@ -1472,7 +1538,10 @@ def _mknot_rule_text(mkr: dict) -> str:
 
 def _mknot_summary_lines(mkr: dict, card_log_name: str | None = None) -> list:
     """M_knot の記録の要約 (YAML のコメント・標準出力)。mkr は card_log の記録 (全部)。card_log_name があれば、掃引の表と全部の
-    記録の置き場 (card_log のファイル名と記録の sha256; YAML の _card.M_knot_rule.card_log と同じ値) の行を足す。"""
+    記録の置き場 (card_log のファイル名と記録の sha256; YAML の _card.M_knot_rule.card_log と同じ値) の行を足す。
+    規則の名前で読み分ける (coarse_min_theta_v2 → `_mknot_summary_lines_v2`)。"""
+    if _is_v2(mkr):
+        return _mknot_summary_lines_v2(mkr, card_log_name)
     if mkr.get("mode") != "auto":
         return [f"M_knot: {_mknot_rule_text(mkr)}"]
     s, g = mkr["selection"], mkr["gate"]
@@ -1513,7 +1582,10 @@ def _mknot_yaml_summary(rec: dict, card_log_name: str) -> dict:
     含む)・r_t の固定点の前後の選び直しの要約・card_log の記録の sha256。掃引の表と行の詳細 (table・ゲートの rows_selected・
     constraints_at_output の行・選び方の記録・選び直しの文) は card_log の `M_knot_rule` だけに置く (掃引の表を YAML に入れると
     1 行 約 52 kB になり、Euler の写しにも入った)。rec は `_mknot_record` の戻り (card_log に書く記録)。
-    knot でない軸則の記録 (mode not_applicable) は表を持たないので、そのまま返す。照合は `mknot_card_log_check`。"""
+    knot でない軸則の記録 (mode not_applicable) は表を持たないので、そのまま返す。照合は `mknot_card_log_check`。
+    規則の名前で読み分ける (coarse_min_theta_v2 → `_mknot_yaml_summary_v2`; 以下は旧の min_theta_max_v1 の記録の要約)。"""
+    if _is_v2(rec):
+        return _mknot_yaml_summary_v2(rec, card_log_name)
     if rec.get("mode") != "auto":
         return rec
 
@@ -1570,7 +1642,8 @@ def mknot_card_log_check(problem_yaml) -> dict:
 
 
 def _mknot_record(card: dict, prob: dict, chain: dict, rt: float, mk: dict) -> dict:
-    """`_card.M_knot_rule` (と card_log の M_knot_rule) の記録 (plan tooling-nozzle-mknot-auto §4.4): 規則の名前・掃引の表・選んだ値
+    """**旧の規則 min_theta_max_v1 の記録** (カードからは呼ばない; 2026-10-15 から要求カードは `_mknot_record_v2`。旧の記録の形の試験の
+    ために残す)。`_card.M_knot_rule` (と card_log の M_knot_rule) の記録 (plan tooling-nozzle-mknot-auto §4.4): 規則の名前・掃引の表・選んだ値
     (chosen_N)・境目 (全部)・距離・解像度のゲートの結果・r_t の固定点の前後の選び直し。雛形の M_knot_factor は記録だけ。
     出力する組 (YAML の geometry.M_knot と r_t) の最終の設計チェーンが、ゲートがその組を評価した行と同じ設計か (θ_max が相対 1e-9 で
     一致するか) を確かめる (古い検証を流用していないこと)。違えば RuntimeError。"""
@@ -1618,6 +1691,181 @@ def _mknot_record(card: dict, prob: dict, chain: dict, rt: float, mk: dict) -> d
     return _plain(rec)
 
 
+# ---------------------------------------------------------------------------------------------------- 規則 coarse_min_theta_v2 の記録
+def _mknot_row_v2(r: dict | None) -> dict | None:
+    """規則 coarse_min_theta_v2 の評価の行の記録 (粗い掃引・谷ごとの確認の表の 1 行): `_mknot_row` の欄に長さ合わせ (符号つきの残差・
+    停止の理由)・実効の入力・1 評価の時間を足したもの。"""
+    if r is None:
+        return None
+    out = {k: r.get(k) for k in _MKNOT_ROW_KEYS_V2 if k in r}
+    out["reasons"] = [str(x)[:200] for x in (r.get("reasons") or [])]
+    return out
+
+
+def _mknot_v2_selection_record(sel: dict) -> dict:
+    """`select_coarse_min_theta` の 1 回の選択の記録 (card_log): 粗い掃引の全行 (coarse_table)・谷ごとの確認とずらし (valleys の
+    steps)・生産の網の全行 (confirm_table)・選んだ点と両隣の行 (final_three)・選択の理由・実効の入力 (inputs: r_t・N_s・L_s・N_p・
+    L_p・x_end_margin)・並列の数。"""
+    keep = ("rule", "M_A", "M_d", "settings", "inputs", "chosen", "theta_max_deg", "distance", "reason", "theta_min", "tie_set",
+            "chosen_valley", "candidates", "intervals", "grid", "n_eval_coarse", "n_eval_prod", "warnings", "workers", "elapsed_s",
+            "elapsed_s_card", "stage", "attempt")
+    rec = {k: sel.get(k) for k in keep}
+    rec["valleys"] = [{k: v.get(k) for k in ("interval", "plateau", "start", "theta_coarse", "steps", "n_moves", "final",
+                                             "theta_max_deg", "distance", "discard_reason")} for v in sel["valleys"]]
+    rec["final_three"] = [_mknot_row_v2(r) for r in sel["final_three"]]
+    rec["coarse_table"] = [_mknot_row_v2(r) for r in sel["coarse_table"]]
+    rec["confirm_table"] = [_mknot_row_v2(r) for r in sel["confirm_table"]]
+    return rec
+
+
+def _mknot_record_v2(card: dict, prob: dict, chain: dict, rt: float, mk: dict, card_elapsed_s: float) -> dict:
+    """`_card.M_knot_rule` (と card_log の M_knot_rule) の記録 (規則 coarse_min_theta_v2、plan tooling-nozzle-mknot-fast §4.1):
+    最終の選択 (出力と同じ実効の入力で選び直したもの) の粗い掃引の全行・谷ごとの確認の行・選択の理由・N_s・L_s・N_p、最初の選択
+    (最終と別のとき)、全部の選択の要約 (自動調整で捨てたものを含む)・r_t の固定点のやり直し・計時 (M_knot に起因する時間の内訳と、
+    記録の時点のカード全体の時間)。雛形の M_knot_factor は記録だけ。
+    出力する組 (YAML の geometry.M_knot と r_t・n_axis_inv・L_total_tol・x_end_margin) が最終の選択の入力・選んだ値・r_t の固定点に
+    使った M_K と同じで、選んだ点と両隣の生産の網の行がその入力で評価した成立の行で、最終の設計チェーンの θ_max が選んだ点の行と
+    相対 1e-9 で一致することを確かめる (古い評価を流用しない)。違えば RuntimeError。"""
+    from ..evaluate.mknot_select import RULE_NAME_V2, _key, v2_k, v2_M
+    meta = load_recipe(card["recipe"])[0]["_recipe"]
+    unused = {"recipe_M_knot_factor": float(meta["M_knot_factor"]),
+              "recipe_M_knot_value_unused": float(meta["M_knot_factor"]) * float(card["M_exit"]),
+              "note": "雛形の M_knot_factor は使わない (記録だけ; plan tooling-nozzle-mknot-auto §4.4)"}
+    g_law = prob["geometry"]
+    if "M_knot" not in g_law:
+        return _plain({"rule": RULE_NAME_V2, "mode": "not_applicable", "source": card["M_knot_auto_source"],
+                       "reason": f"axis_law {g_law.get('axis_law', 'quintic')!r} は knot でない — M_knot を使わない "
+                                 "(geometry.M_knot を書かない・探索しない)", **unused})
+    sel, sel1 = mk["final"], mk["first"]
+    M_out = float(g_law["M_knot"])
+    inp = sel["inputs"]
+    want = {"r_t_m": float(rt), "N_p": int(g_law.get("n_axis_inv", 500)), "L_p": float(g_law.get("L_total_tol", 0.05)),
+            "x_end_margin": float(g_law.get("x_end_margin", 2.3))}
+    mism = {k: (inp.get(k), v) for k, v in want.items() if inp.get(k) != v}
+    rows3 = sel["final_three"]
+    bad3 = [r.get("M_K") for r in rows3
+            if not (r.get("ok") is True and r.get("r_t_m") == want["r_t_m"] and r.get("n_axis") == want["N_p"]
+                    and r.get("L_total_tol") == want["L_p"] and r.get("x_end_margin") == want["x_end_margin"])]
+    row = sel["chosen_row"]
+    th_chain = float(chain["qa"]["theta_max_deg"])
+    th_row = row.get("theta_max_deg")
+    if (M_out != float(sel["chosen"]) or M_out != float(mk["M_K"]) or mism or bad3 or th_row is None
+            or abs(th_chain - float(th_row)) > 1e-9 * abs(th_chain)
+            or [_key(r.get("M_K")) for r in rows3] != [_key(v2_M(v2_k(M_out) + j)) for j in (-1, 0, 1)]):
+        raise RuntimeError(f"M_knot: 出力する組 (geometry.M_knot {M_out!r}、r_t {rt!r} m) が最終の選択と対応しない (選択 {sel['chosen']!r}、"
+                           f"固定点の M_K {mk['M_K']!r}、入力の食い違い {mism}、成立でない・入力の違う行 {bad3}、最終の設計チェーンの θ_max "
+                           f"{th_chain!r} / 選んだ点の行 {th_row!r}) — 古い評価を流用しない (plan tooling-nozzle-mknot-fast §4.1)")
+    timing = list(mk["timing"])
+    rec = {
+        "rule": RULE_NAME_V2, "mode": "auto", "source": card["M_knot_auto_source"],
+        "chosen": M_out,
+        "chosen_from": "出力と同じ実効の入力で選び直した選択 (= r_t の固定点に使った M_K; plan tooling-nozzle-mknot-fast §4.1)",
+        "r_t_m": float(rt), "first_r_t_m": mk["first_rt"],
+        "N_s": inp["N_s"], "L_s": inp["L_s"], "N_p": inp["N_p"], "L_p": inp["L_p"], "x_end_margin": inp["x_end_margin"],
+        "theta_max_deg": float(th_row), "margin_deg": row.get("margin_deg"), "min_sin_angle": row.get("min_sin_angle"),
+        "mpp_sign_changes": row.get("mpp_sign_changes"), "x_K": row.get("x_K"), "moc_gate_ok": row.get("moc_gate_ok"),
+        "theta_max_deg_final_chain": th_chain,
+        "distance_est": sel["distance"], "reason": sel["reason"], "tie_set": sel["tie_set"],
+        "n_valleys": len(sel["valleys"]), "n_valleys_final": sum(v["final"] is not None for v in sel["valleys"]),
+        "final_three": [_mknot_row_v2(r) for r in rows3],
+        "selection": _mknot_v2_selection_record(sel),
+        "first_selection": (None if sel is sel1 else _mknot_v2_selection_record(sel1)),
+        "first_reused": sel is sel1,
+        "selections": mk["runs"], "discarded": mk["discarded"],
+        "events": mk["events"], "redo": mk["redo"], "n_restart": mk["n_restart"], "workers": sel.get("workers"),
+        "elapsed_s": mk["t"],
+        "elapsed_breakdown": {"select_s": sum(x["elapsed_s"] for x in timing if x["kind"] == "select"),
+                              "refix_s": sum(x["elapsed_s"] for x in timing if x["kind"] == "refix")},
+        "timing": timing, "card_elapsed_s": float(card_elapsed_s),
+        "elapsed_note": ("elapsed_s = M_knot に起因する時間の全部 (全部の選択 (自動調整で捨てたものを含む) と、選び直した M_K での r_t の"
+                         "固定点のやり直し)。最初の r_t の固定点はカードの通常の流れなので含めない。card_elapsed_s はこの記録の時点までの"
+                         "カード全体の時間 (YAML・card_log の書き出しの前)"),
+        **unused}
+    return _plain(rec)
+
+
+def _mknot_yaml_summary_v2(rec: dict, card_log_name: str) -> dict:
+    """YAML の `_card.M_knot_rule` に置く要約 (規則 coarse_min_theta_v2): 規則の名前・選んだ値と出力の点の値・実効の入力 (N_s・L_s・
+    N_p・L_p)・推定の距離・選択の理由・谷ごとの結果・全部の選択と選び直しの要約・計時・card_log の記録の sha256。粗い掃引の全行・
+    谷ごとの確認の行・行の詳細は card_log の `M_knot_rule` だけに置く。照合は `mknot_card_log_check`。"""
+    if rec.get("mode") != "auto":
+        return rec
+    s = rec["selection"]
+    return _plain({
+        "rule": rec["rule"], "mode": rec["mode"], "source": rec["source"], "chosen": rec["chosen"], "chosen_from": rec["chosen_from"],
+        "r_t_m": rec["r_t_m"], "first_r_t_m": rec["first_r_t_m"],
+        "N_s": rec["N_s"], "L_s": rec["L_s"], "N_p": rec["N_p"], "L_p": rec["L_p"], "x_end_margin": rec["x_end_margin"],
+        "theta_max_deg": rec["theta_max_deg"], "theta_max_deg_final_chain": rec["theta_max_deg_final_chain"],
+        "margin_deg": rec["margin_deg"], "min_sin_angle": rec["min_sin_angle"],
+        "distance_est": rec["distance_est"], "reason": rec["reason"], "tie_set": rec["tie_set"],
+        "n_valleys": rec["n_valleys"], "n_valleys_final": rec["n_valleys_final"],
+        "ok_final_three": [[r["M_K"], r["ok"]] for r in rec["final_three"]],
+        "valleys": [{"start": v["start"], "final": v["final"], "theta_max_deg": v["theta_max_deg"], "distance": v["distance"],
+                     "n_moves": v["n_moves"], "discarded": v["final"] is None} for v in s["valleys"]],
+        "grid": s["grid"], "n_eval": {"coarse": s["n_eval_coarse"], "prod": s["n_eval_prod"]},
+        "first_reused": rec["first_reused"],
+        "selections": [{k: x.get(k) for k in ("stage", "attempt", "r_t_m", "N_p", "chosen", "discarded")} for x in rec["selections"]],
+        "events": [{k: e.get(k) for k in ("stage", "r_t_m", "M_K_used_in_fixed_point", "chosen", "same")} for e in rec["events"]],
+        "redo": rec["redo"], "n_restart": rec["n_restart"],
+        "workers": {k: (rec["workers"] or {}).get(k) for k in ("coarse", "prod")},
+        "elapsed_s": rec["elapsed_s"], "elapsed_breakdown": rec["elapsed_breakdown"], "card_elapsed_s": rec["card_elapsed_s"],
+        "recipe_M_knot_factor": rec["recipe_M_knot_factor"], "recipe_M_knot_value_unused": rec["recipe_M_knot_value_unused"],
+        "card_log": {"file": card_log_name, "key": "M_knot_rule", "sha256": _mknot_record_sha256(rec),
+                     "sha256_of": "card_log の M_knot_rule を JSON (キーの順に並べ、区切りに空白なし、ensure_ascii=False) にしたもの",
+                     "holds": "粗い掃引の全行 (selection.coarse_table)・谷ごとの確認の行 (selection.valleys・confirm_table)・最初の選択・"
+                              "全部の選択の要約・選び直しの文・計時の内訳"},
+    })
+
+
+def _mknot_dist_v2(v) -> str:
+    """推定の距離の表示 (粗い網に不成立の点が無ければ記録は None = 無限大)。"""
+    return "∞ (粗い網に不成立の点なし)" if v is None else f"{v:.2f}"
+
+
+def _mknot_rule_text_v2(mkr: dict) -> str:
+    """規則 coarse_min_theta_v2 の記録の 1 行の説明 (card_log の記録か YAML の要約のどちらからでも同じ文)。"""
+    if mkr.get("mode") != "auto":
+        return f"自動 ({mkr.get('rule')}) — {mkr.get('reason')}"
+    return (f"自動 (規則 {mkr['rule']}): 出力と同じ実効の入力 (r_t {mkr['r_t_m']!r} m、生産の網 n_axis_inv {mkr['N_p']}・L_total_tol "
+            f"{mkr['L_p']:.4g} r_t) で選び直した値 = r_t の固定点に使った値 (θ_max {mkr['theta_max_deg']:.5f}°、境目までの推定の距離 "
+            f"{_mknot_dist_v2(mkr['distance_est'])}; 粗い網 n_axis_inv {mkr['N_s']}・L_total_tol {mkr['L_s']:g} r_t の 0.05 の格子、谷 "
+            f"{mkr['n_valleys']} 個のうち {mkr['n_valleys_final']} 個を生産の網で確認); 雛形の M_knot_factor {mkr['recipe_M_knot_factor']:g} "
+            "は使わない")
+
+
+def _mknot_summary_lines_v2(mkr: dict, card_log_name: str | None = None) -> list:
+    """規則 coarse_min_theta_v2 の記録の要約 (YAML のコメント・標準出力)。mkr は card_log の記録 (全部)。"""
+    if mkr.get("mode") != "auto":
+        return [f"M_knot: {_mknot_rule_text_v2(mkr)}"]
+    s = mkr["selection"]
+    g = s["grid"]
+    out = [f"M_knot: 自動 (規則 {mkr['rule']}; {mkr['source']}) → geometry.M_knot {mkr['chosen']!r} (θ_max {mkr['theta_max_deg']:.5f}°、"
+           f"余裕 {mkr['margin_deg']:.3f}°、網の最小 sin 角 {mkr['min_sin_angle']:.4f})。要約は _card.M_knot_rule、粗い掃引の全行と"
+           "谷ごとの確認の行は card_log の M_knot_rule",
+           f"  最終の選択 (r_t {mkr['r_t_m']!r} m; 粗い網 n_axis_inv {mkr['N_s']}・L_total_tol {mkr['L_s']:g} r_t の {g[2]} 点 "
+           f"{g[0]:.2f}〜{g[1]:.2f}、生産の網 n_axis_inv {mkr['N_p']}・L_total_tol {mkr['L_p']:.4g} r_t): {_one_line(mkr['reason'])}"]
+    for v in s["valleys"]:
+        out.append(f"  谷 {v['start']:.2f} (候補の区間 {v['interval'][0]:.2f}〜{v['interval'][1]:.2f}、ずらし {v['n_moves']} 回): "
+                   + (f"代表 {v['final']:.2f}、θ_max {v['theta_max_deg']:.5f}°、推定の距離 {_mknot_dist_v2(v['distance'])}"
+                      if v["final"] is not None else f"捨てた — {_one_line(v['discard_reason'])[:160]}"))
+    for x in mkr["selections"]:
+        out.append(f"  選択 [{x['stage']}] 試行 {x['attempt']}、r_t {x['r_t_m']!r} m、n_axis_inv {x['N_s']}/{x['N_p']} → {x['chosen']!r} "
+                   f"(評価 {x['n_eval_coarse']} + {x['n_eval_prod']} 点、{x['elapsed_s']:.0f} s)"
+                   + (" — 自動調整で捨てた" if x.get("discarded") else ""))
+    for e in mkr["events"]:
+        out.append(f"  [{e['stage']}] r_t {e['r_t_m']!r} m: {_one_line(e['action'])[:200]}")
+    w = mkr.get("workers") or {}
+    bd = mkr["elapsed_breakdown"]
+    out.append(f"  M_knot の所要 {mkr['elapsed_s']:.0f} s (選択 {bd['select_s']:.0f} s・r_t の固定点のやり直し {bd['refix_s']:.0f} s; "
+               f"記録の時点のカード全体 {mkr['card_elapsed_s']:.0f} s)、並列 粗い網 {w.get('coarse')}・生産の網 {w.get('prod')} "
+               f"(CPU {w.get('cpu')}、上限 {w.get('cap')}、開始時の使えるメモリ "
+               f"{None if w.get('available_gb') is None else round(w['available_gb'], 1)} GB)")
+    if card_log_name is not None:
+        out.append(f"  粗い掃引の全行と谷ごとの確認の行: {card_log_name} の M_knot_rule (その記録の sha256 {_mknot_record_sha256(mkr)}; "
+                   "YAML の _card.M_knot_rule は要約だけ)")
+    return out
+
+
 def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10, rel_tol: float = 1e-6,
                   r_throat_m: float | None = None, ns_prev_run=None, ns_delta_next=None, log=print) -> dict:
     r"""要求カード → 問題 YAML (§4.1 2.)。戻り: card_log.json と同じ dict。
@@ -1648,23 +1896,23 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     - **x_F が MOC の場の終点に張り付く** (`moc_call_record` の pinned、または終端特性線が壁に届かない例外): `geometry.x_end_margin` を
       0.5 ずつ上げる (上限 5.0、超えても解消しなければ例外)。
 
-    M_knot が自動のカード (plan tooling-nozzle-mknot-auto §4.3; knot の軸則のとき):
-    - 最初の r_t (径/2、`--r-throat` ならその値) で `select_mknot` → `resolution_gate`、出力の `chosen_N` を r_t の固定点の M_K に固定する。
-      上の自動調整 (n_axis_inv の倍化・L_total_tol の緩和・x_end_margin の変更) が起きたら、その geometry で最初の r_t から選び直す。
-    - 収束した最終の組 (r_t, M_K, 実効の geometry) で詰め (±0.1、0.01 刻み) と解像度のゲートを回す (ゲートは N と 2N の両方を
-      ±(半幅 + ΔM_safe) まで評価して、それぞれの解像度で境目を求める; §5.1 #3d)。`chosen_N` と固定点に使った M_K の差 > 0.01 なら
-      chosen_N で r_t の固定点を前の r_t からやり直す (最大 MKNOT_REDO_MAX 回、超えたら RuntimeError)。差 ≤ 0.01 で値が違えば、出力する組 (chosen_N、最後の r_t) で r_t の固定点の
-      1 回を回し直して寸法の残差を確かめる (|Δr_t|/r_t ≤ rel_tol でなければやり直しに数える)。出力する組の最終の設計チェーンの θ_max が
-      ゲートのその組の評価と一致することも確かめる (`_mknot_record`)。
-    - ゲートで選び直した値 (同点の規則の後) が詰めの窓の端なら、同じ組のまま窓を半幅 0.1 → 0.2 → 0.3 に広げて選び直す
-      (`MKNOT_GATE_HALF_WIDTHS`; 上限でも端なら MknotUndeterminedError)。
-    - 記録は card_log の `M_knot_rule` に全部 (掃引の表を含む)、YAML の `_card.M_knot_rule` (と Euler の写し) には要約だけ
-      (`_mknot_yaml_summary`; card_log の記録の sha256 で結び、書いた後に `mknot_card_log_check` で照合する)。
-    - 評価の並列は `mknot_workers` (MKNOT_WORKERS: N・2N とも 1)。2N の 1 評価のメモリの見積もりが使えるメモリを超えるなら評価の前に
-      RuntimeError (`_mknot_mem_check`)。"""
+    M_knot が自動のカード (規則 coarse_min_theta_v2、plan tooling-nozzle-mknot-fast §4.1・§4.2; knot の軸則のとき):
+    - 最初の r_t (径/2、`--r-throat` ならその値) で `select_coarse_min_theta` を回し (粗い網 N_s = N_p/4・L_s 0.1 r_t、生産の網 N_p =
+      実効の n_axis_inv・カードの L_total_tol)、その選択を r_t の固定点の M_K にする。
+    - 固定点が収束したら、出力と同じ実効の入力 (最後の r_t・n_axis_inv・L_total_tol・x_end_margin) で選び直す。終了は「固定点の残差が
+      許容内」かつ「選び直した値 = 固定点に使った M_K」。違えば選び直した値で r_t の固定点を前の r_t からやり直す (最大 MKNOT_REDO_MAX
+      回、超えたら RuntimeError)。同じ実効の入力の選択は使い回す (設計スロート径・--r-throat・--no-solve では最初の選択がそのまま最終)。
+    - 自動調整 (n_axis_inv の倍化・L_total_tol の緩和・x_end_margin の変更) が起きたら、それまでの評価を全部捨て、N_s・N_p・許容差・並列の
+      数を設定し直して最初の r_t の選択からやり直す。
+    - 計時 (`_clock`): 全部の選択 (捨てたものを含む) と、選び直した M_K での r_t の固定点のやり直しの時間を `M_knot_rule.elapsed_s` に入れ、
+      記録の時点のカード全体の時間 `card_elapsed_s` と並べる (内訳は `timing`)。最初の r_t の固定点はカードの通常の流れなので含めない。
+    - 記録は card_log の `M_knot_rule` に全部 (粗い掃引の全行・谷ごとの確認の行・選択の理由・N_s・L_s・N_p)、YAML の `_card.M_knot_rule`
+      (と Euler の写し) には要約だけ (`_mknot_yaml_summary`; card_log の記録の sha256 で結び、書いた後に `mknot_card_log_check` で照合する)。
+    - 評価の並列は `mknot_workers` (min(CPU 数, 4, ⌊0.7 × MemAvailable / 1 評価のピーク⌋)、FORGE_MKNOT_WORKERS で上限を下げる)。算出が 0 なら
+      評価の前に RuntimeError。"""
     from ..feedback.deltastar_loop import SIZING_TOL_M, SIZING_TOL_PRE_CFD_THROAT_M, load_ns_correction, solve_rt_throat
     from ..probdef import load_problem
-    t_all = time.time()
+    t_all = _clock()
     card_path, out = Path(card_path), Path(out_yaml)
     card = load_card(card_path)
     card_sha = _sha256(card_path)
@@ -1689,7 +1937,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     mk_auto = card["M_knot_mode"] == "auto"
     base_geom = card_to_problem(card, D / 2.0, **({"M_knot": float("nan")} if mk_auto else {}))["geometry"]
     mk_knot = mk_auto and str(base_geom.get("axis_law", "quintic")) == "knot"
-    mk: dict = {"M_K": None, "key": None, "events": [], "attempt": 0, "aa_seen": 0, "t": 0.0}
+    mk: dict = {"M_K": None, "key": None, "events": [], "attempt": 0, "aa_seen": 0, "t": 0.0, "timing": [], "runs": [],
+                "discarded": [], "sel": {}, "first": None, "first_rt": None, "final": None, "redo": 0, "n_restart": 0}
 
     def make(rt, M_K=None):
         if mk_auto:
@@ -1858,159 +2107,131 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         raise RuntimeError(f"r_t の固定点が {max_outer} 回で |Δr_t|/r_t ≤ {rel_tol:g} に止まらない (履歴 "
                            f"{[(h['r_t_in_m'], h['r_t_out_m'], h['rel_change']) for h in hist]})")
 
-    # ------------------------------------------------------------------ M_knot の自動の選択 (plan tooling-nozzle-mknot-auto §4.3)
+    # ------------------------------------------------------------------ M_knot の自動の選択 (規則 coarse_min_theta_v2; plan tooling-nozzle-mknot-fast §4.1)
     def mlog(msg):
         log(f"[wt_card] M_knot: {msg}", flush=True)
 
     def mk_key(rt):
+        """実効の入力の鍵: r_t と自動調整したキー (n_axis_inv・L_total_tol・x_end_margin)。他の geometry はカードで決まる。"""
         return (float(rt), tuple(sorted((k, repr(v)) for k, v in auto.items())))
 
     def mk_base(rt, M_K=None) -> dict:
         prob = make(rt, M_K=M_K)
         return {k: v for k, v in prob.items() if k != "_card"}
 
-    def mk_geom(rt) -> dict:
-        g = make(rt)["geometry"]
-        return {k: g.get(k) for k in ("n_axis_inv", "x_end_margin", "L_total_tol")}
+    def mk_seg(kind, stage, t0):
+        dt = _clock() - t0
+        mk["timing"].append({"kind": kind, "stage": stage, "attempt": mk["attempt"], "elapsed_s": dt})
+        mk["t"] += dt
+        return dt
 
-    def mk_event(stage, rt, g, action, t0, M_used=None):
+    def mk_event(stage, rt, sel, action, M_used=None):
         mk["events"].append(_plain({
-            "stage": stage, "attempt": mk["attempt"], "r_t_m": rt, "geometry": mk_geom(rt), "M_K_in": g["chosen"],
-            "M_K_used_in_fixed_point": M_used, "chosen_N": g["chosen_N"], "chosen_2N": g["chosen_2N"],
-            "diff_vs_used": (None if M_used is None else g["chosen_N"] - M_used), "gate_pass": g["pass"],
-            "gate_n_widen": g["n_widen"], "gate_half_width": g["half_width"],
-            "distance": g["distance_to_conservative_boundary"], "action": action, "elapsed_s": time.time() - t0}))
+            "stage": stage, "attempt": mk["attempt"], "r_t_m": rt, "M_K_used_in_fixed_point": M_used, "chosen": sel["chosen"],
+            "same": (None if M_used is None else sel["chosen"] == M_used), "inputs": sel["inputs"], "action": action}))
 
-    def mk_select_first(rt0):
-        """最初の r_t で select_mknot → resolution_gate、出力は chosen_N (§4.2・§4.3)。r_t の固定点の間はこの値で固定する。"""
+    def mk_select(rt, stage):
+        """出力と同じ形の実効の入力 (r_t・auto を当てた geometry) で規則 coarse_min_theta_v2 の選択を 1 回回す (§4.1 の 1〜5)。
+        同じ実効の入力の選択は mk["sel"] に置いて使い回す。時間は M_knot の時間 (mk_seg) に入れる。"""
         from ..evaluate import mknot_select as MS
-        t0 = time.time()
-        base = mk_base(rt0, M_K=float("nan"))          # M_knot は仮置き (search_range は外し、評価は差し替える)
-        N = int(base["geometry"].get("n_axis_inv", 500))
-        wk = mknot_workers(N)
-        _mknot_mem_check(wk, N)
-        rng = MS.search_range(base)
+        t0 = _clock()
+        try:
+            base = mk_base(rt, M_K=float("nan"))          # M_knot は仮置き (search_range は外し、評価は差し替える)
+            g = base["geometry"]
+            N_p = int(g.get("n_axis_inv", 500))
+            inp = {"r_t_m": float(rt), "N_s": max(1, int(round(N_p / MS.V2_COARSE_DIV))), "L_s": float(MS.V2_L_COARSE), "N_p": N_p,
+                   "L_p": float(g.get("L_total_tol", 0.05)), "x_end_margin": float(g.get("x_end_margin", 2.3))}
+            wk = mknot_workers(inp["N_s"], inp["N_p"])      # 算出 0 なら評価の前に例外
+            rng = MS.search_range(base)
+            mlog(f"{stage}: r_t {rt!r} m・粗い網 n_axis_inv {inp['N_s']} (L_total_tol {inp['L_s']:g} r_t)・生産の網 {N_p} (L_total_tol "
+                 f"{inp['L_p']:.4g} r_t)・x_end_margin {inp['x_end_margin']:g} で選ぶ (M_A {rng['M_A']:.6g}〜M_d {rng['M_d']:.6g}、並列 "
+                 f"{wk['coarse']}/{wk['prod']}、CPU {wk['cpu']}、使えるメモリ "
+                 f"{wk['available_gb'] if wk['available_gb'] is None else round(wk['available_gb'], 1)} GB)")
+            sel = MS.select_coarse_min_theta(MS.make_eval_fn(base, inp["N_s"], L_total_tol=inp["L_s"]), MS.make_eval_fn(base, N_p),
+                                             rng["M_A"], rng["M_d"], workers=(wk["coarse"], wk["prod"]), inputs=inp, log=mlog)
+            bad = [r["M_K"] for r in sel["coarse_table"] + sel["confirm_table"]
+                   if r.get("M_A") is not None and r["M_A"] != rng["M_A"]]
+            if bad:
+                raise RuntimeError(f"M_knot: 評価の行の M_A が探索の範囲の M_A {rng['M_A']!r} と違う ({bad[:5]}) — 範囲が揃っていない")
+            sel.update(workers=wk, stage=stage, attempt=mk["attempt"])
+        except BaseException:
+            mk_seg("select", stage, t0)
+            raise
+        dt = mk_seg("select", stage, t0)
+        sel["elapsed_s_card"] = dt
+        mk["sel"][mk_key(rt)] = sel
+        mk["runs"].append(_plain({"stage": stage, "attempt": mk["attempt"], "r_t_m": float(rt), "N_s": inp["N_s"], "N_p": N_p,
+                                  "L_p": inp["L_p"], "x_end_margin": inp["x_end_margin"], "chosen": sel["chosen"],
+                                  "n_eval_coarse": sel["n_eval_coarse"], "n_eval_prod": sel["n_eval_prod"], "elapsed_s": dt,
+                                  "discarded": False}))
+        mlog(f"{stage}: 選択 {sel['chosen']!r} ({dt:.0f} s)")
+        return sel
+
+    def mk_start(rt0):
+        """最初の r_t の選択 (§4.1)。自動調整で実効の入力が変わったときは、それまでの評価 (選択) を全部捨てて最初からやり直す。"""
         new_aa = auto_adjust[mk["aa_seen"]:]
         mk["aa_seen"] = len(auto_adjust)
-        stage = ("最初の r_t" if mk["key"] is None else
-                 "自動調整の後の選び直し (" + "; ".join(f"{a['key']} {a['from']!r} → {a['to']!r}" for a in new_aa) + ")")
-        mlog(f"{stage}: r_t {rt0!r} m・n_axis_inv {N} で探索 (M_A {rng['M_A']:.6g}〜M_d {rng['M_d']:.6g}、並列 N {wk['N']}・2N {wk['2N']}、"
-             f"使えるメモリ {wk['available_gb'] if wk['available_gb'] is None else round(wk['available_gb'], 1)} GB)")
-        sel = MS.select_mknot(MS.make_eval_fn(base, N), rng["M_A"], rng["M_d"], workers=wk["N"], log=mlog)
-        bad = [r["M_K"] for r in sel["table"] if r.get("M_A") is not None and r["M_A"] != rng["M_A"]]
-        if bad:
-            raise RuntimeError(f"M_knot: 評価の行の M_A が探索の原点 {rng['M_A']!r} と違う ({bad[:5]}) — 格子の原点が揃っていない")
-        gate = MS.resolution_gate(base, sel["chosen"], N, select_result=sel, half_widths=MKNOT_GATE_HALF_WIDTHS,
-                                  workers=(wk["N"], wk["2N"]), log=mlog)
-        mk.update(M_K=float(gate["chosen_N"]), key=mk_key(rt0), sel=sel, sel_rt=float(rt0), gate_first=gate, gate_final=None,
-                  N=N, workers=wk, redo=0, seedN={MS._key(r["M_K"]): r for r in gate["rows_N"]},
-                  seed2={MS._key(r["M_K"]): r for r in gate["rows_2N"]})
-        mk_event(stage, rt0, gate, f"select_mknot の選択 {sel['chosen']!r} → ゲートで選び直した chosen_N {gate['chosen_N']!r} を "
-                 "r_t の固定点の M_K に固定", t0)
-        mlog(f"{stage}: 選択 {sel['chosen']!r} → chosen_N {gate['chosen_N']!r} (ゲート PASS、全部の境目から "
-             f"{_mknot_dist(gate['distance_to_conservative_boundary'])}"
-             + (f"、{_mknot_widen_text(gate)}" if gate["n_widen"] else "") + f"、{time.time() - t0:.0f} s)")
-        mk["t"] += time.time() - t0
-
-    def mk_gate(rt, M_c):
-        """(rt, M_c) を中心に詰めと解像度のゲート。同じ r_t・geometry の探索の表があれば再利用し、無ければ評価を作り直す。
-        窓の外の文脈 ±(半幅 + ΔM_safe) は、初回の窓・広げた窓とも resolution_gate が **N と 2N の両方**で評価して、それぞれの
-        解像度で境目を求める (plan §4.4・§5.1 #3d、result 段レビュー M2: 以前はここで N だけを ±(0.1 + ΔM_safe) に広げていて、
-        2N にだけある窓の外の境目を見落とした)。"""
-        from ..evaluate import mknot_select as MS
-        base = mk_base(rt, M_K=M_c)
-        N, sel = mk["N"], mk["sel"]
-        st = sel["settings"]
-        wk = mknot_workers(N)
-        _mknot_mem_check(wk, N)
-        if mk_key(rt) == mk["key"]:                     # 同じ r_t・geometry: 最初の探索とゲートの評価 (N・2N) を使う
-            ctx = {"settings": st, "table": list(mk["seedN"].values())}
-            seed2, how = list(mk["seed2"].values()), "最初の r_t と同じ組 (探索とゲートの評価を再利用)"
+        if mk["key"] is None:
+            stage = "最初の r_t"
         else:
-            mlog(f"最終の組 r_t {rt!r} m: M_K {M_c!r} の前後 ±{MKNOT_GATE_HALF_WIDTH + st['dM_safe']:g} を n_axis_inv {N}・{2 * N} の"
-                 f"両方で評価 (resolution_gate の窓と窓の外の文脈、並列 {wk['N']}・{wk['2N']})")
-            ctx = {"settings": st, "table": []}
-            seed2, how = None, "最終の組で詰め直し (N・2N とも ±(半幅 + ΔM_safe))"
-        g = MS.resolution_gate(base, M_c, N, select_result=ctx, seed_2N=seed2, half_widths=MKNOT_GATE_HALF_WIDTHS,
-                               workers=(wk["N"], wk["2N"]), log=mlog)
-        if mk_key(rt) == mk["key"]:
-            mk["seedN"].update({MS._key(r["M_K"]): r for r in g["rows_N"]})
-            mk["seed2"].update({MS._key(r["M_K"]): r for r in g["rows_2N"]})
-        return g, how
+            why = "; ".join(f"{a['key']} {a['from']!r} → {a['to']!r}" for a in new_aa) or "実効の入力が変わった"
+            mk["discarded"].append(_plain({"attempt": mk["attempt"], "reason": f"自動調整 ({why})", "n_selections": len(mk["sel"]),
+                                           "n_eval": sum(x["n_eval_coarse"] + x["n_eval_prod"] for x in mk["sel"].values())}))
+            for x in mk["runs"]:
+                x["discarded"] = True
+            mk["n_restart"] += 1
+            stage = f"自動調整の後のやり直し ({why})"
+            mlog(f"{stage}: それまでの評価 ({len(mk['sel'])} 回の選択) を捨てて最初の r_t から選び直す")
+        mk.update(sel={}, redo=0, final=None)
+        sel = mk_select(rt0, stage)
+        mk.update(M_K=float(sel["chosen"]), key=mk_key(rt0), first=sel, first_rt=float(rt0))
+        mk_event(stage, rt0, sel, f"選択 {sel['chosen']!r} を r_t の固定点の M_K にする")
 
     def mk_finalize(state):
-        """収束した最終の組 (r_t, M_K, 実効の geometry) で詰めと解像度のゲート (§4.3)。chosen_N と r_t の固定点に使った M_K の差が
-        0.01 を超えたら chosen_N で r_t の固定点をやり直す (最大 MKNOT_REDO_MAX 回)。差が 0.01 以下で値が違えば、出力する組
-        (chosen_N と最後の r_t) で r_t の固定点の 1 回 (寸法の残差) を回し直して確かめる (制約はゲートがその組を N・2N で評価済み)。
-        戻り: state (rt, hist, sizing_res, method, method_text, inner_tol)。出力する組は (mk["M_K"], rt)。"""
+        """固定点の後: 出力と同じ実効の入力で選び直し、固定点に使った M_K と同じなら終了 (§4.1)。違えば選び直した値で r_t の固定点を
+        やり直す (最大 MKNOT_REDO_MAX 回)。戻り: state (rt, hist, sizing_res, method, method_text, inner_tol)。出力する組は
+        (mk["M_K"], rt)。"""
         rt, hist, sizing_res, method, method_text, inner_tol = state
         solving = method in ("physical_throat_solved", "physical_throat_ns_corrected")
-        ns = method == "physical_throat_ns_corrected"
         while True:
-            t0 = time.time()
-            M_used = mk["M_K"]
-            if mk_key(rt) == mk["key"] and M_used == mk["gate_first"]["chosen"]:
-                g, how = mk["gate_first"], "最初の r_t のゲートと同じ組 (再利用)"
+            M_used = float(mk["M_K"])
+            sel = mk["sel"].get(mk_key(rt))
+            if sel is None:
+                sel = mk_select(rt, "最終の組 (出力と同じ実効の入力で選び直す)")
+                how = "出力と同じ実効の入力で選び直した"
             else:
-                g, how = mk_gate(rt, M_used)
-            mk["gate_final"] = g
-            cN = float(g["chosen_N"])
-            diff = cN - M_used
+                how = "同じ実効の入力の選択を使い回した"
+            mk["final"] = sel
             stage = f"最終の組 ({how})"
-            if abs(diff) > MKNOT_MOVE_TOL + 1e-9:
-                mk["redo"] += 1
-                if mk["redo"] > MKNOT_REDO_MAX:
-                    mk_event(stage, rt, g, f"chosen_N と固定点の M_K の差 {diff:+.4g} > {MKNOT_MOVE_TOL:g} が {MKNOT_REDO_MAX} 回の"
-                             "やり直しでも収まらない — 例外", t0, M_used)
-                    raise RuntimeError(f"M_knot: 最終の組のゲートの chosen_N {cN!r} が r_t の固定点に使った M_K {M_used!r} から "
-                                       f"{diff:+.4g} 動き、r_t の固定点を {MKNOT_REDO_MAX} 回やり直しても {MKNOT_MOVE_TOL:g} 以内に収まらない "
-                                       f"(plan tooling-nozzle-mknot-auto §4.3; 記録 {mk['events']})")
-                mk["M_K"] = cN
-                mk_event(stage, rt, g, f"差 {diff:+.4g} > {MKNOT_MOVE_TOL:g} → chosen_N {cN!r} で r_t の固定点をやり直す "
-                         f"({mk['redo']} 回目、始まりは前の r_t)", t0, M_used)
-                mlog(f"最終の組: chosen_N {cN!r} が固定点の M_K {M_used!r} から {diff:+.4g} — r_t の固定点をやり直す ({mk['redo']} 回目)")
-                mk["t"] += time.time() - t0
-                if solving:
-                    rt, h2, sizing_res, method, method_text, inner_tol = solve_loop(rt_start=rt)
-                    hist = hist + h2
-                continue
-            if diff == 0.0:
-                mk_event(stage, rt, g, "chosen_N = r_t の固定点に使った M_K — その組を出力 (寸法は最終の設計チェーンで測る)", t0, M_used)
-                mk["t"] += time.time() - t0
-                return rt, hist, sizing_res, method, method_text, inner_tol
-            mk["M_K"] = cN
-            if not solving:
-                mk_event(stage, rt, g, f"差 {diff:+.4g} ≤ {MKNOT_MOVE_TOL:g}: chosen_N {cN!r} を出力 (r_t は固定; 制約はゲートがこの組を "
-                         "N・2N で評価済み、寸法は最終の設計チェーンで測る)", t0, M_used)
-                mk["t"] += time.time() - t0
-                return rt, hist, sizing_res, method, method_text, inner_tol
-            rt_v, rel, res_v, h = outer_step(len(hist), rt, ns, inner_tol if inner_tol is not None else inner_tol_of(ns),
-                                             stage=f"M_knot の確かめ直し (chosen_N {cN!r}、r_t {rt!r} m)")
-            hist = hist + [h]
-            if rel <= rel_tol:
-                sizing_res = res_v
-                mk_event(stage, rt, g, f"差 {diff:+.4g} ≤ {MKNOT_MOVE_TOL:g}: 出力する組 (chosen_N {cN!r}、r_t {rt!r} m) で r_t の固定点の "
-                         f"1 回を回し直した (|Δr_t|/r_t {rel:.2e} ≤ {rel_tol:g}; 寸法の残差はこの solve_rt_throat と最終の設計チェーンで測る)",
-                         t0, M_used)
-                mk["t"] += time.time() - t0
+            if float(sel["chosen"]) == M_used:
+                mk_event(stage, rt, sel, f"選び直した値 {sel['chosen']!r} = r_t の固定点に使った M_K → その組を出力", M_used)
                 return rt, hist, sizing_res, method, method_text, inner_tol
             mk["redo"] += 1
             if mk["redo"] > MKNOT_REDO_MAX:
-                raise RuntimeError(f"M_knot: 出力する組 (chosen_N {cN!r}、r_t {rt!r} m) の r_t の固定点の 1 回で |Δr_t|/r_t {rel:.2e} > "
-                                   f"{rel_tol:g}、やり直しが {MKNOT_REDO_MAX} 回を超えた")
-            mk_event(stage, rt, g, f"差 {diff:+.4g} ≤ {MKNOT_MOVE_TOL:g} だが出力する組の r_t の固定点の 1 回で |Δr_t|/r_t {rel:.2e} > "
-                     f"{rel_tol:g} — chosen_N で r_t の固定点をやり直す ({mk['redo']} 回目)", t0, M_used)
-            mk["t"] += time.time() - t0
-            rt, h2, sizing_res, method, method_text, inner_tol = solve_loop(rt_start=rt_v)
-            hist = hist + h2
+                mk_event(stage, rt, sel, f"選び直した値 {sel['chosen']!r} ≠ 固定点の M_K {M_used!r} が {MKNOT_REDO_MAX} 回のやり直しでも"
+                         "収まらない — 例外", M_used)
+                raise RuntimeError(f"M_knot: 出力と同じ実効の入力で選び直した値 {sel['chosen']!r} が r_t の固定点に使った M_K {M_used!r} と"
+                                   f"違い、r_t の固定点を {MKNOT_REDO_MAX} 回やり直しても一致しない (plan tooling-nozzle-mknot-fast §4.1; "
+                                   f"記録 {[(e['stage'], e['r_t_m'], e['M_K_used_in_fixed_point'], e['chosen']) for e in mk['events']]})")
+            mk["M_K"] = float(sel["chosen"])
+            mk_event(stage, rt, sel, f"選び直した値 {sel['chosen']!r} ≠ 固定点の M_K {M_used!r} → その値で r_t の固定点をやり直す "
+                     f"({mk['redo']} 回目、始まりは前の r_t)", M_used)
+            mlog(f"選び直した値 {sel['chosen']!r} ≠ 固定点の M_K {M_used!r} — r_t の固定点をやり直す ({mk['redo']} 回目)")
+            if solving:
+                t0 = _clock()
+                try:
+                    rt, h2, sizing_res, method, method_text, inner_tol = solve_loop(rt_start=rt)
+                finally:
+                    mk_seg("refix", f"r_t の固定点のやり直し ({mk['redo']} 回目、M_K {mk['M_K']!r})", t0)
+                hist = hist + h2
 
     for attempt in range(_MAX_ATTEMPTS):
         try:
             if mk_knot:
                 mk["attempt"] = attempt
                 rt0 = float(r_throat_m) if r_throat_m is not None else D / 2.0
-                if mk["key"] != mk_key(rt0):           # 最初の r_t、または自動調整で geometry が変わった → 選び直す
-                    mk_select_first(rt0)
+                if mk["key"] != mk_key(rt0):           # 最初の r_t、または自動調整で実効の入力が変わった → 評価を捨てて最初から選ぶ
+                    mk_start(rt0)
             rt, hist, sizing_res, method, method_text, inner_tol = solve_loop()
             if mk_knot:
                 rt, hist, sizing_res, method, method_text, inner_tol = mk_finalize(
@@ -2086,7 +2307,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         "warnings": list(warnings),
         "generated": datetime.date.today().isoformat(),
     })
-    mk_rec = _mknot_record(card, prob, chain, rt, mk) if mk_auto else None
+    mk_rec = _mknot_record_v2(card, prob, chain, rt, mk, _clock() - t_all) if mk_auto else None
     card_log_name = out.name + ".card_log.json"
     if mk_rec is not None:          # YAML には要約だけ (掃引の表と全部の記録は card_log の M_knot_rule; plan §4.4)
         prob["_card"]["M_knot_rule"] = _mknot_yaml_summary(mk_rec, card_log_name)
@@ -2129,7 +2350,7 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
                              "qa": _json_safe(chain["qa"])},
             "mesh_estimate": {k: v for k, v in est.items() if k != "sections"},     # 断面ごとの配列は書かない
             "nodes": nodes,          # NS (mesh)・Euler (mesh_euler) の実効の節点数と上限 (plan tooling-nozzle-mesh-size-guard §4.2)
-            "liquefaction": liq, "dimensions": dims, "time_s": time.time() - t_all,
+            "liquefaction": liq, "dimensions": dims, "time_s": _clock() - t_all,
             "euler_companion": (str(euler_out) if euler_out else None)}
     if ns_rec is not None:
         logd["ns_correction"] = ns_rec

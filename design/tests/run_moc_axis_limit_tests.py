@@ -20,6 +20,8 @@ plan: plans/accepted/discretization-moc-axis-limit-and-corrector.md §5.1 #3 (§
    (b) の新しい側は出口の切り方を実装前の規則 (`wall[:, 0] <= x_F`) に戻して比べる (2026-10-13 plan
    tooling-nozzle-deltastar-band-root-zone §5.1 #4c で切り方を意図して変えた — この問題では実装前の切り方が x_F の壁点を
    落としていた)。今の切り方は別に、実装前の表 + x_F の 1 点 (先頭はビット同一) であることを見る。
+   新しい側は `FORGE_MOC_KERNEL=numpy` で回す (2026-10-15 plan tooling-nozzle-mknot-fast §4.5: 既定の numba の単位過程は
+   numpy の版とビット同一でない。ここは numpy の版の後方互換の試験で、numba の版との照合は run_moc_jit_tests.py が許容差で見る)。
 
 usage: python3 design/tests/run_moc_axis_limit_tests.py
   凍結源が無ければ 8 (b) と case/45 依存の項目を飛ばして exit 2 (合格扱いにしない)。
@@ -424,7 +426,8 @@ with tempfile.TemporaryDirectory() as td:
         for lab, pkg in (("base", td / "design"), ("new", ROOT / "design")):
             f = td / f"{lab}.npz"
             r = subprocess.run([py, str(td / "snip.py"), str(pkg), str(Path(__file__).resolve().parent), str(f),
-                                "1" if HAVE45 else "0", *args, *(["explicit_legacy"] if lab == "new" else [])], capture_output=True, text=True)
+                                "1" if HAVE45 else "0", *args, *(["explicit_legacy"] if lab == "new" else [])], capture_output=True, text=True,
+                               env={**os.environ, "FORGE_MOC_KERNEL": "numpy"})
             if r.returncode != 0:
                 check(f"ビット同一: {lab} の計算が失敗 ({r.stderr[-300:]})", False)
             res_files[lab] = f

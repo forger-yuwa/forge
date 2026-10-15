@@ -1,0 +1,90 @@
+[wt_card] M_knot: 最初の r_t: r_t 0.025 m・粗い網 n_axis_inv 600 (L_total_tol 0.1 r_t)・生産の網 2400 (L_total_tol 0.02 r_t)・x_end_margin 2.3 で選ぶ (M_A 1.22927〜M_d 5、並列 4/4、CPU 4、使えるメモリ 14.4 GB)
+[wt_card] M_knot: 粗い掃引: 74 点 (1.30〜4.95、0.05 刻み、並列 4)
+[wt_card] M_knot:   [coarse] 74 点を評価 (24.4 s): 1.3×, 1.35×, 1.4×, 1.45×, 1.5×, 1.55×, 1.6×, 1.65×, 1.7×, 1.75×, 1.8×, 1.85×, 1.9×, 1.95×, 2, 2.05, 2.1, 2.15, 2.2, 2.25, 2.3, 2.35, 2.4, 2.45, 2.5, 2.55, 2.6, 2.65, 2.7, 2.75, 2.8, 2.85, 2.9, 2.95, 3, 3.05, 3.1, 3.15, 3.2, 3.25, 3.3, 3.35, 3.4, 3.45, 3.5, 3.55, 3.6, 3.65, 3.7, 3.75, 3.8, 3.85, 3.9, 3.95, 4, 4.05, 4.1, 4.15, 4.2, 4.25, 4.3, 4.35, 4.4×, 4.45×, 4.5×, 4.55×, 4.6×, 4.65×, 4.7×, 4.75×, 4.8×, 4.85×, 4.9×, 4.95×
+[wt_card] M_knot: 候補の区間 1 個・谷 1 個 (代表 2.05) を生産の網で確かめる (並列 4)
+[wt_card] M_knot:   [confirm] 3 点を評価 (9.3 s): 2, 2.05, 2.1
+[wt_card] M_knot:   谷の確認: 2.05 → final (2.05)
+[wt_card] M_knot: 選択 2.05: 代表が残った谷 1 個 (全 1 個) の生産の網の θ_max の最小 15.19133° から 0.01° 以内の同点の集合 1 個 (2.05) の中で 唯一の谷 → 2.05 (θ_max 15.19133°、境目までの推定の距離 0.05)
+[wt_card] M_knot: 最初の r_t: 選択 2.05 (34 s)
+[wt_card] r_t 反復 0: r_t 0.025 → 0.02497400345546207 m (|Δ|/r_t 1.040e-03、内側 2 回・残差 3.571e-09 m、13.2 s)
+[wt_card] r_t 反復 1: r_t 0.02497400345546207 → 0.02497400345546207 m (|Δ|/r_t 0.000e+00、内側 1 回・残差 -1.953e-08 m、12.2 s)
+[wt_card] M_knot: 最終の組 (出力と同じ実効の入力で選び直す): r_t 0.02497400345546207 m・粗い網 n_axis_inv 600 (L_total_tol 0.1 r_t)・生産の網 2400 (L_total_tol 0.02002 r_t)・x_end_margin 2.3 で選ぶ (M_A 1.22927〜M_d 5、並列 4/4、CPU 4、使えるメモリ 14.6 GB)
+[wt_card] M_knot: 粗い掃引: 74 点 (1.30〜4.95、0.05 刻み、並列 4)
+[wt_card] M_knot:   [coarse] 74 点を評価 (24.3 s): 1.3×, 1.35×, 1.4×, 1.45×, 1.5×, 1.55×, 1.6×, 1.65×, 1.7×, 1.75×, 1.8×, 1.85×, 1.9×, 1.95×, 2, 2.05, 2.1, 2.15, 2.2, 2.25, 2.3, 2.35, 2.4, 2.45, 2.5, 2.55, 2.6, 2.65, 2.7, 2.75, 2.8, 2.85, 2.9, 2.95, 3, 3.05, 3.1, 3.15, 3.2, 3.25, 3.3, 3.35, 3.4, 3.45, 3.5, 3.55, 3.6, 3.65, 3.7, 3.75, 3.8, 3.85, 3.9, 3.95, 4×, 4.05, 4.1, 4.15, 4.2, 4.25, 4.3, 4.35, 4.4×, 4.45×, 4.5×, 4.55×, 4.6×, 4.65×, 4.7×, 4.75×, 4.8×, 4.85×, 4.9×, 4.95×
+[wt_card] M_knot: 候補の区間 2 個・谷 2 個 (代表 2.05, 4.10) を生産の網で確かめる (並列 4)
+[wt_card] M_knot:   [confirm] 6 点を評価 (23.3 s): 2, 2.05, 2.1, 4.05, 4.1, 4.15
+[wt_card] M_knot:   谷の確認: 2.05 → final (2.05); 4.10 → final (4.10)
+[wt_card] M_knot: 選択 2.05: 代表が残った谷 2 個 (全 2 個) の生産の網の θ_max の最小 15.16502° から 0.01° 以内の同点の集合 1 個 (2.05) の中で 唯一の谷 → 2.05 (θ_max 15.16502°、境目までの推定の距離 0.05)
+[wt_card] M_knot: 最終の組 (出力と同じ実効の入力で選び直す): 選択 2.05 (48 s)
+[wt_card] design_chain 8.8 s (L_c 21.6973、x_F − L_total 1.476e-02 r_t、x_F − x_e 0.000e+00 r_t、場の終点まで 7.86 r_t)
+カードの値 → 問題 YAML のキー:
+  conditions.Pt                3000000.0                  → spec.Pt                3000000.0   (そのまま [Pa])
+  conditions.Tt                1250.0                     → spec.Tt                1250.0   (そのまま [K])
+  M_exit                       5.0                        → spec.M_design          5.0   (そのまま)
+  throat.diameter_physical_m   0.05                       → spec.r_throat          0.02497400345546207   (物理スロート径: CFD 前の solve_rt_throat の固定点 (spec.sizing.target_m = 径/2))
+  throat.curvature (雛形)        (無し)                       → geometry.R             2.0   (曲率半径 / r_t (設計壁のスロートの曲率; 物理壁は境界層の分だけわずかに違う))
+  inlet.radius_m               0.15                       → geometry.r_inlet       6.006245665317767   (/ r_t)
+  inlet.pipe_length_m          0.2                        → geometry.L_pipe        8.008327553757024   (/ r_t)
+  inlet.contraction_length_m   0.3                        → geometry.L_U           12.012491330635534   (/ r_t)
+  divergent_length_m           1.2                        → dv.L_total             48.049965322542135   (/ r_t (Lc_mode: from_length))
+  tolerances.length_m          0.001                      → geometry.L_total_tol   0.02002081888439256   (/ 2 / r_t)
+  wall                         {thermal: isothermal, Tw: 350.0} → spec.wall_thermal      {mode: isothermal, Tw: 350.0}   (thermal → mode)
+  p_ambient                    design                     → spec.p_ambient         5138.646661132853   (design: 設計出口静圧 (semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)、M 5.0、p/Pt 1.712882e-03))
+  gas                          {preset: air}              → gas.species            {N2: 0.7552, O2: 0.2314, AR: 0.0129, CO2: 0.0005}   (質量分率 (model semiperfect、transport は雛形))
+  recipe                       axismach_final_v1          → geometry・mesh・mesh_euler・evaluate (雛形の構成キー)   (M_knot は自動 (雛形 axismach_final_v1 の M_knot_factor は使わない))
+  M_knot (自動)                  auto                       → geometry.M_knot        2.05   (自動 (規則 coarse_min_theta_v2): 出力と同じ実効の入力 (r_t 0.02497400345546207 m、生産の網 n_axis_inv 2400・L_total_tol 0.02002 r_t) で選び直した値 = r_t の固定点に使った値 (θ_max 15.16502°、境目までの推定の距離 0.05; 粗い網 n_axis_inv 600・L_total_tol 0.1 r_t の 0.05 の格子、谷 2 個のうち 2 個を生産の網で確認); 雛形の M_knot_factor 0.45 は使わない)
+  overrides.deltastar_initializer.model contur                     → deltastar_initializer.model contur   (上書き (雛形/生成値: None))
+  overrides.deltastar_initializer.a_crocco 1.0                        → deltastar_initializer.a_crocco 1.0   (上書き (雛形/生成値: None))
+  overrides.deltastar_initializer.cf_scale 0.8246498920214053         → deltastar_initializer.cf_scale 0.8246498920214053   (上書き (雛形/生成値: None))
+  overrides.deltastar_initializer.n_scale 1.0                        → deltastar_initializer.n_scale 1.0   (上書き (雛形/生成値: None))
+  overrides.mesh.wall_first_frac 1.15e-05                   → mesh.wall_first_frac   1.15e-05   (上書き (雛形/生成値: None))
+  overrides.mesh.wall_first_frac_throat 2.75e-06                   → mesh.wall_first_frac_throat 2.75e-06   (上書き (雛形/生成値: None))
+r_t = 0.02497400345546207 m (physical_throat_solved)
+  反復 0: 0.025 → 0.02497400345546207 m  |Δ|/r_t 1.040e-03  物理スロート半径 0.025000003571062503 m  (13.2 s)
+  反復 1: 0.02497400345546207 → 0.02497400345546207 m  |Δ|/r_t 0.000e+00  物理スロート半径 0.024999980467877544 m  (12.2 s)
+格子 (初期値): ni 1840  wall_first_frac 1.15e-05  wall_first_frac_throat 2.75e-06  ブレンド C (up_x0/x1 None/None)  (AR の最大 4829、y1+ の目安の最大 0.69 @ x -0.33)
+節点数 (格子を作る前の判定): NS (mesh) ni 1840 × nj 97 = 178480 (上限 300000、既定)・Euler (mesh_euler) ni 1840 × nj 97 = 178480 (上限 300000、既定)。上限を超える格子はユーザの了承を取ってから overrides の max_nodes と max_nodes_reason を組で書いて許す
+逆 MOC の場: x_F 48.064729  x_e 48.064729  x_F − x_e +0.000 mm  場の終点 55.9215 r_t (張り付きなし、x_end_margin 2.3)
+M_knot: 自動 (規則 coarse_min_theta_v2; カードに geometry.M_knot を書いていない (既定は自動)) → geometry.M_knot 2.05 (θ_max 15.16502°、余裕 4.269°、網の最小 sin 角 0.0516)。要約は _card.M_knot_rule、粗い掃引の全行と谷ごとの確認の行は card_log の M_knot_rule
+  最終の選択 (r_t 0.02497400345546207 m; 粗い網 n_axis_inv 600・L_total_tol 0.1 r_t の 74 点 1.30〜4.95、生産の網 n_axis_inv 2400・L_total_tol 0.02002 r_t): 代表が残った谷 2 個 (全 2 個) の生産の網の θ_max の最小 15.16502° から 0.01° 以内の同点の集合 1 個 (2.05) の中で 唯一の谷 → 2.05 (θ_max 15.16502°、境目までの推定の距離 0.05)
+  谷 2.05 (候補の区間 2.05〜3.90、ずらし 0 回): 代表 2.05、θ_max 15.16502°、推定の距離 0.05
+  谷 4.10 (候補の区間 4.10〜4.30、ずらし 0 回): 代表 4.10、θ_max 19.62191°、推定の距離 0.05
+  選択 [最初の r_t] 試行 0、r_t 0.025 m、n_axis_inv 600/2400 → 2.05 (評価 74 + 3 点、34 s)
+  選択 [最終の組 (出力と同じ実効の入力で選び直す)] 試行 0、r_t 0.02497400345546207 m、n_axis_inv 600/2400 → 2.05 (評価 74 + 6 点、48 s)
+  [最初の r_t] r_t 0.025 m: 選択 2.05 を r_t の固定点の M_K にする
+  [最終の組 (出力と同じ実効の入力で選び直した)] r_t 0.02497400345546207 m: 選び直した値 2.05 = r_t の固定点に使った M_K → その組を出力
+  M_knot の所要 82 s (選択 82 s・r_t の固定点のやり直し 0 s; 記録の時点のカード全体 117 s)、並列 粗い網 4・生産の網 4 (CPU 4、上限 4、開始時の使えるメモリ 14.6 GB)
+  粗い掃引の全行と谷ごとの確認の行: problem.yaml.card_log.json の M_knot_rule (その記録の sha256 e7b91a7b0a472fb617bef077a3f194183aa07c2a949898df14b1597ed183e1f0; YAML の _card.M_knot_rule は要約だけ)
+液化: 出口静温 221.80 K が Antoine の範囲 (63〜126 K) より高い (N₂ の臨界温度 126.2 K 付近より上) — 液化しない
+寸法 (設計壁から): PASS
+  inlet_radius               カード 0.150000 m  測定 0.150000 m  差 +0.000e+00 m  公差 1e-05  ok
+  pipe_length                カード 0.200000 m  測定 0.200000 m  差 +0.000e+00 m  公差 0.001  ok
+  contraction_length         カード 0.300000 m  測定 0.300000 m  差 -5.607e-12 m  公差 0.001  ok
+  divergent_length           カード 1.200000 m  測定 1.200369 m  差 +3.687e-04 m  公差 0.001  ok
+  throat_diameter_physical   カード 0.050000 m  測定 0.050000 m  差 -3.906e-08 m  公差 2e-05  ok
+警告: 格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.52 (x = -19.98 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.69 @ x = -0.33 r_t)
+→ /home/ubuntu/mknot_time/final_out/card_a/problem.yaml  (/home/ubuntu/mknot_time/final_out/card_a/problem.yaml.card_log.json)
+→ /home/ubuntu/mknot_time/final_out/card_a/problem_euler.yaml  (Euler の参照用。physical_wall_repr・pw_upstream を除いた写し)
+	Command being timed: "/home/ubuntu/mknot_venv/bin/python -m forge_design.intake.wt_card /home/ubuntu/mknot_time/final/case/70.m5_air_wt_demo/card_m5_air_demo_c2b.yaml --out /home/ubuntu/mknot_time/final_out/card_a/problem.yaml"
+	User time (seconds): 322.73
+	System time (seconds): 3.45
+	Percent of CPU this job got: 277%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:57.57
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1271796
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 50
+	Minor (reclaiming a frame) page faults: 592990
+	Voluntary context switches: 1233
+	Involuntary context switches: 38701
+	Swaps: 0
+	File system inputs: 6256
+	File system outputs: 1688
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

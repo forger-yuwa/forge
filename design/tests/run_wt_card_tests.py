@@ -14,24 +14,21 @@
   from_length の各評価の (L_c, x_F, x_e, x_F − x_e) の記録。
   M_knot (plan tooling-nozzle-mknot-auto §5.1 #3、§6 V3): カードの既定は自動になったので、上の試験は**数値の M_knot のカード**
   (overrides の geometry.M_knot: 2.25 = 旧既定の 0.45 × M_exit; case/45 は 2.7 = 0.45 × 6) で回し、期待は変えない。
-  M5 デモの生成は探索の関数 (search_range・select_mknot・resolution_gate・evaluate_mknot・make_eval_fn) を呼んだら失敗する差し替えの
-  中で回す (数値の M_knot では探索しない)。M_knot の書き方 (書かない・auto・数値・不正) の検査と card_to_problem の M_knot=。
-  自動の流れ (選ぶ・最終の組のゲート・やり直し・確かめ直し・記録) は探索の関数を合成の結果に差し替えて確かめる (設計スロート径:
-  再利用・差 ≤ 0.01 の出力・やり直しが 2 回を超えて例外; 物理スロート径: 差 ≤ 0.01 で出力する組の r_t の固定点の 1 回を回し直す)。
-  記録 (§5.1 #3b): card_log の M_knot_rule に全部 (掃引の表を含む)、YAML の _card.M_knot_rule は要約だけ (行 ≤ 4 kB、card_log の記録の
-  sha256 で結ぶ; Euler の写しも同じ要約)、カードはゲートに半幅の列 (0.1, 0.2, 0.3) を渡し、窓を広げた記録が要約・コメントに出る。
-  実際の探索での統合は §6 V4 (case/70 の c2b の条件、所要 数十分) で別に確かめる。
+  M5 デモの生成は探索の関数 (search_range・select_coarse_min_theta・select_mknot・resolution_gate・evaluate_mknot・make_eval_fn) を
+  呼んだら失敗する差し替えの中で回す (数値の M_knot では探索しない)。M_knot の書き方 (書かない・auto・数値・不正) の検査と
+  card_to_problem の M_knot=。
+  自動の流れ (規則 coarse_min_theta_v2; plan tooling-nozzle-mknot-fast §6 V2: 最初と最終の r_t で選び直す・固定点のやり直し・自動調整で
+  評価を捨てる・記録・計時) は design/tests/run_mknot_v2_card_tests.py で確かめる (2026-10-15 に旧の規則 min_theta_max_v1 の合成の試験を
+  ここから外した — カードは旧の規則を呼ばない)。実際の探索での統合は plan tooling-nozzle-mknot-fast §6 V3・V4 (AWS) で別に確かめる。
 
 実行 (forge-deliv の直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_wt_card_tests.py [--slow]
-所要: 既定 約 10 分 (M5 デモの r_t の固定点 + design_chain 数回 + M_knot の自動の流れの合成の試験 約 7 分; 2026-10-14 の手元、別の計算と
-並行)、--slow で case/45 の固定点と物理スロート径の M_knot のやり直しの合成の試験が加わる。
+所要: 既定 数分 (M5 デモの r_t の固定点 + design_chain 数回)、--slow で case/45 の固定点が加わる。
 """
 import contextlib
 import copy
 import json
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np
@@ -47,7 +44,7 @@ from forge_design.probdef import load_problem  # noqa: E402
 
 FAIL = 0
 # M_knot の探索の関数 (数値の M_knot のカードでは呼ばれない; §6 V3)
-SEARCH_FUNCS = ("search_range", "select_mknot", "resolution_gate", "evaluate_mknot", "make_eval_fn")
+SEARCH_FUNCS = ("search_range", "select_coarse_min_theta", "select_mknot", "resolution_gate", "evaluate_mknot", "make_eval_fn")
 FORBIDDEN_CALLS: list = []
 
 
@@ -466,178 +463,10 @@ check("数値の M_knot のカードに M_knot= を渡すと例外", r, msg[:160
 pq = W.card_to_problem(W.validate_card(dict(copy.deepcopy(BASE), overrides={"geometry.axis_law": "quintic"})), 0.025)
 check("knot でない軸則 (quintic) の自動のカード: geometry.M_knot を書かない (M_knot= なしで通る)", "M_knot" not in pq["geometry"])
 
-# ---------------------------------------------------------------------------------------------- M_knot の自動の流れ (合成)
-print("== M_knot の自動の流れ (探索の関数を合成の結果に差し替え; 実際の探索での統合は §6 V4)")
-REAL_EVAL = MS.evaluate_mknot
-M_A_FAKE = 1.2
-SETTINGS = {"coarse": 0.1, "fine": 0.01, "tie_deg": 1e-3, "dM_safe": 0.05, "bisect_tol": 1e-3, "sin_min": 0.02, "margin_min_deg": 1.0,
-            "grid_origin": M_A_FAKE + 0.1}
-
-
-def fake_row(M, role="fake"):
-    return {"M_K": float(M), "ok": True, "reasons": [], "role": role, "theta_max_deg": 15.0 + (float(M) - 2.1) ** 2, "margin_deg": 4.0,
-            "min_sin_angle": 0.05, "mpp_sign_changes": 1, "x_K": 10.0, "L_c": 40.0, "moc_gate_ok": True, "moc_gate_pass": True,
-            "n_axis": 2400, "M_A": M_A_FAKE}
-
-
-class FakeSearch:
-    """select_mknot・resolution_gate・search_range・make_eval_fn を合成の結果に差し替える。moves: ゲートの呼び出しごとの
-    chosen_N − 入力 (足りなければ最後の値)。widen: ゲートが窓を広げた回数 (合成; 記録と YAML のコメントの確かめ用)。出力する組の判定
-    (最終の設計チェーンの θ_max との照合) のため、chosen_N の N の行だけは本物の evaluate_mknot で評価する。"""
-
-    def __init__(self, c0, moves, widen=0):
-        self.c0, self.moves, self.widen, self.gates, self.n_select = c0, list(moves), int(widen), [], 0
-
-    def search_range(self, base, base_dir=None):
-        return {"M_A": M_A_FAKE, "M_d": 5.0, "x_A": 0.5, "Mp_A": 0.6, "Mpp_A": 0.03}
-
-    def select_mknot(self, eval_fn, M_A, M_d, **kw):
-        self.n_select += 1
-        return {"rule": MS.RULE_NAME, "M_A": M_A, "M_d": M_d, "settings": dict(SETTINGS), "chosen": self.c0, "chosen_row": fake_row(self.c0),
-                "distance_to_boundary": 0.1, "reason": "合成", "constrained": False, "theta_min": {}, "theta_min_admissible": {},
-                "tie_set": [self.c0], "excluded_by_distance": [], "safe_points": [], "local_minima": [], "windows": [], "boundaries": [],
-                "warnings": [], "table": [fake_row(self.c0 + 0.01 * j, "fine") for j in range(-3, 4)], "n_eval": 7, "elapsed_s": 0.0}
-
-    def resolution_gate(self, base, chosen, N, select_result=None, seed_2N=None, half_widths=(0.1,), workers=(1, 1), log=None, **kw):
-        mv = self.moves[min(len(self.gates), len(self.moves) - 1)]
-        cN = round(float(chosen) + mv, 9)
-        self.gates.append({"input": float(chosen), "chosen_N": cN, "r_t": float(base["spec"]["r_throat"]), "seed_2N": seed_2N is not None,
-                           "n_seed_N": len((select_result or {}).get("table") or []), "half_widths": tuple(half_widths)})
-        rowN = dict(REAL_EVAL(base, cN, N), role="window")
-        row2 = fake_row(cN, "window")
-        hws = list(half_widths)[:self.widen + 1]
-        widen = [{"half_width": h, "window": [chosen - h, chosen + h], "chosen_N": cN, "chosen_2N": cN,
-                  "edge_values": ({"N": cN} if i < self.widen else {}), "min_offset_N": 0, "min_offset_2N": 0, "action": "合成"}
-                 for i, h in enumerate(hws)]
-        return {"N": N, "N2": 2 * N, "chosen": float(chosen), "window": [chosen - hws[-1], chosen + hws[-1]], "settings": {},
-                "half_width": hws[-1], "n_widen": len(hws) - 1, "widen": widen, "edge_values": {},
-                "pass": True, "checks": {"change": True, "chosen_inside_N": True}, "reasons": [], "warnings": [], "chosen_N": cN,
-                "chosen_N_reason": "合成",
-                "chosen_2N": cN, "chosen_2N_reason": "合成", "moved_N": cN - float(chosen), "distance_to_conservative_boundary": 0.1,
-                "distance_2N": 0.1, "distance_input": 0.1, "min_offset_N": 0, "min_offset_2N": 0,
-                "common_boundaries": [{"kind": "lower", "feasible_end": 1.97, "lo": 1.969, "hi": 1.97, "source": "N", "nearest_other": None,
-                                       "reasons_infeasible": []}], "boundaries_N": [], "boundaries_2N": [], "rule_N": {}, "rule_2N": {},
-                "rows_N": [fake_row(chosen + 0.01 * j, "window") for j in range(-10, 11)],
-                "rows_2N": [fake_row(chosen + 0.01 * j, "window") for j in range(-10, 11)],
-                "row_chosen_N": rowN, "row_chosen_2N": row2, "row_input_N": fake_row(chosen), "row_input_2N": fake_row(chosen),
-                "rows_selected": {f"{float(chosen):.12g}": {"at_N": fake_row(chosen), "at_2N": fake_row(chosen)},
-                                  f"{cN:.12g}": {"at_N": rowN, "at_2N": row2}}, "elapsed_s": 0.0}
-
-    def make_eval_fn(self, base, n=None, base_dir=None):
-        return lambda M: fake_row(M, "context")
-
-
-def run_fake(fake, card_dict, name, **bp):
-    """合成の探索で build_problem を回す。戻り (card_log, YAML の文字列, 例外の文字列)。"""
-    with tempfile.TemporaryDirectory() as td:
-        cp = Path(td) / f"{name}.yaml"
-        cp.write_text(yaml.safe_dump(card_dict, sort_keys=False, allow_unicode=True))
-        out = Path(td) / f"problem_{name}.yaml"
-        wk1 = {"N": 1, "2N": 1, "available_gb": None, "per_eval_gb_N": 0.0, "per_eval_gb_2N": 0.0}
-        with patched_attrs(MS, search_range=fake.search_range, select_mknot=fake.select_mknot, resolution_gate=fake.resolution_gate,
-                           make_eval_fn=fake.make_eval_fn), patched_attrs(W, mknot_workers=lambda N: dict(wk1)):
-            try:
-                logd = W.build_problem(cp, out, log=lambda *a, **k: None, **bp)
-            except Exception as ex:          # noqa: BLE001 (例外の試験)
-                return None, None, f"{type(ex).__name__}: {ex}"
-            return logd, out.read_text(), None
-
-
-AUTO_DESIGN = card(name="m5_auto_design", throat={"diameter_design_m": 0.050}, overrides={})
-t0 = time.time()
-fk = FakeSearch(2.1, [0.0], widen=1)
-logd, text, err = run_fake(fk, AUTO_DESIGN, "auto_a")
-raw = yaml.safe_load(text) if text else {}
-mkr = (raw.get("_card") or {}).get("M_knot_rule") or {}
-check("自動・設計スロート径・ゲートが動かない: 最初の r_t のゲートを最終の組に再利用し、YAML の geometry.M_knot = 記録の chosen = chosen_N",
-      err is None and raw["geometry"]["M_knot"] == 2.1 == mkr["chosen"] and mkr["gate_first_reused"] and fk.n_select == 1
-      and len(fk.gates) == 1 and [e["stage"].split(" ")[0] for e in mkr["events"]] == ["最初の", "最終の組"], err or str(fk.gates))
-check("記録: 規則の名前・出典 (書いていない)・雛形の係数は記録だけ (0.45 × 5 = 2.25 は使わない)・最終の設計チェーンの θ_max = ゲートの行",
-      err is None and mkr["rule"] == "min_theta_max_v1" and "書いていない" in mkr["source"] and mkr["recipe_M_knot_factor"] == 0.45
-      and mkr["recipe_M_knot_value_unused"] == 2.25 and mkr["theta_max_deg_final_chain"] == mkr["theta_max_deg"]
-      and mkr["ok_at_output"] == {"N": True, "2N": True} and logd["M_knot_rule"]["constraints_at_output"]["N"]["ok"]
-      and logd["M_knot_rule"]["constraints_at_output"]["2N"]["ok"], str({k: mkr.get(k) for k in ("rule", "source")}))
-CL_A = "problem_auto_a.yaml.card_log.json"
-check("記録: YAML の _card.M_knot_rule は card_log の M_knot_rule から作った要約 (card_log の記録の sha256 で結ぶ)・対応表の行・"
-      "YAML のコメント (geometry.M_knot と見出し)",
-      err is None and W._mknot_yaml_summary(logd["M_knot_rule"], CL_A) == mkr and mkr["card_log"]["file"] == CL_A
-      and mkr["card_log"]["sha256"] == W._mknot_record_sha256(logd["M_knot_rule"])
-      and any(r["card_key"] == "M_knot (自動)" for r in logd["mapping"])
-      and "# M_knot: 自動 (規則 min_theta_max_v1" in text and "  M_knot: 2.1   # 自動 (規則 min_theta_max_v1)" in text
-      and f"掃引の表と全部の記録: {CL_A} の M_knot_rule (その記録の sha256 {mkr['card_log']['sha256']}" in text
-      and "M_knot は自動" in json.dumps(logd["mapping"], ensure_ascii=False), err or "")
-ln_a = [ln for ln in (text or "").splitlines() if ln.startswith("  M_knot_rule:")]
-# Euler の写し: この雛形 (explore) では書かれないので、物理壁のキーの行を 1 行足した YAML から write_euler_companion で作って比べる
-# (写しは行を落とすだけ; 最終の雛形の実際の写しは生成器が書いた後に mknot_card_log_check で照合する)
-eu_a, chk_e = [], {"ok": None}
-if text:
-    with tempfile.TemporaryDirectory() as td:
-        yp = Path(td) / "problem_auto_a.yaml"
-        lines = text.splitlines(keepends=True)
-        k = next(i for i, ln in enumerate(lines) if ln.startswith("geometry:"))
-        yp.write_text("".join(lines[:k + 1] + ["  physical_wall_repr: single_bspline\n"] + lines[k + 1:]))
-        (Path(td) / CL_A).write_text(json.dumps(logd, indent=1, ensure_ascii=False))
-        eo = W.write_euler_companion(yp)
-        eu_a = [ln for ln in eo.read_text().splitlines() if ln.startswith("  M_knot_rule:")]
-        chk_e = W.mknot_card_log_check(eo)
-check("YAML の大きさ (§4.4 要約だけ): _card.M_knot_rule の行 ≤ 4 kB・掃引の表を持たない、Euler の写しも同じ要約の行で card_log と照合できる",
-      err is None and len(ln_a) == 1 and len(ln_a[0].encode()) <= 4096 and "table" not in mkr and eu_a == ln_a and chk_e["ok"] is True,
-      f"{len(ln_a[0].encode()) if ln_a else None} byte、YAML の最長の行 {max(len(ln.encode()) for ln in (text or ' ').splitlines())} byte、"
-      f"Euler の写しの照合 {chk_e}")
-check("ゲート: カードは半幅の列 (0.1, 0.2, 0.3) を渡し、窓を広げた記録 (回数・最後の半幅・端だった値) が YAML の要約・コメントに出る",
-      err is None and fk.gates[0]["half_widths"] == (0.1, 0.2, 0.3) and mkr["gate"]["n_widen"] == 1 and mkr["gate"]["half_width"] == 0.2
-      and mkr["gate"]["widen"][0]["edge_values"] == {"N": 2.1} and "窓を 1 回広げた" in text
-      and [e["gate_n_widen"] for e in mkr["events"]] == [1, 1], err or str(mkr.get("gate")))
-check("記録: 掃引の表 (M_K・成立・理由・θ_max・余裕・最小 sin 角・M″ の符号反転・x_K・MOC のゲート) は card_log だけ",
-      err is None and all(all(k in r for k in ("M_K", "ok", "reasons", "theta_max_deg", "margin_deg", "min_sin_angle", "mpp_sign_changes",
-                                                "x_K", "moc_gate_ok")) for r in logd["M_knot_rule"]["table"]["select"]), "")
-fk = FakeSearch(2.1, [0.02, 0.005])
-logd, text, err = run_fake(fk, AUTO_DESIGN, "auto_c")
-raw = yaml.safe_load(text) if text else {}
-mkr = (raw.get("_card") or {}).get("M_knot_rule") or {}
-check("自動・設計スロート径・最終の組のゲートで差 0.005 ≤ 0.01: chosen_N 2.125 を出力 (同じ組の評価を再利用して詰め直す)",
-      err is None and raw["geometry"]["M_knot"] == 2.125 == mkr["chosen"] and [g["input"] for g in fk.gates] == [2.1, 2.12]
-      and fk.gates[1]["seed_2N"] and fk.gates[1]["n_seed_N"] > 0 and mkr["redo"] == 0 and not mkr["gate_first_reused"],
-      err or str(fk.gates))
-fk = FakeSearch(2.1, [0.02, 0.02, 0.0])
-logd, text, err = run_fake(fk, AUTO_DESIGN, "auto_redo")
-raw = yaml.safe_load(text) if text else {}
-mkr = (raw.get("_card") or {}).get("M_knot_rule") or {}
-check("自動・設計スロート径・差 0.02 > 0.01 → やり直して (1 回) 収まった値 2.14 を出力",
-      err is None and raw["geometry"]["M_knot"] == 2.14 and mkr["redo"] == 1 and [g["input"] for g in fk.gates] == [2.1, 2.12, 2.14]
-      and "やり直す" in logd["M_knot_rule"]["events"][1]["action"], err or str(fk.gates))
-fk = FakeSearch(2.1, [0.02])
-logd, text, err = run_fake(fk, AUTO_DESIGN, "auto_never")
-check("自動・差が毎回 0.02 → やり直しが 2 回を超えたら例外 (YAML を書かない)",
-      err is not None and err.startswith("RuntimeError") and "2 回やり直しても" in err and len(fk.gates) == 4, (err or "")[:200])
-fk = FakeSearch(2.1, [0.0, 0.004, 0.0])
-logd, text, err = run_fake(fk, card(name="m5_auto_phys", overrides={}), "auto_phys")
-raw = yaml.safe_load(text) if text else {}
-mkr = (raw.get("_card") or {}).get("M_knot_rule") or {}
-hist = raw.get("_card", {}).get("r_t_history") or []
-ver = [h for h in hist if str(h.get("stage", "")).startswith("M_knot の確かめ直し")]
-check("自動・物理スロート径・最終の組の差 0.004 ≤ 0.01: 出力する組 (chosen_N 2.104、最後の r_t) で r_t の固定点の 1 回を回し直し、"
-      "寸法ゲート PASS",
-      err is None and raw["geometry"]["M_knot"] == 2.104 == mkr["chosen"] and fk.gates[0]["r_t"] == 0.025 and fk.gates[1]["r_t"] != 0.025
-      and len(ver) >= 1 and ver[0]["M_K"] == 2.104 and ver[0]["r_t_in_m"] == fk.gates[1]["r_t"] and logd["dimensions"]["pass"]
-      and all(h.get("M_K") in (2.1, 2.104) for h in hist),
-      err or f"ゲート {fk.gates}、確かめ直し {[(h['r_t_in_m'], h['r_t_out_m'], h['rel_change']) for h in ver]}、events "
-             f"{[e['action'][:60] for e in ((logd or {}).get('M_knot_rule') or {}).get('events', [])]}")
-if err is None:
-    print(f"   物理スロート径の確かめ直し: {[(h['r_t_in_m'], h['r_t_out_m'], h['rel_change']) for h in ver]}、出力 r_t {raw['spec']['r_throat']!r}、"
-          f"ゲートの r_t {[g['r_t'] for g in fk.gates]}")
-if SLOW:
-    fk = FakeSearch(2.1, [0.0, 0.03, 0.0])
-    logd, text, err = run_fake(fk, card(name="m5_auto_phys_redo", overrides={}), "auto_phys_redo")
-    raw = yaml.safe_load(text) if text else {}
-    mkr = (raw.get("_card") or {}).get("M_knot_rule") or {}
-    hist = raw.get("_card", {}).get("r_t_history") or []
-    check("自動・物理スロート径・最終の組の差 0.03 > 0.01 (--slow): chosen_N 2.13 で r_t の固定点を前の r_t からやり直し、その組でゲートを"
-          "回し直して出力",
-          err is None and raw["geometry"]["M_knot"] == 2.13 and mkr["redo"] == 1 and [g["input"] for g in fk.gates] == [2.1, 2.1, 2.13]
-          and any(h.get("M_K") == 2.13 for h in hist) and fk.gates[2]["r_t"] == raw["spec"]["r_throat"] and logd["dimensions"]["pass"],
-          err or str(fk.gates))
-print(f"   M_knot の自動の流れ (合成) {time.time() - t0:.0f} s")
+# ---------------------------------------------------------------------------------------------- M_knot の自動の流れ
+# 規則 coarse_min_theta_v2 の自動の流れ (plan tooling-nozzle-mknot-fast §6 V2) は design/tests/run_mknot_v2_card_tests.py (2026-10-15 に
+# 旧の規則 min_theta_max_v1 の合成の試験 (select_mknot・resolution_gate の差し替え) をここから外した — カードは旧の規則を呼ばない)
+print("== M_knot の自動の流れは design/tests/run_mknot_v2_card_tests.py (規則 coarse_min_theta_v2)")
 
 # ---------------------------------------------------------------------------------------------- (c) case/45 の固定点 (--slow)
 if SLOW:

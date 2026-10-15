@@ -381,8 +381,9 @@ def environment_record() -> dict:
     import platform
     import sys as _sys
     import scipy
+    from ..geometry.moc_inverse import moc_kernel_record
     return {"python": platform.python_version(), "executable": _sys.executable, "numpy": np.__version__, "scipy": scipy.__version__,
-            "host": platform.node()}
+            "host": platform.node(), "moc_kernel": moc_kernel_record()}
 
 
 def require_moc_gate(p: Problem, d: dict) -> None:
