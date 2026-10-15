@@ -1486,6 +1486,11 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
     3. SETTLED が保持 (基準の hold) 続いたら STOP_REQUEST (JSON: 理由・条件を満たし始めた step・保持・要求の格子点・照合の token) を置く。
        途中で SETTLED でなくなれば保持をやり直す (`hold.breaks`)。DIVERGED、または未設定の INDETERMINATE (基準と run の出力が合わない;
        直らない) なら理由を書いた STOP_REQUEST で止めて FAILED。
+       settled の要求を置かない場合 (§5.1 #5c; 記録 `reached_without_request`): (A) 保持を満たした格子点が上限 cap 以上 — forge は各 step の
+       始めに STOP_REQUEST を見るので、上限の後に step が無く要求は果たされない (forge の終了処理と判定の競合にも依らない) →
+       上限まで回れば CENSORED (note「保持は上限の格子点で満たした」、再評価は上限の step)。(B) cap より前でも forge が既に終わっている
+       (run_case.sh の終了、または `[run_case] forge exit=` の印) → 要求を置かず、原因は終わり方 (forge_exit など) で出す。DIVERGED・
+       未設定の要求は (A)・(B) の対象にしない (今どおり置いて FAILED)。
     4. forge が終わったら残りの格子点を判定し (要求の後に崩れたら REACHED にしない)、STOPPED_AT を検査 (`check_stopped_at`) して、
        その step を end_step に固定して再評価 (新しい RunData で `settle.judge`、SETTLE_VERDICT.json に書く)。REACHED は「要求が settled・
        forge の終了コード 0・STOPPED_AT が検査に通る・要求の後に崩れない・再評価が SETTLED」のすべて。
@@ -1531,6 +1536,7 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
     after_breaks = []          # 要求の後に SETTLED でなかった格子点
     killed = None
     reached_after_exit = None  # forge が終わった後に保持を満たした格子点 (要求を置けない)
+    reached_why = None         # reached_after_exit の理由 (§5.1 #5c): cap (上限の格子点) / forge_exit_marker / run_case_exited
     forge_exited = False       # 要求の後 stop_wait_s を超えた時点で forge は終わっていた (run_case.sh の後処理の途中; §5.1 #5b)
     next_s = first
 
@@ -1561,8 +1567,14 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
                 v = r["verdict"]
                 if v == "SETTLED":
                     if _hold_step(hs, True, s, hold) and req is None:
-                        if done or proc.poll() is not None:     # 判定の間に forge が終わった (上限の格子点など): 要求を置けない
-                            reached_after_exit = s
+                        if s >= cap:
+                            # (A) 上限の格子点: 上限の後に step が無いので要求は果たされない (§5.1 #5c)
+                            reached_after_exit, reached_why = s, "cap"
+                        elif done or proc.poll() is not None:     # 判定の間に forge が終わった: 要求を置けない
+                            reached_after_exit, reached_why = s, "run_case_exited"
+                        elif _forge_exit(run_dir) is not None:
+                            # (B) forge は終わり run_case.sh だけが後処理をしている: 要求を置けない (§5.1 #5c)
+                            reached_after_exit, reached_why = s, "forge_exit_marker"
                         else:
                             req = place("settled", s, f"settle v2: 3 条件 (残差・流量の収支・目的の量) が step {hs['start']} から "
                                                       f"{s - hs['start']} step 続いた (保持 {hold})")
@@ -1629,20 +1641,34 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
     last = massflux_last_step(mf_csv)
     failures, notes = [], []
     status, k = None, None
+    if reached_after_exit is not None:
+        # 保持を満たしたが settled の要求を置かなかった格子点と理由 (§5.1 #5c)
+        rec["reached_without_request"] = {"step": int(reached_after_exit), "why": reached_why, "cap": cap}
+    reached_note = None
+    if reached_why == "cap":
+        reached_note = (f"保持は上限の格子点 {reached_after_exit} で満たした (要求を置けない; 上限の後に step が無いので forge は要求を見ない)")
+    elif reached_after_exit is not None:
+        reached_note = f"保持を満たした格子点 {reached_after_exit} の判定が forge の終了の後になった (要求を置けない; 上限 {cap})"
     if req is None:
         if forge_rc == 0 and stopped is None and (run_dir / f"res_{cap}.h5").is_file():
             status, k = "CENSORED", cap
-            if reached_after_exit is not None:
+            if reached_why == "cap":
+                notes.append(reached_note)
+            elif reached_after_exit is not None:
                 notes.append(f"保持を満たした格子点 {reached_after_exit} の判定が forge の終了の後になった (要求を置けない; 上限 {cap} まで回った)")
             elif hs["start"] is not None:
                 notes.append(f"条件を満たし始めた {hs['start']} の後の保持 {hold} step が上限 {cap} までに終わらない (保持の途中で上限)")
         elif forge_rc not in (None, 0) and sorted(run_dir.glob("res_nan_*.h5")):
             failures.append("detect_nan")
             notes.append("forge の detectNaN が止めた (" + ", ".join(f.name for f in sorted(run_dir.glob("res_nan_*.h5"))) + ")")
+            if reached_note:
+                notes.append(reached_note)
         else:
             failures.append("forge_exit")
             notes.append(f"要求を置く前に forge が終わった (forge rc {forge_rc}、最後の流量の行 {last}、上限 {cap}"
                          + (f"、STOPPED_AT {stopped}" if stopped is not None else "") + ")")
+            if reached_note:
+                notes.append(reached_note)
     else:
         if req["kind"] != "settled":
             failures.append(req["kind"])

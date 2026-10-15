@@ -26,8 +26,13 @@ forge と同じ形 (`start_obs=False`: 格子点 0 に観測が無い) にする
         - 本物の v2 の見張り (`watch_main_stage_v2`) を `design/tests/run_stop_rule_v2_tests.py` の偽の forge と run の作り方で回し、
           v2 が置いた要求 (種類・step・条件を満たし始めた step・保持の経過) と、同じ run dir を再生して求めた t_s・要求が一致する:
           保持 38,000 (要求 80,000)、保持の既定 40,000 (82,000)、保持の途中で崩れてやり直す (60,001 で出口 M が跳ぶ → 82,000 から
-          数え直して 120,000)、DIVERGED (52,000 で diverged の要求 → 停止候補なし)、未設定 (42,000 で criteria_unset → 停止候補なし)。
+          数え直して 120,000)、DIVERGED (52,000 で diverged の要求 → 停止候補なし)、未設定 (42,000 で criteria_unset → 停止候補なし)、
+          上限 80,000 ちょうどで保持を満たす (v2 は要求を置かず CENSORED、再生も cap = MAIN_STAGE_STARTED の 80,000 で要求なし)。
         --quick は偽の forge の部分を省く (約 1 分)。
+  (vii) 上限の格子点 (plan §5.1 #5c (A)): `emulate_v2` に cap を渡すと保持を満たした格子点が cap 以上で settled の要求を出さない
+        (cap なし・cap の手前は今どおり、DIVERGED・未設定は cap でも要求)。`main_stage_cap` の出所 (MAIN_STAGE_STARTED の
+        main_config.nStepOuter > prepare_info.json の stop_rule.cap > 無し)。`analyse`: データの最後 82,000 で保持を満たす合成の run は、
+        cap が無ければ今どおり t_s 82,000 と note、cap 82,000 なら停止候補なし (理由に上限)、cap 200,000 の一定の系列は今どおり A。
   --bench: 20 万 step・格子 2,000 (格子点 100) の規模の再生の所要を測る (残差の行 60 万 = 3 行/step・14 列、節点 6,000、壁 750 節点;
         case/71 の run_0005 の残差の履歴 600,001 行・120 MB と節点の表 5,335 点に合わせた)。試験の合否には入れない。
 """
@@ -291,6 +296,64 @@ def test_results():
     chk("(x5) CLI: B は終了コード 1", rc == 1 and buf.getvalue().splitlines()[-1] == "VERDICT: B")
 
 
+# ------------------------------------------------------------------ (vii) 上限の格子点 (§5.1 #5c (A))
+def test_cap_unit():
+    print("=== (vii) 上限の格子点: emulate_v2 の cap・main_stage_cap・analyse ===")
+
+    def rows(vs):
+        return [{"step": 42000 + 2000 * k, "verdict": v, "categories": c, "why": None} for k, (v, c) in enumerate(vs)]
+    settled20 = [("SETTLED", [])] * 20                      # 42,000〜80,000 (保持 38,000 は 80,000 で満たす)
+    r0, h0 = SVS.emulate_v2(rows(settled20), 38000)
+    chk("(vii) cap なし: 80,000 で settled の要求 (今どおり)",
+        r0 is not None and r0["kind"] == SVS.REQ_SETTLED and r0["step"] == 80000 and h0["reached_at_cap"] is None, str(r0))
+    rr = rows(settled20)
+    r1, h1 = SVS.emulate_v2(rr, 38000, cap=80000)
+    chk("(vii) cap 80,000 (保持を満たす格子点 = 上限): 要求なし・reached_at_cap 80,000・事象 hold_at_cap:no_request",
+        r1 is None and h1["reached_at_cap"] == 80000 and rr[-1]["v2_event"] == "hold_at_cap:no_request", f"{r1} {h1['reached_at_cap']}")
+    r2, h2 = SVS.emulate_v2(rows(settled20), 38000, cap=82000)
+    chk("(vii) cap 82,000 (上限の手前で保持を満たす): 80,000 で要求", r2 is not None and r2["step"] == 80000 and h2["reached_at_cap"] is None)
+    r3, _ = SVS.emulate_v2(rows([("SETTLED", [])] * 19 + [("DIVERGED", [])]), 38000, cap=80000)
+    chk("(vii) 上限の格子点の DIVERGED は cap でも diverged の要求 (v2 と同じく FAILED のまま)",
+        r3 is not None and r3["kind"] == SVS.REQ_DIVERGED and r3["step"] == 80000, str(r3))
+    r4, _ = SVS.emulate_v2(rows([("SETTLED", [])] * 19 + [("INDETERMINATE", [settle.CAT_UNSET])]), 38000, cap=80000)
+    chk("(vii) 上限の格子点の未設定は cap でも criteria_unset の要求", r4 is not None and r4["kind"] == SVS.REQ_UNSET and r4["step"] == 80000, str(r4))
+
+    d = TS.TMP / "vs_cap_source"
+    d.mkdir()
+    c0 = SVS.main_stage_cap(d)
+    chk("(vii) main_stage_cap: MAIN_STAGE_STARTED も prepare_info.json も無い → None と理由", c0[0] is None
+        and "MAIN_STAGE_STARTED が無い" in c0[1] and "prepare_info.json が無い" in c0[1], str(c0))
+    (d / "prepare_info.json").write_text(json.dumps({"stop_rule": {"cap": 120000}}))
+    chk("(vii) main_stage_cap: prepare_info.json の stop_rule.cap", SVS.main_stage_cap(d) == (120000, "prepare_info.json の stop_rule.cap"))
+    (d / "MAIN_STAGE_STARTED").write_text(json.dumps({"main_config": {"nStepOuter": 200000}}))
+    chk("(vii) main_stage_cap: MAIN_STAGE_STARTED の main_config.nStepOuter が優先",
+        SVS.main_stage_cap(d) == (200000, "MAIN_STAGE_STARTED の main_config.nStepOuter"))
+    (d / "MAIN_STAGE_STARTED").write_text(json.dumps({"main_config": {"nStepOuter": None}}))
+    c3 = SVS.main_stage_cap(d)
+    chk("(vii) main_stage_cap: MAIN_STAGE_STARTED に値が無ければ prepare_info.json へ", c3 == (120000, "prepare_info.json の stop_rule.cap"), str(c3))
+    (d / "prepare_info.json").write_text(json.dumps({"stop_rule": {"cap": True}}))
+    c4 = SVS.main_stage_cap(d)
+    chk("(vii) main_stage_cap: 正の整数でない値 (真偽値) は使わない → None", c4[0] is None and "正の整数の値が無い" in c4[1], str(c4))
+
+    run = build("vs_cap_end", end=82000)                    # 保持 40,000 はデータの最後 82,000 で満たす
+    res = run_vs(run, write=False, plot=False)
+    chk("(vii) analyse: 上限が分からない run → 今どおり t_s 82,000、note (上限が分からない・データの最後)",
+        res["t_s"] == 82000 and res["v2_emulation"]["cap"]["value"] is None and any("本段の上限が分からない" in x for x in res["notes"])
+        and any("データの最後の格子点" in x for x in res["notes"]), f"t_s {res['t_s']} notes {res['notes'][:2]}")
+    (run / "MAIN_STAGE_STARTED").write_text(json.dumps({"main_config": {"nStepOuter": 82000}}))
+    res = run_vs(run, write=False, plot=False)
+    chk("(vii) analyse: 上限 82,000 (MAIN_STAGE_STARTED) で保持を満たす → 停止候補なし・未成立 (理由に上限の格子点)",
+        res["t_s"] is None and res["verdict"] == SVS.RESULT_NA and res["v2_emulation"]["hold"]["reached_at_cap"] == 82000
+        and res["v2_emulation"]["cap"] == {"value": 82000, "source": "MAIN_STAGE_STARTED の main_config.nStepOuter"}
+        and any("上限の格子点 82000" in x for x in res["reasons"]), f"t_s {res['t_s']} {res['reasons'][:1]}")
+    run = build("vs_cap_const", end=200000)
+    (run / "MAIN_STAGE_STARTED").write_text(json.dumps({"main_config": {"nStepOuter": 200000}}))
+    res = run_vs(run, write=False, plot=False)
+    chk("(vii) analyse: 上限 200,000 の一定の系列は今どおり A・t_s 82,000 (上限の規則は効かない)",
+        res["verdict"] == SVS.RESULT_A and res["t_s"] == 82000 and res["v2_emulation"]["hold"]["reached_at_cap"] is None,
+        f"{res['verdict']} t_s {res['t_s']}")
+
+
 # ------------------------------------------------------------------ (vi) v2 と同じ保持
 def test_hold_unit():
     print("=== (vi-a) 写した hold_step と stop_rule._hold_step ===")
@@ -366,6 +429,20 @@ def test_v2_end_to_end():
                 chk("(vi-b) 保持の途中で崩れる: 42,000 から数えた保持が 62,000 で外れ (breaks)、82,000 から数え直す",
                     [(b["start"], b["broken_at"]) for b in hs["breaks"]] == [(42000, 62000)] and hs["reached"] == [42000, 82000],
                     str(hs["breaks"][:1]))
+        # 上限 80,000 ちょうどで保持を満たす (§5.1 #5c (A)): v2 は要求を置かず CENSORED、再生も cap (MAIN_STAGE_STARTED) で要求なし
+        rd = V.make_run("vs_v2_cap_exact", {}, hold=38000, cap=80000)
+        rc, rec, st = V.run_case(rd)
+        res = SVS.analyse(rd, plot=False)
+        em = res["v2_emulation"]
+        chk("(vi-b) vs_v2_cap_exact: v2 は上限 80,000 で保持を満たして要求を置かず CENSORED、再生も要求なし (cap = MAIN_STAGE_STARTED の 80,000)",
+            (st or {}).get("status") == "CENSORED" and (st or {}).get("request_step") is None and em["request"] is None
+            and em["hold"]["reached_at_cap"] == 80000 == (rec.get("reached_without_request") or {}).get("step")
+            and em["cap"] == {"value": 80000, "source": "MAIN_STAGE_STARTED の main_config.nStepOuter"}
+            and res["t_s"] is None and res["verdict"] == "未成立" and any("上限の格子点 80000" in r for r in res["reasons"]),
+            f"v2 {(st or {}).get('status')} {(st or {}).get('reason')}; 再生 {em['request']} {em['cap']} {res['reasons'][:1]}")
+        v2h = (st or {}).get("hold") or {}
+        chk("(vi-b) vs_v2_cap_exact: 保持の経過 (start・reached・breaks) が v2 と同じ",
+            v2h.get("reached") == em["hold"]["reached"] and v2h.get("start") == em["hold"]["start"] and v2h.get("breaks") == em["hold"]["breaks"])
     finally:
         SR.extract_delta_e = real
     print(f"  (偽の forge 5 本 {time.perf_counter() - t0:.1f} s)")
@@ -451,6 +528,7 @@ def main():
     print(f"numpy {np.__version__}, python {sys.version.split()[0]} ({sys.executable}), 作業 {TS.TMP}")
     test_results()
     test_hold_unit()
+    test_cap_unit()
     if not QUICK:
         test_v2_end_to_end()
     if BENCH:

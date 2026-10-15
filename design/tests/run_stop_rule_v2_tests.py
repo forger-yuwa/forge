@@ -27,6 +27,10 @@ res_nodes_i.h5 → 流量の行 i の順に書き (流量の行が完成の印)�
         (stopped_at_invalid)。
       - 上限で止まる → CENSORED (保持の途中と記録、δ_E は上限の step で 1 回)。
       - 要求を無視する forge → stop_wait_s の後に kill → FAILED (timeout; REACHED にしない)。
+      - 保持が上限の格子点ちょうど (上限 80,000) で満たされる → 要求を置かず CENSORED (note「保持は上限の格子点で満たした」; §5.1 #5c (A)、
+        修正前は要求を置いて FAILED no_stopped_at)。forge が上限より前に終わり (80,000 で終了、上限 100,000)、その後に保持を満たした
+        格子点を判定する → 要求を置かず FAILED (forge_exit; §5.1 #5c (B))。見張りがその格子点を forge の終了の印の後に判定するよう、
+        試験の中だけ残差の行の完成の判定 (`residual_row_ready`) を印が出るまで偽にする。
       - forge は要求で止まったが run_case.sh の後処理 (check_convergence.py) が stop_wait_s を超える → 時間切れにせず REACHED
         (§5.1 #5b; forge の終了は run_case_stdout.log の `[run_case] forge exit=`)。後処理は PATH の先頭に置いた python3 の包み
         (check_convergence.py のときだけ眠ってから本物を exec) で遅らせる。
@@ -213,8 +217,13 @@ while i < n_outer:
     hist.write(resid_row(i - 1))
     if out or (i - 1) % 7 == 0:
         hist.flush()
-    if out and not stop_now:
+    early = sc.get("exit_at") is not None and i == int(sc["exit_at"])
+    if out and not stop_now and not early:
         wait_watcher(i)
+    if early:
+        hist.flush()
+        print(f"fake forge v2 exit early at {{i}}", flush=True)
+        sys.exit(int(sc.get("exit_rc", 0)))
     if stop_now:
         break
 hist.flush()
@@ -552,6 +561,44 @@ def test_watcher():
               and not (rd / SR.STOP_REQUEST).exists() and st["request_step"] is None, f"{st and (st['status'], st.get('reason'))}")
         check("CENSORED: δ_E は上限の step 60,000 の全場から 1 回、再評価は 60,000 で SETTLED (記録)",
               [c_["step"] for c_ in DELTA_CALLS] == [60000] and st["reeval"]["end_step"] == 60000 and st["reeval"]["verdict"] == "SETTLED")
+
+        # --- 保持が上限の格子点ちょうどで満たされる → 要求を置かず CENSORED (§5.1 #5c (A)) ---
+        DELTA_CALLS.clear()
+        rd = make_run("cap_exact", {}, cap=80000)
+        rc, rec, st = run_case(rd)
+        check("上限の格子点 80,000 ちょうどで保持 38,000 を満たす → 要求を置かず CENSORED (rc 0・停止の step 80,000・failures なし)",
+              rc == 0 and state_ok(rc, st, "CENSORED") and st["stop_step"] == 80000 and st["failures"] == []
+              and st["request_step"] is None and not (rd / SR.STOP_REQUEST).exists(),
+              f"{st and (st['status'], st['failures'], st.get('request_step'), st.get('reason'))}")
+        check("上限ちょうど: note「保持は上限の格子点 80000 で満たした」・記録 reached_without_request (cap)",
+              "保持は上限の格子点 80000 で満たした" in (st.get("reason") or "")
+              and rec.get("reached_without_request") == {"step": 80000, "why": "cap", "cap": 80000}, f"{st.get('reason')} {rec.get('reached_without_request')}")
+        check("上限ちょうど: 再評価は上限の step 80,000 で SETTLED、δ_E は 80,000 で 1 回 (今の CENSORED と同じ)",
+              st["reeval"]["end_step"] == 80000 and st["reeval"]["verdict"] == "SETTLED" and [c_["step"] for c_ in DELTA_CALLS] == [80000],
+              f"{st['reeval']} {DELTA_CALLS}")
+
+        # --- forge が上限より前に終わり、その後に保持を満たした格子点を判定する → 要求を置かず FAILED forge_exit (§5.1 #5c (B)) ---
+        rd = make_run("early_exit", {"exit_at": 80000}, cap=100000)
+        real_ready = SR.residual_row_ready
+
+        def gated_ready(path, row, _rd=rd):
+            if row == 80000 - 1 and SR._forge_exit(_rd) is None:      # 80,000 の格子点は forge の終了の印の後に判定させる
+                return False
+            return real_ready(path, row)
+        SR.residual_row_ready = gated_ready
+        try:
+            with slow_postprocess(SLOW_POST_S):                         # 判定のとき run_case.sh はまだ後処理の途中 (印の経路を通す)
+                rc, rec, st = run_case(rd)
+        finally:
+            SR.residual_row_ready = real_ready
+        check("forge が上限より前 (80,000) に終わった後に保持を満たす → 要求を置かず FAILED (forge_exit; no_stopped_at でない)",
+              state_ok(rc, st, "FAILED") and st["failures"] == ["forge_exit"] and st["request_step"] is None
+              and not (rd / SR.STOP_REQUEST).exists() and st["forge_rc"] == 0,
+              f"{st and (st['status'], st['failures'], st.get('request_step'), st.get('reason'))}")
+        check("forge が先に終わった: 記録 reached_without_request (forge_exit_marker = run_case.sh の後処理の途中で印を見た)・note",
+              rec.get("reached_without_request") == {"step": 80000, "why": "forge_exit_marker", "cap": 100000}
+              and "要求を置く前に forge が終わった" in (st.get("reason") or "") and "forge の終了の後" in (st.get("reason") or ""),
+              f"{rec.get('reached_without_request')} {st.get('reason')}")
 
         # --- 要求を無視する forge → 時間切れで kill ---
         rd = make_run("timeout", {"ignore_stop": True, "pace": 0.4})

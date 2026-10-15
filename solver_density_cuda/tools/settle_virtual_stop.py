@@ -10,7 +10,7 @@ codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-
 
 ## 手順
 
-1. 再生: 最初に判定できる格子点 first = 開始 + 2W + 間隔 (stop_rule.py:1180) から入力のデータの最後まで、間隔ごとに
+1. 再生: 最初に判定できる格子点 first = 開始 + 2W + 間隔 (stop_rule.py:1181) から入力のデータの最後まで、間隔ごとに
    `settle.judge(run, s)` (RunData は 1 つを使い回す)。
 2. 停止候補 t_s: 停止規則 v2 の見張り (`watch_main_stage_v2`) と同じ規則で、最初に STOP_REQUEST を置く格子点を求める。
    - SETTLED の格子点で保持を進め、条件を満たし始めた格子点 s₀ から s − s₀ ≥ hold になった格子点で要求 (kind settled)。
@@ -18,9 +18,13 @@ codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-
    - SETTLED でない格子点が DIVERGED、または INDETERMINATE で理由の分類に「未設定」(unset) を含むとき、v2 はその格子点で要求
      (kind diverged / criteria_unset) を置いて止める (FAILED) → 停止候補は無い。
    - 出典: 保持は `_hold_step` (stop_rule.py:624–637) を `hold_step` に写した。要求の分岐は watch_main_stage_v2 の判定の繰り返し
-     (stop_rule.py:1547–1573)、理由の分類と why は `judge_summary` (stop_rule.py:1296–1309)、hold の既定は stop_rule.py:110・1123。
-   - 再生では forge が全格子点で走っているとみなす (v2 は forge の終了の後の格子点では要求を置かない。最後の格子点で保持を
-     満たしたときだけ違いうるので note に書く)。
+     (stop_rule.py:1558–1588)、理由の分類と why は `judge_summary` (stop_rule.py:1297–1310)、hold の既定は stop_rule.py:110・1124。
+   - 上限の格子点 (§5.1 #5c (A)、stop_rule.watch_main_stage_v2 と同じ): 保持を満たした格子点 s が本段の上限 cap (本段の nStepOuter)
+     以上なら settled の要求を出さない (上限の後に step が無く forge は要求を見ないので v2 は CENSORED) → 停止候補なし。DIVERGED・
+     未設定の要求は cap に依らず今どおり。cap は `main_stage_cap` (MAIN_STAGE_STARTED の main_config.nStepOuter、無ければ
+     prepare_info.json の stop_rule.cap) から。どちらも無ければ cap なしで再生し、その旨を note に書く。
+   - 再生では forge が cap まで走っているとみなす (v2 は forge が上限より前に終わった後の格子点でも要求を置かない (§5.1 #5c (B)) が、
+     これは時刻の印なので再生には持ち込まない。cap が分からず最後の格子点で保持を満たしたときは note に書く)。
 3. t_s から t_s + span (既定 80,000) の格子点 (両端を含む) で:
    (a) 目的の量の t_s の値からの差: 出口コア M は |M − M(t_s)| ≤ tol、線は max_k |d_k − d_k(t_s)| ≤ tol_pos (位置ごと)、
        出口の流れ角は max_i |θ_i − θ_i(t_s)| ≤ tol (節点ごと)、壁は |Q_i − Q_i(t_s)| ≤ q_tol·A_i + eps_rel·|Q_i(t_s)| (節点ごと;
@@ -87,7 +91,7 @@ PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §6「V3(b)・V4
 OUT_DIR = "settle_virtual_stop"
 SPAN_DEFAULT = 80_000
 TS_MAX_DEFAULT = 120_000
-# = stop_rule.HOLD_STEPS_DEFAULT (stop_rule.py:110)。settle_criteria.yaml に hold が無いときの v2 の保持 (stop_rule.py:1123)
+# = stop_rule.HOLD_STEPS_DEFAULT (stop_rule.py:110)。settle_criteria.yaml に hold が無いときの v2 の保持 (stop_rule.py:1124)
 HOLD_STEPS_DEFAULT = 40_000
 FONT = "/home/sano/.fonts/NotoSansCJKjp-Regular.otf"
 RESULT_A, RESULT_B, RESULT_NA = "A", "B", "未成立"
@@ -122,7 +126,7 @@ def hold_step(hs: dict, ok: bool, step: int, hold: int, why=None) -> bool:
 
 
 def summarize(result: dict, kinds=None) -> dict:
-    """`settle.judge` の結果の要約。categories と why は `judge_summary` (stop_rule.py:1296–1309) と同じ作り方 (digest は作らない)。
+    """`settle.judge` の結果の要約。categories と why は `judge_summary` (stop_rule.py:1297–1310) と同じ作り方 (digest は作らない)。
     kinds を渡すとその種類の量だけで要約する (verdict は settle と同じ優先 DIVERGED > INDETERMINATE > NOT_SETTLED > SETTLED の AND;
     t_s′ の記録用)。"""
     qs = result.get("quantities") or []
@@ -143,11 +147,13 @@ def summarize(result: dict, kinds=None) -> dict:
     return out
 
 
-def emulate_v2(rows: list, hold: int) -> tuple[dict | None, dict]:
-    """格子点の順の要約 rows (first から) に、停止規則 v2 の見張りの判定の分岐 (stop_rule.py:1547–1573) を当てて、最初の
-    STOP_REQUEST を返す。戻り (request, hs)。request = {kind, step, settled_since, reason} か None。v2 と同じく要求の後も保持の
-    状態は更新し続ける。各 row に v2 の事象 `v2_event` と、その格子点の後の保持の始まり `hold_start` を書き足す。"""
-    hs = {"hold_steps": int(hold), "start": None, "reached": [], "breaks": []}
+def emulate_v2(rows: list, hold: int, cap: int | None = None) -> tuple[dict | None, dict]:
+    """格子点の順の要約 rows (first から) に、停止規則 v2 の見張りの判定の分岐 (stop_rule.py の watch_main_stage_v2 の判定の繰り返し)
+    を当てて、最初の STOP_REQUEST を返す。戻り (request, hs)。request = {kind, step, settled_since, reason} か None。v2 と同じく要求の
+    後も保持の状態は更新し続ける。各 row に v2 の事象 `v2_event` と、その格子点の後の保持の始まり `hold_start` を書き足す。
+    cap (本段の上限) を渡すと、保持を満たした格子点が cap 以上なら settled の要求を出さず (v2 は CENSORED; §5.1 #5c (A))、その格子点を
+    hs["reached_at_cap"] に書く (無ければ None)。DIVERGED・未設定の要求は cap に依らない。"""
+    hs = {"hold_steps": int(hold), "start": None, "reached": [], "breaks": [], "reached_at_cap": None}
     req = None
     for row in rows:
         s, v = int(row["step"]), row["verdict"]
@@ -157,9 +163,13 @@ def emulate_v2(rows: list, hold: int) -> tuple[dict | None, dict]:
             if new:
                 ev.append("hold_start")
             if hold_step(hs, True, s, hold) and req is None:
-                req = {"kind": REQ_SETTLED, "step": s, "settled_since": hs["start"],
-                       "reason": f"3 条件が step {hs['start']} から {s - hs['start']} step 続いた (保持 {hold})"}
-                ev.append("request:settled")
+                if cap is not None and s >= cap:
+                    hs["reached_at_cap"] = s          # 上限の後に step が無く要求は果たされない (v2 は CENSORED)
+                    ev.append("hold_at_cap:no_request")
+                else:
+                    req = {"kind": REQ_SETTLED, "step": s, "settled_since": hs["start"],
+                           "reason": f"3 条件が step {hs['start']} から {s - hs['start']} step 続いた (保持 {hold})"}
+                    ev.append("request:settled")
         else:
             had = hs["start"]
             hold_step(hs, False, s, hold, "; ".join(row.get("why") or [v])[:400])
@@ -178,13 +188,36 @@ def emulate_v2(rows: list, hold: int) -> tuple[dict | None, dict]:
     return req, hs
 
 
+def main_stage_cap(run) -> tuple[int | None, str]:
+    """本段の上限 cap (= 本段の nStepOuter; 停止規則 v2 の見張りの上限) と出所。`<run>/MAIN_STAGE_STARTED` (run_staged_ns が本段の forge の
+    直前に書く) の main_config.nStepOuter、無ければ `<run>/prepare_info.json` の stop_rule.cap。どちらも無い・読めない・正の整数でない
+    → (None, 理由)。"""
+    run = Path(run)
+    why = []
+    for name, get in (("MAIN_STAGE_STARTED", lambda d: (d.get("main_config") or {}).get("nStepOuter")),
+                      ("prepare_info.json", lambda d: (d.get("stop_rule") or {}).get("cap"))):
+        p = run / name
+        if not p.is_file():
+            why.append(f"{name} が無い")
+            continue
+        try:
+            v = get(json.loads(p.read_text()))
+        except Exception as e:  # noqa: BLE001
+            why.append(f"{name} を読めない ({type(e).__name__})")
+            continue
+        if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+            return v, (f"{name} の main_config.nStepOuter" if name == "MAIN_STAGE_STARTED" else f"{name} の stop_rule.cap")
+        why.append(f"{name} に正の整数の値が無い ({v!r})")
+    return None, "; ".join(why)
+
+
 def first_judgeable(crit: dict) -> int:
-    """v2 が最初に判定する格子点 = 開始 + 2W + 間隔 (stop_rule.py:1180)。"""
+    """v2 が最初に判定する格子点 = 開始 + 2W + 間隔 (stop_rule.py:1181)。"""
     return crit["grid"]["start_step"] + 2 * crit["window"]["W"] + crit["grid"]["out_step_interval"]
 
 
 def v2_hold(crit: dict) -> tuple[int, str]:
-    """v2 の保持 (stop_rule.py:1123)。"""
+    """v2 の保持 (stop_rule.py:1124)。"""
     if "hold" in crit:
         return int(crit["hold"]), "settle_criteria.yaml の hold"
     return HOLD_STEPS_DEFAULT, f"既定 {HOLD_STEPS_DEFAULT} (stop_rule.HOLD_STEPS_DEFAULT)"
@@ -473,24 +506,32 @@ def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, 
         res["reasons"].append(f"判定できる格子点が無い (最初に判定できる格子点 {first} = 開始 + 2W + 間隔; データの最後 {last})")
 
     # ---------------------------------------------------------------- 2. 停止候補 t_s
-    req, hs = emulate_v2(rows, hold)
-    res["v2_emulation"] = {"request": req, "hold": hs,
-                           "source": "design/forge_design/evaluate/stop_rule.py:624–637 (_hold_step)・1547–1573 (要求の分岐)・"
-                                     "1296–1309 (judge_summary)・1180 (first)・1123 (hold)"}
+    cap, cap_src = main_stage_cap(run)
+    if cap is None:
+        res["notes"].append(f"本段の上限が分からない ({cap_src}) — 上限の格子点の規則 (保持を上限の格子点で満たしたら要求なし) を当てずに再生")
+    req, hs = emulate_v2(rows, hold, cap)
+    res["v2_emulation"] = {"request": req, "hold": hs, "cap": {"value": cap, "source": cap_src},
+                           "source": "design/forge_design/evaluate/stop_rule.py:624–637 (_hold_step)・1558–1588 (要求の分岐)・"
+                                     "1297–1310 (judge_summary)・1181 (first)・1124 (hold)"}
     ts = req["step"] if req is not None and req["kind"] == REQ_SETTLED else None
     res["t_s"] = ts
     res["settled_since"] = req["settled_since"] if ts is not None else None
     span_end = ts + span if ts is not None else None
     res["span_end"] = span_end
     if req is None:
-        if grid:
+        if hs["reached_at_cap"] is not None:
+            res["reasons"].append(f"停止候補が無い: 保持は上限の格子点 {hs['reached_at_cap']} で満たした (v2 は要求を置けない — CENSORED; "
+                                  f"上限 {cap} は {cap_src})")
+        elif grid:
             res["reasons"].append(f"停止候補が無い: v2 は格子点 {grid[0]}〜{grid[-1]} で要求を置かない"
                                   + (f" (保持の途中: 条件を満たし始めた {hs['start']}、保持 {hold})" if hs["start"] is not None else ""))
     elif ts is None:
         res["reasons"].append(f"停止候補が無い: v2 は step {req['step']} で {req['kind']} の要求を置いて止める (FAILED) — {req['reason']}")
     else:
         if grid and ts == grid[-1]:
-            res["notes"].append(f"t_s {ts} はデータの最後の格子点 (v2 は forge の終了と競合して要求を置けない場合がある)")
+            res["notes"].append(f"t_s {ts} はデータの最後の格子点"
+                                + (" (本段の上限が分からないので上限の格子点の規則を当てていない; 上限の格子点なら v2 は要求を置かない)"
+                                   if cap is None else ""))
         if ts > ts_max:
             res["reasons"].append(f"t_s {ts} > {ts_max} (検証の範囲 t_s + {span} がデータの範囲に収まる前提を満たさない)")
 
@@ -517,7 +558,7 @@ def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, 
     # ---------------------------------------------------------------- 3′. 目的の量だけで保持した停止候補 t_s′ (記録だけ; 判定に使わない)
     rows_t = [{"step": r["step"], "verdict": r["target_verdict"], "categories": r["target_categories"], "why": r.get("target_why")}
               for r in rows]
-    req_t, hs_t = emulate_v2(rows_t, hold)
+    req_t, hs_t = emulate_v2(rows_t, hold, cap)
     for r, rt in zip(rows, rows_t):
         r["hold_start_target_only"] = rt["hold_start"]
         r["v2_event_target_only"] = rt["v2_event"]
@@ -526,7 +567,9 @@ def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, 
     to_notes = []
     if tsp is None:
         rel = "t_s′ なし" + ((f" (目的の量だけの判定でも step {req_t['step']} で {req_t['kind']} の要求になる — {req_t['reason']})")
-                            if req_t is not None else (f" (格子点 {grid[0]}〜{grid[-1]} で保持を満たさない)" if grid else ""))
+                            if req_t is not None else
+                            (f" (保持は上限の格子点 {hs_t['reached_at_cap']} で満たした — v2 は要求を置けない)" if hs_t["reached_at_cap"] is not None
+                             else (f" (格子点 {grid[0]}〜{grid[-1]} で保持を満たさない)" if grid else "")))
         outcome = "t_s′ なし"
     else:
         if ts is None:
