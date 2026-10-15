@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -32,8 +33,23 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 FORGE_ROOT = HERE.parents[2]
-GMSH_PYTHON = "/home/sano/work/forge/.venv-mesh/bin/python"
-PPTX_PYTHON = "/home/sano/work/forge/.venv-pptx/bin/python"
+
+
+def _tool_python(env: str, venv: str) -> str:
+    """外部の Python (gmsh・python-pptx を入れた別の環境) の場所: 環境変数 env → リポジトリ直下の venv → 主の作業ツリーの venv。
+    どれも無ければ、リポジトリ直下の venv のパスを返す (使うときに FileNotFoundError になり、置き場所が分かる)。
+    以前はこのマシンの絶対パスが書き込まれていて、他の PC・AWS では mesh・fluent の成果物が作れなかった (2026-10-16、V6)。"""
+    if os.environ.get(env):
+        return os.environ[env]
+    for root in (FORGE_ROOT, FORGE_ROOT.parent / "forge"):
+        c = root / venv / "bin" / "python"
+        if c.exists():
+            return str(c)
+    return str(FORGE_ROOT / venv / "bin" / "python")
+
+
+GMSH_PYTHON = _tool_python("FORGE_MESH_PY", ".venv-mesh")   # gmsh・meshio・h5py・numpy
+PPTX_PYTHON = _tool_python("FORGE_PPTX_PY", ".venv-pptx")   # python-pptx・xlsxwriter
 PARTS = ("cad", "mesh", "fluent", "wall_compare", "excel", "dimensions")
 
 

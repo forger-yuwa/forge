@@ -45,7 +45,19 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[3]
 TOOLS = REPO / "solver_density_cuda" / "tools"
-PPTX_PY = os.environ.get("FORGE_PPTX_PY", "/home/sano/work/forge/.venv-pptx/bin/python")
+def _pptx_python() -> str:
+    """xlsxwriter を入れた Python: 環境変数 FORGE_PPTX_PY → リポジトリ直下の .venv-pptx → 主の作業ツリーの .venv-pptx (以前はこのマシンの絶対パス)。"""
+    root = Path(__file__).resolve().parents[3]
+    if os.environ.get("FORGE_PPTX_PY"):
+        return os.environ["FORGE_PPTX_PY"]
+    for r in (root, root.parent / "forge"):
+        c = r / ".venv-pptx" / "bin" / "python"
+        if c.exists():
+            return str(c)
+    return str(root / ".venv-pptx" / "bin" / "python")
+
+
+PPTX_PY = _pptx_python()
 WALL_KINDS = ("wall", "wall_isothermal")
 SHAPE_COLUMNS = ("x_mm", "r_mm", "wall_angle_deg", "curvature_radius_mm", "s_mm", "perimeter_mm", "lateral_area_cum_mm2")
 # 曲率がこれ以下なら直線とみなして曲率半径を inf にする [1/mm] (STEP の転送誤差の曲率の許容 wall_step.TRANSFER_TOL と同じ値)
