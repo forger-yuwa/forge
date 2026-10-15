@@ -8,13 +8,14 @@ R=${1:?run_0012_ns_free か run_0011_ns_v2}
 # run_0013_ns_free260: codex diagnose 2026-10-16 settle-run0012-result の (i) — run_0012 から本段の上限だけ 260,000 に (plan §6 (1′))
 N=200000
 PROB=problem_m55_p4_settle.yaml
-case "$R" in run_0011_ns_v2) M=v2; PROB=problem_m55_p5_settle_v2.yaml;; run_0012_ns_free) M=off;; run_0013_ns_free260) M=off; N=260000;; *) echo "知らない run: $R"; exit 1;; esac
+# run_0015_ns_float_a・run_0016_ns_float_b: float と FP64 の比較 (card plan §6 V8) — run_0011 と同じ設定を float のビルド (FORGE_BUILD_DIR) で
+case "$R" in run_0011_ns_v2|run_0015_ns_float_a|run_0016_ns_float_b) M=v2; PROB=problem_m55_p5_settle_v2.yaml;; run_0012_ns_free) M=off;; run_0013_ns_free260) M=off; N=260000;; *) echo "知らない run: $R"; exit 1;; esac
 C=$HOME/forge-cardmesh/case/71.m55_combustion_wt
 D=$HOME/forge-cardmesh/design
 PY=$HOME/venv-cardmesh/bin/python
 S=$C/_runs/run_0011_ns_v2/p5_ns.py
-W=$HOME/m55_p5
-FP=$HOME/forge-cardmesh-fp64/solver_density_cuda/build
+W=$HOME/m55_p5${LOGSUFFIX:-}
+FP=${FORGE_BUILD_DIR:-$HOME/forge-cardmesh-fp64/solver_density_cuda/build}
 export FORGE_BIN=$FP/forge FORGE_CONVERTER=$FP/convertGmshToForge FORGE_CUDA_BLOCKSIZE=128 PYTHONDONTWRITEBYTECODE=1
 unset FORGE_TRANSPORT_TABLE FORGE_DIAG_FACE_H_DOUBLE
 mkdir -p "$W"
@@ -33,7 +34,7 @@ log "prepare $R (stop-rule $M)"
     --forge-bin "$FORGE_BIN" --forge-sha256 "$FBSHA" --stop-rule "$M" --nsteps "$N" ) > "$W/prepare_$R.log" 2>&1 \
     || die "prepare $R rc $? (prepare_$R.log)"
 tail -1 "$C/$R/MESH_QUALITY.txt" | tee -a "$W/chain.log"
-if [ "$R" = run_0013_ns_free260 ] || [ "$R" = run_0011_ns_v2 ]; then
+if [ "$R" != run_0012_ns_free ]; then
     # run_0012 と設定を比べる: 差は本段の nStepOuter (と settle_criteria の作成時刻・出所) だけのはず
     $PY - "$C/run_0012_ns_free" "$C/$R" <<'PYC' 2>&1 | tee -a "$W/chain.log" || die "run_0012 と設定の差が要求と違う"
 import sys, yaml
@@ -49,7 +50,7 @@ def flat(d, pre=()):
     return out
 bad = []
 for name, allow in [("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("solverConfig_prestage.yaml", {("time", "last", "nStepOuter")}),   # S1・S2 は nStepOuter 3000 を明示で書く (runner_axismach.ns_stage_configs); 実際の S1・S2 の設定は起動の後に MAIN_STAGE_STARTED の sha256 で照らす
-                    ("bcondConfig.yaml", set())] + ([("settle_criteria.yaml", None)] if b.name != "run_0011_ns_v2" else []):
+                    ("bcondConfig.yaml", set())] + ([("settle_criteria.yaml", None)] if b.name not in ("run_0011_ns_v2", "run_0015_ns_float_a", "run_0016_ns_float_b") else []):
     fa, fb = flat(yaml.safe_load((a / name).read_text())), flat(yaml.safe_load((b / name).read_text()))
     diff = sorted(k for k in set(fa) | set(fb) if fa.get(k, "<無>") != fb.get(k, "<無>"))
     if allow is None:
