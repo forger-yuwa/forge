@@ -1,4 +1,4 @@
-"""CONTUR × 倍率 c + 一定のずらし δ₀ (plan tooling-nozzle-card-local-mesh §4.3・§5.1 #3n) の試験。
+"""CONTUR × 倍率 c + 一定のずらし δ₀ (plan tooling-nozzle-card-local-mesh §4.3・§5.1 #3n) と 3 係数 (c + c₁·x)·δ_C + δ₀ (#3t) の試験。
 
 (1) 既定 (キー無し・(1, 0) の明示) は `integral_delta_r` の δ_r・導関数・記録が今までとビット同一。
 (2) 2 係数: δ_r = c·δ_C + δ₀/scale (r_t 単位) が表・関数の値で成り立ち、導関数は c·δ_C′ (5 次補間の表の誤差の範囲)。
@@ -81,6 +81,31 @@ if ref.is_file():
     check("(4) 既定の CONTUR と pass 0 の物理壁の δ (run_0003_ns_cont の delta_in_prev、格子から測った値、x ≥ 0) が ≤ 0.002 mm で一致", e <= 2e-3, f"最大差 {e:.2e} mm")
 else:
     print("[-- ] (4) pass 0 の記録が無い — 飛ばす")
+
+# (5) 3 係数 (plan §4.3 の末尾・#3t): δ = (c + c₁·x_m)·δ_C + δ₀/scale (x_m = x·scale)
+c0_, c1_, d0_ = 0.6743229906561874, 0.02148862611164012, -3.0538768354168355e-04
+r3, f3, i3 = RA.integral_delta_r(p, d, {"model": "contur", "delta_scale": c0_, "delta_scale_slope_per_m": c1_, "delta_offset_m": d0_})
+want = (c0_ + c1_ * r0["x"] * S) * r0["delta_r"] + d0_ / S
+check("(5) 3 係数の表: δ = (c + c₁·x_m)·δ_C + δ₀/scale", np.max(np.abs(r3["delta_r"] - want)) <= 1e-15,
+      f"最大差 {np.max(np.abs(r3['delta_r'] - want)):.2e} r_t")
+ev3 = np.max(np.abs(f3(xq) - ((c0_ + c1_ * np.asarray(xq) * S) * f0(xq) + d0_ / S)))
+check("(5) 3 係数の関数の値 (5 次補間の表の誤差 ≤ 1e−9 r_t)", ev3 <= 1e-9, f"最大差 {ev3:.2e} r_t")
+xin = xq[(xq > 0.5) & (xq < float(r0["x"][-1]) - 0.5)]
+d1w = c1_ * S * f0(xin) + (c0_ + c1_ * S * xin) * f0(xin, 1)
+ed3 = np.max(np.abs(f3(xin, 1) - d1w)) / max(np.max(np.abs(d1w)), 1e-30)
+check("(5) 3 係数の導関数 = c₁·scale·δ_C + (c + c₁·x_m)·δ_C′ (相対 ≤ 1e−6)", ed3 <= 1e-6, f"相対の最大差 {ed3:.2e}")
+check("(5) 記録に c₁ が残る (2 係数の記録には無い)", i3.get("delta_scale_slope_per_m") == c1_ and (i3.get("two_coef") or {}).get("delta_scale_slope_per_m") == c1_
+      and "delta_scale_slope_per_m" not in i2 and "delta_scale_slope_per_m" not in (i2.get("two_coef") or {}))
+r4, f4, i4 = RA.integral_delta_r(p, d, {"model": "contur", "delta_scale": c, "delta_offset_m": d0, "delta_scale_slope_per_m": 0.0})
+check("(5) c₁ = 0 の明示は 2 係数とビット同一", np.array_equal(r4["delta_r"], r2["delta_r"]) and np.array_equal(f4(xq), f2(xq)) and i4 == i2)
+_dx, rec3 = DL._sizing_delta_supplier(p, {"model": "contur", "delta_scale": c0_, "delta_scale_slope_per_m": c1_, "delta_offset_m": d0_})(d, S)
+check("(5) 寸法の逆算の記録に c₁ が出て、δ_r 関数は prepare_ns の経路と同じ", rec3["settings"].get("delta_scale_slope_per_m") == c1_ and np.array_equal(_dx(xq), f3(xq)))
+for bad in ({"delta_scale_slope_per_m": "x"}, {"delta_scale_slope_per_m": float("inf")}):
+    try:
+        RA.integral_delta_r(p, d, {"model": "contur", **bad})
+        check(f"(5) 不正な c₁ {bad} は ValueError", False, "例外が出ない")
+    except ValueError:
+        check(f"(5) 不正な c₁ {bad} は ValueError", True)
 
 print("\nALL PASS" if not FAIL else f"\nFAIL {len(FAIL)}: {FAIL}")
 sys.exit(1 if FAIL else 0)

@@ -1372,14 +1372,21 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
     # 2 係数の較正 (2026-10-15, plan tooling-nozzle-card-local-mesh §4.3、ユーザ決定): δ = c·δ_C + δ₀/scale (r_t 単位; c = delta_scale、
     # δ₀ = delta_offset_m [m] を全長一定)。NS の δ_E のスロートと出口の 2 点に合わせた CONTUR の倍率とずらし (負の δ も表せる)。
     # 実効の scale (寸法の逆算の試しの r_t を含む) で換算し、値・導関数・表・記録を同じ変換の結果から作る。既定 (1, 0) は何もしない
+    # 3 係数 (同 §4.3 の末尾、ユーザ決定「bがよさそう」): δ = (c + c₁·x_m)·δ_C + δ₀/scale (x_m = x·scale [m]、c₁ = delta_scale_slope_per_m
+    # [1/m]、既定 0 = 2 係数とビット同一の式)
     two = _two_coef(init_cfg)
     if two is not None:
         c2, d0_m = two
+        c1 = _slope_coef(init_cfg)
         f_C = f_s
         res_init["delta_r_contur"] = res_init["delta_r"].copy()          # 係数を当てる前の CONTUR (再較正の基底)
-
-        def f_s(xx, _f=f_C, _c=c2, _d=d0_m / scale):
-            return _c * _f(xx) + _d
+        if c1 == 0.0:
+            def f_s(xx, _f=f_C, _c=c2, _d=d0_m / scale):
+                return _c * _f(xx) + _d
+        else:
+            def f_s(xx, _f=f_C, _c=c2, _c1=c1 * scale, _d=d0_m / scale):
+                xx = np.asarray(xx, dtype=float)
+                return (_c + _c1 * xx) * _f(xx) + _d
         res_init["delta_r"] = f_s(res_init["x"])
     # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
     # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
@@ -1394,16 +1401,31 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
     init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
     if two is not None:
         init_info["delta_scale"], init_info["delta_offset_m"] = two
+        if c1 != 0.0:
+            init_info["delta_scale_slope_per_m"] = c1
         init_info["two_coef"] = {"delta_scale": two[0], "delta_offset_m": two[1], "scale_m": scale,
+                                 **({"delta_scale_slope_per_m": c1} if c1 != 0.0 else {}),
                                  "delta_r_throat_contur": float(np.interp(0.0, res_init["x"], res_init["delta_r_contur"])),
                                  "delta_r_exit_contur": float(res_init["delta_r_contur"][-1]),
                                  "plan": "plans/active/tooling-nozzle-card-local-mesh.md §4.3"}
     return res_init, delta_r_x, init_info
 
 
+def _slope_coef(init_cfg: dict) -> float:
+    """`deltastar_initializer.delta_scale_slope_per_m` (3 係数の c₁ [1/m]、既定 0) を読む。数でない・非有限は ValueError。"""
+    v = init_cfg.get("delta_scale_slope_per_m", 0.0)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"deltastar_initializer.delta_scale_slope_per_m は数 ({init_cfg.get('delta_scale_slope_per_m')!r})") from None
+    if not np.isfinite(v):
+        raise ValueError(f"deltastar_initializer.delta_scale_slope_per_m は有限 ({v!r})")
+    return v
+
+
 def _two_coef(init_cfg: dict):
-    """`deltastar_initializer` の 2 係数 (delta_scale, delta_offset_m) を読む。どちらも既定 (1, 0) なら None (何もしない)。
-    数でない・非有限・c ≤ 0 は ValueError (黙って既定に戻さない)。"""
+    """`deltastar_initializer` の 2 係数 (delta_scale, delta_offset_m) を読む。どちらも既定 (1, 0) で c₁ (delta_scale_slope_per_m) も 0 なら
+    None (何もしない)。数でない・非有限・c ≤ 0 は ValueError (黙って既定に戻さない)。"""
     c = init_cfg.get("delta_scale", 1.0); d = init_cfg.get("delta_offset_m", 0.0)
     try:
         c, d = float(c), float(d)
@@ -1412,7 +1434,7 @@ def _two_coef(init_cfg: dict):
                          f"{init_cfg.get('delta_offset_m')!r})") from None
     if not (np.isfinite(c) and np.isfinite(d)) or c <= 0.0:
         raise ValueError(f"deltastar_initializer.delta_scale は正の有限・delta_offset_m は有限 ({c!r}, {d!r})")
-    return None if (c == 1.0 and d == 0.0) else (c, d)
+    return None if (c == 1.0 and d == 0.0 and _slope_coef(init_cfg) == 0.0) else (c, d)
 
 
 def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar_x=None, offset: str = "normal",
