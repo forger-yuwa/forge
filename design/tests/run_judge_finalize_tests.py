@@ -15,6 +15,11 @@ plan 段 judge の m8)。本物の forge は起動しない: 本物の `run_case
 (f) `same_numerics` (継続の run の `--from-floor` を書くか): 同じ config は True、convMethod (hard キー) が違えば False。
 (g) 判定器の例外: judge_run.py が例外で終わっても `finalize` は例外にせず、RUN_VERDICT は state error・INDETERMINATE。
 (h) 古い判定: 確定の後に系列を書き換えると `--check-fresh` が STALE (Stop フックが止める側)。
+(i) axis-Mach Euler の準定常 (§5.1 #14b): 本段の出力 6 枚 (12,000 step を 2,000 の間隔) で `spec_axismach(euler=True)` の窓
+    (tail 0.4・min_points 4) を満たし STEADY・DRIFTING を判定できる。3 枚は窓の不足 (判定不能)。
+(j) criterion stop_rule (§5.1 #14b): 停止規則の記録 stop_rule.json → judge_series.csv → 停止規則の `judge_rows` そのもので判定した値・合否が
+    記録の行に judge_rows を直に当てた結果と同じ (到達 = first_stop が最後の行で REACHED、未到達 = 届かない)。停止規則の到達との照合
+    (stop_rule_cross) が一致。stop_rule.json・settings が無ければ判定不能。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_judge_finalize_tests.py   (約 1 分)
 """
@@ -251,14 +256,20 @@ for k, sp in specs.items():
     except Exception as e:  # noqa: BLE001
         names[k] = f"誤り: {e}"
 check("全機種の仕様が normalize_spec を通る", all(isinstance(v, list) for v in names.values()), json.dumps(names, ensure_ascii=False))
-check("axis-Mach NS (停止規則あり): 出口コア M・質量の収支 (absolute、停止規則の閾値)・θ_r × 3",
+qns = specs["axismach_ns"]["quasisteady"]["quantities"]
+check("axis-Mach NS (停止規則あり): 出口コア M・質量の収支・θ_r × 3 を criterion stop_rule (役 relative・r・theta、窓・閾値は書かない; #14a (2))",
       names["axismach_ns"] == ["exit_core_M", "mass_imbalance_r", "theta_r_0.4", "theta_r_0.7", "theta_r_0.95"]
-      and specs["axismach_ns"]["quasisteady"]["quantities"][1]["criterion"] == "absolute"
-      and specs["axismach_ns"]["quasisteady"]["quantities"][1]["thresholds"] == {"abs_mean": SR.R_MEAN_MAX, "abs_amp": SR.R_AMP_MAX})
-check("axis-Mach NS (停止規則なし)・Euler: θ_r を入れない (理由を notes に)",
+      and all(q["criterion"] == "stop_rule" and "thresholds" not in q and "window" not in q and q["accept"] == ["STEADY"] for q in qns)
+      and [q["stop_rule_role"] for q in qns] == ["relative", "r", "theta", "theta", "theta"],
+      json.dumps([{k: q.get(k) for k in ("name", "criterion", "stop_rule_role")} for q in qns], ensure_ascii=False))
+q0 = {q["name"]: q for q in specs["axismach_ns_nosr"]["quasisteady"]["quantities"]}
+check("axis-Mach NS (停止規則なし)・Euler: θ_r を入れない (理由を notes に)、M は relative・r は absolute (停止規則の既定の閾値) のまま",
       names["axismach_ns_nosr"] == names["axismach_euler"] == ["exit_core_M", "mass_imbalance_r"]
       and any("θ_r は量に入れない" in n for n in specs["axismach_ns_nosr"]["notes"])
-      and any("INDETERMINATE" in n for n in specs["axismach_euler"]["notes"]))
+      and any("INDETERMINATE" in n for n in specs["axismach_euler"]["notes"])
+      and q0["exit_core_M"]["criterion"] == "relative" and q0["mass_imbalance_r"]["criterion"] == "absolute"
+      and q0["mass_imbalance_r"]["thresholds"] == {"abs_mean": SR.R_MEAN_MAX, "abs_amp": SR.R_AMP_MAX}
+      and all(q["criterion"] != "stop_rule" for q in specs["axismach_euler"]["quasisteady"]["quantities"]))
 check("SERN: 粘性は C_T_with_shear + C_T・C_L・C_M、非粘性は C_T・C_L・C_M (sern_forces の閾値 0.02/0.05)",
       names["sern_rans"] == ["C_T_with_shear", "C_T", "C_L", "C_M"] and names["sern_euler"] == ["C_T", "C_L", "C_M"]
       and specs["sern_rans"]["quasisteady"]["quantities"][0]["thresholds"] == {"drift": 0.02, "osc": 0.05})
@@ -340,6 +351,128 @@ with open(d / "judge_series.csv", "a") as f:
     f.write("2100,0.5\n")
 r = subprocess.run(["python3", str(TOOLS / "judge_run.py"), str(d), "--check-fresh"], capture_output=True, text=True)
 check("確定の後に系列が変わった → --check-fresh が STALE (Stop フックが止める)", r.returncode == 1 and "judge_series.csv" in r.stdout, r.stdout)
+
+# ------------------------------------------------------------------------------------------------ (i) Euler の 6 枚
+print("== (i) axis-Mach Euler の準定常: 本段の出力 6 枚で窓を満たす (spec_axismach(euler=True) の tail 0.4・min_points 4; #14b)", flush=True)
+
+
+def write_series_csv(d: Path, rows: list, cols: list) -> None:
+    with open(d / J.SERIES, "w") as f:
+        f.write("step," + ",".join(cols) + "\n")
+        for r_ in rows:
+            f.write("%d," % r_["step"] + ",".join(repr(float(r_[c])) for c in cols) + "\n")
+
+
+def qs(d: Path) -> dict:
+    """準定常の項目 (judge_run.check_quasisteady を作業ツリーの仕様・停止の状態で)。"""
+    return JR.check_quasisteady(str(d), JR.load_spec(str(d)), JR.read_stop_state(str(d)))
+
+
+d = TMP / "euler6"
+d.mkdir()
+J.write_spec(d, J.spec_axismach("試験 (i)", euler=True))
+steps6 = [2000 * k for k in range(1, 7)]                 # 12,000 step の本段を n/6 = 2,000 の間隔で
+write_series_csv(d, [{"step": s, "exit_core_M": 4.2 * (1 + 1e-4 * (-1) ** k), "r": 2e-4 * (-1) ** k} for k, s in enumerate(steps6)],
+                 ["exit_core_M", "r"])
+c = qs(d)
+qq = c["quantities"]
+check("6 枚 (2,000〜12,000 step) で出口コア M・r が判定できる (窓の不足でない; 末尾窓 3 点・STEADY = PASS)",
+      c["status"] == "PASS" and all(qq[k]["n"] == 6 and qq[k]["tail_points"] == 3 and qq[k]["verdict"] == "STEADY" for k in qq),
+      json.dumps({k: (q["status"], q["reason"][:120]) for k, q in qq.items()}, ensure_ascii=False))
+write_series_csv(d, [{"step": s, "exit_core_M": 4.2 * (1 + 0.05 * k), "r": 2e-4 * (-1) ** k} for k, s in enumerate(steps6)],
+                 ["exit_core_M", "r"])
+c = qs(d)
+check("6 枚でドリフトも判定できる (出口コア M が 5 %/出力で増える → DRIFTING = FAIL; 判定不能でない)",
+      c["status"] == "FAIL" and c["quantities"]["exit_core_M"]["verdict"] == "DRIFTING" and c["quantities"]["mass_imbalance_r"]["status"] == "PASS",
+      c["reason"])
+write_series_csv(d, [{"step": s, "exit_core_M": 4.2, "r": 2e-4} for s in (4000, 8000, 12000)], ["exit_core_M", "r"])
+c = qs(d)
+check("3 枚 (n/3 の間隔) は窓の不足 → 判定不能 (#12b (1) の状態)",
+      c["status"] == "INDETERMINATE" and all("窓の不足" in q["reason"] for q in c["quantities"].values()), c["reason"])
+
+# ------------------------------------------------------------------------------------------------ (j) criterion stop_rule
+print("== (j) criterion stop_rule: 停止規則の記録 → judge_series.csv → judge_rows そのもの (到達と未到達; #14b)", flush=True)
+SRS = SR.resolve_settings({}, nsteps_arg=None, n_main=60000, n_main_source="試験", out_int=2500, euler_ref="x")
+TH = {k: SRS[k] for k in SR.thresholds()}
+TKEYS = [SR.theta_key(f) for f in TH["x_fracs"]]
+
+
+def sr_rows(n: int, drift: float = 0.0, m_osc: float = 0.0) -> list:
+    """停止規則の記録の行 (本段の出力 2,500 step ごと): r は ±1e-4、θ_r は断面ごとの値 × (1 ± 1e-4 + drift·i)、出口コア M は
+    5.5 × (1 ± m_osc) (i = 22 だけ 0: 25 行の最後の窓 (i = 16〜24) の前半・後半の平均を揃え、D でなく振幅だけが外れるように)。"""
+    rows = []
+    for i in range(n):
+        p = 0 if i == 22 else (-1) ** i
+        row = {"step": 2500 * (i + 1), "nonfinite_all": 0, "r": 1e-4 * (-1) ** i, "exit_core_M": 5.5 * (1 + m_osc * p), "mdot_rt": 3.0}
+        for f in TH["x_fracs"]:
+            row[SR.theta_key(f)] = 0.02 * f * (1 + 1e-4 * (-1) ** i + drift * i)
+            row["x_" + SR.theta_key(f)] = 30.0 * f
+        rows.append(row)
+    return rows
+
+
+def sr_run(tag: str, rows: list, status: str) -> Path:
+    d = TMP / tag
+    d.mkdir()
+    J.write_spec(d, J.spec_axismach("試験 (j)", stop_rule=SRS))
+    SR.save_record(d, {"version": 1, "settings": SRS, "status": status, "rows": rows})
+    SR.write_state(d, {"status": status, "record_sha256": SR._sha256(d / SR.RECORD)})
+    J.write_axismach_series(d)
+    return d
+
+
+def same_as_judge_rows(qq: dict, rows: list) -> tuple:
+    """criterion stop_rule の各量 = 停止規則の judge_rows (記録の行そのもの; 出口コア M は relative_keys) の値・合否。戻り (一致, 内訳)。"""
+    j = SR.judge_rows(rows, **TH, relative_keys=("exit_core_M",))
+    j0 = SR.judge_rows(rows, **TH)                       # 停止規則そのものの条件 (r・θ_r)
+    rq = qq["mass_imbalance_r"]
+    ok = (rq["stop_rule_judge"]["r_mean"] == j["r_mean"] and rq["stop_rule_judge"]["r_amp"] == j["r_amp"]
+          and (rq["status"] == "PASS") == j["r_ok"])
+    for k in TKEYS:
+        ok &= (qq[k]["stop_rule_judge"]["D"] == j["theta"][k]["D"] and qq[k]["stop_rule_judge"]["amp"] == j["theta"][k]["amp"]
+               and (qq[k]["status"] == "PASS") == j["theta"][k]["ok"])
+    m = j["relative"]["exit_core_M"]
+    ok &= (qq["exit_core_M"]["stop_rule_judge"]["D"] == m["D"] and qq["exit_core_M"]["stop_rule_judge"]["amp"] == m["amp"]
+           and (qq["exit_core_M"]["status"] == "PASS") == m["ok"])
+    ok &= all(qq[k]["status"] == "PASS" for k in ["mass_imbalance_r"] + TKEYS) == j0["ok"]
+    return ok, {"judge_rows_ok": j0["ok"], "why": j0.get("why"), "M": m}
+
+
+rows_ok = sr_rows(25)                                    # 22,500 で最初に条件を満たし、保持 40,000 の後の 62,500 (最後の行) で REACHED
+fs = SR.first_stop(rows_ok, hold_steps=int(SRS["hold_steps"]), **TH)
+d = sr_run("sr_reached", rows_ok, "REACHED")
+meta = json.loads((d / J.SERIES_META).read_text())
+c = qs(d)
+ok, det = same_as_judge_rows(c["quantities"], rows_ok)
+check("到達: 停止規則の first_stop (保持 40,000) が最後の行で REACHED、系列は stop_rule.json の行から、criterion stop_rule の 5 量は全 PASS",
+      fs and fs["status"] == "REACHED" and fs["k"] == len(rows_ok) - 1 and meta["source"]["kind"] == "stop_rule.json" and c["status"] == "PASS",
+      json.dumps({"first_stop": fs and fs["status"], "reason": c["reason"]}, ensure_ascii=False))
+check("到達: 各量の値・合否が judge_rows (記録の行そのもの) と同じ (r・θ_r × 3・出口コア M = relative_keys)", ok, json.dumps(det, ensure_ascii=False))
+check("到達: 停止規則の到達と照合して一致 (stop_rule_cross agree)、閾値の出所は stop_rule.json の settings",
+      c["stop_rule_cross"]["agree"] is True and c["stop_rule_settings"]["settings"] == SR.thresholds(**TH)
+      and c["stop_rule_settings"]["sha256"] == SR._sha256(d / SR.RECORD), json.dumps(c.get("stop_rule_cross"), ensure_ascii=False))
+rows_bad = sr_rows(25, drift=2e-4, m_osc=1e-2)           # θ_r が 1 出力あたり 2e-4 ずつ動く・出口コア M が ±1 % で振れる
+fs = SR.first_stop(rows_bad, hold_steps=int(SRS["hold_steps"]), **TH)
+d = sr_run("sr_censored", rows_bad, "CENSORED")
+c = qs(d)
+ok, det = same_as_judge_rows(c["quantities"], rows_bad)
+qq = c["quantities"]
+check("未到達: first_stop は届かない、θ_r は DRIFTING・出口コア M は OSCILLATING・r は STEADY (準定常 FAIL)",
+      fs is None and c["status"] == "FAIL" and all(qq[k]["verdict"] == "DRIFTING" for k in TKEYS)
+      and qq["exit_core_M"]["verdict"] == "OSCILLATING" and qq["mass_imbalance_r"]["verdict"] == "STEADY",
+      json.dumps({k: q.get("verdict") for k, q in qq.items()}))
+check("未到達: 各量の値・合否が judge_rows と同じ", ok, json.dumps(det, ensure_ascii=False, default=str))
+check("未到達: 停止規則 CENSORED と criterion stop_rule の FAIL は一致 (stop_rule_cross agree)", c["stop_rule_cross"]["agree"] is True,
+      json.dumps(c.get("stop_rule_cross"), ensure_ascii=False))
+(d / SR.RECORD).write_text(json.dumps({"version": 1, "status": "CENSORED", "rows": rows_bad}))
+c = qs(d)
+check("stop_rule.json に settings が無い → criterion stop_rule の量はすべて判定不能 (閾値を決めない)",
+      c["status"] == "INDETERMINATE" and all(q["status"] == "INDETERMINATE" and "settings" in q["reason"] for q in c["quantities"].values()),
+      c["reason"])
+(d / SR.RECORD).unlink()
+c = qs(d)
+check("stop_rule.json が無い → 判定不能", c["status"] == "INDETERMINATE"
+      and all("stop_rule.json が無い" in q["reason"] for q in c["quantities"].values()), c["reason"])
 
 print()
 if FAIL:

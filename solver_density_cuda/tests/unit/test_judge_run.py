@@ -11,6 +11,9 @@
 - 定数粘性 (`viscMethod 0`) の壁で壁解像が適用になる (`wall_resolution_applies`) こと、仕様の applies と実効の食い違い。
 - solver の終了コード (異常終了・監視の停止・不明)、非有限 (残差・最終の場・`res_nan_*`・`--full-audit`)、物理性、停止規則の状態の対応、
   収束の mode (非定常・単段と確かめられない・not_applicable・from_floor)、仕様の誤り、判定器の例外 (終了 3)。
+- criterion stop_rule (§5.1 #14b): 停止規則の `judge_rows` そのもので判定した値・合否が同じ行に judge_rows を直に当てた結果と同じ
+  (到達 = first_stop が最後の行で REACHED、未到達 = 届かない)、停止規則の到達との照合 (一致・不一致の両方を記録)、窓の不足・
+  `stop_rule.json`・settings が無い・θ_r の列が断面に無いは判定不能、仕様の誤り (thresholds・window を書く・役が無い など)。
 - `run_case.sh` の通し: `RUN_VERDICT.*` ができる・関門で未起動なら判定しない・`LAUNCH_ECHO.txt` と `residual_history.png` が残る・
   終了コードは solver のまま・段階起動 (manifest / `FORGE_JUDGE_DEFER=1`) は `state: deferred`・`FORGE_STRICT_CONVERGENCE` は従来どおり。
 
@@ -512,6 +515,135 @@ with open(os.path.join(d, 'JUDGE_SPEC.json'), 'w') as f:
 write_series(d, [(s_, 1e-4) for s_ in range(100, 2001, 100)], cols=('step', 'r'))
 rc, v, _ = judge(d, '--solver-rc', '0')
 check('仕様の注記: 試験の注記' in open(os.path.join(d, 'RUN_VERDICT.txt'), encoding='utf-8').read(), '仕様の notes を RUN_VERDICT.txt に写す')
+
+print('== criterion stop_rule (停止規則の judge_rows そのもの; plan §5.1 #14a (2)・#14b)')
+SRM = JR.stop_rule_module()
+SR_TH = SRM.thresholds()
+TKEYS = [SRM.theta_key(f) for f in SR_TH['x_fracs']]
+SER = 'judge_series.csv'
+
+
+def sr_item(name, column, role, **kw):
+    return qitem(name, {'kind': 'csv_column', 'file': SER, 'column': column}, criterion='stop_rule', stop_rule_role=role, **kw)
+
+
+SR_SPEC = qspec(sr_item('exit_core_M', 'exit_core_M', 'relative'), sr_item('mass_imbalance_r', 'r', 'r'),
+                *[sr_item(k, k, 'theta') for k in TKEYS])
+
+
+def sr_rows(n, drift=0.0, m_osc=0.0):
+    """本段の出力 2,500 step ごとの系列 (停止規則の記録の行の形)。出口コア M の振れは i = 22 を 0 にして最後の窓の前半・後半の平均を揃える。"""
+    rows = []
+    for i in range(n):
+        p = 0 if i == 22 else (-1) ** i
+        row = {'step': 2500 * (i + 1), 'r': 1e-4 * (-1) ** i, 'exit_core_M': 5.5 * (1 + m_osc * p)}
+        for f in SR_TH['x_fracs']:
+            row[SRM.theta_key(f)] = 0.02 * f * (1 + 1e-4 * (-1) ** i + drift * i)
+        rows.append(row)
+    return rows
+
+
+def write_sr(d, rows, status, settings=True):
+    cols = ['exit_core_M', 'r'] + TKEYS
+    with open(os.path.join(d, SER), 'w') as f:
+        f.write('step,' + ','.join(cols) + '\n')
+        for r_ in rows:
+            f.write('%d,' % r_['step'] + ','.join(repr(float(r_[c])) for c in cols) + '\n')
+    rec = {'version': 1, 'status': status, 'rows': []}
+    if settings:
+        rec['settings'] = dict(SR_TH, cap=200000, hold_steps=40000, use=True)
+    with open(os.path.join(d, 'stop_rule.json'), 'w') as f:
+        json.dump(rec, f)
+    with open(os.path.join(d, 'STOP_RULE_STATE.json'), 'w') as f:
+        json.dump({'version': 1, 'status': status}, f)
+
+
+def same_as_judge_rows(qq, rows):
+    """judge_run の各量 = judge_rows (同じ行; 出口コア M は relative_keys) の値・合否、r・θ_r の全 PASS = 停止規則そのものの条件。"""
+    j = SRM.judge_rows(rows, **SR_TH, relative_keys=('exit_core_M',))
+    j0 = SRM.judge_rows(rows, **SR_TH)
+    rq = qq['mass_imbalance_r']
+    ok = rq['stop_rule_judge']['r_mean'] == j['r_mean'] and rq['stop_rule_judge']['r_amp'] == j['r_amp'] and (rq['status'] == 'PASS') == j['r_ok']
+    for k in TKEYS:
+        ok &= (qq[k]['stop_rule_judge']['D'] == j['theta'][k]['D'] and qq[k]['stop_rule_judge']['amp'] == j['theta'][k]['amp']
+               and (qq[k]['status'] == 'PASS') == j['theta'][k]['ok'])
+    m = j['relative']['exit_core_M']
+    ok &= qq['exit_core_M']['stop_rule_judge']['D'] == m['D'] and (qq['exit_core_M']['status'] == 'PASS') == m['ok']
+    ok &= all(qq[k]['status'] == 'PASS' for k in ['mass_imbalance_r'] + TKEYS) == j0['ok']
+    return ok
+
+
+d = wall_run('sr_reached', spec=SR_SPEC)
+rows = sr_rows(25)
+write_sr(d, rows, 'REACHED')
+fs = SRM.first_stop(rows, hold_steps=40000, **SR_TH)
+rc, v, _ = judge(d, '--solver-rc', '0')
+qq = v['checks']['quasisteady']['quantities']
+txt = open(os.path.join(d, 'RUN_VERDICT.txt'), encoding='utf-8').read()
+check(fs and fs['status'] == 'REACHED' and fs['k'] == len(rows) - 1 and st(v, 'quasisteady') == 'PASS' and st(v, 'stop_rule') == 'PASS'
+      and all(q['criterion'] == 'stop_rule' and q['verdict'] == 'STEADY' for q in qq.values()),
+      '到達 (first_stop が最後の行で REACHED) → criterion stop_rule の 5 量は STEADY・停止規則の項目 PASS と並ぶ', why(v, 'quasisteady'))
+check(same_as_judge_rows(qq, rows), '到達: 各量の値・合否が judge_rows と同じ (別の python3 の判定器から design の stop_rule.py を読んだ)')
+check(v['checks']['quasisteady']['stop_rule_cross']['agree'] is True and '停止規則との照合: 一致' in txt
+      and 'design/forge_design/evaluate/stop_rule.py' in v['tools'],
+      '到達: 停止規則との照合 (一致) を記録・RUN_VERDICT.txt に出す・道具の sha256 に stop_rule.py', v['checks']['quasisteady'].get('stop_rule_cross'))
+d = wall_run('sr_censored', spec=SR_SPEC)
+rows = sr_rows(25, drift=2e-4, m_osc=1e-2)
+write_sr(d, rows, 'CENSORED')
+fs = SRM.first_stop(rows, hold_steps=40000, **SR_TH)
+rc, v, _ = judge(d, '--solver-rc', '0')
+qq = v['checks']['quasisteady']['quantities']
+check(fs is None and st(v, 'quasisteady') == 'FAIL' and all(qq[k]['verdict'] == 'DRIFTING' for k in TKEYS)
+      and qq['exit_core_M']['verdict'] == 'OSCILLATING' and qq['mass_imbalance_r']['verdict'] == 'STEADY'
+      and v['checks']['quasisteady']['stop_rule_cross']['agree'] is True,
+      '未到達 (届かない・CENSORED) → θ_r DRIFTING・出口コア M OSCILLATING・r STEADY、停止規則との照合は一致',
+      json.dumps({k: q.get('verdict') for k, q in qq.items()}))
+check(same_as_judge_rows(qq, rows), '未到達: 各量の値・合否が judge_rows と同じ')
+with open(os.path.join(d, 'STOP_RULE_STATE.json'), 'w') as f:
+    json.dump({'version': 1, 'status': 'REACHED'}, f)
+rc, v, _ = judge(d, '--solver-rc', '0')
+cr = v['checks']['quasisteady']['stop_rule_cross']
+check(cr['agree'] is False and '不一致' in cr['note'] and st(v, 'stop_rule') == 'PASS' and st(v, 'quasisteady') == 'FAIL'
+      and '不一致' in open(os.path.join(d, 'RUN_VERDICT.txt'), encoding='utf-8').read(),
+      '停止規則 REACHED なのに criterion stop_rule が FAIL → 不一致として両方を記録 (総合は各項目のまま)', cr)
+d = wall_run('sr_short', spec=SR_SPEC)
+write_sr(d, sr_rows(6), 'REACHED')
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'quasisteady') == 'INDETERMINATE' and all('窓の不足' in q['reason'] for q in v['checks']['quasisteady']['quantities'].values()),
+      '本段の履歴 12,500 step が窓 20,000 を覆わない → 判定不能 (窓の不足)', why(v, 'quasisteady'))
+d = wall_run('sr_nosettings', spec=SR_SPEC)
+write_sr(d, sr_rows(25), 'REACHED', settings=False)
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'quasisteady') == 'INDETERMINATE' and all('settings が無い' in q['reason'] for q in v['checks']['quasisteady']['quantities'].values()),
+      'stop_rule.json に settings が無い → 判定不能', why(v, 'quasisteady'))
+os.unlink(os.path.join(d, 'stop_rule.json'))
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'quasisteady') == 'INDETERMINATE' and all('stop_rule.json が無い' in q['reason'] for q in v['checks']['quasisteady']['quantities'].values()),
+      'stop_rule.json が無い → 判定不能 (閾値を仕様や既定から補わない)', why(v, 'quasisteady'))
+d = wall_run('sr_badcol', spec=qspec(sr_item('theta_r_0.5', 'theta_r_0.5', 'theta')))
+write_sr(d, sr_rows(25), 'REACHED')
+with open(os.path.join(d, SER)) as f:
+    lines = f.read().splitlines()
+with open(os.path.join(d, SER), 'w') as f:
+    f.write('\n'.join([lines[0] + ',theta_r_0.5'] + [ln + ',0.01' for ln in lines[1:]]) + '\n')
+rc, v, _ = judge(d, '--solver-rc', '0')
+check(st(v, 'quasisteady') == 'INDETERMINATE' and 'どれでもない' in why(v, 'quasisteady'),
+      'θ_r の列が settings の断面に無い → 判定不能', why(v, 'quasisteady'))
+bad = {'thresholds': sr_item('m', 'exit_core_M', 'relative', thresholds={'drift': 0.1}),
+       'window': sr_item('m', 'exit_core_M', 'relative', window={'min_points': 4}),
+       'role の欠け': qitem('m', {'kind': 'csv_column', 'file': SER, 'column': 'exit_core_M'}, criterion='stop_rule'),
+       'role の綴り': sr_item('m', 'exit_core_M', 'theta_r'),
+       'relative に role': qitem('m', {'kind': 'csv_column', 'file': SER, 'column': 'exit_core_M'}, stop_rule_role='r'),
+       'accept OSCILLATING': sr_item('m', 'exit_core_M', 'relative', accept=['STEADY', 'OSCILLATING'])}
+errs = {}
+for k, it in bad.items():
+    try:
+        JR.normalize_spec(qspec(it), True)
+        errs[k] = None
+    except JR.SpecError as e:
+        errs[k] = str(e)
+check(all(errs.values()), 'criterion stop_rule の仕様の誤り (thresholds・window を書く・role が無い・綴り違い・他の criterion に role・'
+      'accept に OSCILLATING) → SpecError', errs)
 
 d = wall_run('nores', spec=QS_NA, res=())
 rc, v, _ = judge(d, '--solver-rc', '0')

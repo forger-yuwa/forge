@@ -613,13 +613,16 @@ def test_watcher():
               and ck["stop_rule"]["raw"] == "REACHED" and not (rd / "JUDGE_PENDING.json").exists(),
               json.dumps({k: (c.get("status"), c.get("reason", "")[:80]) for k, c in ck.items()}, ensure_ascii=False))
         qn = sorted((ck.get("quasisteady", {}).get("quantities") or {}))
-        check("判定の仕様と系列: 生成器が JUDGE_SPEC.json (出口コア M・質量の収支 (絶対)・θ_r × 3) を書き、系列は停止規則の記録の行 "
-              "(STOP_RULE_STATE.json の record_sha256 と一致) から",
+        check("判定の仕様と系列: 生成器が JUDGE_SPEC.json (出口コア M・質量の収支・θ_r × 3、criterion stop_rule = 停止規則の judge_rows; "
+              "plan tooling-convergence-and-wall-resolution-gates §5.1 #14b) を書き、系列は停止規則の記録の行 (STOP_RULE_STATE.json の "
+              "record_sha256 と一致) から。停止規則の到達 (REACHED) と criterion stop_rule の判定が一致 (stop_rule_cross)",
               sp["source"] == "generator:runner_axismach.run_staged_ns"
               and [q["name"] for q in sp["quasisteady"]["quantities"]] == ["exit_core_M", "mass_imbalance_r"] + [SR.theta_key(f) for f in SR.X_FRACS]
               and qn == sorted(q["name"] for q in sp["quasisteady"]["quantities"]) and meta["source"]["kind"] == "stop_rule.json"
-              and meta["source"]["n_rows"] == len(rec["rows"]) and ck["quasisteady"]["quantities"]["mass_imbalance_r"]["criterion"] == "absolute",
-              json.dumps({"qn": qn, "meta": meta}, ensure_ascii=False)[:300])
+              and meta["source"]["n_rows"] == len(rec["rows"])
+              and all(q["criterion"] == "stop_rule" for q in ck["quasisteady"]["quantities"].values())
+              and (ck["quasisteady"].get("stop_rule_cross") or {}).get("agree") is True,
+              json.dumps({"qn": qn, "meta": meta, "cross": ck.get("quasisteady", {}).get("stop_rule_cross")}, ensure_ascii=False)[:400])
 
         rd, _ = make_run("reach_ignore_term", {"dt": 0.25, "ignore_term": True}, cap=200000)
         rc, rec, st = run_case(rd)

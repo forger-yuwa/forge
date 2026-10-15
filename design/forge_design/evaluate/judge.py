@@ -16,7 +16,7 @@ SERN のゲート・ベルの tp_gates) は各ゲートに残す (`judge_run.py`
 
 | 機種 (spec の source) | 量 (系列の出所) | 閾値 |
 | --- | --- | --- |
-| axis-Mach NS (`spec_axismach_ns`) | 出口コア M・質量の収支 r・θ_r (停止規則を使う run だけ) (`judge_series.csv`: 停止規則の記録の行、無ければ本段の res から同じ式) | M・θ_r は check_quasisteady の既定、r は停止規則の絶対の閾値 (|平均|・振幅) |
+| axis-Mach NS (`spec_axismach_ns`) | 出口コア M・質量の収支 r・θ_r (停止規則を使う run だけ) (`judge_series.csv`: 停止規則の記録の行、無ければ本段の res から同じ式) | 停止規則を使う run: M・r・θ_r は criterion stop_rule (停止規則の `judge_rows` そのもの、窓・閾値は run の `stop_rule.json` の settings; §5.1 #14a (2))。使わない run: M は check_quasisteady の既定、r は停止規則の既定の絶対の閾値 (|平均|・振幅) |
 | axis-Mach Euler (`spec_axismach_euler`) | 出口コア M・r (本段の res から) | 同上。本段の出力が 4 枚に届かなければ準定常は INDETERMINATE (窓の不足) |
 | SERN 2D・3D (`spec_sern`) | 目的量 (粘性: C_T_with_shear、非粘性: C_T)・C_T・C_L・C_M (`force_history.csv`; sern_gates の定義) | sern_forces の steadiness (tail 0.4・drift 0.02・osc 0.05) |
 | ベル TP (`spec_bell`) | 推力系 4 列・ṁ (`thrust_history.csv`; tp_gates (ii) の列) | tp_gates (ii) の drift・osc (推力系 1.5e-4、ṁ 1e-3) |
@@ -156,7 +156,12 @@ def write_spec(run_dir, spec: dict) -> Path:
 
 
 def _qty(name, definition, unit, region, extractor, *, criterion="relative", thresholds=None, tail=0.4, min_points=4,
-         accept=("STEADY",), required=True) -> dict:
+         accept=("STEADY",), required=True, role=None) -> dict:
+    """仕様の量 1 つ。criterion stop_rule (停止規則の judge_rows で判定、role = stop_rule_role) は窓・閾値を書かない (run の
+    stop_rule.json の settings から読む; judge_run.normalize_spec が書いたものを誤りにする)。"""
+    if criterion == "stop_rule":
+        return {"name": name, "definition": definition, "unit": unit, "region": region, "extractor": extractor,
+                "criterion": criterion, "stop_rule_role": role, "accept": ["STEADY"], "required": required}
     q = {"name": name, "definition": definition, "unit": unit, "region": region, "extractor": extractor,
          "window": {"tail_frac": tail, "min_points": min_points}, "criterion": criterion,
          "thresholds": dict(thresholds or {"drift": 0.05, "osc": 0.10}), "accept": list(accept), "required": required}
@@ -171,21 +176,34 @@ def _conv(from_floor: str | None) -> dict:
 
 def spec_axismach(generator: str, *, stop_rule: dict | None = None, euler: bool = False, from_floor=None) -> dict:
     """axis-Mach の NS (euler=False) と Euler (True) の仕様。stop_rule: 本段で停止規則を使う run の prepare_info の stop_rule (閾値・断面)、
-    使わない run は None (θ_r は帯の位置 y_b が決まらないので量に入れない)。"""
+    使わない run は None (θ_r は帯の位置 y_b が決まらないので量に入れない)。
+    停止規則を使う NS の run は、出口コア M・質量の収支 r・θ_r を criterion stop_rule (停止規則の judge_rows そのもの、窓・閾値は run の
+    stop_rule.json の settings) で判定する (機種の受理のゲートと PASS の意味を揃える; plan tooling-convergence-and-wall-resolution-gates
+    §5.1 #12b (2)・#14a (2))。使わない NS と Euler (ゲートが無い) は今までどおり M が check_quasisteady の既定、r が停止規則の既定の絶対の閾値。"""
     from . import stop_rule as SR
     th = SR.thresholds(**{k: stop_rule[k] for k in ("window", "min_points", "r_mean_max", "r_amp_max", "theta_drift_max",
                                                      "theta_amp_max", "x_fracs") if k in (stop_rule or {})}) if stop_rule else SR.thresholds()
+    gate = bool(stop_rule) and not euler        # 機種のゲート (本段の停止規則) がある run
     csvx = lambda col: {"kind": "csv_column", "file": SERIES, "column": col, "step_column": "step"}   # noqa: E731
+    m_kw = {"criterion": "stop_rule", "role": "relative"} if gate else {}
+    r_kw = ({"criterion": "stop_rule", "role": "r"} if gate else
+            {"criterion": "absolute", "thresholds": {"abs_mean": float(th["r_mean_max"]), "abs_amp": float(th["r_amp_max"])}})
     qs = [_qty("exit_core_M", "出口コア M: 最後の列 (i = ni − 1) の η = r/r_w ∈ [0.05, 0.7] の節点の M = |U|/c の平均 "
                "(stop_rule.recorded_quantities; nozzle_report.metrics・case/70 qs_series.py と同じ定義)", "-", "出口の列 η ∈ [0.05, 0.7]",
-               csvx("exit_core_M")),
+               csvx("exit_core_M"), **m_kw),
           _qty("mass_imbalance_r", "質量の収支 r = (ṁ_in − ṁ_out)/ṁ_in: 入口の列 (i = 0)・出口の列 (i = ni − 1) の折れ線を通る流束 "
                "2π∫(ρu_x dr − ρu_r dx) r (stop_rule.mass_flows; M6 の cold_xcheck.reduce_fields と同じ式)", "-", "入口の列と出口の列",
-               csvx("r"), criterion="absolute", thresholds={"abs_mean": float(th["r_mean_max"]), "abs_amp": float(th["r_amp_max"])})]
+               csvx("r"), **r_kw)]
     notes = [f"系列 {SERIES} は確定の時点に親が書く (judge.write_axismach_series): 停止規則の記録 stop_rule.json の行 (STOP_RULE_STATE.json の "
-             "record_sha256 と一致するときだけ = 定義・出典・区間が停止規則と一致するとき)、無ければ本段の res_<N>.h5 (N > 0) から同じ式で",
-             "閾値: exit_core_M・θ_r は check_quasisteady の既定 (drift 0.05・osc 0.10; 共通の検査)、r は停止規則の絶対の閾値 "
-             f"(|平均| ≤ {th['r_mean_max']:g}・振幅 ≤ {th['r_amp_max']:g}、末尾窓 4 割)。設計の受理 (停止規則の到達・受け渡しの関門) は各ゲートに残る"]
+             "record_sha256 と一致するときだけ = 定義・出典・区間が停止規則と一致するとき)、無ければ本段の res_<N>.h5 (N > 0) から同じ式で"]
+    if gate:
+        notes.append("閾値: exit_core_M・r・θ_r は criterion stop_rule = 停止規則の judge_rows そのもの (窓・閾値・断面は run の stop_rule.json "
+                     f"の settings; 準備の時点の値は窓 {th['window']} step・{th['min_points']} 点、r は |窓の平均| ≤ {th['r_mean_max']:g}・"
+                     f"振幅 ≤ {th['r_amp_max']:g}、θ_r と出口コア M は D ≤ {th['theta_drift_max']:g}・振幅/|平均| ≤ {th['theta_amp_max']:g})。"
+                     "系列の最後の出力の時点で判定し、停止規則の到達 (stop_rule の項目) とは別の判定として並べる (照合は stop_rule_cross)")
+    else:
+        notes.append("閾値: exit_core_M は check_quasisteady の既定 (drift 0.05・osc 0.10; 共通の検査)、r は停止規則の既定の絶対の閾値 "
+                     f"(|平均| ≤ {th['r_mean_max']:g}・振幅 ≤ {th['r_amp_max']:g}、末尾窓 4 割)。設計の受理 (停止規則の到達・受け渡しの関門) は各ゲートに残る")
     if euler:
         notes.append("Euler: 本段の出力が 4 枚 (min_points) に届かなければ準定常は INDETERMINATE (窓の不足; 理由つきの適用外にはしない — "
                      "軸 M などの報告する量があるので)")
@@ -193,7 +211,8 @@ def spec_axismach(generator: str, *, stop_rule: dict | None = None, euler: bool 
         for f in th["x_fracs"]:
             k = SR.theta_key(f)
             qs.append(_qty(k, f"x = {f:g}·x_w (設計壁の出口 physical_wall.domain[1] に対する比) の一定 x の断面の運動量厚さ θ_r (帯の外縁 y_b は "
-                           "本段の最初の出力 × 固定の Euler 参照で固定; stop_rule.theta_r_sections)", "r_t", f"x/x_w = {f:g} の断面", csvx(k)))
+                           "本段の最初の出力 × 固定の Euler 参照で固定; stop_rule.theta_r_sections)", "r_t", f"x/x_w = {f:g} の断面", csvx(k),
+                           criterion="stop_rule", role="theta"))
     else:
         notes.append("θ_r は量に入れない: 本段で停止規則を使わない (帯の位置 y_b を決める Euler 参照が無い) run")
     return {"judge_spec_version": 1, "source": f"generator:{generator}", "convergence": _conv(from_floor),

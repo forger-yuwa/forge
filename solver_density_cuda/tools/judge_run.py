@@ -20,7 +20,7 @@ r"""計算の後の判定を 1 本にまとめる (plan tooling-convergence-and-
 | `physical` | 最終の場の `ro`>0・`P`>0・`T`>0 (`P`・`T` はあれば) と**静圧 ≤ 全圧** (`total_quantities.total_state`: `VALUE/h0` から全温・全圧; `P > P0·(1 + PT_REL_TOL)` の点が 1 つでもあれば FAIL、P・T が有限で正なのに全圧が非有限の点も FAIL) | 最終の場・`ro` が無い・静圧 ≤ 全圧を確かめられない (`h0` が無い・`thermalMethod` が未対応・物性 (`cp`・`gamma`・種の記録) が読めない) |
 | `convergence` | `check_convergence.py` (仕様の mode: auto は manifest があれば `--segment`、無ければ**単段と確かめられたとき**だけ履歴全体)。PASS は終了 0、列の DIVERGED・RISING・STALLED・still converging・ABOVE FLOOR は FAIL | 判定不能の行・参照の拒否・単段と確かめられない・非定常で仕様が無い |
 | `stop_rule` | `STOP_RULE_STATE.json` (無ければ `stop_rule.json`) の状態を**そのまま** (`raw`) 記録。REACHED→PASS、CENSORED・DIVERGED・EXEC_ERROR→FAIL、UNAVAILABLE・NOT_USED→NOT_APPLICABLE | DATA_ERROR・MISSING (prepare_info.json が要求したのに状態が無い)・RUNNING・記録が読めない |
-| `quasisteady` | 仕様の量だけ (`check_quasisteady.classify_series`)。要求した量と評価した量の完全一致を照合。必須の量の FAIL (NONFINITE・DRIFTING・TRANSIENT-UNSETTLED・受け入れない OSCILLATING) は FAIL | 仕様が無い (対象未設定)・系列・列・量が無い・step の重複・逆行・点数や窓の不足・抽出が適用不能 |
+| `quasisteady` | 仕様の量だけ (criterion relative = `check_quasisteady.classify_series`、absolute = 末尾窓の \|平均\|・振幅、stop_rule = 停止規則の `judge_rows` そのもの)。要求した量と評価した量の完全一致を照合。必須の量の FAIL (NONFINITE・DRIFTING・TRANSIENT-UNSETTLED・OFFSET・受け入れない OSCILLATING) は FAIL。stop_rule の量は停止規則の到達と並べた照合を `stop_rule_cross` に記録 | 仕様が無い (対象未設定)・系列・列・量が無い・step の重複・逆行・点数や窓の不足・抽出が適用不能・stop_rule で `stop_rule.json` の settings が無い |
 | `wall_resolution` | 実効の粘性と境界条件で適用を決め (`wall_resolution_applies`: 定数粘性 `viscMethod 0` も粘性)、全 no-slip 壁 (kind wall*) の最後の step の出力で `check_wall_resolution.py --step N --groups <全壁> --weight area` | 壁の出力が欠ける・要る量が無い・ツールの行が全壁・step N で揃わない・仕様の applies が実効と違う |
 
 **総合 (真理値表)**: 必須の項目のどれかが FAIL → FAIL (判定不能が併存しても**既知の FAIL を隠さない**); FAIL が無く INDETERMINATE が
@@ -73,6 +73,12 @@ runner は全部の段 (S1・stages=none の本段を含む) で `FORGE_JUDGE_DE
           "thresholds": {"drift": 0.05, "osc": 0.10},       # relative: classify の --drift・--osc
           #  absolute (0 を横切る量、例 質量の収支 r): 末尾窓の |平均| ≤ abs_mean かつ 振幅 (最大 − 最小)/2 ≤ abs_amp で STEADY、
           #  振幅の超過は OSCILLATING、|平均| の超過は OFFSET (受け入れられない)。"thresholds": {"abs_mean": 5e-4, "abs_amp": 5e-3}
+          #  stop_rule (機種に停止規則のゲートがある量; plan §5.1 #14a (2)): 停止規則の判定の関数
+          #  design/forge_design/evaluate/stop_rule.py の judge_rows そのもので系列の最後の点の時点を判定する。窓・閾値・断面は run の
+          #  stop_rule.json の settings から (無ければ判定不能)。thresholds・window は書かない、accept は [STEADY] だけ。
+          #  "stop_rule_role": "r" (judge_rows の r: |窓の平均| ≤ r_mean_max・振幅 ≤ r_amp_max) | "theta" (θ_r の断面; 列名は
+          #  settings の x_fracs の theta_key) | "relative" (θ_r と同じ式・閾値の別の量、例 出口コア M)。窓の不足は INDETERMINATE、
+          #  条件の外は OFFSET (r の |平均|)・DRIFTING (D)・OSCILLATING (振幅)
           "accept": ["STEADY"],                # 合格にする判定 (OSCILLATING を入れたら平均±振幅で報告すること)
           "required": true                     # false なら参考 (総合に入れない)
         }]
@@ -147,7 +153,13 @@ STOP_STATUS = {"REACHED": "PASS", "CENSORED": "FAIL", "DIVERGED": "FAIL", "EXEC_
 MONITOR_STOP_RC = (143, 137, -15, -9)          # SIGTERM / SIGKILL (run_case.sh は 128+sig、Python の subprocess は −sig)
 QS_SNAPSHOT = ("shock", "asym", "machmax", "pmax", "theta", "cf_retheta", "cf_momentum")
 QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING")      # accept に書けるもの (absolute の OFFSET は書けない)
-QS_CRITERIA = ("relative", "absolute")
+QS_CRITERIA = ("relative", "absolute", "stop_rule")
+# criterion stop_rule (plan §5.1 #14a (2)): 停止規則の判定の関数 `stop_rule.judge_rows` そのものを呼ぶ (定義を二重に持たない)。
+# 量の役: r = 質量の収支 (|窓の平均|・振幅)、theta = θ_r の断面 (列名 = settings の x_fracs の theta_key)、relative = θ_r と同じ式・閾値の別の量
+STOP_RULE_ROLES = ("r", "theta", "relative")
+STOP_RULE_PY = os.path.join(ROOT, "design", "forge_design", "evaluate", "stop_rule.py")
+STOP_RULE_MOD = "forge_design.evaluate.stop_rule"
+EXTRA_TOOLS = {"design/forge_design/evaluate/stop_rule.py": STOP_RULE_PY}      # 道具の sha256 に入れる (tools の外)
 # 静圧 ≤ 全圧の許容 (P > P0·(1 + PT_REL_TOL) を違反とする)。float32 の出力 (h0・T・P) の丸めで、よどみ点の近くの P/P0 − 1 は
 # 正になる (2026-10-15 実測、最終の場: case/57・case/56 の 25 run で最大 6.4e-7 (CPG 5.2e-7〜6.4e-7、TP 1.6e-7〜2.7e-7)、
 # case/45 run_0138_rerun_fullpath_blk4 (イソブタン TP) 1.0e-6; 倍精度の case/57 run_0016_t3a_lm_double は 1.1e-15)。許容はその約 10 倍
@@ -382,7 +394,7 @@ def normalize_spec(raw, from_json):
             for i, it in enumerate(qs):
                 w = "quasisteady.quantities[%d]" % i
                 _only(it, ("name", "definition", "unit", "region", "extractor", "segment", "window", "criterion", "thresholds",
-                           "accept", "required"), w)
+                           "accept", "required", "stop_rule_role"), w)
                 nm = _need(it, "name", str, w, required=True)
                 if nm in names:
                     raise SpecError("%s.name %r が重複" % (w, nm))
@@ -417,32 +429,53 @@ def normalize_spec(raw, from_json):
                 if crit not in QS_CRITERIA:
                     raise SpecError("%s.criterion %r は %s のどれか" % (w, crit, list(QS_CRITERIA)))
                 th = it.get("thresholds") or {}
+                role = it.get("stop_rule_role")
+                if crit != "stop_rule" and role is not None:
+                    raise SpecError("%s.stop_rule_role は criterion stop_rule のときだけ" % w)
                 if crit == "relative":
                     _only(th, ("drift", "osc"), w + ".thresholds")
                     thn = {"drift": _need(th, "drift", float, w + ".thresholds", 0.05),
                            "osc": _need(th, "osc", float, w + ".thresholds", 0.10)}
-                else:
+                elif crit == "absolute":
                     _only(th, ("abs_mean", "abs_amp"), w + ".thresholds")
                     thn = {"abs_mean": _need(th, "abs_mean", float, w + ".thresholds", required=True),
                            "abs_amp": _need(th, "abs_amp", float, w + ".thresholds", required=True)}
+                else:
+                    # 閾値・窓は run の stop_rule.json の settings (停止規則の見張りが使った値) から読む。仕様に書くと読み手が
+                    # 仕様の値で判定したと誤解するので誤りにする
+                    if th or wn:
+                        raise SpecError("%s: criterion stop_rule では thresholds・window を書かない (閾値・窓は run の "
+                                        "stop_rule.json の settings から)" % w)
+                    if role not in STOP_RULE_ROLES:
+                        raise SpecError("%s.stop_rule_role %r は %s のどれか (criterion stop_rule では必須)" % (w, role, list(STOP_RULE_ROLES)))
+                    thn = {}
                 if any(v <= 0.0 for v in thn.values()):
                     raise SpecError("%s.thresholds は正の数 (%r)" % (w, thn))
                 acc = it.get("accept", ["STEADY"])
                 if not isinstance(acc, list) or not acc or any(a not in QS_VERDICTS for a in acc):
                     raise SpecError("%s.accept は %s の空でないリスト (%r)" % (w, list(QS_VERDICTS), acc))
-                win = {"tail_frac": _need(wn, "tail_frac", float, w + ".window", 0.4),
-                       "min_points": _need(wn, "min_points", int, w + ".window", 4),
-                       "min_tail_span": _need(wn, "min_tail_span", float, w + ".window", 0.0)}
-                if not (0.0 < win["tail_frac"] <= 1.0) or win["min_points"] < 2 or win["min_tail_span"] < 0:
-                    raise SpecError("%s.window の値の範囲 (tail_frac (0,1]・min_points ≥ 2・min_tail_span ≥ 0)" % w)
-                items.append({
+                if crit == "stop_rule":
+                    if acc != ["STEADY"]:
+                        raise SpecError("%s.accept は criterion stop_rule では [STEADY] だけ (PASS の意味を停止規則の条件と揃える; %r)"
+                                        % (w, acc))
+                    win = None
+                else:
+                    win = {"tail_frac": _need(wn, "tail_frac", float, w + ".window", 0.4),
+                           "min_points": _need(wn, "min_points", int, w + ".window", 4),
+                           "min_tail_span": _need(wn, "min_tail_span", float, w + ".window", 0.0)}
+                    if not (0.0 < win["tail_frac"] <= 1.0) or win["min_points"] < 2 or win["min_tail_span"] < 0:
+                        raise SpecError("%s.window の値の範囲 (tail_frac (0,1]・min_points ≥ 2・min_tail_span ≥ 0)" % w)
+                item = {
                     "name": nm, "definition": _need(it, "definition", str, w, required=True),
                     "unit": _need(it, "unit", str, w, required=True), "region": _need(it, "region", str, w, required=True),
                     "extractor": exn,
                     "segment": {"step_min": _need(sg, "step_min", float, w + ".segment", None),
                                 "step_max": _need(sg, "step_max", float, w + ".segment", None)},
                     "window": win, "criterion": crit, "thresholds": thn,
-                    "accept": list(acc), "required": _need(it, "required", bool, w, True)})
+                    "accept": list(acc), "required": _need(it, "required", bool, w, True)}
+                if crit == "stop_rule":
+                    item["stop_rule_role"] = role
+                items.append(item)
             out["quasisteady"] = {"quantities": items}
     wr = raw.get("wall_resolution")
     if wr is None:
@@ -937,7 +970,133 @@ def classify_absolute(steps, vals, tail_frac, abs_mean, abs_amp):
     return "STEADY", detail, (m, a)
 
 
-def check_quasisteady(run, spec_info):
+def stop_rule_module():
+    """停止規則の判定の関数を持つ `design/forge_design/evaluate/stop_rule.py` (この作業ツリーのもの) を読む。既に読まれていればそれを使い、
+    この作業ツリーの STOP_RULE_PY でなければ ImportError (別の作業ツリーの judge_rows で判定しない)。"""
+    mod = sys.modules.get(STOP_RULE_MOD)
+    if mod is None:
+        design = os.path.join(ROOT, "design")
+        added = design not in sys.path
+        if added:
+            sys.path.insert(0, design)
+        try:
+            import importlib
+            mod = importlib.import_module(STOP_RULE_MOD)
+        finally:
+            if added and design in sys.path:
+                sys.path.remove(design)
+    if os.path.realpath(getattr(mod, "__file__", "") or "") != os.path.realpath(STOP_RULE_PY):
+        raise ImportError("読んだ %s が %s でない (%s)" % (STOP_RULE_MOD, _rel(STOP_RULE_PY), getattr(mod, "__file__", None)))
+    return mod
+
+
+def stop_rule_settings(run):
+    """criterion stop_rule の窓・閾値・断面: run の `stop_rule.json` の `settings` (停止規則の見張りが使った値) を
+    `stop_rule.thresholds` で検査したもの。戻り (モジュール か None, 閾値 か None, 出所の記録, 誤り か None)。
+    stop_rule.json・settings・キーが無い・不正 → 誤り (その量は判定不能)。"""
+    info = {"file": "stop_rule.json", "function": "%s: judge_rows" % _rel(STOP_RULE_PY)}
+    try:
+        SR = stop_rule_module()
+    except Exception as e:                                                        # noqa: BLE001
+        return None, None, info, "停止規則の判定の関数 (%s) を読めない (%s: %s)" % (_rel(STOP_RULE_PY), type(e).__name__, str(e)[:200])
+    p = os.path.join(run, "stop_rule.json")
+    if not os.path.isfile(p):
+        return SR, None, info, "stop_rule.json が無い (criterion stop_rule の窓・閾値は停止規則の記録の settings から読む)"
+    info["sha256"] = _sha256_file(p)
+    try:
+        with open(p, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        return SR, None, info, "stop_rule.json を読めない (%s)" % e
+    st = doc.get("settings") if isinstance(doc, dict) else None
+    if not isinstance(st, dict):
+        return SR, None, info, "stop_rule.json に settings が無い"
+    keys = list(SR.thresholds())                 # 停止規則の判定が読む設定のキー (window・min_points・閾値 4 つ・x_fracs)
+    miss = [k for k in keys if st.get(k) is None]
+    if miss:
+        return SR, None, info, "stop_rule.json の settings に %s が無い" % miss
+    try:
+        th = SR.thresholds(**{k: st[k] for k in keys})
+    except ValueError as e:
+        return SR, None, info, "stop_rule.json の settings が停止規則の設定として不正 (%s)" % e
+    info["settings"] = th
+    return SR, th, info, None
+
+
+def judge_stop_rule_item(SR, th, steps, vals, role, column):
+    """criterion stop_rule の 1 量: 停止規則の `judge_rows` そのもの (窓・式・閾値は th = stop_rule.json の settings) で系列の最後の点の
+    時点を判定する。role r は judge_rows の r (|窓の平均| ≤ r_mean_max・振幅 ≤ r_amp_max)、theta は θ_r の断面 (列名が settings の
+    x_fracs の theta_key のどれか)、relative は judge_rows の relative_keys (θ_r と同じ式・閾値; 出口コア M)。
+    戻り (verdict, detail, judge_rows の該当部分, (平均, 振幅) か None)。verdict は STEADY (条件を満たす) / OFFSET (|平均| の超過) /
+    DRIFTING (D の超過) / OSCILLATING (振幅の超過) / INDETERMINATE (窓の不足・平均 0 などで判定できない)。呼ぶ前に非有限・step の単調性は
+    検査済み。"""
+    if role == "r":
+        key, kw = "r", {"x_fracs": []}
+    elif role == "theta":
+        fr = [f for f in th["x_fracs"] if SR.theta_key(f) == column]
+        if not fr:
+            return ("INDETERMINATE", "θ_r の列 %s が停止規則の settings の断面 %s のどれでもない"
+                    % (column, [SR.theta_key(f) for f in th["x_fracs"]]), None, None)
+        key, kw = column, {"x_fracs": fr}
+    else:
+        key, kw = column, {"x_fracs": [], "relative_keys": (column,)}
+    rows = [{"step": int(s) if float(s).is_integer() else float(s), key: float(x)} for s, x in zip(steps, vals)]
+    j = SR.judge_rows(rows, **{**th, **kw})
+    part = {k: j[k] for k in ("step", "n_window", "history_span", "covers", "half_step_gap") if k in j}
+    if "r_mean" not in j:                        # 窓の不足 (履歴が窓を覆わない・窓の点数が足りない・前半か後半に出力が無い)
+        return ("INDETERMINATE", "窓の不足: %s (停止規則の窓 %d step・%d 点以上; judge_rows)" % (j.get("why"), th["window"],
+                                                                                         th["min_points"]), part, None)
+    where = "step %s の窓 %d step・%d 点 (judge_rows)" % (j["step"], th["window"], j["n_window"])
+    if role == "r":
+        m, a, ok = j["r_mean"], j["r_amp"], j["r_ok"]
+        part.update(r_mean=m, r_amp=a, r_ok=ok)
+        detail = "|窓の平均| %.4g (≤ %g)  振幅 %.4g (≤ %g)  [%s]" % (abs(m), th["r_mean_max"], a, th["r_amp_max"], where)
+        if ok:
+            return "STEADY", detail, part, (m, a)
+        if not (math.isfinite(m) and math.isfinite(a)):
+            return "INDETERMINATE", detail + "  -> 窓の量が有限でない", part, None
+        return ("OFFSET" if abs(m) > th["r_mean_max"] else "OSCILLATING"), detail, part, (m, a)
+    t = (j["theta"] if role == "theta" else j["relative"])[key]
+    part.update(t)
+    detail = ("D %.3g (≤ %g /%d step)  振幅/|平均| %.3g (≤ %g)  窓の平均 %.6g  [%s]"
+              % (t["D"], th["theta_drift_max"], th["window"], t["amp"], th["theta_amp_max"], t["mean"], where))
+    ma = (t["mean"], t["amp"] * abs(t["mean"])) if math.isfinite(t["amp"]) else None
+    if t["ok"]:
+        return "STEADY", detail, part, ma
+    if not (math.isfinite(t["D"]) and math.isfinite(t["amp"])):
+        return "INDETERMINATE", detail + "  -> 窓の平均が 0 (相対の量にできない)", part, None
+    return ("DRIFTING" if t["D"] > th["theta_drift_max"] else "OSCILLATING"), detail, part, ma
+
+
+def stop_rule_cross(items, results, stop, SR, th):
+    """停止規則の到達 (STOP_RULE_STATE.json の REACHED) と、criterion stop_rule の停止規則の量 (役 r・theta) の判定を並べる
+    (plan §5.1 #14a (2): 別の判定として並べ、一致しないときは両方を記録)。同じ judge_rows なので、系列が停止規則の記録の行で最後の点が
+    止めた出力なら普通は一致する。一致しない例: 保持の途中で上限に届いた CENSORED (最後の点は条件を満たす)・系列の出所が違う。
+    総合はどちらもそれぞれの項目で入っているので、ここは照合の記録だけ (総合を変えない)。対象の量が無ければ None。"""
+    mine = [it for it in items if it["criterion"] == "stop_rule" and it["stop_rule_role"] in ("r", "theta")]
+    if not mine:
+        return None
+    raw = (stop or {}).get("raw")
+    q = {it["name"]: results[it["name"]]["status"] for it in mine}
+    out = {"stop_rule_state": raw, "stop_rule_source": (stop or {}).get("source"), "quantities": q, "agree": None}
+    covered = sorted("r" if it["stop_rule_role"] == "r" else it["extractor"]["column"] for it in mine)
+    want = sorted(["r"] + [SR.theta_key(f) for f in th["x_fracs"]]) if (SR is not None and th is not None) else None
+    if raw not in ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR") or not (stop or {}).get("final"):
+        out["note"] = "停止規則の状態 %s (%s) は到達の判定と比べない" % (raw, (stop or {}).get("source"))
+    elif "INDETERMINATE" in q.values():
+        out["note"] = "criterion stop_rule に判定不能の量がある (比べない)"
+    elif want is not None and covered != want:
+        out["note"] = "criterion stop_rule の量 %s が停止規則の量 %s と揃わない (比べない)" % (covered, want)
+    else:
+        reached, all_pass = raw == "REACHED", all(s == "PASS" for s in q.values())
+        out.update(agree=(reached == all_pass), criterion_all_pass=all_pass)
+        out["note"] = ("一致 (停止規則 %s・criterion stop_rule の r・θ_r %s)" % (raw, "全 PASS" if all_pass else "PASS でない量あり")
+                       if reached == all_pass else
+                       "不一致 (両方を記録): 停止規則 %s、criterion stop_rule の r・θ_r %s" % (raw, q))
+    return out
+
+
+def check_quasisteady(run, spec_info, stop=None):
     spec = spec_info.get("spec")
     if spec_info.get("error"):
         return _check("INDETERMINATE", spec_info["error"])
@@ -952,6 +1111,7 @@ def check_quasisteady(run, spec_info):
     items = q["quantities"]
     results = {}
     series = {}
+    sr_ctx = None                                # criterion stop_rule の (モジュール, 閾値, 出所, 誤り) (要るときに 1 度だけ読む)
     # 抽出: csv_column は 1 本ずつ、snapshot は抽出の設定ごとにまとめて res_<N>.h5 を 1 回ずつ読む
     snap_groups = {}
     for it in items:
@@ -1006,6 +1166,33 @@ def check_quasisteady(run, spec_info):
             results[nm] = _check("INDETERMINATE", "step が単調に増えない (重複 %d・逆行 %d)" %
                                  (int(np.count_nonzero(ds == 0)), int(np.count_nonzero(ds < 0))), **r)
             continue
+        if it["criterion"] == "stop_rule":
+            # 停止規則の judge_rows そのもので判定 (窓・閾値は run の stop_rule.json の settings; 仕様の window は使わない)
+            if sr_ctx is None:
+                sr_ctx = stop_rule_settings(run)
+            SRm, th_sr, info, err = sr_ctx
+            r.update(criterion="stop_rule", stop_rule_role=it["stop_rule_role"],
+                     stop_rule_source={k: info.get(k) for k in ("file", "sha256", "function")})
+            if err:
+                results[nm] = _check("INDETERMINATE", "criterion stop_rule: %s" % err, **r)
+                continue
+            try:
+                verdict, detail, part, ma = judge_stop_rule_item(SRm, th_sr, s, v, it["stop_rule_role"],
+                                                                 it["extractor"].get("column") or nm)
+            except Exception as e:                                                # noqa: BLE001
+                results[nm] = _check("INDETERMINATE", "criterion stop_rule: judge_rows の例外 (%s: %s)" % (type(e).__name__, str(e)[:200]),
+                                     **r)
+                continue
+            r.update(verdict=verdict, detail=detail, stop_rule_judge=part)
+            if ma is not None:
+                r.update(mean=float(ma[0]), amp=float(ma[1]))
+            if verdict in it["accept"]:
+                results[nm] = _check("PASS", "%s  %s" % (verdict, detail), **r)
+            elif verdict == "INDETERMINATE":
+                results[nm] = _check("INDETERMINATE", detail, **r)
+            else:
+                results[nm] = _check("FAIL", "%s  %s" % (verdict, detail), **r)
+            continue
         win = it["window"]
         if len(v) < win["min_points"]:
             results[nm] = _check("INDETERMINATE", "窓の不足: 点数 %d < min_points %d" % (len(v), win["min_points"]), **r)
@@ -1043,7 +1230,13 @@ def check_quasisteady(run, spec_info):
     why = ("必須の量 %d 個すべて受け入れ" % len(req)) if st == "PASS" else ("; ".join(bad) if bad else "必須の量が無い")
     if adv:
         why += " (参考の量: %s)" % ", ".join("%s %s" % (n, r["status"]) for n, r in adv.items())
-    return _check(st, why, quantities=results)
+    extra = {}
+    if sr_ctx is not None:
+        extra["stop_rule_settings"] = sr_ctx[2]
+        cross = stop_rule_cross(items, results, stop, sr_ctx[0], sr_ctx[1])
+        if cross is not None:
+            extra["stop_rule_cross"] = cross
+    return _check(st, why, quantities=results, **extra)
 
 
 def check_wall_resolution(run, cfg, cfg_err, bcond, bcond_err, spec_info):
@@ -1140,7 +1333,9 @@ def overall_of(checks):
 
 
 def tool_hashes():
-    return {t: _sha256_file(os.path.join(HERE, t)) for t in TOOLS if os.path.exists(os.path.join(HERE, t))}
+    out = {t: _sha256_file(os.path.join(HERE, t)) for t in TOOLS if os.path.exists(os.path.join(HERE, t))}
+    out.update({k: _sha256_file(p) for k, p in EXTRA_TOOLS.items() if os.path.exists(p)})
+    return out
 
 
 def collect_inputs(run, spec_info=None):
@@ -1204,6 +1399,8 @@ def render_txt(v):
         if k == "quasisteady":
             for nm, r in (c.get("quantities") or {}).items():
                 lines.append("      %-24s %-15s %s%s" % (nm, r["status"], r["reason"][:300], "" if r["required"] else "  [参考]"))
+            if c.get("stop_rule_cross"):
+                lines.append("      停止規則との照合: %s" % c["stop_rule_cross"]["note"][:300])
         if k == "convergence" and c.get("segment_lines"):
             lines.append("      %s" % c["segment_lines"][-1])
     for s in v.get("stages") or []:
@@ -1298,7 +1495,7 @@ def judge(run, args):
     else:
         checks["convergence"] = check_convergence(run, spec, cfg)
     checks["stop_rule"] = check_stop_rule(stop)
-    checks["quasisteady"] = check_quasisteady(run, spec_info)
+    checks["quasisteady"] = check_quasisteady(run, spec_info, stop)
     checks["wall_resolution"] = check_wall_resolution(run, cfg, cfg_err, bcond, bcond_err, spec_info)
     st, why = overall_of(checks)
     v = _base_record(run, args, "final")
