@@ -294,10 +294,11 @@ with patched(W, _mem_available_gb=lambda: 1.0, _cpu_count=lambda: 12):
     except RuntimeError as e:
         check("使えるメモリ 1 GB: 生産の網の算出 ⌊0.7/1.31⌋ = 0 → 評価の前に RuntimeError", "算出が 0" in str(e) and "生産の網" in str(e),
               str(e)[:160])
-pk = [W.mknot_eval_peak_gb(n) for n in (300, 600, 1200, 2400, 4800)]
-check("1 評価のピークの見積もり: 600 以下は 0.27、2400 は 1.31、間は単調、4800 は 1.31 × 2^1.6",
-      pk[0] == pk[1] == 0.27 and pk[3] == 1.31 and pk[1] < pk[2] < pk[3] and abs(pk[4] - 1.31 * 2 ** 1.6) < 1e-12,
-      str([round(x, 4) for x in pk]))
+pk = [W.mknot_eval_peak_gb(n) for n in (300, 600, 1200, 2400, 4800, 9600)]
+# 4800 は 2026-10-16 の実測 4.52 (表に足した)、それより上は 4.52 × (N/4800)^1.6 で外挿
+check("1 評価のピークの見積もり: 600 以下は 0.27、2400 は 1.31、4800 は実測 4.52、間は単調、9600 は 4.52 × 2^1.6",
+      pk[0] == 0.27 and pk[1] == 0.27 and pk[1] < pk[2] < pk[3] < pk[4] and pk[3] == 1.31 and pk[4] == 4.52
+      and abs(pk[5] - 4.52 * 2 ** W.MKNOT_EVAL_PEAK_EXP) < 1e-12, [round(v, 4) for v in pk])
 
 CARD_PHYS = card("m5_v2_phys")
 CARD_DESIGN = card("m5_v2_design", throat={"diameter_design_m": 0.050})
