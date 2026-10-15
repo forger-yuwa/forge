@@ -1,0 +1,15 @@
+
+=== /home/ubuntu/m55_diag_0003/out/monitor_series.csv  [11 rows, steps 2000..200000]  -> DRIFTING ===
+  n_P0_exceed     : tail mean=4.703e+04  drift=0.6%/tail  fluct=0.6%  [単調減少; 増分減衰から漸近値 46923.5 (最終比 -0.027 %)] STEADY
+  max_dP0_over_Pt : tail mean=0.004596  drift=1.1%/tail  fluct=1.2%  [単調増加; 増分減衰から漸近値 0.00462802 (最終比 +0.241 %)] STEADY
+  S_mean_dP0_over_Pt: tail mean=4.682e-05  drift=26.8%/tail  fluct=27.1%  (extremum at tail-end) DRIFTING
+  S_mean_h0_minus_h0in: tail mean=-4070  drift=5.1%/tail  fluct=5.2%  (extremum at tail-end) DRIFTING
+  E_in            : tail mean=1.393e+08  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.39263e+08 (最終比 -0.003 %)] STEADY
+  E_out           : tail mean=1.338e+08  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 1.33748e+08 (最終比 -0.002 %)] STEADY
+  Q_wall          : tail mean=-5.423e+06  drift=0.4%/tail  fluct=0.4%  [単調増加; 増分減衰から漸近値 -5.40913e+06 (最終比 +0.088 %)] STEADY
+  bal_plus        : tail mean=0.0007002  drift=12.9%/tail  fluct=13.1%  (extremum at tail-end) DRIFTING
+  bal_minus       : tail mean=0.07857  drift=0.3%/tail  fluct=0.3%  [単調減少; 増分減衰から漸近値 0.0784415 (最終比 -0.055 %)] STEADY
+  inlet_max_T_minus_Tt: tail mean=2.638  drift=0.1%/tail  fluct=0.1%  [単調増加; 増分減衰から漸近値 2.63895 (最終比 +0.017 %)] STEADY
+
+OVERALL: NOT ALL STEADY (see above)
+CHECK_QUASISTEADY_EXIT: 1

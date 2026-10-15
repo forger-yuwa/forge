@@ -1,0 +1,4 @@
+[/home/ubuntu/m55_diag_0003/seg/run_0003_ns_cont] stage_manifest.json が無い -> --segment は使えない (判定区間を人が明示すること)  <-- 判定不能
+
+OVERALL: CHECK FAILURES ABOVE
+CHECK_CONVERGENCE_EXIT: 1

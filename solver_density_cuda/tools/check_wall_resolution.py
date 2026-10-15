@@ -263,7 +263,8 @@ def main():
                     help="壁の各点の x,y,z・y1・y1+・ρ・接線せん断・μ・T_s を CSV に書く (壁群ごとに <名前>_<群>.csv)。"
                          "冷却壁のメッシュ設計 (局所の第一層厚を y1+ の分布から決める) に使う。判定は変えない")
     ap.add_argument("--bcond", default=None,
-                    help="--geometry-only のとき壁名を引く bcondConfig.yaml (既定は run の中)")
+                    help="壁名・境界の kind を引く bcondConfig.yaml (既定は run の中)。--geometry-only では壁名に、ダンプの判定では "
+                         "--groups が無いとき kind が wall* でない境界のダンプを対象外にするのに使う")
     a = ap.parse_args()
 
     cfg = None
@@ -303,6 +304,21 @@ def main():
     if not found:
         print("壁面ダンプ res_<群>_<physID>_<step>.h5 が無い: %s" % a.run); return 2
     want = set(x.strip() for x in a.groups.split(",")) if a.groups else None
+    # 既定 (--groups 無し) では bcondConfig.yaml で kind が wall* でない境界のダンプ (出口の outputHDFflg: 1 など) を対象外にする。
+    # 壁でない面には twall が無いので、以前は「判定不能」になって受け渡しの関門を止めていた (2026-10-15 case/71 run_0003_ns_cont)。
+    # bcond を読めない・名前が bcond に無いときは従来どおり評価する (判定を弱めない)。
+    not_wall = {}
+    if want is None:
+        bp = a.bcond or os.path.join(a.run, "bcondConfig.yaml")
+        if os.path.exists(bp):
+            try:
+                import yaml
+                for nm, d in (yaml.safe_load(open(bp)) or {}).items():
+                    if isinstance(d, dict) and "kind" in d and not str(d["kind"]).startswith("wall"):
+                        not_wall[(str(nm), int(d["physID"]))] = str(d["kind"])
+            except Exception as e:                  # noqa: BLE001
+                print("  WARNING: bcondConfig.yaml を読めない (%s) -> ダンプは全部評価する" % e)
+                not_wall = {}
 
     print("=== %s  (wallTreatmentSST=%d) ===" % (a.run, wt))
     nb = dof_neighbors(mesh)
@@ -312,6 +328,9 @@ def main():
     fails = []
     for (name, pid), lst in sorted(found.items()):
         if want and name not in want:
+            continue
+        if (name, pid) in not_wall:
+            print("  %-12s 壁でない境界の出力 (bcond kind %s) -> 対象外" % (name, not_wall[(name, pid)]))
             continue
         step, path = sorted(lst)[-1] if a.step is None else \
             next(((s, p) for s, p in lst if s == a.step), sorted(lst)[-1])

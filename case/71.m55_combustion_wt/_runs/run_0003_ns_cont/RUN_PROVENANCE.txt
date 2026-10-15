@@ -11,3 +11,5 @@ env         : FORGE_DIAG_FACE_H_DOUBLE=1
 env         : FORGE_BIN=/home/ubuntu/forge-integ-dflow2-fp64/solver_density_cuda/build/forge
 cfg         : lowMachPrecond=0 (要求値)
 cfg         : wallTreatmentSST=0 (要求値)
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)
+'scalarGradient' effective: lsq (default)

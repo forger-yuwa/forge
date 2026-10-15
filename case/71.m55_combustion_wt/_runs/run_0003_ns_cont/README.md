@@ -83,3 +83,9 @@ nohup python3 ../case/71.m55_combustion_wt/_runs/run_0003_ns_cont/cont_0003.py r
   (1 枚 100,605,412 B) で約 10.2 GB、壁の出力 1,170,416 B × 100、出口の出力、残差履歴 (約 0.12 GB)・forge の log を足して約 10.4 GB
   → 終わりの空きは約 5.6 GB (他のセッションが使わない場合)。
 - 停止規則の帯: res_2000 (この run の最初の出力) × `run_0001_euler/res_12000.h5` (sha256 照合済み)、`stop_rule_band/`。
+
+## 結果 (2026-10-15、判定区間は本段 0〜199,999)
+
+- 停止規則 CENSORED (200,000、`STOP_RULE_STATE.json` 03:15:22 UTC)。判定の原文は `judge/` (台本 `judge_0003.sh`、監視の量 `monitor_0003.py`)、δ の 2 窓は `judge/two_window_check.txt` (FAIL、measured)。
+- 数値と解釈、ユーザの決定 (関門の明示の上書きで δ* の補正へ) は plan `tooling-nozzle-card-local-mesh` §5.1 #3d・#3e、codex の採否は §6.1。
+- `judge/check_convergence_segment.txt` は judge を回した時点で `stage_manifest.json` がまだ無かった (ドライバが δ の抽出を待っていた) ので判定不能。manifest はドライバの終了 (03:15) で書かれた。
