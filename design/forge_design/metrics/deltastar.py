@@ -897,7 +897,9 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                   "beyond": [float(max(cover["x0"] - xs_all[i], xs_all[i] - cover["x1"])) for i in et]}
         out["not_extracted"].update(euler_cover=cover, edge_tol_cols=rec_et)
         out["settings"].update(euler_cover=cover, edge_tol_cols=rec_et)
-    out["massflow"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res)
+    # 流量の帳簿も抽出と同じ断面で (2026-10-15, plan tooling-nozzle-card-local-mesh §5.1 #3i): 壁法線の近壁層の格子では列が一定 x でなく、
+    # 列のままの 2π∫ρU_x r dr は断面の流量でない (case/71 run_0005_ns で −0.96 %、散らばり 2.1 %)
+    out["massflow"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res, remap_constant_x=remap_constant_x)
     if edge is not None:
         out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])
         if return_ladders:

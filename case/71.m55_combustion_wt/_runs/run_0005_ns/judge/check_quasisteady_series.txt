@@ -1,0 +1,12 @@
+
+=== /home/ubuntu/m55_diag_0005/out/stop_rule_series.csv  [100 rows, steps 2000..200000]  -> DRIFTING ===
+  r               : tail mean=0.0002532  drift=142.1%/tail  fluct=148.1%  (extremum at tail-end) DRIFTING
+  mdot_in         : tail mean=121.4  drift=0.0%/tail  fluct=0.0%  [単調減少; 増分減衰から漸近値 121.359 (最終比 -0.004 %)] STEADY
+  mdot_out        : tail mean=121.3  drift=0.0%/tail  fluct=0.0%            STEADY
+  theta_r_0.4     : tail mean=0.05244  drift=0.5%/tail  fluct=0.5%  [単調増加; 増分減衰から漸近値 0.0525723 (最終比 +0.043 %)] STEADY
+  theta_r_0.7     : tail mean=0.07852  drift=0.5%/tail  fluct=0.5%  [単調増加; 増分減衰から漸近値 0.0787027 (最終比 +0.059 %)] STEADY
+  theta_r_0.95    : tail mean=0.08931  drift=0.4%/tail  fluct=0.4%  [単調増加; 増分減衰から漸近値 0.0895057 (最終比 +0.062 %)] STEADY
+  exit_core_M     : tail mean=5.502  drift=0.0%/tail  fluct=0.0%            STEADY
+
+OVERALL: NOT ALL STEADY (see above)
+CHECK_QUASISTEADY_EXIT: 1

@@ -1,0 +1,12 @@
+{
+ "proceed": false,
+ "blocked_by": [
+  "停止の状態 CENSORED (REACHED が要る; 明示の上書き allow_not_reached が無い)",
+  "収束の判定 NOT_CONVERGED (check_convergence.py --segment の終了コード 1; 明示の上書き allow_unconverged が無い)",
+  "δ_E・δ_target の 2 窓: delta_E.range_W1 0.06024 mm (x 23.38); delta_E.range_W2 0.01658 mm (x 23.33); delta_E.mean_diff 0.02069 mm (x 23.33); delta_target.range_W1 0.027 mm (x 23.01)"
+ ],
+ "settled": false
+}
+Traceback (most recent call last):
+  File "<stdin>", line 5, in <module>
+AttributeError: 'int' object has no attribute 'items'

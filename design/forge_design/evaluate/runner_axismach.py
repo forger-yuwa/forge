@@ -1229,7 +1229,9 @@ def collect(problem_path, run_dir) -> dict:
     if info.get("euler_ref"):
         try:
             from ..metrics.deltastar import massflow_ratio
-            mf = massflow_ratio(run_dir, info["euler_ref"])
+            # 一定 x の断面で積分 (plan tooling-nozzle-card-local-mesh §5.1 #3i): 列のままは壁法線の近壁層の格子で断面の流量でない
+            # (case/71 run_0005_ns: 列 120.19 kg/s・散らばり 2.1 % → 一定 x 121.350 kg/s・6.4e−5)。列が一定 x の格子では値は同じ
+            mf = massflow_ratio(run_dir, info["euler_ref"], remap_constant_x=True)
         except Exception as e:  # noqa: BLE001 — 帳簿は診断
             mf = {"error": str(e)}
     out = {"res_file": res[-1].name,

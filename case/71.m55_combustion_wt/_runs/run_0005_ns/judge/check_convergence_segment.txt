@@ -1,0 +1,15 @@
+  [segment] 判定区間 = main  (600000 行) -> /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0005_ns/residual_history_segment.csv
+
+=== /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0005_ns  [last step 199999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=1.28e-05 peak=2.30e-05 fin=4.75e-08 drop= 2.7dec falling  <-- still converging
+  rms_roUx    : init=1.68e-02 peak=3.16e-02 fin=2.19e-05 drop= 3.2dec falling
+  rms_roUy    : init=6.99e-03 fin=1.12e-05 drop= 2.8dec flat     <-- STALLED (plateau)
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=1.44e+01 peak=2.34e+01 fin=6.20e-02 drop= 2.6dec flat     <-- STALLED (plateau)
+  rms_roK     : init=8.19e-02 peak=1.10e-01 fin=6.34e-05 drop= 3.4dec falling
+  rms_roOmega : init=8.73e+04 fin=3.94e+01 drop= 3.3dec flat   
+  rms_roY0    : init=1.17e-05 peak=2.10e-05 fin=4.29e-08 drop= 2.7dec falling  <-- still converging
+  rms_roY1    : init=1.10e-06 peak=1.97e-06 fin=4.03e-09 drop= 2.7dec falling  <-- still converging
+
+OVERALL: CHECK FAILURES ABOVE
+CHECK_CONVERGENCE_EXIT: 1
