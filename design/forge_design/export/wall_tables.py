@@ -5,6 +5,7 @@ r"""Excel 向けの壁の表 (plans/accepted/tooling-nozzle-wt-deliverables.md �
 - `wall_heat_series`: 全 `res_<壁名>_<physID>_<step>.h5` の総熱量の時系列 (`check_quasisteady.py --series-csv` の入力)。
 - `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・熱量の準定常 [総熱量と壁の全節点の熱量、16 区間の和は補助]・壁解像・熱量の状態)。
 - `write_xlsx`: 上の CSV と条件・注記を `.xlsx` に (`.venv-pptx` の xlsxwriter を subprocess で呼ぶ)。
+- `table_x_mm`: 形状表の x の点 (粗 1 mm・スロート付近 0.1 mm)。設計壁と物理壁の比較の表 (`wall_compare.py`) も同じ点を使う。
 
 **熱量の正本** (plan §3・§4.5、codex plan レビュー M1・M3): 壁へ入る熱は積分済みの節点熱量 `iface_Qf_eff` (固体向き正、
 `methods/boundary.md`「界面熱量の 4 つの定義」) から作る。軸対称 (`mesh.isAxisymmetric: 1`・`axisymMethod: 0`) では流体の面ベクトルが
@@ -81,6 +82,19 @@ def _write_csv(path: Path, columns, cols_data) -> None:
 # 形状表
 # ---------------------------------------------------------------------------------------------------------------------
 
+def table_x_mm(X0: float, X1: float, s_mm: float, coarse_mm: float = 1.0, fine_per_mm: int = 10,
+               throat_half_width_mm: float | None = None) -> tuple:
+    """表の x の点 [mm] (形状表と壁の比較の表で共通): `coarse_mm` ごと + スロート付近 ($|x| \\le$ hw) は 1/`fine_per_mm` mm ごと、
+    両端 X0・X1 を含む。hw の既定は $\\max(50\\,\\mathrm{mm}, 2 r_t)$ (`s_mm` = r_t [mm])。戻り: (x の点, hw)。"""
+    hw = max(50.0, 2.0 * s_mm) if throat_half_width_mm is None else float(throat_half_width_mm)
+    k0, k1 = math.ceil(X0 / coarse_mm), math.floor(X1 / coarse_mm)
+    xc = np.arange(k0, k1 + 1, dtype=float) * coarse_mm
+    f0, f1 = math.ceil(max(-hw, X0) * fine_per_mm), math.floor(min(hw, X1) * fine_per_mm)
+    xf = np.arange(f0, f1 + 1, dtype=float) / float(fine_per_mm)  # k/10 は 10 進の 0.1 刻みに最も近い浮動小数 (repr で短く出る)
+    xm = np.unique(np.r_[xc, xf, X0, X1])
+    return xm[(xm >= X0) & (xm <= X1)], hw
+
+
 def shape_table(wall_file_dir_or_json, out_csv, coarse_mm: float = 1.0, fine_per_mm: int = 10,
                 throat_half_width_mm: float | None = None, n_sub: int = 16) -> dict:
     """物理壁の形状表 (plan §4.5): 1 mm ごと + スロート付近 ($|x| \\le \\max(50\\,\\mathrm{mm}, 2 r_t)$) は 0.1 mm ごと、両端を含む。
@@ -100,13 +114,7 @@ def shape_table(wall_file_dir_or_json, out_csv, coarse_mm: float = 1.0, fine_per
     s_mm = 1000.0 * float(W["scale_m"])                       # r_t → mm
     x0, x1 = (float(v) for v in W["domain"])                  # r_t
     X0, X1 = x0 * s_mm, x1 * s_mm
-    hw = max(50.0, 2.0 * s_mm) if throat_half_width_mm is None else float(throat_half_width_mm)
-    k0, k1 = math.ceil(X0 / coarse_mm), math.floor(X1 / coarse_mm)
-    xc = np.arange(k0, k1 + 1, dtype=float) * coarse_mm
-    f0, f1 = math.ceil(max(-hw, X0) * fine_per_mm), math.floor(min(hw, X1) * fine_per_mm)
-    xf = np.arange(f0, f1 + 1, dtype=float) / float(fine_per_mm)  # k/10 は 10 進の 0.1 刻みに最も近い浮動小数 (repr で短く出る)
-    xm = np.unique(np.r_[xc, xf, X0, X1])
-    xm = xm[(xm >= X0) & (xm <= X1)]
+    xm, hw = table_x_mm(X0, X1, s_mm, coarse_mm, fine_per_mm, throat_half_width_mm)
 
     def ev(x_mm, d=0):
         return phys.r(np.clip(np.asarray(x_mm, dtype=float) / s_mm, x0, x1), d)
@@ -826,6 +834,17 @@ if wtj:
         r0 += 1
     ws.freeze_panes(h1 + 1, 0)
     info["wall_temperature"] = {"n_rows": len(wtj["rows"]), "columns": wtj["columns"]}
+wcj = job.get("wall_compare")
+if wcj:
+    # 設計壁と物理壁の比較の表 (CSV のまま) と、表の右に注記 (区間・定義域・空欄の意味)
+    hdr_c, _ = put_csv("wall_compare", wcj["csv"])
+    ws = wb.get_worksheet_by_name("wall_compare")
+    nc = len(hdr_c) + 1
+    ws.write_string(0, nc, "注記", bold)
+    for i, t in enumerate(wcj["notes"], 1):
+        ws.write_string(i, nc, t)
+    info["wall_compare"]["notes_column"] = nc
+    info["wall_compare"]["n_notes"] = len(wcj["notes"])
 wb.close()
 done({"written": True, "skipped": False, "sheets": sheets, "info": info, "xlsxwriter": xlsxwriter.__version__})
 '''
@@ -850,7 +869,7 @@ def _flatten(d, pre=""):
 
 def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None = None, notes: list | None = None,
                python: str | None = None, wall_1d: dict | None = None, timeout: int = 600, thermal_use: str | None = None,
-               wall_temperature: dict | None = None) -> dict:
+               wall_temperature: dict | None = None, wall_compare: dict | None = None) -> dict:
     """形状表・CFD 壁面量表・条件・注記を `.xlsx` に書く (plan §4.5)。xlsxwriter は design の venv に無いので
     `.venv-pptx` の python (`python`、既定 `PPTX_PY`) を subprocess で呼ぶ。python か xlsxwriter が無ければ書かずに
     `{"written": False, "skipped": True, "reason": ...}` を返す (呼び出し側が飛ばしたことを MANIFEST・README に書く)。
@@ -858,7 +877,9 @@ def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None =
     各壁節点の T_back_K = T_w − q t / k)。`wall_1d` = {"t_m": .., "k_W_mK": ..} で入力セルの初期値 (既定は空欄)。
     `wall_temperature` (壁温分布の run だけ; plan tooling-nozzle-wall-temperature-profile §4.4) = {"lines": [説明の行],
     "anchors": [[名前, x_m]], "columns": [列名], "rows": [[数値]]} を渡すと最後に専用シート `wall_temperature` を足す
-    (None なら今までどおり; ほかのシートの並びは変えない)。"""
+    (None なら今までどおり; ほかのシートの並びは変えない)。
+    `wall_compare` (設計壁と物理壁の比較; plan tooling-nozzle-card-local-mesh §5.1 #3u) = {"csv": 比較の表の CSV, "notes": [注記の行]}
+    を渡すと最後にシート `wall_compare` (表と、その右の列に注記) を足す (None なら今までどおり)。"""
     exe = python or PPTX_PY
     if not Path(exe).exists():
         return {"written": False, "skipped": True, "reason": f"python が無い: {exe}"}
@@ -875,6 +896,8 @@ def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None =
                "wall_1d": dict(wall_1d or {}), "thermal_use": thermal_use}
         if wall_temperature is not None:
             job["wall_temperature"] = wall_temperature
+        if wall_compare is not None:
+            job["wall_compare"] = {"csv": str(Path(wall_compare["csv"]).resolve()), "notes": [str(t) for t in wall_compare["notes"]]}
         jp.write_text(json.dumps(job, ensure_ascii=False))
         q = subprocess.run([exe, "-I", str(sp), str(jp)], capture_output=True, text=True, timeout=timeout, cwd=td)
         if not rp.exists():

@@ -19,6 +19,19 @@ FreeCAD・gmsh が要る (無ければ飛ばす)。作業は一時ディレク�
 - (J) fixture (FIX) と case/71 run_0005_ns の成果物 (M55_DELIV、FORGE_DELIV_M55_DIR で指定; 無ければ飛ばす) で、接合を STEP の曲線から
   決め入口端から設計スロート x = 0 までの壁節点の半径を曲線と NODE_EQ_MM で照合: 基準 PASS、接合を ±1 節点の間隔ずらした曲線・
   直管の節点の 1e-5 mm で FAIL、照合が欠けたら PASS にしない。旧の「接合点を挟む 2 節点の区間」は参考の記録 (必須から外した)。
+
+設計壁 (Euler で回す壁) と物理壁の座標の比較 `wall_compare/` (plan tooling-nozzle-card-local-mesh §5.1 #3u, 2026-10-15):
+- (C1) M6 fixture: 表の x・物理壁の半径・壁角が形状表 (wall_shape_mm.csv) と文字列で同一、設計壁の半径を壁ファイルから独立に評価して
+  一致、dr_mm = r_physical_mm − r_design_mm、空欄なし。(C2) 物理壁の定義域を縮めた壁で、外の x の物理壁の列と dr_mm だけが空欄。
+  physical が design_upstream (物理壁でない) なら例外。
+- (C3) δ_r の記録との照合: M6 fixture (initializer、delta_r_initial.csv なし) は出口 PASS・スロート未照合 (直線補間の記録を再現できない)、
+  出口の記録を 2e-6 mm ずらすと FAIL・MANIFEST も FAIL、5e-7 mm なら PASS。
+- (C4) case/71 run_0005_ns (delta_r_csv、表は case ディレクトリ) はスロート・出口とも PASS。表の最後の値を変えて sha256 の記録も
+  合わせると FAIL、sha256 が合わない表は未照合 (合格にしない)。
+- (C5) initializer + delta_r_initial.csv の run (FORGE_DELIV_C70_RUN、既定 forge-deliv の case/70 run_0010; 無ければ飛ばす) は PASS、
+  表の x = 0 の隣の値を変えると (記録が表の直線補間と合わない) FAIL。
+- (C6) 図 3 枚が PNG で日本語フォント (Noto Sans CJK JP) で書かれる。作図が失敗したら MANIFEST の errors に残り、xlsx にシートを足さない。
+- (a) の一括書き出しで wall_compare/ の CSV・図・JSON が MANIFEST に載り、xlsx にシート wall_compare (表と注記)、README に行がある。
 """
 import hashlib
 import json
@@ -44,6 +57,9 @@ REPO = Path(__file__).resolve().parents[2]
 # 直管と縮流部の接合の照合 (#3j) の実データ: case/71 run_0005_ns の成果物 (接合の 0.08 mm 下流に節点があり、旧の区間の検査が誤って落ちた)
 M55_DELIV = Path(os.environ.get("FORGE_DELIV_M55_DIR", str(REPO / "case/71.m55_combustion_wt/run_0005_ns/deliverables")))
 M55_CARD = Path(os.environ.get("FORGE_DELIV_M55_CARD", str(REPO / "case/71.m55_combustion_wt/card_m55.yaml")))
+# 設計壁と物理壁の比較 (#3u) の実データ: delta_r_csv の run (case/71 run_0005_ns) と、initializer + delta_r_initial.csv の run (case/70 run_0010)
+M55_RUN = Path(os.environ.get("FORGE_DELIV_M55_RUN", str(REPO / "case/71.m55_combustion_wt/run_0005_ns")))
+C70_RUN = Path(os.environ.get("FORGE_DELIV_C70_RUN", "/home/sano/work/forge-deliv/case/70.m5_air_wt_demo/run_0010_ns_c2b_final"))
 fails = 0
 
 
@@ -303,10 +319,204 @@ def m55_junction_tests() -> None:
           f"r − r_in {(jn.get('node_after_junction') or {}).get('r_node_minus_r_in_mm', float('nan')):.2e} mm")
 
 
+def _csv_cols(path: Path) -> dict:
+    """CSV を列名 → 文字列のリストで読む (書き出し器のコードを使わない)。"""
+    import csv
+    rows = list(csv.reader(open(path)))
+    return {h: [r[j] for r in rows[1:]] for j, h in enumerate(rows[0])}
+
+
+def _f(v: str) -> float:
+    return float("nan") if v == "" else float(v)
+
+
+def _clone_small(src: Path, dst: Path, copy=("prepare_info.json",), link=("wall_repr.json",)) -> Path:
+    """比較の試験用の仮の run: 書き換える小さいファイルは写し、壁ファイルはリンク (元の run に書かない)。"""
+    dst.mkdir(parents=True)
+    for n in copy:
+        if (src / n).exists():
+            shutil.copy2(src / n, dst / n)
+    for n in link:
+        if (src / n).exists():
+            os.symlink((src / n).resolve(), dst / n)
+    return dst
+
+
+def _png_size(p: Path):
+    b = p.read_bytes()[:32]
+    if b[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return int.from_bytes(b[16:20], "big"), int.from_bytes(b[20:24], "big")
+
+
+def wall_compare_tests() -> None:
+    """(C) 設計壁 (Euler で回す壁) と物理壁の座標の比較 (plan tooling-nozzle-card-local-mesh §5.1 #3u)。"""
+    import numpy as np
+    from unittest import mock
+    from forge_design.export import wall_compare as wc
+    from forge_design.export import wall_tables as WT
+    from forge_design.geometry.wall_axismach import DESIGN_UPSTREAM_KIND, load_wall_file
+    with tempfile.TemporaryDirectory(prefix="deliv_wc_") as td:
+        tmp = Path(td)
+        if (FIX / "wall_repr.json").exists():
+            # ---- (C1) 形状表と同じ点・同じ物理壁、設計壁は独立に評価 ----
+            W = load_wall_file(FIX)
+            s = 1000.0 * W["scale_m"]
+            tab = wc.compare_table(FIX, tmp / "c1" / wc.CSV_NAME)
+            WT.shape_table(FIX, tmp / "c1" / "wall_shape_mm.csv")
+            C, S = _csv_cols(tmp / "c1" / wc.CSV_NAME), _csv_cols(tmp / "c1" / "wall_shape_mm.csv")
+            check("(C1) 列が x_mm, r_design_mm, r_physical_mm, dr_mm, angle_design_deg, angle_physical_deg", list(C) == list(wc.COLUMNS), list(C))
+            check(f"(C1) x の点が形状表と同じ ({len(C['x_mm'])} 行、文字列で同一)・物理壁の半径・壁角も形状表と文字列で同一",
+                  C["x_mm"] == S["x_mm"] and C["r_physical_mm"] == S["r_mm"] and C["angle_physical_deg"] == S["wall_angle_deg"])
+            x = np.array([_f(v) for v in C["x_mm"]])
+            lo, hi = W["design"].x_in, W["design"].x_e
+            rd_ind = W["design"].r(np.clip(x / s, lo, hi)) * s
+            ad_ind = np.degrees(np.arctan(W["design"].r(np.clip(x / s, lo, hi), 1)))
+            rd, rp, dr = (np.array([_f(v) for v in C[k]]) for k in ("r_design_mm", "r_physical_mm", "dr_mm"))
+            ad = np.array([_f(v) for v in C["angle_design_deg"]])
+            e_r, e_a, e_d = (float(np.max(np.abs(a - b))) for a, b in ((rd, rd_ind), (ad, ad_ind), (dr, rp - rd)))
+            check("(C1) 設計壁の半径・壁角を壁ファイルから独立に評価して一致・dr_mm = r_physical_mm − r_design_mm・空欄なし",
+                  e_r == 0.0 and e_a == 0.0 and e_d == 0.0 and np.all(np.isfinite(dr)) and tab["n_blank"] == {"design": 0, "physical": 0},
+                  f"|Δr_design| {e_r:.1e} mm・|Δ角| {e_a:.1e} deg・|dr − (rp − rd)| {e_d:.1e} mm・空欄 {tab['n_blank']}")
+            i0 = int(np.flatnonzero(x == 0.0)[0])
+            check(f"(C1) x = 0 の行がある (設計スロート; 設計壁の r = {rd[i0]:.9g} mm = r_t)", abs(rd[i0] - s) <= 1e-9, f"r_t {s!r} mm")
+            # ---- (C2) 定義域の違い: 物理壁の定義域を両端で縮めた壁 ----
+            class Short:
+                def __init__(self, w, a, b):
+                    self._w, self.x_in, self.x_e = w, a, b
+
+                def r(self, xq, deriv=0):
+                    xq = np.asarray(xq, dtype=float)
+                    if xq.size and (xq.min() < self.x_in or xq.max() > self.x_e):
+                        raise ValueError("定義域の外 (試験の壁)")
+                    return self._w.r(xq, deriv)
+            a2, b2 = W["physical"].x_in + 1.0, W["physical"].x_e - 2.0
+            W2 = dict(W, physical=Short(W["physical"], a2, b2))
+            t2 = wc.compare_table(W2, tmp / "c2" / wc.CSV_NAME)
+            C2 = _csv_cols(tmp / "c2" / wc.CSV_NAME)
+            x2 = np.array([_f(v) for v in C2["x_mm"]])
+            out_ = (x2 < a2 * s) | (x2 > b2 * s)
+            blank_p = all((C2[k][i] == "") == bool(out_[i]) for k in ("r_physical_mm", "dr_mm", "angle_physical_deg") for i in range(len(x2)))
+            check(f"(C2) 物理壁の定義域を縮めた壁: 外の x ({int(out_.sum())} 行) だけ物理壁の列と dr_mm が空欄、設計壁の列は全部ある、"
+                  "x の点は同じ・注記に空欄の行数",
+                  blank_p and "" not in C2["r_design_mm"] and C2["x_mm"] == C["x_mm"]
+                  and t2["n_blank"] == {"design": 0, "physical": int(out_.sum())}
+                  and any(f"物理壁 {int(out_.sum())} 行" in t for t in t2["notes"]), t2["n_blank"])
+            try:
+                wc.compare_table(dict(W, kind=DESIGN_UPSTREAM_KIND), tmp / "c2" / "du.csv")
+                check("(C2) physical が design_upstream (物理壁でない) なら例外", False, "例外なし")
+            except ValueError as e:
+                check("(C2) physical が design_upstream (物理壁でない) なら例外", "design_upstream" in str(e), str(e)[:100])
+            # ---- (C3) M6 fixture の δ_r の記録 (initializer、delta_r_initial.csv なし) ----
+            r3 = _clone_small(FIX, tmp / "c3" / "run")
+            rec = wc.export_compare(r3, tmp / "c3" / "out")
+            c = rec["delta_record_check"]
+            pt, pe = c["points"]["throat"], c["points"]["exit"]
+            check("(C3) M6 (initializer、表なし): 出口 PASS (|差| ≤ 1e-6 mm)・スロートは未照合 (直線補間の記録を再現できない)・全体は一部未照合で"
+                  " pass None",
+                  c.get("source") == "initializer" and pe.get("pass") is True and abs(pe["diff_mm"]) <= 1e-6 and pt.get("pass") is None
+                  and "delta_r_initial.csv" in pt.get("reason", "") and c["status"] == "一部未照合" and rec["pass"] is None,
+                  f"出口 {pe.get('diff_mm', float('nan')):.1e} mm・スロートの記録との差 {pt.get('diff_vs_record_mm', float('nan')):.2e} mm (参考)")
+            info = json.loads((FIX / "prepare_info.json").read_text())
+            for dmm, want in ((2e-6, False), (5e-7, True)):
+                rn = tmp / f"c3_{dmm:g}" / "run"
+                _clone_small(FIX, rn)
+                inf = json.loads((FIX / "prepare_info.json").read_text())
+                inf["initializer"]["delta_r_exit"] = info["initializer"]["delta_r_exit"] + dmm / s
+                (rn / "prepare_info.json").write_text(json.dumps(inf))
+                cc = wc.export_compare(rn, tmp / f"c3_{dmm:g}" / "out")["delta_record_check"]
+                check(f"(C3) 出口の記録を {dmm:g} mm ずらす → {'PASS のまま' if want else 'FAIL'}",
+                      cc["points"]["exit"]["pass"] is want and (cc["status"] == "FAIL") is (not want),
+                      f"{cc['status']}・差 {cc['points']['exit']['diff_mm']:.2e} mm")
+                if not want:
+                    for n in ("bcondConfig.yaml", "nozzle.msh"):
+                        os.symlink(FIX / n, rn / n)
+                    man = dl.export(rn, tmp / "c3_man", card=None, skip=("cad", "mesh", "fluent", "excel", "dimensions"))
+                    check("(C3) 照合 FAIL の run は MANIFEST の verdict FAIL・wall_compare が failed_parts に入る",
+                          man["verdict"] == "FAIL" and "wall_compare" in man["failed_parts"], (man["verdict"], man["failed_parts"]))
+            # ---- (C6) 図 ----
+            figs = rec["figures"]
+            sizes = {k: _png_size(tmp / "c3" / "out" / Path(v).name) for k, v in figs.items()}
+            check("(C6) 図 3 枚 (全長・Δr・スロート付近) が PNG (幅 ≥ 1000 px)",
+                  set(figs) == {"full", "dr", "throat"} and all(v is not None and v[0] >= 1000 for v in sizes.values()), sizes)
+            if Path(wc.JP_FONT).is_file():
+                check("(C6) 日本語フォント Noto Sans CJK JP で描いた", "Noto Sans CJK JP" in rec["figure_font"], rec["figure_font"])
+            else:
+                print(f"skip (C6) フォント: {wc.JP_FONT} が無い")
+            # 作図の失敗は MANIFEST の errors に残り、xlsx にシートを足さない・README は「作っていない」
+            rf = _clone_small(FIX, tmp / "c6" / "run", copy=("prepare_info.json", "bcondConfig.yaml"))
+            with mock.patch.object(wc, "plot_compare", side_effect=RuntimeError("試験: 作図の失敗")):
+                man = dl.export(rf, tmp / "c6" / "out", card=None, skip=("cad", "mesh", "fluent", "dimensions"))
+            xl = (man["parts"].get("excel") or {}).get("xlsx") or {}
+            check("(C6) 作図が失敗 → MANIFEST の errors に wall_compare・excel は表のシートを足さない・README に「作っていない」",
+                  "wall_compare" in man["errors"] and "作図の失敗" in man["errors"]["wall_compare"]
+                  and "wall_compare_sheet" not in (man["parts"].get("excel") or {}) and "wall_compare" not in (xl.get("sheets") or [])
+                  and "作っていない" in (tmp / "c6" / "out" / "README.md").read_text().split("## 単位")[0],
+                  (man["errors"].get("wall_compare"), xl.get("sheets")))
+        else:
+            print(f"skip (C1)〜(C3)・(C6): fixture が無い ({FIX})")
+        # ---- (C4) case/71 run_0005_ns (delta_r_csv) ----
+        if (M55_RUN / "wall_repr.json").exists() and (M55_RUN / "prepare_info.json").exists():
+            r4 = wc.export_compare(M55_RUN, tmp / "c4" / "out")
+            c = r4["delta_record_check"]
+            pt, pe = c["points"]["throat"], c["points"]["exit"]
+            check("(C4) case/71 run_0005_ns (delta_r_csv): 表を case ディレクトリで見つけ sha256 一致・スロート・出口とも |差| ≤ 1e-6 mm で PASS",
+                  c.get("source") == "delta_r_csv" and "sha256 が prepare_info.json" in str(c.get("table")) and c["status"] == "PASS"
+                  and r4["pass"] is True,
+                  f"スロート Δr {pt['dr_table_mm']!r} mm (差 {pt.get('diff_mm', float('nan')):.1e})・出口 Δr {pe['dr_table_mm']!r} mm "
+                  f"(差 {pe.get('diff_mm', float('nan')):.1e})")
+            info = json.loads((M55_RUN / "prepare_info.json").read_text())
+            tname = Path(info["delta_r_csv"]).name
+            tsrc = M55_RUN.parent / tname
+            if tsrc.exists():
+                lines = tsrc.read_text().splitlines()
+                xv, dv = lines[-1].split(",")
+                lines[-1] = f"{xv},{float(dv) + 1e-7!r}"
+                for tag, fix_sha, want in (("sha256 も合わせる", True, "FAIL"), ("sha256 は元のまま", False, "未照合")):
+                    case = tmp / f"c4_{int(fix_sha)}"
+                    rn = _clone_small(M55_RUN, case / "run")
+                    (case / tname).write_text("\n".join(lines) + "\n")
+                    if fix_sha:
+                        inf = json.loads(json.dumps(info))
+                        inf["delta_r_table"]["sha256"] = hashlib.sha256((case / tname).read_bytes()).hexdigest()
+                        (rn / "prepare_info.json").write_text(json.dumps(inf))
+                    cc = wc.export_compare(rn, case / "out")["delta_record_check"]
+                    check(f"(C4) δ_r の表の出口の値を +1e-7 r_t ({1e-7 * 1000 * info['scale_m']:.1e} mm) 変える ({tag}) → {want}",
+                          cc["status"] == want and (cc["points"]["exit"]["pass"] is False if want == "FAIL" else cc["points"]["exit"]["pass"] is None),
+                          f"{cc['status']}・{cc.get('table')}"[:200])
+            else:
+                print(f"skip (C4) 負例: δ_r の表が case ディレクトリに無い ({tsrc})")
+        else:
+            print(f"skip (C4): case/71 run_0005_ns が無い ({M55_RUN})")
+        # ---- (C5) initializer + delta_r_initial.csv ----
+        if all((C70_RUN / n).exists() for n in ("wall_repr.json", "prepare_info.json", "delta_r_initial.csv")):
+            r5 = wc.export_compare(C70_RUN, tmp / "c5" / "out")
+            c = r5["delta_record_check"]
+            pt = c["points"]["throat"]
+            check("(C5) initializer + delta_r_initial.csv (case/70 run_0010): 記録が表の直線補間と一致・表を壁と同じ 5 次補間で x = 0 に評価して"
+                  " |差| ≤ 1e-6 mm・出口も PASS",
+                  c["status"] == "PASS" and pt.get("record_equals_table_linear") is True,
+                  f"スロート 差 {pt.get('diff_mm', float('nan')):.1e} mm (記録そのものとの差 {pt.get('diff_vs_record_mm', float('nan')):.2e} mm = 直線補間の誤差)")
+            rn = _clone_small(C70_RUN, tmp / "c5n" / "run", copy=("prepare_info.json", "delta_r_initial.csv"))
+            lines = (rn / "delta_r_initial.csv").read_text().splitlines()
+            xs = [float(ln.split(",")[0]) for ln in lines[1:]]
+            k = 1 + int(np.searchsorted(xs, 0.0))                        # x = 0 の直後の点 (ヘッダ 1 行)
+            cols = lines[k].split(",")
+            cols[1] = repr(float(cols[1]) + 1e-6)
+            lines[k] = ",".join(cols)
+            (rn / "delta_r_initial.csv").write_text("\n".join(lines) + "\n")
+            cc = wc.export_compare(rn, tmp / "c5n" / "out")["delta_record_check"]
+            check("(C5) delta_r_initial.csv の x = 0 の直後の値を変える (記録が表の直線補間と合わない) → FAIL",
+                  cc["status"] == "FAIL" and cc["points"]["throat"].get("record_equals_table_linear") is False, cc["status"])
+        else:
+            print(f"skip (C5): initializer + delta_r_initial.csv の run が無い ({C70_RUN}; FORGE_DELIV_C70_RUN で指定)")
+
+
 def main() -> int:
     structure_tests()
     wn_fixture_tests()
     m55_junction_tests()
+    wall_compare_tests()
     if not (FIX / "wall_repr.json").exists() or not (FIX / "nozzle.msh").exists():
         print(f"skip: fixture が無い ({FIX})。tests/make_deliverables_fixture.py で作る")
         print(f"FAIL 件数: {fails}")
@@ -330,6 +540,30 @@ def main() -> int:
                   "mesh/rebuild_from_step.py", "fluent/nozzle_2d_axi.msh", "fluent/boundary_conditions.md",
                   "excel/wall_shape_mm.csv", "DIMENSIONS.json", "README.md"):
             check(f"(a) {k} がある", (out / k).exists())
+        # 設計壁と物理壁の比較 (#3u): CSV・図・JSON が MANIFEST に載り (sha256 は上で照合)、xlsx にシート、README に行
+        from forge_design.export import wall_compare as wc
+        wfiles = [f"wall_compare/{n}" for n in (wc.CSV_NAME, wc.JSON_NAME, wc.PNG_FULL, wc.PNG_DR, wc.PNG_THROAT)]
+        pw = man["parts"].get("wall_compare") or {}
+        check("(a) wall_compare/ の CSV・JSON・図 3 枚が MANIFEST の files_sha256 にある・part は ok (照合は M6 fixture では一部未照合 = 合否に入れない)",
+              all(k in man["files_sha256"] for k in wfiles) and pw.get("ok") is True and pw.get("pass") is None
+              and pw["delta_record_check"]["status"] == "一部未照合", [k for k in wfiles if k not in man["files_sha256"]])
+        xl = (man["parts"].get("excel") or {}).get("xlsx") or {}
+        if xl.get("written"):
+            import zipfile
+            import re as _re
+            with zipfile.ZipFile(out / "excel" / "nozzle_tables.xlsx") as z:
+                names = _re.findall(r'sheet name="([^"]+)"', z.read("xl/workbook.xml").decode())
+                ss = z.read("xl/sharedStrings.xml").decode() if "xl/sharedStrings.xml" in z.namelist() else ""
+            ninfo = (xl.get("info") or {}).get("wall_compare") or {}
+            check("(a) xlsx: 最後のシートが wall_compare (表の行数が CSV と同じ・右の列に注記)、ほかのシートの並びは今までどおり",
+                  names[-1] == "wall_compare" and names[:-1] == ["shape", "conditions", "notes"]
+                  and ninfo.get("n_rows") == pw.get("n_rows") and ninfo.get("n_notes") == len(pw.get("notes") or [])
+                  and "r_design_mm" in ss and "Δr の意味" in ss, (names, ninfo))
+        else:
+            print(f"skip (a) xlsx のシート: xlsx を書いていない ({xl.get('reason')})")
+        rd_head = (out / "README.md").read_text().split("## 単位")[0]
+        check("(a) README の冒頭に設計壁と物理壁の比較の行 (スロート・出口の Δr と照合の状態)",
+              "設計壁と物理壁の比較" in rd_head and "一部未照合" in rd_head and "| `wall_compare/` |" in (out / "README.md").read_text())
         base = base_mesh_structure(tmp)
         if base is not None and (out / "mesh" / "mesh_structure.json").exists():
             cc, qq, bb, _ = base.read_msh41_mesh2d(FIX / "nozzle.msh")
