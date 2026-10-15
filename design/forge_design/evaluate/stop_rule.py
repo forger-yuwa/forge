@@ -1557,10 +1557,12 @@ def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, s
             lim = massflux_last_step(mf_csv)
             while lim is not None and next_s <= lim and (done or residual_row_ready(res_csv, next_s - 1)):
                 s = next_s
+                t_j = time.time()
                 data.refresh(keep_from=s - 2 * W - dt)
                 r = S.judge(run_dir, s, data=data, loaded=lc)
                 row = judge_summary(r)
                 row["judged_at"] = _now()
+                row["judge_s"] = round(time.time() - t_j, 3)   # 読み込み (refresh) + 判定の所要 (plan §6 V4 の測定)
                 if req is not None:
                     row["after_request"] = True
                 jl.append(row)

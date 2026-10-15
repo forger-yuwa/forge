@@ -7,7 +7,8 @@ set -uo pipefail
 R=${1:?run_0012_ns_free か run_0011_ns_v2}
 # run_0013_ns_free260: codex diagnose 2026-10-16 settle-run0012-result の (i) — run_0012 から本段の上限だけ 260,000 に (plan §6 (1′))
 N=200000
-case "$R" in run_0011_ns_v2) M=v2;; run_0012_ns_free) M=off;; run_0013_ns_free260) M=off; N=260000;; *) echo "知らない run: $R"; exit 1;; esac
+PROB=problem_m55_p4_settle.yaml
+case "$R" in run_0011_ns_v2) M=v2; PROB=problem_m55_p5_settle_v2.yaml;; run_0012_ns_free) M=off;; run_0013_ns_free260) M=off; N=260000;; *) echo "知らない run: $R"; exit 1;; esac
 C=$HOME/forge-cardmesh/case/71.m55_combustion_wt
 D=$HOME/forge-cardmesh/design
 PY=$HOME/venv-cardmesh/bin/python
@@ -27,12 +28,12 @@ case "$EUSHA" in 2b2d02ce*) ;; *) die "run_0009_euler/res_12000.h5 の sha256 �
 test -f "$C/run_0008_ns_b0/res_90000.h5" || die "run_0008_ns_b0/res_90000.h5 (初期場) が無い"
 test -e "$C/$R" && die "$R が既にある"
 log "prepare $R (stop-rule $M)"
-( cd "$D" && $PY "$S" prepare --problem "$C/problem_m55_p4_settle.yaml" --ic-from "$C/run_0008_ns_b0" --run-dir "$C/$R" \
+( cd "$D" && $PY "$S" prepare --problem "$C/$PROB" --ic-from "$C/run_0008_ns_b0" --run-dir "$C/$R" \
     --euler-run "$C/run_0009_euler" --euler-res res_12000.h5 --euler-sha256 "$EUSHA" \
     --forge-bin "$FORGE_BIN" --forge-sha256 "$FBSHA" --stop-rule "$M" --nsteps "$N" ) > "$W/prepare_$R.log" 2>&1 \
     || die "prepare $R rc $? (prepare_$R.log)"
 tail -1 "$C/$R/MESH_QUALITY.txt" | tee -a "$W/chain.log"
-if [ "$R" = run_0013_ns_free260 ]; then
+if [ "$R" = run_0013_ns_free260 ] || [ "$R" = run_0011_ns_v2 ]; then
     # run_0012 と設定を比べる: 差は本段の nStepOuter (と settle_criteria の作成時刻・出所) だけのはず
     $PY - "$C/run_0012_ns_free" "$C/$R" <<'PYC' 2>&1 | tee -a "$W/chain.log" || die "run_0012 と設定の差が要求と違う"
 import sys, yaml
@@ -47,8 +48,8 @@ def flat(d, pre=()):
         out[pre] = d
     return out
 bad = []
-for name, allow in (("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("solverConfig_prestage.yaml", {("time", "last", "nStepOuter")}),   # S1・S2 は nStepOuter 3000 を明示で書く (runner_axismach.ns_stage_configs); 実際の S1・S2 の設定は起動の後に MAIN_STAGE_STARTED の sha256 で照らす
-                    ("bcondConfig.yaml", set()), ("settle_criteria.yaml", None)):
+for name, allow in [("solverConfig.yaml", {("time", "last", "nStepOuter")}), ("solverConfig_prestage.yaml", {("time", "last", "nStepOuter")}),   # S1・S2 は nStepOuter 3000 を明示で書く (runner_axismach.ns_stage_configs); 実際の S1・S2 の設定は起動の後に MAIN_STAGE_STARTED の sha256 で照らす
+                    ("bcondConfig.yaml", set())] + ([("settle_criteria.yaml", None)] if b.name != "run_0011_ns_v2" else []):
     fa, fb = flat(yaml.safe_load((a / name).read_text())), flat(yaml.safe_load((b / name).read_text()))
     diff = sorted(k for k in set(fa) | set(fb) if fa.get(k, "<無>") != fb.get(k, "<無>"))
     if allow is None:
