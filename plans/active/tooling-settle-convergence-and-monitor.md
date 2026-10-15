@@ -108,6 +108,8 @@
 6. **照合の A/B (GPU 不要、codex の判別、V6 の前)**: 同じ合格の入力で A は proceed、B は `MAIN_STAGE_STARTED.main_config.fnv` だけを不一致にして拒否 (上書きなし・理由に照合の不一致・`delta_r_next.csv` を公開しない)。負例: criteria の sha256 の不一致、STOPPED_AT の step の不一致、δ_E の status が ok でない。A が拒否されたら陽性の対照の不成立として直す。
 7. **通しの検証 (V6、事前登録; codex M3 で合格条件を書き直し)**: case/71 を設計チェーンの関数で 1 pass — `deltastar_loop.run_pass0_integral` に `problem_m55_p5_settle_v2.yaml` (3 係数の壁・`wt_nozzle_v2` の明示)、Euler の参照 run_0009_euler res_12000、初期場 run_0008_ns_b0 → NS (停止規則 v2) → 新方式の関門 → `delta_r_next.csv` → 成果物。run は `case/71.m55_combustion_wt/run_0014_chain_v2` (AWS B)。**合格は「上書きなしで REACHED・全関門の合格・`delta_r_next.csv` が停止の step の抽出の表と一致・必要な成果物のファイルが実際に作られる (関数の正常終了だけでは不足; 成果物の例外は握りつぶされる `deltastar_loop.py:1425`)・非有限 0」に限る**。正しく拒否されたなら負例の検査の合格で、V6 の完了ではない。
 
+**V6 の結果 (2026-10-16): 合格** — `case/71.m55_combustion_wt/run_0014_chain_v2` (AWS B、2026-10-15 21:20〜21:46 UTC、`deltastar_loop.run_pass0_integral` を台本でなく直接呼ぶ): 停止規則 v2 は**上書きなしで REACHED** (46,000 で要求・46,171 で協調停止、`delta_E.status ok`)、新方式の関門は **proceed・settled とも true、blocked なし、上書きなし**、`delta_r_next.csv` は停止の step の抽出の表とバイト同一、`CONVERGENCE_VERDICT.txt` の 1 行目は `TOOL: check_settled.py (本段の起動 (MAIN_STAGE_STARTED と照合))`、設計報告の収束の欄は「収束 (check_settled)・SETTLED」、停止の場の非有限 0。成果物: 1 回目は mesh・fluent が**このマシンの絶対パス** (`deliverables.py` の `.venv-mesh`) で失敗 → パスを環境変数・リポジトリから探す形に直し (e668345e)、B に `.venv-mesh`・`.venv-pptx` を作って作り直して mesh・fluent・wall_compare・excel がエラー 0 (`thermal_use` PASS、判定は `check_settled.py --bind`、終端 46,000・停止の観測 46,171)、CAD と寸法の関門は FreeCAD のある手元で作って PASS (`deliverables_cad_local/`)。1 回目の失敗した成果物は `deliverables_failed_venvpath/` に残した。
+
 ## 5. 実装ステップ
 
 1. forge の出力 (#1): `solver_density_cuda/` の input/solverConfig、output、main.cpp。
@@ -183,6 +185,7 @@ V1〜V5 がすべて合格、§5.1 #7 の移行 (呼び出し側が共通の部�
 
 ## 9. 変更ログ
 
+- `2026-10-16` — V6 (設計チェーンの通しの 1 pass、run_0014_chain_v2) 合格。成果物の外部の Python のパスの欠陥を直した。
 - `2026-10-16` — #7b (成果物・報告・案内文の読み手) を実装・commit (implementer)。
 - `2026-10-16` — #7 を実装・commit (implementer): 新方式の関門 (照合・δ_E の契約)、道具の選択の共通化、AGENTS.md・procedures、雛形の既定 v2。残りの読み手を #7b に。
 - `2026-10-16` — ユーザ決定: 雛形の既定のプリセットを `wt_nozzle_v2` に (codex M4 の保留を取り消し; v1 にも根拠は無い)。
