@@ -327,7 +327,7 @@
 証拠の正本: [`case/70.m5_air_wt_demo/_mknot_fast_final/`](../../case/70.m5_air_wt_demo/_mknot_fast_final/README.md) (ログ・出力・台本・照合の結果)。
 機械と環境は同じ (AWS B、AMD EPYC 7R32、自分の venv、BLAS 1 スレッド)。
 
-- **1 評価 (N 2400、各 3 回、`time_base.log`・`time_final.log`)**: 引き継ぎ時点 9468e0d0 (a) 21.81〜21.94 s・(b) 8.63〜8.68 s → 最終の版 (numba)
+- **1 評価 (N 2400、各 3 回、`time_base.txt`・`time_final.txt`)**: 引き継ぎ時点 9468e0d0 (a) 21.81〜21.94 s・(b) 8.63〜8.68 s → 最終の版 (numba)
   (a) 9.08・9.12 s (初回 12.59 s はコンパイル込み)・(b) 3.56〜3.57 s。**倍率 (中央値の比) (a) 2.40・(b) 2.42**。`FORGE_MOC_KERNEL=numpy` (共通部の
   改善だけ) は (a) 19.8 s・(b) 7.15 s。§6.4 の f7e185c4 の値 ((a) 9.17・(b) 3.58 s) と同じ桁 (Newton の修正は所要に効かない)。
 - **メモリのピーク (`mem.txt`)**: 引き継ぎ時点 → 最終の版で、(a) N 600 0.151 → 0.255 GB・N 2400 1.081 → 1.296 GB、(b) 0.148 → 0.253 GB・0.839 → 1.050 GB。
