@@ -1,0 +1,18 @@
+{
+ "event": "main_stage_started",
+ "time": "2026-10-15T00:24:13+00:00",
+ "time_unix": 1792023853.8358245,
+ "stages": "none",
+ "main_config": {
+  "file": "solverConfig.yaml",
+  "sha256": "29d9390b96bf9f3972858547200947a6b5a7d23acd25bcb980a6e9979fb4e195",
+  "nStepOuter": 200000
+ },
+ "initial_field": {
+  "file": "nozzle.h5",
+  "sha256": "b883877fd70033858c954369ec60e9537d788d5809e551246e812a091ae3d259"
+ },
+ "previous_stages": [],
+ "prestage_config": null,
+ "res_files_present": []
+}

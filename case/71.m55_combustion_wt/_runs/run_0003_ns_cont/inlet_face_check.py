@@ -47,25 +47,30 @@ def sha256(path) -> str:
     return h.hexdigest()
 
 
+def _sc(f, Y, T) -> float:
+    """_TPGas の h・cp・s0 (配列の T を取る) をスカラの T で呼ぶ。"""
+    return float(f(Y, np.atleast_1d(np.asarray(T, dtype=float)))[0])
+
+
 def isentropic_from_total(gas, Yin, Pt, Tt, mach):
     """`thermo_isentropic_from_total_mix` (thermo_d.cuh:893) の写し (スカラ)。"""
-    R = gas.Rmix(Yin)
-    h0 = gas.h(Yin, Tt)
+    R = float(gas.Rmix(Yin))
+    h0 = _sc(gas.h, Yin, Tt)
     Ts = max(Tt / (1.0 + 0.2 * mach * mach), 10.0)
     for _ in range(25):
-        cp = gas.cp(Yin, Ts)
+        cp = _sc(gas.cp, Yin, Ts)
         g = cp / max(cp - R, 1.0e-6)
         a2 = g * R * Ts
-        f = gas.h(Yin, Ts) + 0.5 * mach * mach * a2 - h0
+        f = _sc(gas.h, Yin, Ts) + 0.5 * mach * mach * a2 - h0
         df = cp + 0.5 * mach * mach * g * R
         dT = min(max(f / df, -0.4 * Ts), 0.4 * Ts)
         Ts = min(max(Ts - dT, 10.0), Tt)
         if abs(dT) < 1.0e-3 + 1.0e-6 * Ts:
             break
-    cp = gas.cp(Yin, Ts)
+    cp = _sc(gas.cp, Yin, Ts)
     g = cp / max(cp - R, 1.0e-6)
     a = np.sqrt(g * R * Ts)
-    Ps = Pt * np.exp(-(gas.s0(Yin, Tt) - gas.s0(Yin, Ts)) / R)
+    Ps = Pt * np.exp(-(_sc(gas.s0, Yin, Tt) - _sc(gas.s0, Yin, Ts)) / R)
     return Ts, Ps, Ps / (R * Ts), mach * a
 
 
@@ -99,8 +104,8 @@ def main() -> int:
     yin = np.array([max(float(fl[f"Y{s}"]), 0.0) for s in range(nsp)])
     yin = yin / yin.sum()
     Yin = list(yin)
-    h0_in = gas.h(Yin, Tt)
-    R_in = gas.Rmix(Yin)
+    h0_in = _sc(gas.h, Yin, Tt)
+    R_in = float(gas.Rmix(Yin))
 
     with h5py.File(run / "nozzle.h5", "r") as h:
         coord = np.array(h["/MESH/COORD"][:]).reshape(-1, 3)
@@ -169,7 +174,7 @@ def main() -> int:
             if inflow[k]:
                 mach_new[k] = abs(Un[k] / a_s[k])
                 Ts_b[k], Ps_b[k], ro_b[k], um_b[k] = isentropic_from_total(gas, Yin, Pt, Tt, mach_new[k])
-                Ht = gas.h(Yin, Ts_b[k]) + 0.5 * um_b[k] ** 2
+                Ht = _sc(gas.h, Yin, Ts_b[k]) + 0.5 * um_b[k] ** 2
                 dH[k] = Ht - h0_in
                 mdot[k] = -W[k] * ro_b[k] * um_b[k]              # 外向きを正 (ソルバの mdot と同じ符号)
                 eflux[k] = mdot[k] * Ht
@@ -201,6 +206,11 @@ def main() -> int:
                          "Ht_R_minus_h0in": (float(dH[k]) if inflow[k] else None),
                          "mdot_face_per_rad": float(mdot[k]), "share_of_inflow": float(mdot[k] / mdot.sum()) if mdot.sum() != 0 else None})
         st["hot_T0_points"] = rows
+        # 面ごとの表 (壁からの番号の順): 境界の状態と節点の状態、面の質量流束 (1 rad あたり、外向きを正)
+        o2 = np.argsort(-j_idx)
+        st["faces_table"] = {"j_from_wall": [int(nj - 1 - j) for j in j_idx[o2]], "Un_c": Un[o2].tolist(), "T_node": T[o2].tolist(),
+                             "Ts_b": Ts_b[o2].tolist(), "P_node": P[o2].tolist(), "Ps_b": Ps_b[o2].tolist(),
+                             "mach_new": mach_new[o2].tolist(), "mdot_per_rad": mdot[o2].tolist(), "W_per_rad": W[o2].tolist()}
         # v1 は真の逆流 (Un_c > 0) だけ。壁との角の節点 (壁の Dirichlet で U = 0 → Un_c = 0) はソルバでも逆流の分岐 (mdot = 0) に入るが、
         # 壁の節点として想定どおりなので zero に分けて記録する
         viol = {"v1_reverse": int((Un > 0.0).sum()) > 0,

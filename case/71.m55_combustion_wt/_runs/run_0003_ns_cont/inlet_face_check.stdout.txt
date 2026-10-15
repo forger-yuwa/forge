@@ -1,0 +1,2 @@
+[inlet_face_check] A: 流入 91 / 逆流 0 (壁から []) / 零 1 (壁から [0]), |Ht_R−h0_in|/h0_in 最大 9.657541439426221e-14, ṁ_in 面 121.572701 節点 121.573953 kg/s, E−ṁh0 相対 -9.527e-14, mach 最大 0.0658, 違反 {'v1_reverse': False, 'v2_dH': False, 'v3_total_energy': False, 'v4_supersonic': False}
+[inlet_face_check] B: 流入 91 / 逆流 0 (壁から []) / 零 1 (壁から [0]), |Ht_R−h0_in|/h0_in 最大 9.698119344633894e-14, ṁ_in 面 121.572699 節点 121.573949 kg/s, E−ṁh0 相対 -9.527e-14, mach 最大 0.0658, 違反 {'v1_reverse': False, 'v2_dH': False, 'v3_total_energy': False, 'v4_supersonic': False}

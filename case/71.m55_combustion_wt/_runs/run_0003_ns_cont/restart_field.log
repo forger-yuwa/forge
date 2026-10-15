@@ -1,0 +1,6 @@
+[restart_field] species: SRC record resolved_species_fc8ba1a8828147e3_70cc58aa292c9504.yaml verified (integrity 70cc58aa292c9504), destination species_hash fc8ba1a8828147e3 (forge --resolve-species) matches -> inherit
+同一メッシュを確認 (MESH/COORD 一致, 441600 cells)
+移した保存量  : ['ro', 'roK', 'roOmega', 'roUx', 'roUy', 'roUz', 'roY0', 'roY1', 'roe']
+DST を残す    : ['wall_dist']
+species 属性  : 継承 (species_input_unverified=0)
+VERDICT: OK (9 量を移した、SRC とビット一致)

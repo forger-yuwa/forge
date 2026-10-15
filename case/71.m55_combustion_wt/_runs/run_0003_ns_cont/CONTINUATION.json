@@ -1,0 +1,62 @@
+{
+ "plan": "plans/active/tooling-nozzle-card-local-mesh.md §5.1 #3d",
+ "prepared": "2026-10-15T00:23:46+00:00",
+ "git_head": "f85e4f1b6136085c78b5abd2aa3cff0bab4cb315",
+ "from": {
+  "run": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns",
+  "res": "res_183000.h5",
+  "sha256": "c29044a8ce280e01c201f50ddeea7803bc508b7f6418f143273ec239bfa2035b"
+ },
+ "nozzle_h5_sha256_after_restart": "b883877fd70033858c954369ec60e9537d788d5809e551246e812a091ae3d259",
+ "solverConfig_sha256": "29d9390b96bf9f3972858547200947a6b5a7d23acd25bcb980a6e9979fb4e195",
+ "solverConfig_src_sha256": "9aefd8aafdaa275781c5b9d753ee214979d099416e115ff1f65f3775f0563fd7",
+ "bcondConfig_sha256": "d372bf6e878eb8c455a0f5b276c6eb5648c67772a8f39ca81cdf8bf3ee9e0127",
+ "config_changes": {
+  "physProp.thermoFloat": 0,
+  "time.deltaT.implicitSolvePrecision": 1,
+  "time.outStepInterval": 2000
+ },
+ "implicit_conditions": {
+  "timeIntegration": 11,
+  "blockDPLUR": 1,
+  "lowMachPrecond": 0,
+  "implicitSolvePrecision": 1,
+  "ok": true
+ },
+ "stop_rule": {
+  "explicit": true,
+  "cap": 200000,
+  "hold_steps": 40000,
+  "window": 20000,
+  "out_step_interval": 2000,
+  "euler_ref": {
+   "run": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0001_euler",
+   "res": "res_12000.h5",
+   "sha256": "93cb88b0004fe57c439cd107cee3790dfba16628da7c5a8190c741c2418791f7"
+  },
+  "use": true
+ },
+ "env_required": {
+  "FORGE_TRANSPORT_TABLE": "0",
+  "FORGE_DIAG_FACE_H_DOUBLE": "1",
+  "FORGE_CUDA_BLOCKSIZE": "128"
+ },
+ "forge_bin": "/home/ubuntu/forge-integ-dflow2-fp64/solver_density_cuda/build/forge",
+ "forge_sha256": "3a9e347bfac51d003c4bfc9d384f8740b85f3058df9aa486aff4806a089231f8",
+ "restart_verdict": "VERDICT: OK (9 量を移した、SRC とビット一致)",
+ "copied": [
+  "nozzle.h5",
+  "nozzle.xmf",
+  "bcondConfig.yaml",
+  "probe.yaml",
+  "species_meta.yaml",
+  "resolved_species_fc8ba1a8828147e3.yaml",
+  "MESH_QUALITY.txt",
+  "wall_design.csv",
+  "wall_physical.csv",
+  "wall_repr.json",
+  "target_axis_M.csv",
+  "delta_r_initial.csv",
+  "delta_r_initial.json"
+ ]
+}
