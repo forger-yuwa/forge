@@ -1,0 +1,4 @@
+# 元のファイルの sha256 (run_0008_ns_b0: AWS B ~/forge-cardmesh/case/71.m55_combustion_wt/run_0008_ns_b0、2026-10-16 に読むだけで写した; plan tooling-nozzle-card-local-mesh §5.1 #6a の試験用)
+8ea06a4e321c72c62f673005f6b6d00e4aca2a8a680c8ae0de0aa7ebeb3505b7  delta_r_initial.json
+b2bf1a7c7b2693d3150085ef8005e495551a01f5047dcf823e61b4a1cb53d6b5  prepare_info.json
+8bafc8e2d96ce0fea3696f41e5dc81e8a9a3e640c7d41b4ab394626e9373b49d  delta_r_initial.csv
