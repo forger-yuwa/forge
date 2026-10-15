@@ -96,6 +96,15 @@
 4. **壁の熱流の許容** (M5): 節点 i で |ΔQ_i| ≤ Q_abs,i + ε_rel·|Q_ref,i|、Q_abs,i = q_tol·A_i (熱流束の固定の公差 × 局所の面積)。q_tol・ε_rel はプリセットの値 (試して決める)。符号の反転は許容の内なら可。
 5. **容量の条件** (m6): case/71 の規模 (442,520 節点、FP64 のビルド、`output.level` 1、全場 1 枚 約 100.8 MB) で 20 万 step、`fieldOutStepInterval` 20,000 なら全場は res_0・2 万ごと 10 枚・最後で最大 12 枚 (約 1.2 GB)。条件は「全場の枚数 ≤ ⌈上限/間隔⌉ + 2」と「全場以外の出力 (境界・節点・流量; 残差の CSV は除く) ≤ 300 MB (10⁶ bytes 単位)」にする。
 
+### 4.9 呼び出し側の移行 (#7、2026-10-16、ユーザ「ガンガン進めて」; §4.7・§4.8 の 2 の具体化)
+
+1. **受け渡しの関門** (`deltastar_loop.handoff_gate`・`_after_ns`): run に `settle_criteria.yaml` があれば新方式。(a) `STOP_RULE_STATE.json` が method v2・REACHED (CENSORED・FAILED は止める; `allow_not_reached` の上書きは今どおり理由つき)、(b) 停止の step の再評価 (`SETTLE_VERDICT.json`) の残差の量が SETTLED、(c) 同じ再評価の流量の収支が SETTLED、(e) δ_E は停止規則が止めた step で抽出したもの (`stop_rule_v2/delta_E_<step>/`) をそのまま使い、帯の位置の感度 (y_b × 1.25) は記録だけ (時系列の 2 窓は見ない)。(d) 局所 y₁⁺・(f) Euler の参照と ω・(g) 抽出の被覆・(h) 次の壁の健全性は今のまま。旧方式 (基準のファイルが無い run) は今の関門のまま。どちらの方式を使ったかを `HANDOFF_GATE.json` に書く。上書きの規則は今と同じ (被覆・参照・次の壁は上書きで通さない)。
+2. **`run_case.sh` の後処理**: 本段 (`MAIN_STAGE_STARTED` がある) で `settle_criteria.yaml` がある run は `check_settled.py` を回し、その VERDICT を `CONVERGENCE_VERDICT.txt` に書く (どの道具を使ったかを 1 行目に)。それ以外 (前の段・基準の無い run) は今の `check_convergence.py`。
+3. **Stop フック** (`hook_convergence_gate.py`): 2 の `CONVERGENCE_VERDICT.txt` をどちらの道具のものでも受け付ける (今は有無と時刻だけを見ているので、中身の形式の違いで block しないことを確かめる)。
+4. **AGENTS.md の「収束確認」**: 「`settle_criteria.yaml` のある run は `check_settled.py` (区間の判定・SETTLE_VERDICT) が正本、無い run は今の `check_convergence.py`」と書き換える (判定の正本は 2 つ、どちらを使ったかを結果に書く)。他のセッションに効くので調整板に書く。
+5. **雛形の既定のプリセット**: `axismach_final_v1`・`axismach_explore_v1` の `evaluate.settle` を `wt_nozzle_v2` (区間 1 万・保持なし) にする。`wt_nozzle_v1` は残す。
+6. **通しの検証 (V6、事前登録)**: case/71 を設計チェーンの関数で 1 pass 回す — `deltastar_loop.run_pass0_integral` に `problem_m55_p5_settle_v2.yaml` (3 係数の壁)、Euler の参照 run_0009_euler res_12000、初期場 run_0008_ns_b0 → NS (停止規則 v2) → 新方式の関門 → `delta_r_next.csv` → 成果物 (`deliverables`)。合格: 停止規則 REACHED・関門が新方式で proceed (または理由つきで止まり、その理由が実際の状態と合う)・`delta_r_next.csv` と成果物が作られる・非有限 0。run は `case/71.m55_combustion_wt/run_0014_chain_v2` (AWS B)。
+
 ## 5. 実装ステップ
 
 1. forge の出力 (#1): `solver_density_cuda/` の input/solverConfig、output、main.cpp。
@@ -121,7 +130,7 @@
 | 5b | ~~見張りの `stop_wait_s` から run_case.sh の後処理の時間を外す (#6b の試験の修正で見つかった同じ型の欠陥)~~ (2026-10-16 実装済み・commit) | 今は要求を置いてから run_case.sh の子プロセスが終わるまでを stop_wait_s (既定 900 s) で測るので、forge が正しく止まっても後処理 (check_convergence・残差の図) が長引けば `timeout` で FAILED になりうる。forge の終了 (`run_case_stdout.log` の `[run_case] forge exit=`) を見たら stop_wait_s の判定をやめる。合格: 偽の forge で、forge は止まったが後処理が上限を超える場合に REACHED、forge が止まらない場合は今どおり timeout。**run_0011 (V4) の前に** **結果 (implementer)**: 印は `run_case_stdout.log` の `[run_case] forge exit=<rc>` (run_case.sh が forge の直後・後処理の前に書く、既存の `_forge_exit`)。上限を超えた時点で印があれば kill せず、記録に `stop_wait` を残す。試験 `run_stop_rule_v2_tests` 60/60 (後処理が 15 s 遅れる偽の run で REACHED、修正前は timeout で FAILED; 単独・同時・CPU 16 本の負荷で合格)、既存の試験も合格 | O |
 | 5c | ~~同じ型の取り違えの残り: 上限の格子点の判定中に forge が終わり run_case.sh だけが後処理をしているとき、見張りが要求を置くと STOPPED_AT が来ず FAILED (`no_stopped_at`) になる (`stop_rule.py:1559` 付近)。要求を置く前に同じ印 (`[run_case] forge exit=`) を見て、forge が既に終わっていれば要求を置かず CENSORED (note「保持は上限の格子点で満たした、要求の前に forge が終了」) にする~~ (2026-10-16 実装済み・commit) | 合格: 偽の forge で、上限の格子点ちょうどで保持を満たす場合に CENSORED + note、他の試験は今どおり。run_0011 (V4) の前に **決定の修正 (2026-10-16、implementer が実装の前に止めた報告を受けて)**: 印 (`[run_case] forge exit=`) だけでは上限の格子点の競合を防げない (見張りが上限の格子点を判定する時点で forge はまだ終了処理中で印が無い; 偽の forge で修正前は FAILED `no_stopped_at` を確認) → (A) **格子点 s ≥ 上限 (本段の nStepOuter) で保持を満たしても settled の要求は置かない** (上限の後に step が無いので果たされない) → CENSORED + note「保持は上限の格子点で満たした (要求を置けない)」、再評価は上限の step。(B) s < 上限でも forge が既に終わっていれば要求を置かない (原因が forge_exit 等で正しく出る)。DIVERGED・未設定の要求は s ≥ 上限でも今の FAILED のまま。`settle_virtual_stop.emulate_v2` にも上限 (cap) を渡して (A) と同じ規則にする **結果 (implementer)**: 上限ちょうどで CENSORED + note (修正前は FAILED `no_stopped_at`)、途中で終わった forge は FAILED `forge_exit`。`stop_rule.json` に `reached_without_request`。`settle_virtual_stop.emulate_v2(cap)`・`main_stage_cap` (MAIN_STAGE_STARTED の nStepOuter > prepare_info の stop_rule.cap)。試験 `run_stop_rule_v2_tests` 65/65 (単独・同時・負荷)、`test_settle_virtual_stop` 65/65 | O |
 | 5d | ~~判定の区間 1 万 step のプリセット `wt_nozzle_v2` (§4.4 のユーザ決定)~~ (2026-10-16 実装済み・commit) | `settle.py`: 残差の傾き・振幅・上昇を毎 step の系列から測る選択 (`residual.series: raw`、既定は今の `grid` でビット同一)。`settle_presets.py`: `wt_nozzle_v2` (W 10,000・hold 0・min_points 6・残差は raw・閾値は v1 と同じ値)。停止規則 v2 と `settle_virtual_stop.py` が hold 0 で最初の合格点で止める/要求することを試験で確かめる。`settle_virtual_stop.py` に基準のファイルを差し替える引数 (`--criteria`) を足す (run の settle_criteria.yaml を書き換えない)。合格: 試験 (raw の残差で V2 の負例が落ちる・正例が通る、hold 0 の停止規則と再生の一致)、既存の試験。その後 §6 (1″) の再生 codex の追加 (settle-v2-span10k): raw の残差の全行の被覆 (欠けは INDETERMINATE)、v2 の壁の熱流は節点ごとの区間の max − min (相対の参照は区間の終端の値)、B の内訳 ((a) 累積の超過 / (b) 持続の違反) を分けて書く **結果 (implementer)**: `residual.series: raw` (区間・直前の区間の全整数 step の outer_end の行を重複なく要し、欠け・重複は INDETERMINATE; T − 2W = 開始も判定不能にして最初の判定は 22,000)、`wall_heat_nodes.measure: range` (節点ごとの max − min、相対の参照は終端の値)、`wt_nozzle_v2` (v1 は不変・preset_sha256 も同じ)、`settle_virtual_stop.py --criteria` (`--out` 必須、run の基準を読まず書かない)・B の内訳。既定 (grid・terminal_diff) は f210850c と判定がビット同一 (16 件 + --scan)。試験: test_settle 87/87・test_settle_virtual_stop 78/78 (両 Python)・run_settle_presets_tests 46/46・run_stop_rule_v2_tests 72 項目 (hold 0: 26,000 で要求 → 26,001 で REACHED、再生と一致) | O |
-| 7 | 呼び出し側の移行・AGENTS.md・Stop フック | §4.7。V1〜V5 の後。他のセッションに効くので調整板に書く 追加: §4.8 の 2 (受け渡しの関門の置き換え) | F |
+| 7 | 呼び出し側の移行・AGENTS.md・Stop フック | §4.7。V1〜V5 の後。他のセッションに効くので調整板に書く 追加: §4.8 の 2 (受け渡しの関門の置き換え) 具体化: §4.9 (2026-10-16)。V6 (通しの 1 pass) を事前登録 | F |
 
 ## 6. 検証 (事前登録 2026-10-15)
 
@@ -169,6 +178,7 @@ V1〜V5 がすべて合格、§5.1 #7 の移行 (呼び出し側が共通の部�
 
 ## 9. 変更ログ
 
+- `2026-10-16` — #7 の具体化 (§4.9) と V6 (通しの 1 pass) を書いた (ユーザ「ガンガン進めて」)。
 - `2026-10-16` — V4 (§6 (2′)) 合格: run_0011_ns_v2 が 46,000 で要求・46,202 で協調停止して REACHED、オンラインと再生の判定が一致、δ_E を 1 回抽出 (71.6 s)。
 - `2026-10-16` — V4 を `wt_nozzle_v2` で事前登録 (§6 (2′))、見張りの判定ごとの所要 `judge_s` を記録に足した。
 - `2026-10-16` — §6 (1″) の結果: run_0012・run_0013 とも `wt_nozzle_v2` で VERDICT A (t_s 46,000、span で全量が許容の 0.1 以下・全条件 SETTLED)。
