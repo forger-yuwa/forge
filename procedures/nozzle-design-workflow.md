@@ -13,6 +13,8 @@
   [`plans/active/tooling-design-problem-campaign-recipe.md`](../plans/active/tooling-design-problem-campaign-recipe.md)
   (再現可能なパイプライン化、§4.9 C2 方式 — **未実装部分が多い**)。
 - コマンドは `design/` 直下で `.venv-opt/bin/python` を使う。run は検証 run でも AWS で回す。
+- **他の PC で要求カードから成果物まで回す** (AWS を使わず、その PC の GPU で; 2026-10-16): 手順書 [`design-chain-quickstart.md`](design-chain-quickstart.md)
+  (case/71 の M5.5 燃焼ガス風洞ノズルの入口条件と寸法を変えたもの。CONTUR の式の壁の NS → 3 係数の較正 → NS 2 回目 → `wt_qualify` → 成果物)。
 - **計算環境 (2026-10-07)**: 積分法の δ_r (scipy の RK45) は numpy・scipy の版で 1e-6 r_t の桁 (case/45 の出口付近で約 0.5 µm) 動く。
   設計として問題になる大きさではないが、壁・メッシュの**ビット同一を要する照合** (保存した壁の作り直し・W3/W4 型の入力の同一性・生産の
   問題の準備が生産の run の入力を再現するかの確認) は、**照合する相手と同じ環境で**行う。
