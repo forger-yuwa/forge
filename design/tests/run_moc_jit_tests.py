@@ -24,7 +24,7 @@
      θ・ν の差 ≤ 1e−10 rad、NaN の位置が同じ、壁の位置の差 ≤ 1e−10 r_t、θ_max の差 ≤ 1e−8°、判定の欄 (ok・reasons・error) が同じ、
      集計 (`moc`) の分類の数が同じ。差の最大を表で出す
   6. 所要: 放射源流 n_ax 2400 の充填と N 2400 の 1 評価 (numpy と numba、コンパイル済み) と、空のキャッシュでのコンパイル込みの初回
-     (別プロセス)。判定 (3 倍) は AWS A の値で行う (plan §6 V5)、手元の値は記録
+     (別プロセス)。手元の値は記録だけ (plan §6 V5 の所要はユーザ決定で改訂; 新旧の比は AWS B で同じ条件で測る、§6.6)
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_moc_jit_tests.py [--real]
 凍結源 (case/45 の run_0062) や case/71 のカードが無ければその項目を飛ばして exit 2 (合格扱いにしない)。
@@ -537,8 +537,9 @@ else:
     from scipy.spatial import cKDTree  # noqa: E402
 
     def ref_pileup(L, n_ax, pad, kmax, sx):
-        """点の堆積の対の全部 (以前の書き方の cKDTree.query_pairs と同じ判定、切り詰めない): (全件数, seam 除外の [段, x_a, r_a] の並べた列)。"""
-        n_all, locs = 0, []
+        """点の堆積の対の全部 (以前の書き方の cKDTree.query_pairs と同じ判定、切り詰めない):
+        (全件数, seam 除外の [段, x_a, r_a] の並べた列, 全部の対の集合 {(段, 添字 a, 添字 b, seam 除外なら 1)})。"""
+        n_all, locs, pairs = 0, [], set()
         for k in range(L.shape[0]):
             xk, rk = L[k, :, 0], L[k, :, 1]
             idx = np.where(np.isfinite(xk) & np.isfinite(rk))[0]
@@ -554,7 +555,8 @@ else:
                         seam = True
                     if not seam:
                         locs.append((k, float(pts[a, 0]), float(pts[a, 1])))
-        return n_all, sorted(locs)
+                    pairs.add((k, int(idx[a]), int(idx[b]), 0 if seam else 1))
+        return n_all, sorted(locs), pairs
 
     rng = np.random.default_rng(3)
     for n_ax in (60, 300):
@@ -578,16 +580,19 @@ else:
                 # 点の堆積: 切り詰める前の対の集合を比べる (以前の書き方と同じ判定の cKDTree の参照 vs numba の走査の全件)。
                 # 記録の位置の一覧 (先頭 20 件) は段・添字の順で選ぶ契約 (以前は集合の反復順) なので、全件の先頭 20 件と一致することを見る
                 pad, kmax, sx = kw.get("seam_i_pad", 45), kw.get("seam_k_max", 45), kw.get("seam_x_max")
-                n_ref, locs_ref = ref_pileup(L, n_ax, pad, kmax, sx)
+                n_ref, locs_ref, pairs_ref = ref_pileup(L, n_ax, pad, kmax, sx)
                 xs_c, rs_c = np.ascontiguousarray(L[..., 0]), np.ascontiguousarray(L[..., 1])
-                _, _, _, n_nb, n_nb_int, locs_nb = NB.level_scan_nb(xs_c, rs_c, n_ax, pad, kmax, 0.0 if sx is None else float(sx),
-                                                                     sx is not None, 10 ** 7)
+                _, _, _, n_nb, n_nb_int, locs_nb, all_nb = NB.level_scan_nb(xs_c, rs_c, n_ax, pad, kmax, 0.0 if sx is None else float(sx),
+                                                                            sx is not None, 10 ** 7, 10 ** 7)
                 locs_nb = [(int(q[0]), float(q[1]), float(q[2])) for q in locs_nb]
-                set_ok = n_nb == n_ref and sorted(locs_nb) == locs_ref and n_nb_int == len(locs_ref)
+                pairs_nb = {(int(q[0]), int(q[1]), int(q[2]), int(q[3])) for q in all_nb}
+                # 対の全集合 (段・元の添字 a < b・seam の区別) が参照と一致、件数も一致 (重複なし)
+                set_ok = (n_nb == n_ref and len(all_nb) == n_ref and pairs_nb == pairs_ref and sorted(locs_nb) == locs_ref
+                          and n_nb_int == len(locs_ref))
                 head_ok = lb == locs_nb[:20] and len(la) == len(lb)
                 check(f"網の検査 n_ax {n_ax} {lab} {'seam・壁つき' if kw else '既定'}: 位置の一覧以外が完全一致 (反転 "
-                      f"{a['n_orientation_flip']}・堆積 {a['pileup_pairs']}/{a['pileup_pairs_interior']})、堆積の対の全集合 "
-                      f"{len(locs_ref)} 件が参照と一致、記録の先頭 {len(lb)} 件は段・添字の順" + (f" ({d[:3]})" if d else ""),
+                      f"{a['n_orientation_flip']}・堆積 {a['pileup_pairs']}/{a['pileup_pairs_interior']})、堆積の対 (段・添字 a・b・seam) の全集合 "
+                      f"{len(pairs_ref)} 対が参照と一致、記録の先頭 {len(lb)} 件は段・添字の順" + (f" ({d[:3]})" if d else ""),
                       not d and set_ok and head_ok)
 
 # --- 4d. C⁺ 流束閉包の壁の numba の版 (plan §4.6 (3)) ----------------------------------------------------------------------------

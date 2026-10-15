@@ -30,7 +30,7 @@ from .moc_kernel import (AXIS_LIMIT_MODES, AXIS_R_EPS, CORR_MAX, CORR_TOL,
                          pm_mach, pm_mach_vec, pm_nu, source_branches)
 
 
-# --- 単位過程の backend (plans/active/tooling-nozzle-mknot-fast.md §4.4・§4.5、受入は §6 V5) ---------------------------------
+# --- 単位過程の backend (plans/accepted/tooling-nozzle-mknot-fast.md §4.4・§4.5、受入は §6 V5) ---------------------------------
 # 充填 (`fill_levels`・`fill_arrays`) の 1 段の単位過程 (`InverseMOC._pairs`) は既定で numba の版 (`moc_fill_nb.pairs_nb`)。
 # 環境変数 `FORGE_MOC_KERNEL=numpy` で numpy の版 (`moc_kernel.interior_vec`、A/B と回帰の基準)。他の値は ValueError。
 # numba が無ければ ImportError (黙って numpy の版に落ちない)。段のループと集計 (`MocFillDiag.add`) は両方の backend で共通。

@@ -1,6 +1,6 @@
 # M_knot 高速化の最終の版の証拠 (2026-10-15、AWS B)
 
-plan [`tooling-nozzle-mknot-fast`](../../../plans/active/tooling-nozzle-mknot-fast.md) §5.1 #10・§6.6 (result 段 NO-GO の M1 への対応)。
+plan [`tooling-nozzle-mknot-fast`](../../../plans/accepted/tooling-nozzle-mknot-fast.md) §5.1 #10・§6.6 (result 段 NO-GO の M1 への対応)。
 最終の版 = feature/mknot-fast **cba2914f** (逆 MOC の単位過程の numba の版、Newton の修正の後)。比較の相手 = 引き継ぎ時点 **9468e0d0** (numpy の版)。
 
 - 機械: AWS B (g5.xlarge、AMD EPYC 7R32、4 vCPU) — `env.txt`。Python の環境は自分の venv (`~/mknot_venv`: numpy 2.5.2・scipy 1.18.0・numba 0.68.0・llvmlite 0.50.0)。

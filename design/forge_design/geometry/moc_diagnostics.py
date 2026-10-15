@@ -158,7 +158,7 @@ def characteristic_topology_diagnostics(levels: np.ndarray, n_ax: int,
     # 点堆積が出て健全な A でも 180 対に達する (実測)。段ごとの走査は numba の 1 関数 (`moc_fill_nb.level_scan_nb`; 以前は段ごとの
     # cKDTree で 1 評価 約 0.5 s、2026-10-15 plan tooling-nozzle-mknot-fast §4.6 (2))。判定は同じ、位置の一覧は段ごとに対の添字の順。
     from .moc_fill_nb import level_scan_nb
-    min_gap, gk, gi, pileup_pairs, pileup_pairs_interior, locs = level_scan_nb(
+    min_gap, gk, gi, pileup_pairs, pileup_pairs_interior, locs, _ = level_scan_nb(
         xs, rs, int(n_ax), int(seam_i_pad), int(seam_k_max),
         float(seam_x_max) if seam_x_max is not None else 0.0, seam_x_max is not None, 20)
     min_gap = float(min_gap)

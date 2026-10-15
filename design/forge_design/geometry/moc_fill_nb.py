@@ -1,6 +1,6 @@
 r"""逆 MOC の単位過程 (`moc_kernel.interior_vec` を 1 段の対に通す部分) の numba 版。
 
-計画: plans/active/tooling-nozzle-mknot-fast.md §4.4・§4.5 (受入は §6 V5)。
+計画: plans/accepted/tooling-nozzle-mknot-fast.md §4.4・§4.5 (受入は §6 V5)。
 
 `moc_inverse.InverseMOC._pairs` の 1 段分 — 予測子・修正子 (`_interior_pass`)、最終残差 (`_interior_residual`)、源項の端点評価
 (`_src_vec`・`_sin_over_r_vec`)、`mu_vec`、ν→M (`pm_mach_vec`)、源項の分岐 (`source_branches`)、対の分類 — を `pairs_nb` にした。
@@ -325,13 +325,13 @@ def pairs_nb(x, r, th, nu, M, thrA, thrB, analytic, mode, n_corr, tol, max_corr,
 
 # --- 網の検査の段ごとの走査 (`moc_diagnostics.characteristic_topology_diagnostics`、2026-10-15 plan §4.6 (2)) -------------------
 @njit(cache=True)
-def level_scan_nb(xs, rs, n_ax, seam_i_pad, seam_k_max, seam_x_max, has_sx, cap):
+def level_scan_nb(xs, rs, n_ax, seam_i_pad, seam_k_max, seam_x_max, has_sx, cap, cap_all=0):
     r"""網の各段 (`levels[k, :, 0:2]`、NaN = 欠損) について、(1) 隣接する有限の点の間隔の最小とその位置、(2) 点の堆積 = 同じ段の
     **非隣接** (添字の差 > 2) の点の対で、距離 ≤ 0.2 × (その段の隣接間隔の中央値) (下限 1e-9) のものを数える。
     以前の書き方 (段ごとの cKDTree.query_pairs) と同じ判定 (距離² = Δx² + Δr² ≤ 閾値²)。対は x で並べた掃き出しで探す。
     seam の扱いも同じ: 対の片方の添字が n_ax ± seam_i_pad の中で段 ≤ seam_k_max、または両方が x < seam_x_max (has_sx のとき)。
     戻り: (最小間隔 (無ければ inf), その段, その添字, 堆積の対の数, seam を除いた数, seam を除いた対の位置 (先頭 cap 件、段ごとに
-    (a, b) の昇順) [段, x_a, r_a])。"""
+    (a, b) の昇順) [段, x_a, r_a], 堆積の全部の対 (先頭 cap_all 件、試験用) [段, 段の中の添字 a, 同 b, seam を除いた対なら 1])。"""
     n_lev, n_pt = xs.shape
     min_gap = np.inf
     gk = -1
@@ -340,6 +340,8 @@ def level_scan_nb(xs, rs, n_ax, seam_i_pad, seam_k_max, seam_x_max, has_sx, cap)
     n_pile_int = 0
     locs = np.empty((max(cap, 1), 3))
     n_loc = 0
+    allp = np.empty((max(cap_all, 1), 4), np.int64)
+    n_all = 0
     idx = np.empty(n_pt, np.int64)
     px = np.empty(n_pt)
     pr = np.empty(n_pt)
@@ -422,7 +424,13 @@ def level_scan_nb(xs, rs, n_ax, seam_i_pad, seam_k_max, seam_x_max, has_sx, cap)
                     locs[n_loc, 1] = px[a]
                     locs[n_loc, 2] = pr[a]
                     n_loc += 1
-    return min_gap, gk, gi, n_pile, n_pile_int, locs[:n_loc]
+            if n_all < cap_all:
+                allp[n_all, 0] = k
+                allp[n_all, 1] = idx[a]
+                allp[n_all, 2] = idx[b]
+                allp[n_all, 3] = 0 if in_seam else 1
+                n_all += 1
+    return min_gap, gk, gi, n_pile, n_pile_int, locs[:n_loc], allp[:n_all]
 
 
 # --- C⁺ 流束閉包の壁 (`moc_inverse.cplus_flux_wall`、2026-10-15 plan §4.6 (3)) -------------------------------------------------
