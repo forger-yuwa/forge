@@ -93,7 +93,8 @@ SPAN_DEFAULT = 80_000
 TS_MAX_DEFAULT = 120_000
 # = stop_rule.HOLD_STEPS_DEFAULT (stop_rule.py:110)。settle_criteria.yaml に hold が無いときの v2 の保持 (stop_rule.py:1124)
 HOLD_STEPS_DEFAULT = 40_000
-FONT = "/home/sano/.fonts/NotoSansCJKjp-Regular.otf"
+# 日本語のラベルのフォント (手元・AWS とも ~/.fonts に置いてある; 無ければ既定のフォントで描く)
+FONT = str(Path.home() / ".fonts" / "NotoSansCJKjp-Regular.otf")
 RESULT_A, RESULT_B, RESULT_NA = "A", "B", "未成立"
 EXIT_CODE = {RESULT_A: 0, RESULT_B: 1, RESULT_NA: 3}
 REQ_SETTLED, REQ_DIVERGED, REQ_UNSET = "settled", "diverged", "criteria_unset"
