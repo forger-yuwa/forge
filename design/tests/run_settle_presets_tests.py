@@ -14,6 +14,8 @@ r"""収束の判定のプリセット `settle_presets` と節点の量の抽出�
     書いて読み戻せる。η 0.03 は格子の第 1 層 (j = 1) の η と丸めの差で一致・近接するので、列ごとに np.interp が使う対を数えて報告する。
 (c) 例外: evaluate.settle の知らないキー・知らないプリセット・閾値の知らない量とキー・quantities_remove の知らない量・
     farfield / 知らない kind / 出口の無い bcond・凝縮・W が間隔の倍数でない・prepare_info の Md の欠け。
+(e) プリセット `wt_nozzle_v3` (§4.4・§5.1 #8): 残差を外し非有限の見張り (residual_finite)、excluded に理由、他は v2 と同じ、v1・v2 の
+    preset_sha256 は変えない。
 (d) プリセット `wt_nozzle_v2` (§4.4・§5.1 #5d): 窓 10,000・min_points 6・保持 0・残差 series raw・壁の熱流 measure range、閾値と量の
     定義は v1 と同じ、版の記録、往復、v1 は変わらない (プリセットの sha256 が #5d の前と同じ)。
 """
@@ -343,6 +345,7 @@ def test_errors(run):
 
 # ------------------------------------------------------------------ (d) wt_nozzle_v2
 V1_PRESET_SHA256 = "15a7767ac75e25b51cd8e2e4a3faefcb298cb85624b2fa630c91bf5165e48c32"   # #5d の前 (f210850c) の wt_nozzle_v1 の preset_sha256
+V2_PRESET_SHA256 = "e9caa4e73e77b4688327d0a9780a75cbd8f963edadea50cc17b80eaf63bcfcf8"   # #8 の前 (1de17d21) の wt_nozzle_v2 の preset_sha256
 
 
 def test_v2(run, crit_v1):
@@ -391,6 +394,53 @@ def test_v2(run, crit_v1):
         and q4["wall_heat_nodes"]["measure"] == "range" and q4["line_mach"]["x_range_m"] == [4.0, 7.95])
 
 
+def test_v3(run, crit_v1):
+    """プリセット wt_nozzle_v3 (plan §4.4「残差を止める判定から外す・ビルドは float」(2026-10-16 ユーザ決定)、§5.1 #8)。"""
+    print("=== (e) プリセット wt_nozzle_v3 (残差を外し非有限の見張りだけ; §4.4・§5.1 #8) ===")
+    info, cfg, bc = load_inputs(run)
+    c2 = SP.resolve({"preset": "wt_nozzle_v2"}, info, cfg, bc)
+    c3 = SP.resolve({"preset": "wt_nozzle_v3"}, info, cfg, bc)
+    q2 = {x["name"]: x for x in c2["quantities"]}
+    q3 = {x["name"]: x for x in c3["quantities"]}
+    chk("e1 残差 (residual) の量が無く、残差の非有限の見張り (residual_finite、閾値なし・forge の残差の履歴) がある",
+        "residual" not in q3 and q3.get("residual_finite", {}).get("kind") == "residual_finite"
+        and q3["residual_finite"]["file"] == "residual_history.csv" and q3["residual_finite"]["thresholds"] == {}, str(list(q3)))
+    ex = [e for e in c3["excluded"] if e["kind"] == "residual"]
+    chk("e2 外したことと理由を excluded に書く (ユーザ決定・float の残差の振幅・発散は見張りで見る)",
+        len(ex) == 1 and "2026-10-16 ユーザ決定" in ex[0]["reason"] and "0.585" in ex[0]["reason"] and "residual_finite" in ex[0]["reason"],
+        str(ex)[:200])
+    chk("e3 残差以外 (流量・出口コア・線・流れ角・壁の熱流の定義と閾値)・窓 10,000・保持 0・格子・構造・前提は v2 と同じ",
+        all(q3[nm] == q2[nm] for nm in q2 if nm != "residual") and c3["window"] == c2["window"] and c3["hold"] == c2["hold"] == 0
+        and c3["grid"] == c2["grid"] and c3["structured"] == c2["structured"] and c3["preconditions"] == c2["preconditions"]
+        and [e for e in c3["excluded"] if e["kind"] != "residual"] == c2["excluded"],
+        str([nm for nm in q2 if nm != "residual" and q3.get(nm) != q2[nm]]))
+    chk("e4 版の記録: v2 から残差を外す (2026-10-16 ユーザ決定)", c3["source"]["preset"] == "wt_nozzle_v3"
+        and "残差を外す" in c3["source"]["preset_version"] and "2026-10-16 ユーザ決定" in c3["source"]["preset_version"])
+    rd = TMP / "e_run"
+    rd.mkdir()
+    for fn in ("prepare_info.json", "solverConfig.yaml", "bcondConfig.yaml"):
+        shutil.copy(run / fn, rd / fn)
+    w = SP.write_settle_criteria(rd, {"preset": "wt_nozzle_v3"}, info, cfg, bc)
+    lc = settle.load_criteria(rd)
+    chk("e5 書いた settle_criteria.yaml を settle が読める (評価対象が揃う: 見張り・流量・目的の量)",
+        lc["status"] == "ok" and lc["sha256"] == w["sha256"] and "residual_finite" in [q["kind"] for q in lc["criteria"]["quantities"]])
+    ok, msg = raises(lambda: SP.resolve({"preset": "wt_nozzle_v3", "thresholds": {"residual": {"amp_dec": 1.0}}}, info, cfg, bc), "residual")
+    chk("e6 v3 で残差の閾値を上書き → ValueError (残差の量が無い)", ok, msg[:80])
+    cfc = copy.deepcopy(cfg)
+    cfc["condensation"] = {"condensation": 1}
+    try:
+        c3c = SP.resolve({"preset": "wt_nozzle_v3"}, info, cfc, bc)
+        ok3 = "residual_finite" in [q["kind"] for q in c3c["quantities"]]
+    except ValueError as e:
+        ok3, c3c = False, str(e)
+    ok2, msg2 = raises(lambda: SP.resolve({"preset": "wt_nozzle_v2"}, info, cfc, bc), "凝縮")
+    chk("e7 残差の列名を決められない構成 (凝縮): v2 は今どおり ValueError、v3 は列名を使わないので解決できる (見張りは全数値列)",
+        ok2 and ok3, f"{msg2[:60]} / {str(c3c)[:80] if not ok3 else ''}")
+    chk("e8 v1・v2 は変えない: プリセットの sha256 が #5d の前 (v1)・#8 の前 (v2) と同じ",
+        SP._sha256_json(SP.PRESETS["wt_nozzle_v1"]) == V1_PRESET_SHA256 and SP._sha256_json(SP.PRESETS["wt_nozzle_v2"]) == V2_PRESET_SHA256,
+        f"{SP._sha256_json(SP.PRESETS['wt_nozzle_v2'])}")
+
+
 def main():
     print(f"numpy {np.__version__}, python {sys.version.split()[0]}")
     run = find_run()
@@ -404,6 +454,7 @@ def main():
     test_bit_identity(run, crit)
     test_errors(run)
     test_v2(run, crit)
+    test_v3(run, crit)
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{NCHK - len(FAIL)}/{NCHK} OK")
     if FAIL:

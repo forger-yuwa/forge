@@ -560,6 +560,21 @@ plan tooling-settle-convergence-and-monitor §4.5)。前の段 (S1・S2) の設�
    を一時ファイル経由で置く。終了コード 0。
 4. **確認・通知に失敗したら `STOPPED_AT` を置かず終了コード 3** (理由は `[coopStop] ERROR:` の行)。見張りは `STOPPED_AT` と
    終了コード 0 がそろったときだけ、その step の場で判定・抽出する。
+5. **非空のまま途中で切れたファイルも失敗にする** (2026-10-16、plan tooling-settle-convergence-and-monitor §5.1 #7c、result 段レビュー M2;
+   以前は大きさが正なら通した)。各出力の処理が書き込み・flush・close の成否を確かめて失敗を例外にし (XMF は `ofstream` の状態、h5 は
+   HighFive の close がデストラクタで失敗を握りつぶすので `flush` を明示)、締めの確認でも h5 は HDF5 で読み取りで開いて全オブジェクトの
+   ヘッダを読めること、xmf は最後の行が `</Xdmf>` であることを確かめる。随時の書き出しも同じ確認で `SNAPSHOT_FAILED` になる。
+   通常の出力の step の XMF の書き込みの失敗は、h5 の失敗と同じく例外で forge が落ちる (以前は黙って続いた)。
+6. **終了コードの保全**: 協調停止・随時の書き出しの step で出力の失敗を記録した run だけ、終了時に HDF5 のライブラリの後始末を飛ばして
+   main の決めた終了コード (停止の失敗 3、随時の書き出しの失敗の後の完走 0) で終える。HDF5 1.10 は close に失敗した dataset の ID を残し、
+   終了時の後始末 (`H5_term_library` → `H5D_close`) でそれを閉じ直して SIGSEGV になる (2026-10-16 に確認: 停止の失敗が 139、随時の書き出しの
+   失敗で完走した run が最後に 139)。失敗の無い run の終了は今どおり。
+- **試験用の口** (既定 off): 環境変数 `FORGE_TEST_OUTPUT_FSIZE='<ファイル名の正規表現>:<bytes>'` で、協調停止・随時の書き出しの step に
+  書く出力のうち名前が一致するファイルを書く間だけ `RLIMIT_FSIZE` を `<bytes>` にする (`SIGXFSZ` は無視) → write が `EFBIG` で途中から失敗し、
+  非空の途中までのファイルが残る (ディスクの満杯の模擬)。例 `FORGE_TEST_OUTPUT_FSIZE='res_[0-9]+\.xmf:300'`。確認 (case/71 の Euler の写し、
+  2026-10-16): 全場の XMF 300 byte・境界の XMF・全場の h5 (終わり近く 57,774,900 byte から 3,000 byte まで 4 通り)・節点の h5 (3 通り) の停止は
+  どれも終了コード 3・`STOPPED_AT` なし、随時の書き出しの全場の XMF・境界の h5 は `SNAPSHOT_FAILED` で計算は続き終了コード 0、
+  次の要求は成功。flush を明示しない場合、小さい h5 (節点) の途中の失敗は HighFive が例外を出さないことを単体で確かめた。
 
 - forge は `STOP_REQUEST` を消さない。**起動時に `STOP_REQUEST`・`STOPPED_AT`・`SNAPSHOT_REQUEST` のどれかが既にあると止まる**
   (終了コード 1、前の run の残りで 1 step 目に止まる・見張りが完了と取り違えるのを防ぐ)。同じ run dir で起動し直すなら消してから。

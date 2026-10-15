@@ -731,7 +731,8 @@ def delete_after(run_dir, step: int) -> list:
 def postprocess(run_dir) -> dict:
     """`run_case.sh` と同じ後処理 (判定の道具の選択 → CONVERGENCE_VERDICT.txt (1 行目に使った道具)、plot_implicit_residuals.py →
     residual_history.png)。道具の選択は run_case.sh と同じ規則 (`settle.select_judge`; plan tooling-settle-convergence-and-monitor §4.9 の 2):
-    settle_criteria.yaml の無い run・前の段・本段でない起動は check_convergence.py、それ以外は check_settled.py --bind
+    settle_criteria.yaml の無い run と前の段と確かめられた run は check_convergence.py、それ以外は check_settled.py --bind (照合の
+    不一致・起動の記録の欠けは INDETERMINATE; §5.1 #7c)
     (基準のある run は選択に失敗しても旧の道具へ落とさない; VERDICT の行が無ければ INDETERMINATE・終了コード 3 を足す)。"""
     from .runner import FORGE_TOOLS, _ENV
     run_dir = Path(run_dir)
@@ -1151,7 +1152,7 @@ def preflight_v2(run_dir, cfg: dict, cap: int) -> dict:
         nm = q["name"]
         if "series_csv" in q:
             probs.append(f"{nm}: series_csv (再生用の系列) はオンラインの判定に使えない (forge の出力から判定する)")
-        elif q["kind"] == "residual" and q["file"] != FORGE_RESIDUAL:
+        elif q["kind"] in ("residual", "residual_finite") and q["file"] != FORGE_RESIDUAL:
             probs.append(f"{nm}: file {q['file']!r} が forge の残差の履歴 {FORGE_RESIDUAL} でない")
         elif q["kind"] == "mass_balance" and q["file"] != FORGE_MASSFLUX:
             probs.append(f"{nm}: file {q['file']!r} が forge の境界の質量流束 {FORGE_MASSFLUX} でない")

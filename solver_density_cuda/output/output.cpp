@@ -11,16 +11,29 @@
 #include <string>
 #include <list>
 #include <algorithm>
+#include <optional>
+#include <stdexcept>
 
 #include "mesh/mesh.hpp"
 #include "mesh/elementType.hpp"
 #include "common/vectorUtil.hpp"
+#include "output/monitorOutputs.hpp"   // 試験用の口 TestFsizeLimit (既定 off)
 
 #include <highfive/H5File.hpp>
 
 using HighFive::File;
 
 namespace {
+
+// XMF (テキスト) の書き込みの成否を flush・close まで確かめ、失敗は例外にする (h5 の失敗を HighFive が例外にするのと揃える)。
+// 協調停止・随時の書き出しの step では writeStepOutputs が捕まえて完了の通知 (STOPPED_AT / SNAPSHOT_DONE) を出さない
+// (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #7c、result 段レビュー M2)。それ以外の step は h5 と同じく例外で落ちる。
+void closeTextOrThrow(std::ofstream& ofs, const std::string& fname)
+{
+    ofs.flush();
+    ofs.close();
+    if (!ofs) throw std::runtime_error(fname + " の書き込みに失敗 (開く・書く・flush・close のどれか)");
+}
 
 // 化学種の解決済み記録をルート属性に書く (plans/active/thermophysics-solver-owned-species-db.md §4.3, #3a)。
 //   species_hash (互換性ハッシュ) / species_record_sha256 (記録全文) / species_record_file / species_input_unverified。
@@ -111,7 +124,9 @@ static std::list<std::string> effectiveOutputNames(const solverConfig& cfg, cons
     return out;
 }
 
-static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep , const std::string& prefix)
+// force: 協調停止・随時の書き出しの step (試験用の口 TestFsizeLimit が効くのはこのときだけ)。書き込みの失敗は例外。
+static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep , const std::string& prefix ,
+                                 bool force = false)
 {
     const std::list<std::string> outNames = effectiveOutputNames(cfg, var);
     const bool writeH0 = (cfg.outputLevel >= 1) && var.c.count("Ht") && var.c.count("k");
@@ -133,7 +148,12 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     string fnameH5 = prefix+oss.str()+".h5";
     ofstream ofsH5(fnameH5);
 
-    File file(fnameH5, File::ReadWrite | File::Truncate);
+    // h5 は XMF を書く前に flush して閉じる (下)。試験用の口は h5 の close まで効かせる (既定 off)
+    std::optional<monitorOutputs::TestFsizeLimit> h5TestLimit;
+    h5TestLimit.emplace(fnameH5, force);
+    std::optional<File> fileH5;
+    fileH5.emplace(fnameH5, File::ReadWrite | File::Truncate);
+    File& file = *fileH5;
     writeSpeciesAttributes(file);
     writeTwoPhaseAttributes(file, cfg);
 
@@ -266,11 +286,17 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
         const int flag = h0IncludesK ? 1 : 0;
         ds.createAttribute<int>("h0_includes_k", HighFive::DataSpace::From(flag)).write(flag);
     }
+    // 書き込みの成否をここで確かめる: HighFive は close (デストラクタ) の失敗を握りつぶすので、キャッシュに残ったデータ・メタデータを
+    // flush で書き出して失敗を例外にし、それから閉じる (result 段レビュー M2)。
+    file.flush();
+    fileH5.reset();
+    h5TestLimit.reset();
 
     // ------------
     // *** XDMF ***
     // ------------
     string fnameXDMF = prefix+oss.str()+".xmf";
+    const monitorOutputs::TestFsizeLimit xmfTestLimit(fnameXDMF, force);   // 試験用の口 (既定 off)
     ofstream ofs(fnameXDMF);
 
     ofs << "<?xml version='1.0' ?>\n";
@@ -310,6 +336,7 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     ofs << "    </Grid>\n";
     ofs << "  </Domain>\n";
     ofs << "</Xdmf>\n";
+    closeTextOrThrow(ofs, fnameXDMF);
 }
 
 void outputH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep , bool force)
@@ -323,7 +350,7 @@ void outputH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , 
     const int fieldInterval = (cfg.fieldOutStepInterval > 0) ? cfg.fieldOutStepInterval : cfg.outStepInterval;
     if (!force && !isLast && (iStep%fieldInterval != 0 or iStep < cfg.outStepStart)) return;
 
-    writeSolutionH5_XDMF(cfg , msh , var , iStep , "res_");
+    writeSolutionH5_XDMF(cfg , msh , var , iStep , "res_" , force);
 }
 
 // detectNaN 診断モード用: 出力間隔ガードを無視して現在の解を強制ダンプする。
@@ -367,7 +394,12 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         string fnameH5 = "res_"+bc.physName+"_"+oss_id.str()+"_"+oss.str()+".h5";
         ofstream ofsH5(fnameH5);
 
-        File file(fnameH5, File::ReadWrite | File::Truncate);
+        // h5 は XMF を書く前に flush して閉じる (下)。試験用の口は h5 の close まで効かせる (既定 off)
+        std::optional<monitorOutputs::TestFsizeLimit> h5TestLimit;
+        h5TestLimit.emplace(fnameH5, force);
+        std::optional<File> fileH5;
+        fileH5.emplace(fnameH5, File::ReadWrite | File::Truncate);
+        File& file = *fileH5;
         // **累積 step** を属性で残す (再開後はファイル名の step がローカルになるため、
         // 固体チェックポイントとの時刻一致を機械的に確認できるようにする)。
         {
@@ -548,7 +580,13 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         // ------------
         //string fnameXDMF = "res_wall_"+oss.str()+".xmf";
 
+        // h5 の書き込みの成否 (全場と同じ): flush で失敗を例外にしてから閉じる
+        file.flush();
+        fileH5.reset();
+        h5TestLimit.reset();
+
         string fnameXDMF = "res_"+bc.physName+"_"+oss_id.str()+"_"+oss.str()+".xmf";
+        const monitorOutputs::TestFsizeLimit xmfTestLimit(fnameXDMF, force);   // 試験用の口 (既定 off)
         ofstream ofs(fnameXDMF);
 
         ofs << "<?xml version='1.0' ?>\n";
@@ -611,5 +649,6 @@ void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var ,
         ofs << "    </Grid>\n";
         ofs << "  </Domain>\n";
         ofs << "</Xdmf>\n";
+        closeTextOrThrow(ofs, fnameXDMF);
     }
 }

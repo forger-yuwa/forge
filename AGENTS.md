@@ -79,8 +79,9 @@
 - **判定の正本は 2 つ** (2026-10-16、[plans/active/tooling-settle-convergence-and-monitor.md](plans/active/tooling-settle-convergence-and-monitor.md) §4.9 の 2)。
   run に判定の基準 `settle_criteria.yaml` があり、その本段 (設計チェーンでは本段の開始の記録 `MAIN_STAGE_STARTED` と今の起動・設定・基準の
   sha256 を照合) か、手で組んだ run (基準が本段の記録を指さない) なら、正本は `solver_density_cuda/tools/check_settled.py <run_dir>`
-  (「残差が準定常・流量の収支が取れる・目的の量が準定常」の AND を区間で判定、`SETTLED / NOT_SETTLED / DIVERGED / INDETERMINATE`、
-  結果は `SETTLE_VERDICT.json`)。基準の無い run・前の段 (S1・S2) は今の `check_convergence.py` (この節の各項)。`run_case.sh` は同じ規則で
+  (基準のファイルに書いた量の AND を区間で判定、`SETTLED / NOT_SETTLED / DIVERGED / INDETERMINATE`、結果は `SETTLE_VERDICT.json`。
+  雛形の既定 `wt_nozzle_v3` (2026-10-16 ユーザ決定) は「流量の収支 + 目的の量」で、残差は止める判定に使わず非有限の見張りだけ —
+  float では残差が丸めの雑音で揺れ続けるため。v1・v2 は残差の準定常も含む)。基準の無い run・前の段 (S1・S2) は今の `check_convergence.py` (この節の各項)。`run_case.sh` は同じ規則で
   道具を選び `CONVERGENCE_VERDICT.txt` の 1 行目に使った道具を書く (選択は `check_settled.py --select <run_dir>` で確かめる)。
   **基準のある run が判定不能・照合の不一致になっても `check_convergence.py` へ落として合格にしない**。報告には使った道具・VERDICT・
   判定区間を書く (新方式は「設定された量・区間について SETTLED」で、旧の低下の桁数との一致は求めない)。新方式で監視した量 (基準の

@@ -19,8 +19,10 @@ V2 の負例はすべて SETTLED にしないこと、各負例で理由の分�
 (codex の例 [0.25, 1.75, 1, 1, 1, 1])。**既定 (grid・terminal_diff) は変更前 (`GRID_BASE_COMMIT` の settle.py を git から読む) と
 判定の結果がビット同一** (読めなければその検査は NG — 判定不能を合格にしない)。
 
-**道具の選択と本段の起動との照合** (§4.9 の 2; S1〜S11): `select_judge` の mode (main・pre_main・not_main・manual・legacy・invalid)、
-照合の不一致 (設定・基準の sha256・記録の fnv の欠け) は check_settled.py のまま判定不能 (旧の道具へ落とさない)、`--select`・`--bind`。
+**道具の選択と本段の起動との照合** (§4.9 の 2・§5.1 #7c; S1〜S11): `select_judge` の mode (main・pre_main・unconfirmed・manual・legacy・invalid)、
+照合の不一致 (設定・基準の sha256・記録の fnv の欠け、**起動の記録の欠け・最後の起動の不一致**) は check_settled.py のまま判定不能
+(旧の道具へ落とさない)、記録が無い run は stage_manifest.json で前の段と確かめたときだけ旧の道具、`check_settled.py` は既定で照合
+(`--no-bind` は VERDICT と結果に書く)、`--select`・`--bind` (result 段レビュー M1)。
 """
 from __future__ import annotations
 
@@ -649,24 +651,67 @@ def test_select_bind():
     chk("S1 --select: 1 行目 check_settled.py・終了コード 0", rc == 0 and out.splitlines()[0] == "check_settled.py", out[:120])
     rc, out = cli(r, "--bind", "--no-write")
     chk("S1 --bind: 照合を表示して判定 (SETTLED・終了コード 0)", rc == 0 and "照合:" in out and "VERDICT: SETTLED" in out, out[-200:])
+    rc, out = cli(r, "--no-write")
+    chk("S1 引数なし (既定で照合): 照合を表示して判定 (SETTLED・終了コード 0)", rc == 0 and "照合:" in out and "VERDICT: SETTLED" in out
+        and "照合を外した" not in out, out[-200:])
+    # --- result 段レビュー M1 (§5.1 #7c): 本段の記録がある run は旧の道具へ切り替えない ---
     r = mk("sel_nolaunch", launch=None)
     s = settle.select_judge(r)
-    chk("S2 起動の記録が無い run は今の設定で照合 (一致なら本段・問題なし)", s["mode"] == "main" and s["problems"] == [], str(s["problems"]))
+    rc, out = cli(r, "--no-write")
+    chk("S2 本段の記録があり起動の記録 forge_launches.jsonl が無い → check_settled.py の照合の不一致 (旧の道具へ切り替えない)・"
+        "引数なしで INDETERMINATE (終了コード 3)", s["tool"] == settle.TOOL_NEW and s["mode"] == "main"
+        and any("起動の記録" in p and "無い" in p for p in s["problems"]) and rc == 3 and "照合の不一致" in out, str(s["problems"]))
     r = mk("sel_pre", notice=False)
     s = settle.select_judge(r)
+    rc, out = cli(r, "--no-write")
+    chk("S3 本段の記録が無く stage_manifest.json も無い (前の段と確かめられない) → check_settled.py の INDETERMINATE (記録の欠け)",
+        s["tool"] == settle.TOOL_NEW and s["mode"] == "unconfirmed" and s["problems"] and rc == 3 and "記録の欠け" in out, out[-200:])
+    (r / "stage_manifest.json").write_text(json.dumps({"manifest_version": 3, "stages": [{"order": 0, "tag": "S1_soft"}, {"order": 1, "tag": "S2_mid"}]}))
+    s = settle.select_judge(r)
     rc, out = cli(r, "--bind", "--no-write")
-    chk("S3 前の段 (記録が無い) → check_convergence.py; --bind は判定せず INDETERMINATE (終了コード 3)",
-        s["tool"] == settle.TOOL_OLD and s["mode"] == "pre_main" and rc == 3 and "本段の起動でない" in out, out[-160:])
+    rc2, out2 = cli(r, "--select")
+    chk("S3b 本段の記録が無く stage_manifest.json の段 (S1_soft・S2_mid) に本段が無い = 前の段と確かめた → check_convergence.py; "
+        "check_settled.py は判定せず INDETERMINATE (本段の起動でない)", s["tool"] == settle.TOOL_OLD and s["mode"] == "pre_main"
+        and rc == 3 and "本段の起動でない" in out and out2.splitlines()[0] == "check_convergence.py", out[-160:])
+    (r / "stage_manifest.json").write_text(json.dumps({"manifest_version": 3, "stages": [{"order": 0, "tag": "S1_soft"}, {"order": 1, "tag": "S2_mid"},
+                                                                                     {"order": 2, "tag": "main"}]}))
+    s = settle.select_judge(r)
+    chk("S3c 本段の記録が無く stage_manifest.json に本段 (main) がある → 前の段と確かめられない (unconfirmed、旧の道具へ切り替えない)",
+        s["tool"] == settle.TOOL_NEW and s["mode"] == "unconfirmed" and any("本段の段" in p for p in s["problems"]), str(s["problems"]))
+    (r / "stage_manifest.json").write_text("{not json")
+    s = settle.select_judge(r)
+    chk("S3d stage_manifest.json が読めない → unconfirmed", s["mode"] == "unconfirmed" and s["tool"] == settle.TOOL_NEW, str(s["problems"]))
     r = mk("sel_not_main", launch="bbbbbbbbbbbbbbbb")
     s = settle.select_judge(r)
-    chk("S4 最後の起動の cfg_fnv が本段の記録と違う → 本段でない起動 (check_convergence.py)", s["tool"] == settle.TOOL_OLD and s["mode"] == "not_main")
+    rc, out = cli(r, "--no-write")
+    chk("S4 最後の起動の cfg_fnv が本段の記録と違う → check_settled.py の照合の不一致 (以前は not_main で check_convergence.py)・"
+        "引数なしで INDETERMINATE", s["tool"] == settle.TOOL_NEW and s["mode"] == "main"
+        and any("最後の forge の起動" in p for p in s["problems"]) and rc == 3 and "VERDICT: INDETERMINATE (本段の起動との照合の不一致)" in out,
+        str(s["problems"]))
+    r = mk("sel_rec_fnv")
+    n = json.loads((r / "MAIN_STAGE_STARTED").read_text())
+    n["main_config"]["fnv"] = "0123456789abcdef"
+    (r / "MAIN_STAGE_STARTED").write_text(json.dumps(n))
+    s = settle.select_judge(r)
+    rc, out = cli(r, "--no-write")
+    chk("S4b レビューの再現: 本段の記録の main_config.fnv だけを変える → 以前は not_main・problems [] → 今は main・照合の不一致・"
+        "INDETERMINATE (終了コード 3)", s["tool"] == settle.TOOL_NEW and s["mode"] == "main" and len(s["problems"]) >= 2
+        and rc == 3, str(s["problems"])[:300])
+    rc, out = cli(r, "--no-bind", "--no-write", "--json")
+    jb = json.loads(out[out.index("{"):out.rindex("}") + 1]) if "{" in out else {}
+    chk("S4c --no-bind: 照合を外して判定し、VERDICT の行と結果の JSON (binding.skipped) に外したことを書く",
+        rc == 0 and "VERDICT: SETTLED" in out and "照合を外した" in out.splitlines()[-1] and (jb.get("binding") or {}).get("skipped") is True,
+        out.splitlines()[-1])
     r = mk("sel_cfg_edit", launch=None)
     (r / "solverConfig.yaml").write_text(cfg + "# 書き換え\n")
     s = settle.select_judge(r)
     rc, out = cli(r, "--bind")
-    chk("S5 起動の記録なしで今の設定が記録と違う → 本段として照合の不一致 (旧の道具へ落とさない)、--bind は INDETERMINATE・"
-        "SETTLE_VERDICT.json を書かない", s["tool"] == settle.TOOL_NEW and s["mode"] == "main" and len(s["problems"]) == 2
+    chk("S5 起動の記録なしで今の設定が記録と違う → 本段として照合の不一致 3 件 (起動の記録・fnv・sha256; 旧の道具へ落とさない)、"
+        "INDETERMINATE・SETTLE_VERDICT.json を書かない", s["tool"] == settle.TOOL_NEW and s["mode"] == "main" and len(s["problems"]) == 3
         and rc == 3 and "照合の不一致" in out and not (r / settle.VERDICT_FILE).exists(), str(s["problems"])[:200])
+    rc, out = cli(r)
+    chk("S5b 引数なし (通常のコマンド) でも照合の不一致なら判定せず SETTLE_VERDICT.json を書かない",
+        rc == 3 and "照合の不一致" in out and not (r / settle.VERDICT_FILE).exists(), out[-160:])
     r = mk("sel_crit_edit")
     with open(r / settle.CRITERIA_FILE, "a") as f:
         f.write("# 書き換え\n")
@@ -681,7 +726,19 @@ def test_select_bind():
     chk("S7 記録に main_config.fnv が無い → 照合できない (問題)", s["mode"] == "main" and any("main_config.fnv が無い" in p for p in s["problems"]))
     r = mk("sel_manual", notice=False, launch=None, crit_seg=False)
     s = settle.select_judge(r)
-    chk("S8 手で組んだ run (grid.segment が記録を指さない) → check_settled.py (照合なし)", s["tool"] == settle.TOOL_NEW and s["mode"] == "manual")
+    chk("S8 手で組んだ run (grid.segment が記録を指さず MAIN_STAGE_STARTED も無い) → check_settled.py (照合なし)",
+        s["tool"] == settle.TOOL_NEW and s["mode"] == "manual")
+    r = mk("sel_manual_rec", crit_seg=False)
+    s = settle.select_judge(r)
+    chk("S8b 基準が記録を指さなくても run に MAIN_STAGE_STARTED がある → 既定のキーで本段として照合 (一致なら問題なし)",
+        s["tool"] == settle.TOOL_NEW and s["mode"] == "main" and s["problems"] == [] and "記録を指さない" in s["why"], str(s["problems"]))
+    c = yaml.safe_load((r / settle.CRITERIA_FILE).read_text())
+    c["notes"] = "準備の後に grid.segment を外して書き換えた"
+    (r / settle.CRITERIA_FILE).write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
+    s = settle.select_judge(r)
+    rc, out = cli(r, "--no-write")
+    chk("S8c 基準の segment を外し書き換えても、記録がある run は照合する (基準の sha256 の不一致 → INDETERMINATE)",
+        s["mode"] == "main" and any("settle_criteria.sha256" in p for p in s["problems"]) and rc == 3, str(s["problems"])[:200])
     r = mk("sel_legacy")
     (r / settle.CRITERIA_FILE).unlink()
     s = settle.select_judge(r)
@@ -697,6 +754,71 @@ def test_select_bind():
     (r / settle.CRITERIA_FILE).write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
     s = settle.select_judge(r)
     chk("S11 grid.segment の stage が main でない → invalid (本段の基準だけを扱う)", s["mode"] == "invalid" and s["tool"] == settle.TOOL_NEW)
+
+
+def test_mass_denominator():
+    """流量の判定の分母 (result 段レビュー M3、§5.1 #7c): 出口の流量 0・符号の反転・逆流で例外にせず理由つきの結果を返す。
+    ṁ_in > 0 で ṁ_out ≤ 0 → NOT_SETTLED (r = 1 − ṁ_out/ṁ_in ≥ 1 は測れて収支が取れていない)、ṁ_in ≤ 0 → INDETERMINATE (分母が無い)。"""
+    print("=== 流量の判定の分母 (出口 0・符号の反転・逆流; result 段レビュー M3) ===")
+
+    def judged(name, **kw):
+        run = build(name, **kw)
+        try:
+            return run, settle.judge(run, kw.get("stop")), None
+        except Exception as e:  # noqa: BLE001
+            return run, None, f"{type(e).__name__}: {e}"
+
+    def out_reason(q):
+        return any("ṁ_out が正でない" in r["text"] for r in q["reasons"])
+
+    run, res, err = judged("m3a_out_zero", mdot_fn=lambda s: (10.0, 0.0))
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3a 入口が正・出口がゼロの有限な観測 (codex の再現) → 例外にせず NOT_SETTLED (理由: ṁ_out が正でない)、"
+        "ṁ_out の相対の変化は計算しない", err is None and q.get("verdict") == "NOT_SETTLED" and cats(q) == {settle.CAT_THRESHOLD}
+        and out_reason(q) and not any("ṁ_out" in c["check"] and "mean" in c["check"] for c in q["checks"]), err or str(failed_checks(q)))
+    rc, out = run_cli(run)
+    chk("M3a check_settled.py は終了コード 1 (NOT_SETTLED) で VERDICT を出す (Traceback にしない)",
+        rc == 1 and "VERDICT: NOT_SETTLED" in out and "Traceback" not in out, out[-160:])
+    run, res, err = judged("m3b_out_signflip", mdot_fn=lambda s: (10.0, -10.0 if s == 30000 else 10.0))
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3b 窓の 1 点だけ出口の流量の符号が反転 → NOT_SETTLED (理由に step 30000)", err is None and q.get("verdict") == "NOT_SETTLED"
+        and out_reason(q) and any("30000" in r["text"] for r in q["reasons"]), err or str(q.get("reasons"))[:200])
+    def mean_zero(s):   # 窓 20,000〜40,000 の 11 点: +5・−5 を交互に 10 点と最後に 0 → 平均がちょうど 0
+        i = (s - 20000) // DT
+        return (10.0, 10.0 if i < 0 else (0.0 if i == 10 else (5.0 if i % 2 == 0 else -5.0)))
+    run, res, err = judged("m3c_out_mean_zero", mdot_fn=mean_zero)
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3c 窓の出口の流量の平均がちょうど 0 (+5 と −5 が交互、以前は ZeroDivisionError) → NOT_SETTLED", err is None
+        and q.get("verdict") == "NOT_SETTLED" and out_reason(q), err or "")
+    run, res, err = judged("m3d_out_reverse", mdot_fn=lambda s: (10.0, -10.0))
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3d 出口が全点で逆流 (平均が負: 以前は (max − min)/mean が負で ṁ_out の検査を素通り) → NOT_SETTLED", err is None
+        and q.get("verdict") == "NOT_SETTLED" and out_reason(q), err or "")
+    run, res, err = judged("m3e_stop_out_neg", end=40000, stop=40001, mdot_fn=lambda s: (10.0, -110.0 if s == 40001 else 10.0))
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3e 停止の観測 (40,001) だけ出口が逆流 (窓 11 点の和 110 と打ち消して平均 0: 以前は停止の観測を加えた除算で "
+        "ZeroDivisionError) → 例外にせず NOT_SETTLED (停止の観測の理由)", err is None
+        and q.get("verdict") == "NOT_SETTLED" and any("停止の観測の出口の流量" in r["text"] for r in q["reasons"]), err or str(q.get("reasons"))[:200])
+    run, res, err = judged("m3f_stop_in_zero", end=40000, stop=40001, mdot_fn=lambda s: (0.0, 10.0) if s == 40001 else (10.0, 10.0))
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3f 停止の観測だけ入口の流量 0 (r の分母が無い) → INDETERMINATE (データ不足)、例外にしない", err is None
+        and q.get("verdict") == "INDETERMINATE" and cats(q) == {settle.CAT_DATA}, err or str(q.get("reasons"))[:200])
+    run, res, err = judged("m3g_in_zero", mdot_fn=lambda s: (0.0, 10.0))
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3g 窓の入口の流量 0 → INDETERMINATE (今どおり; 理由に step)", err is None and q.get("verdict") == "INDETERMINATE"
+        and cats(q) == {settle.CAT_DATA}, err or "")
+    run, res, err = judged("m3h_positive_stop", end=40000, stop=40001)
+    q = qres(res, "mass_balance") if res else {}
+    chk("M3h (対照) 正の流量・停止の観測あり → SETTLED、ṁ_in・ṁ_out の相対の変化と停止の観測の検査を今どおり計算",
+        err is None and q.get("verdict") == "SETTLED" and sum("(max − min)/mean" in c["check"] for c in q["checks"]) == 4,
+        err or str([c["check"] for c in q.get("checks", [])]))
+    sc = None
+    try:
+        sc = settle.scan(TMP / "m3a_out_zero", 2000)
+    except Exception as e:  # noqa: BLE001
+        sc = {"error": str(e)}
+    chk("M3i --scan (格子点ごとの判定; オンラインの見張りと同じ judge) も出口 0 で例外にしない", "error" not in sc
+        and sc.get("first_settled") is None, str(sc)[:160])
 
 
 def test_area():
@@ -1012,6 +1134,125 @@ def test_grid_bit_identity():
     chk("G2 --scan の結果も変更前と同一", settle.scan(run, DT) == base.scan(run, DT))
 
 
+# ------------------------------------------------------------------ wt_nozzle_v3 の形 (残差を外し非有限の見張りだけ; §4.4・§5.1 #8)
+PRE8_COMMIT = "1de17d21"     # #7c・#8 の前の settle.py (v1・v2 の形の基準の判定のビット同一の基準)
+
+
+def v3_criteria(**over):
+    """wt_nozzle_v3 と同じ形: v2 の形から残差の量を外し、残差の非有限の見張り (residual_finite) を入れて excluded に理由を書く。"""
+    c = v2_criteria()
+    c["quantities"] = [q for q in c["quantities"] if q["kind"] != "residual"]
+    c["quantities"].insert(0, {"kind": "residual_finite", "name": "residual_finite", "thresholds": {}})
+    c["excluded"] = [{"kind": "residual", "name": "residual", "reason": "試験: 残差を止める判定から外した (wt_nozzle_v3 の形)"}]
+    c.update(over)
+    return c
+
+
+def test_v3():
+    """plan §4.4「残差を止める判定から外す・ビルドは float」(2026-10-16 ユーザ決定)・§5.1 #8。"""
+    print("=== wt_nozzle_v3 の形: 残差を外し非有限の見張りだけ (§4.4・§5.1 #8) ===")
+    osc = lambda s: {k: x * (10.0 ** 0.6 if (s // 7) % 2 else 1.0) for k, x in RES_BASE.items()}   # 振幅 0.6 桁 (float の ρ は 0.585 桁)
+    run = braw("v3a_osc", resid_fn=osc, criteria=v3_criteria())
+    res = settle.judge(run)
+    q = qres(res, "residual_finite")
+    chk("V3a 残差の振幅 0.6 桁でも、流量と目的の量が整えば SETTLED (残差は判定しない; 見張りは SETTLED)",
+        res["verdict"] == "SETTLED" and q["verdict"] == "SETTLED" and not any(x["kind"] == "residual" for x in res["quantities"])
+        and q["values"]["role"].startswith("非有限の見張り") and q["checks"] == [],
+        f"{res['verdict']} {[(x['name'], x['verdict']) for x in res['quantities']]}")
+    rewrite_criteria(run, v2_criteria())
+    res2 = settle.judge(run)
+    chk("V3a (対照) 同じ残差を v2 の形の基準で → NOT_SETTLED (残差の振幅)", res2["verdict"] == "NOT_SETTLED"
+        and qres(res2, "residual")["verdict"] == "NOT_SETTLED", str(failed_checks(qres(res2, "residual")))[:160])
+    nan = lambda s: {k: (float("nan") if s >= 21000 else x) for k, x in RES_BASE.items()}
+    run = braw("v3b_nan", resid_fn=nan, criteria=v3_criteria())
+    res = settle.judge(run)
+    q = qres(res, "residual_finite")
+    chk("V3b 残差の非有限 (行 21,000 から) → 見張りが DIVERGED・全体 DIVERGED (分類 nonfinite、最初の行の step)",
+        res["verdict"] == "DIVERGED" and q["verdict"] == "DIVERGED" and cats(q) == {settle.CAT_NONFINITE}
+        and q["values"]["nonfinite"]["first_step"]["rms_ro"] == 21000, str(q["reasons"])[:200])
+    rc, out = run_cli(run)
+    chk("V3b check_settled.py は終了コード 2 (DIVERGED)", rc == 2 and "VERDICT: DIVERGED" in out, out[-120:])
+    run = braw("v3c_stop_nan", end=22000, stop=22001, criteria=v3_criteria(),
+               resid_fn=lambda s: {k: (float("inf") if s == 22000 else x) for k, x in RES_BASE.items()})
+    res = settle.judge(run)
+    chk("V3c 停止の観測 22,001 の直前の行 (22,000) だけ非有限 → DIVERGED (見張りは停止の step − 1 まで)",
+        qres(res, "residual_finite")["verdict"] == "DIVERGED", str(qres(res, "residual_finite")["reasons"])[:160])
+    run = braw("v3d_stop_ok", end=22000, stop=22001, criteria=v3_criteria(), resid_fn=osc)
+    res = settle.judge(run)
+    chk("V3d 停止の観測 22,001 (有限) → SETTLED (終端 22,000)", res["verdict"] == "SETTLED" and res["terminal_step"] == 22000
+        and res["stop_step"] == 22001, res["verdict"])
+    run = braw("v3e_lastrow", criteria=v3_criteria(), skip_resid_rows=(21999,))
+    q = qres(settle.judge(run), "residual_finite")
+    chk("V3e 区間の最後の行 (21,999) が無い → 見張りは判定不能 (終端まで届かない)", q["verdict"] == "INDETERMINATE"
+        and any("最後の行" in r["text"] for r in q["reasons"]), str(q["reasons"])[:200])
+    (run / "residual_history.csv").unlink()
+    q = qres(settle.judge(run), "residual_finite")
+    chk("V3f 残差の履歴が無い → 見張りは判定不能 (データ不足)", q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_DATA})
+    c = v3_criteria()
+    c["quantities"] = [x for x in c["quantities"] if x["kind"] != "residual_finite"]
+    run = braw("v3g_nowatch", criteria=c)
+    lc = settle.load_criteria(run)
+    rc, out = run_cli(run)
+    chk("V3g 残差も見張りも無い基準 → INDETERMINATE (評価対象が未設定; 発散を見張れない)・終了コード 3",
+        lc["status"] == "unset" and "residual_finite" in lc["reason"] and rc == 3 and "評価対象が未設定" in out, lc.get("reason", "")[:160])
+    bad = []
+    for label, mut in (("2 つ", lambda c: c["quantities"].append({"kind": "residual_finite", "name": "rf2", "thresholds": {}})),
+                       ("知らないキー required", lambda c: c["quantities"][0].update(required=["rms_ro"])),
+                       ("閾値のキー slope_dec", lambda c: c["quantities"][0].update(thresholds={"slope_dec": 0.1})),
+                       ("thresholds が無い", lambda c: c["quantities"][0].pop("thresholds"))):
+        c = v3_criteria()
+        mut(c)
+        rewrite_criteria(run, c)
+        try:
+            settle.load_criteria(run)
+            bad.append(label)
+        except settle.CriteriaError:
+            pass
+    chk("V3h residual_finite の誤用 (2 つ・知らないキー・閾値のキー・thresholds が無い) は CriteriaError", not bad, str(bad))
+    c = v3_criteria()
+    c["quantities"][0]["thresholds"] = {"provisional": True}
+    rewrite_criteria(run, c)
+    chk("V3h thresholds は {} か provisional だけ", settle.load_criteria(run)["status"] == "ok")
+    run = braw("v3i_scan", end=30000, criteria=v3_criteria(), resid_fn=osc)
+    sc = settle.scan(run, DT)
+    import settle_virtual_stop as VS
+    fj = VS.first_judgeable(settle.validate_criteria(v3_criteria()))
+    chk("V3i 判定の部品 (--scan) は v3 の形で区間 C だけを使うので 12,000 から SETTLED (直前の区間は残差の上昇の検査だけが使う)、"
+        "停止規則・再生の最初の判定は量によらず開始 + 2W + 間隔 = 22,000 のまま (v2 と同じ; 早めるかは plan の判断)",
+        sc["first_settled"] == 12000 and fj == 22000, f"scan {sc['first_settled']} first_judgeable {fj}")
+
+
+def test_v1_v2_identity_pre8():
+    """v1・v2 の形の基準の判定が #7c・#8 の前 (PRE8_COMMIT) の settle.py とビット同一 (正常な流量; #7c の M3 は流量 ≤ 0 だけを変える)。"""
+    print(f"=== v1・v2 の形の基準の判定は #7c・#8 の前 ({PRE8_COMMIT}) とビット同一 ===")
+    global GRID_BASE_COMMIT
+    saved = GRID_BASE_COMMIT
+    GRID_BASE_COMMIT = PRE8_COMMIT
+    try:
+        base, why = _load_base_settle()
+    finally:
+        GRID_BASE_COMMIT = saved
+    if base is None:
+        chk("I0 #7c・#8 の前の settle.py を読めた (読めなければ判定不能 — 合格にしない)", False, why)
+        return
+    spike = lambda s: {k: x * (1e8 if s == 21999 else 1.0) for k, x in RES_BASE.items()}
+    cases = [("i01_v1_const", dict(), [None, 30000]), ("i02_v1_stop", dict(end=80000, stop=80001), [None]),
+             ("i03_v1_mass_drift", dict(mdot_fn=lambda s: (10.0, 10.0 * (1 - 1e-3 * s / 40000))), [None]),
+             ("i04_v2_const", dict(criteria=v2_criteria(), start_obs=False, rows_mode="dense", end=30000), [22000, 30000]),
+             ("i05_v2_spike", dict(criteria=v2_criteria(), start_obs=False, rows_mode="dense", end=22000, resid_fn=spike), [None]),
+             ("i06_v2_stop", dict(criteria=v2_criteria(), start_obs=False, rows_mode="dense", end=22000, stop=22001), [None]),
+             ("i07_v2_wall", dict(criteria=v2_criteria(), start_obs=False, rows_mode="dense", end=22000,
+                                  Q_fn=lambda s: 100.0 + np.arange(NI, dtype=float) + (5.0 if s == 20000 else 0.0)), [None])]
+    bad, n = [], 0
+    for name, kw, ends in cases:
+        run = build(name, **kw)
+        for e in ends:
+            n += 1
+            if _strip(settle.judge(run, e)) != _strip(base.judge(run, e)):
+                bad.append(f"{name} end {e}")
+    chk(f"I1 v1・v2 の形の基準の判定の結果 (全量の verdict・検査・値・理由・基準の中身) が {PRE8_COMMIT} とビット同一 ({n} 件)", not bad, str(bad))
+
+
 def main():
     print(f"numpy {np.__version__}, python {sys.version.split()[0]}, 作業 {TMP}")
     test_area()
@@ -1021,6 +1262,9 @@ def main():
     test_axis_weight()
     test_verdict_file()
     test_select_bind()
+    test_mass_denominator()
+    test_v3()
+    test_v1_v2_identity_pre8()
     test_raw_residual()
     test_wall_range()
     test_grid_bit_identity()

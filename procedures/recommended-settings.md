@@ -127,8 +127,13 @@ plan [convection-slau-wall-normal-chi-default](../plans/accepted/convection-slau
 
 ### 1.3 検証と報告 (必須)
 
-投入前 `check_mesh_quality.py` (AR ≤ 1000, skew ≤ 0.9)。まとめ前 `check_convergence.py` (全列) と
-`check_quasisteady.py` (報告する量) の VERDICT を貼る。NaN チェック、run パスの明示、case README の run 一覧更新。
+投入前 `check_mesh_quality.py` (AR ≤ 1000, skew ≤ 0.9)。まとめ前に収束の判定の VERDICT を貼る — **判定の正本は 2 つ**
+(AGENTS.md「収束確認」、[`calculation-workflow.md`](calculation-workflow.md) の「判定の道具の選択」、2026-10-16):
+判定の基準 `settle_criteria.yaml` のある run の本段と手で組んだ run は `check_settled.py <run_dir>` (本段の記録 `MAIN_STAGE_STARTED` との
+照合が既定、結果は `SETTLE_VERDICT.json`)、基準の無い run と前の段 (S1・S2) は `check_convergence.py` (全列)。どちらを使うかは
+`check_settled.py --select <run_dir>` で確かめ、基準のある run が判定不能・照合の不一致になっても `check_convergence.py` で代えない。
+報告する量のうち新方式で監視していない派生量は `check_quasisteady.py` の VERDICT も貼る。NaN チェック、run パスの明示、case README の
+run 一覧更新。
 
 ## 2. SST (RANS) — 現行 (2026-09-08)
 

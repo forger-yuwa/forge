@@ -129,8 +129,10 @@ def coords():
     return np.c_[X.ravel(), R.ravel(), np.zeros(NI * NJ)]
 
 
-def criteria(hold: int | None = 38000, dt: int = DT, quantities: list | None = None, W_: int = W, raw: bool = False) -> dict:
-    """試験の基準。raw は wt_nozzle_v2 の形 (残差 series raw; 窓は W_、min_points は W_/dt + 1)。"""
+def criteria(hold: int | None = 38000, dt: int = DT, quantities: list | None = None, W_: int = W, raw: bool = False,
+             watch: bool = False) -> dict:
+    """試験の基準。raw は wt_nozzle_v2 の形 (残差 series raw; 窓は W_、min_points は W_/dt + 1)。watch は wt_nozzle_v3 の形
+    (残差の量を外し、残差の非有限の見張り residual_finite を入れる; plan §4.4・§5.1 #8)。"""
     q = quantities if quantities is not None else [
         {"kind": "residual", "file": "residual_history.csv", "required": ["rms_ro", "rms_roUx", "rms_roUy", "rms_roe"],
          "inactive_ok": ["rms_roUz"],
@@ -144,6 +146,8 @@ def criteria(hold: int | None = 38000, dt: int = DT, quantities: list | None = N
         for x in q:
             if x["kind"] == "residual":
                 x["series"] = "raw"
+    if watch:
+        q = [{"kind": "residual_finite", "file": "residual_history.csv", "thresholds": {}}] + [x for x in q if x["kind"] != "residual"]
     c = {"schema": ST.SCHEMA, "source": {"made_by": "run_stop_rule_v2_tests.py"},
          "structured": {"ni": NI, "nj": NJ, "scale_m": SCALE, "mesh_file": "nozzle.h5"},
          "grid": {"out_step_interval": dt, "start_step": 0, "segment": None},
@@ -162,6 +166,11 @@ for f in ("STOP_REQUEST", "STOPPED_AT", "SNAPSHOT_REQUEST"):
     if os.path.exists(f):
         print(f"[output] 起動時の検査で停止: 作業ディレクトリに {{f}} が既にある", flush=True); sys.exit(1)
 cfg = open("solverConfig.yaml").read()
+# 本物の forge と同じ起動の記録 (forge_launches.jsonl に cfg_fnv = solverConfig.yaml の FNV-1a 64 の 1 行; main.cpp appendLaunchRecord)。
+# check_settled.py は本段の記録のある run を既定で照合し、起動の記録の欠けは判定不能 (plan §5.1 #7c、result 段レビュー M1)
+sys.path.insert(0, {tools!r})
+import stage_manifest as SM
+open("forge_launches.jsonl", "a").write(json.dumps({{"time": int(time.time()), "cfg_fnv": SM.fnv1a64(open("solverConfig.yaml", "rb").read())}}) + "\n")
 n_outer = int(re.search(r"nStepOuter:\s*(\d+)", cfg).group(1))
 dt = int(re.search(r"outStepInterval:\s*(\d+)", cfg).group(1))
 sc = json.load(open("fake_scenario.json"))
@@ -193,9 +202,12 @@ def write_outputs(step, stop):
         h["MESH/NODE_ID"] = np.asarray(ids, dtype=np.int64)
         for k, v in (("ro", 0.1), ("Ux", m * A), ("Uy", 0.0), ("Uz", 0.0), ("P", 1e4), ("T", 300.0), ("sonic", A)):
             h["VALUE/" + k] = np.full(n, v)
-    mf.write(f"{{step}},-1.0,-1.0,1.0,1.0,0.0,0.0\n"); mf.flush()
+    mo = 0.0 if sc.get("zero_out") else 1.0   # zero_out: 出口の流量 0 (流量の判定の分母; §5.1 #7c、result 段レビュー M3)
+    mf.write(f"{{step}},-1.0,-1.0,{{mo!r}},{{mo!r}},0.0,0.0\n"); mf.flush()
 def resid_row(r):
     v = 1e-4 if sc.get("nan_at") is None or r < sc["nan_at"] else float("nan")
+    if sc.get("resid_osc") and (r // 7) % 2:   # 残差の振幅 0.6 桁 (float の run の ρ の 0.585 桁ほど; plan §4.4・§5.1 #8)
+        v *= 10.0 ** 0.6
     vals = [v, v, v, 0.0, v] + ([1e-3] if sc.get("extra_col") else [])
     return f"{{r}},-1,outer_end," + ",".join(repr(float(x)) for x in vals) + "\n"
 def wait_watcher(s):
@@ -252,6 +264,13 @@ if stop_now:
 print("fake forge v2 end", flush=True)
 sys.exit(0)
 '''
+
+def write_fake_forge() -> Path:
+    """偽の forge を書く (test_settle_virtual_stop.py も使う)。起動の記録に使う stage_manifest.py の場所を埋め込む。"""
+    FAKE_FORGE.write_text(FAKE_SRC.format(py=sys.executable, tools=str(ROOT / "solver_density_cuda" / "tools")))
+    FAKE_FORGE.chmod(0o755)
+    return FAKE_FORGE
+
 
 EULER_DUMMY = TMP / "euler_dummy"
 DELTA_CALLS = []
@@ -683,6 +702,44 @@ def test_watcher():
               state_ok(rc, st, "FAILED") and st["failures"] == ["diverged"] and st["request_kind"] == "diverged" and st["request_step"] == 52000
               and st["stop_step"] == 52001 and st["reeval"]["verdict"] == "DIVERGED", f"{st and (st['failures'], st['request_step'])}")
 
+        # --- 残差を外した基準 (wt_nozzle_v3 の形; plan §4.4・§5.1 #8): 残差の振幅 0.6 桁でも流量と目的の量で止まる・非有限は止める ---
+        DELTA_CALLS.clear()
+        rd = make_run("v3_osc", {"resid_osc": True}, crit=criteria(hold=0, W_=10000, watch=True))
+        rc, rec, st = run_case(rd)
+        js = [(j["step"], j["verdict"]) for j in rec["judgements"]]
+        sv = json.loads((rd / ST.VERDICT_FILE).read_text()) if (rd / ST.VERDICT_FILE).exists() else {}
+        check("v3 の形: 残差の振幅 0.6 桁でも 22,000 で SETTLED → 要求 → 22,001 で止まり REACHED (rc 0)、再評価に残差は無く見張りは SETTLED",
+              rc == 0 and state_ok(rc, st, "REACHED") and js == [(22000, "SETTLED")] and st["stop_step"] == 22001 and st["failures"] == []
+              and {q["kind"] for q in sv.get("quantities", [])} >= {"residual_finite"} and "residual" not in {q["kind"] for q in sv.get("quantities", [])},
+              f"{js} {st and (st['status'], st['stop_step'], st['failures'])}")
+        crc, cj = cli_replay(rd, 22001)
+        check("v3 の形: check_settled.py --end-step 22001 の判定が見張りの再評価と同じ (終了コード 0・verdict・量の sha256)",
+              crc == 0 and cj is not None and cj["verdict"] == "SETTLED" and SR.quantities_digest(cj) == SR.quantities_digest(sv), f"rc {crc}")
+        rd = make_run("v2_osc", {"resid_osc": True}, crit=criteria(hold=0, W_=10000, raw=True), cap=26000)
+        rc, rec, st = run_case(rd)
+        js = [(j["step"], j["verdict"]) for j in rec["judgements"]]
+        check("v3 の対照: 同じ残差を v2 の形 (残差を判定) で → 22,000〜26,000 は NOT_SETTLED、要求を置かず CENSORED",
+              st is not None and st["status"] == "CENSORED" and js and all(v_ == "NOT_SETTLED" for _, v_ in js) and st["request_step"] is None,
+              f"{js} {st and st['status']}")
+        rd = make_run("v3_nan", {"nan_at": 20000}, crit=criteria(hold=0, W_=10000, watch=True))
+        rc, rec, st = run_case(rd)
+        check("v3 の形: 残差が 20,000 から非有限 → 22,000 の判定が見張りで DIVERGED → 要求 (diverged) → FAILED (diverged)",
+              state_ok(rc, st, "FAILED") and st["failures"] == ["diverged"] and st["request_kind"] == "diverged" and st["request_step"] == 22000
+              and st["reeval"]["verdict"] == "DIVERGED", f"{st and (st['failures'], st.get('request_step'))}")
+
+        # --- 出口の流量 0 (流量の判定の分母; §5.1 #7c、result 段レビュー M3) → 見張りの例外で forge を止めない ---
+        DELTA_CALLS.clear()
+        rd = make_run("zero_out", {"zero_out": True}, cap=50000)
+        rc, rec, st = run_case(rd)
+        js = (rec or {}).get("judgements") or []
+        mb = [((j.get("by_quantity") or {}).get("mass_balance")) for j in js]
+        check("出口の流量 0 の run (上限 50,000、判定は 42,000〜50,000): 見張りの例外 (以前は ZeroDivisionError → watcher_exception で FAILED) にせず、"
+              "各判定は流量の収支が NOT_SETTLED、要求を置かず上限まで回って CENSORED (rc 0)",
+              st is not None and st["status"] == "CENSORED" and "watcher_exception" not in (st.get("failures") or [])
+              and js and all(m == "NOT_SETTLED" for m in mb) and st["request_step"] is None and not (rd / SR.STOP_REQUEST).exists()
+              and st["reeval"]["verdict"] == "NOT_SETTLED",
+              f"{st and (st['status'], st.get('failures'), st.get('reason'))} {mb[:4]}")
+
         # --- 基準に無い残差の列が値を持つ → 未設定の判定で止める ---
         rd = make_run("unset_col", {"extra_col": True})
         rc, rec, st = run_case(rd)
@@ -716,8 +773,7 @@ def test_watcher():
 
 
 def main() -> int:
-    FAKE_FORGE.write_text(FAKE_SRC.format(py=sys.executable))
-    FAKE_FORGE.chmod(0o755)
+    write_fake_forge()
     test_parts()
     if not QUICK:
         test_watcher()

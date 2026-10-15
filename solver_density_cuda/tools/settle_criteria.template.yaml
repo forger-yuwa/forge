@@ -8,6 +8,9 @@
 #   - 知らない種類・キー、閾値の欠け、重複キーは例外 (黙って既定値で埋めない)。閾値はすべて書く。
 #   - 残差 (residual) 1 つ・流量の収支 (mass_balance) 1 つ・目的の量 (exit_core_mach / line_mach / exit_flow_angle /
 #     wall_heat_nodes) 1 つ以上が要る。足りなければ INDETERMINATE (評価対象が未設定)。
+#   - 残差を止める判定から外すとき (プリセット wt_nozzle_v3; plan §4.4・§5.1 #8) は residual の代わりに残差の非有限の見張り
+#     `- {kind: residual_finite, file: residual_history.csv, thresholds: {}}` を書き、excluded に residual と理由を書く
+#     (見張りは判定の条件でなく、区間の残差の行に非有限があれば DIVERGED。residual も residual_finite も無ければ評価対象が未設定)。
 #   - 量を外すときは quantities から消して excluded に理由を書く (黙って外さない)。
 
 schema: forge.settle_criteria/v1

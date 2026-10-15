@@ -64,8 +64,10 @@ echo "[run_case] convergence check ->"
 # 既定では run_case 自体の終了コードには反映しないが、`FORGE_STRICT_CONVERGENCE=1` を立てると
 # 未収束・判定不能を run_case の失敗として返す (2026-09-19 codex: `|| true` で飲み込んでいた)。
 # 判定の道具の選択 (2026-10-16、plan tooling-settle-convergence-and-monitor §4.9 の 2): settle_criteria.yaml の無い run は今どおり
-# check_convergence.py。ある run は `check_settled.py --select` が決める (本段の起動・手で組んだ run → check_settled.py --bind、
-# 前の段・本段でない起動 → check_convergence.py)。基準のある run は選択に失敗しても旧の道具へ落とさない。1 行目に使った道具を書く
+# check_convergence.py。ある run は `check_settled.py --select` が決める (本段の記録のある run・手で組んだ run → check_settled.py
+# (既定で本段の起動と照合; 照合の不一致・起動の記録の欠け・前の段と確かめられない run は INDETERMINATE)、前の段と確かめられた run
+# (MAIN_STAGE_STARTED が無く stage_manifest.json に本段の段が無い) → check_convergence.py; plan §5.1 #7c)。基準のある run は選択に
+# 失敗しても旧の道具へ落とさない。1 行目に使った道具を書く
 TOOLS="$ROOT/solver_density_cuda/tools"
 judge_tool="check_convergence.py"; judge_why="settle_criteria.yaml が無い"
 if [ -e settle_criteria.yaml ] || [ -L settle_criteria.yaml ]; then

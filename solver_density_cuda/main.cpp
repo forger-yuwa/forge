@@ -4179,8 +4179,11 @@ int main(int argc, char** argv) {
     if (monitorOutputs::stopRequested()) {
         residual_logger.flush();
         const int stopRc = monitorOutputs::finishStop(cfg, msh, residual_logger.streamGood());
-        if (stopRc != 0) return stopRc;
+        if (stopRc != 0) { monitorOutputs::setExitStatus(stopRc); return stopRc; }
     }
 
+    // 協調停止・随時の書き出しの出力の失敗を記録した run だけ、終了時に HDF5 の後始末を飛ばしてこの終了コードで終える
+    // (monitorOutputs::setExitStatus の説明; plans/active/tooling-settle-convergence-and-monitor.md §5.1 #7c)
+    monitorOutputs::setExitStatus(0);
 	return 0;
 }

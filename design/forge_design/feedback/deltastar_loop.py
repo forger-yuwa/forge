@@ -1391,7 +1391,8 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
     照合 (`_v2_binding`): 状態・再評価・STOPPED_AT・停止の step・本段の起動・今の基準・見張りの記録の一致。**上書きでも通さない**。
     (b)(c) 停止の step の再評価 (SETTLE_VERDICT.json) の**全体が SETTLED**: (b) 残差 (residual)・(c) 流量の収支 (mass_balance)・目的の量
     (出口コア M・線・流れ角・壁の熱流)。閾値の超過だけの NOT_SETTLED は (b) allow_unconverged・(c) と目的の量 allow_unsettled で通す
-    (今の上書きの対応: 収束の判定 / 落ち着きの条件)。DIVERGED・判定不能は通さない。
+    (今の上書きの対応: 収束の判定 / 落ち着きの条件)。DIVERGED・判定不能は通さない。基準に残差が無く非有限の見張り (residual_finite) が
+    ある run (wt_nozzle_v3; plan §4.4・§5.1 #8) は (b) を対象外 (止めない) にし、見張り (b′) の DIVERGED・判定不能は上書きでも通さない。
     (d) 局所 y₁⁺ (今のまま、停止の step の壁のダンプ)。(e) δ_E の契約 (`_v2_delta_e`; 抽出し直さない)。(f) Euler の参照・ω (今のまま + 抽出との一致)。
     (a)〜(f) を満たした (上書きを含む) ときだけ、停止規則の抽出の表を HANDOFF_EXTRACT_DIR に写して (g) 被覆・(h) 次の壁を今と同じ関数で
     判定し、全部満たしたら run の直下に旧方式と同じ名前で写す (`delta_r_next.csv` ほか; 次の pass がそのまま読む)。
@@ -1423,21 +1424,35 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
     # (b)(c) 再評価の全体
     v = bind["verdict"]
     qs = (v or {}).get("quantities") or []
-    g_res = _settle_group(qs, (S.KIND_RESIDUAL,), "(b) 残差")
+    kinds_v = {q.get("kind") for q in qs if isinstance(q, dict)}
+    watch_kind = getattr(S, "KIND_RESIDUAL_FINITE", "residual_finite")
+    if S.KIND_RESIDUAL not in kinds_v and watch_kind in kinds_v:
+        # 残差を止める判定から外した基準 (wt_nozzle_v3; plan §4.4・§5.1 #8): (b) は対象外で止めない。発散は非有限の見張りで見る (下)
+        g_res = {"label": "(b) 残差", "kind": "NOT_APPLICABLE", "pass": True, "quantities": {},
+                 "why": "基準に残差の量が無い (残差を止める判定から外したプリセット、例 wt_nozzle_v3) — 対象外"}
+    else:
+        g_res = _settle_group(qs, (S.KIND_RESIDUAL,), "(b) 残差")
+    g_watch = _settle_group(qs, (watch_kind,), "(b′) 残差の非有限の見張り") if watch_kind in kinds_v else None
     g_mass = _settle_group(qs, (S.KIND_MASS,), "(c) 流量の収支")
     g_tgt = _settle_group(qs, S.TARGET_KINDS, "目的の量")
-    other = [q.get("name") for q in qs if q.get("kind") not in (S.KIND_RESIDUAL, S.KIND_MASS) + tuple(S.TARGET_KINDS)]
+    other = [q.get("name") for q in qs if q.get("kind") not in (S.KIND_RESIDUAL, S.KIND_MASS, watch_kind) + tuple(S.TARGET_KINDS)]
     overall = (v or {}).get("verdict")
     checks["reeval"] = {"verdict": overall, "by_quantity": {str(q.get("name")): q.get("verdict") for q in qs},
-                        "pass": bool(overall == "SETTLED" and g_res["pass"] and g_mass["pass"] and g_tgt["pass"] and not other)}
+                        "pass": bool(overall == "SETTLED" and g_res["pass"] and (g_watch is None or g_watch["pass"])
+                                     and g_mass["pass"] and g_tgt["pass"] and not other)}
     if other:
         blocked.append(f"再評価に知らない種類の量 {other} (上書きでは通さない)")
+    if g_watch is not None:
+        checks["residual_watch"] = g_watch
+        if not g_watch["pass"]:
+            blocked.append(f"(b′) 残差の非有限の見張り {g_watch['kind']}: {g_watch.get('why')} (上書きでも通さない)")
     cv_kind = {"PASS": "PASS", "NOT_SETTLED": "NOT_CONVERGED"}.get(g_res["kind"], g_res["kind"])
     cv = {"tool": f"{S.VERDICT_FILE} (停止の step の再評価、settle.judge; 新方式)", "kind": cv_kind, "rc": None,
-          "verdict": [f"OVERALL: {overall}", f"残差: {g_res['kind']}"], "end_step": (v or {}).get("end_step"),
+          "verdict": [f"OVERALL: {overall}", f"残差: {g_res['kind']}"] + ([f"残差の非有限の見張り: {g_watch['kind']}"] if g_watch else []),
+          "end_step": (v or {}).get("end_step"),
           "criteria_sha256": bind["criteria_sha256"]}
     checks["residual"] = g_res
-    if g_res["kind"] != "PASS":
+    if not g_res["pass"]:          # 対象外 (NOT_APPLICABLE、v3) は止めない
         if why_uc is not None and g_res["kind"] == "NOT_SETTLED":
             applied.append("allow_unconverged")
         else:
@@ -1555,7 +1570,8 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
                    "SETTLED」で、旧の低下の桁数の判定との一致は求めない。帯の位置の感度は抽出の方法への感度で、時間の整定や誤差の上限の証明では"
                    "ない (合否に使わない)。settled: false は落ち着きの条件を上書きで通した「落ち着いていない場からの設計」"}
     if write:
-        (run_dir / HANDOFF_CONVERGENCE).write_text(_v2_convergence_text(k, v, {"residual": g_res, "mass": g_mass, "targets": g_tgt},
+        (run_dir / HANDOFF_CONVERGENCE).write_text(_v2_convergence_text(k, v, {"residual": g_res, **({"residual_watch": g_watch} if g_watch else {}),
+                                                                                "mass": g_mass, "targets": g_tgt},
                                                                         bind["criteria_sha256"]))
         (run_dir / HANDOFF_WALL_RESOLUTION).write_text(wr["output"])
         _write_json_atomic(run_dir / HANDOFF_GATE, rec)

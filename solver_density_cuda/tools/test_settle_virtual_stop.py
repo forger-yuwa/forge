@@ -482,8 +482,7 @@ def test_v2_end_to_end():
     if RN._ENV.get("FORGE_BIN") != str(V.FAKE_FORGE):   # runner が先に読み込まれていると本物の forge を起動してしまう
         chk("(vi-b) runner._ENV の FORGE_BIN が偽の forge (本物の forge を起動しない)", False, str(RN._ENV.get("FORGE_BIN")))
         return
-    V.FAKE_FORGE.write_text(V.FAKE_SRC.format(py=sys.executable))
-    V.FAKE_FORGE.chmod(0o755)
+    V.write_fake_forge()   # 本物の forge と同じ起動の記録 (forge_launches.jsonl) も書く偽の forge
     real = SR.extract_delta_e
     SR.extract_delta_e = V.fake_extract_delta_e
     scen = [

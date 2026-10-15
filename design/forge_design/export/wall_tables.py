@@ -720,7 +720,8 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     `valid` のときだけ `PASS`。不合格があれば `FAIL`、判定材料が無ければ `未評価`。各ツールの VERDICT 行を返す。
     ツールは run ディレクトリに書かせない (収束の --segment は入力を一時ディレクトリに写して回す)。
     収束の道具は `settle.select_judge` で選ぶ (plan tooling-settle-convergence-and-monitor §5.1 #7b): settle_criteria.yaml のある run の
-    本段・手で組んだ run は `_settled_convergence` (check_settled.py --bind)、それ以外 (基準の無い run・前の段・本段でない起動) は今どおり。
+    本段の記録のある run・手で組んだ run は `_settled_convergence` (check_settled.py --bind; 照合の不一致・起動の記録の欠け・前の段と確かめ
+    られない run は判定不能)、それ以外 (基準の無い run・前の段と確かめられた run) は今どおり (plan §5.1 #7c)。
     基準のある run は判定不能でも check_convergence.py へ落とさない。"""
     run_dir = Path(run_dir)
     T = _build_table(run_dir, step, False, wall_ids, with_y1plus=False)

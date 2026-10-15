@@ -5,7 +5,8 @@ r"""要求カードの雛形の NS の既定 (本段 B0・監視用の出力・�
     design/.venv-opt/bin/python design/tests/run_settle_defaults_tests.py
 
 (a) 雛形 axismach_final_v1・axismach_explore_v1 の evaluate: main_line (B0、limiter_ref 無し = 自動)・cfl_euler 1.0・ns_output
-    (2,000 / 20,000・4 境界・流量)・settle {preset: wt_nozzle_v2} (2026-10-16 ユーザ決定で v1 → v2、plan §4.9 の 5)、cfl_main 無し。Euler の nStepOuter 12,000・outStepInterval 1,000 は今のまま。
+    (2,000 / 20,000・4 境界・流量)・settle {preset: wt_nozzle_v3} (2026-10-16 ユーザ決定で v1 → v2 (plan §4.9 の 5) → v3 (残差を止める判定から
+    外す; plan §4.4・§5.1 #8))、cfl_main 無し。Euler の nStepOuter 12,000・outStepInterval 1,000 は今のまま。
 (b) **B0 と出力は NS の本段だけ**: case/71 の problem_m55_p3.yaml (旧い雛形の出力、point・cfl_main 1.0) の evaluate を新しい雛形の evaluate に
     置き換えた写し (= 新しい雛形で生成器が書く evaluate) で、本段の設定に B0 と出力のキー (outStepInterval 2,000・fieldOutStepInterval 20,000・
     output.boundaryMassflux・nodeProbeFile・interfaceDiag) が入り、前の段の元の設定 (solverConfig_prestage.yaml) には無く、S1・S2 は旧い問題の
@@ -107,8 +108,8 @@ for name in ("axismach_final_v1", "axismach_explore_v1"):
     check(f"(a) {name}: ns_output (2,000・20,000・4 境界・流量)",
           ev.get("ns_output") == {"outStepInterval": 2000, "fieldOutStepInterval": 20000,
                                   "boundary_h5": ["inlet", "outlet", "wall", "axis"], "boundaryMassflux": 1}, ev.get("ns_output"))
-    check(f"(a) {name}: settle = {{preset: wt_nozzle_v2}} (2026-10-16 ユーザ決定で v1 から; v1 はプリセットに残る)",
-          ev.get("settle") == {"preset": "wt_nozzle_v2"} and "wt_nozzle_v1" in SP.PRESETS)
+    check(f"(a) {name}: settle = {{preset: wt_nozzle_v3}} (2026-10-16 ユーザ決定「残さは監視から外そう」で v2 から; v1・v2 はプリセットに残る)",
+          ev.get("settle") == {"preset": "wt_nozzle_v3"} and "wt_nozzle_v1" in SP.PRESETS and "wt_nozzle_v2" in SP.PRESETS)
     check(f"(a) {name}: Euler の nStepOuter 12000・outStepInterval 1000・mid_stage は今のまま",
           ev.get("nStepOuter") == 12000 and ev.get("outStepInterval") == 1000 and ev.get("mid_stage") is True)
 
@@ -256,8 +257,12 @@ else:
     check("(e) その拒否は run dir を作る前", not (TMP / "run_st_off").exists())
     cond_doc = RA._cfg_load(main_b0)
     cond_doc["condensation"] = {"condensation": 1}
-    rejects("(e) 前提を満たせない設定 (凝縮のモーメントの列) は settle_presets.resolve が例外 (黙って外さない)",
-            lambda: SP.resolve(es, pi_min, cond_doc, yaml.safe_load(bc_new)), "凝縮")
+    rejects("(e) 前提を満たせない設定 (凝縮のモーメントの列) は残差を判定するプリセット (wt_nozzle_v2) の settle_presets.resolve が例外 (黙って外さない)",
+            lambda: SP.resolve({**es, "preset": "wt_nozzle_v2"}, pi_min, cond_doc, yaml.safe_load(bc_new)), "凝縮")
+    c3c = SP.resolve(es, pi_min, cond_doc, yaml.safe_load(bc_new))
+    check("(e) 雛形の既定 wt_nozzle_v3 は残差の列名を使わないので凝縮でも解決できる (非有限の見張りは全数値列; plan §5.1 #8)",
+          es.get("preset") == "wt_nozzle_v3" and "residual_finite" in [q["kind"] for q in c3c["quantities"]]
+          and "residual" not in [q["kind"] for q in c3c["quantities"]])
     rejects("(e) 本段の出力を重ねて書けない (既に fieldOutStepInterval がある)", lambda: RA._apply_ns_outputs(main_n, no, needs), "既に")
     check("(e) キー無しの問題は本段の設定を変えない (文字列一致)", RA._apply_ns_outputs(main_o, None, None) == main_o)
 

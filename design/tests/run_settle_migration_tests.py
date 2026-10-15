@@ -21,14 +21,16 @@ forge_launches.jsonl・solverConfig.yaml) は runner_axismach と forge と同�
   (b) 移行: 旧方式の run (基準のファイルなし) は今の関門 (method v1) のまま。同じ場で旧方式の関門が作る delta_r_next.csv と新方式の表が
       同じ形式 (列の見出し・行・値がビット同一)。既存の関門の試験 (run_h370_prelaunch_tests・run_handoff_diag_mark_tests) は別に回す。
   (c) run_case.sh の道具の選択 (偽の forge = forge_launches.jsonl に起動を 1 行足すだけ): 本段 + 基準 → check_settled.py (1 行目 TOOL)、
-      前の段 (MAIN_STAGE_STARTED なし)・基準なし・本段でない起動 (最後の起動の cfg_fnv が本段の記録と違う) → check_convergence.py、
-      手で組んだ run (基準が本段の記録を指さない) → check_settled.py、照合の不一致・基準の誤り → check_settled.py の INDETERMINATE
-      (旧の道具へ落とさない)、選択に失敗 → check_settled.py、check_settled.py が VERDICT を出さない → INDETERMINATE・終了コード 3。
+      基準なし・前の段と確かめられた run (MAIN_STAGE_STARTED なし・stage_manifest.json に本段の段なし) → check_convergence.py、
+      手で組んだ run (基準が本段の記録を指さない) → check_settled.py、照合の不一致・基準の誤り・**本段でない起動 (最後の起動の cfg_fnv が
+      本段の記録と違う)・起動の記録の欠け・記録が無く前の段と確かめられない run** → check_settled.py の INDETERMINATE (旧の道具へ落とさない;
+      §5.1 #7c、result 段レビュー M1)、選択に失敗 → check_settled.py、check_settled.py が VERDICT を出さない → INDETERMINATE・終了コード 3。
       停止規則の後処理 `stop_rule.postprocess` も同じ選択。
   (d) Stop フック (`hook_convergence_gate.py` を一時の根に写して): 両方の道具の CONVERGENCE_VERDICT.txt で block しない、無い・古いと
       今どおり block、案内文に選択の規則と「通過は合格ではない」。
   (e) #7b 残りの読み手 (同じ選択の規則): 成果物の `wall_tables.thermal_use` (新方式の run は check_settled.py --bind・停止規則の
-      再評価と照合・道具の名前を verdict_line に; 照合の不一致・再評価との食い違いは未評価、NOT_SETTLED は FAIL、前の段は今どおり)、
+      再評価と照合・道具の名前を verdict_line に; 照合の不一致・再評価との食い違いは未評価、NOT_SETTLED は FAIL、前の段と確かめられた
+      run は今どおり、確かめられない run は未評価)、
       旧方式の run は変更前 (HEAD の wall_tables を git から読む) と出力がビット同一。`deliverables.part_excel` の status.json に載る。
       設計の報告の収束の欄 (`nozzle_report.convergence_gate_row`) は 1 行目の TOOL で読み分け、旧い形・旧方式は変更前と同じ。
       `hook_forge_guard.py` の案内文。
@@ -152,17 +154,22 @@ def ns_info(pin):
 RES_COLS = ["rms_ro", "rms_roUx", "rms_roUy", "rms_roUz", "rms_roe"]
 
 
-def criteria(segment=True):
-    q = [{"kind": "residual", "file": "residual_history.csv", "series": "raw", "required": ["rms_ro", "rms_roUx", "rms_roUy", "rms_roe"],
-          "inactive_ok": ["rms_roUz"],
-          "thresholds": {"slope_dec": math.log10(1.05), "amp_dec": 0.1, "rise_dec": math.log10(1.10), "excursion_dec": 0.5}},
+def criteria(segment=True, residual="judge"):
+    """residual: judge = 残差を判定する (wt_nozzle_v2 の形)、watch = 残差を外し非有限の見張りだけ (wt_nozzle_v3 の形; plan §4.4・§5.1 #8)。"""
+    q_res = ({"kind": "residual", "file": "residual_history.csv", "series": "raw", "required": ["rms_ro", "rms_roUx", "rms_roUy", "rms_roe"],
+              "inactive_ok": ["rms_roUz"],
+              "thresholds": {"slope_dec": math.log10(1.05), "amp_dec": 0.1, "rise_dec": math.log10(1.10), "excursion_dec": 0.5}}
+             if residual == "judge" else {"kind": "residual_finite", "file": "residual_history.csv", "thresholds": {}})
+    q = [q_res,
          {"kind": "mass_balance", "file": "boundary_massflux.csv", "inlet": [1], "outlet": [2],
           "thresholds": {"mean_abs": 5e-4, "swing": 5e-3, "mdot_change_rel": 1e-4}},
          {"kind": "exit_core_mach", "eta_range": [0.05, 0.7], "thresholds": {"tol": 1e-4}}]
     return {"schema": ST.SCHEMA, "source": {"made_by": "run_settle_migration_tests.py"},
             "structured": {"ni": NI, "nj": NJ, "scale_m": S_SC},
             "grid": {"out_step_interval": DT, "start_step": 0, "segment": SP.main_stage_segment() if segment else None},
-            "window": {"W": W, "min_points": W // DT + 1}, "hold": 0, "quantities": q, "excluded": [], "preconditions": []}
+            "window": {"W": W, "min_points": W // DT + 1}, "hold": 0, "quantities": q,
+            "excluded": ([] if residual == "judge" else [{"kind": "residual", "reason": "試験: 残差を止める判定から外した (wt_nozzle_v3 の形)"}]),
+            "preconditions": []}
 
 
 CFG_TEXT = "time: {last: {nStepOuter: %d}, outStepInterval: 2000}\noutput: {boundaryMassflux: 1, nodeProbeFile: settle_nodes.txt}\n"
@@ -215,7 +222,8 @@ def write_data(rd: Path, k: int, *, resid_fn=None, mdot_fn=None, skip_nodes=()):
                 h["VALUE/" + key] = np.full(len(ids), val)
 
 
-def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta_from: Path | None = None) -> Path:
+def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta_from: Path | None = None,
+          residual="judge") -> Path:
     """新方式の run。REACHED: 上限 100,000・要求の格子点 26,000・協調停止 26,001 (STOPPED_AT)。CENSORED: 上限 = 停止の step 26,000
     (STOPPED_AT なし)。delta_from: 同じ場の別の run の δ_E の抽出を写す (場は同じなので抽出も同じ; 試験の時間を縮める)。"""
     rd = TMP / name
@@ -227,7 +235,7 @@ def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_n
     (rd / "prepare_info.json").write_text(json.dumps(info))
     (rd / "solverConfig.yaml").write_text(CFG_TEXT % cap)
     return finish_v2(rd, kind=kind, resid_fn=resid_fn, mdot_fn=mdot_fn, skip_nodes=skip_nodes,
-                     delta=("from", delta_from) if delta_from is not None else ("extract", info))
+                     delta=("from", delta_from) if delta_from is not None else ("extract", info), residual=residual)
 
 
 def steps_of(kind):
@@ -235,12 +243,12 @@ def steps_of(kind):
     return (26001, 100000) if kind == "REACHED" else (26000, 26000)
 
 
-def finish_v2(rd: Path, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta=None) -> Path:
+def finish_v2(rd: Path, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta=None, residual="judge") -> Path:
     """run (場・solverConfig.yaml は置いてある) に停止規則 v2 の記録一式を書く: 基準・起動の記録・本段の開始の記録・forge の出力の形の
     データ・STOPPED_AT・停止の step の再評価 (SETTLE_VERDICT.json)・stop_rule.json・STOP_RULE_STATE.json。
     delta: ("extract", prepare_info) = 本物の抽出、("from", run) = 同じ場の別の run の抽出を写す、None = δ_E の記録なし (関門には使えない)。"""
     k, cap = steps_of(kind)
-    (rd / ST.CRITERIA_FILE).write_text(yaml.safe_dump(criteria(), allow_unicode=True, sort_keys=False))
+    (rd / ST.CRITERIA_FILE).write_text(yaml.safe_dump(criteria(residual=residual), allow_unicode=True, sort_keys=False))
     with open(rd / "forge_launches.jsonl", "w") as f:                  # 前の段 (S1) の起動 → 本段の起動
         f.write(json.dumps({"time": 1, "cfg_fnv": "0123456789abcdef"}) + "\n")
     write_launch(rd)
@@ -584,6 +592,39 @@ def test_migration(pin, A):
           f"{g['extract']['made']}")
 
 
+# ====================================================================================== (a′) 残差を外した基準 (wt_nozzle_v3) の関門
+def test_gate_v3(pin, A):
+    """plan §4.4「残差を止める判定から外す」(2026-10-16 ユーザ決定)・§5.1 #8: 基準に残差が無く非有限の見張り (residual_finite) がある run は
+    関門の (b) が対象外 (止めない)、見張りの DIVERGED は上書きでも止める。対照として同じ残差を v2 の形の基準で判定すると (b) で止まる。"""
+    print("== (a′) 残差を外した基準 (wt_nozzle_v3 の形) の関門", flush=True)
+    osc = lambda s: 1e-4 * (10.0 ** 0.6 if (s // 7) % 2 else 1.0)       # 振幅 0.6 桁 (float の run_0015 の ρ の 0.585 桁ほど)
+    V3 = build("A_v3_osc", pin, resid_fn=osc, delta_from=A, residual="watch")
+    lc = ST.load_criteria(V3)
+    kinds = [q["kind"] for q in lc["criteria"]["quantities"]]
+    g = gate(V3, pin)
+    c = g["checks"]
+    check("v3: 残差の振幅 0.6 桁でも、再評価は SETTLED (残差は判定しない・非有限の見張りは SETTLED)・関門は上書きなしで進む、"
+          "(b) 残差は対象外 (NOT_APPLICABLE)・(b′) 見張りは合格",
+          lc["status"] == "ok" and "residual" not in kinds and "residual_finite" in kinds and g["proceed"] and g["settled"] is True
+          and g["override"]["applied"] == [] and not g["blocked_by"] and c["residual"]["kind"] == "NOT_APPLICABLE"
+          and c["residual_watch"]["pass"] and c["reeval"]["pass"] and g["convergence"]["kind"] == "NOT_APPLICABLE"
+          and c["reeval"]["by_quantity"] == {"residual_finite": "SETTLED", "mass_balance": "SETTLED", "exit_core_mach": "SETTLED"},
+          "; ".join(g["blocked_by"])[:300] + " " + json.dumps(c.get("residual"), ensure_ascii=False)[:200])
+    check("v3: HANDOFF_CONVERGENCE.txt に (b) 対象外と (b′) 見張りを書く",
+          "(b) 残差: NOT_APPLICABLE" in (V3 / DL.HANDOFF_CONVERGENCE).read_text()
+          and "(b′) 残差の非有限の見張り: PASS" in (V3 / DL.HANDOFF_CONVERGENCE).read_text(), (V3 / DL.HANDOFF_CONVERGENCE).read_text()[-300:])
+    V2c = build("C_v2_osc", pin, kind="CENSORED", resid_fn=osc)   # δ_E は本物の抽出 (CENSORED の 26,000; 下の v3 の非有限の run が写す)
+    g = gate(V2c, pin, allow_not_reached="試験")
+    check("v3 の対照: 同じ残差を v2 の形の基準 (残差を判定) で → (b) 残差の再評価 NOT_SETTLED で止まる",
+          not g["proceed"] and blocked_by(g, "(b) 残差の再評価 NOT_SETTLED"), "; ".join(g["blocked_by"])[:200])
+    nan_at = lambda s: float("nan") if s >= 25000 else 1e-4
+    V3n = build("C_v3_nan", pin, kind="CENSORED", resid_fn=nan_at, delta_from=V2c, residual="watch")
+    g = gate(V3n, pin, **ALL_OV)
+    check("v3: 残差に非有限 (25,000 から) → 見張りが DIVERGED、上書き 3 つでも止める ((b′) 残差の非有限の見張り)",
+          not g["proceed"] and blocked_by(g, "(b′) 残差の非有限の見張り DIVERGED") and g["checks"]["residual"]["kind"] == "NOT_APPLICABLE"
+          and not_published(V3n), "; ".join(g["blocked_by"])[:300])
+
+
 # ====================================================================================== (c) run_case.sh の道具の選択
 FAKE_FORGE = TMP / "fake_forge.py"
 FAKE_SRC = f'''#!{sys.executable}
@@ -639,10 +680,19 @@ def test_run_case(A):
           and "照合:" in t and "OVERALL" not in t, t[:300])
     rd = fresh("rc_pre")
     (rd / ST.MAIN_STAGE_RECORD).unlink()
+    (rd / "stage_manifest.json").write_text(json.dumps({"manifest_version": 3, "stages": [{"order": 0, "tag": "S1_soft"}]}))
     rc, t = run_case(rd)
-    check("前の段 (MAIN_STAGE_STARTED なし、基準は本段の記録を指す) → check_convergence.py (1 行目 TOOL)",
-          tool_line(t).startswith("TOOL: check_convergence.py (本段の開始の記録") and "CONVERGENCE_EXIT:" in t and "VERDICT: SETTLED" not in t,
-          t[:200])
+    check("前の段と確かめられた run (MAIN_STAGE_STARTED なし・stage_manifest.json の段 S1_soft に本段なし) → check_convergence.py (1 行目 TOOL)",
+          tool_line(t).startswith("TOOL: check_convergence.py (本段の開始の記録") and "前の段と確かめた" in tool_line(t)
+          and "CONVERGENCE_EXIT:" in t and "VERDICT: SETTLED" not in t, t[:200])
+    rd = fresh("rc_pre_unconfirmed")
+    (rd / ST.MAIN_STAGE_RECORD).unlink()
+    (rd / "stage_manifest.json").unlink(missing_ok=True)
+    rc, t = run_case(rd)
+    check("MAIN_STAGE_STARTED が無く stage_manifest.json も無い (前の段と確かめられない) → check_settled.py の INDETERMINATE (記録の欠け)・"
+          "終了コード 3 (以前は check_convergence.py; result 段レビュー M1)",
+          tool_line(t).startswith("TOOL: check_settled.py") and "VERDICT: INDETERMINATE (本段の開始の記録の欠け)" in t and exit_code(t) == 3,
+          t[:300])
     rd = fresh("rc_legacy")
     (rd / ST.CRITERIA_FILE).unlink()
     rc, t = run_case(rd)
@@ -652,8 +702,16 @@ def test_run_case(A):
     with open(rd / "solverConfig.yaml", "a") as f:
         f.write("# 本段の後に別の設定で起動\n")
     rc, t = run_case(rd)
-    check("本段でない起動 (最後の起動の cfg_fnv が本段の記録と違う) → check_convergence.py",
-          tool_line(t).startswith("TOOL: check_convergence.py (最後の forge の起動"), t[:200])
+    check("最後の起動の cfg_fnv が本段の記録と違う (以前は「本段でない起動」で check_convergence.py) → check_settled.py の INDETERMINATE "
+          "(照合の不一致)・終了コード 3 (result 段レビュー M1)",
+          tool_line(t).startswith("TOOL: check_settled.py (本段の起動") and "VERDICT: INDETERMINATE (本段の起動との照合の不一致)" in t
+          and "最後の forge の起動" in t and exit_code(t) == 3, t[:300])
+    rd = fresh("rc_no_launch")
+    (rd / "forge_launches.jsonl").unlink(missing_ok=True)
+    rc, t = run_case(rd, {"FAKE_NO_LAUNCH": "1"})
+    check("本段の記録があり起動の記録 forge_launches.jsonl が無い (設定・基準は記録と一致) → check_settled.py の INDETERMINATE "
+          "(照合の不一致; 以前は問題なしで判定)", tool_line(t).startswith("TOOL: check_settled.py")
+          and "VERDICT: INDETERMINATE (本段の起動との照合の不一致)" in t and "起動の記録" in t and exit_code(t) == 3, t[:300])
     rd = fresh("rc_bind_bad")
     with open(rd / "solverConfig.yaml", "a") as f:
         f.write("# 起動の記録の無い forge で、本段の記録と違う設定\n")
@@ -867,9 +925,17 @@ def test_readers():
           th["convergence"]["result"] == "FAIL" and th["verdict"] == "FAIL" and "NOT_SETTLED" in th["convergence"]["verdict_line"])
     Vp = clone(V, "wt_v2_premain")
     (Vp / ST.MAIN_STAGE_RECORD).unlink()
+    (Vp / "stage_manifest.json").write_text(json.dumps({"manifest_version": 3, "stages": [{"order": 0, "tag": "S1_soft"}]}))
     c = WT.thermal_use(Vp)["convergence"]
-    check("thermal_use: 前の段 (MAIN_STAGE_STARTED なし) → 今どおり check_convergence.py (選択の記録つき)",
-          c["tool"] == "check_convergence.py" and c["selection"]["mode"] == "pre_main")
+    check("thermal_use: 前の段と確かめられた run (MAIN_STAGE_STARTED なし・stage_manifest.json に本段なし) → 今どおり check_convergence.py "
+          "(選択の記録つき)", c["tool"] == "check_convergence.py" and c["selection"]["mode"] == "pre_main")
+    Vu = clone(V, "wt_v2_unconfirmed")
+    (Vu / ST.MAIN_STAGE_RECORD).unlink()
+    (Vu / "stage_manifest.json").unlink(missing_ok=True)
+    c = WT.thermal_use(Vu)["convergence"]
+    check("thermal_use: MAIN_STAGE_STARTED が無く前の段と確かめられない → check_settled.py の INDETERMINATE → 収束 未評価 "
+          "(check_convergence へ落とさない; result 段レビュー M1)", c["tool"] == "check_settled.py --bind" and c["result"] == "未評価"
+          and c["selection"]["mode"] == "unconfirmed", str(c.get("reason")))
 
     # --- 設計の報告 (nozzle_report.convergence_gate_row): 道具に応じて VERDICT を読む ---
     Vc = clone(V, "rep_v2")
@@ -907,6 +973,7 @@ def main() -> int:
     print(f"出力: {TMP}", flush=True)
     eu, pin = make_euler()
     A = test_gate(pin, eu)
+    test_gate_v3(pin, A)
     test_migration(pin, A)
     rc_main, rc_legacy = test_run_case(A)
     test_hook(rc_main, rc_legacy)

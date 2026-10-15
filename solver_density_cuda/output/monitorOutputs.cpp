@@ -2,13 +2,16 @@
 // procedures/solver-settings.md「output」、設計は plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′。
 #include "output/monitorOutputs.hpp"
 
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -16,6 +19,7 @@
 #include <vector>
 
 #include <highfive/H5File.hpp>
+#include <highfive/H5Utility.hpp>
 
 #include "cuda_forge/cudaWrapper.cuh"
 
@@ -230,8 +234,8 @@ void fetchCellValues(const solverConfig& cfg, const mesh& msh, variables& var, c
 }
 
 // step k の出力を確かめる (協調停止・随時の書き出しで共通)。流量の CSV は最後に書けた行と、ディスク上の最後の行の step = k。
-// 書くべきファイル (全場・outputHDFflg 1 の境界の h5/xmf・節点の h5・CSV) がディスクにあって空でないこと。
-// 足りないものは errs に足す。files・sizes は STOPPED_AT / SNAPSHOT_DONE に載せる一覧。
+// 書くべきファイル (全場・outputHDFflg 1 の境界の h5/xmf・節点の h5・CSV) の一覧を作る (存在・大きさ・途中で切れていないことは
+// fileSizes が確かめる)。足りないものは errs に足す。files・sizes は STOPPED_AT / SNAPSHOT_DONE に載せる一覧。
 void checkStepOutputs(const mesh& msh, int k, std::vector<std::string>& errs,
                       std::vector<std::string>& files, std::vector<long long>& sizes)
 {
@@ -255,6 +259,25 @@ void checkStepOutputs(const mesh& msh, int k, std::vector<std::string>& errs,
     if (extraFiles().step == k) for (const auto& f : extraFiles().files) files.push_back(f);
 }
 
+bool endsWith(const std::string& s, const std::string& tail)
+{
+    return s.size() >= tail.size() && s.compare(s.size() - tail.size(), tail.size(), tail) == 0;
+}
+
+// h5 の全オブジェクト (group・dataset) のヘッダを読む (値は読まない)。途中で切れたファイルは開くとき (記録された終端より短い) か、
+// ここで終端より先のアドレスを読むときに例外になる (HDF5 1.10、2026-10-16 の単体の確認)。
+void touchH5Objects(const HighFive::Group& g)
+{
+    for (const auto& name : g.listObjectNames()) {
+        const HighFive::ObjectType t = g.getObjectType(name);
+        if (t == HighFive::ObjectType::Group) touchH5Objects(g.getGroup(name));
+        else if (t == HighFive::ObjectType::Dataset) (void)g.getDataSet(name).getSpace().getElementCount();
+    }
+}
+
+// 書くべきファイルの大きさと完成の確認。無い・空のほか、**非空のまま途中で切れた**ファイルも落とす (result 段レビュー M2):
+// h5 は HDF5 で読み取りで開けて全オブジェクトのヘッダを読める、xmf は最後の空でない行が </Xdmf>。
+// 各出力の処理は書き込み・flush・close の失敗を例外にする (output.cpp・writeNodeProbes) ので、ここは独立の二重の確認。
 void fileSizes(const std::vector<std::string>& files, std::vector<std::string>& errs, std::vector<long long>& sizes)
 {
     sizes.clear();
@@ -262,6 +285,19 @@ void fileSizes(const std::vector<std::string>& files, std::vector<std::string>& 
         const long long sz = regularFileSize(f);
         if (sz <= 0) errs.push_back(f + ": " + (sz < 0 ? "無い" : "空"));
         sizes.push_back(sz);
+        if (sz <= 0) continue;
+        if (endsWith(f, ".xmf")) {
+            if (trimBoth(lastNonEmptyLine(f)) != "</Xdmf>")
+                errs.push_back(f + ": 最後の行が </Xdmf> でない (途中まで書かれた)");
+        } else if (endsWith(f, ".h5")) {
+            try {
+                HighFive::SilenceHDF5 silence;
+                File h(f, File::ReadOnly);
+                touchH5Objects(h.getGroup("/"));
+            } catch (const std::exception& e) {
+                errs.push_back(f + ": HDF5 で開けない (途中まで書かれた?): " + e.what());
+            }
+        }
     }
 }
 
@@ -283,7 +319,79 @@ bool appendLine(const char* path, const std::string& line)
     return static_cast<bool>(ofs);
 }
 
+// FORGE_TEST_OUTPUT_FSIZE の解釈 (起動後に 1 度だけ)。未設定・空なら off。書式の誤りは log に出して off (試験の口なので止めない)。
+struct TestFsizeSpec { bool on = false; std::regex re; rlim_t bytes = 0; };
+const TestFsizeSpec& testFsizeSpec()
+{
+    static const TestFsizeSpec spec = []() {
+        TestFsizeSpec s;
+        const char* e = std::getenv("FORGE_TEST_OUTPUT_FSIZE");
+        if (e == nullptr || *e == '\0') return s;
+        const std::string v(e);
+        const size_t c = v.rfind(':');
+        long long n = -1;
+        try {
+            size_t pos = 0;
+            if (c != std::string::npos && c > 0) { n = std::stoll(v.substr(c + 1), &pos, 10); if (pos != v.size() - c - 1) n = -1; }
+            if (n < 0) throw std::invalid_argument("bytes");
+            s.re = std::regex(v.substr(0, c), std::regex::ECMAScript);
+        } catch (const std::exception&) {
+            std::cerr << "[test-output-fsize] FORGE_TEST_OUTPUT_FSIZE は \"<正規表現>:<bytes>\" (got \"" << v << "\") -> 無視する" << std::endl;
+            return s;
+        }
+        s.bytes = (rlim_t)n;
+        s.on = true;
+        std::cerr << "[test-output-fsize] 試験用: 協調停止・随時の書き出しの step の出力のうち名前が /" << v.substr(0, c)
+                  << "/ のファイルを " << n << " byte で書き込み失敗させる (RLIMIT_FSIZE)" << std::endl;
+        return s;
+    }();
+    return spec;
+}
+
+// 終了コードの保全 (setExitStatus の説明)。exitStatus は main が最後に決めた値 (決める前に exit したら 1)。
+int& exitStatus() { static int s = 1; return s; }
+void exitGuard()
+{
+    std::fflush(nullptr);
+    std::cout.flush();
+    std::cerr.flush();
+    std::_Exit(exitStatus());
+}
+// 出力の失敗を記録したときに 1 度だけ登録する。atexit は登録の逆順に呼ばれるので、起動時に HDF5 が登録した後始末より先に走る。
+void armExitGuard()
+{
+    static bool armed = false;
+    if (armed) return;
+    armed = true;
+    if (std::atexit(exitGuard) != 0)
+        std::cerr << "[output] WARNING: 終了コードの保全を登録できない (終了時に HDF5 の後始末で落ちうる)" << std::endl;
+}
+
 }  // namespace
+
+void setExitStatus(int rc) { exitStatus() = rc; }
+
+TestFsizeLimit::TestFsizeLimit(const std::string& fname, bool force)
+{
+    const TestFsizeSpec& s = testFsizeSpec();
+    if (!s.on || !force || !std::regex_match(fname, s.re)) return;
+    if (::getrlimit(RLIMIT_FSIZE, &old_) != 0) return;
+    struct rlimit lim = old_;
+    lim.rlim_cur = (old_.rlim_max == RLIM_INFINITY || s.bytes < old_.rlim_max) ? s.bytes : old_.rlim_max;
+    oldHandler_ = std::signal(SIGXFSZ, SIG_IGN);   // 無視すると上限を超える write は EFBIG で失敗する (プロセスは落ちない)
+    if (::setrlimit(RLIMIT_FSIZE, &lim) != 0) { std::signal(SIGXFSZ, oldHandler_); return; }
+    active_ = true;
+}
+
+TestFsizeLimit::~TestFsizeLimit()
+{
+    if (!active_) return;
+    ::setrlimit(RLIMIT_FSIZE, &old_);
+    std::signal(SIGXFSZ, oldHandler_);
+    // 上限の間に log へ書いて失敗していれば標準出力・標準エラーが失敗の状態のまま残るので戻す (試験の口のときだけ)
+    std::clearerr(stdout); std::clearerr(stderr);
+    std::cout.clear(); std::cerr.clear();
+}
 
 void init(const solverConfig& cfg, const mesh& msh)
 {
@@ -374,6 +482,7 @@ int stoppedStep() { return stopState().step; }
 
 void noteStopWriteError(const std::string& what)
 {
+    armExitGuard();
     stopState().writeErrors.push_back(what);
     std::cerr << "[coopStop] ERROR: 停止の step の出力の書き込みに失敗: " << what << std::endl;
 }
@@ -401,6 +510,7 @@ int finishStop(const solverConfig& cfg, const mesh& msh, bool residualStreamOk)
     fileSizes(files, errs, sizes);
 
     if (!errs.empty()) {
+        armExitGuard();
         for (const auto& e : errs) std::cerr << "[coopStop] ERROR: " << e << std::endl;
         std::cerr << "[coopStop] ERROR: step " << k << " の出力を確かめられないので " << kStoppedAt
                   << " を置かずに終了コード 3 で終える" << std::endl;
@@ -446,6 +556,7 @@ bool pollSnapshotRequest(int iStep)
 
 void noteSnapshotWriteError(const std::string& what)
 {
+    armExitGuard();
     snapState().writeErrors.push_back(what);
 }
 
@@ -475,6 +586,7 @@ void finishSnapshot(const mesh& msh)
             errs.push_back(std::string(kSnapshotDone) + " に書き足せない");
     }
     if (!errs.empty()) {
+        armExitGuard();
         std::string ej;
         for (size_t i = 0; i < errs.size(); ++i) ej += (i ? ", \"" : "\"") + jsonEscape(errs[i]) + "\"";
         recorded = appendLine(kSnapshotFailed, head + "\"errors\": [" + ej + "]}");
@@ -506,6 +618,7 @@ void writeNodeProbes(const solverConfig& cfg, const mesh& msh, variables& var, i
     if (!np.enabled || !isOutputStep(cfg, iStep, force)) return;
 
     const std::string fname = "res_nodes_" + std::to_string(iStep) + ".h5";
+    const TestFsizeLimit testLimit(fname, force);   // 試験用の口 (既定 off)。file より先に作り、file の close の後に外す
     File file(fname, File::ReadWrite | File::Truncate);
     file.createAttribute<int>("step", HighFive::DataSpace::From(iStep)).write(iStep);
     file.createAttribute<std::string>("nodeProbeFile", HighFive::DataSpace::From(np.file)).write(np.file);
@@ -527,6 +640,9 @@ void writeNodeProbes(const solverConfig& cfg, const mesh& msh, variables& var, i
         for (size_t k = 0; k < np.ids.size(); ++k) vals[k] = buf[np.ids[k]];
         file.createDataSet(std::string("/VALUE/") + name, vals);
     }
+    // 書き込みの成否をここで確かめる: HighFive は close (デストラクタ) の失敗を握りつぶすので、キャッシュに残ったデータ・メタデータを
+    // flush で書き出し、失敗を例外にする (result 段レビュー M2)。
+    file.flush();
 }
 
 void writeBoundaryMassflux(const solverConfig& cfg, const mesh& msh, variables& var, int iStep, bool force)

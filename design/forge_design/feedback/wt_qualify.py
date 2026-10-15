@@ -85,7 +85,7 @@ DEFAULT_TOLS = {                        # plan §6 V5b・V5c (ユーザ了承 20
     "line_tol_halfamp_pct": (0.05, "plan §6 V5c (片振幅 ≤ 0.05 %)"),
 }
 QUAL_KEYS = ("exit_core_M_tol_rel", "line_eta", "line_x_range_m", "line_tol_maxabs_pct", "line_tol_halfamp_pct")
-DEFAULT_PRESET = "wt_nozzle_v2"         # 雛形 axismach_final_v1 の evaluate.settle の既定
+DEFAULT_PRESET = "wt_nozzle_v3"         # 雛形 axismach_final_v1 の evaluate.settle の既定 (2026-10-16 から v3; 線の定義は v2 と同じ)
 RECAL_MIN_REDUCTION = 0.5               # 規則 (c) の暫定の値 (plan に数値が無い; 上の docstring)
 MAX_RECALIBRATIONS = 1                  # plan §4.3「1 回まで」
 RESULTS = ("accepted", "back_to_correction", "rejected", "incomplete")

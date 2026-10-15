@@ -12,23 +12,29 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   窓の格子点のどれかが欠ければ判定不能 (データ不足)。本段の開始の場には残差の行も節点・流量の出力も無いので、最初に判定できる
   終端は開始 + 2W + 間隔。協調停止などで終端が格子に乗らなければ、その観測は別の検査 (非有限・直前の格子からの差・窓に加えた許容)
   だけに使う。
-- 量の種類: residual・mass_balance・exit_core_mach・line_mach・exit_flow_angle・wall_heat_nodes (詳細は settle.py の docstring)。
+- 量の種類: residual・mass_balance・exit_core_mach・line_mach・exit_flow_angle・wall_heat_nodes と、残差を止める判定から外した基準
+  (wt_nozzle_v3) の残差の非有限の見張り residual_finite (判定の条件ではない; 非有限 → DIVERGED) (詳細は settle.py の docstring)。
   各量に verdict・使った値・不合格の理由の分類 (閾値の超過 / データ不足 / 未設定 / 非有限) を書く。全体は AND
   (DIVERGED > INDETERMINATE > NOT_SETTLED > SETTLED)。判定不能は合格にしない。
 - 結果は `<run>/SETTLE_VERDICT.json` (基準の中身と sha256・起動の識別・格子・判定区間・終端・使ったファイルの一覧と sha256・各量)。
   閾値に `provisional: true` があれば VERDICT の行に「閾値は暫定 (plan §6 V3 で決める)」と出す。
 
 使い方:
-  python3 check_settled.py <run_dir> [--end-step N] [--scan N] [--json] [--no-write | --out PATH]
+  python3 check_settled.py <run_dir> [--end-step N] [--scan N] [--json] [--no-write | --out PATH] [--no-bind]
   --end-step N: N までのデータで判定する (省略時は STOPPED_AT の step、無ければ入力のデータの最後)。
   --scan N: 格子点のうち N の倍数ごとに「その時点まで」で判定し、最初に SETTLED になった step を報告する (N は格子の間隔の倍数)。
   --json: 結果の JSON を標準出力に出す。
-  --bind: 本段の起動との照合をしてから判定する (run_case.sh の後処理が使う; plan §4.9 の 2)。`settle.select_judge` が
-          本段 (main) と照合し、食い違い・記録の欠けがあれば判定せず INDETERMINATE (SETTLE_VERDICT.json も書かない)。前の段・本段でない起動
-          (check_convergence.py の対象) も INDETERMINATE。手で組んだ run (基準が本段の開始の記録を指さない) はそのまま判定する。
+  **本段の起動との照合は既定** (plan §4.9 の 2、§5.1 #7c で既定にした — result 段レビュー M1: 引数なしの通常のコマンドが照合を省いていた)。
+          `settle.select_judge` が道具を選び、本段の記録 (MAIN_STAGE_STARTED) のある run は記録・今の設定・最後の起動・基準の sha256 と
+          照合する。食い違い・記録の欠け (起動の記録が無い、記録が無く前の段とも確かめられない) があれば判定せず INDETERMINATE
+          (SETTLE_VERDICT.json も書かない)。前の段と確かめられた run (check_convergence.py の対象) も INDETERMINATE。手で組んだ run
+          (基準が本段の開始の記録を指さず、記録も無い) と基準の無い run はそのまま判定する (後者は「評価対象が未設定」)。
+  --bind: 互換のために残す (既定と同じ)。run_case.sh・停止規則の後処理・成果物が付けて呼ぶ。
+  --no-bind: 照合を外して判定する (調査用)。外したことを VERDICT の行と結果の JSON (`binding.skipped`) に書く。
   python3 check_settled.py --select <run_dir>
           判定の道具の選択だけ (1 行目 check_settled.py / check_convergence.py、2 行目 理由、続いて照合の問題; 終了コード 0)。
-          基準のファイルの無い run・前の段・本段でない起動は check_convergence.py、それ以外は check_settled.py (判定不能でも旧の道具へ落とさない)。
+          基準のファイルの無い run と前の段と確かめられた run は check_convergence.py、それ以外は check_settled.py (照合の不一致・
+          記録の欠け・判定不能でも旧の道具へ落とさない)。
 
 終了コード: 0 SETTLED / 1 NOT_SETTLED / 2 DIVERGED / 3 INDETERMINATE (基準のファイルの誤り・引数の誤り・照合の不一致も 3; argparse の既定の
 2 は DIVERGED と紛れるので使わない)。
@@ -93,7 +99,8 @@ def main(argv=None) -> int:
     g.add_argument("--out", default=None, help="結果の JSON の書き先 (既定 <run>/SETTLE_VERDICT.json)")
     m = ap.add_mutually_exclusive_group()
     m.add_argument("--select", action="store_true", help="判定の道具の選択だけを出す (1 行目 道具、2 行目 理由; 終了コード 0)")
-    m.add_argument("--bind", action="store_true", help="本段の起動との照合をしてから判定する (run_case.sh の後処理)")
+    m.add_argument("--bind", action="store_true", help="本段の起動との照合をしてから判定する (既定と同じ; 互換のため残す)")
+    m.add_argument("--no-bind", action="store_true", help="照合を外して判定する (調査用; 外したことを VERDICT と結果に書く)")
     a = ap.parse_args(argv)
     run = Path(a.run_dir)
     if a.select:
@@ -107,23 +114,30 @@ def main(argv=None) -> int:
         print(f"ERROR: {run} はディレクトリでない")
         print("VERDICT: INDETERMINATE (データ不足)")
         return settle.EXIT_CODE["INDETERMINATE"]
-    if a.bind:
+    binding = {"skipped": True, "by": "--no-bind"} if a.no_bind else None
+    if a.no_bind:
+        print("注意: --no-bind — 本段の起動との照合を外して判定する (この VERDICT は照合の裏付けを持たない)")
+    else:
         sel = settle.select_judge(run)
-        if sel["tool"] != settle.TOOL_NEW:
+        binding = {"skipped": False, **{k: sel.get(k) for k in ("tool", "mode", "why", "problems", "binding")}}
+        if sel["mode"] == "legacy":
+            # 基準のファイルが無い run: 判定は「評価対象が未設定」(置き場所と量の種類の一覧を出す; 旧の道具の対象であることも書く)
+            print(f"照合: {sel['why']} (この run の判定の道具は {sel['tool']}) [mode legacy]")
+        elif sel["tool"] != settle.TOOL_NEW:
             print(f"この起動は {settle.TOOL_NEW} の対象でない: {sel['why']} (判定は {sel['tool']})")
             print("VERDICT: INDETERMINATE (本段の起動でない)")
             return settle.EXIT_CODE["INDETERMINATE"]
-        if sel["mode"] == "main":
-            if sel["problems"]:
-                print(f"本段の起動との照合の不一致 ({sel['why']}; 判定しない):")
-                for p in sel["problems"]:
-                    print(f"  {p}")
-                print("VERDICT: INDETERMINATE (本段の起動との照合の不一致)")
-                return settle.EXIT_CODE["INDETERMINATE"]
+        elif sel["mode"] in ("main", "unconfirmed") and sel["problems"]:
+            what = "本段の起動との照合の不一致" if sel["mode"] == "main" else "本段の開始の記録の欠け"
+            print(f"{what} ({sel['why']}; 判定しない):")
+            for p in sel["problems"]:
+                print(f"  {p}")
+            print(f"VERDICT: INDETERMINATE ({what})")
+            return settle.EXIT_CODE["INDETERMINATE"]
+        elif sel["mode"] == "main":
             b = sel["binding"]
-            print(f"照合: {b['record']} の本段の設定 (fnv {b['main_config_fnv']}) = 今の {b['config_file']}"
-                  + (f" = 最後の起動の cfg_fnv" if b["launch_cfg_fnv"] is not None else " (起動の記録なし)")
-                  + f"、基準の sha256 {b['criteria_sha256'][:16]}… = 記録")
+            print(f"照合: {b['record']} の本段の設定 (fnv {b['main_config_fnv']}) = 今の {b['config_file']} = 最後の起動の cfg_fnv"
+                  f"、基準の sha256 {b['criteria_sha256'][:16]}… = 記録")
         else:
             print(f"照合: {sel['why']} [mode {sel['mode']}]")
     try:
@@ -137,6 +151,7 @@ def main(argv=None) -> int:
         return settle.EXIT_CODE["INDETERMINATE"]
     if sc is not None:
         res["scan"] = sc
+    res["binding"] = binding
     _print(res)
     if sc is not None:
         print(f"最初に SETTLED になった step (--scan {a.scan}): {sc['first_settled']}")
@@ -145,7 +160,7 @@ def main(argv=None) -> int:
         print(f"結果: {p}")
     if a.json:
         print(json.dumps(settle._jsonable(res), ensure_ascii=False, indent=1))
-    print(settle.verdict_line(res))
+    print(settle.verdict_line(res) + (" (本段の起動との照合を外した: --no-bind)" if a.no_bind else ""))
     return settle.EXIT_CODE[res["verdict"]]
 
 

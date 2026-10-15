@@ -7,8 +7,9 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
 
 ## 入力は run の `settle_criteria.yaml` だけ (§4.2)
 
-- 無い・目的の量 (`exit_core_mach`・`line_mach`・`exit_flow_angle`・`wall_heat_nodes`) が 1 つも無い・残差 (`residual`) か
-  流量の収支 (`mass_balance`) が無い → `INDETERMINATE (評価対象が未設定)` (例外にしない; 置き場所と量の種類の一覧を文言に付ける)。
+- 無い・目的の量 (`exit_core_mach`・`line_mach`・`exit_flow_angle`・`wall_heat_nodes`) が 1 つも無い・残差 (`residual`) も
+  残差の非有限の見張り (`residual_finite`) も無い・流量の収支 (`mass_balance`) が無い → `INDETERMINATE (評価対象が未設定)`
+  (例外にしない; 置き場所と量の種類の一覧を文言に付ける)。
 - 知らない種類・キー、閾値の欠け、YAML の重複キー → `CriteriaError` (黙って既定値で埋めない)。CLI は終了コード 3。
 - 書式 (ひな形は `settle_criteria.template.yaml`):
 
@@ -56,9 +57,14 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
   区間ごとに整数 step の行が**重複なく全部**あることを検査し、欠け・重複は判定不能 (データ不足)。直前の区間が本段の開始の
   直後から始まる終端 (T − 2W = 開始) も判定不能 (開始直後の行を直前の区間に入れない; 最初に判定できる終端は grid と同じ
   開始 + 2W + 間隔)。跳ね・停止の観測の検査は grid と同じ。
+- `residual_finite` (`file` 既定 residual_history.csv; プリセット `wt_nozzle_v3`、plan §4.4「残差を止める判定から外す」(2026-10-16
+  ユーザ決定)・§5.1 #8): **残差の非有限の見張りで、判定の条件ではない**。区間 (outer_end の行 start〜終端 − 1) のどの数値の列にも
+  非有限が無ければ SETTLED、非有限 → DIVERGED。履歴が無い・区間の最後の行が無い → 判定不能。`residual` を外した基準はこれが要る。
 - `mass_balance` (`file` 既定 boundary_massflux.csv; forge の `output.boundaryMassflux: 1`): 列 `mdot_<name>_<physID>` [kg/s] から
   ṁ_in = −Σ_inlet mdot、ṁ_out = Σ_outlet mdot、r = (ṁ_in − ṁ_out)/ṁ_in。C で |mean r| ≤ `mean_abs`、max r − min r ≤ `swing`、
-  (max − min)/mean の ṁ_in・ṁ_out ≤ `mdot_change_rel`。入口・出口以外の境界 (壁・軸) の mdot は記録だけ。ṁ_in ≤ 0 は判定不能。
+  (max − min)/mean の ṁ_in・ṁ_out ≤ `mdot_change_rel`。入口・出口以外の境界 (壁・軸) の mdot は記録だけ。ṁ_in ≤ 0 は判定不能 (r の
+  分母が無い)。ṁ_in > 0 で ṁ_out ≤ 0 (流出が無い・逆流・符号の反転) は理由つきの NOT_SETTLED (r ≥ 1 は測れている; ṁ_out の相対の
+  変化は計算しない; §5.1 #7c、result 段レビュー M3)。停止の観測も同じ規則。
 - 節点の量 (`nodes_file` 既定 `res_nodes_{step}.h5`; forge の `output.nodeProbeFile`): 構造格子の節点番号 id = i·nj + j から
   (i, j) = divmod(id, nj)。座標と M は `design/forge_design/report/nozzle_report.py` の `load_field` と**演算の順まで同じ**:
   X = COORD[:, 0] / scale_m・R = COORD[:, 1] / scale_m (COORD の型のまま割る)、M = np.hypot(Ux, Uy) / sonic (VALUE を float64 に
@@ -106,10 +112,12 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
 
 ## 道具の選択と本段の起動との照合 (`select_judge`、§4.9 の 1・2)
 
-基準のファイルの無い run・前の段 (本段の開始の記録 `MAIN_STAGE_STARTED` が無い)・本段でない起動は `check_convergence.py`、
-本段の起動 (記録と今の solverConfig.yaml・最後の起動・基準の sha256 を照合) と手で組んだ run (基準が記録を指さない) は
-`check_settled.py`。基準があって判定不能になったときに旧の道具へ落とさない。run_case.sh・`stop_rule.postprocess`・受け渡しの関門が
-同じ規則を使う (`check_settled.py --select` / `--bind`)。
+基準のファイルの無い run と、**前の段であることを記録と独立に確かめられた** run (本段の開始の記録 `MAIN_STAGE_STARTED` が無く、
+`stage_manifest.json` に本段の段が無い) は `check_convergence.py`。本段の記録がある run は必ず本段として照合し (記録と今の
+solverConfig.yaml・最後の起動・基準の sha256)、食い違い・起動の記録の欠けは `check_settled.py` の INDETERMINATE (旧の道具へ切り替えない;
+§5.1 #7c、result 段レビュー M1)。記録が無く前の段とも確かめられない run も INDETERMINATE。手で組んだ run (基準が記録を指さず、記録も
+無い) は `check_settled.py`。基準があって判定不能になったときに旧の道具へ落とさない。run_case.sh・`stop_rule.postprocess`・受け渡しの
+関門が同じ規則を使う (`check_settled.py --select`; `check_settled.py` は既定で照合する)。
 """
 from __future__ import annotations
 
@@ -165,8 +173,11 @@ WALL_RANGE = "range"
 
 KIND_RESIDUAL = "residual"
 KIND_MASS = "mass_balance"
+# 残差の非有限の見張り (判定の条件ではない; plan §4.4「残差を止める判定から外す」(2026-10-16 ユーザ決定)、§5.1 #8)。
+# 残差 (residual) を外した基準 (プリセット wt_nozzle_v3) は代わりにこれを要る (発散を見張らずに止めない)。
+KIND_RESIDUAL_FINITE = "residual_finite"
 TARGET_KINDS = ("exit_core_mach", "line_mach", "exit_flow_angle", "wall_heat_nodes")
-ALL_KINDS = (KIND_RESIDUAL, KIND_MASS) + TARGET_KINDS
+ALL_KINDS = (KIND_RESIDUAL, KIND_MASS) + TARGET_KINDS + (KIND_RESIDUAL_FINITE,)
 NODE_KINDS = ("exit_core_mach", "line_mach", "exit_flow_angle")
 
 # 種類ごとの閾値のキー (すべて必須; `provisional` は任意の記録)
@@ -177,6 +188,7 @@ THRESHOLD_KEYS = {
     "line_mach": ("tol_maxabs", "tol_halfamp", "tol_pos"),
     "exit_flow_angle": ("tol",),
     "wall_heat_nodes": ("q_tol", "eps_rel"),
+    "residual_finite": (),          # 見張りだけ (閾値なし; thresholds は {} か provisional だけ)
 }
 # 種類ごとの許されるキー (`kind`・`name`・`thresholds`・`notes` は共通)
 _COMMON_KEYS = ("kind", "name", "thresholds", "notes")
@@ -187,6 +199,7 @@ KIND_KEYS = {
     "line_mach": ("nodes_file", "series_csv", "eta", "x_range_m", "n", "Md"),
     "exit_flow_angle": ("nodes_file", "eta_range"),
     "wall_heat_nodes": ("walls", "file_pattern", "dataset", "axisymmetric", "measure"),
+    "residual_finite": ("file",),
 }
 SERIES_KEYS = {
     "exit_core_mach": (("path", "step_col", "value_col"), ()),
@@ -216,7 +229,8 @@ def unset_message(run_dir, why: str) -> str:
     p = Path(run_dir) / CRITERIA_FILE
     return (f"INDETERMINATE (評価対象が未設定): {why}。置き場所: {p} (手で組む run はひな形 {TEMPLATE} を写す; 設計チェーンの run は"
             f"問題 YAML の evaluate.settle を準備のときに解決して写す)。量の種類: {', '.join(ALL_KINDS)} "
-            f"(残差 residual・流量の収支 mass_balance と、目的の量 {', '.join(TARGET_KINDS)} の 1 つ以上が要る)")
+            f"(残差 residual か残差の非有限の見張り residual_finite、流量の収支 mass_balance と、目的の量 {', '.join(TARGET_KINDS)} の "
+            "1 つ以上が要る)")
 
 
 def _yaml_load_strict(text: str):
@@ -417,6 +431,8 @@ def validate_criteria(obj) -> dict:
                 if q["series"] not in (SERIES_GRID, SERIES_RAW):
                     raise CriteriaError(f"{where}.series: '{q['series']}' は {SERIES_GRID} か {SERIES_RAW}")
                 o["series"] = q["series"]
+        elif kind == KIND_RESIDUAL_FINITE:
+            o["file"] = q.get("file", "residual_history.csv")
         elif kind == "mass_balance":
             if "series_csv" in q:
                 if "file" in q:
@@ -522,12 +538,15 @@ def load_criteria(run_dir, path=None) -> dict:
     lack = []
     if not any(k in TARGET_KINDS for k in kinds):
         lack.append("目的の量 (" + ", ".join(TARGET_KINDS) + ") が 1 つも無い")
-    if KIND_RESIDUAL not in kinds:
-        lack.append("残差 (residual) が無い")
+    if KIND_RESIDUAL not in kinds and KIND_RESIDUAL_FINITE not in kinds:
+        # 残差を止める判定から外した基準 (wt_nozzle_v3) でも、発散の見張り (residual_finite) は要る (plan §4.4、§5.1 #8)
+        lack.append("残差 (residual) も残差の非有限の見張り (residual_finite) も無い (発散を見張れない)")
     if KIND_MASS not in kinds:
         lack.append("流量の収支 (mass_balance) が無い")
     if kinds.count(KIND_RESIDUAL) > 1:
         raise CriteriaError("residual が 2 つ以上ある")
+    if kinds.count(KIND_RESIDUAL_FINITE) > 1:
+        raise CriteriaError("residual_finite が 2 つ以上ある")
     if lack:
         why = f"{p}: " + "、".join(lack)
         return {"status": "unset", "verdict": "INDETERMINATE", "reason": why, "message": unset_message(run_dir, why), "path": str(p),
@@ -1165,6 +1184,41 @@ def _eval_residual(q: dict, ctx: dict) -> dict:
     return Q.finish()
 
 
+def _eval_residual_finite(q: dict, ctx: dict) -> dict:
+    """残差の非有限の見張り (`residual_finite`; plan §4.4「残差を止める判定から外す」(2026-10-16 ユーザ決定)、§5.1 #8)。
+    **判定の条件ではない** (傾き・振幅・上昇・跳ねは見ない): 残差の履歴の本段の区間 (outer_end の行 start〜終端 − 1、停止の観測が
+    あれば停止の step − 1 まで) のどの数値の列にも非有限が無ければ SETTLED (見張りの合格)、非有限 → DIVERGED (`residual` と同じ検査)。
+    履歴が無い・読めない行・区間の行が無い・最後の行 (終端 − 1) が無い (見張りが終端まで届かない) → 判定不能。"""
+    Q = _Q(q)
+    T, start, stop = ctx["T"], ctx["start"], ctx["stop"]
+    try:
+        R = ctx["data"].residual(q["file"])
+    except _DataMissing as e:
+        Q.reason(CAT_DATA, str(e))
+        return Q.finish()
+    st = R["steps"]
+    end_row = (stop if stop is not None else T) - 1
+    seg = (st >= start) & (st <= end_row)
+    s_seg = st[seg]
+    Q.r["values"].update(file=R["path"], rows_in_segment=int(seg.sum()), rows=[start, end_row],
+                         role="非有限の見張り (判定の条件ではない)")
+    bad_in = [b for b in R["bad"] if b is None or start <= b <= end_row]
+    if bad_in:
+        Q.reason(CAT_DATA, f"読めない・欠けた outer_end の行が {len(bad_in)} 行 (step {bad_in[:5]})")
+    nonfin = {k: int(np.count_nonzero(~np.isfinite(v[seg]))) for k, v in R["cols"].items()}
+    nonfin = {k: n for k, n in nonfin.items() if n}
+    if nonfin:
+        first = {k: int(s_seg[np.argmax(~np.isfinite(R["cols"][k][seg]))]) for k in nonfin}
+        Q.reason(CAT_NONFINITE, f"非有限の残差: {nonfin} (最初の行の step {first})")
+        Q.r["values"]["nonfinite"] = {"count": nonfin, "first_step": first}
+        return Q.finish()
+    if not len(s_seg):
+        Q.reason(CAT_DATA, f"区間 (行 {start}〜{end_row}) の outer_end の行が無い (見張れない)")
+    elif int(s_seg.max()) < end_row:
+        Q.reason(CAT_DATA, f"区間の最後の行 (step {end_row}) が無い (最後の行 {int(s_seg.max())}; 見張りが終端まで届かない)")
+    return Q.finish()
+
+
 # ============================================================ 流量の収支
 def _eval_mass(q: dict, ctx: dict) -> dict:
     series = "series_csv" in q
@@ -1222,13 +1276,21 @@ def _eval_mass(q: dict, ctx: dict) -> dict:
     rows = [idx[s] for s in C]
     r = r_all[rows]
     vals = {"r": [float(x) for x in r], "steps": C}
+    # 分母の成立 (result 段レビュー M3: 出口の流量 0 で ZeroDivisionError、オンラインでは見張りの例外で forge を止める経路だった)。
+    #   ṁ_in ≤ 0: r = (ṁ_in − ṁ_out)/ṁ_in の分母が成り立たない (流入が無い・入口の逆流・physID の取り違え) → 判定不能 (データ不足)。
+    #   ṁ_in > 0 で ṁ_out ≤ 0 (流出が無い・逆流・符号の反転): r = 1 − ṁ_out/ṁ_in ≥ 1 が測れて収支が取れていないことは確か
+    #     → 理由つきの不合格 (NOT_SETTLED)。ṁ_out の相対の変化 (max − min)/mean は定義できないので計算しない。
+    out_ok = True
     if mi_all is not None:
         mi = mi_all[rows]
         mo = mo_all[rows]
         if np.any(mi <= 0):
-            Q.reason(CAT_DATA, "入口の流量 ṁ_in が正でない格子点がある (流入が無い — inlet・outlet の physID か流れを確かめる)")
+            bad_s = [C[i] for i in np.flatnonzero(mi <= 0)]
+            Q.reason(CAT_DATA, f"入口の流量 ṁ_in が正でない格子点がある (step {bad_s[:6]}{'…' if len(bad_s) > 6 else ''}; 流入が無い — "
+                               "r の分母が成り立たない。inlet・outlet の physID か流れを確かめる)")
             return Q.finish()
         vals.update(mdot_in=[float(x) for x in mi], mdot_out=[float(x) for x in mo])
+        out_ok = _mdot_out_positive(Q, mo, C, "窓の")
     Q.r["values"] = vals
     if not series and others:
         Q.r["values"]["others_at_T"] = {k: float(a[idx[T]]) for k, a in others.items()}
@@ -1237,12 +1299,18 @@ def _eval_mass(q: dict, ctx: dict) -> dict:
     Q.check("max r − min r", _span(r), th["swing"], _span(r) <= th["swing"])
     if mi_all is not None:
         for lab, a in (("ṁ_in", mi), ("ṁ_out", mo)):
+            if lab == "ṁ_out" and not out_ok:
+                continue
             rel = _span(a) / float(a.mean())
             Q.check(f"(max − min)/mean {lab}", rel, th["mdot_change_rel"], rel <= th["mdot_change_rel"])
     else:
         Q.reason(CAT_DATA, "ṁ_in・ṁ_out の系列が無い (series_csv の r だけ) — mdot_change_rel を判定できない")
     if stop is not None:
         k = idx[stop]
+        if mi_all is not None and not float(mi_all[k]) > 0:
+            Q.r["values"]["stop"] = {"step": stop, "mdot_in": float(mi_all[k]), "mdot_out": float(mo_all[k])}
+            Q.reason(CAT_DATA, f"停止の観測 (step {stop}) の入口の流量 ṁ_in {float(mi_all[k]):.6g} が正でない (r の分母が成り立たない)")
+            return Q.finish()
         rs = r_all[k]
         Q.r["values"]["stop"] = {"step": stop, "r": float(rs)}
         Q.check(f"停止の観測 (step {stop}) の r の格子の終端からの差", abs(float(rs - r[-1])), th["swing"], abs(float(rs - r[-1])) <= th["swing"])
@@ -1250,11 +1318,32 @@ def _eval_mass(q: dict, ctx: dict) -> dict:
         Q.check("停止の観測を加えた |mean r|", abs(float(r2.mean())), th["mean_abs"], abs(float(r2.mean())) <= th["mean_abs"])
         Q.check("停止の観測を加えた max r − min r", _span(r2), th["swing"], _span(r2) <= th["swing"])
         if mi_all is not None:
+            # (正常な経路の values・checks は変えない: 量の digest を停止規則の再評価と照合するため)
+            stop_out_ok = _mdot_out_positive(Q, np.asarray([mo_all[k]]), [stop], "停止の観測の")
             for lab, a, aa in (("ṁ_in", mi, mi_all), ("ṁ_out", mo, mo_all)):
+                if lab == "ṁ_out" and not (out_ok and stop_out_ok):
+                    continue
                 a2 = np.append(a, aa[k])
                 rel = _span(a2) / float(a2.mean())
                 Q.check(f"停止の観測を加えた (max − min)/mean {lab}", rel, th["mdot_change_rel"], rel <= th["mdot_change_rel"])
     return Q.finish()
+
+
+def _mdot_out_positive(Q: _Q, mo, steps, where: str) -> bool:
+    """出口の流量 ṁ_out が全点で正か (流出がある・符号が反転しない)。正でない点があれば理由つきの不合格 (閾値の超過の分類) を足して
+    False。判定不能にしない理由: 呼ぶのは ṁ_in > 0 のときだけで、r = 1 − ṁ_out/ṁ_in ≥ 1 は測れており収支が取れていないことは確か
+    (データの欠けではない)。ṁ_out の相対の変化は定義できないので、呼び出し側は計算しない。"""
+    mo = np.asarray(mo, dtype=float)
+    bad = np.flatnonzero(~(mo > 0))
+    if bad.size == 0:
+        return True
+    bad_s = [steps[i] for i in bad]
+    mn = float(mo.min())
+    Q.r["checks"].append({"check": f"{where}出口の流量 ṁ_out が正 (流出がある)", "value": mn, "limit": "> 0", "ok": False,
+                          "detail": f"正でない点 {len(bad_s)}/{len(mo)} (step {bad_s[:6]}{'…' if len(bad_s) > 6 else ''})"})
+    Q.reason(CAT_THRESHOLD, f"{where}出口の流量 ṁ_out が正でない点がある (最小 {mn:.6g}、step {bad_s[:6]}{'…' if len(bad_s) > 6 else ''}; "
+                            "流出が無い・逆流・符号の反転 — r = 1 − ṁ_out/ṁ_in ≥ 1 で流量の収支が取れていない。ṁ_out の相対の変化は定義できない)")
+    return False
 
 
 # ============================================================ 節点の量
@@ -1614,6 +1703,7 @@ EVALUATORS = {
     "line_mach": _eval_line,
     "exit_flow_angle": _eval_angle,
     "wall_heat_nodes": _eval_wall,
+    KIND_RESIDUAL_FINITE: _eval_residual_finite,
 }
 
 
@@ -1819,21 +1909,49 @@ def _dotted(d, key: str):
     return d
 
 
+def _previous_stage_evidence(run: Path, seg: dict) -> tuple[bool, str]:
+    """本段の開始の記録が無い run が前の段 (S1・S2 など) であることを、記録と独立に確かめる (§5.1 #7c、result 段レビュー M1)。
+    確かめられるのは、`stage_manifest.json` (run_staged_ns が段ごとに forge の後で書く; 基準の grid.segment.stage_manifest) が読めて
+    段を 1 つ以上持ち、どの段も本段の tag (grid.segment.stage_tag、既定 main) でないときだけ。戻り (確かめられた, 理由)。
+    run_staged_ns の最初の段 (S1) の後処理の時点ではまだ段の記録が無いので確かめられない (判定不能になる; 段の終了の関門は場で見る)。"""
+    man_name = str(seg.get("stage_manifest") or "stage_manifest.json")
+    tag = str(seg.get("stage_tag") or "main")
+    p = run / man_name
+    if not p.is_file():
+        return False, f"{man_name} が無い (前の段であることを確かめられない)"
+    try:
+        man = json.loads(p.read_text())
+        stages = man.get("stages") if isinstance(man, dict) else None
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return False, f"{man_name} を読めない ({e})"
+    if not isinstance(stages, list) or not stages:
+        return False, f"{man_name} に段が無い (前の段であることを確かめられない)"
+    tags = [s.get("tag") if isinstance(s, dict) else None for s in stages]
+    if tag in tags:
+        return False, (f"{man_name} に本段の段 (tag {tag}) がある (段 {tags}) — 本段の開始の記録が欠けているか、前の呼び出しの残りで、"
+                       "前の段と確かめられない")
+    return True, f"{man_name} の段 {tags} に本段 (tag {tag}) が無い"
+
+
 def select_judge(run_dir) -> dict:
     """run の今の起動を判定する道具を選ぶ。戻り {tool, mode, why, problems, binding}。
     mode:
-      legacy   基準のファイル (settle_criteria.yaml) が無い → check_convergence.py (今どおり)。
-      invalid  基準のファイルが読めない・誤り・評価対象が未設定・grid.segment の stage が main でない → check_settled.py
-               (判定不能を返す; **旧の道具へ落とさない**)。
-      manual   基準が本段の開始の記録 (grid.segment.start_record) を指さない = 手で組んだ run → check_settled.py。
-      pre_main 基準は本段の開始の記録を指すが、その記録が無い = 前の段 (S1・S2)・本段の前 → check_convergence.py。
-      not_main 記録はあるが、最後の forge の起動 (forge_launches.jsonl の cfg_fnv) が本段の設定 (記録の main_config.fnv) と違う
-               = 本段でない起動 → check_convergence.py。起動の記録が無い run はここに来ない (本段として照合し、食い違いは problems)。
-      main     本段の起動 → check_settled.py。照合 (binding、どれかが食い違う・記録が欠けると problems): 記録の event、
-               main_config の sha256・fnv = 今の solverConfig.yaml (main_config.file)、最後の起動の cfg_fnv = main_config.fnv
-               (起動の記録がある run)、記録の settle_criteria.sha256 = 今の基準のファイルの sha256。
+      legacy      基準のファイル (settle_criteria.yaml) が無い → check_convergence.py (今どおり)。
+      invalid     基準のファイルが読めない・誤り・評価対象が未設定・grid.segment の stage が main でない → check_settled.py
+                  (判定不能を返す; **旧の道具へ落とさない**)。
+      manual      基準が本段の開始の記録 (grid.segment.start_record) を指さず、run に本段の記録 (MAIN_STAGE_STARTED) も無い
+                  = 手で組んだ run → check_settled.py。
+      pre_main    基準は本段の開始の記録を指すが記録が無く、**前の段であることを独立に確かめられた** (`_previous_stage_evidence`:
+                  stage_manifest.json に本段の段が無い) → check_convergence.py。
+      unconfirmed 記録が無く、前の段とも確かめられない (stage_manifest.json が無い・読めない・本段の段がある) → check_settled.py の
+                  判定不能 (problems に記録の欠け; §5.1 #7c、result 段レビュー M1)。
+      main        本段の記録がある (基準が記録を指さなくても、run に MAIN_STAGE_STARTED があれば既定のキーで) → check_settled.py。
+                  照合 (binding、どれかが食い違う・記録が欠けると problems): 記録の event、main_config の sha256・fnv = 今の
+                  solverConfig.yaml (main_config.file)、**起動の記録 (forge_launches.jsonl) があり**最後の起動の cfg_fnv = main_config.fnv、
+                  記録の settle_criteria.sha256 = 今の基準のファイルの sha256。**最後の起動が本段の記録と違う・起動の記録が無いときも
+                  旧の道具へ切り替えず problems** (以前の not_main は result 段レビュー M1 で廃止: 照合の回避の経路だった)。
     記録のキーは基準の grid.segment の config_fnv_key・criteria_sha256_key (既定 main_config.fnv・settle_criteria.sha256)。
-    problems があるときの判定は INDETERMINATE (`check_settled.py --bind`; 受け渡しの関門は上書きでも通さない)。"""
+    problems があるときの判定は INDETERMINATE (`check_settled.py` は既定で照合する; 受け渡しの関門は上書きでも通さない)。"""
     run = Path(run_dir)
     out = {"tool": TOOL_NEW, "mode": None, "why": None, "problems": [], "binding": None}
     if not os.path.lexists(run / CRITERIA_FILE):
@@ -1846,23 +1964,34 @@ def select_judge(run_dir) -> dict:
         return {**out, "mode": "invalid", "why": f"{CRITERIA_FILE} の評価対象が未設定", "problems": [lc["reason"]]}
     seg = lc["criteria"]["grid"].get("segment")
     rec_name = seg.get("start_record") if isinstance(seg, dict) else None
+    via_default = False
     if not rec_name:
-        return {**out, "mode": "manual", "why": f"手で組んだ run ({CRITERIA_FILE} の grid.segment が本段の開始の記録を指さない)"}
+        if not os.path.lexists(run / MAIN_STAGE_RECORD):
+            return {**out, "mode": "manual", "why": f"手で組んだ run ({CRITERIA_FILE} の grid.segment が本段の開始の記録を指さない)"}
+        # 基準が記録を指さなくても、本段の記録がある run は本段として照合する (基準の segment を外して照合を避ける経路を塞ぐ)
+        seg, rec_name, via_default = {}, MAIN_STAGE_RECORD, True
     if seg.get("stage", "main") != "main":
         return {**out, "mode": "invalid", "why": "grid.segment の stage が main でない",
                 "problems": [f"grid.segment.stage {seg.get('stage')!r} (本段 main の基準だけを扱う)"]}
     rp = run / str(rec_name)
-    if not rp.exists():
-        return {**out, "tool": TOOL_OLD, "mode": "pre_main", "why": f"本段の開始の記録 {rec_name} が無い (前の段・本段の前の起動)"}
+    if not os.path.lexists(rp):
+        ok, ev = _previous_stage_evidence(run, seg)
+        if ok:
+            return {**out, "tool": TOOL_OLD, "mode": "pre_main",
+                    "why": f"本段の開始の記録 {rec_name} が無く、前の段と確かめた ({ev})"}
+        return {**out, "mode": "unconfirmed", "why": f"本段の開始の記録 {rec_name} が無く、前の段とも確かめられない",
+                "problems": [f"本段の開始の記録 {rec_name} が無い・前の段と確かめられない: {ev} (記録の欠け; 旧の道具へ切り替えない)"]}
     fnv_key = str(seg.get("config_fnv_key") or "main_config.fnv")
     sha_key = str(seg.get("criteria_sha256_key") or "settle_criteria.sha256")
     probs = []
+    why_main = (f"本段の起動 ({rec_name} と照合" + (f"; {CRITERIA_FILE} の grid.segment は記録を指さないが run に {MAIN_STAGE_RECORD} がある"
+                                                   if via_default else "") + ")")
     try:
         note = json.loads(rp.read_text())
         if not isinstance(note, dict):
             raise ValueError("JSON の対応表でない")
     except (OSError, UnicodeDecodeError, ValueError) as e:
-        return {**out, "mode": "main", "why": f"本段の開始の記録 {rec_name} がある", "problems": [f"{rec_name} を読めない ({e})"]}
+        return {**out, "mode": "main", "why": why_main, "problems": [f"{rec_name} を読めない ({e})"]}
     if note.get("event") != "main_stage_started":
         probs.append(f"{rec_name} の event が main_stage_started でない ({note.get('event')!r})")
     cfg_name = str(_dotted(note, "main_config.file") or "solverConfig.yaml")
@@ -1882,13 +2011,17 @@ def select_judge(run_dir) -> dict:
     binding = {"record": str(rec_name), "config_file": cfg_name, "main_config_fnv": main_fnv, "main_config_sha256": main_sha,
                "config_fnv": cfg_fnv, "config_sha256": cfg_sha, "launch": ll, "launch_cfg_fnv": launch_fnv,
                "record_criteria_sha256": crit_sha, "criteria_sha256": lc["sha256"], "keys": {"config_fnv": fnv_key, "criteria_sha256": sha_key}}
-    if launch_fnv is not None and main_fnv is not None and launch_fnv != main_fnv:
-        return {**out, "tool": TOOL_OLD, "mode": "not_main", "binding": binding,
-                "why": f"最後の forge の起動 (cfg_fnv {launch_fnv}) が本段の記録 ({fnv_key} {main_fnv}) と違う (本段でない起動)"}
-    if isinstance(ll, dict) and "error" in ll:
+    # 起動の照合 (result 段レビュー M1): 起動の記録が無い・最後の起動が本段の記録と違うときも旧の道具へ切り替えず problems にする
+    # (本段の記録がある run は、前の段であることを独立に確かめられない)
+    if ll is None:
+        probs.append(f"起動の記録 {LAUNCHES_FILE} が無い (最後の forge の起動を本段と照合できない)")
+    elif "error" in ll:
         probs.append(f"起動の記録: {ll['error']}")
-    elif isinstance(ll, dict) and launch_fnv is None:
+    elif launch_fnv is None:
         probs.append(f"{LAUNCHES_FILE} の最後の起動に cfg_fnv が無い")
+    elif main_fnv is not None and launch_fnv != main_fnv:
+        probs.append(f"最後の forge の起動 (cfg_fnv {launch_fnv}) が {rec_name} の {fnv_key} {main_fnv} と違う "
+                     "(本段でない起動か記録の不一致; 前の段と確かめられないので旧の道具へ切り替えない)")
     if main_fnv is None:
         probs.append(f"{rec_name} に {fnv_key} が無い (本段の起動を照合できない)")
     elif cfg_fnv is not None and cfg_fnv != main_fnv:
@@ -1901,7 +2034,7 @@ def select_judge(run_dir) -> dict:
         probs.append(f"{rec_name} に {sha_key} が無い (基準を本段に結び付けられない)")
     elif crit_sha != lc["sha256"]:
         probs.append(f"今の {CRITERIA_FILE} の sha256 {lc['sha256'][:16]}… が {rec_name} の {sha_key} {str(crit_sha)[:16]}… と違う")
-    return {**out, "mode": "main", "why": f"本段の起動 ({rec_name} と照合)", "problems": probs, "binding": binding}
+    return {**out, "mode": "main", "why": why_main, "problems": probs, "binding": binding}
 
 
 def verdict_line(result: dict) -> str:
