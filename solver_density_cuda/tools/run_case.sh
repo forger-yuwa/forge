@@ -37,7 +37,9 @@ FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
   # forge の挙動を変える環境変数を**値ごと**残す (2026-09-23)。
   # FORGE_CUDA_BLOCKSIZE は結果に効く (case/56 で 100k あたりの減衰が 1.40 % vs 1.88 %) のに
   # どこにも記録されず、後から run_0020/run_0021 を突き合わせたときに揃っているか確認できなかった。
-  for v in FORGE_CUDA_BLOCKSIZE FORGE_KERNEL_SYNC FORGE_NODE_FX_HALF FORGE_AXIS_DIAG_ALPHA FORGE_RESID_SNAP FORGE_BIN; do
+  # FORGE_TRANSPORT_TABLE (0 = 輸送物性を表でなく double 評価)・FORGE_DIAG_FACE_H_DOUBLE (1 = SLAU の面エンタルピーを double) も
+  # 解を変えるので残す (2026-10-15、plan tooling-nozzle-card-local-mesh §5.1 #3d の全部 double の延長)。
+  for v in FORGE_CUDA_BLOCKSIZE FORGE_KERNEL_SYNC FORGE_NODE_FX_HALF FORGE_AXIS_DIAG_ALPHA FORGE_RESID_SNAP FORGE_TRANSPORT_TABLE FORGE_DIAG_FACE_H_DOUBLE FORGE_BIN; do
     if [ -n "${!v-}" ]; then echo "env         : $v=${!v}"; fi
   done
   # 解を変える opt-in の**要求値**を config から拾う (実効値は forge のログが出す)。
