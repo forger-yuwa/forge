@@ -33,4 +33,34 @@ log "deliverables"
 ( cd "$D" && $PY -m forge_design.export.deliverables "$R" --card "$C/card_m55_3coef.yaml" --problem "$C/problem_m55_p5_settle_v2.yaml" --skip cad ) > "$W/deliverables.log" 2>&1
 log "deliverables rc $?"
 tail -5 "$W/deliverables.log" | cut -c1-400 | tee -a "$W/chain.log"
+log "V6 の確認: 停止規則・関門・表・成果物・報告の収束の欄・非有限"
+( cd "$D" && $PY - "$R" <<'PYC'
+import json, sys, glob, os, hashlib
+from pathlib import Path
+R = Path(sys.argv[1])
+st = json.loads((R / "STOP_RULE_STATE.json").read_text()) if (R / "STOP_RULE_STATE.json").exists() else {}
+print("停止規則:", st.get("method"), st.get("status"), "failures", st.get("failures"), "stop_step", st.get("stop_step"), "delta_E", (st.get("delta_E") or {}).get("status"))
+g = json.loads((R / "HANDOFF_GATE.json").read_text()) if (R / "HANDOFF_GATE.json").exists() else {}
+print("関門:", "method", g.get("method"), "proceed", g.get("proceed"), "settled", g.get("settled"), "blocked_by", g.get("blocked_by"), "overrides", g.get("overrides") or g.get("override"))
+nxt = R / "delta_r_next.csv"
+de = Path((st.get("delta_E") or {}).get("dir") or "") / "delta_r_next.csv"
+sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
+print("delta_r_next.csv:", nxt.exists(), "停止の抽出の表と一致:", sha(nxt) is not None and sha(nxt) == sha(de))
+print("CONVERGENCE_VERDICT.txt 1 行目:", (R / "CONVERGENCE_VERDICT.txt").read_text().splitlines()[0] if (R / "CONVERGENCE_VERDICT.txt").exists() else None)
+from forge_design.report.nozzle_report import convergence_gate_row
+print("報告の収束の欄:", convergence_gate_row(R))
+d = R / "deliverables"
+print("成果物:", sorted(p.name for p in d.iterdir()) if d.exists() else None)
+st_ex = d / "excel" / "status.json"
+if st_ex.exists():
+    sj = json.loads(st_ex.read_text()); print("excel status:", json.dumps(sj, ensure_ascii=False)[:600])
+import h5py, numpy as np
+k = st.get("stop_step")
+f = R / f"res_{k}.h5"
+if f.exists():
+    with h5py.File(f, "r") as h:
+        bad = {n: int((~np.isfinite(np.asarray(h["VALUE/" + n][:], float))).sum()) for n in h["VALUE"]}
+    print("非有限 (停止の場):", {a: b for a, b in bad.items() if b} or 0)
+PYC
+) 2>&1 | tee -a "$W/chain.log"
 log "ALL DONE"
