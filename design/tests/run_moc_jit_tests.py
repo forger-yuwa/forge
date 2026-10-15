@@ -15,6 +15,9 @@
      両方の backend の `fill_levels` に通し、段・対ごとの状態 (`PAIR_*`)・源項の分岐が同じ、反復回数は収束した対で ±1 まで
      (更新量が収束の許容差のちょうど境目にある対は丸めで 1 回ずれうる; 件数を記録)、最終残差が許容差の中、
      棄却の位置・`moc_gate` の判定が同じ (段・対ごとの値は `MocFillDiag.add` の入力を両方の backend で記録して比べる)
+  4b〜4d. 共通部 (backend にかかわらず使う) の高速化が以前の版と完全一致 (plan §4.6): 集計 `MocFillDiag.add` (以前の書き方の写しが参照)、
+     網の検査 `characteristic_topology_diagnostics` (git 57f73940 の版が参照; 点の堆積は切り詰める前の対の全集合を cKDTree の参照と比べ、
+     記録の 20 件は段・添字の順の先頭)、`cplus_flux_wall` (numpy の書き方の経路が参照)
 --real (V5 の実データ、所要 10〜20 分、最大 RSS 約 3 GB):
   5. M5 (case/70 c2b)・M5.5 (case/71 のカード)・M6 (case/45 の生産の問題、CFD の初期線) を N 600 (L_total_tol 0.1 r_t) と
      2400 (問題の値) で `evaluate_mknot` に通し、逆 MOC の呼び出しごとに網・壁・集計を比べる。合格: 網の有限の点の位置の差 ≤ 1e−10 r_t、
@@ -531,6 +534,28 @@ else:
         MDREF = importlib.util.module_from_spec(_spec)
         _spec.loader.exec_module(MDREF)
     from forge_design.geometry import moc_diagnostics as MD  # noqa: E402
+    from scipy.spatial import cKDTree  # noqa: E402
+
+    def ref_pileup(L, n_ax, pad, kmax, sx):
+        """点の堆積の対の全部 (以前の書き方の cKDTree.query_pairs と同じ判定、切り詰めない): (全件数, seam 除外の [段, x_a, r_a] の並べた列)。"""
+        n_all, locs = 0, []
+        for k in range(L.shape[0]):
+            xk, rk = L[k, :, 0], L[k, :, 1]
+            idx = np.where(np.isfinite(xk) & np.isfinite(rk))[0]
+            if len(idx) < 5:
+                continue
+            pts = np.column_stack([xk[idx], rk[idx]])
+            thr = max(np.median(np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))) * 0.2, 1e-9)
+            for a, b in cKDTree(pts).query_pairs(r=thr):
+                if abs(idx[a] - idx[b]) > 2:
+                    n_all += 1
+                    seam = (abs(int(idx[a]) - n_ax) <= pad or abs(int(idx[b]) - n_ax) <= pad) and k <= kmax
+                    if sx is not None and pts[a, 0] < sx and pts[b, 0] < sx:
+                        seam = True
+                    if not seam:
+                        locs.append((k, float(pts[a, 0]), float(pts[a, 1])))
+        return n_all, sorted(locs)
+
     rng = np.random.default_rng(3)
     for n_ax in (60, 300):
         lev = InverseMOC(axis_limit="legacy", corrector="converge").fill_levels(RAD.build_init(n_ax, 13))
@@ -550,11 +575,20 @@ else:
                 b = MD.characteristic_topology_diagnostics(L, n_ax, **kw)
                 la, lb = a.pop("pileup_locs_interior"), b.pop("pileup_locs_interior")
                 d = same_obj(a, b)
-                # 位置の一覧 (記録、先頭 20 件) は段・添字の順に変えた: 20 件以下なら集合が同じ、超えたら件数だけ
-                locs_ok = len(la) == len(lb) and (sorted(la) == sorted(lb) or a["pileup_pairs_interior"] > 20)
+                # 点の堆積: 切り詰める前の対の集合を比べる (以前の書き方と同じ判定の cKDTree の参照 vs numba の走査の全件)。
+                # 記録の位置の一覧 (先頭 20 件) は段・添字の順で選ぶ契約 (以前は集合の反復順) なので、全件の先頭 20 件と一致することを見る
+                pad, kmax, sx = kw.get("seam_i_pad", 45), kw.get("seam_k_max", 45), kw.get("seam_x_max")
+                n_ref, locs_ref = ref_pileup(L, n_ax, pad, kmax, sx)
+                xs_c, rs_c = np.ascontiguousarray(L[..., 0]), np.ascontiguousarray(L[..., 1])
+                _, _, _, n_nb, n_nb_int, locs_nb = NB.level_scan_nb(xs_c, rs_c, n_ax, pad, kmax, 0.0 if sx is None else float(sx),
+                                                                     sx is not None, 10 ** 7)
+                locs_nb = [(int(q[0]), float(q[1]), float(q[2])) for q in locs_nb]
+                set_ok = n_nb == n_ref and sorted(locs_nb) == locs_ref and n_nb_int == len(locs_ref)
+                head_ok = lb == locs_nb[:20] and len(la) == len(lb)
                 check(f"網の検査 n_ax {n_ax} {lab} {'seam・壁つき' if kw else '既定'}: 位置の一覧以外が完全一致 (反転 "
-                      f"{a['n_orientation_flip']}・堆積 {a['pileup_pairs']}/{a['pileup_pairs_interior']})、位置の一覧 {len(lb)} 件"
-                      + (f" ({d[:3]})" if d else ""), not d and locs_ok)
+                      f"{a['n_orientation_flip']}・堆積 {a['pileup_pairs']}/{a['pileup_pairs_interior']})、堆積の対の全集合 "
+                      f"{len(locs_ref)} 件が参照と一致、記録の先頭 {len(lb)} 件は段・添字の順" + (f" ({d[:3]})" if d else ""),
+                      not d and set_ok and head_ok)
 
 # --- 4d. C⁺ 流束閉包の壁の numba の版 (plan §4.6 (3)) ----------------------------------------------------------------------------
 print("== 4d. cplus_flux_wall の numba の版が numpy の書き方と完全一致")
