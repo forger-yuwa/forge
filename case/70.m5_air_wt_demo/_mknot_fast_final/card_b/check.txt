@@ -1,0 +1,12 @@
+ok   規則 coarse_min_theta_v2・自動  [coarse_min_theta_v2 auto]
+ok   YAML の geometry.M_knot = 記録の選択  [2.8 / 2.8]
+ok   最終の 3 点が生産の網で成立  [M_K 2.75 ok True θ_max 12.06935024326499; M_K 2.8 ok True θ_max 12.056557110766164; M_K 2.85 ok True θ_max 12.05679204703904]
+ok   寸法の判定 PASS  [inlet_radius +0.000e+00 m (公差 1e-05); pipe_length +0.000e+00 m (公差 0.001); contraction_length +2.936e-10 m (公差 0.001); divergent_length +4.440e-05 m (公差 0.001); throat_diameter_physical +9.168e-09 m (公差 2e-05)]
+ok   YAML の要約と card_log の照合 (sha256・作り直した要約)  [{'ok': True, 'summary_matches': True}]
+ok   M_knot の所要 ≤ 600 s  [M_knot 72.1 s (選択 72.1 s・r_t の固定点のやり直し 0 s)、記録の時点のカード全体 94.2 s、壁時計 (gen.log) 1:35.13]
+info 選択: 代表が残った谷 1 個 (全 1 個) の生産の網の θ_max の最小 12.05656° から 0.01° 以内の同点の集合 1 個 (2.80) の中で 唯一の谷 → 2.80 (θ_max 12.05656°、境目までの推定の距離 1.15)
+info 実効の入力 (最終の組): {"r_t_m": 0.09990849020517084, "N_s": 600, "L_s": 0.1, "N_p": 2400, "L_p": 0.005004579680597777, "x_end_margin": 2.3}
+info 選択の段: [('最初の r_t', 2.8, 37.3, False), ('最終の組 (出力と同じ実効の入力で選び直す)', 2.8, 34.8, False)] redo 0 n_restart 0
+info 並列: {'cpu': 4, 'coarse': 4, 'prod': 4, 'per_eval_gb_coarse': 0.27, 'per_eval_gb_prod': 1.31, 'available_gb': 14.5498046875}
+info r_t: 0.09990849020517084 θ_max: 12.056557110766164 余裕: 4.087686567655658 最小 sin 角: 0.05700179679646827
+VERDICT: PASS

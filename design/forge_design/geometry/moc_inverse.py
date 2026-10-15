@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
@@ -26,6 +28,96 @@ from .moc_kernel import (AXIS_LIMIT_MODES, AXIS_R_EPS, CORR_MAX, CORR_TOL,
                          PAIR_GEOM, PAIR_MAXITER, PAIR_MISSING, PAIR_NONFINITE,
                          RESID_TOL, KernelMOC, _Pt, axis_theta_r, interior_vec,
                          pm_mach, pm_mach_vec, pm_nu, source_branches)
+
+
+# --- 単位過程の backend (plans/accepted/tooling-nozzle-mknot-fast.md §4.4・§4.5、受入は §6 V5) ---------------------------------
+# 充填 (`fill_levels`・`fill_arrays`) の 1 段の単位過程 (`InverseMOC._pairs`) は既定で numba の版 (`moc_fill_nb.pairs_nb`)。
+# 環境変数 `FORGE_MOC_KERNEL=numpy` で numpy の版 (`moc_kernel.interior_vec`、A/B と回帰の基準)。他の値は ValueError。
+# numba が無ければ ImportError (黙って numpy の版に落ちない)。段のループと集計 (`MocFillDiag.add`) は両方の backend で共通。
+# numba の版は numpy の版とビット同一ではない (ν→M の Newton を対ごとに前の M から回す; §4.5、ユーザ決定 2026-10-15)。
+MOC_KERNEL_ENV = "FORGE_MOC_KERNEL"
+MOC_KERNELS = ("numba", "numpy")
+# numba の版は単位過程を内側に持つので、試験・台本が差し替えた関数は効かない。差し替えを検出したら止める (黙って無視しない)。
+_UNIT_NAMES_MK = ("interior_vec", "_interior_pass", "_interior_residual", "_src_vec", "_sin_over_r_vec", "mu_vec",
+                  "pm_mach_vec", "pm_nu", "source_branches")
+_UNITS_MK = {k: getattr(_mk, k) for k in _UNIT_NAMES_MK}
+
+
+def moc_kernel_backend() -> str:
+    """単位過程の backend (`FORGE_MOC_KERNEL`、未設定は `numba`)。呼ぶたびに読む (試験で切り替えるため)。"""
+    v = os.environ.get(MOC_KERNEL_ENV)
+    if v is None:
+        return "numba"
+    if v not in MOC_KERNELS:
+        raise ValueError(f"{MOC_KERNEL_ENV} は {MOC_KERNELS} のどれか (受け取った値: {v!r})")
+    return v
+
+
+def moc_kernel_record() -> dict:
+    """記録用 (prepare_info.json の environment): backend と numba・llvmlite の版。numba の版は import せずに読む。"""
+    from importlib import metadata
+    rec = {"backend": moc_kernel_backend()}
+    for pkg in ("numba", "llvmlite"):
+        try:
+            rec[pkg] = metadata.version(pkg)
+        except metadata.PackageNotFoundError:
+            rec[pkg] = None
+    return rec
+
+
+def _load_nb():
+    try:
+        from . import moc_fill_nb
+    except ImportError as e:
+        raise ImportError(f"逆 MOC の網の充填の既定 ({MOC_KERNEL_ENV} 未設定 = numba) に numba が要る ({e})。"
+                          f"numpy の版を使うなら {MOC_KERNEL_ENV}=numpy") from e
+    return moc_fill_nb
+
+
+def _check_units_unpatched():
+    """単位過程の関数が差し替えられていたら止める (numba の版には効かないので、結果が黙って変わる)。"""
+    bad = [k for k in _UNIT_NAMES_MK if getattr(_mk, k) is not _UNITS_MK[k]]
+    if globals()["interior_vec"] is not _UNITS_MK["interior_vec"]:
+        bad.append("moc_inverse.interior_vec")
+    if bad:
+        raise RuntimeError(f"単位過程が差し替えられている ({', '.join(bad)})。numba の版には効かないので、"
+                           f"差し替えを使うなら {MOC_KERNEL_ENV}=numpy で回す")
+
+
+def _nb_gas(g):
+    """ν→M の経路 (numba の版): (種類, γ, 表 ν, 表 M)。float の γ・`GasCPG`・CPG の `Isentrope` は CPG の Newton、
+    `GasSemiPerfect` は表の線形補間。それ以外のガス (TP の `Isentrope` の Hermite の Newton など) は扱わない (ValueError)。"""
+    from . import moc_fill_nb as _nb
+    empty = np.zeros(1)
+    if isinstance(g, (bool, np.bool_)):
+        raise ValueError(f"γ に bool は使えない (受け取った値: {g!r})")
+    if isinstance(g, (int, float, np.integer, np.floating)):
+        return _nb.GAS_CPG, float(g), empty, empty
+    from ..gas.isentrope import Isentrope
+    from ..gas.semiperfect import GasCPG, GasSemiPerfect
+    if type(g) is GasCPG or (type(g) is Isentrope and g.cpg):
+        return _nb.GAS_CPG, float(g.gamma_ref), empty, empty
+    if type(g) is GasSemiPerfect:
+        tx = np.ascontiguousarray(g._nu, dtype=float)
+        ty = np.ascontiguousarray(g._M, dtype=float)
+        if tx.ndim != 1 or tx.shape != ty.shape or tx.size < 1:
+            raise ValueError(f"GasSemiPerfect の表の形が不正 (ν {tx.shape}, M {ty.shape})")
+        return _nb.GAS_TABLE, 0.0, tx, ty
+    raise ValueError(f"numba の版の網の充填はこのガスを扱わない ({type(g).__name__})。{MOC_KERNEL_ENV}=numpy で回す")
+
+
+def _flux_table(g):
+    """`cplus_flux_wall` の numba の版の質量流束の経路: float の γ は CPG の式、`GasSemiPerfect` は M・流束の表、他は None。"""
+    if isinstance(g, (bool, np.bool_)):
+        return None
+    if isinstance(g, (int, float, np.integer, np.floating)):
+        from .moc_fill_nb import GAS_CPG
+        return GAS_CPG, float(g), np.zeros(1), np.zeros(1)
+    from ..gas.semiperfect import GasSemiPerfect
+    if type(g) is GasSemiPerfect:
+        from .moc_fill_nb import GAS_TABLE
+        return GAS_TABLE, 0.0, np.ascontiguousarray(g._M, dtype=float), np.ascontiguousarray(g._flux, dtype=float)
+    return None
 
 
 def field_interpolator(pts):
@@ -78,23 +170,28 @@ class MocFillDiag:
         self.n_levels = 0
 
     def add(self, level: int, Ax, Ar, Bx, Br, xP, rP, st: dict, below):
+        # 段ごとに呼ぶので numpy の呼び出しの数を抑える (分類の数は bincount 1 回、該当の無い分類は飛ばす;
+        # 出力は以前の書き方と同じ、plan tooling-nozzle-mknot-fast §4.6)
         status = np.array(st["status"], dtype=np.int8)
-        status[(status == PAIR_CONVERGED) & below] = PAIR_BELOW_AXIS
-        status[(status == PAIR_DONE) & below] = PAIR_BELOW_AXIS
+        done = (status == PAIR_CONVERGED) | (status == PAIR_DONE)
+        mb = done & below
+        if mb.any():
+            status[mb] = PAIR_BELOW_AXIS
+            done &= ~mb
         n_it = st["n_iter"]
+        nc = np.bincount(status.astype(np.intp), minlength=7)
         c = self.counts
         c["input"] += int(status.size)
         for key, code in (("missing", PAIR_MISSING), ("geom_parallel", PAIR_GEOM),
                           ("geom_below_axis", PAIR_BELOW_AXIS), ("iter_nonfinite", PAIR_NONFINITE),
                           ("iter_maxiter", PAIR_MAXITER), ("converged", PAIR_CONVERGED),
                           ("done_fixed", PAIR_DONE)):
-            c[key] += int(np.sum(status == code))
+            c[key] += int(nc[code])
         self.n_levels = max(self.n_levels, int(level))
-        done = (status == PAIR_CONVERGED) | (status == PAIR_DONE)
-        if np.any(done):
-            v, cnt = np.unique(n_it[done], return_counts=True)
-            for a, b in zip(v.tolist(), cnt.tolist()):
-                self.iter_hist[int(a)] = self.iter_hist.get(int(a), 0) + int(b)
+        if nc[PAIR_CONVERGED] + nc[PAIR_DONE]:
+            h = np.bincount(np.asarray(n_it[done], dtype=np.intp))
+            for a in np.flatnonzero(h).tolist():
+                self.iter_hist[a] = self.iter_hist.get(a, 0) + int(h[a])
         for key, arr in (("geom_max", st["resid_geom"]), ("comp_max", st["resid_comp"])):
             fa = np.where(np.isfinite(arr), arr, -1.0)
             if fa.size and fa.max() > self.resid[key]:
@@ -102,29 +199,34 @@ class MocFillDiag:
                 self.resid[key] = float(fa[j])
                 self.resid["at_" + key.split("_")[0]] = [int(level), j, float(xP[j]), float(rP[j])]
         b = st["branch"]
-        valid = status != PAIR_MISSING
+        n_miss = int(nc[PAIR_MISSING])
+        valid = status != PAIR_MISSING if n_miss else None
         for key in ("axis_analytic", "axis_borrow", "axis_zero"):
-            self.branch[key] += int(np.sum(np.where(valid, b[key], 0)))
+            self.branch[key] += int(np.sum(b[key] if valid is None else np.where(valid, b[key], 0)))
         for key, (xp, rp, ro) in (("frac_A", (Ax, Ar, Br)), ("frac_B", (Bx, Br, Ar)),
-                                  ("frac_PA", (xP, np.maximum(rP, 0.0), Ar)),
-                                  ("frac_PB", (xP, np.maximum(rP, 0.0), Br))):
-            m = b[key] & valid
-            nm = int(np.sum(m))
+                                  ("frac_PA", (xP, None, Ar)), ("frac_PB", (xP, None, Br))):
+            m = b[key] if valid is None else (b[key] & valid)
+            nm = int(np.count_nonzero(m))
+            if not nm:
+                continue
             self.branch[key] += nm
-            if nm:
-                idx = np.flatnonzero(m)
-                self.frac_rng = [min(self.frac_rng[0], float(xp[idx].min())), max(self.frac_rng[1], float(xp[idx].max())),
-                                 min(self.frac_rng[2], float(rp[idx].min())), max(self.frac_rng[3], float(rp[idx].max()))]
-                for j in idx[: max(self.CAP - len(self.frac_pos), 0)]:
-                    self.frac_pos.append([int(level), int(j), key, float(xp[j]), float(rp[j]), float(ro[j])])
-        self.branch["P_on_axis"] += int(np.sum(b["P_on_axis"] & ((status == PAIR_CONVERGED) | (status == PAIR_DONE))))
+            idx = np.flatnonzero(m)
+            rpi = np.maximum(rP[idx], 0.0) if rp is None else rp[idx]
+            xpi = xp[idx]
+            self.frac_rng = [min(self.frac_rng[0], float(xpi.min())), max(self.frac_rng[1], float(xpi.max())),
+                             min(self.frac_rng[2], float(rpi.min())), max(self.frac_rng[3], float(rpi.max()))]
+            for q, j in enumerate(idx[: max(self.CAP - len(self.frac_pos), 0)]):
+                self.frac_pos.append([int(level), int(j), key, float(xpi[q]), float(rpi[q]), float(ro[j])])
+        self.branch["P_on_axis"] += int(np.count_nonzero(b["P_on_axis"] & done))
         for code, kind in ((PAIR_GEOM, "parallel"), (PAIR_BELOW_AXIS, "below_axis")):
-            for j in np.flatnonzero(status == code):
-                self.geom.append((int(level), int(j), kind, float(Ax[j]), float(Ar[j]), float(Bx[j]), float(Br[j])))
+            if nc[code]:
+                for j in np.flatnonzero(status == code):
+                    self.geom.append((int(level), int(j), kind, float(Ax[j]), float(Ar[j]), float(Bx[j]), float(Br[j])))
         for code, kind in ((PAIR_NONFINITE, "nonfinite"), (PAIR_MAXITER, "maxiter")):
-            for j in np.flatnonzero(status == code)[: max(self.CAP - len(self.fail), 0)]:
-                self.fail.append([int(level), int(j), kind, int(n_it[j]), float(Ax[j]), float(Ar[j]),
-                                  float(Bx[j]), float(Br[j])])
+            if nc[code]:
+                for j in np.flatnonzero(status == code)[: max(self.CAP - len(self.fail), 0)]:
+                    self.fail.append([int(level), int(j), kind, int(n_it[j]), float(Ax[j]), float(Ar[j]),
+                                      float(Bx[j]), float(Br[j])])
 
     def summary(self) -> dict:
         h = self.iter_hist
@@ -196,19 +298,50 @@ class InverseMOC(KernelMOC):
             raise ValueError(f"axis_thr の長さ {thr.shape} が初期前線 ({n}) と違う")
         return thr
 
-    def _pairs(self, x, r, th, nu, M, thr):
-        """隣接対 (B=front[:-1] が C⁻ 担体、A=front[1:] が C⁺ 担体) を単位過程に通す。戻り: 5 値 + 集計用 stats。"""
+    def _kernel(self):
+        """この充填の単位過程: numba の版なら (模組 `moc_fill_nb`, ν→M の経路)、numpy の版なら None (`moc_kernel_backend`)。"""
+        if moc_kernel_backend() != "numba":
+            return None
+        nb = _load_nb()
+        _check_units_unpatched()
+        return nb, _nb_gas(self.g)
+
+    def _pairs(self, x, r, th, nu, M, thr, kern=None):
+        """隣接対 (B=front[:-1] が C⁻ 担体、A=front[1:] が C⁺ 担体) を単位過程に通す。
+        戻り: 5 値 + 集計用 stats + 新点の M (numba の版は ok の対だけ、numpy の版は None = 呼び出し側が `pm_mach_vec`)。"""
+        if kern is not None:
+            return self._pairs_nb(x, r, th, nu, M, thr, kern)
         A = (x[1:], r[1:], th[1:], nu[1:], M[1:])
         B = (x[:-1], r[:-1], th[:-1], nu[:-1], M[:-1])
         if self.axis_limit == "legacy" and self.corrector == "fixed2":
             # 既定: 従来と同じ呼び出し (位置引数だけ — 単位過程を差し替える試験スクリプトとの互換)
             out = interior_vec(*A, *B, self.g, self.delta, self.n_corr)
-            return out + (_posthoc_stats(A, B, out, self.n_corr),)
+            return out + (_posthoc_stats(A, B, out, self.n_corr), None)
         st: dict = {}
         out = interior_vec(*A, *B, self.g, self.delta, self.n_corr, axis_limit=self.axis_limit,
                            thrA=None if thr is None else thr[1:], thrB=None if thr is None else thr[:-1],
                            corrector=self.corrector, tol=self.tol, max_corr=self.max_corr, stats=st)
-        return out + (st,)
+        return out + (st, None)
+
+    def _pairs_nb(self, x, r, th, nu, M, thr, kern):
+        """`_pairs` の numba の版 (`moc_fill_nb.pairs_nb`)。戻り値の形は numpy の版と同じ (+ 新点の M)。"""
+        nb, (gas_kind, gam, tx, ty) = kern
+        m = len(x) - 1
+        analytic = self.axis_limit == "analytic"
+        tA = np.full(m, np.nan) if thr is None else np.ascontiguousarray(thr[1:], dtype=float)
+        tB = np.full(m, np.nan) if thr is None else np.ascontiguousarray(thr[:-1], dtype=float)
+        mode = (nb.MODE_CONVERGE if self.corrector == "converge" else
+                nb.MODE_FIXED2 if analytic else nb.MODE_LEGACY_FIXED2)
+        f = [np.ascontiguousarray(a, dtype=float) for a in (x, r, th, nu, M)]
+        (n_lack, xP, rP, thP, nuP, ok, status, n_it, rg, rc, br, MP) = nb.pairs_nb(
+            *f, tA, tB, analytic, mode, int(self.n_corr), float(self.tol), int(self.max_corr), float(self.delta),
+            gas_kind, gam, tx, ty, float(_mk.AXIS_LIMIT_FRAC), float(AXIS_R_EPS))
+        if n_lack:
+            raise ValueError(f"axis_limit='analytic': 軸上の既知点 {int(n_lack)} 対に θ_r が無い "
+                             "(初期前線の軸端点には axis_thr を渡すこと)")
+        branch = {k: (br[i] if i < 3 else br[i].view(np.bool_)) for i, k in enumerate(nb.BRANCH_KEYS)}
+        st = {"status": status, "n_iter": n_it, "resid_geom": rg, "resid_comp": rc, "branch": branch}
+        return xP, rP, thP, nuP, ok, st, MP
 
     # -- 場充填 ---------------------------------------------------------------
     def fill(self, init_front, axis_thr=None) -> list:
@@ -250,6 +383,9 @@ class InverseMOC(KernelMOC):
 
         `axis_thr`: `axis_limit='analytic'` のときの初期前線の各点の θ_r (長さ = 初期前線、
         軸端点以外は NaN)。生成した点 (軸外) は θ_r を持たない。対の集計は `self.last_diag`。
+
+        1 段の単位過程は既定で numba の版 (2026-10-15、段の中も逐次の固定費が支配していたため)、
+        `FORGE_MOC_KERNEL=numpy` で numpy の版 (`_pairs`・`moc_kernel_backend`)。
         """
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
@@ -257,20 +393,21 @@ class InverseMOC(KernelMOC):
         nu = np.array([p.nu for p in init_front], dtype=float)
         M = np.array([p.M for p in init_front], dtype=float)
         thr = self._front_thr(len(x), axis_thr)
+        kern = self._kernel()
         diag = self._new_diag()
         out = [np.column_stack([x, r, th, nu, M])]
         k = 0
         while len(x) >= 2:
             k += 1
             # B=右(下流)側 C⁻ 担体 = front[:-1], A=左側 C⁺ 担体 = front[1:]
-            xP, rP, thP, nuP, ok, st = self._pairs(x, r, th, nu, M, thr)
+            xP, rP, thP, nuP, ok, st, MP = self._pairs(x, r, th, nu, M, thr, kern)
             below = ~(rP >= -1e-12)
             ok &= rP >= -1e-12
             diag.add(k, x[1:], r[1:], x[:-1], r[:-1], xP, rP, st, below & np.isfinite(rP))
             if not np.any(ok):
                 break
             x, r, th, nu = xP[ok], rP[ok], thP[ok], nuP[ok]
-            M = pm_mach_vec(nu, self.g)
+            M = pm_mach_vec(nu, self.g) if MP is None else MP[ok]
             thr = None if thr is None else np.full(len(x), np.nan)
             out.append(np.column_stack([x, r, th, nu, M]))
         self.last_diag = diag.summary()
@@ -291,6 +428,8 @@ class InverseMOC(KernelMOC):
         つまり三角充填の網と特性線網は同じもので、走査順が違うだけ。
 
         `axis_thr`: `fill_arrays` と同じ。対の集計 (欠損 = 死んだ対を含む) は `self.last_diag`。
+
+        1 段の単位過程は既定で numba の版、`FORGE_MOC_KERNEL=numpy` で numpy の版 (`_pairs`・`moc_kernel_backend`)。
         """
         x = np.array([p.x for p in init_front], dtype=float)
         r = np.array([p.r for p in init_front], dtype=float)
@@ -299,6 +438,7 @@ class InverseMOC(KernelMOC):
         M = np.array([p.M for p in init_front], dtype=float)
         n = len(x)
         thr = self._front_thr(n, axis_thr)
+        kern = self._kernel()
         diag = self._new_diag()
         out = np.full((n, n, 5), np.nan)
         out[0] = np.column_stack([x, r, th, nu, M])
@@ -308,13 +448,13 @@ class InverseMOC(KernelMOC):
             pair = live[:-1] & live[1:]
             if not np.any(pair):
                 break
-            xP, rP, thP, nuP, ok, st = self._pairs(x, r, th, nu, M, thr)
+            xP, rP, thP, nuP, ok, st, MPk = self._pairs(x, r, th, nu, M, thr, kern)
             diag.add(k, x[1:], r[1:], x[:-1], r[:-1], xP, rP, st, pair & np.isfinite(rP) & ~(rP >= -1e-12))
             ok &= pair & (rP >= -1e-12)
             thr = None if thr is None else np.full(len(x) - 1, np.nan)    # 生成した点は軸外 (θ_r なし)
             if not np.any(ok):
                 break
-            MP = pm_mach_vec(np.where(ok, nuP, 0.0), self.g)
+            MP = pm_mach_vec(np.where(ok, nuP, 0.0), self.g) if MPk is None else MPk
             x = np.where(ok, xP, np.nan)
             r = np.where(ok, rP, np.nan)
             th = np.where(ok, thP, np.nan)
@@ -470,7 +610,16 @@ def cplus_flux_wall(levels: np.ndarray, init_cum: np.ndarray, mdot_star: float,
 
     `init_cum[m]`: 起点 $L_0[m]$ までに**すでに軸から流れている**流束。初期値線上の
     点なら軸からその点までの累積、軸上の点なら 0。
-    戻り: (n,4) [x, r, theta, M] を x 昇順で。"""
+    戻り: (n,4) [x, r, theta, M] を x 昇順で。
+
+    float の γ と `GasSemiPerfect` では線ごとのループを numba の版 (`moc_fill_nb.cplus_flux_wall_nb`、同じ式・同じ累積の順序で
+    出力は完全一致; 2026-10-15 plan tooling-nozzle-mknot-fast §4.6 (3)) で回す。他のガスは下の numpy の書き方。"""
+    kind = _flux_table(gamma)
+    if kind is not None:
+        nb = _load_nb()
+        w = nb.cplus_flux_wall_nb(*(levels[..., c] for c in (0, 1, 2, 4)),
+                                  np.ascontiguousarray(init_cum, dtype=float), float(mdot_star), *kind)
+        return w[np.argsort(w[:, 0])] if len(w) else np.asarray([], dtype=float)
     n = levels.shape[1]
     out = []
     for m in range(n - 1, -1, -1):

@@ -96,14 +96,15 @@ MKNOT_REDO_MAX = 2                   # 選び直した M_K が固定点に使っ
 MKNOT_WORKERS_MAX = 4
 MKNOT_MEM_FRACTION = 0.7
 MKNOT_WORKERS_ENV = "FORGE_MKNOT_WORKERS"
-# evaluate_mknot の 1 評価のピーク [GB] (新しいプロセスで 1 評価したときの最大 RSS; 捕捉を最後の 2 つに限った後、case/70
-# problem_m5_air_ns2_euler.yaml の M_K 数点の最大を切り上げた値、MKNOT_EVAL_PEAK_SOURCE)。測った N の間は両対数で補間、上は (N/N_max)^MKNOT_EVAL_PEAK_EXP で外挿 (指数は
-# 捕捉を限る前の 2400 → 4800 の実測 1.28 → 3.86 GB から)、下は最小の N の値のまま。case/71 (M5.5・燃焼ガス) は未測定 (AWS で測り直す)
-MKNOT_EVAL_PEAK_GB = {600: 0.15, 2400: 1.04}
+# evaluate_mknot の 1 評価のピーク [GB] (新しいプロセスで 1 評価したときの最大 RSS; 捕捉を最後の 2 つに限った後、逆 MOC の単位過程は
+# numba の版 (numba・LLVM の読み込みで 約 0.11 GB 増える)、case/70 c2b と case/71 の最大を切り上げた値、MKNOT_EVAL_PEAK_SOURCE)。
+# 測った N の間は両対数で補間、上は (N/N_max)^MKNOT_EVAL_PEAK_EXP で外挿 (指数は捕捉を限る前の 2400 → 4800 の実測 1.28 → 3.86 GB から)、
+# 下は最小の N の値のまま
+MKNOT_EVAL_PEAK_GB = {600: 0.27, 2400: 1.31}
 MKNOT_EVAL_PEAK_EXP = 1.6
-MKNOT_EVAL_PEAK_SOURCE = ("2026-10-15 手元 (WSL)、case/70 problem_m5_air_ns2_euler.yaml、捕捉 2: N 600・L_total_tol 0.1 r_t で M_K 1.5/2.05/3.5/4.5 の"
-                          "最大 0.149 GB、N 2400・カードの L_total_tol で M_K 2.05/3.0 の最大 1.035 GB (捕捉を限る前は 2.05 で 1.256 GB)。"
-                          "case/71 は未測定")
+MKNOT_EVAL_PEAK_SOURCE = ("2026-10-15 AWS B (g5.xlarge)、feature/mknot-fast f7e185c4 (numba の版)、新しいプロセスで 1 評価: case/70 c2b "
+                          "(problem_c2b_auto_final.yaml、M_K 2.05) N 600 (L_total_tol 0.1 r_t) 0.263 GB・N 2400 1.302 GB、case/71 (r_t 0.1 m、"
+                          "M_K 2.80) N 600 0.260 GB・N 2400 1.057 GB。引き継ぎ時点 9468e0d0 (numpy の版) は同じ順に 0.157・1.084・0.150・0.842 GB")
 
 # カードのキー
 _TOP_REQUIRED = ("format", "name", "gas", "conditions", "M_exit", "throat", "inlet", "divergent_length_m", "wall")

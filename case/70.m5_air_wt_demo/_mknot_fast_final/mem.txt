@@ -1,0 +1,8 @@
+base a 600 maxrss_kB 151296 wall 2.61
+base a 2400 maxrss_kB 1081096 wall 22.70
+base b 600 maxrss_kB 147788 wall 2.33
+base b 2400 maxrss_kB 838888 wall 9.36
+final a 600 maxrss_kB 254696 wall 2.19
+final a 2400 maxrss_kB 1296228 wall 10.53
+final b 600 maxrss_kB 252776 wall 1.90
+final b 2400 maxrss_kB 1050008 wall 4.94

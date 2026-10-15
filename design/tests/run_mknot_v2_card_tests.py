@@ -231,14 +231,14 @@ print("== 並列の数 (§4.2: mknot_workers)")
 os.environ.pop("FORGE_MKNOT_WORKERS", None)
 with patched(W, _mem_available_gb=lambda: 10.0, _cpu_count=lambda: 12):
     w = W.mknot_workers(600, 2400)
-check("使えるメモリ 10 GB・CPU 12: 粗い網 min(12, 4, ⌊7/0.15⌋ = 46) = 4、生産の網 min(12, 4, ⌊7/1.04⌋ = 6) = 4",
-      w["coarse"] == 4 and w["prod"] == 4 and w["by_mem_coarse"] == 46 and w["by_mem_prod"] == 6, str(w))
+check("使えるメモリ 10 GB・CPU 12: 粗い網 min(12, 4, ⌊7/0.27⌋ = 25) = 4、生産の網 min(12, 4, ⌊7/1.31⌋ = 5) = 4",
+      w["coarse"] == 4 and w["prod"] == 4 and w["by_mem_coarse"] == 25 and w["by_mem_prod"] == 5, str(w))
 with patched(W, _mem_available_gb=lambda: 10.0, _cpu_count=lambda: 2):
     w = W.mknot_workers(600, 2400)
 check("CPU 2 なら 2・2", w["coarse"] == 2 and w["prod"] == 2, str({k: w[k] for k in ("coarse", "prod")}))
-with patched(W, _mem_available_gb=lambda: 3.0, _cpu_count=lambda: 12):
+with patched(W, _mem_available_gb=lambda: 4.0, _cpu_count=lambda: 12):
     w = W.mknot_workers(600, 2400)
-check("使えるメモリ 3 GB: 生産の網は ⌊2.1/1.04⌋ = 2、粗い網は 4", w["coarse"] == 4 and w["prod"] == 2, str({k: w[k] for k in ("coarse", "prod")}))
+check("使えるメモリ 4 GB: 生産の網は ⌊2.8/1.31⌋ = 2、粗い網は 4", w["coarse"] == 4 and w["prod"] == 2, str({k: w[k] for k in ("coarse", "prod")}))
 os.environ["FORGE_MKNOT_WORKERS"] = "1"
 with patched(W, _mem_available_gb=lambda: 10.0, _cpu_count=lambda: 12):
     w = W.mknot_workers(600, 2400)
@@ -259,13 +259,13 @@ check("MemAvailable が取れなければ 1・1 (上限 4 でも)", w["coarse"] 
 with patched(W, _mem_available_gb=lambda: 1.0, _cpu_count=lambda: 12):
     try:
         W.mknot_workers(600, 2400)
-        check("使えるメモリ 1 GB: 生産の網の算出 ⌊0.7/1.04⌋ = 0 → 評価の前に RuntimeError", False)
+        check("使えるメモリ 1 GB: 生産の網の算出 ⌊0.7/1.31⌋ = 0 → 評価の前に RuntimeError", False)
     except RuntimeError as e:
-        check("使えるメモリ 1 GB: 生産の網の算出 ⌊0.7/1.04⌋ = 0 → 評価の前に RuntimeError", "算出が 0" in str(e) and "生産の網" in str(e),
+        check("使えるメモリ 1 GB: 生産の網の算出 ⌊0.7/1.31⌋ = 0 → 評価の前に RuntimeError", "算出が 0" in str(e) and "生産の網" in str(e),
               str(e)[:160])
 pk = [W.mknot_eval_peak_gb(n) for n in (300, 600, 1200, 2400, 4800)]
-check("1 評価のピークの見積もり: 600 以下は 0.15、2400 は 1.04、間は単調、4800 は 1.04 × 2^1.6",
-      pk[0] == pk[1] == 0.15 and pk[3] == 1.04 and pk[1] < pk[2] < pk[3] and abs(pk[4] - 1.04 * 2 ** 1.6) < 1e-12,
+check("1 評価のピークの見積もり: 600 以下は 0.27、2400 は 1.31、間は単調、4800 は 1.31 × 2^1.6",
+      pk[0] == pk[1] == 0.27 and pk[3] == 1.31 and pk[1] < pk[2] < pk[3] and abs(pk[4] - 1.31 * 2 ** 1.6) < 1e-12,
       str([round(x, 4) for x in pk]))
 
 CARD_PHYS = card("m5_v2_phys")
