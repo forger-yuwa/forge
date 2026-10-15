@@ -72,6 +72,7 @@ file( GLOB forge_cppfiles
     gradient.cpp 
     mesh/mesh.cpp 
     output/output.cpp 
+    output/monitorOutputs.cpp 
     update.cpp 
     variables.cpp 
     boundaryCond.cpp 

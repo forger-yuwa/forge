@@ -312,13 +312,16 @@ static void writeSolutionH5_XDMF(const solverConfig& cfg , const mesh& msh , var
     ofs << "</Xdmf>\n";
 }
 
-void outputH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep)
+void outputH5_XDMF(const solverConfig& cfg , const mesh& msh , variables& var , const int& iStep , bool force)
 {
     // **最終 step は間隔に関係なく必ず保存する** (codex 2026-09-20 plan レビュー Major 4)。
     // 剰余判定だけだと `nStepOuter` が `outStepInterval` の倍数でない run は最終場を残さず、
     // 「完走した」のに比較できる場が無い (run_0324 は 40 step 走って res_0 しか書いていなかった)。
+    // 全場の間隔は time.fieldOutStepInterval (省略時 = outStepInterval で従来と同じ)。force は協調停止の step
+    // (STOP_REQUEST を見た step。間隔に関係なく書く; plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′)。
     const bool isLast = (cfg.nStepOuter > 0) && (iStep >= cfg.nStepOuter);
-    if (!isLast && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
+    const int fieldInterval = (cfg.fieldOutStepInterval > 0) ? cfg.fieldOutStepInterval : cfg.outStepInterval;
+    if (!force && !isLast && (iStep%fieldInterval != 0 or iStep < cfg.outStepStart)) return;
 
     writeSolutionH5_XDMF(cfg , msh , var , iStep , "res_");
 }
@@ -330,13 +333,14 @@ void dumpSolutionH5_force(const solverConfig& cfg , const mesh& msh , variables&
     writeSolutionH5_XDMF(cfg , msh , var , iStep , prefix);
 }
 
-void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var , const int& iStep)
+void outputBconds_H5_XDMF(const solverConfig& cfg , mesh& msh , variables& var , const int& iStep , bool force)
 {
     // **最終 step は必ず出す** (CHT の収支ゲートが壁ダンプと固体チェックポイントを突き合わせるため。
     // 出力間隔だけで制御していたので、非倍数で終わる run では壁だけ 960 step 古い組合せができ、
     // それを G-cons が PASS にしていた。codex result 4 巡目 M1)。
+    // 間隔は outStepInterval のまま (fieldOutStepInterval は全場だけ)。force は協調停止の step。
     const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter);
-    if (!lastStep && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
+    if (!force && !lastStep && (iStep%cfg.outStepInterval != 0 or iStep < cfg.outStepStart)) return;
 
 
     for (auto& bc : msh.bconds) {

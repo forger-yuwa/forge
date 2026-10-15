@@ -32,6 +32,10 @@ public:
     int nStepOuter;
     int outStepInterval;
     int outStepStart;
+    // 全場 res_<step>.h5 だけの出力間隔 (time.fieldOutStepInterval, 省略時 = outStepInterval で従来と同じ)。
+    // 境界の h5・point probe・節点の出力・境界の質量流束は outStepInterval のまま。最後の step と協調停止の step は
+    // 間隔に関係なく書く (plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′(a))。
+    int fieldOutStepInterval = 0;
     // 出力する場の量の絞り込み (config `output:` ブロック, 2026-09-08)。
     //   level 0: リスタート最小 (保存量 ro/roU/roe/roK/roOmega/roY*/凝縮モーメント) のみ
     //   level 1 (既定): 0 + 原始量 P/T/U/k/omega/sonic/Y*, vis_lam/vis_turb, wall_dist, h0 (全エンタルピー; sstEnergyIncludesK なら +k)
@@ -43,6 +47,13 @@ public:
     // iface_T1 / iface_d1 / iface_keff / iface_q_compact / iface_q_recon / iface_ok / iface_align を追加する。
     // 定義と符号は conjugateWall.hpp と methods/boundary.md「共役熱伝達 (CHT)」が正本。
     int interfaceDiag = 0;
+    // 選んだ節点の状態の出力 (output.nodeProbeFile, 既定 "" = 出さない)。節点の番号の表 (1 行 1 つ、# 以降と空行は無視) を
+    // 渡すと outStepInterval ごと (と最後の step・協調停止の step) に res_nodes_<step>.h5 を書く。node の離散化のみ
+    // (plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′(c)、仕様は procedures/solver-settings.md「output」)。
+    std::string nodeProbeFile;
+    // 境界ごとの質量流束の積算 (output.boundaryMassflux: 1, 既定 0 = 出さない)。boundary_massflux.csv に outStepInterval ごと
+    // (と最後の step・協調停止の step) に 1 行を足す (同 §4.4 1′(d))。
+    int boundaryMassflux = 0;
     // ソルバ内 CHT (Phase 2a, `conjugate:` ブロック + bcond `ints: {conjugate: 1}`)。
     // 初版は node 限定・定常陰解法限定・薄肉の点ごと 1 次元抵抗 (local1d) のみ。
     // 仕様は methods/boundary.md「共役熱伝達 (CHT)」、符号は conjugateWall.hpp。

@@ -524,6 +524,13 @@ mdot や推力など revolved 量を物理的に正しく出すには $2\pi$ を
 `post_tool/` の関連スクリプトに「軸対称ケースでは結果に $2\pi$ を乗じる」
 旨をコメントとして残す。
 
+ソルバの出力で $2\pi$ を掛けているのは境界ごとの質量流束 `output.boundaryMassflux: 1` (`boundary_massflux.csv`、
+2026-10-15) だけで、`raw_*` に 1 ラジアンあたりの和 $\sum_f \dot m_f$ ($\dot m_f = \rho_b \mathbf U_b\cdot\mathbf W_f$、
+$\mathbf W_f$ は r 重みの面ベクトル、外向き正)、`mdot_*` に $2\pi\sum_f \dot m_f$ [kg/s] を書く。`axisymMethod 1` は面が
+r で重みづけされないので起動時に拒否する。case/71 の Euler の場 (466,570 節点) で、$2\pi\sum$ は全場の折れ線の積分
+$2\pi\int(\rho u\,dr-\rho v\,dx)\,r$ と入口・出口とも相対 $3\times10^{-7}$ 以内で一致した (診断値;
+[procedures/solver-settings.md](../../procedures/solver-settings.md)「output」)。
+
 ## ソース対応表
 
 | 機能 | ファイル | 変更内容 |

@@ -491,6 +491,11 @@ void solverConfig::read(std::string fname)
 
         this->outStepInterval = getValidatedValue<int>(config["time"], "outStepInterval", "time");
         this->outStepStart = getValidatedValue<int>(config["time"], "outStepStart", "time");
+        // 全場 res_<step>.h5 だけの出力間隔 (省略時 = outStepInterval で従来と同じ; plan tooling-nozzle-card-local-mesh §4.4 1′(a))。
+        // 境界の h5・point probe・節点の出力・境界の質量流束は outStepInterval のまま。検査は書いたときだけ (省略時は従来の挙動のまま)。
+        this->fieldOutStepInterval = getOptionalValidatedValue<int>(config["time"], "fieldOutStepInterval", this->outStepInterval, "time");
+        if (config["time"]["fieldOutStepInterval"].IsDefined() && this->fieldOutStepInterval < 1)
+            throw std::runtime_error("Key 'fieldOutStepInterval' in 'time' must be >= 1.");
         this->timeIntegration = getValidatedValue<int>(config["time"], "timeIntegration", "time");
         if (config["time"]["nInnerLoop"].IsDefined()) {
             throw std::runtime_error(
@@ -543,6 +548,11 @@ void solverConfig::read(std::string fname)
             if (this->interfaceDiag != 0 && this->interfaceDiag != 1) throw std::runtime_error("Key 'interfaceDiag' in 'output' must be 0 or 1.");
             this->interfaceDiagAlignMin = getOptionalValidatedValue<double>(out, "interfaceDiagAlignMin", 0.5, "output");
             if (!(this->interfaceDiagAlignMin > 0.0 && this->interfaceDiagAlignMin <= 1.0)) throw std::runtime_error("Key 'interfaceDiagAlignMin' in 'output' must be in (0, 1].");
+            // 本段の監視用の出力 (plan tooling-nozzle-card-local-mesh §4.4 1′(c)(d))。表の中身・離散化の検査は
+            // 格子を読んだ後に output/monitorOutputs.cpp の init が行う。
+            this->nodeProbeFile = getOptionalValidatedValue<std::string>(out, "nodeProbeFile", std::string(""), "output");
+            this->boundaryMassflux = getOptionalValidatedValue<int>(out, "boundaryMassflux", 0, "output");
+            if (this->boundaryMassflux != 0 && this->boundaryMassflux != 1) throw std::runtime_error("Key 'boundaryMassflux' in 'output' must be 0 or 1.");
         }
         std::cout << "'output': level=" << this->outputLevel << " extraFields=" << this->outputExtraFields.size()
                   << " interfaceDiag=" << this->interfaceDiag << "\n";

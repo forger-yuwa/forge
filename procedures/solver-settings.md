@@ -471,6 +471,83 @@ output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
   Python からは `total_state(run_dir, res_path)`。
 - 原則: **後処理で導出できる量はソルバから出さない**。勾配・リミッタ・診断は必要な run だけ level 2 で取る。
 
+### 本段の監視用の出力と協調停止 (2026-10-15)
+
+長い本段を「全場を出し続けず、境界・選んだ節点・流量で監視し、止める step の全場だけを確実に残す」ための出力。
+どれも**出力だけ**で数値 (流束・勾配・リミッタ・境界条件・陰解法・ソース) には触らない。キーを書かなければ従来と同じ出力
+(協調停止と随時の書き出しは常に有効だが、要求のファイルが無ければ毎 step `stat` を 2 回するだけ)。設計は
+[plans/active/tooling-nozzle-card-local-mesh.md](../plans/active/tooling-nozzle-card-local-mesh.md) §4.4 1′・§5.1 #4a と
+[plans/active/tooling-settle-convergence-and-monitor.md](../plans/active/tooling-settle-convergence-and-monitor.md) §4.1 の 6 (随時の書き出し)。
+
+```yaml
+time:
+  outStepInterval: 2000          # 境界の h5・point probe・節点の出力・流量の行
+  fieldOutStepInterval: 20000    # 全場 res_<step>.h5 だけ (省略時 = outStepInterval)
+output: {nodeProbeFile: nodes.txt, boundaryMassflux: 1}
+```
+
+| キー | 既定 | 効き方 |
+| --- | --- | --- |
+| `time.fieldOutStepInterval` | `outStepInterval` | 全場 `res_<step>.h5` の間隔。`outStepStart` は共通。**最後の step・協調停止の step・随時の書き出しの step は間隔に関係なく書く**。1 以上。 |
+| `output.nodeProbeFile` | (なし) | 節点の番号の表 (1 行 1 つ、`#` 以降と空行は無視)。`outStepInterval` ごと・最後の step・協調停止と随時の書き出しの step に `res_nodes_<step>.h5` を書く。**node の離散化のみ**。 |
+| `output.boundaryMassflux` | 0 | 1 で `boundary_massflux.csv` に、節点の出力と同じ step に境界ごとの質量流束の和を 1 行。node・`gpu: 1`・(軸対称なら) `axisymMethod: 0` のみ。 |
+
+**`res_nodes_<step>.h5`**: `MESH/COORD` (その節点の座標、全場と同じ並び x,y,z の 1 次元)、`MESH/NODE_ID` (表の順の節点の番号)、
+`VALUE/ro Ux Uy Uz P T sonic` (全場と同じ変数・同じ型の、その step の節点の値)、属性 `step`・`nodeProbeFile`。
+**同じ step の全場の同じ節点とビット一致する** (case/71 の Euler で 486 節点 × 10 時点を確認)。表の誤り (数でない行・
+1 行に 2 つ・範囲外・重複・節点 0 個・ファイルが無い) は起動時に止まる (終了コード 1、`[output] 起動時の検査で停止: ...`)。
+節点の番号は node の CV 番号 = 格子の節点の番号 (要求カードのノズルの構造格子なら `i·nj + j`)。
+
+**`boundary_massflux.csv`**: 先頭の `#` 行に定義、続いて見出し `step,mdot_<名前>_<physID>,raw_<名前>_<physID>,...`
+(周期境界は除く)。`raw` はその境界の面 (node: 境界の半割の双対面) の `massflux` = $|S_f|\rho_b(\mathbf U_b\cdot\mathbf n_f)$ の
+面の順の double の和で、**ソルバが境界の流束に使った値そのもの** (`convectiveFlux_boundary_d`、$\rho_b,\mathbf U_b$ は境界の状態 bvar)。
+その step の最後の流束評価の値 (定常の陰解法では、その step の更新に使った step の頭の状態の流束)。**符号は外向きが正
+(流出が正、流入が負)**。軸対称 (`axisymMethod 0`) の面ベクトルは r で重みづけした 1 ラジアンあたりなので `raw` は [kg/s/rad]、
+`mdot = 2π·raw` が実寸 [kg/s]。非軸対称は `mdot = raw` (2 次元の格子なら奥行き 1 m あたり)。`step` は全場・境界の h5 と同じ番号
+(`residual_history.csv` の `step` 列は step−1)。確認 (case/71 の Euler、466,570 節点): 面ごとの `massflux` の書き出し
+(`FORGE_DUMP_MASSFLUX`) を格子ファイルの境界の面の一覧から別に足した値と、入口・出口・壁・軸とも**ビット一致**。
+全場の折れ線の積分 (`stop_rule.mass_flows`) との差は相対 $\le 3\times10^{-7}$ (診断値)。軸の境界は 0、slip 壁は ~1e−6 kg/s。
+
+**協調停止** (`STOP_REQUEST` → `STOPPED_AT`):
+
+1. 見張りは run dir (forge の作業ディレクトリ) に `STOP_REQUEST` を置く。中身は停止の理由 (空でもよい、先頭 4 KiB を記録)。
+   途中まで書いたファイルを読まれないよう、**一時ファイルに書いてから `mv`** する。
+2. forge は毎 step 末尾の出力の前に `stat` で確かめ、見つけた step で全場・境界の h5・節点の出力・流量の行を**間隔に関係なく**書き、
+   log に `[coopStop] step N: STOP_REQUEST を検出 ...` を 1 行出し、その step で main ループを抜けて通常の終了処理に進む。
+   残差履歴の最後の行は `step` 列 N−1 (全場 `res_N.h5` と同じ step を記録した行; 完走のときと同じ規約)。
+3. 終了処理の最後に、残差履歴を flush し、停止の step の書き込みで例外が出ていないこと・残差履歴と流量の CSV の最後の行の
+   step・書くべきファイル (全場と `outputHDFflg: 1` の境界の h5/xmf、節点の h5、CSV) がディスクにあって空でないことを確かめ、
+   **すべて通ったときだけ** `STOPPED_AT` (JSON: `status`・`step`・`residual_step`・`request`・`nStepOuter`・`files` [{`path`, `bytes`}])
+   を一時ファイル経由で置く。終了コード 0。
+4. **確認・通知に失敗したら `STOPPED_AT` を置かず終了コード 3** (理由は `[coopStop] ERROR:` の行)。見張りは `STOPPED_AT` と
+   終了コード 0 がそろったときだけ、その step の場で判定・抽出する。
+
+- forge は `STOP_REQUEST` を消さない。**起動時に `STOP_REQUEST`・`STOPPED_AT`・`SNAPSHOT_REQUEST` のどれかが既にあると止まる**
+  (終了コード 1、前の run の残りで 1 step 目に止まる・見張りが完了と取り違えるのを防ぐ)。同じ run dir で起動し直すなら消してから。
+- 最後の step の出力の後に置かれた `STOP_REQUEST` は見ない (通常の完走、`STOPPED_AT` なし)。
+- ソルバ内 CHT の固体の状態 (`writeConjugateState`) は協調停止・随時の書き出しの step では書かない (従来の間隔・最後の step のまま; 未対応)。
+- `tools/check_field_regress.py` の境界ダンプの拾い方 (`res_*_<step>.h5`) は `res_nodes_<step>.h5` も拾う
+  (節点の出力を有効にした run どうしの比較では両側にあるので害は無いが、名前 `nodes` の境界として並ぶ)。
+
+**随時の書き出し** (`SNAPSHOT_REQUEST` → `SNAPSHOT_DONE` / `SNAPSHOT_FAILED`、2026-10-16): `fieldOutStepInterval` を大きくした本段でも、
+見たいときにその step の全場を取る。**計算は止めない**。
+
+1. 見張り (または人) は run dir に `SNAPSHOT_REQUEST` を置く (中身は理由、空でもよい; 一時ファイルに書いてから `mv`)。
+2. forge は協調停止と同じ毎 step の `stat` で見つけ、その step の全場・境界の h5 (`outputHDFflg: 1`)・節点の出力・流量の行を
+   間隔に関係なく書く。出力の格子の step と重なっても各出力は 1 回だけ (流量の CSV の行も 1 行)。
+3. 書いたもの (全場と境界の h5/xmf、節点の h5、流量の CSV の最後の行の step) をディスク上で確かめ、成功なら `SNAPSHOT_DONE` に
+   JSON を 1 行書き足す: `{"step", "pid", "request", "files": [{"path", "bytes"}]}` (log に `[snapshot] step N: ...` を 1 行)。
+4. 書き込みに失敗しても計算は止めず、`SNAPSHOT_FAILED` に `{"step", "pid", "request", "errors": [...]}` を 1 行残す。
+5. **記録の行を書いた後に `SNAPSHOT_REQUEST` を消す** (失敗でも消す: 同じ失敗を毎 step 繰り返さない)。見張りは「要求が消えた」を
+   見たら `SNAPSHOT_DONE` / `SNAPSHOT_FAILED` の最後の行 (自分の `pid`・`step`) を読めばよい。要求を消せなかった run では以後の要求を見ない
+   (`SNAPSHOT_FAILED` にその旨)。
+6. `SNAPSHOT_DONE` / `SNAPSHOT_FAILED` は書き足しなので、同じ run dir で起動し直すと前の run の行が残る (行の `pid` で区別する)。
+   残差履歴は随時の書き出しでは flush しない (`monitorInterval` ごと)。
+- 確認 (case/71 の Euler、466,570 節点): 格子でない step 163・401 の要求で全場・境界・節点・流量が書かれ計算は 600 step まで続く
+  (終了コード 0、節点の値は全場とビット一致)。格子 (`outStepInterval: 1`) と重なった step でも流量の行は各 step 1 行。
+  全場を書けない (同名のディレクトリ) 要求は `SNAPSHOT_FAILED` 1 行・要求は消え、計算は続いて次の要求は成功。要求の後の場と要求なしの run の差は、
+  要求なしの run どうしの再実行の差と同じ大きさ (node の残差の atomicAdd で再実行はビット一致しないので、ビットの比較はできない)。
+
 ## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)
 
 ```yaml

@@ -28,6 +28,7 @@
 
 #include "mesh/gmshReader.hpp"
 #include "output/output.hpp"
+#include "output/monitorOutputs.hpp"   // 協調停止・節点の状態・境界の質量流束 (plan tooling-nozzle-card-local-mesh §4.4 1′)
 #include "conjugateWall.hpp"
 #include "boundaryCond.hpp"
 
@@ -414,6 +415,9 @@ public:
             flushDevice();
         }
     }
+
+    // ストリームが書き込みの失敗の状態でないか (協調停止の締めで、残差の行が書けたことを確かめる)。
+    bool streamGood() const { return static_cast<bool>(stream_); }
 
     // console モニタ行用の要約: 最新 outer_end 行の rms と、step 0 outer_begin の rms (基準)。
     // flush 済みの値 (= CSV に書いた値そのもの) を返すので追加 reduction は無い。
@@ -1835,8 +1839,25 @@ void writeStepOutputs(
     point_probes& pprobes,
     int iStep)
 {
-    outputH5_XDMF(cfg , msh, var, iStep);
-    outputBconds_H5_XDMF(cfg , msh, var, iStep);
+    // 協調停止 (plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′(b)): 作業ディレクトリの STOP_REQUEST を stat 1 回で確かめる。
+    // あればこの step の全場・境界・節点・流量を間隔に関係なく書き、main ループがこの step で抜ける (STOPPED_AT は main の最後)。
+    // 停止の step の書き込みの失敗は記録して終了処理に回し、STOPPED_AT を置かず終了コード 3 で終える (それ以外の step は従来どおり例外で落ちる)。
+    // 随時の書き出し (SNAPSHOT_REQUEST, 同 plan tooling-settle-convergence-and-monitor §4.1 の 6): 同じ出力を止めずに書く。
+    // 出力の格子の step と重なっても各出力は 1 回だけ (force は間隔の判定を飛ばすだけ)。失敗は SNAPSHOT_FAILED に残して計算は続ける。
+    const bool stopNow = monitorOutputs::pollStopRequest(iStep);
+    const bool snapNow = monitorOutputs::pollSnapshotRequest(iStep);
+    const bool force = stopNow || snapNow;
+    try {
+        outputH5_XDMF(cfg , msh, var, iStep, force);
+        outputBconds_H5_XDMF(cfg , msh, var, iStep, force);
+        monitorOutputs::writeNodeProbes(cfg , msh , var , iStep , force);        // output.nodeProbeFile (既定 off)
+        monitorOutputs::writeBoundaryMassflux(cfg , msh , var , iStep , force);  // output.boundaryMassflux (既定 off)
+    } catch (const std::exception& e) {
+        if (!force) throw;
+        if (stopNow) monitorOutputs::noteStopWriteError(e.what());
+        if (snapNow) monitorOutputs::noteSnapshotWriteError(e.what());
+    }
+    if (snapNow) monitorOutputs::finishSnapshot(msh);
     pprobes.outputProbes(cfg , cuda_cfg , msh , var , iStep);
     // ソルバ内 CHT の壁温を残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
     conjugateWall::writeConjugateState(cfg , msh , iStep);
@@ -3498,6 +3519,14 @@ int main(int argc, char** argv) {
     if (const char* e = getenv("FORGE_DIAG_GEOM_STAGE2_DUMP"); e != nullptr && *e != '\0') {
         return geomStage2Dump::run(e, cfg, cuda_cfg, msh, var);
     }
+    // 本段の監視用の出力の起動時の検査と準備 (plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′)。
+    // 残っている STOP_REQUEST/STOPPED_AT・節点の表の誤り (範囲外・重複など) は、残差履歴を作り直す前にここで止める。
+    try {
+        monitorOutputs::init(cfg, msh);
+    } catch (const std::exception& e) {
+        std::cerr << "[output] 起動時の検査で停止: " << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
     ResidualCsvLogger residual_logger("residual_history.csv", cfg, msh, var);
 
     // 診断 D1 (FORGE_DIAG_TP_FACES=<出力 h5>; 既定 off): 組立を 1 回だけ通した状態の面作用素 A/B を書いて終了する (時間更新・res_0 出力なし)。
@@ -3542,6 +3571,9 @@ int main(int argc, char** argv) {
     // reconcile が採用する節点を量ごとに <接頭辞>_<step>.h5 に書く (plan architecture-float-state-double-geometry §5.1 #18・§6.34)。
     qaccAdoptDiag::init(cfg, msh, var);
     cout << "Start Calculation \n";
+    // 実際に回した step 数。協調停止 (STOP_REQUEST) ならその step で打ち切る。既定は mainLoopCount() のまま
+    // (plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′(b))。
+    int nDone = cfg.mainLoopCount();
     for (int iStep = 0 ; iStep < cfg.mainLoopCount() ; iStep++) {
         advanceOneStep(cfg , cuda_cfg , msh , mat_ns , var , fluct , pprobes , profiler , residual_logger , implicit_diag_logger , iStep);
         monitor.report(iStep);
@@ -3549,17 +3581,20 @@ int main(int argc, char** argv) {
         if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
         // 凝縮の理由別の補正量 (plan condensation-two-phase-transport §4.3; 凝縮なしは no-op)
         if (iStep % cfg.monitorInterval == 0) condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
+        // 協調停止: この step (iStep+1) の全場・境界・節点・流量は writeStepOutputs が書き終えている。残差の行
+        // (step 列 = iStep) も記録済みなので、ここで抜けて通常の終了処理に進む。
+        if (monitorOutputs::stopRequested()) { nDone = iStep + 1; break; }
     }
     // 終了時に受動種の収支を必ず出す (最終 step が monitorInterval に乗らないと末尾の補正が記録されない; plan-8 M1)
-    if (cfg.mainLoopCount() > 0 && ((cfg.mainLoopCount() - 1) % cfg.monitorInterval) != 0) {
-        passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
-        condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, cfg.mainLoopCount() - 1);
+    if (nDone > 0 && ((nDone - 1) % cfg.monitorInterval) != 0) {
+        passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, nDone - 1);
+        condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, nDone - 1);
     }
 
     twoPhaseDiagWrite(cfg, cuda_cfg, msh, var);   // 二相更新の診断 CSV (condTwoPhaseDiag; 無効なら no-op)
-    renormGateLog(cfg, cfg.mainLoopCount(), true);   // 再正規化の受入ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#1b-pre)
-    twoPhaseCorrGateLog(cfg, cfg.mainLoopCount(), true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
-    twoPhaseAudit(cfg.mainLoopCount(), true);   // 最終の格納状態 (出力は書き終えている)
+    renormGateLog(cfg, nDone, true);   // 再正規化の受入ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#1b-pre)
+    twoPhaseCorrGateLog(cfg, nDone, true);   // 二相の補正ゲート: 末尾 ceil(0.1N) 更新の max と VERDICT (#4h)
+    twoPhaseAudit(nDone, true);   // 最終の格納状態 (出力は書き終えている)
     limiterDiag_finalize(cfg);   // 有界性診断の末尾取りこぼしを回収して累計を確定 (plan §4.35)
     commitLossDiag::finalize();  // commit_loss.csv を閉じる (無効なら何もしない)
     stageDumpDiag::finalize();   // 対象の step に達しなかったらその旨を出す (無効なら何もしない)
@@ -3567,9 +3602,17 @@ int main(int argc, char** argv) {
     quantizeStateDiag::finalize();   // 点検しなかった対象の step があればその旨を出す (無効なら何もしない)
 
     // 壁時計 (旧実装は clock() = CPU 時間で、GPU 待ちを含まなかった)。書式 "Time = %.3f s" は grep 互換のため維持。
-    printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), cfg.mainLoopCount(),
-           monitor.elapsedSeconds() * 1.0e3 / std::max(1, cfg.mainLoopCount())); 
+    printf("Time = %.3f s (wall, %d steps, %.2f ms/step)\n", monitor.elapsedSeconds(), nDone,
+           monitor.elapsedSeconds() * 1.0e3 / std::max(1, nDone)); 
     profiler.printSummary();
+
+    // 協調停止の完了の通知: 残差履歴を flush し、停止の step の出力を確かめてから STOPPED_AT を置く (見張りはこれを見て、
+    // その step の場で判定する)。確認・通知に失敗したら STOPPED_AT を置かず終了コード 3 (0 に進まない)。
+    if (monitorOutputs::stopRequested()) {
+        residual_logger.flush();
+        const int stopRc = monitorOutputs::finishStop(cfg, msh, residual_logger.streamGood());
+        if (stopRc != 0) return stopRc;
+    }
 
 	return 0;
 }

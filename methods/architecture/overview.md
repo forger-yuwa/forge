@@ -236,7 +236,8 @@
 
 ### 8.1 メイン出力
 
-`output/output.cpp` の `outputH5_XDMF()` が、セル中心量を HDF5 と XDMF で書き出す。
+`output/output.cpp` の `outputH5_XDMF()` が、セル中心量を HDF5 と XDMF で書き出す。間隔は `time.fieldOutStepInterval`
+(省略時 = `outStepInterval`) で、最後の step・協調停止の step・随時の書き出しの step (§8.6) は間隔に関係なく書く。
 
 - HDF5 側にはメッシュ座標 `MESH/COORD`、接続 `MESH/CONNE`、各変数 `VALUE/...` を書き込む
 - XDMF 側には ParaView などから読めるトポロジ、座標、属性の定義を書く
@@ -312,6 +313,29 @@ step     200 | t 5.0000e-05 dt 2.50e-07 maxCFL 0.07 | 4.06 ms/step elapsed 0.6 s
 
 同期コストは monitor ステップでの CSV flush (D2H 1 回) と、unsteady の `max cfl` 読み (従来どおり) だけ。
 `monitorInterval: 1` (既定) なら毎ステップ 1 行。
+
+### 8.6 本段の監視用の出力と協調停止 (2026-10-15)
+
+`main.cpp` の `writeStepOutputs()` (各 step の末尾で 1 回) が、§8.1〜8.3 の出力に加えて `output/monitorOutputs.cpp` を呼ぶ。
+どれも出力だけで数値には触らず、キーが無ければ何も書かない。設定の意味と書式は
+[`procedures/solver-settings.md`](../../procedures/solver-settings.md)「output」、設計は
+[plans/active/tooling-nozzle-card-local-mesh.md](../../plans/active/tooling-nozzle-card-local-mesh.md) §4.4 1′。
+
+- **全場の間隔** `time.fieldOutStepInterval` (省略時 = `outStepInterval`) は `outputH5_XDMF()` だけに効く。境界の h5・
+  プローブ・節点の出力・質量流束は `outStepInterval` のまま。
+- **協調停止**: `monitorOutputs::pollStopRequest()` が作業ディレクトリの `STOP_REQUEST` を毎 step `stat` 1 回で確かめ、
+  見つけた step では全場・境界・節点・流量を間隔に関係なく書く。main ループはその step で抜け、通常の終了処理
+  (残差 CSV の flush) の後に `monitorOutputs::finishStop()` が書いたものをディスク上で確かめてから `STOPPED_AT` を置く。
+  確認・通知に失敗したら `STOPPED_AT` を置かず終了コード 3。
+- **随時の書き出し**: 同じ毎 step の `stat` で `SNAPSHOT_REQUEST` を見つけたら、同じ出力を止めずに書き
+  (`monitorOutputs::pollSnapshotRequest()` → `finishSnapshot()`)、確かめて `SNAPSHOT_DONE` (失敗は `SNAPSHOT_FAILED`) に 1 行足してから
+  要求を消す。失敗しても計算は続ける ([plans/active/tooling-settle-convergence-and-monitor.md](../../plans/active/tooling-settle-convergence-and-monitor.md) §4.1 の 6)。
+- **節点の状態** `output.nodeProbeFile`: 選んだ節点 (node の CV 番号 = primal の節点番号) の `ro Ux Uy Uz P T sonic` を
+  device から一時バッファへ直接写して `res_nodes_<step>.h5` に書く (`var.c` は書き換えない)。全場の同じ節点とビット一致する。
+- **境界の質量流束** `output.boundaryMassflux`: `var.p_d["massflux"]` (node の境界の半割の双対面は
+  `convectiveFlux_boundary_d` が `|S_f|ρ_b(U_b·n_f)` を書く、外向き正) を境界の `iPlanes` の順に double で足し、
+  軸対称 (`axisymMethod 0`、面ベクトルは r 重みの 1 ラジアンあたり) は 2π を掛けた実寸も `boundary_massflux.csv` に出す
+  (2π を出力の側で掛ける規約は [axisymmetric/theory.md](../axisymmetric/theory.md)「2π の取扱い」)。
 
 ## 9. CUDA 側実装の見取り図
 
