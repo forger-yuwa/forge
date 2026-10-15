@@ -45,6 +45,15 @@ L_ref (`limiterRefLength`) で無次元化する。**省略 (0) は起動のた�
 - 固定するには値をそのまま `space` に書く (`limiterRoRef: 0.592988528618707` のように Python の `repr` で書けば forge は同じ double を読む;
   case/71 の Euler で自動 → 固定の 2 起動の記録が `%.17g` の文字列まで一致)。設計チェーンは `evaluate.main_line.limiter_ref: {from_run: <run>}` で
   別 run の記録を継承する (`runner_axismach.limiter_ref_from_run`; plan tooling-settle-convergence-and-monitor §4.6)。
+- **系列の自動の継承** (2026-10-16、同 plan §5.1 #6b): 設計チェーンの NS (`prepare_ns`) で B0 の本段 (`evaluate.main_line` が mapping) の
+  `limiter_ref` を省くと、初期場の元 (`ic_from`; `deltastar_loop` の前の pass・`--ic-from`・`--prev` もここを通る) が NS の run なら、その run の
+  本段の起動の `limiter_ref.json` (cfg_fnv が本段の設定と一致・computed) の 4 つを固定値で継承する。記録が無い・別の起動のものなら本段の設定の明示
+  ρ・P・a を継承し、`limiterRefLength` は明示があれば写し、無ければ新しい run でも forge が格子から決める (既存の固定値の run は L が自動)。
+  初期場の元が Euler・無いときは自動。元の run が NS なのに値が分からない (記録も ρ・P・a の明示も無い)・記録が壊れている・`computed: false`・
+  本段の前の段 (S1・S2) で終わった run (`MAIN_STAGE_STARTED` が無く `stage_manifest.json` の最後の段が `main` でない) のときは準備で止まる —
+  `limiter_ref: auto` (継承しない自動) か値の明示で通す。段の記録の無い旧い run は `solverConfig.yaml` を本段とみなし、出所に「本段の確認なし」と
+  書く。明示・`from_run` は継承より優先、point の本段には効かない。
+  出所は `prepare_info.json` の `main_line.limiter_ref_source` と `MAIN_STAGE_STARTED` の `limiter_ref.source` (`runner_axismach.limiter_ref_inherit_from_ic`)。
 
 ## 推奨組み合わせ
 
@@ -541,11 +550,12 @@ plan tooling-settle-convergence-and-monitor §4.5)。前の段 (S1・S2) の設�
 
 1. 見張りは run dir (forge の作業ディレクトリ) に `STOP_REQUEST` を置く。中身は停止の理由 (空でもよい、先頭 4 KiB を記録)。
    途中まで書いたファイルを読まれないよう、**一時ファイルに書いてから `mv`** する。
-2. forge は毎 step 末尾の出力の前に `stat` で確かめ、見つけた step で全場・境界の h5・節点の出力・流量の行を**間隔に関係なく**書き、
-   log に `[coopStop] step N: STOP_REQUEST を検出 ...` を 1 行出し、その step で main ループを抜けて通常の終了処理に進む。
+2. forge は毎 step 末尾の出力の前に `stat` で確かめ、見つけた step で全場・境界の h5・節点の出力・流量の行 (ソルバ内 CHT の run は
+   固体の状態も、下記) を**間隔に関係なく**書き、log に `[coopStop] step N: STOP_REQUEST を検出 ...` を 1 行出し、その step で
+   main ループを抜けて通常の終了処理に進む。
    残差履歴の最後の行は `step` 列 N−1 (全場 `res_N.h5` と同じ step を記録した行; 完走のときと同じ規約)。
 3. 終了処理の最後に、残差履歴を flush し、停止の step の書き込みで例外が出ていないこと・残差履歴と流量の CSV の最後の行の
-   step・書くべきファイル (全場と `outputHDFflg: 1` の境界の h5/xmf、節点の h5、CSV) がディスクにあって空でないことを確かめ、
+   step・書くべきファイル (全場と `outputHDFflg: 1` の境界の h5/xmf、節点の h5、CSV、CHT の固体の状態) がディスクにあって空でないことを確かめ、
    **すべて通ったときだけ** `STOPPED_AT` (JSON: `status`・`step`・`residual_step`・`request`・`nStepOuter`・`files` [{`path`, `bytes`}])
    を一時ファイル経由で置く。終了コード 0。
 4. **確認・通知に失敗したら `STOPPED_AT` を置かず終了コード 3** (理由は `[coopStop] ERROR:` の行)。見張りは `STOPPED_AT` と
@@ -554,28 +564,54 @@ plan tooling-settle-convergence-and-monitor §4.5)。前の段 (S1・S2) の設�
 - forge は `STOP_REQUEST` を消さない。**起動時に `STOP_REQUEST`・`STOPPED_AT`・`SNAPSHOT_REQUEST` のどれかが既にあると止まる**
   (終了コード 1、前の run の残りで 1 step 目に止まる・見張りが完了と取り違えるのを防ぐ)。同じ run dir で起動し直すなら消してから。
 - 最後の step の出力の後に置かれた `STOP_REQUEST` は見ない (通常の完走、`STOPPED_AT` なし)。
-- ソルバ内 CHT の固体の状態 (`writeConjugateState`) は協調停止・随時の書き出しの step では書かない (従来の間隔・最後の step のまま; 未対応)。
-- `tools/check_field_regress.py` の境界ダンプの拾い方 (`res_*_<step>.h5`) は `res_nodes_<step>.h5` も拾う
-  (節点の出力を有効にした run どうしの比較では両側にあるので害は無いが、名前 `nodes` の境界として並ぶ)。
+- **ソルバ内 CHT の固体の状態** (`conjugateWall::writeConjugateState`、2026-10-16): 協調停止・随時の書き出しの step でも、通常の出力の
+  step と同じもの (壁温 `conjugate_Tw_<physID>.csv`、mode fem2d は固体場 `res_solid_<physID>_<step>.h5/.xmf` と再開用の状態
+  `conjugate_state_<physID>.h5` (属性 `step` = 累積 step)) を書き、`STOPPED_AT` / `SNAPSHOT_DONE` の `files` に載せて存在と大きさを確かめる。
+  その step の書き込みの失敗は停止なら終了コード 3 (`STOPPED_AT` なし)、随時の書き出しなら `SNAPSHOT_FAILED` (通常の出力の step では
+  従来どおり警告だけ)。確認 (case/65 C1 n16 の写し、warmup 100・interval 50): 格子でない step 1267 の停止で壁の h5 の `step`・`step_abs`、
+  `conjugate_state_5.h5` の `step` がどれも 1267、`res_solid_5_1267.h5` の `T` = 再開用の状態の `SOLID/T` (ビット同一)、壁の h5 の `Ts` と
+  壁温 CSV の差 ≤ 5e−9 K (CSV の 10 桁)。step 724 の随時の書き出しも同じ (書き出しの直後に写した再開用の状態の `step` 724)。
+- `tools/check_field_regress.py --boundary` は `res_<名前>_<physID>_<step>.h5` (physID が整数) だけを境界の出力として拾う
+  (`res_nodes_<step>.h5`・detectNaN の `res_nan_<step>.h5` は拾わない; 2026-10-16 まではどちらも境界 `nodes`・`nan` として比べていた)。
 
 **随時の書き出し** (`SNAPSHOT_REQUEST` → `SNAPSHOT_DONE` / `SNAPSHOT_FAILED`、2026-10-16): `fieldOutStepInterval` を大きくした本段でも、
 見たいときにその step の全場を取る。**計算は止めない**。
 
 1. 見張り (または人) は run dir に `SNAPSHOT_REQUEST` を置く (中身は理由、空でもよい; 一時ファイルに書いてから `mv`)。
-2. forge は協調停止と同じ毎 step の `stat` で見つけ、その step の全場・境界の h5 (`outputHDFflg: 1`)・節点の出力・流量の行を
-   間隔に関係なく書く。出力の格子の step と重なっても各出力は 1 回だけ (流量の CSV の行も 1 行)。
-3. 書いたもの (全場と境界の h5/xmf、節点の h5、流量の CSV の最後の行の step) をディスク上で確かめ、成功なら `SNAPSHOT_DONE` に
+2. forge は協調停止と同じ毎 step の `stat` で見つけ、その step の全場・境界の h5 (`outputHDFflg: 1`)・節点の出力・流量の行
+   (ソルバ内 CHT の run は固体の状態も) を間隔に関係なく書く。出力の格子の step と重なっても各出力は 1 回だけ (流量の CSV の行も 1 行)。
+3. 書いたもの (全場と境界の h5/xmf、節点の h5、流量の CSV の最後の行の step、CHT の固体の状態) をディスク上で確かめ、成功なら `SNAPSHOT_DONE` に
    JSON を 1 行書き足す: `{"step", "pid", "request", "files": [{"path", "bytes"}]}` (log に `[snapshot] step N: ...` を 1 行)。
 4. 書き込みに失敗しても計算は止めず、`SNAPSHOT_FAILED` に `{"step", "pid", "request", "errors": [...]}` を 1 行残す。
 5. **記録の行を書いた後に `SNAPSHOT_REQUEST` を消す** (失敗でも消す: 同じ失敗を毎 step 繰り返さない)。見張りは「要求が消えた」を
    見たら `SNAPSHOT_DONE` / `SNAPSHOT_FAILED` の最後の行 (自分の `pid`・`step`) を読めばよい。要求を消せなかった run では以後の要求を見ない
    (`SNAPSHOT_FAILED` にその旨)。
 6. `SNAPSHOT_DONE` / `SNAPSHOT_FAILED` は書き足しなので、同じ run dir で起動し直すと前の run の行が残る (行の `pid` で区別する)。
-   残差履歴は随時の書き出しでは flush しない (`monitorInterval` ごと)。
+7. その step の残差の行 (`step` 列 N−1) を**記録の行の直後に flush する** (2026-10-16; 以前は `monitorInterval` ごとだけ)。
+   `SNAPSHOT_DONE` の時点ではまだ書かれていないことがあるので、見張りは残差の行 N−1 が現れるのを待ってから読む
+   (`monitorInterval` 1000 の CHT の run で、記録の直後に残差の最後の行が `723,-1,outer_end` (N = 724) になることを確認)。
 - 確認 (case/71 の Euler、466,570 節点): 格子でない step 163・401 の要求で全場・境界・節点・流量が書かれ計算は 600 step まで続く
   (終了コード 0、節点の値は全場とビット一致)。格子 (`outStepInterval: 1`) と重なった step でも流量の行は各 step 1 行。
   全場を書けない (同名のディレクトリ) 要求は `SNAPSHOT_FAILED` 1 行・要求は消え、計算は続いて次の要求は成功。要求の後の場と要求なしの run の差は、
   要求なしの run どうしの再実行の差と同じ大きさ (node の残差の atomicAdd で再実行はビット一致しないので、ビットの比較はできない)。
+
+**出力の処理が数値の状態を変えないことの確認** (診断、既定 off; plan tooling-settle-convergence-and-monitor §5.1 #1c・§6 V1 (f′)(g′)):
+`FORGE_DIAG_OUTPUT_INVARIANCE=<K>` を付けて起動すると、step K (通常の出力の step でも最後の step でもないこと; 違えば終了コード 2) の
+出力の処理の直前の状態 S0 を退避し、S0 に戻しては出力の処理だけを 4 つの腕 (A 要求なし・B `SNAPSHOT_REQUEST` で節点の出力と流量の積算を
+止める・C `SNAPSHOT_REQUEST` でキーのまま・A2 要求なし) で実行して、device の全配列 (`var.c_d`・`var.p_d`・境界の `bvar_d`/`bint_d`・
+FP64 影アキュムレータ・ライン陰解法の配列) と host の写し (`var.c`・`var.p`・境界の `bvar`/`bint`/`diagVar`・CHT の固体の状態) を S0 と
+ビットで比べ、`output_invariance_<K>.txt` (配列の一覧と大きさ・腕ごとの差) を書いて終了する (0 = 腕の間で全配列が同一、4 = 差あり)。
+`FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE=restore` は S0 に戻して計算を続け、`=poison` はさらに「腕の間で違った host の配列」を NaN で
+埋めて続ける (数値更新がその写しを読むかの検査; 結果は `check_field_regress.py` で要求なしの反復と比べる)。
+- 結果 (2026-10-16、float のビルド): case/71 の Euler (466,570 節点、K 163)・B0 の NS (442,520 節点、ライン陰解法・SST・`interfaceDiag: 1`、
+  K 163)・case/65 の CHT fem2d (K 263) のどれも **device は 4 つの腕の間で全配列がビット同一** (307・329・311 配列)。host は全場・境界の
+  出力が D2H で写す配列 (43・58・57 個; 写した値は S0 の device と同一) と界面の診断 `diagVar` だけが B・C で変わる (A = A2、B = C)。
+  `poison` (それらを NaN で埋めて 137〜1,237 step 続ける) は NaN が出ず、要求なしの反復との差はノイズ床の 2 倍以内
+  (Euler は基準 3 本 対 1 本で最大 1.90 倍、NS は 10 本 対 10 本で最大 1.25 倍、CHT は 10 対 10 で丸めでゼロの slip 壁の `roUy` を
+  除いて PASS)。
+- host の写しを数値の経路が読む箇所 (コードの点検): 遠方境界 `farfield` の流束が自由流を host の `bc.bvar` の先頭から毎回読む
+  (`convectiveFlux_d.cu` の `farfieldFlux_d_wrapper`)。device の farfield の `bvar_d` を書くカーネルが無いので出力の D2H は同じ値を
+  写すだけだが、その前提が崩れると出力が数値を変える。CHT は使う前に D2H し直す (`updateConjugateWalls`)。
 
 ## mesh.wallDistExtraPhysIDs — 壁距離に含める非 wall 境界 (変換時)
 

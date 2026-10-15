@@ -17,6 +17,8 @@
 #include <map>
 #include <tuple>
 #include <cstring>
+#include <cstdint>
+#include <set>
 
 #include "flowFormat.hpp"
 #include "mesh/mesh.hpp"
@@ -1892,6 +1894,11 @@ cudaConfig initializeSimulation(
     return cuda_cfg;
 }
 
+// 診断 FORGE_DIAG_OUTPUT_INVARIANCE (既定 off; plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1c)。定義は pdeSnapshot の後。
+static bool outputInvarianceDiagAt(int iStep);
+static void runOutputInvarianceDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                    point_probes& pprobes, int iStep);
+
 void writeStepOutputs(
     solverConfig& cfg,
     cudaConfig& cuda_cfg,
@@ -1900,8 +1907,11 @@ void writeStepOutputs(
     point_probes& pprobes,
     int iStep)
 {
+    // 診断 (既定 off): 対象の step なら、この関数の出力の処理を腕ごとに同じ状態から実行して状態を比べる (数値更新はしない)
+    if (outputInvarianceDiagAt(iStep)) { runOutputInvarianceDiag(cfg , cuda_cfg , msh , var , pprobes , iStep); return; }
     // 協調停止 (plans/active/tooling-nozzle-card-local-mesh.md §4.4 1′(b)): 作業ディレクトリの STOP_REQUEST を stat 1 回で確かめる。
-    // あればこの step の全場・境界・節点・流量を間隔に関係なく書き、main ループがこの step で抜ける (STOPPED_AT は main の最後)。
+    // あればこの step の全場・境界・節点・流量 (と CHT の固体の状態) を間隔に関係なく書き、main ループがこの step で抜ける
+    // (STOPPED_AT は main の最後)。
     // 停止の step の書き込みの失敗は記録して終了処理に回し、STOPPED_AT を置かず終了コード 3 で終える (それ以外の step は従来どおり例外で落ちる)。
     // 随時の書き出し (SNAPSHOT_REQUEST, 同 plan tooling-settle-convergence-and-monitor §4.1 の 6): 同じ出力を止めずに書く。
     // 出力の格子の step と重なっても各出力は 1 回だけ (force は間隔の判定を飛ばすだけ)。失敗は SNAPSHOT_FAILED に残して計算は続ける。
@@ -1918,10 +1928,19 @@ void writeStepOutputs(
         if (stopNow) monitorOutputs::noteStopWriteError(e.what());
         if (snapNow) monitorOutputs::noteSnapshotWriteError(e.what());
     }
-    if (snapNow) monitorOutputs::finishSnapshot(msh);
     pprobes.outputProbes(cfg , cuda_cfg , msh , var , iStep);
-    // ソルバ内 CHT の壁温を残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
-    conjugateWall::writeConjugateState(cfg , msh , iStep);
+    // ソルバ内 CHT の壁温・固体の状態を残す (再開時は wall_profile_<physID>.csv にコピーして使う)。協調停止・随時の書き出しの
+    // step も書き (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1b)、そのとき書いたファイルは停止・随時の書き出しの
+    // 締めが全場などと一緒に確かめる。上の出力が失敗しても固体の状態は書く (別の try)。
+    try {
+        const std::vector<std::string> chtFiles = conjugateWall::writeConjugateState(cfg , msh , iStep , force);
+        if (force) monitorOutputs::noteStepFiles(iStep , chtFiles);
+    } catch (const std::exception& e) {
+        if (!force) throw;
+        if (stopNow) monitorOutputs::noteStopWriteError(e.what());
+        if (snapNow) monitorOutputs::noteSnapshotWriteError(e.what());
+    }
+    if (snapNow) monitorOutputs::finishSnapshot(msh);
 }
 
 void writeInitialOutputs(
@@ -2299,26 +2318,33 @@ static void pdeInit(StepContext& s)
            g_pde.n0, g_pde.n0 + 1, g_pde.n1, (double)g_pde.xmax, nS);
 }
 
-// 退避: 名前 → (device ポインタ, 要素数, host 複製)
-struct PdeSnap { std::vector<std::tuple<flow_float*, size_t, std::vector<flow_float>>> arr; };
+// 退避: 名前 → (device ポインタ, 要素数, host 複製)。names は arr と同じ順の名前 (c:<名前> CV・p:<名前> 面・b<physID>:<名前> 境界;
+// 診断の報告用)。
+struct PdeSnap { std::vector<std::tuple<flow_float*, size_t, std::vector<flow_float>>> arr; std::vector<std::string> names; };
 static size_t pdeSize(const std::map<std::string, std::vector<flow_float>>& host, const std::string& k, size_t fallback)
 {
     auto it = host.find(k); return (it != host.end() && !it->second.empty()) ? it->second.size() : fallback;
 }
-static PdeSnap pdeSnapshot(StepContext& s)
+// 面の配列・境界の配列は、host の写しが空でも確保の大きさ (面 msh.nPlanes: variables::allocVariables、境界 bc.iPlanes:
+// bcond::bcondInitVariables) で退避する (以前は host の大きさが分からない面の配列を退避しなかった;
+// plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1c)。tag が空でなければ最初の 1 回だけ件数を出す。
+static PdeSnap pdeSnapshot(mesh& msh, variables& var, const char* tag)
 {
     PdeSnap sn;
-    auto add = [&](flow_float* p, size_t n) { if (!p || n == 0) return; std::vector<flow_float> h(n);
-        gpuErrchk( cudaMemcpy(h.data(), p, n*sizeof(flow_float), cudaMemcpyDeviceToHost) ); sn.arr.emplace_back(p, n, std::move(h)); };
-    for (auto& kv : s.var.c_d) add(kv.second, pdeSize(s.var.c, kv.first, s.msh.nCells_all));
-    for (auto& kv : s.var.p_d) add(kv.second, pdeSize(s.var.p, kv.first, 0));   // host 側の大きさが分からない面配列は退避しない (件数をログ)
-    for (auto& bc : s.msh.bconds) for (auto& kv : bc.bvar_d) add(kv.second, pdeSize(bc.bvar, kv.first, 0));
+    auto add = [&](const std::string& nm, flow_float* p, size_t n) { if (!p || n == 0) return; std::vector<flow_float> h(n);
+        gpuErrchk( cudaMemcpy(h.data(), p, n*sizeof(flow_float), cudaMemcpyDeviceToHost) ); sn.arr.emplace_back(p, n, std::move(h));
+        sn.names.push_back(nm); };
+    for (auto& kv : var.c_d) add("c:" + kv.first, kv.second, pdeSize(var.c, kv.first, msh.nCells_all));
+    for (auto& kv : var.p_d) add("p:" + kv.first, kv.second, pdeSize(var.p, kv.first, (size_t)msh.nPlanes));
+    for (auto& bc : msh.bconds) for (auto& kv : bc.bvar_d)
+        add("b" + std::to_string(bc.physID) + ":" + kv.first, kv.second, pdeSize(bc.bvar, kv.first, bc.iPlanes.size()));
     static bool logged = false;
-    if (!logged) { logged = true; size_t nb = 0; for (auto& a : sn.arr) nb += std::get<1>(a);
-        size_t nTot = s.var.c_d.size() + s.var.p_d.size(); for (auto& bc : s.msh.bconds) nTot += bc.bvar_d.size();
-        printf("[psi-dualeval] snapshot: %zu of %zu device arrays (%.1f MB)\n", sn.arr.size(), nTot, nb*sizeof(flow_float)/1048576.0); }
+    if (tag && *tag && !logged) { logged = true; size_t nb = 0; for (auto& a : sn.arr) nb += std::get<1>(a);
+        size_t nTot = var.c_d.size() + var.p_d.size(); for (auto& bc : msh.bconds) nTot += bc.bvar_d.size();
+        printf("[%s] snapshot: %zu of %zu device arrays (%.1f MB)\n", tag, sn.arr.size(), nTot, nb*sizeof(flow_float)/1048576.0); }
     return sn;
 }
+static PdeSnap pdeSnapshot(StepContext& s) { return pdeSnapshot(s.msh, s.var, "psi-dualeval"); }
 static void pdeRestore(const PdeSnap& sn)
 {
     for (auto& a : sn.arr) gpuErrchk( cudaMemcpy(std::get<0>(a), std::get<2>(a).data(), std::get<1>(a)*sizeof(flow_float), cudaMemcpyHostToDevice) );
@@ -2396,6 +2422,433 @@ static void pdeAfterNormal(StepContext& s)
         limiterPsiSave(s.cfg, s.msh, s.var, g_pde.xmax); g_pde.saved = true;
         printf("[psi-dualeval] psi saved at iStep %d\n", s.iStep);
     }
+}
+
+// ---- tooling-settle-convergence-and-monitor §5.1 #1c (診断専用・既定 off) ------------------------------------------------
+// FORGE_DIAG_OUTPUT_INVARIANCE=<K>: 出力の処理が「次の数値更新が読む状態」を変えないことを、数値更新 0 step の A/B で直接確かめる
+// (plan §6 V1 (f′)・(g′)、codex diagnose settle-v1-and-line-height)。writeStepOutputs に step K (= iStep+1。通常の出力の step でも
+// 最後の step でもないこと) が渡ったところで device を同期して状態 S0 を退避し、S0 に戻しては writeStepOutputs の出力の処理だけを
+// 次の腕で実行して、腕ごとに比べる配列をすべて S0 とビットで比べる。数値更新はどの腕でも 0 step:
+//   A  = 要求なし
+//   B  = SNAPSHOT_REQUEST あり、節点の出力・流量の積算 (output.nodeProbeFile・boundaryMassflux) は一時的に止める
+//   C  = SNAPSHOT_REQUEST あり、節点の出力・流量の積算は起動時の設定のまま (どちらかのキーを書いた config で起動したときだけ)
+//   A2 = 要求なし (B・C の後も S0 に戻せていることの確認)
+// 比べる配列 (確保されているものすべて):
+//   device: var.c_d [nCells_all]・var.p_d [nPlanes]・各境界の bvar_d・bint_d [iPlanes] (pdeSnapshot)、FP64 影アキュムレータ
+//           qacc_d [nCells]、ライン陰解法の配列 (line_*)、point probe の配列
+//   host  : var.c・var.p (全場の出力が D2H で更新する写し)、各境界の bvar・bint (境界の出力が更新する写し)・diagVar (界面の診断)、
+//           point probe の写し、ソルバ内 CHT の固体の状態 (比べるだけ; 出力の経路は書かない)
+// 比べないもの: 数値のモジュールが持つファイル内の static な device の作業配列 (出力の関数からは届かない)、cfg (出力の関数は
+// const で受ける。point probe だけ非 const だが probe の step 以外は何もしない)、残差の記録 (writeStepOutputs に渡らない)。
+// 結果は output_invariance_<K>.txt (配列の一覧と大きさ、腕ごとの S0 からの差の要素数・最大絶対差、腕どうしの差) と標準出力。
+// 既定は報告の後に終了する: 終了コード 0 = 比べた全配列が腕の間で同一、4 = 差あり、2 = 使い方の誤り (K が出力の step など)。
+// FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE=restore: 終了せずに S0 へ戻して計算を続ける (毒入れの対照; 診断の同期・退避だけの影響を見る)。
+// FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE=poison : S0 へ戻した後、「腕の間で違った host の配列」を quiet NaN (整数は最小値) で埋めて
+// 計算を続ける (数値更新がその host の写しを読むなら NaN が device に入る; detectNaN と場の比較で見る)。
+// どちらも step K の出力は腕が書いたものだけ。
+namespace oid {
+
+struct State { bool init = false, on = false, running = false, done = false; int cont = 0; int K = -1; };   // cont: 0 終了・1 restore・2 poison
+static State& state() { static State s; return s; }
+
+// 比べる配列 1 つ。kind: 'D' = device (snapIdx >= 0 なら PdeSnap の flow_float 配列、それ以外は raw0 に退避した別の型)、
+// 'H' = host の vector、'M' = host の map (境界の diagVar; 出力が量を足しうるので map ごと比べて戻す)、
+// 'S' = 比べるだけ (CHT の固体の状態; 戻さない)。
+struct Entry {
+    std::string name; char kind = 'D'; char type = 'f'; size_t esz = sizeof(flow_float);
+    int snapIdx = -1; void* dptr = nullptr; size_t n = 0; std::vector<char> raw0;
+    std::vector<flow_float>* vf = nullptr; std::vector<geom_int>* vi = nullptr; std::vector<char> h0;
+    std::map<std::string, std::vector<flow_float>>* dv = nullptr; std::map<std::string, std::vector<flow_float>> dv0;
+    long twin = -1;   // host の写しのとき、対応する device の Entry (無ければ -1)
+};
+struct Stat { size_t nDiff = 0; double maxAbs = 0.0; bool sizeChanged = false; };
+struct Arm {
+    std::string label, desc; bool ran = false; long restoreMismatch = 0; std::string note;
+    std::vector<Stat> st;                          // Entry と同じ順 (S0 との比較)
+    std::map<size_t, std::vector<char>> changed;   // S0 と違った配列の中身 (腕どうしの比較用)
+    std::map<size_t, int> twinEq;                  // 変わった host の写しが、S0 の device の値と同一か (1/0)
+};
+
+static void serializeMap(const std::map<std::string, std::vector<flow_float>>& m, std::vector<char>& out)
+{
+    out.clear();
+    for (const auto& kv : m) {
+        out.insert(out.end(), kv.first.begin(), kv.first.end()); out.push_back('\0');
+        const uint64_t n = kv.second.size(); const char* pn = reinterpret_cast<const char*>(&n);
+        out.insert(out.end(), pn, pn + sizeof(n));
+        const char* pd = reinterpret_cast<const char*>(kv.second.data());
+        if (n) out.insert(out.end(), pd, pd + n * sizeof(flow_float));
+    }
+}
+static void current(const Entry& e, const PdeSnap& sn, std::vector<char>& buf)
+{
+    if (e.kind == 'D') {
+        void* p = (e.snapIdx >= 0) ? static_cast<void*>(std::get<0>(sn.arr[(size_t)e.snapIdx])) : e.dptr;
+        buf.resize(e.n * e.esz);
+        gpuErrchk( cudaMemcpy(buf.data(), p, buf.size(), cudaMemcpyDeviceToHost) );
+    } else if (e.kind == 'H') {
+        const char* p = e.vf ? reinterpret_cast<const char*>(e.vf->data()) : reinterpret_cast<const char*>(e.vi->data());
+        const size_t bytes = (e.vf ? e.vf->size() : e.vi->size()) * e.esz;
+        buf.assign(p, p + bytes);
+    } else if (e.kind == 'M') {
+        serializeMap(*e.dv, buf);
+    } else {
+        conjugateWall::diagStateBytes(buf);
+    }
+}
+static const char* s0Bytes(const Entry& e, const PdeSnap& sn, size_t& bytes)
+{
+    if (e.kind == 'D' && e.snapIdx >= 0) {
+        const auto& v = std::get<2>(sn.arr[(size_t)e.snapIdx]); bytes = v.size() * sizeof(flow_float);
+        return reinterpret_cast<const char*>(v.data());
+    }
+    if (e.kind == 'D') { bytes = e.raw0.size(); return e.raw0.data(); }
+    bytes = e.h0.size(); return e.h0.data();   // 'H'・'M' (直列化した S0)・'S'
+}
+// 要素ごとにビットで比べる (要素数・最大絶対差; 片方が非有限なら最大絶対差は inf)。
+static Stat compareBytes(const char* a, size_t na, const char* b, size_t nb, char type, size_t esz)
+{
+    Stat s; s.sizeChanged = (na != nb);
+    const size_t n = std::min(na, nb) / esz;
+    for (size_t i = 0; i < n; ++i) {
+        const char* pa = a + i * esz; const char* pb = b + i * esz;
+        if (std::memcmp(pa, pb, esz) == 0) continue;
+        ++s.nDiff;
+        double va = 0.0, vb = 0.0;
+        if (type == 'f') { flow_float x, y; std::memcpy(&x, pa, sizeof x); std::memcpy(&y, pb, sizeof y); va = x; vb = y; }
+        else if (type == 'd') { std::memcpy(&va, pa, sizeof va); std::memcpy(&vb, pb, sizeof vb); }
+        else if (type == 'i') { geom_int x, y; std::memcpy(&x, pa, sizeof x); std::memcpy(&y, pb, sizeof y); va = x; vb = y; }
+        else { va = (unsigned char)*pa; vb = (unsigned char)*pb; }
+        const double d = std::fabs(va - vb);
+        s.maxAbs = std::isfinite(d) ? std::max(s.maxAbs, d) : std::numeric_limits<double>::infinity();
+    }
+    if (s.sizeChanged) s.nDiff += (std::max(na, nb) - std::min(na, nb)) / esz;
+    return s;
+}
+static void restoreAll(std::vector<Entry>& es, const PdeSnap& sn)
+{
+    pdeRestore(sn);
+    for (auto& e : es) {
+        if (e.kind == 'D' && e.snapIdx < 0) {
+            gpuErrchk( cudaMemcpy(e.dptr, e.raw0.data(), e.raw0.size(), cudaMemcpyHostToDevice) );
+        } else if (e.kind == 'H') {
+            if (e.vf) { e.vf->resize(e.h0.size() / e.esz); if (!e.h0.empty()) std::memcpy(e.vf->data(), e.h0.data(), e.h0.size()); }
+            else      { e.vi->resize(e.h0.size() / e.esz); if (!e.h0.empty()) std::memcpy(e.vi->data(), e.h0.data(), e.h0.size()); }
+        } else if (e.kind == 'M') {
+            *e.dv = e.dv0;
+        }
+    }
+    gpuErrchk( cudaDeviceSynchronize() );
+}
+// 戻した後の device の不一致の配列数 (pdeRestoreMismatch + 別の型の配列)
+static long restoreMismatch(const std::vector<Entry>& es, const PdeSnap& sn)
+{
+    long n = pdeRestoreMismatch(sn);
+    std::vector<char> buf;
+    for (const auto& e : es) if (e.kind == 'D' && e.snapIdx < 0) { current(e, sn, buf); n += (buf != e.raw0); }
+    return n;
+}
+static long countLines(const char* path)
+{
+    std::ifstream ifs(path); if (!ifs) return 0;
+    long n = 0; std::string line; while (std::getline(ifs, line)) if (!line.empty()) ++n;
+    return n;
+}
+static std::string lastLine(const char* path)
+{
+    std::ifstream ifs(path); std::string line, last;
+    while (std::getline(ifs, line)) if (!line.empty()) last = line;
+    return last;
+}
+static bool fileExists(const char* path) { std::ifstream f(path); return static_cast<bool>(f); }
+
+}  // namespace oid
+
+static bool outputInvarianceDiagAt(int iStep)
+{
+    oid::State& st = oid::state();
+    if (!st.init) {
+        st.init = true;
+        const char* e = std::getenv("FORGE_DIAG_OUTPUT_INVARIANCE");
+        if (e && *e) {
+            char* end = nullptr; const long k = std::strtol(e, &end, 10);
+            if (end == e || *end != '\0' || k <= 0) {
+                std::cerr << "[output-invariance] FORGE_DIAG_OUTPUT_INVARIANCE must be a step number K > 0 (got \"" << e << "\")\n";
+                std::exit(2);
+            }
+            st.on = true; st.K = (int)k;
+            const char* c = std::getenv("FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE");
+            const std::string cs = c ? std::string(c) : std::string();
+            if (cs == "restore") st.cont = 1;
+            else if (cs == "poison") st.cont = 2;
+            else if (!cs.empty()) {
+                std::cerr << "[output-invariance] FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE must be \"restore\" or \"poison\" (got \"" << cs << "\")\n";
+                std::exit(2);
+            }
+            printf("[output-invariance] ON: step %d で出力の処理の状態不変 A/B (数値更新 0 step)%s\n", st.K,
+                   st.cont == 2 ? "、その後 S0 に戻して host の写しを NaN で埋めて続ける"
+                 : st.cont == 1 ? "、その後 S0 に戻して続ける" : "、報告の後に終了する");
+        }
+    }
+    return st.on && !st.running && !st.done && iStep == st.K;
+}
+
+static void runOutputInvarianceDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mesh& msh, variables& var,
+                                    point_probes& pprobes, int K)
+{
+    using namespace oid;
+    State& stt = state();
+    stt.running = true;
+    auto usage = [&](const std::string& why) {
+        std::cerr << "[output-invariance] ERROR: " << why << std::endl; std::exit(2); };
+    // K は通常の出力の step でも最後の step でもないこと (どの腕でも出力の処理が「要求の有無」だけで分かれるように)
+    const int fieldInterval = (cfg.fieldOutStepInterval > 0) ? cfg.fieldOutStepInterval : cfg.outStepInterval;
+    if (cfg.gpu != 1) usage("gpu: 1 だけに対応");
+    if (cfg.nStepOuter > 0 && K >= cfg.nStepOuter) usage("K は最後の step より前にすること (最後の step は全場を必ず書く)");
+    if (K >= cfg.outStepStart && cfg.outStepInterval > 0 && K % cfg.outStepInterval == 0)
+        usage("K が outStepInterval の格子 (境界の h5・節点・流量・CHT の出力) に乗っている");
+    if (K >= cfg.outStepStart && fieldInterval > 0 && K % fieldInterval == 0)
+        usage("K が全場の出力の格子 (fieldOutStepInterval) に乗っている");
+    if (pprobes.nProbes > 0 && pprobes.outStepInterval > 0 && K >= pprobes.outStepStart && K % pprobes.outStepInterval == 0)
+        usage("K が point probe の出力の格子に乗っている");
+    if (fileExists("STOP_REQUEST") || fileExists("SNAPSHOT_REQUEST"))
+        usage("作業ディレクトリに STOP_REQUEST / SNAPSHOT_REQUEST がある (腕の要求は診断が置く)");
+
+    gpuErrchk( cudaDeviceSynchronize() );
+    // ---- S0 の退避 ----
+    const PdeSnap sn = pdeSnapshot(msh, var, "");
+    std::vector<Entry> es;
+    std::map<std::string, long> devIdx;
+    for (size_t i = 0; i < sn.arr.size(); ++i) {
+        Entry e; e.name = sn.names[i]; e.kind = 'D'; e.type = 'f'; e.esz = sizeof(flow_float); e.snapIdx = (int)i;
+        e.n = std::get<1>(sn.arr[i]); devIdx[e.name] = (long)es.size(); es.push_back(std::move(e));
+    }
+    auto addRaw = [&](const std::string& nm, void* p, size_t n, char type, size_t esz) {
+        if (!p || n == 0) return;
+        Entry e; e.name = nm; e.kind = 'D'; e.type = type; e.esz = esz; e.dptr = p; e.n = n; e.raw0.resize(n * esz);
+        gpuErrchk( cudaMemcpy(e.raw0.data(), p, e.raw0.size(), cudaMemcpyDeviceToHost) );
+        devIdx[nm] = (long)es.size(); es.push_back(std::move(e));
+    };
+    for (auto& bc : msh.bconds)
+        for (auto& kv : bc.bint_d) addRaw("b" + std::to_string(bc.physID) + ":int:" + kv.first, kv.second, bc.iPlanes.size(), 'i', sizeof(geom_int));
+    for (int q = 0; q < 5; ++q) addRaw("qacc" + std::to_string(q), var.qacc_d[q], (size_t)msh.nCells, 'd', sizeof(double));
+    addRaw("qaccAdopt", var.qaccAdopt_d, 1, 'i', sizeof(int));
+    {
+        const size_t n = (size_t)msh.nCells, nAll = (size_t)msh.nCells_all;
+        const size_t nLines = (size_t)std::max(msh.nImplicitLines, (geom_int)0);
+        addRaw("line_prev", msh.line_prev_d, n, 'i', sizeof(geom_int));
+        addRaw("line_next", msh.line_next_d, n, 'i', sizeof(geom_int));
+        if (msh.line_offsets_d) {
+            addRaw("line_offsets", msh.line_offsets_d, nLines + 1, 'i', sizeof(geom_int));
+            geom_int nOn = 0;
+            gpuErrchk( cudaMemcpy(&nOn, msh.line_offsets_d + nLines, sizeof(geom_int), cudaMemcpyDeviceToHost) );
+            addRaw("line_cells", msh.line_cells_d, (size_t)std::max(nOn, (geom_int)1), 'i', sizeof(geom_int));
+        }
+        addRaw("line_Kprev", msh.line_Kprev_d, 25 * nAll, 'f', sizeof(flow_float));
+        addRaw("line_Knext", msh.line_Knext_d, 25 * nAll, 'f', sizeof(flow_float));
+        addRaw("line_W",  msh.line_W_d,  25 * nAll, 'd', sizeof(double));
+        addRaw("line_y",  msh.line_y_d,   5 * nAll, 'd', sizeof(double));
+        addRaw("line_LU", msh.line_LU_d, 25 * nAll, 'd', sizeof(double));
+        addRaw("line_piv", msh.line_piv_d, 5 * nAll, 'b', 1);
+        addRaw("line_fail", msh.line_fail_d, std::max(nLines, (size_t)1), 'b', 1);
+    }
+    if (pprobes.nProbes > 0)
+        for (auto& kv : pprobes.var_d) addRaw("probe:" + kv.first, kv.second, (size_t)pprobes.nProbes, 'f', sizeof(flow_float));
+    const size_t nDev = es.size();
+    auto addHost = [&](const std::string& nm, std::vector<flow_float>* v, const std::string& twin) {
+        if (!v || v->empty()) return;
+        Entry e; e.name = "host " + nm; e.kind = 'H'; e.type = 'f'; e.esz = sizeof(flow_float); e.vf = v; e.n = v->size();
+        e.h0.assign(reinterpret_cast<const char*>(v->data()), reinterpret_cast<const char*>(v->data()) + v->size() * sizeof(flow_float));
+        auto it = devIdx.find(twin); e.twin = (it != devIdx.end()) ? it->second : -1;
+        es.push_back(std::move(e));
+    };
+    for (auto& kv : var.c) addHost("c:" + kv.first, &kv.second, "c:" + kv.first);
+    for (auto& kv : var.p) addHost("p:" + kv.first, &kv.second, "p:" + kv.first);
+    for (auto& bc : msh.bconds) {
+        const std::string b = "b" + std::to_string(bc.physID) + ":";
+        for (auto& kv : bc.bvar) addHost(b + kv.first, &kv.second, b + kv.first);
+        for (auto& kv : bc.bint) {
+            if (kv.second.empty()) continue;
+            Entry e; e.name = "host " + b + "int:" + kv.first; e.kind = 'H'; e.type = 'i'; e.esz = sizeof(geom_int);
+            e.vi = &kv.second; e.n = kv.second.size();
+            e.h0.assign(reinterpret_cast<const char*>(kv.second.data()),
+                        reinterpret_cast<const char*>(kv.second.data()) + kv.second.size() * sizeof(geom_int));
+            es.push_back(std::move(e));
+        }
+        Entry m; m.name = "host " + b + "diagVar"; m.kind = 'M'; m.type = 'b'; m.esz = 1; m.dv = &bc.diagVar; m.dv0 = bc.diagVar;
+        serializeMap(bc.diagVar, m.h0); m.n = m.h0.size();
+        es.push_back(std::move(m));
+    }
+    for (auto& kv : pprobes.var) addHost("probe:" + kv.first, &kv.second, "probe:" + kv.first);
+    {
+        Entry s; s.name = "host conjugate:solid"; s.kind = 'S'; s.type = 'b'; s.esz = 1;
+        conjugateWall::diagStateBytes(s.h0); s.n = s.h0.size();
+        if (!s.h0.empty()) es.push_back(std::move(s));
+    }
+    size_t bytesDev = 0, bytesHost = 0;
+    for (size_t i = 0; i < es.size(); ++i) { size_t b = 0; s0Bytes(es[i], sn, b); (i < nDev ? bytesDev : bytesHost) += b; }
+    printf("[output-invariance] step %d: S0 を退避 (device %zu 配列 %.1f MB、host %zu 配列 %.1f MB)\n", K, nDev,
+           bytesDev / 1048576.0, es.size() - nDev, bytesHost / 1048576.0);
+
+    // ---- 腕 ----
+    const bool haveKeys = monitorOutputs::monitorKeysEnabled();
+    std::vector<Arm> arms(4);
+    arms[0].label = "A";  arms[0].desc = "要求なし";
+    arms[1].label = "B";  arms[1].desc = "SNAPSHOT_REQUEST、節点の出力・流量の積算は止める";
+    arms[2].label = "C";  arms[2].desc = "SNAPSHOT_REQUEST、節点の出力・流量の積算は起動時の設定のまま";
+    arms[3].label = "A2"; arms[3].desc = "要求なし (B・C の後)";
+    std::vector<char> buf;
+    for (int a = 0; a < 4; ++a) {
+        Arm& arm = arms[(size_t)a];
+        const bool snap = (a == 1 || a == 2);
+        if (a == 2 && !haveKeys) { arm.note = "未実行 (起動時に nodeProbeFile・boundaryMassflux のどちらも無い)"; continue; }
+        restoreAll(es, sn);
+        arm.restoreMismatch = restoreMismatch(es, sn);
+        const long done0 = countLines("SNAPSHOT_DONE"), fail0 = countLines("SNAPSHOT_FAILED");
+        if (snap) {
+            { std::ofstream r("SNAPSHOT_REQUEST.oid.tmp"); r << "FORGE_DIAG_OUTPUT_INVARIANCE arm " << arm.label << "\n"; }
+            if (std::rename("SNAPSHOT_REQUEST.oid.tmp", "SNAPSHOT_REQUEST") != 0) usage("SNAPSHOT_REQUEST を置けない");
+        }
+        if (a == 1) monitorOutputs::diagSuspendMonitorKeys(true);
+        writeStepOutputs(cfg , cuda_cfg , msh , var , pprobes , K);
+        if (a == 1) monitorOutputs::diagSuspendMonitorKeys(false);
+        gpuErrchk( cudaDeviceSynchronize() );
+        if (snap) {
+            const long done1 = countLines("SNAPSHOT_DONE"), fail1 = countLines("SNAPSHOT_FAILED");
+            const std::string last = lastLine("SNAPSHOT_DONE");
+            const bool ok = (done1 == done0 + 1) && (fail1 == fail0) && !fileExists("SNAPSHOT_REQUEST")
+                         && last.find("\"step\": " + std::to_string(K) + ",") != std::string::npos;
+            arm.note = std::string(ok ? "SNAPSHOT_DONE に step " : "**随時の書き出しが期待どおりでない** step ") + std::to_string(K)
+                     + " (DONE +" + std::to_string(done1 - done0) + " 行・FAILED +" + std::to_string(fail1 - fail0) + " 行・要求 "
+                     + (fileExists("SNAPSHOT_REQUEST") ? "残った" : "消えた") + ")";
+            if (!ok) std::remove("SNAPSHOT_REQUEST");
+        }
+        arm.st.resize(es.size());
+        for (size_t i = 0; i < es.size(); ++i) {
+            current(es[i], sn, buf);
+            size_t nb = 0; const char* s0 = s0Bytes(es[i], sn, nb);
+            arm.st[i] = compareBytes(buf.data(), buf.size(), s0, nb, es[i].type, es[i].esz);
+            if (arm.st[i].nDiff == 0 && !arm.st[i].sizeChanged) continue;
+            if (es[i].twin >= 0) {
+                size_t tb = 0; const char* t0 = s0Bytes(es[(size_t)es[i].twin], sn, tb);
+                arm.twinEq[i] = (tb == buf.size() && std::memcmp(t0, buf.data(), tb) == 0) ? 1 : 0;
+            }
+            arm.changed[i] = buf;
+        }
+        arm.ran = true;
+        printf("[output-invariance] 腕 %s (%s): S0 から変わった配列 %zu (戻した直後の device の不一致 %ld)%s%s\n",
+               arm.label.c_str(), arm.desc.c_str(), arm.changed.size(), arm.restoreMismatch,
+               arm.note.empty() ? "" : "; ", arm.note.c_str());
+    }
+
+    // ---- 腕どうしの比較 ----
+    auto differ = [&](const Arm& x, const Arm& y, size_t i) -> bool {
+        const bool cx = x.changed.count(i) != 0, cy = y.changed.count(i) != 0;
+        if (!cx && !cy) return false;
+        if (cx != cy) return true;
+        return x.changed.at(i) != y.changed.at(i);
+    };
+    struct Pair { std::string name; std::vector<size_t> dev, host; };
+    std::vector<Pair> pairs;
+    for (size_t x = 0; x < arms.size(); ++x) for (size_t y = x + 1; y < arms.size(); ++y) {
+        if (!arms[x].ran || !arms[y].ran) continue;
+        Pair p; p.name = arms[x].label + "-" + arms[y].label;
+        for (size_t i = 0; i < es.size(); ++i) if (differ(arms[x], arms[y], i)) (i < nDev ? p.dev : p.host).push_back(i);
+        pairs.push_back(std::move(p));
+    }
+    long restoreBad = 0; for (const auto& a : arms) if (a.ran) restoreBad += a.restoreMismatch;
+    size_t nDevDiff = 0, nHostDiff = 0;
+    std::set<size_t> hostDiffSet;
+    for (const auto& p : pairs) { nDevDiff += p.dev.size(); nHostDiff += p.host.size(); hostDiffSet.insert(p.host.begin(), p.host.end()); }
+    const bool pass = (restoreBad == 0) && (nDevDiff == 0) && (nHostDiff == 0);
+
+    // ---- 報告 ----
+    const std::string fname = "output_invariance_" + std::to_string(K) + ".txt";
+    {
+        std::ofstream o(fname);
+        o << "# FORGE_DIAG_OUTPUT_INVARIANCE: step " << K << " (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1c, §6 V1 (f′)・(g′))\n";
+        o << "# 数値更新 0 step。各腕の前に S0 (writeStepOutputs の直前の状態) へ戻し、writeStepOutputs の出力の処理だけを実行して比べた。\n";
+        for (const auto& a : arms) o << "# 腕 " << a.label << ": " << a.desc << (a.ran ? "" : " — ") << (a.ran ? "" : a.note) << "\n";
+        o << "# 比べた配列: device " << nDev << " 個 (" << std::fixed << std::setprecision(1) << bytesDev / 1048576.0 << " MB)、host "
+          << es.size() - nDev << " 個 (" << bytesHost / 1048576.0 << " MB)。flow_float = " << sizeof(flow_float) << " bytes\n";
+        o << "# 比べないもの: 数値のモジュールのファイル内 static な device の作業配列 (出力の関数から届かない)、cfg (出力の関数は const で受ける)、"
+             "残差の記録 (writeStepOutputs に渡らない)\n";
+        o << "# 戻した直後の device の不一致 (配列数):";
+        for (const auto& a : arms) if (a.ran) o << " " << a.label << " " << a.restoreMismatch;
+        o << "\n";
+        for (const auto& a : arms) if (a.ran && !a.note.empty()) o << "# 腕 " << a.label << " の記録: " << a.note << "\n";
+        o << "#\n# 腕どうしの差 (配列の数):\n";
+        for (const auto& p : pairs) {
+            o << "#   " << p.name << ": device " << p.dev.size() << "、host " << p.host.size();
+            if (!p.dev.empty() || !p.host.empty()) {
+                o << " —";
+                size_t shown = 0;
+                for (size_t i : p.dev)  { if (shown++ < 40) o << " " << es[i].name; }
+                for (size_t i : p.host) { if (shown++ < 40) o << " " << es[i].name; }
+                if (shown > 40) o << " ...";
+            }
+            o << "\n";
+        }
+        o << "#\n# 列: 名前 要素数 bytes | 腕ごとに S0 からの差の要素数 (0 = ビット同一) と最大絶対差 | 変わった host の写しが S0 の device と同一か\n";
+        o << std::defaultfloat << std::setprecision(6);
+        o << "name n bytes";
+        for (const auto& a : arms) if (a.ran) o << " " << a.label << ".nDiff " << a.label << ".maxAbs";
+        o << " twin\n";
+        for (size_t i = 0; i < es.size(); ++i) {
+            size_t b = 0; s0Bytes(es[i], sn, b);
+            o << (i < nDev ? "dev:" : "") << es[i].name << " " << es[i].n << " " << b;
+            std::string tw;
+            for (const auto& a : arms) {
+                if (!a.ran) continue;
+                const Stat& s = a.st[i];
+                o << " " << s.nDiff << (s.sizeChanged ? "(size)" : "") << " " << s.maxAbs;
+                auto it = a.twinEq.find(i);
+                if (it != a.twinEq.end()) tw += a.label + (it->second ? ":=dev " : ":!=dev ");
+            }
+            o << " " << (tw.empty() ? "-" : tw) << "\n";
+        }
+        o << "#\n# DEVICE: " << (nDevDiff == 0 ? "腕の間で全配列がビット同一" : "**腕の間で差あり**") << "\n";
+        o << "# HOST: " << (nHostDiff == 0 ? "腕の間で全配列がビット同一" : "**腕の間で差あり** (上の表の twin 列: 出力が D2H で写した値か)") << "\n";
+        o << "OUTPUT_INVARIANCE_VERDICT: " << (pass ? "PASS" : "FAIL") << " (device の差 " << nDevDiff << "、host の差 " << nHostDiff
+          << "、戻しの不一致 " << restoreBad << "; 腕の組の合計)\n";
+    }
+    for (const auto& p : pairs)
+        printf("[output-invariance] %s: device の差 %zu 配列、host の差 %zu 配列\n", p.name.c_str(), p.dev.size(), p.host.size());
+    printf("[output-invariance] OUTPUT_INVARIANCE_VERDICT: %s (報告 %s)\n", pass ? "PASS" : "FAIL", fname.c_str());
+    fflush(stdout);
+
+    if (stt.cont == 0) std::exit(pass ? 0 : 4);
+
+    // ---- 続ける: S0 に戻す (restore)。poison はさらに腕の間で違った host の配列を NaN (整数は最小値) で埋める ----
+    restoreAll(es, sn);
+    const long mm = restoreMismatch(es, sn);
+    if (mm != 0) usage("続ける前に S0 へ戻せない (device の不一致 " + std::to_string(mm) + " 配列)");
+    if (stt.cont == 1) {
+        printf("[output-invariance] RESTORE: S0 に戻して計算を続ける (device の不一致 0)\n");
+        std::ofstream(fname, std::ios::app) << "# RESTORE: S0 に戻して (device の不一致 0) 計算を続けた\n";
+        fflush(stdout);
+        stt.running = false;
+        stt.done = true;
+        return;
+    }
+    size_t nPoison = 0;
+    std::string names;
+    for (size_t i : hostDiffSet) {
+        Entry& e = es[i];
+        if (e.kind == 'H' && e.vf) std::fill(e.vf->begin(), e.vf->end(), std::numeric_limits<flow_float>::quiet_NaN());
+        else if (e.kind == 'H' && e.vi) std::fill(e.vi->begin(), e.vi->end(), std::numeric_limits<geom_int>::min());
+        else if (e.kind == 'M') for (auto& kv : *e.dv) std::fill(kv.second.begin(), kv.second.end(), std::numeric_limits<flow_float>::quiet_NaN());
+        else continue;   // 'S' は戻せないので毒も入れない
+        ++nPoison; if (names.size() < 2000) names += " " + e.name;
+    }
+    printf("[output-invariance] POISON: S0 に戻し、腕の間で違った host の配列 %zu 個を NaN で埋めて計算を続ける:%s\n", nPoison, names.c_str());
+    {
+        std::ofstream o(fname, std::ios::app);
+        o << "# POISON: S0 に戻し (device の不一致 0)、host の配列 " << nPoison << " 個を NaN (整数は最小値) で埋めて計算を続けた:" << names << "\n";
+    }
+    fflush(stdout);
+    stt.running = false;
+    stt.done = true;
 }
 
 // 診断 G3-b (FORGE_DIAG_TP_UPDATE): runTpUpdateDiag が組立を自分で (前処理・後処理を分けて) 通したあと、更新だけを 1 回行うための印。
@@ -3642,6 +4095,9 @@ int main(int argc, char** argv) {
         if (iStep % cfg.monitorInterval == 0) passiveFloorCorrLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
         // 凝縮の理由別の補正量 (plan condensation-two-phase-transport §4.3; 凝縮なしは no-op)
         if (iStep % cfg.monitorInterval == 0) condCorrectionLog_d_wrapper(cfg, cuda_cfg, msh, var, iStep);
+        // 随時の書き出しの step: 残差の行 (step 列 = iStep) を flush し、見張りが同じ step の残差をすぐ読めるようにする
+        // (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1b; 書き出しの記録 SNAPSHOT_DONE はこれより先に書かれる)。
+        if (monitorOutputs::snapshotHandledAt(iStep + 1)) residual_logger.flush();
         // 協調停止: この step (iStep+1) の全場・境界・節点・流量は writeStepOutputs が書き終えている。残差の行
         // (step 列 = iStep) も記録済みなので、ここで抜けて通常の終了処理に進む。
         if (monitorOutputs::stopRequested()) { nDone = iStep + 1; break; }

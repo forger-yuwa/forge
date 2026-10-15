@@ -47,6 +47,7 @@ struct SnapshotState {
     bool active = false;      // この step で要求を処理中
     bool disabled = false;    // 要求を消せなかった (毎 step 同じ要求を繰り返さないよう以後は見ない)
     int step = -1;
+    int handledStep = -1;     // 最後に締めた (SNAPSHOT_DONE / SNAPSHOT_FAILED を書いた) step
     std::string request;
     std::vector<std::string> writeErrors;
 };
@@ -72,6 +73,10 @@ struct MassfluxState {
     int lastStep = -1;   // 最後に書けた行の step (協調停止の締めで突き合わせる)
 };
 MassfluxState& massflux() { static MassfluxState s; return s; }
+
+// 協調停止・随時の書き出しの step に、4 種の出力のほかに書いたファイル (noteStepFiles; ソルバ内 CHT の固体の状態など)
+struct ExtraFiles { int step = -1; std::vector<std::string> files; };
+ExtraFiles& extraFiles() { static ExtraFiles s; return s; }
 
 bool fileExists(const char* path)
 {
@@ -247,6 +252,7 @@ void checkStepOutputs(const mesh& msh, int k, std::vector<std::string>& errs,
     }
     if (nodeProbe().enabled) files.push_back("res_nodes_" + ks + ".h5");
     if (massflux().enabled) files.push_back(kMassfluxCsv);
+    if (extraFiles().step == k) for (const auto& f : extraFiles().files) files.push_back(f);
 }
 
 void fileSizes(const std::vector<std::string>& files, std::vector<std::string>& errs, std::vector<long long>& sizes)
@@ -449,6 +455,7 @@ void finishSnapshot(const mesh& msh)
     if (!s.active) return;
     s.active = false;
     const int k = s.step;
+    s.handledStep = k;
     std::vector<std::string> errs = s.writeErrors;
     std::vector<std::string> files;
     std::vector<long long> sizes;
@@ -481,6 +488,16 @@ void finishSnapshot(const mesh& msh)
         appendLine(kSnapshotFailed, head + "\"errors\": [\"" + std::string(kSnapshotRequest)
                                     + " を消せない; この run では以後の要求を見ない\"]}");
     }
+}
+
+bool snapshotHandledAt(int k) { return snapState().handledStep == k; }
+
+void noteStepFiles(int k, const std::vector<std::string>& files)
+{
+    ExtraFiles& x = extraFiles();
+    if (x.step != k) { x.step = k; x.files.clear(); }
+    for (const auto& f : files)
+        if (std::find(x.files.begin(), x.files.end(), f) == x.files.end()) x.files.push_back(f);
 }
 
 void writeNodeProbes(const solverConfig& cfg, const mesh& msh, variables& var, int iStep, bool force)
@@ -536,6 +553,35 @@ void writeBoundaryMassflux(const solverConfig& cfg, const mesh& msh, variables& 
     // 書き込みの失敗を黙らせない (h5 の書き込みの失敗は HighFive が例外を投げるのと揃える)
     if (!o) throw std::runtime_error(std::string(kMassfluxCsv) + " への step " + std::to_string(iStep) + " の行の書き込みに失敗");
     mf.lastStep = iStep;
+}
+
+// 診断 FORGE_DIAG_OUTPUT_INVARIANCE 専用 (§5.1 #1c)。止めている間は (c)・(d) を書かず、停止・随時の書き出しの確認の一覧にも載せない
+// (enabled を下ろすだけ。節点の表・CSV のストリームは持ったまま)。
+namespace {
+struct DiagSuspend { bool active = false; bool np = false; bool mf = false; };
+DiagSuspend& diagSuspend() { static DiagSuspend s; return s; }
+}  // namespace
+
+void diagSuspendMonitorKeys(bool suspend)
+{
+    DiagSuspend& d = diagSuspend();
+    if (suspend && !d.active) {
+        d.np = nodeProbe().enabled;
+        d.mf = massflux().enabled;
+        nodeProbe().enabled = false;
+        massflux().enabled = false;
+        d.active = true;
+    } else if (!suspend && d.active) {
+        nodeProbe().enabled = d.np;
+        massflux().enabled = d.mf;
+        d.active = false;
+    }
+}
+
+bool monitorKeysEnabled()
+{
+    const DiagSuspend& d = diagSuspend();
+    return d.active ? (d.np || d.mf) : (nodeProbe().enabled || massflux().enabled);
 }
 
 }  // namespace monitorOutputs

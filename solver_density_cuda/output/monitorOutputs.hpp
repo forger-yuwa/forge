@@ -16,6 +16,7 @@
 //   (d) 境界の質量流束: output.boundaryMassflux: 1 で boundary_massflux.csv に境界ごとの Σ massflux を 1 行。
 
 #include <string>
+#include <vector>
 
 #include "mesh/mesh.hpp"
 #include "input/solverConfig.hpp"
@@ -52,10 +53,22 @@ void noteSnapshotWriteError(const std::string& what);
 // 随時の書き出しの締め (同じ step の出力の直後)。出力を確かめ、SNAPSHOT_DONE (成功: step・pid・中身・ファイルの一覧と大きさ) か
 // SNAPSHOT_FAILED (失敗: step・pid・中身・理由) に JSON を 1 行書き足してから SNAPSHOT_REQUEST を消す。
 void finishSnapshot(const mesh& msh);
+// 随時の書き出しを step k で処理したか (成功・失敗を問わず)。main がその step の残差の行を flush するのに使う
+// (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1b)。
+bool snapshotHandledAt(int k);
+// 協調停止・随時の書き出しの step k に、全場・境界・節点・流量のほかに書いたファイル (ソルバ内 CHT の固体の状態など)。
+// 締めがそれらも存在と大きさを確かめ、STOPPED_AT / SNAPSHOT_DONE の一覧に載せる (同じ step で呼ぶたびに足す)。
+void noteStepFiles(int k, const std::vector<std::string>& files);
 
 // (c) 節点の状態 res_nodes_<step>.h5。outStepInterval ごと・最後の step・force (協調停止の step)。
 void writeNodeProbes(const solverConfig& cfg, const mesh& msh, variables& var, int iStep, bool force);
 // (d) boundary_massflux.csv に 1 行。間隔は (c) と同じ。
 void writeBoundaryMassflux(const solverConfig& cfg, const mesh& msh, variables& var, int iStep, bool force);
+
+// 診断 FORGE_DIAG_OUTPUT_INVARIANCE (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1c) 専用。通常の経路からは呼ばない。
+// 起動時に有効にした (c)・(d) を一時的に止める (suspend = true) / 起動時の状態に戻す (false)。
+void diagSuspendMonitorKeys(bool suspend);
+// 起動時に (c)・(d) のどちらかを有効にしたか。
+bool monitorKeysEnabled();
 
 }  // namespace monitorOutputs
