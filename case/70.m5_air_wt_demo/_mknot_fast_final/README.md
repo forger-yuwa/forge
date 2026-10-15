@@ -9,10 +9,12 @@ plan [`tooling-nozzle-mknot-fast`](../../../plans/active/tooling-nozzle-mknot-fa
 
 | ファイル | 中身 |
 | --- | --- |
-| `time_base.log` / `time_final.log` | N 2400 の 1 評価 (a) case/70 c2b (M_K 2.05)・(b) case/71 (r_t 0.1 m、M_K 2.80) を各 3 回。`numpy`/`numba` の行は `FORGE_MOC_KERNEL` (9468e0d0 には numba の経路が無いので両方 numpy) |
+| `time_base.txt` / `time_final.txt` | N 2400 の 1 評価 (a) case/70 c2b (M_K 2.05)・(b) case/71 (r_t 0.1 m、M_K 2.80) を各 3 回。`numpy`/`numba` の行は `FORGE_MOC_KERNEL` (9468e0d0 には numba の経路が無いので両方 numpy) |
 | `mem.txt` | 新しいプロセスで 1 評価したときの最大 RSS (N 600 は L_total_tol 0.1 r_t) |
-| `card_a/` | M5 c2b のカード (`../card_m5_air_demo_c2b.yaml`) の生成: `gen.log` (標準出力と `/usr/bin/time -v`)・`problem.yaml`・card_log・Euler の写し・`check.txt` (照合) |
+| `card_a/` | M5 c2b のカード (`../card_m5_air_demo_c2b.yaml`) の生成: `gen.stdout.txt` (標準出力と `/usr/bin/time -v`)・`problem.yaml`・card_log・Euler の写し・`check.txt` (照合) |
 | `card_b/` | M5.5 の最終のカード (`card_m55_final.yaml` = M6ノズルの設計の feature/card-local-mesh 94790833 の `case/71.m55_combustion_wt/card_m55.yaml` の写し。`overrides: {mesh.ni: 3000}` は格子の見積もり (節点の上限) を避けるためだけで、上限は緩めていない。寸法・M_knot は ni に依らない) の生成: 同上 |
 | `card_times.txt` | カードの生成の壁時計 |
+
+台本が書いた名前の `*.log` は、リポジトリの `*.log` の除外に掛からないよう `*.txt` に改名して置いた (`time_*.txt`・`gen.stdout.txt`)。
 
 結果の要約は plan §6.6。
