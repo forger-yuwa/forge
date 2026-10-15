@@ -76,6 +76,13 @@
 - 目的の量の判定は区間の中の `max − min` で、ドリフトと準定常の振れを区別せず両方を合わせて許容に収める (振れが許容を超える準定常 (OSCILLATING) は不合格のまま; ドリフトと振れの分離の記録は足さない — 2026-10-16 ユーザ「まあ現状でいいかとりあえず」)。2,000 ごとの観測なので周期 4,000 step より短い振れは捉えられない。
 - 区間を短くすると、区間ごとには許容内で動き続けるゆっくりしたドリフトを止めてしまいうる。これは下の検証 (止めた点から 8 万 step の累積の変化) で確かめる。
 
+**残差を止める判定から外す・ビルドは float (2026-10-16 ユーザ決定「floatにしようか。残さは監視から外そう。たぶん上流で揺れてるんだと思うけど」)**: card plan §6 V8 の比較で、float では目的の量・流量は FP64 とほぼ同じ (出口コア M の差 ≤ 0.00006 %、近軸の線 ≤ 0.0009 %pt、壁の総熱量 0.002〜0.004 %) だが、残差 (ρ) の振幅が 0.585 桁 (FP64 は約 0.02 桁) で、残差の条件が通らず止まらなかった。
+- 新しいプリセット **`wt_nozzle_v3`** (雛形の既定): `wt_nozzle_v2` から**残差の量を外す** (判定は流量の収支 + 目的の量、区間 1 万・保持なしは同じ)。外したことと理由を基準のファイルの `excluded` に書く。
+- **発散の見張りは残す**: 残差に非有限が出たら DIVERGED (判定の条件ではなく安全のため)。判定の部品の「residual 1 つ必須」は v3 では外し、非有限の見張りだけを必須にする。
+- 受け渡しの関門の (b) 残差は、基準に残差が無ければ「対象外」(止めない)。
+- 「上流で揺れている」はユーザの見立てで未確認 (case/45 では float のずれが縮流部の境界層の縁で育った — float plan §6.51〜§6.56)。確かめるなら残差の空間の分布を見る (後の残作業)。
+- 見込み: FP64 の run_0012・0013 の再生では目的の量だけの停止候補は 30,000 で、その後 8 万 step 超過なし (最大の比 0.087)。float の run_0015・0016 でも再生して記録する (データは 60,000 まで)。
+
 ### 4.5 要求カードの雛形の既定 (NS)
 
 入口・出口・壁・軸の境界の出力と節点の出力と流量の積算を有効、`outStepInterval` 2,000・`fieldOutStepInterval` 20,000、本段 B0 (前の段 S1・S2 は point、Euler の cfl は別に保持)、`evaluate.settle: {preset: wt_nozzle_v1}`。B0 が NS の本段だけに効くことを試験する。
@@ -138,6 +145,7 @@
 | 7 | ~~呼び出し側の移行・AGENTS.md・Stop フック~~ (2026-10-16 実装済み・commit) | §4.7。V1〜V5 の後。他のセッションに効くので調整板に書く 追加: §4.8 の 2 (受け渡しの関門の置き換え) 具体化: §4.9 (2026-10-16)。V6 (通しの 1 pass) を事前登録 **結果 (implementer)**: `deltastar_loop._handoff_gate_v2` (照合: 状態・再評価・STOPPED_AT・停止の step・MAIN_STAGE_STARTED の sha256/fnv・最後の起動・基準の sha256・見張りの記録; 全体の SETTLED; δ_E の契約; 照合と δ_E の契約は上書きでも通さない; 表は再抽出せず旧方式と同じ名前で直下に写す)、`settle.select_judge`・`check_settled.py --select/--bind` を run_case.sh・stop_rule.postprocess・関門で共通に (基準のある run は判定不能・照合の不一致でも旧の道具へ落とさない; CONVERGENCE_VERDICT.txt の 1 行目に `TOOL:`)、Stop フックは案内文だけ、AGENTS.md「収束確認」と procedures、雛形の既定 `wt_nozzle_v2`。試験 `run_settle_migration_tests` 52/52 (判別の A/B: A は進み、B の `main_config.fnv` だけの不一致は上書きでも止まる; 負例 7 件; 旧方式の run と同じ場で表がビット同一)、test_settle 100/100、既存の関連試験も合格。**上書きの対応 (主セッションが確認して採用)**: (b) 残差の閾値の超過は `allow_unconverged`、(c) 流量と目的の量の閾値の超過は `allow_unsettled` (旧方式の δ の 2 窓に当たる)、判定不能・DIVERGED・FAILED・照合・δ_E の契約は上書き不可。「本段でない起動」は最後の起動の cfg_fnv が MAIN_STAGE_STARTED の fnv と違うこと | F |
 | 7b | ~~新方式の run を読む残りの読み手 (#7 で見つかった範囲外)~~ (2026-10-16 実装済み・commit) | `export/wall_tables.py:653` (自分で check_convergence を回すので、新方式の run の成果物の「熱設計に使えるか」が未収束の扱いになる — V6 の成果物に効く)、`report/nozzle_report.py:190` (OVERALL の行を読むので収束の欄が「?」)、`hook_forge_guard.py:55` (文言)。`settle.select_judge` の同じ規則に揃える。合格: 試験 + run_0011_ns_v2 の写しで成果物と報告が新方式の判定を書く。**V6 の前に** **結果 (implementer)**: `wall_tables.thermal_use` (基準のある本段の run は `check_settled.py --bind --no-write` で判定し停止規則の再評価と照合、判定不能を旧の道具へ落とさない、道具の名前を status.json と xlsx の注記に)、`nozzle_report.convergence_gate_row` (TOOL の行で読み分け)、`hook_forge_guard.py`・`codex_review.py` の文言。読み手を grep で洗い出し、残り (health.py・opt/driver.py・sern 系) は基準のある run が来ないので変更なし (注意: health.py は基準のある run に使われると CONVERGENCE_VERDICT.txt を上書きする)。試験 `run_settle_migration_tests` 68/68 (旧方式の run は変更前とビット同一)。run_0011 の写しでの確認は V6 の前に AWS で | O |
 | 7c | result 段レビュー (NO-GO) の修正 | M1 照合の回避 (`settle.select_judge`・`check_settled.py` の既定の照合)、M2 出力の XMF の書き込み失敗の検出と伝播 (forge `output.cpp`・`monitorOutputs.cpp`)、M3 流量の判定のゼロ割、m4 文書。合格: 再現の負例が INDETERMINATE・終了コード 3・理由つきの結果になる、既存の試験。その後 result 段をやり直す | O |
+| 8 | 残差を外したプリセット `wt_nozzle_v3` と雛形の既定 (§4.4 の 2026-10-16 ユーザ決定) | `settle_presets.py` に v3 (v2 − 残差 + `excluded` の記録)、`settle.py` の「residual 必須」を外し非有限の見張り (残差の非有限 → DIVERGED) を必須に、関門の (b) は基準に残差が無ければ対象外、雛形 (`axismach_final_v1`・`axismach_explore_v1`) の既定を v3 に。合格: 試験 (v3 で残差の振幅が大きくても SETTLED になる・残差の非有限は DIVERGED・関門が通る)、run_0012・0013・0015・0016 を v3 で再生 (`settle_virtual_stop --criteria`) して t_s とその後を記録。#7c の後 (同じファイル) | O |
 
 ## 6. 検証 (事前登録 2026-10-15)
 
@@ -187,6 +195,7 @@ V1〜V5 がすべて合格、§5.1 #7 の移行 (呼び出し側が共通の部�
 
 ## 9. 変更ログ
 
+- `2026-10-16` — ユーザ決定: ビルドは float、残差は止める判定から外す (`wt_nozzle_v3`、§4.4、§5.1 #8)。
 - `2026-10-16` — result 段レビュー (未成立、NO-GO、C0/M3/m2) を全件採用: 修正を #7c に、V3 の参考値を訂正、V4・V6 の一次データを手元に写した。
 - `2026-10-16` — V6 (設計チェーンの通しの 1 pass、run_0014_chain_v2) 合格。成果物の外部の Python のパスの欠陥を直した。
 - `2026-10-16` — #7b (成果物・報告・案内文の読み手) を実装・commit (implementer)。
