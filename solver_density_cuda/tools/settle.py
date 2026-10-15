@@ -102,6 +102,14 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
 
 基準の中身と sha256・起動の識別 (forge_launches.jsonl の最後の行・STOPPED_AT)・格子・判定区間・終端の step・窓の格子点・使ったファイルの
 一覧 (大きさ・sha256)・各量の結果。閾値に `provisional: true` があれば VERDICT の行に「閾値は暫定 (plan §6 V3 で決める)」と出す。
+`judge` は起動の識別を**記録するだけで照合しない**。本段の起動との照合は `select_judge` (下) と受け渡しの関門が行う。
+
+## 道具の選択と本段の起動との照合 (`select_judge`、§4.9 の 1・2)
+
+基準のファイルの無い run・前の段 (本段の開始の記録 `MAIN_STAGE_STARTED` が無い)・本段でない起動は `check_convergence.py`、
+本段の起動 (記録と今の solverConfig.yaml・最後の起動・基準の sha256 を照合) と手で組んだ run (基準が記録を指さない) は
+`check_settled.py`。基準があって判定不能になったときに旧の道具へ落とさない。run_case.sh・`stop_rule.postprocess`・受け渡しの関門が
+同じ規則を使う (`check_settled.py --select` / `--bind`)。
 """
 from __future__ import annotations
 
@@ -1777,6 +1785,123 @@ def write_verdict(run_dir, result: dict, data: RunData | None = None, out: str |
     tmp.write_text(json.dumps(_jsonable(res), ensure_ascii=False, indent=1) + "\n")
     os.replace(tmp, p)
     return p
+
+
+# ============================================================ 判定の道具の選択と本段の起動との照合
+# plan tooling-settle-convergence-and-monitor §4.9 の 1・2 (codex diagnose 2026-10-16 settle-migration-7 の M1・M5)。
+# run_case.sh の後処理 (`check_settled.py --select`)・停止規則の後処理 (`stop_rule.postprocess`)・受け渡しの関門
+# (`deltastar_loop.handoff_gate`) が同じこの規則を使う。
+MAIN_STAGE_RECORD = "MAIN_STAGE_STARTED"       # 設計チェーンの本段の開始の記録 (runner_axismach.run_staged_ns が本段の forge の直前に書く)
+LAUNCHES_FILE = "forge_launches.jsonl"         # forge が起動ごとに 1 行足す (cfg_fnv = solverConfig.yaml の FNV-1a 64)
+TOOL_NEW, TOOL_OLD = "check_settled.py", "check_convergence.py"
+
+
+def last_launch(run_dir) -> dict | None:
+    """forge_launches.jsonl の最後の非空行 (= 最後の forge の起動)。ファイルが無い → None、読めない・JSON でない → {"error": ...}。"""
+    p = Path(run_dir) / LAUNCHES_FILE
+    if not p.is_file():
+        return None
+    try:
+        lines = [ln for ln in p.read_text().splitlines() if ln.strip()]
+        if not lines:
+            return {"error": f"{p} に行が無い"}
+        d = json.loads(lines[-1])
+        return d if isinstance(d, dict) else {"error": f"{p} の最後の行が JSON の対応表でない"}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        return {"error": f"{p} を読めない ({e})"}
+
+
+def _dotted(d, key: str):
+    for k in key.split("."):
+        if not isinstance(d, dict) or k not in d:
+            return None
+        d = d[k]
+    return d
+
+
+def select_judge(run_dir) -> dict:
+    """run の今の起動を判定する道具を選ぶ。戻り {tool, mode, why, problems, binding}。
+    mode:
+      legacy   基準のファイル (settle_criteria.yaml) が無い → check_convergence.py (今どおり)。
+      invalid  基準のファイルが読めない・誤り・評価対象が未設定・grid.segment の stage が main でない → check_settled.py
+               (判定不能を返す; **旧の道具へ落とさない**)。
+      manual   基準が本段の開始の記録 (grid.segment.start_record) を指さない = 手で組んだ run → check_settled.py。
+      pre_main 基準は本段の開始の記録を指すが、その記録が無い = 前の段 (S1・S2)・本段の前 → check_convergence.py。
+      not_main 記録はあるが、最後の forge の起動 (forge_launches.jsonl の cfg_fnv) が本段の設定 (記録の main_config.fnv) と違う
+               = 本段でない起動 → check_convergence.py。起動の記録が無い run はここに来ない (本段として照合し、食い違いは problems)。
+      main     本段の起動 → check_settled.py。照合 (binding、どれかが食い違う・記録が欠けると problems): 記録の event、
+               main_config の sha256・fnv = 今の solverConfig.yaml (main_config.file)、最後の起動の cfg_fnv = main_config.fnv
+               (起動の記録がある run)、記録の settle_criteria.sha256 = 今の基準のファイルの sha256。
+    記録のキーは基準の grid.segment の config_fnv_key・criteria_sha256_key (既定 main_config.fnv・settle_criteria.sha256)。
+    problems があるときの判定は INDETERMINATE (`check_settled.py --bind`; 受け渡しの関門は上書きでも通さない)。"""
+    run = Path(run_dir)
+    out = {"tool": TOOL_NEW, "mode": None, "why": None, "problems": [], "binding": None}
+    if not os.path.lexists(run / CRITERIA_FILE):
+        return {**out, "tool": TOOL_OLD, "mode": "legacy", "why": f"{CRITERIA_FILE} が無い"}
+    try:
+        lc = load_criteria(run)
+    except CriteriaError as e:
+        return {**out, "mode": "invalid", "why": f"{CRITERIA_FILE} の誤り", "problems": [f"{CRITERIA_FILE} の誤り: {e}"]}
+    if lc["status"] != "ok":
+        return {**out, "mode": "invalid", "why": f"{CRITERIA_FILE} の評価対象が未設定", "problems": [lc["reason"]]}
+    seg = lc["criteria"]["grid"].get("segment")
+    rec_name = seg.get("start_record") if isinstance(seg, dict) else None
+    if not rec_name:
+        return {**out, "mode": "manual", "why": f"手で組んだ run ({CRITERIA_FILE} の grid.segment が本段の開始の記録を指さない)"}
+    if seg.get("stage", "main") != "main":
+        return {**out, "mode": "invalid", "why": "grid.segment の stage が main でない",
+                "problems": [f"grid.segment.stage {seg.get('stage')!r} (本段 main の基準だけを扱う)"]}
+    rp = run / str(rec_name)
+    if not rp.exists():
+        return {**out, "tool": TOOL_OLD, "mode": "pre_main", "why": f"本段の開始の記録 {rec_name} が無い (前の段・本段の前の起動)"}
+    fnv_key = str(seg.get("config_fnv_key") or "main_config.fnv")
+    sha_key = str(seg.get("criteria_sha256_key") or "settle_criteria.sha256")
+    probs = []
+    try:
+        note = json.loads(rp.read_text())
+        if not isinstance(note, dict):
+            raise ValueError("JSON の対応表でない")
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return {**out, "mode": "main", "why": f"本段の開始の記録 {rec_name} がある", "problems": [f"{rec_name} を読めない ({e})"]}
+    if note.get("event") != "main_stage_started":
+        probs.append(f"{rec_name} の event が main_stage_started でない ({note.get('event')!r})")
+    cfg_name = str(_dotted(note, "main_config.file") or "solverConfig.yaml")
+    main_fnv = _dotted(note, fnv_key)
+    main_sha = _dotted(note, "main_config.sha256")
+    crit_sha = _dotted(note, sha_key)
+    try:
+        cfg_raw = (run / cfg_name).read_bytes()
+    except OSError as e:
+        cfg_raw = None
+        probs.append(f"本段の設定 {cfg_name} を読めない ({e})")
+    import stage_manifest as _SM     # 同じ tools の FNV-1a 64 (forge の appendLaunchRecord と同じ定義)
+    cfg_fnv = _SM.fnv1a64(cfg_raw) if cfg_raw is not None else None
+    cfg_sha = _sha256_bytes(cfg_raw) if cfg_raw is not None else None
+    ll = last_launch(run)
+    launch_fnv = ll.get("cfg_fnv") if isinstance(ll, dict) and "error" not in ll else None
+    binding = {"record": str(rec_name), "config_file": cfg_name, "main_config_fnv": main_fnv, "main_config_sha256": main_sha,
+               "config_fnv": cfg_fnv, "config_sha256": cfg_sha, "launch": ll, "launch_cfg_fnv": launch_fnv,
+               "record_criteria_sha256": crit_sha, "criteria_sha256": lc["sha256"], "keys": {"config_fnv": fnv_key, "criteria_sha256": sha_key}}
+    if launch_fnv is not None and main_fnv is not None and launch_fnv != main_fnv:
+        return {**out, "tool": TOOL_OLD, "mode": "not_main", "binding": binding,
+                "why": f"最後の forge の起動 (cfg_fnv {launch_fnv}) が本段の記録 ({fnv_key} {main_fnv}) と違う (本段でない起動)"}
+    if isinstance(ll, dict) and "error" in ll:
+        probs.append(f"起動の記録: {ll['error']}")
+    elif isinstance(ll, dict) and launch_fnv is None:
+        probs.append(f"{LAUNCHES_FILE} の最後の起動に cfg_fnv が無い")
+    if main_fnv is None:
+        probs.append(f"{rec_name} に {fnv_key} が無い (本段の起動を照合できない)")
+    elif cfg_fnv is not None and cfg_fnv != main_fnv:
+        probs.append(f"今の {cfg_name} の fnv {cfg_fnv} が {rec_name} の {fnv_key} {main_fnv} と違う")
+    if main_sha is None:
+        probs.append(f"{rec_name} に main_config.sha256 が無い")
+    elif cfg_sha is not None and cfg_sha != main_sha:
+        probs.append(f"今の {cfg_name} の sha256 {cfg_sha[:16]}… が {rec_name} の main_config.sha256 {str(main_sha)[:16]}… と違う")
+    if crit_sha is None:
+        probs.append(f"{rec_name} に {sha_key} が無い (基準を本段に結び付けられない)")
+    elif crit_sha != lc["sha256"]:
+        probs.append(f"今の {CRITERIA_FILE} の sha256 {lc['sha256'][:16]}… が {rec_name} の {sha_key} {str(crit_sha)[:16]}… と違う")
+    return {**out, "mode": "main", "why": f"本段の起動 ({rec_name} と照合)", "problems": probs, "binding": binding}
 
 
 def verdict_line(result: dict) -> str:

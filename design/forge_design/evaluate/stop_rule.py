@@ -729,16 +729,34 @@ def delete_after(run_dir, step: int) -> list:
 
 
 def postprocess(run_dir) -> dict:
-    """`run_case.sh` と同じ後処理 (check_convergence.py → CONVERGENCE_VERDICT.txt、plot_implicit_residuals.py → residual_history.png)。"""
+    """`run_case.sh` と同じ後処理 (判定の道具の選択 → CONVERGENCE_VERDICT.txt (1 行目に使った道具)、plot_implicit_residuals.py →
+    residual_history.png)。道具の選択は run_case.sh と同じ規則 (`settle.select_judge`; plan tooling-settle-convergence-and-monitor §4.9 の 2):
+    settle_criteria.yaml の無い run・前の段・本段でない起動は check_convergence.py、それ以外は check_settled.py --bind
+    (基準のある run は選択に失敗しても旧の道具へ落とさない; VERDICT の行が無ければ INDETERMINATE・終了コード 3 を足す)。"""
     from .runner import FORGE_TOOLS, _ENV
     run_dir = Path(run_dir)
-    with open(run_dir / "CONVERGENCE_VERDICT.txt", "w") as fh:
-        r = subprocess.run(["python3", str(FORGE_TOOLS / "check_convergence.py"), "."], cwd=run_dir, env=_ENV, stdout=fh, stderr=subprocess.STDOUT)
-    with open(run_dir / "CONVERGENCE_VERDICT.txt", "a") as fh:
-        fh.write(f"CONVERGENCE_EXIT: {r.returncode}\n")
+    tool, why = "check_convergence.py", "settle_criteria.yaml が無い"
+    if criteria_present(run_dir):
+        try:
+            sel = _settle().select_judge(run_dir)
+            tool, why = sel["tool"], sel["why"]
+        except Exception as e:  # noqa: BLE001 — 選択に失敗しても基準のある run は旧の道具へ落とさない
+            tool, why = "check_settled.py", f"道具の選択に失敗 ({type(e).__name__}: {e}); 基準のある run なので check_settled.py"
+    vp = run_dir / "CONVERGENCE_VERDICT.txt"
+    with open(vp, "w") as fh:
+        fh.write(f"TOOL: {tool} ({why})\n")
+        fh.flush()
+        r = subprocess.run(["python3", str(FORGE_TOOLS / tool), "."] + (["--bind"] if tool == "check_settled.py" else []),
+                           cwd=run_dir, env=_ENV, stdout=fh, stderr=subprocess.STDOUT)
+    rc = r.returncode
+    with open(vp, "a") as fh:
+        if tool == "check_settled.py" and not re.search(r"^VERDICT: ", vp.read_text(errors="replace"), re.M):
+            fh.write(f"VERDICT: INDETERMINATE (check_settled.py が VERDICT を出さずに終わった; 終了コード {rc})\n")
+            rc = 3
+        fh.write(f"CONVERGENCE_EXIT: {rc}\n")
     subprocess.run(["python3", str(FORGE_TOOLS / "plot_implicit_residuals.py"), "--input", "residual_history.csv", "--output", "residual_history.png"],
                    cwd=run_dir, env=_ENV, capture_output=True)
-    return {"by": "watcher", "convergence_exit": r.returncode}
+    return {"by": "watcher", "tool": tool, "convergence_exit": rc}
 
 
 # ------------------------------------------------------------------ forge のプロセス

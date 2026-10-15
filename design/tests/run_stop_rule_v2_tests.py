@@ -34,9 +34,10 @@ res_nodes_i.h5 → 流量の行 i の順に書き (流量の行が完成の印)�
         修正前は要求を置いて FAILED no_stopped_at)。forge が上限より前に終わり (80,000 で終了、上限 100,000)、その後に保持を満たした
         格子点を判定する → 要求を置かず FAILED (forge_exit; §5.1 #5c (B))。見張りがその格子点を forge の終了の印の後に判定するよう、
         試験の中だけ残差の行の完成の判定 (`residual_row_ready`) を印が出るまで偽にする。
-      - forge は要求で止まったが run_case.sh の後処理 (check_convergence.py) が stop_wait_s を超える → 時間切れにせず REACHED
+      - forge は要求で止まったが run_case.sh の後処理 (収束の判定) が stop_wait_s を超える → 時間切れにせず REACHED
         (§5.1 #5b; forge の終了は run_case_stdout.log の `[run_case] forge exit=`)。後処理は PATH の先頭に置いた python3 の包み
-        (check_convergence.py のときだけ眠ってから本物を exec) で遅らせる。
+        (判定の道具 check_convergence.py・check_settled.py の判定のときだけ眠ってから本物を exec; 2026-10-16 から基準のある run の本段は
+        run_case.sh が check_settled.py で判定する、plan tooling-settle-convergence-and-monitor §4.9 の 2) で遅らせる。
       - 残差が非有限 → DIVERGED の判定で STOP_REQUEST → FAILED (diverged)。基準に無い残差の列が値を持つ → 未設定の判定で止めて FAILED
         (criteria_unset)。
       - 起動前に STOP_REQUEST が残っている → forge を起動せず RuntimeError (ファイルは消さない)。基準の誤り・出力の設定の不足も起動しない。
@@ -311,7 +312,8 @@ SLOW_POST_S = 15
 
 
 class slow_postprocess:
-    """run_case.sh の後処理を遅らせる: PATH の先頭に python3 の包みを置き、check_convergence.py のときだけ seconds 眠ってから本物の
+    """run_case.sh の後処理を遅らせる: PATH の先頭に python3 の包みを置き、判定の道具 (check_convergence.py・check_settled.py の判定;
+    道具の選択 --select は除く) のときだけ seconds 眠ってから本物の
     python3 を exec する (見張りが run_case.sh に渡す環境 runner._ENV を一時的に書き換える; 偽の forge は sys.executable で動くので影響しない)。"""
 
     def __init__(self, seconds: float):
@@ -322,7 +324,8 @@ class slow_postprocess:
         d = TMP / "slow_python3"
         d.mkdir(exist_ok=True)
         w = d / "python3"
-        w.write_text("#!/bin/sh\ncase \"$1\" in *check_convergence.py) sleep %s;; esac\nexec %s \"$@\"\n" % (self.seconds, real))
+        w.write_text("#!/bin/sh\ncase \"$*\" in *--select*) ;; *check_convergence.py*|*check_settled.py*) sleep %s;; esac\n"
+                     "exec %s \"$@\"\n" % (self.seconds, real))
         w.chmod(0o755)
         self.saved = RN._ENV.get("PATH")
         RN._ENV["PATH"] = f"{d}:{self.saved}"
@@ -522,6 +525,11 @@ def test_watcher():
               "rows" not in rec and "delta_series" not in rec and SR.res_steps(rd) == [0, 80001], str(SR.res_steps(rd)))
         check("REACHED: forge を kill していない (stop_forge なし)・run_case.sh の後処理が走った",
               rec.get("stop_forge") is None and rec["postprocess"]["by"] == "run_case.sh")
+        cvt = (rd / "CONVERGENCE_VERDICT.txt").read_text()
+        check("REACHED: run_case.sh の後処理は基準のある run を check_settled.py で判定 (1 行目 TOOL・SETTLED; §4.9 の 2)、"
+              "SETTLE_VERDICT.json は見張りが後から書いた再評価",
+              cvt.startswith("TOOL: check_settled.py") and "VERDICT: SETTLED" in cvt and "CONVERGENCE_EXIT: 0" in cvt
+              and st["reeval"]["sha256"] == SR._sha256(rd / ST.VERDICT_FILE), cvt[:160])
         check("REACHED: solverConfig と stage_manifest の本段の nStepOuter = 上限 100,000",
               RA._cfg_value((rd / "solverConfig.yaml").read_text(), "nStepOuter") == 100000)
 
@@ -657,7 +665,7 @@ def test_watcher():
         with slow_postprocess(SLOW_POST_S):
             rc, rec, st = run_case(rd, watch={"stop_wait_s": SLOW_STOP_WAIT_S})
         sw = rec.get("stop_wait") or {}
-        check(f"後処理が遅い (check_convergence.py の前に {SLOW_POST_S} s) が forge は止まった → stop_wait_s {SLOW_STOP_WAIT_S} s を超えても "
+        check(f"後処理が遅い (判定の道具の前に {SLOW_POST_S} s) が forge は止まった → stop_wait_s {SLOW_STOP_WAIT_S} s を超えても "
               "REACHED (rc 0・80,001・failures なし)",
               rc == 0 and state_ok(rc, st, "REACHED") and st["stop_step"] == 80001 and st["failures"] == [] and st["forge_rc"] == 0,
               f"{st and (st['status'], st['failures'], st.get('reason'))}")

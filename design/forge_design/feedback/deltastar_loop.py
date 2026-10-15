@@ -38,6 +38,14 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
 抽出の表を run の直下に写す。Euler の参照は `--euler-ref-res res_<N>.h5 --euler-ref-sha256 HEX` でスナップショットを固定できる (sha が
 合わなければ例外; 無ければ今までどおり最新の出力)。
 
+**関門の新方式** (2026-10-16、plan tooling-settle-convergence-and-monitor §4.9 の 1・2、codex diagnose settle-migration-7 を全件採用):
+run に `settle_criteria.yaml` があれば (分岐は基準のファイルの有無だけ; 判定不能・照合の不一致で旧方式へ落とさない) `_handoff_gate_v2`:
+停止規則 v2 の `STOP_RULE_STATE.json` が REACHED、停止の step の再評価 (`SETTLE_VERDICT.json`) の全体が SETTLED (残差・流量の収支・目的の量)、
+状態・再評価・STOPPED_AT・停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の基準の sha256・
+見張りの記録の照合、δ_E は停止規則が止めた step で抽出した `stop_rule_v2/delta_E_<step>/` を契約 (状態 ok・step・場と表の sha256・
+抽出の設定・Euler の参照・ω) を確かめて使う (抽出し直さない; 帯の感度は記録だけ)。(d) y₁⁺・(f) 参照と ω・(g) 被覆・(h) 次の壁は今のまま。
+合格したら表を旧方式と同じ名前で run の直下に写す (`delta_r_next.csv` ほか)。HANDOFF_GATE.json の `method` (v1 / v2) にどちらを使ったかを書く。
+
 推奨 (2026-09-04, case/45 run_0026 で検証): 収束済み NS 場からの warm start では
   `--stages none --cfl 5 --implicit-relax 0.7 --steps 12000`
 (soft/mid 6000 step は不要、cfl 5 + relax 0.7 で 5000〜9000 step で cfl1/24000 step と同じ残差水準・出口 M は 8000 step で凍結。
@@ -966,6 +974,14 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
     why_uc = override_reason("allow_unconverged", allow_unconverged)
     why_us = override_reason("allow_unsettled", allow_unsettled)
     src = _caller_delta_e_source(extractor, delta_e_source)
+    if SR.criteria_present(run_dir):
+        # 新方式 (settle_criteria.yaml のある run; plan tooling-settle-convergence-and-monitor §4.9 の 1): 停止規則 v2 の記録と照合し、
+        # 停止の step で抽出済みの δ_E を使う (抽出し直さない)。判定不能・照合の不一致で旧方式へ落とさない
+        if src is not None:
+            raise ValueError("新方式 (settle_criteria.yaml のある run) の δ_E は停止規則 v2 が止めた step で抽出したものだけを使う — "
+                             "extractor・delta_e_source は旧方式の run だけ")
+        return _handoff_gate_v2(run_dir, problem=problem, euler_ref=euler_ref, omega=omega, why_nr=why_nr, why_uc=why_uc, why_us=why_us,
+                                write=write, extract=extract)
     st = stop_state(run_dir)
     cv = convergence_verdict(run_dir)
     blocked, unsettled, applied = [], [], []
@@ -1071,7 +1087,9 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
                         shutil.copy2(od / f, run_dir / f)
                         made.append(f)
                 ext["made"] = made
-    rec = {"version": 3, "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a・#36e・#36h (§6 V-h370)",
+    rec = {"version": 3, "method": "v1",
+           "method_note": "旧方式 (settle_criteria.yaml の無い run): 停止規則 v1・check_convergence.py --segment・stop_rule.json の窓・関門の抽出",
+           "plan": "plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a・#36e・#36h (§6 V-h370)",
            "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
            "proceed": not blocked, "blocked_by": blocked,
            "settled": mark["settled"], "unsettled_overrides": mark["unsettled_overrides"], "delta_e_source": mark["delta_e_source"],
@@ -1092,6 +1110,458 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
     return rec
 
 
+# --- 受け渡しの関門の新方式 (settle_criteria.yaml のある run; plan tooling-settle-convergence-and-monitor §4.9 の 1・2、
+#     codex diagnose 2026-10-16 settle-migration-7 の M1・M2・M5) ---------------------------------------------------------------------
+HANDOFF_V2_PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §4.9 の 1・2 (§4.8 の 2、codex diagnose 2026-10-16 "
+                   "settle-migration-7: 照合・δ_E の契約・分岐の規則)")
+_V2_TABLE_FILES = ("delta_r_next.csv", "delta_r_equiv.csv", "delta_r_equiv_diag.json", "delta_r_extract_summary.json", "delta_r_edge.csv")
+_V2_SENS_FILES = ("band_sensitivity.json", "band_sensitivity.csv")
+_V2_NEED_FILES = ("delta_r_next.csv", "delta_r_equiv_diag.json", "delta_r_extract_summary.json")
+
+
+def _settle_group(qs: list, kinds, label: str) -> dict:
+    """再評価 (SETTLE_VERDICT.json) の量のうち kind が kinds のものの判定。全部 SETTLED → kind PASS。
+    不合格の分類: DIVERGED (どれかが DIVERGED) / UNDETERMINED (どれかが INDETERMINATE か、理由に閾値の超過以外がある・量が無い) /
+    NOT_SETTLED (閾値の超過だけ = measured; 上書きの対象)。"""
+    sel = [q for q in qs if isinstance(q, dict) and q.get("kind") in kinds]
+    out = {"label": label, "quantities": {str(q.get("name")): q.get("verdict") for q in sel}, "pass": False}
+    if not sel:
+        out.update(kind="UNDETERMINED", why=f"再評価に {label} の量 ({'・'.join(kinds)}) が無い")
+        return out
+    bad = [q for q in sel if q.get("verdict") != "SETTLED"]
+    if not bad:
+        out.update(kind="PASS", **{"pass": True})
+        return out
+    vs = {q.get("verdict") for q in bad}
+    if "DIVERGED" in vs:
+        out["kind"] = "DIVERGED"
+    elif "INDETERMINATE" in vs or vs - {"NOT_SETTLED"} or any(set(q.get("categories") or []) - {"threshold"} for q in bad):
+        out["kind"] = "UNDETERMINED"
+    else:
+        out["kind"] = "NOT_SETTLED"
+        out["measured"] = True
+    out["failed"] = {str(q.get("name")): {"verdict": q.get("verdict"), "categories": q.get("categories"),
+                                          "checks": [c.get("check") for c in q.get("checks") or [] if not c.get("ok")][:6],
+                                          "reasons": [r.get("text") for r in q.get("reasons") or []][:3]} for q in bad}
+    out["why"] = "; ".join(f"{q.get('name')}: {q.get('verdict')}" + (f" ({(q.get('reasons') or [{}])[0].get('text')})" if q.get("reasons") else "")
+                           for q in bad)[:800]
+    return out
+
+
+def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
+    """照合 (§4.9 の 1、codex M1): STOP_RULE_STATE・SETTLE_VERDICT (停止の step の再評価)・STOPPED_AT・停止の step・本段の起動
+    (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の settle_criteria.yaml の sha256・stop_rule.json が
+    互いに一致すること。どれかが照合できない・食い違えば problems (受け渡しの関門は上書きでも通さない)。
+    戻り: {pass, problems, items, verdict (SETTLE_VERDICT.json の中身か None), stop_step, criteria_sha256}。"""
+    from ..evaluate import stop_rule as SR
+    probs, items = [], {}
+    sel = S.select_judge(run_dir)
+    items["select"] = {k: sel.get(k) for k in ("tool", "mode", "why", "problems")}
+    b = sel.get("binding") or {}
+    items["main_stage"] = {k: b.get(k) for k in ("record", "main_config_fnv", "main_config_sha256", "config_fnv", "config_sha256",
+                                                 "launch_cfg_fnv", "record_criteria_sha256", "criteria_sha256")}
+    if sel["mode"] != "main":
+        probs.append(f"本段の起動として照合できない ({sel['why']} [mode {sel['mode']}])")
+    probs += [f"本段の起動: {p}" for p in sel["problems"]]
+    if sel["mode"] == "main" and b.get("launch_cfg_fnv") is None:
+        probs.append(f"{S.LAUNCHES_FILE} の起動の記録が無い (最後の forge の起動を本段と照合できない)")
+    crit_sha = b.get("criteria_sha256")
+    if crit_sha is None:
+        try:
+            lc = S.load_criteria(run_dir)
+            crit_sha = lc.get("sha256")
+        except S.CriteriaError as e:
+            probs.append(f"{S.CRITERIA_FILE} の誤り: {e}")
+    out = {"pass": False, "problems": probs, "items": items, "verdict": None, "stop_step": None, "criteria_sha256": crit_sha}
+    if not isinstance(st, dict):
+        probs.append(f"{SR.STATE} が無い (停止規則 v2 の記録が要る)")
+        return out
+    if st.get("method") != "v2":
+        probs.append(f"{SR.STATE} の method が v2 でない ({st.get('method')!r})")
+    sc = (st.get("criteria") or {}).get("sha256")
+    if sc != crit_sha:
+        probs.append(f"{SR.STATE} の基準の sha256 {str(sc)[:16]}… が今の {S.CRITERIA_FILE} ({str(crit_sha)[:16]}…) と違う")
+    try:
+        note = json.loads((run_dir / S.MAIN_STAGE_RECORD).read_text())
+        n_main = ((note.get("main_config") or {}).get("nStepOuter")) if isinstance(note, dict) else None
+    except (OSError, ValueError):
+        n_main = None
+    if st.get("cap") is None or n_main != st.get("cap"):
+        probs.append(f"本段の記録の nStepOuter {n_main!r} が停止規則の上限 {st.get('cap')!r} と違う")
+    k = st.get("stop_step")
+    items["stop_step"] = k
+    if not isinstance(k, int) or isinstance(k, bool):
+        probs.append(f"{SR.STATE} に停止の step が無い ({k!r}; 状態 {st.get('status')})")
+        return out
+    out["stop_step"] = k
+    # STOPPED_AT (REACHED は協調停止の通知、CENSORED は上限まで回って通知なし)
+    stopped = S.read_stopped_at(run_dir)
+    sa_rec = st.get("stopped_at") or {}
+    sa_path = run_dir / SR.STOPPED_AT
+    items["stopped_at"] = {"present": stopped is not None, "step": (stopped or {}).get("step"), "state": sa_rec}
+    if st.get("status") == "CENSORED":
+        if stopped is not None:
+            probs.append(f"CENSORED なのに {SR.STOPPED_AT} がある")
+        if k != st.get("cap"):
+            probs.append(f"CENSORED の停止の step {k} が上限 {st.get('cap')} と違う")
+    else:
+        if stopped is None or "error" in stopped:
+            probs.append(f"{SR.STOPPED_AT} が無い・読めない ({(stopped or {}).get('error', '無い')})")
+        else:
+            if stopped["step"] != k:
+                probs.append(f"{SR.STOPPED_AT} の step {stopped['step']} が {SR.STATE} の停止の step {k} と違う")
+            if sa_rec.get("step") != stopped["step"] or sa_rec.get("sha256") != _sha256(sa_path):
+                probs.append(f"{SR.STOPPED_AT} (step {stopped['step']}、sha256 {_sha256(sa_path)[:16]}…) が {SR.STATE} の記録 "
+                             f"(step {sa_rec.get('step')}、sha256 {str(sa_rec.get('sha256'))[:16]}…) と違う")
+    # 停止の場
+    res = run_dir / f"res_{k}.h5"
+    res_sha = _sha256(res) if res.is_file() else None
+    items["stop_field"] = {"res": res.name, "sha256": res_sha, "state": st.get("stop_sha256")}
+    if res_sha is None:
+        probs.append(f"停止の場 {res.name} が無い")
+    elif res_sha != st.get("stop_sha256"):
+        probs.append(f"停止の場 {res.name} の sha256 {res_sha[:16]}… が {SR.STATE} の記録 {str(st.get('stop_sha256'))[:16]}… と違う")
+    # 見張りの記録 stop_rule.json (δ_E の抽出の設定の出所)
+    rp = run_dir / SR.RECORD
+    rec_sha = _sha256(rp) if rp.is_file() else None
+    if rec_sha is None or rec_sha != st.get("record_sha256"):
+        probs.append(f"{SR.RECORD} (sha256 {str(rec_sha)[:16]}…) が {SR.STATE} の記録 ({str(st.get('record_sha256'))[:16]}…) と違う・無い")
+    # 停止の step の再評価 SETTLE_VERDICT.json
+    ve = st.get("reeval") or {}
+    vp = run_dir / S.VERDICT_FILE
+    try:
+        v = json.loads(vp.read_text())
+        if not isinstance(v, dict):
+            raise ValueError("JSON の対応表でない")
+    except (OSError, ValueError) as e:
+        probs.append(f"{S.VERDICT_FILE} を読めない ({e})")
+        return {**out, "pass": False}
+    out["verdict"] = v
+    dig = SR.quantities_digest(v)
+    items["reeval"] = {"file": S.VERDICT_FILE, "end_step": v.get("end_step"), "verdict": v.get("verdict"), "digest": dig,
+                       "state": {kk: ve.get(kk) for kk in ("end_step", "verdict", "digest", "sha256")},
+                       "file_sha256": _sha256(vp), "file_sha256_matches_state": _sha256(vp) == ve.get("sha256")}
+    if ve.get("error") or not ve:
+        probs.append(f"{SR.STATE} に再評価の記録が無い ({ve.get('error') if ve else '無い'})")
+    if v.get("end_step") != k or ve.get("end_step") != k:
+        probs.append(f"再評価の終端 ({S.VERDICT_FILE} {v.get('end_step')!r}・{SR.STATE} {ve.get('end_step')!r}) が停止の step {k} と違う")
+    if (v.get("criteria") or {}).get("sha256") != crit_sha:
+        probs.append(f"{S.VERDICT_FILE} の基準の sha256 が今の {S.CRITERIA_FILE} と違う")
+    if dig != ve.get("digest") or v.get("verdict") != ve.get("verdict"):
+        probs.append(f"{S.VERDICT_FILE} の判定 ({v.get('verdict')}、量の sha256 {dig[:16]}…) が {SR.STATE} の再評価 "
+                     f"({ve.get('verdict')}、{str(ve.get('digest'))[:16]}…) と違う")
+    vsa = v.get("stopped_at")
+    if st.get("status") == "CENSORED":
+        if vsa is not None:
+            probs.append(f"CENSORED の再評価に STOPPED_AT がある")
+    elif not isinstance(vsa, dict) or vsa.get("step") != k:
+        probs.append(f"再評価が読んだ STOPPED_AT の step ({(vsa or {}).get('step') if isinstance(vsa, dict) else vsa!r}) が停止の step {k} と違う")
+    ll = S.last_launch(run_dir)
+    vl = (v.get("launch") or {}).get("forge_launches_last")
+    if ll is None or "error" in (ll or {}) or vl != ll:
+        probs.append(f"再評価の起動の記録 (forge_launches.jsonl の最後の行) が今の最後の起動と違う・無い")
+    out["pass"] = not probs
+    return out
+
+
+def _v2_delta_e(run_dir: Path, st: dict | None, rec_sr: dict | None, k, run_eref, om: float) -> dict:
+    """δ_E の受け渡しの契約 (§4.9 の 1、codex M2): REACHED は δ_E が使える保証ではないので、停止規則 v2 が止めた step で抽出した
+    `stop_rule_v2/delta_E_<k>/` を照合する: 状態の delta_E.status ok・抽出の step = 停止の step・停止の場の sha256・delta_r_next.csv の
+    sha256 (状態・見張りの記録・ファイル)・抽出の設定 (handoff_extract_settings と同じ: 見張りの記録の repr、抽出器の diag の帯の選び方と
+    一定 x の断面・端、要約の ω・昇格の上限・ノット)・Euler の参照 (抽出器の diag と本段の記録)・ω (呼び出し側 = 固定の値 = 抽出)。
+    帯の感度は合否に使わず、記録の欠け・非有限は warnings に書く (「問題なし」とは扱わない)。
+    戻り: {pass, why, problems, warnings, dir, summary (delta_r_extract_summary.json), delta_r_next_sha256, band_sensitivity}。"""
+    from ..evaluate import stop_rule as SR
+    probs, warns = [], []
+    out = {"pass": False, "problems": probs, "warnings": warns, "dir": None, "summary": None}
+    de = (st or {}).get("delta_E")
+    if not isinstance(de, dict):
+        probs.append(f"{SR.STATE} に δ_E の抽出の記録が無い ({de!r}; 停止規則は REACHED・CENSORED のときだけ抽出する)")
+        out["why"] = "; ".join(probs)
+        return out
+    out["state"] = {kk: de.get(kk) for kk in ("status", "step", "dir", "res_sha256", "delta_r_next_sha256", "seconds")}
+    if de.get("status") != "ok":
+        probs.append(f"δ_E の抽出の状態が ok でない ({de.get('status')!r}: {de.get('error') or de.get('reason')})")
+    if not isinstance(k, int) or de.get("step") != k:
+        probs.append(f"δ_E の抽出の step {de.get('step')!r} が停止の step {k!r} と違う")
+    if de.get("res_sha256") is None or de.get("res_sha256") != (st or {}).get("stop_sha256"):
+        probs.append(f"δ_E の抽出元の場の sha256 {str(de.get('res_sha256'))[:16]}… が停止の場の記録 {str((st or {}).get('stop_sha256'))[:16]}… と違う")
+    if probs:
+        out["why"] = "; ".join(probs)
+        return out
+    dname = f"delta_E_{k}"
+    dpath = Path(str(de.get("dir") or ""))
+    if dpath.name != dname or dpath.parent.name != SR.V2_DIR:
+        probs.append(f"δ_E の抽出の置き場 {de.get('dir')!r} が {SR.V2_DIR}/{dname} でない")
+    od = run_dir / SR.V2_DIR / dname
+    out["dir"] = str(od)
+    miss = [f for f in _V2_NEED_FILES if not (od / f).is_file()]
+    if miss:
+        probs.append(f"δ_E の抽出の置き場 {od} に {miss} が無い")
+        out["why"] = "; ".join(probs)
+        return out
+    dn_sha = _sha256(od / "delta_r_next.csv")
+    out["delta_r_next_sha256"] = dn_sha
+    rde = (rec_sr or {}).get("delta_E") if isinstance(rec_sr, dict) else None
+    if dn_sha != de.get("delta_r_next_sha256") or not isinstance(rde, dict) or dn_sha != rde.get("delta_r_next_sha256"):
+        probs.append(f"{dname}/delta_r_next.csv の sha256 {dn_sha[:16]}… が {SR.STATE}・{SR.RECORD} の記録と違う")
+    if not isinstance(rde, dict) or rde.get("status") != "ok" or rde.get("step") != k or rde.get("res_sha256") != de.get("res_sha256"):
+        probs.append(f"{SR.RECORD} の δ_E の記録が {SR.STATE} と合わない (状態・step・場の sha256)")
+    # 抽出の設定 (見張りの記録は repr で残す)
+    want = handoff_extract_settings()
+    ex = (rde or {}).get("extract") or {}
+    bad_ex = [kk for kk, vv in want.items() if ex.get(kk) != repr(vv)]
+    if ex.get("function") != "feedback.deltastar_loop.extract_and_merge" or bad_ex:
+        probs.append(f"δ_E の抽出の設定が受け渡しの固定の条件と違う (関数 {ex.get('function')!r}、違うキー {bad_ex})")
+    try:
+        summ = json.loads((od / "delta_r_extract_summary.json").read_text())
+        diag = json.loads((od / "delta_r_equiv_diag.json").read_text())
+        dset = diag.get("settings") or {}
+    except (OSError, ValueError) as e:
+        probs.append(f"δ_E の抽出の記録を読めない ({e})")
+        out["why"] = "; ".join(probs)
+        return out
+    out["summary"] = summ
+    if not (dset.get("band_select") == want["band_select"] and dset.get("remap_constant_x") is True
+            and dset.get("remap_edge") == want["remap_edge"]):
+        probs.append(f"抽出器の記録の帯・断面の条件が固定の条件と違う (band_select {dset.get('band_select')!r}・remap_constant_x "
+                     f"{dset.get('remap_constant_x')!r}・remap_edge {dset.get('remap_edge')!r})")
+    sm = summ.get("smooth") if isinstance(summ.get("smooth"), dict) else {}
+    if summ.get("omega") != want["omega"] or summ.get("max_lam_factor") != want["max_lam_factor"] or sm.get("knot_spacing") != want["knot_spacing"]:
+        probs.append(f"抽出の要約の ω {summ.get('omega')!r}・昇格の上限 {summ.get('max_lam_factor')!r}・ノット {sm.get('knot_spacing')!r} が"
+                     f"固定の条件 ({want['omega']}・{want['max_lam_factor']}・{want['knot_spacing']}) と違う")
+    if om != want["omega"] or om != summ.get("omega"):
+        probs.append(f"ω: 呼び出し側 {om} と抽出 {summ.get('omega')!r} と固定 {want['omega']} が揃わない")
+    # Euler の参照 (抽出器が読んだもの = 本段の記録の参照)
+    pinned = dset.get("euler_ref_pinned")
+    if isinstance(run_eref, dict):
+        ok_e = (isinstance(pinned, dict) and pinned.get("res") == run_eref.get("res") and pinned.get("sha256") == run_eref.get("sha256")
+                and _same_euler_ref(pinned, run_eref))
+    else:
+        rp_ = SR.resolve_path(run_eref) if run_eref else None
+        ok_e = (pinned is None and rp_ is not None and dset.get("euler_run") is not None
+                and Path(str(dset.get("euler_run"))).resolve() == rp_.resolve())
+    out["euler_ref"] = {"extraction": pinned if pinned is not None else dset.get("euler_run"), "run": run_eref, "pass": bool(ok_e)}
+    if not ok_e:
+        probs.append(f"δ_E の抽出の Euler の参照 ({out['euler_ref']['extraction']!r}) が本段の記録 ({run_eref!r}) と違う")
+    # 帯の感度 (記録だけ; 欠け・非有限は警告)
+    bs = de.get("band_sensitivity")
+    bsf = None
+    if (od / "band_sensitivity.json").is_file():
+        try:
+            bsf = json.loads((od / "band_sensitivity.json").read_text())
+        except ValueError:
+            bsf = None
+    out["band_sensitivity"] = bs
+    if not isinstance(bs, dict) or bsf is None:
+        warns.append("帯の位置の感度の記録が欠けている (状態の band_sensitivity・band_sensitivity.json; 「感度に問題なし」とは扱わない)")
+    else:
+        for kk in ("max_abs_B_minus_A_mm", "A_reproduces_delta_E_max_abs_rt"):
+            vv = bs.get(kk)
+            if not isinstance(vv, (int, float)) or not np.isfinite(vv):
+                warns.append(f"帯の位置の感度の {kk} が無い・非有限 ({vv!r}; 「感度に問題なし」とは扱わない)")
+        if bs.get("n_nonfinite_B_use"):
+            warns.append(f"帯の位置の感度: 使用域で B (y_b × {bs.get('factor')}) が非有限の列 {bs.get('n_nonfinite_B_use')}")
+    out["pass"] = not probs
+    if probs:
+        out["why"] = "; ".join(probs)
+    return out
+
+
+def _v2_convergence_text(k, v: dict | None, groups: dict, crit_sha) -> str:
+    """HANDOFF_CONVERGENCE.txt (新方式): 停止の step の再評価 (SETTLE_VERDICT.json) の量ごとの結果。"""
+    lines = [f"=== 受け渡しの関門 (新方式): 停止の step {k} の再評価 SETTLE_VERDICT.json (settle.judge、基準 sha256 {str(crit_sha)[:16]}…) ==="]
+    if v is None:
+        lines.append("再評価を読めない")
+        return "\n".join(lines) + "\n"
+    lines.append(f"OVERALL: {v.get('verdict')} (終端 {v.get('terminal_step')}、停止の観測 {v.get('stop_step')}、end_step {v.get('end_step')})")
+    for q in v.get("quantities") or []:
+        lines.append(f"  [{q.get('verdict')}] {q.get('name')} ({q.get('kind')})")
+        for c in q.get("checks") or []:
+            if not c.get("ok"):
+                lines.append(f"      NG {c.get('check')}: {c.get('value')} (許容 {c.get('limit')})")
+    for name, g in groups.items():
+        lines.append(f"{g['label']}: {g['kind']}" + (f" — {g.get('why')}" if g.get("why") else ""))
+    return "\n".join(lines) + "\n"
+
+
+def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc, why_us, write: bool, extract: bool) -> dict:
+    """受け渡しの関門の新方式 (`handoff_gate` から、settle_criteria.yaml のある run; plan tooling-settle-convergence-and-monitor §4.9 の 1)。
+    (a) STOP_RULE_STATE.json (method v2) が REACHED。CENSORED・NOT_USED は allow_not_reached で通す (今どおり理由つき)、FAILED・MISSING は通さない。
+    照合 (`_v2_binding`): 状態・再評価・STOPPED_AT・停止の step・本段の起動・今の基準・見張りの記録の一致。**上書きでも通さない**。
+    (b)(c) 停止の step の再評価 (SETTLE_VERDICT.json) の**全体が SETTLED**: (b) 残差 (residual)・(c) 流量の収支 (mass_balance)・目的の量
+    (出口コア M・線・流れ角・壁の熱流)。閾値の超過だけの NOT_SETTLED は (b) allow_unconverged・(c) と目的の量 allow_unsettled で通す
+    (今の上書きの対応: 収束の判定 / 落ち着きの条件)。DIVERGED・判定不能は通さない。
+    (d) 局所 y₁⁺ (今のまま、停止の step の壁のダンプ)。(e) δ_E の契約 (`_v2_delta_e`; 抽出し直さない)。(f) Euler の参照・ω (今のまま + 抽出との一致)。
+    (a)〜(f) を満たした (上書きを含む) ときだけ、停止規則の抽出の表を HANDOFF_EXTRACT_DIR に写して (g) 被覆・(h) 次の壁を今と同じ関数で
+    判定し、全部満たしたら run の直下に旧方式と同じ名前で写す (`delta_r_next.csv` ほか; 次の pass がそのまま読む)。
+    落ち着きの印 settled は (a) REACHED・(c)・目的の量が上書きなしで SETTLED (旧方式の (a)・(c)・(e) に対応)。"""
+    import datetime
+    import shutil
+    from ..evaluate import stop_rule as SR
+    S = SR._settle()
+    st_full = SR.read_state(run_dir)
+    st = stop_state(run_dir)
+    blocked, unsettled, applied, warnings = [], [], [], []
+    s = st["status"]
+    # (a) 停止の状態
+    if s != "REACHED":
+        if why_nr is not None and s in ("NOT_USED", "CENSORED"):
+            unsettled.append({"override": "allow_not_reached", "condition": "stop_state", "reason": why_nr, "status": s,
+                              "stop_step": st.get("stop_step")})
+            applied.append("allow_not_reached")
+        else:
+            blocked.append(f"停止の状態 {s} (REACHED が要る"
+                           + ("; allow_not_reached で通せるのは NOT_USED・CENSORED だけ)" if s not in ("NOT_USED", "CENSORED")
+                              else "; 明示の上書き allow_not_reached が無い)"))
+    # 照合 (上書きでは通さない)
+    bind = _v2_binding(run_dir, st_full, S)
+    if not bind["pass"]:
+        blocked.append("照合 (上書きでは通さない): " + "; ".join(bind["problems"])[:1500])
+    k = bind["stop_step"] if bind["stop_step"] is not None else st.get("stop_step")
+    checks = {"stop_step": k, "binding": {kk: vv for kk, vv in bind.items() if kk != "verdict"}}
+    # (b)(c) 再評価の全体
+    v = bind["verdict"]
+    qs = (v or {}).get("quantities") or []
+    g_res = _settle_group(qs, (S.KIND_RESIDUAL,), "(b) 残差")
+    g_mass = _settle_group(qs, (S.KIND_MASS,), "(c) 流量の収支")
+    g_tgt = _settle_group(qs, S.TARGET_KINDS, "目的の量")
+    other = [q.get("name") for q in qs if q.get("kind") not in (S.KIND_RESIDUAL, S.KIND_MASS) + tuple(S.TARGET_KINDS)]
+    overall = (v or {}).get("verdict")
+    checks["reeval"] = {"verdict": overall, "by_quantity": {str(q.get("name")): q.get("verdict") for q in qs},
+                        "pass": bool(overall == "SETTLED" and g_res["pass"] and g_mass["pass"] and g_tgt["pass"] and not other)}
+    if other:
+        blocked.append(f"再評価に知らない種類の量 {other} (上書きでは通さない)")
+    cv_kind = {"PASS": "PASS", "NOT_SETTLED": "NOT_CONVERGED"}.get(g_res["kind"], g_res["kind"])
+    cv = {"tool": f"{S.VERDICT_FILE} (停止の step の再評価、settle.judge; 新方式)", "kind": cv_kind, "rc": None,
+          "verdict": [f"OVERALL: {overall}", f"残差: {g_res['kind']}"], "end_step": (v or {}).get("end_step"),
+          "criteria_sha256": bind["criteria_sha256"]}
+    checks["residual"] = g_res
+    if g_res["kind"] != "PASS":
+        if why_uc is not None and g_res["kind"] == "NOT_SETTLED":
+            applied.append("allow_unconverged")
+        else:
+            blocked.append(f"(b) 残差の再評価 {g_res['kind']}: {g_res.get('why')}"
+                           + ("; 明示の上書き allow_unconverged が無い" if g_res["kind"] == "NOT_SETTLED" else "; 上書きでも通さない"))
+    for name, g in (("mass_balance", g_mass), ("targets", g_tgt)):
+        checks[name] = g
+        if g["pass"]:
+            continue
+        if why_us is not None and g.get("measured"):
+            unsettled.append({"override": "allow_unsettled", "condition": name, "reason": why_us, "end_step": k,
+                              "quantities": g["quantities"], "failed": g.get("failed")})
+            if "allow_unsettled" not in applied:
+                applied.append("allow_unsettled")
+            continue
+        blocked.append(f"{g['label']}の再評価 {g['kind']}: {g.get('why')}"
+                       + (" (判定不能・非有限は allow_unsettled でも通さない)" if why_us is not None else ""))
+    # (d) 局所 y₁⁺
+    wr = wall_resolution_verdict(run_dir, k)
+    checks["wall_resolution"] = {k_: v_ for k_, v_ in wr.items() if k_ != "output"}
+    checks["wall_resolution"]["pass"] = wr["kind"] == "PASS"
+    if not checks["wall_resolution"]["pass"]:
+        blocked.append("局所 y₁⁺ (check_wall_resolution): " + str(wr.get("kind")))
+    # (e)(f) δ_E の契約・Euler の参照・ω
+    try:
+        info = json.loads((run_dir / "prepare_info.json").read_text())
+    except (OSError, ValueError):
+        info = {}
+    sr = info.get("stop_rule") if isinstance(info.get("stop_rule"), dict) else {}
+    run_eref = sr.get("euler_ref") or info.get("euler_ref")
+    use_eref = run_eref if run_eref else euler_ref
+    eref_ok = use_eref is not None and (euler_ref is None or run_eref is None or _same_euler_ref(euler_ref, run_eref))
+    checks["euler_ref"] = {"run": run_eref, "caller": (euler_ref if isinstance(euler_ref, dict) or euler_ref is None else str(euler_ref)),
+                           "pinned": isinstance(use_eref, dict), "pass": bool(eref_ok)}
+    om = HANDOFF_OMEGA if omega is None else float(omega)
+    rec_sr = _read_stop_record(run_dir)
+    de = _v2_delta_e(run_dir, st_full, rec_sr, k, run_eref, om)
+    warnings += de["warnings"]
+    checks["delta_E"] = {kk: vv for kk, vv in de.items() if kk != "summary"}
+    # ω: 呼び出し側 = 固定の値、抽出の要約があればその ω も同じ (要約が無いときは δ_E の契約の側で止まる)
+    om_ex = (de.get("summary") or {}).get("omega") if de.get("summary") is not None else None
+    checks["omega"] = {"caller": om, "fixed": HANDOFF_OMEGA, "extraction": om_ex,
+                       "pass": bool(om == HANDOFF_OMEGA and (de.get("summary") is None or om_ex == HANDOFF_OMEGA))}
+    for name, label in (("euler_ref", "Euler の参照 (本段の記録と同じ)"), ("omega", "ω (固定の値・抽出と同じ)")):
+        if not checks[name]["pass"]:
+            blocked.append(f"{label}: {checks[name]}"[:600])
+    if not de["pass"]:
+        blocked.append("(e) δ_E の受け渡しの契約 (上書きでは通さない): " + str(de.get("why"))[:1200])
+    settled = bool(s == "REACHED" and bind["pass"] and g_mass["pass"] and g_tgt["pass"])
+    src = {"kind": "stop_rule_v2_stop_snapshot", "n_snapshots": 1, "res": (f"res_{k}.h5" if k is not None else None),
+           "steps": ([k] if k is not None else None), "stop_step": k, "is_stop_output": k is not None,
+           "res_sha256": (st_full or {}).get("stop_sha256"), "dir": f"{SR.V2_DIR}/delta_E_{k}",
+           "delta_r_next_sha256": de.get("delta_r_next_sha256"),
+           "provider": "stop_rule.watch_main_stage_v2 (extract_delta_e、止めた step の全場から 1 回; 関門は抽出し直さない)"}
+    mark = {"settled": settled, "unsettled_overrides": unsettled, "delta_e_source": src}
+    # (g)(h): 停止規則の抽出の表を写して判定 ((a)〜(f) を満たしたときだけ; 上書き不可)
+    ext = {"band_select": HANDOFF_BAND_SELECT, "settings": handoff_extract_settings(), "dir": HANDOFF_EXTRACT_DIR,
+           "source": src["dir"], "made": None, "summary": None, "delta_r_next_sha256": de.get("delta_r_next_sha256")}
+    if blocked or not extract:
+        why = "前の条件で止めた" if blocked else "extract=False"
+        checks["coverage"] = {"pass": False, "evaluated": False, "why": why}
+        checks["next_wall"] = {"pass": False, "evaluated": False, "why": why}
+        if not blocked:
+            blocked.append("抽出の表を判定していない (extract=False) — 被覆・held・次の壁を判定していない")
+    else:
+        od = run_dir / HANDOFF_EXTRACT_DIR
+        if od.exists():
+            shutil.rmtree(od)
+        od.mkdir(parents=True)
+        srcd = Path(de["dir"])
+        for f in _V2_TABLE_FILES + _V2_SENS_FILES:
+            if (srcd / f).is_file():
+                shutil.copy2(srcd / f, od / f)
+        dn = od / "delta_r_next.csv"
+        summ = dict(de["summary"])
+        summ.update(mark)
+        (od / "delta_r_extract_summary.json").write_text(json.dumps(summ, indent=1, default=str))
+        ext["summary"] = summ
+        if _sha256(dn) != de.get("delta_r_next_sha256"):
+            blocked.append(f"写した {dn} の sha256 が停止規則の抽出と違う (写しの失敗)")
+            checks["coverage"] = {"pass": False, "evaluated": False, "why": "写しの失敗"}
+            checks["next_wall"] = {"pass": False, "evaluated": False, "why": "写しの失敗"}
+        else:
+            x_e = ((info.get("physical_wall") or {}).get("domain") or [None, None])[1]
+            if x_e is None:
+                x_e = float(np.max(np.loadtxt(dn, delimiter=",", skiprows=1)[:, 0]))
+            checks["coverage"] = coverage_check(summ, dn, float(x_e))
+            checks["next_wall"] = next_wall_check(problem, dn)
+            for name, label in (("coverage", "抽出の全域の被覆・使用域の held と欠測"), ("next_wall", "次の壁の幾何の健全性")):
+                if not checks[name]["pass"]:
+                    blocked.append(f"{label}: {checks[name].get('why')}")
+        if not blocked:
+            made = []
+            for f in _V2_TABLE_FILES:
+                if (od / f).exists():
+                    shutil.copy2(od / f, run_dir / f)
+                    made.append(f)
+            ext["made"] = made
+    rec = {"version": 4, "method": "v2",
+           "method_note": ("新方式 (settle_criteria.yaml のある run): 停止規則 v2 の REACHED・停止の step の再評価 (SETTLE_VERDICT.json) の全体・"
+                           "本段の起動との照合・停止規則の δ_E の抽出 (抽出し直さない)"),
+           "plan": HANDOFF_V2_PLAN, "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+           "proceed": not blocked, "blocked_by": blocked, "warnings": warnings,
+           "settled": mark["settled"], "unsettled_overrides": mark["unsettled_overrides"], "delta_e_source": mark["delta_e_source"],
+           "stop_rule": st, "convergence": cv, "checks": checks,
+           "override": {"allow_not_reached": why_nr is not None, "allow_unconverged": why_uc is not None, "allow_unsettled": why_us is not None,
+                        "allow_not_reached_reason": why_nr, "allow_unconverged_reason": why_uc, "allow_unsettled_reason": why_us,
+                        "applied": applied,
+                        "scope": "上書きは (a) 停止の状態 NOT_USED・CENSORED (allow_not_reached)・(b) 残差の閾値の超過 (allow_unconverged)・"
+                                 "(c) 流量の収支と目的の量の閾値の超過 (allow_unsettled) だけ。照合 (状態・再評価・STOPPED_AT・停止の step・"
+                                 "本段の起動・基準・見張りの記録)・判定不能・非有限・FAILED・y₁⁺・δ_E の契約・参照・ω・被覆・held・次の壁は"
+                                 "上書きでは通さない"},
+           "extract": ext,
+           "note": "proceed は §4.9 の 1 の条件の全部を満たしたか (壁の更新は次の pass へ自動でつながない)。判定は「設定された量・区間について "
+                   "SETTLED」で、旧の低下の桁数の判定との一致は求めない。帯の位置の感度は抽出の方法への感度で、時間の整定や誤差の上限の証明では"
+                   "ない (合否に使わない)。settled: false は落ち着きの条件を上書きで通した「落ち着いていない場からの設計」"}
+    if write:
+        (run_dir / HANDOFF_CONVERGENCE).write_text(_v2_convergence_text(k, v, {"residual": g_res, "mass": g_mass, "targets": g_tgt},
+                                                                        bind["criteria_sha256"]))
+        (run_dir / HANDOFF_WALL_RESOLUTION).write_text(wr["output"])
+        _write_json_atomic(run_dir / HANDOFF_GATE, rec)
+    return rec
+
+
 def _write_json_atomic(path: Path, rec: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False, default=str))
@@ -1101,8 +1571,9 @@ def _write_json_atomic(path: Path, rec: dict) -> None:
 def _print_gate(label: str, gate: dict) -> None:
     ov = gate["override"]
     used = "; ".join("{} ({})".format(k, ov.get(k + "_reason")) for k in ov.get("applied") or [])
-    print(f"handoff gate ({label}): {'進む' if gate['proceed'] else '止める'} — 停止の状態 {gate['stop_rule']['status']}、"
-          f"収束の判定 {gate['convergence']['kind']}" + (f"、理由: {'; '.join(gate['blocked_by'])}" if gate["blocked_by"] else "")
+    print(f"handoff gate ({label}, 方式 {gate.get('method', 'v1')}): {'進む' if gate['proceed'] else '止める'} — 停止の状態 "
+          f"{gate['stop_rule']['status']}、収束の判定 {gate['convergence']['kind']}"
+          + (f"、理由: {'; '.join(gate['blocked_by'])}" if gate["blocked_by"] else "")
           + (f"、上書き {used}" if used else "")
           + ("" if gate.get("settled", True) else "、settled: false (落ち着いていない場からの設計)"), flush=True)
 
@@ -1119,7 +1590,9 @@ def _after_ns(run_dir, euler_ref, omega, m: dict, label: str, allow_not_reached:
     """NS の後段 (`run_pass`・`run_pass0_integral`・`run_from_table` 共通): 受け渡しの関門 (`handoff_gate`; 条件を満たせば関門の中で抽出し、
     表を run の直下に写す) → 通れば fixed_point.json (抽出の要約 = 落ち着きの印 settled・unsettled_overrides・delta_e_source を含む) →
     設計の標準出力。関門で止めたら fixed_point.json・delta_r_next.csv を run の直下に作らない (標準出力は今までどおり作る)。m (metrics) に
-    関門の記録 `handoff_gate` を足して返す。"""
+    関門の記録 `handoff_gate` を足して返す。新方式 (settle_criteria.yaml のある run、plan tooling-settle-convergence-and-monitor §4.9 の 1) では
+    関門は抽出し直さず、停止規則 v2 が止めた step で抽出した表 (`stop_rule_v2/delta_E_<step>/`) を照合して同じ名前で run の直下に写すので、
+    ここ (fixed_point.json = その要約 + 落ち着きの印) は旧方式と同じ流れ。"""
     run_dir = Path(run_dir)
     gate = handoff_gate(run_dir, problem=problem, euler_ref=euler_ref, omega=omega, allow_not_reached=allow_not_reached,
                         allow_unconverged=allow_unconverged, allow_unsettled=allow_unsettled)

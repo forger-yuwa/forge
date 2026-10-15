@@ -75,7 +75,16 @@
 
 **収束確認 (必須・NaN チェックとは別)**: 「NaN が無い」=「収束した」ではない。結果を使う/報告する前に、各保存量の残差が**実際に下がりきっているか**を必ず確認すること。
 
-- **判定は手作業の目視ではなく `solver_density_cuda/tools/check_convergence.py <run_dir> ...` を実行して行う** (本ルールの実体化ツール)。全残差列の低下桁数・トレンド・NaN を判定し `PASS / NOT CONVERGED / DIVERGED` を返す。**「収束した」「一致した」と報告する応答には、このツールの VERDICT を根拠として必ず貼ること** (これを怠り `rms_ro` だけで「収束」と誤報告した事例があるため、ツール経由を必須とする)。未収束なら「未収束」と明記し、未収束のトランジェント同士の場の比較を「一致」と表現しない。
+- **判定は手作業の目視ではなく `solver_density_cuda/tools/check_convergence.py <run_dir> ...` を実行して行う** (本ルールの実体化ツール)。全残差列の低下桁数・トレンド・NaN を判定し `PASS / NOT CONVERGED / DIVERGED` を返す。**「収束した」「一致した」と報告する応答には、このツールの VERDICT を根拠として必ず貼ること** (これを怠り `rms_ro` だけで「収束」と誤報告した事例があるため、ツール経由を必須とする)。未収束なら「未収束」と明記し、未収束のトランジェント同士の場の比較を「一致」と表現しない。(`settle_criteria.yaml` のある run の本段は次項)
+- **判定の正本は 2 つ** (2026-10-16、[plans/active/tooling-settle-convergence-and-monitor.md](plans/active/tooling-settle-convergence-and-monitor.md) §4.9 の 2)。
+  run に判定の基準 `settle_criteria.yaml` があり、その本段 (設計チェーンでは本段の開始の記録 `MAIN_STAGE_STARTED` と今の起動・設定・基準の
+  sha256 を照合) か、手で組んだ run (基準が本段の記録を指さない) なら、正本は `solver_density_cuda/tools/check_settled.py <run_dir>`
+  (「残差が準定常・流量の収支が取れる・目的の量が準定常」の AND を区間で判定、`SETTLED / NOT_SETTLED / DIVERGED / INDETERMINATE`、
+  結果は `SETTLE_VERDICT.json`)。基準の無い run・前の段 (S1・S2) は今の `check_convergence.py` (この節の各項)。`run_case.sh` は同じ規則で
+  道具を選び `CONVERGENCE_VERDICT.txt` の 1 行目に使った道具を書く (選択は `check_settled.py --select <run_dir>` で確かめる)。
+  **基準のある run が判定不能・照合の不一致になっても `check_convergence.py` へ落として合格にしない**。報告には使った道具・VERDICT・
+  判定区間を書く (新方式は「設定された量・区間について SETTLED」で、旧の低下の桁数との一致は求めない)。新方式で監視した量 (基準の
+  ファイルの量) はその VERDICT を根拠にしてよいが、**監視していない派生量は従来どおり `check_quasisteady.py` を要す** (下の「準定常確認」)。
 - **`rms_ro` だけで判断しない**。`residual_history.csv` の **全列** (`rms_ro`,`rms_roUx`,`rms_roUy`,`rms_roUz`,`rms_roe`、RANS 時は `rms_roK`,`rms_roOmega`) のトレンドを見る。`rms_ro` が低くても、運動量 (特に軸対称の `rms_roUy`) や乱流 (`rms_roK`/`rms_roOmega`) が**下げ止まり・横ばい・上昇**していれば未収束。実例: 軸対称 SST で `rms_ro`≈3e-5 でも `rms_roUy`≈1e-2 停滞・`rms_roK` 増大=近軸が未収束だった ([architecture-axisym-axis-singularity.md](plans/accepted/architecture-axisym-axis-singularity.md))。
 - **残差プラトーは「収束」ではない**。下げ止まる場合は、積分量 (massflux/推力/出口諸量) が**定常化**しているか、場が**発達しきっている**かを併せて確認する (リミットサイクルの可能性)。
 - **場の発達も確認する** ([develop-flow-before-reporting] と同趣旨): 残差が下がっていても、境界層・乱流・衝撃などが発達途中なら結果は使えない。中間 `res_*.h5` を時系列で見て、注目量が定常化したことを確認する。
@@ -96,7 +105,8 @@
   「このセッションが forge を回した case」を `forge_gate_claims.py` 経由で claim し、Stop 側は
   **claim した case の run だけ**を検査する。`session_id` が取れないときは絞り込まず全件検査する
   (ゲートを弱めない)。**他セッションの run ディレクトリに VERDICT を書きに行かないこと** —
-  block されたらその旨を伝えて止まる。
+  block されたらその旨を伝えて止まる。フックは `CONVERGENCE_VERDICT.txt` の有無と時刻だけを見るので、どちらの道具の形式でも
+  同じに扱う。**フックの通過は判定の記録があることの確認で、収束の合格ではない** (2026-10-16)。
 - **判定ツールが「判定不能」を返したら、それは合格ではない**。残差列が無い / 必須の保存量列が
   欠けている / 末尾窓の代表値が 0 といった入力は、以前は**合格として通っていた** (2026-09-19 修正)。
   回帰試験は `python3 solver_density_cuda/tools/test_gate_bad_input.py`。判定ロジックを触るときは必ず通す。

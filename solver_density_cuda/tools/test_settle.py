@@ -18,6 +18,9 @@ V2 の負例はすべて SETTLED にしないこと、各負例で理由の分�
 再現 (途中の 1 行の欠け・2,000 ごとの行だけ → raw は判定不能、grid では SETTLED)、区間の端の行、内反復の行の混入、壁の区間の幅
 (codex の例 [0.25, 1.75, 1, 1, 1, 1])。**既定 (grid・terminal_diff) は変更前 (`GRID_BASE_COMMIT` の settle.py を git から読む) と
 判定の結果がビット同一** (読めなければその検査は NG — 判定不能を合格にしない)。
+
+**道具の選択と本段の起動との照合** (§4.9 の 2; S1〜S11): `select_judge` の mode (main・pre_main・not_main・manual・legacy・invalid)、
+照合の不一致 (設定・基準の sha256・記録の fnv の欠け) は check_settled.py のまま判定不能 (旧の道具へ落とさない)、`--select`・`--bind`。
 """
 from __future__ import annotations
 
@@ -606,6 +609,96 @@ def test_verdict_file():
     chk("V1 壁の面積の取り方を記録", "A_i" in q["wall_heat_nodes"]["values"]["walls"][0]["area_method"])
 
 
+def test_select_bind():
+    """道具の選択 `select_judge` と `check_settled.py --select` / `--bind` (plan §4.9 の 2、codex diagnose settle-migration-7 M1・M5)。"""
+    print("=== 道具の選択と本段の起動との照合 (select_judge・--select・--bind) ===")
+    import stage_manifest as SM
+    seg = {"stage": "main", "start_record": "MAIN_STAGE_STARTED", "config_fnv_key": "main_config.fnv",
+           "criteria_sha256_key": "settle_criteria.sha256"}
+    cfg = "time: {last: {nStepOuter: 100000}}\n"
+
+    def mk(name, *, notice=True, launch="match", crit_seg=True):
+        run = build(name, end=40000, criteria=base_criteria(grid={"out_step_interval": DT, "start_step": 0,
+                                                                  "segment": seg if crit_seg else None}))
+        (run / "solverConfig.yaml").write_text(cfg)
+        if notice:
+            (run / "MAIN_STAGE_STARTED").write_text(json.dumps({
+                "event": "main_stage_started",
+                "main_config": {"file": "solverConfig.yaml", "sha256": settle._sha256_bytes(cfg.encode()), "nStepOuter": 100000,
+                                "fnv": SM.fnv1a64(cfg)},
+                "settle_criteria": {"file": settle.CRITERIA_FILE, "sha256": settle._sha256_bytes((run / settle.CRITERIA_FILE).read_bytes())}}))
+        if launch is not None:
+            fnv = SM.fnv1a64(cfg) if launch == "match" else launch
+            (run / "forge_launches.jsonl").write_text(json.dumps({"cfg_fnv": "aaaa"}) + "\n" + json.dumps({"cfg_fnv": fnv}) + "\n")
+        return run
+
+    def cli(run, *args):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            try:
+                rc = check_settled.main([*args, str(run)])
+            except SystemExit as e:
+                rc = e.code
+        return rc, buf.getvalue()
+
+    r = mk("sel_main")
+    s = settle.select_judge(r)
+    chk("S1 本段 (記録・今の設定・最後の起動・基準の sha256 が一致) → check_settled.py・問題なし",
+        s["tool"] == settle.TOOL_NEW and s["mode"] == "main" and s["problems"] == [], str(s["problems"]))
+    rc, out = cli(r, "--select")
+    chk("S1 --select: 1 行目 check_settled.py・終了コード 0", rc == 0 and out.splitlines()[0] == "check_settled.py", out[:120])
+    rc, out = cli(r, "--bind", "--no-write")
+    chk("S1 --bind: 照合を表示して判定 (SETTLED・終了コード 0)", rc == 0 and "照合:" in out and "VERDICT: SETTLED" in out, out[-200:])
+    r = mk("sel_nolaunch", launch=None)
+    s = settle.select_judge(r)
+    chk("S2 起動の記録が無い run は今の設定で照合 (一致なら本段・問題なし)", s["mode"] == "main" and s["problems"] == [], str(s["problems"]))
+    r = mk("sel_pre", notice=False)
+    s = settle.select_judge(r)
+    rc, out = cli(r, "--bind", "--no-write")
+    chk("S3 前の段 (記録が無い) → check_convergence.py; --bind は判定せず INDETERMINATE (終了コード 3)",
+        s["tool"] == settle.TOOL_OLD and s["mode"] == "pre_main" and rc == 3 and "本段の起動でない" in out, out[-160:])
+    r = mk("sel_not_main", launch="bbbbbbbbbbbbbbbb")
+    s = settle.select_judge(r)
+    chk("S4 最後の起動の cfg_fnv が本段の記録と違う → 本段でない起動 (check_convergence.py)", s["tool"] == settle.TOOL_OLD and s["mode"] == "not_main")
+    r = mk("sel_cfg_edit", launch=None)
+    (r / "solverConfig.yaml").write_text(cfg + "# 書き換え\n")
+    s = settle.select_judge(r)
+    rc, out = cli(r, "--bind")
+    chk("S5 起動の記録なしで今の設定が記録と違う → 本段として照合の不一致 (旧の道具へ落とさない)、--bind は INDETERMINATE・"
+        "SETTLE_VERDICT.json を書かない", s["tool"] == settle.TOOL_NEW and s["mode"] == "main" and len(s["problems"]) == 2
+        and rc == 3 and "照合の不一致" in out and not (r / settle.VERDICT_FILE).exists(), str(s["problems"])[:200])
+    r = mk("sel_crit_edit")
+    with open(r / settle.CRITERIA_FILE, "a") as f:
+        f.write("# 書き換え\n")
+    s = settle.select_judge(r)
+    chk("S6 基準の sha256 が記録と違う → 照合の不一致", s["mode"] == "main" and any("settle_criteria.sha256" in p for p in s["problems"]),
+        str(s["problems"]))
+    r = mk("sel_nofnv")
+    n = json.loads((r / "MAIN_STAGE_STARTED").read_text())
+    del n["main_config"]["fnv"]
+    (r / "MAIN_STAGE_STARTED").write_text(json.dumps(n))
+    s = settle.select_judge(r)
+    chk("S7 記録に main_config.fnv が無い → 照合できない (問題)", s["mode"] == "main" and any("main_config.fnv が無い" in p for p in s["problems"]))
+    r = mk("sel_manual", notice=False, launch=None, crit_seg=False)
+    s = settle.select_judge(r)
+    chk("S8 手で組んだ run (grid.segment が記録を指さない) → check_settled.py (照合なし)", s["tool"] == settle.TOOL_NEW and s["mode"] == "manual")
+    r = mk("sel_legacy")
+    (r / settle.CRITERIA_FILE).unlink()
+    s = settle.select_judge(r)
+    chk("S9 基準のファイルが無い → check_convergence.py (legacy)", s["tool"] == settle.TOOL_OLD and s["mode"] == "legacy")
+    r = mk("sel_invalid")
+    (r / settle.CRITERIA_FILE).write_text("schema: forge.settle_criteria/v1\nbogus: 1\n")
+    s = settle.select_judge(r)
+    chk("S10 基準の誤り → check_settled.py (invalid; 判定不能を返す、旧の道具へ落とさない)", s["tool"] == settle.TOOL_NEW and s["mode"] == "invalid"
+        and s["problems"])
+    r = mk("sel_stage")
+    c = yaml.safe_load((r / settle.CRITERIA_FILE).read_text())
+    c["grid"]["segment"] = {**seg, "stage": "S1"}
+    (r / settle.CRITERIA_FILE).write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
+    s = settle.select_judge(r)
+    chk("S11 grid.segment の stage が main でない → invalid (本段の基準だけを扱う)", s["mode"] == "invalid" and s["tool"] == settle.TOOL_NEW)
+
+
 def test_area():
     print("=== 壁の節点の面積 ===")
     coord = np.array([[0.0, 1.0, 0], [1.0, 1.0, 0], [2.0, 2.0, 0]])
@@ -927,6 +1020,7 @@ def main():
     test_negative_extra()
     test_axis_weight()
     test_verdict_file()
+    test_select_bind()
     test_raw_residual()
     test_wall_range()
     test_grid_bit_identity()

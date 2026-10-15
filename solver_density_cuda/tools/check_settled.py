@@ -23,9 +23,15 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   --end-step N: N までのデータで判定する (省略時は STOPPED_AT の step、無ければ入力のデータの最後)。
   --scan N: 格子点のうち N の倍数ごとに「その時点まで」で判定し、最初に SETTLED になった step を報告する (N は格子の間隔の倍数)。
   --json: 結果の JSON を標準出力に出す。
+  --bind: 本段の起動との照合をしてから判定する (run_case.sh の後処理が使う; plan §4.9 の 2)。`settle.select_judge` が
+          本段 (main) と照合し、食い違い・記録の欠けがあれば判定せず INDETERMINATE (SETTLE_VERDICT.json も書かない)。前の段・本段でない起動
+          (check_convergence.py の対象) も INDETERMINATE。手で組んだ run (基準が本段の開始の記録を指さない) はそのまま判定する。
+  python3 check_settled.py --select <run_dir>
+          判定の道具の選択だけ (1 行目 check_settled.py / check_convergence.py、2 行目 理由、続いて照合の問題; 終了コード 0)。
+          基準のファイルの無い run・前の段・本段でない起動は check_convergence.py、それ以外は check_settled.py (判定不能でも旧の道具へ落とさない)。
 
-終了コード: 0 SETTLED / 1 NOT_SETTLED / 2 DIVERGED / 3 INDETERMINATE (基準のファイルの誤り・引数の誤りも 3; argparse の既定の 2 は
-DIVERGED と紛れるので使わない)。
+終了コード: 0 SETTLED / 1 NOT_SETTLED / 2 DIVERGED / 3 INDETERMINATE (基準のファイルの誤り・引数の誤り・照合の不一致も 3; argparse の既定の
+2 は DIVERGED と紛れるので使わない)。
 """
 from __future__ import annotations
 
@@ -85,12 +91,41 @@ def main(argv=None) -> int:
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--no-write", action="store_true", help="SETTLE_VERDICT.json を書かない")
     g.add_argument("--out", default=None, help="結果の JSON の書き先 (既定 <run>/SETTLE_VERDICT.json)")
+    m = ap.add_mutually_exclusive_group()
+    m.add_argument("--select", action="store_true", help="判定の道具の選択だけを出す (1 行目 道具、2 行目 理由; 終了コード 0)")
+    m.add_argument("--bind", action="store_true", help="本段の起動との照合をしてから判定する (run_case.sh の後処理)")
     a = ap.parse_args(argv)
     run = Path(a.run_dir)
+    if a.select:
+        sel = settle.select_judge(run)
+        print(sel["tool"])
+        print(f"{sel['why']} [mode {sel['mode']}]")
+        for p in sel["problems"]:
+            print(f"照合の問題: {p}")
+        return 0
     if not run.is_dir():
         print(f"ERROR: {run} はディレクトリでない")
         print("VERDICT: INDETERMINATE (データ不足)")
         return settle.EXIT_CODE["INDETERMINATE"]
+    if a.bind:
+        sel = settle.select_judge(run)
+        if sel["tool"] != settle.TOOL_NEW:
+            print(f"この起動は {settle.TOOL_NEW} の対象でない: {sel['why']} (判定は {sel['tool']})")
+            print("VERDICT: INDETERMINATE (本段の起動でない)")
+            return settle.EXIT_CODE["INDETERMINATE"]
+        if sel["mode"] == "main":
+            if sel["problems"]:
+                print(f"本段の起動との照合の不一致 ({sel['why']}; 判定しない):")
+                for p in sel["problems"]:
+                    print(f"  {p}")
+                print("VERDICT: INDETERMINATE (本段の起動との照合の不一致)")
+                return settle.EXIT_CODE["INDETERMINATE"]
+            b = sel["binding"]
+            print(f"照合: {b['record']} の本段の設定 (fnv {b['main_config_fnv']}) = 今の {b['config_file']}"
+                  + (f" = 最後の起動の cfg_fnv" if b["launch_cfg_fnv"] is not None else " (起動の記録なし)")
+                  + f"、基準の sha256 {b['criteria_sha256'][:16]}… = 記録")
+        else:
+            print(f"照合: {sel['why']} [mode {sel['mode']}]")
     try:
         loaded = settle.load_criteria(run)
         data = settle.RunData(run, loaded["criteria"]) if loaded["status"] == "ok" else None

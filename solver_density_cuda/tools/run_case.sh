@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# forge を run ディレクトリで実行し、終了後に必ず check_convergence.py を走らせて
-# VERDICT を CONVERGENCE_VERDICT.txt に残す + 残差プロットを生成する。
+# forge を run ディレクトリで実行し、終了後に必ず収束の判定 (check_convergence.py、settle_criteria.yaml のある run の本段は
+# check_settled.py; 選択の規則は下の後処理) を走らせて VERDICT を CONVERGENCE_VERDICT.txt に残す + 残差プロットを生成する。
 #
 # 使い方:  run_case.sh [run_dir]        (省略時は $PWD)
 #   バックグラウンド長時間 run も:  nohup run_case.sh <run_dir> &
@@ -63,8 +63,31 @@ echo "[run_case] convergence check ->"
 # 判定の終了コードを **握りつぶさず記録する**。段階起動では段ごとに未収束でも先へ進むのが正しいので
 # 既定では run_case 自体の終了コードには反映しないが、`FORGE_STRICT_CONVERGENCE=1` を立てると
 # 未収束・判定不能を run_case の失敗として返す (2026-09-19 codex: `|| true` で飲み込んでいた)。
-python3 "$ROOT/solver_density_cuda/tools/check_convergence.py" . > CONVERGENCE_VERDICT.txt 2>&1
-conv_rc=$?
+# 判定の道具の選択 (2026-10-16、plan tooling-settle-convergence-and-monitor §4.9 の 2): settle_criteria.yaml の無い run は今どおり
+# check_convergence.py。ある run は `check_settled.py --select` が決める (本段の起動・手で組んだ run → check_settled.py --bind、
+# 前の段・本段でない起動 → check_convergence.py)。基準のある run は選択に失敗しても旧の道具へ落とさない。1 行目に使った道具を書く
+TOOLS="$ROOT/solver_density_cuda/tools"
+judge_tool="check_convergence.py"; judge_why="settle_criteria.yaml が無い"
+if [ -e settle_criteria.yaml ] || [ -L settle_criteria.yaml ]; then
+    sel=$(python3 "$TOOLS/check_settled.py" --select . 2>/dev/null)
+    judge_tool=$(printf '%s\n' "$sel" | sed -n 1p)
+    judge_why=$(printf '%s\n' "$sel" | sed -n 2p)
+    if [ "$judge_tool" != "check_convergence.py" ] && [ "$judge_tool" != "check_settled.py" ]; then
+        judge_why="道具の選択に失敗 (check_settled.py --select の出力 '${judge_tool}'); 基準のある run なので check_settled.py"
+        judge_tool="check_settled.py"
+    fi
+fi
+if [ "$judge_tool" = "check_settled.py" ]; then
+    { echo "TOOL: check_settled.py ($judge_why)"; python3 "$TOOLS/check_settled.py" . --bind; } > CONVERGENCE_VERDICT.txt 2>&1
+    conv_rc=$?
+    if ! grep -q '^VERDICT: ' CONVERGENCE_VERDICT.txt; then
+        echo "VERDICT: INDETERMINATE (check_settled.py が VERDICT を出さずに終わった; 終了コード $conv_rc)" >> CONVERGENCE_VERDICT.txt
+        conv_rc=3
+    fi
+else
+    { echo "TOOL: check_convergence.py ($judge_why)"; python3 "$TOOLS/check_convergence.py" .; } > CONVERGENCE_VERDICT.txt 2>&1
+    conv_rc=$?
+fi
 echo "CONVERGENCE_EXIT: $conv_rc" >> CONVERGENCE_VERDICT.txt
 cat CONVERGENCE_VERDICT.txt
 python3 "$ROOT/solver_density_cuda/tools/plot_implicit_residuals.py" \
