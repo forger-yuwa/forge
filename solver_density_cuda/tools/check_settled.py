@@ -1,139 +1,117 @@
 #!/usr/bin/env python3
-r"""収束の判定 (案) — 「残差が準定常・流量の収支が取れる・目的の量が準定常」の AND (plan tooling-nozzle-card-local-mesh §4.4・§5.1 #4b、
-ユーザ決定 2026-10-15「残さが準定常になり、流量バランスが取れ、目的とする物理量が準定常担ったら収束と判定しないか」)。
+r"""収束の判定の道具 — 「残差が準定常・流量の収支が取れる・目的の量が準定常」の AND
+(plan `plans/active/tooling-settle-convergence-and-monitor.md` §4.2・§4.3・§4.8、§5.1 #2〜#4。判定の中身は共通の部品 `settle.py`)。
 
-この版は**残差の準定常**の部分だけ (流量の収支と目的の量は forge の出力の追加 #4a の後に足す)。低下の桁数は見ない。
-
-残差の基準 (codex diagnose 2026-10-15 m55-settle-and-monitor M1: log10 の残差に `check_quasisteady` (系列の平均で割る) を使わない):
-- 列ごとに y = log10(rms) を、本段の outer_end の行から取る (step の間隔は履歴のまま)。全履歴に非有限があれば DIVERGED。
-- 末尾の窓 W [step] (既定 20,000) に点が `min_points` (既定 11) 以上あること (足りなければ判定不能)。
-- 傾き: 窓の y の step に対する 1 次の最小二乗の傾き s で |s|·W ≤ `slope_dec` (既定 log10(1.05) ≈ 0.0212 桁)。
-- 振幅: 窓の y の p95 − p5 ≤ `amp_dec` (既定 0.1 桁)。
-- 持続的な上昇: 直前の窓 (W) の平均から末尾の窓の平均への上昇 ≤ `rise_dec` (既定 log10(1.10) ≈ 0.0414 桁; 4 万 step で 10 % を超える上昇を通さない)。
-- 恒等ゼロの列は非活動として外す。途中からゼロ・一部ゼロは異常として判定不能。
-閾値は**検証済みの既定ではない** (試して決める; plan §4.4 の修正 M1)。
+**契約** (低下の桁数は見ない):
+- 入力は run の `settle_criteria.yaml` だけ。無い・目的の量が無い → `INDETERMINATE (評価対象が未設定)` (置き場所と量の種類の一覧を出す)。
+  知らない種類・キー・閾値の欠け → 基準のファイルの誤りとして INDETERMINATE (黙って既定値で埋めない)。ひな形は
+  `settle_criteria.template.yaml`、設計チェーンの run は `design/forge_design/evaluate/settle_presets.py` が問題 YAML の
+  `evaluate.settle` から作る。
+- 判定は通常の出力の格子 (`time.outStepInterval` の倍数の step) の点だけで行う。窓 W は端点込み (W 20,000・間隔 2,000 → 11 点)、
+  残差の上昇は直前の窓 (T−2W〜T−W) と比べる。格子点 s の観測 = 残差の行 s−1・流量の行 s・`res_nodes_s.h5`・壁の h5。
+  窓の格子点のどれかが欠ければ判定不能 (データ不足)。本段の開始の場には残差の行も節点・流量の出力も無いので、最初に判定できる
+  終端は開始 + 2W + 間隔。協調停止などで終端が格子に乗らなければ、その観測は別の検査 (非有限・直前の格子からの差・窓に加えた許容)
+  だけに使う。
+- 量の種類: residual・mass_balance・exit_core_mach・line_mach・exit_flow_angle・wall_heat_nodes (詳細は settle.py の docstring)。
+  各量に verdict・使った値・不合格の理由の分類 (閾値の超過 / データ不足 / 未設定 / 非有限) を書く。全体は AND
+  (DIVERGED > INDETERMINATE > NOT_SETTLED > SETTLED)。判定不能は合格にしない。
+- 結果は `<run>/SETTLE_VERDICT.json` (基準の中身と sha256・起動の識別・格子・判定区間・終端・使ったファイルの一覧と sha256・各量)。
+  閾値に `provisional: true` があれば VERDICT の行に「閾値は暫定 (plan §6 V3 で決める)」と出す。
 
 使い方:
-  python3 check_settled.py <run_dir|residual_history.csv[.gz]> [--window 20000] [--scan 2000]
-  --scan N: N step ごとに「その時点までの履歴」で判定し、最初に残差の準定常を満たした step を報告する (到達の時点の比較用)。
+  python3 check_settled.py <run_dir> [--end-step N] [--scan N] [--json] [--no-write | --out PATH]
+  --end-step N: N までのデータで判定する (省略時は STOPPED_AT の step、無ければ入力のデータの最後)。
+  --scan N: 格子点のうち N の倍数ごとに「その時点まで」で判定し、最初に SETTLED になった step を報告する (N は格子の間隔の倍数)。
+  --json: 結果の JSON を標準出力に出す。
+
+終了コード: 0 SETTLED / 1 NOT_SETTLED / 2 DIVERGED / 3 INDETERMINATE (基準のファイルの誤り・引数の誤りも 3; argparse の既定の 2 は
+DIVERGED と紛れるので使わない)。
 """
 from __future__ import annotations
 
 import argparse
-import csv
-import gzip
-import math
+import json
 import sys
 from pathlib import Path
 
-import numpy as np
-
-SLOPE_DEC = math.log10(1.05)
-RISE_DEC = math.log10(1.10)
-AMP_DEC = 0.1
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import settle  # noqa: E402
 
 
-def read_residuals(path) -> tuple[np.ndarray, dict]:
-    """residual_history.csv (gz 可) の outer_end の行 → (steps, {列: 値})。同じ step が重なれば最後の行。"""
-    p = Path(path)
-    if p.is_dir():
-        p = p / "residual_history.csv"
-    op = gzip.open if str(p).endswith(".gz") else open
-    with op(p, "rt") as f:
-        r = csv.reader(f)
-        h = next(r)
-        ic = [i for i, k in enumerate(h) if k.startswith("rms_") and not k.startswith("rms_dq_")]
-        rows = {}
-        for row in r:
-            if len(row) < 3 or row[2] != "outer_end":
-                continue
-            try:
-                rows[int(row[0])] = [float(row[i]) for i in ic]
-            except ValueError:
-                rows[int(row[0])] = [float("nan")] * len(ic)
-    st = np.array(sorted(rows))
-    v = np.array([rows[s] for s in st]) if len(st) else np.zeros((0, len(ic)))
-    return st, {h[i]: v[:, k] for k, i in enumerate(ic)}
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):  # 引数の誤りは INDETERMINATE (3) にする (既定の 2 は DIVERGED と紛れる)
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: 引数の誤り: {message}", file=sys.stderr)
+        print("VERDICT: INDETERMINATE (引数の誤り)")
+        sys.exit(settle.EXIT_CODE["INDETERMINATE"])
 
 
-def residual_settled(steps, cols: dict, window: int = 20000, min_points: int = 11, slope_dec: float = SLOPE_DEC,
-                     amp_dec: float = AMP_DEC, rise_dec: float = RISE_DEC) -> dict:
-    """残差の準定常の判定。戻り: {verdict: SETTLED|NOT_SETTLED|DIVERGED|INDETERMINATE, columns: {...}, reasons: [...]}。"""
-    steps = np.asarray(steps, dtype=float)
-    out = {"window": window, "thresholds": {"slope_dec": slope_dec, "amp_dec": amp_dec, "rise_dec": rise_dec, "min_points": min_points},
-           "columns": {}, "reasons": []}
-    if len(steps) == 0:
-        out.update(verdict="INDETERMINATE", reasons=["残差の行が無い"]); return out
-    last = steps[-1]
-    w1 = steps > last - window
-    w0 = (steps > last - 2 * window) & ~w1
-    verdicts = []
-    for k, v in cols.items():
-        v = np.asarray(v, dtype=float)
-        if not np.all(np.isfinite(v)):
-            out["columns"][k] = {"verdict": "DIVERGED"}; verdicts.append("DIVERGED"); continue
-        if np.all(v == 0.0):
-            out["columns"][k] = {"verdict": "INACTIVE"}; continue
-        if np.any(v <= 0.0):
-            out["columns"][k] = {"verdict": "INDETERMINATE", "why": "途中・一部がゼロ"}; verdicts.append("INDETERMINATE"); continue
-        y = np.log10(v)
-        if w1.sum() < min_points:
-            out["columns"][k] = {"verdict": "INDETERMINATE", "why": f"窓の点 {int(w1.sum())} < {min_points}"}; verdicts.append("INDETERMINATE"); continue
-        s = float(np.polyfit(steps[w1], y[w1], 1)[0])
-        amp = float(np.percentile(y[w1], 95) - np.percentile(y[w1], 5))
-        rise = float(np.mean(y[w1]) - np.mean(y[w0])) if w0.sum() >= min_points else float("nan")
-        ok_s = abs(s) * window <= slope_dec
-        ok_a = amp <= amp_dec
-        ok_r = (not np.isfinite(rise)) or rise <= rise_dec
-        why = [w for w, ok in (("傾き", ok_s), ("振幅", ok_a), ("上昇", ok_r)) if not ok]
-        vd = "SETTLED" if not why else "NOT_SETTLED"
-        if not np.isfinite(rise):
-            why_r = "直前の窓の点が足りず上昇は見ていない"
-        else:
-            why_r = None
-        out["columns"][k] = {"verdict": vd, "slope_dec_per_window": s * window, "amp_dec": amp, "rise_dec": rise,
-                             "fail": why, **({"note": why_r} if why_r else {}), "last": float(v[-1])}
-        verdicts.append(vd)
-    if not verdicts:
-        out.update(verdict="INDETERMINATE", reasons=["活動している残差の列が無い"]); return out
-    if "DIVERGED" in verdicts:
-        out["verdict"] = "DIVERGED"
-    elif "INDETERMINATE" in verdicts:
-        out["verdict"] = "INDETERMINATE"
-    elif all(v == "SETTLED" for v in verdicts):
-        out["verdict"] = "SETTLED"
-    else:
-        out["verdict"] = "NOT_SETTLED"
-    return out
+def _print(res: dict) -> None:
+    run = res.get("run_dir", "?")
+    T = res.get("terminal_step")
+    hdr = f"=== {run}  終端 {T if T is not None else '-'}"
+    if res.get("stop_step") is not None:
+        hdr += f" (停止の観測 {res['stop_step']} は別の検査だけ)"
+    hdr += f"  end_step {res.get('end_step')} [{res.get('end_source', '-')}]"
+    print(hdr + " ===")
+    if res.get("reason"):
+        print(f"  {res['reason']}")
+    for q in res.get("quantities", []):
+        print(f"  [{q['verdict']:13s}] {q['name']} ({q['kind']}, 入力 {q['input']})")
+        for c in q.get("checks", []):
+            print(f"      {'ok ' if c['ok'] else 'NG '} {c['check']}: {settle._fmt(c['value'])} (許容 {settle._fmt(c['limit'])})"
+                  + (f"  {c['detail']}" if c.get("detail") else ""))
+        for r in q.get("reasons", []):
+            if r["category"] != settle.CAT_THRESHOLD:
+                print(f"      [{r['label']}] {r['text']}")
+        if q["kind"] == "residual":
+            for k, c in (q.get("values", {}).get("columns") or {}).items():
+                if c.get("status") != "judged":
+                    print(f"      列 {k}: {c.get('status')}")
+    for e in res.get("excluded", []) or []:
+        print(f"  外した量: {e['kind']} — {e['reason']}")
+    for p in res.get("preconditions", []) or []:
+        if not p.get("satisfied"):
+            print(f"  前提が満たされていない: {p['quantity']} — {p['requires']}")
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("src")
-    ap.add_argument("--window", type=int, default=20000)
-    ap.add_argument("--min-points", type=int, default=11)
+    ap = _Parser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("run_dir")
+    ap.add_argument("--end-step", type=int, default=None)
     ap.add_argument("--scan", type=int, default=0)
+    ap.add_argument("--json", action="store_true")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--no-write", action="store_true", help="SETTLE_VERDICT.json を書かない")
+    g.add_argument("--out", default=None, help="結果の JSON の書き先 (既定 <run>/SETTLE_VERDICT.json)")
     a = ap.parse_args(argv)
-    st, cols = read_residuals(a.src)
-    res = residual_settled(st, cols, a.window, a.min_points)
-    print(f"=== {a.src}  [last step {int(st[-1]) if len(st) else '-'}]  残差の準定常 (窓 {a.window}): {res['verdict']} ===")
-    for k, c in res["columns"].items():
-        if c["verdict"] in ("INACTIVE",):
-            print(f"  {k:12s}: 非活動 (恒等ゼロ)"); continue
-        if "slope_dec_per_window" not in c:
-            print(f"  {k:12s}: {c['verdict']} {c.get('why', '')}"); continue
-        print(f"  {k:12s}: 末尾 {c['last']:.2e}  傾き {c['slope_dec_per_window']:+.4f} 桁/窓  振幅 {c['amp_dec']:.4f} 桁  上昇 {c['rise_dec']:+.4f} 桁  {c['verdict']}"
-              + (f"  (不成立: {', '.join(c['fail'])})" if c['fail'] else ""))
-    if a.scan:
-        first = None
-        for s in range(a.scan, int(st[-1]) + 1, a.scan):
-            m = st <= s
-            r = residual_settled(st[m], {k: v[m] for k, v in cols.items()}, a.window, a.min_points)
-            if r["verdict"] == "SETTLED":
-                first = s; break
-        print(f"最初に残差の準定常を満たした step (--scan {a.scan}): {first}")
-    print(f"VERDICT: {res['verdict']}")
-    return 0 if res["verdict"] == "SETTLED" else 1
+    run = Path(a.run_dir)
+    if not run.is_dir():
+        print(f"ERROR: {run} はディレクトリでない")
+        print("VERDICT: INDETERMINATE (データ不足)")
+        return settle.EXIT_CODE["INDETERMINATE"]
+    try:
+        loaded = settle.load_criteria(run)
+        data = settle.RunData(run, loaded["criteria"]) if loaded["status"] == "ok" else None
+        res = settle.judge(run, a.end_step, data=data, loaded=loaded)
+        sc = settle.scan(run, a.scan, end_step=a.end_step) if a.scan else None
+    except settle.CriteriaError as e:
+        print(f"ERROR: 基準のファイルの誤り ({run / settle.CRITERIA_FILE}): {e}")
+        print("VERDICT: INDETERMINATE (基準のファイルの誤り)")
+        return settle.EXIT_CODE["INDETERMINATE"]
+    if sc is not None:
+        res["scan"] = sc
+    _print(res)
+    if sc is not None:
+        print(f"最初に SETTLED になった step (--scan {a.scan}): {sc['first_settled']}")
+    if not a.no_write:
+        p = settle.write_verdict(run, res, data, a.out)
+        print(f"結果: {p}")
+    if a.json:
+        print(json.dumps(settle._jsonable(res), ensure_ascii=False, indent=1))
+    print(settle.verdict_line(res))
+    return settle.EXIT_CODE[res["verdict"]]
 
 
 if __name__ == "__main__":
