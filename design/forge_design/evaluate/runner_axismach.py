@@ -1795,6 +1795,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             csv = np.interp(np.clip(x, _tbl[0, 0], _tbl[-1, 0]), _tbl[:, 0], _tbl[:, 1])
             return (1.0 - w) * _corr(x) + w * csv
     delta_r_x = None
+    delta_r_table_ends = None          # 表の端の照合 (delta_r_csv のときだけ; §5.1 #3h)
     init_info = None
     init_cfg = initializer if initializer is not None else p.raw.get("deltastar_initializer")
     if init_cfg and delta_r_csv is None and dstar_csv is None:
@@ -1808,7 +1809,11 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         tbl_r = np.loadtxt(delta_r_csv, delimiter=",", skiprows=1)
         if not np.all(np.isfinite(tbl_r[:, 1])):
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
-        delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
+        # 表の端が設計の入口端・出口から ε_f32 以内なら揃える (格子の x [m] / r_t の丸めで 1 ulp 短い表; plan
+        # tooling-nozzle-card-local-mesh §5.1 #3h)。超えた端はそのまま (今までどおり壁の構築が判定する)
+        from ..feedback.deltastar_loop import design_anchors, snap_table_ends_same_design
+        xs_r, delta_r_table_ends = snap_table_ends_same_design(tbl_r[:, 0], design_anchors(d["wall"]), scale)
+        delta_r_x = delta_r_from_table(xs_r, tbl_r[:, 1])
         offset = "radial"
     # 物理壁 (pw_ramp・pw_upstream・physical_wall_repr に従う。寸法の逆算と同じ構築; build_physical_wall)。ゲート不合格は例外
     wall = build_physical_wall(p, d, scale, delta_r_x=delta_r_x, dstar_x=dstar_x, offset=offset, pwu=pwu)
@@ -1969,6 +1974,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         # 物理壁だけの上流の形 (§5.1 #34): 問題の値と、壁が使った値 (名目の U→T Hermite・凍結した設計の値)。キー無しは書かない
         info["physical_upstream"] = {"requested": pu, "wall": wall.physical_upstream}
     info["sizing"] = _sizing_record(sizing, wall, scale)
+    if delta_r_table_ends is not None:
+        info["delta_r_table_ends"] = delta_r_table_ends
     info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
     # 本段だけの B0 (§5.1 #30): 前の段の元の設定を PRESTAGE_CONFIG に置き、solverConfig.yaml を本段の設定に替える
     # (cfl_main・implicit_relax の記録は本段の値にする)。キー無しはファイルを書かない

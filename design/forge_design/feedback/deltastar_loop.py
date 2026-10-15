@@ -314,6 +314,27 @@ def snap_table_ends(x, a_prev: dict, S_prev: float) -> tuple:
     return x, rec
 
 
+def snap_table_ends_same_design(x, a: dict, S: float) -> tuple:
+    """同じ設計の壁に表を当てるとき (`prepare_ns(delta_r_csv=...)`・関門の `next_wall_check`) の端の照合: 端ごとに |Δ| ≤ ε_f32 (`eps_f32`、
+    `snap_table_ends` と同じ許容) なら端の x を設計の入口端・出口に置き換える。超えた端は**そのまま** (例外にしない; 覆わない表の扱いは
+    今までどおり壁の構築に任せる)。2026-10-15 case/71 run_0003_ns_cont: 表の終点が x_e より 1 ulp 短く (格子の x [m] / r_t の丸め)、
+    1 本の B-spline の物理壁が「表が出口まで覆わない」で止まった (plan tooling-nozzle-card-local-mesh §5.1 #3h)。
+    戻り: (x のコピー, 記録 {start, end: 表の x・設計の x・差・ε・置き換えたか})。"""
+    x = np.array(x, dtype=float, copy=True)
+    S = float(S)
+    rec = {}
+    for name, i, key in (("start", 0, "x_in"), ("end", -1, "x_exit")):
+        xd, xt = float(a[key]), float(x[i])
+        diff, eps = xt - xd, eps_f32(xd, S)
+        snap = diff != 0.0 and abs(diff) <= eps
+        rec[name] = {"x_table_rt": xt, "x_design_rt": xd, "diff_rt": diff, "eps_f32_rt": eps, "snapped": bool(snap)}
+        if snap:
+            x[i] = xd
+    if not np.all(np.diff(x) > 0.0):
+        raise ValueError("表の端を揃えると x が狭義単調増加でなくなる")
+    return x, rec
+
+
 def load_ns_correction(prev_run, delta_next=None) -> dict:
     """NS 後の補正の入力を読んで検査する (plan tooling-nozzle-deltastar-band-root-zone §4.2・§4.3 3、codex plan レビュー M1・M3):
     prev run の `delta_r_next.csv` (delta_next で別の抽出を指定可) の δ_E と held、前の設計の区切りの点と S_prev (`prev_design_anchors`)。
@@ -814,7 +835,9 @@ def next_wall_check(problem, delta_next) -> dict:
         d = design_chain(p)
         require_moc_gate(p, d)
         tbl = np.loadtxt(delta_next, delimiter=",", skiprows=1)
-        W = build_physical_wall(p, d, float(p.spec["r_throat"]), delta_r_x=delta_r_from_table(tbl[:, 0], tbl[:, 1]), offset="radial")
+        # prepare_ns と同じ: 表の端が設計の端から ε_f32 以内なら揃える (plan tooling-nozzle-card-local-mesh §5.1 #3h)
+        xs, ends = snap_table_ends_same_design(tbl[:, 0], design_anchors(d["wall"]), float(p.spec["r_throat"]))
+        W = build_physical_wall(p, d, float(p.spec["r_throat"]), delta_r_x=delta_r_from_table(xs, tbl[:, 1]), offset="radial")
         check_required_attrs(W)
         msgs = W.validate()
     except Exception as e:  # noqa: BLE001 — 壁のゲートの例外は不合格として記録する
@@ -822,7 +845,7 @@ def next_wall_check(problem, delta_next) -> dict:
     g = getattr(W, "upstream_gate", None) or {}
     out = {"pass": not msgs, "wall": type(W).__name__, "pw_upstream": getattr(W, "pw_upstream", None),
            "throat": {"x": float(W.x_throat), "r": float(W.r_throat), "kappa": float(W.kappa_throat)},
-           "upstream_gate_pass": g.get("pass"), "validate": msgs}
+           "upstream_gate_pass": g.get("pass"), "validate": msgs, "table_ends": ends}
     if msgs:
         out["why"] = "validate: " + "; ".join(msgs)
     return out
