@@ -10,6 +10,7 @@
 - **related_plans**:
   - [`tooling-nozzle-axismach-length-dv.md`](../accepted/tooling-nozzle-axismach-length-dv.md) (§2 の「ドライバは dv dict に対して汎用」はコードと矛盾 — 本 plan §5.1 #8 で訂正)
   - [`tooling-nozzle-deltastar-core-matched-euler.md`](../accepted/tooling-nozzle-deltastar-core-matched-euler.md) (δ\* 補正の生産レシピ = `axismach.deltastar_ns/v1` の中身)
+  - **子**: [`tooling-design-orchestrator.md`](tooling-design-orchestrator.md) (§5 ステップ 5 の campaign 実行器・ledger と、要求カードからの入口の実装; 2026-10-16 起票、diagnostician の諮問で位置づけを決めた)
   - [`tooling-nozzle-sern-chain.md`](tooling-nozzle-sern-chain.md) (SERN の多作動点 MOO — 後続で同じ契約に載せる)
 - **created**: `2026-09-27`
 - **owner**: `Claude (主セッション) / ユーザ`
@@ -236,6 +237,8 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 - [ ] [`plans/README.md`](../README.md) の一覧を同期
 
 ## 9. 変更ログ
+
+- `2026-10-16` — §5 ステップ 5 (campaign 実行器・ledger) と要求カードからの入口の実装を子の plan `tooling-design-orchestrator.md` に切り出した (語彙はこの plan に合わせる、汎用 DAG は作らない)。
 
 - `2026-10-05` — ユーザ要求 (M6 設計の再現・別マッハ・寸法決め打ち/パレート) を受け、codex (diagnose) に諮って C2 方式を recipe `axismach.contur_c2/v1` として §4.9 に追加。実装順は旧基準の保存 → 評価量統一 → 熱力学 → 最小契約 → C2 → 壁表現 → 寸法固定/探索 (§5.1 #13–#15)。
 
