@@ -50,6 +50,12 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
   区間の行に非有限 (どの数値の列でも) → DIVERGED。`required` の列が無い・恒等ゼロ・一部ゼロ (負も) → 判定不能。`inactive_ok` の列は
   恒等ゼロなら外し、そうでなければ required と同じに判定する。**どちらにも無い列が値を持つ → 判定不能 (未設定)** (黙って見ない扱いにしない)。
   `rms_dq_*` は非有限の検査だけ。
+  **`series: raw`** (プリセット `wt_nozzle_v2`; 既定 `grid` は上の通りで今と同じ): 傾き・振幅・上昇を格子点の行でなく**毎 step の
+  outer_end の全行**で測る。区間 (T−W, T] と直前の区間 (T−2W, T−W] の場の step を行 s−1 の対応で行 T−W〜T−1・T−2W〜T−W−1
+  (各 W 行) にし、傾き |s|·W (全行の最小二乗)・振幅 p95 − p5・上昇 mean(区間) − mean(直前の区間) を同じ閾値で判定する。
+  区間ごとに整数 step の行が**重複なく全部**あることを検査し、欠け・重複は判定不能 (データ不足)。直前の区間が本段の開始の
+  直後から始まる終端 (T − 2W = 開始) も判定不能 (開始直後の行を直前の区間に入れない; 最初に判定できる終端は grid と同じ
+  開始 + 2W + 間隔)。跳ね・停止の観測の検査は grid と同じ。
 - `mass_balance` (`file` 既定 boundary_massflux.csv; forge の `output.boundaryMassflux: 1`): 列 `mdot_<name>_<physID>` [kg/s] から
   ṁ_in = −Σ_inlet mdot、ṁ_out = Σ_outlet mdot、r = (ṁ_in − ṁ_out)/ṁ_in。C で |mean r| ≤ `mean_abs`、max r − min r ≤ `swing`、
   (max − min)/mean の ṁ_in・ṁ_out ≤ `mdot_change_rel`。入口・出口以外の境界 (壁・軸) の mdot は記録だけ。ṁ_in ≤ 0 は判定不能。
@@ -81,6 +87,10 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
   `methods/design/overview.md` の A_node = 2π Σ r_f |S_f| の 1 rad 分)、平面は A_i = Σ_e |e|/2 [m²/m]。三角形・四角形 (3D) は面積/節点数の
   和 (軸対称では判定不能)。forge の `msh.planes[ip].surfArea` (平面の面積) とは別の量で、許容の尺度にだけ使う。
   `iface_Qf_eff` に非有限 → 判定不能 (適用外の NaN と発散を区別できないので; 流れの発散は残差・節点の量が DIVERGED にする)。
+  **`measure: range`** (プリセット `wt_nozzle_v2`; 既定 `terminal_diff` は上の「終端の値からの差」で今と同じ): 節点ごとの窓の幅
+  max_s Q_i − min_s Q_i ≤ q_tol·A_i + eps_rel·|Q_i(T)| (相対の参照は終端 T の値; 終端からの差では窓の中の往復を見落とす —
+  codex diagnose 2026-10-16 settle-v2-span10k の例 [0.25, 1.75, 1, 1, 1, 1] は差の最大 0.75・幅 1.5)。停止の観測は終端からの差と
+  窓に加えた幅を同じ許容で検査する。
 
 ## 系列の入力の代替 (§6 V3(a) の再生用)
 
@@ -136,6 +146,15 @@ CAT_LABEL = {CAT_THRESHOLD: "閾値の超過", CAT_DATA: "データ不足", CAT_
 # 近軸の線を取る意図が崩れる) ので判定不能にする。
 AXIS_WEIGHT_MAX = 1.0e-6
 
+# 残差の傾き・振幅・上昇を測る系列 (`residual.series`; plan §4.4 の「判定の区間を 1 万 step にする」、§5.1 #5d)。
+# grid (既定・今の判定): 格子点の行 s−1 だけ。raw: 区間の毎 step の outer_end の全行 (欠け・重複は判定不能)。
+SERIES_GRID = "grid"
+SERIES_RAW = "raw"
+# 壁の熱流の窓の量 (`wall_heat_nodes.measure`; §5.1 #5d、codex diagnose 2026-10-16 settle-v2-span10k)。
+# terminal_diff (既定・今の判定): 終端 T の値からの差の最大。range: 節点ごとの窓の幅 max − min。どちらも許容の相対の参照は終端 T の値。
+WALL_TERMINAL = "terminal_diff"
+WALL_RANGE = "range"
+
 KIND_RESIDUAL = "residual"
 KIND_MASS = "mass_balance"
 TARGET_KINDS = ("exit_core_mach", "line_mach", "exit_flow_angle", "wall_heat_nodes")
@@ -154,12 +173,12 @@ THRESHOLD_KEYS = {
 # 種類ごとの許されるキー (`kind`・`name`・`thresholds`・`notes` は共通)
 _COMMON_KEYS = ("kind", "name", "thresholds", "notes")
 KIND_KEYS = {
-    "residual": ("file", "required", "inactive_ok"),
+    "residual": ("file", "required", "inactive_ok", "series"),
     "mass_balance": ("file", "series_csv", "inlet", "outlet"),
     "exit_core_mach": ("nodes_file", "series_csv", "eta_range"),
     "line_mach": ("nodes_file", "series_csv", "eta", "x_range_m", "n", "Md"),
     "exit_flow_angle": ("nodes_file", "eta_range"),
-    "wall_heat_nodes": ("walls", "file_pattern", "dataset", "axisymmetric"),
+    "wall_heat_nodes": ("walls", "file_pattern", "dataset", "axisymmetric", "measure"),
 }
 SERIES_KEYS = {
     "exit_core_mach": (("path", "step_col", "value_col"), ()),
@@ -386,6 +405,10 @@ def validate_criteria(obj) -> dict:
             for col in o["required"] + o["inactive_ok"]:
                 if not col.startswith("rms_") or col.startswith("rms_dq_"):
                     raise CriteriaError(f"{where}: 残差の列 '{col}' は rms_<方程式> の形でない (rms_dq_* は判定に使わない)")
+            if "series" in q:      # 書いたときだけ残す (書かない基準の中身は今と同じ)
+                if q["series"] not in (SERIES_GRID, SERIES_RAW):
+                    raise CriteriaError(f"{where}.series: '{q['series']}' は {SERIES_GRID} か {SERIES_RAW}")
+                o["series"] = q["series"]
         elif kind == "mass_balance":
             if "series_csv" in q:
                 if "file" in q:
@@ -450,6 +473,10 @@ def validate_criteria(obj) -> dict:
             o["axisymmetric"] = q["axisymmetric"]
             o["file_pattern"] = q.get("file_pattern", DEFAULT_WALL_PATTERN)
             o["dataset"] = q.get("dataset", DEFAULT_WALL_DATASET)
+            if "measure" in q:     # 書いたときだけ残す (書かない基準の中身は今と同じ)
+                if q["measure"] not in (WALL_TERMINAL, WALL_RANGE):
+                    raise CriteriaError(f"{where}.measure: '{q['measure']}' は {WALL_TERMINAL} か {WALL_RANGE}")
+                o["measure"] = q["measure"]
         if kind in NODE_KINDS and "series_csv" not in o and "structured" not in c:
             raise CriteriaError(f"{where}: 節点の量 ({kind}) には structured: {{ni, nj, scale_m}} が要る")
         out.append(o)
@@ -461,13 +488,14 @@ def _sha256_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def load_criteria(run_dir) -> dict:
-    """run の settle_criteria.yaml を読む。
+def load_criteria(run_dir, path=None) -> dict:
+    """run の settle_criteria.yaml を読む。path を渡すと run の settle_criteria.yaml の代わりにそのファイルを読む (再生で別の基準を
+    当てるとき; `settle_virtual_stop.py --criteria`。基準の中の相対のパスは今どおり run から解く)。
 
     戻り: {'status': 'ok', 'criteria': <検証済み>, 'path', 'sha256'} か
           {'status': 'unset', 'verdict': 'INDETERMINATE', 'reason': ..., 'message': ...} (ファイルが無い・量が足りない)。
     誤用 (知らない種類・キー、閾値の欠けなど) は CriteriaError。"""
-    p = Path(run_dir) / CRITERIA_FILE
+    p = Path(path) if path is not None else Path(run_dir) / CRITERIA_FILE
     if not p.is_file():
         why = f"{p} が無い"
         return {"status": "unset", "verdict": "INDETERMINATE", "reason": why, "message": unset_message(run_dir, why), "path": str(p)}
@@ -947,6 +975,36 @@ def _check_points(Q: _Q, pts, start: int, what: str):
 
 
 # ============================================================ 残差
+def _raw_intervals(Q: _Q, st, sel, T: int, W: int, start: int, dt: int, ok_grid: bool, P):
+    """残差の毎 step の系列 (series raw) の区間の行 (`_eval_residual` のコメント)。戻り (rawC, rawP, missC, missP):
+    rawC・rawP は区間の行の位置 (判定できなければ None)、missC・missP は欠けた行の step (先頭 6 つ)。
+    ok_grid が偽 (窓の格子点が判定区間の始まりより前; 理由は _check_points が書いた) なら何もしない。"""
+    if not ok_grid:
+        return None, None, [], []
+    if P[0] <= start:
+        Q.reason(CAT_DATA, f"直前の区間 (行 {T - 2 * W}〜{T - W - 1}) が本段の開始 (step {start}) の直後から始まる — 開始直後の行は直前の区間に"
+                           f"入れない (§5.1 #2; grid と同じく最初に判定できる終端は開始 + 2W + 間隔 = {start + 2 * W + dt})")
+        return None, None, [], []
+    out = []
+    ok = True
+    for lab, lo, hi in (("区間", T - W, T - 1), ("直前の区間", T - 2 * W, T - W - 1)):
+        rows = sel[(st[sel] >= lo) & (st[sel] <= hi)]
+        s = st[rows]
+        u = np.unique(s)
+        ndup = int(len(s) - len(u))
+        nmiss = int((hi - lo + 1) - len(u))
+        miss = [int(x) for x in np.setdiff1d(np.arange(lo, hi + 1, dtype=np.int64), u, assume_unique=True)[:6]] if nmiss else []
+        if nmiss or ndup:
+            ok = False
+            Q.reason(CAT_DATA, f"毎 step の系列の{lab} (行 {lo}〜{hi}、{hi - lo + 1} 行が要る) の outer_end の行の欠け {nmiss} 行"
+                               + (f" (例 step {miss}{'…' if nmiss > len(miss) else ''})" if nmiss else "")
+                               + (f"・重複 {ndup} 行" if ndup else "") + " — 全行がそろわないと傾き・振幅・上昇を測れない")
+        out.append((rows, miss))
+    if not ok:
+        return None, None, out[0][1], out[1][1]
+    return out[0][0], out[1][0], [], []
+
+
 def _eval_residual(q: dict, ctx: dict) -> dict:
     Q = _Q(q)
     th = q["thresholds"]
@@ -1026,13 +1084,23 @@ def _eval_residual(q: dict, ctx: dict) -> dict:
     raw_w = sel[(st[sel] >= lo_raw) & (st[sel] <= hi_raw)]
     rowsC = [idx.get(s - 1) for s in C]
     rowsP = [idx.get(s - 1) for s in P]
-    missC = [s for s, r in zip(C, rowsC) if r is None]
-    missP = [s for s, r in zip(P, rowsP) if r is None]
-    if okC and missC:
-        Q.reason(CAT_DATA, f"窓の格子点 {missC[:6]}{'…' if len(missC) > 6 else ''} の残差の行 (s−1) が無い ({len(missC)}/{len(C)} 点の欠測)")
-    if okP and missP:
-        Q.reason(CAT_DATA, f"直前の窓の格子点 {missP[:6]}{'…' if len(missP) > 6 else ''} の残差の行 (s−1) が無い ({len(missP)}/{len(P)} 点)"
-                           + (" — 本段の開始の場には残差の行が無い (最初に判定できる終端は開始 + 2W + 間隔)" if missP[0] == start else ""))
+    raw = q.get("series", SERIES_GRID) == SERIES_RAW
+    rawC = rawP = None
+    if raw:
+        # 毎 step の系列 (§4.4・§5.1 #5d): 区間 (T−W, T] と直前の区間 (T−2W, T−W] の場の step を、行 s−1 の対応 (§4.8 の 1) で
+        # 残差の行 T−W〜T−1 と T−2W〜T−W−1 (各 W 行) にし、その全行を使う。被覆 (整数 step が重複なく全部) を区間ごとに検査し、
+        # 欠け・重複は判定不能 (codex diagnose 2026-10-16 settle-v2-span10k: 格子点の行だけの検査では途中の 1 行の欠け・2,000 ごとの
+        # 行だけの履歴も SETTLED になる)。直前の区間が本段の開始の直後から始まる終端 (T − 2W = 開始) も判定不能にする: 開始直後の
+        # 行を直前の区間に入れない (§5.1 #2 の決定) ので、grid と同じく最初に判定できる終端は開始 + 2W + 間隔。
+        rawC, rawP, missC, missP = _raw_intervals(Q, st, sel, T, W, start, ctx["dt"], okC and okP, P)
+    else:
+        missC = [s for s, r in zip(C, rowsC) if r is None]
+        missP = [s for s, r in zip(P, rowsP) if r is None]
+        if okC and missC:
+            Q.reason(CAT_DATA, f"窓の格子点 {missC[:6]}{'…' if len(missC) > 6 else ''} の残差の行 (s−1) が無い ({len(missC)}/{len(C)} 点の欠測)")
+        if okP and missP:
+            Q.reason(CAT_DATA, f"直前の窓の格子点 {missP[:6]}{'…' if len(missP) > 6 else ''} の残差の行 (s−1) が無い ({len(missP)}/{len(P)} 点)"
+                               + (" — 本段の開始の場には残差の行が無い (最初に判定できる終端は開始 + 2W + 間隔)" if missP[0] == start else ""))
     stop_rows = None
     if stop is not None:
         stop_rows = sel[(st[sel] >= T) & (st[sel] <= stop - 1)]
@@ -1040,22 +1108,34 @@ def _eval_residual(q: dict, ctx: dict) -> dict:
             Q.reason(CAT_DATA, f"停止の step {stop} の残差の行 {stop - 1} が無い")
             stop_rows = None
     Q.r["values"]["columns"] = col_res
-    have = okC and okP and not missC and not missP
-    xs = np.asarray(C, dtype=float)
+    if raw:
+        Q.r["values"]["series"] = SERIES_RAW
+        Q.r["values"]["raw_rows"] = {"C": [T - W, T - 1], "P": [T - 2 * W, T - W - 1],
+                                     "n_C": None if rawC is None else int(len(rawC)), "n_P": None if rawP is None else int(len(rawP))}
+        have = rawC is not None and rawP is not None
+        xs = st[rawC].astype(float) if have else None
+        rdet = f"毎 step の系列 (行 {T - W}〜{T - 1} の {W} 行、直前の区間は行 {T - 2 * W}〜{T - W - 1})"
+    else:
+        have = okC and okP and not missC and not missP
+        xs = np.asarray(C, dtype=float)
+        rdet = None
     for k in judged:
         v = R["cols"][k]
         cr = {"status": "judged", "last": float(v[sel[-1]]) if len(sel) else None}
         if have:
-            yC = np.log10(v[rowsC])
-            yP = np.log10(v[rowsP])
+            yC = np.log10(v[rawC if raw else rowsC])
+            yP = np.log10(v[rawP if raw else rowsP])
             xc = xs - xs.mean()
             slope = float(np.dot(xc, yC - yC.mean()) / np.dot(xc, xc))
             amp = float(np.percentile(yC, 95) - np.percentile(yC, 5))
             rise = float(yC.mean() - yP.mean())
-            cr.update(slope_dec_per_W=slope * W, amp_dec=amp, rise_dec=rise, n_C=len(C), n_P=len(P))
-            Q.check(f"{k} 傾き |s|·W [桁]", abs(slope) * W, th["slope_dec"], abs(slope) * W <= th["slope_dec"])
-            Q.check(f"{k} 振幅 p95−p5 [桁]", amp, th["amp_dec"], amp <= th["amp_dec"])
-            Q.check(f"{k} 直前の窓からの上昇 [桁]", rise, th["rise_dec"], rise <= th["rise_dec"])
+            if raw:
+                cr.update(slope_dec_per_W=slope * W, amp_dec=amp, rise_dec=rise, n_C=int(len(yC)), n_P=int(len(yP)), series=SERIES_RAW)
+            else:
+                cr.update(slope_dec_per_W=slope * W, amp_dec=amp, rise_dec=rise, n_C=len(C), n_P=len(P))
+            Q.check(f"{k} 傾き |s|·W [桁]", abs(slope) * W, th["slope_dec"], abs(slope) * W <= th["slope_dec"], detail=rdet)
+            Q.check(f"{k} 振幅 p95−p5 [桁]", amp, th["amp_dec"], amp <= th["amp_dec"], detail=rdet)
+            Q.check(f"{k} 直前の窓からの上昇 [桁]", rise, th["rise_dec"], rise <= th["rise_dec"], detail=rdet)
         if len(raw_w):
             yr = np.log10(v[raw_w])
             med = float(np.median(yr))
@@ -1429,6 +1509,9 @@ def _eval_wall(q: dict, ctx: dict) -> dict:
     worstC = None       # 窓の格子点の最悪 (|ΔQ_i| / 許容_i の最大)
     worstS = None       # 停止の観測の最悪
     vals = {"walls": [], "steps": C}
+    rng = q.get("measure", WALL_TERMINAL) == WALL_RANGE
+    worstR = None       # range: 節点ごとの窓の幅 / 許容 の最大
+    worstR2 = None      # range: 停止の観測を加えた幅 / 許容 の最大
     try:
         for wl in q["walls"]:
             ref = ctx["data"].wall(q["file_pattern"], q["dataset"], wl, T)
@@ -1441,6 +1524,8 @@ def _eval_wall(q: dict, ctx: dict) -> dict:
             tol = th["q_tol"] * A + th["eps_rel"] * np.abs(Qref)
             vals["walls"].append({"name": wl["name"], "physID": wl["physID"], "n_nodes": int(len(Qref)), "area_method": how,
                                   "area_sum": float(A.sum()), "Q_sum_at_T": float(np.sum(Qref))})
+            QC = []             # range: 窓の格子点の値
+            Qstop = None
             for s in C + ([stop] if stop is not None else []):
                 ob = ctx["data"].wall(q["file_pattern"], q["dataset"], wl, s)
                 if not np.array_equal(ob["coord"], ref["coord"]):
@@ -1456,12 +1541,51 @@ def _eval_wall(q: dict, ctx: dict) -> dict:
                 cand = {"wall": wl["name"], "step": s, "node": k, "ratio": float(ratio[k]), "dQ": float(dQ[k]), "tol": float(tol[k]),
                         "Q_ref": float(Qref[k]), "x": float(ref["coord"][k, 0]), "r": float(ref["coord"][k, 1])}
                 if s == stop:
+                    Qstop = ob["Q"]
                     if worstS is None or cand["ratio"] > worstS["ratio"]:
                         worstS = cand
-                elif worstC is None or cand["ratio"] > worstC["ratio"]:
-                    worstC = cand
+                else:
+                    if rng:
+                        QC.append(ob["Q"])
+                    if worstC is None or cand["ratio"] > worstC["ratio"]:
+                        worstC = cand
+            if rng:
+                # 節点ごとの窓の幅 max − min (v2; 終端からの差では窓の中の往復を見落とす — codex の例 [0.25, 1.75, 1, 1, 1, 1] は
+                # 終端からの差の最大 0.75 だが幅 1.5)。許容の相対の参照は終端 T の値 |Q_i(T)|
+                for lab, M_ in (("C", np.vstack(QC)), ("C+stop", np.vstack(QC + [Qstop]) if Qstop is not None else None)):
+                    if M_ is None:
+                        continue
+                    span = M_.max(axis=0) - M_.min(axis=0)
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        ratio = np.where(tol > 0, span / tol, np.where(span > 0, np.inf, 0.0))
+                    k = int(np.argmax(ratio))
+                    cand = {"wall": wl["name"], "node": k, "ratio": float(ratio[k]), "span": float(span[k]), "tol": float(tol[k]),
+                            "Q_ref": float(Qref[k]), "Q_max": float(M_[:, k].max()), "Q_min": float(M_[:, k].min()),
+                            "x": float(ref["coord"][k, 0]), "r": float(ref["coord"][k, 1])}
+                    if lab == "C":
+                        if worstR is None or cand["ratio"] > worstR["ratio"]:
+                            worstR = cand
+                    elif worstR2 is None or cand["ratio"] > worstR2["ratio"]:
+                        worstR2 = cand
     except _DataMissing as e:
         Q.reason(CAT_DATA, str(e))
+        return Q.finish()
+    if rng:
+        vals["measure"] = WALL_RANGE
+        vals["worst_window"] = worstR
+        vals["worst_terminal_diff"] = worstC          # 記録だけ (v1 の量)
+        Q.r["values"] = vals
+        w = worstR
+        Q.check("窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大", w["ratio"], 1.0, w["ratio"] <= 1.0,
+                detail=f"壁 {w['wall']} 節点 {w['node']} (x {w['x']:.6g}, r {w['r']:.6g}): 幅 {w['span']:.4g} "
+                       f"({w['Q_min']:.4g}〜{w['Q_max']:.4g}), 許容 {w['tol']:.4g} (相対の参照は終端 {T} の値)")
+        if worstS is not None:
+            vals["worst_stop"] = worstS
+            vals["worst_window_with_stop"] = worstR2
+            Q.check(f"停止の観測 (step {stop}) の節点の熱量の格子の終端からの差 / 許容 の最大", worstS["ratio"], 1.0, worstS["ratio"] <= 1.0,
+                    detail=f"壁 {worstS['wall']} 節点 {worstS['node']}")
+            Q.check("停止の観測を加えた節点の熱量の幅 / 許容 の最大", worstR2["ratio"], 1.0, worstR2["ratio"] <= 1.0,
+                    detail=f"壁 {worstR2['wall']} 節点 {worstR2['node']}")
         return Q.finish()
     vals["worst_window"] = worstC
     Q.r["values"] = vals

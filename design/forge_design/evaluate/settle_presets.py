@@ -1,10 +1,10 @@
-r"""収束の判定の基準 `settle_criteria.yaml` のプリセット (plan `plans/active/tooling-settle-convergence-and-monitor.md` §4.2・§5.1 #2〜#3)。
+r"""収束の判定の基準 `settle_criteria.yaml` のプリセット (plan `plans/active/tooling-settle-convergence-and-monitor.md` §4.2・§5.1 #2〜#3・#5d)。
 
 問題 YAML の `evaluate.settle` (`preset` + 足し引き・閾値の上書き) を、準備のときに run の設定 (prepare_info・solverConfig・
 bcondConfig) で解決して `settle_criteria.yaml` の中身にする。判定は `solver_density_cuda/tools/settle.py` (`check_settled.py`)。
 
 `evaluate.settle` のキー (知らないキーは ValueError):
-  preset: wt_nozzle_v1                 必須
+  preset: wt_nozzle_v1                 必須 (wt_nozzle_v1 / wt_nozzle_v2)
   thresholds: {<量の名前>: {<閾値のキー>: 値}}   閾値の上書き (知らない量・キーは例外)
   quantities_remove: [<量の名前>]       外す (criteria の excluded に「問題 YAML で外した」と残す)
   quantities_add: [<量の指定>]          足す (settle_criteria.yaml の quantities の 1 要素の形; 検査は settle.validate_criteria)
@@ -34,6 +34,15 @@ bcondConfig) で解決して `settle_criteria.yaml` の中身にする。判定�
   q_tol 1.0e3 W/m²・eps_rel 1e−3。軸対称は solverConfig の mesh.isAxisymmetric。
 - 量の前提 (forge の出力の設定; output.boundaryMassflux 1・output.nodeProbeFile・output.interfaceDiag 1・壁の outputHDFflg 1・定常) は
   `preconditions` に満たされているかを記録する (満たされていなければ判定は INDETERMINATE (データ不足) になる; 有効にするのは雛形 #6)。
+
+## プリセット `wt_nozzle_v2` (区間 1 万 step・保持なし; plan §4.4「判定の区間を 1 万 step にする (2026-10-16 ユーザ決定)」、§5.1 #5d)
+
+v1 との違いだけ (量・閾値の値・線・出口コア・入口出口・残差の列・前提の記録は v1 と同じ; 閾値はすべて暫定):
+- 窓 W 10,000 (min_points 6 = 間隔 2,000 の端点込みの点)、保持 0 (停止規則 v2 は最初に SETTLED になった格子点で要求)。
+  最初に判定できる格子点は開始 + 2W + 間隔 = 22,000。許容は区間の長さで縮めない (ユーザ「区間の中の幅 ≤ 許容の 1/8 これやめろ」)。
+- 残差は `series: raw` (毎 step の outer_end の全行で傾き・振幅・上昇; 行の欠け・重複は判定不能)。
+- 壁の熱流は `measure: range` (節点ごとの区間の幅 max − min; 相対の参照は区間の終端の値; codex diagnose 2026-10-16 settle-v2-span10k)。
+- v1 は run_0013 の検証のために変えない (v1 の解決の結果は今と同じ)。
 
 節点の表 (forge の `output.nodeProbeFile`): `probe_node_ids` が節点の量に要る節点の和集合を返し、`write_node_probe_file` が forge の
 書式 (1 行 1 節点番号、`#` 以降と空行は無視、重複・範囲外は forge が起動時に拒否; `output/monitorOutputs.cpp` の readNodeList) で書く。
@@ -83,6 +92,24 @@ PRESETS = {
         "exit_eta_range": [0.05, 0.7],
         "line": {"eta": 0.03, "n": 2001, "x_offsets_rt": [2.0, -1.0]},
     },
+}
+# 区間 1 万 step・保持なし (plan §4.4「判定の区間を 1 万 step にする (2026-10-16 ユーザ決定)」、§5.1 #5d)。閾値は v1 と同じ値
+# (区間の長さで許容を縮めない; ユーザ「区間の中の幅 ≤ 許容の 1/8 これやめろ 10000ステップはそのまま」)。残差は毎 step の系列
+# (settle の residual.series raw)、壁の熱流は節点ごとの区間の幅 (wall_heat_nodes.measure range; codex diagnose 2026-10-16
+# settle-v2-span10k)。v1 は run_0013 の検証のために変えない。
+PRESETS["wt_nozzle_v2"] = {
+    "version": "wt_nozzle_v2 (2026-10-16; 区間 1 万・保持なし (2026-10-16 ユーザ決定); 残差は毎 step の系列・壁の熱流は区間の幅; 線 η 0.03)",
+    "window": {"W": 10000, "min_points": 6},
+    "hold": 0,
+    "residual_series": "raw",
+    "wall_measure": "range",
+    "thresholds": copy.deepcopy(PRESETS["wt_nozzle_v1"]["thresholds"]),
+    "exit_eta_range": [0.05, 0.7],
+    "line": {"eta": 0.03, "n": 2001, "x_offsets_rt": [2.0, -1.0]},
+    "notes": ["区間 1 万 step・保持なし (2026-10-16 ユーザ決定; plan §4.4)。格子点 s ごとに区間 (s − 10,000, s] を 1 回判定し、"
+              "最初に合格した格子点で止める。目的の量・流量は区間の中の幅を v1 と同じ許容で、残差は毎 step の系列 (outer_end の全行) で"
+              "区間あたりの v1 と同じ閾値、上昇は直前の 1 万 step の区間と比べる。壁の熱流は節点ごとの区間の幅 (相対の参照は区間の終端の値)",
+              "最初に判定できる格子点は開始 + 2 × 10,000 + 間隔 (間隔 2,000 なら 22,000)"],
 }
 
 INLET_PREFIX = "inlet_"
@@ -240,6 +267,8 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
 
     q_res = {"kind": "residual", "name": "residual", "file": "residual_history.csv", "required": req, "inactive_ok": inactive,
              "thresholds": th["residual"]}
+    if "residual_series" in P:          # v1 は書かない (settle の既定 grid; 基準の中身は今と同じ)
+        q_res["series"] = P["residual_series"]
     q_mass = {"kind": "mass_balance", "name": "mass_balance", "file": "boundary_massflux.csv", "inlet": sorted(bc["inlet"]),
               "outlet": sorted(bc["outlet"]), "thresholds": th["mass_balance"],
               "notes": [f"入口・出口は bcondConfig の kind から (inlet_* / outlet_*・outflow); 記録だけの境界 physID {sorted(bc['other'])}"]}
@@ -258,6 +287,8 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
         quantities.append({"kind": "wall_heat_nodes", "name": "wall_heat_nodes",
                            "walls": [{"name": w["name"], "physID": w["physID"]} for w in walls], "axisymmetric": axisym,
                            "file_pattern": st.DEFAULT_WALL_PATTERN, "dataset": st.DEFAULT_WALL_DATASET, "thresholds": th["wall_heat_nodes"]})
+        if "wall_measure" in P:         # v1 は書かない (settle の既定 terminal_diff)
+            quantities[-1]["measure"] = P["wall_measure"]
     else:
         excluded.append({"kind": "wall_heat_nodes", "name": "wall_heat_nodes",
                          "reason": "等温壁が無い (bcondConfig に wall_isothermal も ints.wallProfile も無い) — iface_Qf_eff は等温壁・定常の"
@@ -320,7 +351,7 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
         "preconditions": pre,
         "notes": ["grid.start_step は本段の forge の起動 (step 0)。segment は判定区間の識別 (設計チェーンでは本段の開始の通知 "
                   "MAIN_STAGE_STARTED を指す; main_stage_segment、plan §5.1 #6)。None = 未記録",
-                  "閾値は暫定 (provisional: true; plan §6 V3 で決める)"],
+                  "閾値は暫定 (provisional: true; plan §6 V3 で決める)"] + list(P.get("notes", [])),
     }
     st.validate_criteria(crit)       # 誤用はここで CriteriaError (ValueError)
     return crit

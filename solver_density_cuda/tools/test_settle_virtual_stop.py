@@ -33,6 +33,11 @@ forge と同じ形 (`start_obs=False`: 格子点 0 に観測が無い) にする
         (cap なし・cap の手前は今どおり、DIVERGED・未設定は cap でも要求)。`main_stage_cap` の出所 (MAIN_STAGE_STARTED の
         main_config.nStepOuter > prepare_info.json の stop_rule.cap > 無し)。`analyse`: データの最後 82,000 で保持を満たす合成の run は、
         cap が無ければ今どおり t_s 82,000 と note、cap 82,000 なら停止候補なし (理由に上限)、cap 200,000 の一定の系列は今どおり A。
+  (viii) 保持 0 と --criteria (plan §5.1 #5d・§6 (1″)): `emulate_v2` の保持 0 は最初に SETTLED の格子点で要求 (上限の格子点の規則は
+        今どおり)。run に v1 の形の基準を置き、v2 の形 (窓 1 万・保持 0・残差 raw・壁 range) の基準を --criteria で渡すと t_s は最初に
+        SETTLED になる 26,000 (22,000・24,000 は出口 M の段差で不合格)・A、結果の基準は渡したファイル、run の基準と
+        settle_virtual_stop/ は触らない、VERDICT.txt の閾値の行は基準の版。CLI: --criteria に --out が無い・既定の置き場所 → 終了コード 3。
+        B の内訳 ((ii)・(x2)): (a) 目的の量の累積の超過と (b) 全条件の持続の違反 (崩れた条件) を分けて JSON・VERDICT.txt に書く。
   --bench: 20 万 step・格子 2,000 (格子点 100) の規模の再生の所要を測る (残差の行 60 万 = 3 行/step・14 列、節点 6,000、壁 750 節点;
         case/71 の run_0005 の残差の履歴 600,001 行・120 MB と節点の表 5,335 点に合わせた)。試験の合否には入れない。
 """
@@ -154,6 +159,14 @@ def test_results():
     chk("(ii) B の根拠に量・step・位置が書かれ、VERDICT.txt の 1 行目が `VERDICT: B`",
         any("exit_core_mach" in b and "162000" in b and "比" in b for b in res["b_evidence"])
         and (run / SVS.OUT_DIR / "VERDICT.txt").read_text().splitlines()[0] == "VERDICT: B", res["b_evidence"][0][:160])
+    bd = res["b_breakdown"]
+    vt = (run / SVS.OUT_DIR / "VERDICT.txt").read_text()
+    chk("(ii) B の内訳: (a) 目的の量の累積の超過あり (出口コア M・線)、(b) 全条件の持続の違反なし — JSON と VERDICT.txt で分けて書く",
+        bd["a_cumulative_exceedance"]["present"] and set(bd["a_cumulative_exceedance"]["quantities"]) == {"exit_core_mach", "line_mach"}
+        and not bd["b_persistence_violation"]["present"] and "B の内訳 (a) 目的の量の累積の超過: あり" in vt
+        and "B の内訳 (b) 全条件の持続の違反: なし" in vt and json.loads((run / SVS.OUT_DIR / "virtual_stop.json").read_text())["b_breakdown"]
+        ["a_cumulative_exceedance"]["quantities"]["exit_core_mach"]["first_exceeded"] == 110000,
+        json.dumps({k: v["present"] for k, v in bd.items()}))
 
     print("=== (iii) 停止候補が無い → 未成立 ===")
     run = build("vs_iii_no_candidate", end=200000, M_fn=lambda s: np.full(NI, MD + (0.001 if (s // DT) % 2 else 0.0)))
@@ -211,6 +224,17 @@ def test_results():
         ex["failed"]["count"] == 10 and ex["failed"]["by_region"] == {"span": 10}
         and [x["step"] for x in ex["failed"]["steps"]] == list(range(122000, 140001, DT))
         and all(x["residual_mass"]["residual"] == "NOT_SETTLED" for x in ex["failed"]["steps"]), json.dumps(ex["failed"]["by_region"]))
+    bd = res["b_breakdown"]
+    bq = bd["b_persistence_violation"]["by_quantity"]
+    vt = (run / SVS.OUT_DIR / "VERDICT.txt").read_text()
+    chk("(x2) B の内訳: (a) 累積の超過なし、(b) 持続の違反あり — 崩れた条件は residual だけ (10 格子点 NOT_SETTLED、最初 122,000)、"
+        "VERDICT.txt に「(b) だけ — 早すぎる停止の証明ではない」の注",
+        not bd["a_cumulative_exceedance"]["present"] and bd["b_persistence_violation"]["present"]
+        and bd["b_persistence_violation"]["n_grid_points"] == 10 and bd["b_persistence_violation"]["first_step"] == 122000
+        and list(bq) == ["residual"] and bq["residual"]["n_grid_points"] == 10 and bq["residual"]["verdicts"] == {"NOT_SETTLED": 10}
+        and bq["residual"]["kind"] == "residual" and "B の内訳 (a) 目的の量の累積の超過: なし" in vt
+        and "B の内訳 (b) 全条件の持続の違反: あり" in vt and "residual (residual) 10 格子点" in vt and "早く止めすぎた証明ではない" in vt,
+        json.dumps(bq, ensure_ascii=False)[:200])
 
     xm, rm = TS.grid_xr()
     coord = np.stack([xm[:, -1], rm[:, -1], np.zeros(NI)], axis=1)
@@ -352,6 +376,74 @@ def test_cap_unit():
     chk("(vii) analyse: 上限 200,000 の一定の系列は今どおり A・t_s 82,000 (上限の規則は効かない)",
         res["verdict"] == SVS.RESULT_A and res["t_s"] == 82000 and res["v2_emulation"]["hold"]["reached_at_cap"] is None,
         f"{res['verdict']} t_s {res['t_s']}")
+
+
+# ------------------------------------------------------------------ (viii) 保持 0・--criteria (§5.1 #5d)
+def test_hold0_criteria():
+    print("=== (viii) 保持 0 (wt_nozzle_v2 の形) と --criteria (run の基準の代わり) ===")
+
+    def rows(vs):
+        return [{"step": 22000 + 2000 * k, "verdict": v, "categories": [], "why": None} for k, v in enumerate(vs)]
+    rr = rows(["NOT_SETTLED", "NOT_SETTLED", "SETTLED", "NOT_SETTLED", "SETTLED"])
+    r0, h0 = SVS.emulate_v2(rr, 0)
+    chk("(viii) emulate_v2 の保持 0: 最初に SETTLED の格子点 26,000 で要求 (条件を満たし始めた step も 26,000)",
+        r0 is not None and r0["kind"] == SVS.REQ_SETTLED and r0["step"] == 26000 and r0["settled_since"] == 26000
+        and rr[2]["v2_event"] == "hold_start,request:settled", f"{r0} {rr[2]['v2_event']}")
+    r1, h1 = SVS.emulate_v2(rows(["NOT_SETTLED", "SETTLED"]), 0, cap=24000)
+    chk("(viii) 保持 0 でも上限の格子点 (24,000) で満たしたら要求なし", r1 is None and h1["reached_at_cap"] == 24000, str(r1))
+
+    # run には v1 の形の基準 (窓 2 万・保持 4 万・grid)、--criteria に v2 の形 (窓 1 万・保持 0・raw・range)
+    c2 = TS.v2_criteria()
+    c2["source"] = {"preset": "wt_nozzle_v2", "preset_version": "wt_nozzle_v2 (試験の写し)"}
+    c2["quantities"][2]["thresholds"]["tol"] = 0.000275
+
+    def M_fn(s):
+        return np.full(NI, MD + (0.001 if s < 16000 else 0.0))     # 16,000 で落ち着く → 区間に 14,000 を含む 22,000・24,000 は不合格
+    crit_v1 = TS.base_criteria()
+    crit_v1["quantities"][2]["thresholds"]["tol"] = 0.000275
+    run = build("vs_viii_hold0", end=110000, rows_mode="dense", M_fn=M_fn, criteria=crit_v1)
+    cf = TS.TMP / "vs_viii_criteria_v2.yaml"
+    cf.write_text(yaml.safe_dump(c2, allow_unicode=True, sort_keys=False))
+    sha_run = settle._sha256_bytes((run / settle.CRITERIA_FILE).read_bytes())
+    od = TS.TMP / "vs_viii_out_v2"
+    res = SVS.analyse(run, criteria=cf, out_dir=od, plot=False)
+    rows_ = list(__import__("csv").DictReader(open(od / "grid_verdicts.csv")))
+    chk("(viii) --criteria (v2 の形): 最初に判定できる 22,000 から、22,000・24,000 は NOT_SETTLED、t_s = 最初に SETTLED の 26,000 (保持 0)、A",
+        res["verdict"] == "A" and res["t_s"] == 26000 and res["settled_since"] == 26000 and res["criteria"]["hold"] == 0
+        and res["criteria"]["first_judgeable"] == 22000 and [r["verdict"] for r in rows_[:3]] == ["NOT_SETTLED", "NOT_SETTLED", "SETTLED"]
+        and res["span_end"] == 106000, f"{res['verdict']} t_s {res['t_s']} {res['reasons'][:1]} {res['incomplete'][:1]} {res['b_evidence'][:1]}")
+    js = json.loads((od / "virtual_stop.json").read_text())
+    files = {Path(f["path"]).resolve() for f in js["files"]}
+    chk("(viii) --criteria: 結果の基準の path・sha256 は渡したファイル、使ったファイルの一覧に渡したファイル (run の基準は無い)、params に記録",
+        Path(js["criteria"]["path"]).resolve() == cf.resolve() and js["criteria"]["sha256"] == settle._sha256_bytes(cf.read_bytes())
+        and cf.resolve() in files and (run / settle.CRITERIA_FILE).resolve() not in files and js["params"]["criteria"] == str(cf.resolve()),
+        str(sorted(Path(f).name for f in files)))
+    chk("(viii) --criteria: run の settle_criteria.yaml は書き換えない・run の settle_virtual_stop/ を作らない",
+        settle._sha256_bytes((run / settle.CRITERIA_FILE).read_bytes()) == sha_run and not (run / SVS.OUT_DIR).exists())
+    vt = (od / "VERDICT.txt").read_text()
+    chk("(viii) VERDICT.txt の閾値の行は基準の版 (wt_nozzle_v2 …) を書く (v1 の版と書かない)",
+        "wt_nozzle_v2 (試験の写し) の値に固定" in vt and "wt_nozzle_v1 版 1" not in vt, [ln for ln in vt.splitlines() if ln.startswith("閾値")][:1])
+    res1 = SVS.analyse(run, write=False, plot=False)
+    chk("(viii) 同じ run を run の基準 (v1 の形: 窓 2 万・保持 4 万) で再生すると t_s 82,000 (--criteria と別の結果)",
+        res1["t_s"] == 82000 and res1["criteria"]["hold"] == 40000, f"t_s {res1['t_s']}")
+
+    def cli(*args):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = SVS.main([str(run), "--no-plot", *args])
+        return rc, buf.getvalue().splitlines()
+    rc, out = cli("--criteria", str(cf))
+    chk("(viii) CLI: --criteria に --out が無い → 終了コード 3 (run の基準の結果を上書きしない)・何も書かない",
+        rc == 3 and out[-1] == "VERDICT: 未成立" and any("--out が要る" in ln for ln in out) and not (run / SVS.OUT_DIR).exists(), out[-2:])
+    rc, out = cli("--criteria", str(cf), "--out", str(run / SVS.OUT_DIR))
+    chk("(viii) CLI: --out が run の既定の置き場所 → 終了コード 3", rc == 3 and not (run / SVS.OUT_DIR).exists(), out[-2:])
+    od2 = TS.TMP / "vs_viii_out_cli"
+    rc, out = cli("--criteria", str(cf), "--out", str(od2))
+    chk("(viii) CLI: --criteria と --out で終了コード 0・VERDICT: A、出力は --out に", rc == 0 and out[-1] == "VERDICT: A"
+        and (od2 / "virtual_stop.json").is_file() and not (run / SVS.OUT_DIR).exists(), out[-1])
+    rc, out = cli("--criteria", str(TS.TMP / "no_such.yaml"), "--out", str(TS.TMP / "vs_viii_out_none"))
+    chk("(viii) CLI: --criteria のファイルが無い → 未成立 (評価対象が未設定; 終了コード 3)", rc == 3 and out[-1] == "VERDICT: 未成立"
+        and any("評価対象が未設定" in ln for ln in out), out[-2:])
 
 
 # ------------------------------------------------------------------ (vi) v2 と同じ保持
@@ -529,6 +621,7 @@ def main():
     test_results()
     test_hold_unit()
     test_cap_unit()
+    test_hold0_criteria()
     if not QUICK:
         test_v2_end_to_end()
     if BENCH:

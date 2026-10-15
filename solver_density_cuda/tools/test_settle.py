@@ -12,6 +12,12 @@ V2 の負例はすべて SETTLED にしないこと、各負例で理由の分�
 **格子点 0 の観測**: forge は本段の開始 (step 0) に残差の行・節点・流量の出力を書かない。V2 の正例「0〜40,000」は全格子点
 (0 を含む 21 点) に観測があるという意味なので、合成では格子点 0 の観測 (残差の行 −1・res_nodes_0・流量の行 0・壁の h5) を置く
 (`start_obs=True`)。forge と同じ形 (`start_obs=False`) では 40,000 で判定不能・42,000 で SETTLED になることを別に確かめる。
+
+**wt_nozzle_v2 の形** (§5.1 #5d; 窓 10,000・保持 0・残差 `series: raw`・壁の熱流 `measure: range`): 毎 step の残差の行 (forge と同じ形)
+で V2 の負例 (末尾の跳ね・短いバースト・持続的な上昇・一部ゼロ・欠測) が落ち一定系列が通ること、codex diagnose settle-v2-span10k の
+再現 (途中の 1 行の欠け・2,000 ごとの行だけ → raw は判定不能、grid では SETTLED)、区間の端の行、内反復の行の混入、壁の区間の幅
+(codex の例 [0.25, 1.75, 1, 1, 1, 1])。**既定 (grid・terminal_diff) は変更前 (`GRID_BASE_COMMIT` の settle.py を git から読む) と
+判定の結果がビット同一** (読めなければその検査は NG — 判定不能を合格にしない)。
 """
 from __future__ import annotations
 
@@ -117,13 +123,19 @@ def write_massflux(run, rows):
             f.write(f"{s},{-mi!r},{-mi / (2 * math.pi)!r},{mo!r},{mo / (2 * math.pi)!r},0,0,0,0\n")
 
 
-def write_residual(run, steps, fn, cols=RES_COLS, name="residual_history.csv"):
+def write_residual(run, steps, fn, cols=RES_COLS, name="residual_history.csv", inner_rows=False):
+    """inner_rows: 各 step に内反復の行 (inner_begin・inner_end、値は 10⁸ 倍) を足す (outer_end だけを読むことの試験)。"""
     with open(run / name, "w") as f:
         f.write("step,inner,phase," + ",".join(cols + DQ_COLS) + "\n")
         for s in steps:
             v = fn(s)
-            f.write(f"{s},-1,outer_begin," + ",".join(repr(v.get(c, 0.0)) for c in cols) + ",0,0,0,0,0\n")
-            f.write(f"{s},-1,outer_end," + ",".join(repr(v.get(c, 0.0)) for c in cols) + ",0,0,0,0,0\n")
+            txt = ",".join(repr(v.get(c, 0.0)) for c in cols)
+            f.write(f"{s},-1,outer_begin," + txt + ",0,0,0,0,0\n")
+            if inner_rows:
+                big = ",".join(repr(v.get(c, 0.0) * 1e8) for c in cols)
+                f.write(f"{s},0,inner_begin," + big + ",0,0,0,0,0\n")
+                f.write(f"{s},0,inner_end," + big + ",0,0,0,0,0\n")
+            f.write(f"{s},-1,outer_end," + txt + ",0,0,0,0,0\n")
 
 
 def base_criteria(**over):
@@ -155,8 +167,10 @@ def base_criteria(**over):
 
 def build(name, *, end=40000, stop=None, start_obs=True, resid_fn=None, resid_cols=RES_COLS, M_fn=default_M,
           Q_fn=None, mdot_fn=None, skip=(), skip_resid_rows=(), criteria=None, no_massflux=False, nan_nodes_at=None,
-          extra_resid_rows=(), stopped_at=True):
-    """合成の run を作る。skip: 観測を置かない格子点 (残差の行 s−1・節点・流量・壁)。"""
+          extra_resid_rows=(), stopped_at=True, rows_mode="every10", inner_rows=False, dup_resid_rows=()):
+    """合成の run を作る。skip: 観測を置かない格子点 (残差の行 s−1・節点・流量・壁)。
+    rows_mode: 残差の outer_end の行 — every10 (10 step ごと + 格子点の行 s−1; 今までの試験)、dense (毎 step; forge と同じ)、
+    grid_only (格子点の行 s−1 だけ; codex の「2,000 ごとの行だけ」)。dup_resid_rows: 2 回書く行。"""
     run = TMP / name
     if run.exists():
         shutil.rmtree(run)
@@ -165,12 +179,14 @@ def build(name, *, end=40000, stop=None, start_obs=True, resid_fn=None, resid_co
     obs = grid + ([stop] if stop is not None else [])
     last_row = (stop if stop is not None else end) - 1
     resid_fn = resid_fn or (lambda s: dict(RES_BASE))
-    rows = set(range(0, last_row + 1, 10)) | {s - 1 for s in obs}
+    step10 = {"every10": 10, "dense": 1}.get(rows_mode)
+    rows = (set(range(0, last_row + 1, step10)) if step10 else set()) | {s - 1 for s in obs}
     rows |= set(extra_resid_rows)
     if start_obs:
         rows.add(-1)
     rows = sorted(r for r in rows if r <= last_row and (r + 1) not in skip and r not in skip_resid_rows)
-    write_residual(run, rows, resid_fn, cols=resid_cols)
+    rows = sorted(rows + [r for r in dup_resid_rows if r in rows])
+    write_residual(run, rows, resid_fn, cols=resid_cols, inner_rows=inner_rows)
     mdot_fn = mdot_fn or (lambda s: (10.0, 10.0))
     if not no_massflux:
         write_massflux(run, [(s, *mdot_fn(s)) for s in obs])
@@ -603,6 +619,306 @@ def test_area():
     chk("A2 平面: A_i = Σ |e|/2", np.allclose(A2, [0.5, 0.5 + l2 / 2, l2 / 2]))
 
 
+# ------------------------------------------------------------------ wt_nozzle_v2 の形 (§5.1 #5d)
+GRID_BASE_COMMIT = "f210850c"     # residual.series・wall_heat_nodes.measure を足す前の settle.py (grid の既定のビット同一の基準)
+
+
+def v2_criteria(**over):
+    """wt_nozzle_v2 と同じ形: 窓 10,000 (min_points 6)・保持 0・残差 series raw・壁の熱流 measure range (閾値は v1 と同じ)。"""
+    c = base_criteria()
+    c["window"] = {"W": 10000, "min_points": 6}
+    c["hold"] = 0
+    for q in c["quantities"]:
+        if q["kind"] == "residual":
+            q["series"] = "raw"
+        if q["kind"] == "wall_heat_nodes":
+            q["measure"] = "range"
+    c.update(over)
+    return c
+
+
+def braw(name, **kw):
+    """forge と同じ形 (格子点 0 に観測なし・毎 step の残差の行) の v2 の run。既定の終端 22,000 = 最初に判定できる格子点。"""
+    kw.setdefault("start_obs", False)
+    kw.setdefault("rows_mode", "dense")
+    kw.setdefault("end", 22000)
+    kw.setdefault("criteria", v2_criteria())
+    return build(name, **kw)
+
+
+def rewrite_criteria(run, c):
+    (run / settle.CRITERIA_FILE).write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
+
+
+def grid_of(c):
+    """同じ基準で残差を grid (series を消す) にしたもの (対照)。"""
+    c = json.loads(json.dumps(c))
+    for q in c["quantities"]:
+        q.pop("series", None)
+    return c
+
+
+def test_raw_residual():
+    print("=== wt_nozzle_v2 の形: 残差の毎 step の系列 (series raw; §5.1 #5d、codex diagnose settle-v2-span10k) ===")
+    run = braw("r01_const")
+    r22 = settle.judge(run, 22000)
+    q = qres(r22, "residual")
+    v = q["values"]
+    cols = {k: c for k, c in v["columns"].items() if c.get("status") == "judged"}
+    chk("R1 一定の系列 (毎 step の行・区間 1 万) は最初に判定できる格子点 22,000 で SETTLED",
+        r22["verdict"] == "SETTLED", f"{r22['verdict']} {[(x['name'], x['reasons'][:1]) for x in r22['quantities'] if x['verdict'] != 'SETTLED']}")
+    chk("R1 区間は行 12,000〜21,999 (場の (12,000, 22,000]) と直前の区間は行 2,000〜11,999、各 10,000 行を全部使う",
+        v.get("series") == "raw" and v["raw_rows"] == {"C": [12000, 21999], "P": [2000, 11999], "n_C": 10000, "n_P": 10000}
+        and len(cols) == 6 and all(c["n_C"] == 10000 and c["n_P"] == 10000 and c["series"] == "raw" for c in cols.values()),
+        str(v.get("raw_rows")))
+    chk("R1 検査の detail に毎 step の系列と行の範囲", all("毎 step の系列" in (c.get("detail") or "") for c in q["checks"] if "跳ね" not in c["check"]))
+    chk("R1 窓の格子点 6 点 (端点込み)", len(r22["window_steps"]["C"]) == 6 and r22["window_steps"]["C"][0] == 12000)
+    r20 = settle.judge(run, 20000)
+    q20 = qres(r20, "residual")
+    chk("R1b 終端 20,000 (直前の区間が開始の直後から) は判定不能 (データ不足; 最初に判定できる終端は 22,000)",
+        r20["verdict"] == "INDETERMINATE" and cats(q20) == {settle.CAT_DATA} and any("22000" in r["text"] and "開始" in r["text"] for r in q20["reasons"]),
+        str(q20["reasons"][:1]))
+
+    def spike(s):
+        v = dict(RES_BASE)
+        if s == 21999:
+            v = {k: x * 1e8 for k, x in v.items()}
+        return v
+    q = qres(settle.judge(braw("r02_last_spike", resid_fn=spike), 22000), "residual")
+    fc = failed_checks(q)
+    chk("R2 末尾の 1 行だけ 10⁸ 倍 → NOT_SETTLED、跳ねの検査だけが落とす (毎 step の傾き・振幅・上昇は通る)",
+        q["verdict"] == "NOT_SETTLED" and cats(q) == {settle.CAT_THRESHOLD} and fc and all("跳ね" in c for c in fc), str(fc[:3]))
+
+    def burst(s):
+        v = dict(RES_BASE)
+        if 17100 <= s <= 17400:
+            v = {k: x * 1e3 for k, x in v.items()}
+        return v
+    q = qres(settle.judge(braw("r03_burst", resid_fn=burst), 22000), "residual")
+    fc = failed_checks(q)
+    chk("R3 短い反復のバースト (行 17,100〜17,400 が 10³ 倍) → NOT_SETTLED、跳ねの検査が落とす", q["verdict"] == "NOT_SETTLED"
+        and cats(q) == {settle.CAT_THRESHOLD} and any("跳ね" in c for c in fc), str(fc[:4]))
+
+    def rise(s):
+        v = dict(RES_BASE)
+        if s >= 12000:
+            v = {k: x * 1.12 for k, x in v.items()}
+        return v
+    q = qres(settle.judge(braw("r04_rise", resid_fn=rise), 22000), "residual")
+    fc = failed_checks(q)
+    chk("R4 持続的な上昇 (区間の全行が直前の区間より 12 % 高い水準で一定) → NOT_SETTLED、上昇の検査だけが落とす",
+        q["verdict"] == "NOT_SETTLED" and cats(q) == {settle.CAT_THRESHOLD} and fc and all("上昇" in c for c in fc),
+        f"{fc[:2]} rise {q['values']['columns']['rms_ro'].get('rise_dec')}")
+
+    def partzero(s):
+        v = dict(RES_BASE)
+        if s > 15000:
+            v["rms_roOmega"] = 0.0
+        return v
+    q = qres(settle.judge(braw("r05_partly_zero", resid_fn=partzero), 22000), "residual")
+    chk("R5 残差の列の一部がゼロ → INDETERMINATE (データ不足)", q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_DATA})
+
+    # codex の再現 (settle-v2-span10k): 途中の 1 行の欠け・2,000 ごとの行だけ。grid では SETTLED、raw では判定不能
+    run = braw("r06_one_row_missing", skip_resid_rows=(15555,))
+    q = qres(settle.judge(run, 22000), "residual")
+    chk("R6 途中の 1 行 (15,555) の欠け → raw は INDETERMINATE (データ不足、欠けの行を書く)", q["verdict"] == "INDETERMINATE"
+        and cats(q) == {settle.CAT_DATA} and any("欠け 1 行" in r["text"] and "15555" in r["text"] for r in q["reasons"]), str(q["reasons"][:1]))
+    rewrite_criteria(run, grid_of(v2_criteria()))
+    chk("R6 (対照) 同じ履歴を grid で判定すると SETTLED (格子点の行しか見ない — codex の指摘の再現)",
+        qres(settle.judge(run, 22000), "residual")["verdict"] == "SETTLED")
+    run = braw("r07_grid_rows_only", rows_mode="grid_only")
+    q = qres(settle.judge(run, 22000), "residual")
+    chk("R7 2,000 ごとの行 (格子点の行 s−1) だけの履歴 → raw は INDETERMINATE (区間・直前の区間とも 9,995 行の欠け)",
+        q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_DATA}
+        and sum("欠け 9995 行" in r["text"] for r in q["reasons"]) == 2, str([r["text"][:60] for r in q["reasons"]]))
+    rewrite_criteria(run, grid_of(v2_criteria()))
+    chk("R7 (対照) 同じ履歴を grid で判定すると SETTLED", qres(settle.judge(run, 22000), "residual")["verdict"] == "SETTLED")
+
+    # 出力の境界の step: 区間の端の行が 1 行でも欠ければ判定不能、区間の外の行の欠けは影響しない
+    for row, what in ((21999, "区間の最後 (T−1)"), (12000, "区間の最初 (T−W)"), (11999, "直前の区間の最後 (T−W−1)"),
+                      (2000, "直前の区間の最初 (T−2W)")):
+        q = qres(settle.judge(braw(f"r08_edge_{row}", end=24000, skip_resid_rows=(row,)), 22000), "residual")
+        chk(f"R8 出力の境界: 行 {row} ({what}) の欠け → INDETERMINATE", q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_DATA}
+            and any(str(row) in r["text"] for r in q["reasons"]), str(q["reasons"][:1]))
+    r = settle.judge(braw("r08_outside", end=24000, skip_resid_rows=(1999, 22000)), 22000)
+    chk("R8 出力の境界: 区間の外の行 1,999 (T−2W−1) と 22,000 (T) の欠けは影響しない (SETTLED; 区間は行 2,000〜21,999 ちょうど)",
+        r["verdict"] == "SETTLED", f"{r['verdict']} {[x['reasons'][:1] for x in r['quantities'] if x['verdict'] != 'SETTLED']}")
+
+    q = qres(settle.judge(braw("r09_inner_rows", inner_rows=True), 22000), "residual")
+    chk("R9 内反復の行 (inner_begin・inner_end、10⁸ 倍) が混じっても outer_end だけを使う (SETTLED・区間 10,000 行)",
+        q["verdict"] == "SETTLED" and q["values"]["raw_rows"]["n_C"] == 10000, str(q["reasons"][:1]))
+    q = qres(settle.judge(braw("r10_dup_row", dup_resid_rows=(15000,)), 22000), "residual")
+    chk("R10 区間の行の重複 (15,000 を 2 回) → INDETERMINATE (重複)", q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_DATA}
+        and any("重複" in r["text"] for r in q["reasons"]), str(q["reasons"][:2]))
+
+    def nanres(s):
+        v = dict(RES_BASE)
+        if s == 16000:
+            v["rms_roe"] = float("nan")
+        return v
+    q = qres(settle.judge(braw("r11_nan", resid_fn=nanres), 22000), "residual")
+    chk("R11 残差に NaN → DIVERGED (非有限)", q["verdict"] == "DIVERGED" and cats(q) == {settle.CAT_NONFINITE})
+    r = settle.judge(braw("r12_stop", stop=22001))
+    q = qres(r, "residual")
+    chk("R12 一定の系列を非格子の 22,001 で止めた → SETTLED (終端 22,000、停止の観測の別検査あり)",
+        r["verdict"] == "SETTLED" and r["terminal_step"] == 22000 and r["stop_step"] == 22001
+        and any("停止の観測" in c["check"] for c in q["checks"]), f"{r['verdict']} {[x['reasons'][:1] for x in r['quantities'] if x['verdict'] != 'SETTLED']}")
+    for key, val, word in (("series", "every", "series"), ("measure", "max", "measure")):
+        c = v2_criteria()
+        for qq in c["quantities"]:
+            if key in qq:
+                qq[key] = val
+        try:
+            settle.validate_criteria(c)
+            ok = False
+        except settle.CriteriaError as e:
+            ok = word in str(e)
+        chk(f"R13 {key}: '{val}' (知らない値) → CriteriaError", ok)
+
+
+def test_wall_range():
+    print("=== wt_nozzle_v2 の形: 壁の熱流の区間の幅 (measure range; codex diagnose settle-v2-span10k) ===")
+    xm, rm = grid_xr()
+    coord = np.stack([xm[:, -1], rm[:, -1], np.zeros(NI)], axis=1)
+    conne = []
+    for i in range(NI - 1):
+        conne += [2, 2, i, i + 1]
+    A, _ = settle.wall_node_area(coord, np.asarray(conne), True)
+    k = 10
+    seq = {12000: 0.25, 14000: 1.75}                 # 区間の格子点 12,000〜22,000 の値 [0.25, 1.75, 1, 1, 1, 1]
+
+    def Qc(s):
+        Q = np.ones(NI)
+        Q[k] = seq.get(s, 1.0)
+        return Q
+    c = v2_criteria()
+    for q in c["quantities"]:
+        if q["kind"] == "wall_heat_nodes":
+            q["thresholds"] = {"q_tol": 1.001 / float(A[k]), "eps_rel": 0.0, "provisional": True}    # 節点 10 の許容 1.001
+    run = braw("w01_codex_example", Q_fn=Qc, criteria=c)
+    r = settle.judge(run, 22000)
+    q = qres(r, "wall_heat_nodes")
+    w = q["values"].get("worst_window") or {}
+    chk("W1 codex の例 [0.25, 1.75, 1, 1, 1, 1]・許容 1.001: range は幅 1.5 で NOT_SETTLED (節点 10、比 1.5/1.001)",
+        r["verdict"] == "NOT_SETTLED" and q["verdict"] == "NOT_SETTLED" and cats(q) == {settle.CAT_THRESHOLD} and w.get("node") == k
+        and abs(w["span"] - 1.5) < 1e-12 and abs(w["ratio"] - 1.5 / 1.001) < 1e-9 and q["values"].get("measure") == "range",
+        f"{r['verdict']} {w}")
+    chk("W1 range の記録: 終端からの差の最大 (v1 の量) も残す (比 0.749)", abs((q["values"].get("worst_terminal_diff") or {}).get("ratio", 0) - 0.75 / 1.001) < 1e-9)
+    for qq in c["quantities"]:
+        qq.pop("measure", None)
+    rewrite_criteria(run, c)
+    r = settle.judge(run, 22000)
+    q = qres(r, "wall_heat_nodes")
+    chk("W1 (対照) 同じ系列を既定 (terminal_diff、v1 の判定) で判定すると今どおり SETTLED (比 0.75/1.001 = 0.74925)",
+        r["verdict"] == "SETTLED" and abs(q["values"]["worst_window"]["ratio"] - 0.75 / 1.001) < 1e-9 and "measure" not in q["values"],
+        f"{r['verdict']} {q['values']['worst_window'].get('ratio')}")
+    r = settle.judge(braw("w02_const_stop", stop=22001))
+    q = qres(r, "wall_heat_nodes")
+    names = [x["check"] for x in q["checks"]]
+    chk("W2 range: 一定の壁を 22,001 で止めた → SETTLED、停止の観測の終端からの差と加えた幅を検査",
+        r["verdict"] == "SETTLED" and any("停止の観測を加えた節点の熱量の幅" in n for n in names)
+        and any("停止の観測 (step 22001)" in n for n in names), str(names))
+
+    def Qs(s):
+        Q = 100.0 + np.arange(NI, dtype=float)
+        if s == 22001:
+            Q[k] += 1.2 * (1000.0 * A[k] + 1e-3 * Q[k])
+        return Q
+    q = qres(settle.judge(braw("w03_stop_move", stop=22001, Q_fn=Qs)), "wall_heat_nodes")
+    fc = failed_checks(q)
+    chk("W3 range: 停止の観測だけ節点 10 が許容の 1.2 倍動く → NOT_SETTLED (停止の観測の検査だけ)", q["verdict"] == "NOT_SETTLED"
+        and fc and all("停止の観測" in x for x in fc), str(fc))
+
+
+def _load_base_settle():
+    """grid の既定のビット同一の基準: GRID_BASE_COMMIT の settle.py を git から読む (読めなければ None と理由)。"""
+    import importlib.util
+    import subprocess
+    try:
+        src = subprocess.run(["git", "-C", str(HERE), "show", f"{GRID_BASE_COMMIT}:solver_density_cuda/tools/settle.py"],
+                             capture_output=True, text=True, check=True).stdout
+    except Exception as e:  # noqa: BLE001
+        return None, f"git show {GRID_BASE_COMMIT}:solver_density_cuda/tools/settle.py が読めない ({type(e).__name__})"
+    p = TMP / f"settle_base_{GRID_BASE_COMMIT}.py"
+    p.write_text(src)
+    spec = importlib.util.spec_from_file_location(f"settle_base_{GRID_BASE_COMMIT}", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m, None
+
+
+def _strip(res):
+    d = json.loads(json.dumps(settle._jsonable(res), ensure_ascii=False))
+    for k in ("created", "tool_sha256"):
+        d.pop(k, None)
+    return d
+
+
+def test_grid_bit_identity():
+    print(f"=== 既定 (series grid・measure terminal_diff) は変更前 ({GRID_BASE_COMMIT}) の settle.py とビット同一 ===")
+    base, why = _load_base_settle()
+    if base is None:
+        chk("G0 変更前の settle.py を読めた (読めなければ判定不能 — 合格にしない)", False, why)
+        return
+
+    def spike(s):
+        v = dict(RES_BASE)
+        if s == 39999:
+            v = {k: x * 1e8 for k, x in v.items()}
+        return v
+
+    def burst(s):
+        v = dict(RES_BASE)
+        if 33100 <= s <= 33400:
+            v = {k: x * 1e3 for k, x in v.items()}
+        return v
+
+    def rise(s):
+        v = dict(RES_BASE)
+        if s >= 19999:
+            v = {k: x * 1.12 for k, x in v.items()}
+        return v
+
+    def partzero(s):
+        v = dict(RES_BASE)
+        if s > 30000:
+            v["rms_roOmega"] = 0.0
+        return v
+
+    def swap(s):
+        Q = 100.0 + np.arange(NI, dtype=float)
+        d = 200.0 * math.sin(s / 7000.0)
+        Q[10] += d
+        Q[20] -= d
+        return Q
+
+    def drift(s):
+        f = 10 ** (-2.0 * min(s, 30000) / 30000)
+        return {k: x * f for k, x in RES_BASE.items()}
+    cases = [("g01_const", {}, [None, 30000]), ("g02_stop", {"end": 80000, "stop": 80001}, [None]),
+             ("g03_forge_like", {"end": 42000, "start_obs": False}, [40000, 42000]), ("g04_spike", {"resid_fn": spike}, [None]),
+             ("g05_burst", {"resid_fn": burst, "extra_resid_rows": range(33100, 33401, 50)}, [None]), ("g06_rise", {"resid_fn": rise}, [None]),
+             ("g07_gap", {"skip": tuple(range(26000, 34001, DT))}, [None]), ("g08_partzero", {"resid_fn": partzero}, [None]),
+             ("g09_wall_swap", {"Q_fn": swap}, [None]), ("g10_wall_cross", {"Q_fn": lambda s: np.full(NI, 1.0 if (s // DT) % 2 else -1.0)}, [None]),
+             ("g11_dense", {"rows_mode": "dense", "end": 42000, "start_obs": False}, [42000]),
+             ("g12_grid_only", {"rows_mode": "grid_only", "end": 42000, "start_obs": False}, [42000]),
+             ("g13_drift", {"resid_fn": drift, "end": 90000}, [None, 60000])]
+    bad = []
+    n = 0
+    for name, kw, ends in cases:
+        run = build(name, **kw)
+        for e in ends:
+            a = _strip(settle.judge(run, e))
+            b = _strip(base.judge(run, e))
+            n += 1
+            if a != b:
+                bad.append(f"{name} end {e}")
+    chk(f"G1 既定の判定の結果 (全量の verdict・検査・値・理由・基準の中身) が変更前とビット同一 ({n} 件; 生成の時刻・道具の sha256 を除く)",
+        not bad, str(bad))
+    run = build("g13_drift_scan", resid_fn=drift, end=90000)
+    chk("G2 --scan の結果も変更前と同一", settle.scan(run, DT) == base.scan(run, DT))
+
+
 def main():
     print(f"numpy {np.__version__}, python {sys.version.split()[0]}, 作業 {TMP}")
     test_area()
@@ -611,6 +927,9 @@ def main():
     test_negative_extra()
     test_axis_weight()
     test_verdict_file()
+    test_raw_residual()
+    test_wall_range()
+    test_grid_bit_identity()
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{NCHK - len(FAILS)}/{NCHK} OK")
     if FAILS:

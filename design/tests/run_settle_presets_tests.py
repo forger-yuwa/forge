@@ -14,11 +14,14 @@ r"""収束の判定のプリセット `settle_presets` と節点の量の抽出�
     書いて読み戻せる。η 0.03 は格子の第 1 層 (j = 1) の η と丸めの差で一致・近接するので、列ごとに np.interp が使う対を数えて報告する。
 (c) 例外: evaluate.settle の知らないキー・知らないプリセット・閾値の知らない量とキー・quantities_remove の知らない量・
     farfield / 知らない kind / 出口の無い bcond・凝縮・W が間隔の倍数でない・prepare_info の Md の欠け。
+(d) プリセット `wt_nozzle_v2` (§4.4・§5.1 #5d): 窓 10,000・min_points 6・保持 0・残差 series raw・壁の熱流 measure range、閾値と量の
+    定義は v1 と同じ、版の記録、往復、v1 は変わらない (プリセットの sha256 が #5d の前と同じ)。
 """
 from __future__ import annotations
 
 import copy
 import json
+import math
 import shutil
 import sys
 import tempfile
@@ -338,6 +341,56 @@ def test_errors(run):
         chk(name + " → ValueError", ok, msg[:90])
 
 
+# ------------------------------------------------------------------ (d) wt_nozzle_v2
+V1_PRESET_SHA256 = "15a7767ac75e25b51cd8e2e4a3faefcb298cb85624b2fa630c91bf5165e48c32"   # #5d の前 (f210850c) の wt_nozzle_v1 の preset_sha256
+
+
+def test_v2(run, crit_v1):
+    print("=== (d) プリセット wt_nozzle_v2 (区間 1 万・保持なし; §4.4・§5.1 #5d) ===")
+    info, cfg, bc = load_inputs(run)
+    c2 = SP.resolve({"preset": "wt_nozzle_v2"}, info, cfg, bc)
+    q1 = {x["name"]: x for x in crit_v1["quantities"]}
+    q2 = {x["name"]: x for x in c2["quantities"]}
+    chk("d1 窓 W 10,000・min_points 6・保持 0、格子の間隔は v1 と同じ 2,000",
+        c2["window"] == {"W": 10000, "min_points": 6} and c2["hold"] == 0 and c2["grid"] == crit_v1["grid"], f"{c2['window']} hold {c2['hold']}")
+    chk("d2 残差は series raw、壁の熱流は measure range", q2["residual"].get("series") == "raw" and q2["wall_heat_nodes"].get("measure") == "range")
+    same = all(q2[nm]["thresholds"] == q1[nm]["thresholds"] for nm in q1)
+    chk("d3 閾値は v1 と同じ値 (傾き log10(1.05)・振幅 0.1・上昇 log10(1.10)・跳ね 0.5、流量・目的の量の許容も同じ; 区間の長さで縮めない)、"
+        "すべて provisional", same and list(q2) == list(q1) and all(x["thresholds"].get("provisional") is True for x in c2["quantities"])
+        and q2["residual"]["thresholds"]["slope_dec"] == math.log10(1.05) and q2["residual"]["thresholds"]["rise_dec"] == math.log10(1.10),
+        str({nm: q2[nm]["thresholds"] for nm in q2 if q2[nm]["thresholds"] != q1[nm]["thresholds"]})[:200])
+    strip = ("series", "measure")
+    chk("d4 量の定義 (残差の列・入口と出口・出口コア・線・流れ角・壁) は series・measure を除いて v1 と同じ",
+        all({k: v for k, v in q2[nm].items() if k not in strip} == q1[nm] for nm in q1) and c2["structured"] == crit_v1["structured"]
+        and c2["excluded"] == crit_v1["excluded"] and c2["preconditions"] == crit_v1["preconditions"])
+    chk("d5 版の記録: 区間 1 万・保持なし (2026-10-16 ユーザ決定)、notes に決定の中身",
+        c2["source"]["preset"] == "wt_nozzle_v2" and "区間 1 万・保持なし (2026-10-16 ユーザ決定)" in c2["source"]["preset_version"]
+        and any("2026-10-16 ユーザ決定" in n and "v1 と同じ許容" in n for n in c2["notes"]), c2["source"]["preset_version"])
+    rd = TMP / "d_run"
+    rd.mkdir()
+    for fn in ("prepare_info.json", "solverConfig.yaml", "bcondConfig.yaml"):
+        shutil.copy(run / fn, rd / fn)
+    w = SP.write_settle_criteria(rd, {"preset": "wt_nozzle_v2"}, info, cfg, bc)
+    lc = settle.load_criteria(rd)
+    q3 = {x["name"]: x for x in lc["criteria"]["quantities"]}
+    chk("d6 書いた settle_criteria.yaml を settle が読める (series raw・measure range・hold 0 が往復で残る)",
+        lc["status"] == "ok" and lc["sha256"] == w["sha256"] and q3["residual"].get("series") == "raw"
+        and q3["wall_heat_nodes"].get("measure") == "range" and lc["criteria"]["hold"] == 0 and lc["criteria"]["window"]["W"] == 10000)
+    p1 = SP.PRESETS["wt_nozzle_v1"]
+    chk("d7 v1 は変えない: プリセットの sha256 が #5d の前と同じ、解決に series・measure が無い・窓 20,000・保持 40,000",
+        SP._sha256_json(p1) == V1_PRESET_SHA256 and "series" not in q1["residual"] and "measure" not in q1["wall_heat_nodes"]
+        and crit_v1["window"] == {"W": 20000, "min_points": 11} and crit_v1["hold"] == 40000, SP._sha256_json(p1))
+    cfi = copy.deepcopy(cfg)
+    cfi["time"]["outStepInterval"] = 3000
+    ok, msg = raises(lambda: SP.resolve({"preset": "wt_nozzle_v2"}, info, cfi, bc), "倍数でない")
+    chk("d8 v2 で W 10,000 が間隔 3,000 の倍数でない → ValueError", ok, msg[:80])
+    es4 = {"preset": "wt_nozzle_v2", "thresholds": {"wall_heat_nodes": {"eps_rel": 2e-3}}, "x_range_m": [4.0, 7.95]}
+    c4 = SP.resolve(es4, info, cfg, bc)
+    q4 = {x["name"]: x for x in c4["quantities"]}
+    chk("d9 v2 でも閾値の上書き・x_range_m が効き、measure は残る", q4["wall_heat_nodes"]["thresholds"]["eps_rel"] == 2e-3
+        and q4["wall_heat_nodes"]["measure"] == "range" and q4["line_mach"]["x_range_m"] == [4.0, 7.95])
+
+
 def main():
     print(f"numpy {np.__version__}, python {sys.version.split()[0]}")
     run = find_run()
@@ -350,6 +403,7 @@ def main():
     crit = test_resolve(run)
     test_bit_identity(run, crit)
     test_errors(run)
+    test_v2(run, crit)
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"\n{NCHK - len(FAIL)}/{NCHK} OK")
     if FAIL:

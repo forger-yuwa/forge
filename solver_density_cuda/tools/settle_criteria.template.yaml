@@ -37,6 +37,8 @@ quantities:
     file: residual_history.csv          # .gz も可。run からの相対か絶対
     required: [rms_ro, rms_roUx, rms_roUy, rms_roe, rms_roK, rms_roOmega]
     inactive_ok: [rms_roUz]
+    # series: grid (既定) = 格子点の行 s−1 で傾き・振幅・上昇。raw = 区間 (T−W, T] と直前の区間の毎 step の outer_end の全行で
+    # 同じ閾値 (wt_nozzle_v2; 行の欠け・重複は判定不能)
     thresholds: {slope_dec: 0.0211893, amp_dec: 0.1, rise_dec: 0.0413927, excursion_dec: 0.5, provisional: true}
 
   # 流量の収支: boundary_massflux.csv (forge の output.boundaryMassflux: 1) の mdot_<name>_<physID> [kg/s] から
@@ -81,6 +83,7 @@ quantities:
     axisymmetric: true
     file_pattern: res_{name}_{physID}_{step}.h5
     dataset: iface_Qf_eff
+    # measure: terminal_diff (既定) = 終端の値からの差の最大。range = 節点ごとの窓の幅 max − min (wt_nozzle_v2; 相対の参照は終端の値)
     thresholds: {q_tol: 1000.0, eps_rel: 1.0e-3, provisional: true}
 
 # 外した量と理由 (記録だけ)。例: [{kind: wall_heat_nodes, reason: "断熱壁 (iface_Qf_eff は等温壁だけ)"}]

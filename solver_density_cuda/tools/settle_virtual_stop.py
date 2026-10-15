@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 r"""仮想の停止の後の同じ軌道の検証 — 停止規則 v2 が止めたはずの格子点 t_s から span の間、目的の量が t_s の値から許容の内に
 留まり、各格子点の判定が SETTLED のままかを、停止規則なしで回した run で確かめる
-(plan `plans/active/tooling-settle-convergence-and-monitor.md` §6「V3(b)・V4 の実施」の (1) `run_0012_ns_free`;
-codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-settle-v3b-v4.md` の Major 1)。
+(plan `plans/active/tooling-settle-convergence-and-monitor.md` §6「V3(b)・V4 の実施」の (1) `run_0012_ns_free`・(1′)・(1″)
+(`wt_nozzle_v2` の再生は `--criteria`); codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-settle-v3b-v4.md`
+の Major 1)。保持 0 (`wt_nozzle_v2`) では停止候補 t_s は最初に SETTLED になった格子点 (hold_step が保持 0 で即到達)。
 
 判定の部品は `settle.py` (`RunData`・`judge`・量を作る関数) をそのまま使う。design には依存しない (停止規則 v2 の保持の数え方は
 `design/forge_design/evaluate/stop_rule.py` から写し、出典の行を書いた; 同じ判定になることは `test_settle_virtual_stop.py` の (vi) が
@@ -55,6 +56,8 @@ codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-
 - `virtual_stop.json`: 結果 (基準の sha256・道具と settle.py の sha256・t_s・保持の経過・span の量ごとの最大の比・B の根拠・欠け・
   追加の記録・所要・使ったファイルの大きさと sha256)。手順 6 の記録は `target_only` (`used_for_verdict: false`)。
 - `VERDICT.txt`: 1 行目 `VERDICT: A` / `VERDICT: B` / `VERDICT: 未成立`、続けて理由と、「参考 (判定に使わない)」の t_s′ の行。
+  B のときは「B の内訳」の行で (a) 目的の量の累積の超過と (b) 全条件の持続の違反 (崩れた条件 = 量ごとの格子点の数・verdict) を分けて
+  書く (JSON の `b_breakdown`; codex diagnose 2026-10-16 settle-v2-span10k — (b) だけの B は早すぎる停止の証明ではない)。
 - `grid_verdicts.csv`: 格子点ごとの全体と量ごとの verdict・v2 の保持の状態と事象・区間・追加の記録の印、目的の量だけの verdict と
   その保持の状態・事象・t_s′ からの区間。
 - `grid_checks.csv`: 格子点ごと・量ごとの settle の検査の値と許容 (統計量の時系列) と、検査の無い理由。
@@ -64,7 +67,10 @@ codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-
   違えば紫の破線で示す。
 
 使い方:
-  python3 settle_virtual_stop.py <run_dir> [--span 80000] [--ts-max 120000] [--out DIR] [--no-plot] [--json]
+  python3 settle_virtual_stop.py <run_dir> [--span 80000] [--ts-max 120000] [--out DIR] [--criteria FILE] [--no-plot] [--json]
+  --criteria FILE: run の settle_criteria.yaml の代わりに FILE を基準にする (§6 (1″) の `wt_nozzle_v2` の再生など; run の基準は
+    読まず書き換えない。基準の中の相対のパスは run から解く)。run の基準の結果を上書きしないよう --out が要り、既定の
+    <run>/settle_virtual_stop は使えない。結果の criteria.path・files は FILE を指す。
 終了コード: 0 A / 1 B / 3 未成立 (基準・引数の誤りも 3)。
 """
 from __future__ import annotations
@@ -347,10 +353,12 @@ def _region(s: int, ts, span: int) -> str:
 
 
 def _span_check(ts, span: int, targets: list, vals: dict, grid: list, by_step: dict, last, verdict_key: str, why_key: str,
-                b_label: str, ts_label: str) -> dict:
+                b_label: str, ts_label: str, b_kinds=None) -> dict:
     """停止候補 ts から ts + span の格子点の (a)・(b) (§手順 3)。値 vals は全格子点で作ったものを使い回す。
     verdict_key・why_key は (b) に使う row の verdict と理由のキー (本検証は全体の "verdict"・"why"、t_s′ の記録は目的の量だけの
-    "target_verdict"・"target_why")。戻り {a, b_not_settled, evidence, incomplete, dev_rows, series, grid_points}。
+    "target_verdict"・"target_why")。b_kinds は (b) の違反の内訳に数える量の種類 (None = すべて)。
+    戻り {a, b_not_settled, evidence, incomplete, dev_rows, series, grid_points}。b_not_settled の各要素に、SETTLED でなかった量と
+    その verdict (`quantities`) を付ける (B の内訳)。
     evidence は超過 (B の根拠)、incomplete はデータの欠け・判定不能。ts が None なら量ごとに「{ts_label} なし」だけを書く。"""
     out = {"a": {}, "b_not_settled": [], "evidence": [], "incomplete": [], "dev_rows": [],
            "series": {q["name"]: {"kind": q["kind"], "steps": [], "signed": [], "diff": [], "tol": [], "ratio": []} for q in targets},
@@ -430,7 +438,9 @@ def _span_check(ts, span: int, targets: list, vals: dict, grid: list, by_step: d
             r = by_step[s]
             v = r[verdict_key]
             if v in FAIL_VERDICTS:
-                out["b_not_settled"].append({"step": s, "verdict": v, "why": r.get(why_key)})
+                qs = {nm: qv for nm, qv in r["by_quantity"].items()
+                      if qv != "SETTLED" and (b_kinds is None or r["kinds"][nm] in b_kinds)}
+                out["b_not_settled"].append({"step": s, "verdict": v, "why": r.get(why_key), "quantities": qs})
             elif v == "INDETERMINATE":
                 out["incomplete"].append(f"(b) 格子点 {s} の{b_label}が INDETERMINATE — " + "; ".join((r.get(why_key) or [])[:2]))
         bb = out["b_not_settled"]
@@ -442,22 +452,28 @@ def _span_check(ts, span: int, targets: list, vals: dict, grid: list, by_step: d
 
 
 def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, out_dir=None, write: bool = True,
-            plot: bool = True) -> dict:
-    """run を再生して仮想の停止の後を検証する。戻りは結果の dict (`virtual_stop.json` の中身)。write で出力を書く。"""
+            plot: bool = True, criteria=None) -> dict:
+    """run を再生して仮想の停止の後を検証する。戻りは結果の dict (`virtual_stop.json` の中身)。write で出力を書く。
+    criteria を渡すと run の settle_criteria.yaml の代わりにそのファイルを基準にする (run の基準は読まず書き換えない; 基準の中の
+    相対のパスは run から解く)。"""
     t0 = time.perf_counter()
     run = Path(run_dir)
     if span <= 0 or ts_max < 0:
         raise ValueError(f"span {span} は正、ts_max {ts_max} は 0 以上")
+    crit_path = Path(criteria) if criteria is not None else run / settle.CRITERIA_FILE
     res = {"schema": SCHEMA, "plan": PLAN, "run_dir": str(run.resolve()),
            "created": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
            "tool": "solver_density_cuda/tools/settle_virtual_stop.py", "tool_sha256": _sha256_file(Path(__file__)),
            "settle_sha256": _sha256_file(Path(settle.__file__)), "params": {"span": int(span), "ts_max": int(ts_max)},
            "reasons": [], "incomplete": [], "b_evidence": [], "notes": []}
+    if criteria is not None:
+        res["params"]["criteria"] = str(crit_path.resolve())
+        res["notes"].append(f"基準は --criteria {crit_path} (run の {settle.CRITERIA_FILE} の代わり; run の基準は使わない)")
     timing = {}
     try:
-        lc = settle.load_criteria(run)
+        lc = settle.load_criteria(run, path=crit_path if criteria is not None else None)
     except settle.CriteriaError as e:
-        res.update(verdict=RESULT_NA, reasons=[f"基準のファイルの誤り ({run / settle.CRITERIA_FILE}): {e}"])
+        res.update(verdict=RESULT_NA, reasons=[f"基準のファイルの誤り ({crit_path}): {e}"])
         return _finish(res, run, out_dir, write, plot, None, [], [], {}, timing, t0)
     if lc["status"] != "ok":
         res.update(verdict=RESULT_NA, reasons=[lc["message"]], criteria={"path": lc["path"], "sha256": lc.get("sha256")})
@@ -564,7 +580,8 @@ def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, 
         r["hold_start_target_only"] = rt["hold_start"]
         r["v2_event_target_only"] = rt["v2_event"]
     tsp = req_t["step"] if req_t is not None and req_t["kind"] == REQ_SETTLED else None
-    sct = _span_check(tsp, span, targets, vals, grid, by_step, last, "target_verdict", "target_why", "目的の量の判定", "t_s′")
+    sct = _span_check(tsp, span, targets, vals, grid, by_step, last, "target_verdict", "target_why", "目的の量の判定", "t_s′",
+                      b_kinds=settle.TARGET_KINDS)
     to_notes = []
     if tsp is None:
         rel = "t_s′ なし" + ((f" (目的の量だけの判定でも step {req_t['step']} で {req_t['kind']} の要求になる — {req_t['reason']})")
@@ -607,6 +624,10 @@ def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, 
     else:
         verdict = RESULT_A
     res["verdict"] = verdict
+    # B の内訳 (codex diagnose 2026-10-16 settle-v2-span10k): (a) 目的の量の累積の超過と (b) 全条件の持続の違反を分けて書く
+    kinds_of = {q["name"]: q["kind"] for q in crit["quantities"]}
+    res["b_breakdown"] = b_breakdown(sc["a"], sc["b_not_settled"], kinds_of)
+    res["target_only"]["b_breakdown"] = b_breakdown(sct["a"], sct["b_not_settled"], kinds_of)
 
     # ---------------------------------------------------------------- 5. 追加の記録
     rm_kinds = (settle.KIND_RESIDUAL, settle.KIND_MASS)
@@ -636,6 +657,51 @@ def analyse(run_dir, *, span: int = SPAN_DEFAULT, ts_max: int = TS_MAX_DEFAULT, 
                    {"dev_rows": sc["dev_rows"], "series": sc["series"], "dev_rows_tp": sct["dev_rows"]}, timing, t0)
 
 
+def b_breakdown(span_a: dict, b_not: list, kinds_of: dict) -> dict:
+    """B の内訳 (codex diagnose 2026-10-16 settle-v2-span10k の「B の解釈」): (a) 目的の量の t_s からの累積の超過 (量ごとの超過の
+    格子点の数・最初・最大の比) と、(b) span の格子点の全条件の持続の違反 (SETTLED でなかった条件 = 量ごとの格子点の数・verdict・step)
+    を分ける。(b) だけの B は目的の量を早く止めすぎた証明ではない (残差・流量の条件の再逸脱でも B になる)。"""
+    a_q = {}
+    for nm, sm in span_a.items():
+        if sm.get("n_exceeded"):
+            a_q[nm] = {"kind": sm.get("kind"), "n_exceeded": sm["n_exceeded"], "first_exceeded": sm.get("first_exceeded"),
+                       "max_ratio": sm.get("max_ratio"), "at_step": sm.get("at_step"), "where": sm.get("where")}
+    by_q = {}
+    for b in b_not:
+        for nm, v in (b.get("quantities") or {}).items():
+            e = by_q.setdefault(nm, {"kind": kinds_of.get(nm), "n_grid_points": 0, "verdicts": {}, "first_step": b["step"], "steps": []})
+            e["n_grid_points"] += 1
+            e["verdicts"][v] = e["verdicts"].get(v, 0) + 1
+            if len(e["steps"]) < 20:
+                e["steps"].append(b["step"])
+    return {"a_cumulative_exceedance": {"present": bool(a_q), "quantities": a_q,
+                                        "definition": "目的の量の t_s の値からの差が許容を超えた (累積のドリフト; 節点の値の非有限を含む)"},
+            "b_persistence_violation": {"present": bool(b_not), "n_grid_points": len(b_not),
+                                        "first_step": b_not[0]["step"] if b_not else None, "by_quantity": by_q,
+                                        "definition": "span の格子点で全条件の判定が SETTLED でない (どの条件が崩れたか)。これだけの B は"
+                                                      "目的の量を早く止めすぎた証明ではない"}}
+
+
+def _breakdown_lines(bd: dict, head: str) -> list:
+    a, b = bd["a_cumulative_exceedance"], bd["b_persistence_violation"]
+    out = []
+    if a["present"]:
+        out.append(f"{head} (a) 目的の量の累積の超過: あり — " + "; ".join(
+            f"{nm} ({x['kind']}) 超過 {x['n_exceeded']} 格子点、最初 step {x['first_exceeded']}、最大の比 "
+            + (f"{x['max_ratio']:.4g}" if isinstance(x.get("max_ratio"), (int, float)) else "-") + f" (step {x['at_step']})"
+            for nm, x in a["quantities"].items()))
+    else:
+        out.append(f"{head} (a) 目的の量の累積の超過: なし")
+    if b["present"]:
+        out.append(f"{head} (b) 全条件の持続の違反: あり — span の {b['n_grid_points']} 格子点 (最初 step {b['first_step']}); 崩れた条件: " + "; ".join(
+            f"{nm} ({x['kind']}) {x['n_grid_points']} 格子点 {x['verdicts']} 最初 step {x['first_step']}" for nm, x in b["by_quantity"].items()))
+        if not a["present"]:
+            out.append(f"{head}の注: (a) の超過は無く (b) だけ — 目的の量を早く止めすぎた証明ではない (条件の再逸脱)")
+    else:
+        out.append(f"{head} (b) 全条件の持続の違反: なし")
+    return out
+
+
 DEV_COLS = ["step", "region", "quantity", "kind", "status", "diff", "tol", "ratio", "exceeded", "where", "signed", "value", "ref",
             "x_m", "r_m", "maxabs_diff", "halfamp_diff", "detail"]
 
@@ -661,7 +727,8 @@ def _finish(res, run, out_dir, write, plot, data, rows, checks, dev, timing, t0)
         timing["outputs_s"] = time.perf_counter() - t3
         timing["total_s"] = time.perf_counter() - t0
         res["timing_s"] = timing
-        extra = [run / settle.CRITERIA_FILE] if (run / settle.CRITERIA_FILE).exists() else []
+        cp = Path((res.get("criteria") or {}).get("path") or (res.get("params") or {}).get("criteria") or run / settle.CRITERIA_FILE)
+        extra = [cp] if cp.exists() else []         # 使った基準のファイル (--criteria ならそれ; run の基準ではない)
         res["files"] = settle.files_record(data, extra)
         (od / "VERDICT.txt").write_text("\n".join(verdict_lines(res)) + "\n")
         tmp = od / "virtual_stop.json.tmp"
@@ -688,6 +755,8 @@ def verdict_lines(res: dict) -> list:
     for k, lab in (("reasons", "未成立の理由"), ("b_evidence", "超過"), ("incomplete", "欠け・判定不能")):
         for x in res.get(k) or []:
             out.append(f"{lab}: {x}")
+    if res.get("verdict") == RESULT_B and res.get("b_breakdown"):
+        out += _breakdown_lines(res["b_breakdown"], "B の内訳")
     a = ((res.get("span") or {}).get("a")) or {}
     for nm, s in a.items():
         if s.get("max_ratio") is not None:
@@ -718,7 +787,9 @@ def verdict_lines(res: dict) -> list:
     for x in res.get("notes") or []:
         out.append(f"note: {x}")
     if res.get("provisional"):
-        out.append(f"閾値: {settle.PROVISIONAL_TEXT} — この検証では wt_nozzle_v1 版 1 の値に固定 (plan §6 V3(b))")
+        src = ((c.get("content") or {}).get("source") or {}) if isinstance(c.get("content"), dict) else {}
+        ver = f"{src['preset_version']} の値" if src.get("preset_version") else "基準のファイルの値"
+        out.append(f"閾値: {settle.PROVISIONAL_TEXT} — この検証では {ver}に固定 (基準 {c.get('path')}; plan §6 V3(b)・(1″))")
     return out
 
 
@@ -869,7 +940,9 @@ def main(argv=None) -> int:
     ap.add_argument("run_dir")
     ap.add_argument("--span", type=int, default=SPAN_DEFAULT, help=f"t_s から検証する step 数 (既定 {SPAN_DEFAULT})")
     ap.add_argument("--ts-max", type=int, default=TS_MAX_DEFAULT, help=f"t_s の上限 (超えたら未成立; 既定 {TS_MAX_DEFAULT})")
-    ap.add_argument("--out", default=None, help=f"出力の置き場所 (既定 <run>/{OUT_DIR})")
+    ap.add_argument("--out", default=None, help=f"出力の置き場所 (既定 <run>/{OUT_DIR}; --criteria のときは必須)")
+    ap.add_argument("--criteria", default=None,
+                    help=f"run の {settle.CRITERIA_FILE} の代わりに使う基準のファイル (run の基準は読まず書き換えない; --out が要る)")
     ap.add_argument("--no-plot", action="store_true")
     ap.add_argument("--json", action="store_true", help="結果の JSON を標準出力に出す")
     a = ap.parse_args(argv)
@@ -878,8 +951,18 @@ def main(argv=None) -> int:
         print(f"ERROR: {run} はディレクトリでない")
         print(f"VERDICT: {RESULT_NA}")
         return EXIT_CODE[RESULT_NA]
+    if a.criteria is not None:
+        # 別の基準の結果で run の基準の結果 (<run>/settle_virtual_stop/) を上書きしない
+        if a.out is None:
+            print(f"ERROR: --criteria には --out が要る (既定の {run / OUT_DIR} は run の基準の結果の置き場所)")
+            print(f"VERDICT: {RESULT_NA}")
+            return EXIT_CODE[RESULT_NA]
+        if Path(a.out).resolve() == (run / OUT_DIR).resolve():
+            print(f"ERROR: --out {a.out} は run の基準の結果の置き場所 ({run / OUT_DIR}) — 別の場所にする")
+            print(f"VERDICT: {RESULT_NA}")
+            return EXIT_CODE[RESULT_NA]
     try:
-        res = analyse(run, span=a.span, ts_max=a.ts_max, out_dir=a.out, write=True, plot=not a.no_plot)
+        res = analyse(run, span=a.span, ts_max=a.ts_max, out_dir=a.out, write=True, plot=not a.no_plot, criteria=a.criteria)
     except ValueError as e:
         print(f"ERROR: {e}")
         print(f"VERDICT: {RESULT_NA}")

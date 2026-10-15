@@ -20,6 +20,9 @@ res_nodes_i.h5 → 流量の行 i の順に書き (流量の行が完成の印)�
         オンラインの格子点ごとの判定が終了後の再生 (`settle.judge(run, s)`) と同じ (verdict と量の sha256)、止めた step の再評価
         (SETTLE_VERDICT.json) が `check_settled.py --end-step 80001` と同じ (終了コード 0)。
       - 保持の既定 (基準のファイルに hold が無い → 40,000): 82,000 で要求、82,001 で REACHED。
+      - 保持 0・区間 1 万・残差 series raw (wt_nozzle_v2 の形; §5.1 #5d): 出口 M が 16,000 から跳ぶので 22,000・24,000 は NOT_SETTLED、
+        最初に SETTLED になる 26,000 で要求 → 26,001 で REACHED。オンラインの判定と再生・check_settled・settle_virtual_stop の
+        emulate_v2 の要求が一致、再評価の残差は毎 step の系列 (区間・直前の区間とも 10,000 行)。
       - 要求の後に崩れる: (i) 停止の step の観測だけが跳ねる → 再評価 NOT_SETTLED → FAILED (reeval_not_settled)、
         (ii) 要求を見てから 4,000 step 遅れて止まり、その間に出口の M が変わる → 要求の後の格子点が NOT_SETTLED → FAILED
         (broken_after_request)。
@@ -73,6 +76,8 @@ from forge_design.evaluate import stop_rule as SR  # noqa: E402
 from forge_design.evaluate import runner as RN  # noqa: E402
 
 ST = SR._settle()
+sys.path.insert(0, str(ROOT / "solver_density_cuda" / "tools"))
+import settle_virtual_stop as SVS  # noqa: E402  (再生の emulate_v2 との一致)
 FAIL = 0
 NI, NJ, SCALE = 6, 5, 0.1
 DT, W = 2000, 20000
@@ -123,7 +128,8 @@ def coords():
     return np.c_[X.ravel(), R.ravel(), np.zeros(NI * NJ)]
 
 
-def criteria(hold: int | None = 38000, dt: int = DT, quantities: list | None = None) -> dict:
+def criteria(hold: int | None = 38000, dt: int = DT, quantities: list | None = None, W_: int = W, raw: bool = False) -> dict:
+    """試験の基準。raw は wt_nozzle_v2 の形 (残差 series raw; 窓は W_、min_points は W_/dt + 1)。"""
     q = quantities if quantities is not None else [
         {"kind": "residual", "file": "residual_history.csv", "required": ["rms_ro", "rms_roUx", "rms_roUy", "rms_roe"],
          "inactive_ok": ["rms_roUz"],
@@ -133,9 +139,14 @@ def criteria(hold: int | None = 38000, dt: int = DT, quantities: list | None = N
         {"kind": "exit_core_mach", "eta_range": [0.05, 0.7], "thresholds": {"tol": 1e-4}},
         {"kind": "exit_flow_angle", "eta_range": [0.05, 0.7], "thresholds": {"tol": 0.01}},
     ]
+    if raw:
+        for x in q:
+            if x["kind"] == "residual":
+                x["series"] = "raw"
     c = {"schema": ST.SCHEMA, "source": {"made_by": "run_stop_rule_v2_tests.py"},
          "structured": {"ni": NI, "nj": NJ, "scale_m": SCALE, "mesh_file": "nozzle.h5"},
-         "grid": {"out_step_interval": dt, "start_step": 0, "segment": None}, "window": {"W": W, "min_points": 11},
+         "grid": {"out_step_interval": dt, "start_step": 0, "segment": None},
+         "window": {"W": W_, "min_points": 11 if W_ == W else W_ // dt + 1},
          "quantities": q, "excluded": [], "preconditions": []}
     if hold is not None:
         c["hold"] = hold
@@ -513,6 +524,37 @@ def test_watcher():
               rec.get("stop_forge") is None and rec["postprocess"]["by"] == "run_case.sh")
         check("REACHED: solverConfig と stage_manifest の本段の nStepOuter = 上限 100,000",
               RA._cfg_value((rd / "solverConfig.yaml").read_text(), "nStepOuter") == 100000)
+
+        # --- 保持 0・区間 1 万・残差の毎 step の系列 (wt_nozzle_v2 の形; §4.4・§5.1 #5d): 最初に合格した格子点で要求 ---
+        DELTA_CALLS.clear()
+        rd = make_run("hold0_v2", {"jump_at": 15001}, crit=criteria(hold=0, W_=10000, raw=True))
+        rc, rec, st = run_case(rd)
+        js = [(j["step"], j["verdict"]) for j in rec["judgements"]]
+        check("保持 0・区間 1 万 (raw): 出口 M が 16,000 から跳ぶ → 22,000・24,000 は NOT_SETTLED、最初に SETTLED の 26,000 で要求 → "
+              "26,001 で止まり REACHED (rc 0)",
+              rc == 0 and state_ok(rc, st, "REACHED") and js == [(22000, "NOT_SETTLED"), (24000, "NOT_SETTLED"), (26000, "SETTLED")]
+              and st["settled_since"] == 26000 and st["request_step"] == 26000 and st["stop_step"] == 26001 and st["failures"] == []
+              and st["hold_steps"] == 0, f"{js} {st and (st['status'], st['request_step'], st['stop_step'], st['failures'])}")
+        req = json.loads((rd / SR.STOP_REQUEST).read_text())
+        check("保持 0: STOP_REQUEST の保持 0・条件を満たし始めた step = 要求の格子点 26,000",
+              req["kind"] == "settled" and req["hold_steps"] == 0 and req["settled_since"] == 26000 and req["request_step"] == 26000)
+        ok, n, bad = replay_matches(rd)
+        check("保持 0: オンラインの格子点ごとの判定 (22,000〜26,000) が終了後の再生と同じ (verdict・量の sha256)", ok and n == 3, f"{n} 点、違い {bad}")
+        sv = json.loads((rd / ST.VERDICT_FILE).read_text())
+        rq = [q for q in sv["quantities"] if q["kind"] == "residual"][0]
+        check("保持 0: 再評価 (26,001) は SETTLED、残差は毎 step の系列 (区間・直前の区間とも 10,000 行) で判定",
+              st["reeval"]["verdict"] == "SETTLED" and st["reeval"]["end_step"] == 26001 and rq["values"].get("series") == "raw"
+              and rq["values"]["raw_rows"] == {"C": [16000, 25999], "P": [6000, 15999], "n_C": 10000, "n_P": 10000},
+              json.dumps(rq["values"].get("raw_rows")))
+        crc, cj = cli_replay(rd, 26001)
+        check("保持 0: check_settled.py --end-step 26001 が見張りの再評価と同じ (終了コード 0・verdict・量の sha256)",
+              crc == 0 and cj is not None and cj["verdict"] == "SETTLED" and SR.quantities_digest(cj) == SR.quantities_digest(sv), f"rc {crc}")
+        vs = SVS.analyse(rd, write=False, plot=False)
+        em = vs["v2_emulation"]["request"] or {}
+        check("保持 0: settle_virtual_stop の再生 (emulate_v2) の要求が v2 と同じ (settled・26,000・条件を満たし始めた 26,000)",
+              (em.get("kind"), em.get("step"), em.get("settled_since")) == ("settled", 26000, 26000) and vs["t_s"] == 26000
+              and vs["v2_emulation"]["hold"]["reached"] == st["hold"]["reached"] == [26000], f"{em} {st['hold']}")
+        check("保持 0: δ_E の抽出は止めた step 26,001 から 1 回", [c_["step"] for c_ in DELTA_CALLS] == [26001], str(DELTA_CALLS))
 
         # --- 保持の既定 (基準のファイルに hold が無い → 40,000) ---
         DELTA_CALLS.clear()
