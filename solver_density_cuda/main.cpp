@@ -137,6 +137,61 @@ static void appendLaunchRecord(const solverConfig& cfg)
     if (out) out << os.str() << "\n";
 }
 
+// リミッタの基準値の記録 limiter_ref.json (plans/active/tooling-settle-convergence-and-monitor.md §4.6・§4.8 の 3)。
+// 起動ごとに作業ディレクトリ (= run dir) へ上書きで書く (一時ファイル → rename)。値は %.17g (double を往復できる桁)。
+// stage_manifest.py が cfg_fnv (solverConfig.yaml の FNV-1a 64、forge_launches.jsonl と同じ) で段と結び付け、区間の鍵にする。
+// 設計チェーンは `main_line.limiter_ref: {from_run: <run>}` でこの値を次の run の solverConfig へ固定値として写す。
+// **出力だけ**: 値の決め方 (上の自動の平均・境界箱) には触らない。書けなくても計算は止めない (記録が無い段は連結されない)。
+static void writeLimiterRefRecord(const solverConfig& cfg, bool computed,
+                                  bool roAuto, bool pAuto, bool aAuto, bool lAuto)
+{
+    auto num = [](double v) {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%.17g", v);
+        return std::string(buf);
+    };
+    auto tf = [](bool b) { return std::string(b ? "true" : "false"); };
+    std::ostringstream os;
+    os << "{\n  \"schema\": \"forge.limiter_ref/v1\",\n"
+       << "  \"time\": " << (long long)std::time(nullptr) << ",\n"
+       << "  \"cfg_fnv\": \"" << std::hex << fnv1a64File("solverConfig.yaml") << std::dec << "\",\n"
+       << "  \"limiterScaled\": " << cfg.limiterScaled << ",\n"
+       << "  \"limiterDiag\": " << cfg.limiterDiag << ",\n"
+       << "  \"computed\": " << tf(computed) << ",\n";
+    if (computed) {
+        os << "  \"limiterRoRef\": " << num(cfg.limiterRoRef) << ",\n"
+           << "  \"limiterPRef\": " << num(cfg.limiterPRef) << ",\n"
+           << "  \"limiterARef\": " << num(cfg.limiterARef) << ",\n"
+           << "  \"limiterRefLength\": " << num(cfg.limiterRefLength) << ",\n"
+           << "  \"auto\": {\"limiterRoRef\": " << tf(roAuto) << ", \"limiterPRef\": " << tf(pAuto)
+           << ", \"limiterARef\": " << tf(aAuto) << ", \"limiterRefLength\": " << tf(lAuto) << "},\n"
+           << "  \"venkatK\": " << num(cfg.venkatK) << ",\n"
+           << "  \"h_i\": \"" << (cfg.limiterLengthFromArea ? "sqrt(A_planar)" : "cbrt(volume)") << "\"\n";
+    } else {
+        os << "  \"limiterRoRef\": null,\n  \"limiterPRef\": null,\n  \"limiterARef\": null,\n  \"limiterRefLength\": null,\n"
+           << "  \"auto\": null,\n  \"venkatK\": " << num(cfg.venkatK) << ",\n  \"h_i\": null\n";
+    }
+    os << "}\n";
+    const std::string path = "limiter_ref.json", tmp = path + ".tmp";
+    bool ok = false;
+    {
+        std::ofstream out(tmp, std::ios::out | std::ios::trunc);
+        if (out) { out << os.str(); out.flush(); ok = static_cast<bool>(out); }
+    }
+    if (ok) ok = (std::rename(tmp.c_str(), path.c_str()) == 0);
+    if (!ok) {
+        std::remove(tmp.c_str());
+        std::cout << "[limiter] 警告: limiter_ref.json を書けなかった (計算は続ける; この起動の段は区間の連結に使えない)" << std::endl;
+        return;
+    }
+    if (computed)
+        std::cout << "[limiter] 記録: limiter_ref.json (limiterRoRef " << num(cfg.limiterRoRef) << ", limiterPRef "
+                  << num(cfg.limiterPRef) << ", limiterARef " << num(cfg.limiterARef) << ", limiterRefLength "
+                  << num(cfg.limiterRefLength) << "; %.17g)" << std::endl;
+    else
+        std::cout << "[limiter] 記録: limiter_ref.json (基準値は使わない: limiterScaled 0・limiterDiag 0)" << std::endl;
+}
+
 
 #define CHECK_LAST_CUDA_ERROR() checkLast(__FILE__, __LINE__)
 void checkLast(const char* const file, const int line)
@@ -1775,6 +1830,8 @@ cudaConfig initializeSimulation(
     // h_i は 2D / 軸対称では半径重み前の面積の平方根、3D では体積の立方根 (ieleType で判別)。
     // limiterDiag>0 のときも基準値を計算する: G1 の許容幅に**構成によらない絶対床**を与えるため
     // (Uy/Uz が恒等 0 の場では近傍レンジも 0 になり、float ノイズを逸脱と数えてしまう)。
+    // 自動か固定か (下の limiter_ref.json に書くだけ; 値の決め方には使わない)
+    bool limRefComputed = false, limRoAuto = false, limPAuto = false, limAAuto = false, limLAuto = false;
     if (cfg.limiterScaled == 1 || cfg.limiterDiag > 0) {
         std::vector<flow_float> h_ro(msh.nCells), h_P(msh.nCells), h_a(msh.nCells);
         gpuErrchk( cudaMemcpy(h_ro.data(), var.c_d["ro"],    msh.nCells*sizeof(flow_float), cudaMemcpyDeviceToHost) );
@@ -1803,7 +1860,10 @@ cudaConfig initializeSimulation(
             const double dx=xmax-xmin, dy=ymax-ymin, dz=zmax-zmin;
             const double diag = std::sqrt(dx*dx+dy*dy+dz*dz);
             cfg.limiterRefLength = (diag > 0.0) ? diag : 1.0;
+            limLAuto = true;
         }
+        limRefComputed = true;
+        limRoAuto = roAuto; limPAuto = pAuto; limAAuto = aAuto;
         // 2D 判定は**境界箱が 1 方向に潰れているか**で行う (平面 2D は z 幅 0)。
         // ieleType は node の双対 CV では primal の型を持たないので使えない。
         {
@@ -1827,6 +1887,7 @@ cudaConfig initializeSimulation(
             std::cout << "[limiter]   limiterARef: "  << cfg.limiterARef  << std::endl;
         }
     }
+    writeLimiterRefRecord(cfg, limRefComputed, limRoAuto, limPAuto, limAAuto, limLAuto);
 
     return cuda_cfg;
 }

@@ -22,6 +22,30 @@
 | `1` | Barth | |
 | `2` | Venkatakrishnan | 通常使用するリミタ。`convMethod: 1` または `2` と組み合わせる |
 
+### リミッタの基準値の記録 `limiter_ref.json` (2026-10-16)
+
+`limiterScaled: 1` (既定) の Venkatakrishnan は基準値 ρ・P・a (`space.limiterRoRef`・`limiterPRef`・`limiterARef`) と基準長
+L_ref (`limiterRefLength`) で無次元化する。**省略 (0) は起動のたびに開始の場の体積平均** (L_ref は格子の境界箱の対角) で決まるので、
+同じ YAML でも起動ごとに作用素が変わりうる (再開・段の切り替えのたび)。forge は起動のたびに、決まった値を作業ディレクトリ (run dir) の
+`limiter_ref.json` に**上書き**で書く (一時ファイル → rename; 出力だけで値の決め方は変えない):
+
+```json
+{"schema": "forge.limiter_ref/v1", "time": 1792078376, "cfg_fnv": "cdf047de7f18fd9", "limiterScaled": 1, "limiterDiag": 0,
+ "computed": true, "limiterRoRef": 0.59298852861870699, "limiterPRef": 192416.41762690683, "limiterARef": 327.13657637494532,
+ "limiterRefLength": 9.0296406421583377,
+ "auto": {"limiterRoRef": true, "limiterPRef": true, "limiterARef": true, "limiterRefLength": true},
+ "venkatK": 0.050000000000000003, "h_i": "sqrt(A_planar)"}
+```
+
+- 値は `%.17g` (double を往復できる桁)。log の `[limiter]` の行 (10 桁) と同じ値で、log にも `[limiter] 記録: limiter_ref.json (... %.17g)` を 1 行出す。
+- `cfg_fnv` は `solverConfig.yaml` の FNV-1a 64 (`forge_launches.jsonl` と同じ)。`tools/stage_manifest.py` はこれで段と結び付け、値を区間の
+  hard キー `limiter.ref` に入れる (値が違う段は別の区間、記録が無く自動の値が分からない段は連結しない)。段の記録 (`StageManifest.add`) は
+  **その段の forge の後に**呼ぶ。
+- 基準値を使わない起動 (`limiterScaled: 0` かつ `limiterDiag: 0`) も `"computed": false` で書く。書けなかったら log に警告を出して計算は続ける。
+- 固定するには値をそのまま `space` に書く (`limiterRoRef: 0.592988528618707` のように Python の `repr` で書けば forge は同じ double を読む;
+  case/71 の Euler で自動 → 固定の 2 起動の記録が `%.17g` の文字列まで一致)。設計チェーンは `evaluate.main_line.limiter_ref: {from_run: <run>}` で
+  別 run の記録を継承する (`runner_axismach.limiter_ref_from_run`; plan tooling-settle-convergence-and-monitor §4.6)。
+
 ## 推奨組み合わせ
 
 | 用途 | convMethod | limiter |
@@ -485,6 +509,11 @@ time:
   fieldOutStepInterval: 20000    # 全場 res_<step>.h5 だけ (省略時 = outStepInterval)
 output: {nodeProbeFile: nodes.txt, boundaryMassflux: 1}
 ```
+
+要求カードの雛形 (`axismach_final_v1`・`axismach_explore_v1`) の NS は、問題 YAML の `evaluate.ns_output`・`evaluate.settle` から
+`runner_axismach.prepare_ns` が**本段の設定だけ**にこれらを書く (間隔 2,000 / 全場 20,000、入口・出口・壁・軸の境界の h5、流量、
+判定の基準 `settle_criteria.yaml` の節点の表 `settle_nodes.txt`、等温壁なら `interfaceDiag: 1`; 2026-10-16、
+plan tooling-settle-convergence-and-monitor §4.5)。前の段 (S1・S2) の設定には入らない。
 
 | キー | 既定 | 効き方 |
 | --- | --- | --- |

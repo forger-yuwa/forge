@@ -69,6 +69,15 @@ UNAVAILABLE を記録して fallback_steps の長さで回す。本段が終わ�
 SIGTERM → 待って SIGKILL (止まったことを /proc で確かめる)、止めた出力より後の res を消す。forge の終了コードは `run_case.sh` の
 `[run_case] forge exit=N` の行から読む (`FORGE_STRICT_CONVERGENCE` の終了コードと取り違えない)。forge だけを止めるので `run_case.sh` の後処理
 (収束判定・残差の png) はそのまま走る; 走らなかったら同じ後処理を呼ぶ。
+
+**停止規則 v2** (plan tooling-settle-convergence-and-monitor §4.4・§4.8 の 1・§6 V4、§5.1 #5、2026-10-16; ファイルの後半):
+run に `settle_criteria.yaml` があれば新方式 (`watch_main_stage_v2`)、無ければ上の旧方式のまま (分岐は `runner_axismach.run_staged_ns`)。
+どちらを使ったかを STOP_RULE_STATE.json の `method` (v1 / v2) に書く。v2 は判定に共通の部品 `solver_density_cuda/tools/settle.py` を使い、
+出力の格子 (grid.out_step_interval の倍数) の観測 (残差の行 s−1・流量の行 s・`res_nodes_s.h5`) がそろうたびに判定する。3 条件の AND が
+保持 (基準のファイルの hold、既定 `HOLD_STEPS_DEFAULT`) 続いたら `STOP_REQUEST` を置き、forge が協調停止で書いた `STOPPED_AT` の step で
+再評価 (格子の窓 + 停止の観測の別検査、`SETTLE_VERDICT.json`) して SETTLED のときだけ REACHED。止めた step の全場から δ_E を 1 回だけ
+抽出し、帯の位置の感度 (y_b × 1.25) を記録する。θ_r・δ の時系列は作らない。forge を kill で止めるのは時間切れ・見張りの例外だけ
+(その場合も REACHED にしない)。状態は REACHED / CENSORED / FAILED (理由と `failures`)。
 """
 from __future__ import annotations
 
@@ -76,11 +85,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -669,12 +680,16 @@ def save_record(run_dir, rec: dict) -> Path:
 def write_state(run_dir, state: dict) -> Path:
     """本段の終了の状態 `<run>/STOP_RULE_STATE.json` を原子的に書く (一時ファイル → rename; M6 の版で足した)。state は少なくとも status を持つ。
     `run_staged_ns` が本段の後に 1 度だけ書く。見張りの途中の記録 (stop_rule.json、status は RUNNING から変わる) と違い、このファイルが
-    あれば本段は終わっている (無いのに prepare_info が停止規則を要求していれば、本段が終わっていないか記録が失われた)。"""
-    if state.get("status") not in STATES + ("NOT_USED",):
-        raise ValueError(f"停止の状態 {state.get('status')!r} は {STATES + ('NOT_USED',)} のどれか")
+    あれば本段は終わっている (無いのに prepare_info が停止規則を要求していれば、本段が終わっていないか記録が失われた)。
+    `method` が "v2" (停止規則 v2、settle_criteria.yaml の run) なら状態は `V2_STATES` (+ NOT_USED) のどれかで、version 2・plan は v2 の plan。"""
+    v2 = state.get("method") == "v2"
+    allowed = (V2_STATES if v2 else STATES) + ("NOT_USED",)
+    if state.get("status") not in allowed:
+        raise ValueError(f"停止の状態 {state.get('status')!r} は {allowed} のどれか")
     p = Path(run_dir) / STATE
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(json.dumps({"version": 1, "plan": PLAN, **state}, indent=1, ensure_ascii=False, default=_json_default))
+    head = {"version": 2, "plan": V2_PLAN} if v2 else {"version": 1, "plan": PLAN}
+    tmp.write_text(json.dumps({**head, **state}, indent=1, ensure_ascii=False, default=_json_default))
     os.replace(tmp, p)
     return p
 
@@ -1022,3 +1037,654 @@ def window_summary(rows: list, step: int, window: int = WINDOW) -> dict:
         if len(v):
             out[k] = {"mean": float(v.mean()), "amp": float((v.max() - v.min()) / 2.0), "n": int(len(v))}
     return out
+
+
+# ====================================================================================== 停止規則 v2
+# plan tooling-settle-convergence-and-monitor §4.4・§4.8 の 1・§6 V4 (§5.1 #5、2026-10-16)。概要は docstring の「停止規則 v2」。
+# forge 側の契約 (STOP_REQUEST → STOPPED_AT、終了コード 0/3、起動時の残りで終了コード 1) は procedures/solver-settings.md の
+# 「本段の監視用の出力と協調停止」と solver_density_cuda/output/monitorOutputs.cpp。
+V2_PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §4.4・§4.8 の 1・§6 V4 (§5.1 #5、2026-10-16: settle_criteria.yaml の run は "
+           "3 条件の保持 → 協調停止 → 止めた step で再評価 → δ_E を 1 回)")
+V2_STATES = ("REACHED", "CENSORED", "FAILED")
+V2_DIR = "stop_rule_v2"                    # v2 の見張りの作業の置き場 (δ_E の抽出の出力・オンラインの読み込みの写し)
+STOP_REQUEST, STOPPED_AT, SNAPSHOT_REQUEST = "STOP_REQUEST", "STOPPED_AT", "SNAPSHOT_REQUEST"
+CONTROL_FILES = (STOP_REQUEST, STOPPED_AT, SNAPSHOT_REQUEST)   # forge は起動時にどれかがあると止まる (終了コード 1)
+CRITERIA_FILE = "settle_criteria.yaml"     # = settle.CRITERIA_FILE (preflight_v2 で照合)
+FORGE_RESIDUAL = "residual_history.csv"    # forge が書く名前 (オンラインの判定はこの名前の入力だけを読む)
+FORGE_MASSFLUX = "boundary_massflux.csv"
+V2_STOP_WAIT_S = 900.0                     # STOP_REQUEST を置いてから forge が終わるのを待つ上限 [s] (超えたら非常時として kill、REACHED にしない)
+YB_SENS_FACTOR = 1.25                      # δ_E の帯の位置の感度の倍率 (card plan #3z・case/71 _runs/run_0010_ns_b0/band_ab.py と同じ)
+REQUEST_MAX_BYTES = 4000                   # forge は STOP_REQUEST の先頭 4 KiB を STOPPED_AT の request に写す
+_V2_NODE_KINDS = ("exit_core_mach", "line_mach", "exit_flow_angle")
+V2_FAILURES = {                            # FAILED の理由の分類 (状態の failures に入る)
+    "diverged": "オンラインの判定が DIVERGED (非有限) — 協調停止で止めた",
+    "criteria_unset": "オンラインの判定が INDETERMINATE (未設定: 基準と run の出力が合わない) — 協調停止で止めた",
+    "detect_nan": "forge の detectNaN が止めた",
+    "forge_exit": "forge が 0 以外で終わった・上限より前に終わった",
+    "no_stopped_at": "STOP_REQUEST を置いたのに STOPPED_AT が無い",
+    "stopped_at_invalid": "STOPPED_AT の中身の検査に通らない",
+    "broken_after_request": "要求の後の格子点で 3 条件が崩れた",
+    "reeval_not_settled": "止めた step の再評価 (格子の窓 + 停止の観測) が SETTLED でない",
+    "timeout": "要求の後 stop_wait_s 待っても forge が終わらない (非常時として kill した)",
+    "watcher_exception": "見張りの例外 (非常時として kill した)",
+}
+
+
+def _settle():
+    """solver_density_cuda/tools/settle.py (判定の共通の部品; run_case.sh と同じ FORGE_TOOLS から読む)。"""
+    from .runner import FORGE_TOOLS
+    p = str(FORGE_TOOLS)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    import settle
+    return settle
+
+
+def criteria_present(run_dir) -> bool:
+    """run が停止規則 v2 (新方式) の対象か = settle_criteria.yaml がある (壊れた symlink も「ある」とし、黙って旧方式に落とさない)。"""
+    return os.path.lexists(Path(run_dir) / CRITERIA_FILE)
+
+
+def leftover_control_files(run_dir) -> list:
+    """run dir に残っている協調停止・随時の書き出しの制御のファイル (forge はどれかがあると起動を拒む)。"""
+    return [n for n in CONTROL_FILES if os.path.lexists(Path(run_dir) / n)]
+
+
+def preflight_v2(run_dir, cfg: dict, cap: int) -> dict:
+    """停止規則 v2 を使えるかを forge を起動する前に確かめる。問題は `problems` に理由を並べる (呼ぶ側は forge を起動しない)。
+    cfg は本段の solverConfig (YAML を読んだ dict)、cap は本段の上限 (= 本段の nStepOuter)。
+    検査: 起動を拒まれる制御のファイル (STOP_REQUEST・STOPPED_AT・SNAPSHOT_REQUEST) が無い (**残っていても消さない**)、
+    settle_criteria.yaml が読めて評価対象がそろう (`settle.load_criteria`; 誤用・未設定は問題)、格子の間隔 = time.outStepInterval、
+    grid.start_step = 0 (forge は起動ごとに step 0 から)、オンラインの判定に使えない入力が無い (series_csv・forge の出力と違うファイルの
+    名前)、量に要る forge の出力が有効 (mass_balance → output.boundaryMassflux 1; 節点の量 → output.nodeProbeFile があり、その表に
+    `settle_presets.probe_node_ids` の節点がそろう; wall_heat_nodes → output.interfaceDiag 1 と bcondConfig の壁の outputHDFflg 1)。
+    戻り: {loaded, problems, dt, W, start, hold, hold_source, first_judgeable, note}。first_judgeable = start + 2W + 間隔 (本段の開始の場には
+    残差の行・節点・流量が無いので、これより前の格子点は必ず判定不能; plan §5.1 #2 の決定)。note は「上限までに保持を終えられない」。"""
+    S = _settle()
+    run_dir = Path(run_dir)
+    probs = []
+    left = leftover_control_files(run_dir)
+    if left:
+        probs.append(f"run dir に {left} が残っている (forge は起動を拒む; 前の run の残りかを確かめてから手で消す — 見張りは消さない)")
+    if S.CRITERIA_FILE != CRITERIA_FILE:
+        probs.append(f"基準のファイルの名前が settle.py ({S.CRITERIA_FILE}) とここ ({CRITERIA_FILE}) で違う")
+    out = {"loaded": None, "problems": probs}
+    try:
+        lc = S.load_criteria(run_dir)
+    except S.CriteriaError as e:
+        probs.append(f"{CRITERIA_FILE} の誤り: {e}")
+        return out
+    out["loaded"] = lc
+    if lc["status"] != "ok":
+        probs.append(lc["message"])
+        return out
+    crit = lc["criteria"]
+    dt, start, W = crit["grid"]["out_step_interval"], crit["grid"]["start_step"], crit["window"]["W"]
+    hold = int(crit["hold"]) if "hold" in crit else HOLD_STEPS_DEFAULT
+    t = cfg.get("time") if isinstance(cfg.get("time"), dict) else {}
+    o = cfg.get("output") if isinstance(cfg.get("output"), dict) else {}
+    if t.get("outStepInterval") != dt:
+        probs.append(f"grid.out_step_interval {dt} が本段の time.outStepInterval {t.get('outStepInterval')!r} と違う (判定の格子に出力が乗らない)")
+    if start != 0:
+        probs.append(f"grid.start_step {start} が 0 でない (forge は起動ごとに step 0 から数える)")
+    kinds = {q["kind"] for q in crit["quantities"]}
+    for q in crit["quantities"]:
+        nm = q["name"]
+        if "series_csv" in q:
+            probs.append(f"{nm}: series_csv (再生用の系列) はオンラインの判定に使えない (forge の出力から判定する)")
+        elif q["kind"] == "residual" and q["file"] != FORGE_RESIDUAL:
+            probs.append(f"{nm}: file {q['file']!r} が forge の残差の履歴 {FORGE_RESIDUAL} でない")
+        elif q["kind"] == "mass_balance" and q["file"] != FORGE_MASSFLUX:
+            probs.append(f"{nm}: file {q['file']!r} が forge の境界の質量流束 {FORGE_MASSFLUX} でない")
+        elif q["kind"] in _V2_NODE_KINDS and q["nodes_file"] != S.DEFAULT_NODES_FILE:
+            probs.append(f"{nm}: nodes_file {q['nodes_file']!r} が forge の節点の出力 {S.DEFAULT_NODES_FILE} でない")
+        elif q["kind"] == "wall_heat_nodes" and q["file_pattern"] != S.DEFAULT_WALL_PATTERN:
+            probs.append(f"{nm}: file_pattern {q['file_pattern']!r} が forge の境界の h5 {S.DEFAULT_WALL_PATTERN} でない")
+    if "mass_balance" in kinds and o.get("boundaryMassflux") != 1:
+        probs.append(f"流量の収支 (mass_balance) に output.boundaryMassflux: 1 が要る (本段の値 {o.get('boundaryMassflux')!r})")
+    if kinds & set(_V2_NODE_KINDS):
+        npf = o.get("nodeProbeFile")
+        st = crit.get("structured") or {}
+        mesh = st.get("mesh_file") or ((cfg.get("mesh") or {}).get("meshFileName") if isinstance(cfg.get("mesh"), dict) else None)
+        if not npf:
+            probs.append("節点の量 (exit_core_mach・line_mach・exit_flow_angle) に output.nodeProbeFile が要る")
+        elif not (run_dir / npf).is_file():
+            probs.append(f"output.nodeProbeFile {npf!r} が run dir に無い")
+        elif st.get("mesh_file") and not (run_dir / st["mesh_file"]).is_file():
+            probs.append(f"structured.mesh_file {st['mesh_file']!r} が run dir に無い")
+        elif not mesh or not (run_dir / mesh).is_file():
+            probs.append(f"節点の表を確かめる格子の h5 が無い (structured.mesh_file・mesh.meshFileName: {mesh!r})")
+        else:
+            try:
+                from .settle_presets import mesh_xr, probe_node_ids, read_node_probe_file
+                X, R = mesh_xr(run_dir / mesh, st["ni"], st["nj"], st["scale_m"])
+                need = set(probe_node_ids(st["ni"], st["nj"], X, R, crit).tolist())
+                miss = sorted(need - set(read_node_probe_file(run_dir / npf)))
+                if miss:
+                    probs.append(f"節点の表 {npf} に節点の量に要る節点が {len(miss)} 個足りない (例 {miss[:5]}; settle_presets.probe_node_ids)")
+            except Exception as e:  # noqa: BLE001 — 確かめられないことを問題として返す (起動しない)
+                probs.append(f"節点の表 {npf} を確かめられない ({type(e).__name__}: {e})")
+    if "wall_heat_nodes" in kinds:
+        if o.get("interfaceDiag") != 1:
+            probs.append(f"壁の熱流 (wall_heat_nodes) に output.interfaceDiag: 1 が要る (本段の値 {o.get('interfaceDiag')!r})")
+        try:
+            import yaml
+            bc = yaml.safe_load((run_dir / "bcondConfig.yaml").read_text()) or {}
+            flg = {int(v["physID"]): v.get("outputHDFflg") for v in bc.values() if isinstance(v, dict) and "physID" in v}
+            for q in crit["quantities"]:
+                for wl in q.get("walls", []) if q["kind"] == "wall_heat_nodes" else []:
+                    if flg.get(int(wl["physID"])) != 1:
+                        probs.append(f"{q['name']}: 壁 {wl['name']} (physID {wl['physID']}) の bcondConfig の outputHDFflg が 1 でない")
+        except Exception as e:  # noqa: BLE001
+            probs.append(f"壁の熱流の前提 (bcondConfig.yaml の outputHDFflg) を確かめられない ({type(e).__name__}: {e})")
+    first = start + 2 * W + dt
+    note = None
+    if int(cap) < first + hold:
+        note = (f"上限 {int(cap)} では最初に判定できる格子点 {first} (開始 + 2W + 間隔) から保持 {hold} step を終えられない (必ず CENSORED)")
+    out.update(dt=dt, start=start, W=W, min_points=crit["window"]["min_points"], hold=hold,
+               hold_source=("settle_criteria.yaml の hold" if "hold" in crit else f"既定 {HOLD_STEPS_DEFAULT}"), first_judgeable=first, note=note)
+    return out
+
+
+def _online_data(S, run_dir, crit: dict, tmp_dir):
+    """見張り用の `settle.RunData` (§4.8 の 1 の「出力一式がそろってから判定」の読み込み側):
+    (1) 判定のたびに残差・流量の CSV を読み直す (`refresh`; 節点・壁・格子の h5 は使い回し、窓より古い step は捨てる)。
+    (2) forge が書いている途中の最後の行 (改行で終わらない) を読まない: CSV を最後の改行まで tmp_dir に写して親の読み込みに渡し、
+        結果の path・使ったファイルの一覧・文言は元のファイルに戻す (終了後の再生 `check_settled.py --end-step` と同じ値・同じ path)。"""
+    class OnlineRunData(S.RunData):
+        def __init__(self):
+            super().__init__(run_dir, crit)
+            self._tmp = Path(tmp_dir)
+            self._tmp.mkdir(parents=True, exist_ok=True)
+
+        def refresh(self, keep_from: int | None = None) -> None:
+            self._resid.clear()
+            self._mf.clear()
+            self._series.clear()
+            if keep_from is not None:
+                for cache in (self._nodes, self._wall):
+                    for key in [key for key in cache if key[-1] < keep_from]:
+                        del cache[key]
+
+        def _complete_lines(self, fname, cache, parent):
+            if fname in cache:
+                return parent(fname)
+            real = S._resolve(self.run, fname)
+            if str(fname).endswith(".gz") or not real.is_file():
+                return parent(fname)
+            raw = real.read_bytes()
+            snap = self._tmp / real.name
+            snap.write_bytes(raw[:raw.rfind(b"\n") + 1])
+            key = str(snap)
+            try:
+                r = parent(key)
+            except Exception as e:  # noqa: BLE001 — 親は読めない入力を _DataMissing にして投げる。文言の path を元に戻して同じ型で投げ直す
+                err = type(e)(str(e).replace(key, str(real)))
+                cache.pop(key, None)
+                self.used.pop(key, None)
+                cache[fname] = err
+                raise err from None
+            cache.pop(key, None)
+            self.used.pop(key, None)
+            self._use(real)
+            r = dict(r, path=str(real))
+            cache[fname] = r
+            return r
+
+        def residual(self, fname):
+            return self._complete_lines(fname, self._resid, super().residual)
+
+        def massflux(self, fname):
+            return self._complete_lines(fname, self._mf, super().massflux)
+
+    return OnlineRunData()
+
+
+def _last_complete_line(path, block: int = 1 << 20) -> bytes | None:
+    """ファイルの最後の完成した行 (改行で終わる行; 書いている途中の行は除く)。無い・読めない・1 行が block より長ければ None。"""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            n = min(size, block)
+            f.seek(size - n)
+            tail = f.read(n)
+    except OSError:
+        return None
+    end = tail.rfind(b"\n")
+    if end < 0:
+        return None
+    beg = tail.rfind(b"\n", 0, end) + 1
+    if beg == 0 and size > n:
+        return None
+    return tail[beg:end].rstrip(b"\r")
+
+
+def residual_row_ready(path, row: int) -> bool:
+    """forge の残差の履歴に step 列 row の outer_end の行が書き終わっているか (forge は 1 step の行を outer_begin … outer_end の順に書き、
+    monitorInterval ごとに flush する。最後の完成した行が row より後の step か、row の outer_end なら書き終わっている)。"""
+    ln = _last_complete_line(path)
+    if not ln:
+        return False
+    f = ln.split(b",")
+    try:
+        s = int(f[0])
+    except (ValueError, IndexError):
+        return False
+    return s > row or (s == row and len(f) > 2 and f[2] == b"outer_end")
+
+
+def massflux_last_step(path) -> int | None:
+    """forge の境界の質量流束の CSV の最後の完成した行の step (無い・見出しだけなら None)。forge は出力の step に全場・境界の h5・
+    節点の h5 を書いて閉じた**後に**この行を書く (`writeStepOutputs`) ので、行 s があれば step s の h5 は書き終わっている (完成の印)。"""
+    ln = _last_complete_line(path)
+    if not ln or ln.startswith(b"#"):
+        return None
+    try:
+        return int(ln.split(b",")[0])
+    except ValueError:
+        return None
+
+
+def quantities_digest(result: dict) -> str:
+    """判定の結果の量の部分 (各量の verdict・検査・値・理由) の sha256。オンラインの判定と終了後の再生が同じかを比べる。"""
+    S = _settle()
+    blob = json.dumps(S._jsonable(result.get("quantities") or []), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def judge_summary(result: dict) -> dict:
+    """`settle.judge` の結果の要約 (見張りの記録の 1 行・状態の再評価の欄)。"""
+    qs = result.get("quantities") or []
+    cats = {c for q in qs for c in q.get("categories", [])}
+    if result.get("reason_category"):
+        cats.add(result["reason_category"])
+    out = {"step": result.get("terminal_step"), "end_step": result.get("end_step"), "stop_step": result.get("stop_step"),
+           "verdict": result["verdict"], "by_quantity": {q["name"]: q["verdict"] for q in qs}, "categories": sorted(cats),
+           "provisional": bool(result.get("provisional")), "digest": quantities_digest(result)}
+    why = ([str(result["reason"])] if result.get("reason") else []) + [
+        f"{q['name']}: [{r['label']}] {r['text']}" for q in qs if q["verdict"] != "SETTLED" for r in q.get("reasons", [])[:1]]
+    if why:
+        out["why"] = why[:8]
+    return out
+
+
+def write_stop_request(run_dir, payload: dict) -> str:
+    """run dir に STOP_REQUEST (JSON 1 行) を一時ファイル → rename で置く (forge が書きかけを読まないように)。戻り: 書いた文字列
+    (forge は先頭 4 KiB を STOPPED_AT の request に写すので、照合に使う)。"""
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default)
+    if len(text.encode()) > REQUEST_MAX_BYTES:
+        raise ValueError(f"STOP_REQUEST の中身が {len(text.encode())} byte (> {REQUEST_MAX_BYTES}; forge は先頭 4 KiB だけを写す)")
+    p = Path(run_dir) / STOP_REQUEST
+    tmp = p.with_name("." + STOP_REQUEST + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, p)
+    return text
+
+
+def stop_files_needed(crit: dict, k: int) -> list:
+    """協調停止の step k に forge が書いているべきファイル (STOPPED_AT の files にあること): 全場 res_k.h5・残差の履歴・流量の CSV、
+    節点の量があれば res_nodes_k.h5、壁の熱流があれば壁の h5。"""
+    S = _settle()
+    need = [f"res_{k}.h5", FORGE_RESIDUAL, FORGE_MASSFLUX]
+    kinds = {q["kind"] for q in crit["quantities"]}
+    if kinds & set(_V2_NODE_KINDS):
+        need.append(S.DEFAULT_NODES_FILE.format(step=k))
+    for q in crit["quantities"]:
+        if q["kind"] == "wall_heat_nodes":
+            need += [q["file_pattern"].format(name=wl["name"], physID=wl["physID"], step=k) for wl in q["walls"]]
+    return need
+
+
+def check_stopped_at(run_dir, stopped, *, request_text: str, request_step: int, cap: int, crit: dict) -> list:
+    """forge の STOPPED_AT の中身の検査 (§4.8 の 1)。stopped は `settle.read_stopped_at` の戻り (None = 無い)。戻り: 問題の文言 (空なら合格)。
+    - status ok・整数の step (read_stopped_at)、要求の格子点 ≤ step ≤ 上限、residual_step = step − 1 (残差の番号の対応)、nStepOuter = 上限。
+    - request が見張りの置いた STOP_REQUEST と同じ文字列 (別の要求・前の run の通知と取り違えない)。
+    - files の各ファイルがあり、大きさが記録と同じで 0 でない。`stop_files_needed` が files にそろう。"""
+    if stopped is None:
+        return [f"{STOPPED_AT} が無い"]
+    if "error" in stopped:
+        return [stopped["error"]]
+    probs = []
+    k = int(stopped["step"])
+    if k < int(request_step):
+        probs.append(f"停止の step {k} が要求の格子点 {request_step} より前")
+    if k > int(cap):
+        probs.append(f"停止の step {k} が上限 {cap} を越える")
+    if stopped.get("residual_step") != k - 1:
+        probs.append(f"residual_step {stopped.get('residual_step')!r} が停止の step − 1 = {k - 1} でない")
+    if stopped.get("nStepOuter") != int(cap):
+        probs.append(f"nStepOuter {stopped.get('nStepOuter')!r} が本段の上限 {cap} でない")
+    if stopped.get("request") != request_text:
+        probs.append("request が見張りの置いた STOP_REQUEST と違う (別の要求の通知?)")
+    files = stopped.get("files")
+    if not isinstance(files, list):
+        probs.append("files (書いたファイルの一覧) が無い")
+        return probs
+    listed = {}
+    for f in files:
+        if not (isinstance(f, dict) and isinstance(f.get("path"), str) and isinstance(f.get("bytes"), int)):
+            probs.append(f"files の要素が {{path, bytes}} でない ({f!r})")
+            continue
+        listed[f["path"]] = f["bytes"]
+        try:
+            sz = (Path(run_dir) / f["path"]).stat().st_size
+        except OSError:
+            probs.append(f"{f['path']} が無い")
+            continue
+        if sz <= 0 or sz != f["bytes"]:
+            probs.append(f"{f['path']}: 大きさ {sz} byte (STOPPED_AT の記録 {f['bytes']})")
+    miss = [n for n in stop_files_needed(crit, k) if n not in listed]
+    if miss:
+        probs.append(f"STOPPED_AT の files に {miss} が無い")
+    return probs
+
+
+def extract_delta_e(run_dir, step: int, euler_ref, out_dir, sens_factor: float = YB_SENS_FACTOR) -> dict:
+    """止めた step の全場 res_<step>.h5 から δ_E を 1 回だけ抽出し、帯の位置の感度 (y_b × sens_factor) を記録する (§4.4・§4.8 の 2 (e))。
+    抽出は受け渡しと同じ条件 (`feedback.deltastar_loop.extract_and_merge(..., **handoff_extract_settings())`: edge・一定 x の断面への補間・
+    端は欠測・ω・平滑化の λ とノット・昇格の上限、固定した Euler の参照) に `yb_sens_factors=[sens_factor]` を足したもの
+    (`metrics.deltastar` の列の並列版 `_map_columns`; 並列の数は `extract_workers`)。感度を足しても δ_r の生値・hard_ok・δ_E は変わらない
+    (soft の理由 yb_sens が ok に入るだけ)。run の他の出力を読まないよう、一時ディレクトリに prepare_info.json・nozzle.h5・その res だけを
+    symlink して抽出する。出力 (out_dir): delta_r_equiv.csv・delta_r_equiv_diag.json・delta_r_next.csv・delta_r_extract_summary.json・
+    delta_r_edge.csv と band_sensitivity.json・band_sensitivity.csv (列ごとの A・B)。
+    感度: 抽出器の生値 δ_r (A = 選ばれた y_b) と 1.25 y_b に固定した生値 (B) を、δ_E と同じ平滑化 (重み = hard_ok かつ有限、5 次 P-spline・
+    ノット・実際に使った λ・符号の扱い) にかけ、A が δ_E を再現することを確かめて max|B − A| を使用域 x ∈ [0, x_w] (x_w = 設計壁の出口
+    physical_wall.domain[1]、無ければ全列) で記録する (case/71 run_0010_ns_b0 の band_ab.py と同じ計算)。戻り: 記録の dict。"""
+    from ..feedback.deltastar_loop import extract_and_merge, handoff_extract_settings, read_delta_r_next
+    from ..metrics.deltastar import extract_workers, smooth_delta_quintic
+    run_dir = Path(run_dir).resolve()
+    od = Path(out_dir)
+    od.mkdir(parents=True, exist_ok=True)
+    res = run_dir / f"res_{int(step)}.h5"
+    if not res.is_file():
+        raise FileNotFoundError(f"{res} が無い (止めた step の全場)")
+    ex = handoff_extract_settings()
+    t0 = time.time()
+    with tempfile.TemporaryDirectory(prefix="stop_rule_v2_delta_") as td:
+        src = Path(td) / run_dir.name
+        src.mkdir()
+        for name in ("prepare_info.json", "nozzle.h5"):
+            (src / name).symlink_to(run_dir / name)
+        (src / res.name).symlink_to(res)
+        summ = extract_and_merge(src, euler_ref, out_dir=od, yb_sens_factors=[float(sens_factor)], **ex)
+    secs = time.time() - t0
+    info = json.loads((run_dir / "prepare_info.json").read_text())
+    S_m = float(info["scale_m"])
+    wt = info.get("wall_thermal") or {"mode": "adiabatic"}
+    positive = str(wt.get("mode", "adiabatic")) == "adiabatic"          # extract_and_merge と同じ符号の扱い
+    nx = read_delta_r_next(od / "delta_r_next.csv")
+    diag = json.loads((od / "delta_r_equiv_diag.json").read_text())
+    x = np.asarray(diag["x"], dtype=float)
+    raw = np.asarray(diag["delta_r_raw"], dtype=float)
+    hard_ok = np.asarray(diag["hard_ok"], dtype=bool)
+    raw_b = np.asarray(diag["delta_r_sens_yb"], dtype=float).reshape(len(x), -1)[:, 0]
+    lam = float(summ["smooth"]["lam"])
+    knot = float(ex["knot_spacing"])
+    f_a, _ = smooth_delta_quintic(x, raw, weights=(hard_ok & np.isfinite(raw)).astype(float), knot_spacing=knot, lam=lam, positive=positive)
+    f_b, _ = smooth_delta_quintic(x, raw_b, weights=(hard_ok & np.isfinite(raw_b)).astype(float), knot_spacing=knot, lam=lam,
+                                  positive=positive)
+    a, b = f_a(x), f_b(x)
+    d_e = np.asarray(nx["delta_E"], dtype=float)
+    rep_a = float(np.nanmax(np.abs(a - d_e))) if len(x) else float("nan")
+    pw = info.get("physical_wall") if isinstance(info.get("physical_wall"), dict) else {}
+    dom = pw.get("domain") if isinstance(pw, dict) else None
+    x_w = float(dom[1]) if isinstance(dom, (list, tuple)) and len(dom) == 2 else None
+    use = (x >= 0.0) & (x <= x_w + 1e-9) if x_w is not None else np.ones(len(x), bool)
+    d = b - a
+    fin = use & np.isfinite(d)
+    sens = {"factor": float(sens_factor), "use_domain_rt": [0.0, x_w] if x_w is not None else None,
+            "A_reproduces_delta_E_max_abs_rt": rep_a, "n_cols": int(len(x)), "n_use": int(use.sum()),
+            "n_nonfinite_B_use": int(np.sum(use & ~np.isfinite(raw_b))), "n_hard_fail_use": int(np.sum(use & ~hard_ok)),
+            "smoothing": {"lam": lam, "knot_spacing": knot, "positive": positive}}
+    if fin.any():
+        i = int(np.flatnonzero(fin)[np.argmax(np.abs(d[fin]))])
+        sens.update(max_abs_B_minus_A_rt=float(abs(d[i])), max_abs_B_minus_A_mm=float(abs(d[i]) * S_m * 1e3),
+                    x_rt_at=float(x[i]), x_m_at=float(x[i] * S_m))
+    (od / "band_sensitivity.json").write_text(json.dumps(sens, indent=1, ensure_ascii=False))
+    np.savetxt(od / "band_sensitivity.csv", np.c_[x, a, b, use.astype(int)], delimiter=",", comments="",
+               header=f"x_rt,delta_E_A,delta_E_B,use (A = 選ばれた y_b、B = {float(sens_factor):g} y_b に固定; r_t 単位、同じ平滑化)")
+    return {"status": "ok", "step": int(step), "dir": str(od), "res_sha256": _sha256(res),
+            "delta_r_next_sha256": _sha256(od / "delta_r_next.csv"), "seconds": round(secs, 1), "workers": extract_workers(),
+            "extract": {"function": "feedback.deltastar_loop.extract_and_merge", **{k: repr(v) for k, v in ex.items()},
+                        "yb_sens_factors": [float(sens_factor)]},
+            "summary": {k: summ.get(k) for k in ("n_stations", "n_hard_ok", "n_held", "max_lam_factor")}
+            | {"lam": summ["smooth"]["lam"], "n_not_extracted": (summ.get("not_extracted") or {}).get("n")},
+            "band_sensitivity": sens}
+
+
+def _v2_state(run_dir, rec: dict, rc: int) -> dict:
+    """見張りの記録 (stop_rule.json) から STOP_RULE_STATE.json に書く v2 の終了の状態を作る (受け渡しの関門 #7 が読む)。"""
+    req = rec.get("request") or {}
+    de = rec.get("delta_E")
+    if isinstance(de, dict) and de.get("status") == "ok":
+        bs = de.get("band_sensitivity") or {}
+        de = {k: de.get(k) for k in ("status", "step", "dir", "res_sha256", "delta_r_next_sha256", "seconds")} | {
+            "band_sensitivity": {k: bs.get(k) for k in ("factor", "max_abs_B_minus_A_mm", "x_m_at", "A_reproduces_delta_E_max_abs_rt",
+                                                        "n_nonfinite_B_use", "n_hard_fail_use")}}
+    return {"method": "v2", "status": rec["status"], "reason": rec.get("reason"), "failures": list(rec.get("failures") or []),
+            "settled_since": req.get("settled_since"), "request_step": req.get("grid_step"), "request_kind": req.get("kind"),
+            "stop_step": rec.get("stop_step"), "last_output": rec.get("last_output"), "cap": rec["cap"],
+            "hold_steps": rec["criteria"]["hold"], "hold": rec.get("hold"), "forge_rc": rec.get("forge_rc"), "run_case_rc": rec.get("run_case_rc"),
+            "rc": int(rc), "criteria": {k: rec["criteria"].get(k) for k in ("path", "sha256")}, "stopped_at": rec.get("stopped_at"),
+            "reeval": rec.get("reeval"), "stop_sha256": rec.get("stop_sha256"), "delta_E": de, "note": rec.get("note"),
+            "record": RECORD, "record_sha256": _sha256(Path(run_dir) / RECORD), "finished": rec.get("finished")}
+
+
+def watch_main_stage_v2(run_dir, sr: dict, cfg: dict, *, poll_s: float = 10.0, stop_wait_s: float = V2_STOP_WAIT_S,
+                        term_wait_s: float = 180.0, kill_wait_s: float = 60.0, post_wait_s: float = 1800.0) -> dict:
+    """停止規則 v2 の本段の見張り (§4.4・§4.8 の 1)。sr は prepare_info.json の stop_rule (cap = 本段の nStepOuter)、cfg は本段の solverConfig
+    (読んだ dict; solverConfig.yaml に書いてあること)。`run_case.sh` を子プロセス (新しいプロセスグループ) で起動して見張る。
+    戻り: {status, stop_step, forge_rc, rc, state}。state は STOP_RULE_STATE.json に書く中身 (呼ぶ側が `write_state`)、rc は REACHED・
+    CENSORED で 0、それ以外は非 0。詳しい記録は `<run>/stop_rule.json` (version 2、判定の要約 `judgements`)。
+
+    1. 起動の前: `preflight_v2` (制御のファイルの残り・基準・出力の設定) と、本段の出力 (res_<N> N > 0・res_nodes_*) が無いこと。
+       問題があれば RuntimeError (forge を起動しない; 残りのファイルは消さない)。
+    2. 格子点 s (間隔の倍数、最初は start + 2W + 間隔) ごとに、流量の行 s (完成の印: forge は h5 を閉じた後にこの行を書く) と残差の
+       行 s−1 (outer_end) が書き終わったら `settle.judge(run, s)` (RunData は使い回し; CSV は読み直し、書きかけの最後の行は読まない)。
+    3. SETTLED が保持 (基準の hold) 続いたら STOP_REQUEST (JSON: 理由・条件を満たし始めた step・保持・要求の格子点・照合の token) を置く。
+       途中で SETTLED でなくなれば保持をやり直す (`hold.breaks`)。DIVERGED、または未設定の INDETERMINATE (基準と run の出力が合わない;
+       直らない) なら理由を書いた STOP_REQUEST で止めて FAILED。
+    4. forge が終わったら残りの格子点を判定し (要求の後に崩れたら REACHED にしない)、STOPPED_AT を検査 (`check_stopped_at`) して、
+       その step を end_step に固定して再評価 (新しい RunData で `settle.judge`、SETTLE_VERDICT.json に書く)。REACHED は「要求が settled・
+       forge の終了コード 0・STOPPED_AT が検査に通る・要求の後に崩れない・再評価が SETTLED」のすべて。
+    5. 要求を置かずに forge が終わった: 終了コード 0・STOPPED_AT なし・上限の全場ありなら CENSORED (保持の途中なら note)、それ以外は FAILED。
+    6. REACHED・CENSORED は止めた step (CENSORED は上限) の全場から δ_E を 1 回抽出する (`extract_delta_e`; 失敗は記録して状態は変えない)。
+    非常時 (要求の後 stop_wait_s 待っても終わらない・見張りの例外) だけ forge を kill し (`stop_forge`)、FAILED にする。"""
+    from .runner import FORGE_TOOLS, _ENV
+    S = _settle()
+    run_dir = Path(run_dir).resolve()
+    cap = int(sr["cap"])
+    pf = preflight_v2(run_dir, cfg, cap)
+    if pf["problems"]:
+        raise RuntimeError(f"{run_dir}: 停止規則 v2 ({CRITERIA_FILE}) を使えない — forge を起動しない: " + "; ".join(pf["problems"]))
+    pre = [f"res_{n}.h5" for n in res_steps(run_dir) if n > 0] + sorted(f.name for f in run_dir.glob("res_nodes_*.h5"))
+    if pre:
+        raise RuntimeError(f"{run_dir}: 本段の起動前に出力 {pre[:3]} ほか {len(pre)} 個がある — 判定の系列に混ざるので起動しない")
+    lc = pf["loaded"]
+    crit = lc["criteria"]
+    dt, W, hold, first = pf["dt"], pf["W"], pf["hold"], pf["first_judgeable"]
+    vdir = run_dir / V2_DIR
+    vdir.mkdir(exist_ok=True)
+    online_tmp = vdir / "online"
+    shutil.rmtree(online_tmp, ignore_errors=True)
+    data = _online_data(S, run_dir, crit, online_tmp)
+    res_csv, mf_csv = run_dir / FORGE_RESIDUAL, run_dir / FORGE_MASSFLUX
+    hs = {"hold_steps": hold, "start": None, "reached": [], "breaks": []}
+    rec = {"version": 2, "method": "v2", "plan": V2_PLAN, "status": "RUNNING", "started": _now(), "prepare_stop_rule": sr, "cap": cap,
+           "criteria": {"path": lc["path"], "sha256": lc["sha256"], "out_step_interval": dt, "start_step": pf["start"], "W": W,
+                        "min_points": pf["min_points"], "hold": hold, "hold_source": pf["hold_source"], "first_judgeable": first,
+                        "provisional": S.any_provisional(crit)},
+           "note": pf["note"], "judgements": [], "hold": hs, "request": None,
+           "timing": {"poll_s": poll_s, "stop_wait_s": stop_wait_s, "term_wait_s": term_wait_s, "kill_wait_s": kill_wait_s}}
+    save_record(run_dir, rec)
+    t_launch = time.time()
+    with open(run_dir / "run_case_stdout.log", "w") as log:
+        proc = subprocess.Popen([str(FORGE_TOOLS / "run_case.sh"), str(run_dir)], env=_ENV, stdout=log, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    rec["run_case_pid"] = proc.pid
+    jl = rec["judgements"]
+    req = None                 # 置いた STOP_REQUEST {kind, grid_step, settled_since, payload, text, t}
+    after_breaks = []          # 要求の後に SETTLED でなかった格子点
+    killed = None
+    reached_after_exit = None  # forge が終わった後に保持を満たした格子点 (要求を置けない)
+    next_s = first
+
+    def place(kind, s, why):
+        payload = {"by": "forge_design.evaluate.stop_rule.watch_main_stage_v2", "kind": kind, "reason": why, "request_step": int(s),
+                   "settled_since": hs["start"] if kind == "settled" else None, "hold_steps": hold, "criteria_sha256": lc["sha256"],
+                   "token": uuid.uuid4().hex, "time": _now()}
+        text = write_stop_request(run_dir, payload)
+        r = {"kind": kind, "grid_step": int(s), "settled_since": payload["settled_since"], "payload": payload, "text": text,
+             "t": time.time(), "placed": payload["time"]}
+        rec["request"] = {k: v for k, v in r.items() if k != "t"}
+        return r
+
+    try:
+        while True:
+            done = proc.poll() is not None
+            lim = massflux_last_step(mf_csv)
+            while lim is not None and next_s <= lim and (done or residual_row_ready(res_csv, next_s - 1)):
+                s = next_s
+                data.refresh(keep_from=s - 2 * W - dt)
+                r = S.judge(run_dir, s, data=data, loaded=lc)
+                row = judge_summary(r)
+                row["judged_at"] = _now()
+                if req is not None:
+                    row["after_request"] = True
+                jl.append(row)
+                v = r["verdict"]
+                if v == "SETTLED":
+                    if _hold_step(hs, True, s, hold) and req is None:
+                        if done or proc.poll() is not None:     # 判定の間に forge が終わった (上限の格子点など): 要求を置けない
+                            reached_after_exit = s
+                        else:
+                            req = place("settled", s, f"settle v2: 3 条件 (残差・流量の収支・目的の量) が step {hs['start']} から "
+                                                      f"{s - hs['start']} step 続いた (保持 {hold})")
+                else:
+                    _hold_step(hs, False, s, hold, "; ".join(row.get("why") or [v])[:400])
+                    if req is not None:
+                        after_breaks.append({"step": s, "verdict": v, "why": row.get("why")})
+                    elif not done and v == "DIVERGED":
+                        req = place("diverged", s, f"settle v2: 判定が DIVERGED (step {s})")
+                    elif not done and v == "INDETERMINATE" and "unset" in row["categories"]:
+                        req = place("criteria_unset", s, f"settle v2: 判定が INDETERMINATE (未設定; 基準と run の出力が合わない) (step {s})")
+                save_record(run_dir, rec)
+                next_s += dt
+            if done:
+                break
+            if req is not None and time.time() - req["t"] > stop_wait_s:
+                killed = stop_forge(proc.pid, run_dir, term_wait_s, kill_wait_s)
+                rec["stop_forge"] = killed
+                break
+            time.sleep(poll_s)
+    except BaseException as e:
+        # 見張りの例外: 非常時として forge を止め、状態を残す (REACHED にしない)
+        rec["stop_forge"] = stop_forge(proc.pid, run_dir, term_wait_s, kill_wait_s) if proc.poll() is None else None
+        rec.update(status="FAILED", failures=["watcher_exception"], reason=f"見張りの例外: {type(e).__name__}: {e}", finished=_now())
+        rec["forge_rc"] = _forge_exit(run_dir)
+        save_record(run_dir, rec)
+        shutil.rmtree(online_tmp, ignore_errors=True)
+        if not isinstance(e, Exception):
+            raise
+        return {"status": "FAILED", "stop_step": None, "forge_rc": rec["forge_rc"], "rc": 1, "state": _v2_state(run_dir, rec, 1)}
+
+    try:
+        proc.wait(timeout=post_wait_s)
+    except subprocess.TimeoutExpired:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(proc.pid, sig)
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=30)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        rec["run_case_killed"] = True
+    rec["run_case_rc"] = proc.returncode
+    forge_rc = _forge_exit(run_dir)
+    rec["forge_rc"] = forge_rc
+    vp = run_dir / "CONVERGENCE_VERDICT.txt"
+    ran = vp.exists() and vp.stat().st_mtime >= t_launch - 1.0 and "CONVERGENCE_EXIT" in vp.read_text(errors="replace")
+    rec["postprocess"] = {"by": "run_case.sh"} if ran else postprocess(run_dir)
+
+    stopped = S.read_stopped_at(run_dir)
+    last = massflux_last_step(mf_csv)
+    failures, notes = [], []
+    status, k = None, None
+    if req is None:
+        if forge_rc == 0 and stopped is None and (run_dir / f"res_{cap}.h5").is_file():
+            status, k = "CENSORED", cap
+            if reached_after_exit is not None:
+                notes.append(f"保持を満たした格子点 {reached_after_exit} の判定が forge の終了の後になった (要求を置けない; 上限 {cap} まで回った)")
+            elif hs["start"] is not None:
+                notes.append(f"条件を満たし始めた {hs['start']} の後の保持 {hold} step が上限 {cap} までに終わらない (保持の途中で上限)")
+        elif forge_rc not in (None, 0) and sorted(run_dir.glob("res_nan_*.h5")):
+            failures.append("detect_nan")
+            notes.append("forge の detectNaN が止めた (" + ", ".join(f.name for f in sorted(run_dir.glob("res_nan_*.h5"))) + ")")
+        else:
+            failures.append("forge_exit")
+            notes.append(f"要求を置く前に forge が終わった (forge rc {forge_rc}、最後の流量の行 {last}、上限 {cap}"
+                         + (f"、STOPPED_AT {stopped}" if stopped is not None else "") + ")")
+    else:
+        if req["kind"] != "settled":
+            failures.append(req["kind"])
+            notes.append(req["payload"]["reason"])
+        if killed is not None:
+            failures.append("timeout")
+            notes.append(f"要求の後 {stop_wait_s} s 待っても forge が終わらない — kill した ({killed.get('signals')})")
+        elif forge_rc != 0:
+            failures.append("forge_exit")
+            notes.append(f"協調停止の後の forge の終了コード {forge_rc} (0 でない; 確認・通知の失敗は 3)")
+        probs = check_stopped_at(run_dir, stopped, request_text=req["text"], request_step=req["grid_step"], cap=cap, crit=crit)
+        if probs:
+            failures.append("no_stopped_at" if stopped is None else "stopped_at_invalid")
+            notes += probs
+        else:
+            k = int(stopped["step"])
+        if after_breaks:
+            failures.append("broken_after_request")
+            notes.append("要求の後の格子点で条件が崩れた: " + ", ".join(f"{b['step']} {b['verdict']}" for b in after_breaks))
+    rec["stopped_at"] = ({"present": stopped is not None, "step": (stopped or {}).get("step"),
+                          "sha256": _sha256(run_dir / STOPPED_AT) if (run_dir / STOPPED_AT).is_file() else None,
+                          "problems": (probs if req is not None else ([] if stopped is None else ["要求を置いていないのに STOPPED_AT がある"]))})
+    # 再評価: 止めた step (CENSORED は上限) を end_step に固定して、新しい RunData で判定し SETTLE_VERDICT.json に書く。
+    # FAILED で停止の step が決まらないときも、記録のためにデータの最後で判定する
+    end = k if k is not None else last
+    reeval = None
+    if end is not None:
+        try:
+            fresh = S.RunData(run_dir, crit)
+            r = S.judge(run_dir, int(end), data=fresh, loaded=lc)
+            p_v = S.write_verdict(run_dir, r, fresh)
+            reeval = {**judge_summary(r), "end_source": r.get("end_source"), "file": S.VERDICT_FILE, "sha256": _sha256(p_v)}
+        except Exception as e:  # noqa: BLE001 — 再評価の失敗は記録 (REACHED にしない)
+            reeval = {"error": f"{type(e).__name__}: {e}", "end_step": int(end)}
+    rec["reeval"] = reeval
+    if status is None:
+        if req is not None and req["kind"] == "settled" and k is not None and (reeval is None or reeval.get("verdict") != "SETTLED"):
+            failures.append("reeval_not_settled")
+            notes.append(f"止めた step {k} の再評価が {(reeval or {}).get('verdict', (reeval or {}).get('error'))}")
+        status = "REACHED" if (req is not None and req["kind"] == "settled" and not failures) else "FAILED"
+    if k is not None and (run_dir / f"res_{k}.h5").is_file():
+        rec["stop_sha256"] = _sha256(run_dir / f"res_{k}.h5")
+    delta = None
+    if status in ("REACHED", "CENSORED"):
+        eu = euler_ref_spec(sr.get("euler_ref"))
+        if eu is None:
+            delta = {"status": "skipped", "reason": f"euler_ref が無い・見つからない ({sr.get('euler_ref')!r})", "step": k}
+        else:
+            try:
+                delta = extract_delta_e(run_dir, k, eu, vdir / f"delta_E_{k}")
+            except Exception as e:  # noqa: BLE001 — δ_E の抽出の失敗は記録 (停止の状態は変えない; 受け渡しの関門 #7 が見る)
+                delta = {"status": "error", "error": f"{type(e).__name__}: {e}", "step": k}
+    shutil.rmtree(online_tmp, ignore_errors=True)
+    rec.update(status=status, failures=failures, reason=("; ".join(notes) or None), stop_step=k, last_output=last,
+               delta_E=delta, finished=_now())
+    if pf["note"] and status == "CENSORED":
+        rec["reason"] = "; ".join(x for x in (rec["reason"], pf["note"]) if x)
+    save_record(run_dir, rec)
+    rc = 0 if status in ("REACHED", "CENSORED") else (forge_rc if forge_rc not in (None, 0, 143, 137) else 1)
+    return {"status": status, "stop_step": k, "forge_rc": forge_rc, "rc": rc, "state": _v2_state(run_dir, rec, rc)}

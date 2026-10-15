@@ -17,7 +17,8 @@ bcondConfig) で解決して `settle_criteria.yaml` の中身にする。判定�
 - 構造格子 ni・nj・scale_m は prepare_info、`structured.mesh_file` は solverConfig の `mesh.meshFileName` (節点の座標を
   `nozzle_report.load_field` と同じ格子の h5 の COORD から作る; float のビルドでも一致させるため)。
 - 判定の格子 = solverConfig の `time.outStepInterval`、窓 W 20,000 (min_points 11)、保持 40,000 (停止規則用、記録だけ)。
-  `grid.start_step` は 0 (forge の起動ごとに step は 0 から)、`grid.segment` は本段の開始のときに記録する (§5.1 #6)。
+  `grid.start_step` は 0 (forge の起動ごとに step は 0 から)、`grid.segment` は判定区間の識別 (設計チェーンは `main_stage_segment()` =
+  本段の開始の通知 MAIN_STAGE_STARTED を指す; §5.1 #6)。
 - 残差の必要な列: rms_ro・rms_roUx・rms_roUy・rms_roe、SST なら rms_roK・rms_roOmega、遷移 lm2009 なら rms_roGamma・rms_roReth、
   化学種 2 つ以上なら rms_roY0〜、トレーサ exhaust なら rms_roXi (forge `main.cpp` の `residualEquationNames` と同じ規則)。
   非活動を許す列: rms_roUz。凝縮 (condensation 1) はモーメントの列名を決められないので例外 (問題 YAML で residual を外して足す)。
@@ -165,9 +166,26 @@ def _isothermal_walls(bcond_cfg: dict) -> list:
     return walls
 
 
-def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: dict, bcond_cfg: dict) -> dict:
+def criteria_file_name() -> str:
+    """run の判定の基準のファイルの名前 (settle.CRITERIA_FILE)。"""
+    return _settle().CRITERIA_FILE
+
+
+def main_stage_segment() -> dict:
+    """設計チェーンの NS の run (runner_axismach.run_staged_ns) の判定区間の識別 (`grid.segment`; plan §4.2・§5.1 #6)。
+    判定区間 = 本段の forge の起動 (forge の step は起動ごとに 0 から = grid.start_step)。どの起動が本段かは、本段の起動の直前に
+    run_staged_ns が書く通知 MAIN_STAGE_STARTED (`main_config.fnv` = 本段の solverConfig.yaml の FNV-1a 64、`settle_criteria.sha256` =
+    この基準) で決まり、stage_manifest.json の本段の段 (tag main、forge の後に足す) と forge_launches.jsonl の起動とは cfg_fnv で突き合わせる。
+    リミッタの基準値はその段の limiter_ref (forge の limiter_ref.json の写し) にある。基準のファイルは準備の後に書き換えない。"""
+    return {"stage": "main", "start_record": "MAIN_STAGE_STARTED", "config_fnv_key": "main_config.fnv",
+            "criteria_sha256_key": "settle_criteria.sha256", "stage_manifest": "stage_manifest.json", "stage_tag": "main",
+            "match": "cfg_fnv"}
+
+
+def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: dict, bcond_cfg: dict, segment=None) -> dict:
     """問題 YAML の evaluate.settle を run の設定で解決して settle_criteria.yaml の中身 (dict) を返す。不正・判別できない入力は ValueError
-    (settle.CriteriaError は ValueError の子)。"""
+    (settle.CriteriaError は ValueError の子)。segment は `grid.segment` (判定区間の識別; 設計チェーンは `main_stage_segment()`、
+    None = 未記録)。"""
     st = _settle()
     es = problem_cfg_evaluate_settle
     if not isinstance(es, dict):
@@ -294,25 +312,27 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
                    "generator": "design/forge_design/evaluate/settle_presets.py",
                    "generator_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},
         "structured": structured,
-        "grid": {"out_step_interval": int(dt), "start_step": 0, "segment": None},
+        "grid": {"out_step_interval": int(dt), "start_step": 0, "segment": segment},
         "window": dict(P["window"]),
         "hold": int(P["hold"]),
         "quantities": quantities,
         "excluded": excluded,
         "preconditions": pre,
-        "notes": ["grid.start_step・segment は本段の開始のときに記録する (plan §5.1 #6)",
+        "notes": ["grid.start_step は本段の forge の起動 (step 0)。segment は判定区間の識別 (設計チェーンでは本段の開始の通知 "
+                  "MAIN_STAGE_STARTED を指す; main_stage_segment、plan §5.1 #6)。None = 未記録",
                   "閾値は暫定 (provisional: true; plan §6 V3 で決める)"],
     }
     st.validate_criteria(crit)       # 誤用はここで CriteriaError (ValueError)
     return crit
 
 
-def write_settle_criteria(run_dir, problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: dict, bcond_cfg: dict) -> dict:
+def write_settle_criteria(run_dir, problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: dict, bcond_cfg: dict,
+                          segment=None) -> dict:
     """resolve して run の settle_criteria.yaml を書く (一時ファイル → rename)。出典に run の入力のファイルの sha256 を足す。
     戻り {'path', 'sha256', 'criteria'}。"""
     st = _settle()
     run = Path(run_dir)
-    crit = resolve(problem_cfg_evaluate_settle, prepare_info, solver_cfg, bcond_cfg)
+    crit = resolve(problem_cfg_evaluate_settle, prepare_info, solver_cfg, bcond_cfg, segment=segment)
     inputs = {}
     for fn in ("prepare_info.json", "solverConfig.yaml", "bcondConfig.yaml"):
         p = run / fn
