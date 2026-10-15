@@ -2446,9 +2446,14 @@ static void pdeAfterNormal(StepContext& s)
 // FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE=poison : S0 へ戻した後、「腕の間で違った host の配列」を quiet NaN (整数は最小値) で埋めて
 // 計算を続ける (数値更新がその host の写しを読むなら NaN が device に入る; detectNaN と場の比較で見る)。
 // どちらも step K の出力は腕が書いたものだけ。
+// FORGE_DIAG_OUTPUT_INVARIANCE_POISON_EXTRA=<名前,...> (poison のときだけ): 報告の名前 (例 "host b1:ro") の host の配列も
+// 毒で埋める (陽性対照: 数値の経路が読むと分かっている host の配列で、毒入れが NaN を検出できることを確かめる; §5.1 #1d)。
+// 報告の表の s0twin 列 (§5.1 #1d): S0 の時点で host の写しが対応の device の配列と違う要素の数 (腕を回す前の値の不変性;
+// 出力が D2H しない配列でも数える)。
 namespace oid {
 
-struct State { bool init = false, on = false, running = false, done = false; int cont = 0; int K = -1; };   // cont: 0 終了・1 restore・2 poison
+struct State { bool init = false, on = false, running = false, done = false; int cont = 0; int K = -1;   // cont: 0 終了・1 restore・2 poison
+               std::vector<std::string> poisonExtra; };
 static State& state() { static State s; return s; }
 
 // 比べる配列 1 つ。kind: 'D' = device (snapIdx >= 0 なら PdeSnap の flow_float 配列、それ以外は raw0 に退避した別の型)、
@@ -2460,6 +2465,7 @@ struct Entry {
     std::vector<flow_float>* vf = nullptr; std::vector<geom_int>* vi = nullptr; std::vector<char> h0;
     std::map<std::string, std::vector<flow_float>>* dv = nullptr; std::map<std::string, std::vector<flow_float>> dv0;
     long twin = -1;   // host の写しのとき、対応する device の Entry (無ければ -1)
+    long s0twinDiff = -1;   // S0 で host の写しが twin と違う要素の数 (twin が無い・大きさが違うときは -1)
 };
 struct Stat { size_t nDiff = 0; double maxAbs = 0.0; bool sizeChanged = false; };
 struct Arm {
@@ -2585,6 +2591,14 @@ static bool outputInvarianceDiagAt(int iStep)
                 std::cerr << "[output-invariance] FORGE_DIAG_OUTPUT_INVARIANCE_CONTINUE must be \"restore\" or \"poison\" (got \"" << cs << "\")\n";
                 std::exit(2);
             }
+            if (const char* px = std::getenv("FORGE_DIAG_OUTPUT_INVARIANCE_POISON_EXTRA"); px && *px) {
+                if (st.cont != 2) {
+                    std::cerr << "[output-invariance] FORGE_DIAG_OUTPUT_INVARIANCE_POISON_EXTRA は CONTINUE=poison のときだけ使える\n";
+                    std::exit(2);
+                }
+                std::string s(px), tok; std::istringstream is(s);
+                while (std::getline(is, tok, ',')) if (!tok.empty()) st.poisonExtra.push_back(tok);
+            }
             printf("[output-invariance] ON: step %d で出力の処理の状態不変 A/B (数値更新 0 step)%s\n", st.K,
                    st.cont == 2 ? "、その後 S0 に戻して host の写しを NaN で埋めて続ける"
                  : st.cont == 1 ? "、その後 S0 に戻して続ける" : "、報告の後に終了する");
@@ -2684,6 +2698,17 @@ static void runOutputInvarianceDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mes
         Entry s; s.name = "host conjugate:solid"; s.kind = 'S'; s.type = 'b'; s.esz = 1;
         conjugateWall::diagStateBytes(s.h0); s.n = s.h0.size();
         if (!s.h0.empty()) es.push_back(std::move(s));
+    }
+    // S0 で host の写しが対応の device の配列と同じか (要素ごとのビット比較)。出力の D2H の有無に関係なく、
+    // 「host の読み手が読む値 = その時点の device の値」かを腕を回す前に数える (§5.1 #1d)。
+    long nHostTwinNe = 0;
+    for (size_t i = nDev; i < es.size(); ++i) {
+        Entry& e = es[i];
+        if (e.kind != 'H' || e.twin < 0) continue;
+        size_t tb = 0; const char* t0 = s0Bytes(es[(size_t)e.twin], sn, tb);
+        if (tb != e.h0.size()) continue;
+        e.s0twinDiff = (long)compareBytes(e.h0.data(), e.h0.size(), t0, tb, e.type, e.esz).nDiff;
+        if (e.s0twinDiff > 0) ++nHostTwinNe;
     }
     size_t bytesDev = 0, bytesHost = 0;
     for (size_t i = 0; i < es.size(); ++i) { size_t b = 0; s0Bytes(es[i], sn, b); (i < nDev ? bytesDev : bytesHost) += b; }
@@ -2789,11 +2814,13 @@ static void runOutputInvarianceDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mes
             }
             o << "\n";
         }
-        o << "#\n# 列: 名前 要素数 bytes | 腕ごとに S0 からの差の要素数 (0 = ビット同一) と最大絶対差 | 変わった host の写しが S0 の device と同一か\n";
+        o << "#\n# 列: 名前 要素数 bytes | 腕ごとに S0 からの差の要素数 (0 = ビット同一) と最大絶対差 | s0twin = S0 で host の写しが"
+             "対応の device と違う要素の数 (- = 対応なし) | 変わった host の写しが S0 の device と同一か\n";
+        o << "# S0 で host の写しが device と違う配列: " << nHostTwinNe << " 個\n";
         o << std::defaultfloat << std::setprecision(6);
         o << "name n bytes";
         for (const auto& a : arms) if (a.ran) o << " " << a.label << ".nDiff " << a.label << ".maxAbs";
-        o << " twin\n";
+        o << " s0twin twin\n";
         for (size_t i = 0; i < es.size(); ++i) {
             size_t b = 0; s0Bytes(es[i], sn, b);
             o << (i < nDev ? "dev:" : "") << es[i].name << " " << es[i].n << " " << b;
@@ -2805,6 +2832,7 @@ static void runOutputInvarianceDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mes
                 auto it = a.twinEq.find(i);
                 if (it != a.twinEq.end()) tw += a.label + (it->second ? ":=dev " : ":!=dev ");
             }
+            o << " " << (es[i].s0twinDiff >= 0 ? std::to_string(es[i].s0twinDiff) : std::string("-"));
             o << " " << (tw.empty() ? "-" : tw) << "\n";
         }
         o << "#\n# DEVICE: " << (nDevDiff == 0 ? "腕の間で全配列がビット同一" : "**腕の間で差あり**") << "\n";
@@ -2841,10 +2869,33 @@ static void runOutputInvarianceDiag(solverConfig& cfg, cudaConfig& cuda_cfg, mes
         else continue;   // 'S' は戻せないので毒も入れない
         ++nPoison; if (names.size() < 2000) names += " " + e.name;
     }
+    // 陽性対照 (FORGE_DIAG_OUTPUT_INVARIANCE_POISON_EXTRA): 名前で指定した host の配列も毒で埋める
+    std::string extraNames;
+    size_t nExtra = 0;
+    for (const auto& nm : stt.poisonExtra) {
+        bool found = false;
+        for (size_t i = nDev; i < es.size(); ++i) {
+            Entry& e = es[i];
+            if (e.name != nm) continue;
+            found = true;
+            if (hostDiffSet.count(i)) break;   // 上で埋めた
+            if (e.kind == 'H' && e.vf) std::fill(e.vf->begin(), e.vf->end(), std::numeric_limits<flow_float>::quiet_NaN());
+            else if (e.kind == 'H' && e.vi) std::fill(e.vi->begin(), e.vi->end(), std::numeric_limits<geom_int>::min());
+            else if (e.kind == 'M') for (auto& kv : *e.dv) std::fill(kv.second.begin(), kv.second.end(), std::numeric_limits<flow_float>::quiet_NaN());
+            else break;
+            ++nExtra; extraNames += " " + e.name;
+            break;
+        }
+        if (!found) usage("FORGE_DIAG_OUTPUT_INVARIANCE_POISON_EXTRA の \"" + nm + "\" が比べた host の配列に無い");
+    }
     printf("[output-invariance] POISON: S0 に戻し、腕の間で違った host の配列 %zu 個を NaN で埋めて計算を続ける:%s\n", nPoison, names.c_str());
+    if (!stt.poisonExtra.empty())
+        printf("[output-invariance] POISON_EXTRA (陽性対照): さらに host の配列 %zu 個を NaN で埋めた:%s\n", nExtra, extraNames.c_str());
     {
         std::ofstream o(fname, std::ios::app);
         o << "# POISON: S0 に戻し (device の不一致 0)、host の配列 " << nPoison << " 個を NaN (整数は最小値) で埋めて計算を続けた:" << names << "\n";
+        if (!stt.poisonExtra.empty())
+            o << "# POISON_EXTRA (陽性対照): さらに host の配列 " << nExtra << " 個を NaN で埋めた:" << extraNames << "\n";
     }
     fflush(stdout);
     stt.running = false;
