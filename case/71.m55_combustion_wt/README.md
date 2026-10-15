@@ -28,6 +28,8 @@
 | `run_0004_euler` | δ* の補正の 1 回目の Euler の参照 (AWS A、plan §5.1 #3e (4)): `problem_m55_p1_euler.yaml` (`wt_card --ns-correction run_0003_ns_cont` で物理スロート径 200 mm に r_t を解き直したカード `problem_m55_p1_card.yaml` → `_mesh/hand_mesh.py build`、r_t 0.10024473616136853 m = 前の +0.34 %、M_knot 2.80)、格子 466,570 点 (品質 PASS、AR 最大 ≤ 1000)、`runner_axismach` の `--stages full` (本段 cfl 1・12,000)、FP64 のビルド。台本 `_runs/run_0004_euler/p1_euler.py`・`_runs/run_0005_ns/p1_chain.sh` | 完走 (228 s、非有限なし): 軸の出口 M の最大 5.5013、dM 最大 0.058 % Md。`check_convergence` NOT CONVERGED (1.2〜1.8 桁で横ばい; run_0001_euler と同じ型)。参照は `res_12000.h5` (sha256 78294389…) | ref (run_0005_ns の Euler の参照) |
 | `run_0005_ns` | δ* の補正の 1 回目の NS (AWS A、plan §5.1 #3e (5)): run_0003_ns_cont の δ_E から作った補正の表 `problem_m55_p1_card_delta_r.csv` の物理壁、`problem_m55_p1.yaml` (手組みの格子 442,520 点、品質 PASS・AR 緩和 違反 0)、初期場は run_0003_ns_cont の最後の場から補間、`--stages full`、**精度は既定 (float; ユーザ決定 2026-10-15)**・FP64 のビルド、出力 2,000、停止規則 (窓 2 万・保持 4 万・上限 200,000)、Euler の参照 `run_0004_euler/res_12000.h5`。台本 `_runs/run_0005_ns/p1_ns.py`・`p1_follow.sh` (終わったら成果物を作る) | 起動 2026-10-15 05:29 UTC。S1 (3,000 step) は非有限なし | 走行中 |
 
+- **AWS A の途中の全場の削除 (2026-10-15、判定済み)**: `run_0003_ns_cont` の 96 枚 (res_0・140000・160000・180000・200000 は #3f の再生用に残す)、`run_0002_ns` の 21 枚 (res_0・res_183000 = run_0003 の初期場を残す)、`run_0001_euler`・`run_0004_euler` の各 11 枚 (res_0・res_12000 = Euler の参照を残す)。壁・出口の出力・残差履歴・判定の記録は残した。
+
 ## 経緯
 
 - 2026-10-14〜15: 旧の M_knot の規則 (`min_theta_max_v1`) でカードを生成 (AWS A `~/forge-m55`、約 98 分) → 最終の組の 4800 の網の長さ合わせが全点未収束で失敗 (plan `tooling-nozzle-mknot-fast` §3)。
