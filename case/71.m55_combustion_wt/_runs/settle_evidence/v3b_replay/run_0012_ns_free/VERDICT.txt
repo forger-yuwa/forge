@@ -1,0 +1,13 @@
+VERDICT: A
+run: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0012_ns_free
+t_s: 32000 (条件を満たし始めた step 32000、保持 0) / span 80000 (32000〜112000) / t_s の上限 120000
+(a) exit_core_mach: 内、span の最大の比 0.02691 (step 62000、出口コアの平均; |M − M(t_s)| ≤ tol 0.000275)
+(a) line_mach: 内、span の最大の比 0.01687 (step 86000、xq の位置 1899 (x 7.75053 m); max_k |d_k − d_k(t_s)| ≤ tol_pos 0.01 %pt)
+(a) exit_flow_angle: 内、span の最大の比 0.001531 (step 70000、コアの 21 番目の節点; max_i |θ_i − θ_i(t_s)| ≤ tol 0.01 deg)
+追加の記録: 目的の量だけなら SETTLED なのに残差か流量で落ちた格子点 1 (区間別 {'before_ts': 1})、判定不能だった格子点 0 (目的の量がすべて SETTLED の格子点 86)
+参考 (判定に使わない) 目的の量だけで保持した停止候補 t_s′: 30000 (条件を満たし始めた step 30000、span 30000〜110000) — t_s′ < t_s (2000 step 早い)、t_s′ からの検証: 超過なし
+参考 t_s′ (a) exit_core_mach: 内、span の最大の比 0.04945 (step 62000、出口コアの平均)
+参考 t_s′ (a) line_mach: 内、span の最大の比 0.02856 (step 92000、xq の位置 1862 (x 7.67745 m))
+参考 t_s′ (a) exit_flow_angle: 内、span の最大の比 0.00285 (step 70000、コアの 21 番目の節点)
+note: 基準は --criteria /home/ubuntu/m55_p5/v3b_replay/criteria_v2_run_0012_ns_free.yaml (run の settle_criteria.yaml の代わり; run の基準は使わない)
+閾値: 閾値は暫定 (plan §6 V3 で決める) — この検証では wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」); 残差は非有限の見張りだけ; 壁の熱流 (節点ごと) も外す (2026-10-16 ユーザ決定「floatで良い」); 線 η 0.03) の値に固定 (基準 /home/ubuntu/m55_p5/v3b_replay/criteria_v2_run_0012_ns_free.yaml; plan §6 V3(b)・(1″))

@@ -1,0 +1,1 @@
+wrote /home/ubuntu/m55_p5/v3b_replay/criteria_v2_run_0015_ns_float_a.yaml wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」); 残差は非有限の見張りだけ; 壁の熱流 (節点ごと) も外す (2026-10-16 ユーザ決定「floatで良い」); 線 η 0.03) W {'W': 10000, 'min_points': 6} hold 0

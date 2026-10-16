@@ -1,0 +1,201 @@
+step,quantity,kind,verdict,categories,check,value,limit,ok,detail
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,0.00030393169679416465,0.0005,True,
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.0005921965181327088,0.005,True,
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,3.70466784878122e-05,0.0001,True,
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.0005549632227359648,0.0001,False,
+22000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.0004731347769668659,0.000275,False,
+22000,line_mach,line_mach,NOT_SETTLED,threshold,最大偏差 maxabs の幅 [%pt],0.007230949079850557,0.01,True,
+22000,line_mach,line_mach,NOT_SETTLED,threshold,片振幅 halfamp の幅 [%pt],0.0029471593911413047,0.005,True,
+22000,line_mach,line_mach,NOT_SETTLED,threshold,位置ごとの d の幅の最大 [%pt],0.023669962768113617,0.01,False,xq の位置 399
+22000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.001232934613395871,0.01,True,コアの 2 番目の節点
+22000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,62.04627680888964,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 14.06 (127.4〜141.5), 許容 0.2266 (相対の参照は終端 22000 の値)"
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,0.000200066798887471,0.0005,True,
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.0004311122485203408,0.005,True,
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,1.7702463518123502e-05,0.0001,True,
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.0004133210202602668,0.0001,False,
+24000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.0005209285795650942,0.000275,False,
+24000,line_mach,line_mach,NOT_SETTLED,threshold,最大偏差 maxabs の幅 [%pt],0.005802918424924197,0.01,True,
+24000,line_mach,line_mach,NOT_SETTLED,threshold,片振幅 halfamp の幅 [%pt],0.0018531239898548907,0.005,True,
+24000,line_mach,line_mach,NOT_SETTLED,threshold,位置ごとの d の幅の最大 [%pt],0.016371769144507553,0.01,False,xq の位置 407
+24000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0006862018746352864,0.01,True,コアの 2 番目の節点
+24000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,61.059143058248324,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 14.06 (127.4〜141.5), 許容 0.2302 (相対の参照は終端 24000 の値)"
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,0.00012537191675013242,0.0005,True,
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.00028920369773988684,0.005,True,
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,8.34130047503732e-06,0.0001,True,
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.000280853397778932,0.0001,False,
+26000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.00042969317649088623,0.000275,False,
+26000,line_mach,line_mach,NOT_SETTLED,threshold,最大偏差 maxabs の幅 [%pt],0.005281275367585714,0.01,True,
+26000,line_mach,line_mach,NOT_SETTLED,threshold,片振幅 halfamp の幅 [%pt],0.0016396907029804092,0.005,True,
+26000,line_mach,line_mach,NOT_SETTLED,threshold,位置ごとの d の幅の最大 [%pt],0.010381319019725499,0.01,False,xq の位置 413
+26000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.000550641271202237,0.01,True,コアの 19 番目の節点
+26000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,73.63469927820252,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 17.9 (127.4〜145.3), 許容 0.2431 (相対の参照は終端 26000 の値)"
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,7.57755941818843e-05,0.0005,True,
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.00018184111005928544,0.005,True,
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,3.6823146491270778e-06,0.0001,True,
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.00017814475127602707,0.0001,False,
+28000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.0002986291321169787,0.000275,False,
+28000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.005343452407591265,0.01,True,
+28000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0013665671390535178,0.005,True,
+28000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.006541619066957605,0.01,True,xq の位置 385
+28000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0004646326424752184,0.01,True,コアの 21 番目の節点
+28000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,75.04503468414742,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 17.9 (127.4〜145.3), 許容 0.2386 (相対の参照は終端 28000 の値)"
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,4.4585539934600245e-05,0.0005,True,
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.00011020334198927135,0.005,True,
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,1.5714413607329634e-06,0.0001,True,
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.0001086269341885104,0.0001,False,
+30000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,0.00019422231476529106,0.000275,True,
+30000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0036904801680393007,0.01,True,
+30000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0007487432075560102,0.005,True,
+30000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.004073652095493152,0.01,True,xq の位置 1907
+30000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0003323001146638624,0.01,True,コアの 21 番目の節点
+30000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,69.31689823764678,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 16.57 (128.8〜145.3), 許容 0.2391 (相対の参照は終端 30000 の値)"
+32000,mass_balance,mass_balance,SETTLED,,|mean r|,2.5802507667877014e-05,0.0005,True,
+32000,mass_balance,mass_balance,SETTLED,,max r − min r,6.421821831623236e-05,0.005,True,
+32000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,7.277058995830998e-07,0.0001,True,
+32000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.376045136932451e-05,0.0001,True,
+32000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,0.00011958034815773289,0.000275,True,
+32000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.002161899603003725,0.01,True,
+32000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005661982991062506,0.005,True,
+32000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.002769347053077631,0.01,True,xq の位置 1926
+32000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.00021414517482147392,0.01,True,コアの 21 番目の節点
+32000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,110.07414574929975,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 28.02 (128.8〜156.8), 許容 0.2546 (相対の参照は終端 32000 の値)"
+34000,mass_balance,mass_balance,SETTLED,,|mean r|,1.4810153311217109e-05,0.0005,True,
+34000,mass_balance,mass_balance,SETTLED,,max r − min r,3.4961256832506684e-05,0.005,True,
+34000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.328031016054951e-07,0.0001,True,
+34000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,3.445608716645656e-05,0.0001,True,
+34000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.075443830384387e-05,0.000275,True,
+34000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0014295604850333987,0.01,True,
+34000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0006644601576187917,0.005,True,
+34000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0018124209910874711,0.01,True,xq の位置 1980
+34000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0001674436642319574,0.01,True,コアの 21 番目の節点
+34000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,103.99126784228447,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 24.36 (132.4〜156.8), 許容 0.2342 (相対の参照は終端 34000 の値)"
+36000,mass_balance,mass_balance,SETTLED,,|mean r|,8.650948333214684e-06,0.0005,True,
+36000,mass_balance,mass_balance,SETTLED,,max r − min r,1.9898185564323844e-05,0.005,True,
+36000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,7.337434194595486e-07,0.0001,True,
+36000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.9164268812524908e-05,0.0001,True,
+36000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.771645288086489e-05,0.000275,True,
+36000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005417130716223184,0.01,True,
+36000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00046321044300447894,0.005,True,
+36000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0012518922613891093,0.01,True,xq の位置 856
+36000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],8.645059279155896e-05,0.01,True,コアの 21 番目の節点
+36000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,86.80352448554301,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 22.27 (136.5〜158.7), 許容 0.2565 (相対の参照は終端 36000 の値)"
+38000,mass_balance,mass_balance,SETTLED,,|mean r|,5.185971339669172e-06,0.0005,True,
+38000,mass_balance,mass_balance,SETTLED,,max r − min r,1.2415624291671126e-05,0.005,True,
+38000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.954116684415867e-07,0.0001,True,
+38000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1902237330398027e-05,0.0001,True,
+38000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,2.1715388409226932e-05,0.000275,True,
+38000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0004795360316167674,0.01,True,
+38000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00046321044300447894,0.005,True,
+38000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0012518922613891093,0.01,True,xq の位置 856
+38000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.371326370409706e-05,0.01,True,コアの 3 番目の節点
+38000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,110.18148566070269,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 25.46 (133.3〜158.7), 許容 0.2311 (相対の参照は終端 38000 の値)"
+40000,mass_balance,mass_balance,SETTLED,,|mean r|,3.2018448256066656e-06,0.0005,True,
+40000,mass_balance,mass_balance,SETTLED,,max r − min r,7.116408867252191e-06,0.005,True,
+40000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.920712992898229e-07,0.0001,True,
+40000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.878016018010757e-06,0.0001,True,
+40000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,1.3618779317603469e-05,0.000275,True,
+40000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00041639950154603866,0.01,True,
+40000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00046321044300447894,0.005,True,
+40000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011489117338170374,0.01,True,xq の位置 831
+40000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.736203481144117e-05,0.01,True,コアの 3 番目の節点
+40000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,100.85063600616685,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 25.46 (133.3〜158.7), 許容 0.2524 (相対の参照は終端 40000 の値)"
+42000,mass_balance,mass_balance,SETTLED,,|mean r|,1.9492830685776817e-06,0.0005,True,
+42000,mass_balance,mass_balance,SETTLED,,max r − min r,5.020518931105899e-06,0.005,True,
+42000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.920712843686772e-07,0.0001,True,
+42000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,4.597687412509645e-06,0.0001,True,
+42000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,8.728462392859626e-06,0.000275,True,
+42000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00041639950154603866,0.01,True,
+42000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00046321044300447894,0.005,True,
+42000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001135498489690523,0.01,True,xq の位置 447
+42000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.736203481144117e-05,0.01,True,コアの 3 番目の節点
+42000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,107.11939872498046,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 25.46 (133.3〜158.7), 許容 0.2377 (相対の参照は終端 42000 の値)"
+44000,mass_balance,mass_balance,SETTLED,,|mean r|,1.2015703313594197e-06,0.0005,True,
+44000,mass_balance,mass_balance,SETTLED,,max r − min r,3.2846111073787995e-06,0.005,True,
+44000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,3.026624655807116e-07,0.0001,True,
+44000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,3.252917452502677e-06,0.0001,True,
+44000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.735963796522526e-06,0.000275,True,
+44000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00041639950154603866,0.01,True,
+44000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00046321044300447894,0.005,True,
+44000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001135498489690523,0.01,True,xq の位置 447
+44000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.736203481144117e-05,0.01,True,コアの 3 番目の節点
+44000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,105.09643409399321,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 25.46 (133.3〜158.7), 許容 0.2422 (相対の参照は終端 44000 の値)"
+46000,mass_balance,mass_balance,SETTLED,,|mean r|,5.725206785738518e-07,0.0005,True,
+46000,mass_balance,mass_balance,SETTLED,,max r − min r,1.7803248812055479e-06,0.005,True,
+46000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,3.0266246872544787e-07,0.0001,True,
+46000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,2.0436056859937513e-06,0.0001,True,
+46000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.855497622915152e-06,0.000275,True,
+46000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00036612525211587865,0.01,True,
+46000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00030418222747902873,0.005,True,
+46000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001135498489690523,0.01,True,xq の位置 447
+46000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.736203481144117e-05,0.01,True,コアの 3 番目の節点
+46000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,105.38881084024459,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 25.46 (133.3〜158.7), 許容 0.2416 (相対の参照は終端 46000 の値)"
+48000,mass_balance,mass_balance,SETTLED,,|mean r|,4.051184309463982e-07,0.0005,True,
+48000,mass_balance,mass_balance,SETTLED,,max r − min r,1.3995136915524073e-06,0.005,True,
+48000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,2.4048456490948795e-07,0.0001,True,
+48000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.5216482391810011e-06,0.0001,True,
+48000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.8469104732571395e-06,0.000275,True,
+48000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005678840280687325,0.01,True,
+48000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00021106234286769748,0.005,True,
+48000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011838109618911297,0.01,True,xq の位置 131
+48000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.0050489194055675e-05,0.01,True,コアの 4 番目の節点
+48000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,95.671477814618,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 22.04 (132.6〜154.7), 許容 0.2304 (相対の参照は終端 48000 の値)"
+50000,mass_balance,mass_balance,SETTLED,,|mean r|,4.158691496340189e-07,0.0005,True,
+50000,mass_balance,mass_balance,SETTLED,,max r − min r,1.3995136915524073e-06,0.005,True,
+50000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,2.782867738487432e-07,0.0001,True,
+50000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.5216482132352474e-06,0.0001,True,
+50000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.754817652636746e-06,0.000275,True,
+50000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005697096434165161,0.01,True,
+50000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0002260661391660021,0.005,True,
+50000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001214059002807577,0.01,True,xq の位置 501
+50000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.0050489194055675e-05,0.01,True,コアの 4 番目の節点
+50000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,88.58832860126985,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 22.04 (132.6〜154.7), 許容 0.2488 (相対の参照は終端 50000 の値)"
+52000,mass_balance,mass_balance,SETTLED,,|mean r|,2.0178247677836852e-07,0.0005,True,
+52000,mass_balance,mass_balance,SETTLED,,max r − min r,1.0239293171309365e-06,0.005,True,
+52000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,2.7828677154437714e-07,0.0001,True,
+52000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1721462514399266e-06,0.0001,True,
+52000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.754817652636746e-06,0.000275,True,
+52000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005697096434165161,0.01,True,
+52000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0002260661391660021,0.005,True,
+52000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.00134404140201827,0.01,True,xq の位置 445
+52000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.924105449921636e-05,0.01,True,コアの 4 番目の節点
+52000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,78.65432604715836,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 18.42 (132.6〜151), 許容 0.2342 (相対の参照は終端 52000 の値)"
+54000,mass_balance,mass_balance,SETTLED,,|mean r|,1.6545893613854222e-07,0.0005,True,
+54000,mass_balance,mass_balance,SETTLED,,max r − min r,1.0239293171309365e-06,0.005,True,
+54000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,2.7828677139268746e-07,0.0001,True,
+54000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1721462933775047e-06,0.0001,True,
+54000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.754817652636746e-06,0.000275,True,
+54000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005697096434165161,0.01,True,
+54000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0002260661391660021,0.005,True,
+54000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011838109618911297,0.01,True,xq の位置 131
+54000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.924105449921636e-05,0.01,True,コアの 4 番目の節点
+54000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,77.19903982345414,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 18.42 (132.6〜151), 許容 0.2386 (相対の参照は終端 54000 の値)"
+56000,mass_balance,mass_balance,SETTLED,,|mean r|,5.5191002442323975e-08,0.0005,True,
+56000,mass_balance,mass_balance,SETTLED,,max r − min r,9.531527963820467e-07,0.005,True,
+56000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,2.7828676191341946e-07,0.0001,True,
+56000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1721463827008724e-06,0.0001,True,
+56000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.619021964164972e-06,0.000275,True,
+56000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005697096434165161,0.01,True,
+56000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00022497305959974512,0.005,True,
+56000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010998588791277797,0.01,True,xq の位置 1811
+56000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.738756129458316e-05,0.01,True,コアの 19 番目の節点
+56000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,77.48038019071718,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 18.42 (132.6〜151), 許容 0.2378 (相対の参照は終端 56000 の値)"
+58000,mass_balance,mass_balance,SETTLED,,|mean r|,6.860964064786306e-08,0.0005,True,
+58000,mass_balance,mass_balance,SETTLED,,max r − min r,8.726409671488122e-07,0.005,True,
+58000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,2.782867600234745e-07,0.0001,True,
+58000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.0508864118148896e-06,0.0001,True,
+58000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.619021964164972e-06,0.000275,True,
+58000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005697096434165161,0.01,True,
+58000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00042980932388141796,0.005,True,
+58000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001241654254013902,0.01,True,xq の位置 131
+58000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.4852858845039076e-05,0.01,True,コアの 1 番目の節点
+58000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,138.8266409132803,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 30.33 (120.7〜151), 許容 0.2185 (相対の参照は終端 58000 の値)"
+60000,mass_balance,mass_balance,SETTLED,,|mean r|,2.633049010758121e-08,0.0005,True,
+60000,mass_balance,mass_balance,SETTLED,,max r − min r,8.726409671488122e-07,0.005,True,
+60000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,3.5017824951459775e-07,0.0001,True,
+60000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.0970605043224169e-06,0.0001,True,
+60000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.925498309800048e-06,0.000275,True,
+60000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00041234198517869913,0.01,True,
+60000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.000412719688009322,0.005,True,
+60000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010998588791277797,0.01,True,xq の位置 1811
+60000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.769998198556492e-05,0.01,True,コアの 5 番目の節点
+60000,wall_heat_nodes,wall_heat_nodes,NOT_SETTLED,threshold,窓の節点の熱量の幅 / 許容 (max_s Q_i − min_s Q_i) / (q_tol·A_i + eps_rel·|Q_i(T)|) の最大,141.59143290653353,1.0,False,"壁 wall 節点 2921 (x 0.367194, r 0.161067): 幅 36.04 (120.7〜156.7), 許容 0.2545 (相対の参照は終端 60000 の値)"

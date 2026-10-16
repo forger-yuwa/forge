@@ -1,0 +1,18 @@
+run: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0016_ns_float_b
+t_s: なし
+未成立の理由: 停止候補が無い: v2 は格子点 22000〜60000 で要求を置かない
+(a) exit_core_mach: t_s なし
+(a) line_mach: t_s なし
+(a) exit_flow_angle: t_s なし
+(a) wall_heat_nodes: t_s なし
+追加の記録: 目的の量だけなら SETTLED なのに残差か流量で落ちた格子点 0 (区間別 {})、判定不能だった格子点 0 (目的の量がすべて SETTLED の格子点 0)
+参考 (判定に使わない) 目的の量だけで保持した停止候補 t_s′: t_s′ なし (格子点 22000〜60000 で保持を満たさない)
+note: 基準は --criteria /home/ubuntu/m55_p5/v3_replay/criteria_v2_run_0016_ns_float_b.yaml (run の settle_criteria.yaml の代わり; run の基準は使わない)
+閾値: 閾値は暫定 (plan §6 V3 で決める) — この検証では wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」); 残差は非有限の見張りだけ; 線 η 0.03) の値に固定 (基準 /home/ubuntu/m55_p5/v3_replay/criteria_v2_run_0016_ns_float_b.yaml; plan §6 V3(b)・(1″))
+所要: replay_s 2.81 s, values_s 0.15 s, outputs_s 0.48 s, total_s 3.46 s
+結果: /home/ubuntu/m55_p5/v3_replay/run_0016_ns_float_b
+VERDICT: 未成立
+
+real	0m4.352s
+user	0m3.718s
+sys	0m0.189s
