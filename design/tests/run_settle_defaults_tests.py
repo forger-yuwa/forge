@@ -105,9 +105,10 @@ for name in ("axismach_final_v1", "axismach_explore_v1"):
     check(f"(a) {name}: main_line = B0 (dir・cap 50・itj 5・cfl 4・relax 0.7)、limiter_ref 無し (= 自動)",
           ev.get("main_line") == {"line": "dir", "cap": 50, "itj": 5, "cfl": 4, "relax": 0.7}, ev.get("main_line"))
     check(f"(a) {name}: cfl_main 無し・cfl_euler 1.0 (Euler の cfl を別に保持)", "cfl_main" not in ev and ev.get("cfl_euler") == 1.0)
-    check(f"(a) {name}: ns_output (2,000・20,000・4 境界・流量)",
+    check(f"(a) {name}: ns_output (2,000・20,000・4 境界・流量・界面の診断 (成果物の壁の熱流のため))",
           ev.get("ns_output") == {"outStepInterval": 2000, "fieldOutStepInterval": 20000,
-                                  "boundary_h5": ["inlet", "outlet", "wall", "axis"], "boundaryMassflux": 1}, ev.get("ns_output"))
+                                  "boundary_h5": ["inlet", "outlet", "wall", "axis"], "boundaryMassflux": 1, "interfaceDiag": 1},
+          ev.get("ns_output"))
     check(f"(a) {name}: settle = {{preset: wt_nozzle_v3}} (2026-10-16 ユーザ決定「残さは監視から外そう」で v2 から; v1・v2 はプリセットに残る)",
           ev.get("settle") == {"preset": "wt_nozzle_v3"} and "wt_nozzle_v1" in SP.PRESETS and "wt_nozzle_v2" in SP.PRESETS)
     check(f"(a) {name}: Euler の nStepOuter 12000・outStepInterval 1000・mid_stage は今のまま",
@@ -149,8 +150,9 @@ else:
     pi_min = {"Md": 5.5, "scale_m": float(p_new.spec["r_throat"]), "mesh": {"ni": 4810, "nj": 92}, "x_E": 40.63,
               "physical_wall": {"domain": [-9.98, 79.81]}}       # run_0010_ns_b0 の prepare_info の値 (丸め)
     needs = RA._settle_needs(SP.resolve(es, pi_min, RA._cfg_load(main_b0), yaml.safe_load(bc_new)))
-    check("(b) 判定の基準が要る出力: 節点・流量・界面の診断 (等温壁)", needs == {"nodeProbeFile": True, "boundaryMassflux": True,
-                                                                  "interfaceDiag": True}, needs)
+    check("(b) 判定の基準 (v3) が要る出力: 節点・流量 (壁の熱流は判定から外したので界面の診断は要らない; 成果物のために ns_output で出す)",
+          needs == {"nodeProbeFile": True, "boundaryMassflux": True, "interfaceDiag": False}, needs)
+    check("(b) 雛形の ns_output に interfaceDiag 1 (成果物の壁の熱流のため)", no.get("interfaceDiag") == 1, no)
     main_n = RA._apply_ns_outputs(main_b0, no, needs)
     check("(b) 本段: B0 のキー (ライン陰解法・上限 50・ITJ 5・cfl 4・relax 0.7)",
           get(main_n, ("time", "deltaT", "lineImplicit")) == 1 and get(main_n, ("time", "deltaT", "lineDtDirectional")) == 1
@@ -277,7 +279,7 @@ else:
         g.create_dataset("/MESH/COORD", data=f["/MESH/COORD"][:])          # 座標だけの写し (元の run には書かない)
     (run / "solverConfig.yaml").write_text(main_n)
     (run / "bcondConfig.yaml").write_text(bc_new)
-    es71 = {"preset": "wt_nozzle_v1", "x_range_m": [4.0, 7.95]}
+    es71 = {"preset": "wt_nozzle_v3", "x_range_m": [4.0, 7.95]}   # 雛形の既定 (v3) で作った本段の設定に合わせる (2026-10-16)
     rec = RA.write_settle_files(run, es71, info10, main_n, bc_new)
     text = (run / settle.CRITERIA_FILE).read_text()
     obj = settle._yaml_load_strict(text)
@@ -285,9 +287,9 @@ else:
     lc = settle.load_criteria(run)
     check("(c) settle_criteria.yaml が settle.validate_criteria・load_criteria を通る", lc["status"] == "ok" and v["grid"]["out_step_interval"] == 2000,
           lc.get("message"))
-    check("(c) 量 6 つ (等温壁なので wall_heat_nodes も)・外した量なし",
-          rec["quantities"] == ["residual", "mass_balance", "exit_core_mach", "line_mach", "exit_flow_angle", "wall_heat_nodes"]
-          and rec["excluded"] == [], rec["quantities"])
+    check("(c) v3 の量 5 つ (残差の非有限の見張り・流量・出口コア・線・流れ角)、外した量は残差と壁の熱流 (理由つき)",
+          rec["quantities"] == ["residual_finite", "mass_balance", "exit_core_mach", "line_mach", "exit_flow_angle"]
+          and sorted(e["kind"] for e in obj["excluded"]) == ["residual", "wall_heat_nodes"], (rec["quantities"], obj.get("excluded")))
     check("(c) 前提 (流量・節点の表・界面の診断・壁の h5) がすべて満たされる", all(c["satisfied"] for c in obj["preconditions"]))
     check("(c) grid.segment = 本段の開始の通知 (main_stage_segment)、start_step 0",
           obj["grid"]["segment"] == SP.main_stage_segment() and obj["grid"]["start_step"] == 0)

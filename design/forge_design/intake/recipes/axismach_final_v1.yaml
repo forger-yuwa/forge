@@ -70,7 +70,7 @@ evaluate:
   main_line: {line: dir, cap: 50, itj: 5, cfl: 4, relax: 0.7}
   # NS だけの出力 (同 plan §4.1・§4.5): 境界・節点・流量・残差の判定は 2,000 step ごと、全場は 20,000 step ごと (と最後・止めた step)。
   # 入口・出口・壁・軸の境界の h5 を出す。evaluate.outStepInterval (上) は Euler だけが読む
-  ns_output: {outStepInterval: 2000, fieldOutStepInterval: 20000, boundary_h5: [inlet, outlet, wall, axis], boundaryMassflux: 1}
+  ns_output: {outStepInterval: 2000, fieldOutStepInterval: 20000, boundary_h5: [inlet, outlet, wall, axis], boundaryMassflux: 1, interfaceDiag: 1}
   # 収束の判定の基準 (同 plan §4.2): 準備のときに run の settle_criteria.yaml と節点の表 settle_nodes.txt を書く (判定は check_settled.py)。
   # 外すときは evaluate.settle: false を明示 (理由は prepare_info に残る)。既定は wt_nozzle_v3 (区間 1 万 step・保持なし、残差は止める判定から
   # 外し非有限の見張りだけ; ユーザ決定 2026-10-16「floatにしようか。残さは監視から外そう」、同 plan §4.4・§5.1 #8)。wt_nozzle_v2 (残差も判定;

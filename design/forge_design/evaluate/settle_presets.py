@@ -124,7 +124,7 @@ PRESETS["wt_nozzle_v2"] = {
 # 残差を止める判定から外す (plan §4.4「残差を止める判定から外す・ビルドは float」(2026-10-16 ユーザ決定)、§5.1 #8)。v2 の残差以外は
 # 同じ (区間 1 万・保持なし・閾値・壁の熱流の measure range)。残差の代わりに非有限の見張り (residual_finite) を入れる。v1・v2 は変えない。
 PRESETS["wt_nozzle_v3"] = {
-    "version": "wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」); 残差は非有限の見張りだけ; 線 η 0.03)",
+    "version": "wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」); 残差は非有限の見張りだけ; 壁の熱流 (節点ごと) も外す (2026-10-16 ユーザ決定「floatで良い」); 線 η 0.03)",
     "window": {"W": 10000, "min_points": 6},
     "hold": 0,
     "residual": "watch",
@@ -136,7 +136,12 @@ PRESETS["wt_nozzle_v3"] = {
         "残差を止める判定から外した (2026-10-16 ユーザ決定「floatにしようか。残さは監視から外そう」、plan §4.4・§5.1 #8): float の"
         "ビルドでは目的の量・流量は FP64 とほぼ同じなのに残差 (ρ) の振幅が約 0.585 桁 (FP64 は約 0.02 桁) で、残差の条件が通らず止まらな"
         "かった (card plan §6 V8)。発散は residual_finite (非有限の見張り、判定の条件ではない) で見る"),
-    "notes": ["残差を止める判定から外す (2026-10-16 ユーザ決定; plan §4.4)。判定は流量の収支 + 目的の量 (区間 1 万 step・保持なしは v2 と同じ)。"
+    "wall_heat_excluded_reason": (
+        "壁の熱流 (節点ごと) を止める判定から外した (2026-10-16 ユーザ決定「設計を早く進めるのが第一だから、floatで良い」、plan §4.4・"
+        "§5.1 #8): float のビルドでは case/71 の x 0.367 m・r 0.161 m の壁の節点の熱量が窓の中で ±12 % 往復し (FP64 では収まる)、"
+        "節点ごとの許容の 171 倍で止まらなかった (v3 の再生、B ~/m55_p5/v3_replay/)。冷却壁の第一層が極端に薄く (半径の 3.7e−7)、"
+        "float では壁の法線の温度の勾配が丸めで揺れる見立て (未確認)。局所の壁の熱流を使う場面は FP64 で確かめる"),
+    "notes": ["残差を止める判定から外す (2026-10-16 ユーザ決定; plan §4.4)。壁の熱流 (節点ごと) も外す (同、float の局所の揺れ)。判定は流量の収支 + 目的の量 (区間 1 万 step・保持なしは v2 と同じ)。"
               "残差は非有限の見張り (residual_finite) だけで、非有限なら DIVERGED",
               "停止規則 v2 の最初の判定は量によらず開始 + 2 × 10,000 + 間隔 (間隔 2,000 なら 22,000; v2 と同じ)。判定の部品だけを"
               "当てる (check_settled.py --end-step・--scan) と、残差の直前の区間が要らないので開始 + 10,000 + 間隔から判定できる"],
@@ -327,7 +332,9 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
              "eta_range": list(P["exit_eta_range"]), "thresholds": th["exit_flow_angle"]}
     quantities = [q_res, q_mass, q_core, q_line, q_ang]
     walls = _isothermal_walls(bcond_cfg)
-    if walls:
+    if walls and P.get("wall_heat_excluded_reason"):
+        excluded.append({"kind": "wall_heat_nodes", "name": "wall_heat_nodes", "reason": P["wall_heat_excluded_reason"]})
+    elif walls:
         quantities.append({"kind": "wall_heat_nodes", "name": "wall_heat_nodes",
                            "walls": [{"name": w["name"], "physID": w["physID"]} for w in walls], "axisymmetric": axisym,
                            "file_pattern": st.DEFAULT_WALL_PATTERN, "dataset": st.DEFAULT_WALL_DATASET, "thresholds": th["wall_heat_nodes"]})
@@ -375,7 +382,7 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
         {"quantity": "exit_core_mach・line_mach・exit_flow_angle", "requires": "solverConfig output.nodeProbeFile (節点の表; probe_node_ids)",
          "satisfied": bool(out.get("nodeProbeFile"))},
     ]
-    if walls:
+    if walls and not P.get("wall_heat_excluded_reason"):   # 壁の熱流を判定に使うときだけ前提にする (v3 は外した)
         pre.append({"quantity": "wall_heat_nodes", "requires": "solverConfig output.interfaceDiag: 1",
                     "satisfied": int(out.get("interfaceDiag", 0) or 0) == 1})
         pre.append({"quantity": "wall_heat_nodes", "requires": "壁の bcond の outputHDFflg: 1 (" + ", ".join(w["name"] for w in walls) + ")",

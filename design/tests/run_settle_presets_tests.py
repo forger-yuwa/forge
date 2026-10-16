@@ -409,11 +409,17 @@ def test_v3(run, crit_v1):
     chk("e2 外したことと理由を excluded に書く (ユーザ決定・float の残差の振幅・発散は見張りで見る)",
         len(ex) == 1 and "2026-10-16 ユーザ決定" in ex[0]["reason"] and "0.585" in ex[0]["reason"] and "residual_finite" in ex[0]["reason"],
         str(ex)[:200])
-    chk("e3 残差以外 (流量・出口コア・線・流れ角・壁の熱流の定義と閾値)・窓 10,000・保持 0・格子・構造・前提は v2 と同じ",
-        all(q3[nm] == q2[nm] for nm in q2 if nm != "residual") and c3["window"] == c2["window"] and c3["hold"] == c2["hold"] == 0
-        and c3["grid"] == c2["grid"] and c3["structured"] == c2["structured"] and c3["preconditions"] == c2["preconditions"]
-        and [e for e in c3["excluded"] if e["kind"] != "residual"] == c2["excluded"],
-        str([nm for nm in q2 if nm != "residual" and q3.get(nm) != q2[nm]]))
+    chk("e3 残差と壁の熱流以外 (流量・出口コア・線・流れ角の定義と閾値)・窓 10,000・保持 0・格子・構造は v2 と同じ、"
+        "前提は壁の熱流の分だけ少ない",
+        all(q3[nm] == q2[nm] for nm in q2 if nm not in ("residual", "wall_heat_nodes")) and "wall_heat_nodes" not in q3
+        and c3["window"] == c2["window"] and c3["hold"] == c2["hold"] == 0
+        and c3["grid"] == c2["grid"] and c3["structured"] == c2["structured"]
+        and c3["preconditions"] == [x for x in c2["preconditions"] if x["quantity"] != "wall_heat_nodes"]
+        and [e for e in c3["excluded"] if e["kind"] not in ("residual", "wall_heat_nodes")] == c2["excluded"],
+        str([nm for nm in q2 if nm not in ("residual", "wall_heat_nodes") and q3.get(nm) != q2[nm]]))
+    exw = [e for e in c3["excluded"] if e["kind"] == "wall_heat_nodes"]
+    chk("e3b 壁の熱流 (節点ごと) を外したことと理由を excluded に書く (ユーザ決定「floatで良い」・float の局所の揺れ)",
+        len(exw) == 1 and "2026-10-16 ユーザ決定" in exw[0]["reason"] and "float" in exw[0]["reason"], str(exw)[:200])
     chk("e4 版の記録: v2 から残差を外す (2026-10-16 ユーザ決定)", c3["source"]["preset"] == "wt_nozzle_v3"
         and "残差を外す" in c3["source"]["preset_version"] and "2026-10-16 ユーザ決定" in c3["source"]["preset_version"])
     rd = TMP / "e_run"

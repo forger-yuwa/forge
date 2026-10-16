@@ -1977,7 +1977,7 @@ def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implic
 # --- 本段の監視用の出力と判定の基準 (`evaluate.ns_output`・`evaluate.settle`; plan tooling-settle-convergence-and-monitor §4.5・§5.1 #6) -----
 # 要求カードの雛形 (axismach_final_v1・axismach_explore_v1) が既定で書く。キー無しの問題は今と同じ設定・同じファイル。
 # 出力のキーは**本段の設定だけ**に書き (B0 と同じ)、前の段 (S1・S2) は PRESTAGE_CONFIG (出力のキーの無い元の設定) から作る。
-NS_OUTPUT_KEYS = ("outStepInterval", "fieldOutStepInterval", "boundary_h5", "boundaryMassflux")
+NS_OUTPUT_KEYS = ("outStepInterval", "fieldOutStepInterval", "boundary_h5", "boundaryMassflux", "interfaceDiag")
 NS_BOUNDARY_NAMES = ("inlet", "outlet", "wall", "axis")       # runner_wt._bcond の境界の名前
 SETTLE_NODES_FILE = "settle_nodes.txt"                        # forge の output.nodeProbeFile (settle_presets.probe_node_ids)
 # 本段だけに書く出力のパス (前の段の設定に残っていてはいけない; 本段と前の段の元の設定の差として許す)
@@ -2021,7 +2021,11 @@ def _ns_output_spec(p: Problem) -> dict | None:
     bm = no.get("boundaryMassflux", 0)
     if bm not in (0, 1) or isinstance(bm, float):
         raise ValueError(f"evaluate.ns_output.boundaryMassflux は 0 か 1 ({bm!r})")
-    return {"outStepInterval": oi, "fieldOutStepInterval": fi, "boundary_h5": list(bh), "boundaryMassflux": int(bm)}
+    idg = no.get("interfaceDiag", 0)
+    if idg not in (0, 1) or isinstance(idg, (bool, float)):
+        raise ValueError(f"evaluate.ns_output.interfaceDiag は 0 か 1 ({idg!r})")
+    # interfaceDiag: 壁の熱流の判定に使わなくても成果物の壁の熱流 (iface_Qf_eff) のために出す (2026-10-16、wt_nozzle_v3 は壁の熱流を判定から外した)
+    return {"outStepInterval": oi, "fieldOutStepInterval": fi, "boundary_h5": list(bh), "boundaryMassflux": int(bm), "interfaceDiag": int(idg)}
 
 
 def _settle_spec(p: Problem) -> tuple:
@@ -2083,7 +2087,7 @@ def _apply_ns_outputs(cfg: str, no: dict | None, needs: dict | None) -> str:
         outk["boundaryMassflux"] = 1
     if needs.get("nodeProbeFile"):
         outk["nodeProbeFile"] = SETTLE_NODES_FILE
-    if needs.get("interfaceDiag"):
+    if needs.get("interfaceDiag") or no.get("interfaceDiag"):
         outk["interfaceDiag"] = 1
     fi = no.get("fieldOutStepInterval")
     if not outk and fi is None:
