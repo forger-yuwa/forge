@@ -85,14 +85,15 @@ df -h ~ | tail -n 1
 
 ```bash
 cd ~
-git clone -b feature/card-local-mesh https://github.com/forger-yuwa/forge.git forge
+git clone -b main https://github.com/forger-yuwa/forge.git forge
 cd ~/forge
 git submodule update --init --recursive
 git config core.hooksPath solver_density_cuda/tools/git-hooks
 git log --oneline -1
 ```
 
-- ブランチは今 `feature/card-local-mesh`。main に入ったら (人が知らせる) `-b main` にする。置き場所は `~/forge` を前提に書いてある (違う場所なら人に聞く)。
+- ブランチは `main` (2026-10-16 に PR #11 で入った)。人に別のブランチを言われたときだけ `-b` を変える。置き場所は `~/forge` を前提に書いてある (違う場所なら人に聞く)。
+- 既に clone してあるなら、作り直さずに `cd ~/forge && git checkout main && git pull --ff-only` (人に言われたとき)。ビルド・Python 環境はそのまま使える (C++・CUDA の変更が入ったと言われたら §0.3 をやり直す)。
 - **成功の印**: `git log` が 1 行出る。`solver_density_cuda/third_party/HighFive/include/highfive/highfive.hpp` がある。
 
 ### 0.3 ビルド (float)
