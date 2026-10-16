@@ -1,0 +1,206 @@
+{
+ "step_dimensions": {
+  "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/cad/wall_physical.step",
+  "units": "mm",
+  "x_origin": "設計スロート (x=0)",
+  "x_start_mm": -1000.0,
+  "x_end_mm": 8000.402372861,
+  "inlet_radius_mm": 300.0,
+  "straight": {
+   "u_end": -500.0,
+   "x_end_mm": -500.0,
+   "n_equal_poles": 6
+  },
+  "L_pipe_mm": 500.0,
+  "L_U_mm": 500.0,
+  "throat_physical": {
+   "r_mm": 100.0000362384736,
+   "x_mm": -0.23100018751569829,
+   "diameter_mm": 200.0000724769472,
+   "curvature_radius_mm": 494.8436549227848
+  },
+  "L_div_mm": 8000.402372861,
+  "exit_radius_mm": 767.51876078629,
+  "curve": {
+   "degree": 5,
+   "n_poles": 1564,
+   "u_range": [
+    -1000.0,
+    8000.402372861
+   ]
+  }
+ },
+ "mesh_dimensions": {
+  "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/nozzle.msh",
+  "units": "mm",
+  "n_wall_nodes": 4810,
+  "x_start_mm": -1000.0,
+  "x_end_mm": 8000.402372861136,
+  "inlet_radius_mm": 300.0,
+  "straight_end_interval_mm": [
+   -499.59842938143004,
+   -498.26919828421137
+  ],
+  "L_pipe_interval_mm": [
+   500.40157061856996,
+   501.73080171578863
+  ],
+  "throat_physical": {
+   "r_mm": 100.00004163493287,
+   "x_mm": -0.15789681927428265,
+   "diameter_mm": 200.00008326986574
+  },
+  "L_div_mm": 8000.402372861136,
+  "exit_radius_mm": 767.5187607862956
+ },
+ "chord": {
+  "status": "ok",
+  "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/nozzle.msh の壁節点と /home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/cad/wall_physical.step の曲線",
+  "unit": "mm",
+  "min_mm": -0.0007573180483291253,
+  "x_of_min_mm": -420.5797684748112,
+  "max_mm": 2.3953946168830953e-05,
+  "x_of_max_mm": -160.93740539885036,
+  "n_edges": 4809
+ },
+ "junction": {
+  "unit": "mm",
+  "x_junction_mm": -500.0,
+  "x_hi_mm": 0.0,
+  "tol_mm": 1e-06,
+  "status": "ok",
+  "n_nodes": 1654,
+  "n_upstream": 281,
+  "n_downstream": 1373,
+  "x_range_mm": [
+   -1000.0,
+   -0.15789681927428265
+  ],
+  "max_abs_mm": 4.973799150320701e-12,
+  "x_of_max_mm": -0.6999242685651071,
+  "dev_at_max_mm": 4.973799150320701e-12,
+  "max_abs_upstream_mm": 2.2737367544323206e-13,
+  "max_abs_downstream_mm": 4.973799150320701e-12,
+  "node_before_junction": {
+   "x_mm": -500.92766047864865,
+   "r_node_mm": 299.99999999999994,
+   "r_curve_mm": 300.00000000000006,
+   "dev_mm": -1.1368683772161603e-13,
+   "r_node_minus_r_in_mm": -5.684341886080802e-14
+  },
+  "node_after_junction": {
+   "x_mm": -499.59842938143004,
+   "r_node_mm": 299.9999990944166,
+   "r_curve_mm": 299.9999990944166,
+   "dev_mm": 0.0,
+   "r_node_minus_r_in_mm": -9.055834198079538e-07
+  },
+  "spacing_at_junction_mm": 1.32923109721861,
+  "evaluation": {
+   "x_residual_max_mm": 4.547473508864641e-13,
+   "outside_domain_max_mm": 0.0,
+   "newton_iterations": 1,
+   "converged": true
+  },
+  "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/nozzle.msh の壁節点と /home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/cad/wall_physical.step の曲線"
+ },
+ "format": "forge.dimension_gate/v1",
+ "verdict": "PASS",
+ "items": {
+  "inlet_radius": {
+   "card_mm": 300.0,
+   "step_mm": 300.0,
+   "diff_mm": 0.0,
+   "tol_mm": 0.01,
+   "pass": true,
+   "mesh_mm": 300.0
+  },
+  "L_pipe": {
+   "card_mm": 500.0,
+   "step_mm": 500.0,
+   "diff_mm": 0.0,
+   "tol_mm": 1.0,
+   "pass": true,
+   "mesh_mm": [
+    500.40157061856996,
+    501.73080171578863
+   ]
+  },
+  "L_U": {
+   "card_mm": 500.0,
+   "step_mm": 500.0,
+   "diff_mm": 0.0,
+   "tol_mm": 1.0,
+   "pass": true
+  },
+  "L_div": {
+   "card_mm": 8000.0,
+   "step_mm": 8000.402372861,
+   "diff_mm": 0.40237286100000347,
+   "tol_mm": 1.0,
+   "pass": true,
+   "mesh_mm": 8000.402372861136
+  },
+  "throat_diameter_physical": {
+   "card_mm": 200.0,
+   "step_mm": 200.0000724769472,
+   "diff_mm": 7.247694719580977e-05,
+   "tol_mm": 0.02,
+   "pass": true,
+   "mesh_mm": 200.00008326986574
+  }
+ },
+ "tolerances_source": {
+  "length_m": "card",
+  "diameter_m": "card"
+ },
+ "info": {
+  "throat_curvature_radius_physical_mm": 494.8436549227848,
+  "throat_curvature_radius_card_design_mm": 500.0
+ },
+ "throat_kind": "physical",
+ "mesh_vs_step": {
+  "x_end_diff_mm": 1.3642420526593924e-10,
+  "x_end_pass": true,
+  "inlet_radius_diff_mm": 0.0,
+  "inlet_radius_pass": true,
+  "throat_r_mesh_minus_curve_mm": 5.396459272333232e-06,
+  "throat_r_pass": true,
+  "straight_end_in_mesh_interval": false,
+  "x_start_diff_mm": 0.0,
+  "x_start_pass": true,
+  "chord_max_abs_mm": 0.0007573180483291253,
+  "chord_pass": true,
+  "straight_junction_max_abs_mm": 4.973799150320701e-12,
+  "straight_junction_x_of_max_mm": -0.6999242685651071,
+  "straight_junction_x_mm": -500.0,
+  "straight_junction_n_nodes": {
+   "upstream": 281,
+   "downstream": 1373
+  },
+  "straight_junction_checks": {
+   "max_abs_le_node_eq": true,
+   "junction_is_step_straight_end": true,
+   "covers_to_design_throat": true,
+   "nodes_upstream": true,
+   "nodes_downstream": true,
+   "inside_curve_domain": true
+  },
+  "straight_junction_pass": true,
+  "required": [
+   "x_start_pass",
+   "x_end_pass",
+   "inlet_radius_pass",
+   "throat_r_pass",
+   "straight_junction_pass",
+   "chord_pass"
+  ],
+  "reference_only": [
+   "straight_end_in_mesh_interval"
+  ],
+  "missing": []
+ },
+ "note": "STEP とメッシュから測り直した寸法をカードと比べた (YAML の往復ではない)。出口マッハ数は CFD の判定で、ここでは測らない",
+ "card": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/card_m55_3coef.yaml",
+ "card_sha256": "b20cd7ae263f1103e33978405dd5c179789f9c82dbde35349c87079e3c49787f"
+}

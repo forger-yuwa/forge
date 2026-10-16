@@ -1,0 +1,176 @@
+{
+ "format": "forge.wall_design_vs_physical/v1",
+ "run": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2",
+ "wall_file": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/wall_repr.json",
+ "wall_file_sha256": "a0dcb872680adb68db34cbcf3f0978f1888668d56736fc8fa4c6a7375679d4ed",
+ "csv": "wall_compare/wall_design_vs_physical_mm.csv",
+ "n_rows": 12610,
+ "columns": [
+  "x_mm",
+  "r_design_mm",
+  "r_physical_mm",
+  "dr_mm",
+  "angle_design_deg",
+  "angle_physical_deg"
+ ],
+ "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/wall_repr.json",
+ "physical_wall_repr": "single_bspline",
+ "pw_upstream": "poly",
+ "scale_mm_per_rt": 100.2434996788185,
+ "units": "mm (角度は deg)",
+ "origin": "設計スロート (設計壁の x = 0)。x = 流れ方向 (回転軸)、r = 半径",
+ "spacing": {
+  "coarse_mm": 1.0,
+  "fine_mm": 0.1,
+  "fine_zone_mm": [
+   -200.486999357637,
+   200.486999357637
+  ],
+  "fine_zone_rule": "|x| ≤ max(50 mm, 2 r_t) (形状表と同じ)"
+ },
+ "domain_mm": {
+  "design": [
+   -999.9999999999999,
+   8000.402372861136
+  ],
+  "physical": [
+   -999.9999999999999,
+   8000.402372861136
+  ]
+ },
+ "n_blank": {
+  "design": 0,
+  "physical": 0
+ },
+ "segments": {
+  "design": [
+   {
+    "part": "直管 (半径 r_U 一定)",
+    "x_mm": [
+     -999.9999999999999,
+     -499.99999999999994
+    ]
+   },
+   {
+    "part": "縮流部 (上流 Hermite)",
+    "x_mm": [
+     -499.99999999999994,
+     0.0
+    ]
+   },
+   {
+    "part": "拡大部 (MOC の壁 S)",
+    "x_mm": [
+     0.0,
+     8000.402372861136
+    ]
+   }
+  ],
+  "physical": [
+   {
+    "part": "直管 (半径 r_U 一定)",
+    "x_mm": [
+     -999.9999999999999,
+     -499.99999999999994
+    ]
+   },
+   {
+    "part": "縮流部 (多項式 Q: 上流端で直管、x = 0 で S + δ_r に値・1 階・2 階の微分が連続)",
+    "x_mm": [
+     -499.99999999999994,
+     0.0
+    ]
+   },
+   {
+    "part": "拡大部 (設計壁 S + δ_r)",
+    "x_mm": [
+     0.0,
+     8000.402372861136
+    ]
+   }
+  ]
+ },
+ "dr_meaning": [
+  "x ≥ 0 (設計スロートから出口): Δr = δ_r = 境界層の補正 (物理壁 = 設計壁 S + δ_r)。冷却壁ではスロート付近で負になりうる",
+  "縮流部 (x < 0): 物理壁は多項式 Q、設計壁は Hermite で別の曲線。Δr は境界層の厚みではなく 2 つの上流の形の違い (x = 0 で δ_r(0) に連続)",
+  "直管: Δr = 物理壁の r_U − 設計壁の r_U (この壁では 0.0 mm)"
+ ],
+ "upstream_dr_is_boundary_layer": false,
+ "physical_throat_mm": {
+  "x": -0.23100395407612417,
+  "r": 100.00003623847854
+ },
+ "dr_range_mm": {
+  "min": -0.25721559779553615,
+  "x_at_min": -57.4,
+  "max": 41.45687022301138,
+  "x_at_max": 8000.402372861136
+ },
+ "column_notes": {
+  "x_mm": "軸方向の位置 [mm]。原点 = 設計スロート",
+  "r_design_mm": "設計壁 (Euler で回す壁、境界層なし) の半径 [mm]",
+  "r_physical_mm": "物理壁 (設計壁 + 境界層の厚み、実際に作る壁) の半径 [mm]",
+  "dr_mm": "r_physical_mm − r_design_mm [mm] (区間で意味が違う: notes)",
+  "angle_design_deg": "設計壁の傾き atan(dr/dx) [deg]",
+  "angle_physical_deg": "物理壁の傾き atan(dr/dx) [deg] (形状表の wall_angle_deg と同じ)"
+ },
+ "notes": [
+  "run run_0014_chain_v2: 原点 = 設計スロート (設計壁の x = 0)、x = 流れ方向 (回転軸)、r = 半径。単位 mm (角度は deg)。x の点は形状表 wall_shape_mm.csv と同じ (1 mm ごと + |x| ≤ 200.487 mm は 0.1 mm ごと)",
+  "r_design_mm: 設計壁 = Euler で回す壁 (境界層を無視した MOC の形; wall_repr.json の design_wall)",
+  "r_physical_mm: 物理壁 = 実際に作る壁 (設計壁 + 境界層の厚み; wall_repr.json の physical_wall = STEP と同じ曲線)",
+  "dr_mm = r_physical_mm − r_design_mm。angle_design_deg・angle_physical_deg = atan(dr/dx) (正 = 下流で広がる)",
+  "設計壁の区間: 直管 (半径 r_U 一定) [-1000, -500] mm・縮流部 (上流 Hermite) [-500, 0] mm・拡大部 (MOC の壁 S) [0, 8000.4] mm",
+  "物理壁の区間: 直管 (半径 r_U 一定) [-1000, -500] mm・縮流部 (多項式 Q: 上流端で直管、x = 0 で S + δ_r に値・1 階・2 階の微分が連続) [-500, 0] mm・拡大部 (設計壁 S + δ_r) [0, 8000.4] mm",
+  "Δr の意味 — x ≥ 0 (設計スロートから出口): Δr = δ_r = 境界層の補正 (物理壁 = 設計壁 S + δ_r)。冷却壁ではスロート付近で負になりうる",
+  "Δr の意味 — 縮流部 (x < 0): 物理壁は多項式 Q、設計壁は Hermite で別の曲線。Δr は境界層の厚みではなく 2 つの上流の形の違い (x = 0 で δ_r(0) に連続)",
+  "Δr の意味 — 直管: Δr = 物理壁の r_U − 設計壁の r_U (この壁では 0.0 mm)",
+  "物理壁は 5 次 B-spline 1 本 (STEP と同じ曲線)。区分の式 (直管・Q・S + δ_r) との差は値で最大 1.69e-12 mm",
+  "定義域: 設計壁 [-1000, 8000.4] mm・物理壁 [-1000, 8000.4] mm。片方の定義域の外の x はその壁の列と dr_mm を空欄にした (空欄: 設計壁 0 行・物理壁 0 行)",
+  "物理スロート (物理壁の最小径): x = -0.231004 mm・r = 100.000036 mm (設計スロートの r = 100.2435 mm)"
+ ],
+ "delta_record_check": {
+  "tol_mm": 1e-06,
+  "points": {
+   "throat": {
+    "x_mm": 0.0,
+    "dr_table_mm": -0.24340964429943313,
+    "record_equals_table_linear": true,
+    "table": {
+     "file": "delta_r_initial.csv",
+     "sha256": "48c314c63470c9741d1f58c27d33728e26be487df861c01c8535489732580b51",
+     "n": 1500
+    },
+    "how": "記録 initializer.delta_r_throat は積分の表の直線補間 np.interp(0, 表)。run の delta_r_initial.csv を壁と同じ 5 次補間 (runner_axismach.delta_r_from_table) で x = 0 に評価した値と比べる",
+    "record_mm": -0.24337828635877212,
+    "diff_vs_record_mm": -3.135794066100317e-05,
+    "reference_mm": -0.24340964429943118,
+    "diff_mm": -1.942890293094024e-15,
+    "pass": true
+   },
+   "exit": {
+    "x_mm": 8000.402372861136,
+    "dr_table_mm": 41.45687022301138,
+    "how": "記録 initializer.delta_r_exit (積分の表の最後の点の値。壁は表の点を通り、表より下流は端値) と直接比べる",
+    "record_mm": 41.456870223011386,
+    "diff_vs_record_mm": -7.105427357601002e-15,
+    "reference_mm": 41.456870223011386,
+    "diff_mm": -7.105427357601002e-15,
+    "pass": true
+   }
+  },
+  "prepare_info_sha256": "93fbde47c8db4c026300c1ec88360cdf7ee223f0443ab3b19be9b3e32d06ecb1",
+  "source": "initializer",
+  "status": "PASS",
+  "pass": true
+ },
+ "figures": {
+  "full": "wall_compare/wall_design_vs_physical_full.png",
+  "dr": "wall_compare/wall_design_vs_physical_dr.png",
+  "throat": "wall_compare/wall_design_vs_physical_throat.png"
+ },
+ "figure_font": "Noto Sans CJK JP (/home/sano/.fonts/NotoSansCJKjp-Regular.otf)",
+ "zoom_mm": [
+  -300.0,
+  500.0
+ ]
+}
