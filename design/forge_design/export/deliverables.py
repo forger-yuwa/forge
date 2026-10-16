@@ -193,14 +193,20 @@ def _mesh_quality(msh: Path, run: Path, ar_max: float) -> dict:
         shutil.copy2(run / "bcondConfig.yaml", t / "bcondConfig.yaml")
         shutil.copy2(msh, t / "nozzle.msh")
         c = subprocess.run([str(conv), "nozzle.msh", "nozzle_qc.h5"], cwd=t, capture_output=True, text=True, timeout=3600)
-        if c.returncode != 0:
-            return {"verdict": "FAIL", "reason": "変換器が失敗", "log": (c.stdout + c.stderr)[-800:]}
+        # 終了コードでは判定しない: 一部の環境 (AWS g5・CUDA 13) の変換器は h5 を書き切った後の終了時に `GPUassert: invalid argument` で
+        # 非零で抜ける (既知・無害、procedures/cloud-aws-gpu.md「移設で必ず踏む 4 点」の 3、runner_sern.convert_mesh と同じ)。
+        # 出力ファイルの存在と大きさで見る
+        h5 = t / "nozzle_qc.h5"
+        if not h5.exists() or h5.stat().st_size < 1024:
+            return {"verdict": "FAIL", "reason": f"変換器が {h5.name} を作れなかった (rc {c.returncode})", "log": (c.stdout + c.stderr)[-800:]}
+        conv_rc = c.returncode
         q = subprocess.run([sys.executable, str(FORGE_ROOT / "solver_density_cuda" / "tools" / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(ar_max))], cwd=t, capture_output=True, text=True, timeout=1800)
     lines = [ln for ln in q.stdout.splitlines() if ln.strip()]
     v = next((ln for ln in reversed(lines) if ln.startswith("VERDICT")), "VERDICT: ?")
     return {"verdict": "PASS" if v.startswith("VERDICT: PASS") else "FAIL", "verdict_line": v, "ar_max": ar_max,
-            "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv), "config_source": src_cfg.name}
+            "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv), "config_source": src_cfg.name,
+            "converter_rc": conv_rc}
 
 
 def _wall_slope(run: Path, coords, bedges) -> tuple:

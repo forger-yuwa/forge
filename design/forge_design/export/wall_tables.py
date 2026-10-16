@@ -255,15 +255,17 @@ def _select_step(dumps: dict, step) -> int:
     return step
 
 
-def _read_dump(path: Path, step: int) -> tuple[dict, np.ndarray]:
+def _read_dump(path: Path, step: int) -> tuple[dict, np.ndarray, bool]:
+    """壁ダンプの値・座標 (倍精度に直す) と、座標が float32 で書かれていたか (forge の float ビルド)。"""
     import h5py
     with h5py.File(path, "r") as f:
         st = f.attrs.get("step")
         if st is not None and int(st) != int(step):
             raise ValueError(f"{path.name}: 属性 step {int(st)} ≠ ファイル名の step {step} (異なる step の混入)")
         V = {k: np.array(f["VALUE"][k]) for k in f["VALUE"]}
+        xyz32 = f["MESH/COORD"].dtype == np.float32
         xyz = np.array(f["MESH/COORD"], dtype=float).reshape(-1, 3)
-    return V, xyz
+    return V, xyz, bool(xyz32)
 
 
 def _chain(edges: np.ndarray, xyz: np.ndarray) -> list:
@@ -315,14 +317,23 @@ def _wall_block(run_dir: Path, rc: dict, pid: int, path: Path, step: int, mesh_c
         raise ValueError(f"BCONDS/{pid}: iCells が節点数を超える (node 方式のメッシュだけ対応)")
     if not np.all(vs == 2):
         raise ValueError(f"BCONDS/{pid}: 境界面が線分でない (2D の壁だけ対応)")
-    V, wxyz = _read_dump(path, step)
+    V, wxyz, wxyz32 = _read_dump(path, step)
     n = len(V["ro"]) if "ro" in V else len(wxyz)
     if n != len(icells) or len(wxyz) != len(icells):
         raise ValueError(f"{path.name}: 壁ダンプの点数 {n} (座標 {len(wxyz)}) ≠ BCONDS/{pid} の境界面数 {len(icells)} (node 方式の壁ダンプだけ対応)")
     # 壁ダンプの点を座標で境界面 (ib) に対応づける (順序を仮定しない; check_wall_resolution.py と同じ許容)
     d, jmap = cKDTree(nodes[icells]).query(wxyz)
     scale = float(np.median(np.linalg.norm(np.diff(wxyz[:min(len(wxyz), 200)], axis=0), axis=1))) if len(wxyz) > 1 else 1.0
-    if float(d.max()) > 1e-6 * max(scale, 1e-12) + 1e-12 or len(np.unique(jmap)) != len(jmap):
+    tol = 1e-6 * max(scale, 1e-12) + 1e-12
+    # forge の float ビルドの壁ダンプは座標が float32 で、倍精度のメッシュの節点から丸め幅 (≤ 0.5 ulp ≈ 6e-8 |x|) だけずれる
+    # (2026-10-16 試走 case/90 run_0005_ns_p1: 最大 2.4e-7 m で止まった)。check_wall_resolution.py と同じく、丸め幅を許容に足すのは
+    # 壁の節点の最小間隔の 1/4 未満のとき (対応づけが一意である範囲) だけ
+    if wxyz32 and len(icells) > 1:
+        tol32 = 2.0 * float(np.finfo(np.float32).eps) * float(np.abs(wxyz).max())
+        dd, _ = cKDTree(nodes[icells]).query(nodes[icells], k=2)
+        if tol32 < 0.25 * float(dd[:, 1].min()):
+            tol = max(tol, tol32)
+    if float(d.max()) > tol or len(np.unique(jmap)) != len(jmap):
         raise ValueError(f"{path.name}: 壁ダンプの点を節点に 1 対 1 で対応づけられない (最大 {float(d.max()):.3e} m)")
     k_of_ib = np.empty(len(icells), dtype=np.int64)
     k_of_ib[jmap] = np.arange(len(jmap))
