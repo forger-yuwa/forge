@@ -27,7 +27,9 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   **本段の起動との照合は既定** (plan §4.9 の 2、§5.1 #7c で既定にした — result 段レビュー M1: 引数なしの通常のコマンドが照合を省いていた)。
           `settle.select_judge` が道具を選び、本段の記録 (MAIN_STAGE_STARTED) のある run は記録・今の設定・最後の起動・基準の sha256 と
           照合する。食い違い・記録の欠け (起動の記録が無い、記録が無く前の段とも確かめられない) があれば判定せず INDETERMINATE
-          (SETTLE_VERDICT.json も書かない)。前の段と確かめられた run (check_convergence.py の対象) も INDETERMINATE。手で組んだ run
+          (SETTLE_VERDICT.json も書かない)。**基準が無効 (`mode invalid`: 誤り・評価対象が未設定・grid.segment の stage が main でない)
+          のときも mode によらず判定せず INDETERMINATE** (§5.1 #9、result 段レビュー 2 回目 M1: 以前は stage を書き換えた基準で判定して
+          SETTLED を返した)。前の段と確かめられた run (check_convergence.py の対象) も INDETERMINATE。手で組んだ run
           (基準が本段の開始の記録を指さず、記録も無い) と基準の無い run はそのまま判定する (後者は「評価対象が未設定」)。
   --bind: 互換のために残す (既定と同じ)。run_case.sh・停止規則の後処理・成果物が付けて呼ぶ。
   --no-bind: 照合を外して判定する (調査用)。外したことを VERDICT の行と結果の JSON (`binding.skipped`) に書く。
@@ -88,6 +90,26 @@ def _print(res: dict) -> None:
             print(f"  前提が満たされていない: {p['quantity']} — {p['requires']}")
 
 
+def _rejection(run: Path, sel: dict) -> tuple[str, str | None]:
+    """判定に進まない選択 (mode invalid か照合の問題) の VERDICT の括弧の文言と、添える案内 (無ければ None)。
+    invalid の中身は基準を読み直して分ける: 誤り → 「基準のファイルの誤り」(判定の経路の文言と同じ)、評価対象が未設定 → 置き場所と
+    量の種類の一覧 (`settle.load_criteria` の message; §4.2 の契約)、それ以外 (grid.segment の stage が main でない等) → 「基準が本段の
+    判定に使えない」。"""
+    if sel["mode"] == "main":
+        return "本段の起動との照合の不一致", None
+    if sel["mode"] == "unconfirmed":
+        return "本段の開始の記録の欠け", None
+    if sel["mode"] != "invalid":
+        return f"照合の問題 (mode {sel['mode']})", None
+    try:
+        lc = settle.load_criteria(run)
+    except settle.CriteriaError as e:
+        return "基準のファイルの誤り", f"ERROR: 基準のファイルの誤り ({run / settle.CRITERIA_FILE}): {e}"
+    if lc["status"] != "ok":
+        return "評価対象が未設定", lc["message"]
+    return "基準が本段の判定に使えない", None
+
+
 def main(argv=None) -> int:
     ap = _Parser(description=__doc__.split("\n\n")[0])
     ap.add_argument("run_dir")
@@ -127,11 +149,16 @@ def main(argv=None) -> int:
             print(f"この起動は {settle.TOOL_NEW} の対象でない: {sel['why']} (判定は {sel['tool']})")
             print("VERDICT: INDETERMINATE (本段の起動でない)")
             return settle.EXIT_CODE["INDETERMINATE"]
-        elif sel["mode"] in ("main", "unconfirmed") and sel["problems"]:
-            what = "本段の起動との照合の不一致" if sel["mode"] == "main" else "本段の開始の記録の欠け"
-            print(f"{what} ({sel['why']}; 判定しない):")
+        elif sel["mode"] == "invalid" or sel["problems"]:
+            # 基準が無効 (mode invalid) か照合に問題があれば、mode によらず判定に進まない (result 段レビュー 2 回目 M1、plan §5.1 #9:
+            # 以前は main・unconfirmed だけを拒否し、基準の grid.segment.stage を main 以外に書き換えた run (invalid; 基準の sha256 と
+            # 本段の記録の照合も通らない経路) を判定して SETTLED・終了コード 0 を返していた)
+            what, msg = _rejection(run, sel)
+            print(f"{what} ({sel['why']} [mode {sel['mode']}]; 判定しない):")
             for p in sel["problems"]:
                 print(f"  {p}")
+            if msg:
+                print(msg)
             print(f"VERDICT: INDETERMINATE ({what})")
             return settle.EXIT_CODE["INDETERMINATE"]
         elif sel["mode"] == "main":

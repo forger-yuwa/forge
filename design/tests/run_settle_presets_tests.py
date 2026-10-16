@@ -442,6 +442,22 @@ def test_v3(run, crit_v1):
     ok2, msg2 = raises(lambda: SP.resolve({"preset": "wt_nozzle_v2"}, info, cfc, bc), "凝縮")
     chk("e7 残差の列名を決められない構成 (凝縮): v2 は今どおり ValueError、v3 は列名を使わないので解決できる (見張りは全数値列)",
         ok2 and ok3, f"{msg2[:60]} / {str(c3c)[:80] if not ok3 else ''}")
+    # result 段レビュー 2 回目 M2 (plan §5.1 #10): 見張りが要る列を基準に書く (乱流の列を含む)。決められない構成は書かず settle の既定 4 列
+    req2 = next(x for x in c2["quantities"] if x["name"] == "residual")["required"]
+    chk("e7b v3 の見張りの必要な列 = v2 の残差の判定の列 (forge の残差の列の規則)", q3["residual_finite"].get("required") == req2, str(q3["residual_finite"].get("required")))
+    cfs = copy.deepcopy(cfg)
+    cfs["turbulence"] = {**(cfs.get("turbulence") or {}), "model": "SST"}
+    try:
+        q3s = {x["name"]: x for x in SP.resolve({"preset": "wt_nozzle_v3"}, info, cfs, bc)["quantities"]}
+        req_s = q3s["residual_finite"].get("required") or []
+    except ValueError as e:
+        req_s = [str(e)]
+    chk("e7c SST の構成では必要な列に rms_roK・rms_roOmega が入る", "rms_roK" in req_s and "rms_roOmega" in req_s, str(req_s))
+    if ok3:
+        q3c = {x["name"]: x for x in c3c["quantities"]}
+        chk("e7d 凝縮 (列名を決められない) は required を書かない (settle の既定の保存量の 4 列で見張る) と notes に理由",
+            "required" not in q3c["residual_finite"] and any("既定の保存量の 4 列" in n for n in q3c["residual_finite"]["notes"]),
+            str(q3c["residual_finite"])[:200])
     chk("e8 v1・v2 は変えない: プリセットの sha256 が #5d の前 (v1)・#8 の前 (v2) と同じ",
         SP._sha256_json(SP.PRESETS["wt_nozzle_v1"]) == V1_PRESET_SHA256 and SP._sha256_json(SP.PRESETS["wt_nozzle_v2"]) == V2_PRESET_SHA256,
         f"{SP._sha256_json(SP.PRESETS['wt_nozzle_v2'])}")

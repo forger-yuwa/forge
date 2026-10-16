@@ -1307,10 +1307,148 @@ def massflux_last_step(path) -> int | None:
 
 
 def quantities_digest(result: dict) -> str:
-    """判定の結果の量の部分 (各量の verdict・検査・値・理由) の sha256。オンラインの判定と終了後の再生が同じかを比べる。"""
+    """判定の結果の量の部分 (各量の verdict・検査・値・理由) の sha256。**同じ所在・同じ環境で書いた判定どうし** (STOP_RULE_STATE.json
+    の reeval と同時に書いた SETTLE_VERDICT.json、試験のオンラインの判定と同じ run の再生) が同じかを比べる。量には入力の所在のパス
+    (residual の values.file) と浮動小数の計算値がそのまま入るので、別の所在・別の数値ライブラリで**再計算した**判定との照合には
+    使わない (`match_reeval` を使う; §5.1 #11)。定義は変えない (書き済みの記録の digest を今の定義で読めるように)。"""
     S = _settle()
     blob = json.dumps(S._jsonable(result.get("quantities") or []), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode()).hexdigest()
+
+
+# ------------------------------------------------------------------ 再計算した判定と停止規則の再評価の記録の照合 (§5.1 #11)
+# result 段レビュー 2 回目 M3: 量の辞書全体の sha256 の完全一致を「同じ判定」の条件にすると、run の所在 (相対・絶対・別の機械; residual の
+# values.file に入る) と浮動小数の演算の順 (numpy の版) の違いだけで同じ判定を拒否し、成果物の収束が「未評価」になった (V4・V6 の写し)。
+# 照合の規則: 入力の中身 (記録の使ったファイルの sha256 と今のファイル)・基準の sha256・起動の識別は一致を求め、量は
+#   - 構造 (量の並び・名前・種類・キー・リストの長さ) と、文字列・真偽・整数 (verdict・categories・各検査の名前と合否 ok・step・節点の番号)
+#     は一致を求める (各検査の合否が 1 つでも違えば不一致)
+#   - 浮動小数は |a − b| ≤ max(REEVAL_RTOL·max(|a|, |b|), REEVAL_ATOL)
+#   - 所在のパス (キー `file`) と、数値を文にした表示 (検査の `detail`・理由の `text`; 同じ値を数値で比べる) は比べない
+# 許容の根拠: 入力の中身を sha256 で揃えた上の差は演算の順だけで、run_0011・run_0014 の写しを numpy 1.26 (system python3) と 2.5
+# (design/.venv-opt) で再計算した差は相対 ≤ 6.2e−12 (残差の rise_dec・slope)、絶対 ≤ 3.6e−15。REEVAL_RTOL 1e−9 はその 160 倍の余裕で、
+# 判定の閾値 (最小 1e−4) より 5 桁小さい (合否は別に一致を求めるので、許容が合否を動かすことはない)。REEVAL_ATOL 1e−12 は、それ自体が
+# 丸めの大きさの量 (軸の重みの和の誤差 3e−16、ṁ ≈ 10² の差から作る r ≈ 1e−9 の丸め ≈ 1e−16) を相対で比べて誤って拒否しないための
+# 床で、最小の閾値より 8 桁小さい (大きさが 1e−3 より小さい量では許容は実質この絶対値になり、相対では 1e−9 よりゆるい; 入力の中身は
+# sha256 で別に揃えるので、ここに残る差は演算の順だけ)。
+REEVAL_RTOL = 1e-9
+REEVAL_ATOL = 1e-12
+_REEVAL_SKIP_KEYS = ("file", "detail", "text")
+
+
+def quantities_mismatch(a, b, *, rtol: float = REEVAL_RTOL, atol: float = REEVAL_ATOL, where: str = "quantities") -> list:
+    """判定の結果の量 a (再計算) と b (記録) の食い違いの一覧 (空 = 同じ判定)。規則は上の注記。"""
+    S = _settle()
+    return _mismatch(S._jsonable(a), S._jsonable(b), rtol, atol, where)
+
+
+def _mismatch(a, b, rtol, atol, where) -> list:
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = []
+        ka = {k for k in a if k not in _REEVAL_SKIP_KEYS}
+        kb = {k for k in b if k not in _REEVAL_SKIP_KEYS}
+        if ka != kb:
+            out.append(f"{where}: キーが違う (再計算だけ {sorted(ka - kb)}、記録だけ {sorted(kb - ka)})")
+        for k in sorted(ka & kb):
+            out += _mismatch(a[k], b[k], rtol, atol, f"{where}.{k}")
+        return out
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return [f"{where}: 長さが違う ({len(a)} と {len(b)})"]
+        out = []
+        for i, (x, y) in enumerate(zip(a, b)):
+            out += _mismatch(x, y, rtol, atol, f"{where}[{i}]")
+        return out
+    if isinstance(a, bool) or isinstance(b, bool) or not (isinstance(a, (int, float)) and isinstance(b, (int, float))):
+        return [] if (type(a) is type(b) and a == b) else [f"{where}: {a!r} と {b!r}"]
+    if isinstance(a, int) and isinstance(b, int):
+        return [] if a == b else [f"{where}: {a} と {b}"]
+    fa, fb = float(a), float(b)
+    if abs(fa - fb) <= max(rtol * max(abs(fa), abs(fb)), atol):
+        return []
+    return [f"{where}: {fa!r} と {fb!r} (差 {abs(fa - fb):.3g} > 許容 max({rtol:g}·|値|, {atol:g}))"]
+
+
+def _recorded_input(run_dir: Path, rec_run_dir, path) -> Path | None:
+    """記録の使ったファイルのパス (記録を書いた run の所在) を今の run の中のパスに引き直す。記録の run_dir の下なら相対で
+    今の run_dir へ、run の外の絶対のパスはそのまま、相対のパスは今の run_dir の下で先頭から 1 つずつ外して探す
+    (記録を書いた道具の作業ディレクトリが分からないため)。引けなければ None。"""
+    if not isinstance(path, str) or not path:
+        return None
+    p = Path(path)
+    if p.is_absolute():
+        if isinstance(rec_run_dir, str) and rec_run_dir:
+            try:
+                return run_dir / p.relative_to(rec_run_dir)
+            except ValueError:
+                pass
+        return p
+    parts = p.parts
+    for i in range(len(parts)):
+        q = run_dir.joinpath(*parts[i:])
+        if q.exists():
+            return q
+    return None
+
+
+def reeval_record(run_dir, ve: dict) -> tuple:
+    """停止規則 v2 の再評価の記録 (STOP_RULE_STATE.json の reeval = ve) と結び付く SETTLE_VERDICT.json の中身を返す。
+    結び付く = 量の sha256 (`quantities_digest`; 記録どうしの照合なので完全一致)・verdict・end_step が ve と一致。
+    戻り (中身 か None, 理由)。"""
+    S = _settle()
+    p = Path(run_dir) / S.VERDICT_FILE
+    try:
+        v = json.loads(p.read_text())
+        if not isinstance(v, dict):
+            raise ValueError("JSON の対応表でない")
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return None, f"{S.VERDICT_FILE} を読めない ({e})"
+    if quantities_digest(v) != ve.get("digest"):
+        return None, (f"{S.VERDICT_FILE} の量の sha256 {quantities_digest(v)[:16]}… が再評価の記録 {str(ve.get('digest'))[:16]}… と違う "
+                      "(再評価の後に書き換えられたか、記録どうしが食い違う)")
+    if v.get("verdict") != ve.get("verdict") or v.get("end_step") != ve.get("end_step"):
+        return None, (f"{S.VERDICT_FILE} の判定 ({v.get('verdict')}、終端 {v.get('end_step')}) が再評価の記録 ({ve.get('verdict')}、"
+                      f"終端 {ve.get('end_step')}) と違う")
+    same_file = ve.get("sha256") is not None and _sha256(p) == ve.get("sha256")
+    return v, f"{S.VERDICT_FILE} の量の sha256 が再評価の記録と一致" + ("・ファイルの sha256 も一致" if same_file else " (ファイルの sha256 は違う)")
+
+
+def match_reeval(run_dir, res: dict | None, ve: dict, *, rtol: float = REEVAL_RTOL, atol: float = REEVAL_ATOL) -> dict:
+    """再計算した判定 `res` (`settle.judge` の結果; `check_settled.py --json`) が停止規則 v2 の再評価の記録 (ve と、それに結び付く
+    SETTLE_VERDICT.json) と同じ判定かを照合する (§5.1 #11、result 段レビュー 2 回目 M3; 規則は上の注記)。
+    戻り {matches, problems (先頭 20), n_problems, record (結び付きの理由), rtol, atol}。記録が読めない・結び付かないときは
+    matches False と理由 (旧い記録でも理由つきで返し、例外にしない)。"""
+    run_dir = Path(run_dir)
+    out = {"matches": False, "problems": [], "n_problems": 0, "record": None, "rtol": rtol, "atol": atol}
+    if not isinstance(res, dict):
+        out.update(problems=["再計算の判定 (check_settled.py の結果の JSON) が無い"], n_problems=1)
+        return out
+    rec, why = reeval_record(run_dir, ve)
+    out["record"] = why
+    if rec is None:
+        out.update(problems=[f"再評価の記録を照合に使えない: {why}"], n_problems=1)
+        return out
+    probs = []
+    for k in ("verdict", "end_step", "terminal_step", "stop_step"):
+        if res.get(k) != rec.get(k):
+            probs.append(f"{k}: 再計算 {res.get(k)!r} と記録 {rec.get(k)!r}")
+    cs_a, cs_b = (res.get("criteria") or {}).get("sha256"), (rec.get("criteria") or {}).get("sha256")
+    if cs_a is None or cs_a != cs_b:
+        probs.append(f"基準の sha256: 再計算 {str(cs_a)[:16]}… と記録 {str(cs_b)[:16]}…")
+    if res.get("launch") != rec.get("launch"):
+        probs.append("起動の識別 (forge_launches.jsonl の最後の行・起動の数・RUN_PROVENANCE.txt の sha256) が記録と違う")
+    files = rec.get("files")
+    if not isinstance(files, list) or not files:
+        probs.append("記録に使ったファイルの一覧 (files) が無い (入力の中身を照合できない)")
+    else:
+        for f in files:
+            loc = _recorded_input(run_dir, rec.get("run_dir"), (f or {}).get("path") if isinstance(f, dict) else None)
+            if loc is None or not loc.is_file():
+                probs.append(f"記録の入力 {(f or {}).get('path') if isinstance(f, dict) else f!r} が今の run に無い")
+            elif _sha256(loc) != f.get("sha256"):
+                probs.append(f"入力 {loc.name} の中身 (sha256) が記録と違う")
+    probs += quantities_mismatch(res.get("quantities") or [], rec.get("quantities") or [], rtol=rtol, atol=atol)
+    out.update(matches=not probs, problems=probs[:20], n_problems=len(probs))
+    return out
 
 
 def judge_summary(result: dict) -> dict:

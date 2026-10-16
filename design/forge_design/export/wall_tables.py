@@ -674,7 +674,10 @@ def _settled_convergence(run_dir: Path, st: int, last_step: int, sel: dict, pyth
     """新方式 (settle_criteria.yaml のある run の本段・手で組んだ run) の収束: `check_settled.py <run> --bind --end-step <st> --no-write
     --json` (本段の起動・基準との照合の後に判定; run ディレクトリに書かない)。終了コード 0 → PASS、1 (NOT_SETTLED)・2 (DIVERGED) →
     FAIL、3 (INDETERMINATE: 照合の不一致・判定不能) ほか → 未評価。停止規則 v2 の再評価 (STOP_RULE_STATE.json の reeval) が同じ終端に
-    あれば、量の判定 (digest)・verdict が一致することも確かめ、食い違えば未評価 (記録どうしが合わない場を熱設計に使わない)。
+    あれば、今の判定がその記録と同じ判定であることも確かめ (`stop_rule.match_reeval`: 入力の中身・基準・起動は一致、各検査の合否は一致、
+    再計算した値は明示した数値の許容、所在のパスは比べない; §5.1 #11)、食い違えば未評価 (記録どうしが合わない場を熱設計に使わない)。
+    以前は量の辞書全体の sha256 の完全一致を求めたので、run を相対・絶対・別の機械のパスで渡すだけ・numpy の版の丸めの差だけで未評価に
+    なった (result 段レビュー 2 回目 M3)。
     verdict_line には道具の名前を入れる (成果物の xlsx の注記・status.json にどちらの道具かが残る)。"""
     conv = {"tool": "check_settled.py --bind", "selection": {k: sel.get(k) for k in ("tool", "mode", "why", "problems")}}
     if st != last_step:
@@ -711,13 +714,17 @@ def _settled_convergence(run_dir: Path, st: int, last_step: int, sel: dict, pyth
         stt = None
     ve = (stt or {}).get("reeval") if isinstance(stt, dict) and stt.get("method") == "v2" else None
     if isinstance(ve, dict) and ve.get("end_step") == st:
-        same = res is not None and SR.quantities_digest(res) == ve.get("digest") and res.get("verdict") == ve.get("verdict")
-        conv["stop_rule_reeval"] = {"end_step": ve.get("end_step"), "verdict": ve.get("verdict"), "matches": bool(same),
-                                    "state_status": stt.get("status")}
+        try:
+            m = SR.match_reeval(run_dir, res, ve)
+        except Exception as e:  # noqa: BLE001 — 照合できなければ一致とみなさない (理由を残す)
+            m = {"matches": False, "problems": [f"照合の失敗 ({type(e).__name__}: {e})"], "n_problems": 1}
+        same = bool(m.get("matches"))
+        conv["stop_rule_reeval"] = {"end_step": ve.get("end_step"), "verdict": ve.get("verdict"), "matches": same,
+                                    "state_status": stt.get("status"), "compare": m}
         if not same and result == "PASS":
             result = "未評価"
             conv["reason"] = (f"停止規則 v2 の再評価 (終端 {ve.get('end_step')}、{ve.get('verdict')}) と今の判定が食い違う "
-                              "(記録どうしが合わない場を熱設計に使わない)")
+                              f"(記録どうしが合わない場を熱設計に使わない): {'; '.join(m.get('problems') or [])[:400]}")
     else:
         conv["stop_rule_reeval"] = {"compared": False, "why": ("停止規則 v2 の記録が無い" if not isinstance(ve, dict)
                                                                else f"再評価の終端 {ve.get('end_step')} が対象の step {st} と違う")}

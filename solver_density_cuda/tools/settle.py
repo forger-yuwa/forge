@@ -60,6 +60,12 @@ r"""収束の判定の共通の部品 — 「残差が準定常・流量の収�
 - `residual_finite` (`file` 既定 residual_history.csv; プリセット `wt_nozzle_v3`、plan §4.4「残差を止める判定から外す」(2026-10-16
   ユーザ決定)・§5.1 #8): **残差の非有限の見張りで、判定の条件ではない**。区間 (outer_end の行 start〜終端 − 1) のどの数値の列にも
   非有限が無ければ SETTLED、非有限 → DIVERGED。履歴が無い・区間の最後の行が無い → 判定不能。`residual` を外した基準はこれが要る。
+  **見張りの被覆** (§5.1 #10、result 段レビュー 2 回目 M2; 閾値は戻さない): 区間の整数 step の outer_end の行が**重複なく全部**
+  (forge は毎 step 書く; `residual` の `series: raw` と同じ定義)・step の逆行なし、**必要な列** (`required`; 書かなければ
+  `RESIDUAL_FINITE_DEFAULT_REQUIRED` = forge が常に書く保存量の 4 列 `residual` の既定と同じ名前) が全部ある、を必須にする。
+  欠け・重複・逆行・列の欠け → 判定不能 (データ不足)。以前は在る数値だけを見て最終行があれば合格にしたので、最終 1 行だけ・
+  rms_ro の列だけ・残差の列の無い `step,inner,phase` の 1 行でも SETTLED になった。乱流 (rms_roK・rms_roOmega)・化学種などの列は
+  基準の `required` に書いたときだけ要る (書くのは生成器 `settle_presets.py` の役目)。
 - `mass_balance` (`file` 既定 boundary_massflux.csv; forge の `output.boundaryMassflux: 1`): 列 `mdot_<name>_<physID>` [kg/s] から
   ṁ_in = −Σ_inlet mdot、ṁ_out = Σ_outlet mdot、r = (ṁ_in − ṁ_out)/ṁ_in。C で |mean r| ≤ `mean_abs`、max r − min r ≤ `swing`、
   (max − min)/mean の ṁ_in・ṁ_out ≤ `mdot_change_rel`。入口・出口以外の境界 (壁・軸) の mdot は記録だけ。ṁ_in ≤ 0 は判定不能 (r の
@@ -199,8 +205,12 @@ KIND_KEYS = {
     "line_mach": ("nodes_file", "series_csv", "eta", "x_range_m", "n", "Md"),
     "exit_flow_angle": ("nodes_file", "eta_range"),
     "wall_heat_nodes": ("walls", "file_pattern", "dataset", "axisymmetric", "measure"),
-    "residual_finite": ("file",),
+    "residual_finite": ("file", "required"),
 }
+# residual_finite の必要な列の既定 (基準に `required` が無いとき; §5.1 #10)。forge の残差の履歴は保存量の列を常に書く
+# (`main.cpp` の kResidualEquationNames: ro・roUx・roUy・roUz・roe)。名前と範囲は `residual` の既定の required
+# (`settle_presets.residual_columns` の最初の 4 つ; rms_roUz は inactive_ok なので要らない) に揃える。
+RESIDUAL_FINITE_DEFAULT_REQUIRED = ("rms_ro", "rms_roUx", "rms_roUy", "rms_roe")
 SERIES_KEYS = {
     "exit_core_mach": (("path", "step_col", "value_col"), ()),
     "line_mach": (("path", "step_col", "maxabs_col", "halfamp_col"), ()),
@@ -433,6 +443,11 @@ def validate_criteria(obj) -> dict:
                 o["series"] = q["series"]
         elif kind == KIND_RESIDUAL_FINITE:
             o["file"] = q.get("file", "residual_history.csv")
+            if "required" in q:    # 書いたときだけ残す (書かない基準の中身は今と同じ; 見張りは既定の 4 列を要る)
+                o["required"] = _str_list(q["required"], f"{where}.required", allow_empty=False)
+                for col in o["required"]:
+                    if not col.startswith("rms_") or col.startswith("rms_dq_"):
+                        raise CriteriaError(f"{where}: 残差の列 '{col}' は rms_<方程式> の形でない (rms_dq_* は必要な列にしない)")
         elif kind == "mass_balance":
             if "series_csv" in q:
                 if "file" in q:
@@ -1188,7 +1203,9 @@ def _eval_residual_finite(q: dict, ctx: dict) -> dict:
     """残差の非有限の見張り (`residual_finite`; plan §4.4「残差を止める判定から外す」(2026-10-16 ユーザ決定)、§5.1 #8)。
     **判定の条件ではない** (傾き・振幅・上昇・跳ねは見ない): 残差の履歴の本段の区間 (outer_end の行 start〜終端 − 1、停止の観測が
     あれば停止の step − 1 まで) のどの数値の列にも非有限が無ければ SETTLED (見張りの合格)、非有限 → DIVERGED (`residual` と同じ検査)。
-    履歴が無い・読めない行・区間の行が無い・最後の行 (終端 − 1) が無い (見張りが終端まで届かない) → 判定不能。"""
+    履歴が無い・読めない行・区間の行が無い・最後の行 (終端 − 1) が無い (見張りが終端まで届かない) → 判定不能。
+    **被覆と列** (§5.1 #10、result 段レビュー 2 回目 M2): 区間の整数 step の行が重複なく全部・逆行なし、必要な列 (基準の `required`、
+    無ければ `RESIDUAL_FINITE_DEFAULT_REQUIRED`) が全部ある、を必須にする (欠け・重複・逆行・列の欠け → 判定不能)。閾値は見ない。"""
     Q = _Q(q)
     T, start, stop = ctx["T"], ctx["start"], ctx["stop"]
     try:
@@ -1200,11 +1217,20 @@ def _eval_residual_finite(q: dict, ctx: dict) -> dict:
     end_row = (stop if stop is not None else T) - 1
     seg = (st >= start) & (st <= end_row)
     s_seg = st[seg]
+    req = list(q.get("required") or RESIDUAL_FINITE_DEFAULT_REQUIRED)
     Q.r["values"].update(file=R["path"], rows_in_segment=int(seg.sum()), rows=[start, end_row],
-                         role="非有限の見張り (判定の条件ではない)")
+                         role="非有限の見張り (判定の条件ではない)", required=req,
+                         required_source=("基準の required" if "required" in q
+                                          else "既定 (forge が常に書く保存量の列; 乱流・化学種などの列は基準の required に書く)"))
     bad_in = [b for b in R["bad"] if b is None or start <= b <= end_row]
     if bad_in:
         Q.reason(CAT_DATA, f"読めない・欠けた outer_end の行が {len(bad_in)} 行 (step {bad_in[:5]})")
+    if len(s_seg) > 1:         # `residual` と同じ検査 (重複・逆行は判定不能)
+        d = np.diff(s_seg)
+        if np.any(d == 0):
+            Q.reason(CAT_DATA, f"step の重複 (例 {int(s_seg[1:][d == 0][0])})")
+        if np.any(d < 0):
+            Q.reason(CAT_DATA, f"step が単調でない (例 {int(s_seg[1:][d < 0][0])} の前が {int(s_seg[:-1][d < 0][0])})")
     nonfin = {k: int(np.count_nonzero(~np.isfinite(v[seg]))) for k, v in R["cols"].items()}
     nonfin = {k: n for k, n in nonfin.items() if n}
     if nonfin:
@@ -1214,8 +1240,18 @@ def _eval_residual_finite(q: dict, ctx: dict) -> dict:
         return Q.finish()
     if not len(s_seg):
         Q.reason(CAT_DATA, f"区間 (行 {start}〜{end_row}) の outer_end の行が無い (見張れない)")
-    elif int(s_seg.max()) < end_row:
-        Q.reason(CAT_DATA, f"区間の最後の行 (step {end_row}) が無い (最後の行 {int(s_seg.max())}; 見張りが終端まで届かない)")
+    else:
+        if int(s_seg.max()) < end_row:
+            Q.reason(CAT_DATA, f"区間の最後の行 (step {end_row}) が無い (最後の行 {int(s_seg.max())}; 見張りが終端まで届かない)")
+        # 区間の毎 step の行 (forge は outer_end の行を毎 step 書く; `residual` の series raw の被覆と同じ定義)
+        miss = np.setdiff1d(np.arange(start, end_row + 1, dtype=np.int64), s_seg)
+        if len(miss):
+            Q.reason(CAT_DATA, f"区間 (行 {start}〜{end_row}) の outer_end の行が {len(miss)} 行欠ける (step {miss[:6].tolist()}"
+                               f"{' …' if len(miss) > 6 else ''}; 見張りは区間の毎 step の行を要る)")
+    rms = [k for k in R["cols"] if k.startswith("rms_") and not k.startswith("rms_dq_")]
+    miss_cols = [k for k in req if k not in R["cols"]]
+    if miss_cols:
+        Q.reason(CAT_DATA, f"必要な残差の列が無い: {miss_cols} (ある列: {rms})")
     return Q.finish()
 
 

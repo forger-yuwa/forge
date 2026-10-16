@@ -34,6 +34,10 @@ forge_launches.jsonl・solverConfig.yaml) は runner_axismach と forge と同�
       旧方式の run は変更前 (HEAD の wall_tables を git から読む) と出力がビット同一。`deliverables.part_excel` の status.json に載る。
       設計の報告の収束の欄 (`nozzle_report.convergence_gate_row`) は 1 行目の TOOL で読み分け、旧い形・旧方式は変更前と同じ。
       `hook_forge_guard.py` の案内文。
+  (e′) result 段レビュー 2 回目 M3 (§5.1 #11): 成果物の収束と停止規則の再評価の照合 (`stop_rule.match_reeval`) は、同じ run を相対・絶対・
+      別の場所のパスで渡しても、記録の浮動小数を全部 1 ulp ずらしても一致 (修正前 = PRE_REVIEW2_COMMIT の wall_tables は「未評価」; 検出力)、
+      各検査の合否・量の verdict・許容を超える値・全体の verdict・入力の中身が違えば不一致 (未評価)、記録のファイルの一覧が無い・記録が無い
+      旧い形は例外にせず理由つきの未評価。照合の部品の単体 (所在のパス・表示の文は比べない、絶対の床 1e−12 の扱い)。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_settle_migration_tests.py
 所要: 約 1 分 (本物の δ_E の抽出 3 回)。出力は一時ディレクトリ (全部合格なら消す)。
@@ -824,10 +828,11 @@ def _norm(o) -> str:
     return _TMPDIR_RE.sub(lambda m: f"/tmp/thermal_use_{m.group(1)}_<TMP>", json.dumps(o, ensure_ascii=False, default=str))
 
 
-def _load_ref(relpath: str, modname: str):
-    """変更前 (HEAD) のモジュールを git から読み、同じパッケージの中の名前で読み込む (相対 import を同じに解く)。"""
+def _load_ref(relpath: str, modname: str, commit: str = "HEAD"):
+    """変更前 (既定 HEAD; 検出力の確かめは固定の commit) のモジュールを git から読み、同じパッケージの中の名前で読み込む
+    (相対 import を同じに解く)。"""
     import importlib.util
-    src = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{relpath}"], capture_output=True, text=True, check=True).stdout
+    src = subprocess.run(["git", "-C", str(ROOT), "show", f"{commit}:{relpath}"], capture_output=True, text=True, check=True).stdout
     f = TMP / "ref_tree" / Path(relpath).parent / (modname.rsplit(".", 1)[-1] + ".py")   # 同じ深さに置く (REPO = parents[3])
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(src)
@@ -839,6 +844,143 @@ def _load_ref(relpath: str, modname: str):
         if hasattr(m, k_):
             setattr(m, k_, getattr(sys.modules[modname.rsplit(".", 1)[0] + "." + Path(relpath).stem], k_))
     return m
+
+
+PRE_REVIEW2_COMMIT = "b64dbfdd"     # result 段レビュー 2 回目 M3 (§5.1 #11) の修正の前 (検出力の確かめに使う)
+
+
+def _rebind_verdict(rd: Path, mutate):
+    """停止規則の再評価の記録 SETTLE_VERDICT.json を mutate(v) で書き換え、STOP_RULE_STATE の reeval (digest・sha256・verdict) を合わせる
+    (別の機械・別の所在で書いた記録の形; 記録どうしは結び付いたまま)。"""
+    p = rd / ST.VERDICT_FILE
+    v = json.loads(p.read_text())
+    mutate(v)
+    p.write_text(json.dumps(v, ensure_ascii=False, indent=1) + "\n")
+    dig, sha = SR.quantities_digest(v), SR._sha256(p)
+    rewrite_records(rd, lambda rec: rec["reeval"].update(digest=dig, sha256=sha, verdict=v["verdict"]))
+
+
+def test_reeval_match(V: Path):
+    """result 段レビュー 2 回目 M3 (plan §5.1 #11): 成果物の収束 (`wall_tables._settled_convergence`) が停止規則 v2 の再評価の記録と
+    今の判定を照合するとき、所在のパス (相対・絶対・別の場所) と演算の丸め (1 ulp) では一致、各検査の合否・量の verdict・許容を超える値・
+    入力の中身が違えば不一致 (未評価)。修正前 (PRE_REVIEW2_COMMIT の wall_tables; 量の辞書全体の sha256 の完全一致) が所在と丸めで
+    未評価だったこと (検出力) も確かめる。"""
+    print("== (e′) 成果物の収束と停止規則の再評価の照合 (result 段レビュー 2 回目 M3、§5.1 #11)", flush=True)
+    from forge_design.export import wall_tables as WT
+    try:
+        PRE = _load_ref("design/forge_design/export/wall_tables.py", "forge_design.export._wall_tables_pre_review2", commit=PRE_REVIEW2_COMMIT)
+    except Exception as e:  # noqa: BLE001
+        PRE = None
+        check(f"修正前 ({PRE_REVIEW2_COMMIT}) の wall_tables を読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
+
+    def conv(run, mod=WT):
+        return mod.thermal_use(run)["convergence"]
+
+    # 照合の部品の単体 (quantities_mismatch)
+    a = [{"name": "q", "verdict": "SETTLED", "checks": [{"check": "c", "value": 0.1, "limit": 1.0, "ok": True, "detail": "x 0.1"}],
+          "values": {"file": "/a/run/residual_history.csv", "n": 3, "v": 1e-9, "w": 0.5, "z": 3.3e-16, "nan": float("nan")},
+          "reasons": [{"category": "data", "label": "データ不足", "text": "/a/run/x が無い"}]}]
+    b = json.loads(json.dumps(SR._settle()._jsonable(a)))
+    b[0]["values"]["file"] = "rel/run/residual_history.csv"
+    b[0]["checks"][0]["detail"] = "x 0.1000000001"
+    b[0]["reasons"][0]["text"] = "rel/run/x が無い"
+    b[0]["checks"][0]["value"] = math.nextafter(0.1, 1.0)
+    b[0]["values"]["v"] = 1e-9 * (1 + 5e-10)
+    b[0]["values"]["w"] = 0.5 * (1 + 5e-10)
+    b[0]["values"]["z"] = 0.0
+    check("照合の単体: 所在のパス (file)・表示の文 (detail・text) の違い、1 ulp・相対 5e−10 の差、丸めの大きさの量 (3e−16 と 0)、"
+          "非有限 (nan と nan) は一致", SR.quantities_mismatch(a, b) == [], str(SR.quantities_mismatch(a, b)))
+    c_ = json.loads(json.dumps(b))
+    c_[0]["values"]["v"] = 1e-9 * (1 + 1e-6)
+    check(f"照合の単体: 絶対の床 (REEVAL_ATOL {SR.REEVAL_ATOL:g}) より小さい差は一致とみなす (1e−9 の量の相対 1e−6 = 絶対 1e−15; "
+          "許容の決め方を試験に残す — 入力の中身は sha256 で別に揃える)", SR.quantities_mismatch(a, c_) == [], str(SR.quantities_mismatch(a, c_)))
+    neg = []
+    for label, mut in (("合否 ok", lambda x: x[0]["checks"][0].update(ok=False)), ("量の verdict", lambda x: x[0].update(verdict="NOT_SETTLED")),
+                       ("整数", lambda x: x[0]["values"].update(n=4)), ("相対 1e−6 の差 (0.5 の量)", lambda x: x[0]["values"].update(w=0.5 * (1 + 1e-6))),
+                       ("キーの欠け", lambda x: x[0]["values"].pop("n")), ("検査の名前", lambda x: x[0]["checks"][0].update(check="d")),
+                       ("理由の分類", lambda x: x[0]["reasons"][0].update(category="threshold")),
+                       ("真偽と整数", lambda x: x[0]["checks"][0].update(ok=1))):
+        c_ = json.loads(json.dumps(b))
+        mut(c_)
+        if not SR.quantities_mismatch(a, c_):
+            neg.append(label)
+    check("照合の単体: 合否 ok・量の verdict・整数・許容を超える差 (相対 1e−6)・キーの欠け・検査の名前・理由の分類・真偽と整数の取り違えは不一致",
+          not neg, str(neg))
+
+    # 相対のパス (同じ run を作業ディレクトリからの相対で渡す)
+    cwd = os.getcwd()
+    try:
+        os.chdir(V.parent)
+        c = conv(Path(V.name))
+        c_old = conv(Path(V.name), PRE) if PRE is not None else None
+    finally:
+        os.chdir(cwd)
+    check("同じ run を相対のパスで渡す → 停止規則の再評価と一致・収束 PASS",
+          c["result"] == "PASS" and c["stop_rule_reeval"]["matches"] is True, json.dumps(c.get("stop_rule_reeval"), ensure_ascii=False)[:300])
+    check("検出力: 修正前は相対のパスで「未評価」(量の sha256 に所在のパスが入る)",
+          c_old is not None and c_old["result"] == "未評価" and c_old["stop_rule_reeval"]["matches"] is False, str((c_old or {}).get("reason")))
+    c = conv(V.resolve())
+    check("同じ run を絶対のパスで渡す → 一致・収束 PASS", c["result"] == "PASS" and c["stop_rule_reeval"]["matches"] is True)
+    # 別の場所 (記録を書いた run と違う所在; AWS からの写しの形)
+    Vm = clone(V, "wt_v2_moved")
+    c = conv(Vm)
+    check("run を別の場所へ写す (記録の所在と違う) → 一致・収束 PASS (入力の中身は記録の相対のパスで引き直して sha256 が一致)",
+          c["result"] == "PASS" and c["stop_rule_reeval"]["matches"] is True, json.dumps(c["stop_rule_reeval"].get("compare"), ensure_ascii=False)[:300])
+    if PRE is not None:
+        c_old = conv(Vm, PRE)
+        check("検出力: 修正前は別の場所へ写した run で「未評価」", c_old["result"] == "未評価", str(c_old.get("reason")))
+    # 演算の丸め (記録の浮動小数をすべて 1 ulp ずらし、記録どうしの結び付きは保つ)
+    V1 = clone(V, "wt_v2_ulp")
+    nb = [0]
+
+    def bump(o):
+        if isinstance(o, dict):
+            return {k: bump(x) for k, x in o.items()}
+        if isinstance(o, list):
+            return [bump(x) for x in o]
+        if isinstance(o, float) and math.isfinite(o) and o != 0.0:
+            nb[0] += 1
+            return math.nextafter(o, math.inf)
+        return o
+    _rebind_verdict(V1, lambda v: v.update(quantities=bump(v["quantities"])))
+    c = conv(V1)
+    check(f"記録の浮動小数を全部 1 ulp ずらす ({nb[0]} 個; 別の数値ライブラリで書いた記録の形) → 一致・収束 PASS",
+          nb[0] > 10 and c["result"] == "PASS" and c["stop_rule_reeval"]["matches"] is True, json.dumps(c["stop_rule_reeval"].get("compare"), ensure_ascii=False)[:300])
+    if PRE is not None:
+        c_old = conv(V1, PRE)
+        check("検出力: 修正前は 1 ulp の差で「未評価」", c_old["result"] == "未評価", str(c_old.get("reason")))
+
+    # 不一致の負例 (未評価にする)
+    def first_check(v, kind="exit_core_mach"):
+        return next(q for q in v["quantities"] if q["kind"] == kind)["checks"][0]
+    for name, mut, word in (
+            ("ok", lambda v: first_check(v).update(ok=False), ".ok"),
+            ("qverdict", lambda v: next(q for q in v["quantities"] if q["kind"] == "exit_core_mach").update(verdict="NOT_SETTLED"), ".verdict"),
+            ("value", lambda v: first_check(v).update(value=first_check(v)["value"] * (1 + 1e-6) + 1e-9), ".value"),
+            ("verdict", lambda v: v.update(verdict="NOT_SETTLED"), "verdict")):
+        Vx = clone(V, f"wt_v2_neg_{name}")
+        _rebind_verdict(Vx, mut)
+        c = conv(Vx)
+        check(f"記録の {name} だけが今の判定と違う (記録どうしは結び付いたまま) → 不一致・収束 未評価 (理由に食い違いの箇所)",
+              c["result"] == "未評価" and c["stop_rule_reeval"]["matches"] is False and "食い違う" in (c.get("reason") or "")
+              and word in (c.get("reason") or ""), str(c.get("reason"))[:300])
+    Vi = clone(V, "wt_v2_input")
+    p = Vi / "boundary_massflux.csv"
+    p.write_text("# 再評価の後に足した行 (判定には効かない)\n" + p.read_text())
+    c = conv(Vi)
+    check("入力の中身が記録と違う (判定に効かない注記の行を足した流量の CSV) → 判定は同じでも不一致・収束 未評価 (入力の sha256 の照合を残す)",
+          c["result"] == "未評価" and c["stop_rule_reeval"]["matches"] is False and "boundary_massflux.csv" in (c.get("reason") or ""),
+          str(c.get("reason"))[:300])
+    Vf = clone(V, "wt_v2_nofiles")
+    _rebind_verdict(Vf, lambda v: v.pop("files"))
+    c = conv(Vf)
+    check("記録に使ったファイルの一覧が無い (旧い記録の形) → 例外にせず理由つきの未評価", c["result"] == "未評価"
+          and "files" in (c.get("reason") or ""), str(c.get("reason"))[:300])
+    Vv = clone(V, "wt_v2_noverdict")
+    (Vv / ST.VERDICT_FILE).unlink()
+    c = conv(Vv)
+    check("再評価の記録 SETTLE_VERDICT.json が無い → 例外にせず理由つきの未評価", c["result"] == "未評価"
+          and ST.VERDICT_FILE in (c.get("reason") or ""), str(c.get("reason"))[:300])
 
 
 def _old_gate_row(run: Path):
@@ -917,6 +1059,7 @@ def test_readers():
     c = WT.thermal_use(Vr)["convergence"]
     check("thermal_use: 停止規則 v2 の再評価 (STOP_RULE_STATE の digest) と今の判定が食い違う → 未評価",
           c["result"] == "未評価" and c["stop_rule_reeval"]["matches"] is False and "食い違う" in (c.get("reason") or ""), str(c.get("reason")))
+    test_reeval_match(V)
     Vn = TMP / "wt_v2_rising"
     RWT.make_synth(Vn, steps=wsteps, tw=1e-5, residual=False)
     finish_v2(Vn, kind="REACHED", resid_fn=lambda s: 1e-4 * 10.0 ** (s / 20000.0), delta=None)
