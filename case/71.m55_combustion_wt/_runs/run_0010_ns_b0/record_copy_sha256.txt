@@ -1,0 +1,4 @@
+# 元のファイルの sha256 (run_0010_ns_b0: 手元の case/71.m55_combustion_wt/run_0010_ns_b0 (AWS A から回収した写し)、2026-10-16; plan tooling-nozzle-card-local-mesh §5.1 #6a の試験用)
+19d8c85e877f54c14a8ce76fa07011a409092ff90e5a016e32742cd390c2a8a1  delta_r_initial.json
+b220879a6e4d0f2230de8a40d4eadc0b136e3c68b050533bac204b1ae8c85f58  prepare_info.json
+ab5aac75f500c428e914d33369bf9782de59f45a2bb2a1613078a2f2d42758e6  delta_r_initial.csv

@@ -270,6 +270,18 @@ def test_v4_unit():
     check("V4(c) 始点が ε を超える → 例外", ok, msg[:120])
     x, rec = DL.snap_table_ends(base, A10, S10)
     check("V4 端が設計と一致する表は揃えても同じ (snapped = False)", np.array_equal(x, base) and not rec["start"]["snapped"] and not rec["end"]["snapped"])
+    # 同じ設計に当てる照合 (prepare_ns・関門の next_wall_check; card-local-mesh §5.1 #3h): ε 以内は揃え、超えたら触らない (例外にしない)
+    ulp_e = float(np.spacing(A10["x_exit"]))
+    x, rec = DL.snap_table_ends_same_design(tab(0.0, -ulp_e), A10, S10)
+    check("#3h 終点が 1 ulp 短い (case/71 run_0003 の型) → 出口に揃う", x[-1] == A10["x_exit"] and rec["end"]["snapped"]
+          and np.array_equal(x[:-1], base[:-1]), f"差 {rec['end']['diff_rt']:+.3e}")
+    for nm, d0, d1 in (("終点が ε を超えて内側", 0.0, -2.0 * eps_e), ("始点が ε を超えて外側", -2.0 * eps_s, 0.0)):
+        t_ = tab(d0, d1)
+        x, rec = DL.snap_table_ends_same_design(t_, A10, S10)
+        check(f"#3h {nm} → 揃えない・例外にしない (壁の構築が判定)", np.array_equal(x, t_) and not rec["start"]["snapped"]
+              and not rec["end"]["snapped"])
+    x, rec = DL.snap_table_ends_same_design(base, A10, S10)
+    check("#3h 端が一致する表は同じ (snapped = False)", np.array_equal(x, base) and not rec["start"]["snapped"] and not rec["end"]["snapped"])
     # (e) 前の設計の記録
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)

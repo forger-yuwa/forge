@@ -52,7 +52,8 @@ if exec_forge and not benign:
         "permissionDecision": "deny",
         "permissionDecisionReason": (
             "forge は solver_density_cuda/tools/run_case.sh 経由で実行すること。"
-            "ラッパーが実行後に check_convergence.py を走らせ CONVERGENCE_VERDICT.txt を残すため、"
+            "ラッパーが実行後に収束の判定 (settle_criteria.yaml のある run の本段は check_settled.py、それ以外は "
+            "check_convergence.py; 選択は check_settled.py --select <run_dir>) を走らせ CONVERGENCE_VERDICT.txt を残すため、"
             "収束確認が自動で担保される。直接 build/forge を呼ばない "
             "(例: `nohup solver_density_cuda/tools/run_case.sh <run_dir> &`)。")}}
     print(json.dumps(out)); sys.exit(0)

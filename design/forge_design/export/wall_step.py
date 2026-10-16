@@ -25,12 +25,14 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import shutil
 import tempfile
 from pathlib import Path
 
 import numpy as np
 
-FREECADCMD = os.environ.get("FREECADCMD", "/home/sano/opt/squashfs-root/usr/bin/freecadcmd")
+# FreeCAD の freecadcmd: 環境変数 FREECADCMD → PATH (以前はこのマシンの絶対パスが既定だった)
+FREECADCMD = os.environ.get("FREECADCMD") or shutil.which("freecadcmd") or shutil.which("FreeCADCmd") or "/home/sano/opt/squashfs-root/usr/bin/freecadcmd"
 JOB_SCRIPT = Path(__file__).with_name("freecad_wall_step_job.py")
 # 転送誤差の許容 (plan §6 W5): 位置 [mm]・接線方向の角度 [rad]・曲率 (絶対 [1/mm] または相対)
 TRANSFER_TOL = {"pos_mm": 1e-6, "angle_rad": 1e-9, "kappa_abs_per_mm": 1e-9, "kappa_rel": 1e-9}

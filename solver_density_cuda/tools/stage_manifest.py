@@ -32,10 +32,14 @@ r"""段階起動の **段ごとの実効設定**を記録・照合する (収束
     python3 solver_density_cuda/tools/stage_manifest.py <run_dir> [--segments]
 
 `--segments` は**連結してよい最大の区間**を順に出す。最後の区間が本段を含む判定区間になる。
+
+hard キーには forge が確定したリミッタの基準値 (`limiter.ref`、run の `limiter_ref.json` から) も入る
+(2026-10-16、plan tooling-settle-convergence-and-monitor §4.8 の 3)。`sm.add` は**その段の forge の後に**呼ぶこと。
 """
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -119,7 +123,130 @@ YAML_HARD_PATHS = [
 ]
 
 CHI_KEY = "space.slauWallNormalChi.effective"
-MANIFEST_VERSION = 2
+# 3: 段に limiter_ref (リミッタの基準値の記録) と hard キー `limiter.ref` を足した (2026-10-16)
+MANIFEST_VERSION = 3
+
+# ---- リミッタの基準値 (plan tooling-settle-convergence-and-monitor §4.6・§4.8 の 3、codex plan 段 2026-10-15 M4) ----
+# 基準値 ρ・P・a・L_ref はリミッタの作用素を変える (limiter_d.cu の平滑化項 ∝ q_ref²·(K h/L_ref)³)。forge は省略 (0) なら
+# **起動のたびに開始の場の体積平均** (L_ref は格子の境界箱) で決めるので、同じ YAML でも起動ごとに作用素が違いうる。
+# 以前は hard キーに入っておらず、limiterRoRef 1 → 10 の 2 段も 1 区間に連結されていた (codex の再現)。
+# 値の正本は forge が起動ごとに書く `limiter_ref.json` (main.cpp writeLimiterRefRecord、%.17g、cfg_fnv つき)。
+# 段の記録 (`StageManifest.add`) は**その段の forge が終わった後**に呼ぶこと (自動の値は forge が書く)。
+#   - 記録が cfg_fnv の一致する段のもの → その値 (status forge)
+#   - 記録が無い・別の起動 → 4 つとも solverConfig の明示 (> 0) なら その値 (status config)、
+#     `limiterScaled: 0` (と limiterDiag 0) を明示なら 基準値を使わない (status unused)、それ以外は値が分からない (status unknown)
+#   - **unknown の段は前後のどの段とも連結しない** (segments)。値が同じなら連結する (継承した固定値と元の自動の値は同じ区間)。
+# 起動の識別 (どの起動がどの段か) は plan tooling-stage-manifest-launch-binding の担当で、ここは cfg_fnv の照合だけ。
+LIMITER_KEY = "limiter.ref"
+LIMITER_REF_FILE = "limiter_ref.json"
+LIMITER_REF_SCHEMA = "forge.limiter_ref/v1"
+LIMITER_REF_NAMES = ("limiterRoRef", "limiterPRef", "limiterARef", "limiterRefLength")
+LIMITER_UNKNOWN = "unknown"
+LIMITER_UNUSED = "unused"
+
+
+class LimiterRecordError(ValueError):
+    """limiter_ref.json が無い・壊れている・別の起動のもの。"""
+
+
+def _pos_finite(v):
+    """有限の正の数なら float、それ以外は None (bool は数として扱わない)。"""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if (math.isfinite(v) and v > 0.0) else None
+
+
+def limiter_values_key(vals):
+    """基準値 4 つの hard キーの文字列 (repr = double を往復できる最短の表記)。"""
+    return ";".join("%s=%r" % (k, float(vals[k])) for k in LIMITER_REF_NAMES)
+
+
+def read_limiter_ref(run_dir, cfg_text=None):
+    """run の `limiter_ref.json` を読んで検査した dict を返す。cfg_text を渡すと、記録の cfg_fnv がその設定の FNV-1a 64
+    (forge_launches.jsonl と同じ) と一致することも確かめる。無い・壊れている・形式が違う・値が正の有限でない・
+    cfg_fnv が違う → LimiterRecordError。戻りの dict には `sha256` (ファイルの) を足す。"""
+    p = os.path.join(str(run_dir), LIMITER_REF_FILE)
+    if not os.path.isfile(p):
+        raise LimiterRecordError("%s が無い" % p)
+    raw = open(p, "rb").read()
+    try:
+        rec = json.loads(raw.decode())
+    except Exception as e:  # noqa: BLE001
+        raise LimiterRecordError("%s を JSON として読めない (%s)" % (p, e))
+    if not isinstance(rec, dict) or rec.get("schema") != LIMITER_REF_SCHEMA:
+        raise LimiterRecordError("%s の schema が %r でない" % (p, LIMITER_REF_SCHEMA))
+    if cfg_text is not None and rec.get("cfg_fnv") != fnv1a64(cfg_text):
+        raise LimiterRecordError("%s は別の起動の記録 (cfg_fnv %s、この段の設定は %s)"
+                                 % (p, rec.get("cfg_fnv"), fnv1a64(cfg_text)))
+    if not isinstance(rec.get("computed"), bool):
+        raise LimiterRecordError("%s の computed が真偽値でない" % p)
+    if rec["computed"]:
+        bad = [k for k in LIMITER_REF_NAMES if _pos_finite(rec.get(k)) is None]
+        au = rec.get("auto")
+        if bad or not isinstance(au, dict) or any(not isinstance(au.get(k), bool) for k in LIMITER_REF_NAMES):
+            raise LimiterRecordError("%s の基準値が正の有限の数でない・auto が欠ける (%s)" % (p, bad))
+    rec["sha256"] = hashlib.sha256(raw).hexdigest()
+    rec["path"] = p
+    return rec
+
+
+def _cfg_limiter_settings(cfg_text):
+    """solverConfig の space から (明示の基準値 {名前: float}、limiterScaled (明示が無ければ None)、limiterDiag (同))。
+    YAML が読めなければ None。"""
+    try:
+        import yaml
+        doc = yaml.safe_load(cfg_text or "")
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(doc, dict):
+        return None
+    sp = doc.get("space") if isinstance(doc.get("space"), dict) else {}
+    expl = {}
+    for k in LIMITER_REF_NAMES:
+        v = _pos_finite(sp.get(k)) if k in sp else None
+        if v is not None:
+            expl[k] = v
+    sc = sp.get("limiterScaled")
+    dg = sp.get("limiterDiag")
+    return expl, (int(sc) if isinstance(sc, int) and not isinstance(sc, bool) else None), \
+        (int(dg) if isinstance(dg, int) and not isinstance(dg, bool) else None)
+
+
+def limiter_ref_entry(cfg_text, run_dir=None):
+    """段のリミッタの基準値の記録 (manifest の段の `limiter_ref`)。`key` が hard キー `limiter.ref` の値。
+    規則は上の LIMITER_* の説明。**その段の forge の起動の後に呼ぶ**。"""
+    cs = _cfg_limiter_settings(cfg_text)
+    if cs is None:
+        return {"key": LIMITER_UNKNOWN, "status": "unknown", "reason": "solverConfig を YAML として読めない"}
+    expl, scaled, diag = cs
+    why_no_rec = "run dir が無い"
+    if run_dir:
+        try:
+            rec = read_limiter_ref(run_dir, cfg_text)
+        except LimiterRecordError as e:
+            rec, why_no_rec = None, str(e)
+        if rec is not None:
+            base = {"status": "forge", "file": LIMITER_REF_FILE, "sha256": rec["sha256"], "cfg_fnv": rec["cfg_fnv"],
+                    "time": rec.get("time")}
+            if not rec["computed"]:
+                return {**base, "key": LIMITER_UNUSED, "values": None,
+                        "reason": "forge が基準値を使わない (limiterScaled %s・limiterDiag %s)" % (rec.get("limiterScaled"), rec.get("limiterDiag"))}
+            vals = {k: float(rec[k]) for k in LIMITER_REF_NAMES}
+            clash = [k for k, v in expl.items() if v != vals[k] or rec["auto"][k]]
+            if clash:
+                # 設定の明示と forge の記録が食い違う (別のバイナリ・壊れた記録)。値を決めない
+                return {**base, "status": "unknown", "key": LIMITER_UNKNOWN, "values": vals,
+                        "reason": "solverConfig の明示 %s と limiter_ref.json の値・auto が食い違う" % clash}
+            return {**base, "key": limiter_values_key(vals), "values": vals, "auto": dict(rec["auto"])}
+    if scaled == 0 and not diag:
+        return {"status": "config", "key": LIMITER_UNUSED, "values": None,
+                "reason": "limiterScaled 0 の明示 (基準値を使わない); 記録なし: %s" % why_no_rec}
+    if len(expl) == len(LIMITER_REF_NAMES):
+        return {"status": "config", "key": limiter_values_key(expl), "values": expl,
+                "auto": {k: False for k in LIMITER_REF_NAMES}, "reason": "4 つとも solverConfig の明示; 記録なし: %s" % why_no_rec}
+    return {"status": "unknown", "key": LIMITER_UNKNOWN, "values": None,
+            "reason": "自動の基準値 (%s) の記録が無い: %s" % ([k for k in LIMITER_REF_NAMES if k not in expl], why_no_rec)}
 
 
 def fnv1a64(data):
@@ -293,16 +420,22 @@ class StageManifest:
         self.stages = []
 
     def add(self, tag, cfg_text, bcond_text, history=None, restart_from=None):
+        """段を足す。リミッタの基準値は run の limiter_ref.json (forge が起動ごとに書く) から取るので、**その段の forge が
+        終わった後に呼ぶ** (先に呼ぶと記録が無い・前の段のものになり、自動の基準値の段は値が分からず連結されない)。"""
+        key = stage_key(cfg_text, bcond_text, self.run)
+        lim = limiter_ref_entry(cfg_text, self.run)
+        key[LIMITER_KEY] = lim["key"]
         self.stages.append({
             "order": len(self.stages),
             "tag": tag,
             "history": history or ("residual_history_%s.csv" % tag),
             "restart_from": restart_from if restart_from is not None else (
                 self.stages[-1]["tag"] if self.stages else None),
-            "key": stage_key(cfg_text, bcond_text, self.run),
+            "key": key,
             "cfg_fnv": fnv1a64(cfg_text or ""),
             "chi_source": infer_wall_normal_chi(cfg_text)[1],
             "soft": _grab(cfg_text, SOFT_PATTERNS),
+            "limiter_ref": lim,
         })
 
     def write(self):
@@ -333,12 +466,17 @@ def _normalize(man, launches):
 def segments(man, launches=None):
     """hard キーが同じ連続区間に切る。戻り [[stage, ...], ...]。
     実効値が**推定** (inferred) の段と、確定 (launch/explicit/legacy) の段は、値が同じでも連結しない
-    (由来不明の推定値を既知と自動連結しない。plan convection-slau-wall-normal-chi-default §4.3、codex plan M1)。"""
+    (由来不明の推定値を既知と自動連結しない。plan convection-slau-wall-normal-chi-default §4.3、codex plan M1)。
+    リミッタの基準値が分からない段 (hard キー `limiter.ref` = unknown) は前後のどの段とも連結しない
+    (plan tooling-settle-convergence-and-monitor §4.8 の 3)。キーの無い旧い manifest は従来どおり。"""
     segs, cur = [], []
     for st in _normalize(man, launches):
         inf = st.get("chi_source") == "inferred"
         amb = st.get("chi_source") == AMBIGUOUS or (cur and cur[-1].get("chi_source") == AMBIGUOUS)
-        if cur and (amb or st["key"] != cur[-1]["key"] or inf != (cur[-1].get("chi_source") == "inferred")):
+        lim_unknown = st["key"].get(LIMITER_KEY) == LIMITER_UNKNOWN or (
+            cur and cur[-1]["key"].get(LIMITER_KEY) == LIMITER_UNKNOWN)
+        if cur and (amb or lim_unknown or st["key"] != cur[-1]["key"]
+                    or inf != (cur[-1].get("chi_source") == "inferred")):
             segs.append(cur); cur = []
         cur.append(st)
     if cur:
@@ -365,6 +503,10 @@ def main():
         print("  区間 %d: %s" % (i, tags))
         diff = {k: v for k, v in sg[0]["key"].items()}
         print("        hard: %s" % json.dumps(diff, ensure_ascii=False))
+        lims = [s.get("limiter_ref") or {} for s in sg]
+        if any(lims):
+            print("        limiter: %s" % "; ".join("%s=%s (%s)" % (s["tag"], (l.get("status") or "?"), l.get("reason") or l.get("file") or "")
+                                                   for s, l in zip(sg, lims)))
         softs = {s["tag"]: s["soft"] for s in sg}
         if len(set(json.dumps(v, sort_keys=True) for v in softs.values())) > 1:
             print("        soft (区間内で変化・連結可): %s" % json.dumps(softs, ensure_ascii=False))

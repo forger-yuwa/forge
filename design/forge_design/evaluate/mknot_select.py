@@ -75,10 +75,13 @@ _CAPTURE_KEEP: int | None = 2
 
 
 class MknotSelectionError(ValueError):
-    """選べない (成立点が無い・境目からの距離を満たす点が無い)。`table` に全評価点。"""
+    """選べない (成立点が無い・境目からの距離を満たす点が無い)。`table` に全評価点、`detail` に止まった段の記録
+    (規則 coarse_min_theta_v2: {"stage": "coarse_length" | "no_final_valley", "valleys": 谷ごとの確認の記録}; 長さ合わせの停止の判定
+    `v2_length_stall` が読む。無ければ {})。"""
 
-    def __init__(self, msg: str, table: list | None = None):
+    def __init__(self, msg: str, table: list | None = None, detail: dict | None = None):
         self.table = list(table or [])
+        self.detail = dict(detail or {})
         super().__init__(msg + ("\n" + format_table(self.table) if self.table else ""))
 
 
@@ -1018,6 +1021,42 @@ def _is_length_unconverged(row: dict) -> bool:
     return _LENGTH_UNCONVERGED in str(row.get("error") or "")
 
 
+def v2_length_stall(result: dict | None = None, error: "MknotSelectionError | None" = None) -> dict | None:
+    """選択の長さ合わせ (from_length) の停止を見つける (plan tooling-nozzle-card-local-mesh §5.1 #6d; plan tooling-nozzle-mknot-fast §4.1 の拡張)。
+    `select_coarse_min_theta` の戻り (result) か例外 (error) を受け、次のどちらかなら記録の dict、どちらでもなければ None を返す:
+      - 生産の網の行 (result の confirm_table、例外の表の role "confirm" の行) に、長さ合わせが許容に届かずに止まった行
+        (`_is_length_unconverged`) が 1 つでもある (選べた結果でも返す: その行は不成立として扱われ、谷を捨てて別の谷を選んでいる
+        かもしれない — 網・許容の違う谷を比べないため、選んだ値は使わない)。
+      - 粗い網の長さ合わせが全点で未収束の例外 (detail の stage "coarse_length")。
+    制約による本当の不成立 (粗い網に成立点が無い・候補が無い・中心が reasons で落ちた) は None (長さの停止ではない)。
+    戻り: {grid ("prod" | "coarse"), rows [{M_K, L_residual_rt, length_stop}]、best_abs_residual_rt (|x_F − L_total| の最小; 記録が無ければ
+    None)、valleys [{start, final, discard_reason, unconverged (その谷の確認で未収束だった M_K)}] (生産の網のとき)、selected (選べた値 or None)}。"""
+    if (result is None) == (error is None):
+        raise ValueError("v2_length_stall: result か error のどちらか 1 つを渡す")
+    if result is not None:
+        prod, valleys, selected = list(result.get("confirm_table") or []), result.get("valleys") or [], result.get("chosen")
+    else:
+        prod = [r for r in error.table if r.get("role") == "confirm"]
+        valleys, selected = (error.detail or {}).get("valleys") or [], None
+    bad = [r for r in prod if _is_length_unconverged(r)]
+    grid = "prod" if bad else None
+    if grid is None and error is not None and (error.detail or {}).get("stage") == "coarse_length":
+        bad = [r for r in error.table if r.get("role", "coarse") == "coarse" and _is_length_unconverged(r)]
+        grid = "coarse" if bad else None
+    if grid is None:
+        return None
+    res = [abs(float(r["L_residual_rt"])) for r in bad if r.get("L_residual_rt") is not None and np.isfinite(r["L_residual_rt"])]
+    bad_k = {_key(r["M_K"]) for r in bad}
+    vrec = []
+    for v in valleys if grid == "prod" else []:
+        pts = sorted({_key(m) for st in v.get("steps") or [] for m in (st.get("left"), st.get("center"), st.get("right")) if m is not None})
+        vrec.append({"start": v.get("start"), "final": v.get("final"), "discard_reason": v.get("discard_reason"),
+                     "unconverged": [m for m in pts if m in bad_k]})
+    return {"grid": grid, "rows": [{"M_K": float(r["M_K"]), "L_residual_rt": r.get("L_residual_rt"), "length_stop": r.get("length_stop")}
+                                   for r in sorted(bad, key=lambda r: r["M_K"])],
+            "best_abs_residual_rt": (min(res) if res else None), "valleys": vrec, "selected": selected}
+
+
 def v2_distance_steps(k: int, infeasible_k: list[int]) -> float:
     """推定の距離を格子の数で (最も近い粗い網の不成立の格子点までの |Δk| − 1)。不成立の格子点が無ければ inf。"""
     if not infeasible_k:
@@ -1167,7 +1206,8 @@ def select_coarse_min_theta(eval_coarse, eval_prod, M_A: float, M_d: float, *, w
         n_c = evc.n_eval
     ctab = sorted(crow, key=lambda r: r["M_K"])
     if all(_is_length_unconverged(r) for r in ctab):
-        raise MknotSelectionError(f"M_knot を選べない ({RULE_NAME_V2}): 粗い網の長さ合わせ (from_length) が全点で未収束", ctab)
+        raise MknotSelectionError(f"M_knot を選べない ({RULE_NAME_V2}): 粗い網の長さ合わせ (from_length) が全点で未収束", ctab,
+                                  detail={"stage": "coarse_length"})
     if not any(_feasible(r) for r in ctab):
         raise MknotSelectionError(f"M_knot を選べない ({RULE_NAME_V2}): 粗い網に成立点が無い (制約を満たす点が 0)", ctab)
     ana = v2_coarse_analysis(ctab)
@@ -1199,7 +1239,7 @@ def select_coarse_min_theta(eval_coarse, eval_prod, M_A: float, M_d: float, *, w
         raise MknotSelectionError(
             f"M_knot を選べない ({RULE_NAME_V2}): 生産の網で最終の代表が残る谷が無い ("
             + "; ".join(f"谷 {v['start']:.2f}: {v['discard_reason']}" for v in valleys) + ")",
-            ctab + [dict(r, role="confirm") for r in ptab])
+            ctab + [dict(r, role="confirm") for r in ptab], detail={"stage": "no_final_valley", "valleys": valleys})
     pk = v2_pick(finals, tie_deg=tie_deg)
     best = pk["chosen"]
     ck = v2_k(best["M_K"])

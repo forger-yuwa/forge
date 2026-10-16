@@ -414,8 +414,10 @@ def _main(tmp: Path) -> int:
         vals = np.array([float(v) for v in re.findall(r"<v>([^<]+)</v>", sx) if re.fullmatch(r"[-+0-9.eE]+", v)])
         want_v = recS["x_m"] + recS["Tw_x_K"] + recS["coords"] + list(recS["anchors_m"].values())
         miss = [v for v in want_v if not np.any(np.abs(vals - v) <= 1e-15 * max(1.0, abs(v)))] if vals.size else want_v
-        check(f"xlsx: シート {names} の最後に wall_temperature・元の表・実寸の表・区切りの点の値が載る (相対 1e-15)",
-              names[-1:] == ["wall_temperature"] and not miss
+        # 2026-10-15 に理想の壁と物理壁の比較のシート wall_compare (card plan #3u) が wall_temperature の後に足された
+        tail = [n for n in names if n not in ("shape", "conditions", "notes")]
+        check(f"xlsx: シート {names} の notes の後に wall_temperature (その後は wall_compare だけ可)・元の表・実寸の表・区切りの点の値が載る (相対 1e-15)",
+              tail[:1] == ["wall_temperature"] and set(tail[1:]) <= {"wall_compare"} and not miss
               and (xl.get("info") or {}).get("wall_temperature", {}).get("n_rows") == n_tab, (miss, xl.get("info")))
         notes_ok = any("wall_temperature" in str(t) for t in (px.get("wall_temperature_profile") or {}).get("notes", []))
         check("xlsx の notes に壁温分布の行 (シートと正本の所在)", notes_ok, px.get("wall_temperature_profile"))

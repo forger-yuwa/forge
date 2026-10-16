@@ -1,0 +1,200 @@
+step   183843 | 14.11 ms/step elapsed 2645.9 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.46e-06 (-1.5)
+step   183844 | 14.12 ms/step elapsed 2645.9 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.46e-06 (-1.5)
+step   183845 | 14.15 ms/step elapsed 2645.9 s eta 229 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.46e-06 (-1.5)
+step   183846 | 14.14 ms/step elapsed 2645.9 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.46e-06 (-1.5)
+step   183847 | 14.15 ms/step elapsed 2646.0 s eta 229 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183848 | 14.15 ms/step elapsed 2646.0 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183849 | 14.13 ms/step elapsed 2646.0 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183850 | 14.14 ms/step elapsed 2646.0 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183851 | 14.14 ms/step elapsed 2646.0 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183852 | 14.16 ms/step elapsed 2646.0 s eta 229 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183853 | 14.13 ms/step elapsed 2646.0 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183854 | 14.14 ms/step elapsed 2646.0 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183855 | 14.13 ms/step elapsed 2646.1 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183856 | 14.13 ms/step elapsed 2646.1 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183857 | 14.14 ms/step elapsed 2646.1 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183858 | 14.14 ms/step elapsed 2646.1 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183859 | 14.16 ms/step elapsed 2646.1 s eta 229 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183860 | 14.15 ms/step elapsed 2646.1 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183861 | 14.12 ms/step elapsed 2646.1 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183862 | 14.14 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183863 | 14.13 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183864 | 14.15 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183865 | 14.14 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183866 | 14.15 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183867 | 14.13 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183868 | 14.11 ms/step elapsed 2646.2 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183869 | 14.13 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183870 | 14.13 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183871 | 14.16 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183872 | 14.13 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183873 | 14.14 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183874 | 14.15 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183875 | 14.14 ms/step elapsed 2646.3 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183876 | 14.14 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183877 | 14.13 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183878 | 14.13 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183879 | 14.14 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.59e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183880 | 14.16 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183881 | 14.12 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183882 | 14.12 ms/step elapsed 2646.4 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183883 | 14.11 ms/step elapsed 2646.5 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183884 | 14.13 ms/step elapsed 2646.5 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183885 | 14.13 ms/step elapsed 2646.5 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183886 | 14.15 ms/step elapsed 2646.5 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183887 | 14.12 ms/step elapsed 2646.5 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183888 | 14.12 ms/step elapsed 2646.5 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183889 | 14.11 ms/step elapsed 2646.5 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183890 | 14.15 ms/step elapsed 2646.6 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183891 | 14.11 ms/step elapsed 2646.6 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183892 | 14.12 ms/step elapsed 2646.6 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183893 | 14.15 ms/step elapsed 2646.6 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183894 | 14.15 ms/step elapsed 2646.6 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183895 | 14.12 ms/step elapsed 2646.6 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183896 | 14.14 ms/step elapsed 2646.6 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183897 | 14.15 ms/step elapsed 2646.7 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183898 | 14.15 ms/step elapsed 2646.7 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183899 | 14.14 ms/step elapsed 2646.7 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183900 | 14.13 ms/step elapsed 2646.7 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.45e-06 (-1.5)
+step   183901 | 14.13 ms/step elapsed 2646.7 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183902 | 14.13 ms/step elapsed 2646.7 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183903 | 14.15 ms/step elapsed 2646.7 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183904 | 14.15 ms/step elapsed 2646.8 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183905 | 14.13 ms/step elapsed 2646.8 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183906 | 14.14 ms/step elapsed 2646.8 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183907 | 14.16 ms/step elapsed 2646.8 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183908 | 14.14 ms/step elapsed 2646.8 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183909 | 14.12 ms/step elapsed 2646.8 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183910 | 14.11 ms/step elapsed 2646.8 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183911 | 14.13 ms/step elapsed 2646.9 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183912 | 14.13 ms/step elapsed 2646.9 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183913 | 14.15 ms/step elapsed 2646.9 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183914 | 14.15 ms/step elapsed 2646.9 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183915 | 14.14 ms/step elapsed 2646.9 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183916 | 14.14 ms/step elapsed 2646.9 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183917 | 14.11 ms/step elapsed 2646.9 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183918 | 14.15 ms/step elapsed 2647.0 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183919 | 14.11 ms/step elapsed 2647.0 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183920 | 14.14 ms/step elapsed 2647.0 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183921 | 14.10 ms/step elapsed 2647.0 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183922 | 14.15 ms/step elapsed 2647.0 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183923 | 14.11 ms/step elapsed 2647.0 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183924 | 14.13 ms/step elapsed 2647.0 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183925 | 14.17 ms/step elapsed 2647.1 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183926 | 14.17 ms/step elapsed 2647.1 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183927 | 14.17 ms/step elapsed 2647.1 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183928 | 14.14 ms/step elapsed 2647.1 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183929 | 14.13 ms/step elapsed 2647.1 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183930 | 14.15 ms/step elapsed 2647.1 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183931 | 14.13 ms/step elapsed 2647.1 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183932 | 14.14 ms/step elapsed 2647.2 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183933 | 14.16 ms/step elapsed 2647.2 s eta 228 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183934 | 14.14 ms/step elapsed 2647.2 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183935 | 14.15 ms/step elapsed 2647.2 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183936 | 14.13 ms/step elapsed 2647.2 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183937 | 14.14 ms/step elapsed 2647.2 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183938 | 14.13 ms/step elapsed 2647.2 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183939 | 14.16 ms/step elapsed 2647.3 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183940 | 14.11 ms/step elapsed 2647.3 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183941 | 14.12 ms/step elapsed 2647.3 s eta 227 s | rms_ro 1.58e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183942 | 14.14 ms/step elapsed 2647.3 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183943 | 14.16 ms/step elapsed 2647.3 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183944 | 14.10 ms/step elapsed 2647.3 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183945 | 14.15 ms/step elapsed 2647.3 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183946 | 14.12 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183947 | 14.13 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183948 | 14.14 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183949 | 14.11 ms/step elapsed 2647.4 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183950 | 14.13 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183951 | 14.14 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183952 | 14.12 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183953 | 14.13 ms/step elapsed 2647.4 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183954 | 14.13 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183955 | 14.16 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183956 | 14.13 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183957 | 14.14 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183958 | 14.13 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183959 | 14.16 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183960 | 14.14 ms/step elapsed 2647.5 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183961 | 14.15 ms/step elapsed 2647.6 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183962 | 14.15 ms/step elapsed 2647.6 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183963 | 14.12 ms/step elapsed 2647.6 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183964 | 14.12 ms/step elapsed 2647.6 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183965 | 14.13 ms/step elapsed 2647.6 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183966 | 14.13 ms/step elapsed 2647.6 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183967 | 14.15 ms/step elapsed 2647.6 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.44e-06 (-1.5)
+step   183968 | 14.18 ms/step elapsed 2647.7 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183969 | 14.18 ms/step elapsed 2647.7 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183970 | 14.15 ms/step elapsed 2647.7 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183971 | 14.15 ms/step elapsed 2647.7 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183972 | 14.14 ms/step elapsed 2647.7 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183973 | 14.12 ms/step elapsed 2647.7 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183974 | 14.12 ms/step elapsed 2647.7 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183975 | 14.15 ms/step elapsed 2647.8 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183976 | 14.14 ms/step elapsed 2647.8 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183977 | 14.12 ms/step elapsed 2647.8 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183978 | 14.15 ms/step elapsed 2647.8 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183979 | 14.14 ms/step elapsed 2647.8 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183980 | 14.12 ms/step elapsed 2647.8 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183981 | 14.14 ms/step elapsed 2647.8 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183982 | 14.16 ms/step elapsed 2647.9 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183983 | 14.15 ms/step elapsed 2647.9 s eta 227 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183984 | 14.13 ms/step elapsed 2647.9 s eta 226 s | rms_ro 1.57e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183985 | 14.14 ms/step elapsed 2647.9 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183986 | 14.15 ms/step elapsed 2647.9 s eta 227 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183987 | 14.15 ms/step elapsed 2647.9 s eta 227 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183988 | 14.13 ms/step elapsed 2647.9 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183989 | 14.16 ms/step elapsed 2648.0 s eta 227 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183990 | 14.16 ms/step elapsed 2648.0 s eta 227 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183991 | 14.12 ms/step elapsed 2648.0 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183992 | 14.15 ms/step elapsed 2648.0 s eta 227 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183993 | 14.14 ms/step elapsed 2648.0 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183994 | 14.13 ms/step elapsed 2648.0 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183995 | 14.12 ms/step elapsed 2648.0 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183996 | 14.14 ms/step elapsed 2648.1 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183997 | 14.15 ms/step elapsed 2648.1 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183998 | 14.14 ms/step elapsed 2648.1 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+step   183999 | 14.12 ms/step elapsed 2648.1 s eta 226 s | rms_ro 1.56e-06 (-1.5) worst rms_roY0 1.43e-06 (-1.5)
+HDF5-DIAG: Error detected in HDF5 (1.10.10) thread 1:
+  #000: ../../../src/H5Dio.c line 316 in H5Dwrite(): can't write data
+    major: Dataset
+    minor: Write failed
+  #001: ../../../src/H5Dio.c line 821 in H5D__write(): can't write data
+    major: Dataset
+    minor: Write failed
+  #002: ../../../src/H5Dcontig.c line 644 in H5D__contig_write(): contiguous write failed
+    major: Dataset
+    minor: Write failed
+  #003: ../../../src/H5Dselect.c line 493 in H5D__select_write(): write error
+    major: Dataspace
+    minor: Write failed
+  #004: ../../../src/H5Dselect.c line 226 in H5D__select_io(): write error
+    major: Dataspace
+    minor: Write failed
+  #005: ../../../src/H5Dcontig.c line 1271 in H5D__contig_writevv(): can't perform vectorized sieve buffer write
+    major: Dataset
+    minor: Can't operate on object
+  #006: ../../../src/H5VM.c line 1409 in H5VM_opvv(): can't perform operation
+    major: Internal error (too specific to document in detail)
+    minor: Can't operate on object
+  #007: ../../../src/H5Dcontig.c line 1015 in H5D__contig_writevv_sieve_cb(): block write failed
+    major: Dataset
+    minor: Write failed
+  #008: ../../../src/H5Fio.c line 149 in H5F_block_write(): write through page buffer failed
+    major: Low-level I/O
+    minor: Write failed
+  #009: ../../../src/H5PB.c line 1020 in H5PB_write(): write through metadata accumulator failed
+    major: Page Buffering
+    minor: Write failed
+  #010: ../../../src/H5Faccum.c line 830 in H5F__accum_write(): file write failed
+    major: Low-level I/O
+    minor: Write failed
+  #011: ../../../src/H5FDint.c line 239 in H5FD_write(): driver write request failed
+    major: Virtual File Layer
+    minor: Write failed
+  #012: ../../../src/H5FDsec2.c line 863 in H5FD__sec2_write(): file write failed: time = Wed Oct 14 22:46:53 2026
+, filename = 'res_184000.h5', file descriptor = 39, errno = 28, error message = 'No space left on device', buf = 0x5f1cc844b86c, total write size = 1150436, bytes this sub-write = 1150436, bytes actually written = 18446744073709551615, offset = 0
+    major: Low-level I/O
+    minor: Write failed
+terminate called after throwing an instance of 'HighFive::DataSetException'
+  what():  Unable to write the dataset (Low-level I/O) Write failed

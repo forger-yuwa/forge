@@ -20,6 +20,7 @@
 | [`inlet-profile.md`](inlet-profile.md) | 入口分布 (全温 / 全圧 / 組成 H2O / k・ω / 超音速入口の ρ,U,Ps) の与え方: `inletProfile` CSV の生成 (`gen_inlet_profile.py`)・起動ログ確認・結果照合 |
 | [`nozzle-design-outputs.md`](nozzle-design-outputs.md) | **ノズル設計の標準出力と PowerPoint 報告**: コンタ・軸/出口/壁の線グラフ・評価量 (Mach 波・オーバーシュート・出口 M) と条件 (境界条件・解析領域・解析設定) を `nozzle_report.py` で自動生成し pptx にまとめる |
 | [`nozzle-design-workflow.md`](nozzle-design-workflow.md) | **軸対称風洞ノズル (axismach) の設計・計算手順**: 新規の非粘性 (MOC) 設計 / 軸長パラスタ → Euler → NS (δ* ループ・C2) → 形状調整 → 凝縮 / 既存形状の Euler・NS。Claude は skill `nozzle-design` |
+| [`design-chain-quickstart.md`](design-chain-quickstart.md) | **他の PC で回す手順書** (コマンドをそのまま打てる形): case/71 の M5.5 燃焼ガス風洞ノズルの入口条件と寸法を変えたノズルを、素の clone → ビルド → 要求カード → `wt_card` → 格子 → Euler → NS (CONTUR の式の壁) → `contur_calibrate` → 新しい壁で Euler・NS → `wt_qualify` → 成果物まで、その PC の GPU で回す |
 
 ## 開発環境
 

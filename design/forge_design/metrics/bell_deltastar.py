@@ -50,7 +50,8 @@ def extract_bell(ns_run, euler_run, *, ns_res: str | None = None, yb_sens_factor
                                             yb_sens_factors=(None if yb_sens_factors is None else tuple(yb_sens_factors)), **kw)
     if remap_constant_x:
         # 流量の帳簿も一定 x の断面で (列のままは③ L100 で 3 % 小さい — massflow_ratio の docstring)。列のままの値は記録に残す
-        out["massflow_column"] = out["massflow"]
+        # (2026-10-15 から抽出側の帳簿が抽出と同じ断面になったので、列のままの値はここで明示して測る)
+        out["massflow_column"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res, remap_constant_x=False)
         out["massflow"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res, remap_constant_x=True)
     out["uncertainty"] = (extraction_uncertainty(out, accept_rel=accept_rel) if yb_sens_factors is not None
                           else {"computed": False, "reason": "yb_sens_factors=None (時系列などで帯位置の感度を省いた)"})

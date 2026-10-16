@@ -32,6 +32,7 @@ VERDICT PASS / FAIL, exit 0/1。
 import argparse
 import glob
 import os
+import re
 import sys
 
 DEFAULT_Q = ['ro', 'roUx', 'roUy', 'roUz', 'roe', 'P', 'T']
@@ -47,11 +48,16 @@ def last_step(run):
 
 
 def boundary_files(run, step):
-    """{接頭辞: パス} — 境界出力 res_<名前>_<physID>_<step>.h5 を拾う (res_<step>.h5 は除く)。"""
+    """{接頭辞: パス} — 境界出力 res_<名前>_<physID>_<step>.h5 を拾う (res_<step>.h5 は除く)。
+
+    接頭辞が `<名前>_<physID>` (physID は整数) の形のものだけを境界とみなす。節点の出力 `res_nodes_<step>.h5`
+    (output.nodeProbeFile) や detectNaN のダンプ `res_nan_<step>.h5` は physID が無いので拾わない
+    (以前は `nodes` という境界として比べていた; plan tooling-settle-convergence-and-monitor §5.1 #1b)。
+    """
     out = {}
     for f in sorted(glob.glob(os.path.join(run, f'res_*_{step}.h5'))):
         stem = os.path.basename(f)[4:-(len(str(step)) + 4)].rstrip('_')
-        if stem:
+        if stem and re.fullmatch(r'.+_\d+', stem):
             out[stem] = f
     return out
 

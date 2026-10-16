@@ -1,0 +1,15 @@
+  [segment] 判定区間 = main  (551997 行) -> /home/ubuntu/m55_diag_0002/seg_with_main/run_0002_ns/residual_history_segment.csv
+
+=== /home/ubuntu/m55_diag_0002/seg_with_main/run_0002_ns  [last step 183998]  -> NOT CONVERGED (still converging — run more steps) ===
+  rms_ro      : init=5.46e-05 peak=6.19e-05 fin=1.56e-06 drop= 1.8dec falling  <-- still converging
+  rms_roUx    : init=7.49e-02 peak=8.80e-02 fin=6.63e-04 drop= 2.4dec falling  <-- still converging
+  rms_roUy    : init=1.89e-02 peak=2.36e-02 fin=2.98e-04 drop= 2.4dec falling  <-- still converging
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=6.68e+01 peak=7.58e+01 fin=9.82e-01 drop= 2.2dec falling  <-- still converging
+  rms_roK     : init=3.29e-01 peak=5.93e-01 fin=6.62e-04 drop= 2.9dec falling  <-- still converging
+  rms_roOmega : init=1.87e+05 fin=8.16e+02 drop= 2.7dec falling  <-- still converging
+  rms_roY0    : init=4.99e-05 peak=5.66e-05 fin=1.43e-06 drop= 1.8dec falling  <-- still converging
+  rms_roY1    : init=4.68e-06 peak=5.31e-06 fin=1.34e-07 drop= 1.8dec falling  <-- still converging
+
+OVERALL: CHECK FAILURES ABOVE
+CHECK_CONVERGENCE_EXIT: 1

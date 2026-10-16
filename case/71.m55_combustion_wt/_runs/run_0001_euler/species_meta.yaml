@@ -1,0 +1,62 @@
+mode: lumped
+species:
+- MIXDRY
+- H2O
+keep:
+- H2O
+condensing_species: H2O
+condensing_index: 1
+tracer:
+  enabled: false
+  name: null
+  definition: null
+exhaust_fraction: null
+lumps:
+  MIXDRY:
+    from: composition
+    stream: null
+    mole_fractions:
+      CO2: 0.12550903682310086
+      O2: 0.022645262404230745
+      N2: 0.8518457007726683
+    mass_fractions:
+      CO2: 0.1834390724130387
+      O2: 0.024064756070881644
+      N2: 0.7924961715160797
+expansion:
+  MIXDRY:
+    CO2: 0.1834390724130387
+    O2: 0.024064756070881644
+    N2: 0.7924961715160797
+  H2O:
+    H2O: 1.0
+streams:
+  inflow:
+    X:
+      CO2: 0.10849036003384116
+      H2O: 0.1355972224792604
+      O2: 0.019574627719903037
+      N2: 0.7363377897669954
+    Y:
+      CO2: 0.1677
+      H2O: 0.0858
+      O2: 0.022
+      N2: 0.7245
+    Y_transport:
+    - 0.9142
+    - 0.0858
+    sum_input: 1.0
+atoms:
+  MIXDRY:
+    C: 0.12550903682310086
+    O: 0.29630859845466323
+    N: 1.7036914015453366
+  H2O:
+    H: 2
+    O: 1
+MW:
+  MIXDRY: 0.030111305532711824
+  H2O: 0.01801528
+source:
+  MIXDRY: lumped from ['CO2', 'O2', 'N2'] (mass-fraction linear mixing of NASA-9)
+  H2O: CEA thermo.inp (McBride-Gordon 2002), transcribed in forge_design.gas.semiperfect

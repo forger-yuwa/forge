@@ -1,0 +1,46 @@
+# case/71 の 3 係数の壁用の写し (2026-10-15、plan tooling-nozzle-card-local-mesh §4.3 の末尾・§5.1 #3t): card_m55.yaml の要求はそのまま、overrides に deltastar_initializer の 3 係数だけを足した。
+# 要求カード (forge.wt_card/v1): M5.5 の燃焼ガスの風洞ノズル (2026-10-14 ユーザ依頼「mach 5.5、入口配管長0.5m、収縮部0.5m、
+# スロート曲率5mm、スロート直径Φ200、スロート～出口8m のノズルを作って、凝縮計算はせずとも、NS計算までやりきる」)。
+# インタビューの結果 (2026-10-14、AskUserQuestion と対話):
+#   - スロート曲率: 「500 mm (R = 5) かも、自信なし」→ 曲率半径 0.500 m を**暫定**で採用 (5 mm は R = 0.05 で生成器が拒否する)。
+#   - スロート直径 Φ200: **物理スロート** (境界層込みの実際の穴)。r_t は CFD 前の δ で解く。
+#   - 入口の配管の半径: 300 mm (提案値、ユーザ了承; r_t の 3 倍、入口のマッハ数 約 0.065)。
+#   - ガス: 燃焼ガス、組成は case/45 と同じ (イソブタン・当量比 0.9; 質量分率、ユーザ了承)。
+#   - 全圧 3.5 MPa・全温 1,250 K (ユーザ指示「1250k、3.5mpaくらい」)。
+#   - 壁: 等温 350 K (ユーザ指示)。
+#   - 許容差: 「よくわからん」→ 雛形の仮の値。
+#   - 凝縮は計算しない (出口の静温 約 250 K で H2O の凝縮は起こりうる; ユーザ指示で dry の NS まで)。
+# 長さ・径は実寸 [m]、圧力 [Pa]、温度 [K]。
+format: forge.wt_card/v1
+name: m55_combustion_wt
+gas: {species: {CO2: 0.1677, H2O: 0.0858, O2: 0.0220, N2: 0.7245}}   # case/45 と同じ (質量分率、和 1.0000)
+conditions: {Pt: 3.5e6, Tt: 1250.0}
+M_exit: 5.5                              # = spec.M_design
+throat: {diameter_physical_m: 0.200, curvature_radius_m: 0.500}   # 物理スロート径; 曲率半径 0.5 m (R ≈ 5、暫定)
+inlet: {radius_m: 0.300, pipe_length_m: 0.50, contraction_length_m: 0.50}
+divergent_length_m: 8.0                  # 設計スロート (x = 0) → 物理出口
+wall: {thermal: isothermal, Tw: 350.0}
+p_ambient: design                        # 設計出口静圧 (等エントロピー、semiperfect)
+tolerances: {length_m: 1.0e-3, diameter_m: 2.0e-5}   # 雛形の仮の値 (ユーザ「よくわからん」)
+# 雛形 (2026-10-15、plan tooling-nozzle-card-local-mesh §5.1 #3a の判断 (4)・#3b): axismach_explore_v1 → axismach_final_v1。探索の雛形の
+# 物理壁 (interp 壁の区分表現、壁ファイルを書かない) では NS の本段の停止規則が使えない (θ_r の断面を壁ファイルの設計壁の出口
+# physical_wall.domain[1] の比で決める; runner_axismach.prepare_ns)。最終の雛形は joint 壁・physical_wall_repr: single_bspline・
+# pw_upstream: poly で壁ファイルを書き、Euler 用の <stem>_euler.yaml (物理壁の 2 行を除いた写し) も一緒に書かれる。
+recipe: axismach_final_v1
+# 格子 (2026-10-15): 一度 ni 10,200・上限 100 万点を明示したが、ユーザが「メッシュ多すぎ、古いやり方で作ってない？」と取り下げた。
+# 今の見積もりは第一層を 2 値 (スロート / それ以外) で持ち、最も厳しい場所の薄い第一層を拡大部全体に掛けるので AR ≤ 5000 に ni ≈ 10,177 が要る。
+# 場所ごとの第一層と流れ方向の密度の表で作る見積もりに直してから決める (README「経緯」)。
+# 2026-10-15 (plan tooling-nozzle-card-local-mesh §5.1 #3a): 生成器の格子の見積もり (第一層 2 値) は ni ≈ 10,177・約 99 万点で節点数の上限
+# (30 万) に止まるので、問題 YAML を作るためだけに mesh.ni を 3000 (291,000 点、Euler も同じ ni) に固定する。生成した YAML の mesh・mesh_euler は
+# 手組みの格子 (場所ごとの第一層の表・流れ方向の密度の表、ユーザ決定「a」) に置き換える (problem_m55_ns.yaml)。M_knot は自動 (新しい規則) のまま。
+# #3b (最終の雛形) からは problem_m55_final.yaml (NS)・problem_m55_final_euler.yaml (Euler) (生成器の出力は problem_m55_final_card*.yaml)。
+overrides:
+  mesh.ni: 3000                          # 生成のためだけ (上の理由)。実際の格子は problem_m55_final.yaml の mesh 節 (#3a は problem_m55_ns.yaml)
+  # 3 係数の境界層の厚み (2026-10-15 ユーザ決定「bがよさそう」、plan tooling-nozzle-card-local-mesh §4.3 の末尾・§5.1 #3t):
+  # δ = (c + c₁·x_m)·δ_CONTUR + δ₀ (x_m は設計スロートからの実寸 [m]、δ₀ は実寸 [m] で全長一定)。2 係数の壁の NS (run_0008_ns_b0 res_90000、
+  # r_t 0.100243850935207 m) の δ_E (平滑化後) にスロート (x = 0) と出口で等式、c₁ は x ≥ 0 の Δx 重み (台形) の最小二乗 (codex diagnose 2026-10-15
+  # m55-three-coef の採用; この NS に対し最大 0.612 mm @ x 1.07 m、x ≥ 3 m は 0.198 mm)
+  deltastar_initializer.model: contur
+  deltastar_initializer.delta_scale: 0.6779482479245829
+  deltastar_initializer.delta_scale_slope_per_m: 0.021036335310539667
+  deltastar_initializer.delta_offset_m: -3.057205936466481e-04

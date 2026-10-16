@@ -745,12 +745,46 @@ def _cut_wall_at_exit(wall: np.ndarray, x_F: float) -> tuple:
     return cut, {"x_F_appended": append, "x_F_minus_last_node_rt": gap}
 
 
+def _terminal_bracket(ax: np.ndarray, x_E: float) -> list:
+    """降順の軸の節点 `ax` (下流→上流) で x_E を挟む節点と重み。
+    節点に乗れば `[(m, 1.0)]`、挟めば `[(m_hi, w), (m_lo, 1 − w)]` (m_hi が下流側、w = (x_E − x_lo)/(x_hi − x_lo))。
+    範囲の外・非有限・降順でない網は例外。"""
+    if not np.isfinite(x_E):
+        raise ValueError(f"終端 C⁺: x_E が有限でない ({x_E})")
+    if len(ax) < 2 or not np.all(np.diff(ax) < 0.0):
+        raise ValueError("終端 C⁺: 軸の節点が狭義の降順でない")
+    if not (ax[-1] <= x_E <= ax[0]):
+        raise ValueError(f"終端 C⁺: x_E {x_E:.9g} が軸の節点の範囲 [{ax[-1]:.9g}, {ax[0]:.9g}] の外")
+    hit = np.nonzero(ax == x_E)[0]
+    if len(hit):
+        return [(int(hit[0]), 1.0)]
+    m_hi = int(np.nonzero(ax > x_E)[0][-1])
+    m_lo = m_hi + 1
+    w = (x_E - ax[m_lo]) / (ax[m_hi] - ax[m_lo])
+    return [(m_hi, float(w)), (m_lo, float(1.0 - w))]
+
+
+def _cplus_wall_cross(lev: np.ndarray, wall: np.ndarray, m: int) -> float:
+    """軸の節点 m から出る網の C⁺ と壁の交点の x (どちらも網由来の折れ線)。"""
+    term = cplus_lines(lev, m)
+    if len(term) < 3:
+        raise RuntimeError("cplus: 終端 C⁺ が短すぎる")
+    rw_on_term = np.interp(term[:, 0], wall[:, 0], wall[:, 1],
+                           left=np.nan, right=np.nan)
+    d = term[:, 1] - rw_on_term
+    j = int(np.argmax(d >= 0.0)) if np.any(d >= 0.0) else -1
+    if j <= 0:
+        raise RuntimeError("終端特性線が壁に到達しない (軸 target の延長不足)")
+    s = -d[j - 1] / max(d[j] - d[j - 1], 1e-30)
+    return float(term[j - 1, 0] + s * (term[j, 0] - term[j - 1, 0]))
+
+
 def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
                   exit_mode, x_E, M_d, start_line, axis_thr=None) -> dict:
     r"""`wall_mode='cplus'` の設計本体 — **補間構造を一切作らない**経路。
 
     壁は各 C⁺ 線上の流束閉包 (`cplus_flux_wall`)、物理出口 $F$ は $E=(x_E,0)$ を
-    起点とする**網の C⁺ 線**と壁の交点。どちらも網の点だけで決まるので Delaunay も
+    挟む 2 節点から出る**網の C⁺ 線**と壁の交点を $x_E$ で線形補間した点 (`_terminal_bracket`)。どちらも網の点だけで決まるので Delaunay も
     流線 ODE も不要 (設計コストの 82% を占めていた三角形分割が丸ごと消える)。
 
     診断は `mdot_ratio_moc` を返さない — 本閉包では構成的に 1 になる**循環指標**に
@@ -770,19 +804,21 @@ def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
     if exit_mode == "characteristic":
         if x_E is None or M_d is None:
             raise ValueError("exit_mode='characteristic' には x_E と M_d が必要")
-        m_E = int(np.argmin(np.abs(np.asarray(ax) - float(x_E))))
-        term = cplus_lines(lev, m_E)
-        if len(term) < 3:
-            raise RuntimeError("cplus: 終端 C⁺ が短すぎる")
-        # 終端 C⁺ と壁の交点 (どちらも網由来の折れ線)
-        rw_on_term = np.interp(term[:, 0], wall[:, 0], wall[:, 1],
-                               left=np.nan, right=np.nan)
-        d = term[:, 1] - rw_on_term
-        j = int(np.argmax(d >= 0.0)) if np.any(d >= 0.0) else -1
-        if j <= 0:
-            raise RuntimeError("終端特性線が壁に到達しない (軸 target の延長不足)")
-        s = -d[j - 1] / max(d[j] - d[j - 1], 1e-30)
-        x_F = float(term[j - 1, 0] + s * (term[j, 0] - term[j - 1, 0]))
+        axv = np.asarray(ax, dtype=float)
+        m_E = int(np.argmin(np.abs(axv - float(x_E))))
+        # 終端 C⁺ は E を挟む 2 節点の網の C⁺ と壁の交点を x_E で線形補間する (plan
+        # tooling-nozzle-card-local-mesh §4.5)。最寄りの 1 本だと x_F(L_c) が網の間隔 1 つの段ののこぎり歯になり、
+        # from_length が許容に届かない (forge-7d の掃引)。E が節点に乗るときはその 1 本の値
+        br = _terminal_bracket(axv, float(x_E))
+        if len(br) == 1:
+            x_F = _cplus_wall_cross(lev, wall, br[0][0])
+            exit_info.update({"x_E_bracket": [br[0][0]], "x_E_weight": 1.0, "x_F_nodes": [x_F]})
+        else:
+            (m_hi, w), (m_lo, _) = br
+            xF_hi = _cplus_wall_cross(lev, wall, m_hi)
+            xF_lo = _cplus_wall_cross(lev, wall, m_lo)
+            x_F = float(xF_lo + w * (xF_hi - xF_lo))
+            exit_info.update({"x_E_bracket": [m_hi, m_lo], "x_E_weight": float(w), "x_F_nodes": [xF_hi, xF_lo]})
         exit_info.update({"x_F": x_F,
                           "r_F": float(np.interp(x_F, wall[:, 0], wall[:, 1])),
                           "x_E_index": m_E, "n_frozen": 0})

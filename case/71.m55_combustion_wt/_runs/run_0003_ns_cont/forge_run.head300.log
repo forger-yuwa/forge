@@ -1,0 +1,300 @@
+Read Solver Config 
+'meshFileName' in 'mesh': nozzle.h5
+'valueFileName' in 'mesh': nozzle.h5
+[config] mesh.scalarGradient 省略 → 既定 lsq (2026-09-27 から。それ以前に既定 gg で始めた run を途中から再開しないこと。旧挙動は mesh.scalarGradient: gg を明記)
+'scalarGradient' effective: lsq (default)
+'solver': SLAU
+'gpu': 1
+'unsteady' in 'time': 0
+'dualTime' in 'time': 0
+'nStepOuter' in 'time.last': 200000
+'control' in 'time.deltaT': 1
+'dt' in 'time.deltaT': 1e-08
+'cfl' in 'time.deltaT': 1
+'cfl_pseudo' in 'time.deltaT': 1
+'blockDPLUR' in 'time.deltaT': 1
+'passiveScalarScheme' in 'time.deltaT': 1 (passiveImplicitRelax=1, speciesImplicitRelax=1, scalarCflMax=-1, passiveImplicitCoupling=0, passiveFct=1 [prelimit 0, sweeps 100, tol 1e-06])
+'implicitSolvePrecision' in 'time.deltaT': 1
+'detectNaN' in 'time.deltaT': 1
+'lowMachPrecond' in 'time.deltaT': 0
+'dt_max' in 'time.deltaT': 0.001
+'dt_min' in 'time.deltaT': 1e-09
+'outStepInterval' in 'time': 2000
+'outStepStart' in 'time': 0
+'timeIntegration' in 'time': 11
+'nStepInner' in 'time': 5
+'output': level=1 extraFields=0 interfaceDiag=0
+'convMethod' in 'space': 1
+'limiter' in 'space': 2
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)
+'model' in 'turbulence': sst
+'model' in 'turbulence': sst
+'scalarDiffusion' in 'turbulence': 1
+'dilatationCorrection' in 'turbulence': 2
+'katoLaunder' in 'turbulence': 1
+'sst options' in 'turbulence': nodeWallKPin=1 omegaProdFromPk=1 sigmaBlend=1 isotropicStress=0 energyKSource=0 energyIncludesK=0
+'wallTreatmentSST' in 'turbulence': 0
+'turbulentPrandtl' in 'turbulence': 0.9
+[config] node scheme: values at nodes, edge-midpoint reconstruction, LSQ gradient, axis u_r Dirichlet triple
+'thermalMethod' in 'physProp': 2
+'viscMethod' in 'physProp': 2
+'visc' in 'physProp': 1.8e-05
+'thermCond' in 'physProp': 0.0257
+'prandtlLam' in 'physProp': 0.72
+'cp' in 'physProp': 1296.35
+'gamma' in 'physProp': 1.29078
+'thermoFloat' in 'physProp': 0 (double Newton)
+'initial': uniform_p101325_u10
+Mesh Format: hdf5
+Mesh File Name: nozzle.h5
+Solver: SLAU
+[species] table (physProp.species order; MW [kg/mol]; source builtin|file)
+[species]   built-in data: forge_species_v1.yaml (embedded, sha256 d879f04dab3ef996)
+[species]    0  MIXDRY    MW=0.03011130553  lump
+[species]    1  H2O       MW=0.01801528  builtin
+[species]   LJ sets searched (physProp.ljSource, default): [gri30, svehla1962]
+[species]     LJ MIXDRY.CO2       gri30         (stockmayer) sigma=3.7629999999999999 A eps/kB=244 K
+[species]     LJ MIXDRY.O2        gri30         (stockmayer) sigma=3.4580000000000002 A eps/kB=107.40000000000001 K
+[species]     LJ MIXDRY.N2        gri30         (stockmayer) sigma=3.621 A eps/kB=97.530000000000001 K
+[species]     LJ H2O              gri30         (stockmayer) sigma=2.605 A eps/kB=572.39999999999998 K
+[species]   lump MIXDRY (basis mole; synthesized at startup: nasa9 and MW mole-fraction weighted (equal breakpoints only); LJ mass-fraction mean (provisional, plan #7))
+[species]     CO2       input=0.12550903682310086  x=0.12550903682310088  MW=0.0440095  builtin
+[species]     O2        input=0.022645262404230745  x=0.022645262404230749  MW=0.0319988  builtin
+[species]     N2        input=0.8518457007726683  x=0.85184570077266841  MW=0.0280134  builtin
+[species]     MW=0.030111305532711827 kg/mol, T breakpoints 200/1000/6000/20000 K
+[species]     LJ sigma=3.6431257930430982 A eps/kB=124.63584007875738 K (PROVISIONAL: mass-fraction mean of constituents, as the design-side generator; to be replaced by constituent expansion / Blanc diffusion in plan #7)
+[species]     T=298.15 K: cp=1000.799786 J/(kg K), h_abs=-1640207.183 J/kg
+[species]     T=1000 K: cp=1177.573716 J/(kg K), h_abs=-876752.9241 J/kg
+[species]     T=2000 K: cp=1297.482546 J/(kg K), h_abs=373516.2253 J/kg
+[species]   transport (physProp.transport; forge_transport_v1, data forge_transport_v1.yaml sha256 69c40583de0c93b8, trans.inp sha256 379c514a7f763837)
+[species]     mixing: cea_frozen_v1 (cea2.f TRANP: phi_ij=2 M_j eta_i/((M_i+M_j) eta_ij), psi_ij=phi_ij(1+2.41(M_i-M_j)(M_i-0.142M_j)/(M_i+M_j)^2), phi_ii=psi_ii=1)
+[species]      0  CO2       cea  (trans.inp CO2 (BOUSHEHRI ET AL (1987)  SVEHLA (1994)))  mu(300K)=1.50146e-05 Pa s, lambda(300K)=0.0166136 W/(m K), mu(1000K)=4.13306e-05, lambda(1000K)=0.0679686
+[species]      1  O2        cea  (trans.inp O2 (BOUSHEHRI ET AL (1987)  SVEHLA (1994)))  mu(300K)=2.0743e-05 Pa s, lambda(300K)=0.0265964 W/(m K), mu(1000K)=4.90868e-05, lambda(1000K)=0.0704009
+[species]      2  N2        cea  (trans.inp N2 (BOUSHEHRI ET AL (1987)  SVEHLA (1994)))  mu(300K)=1.79059e-05 Pa s, lambda(300K)=0.0261505 W/(m K), mu(1000K)=4.1624e-05, lambda(1000K)=0.0647593
+[species]      3  H2O       custom:h2o_iapws_cea_v1  (IAPWS 2008/2011 dilute gas below 500 K + trans.inp H2O (SENGERS & WATSON (1986)  SVEHLA (1994)) above 700 K)  mu(300K)=9.76841e-06 Pa s, lambda(300K)=0.0185629 W/(m K), mu(1000K)=3.76123e-05, lambda(1000K)=0.09724
+[species]     eta_ij CO2-O2: trans.inp CO2/O2 (SVEHLA (1994))
+[species]     eta_ij CO2-N2: trans.inp CO2/N2 (SVEHLA (1994))
+[species]     eta_ij CO2-H2O: trans.inp CO2/H2O (SVEHLA (1994))
+[species]     eta_ij O2-N2: trans.inp N2/O2 (SVEHLA (1994))
+[species]     eta_ij O2-H2O: trans.inp H2O/O2 (SVEHLA (1994))
+[species]     eta_ij N2-H2O: trans.inp H2O/N2 (SVEHLA (1994))
+[species]     NOTE: CO2 (cea): data 200-10000 K; outside, the nearest interval is extrapolated (as CEA, cea2.f TRANIN)
+[species]     NOTE: O2 (cea): data 200-15000 K; outside, the nearest interval is extrapolated (as CEA, cea2.f TRANIN)
+[species]     NOTE: N2 (cea): data 200-15000 K; outside, the nearest interval is extrapolated (as CEA, cea2.f TRANIN)
+[species]     NOTE: H2O (custom:h2o_iapws_cea_v1): IAPWS dilute-gas formulas are used within their formal range (253.15-1173.15 K) up to 500 K; below 253.15 K (outside their formal range) a power law matched to the IAPWS log-slope at 253.15 K (C1; the formulas themselves are non-monotonic there)
+[species]   tracer: none
+Init Thermo DB 
+[thermo_d] enthalpy datum offset applied: h_s(Tref=298.15K)=0 for all species
+[thermo_d] transport (physProp.transport) uploaded: 4 real species, 6 pairs, expand 2x4 (mole basis)
+[thermo_d] transport tables disabled (FORGE_TRANSPORT_TABLE=0): double evaluation
+[thermo_d] initialized 2 species: MIXDRY H2O
+  [0] MW=0.0301113 kg/mol, R=276.124 J/kgK, cp(300K)=1001.18 J/kgK, cp(1500K)=1256.47 J/kgK, h(300K)=1851.83 J/kg
+  [1] MW=0.0180153 kg/mol, R=461.523 J/kgK, cp(300K)=1864.85 J/kgK, cp(1500K)=2626.56 J/kgK, h(300K)=3449.54 J/kg
+Read Mesh 
+Number of Cells: 441600
+Number of Planes: 888092
+Number of Normal Planes: 878308
+Number of Boundary Planes: 9784
+Number of Boundary Conditions: 4
+Number of Ghost Cells: 9784
+Number of All   Cells: 451384
+[mesh] nodeValueAtNode: centCoords <- node coords for 441600 CVs (max centroid shift 0.00594662), dual-centroid r kept in rEff
+in mesh.cpp  physID=1
+in mesh.cpp  bcondKind=inlet_Pressure
+               ip min=878308, ip max=878399
+in mesh.cpp  physID=2
+in mesh.cpp  bcondKind=outlet_statPress
+               ip min=878400, ip max=878491
+in mesh.cpp  physID=3
+in mesh.cpp  bcondKind=wall_isothermal
+               ip min=878492, ip max=883291
+in mesh.cpp  physID=4
+in mesh.cpp  bcondKind=axis
+               ip min=883292, ip max=888091
+readMesh: loaded /VIZMESH (node-centered viz, nVizCells=436709)
+Init Matrix (but not used now) 
+Read Boundary Conditions 
+bname = inlet
+physID=1
+kind=inlet_Pressure
+outputHDF=0
+bname = outlet
+physID=2
+kind=outlet_statPress
+outputHDF=1
+bname = wall
+physID=3
+kind=wall_isothermal
+outputHDF=1
+bname = axis
+physID=4
+kind=axis
+outputHDF=0
+bc.physID=1
+bcf.kind=inlet_Pressure
+bc.physID=2
+bcf.kind=outlet_statPress
+bc.physID=3
+bcf.kind=wall_isothermal
+bc.physID=4
+bcf.kind=axis
+[species] inlet 'inlet' (physID 1, inlet_Pressure) composition:
+[species]    0  MIXDRY    Y=0.9142  X=0.8644027775
+[species]    1  H2O       Y=0.0858  X=0.1355972225
+registerSpecies: nSpecies=2 -> registered 20 cell variables
+speciesInit_d: built device roY/roYN/res/diag/Y/dY/limiterY[] for nSpecies=2
+[species] input field species_hash matches (fc8ba1a8828147e3)
+[species] species_hash fc8ba1a8828147e368b38b4eef4f9883f77488a0fc560095447d3fed5b768f4b (record resolved_species_fc8ba1a8828147e3_70cc58aa292c9504.yaml, sha256 70cc58aa292c9504, input verified)
+Read Initial Values 
+Set mesh connection map for cuda 
+[axisym] axisSegmentRWeight: ON -> face vectors W_f = sum_k r_k S_k from /PLANES/rSurfVect (888092 faces, 4800 axis faces at r = 1e-20)
+gradLSQ=2 precomp: 441600/441600 nodes spectral-truncated (thresh=1.00e-02)
+Read probe setting form probe.yaml
+[limiter] scaled: ro_ref=0.5734162041(auto) p_ref=185362.6735(auto) a_ref=328.9226328(auto) L_ref=9.033795583 K=0.05 h_i=sqrt(A_planar)
+[limiter] 警告: 基準値が自動決定なので、この run は**開始場に依存する作用素**である (分割実行が連続実行と一致しない)。固定するには solverConfig.yaml の space へ次をそのまま貼ること (plan convection-node-wall-reconstruction §4.25):
+[limiter]   limiterRoRef: 0.5734162041
+[limiter]   limiterPRef: 185362.6735
+[limiter]   limiterARef: 328.9226328
+[monitor] mode: steady implicit (block-DPLUR, local pseudo-dt)  nStepOuter=200000  monitorInterval=1  cfl_pseudo=1  implicitRelax=1  nStepInner=5
+[monitor] columns: step | ms/step elapsed eta | rms_ro (log10 change vs step 0) worst column (log10 change) [from0 column]
+Start Calculation 
+[DIAG] FORGE_DIAG_FACE_H_DOUBLE: SLAU の TP 多成分の面エンタルピーを double で評価する (診断)
+[node weak-form] conv main planes = 878308 (internal 878308 + periodic 0), boundary weak planes = 9784 (wall 4800 + non-wall 4984)
+step        1 | 37.23 ms/step elapsed 0.0 s eta 7447 s | rms_ro 1.70e-06 (-0.0)
+step        2 | 27.02 ms/step elapsed 0.1 s eta 5403 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.27e-04 (+0.0)
+step        3 | 26.97 ms/step elapsed 0.1 s eta 5394 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.25e-04 (+0.0)
+step        4 | 26.97 ms/step elapsed 0.1 s eta 5394 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.36e-04 (+0.0)
+step        5 | 26.92 ms/step elapsed 0.1 s eta 5384 s | rms_ro 1.70e-06 (+0.0) worst rms_roOmega 5.88e+02 (+0.0)
+step        6 | 27.00 ms/step elapsed 0.2 s eta 5400 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.26e-04 (+0.0)
+step        7 | 27.01 ms/step elapsed 0.2 s eta 5401 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.27e-04 (+0.0)
+step        8 | 26.94 ms/step elapsed 0.2 s eta 5387 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.36e-04 (+0.0)
+step        9 | 26.93 ms/step elapsed 0.3 s eta 5386 s | rms_ro 1.70e-06 (+0.0) worst rms_roOmega 5.90e+02 (+0.0)
+step       10 | 26.95 ms/step elapsed 0.3 s eta 5389 s | rms_ro 1.70e-06 (+0.0) worst rms_roOmega 5.88e+02 (+0.0)
+step       11 | 26.97 ms/step elapsed 0.3 s eta 5394 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.27e-04 (+0.0)
+step       12 | 26.94 ms/step elapsed 0.3 s eta 5388 s | rms_ro 1.70e-06 (+0.0) worst rms_roUy 3.31e-04 (+0.0)
+step       13 | 26.94 ms/step elapsed 0.4 s eta 5388 s | rms_ro 1.70e-06 (+0.0) worst rms_roOmega 5.89e+02 (+0.0)
+step       14 | 26.96 ms/step elapsed 0.4 s eta 5392 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.37e-04 (+0.0)
+step       15 | 27.00 ms/step elapsed 0.4 s eta 5399 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.28e-04 (+0.0)
+step       16 | 26.99 ms/step elapsed 0.4 s eta 5398 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.27e-04 (+0.0)
+step       17 | 26.97 ms/step elapsed 0.5 s eta 5394 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.37e-04 (+0.0)
+step       18 | 26.96 ms/step elapsed 0.5 s eta 5391 s | rms_ro 1.70e-06 (+0.0) worst rms_roOmega 5.90e+02 (+0.0)
+step       19 | 26.98 ms/step elapsed 0.5 s eta 5395 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.28e-04 (+0.0)
+step       20 | 26.96 ms/step elapsed 0.5 s eta 5391 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.28e-04 (+0.0)
+step       21 | 26.94 ms/step elapsed 0.6 s eta 5388 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.37e-04 (+0.0)
+step       22 | 26.97 ms/step elapsed 0.6 s eta 5394 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.38e-04 (+0.0)
+step       23 | 26.93 ms/step elapsed 0.6 s eta 5386 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.28e-04 (+0.0)
+step       24 | 26.95 ms/step elapsed 0.7 s eta 5390 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.29e-04 (+0.0)
+step       25 | 26.98 ms/step elapsed 0.7 s eta 5395 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.38e-04 (+0.0)
+step       26 | 26.99 ms/step elapsed 0.7 s eta 5398 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.38e-04 (+0.0)
+step       27 | 27.04 ms/step elapsed 0.7 s eta 5408 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.38e-04 (+0.0)
+step       28 | 26.98 ms/step elapsed 0.8 s eta 5396 s | rms_ro 1.70e-06 (+0.0) worst rms_roUx 7.29e-04 (+0.0)
+step       29 | 26.96 ms/step elapsed 0.8 s eta 5390 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       30 | 26.97 ms/step elapsed 0.8 s eta 5393 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       31 | 26.98 ms/step elapsed 0.8 s eta 5396 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       32 | 26.97 ms/step elapsed 0.9 s eta 5393 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       33 | 26.95 ms/step elapsed 0.9 s eta 5390 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       34 | 26.96 ms/step elapsed 0.9 s eta 5391 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       35 | 26.95 ms/step elapsed 1.0 s eta 5390 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.39e-04 (+0.0)
+step       36 | 26.92 ms/step elapsed 1.0 s eta 5384 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.40e-04 (+0.0)
+step       37 | 26.98 ms/step elapsed 1.0 s eta 5396 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.40e-04 (+0.0)
+step       38 | 26.98 ms/step elapsed 1.0 s eta 5396 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.40e-04 (+0.0)
+step       39 | 27.03 ms/step elapsed 1.1 s eta 5404 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.40e-04 (+0.0)
+step       40 | 27.05 ms/step elapsed 1.1 s eta 5408 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.40e-04 (+0.0)
+step       41 | 27.04 ms/step elapsed 1.1 s eta 5407 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.40e-04 (+0.0)
+step       42 | 27.05 ms/step elapsed 1.1 s eta 5409 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.41e-04 (+0.0)
+step       43 | 27.02 ms/step elapsed 1.2 s eta 5402 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.41e-04 (+0.0)
+step       44 | 26.96 ms/step elapsed 1.2 s eta 5391 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.41e-04 (+0.0)
+step       45 | 26.97 ms/step elapsed 1.2 s eta 5393 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.41e-04 (+0.0)
+step       46 | 26.96 ms/step elapsed 1.3 s eta 5390 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.41e-04 (+0.0)
+step       47 | 26.95 ms/step elapsed 1.3 s eta 5388 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.42e-04 (+0.0)
+step       48 | 26.97 ms/step elapsed 1.3 s eta 5392 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.42e-04 (+0.0)
+step       49 | 26.97 ms/step elapsed 1.3 s eta 5393 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.42e-04 (+0.0)
+step       50 | 26.96 ms/step elapsed 1.4 s eta 5391 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.42e-04 (+0.0)
+step       51 | 26.94 ms/step elapsed 1.4 s eta 5386 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.42e-04 (+0.0)
+step       52 | 26.97 ms/step elapsed 1.4 s eta 5392 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.43e-04 (+0.0)
+step       53 | 26.94 ms/step elapsed 1.4 s eta 5386 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.43e-04 (+0.0)
+step       54 | 26.95 ms/step elapsed 1.5 s eta 5389 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.43e-04 (+0.0)
+step       55 | 26.95 ms/step elapsed 1.5 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.43e-04 (+0.0)
+step       56 | 26.98 ms/step elapsed 1.5 s eta 5395 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.43e-04 (+0.0)
+step       57 | 26.94 ms/step elapsed 1.5 s eta 5387 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.44e-04 (+0.0)
+step       58 | 26.94 ms/step elapsed 1.6 s eta 5387 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.44e-04 (+0.0)
+step       59 | 26.96 ms/step elapsed 1.6 s eta 5391 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.44e-04 (+0.0)
+step       60 | 26.95 ms/step elapsed 1.6 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.44e-04 (+0.0)
+step       61 | 26.95 ms/step elapsed 1.7 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.45e-04 (+0.0)
+step       62 | 26.94 ms/step elapsed 1.7 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.45e-04 (+0.0)
+step       63 | 26.97 ms/step elapsed 1.7 s eta 5393 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.45e-04 (+0.0)
+step       64 | 26.94 ms/step elapsed 1.7 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.45e-04 (+0.0)
+step       65 | 26.95 ms/step elapsed 1.8 s eta 5388 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.45e-04 (+0.0)
+step       66 | 26.95 ms/step elapsed 1.8 s eta 5388 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.46e-04 (+0.0)
+step       67 | 26.94 ms/step elapsed 1.8 s eta 5386 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.46e-04 (+0.0)
+step       68 | 27.01 ms/step elapsed 1.8 s eta 5401 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.46e-04 (+0.0)
+step       69 | 26.97 ms/step elapsed 1.9 s eta 5392 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.46e-04 (+0.0)
+step       70 | 26.95 ms/step elapsed 1.9 s eta 5388 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.46e-04 (+0.0)
+step       71 | 26.95 ms/step elapsed 1.9 s eta 5389 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.47e-04 (+0.0)
+step       72 | 27.00 ms/step elapsed 2.0 s eta 5397 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.47e-04 (+0.0)
+step       73 | 26.93 ms/step elapsed 2.0 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.47e-04 (+0.0)
+step       74 | 26.92 ms/step elapsed 2.0 s eta 5382 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.47e-04 (+0.0)
+step       75 | 26.98 ms/step elapsed 2.0 s eta 5393 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.48e-04 (+0.0)
+step       76 | 26.94 ms/step elapsed 2.1 s eta 5387 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.48e-04 (+0.0)
+step       77 | 26.97 ms/step elapsed 2.1 s eta 5392 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.48e-04 (+0.0)
+step       78 | 26.95 ms/step elapsed 2.1 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.48e-04 (+0.0)
+step       79 | 27.02 ms/step elapsed 2.1 s eta 5402 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.49e-04 (+0.0)
+step       80 | 26.96 ms/step elapsed 2.2 s eta 5390 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.49e-04 (+0.0)
+step       81 | 26.94 ms/step elapsed 2.2 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.49e-04 (+0.0)
+step       82 | 26.97 ms/step elapsed 2.2 s eta 5392 s | rms_ro 1.70e-06 (+0.0) worst rms_roK 5.49e-04 (+0.0)
+step       83 | 26.93 ms/step elapsed 2.2 s eta 5384 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.50e-04 (+0.0)
+step       84 | 26.96 ms/step elapsed 2.3 s eta 5390 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.50e-04 (+0.0)
+step       85 | 26.96 ms/step elapsed 2.3 s eta 5390 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.50e-04 (+0.0)
+step       86 | 26.94 ms/step elapsed 2.3 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.50e-04 (+0.0)
+step       87 | 26.95 ms/step elapsed 2.4 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.51e-04 (+0.0)
+step       88 | 26.96 ms/step elapsed 2.4 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.51e-04 (+0.0)
+step       89 | 26.94 ms/step elapsed 2.4 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.51e-04 (+0.0)
+step       90 | 26.93 ms/step elapsed 2.4 s eta 5383 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.51e-04 (+0.0)
+step       91 | 26.96 ms/step elapsed 2.5 s eta 5390 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.52e-04 (+0.0)
+step       92 | 26.95 ms/step elapsed 2.5 s eta 5387 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.52e-04 (+0.0)
+step       93 | 26.98 ms/step elapsed 2.5 s eta 5393 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.52e-04 (+0.0)
+step       94 | 26.99 ms/step elapsed 2.5 s eta 5395 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.52e-04 (+0.0)
+step       95 | 27.03 ms/step elapsed 2.6 s eta 5402 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.53e-04 (+0.0)
+step       96 | 26.97 ms/step elapsed 2.6 s eta 5391 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.53e-04 (+0.0)
+step       97 | 26.93 ms/step elapsed 2.6 s eta 5384 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.53e-04 (+0.0)
+step       98 | 26.97 ms/step elapsed 2.7 s eta 5391 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.53e-04 (+0.0)
+step       99 | 26.94 ms/step elapsed 2.7 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.54e-04 (+0.0)
+step      100 | 26.99 ms/step elapsed 2.7 s eta 5395 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.54e-04 (+0.0)
+step      101 | 26.96 ms/step elapsed 2.7 s eta 5388 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.54e-04 (+0.0)
+step      102 | 26.94 ms/step elapsed 2.8 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.54e-04 (+0.0)
+step      103 | 26.96 ms/step elapsed 2.8 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.55e-04 (+0.0)
+step      104 | 26.96 ms/step elapsed 2.8 s eta 5390 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.55e-04 (+0.0)
+step      105 | 26.98 ms/step elapsed 2.8 s eta 5394 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.55e-04 (+0.0)
+step      106 | 26.94 ms/step elapsed 2.9 s eta 5384 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.55e-04 (+0.0)
+step      107 | 26.95 ms/step elapsed 2.9 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.56e-04 (+0.0)
+step      108 | 26.98 ms/step elapsed 2.9 s eta 5394 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.56e-04 (+0.0)
+step      109 | 26.94 ms/step elapsed 2.9 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.56e-04 (+0.0)
+step      110 | 26.94 ms/step elapsed 3.0 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.56e-04 (+0.0)
+step      111 | 26.94 ms/step elapsed 3.0 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.57e-04 (+0.0)
+step      112 | 26.96 ms/step elapsed 3.0 s eta 5388 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.57e-04 (+0.0)
+step      113 | 26.96 ms/step elapsed 3.1 s eta 5390 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.57e-04 (+0.0)
+step      114 | 26.93 ms/step elapsed 3.1 s eta 5382 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.57e-04 (+0.0)
+step      115 | 26.94 ms/step elapsed 3.1 s eta 5384 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.58e-04 (+0.0)
+step      116 | 26.94 ms/step elapsed 3.1 s eta 5384 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.58e-04 (+0.0)
+step      117 | 26.96 ms/step elapsed 3.2 s eta 5389 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.58e-04 (+0.0)
+step      118 | 26.94 ms/step elapsed 3.2 s eta 5384 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.58e-04 (+0.0)
+step      119 | 26.94 ms/step elapsed 3.2 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.59e-04 (+0.0)
+step      120 | 26.95 ms/step elapsed 3.2 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.59e-04 (+0.0)
+step      121 | 26.97 ms/step elapsed 3.3 s eta 5390 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.59e-04 (+0.0)
+step      122 | 26.98 ms/step elapsed 3.3 s eta 5392 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.59e-04 (+0.0)
+step      123 | 26.95 ms/step elapsed 3.3 s eta 5387 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.60e-04 (+0.0)
+step      124 | 26.92 ms/step elapsed 3.4 s eta 5381 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.60e-04 (+0.0)
+step      125 | 26.95 ms/step elapsed 3.4 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.60e-04 (+0.0)
+step      126 | 26.98 ms/step elapsed 3.4 s eta 5392 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.61e-04 (+0.0)
+step      127 | 26.93 ms/step elapsed 3.4 s eta 5383 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.61e-04 (+0.0)
+step      128 | 26.94 ms/step elapsed 3.5 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.61e-04 (+0.0)
+step      129 | 26.95 ms/step elapsed 3.5 s eta 5387 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.61e-04 (+0.0)
+step      130 | 26.93 ms/step elapsed 3.5 s eta 5382 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.62e-04 (+0.0)
+step      131 | 26.93 ms/step elapsed 3.5 s eta 5382 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.62e-04 (+0.0)
+step      132 | 26.95 ms/step elapsed 3.6 s eta 5386 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.62e-04 (+0.0)
+step      133 | 26.93 ms/step elapsed 3.6 s eta 5382 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.62e-04 (+0.0)
+step      134 | 26.93 ms/step elapsed 3.6 s eta 5382 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.63e-04 (+0.0)
+step      135 | 26.95 ms/step elapsed 3.7 s eta 5387 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.63e-04 (+0.0)
+step      136 | 26.94 ms/step elapsed 3.7 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.63e-04 (+0.0)
+step      137 | 26.98 ms/step elapsed 3.7 s eta 5392 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.63e-04 (+0.0)
+step      138 | 26.94 ms/step elapsed 3.7 s eta 5385 s | rms_ro 1.70e-06 (-0.0) worst rms_roK 5.64e-04 (+0.0)

@@ -1,0 +1,96 @@
+# settle_criteria.yaml のひな形 (手で組む run 用)。run ディレクトリに settle_criteria.yaml の名前で写し、値を run に合わせる。
+# 判定の道具: python3 solver_density_cuda/tools/check_settled.py <run_dir>  (判定の中身と各量の定義は settle.py の docstring)
+# 仕様の正本: plans/active/tooling-settle-convergence-and-monitor.md §4.2・§4.3・§4.8
+# 設計チェーンの run は問題 YAML の evaluate.settle (例 {preset: wt_nozzle_v1}) を準備のときに
+# design/forge_design/evaluate/settle_presets.py が解決してこの形で書く (手で書かない)。
+#
+# 規則:
+#   - 知らない種類・キー、閾値の欠け、重複キーは例外 (黙って既定値で埋めない)。閾値はすべて書く。
+#   - 残差 (residual) 1 つ・流量の収支 (mass_balance) 1 つ・目的の量 (exit_core_mach / line_mach / exit_flow_angle /
+#     wall_heat_nodes) 1 つ以上が要る。足りなければ INDETERMINATE (評価対象が未設定)。
+#   - 残差を止める判定から外すとき (プリセット wt_nozzle_v3; plan §4.4・§5.1 #8) は residual の代わりに残差の非有限の見張り
+#     `- {kind: residual_finite, file: residual_history.csv, thresholds: {}}` を書き、excluded に residual と理由を書く
+#     (見張りは判定の条件でなく、区間の残差の行に非有限があれば DIVERGED。residual も residual_finite も無ければ評価対象が未設定)。
+#   - 量を外すときは quantities から消して excluded に理由を書く (黙って外さない)。
+
+schema: forge.settle_criteria/v1
+
+# 出典 (記録だけ)。手で組んだ run は誰がいつ何を根拠に組んだかを書く。
+source: {made_by: hand, date: "YYYY-MM-DD", note: "根拠 (plan・run の比較など)"}
+
+# 節点の量 (exit_core_mach・line_mach・exit_flow_angle) に要る構造格子の寸法。節点番号 = i·nj + j (j = 0 が軸、j = nj−1 が壁)。
+# scale_m は座標を割る長さ (nozzle_report.load_field と同じ; ノズルは prepare_info.json の scale_m = r_t [m])。
+# mesh_file (任意) は座標を読む格子の h5 (load_field と同じ double の COORD; float のビルドの res_nodes は座標が float32 なので要る)。
+structured: {ni: 3000, nj: 92, scale_m: 0.1, mesh_file: nozzle.h5}
+
+# 判定の格子: forge の time.outStepInterval (この倍数の step の観測だけを使う)、判定区間の始まりの step (本段の開始;
+# forge の起動ごとに step は 0 から)、stage_manifest の区間の識別 (記録だけ)。
+grid: {out_step_interval: 2000, start_step: 0, segment: null}
+
+# 窓 W [step] (端点込みで点を数える; W/間隔 + 1 ≥ min_points、W は間隔の倍数)。残差の上昇は直前の窓 (T−2W〜T−W) と比べる。
+window: {W: 20000, min_points: 11}
+
+# 停止規則 v2 の保持 [step] (この道具は記録だけ)。
+hold: 40000
+
+quantities:
+  # 残差: required の列ごとに log10 の傾き |s|·W・振幅 p95−p5・直前の窓からの上昇・生の系列の跳ね max−median [桁]。
+  # required の列が無い・恒等ゼロ・一部ゼロは判定不能。inactive_ok の列は恒等ゼロなら外す。どちらにも無い列が値を持てば判定不能。
+  - kind: residual
+    file: residual_history.csv          # .gz も可。run からの相対か絶対
+    required: [rms_ro, rms_roUx, rms_roUy, rms_roe, rms_roK, rms_roOmega]
+    inactive_ok: [rms_roUz]
+    # series: grid (既定) = 格子点の行 s−1 で傾き・振幅・上昇。raw = 区間 (T−W, T] と直前の区間の毎 step の outer_end の全行で
+    # 同じ閾値 (wt_nozzle_v2; 行の欠け・重複は判定不能)
+    thresholds: {slope_dec: 0.0211893, amp_dec: 0.1, rise_dec: 0.0413927, excursion_dec: 0.5, provisional: true}
+
+  # 流量の収支: boundary_massflux.csv (forge の output.boundaryMassflux: 1) の mdot_<name>_<physID> [kg/s] から
+  # ṁ_in = −Σ inlet、ṁ_out = Σ outlet、r = (ṁ_in − ṁ_out)/ṁ_in。窓で |mean r| ≤ mean_abs、max r − min r ≤ swing、
+  # (max − min)/mean の ṁ_in・ṁ_out ≤ mdot_change_rel。
+  - kind: mass_balance
+    file: boundary_massflux.csv
+    inlet: [1]                          # 入口の physID (bcondConfig の inlet_*)
+    outlet: [2]                         # 出口の physID (outlet_statPress・outflow)
+    thresholds: {mean_abs: 5.0e-4, swing: 5.0e-3, mdot_change_rel: 1.0e-4, provisional: true}
+    # 再生用: series_csv: {path: ..., step_col: step, value_col: r, mdot_in_col: mdot_in, mdot_out_col: mdot_out}
+
+  # 出口コア M: 最後の列の η = r/r_w ∈ eta_range の節点の M の単純平均 (stop_rule の exit_core_M と同じ)。窓の幅 ≤ tol (絶対値)。
+  # res_nodes_<step>.h5 (forge の output.nodeProbeFile) に最後の列の全節点が要る。
+  - kind: exit_core_mach
+    nodes_file: res_nodes_{step}.h5
+    eta_range: [0.05, 0.7]
+    thresholds: {tol: 2.75e-4, provisional: true}   # 0.1 × 0.05 % × M_d (M_d 5.5)
+
+  # 線の M: nozzle_report.eta_line と同じ (r/r_w = eta の線、x は x_range_m [m] を n 点)。d = 100 (M/Md − 1) [%]。
+  # 窓の maxabs の幅 ≤ tol_maxabs、halfamp の幅 ≤ tol_halfamp、位置ごとの d の幅の最大 ≤ tol_pos [%pt]。
+  # 節点の表には列ごとに軸 (j=0)・η を挟む節点とその両側・壁 (j=nj−1) が要る (settle_presets.probe_node_ids)。
+  - kind: line_mach
+    nodes_file: res_nodes_{step}.h5
+    eta: 0.03
+    x_range_m: [4.0, 7.95]
+    n: 2001
+    Md: 5.5
+    thresholds: {tol_maxabs: 0.01, tol_halfamp: 0.005, tol_pos: 0.01, provisional: true}
+
+  # 出口の流れ角: exit_core_mach と同じ節点の θ = atan2(Uy, Ux) [deg]、節点ごとの窓の幅の最大 ≤ tol。
+  - kind: exit_flow_angle
+    nodes_file: res_nodes_{step}.h5
+    eta_range: [0.05, 0.7]
+    thresholds: {tol: 0.01, provisional: true}
+
+  # 壁の熱流: 壁の h5 (bcond の outputHDFflg: 1) の VALUE/iface_Qf_eff (output.interfaceDiag: 1・定常・等温壁のときだけ値を持つ)。
+  # 窓の全格子点で |Q_i − Q_ref,i| ≤ q_tol·A_i + eps_rel·|Q_ref,i| (Q_ref は終端の値、A_i は壁の h5 の COORD・CONNE から;
+  # axisymmetric: true は 1 rad あたり)。等温壁でない run は quantities から外して excluded に理由を書く。
+  - kind: wall_heat_nodes
+    walls: [{name: wall, physID: 3}]
+    axisymmetric: true
+    file_pattern: res_{name}_{physID}_{step}.h5
+    dataset: iface_Qf_eff
+    # measure: terminal_diff (既定) = 終端の値からの差の最大。range = 節点ごとの窓の幅 max − min (wt_nozzle_v2; 相対の参照は終端の値)
+    thresholds: {q_tol: 1000.0, eps_rel: 1.0e-3, provisional: true}
+
+# 外した量と理由 (記録だけ)。例: [{kind: wall_heat_nodes, reason: "断熱壁 (iface_Qf_eff は等温壁だけ)"}]
+excluded: []
+
+# 量の前提 (forge の出力の設定) が満たされているか (記録だけ)。
+preconditions: []

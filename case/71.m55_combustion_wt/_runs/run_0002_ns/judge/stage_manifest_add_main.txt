@@ -1,0 +1,33 @@
+{
+ "order": 2,
+ "tag": "main",
+ "history": "residual_history_main.csv",
+ "restart_from": "S2_mid",
+ "key": {
+  "convMethod": "1",
+  "limiter": "2",
+  "turbulence.model": "sst",
+  "wallTreatmentSST": "0",
+  "viscMethod": "2",
+  "thermalMethod": "2",
+  "unsteady": "0",
+  "dualTime": "0",
+  "turbulence.wallTreatmentSST": "0",
+  "space.convMethod": "1",
+  "space.limiter": "2",
+  "time.unsteady": "0",
+  "time.dualTime": "0",
+  "solver": "SLAU",
+  "space.slauWallNormalChi.effective": "1",
+  "bcond_sha1": "2a3991e6dc3d",
+  "conjugate.enabled": "0"
+ },
+ "cfg_fnv": "d903391a098b4612",
+ "chi_source": "inferred",
+ "soft": {
+  "cfl": "1.0",
+  "cfl_pseudo": "1.0",
+  "nStepInner": "5",
+  "nStepOuter": "200000"
+ }
+}

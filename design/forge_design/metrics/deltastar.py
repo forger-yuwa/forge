@@ -342,11 +342,34 @@ def core_matched_deficit(r, q_ns, q_e, rw_e: float, core_frac: float = 0.30,
 
 
 
+def band_local_pre(r, q_ns, q_e, rw_e: float, refine: int = 4, core_frac: float = 0.30, n_axis_skip: int = 1) -> dict:
+    """`band_local_deficit` の帯の位置に依らない量: 細分の点 rr・NS の ρU_x (qN)・Euler の ρU_x (qE) と内側コアの倍率 α・RMS。
+    `band_local_deficit` の既定の経路と同じ式 (ビット同一)。同じ断面を帯の位置だけ変えて測るときに 1 回だけ作って `_pre` で渡す。"""
+    r0 = np.asarray(r, dtype=float); q0 = np.asarray(q_ns, dtype=float)
+    if refine > 1:
+        t = np.linspace(0.0, 1.0, refine, endpoint=False)
+        rr = np.concatenate([(r0[:-1, None] + (r0[1:] - r0[:-1])[:, None] * t[None, :]).ravel(), [r0[-1]]])
+        qN = np.interp(rr, r0, q0)
+        qE = np.asarray(q_e(rr), dtype=float) if callable(q_e) else np.interp(rr, r0, np.asarray(q_e, dtype=float))
+    else:
+        rr, qN = r0, q0
+        qE = np.asarray(q_e(rr), dtype=float) if callable(q_e) else np.asarray(q_e, dtype=float)
+    mc = rr <= core_frac * rw_e
+    if mc.sum() >= n_axis_skip + 3:
+        num = np.trapezoid(qN[mc] * rr[mc], rr[mc]); den = np.trapezoid(qE[mc] * rr[mc], rr[mc])
+        alpha = float(num / den) if den > 0 else float("nan")
+        rel = qN[mc] / np.maximum(alpha * qE[mc], 1e-30) - 1.0
+        core_rms = float(np.sqrt(np.mean(rel[n_axis_skip:] ** 2)))
+    else:
+        alpha, core_rms = float("nan"), float("nan")
+    return {"rr": rr, "qN": qN, "qE": qE, "alpha": alpha, "core_rms": core_rms}
+
+
 def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
                        k_band: float = 1.5, band_min_frac: float = 0.02, band_width: float = 0.5,
                        n_axis_skip: int = 1, core_frac: float = 0.30, refine: int = 4, _retry: int = 0,
                        slope_max: float = 0.01, band_growth: float = 1.25, max_retry: int = 14,
-                       fit_from: float = 1.0, y_b_fixed: float | None = None):
+                       fit_from: float = 1.0, y_b_fixed: float | None = None, _pre: dict | None = None):
     r"""1 断面の**帯局所参照・質量欠損 → 半径方向等価排除厚** (生産抽出、純関数)。
 
     plan §4.3 の修正 (2026-09-04 V1 pass1 の知見): 内側 30 % コアの単一倍率 α では、上流の壁 δ 誤差が
@@ -359,15 +382,11 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
     $r_{eff}$ は壁〜$y_b$ の区間の累積流量 $F$ だけで引く (2026-10-13, plan tooling-nozzle-deltastar-band-root-zone §4.1)。
     探索域で $q_{ref}$ が非正・非有限なら `nonpos_ref`、区間の中で $F$ が減れば `nonmono_zone` (どちらも hard、δ_r = NaN)。
     内側 30 % の α・コア RMS は診断として併記する。q_e は配列または callable(r)。"""
-    r0 = np.asarray(r, dtype=float); q0 = np.asarray(q_ns, dtype=float)
-    if refine > 1:
-        t = np.linspace(0.0, 1.0, refine, endpoint=False)
-        rr = np.concatenate([(r0[:-1, None] + (r0[1:] - r0[:-1])[:, None] * t[None, :]).ravel(), [r0[-1]]])
-        qN = np.interp(rr, r0, q0)
-        qE = np.asarray(q_e(rr), dtype=float) if callable(q_e) else np.interp(rr, r0, np.asarray(q_e, dtype=float))
-    else:
-        rr, qN = r0, q0
-        qE = np.asarray(q_e(rr), dtype=float) if callable(q_e) else np.asarray(q_e, dtype=float)
+    # _pre (2026-10-15, plan tooling-nozzle-card-local-mesh §5.1 #3q、高速化): 同じ断面を帯の位置だけ変えて何度も測るとき (edge の梯子・
+    # 感度) に、帯に依らない量 (細分の点・NS と Euler の値・内側コアの倍率) を `band_local_pre` で 1 回だけ作って渡す。中身は下の
+    # 既定の経路と同じ式なので結果はビット同一 (y_b_fixed のときだけ使う; 再試行の再帰には渡さない)
+    pre = _pre if _pre is not None else band_local_pre(r, q_ns, q_e, rw_e, refine, core_frac, n_axis_skip)
+    rr, qN, qE = pre["rr"], pre["qN"], pre["qE"]
     rwN = float(rr[-1]); y = rwN - rr
     d_in = float(rwN - rw_e) if delta_in is None else float(delta_in)
     if y_b_fixed is not None:                      # 2 パス目: 隣接列で平滑化した帯位置を固定して使う (帯のトグルを防ぐ)
@@ -394,15 +413,8 @@ def band_local_deficit(r, q_ns, q_e, rw_e: float, delta_in: float | None = None,
         a0 = float(c0[0])
     else:
         slope0, a0 = 0.0, a
-    # 内側コアの単一倍率 (診断 + 「帯が境界層の深部にある」検出: 縁候補の比がコア比より 5 % 以上低い)
-    mc = rr <= core_frac * rw_e
-    if mc.sum() >= n_axis_skip + 3:
-        num = np.trapezoid(qN[mc] * rr[mc], rr[mc]); den = np.trapezoid(qE[mc] * rr[mc], rr[mc])
-        alpha = float(num / den) if den > 0 else float("nan")
-        rel = qN[mc] / np.maximum(alpha * qE[mc], 1e-30) - 1.0
-        core_rms = float(np.sqrt(np.mean(rel[n_axis_skip:] ** 2)))
-    else:
-        alpha, core_rms = float("nan"), float("nan")
+    # 内側コアの単一倍率 (診断 + 「帯が境界層の深部にある」検出: 縁候補の比がコア比より 5 % 以上低い; `band_local_pre` で作る)
+    alpha, core_rms = pre["alpha"], pre["core_rms"]
     if np.isfinite(alpha) and a0 < 0.95 * alpha and _retry < max_retry:
         return band_local_deficit(r, q_ns, q_e, rw_e, delta_in, k_band, band_min_frac, band_width,
                                   n_axis_skip, core_frac, refine, _retry + 1, slope_max=slope_max,
@@ -569,6 +581,51 @@ def edge_band_positions(x, y_ladders, d_ladders, d_in, r_w, eps: float = 0.003, 
     return dict(y_b=c * y_ref * np.exp(ks), y_star=y_star, kappa=kappa, kappa_med=med, kappa_s=ks, y_ref=y_ref)
 
 
+def extract_workers() -> int:
+    """抽出の並列の数: 環境変数 FORGE_DSTAR_WORKERS (1 = 並列しない)、無ければ min(8, CPU 数 − 1) (1 以上)。
+    forge と同じ機械で回すとき (停止規則の見張り) に CPU を 1 つ残すため − 1。"""
+    import os
+    v = os.environ.get("FORGE_DSTAR_WORKERS")
+    if v is not None:
+        try:
+            return max(1, int(v))
+        except ValueError:
+            raise ValueError(f"FORGE_DSTAR_WORKERS は整数 ({v!r})") from None
+    return max(1, min(8, (os.cpu_count() or 1) - 1))
+
+
+_MAP_FN = None
+
+
+def _map_call(i):
+    return _MAP_FN(i)
+
+
+def _map_columns(fn, items):
+    """fn を items に当てた結果のリスト (順序は items のまま)。`extract_workers()` > 1 なら fork の子で並列に (fn は閉包でよい:
+    子は fork で受け継ぐのでピクルしない; 戻り値だけピクルする)。fork が使えない・1 並列なら逐次 (どちらも同じ値)。"""
+    global _MAP_FN
+    items = list(items)
+    nw = extract_workers()
+    if nw <= 1 or len(items) < 2 * nw:
+        return [fn(i) for i in items]
+    import multiprocessing as mp_
+    import threading
+    # 他のスレッドが動いている (fork の子でロックが残りうる) か、デーモンの子の中 (子を作れない) なら逐次
+    if threading.active_count() > 1 or mp_.current_process().daemon:
+        return [fn(i) for i in items]
+    try:
+        ctx = mp_.get_context("fork")
+    except ValueError:
+        return [fn(i) for i in items]
+    _MAP_FN = fn
+    try:
+        with ctx.Pool(nw) as pool:
+            return pool.map(_map_call, items, chunksize=max(1, len(items) // (nw * 8)))
+    finally:
+        _MAP_FN = None
+
+
 def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30,
                                       core_frac_sens=(0.25, 0.35), n_axis_skip: int = 1,
                                       outer_frac: float = 0.25, smooth_lam: float = 1e-3,
@@ -661,10 +718,28 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         rw = (1 - w) * rwE_col[k] + w * rwE_col[k + 1]
         return (1 - w) * q0 + w * q1, rw
 
+    col_cache = {}                                       # 列ごとの帯に依らない量 (帯の位置を固定して測る経路だけ; §5.1 #3q)
+
     def extract_one(i, fc, y_b_fixed=None):
         x = float(N["x"][i, 0]); r0 = N["r"][i]; q0 = N["q"][i]
         if not covered(x) or i in miss_cols:
             return None
+        if method == "band" and y_b_fixed is not None:
+            c_ = col_cache.get(i)
+            if c_ is None:
+                _, rwE_ = euler_q_at(x, r0[:1])
+                c_ = (float(rwE_), band_local_pre(r0, q0, lambda rr: euler_q_at(x, rr)[0], float(rwE_), refine, core_frac, n_axis_skip))
+                col_cache[i] = c_
+            rwE, pre = c_
+            res = band_local_deficit(r0, q0, lambda rr: euler_q_at(x, rr)[0], rwE, k_band=fc,
+                                     band_min_frac=band_min_frac, band_width=band_width,
+                                     n_axis_skip=n_axis_skip, core_frac=core_frac, refine=refine,
+                                     slope_max=slope_max, band_growth=band_growth, max_retry=max_retry, fit_from=fit_from,
+                                     y_b_fixed=y_b_fixed, _pre=pre)
+            if res is None:
+                return None
+            res["x"] = x; res["i"] = int(i); res["i_col"] = i
+            return res
         _, rwE = euler_q_at(x, r0[:1])
         if method == "band":
             res = band_local_deficit(r0, q0, lambda rr: euler_q_at(x, rr)[0], float(rwE), k_band=fc,
@@ -707,11 +782,11 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
         raise ValueError(f"band_select={band_select!r} は method='band' かつ band_smooth_x=0 でのみ使える")
     edge = None
     if band_select == "edge":
-        ii, xs_e, din_e, rw_e_l, yl, dl = [], [], [], [], [], []
-        for i in range(N["x"].shape[0]):
+        def ladder(i):
+            """列 i の梯子 (帯の位置 y_b の列と各 y_b の δ_r)。対象外の列は None。"""
             x = float(N["x"][i, 0])
             if not covered(x) or i in miss_cols:
-                continue
+                return None
             _, rwE = euler_q_at(x, N["r"][i][:1])
             rwN = float(N["r"][i][-1]); d_in = rwN - float(rwE)
             y0 = max(edge_y0_fac * max(d_in, 0.0), edge_min_frac * rwN) * edge_y0_shift
@@ -723,7 +798,15 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
             for yb in ys:
                 rk = extract_one(i, main_par, y_b_fixed=yb)
                 ds.append(rk["delta_r"] if (rk is not None and np.isfinite(rk["delta_r"])) else np.nan)
-            ii.append(i); xs_e.append(x); din_e.append(d_in); rw_e_l.append(rwN); yl.append(np.array(ys)); dl.append(np.array(ds))
+            col_cache.pop(i, None)                          # 梯子の後は要らない (並列の子でメモリを持ち続けない)
+            return (i, x, d_in, rwN, np.array(ys), np.array(ds))
+
+        ii, xs_e, din_e, rw_e_l, yl, dl = [], [], [], [], [], []
+        for got in _map_columns(ladder, range(N["x"].shape[0])):   # 列ごとに独立 (並列でも順序・値は同じ)
+            if got is None:
+                continue
+            i, x, d_in, rwN, ys, ds = got
+            ii.append(i); xs_e.append(x); din_e.append(d_in); rw_e_l.append(rwN); yl.append(ys); dl.append(ds)
         pos = edge_band_positions(np.array(xs_e), yl, dl, np.array(din_e), np.array(rw_e_l), eps=edge_eps, c=edge_c,
                                   window=edge_window, knot=edge_knot, edge_ratio=1.25, ref_min_frac=edge_ref_min_frac,
                                   persist=edge_persist)
@@ -897,7 +980,9 @@ def deltastar_from_core_matched_euler(ns_run, euler_run, core_frac: float = 0.30
                   "beyond": [float(max(cover["x0"] - xs_all[i], xs_all[i] - cover["x1"])) for i in et]}
         out["not_extracted"].update(euler_cover=cover, edge_tol_cols=rec_et)
         out["settings"].update(euler_cover=cover, edge_tol_cols=rec_et)
-    out["massflow"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res)
+    # 流量の帳簿も抽出と同じ断面で (2026-10-15, plan tooling-nozzle-card-local-mesh §5.1 #3i): 壁法線の近壁層の格子では列が一定 x でなく、
+    # 列のままの 2π∫ρU_x r dr は断面の流量でない (case/71 run_0005_ns で −0.96 %、散らばり 2.1 %)
+    out["massflow"] = massflow_ratio(ns_run, euler_run, ns_res=ns_res, remap_constant_x=remap_constant_x)
     if edge is not None:
         out["edge_y_star"] = np.array([r_.get("edge_y_star", np.nan) for r_ in rows])
         if return_ladders:

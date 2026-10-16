@@ -13,8 +13,12 @@ YAML の値 × $r_t$ の往復は単位換算の検査であって形状の検�
 - スロート→出口長: **物理出口 = 最終 STEP の下流端** (設計スロートが原点)。メッシュの `outlet` 境界の $x$ と端点の転送・丸めの範囲
   (`END_TOL_MM`) で一致することを別に検査する (codex 諮問 2026-10-13: MOC の $x_F$ で代用しない、途中の弦誤差で許容しない)。
 
-メッシュ側は壁節点から同じ量を測る (直管の終端は接合点を挟む 2 節点の区間)。メッシュと STEP の差は弦の形状誤差
-(`wall_step.chord_deviation`) の範囲で見る。
+メッシュ側は壁節点から同じ量を測る。直管と縮流部の接合はメッシュの半径からは決めず、STEP の曲線から決めた $x(u^*)$ を使う。
+入口端から設計スロート $x=0$ までの壁節点 (直管側から接合を越える区間全体) の半径を、各節点の $x$ で評価した STEP の曲線と
+`NODE_EQ_MM` で照合する (`junction_from_mesh`; plan tooling-nozzle-card-local-mesh §5.1 #3j、codex diagnose 2026-10-15 E(ii))。
+接合点を挟む 2 節点の区間 (`straight_end_interval_mm`、入口半径との差 ≤ `NODE_EQ_MM` の節点を直管と数える) は参考の記録で、
+合否には使わない (接合は $r'=r''=0$ で滑らかなので、接合の直後の節点も直管と数えて区間が接合を外れる: case/71 run_0005_ns で
+接合の 0.08 mm 下流の節点の $r - r_{in}$ が −7.3e−9 mm)。メッシュと STEP の差は弦の形状誤差 (`wall_step.chord_deviation`) の範囲で見る。
 
 usage:
   design/.venv-opt/bin/python -m forge_design.export.dimension_gate STEP --card CARD [--msh MSH] [--wall-file WALL_REPR] [--out JSON]
@@ -28,7 +32,7 @@ from pathlib import Path
 import numpy as np
 
 POLE_EQ_MM = 1e-9          # 制御点の半径が入口半径と「等しい」とみなす差 [mm]
-NODE_EQ_MM = 1e-6          # メッシュの壁節点が入口半径と等しいとみなす差 [mm] (msh は 10 有効桁)
+NODE_EQ_MM = 1e-6          # メッシュの壁節点の半径が曲線 (入口半径・接合の照合では STEP の曲線) と等しいとみなす差 [mm] (msh は 10 有効桁)
 END_TOL_MM = 1e-3          # 出口端 (STEP の下流端とメッシュの outlet の x) の一致の許容 [mm]: 端点の転送・丸めの検査 (弦誤差では許容しない)
 DENSE = 20001              # 最小半径の粗探索の点数
 
@@ -109,7 +113,8 @@ def design_throat_diameter_mm(wall_file) -> dict:
 
 
 def mesh_dimensions(msh_path) -> dict:
-    """解析メッシュ (mesh2d の msh4.1) の壁節点から寸法を測る [mm]。直管の終端は接合点を挟む 2 節点の区間で返す。"""
+    """解析メッシュ (mesh2d の msh4.1) の壁節点から寸法を測る [mm]。直管の終端は接合点を挟む 2 節点の区間で返す
+    (参考の記録; 接合の合否は `junction_from_mesh`)。"""
     from .mesh_structure import read_msh41_mesh2d
     coords, _quads, bedges, _tags = read_msh41_mesh2d(msh_path)
     e = np.asarray(bedges["wall"], dtype=np.int64)
@@ -162,6 +167,110 @@ def chord_from_mesh(step_path, msh_path, freecadcmd: str | None = None) -> dict:
             "max_mm": hi, "x_of_max_mm": xhi, "n_edges": int(len(xw) - 1)}
 
 
+NEWTON_X_TOL_MM = 1e-9     # x → u の逆引きの収束 (曲線の定義域の中の節点の |x(u) − x|) [mm]: 照合の許容ではなく評価の精度
+
+
+def wall_nodes_mm(msh_path):
+    """解析メッシュの壁節点の (x, r) [mm] を x の順で返す。"""
+    from .mesh_structure import read_msh41_mesh2d
+    coords, _q, bedges, _tags = read_msh41_mesh2d(msh_path)
+    nodes = np.unique(np.asarray(bedges["wall"], dtype=np.int64).ravel())
+    xw, rw = coords[nodes, 0] * 1000.0, coords[nodes, 1] * 1000.0
+    o = np.argsort(xw)
+    return xw[o], rw[o]
+
+
+def curve_r_at_x(C, u_range, xq) -> tuple:
+    """STEP の曲線 C(u) = (x(u), r(u), ·) を与えた x [mm] で評価した r [mm] と、評価の記録を返す。
+
+    x → u は密な評価の補間を初期値に Newton で詰める (線形補間の誤差を照合に混ぜない)。定義域の外の点 (端点の丸め) は
+    端の u で 1 次の外挿 r(u) + (x − x(u))·(dr/du)/(dx/du) にする。戻り: (r, {"x_residual_max_mm": 定義域の中の |x(u) − x| の最大,
+    "outside_domain_max_mm": 定義域の外に出た量の最大, "newton_iterations", "converged"})。x(u) が単調増加でなければ ValueError。"""
+    u0, u1 = (float(v) for v in u_range)
+    xq = np.asarray(xq, dtype=float)
+    us = np.linspace(u0, u1, DENSE)
+    xs = C(us)[:, 0]
+    if np.any(np.diff(xs) <= 0):
+        raise ValueError("STEP の曲線の x が単調増加でない (x → u を逆引きできない)")
+    dC = C.derivative()
+    u = np.interp(xq, xs, us)                      # 定義域の外は端の u (np.interp の端の値)
+    inside = (xq >= xs[0]) & (xq <= xs[-1])
+    it, conv = 0, False
+    for it in range(1, 61):
+        p, dp = C(u), dC(u)
+        if not np.all(dp[:, 0] > 0.0):
+            raise ValueError("STEP の曲線の dx/du ≤ 0 の点がある (x → u を逆引きできない)")
+        f = p[:, 0] - xq
+        # 丸めの桁 (1e-12 mm) まで詰める。届かなくても最後に |x(u) − x| ≤ NEWTON_X_TOL_MM なら収束とみなす
+        if not np.any(inside) or float(np.abs(f[inside]).max()) <= NEWTON_X_TOL_MM * 1e-3:
+            conv = True
+            break
+        u = np.clip(u - f / dp[:, 0], u0, u1)
+    p, dp = C(u), dC(u)
+    dx = xq - p[:, 0]
+    r = p[:, 1] + dx * dp[:, 1] / dp[:, 0]
+    res_in = float(np.abs(dx[inside]).max()) if np.any(inside) else 0.0
+    out = np.maximum(xs[0] - xq, xq - xs[-1])
+    return r, {"x_residual_max_mm": res_in, "outside_domain_max_mm": float(max(out.max(), 0.0)) if len(xq) else 0.0,
+               "newton_iterations": int(it), "converged": bool(conv or res_in <= NEWTON_X_TOL_MM)}
+
+
+def junction_match(C, u_range, x_junction_mm: float, xw, rw, x_hi_mm: float = 0.0) -> dict:
+    """直管側から接合を越える区間全体 (壁節点のうち x ≤ x_hi_mm、既定は設計スロート x = 0 まで) の節点の半径を、
+    節点の x で評価した STEP の曲線 C と照合する [mm]。接合の位置 x_junction_mm は STEP の曲線から決めた値
+    (`step_dimensions` の straight.x_end_mm) を渡す (plan tooling-nozzle-card-local-mesh §5.1 #3j)。
+    合否は `evaluate_gate` が決める (`straight_junction_checks`: 最大 |節点 r − 曲線 r| ≤ NODE_EQ_MM、接合が STEP の直管の終端と同じ、
+    設計スロートまで照合した、接合の両側に節点がある、定義域の外 ≤ END_TOL_MM)。"""
+    xw, rw = np.asarray(xw, dtype=float), np.asarray(rw, dtype=float)
+    sel = xw <= x_hi_mm
+    xq, rq = xw[sel], rw[sel]
+    xj = float(x_junction_mm)
+    base = {"unit": "mm", "x_junction_mm": xj, "x_hi_mm": float(x_hi_mm), "tol_mm": NODE_EQ_MM}
+    if len(xq) == 0:
+        return {**base, "status": f"x ≤ {x_hi_mm} mm の壁節点が無い"}
+    try:
+        rc, ev = curve_r_at_x(C, u_range, xq)
+    except ValueError as e:
+        return {**base, "status": f"曲線を評価できない: {e}"}
+    if not ev["converged"]:
+        return {**base, "status": f"x → u の逆引きが収束しない (|x(u) − x| 最大 {ev['x_residual_max_mm']:.3g} mm)", "evaluation": ev}
+    dev = rq - rc
+    ad = np.abs(dev)
+    up, dn = xq <= xj, xq > xj
+    i = int(np.argmax(ad))
+    r_in = float(rc[0])
+
+    def near(m, last):
+        if not np.any(m):
+            return None
+        k = int(np.flatnonzero(m)[-1 if last else 0])
+        return {"x_mm": float(xq[k]), "r_node_mm": float(rq[k]), "r_curve_mm": float(rc[k]), "dev_mm": float(dev[k]),
+                "r_node_minus_r_in_mm": float(rq[k] - r_in)}
+
+    nu, nd = near(up, True), near(dn, False)
+    return {**base, "status": "ok",
+            "n_nodes": int(len(xq)), "n_upstream": int(up.sum()), "n_downstream": int(dn.sum()),
+            "x_range_mm": [float(xq[0]), float(xq[-1])],
+            "max_abs_mm": float(ad[i]), "x_of_max_mm": float(xq[i]), "dev_at_max_mm": float(dev[i]),
+            "max_abs_upstream_mm": float(ad[up].max()) if np.any(up) else None,
+            "max_abs_downstream_mm": float(ad[dn].max()) if np.any(dn) else None,
+            "node_before_junction": nu, "node_after_junction": nd,
+            "spacing_at_junction_mm": (float(nd["x_mm"] - nu["x_mm"]) if nu and nd else None),
+            "evaluation": ev}
+
+
+def junction_from_mesh(step_path, msh_path, x_junction_mm: float, freecadcmd: str | None = None, x_hi_mm: float = 0.0) -> dict:
+    """配布する STEP とメッシュで、直管側から接合を越える区間全体の壁節点の半径を STEP の曲線と照合する (`junction_match`)。
+    x_junction_mm は同じ STEP の `step_dimensions(...)["straight"]["x_end_mm"]`。"""
+    from .wall_step import read_step
+    rd = read_step(step_path, freecadcmd=freecadcmd)
+    C, _t, _P, _k = _bspline(rd)
+    xw, rw = wall_nodes_mm(msh_path)
+    res = junction_match(C, (float(rd["first"]), float(rd["last"])), x_junction_mm, xw, rw, x_hi_mm)
+    res["source"] = f"{msh_path} の壁節点と {step_path} の曲線"
+    return res
+
+
 def card_targets(card: dict) -> dict:
     """要求カードから比べる寸法 [mm] と公差 [mm] を取り出す。"""
     # 公差の既定は生成器と同じ値 (wt_card.DEFAULT_TOLERANCES) で補う (codex result レビュー 2026-10-13 M4: 生成器は省略を許すのに
@@ -185,7 +294,7 @@ def card_targets(card: dict) -> dict:
 
 
 def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, design_throat: dict | None = None,
-                  chord: dict | None = None) -> dict:
+                  chord: dict | None = None, junction: dict | None = None) -> dict:
     """カードと測った寸法を比べる。戻り: 項目ごとの {card, step, mesh, diff, tol, pass} と総合 verdict (PASS / FAIL)。"""
     T = card_targets(card)
     tl, td = T["tol_length_mm"], T["tol_diameter_mm"]
@@ -223,7 +332,12 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
     # メッシュと STEP の整合 (codex result レビュー 2026-10-13 M1: 記録するだけでなく合否に入れる)。誤差の量を分けて判定する:
     # - 端点 (出口端・入口半径): 節点は曲線上なので転送・丸めの範囲 END_TOL_MM
     # - 最小半径: 壁節点の最小は曲線の最小以上 (節点は曲線上) で、取り逃しは弦の範囲 → 0 − END_TOL ≤ 差 ≤ 直径公差/2
-    # - 直管の終端: メッシュの接合点を挟む区間に STEP の終端が入る
+    # - 直管と縮流部の接合 (plan tooling-nozzle-card-local-mesh §5.1 #3j、codex diagnose 2026-10-15 E(ii)): 接合は STEP の曲線から決め
+    #   (step_dims の straight.x_end_mm)、入口端から設計スロート x = 0 までの壁節点 (直管側から接合を越える区間全体) の半径を
+    #   節点の x で評価した曲線と照合する (junction_from_mesh): 最大 |差| ≤ NODE_EQ_MM、接合の両側に節点がある、照合に使った接合が
+    #   STEP の値と同じ、設計スロートまで照合した、定義域の外に出た節点 (端点の丸め) ≤ END_TOL_MM。
+    #   メッシュの接合点を挟む区間に STEP の終端が入るか (straight_end_in_mesh_interval) は参考の記録に残す (合否に使わない:
+    #   接合が滑らかだと直後の節点も半径の閾値で直管と数え、区間が接合を外れる; case/71 run_0005_ns)
     # - 弦の形状誤差 (wall_step.chord_deviation、節点を結ぶ多角形と曲線の差): 最大 |差| ≤ 直径公差/2
     consistency = {}
     if mesh_dims:
@@ -235,7 +349,7 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
         consistency["throat_r_mesh_minus_curve_mm"] = d_th
         consistency["throat_r_pass"] = bool(-END_TOL_MM <= d_th <= td / 2.0)
         lo, hi = m["straight_end_interval_mm"]
-        consistency["straight_end_in_mesh_interval"] = bool(lo - 1e-6 <= step_dims["straight"]["x_end_mm"] <= hi + 1e-6)
+        consistency["straight_end_in_mesh_interval"] = bool(lo - 1e-6 <= step_dims["straight"]["x_end_mm"] <= hi + 1e-6)   # 参考 (#3j)
         consistency["x_start_diff_mm"] = float(m["x_start_mm"] - step_dims["x_start_mm"])
         consistency["x_start_pass"] = bool(abs(consistency["x_start_diff_mm"]) <= END_TOL_MM)
     if chord and chord.get("status") == "ok":
@@ -247,10 +361,30 @@ def evaluate_gate(card: dict, step_dims: dict, mesh_dims: dict | None = None, de
         consistency["chord_pass"] = bool(cmax <= td / 2.0)
     elif chord:
         consistency["chord_status"] = chord.get("status")
+    if junction and junction.get("status") == "ok":
+        need_up = step_dims["straight"].get("u_end") is not None       # 直管の無い STEP は接合の上流の節点を求めない
+        jmax = float(junction["max_abs_mm"])
+        consistency["straight_junction_max_abs_mm"] = jmax
+        consistency["straight_junction_x_of_max_mm"] = float(junction["x_of_max_mm"])
+        consistency["straight_junction_x_mm"] = float(junction["x_junction_mm"])
+        consistency["straight_junction_n_nodes"] = {"upstream": int(junction["n_upstream"]), "downstream": int(junction["n_downstream"])}
+        conds = {"max_abs_le_node_eq": bool(jmax <= NODE_EQ_MM),
+                 # 同じ STEP から同じ規則で決めた値を渡すので一致する (別の接合で照合したものを通さない)
+                 "junction_is_step_straight_end": bool(abs(float(junction["x_junction_mm"]) - float(step_dims["straight"]["x_end_mm"])) <= 1e-9),
+                 "covers_to_design_throat": bool(float(junction["x_hi_mm"]) >= 0.0),
+                 "nodes_upstream": bool(int(junction["n_upstream"]) >= 1 or not need_up),
+                 "nodes_downstream": bool(int(junction["n_downstream"]) >= 1),
+                 "inside_curve_domain": bool(float(junction["evaluation"]["outside_domain_max_mm"]) <= END_TOL_MM)}
+        consistency["straight_junction_checks"] = conds
+        consistency["straight_junction_pass"] = bool(all(conds.values()))
+    elif junction:
+        consistency["straight_junction_status"] = junction.get("status")
     # 出荷判定に要る検査は固定 (codex result レビュー 2 回目 M1): 欠けたら PASS にしない (未判定)
-    REQUIRED = ("x_start_pass", "x_end_pass", "inlet_radius_pass", "throat_r_pass", "straight_end_in_mesh_interval", "chord_pass")
+    # (#3j: 接合の検査は straight_end_in_mesh_interval から straight_junction_pass に置き換え、前者は参考の記録)
+    REQUIRED = ("x_start_pass", "x_end_pass", "inlet_radius_pass", "throat_r_pass", "straight_junction_pass", "chord_pass")
     missing = [k for k in REQUIRED if k not in consistency]
     consistency["required"] = list(REQUIRED)
+    consistency["reference_only"] = ["straight_end_in_mesh_interval"]
     consistency["missing"] = missing
     items_ok = all(v["pass"] for v in items.values())
     cons_ok = all(consistency[k] for k in REQUIRED if k in consistency)
@@ -276,9 +410,12 @@ def main(argv=None) -> int:
     sd = step_dimensions(a.step, a.freecadcmd)
     md = mesh_dimensions(a.msh) if a.msh else None
     ch = chord_from_mesh(a.step, a.msh, a.freecadcmd) if a.msh else None      # 弦の検査は必須 (--msh が無ければ未判定)
+    jn = (junction_from_mesh(a.step, a.msh, sd["straight"]["x_end_mm"], a.freecadcmd)
+          if a.msh else None)                                                  # 接合の照合も必須 (#3j)
     dt = design_throat_diameter_mm(a.wall_file) if a.wall_file else None
-    res = evaluate_gate(card, sd, md, dt, ch)
+    res = evaluate_gate(card, sd, md, dt, ch, jn)
     res["chord"] = ch
+    res["junction"] = jn
     res["step_dimensions"], res["mesh_dimensions"], res["design_throat"] = sd, md, dt
     txt = json.dumps(res, indent=1, ensure_ascii=False)
     if a.out:

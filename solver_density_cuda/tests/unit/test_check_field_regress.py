@@ -98,6 +98,42 @@ if HAVE_H5:
         c3 = os.path.join(tmp, 'c_ok'); make_run(c3, 10)
         rc, out = run_tool(*reps, c3)
         check(rc == 0 and 'VERDICT: PASS' in out, f'clean data must still pass (rc={rc})')
+
+        # --- --boundary: 節点の出力 res_nodes_<step>.h5 を境界の出力と取り違えない
+        #     (plan tooling-settle-convergence-and-monitor §5.1 #1b) ---
+        def put(d, name, vals):
+            with h5py.File(os.path.join(d, name), 'w') as f:
+                g = f.create_group('VALUE')
+                for q, v in vals.items():
+                    g.create_dataset(q, data=v)
+
+        def run_tool_b(*runs_and_cands):
+            reps_, cand = runs_and_cands[:-1], runs_and_cands[-1]
+            r = subprocess.run([sys.executable, tool, '--repeat', *reps_, '--candidate', cand, '--boundary'],
+                               capture_output=True, text=True)
+            return r.returncode, r.stdout + r.stderr
+
+        breps = [os.path.join(tmp, f'b{i}') for i in (1, 2)]
+        for d in breps:
+            make_run(d, 10)
+            put(d, 'res_wall_3_10.h5', {'qwall': np.array([1.0, 2.0]), 'ro': np.array([1.0, 1.0])})
+        # 拾うのは res_<名前>_<physID>_<step>.h5 だけ (res_nodes_<step>.h5・res_nan_<step>.h5 は拾わない)
+        bc = os.path.join(tmp, 'b_cand'); make_run(bc, 10)
+        put(bc, 'res_wall_3_10.h5', {'qwall': np.array([1.0, 2.0]), 'ro': np.array([1.0, 1.0])})
+        put(bc, 'res_nodes_10.h5', {'ro': np.array([np.nan, 1.0])})   # 節点の出力 (候補だけにあり、NaN)
+        put(bc, 'res_nan_10.h5', {'ro': np.array([np.nan])})          # detectNaN のダンプ
+        put(bc, 'res_nodes_5_10.h5', {'qwall': np.array([3.0])})      # 名前 nodes・physID 5 の境界は境界として拾う
+        bf = cfr.boundary_files(bc, 10)
+        check(set(bf) == {'wall_3', 'nodes_5'}, f'boundary_files must pick only <name>_<physID> stems, got {sorted(bf)}')
+        os.remove(os.path.join(bc, 'res_nodes_5_10.h5'))
+        rc, out = run_tool_b(*breps, bc)
+        check(rc == 0 and 'VERDICT: PASS' in out and 'nodes/' not in out,
+              f'res_nodes_<step>.h5 must not be compared as a boundary output (rc={rc})\n{out}')
+        # 境界の出力の NaN は従来どおり止まる (拾い方を狭めても境界の検査は弱めない)
+        bn = os.path.join(tmp, 'b_nan'); make_run(bn, 10)
+        put(bn, 'res_wall_3_10.h5', {'qwall': np.array([1.0, np.nan]), 'ro': np.array([1.0, 1.0])})
+        rc, out = run_tool_b(*breps, bn)
+        check(rc == 2 and 'wall_3/qwall' in out, f'NaN in a boundary output must still stop the run (rc={rc})')
 else:
     print('  (h5py が無いので main() 経由の反例は省略)')
 

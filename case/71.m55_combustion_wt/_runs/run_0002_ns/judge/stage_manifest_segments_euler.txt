@@ -1,0 +1,10 @@
+=== /home/ubuntu/m55_diag_0002/seg_euler/run_0001_euler : 3 段 / 2 区間 ===
+  区間 0: soft
+        hard: {"convMethod": "0", "limiter": "2", "turbulence.model": "none", "viscMethod": "0", "thermalMethod": "2", "unsteady": "0", "dualTime": "0", "space.convMethod": "0", "space.limiter": "2", "time.unsteady": "0", "time.dualTime": "0", "solver": "SLAU", "space.slauWallNormalChi.effective": "1", "bcond_sha1": "e21cbe7407fd", "conjugate.enabled": "0"}
+  区間 1: mid -> main
+        hard: {"convMethod": "1", "limiter": "2", "turbulence.model": "none", "viscMethod": "0", "thermalMethod": "2", "unsteady": "0", "dualTime": "0", "space.convMethod": "1", "space.limiter": "2", "time.unsteady": "0", "time.dualTime": "0", "solver": "SLAU", "space.slauWallNormalChi.effective": "1", "bcond_sha1": "e21cbe7407fd", "conjugate.enabled": "0"}
+        soft (区間内で変化・連結可): {"mid": {"cfl": "1.0", "cfl_pseudo": "1.0", "nStepInner": "5", "nStepOuter": "3000"}, "main": {"cfl": "1.0", "cfl_pseudo": "1.0", "nStepInner": "5", "nStepOuter": "12000"}}
+
+**判定区間は最後の区間** (mid -> main)。
+  `check_convergence.py` にはこの区間の履歴だけを渡すこと。
+STAGE_MANIFEST_EXIT: 0

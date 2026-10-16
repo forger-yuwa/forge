@@ -5,6 +5,8 @@ r"""風洞ノズルの成果物一式を最終 NS の run から書き出す (pl
 - `cad/`    2D の壁曲線の STEP (`wall_step.export_run`)・3D の内面の STEP と STL (`wall_step.write_surface`)・gmsh での読み直し
 - `mesh/`   解析メッシュ (msh4.1 のまま・msh2.2)・構造ファイル・STEP から同じ構造で作り直す gmsh スクリプトとその照合
 - `fluent/` 2D 軸対称の Fluent メッシュ (`.msh`)・CGNS・境界条件表 (壁温分布の run は壁温の point profile `wall_temperature.prof` も)
+- `wall_compare/` 設計壁 (Euler で回す壁) と物理壁 (作る壁) の座標の比較の表・図と、Δr の prepare の δ_r の記録との照合
+  (plan tooling-nozzle-card-local-mesh §5.1 #3u; `wall_compare.py`)。表は `.xlsx` のシート `wall_compare` にも入れる
 - `excel/`  形状表・CFD 壁面量表 (状態つき)・条件・`.xlsx` (壁温分布の run は壁温の表も)
 - `DIMENSIONS.json` 寸法の出荷ゲート (§4.2a)、`MANIFEST.json` (sha256・検査の数値・飛ばしたものと理由)、`README.md`
 
@@ -20,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -30,9 +33,24 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 FORGE_ROOT = HERE.parents[2]
-GMSH_PYTHON = "/home/sano/work/forge/.venv-mesh/bin/python"
-PPTX_PYTHON = "/home/sano/work/forge/.venv-pptx/bin/python"
-PARTS = ("cad", "mesh", "fluent", "excel", "dimensions")
+
+
+def _tool_python(env: str, venv: str) -> str:
+    """外部の Python (gmsh・python-pptx を入れた別の環境) の場所: 環境変数 env → リポジトリ直下の venv → 主の作業ツリーの venv。
+    どれも無ければ、リポジトリ直下の venv のパスを返す (使うときに FileNotFoundError になり、置き場所が分かる)。
+    以前はこのマシンの絶対パスが書き込まれていて、他の PC・AWS では mesh・fluent の成果物が作れなかった (2026-10-16、V6)。"""
+    if os.environ.get(env):
+        return os.environ[env]
+    for root in (FORGE_ROOT, FORGE_ROOT.parent / "forge"):
+        c = root / venv / "bin" / "python"
+        if c.exists():
+            return str(c)
+    return str(FORGE_ROOT / venv / "bin" / "python")
+
+
+GMSH_PYTHON = _tool_python("FORGE_MESH_PY", ".venv-mesh")   # gmsh・meshio・h5py・numpy
+PPTX_PYTHON = _tool_python("FORGE_PPTX_PY", ".venv-pptx")   # python-pptx・xlsxwriter
+PARTS = ("cad", "mesh", "fluent", "wall_compare", "excel", "dimensions")
 
 
 def _sha(p: Path) -> str:
@@ -160,7 +178,11 @@ def _mesh_quality(msh: Path, run: Path, ar_max: float) -> dict:
         return {"verdict": "未判定", "reason": "convertGmshToForge が見つからない (FORGE_CONVERTER で指定)"}
     if not (run / "solverConfig.yaml").exists() or not (run / "bcondConfig.yaml").exists():
         return {"verdict": "未判定", "reason": "run に solverConfig.yaml / bcondConfig.yaml が無い (変換の設定を作れない)"}
-    cfg = (run / "solverConfig.yaml").read_text()
+    # 本段だけの陰解法 B0 (`evaluate.main_line`) の run は、本段の設定に node 専用のキー (implicitThermalJacobian など) が入っていて
+    # cell の変換が拒む (2026-10-15 case/71 run_0010_ns_b0)。B0 を当てる前の元の設定 (runner_axismach.PRESTAGE_CONFIG) があればそれを使う
+    from ..evaluate.runner_axismach import PRESTAGE_CONFIG
+    src_cfg = run / PRESTAGE_CONFIG if (run / PRESTAGE_CONFIG).exists() else run / "solverConfig.yaml"
+    cfg = src_cfg.read_text()
     cfg = cfg.replace('discretization: "node"', 'discretization: "cell"').replace(", axisCentroidShift: 1, nodeWallDirichlet: 1", "")
     import re
     cfg = re.sub(r'meshFileName: "[^"]*"', 'meshFileName: "nozzle_qc.h5"', cfg)
@@ -171,14 +193,71 @@ def _mesh_quality(msh: Path, run: Path, ar_max: float) -> dict:
         shutil.copy2(run / "bcondConfig.yaml", t / "bcondConfig.yaml")
         shutil.copy2(msh, t / "nozzle.msh")
         c = subprocess.run([str(conv), "nozzle.msh", "nozzle_qc.h5"], cwd=t, capture_output=True, text=True, timeout=3600)
-        if c.returncode != 0:
-            return {"verdict": "FAIL", "reason": "変換器が失敗", "log": (c.stdout + c.stderr)[-800:]}
+        # 終了コードでは判定しない: 一部の環境 (AWS g5・CUDA 13) の変換器は h5 を書き切った後の終了時に `GPUassert: invalid argument` で
+        # 非零で抜ける (既知・無害、procedures/cloud-aws-gpu.md「移設で必ず踏む 4 点」の 3、runner_sern.convert_mesh と同じ)。
+        # 出力ファイルの存在と大きさで見る
+        h5 = t / "nozzle_qc.h5"
+        if not h5.exists() or h5.stat().st_size < 1024:
+            return {"verdict": "FAIL", "reason": f"変換器が {h5.name} を作れなかった (rc {c.returncode})", "log": (c.stdout + c.stderr)[-800:]}
+        conv_rc = c.returncode
         q = subprocess.run([sys.executable, str(FORGE_ROOT / "solver_density_cuda" / "tools" / "check_mesh_quality.py"),
                             "nozzle_qc.h5", "--ar-max", str(int(ar_max))], cwd=t, capture_output=True, text=True, timeout=1800)
     lines = [ln for ln in q.stdout.splitlines() if ln.strip()]
     v = next((ln for ln in reversed(lines) if ln.startswith("VERDICT")), "VERDICT: ?")
     return {"verdict": "PASS" if v.startswith("VERDICT: PASS") else "FAIL", "verdict_line": v, "ar_max": ar_max,
-            "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv)}
+            "summary": [ln for ln in lines if ("AR" in ln or "skew" in ln)][:6], "converter": str(conv), "config_source": src_cfg.name,
+            "converter_rc": conv_rc}
+
+
+def _wall_slope(run: Path, coords, bedges) -> tuple:
+    """壁法線の近壁層の格子 (構造ファイル v2) に渡す station ごとの壁の傾き r′ = dr/dx (plan tooling-nozzle-card-local-mesh §5.1 #5)。
+    run の壁ファイル (`load_wall_file(run)["physical"]` の r(x, 1)) を壁の節点の x [m] / scale_m (r_t 単位) で評価する。
+    壁の節点の x が定義域の外に丸めの分 (定義域の幅の 1e-9 以内) だけ出ていれば端で評価する。戻り値は (傾き, 出典 dict, None)、
+    作れないときは (None, None, 理由)。縦線の格子では extract_structure が傾きを使わない (v1 の出力は渡しても同じ)。"""
+    from ..geometry.wall_axismach import load_wall_file
+    try:
+        W = load_wall_file(run)
+        ni, nj = len(bedges["wall"]) + 1, len(bedges["inlet"]) + 1
+        if coords.shape[0] != ni * nj:
+            raise ValueError(f"節点数 {coords.shape[0]} が ni·nj = {ni * nj} でない")
+        scale = float(W["scale_m"])
+        x = np.asarray(coords[:, 0], dtype=float).reshape(ni, nj)[:, -1] / scale
+        lo, hi = (float(v) for v in W["domain"])
+        tol = 1e-9 * (hi - lo)
+        if x.min() < lo - tol or x.max() > hi + tol:
+            raise ValueError(f"壁の節点の x [{x.min():.12g}, {x.max():.12g}] r_t が壁ファイルの定義域 [{lo:.12g}, {hi:.12g}] の外")
+        xc = np.clip(x, lo, hi)
+        rp = np.asarray(W["physical"].r(xc, 1), dtype=float)
+        if rp.shape != x.shape or not np.all(np.isfinite(rp)):
+            raise ValueError("壁の傾きが非有限か形が違う")
+    except Exception as e:  # noqa: BLE001 — 作れなければ理由を返す (縦線の格子は傾きなしで v1 を作る)
+        return None, None, f"{type(e).__name__}: {e}"
+    src = {"file": Path(W["path"]).name, "sha256": _sha(Path(W["path"])), "kind": W["kind"], "scale_m": scale,
+           "how": "load_wall_file(run)['physical'].r(x, 1)、x = 壁の節点の x [m] / scale_m (r_t 単位)",
+           "n_clipped_to_domain": int(np.sum(xc != x))}
+    return rp, src, None
+
+
+def _rule_params(run: Path, msh_sha256: str) -> tuple:
+    """構造ファイル v2 の規則の照合に渡す mesh2d の規則のパラメータ (plan tooling-nozzle-card-local-mesh §5.1 #5 の判断)。
+    run の prepare_info.json の `mesh.params` (生成に使った Mesh2DParams そのもの; `mesh.block` は問題 YAML の mesh 節で、
+    wall_normal_end_stations を書かないことがある) の `wall_normal_layer`・`wall_normal_end_stations` (キーが無ければ null =
+    Mesh2DParams の既定) を取る。出典に prepare_info.json の sha256 と、そこに記録された msh の sha256 が run の nozzle.msh と
+    一致するかを書く。戻り値は (rule_params, None)、取れないときは (None, 理由)。"""
+    p = run / "prepare_info.json"
+    try:
+        info = json.loads(p.read_text())
+        mesh = info["mesh"]
+        prm = mesh["params"]
+        wnl = prm.get("wall_normal_layer")
+        if wnl is None:
+            raise ValueError("prepare_info.json の mesh.params に wall_normal_layer が無い (null)")
+    except Exception as e:  # noqa: BLE001 — 取れなければ理由を返す (規則の照合は未実施になる)
+        return None, f"{type(e).__name__}: {e}"
+    rec = (mesh.get("hashes") or {}).get("msh_sha256")
+    src = {"file": p.name, "sha256": _sha(p), "key": "mesh.params",
+           "msh_sha256_recorded": rec, "msh_sha256_matches": None if rec is None else rec == msh_sha256}
+    return {"wall_normal_layer": list(wnl), "wall_normal_end_stations": prm.get("wall_normal_end_stations"), "source": src}, None
 
 
 def part_mesh(run: Path, out: Path) -> dict:
@@ -190,14 +269,27 @@ def part_mesh(run: Path, out: Path) -> dict:
     res = {"msh41": "mesh/nozzle.msh", "msh41_sha256": _sha(d / "nozzle.msh")}
     res["msh22"] = _gmsh(_MSH22, d / "nozzle.msh", d / "nozzle_v22.msh")
     coords, quads, bedges, tags = ms.read_msh41_mesh2d(d / "nozzle.msh")
+    # 壁の傾きは壁法線の近壁層の格子 (縦線でない) の構造ファイル v2 に要る。縦線の格子は渡しても v1 のまま (出力は今までと同じ)
+    slope, slope_src, slope_why = _wall_slope(run, coords, bedges)
+    # 規則のパラメータ (v2 の規則の照合; 取れなければ照合は未実施と記録される)
+    rule, rule_why = _rule_params(run, res["msh41_sha256"])
     try:
-        st = ms.extract_structure(coords, quads, bedges)
-    except Exception as e:  # noqa: BLE001 — 縦線でない格子などは構造ファイルを作らず理由を書く
-        res["structure"] = f"作らない: {type(e).__name__}: {e}"
+        st = ms.extract_structure(coords, quads, bedges, wall_slope=slope, wall_slope_source=slope_src, rule_params=rule)
+    except Exception as e:  # noqa: BLE001 — 規則に従わない格子・壁の傾きを作れない非縦線の格子は構造ファイルを作らず理由を書く
+        res["structure"] = f"作らない: {type(e).__name__}: {e}" + (f" (壁の傾きを作れない: {slope_why})" if slope_why else "")
         return res
     ms.write_structure_json(st, d / "mesh_structure.json")
     shutil.copy2(HERE / "rebuild_from_step.py", d / "rebuild_from_step.py")
     res["structure"] = "mesh/mesh_structure.json"
+    res["structure_format"] = st["format"]
+    if st["format"] == ms.FORMAT_V2:                 # 壁法線の近壁層の格子: 節点の規則・自己検査・規則の照合・出典
+        res["structure_node_rule"] = st["node_rule"]
+        res["structure_self_check"] = st["checks"]["self_check"]
+        res["structure_rule_check"] = st["checks"]["rule_check"]
+        res["structure_wall_slope_source"] = st["wall_slope_source"]
+        res["structure_rule_params"] = st["rule_params"]
+        if rule is None:
+            res["structure_rule_params_missing"] = rule_why
     step = out / "cad" / "wall_physical.step"
     if step.exists():
         q = subprocess.run([GMSH_PYTHON, str(d / "rebuild_from_step.py"), str(step), str(d / "mesh_structure.json"),
@@ -307,10 +399,22 @@ def _problem_dict(problem) -> dict | None:
     return yaml.safe_load(Path(problem).read_text())
 
 
-def part_excel(run: Path, out: Path, step=None) -> dict:
+def part_wall_compare(run: Path, out: Path) -> dict:
+    """wall_compare/: 設計壁 (Euler で回す壁、境界層なし) と物理壁 (設計壁 + 境界層の厚み = 作る壁) の座標の比較
+    (plan tooling-nozzle-card-local-mesh §5.1 #3u; `wall_compare.export_compare`): 同じ x [mm] (形状表と同じ点) の半径・差 Δr・壁角の
+    CSV、図 3 枚 (全長・Δr・スロート付近)、説明の JSON。Δr のスロート (x = 0)・出口を prepare_info.json の δ_r の記録と照合し、
+    不一致なら `pass` False (照合できない点があれば None = 合否に入れない)。xlsx のシートは excel の part が足す (export が渡す)。"""
+    from . import wall_compare as wc
+    _need(run, ["wall_repr.json"])
+    return wc.export_compare(run, out / "wall_compare", rel_to=out)
+
+
+def part_excel(run: Path, out: Path, step=None, wall_compare: dict | None = None) -> dict:
     """excel/: 形状表・CFD 壁面量表 (状態つき)・条件・`.xlsx`。壁温分布の run は conditions.csv に壁温の表 (元の座標の種類・元の表・
     実寸の表・区切りの点; `wall_Tw_profile_*`) を足し、xlsx に専用シート `wall_temperature` を足す (run の正本の JSON から;
-    plan tooling-nozzle-wall-temperature-profile §4.4)。CFD 壁面量表の `T_w_K` は壁ダンプの `Ts` のまま (分布が入ったことが見える)。"""
+    plan tooling-nozzle-wall-temperature-profile §4.4)。CFD 壁面量表の `T_w_K` は壁ダンプの `Ts` のまま (分布が入ったことが見える)。
+    `wall_compare` = {"csv": 設計壁と物理壁の比較の表, "notes": [注記]} (同じ書き出しで part_wall_compare が作ったもの; export が渡す) が
+    あれば xlsx の最後にシート `wall_compare` を足す (None なら今までどおり)。"""
     from . import wall_tables as wt
     wtp = _wall_profile(run)                                  # 正本の照合 (不合格なら excel/ に何も書かない)
     d = out / "excel"
@@ -390,7 +494,11 @@ def part_excel(run: Path, out: Path, step=None) -> dict:
                                     (d / "wall_cfd_nodes.csv") if (d / "wall_cfd_nodes.csv").exists() else None,
                                     {k: f"{v[0]} {v[1]}" for k, v in conds.items()}, notes, PPTX_PYTHON,
                                     thermal_use=str(tu_short["verdict"]),
-                                    wall_temperature=_wall_profile_sheet(wtp) if wtp is not None else None)
+                                    wall_temperature=_wall_profile_sheet(wtp) if wtp is not None else None,
+                                    wall_compare=wall_compare)
+        if wall_compare is not None:
+            res["wall_compare_sheet"] = {"sheet": "wall_compare", "csv": str(Path(wall_compare["csv"]).relative_to(out))
+                                         if Path(wall_compare["csv"]).is_relative_to(out) else str(wall_compare["csv"])}
     else:
         res["xlsx"] = "飛ばした: xlsxwriter (.venv-pptx) が無い"
     return res
@@ -474,7 +582,10 @@ def part_dimensions(run: Path, out: Path, card_path) -> dict:
         # 弦の形状誤差は配布するメッシュ (run の nozzle.msh = mesh/nozzle.msh) と配布する STEP から測る (codex result レビュー 2 回目 M1)
         chord = dg.chord_from_mesh(step, run / "nozzle.msh") if (run / "nozzle.msh").exists() else None
         res["chord"] = chord
-        g = dg.evaluate_gate(card, sd, md, dt, chord)
+        # 直管と縮流部の接合: STEP の曲線から決めた接合を越える区間の壁節点の半径を曲線と照合 (plan tooling-nozzle-card-local-mesh §5.1 #3j)
+        junction = dg.junction_from_mesh(step, run / "nozzle.msh", sd["straight"]["x_end_mm"]) if (run / "nozzle.msh").exists() else None
+        res["junction"] = junction
+        g = dg.evaluate_gate(card, sd, md, dt, chord, junction)
         res.update(g)
         res["card"] = str(card_path)
         res["card_sha256"] = _sha(Path(card_path))
@@ -514,13 +625,32 @@ def _readme_wall_profile(man: dict, wtp: dict) -> list:
     return L
 
 
+def _readme_wall_compare(man: dict) -> tuple:
+    """README の設計壁と物理壁の比較の行 (冒頭の 1 行と、注意の節の Δr の意味の行)。"""
+    wc = man["parts"].get("wall_compare")
+    if not isinstance(wc, dict) or not wc.get("ok"):
+        why = man["skipped"].get("wall_compare") or man["errors"].get("wall_compare") or "理由不明"
+        return f"- **設計壁と物理壁の比較** (`wall_compare/`): 作っていない ({why})", []
+    chk = wc.get("delta_record_check") or {}
+    f = lambda v: "—" if v is None else f"{v:.6g} mm"                       # noqa: E731
+    head = (f"- **設計壁と物理壁の比較** (`wall_compare/`): Δr = r_物理 − r_設計 は設計スロート (x = 0) で {f(wc.get('dr_throat_mm'))}・"
+            f"出口で {f(wc.get('dr_exit_mm'))}。prepare の δ_r の記録との照合: **{chk.get('status', '未照合')}** "
+            "(`wall_compare/wall_design_vs_physical.json` の `delta_record_check`)")
+    mean = [t for t in wc.get("notes") or [] if t.startswith("Δr の意味")]
+    note = ["- 設計壁と物理壁の比較 (`wall_compare/`) の Δr は区間で意味が違う:"]
+    note += [f"  - {t.split('— ', 1)[-1]}" for t in mean]
+    return head, note
+
+
 def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
     dim = man["parts"].get("dimensions", {}).get("verdict", "未判定")
     th = (man["parts"].get("excel", {}).get("thermal_use") or {})
     thv = th.get("verdict", "未評価") if isinstance(th, dict) else str(th)
+    wc_head, wc_note = _readme_wall_compare(man)
     L = [f"# ノズルの成果物一式 — `{run.name}`", "",
          f"- **寸法の出荷ゲート**: **{dim}** (`DIMENSIONS.json`: STEP とメッシュから測り直した寸法と要求カードの公差)",
          f"- **壁面の熱量を熱設計に使えるか (`thermal_use`)**: **{thv}**",
+         wc_head,
          "- **Fluent での読み込み**: 未確認 (手元に Fluent が無い。`fluent/nozzle_2d_axi.msh` を読んで `Mesh > Check` の結果を教えてほしい)",
          f"- 総合: **{man['verdict']}**", "",
          "## 単位・座標", "",
@@ -530,9 +660,12 @@ def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
          "## フォルダ", "",
          "| フォルダ | 中身 |", "| --- | --- |",
          "| `cad/` | `wall_physical.step` (2D の壁曲線、5 次 B-spline 1 本)・`wall_surface.step` (3D の内面)・`wall_surface.stl`・検査の JSON |",
-         "| `mesh/` | `nozzle.msh` (解析に使った msh4.1)・`nozzle_v22.msh` (msh2.2、番号は gmsh が振り直す)・`mesh_structure.json`・`rebuild_from_step.py` (STEP から同じ構造で作り直す: `python rebuild_from_step.py STEP mesh_structure.json OUT [--compare nozzle.msh]`、gmsh が要る)・その実行例 `rebuilt_from_step*` |",
+         "| `mesh/` | `nozzle.msh` (解析に使った msh4.1)・`nozzle_v22.msh` (msh2.2、番号は gmsh が振り直す)・`mesh_structure.json` (構造ファイル: 半径方向の格子線の格子は v1、壁法線の近壁層の格子は v2 = 節点の規則 `wall_normal_blend_v1` と重み β・壁の傾き)・`rebuild_from_step.py` (STEP から同じ構造で作り直す: `python rebuild_from_step.py STEP mesh_structure.json OUT [--compare nozzle.msh]`、gmsh が要る)・その実行例 `rebuilt_from_step*` |",
          "| | 作り直しの出力: `OUT.msh` = forge の変換器に入れる形 (元と同じ番号・書式、座標 17 桁)、`OUT_cad.msh` = 壁の節点が STEP の曲線に分類された gmsh の msh4.1 (**forge の変換器には入れない**: ファイル内の節点の順が番号順でない)、`OUT_v22.msh`・`OUT.cgns` (番号・物理タグは gmsh が振り直す。物理名で対応付ける) |",
          "| `fluent/` | `nozzle_2d_axi.msh` (Fluent 形式、境界の名前と型つき)・`nozzle_2d_axi.cgns`・`boundary_conditions.md` (動作圧 0 Pa で絶対圧を入れる) |",
+         "| `wall_compare/` | `wall_design_vs_physical_mm.csv` (同じ x [mm] で設計壁 = Euler で回す壁 (境界層なし) と物理壁 = 作る壁 (設計壁 + 境界層の厚み) の"
+         "半径・差 Δr = r_物理 − r_設計・壁角。x の点は形状表と同じ。xlsx のシート `wall_compare` にも入れた)・図 (`*_full.png` 全長の壁の形・"
+         "`*_dr.png` Δr の分布・`*_throat.png` スロート付近の拡大)・`wall_design_vs_physical.json` (列の意味・区間・δ_r の記録との照合) |",
          "| `excel/` | `wall_shape_mm.csv` (形状表)・`wall_cfd_nodes.csv` (壁節点ごとの圧力・温度・せん断・熱量)・`conditions.csv`・`nozzle_tables.xlsx` |", "",
          "## 注意", "",
          "- forge は節点中心、Fluent はセル中心。同じメッシュでも壁の第 1 未知数までの距離は Fluent が約半分になる。",
@@ -542,9 +675,14 @@ def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
          "- 壁の両端の節点 (入口・出口の角) の熱量は信頼できない (別の壁との境目で再構成勾配との比が 2〜4 倍になった例がある。原因は未確認)。"
          "`excel/wall_cfd_nodes.status.json` の `end_nodes` を見る。",
          "- STEP を CAD で編集したら `rebuild_from_step.py` で作り直し、`check_mesh_quality.py` で格子品質を確かめる。",
+         "- 壁法線の近壁層の格子 (`mesh_structure.json` が v2) の作り直しは、STEP の曲線の傾きで近壁の節点を壁の法線上に置く。"
+         "入口・出口の面は直線 (x 一定) のままなので、端の列の節点が直線から外れることがある (外れる量は `mesh/rebuilt_from_step_compare.json` の `end_columns`)。"
+         "構造ファイルを作るときに、格子の生成の記録 (run の `prepare_info.json` の `mesh.params`) の規則のパラメータで節点を置き直して元と照合した"
+         " (`MANIFEST.json` の `structure_rule_check`。記録が無ければ「未実施」)。",
          f"- STL (`cad/wall_surface.stl`) は表示・形の確認用の近似: 弦誤差の設定 {_stl_setting(man)}。寸法の正本は STEP。",
          "- CGNS (`fluent/nozzle_2d_axi.cgns`) を Fluent で読むと**境界の型は付かない** (入口・出口・壁・軸を Fluent 側で付け直す)。"
-         "gmsh で読み直すと物理タグの番号も振り直されるので、境界は**名前**で対応付ける。型つきの Fluent 形式は `fluent/nozzle_2d_axi.msh`。", ""]
+         "gmsh で読み直すと物理タグの番号も振り直されるので、境界は**名前**で対応付ける。型つきの Fluent 形式は `fluent/nozzle_2d_axi.msh`。"]
+    L += wc_note + [""]
     if wtp is not None:                                       # 壁温分布の run だけ (一様・断熱の README は変えない)
         L.insert(L.index(f"- 総合: **{man['verdict']}**") + 1,
                  "- **壁温**: 分布 (`fluent/wall_temperature.prof` の point profile; 下の「壁温分布」。Fluent での読み込みは未確認)")
@@ -574,8 +712,13 @@ def export(run_dir, out_dir=None, card=None, step=None, skip=(), freecadcmd=None
         log.run("mesh", lambda: part_mesh(run, out))
     if "fluent" not in skip:
         log.run("fluent", lambda: part_fluent(run, out, problem))
+    if "wall_compare" not in skip:
+        log.run("wall_compare", lambda: part_wall_compare(run, out))
     if "excel" not in skip:
-        log.run("excel", lambda: part_excel(run, out, step))
+        # 比較の表は、この書き出しで wall_compare が作れたときだけ xlsx のシートにする (古い出力の残りを拾わない)
+        wcp = log.parts.get("wall_compare") or {}
+        wcx = {"csv": out / wcp["csv"], "notes": wcp["notes"]} if wcp.get("ok") and wcp.get("csv") else None
+        log.run("excel", lambda: part_excel(run, out, step, wall_compare=wcx))
     if "dimensions" not in skip:
         log.run("dimensions", lambda: part_dimensions(run, out, card))
     for s in skip:

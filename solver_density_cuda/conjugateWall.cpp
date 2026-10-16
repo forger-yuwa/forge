@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -10,6 +11,7 @@
 #include <sstream>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 
@@ -1036,9 +1038,29 @@ int stepOffsetForOutput()
     return off;
 }
 
-void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
+void diagStateBytes(std::vector<char>& out)
 {
-    if (!conjugateActive(cfg, msh)) return;
+    out.clear();
+    auto put = [&](const void* p, size_t n) { const char* c = static_cast<const char*>(p); out.insert(out.end(), c, c + n); };
+    auto putv = [&](const std::vector<double>& v) { const uint64_t n = v.size(); put(&n, sizeof n); if (n) put(v.data(), n * sizeof(double)); };
+    for (const auto& kv : solidStates()) {
+        const SolidState& st = kv.second;
+        put(&kv.first, sizeof kv.first);
+        putv(st.u); putv(st.qIface); putv(st.uFact); putv(st.dfFact); putv(st.lumped);
+        const uint64_t nb = st.qBuf.size(); put(&nb, sizeof nb);
+        for (const auto& q : st.qBuf) putv(q);
+        const char flags[2] = {(char)st.hasFact, (char)st.ready}; put(flags, sizeof flags);
+        put(&st.dTgrowStart, sizeof st.dTgrowStart); put(&st.stepOffset, sizeof st.stepOffset);
+        put(&st.nFact, sizeof st.nFact); put(&st.nUpdate, sizeof st.nUpdate);
+        put(&st.qPos, sizeof st.qPos); put(&st.qFilled, sizeof st.qFilled);
+        put(&st.dTprev, sizeof st.dTprev); put(&st.nGrow, sizeof st.nGrow);
+    }
+}
+
+std::vector<std::string> writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep, bool force)
+{
+    std::vector<std::string> written;
+    if (!conjugateActive(cfg, msh)) return written;
     const bool nodeMode = (cfg.discretization == "node");
     for (const bcond& bc : msh.bconds) {
         if (!bcondIsConjugate(bc)) continue;
@@ -1052,8 +1074,10 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
         // `writeStepOutputs` には **`iStep+1` (= 完了した step 数)** が渡る (main.cpp:1808)。
         // `nStepOuter-1` で判定していたため固体だけ 1 step 早く保存され、流体 `res_19975.h5` に対し
         // 固体が `res_solid_5_19974.h5` になっていた (codex result 3 巡目 M1)。
+        // 協調停止・随時の書き出しの step (force) も書く: 流体の場と固体の状態を同じ step で残す
+        // (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1b)。
         const bool lastStep = (cfg.nStepOuter > 0) && (iStep == cfg.nStepOuter);
-        const bool outStep = lastStep
+        const bool outStep = force || lastStep
                           || ((cfg.outStepInterval > 0)
                               && (iStep % cfg.outStepInterval == 0) && (iStep >= cfg.outStepStart));
 
@@ -1065,10 +1089,12 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
                 oss << "res_solid_" << bc.physID << "_" << iStep;
                 conjugate::writeSolidField(oss.str(), st.mesh, st.u, st.qIface,
                                            (double)iStep);
+                written.push_back(oss.str() + ".h5");
+                written.push_back(oss.str() + ".xmf");
                 // 再開用の状態 (可視化の間引きと混ぜない)。
+                const std::string stateFile = "conjugate_state_" + std::to_string(bc.physID) + ".h5";
                 try {
-                    HighFive::File f("conjugate_state_" + std::to_string(bc.physID) + ".h5",
-                                     HighFive::File::Overwrite);
+                    HighFive::File f(stateFile, HighFive::File::Overwrite);
                     f.createDataSet("SOLID/T", st.u);
                     // **平均バッファと更新位相も保存する** (codex result 2026-09-23 M4)。
                     // 壁温 CSV だけでは連成状態 (内部温度・42 更新の荷重履歴) が失われる。
@@ -1086,7 +1112,10 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
                 } catch (const std::exception& e) {
                     std::cerr << "[conjugateWall] WARNING: conjugate_state を書けない: "
                               << e.what() << "\n";
+                    // 協調停止・随時の書き出しの step では失敗として呼び出し側へ返す (STOPPED_AT / SNAPSHOT_DONE を置かせない)
+                    if (force) throw std::runtime_error(stateFile + " を書けない: " + e.what());
                 }
+                written.push_back(stateFile);
             }
         }
         const auto it = bc.bvar.find("Ts");
@@ -1095,7 +1124,8 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
         // 1 step あたり ~0.14 ms かかり、連成の per-step コストの大半を占める (2026-09-23 実測)。
         // 再開に要るのは最新版だけなので、流体の出力間隔に合わせる。
         if (!outStep && iStep != 0) continue;
-        std::ofstream ofs("conjugate_Tw_" + std::to_string(bc.physID) + ".csv");
+        const std::string twFile = "conjugate_Tw_" + std::to_string(bc.physID) + ".csv";
+        std::ofstream ofs(twFile);
         ofs << "x y z Ts\n";
         ofs.precision(10);
         for (size_t ib = 0; ib < bc.iCells.size() && ib < it->second.size(); ++ib) {
@@ -1103,7 +1133,13 @@ void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep)
             ofs << std::scientific << xyz[0] << " " << xyz[1] << " " << xyz[2] << " "
                 << (double)it->second[ib] << "\n";
         }
+        if (force) {
+            ofs.flush();
+            if (!ofs) throw std::runtime_error(twFile + " を書けない");
+        }
+        written.push_back(twFile);
     }
+    return written;
 }
 
 } // namespace conjugateWall

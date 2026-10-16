@@ -1,0 +1,28 @@
+{
+ "ar_threshold": 1000.0,
+ "skew_max": 0.1,
+ "ar_max_allowed": 5000.0,
+ "required": true,
+ "source": "nozzle_qc.h5 (primal/cell \u5909\u63db)",
+ "n_cells": 436709,
+ "max_ar": 4849.033232875743,
+ "max_skew": 0.42120172946716894,
+ "n_high_ar": 36115,
+ "max_skew_high_ar": 0.0015197503758021943,
+ "n_violations": 0,
+ "worst_high_ar": {
+  "x_over_rt": -4.160314013024643,
+  "r_over_rt": 2.93754980072984,
+  "ar": 1072.1068039173476,
+  "skew": 0.0015197503758021943
+ },
+ "high_ar_x_range_over_rt": [
+  -10.003114175202,
+  44.09059613733294
+ ],
+ "inlet_x_spread_m": 0.0,
+ "inlet_planar": true,
+ "outlet_x_spread_m": 0.0006213013315274907,
+ "outlet_planar": false,
+ "ok": false
+}

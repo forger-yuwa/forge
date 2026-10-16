@@ -1,0 +1,18 @@
+{
+ "ar_threshold": 1000.0,
+ "skew_max": 0.1,
+ "ar_max_allowed": 1000.0,
+ "required": false,
+ "source": "nozzle_qc.h5 (primal/cell \u5909\u63db)",
+ "n_cells": 460704,
+ "max_ar": 6.144806253943473,
+ "max_skew": 0.3981261461656235,
+ "n_high_ar": 0,
+ "max_skew_high_ar": null,
+ "n_violations": 0,
+ "inlet_x_spread_m": 0.0,
+ "inlet_planar": true,
+ "outlet_x_spread_m": 0.0,
+ "outlet_planar": true,
+ "ok": true
+}

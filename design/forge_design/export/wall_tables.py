@@ -4,7 +4,10 @@ r"""Excel 向けの壁の表 (plans/accepted/tooling-nozzle-wt-deliverables.md �
 - `cfd_wall_table`: CFD の壁節点ごとの壁面量表 `wall_cfd_nodes.csv` [SI] と状態 `wall_cfd_nodes.status.json`。
 - `wall_heat_series`: 全 `res_<壁名>_<physID>_<step>.h5` の総熱量の時系列 (`check_quasisteady.py --series-csv` の入力)。
 - `thermal_use`: 壁面量を熱設計に使えるかの判定 (収束・熱量の準定常 [総熱量と壁の全節点の熱量、16 区間の和は補助]・壁解像・熱量の状態)。
+  収束の道具は run_case.sh・受け渡しの関門と同じ規則 (`settle.select_judge`; plan tooling-settle-convergence-and-monitor §5.1 #7b):
+  `settle_criteria.yaml` のある run の本段は `check_settled.py --bind` (停止規則 v2 の再評価と照合)、それ以外は今どおり `check_convergence.py`。
 - `write_xlsx`: 上の CSV と条件・注記を `.xlsx` に (`.venv-pptx` の xlsxwriter を subprocess で呼ぶ)。
+- `table_x_mm`: 形状表の x の点 (粗 1 mm・スロート付近 0.1 mm)。設計壁と物理壁の比較の表 (`wall_compare.py`) も同じ点を使う。
 
 **熱量の正本** (plan §3・§4.5、codex plan レビュー M1・M3): 壁へ入る熱は積分済みの節点熱量 `iface_Qf_eff` (固体向き正、
 `methods/boundary.md`「界面熱量の 4 つの定義」) から作る。軸対称 (`mesh.isAxisymmetric: 1`・`axisymMethod: 0`) では流体の面ベクトルが
@@ -42,7 +45,19 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[3]
 TOOLS = REPO / "solver_density_cuda" / "tools"
-PPTX_PY = os.environ.get("FORGE_PPTX_PY", "/home/sano/work/forge/.venv-pptx/bin/python")
+def _pptx_python() -> str:
+    """xlsxwriter を入れた Python: 環境変数 FORGE_PPTX_PY → リポジトリ直下の .venv-pptx → 主の作業ツリーの .venv-pptx (以前はこのマシンの絶対パス)。"""
+    root = Path(__file__).resolve().parents[3]
+    if os.environ.get("FORGE_PPTX_PY"):
+        return os.environ["FORGE_PPTX_PY"]
+    for r in (root, root.parent / "forge"):
+        c = r / ".venv-pptx" / "bin" / "python"
+        if c.exists():
+            return str(c)
+    return str(root / ".venv-pptx" / "bin" / "python")
+
+
+PPTX_PY = _pptx_python()
 WALL_KINDS = ("wall", "wall_isothermal")
 SHAPE_COLUMNS = ("x_mm", "r_mm", "wall_angle_deg", "curvature_radius_mm", "s_mm", "perimeter_mm", "lateral_area_cum_mm2")
 # 曲率がこれ以下なら直線とみなして曲率半径を inf にする [1/mm] (STEP の転送誤差の曲率の許容 wall_step.TRANSFER_TOL と同じ値)
@@ -81,6 +96,19 @@ def _write_csv(path: Path, columns, cols_data) -> None:
 # 形状表
 # ---------------------------------------------------------------------------------------------------------------------
 
+def table_x_mm(X0: float, X1: float, s_mm: float, coarse_mm: float = 1.0, fine_per_mm: int = 10,
+               throat_half_width_mm: float | None = None) -> tuple:
+    """表の x の点 [mm] (形状表と壁の比較の表で共通): `coarse_mm` ごと + スロート付近 ($|x| \\le$ hw) は 1/`fine_per_mm` mm ごと、
+    両端 X0・X1 を含む。hw の既定は $\\max(50\\,\\mathrm{mm}, 2 r_t)$ (`s_mm` = r_t [mm])。戻り: (x の点, hw)。"""
+    hw = max(50.0, 2.0 * s_mm) if throat_half_width_mm is None else float(throat_half_width_mm)
+    k0, k1 = math.ceil(X0 / coarse_mm), math.floor(X1 / coarse_mm)
+    xc = np.arange(k0, k1 + 1, dtype=float) * coarse_mm
+    f0, f1 = math.ceil(max(-hw, X0) * fine_per_mm), math.floor(min(hw, X1) * fine_per_mm)
+    xf = np.arange(f0, f1 + 1, dtype=float) / float(fine_per_mm)  # k/10 は 10 進の 0.1 刻みに最も近い浮動小数 (repr で短く出る)
+    xm = np.unique(np.r_[xc, xf, X0, X1])
+    return xm[(xm >= X0) & (xm <= X1)], hw
+
+
 def shape_table(wall_file_dir_or_json, out_csv, coarse_mm: float = 1.0, fine_per_mm: int = 10,
                 throat_half_width_mm: float | None = None, n_sub: int = 16) -> dict:
     """物理壁の形状表 (plan §4.5): 1 mm ごと + スロート付近 ($|x| \\le \\max(50\\,\\mathrm{mm}, 2 r_t)$) は 0.1 mm ごと、両端を含む。
@@ -100,13 +128,7 @@ def shape_table(wall_file_dir_or_json, out_csv, coarse_mm: float = 1.0, fine_per
     s_mm = 1000.0 * float(W["scale_m"])                       # r_t → mm
     x0, x1 = (float(v) for v in W["domain"])                  # r_t
     X0, X1 = x0 * s_mm, x1 * s_mm
-    hw = max(50.0, 2.0 * s_mm) if throat_half_width_mm is None else float(throat_half_width_mm)
-    k0, k1 = math.ceil(X0 / coarse_mm), math.floor(X1 / coarse_mm)
-    xc = np.arange(k0, k1 + 1, dtype=float) * coarse_mm
-    f0, f1 = math.ceil(max(-hw, X0) * fine_per_mm), math.floor(min(hw, X1) * fine_per_mm)
-    xf = np.arange(f0, f1 + 1, dtype=float) / float(fine_per_mm)  # k/10 は 10 進の 0.1 刻みに最も近い浮動小数 (repr で短く出る)
-    xm = np.unique(np.r_[xc, xf, X0, X1])
-    xm = xm[(xm >= X0) & (xm <= X1)]
+    xm, hw = table_x_mm(X0, X1, s_mm, coarse_mm, fine_per_mm, throat_half_width_mm)
 
     def ev(x_mm, d=0):
         return phys.r(np.clip(np.asarray(x_mm, dtype=float) / s_mm, x0, x1), d)
@@ -233,15 +255,17 @@ def _select_step(dumps: dict, step) -> int:
     return step
 
 
-def _read_dump(path: Path, step: int) -> tuple[dict, np.ndarray]:
+def _read_dump(path: Path, step: int) -> tuple[dict, np.ndarray, bool]:
+    """壁ダンプの値・座標 (倍精度に直す) と、座標が float32 で書かれていたか (forge の float ビルド)。"""
     import h5py
     with h5py.File(path, "r") as f:
         st = f.attrs.get("step")
         if st is not None and int(st) != int(step):
             raise ValueError(f"{path.name}: 属性 step {int(st)} ≠ ファイル名の step {step} (異なる step の混入)")
         V = {k: np.array(f["VALUE"][k]) for k in f["VALUE"]}
+        xyz32 = f["MESH/COORD"].dtype == np.float32
         xyz = np.array(f["MESH/COORD"], dtype=float).reshape(-1, 3)
-    return V, xyz
+    return V, xyz, bool(xyz32)
 
 
 def _chain(edges: np.ndarray, xyz: np.ndarray) -> list:
@@ -293,14 +317,23 @@ def _wall_block(run_dir: Path, rc: dict, pid: int, path: Path, step: int, mesh_c
         raise ValueError(f"BCONDS/{pid}: iCells が節点数を超える (node 方式のメッシュだけ対応)")
     if not np.all(vs == 2):
         raise ValueError(f"BCONDS/{pid}: 境界面が線分でない (2D の壁だけ対応)")
-    V, wxyz = _read_dump(path, step)
+    V, wxyz, wxyz32 = _read_dump(path, step)
     n = len(V["ro"]) if "ro" in V else len(wxyz)
     if n != len(icells) or len(wxyz) != len(icells):
         raise ValueError(f"{path.name}: 壁ダンプの点数 {n} (座標 {len(wxyz)}) ≠ BCONDS/{pid} の境界面数 {len(icells)} (node 方式の壁ダンプだけ対応)")
     # 壁ダンプの点を座標で境界面 (ib) に対応づける (順序を仮定しない; check_wall_resolution.py と同じ許容)
     d, jmap = cKDTree(nodes[icells]).query(wxyz)
     scale = float(np.median(np.linalg.norm(np.diff(wxyz[:min(len(wxyz), 200)], axis=0), axis=1))) if len(wxyz) > 1 else 1.0
-    if float(d.max()) > 1e-6 * max(scale, 1e-12) + 1e-12 or len(np.unique(jmap)) != len(jmap):
+    tol = 1e-6 * max(scale, 1e-12) + 1e-12
+    # forge の float ビルドの壁ダンプは座標が float32 で、倍精度のメッシュの節点から丸め幅 (≤ 0.5 ulp ≈ 6e-8 |x|) だけずれる
+    # (2026-10-16 試走 case/90 run_0005_ns_p1: 最大 2.4e-7 m で止まった)。check_wall_resolution.py と同じく、丸め幅を許容に足すのは
+    # 壁の節点の最小間隔の 1/4 未満のとき (対応づけが一意である範囲) だけ
+    if wxyz32 and len(icells) > 1:
+        tol32 = 2.0 * float(np.finfo(np.float32).eps) * float(np.abs(wxyz).max())
+        dd, _ = cKDTree(nodes[icells]).query(nodes[icells], k=2)
+        if tol32 < 0.25 * float(dd[:, 1].min()):
+            tol = max(tol, tol32)
+    if float(d.max()) > tol or len(np.unique(jmap)) != len(jmap):
         raise ValueError(f"{path.name}: 壁ダンプの点を節点に 1 対 1 で対応づけられない (最大 {float(d.max()):.3e} m)")
     k_of_ib = np.empty(len(icells), dtype=np.int64)
     k_of_ib[jmap] = np.arange(len(jmap))
@@ -629,11 +662,78 @@ def _mirror_for_segment(run_dir: Path, td: Path) -> list:
     return copied
 
 
+def _judge_selection(run_dir: Path) -> dict:
+    """収束の判定の道具の選択 (run_case.sh・stop_rule.postprocess・受け渡しの関門と同じ `settle.select_judge`)。"""
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import settle
+    return settle.select_judge(run_dir)
+
+
+def _settled_convergence(run_dir: Path, st: int, last_step: int, sel: dict, python=None) -> dict:
+    """新方式 (settle_criteria.yaml のある run の本段・手で組んだ run) の収束: `check_settled.py <run> --bind --end-step <st> --no-write
+    --json` (本段の起動・基準との照合の後に判定; run ディレクトリに書かない)。終了コード 0 → PASS、1 (NOT_SETTLED)・2 (DIVERGED) →
+    FAIL、3 (INDETERMINATE: 照合の不一致・判定不能) ほか → 未評価。停止規則 v2 の再評価 (STOP_RULE_STATE.json の reeval) が同じ終端に
+    あれば、量の判定 (digest)・verdict が一致することも確かめ、食い違えば未評価 (記録どうしが合わない場を熱設計に使わない)。
+    verdict_line には道具の名前を入れる (成果物の xlsx の注記・status.json にどちらの道具かが残る)。"""
+    conv = {"tool": "check_settled.py --bind", "selection": {k: sel.get(k) for k in ("tool", "mode", "why", "problems")}}
+    if st != last_step:
+        conv.update(result="未評価", reason=f"スナップショット step {st} が最終の壁ダンプ {last_step} でない (判定の終端を切り出さない)")
+        return conv
+    args = [TOOLS / "check_settled.py", run_dir, "--bind", "--no-write", "--json", "--end-step", st]
+    rc_, txt = _run_tool(args, python)
+    conv["cmd"] = " ".join(str(a) for a in args)
+    conv["exit"] = rc_
+    lines = txt.splitlines()
+    vl = next((ln.strip() for ln in reversed(lines) if ln.startswith("VERDICT:")), None)
+    res = None
+    try:
+        a = lines.index("{")
+        b = max(i for i, ln in enumerate(lines) if ln == "}")
+        res = json.loads("\n".join(lines[a:b + 1]))
+    except ValueError:
+        res = None
+    if res is not None:
+        conv["judged"] = {"end_step": res.get("end_step"), "terminal_step": res.get("terminal_step"), "stop_step": res.get("stop_step"),
+                          "verdict": res.get("verdict"), "criteria_sha256": (res.get("criteria") or {}).get("sha256"),
+                          "quantities": {str(q.get("name")): q.get("verdict") for q in res.get("quantities") or []}}
+    where = (f"終端 {res.get('terminal_step')}" + (f"・停止の観測 {res.get('stop_step')}" if res.get("stop_step") is not None else "")
+             if res is not None else f"end_step {st}")
+    conv["verdict_line"] = f"{vl or 'VERDICT: (行なし)'} [check_settled.py --bind、{where}]"
+    result = {0: "PASS", 1: "FAIL", 2: "FAIL"}.get(rc_, "未評価")
+    if result == "未評価":
+        conv["reason"] = vl or f"check_settled.py の終了コード {rc_} (VERDICT の行が無い)"
+    # 停止規則 v2 の再評価との一致 (同じ終端のとき)
+    try:
+        from ..evaluate import stop_rule as SR
+        stt = SR.read_state(run_dir)
+    except Exception:  # noqa: BLE001 — 読めなければ照合しない (記録に残す)
+        stt = None
+    ve = (stt or {}).get("reeval") if isinstance(stt, dict) and stt.get("method") == "v2" else None
+    if isinstance(ve, dict) and ve.get("end_step") == st:
+        same = res is not None and SR.quantities_digest(res) == ve.get("digest") and res.get("verdict") == ve.get("verdict")
+        conv["stop_rule_reeval"] = {"end_step": ve.get("end_step"), "verdict": ve.get("verdict"), "matches": bool(same),
+                                    "state_status": stt.get("status")}
+        if not same and result == "PASS":
+            result = "未評価"
+            conv["reason"] = (f"停止規則 v2 の再評価 (終端 {ve.get('end_step')}、{ve.get('verdict')}) と今の判定が食い違う "
+                              "(記録どうしが合わない場を熱設計に使わない)")
+    else:
+        conv["stop_rule_reeval"] = {"compared": False, "why": ("停止規則 v2 の記録が無い" if not isinstance(ve, dict)
+                                                               else f"再評価の終端 {ve.get('end_step')} が対象の step {st} と違う")}
+    conv["result"] = result
+    return conv
+
+
 def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     """壁面量を熱設計に使えるか (plan §4.5): 対象 snapshot と同じ区間の `check_convergence.py` (`stage_manifest.json` があれば
     `--segment`)・総熱量の時系列に `check_quasisteady.py --series-csv`・`check_wall_resolution.py` の 3 つが合格し、熱量の状態が
     `valid` のときだけ `PASS`。不合格があれば `FAIL`、判定材料が無ければ `未評価`。各ツールの VERDICT 行を返す。
-    ツールは run ディレクトリに書かせない (収束の --segment は入力を一時ディレクトリに写して回す)。"""
+    ツールは run ディレクトリに書かせない (収束の --segment は入力を一時ディレクトリに写して回す)。
+    収束の道具は `settle.select_judge` で選ぶ (plan tooling-settle-convergence-and-monitor §5.1 #7b): settle_criteria.yaml のある run の
+    本段の記録のある run・手で組んだ run は `_settled_convergence` (check_settled.py --bind; 照合の不一致・起動の記録の欠け・前の段と確かめ
+    られない run は判定不能)、それ以外 (基準の無い run・前の段と確かめられた run) は今どおり (plan §5.1 #7c)。
+    基準のある run は判定不能でも check_convergence.py へ落とさない。"""
     run_dir = Path(run_dir)
     T = _build_table(run_dir, step, False, wall_ids, with_y1plus=False)
     st, heat = T["step"], T["status"]
@@ -642,6 +742,20 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
     out = {"run_dir": str(run_dir), "step": st, "walls": {str(b["pid"]): b["name"] for b in T["blocks"]},
            "heat_status": heat, "heat_per_wall": {str(k): v["status"] for k, v in T["per_wall"].items()}}
     # 1. 収束
+    sel = _judge_selection(run_dir) if os.path.lexists(run_dir / "settle_criteria.yaml") else None
+    if sel is not None and sel["tool"] == "check_settled.py":
+        conv = _settled_convergence(run_dir, st, last_step, sel, python)
+    else:
+        conv = _legacy_convergence(run_dir, st, last_step, python)
+        if sel is not None:
+            conv["selection"] = {k: sel.get(k) for k in ("tool", "mode", "why")}
+    out["convergence"] = conv
+    _thermal_use_rest(out, run_dir, T, st, heat, names, python)
+    return out
+
+
+def _legacy_convergence(run_dir: Path, st, last_step, python=None) -> dict:
+    """今までの収束 (`check_convergence.py`; stage_manifest.json があれば --segment を一時ディレクトリで)。"""
     conv = {"tool": "check_convergence.py"}
     if st != last_step:
         conv.update(result="未評価", reason=f"スナップショット step {st} が最終の壁ダンプ {last_step} でない (区間を切り出さない)")
@@ -666,7 +780,12 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
                                    if "NO residual_history" in ln or "判定不能" in ln or "empty residual" in ln), None)
         else:
             conv["result"] = "FAIL"
-    out["convergence"] = conv
+    return conv
+
+
+def _thermal_use_rest(out: dict, run_dir: Path, T: dict, st, heat, names, python=None) -> None:
+    """thermal_use の 2. 総熱量の準定常・3. 壁解像・総合の判定 (out に書く; 収束は out["convergence"] に入っている)。"""
+    conv = out["convergence"]
     # 2. 総熱量の準定常
     qs = {"tool": "check_quasisteady.py --series-csv"}
     if heat != "valid":
@@ -710,7 +829,6 @@ def thermal_use(run_dir, step=None, wall_ids=None, python=None) -> dict:
         out["verdict"] = "未評価"
     out["rule"] = ("収束・熱量の準定常 (総熱量と壁の全節点の熱量; 最悪で判定)・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、"
                    "不合格 (熱量 nonfinite を含む) があれば FAIL、他は未評価")
-    return out
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -826,6 +944,17 @@ if wtj:
         r0 += 1
     ws.freeze_panes(h1 + 1, 0)
     info["wall_temperature"] = {"n_rows": len(wtj["rows"]), "columns": wtj["columns"]}
+wcj = job.get("wall_compare")
+if wcj:
+    # 設計壁と物理壁の比較の表 (CSV のまま) と、表の右に注記 (区間・定義域・空欄の意味)
+    hdr_c, _ = put_csv("wall_compare", wcj["csv"])
+    ws = wb.get_worksheet_by_name("wall_compare")
+    nc = len(hdr_c) + 1
+    ws.write_string(0, nc, "注記", bold)
+    for i, t in enumerate(wcj["notes"], 1):
+        ws.write_string(i, nc, t)
+    info["wall_compare"]["notes_column"] = nc
+    info["wall_compare"]["n_notes"] = len(wcj["notes"])
 wb.close()
 done({"written": True, "skipped": False, "sheets": sheets, "info": info, "xlsxwriter": xlsxwriter.__version__})
 '''
@@ -850,7 +979,7 @@ def _flatten(d, pre=""):
 
 def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None = None, notes: list | None = None,
                python: str | None = None, wall_1d: dict | None = None, timeout: int = 600, thermal_use: str | None = None,
-               wall_temperature: dict | None = None) -> dict:
+               wall_temperature: dict | None = None, wall_compare: dict | None = None) -> dict:
     """形状表・CFD 壁面量表・条件・注記を `.xlsx` に書く (plan §4.5)。xlsxwriter は design の venv に無いので
     `.venv-pptx` の python (`python`、既定 `PPTX_PY`) を subprocess で呼ぶ。python か xlsxwriter が無ければ書かずに
     `{"written": False, "skipped": True, "reason": ...}` を返す (呼び出し側が飛ばしたことを MANIFEST・README に書く)。
@@ -858,7 +987,9 @@ def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None =
     各壁節点の T_back_K = T_w − q t / k)。`wall_1d` = {"t_m": .., "k_W_mK": ..} で入力セルの初期値 (既定は空欄)。
     `wall_temperature` (壁温分布の run だけ; plan tooling-nozzle-wall-temperature-profile §4.4) = {"lines": [説明の行],
     "anchors": [[名前, x_m]], "columns": [列名], "rows": [[数値]]} を渡すと最後に専用シート `wall_temperature` を足す
-    (None なら今までどおり; ほかのシートの並びは変えない)。"""
+    (None なら今までどおり; ほかのシートの並びは変えない)。
+    `wall_compare` (設計壁と物理壁の比較; plan tooling-nozzle-card-local-mesh §5.1 #3u) = {"csv": 比較の表の CSV, "notes": [注記の行]}
+    を渡すと最後にシート `wall_compare` (表と、その右の列に注記) を足す (None なら今までどおり)。"""
     exe = python or PPTX_PY
     if not Path(exe).exists():
         return {"written": False, "skipped": True, "reason": f"python が無い: {exe}"}
@@ -875,6 +1006,8 @@ def write_xlsx(out_xlsx, shape_csv=None, cfd_csv=None, conditions: dict | None =
                "wall_1d": dict(wall_1d or {}), "thermal_use": thermal_use}
         if wall_temperature is not None:
             job["wall_temperature"] = wall_temperature
+        if wall_compare is not None:
+            job["wall_compare"] = {"csv": str(Path(wall_compare["csv"]).resolve()), "notes": [str(t) for t in wall_compare["notes"]]}
         jp.write_text(json.dumps(job, ensure_ascii=False))
         q = subprocess.run([exe, "-I", str(sp), str(jp)], capture_output=True, text=True, timeout=timeout, cwd=td)
         if not rp.exists():

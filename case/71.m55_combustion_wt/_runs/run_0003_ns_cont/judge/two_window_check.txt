@@ -1,0 +1,55 @@
+tol_mm 0.01
+{
+ "step": 200000,
+ "windows": [
+  [
+   160000,
+   180000
+  ],
+  [
+   180000,
+   200000
+  ]
+ ],
+ "tol_mm": 0.01,
+ "n_cols": 3153,
+ "pass": false,
+ "required": {
+  "n": 21,
+  "first": 160000,
+  "last": 200000,
+  "out_step_interval": 2000
+ },
+ "n": [
+  11,
+  11
+ ],
+ "worst": {
+  "delta_E.range_W1": {
+   "max_mm": 0.05141856376419086,
+   "x_at_max": 14.851374194372852
+  },
+  "delta_E.range_W2": {
+   "max_mm": 0.06756397059835703,
+   "x_at_max": 21.68400684957652
+  },
+  "delta_E.mean_diff": {
+   "max_mm": 0.04525128776395277,
+   "x_at_max": 15.491274780878554
+  },
+  "delta_target.range_W1": {
+   "max_mm": 0.02238615507019136,
+   "x_at_max": 14.899031877751954
+  },
+  "delta_target.range_W2": {
+   "max_mm": 0.030739078497665526,
+   "x_at_max": 21.68400684957652
+  },
+  "delta_target.mean_diff": {
+   "max_mm": 0.0211549636089293,
+   "x_at_max": 17.017220824354403
+  }
+ },
+ "measured": true,
+ "why": "delta_E.range_W1 0.05142 mm (x 14.85); delta_E.range_W2 0.06756 mm (x 21.68); delta_E.mean_diff 0.04525 mm (x 15.49); delta_target.range_W1 0.02239 mm (x 14.9); delta_target.range_W2 0.03074 mm (x 21.68); delta_target.mean_diff 0.02115 mm (x 17.02)"
+}

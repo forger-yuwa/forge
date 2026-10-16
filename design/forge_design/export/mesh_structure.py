@@ -9,14 +9,41 @@ run の `nozzle.msh` (`meshing/mesh2d.py` の `write_msh41_2d` が書いた msh4
   四角形は $i$ が外側・$j$ が内側のループで $(i,j),(i{+}1,j),(i{+}1,j{+}1),(i,j{+}1)$ (反時計回り)、
   境界辺は軸 $j=0$・壁 $j=n_j-1$ ($i$ 増加の向き)、入口 $i=0$・出口 $i=n_i-1$ ($j$ 増加の向き)。
   要素番号は四角形が先で、続いて境界辺のブロックを msh に現れた順 (`write_msh41_2d` は inlet・outlet・wall・axis)。
-- 縦線の検査: 各 station で $\max_j |x_{ij}-x_{i0}| \le 10^{-9} L$ ($L$ = 全長)。外れたら作らない (壁法線の近壁層など)。
-- 比 $s_{ij} = r_{ij}/r_{i,n_j-1}$。全 station の行が 1e-15 以内で同じなら `s_common` (1 行)、違えば `s` ($n_i\times n_j$)。
-  msh は座標を 10 有効桁で書くので、実際の msh では行が丸めの分だけ違い、ふつうは `s` になる。軸の比 $s_{i0}$ は 0 に置く
-  (軸の節点が $r=0$ であることを検査したうえで)。
+- 縦線の検査: 各 station で $\max_j |x_{ij}-x_{i0}| \le 10^{-9} L$ ($L$ = 全長)。通れば v1 (下)。外れた格子 (壁法線の近壁層など) は
+  壁の傾き $r'_i$ を渡したときだけ v2 (下) で表す。渡さなければ作らない (StructureError)。
+- v1 (`forge.mesh_structure/v1`): 比 $s_{ij} = r_{ij}/r_{i,n_j-1}$。全 station の行が 1e-15 以内で同じなら `s_common` (1 行)、
+  違えば `s` ($n_i\times n_j$)。msh は座標を 10 有効桁で書くので、実際の msh では行が丸めの分だけ違い、ふつうは `s` になる。
+  軸の比 $s_{i0}$ は 0 に置く (軸の節点が $r=0$ であることを検査したうえで)。縦線の格子は傾きを渡しても v1 (出力は渡さないときと同じ)。
+- v2 (`forge.mesh_structure/v2`、節点の規則 `wall_normal_blend_v1`; plan tooling-nozzle-card-local-mesh §5.1 #5):
+  `meshing/mesh2d.py` の `wall_normal_layer` と同じ式で節点を置く。
+  $(x,r)_{ij} = P_i + (1-\beta_{ij})\,d_{ij}\,(0,-1) + \beta_{ij}\,d_{ij}\,n_i$、$P_i = (x_i, r_{w,i})$、
+  $n_i = (r'_i, -1)/\sqrt{1+r_i'^2}$ (内向きの壁法線)、$d_{ij} = r_{w,i}(1-s_{ij})$。
+  $x_i$ は壁の節点の $x$ (軸の節点の $x$ と $10^{-12}L$ 以内で一致することを検査)。$\beta d$ と $d$ は $dX = x_{ij}-x_i$・
+  $dR = r_{w,i}-r_{ij}$ から $\beta d = dX\sqrt{1+r'^2}/r'$、$d = dR + \beta d\,(1 - 1/\sqrt{1+r'^2})$ で解く
+  ($|r'_i| \le 10^{-12}$ の station は $\beta = 0$)。$\beta$ は半径方向の配置 (0) と壁法線 (1) の重みなので [0, 1] に収め、
+  壁の節点 ($d = 0$) は隣 ($j = n_j-2$) の値、軸の節点は 0 とする。
+  v1 の項目に加えて `s` ($n_i\times n_j$、常に)・`beta` ($n_i\times n_j$)・`wall_slope` ($n_i$)・`wall_slope_source` (傾きの出典と sha256)。
+  `first_layer_mm` は v1 と同じ壁の節点と $j = n_j-2$ の節点の半径の差 (壁法線の層では法線方向の厚さ × cos θ_w で厚さより小さい
+  = 比の判定は厳しい側)。
+  自己検査 (どちらも許容は最大 $10^{-7}$ mm かつ station の第 1 層厚の $10^{-3}$、外れたら StructureError、結果は `checks`):
+  (1) 作り直し: 構造 dict ($x_i$・$r_{w,i}$・$r'_i$・$s$・$\beta$) から節点を置き直して元と比べる。$(\beta, s)$ は渡した傾きについて
+      解くので、これだけでは傾きの誤りは $\beta$ が [0, 1] の外に出る節点 (ずれが $r'_i$ と逆符号の station の近壁) でしか見えない。
+  (2) 規則の照合 (`rule_params` を渡したとき; 2026-10-15 主セッション判断): mesh2d の規則のパラメータ (`wall_normal_layer` の
+      $[d_n, d_b]$・`wall_normal_end_stations`) から mesh2d と同じ重み
+      $\beta^{rule}_{ij} = \bigl(1 - \mathrm{sm}(\mathrm{clip}((d_{ij}/r_{w,i} - d_n)/(d_b - d_n), 0, 1))\bigr)\cdot \mathrm{sm}(\mathrm{clip}(\min(i, n_i-1-i)/n_e, 0, 1))$
+      ($\mathrm{sm}(t) = t^2(3-2t)$、端の断面の戻しが無ければ第 2 因子は 1) を作り、渡した傾きで節点を置き直して元と比べる。
+      $\beta$ を解かずに規則から決めるので、傾きのずれは符号によらず (定数倍も) 節点のずれとして見える。パラメータは v2 の
+      `rule_params` に出典と記録する。渡さなければ `checks.rule_check.status` を「未実施 (パラメータ無し)」にする (例外にしない;
+      傾きの誤りの判定は STEP からの作り直しの比較 `rebuild_from_step.py --compare` だけになる)。
+  **17 桁の msh が前提**: 10 有効桁の msh では近壁の $dX$ が座標の丸めに埋もれ、解いた $\beta$ が [0, 1] の外に出て (1) が、
+  丸めそのもの (長さ数 m で $10^{-7}$ mm 超) で (2) が StructureError になる (case/71 の格子を 10 桁で書き直すと 9.9e-7 mm)。
+  `wall_normal_layer` の格子は `mesh.msh_digits: 17` で書くこと。
 - 単位: msh の座標は m、構造ファイルの長さは mm (STEP と同じ)。
 
 usage:
   design/.venv-opt/bin/python -m forge_design.export.mesh_structure NOZZLE_MSH [--out mesh_structure.json]
+  (この CLI は傾きを渡さないので縦線の格子 (v1) だけ。v2 は `deliverables.part_mesh` が run の壁ファイルから傾きを、
+  prepare_info.json の格子の記録 (`mesh.params`) から規則のパラメータを作って渡す)
 """
 from __future__ import annotations
 
@@ -28,10 +55,16 @@ from pathlib import Path
 import numpy as np
 
 FORMAT = "forge.mesh_structure/v1"
+FORMAT_V2 = "forge.mesh_structure/v2"
+FORMATS = (FORMAT, FORMAT_V2)
 CONNECTIVITY = "mesh2d_ij_v1"
+NODE_RULE_V2 = "wall_normal_blend_v1"
 VERTICAL_TOL_REL = 1e-9      # 縦線の許容 (全長に対する比; plan §4.3)
 S_COMMON_TOL = 1e-15         # 比の行が全 station で同じとみなす許容
-AXIS_TOL_REL = 1e-12         # 軸の節点の |r| と全節点の |z| の許容 (全長に対する比)
+AXIS_TOL_REL = 1e-12         # 軸の節点の |r| と全節点の |z| の許容 (全長に対する比)。v2 では軸と壁の節点の x の一致にも使う
+SLOPE_ZERO_TOL = 1e-12       # v2: |r′| がこれ以下の station は β = 0 (縦線; plan tooling-nozzle-card-local-mesh §5.1 #5)
+SELF_CHECK_TOL_MM = 1e-7     # v2 の自己検査: 作り直した節点と元の節点の距離の最大 [mm]
+SELF_CHECK_TOL_REL = 1e-3    # 同じく station の第 1 層厚に対する比 (規則の照合も同じ許容)
 M_TO_MM = 1000.0
 SIDES = ("inlet", "outlet", "wall", "axis")   # 境界辺の名前 (msh の物理名) = 辺の位置
 
@@ -193,13 +226,19 @@ def _first_mismatch(a: np.ndarray, b: np.ndarray) -> str:
 
 
 def extract_structure(coords, quads, bedges, ni=None, nj=None, *, phys=None, msh_sha256=None,
-                      source=None) -> dict:
-    """msh の配列 → 構造 dict (`forge.mesh_structure/v1`)。規則に従わなければ StructureError (理由つき)。
+                      source=None, wall_slope=None, wall_slope_source=None, rule_params=None) -> dict:
+    """msh の配列 → 構造 dict (`forge.mesh_structure/v1`、縦線でない格子は v2)。規則に従わなければ StructureError (理由つき)。
 
     $n_i$ = 壁辺数 + 1、$n_j$ = 入口辺数 + 1 で推定する (引数で与えたときは一致を確かめる)。
     検査: (a) 節点番号・四角形・境界辺が規則 `mesh2d_ij_v1` と完全一致、(b) 縦線、(c) 軸の節点が $r=0$
     (と全節点が $z=0$)、ほかに station が $x$ 方向に狭義増加・各 station で $r$ が $j$ について狭義増加。
     phys (物理名 → タグ) を省くと `mesh2d.PHYS` の規約を使う。
+    wall_slope: station ごとの壁の傾き $r'_i = dr/dx$ (無次元、長さ $n_i$)。(b) を通る格子では使わない (v1 の出力は渡さないときと
+    同じ)。(b) を通らない格子は、これがあれば v2 (節点の規則 `wall_normal_blend_v1`、モジュールの説明) を作り、無ければ StructureError。
+    wall_slope_source: 傾きの出典 (dict; ファイル・sha256・求め方)。v2 の `wall_slope_source` にそのまま書く。
+    rule_params: mesh2d の規則のパラメータ {"wall_normal_layer": [d_n, d_b], "wall_normal_end_stations": n_e か None,
+    "source": 出典 dict (任意)}。v2 の規則の照合 (モジュールの説明) に使い、v2 の `rule_params` に書く。None なら照合は未実施。
+    v1 では使わない。
     """
     coords = np.asarray(coords, dtype=np.float64)
     quads = np.asarray(quads, dtype=np.int64)
@@ -233,12 +272,28 @@ def extract_structure(coords, quads, bedges, ni=None, nj=None, *, phys=None, msh
     # (b) 縦線
     dev = np.abs(X - xi[:, None]).max(axis=1)
     vmax = float(dev.max()) / L
-    if vmax > VERTICAL_TOL_REL:
-        i = int(np.argmax(dev))
-        j = int(np.argmax(np.abs(X[i] - xi[i])))
-        raise StructureError(
-            f"縦線の検査: station {i} (x = {xi[i] * M_TO_MM:.9g} mm) で節点 j = {j} の x が {dev[i] * M_TO_MM:.3e} mm "
-            f"(= {vmax:.3e} L) ずれる (許容 {VERTICAL_TOL_REL:g} L)。格子線が縦でない (壁法線の近壁層など) 格子は v1 の構造ファイルで表せない")
+    v2 = vmax > VERTICAL_TOL_REL
+    if v2:
+        if wall_slope is None:
+            i = int(np.argmax(dev))
+            j = int(np.argmax(np.abs(X[i] - xi[i])))
+            raise StructureError(
+                f"縦線の検査: station {i} (x = {xi[i] * M_TO_MM:.9g} mm) で節点 j = {j} の x が {dev[i] * M_TO_MM:.3e} mm "
+                f"(= {vmax:.3e} L) ずれる (許容 {VERTICAL_TOL_REL:g} L)。格子線が縦でない (壁法線の近壁層など) 格子は v1 の構造ファイルで表せない。"
+                f"壁の傾きを渡す (wall_slope: station ごとの r′ = dr/dx) と v2 (節点の規則 {NODE_RULE_V2}) で表せる")
+        rp = np.asarray(wall_slope, dtype=np.float64).reshape(-1)
+        if rp.shape != (ni,) or not np.all(np.isfinite(rp)):
+            raise StructureError(f"壁の傾き wall_slope が長さ ni = {ni} の有限の列でない (形 {rp.shape})")
+        xa = xi                                      # 軸の節点の x
+        xi = X[:, -1].copy()                         # v2: station の x = 壁の節点の x
+        L = float(xi[-1] - xi[0])
+        if not L > 0:
+            raise StructureError(f"壁の節点の全長 L = {L} ≤ 0")
+        awx = float(np.abs(xa - xi).max())
+        if awx > AXIS_TOL_REL * L:
+            i = int(np.argmax(np.abs(xa - xi)))
+            raise StructureError(f"v2 の検査: station {i} で軸の節点と壁の節点の x が {awx * M_TO_MM:.3e} mm ずれる "
+                                 f"(許容 {AXIS_TOL_REL:g} L; 規則 {NODE_RULE_V2} では両端の節点が同じ x_i に乗る)")
     if not np.all(np.diff(xi) > 0):
         i = int(np.argmax(~(np.diff(xi) > 0)))
         raise StructureError(f"station の x が狭義増加でない (i = {i} → {i + 1})")
@@ -256,6 +311,9 @@ def extract_structure(coords, quads, bedges, ni=None, nj=None, *, phys=None, msh
     if not np.all(np.diff(R, axis=1) > 0):
         i = int(np.argmax(~np.all(np.diff(R, axis=1) > 0, axis=1)))
         raise StructureError(f"station {i} で r が j について狭義増加でない (格子が折れている)")
+    if v2:
+        return _extract_v2(X, R, xi, rw, rp, L, ni, nj, bedges, phys, vmax, awx, amax, zmax, msh_sha256, source,
+                           wall_slope_source, rule_params)
     S = R / rw[:, None]
     S[:, 0] = 0.0
     S[:, -1] = 1.0
@@ -294,6 +352,191 @@ def extract_structure(coords, quads, bedges, ni=None, nj=None, *, phys=None, msh
     return st
 
 
+def wall_normal_blend_xr(x, rw, rp, S, B) -> tuple[np.ndarray, np.ndarray]:
+    """規則 `wall_normal_blend_v1` の節点 (X, R) (ni, nj)。x・rw: station の x と壁半径 (同じ単位)、rp: 壁の傾き dr/dx、
+    S・B: 比 s と重み β (ni, nj)。式は `meshing/mesh2d.py` の wall_normal_layer と同じ:
+    X = x + β·d·r′/√(1 + r′²)、R = r_w − (1 − β)·d − β·d/√(1 + r′²)、d = r_w (1 − s)。"""
+    x = np.asarray(x, dtype=np.float64)
+    rw = np.asarray(rw, dtype=np.float64)
+    rp = np.asarray(rp, dtype=np.float64)
+    nrm = np.sqrt(1.0 + rp * rp)
+    d = rw[:, None] * (1.0 - S)
+    X = x[:, None] + B * (d * (rp / nrm)[:, None])
+    R = rw[:, None] - (1.0 - B) * d - B * (d / nrm[:, None])
+    return X, R
+
+
+def _check_rule_params(rule_params, ni: int) -> dict:
+    """規則のパラメータを検査して正規化する (mesh2d の generate_axisym_mesh と同じ条件)。不正なら StructureError。"""
+    try:
+        dn, db = (float(v) for v in rule_params["wall_normal_layer"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise StructureError(f"規則のパラメータ wall_normal_layer が [d_n, d_b] でない ({rule_params!r}: {e})") from None
+    if not (np.isfinite(dn) and np.isfinite(db) and 0.0 < dn < db < 1.0):
+        raise StructureError(f"規則のパラメータ wall_normal_layer: 0 < d_n < d_b < 1 にする ({dn}, {db})")
+    ne = rule_params.get("wall_normal_end_stations")
+    if ne is not None:
+        if isinstance(ne, bool) or int(ne) != ne or not (1 <= int(ne) <= (ni - 1) // 2):
+            raise StructureError(f"規則のパラメータ wall_normal_end_stations: 1 以上 (ni − 1)/2 以下の整数か null にする ({ne!r}, ni {ni})")
+        ne = int(ne)
+    return {"wall_normal_layer": [dn, db], "wall_normal_end_stations": ne, "source": rule_params.get("source")}
+
+
+def wall_normal_rule_beta(S, rule_params: dict, ni: int) -> np.ndarray:
+    """mesh2d の wall_normal_layer の重み β(d) (n_i, n_j): 1 − smoothstep((d/r_w − d_n)/(d_b − d_n)) に、端の断面の戻し
+    (wall_normal_end_stations = n_e) があれば smoothstep(min(i, n_i − 1 − i)/n_e) を掛ける (`meshing/mesh2d.py` と同じ式)。
+    S: 比 s (d/r_w = 1 − s)。rule_params は `_check_rule_params` を通したもの。"""
+    dn, db = rule_params["wall_normal_layer"]
+    t = np.clip(((1.0 - S) - dn) / (db - dn), 0.0, 1.0)
+    B = 1.0 - t * t * (3.0 - 2.0 * t)
+    ne = rule_params["wall_normal_end_stations"]
+    if ne is not None:
+        ii = np.arange(ni)
+        te = np.clip(np.minimum(ii, ni - 1 - ii) / float(ne), 0.0, 1.0)
+        B = B * (te * te * (3.0 - 2.0 * te))[:, None]
+    return B
+
+
+def _solve_v2(X, R, xi, rw, rp) -> tuple[np.ndarray, np.ndarray, dict]:
+    """v2: 節点 (X, R) と壁の傾き rp から比 s と重み β を解く (モジュールの説明の式)。戻り値 (S, B, 情報)。"""
+    nrm = np.sqrt(1.0 + rp * rp)
+    flat = np.abs(rp) <= SLOPE_ZERO_TOL
+    dX = X - xi[:, None]
+    dR = rw[:, None] - R
+    rps = np.where(flat, 1.0, rp)
+    bd = np.where(flat[:, None], 0.0, dX * (nrm / rps)[:, None])          # β·d
+    d = dR + bd * (rp * rp / (nrm * (nrm + 1.0)))[:, None]                 # 1 − 1/√(1+r′²) = r′²/(√(1+r′²)(√(1+r′²)+1))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        B = np.where(d > 0.0, bd / np.where(d > 0.0, d, 1.0), 0.0)
+    B[:, -1] = B[:, -2]                                  # 壁の節点 (d = 0) は隣の値 (作り直しには効かない)
+    B[:, 0] = 0.0                                        # 軸の節点は半径方向 (x = x_i、r = 0)
+    out = B < 0.0
+    over = B > 1.0
+    info = {"beta_raw_min": float(B.min()), "beta_raw_max": float(B.max()),
+            "n_beta_clamped": int(out.sum() + over.sum()), "n_flat_stations": int(flat.sum())}
+    B = np.clip(B, 0.0, 1.0)                             # β は半径方向 (0) と壁法線 (1) の重み
+    S = 1.0 - d / rw[:, None]
+    S[:, 0] = 0.0
+    S[:, -1] = 1.0
+    return S, B, info
+
+
+def _extract_v2(X, R, xi, rw, rp, L, ni, nj, bedges, phys, vmax, awx, amax, zmax, msh_sha256, source,
+                wall_slope_source, rule_params=None) -> dict:
+    """縦線でない格子の構造 dict (`forge.mesh_structure/v2`)。作った後に座標を作り直して元の節点と比べ、規則のパラメータが
+    あれば規則の重みで置き直して元と比べる (自己検査 (1)(2))。"""
+    rq = None if rule_params is None else _check_rule_params(rule_params, ni)
+    S, B, info = _solve_v2(X, R, xi, rw, rp)
+    if not np.all(np.diff(S, axis=1) > 0):
+        i = int(np.argmax(~np.all(np.diff(S, axis=1) > 0, axis=1)))
+        raise StructureError(f"v2: station {i} で比 s が j について狭義増加でない (壁からの距離 d が単調でない; 壁の傾きが格子と合わない可能性)")
+    if phys is None:
+        from forge_design.meshing.mesh2d import PHYS
+        phys = dict(PHYS)
+    surf = [k for k in phys if k not in SIDES]
+    if not set(SIDES) <= set(phys) or len(surf) != 1:
+        raise StructureError(f"物理名が {SIDES} + 面 1 つでない ({sorted(phys)})")
+    physical = {nm: {"dim": 1, "tag": int(phys[nm])} for nm in SIDES}
+    physical[surf[0]] = {"dim": 2, "tag": int(phys[surf[0]])}
+    first = (R[:, -1] - R[:, -2]) * M_TO_MM                                # v1 と同じ半径の差 (法線方向の厚さ以下)
+    st: dict = {
+        "format": FORMAT_V2,
+        "connectivity": CONNECTIVITY,
+        "connectivity_note": "節点 (i,j) → i·nj + j (0 始まり; msh の番号は +1)。四角形 (i,j),(i+1,j),(i+1,j+1),(i,j+1) を i 外・j 内の順。"
+                             "境界辺 axis j=0・wall j=nj-1 (i 増加)・inlet i=0・outlet i=ni-1 (j 増加)",
+        "node_rule": NODE_RULE_V2,
+        "node_rule_note": "節点 (i,j) = P_i + (1 − β_ij)·d_ij·(0, −1) + β_ij·d_ij·n_i、P_i = (x_i, r_w,i)、"
+                          "n_i = (r′_i, −1)/√(1 + r′_i²) (内向きの壁法線)、d_ij = r_w,i·(1 − s_ij)。x_i = x_mm[i]、r_w,i = 壁半径 "
+                          "(作り直しでは STEP の曲線の r(u_i))、r′_i = 壁の傾き dr/dx (作り直しでは STEP の曲線の (dr/du)/(dx/du))。"
+                          "forge の meshing/mesh2d.py の wall_normal_layer と同じ式",
+        "ni": int(ni),
+        "nj": int(nj),
+        "units": {"length": "mm", "msh_coords": "m", "mm_per_msh_unit": M_TO_MM,
+                  "s": "1 (1 − d / r_wall、d は規則の壁からの距離)", "beta": "1 (0 = 半径方向の配置、1 = 壁法線)",
+                  "wall_slope": "1 (dr/dx)"},
+        "physical": physical,
+        "element_tag_order": [surf[0]] + [nm for nm in bedges],
+        "length_mm": L * M_TO_MM,
+        "x_mm": (xi * M_TO_MM).tolist(),
+        "x_note": "x_mm は station の壁の節点の x (= 軸の節点の x)。それ以外の節点の x は規則で決まる (縦線でない)",
+        "s": S.tolist(),
+        "beta": B.tolist(),
+        "wall_slope": rp.tolist(),
+        "wall_slope_source": wall_slope_source,
+        "rule_params": rq,
+        "rule_params_note": "mesh2d の規則のパラメータ (wall_normal_layer の [d_n, d_b]・wall_normal_end_stations) と出典。自己検査の"
+                            "規則の照合に使う (作り直しは beta を使う)。null = 渡されていない (規則の照合は未実施)",
+        "wall_r_mm": (rw * M_TO_MM).tolist(),
+        "first_layer_mm": first.tolist(),
+        "reference_note": "wall_r_mm・first_layer_mm は元の msh の各 station の壁半径と第 1 層厚 (作り直しの基準値)。第 1 層厚は v1 と同じ"
+                          "壁の節点と j = nj − 2 の節点の半径の差 (壁法線の層では法線方向の厚さ × cos θ_w)",
+    }
+    # 自己検査: 構造 dict から作り直した節点と元の節点の距離 (plan tooling-nozzle-card-local-mesh §5.1 #5)
+    Xr, Rr = wall_normal_blend_xr(np.asarray(st["x_mm"]), np.asarray(st["wall_r_mm"]), rp, S, B)
+    dist = np.hypot(Xr - X * M_TO_MM, Rr - R * M_TO_MM)                     # mm
+    rel = dist / first[:, None]
+    k = int(np.argmax(dist))
+    kr = int(np.argmax(rel))
+    self_check = {"max_dist_mm": float(dist.max()), "at_node": {"i": k // nj, "j": k % nj},
+                  "max_dist_over_first_layer": float(rel.max()), "ratio_at_node": {"i": kr // nj, "j": kr % nj},
+                  "tol_mm": SELF_CHECK_TOL_MM, "tol_over_first_layer": SELF_CHECK_TOL_REL}
+    # 規則の照合: mesh2d の規則の重み β(d) と渡した傾きで置き直す (β を解かないので傾きのずれが符号によらず見える)
+    if rq is None:
+        rule_check = {"status": "未実施 (パラメータ無し)",
+                      "note": "規則のパラメータ (wall_normal_layer・wall_normal_end_stations) が渡されていない。傾きの誤りの判定は "
+                              "STEP からの作り直しの比較 (rebuild_from_step.py --compare) だけ"}
+        dq = relq = None
+    else:
+        Bq = wall_normal_rule_beta(S, rq, ni)
+        Xq, Rq = wall_normal_blend_xr(np.asarray(st["x_mm"]), np.asarray(st["wall_r_mm"]), rp, S, Bq)
+        dq = np.hypot(Xq - X * M_TO_MM, Rq - R * M_TO_MM)                   # mm
+        relq = dq / first[:, None]
+        kq, kqr = int(np.argmax(dq)), int(np.argmax(relq))
+        # β の差 (情報): 壁の節点 (d = 0) と傾きの無い station (|r′| ≤ slope_zero_tol、解いた β は 0) は β が節点に効かないので除く
+        dB = np.where((np.abs(rp) <= SLOPE_ZERO_TOL)[:, None], 0.0, np.abs(Bq - B))[:, :-1]
+        kb = int(np.argmax(dB))
+        rule_check = {"status": "実施", "max_dist_mm": float(dq.max()), "at_node": {"i": kq // nj, "j": kq % nj},
+                      "max_dist_over_first_layer": float(relq.max()), "ratio_at_node": {"i": kqr // nj, "j": kqr % nj},
+                      "beta_rule_minus_solved_max_abs": float(dB.max()),
+                      "beta_at_node": {"i": kb // (nj - 1), "j": kb % (nj - 1)},
+                      "tol_mm": SELF_CHECK_TOL_MM, "tol_over_first_layer": SELF_CHECK_TOL_REL,
+                      "note": "mesh2d の規則の重み β(d) (rule_params) と wall_slope で置き直した節点と元の節点の距離。"
+                              "beta_rule_minus_solved は情報 (壁の節点と傾きの無い station (|r′| ≤ slope_zero_tol) を除く)"}
+    st["checks"] = {"vertical_max_dev_over_L": vmax, "vertical_tol_over_L": VERTICAL_TOL_REL,
+                    "axis_wall_x_max_dev_over_L": awx / L, "axis_max_abs_r_m": amax, "max_abs_z_m": zmax,
+                    "slope_zero_tol": SLOPE_ZERO_TOL, **info, "self_check": self_check,
+                    "self_check_note": "(β, s) は渡した傾きについて解くので、作り直しの一致だけでは傾きの正しさを示さない (傾きの誤りが見えるのは "
+                                       "β が [0, 1] の外に出る節点だけ = n_beta_clamped)。傾きは rule_check (規則の照合) と STEP からの"
+                                       "作り直しの比較で確かめる",
+                    "rule_check": rule_check}
+    st["source"] = {"msh": None if source is None else str(source), "sha256": msh_sha256}
+    if not (dist.max() <= SELF_CHECK_TOL_MM and rel.max() <= SELF_CHECK_TOL_REL):
+        raise StructureError(
+            f"v2 の自己検査: 作り直した節点が元から最大 {dist.max():.3e} mm (station {k // nj}・j = {k % nj})、第 1 層厚の "
+            f"{rel.max():.3e} 倍 (station {kr // nj}・j = {kr % nj}) ずれる (許容 {SELF_CHECK_TOL_MM:g} mm かつ {SELF_CHECK_TOL_REL:g}; "
+            f"β が [0, 1] の外に出た節点 {info['n_beta_clamped']}、解いた β の範囲 [{info['beta_raw_min']:.9g}, "
+            f"{info['beta_raw_max']:.9g}])。壁の傾き wall_slope が格子と合わない可能性")
+    if dq is not None and not (dq.max() <= SELF_CHECK_TOL_MM and relq.max() <= SELF_CHECK_TOL_REL):
+        rc = rule_check
+        raise StructureError(
+            f"v2 の規則の照合: mesh2d の規則 (wall_normal_layer {rq['wall_normal_layer']}・wall_normal_end_stations "
+            f"{rq['wall_normal_end_stations']}) の重みと渡した傾きで置き直した節点が元から最大 {rc['max_dist_mm']:.3e} mm "
+            f"(station {rc['at_node']['i']}・j = {rc['at_node']['j']})、第 1 層厚の {rc['max_dist_over_first_layer']:.3e} 倍 "
+            f"(station {rc['ratio_at_node']['i']}・j = {rc['ratio_at_node']['j']}) ずれる (許容 {SELF_CHECK_TOL_MM:g} mm かつ "
+            f"{SELF_CHECK_TOL_REL:g}; |β_規則 − β_解| 最大 {rc['beta_rule_minus_solved_max_abs']:.3e})。壁の傾き wall_slope か"
+            "規則のパラメータが格子と合わない")
+    return st
+
+
+def structure_beta(struct: dict) -> np.ndarray:
+    """v2 の構造 dict の重み β (n_i, n_j)。"""
+    ni, nj = int(struct["ni"]), int(struct["nj"])
+    B = np.asarray(struct["beta"], dtype=np.float64)
+    if B.shape != (ni, nj):
+        raise StructureError(f"beta の形 {B.shape} が (ni, nj) = ({ni}, {nj}) でない")
+    return B
+
+
 def structure_from_msh(path) -> dict:
     """msh を読んで構造 dict を作る (sha256・物理名つき)。"""
     coords, quads, bedges, phys = read_msh41_mesh2d(path)
@@ -311,11 +554,19 @@ def structure_s(struct: dict) -> np.ndarray:
     return S
 
 
-def structure_coords(struct: dict, wall_r_mm=None) -> np.ndarray:
-    """構造 dict から節点座標 (N,3) [m] を作り直す。壁半径 [mm] を省くと基準値 (元の msh の壁半径)。"""
+def structure_coords(struct: dict, wall_r_mm=None, wall_slope=None) -> np.ndarray:
+    """構造 dict から節点座標 (N,3) [m] を作り直す。壁半径 [mm] を省くと基準値 (元の msh の壁半径)。
+    v2 は規則 `wall_normal_blend_v1` で置く (壁の傾きを省くと構造 dict の `wall_slope`)。"""
     ni, nj = int(struct["ni"]), int(struct["nj"])
     x = np.asarray(struct["x_mm"], dtype=np.float64)
     rw = np.asarray(struct["wall_r_mm"] if wall_r_mm is None else wall_r_mm, dtype=np.float64)
+    if struct.get("format") == FORMAT_V2:
+        rp = np.asarray(struct["wall_slope"] if wall_slope is None else wall_slope, dtype=np.float64)
+        X, R = wall_normal_blend_xr(x, rw, rp, structure_s(struct), structure_beta(struct))
+        out = np.zeros((ni * nj, 3))
+        out[:, 0] = X.ravel() / M_TO_MM
+        out[:, 1] = R.ravel() / M_TO_MM
+        return out
     R = structure_s(struct) * rw[:, None]
     out = np.zeros((ni * nj, 3))
     out[:, 0] = np.repeat(x, nj) / M_TO_MM
@@ -332,8 +583,10 @@ def write_structure_json(struct: dict, path) -> None:
 
 def load_structure_json(path) -> dict:
     st = json.loads(Path(path).read_text(encoding="utf-8"))
-    if st.get("format") != FORMAT or st.get("connectivity") != CONNECTIVITY:
-        raise StructureError(f"構造ファイルの format/connectivity が {FORMAT}/{CONNECTIVITY} でない")
+    if st.get("format") not in FORMATS or st.get("connectivity") != CONNECTIVITY:
+        raise StructureError(f"構造ファイルの format/connectivity が {' か '.join(FORMATS)}/{CONNECTIVITY} でない")
+    if st["format"] == FORMAT_V2 and st.get("node_rule") != NODE_RULE_V2:
+        raise StructureError(f"v2 の構造ファイルの節点の規則 node_rule が {NODE_RULE_V2} でない ({st.get('node_rule')!r})")
     return st
 
 

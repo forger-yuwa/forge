@@ -10,7 +10,8 @@
   最終の雛形 (axismach_final_v1) の問題も load_problem と design_chain を通る。出口静圧 (semiperfect) を case/45 の記録と照合。
   液化の判定 (未飽和・過飽和・範囲外・N₂ なし)。
   自動調整 (2026-10-13 追加): 縮流部側の第 1 層のブレンドの決め直し (y1+ の目安 ≤ 1・AR ≤ 5000)、x_F が逆 MOC の場の終点に張り付いた
-  ときの x_end_margin の引き上げ、from_length が止まったときの内部許容差の明示の緩和 (L_total_tol_relaxed の記録)、
+  ときの x_end_margin の引き上げ、長さ合わせ (長さ公差 1e-6 m でも雛形の網のまま収束; 1e-12 m は自動調整せずに例外 — 2026-10-16 の
+  終端 C⁺ の補間から、cplus × characteristic の網の倍化・内部許容差の緩和は外した)、
   from_length の各評価の (L_c, x_F, x_e, x_F − x_e) の記録。
   M_knot (plan tooling-nozzle-mknot-auto §5.1 #3、§6 V3): カードの既定は自動になったので、上の試験は**数値の M_knot のカード**
   (overrides の geometry.M_knot: 2.25 = 旧既定の 0.45 × M_exit; case/45 は 2.7 = 0.45 × 6) で回し、期待は変えない。
@@ -369,7 +370,10 @@ with tempfile.TemporaryDirectory() as td:
     check("引き上げの履歴を YAML のコメントに書いた", "自動調整: geometry.x_end_margin" in out.read_text())
     print(f"   x_end_margin の履歴: {[(a['from'], a['to'], a['reason'][:60]) for a in aa]}")
 
-print("== 自動調整: from_length が止まる (長さ公差 1e-6 m) → n_axis_inv 2 倍 → 内部許容差 0.05 r_t に緩める")
+print("== 長さ合わせ: 長さ公差 1e-6 m でも雛形の網のまま収束する (終端 C⁺ の補間、plan tooling-nozzle-card-local-mesh §4.5)")
+# 2026-10-16 まではこのカードで from_length が止まり、n_axis_inv の倍化 → 内部許容差 0.05 r_t への緩和 (#6d) を試験していた。
+# 終端 C⁺ を x_E を挟む 2 本の補間にしてから x_F(L_c) が連続になり、1e-6 m でも収束する。cplus × characteristic では
+# 自動調整を外し、未収束は止める (下の 1e-12 m のカード)
 with tempfile.TemporaryDirectory() as td:
     cp = Path(td) / "m5_tight.yaml"
     cp.write_text(yaml.safe_dump(card(name="m5_tight_length", throat={"diameter_design_m": 0.050},
@@ -377,22 +381,31 @@ with tempfile.TemporaryDirectory() as td:
     out = Path(td) / "problem_tight.yaml"
     rc = W.main([str(cp), "--out", str(out)])
     logd = json.loads(Path(str(out) + ".card_log.json").read_text())
-    text = out.read_text()
-    raw = yaml.safe_load(text)
-    rl = logd["L_total_tol_relaxed"]
-    keys = [a["key"] for a in logd["auto_adjust"]]
-    check("緩和を card_log の L_total_tol_relaxed {from, to, reason} に記録 (from = 1e-6/2/r_t、to = 0.05)",
-          rl is not None and abs(rl["from"] - 1.0e-6 / 2 / 0.025) < 1e-15 and rl["to"] == 0.05 and W.STALL_TEXT in rl["reason"],
-          str(rl)[:200])
-    check("順序: n_axis_inv を 2 倍 → 内部許容差を緩めて n_axis_inv を雛形に戻す",
-          keys[:3] == ["geometry.n_axis_inv", "geometry.L_total_tol", "geometry.n_axis_inv"] and raw["geometry"]["n_axis_inv"] == 2400
-          and raw["geometry"]["L_total_tol"] == 0.05, str(keys))
-    check("緩和を _card 節と YAML のコメントに記録", raw["_card"]["L_total_tol_relaxed"]["to"] == 0.05
-          and "内部許容差を緩めた" in text)
-    check("カードの公差は変えない: 寸法はカードの長さ公差 1e-6 m で判定 (FAIL → 終了コード 2、YAML は書く)",
-          [r["tol_m"] for r in logd["dimensions"]["rows"] if r["name"] == "divergent_length"] == [1.0e-6]
-          and (rc == 2) == (not logd["dimensions"]["pass"]), f"rc {rc}, 寸法 {logd['dimensions']['pass']}")
+    raw = yaml.safe_load(out.read_text())
+    dl = [r for r in logd["dimensions"]["rows"] if r["name"] == "divergent_length"]
+    check("長さ公差 1e-6 m: 自動調整なし (n_axis_inv 2400・L_total_tol = 1e-6/2/r_t)、緩和の記録なし",
+          logd["auto_adjust"] == [] and logd["L_total_tol_relaxed"] is None and raw["geometry"]["n_axis_inv"] == 2400
+          and abs(raw["geometry"]["L_total_tol"] - 1.0e-6 / 2 / 0.025) < 1e-15, str(logd["auto_adjust"])[:200])
+    check("長さ公差 1e-6 m: 寸法 PASS (拡大部の長さの差 ≤ 1e-6 m)、終了コード 0",
+          rc == 0 and logd["dimensions"]["pass"] and len(dl) == 1 and abs(dl[0]["diff_m"]) <= 1.0e-6, f"rc {rc}, {dl}")
     load_problem(out)
+
+print("== 長さ合わせの未収束 (反復 0 回・長さ公差 1e-12 m): cplus × characteristic は自動調整せずに止める")
+# 補間の後は 1e-12 m でも丸めの桁まで収束するので、反復の上限 geometry.L_total_maxiter を 0 にして未収束を作る
+with tempfile.TemporaryDirectory() as td:
+    cp = Path(td) / "m5_tighter.yaml"
+    c_t = card(name="m5_tighter_length", throat={"diameter_design_m": 0.050}, tolerances={"length_m": 1.0e-12, "diameter_m": 2.0e-5})
+    c_t["overrides"] = {**(c_t.get("overrides") or {}), "geometry.L_total_maxiter": 0}
+    cp.write_text(yaml.safe_dump(c_t, sort_keys=False))
+    out = Path(td) / "problem_tighter.yaml"
+    try:
+        W.main([str(cp), "--out", str(out)])
+        ok_, msg = False, "例外が出ない"
+    except ValueError as ex:
+        msg = str(ex)
+        ok_ = W.STALL_TEXT in msg and "網の倍化・許容差の緩和はしない" in msg
+    check("例外で止まる (理由に STALL_TEXT と「網の倍化・許容差の緩和はしない」)、YAML は書かない",
+          ok_ and not out.exists(), msg[:240])
 
 # ---------------------------------------------------------------------------------------------- 最終の雛形
 print("== スロート曲率 (2026-10-13 ユーザ「スロート曲率も指定できるようにして」)")
@@ -494,9 +507,9 @@ if SLOW:
             rl = logd["L_total_tol_relaxed"]
             ok_yaml = out.is_file()
             text = out.read_text() if ok_yaml else ""
-            check("case/45: 内部許容差の緩和が記録され YAML ができる (card_log・_card・コメント)",
-                  ok_yaml and rl is not None and rl["to"] == 0.05 and yaml.safe_load(text)["_card"]["L_total_tol_relaxed"] == rl
-                  and "内部許容差を緩めた" in text and load_problem(out) is not None, str(rl)[:240])
+            # 2026-10-16 (終端 C⁺ の補間、plan tooling-nozzle-card-local-mesh §4.5) から緩和は起きない (以前は 0.05 r_t に緩めていた)
+            check("case/45: 内部許容差を緩めずに YAML ができる (L_total_tol_relaxed なし)",
+                  ok_yaml and rl is None and "内部許容差を緩めた" not in text and load_problem(out) is not None, str(rl)[:240])
             print(f"   緩和: {rl}")
             print(f"   自動調整: {[(a['key'], a['from'], a['to']) for a in logd['auto_adjust']]}")
             print(f"   場: {logd['moc_field']}")

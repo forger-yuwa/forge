@@ -1,0 +1,15 @@
+date        : 2026-10-15T00:24:14+00:00
+forge_bin   : /home/ubuntu/forge-integ-dflow2-fp64/solver_density_cuda/build/forge
+forge_mtime : 2026-10-14T13:18:15+00:00
+forge_sha256: 3a9e347bfac51d003c4bfc9d384f8740b85f3058df9aa486aff4806a089231f8
+git_head    : f85e4f1b6136085c78b5abd2aa3cff0bab4cb315
+git_dirty   : 0 件
+host        : ip-172-31-5-94
+env         : FORGE_CUDA_BLOCKSIZE=128
+env         : FORGE_TRANSPORT_TABLE=0
+env         : FORGE_DIAG_FACE_H_DOUBLE=1
+env         : FORGE_BIN=/home/ubuntu/forge-integ-dflow2-fp64/solver_density_cuda/build/forge
+cfg         : lowMachPrecond=0 (要求値)
+cfg         : wallTreatmentSST=0 (要求値)
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)
+'scalarGradient' effective: lsq (default)

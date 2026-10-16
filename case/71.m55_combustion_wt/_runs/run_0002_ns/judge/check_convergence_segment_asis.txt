@@ -1,0 +1,15 @@
+  [segment] 判定区間 = S1_soft -> S2_mid  (18000 行) -> /home/ubuntu/m55_diag_0002/seg_asis/run_0002_ns/residual_history_segment.csv
+
+=== /home/ubuntu/m55_diag_0002/seg_asis/run_0002_ns  [last step 5999]  -> NOT CONVERGED (stalled/plateau — needs scheme change, not more steps) ===
+  rms_ro      : init=5.18e-02 fin=5.41e-05 drop= 2.9dec falling  <-- still converging
+  rms_roUx    : init=6.74e+00 fin=7.50e-02 drop= 1.9dec falling  <-- still converging
+  rms_roUy    : init=1.92e+01 fin=1.72e-02 drop= 2.8dec falling  <-- still converging
+  rms_roUz    : all-zero (inactive, skip)
+  rms_roe     : init=4.44e+04 fin=6.67e+01 drop= 2.7dec falling  <-- still converging
+  rms_roK     : init=3.87e-02 peak=8.28e-01 fin=3.29e-01 drop= 0.3dec flat     <-- STALLED (plateau)
+  rms_roOmega : init=1.91e+09 fin=2.92e+04 drop= 4.5dec falling
+  rms_roY0    : init=4.73e-02 fin=4.94e-05 drop= 2.9dec falling  <-- still converging
+  rms_roY1    : init=4.44e-03 fin=4.64e-06 drop= 2.9dec falling  <-- still converging
+
+OVERALL: CHECK FAILURES ABOVE
+CHECK_CONVERGENCE_EXIT: 1

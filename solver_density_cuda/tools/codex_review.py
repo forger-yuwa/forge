@@ -133,7 +133,8 @@ SLAU/Roe/KEEP、block-DPLUR 陰解法、SST、多成分 TP、凝縮、軸対称�
 - リポジトリのルールは `AGENTS.md`、現在仕様は `methods/`、運用手順は `procedures/`、設計判断は `plans/`。
   用語や設定の意味は推測せず `procedures/solver-settings.md` / `procedures/recommended-settings.md` を読むこと。
 - 収束の判定は `solver_density_cuda/tools/check_convergence.py <run_dir>` (各 run の `CONVERGENCE_VERDICT.txt`)、
-  派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
+  ただし `settle_criteria.yaml` のある run の本段は `check_settled.py` (`SETTLE_VERDICT.json`; `CONVERGENCE_VERDICT.txt` の 1 行目の
+  `TOOL:` がどちらの道具かを示す)。派生量の定常性は `check_quasisteady.py` の VERDICT を根拠にする。`rms_ro` 単独やスナップショット 1 枚で判断しない。
 """
 
 STAGE_PLAN = """## 依頼: 計画立案時レビュー (stage = plan)

@@ -1222,6 +1222,15 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 `runner_axismach.run_staged_ns` は段 (`S1_soft`・`S2_mid`・ランプ段 `R<i>_cfl<c>`・`main`) ごとに実効設定を
 `stage_manifest.json` (`solver_density_cuda/tools/stage_manifest.py`) に書き、残差履歴を `residual_history_<tag>.csv` に残す
 (段の `res_*` は従来どおり消す)。`check_convergence.py <run> --segment` はこの manifest の最後の区間 (1 次の前段は別区間) で判定する。
+**判定の正本は 2 つ** (AGENTS.md「収束確認」、`procedures/calculation-workflow.md` の「判定の道具の選択」、plan
+`tooling-settle-convergence-and-monitor` §4.9 の 2・§5.1 #7c): 準備で判定の基準 `settle_criteria.yaml` を書いた run (要求カードの雛形の NS)
+では、本段を `check_settled.py` (基準に書いた量の AND; 結果は `SETTLE_VERDICT.json`。雛形の既定 `wt_nozzle_v3` は流量の収支と目的の量の準定常で、残差は止める判定から外して非有限の見張り (`residual_finite`、非有限なら DIVERGED) だけ — 2026-10-16 ユーザ決定、plan §4.4・§5.1 #8; `wt_nozzle_v1`・`v2` は残差の準定常も判定) で判定し、
+`check_convergence.py` の低下の桁数は使わない。`check_settled.py` は既定で本段の開始の記録 `MAIN_STAGE_STARTED` (本段の forge の直前に
+書く) と今の solverConfig.yaml・最後の forge の起動 (`forge_launches.jsonl`)・基準の sha256 を照合し、食い違い・起動の記録の欠けは
+`INDETERMINATE` (旧の道具へ切り替えない)。前の段 (S1・S2) を `check_convergence.py` で判定するのは、記録が無く `stage_manifest.json` に
+本段の段が無い (前の段と独立に確かめられた) ときだけで、確かめられない run (例: 最初の段 S1 の後処理の時点はまだ段の記録が無い) は
+判定不能になる (段の終了ゲートは場で見る)。道具の選択は `check_settled.py --select <run>` で確かめる。基準の無い run は従来どおり
+`check_convergence.py` (`--segment`)。
 前段の 1 次化は `convMethod: 1`/`2` → 0。段の最終 res の必要保存量が非有限・$\rho \le 0$ なら次段へ進まず停止する
 (非有限の場を `restart_field` で次段の初期場へ写さない)。段の CFL・step 数は変えていない。
 段の config の変更 (`cfl`・`cfl_pseudo`・`convMethod`・`nStepOuter`・`outStepInterval`・`nStepInner`) は YAML 上の位置で値を読み、

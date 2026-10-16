@@ -1,0 +1,136 @@
+# 生成: forge_design.intake.wt_card (2026-10-15)。**手で編集しない** — 要求カードを直して作り直す。
+# カード: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/card_m55.yaml (sha256 f38fe445ba8408eb…)、雛形: axismach_final_v1 (/home/ubuntu/forge-cardmesh/design/forge_design/intake/recipes/axismach_final_v1.yaml, sha256 3a2fb241967744c9…)
+# r_t = 0.10024473616136853 m: NS 後の補正の solve_rt_throat (δ: 前の run /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont の δ_E の全分布 × (r_t/S_prev)^−0.2、前の設計の x → s → 今の設計の x) で物理スロート半径 0.1 m に合わせた固定点 (外側 1 回、最後の |Δr_t|/r_t 3.18e-15 ≤ 1e-06、内側の許容差 1e-09 m)。補正の表は YAML の横の problem_m55_p1_card_delta_r.csv (出典と sha256 は _card.ns_correction; NS は deltastar_loop --delta-r-csv で立てる)
+# 長さの写し: geometry.r_inlet・L_U・L_pipe・dv.L_total はカードの実寸 / r_t。L_total_tol = 長さ公差 / 2 / r_t (r_t を変えたら生成器で作り直す — 手で r_throat だけ変えると実寸がずれる)
+# p_ambient: design: 設計出口静圧 (semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)、M 5.5、p/Pt 7.916414e-04)
+# 格子: mesh.ni 3000・wall_first_frac 2.4e-06・wall_first_frac_throat 7.4e-07 は estimate_mesh の**初期値** (y1+ 0.8、Eckert + 平板乱流 Cf)。合格の根拠ではない — NS 後に check_wall_resolution.py の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥)。実際の格子の AR の最大 16422 (ar_max 5000)
+# 節点数 (格子を作る前の判定): NS (mesh) ni 3000 × nj 97 = 291000 (上限 300000、既定)・Euler (mesh_euler) ni 3000 × nj 97 = 291000 (上限 300000、既定)。上限を超える格子はユーザの了承を取ってから overrides の max_nodes と max_nodes_reason を組で書いて許す
+# 液化 (N₂、出口 204.31 K・2771 Pa): 出口静温 204.31 K が Antoine の範囲 (63〜126 K) より高い (N₂ の臨界温度 126.2 K 付近より上) — 液化しない
+# 設計壁から測った寸法 (§4.2a の前段; 最終の合格は成果物から測る出荷ゲート): inlet_radius 0.300000 m (差 +0.00e+00、公差 1e-05、ok)、pipe_length 0.500000 m (差 +0.00e+00、公差 0.001、ok)、contraction_length 0.500000 m (差 +5.09e-11、公差 0.001、ok)、divergent_length 8.000425 m (差 +4.25e-04、公差 0.001、ok)、throat_diameter_physical 0.200000 m (差 -1.61e-10、公差 2e-05、ok)
+# MOC の出口 x_F と設計壁の終点 x_e の差 +0.000 mm (from_length は x_F を合わせ、壁とメッシュは x_e で終わる)
+# NS 後の補正: 前の run /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont の /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont/delta_r_next.csv (sha256 2386f48c0e3a53e8…) の δ_E × (r_t/S_prev)^−0.2 (S_prev 0.0999084914252905 m、factor 0.9993282504457885)。x は 前の設計の x → s (区間で正規化; wall_temperature と同じ区切り) → 今の設計の x。表の端を前の設計に揃えた差 始点 +0.000e+00・終点 -1.421e-14 r_t (ε_f32 2.15e-06・1.72e-05)
+# 補正の表: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/problem_m55_p1_card_delta_r.csv (sha256 f92d6eab3a3899e7…) — NS は deltastar_loop --delta-r-csv で立てる (問題 YAML の _card.ns_correction.table_sha256 と照合する)
+# 逆 MOC の場: x_F 79.808928 r_t、切る前の壁の終点 91.577207 r_t (x_F の 11.77 r_t 下流、x_F より下流の壁点 433 個、最後の点間隔 0.02718 r_t) — 張り付きなし (x_end_margin 2.3)
+# 格子の縮流部側のブレンド: C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した — y1+ の目安の最大 0.80 @ x = -0.42 r_t (雛形の値では 2.07 @ x = -9.94)
+# M_knot: 自動 (規則 coarse_min_theta_v2; カードに geometry.M_knot を書いていない (既定は自動)) → geometry.M_knot 2.8 (θ_max 12.13097°、余裕 4.053°、網の最小 sin 角 0.0567)。要約は _card.M_knot_rule、粗い掃引の全行と谷ごとの確認の行は card_log の M_knot_rule
+# 最終の選択 (r_t 0.10024473616136853 m; 粗い網 n_axis_inv 1200・L_total_tol 0.1 r_t の 87 点 1.15〜5.45、生産の網 n_axis_inv 4800・L_total_tol 0.004988 r_t): 代表が残った谷 1 個 (全 1 個) の生産の網の θ_max の最小 12.13097° から 0.01° 以内の同点の集合 1 個 (2.80) の中で 唯一の谷 → 2.80 (θ_max 12.13097°、境目までの推定の距離 1.15)
+# 谷 2.80 (候補の区間 1.50〜3.90、ずらし 0 回): 代表 2.80、θ_max 12.13097°、推定の距離 1.15
+# 選択 [最初の r_t] 試行 0、r_t 0.1 m、n_axis_inv 600/2400 → 2.8 (評価 87 + 3 点、80 s) — 自動調整で捨てた
+# 選択 [自動調整の後のやり直し (geometry.n_axis_inv 2400 → 4800)] 試行 1、r_t 0.1 m、n_axis_inv 1200/4800 → 2.85 (評価 87 + 3 点、232 s)
+# 選択 [最終の組 (出力と同じ実効の入力で選び直す)] 試行 1、r_t 0.10024473616136821 m、n_axis_inv 1200/4800 → 2.8 (評価 87 + 3 点、232 s)
+# 選択 [最終の組 (出力と同じ実効の入力で選び直す)] 試行 1、r_t 0.10024473616136853 m、n_axis_inv 1200/4800 → 2.8 (評価 87 + 3 点、232 s)
+# [最初の r_t] r_t 0.1 m: 選択 2.8 を r_t の固定点の M_K にする
+# [自動調整の後のやり直し (geometry.n_axis_inv 2400 → 4800)] r_t 0.1 m: 選択 2.85 を r_t の固定点の M_K にする
+# [最終の組 (出力と同じ実効の入力で選び直した)] r_t 0.10024473616136821 m: 選び直した値 2.8 ≠ 固定点の M_K 2.85 → その値で r_t の固定点をやり直す (1 回目、始まりは前の r_t)
+# [最終の組 (出力と同じ実効の入力で選び直した)] r_t 0.10024473616136853 m: 選び直した値 2.8 = r_t の固定点に使った M_K → その組を出力
+# M_knot の所要 855 s (選択 776 s・r_t の固定点のやり直し 79 s; 記録の時点のカード全体 1114 s)、並列 粗い網 4・生産の網 3 (CPU 4、上限 4、開始時の使えるメモリ 14.6 GB)
+# 粗い掃引の全行と谷ごとの確認の行: problem_m55_p1_card.yaml.card_log.json の M_knot_rule (その記録の sha256 76e08271b71f66b9d90c133f34133b0a6ff6f34279a0edf3c9977d9b4294fcbf; YAML の _card.M_knot_rule は要約だけ)
+# 自動調整: geometry.n_axis_inv 2400 → 4800 (from_length の固定点反復が改善しなくなって止まった (runner_axismach.py:606-616; 離散化のノイズ床とは区別できない): 最良の |x_F − L_total| 0.0311 r_t > L_total)
+# 上書き (overrides): mesh.ni = 3000 (雛形/生成値 null)
+# 雛形に入れていない較正値: initial_line: cfd・Md_moc_offset・deltastar_initializer.cf_scale は手順書 §2 ⑤ の手順で後から足す
+# 警告: 格子: 実際の格子 (ni 3000) の AR の最大 16422 が ar_max 5000 を超える (x = 4.640 r_t)
+# 警告: 格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.07 (x = -9.94 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.80 @ x = -0.42 r_t)
+# 警告: 格子: wall_first_frac_throat 7.4e-07 < 1e-06 — float32 の座標では第 1 層が局所半径の 7.4e-07 倍で 約 6 ulp しかない。FP64 のビルドと msh の 17 桁の座標が要る (mesh2d.write_msh41_2d の既定は 10 桁)
+name: m55_combustion_wt   # 要求カードの name
+type: wind_tunnel_axisym_axismach
+
+gas:   # カードの gas (model は semiperfect 固定)
+  model: semiperfect   # 生成器 (カードの gas は常に semiperfect)
+  transport: {CO2: cea, H2O: 'custom:h2o_iapws_cea_v1', O2: cea, N2: cea}   # 雛形 axismach_final_v1: 実種ごとに cea (H2O は custom:h2o_iapws_cea_v1)
+  species: {CO2: 0.1677, H2O: 0.0858, O2: 0.022, N2: 0.7245}   # 質量分率 (カードの gas: {species: {CO2: 0.1677, H2O: 0.0858, O2: 0.022, N2: 0.7245}})
+  gamma: 1.29078   # 参照値: スロート T* の γ (semiperfect では NASA-9 が優先)
+  cp: 1296.35   # 参照値: c_p(T*) [J/(kg K)]
+
+spec:
+  Pt: 3500000.0   # カード conditions.Pt [Pa]
+  Tt: 1250.0   # カード conditions.Tt [K]
+  p_ambient: 2770.7447458188694   # [Pa] design: 設計出口静圧 (semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)、M 5.5、p/Pt 7.916414e-04)
+  r_throat: 0.10024473616136853   # [m] 物理スロート径 0.2 m から NS 後の補正の solve_rt_throat (δ: 前の run /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont の δ_E の全分布 × (r_t/S_prev)^−0.2、前の設計の x → s → 今の設計の x) で物理スロート半径 0.1 m に合わせた固定点 (外側 1 回、最後の |Δr_t|/r_t 3.18e-15 ≤ 1e-06、内側の許容差 1e-09 m)。補正の表は YAML の横の problem_m55_p1_card_delta_r.csv (出典と sha256 は _card.ns_correction; NS は deltastar_loop --delta-r-csv で立てる)
+  M_design: 5.5   # カード M_exit
+  wall_thermal: {mode: isothermal, Tw: 350.0}   # カード wall
+  sizing: {method: throat, target_m: 0.1}   # カード throat.diameter_physical_m 0.2 m の半径 (物理スロート) で寸法を決めた
+
+dv:   # Lc_mode: from_length の設計変数 (r_t 単位)
+  L_total: {value: 79.80468906738439}   # = divergent_length_m 8.0 m / r_t (設計スロート x=0 → 物理出口)
+
+geometry:
+  R: 4.987793066711524   # = throat.curvature_radius_m 0.5 m / r_t (設計壁のスロートの曲率半径)
+  r_inlet: 2.9926758400269144   # = inlet.radius_m 0.3 m / r_t
+  L_U: 4.987793066711524   # = inlet.contraction_length_m 0.5 m / r_t (μ = L_U²/(R Δr) = 2.503 ≤ 20)
+  L_pipe: 4.987793066711524   # = inlet.pipe_length_m 0.5 m / r_t
+  Lc_mode: from_length   # 生成器: dv.L_total から L_c を解く
+  L_total_tol: 0.004987793066711524   # = 長さ公差 0.001 m / 2 / r_t
+  M_knot: 2.8   # 自動 (規則 coarse_min_theta_v2): 出力と同じ実効の入力 (r_t 0.10024473616136853 m、生産の網 n_axis_inv 4800・L_total_tol 0.004988 r_t) で選び直した値 = r_t の固定点に使った値 (θ_max 12.13097°、境目までの推定の距離 1.15; 粗い網 n_axis_inv 1200・L_total_tol 0.1 r_t の 0.05 の格子、谷 1 個のうち 1 個を生産の網で確認); 雛形の M_knot_factor 0.45 は使わない。要約は _card.M_knot_rule、掃引の表と全部の記録は card_log の M_knot_rule
+  axis_law: knot   # 雛形 axismach_final_v1
+  start_line: throat_char   # 雛形 axismach_final_v1
+  n_start: 41   # 雛形 axismach_final_v1
+  n_axis_inv: 4800   # 自動調整: 2400 → 4800 (from_length の固定点反復が改善しなくなって止まった (runner_axismach.py:606-616; 離散化のノイズ床とは区別できない): 最良の |x_F − L_total| 0.0311 r_t > L_total_tol 0.00499 r_t (r_t 0.1002447358755118)
+  axis_dx0: 0.03   # 雛形 axismach_final_v1
+  x_end_margin: 2.3   # 雛形 axismach_final_v1
+  wall_mode: cplus   # 雛形 axismach_final_v1
+  exit_mode: characteristic   # 雛形 axismach_final_v1
+  wall_repr: joint   # 雛形 axismach_final_v1
+  wall_fit_mono_r2: [0.0, 1.5]   # 雛形 axismach_final_v1
+  pw_upstream: poly   # 雛形 axismach_final_v1
+  physical_wall_repr: single_bspline   # 雛形 axismach_final_v1
+  moc_axis_limit: analytic   # 雛形 axismach_final_v1
+  moc_corrector: converge   # 雛形 axismach_final_v1
+
+mesh:   # NS の格子 (prepare_ns)。ni・wall_first_frac・wall_first_frac_throat は estimate_mesh の初期値
+  discretization: node   # 雛形 axismach_final_v1
+  nj: 97   # 雛形 axismach_final_v1
+  throat_refine: 4.0   # 雛形 axismach_final_v1
+  throat_width: 3.0   # 雛形 axismach_final_v1
+  wall_first_up_x0: null   # estimate_mesh が決め直した (C; null = 上流は全域スロートの値)。雛形の値では y1+ の目安 > 1
+  wall_first_up_x1: null   # estimate_mesh が決め直した (C; null = 上流は全域スロートの値)。雛形の値では y1+ の目安 > 1
+  wall_first_blend_x0: 1.0   # 雛形 axismach_final_v1
+  wall_first_blend_x1: 17.0   # 雛形 axismach_final_v1
+  ar_max: 5000   # 雛形 axismach_final_v1
+  ni: 3000   # overrides で上書き (雛形/生成値: null)
+  wall_first_frac: 2.4e-06   # estimate_mesh の初期値: x > 6 の y1+ 0.8 の y1/r_w の最小 2.493e-06 を 2 桁に切り下げ
+  wall_first_frac_throat: 7.4e-07   # estimate_mesh の初期値: |x| ≤ 2 の最小 7.404e-07 を 2 桁に切り下げ
+
+mesh_euler:   # Euler の格子 (prepare)。軸方向 (ni・throat_refine・throat_width) は mesh と同じ
+  nj: 97   # 雛形 axismach_final_v1
+  throat_refine: 4.0   # 雛形 axismach_final_v1
+  throat_width: 3.0   # 雛形 axismach_final_v1
+  wall_first_frac: 0.005   # 雛形 axismach_final_v1
+  ni: 3000   # = mesh.ni (軸方向は mesh と同じ)
+
+evaluate:
+  nStepOuter: 12000   # 雛形 axismach_final_v1
+  outStepInterval: 1000   # 雛形 axismach_final_v1
+  cfl_main: 1.0   # 雛形 axismach_final_v1
+  mid_stage: true   # 雛形 axismach_final_v1
+  tp_species: split_h2o   # 雛形 axismach_final_v1: 組成に H2O があるので split_h2o (凝縮の restart 用)
+
+_card:   # 要求カードの記録 (ソルバ・設計チェーンは読まない)
+  format: forge.wt_card/v1
+  generator: forge_design.intake.wt_card
+  name: m55_combustion_wt
+  recipe: {name: axismach_final_v1, path: /home/ubuntu/forge-cardmesh/design/forge_design/intake/recipes/axismach_final_v1.yaml, sha256: 3a2fb241967744c9ca06ef40edd4401c70a4f0b0af51250e31a79a099e9b8779}
+  r_t_m: 0.10024473616136853
+  throat: {kind: physical, diameter_m: 0.2, curvature_ratio_R: 4.987793066711524, curvature_radius_design_m: 0.5, curvature_source: card throat.curvature_radius_m}
+  p_ambient_source: 'design: 設計出口静圧 (semiperfect 等エントロピー (GasSemiPerfect.T_of_M + evaluate.ic._isentropic_pressure_ratio_gas)、M 5.5、p/Pt 7.916414e-04)'
+  mu_contraction: 2.5030629500903445
+  tolerances: {length_m: 0.001, diameter_m: 2.0e-05}
+  tolerances_default: false
+  overrides: [{key: mesh.ni, before: null, before_missing: false, value: 3000}]
+  r_t_method: physical_throat_ns_corrected
+  r_t_method_text: 'NS 後の補正の solve_rt_throat (δ: 前の run /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont の δ_E の全分布 × (r_t/S_prev)^−0.2、前の設計の x → s → 今の設計の x) で物理スロート半径 0.1 m に合わせた固定点 (外側 1 回、最後の |Δr_t|/r_t 3.18e-15 ≤ 1e-06、内側の許容差 1e-09 m)。補正の表は YAML の横の problem_m55_p1_card_delta_r.csv (出典と sha256 は _card.ns_correction; NS は deltastar_loop --delta-r-csv で立てる)'
+  card_path: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/card_m55.yaml
+  card_sha256: f38fe445ba8408eb1d4ede4c43f7daaa57c8066e8133657b097782a0bbe90d18
+  card: {format: forge.wt_card/v1, name: m55_combustion_wt, gas: {species: {CO2: 0.1677, H2O: 0.0858, O2: 0.022, N2: 0.7245}}, conditions: {Pt: 3500000.0, Tt: 1250.0}, M_exit: 5.5, throat: {diameter_physical_m: 0.2, curvature_radius_m: 0.5}, inlet: {radius_m: 0.3, pipe_length_m: 0.5, contraction_length_m: 0.5}, divergent_length_m: 8.0, wall: {thermal: isothermal, Tw: 350.0}, p_ambient: design, tolerances: {length_m: 0.001, diameter_m: 2.0e-05}, recipe: axismach_final_v1, overrides: {mesh.ni: 3000}}
+  r_t_history: [{iter: 0, r_t_in_m: 0.1, r_t_out_m: 0.10024473588077615, rel_change: 0.002447358807761424, inner_residual_m: -8.063852363626722e-11, inner_n_iter: 3, physical_throat_r_m: 0.09999999991936148, physical_throat_x_m: -0.00033778437808719154, exit_radius_m: 0.7678952465224842, time_s: 78.64271211624146, M_K: 2.85, stage: r_t の固定点}, {iter: 1, r_t_in_m: 0.10024473588077615, r_t_out_m: 0.10024473616136821, rel_change: 2.7990703053643536e-09, inner_residual_m: -8.063905099220392e-11, inner_n_iter: 3, physical_throat_r_m: 0.09999999991936095, physical_throat_x_m: -0.00033778253353661323, exit_radius_m: 0.7678939922020154, time_s: 79.41590690612793, M_K: 2.85, stage: r_t の固定点}, {iter: 0, r_t_in_m: 0.10024473616136821, r_t_out_m: 0.10024473616136853, rel_change: 3.184098555219101e-15, inner_residual_m: -8.063893996990146e-11, inner_n_iter: 3, physical_throat_r_m: 0.09999999991936107, physical_throat_x_m: -0.00033778253357140837, exit_radius_m: 0.7678939922006913, time_s: 79.25815796852112, M_K: 2.8, stage: r_t の固定点}]
+  inner_tol_m: 1.0e-09
+  auto_adjust: [{key: geometry.n_axis_inv, from: 2400, to: 4800, reason: 'from_length の固定点反復が改善しなくなって止まった (runner_axismach.py:606-616; 離散化のノイズ床とは区別できない): 最良の |x_F − L_total| 0.0311 r_t > L_total_tol 0.00499 r_t (r_t 0.10024473587551185 m)'}]
+  L_total_tol_relaxed: null
+  moc_field: {x_F: 79.80892776473334, x_e: 79.80892776473333, x_F_minus_x_e_rt: 1.4210854715202004e-14, x_wall_full_end: 91.5772065027192, spacing_end: 0.027178472835970524, margin_to_field_end_rt: 11.768278737985867, n_beyond_x_F: 433, x_axis_end: 130.7603280843692, pinned: false, x_F_minus_x_e_m: 1.4245633815529648e-15, x_end_margin: 2.3}
+  mesh_estimate: {note: 初期値 (合格の根拠ではない)。NS 後に check_wall_resolution.py の VERDICT で判定し、不合格なら細分する (手順書 §2 ⑥), wall_first_frac: 2.4e-06, wall_first_frac_throat: 7.4e-07, ni: 3000, wall_first_frac_raw: 2.4930110134652046e-06, wall_first_frac_throat_raw: 7.404280486066037e-07, ni_required_for_ar: 10136, ar_max_limit: 5000.0, y1plus_est_max_with_blend: 0.7995364425186255, x_y1plus_est_max_rt: -0.4177007197515221, blend_choice: C, wall_first_up_x0: null, wall_first_up_x1: null}
+  mesh_estimate_ar_check: {ar_max: 16422.13275649707, x_at_max: 4.640265032578414, n_cells: 287904, nj: 97}
+  liquefaction: {verdict: 出口静温 204.31 K が Antoine の範囲 (63〜126 K) より高い (N₂ の臨界温度 126.2 K 付近より上) — 液化しない, T_exit_K: 204.31417427410088, p_exit_Pa: 2770.7447458188694, p_N2_Pa: 2040.2040621447818, p_sat_N2_Pa: null, supersaturated: false}
+  dimensions: {pass: true, rows: [{name: inlet_radius, card_m: 0.3, measured_m: 0.3, diff_m: 0.0, tol_m: 1.0e-05, pass: true}, {name: pipe_length, card_m: 0.5, measured_m: 0.5, diff_m: 0.0, tol_m: 0.001, pass: true}, {name: contraction_length, card_m: 0.5, measured_m: 0.5000000000509272, diff_m: 5.092715138488302e-11, tol_m: 0.001, pass: true}, {name: divergent_length, card_m: 8.0, measured_m: 8.000424907097411, diff_m: 0.0004249070974111646, tol_m: 0.001, pass: true}, {name: throat_diameter_physical, card_m: 0.2, measured_m: 0.19999999983872213, diff_m: -1.6127787993980292e-10, tol_m: 2.0e-05, pass: true}], x_F_minus_x_e_m: 1.4245633815529648e-15}
+  warnings: ['格子: 実際の格子 (ni 3000) の AR の最大 16422 が ar_max 5000 を超える (x = 4.640 r_t)', '格子: 雛形のブレンド (wall_first_up_x0/x1 -9.0/-4.0) では y1+ の目安の最大 2.07 (x = -9.94 r_t) > 1 — C (上流は全域スロートの値 (up_x0・up_x1 = null; mesh2d の規則)) に決め直した (目安の最大 0.80 @ x = -0.42 r_t)', '格子: wall_first_frac_throat 7.4e-07 < 1e-06 — float32 の座標では第 1 層が局所半径の 7.4e-07 倍で 約 6 ulp しかない。FP64 のビルドと msh の 17 桁の座標が要る (mesh2d.write_msh41_2d の既定は 10 桁)']
+  generated: '2026-10-15'
+  M_knot_rule: {rule: coarse_min_theta_v2, mode: auto, source: カードに geometry.M_knot を書いていない (既定は自動), chosen: 2.8, chosen_from: 出力と同じ実効の入力で選び直した選択 (= r_t の固定点に使った M_K; plan tooling-nozzle-mknot-fast §4.1), r_t_m: 0.10024473616136853, first_r_t_m: 0.1, N_s: 1200, L_s: 0.1, N_p: 4800, L_p: 0.004987793066711524, x_end_margin: 2.3, theta_max_deg: 12.130968238686233, theta_max_deg_final_chain: 12.130968238686233, margin_deg: 4.052797997878899, min_sin_angle: 0.056730686408016616, distance_est: 1.15, reason: 代表が残った谷 1 個 (全 1 個) の生産の網の θ_max の最小 12.13097° から 0.01° 以内の同点の集合 1 個 (2.80) の中で 唯一の谷 → 2.80 (θ_max 12.13097°、境目までの推定の距離 1.15), tie_set: [2.8], n_valleys: 1, n_valleys_final: 1, ok_final_three: [[2.75, true], [2.8, true], [2.85, true]], valleys: [{start: 2.8, final: 2.8, theta_max_deg: 12.130968238686233, distance: 1.15, n_moves: 0, discarded: false}], grid: [1.15, 5.45, 87], n_eval: {coarse: 87, prod: 3}, first_reused: false, selections: [{stage: 最初の r_t, attempt: 0, r_t_m: 0.1, N_p: 2400, chosen: 2.8, discarded: true}, {stage: 自動調整の後のやり直し (geometry.n_axis_inv 2400 → 4800), attempt: 1, r_t_m: 0.1, N_p: 4800, chosen: 2.85, discarded: false}, {stage: 最終の組 (出力と同じ実効の入力で選び直す), attempt: 1, r_t_m: 0.10024473616136821, N_p: 4800, chosen: 2.8, discarded: false}, {stage: 最終の組 (出力と同じ実効の入力で選び直す), attempt: 1, r_t_m: 0.10024473616136853, N_p: 4800, chosen: 2.8, discarded: false}], events: [{stage: 最初の r_t, r_t_m: 0.1, M_K_used_in_fixed_point: null, chosen: 2.8, same: null}, {stage: 自動調整の後のやり直し (geometry.n_axis_inv 2400 → 4800), r_t_m: 0.1, M_K_used_in_fixed_point: null, chosen: 2.85, same: null}, {stage: 最終の組 (出力と同じ実効の入力で選び直した), r_t_m: 0.10024473616136821, M_K_used_in_fixed_point: 2.85, chosen: 2.8, same: false}, {stage: 最終の組 (出力と同じ実効の入力で選び直した), r_t_m: 0.10024473616136853, M_K_used_in_fixed_point: 2.8, chosen: 2.8, same: true}], redo: 1, n_restart: 1, workers: {coarse: 4, prod: 3}, elapsed_s: 855.1502771377563, elapsed_breakdown: {select_s: 775.8920471668243, refix_s: 79.258229970932}, card_elapsed_s: 1114.3030688762665, recipe_M_knot_factor: 0.45, recipe_M_knot_value_unused: 2.475, card_log: {file: problem_m55_p1_card.yaml.card_log.json, key: M_knot_rule, sha256: 76e08271b71f66b9d90c133f34133b0a6ff6f34279a0edf3c9977d9b4294fcbf, sha256_of: card_log の M_knot_rule を JSON (キーの順に並べ、区切りに空白なし、ensure_ascii=False) にしたもの, holds: 粗い掃引の全行 (selection.coarse_table)・谷ごとの確認の行 (selection.valleys・confirm_table)・最初の選択・全部の選択の要約・選び直しの文・計時の内訳}}
+  ns_correction: {prev_run: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont, delta_next: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont/delta_r_next.csv, delta_next_sha256: 2386f48c0e3a53e837e71f68f4798ead4325e6171394c72ff31a5e307b6cf17e, delta_column: delta_E (named header), wall_repr: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont/wall_repr.json, wall_repr_sha256: c77f919c3b086ae66763381c7ce5318e3b92efbaf55dcc7e1c5ea40bb9bd1a1c, prepare_info: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0003_ns_cont/prepare_info.json, prepare_info_sha256: 4c3da597402953f80bd31033f6da4ef6cb35f3ec43ef1cb948b64a4db0b550ef, S_prev_m: 0.0999084914252905, anchors_prev_rt: {x_in: -10.009159238959976, x_contraction: -5.004579619479988, x_throat: 0.0, x_exit: 80.07371897756357}, anchors_new_rt: {x_in: -9.975586133423048, x_contraction: -4.987793066711524, x_throat: 0.0, x_exit: 79.80892776473333}, x_map: 前の設計の x → s (区間で正規化; wall_temperature と同じ区切り) → 今の設計の x, table_ends: {start: {x_table_rt: -10.009159238959976, x_design_rt: -10.009159238959976, diff_rt: 0.0, diff_m: 0.0, eps_f32_rt: 2.146859078283307e-06, snapped: false}, end: {x_table_rt: 80.07371897756356, x_design_rt: 80.07371897756357, diff_rt: -1.4210854715202004e-14, diff_m: -1.4197850564598084e-15, eps_f32_rt: 1.7174872626266455e-05, snapped: true}}, held: {n_held: 0, n_held_in_use: 0, x_held_outside_use_rt: []}, table: /home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/problem_m55_p1_card_delta_r.csv, table_sha256: f92d6eab3a3899e7b7bcd86ca61a4c9996ddda590dcb49171077cf386388cd58, r_t_m: 0.10024473616136853, factor: 0.9993282504457885, table_x_range_rt: [-9.975586133423048, 79.80892776473333], final_table_equals_last_inner: false, use: deltastar_loop --problem problem_m55_p1_card.yaml --delta-r-csv problem_m55_p1_card_delta_r.csv (sha256 を照合する)}

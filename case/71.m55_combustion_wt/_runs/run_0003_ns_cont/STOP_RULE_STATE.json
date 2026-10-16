@@ -1,0 +1,25 @@
+{
+ "version": 1,
+ "plan": "plans/active/tooling-nozzle-cooled-wall-ns-settling.md §4.6・plans/active/tooling-nozzle-isothermal-wall-chain.md §4.9・§5.1 #36a (2026-10-14 統合: 既定で使う・明示のときだけ使えない設定を例外・保持の既定 40,000)",
+ "status": "CENSORED",
+ "stop_step": 200000,
+ "last_output": 200000,
+ "forge_rc": 0,
+ "run_case_rc": 0,
+ "rc": 0,
+ "cap": 200000,
+ "fallback_steps": 200000,
+ "hold_steps": 40000,
+ "hold": {
+  "hold_steps": 40000,
+  "start": null,
+  "reached": [],
+  "breaks": []
+ },
+ "stop_sha256": "0fbddf79a4b31a58634dba670cf16ea04c821a8e376d42c637547e4628935b36",
+ "note": null,
+ "unavailable": null,
+ "record": "stop_rule.json",
+ "record_sha256": "25de509154f054a5b154d2bc36e25d3fec867e5c06bfeeb40e6f4e81f235750e",
+ "finished": "2026-10-15T03:15:22+00:00"
+}

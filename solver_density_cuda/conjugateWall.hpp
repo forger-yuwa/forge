@@ -110,8 +110,13 @@ void initConjugateWalls(const solverConfig& cfg, const mesh& msh);   // 起動�
 void updateConjugateWalls(const solverConfig& cfg, mesh& msh, variables& var, int iStep);
 bool conjugateActive(const solverConfig& cfg, const mesh& msh);
 // 収束した壁温を run ディレクトリに残す (再開時は wall_profile_<physID>.csv にコピーして使う)。
-void writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep);
+// outStepInterval ごと・最後の step・force (協調停止・随時の書き出しの step) に、壁温 CSV と mode fem2d の固体場・再開用の状態を書き、
+// 書いたファイル名を返す。force のときは書き込みの失敗を例外で返す (それ以外の step は従来どおり警告だけ)。
+std::vector<std::string> writeConjugateState(const solverConfig& cfg, const mesh& msh, int iStep, bool force = false);
 // 再開時の累積 step オフセット (出力側が壁ダンプに `step_abs` を書くために使う)。
 int stepOffsetForOutput();
+// 診断 FORGE_DIAG_OUTPUT_INVARIANCE (plans/active/tooling-settle-convergence-and-monitor.md §5.1 #1c) 専用: mode fem2d の固体の状態
+// (温度・界面荷重・平均バッファ・分解の記録・更新の位相) をバイト列に並べる (比べるだけ。固体が無ければ空)。
+void diagStateBytes(std::vector<char>& out);
 
 } // namespace conjugateWall

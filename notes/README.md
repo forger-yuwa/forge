@@ -35,6 +35,7 @@
 | [su2-nemo-contact-thermo-investigation.md](investigations/su2-nemo-contact-thermo-investigation.md) | `convection / thermophysics` | SU2-NEMO contact/interface thermo 取り扱い調査 (forge mixed-order face-state 比較) |
 | [turbulence-des-flux-survey.md](investigations/turbulence-des-flux-survey.md) | `turbulence` | DES/DDES/IDDES 用 低散逸対流 flux 設計 技術調査（圧縮性 LES/DES） |
 | [turbulence-des-wmles-survey.md](investigations/turbulence-des-wmles-survey.md) | `turbulence` | DES / WMLES 最新動向サーベイ（超音速ノズル・ピントルバルブ適用向け） |
+| [2026-10-16-output-host-readers.md](investigations/2026-10-16-output-host-readers.md) | tooling / output | 出力の処理が書き換える host の写しの読み手の網羅 (settle plan §5.1 #1d)。#1c の 158 配列は (a) 153・(b) 5・(c) 0。上書き前に読む farfield の自由流と連成の Ts は device に書き手が無く値は不変。farfield の A/B・FP64 でも同じ。陽性対照で、毒入れと場の比較は網羅の代わりにならないことを確認 |
 
 ## sessions
 

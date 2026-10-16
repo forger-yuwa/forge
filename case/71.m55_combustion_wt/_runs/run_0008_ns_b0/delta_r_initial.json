@@ -1,0 +1,40 @@
+{
+ "model": "contur_momentum_integral",
+ "closure": "contur",
+ "a_crocco": 1.0,
+ "cf_scale": 1.0,
+ "n_scale": 1.0,
+ "thermal_bc": {
+  "mode": "prescribed_temperature",
+  "Tw": 350.0
+ },
+ "theta0_m": 0.0008389002729800606,
+ "theta0_source": "flat-plate virtual length 0.5 m (Re_x 4.55e+06)",
+ "x_virtual_m": 0.5,
+ "rt_m": 0.100243850935207,
+ "Pt": 3500000.0,
+ "Tt": 1250.0,
+ "gas": "semiperfect",
+ "smooth": {
+  "kind": "quintic_pspline",
+  "n_cp": 59,
+  "knot_spacing": 2.0,
+  "lam": 1.0,
+  "penalty_order": 3,
+  "resid_rel_rms": 0.01917078449116264,
+  "resid_abs_max": 0.0003341860414035466,
+  "resid_rel_p95": 0.027946528289929492
+ },
+ "delta_r_throat": -0.0024308912455700184,
+ "delta_r_exit": 0.41626520036415077,
+ "delta_scale": 0.852087987522164,
+ "delta_offset_m": -0.0003220418618084591,
+ "two_coef": {
+  "delta_scale": 0.852087987522164,
+  "delta_offset_m": -0.0003220418618084591,
+  "scale_m": 0.100243850935207,
+  "delta_r_throat_contur": 0.0009173858405771341,
+  "delta_r_exit_contur": 0.49229397809517683,
+  "plan": "plans/active/tooling-nozzle-card-local-mesh.md \u00a74.3"
+ }
+}

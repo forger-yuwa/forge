@@ -220,8 +220,15 @@ if base_ds is None:
 else:
     cases = [{}, {"band_select": "edge", "remap_constant_x": True}, {"band_smooth_x": 4.0}, {"method": "core"}]
     for kw in cases:
-        r_ = same(base_ds.deltastar_from_core_matched_euler(ns1, eu1, **kw), ds.deltastar_from_core_matched_euler(ns1, eu1, **kw))
-        check(f"(4) ①の抽出がビット同一 (合成、{kw or '既定'})", r_ is None, r_ or "")
+        o_b = base_ds.deltastar_from_core_matched_euler(ns1, eu1, **kw); o_n = ds.deltastar_from_core_matched_euler(ns1, eu1, **kw)
+        if kw.get("remap_constant_x"):
+            # 意図した変更 (2026-10-15, plan tooling-nozzle-card-local-mesh §5.1 #3i): 一定 x の抽出の流量の帳簿は抽出と同じ断面で測る。
+            # 帳簿以外はビット同一、帳簿は massflow_ratio(remap_constant_x=True) と同一であることを見る
+            mf_n = o_n.pop("massflow"); o_b.pop("massflow")
+            r_m = same(mf_n, ds.massflow_ratio(ns1, eu1, remap_constant_x=True))
+            check("(4) 一定 x の抽出の流量の帳簿 = 一定 x の massflow_ratio (#3i)", r_m is None, r_m or "")
+        r_ = same(o_b, o_n)
+        check(f"(4) ①の抽出がビット同一 (合成、{kw or '既定'}{'、帳簿を除く' if kw.get('remap_constant_x') else ''})", r_ is None, r_ or "")
     r_ = same(base_ds.massflow_ratio(ns1, eu1), ds.massflow_ratio(ns1, eu1))
     check("(4) ①の流量の帳簿がビット同一 (合成)", r_ is None, r_ or "")
     real = [(c / "run_0038_ns_final_rt77p02", c / "run_0037_euler_rt77p02")

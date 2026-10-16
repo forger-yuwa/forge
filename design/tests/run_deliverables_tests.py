@@ -5,6 +5,33 @@ M6 の生産の壁の準備ディレクトリ (wall_repr.json・prepare_info.jso
 (a) 一括書き出しが通り MANIFEST の sha256 が実ファイルと一致、(b) 寸法ゲート: 生産の設計値で作ったカードは PASS・出口長を 2.2 mm
 ずらしたカードは FAIL で MANIFEST の verdict も FAIL、(c) 入力が欠けた run (wall_repr.json なし) は cad を理由つきで飛ばす、を確かめる。
 FreeCAD・gmsh が要る (無ければ飛ばす)。作業は一時ディレクトリで行い、fixture には書かない。
+
+壁法線の近壁層の格子 (構造ファイル v2、plan tooling-nozzle-card-local-mesh §5.1 #5, 2026-10-15):
+- (S) fixture なしで回る: mesh2d の小さな格子の run で part_mesh が、縦線の格子は v1 (変更前 = git の BASE_COMMIT の
+  mesh_structure.py の出力とバイト一致)、壁法線の近壁層の格子で壁ファイルが無い run は「作らない」と理由 (壁の傾き) を書く。
+- (W) FORGE_DELIV_FIXTURE_WN (壁法線の近壁層の run から make_deliverables_fixture.py で作ったもの。既定は下の FIXTURE_WN_DEFAULT =
+  case/71 run_0003_ns_cont の写し) があれば、part_mesh が v2 を作り STEP からの作り直しの比較が PASS。格子品質は変換器が
+  FP64 の座標でないと薄い第 1 層を測れない (FORGE_CONVERTER で指定) ので、元と作り直しの判定が同じことだけを合否にする。
+  規則の照合 (prepare_info.json の mesh.params の wall_normal_layer・wall_normal_end_stations): part_mesh で実施されて通り、
+  同じ格子で傾きを (1 + 1e-6) 倍・d_n を 1 % ずらすと StructureError、パラメータ無しでは通って「未実施」と書く。
+
+寸法ゲートの直管と縮流部の接合の照合 (plan tooling-nozzle-card-local-mesh §5.1 #3j、codex diagnose 2026-10-15 E(ii)):
+- (J) fixture (FIX) と case/71 run_0005_ns の成果物 (M55_DELIV、FORGE_DELIV_M55_DIR で指定; 無ければ飛ばす) で、接合を STEP の曲線から
+  決め入口端から設計スロート x = 0 までの壁節点の半径を曲線と NODE_EQ_MM で照合: 基準 PASS、接合を ±1 節点の間隔ずらした曲線・
+  直管の節点の 1e-5 mm で FAIL、照合が欠けたら PASS にしない。旧の「接合点を挟む 2 節点の区間」は参考の記録 (必須から外した)。
+
+設計壁 (Euler で回す壁) と物理壁の座標の比較 `wall_compare/` (plan tooling-nozzle-card-local-mesh §5.1 #3u, 2026-10-15):
+- (C1) M6 fixture: 表の x・物理壁の半径・壁角が形状表 (wall_shape_mm.csv) と文字列で同一、設計壁の半径を壁ファイルから独立に評価して
+  一致、dr_mm = r_physical_mm − r_design_mm、空欄なし。(C2) 物理壁の定義域を縮めた壁で、外の x の物理壁の列と dr_mm だけが空欄。
+  physical が design_upstream (物理壁でない) なら例外。
+- (C3) δ_r の記録との照合: M6 fixture (initializer、delta_r_initial.csv なし) は出口 PASS・スロート未照合 (直線補間の記録を再現できない)、
+  出口の記録を 2e-6 mm ずらすと FAIL・MANIFEST も FAIL、5e-7 mm なら PASS。
+- (C4) case/71 run_0005_ns (delta_r_csv、表は case ディレクトリ) はスロート・出口とも PASS。表の最後の値を変えて sha256 の記録も
+  合わせると FAIL、sha256 が合わない表は未照合 (合格にしない)。
+- (C5) initializer + delta_r_initial.csv の run (FORGE_DELIV_C70_RUN、既定 forge-deliv の case/70 run_0010; 無ければ飛ばす) は PASS、
+  表の x = 0 の隣の値を変えると (記録が表の直線補間と合わない) FAIL。
+- (C6) 図 3 枚が PNG で日本語フォント (Noto Sans CJK JP) で書かれる。作図が失敗したら MANIFEST の errors に残り、xlsx にシートを足さない。
+- (a) の一括書き出しで wall_compare/ の CSV・図・JSON が MANIFEST に載り、xlsx にシート wall_compare (表と注記)、README に行がある。
 """
 import hashlib
 import json
@@ -23,6 +50,16 @@ FIX = Path(os.environ.get("FORGE_DELIV_FIXTURE",
                           "/tmp/claude-1000/-home-sano-work-forge/bd18adac-85f4-4627-811b-8f3186867995/scratchpad/fixtures/m6_prod"))
 CFG_TEMPLATE = Path(os.environ.get("FORGE_DELIV_CFG_TEMPLATE",
                                    "/home/sano/work/forge/case/45.isobutane_m6_d155/run_0051_ns_final_c2/solverConfig.yaml"))
+FIXTURE_WN_DEFAULT = "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/m55_deliv/fixtures/m55_wn"
+FIX_WN = Path(os.environ.get("FORGE_DELIV_FIXTURE_WN", FIXTURE_WN_DEFAULT))
+BASE_COMMIT = "6d4334e3"     # v2 を入れる前の mesh_structure.py (v1 の出力のビット同一の基準)
+REPO = Path(__file__).resolve().parents[2]
+# 直管と縮流部の接合の照合 (#3j) の実データ: case/71 run_0005_ns の成果物 (接合の 0.08 mm 下流に節点があり、旧の区間の検査が誤って落ちた)
+M55_DELIV = Path(os.environ.get("FORGE_DELIV_M55_DIR", str(REPO / "case/71.m55_combustion_wt/run_0005_ns/deliverables")))
+M55_CARD = Path(os.environ.get("FORGE_DELIV_M55_CARD", str(REPO / "case/71.m55_combustion_wt/card_m55.yaml")))
+# 設計壁と物理壁の比較 (#3u) の実データ: delta_r_csv の run (case/71 run_0005_ns) と、initializer + delta_r_initial.csv の run (case/70 run_0010)
+M55_RUN = Path(os.environ.get("FORGE_DELIV_M55_RUN", str(REPO / "case/71.m55_combustion_wt/run_0005_ns")))
+C70_RUN = Path(os.environ.get("FORGE_DELIV_C70_RUN", "/home/sano/work/forge-deliv/case/70.m5_air_wt_demo/run_0010_ns_c2b_final"))
 fails = 0
 
 
@@ -48,10 +85,442 @@ def card_from_production(L_div_mm: float, throat_d_mm: float) -> dict:
             "tolerances": {"length_m": 1.0e-3, "diameter_m": 2.0e-5}}
 
 
+def base_mesh_structure(tmp: Path):
+    """BASE_COMMIT の mesh_structure.py を git から読んで import する (読めなければ None)。"""
+    import importlib.util
+    import subprocess
+    r = subprocess.run(["git", "-C", str(Path(__file__).resolve().parents[2]), "show",
+                        f"{BASE_COMMIT}:design/forge_design/export/mesh_structure.py"], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    p = tmp / "mesh_structure_base.py"
+    p.write_text(r.stdout, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("mesh_structure_base", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def structure_tests() -> None:
+    """(S) part_mesh の構造ファイル: 縦線の格子は v1 (変更前とバイト一致)、壁ファイルの無い壁法線の近壁層の格子は理由つきで作らない。"""
+    import numpy as np
+    from forge_design.meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
+    from forge_design.export import mesh_structure as ms
+    if not Path(dl.GMSH_PYTHON).exists():
+        print(f"skip (S): gmsh の python が無い ({dl.GMSH_PYTHON})")
+        return
+
+    class WallS:
+        x_in, x_e = -2.0, 4.0
+
+        @staticmethod
+        def r(x, deriv=0):
+            x = np.asarray(x, dtype=float)
+            return 1.0 + 0.05 * x * x if deriv == 0 else 0.1 * x
+
+    with tempfile.TemporaryDirectory(prefix="deliv_struct_") as td:
+        tmp = Path(td)
+        base = base_mesh_structure(tmp)
+        for name, extra in (("v", {}), ("w", {"wall_normal_layer": [0.02, 0.8]})):
+            run = tmp / f"run_{name}"
+            run.mkdir()
+            c, q, b = generate_axisym_mesh(WallS, Mesh2DParams(ni=41, nj=17, wall_first_frac=0.01, scale=0.05, **extra))
+            write_msh41_2d(run / "nozzle.msh", c, q, b, digits=17)
+            res = dl.part_mesh(run, tmp / f"out_{name}")
+            if name == "v":
+                js = tmp / "out_v" / "mesh" / "mesh_structure.json"
+                check("(S1) 縦線の格子: part_mesh が v1 の構造ファイルを書く (STEP が無いので作り直しは飛ばす)",
+                      res.get("structure_format") == ms.FORMAT and js.exists() and "STEP が無い" in str(res.get("rebuild")), res.get("structure"))
+                if base is None:
+                    print(f"skip (S1) v1 のビット同一: git から {BASE_COMMIT} を読めない")
+                else:
+                    cc, qq, bb, _ = base.read_msh41_mesh2d(tmp / "out_v" / "mesh" / "nozzle.msh")
+                    base.write_structure_json(base.extract_structure(cc, qq, bb), tmp / "base.json")
+                    check(f"(S1) 縦線の格子の mesh_structure.json が変更前 ({BASE_COMMIT} の extract_structure) とバイト一致",
+                          js.exists() and js.read_bytes() == (tmp / "base.json").read_bytes())
+            else:
+                st = str(res.get("structure"))
+                check("(S2) 壁法線の近壁層の格子で壁ファイルの無い run: 構造ファイルを作らず理由 (壁の傾きを渡す・壁の傾きを作れない) を書く",
+                      st.startswith("作らない") and "壁の傾きを渡す" in st and "壁の傾きを作れない" in st
+                      and not (tmp / "out_w" / "mesh" / "mesh_structure.json").exists(), st[-160:])
+
+
+def wn_fixture_tests() -> None:
+    """(W) 壁法線の近壁層の run の fixture (FORGE_DELIV_FIXTURE_WN) で part_mesh が v2 を作り、STEP からの作り直しの比較が PASS。"""
+    import numpy as np
+    from forge_design.export import mesh_structure as ms
+    need = ("nozzle.msh", "wall_repr.json", "prepare_info.json", "bcondConfig.yaml")
+    if not all((FIX_WN / n).exists() for n in need) or not (FIX_WN / "step" / "wall_physical.step").exists():
+        print(f"skip (W): 壁法線の近壁層の fixture が無い ({FIX_WN})。tests/make_deliverables_fixture.py で作り FORGE_DELIV_FIXTURE_WN で指定")
+        return
+    with tempfile.TemporaryDirectory(prefix="deliv_wn_") as td:
+        tmp = Path(td)
+        run = tmp / "run_wn"
+        run.mkdir()
+        for n in need + ("solverConfig.yaml",):
+            if (FIX_WN / n).exists():
+                os.symlink(FIX_WN / n, run / n)
+        out = tmp / "out"
+        (out / "cad").mkdir(parents=True)
+        shutil.copy2(FIX_WN / "step" / "wall_physical.step", out / "cad" / "wall_physical.step")
+        res = dl.part_mesh(run, out)
+        sc = res.get("structure_self_check") or {}
+        src = res.get("structure_wall_slope_source") or {}
+        check("(W1) part_mesh が v2 (節点の規則 wall_normal_blend_v1) の構造ファイルを書く・自己検査 ≤ 1e-7 mm かつ第 1 層厚の 1e-3",
+              res.get("structure_format") == ms.FORMAT_V2 and res.get("structure_node_rule") == ms.NODE_RULE_V2
+              and sc.get("max_dist_mm", 1.0) <= 1e-7 and sc.get("max_dist_over_first_layer", 1.0) <= 1e-3,
+              f"{res.get('structure')}: 自己検査 {sc.get('max_dist_mm', float('nan')):.2e} mm・{sc.get('max_dist_over_first_layer', float('nan')):.2e}")
+        check("(W1) 壁の傾きの出典 = run の壁ファイル (sha256 一致)",
+              src.get("file") == "wall_repr.json" and src.get("sha256") == hashlib.sha256((FIX_WN / "wall_repr.json").read_bytes()).hexdigest())
+        rc = res.get("structure_rule_check") or {}
+        rpar = res.get("structure_rule_params") or {}
+        pinfo = json.loads((FIX_WN / "prepare_info.json").read_text())["mesh"]["params"]
+        check("(W1) 規則の照合を実施して ≤ 1e-7 mm かつ第 1 層厚の 1e-3・パラメータは prepare_info.json の mesh.params (sha256・msh の sha256 一致)",
+              rc.get("status") == "実施" and rc.get("max_dist_mm", 1.0) <= 1e-7 and rc.get("max_dist_over_first_layer", 1.0) <= 1e-3
+              and rpar.get("wall_normal_layer") == [float(v) for v in pinfo["wall_normal_layer"]]
+              and rpar.get("wall_normal_end_stations") == pinfo.get("wall_normal_end_stations")
+              and rpar.get("source", {}).get("key") == "mesh.params" and rpar.get("source", {}).get("msh_sha256_matches") is True
+              and rpar.get("source", {}).get("sha256") == hashlib.sha256((FIX_WN / "prepare_info.json").read_bytes()).hexdigest(),
+              f"{rc.get('status')}: {rc.get('max_dist_mm', float('nan')):.2e} mm・{rc.get('max_dist_over_first_layer', float('nan')):.2e}・"
+              f"|β_規則 − β_解| {rc.get('beta_rule_minus_solved_max_abs', float('nan')):.1e}・パラメータ {rpar.get('wall_normal_layer')}・"
+              f"{rpar.get('wall_normal_end_stations')}")
+        js = out / "mesh" / "mesh_structure.json"
+        if js.exists():
+            st = ms.load_structure_json(js)
+            cc = ms.read_msh41_mesh2d(FIX_WN / "nozzle.msh")[0]
+            e = float(np.abs(ms.structure_coords(st) - cc).max()) / (st["length_mm"] * 1e-3)
+            check("(W2) 構造ファイルから作り直した座標が元の msh と ≤ 1e-12 L", e <= 1e-12, f"{e:.2e} L")
+        rb = res.get("rebuild") if isinstance(res.get("rebuild"), dict) else {}
+        bd = rb.get("b_distance", {})
+        ec = rb.get("end_columns", {})
+        check("(W3) STEP からの作り直しの比較が PASS (v2)", rb.get("verdict") == "PASS" and rb.get("structure_format") == ms.FORMAT_V2,
+              f"最大距離 {bd.get('max_dist_mm', float('nan')):.3e} mm・第 1 層厚比 {bd.get('max_dist_over_first_layer', float('nan')):.3e}・"
+              f"端の列の外れ 入口 {ec.get('inlet', {}).get('max_abs_dx_mm', float('nan')):.3e} mm・出口 "
+              f"{ec.get('outlet', {}).get('max_abs_dx_mm', float('nan')):.3e} mm・理由 {rb.get('fail_reasons', str(res.get('rebuild'))[-200:])}")
+        qo, qr = (res.get("quality", {}).get(k, {}) for k in ("original", "rebuilt"))
+        check("(W4) 格子品質の判定が元と作り直しで同じ", qo.get("verdict") is not None and qo.get("verdict") == qr.get("verdict"),
+              f"元 {qo.get('verdict')}・作り直し {qr.get('verdict')} (変換器 {qo.get('converter')}; FP64 でない変換器は薄い第 1 層で FAIL)")
+        print(f"     (記録) part_mesh の pass = {res.get('pass')} (格子品質 元 {qo.get('verdict')}・作り直し {qr.get('verdict')})")
+        # 実データでの規則の照合の負例 (同じ格子・同じ傾きの作り方で、傾きを定数倍・パラメータをずらす)
+        cc, qq, bb, ph = ms.read_msh41_mesh2d(FIX_WN / "nozzle.msh")
+        slope, _, why = dl._wall_slope(run, cc, bb)
+        rule, why_r = dl._rule_params(run, hashlib.sha256((FIX_WN / "nozzle.msh").read_bytes()).hexdigest())
+        if slope is None or rule is None:
+            check("(W5) 実データの規則の照合の負例: 傾き・パラメータを作れる", False, f"{why} / {why_r}")
+            return
+        for name, kw, word in (("傾きを (1 + 1e-6) 倍", {"wall_slope": slope * (1.0 + 1e-6), "rule_params": rule}, "規則の照合"),
+                               ("d_n を 1 % ずらす", {"wall_slope": slope, "rule_params": dict(
+                                   rule, wall_normal_layer=[rule["wall_normal_layer"][0] * 1.01, rule["wall_normal_layer"][1]])}, "規則の照合")):
+            try:
+                ms.extract_structure(cc, qq, bb, phys=ph, **kw)
+                check(f"(W5) 実データ: {name} と規則の照合で StructureError", False, "例外なし")
+            except ms.StructureError as e:
+                check(f"(W5) 実データ: {name} と規則の照合で StructureError", word in str(e), str(e)[:170])
+        st0 = ms.extract_structure(cc, qq, bb, phys=ph, wall_slope=slope)
+        check("(W5) 実データ: 規則のパラメータ無しでは今までどおり通り、checks に「未実施」",
+              st0["checks"]["rule_check"]["status"] == "未実施 (パラメータ無し)" and st0["rule_params"] is None)
+        st1 = ms.extract_structure(cc, qq, bb, phys=ph, wall_slope=slope * (1.0 + 1e-6))
+        print(f"     (記録) 実データ: 傾きを (1 + 1e-6) 倍でも規則のパラメータ無しでは通る (自己検査 {st1['checks']['self_check']['max_dist_mm']:.2e} mm、"
+              f"β が [0, 1] の外に出た節点 {st1['checks']['n_beta_clamped']})")
+
+
+def shifted_junction_r(C, u_range, xj: float, r_in: float, xw, rw, d: float):
+    """接合を d [mm] ずらした曲線の半径を壁節点の x で返す (負例用)。入口端・直管の半径・設計スロート x = 0 は固定:
+    x ≤ xj + d は入口半径、xj + d < x ≤ 0 は縮流部 [xj, 0] を [xj + d, 0] に線形に写した曲線、x > 0 は元の節点のまま。"""
+    from forge_design.export import dimension_gate as dg
+    r = rw.copy()
+    r[xw <= xj + d] = r_in
+    mid = (xw > xj + d) & (xw <= 0.0)
+    r[mid] = dg.curve_r_at_x(C, u_range, xj + (xw[mid] - xj - d) * (0.0 - xj) / (0.0 - xj - d))[0]
+    return r
+
+
+def junction_tests(tag: str, card: dict, sd: dict, md: dict, ch: dict, step: Path, msh: Path) -> dict:
+    """(J) 直管と縮流部の接合の照合 (plan tooling-nozzle-card-local-mesh §5.1 #3j、codex diagnose 2026-10-15 E(ii)):
+    接合は STEP の曲線から決め、入口端から設計スロート x = 0 までの壁節点の半径を節点の x で評価した曲線と NODE_EQ_MM で照合する。
+    (a) 基準は PASS、(b) 接合を ±1 節点の間隔ずらした曲線で作り直した節点の半径は FAIL、(c) 直管の節点の半径を 1e-5 mm 動かすと FAIL、
+    (d) 照合が欠けた・評価できない・別の接合で照合した・設計スロートまで照合していないものは PASS にしない。"""
+    import numpy as np
+    from forge_design.export import dimension_gate as dg
+    from forge_design.export.wall_step import read_step
+    rd = read_step(step)
+    C = dg._bspline(rd)[0]
+    ur = (float(rd["first"]), float(rd["last"]))
+    xw, rw = dg.wall_nodes_mm(msh)
+    xj = float(sd["straight"]["x_end_mm"])
+    jn = dg.junction_from_mesh(step, msh, xj)
+    g = dg.evaluate_gate(card, sd, md, None, ch, jn)
+    mv = g["mesh_vs_step"]
+    ok_a = jn.get("status") == "ok" and mv.get("straight_junction_pass") is True and g["verdict"] == "PASS"
+    check(f"(J-a {tag}) 基準: 接合の照合 PASS・寸法ゲート PASS", ok_a,
+          f"最大 |節点 r − 曲線 r| {jn.get('max_abs_mm', float('nan')):.2e} mm @ x {jn.get('x_of_max_mm', float('nan')):.4f} mm・"
+          f"節点 {jn.get('n_nodes')} (接合の上流 {jn.get('n_upstream')}・下流 {jn.get('n_downstream')})・接合 x {xj} mm・"
+          f"接合を挟む節点の間隔 {jn.get('spacing_at_junction_mm', float('nan')):.4f} mm・定義域の外 "
+          f"{(jn.get('evaluation') or {}).get('outside_domain_max_mm', float('nan')):.1e} mm・verdict {g['verdict']} {jn.get('status')}")
+    if jn.get("status") != "ok":
+        return jn
+
+    def regate(r_new, x_junction=xj, x_hi=0.0):
+        j2 = dg.junction_match(C, ur, x_junction, xw, r_new, x_hi)
+        return j2, dg.evaluate_gate(card, sd, md, None, ch, j2)
+
+    h = float(jn["spacing_at_junction_mm"])
+    for k in (+1.0, -1.0):
+        j2, g2 = regate(shifted_junction_r(C, ur, xj, float(sd["inlet_radius_mm"]), xw, rw, k * h))
+        check(f"(J-b {tag}) 接合を {k:+.0f} 節点の間隔 ({k * h:+.4f} mm) ずらした曲線 (入口端・設計スロート x = 0 は固定) で作り直した"
+              "節点の半径 → 照合 FAIL・寸法ゲート FAIL",
+              j2.get("status") == "ok" and g2["mesh_vs_step"].get("straight_junction_pass") is False and g2["verdict"] == "FAIL",
+              f"最大 |差| {j2.get('max_abs_mm', float('nan')):.3e} mm @ x {j2.get('x_of_max_mm', float('nan')):.3f} mm")
+    i_up = int(np.flatnonzero(xw <= xj)[-1])                        # 接合の直前の直管の節点
+    i_mid = int(np.argmin(np.abs(xw - 0.5 * (xw[0] + xj))))         # 直管の中ほどの節点
+    i_dn = int(np.flatnonzero(xw > xj)[0])                          # 接合の直後の節点 (縮流部)
+    for name, i, dr in (("直管の接合の直前の節点", i_up, +1e-5), ("直管の中ほどの節点", i_mid, -1e-5), ("接合の直後の節点", i_dn, +1e-5)):
+        r2 = rw.copy(); r2[i] += dr
+        j2, g2 = regate(r2)
+        check(f"(J-c {tag}) {name} (x {xw[i]:.3f} mm) の半径を {dr:+.0e} mm 動かす → 照合 FAIL・寸法ゲート FAIL",
+              g2["mesh_vs_step"].get("straight_junction_pass") is False and g2["verdict"] == "FAIL",
+              f"最大 |差| {j2.get('max_abs_mm', float('nan')):.3e} mm @ x {j2.get('x_of_max_mm', float('nan')):.3f} mm")
+    check(f"(J-d {tag}) 接合の照合が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card, sd, md, None, ch, None)["verdict"] == "未判定")
+    check(f"(J-d {tag}) 接合の照合が評価できない (status ≠ ok) なら PASS にしない (未判定)",
+          dg.evaluate_gate(card, sd, md, None, ch, {"status": "曲線を評価できない: 試験"})["verdict"] == "未判定")
+    j2, g2 = regate(rw, x_junction=xj + h)
+    check(f"(J-d {tag}) STEP の接合と別の位置 (+1 節点の間隔) で照合したもの → FAIL",
+          g2["verdict"] == "FAIL" and g2["mesh_vs_step"]["straight_junction_checks"]["junction_is_step_straight_end"] is False)
+    j2, g2 = regate(rw, x_hi=xj - 1.0)
+    check(f"(J-d {tag}) 接合の手前までしか照合していないもの (設計スロートまで照合せず、接合の下流の節点なし) → FAIL",
+          g2["verdict"] == "FAIL" and not g2["mesh_vs_step"]["straight_junction_checks"]["nodes_downstream"]
+          and not g2["mesh_vs_step"]["straight_junction_checks"]["covers_to_design_throat"])
+    return jn
+
+
+def m55_junction_tests() -> None:
+    """(J-e) case/71 run_0005_ns の成果物 (接合の 0.08 mm 下流に節点、旧の区間の検査が誤って FAIL) で接合の照合が PASS し、寸法ゲート全体が PASS。"""
+    from forge_design.export import dimension_gate as dg
+    from forge_design.export import wall_step
+    step, msh = M55_DELIV / "cad" / "wall_physical.step", M55_DELIV / "mesh" / "nozzle.msh"
+    if not (step.exists() and msh.exists() and M55_CARD.exists()):
+        print(f"skip (J-e): case/71 run_0005_ns の成果物が無い ({M55_DELIV}; FORGE_DELIV_M55_DIR で指定)")
+        return
+    if not Path(wall_step.FREECADCMD).exists():
+        print(f"skip (J-e): freecadcmd が無い ({wall_step.FREECADCMD})")
+        return
+    card = yaml.safe_load(M55_CARD.read_text())
+    sd = dg.step_dimensions(step)
+    md = dg.mesh_dimensions(msh)
+    ch = dg.chord_from_mesh(step, msh)
+    jn = junction_tests("case/71 run_0005_ns", card, sd, md, ch, step, msh)
+    g = dg.evaluate_gate(card, sd, md, None, ch, jn)
+    mv = g["mesh_vs_step"]
+    check("(J-e) case/71 run_0005_ns: 旧の区間の検査は false (参考の記録) で、接合の照合と寸法ゲート全体は PASS",
+          mv.get("straight_end_in_mesh_interval") is False and mv.get("straight_junction_pass") is True and g["verdict"] == "PASS",
+          f"旧の区間 {md['straight_end_interval_mm']} mm・STEP の接合 {sd['straight']['x_end_mm']} mm・"
+          f"照合 最大 {jn.get('max_abs_mm', float('nan')):.2e} mm @ x {jn.get('x_of_max_mm', float('nan')):.4f} mm "
+          f"({jn.get('n_nodes')} 節点)・接合の直後の節点 x {(jn.get('node_after_junction') or {}).get('x_mm', float('nan')):.4f} mm の "
+          f"r − r_in {(jn.get('node_after_junction') or {}).get('r_node_minus_r_in_mm', float('nan')):.2e} mm")
+
+
+def _csv_cols(path: Path) -> dict:
+    """CSV を列名 → 文字列のリストで読む (書き出し器のコードを使わない)。"""
+    import csv
+    rows = list(csv.reader(open(path)))
+    return {h: [r[j] for r in rows[1:]] for j, h in enumerate(rows[0])}
+
+
+def _f(v: str) -> float:
+    return float("nan") if v == "" else float(v)
+
+
+def _clone_small(src: Path, dst: Path, copy=("prepare_info.json",), link=("wall_repr.json",)) -> Path:
+    """比較の試験用の仮の run: 書き換える小さいファイルは写し、壁ファイルはリンク (元の run に書かない)。"""
+    dst.mkdir(parents=True)
+    for n in copy:
+        if (src / n).exists():
+            shutil.copy2(src / n, dst / n)
+    for n in link:
+        if (src / n).exists():
+            os.symlink((src / n).resolve(), dst / n)
+    return dst
+
+
+def _png_size(p: Path):
+    b = p.read_bytes()[:32]
+    if b[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return int.from_bytes(b[16:20], "big"), int.from_bytes(b[20:24], "big")
+
+
+def wall_compare_tests() -> None:
+    """(C) 設計壁 (Euler で回す壁) と物理壁の座標の比較 (plan tooling-nozzle-card-local-mesh §5.1 #3u)。"""
+    import numpy as np
+    from unittest import mock
+    from forge_design.export import wall_compare as wc
+    from forge_design.export import wall_tables as WT
+    from forge_design.geometry.wall_axismach import DESIGN_UPSTREAM_KIND, load_wall_file
+    with tempfile.TemporaryDirectory(prefix="deliv_wc_") as td:
+        tmp = Path(td)
+        if (FIX / "wall_repr.json").exists():
+            # ---- (C1) 形状表と同じ点・同じ物理壁、設計壁は独立に評価 ----
+            W = load_wall_file(FIX)
+            s = 1000.0 * W["scale_m"]
+            tab = wc.compare_table(FIX, tmp / "c1" / wc.CSV_NAME)
+            WT.shape_table(FIX, tmp / "c1" / "wall_shape_mm.csv")
+            C, S = _csv_cols(tmp / "c1" / wc.CSV_NAME), _csv_cols(tmp / "c1" / "wall_shape_mm.csv")
+            check("(C1) 列が x_mm, r_design_mm, r_physical_mm, dr_mm, angle_design_deg, angle_physical_deg", list(C) == list(wc.COLUMNS), list(C))
+            check(f"(C1) x の点が形状表と同じ ({len(C['x_mm'])} 行、文字列で同一)・物理壁の半径・壁角も形状表と文字列で同一",
+                  C["x_mm"] == S["x_mm"] and C["r_physical_mm"] == S["r_mm"] and C["angle_physical_deg"] == S["wall_angle_deg"])
+            x = np.array([_f(v) for v in C["x_mm"]])
+            lo, hi = W["design"].x_in, W["design"].x_e
+            rd_ind = W["design"].r(np.clip(x / s, lo, hi)) * s
+            ad_ind = np.degrees(np.arctan(W["design"].r(np.clip(x / s, lo, hi), 1)))
+            rd, rp, dr = (np.array([_f(v) for v in C[k]]) for k in ("r_design_mm", "r_physical_mm", "dr_mm"))
+            ad = np.array([_f(v) for v in C["angle_design_deg"]])
+            e_r, e_a, e_d = (float(np.max(np.abs(a - b))) for a, b in ((rd, rd_ind), (ad, ad_ind), (dr, rp - rd)))
+            check("(C1) 設計壁の半径・壁角を壁ファイルから独立に評価して一致・dr_mm = r_physical_mm − r_design_mm・空欄なし",
+                  e_r == 0.0 and e_a == 0.0 and e_d == 0.0 and np.all(np.isfinite(dr)) and tab["n_blank"] == {"design": 0, "physical": 0},
+                  f"|Δr_design| {e_r:.1e} mm・|Δ角| {e_a:.1e} deg・|dr − (rp − rd)| {e_d:.1e} mm・空欄 {tab['n_blank']}")
+            i0 = int(np.flatnonzero(x == 0.0)[0])
+            check(f"(C1) x = 0 の行がある (設計スロート; 設計壁の r = {rd[i0]:.9g} mm = r_t)", abs(rd[i0] - s) <= 1e-9, f"r_t {s!r} mm")
+            # ---- (C2) 定義域の違い: 物理壁の定義域を両端で縮めた壁 ----
+            class Short:
+                def __init__(self, w, a, b):
+                    self._w, self.x_in, self.x_e = w, a, b
+
+                def r(self, xq, deriv=0):
+                    xq = np.asarray(xq, dtype=float)
+                    if xq.size and (xq.min() < self.x_in or xq.max() > self.x_e):
+                        raise ValueError("定義域の外 (試験の壁)")
+                    return self._w.r(xq, deriv)
+            a2, b2 = W["physical"].x_in + 1.0, W["physical"].x_e - 2.0
+            W2 = dict(W, physical=Short(W["physical"], a2, b2))
+            t2 = wc.compare_table(W2, tmp / "c2" / wc.CSV_NAME)
+            C2 = _csv_cols(tmp / "c2" / wc.CSV_NAME)
+            x2 = np.array([_f(v) for v in C2["x_mm"]])
+            out_ = (x2 < a2 * s) | (x2 > b2 * s)
+            blank_p = all((C2[k][i] == "") == bool(out_[i]) for k in ("r_physical_mm", "dr_mm", "angle_physical_deg") for i in range(len(x2)))
+            check(f"(C2) 物理壁の定義域を縮めた壁: 外の x ({int(out_.sum())} 行) だけ物理壁の列と dr_mm が空欄、設計壁の列は全部ある、"
+                  "x の点は同じ・注記に空欄の行数",
+                  blank_p and "" not in C2["r_design_mm"] and C2["x_mm"] == C["x_mm"]
+                  and t2["n_blank"] == {"design": 0, "physical": int(out_.sum())}
+                  and any(f"物理壁 {int(out_.sum())} 行" in t for t in t2["notes"]), t2["n_blank"])
+            try:
+                wc.compare_table(dict(W, kind=DESIGN_UPSTREAM_KIND), tmp / "c2" / "du.csv")
+                check("(C2) physical が design_upstream (物理壁でない) なら例外", False, "例外なし")
+            except ValueError as e:
+                check("(C2) physical が design_upstream (物理壁でない) なら例外", "design_upstream" in str(e), str(e)[:100])
+            # ---- (C3) M6 fixture の δ_r の記録 (initializer、delta_r_initial.csv なし) ----
+            r3 = _clone_small(FIX, tmp / "c3" / "run")
+            rec = wc.export_compare(r3, tmp / "c3" / "out")
+            c = rec["delta_record_check"]
+            pt, pe = c["points"]["throat"], c["points"]["exit"]
+            check("(C3) M6 (initializer、表なし): 出口 PASS (|差| ≤ 1e-6 mm)・スロートは未照合 (直線補間の記録を再現できない)・全体は一部未照合で"
+                  " pass None",
+                  c.get("source") == "initializer" and pe.get("pass") is True and abs(pe["diff_mm"]) <= 1e-6 and pt.get("pass") is None
+                  and "delta_r_initial.csv" in pt.get("reason", "") and c["status"] == "一部未照合" and rec["pass"] is None,
+                  f"出口 {pe.get('diff_mm', float('nan')):.1e} mm・スロートの記録との差 {pt.get('diff_vs_record_mm', float('nan')):.2e} mm (参考)")
+            info = json.loads((FIX / "prepare_info.json").read_text())
+            for dmm, want in ((2e-6, False), (5e-7, True)):
+                rn = tmp / f"c3_{dmm:g}" / "run"
+                _clone_small(FIX, rn)
+                inf = json.loads((FIX / "prepare_info.json").read_text())
+                inf["initializer"]["delta_r_exit"] = info["initializer"]["delta_r_exit"] + dmm / s
+                (rn / "prepare_info.json").write_text(json.dumps(inf))
+                cc = wc.export_compare(rn, tmp / f"c3_{dmm:g}" / "out")["delta_record_check"]
+                check(f"(C3) 出口の記録を {dmm:g} mm ずらす → {'PASS のまま' if want else 'FAIL'}",
+                      cc["points"]["exit"]["pass"] is want and (cc["status"] == "FAIL") is (not want),
+                      f"{cc['status']}・差 {cc['points']['exit']['diff_mm']:.2e} mm")
+                if not want:
+                    for n in ("bcondConfig.yaml", "nozzle.msh"):
+                        os.symlink(FIX / n, rn / n)
+                    man = dl.export(rn, tmp / "c3_man", card=None, skip=("cad", "mesh", "fluent", "excel", "dimensions"))
+                    check("(C3) 照合 FAIL の run は MANIFEST の verdict FAIL・wall_compare が failed_parts に入る",
+                          man["verdict"] == "FAIL" and "wall_compare" in man["failed_parts"], (man["verdict"], man["failed_parts"]))
+            # ---- (C6) 図 ----
+            figs = rec["figures"]
+            sizes = {k: _png_size(tmp / "c3" / "out" / Path(v).name) for k, v in figs.items()}
+            check("(C6) 図 3 枚 (全長・Δr・スロート付近) が PNG (幅 ≥ 1000 px)",
+                  set(figs) == {"full", "dr", "throat"} and all(v is not None and v[0] >= 1000 for v in sizes.values()), sizes)
+            if Path(wc.JP_FONT).is_file():
+                check("(C6) 日本語フォント Noto Sans CJK JP で描いた", "Noto Sans CJK JP" in rec["figure_font"], rec["figure_font"])
+            else:
+                print(f"skip (C6) フォント: {wc.JP_FONT} が無い")
+            # 作図の失敗は MANIFEST の errors に残り、xlsx にシートを足さない・README は「作っていない」
+            rf = _clone_small(FIX, tmp / "c6" / "run", copy=("prepare_info.json", "bcondConfig.yaml"))
+            with mock.patch.object(wc, "plot_compare", side_effect=RuntimeError("試験: 作図の失敗")):
+                man = dl.export(rf, tmp / "c6" / "out", card=None, skip=("cad", "mesh", "fluent", "dimensions"))
+            xl = (man["parts"].get("excel") or {}).get("xlsx") or {}
+            check("(C6) 作図が失敗 → MANIFEST の errors に wall_compare・excel は表のシートを足さない・README に「作っていない」",
+                  "wall_compare" in man["errors"] and "作図の失敗" in man["errors"]["wall_compare"]
+                  and "wall_compare_sheet" not in (man["parts"].get("excel") or {}) and "wall_compare" not in (xl.get("sheets") or [])
+                  and "作っていない" in (tmp / "c6" / "out" / "README.md").read_text().split("## 単位")[0],
+                  (man["errors"].get("wall_compare"), xl.get("sheets")))
+        else:
+            print(f"skip (C1)〜(C3)・(C6): fixture が無い ({FIX})")
+        # ---- (C4) case/71 run_0005_ns (delta_r_csv) ----
+        if (M55_RUN / "wall_repr.json").exists() and (M55_RUN / "prepare_info.json").exists():
+            r4 = wc.export_compare(M55_RUN, tmp / "c4" / "out")
+            c = r4["delta_record_check"]
+            pt, pe = c["points"]["throat"], c["points"]["exit"]
+            check("(C4) case/71 run_0005_ns (delta_r_csv): 表を case ディレクトリで見つけ sha256 一致・スロート・出口とも |差| ≤ 1e-6 mm で PASS",
+                  c.get("source") == "delta_r_csv" and "sha256 が prepare_info.json" in str(c.get("table")) and c["status"] == "PASS"
+                  and r4["pass"] is True,
+                  f"スロート Δr {pt['dr_table_mm']!r} mm (差 {pt.get('diff_mm', float('nan')):.1e})・出口 Δr {pe['dr_table_mm']!r} mm "
+                  f"(差 {pe.get('diff_mm', float('nan')):.1e})")
+            info = json.loads((M55_RUN / "prepare_info.json").read_text())
+            tname = Path(info["delta_r_csv"]).name
+            tsrc = M55_RUN.parent / tname
+            if tsrc.exists():
+                lines = tsrc.read_text().splitlines()
+                xv, dv = lines[-1].split(",")
+                lines[-1] = f"{xv},{float(dv) + 1e-7!r}"
+                for tag, fix_sha, want in (("sha256 も合わせる", True, "FAIL"), ("sha256 は元のまま", False, "未照合")):
+                    case = tmp / f"c4_{int(fix_sha)}"
+                    rn = _clone_small(M55_RUN, case / "run")
+                    (case / tname).write_text("\n".join(lines) + "\n")
+                    if fix_sha:
+                        inf = json.loads(json.dumps(info))
+                        inf["delta_r_table"]["sha256"] = hashlib.sha256((case / tname).read_bytes()).hexdigest()
+                        (rn / "prepare_info.json").write_text(json.dumps(inf))
+                    cc = wc.export_compare(rn, case / "out")["delta_record_check"]
+                    check(f"(C4) δ_r の表の出口の値を +1e-7 r_t ({1e-7 * 1000 * info['scale_m']:.1e} mm) 変える ({tag}) → {want}",
+                          cc["status"] == want and (cc["points"]["exit"]["pass"] is False if want == "FAIL" else cc["points"]["exit"]["pass"] is None),
+                          f"{cc['status']}・{cc.get('table')}"[:200])
+            else:
+                print(f"skip (C4) 負例: δ_r の表が case ディレクトリに無い ({tsrc})")
+        else:
+            print(f"skip (C4): case/71 run_0005_ns が無い ({M55_RUN})")
+        # ---- (C5) initializer + delta_r_initial.csv ----
+        if all((C70_RUN / n).exists() for n in ("wall_repr.json", "prepare_info.json", "delta_r_initial.csv")):
+            r5 = wc.export_compare(C70_RUN, tmp / "c5" / "out")
+            c = r5["delta_record_check"]
+            pt = c["points"]["throat"]
+            check("(C5) initializer + delta_r_initial.csv (case/70 run_0010): 記録が表の直線補間と一致・表を壁と同じ 5 次補間で x = 0 に評価して"
+                  " |差| ≤ 1e-6 mm・出口も PASS",
+                  c["status"] == "PASS" and pt.get("record_equals_table_linear") is True,
+                  f"スロート 差 {pt.get('diff_mm', float('nan')):.1e} mm (記録そのものとの差 {pt.get('diff_vs_record_mm', float('nan')):.2e} mm = 直線補間の誤差)")
+            rn = _clone_small(C70_RUN, tmp / "c5n" / "run", copy=("prepare_info.json", "delta_r_initial.csv"))
+            lines = (rn / "delta_r_initial.csv").read_text().splitlines()
+            xs = [float(ln.split(",")[0]) for ln in lines[1:]]
+            k = 1 + int(np.searchsorted(xs, 0.0))                        # x = 0 の直後の点 (ヘッダ 1 行)
+            cols = lines[k].split(",")
+            cols[1] = repr(float(cols[1]) + 1e-6)
+            lines[k] = ",".join(cols)
+            (rn / "delta_r_initial.csv").write_text("\n".join(lines) + "\n")
+            cc = wc.export_compare(rn, tmp / "c5n" / "out")["delta_record_check"]
+            check("(C5) delta_r_initial.csv の x = 0 の直後の値を変える (記録が表の直線補間と合わない) → FAIL",
+                  cc["status"] == "FAIL" and cc["points"]["throat"].get("record_equals_table_linear") is False, cc["status"])
+        else:
+            print(f"skip (C5): initializer + delta_r_initial.csv の run が無い ({C70_RUN}; FORGE_DELIV_C70_RUN で指定)")
+
+
 def main() -> int:
+    structure_tests()
+    wn_fixture_tests()
+    m55_junction_tests()
+    wall_compare_tests()
     if not (FIX / "wall_repr.json").exists() or not (FIX / "nozzle.msh").exists():
         print(f"skip: fixture が無い ({FIX})。tests/make_deliverables_fixture.py で作る")
-        return 0
+        print(f"FAIL 件数: {fails}")
+        return 1 if fails else 0
     with tempfile.TemporaryDirectory(prefix="deliv_test_") as td:
         tmp = Path(td)
         run = make_run(tmp)
@@ -71,6 +540,36 @@ def main() -> int:
                   "mesh/rebuild_from_step.py", "fluent/nozzle_2d_axi.msh", "fluent/boundary_conditions.md",
                   "excel/wall_shape_mm.csv", "DIMENSIONS.json", "README.md"):
             check(f"(a) {k} がある", (out / k).exists())
+        # 設計壁と物理壁の比較 (#3u): CSV・図・JSON が MANIFEST に載り (sha256 は上で照合)、xlsx にシート、README に行
+        from forge_design.export import wall_compare as wc
+        wfiles = [f"wall_compare/{n}" for n in (wc.CSV_NAME, wc.JSON_NAME, wc.PNG_FULL, wc.PNG_DR, wc.PNG_THROAT)]
+        pw = man["parts"].get("wall_compare") or {}
+        check("(a) wall_compare/ の CSV・JSON・図 3 枚が MANIFEST の files_sha256 にある・part は ok (照合は M6 fixture では一部未照合 = 合否に入れない)",
+              all(k in man["files_sha256"] for k in wfiles) and pw.get("ok") is True and pw.get("pass") is None
+              and pw["delta_record_check"]["status"] == "一部未照合", [k for k in wfiles if k not in man["files_sha256"]])
+        xl = (man["parts"].get("excel") or {}).get("xlsx") or {}
+        if xl.get("written"):
+            import zipfile
+            import re as _re
+            with zipfile.ZipFile(out / "excel" / "nozzle_tables.xlsx") as z:
+                names = _re.findall(r'sheet name="([^"]+)"', z.read("xl/workbook.xml").decode())
+                ss = z.read("xl/sharedStrings.xml").decode() if "xl/sharedStrings.xml" in z.namelist() else ""
+            ninfo = (xl.get("info") or {}).get("wall_compare") or {}
+            check("(a) xlsx: 最後のシートが wall_compare (表の行数が CSV と同じ・右の列に注記)、ほかのシートの並びは今までどおり",
+                  names[-1] == "wall_compare" and names[:-1] == ["shape", "conditions", "notes"]
+                  and ninfo.get("n_rows") == pw.get("n_rows") and ninfo.get("n_notes") == len(pw.get("notes") or [])
+                  and "r_design_mm" in ss and "Δr の意味" in ss, (names, ninfo))
+        else:
+            print(f"skip (a) xlsx のシート: xlsx を書いていない ({xl.get('reason')})")
+        rd_head = (out / "README.md").read_text().split("## 単位")[0]
+        check("(a) README の冒頭に設計壁と物理壁の比較の行 (スロート・出口の Δr と照合の状態)",
+              "設計壁と物理壁の比較" in rd_head and "一部未照合" in rd_head and "| `wall_compare/` |" in (out / "README.md").read_text())
+        base = base_mesh_structure(tmp)
+        if base is not None and (out / "mesh" / "mesh_structure.json").exists():
+            cc, qq, bb, _ = base.read_msh41_mesh2d(FIX / "nozzle.msh")
+            base.write_structure_json(base.extract_structure(cc, qq, bb), tmp / "base_m6.json")
+            check(f"(a) 縦線の格子 (M6) の mesh_structure.json が変更前 ({BASE_COMMIT}) とバイト一致",
+                  (out / "mesh" / "mesh_structure.json").read_bytes() == (tmp / "base_m6.json").read_bytes())
         d = json.loads((out / "DIMENSIONS.json").read_text())
         check("(b) 寸法ゲート PASS (生産の設計値のカード)", d["verdict"] == "PASS",
               {k: round(v["diff_mm"], 6) for k, v in d.get("items", {}).items()})
@@ -98,17 +597,23 @@ def main() -> int:
     from forge_design.export import wall_step
     md = dg.mesh_dimensions(FIX / "nozzle.msh")
     chm = dg.chord_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")   # 弦の検査は必須 (欠けたら未判定)
-    check("(M1) 基準: 生産の設計値のカード・メッシュ・弦あり → PASS", dg.evaluate_gate(card_ok, sd, md, None, chm)["verdict"] == "PASS")
+    jnf = dg.junction_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh", sd["straight"]["x_end_mm"])   # 接合の照合も必須 (#3j)
+    check("(M1) 基準: 生産の設計値のカード・メッシュ・弦・接合の照合あり → PASS", dg.evaluate_gate(card_ok, sd, md, None, chm, jnf)["verdict"] == "PASS")
     for name, mut in (("入口半径 +10 mm", lambda m: m.__setitem__("inlet_radius_mm", m["inlet_radius_mm"] + 10.0)),
                       ("スロート半径 +10 mm", lambda m: m["throat_physical"].__setitem__("r_mm", m["throat_physical"]["r_mm"] + 10.0)),
-                      ("直管の終端の区間を別の位置に", lambda m: m.__setitem__("straight_end_interval_mm", [0.0, 1.0])),
                       ("出口端 +0.01 mm", lambda m: m.__setitem__("x_end_mm", m["x_end_mm"] + 0.01))):
         m2 = copy.deepcopy(md); mut(m2)
-        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2, None, chm)["verdict"] == "FAIL")
+        check(f"(M1) メッシュ側の {name} → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m2, None, chm, jnf)["verdict"] == "FAIL")
+    # #3j: 接合点を挟む 2 節点の区間 (straight_end_in_mesh_interval) は参考の記録 (合否は接合の照合 straight_junction_pass)
+    m2 = copy.deepcopy(md); m2["straight_end_interval_mm"] = [0.0, 1.0]
+    g_iv = dg.evaluate_gate(card_ok, sd, m2, None, chm, jnf)
+    check("(M1→#3j) 直管の終端の区間 (参考) を別の位置に → 記録は false・必須でない (合否は接合の照合で PASS のまま)",
+          g_iv["mesh_vs_step"]["straight_end_in_mesh_interval"] is False and "straight_end_in_mesh_interval" not in g_iv["mesh_vs_step"]["required"]
+          and "straight_end_in_mesh_interval" in g_iv["mesh_vs_step"]["reference_only"] and g_iv["verdict"] == "PASS", g_iv["verdict"])
     check("(M1) 弦の形状誤差 50 µm → FAIL",
-          dg.evaluate_gate(card_ok, sd, md, None, {"status": "ok", "min_um": -50.0, "max_um": 3.0})["verdict"] == "FAIL")
+          dg.evaluate_gate(card_ok, sd, md, None, {"status": "ok", "min_um": -50.0, "max_um": 3.0}, jnf)["verdict"] == "FAIL")
     card_nt = {k: v for k, v in card_ok.items() if k != "tolerances"}
-    g_nt = dg.evaluate_gate(card_nt, sd, md, None, chm)
+    g_nt = dg.evaluate_gate(card_nt, sd, md, None, chm, jnf)
     check("(M4) 公差を省いたカードは生成器と同じ既定の公差で判定 (止まらない)",
           g_nt["verdict"] == "PASS" and all(v.startswith("default") for v in g_nt["tolerances_source"].values()), g_nt["tolerances_source"])
     with tempfile.TemporaryDirectory(prefix="deliv_m2_") as td2:
@@ -126,12 +631,13 @@ def main() -> int:
     # ---- codex result レビュー 2 回目の負例 ----
     md0 = dg.mesh_dimensions(FIX / "nozzle.msh")
     m3 = copy.deepcopy(md0); m3["x_start_mm"] += 10.0
-    check("(R2-M1) メッシュの入口端を 10 mm ずらす (直管が短い) → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m3, None, chm)["verdict"] == "FAIL")
+    check("(R2-M1) メッシュの入口端を 10 mm ずらす (直管が短い) → 寸法ゲート FAIL", dg.evaluate_gate(card_ok, sd, m3, None, chm, jnf)["verdict"] == "FAIL")
     ch = dg.chord_from_mesh(FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")
     check(f"(R2-M1) 弦の形状誤差を配布メッシュと STEP から測る (最大 {max(abs(ch['min_mm']), abs(ch['max_mm'])):.2e} mm) → 基準は PASS",
-          dg.evaluate_gate(card_ok, sd, md0, None, ch)["verdict"] == "PASS")
-    check("(R2-M1) 弦の検査が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, md0, None, None)["verdict"] == "未判定")
-    check("(R2-M1) メッシュの測定が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, None, None, ch)["verdict"] == "未判定")
+          dg.evaluate_gate(card_ok, sd, md0, None, ch, jnf)["verdict"] == "PASS")
+    check("(R2-M1) 弦の検査が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, md0, None, None, jnf)["verdict"] == "未判定")
+    check("(R2-M1) メッシュの測定が欠けたら PASS にしない (未判定)", dg.evaluate_gate(card_ok, sd, None, None, ch, jnf)["verdict"] == "未判定")
+    junction_tests("M6 fixture", card_ok, sd, md0, ch, FIX / "step" / "wall_physical.step", FIX / "nozzle.msh")
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import run_wall_tables_tests as RWT
     from forge_design.export import wall_tables as WT

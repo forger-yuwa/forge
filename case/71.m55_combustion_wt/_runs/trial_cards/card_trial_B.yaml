@@ -1,0 +1,17 @@
+# 要求カード (forge.wt_card/v1)。case/71 の M5.5 燃焼ガスの風洞ノズル (card_m55_3coef.yaml) の写しで、入口条件と寸法を変えたもの。
+# 手順: procedures/design-chain-quickstart.md §1。長さ・径は実寸 [m]、圧力 [Pa]、温度 [K]。
+format: forge.wt_card/v1
+name: m55_trial_b                                                   # ← 名前
+gas: {species: {CO2: 0.1677, H2O: 0.0858, O2: 0.0220, N2: 0.7245}}   # ← 組成 (質量分率、和 1)
+conditions: {Pt: 3.15e6, Tt: 1187.5}                                  # ← 全圧 [Pa]・全温 [K]
+M_exit: 5.5
+throat: {diameter_physical_m: 0.210, curvature_radius_m: 0.500}     # ← 物理スロート径 [m]・スロートの曲率半径 [m]
+inlet: {radius_m: 0.300, pipe_length_m: 0.50, contraction_length_m: 0.50}   # ← 入口の配管の半径・直管の長さ・縮流部の長さ [m]
+divergent_length_m: 8.0                                              # ← 設計スロート (x = 0) → 物理出口の長さ [m]
+wall: {thermal: isothermal, Tw: 350.0}                               # ← 壁温 [K] (一様)
+p_ambient: design
+tolerances: {length_m: 1.0e-3, diameter_m: 2.0e-5}                   # ← 寸法の公差 [m] (聞いて無ければこのまま)
+recipe: axismach_final_v1
+overrides:
+  mesh.ni: 3000                          # 問題 YAML を作るためだけ (格子は §3 の hand_mesh.py が作り直す)。変えない
+  deltastar_initializer.model: contur    # 1 回目は CONTUR の積分の式のまま (係数なし)。係数は §7 で足す

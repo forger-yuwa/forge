@@ -1,0 +1,30 @@
+# 2026-10-14T23:32:22Z python3 ~/forge-cardmesh/solver_density_cuda/tools/check_quasisteady.py --series-csv p0_ab_series.csv --series-cols nexc_A,nexc_B,S_dP0_A_mean,S_dP0_B_mean,S_dP0_A_max,S_dP0_B_max,S_dh0_A_mean,S_dh0_B_mean,Sax_dP0_A_mean,Sax_dP0_B_mean,Sax_dh0_A_mean,Sax_dh0_B_mean,Sin_dP0_A_mean,Sin_dP0_B_mean,Sin_dh0_A_mean,Sin_dh0_B_mean,pax_dP0_A,pax_dP0_B,pax_dh0_A,pax_dh0_B,pin_dP0_A,pin_dP0_B,pin_dh0_A,pin_dh0_B (既定 --tail 0.4 --drift 0.05 --osc 0.10 --min-snaps 4)
+
+=== p0_ab_series.csv  [12 rows, steps 100000..183000]  -> DRIFTING ===
+  nexc_A          : tail mean=5.073e+04  drift=4.5%/tail  fluct=4.5%        STEADY
+  nexc_B          : tail mean=5.044e+04  drift=4.3%/tail  fluct=4.4%        STEADY
+  S_dP0_A_mean    : tail mean=0.0001418  drift=8.0%/tail  fluct=8.7%  (extremum at tail-end) DRIFTING
+  S_dP0_B_mean    : tail mean=0.0001417  drift=8.0%/tail  fluct=8.7%  (extremum at tail-end) DRIFTING
+  S_dP0_A_max     : tail mean=0.002322  drift=5.5%/tail  fluct=5.4%         DRIFTING
+  S_dP0_B_max     : tail mean=0.002322  drift=5.5%/tail  fluct=5.4%         DRIFTING
+  S_dh0_A_mean    : tail mean=-2042  drift=18.8%/tail  fluct=18.7%  (extremum at tail-end) DRIFTING
+  S_dh0_B_mean    : tail mean=-2042  drift=18.8%/tail  fluct=18.7%  (extremum at tail-end) DRIFTING
+  Sax_dP0_A_mean  : tail mean=4.375e-05  drift=24.0%/tail  fluct=24.3%  (extremum at tail-end) DRIFTING
+  Sax_dP0_B_mean  : tail mean=4.369e-05  drift=24.2%/tail  fluct=24.5%  (extremum at tail-end) DRIFTING
+  Sax_dh0_A_mean  : tail mean=-2.561  drift=4.3%/tail  fluct=23.6%  -> report -2.561 +/- 0.3 OSCILLATING
+  Sax_dh0_B_mean  : tail mean=-2.559  drift=3.3%/tail  fluct=23.6%  -> report -2.559 +/- 0.3 OSCILLATING
+  Sin_dP0_A_mean  : tail mean=0.0001461  drift=8.4%/tail  fluct=9.2%  (extremum at tail-end) DRIFTING
+  Sin_dP0_B_mean  : tail mean=0.000146  drift=8.4%/tail  fluct=9.1%  (extremum at tail-end) DRIFTING
+  Sin_dh0_A_mean  : tail mean=-2131  drift=18.8%/tail  fluct=18.7%  (extremum at tail-end) DRIFTING
+  Sin_dh0_B_mean  : tail mean=-2131  drift=18.8%/tail  fluct=18.7%  (extremum at tail-end) DRIFTING
+  pax_dP0_A       : tail mean=0.0001239  drift=18.9%/tail  fluct=24.3%  (extremum at tail-end) DRIFTING
+  pax_dP0_B       : tail mean=0.0001242  drift=16.9%/tail  fluct=24.1%  (extremum at tail-end) DRIFTING
+  pax_dh0_A       : tail mean=-10.58  drift=147.2%/tail  fluct=190.7%       DRIFTING
+  pax_dh0_B       : tail mean=-10.45  drift=157.7%/tail  fluct=201.4%       DRIFTING
+  pin_dP0_A       : tail mean=0.002316  drift=6.7%/tail  fluct=6.6%  (extremum at tail-end) DRIFTING
+  pin_dP0_B       : tail mean=0.002316  drift=6.7%/tail  fluct=6.6%  (extremum at tail-end) DRIFTING
+  pin_dh0_A       : tail mean=-4233  drift=31.0%/tail  fluct=31.1%  (extremum at tail-end) DRIFTING
+  pin_dh0_B       : tail mean=-4233  drift=31.0%/tail  fluct=31.1%  (extremum at tail-end) DRIFTING
+
+OVERALL: NOT ALL STEADY (see above)
+CHECK_QUASISTEADY_EXIT: 1

@@ -592,7 +592,13 @@ def _diff_paths(a, b, pre=""):
 INTEG_NULL_KEYS = (("mesh", "params", "wall_first_frac_table"), ("mesh", "params", "wall_normal_layer"),
                    ("mesh", "params", "x_density_table"), ("mesh", "params", "x_respace"),
                    ("mesh", "params", "wall_normal_end_stations"),
-                   ("main_line",), ("physical_upstream",))
+                   ("main_line",), ("physical_upstream",),
+                   # 本段の監視用の出力 (evaluate.ns_output; plan tooling-settle-convergence-and-monitor §5.1 #6)。null = 指定なし (従来どおり)
+                   ("ns_output",))
+# 同じ #6 で増えた記録のうち、キー無しの問題で書かれる既定の値 (null でない記録): 判定の基準 (evaluate.settle が無い = unset) と
+# 本段の陰解法の選び方 (evaluate.main_line が無い = point)
+INTEG_DEFAULT_RECORDS = (("settle", lambda v: isinstance(v, dict) and v.get("status") == "unset"),
+                         ("main_line_mode", lambda v: isinstance(v, dict) and v.get("value") == "point" and "無い" in str(v.get("source"))))
 
 
 def drop_integration_defaults(pi_o: dict, pi_n: dict, run_new: Path) -> list:
@@ -609,6 +615,10 @@ def drop_integration_defaults(pi_o: dict, pi_n: dict, run_new: Path) -> list:
         if isinstance(d_n, dict) and k in d_n and d_n[k] is None and not (isinstance(d_o, dict) and k in d_o):
             d_n.pop(k)
             dropped.append(".".join(path) + " = null")
+    for k, is_default in INTEG_DEFAULT_RECORDS:
+        if k in pi_n and k not in pi_o and is_default(pi_n[k]):
+            pi_n.pop(k)
+            dropped.append(f"{k} (キー無しの問題の既定の記録)")
     ns = pi_n.get("ns_stage_configs")
     cfg_sha = hashlib.sha256((run_new / "solverConfig.yaml").read_bytes()).hexdigest()
     if ("ns_stage_configs" not in pi_o and isinstance(ns, dict) and ns.get("stages") == "full" and ns.get("at") == "prepare"

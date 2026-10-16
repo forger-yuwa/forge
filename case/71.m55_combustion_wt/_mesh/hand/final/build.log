@@ -1,0 +1,12 @@
+r_t 0.0999084914252905 m  設計壁 [-10.009159, 80.073719]  物理壁 [-10.009159, 80.073719]  x_U -5.004580  ar_max 5000 (AR 上限 4850)  初期化 {'initializer': {'model': 'contur'}, 'model': 'contur_momentum_integral'}
+式の写し vs estimate_mesh (8001 点): 相対差の最大 0.000e+00
+係数 pipe    c 0.6000–1.0000  M6 の比の最小 2.21768  OK
+係数 contr   c 0.5000–0.6000  M6 の比の最小 0.61161  OK
+係数 throat  c 0.4900–0.5000  M6 の比の最小 0.51066  OK
+係数 div     c 0.4900–0.4900  M6 の比の最小 0.49874  OK
+要求の格子: 作る 450416 点・検査 4504145 点; 頭打ちの値 y1(s = 0.011) 2.491072e-07 / 2.491072e-07 m (2 点の式 2.491072e-07 m)
+第一層の表 233 点 (足した点 0): 表/要求 (検査の刻み 2e-05) の最大 1.000000・最小 0.7842; (作る刻み) 最大 1.000000
+ni 最小 4800 → 4800 (理想 4649)  節点 465,600  壁際 AR 最大 4849.0 @ x -0.185  dx 0.00181–0.0530 r_t  dx 比最大 1.0327 @ x -9.648
+径方向: axis_cap_frac 0.03・比 ≤ 1.2 → nj 92 (比の最大 1.19744; nj 91 では 1.20130; 最も薄い第一セル 3.7121e-07 @ x -0.509)  節点 441,600 (雛形の nj 97)
+Euler の写し: problem_m55_final_euler.yaml (生成器の写し problem_m55_final_card_euler.yaml と mesh・mesh_euler 以外が同じ; 除いたキー ['physical_wall_repr', 'pw_upstream'])
+書いた: problem_m55_final.yaml  記録 /home/ubuntu/m55_final/build_record.json  (29 s)

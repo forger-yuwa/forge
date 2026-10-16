@@ -1000,6 +1000,11 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node 変換 (node config を書いてから変換 — 必須) + 等エントロピー IC
     cfg_e = _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
+    # Euler の本段の cfl: 引数 (--cfl) > evaluate.cfl_euler (要求カードの雛形; NS の本段が B0 で cfl_main を書かないので Euler の cfl を
+    # 別に持つ、plan tooling-settle-convergence-and-monitor §4.5・codex m55-three-coef M4)。どちらも無ければ今までどおり設定は 4.0 のまま
+    # (cfl_main は run_staged の呼び出し側が渡す)
+    if cfl_main is None and p.evaluate.get("cfl_euler") is not None:
+        cfl_main = euler_cfl(p)
     if cfl_main is not None:
         cfg_e = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {float(cfl_main)}, cfl_pseudo: {float(cfl_main)}", cfg_e)
     if implicit_relax is not None:
@@ -1230,7 +1235,9 @@ def collect(problem_path, run_dir) -> dict:
     if info.get("euler_ref"):
         try:
             from ..metrics.deltastar import massflow_ratio
-            mf = massflow_ratio(run_dir, info["euler_ref"])
+            # 一定 x の断面で積分 (plan tooling-nozzle-card-local-mesh §5.1 #3i): 列のままは壁法線の近壁層の格子で断面の流量でない
+            # (case/71 run_0005_ns: 列 120.19 kg/s・散らばり 2.1 % → 一定 x 121.350 kg/s・6.4e−5)。列が一定 x の格子では値は同じ
+            mf = massflow_ratio(run_dir, info["euler_ref"], remap_constant_x=True)
         except Exception as e:  # noqa: BLE001 — 帳簿は診断
             mf = {"error": str(e)}
     out = {"res_file": res[-1].name,
@@ -1270,7 +1277,7 @@ def main(argv=None) -> int:
     pp = load_problem(a.problem)
     import time as _t
     t0 = _t.time()
-    rc = run_staged(a.run_dir, cfl_main=(a.cfl if a.cfl is not None else pp.evaluate.get("cfl_main")),
+    rc = run_staged(a.run_dir, cfl_main=(a.cfl if a.cfl is not None else euler_cfl(pp)),     # cfl_euler > cfl_main
                     mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)), stages=a.stages)
     print(f"forge exit={rc} (wall {_t.time() - t0:.0f} s, stages={a.stages})")
     print(json.dumps(collect(a.problem, a.run_dir), indent=1))
@@ -1368,6 +1375,25 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
                                         positive=(p.wall_thermal["mode"] == "adiabatic"))  # 等温は符号付き
     res_init["delta_r_raw_integral"] = res_init["delta_r"].copy()
     res_init["delta_r"] = f_s(res_init["x"])
+    # 2 係数の較正 (2026-10-15, plan tooling-nozzle-card-local-mesh §4.3、ユーザ決定): δ = c·δ_C + δ₀/scale (r_t 単位; c = delta_scale、
+    # δ₀ = delta_offset_m [m] を全長一定)。NS の δ_E のスロートと出口の 2 点に合わせた CONTUR の倍率とずらし (負の δ も表せる)。
+    # 実効の scale (寸法の逆算の試しの r_t を含む) で換算し、値・導関数・表・記録を同じ変換の結果から作る。既定 (1, 0) は何もしない
+    # 3 係数 (同 §4.3 の末尾、ユーザ決定「bがよさそう」): δ = (c + c₁·x_m)·δ_C + δ₀/scale (x_m = x·scale [m]、c₁ = delta_scale_slope_per_m
+    # [1/m]、既定 0 = 2 係数とビット同一の式)
+    two = _two_coef(init_cfg)
+    if two is not None:
+        c2, d0_m = two
+        c1 = _slope_coef(init_cfg)
+        f_C = f_s
+        res_init["delta_r_contur"] = res_init["delta_r"].copy()          # 係数を当てる前の CONTUR (再較正の基底)
+        if c1 == 0.0:
+            def f_s(xx, _f=f_C, _c=c2, _d=d0_m / scale):
+                return _c * _f(xx) + _d
+        else:
+            def f_s(xx, _f=f_C, _c=c2, _c1=c1 * scale, _d=d0_m / scale):
+                xx = np.asarray(xx, dtype=float)
+                return (_c + _c1 * xx) * _f(xx) + _d
+        res_init["delta_r"] = f_s(res_init["x"])
     # 壁には平滑化関数そのものを渡す (2026-10-05, plan verification-m6-axis-wave-mesh-su2 §5.1 #8a):
     # 1500 点の表を np.interp で渡すと点ごとの傾きの折れ目を補間 5 次スプラインが通り、r″ が点間隔で波打つ
     delta_r_x = f_s
@@ -1379,7 +1405,42 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
     init_info["smooth"] = {"kind": "quintic_pspline", **sm_diag}
     init_info["delta_r_throat"] = float(np.interp(0.0, res_init["x"], res_init["delta_r"]))
     init_info["delta_r_exit"] = float(res_init["delta_r"][-1])
+    if two is not None:
+        init_info["delta_scale"], init_info["delta_offset_m"] = two
+        if c1 != 0.0:
+            init_info["delta_scale_slope_per_m"] = c1
+        init_info["two_coef"] = {"delta_scale": two[0], "delta_offset_m": two[1], "scale_m": scale,
+                                 **({"delta_scale_slope_per_m": c1} if c1 != 0.0 else {}),
+                                 "delta_r_throat_contur": float(np.interp(0.0, res_init["x"], res_init["delta_r_contur"])),
+                                 "delta_r_exit_contur": float(res_init["delta_r_contur"][-1]),
+                                 "plan": "plans/active/tooling-nozzle-card-local-mesh.md §4.3"}
     return res_init, delta_r_x, init_info
+
+
+def _slope_coef(init_cfg: dict) -> float:
+    """`deltastar_initializer.delta_scale_slope_per_m` (3 係数の c₁ [1/m]、既定 0) を読む。数でない・非有限は ValueError。"""
+    v = init_cfg.get("delta_scale_slope_per_m", 0.0)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"deltastar_initializer.delta_scale_slope_per_m は数 ({init_cfg.get('delta_scale_slope_per_m')!r})") from None
+    if not np.isfinite(v):
+        raise ValueError(f"deltastar_initializer.delta_scale_slope_per_m は有限 ({v!r})")
+    return v
+
+
+def _two_coef(init_cfg: dict):
+    """`deltastar_initializer` の 2 係数 (delta_scale, delta_offset_m) を読む。どちらも既定 (1, 0) で c₁ (delta_scale_slope_per_m) も 0 なら
+    None (何もしない)。数でない・非有限・c ≤ 0 は ValueError (黙って既定に戻さない)。"""
+    c = init_cfg.get("delta_scale", 1.0); d = init_cfg.get("delta_offset_m", 0.0)
+    try:
+        c, d = float(c), float(d)
+    except (TypeError, ValueError):
+        raise ValueError(f"deltastar_initializer.delta_scale・delta_offset_m は数 ({init_cfg.get('delta_scale')!r}, "
+                         f"{init_cfg.get('delta_offset_m')!r})") from None
+    if not (np.isfinite(c) and np.isfinite(d)) or c <= 0.0:
+        raise ValueError(f"deltastar_initializer.delta_scale は正の有限・delta_offset_m は有限 ({c!r}, {d!r})")
+    return None if (c == 1.0 and d == 0.0 and _slope_coef(init_cfg) == 0.0) else (c, d)
 
 
 def build_physical_wall(p: Problem, d: dict, scale: float, delta_r_x=None, dstar_x=None, offset: str = "normal",
@@ -1475,12 +1536,16 @@ def euler_reference_wall(p: Problem, d: dict, scale: float, pwu: dict | None = N
 PRESTAGE_CONFIG = "solverConfig_prestage.yaml"
 MAIN_STAGE_STARTED = "MAIN_STAGE_STARTED"
 _MAIN_LINE_KEYS = ("line", "cap", "itj", "cfl", "relax", "limiter_ref", "extra_fields")
-_MAIN_LINE_REQUIRED = ("line", "cap", "itj", "cfl", "relax", "limiter_ref")     # extra_fields (出力の量) だけは任意
+# limiter_ref の省略 = 初期場の元が NS の run ならその基準値を継承、それ以外は自動 (forge が本段の開始の場で決めて run の limiter_ref.json に
+# 書く; plan tooling-settle-convergence-and-monitor §4.6・§5.1 #6・#6b、2026-10-16)。`auto` の明示は継承しない自動。extra_fields (出力の量) も任意
+_MAIN_LINE_REQUIRED = ("line", "cap", "itj", "cfl", "relax")
+LIMITER_REF_AUTO = "auto"                                     # main_line.limiter_ref: auto (初期場の元を見ずに自動)
 _LIMITER_REF_KEYS = (("ro", "limiterRoRef"), ("p", "limiterPRef"), ("a", "limiterARef"))
+_LIMITER_REF_OPT_KEYS = (("L", "limiterRefLength"),)          # 明示の数値で任意 (省略 = 格子の境界箱; from_run は 4 つとも写す)
 # B0 だけが書くパス (前の段の設定に残っていてはいけない)。cfl・cfl_pseudo・implicitRelax は前の段にもありうるので含めない
 _MAIN_LINE_ONLY_PATHS = ({("time", "deltaT", k) for k in ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap",
                                                          "implicitThermalJacobian")}
-                         | {("space", k) for _, k in _LIMITER_REF_KEYS} | {("output",)})
+                         | {("space", k) for _, k in _LIMITER_REF_KEYS + _LIMITER_REF_OPT_KEYS} | {("output",)})
 # 前の段の元の設定と本段の設定の差として許すパス (B0 のパス + cfl・cfl_pseudo・implicitRelax)
 _MAIN_LINE_PATHS = (_MAIN_LINE_ONLY_PATHS
                     | {("time", "deltaT", k) for k in ("cfl", "cfl_pseudo", "implicitRelax")})
@@ -1510,15 +1575,280 @@ def _cfg_path_get(doc, path):
     return v
 
 
-def _main_line_spec(p: Problem, cfl_main=None, implicit_relax=None) -> dict | None:
-    """`evaluate.main_line` を読んで検査し、解決した値を返す (キー無しは None = 今と同じ設定・同じ段)。
-    {line: dir, cap, itj, cfl, relax, limiter_ref: {ro, p, a}, extra_fields: [...]}。本段の cfl・implicitRelax は main_line が
+def _main_line_mode(p: Problem) -> dict:
+    """本段の陰解法の選び方の記録 (prepare_info の `main_line_mode`)。`evaluate.main_line` が mapping → B0、`point` (文字列) → point の
+    明示 (本段の cfl は `cfl_main`; 要求カードの雛形の既定 B0 から外すとき)、キー無し・null → point (今までどおり)。
+    それ以外の値は ValueError (`_main_line_spec` と同じ)。"""
+    ml = p.evaluate.get("main_line")
+    if isinstance(ml, dict):
+        return {"value": "B0", "source": "evaluate.main_line"}
+    if ml == "point":
+        return {"value": "point", "source": "evaluate.main_line: point (明示)"}
+    if ml is None:
+        return {"value": "point", "source": "evaluate.main_line が無い (今までどおり)"}
+    raise ValueError(f"evaluate.main_line は mapping (B0) か 'point' であること ({ml!r})")
+
+
+def _limiter_tools():
+    """solver_density_cuda/tools/stage_manifest.py (limiter_ref.json の読み・検査と fnv1a64)。"""
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    import stage_manifest
+    return stage_manifest
+
+
+def limiter_ref_from_run(run, base_dir=None) -> tuple:
+    """別 run のリミッタの基準値の記録を継承する (`main_line.limiter_ref: {from_run: <run>}`; plan tooling-settle-convergence-and-monitor
+    §4.6)。戻り ({limiterRoRef, limiterPRef, limiterARef, limiterRefLength: float}, 記録)。
+    記録の正本は forge が起動ごとに書く `<run>/limiter_ref.json` (%.17g)。その cfg_fnv が `<run>/solverConfig.yaml` (最後に回した設定 =
+    run_staged_ns の run なら本段) と一致すること、基準値を使った起動であること (computed)、`<run>/stage_manifest.json` があれば最後の段の
+    記録と値が同じことを確かめる (違えば ValueError; 黙って別の値を継承しない)。相対パスは base_dir (問題 YAML の場所) から。"""
+    SM = _limiter_tools()
+    src = Path(str(run)).expanduser()
+    if not src.is_absolute() and base_dir is not None:
+        src = Path(base_dir) / src
+    cfgp = src / "solverConfig.yaml"
+    if not cfgp.is_file():
+        raise ValueError(f"main_line.limiter_ref.from_run: {cfgp} が無い")
+    try:
+        rec = SM.read_limiter_ref(src, cfgp.read_text())
+    except SM.LimiterRecordError as e:
+        raise ValueError(f"main_line.limiter_ref.from_run: 継承する記録を読めない — {e}") from e
+    if not rec["computed"]:
+        raise ValueError(f"main_line.limiter_ref.from_run: {src} は基準値を使わない起動の記録 (limiterScaled 0) — 継承できない")
+    vals = {k: float(rec[k]) for k in SM.LIMITER_REF_NAMES}
+    man = src / "stage_manifest.json"
+    mrec = None
+    if man.is_file():
+        st = (json.loads(man.read_text()).get("stages") or [])
+        mrec = (st[-1].get("limiter_ref") if st else None)
+        if isinstance(mrec, dict) and mrec.get("values") is not None and mrec.get("values") != vals:
+            raise ValueError(f"main_line.limiter_ref.from_run: {src} の limiter_ref.json {vals} と stage_manifest の最後の段 "
+                             f"({st[-1].get('tag')}) の記録 {mrec.get('values')} が違う — どちらを継承するか決めない")
+    return vals, {"mode": "from_run", "run": str(src), "file": SM.LIMITER_REF_FILE, "sha256": rec["sha256"],
+                  "cfg_fnv": rec["cfg_fnv"], "auto_in_source": rec.get("auto"), "values": vals,
+                  "stage_manifest_checked": bool(isinstance(mrec, dict) and mrec.get("values") is not None)}
+
+
+# --- 系列のリミッタの基準値の自動の継承 (plan tooling-settle-convergence-and-monitor §4.6・§5.1 #6b、2026-10-16) -------------------------
+# NS の初期場を別の NS run から作るとき (`prepare_ns(ic_from=…)`; deltastar_loop の run_pass・run_from_table・run_pass0_integral もここに
+# 集まる) は、`main_line.limiter_ref` の省略をその run の基準値の継承と読む。B0 の本段 (main_line が mapping) だけ — point の本段には効かせない。
+#   - 元の run の `limiter_ref.json` が本段の設定の起動のもの (cfg_fnv が一致) で computed → 4 つ (ρ・P・a・L_ref) を固定値で継承
+#   - 記録が無い・cfg_fnv が本段の設定と違う → 元の run の本段の設定の明示 ρ・P・a を継承 (L_ref は明示があれば写し、無ければ新しい run でも
+#     forge が格子の境界箱から自動で決める = 元の run と同じ扱い; 既存の固定値の run (case/45 の B0 の系譜・case/71 の p2/p3/p4) は L が自動)。
+#     stage_manifest の「値が分かる」(4 つ) より緩いが、新しい run の limiter_ref.json に L の実際の値が残るので区間の鍵は決まる
+#   - 記録が壊れている・computed false (元の本段が基準値を使わない)・ρ・P・a の明示が欠ける → ValueError (黙って自動に戻さない;
+#     `limiter_ref: auto` か明示で通る)
+#   - 元の run の solverConfig.yaml が本段の設定であることは MAIN_STAGE_STARTED (無ければ stage_manifest の最後の段が main) で確かめる。
+#     S1・S2 で落ちた run (どちらも本段を示さない) は ValueError、段の記録の無い旧い run は「本段の確認なし」と記録して solverConfig.yaml を使う
+_IC_CHAIN_KIND = {"axismach_ns": "ns", "axismach": "euler"}   # prepare_info.json の chain → 種類 (prepare_ns / prepare)
+
+
+def _ic_source_kind(src: Path) -> dict:
+    """初期場の元の run が NS か Euler か (§5.1 #6b)。`<src>/solverConfig.yaml` (最後に回した設定) の turbulence.model・physProp.viscMethod
+    (model が none 以外か viscMethod が 0 以外 → NS、model none かつ viscMethod 0 → Euler) と `<src>/prepare_info.json` の chain
+    (axismach_ns → NS、axismach → Euler、ほかは判定に使わない) で決める。食い違う・どちらでも決められない・読めない → ValueError。
+    戻り {"kind": "ns" | "euler", "by": {判定に使ったファイル: 値と種類}}。"""
+    by = {}
+    cfgp = src / "solverConfig.yaml"
+    if cfgp.is_file():
+        try:
+            doc = _cfg_load(cfgp.read_text())
+        except Exception as e:  # noqa: BLE001 (重複キー・YAML の誤り)
+            raise ValueError(f"初期場の元の run の {cfgp} を読めない ({type(e).__name__}: {e})") from e
+        tb, pp = doc.get("turbulence"), doc.get("physProp")
+        model = tb.get("model") if isinstance(tb, dict) else None
+        vm = pp.get("viscMethod") if isinstance(pp, dict) else None
+        vm_i = vm if (isinstance(vm, int) and not isinstance(vm, bool)) else None
+        model_s = "none" if model is None else str(model).strip().lower()
+        kind = "ns" if (model_s != "none" or (vm_i is not None and vm_i != 0)) else ("euler" if vm_i == 0 else None)
+        by["solverConfig.yaml"] = {"turbulence.model": model, "viscMethod": vm, "kind": kind}
+    pip = src / "prepare_info.json"
+    if pip.is_file():
+        try:
+            chain = json.loads(pip.read_text()).get("chain")
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"初期場の元の run の {pip} を読めない ({type(e).__name__}: {e})") from e
+        by["prepare_info.json"] = {"chain": chain, "kind": _IC_CHAIN_KIND.get(chain)}
+    kinds = {v["kind"] for v in by.values() if v["kind"] is not None}
+    if len(kinds) > 1:
+        raise ValueError(f"初期場の元の run {src} が NS か Euler かが食い違う ({by}) — 基準値を継承するか決めない "
+                         f"(evaluate.main_line.limiter_ref に {LIMITER_REF_AUTO} か {{ro, p, a}} を明示する)")
+    if not kinds:
+        raise ValueError(f"初期場の元の run {src} が NS か Euler かを決められない (solverConfig.yaml の turbulence.model・viscMethod、"
+                         f"prepare_info.json の chain から; {by or 'どちらのファイルも無い'}) — evaluate.main_line.limiter_ref に "
+                         f"{LIMITER_REF_AUTO} か {{ro, p, a}} を明示する")
+    return {"kind": kinds.pop(), "by": by}
+
+
+IC_MAIN_UNCONFIRMED = "本段の確認なし"                      # 元の run の本段の設定を確かめられなかった旧い run の記録 (§5.1 #6b)
+
+
+def _ic_main_config(src: Path) -> tuple:
+    """初期場の元の run の本段の設定 (§5.1 #6b): `<src>/solverConfig.yaml`。本段であることを次の順で確かめ、記録の `main_confirmed` に書く。
+    1. `<src>/MAIN_STAGE_STARTED` (run_staged_ns が本段の forge の直前に書く) があれば、その main_config の sha256 (と #6 以後の run なら fnv) が
+       solverConfig.yaml と一致すること (違えば ValueError — 最後に回した設定が本段でない・書き換えられた)。
+    2. 無ければ `<src>/stage_manifest.json` の最後の段が tag `main` で、その cfg_fnv (あれば) が solverConfig.yaml と一致すること。最後の段が
+       main でない (S1・S2 で落ちた run: solverConfig.yaml は前の段の設定のまま) なら ValueError (`limiter_ref: auto` か明示で通る)。
+    3. どちらも無い (段の記録の無い旧い run) なら solverConfig.yaml を本段とみなし、`main_confirmed` に IC_MAIN_UNCONFIRMED と書く (from_run と同じ扱い)。
+    戻り (設定の文字列, 記録)。"""
+    SM = _limiter_tools()
+    cfgp = src / "solverConfig.yaml"
+    hint = f"(evaluate.main_line.limiter_ref に {LIMITER_REF_AUTO} か {{ro, p, a}} を明示する)"
+    if not cfgp.is_file():
+        raise ValueError(f"初期場の元の run {src} は NS だが solverConfig.yaml が無い — 本段のリミッタの基準値が分からない {hint}")
+    raw = cfgp.read_bytes()
+    text = raw.decode()
+    sha, fnv = _sha256_bytes(raw), SM.fnv1a64(text)
+    rec = {"file": "solverConfig.yaml", "sha256": sha, "fnv": fnv, "main_stage_started": None, "main_confirmed": None}
+    ms = src / MAIN_STAGE_STARTED
+    if ms.is_file():
+        try:
+            mc = json.loads(ms.read_text()).get("main_config") or {}
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"初期場の元の run の {ms} を読めない ({type(e).__name__}: {e})") from e
+        if mc.get("sha256") != sha:
+            raise ValueError(f"初期場の元の run {src} の solverConfig.yaml (sha256 {sha[:16]}…) が {MAIN_STAGE_STARTED} の本段の設定 "
+                             f"(sha256 {str(mc.get('sha256'))[:16]}…) と違う — 本段の設定が分からないので基準値を継承しない")
+        if mc.get("fnv") is not None and mc["fnv"] != fnv:
+            raise ValueError(f"初期場の元の run {src} の solverConfig.yaml (fnv {fnv}) が {MAIN_STAGE_STARTED} の本段の設定 (fnv {mc['fnv']}) と違う")
+        rec["main_stage_started"] = {"sha256_checked": True, "fnv_checked": mc.get("fnv") is not None}
+        rec["main_confirmed"] = f"{MAIN_STAGE_STARTED} の main_config"
+        return text, rec
+    man = src / "stage_manifest.json"
+    stages = []
+    if man.is_file():
+        try:
+            stages = json.loads(man.read_text()).get("stages") or []
+        except Exception as e:  # noqa: BLE001
+            raise ValueError(f"初期場の元の run の {man} を読めない ({type(e).__name__}: {e})") from e
+    if stages:
+        last = stages[-1] if isinstance(stages[-1], dict) else {}
+        if last.get("tag") != "main":
+            raise ValueError(f"初期場の元の run {src} に {MAIN_STAGE_STARTED} が無く、stage_manifest の最後の段が {last.get('tag')!r} (main でない) — "
+                             f"本段の前の段で終わった run で、solverConfig.yaml は本段の設定でない。基準値を継承しない {hint}")
+        if last.get("cfg_fnv") is not None and last["cfg_fnv"] != fnv:
+            raise ValueError(f"初期場の元の run {src} の stage_manifest の最後の段 main (cfg_fnv {last['cfg_fnv']}) が solverConfig.yaml (fnv {fnv}) "
+                             f"と違う — 本段の設定が分からないので基準値を継承しない {hint}")
+        rec["main_confirmed"] = "stage_manifest の最後の段 (tag main)"
+        return text, rec
+    rec["main_confirmed"] = (f"{IC_MAIN_UNCONFIRMED} ({MAIN_STAGE_STARTED} も stage_manifest の段も無い旧い run; solverConfig.yaml を本段と"
+                             "みなした)")
+    return text, rec
+
+
+def _ic_manifest_main_check(src: Path, vals: dict, fnv: str) -> dict:
+    """継承する値を元の run の stage_manifest.json の tag `main` の段 (最後のもの) の記録と照らす (§5.1 #6b; 最後の段でなく本段)。
+    main の段の cfg_fnv が本段の設定と違う・継承する値と記録の値が違う → ValueError。照らせなければ (ファイル・main の段・値が無い) 理由を返す。"""
+    man = src / "stage_manifest.json"
+    if not man.is_file():
+        return {"checked": False, "reason": "stage_manifest.json が無い"}
+    try:
+        st = json.loads(man.read_text()).get("stages") or []
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"初期場の元の run の {man} を読めない ({type(e).__name__}: {e})") from e
+    mains = [s for s in st if isinstance(s, dict) and s.get("tag") == "main"]
+    if not mains:
+        return {"checked": False, "reason": "tag main の段が無い (本段の終わる前・記録の前の run)"}
+    m = mains[-1]
+    if m.get("cfg_fnv") is not None and m["cfg_fnv"] != fnv:
+        raise ValueError(f"初期場の元の run {src} の stage_manifest の main の段 (cfg_fnv {m['cfg_fnv']}) が本段の設定 (fnv {fnv}) と違う "
+                         "— どちらが本段か決めない")
+    lr = m.get("limiter_ref")
+    mv = lr.get("values") if isinstance(lr, dict) else None
+    if not isinstance(mv, dict):
+        return {"checked": False, "reason": f"main の段に基準値の値が無い (status {lr.get('status') if isinstance(lr, dict) else None})"}
+    bad = {k: (mv.get(k), v) for k, v in vals.items() if mv.get(k) != v}
+    if bad:
+        raise ValueError(f"初期場の元の run {src} から継承する基準値と stage_manifest の main の段の記録が違う ({bad}; (記録, 継承)) "
+                         "— どちらを継承するか決めない")
+    return {"checked": True, "tag": "main", "order": m.get("order"), "status": lr.get("status")}
+
+
+def limiter_ref_inherit_from_ic(ic_from) -> tuple:
+    """初期場の元の run (`prepare_ns` の ic_from) のリミッタの基準値を継承する (plan tooling-settle-convergence-and-monitor §4.6・§5.1 #6b;
+    `main_line.limiter_ref` の省略のとき `_main_line_spec` が呼ぶ)。戻り ({space のキー: float}, 出所の記録)。空の dict = 自動。
+    - 元の run が Euler (`_ic_source_kind`) → 自動 (新しい物理問題)。
+    - 元の run が NS → 本段の設定 (`_ic_main_config`) の起動の `limiter_ref.json` (cfg_fnv 一致・computed) の 4 つ、無ければ本段の設定の明示
+      ρ・P・a (+ 明示の L)。規則は上の区切りのコメント。基準値が分からないときは ValueError。"""
+    SM = _limiter_tools()
+    src = Path(str(ic_from)).expanduser()
+    kind = _ic_source_kind(src)
+    if kind["kind"] == "euler":
+        return {}, {"mode": "auto", "reason": "初期場の元が Euler の run (新しい物理問題)", "ic_from": str(src), "ic_kind": kind,
+                    "note": "forge が本段の開始の場で決めて run の limiter_ref.json に書く (stage_manifest の本段の段に写る)"}
+    text, main_rec = _ic_main_config(src)
+    base = {"mode": "inherit", "run": str(src), "ic_kind": kind, "main_confirmed": main_rec["main_confirmed"], "main_config": main_rec}
+    try:
+        doc = _cfg_load(text)
+    except Exception as e:  # noqa: BLE001
+        raise ValueError(f"初期場の元の run の solverConfig.yaml を読めない ({type(e).__name__}: {e})") from e
+    sp = doc.get("space") if isinstance(doc.get("space"), dict) else {}
+
+    def _posf(v):
+        return float(v) if (not isinstance(v, bool) and isinstance(v, (int, float)) and np.isfinite(float(v)) and float(v) > 0.0) else None
+    expl = {k: _posf(sp[k]) for k in SM.LIMITER_REF_NAMES if k in sp}
+    bad_expl = sorted(k for k, v in expl.items() if v is None)
+    if bad_expl:
+        raise ValueError(f"初期場の元の run {src} の本段の設定の基準値 {bad_expl} が正の有限の数でない — 継承しない")
+    recp = src / SM.LIMITER_REF_FILE
+    skipped = f"{SM.LIMITER_REF_FILE} が無い"
+    if recp.is_file():
+        try:
+            rec = SM.read_limiter_ref(src)              # 形式・値の検査 (起動の照合は下で; 不一致は固定値へ回す)
+        except SM.LimiterRecordError as e:
+            raise ValueError(f"初期場の元の run の記録が壊れている — 黙って固定値に落とさない: {e}") from e
+        if rec["cfg_fnv"] != main_rec["fnv"]:
+            skipped = (f"{SM.LIMITER_REF_FILE} は本段の設定の起動のものでない (cfg_fnv {rec['cfg_fnv']}、本段の設定 {main_rec['fnv']}; "
+                       f"sha256 {rec['sha256']})")
+        elif not rec["computed"]:
+            raise ValueError(f"初期場の元の run {src} の本段は基準値を使わない起動 (limiter_ref.json computed false、limiterScaled "
+                             f"{rec.get('limiterScaled')}) — 継承できない (evaluate.main_line.limiter_ref に {LIMITER_REF_AUTO} か "
+                             "{ro, p, a} を明示する)")
+        else:
+            vals = {k: float(rec[k]) for k in SM.LIMITER_REF_NAMES}
+            clash = sorted(k for k, v in expl.items() if v != vals[k] or rec["auto"][k])
+            if clash:
+                raise ValueError(f"初期場の元の run {src} の本段の設定の明示 {clash} と limiter_ref.json の値・auto が食い違う — 継承しない")
+            man = _ic_manifest_main_check(src, vals, main_rec["fnv"])
+            return vals, {**base, "basis": SM.LIMITER_REF_FILE, "file": SM.LIMITER_REF_FILE, "sha256": rec["sha256"],
+                          "cfg_fnv": rec["cfg_fnv"], "auto_in_source": dict(rec["auto"]), "values": vals,
+                          "L_ref": "fixed (記録の値)", "stage_manifest": man}
+    if sp.get("limiterScaled") == 0 and not sp.get("limiterDiag"):
+        raise ValueError(f"初期場の元の run {src} の本段は limiterScaled 0 (基準値を使わない) — 継承できない "
+                         f"(evaluate.main_line.limiter_ref に {LIMITER_REF_AUTO} か {{ro, p, a}} を明示する)")
+    missing = [sk for _, sk in _LIMITER_REF_KEYS if sk not in expl]
+    if missing:
+        raise ValueError(f"初期場の元の run {src} は NS だが基準値が分からない ({skipped}、本段の設定に {missing} の明示が無い) — 黙って自動に"
+                         f"戻さない (evaluate.main_line.limiter_ref に {LIMITER_REF_AUTO} か {{ro, p, a}} を明示する)")
+    vals = {sk: expl[sk] for _, sk in _LIMITER_REF_KEYS + _LIMITER_REF_OPT_KEYS if sk in expl}
+    man = _ic_manifest_main_check(src, vals, main_rec["fnv"])
+    return vals, {**base, "basis": "solverConfig.yaml", "file": "solverConfig.yaml", "sha256": main_rec["sha256"], "values": vals,
+                  "record_skipped": skipped,
+                  "L_ref": ("fixed (本段の設定の明示)" if "limiterRefLength" in vals
+                            else "auto (元の run と同じく forge が新しい run の格子の境界箱から決める; 値は新しい run の limiter_ref.json)"),
+                  "stage_manifest": man}
+
+
+def _main_line_spec(p: Problem, cfl_main=None, implicit_relax=None, source_out: dict | None = None, ic_from=None) -> dict | None:
+    """`evaluate.main_line` を読んで検査し、解決した値を返す (キー無し・null・`point` は None = point の本段、今と同じ設定・同じ段)。
+    {line: dir, cap, itj, cfl, relax, limiter_ref, extra_fields: [...]}。本段の cfl・implicitRelax は main_line が
     決めるので、引数・YAML の `cfl_main` と同時に指定したら ValueError (どちらが効くかを曖昧にしない)。`implicit_relax` は
     前の段 (S1・S2) にも効く値なので、main_line.relax と同じ値のときだけ併記を許す (2026-10-13 親の決定: 生産の系譜 run_0182 は
     `prepare_ns(implicit_relax=0.7)` で S1・S2 も 0.7。違う値は ValueError)。
-    line は dir (lineImplicit 1 + lineDtDirectional 1) だけ。未知のキー・欠けたキー・範囲外の値も ValueError。"""
+    line は dir (lineImplicit 1 + lineDtDirectional 1) だけ。未知のキー・欠けたキー・範囲外の値も ValueError。
+    **limiter_ref** (plan tooling-settle-convergence-and-monitor §4.6・§5.1 #6b、2026-10-16):
+      - 省略 (null): `ic_from` (prepare_ns の初期場の元の run) が NS の run なら**その基準値を継承** (`limiter_ref_inherit_from_ic`;
+        記録の 4 つ、無ければ本段の設定の明示 ρ・P・a (+ L)、分からなければ ValueError)。`ic_from` が無い・Euler の run なら **自動**
+        (本段の設定に基準値を書かず、forge が本段の開始の場で決めて run の `limiter_ref.json` に書く; stage_manifest の本段の段にも写る;
+        戻りの limiter_ref は {})。ic_from を渡さない呼び出し (case/45 の台本の登録の照合など) は今までどおり自動。
+      - `auto` (文字列) = 初期場の元を見ずに自動 (継承しない明示)。
+      - `{ro, p, a}` (+ 任意の `L` = limiterRefLength) = 明示の固定値 (今までどおり; 継承より優先)。
+      - `{from_run: <run>}` = 別 run の記録を継承 (`limiter_ref_from_run`; ρ・P・a・L_ref の 4 つを固定値で書く; 初期場の元より優先)。
+    基準値の由来 (mode auto / inherit / explicit / from_run と記録の sha256 など) は `source_out` (dict を渡したとき) の `limiter_ref` に書く
+    (戻りの dict のキーは今までと同じ — case/45 の台本が登録の dict と比べる)。"""
     ml = p.evaluate.get("main_line")
-    if ml is None:
+    if ml is None or _main_line_mode(p)["value"] == "point":
         return None
     if not isinstance(ml, dict):
         raise ValueError(f"evaluate.main_line は mapping であること ({ml!r})")
@@ -1542,15 +1872,34 @@ def _main_line_spec(p: Problem, cfl_main=None, implicit_relax=None) -> dict | No
     if isinstance(itj, bool) or not isinstance(itj, int) or not 0 <= itj <= 7 or ((itj & 4) and not (itj & 1)):
         # ソルバの検査 (solverConfig.cpp: 0..7、ビット 4 はビット 1 が要る) と同じ
         raise ValueError(f"evaluate.main_line.itj は 0..7 の整数 (ビット 4 はビット 1 と一緒に) であること ({itj!r})")
-    lr = ml["limiter_ref"]
-    if not isinstance(lr, dict) or set(lr) != {k for k, _ in _LIMITER_REF_KEYS}:
-        raise ValueError(f"evaluate.main_line.limiter_ref は {{ro, p, a}} の 3 つだけを持つ mapping であること ({lr!r})")
-    refs = {sk: _pos(f"limiter_ref.{k}", lr[k]) for k, sk in _LIMITER_REF_KEYS}
+    lr = ml.get("limiter_ref")
+    need = {k for k, _ in _LIMITER_REF_KEYS}
+    opt = {k for k, _ in _LIMITER_REF_OPT_KEYS}
+    auto_note = "forge が本段の開始の場で決めて run の limiter_ref.json に書く (stage_manifest の本段の段に写る)"
+    if lr is None and ic_from is not None:
+        refs, lr_src = limiter_ref_inherit_from_ic(ic_from)       # NS の元なら継承、Euler の元なら自動 (分からなければ ValueError)
+    elif lr is None:
+        refs = {}
+        lr_src = {"mode": "auto", "reason": "初期場の元の run が無い (新しい問題)", "note": auto_note}
+    elif lr == LIMITER_REF_AUTO:
+        refs = {}
+        lr_src = {"mode": "auto", "reason": f"evaluate.main_line.limiter_ref: {LIMITER_REF_AUTO} の明示 (初期場の元を見ない)",
+                  "ic_from": (None if ic_from is None else str(ic_from)), "note": auto_note}
+    elif isinstance(lr, dict) and set(lr) == {"from_run"}:
+        refs, lr_src = limiter_ref_from_run(lr["from_run"], base_dir=(Path(p.path).resolve().parent if getattr(p, "path", None) else None))
+    elif isinstance(lr, dict) and need <= set(lr) <= need | opt:
+        refs = {sk: _pos(f"limiter_ref.{k}", lr[k]) for k, sk in _LIMITER_REF_KEYS + _LIMITER_REF_OPT_KEYS if k in lr}
+        lr_src = {"mode": "explicit", "values": dict(refs)}
+    else:
+        raise ValueError(f"evaluate.main_line.limiter_ref は 省略 (初期場の元の NS run から継承、無ければ自動)・{LIMITER_REF_AUTO}・"
+                         f"{{ro, p, a}} (+ 任意の L)・{{from_run: <run>}} のどれかであること ({lr!r})")
     ex = ml.get("extra_fields")
     if ex is not None and (not isinstance(ex, list) or not ex or len(set(map(str, ex))) != len(ex)
                            or any(not isinstance(s, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", s) for s in ex)):
         raise ValueError(f"evaluate.main_line.extra_fields は重複の無い量の名前の空でないリストであること ({ex!r})")
     relax = _pos("relax", ml["relax"], hi=1.0)
+    if source_out is not None:
+        source_out["limiter_ref"] = lr_src
     ir = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
     if ir is not None and float(ir) != relax:
         raise ValueError(f"implicit_relax ({ir!r}、前の段にも効く) は evaluate.main_line.relax ({relax!r}) と同じ値に限る "
@@ -1586,7 +1935,8 @@ def _apply_main_line(cfg: str, ml: dict) -> str:
     text = _cfg_set(cfg, {"cfl": ml["cfl"], "cfl_pseudo": ml["cfl"]})
     if ml["extra_fields"]:
         text = text.rstrip("\n") + "\noutput: {level: 1, extraFields: [" + ", ".join(ml["extra_fields"]) + "]}\n"
-    text = text.replace("space: {", "space: {" + ", ".join(f"{k}: {float(v)!r}" for k, v in ml["limiter_ref"].items()) + ", ", 1)
+    if ml["limiter_ref"]:                  # 空 = 自動 (forge が本段の開始の場で決めて limiter_ref.json に書く) なら書かない
+        text = text.replace("space: {", "space: {" + ", ".join(f"{k}: {float(v)!r}" for k, v in ml["limiter_ref"].items()) + ", ", 1)
     text = text.replace("deltaT: {", "deltaT: {lineImplicit: 1, lineDtDirectional: 1, ", 1)
     text = text.replace("deltaT: {", f"deltaT: {{implicitThermalJacobian: {int(ml['itj'])}, ", 1)
     text = text.replace("deltaT: {", f"deltaT: {{lineDtDirectionalCap: {float(ml['cap'])!r}, ", 1)
@@ -1624,19 +1974,223 @@ def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implic
     return cfg_ns, _apply_main_line(cfg_ns, main_line)
 
 
+# --- 本段の監視用の出力と判定の基準 (`evaluate.ns_output`・`evaluate.settle`; plan tooling-settle-convergence-and-monitor §4.5・§5.1 #6) -----
+# 要求カードの雛形 (axismach_final_v1・axismach_explore_v1) が既定で書く。キー無しの問題は今と同じ設定・同じファイル。
+# 出力のキーは**本段の設定だけ**に書き (B0 と同じ)、前の段 (S1・S2) は PRESTAGE_CONFIG (出力のキーの無い元の設定) から作る。
+NS_OUTPUT_KEYS = ("outStepInterval", "fieldOutStepInterval", "boundary_h5", "boundaryMassflux", "interfaceDiag")
+NS_BOUNDARY_NAMES = ("inlet", "outlet", "wall", "axis")       # runner_wt._bcond の境界の名前
+SETTLE_NODES_FILE = "settle_nodes.txt"                        # forge の output.nodeProbeFile (settle_presets.probe_node_ids)
+# 本段だけに書く出力のパス (前の段の設定に残っていてはいけない; 本段と前の段の元の設定の差として許す)
+_NS_OUTPUT_PATHS = ({("time", "fieldOutStepInterval"), ("output",)}
+                    | {("output", k) for k in ("boundaryMassflux", "nodeProbeFile", "interfaceDiag")})
+
+
+def _settle_presets():
+    from . import settle_presets
+    return settle_presets
+
+
+def _ns_output_spec(p: Problem) -> dict | None:
+    """`evaluate.ns_output` (NS だけが読む; Euler の `prepare` は読まない) を検査して返す (キー無しは None = 今と同じ)。
+    {outStepInterval: 2000 (境界の h5・節点・流量・残差の判定の格子; `_ns_steps` が evaluate.outStepInterval より優先),
+     fieldOutStepInterval: 20000 (全場 res_<step>.h5 だけ; forge の time.fieldOutStepInterval、本段だけ),
+     boundary_h5: [inlet, outlet, wall, axis] (outputHDFflg を 1 にする境界; 書いていない境界は今のまま),
+     boundaryMassflux: 1 (本段の output.boundaryMassflux)}。知らないキー・不正な値は ValueError。"""
+    no = p.evaluate.get("ns_output")
+    if no is None:
+        return None
+    if not isinstance(no, dict):
+        raise ValueError(f"evaluate.ns_output は mapping であること ({no!r})")
+    bad = sorted(set(no) - set(NS_OUTPUT_KEYS), key=str)
+    if bad:
+        raise ValueError(f"evaluate.ns_output の知らないキー {bad} (使えるのは {list(NS_OUTPUT_KEYS)})")
+
+    def _pint(k):
+        v = no.get(k)
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            raise ValueError(f"evaluate.ns_output.{k} は 1 以上の整数であること ({v!r})")
+        return int(v)
+    oi, fi = _pint("outStepInterval"), _pint("fieldOutStepInterval")
+    if fi is not None and oi is not None and fi % oi:
+        raise ValueError(f"evaluate.ns_output.fieldOutStepInterval {fi} が outStepInterval {oi} の倍数でない (全場が出力の格子に乗らない)")
+    bh = no.get("boundary_h5", [])
+    if not isinstance(bh, list) or len(set(map(str, bh))) != len(bh) or any(b not in NS_BOUNDARY_NAMES for b in bh):
+        raise ValueError(f"evaluate.ns_output.boundary_h5 は {list(NS_BOUNDARY_NAMES)} の重複の無いリストであること ({bh!r})")
+    bm = no.get("boundaryMassflux", 0)
+    if bm not in (0, 1) or isinstance(bm, float):
+        raise ValueError(f"evaluate.ns_output.boundaryMassflux は 0 か 1 ({bm!r})")
+    idg = no.get("interfaceDiag", 0)
+    if idg not in (0, 1) or isinstance(idg, (bool, float)):
+        raise ValueError(f"evaluate.ns_output.interfaceDiag は 0 か 1 ({idg!r})")
+    # interfaceDiag: 壁の熱流の判定に使わなくても成果物の壁の熱流 (iface_Qf_eff) のために出す (2026-10-16、wt_nozzle_v3 は壁の熱流を判定から外した)
+    return {"outStepInterval": oi, "fieldOutStepInterval": fi, "boundary_h5": list(bh), "boundaryMassflux": int(bm), "interfaceDiag": int(idg)}
+
+
+def _settle_spec(p: Problem) -> tuple:
+    """`evaluate.settle` を読む: (問題 YAML の evaluate.settle の dict か None, prepare_info の `settle` の記録)。
+    - キー無し: (None, 未指定)。今と同じ (settle_criteria.yaml を書かない)。
+    - `false`: (None, 外した・理由)。**明示のときだけ外す** (前提を満たせない問題は settle_presets.resolve の例外で止まる)。
+    - mapping: キーとプリセットの名前をここで検査 (run dir を作る前)。中身の解決は prepare_ns が run の設定で行う。
+    それ以外 (true など) は ValueError。"""
+    es = p.evaluate.get("settle", None)
+    if "settle" not in p.evaluate:
+        return None, {"status": "unset", "reason": "evaluate.settle が無い (settle_criteria.yaml を書かない; 今までどおり)"}
+    if es is False:
+        return None, {"status": "off", "reason": "evaluate.settle: false (問題 YAML で明示して外した)"}
+    if not isinstance(es, dict):
+        raise ValueError(f"evaluate.settle は mapping (preset ほか) か false であること ({es!r})")
+    SP = _settle_presets()
+    unknown = [k for k in es if k not in SP.SETTLE_KEYS]
+    if unknown or es.get("preset") not in SP.PRESETS:
+        raise ValueError(f"evaluate.settle が不正 (知らないキー {unknown}、preset {es.get('preset')!r}; キー {list(SP.SETTLE_KEYS)}、"
+                         f"プリセット {list(SP.PRESETS)})")
+    return dict(es), {"status": "on", "preset": es["preset"]}
+
+
+def _bcond_set_output(txt: str, names) -> str:
+    """bcondConfig (runner_wt._bcond の 1 行 1 境界の flow 形式) の names の境界の outputHDFflg を 1 にする。読み直して、差が
+    その境界の outputHDFflg だけであることを確かめる (違えば ValueError)。"""
+    import yaml
+    before = yaml.safe_load(txt)
+    out = txt
+    for nm in names:
+        pat = re.compile(rf"^({re.escape(nm)}:\s*\{{.*?\boutputHDFflg:\s*)(\d+)", re.M)
+        if len(pat.findall(out)) != 1:
+            raise ValueError(f"bcondConfig に境界 {nm!r} の outputHDFflg の行がちょうど 1 つでない")
+        out = pat.sub(lambda m: m.group(1) + "1", out, count=1)
+    after = yaml.safe_load(out)
+    want = {nm: {**before[nm], "outputHDFflg": 1} for nm in names}
+    if after != {**before, **want}:
+        raise ValueError("bcondConfig の outputHDFflg を書き換えたら想定と違う")
+    return out
+
+
+def _settle_needs(crit: dict) -> dict:
+    """解決した settle_criteria の量から、本段の出力に要るもの {nodeProbeFile, boundaryMassflux, interfaceDiag}。"""
+    kinds = {q["kind"] for q in crit["quantities"] if "series_csv" not in q}
+    return {"nodeProbeFile": bool(kinds & {"exit_core_mach", "line_mach", "exit_flow_angle"}),
+            "boundaryMassflux": "mass_balance" in kinds, "interfaceDiag": "wall_heat_nodes" in kinds}
+
+
+def _apply_ns_outputs(cfg: str, no: dict | None, needs: dict | None) -> str:
+    """本段の設定に監視用の出力を足す (plan tooling-settle-convergence-and-monitor §4.1・§4.5)。no = `_ns_output_spec`、needs =
+    `_settle_needs` (settle が無ければ None)。time.fieldOutStepInterval を outStepInterval の行の直後に、output のキー
+    (boundaryMassflux・nodeProbeFile・interfaceDiag) を output の mapping に (無ければ最後に 1 行) 書く。outStepInterval は
+    `_ns_steps` が既に設定に入れている。読み直して、元との差が _NS_OUTPUT_PATHS だけで値が要求どおりであることを確かめる。
+    足すものが無ければ cfg をそのまま返す (キー無しの問題は今と同じ文字列)。"""
+    no = no or {}
+    needs = needs or {}
+    outk = {}
+    if no.get("boundaryMassflux") or needs.get("boundaryMassflux"):
+        outk["boundaryMassflux"] = 1
+    if needs.get("nodeProbeFile"):
+        outk["nodeProbeFile"] = SETTLE_NODES_FILE
+    if needs.get("interfaceDiag") or no.get("interfaceDiag"):
+        outk["interfaceDiag"] = 1
+    fi = no.get("fieldOutStepInterval")
+    if not outk and fi is None:
+        return cfg
+    doc = _cfg_load(cfg)
+    have = [".".join(pth) for pth in sorted(_NS_OUTPUT_PATHS - {("output",)}) if _cfg_path_get(doc, pth) is not _CFG_MISSING]
+    if have:
+        raise ValueError(f"前の段の元の設定に既に {have} がある — 本段の出力を重ねて書けない")
+    text = cfg
+    if fi is not None:
+        pat = re.compile(r"^([ \t]*)outStepInterval:[ \t]*\S+[ \t]*$", re.M)
+        if len(pat.findall(text)) != 1:
+            raise ValueError("time.outStepInterval の行がちょうど 1 つの block 形式でない — fieldOutStepInterval の足し方を決めていない")
+        text = pat.sub(lambda m: m.group(0) + "\n" + m.group(1) + f"fieldOutStepInterval: {int(fi)}", text, count=1)
+    if outk:
+        flow = ", ".join(f"{k}: {v}" for k, v in outk.items())
+        if _cfg_path_get(doc, ("output",)) is _CFG_MISSING:
+            text = text.rstrip("\n") + "\noutput: {" + flow + "}\n"
+        elif len(re.findall(r"^output: \{", text, re.M)) == 1:
+            text = re.sub(r"^output: \{", "output: {" + flow + ", ", text, count=1, flags=re.M)
+        else:
+            raise ValueError("output が 1 行の flow 形式でない — 本段の出力の足し方を決めていない")
+    want = {("output", k): v for k, v in outk.items()}
+    if fi is not None:
+        want[("time", "fieldOutStepInterval")] = int(fi)
+    after = _cfg_load(text)
+    stray = sorted(set(_cfg_diff_paths(doc, after)) - _NS_OUTPUT_PATHS, key=str)
+    bad = {".".join(pth): _cfg_path_get(after, pth) for pth, v in want.items() if _cfg_path_get(after, pth) != v}
+    if stray or bad:
+        raise ValueError(f"本段の出力を足した設定を読み直したら想定と違う (出力以外の差 {stray}、値の違い {bad})")
+    return text
+
+
+def write_settle_files(run_dir, settle_es: dict, info: dict, cfg_main: str, bc_text: str) -> dict:
+    """run に判定の基準 `settle_criteria.yaml` と節点の表 `settle_nodes.txt` を書く (plan tooling-settle-convergence-and-monitor §4.2・
+    §5.1 #6; prepare_ns が本段の設定と bcondConfig を書いた後に呼ぶ)。info は prepare_info の中身 (Md・scale_m・mesh の ni・nj・x_E・
+    physical_wall)、cfg_main は本段の設定 (出力のキー入り)。節点の座標は本段の設定の mesh.meshFileName (変換した格子) から。
+    `grid.segment` は本段の開始の通知 (`settle_presets.main_stage_segment`)。基準の前提 (本段の出力の設定) が 1 つでも満たされて
+    いなければ ValueError (書いた本段の設定の誤り)。戻り: prepare_info の `settle` に足す記録。"""
+    import yaml
+    SP = _settle_presets()
+    run_dir = Path(run_dir)
+    main_doc = _cfg_load(cfg_main)
+    bc_doc = yaml.safe_load(bc_text)
+    seg = SP.main_stage_segment()
+    crit = SP.resolve(settle_es, info, main_doc, bc_doc, segment=seg)
+    nodes_rec = None
+    if _settle_needs(crit)["nodeProbeFile"]:
+        nf = str((main_doc.get("output") or {}).get("nodeProbeFile", ""))
+        if nf != SETTLE_NODES_FILE:
+            raise ValueError(f"本段の設定の output.nodeProbeFile ({nf!r}) が {SETTLE_NODES_FILE} でない")
+        ni_m, nj_m = int(info["mesh"]["ni"]), int(info["mesh"]["nj"])
+        X, R = SP.mesh_xr(run_dir / str(main_doc["mesh"]["meshFileName"]), ni_m, nj_m, float(info["scale_m"]))
+        ids = SP.probe_node_ids(ni_m, nj_m, X, R, crit)
+        if len(ids) == 0:
+            raise ValueError("判定の基準の節点の量の節点が 0 個 (forge は空の節点の表を拒む)")
+        SP.write_node_probe_file(run_dir / SETTLE_NODES_FILE, ids,
+                                 header=(f"settle_presets.probe_node_ids (preset {settle_es['preset']}; 構造格子 i·nj + j、ni {ni_m}・nj {nj_m})\n"
+                                         "runner_axismach.prepare_ns が書いた — 手で直さない"))
+        nodes_rec = {"file": SETTLE_NODES_FILE, "n": int(len(ids)), "sha256": _sha256_file(run_dir / SETTLE_NODES_FILE)}
+    w = SP.write_settle_criteria(run_dir, settle_es, info, main_doc, bc_doc, segment=seg)
+    unmet = [c for c in w["criteria"]["preconditions"] if not c["satisfied"]]
+    if unmet:
+        raise ValueError(f"判定の基準の前提を本段の設定が満たさない (書いた出力の誤り): {unmet}")
+    return {"file": Path(w["path"]).name, "sha256": w["sha256"], "nodes": nodes_rec,
+            "quantities": [q["name"] for q in w["criteria"]["quantities"]], "excluded": w["criteria"]["excluded"],
+            "evaluate_settle": settle_es}
+
+
+def euler_cfl(p: Problem):
+    """Euler の本段の cfl (`evaluate.cfl_euler` > `evaluate.cfl_main` > None = 設定の既定 4.0)。要求カードの雛形は NS の本段を B0
+    (`main_line`、cfl_main と併記できない) にしたので、Euler の cfl を別に持つ (codex diagnose 2026-10-15 m55-three-coef M4: cfl_main を
+    消すだけでは Euler が cfl 4 に変わる)。Euler の台本 (run_staged の呼び出し側) はこれを使う。"""
+    v = p.evaluate.get("cfl_euler", p.evaluate.get("cfl_main"))
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not np.isfinite(float(v)) or float(v) <= 0.0:
+        raise ValueError(f"evaluate.cfl_euler (または cfl_main) は有限の正の数であること ({v!r})")
+    return float(v)
+
+
 def _ns_steps(p: Problem, nsteps=None) -> tuple:
     """NS の本段の step 数・出力の間隔とその出所 (n, out_int, n の出所)。prepare_ns と停止規則の設定 (`_stop_rule_settings`) が共有する
     (M6 の版が prepare_ns の中の式を関数に出した; plan tooling-nozzle-isothermal-wall-chain §5.1 #36a)。
     step 数は 2026-10-14 のユーザ決定「1 ok」(forge-f5 fb07daf8、plan tooling-nozzle-cooled-wall-ns-settling §4.5) のとおり、引数 nsteps
     (`--steps`) > `evaluate.ns_steps` > `NS_STEPS_DEFAULT` (60,000)。`evaluate.nStepOuter` は Euler (`prepare`) だけが読む
     (雛形の 12,000 が NS にも効いて本段が短すぎた)。停止規則を使うときの本段の長さは上限 (`stop_rule.resolve_settings` の cap) で、
-    この n は使わない・使えないときの長さ (`fallback_steps`)。"""
+    この n は使わない・使えないときの長さ (`fallback_steps`)。
+    出力の間隔は `evaluate.ns_output.outStepInterval` (NS だけ; plan tooling-settle-convergence-and-monitor §4.5) > `evaluate.outStepInterval`
+    (Euler と共有) > n // 6。ns_output の間隔は判定の格子なので、n を割り切らなければ直さず ValueError。"""
     if nsteps:
         n, src = int(nsteps), "引数 (--steps)"
     elif p.evaluate.get("ns_steps") is not None:
         n, src = int(p.evaluate["ns_steps"]), "evaluate.ns_steps"
     else:
         n, src = NS_STEPS_DEFAULT, f"既定 {NS_STEPS_DEFAULT}"
+    no = _ns_output_spec(p)
+    if no is not None and no["outStepInterval"] is not None:
+        # NS だけの出力の間隔 (evaluate.ns_output; plan tooling-settle-convergence-and-monitor §4.5)。判定の格子なので黙って直さない
+        out_int = no["outStepInterval"]
+        if n % out_int:
+            raise ValueError(f"NS の本段 {n} step ({src}) が evaluate.ns_output.outStepInterval {out_int} の倍数でない")
+        return n, out_int, src
     out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
     if n % out_int:
         # forge は outStepInterval の倍数でしか res を書かない → 最終 step の res が残るよう n を割り切る間隔に直す
@@ -1733,6 +2287,21 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
       (plan tooling-nozzle-isothermal-wall-chain §5.1 #36e (6); `metrics.deltastar.resolve_euler_ref`)。固定は run dir を作る前に sha256 を照合し
       (違えば ValueError)、prepare_info.json の `euler_ref` (と停止規則の `stop_rule.euler_ref`) にそのまま残す。停止規則の帯・見張りの中の
       出力ごとの δ の記録・受け渡しの関門の抽出はその固定のファイルを読む。
+    - **本段の監視用の出力と判定の基準** (plan tooling-settle-convergence-and-monitor §4.5・§5.1 #6; 要求カードの雛形が既定で書く。キー無しは今と同じ):
+      `evaluate.ns_output` {outStepInterval, fieldOutStepInterval, boundary_h5, boundaryMassflux} (`_ns_output_spec`) — outStepInterval は NS の
+      出力の間隔 (`_ns_steps`; evaluate.outStepInterval は Euler だけ)、boundary_h5 の境界は bcondConfig の outputHDFflg 1、fieldOutStepInterval・
+      boundaryMassflux は**本段の設定だけ** (`_apply_ns_outputs`)。`evaluate.settle` {preset, ...} (`_settle_spec`) — run の設定で解決して
+      `settle_criteria.yaml` (`settle_presets.write_settle_criteria`、`grid.segment` = 本段の開始の通知) と節点の表 `settle_nodes.txt`
+      (`settle_presets.probe_node_ids`) を書き、要る出力 (output.nodeProbeFile・boundaryMassflux、等温壁なら interfaceDiag) を本段の設定に足す。
+      解決できない設定 (凝縮のモーメントの列など) は例外 (`evaluate.settle: false` の明示だけで外す; 外した理由は prepare_info の `settle`)。
+      本段の設定が前の段の元の設定と違えば (B0 か出力) PRESTAGE_CONFIG を書き、S1・S2 はそこから作る。判定の基準が無い run で
+      fieldOutStepInterval を出力の間隔より粗くし、停止規則 (旧方式 = 出力ごとに全場を読む) を使う組み合わせは run dir を作る前に例外。
+    - **`main_line.limiter_ref`** (同 plan §4.6・§5.1 #6b): 省略 = `ic_from` が NS の run なら**その基準値を継承** (`limiter_ref_inherit_from_ic`:
+      元の run の limiter_ref.json の 4 つ、無ければ本段の設定の明示 ρ・P・a (+ L)、分からなければ run dir を作る前に ValueError)、`ic_from` が
+      無い・Euler の run なら自動 (forge が本段の開始の場で決めて `limiter_ref.json` に書き、stage_manifest の本段の段に写る)、`auto` = 継承しない自動、
+      `{ro, p, a[, L]}` = 明示、`{from_run: <run>}` = 別 run の記録を継承 (`limiter_ref_from_run`)。明示・from_run は初期場の元より優先。B0 の本段
+      だけ (point の本段は今までどおり自動)。出所は prepare_info の `main_line.limiter_ref_source` と MAIN_STAGE_STARTED の `limiter_ref.source`。
+      `evaluate.main_line: point` は B0 を使わない明示 (prepare_info の `main_line_mode`)。
     """
     from ..feedback.deltastar import _sutherland
     from . import stop_rule as SR
@@ -1755,7 +2324,21 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     ns_mesh_defaults = {"ni": 561, "nj": 97, "wall_first_frac": 4.5e-5}
     nodes = check_node_budget(mesh_params(p, 1.0, **ns_mesh_defaults), p.mesh, "mesh")
     # 本段だけの B0 (§5.1 #30): 不正値・cfl_main / implicit_relax との併記は run dir を作る前に例外
-    main_line = _main_line_spec(p, cfl_main, implicit_relax)
+    # (limiter_ref の省略 = 初期場の元の NS run から継承・無ければ自動、from_run の記録の読み・検査もここ; plan
+    # tooling-settle-convergence-and-monitor §4.6・§5.1 #6b)
+    ml_src = {}
+    main_line = _main_line_spec(p, cfl_main, implicit_relax, source_out=ml_src, ic_from=ic_from)
+    main_line_mode = _main_line_mode(p)
+    # 本段の監視用の出力と判定の基準 (plan tooling-settle-convergence-and-monitor §4.5・§5.1 #6): キーとプリセットの名前、
+    # 流量の収支の入口・出口の判別 (bcond の kind) は run dir を作る前に検査する。中身の解決は格子と設定ができてから
+    ns_out = _ns_output_spec(p)
+    settle_es, settle_rec = _settle_spec(p)
+    bc_ns = _bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p))
+    if ns_out is not None and ns_out["boundary_h5"]:
+        bc_ns = _bcond_set_output(bc_ns, ns_out["boundary_h5"])
+    if settle_es is not None:
+        import yaml as _yaml
+        _settle_presets().classify_bconds(_yaml.safe_load(bc_ns))
     # 物理壁だけの上流の形 (§5.1 #34): 不正値・δ_r の経路 (delta_r_csv だけ)・壁温分布との併用は run dir を作る前に例外
     pu = _physical_upstream(p.geometry)
     if pu is not None:
@@ -1771,6 +2354,13 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # 本段の停止規則 (§5.1 #36a): 既定で使う。不正値と、明示 (evaluate.stop_rule: true) なのに使えない設定は run dir を作る前に例外
     # (既定なら使えない理由を記録して fallback_steps で回す)
     sr_settings = _stop_rule_settings(p, nsteps, euler_ref, stop_rule)
+    # 判定の基準の無い run (evaluate.settle が無い・false) の停止規則は旧方式 (v1; 出力ごとに全場を読む)。全場の間隔を出力の間隔より
+    # 粗くすると窓に全場が揃わないので、その組み合わせは run dir を作る前に止める (plan tooling-settle-convergence-and-monitor §4.5)
+    if (settle_es is None and sr_settings.get("requested") and stop_rule is not False and ns_out is not None
+            and ns_out["fieldOutStepInterval"] not in (None, _ns_steps(p, nsteps)[1])):
+        raise ValueError("evaluate.ns_output.fieldOutStepInterval が出力の間隔と違うが、判定の基準 (evaluate.settle) が無いので本段の停止規則は"
+                         "出力ごとに全場を読む旧方式になる — evaluate.settle を書くか、evaluate.stop_rule: false にするか、"
+                         "fieldOutStepInterval を外す")
     run_dir = Path(run_dir)
     if run_dir.exists():
         raise FileExistsError(f"{run_dir} が既にある")
@@ -1796,6 +2386,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             csv = np.interp(np.clip(x, _tbl[0, 0], _tbl[-1, 0]), _tbl[:, 0], _tbl[:, 1])
             return (1.0 - w) * _corr(x) + w * csv
     delta_r_x = None
+    delta_r_table_ends = None          # 表の端の照合 (delta_r_csv のときだけ; §5.1 #3h)
     init_info = None
     init_cfg = initializer if initializer is not None else p.raw.get("deltastar_initializer")
     if init_cfg and delta_r_csv is None and dstar_csv is None:
@@ -1809,7 +2400,11 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         tbl_r = np.loadtxt(delta_r_csv, delimiter=",", skiprows=1)
         if not np.all(np.isfinite(tbl_r[:, 1])):
             raise ValueError("delta_r_csv に非有限値がある (deltastar_loop.extract_and_merge で前回値保持済みの CSV を渡す)")
-        delta_r_x = delta_r_from_table(tbl_r[:, 0], tbl_r[:, 1])
+        # 表の端が設計の入口端・出口から ε_f32 以内なら揃える (格子の x [m] / r_t の丸めで 1 ulp 短い表; plan
+        # tooling-nozzle-card-local-mesh §5.1 #3h)。超えた端はそのまま (今までどおり壁の構築が判定する)
+        from ..feedback.deltastar_loop import design_anchors, snap_table_ends_same_design
+        xs_r, delta_r_table_ends = snap_table_ends_same_design(tbl_r[:, 0], design_anchors(d["wall"]), scale)
+        delta_r_x = delta_r_from_table(xs_r, tbl_r[:, 1])
         offset = "radial"
     # 物理壁 (pw_ramp・pw_upstream・physical_wall_repr に従う。寸法の逆算と同じ構築; build_physical_wall)。ゲート不合格は例外
     wall = build_physical_wall(p, d, scale, delta_r_x=delta_r_x, dstar_x=dstar_x, offset=offset, pwu=pwu)
@@ -1877,8 +2472,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         print(f"[prepare_ns] 本段 {n} step ({n_src})。evaluate.nStepOuter {p.evaluate['nStepOuter']} は Euler だけが読む (2026-10-14 から)", flush=True)
     cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
     implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
-    # 壁温分布なら壁の行に wallProfile: 1 (CSV は上で書いた。この runner だけが profile_ok=True)
-    (run_dir / "bcondConfig.yaml").write_text(_bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p)))
+    # 壁温分布なら壁の行に wallProfile: 1 (CSV は上で書いた。この runner だけが profile_ok=True)。evaluate.ns_output.boundary_h5 の
+    # 境界は outputHDFflg 1 (plan tooling-settle-convergence-and-monitor §4.5; 全段に効く出力だけ — 前の段の出力は段の終わりに消える)
+    (run_dir / "bcondConfig.yaml").write_text(bc_ns)
     (run_dir / "probe.yaml").write_text(PROBE_STUB)
     # 品質は cell 変換コピーで検査 (品質ツールは node CONNE 非対応)
     (run_dir / "solverConfig.yaml").write_text(
@@ -1895,6 +2491,16 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)。main_line があっても変換・初期場の処理は B0 を
     # 当てる前の設定で行い、本段の設定 (cfg_main) への切り替えは最後に行う (§5.1 #30)
     cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line)
+    # 本段の監視用の出力 (plan tooling-settle-convergence-and-monitor §4.1・§4.5): 判定の基準 (evaluate.settle) を run の設定で一度解決して
+    # 要る出力 (節点・流量・界面の診断) を決め、evaluate.ns_output と合わせて本段の設定だけに書く。前提を満たせない設定 (凝縮のモーメントの
+    # 列・非定常・入口か出口の判別ができない境界など) は settle_presets.resolve の例外で止まる (黙って外さない; 外すのは evaluate.settle: false)
+    settle_pi = {"Md": d["Md"], "scale_m": scale, "mesh": {"ni": mp.ni, "nj": coords.shape[0] // mp.ni}, "x_E": d["x_E"],
+                 **({"physical_wall": pw_info} if pw_info is not None else {})}
+    settle_needs = None
+    if settle_es is not None:
+        import yaml as _yaml
+        settle_needs = _settle_needs(_settle_presets().resolve(settle_es, settle_pi, _cfg_load(cfg_main), _yaml.safe_load(bc_ns)))
+    cfg_main = _apply_ns_outputs(cfg_main, ns_out, settle_needs)
     (run_dir / "solverConfig.yaml").write_text(cfg_ns)
     run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # 記録だけ (NS の格子は mesh のまま、座標・接続は変えない; 2026-10-07 plan verification-case45-euler-total-enthalpy §4)
@@ -1970,16 +2576,27 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         # 物理壁だけの上流の形 (§5.1 #34): 問題の値と、壁が使った値 (名目の U→T Hermite・凍結した設計の値)。キー無しは書かない
         info["physical_upstream"] = {"requested": pu, "wall": wall.physical_upstream}
     info["sizing"] = _sizing_record(sizing, wall, scale)
+    if delta_r_table_ends is not None:
+        info["delta_r_table_ends"] = delta_r_table_ends
     info["environment"] = environment_record()     # 照合は同じ環境どうしで (2026-10-07)
-    # 本段だけの B0 (§5.1 #30): 前の段の元の設定を PRESTAGE_CONFIG に置き、solverConfig.yaml を本段の設定に替える
-    # (cfl_main・implicit_relax の記録は本段の値にする)。キー無しはファイルを書かない
+    # 本段だけの B0 (§5.1 #30) と本段の監視用の出力 (plan tooling-settle-convergence-and-monitor §4.5): 前の段の元の設定を PRESTAGE_CONFIG に
+    # 置き、solverConfig.yaml を本段の設定に替える (cfl_main・implicit_relax の記録は本段の値にする)。どちらも無ければファイルを書かない
     info["main_line"] = None
-    if main_line is not None:
+    info["main_line_mode"] = main_line_mode
+    if cfg_main != cfg_ns:
         (run_dir / PRESTAGE_CONFIG).write_text(cfg_ns)
         (run_dir / "solverConfig.yaml").write_text(cfg_main)
+    if main_line is not None:
         info["cfl_main"], info["implicit_relax"] = main_line["cfl"], main_line["relax"]
-        info["main_line"] = {**main_line, "source": "evaluate.main_line", "prestage_config": PRESTAGE_CONFIG}
-    info["ns_stage_configs"] = ns_stage_sha256(cfg_main, cfg_ns if main_line is not None else None)
+        info["main_line"] = {**main_line, "source": "evaluate.main_line", "prestage_config": PRESTAGE_CONFIG,
+                             "limiter_ref_source": ml_src.get("limiter_ref")}
+    info["ns_output"] = (None if ns_out is None else
+                         {**ns_out, "outStepInterval_effective": out_int, "source": "evaluate.ns_output", "main_stage_only": True})
+    info["ns_stage_configs"] = ns_stage_sha256(cfg_main, cfg_ns if cfg_main != cfg_ns else None)
+    # 判定の基準 settle_criteria.yaml と節点の表 settle_nodes.txt (plan tooling-settle-convergence-and-monitor §4.2・§5.1 #6)
+    if settle_es is not None:
+        settle_rec = {**settle_rec, **write_settle_files(run_dir, settle_es, info, cfg_main, bc_ns)}
+    info["settle"] = settle_rec
     # 本段の停止規則 (§5.1 #36a; run_staged_ns が読む)。θ_r の断面は設計壁の出口 (physical_wall.domain[1]) の比なので、壁ファイルを
     # 書かない区分表現の物理壁では使えない: 明示なら例外 (M6 の版)、既定なら使えない理由を記録して fallback_steps で回す (forge-f5 の版)
     if sr_settings["use"] and not (isinstance(pw_info, dict) and isinstance(pw_info.get("domain"), (list, tuple))):
@@ -2050,16 +2667,18 @@ def _ns_prestage(cfg: str, cfl: float) -> str:
 def ns_stage_configs(cfg_main: str, stages: str = "full", ramp=None, ramp_steps: int = 1000, cfg_pre: str | None = None):
     """`run_staged_ns` の段の設定を、forge を回さずに導く。戻り: (前の段 [(tag, 実効設定, step 数, 起動前の要求値)],
     本段の実効設定, 本段の起動前の要求値)。前の段の実効設定は step 数・出力の間隔まで書いた起動直前の文字列。
-    `cfg_pre` (main_line の run の PRESTAGE_CONFIG = B0 を当てる前の設定) があれば S1・S2 はそこから作り
-    (§5.1 #30)、本段との差が B0 のパスと段の長さだけであること、S1・S2 に B0 だけのキーが残っていないことを検査する
+    `cfg_pre` (main_line・本段の監視用の出力の run の PRESTAGE_CONFIG = B0・出力を当てる前の設定) があれば S1・S2 はそこから作り
+    (§5.1 #30)、本段との差が B0 のパス・本段の出力のパス (_NS_OUTPUT_PATHS; plan tooling-settle-convergence-and-monitor §4.5) と
+    段の長さだけであること、S1・S2 に B0・本段の出力だけのキーが残っていないことを検査する
     (違えば ValueError)。`cfg_pre` があるときの stages="ramp" は定義していないので ValueError。"""
     n_main = _cfg_value(cfg_main, "nStepOuter")
     main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "outStepInterval")}
     if cfg_pre is not None:
         len_paths = {("time", "last", "nStepOuter"), ("time", "outStepInterval")}
-        stray = sorted(set(_cfg_diff_paths(_cfg_load(cfg_pre), _cfg_load(cfg_main))) - _MAIN_LINE_PATHS - len_paths, key=str)
+        stray = sorted(set(_cfg_diff_paths(_cfg_load(cfg_pre), _cfg_load(cfg_main))) - _MAIN_LINE_PATHS - _NS_OUTPUT_PATHS - len_paths,
+                       key=str)
         if stray:
-            raise ValueError(f"{PRESTAGE_CONFIG} と本段の設定の差が B0 (main_line) のパスと段の長さ以外にもある: "
+            raise ValueError(f"{PRESTAGE_CONFIG} と本段の設定の差が B0 (main_line)・本段の出力のパスと段の長さ以外にもある: "
                              + ", ".join(".".join(map(str, pth)) for pth in stray) + " — 段の設定を作らない")
         if stages == "ramp":
             raise ValueError("main_line (前の段の元の設定がある run) の stages='ramp' は定義していない — 'full' か 'none' を使う")
@@ -2074,12 +2693,13 @@ def ns_stage_configs(cfg_main: str, stages: str = "full", ramp=None, ramp_steps:
         _add(_ns_prestage(src, 0.5), 3000, "S1_soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
         _add(_ns_prestage(src, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
         if cfg_pre is not None:
-            # S1・S2 にライン陰解法・上限・ITJ・リミッタの基準値が無く、出力の指定は前の段の元の設定のまま (本段の extraFields が無い)
+            # S1・S2 にライン陰解法・上限・ITJ・リミッタの基準値・全場の間隔が無く、出力の指定は前の段の元の設定のまま
+            # (本段の extraFields・節点・流量・界面の診断が無い)
             out_pre = _cfg_path_get(_cfg_load(cfg_pre), ("output",))
             for tag, cfg, _, _ in pre:
                 doc = _cfg_load(cfg)
-                left = [".".join(pth) for pth in sorted(_MAIN_LINE_ONLY_PATHS - {("output",)})
-                        if _cfg_path_get(doc, pth) is not _CFG_MISSING]
+                left = [".".join(pth) for pth in sorted(pth for pth in _MAIN_LINE_ONLY_PATHS | _NS_OUTPUT_PATHS if pth[0] != "output")
+                        if _cfg_path_get(doc, pth) is not _CFG_MISSING]       # output は下で前の段の元の設定と丸ごと比べる
                 if _cfg_path_get(doc, ("output",)) != out_pre:
                     left.append("output")
                 if left:
@@ -2133,20 +2753,45 @@ def _write_main_stage_started(run_dir: Path, cfg_main: str, stages: str, done: l
     restart と res_* の削除) の後、forge を起動する直前に呼ぶ。外の見張り (case/45 の m9_watch.py など) はこのファイルが
     出てから起動する (前の段の res_3000.h5 を本段の出力と取り違えない; codex diagnose 2026-10-13)。一時ファイルに書いて
     rename する (読みかけの JSON を見せない)。中身: 時刻、本段の設定と本段の初期の場 (mesh.valueFileName) の sha256、
-    前の段の tag・step 数・設定の sha256、前の段の元の設定 (main_line の run だけ)、この時点で残っている res_*。"""
+    前の段の tag・step 数・設定の sha256、前の段の元の設定 (main_line の run だけ)、この時点で残っている res_*。
+    判定区間の識別 (plan tooling-settle-convergence-and-monitor §4.2・§5.1 #6): 本段の設定の FNV-1a 64 (`main_config.fnv`; forge_launches.jsonl・
+    limiter_ref.json・stage_manifest の本段の段の cfg_fnv と同じ定義) と、判定の基準 settle_criteria.yaml の sha256 (`settle_criteria`; ある
+    run だけ) を書く。基準の `grid.segment` (準備のときに書く) はこの通知を指す。前の段のリミッタの基準値の記録 limiter_ref.json
+    (前の段の stage_manifest の段に写し済み) は消す (本段の forge が書き直すまで前の段の値を本段のものと読ませない)。
+    リミッタの基準値の出所 (§5.1 #6b): prepare_info.json の `main_line.limiter_ref_source` (継承元の run・ファイル・sha256・値、自動・明示の別) を
+    `limiter_ref.source` に写し、本段の設定の明示の値 (`config_values`) とその値が同じか (`source_matches_config`; 自動なら明示が無いこと) を書く
+    (prepare_info・main_line の無い run は source null・一致 null)。"""
     import datetime
     import os
     import time
-    vf = str((_cfg_load(cfg_main).get("mesh") or {}).get("valueFileName", "nozzle.h5"))
+    doc_main = _cfg_load(cfg_main)
+    vf = str((doc_main.get("mesh") or {}).get("valueFileName", "nozzle.h5"))
+    SMt = _limiter_tools()
+    pi = run_dir / "prepare_info.json"
+    ml_pi = json.loads(pi.read_text()).get("main_line") if pi.is_file() else None
+    lim_src = ml_pi.get("limiter_ref_source") if isinstance(ml_pi, dict) else None
+    sp_main = doc_main.get("space") if isinstance(doc_main.get("space"), dict) else {}
+    cfg_vals = {k: sp_main[k] for k in SMt.LIMITER_REF_NAMES if k in sp_main}
+    lim_match = (None if not isinstance(lim_src, dict)
+                 else cfg_vals == ({} if lim_src.get("mode") == "auto" else (lim_src.get("values") or {})))
+    lim_old = run_dir / SMt.LIMITER_REF_FILE
+    lim_removed = lim_old.is_file()
+    lim_old.unlink(missing_ok=True)
+    crit = run_dir / _settle_presets().criteria_file_name()
     rec = {"event": "main_stage_started", "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
            "time_unix": time.time(), "stages": stages,
            "main_config": {"file": "solverConfig.yaml", "sha256": _sha256_file(run_dir / "solverConfig.yaml"),
-                           "nStepOuter": _cfg_value(cfg_main, "nStepOuter")},
+                           "nStepOuter": _cfg_value(cfg_main, "nStepOuter"), "fnv": SMt.fnv1a64(cfg_main)},
            "initial_field": {"file": vf, "sha256": _sha256_file(run_dir / vf)},
            "previous_stages": list(done),
            "prestage_config": (None if cfg_pre is None
                                else {"file": PRESTAGE_CONFIG, "sha256": _sha256_file(run_dir / PRESTAGE_CONFIG)}),
-           "res_files_present": sorted(f.name for f in run_dir.glob("res_*"))}
+           "res_files_present": sorted(f.name for f in run_dir.glob("res_*")),
+           "start_step": 0,
+           "settle_criteria": ({"file": crit.name, "sha256": _sha256_file(crit)} if crit.is_file() else None),
+           "limiter_ref": {"file": SMt.LIMITER_REF_FILE, "previous_removed": lim_removed,
+                           "note": "本段の forge が起動時に書く (cfg_fnv = main_config.fnv)。stage_manifest の本段の段の limiter_ref に写る",
+                           "source": lim_src, "config_values": cfg_vals, "source_matches_config": lim_match}}
     tmp = run_dir / (MAIN_STAGE_STARTED + ".tmp")
     tmp.write_text(json.dumps(rec, indent=1, ensure_ascii=False))
     os.replace(tmp, run_dir / MAIN_STAGE_STARTED)
@@ -2209,11 +2854,41 @@ def _stop_rule_for_main(run_dir: Path, stop_rule: bool | None) -> tuple:
     return sr, False, why
 
 
+def _stop_rule_v2_for_main(run_dir: Path, stop_rule: bool | None, cfg_main: str) -> dict | None:
+    """本段で停止規則 v2 (plan tooling-settle-convergence-and-monitor §4.4・§4.8 の 1・§5.1 #5、`stop_rule.watch_main_stage_v2`) を使うか。
+    run に settle_criteria.yaml があり、prepare_info の stop_rule が要求していて、引数 stop_rule が False でなければ v2 — 戻り: prepare_info の
+    stop_rule (本段の上限 cap は旧方式と同じ `--steps` > `evaluate.stop_rule_cap` > 200,000)。それ以外は None (旧方式の `_stop_rule_for_main`
+    が決める: settle_criteria.yaml の無い run、要求なし・stop_rule=False は今までどおり)。
+    v2 で使えない (`stop_rule.preflight_v2`: 制御のファイル STOP_REQUEST・STOPPED_AT・SNAPSHOT_REQUEST の残り (消さない)・基準の誤用や
+    未設定・出力の設定・節点の表) とき、上限 cap の記録が無いときは、明示・既定を問わず S1 の前・forge を起動する前に RuntimeError
+    (settle_criteria.yaml を置いた run は v2 を明示したとみなし、旧方式の UNAVAILABLE + fallback_steps には落とさない。v2 は Euler の参照を
+    判定に使わないので euler_ref が無くても止めない — δ_E の抽出だけを飛ばして記録する)。stop_rule=True で prepare が要求していなければ
+    ValueError (旧方式と同じ)。"""
+    from . import stop_rule as SR
+    if not SR.criteria_present(run_dir):
+        return None
+    pi = run_dir / "prepare_info.json"
+    sr = json.loads(pi.read_text()).get("stop_rule") if pi.exists() else None
+    requested = isinstance(sr, dict) and bool(sr.get("requested"))
+    if stop_rule is True and not requested:
+        raise ValueError(f"{run_dir}: run_staged_ns(stop_rule=True) だが prepare_info.json に停止規則の要求が無い "
+                         "(問題 YAML の evaluate.stop_rule を false にしないで準備する)")
+    if not requested or stop_rule is False:
+        return None
+    if sr.get("cap") is None:
+        raise RuntimeError(f"{run_dir}: {SR.CRITERIA_FILE} の run (停止規則 v2) だが prepare_info.json の stop_rule に上限 cap が無い "
+                           "— forge を起動しない")
+    pf = SR.preflight_v2(run_dir, _cfg_load(cfg_main), int(sr["cap"]))
+    if pf["problems"]:
+        raise RuntimeError(f"{run_dir}: {SR.CRITERIA_FILE} の run (停止規則 v2) だが使えない — forge を起動しない: " + "; ".join(pf["problems"]))
+    return sr
+
+
 def _stop_state_record(run_dir: Path, w: dict, sr: dict) -> dict:
     """見張り (`stop_rule.watch_main_stage`) の戻りと詳しい記録 stop_rule.json から、STOP_RULE_STATE.json に書く終了の状態を作る。"""
     from . import stop_rule as SR
     rec = json.loads((run_dir / SR.RECORD).read_text())
-    return {"status": w["status"], "stop_step": w["stop_step"], "last_output": rec.get("last_output"),
+    return {"method": "v1", "status": w["status"], "stop_step": w["stop_step"], "last_output": rec.get("last_output"),
             "forge_rc": w["forge_rc"], "run_case_rc": rec.get("run_case_rc"), "rc": int(w["rc"]),
             "cap": int(sr["cap"]), "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
             "hold": rec.get("hold"), "stop_sha256": rec.get("stop_sha256"), "note": rec.get("note"), "unavailable": rec.get("unavailable"),
@@ -2249,6 +2924,11 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     `stop_rule=False` (CLI `--no-stop-rule` の後に呼ぶとき) は要求を打ち消して今までの経路で回し、状態 NOT_USED を記録する。prepare_info.json に
     `stop_rule` の無い run (2026-10-14 より前の準備) と要求していない run (`evaluate.stop_rule: false`) は今までと同じ (STOP_RULE_STATE.json も
     書かない)。`stop_rule_watch` は見張りの時間の設定 (試験用; poll_s・settle_s ほか)。
+    **停止規則 v2** (plan tooling-settle-convergence-and-monitor §4.4・§4.8 の 1・§5.1 #5): run に settle_criteria.yaml があり停止規則を要求して
+    いれば、上の旧方式の代わりに `stop_rule.watch_main_stage_v2` で見張る (`_stop_rule_v2_for_main`; 使えなければ S1 の前に RuntimeError)。
+    本段の nStepOuter を上限 cap に書き換えるのは同じ。3 条件 (残差・流量の収支・目的の量) の保持 → STOP_REQUEST → forge の協調停止
+    (STOPPED_AT) → 止めた step で再評価 (SETTLE_VERDICT.json) → δ_E を 1 回。状態は REACHED / CENSORED / FAILED、STOP_RULE_STATE.json の
+    `method` が v2 (旧方式は v1)。`stop_rule_watch` は v2 の見張りの時間の設定 (poll_s・stop_wait_s ほか)。
     戻り: forge の終了コード (`StagedRC`、int のまま比べられる)。停止規則のときは REACHED・CENSORED・一部の UNAVAILABLE = 0、
     それ以外は非 0 — **合否は終了コードでなく状態 (`rc.stop_rule["status"]`・STOP_RULE_STATE.json) で決める**。"""
     import shutil
@@ -2260,8 +2940,13 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
     pre, cfg_main, main_want = ns_stage_configs(cfg_main, stages, ramp, ramp_steps, cfg_pre)
-    # 停止規則: 明示の要求なのに使えなければここで例外 (S1 の前・forge を起動しない)。既定の要求で使えなければ sr_why に理由 (本段で UNAVAILABLE)
-    sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
+    # 停止規則 v2 (settle_criteria.yaml の run): 使えなければここで例外 (S1 の前・forge を起動しない)。無ければ旧方式
+    sr_v2 = _stop_rule_v2_for_main(run_dir, stop_rule, cfg_main)
+    if sr_v2 is not None:
+        sr, sr_use, sr_why = sr_v2, False, None
+    else:
+        # 停止規則: 明示の要求なのに使えなければここで例外 (S1 の前・forge を起動しない)。既定の要求で使えなければ sr_why に理由 (本段で UNAVAILABLE)
+        sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
     (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     (run_dir / SR.STATE).unlink(missing_ok=True)             # 前の呼び出しの停止の状態を今回の結果と取り違えない
     sm = _stage_manifest_cls()(run_dir)
@@ -2303,7 +2988,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         return {"tag": tag, "nsteps": nsteps, "config_sha256": sha}
 
     done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
-    if sr_use:
+    if sr_use or sr_v2 is not None:
         # 停止規則の上限を本段の nStepOuter に (manifest・通知の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
         cfg_main = _cfg_set(cfg_main, {"nStepOuter": int(sr["cap"])})
         main_want = {**main_want, "nStepOuter": int(sr["cap"])}
@@ -2313,7 +2998,13 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
     _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
     state = None
-    if sr_use:
+    if sr_v2 is not None:
+        # 停止規則 v2: 協調停止で止め、止めた step で再評価する (forge を kill しない; 非常時を除く)
+        w = SR.watch_main_stage_v2(run_dir, sr, _cfg_load(cfg_main), **(stop_rule_watch or {}))
+        rc, state = w["rc"], w["state"]
+        print(f"[stop_rule v2] 本段: {w['status']} (停止の step {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
+              f"{run_dir / SR.STATE}", flush=True)
+    elif sr_use:
         w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
         rc = w["rc"]
         state = _stop_state_record(run_dir, w, sr)
@@ -2330,14 +3021,15 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         forge_rc = SR._forge_exit(run_dir)
         urec.update(forge_rc=forge_rc, run_case_rc=int(rc), finished=SR._now())
         SR.save_record(run_dir, urec)
-        state = {"status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
+        state = {"method": "v1", "status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
                  "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
                  "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": urec["finished"]}
     else:
         rc = run_forge(run_dir)
         if sr is not None and sr.get("requested"):
             # prepare は要求したが引数 stop_rule=False で使わなかった: 打ち消したことを状態として残す (受け渡しの関門は NOT_USED と見る)
-            state = {"status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
+            state = {"method": "v2" if SR.criteria_present(run_dir) else "v1",
+                     "status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
                      "cap": None, "fallback_steps": int(sr["fallback_steps"])}
     _record(cfg_main, "main")
     if state is not None:

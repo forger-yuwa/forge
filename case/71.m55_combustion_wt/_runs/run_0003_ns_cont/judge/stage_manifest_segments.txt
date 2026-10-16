@@ -1,0 +1,3 @@
+stage_manifest.json が無い: /home/ubuntu/m55_diag_0003/seg/run_0003_ns_cont/stage_manifest.json
+  -> 段階起動の run なら生成側で StageManifest を使うこと。無い run では**判定区間を人が明示する**しかない (AGENTS.md 収束確認)。
+STAGE_MANIFEST_EXIT: 2

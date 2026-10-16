@@ -267,8 +267,17 @@ else:
                       ("extra_fields の不正な名前", {"extra_fields": ["res_ro", "a, b"]}),
                       ("extra_fields の重複", {"extra_fields": ["res_ro", "res_ro"]}))):
         rejects(f"(e) {name}", lambda mod=mod, i=i: RA._main_line_spec(problem(f"e_bad{i}", with_ml({**ML, **mod}))))
-    rejects("(e) limiter_ref が無い", lambda: RA._main_line_spec(problem("e_nolr", with_ml({k: v for k, v in ML.items() if k != "limiter_ref"}))),
-            "欠け")
+    # limiter_ref の省略 = 自動 (plan tooling-settle-convergence-and-monitor §4.6、2026-10-16 に「欠けは拒否」から変更): 本段の設定に
+    # 基準値を書かない (forge が本段の開始の場で決めて limiter_ref.json に書く)。それ以外は同じ
+    src_auto = {}
+    ml_auto = RA._main_line_spec(problem("e_nolr", with_ml({k: v for k, v in ML.items() if k != "limiter_ref"})), source_out=src_auto)
+    m_auto = RA._apply_main_line(base, ml_auto)
+    check("(e) limiter_ref の省略は自動 (limiter_ref {}・由来 auto; 戻りのキーは今までと同じ)", ml_auto["limiter_ref"] == {}
+          and src_auto["limiter_ref"]["mode"] == "auto" and set(ml_auto) == set(ml))
+    check("(e) 自動の本段の設定: 基準値のキーが無く、明示の本段との差は基準値 3 つだけ",
+          all(get(m_auto, ("space", k)) is RA._CFG_MISSING for k in ("limiterRoRef", "limiterPRef", "limiterARef", "limiterRefLength"))
+          and set(RA._cfg_diff_paths(RA._cfg_load(m_auto), RA._cfg_load(main)))
+          == {("space", k) for k in ("limiterRoRef", "limiterPRef", "limiterARef")})
     rejects("(e) lowMachPrecond 2 の設定に B0", lambda: RA._apply_main_line(base.replace("lowMachPrecond: 0", "lowMachPrecond: 2"), ml),
             "lowMachPrecond")
     rejects("(e) 既にライン陰解法がある設定に B0", lambda: RA._apply_main_line(main, ml), "既に")

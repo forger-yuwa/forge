@@ -64,6 +64,16 @@ if [[ -n "$cuda_architectures" ]]; then
   cmake_args+=(-DCMAKE_CUDA_ARCHITECTURES="$cuda_architectures")
 fi
 
+# CUDA 13.x は thrust・cub を include/cccl/ に移した (procedures/cloud-aws-gpu.md「移設で必ず踏む 4 点」の 2)。
+# .cpp も vector_types.h を読むので、toolkit の include を C++ 側にも渡す (runfile 版の CUDA は /usr/include に無い)。
+cuda_root="$(cd -- "$(dirname -- "$(readlink -f "$nvcc_path")")/.." && pwd)"
+cuda_major="$("$nvcc_path" --version | sed -n 's/.*release \([0-9]*\)\..*/\1/p' | head -n 1)"
+if [[ -n "$cuda_major" && "$cuda_major" -ge 13 && -d "$cuda_root/include/cccl" ]]; then
+  echo "[build_native_wsl] CUDA $cuda_major: add $cuda_root/include/cccl"
+  cmake_args+=(-DCMAKE_CUDA_FLAGS="-I$cuda_root/include/cccl"
+               -DCMAKE_CXX_FLAGS="-I$cuda_root/include -I$cuda_root/include/cccl")
+fi
+
 cmake "${cmake_args[@]}"
 
 cmake --build "$build_dir" -j "${FORGE_BUILD_JOBS:-$(nproc)}"

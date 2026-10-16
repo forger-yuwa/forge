@@ -6,8 +6,13 @@ case/*/run_*/residual_history.csv のうち「最近 (既定 180 分) 更新さ�
 これは forge の実行方法 (直接/ラッパー/バックグラウンド) に依らずファイル状態だけで判定するので、
 「位置安定だけ見て収束と判断する」近道を構造的に防ぐ。
 
-block 時は decision=block + reason を返し、解消法 (run_case.sh 経由 or check_convergence.py で
+block 時は decision=block + reason を返し、解消法 (run_case.sh 経由 or 判定の道具で
 VERDICT を残す) と「収束/一致を主張するなら VERDICT 行を引用」を伝える。
+
+**判定の道具は 2 つ** (2026-10-16、plan tooling-settle-convergence-and-monitor §4.9 の 2・3): run_case.sh は
+settle_criteria.yaml のある run の本段を `check_settled.py`、それ以外を `check_convergence.py` で判定し、1 行目に使った道具を
+書く。このフックは CONVERGENCE_VERDICT.txt の**有無と時刻だけ**を見るので、どちらの道具の形式でも同じに扱う (中身は読まない)。
+**フックの通過は判定の記録があることの確認で、収束の合格ではない** (合否は VERDICT 行・SETTLE_VERDICT.json で見る)。
 
 **セッション別スコープ (2026-09-20)**: 共有ワークツリーで複数セッションが並行作業すると、
 このフックは case/*/run_* をファイル状態だけで見るため **他セッションの run** で
@@ -54,10 +59,12 @@ if bad:
         "forge を実行したのに収束チェック未実施/古い run があります:\n  - "
         + "\n  - ".join(sorted(bad))
         + "\n\n各 run を `solver_density_cuda/tools/run_case.sh <run_dir>` 経由で実行する"
-        "(自動で VERDICT を残す)か、`python3 solver_density_cuda/tools/check_convergence.py "
-        "<run_dir> > <run_dir>/CONVERGENCE_VERDICT.txt` を実行して VERDICT を残すこと。\n"
-        "**収束/一致/ショックレス等を主張する応答では check_convergence.py の VERDICT 行を必ず引用する。"
-        "衝撃波位置の安定や rms_ro 単独で『収束』と判断しない。**")
+        "(自動で道具を選んで VERDICT を残す)か、手で判定して `<run_dir>/CONVERGENCE_VERDICT.txt` に残すこと。道具の選択は "
+        "`python3 solver_density_cuda/tools/check_settled.py --select <run_dir>` (settle_criteria.yaml のある run の本段は "
+        "`check_settled.py <run_dir> --bind`、基準の無い run・前の段は `check_convergence.py <run_dir>`; 基準のある run で判定不能に"
+        "なっても check_convergence.py へ落とさない)。\n"
+        "**このフックの通過は判定の記録があることの確認で、収束の合格ではない。収束/一致/ショックレス等を主張する応答では"
+        "使った道具の VERDICT 行を必ず引用する。衝撃波位置の安定や rms_ro 単独で『収束』と判断しない。**")
     print(json.dumps({"decision": "block", "reason": reason}))
 else:
     print("{}")
