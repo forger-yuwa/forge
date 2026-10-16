@@ -152,7 +152,7 @@
 | 11 | **同 M3: 判定の結果のハッシュがパスの書き方と丸め差に依る** | `stop_rule.py:1309` が入力のパスや浮動小数の計算値を含む量の辞書全体をハッシュにし、`export/wall_tables.py:714` が完全一致を求める。run を相対・絶対で渡すだけで不一致になり、AWS からの写しでは丸め差で成果物の収束の判定が「未評価」になる。入力の中身・基準・起動のハッシュの照合は残し、所在のパスを量の同一性から外す。再計算した値は明示した数値の許容で比べ、各検査の合否は一致を求める。合格: 相対・絶対のパス、丸め差 (1 ulp 程度) の試験で一致、合否が違えば不一致 | O |
 | 12 | **同 m1: plan の仕様の整理と残る検証の独立** | §4.5 の既定 `wt_nozzle_v1`・§4.9 の v2 を現行 v3 に揃え、過去の仕様は履歴と明示する。#8 の「実装済み」と「float の 8 万 step の検証は未成立」「ユーザの判断待ち」を分け、残る検証 (float の長い区間、別の条件の小さいノズル) を独立の項目にする **済み (2026-10-16)**: §4.5 を v3 (履歴つき)、§4.9 の 5 に履歴の印、#8 の「判断待ち」に決着の印、残る検証を #14・#15 に分けた | O |
 | 13 | **同 証拠不足の補完** | 手元に写す: §5.1 #8 の `v3_replay`・`v3b_replay` の基準のファイルと判定の記録、float の `run_0015_ns_float_a`・`run_0016_ns_float_b` の判定に使った記録、V4・V6 の `STOPPED_AT.files` にある停止の時の入口・出口・軸の h5・xmf と壁の xmf、V4 の全出力の一覧と大きさ。置き場所は case/71 の `_runs/` **済み (2026-10-16)**: `case/71.m55_combustion_wt/_runs/settle_evidence/` (再生の記録・全ファイルの一覧・README)、手元の run の写し (`run_0015_ns_float_a`・`run_0016_ns_float_b` の判定の記録と節点・境界の出力、`run_0011`・`run_0014` の停止の時の境界の出力)。V4 (vi) の 76.4 MB は再現できず 74.1 MB に訂正 | O |
-| 14 | **float の v3 の長い区間の検証** (#8 から分けた) | float の run で v3 の停止候補 t_s から span の終わり (t_s + 8 万 step) まで、目的の量の t_s からの変化 / 許容が 1 以下か (V3 の結果 A の条件、FP64 の run_0012・0013 と同じ形)。今のデータ (run_0015・0016) は 60,000 まで。要るのは float の自由継続を 112,000 以上 (新しい run、約 30 分) — 回すかは上位に諮ってから | F |
+| 14 | **float の v3 の長い区間の検証** (#8 から分けた) | float の run で v3 の停止候補 t_s から span の終わり (t_s + 8 万 step) まで、目的の量の t_s からの変化 / 許容が 1 以下か (V3 の結果 A の条件、FP64 の run_0012・0013 と同じ形)。今のデータ (run_0015・0016) は 60,000 まで。要るのは float の自由継続を 112,000 以上 (新しい run、約 30 分) **判断: 2026-10-16 codex diagnose — 回す (§6 V3(c) に事前登録)**。run_0017 を実行中 | F |
 | 15 | **別の条件のノズルでの確認** (#8 から分けた) | case/71 以外の入口条件・寸法のノズルで v3 の停止規則が止まり、関門と判定が通るか。**部分的な実績 (2026-10-16)**: 手順書の試走 A (AWS B `~/qs_trial/forge/case/90.qs_trial_a/`、float、試走のカード A) の p0・p1 の NS が v3 で REACHED (本段 42,060・30,088 step)、関門「進む」、SETTLED、非有限 0 (`procedures/design-chain-quickstart.md` の付録)。小さいノズル (寸法が大きく違う) は未 | O |
 
 ## 6. 検証 (事前登録 2026-10-15)
@@ -180,6 +180,21 @@
   - 前提への異議の採用 (codex): run_0010 は新方式の正例として確定していない (旧の系列は ALL STEADY だが残差は NOT CONVERGED)。新しい数値流束・局所の壁の熱流を含む全条件の正解のラベルとして使わない。
 - 判定不能は合格にしない。
 
+- **V3(c) float の v3 の長い区間 (§5.1 #14、事前登録 2026-10-16、codex diagnose `notes/reviews/2026-10-16-settle-float-long-span-diagnose.md` を全件採用して確定)**:
+  - run: `case/71.m55_combustion_wt/run_0017_ns_float_free130` (AWS B)。**run_0015 と同じ入力**: 準備の design は run_0015 を準備した commit `dfad0267` の worktree (B `~/forge-cardmesh-r17`)、
+    問題 `problem_m55_p5_settle_v2.yaml` (その commit の写し)、初期場 `run_0008_ns_b0`、Euler の参照 `run_0009_euler` res_12000 (sha256 2b2d02ce…)、float のビルド `~/forge-cardmesh-float` (sha256 12033eb3…)、
+    `p5_ns.py prepare --precision float --stop-rule off --nsteps 130000`。準備の後、run_0015 と設定を比べ、差が `time.last.nStepOuter` (本段・前の段) と停止規則の有無と記録の出所だけであることを確かめる
+    (`solverConfig.yaml`・`solverConfig_prestage.yaml`・`bcondConfig.yaml`・`settle_criteria.yaml` の source 以外・`settle_nodes.txt` のコメント以外・`delta_r_initial.csv`)。違えば回さずに止める。
+  - **1 本の連続の軌道**: 途中で restart しない (同じ連続の軌道を検証するため; restart の後の系列を継がない)。停止規則なし・本段 130,000 step (約 33 分)。
+  - 判定: 基準は run_0015 の v3b の再生と同じ作り方 (`settle_evidence/replay_v3.sh` の「preset を wt_nozzle_v3 にして `settle_presets.resolve`」) で run_0017 から作り、
+    run_0015 の v3b の基準 (`settle_evidence/v3b_replay/criteria_v2_run_0015_ns_float_a.yaml`、sha256 97187ac0…) と source 以外が一致することを確かめ、基準のファイルと sha256 を記録する。
+    道具は §5.1 #10 (残差の見張りの被覆) の修正と回帰試験の**後**の版 (合格の確定は #10 の後; 完全な残差の履歴で再生)。
+    `settle_virtual_stop.py <run> --criteria <基準> --out <別の置き場> --span 80000 --ts-max 50000`。t_s は再生で求める (32,000 に固定しない)。
+  - **A**: [t_s, t_s + 80,000] の 2,000 step ごとの 41 点で、目的の量の t_s からの差 / 許容 ≤ 1、全点 SETTLED、欠けなし → この条件・観測の間隔・検証の長さについて「float の遅いドリフト・間欠の変動」を退け #14 を閉じる。
+    **B**: 差の超過か持続の違反 (NOT_SETTLED・DIVERGED) → 「観測の期間の不足だけ」を退ける。差の超過と持続の違反は分けて報告し、持続の違反だけで「目的の量を早く止めすぎた」と断定しない。
+    **未成立**: t_s > 50,000・停止候補なし・反例なしでデータ不足。合格するまで上限を延ばさない。閾値は v3 の暫定値に固定 (結果を見て緩めない)。
+  - 一般化しない: A でも局所の壁の熱流・δ_E・別の条件のノズルには広げない (codex)。
+
 ### 6.1 レビュー記録 (codex)
 
 | 段階 | 日付 | 記録 | 判定 / 指摘 (C/M/m) | 対応 / 免除理由 |
@@ -193,6 +208,7 @@
 | diagnose | 2026-10-16 | [2026-10-16-settle-migration-7-diagnose-settle-migration-7.md](../../notes/reviews/2026-10-16-settle-migration-7-diagnose-settle-migration-7.md) (ブリーフ [briefs/2026-10-16-settle-migration-7.md](../../notes/reviews/briefs/2026-10-16-settle-migration-7.md)) | 結論: V6 の前に、新しい関門が今の起動と一致しない合格の記録を拒む契約を足し、GPU 不要の 1 項目の差し替えの A/B で確かめる。C0/M5/m1 | 全件**採用** (§4.9 を書き直し、実装中の #7 へ伝えた): M1 照合 (基準・起動・STOPPED_AT・停止の step・再評価・抽出元の一致、全体の SETTLED、照合不能は上書き不可)。M2 δ_E の契約 (status ok・step・場の sha256・表の sha256・抽出の設定・参照・ω)。M3 V6 の合格を上書きなしの REACHED・全関門・表の一致・成果物のファイル・非有限 0 に限る (正しい拒否は V6 の完了でない)。M4 雛形の既定の v2 化は保留 (case/71 は明示) → **ユーザ決定で取り消し、v2 を既定に (2026-10-16、§4.9 の 5)**。M5 分岐の規則 (前の段は旧、本段は照合した基準で新、新で判定不能を旧へ落とさない) と AGENTS.md の適用範囲 (監視していない派生量は check_quasisteady)。m フックの案内文 (通過は記録の確認で収束の合格でない)。前提への異議 (V4 合格は受け渡し・成果物の成功を保証しない、REACHED と抽出の成功は別) も採用 |
 | result | 2026-10-16 | [2026-10-16-tooling-settle-convergence-and-monitor-result.md](../../notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result.md) | **未成立 (incomplete)**、NO-GO、C0/M3/m2 (証拠不足: V4・V6 の一次データが手元に無い) | 全件**採用**: M1 本段の記録がある run で照合の不一致・起動の記録の欠けを旧の判定へ切り替えず INDETERMINATE、`check_settled.py` は既定で照合 (#7c)。M2 XMF の書き込み・flush・close の失敗を完了の通知へ伝える (#7c、forge の出力)。M3 流量の判定のゼロ割 (出口 0・符号の反転) を理由つきの結果に (#7c)。m4 `recommended-settings.md`・`methods/design/overview.md` を判定の正本 2 つに揃える (#7c)。m5 V3 の参考の最大の比を 0.0872 に訂正 (済み)。証拠: run_0011・run_0014 の残差・節点・流量・停止の場・判定の記録を手元の run に写した (git の外)。修正の後に result 段をやり直す |
 | result | 2026-10-16 | [2026-10-16-tooling-settle-convergence-and-monitor-result-2.md](../../notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-2.md) | **未成立 (incomplete)**、NO-GO、C0/M3/m1 (前回の照合・出力・流量の指摘への対応と V4・V6 の SETTLED の再現は確認された; 証拠不足: v3 の再生の記録・float の run・停止の時の境界の出力) | 全件**採用** (どれも再現の手順つきの欠陥): M1 → §5.1 #9、M2 → #10、M3 → #11、m1 → #12、証拠不足 → #13。直した後に result 段をやり直す |
+| diagnose | 2026-10-16 | [2026-10-16-settle-float-long-span-diagnose.md](../../notes/reviews/2026-10-16-settle-float-long-span-diagnose.md) (ブリーフ [briefs/2026-10-16-settle-float-long-span.md](../../notes/reviews/briefs/2026-10-16-settle-float-long-span.md)) | 事前登録に実行の条件を補い、run_0017 を途中 restart なし・停止規則なし・本段 130,000 step で 1 本回す。Major 3・Minor 1 | 全件**採用**: #14 を省いて閉じない、`--span 80000 --ts-max 50000 --criteria --out` と float のバイナリ・設定・初期場の照合を事前登録 (§6 V3(c))、合格の確定は #10 の後、restart で延ばさない理由は「同じ連続の軌道を検証するため」 |
 
 ## 7. 影響範囲
 
