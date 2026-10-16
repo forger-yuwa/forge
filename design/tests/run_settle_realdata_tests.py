@@ -18,10 +18,16 @@ run は一時ディレクトリへ写して使う (h5・xmf は symlink、それ
   (#16) result 段レビュー 3 回目 M1 (notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-3.md の 1): 写しで
        「通常の CLI (`check_settled.py`、相対のパス・既定で SETTLE_VERDICT.json を上書き) → 成果物の収束 (`thermal_use`、相対・絶対の
        パス) → 受け渡しの照合 (`deltastar_loop._v2_binding`)」を続けて回し、成果物が「未評価」にならず照合も通る。古い形 (写しのまま;
-       停止の時の専用ファイルが無い V4・V6 の形 → SETTLE_VERDICT.json が上書きされたら要約の一致する代わりの記録 + 今の判定との許容つきの
-       照合) と新しい形 (写しの SETTLE_VERDICT.json を停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に置き、
-       状態の記録に相対パスと sha256 を足した — 修正後の見張りが書く形) の両方。新しい形で専用ファイルを書き換えると未評価・照合の失敗。
+       停止の時の専用ファイルが無い V4・V6 の形 → CLI が上書きの直前に停止の時の原本を同じ名前の専用ファイルへ移す) と新しい形 (写しの
+       SETTLE_VERDICT.json を停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に置き、状態の記録に相対パスと
+       sha256 を足した — 修正後の見張りが書く形) の両方。専用ファイル (新しい形・移した古い形) を書き換えると未評価・照合の失敗。
        修正前 (PRE_M1_COMMIT の stop_rule・deltastar_loop・wall_tables) は古い形で CLI の後に「未評価」・照合の失敗 (レビューの再現; 検出力)。
+  (#16 続き) result 段レビュー 4 回目 M1 (notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-4.md の 1): 写しで
+       流量の CSV の流入・流出の絶対値を各 1 kg/s 増やして通常の CLI (終了コード 0・SETTLED) → 成果物の収束は未評価・受け渡しの照合は
+       失敗 (古い形・新しい形の両方; 入力の sha256 が停止の時の記録と違う)。古い形で移行の前に SETTLE_VERDICT.json が上書きされていた写し
+       (修正前の CLI で上書き; 原本なし) は照合不能で拒否。修正前 (PRE_M1B_COMMIT = 61fc3d59 の stop_rule・deltastar_loop・wall_tables・
+       check_settled) は、入力を変えて通常の CLI を回すと古い形の成果物 (記録の形 overwritten)・受け渡し、新しい形の受け渡しが通った
+       (レビューの再現; 検出力)。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_settle_realdata_tests.py
 所要: 約 1 分。
@@ -59,6 +65,7 @@ CASE = ROOT / "case" / "71.m55_combustion_wt"
 RUNS = {"V4 run_0011_ns_v2": CASE / "run_0011_ns_v2", "V6 run_0014_chain_v2": CASE / "run_0014_chain_v2"}
 PRE_REVIEW2_COMMIT = "b64dbfdd"      # result 段レビュー 2 回目の修正の前 (検出力の確かめ)
 PRE_M1_COMMIT = "8cf2a284"           # result 段レビュー 3 回目 M1 (§5.1 #16) の修正の前 (検出力の確かめ)
+PRE_M1B_COMMIT = "61fc3d59"          # result 段レビュー 4 回目 M1 (§5.1 #16 の続き) の修正の前 (検出力の確かめ)
 SYS_PY = Path("/usr/bin/python3")    # design/.venv-opt と numpy の版が違う (1.26 と 2.x; 再計算の丸めが違う)
 TMP = Path(tempfile.mkdtemp(prefix="settle_realdata_"))
 FAIL = 0
@@ -141,15 +148,44 @@ def v3_criteria(run: Path) -> Path:
     return p
 
 
-def rejudge_cli(run: Path):
-    """通常の CLI (check_settled.py; 既定で SETTLE_VERDICT.json に書く) を run の親から相対のパスで回す。戻り (終了コード, 最後の行)。"""
+def rejudge_cli(run: Path, mod=None):
+    """通常の CLI (check_settled.py; 既定で SETTLE_VERDICT.json に書く) を run の親から相対のパスで回す。mod: 別の版の check_settled
+    (検出力の確かめ; 既定は今の作業ツリー)。戻り (終了コード, 最後の行, 出力の全文)。"""
     cwd = os.getcwd()
     try:
         os.chdir(run.parent)
-        rc, _, last = cli(check_settled, Path(run.name))
+        rc, out, last = cli(mod or check_settled, Path(run.name))
     finally:
         os.chdir(cwd)
-    return rc, last
+    return rc, last, out
+
+
+def bump_massflux(run: Path, dm: float = 1.0):
+    """流量の CSV の流入・流出の絶対値を各 dm [kg/s] 増やす (result 段レビュー 4 回目 M1 の再現: 流入は負・流出は正の符号; 実寸の
+    mdot_ と生の raw_ (= mdot/2π) の両方)。写しの実ファイルを消してから書く。"""
+    import math
+    p = run / "boundary_massflux.csv"
+    lines = p.read_text().splitlines()
+    hi = next(i for i, ln in enumerate(lines) if ln.startswith("step,"))
+    cols = lines[hi].split(",")
+    step = {}
+    for c in cols:
+        if c.startswith(("mdot_inlet", "mdot_outlet")):
+            step[c] = (-1.0 if "inlet" in c else 1.0) * dm
+        elif c.startswith(("raw_inlet", "raw_outlet")):
+            step[c] = (-1.0 if "inlet" in c else 1.0) * dm / (2.0 * math.pi)
+    out = lines[:hi + 1]
+    for ln in lines[hi + 1:]:
+        if not ln or ln.startswith("#"):
+            out.append(ln)
+            continue
+        v = ln.split(",")
+        for c, d in step.items():
+            j = cols.index(c)
+            v[j] = repr(float(v[j]) + d)
+        out.append(",".join(v))
+    p.unlink()
+    p.write_text("\n".join(out) + "\n")
 
 
 def thermal_both(run: Path, mod=None):
@@ -195,57 +231,124 @@ def with_stop_rule(mod, fn):
         sys.modules[key], EV.stop_rule = saved_m, saved_a
 
 
-def test_rejudge_chain(label: str, src: Path, old: dict | None):
-    """(#16) 通常の CLI → 成果物の収束 → 受け渡しの照合 (古い形・新しい形・検出力)。old は修正前のモジュール {sr, dl, wt} (読めなければ None)。"""
+def test_rejudge_chain(label: str, src: Path, old: dict | None, old_b: dict | None):
+    """(#16) 通常の CLI → 成果物の収束 → 受け渡しの照合 (古い形・新しい形・検出力)。old・old_b は修正前 (PRE_M1_COMMIT・PRE_M1B_COMMIT)
+    のモジュール {sr, dl, wt (, cs)} (読めなければ None)。"""
     tag = src.name
 
     def conv_ok(c, form):
         return (c["result"] == "PASS" and c["stop_rule_reeval"].get("matches") is True
                 and (c["stop_rule_reeval"].get("compare") or {}).get("form") == form)
 
-    for form in ("overwritten", "stop_file"):
-        what = "古い形 (写しのまま; 専用ファイルなし)" if form == "overwritten" else "新しい形 (停止の時の専用ファイルあり)"
-        r = copy_run(src, f"{tag}_m1_{form}")
-        rel = to_new_form(r) if form == "stop_file" else None
-        stop_bytes = (r / rel).read_bytes() if rel else None
-        ve = SR.read_state(r)["reeval"]
-        rc, last = rejudge_cli(r)
-        check(f"(#16) {label} {what}: 通常の CLI (相対のパス・既定で書く) → SETTLED・終了コード 0、SETTLE_VERDICT.json は停止の時と違うバイト"
-              + ("、専用ファイルは変わらない" if rel else ""),
-              rc == 0 and last.startswith("VERDICT: SETTLED") and SR._sha256(r / ST.VERDICT_FILE) != ve["sha256"]
-              and (rel is None or (r / rel).read_bytes() == stop_bytes), f"rc {rc} {last}")
-        c_rel, c_abs = thermal_both(r)
-        check(f"(#16) {label} {what}: CLI の後の成果物の収束 (相対・絶対のパス) → 停止規則 v2 の再評価と一致・PASS (記録の形 {form})",
-              conv_ok(c_rel, form) and conv_ok(c_abs, form), f"{str(c_rel.get('reason'))[:200]} / {str(c_abs.get('reason'))[:200]}")
+    def binding_both(r):
         cwd = os.getcwd()
         try:
             os.chdir(r.parent)
             b_rel = DL._v2_binding(Path(r.name), SR.read_state(r), ST)
         finally:
             os.chdir(cwd)
-        b = DL._v2_binding(r.resolve(), SR.read_state(r), ST)
-        check(f"(#16) {label} {what}: CLI の後の受け渡しの照合 (_v2_binding、相対・絶対のパス) が通る (記録の形 {form})",
-              all(x["pass"] and x["items"]["reeval"]["form"] == form
-                  and (form == "stop_file" or x["items"]["reeval"]["rejudge_match"]["matches"] is True) for x in (b_rel, b)),
+        return b_rel, DL._v2_binding(r.resolve(), SR.read_state(r), ST)
+
+    def prepare(form, name):
+        """写し (form "stop_file" は新しい形にする)。戻り (写し, 専用ファイルの相対パス, 状態の reeval)。"""
+        r = copy_run(src, name)
+        rel = to_new_form(r) if form == "stop_file" else SR.legacy_stop_verdict_relpath(SR.read_state(r)["reeval"])
+        return r, rel, SR.read_state(r)["reeval"]
+
+    for form in ("migrated", "stop_file"):
+        what = "古い形 (写しのまま; 専用ファイルなし)" if form == "migrated" else "新しい形 (停止の時の専用ファイルあり)"
+        r, rel, ve = prepare(form, f"{tag}_m1_{form}")
+        orig = (r / ST.VERDICT_FILE).read_bytes()
+        state_bytes = (r / SR.STATE).read_bytes()
+        stop_bytes = (r / rel).read_bytes() if form == "stop_file" else None
+        before_missing = form == "stop_file" or not (r / rel).exists()
+        rc, last, out = rejudge_cli(r)
+        if form == "stop_file":
+            ok = (r / rel).read_bytes() == stop_bytes and "移行:" not in out
+            tail = "、専用ファイルは変わらない"
+        else:
+            ok = (before_missing and "移行:" in out and (r / rel).read_bytes() == orig and SR._sha256(r / rel) == ve["sha256"]
+                  and (r / SR.STATE).read_bytes() == state_bytes)
+            tail = f"、上書きの前に停止の時の原本を {rel} へ移した (バイト同一・状態の記録の sha256)、STOP_RULE_STATE.json は変えない"
+        check(f"(#16) {label} {what}: 通常の CLI (相対のパス・既定で書く) → SETTLED・終了コード 0、SETTLE_VERDICT.json は停止の時と違うバイト"
+              + tail, rc == 0 and last.startswith("VERDICT: SETTLED") and SR._sha256(r / ST.VERDICT_FILE) != ve["sha256"] and ok,
+              f"rc {rc} {last}")
+        c_rel, c_abs = thermal_both(r)
+        check(f"(#16) {label} {what}: CLI の後の成果物の収束 (相対・絶対のパス) → 停止規則 v2 の再評価と一致・PASS (記録の形 {form})",
+              conv_ok(c_rel, form) and conv_ok(c_abs, form), f"{str(c_rel.get('reason'))[:200]} / {str(c_abs.get('reason'))[:200]}")
+        b_rel, b = binding_both(r)
+        check(f"(#16) {label} {what}: CLI の後の受け渡しの照合 (_v2_binding、相対・絶対のパス) が通る (記録の形 {form}、停止の時の原本 {rel})",
+              all(x["pass"] and x["items"]["reeval"]["form"] == form and x["items"]["reeval"]["exact"] is True and x["verdict_file"] == rel
+                  and "rejudge_match" not in x["items"]["reeval"] for x in (b_rel, b)),
               str((b_rel["problems"] + b["problems"])[:3])[:300])
-        if rel:
-            (r / rel).write_text((r / rel).read_text().replace('"verdict": "SETTLED"', '"verdict": "SETTLED" ', 1))
-            c_rel, _ = thermal_both(r)
-            b = DL._v2_binding(r, SR.read_state(r), ST)
-            check(f"(#16) {label} {what}: 専用ファイルを停止の後に書き換えた → 成果物の収束は未評価・受け渡しの照合は失敗",
-                  c_rel["result"] == "未評価" and "停止の後に書き換えられた" in (c_rel.get("reason") or "") and not b["pass"],
-                  f"{str(c_rel.get('reason'))[:200]} / {b['problems'][:1]}")
-    if old is None:
-        return
-    r = copy_run(src, f"{tag}_m1_detect")
-    sr_o, dl_o, wt_o = old["sr"], old["dl"], old["wt"]
-    pre = with_stop_rule(sr_o, lambda: (thermal_both(r, wt_o)[0], dl_o._v2_binding(r, sr_o.read_state(r), ST)))
-    rc, last = rejudge_cli(r)
-    post = with_stop_rule(sr_o, lambda: (thermal_both(r, wt_o)[0], dl_o._v2_binding(r, sr_o.read_state(r), ST)))
-    check(f"(#16) {label}: 検出力 — 修正前は CLI の前は成果物の収束 PASS・照合が通り、通常の CLI (終了コード {rc}) の後は成果物の収束"
-          "「未評価」・受け渡しの照合が失敗 (レビューの再現)",
-          rc == 0 and pre[0]["result"] == "PASS" and pre[1]["pass"] and post[0]["result"] == "未評価" and not post[1]["pass"],
-          f"前 {pre[0]['result']}・{pre[1]['pass']} / 後 {post[0]['result']}・{str(post[1]['problems'][:1])[:200]}")
+        (r / rel).write_text((r / rel).read_text().replace('"verdict": "SETTLED"', '"verdict": "SETTLED" ', 1))
+        c_rel, _ = thermal_both(r)
+        b = DL._v2_binding(r, SR.read_state(r), ST)
+        key = "停止の後に書き換えられた" if form == "stop_file" else "停止の時の原本でない"
+        check(f"(#16) {label} {what}: 専用ファイル{'' if form == 'stop_file' else ' (移したもの)'}を停止の後に書き換えた → 成果物の収束は未評価・"
+              f"受け渡しの照合は失敗 (理由に「{key}」)",
+              c_rel["result"] == "未評価" and key in (c_rel.get("reason") or "") and not b["pass"] and any(key in p_ for p_ in b["problems"]),
+              f"{str(c_rel.get('reason'))[:200]} / {b['problems'][:1]}")
+
+    # (4 回目 M1) 入力を変える → 通常の CLI → 成果物・受け渡しが拒否される (古い形・新しい形)
+    for form in ("migrated", "stop_file"):
+        what = "古い形" if form == "migrated" else "新しい形"
+        r, rel, ve = prepare(form, f"{tag}_m1b_input_{form}")
+        orig = (r / ST.VERDICT_FILE).read_bytes()
+        bump_massflux(r)
+        rc, last, out = rejudge_cli(r)
+        c_rel, c_abs = thermal_both(r)
+        b_rel, b = binding_both(r)
+        key_c, key_b = "boundary_massflux.csv の中身 (sha256) が記録と違う", "入力が今の run と違う"
+        check(f"(#16 続き) {label} {what}: 流量の CSV の流入・流出を各 +1 kg/s → 通常の CLI (終了コード {rc}・{last[:24]}) → 成果物の収束"
+              "は未評価 (相対・絶対)、受け渡しの照合は失敗 (相対・絶対) — 入力の sha256 が停止の時と違う"
+              + ("; 原本は移した (拒否は入力の照合による)" if form == "migrated" else ""),
+              rc == 0 and last.startswith("VERDICT: SETTLED")
+              and all(c["result"] == "未評価" and key_c in (c.get("reason") or "") for c in (c_rel, c_abs))
+              and all(not x["pass"] and any(key_b in p_ for p_ in x["problems"]) and x["items"]["reeval"]["form"] == form
+                      for x in (b_rel, b))
+              and (form == "stop_file" or (r / rel).read_bytes() == orig),
+              f"{str(c_rel.get('reason'))[:200]} / {str(b['problems'][:1])[:200]}")
+
+    # (4 回目 M1) 古い形で移行の前に SETTLE_VERDICT.json が上書きされていた (修正前の CLI で上書き; 原本なし) → 照合不能で拒否
+    if old_b is not None:
+        r, rel, ve = prepare("migrated", f"{tag}_m1b_lost")
+        rejudge_cli(r, old_b["cs"])
+        rc, last, out = rejudge_cli(r)
+        c_rel, c_abs = thermal_both(r)
+        b_rel, b = binding_both(r)
+        key = "原本が失われた"
+        check(f"(#16 続き) {label} 古い形: 移行の前に SETTLE_VERDICT.json が上書きされていた (修正前 {PRE_M1B_COMMIT} の CLI) → 今の CLI は"
+              f"移行しない、成果物の収束は未評価・受け渡しの照合は失敗 (理由に「{key}」)",
+              rc == 0 and "移行:" not in out and not (r / rel).exists()
+              and all(c["result"] == "未評価" and key in (c.get("reason") or "") for c in (c_rel, c_abs))
+              and all(not x["pass"] and any(key in p_ for p_ in x["problems"]) for x in (b_rel, b)),
+              f"{str(c_rel.get('reason'))[:200]} / {str(b['problems'][:1])[:200]}")
+
+    if old is not None:
+        r = copy_run(src, f"{tag}_m1_detect")
+        sr_o, dl_o, wt_o = old["sr"], old["dl"], old["wt"]
+        pre = with_stop_rule(sr_o, lambda: (thermal_both(r, wt_o)[0], dl_o._v2_binding(r, sr_o.read_state(r), ST)))
+        rc, last, _ = rejudge_cli(r)
+        post = with_stop_rule(sr_o, lambda: (thermal_both(r, wt_o)[0], dl_o._v2_binding(r, sr_o.read_state(r), ST)))
+        check(f"(#16) {label}: 検出力 — 修正前は CLI の前は成果物の収束 PASS・照合が通り、通常の CLI (終了コード {rc}) の後は成果物の収束"
+              "「未評価」・受け渡しの照合が失敗 (レビューの再現)",
+              rc == 0 and pre[0]["result"] == "PASS" and pre[1]["pass"] and post[0]["result"] == "未評価" and not post[1]["pass"],
+              f"前 {pre[0]['result']}・{pre[1]['pass']} / 後 {post[0]['result']}・{str(post[1]['problems'][:1])[:200]}")
+    if old_b is not None:
+        sr_b, dl_b, wt_b, cs_b = old_b["sr"], old_b["dl"], old_b["wt"], old_b["cs"]
+        res = {}
+        for form in ("migrated", "stop_file"):
+            r, _, _ = prepare(form, f"{tag}_m1b_detect_{form}")
+            bump_massflux(r)
+            rc, last, _ = rejudge_cli(r, cs_b)
+            res[form] = (rc, with_stop_rule(sr_b, lambda: (thermal_both(r, wt_b)[0], dl_b._v2_binding(r, sr_b.read_state(r), ST))))
+        (rc_l, (c_l, b_l)), (rc_n, (c_n, b_n)) = res["migrated"], res["stop_file"]
+        check(f"(#16 続き) {label}: 検出力 — 修正前 ({PRE_M1B_COMMIT}) は流量の CSV を変えて通常の CLI (その版) を回すと、古い形で成果物の収束 "
+              "PASS (記録の形 overwritten)・受け渡しの照合が通り、新しい形でも受け渡しの照合が通った (レビューの再現; 今は両方とも拒否)",
+              rc_l == 0 and rc_n == 0 and c_l["result"] == "PASS" and (c_l["stop_rule_reeval"].get("compare") or {}).get("form") == "overwritten"
+              and b_l["pass"] and b_n["pass"],
+              f"古い形 {c_l['result']}・{b_l['pass']} / 新しい形 {c_n['result']}・{b_n['pass']}")
 
 
 def main() -> int:
@@ -272,6 +375,19 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         old_m1 = None
         check(f"修正前 ({PRE_M1_COMMIT}) のモジュールを git から読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
+    try:
+        old_m1b = {"sr": load_at(PRE_M1B_COMMIT, "design/forge_design/evaluate/stop_rule.py", "forge_design.evaluate._stop_rule_pre_m1b",
+                                 package="forge_design.evaluate"),
+                   "dl": load_at(PRE_M1B_COMMIT, "design/forge_design/feedback/deltastar_loop.py",
+                                 "forge_design.feedback._deltastar_loop_pre_m1b", package="forge_design.feedback"),
+                   "wt": load_at(PRE_M1B_COMMIT, "design/forge_design/export/wall_tables.py", "forge_design.export._wall_tables_pre_m1b",
+                                 package="forge_design.export"),
+                   "cs": load_at(PRE_M1B_COMMIT, "solver_density_cuda/tools/check_settled.py", "check_settled_pre_m1b")}
+        for k_ in ("REPO", "TOOLS"):          # 成果物の道具 (check_settled.py --bind --no-write) は今の作業ツリーのもの (書かないので移行は無関係)
+            setattr(old_m1b["wt"], k_, getattr(WT, k_))
+    except Exception as e:  # noqa: BLE001
+        old_m1b = None
+        check(f"修正前 ({PRE_M1B_COMMIT}) のモジュールを git から読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
     for label, src in RUNS.items():
         if not (src / ST.CRITERIA_FILE).is_file() or not (src / SR.STATE).is_file():
             SKIPPED.append(f"{label} ({src.relative_to(ROOT)} が無い)")
@@ -362,7 +478,7 @@ def main() -> int:
         else:
             SKIPPED.append(f"(#11) {label}: {SYS_PY} が無い (別の numpy の照合)")
         # ---------------------------------------------------------------- #16
-        test_rejudge_chain(label, src, old_m1)
+        test_rejudge_chain(label, src, old_m1, old_m1b)
     if SKIPPED:
         print("飛ばした項目: " + "; ".join(SKIPPED), flush=True)
     print(f"\n{NCHK - FAIL}/{NCHK} ok — {'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (一時ディレクトリ {TMP})", flush=True)

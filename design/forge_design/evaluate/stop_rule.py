@@ -1400,17 +1400,22 @@ def _recorded_input(run_dir: Path, rec_run_dir, path) -> Path | None:
 # 規則:
 #   - 停止規則 v2 は停止の時の再評価を、変更されない専用のファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に書き、同じバイトを
 #     SETTLE_VERDICT.json にも置く (`write_stop_verdict`)。STOP_RULE_STATE.json の reeval に相対パス stop_file と sha256 stop_file_sha256。
-#   - SETTLE_VERDICT.json は「最新の判定」(通常の CLI が上書きする) で、停止の時の照合には使わない。専用ファイルは停止規則だけが書く
-#     (check_settled.py は stop_rule_v2/ の下に書かない)。
+#   - SETTLE_VERDICT.json は「最新の判定」(通常の CLI が上書きする) で、停止の時の照合には使わない。専用ファイルは停止規則が書く
+#     (check_settled.py は判定の結果を stop_rule_v2/ の下に書かない; 下の古い run の移行で停止の時の原本を写すことだけをする)。
 #   - 照合 (`stop_verdict_record`) は専用ファイルを読み、ファイルの sha256・量の sha256・verdict・end_step の記録との一致を要する。
 #     専用ファイルが無い・書き換えられていれば記録として使わない (新しい run は SETTLE_VERDICT.json へ落とさない)。
-#   - 専用ファイルの無い古い run (STOP_RULE_STATE の reeval に stop_file が無い; V4・V6 ほか): SETTLE_VERDICT.json の sha256 が reeval の
-#     記録と一致すれば停止の時の記録として読む (今までどおり)。違えば「通常の CLI で上書きされた」(停止の時の中身は残っていない) として、
-#     上書き後の判定を代わりの記録にする — 停止の時の要約 (`_STOP_SUMMARY_KEYS`: 格子の終端・end_step・停止の観測・verdict・量ごとの
-#     verdict・理由の分類・暫定) との一致を要し、中身は `match_reeval` で今の判定と許容つきで照合する (入力の中身・基準・起動・各検査の
-#     合否は一致)。要約が違えば記録として使わない (照合は不一致 = 今どおり未評価)。代わりの記録は量の値を停止の時と照合できないので
-#     `exact` False で返し、読む側は今の判定との照合を省かない。
-_STOP_SUMMARY_KEYS = ("step", "end_step", "stop_step", "verdict", "by_quantity", "categories", "provisional")
+#   - 専用ファイルの無い古い run (STOP_RULE_STATE の reeval に stop_file が無い; V4・V6 ほか; result 段レビュー 4 回目 M1 で直した):
+#     停止の時の原本は SETTLE_VERDICT.json だけにあり、その sha256 が reeval の sha256 に残っている。
+#     * 移行: 通常の CLI (`check_settled.py`) は SETTLE_VERDICT.json を上書きする**直前に**、その sha256 が reeval の sha256 と一致すれば
+#       原本を専用ファイル (新しい形と同じ名前 `stop_verdict_relpath(reeval の end_step)`) へ写す (STOP_RULE_STATE は書き換えない)。
+#     * 照合: 専用ファイルがあればその sha256 が reeval の sha256 と一致するときだけ停止の時の記録 (form "migrated"、exact)。専用ファイルが
+#       無ければ SETTLE_VERDICT.json の sha256 が一致するときだけ (form "settle_verdict"、まだ移行していない原本、exact)。
+#     * どちらも無い (専用ファイルが無く SETTLE_VERDICT.json も記録と違う = 移行の前に上書きされて原本が失われた)、専用ファイルが記録と
+#       違う → 照合不能として拒否 (成果物は未評価、関門は止める)。
+#     以前 (61fc3d59) は原本が失われたとき上書き後の判定を要約 (判定・step・量ごとの合否) の一致で代わりの記録にし (form "overwritten")、
+#     読む側がそれを今の入力から作り直した判定と比べた。これは変更後の入力を変更後の記録と比べるので、停止の時の入力の sha256・量の値
+#     との照合が失われ、流量の CSV を書き換えて通常の CLI を回すだけで照合が通った (result 段レビュー 4 回目 M1、V4 の写しで再現)。
+#     代わりの記録の形は廃止した (停止の時の入力と照合できない記録は使わない)。
 
 
 def stop_verdict_relpath(step) -> str:
@@ -1470,15 +1475,25 @@ def _exact_record(v: dict, ve: dict, name: str) -> str | None:
     return None
 
 
+def legacy_stop_verdict_relpath(ve) -> str | None:
+    """古い形の run (reeval に stop_file が無い) の停止の時の原本の移行先 (`stop_verdict_relpath(reeval の end_step)`)。end_step が
+    整数でなければ None (移行も照合もできない)。check_settled.py の移行 (`_migrate_legacy_stop_verdict`) と同じ名前の規則。"""
+    es = ve.get("end_step") if isinstance(ve, dict) else None
+    if isinstance(es, bool) or not isinstance(es, int):
+        return None
+    return stop_verdict_relpath(es)
+
+
 def stop_verdict_record(run_dir, ve) -> dict:
     """停止規則 v2 の停止の時の再評価の記録 (STOP_RULE_STATE.json の reeval = ve) に結び付く判定の中身を探す (§5.1 #16; 規則は上の注記)。
     戻り {record (中身の dict か None), form, file (run からの相対), exact, why}:
-      form "stop_file": 専用ファイル (新しい run)。ファイルの sha256 = stop_file_sha256 と `_exact_record` を要す。exact True。
-      form "settle_verdict": 専用ファイルの無い古い run で、SETTLE_VERDICT.json の sha256 が reeval の sha256 と一致 (停止の時のまま)。
-        `_exact_record` も要す。exact True。
-      form "overwritten": 専用ファイルの無い古い run で、SETTLE_VERDICT.json が停止の後に書き換えられた (通常の CLI の上書き)。停止の時の
-        要約 (`_STOP_SUMMARY_KEYS`) と一致すれば代わりの記録 (exact False: 読む側は今の判定と `match_reeval` で照合する)、違えば None。
-    記録が無い・読めない・結び付かないときは record None と理由 (例外にしない)。"""
+      form "stop_file": 専用ファイル (新しい run)。ファイルの sha256 = stop_file_sha256 と `_exact_record` を要す。
+      form "migrated": 専用ファイルの無い古い run を通常の CLI が移行した専用ファイル (`legacy_stop_verdict_relpath`)。ファイルの
+        sha256 = reeval の sha256 (停止の時の SETTLE_VERDICT.json) と `_exact_record` を要す。
+      form "settle_verdict": 専用ファイルの無い古い run でまだ移行していない原本 (SETTLE_VERDICT.json の sha256 = reeval の sha256)。
+        `_exact_record` も要す。
+    record があれば exact は常に True (停止の時の記録そのもの)。原本が失われた (移行の前に SETTLE_VERDICT.json が上書きされた)・
+    専用ファイルが記録と違う・記録が無い・読めない・結び付かないときは record None と理由 (例外にしない; 照合不能として拒否)。"""
     S = _settle()
     run_dir = Path(run_dir)
     out = {"record": None, "form": None, "file": None, "exact": False, "why": None}
@@ -1510,35 +1525,54 @@ def stop_verdict_record(run_dir, ve) -> dict:
             return out
         out.update(record=v, exact=True, why=f"停止の時の再評価の専用ファイル {rel} (ファイルと量の sha256 が {STATE} の記録と一致)")
         return out
-    # 専用ファイルの無い古い run (後方互換)
+    # 専用ファイルの無い古い run: 停止の時の原本は reeval の sha256 (停止の時の SETTLE_VERDICT.json) で確かめる。通常の CLI が移行した
+    # 専用ファイルを先に、無ければ移行していない SETTLE_VERDICT.json を読む。どちらも原本でなければ照合不能 (代わりの記録は作らない)
+    want = ve.get("sha256")
+    if not isinstance(want, str) or not want:
+        out["why"] = f"{STATE} の再評価の記録に停止の時の SETTLE_VERDICT.json の sha256 が無い (古い形の run; 原本を確かめられない)"
+        return out
+    rel = legacy_stop_verdict_relpath(ve)
+    pm = run_dir / rel if rel is not None else None
+    if pm is not None and pm.is_file():
+        out.update(form="migrated", file=rel)
+        sha = _sha256(pm)
+        if sha != want:
+            out["why"] = (f"古い形の run の移行した専用ファイル {rel} の sha256 {sha[:16]}… が {STATE} の記録 (停止の時の "
+                          f"{S.VERDICT_FILE}) {want[:16]}… と違う (停止の時の原本でない; 照合不能)")
+            return out
+        v, err = _read_verdict_json(pm)
+        if v is None:
+            out["why"] = f"{rel} を読めない ({err})"
+            return out
+        bad = _exact_record(v, ve, rel)
+        if bad:
+            out["why"] = bad
+            return out
+        out.update(record=v, exact=True, why=(f"古い形の run の停止の時の原本を移した専用ファイル {rel} (ファイルの sha256 が {STATE} の"
+                                              f"記録の停止の時の {S.VERDICT_FILE} と一致、量の sha256 も一致)"))
+        return out
     out.update(form="settle_verdict", file=S.VERDICT_FILE)
     p = run_dir / S.VERDICT_FILE
+    if not p.is_file():
+        out["why"] = (f"停止の時の原本が無い: 古い形の run で、移行した専用ファイル {rel or '(終端が分からず名前を決められない)'} も "
+                      f"{S.VERDICT_FILE} も無い (照合不能)")
+        return out
+    sha = _sha256(p)
+    if sha != want:
+        out["why"] = (f"停止の時の原本が失われた: 古い形の run で、移行した専用ファイル {rel or '(終端が分からず名前を決められない)'} が無く、"
+                      f"{S.VERDICT_FILE} の sha256 {sha[:16]}… も {STATE} の記録 {want[:16]}… と違う (移行の前に上書きされた; 停止の時の"
+                      "入力・量の値と照合できないので照合不能。上書き後の判定を代わりの記録にはしない — result 段レビュー 4 回目 M1)")
+        return out
     v, err = _read_verdict_json(p)
     if v is None:
         out["why"] = f"{S.VERDICT_FILE} を読めない ({err}; 停止の時の専用ファイルの無い古い形の run)"
         return out
-    if ve.get("sha256") is not None and _sha256(p) == ve.get("sha256"):
-        bad = _exact_record(v, ve, S.VERDICT_FILE)
-        if bad:
-            out["why"] = bad
-            return out
-        out.update(record=v, exact=True, why=(f"{S.VERDICT_FILE} が停止の時のまま (古い形の run; ファイルと量の sha256 が {STATE} の"
-                                              "記録と一致)"))
+    bad = _exact_record(v, ve, S.VERDICT_FILE)
+    if bad:
+        out["why"] = bad
         return out
-    out["form"] = "overwritten"
-    head = (f"{S.VERDICT_FILE} のファイルの sha256 が {STATE} の再評価の記録と違う — 通常の CLI (check_settled.py) で上書きされた "
-            "(停止の時の専用ファイルの無い古い形の run; 停止の時の量の値は残っていない)")
-    try:
-        summ = judge_summary(v)
-    except (KeyError, TypeError, AttributeError) as e:
-        out["why"] = f"{head}; 上書き後の判定の要約を作れない ({type(e).__name__}: {e})"
-        return out
-    diff = [f"{k_}: 上書き後 {summ.get(k_)!r} と停止の時 {ve.get(k_)!r}" for k_ in _STOP_SUMMARY_KEYS if summ.get(k_) != ve.get(k_)]
-    if diff:
-        out["why"] = f"{head}; 上書き後の判定の要約が停止の時の記録と違う ({'; '.join(diff)[:400]})"
-        return out
-    out.update(record=v, why=(f"{head}; 上書き後の判定の要約 ({'・'.join(_STOP_SUMMARY_KEYS)}) が停止の時の記録と一致 — "
-                              "代わりの記録として、中身は今の判定と許容つきで照合する"))
+    out.update(record=v, exact=True, why=(f"{S.VERDICT_FILE} が停止の時のまま (古い形の run でまだ移行していない; ファイルと量の sha256 が "
+                                          f"{STATE} の記録と一致)"))
     return out
 
 
@@ -1551,8 +1585,9 @@ def reeval_record(run_dir, ve: dict) -> tuple:
 
 def match_reeval(run_dir, res: dict | None, ve: dict, *, rtol: float = REEVAL_RTOL, atol: float = REEVAL_ATOL) -> dict:
     """再計算した判定 `res` (`settle.judge` の結果; `check_settled.py --json`) が停止規則 v2 の再評価の記録 (ve と、それに結び付く
-    停止の時の記録 — 専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`、古い run は `stop_verdict_record` の後方互換) と
-    同じ判定かを照合する (§5.1 #11、result 段レビュー 2 回目 M3; §5.1 #16、3 回目 M1; 規則は上の注記)。
+    停止の時の記録 — 専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`、古い run は移行した専用ファイルか移行していない原本;
+    `stop_verdict_record`) と同じ判定かを照合する (§5.1 #11、result 段レビュー 2 回目 M3; §5.1 #16、3 回目・4 回目 M1; 規則は上の注記)。
+    記録は常に停止の時の原本なので、今の入力の中身 (sha256) が停止の時と違えば不一致になる。
     戻り {matches, problems (先頭 20), n_problems, record (結び付きの理由), form・record_file・exact (記録の形; `stop_verdict_record`),
     rtol, atol}。記録が読めない・結び付かないときは matches False と理由 (旧い記録でも理由つきで返し、例外にしない)。"""
     run_dir = Path(run_dir)
@@ -1576,19 +1611,29 @@ def match_reeval(run_dir, res: dict | None, ve: dict, *, rtol: float = REEVAL_RT
         probs.append(f"基準の sha256: 再計算 {str(cs_a)[:16]}… と記録 {str(cs_b)[:16]}…")
     if res.get("launch") != rec.get("launch"):
         probs.append("起動の識別 (forge_launches.jsonl の最後の行・起動の数・RUN_PROVENANCE.txt の sha256) が記録と違う")
-    files = rec.get("files")
-    if not isinstance(files, list) or not files:
-        probs.append("記録に使ったファイルの一覧 (files) が無い (入力の中身を照合できない)")
-    else:
-        for f in files:
-            loc = _recorded_input(run_dir, rec.get("run_dir"), (f or {}).get("path") if isinstance(f, dict) else None)
-            if loc is None or not loc.is_file():
-                probs.append(f"記録の入力 {(f or {}).get('path') if isinstance(f, dict) else f!r} が今の run に無い")
-            elif _sha256(loc) != f.get("sha256"):
-                probs.append(f"入力 {loc.name} の中身 (sha256) が記録と違う")
+    probs += recorded_input_problems(run_dir, rec)
     probs += quantities_mismatch(res.get("quantities") or [], rec.get("quantities") or [], rtol=rtol, atol=atol)
     out.update(matches=not probs, problems=probs[:20], n_problems=len(probs))
     return out
+
+
+def recorded_input_problems(run_dir, rec: dict) -> list:
+    """判定の記録 rec (SETTLE_VERDICT の形) の使ったファイルの一覧 (files の path・sha256) が今の run のファイルと同じ中身かの食い違いの
+    一覧 (空 = 同じ)。所在は `_recorded_input` で今の run に引き直す。`match_reeval` (成果物) と受け渡しの照合
+    (`deltastar_loop._v2_binding`; §5.1 #16、result 段レビュー 4 回目 M1: 停止の時の記録の中身だけを照合し、今の入力が停止の時と同じかを
+    見ていなかった) が使う。"""
+    run_dir = Path(run_dir)
+    files = rec.get("files") if isinstance(rec, dict) else None
+    if not isinstance(files, list) or not files:
+        return ["記録に使ったファイルの一覧 (files) が無い (入力の中身を照合できない)"]
+    probs = []
+    for f in files:
+        loc = _recorded_input(run_dir, rec.get("run_dir"), (f or {}).get("path") if isinstance(f, dict) else None)
+        if loc is None or not loc.is_file():
+            probs.append(f"記録の入力 {(f or {}).get('path') if isinstance(f, dict) else f!r} が今の run に無い")
+        elif _sha256(loc) != f.get("sha256"):
+            probs.append(f"入力 {loc.name} の中身 (sha256) が記録と違う")
+    return probs
 
 
 def judge_summary(result: dict) -> dict:

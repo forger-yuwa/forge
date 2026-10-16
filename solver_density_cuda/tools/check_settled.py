@@ -20,7 +20,13 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   これは**最新の判定** (呼ぶたびに上書きする)。停止規則 v2 の停止の時の再評価は、停止規則が変更されない専用ファイル
   `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に書き、受け渡しの関門・成果物はそちらと照合する (plan §5.1 #16、result 段レビュー
   3 回目 M1: 以前は停止の時の記録が SETTLE_VERDICT.json だけにあり、この道具で判定し直すと照合が失敗した)。この道具は
-  `stop_rule_v2/` の下に書かない (`--out` で指すと引数の誤り、終了コード 3)。
+  判定の結果を `stop_rule_v2/` の下に書かない (`--out` で指すと引数の誤り、終了コード 3)。
+  **古い形の run の移行** (§5.1 #16、result 段レビュー 4 回目 M1): 専用ファイルの無い古い形の run (STOP_RULE_STATE.json の
+  reeval に stop_file が無い) では停止の時の原本が SETTLE_VERDICT.json だけにある。この道具は SETTLE_VERDICT.json を上書きする
+  **直前に**、その sha256 が reeval の sha256 と一致すれば原本をそのまま専用ファイル (新しい形と同じ名前
+  `stop_rule_v2/SETTLE_VERDICT_stop_<reeval の end_step>.json`) へ写す (STOP_RULE_STATE は書き換えない; 読む側は reeval の sha256 で
+  原本と確かめる)。写せない (書き込みの失敗・同じ名前に違う中身がある) ときは原本を失わないよう SETTLE_VERDICT.json を上書きしない
+  (判定と終了コードはそのまま; その旨を出す)。`--no-write`・別の `--out` は上書きしないので移行もしない。
   閾値に `provisional: true` があれば VERDICT の行に「閾値は暫定 (plan §6 V3 で決める)」と出す。
 
 使い方:
@@ -48,7 +54,10 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -56,7 +65,66 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import settle  # noqa: E402
 
-STOP_RULE_V2_DIR = "stop_rule_v2"   # 停止規則 v2 の置き場 (= design/forge_design/evaluate/stop_rule.py の V2_DIR; 停止の時の再評価の専用ファイル)
+# 停止規則 v2 の名前 (design/forge_design/evaluate/stop_rule.py と同じ; この道具は design のパッケージを読まないので写して持つ。
+# 一致は design/tests/run_settle_migration_tests.py の (g) で確かめる)
+STOP_RULE_V2_DIR = "stop_rule_v2"                        # = stop_rule.V2_DIR (停止の時の再評価の専用ファイルの置き場)
+STOP_RULE_STATE = "STOP_RULE_STATE.json"                 # = stop_rule.STATE
+STOP_VERDICT_NAME = "SETTLE_VERDICT_stop_{step}.json"    # = stop_rule.V2_STOP_VERDICT
+
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _migrate_legacy_stop_verdict(run: Path) -> tuple:
+    """古い形の run (STOP_RULE_STATE.json の method v2・reeval に stop_file が無い) の停止の時の原本 SETTLE_VERDICT.json を、上書きの
+    前に専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<reeval の end_step>.json` へ写す (§5.1 #16、result 段レビュー 4 回目 M1;
+    規則は docstring)。STOP_RULE_STATE.json は書き換えない (読む側 `stop_rule.stop_verdict_record` は reeval の sha256 で原本と確かめる)。
+    戻り (上書きしてよいか, 出す文 か None)。上書きしてはいけないのは、SETTLE_VERDICT.json が原本なのに写せなかったときだけ
+    (書き込みの失敗・同じ名前に違う中身がある)。原本でない (既に上書きされた・新しい形・停止規則の記録が無い) ときは移行せず上書きしてよい。"""
+    p_state = run / STOP_RULE_STATE
+    if not p_state.is_file():
+        return True, None
+    try:
+        st = json.loads(p_state.read_text())
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return True, f"注意: {STOP_RULE_STATE} を読めない ({e}) — 停止の時の記録の移行を判断できない (移行しない)"
+    ve = st.get("reeval") if isinstance(st, dict) and st.get("method") == "v2" else None
+    if not isinstance(ve, dict) or not ve or ve.get("error") or "stop_file" in ve:
+        return True, None                                 # 停止規則 v2 の記録が無い・再評価の失敗・新しい形 (専用ファイルは停止規則が書いた)
+    want, es = ve.get("sha256"), ve.get("end_step")
+    p_v = run / settle.VERDICT_FILE
+    if not isinstance(want, str) or not want or isinstance(es, bool) or not isinstance(es, int) or not p_v.is_file():
+        return True, None
+    if _sha256(p_v) != want:
+        return True, (f"注意: 古い形の run で {settle.VERDICT_FILE} は停止の時の原本でない (sha256 が {STOP_RULE_STATE} の記録と違う; "
+                      "既に上書きされた) — 移行しない")
+    rel = f"{STOP_RULE_V2_DIR}/{STOP_VERDICT_NAME.format(step=es)}"
+    dst = run / rel
+    if dst.exists():
+        if dst.is_file() and _sha256(dst) == want:
+            return True, None                             # 移行済み (同じ原本)
+        return False, (f"停止の時の原本を移せない: {rel} が既にあり中身が原本 ({settle.VERDICT_FILE}、{STOP_RULE_STATE} の記録の sha256) と"
+                       f"違う — 原本を失わないよう {settle.VERDICT_FILE} を上書きしない")
+    tmp = dst.with_name(dst.name + ".tmp")
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p_v, tmp)
+        if _sha256(tmp) != want:
+            raise OSError("写した中身の sha256 が原本と違う")
+        os.replace(tmp, dst)
+    except OSError as e:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False, f"停止の時の原本を {rel} へ移せない ({e}) — 原本を失わないよう {settle.VERDICT_FILE} を上書きしない"
+    return True, (f"移行: 古い形の run の停止の時の再評価 ({settle.VERDICT_FILE}、sha256 {want[:16]}…) を上書きの前に {rel} へ写した "
+                  f"({STOP_RULE_STATE} は変えない)")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -192,8 +260,16 @@ def main(argv=None) -> int:
     if sc is not None:
         print(f"最初に SETTLED になった step (--scan {a.scan}): {sc['first_settled']}")
     if not a.no_write:
-        p = settle.write_verdict(run, res, data, a.out)
-        print(f"結果: {p}")
+        # 古い形の run は上書きの直前に停止の時の原本を専用ファイルへ移す (§5.1 #16、result 段レビュー 4 回目 M1)
+        target = Path(a.out) if a.out else run / settle.VERDICT_FILE
+        ok, msg = (_migrate_legacy_stop_verdict(run) if target.resolve() == (run / settle.VERDICT_FILE).resolve() else (True, None))
+        if msg:
+            print(msg)
+        if ok:
+            p = settle.write_verdict(run, res, data, a.out)
+            print(f"結果: {p}")
+        else:
+            print(f"結果: 書かない ({target}; 停止の時の原本を残す)")
     if a.json:
         print(json.dumps(settle._jsonable(res), ensure_ascii=False, indent=1))
     print(settle.verdict_line(res) + (" (本段の起動との照合を外した: --no-bind)" if a.no_bind else ""))

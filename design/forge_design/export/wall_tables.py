@@ -677,11 +677,13 @@ def _settled_convergence(run_dir: Path, st: int, last_step: int, sel: dict, pyth
     あれば、今の判定がその記録と同じ判定であることも確かめ (`stop_rule.match_reeval`: 入力の中身・基準・起動は一致、各検査の合否は一致、
     再計算した値は明示した数値の許容、所在のパスは比べない; §5.1 #11)、食い違えば未評価 (記録どうしが合わない場を熱設計に使わない)。
     以前は量の辞書全体の sha256 の完全一致を求めたので、run を相対・絶対・別の機械のパスで渡すだけ・numpy の版の丸めの差だけで未評価に
-    なった (result 段レビュー 2 回目 M3)。停止の時の記録は停止規則だけが書く専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`
+    なった (result 段レビュー 2 回目 M3)。停止の時の記録は停止規則が書く専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`
     (`stop_rule.stop_verdict_record`; §5.1 #16、3 回目 M1) で、通常の CLI が上書きする SETTLE_VERDICT.json ではない — 以前は
     SETTLE_VERDICT.json を記録として読んだので、run を通常の CLI で判定し直すだけで未評価になった。専用ファイルの無い古い run は
-    SETTLE_VERDICT.json が停止の時のままならそれを、上書きされていれば要約の一致する代わりの記録を読み、同じ許容つきの照合をする
-    (どの形の記録を読んだかは stop_rule_reeval.compare の form・record_file)。
+    通常の CLI が上書きの前に停止の時の原本を移した専用ファイル、まだ移していなければ停止の時のままの SETTLE_VERDICT.json を読む。
+    原本が失われていれば (移行の前に上書きされた) 照合不能で未評価 (4 回目 M1: 以前は上書き後の判定を要約の一致で代わりの記録にしたので、
+    入力を変えて通常の CLI を回すだけで今の判定と記録が一致して PASS になった)。どの形の記録を読んだかは stop_rule_reeval.compare の
+    form・record_file。
     verdict_line には道具の名前を入れる (成果物の xlsx の注記・status.json にどちらの道具かが残る)。"""
     conv = {"tool": "check_settled.py --bind", "selection": {k: sel.get(k) for k in ("tool", "mode", "why", "problems")}}
     if st != last_step:

@@ -42,7 +42,7 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
 run に `settle_criteria.yaml` があれば (分岐は基準のファイルの有無だけ; 判定不能・照合の不一致で旧方式へ落とさない) `_handoff_gate_v2`:
 停止規則 v2 の `STOP_RULE_STATE.json` が REACHED、停止の step の再評価 (停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`;
 `SETTLE_VERDICT.json` は通常の CLI が上書きする最新の判定なので読まない、§5.1 #16) の全体が SETTLED (残差・流量の収支・目的の量)、
-状態・再評価・STOPPED_AT・停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の基準の sha256・
+状態・再評価・再評価が使った入力の中身 (§5.1 #16、result 段レビュー 4 回目 M1)・STOPPED_AT・停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の基準の sha256・
 見張りの記録の照合、δ_E は停止規則が止めた step で抽出した `stop_rule_v2/delta_E_<step>/` を契約 (状態 ok・step・場と表の sha256・
 抽出の設定・Euler の参照・ω) を確かめて使う (抽出し直さない; 帯の感度は記録だけ)。(d) y₁⁺・(f) 参照と ω・(g) 被覆・(h) 次の壁は今のまま。
 合格したら表を旧方式と同じ名前で run の直下に写す (`delta_r_next.csv` ほか)。HANDOFF_GATE.json の `method` (v1 / v2) にどちらを使ったかを書く。
@@ -1151,9 +1151,10 @@ def _settle_group(qs: list, kinds, label: str) -> dict:
 
 def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
     """照合 (§4.9 の 1、codex M1): STOP_RULE_STATE・停止の step の再評価 (停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<k>.json`;
-    専用ファイルの無い古い run は `stop_rule.stop_verdict_record` の後方互換、§5.1 #16)・STOPPED_AT・停止の step・本段の起動
-    (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の settle_criteria.yaml の sha256・stop_rule.json が
-    互いに一致すること。どれかが照合できない・食い違えば problems (受け渡しの関門は上書きでも通さない)。
+    専用ファイルの無い古い run は通常の CLI が移行した専用ファイルか移行していない原本 SETTLE_VERDICT.json、`stop_rule.stop_verdict_record`、
+    §5.1 #16)・再評価が使った入力のファイルの中身 (記録の files の sha256 と今の run のファイル; result 段レビュー 4 回目 M1)・STOPPED_AT・
+    停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の settle_criteria.yaml の sha256・
+    stop_rule.json が互いに一致すること。どれかが照合できない・食い違えば problems (受け渡しの関門は上書きでも通さない)。
     戻り: {pass, problems, items, verdict (停止の時の再評価の中身か None), verdict_file (読んだファイルの run からの相対), stop_step,
     criteria_sha256}。"""
     from ..evaluate import stop_rule as SR
@@ -1231,7 +1232,9 @@ def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
         probs.append(f"{SR.RECORD} (sha256 {str(rec_sha)[:16]}…) が {SR.STATE} の記録 ({str(st.get('record_sha256'))[:16]}…) と違う・無い")
     # 停止の step の再評価: 停止の時の専用ファイル stop_rule_v2/SETTLE_VERDICT_stop_<k>.json (§5.1 #16、result 段レビュー 3 回目 M1)。
     # SETTLE_VERDICT.json は最新の判定 (通常の CLI が上書きする) なので、停止の時の照合には読まない。専用ファイルの無い古い run は
-    # `stop_rule.stop_verdict_record` の後方互換 (停止の時のままなら SETTLE_VERDICT.json、上書きされていれば要約の一致する代わりの記録)
+    # 通常の CLI が上書きの前に移した専用ファイル、まだ移していなければ停止の時のままの SETTLE_VERDICT.json (`stop_rule.stop_verdict_record`)。
+    # 原本が失われていれば照合不能 (result 段レビュー 4 回目 M1: 以前は上書き後の判定を要約の一致で代わりの記録にし、今の入力から
+    # 作り直した判定と比べたので、入力を変えて通常の CLI を回すだけで照合が通った)
     ve = st.get("reeval") or {}
     svr = SR.stop_verdict_record(run_dir, ve)
     vname = svr["file"] or S.VERDICT_FILE
@@ -1251,24 +1254,16 @@ def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
         probs.append(f"再評価の終端 ({vname} {v.get('end_step')!r}・{SR.STATE} {ve.get('end_step')!r}) が停止の step {k} と違う")
     if (v.get("criteria") or {}).get("sha256") != crit_sha:
         probs.append(f"{vname} の基準の sha256 が今の {S.CRITERIA_FILE} と違う")
-    if svr["exact"]:
-        if dig != ve.get("digest") or v.get("verdict") != ve.get("verdict"):
-            probs.append(f"{vname} の判定 ({v.get('verdict')}、量の sha256 {dig[:16]}…) が {SR.STATE} の再評価 "
-                         f"({ve.get('verdict')}、{str(ve.get('digest'))[:16]}…) と違う")
-    else:
-        # 古い run の上書き後の代わりの記録: 停止の時の量の値は残っていないので、今の入力で判定し直して許容つきで照合する
-        # (`stop_rule.match_reeval`: 入力の中身・基準・起動・各検査の合否は一致、浮動小数は許容; 成果物の照合と同じ規則)
-        try:
-            lc = S.load_criteria(run_dir)
-            if lc.get("status") != "ok":
-                raise ValueError(f"基準の状態 {lc.get('status')}")
-            res_now = S.judge(run_dir, k, data=S.RunData(run_dir, lc["criteria"]), loaded=lc)
-            m = SR.match_reeval(run_dir, res_now, ve)
-        except Exception as e:  # noqa: BLE001 — 照合できなければ一致とみなさない (理由を残す)
-            m = {"matches": False, "problems": [f"今の判定を作れない ({type(e).__name__}: {e})"], "n_problems": 1}
-        items["reeval"]["rejudge_match"] = {kk: m.get(kk) for kk in ("matches", "problems", "n_problems", "form")}
-        if not m.get("matches"):
-            probs.append(f"{vname} (上書き後の代わりの記録) と今の判定が食い違う: " + "; ".join(m.get("problems") or [])[:400])
+    if not svr["exact"] or dig != ve.get("digest") or v.get("verdict") != ve.get("verdict"):
+        probs.append(f"{vname} の判定 ({v.get('verdict')}、量の sha256 {dig[:16]}…) が {SR.STATE} の再評価 "
+                     f"({ve.get('verdict')}、{str(ve.get('digest'))[:16]}…) と違う")
+    # 再評価が使った入力 (流量・節点・壁の h5・残差・STOPPED_AT・基準) が今の run のファイルと同じ中身か (result 段レビュー 4 回目 M1:
+    # 停止の時の記録の中身だけを照合し、停止の後に入力を書き換えても受け渡しの照合が通った; 成果物の照合 `match_reeval` と同じ部品)
+    inp = SR.recorded_input_problems(run_dir, v)
+    items["reeval"]["inputs"] = {"n_files": len(v.get("files") or []) if isinstance(v.get("files"), list) else 0,
+                                 "problems": inp[:10], "n_problems": len(inp)}
+    if inp:
+        probs.append(f"{vname} の再評価が使った入力が今の run と違う (停止の後に書き換えられた・無い): " + "; ".join(inp)[:400])
     vsa = v.get("stopped_at")
     if st.get("status") == "CENSORED":
         if vsa is not None:
@@ -1572,7 +1567,7 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
             ext["made"] = made
     rec = {"version": 4, "method": "v2",
            "method_note": ("新方式 (settle_criteria.yaml のある run): 停止規則 v2 の REACHED・停止の step の再評価 (停止の時の専用ファイル "
-                           "stop_rule_v2/SETTLE_VERDICT_stop_<step>.json; 古い run は SETTLE_VERDICT.json の後方互換) の全体・"
+                           "stop_rule_v2/SETTLE_VERDICT_stop_<step>.json; 古い run は通常の CLI が移した専用ファイルか停止の時のままの SETTLE_VERDICT.json) の全体・"
                            "本段の起動との照合・停止規則の δ_E の抽出 (抽出し直さない)"),
            "plan": HANDOFF_V2_PLAN, "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
            "proceed": not blocked, "blocked_by": blocked, "warnings": warnings,
