@@ -1,0 +1,12 @@
+r_t 0.10524766333341617 m  設計壁 [-9.501399, 72.210628]  物理壁 [-9.501399, 72.210628]  x_U -4.750699  ar_max 5000 (AR 上限 4850)  初期化 {'initializer': {'model': 'contur', 'delta_scale': 0.6879276441586154, 'delta_scale_slope_per_m': 0.021489879641868756, 'delta_offset_m': -0.00031472178952660714}, 'model': 'contur_momentum_integral'}
+式の写し vs estimate_mesh (8001 点): 相対差の最大 0.000e+00
+係数 pipe    c 0.6000–1.0000  M6 の比の最小 2.21768  OK
+係数 contr   c 0.5000–0.6000  M6 の比の最小 0.61161  OK
+係数 throat  c 0.4900–0.5000  M6 の比の最小 0.51066  OK
+係数 div     c 0.4900–0.4900  M6 の比の最小 0.49874  OK
+要求の格子: 作る 408562 点・検査 4085603 点; 頭打ちの値 y1(s = 0.011) 2.531857e-07 / 2.531857e-07 m (2 点の式 2.531857e-07 m)
+第一層の表 221 点 (足した点 0): 表/要求 (検査の刻み 2e-05) の最大 1.000000・最小 0.7842; (作る刻み) 最大 1.000000
+ni 最小 4466 → 4470 (理想 4332)  節点 433,590  壁際 AR 最大 4845.0 @ x -0.199  dx 0.00190–0.0488 r_t  dx 比最大 1.0310 @ x -9.155
+径方向: axis_cap_frac 0.03・比 ≤ 1.2 → nj 92 (比の最大 1.19631; nj 91 では 1.20015; 最も薄い第一セル 3.9160e-07 @ x -0.501)  節点 411,240 (雛形の nj 97)
+Euler の写し: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/problem_p1_euler.yaml (生成器の写し problem_p1_card_euler.yaml と mesh・mesh_euler 以外が同じ; 除いたキー ['physical_wall_repr', 'pw_upstream'])
+書いた: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/problem_p1.yaml  記録 /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/_mesh_p1/build_record.json  (26 s)

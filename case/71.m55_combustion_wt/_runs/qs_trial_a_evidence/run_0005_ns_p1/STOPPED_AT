@@ -1,0 +1,22 @@
+{
+  "status": "ok",
+  "step": 30088,
+  "residual_step": 30087,
+  "request": "{\"by\":\"forge_design.evaluate.stop_rule.watch_main_stage_v2\",\"criteria_sha256\":\"ea0be33aa5d5c699e4390b5eb1d3e6d57f258fb628d121eda7f015257f8242a2\",\"hold_steps\":0,\"kind\":\"settled\",\"reason\":\"settle v2: 3 条件 (残差・流量の収支・目的の量) が step 30000 から 0 step 続いた (保持 0)\",\"request_step\":30000,\"settled_since\":30000,\"time\":\"2026-10-16T01:24:57+00:00\",\"token\":\"14a98298efb746d78a0cdf7120021a71\"}",
+  "nStepOuter": 200000,
+  "files": [
+    {"path": "res_30088.h5", "bytes": 50920972},
+    {"path": "res_30088.xmf", "bytes": 5169},
+    {"path": "res_inlet_1_30088.h5", "bytes": 22784},
+    {"path": "res_inlet_1_30088.xmf", "bytes": 3826},
+    {"path": "res_outlet_2_30088.h5", "bytes": 22048},
+    {"path": "res_outlet_2_30088.xmf", "bytes": 3452},
+    {"path": "res_wall_3_30088.h5", "bytes": 844992},
+    {"path": "res_wall_3_30088.xmf", "bytes": 5742},
+    {"path": "res_axis_4_30088.h5", "bytes": 389800},
+    {"path": "res_axis_4_30088.xmf", "bytes": 3454},
+    {"path": "res_nodes_30088.h5", "bytes": 175856},
+    {"path": "boundary_massflux.csv", "bytes": 2482},
+    {"path": "residual_history.csv", "bytes": 17878282}
+  ]
+}

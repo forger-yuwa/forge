@@ -1,0 +1,50 @@
+{
+ "event": "main_stage_started",
+ "time": "2026-10-16T00:37:53+00:00",
+ "time_unix": 1792111073.9077566,
+ "stages": "full",
+ "main_config": {
+  "file": "solverConfig.yaml",
+  "sha256": "a9eec9e5639de2aabddad069aba786edc2cebfd20454fd16d17917d11641d31f",
+  "nStepOuter": 200000,
+  "fnv": "7e30ef0394d1aab0"
+ },
+ "initial_field": {
+  "file": "nozzle.h5",
+  "sha256": "8c0be33258b844934c45c81d40248ed9095c9556afd03249987186088cc9002d"
+ },
+ "previous_stages": [
+  {
+   "tag": "S1_soft",
+   "nsteps": 3000,
+   "config_sha256": "a54f00071bbecf8c9550939ca6f77e7a9bda50bf7ad32d8184af1fcc73b0d42a"
+  },
+  {
+   "tag": "S2_mid",
+   "nsteps": 3000,
+   "config_sha256": "116495d93521280568957ec6cc9ed1358d8b90f8eeaa4095eb8c2ea2be7e6633"
+  }
+ ],
+ "prestage_config": {
+  "file": "solverConfig_prestage.yaml",
+  "sha256": "076b790aabd2e184bea99eb3de117cd0f6c290fc6b2fa095cbf59f3f782dac92"
+ },
+ "res_files_present": [],
+ "start_step": 0,
+ "settle_criteria": {
+  "file": "settle_criteria.yaml",
+  "sha256": "83a42ad6e94f93234a9cf5a9ef258a9084e7b1891f53c4c29500499f3b2de5e0"
+ },
+ "limiter_ref": {
+  "file": "limiter_ref.json",
+  "previous_removed": true,
+  "note": "本段の forge が起動時に書く (cfg_fnv = main_config.fnv)。stage_manifest の本段の段の limiter_ref に写る",
+  "source": {
+   "mode": "auto",
+   "reason": "初期場の元の run が無い (新しい問題)",
+   "note": "forge が本段の開始の場で決めて run の limiter_ref.json に書く (stage_manifest の本段の段に写る)"
+  },
+  "config_values": {},
+  "source_matches_config": true
+ }
+}

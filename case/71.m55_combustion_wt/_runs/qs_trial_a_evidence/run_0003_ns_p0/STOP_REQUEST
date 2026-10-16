@@ -1,0 +1,1 @@
+{"by":"forge_design.evaluate.stop_rule.watch_main_stage_v2","criteria_sha256":"83a42ad6e94f93234a9cf5a9ef258a9084e7b1891f53c4c29500499f3b2de5e0","hold_steps":0,"kind":"settled","reason":"settle v2: 3 条件 (残差・流量の収支・目的の量) が step 42000 から 0 step 続いた (保持 0)","request_step":42000,"settled_since":42000,"time":"2026-10-16T00:48:39+00:00","token":"7fde78035d0f46549426e912f0cf8a75"}

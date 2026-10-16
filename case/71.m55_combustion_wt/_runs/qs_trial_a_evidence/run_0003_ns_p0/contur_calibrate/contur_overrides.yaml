@@ -1,0 +1,7 @@
+# contur_calibrate (plans/active/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a): run_0003_ns_p0 (r_t 0.10490286531519752 m) の δ_E に合わせた 3 係数
+# δ = (c₀ + c₁·x_m)·δ_CONTUR + δ₀ (x_m は設計スロートからの実寸 [m])。新しい r_t でも同じ係数を CONTUR に当てる
+overrides:
+  deltastar_initializer.model: contur
+  deltastar_initializer.delta_scale: 0.6879276441586154
+  deltastar_initializer.delta_scale_slope_per_m: 0.021489879641868756
+  deltastar_initializer.delta_offset_m: -0.00031472178952660714

@@ -1,0 +1,131 @@
+{
+ "format": "forge.contur_calibration/v1",
+ "plan": "plans/active/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a",
+ "created": "2026-10-16T00:51:34+00:00",
+ "git_head": "a36a87ff117739788a76c4c79e38977782bccb5c",
+ "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0",
+ "inputs": {
+  "delta_E": {
+   "path": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/stop_rule_v2/delta_E_42060/delta_r_next.csv",
+   "sha256": "ae9639f56ddb321257fa3f501b592a01f48a060f1a4ab3d0aa866fa307f8291e",
+   "source": "停止規則 v2 の抽出 (STOP_RULE_STATE.json の delta_E、step 42060)",
+   "state": {
+    "status": "REACHED",
+    "method": "v2",
+    "stop_step": 42060,
+    "delta_E_step": 42060,
+    "delta_E_res_sha256": "c552ebf2aa9e6cea96287524c131537c1346d38b30a26e081657523f6bc767af"
+   }
+  },
+  "delta_E_columns": "delta_E (未緩和の平滑化抽出; named header)",
+  "delta_in": {
+   "source": "grid",
+   "column": "delta_in_prev (格子の NS の壁 − Euler の壁、列ごと)"
+  },
+  "files": {
+   "prepare_info.json": "2470ae339dc383c2a8ece4cb7fd143d98b15b23b22dda538f166ba2146bcd5e8",
+   "delta_r_initial.json": "061a85b73135d1888d57b346573fd215641281503821cd4bd42071d04188ee1b"
+  },
+  "scale_m": 0.10490286531519752,
+  "n_cols": 4470,
+  "x_range_m": [
+   -0.9999999999999999,
+   7.599523203477185
+  ],
+  "x_wall_end_m": 7.599523203477185,
+  "initializer": {
+   "model": "contur_momentum_integral",
+   "closure": "contur",
+   "cf_scale": 1.0,
+   "n_scale": 1.0,
+   "a_crocco": 1.0,
+   "thermal_bc": {
+    "mode": "prescribed_temperature",
+    "Tw": 350.0
+   },
+   "x_virtual_m": 0.49999999999999994,
+   "theta0_m": 0.0008316540521641406
+  }
+ },
+ "current": {
+  "c0": 1.0,
+  "c1_per_m": 0.0,
+  "d0_m": 0.0,
+  "pass0": true,
+  "form": "δ = (c₀ + c₁·x_m)·δ_C + δ₀ (係数なし = CONTUR の式のまま)"
+ },
+ "coefficients": {
+  "c0": 0.6879276441586154,
+  "c1_per_m": 0.021489879641868756,
+  "d0_m": -0.00031472178952660714
+ },
+ "calibration": {
+  "throat": {
+   "C_m": 9.7218136777192e-05,
+   "E_m": -0.0002478427457239834
+  },
+  "exit": {
+   "x_m": 7.599523203477185,
+   "C_m": 0.04790172104789342,
+   "E_m": 0.04046116237837259
+  },
+  "n_lsq": 2922,
+  "weights": "x ≥ 0 の列の台形 (Δx) の重み",
+  "constraints": "x = 0 (列の直線補間) と最後の列で等式"
+ },
+ "overrides": {
+  "deltastar_initializer.model": "contur",
+  "deltastar_initializer.delta_scale": 0.6879276441586154,
+  "deltastar_initializer.delta_scale_slope_per_m": 0.021489879641868756,
+  "deltastar_initializer.delta_offset_m": -0.00031472178952660714
+ },
+ "overrides_yaml": "# contur_calibrate (plans/active/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a): run_0003_ns_p0 (r_t 0.10490286531519752 m) の δ_E に合わせた 3 係数\n# δ = (c₀ + c₁·x_m)·δ_CONTUR + δ₀ (x_m は設計スロートからの実寸 [m])。新しい r_t でも同じ係数を CONTUR に当てる\noverrides:\n  deltastar_initializer.model: contur\n  deltastar_initializer.delta_scale: 0.6879276441586154\n  deltastar_initializer.delta_scale_slope_per_m: 0.021489879641868756\n  deltastar_initializer.delta_offset_m: -0.00031472178952660714\n",
+ "errors": {
+  "current_wall": {
+   "max_abs_mm": 7.879080894668926,
+   "x_m_at_max": 7.101044707471903,
+   "signed_at_max_mm": 7.879080894668926,
+   "max_abs_x_ge_3m_mm": 7.879080894668926,
+   "throat_mm": 0.3450608825011754,
+   "exit_mm": 7.4405586695208275,
+   "rms_dx_mm": 5.601648859891953,
+   "sign": "δ − δ_E (正 = 入れた δ が NS より厚い)",
+   "x_far_m": 3.0
+  },
+  "projected_after_calibration": {
+   "max_abs_mm": 0.6365209543066689,
+   "x_m_at_max": 0.892767685960566,
+   "signed_at_max_mm": 0.6365209543066689,
+   "max_abs_x_ge_3m_mm": 0.27779270961232616,
+   "throat_mm": 9.977259784429904e-11,
+   "exit_mm": -6.938893903907228e-15,
+   "rms_dx_mm": 0.25509846709213646,
+   "sign": "δ − δ_E (正 = 入れた δ が NS より厚い)",
+   "x_far_m": 3.0
+  },
+  "note": "「較正後の射影」はこの NS の δ_E に対する誤差 (新しい壁の NS の誤差ではない)"
+ },
+ "checks": {
+  "delta_in": {
+   "max_abs_grid_minus_function_x_ge_0_mm": 8.258442171621843e-05,
+   "warn_mm": 0.005,
+   "warn": false,
+   "function_source": "delta_r_initial.csv の 5 次補間"
+  },
+  "delta_C_vs_recorded_contur": {
+   "throat": {
+    "delta_C_from_delta_in_mm": 0.097218136777192,
+    "recorded_contur_mm": 0.09728416914531454,
+    "diff_mm": -6.60323681225415e-05
+   },
+   "exit": {
+    "delta_C_from_delta_in_mm": 47.90172104789342,
+    "recorded_contur_mm": 47.90172100612787,
+    "diff_mm": 4.17655493523128e-08
+   },
+   "note": "δ_in から戻した δ_C と記録の CONTUR の値 (initializer.delta_r_throat・delta_r_exit) の差 (格子の測定の差の大きさ)"
+  },
+  "n_held_x_ge_0": 0
+ },
+ "warnings": []
+}

@@ -1,0 +1,36 @@
+TOOL: check_settled.py (本段の起動 (MAIN_STAGE_STARTED と照合) [mode main])
+照合: MAIN_STAGE_STARTED の本段の設定 (fnv 891471637206e700) = 今の solverConfig.yaml = 最後の起動の cfg_fnv、基準の sha256 ea0be33aa5d5c699… = 記録
+=== /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1  終端 30000 (停止の観測 30088 は別の検査だけ)  end_step 30088 [STOPPED_AT] ===
+  [SETTLED      ] residual_finite (residual_finite, 入力 native)
+  [SETTLED      ] mass_balance (mass_balance, 入力 native)
+      ok  |mean r|: 3.39962e-05 (許容 0.0005)
+      ok  max r − min r: 8.72764e-05 (許容 0.005)
+      ok  (max − min)/mean ṁ_in: 8.16575e-07 (許容 0.0001)
+      ok  (max − min)/mean ṁ_out: 8.67377e-05 (許容 0.0001)
+      ok  停止の観測 (step 30088) の r の格子の終端からの差: 2.72335e-07 (許容 0.005)
+      ok  停止の観測を加えた |mean r|: 2.99295e-05 (許容 0.0005)
+      ok  停止の観測を加えた max r − min r: 8.75487e-05 (許容 0.005)
+      ok  停止の観測を加えた (max − min)/mean ṁ_in: 8.16575e-07 (許容 0.0001)
+      ok  停止の観測を加えた (max − min)/mean ṁ_out: 8.75029e-05 (許容 0.0001)
+  [SETTLED      ] exit_core_mach (exit_core_mach, 入力 native)
+      ok  出口コア M の幅 max − min: 0.000175139 (許容 0.000275)
+      ok  停止の観測 (step 30088) の格子の終端からの差: 2.95157e-06 (許容 0.000275)
+      ok  停止の観測を加えた幅: 0.000175139 (許容 0.000275)
+  [SETTLED      ] line_mach (line_mach, 入力 native)
+      ok  最大偏差 maxabs の幅 [%pt]: 0.00324084 (許容 0.01)
+      ok  片振幅 halfamp の幅 [%pt]: 0.000763032 (許容 0.005)
+      ok  位置ごとの d の幅の最大 [%pt]: 0.00340145 (許容 0.01)  xq の位置 1963
+      ok  停止の観測 (step 30088) の maxabs の格子の終端からの差: 4.45387e-05 (許容 0.01)
+      ok  停止の観測を加えた maxabs の幅: 0.00324084 (許容 0.01)
+      ok  停止の観測 (step 30088) の halfamp の格子の終端からの差: 0.000224447 (許容 0.005)
+      ok  停止の観測を加えた halfamp の幅: 0.000763032 (許容 0.005)
+      ok  停止の観測を加えた位置ごとの d の幅の最大: 0.00340145 (許容 0.01)
+  [SETTLED      ] exit_flow_angle (exit_flow_angle, 入力 native)
+      ok  節点ごとの流れ角の幅の最大 [deg]: 0.000267851 (許容 0.01)  コアの 20 番目の節点
+      ok  停止の観測 (step 30088) の格子の終端からの差の最大 [deg]: 4.86228e-05 (許容 0.01)
+      ok  停止の観測を加えた幅の最大 [deg]: 0.000267851 (許容 0.01)
+  外した量: residual — 残差を止める判定から外した (2026-10-16 ユーザ決定「floatにしようか。残さは監視から外そう」、plan §4.4・§5.1 #8): float のビルドでは目的の量・流量は FP64 とほぼ同じなのに残差 (ρ) の振幅が約 0.585 桁 (FP64 は約 0.02 桁) で、残差の条件が通らず止まらなかった (card plan §6 V8)。発散は residual_finite (非有限の見張り、判定の条件ではない) で見る
+  外した量: wall_heat_nodes — 壁の熱流 (節点ごと) を止める判定から外した (2026-10-16 ユーザ決定「設計を早く進めるのが第一だから、floatで良い」、plan §4.4・§5.1 #8): float のビルドでは case/71 の x 0.367 m・r 0.161 m の壁の節点の熱量が窓の中で ±12 % 往復し (FP64 では収まる)、節点ごとの許容の 171 倍で止まらなかった (v3 の再生、B ~/m55_p5/v3_replay/)。冷却壁の第一層が極端に薄く (半径の 3.7e−7)、float では壁の法線の温度の勾配が丸めで揺れる見立て (未確認)。局所の壁の熱流を使う場面は FP64 で確かめる
+結果: SETTLE_VERDICT.json
+VERDICT: SETTLED (閾値は暫定 (plan §6 V3 で決める))
+CONVERGENCE_EXIT: 0

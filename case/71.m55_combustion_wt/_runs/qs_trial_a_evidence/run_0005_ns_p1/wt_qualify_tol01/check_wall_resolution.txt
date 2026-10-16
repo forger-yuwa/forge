@@ -1,0 +1,8 @@
+=== /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1  (wallTreatmentSST=0) ===
+  wall         step  30088  y1 = 1.498e-07 m  y1+ 平均   0.481 / p99   0.770 / 最大   0.965
+               評価できた面積割合 100.0 % ; y1+ > 1 が面積割合 0.0 % ; 最大の位置 index 0 (x -1, y 0.3)  ; ソルバ ypls 平均 0.1934
+
+最大 y1+ = 0.965 (幾何的特異点では収束しないので判定には使わない) ; **目標 1 を超える面積割合 最大 0.0 % (許容 2 %)**
+VERDICT: PASS (壁解像)
+
+CHECK_WALL_RESOLUTION_EXIT: 0

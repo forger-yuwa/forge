@@ -1,0 +1,102 @@
+{
+ "event": "main_stage_started",
+ "time": "2026-10-16T01:17:15+00:00",
+ "time_unix": 1792113435.2675529,
+ "stages": "full",
+ "main_config": {
+  "file": "solverConfig.yaml",
+  "sha256": "ad2e9d661195306260cbdc0339a72e4560a459223aa416addcfa25bc484a2ae7",
+  "nStepOuter": 200000,
+  "fnv": "891471637206e700"
+ },
+ "initial_field": {
+  "file": "nozzle.h5",
+  "sha256": "f290e030434fe14fac9df57de22250b3847954acb8bc0260ef8b8cd6baec80dd"
+ },
+ "previous_stages": [
+  {
+   "tag": "S1_soft",
+   "nsteps": 3000,
+   "config_sha256": "a54f00071bbecf8c9550939ca6f77e7a9bda50bf7ad32d8184af1fcc73b0d42a"
+  },
+  {
+   "tag": "S2_mid",
+   "nsteps": 3000,
+   "config_sha256": "116495d93521280568957ec6cc9ed1358d8b90f8eeaa4095eb8c2ea2be7e6633"
+  }
+ ],
+ "prestage_config": {
+  "file": "solverConfig_prestage.yaml",
+  "sha256": "076b790aabd2e184bea99eb3de117cd0f6c290fc6b2fa095cbf59f3f782dac92"
+ },
+ "res_files_present": [],
+ "start_step": 0,
+ "settle_criteria": {
+  "file": "settle_criteria.yaml",
+  "sha256": "ea0be33aa5d5c699e4390b5eb1d3e6d57f258fb628d121eda7f015257f8242a2"
+ },
+ "limiter_ref": {
+  "file": "limiter_ref.json",
+  "previous_removed": true,
+  "note": "本段の forge が起動時に書く (cfg_fnv = main_config.fnv)。stage_manifest の本段の段の limiter_ref に写る",
+  "source": {
+   "mode": "inherit",
+   "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0",
+   "ic_kind": {
+    "kind": "ns",
+    "by": {
+     "solverConfig.yaml": {
+      "turbulence.model": "sst",
+      "viscMethod": 2,
+      "kind": "ns"
+     },
+     "prepare_info.json": {
+      "chain": "axismach_ns",
+      "kind": "ns"
+     }
+    }
+   },
+   "main_confirmed": "MAIN_STAGE_STARTED の main_config",
+   "main_config": {
+    "file": "solverConfig.yaml",
+    "sha256": "a9eec9e5639de2aabddad069aba786edc2cebfd20454fd16d17917d11641d31f",
+    "fnv": "7e30ef0394d1aab0",
+    "main_stage_started": {
+     "sha256_checked": true,
+     "fnv_checked": true
+    },
+    "main_confirmed": "MAIN_STAGE_STARTED の main_config"
+   },
+   "basis": "limiter_ref.json",
+   "file": "limiter_ref.json",
+   "sha256": "57083f5a8137ab90594b8a7e4b9e76a9d38607b77eddec2a16285f977d021d3b",
+   "cfg_fnv": "7e30ef0394d1aab0",
+   "auto_in_source": {
+    "limiterRoRef": true,
+    "limiterPRef": true,
+    "limiterARef": true,
+    "limiterRefLength": true
+   },
+   "values": {
+    "limiterRoRef": 0.5486432680512212,
+    "limiterPRef": 169677.6432118667,
+    "limiterARef": 316.9200444311932,
+    "limiterRefLength": 8.637176151616265
+   },
+   "L_ref": "fixed (記録の値)",
+   "stage_manifest": {
+    "checked": true,
+    "tag": "main",
+    "order": 2,
+    "status": "forge"
+   }
+  },
+  "config_values": {
+   "limiterRoRef": 0.5486432680512212,
+   "limiterPRef": 169677.6432118667,
+   "limiterARef": 316.9200444311932,
+   "limiterRefLength": 8.637176151616265
+  },
+  "source_matches_config": true
+ }
+}

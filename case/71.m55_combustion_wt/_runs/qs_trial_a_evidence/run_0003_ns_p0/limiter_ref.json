@@ -1,0 +1,15 @@
+{
+  "schema": "forge.limiter_ref/v1",
+  "time": 1792111075,
+  "cfg_fnv": "7e30ef0394d1aab0",
+  "limiterScaled": 1,
+  "limiterDiag": 0,
+  "computed": true,
+  "limiterRoRef": 0.54864326805122121,
+  "limiterPRef": 169677.6432118667,
+  "limiterARef": 316.92004443119322,
+  "limiterRefLength": 8.6371761516162646,
+  "auto": {"limiterRoRef": true, "limiterPRef": true, "limiterARef": true, "limiterRefLength": true},
+  "venkatK": 0.050000000000000003,
+  "h_i": "sqrt(A_planar)"
+}

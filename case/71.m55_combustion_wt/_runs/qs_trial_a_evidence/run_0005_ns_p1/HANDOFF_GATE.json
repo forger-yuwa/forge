@@ -1,0 +1,390 @@
+{
+ "version": 4,
+ "method": "v2",
+ "method_note": "新方式 (settle_criteria.yaml のある run): 停止規則 v2 の REACHED・停止の step の再評価 (SETTLE_VERDICT.json) の全体・本段の起動との照合・停止規則の δ_E の抽出 (抽出し直さない)",
+ "plan": "plans/active/tooling-settle-convergence-and-monitor.md §4.9 の 1・2 (§4.8 の 2、codex diagnose 2026-10-16 settle-migration-7: 照合・δ_E の契約・分岐の規則)",
+ "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1",
+ "time": "2026-10-16T01:26:49+00:00",
+ "proceed": true,
+ "blocked_by": [],
+ "warnings": [],
+ "settled": true,
+ "unsettled_overrides": [],
+ "delta_e_source": {
+  "kind": "stop_rule_v2_stop_snapshot",
+  "n_snapshots": 1,
+  "res": "res_30088.h5",
+  "steps": [
+   30088
+  ],
+  "stop_step": 30088,
+  "is_stop_output": true,
+  "res_sha256": "b5e638d91198af18c2dafb9dccccfa84ec74aa82109a7c187fc019afea4ff6bf",
+  "dir": "stop_rule_v2/delta_E_30088",
+  "delta_r_next_sha256": "70054bf12b4d33914ca3b796eb2e317d1f5c435cf7648ac97ea77639ca78905b",
+  "provider": "stop_rule.watch_main_stage_v2 (extract_delta_e、止めた step の全場から 1 回; 関門は抽出し直さない)"
+ },
+ "stop_rule": {
+  "status": "REACHED",
+  "source": "STOP_RULE_STATE.json",
+  "stop_step": 30088,
+  "forge_rc": 0
+ },
+ "convergence": {
+  "tool": "SETTLE_VERDICT.json (停止の step の再評価、settle.judge; 新方式)",
+  "kind": "NOT_APPLICABLE",
+  "rc": null,
+  "verdict": [
+   "OVERALL: SETTLED",
+   "残差: NOT_APPLICABLE",
+   "残差の非有限の見張り: PASS"
+  ],
+  "end_step": 30088,
+  "criteria_sha256": "ea0be33aa5d5c699e4390b5eb1d3e6d57f258fb628d121eda7f015257f8242a2"
+ },
+ "checks": {
+  "stop_step": 30088,
+  "binding": {
+   "pass": true,
+   "problems": [],
+   "items": {
+    "select": {
+     "tool": "check_settled.py",
+     "mode": "main",
+     "why": "本段の起動 (MAIN_STAGE_STARTED と照合)",
+     "problems": []
+    },
+    "main_stage": {
+     "record": "MAIN_STAGE_STARTED",
+     "main_config_fnv": "891471637206e700",
+     "main_config_sha256": "ad2e9d661195306260cbdc0339a72e4560a459223aa416addcfa25bc484a2ae7",
+     "config_fnv": "891471637206e700",
+     "config_sha256": "ad2e9d661195306260cbdc0339a72e4560a459223aa416addcfa25bc484a2ae7",
+     "launch_cfg_fnv": "891471637206e700",
+     "record_criteria_sha256": "ea0be33aa5d5c699e4390b5eb1d3e6d57f258fb628d121eda7f015257f8242a2",
+     "criteria_sha256": "ea0be33aa5d5c699e4390b5eb1d3e6d57f258fb628d121eda7f015257f8242a2"
+    },
+    "stop_step": 30088,
+    "stopped_at": {
+     "present": true,
+     "step": 30088,
+     "state": {
+      "present": true,
+      "step": 30088,
+      "sha256": "a2027614cf1690b6e9f2555eb2e151797c6d6a53f62b25ee19d0c10ea29e8ebd",
+      "problems": []
+     }
+    },
+    "stop_field": {
+     "res": "res_30088.h5",
+     "sha256": "b5e638d91198af18c2dafb9dccccfa84ec74aa82109a7c187fc019afea4ff6bf",
+     "state": "b5e638d91198af18c2dafb9dccccfa84ec74aa82109a7c187fc019afea4ff6bf"
+    },
+    "reeval": {
+     "file": "SETTLE_VERDICT.json",
+     "end_step": 30088,
+     "verdict": "SETTLED",
+     "digest": "00afb1982e91f702a51a85462c13eb8a5593eedb22a9c3fd198312afd91d5818",
+     "state": {
+      "end_step": 30088,
+      "verdict": "SETTLED",
+      "digest": "00afb1982e91f702a51a85462c13eb8a5593eedb22a9c3fd198312afd91d5818",
+      "sha256": "db49c2a840a6a22c91a149bf2e77e8f786c7cf6b5fa5a2f840105056ebb8d688"
+     },
+     "file_sha256": "db49c2a840a6a22c91a149bf2e77e8f786c7cf6b5fa5a2f840105056ebb8d688",
+     "file_sha256_matches_state": true
+    }
+   },
+   "stop_step": 30088,
+   "criteria_sha256": "ea0be33aa5d5c699e4390b5eb1d3e6d57f258fb628d121eda7f015257f8242a2"
+  },
+  "reeval": {
+   "verdict": "SETTLED",
+   "by_quantity": {
+    "residual_finite": "SETTLED",
+    "mass_balance": "SETTLED",
+    "exit_core_mach": "SETTLED",
+    "line_mach": "SETTLED",
+    "exit_flow_angle": "SETTLED"
+   },
+   "pass": true
+  },
+  "residual_watch": {
+   "label": "(b′) 残差の非有限の見張り",
+   "quantities": {
+    "residual_finite": "SETTLED"
+   },
+   "pass": true,
+   "kind": "PASS"
+  },
+  "residual": {
+   "label": "(b) 残差",
+   "kind": "NOT_APPLICABLE",
+   "pass": true,
+   "quantities": {},
+   "why": "基準に残差の量が無い (残差を止める判定から外したプリセット、例 wt_nozzle_v3) — 対象外"
+  },
+  "mass_balance": {
+   "label": "(c) 流量の収支",
+   "quantities": {
+    "mass_balance": "SETTLED"
+   },
+   "pass": true,
+   "kind": "PASS"
+  },
+  "targets": {
+   "label": "目的の量",
+   "quantities": {
+    "exit_core_mach": "SETTLED",
+    "line_mach": "SETTLED",
+    "exit_flow_angle": "SETTLED"
+   },
+   "pass": true,
+   "kind": "PASS"
+  },
+  "wall_resolution": {
+   "cmd": [
+    "/home/ubuntu/qs_trial/forge/design/.venv-opt/bin/python",
+    "/home/ubuntu/qs_trial/forge/solver_density_cuda/tools/check_wall_resolution.py",
+    "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1",
+    "--step",
+    "30088"
+   ],
+   "rc": 0,
+   "kind": "PASS",
+   "verdict": [
+    "VERDICT: PASS (壁解像)"
+   ],
+   "pass": true
+  },
+  "euler_ref": {
+   "run": {
+    "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0004_euler_p1",
+    "res": "res_12000.h5",
+    "sha256": "82e65c51570526fe9e1b879fd129bb5eb8f9a193c80149c785409b3b8b12b9d4"
+   },
+   "caller": {
+    "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0004_euler_p1",
+    "res": "res_12000.h5",
+    "sha256": "82e65c51570526fe9e1b879fd129bb5eb8f9a193c80149c785409b3b8b12b9d4"
+   },
+   "pinned": true,
+   "pass": true
+  },
+  "delta_E": {
+   "pass": true,
+   "problems": [],
+   "warnings": [],
+   "dir": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/stop_rule_v2/delta_E_30088",
+   "state": {
+    "status": "ok",
+    "step": 30088,
+    "dir": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/stop_rule_v2/delta_E_30088",
+    "res_sha256": "b5e638d91198af18c2dafb9dccccfa84ec74aa82109a7c187fc019afea4ff6bf",
+    "delta_r_next_sha256": "70054bf12b4d33914ca3b796eb2e317d1f5c435cf7648ac97ea77639ca78905b",
+    "seconds": 65.7
+   },
+   "delta_r_next_sha256": "70054bf12b4d33914ca3b796eb2e317d1f5c435cf7648ac97ea77639ca78905b",
+   "euler_ref": {
+    "extraction": {
+     "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0004_euler_p1",
+     "res": "res_12000.h5",
+     "sha256": "82e65c51570526fe9e1b879fd129bb5eb8f9a193c80149c785409b3b8b12b9d4"
+    },
+    "run": {
+     "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0004_euler_p1",
+     "res": "res_12000.h5",
+     "sha256": "82e65c51570526fe9e1b879fd129bb5eb8f9a193c80149c785409b3b8b12b9d4"
+    },
+    "pass": true
+   },
+   "band_sensitivity": {
+    "factor": 1.25,
+    "max_abs_B_minus_A_mm": 0.27988410078359827,
+    "x_m_at": 7.599999899813838,
+    "A_reproduces_delta_E_max_abs_rt": 0.0,
+    "n_nonfinite_B_use": 0,
+    "n_hard_fail_use": 0
+   }
+  },
+  "omega": {
+   "caller": 0.5,
+   "fixed": 0.5,
+   "extraction": 0.5,
+   "pass": true
+  },
+  "coverage": {
+   "x_exit": 72.2106283323141,
+   "pass": true,
+   "not_extracted": {
+    "n": 0,
+    "n_cols_ns": 4470,
+    "x": [],
+    "reason": [],
+    "euler_cover": {
+     "lo": -9.501400775100814,
+     "hi": 72.21063051945018,
+     "x0": -9.50139859002931,
+     "x1": 72.2106283340829,
+     "tol_lo": 2.185071503881986e-06,
+     "tol_hi": 2.1853672824192927e-06,
+     "edge_tol": true,
+     "frac": 0.0001
+    },
+    "edge_tol_cols": {
+     "n": 0,
+     "i": [],
+     "x": [],
+     "beyond": []
+    }
+   },
+   "n_use": 2913,
+   "n_held_use": 0,
+   "n_nonfinite_use": 0,
+   "x_held_use": []
+  },
+  "next_wall": {
+   "pass": true,
+   "wall": "SingleBSplinePhysicalWall",
+   "pw_upstream": "poly",
+   "throat": {
+    "x": -0.001943075912920279,
+    "r": 0.9975858437272098,
+    "kappa": 0.212378866307407
+   },
+   "upstream_gate_pass": true,
+   "validate": [],
+   "table_ends": {
+    "start": {
+     "x_table_rt": -9.50139859002931,
+     "x_design_rt": -9.50139859002931,
+     "diff_rt": 0.0,
+     "eps_f32_rt": 2.086329292062439e-06,
+     "snapped": false
+    },
+    "end": {
+     "x_table_rt": 72.2106283323141,
+     "x_design_rt": 72.2106283323141,
+     "diff_rt": 0.0,
+     "eps_f32_rt": 1.2160014433874755e-05,
+     "snapped": false
+    }
+   }
+  }
+ },
+ "override": {
+  "allow_not_reached": false,
+  "allow_unconverged": false,
+  "allow_unsettled": false,
+  "allow_not_reached_reason": null,
+  "allow_unconverged_reason": null,
+  "allow_unsettled_reason": null,
+  "applied": [],
+  "scope": "上書きは (a) 停止の状態 NOT_USED・CENSORED (allow_not_reached)・(b) 残差の閾値の超過 (allow_unconverged)・(c) 流量の収支と目的の量の閾値の超過 (allow_unsettled) だけ。照合 (状態・再評価・STOPPED_AT・停止の step・本段の起動・基準・見張りの記録)・判定不能・非有限・FAILED・y₁⁺・δ_E の契約・参照・ω・被覆・held・次の壁は上書きでは通さない"
+ },
+ "extract": {
+  "band_select": "edge",
+  "settings": {
+   "band_select": "edge",
+   "remap_constant_x": true,
+   "remap_edge": "missing",
+   "omega": 0.5,
+   "smooth_lam": 1.0,
+   "knot_spacing": 2.0,
+   "max_lam_factor": 1000.0
+  },
+  "dir": "handoff_extract",
+  "source": "stop_rule_v2/delta_E_30088",
+  "made": [
+   "fixed_point.json",
+   "delta_r_next.csv",
+   "delta_r_equiv.csv",
+   "delta_r_equiv_diag.json",
+   "delta_r_extract_summary.json",
+   "delta_r_edge.csv"
+  ],
+  "summary": {
+   "omega": 0.5,
+   "smooth": {
+    "kind": "quintic_pspline",
+    "knot_spacing": 2.0,
+    "lam": 1.0,
+    "n_cp": 34,
+    "penalty_order": 3,
+    "resid_rel_rms": 1.9989083766392701,
+    "resid_abs_max": 0.004775777482875793,
+    "resid_rel_p95": 0.5801975883618758
+   },
+   "max_lam_factor": 1000.0,
+   "not_extracted": {
+    "n": 0,
+    "n_cols_ns": 4470,
+    "i": [],
+    "x": [],
+    "reason": [],
+    "euler_cover": {
+     "lo": -9.501400775100814,
+     "hi": 72.21063051945018,
+     "x0": -9.50139859002931,
+     "x1": 72.2106283340829,
+     "tol_lo": 2.185071503881986e-06,
+     "tol_hi": 2.1853672824192927e-06,
+     "edge_tol": true,
+     "frac": 0.0001
+    },
+    "edge_tol_cols": {
+     "n": 0,
+     "i": [],
+     "x": [],
+     "beyond": []
+    }
+   },
+   "n_stations": 4470,
+   "n_ok": 1996,
+   "n_hard_ok": 4470,
+   "n_held": 0,
+   "use_over_in_median": 0.9876758761566322,
+   "use_over_in_p10_p90": [
+    -0.0026336372799495283,
+    1.0073592955439827
+   ],
+   "max_abs_change": 0.006480306513600306,
+   "massflow": {
+    "remap_constant_x_ns": true,
+    "mdot_ns": 123.61987542494992,
+    "mdot_ns_spread": 6.24005104989651e-05,
+    "res_ns": "res_30088.h5",
+    "remap_constant_x_euler": true,
+    "mdot_euler": 123.71884373256154,
+    "mdot_euler_spread": 8.154324815913167e-06,
+    "res_euler": "res_12000.h5",
+    "mdot_ratio": 0.9992000546996256,
+    "r_throat_eff": 0.9995999473287429,
+    "r_throat_phys": 0.9976464788515625,
+    "cd_rel": 1.003919987769886,
+    "delta_r_throat_eff": -0.0019534684771803645,
+    "delta_r_throat_given": -0.002353521148437454
+   },
+   "delta_r_throat_use": -0.002387123044237149,
+   "delta_r_throat_in": -0.0023536937083569057,
+   "settled": true,
+   "unsettled_overrides": [],
+   "delta_e_source": {
+    "kind": "stop_rule_v2_stop_snapshot",
+    "n_snapshots": 1,
+    "res": "res_30088.h5",
+    "steps": [
+     30088
+    ],
+    "stop_step": 30088,
+    "is_stop_output": true,
+    "res_sha256": "b5e638d91198af18c2dafb9dccccfa84ec74aa82109a7c187fc019afea4ff6bf",
+    "dir": "stop_rule_v2/delta_E_30088",
+    "delta_r_next_sha256": "70054bf12b4d33914ca3b796eb2e317d1f5c435cf7648ac97ea77639ca78905b",
+    "provider": "stop_rule.watch_main_stage_v2 (extract_delta_e、止めた step の全場から 1 回; 関門は抽出し直さない)"
+   }
+  },
+  "delta_r_next_sha256": "70054bf12b4d33914ca3b796eb2e317d1f5c435cf7648ac97ea77639ca78905b"
+ },
+ "note": "proceed は §4.9 の 1 の条件の全部を満たしたか (壁の更新は次の pass へ自動でつながない)。判定は「設定された量・区間について SETTLED」で、旧の低下の桁数の判定との一致は求めない。帯の位置の感度は抽出の方法への感度で、時間の整定や誤差の上限の証明ではない (合否に使わない)。settled: false は落ち着きの条件を上書きで通した「落ち着いていない場からの設計」"
+}
