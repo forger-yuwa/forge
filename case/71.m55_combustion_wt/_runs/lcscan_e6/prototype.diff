@@ -1,0 +1,51 @@
+diff --git a/design/forge_design/geometry/moc_inverse.py bdesign/forge_design/geometry/moc_inverse.py
+index c5ae2d21..62595beb 100644
+--- a/design/forge_design/geometry/moc_inverse.py
++++ bdesign/forge_design/geometry/moc_inverse.py
+@@ -770,19 +770,33 @@ def _design_cplus(inv, init, n_ax, ax, mdot_star, g, x0, x_wall0,
+     if exit_mode == "characteristic":
+         if x_E is None or M_d is None:
+             raise ValueError("exit_mode='characteristic' には x_E と M_d が必要")
+-        m_E = int(np.argmin(np.abs(np.asarray(ax) - float(x_E))))
+-        term = cplus_lines(lev, m_E)
+-        if len(term) < 3:
+-            raise RuntimeError("cplus: 終端 C⁺ が短すぎる")
+-        # 終端 C⁺ と壁の交点 (どちらも網由来の折れ線)
+-        rw_on_term = np.interp(term[:, 0], wall[:, 0], wall[:, 1],
+-                               left=np.nan, right=np.nan)
+-        d = term[:, 1] - rw_on_term
+-        j = int(np.argmax(d >= 0.0)) if np.any(d >= 0.0) else -1
+-        if j <= 0:
+-            raise RuntimeError("終端特性線が壁に到達しない (軸 target の延長不足)")
+-        s = -d[j - 1] / max(d[j] - d[j - 1], 1e-30)
+-        x_F = float(term[j - 1, 0] + s * (term[j, 0] - term[j - 1, 0]))
++        axv = np.asarray(ax, dtype=float)
++        m_E = int(np.argmin(np.abs(axv - float(x_E))))
++
++        def _term_xF(m: int) -> float:
++            term = cplus_lines(lev, m)
++            if len(term) < 3:
++                raise RuntimeError("cplus: 終端 C⁺ が短すぎる")
++            # 終端 C⁺ と壁の交点 (どちらも網由来の折れ線)
++            rw_on_term = np.interp(term[:, 0], wall[:, 0], wall[:, 1],
++                                   left=np.nan, right=np.nan)
++            d = term[:, 1] - rw_on_term
++            j = int(np.argmax(d >= 0.0)) if np.any(d >= 0.0) else -1
++            if j <= 0:
++                raise RuntimeError("終端特性線が壁に到達しない (軸 target の延長不足)")
++            s = -d[j - 1] / max(d[j] - d[j - 1], 1e-30)
++            return float(term[j - 1, 0] + s * (term[j, 0] - term[j - 1, 0]))
++        import os as _os
++        if _os.environ.get("INTERP", "1") == "1":
++            # ax は下流→上流の降順。x_E を挟む 2 節点 (下流 m_hi・上流 m_hi+1) の C⁺ の x_F を x_E で線形補間
++            m_hi = int(np.nonzero(axv >= float(x_E))[0][-1])
++            m_lo = m_hi + 1
++            w = (float(x_E) - axv[m_lo]) / (axv[m_hi] - axv[m_lo])
++            xF_lo, xF_hi = _term_xF(m_lo), _term_xF(m_hi)
++            x_F = float(xF_lo + w * (xF_hi - xF_lo))
++            exit_info.update({"x_F_nearest": xF_hi if m_E == m_hi else xF_lo, "x_E_weight": float(w)})
++        else:
++            x_F = _term_xF(m_E)
+         exit_info.update({"x_F": x_F,
+                           "r_F": float(np.interp(x_F, wall[:, 0], wall[:, 1])),
+                           "x_E_index": m_E, "n_frozen": 0})
