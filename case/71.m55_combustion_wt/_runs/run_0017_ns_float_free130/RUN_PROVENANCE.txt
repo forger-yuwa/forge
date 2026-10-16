@@ -1,0 +1,14 @@
+date        : 2026-10-16T02:13:29+00:00
+forge_bin   : /home/ubuntu/forge-cardmesh-float/solver_density_cuda/build/forge
+forge_mtime : 2026-10-15T21:51:13+00:00
+forge_sha256: 12033eb378155f64172303ef7a024369845ee58395dd6e9a891af7600bfe2953
+git_head    : dfad026762ebd7a346e66cd31e501e7936733bd1
+git_dirty   : 0 件
+host        : ip-172-31-14-139
+env         : FORGE_CUDA_BLOCKSIZE=128
+env         : FORGE_BIN=/home/ubuntu/forge-cardmesh-float/solver_density_cuda/build/forge
+cfg         : lineImplicit=1 (要求値)
+cfg         : lowMachPrecond=0 (要求値)
+cfg         : wallTreatmentSST=0 (要求値)
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)
+'scalarGradient' effective: lsq (default)

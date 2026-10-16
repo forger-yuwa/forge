@@ -1,0 +1,496 @@
+step,quantity,kind,verdict,categories,check,value,limit,ok,detail
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,0.00030377718797299365,0.0005,True,
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.0005934360827431629,0.005,True,
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,3.668135517616628e-05,0.0001,True,
+22000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.0005565679373922174,0.0001,False,
+22000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.0004746040676231189,0.000275,False,
+22000,line_mach,line_mach,NOT_SETTLED,threshold,最大偏差 maxabs の幅 [%pt],0.006946078973024683,0.01,True,
+22000,line_mach,line_mach,NOT_SETTLED,threshold,片振幅 halfamp の幅 [%pt],0.002782370039934215,0.005,True,
+22000,line_mach,line_mach,NOT_SETTLED,threshold,位置ごとの d の幅の最大 [%pt],0.023469892427563366,0.01,False,xq の位置 391
+22000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0012348320799221626,0.01,True,コアの 2 番目の節点
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,0.00019980884314016304,0.0005,True,
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.00043028507149215625,0.005,True,
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,1.7527062542760277e-05,0.0001,True,
+24000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.0004126695825139542,0.0001,False,
+24000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.0005287074799946723,0.000275,False,
+24000,line_mach,line_mach,NOT_SETTLED,threshold,最大偏差 maxabs の幅 [%pt],0.00533807881988313,0.01,True,
+24000,line_mach,line_mach,NOT_SETTLED,threshold,片振幅 halfamp の幅 [%pt],0.002022636022717836,0.005,True,
+24000,line_mach,line_mach,NOT_SETTLED,threshold,位置ごとの d の幅の最大 [%pt],0.016116601709303957,0.01,False,xq の位置 388
+24000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0006750756294412821,0.01,True,コアの 2 番目の節点
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,0.00012523997525487474,0.0005,True,
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.0002895392791122239,0.005,True,
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,8.888089514051306e-06,0.0001,True,
+26000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.0002806140540993463,0.0001,False,
+26000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.0004278459041993088,0.000275,False,
+26000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.004697477499115976,0.01,True,
+26000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0012124520575166053,0.005,True,
+26000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.00988884635277909,0.01,True,xq の位置 385
+26000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0005477633494636175,0.01,True,コアの 21 番目の節点
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,7.550009943238257e-05,0.0005,True,
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.00018312200384213361,0.005,True,
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,4.4755141864437845e-06,0.0001,True,
+28000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.00017863236683860265,0.0001,False,
+28000,exit_core_mach,exit_core_mach,NOT_SETTLED,threshold,出口コア M の幅 max − min,0.00029878675404759747,0.000275,False,
+28000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0049603583034407706,0.01,True,
+28000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0007152702335957231,0.005,True,
+28000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.006485885680918013,0.01,True,xq の位置 399
+28000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0004764990867367983,0.01,True,コアの 21 番目の節点
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,|mean r|,4.423725633735222e-05,0.0005,True,
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,max r − min r,0.0001096889900337371,0.005,True,
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_in,1.6812144041060911e-06,0.0001,True,
+30000,mass_balance,mass_balance,NOT_SETTLED,threshold,(max − min)/mean ṁ_out,0.00010846312192237799,0.0001,False,
+30000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,0.0001950011566513865,0.000275,True,
+30000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0036876288709519756,0.01,True,
+30000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0008383302944927409,0.005,True,
+30000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.004035110255262708,0.01,True,xq の位置 1878
+30000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.00033509797491423736,0.01,True,コアの 19 番目の節点
+32000,mass_balance,mass_balance,SETTLED,,|mean r|,2.546050764666523e-05,0.0005,True,
+32000,mass_balance,mass_balance,SETTLED,,max r − min r,6.382865473455665e-05,0.005,True,
+32000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,9.025050678131671e-07,0.0001,True,
+32000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.324444425572523e-05,0.0001,True,
+32000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,0.00012088780685992617,0.000275,True,
+32000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0022525809735718383,0.01,True,
+32000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0004363392763631832,0.005,True,
+32000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.002822565347138095,0.01,True,xq の位置 1856
+32000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.00022263248303814112,0.01,True,コアの 21 番目の節点
+34000,mass_balance,mass_balance,SETTLED,,|mean r|,1.4518774416405655e-05,0.0005,True,
+34000,mass_balance,mass_balance,SETTLED,,max r − min r,3.527641312773676e-05,0.005,True,
+34000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.96215647468194e-07,0.0001,True,
+34000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,3.493661701986758e-05,0.0001,True,
+34000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.014677334549191e-05,0.000275,True,
+34000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0009292081500023031,0.01,True,
+34000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00036007750874715583,0.005,True,
+34000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0014079457154259067,0.01,True,xq の位置 407
+34000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.00015003383234942456,0.01,True,コアの 21 番目の節点
+36000,mass_balance,mass_balance,SETTLED,,|mean r|,8.452065611801595e-06,0.0005,True,
+36000,mass_balance,mass_balance,SETTLED,,max r − min r,1.9272117008050704e-05,0.005,True,
+36000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.602688569287601e-07,0.0001,True,
+36000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.9490309553460174e-05,0.0001,True,
+36000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.7435208792402364e-05,0.000275,True,
+36000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.001113224340687502,0.01,True,
+36000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005132462435497587,0.005,True,
+36000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0013185256152459246,0.01,True,xq の位置 1671
+36000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],9.782145052904777e-05,0.01,True,コアの 20 番目の節点
+38000,mass_balance,mass_balance,SETTLED,,|mean r|,5.041633397075353e-06,0.0005,True,
+38000,mass_balance,mass_balance,SETTLED,,max r − min r,1.1562617465628431e-05,0.005,True,
+38000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.7049728692065275e-07,0.0001,True,
+38000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1552333460055416e-05,0.0001,True,
+38000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,2.4894176271494928e-05,0.000275,True,
+38000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0008503435363627077,0.01,True,
+38000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005125479613500156,0.005,True,
+38000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010180486800903665,0.01,True,xq の位置 1669
+38000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.281860245548442e-05,0.01,True,コアの 18 番目の節点
+40000,mass_balance,mass_balance,SETTLED,,|mean r|,3.106600549391157e-06,0.0005,True,
+40000,mass_balance,mass_balance,SETTLED,,max r − min r,7.1551423580567385e-06,0.005,True,
+40000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.70497305719369e-07,0.0001,True,
+40000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.934580435283e-06,0.0001,True,
+40000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,1.7529270246008366e-05,0.000275,True,
+40000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005537164278646145,0.01,True,
+40000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003497407655039808,0.005,True,
+40000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.000984316625640691,0.01,True,xq の位置 869
+40000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.772496153844497e-05,0.01,True,コアの 4 番目の節点
+42000,mass_balance,mass_balance,SETTLED,,|mean r|,1.955387195065106e-06,0.0005,True,
+42000,mass_balance,mass_balance,SETTLED,,max r − min r,4.183640247671933e-06,0.005,True,
+42000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,8.646716913484074e-07,0.0001,True,
+42000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,4.470273673961251e-06,0.0001,True,
+42000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,1.0623840464241141e-05,0.000275,True,
+42000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005757275117090899,0.01,True,
+42000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003497407655039808,0.005,True,
+42000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010833678268484803,0.01,True,xq の位置 613
+42000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.1437553646418305e-05,0.01,True,コアの 17 番目の節点
+44000,mass_balance,mass_balance,SETTLED,,|mean r|,1.2421286350587688e-06,0.0005,True,
+44000,mass_balance,mass_balance,SETTLED,,max r − min r,2.4578067130371793e-06,0.005,True,
+44000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,8.646717212386402e-07,0.0001,True,
+44000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,2.7282145915029403e-06,0.0001,True,
+44000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.261461607122044e-06,0.000275,True,
+44000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000303490563369202,0.01,True,
+44000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003497407655039808,0.005,True,
+44000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001022532761307815,0.01,True,xq の位置 611
+44000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.453900909550792e-05,0.01,True,コアの 4 番目の節点
+46000,mass_balance,mass_balance,SETTLED,,|mean r|,7.655829999381747e-07,0.0005,True,
+46000,mass_balance,mass_balance,SETTLED,,max r − min r,1.7354341108359768e-06,0.005,True,
+46000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,8.646717420845073e-07,0.0001,True,
+46000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.7701683795317387e-06,0.0001,True,
+46000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.340327977914171e-06,0.000275,True,
+46000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000303490563369202,0.01,True,
+46000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003497407655039808,0.005,True,
+46000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011074388487464226,0.01,True,xq の位置 402
+46000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.453900909550792e-05,0.01,True,コアの 4 番目の節点
+48000,mass_balance,mass_balance,SETTLED,,|mean r|,5.540335129011956e-07,0.0005,True,
+48000,mass_balance,mass_balance,SETTLED,,max r − min r,7.4524044215291e-07,0.005,True,
+48000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,8.646717247263247e-07,0.0001,True,
+48000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.567748644465869e-07,0.0001,True,
+48000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.087221024131395e-06,0.000275,True,
+48000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000303490563369202,0.01,True,
+48000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003497407655039808,0.005,True,
+48000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011074388487464226,0.01,True,xq の位置 402
+48000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.222113852696663e-05,0.01,True,コアの 3 番目の節点
+50000,mass_balance,mass_balance,SETTLED,,|mean r|,5.536568511911112e-07,0.0005,True,
+50000,mass_balance,mass_balance,SETTLED,,max r − min r,7.4524044215291e-07,0.005,True,
+50000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.14713342796168e-07,0.0001,True,
+50000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.592368601315126e-07,0.0001,True,
+50000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.087221024131395e-06,0.000275,True,
+50000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0006601369911596322,0.01,True,
+50000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00030893159742684945,0.005,True,
+50000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011074388487464226,0.01,True,xq の位置 402
+50000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.222113852696663e-05,0.01,True,コアの 3 番目の節点
+52000,mass_balance,mass_balance,SETTLED,,|mean r|,5.954010522917179e-07,0.0005,True,
+52000,mass_balance,mass_balance,SETTLED,,max r − min r,7.478434166561172e-07,0.005,True,
+52000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.080393667069135e-07,0.0001,True,
+52000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.213218480076492e-07,0.0001,True,
+52000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.645736829431371e-06,0.000275,True,
+52000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0007678411903189186,0.01,True,
+52000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00045218933937072464,0.005,True,
+52000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011074388487464226,0.01,True,xq の位置 402
+52000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.5835149095155314e-05,0.01,True,コアの 3 番目の節点
+54000,mass_balance,mass_balance,SETTLED,,|mean r|,5.460600900050328e-07,0.0005,True,
+54000,mass_balance,mass_balance,SETTLED,,max r − min r,7.478434166561172e-07,0.005,True,
+54000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.453175742916426e-07,0.0001,True,
+54000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.21321859692691e-07,0.0001,True,
+54000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.645736829431371e-06,0.000275,True,
+54000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0009676231187416562,0.01,True,
+54000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005467672681159705,0.005,True,
+54000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011485674091815667,0.01,True,xq の位置 1685
+54000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.5835149095155314e-05,0.01,True,コアの 3 番目の節点
+56000,mass_balance,mass_balance,SETTLED,,|mean r|,4.800372092251098e-07,0.0005,True,
+56000,mass_balance,mass_balance,SETTLED,,max r − min r,7.478434166561172e-07,0.005,True,
+56000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.453175824208193e-07,0.0001,True,
+56000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,8.51281087152795e-07,0.0001,True,
+56000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.645736829431371e-06,0.000275,True,
+56000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0009676231187416562,0.01,True,
+56000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005467672681159705,0.005,True,
+56000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011485674091815667,0.01,True,xq の位置 1685
+56000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.5835149095155314e-05,0.01,True,コアの 3 番目の節点
+58000,mass_balance,mass_balance,SETTLED,,|mean r|,5.368501523633365e-07,0.0005,True,
+58000,mass_balance,mass_balance,SETTLED,,max r − min r,7.425136036492701e-07,0.005,True,
+58000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.171876473571441e-07,0.0001,True,
+58000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,8.512810065744382e-07,0.0001,True,
+58000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,7.645736829431371e-06,0.000275,True,
+58000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0009676231187416562,0.01,True,
+58000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005467672681159705,0.005,True,
+58000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011485674091815667,0.01,True,xq の位置 1685
+58000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.955955767786716e-05,0.01,True,コアの 2 番目の節点
+60000,mass_balance,mass_balance,SETTLED,,|mean r|,4.5478505496626164e-07,0.0005,True,
+60000,mass_balance,mass_balance,SETTLED,,max r − min r,7.740968124244637e-07,0.005,True,
+60000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.298316107091525e-07,0.0001,True,
+60000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.978916444188315e-07,0.0001,True,
+60000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.920410841715352e-06,0.000275,True,
+60000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0009676231187416562,0.01,True,
+60000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005467672681159705,0.005,True,
+60000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011485674091815667,0.01,True,xq の位置 1685
+60000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.0001060188018969724,0.01,True,コアの 1 番目の節点
+62000,mass_balance,mass_balance,SETTLED,,|mean r|,3.5054619828352067e-07,0.0005,True,
+62000,mass_balance,mass_balance,SETTLED,,max r − min r,8.305786964838518e-07,0.005,True,
+62000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.29831606903071e-07,0.0001,True,
+62000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.978917218584069e-07,0.0001,True,
+62000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.920410841715352e-06,0.000275,True,
+62000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0009676231187416562,0.01,True,
+62000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0005467672681159705,0.005,True,
+62000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011485674091815667,0.01,True,xq の位置 1685
+62000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],0.00010335406379813268,0.01,True,コアの 1 番目の節点
+64000,mass_balance,mass_balance,SETTLED,,|mean r|,2.309812028932068e-07,0.0005,True,
+64000,mass_balance,mass_balance,SETTLED,,max r − min r,5.319299482605336e-07,0.005,True,
+64000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.993496116999394e-07,0.0001,True,
+64000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.978917215334989e-07,0.0001,True,
+64000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.876997336504928e-06,0.000275,True,
+64000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0007324844363054694,0.01,True,
+64000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00034981145292757587,0.005,True,
+64000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011083213640405987,0.01,True,xq の位置 442
+64000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],9.364416004461904e-05,0.01,True,コアの 1 番目の節点
+66000,mass_balance,mass_balance,SETTLED,,|mean r|,1.8548823222196792e-07,0.0005,True,
+66000,mass_balance,mass_balance,SETTLED,,max r − min r,4.2361293865709474e-07,0.005,True,
+66000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.649892312167748e-07,0.0001,True,
+66000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.978917431937561e-07,0.0001,True,
+66000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.876997336504928e-06,0.000275,True,
+66000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000708704971619234,0.01,True,
+66000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00040774070695158426,0.005,True,
+66000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009732131817652423,0.01,True,xq の位置 450
+66000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],9.364416004461904e-05,0.01,True,コアの 1 番目の節点
+68000,mass_balance,mass_balance,SETTLED,,|mean r|,1.985233576409978e-07,0.0005,True,
+68000,mass_balance,mass_balance,SETTLED,,max r − min r,4.2361293865709474e-07,0.005,True,
+68000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.89273073109326e-07,0.0001,True,
+68000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,6.802409498223867e-07,0.0001,True,
+68000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.577549647637568e-06,0.000275,True,
+68000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000708704971619234,0.01,True,
+68000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00040774070695158426,0.005,True,
+68000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001017591299645737,0.01,True,xq の位置 238
+68000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],9.364416004461904e-05,0.01,True,コアの 1 番目の節点
+70000,mass_balance,mass_balance,SETTLED,,|mean r|,1.1127987705738078e-07,0.0005,True,
+70000,mass_balance,mass_balance,SETTLED,,max r − min r,3.5882006907770783e-07,0.005,True,
+70000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.892730906559049e-07,0.0001,True,
+70000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,5.943418355031159e-07,0.0001,True,
+70000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.577549647637568e-06,0.000275,True,
+70000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0006230603090573439,0.01,True,
+70000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00040774070695158426,0.005,True,
+70000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010450602417111376,0.01,True,xq の位置 238
+70000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],9.364416004461904e-05,0.01,True,コアの 1 番目の節点
+72000,mass_balance,mass_balance,SETTLED,,|mean r|,2.7666516977739016e-07,0.0005,True,
+72000,mass_balance,mass_balance,SETTLED,,max r − min r,1.1486415852240517e-06,0.005,True,
+72000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.892731081134389e-07,0.0001,True,
+72000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1621918778200642e-06,0.0001,True,
+72000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.577549647637568e-06,0.000275,True,
+72000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0006230603090573439,0.01,True,
+72000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003474343597870688,0.005,True,
+72000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010450602417111376,0.01,True,xq の位置 238
+72000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.144889884791716e-05,0.01,True,コアの 4 番目の節点
+74000,mass_balance,mass_balance,SETTLED,,|mean r|,2.4060093101274616e-07,0.0005,True,
+74000,mass_balance,mass_balance,SETTLED,,max r − min r,1.2651790729673085e-06,0.005,True,
+74000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.892730764633286e-07,0.0001,True,
+74000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1621918573118168e-06,0.0001,True,
+74000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.924093896185866e-06,0.000275,True,
+74000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0004117588203511602,0.01,True,
+74000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0004174797738459371,0.005,True,
+74000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001060989242351873,0.01,True,xq の位置 1838
+74000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.419540877085044e-05,0.01,True,コアの 18 番目の節点
+76000,mass_balance,mass_balance,SETTLED,,|mean r|,2.3687989761957997e-07,0.0005,True,
+76000,mass_balance,mass_balance,SETTLED,,max r − min r,1.2651790729673085e-06,0.005,True,
+76000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.522622761254192e-07,0.0001,True,
+76000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.162191908502236e-06,0.0001,True,
+76000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.8052015122479474e-06,0.000275,True,
+76000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005198627525127009,0.01,True,
+76000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0004174797738459371,0.005,True,
+76000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010823398174597543,0.01,True,xq の位置 1848
+76000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.419540877085044e-05,0.01,True,コアの 18 番目の節点
+78000,mass_balance,mass_balance,SETTLED,,|mean r|,1.8552000293841157e-07,0.0005,True,
+78000,mass_balance,mass_balance,SETTLED,,max r − min r,1.2651790729673085e-06,0.005,True,
+78000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,3.372927513673867e-07,0.0001,True,
+78000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1621918625760307e-06,0.0001,True,
+78000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.8052015122479474e-06,0.000275,True,
+78000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0003570638801297932,0.01,True,
+78000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003437361720431478,0.005,True,
+78000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010823398174597543,0.01,True,xq の位置 1848
+78000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.419540877085044e-05,0.01,True,コアの 18 番目の節点
+80000,mass_balance,mass_balance,SETTLED,,|mean r|,2.0210716796660107e-07,0.0005,True,
+80000,mass_balance,mass_balance,SETTLED,,max r − min r,1.2651790729673085e-06,0.005,True,
+80000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,3.372927469312983e-07,0.0001,True,
+80000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.16219182801337e-06,0.0001,True,
+80000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.549271830356361e-06,0.000275,True,
+80000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0003570638801297932,0.01,True,
+80000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00023481623526419582,0.005,True,
+80000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010823398174597543,0.01,True,xq の位置 1848
+80000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.61896961535531e-05,0.01,True,コアの 18 番目の節点
+82000,mass_balance,mass_balance,SETTLED,,|mean r|,2.603462821286971e-07,0.0005,True,
+82000,mass_balance,mass_balance,SETTLED,,max r − min r,1.2651790729673085e-06,0.005,True,
+82000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.4575990020807343e-07,0.0001,True,
+82000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.0344349795111856e-06,0.0001,True,
+82000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.549271830356361e-06,0.000275,True,
+82000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0003579419037613718,0.01,True,
+82000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00023481623526419582,0.005,True,
+82000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001009136087448681,0.01,True,xq の位置 1894
+82000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.088622496987972e-05,0.01,True,コアの 3 番目の節点
+84000,mass_balance,mass_balance,SETTLED,,|mean r|,1.2230459192078906e-07,0.0005,True,
+84000,mass_balance,mass_balance,SETTLED,,max r − min r,4.821842681057621e-07,0.005,True,
+84000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.457598918826513e-07,0.0001,True,
+84000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,4.1099782841459184e-07,0.0001,True,
+84000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.491872136609288e-06,0.000275,True,
+84000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00042858620288299676,0.01,True,
+84000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0002669715573055953,0.005,True,
+84000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001009136087448681,0.01,True,xq の位置 1894
+84000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.088622496987972e-05,0.01,True,コアの 3 番目の節点
+86000,mass_balance,mass_balance,SETTLED,,|mean r|,3.3904944868110773e-07,0.0005,True,
+86000,mass_balance,mass_balance,SETTLED,,max r − min r,1.1332709518279575e-06,0.005,True,
+86000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.856086172135745e-07,0.0001,True,
+86000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.946477952714749e-07,0.0001,True,
+86000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,8.373009310780333e-06,0.000275,True,
+86000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00042858620288299676,0.01,True,
+86000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0002669715573055953,0.005,True,
+86000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.001009136087448681,0.01,True,xq の位置 1894
+86000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.210595244143102e-05,0.01,True,コアの 3 番目の節点
+88000,mass_balance,mass_balance,SETTLED,,|mean r|,3.2684367065486654e-07,0.0005,True,
+88000,mass_balance,mass_balance,SETTLED,,max r − min r,1.1332709518279575e-06,0.005,True,
+88000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.856086301893816e-07,0.0001,True,
+88000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.391110238698813e-07,0.0001,True,
+88000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,8.373009310780333e-06,0.000275,True,
+88000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00042362424721442693,0.01,True,
+88000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003523797654397323,0.005,True,
+88000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009861528972088252,0.01,True,xq の位置 1894
+88000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.579719100854373e-05,0.01,True,コアの 3 番目の節点
+90000,mass_balance,mass_balance,SETTLED,,|mean r|,2.4854537439691306e-07,0.0005,True,
+90000,mass_balance,mass_balance,SETTLED,,max r − min r,1.6030607293756783e-06,0.005,True,
+90000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.437356654732036e-07,0.0001,True,
+90000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.159324670990789e-06,0.0001,True,
+90000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,8.373009310780333e-06,0.000275,True,
+90000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005078130927538282,0.01,True,
+90000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00037887797933355144,0.005,True,
+90000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009861528972088252,0.01,True,xq の位置 1894
+90000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.579719100854373e-05,0.01,True,コアの 3 番目の節点
+92000,mass_balance,mass_balance,SETTLED,,|mean r|,3.4267497649860296e-07,0.0005,True,
+92000,mass_balance,mass_balance,SETTLED,,max r − min r,1.6030607293756783e-06,0.005,True,
+92000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.380793348926095e-07,0.0001,True,
+92000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1593246421989908e-06,0.0001,True,
+92000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,8.373009310780333e-06,0.000275,True,
+92000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005078130927538282,0.01,True,
+92000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00037887797933355144,0.005,True,
+92000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009883619158435053,0.01,True,xq の位置 314
+92000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.579719100854373e-05,0.01,True,コアの 3 番目の節点
+94000,mass_balance,mass_balance,SETTLED,,|mean r|,3.5510798361144704e-07,0.0005,True,
+94000,mass_balance,mass_balance,SETTLED,,max r − min r,1.6030607293756783e-06,0.005,True,
+94000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.380793276093575e-07,0.0001,True,
+94000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.1593246120928966e-06,0.0001,True,
+94000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,8.373009310780333e-06,0.000275,True,
+94000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005788533711248434,0.01,True,
+94000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00037887797933355144,0.005,True,
+94000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009883619158435053,0.01,True,xq の位置 314
+94000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.3764186935518696e-05,0.01,True,コアの 7 番目の節点
+96000,mass_balance,mass_balance,SETTLED,,|mean r|,3.279898824747523e-07,0.0005,True,
+96000,mass_balance,mass_balance,SETTLED,,max r − min r,1.6030607293756783e-06,0.005,True,
+96000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,5.380793364099864e-07,0.0001,True,
+96000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.159324662493058e-06,0.0001,True,
+96000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.411566169399862e-06,0.000275,True,
+96000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005788533711248434,0.01,True,
+96000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00037887797933355144,0.005,True,
+96000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0008295289274373729,0.01,True,xq の位置 1867
+96000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.484583648094913e-05,0.01,True,コアの 5 番目の節点
+98000,mass_balance,mass_balance,SETTLED,,|mean r|,1.6584584669615996e-09,0.0005,True,
+98000,mass_balance,mass_balance,SETTLED,,max r − min r,1.704481284200734e-06,0.005,True,
+98000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.896580438068262e-07,0.0001,True,
+98000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.014823271879843e-06,0.0001,True,
+98000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.3941489627764554e-06,0.000275,True,
+98000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0005788533711248434,0.01,True,
+98000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00037887797933355144,0.005,True,
+98000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0008637252927545802,0.01,True,xq の位置 1564
+98000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.5429023919846614e-05,0.01,True,コアの 10 番目の節点
+100000,mass_balance,mass_balance,SETTLED,,|mean r|,6.711280164899014e-08,0.0005,True,
+100000,mass_balance,mass_balance,SETTLED,,max r − min r,1.704481284200734e-06,0.005,True,
+100000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.89658066046451e-07,0.0001,True,
+100000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.014823238180606e-06,0.0001,True,
+100000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.312285213359246e-06,0.000275,True,
+100000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000444895263229661,0.01,True,
+100000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003509528310145643,0.005,True,
+100000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0008637252927545802,0.01,True,xq の位置 1564
+100000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.073178276775678e-05,0.01,True,コアの 0 番目の節点
+102000,mass_balance,mass_balance,SETTLED,,|mean r|,2.3449921286355447e-07,0.0005,True,
+102000,mass_balance,mass_balance,SETTLED,,max r − min r,1.704481284200734e-06,0.005,True,
+102000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.896580952450416e-07,0.0001,True,
+102000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.0148231112783504e-06,0.0001,True,
+102000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.305151928285511e-06,0.000275,True,
+102000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000444895263229661,0.01,True,
+102000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00032487322656683804,0.005,True,
+102000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010472843137376842,0.01,True,xq の位置 1593
+102000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.073178276775678e-05,0.01,True,コアの 0 番目の節点
+104000,mass_balance,mass_balance,SETTLED,,|mean r|,9.443940584496951e-08,0.0005,True,
+104000,mass_balance,mass_balance,SETTLED,,max r − min r,1.359246281958452e-06,0.005,True,
+104000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.614540574251982e-07,0.0001,True,
+104000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.536410833687778e-07,0.0001,True,
+104000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.305151928285511e-06,0.000275,True,
+104000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.000444895263229661,0.01,True,
+104000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00032487322656683804,0.005,True,
+104000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010472843137376842,0.01,True,xq の位置 1593
+104000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.060574701957518e-05,0.01,True,コアの 0 番目の節点
+106000,mass_balance,mass_balance,SETTLED,,|mean r|,4.7099199566603365e-08,0.0005,True,
+106000,mass_balance,mass_balance,SETTLED,,max r − min r,1.359246281958452e-06,0.005,True,
+106000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.614540634579517e-07,0.0001,True,
+106000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.536411372119662e-07,0.0001,True,
+106000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.995211853791147e-06,0.000275,True,
+106000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00032585091971348845,0.01,True,
+106000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00022814698338212425,0.005,True,
+106000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010472843137376842,0.01,True,xq の位置 1593
+106000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.168456667448967e-05,0.01,True,コアの 15 番目の節点
+108000,mass_balance,mass_balance,SETTLED,,|mean r|,9.055742512071497e-08,0.0005,True,
+108000,mass_balance,mass_balance,SETTLED,,max r − min r,1.359246281958452e-06,0.005,True,
+108000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,6.61454056050423e-07,0.0001,True,
+108000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.536410850887273e-07,0.0001,True,
+108000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.4182532210612635e-06,0.000275,True,
+108000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00038171317287005735,0.01,True,
+108000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00022621820775402257,0.005,True,
+108000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010472843137376842,0.01,True,xq の位置 1593
+108000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.168456667448967e-05,0.01,True,コアの 15 番目の節点
+110000,mass_balance,mass_balance,SETTLED,,|mean r|,1.5486317930691145e-07,0.0005,True,
+110000,mass_balance,mass_balance,SETTLED,,max r − min r,9.734117568412733e-07,0.005,True,
+110000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,3.258486794444387e-07,0.0001,True,
+110000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.402170425935528e-07,0.0001,True,
+110000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.4182532210612635e-06,0.000275,True,
+110000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00026545286946344504,0.01,True,
+110000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00022621820775402257,0.005,True,
+110000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009367396135995243,0.01,True,xq の位置 525
+110000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.732410465093009e-05,0.01,True,コアの 0 番目の節点
+112000,mass_balance,mass_balance,SETTLED,,|mean r|,1.4908229870203552e-07,0.0005,True,
+112000,mass_balance,mass_balance,SETTLED,,max r − min r,9.734117568412733e-07,0.005,True,
+112000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,1.9336910785091586e-07,0.0001,True,
+112000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,9.402170162768612e-07,0.0001,True,
+112000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.00447773518664e-06,0.000275,True,
+112000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00026545286946344504,0.01,True,
+112000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0002157321862080036,0.005,True,
+112000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010636950993569982,0.01,True,xq の位置 423
+112000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.168456667448967e-05,0.01,True,コアの 15 番目の節点
+114000,mass_balance,mass_balance,SETTLED,,|mean r|,1.1089199448829449e-07,0.0005,True,
+114000,mass_balance,mass_balance,SETTLED,,max r − min r,8.637389420439575e-07,0.005,True,
+114000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.192597836722265e-07,0.0001,True,
+114000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.0069659744360622e-06,0.0001,True,
+114000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,4.00447773518664e-06,0.000275,True,
+114000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00026545286946344504,0.01,True,
+114000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00014756508973141208,0.005,True,
+114000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010636950993569982,0.01,True,xq の位置 423
+114000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],6.168456667448967e-05,0.01,True,コアの 15 番目の節点
+116000,mass_balance,mass_balance,SETTLED,,|mean r|,1.3848293434311297e-07,0.0005,True,
+116000,mass_balance,mass_balance,SETTLED,,max r − min r,8.637389420439575e-07,0.005,True,
+116000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.192597965472548e-07,0.0001,True,
+116000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.0069659775757973e-06,0.0001,True,
+116000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.0876210941908084e-06,0.000275,True,
+116000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00029299515955649724,0.01,True,
+116000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00012434156333249874,0.005,True,
+116000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010636950993569982,0.01,True,xq の位置 423
+116000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.875593575339379e-05,0.01,True,コアの 15 番目の節点
+118000,mass_balance,mass_balance,SETTLED,,|mean r|,2.808307674862762e-07,0.0005,True,
+118000,mass_balance,mass_balance,SETTLED,,max r − min r,1.3823008549493338e-06,0.005,True,
+118000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.394599476522168e-07,0.0001,True,
+118000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.2055365331828098e-06,0.0001,True,
+118000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.0876210941908084e-06,0.000275,True,
+118000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0003920434365145553,0.01,True,
+118000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003192174511067597,0.005,True,
+118000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010636950993569982,0.01,True,xq の位置 423
+118000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.871653795573615e-05,0.01,True,コアの 1 番目の節点
+120000,mass_balance,mass_balance,SETTLED,,|mean r|,2.2987748539752024e-07,0.0005,True,
+120000,mass_balance,mass_balance,SETTLED,,max r − min r,1.3823008549493338e-06,0.005,True,
+120000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.3945993721433616e-07,0.0001,True,
+120000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,1.2055365659754134e-06,0.0001,True,
+120000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.7225235871574114e-06,0.000275,True,
+120000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00044206791010026336,0.01,True,
+120000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003192174511067597,0.005,True,
+120000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0009467615830538456,0.01,True,xq の位置 1166
+120000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],4.797660443210082e-05,0.01,True,コアの 3 番目の節点
+122000,mass_balance,mass_balance,SETTLED,,|mean r|,4.7331815513265937e-07,0.0005,True,
+122000,mass_balance,mass_balance,SETTLED,,max r − min r,9.597091543513546e-07,0.005,True,
+122000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.394599500589018e-07,0.0001,True,
+122000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.888898473160776e-07,0.0001,True,
+122000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,3.7225235871574114e-06,0.000275,True,
+122000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00044206791010026336,0.01,True,
+122000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.0003192174511067597,0.005,True,
+122000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0010399899297741655,0.01,True,xq の位置 109
+122000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],7.20316996355753e-05,0.01,True,コアの 0 番目の節点
+124000,mass_balance,mass_balance,SETTLED,,|mean r|,4.0955965511133834e-07,0.0005,True,
+124000,mass_balance,mass_balance,SETTLED,,max r − min r,9.79456076494803e-07,0.005,True,
+124000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.3945993491262937e-07,0.0001,True,
+124000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,7.888898704248956e-07,0.0001,True,
+124000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.387048722800159e-06,0.000275,True,
+124000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00044206791010026336,0.01,True,
+124000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00030681221498760763,0.005,True,
+124000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011017836889615218,0.01,True,xq の位置 136
+124000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.936615622108625e-05,0.01,True,コアの 0 番目の節点
+126000,mass_balance,mass_balance,SETTLED,,|mean r|,4.011308913078209e-07,0.0005,True,
+126000,mass_balance,mass_balance,SETTLED,,max r − min r,9.79456076494803e-07,0.005,True,
+126000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.1977285884119366e-07,0.0001,True,
+126000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,8.48757306119647e-07,0.0001,True,
+126000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,6.387048722800159e-06,0.000275,True,
+126000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.00044206791010026336,0.01,True,
+126000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00030681221498760763,0.005,True,
+126000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011303995380185228,0.01,True,xq の位置 131
+126000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.936615622108625e-05,0.01,True,コアの 0 番目の節点
+128000,mass_balance,mass_balance,SETTLED,,|mean r|,4.5235165363797925e-07,0.0005,True,
+128000,mass_balance,mass_balance,SETTLED,,max r − min r,9.79456076494803e-07,0.005,True,
+128000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.1977285420125596e-07,0.0001,True,
+128000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,8.487572532639782e-07,0.0001,True,
+128000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.067289250426654e-06,0.000275,True,
+128000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0004721918703154415,0.01,True,
+128000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00032613869265835094,0.005,True,
+128000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0011999475419965933,0.01,True,xq の位置 1202
+128000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],5.936615622108625e-05,0.01,True,コアの 0 番目の節点
+130000,mass_balance,mass_balance,SETTLED,,|mean r|,3.314543253792223e-07,0.0005,True,
+130000,mass_balance,mass_balance,SETTLED,,max r − min r,9.79456076494803e-07,0.005,True,
+130000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_in,4.197728367364377e-07,0.0001,True,
+130000,mass_balance,mass_balance,SETTLED,,(max − min)/mean ṁ_out,8.48757320563531e-07,0.0001,True,
+130000,exit_core_mach,exit_core_mach,SETTLED,,出口コア M の幅 max − min,5.067289250426654e-06,0.000275,True,
+130000,line_mach,line_mach,SETTLED,,最大偏差 maxabs の幅 [%pt],0.0007726763896487299,0.01,True,
+130000,line_mach,line_mach,SETTLED,,片振幅 halfamp の幅 [%pt],0.00032613869265835094,0.005,True,
+130000,line_mach,line_mach,SETTLED,,位置ごとの d の幅の最大 [%pt],0.0012350578713182792,0.01,True,xq の位置 429
+130000,exit_flow_angle,exit_flow_angle,SETTLED,,節点ごとの流れ角の幅の最大 [deg],8.492804769211601e-05,0.01,True,コアの 0 番目の節点

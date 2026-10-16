@@ -1,0 +1,861 @@
+{
+ "schema": "forge.settle_virtual_stop/v1",
+ "plan": "plans/active/tooling-settle-convergence-and-monitor.md §6「V3(b)・V4 の実施」(1) run_0012_ns_free (codex diagnose 2026-10-16-settle-v3b-v4-preregistration の Major 1)",
+ "run_dir": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130",
+ "created": "2026-10-16T02:49:55+00:00",
+ "tool": "solver_density_cuda/tools/settle_virtual_stop.py",
+ "tool_sha256": "d0125068d9d5b6b532e55b02cdc2758c7ffc4190cb591f3ef9a609ab35c1edd8",
+ "settle_sha256": "125b0c5c302ee8c278a99ac93a2eb954bb8dba9e6ea398ee89cd6d307fbe216d",
+ "params": {
+  "span": 80000,
+  "ts_max": 50000,
+  "criteria": "/home/ubuntu/m55_p17/replay/criteria_v3_run_0017_ns_float_free130.yaml"
+ },
+ "reasons": [],
+ "incomplete": [],
+ "b_evidence": [],
+ "notes": [
+  "基準は --criteria /home/ubuntu/m55_p17/replay/criteria_v3_run_0017_ns_float_free130.yaml (run の settle_criteria.yaml の代わり; run の基準は使わない)"
+ ],
+ "criteria": {
+  "path": "/home/ubuntu/m55_p17/replay/criteria_v3_run_0017_ns_float_free130.yaml",
+  "sha256": "39d923b6e472cec636359d7714d9ff6f5abe1d862669b23f0a673bebb1f90cb8",
+  "provisional": true,
+  "W": 10000,
+  "min_points": 6,
+  "out_step_interval": 2000,
+  "start_step": 0,
+  "hold": 0,
+  "hold_source": "settle_criteria.yaml の hold",
+  "first_judgeable": 22000,
+  "targets": [
+   {
+    "name": "exit_core_mach",
+    "kind": "exit_core_mach",
+    "tolerance": "|M − M(t_s)| ≤ tol 0.000275"
+   },
+   {
+    "name": "line_mach",
+    "kind": "line_mach",
+    "tolerance": "max_k |d_k − d_k(t_s)| ≤ tol_pos 0.01 %pt"
+   },
+   {
+    "name": "exit_flow_angle",
+    "kind": "exit_flow_angle",
+    "tolerance": "max_i |θ_i − θ_i(t_s)| ≤ tol 0.01 deg"
+   }
+  ],
+  "content": {
+   "schema": "forge.settle_criteria/v1",
+   "grid": {
+    "out_step_interval": 2000,
+    "start_step": 0,
+    "segment": {
+     "stage": "main",
+     "start_record": "MAIN_STAGE_STARTED",
+     "config_fnv_key": "main_config.fnv",
+     "criteria_sha256_key": "settle_criteria.sha256",
+     "stage_manifest": "stage_manifest.json",
+     "stage_tag": "main",
+     "match": "cfg_fnv"
+    }
+   },
+   "window": {
+    "W": 10000,
+    "min_points": 6
+   },
+   "hold": 0,
+   "source": {
+    "preset": "wt_nozzle_v3",
+    "preset_version": "wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」); 残差は非有限の見張りだけ; 壁の熱流 (節点ごと) も外す (2026-10-16 ユーザ決定「floatで良い」); 線 η 0.03)",
+    "preset_sha256": "349213b7170d2d92ee260332fde7a16a3636ec11dc80b1c100029dff30d593f9",
+    "evaluate_settle": {
+     "preset": "wt_nozzle_v3",
+     "x_range_m": [
+      4.0,
+      7.95
+     ]
+    },
+    "evaluate_settle_sha256": "56f3fce7f33167d7bce6694c049068eef9481ce3a62016fe3de42ea81a427ab4",
+    "generator": "design/forge_design/evaluate/settle_presets.py",
+    "generator_sha256": "2ce1ceef47dac294b0adf5b55fe6438179ffb2b5d2f21c547f42fb8685393016"
+   },
+   "notes": [
+    "grid.start_step は本段の forge の起動 (step 0)。segment は判定区間の識別 (設計チェーンでは本段の開始の通知 MAIN_STAGE_STARTED を指す; main_stage_segment、plan §5.1 #6)。None = 未記録",
+    "閾値は暫定 (provisional: true; plan §6 V3 で決める)",
+    "残差を止める判定から外す (2026-10-16 ユーザ決定; plan §4.4)。壁の熱流 (節点ごと) も外す (同、float の局所の揺れ)。判定は流量の収支 + 目的の量 (区間 1 万 step・保持なしは v2 と同じ)。残差は非有限の見張り (residual_finite) だけで、非有限なら DIVERGED",
+    "停止規則 v2 の最初の判定は量によらず開始 + 2 × 10,000 + 間隔 (間隔 2,000 なら 22,000; v2 と同じ)。判定の部品だけを当てる (check_settled.py --end-step・--scan) と、残差の直前の区間が要らないので開始 + 10,000 + 間隔から判定できる"
+   ],
+   "structured": {
+    "ni": 4810,
+    "nj": 92,
+    "scale_m": 0.1002434996788185,
+    "mesh_file": "nozzle.h5"
+   },
+   "excluded": [
+    {
+     "kind": "residual",
+     "name": "residual",
+     "reason": "残差を止める判定から外した (2026-10-16 ユーザ決定「floatにしようか。残さは監視から外そう」、plan §4.4・§5.1 #8): float のビルドでは目的の量・流量は FP64 とほぼ同じなのに残差 (ρ) の振幅が約 0.585 桁 (FP64 は約 0.02 桁) で、残差の条件が通らず止まらなかった (card plan §6 V8)。発散は residual_finite (非有限の見張り、判定の条件ではない) で見る"
+    },
+    {
+     "kind": "wall_heat_nodes",
+     "name": "wall_heat_nodes",
+     "reason": "壁の熱流 (節点ごと) を止める判定から外した (2026-10-16 ユーザ決定「設計を早く進めるのが第一だから、floatで良い」、plan §4.4・§5.1 #8): float のビルドでは case/71 の x 0.367 m・r 0.161 m の壁の節点の熱量が窓の中で ±12 % 往復し (FP64 では収まる)、節点ごとの許容の 171 倍で止まらなかった (v3 の再生、B ~/m55_p5/v3_replay/)。冷却壁の第一層が極端に薄く (半径の 3.7e−7)、float では壁の法線の温度の勾配が丸めで揺れる見立て (未確認)。局所の壁の熱流を使う場面は FP64 で確かめる"
+    }
+   ],
+   "preconditions": [
+    {
+     "quantity": "mass_balance",
+     "requires": "solverConfig output.boundaryMassflux: 1",
+     "satisfied": true
+    },
+    {
+     "quantity": "exit_core_mach・line_mach・exit_flow_angle",
+     "requires": "solverConfig output.nodeProbeFile (節点の表; probe_node_ids)",
+     "satisfied": true
+    }
+   ],
+   "quantities": [
+    {
+     "kind": "residual_finite",
+     "name": "residual_finite",
+     "thresholds": {},
+     "notes": [
+      "残差の非有限の見張り (判定の条件ではない): 区間の残差の行に非有限があれば DIVERGED、行・列の欠けは判定不能",
+      "見張る列は残差の履歴の全数値列。必要な列 (欠けたら判定不能) は ['rms_ro', 'rms_roUx', 'rms_roUy', 'rms_roe', 'rms_roK', 'rms_roOmega', 'rms_roY0', 'rms_roY1'] (forge の残差の列の規則)"
+     ],
+     "file": "residual_history.csv",
+     "required": [
+      "rms_ro",
+      "rms_roUx",
+      "rms_roUy",
+      "rms_roe",
+      "rms_roK",
+      "rms_roOmega",
+      "rms_roY0",
+      "rms_roY1"
+     ]
+    },
+    {
+     "kind": "mass_balance",
+     "name": "mass_balance",
+     "thresholds": {
+      "mean_abs": 0.0005,
+      "swing": 0.005,
+      "mdot_change_rel": 0.0001,
+      "provisional": true
+     },
+     "notes": [
+      "入口・出口は bcondConfig の kind から (inlet_* / outlet_*・outflow); 記録だけの境界 physID [3, 4]"
+     ],
+     "file": "boundary_massflux.csv",
+     "inlet": [
+      1
+     ],
+     "outlet": [
+      2
+     ]
+    },
+    {
+     "kind": "exit_core_mach",
+     "name": "exit_core_mach",
+     "thresholds": {
+      "tol": 0.000275,
+      "provisional": true
+     },
+     "notes": [
+      "tol = 5e-05 × M_d (0.1 × 0.05 % × M_d、M_d 5.5)"
+     ],
+     "eta_range": [
+      0.05,
+      0.7
+     ],
+     "nodes_file": "res_nodes_{step}.h5"
+    },
+    {
+     "kind": "line_mach",
+     "name": "line_mach",
+     "thresholds": {
+      "tol_maxabs": 0.01,
+      "tol_halfamp": 0.005,
+      "tol_pos": 0.01,
+      "provisional": true
+     },
+     "notes": [
+      "x 範囲: evaluate.settle.x_range_m"
+     ],
+     "eta": 0.03,
+     "x_range_m": [
+      4.0,
+      7.95
+     ],
+     "n": 2001,
+     "Md": 5.5,
+     "nodes_file": "res_nodes_{step}.h5"
+    },
+    {
+     "kind": "exit_flow_angle",
+     "name": "exit_flow_angle",
+     "thresholds": {
+      "tol": 0.01,
+      "provisional": true
+     },
+     "eta_range": [
+      0.05,
+      0.7
+     ],
+     "nodes_file": "res_nodes_{step}.h5"
+    }
+   ]
+  }
+ },
+ "data_last": {
+  "step": 130000,
+  "sources": [
+   {
+    "step": 130000,
+    "what": "mass_balance: 流量の CSV の最後"
+   },
+   {
+    "step": 130000,
+    "what": "exit_core_mach: 節点の h5 の最後"
+   },
+   {
+    "step": 130000,
+    "what": "line_mach: 節点の h5 の最後"
+   },
+   {
+    "step": 130000,
+    "what": "exit_flow_angle: 節点の h5 の最後"
+   }
+  ]
+ },
+ "grid": {
+  "first": 22000,
+  "last": 130000,
+  "n_points": 55
+ },
+ "v2_emulation": {
+  "request": {
+   "kind": "settled",
+   "step": 32000,
+   "settled_since": 32000,
+   "reason": "3 条件が step 32000 から 0 step 続いた (保持 0)"
+  },
+  "hold": {
+   "hold_steps": 0,
+   "start": 32000,
+   "reached": [
+    32000
+   ],
+   "breaks": [],
+   "reached_at_cap": null
+  },
+  "cap": {
+   "value": 130000,
+   "source": "MAIN_STAGE_STARTED の main_config.nStepOuter"
+  },
+  "source": "design/forge_design/evaluate/stop_rule.py:624–637 (_hold_step)・1558–1588 (要求の分岐)・1297–1310 (judge_summary)・1181 (first)・1124 (hold)"
+ },
+ "t_s": 32000,
+ "settled_since": 32000,
+ "span_end": 112000,
+ "span": {
+  "t_s": 32000,
+  "end": 112000,
+  "grid_points": [
+   32000,
+   34000,
+   36000,
+   38000,
+   40000,
+   42000,
+   44000,
+   46000,
+   48000,
+   50000,
+   52000,
+   54000,
+   56000,
+   58000,
+   60000,
+   62000,
+   64000,
+   66000,
+   68000,
+   70000,
+   72000,
+   74000,
+   76000,
+   78000,
+   80000,
+   82000,
+   84000,
+   86000,
+   88000,
+   90000,
+   92000,
+   94000,
+   96000,
+   98000,
+   100000,
+   102000,
+   104000,
+   106000,
+   108000,
+   110000,
+   112000
+  ],
+  "n_grid_points": 41,
+  "a": {
+   "exit_core_mach": {
+    "kind": "exit_core_mach",
+    "tolerance": "|M − M(t_s)| ≤ tol 0.000275",
+    "n_points": 41,
+    "max_ratio": 0.05831985663850115,
+    "at_step": 86000,
+    "where": "出口コアの平均",
+    "diff": 1.6037960575587817e-05,
+    "tol": 0.000275,
+    "n_exceeded": 0,
+    "first_exceeded": null,
+    "exceeded": [],
+    "status": "内"
+   },
+   "line_mach": {
+    "kind": "line_mach",
+    "tolerance": "max_k |d_k − d_k(t_s)| ≤ tol_pos 0.01 %pt",
+    "n_points": 41,
+    "max_ratio": 0.12448383367114069,
+    "at_step": 68000,
+    "where": "xq の位置 614 (x 5.21265 m)",
+    "diff": 0.0012448383367114069,
+    "tol": 0.01,
+    "n_exceeded": 0,
+    "first_exceeded": null,
+    "exceeded": [],
+    "status": "内"
+   },
+   "exit_flow_angle": {
+    "kind": "exit_flow_angle",
+    "tolerance": "max_i |θ_i − θ_i(t_s)| ≤ tol 0.01 deg",
+    "n_points": 41,
+    "max_ratio": 0.010323222507679862,
+    "at_step": 60000,
+    "where": "コアの 0 番目の節点",
+    "diff": 0.00010323222507679862,
+    "tol": 0.01,
+    "n_exceeded": 0,
+    "first_exceeded": null,
+    "exceeded": [],
+    "status": "内"
+   }
+  },
+  "b_not_settled": []
+ },
+ "target_only": {
+  "used_for_verdict": false,
+  "definition": "残差 (residual) と流量の収支 (mass_balance) の条件を外し、目的の量 (exit_core_mach, line_mach, exit_flow_angle, wall_heat_nodes) の verdict の AND (優先は settle と同じ) に停止規則 v2 と同じ保持の規則・要求の分岐を当てた停止候補 t_s′。t_s′ から span の (a) は本検証と同じ差、(b) は全体でなく目的の量の verdict。残差の条件が独立の情報を足すかの確認の材料",
+  "request": {
+   "kind": "settled",
+   "step": 30000,
+   "settled_since": 30000,
+   "reason": "3 条件が step 30000 から 0 step 続いた (保持 0)"
+  },
+  "hold": {
+   "hold_steps": 0,
+   "start": 30000,
+   "reached": [
+    30000
+   ],
+   "breaks": [],
+   "reached_at_cap": null
+  },
+  "t_s_prime": 30000,
+  "settled_since": 30000,
+  "span_end": 110000,
+  "relation": "t_s′ < t_s (2000 step 早い)",
+  "outcome": "超過なし",
+  "evidence": [],
+  "incomplete": [],
+  "span": {
+   "grid_points": [
+    30000,
+    32000,
+    34000,
+    36000,
+    38000,
+    40000,
+    42000,
+    44000,
+    46000,
+    48000,
+    50000,
+    52000,
+    54000,
+    56000,
+    58000,
+    60000,
+    62000,
+    64000,
+    66000,
+    68000,
+    70000,
+    72000,
+    74000,
+    76000,
+    78000,
+    80000,
+    82000,
+    84000,
+    86000,
+    88000,
+    90000,
+    92000,
+    94000,
+    96000,
+    98000,
+    100000,
+    102000,
+    104000,
+    106000,
+    108000,
+    110000
+   ],
+   "n_grid_points": 41,
+   "a": {
+    "exit_core_mach": {
+     "kind": "exit_core_mach",
+     "tolerance": "|M − M(t_s)| ≤ tol 0.000275",
+     "n_points": 41,
+     "max_ratio": 0.08343051039038196,
+     "at_step": 86000,
+     "where": "出口コアの平均",
+     "diff": 2.2943390357355042e-05,
+     "tol": 0.000275,
+     "n_exceeded": 0,
+     "first_exceeded": null,
+     "exceeded": [],
+     "status": "内"
+    },
+    "line_mach": {
+     "kind": "line_mach",
+     "tolerance": "max_k |d_k − d_k(t_s)| ≤ tol_pos 0.01 %pt",
+     "n_points": 41,
+     "max_ratio": 0.11962153763978023,
+     "at_step": 54000,
+     "where": "xq の位置 906 (x 5.78935 m)",
+     "diff": 0.0011962153763978023,
+     "tol": 0.01,
+     "n_exceeded": 0,
+     "first_exceeded": null,
+     "exceeded": [],
+     "status": "内"
+    },
+    "exit_flow_angle": {
+     "kind": "exit_flow_angle",
+     "tolerance": "max_i |θ_i − θ_i(t_s)| ≤ tol 0.01 deg",
+     "n_points": 41,
+     "max_ratio": 0.009480903643312846,
+     "at_step": 82000,
+     "where": "コアの 3 番目の節点",
+     "diff": 9.480903643312847e-05,
+     "tol": 0.01,
+     "n_exceeded": 0,
+     "first_exceeded": null,
+     "exceeded": [],
+     "status": "内"
+    }
+   },
+   "b_not_settled": []
+  },
+  "notes": [],
+  "b_breakdown": {
+   "a_cumulative_exceedance": {
+    "present": false,
+    "quantities": {},
+    "definition": "目的の量の t_s の値からの差が許容を超えた (累積のドリフト; 節点の値の非有限を含む)"
+   },
+   "b_persistence_violation": {
+    "present": false,
+    "n_grid_points": 0,
+    "first_step": null,
+    "by_quantity": {},
+    "definition": "span の格子点で全条件の判定が SETTLED でない (どの条件が崩れたか)。これだけの B は目的の量を早く止めすぎた証明ではない"
+   }
+  }
+ },
+ "verdict": "A",
+ "b_breakdown": {
+  "a_cumulative_exceedance": {
+   "present": false,
+   "quantities": {},
+   "definition": "目的の量の t_s の値からの差が許容を超えた (累積のドリフト; 節点の値の非有限を含む)"
+  },
+  "b_persistence_violation": {
+   "present": false,
+   "n_grid_points": 0,
+   "first_step": null,
+   "by_quantity": {},
+   "definition": "span の格子点で全条件の判定が SETTLED でない (どの条件が崩れたか)。これだけの B は目的の量を早く止めすぎた証明ではない"
+  }
+ },
+ "extra_record": {
+  "definition": "目的の量 (exit_core_mach, line_mach, exit_flow_angle, wall_heat_nodes) がすべて SETTLED なのに residual か mass_balance が SETTLED でない格子点",
+  "failed": {
+   "count": 1,
+   "steps": [
+    {
+     "step": 30000,
+     "region": "before_ts",
+     "residual_mass": {
+      "mass_balance": "NOT_SETTLED"
+     }
+    }
+   ],
+   "by_region": {
+    "before_ts": 1
+   }
+  },
+  "indeterminate": {
+   "count": 0,
+   "steps": [],
+   "by_region": {}
+  },
+  "target_only_settled_points": 51
+ },
+ "provisional": true,
+ "figures": [
+  "/home/ubuntu/m55_p17/replay/run_0017_ns_float_free130/deviation_from_ts.png",
+  "/home/ubuntu/m55_p17/replay/run_0017_ns_float_free130/grid_verdicts.png"
+ ],
+ "timing_s": {
+  "replay_s": 6.084829754000111,
+  "values_s": 0.4253817759999947,
+  "outputs_s": 1.151927884000088,
+  "total_s": 7.681538635999914
+ },
+ "files": [
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/boundary_massflux.csv",
+   "bytes": 6978,
+   "sha256": "1a3033f66ff6b56ea901109be2a2f3c81777e52fc325cb1d12a2b3422ca96f64"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/nozzle.h5",
+   "bytes": 174884016,
+   "sha256": "019d1a51517ac98ca48df8f294986530d667ac5db786dae730f3ab37cc5e4b11"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_100000.h5",
+   "bytes": 178804,
+   "sha256": "c1bfdd248e458d35868946d9100ba8c864411bfe419d574493117aeb431820b5"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_102000.h5",
+   "bytes": 178804,
+   "sha256": "deb298923295d6a5225ea1f61249bd24c53c6af72b4b36cef8a0b5f30be415c2"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_104000.h5",
+   "bytes": 178804,
+   "sha256": "4dd25becf11f0d31af45724ba900aa6f2a3dee798ad85535b52a07dfa2aba36e"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_106000.h5",
+   "bytes": 178804,
+   "sha256": "a1f326bb19fd08c39103728bc36a6910fb4a4875bc764f8bd1cfddccf4cda1a5"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_108000.h5",
+   "bytes": 178804,
+   "sha256": "82488f608707bbc1e6f6bf0d317f079d06cd83873dcd13a6382cafa28b4f9803"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_110000.h5",
+   "bytes": 178804,
+   "sha256": "2cb9fb23f7382a4d6d0d3b1a1438c0a11a7e395789a92be123a4df3edc1b0de5"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_112000.h5",
+   "bytes": 178804,
+   "sha256": "8d1e6659f37cb795979b937631e51b5641c20f21376b64d8f13c90b87e38ade6"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_114000.h5",
+   "bytes": 178804,
+   "sha256": "385c7d7b5163b7c6f27ee70750688d6f53cdd0f769723bcc838f30a05fe5d841"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_116000.h5",
+   "bytes": 178804,
+   "sha256": "55966125fa3ece9ead6bb6c8cde06401c9aa8fa27cf292fc36b7a59a4aaedd1e"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_118000.h5",
+   "bytes": 178804,
+   "sha256": "4827eb0da11639a1acfd7fda742b23e2d7a544236670c30adc643830df87703b"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_12000.h5",
+   "bytes": 178804,
+   "sha256": "8c471f8b155a5ec50d670b8d341502049ea2fd88c0b5fe53128bfc011be86769"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_120000.h5",
+   "bytes": 178804,
+   "sha256": "e8a981d84865c7404bb848042745432247a7db9dca34fdac1aee1fe073a4c6e0"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_122000.h5",
+   "bytes": 178804,
+   "sha256": "fbd44dd30461a77805820bc9dc165989be37e2608dadddf31e7bd67677ad125a"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_124000.h5",
+   "bytes": 178804,
+   "sha256": "a79e841b57ed0d25bb03749bb7e9b0bad8bd28a5c479abc35d5a7952f9672270"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_126000.h5",
+   "bytes": 178804,
+   "sha256": "1c5023489c2d897102099a603ce72795e4736b01ca459a86426d804452c6abaf"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_128000.h5",
+   "bytes": 178804,
+   "sha256": "2d41584532071ded19b8ef87c4e9956dcd3df79664ff45f246b6cd1749925bd1"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_130000.h5",
+   "bytes": 178804,
+   "sha256": "bcc51771e95eba4cbdafd80b1d5b4e62d5ff20e16343c252a05e88fc1b9d9a6d"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_14000.h5",
+   "bytes": 178804,
+   "sha256": "8e9de0c374a3cf40e40643ee04221c81c9a82c2afc9d365cdb0130cb71f441b2"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_16000.h5",
+   "bytes": 178804,
+   "sha256": "92cc4f7629b8821bc36fa8dcf555a2b9e742d294c30f996770cb50a874ac138f"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_18000.h5",
+   "bytes": 178804,
+   "sha256": "5525c55adf50b277304c44acc91f18f6b9da06263dfb85e7a2a0f2bd800ff3e4"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_20000.h5",
+   "bytes": 178804,
+   "sha256": "8c36d47ffb412ccbc40106268fa07bf30a3c399fe488a9911e44c75b85fa6d51"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_22000.h5",
+   "bytes": 178804,
+   "sha256": "bdc583e3c44766a36146fada4581aca627da7d087e2d255b8dc3ac0c0388dbcd"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_24000.h5",
+   "bytes": 178804,
+   "sha256": "730895c61b9f29dc523359f96f4aaf4b7b29703598fb675a8932200b07356192"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_26000.h5",
+   "bytes": 178804,
+   "sha256": "a71f02b59f26950cc3d2b84bf706b74b4d1756598376e1a54e14f0b0022f44df"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_28000.h5",
+   "bytes": 178804,
+   "sha256": "804c8c6b72254d69f0d7ab96ca5bca069893b6bfe804c430fc875fe7d8237da9"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_30000.h5",
+   "bytes": 178804,
+   "sha256": "8f389956e59fa4f963769a6d8049566f42dea71920a409becd96246b281e4847"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_32000.h5",
+   "bytes": 178804,
+   "sha256": "e5637b3408d6a26aae2c17f4671434b6bed7db3ff36aaca7e7c0c4dc9061e7f4"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_34000.h5",
+   "bytes": 178804,
+   "sha256": "df588a1f911fdbf4516cbc590b6ffb59e026a733affeefcb179adb56789b212f"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_36000.h5",
+   "bytes": 178804,
+   "sha256": "20bf47b38dca2247da016bc4c218ece960cce3a6ffa6654521536605ad71f3c1"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_38000.h5",
+   "bytes": 178804,
+   "sha256": "db7e9b0f6cbb26a11715d506c017395b6e728c32143aeed6e9f10dfcb043bcb3"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_40000.h5",
+   "bytes": 178804,
+   "sha256": "3fd4143d8e4e25aeda3511afa3e432d6daca11f20fa6d285ab907d0feaad8010"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_42000.h5",
+   "bytes": 178804,
+   "sha256": "2932ced7407c6fc8674e5899e07914ae65b5cf2170d4b8d9fcb05178698f4e7e"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_44000.h5",
+   "bytes": 178804,
+   "sha256": "5dd7a6f6579f5bd14ca2cce2bc19d862ae3ce51f631dc818bf5e1f12c209a404"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_46000.h5",
+   "bytes": 178804,
+   "sha256": "bda381f59155c88a7ab7df55bd0a8d42a68686e9ebd7d0504b85ae3f696121ce"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_48000.h5",
+   "bytes": 178804,
+   "sha256": "e239142318792cf39b20cfcfb1469de1217b798985041dda7fae9d99ea1161e3"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_50000.h5",
+   "bytes": 178804,
+   "sha256": "0e764504d69b1a536ae46587aa8e44f8babd9836a91ac7f5ea0fa8c2aff2d66b"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_52000.h5",
+   "bytes": 178804,
+   "sha256": "d11eab5189c3e981db14996eef5c12088c940ecc57f3ad14ec81fb2ac252ea13"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_54000.h5",
+   "bytes": 178804,
+   "sha256": "7512d54e110eda09e87dfe983319bff5611c97ed695eea5faec5ce025b3417bd"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_56000.h5",
+   "bytes": 178804,
+   "sha256": "7a6d5e7dba762f5b3afeca6a13ff7031b99b773516ce23e7e26ad911201ddfb7"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_58000.h5",
+   "bytes": 178804,
+   "sha256": "72e02b4607f5bcb6cd8bf049c8b1687ab270db4956db683b21fa571677576d2e"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_60000.h5",
+   "bytes": 178804,
+   "sha256": "8dba69d1ae4ddef0ab5d9910bed191ae78cd28eed23b95e5b3a90c132d6a7812"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_62000.h5",
+   "bytes": 178804,
+   "sha256": "afaf12c098c92d17753886b856edf4e9136b7d77fff0379076b45cab0a69a50c"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_64000.h5",
+   "bytes": 178804,
+   "sha256": "23f906e8a663c717f3f50f46c948a5e9e31ea080d8034baf8d3c22a0d6db9ba1"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_66000.h5",
+   "bytes": 178804,
+   "sha256": "1fe34fd0ee4bf0cfc6f08890f2544684e2d2e060b9191d65b6146b495c2b7c33"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_68000.h5",
+   "bytes": 178804,
+   "sha256": "73595e403e51d8249cd320a9240d2f21c41ac36ac4b9fe531a56a1826b9d3e6c"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_70000.h5",
+   "bytes": 178804,
+   "sha256": "5bf05d9f5f0ae37aeb5d48e2da7e0e302d795e77a1919d5302a947987108c164"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_72000.h5",
+   "bytes": 178804,
+   "sha256": "bbf75b64ef4c36a9a2e273ca0b61f496074a7b415a1ba53e3dc462a0e2e63f55"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_74000.h5",
+   "bytes": 178804,
+   "sha256": "188f8d7243c5ed38bb558192e745c324261b7130b1c589f05e746e2bd7d14f40"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_76000.h5",
+   "bytes": 178804,
+   "sha256": "dfe27c32a654ea8bb801653ff790f710533540750196cbb7bc55ee6df2db8236"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_78000.h5",
+   "bytes": 178804,
+   "sha256": "223e122bfca086474c3482924c710300665b33376e2a6bad90e023f68f37488a"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_80000.h5",
+   "bytes": 178804,
+   "sha256": "e406eb19a357a36fa8f7c9356ccbad7211d0405c9bfccdd287da6f5b7c4b8fe9"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_82000.h5",
+   "bytes": 178804,
+   "sha256": "4097e3e80cc48234e65c90584ddbaaeae0b906e9a474a9a36b67932de171d554"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_84000.h5",
+   "bytes": 178804,
+   "sha256": "56b191a4262525846908613b1ec379d767fc6e759822bed3a3e7478547206da8"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_86000.h5",
+   "bytes": 178804,
+   "sha256": "a3863118d090357995d31ae464c486a37e06031e4a9285bab811029f48f4a4d0"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_88000.h5",
+   "bytes": 178804,
+   "sha256": "3b99952de7d52f014424235ed0021c0736b1c39c64a9fdee90f077bcb4788e35"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_90000.h5",
+   "bytes": 178804,
+   "sha256": "0e48ae474c22edb63b0c631beeaa482bf39dcddf6698b8a816a7934a880fca9d"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_92000.h5",
+   "bytes": 178804,
+   "sha256": "bb8fa5aeb9dd10e2b033720070e885769790befa9d150dd6fff8115e66583e2d"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_94000.h5",
+   "bytes": 178804,
+   "sha256": "1e812e11fe1a8eba02a768f36b900a5b724cca1ec25871b4ae06313831f6f0df"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_96000.h5",
+   "bytes": 178804,
+   "sha256": "9a2cdc5a8ea4b7576a1ba0b737b492a5d1176205f81ce7252e8af0943243b9cc"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/res_nodes_98000.h5",
+   "bytes": 178804,
+   "sha256": "72bbf0a9d8fd53f6b74b47fbb6b4e3ca3b6ba229a33ac5231226754585536cb4"
+  },
+  {
+   "path": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0017_ns_float_free130/residual_history.csv",
+   "bytes": 76857670,
+   "sha256": "6f9c3e64dbe1a7e1ea62e33f021861c9396f15a6efaf5a4b17869ad12c6d4ebb"
+  },
+  {
+   "path": "/home/ubuntu/m55_p17/replay/criteria_v3_run_0017_ns_float_free130.yaml",
+   "bytes": 5202,
+   "sha256": "39d923b6e472cec636359d7714d9ff6f5abe1d862669b23f0a673bebb1f90cb8"
+  }
+ ]
+}
