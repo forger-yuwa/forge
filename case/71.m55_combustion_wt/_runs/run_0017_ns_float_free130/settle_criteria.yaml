@@ -1,0 +1,145 @@
+# settle_criteria.yaml — design/forge_design/evaluate/settle_presets.py が問題 YAML の evaluate.settle から作った
+# (プリセット wt_nozzle_v2 (2026-10-16; 区間 1 万・保持なし (2026-10-16 ユーザ決定); 残差は毎 step の系列・壁の熱流は区間の幅; 線 η 0.03))。判定: python3 solver_density_cuda/tools/check_settled.py <run_dir>
+# 手で直さない (直すなら問題 YAML の evaluate.settle を直して作り直す)。
+schema: forge.settle_criteria/v1
+source:
+  preset: wt_nozzle_v2
+  preset_version: wt_nozzle_v2 (2026-10-16; 区間 1 万・保持なし (2026-10-16 ユーザ決定); 残差は毎 step の系列・壁の熱流は区間の幅; 線 η 0.03)
+  preset_sha256: e9caa4e73e77b4688327d0a9780a75cbd8f963edadea50cc17b80eaf63bcfcf8
+  evaluate_settle:
+    preset: wt_nozzle_v2
+    x_range_m:
+    - 4.0
+    - 7.95
+  evaluate_settle_sha256: fd5c905cda777f126ed1cc84e632126ff5381e4578da542d940ed52d29ca3c3a
+  generator: design/forge_design/evaluate/settle_presets.py
+  generator_sha256: 9dd961301eeec4fecf7b8f37b4b2625fe7caa26da41520f5185149155711882d
+  inputs_sha256:
+    solverConfig.yaml: 303e4c74760410b8ac29caf12732597a59ad1d1e3de9aa6fe83876da848bf121
+    bcondConfig.yaml: c57448a4ac4fa954c30bff377a3065df7eadb9fb0d1f8f2876c87358177cd6c5
+  written: '2026-10-16T02:12:23+00:00'
+structured:
+  ni: 4810
+  nj: 92
+  scale_m: 0.1002434996788185
+  mesh_file: nozzle.h5
+grid:
+  out_step_interval: 2000
+  start_step: 0
+  segment:
+    stage: main
+    start_record: MAIN_STAGE_STARTED
+    config_fnv_key: main_config.fnv
+    criteria_sha256_key: settle_criteria.sha256
+    stage_manifest: stage_manifest.json
+    stage_tag: main
+    match: cfg_fnv
+window:
+  W: 10000
+  min_points: 6
+hold: 0
+quantities:
+- kind: residual
+  name: residual
+  file: residual_history.csv
+  required:
+  - rms_ro
+  - rms_roUx
+  - rms_roUy
+  - rms_roe
+  - rms_roK
+  - rms_roOmega
+  - rms_roY0
+  - rms_roY1
+  inactive_ok:
+  - rms_roUz
+  thresholds:
+    slope_dec: 0.021189299069938092
+    amp_dec: 0.1
+    rise_dec: 0.04139268515822507
+    excursion_dec: 0.5
+    provisional: true
+  series: raw
+- kind: mass_balance
+  name: mass_balance
+  file: boundary_massflux.csv
+  inlet:
+  - 1
+  outlet:
+  - 2
+  thresholds:
+    mean_abs: 0.0005
+    swing: 0.005
+    mdot_change_rel: 0.0001
+    provisional: true
+  notes:
+  - 入口・出口は bcondConfig の kind から (inlet_* / outlet_*・outflow); 記録だけの境界 physID [3, 4]
+- kind: exit_core_mach
+  name: exit_core_mach
+  nodes_file: res_nodes_{step}.h5
+  eta_range:
+  - 0.05
+  - 0.7
+  thresholds:
+    tol: 0.000275
+    provisional: true
+  notes:
+  - tol = 5e-05 × M_d (0.1 × 0.05 % × M_d、M_d 5.5)
+- kind: line_mach
+  name: line_mach
+  nodes_file: res_nodes_{step}.h5
+  eta: 0.03
+  x_range_m:
+  - 4.0
+  - 7.95
+  n: 2001
+  Md: 5.5
+  thresholds:
+    tol_maxabs: 0.01
+    tol_halfamp: 0.005
+    tol_pos: 0.01
+    provisional: true
+  notes:
+  - 'x 範囲: evaluate.settle.x_range_m'
+- kind: exit_flow_angle
+  name: exit_flow_angle
+  nodes_file: res_nodes_{step}.h5
+  eta_range:
+  - 0.05
+  - 0.7
+  thresholds:
+    tol: 0.01
+    provisional: true
+- kind: wall_heat_nodes
+  name: wall_heat_nodes
+  walls:
+  - name: wall
+    physID: 3
+  axisymmetric: true
+  file_pattern: res_{name}_{physID}_{step}.h5
+  dataset: iface_Qf_eff
+  thresholds:
+    q_tol: 1000.0
+    eps_rel: 0.001
+    provisional: true
+  measure: range
+excluded: []
+preconditions:
+- quantity: mass_balance
+  requires: 'solverConfig output.boundaryMassflux: 1'
+  satisfied: true
+- quantity: exit_core_mach・line_mach・exit_flow_angle
+  requires: solverConfig output.nodeProbeFile (節点の表; probe_node_ids)
+  satisfied: true
+- quantity: wall_heat_nodes
+  requires: 'solverConfig output.interfaceDiag: 1'
+  satisfied: true
+- quantity: wall_heat_nodes
+  requires: '壁の bcond の outputHDFflg: 1 (wall)'
+  satisfied: true
+notes:
+- 'grid.start_step は本段の forge の起動 (step 0)。segment は判定区間の識別 (設計チェーンでは本段の開始の通知 MAIN_STAGE_STARTED を指す; main_stage_segment、plan §5.1 #6)。None = 未記録'
+- '閾値は暫定 (provisional: true; plan §6 V3 で決める)'
+- 区間 1 万 step・保持なし (2026-10-16 ユーザ決定; plan §4.4)。格子点 s ごとに区間 (s − 10,000, s] を 1 回判定し、最初に合格した格子点で止める。目的の量・流量は区間の中の幅を v1 と同じ許容で、残差は毎 step の系列 (outer_end の全行) で区間あたりの v1 と同じ閾値、上昇は直前の 1 万 step の区間と比べる。壁の熱流は節点ごとの区間の幅
+  (相対の参照は区間の終端の値)
+- 最初に判定できる格子点は開始 + 2 × 10,000 + 間隔 (間隔 2,000 なら 22,000)

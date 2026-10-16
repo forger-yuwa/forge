@@ -1,0 +1,16 @@
+run: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1  (場 res_30088.h5: STOP_RULE_STATE.json の stop_step (status REACHED))
+判定: back_to_correction  次の手: escalate
+V5b 出口コア M 5.503596 (許容 5.49725〜5.50275; plan §6 V5b (5.5 ± 0.05 %、M6 の生産のゲートと同じ幅)) → FAIL
+V5c 線 η 0.03 x 3.736998151679548〜7.494752236480422 m: 最大偏差 0.0646 % (≤ 0.1)・片振幅 0.0610 % (≤ 0.05) → FAIL  [窓 run の settle_criteria.yaml の line_mach]
+    比較 eta0.1: 最大偏差 0.0666 %・片振幅 0.0593 % (判定に使わない)
+    比較 eta0: 最大偏差 0.0698 %・片振幅 0.0658 % (判定に使わない)
+壁解像 → PASS (VERDICT: PASS (壁解像))
+計算の成立 → PASS
+寸法の関門 → ABSENT・成果物 → ABSENT (/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/deliverables が無い (成果物を作っていない))
+較正し直しの規則: 当たらない → escalate
+    a_both_judged: ok  {"v5b": "FAIL", "v5c": "FAIL"}
+    b_prev_update_reduced_error: ok  {"prev_max_abs_mm": 7.879080894668926, "current_max_abs_mm": 0.582242972949113, "prev_x_m_at_max": 7.101044707471903}
+    c_further_reducible: NO  {"current_max_abs_mm": 0.582242972949113, "projected_max_abs_mm": 0.5917244179058732, "reduction": -0.016284344160884867, "min_reduction": 0.5, "current_max_abs_x_ge_3m_mm": 0.501657081436603, "projected_max_abs_x_ge_3m_mm": 0.3062952997969562, "note": "min_reduction は plan に数値が無い暫定の値 (--recal-min-reduction)"}
+    d_count: ok  {"recalibrations_done": 0, "max_recalibrations": 1}
+    e_flow_verified: ok  {"flow": "PASS"}
+書いた: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/wt_qualify/WT_QUALIFICATION.json

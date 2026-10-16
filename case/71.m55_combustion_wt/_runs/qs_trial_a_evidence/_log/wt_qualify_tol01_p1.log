@@ -1,0 +1,10 @@
+run: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1  (場 res_30088.h5: STOP_RULE_STATE.json の stop_step (status REACHED))
+判定: accepted  次の手: done
+V5b 出口コア M 5.503596 (許容 5.49450〜5.50550; plan §6 V5b (5.5 ± 0.1 %; 2026-10-16 ユーザ決定、前は ± 0.05 %)) → PASS
+V5c 線 η 0.03 x 3.736998151679548〜7.494752236480422 m: 最大偏差 0.0646 % (≤ 0.1)・片振幅 0.0610 % (≤ 0.1) → PASS  [窓 run の settle_criteria.yaml の line_mach]
+    比較 eta0.1: 最大偏差 0.0666 %・片振幅 0.0593 % (判定に使わない)
+    比較 eta0: 最大偏差 0.0698 %・片振幅 0.0658 % (判定に使わない)
+壁解像 → PASS (VERDICT: PASS (壁解像))
+計算の成立 → PASS
+寸法の関門 → PASS・成果物 → PASS
+書いた: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/wt_qualify_tol01/WT_QUALIFICATION.json

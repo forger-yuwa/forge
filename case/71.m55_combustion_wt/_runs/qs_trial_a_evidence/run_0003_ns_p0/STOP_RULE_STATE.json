@@ -1,0 +1,76 @@
+{
+ "version": 2,
+ "plan": "plans/active/tooling-settle-convergence-and-monitor.md §4.4・§4.8 の 1・§6 V4 (§5.1 #5、2026-10-16: settle_criteria.yaml の run は 3 条件の保持 → 協調停止 → 止めた step で再評価 → δ_E を 1 回)",
+ "method": "v2",
+ "status": "REACHED",
+ "reason": null,
+ "failures": [],
+ "settled_since": 42000,
+ "request_step": 42000,
+ "request_kind": "settled",
+ "stop_step": 42060,
+ "last_output": 42060,
+ "cap": 200000,
+ "hold_steps": 0,
+ "hold": {
+  "hold_steps": 0,
+  "start": 42000,
+  "reached": [
+   42000
+  ],
+  "breaks": []
+ },
+ "forge_rc": 0,
+ "run_case_rc": 0,
+ "rc": 0,
+ "criteria": {
+  "path": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/settle_criteria.yaml",
+  "sha256": "83a42ad6e94f93234a9cf5a9ef258a9084e7b1891f53c4c29500499f3b2de5e0"
+ },
+ "stopped_at": {
+  "present": true,
+  "step": 42060,
+  "sha256": "d9b172be183b87ca7e0faddc7c9371e1e3e921b93b8a158f125942f6440edd1e",
+  "problems": []
+ },
+ "reeval": {
+  "step": 42000,
+  "end_step": 42060,
+  "stop_step": 42060,
+  "verdict": "SETTLED",
+  "by_quantity": {
+   "residual_finite": "SETTLED",
+   "mass_balance": "SETTLED",
+   "exit_core_mach": "SETTLED",
+   "line_mach": "SETTLED",
+   "exit_flow_angle": "SETTLED"
+  },
+  "categories": [],
+  "provisional": true,
+  "digest": "df6dfcc7ee5b4eae6fe92b82b4444be632a5bf1e39615243f04d9eb26f2e50bd",
+  "end_source": "--end-step",
+  "file": "SETTLE_VERDICT.json",
+  "sha256": "61bfd10a2b6d3c12d884781b79254e6f584923d22634713f2f81b2dc4c34e04a"
+ },
+ "stop_sha256": "c552ebf2aa9e6cea96287524c131537c1346d38b30a26e081657523f6bc767af",
+ "delta_E": {
+  "status": "ok",
+  "step": 42060,
+  "dir": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/stop_rule_v2/delta_E_42060",
+  "res_sha256": "c552ebf2aa9e6cea96287524c131537c1346d38b30a26e081657523f6bc767af",
+  "delta_r_next_sha256": "ae9639f56ddb321257fa3f501b592a01f48a060f1a4ab3d0aa866fa307f8291e",
+  "seconds": 63.1,
+  "band_sensitivity": {
+   "factor": 1.25,
+   "max_abs_B_minus_A_mm": 0.250533675388782,
+   "x_m_at": 2.3732074257733555,
+   "A_reproduces_delta_E_max_abs_rt": 0.0,
+   "n_nonfinite_B_use": 0,
+   "n_hard_fail_use": 0
+  }
+ },
+ "note": null,
+ "record": "stop_rule.json",
+ "record_sha256": "31e45909ea6625b62595a28fef696aaee8c9608465c2663bc15725327cba266e",
+ "finished": "2026-10-16T00:50:03+00:00"
+}

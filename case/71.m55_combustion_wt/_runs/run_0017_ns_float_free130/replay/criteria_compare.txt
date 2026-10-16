@@ -1,0 +1,5 @@
+run_0015 と run_0017 の基準 (source 以外): 一致
+旧の run_0015 の v3b の基準との差が residual_finite の required (と notes) だけ: はい
+39d923b6e472cec636359d7714d9ff6f5abe1d862669b23f0a673bebb1f90cb8 /home/ubuntu/m55_p17/replay/criteria_v3_run_0015_ns_float_a.yaml
+39d923b6e472cec636359d7714d9ff6f5abe1d862669b23f0a673bebb1f90cb8 /home/ubuntu/m55_p17/replay/criteria_v3_run_0017_ns_float_free130.yaml
+97187ac08af96cb07c0b28a8bfe578c740c994bc659c0239b360f26424df5543 /home/ubuntu/m55_p5/v3b_replay/criteria_v2_run_0015_ns_float_a.yaml

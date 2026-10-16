@@ -1,0 +1,130 @@
+schema: forge.settle_criteria/v1
+source:
+  preset: wt_nozzle_v3
+  preset_version: wt_nozzle_v3 (2026-10-16; v2 から残差を外す (2026-10-16 ユーザ決定「残さは監視から外そう」);
+    残差は非有限の見張りだけ; 壁の熱流 (節点ごと) も外す (2026-10-16 ユーザ決定「floatで良い」); 線 η 0.03)
+  preset_sha256: 349213b7170d2d92ee260332fde7a16a3636ec11dc80b1c100029dff30d593f9
+  evaluate_settle:
+    preset: wt_nozzle_v3
+    x_range_m:
+    - 4.0
+    - 7.95
+  evaluate_settle_sha256: 56f3fce7f33167d7bce6694c049068eef9481ce3a62016fe3de42ea81a427ab4
+  generator: design/forge_design/evaluate/settle_presets.py
+  generator_sha256: 2ce1ceef47dac294b0adf5b55fe6438179ffb2b5d2f21c547f42fb8685393016
+structured:
+  ni: 4810
+  nj: 92
+  scale_m: 0.1002434996788185
+  mesh_file: nozzle.h5
+grid:
+  out_step_interval: 2000
+  start_step: 0
+  segment:
+    stage: main
+    start_record: MAIN_STAGE_STARTED
+    config_fnv_key: main_config.fnv
+    criteria_sha256_key: settle_criteria.sha256
+    stage_manifest: stage_manifest.json
+    stage_tag: main
+    match: cfg_fnv
+window:
+  W: 10000
+  min_points: 6
+hold: 0
+quantities:
+- kind: residual_finite
+  name: residual_finite
+  file: residual_history.csv
+  thresholds: {}
+  notes:
+  - '残差の非有限の見張り (判定の条件ではない): 区間の残差の行に非有限があれば DIVERGED、行・列の欠けは判定不能'
+  - 見張る列は残差の履歴の全数値列。必要な列 (欠けたら判定不能) は ['rms_ro', 'rms_roUx', 'rms_roUy', 'rms_roe',
+    'rms_roK', 'rms_roOmega', 'rms_roY0', 'rms_roY1'] (forge の残差の列の規則)
+  required:
+  - rms_ro
+  - rms_roUx
+  - rms_roUy
+  - rms_roe
+  - rms_roK
+  - rms_roOmega
+  - rms_roY0
+  - rms_roY1
+- kind: mass_balance
+  name: mass_balance
+  file: boundary_massflux.csv
+  inlet:
+  - 1
+  outlet:
+  - 2
+  thresholds:
+    mean_abs: 0.0005
+    swing: 0.005
+    mdot_change_rel: 0.0001
+    provisional: true
+  notes:
+  - 入口・出口は bcondConfig の kind から (inlet_* / outlet_*・outflow); 記録だけの境界 physID [3,
+    4]
+- kind: exit_core_mach
+  name: exit_core_mach
+  nodes_file: res_nodes_{step}.h5
+  eta_range:
+  - 0.05
+  - 0.7
+  thresholds:
+    tol: 0.000275
+    provisional: true
+  notes:
+  - tol = 5e-05 × M_d (0.1 × 0.05 % × M_d、M_d 5.5)
+- kind: line_mach
+  name: line_mach
+  nodes_file: res_nodes_{step}.h5
+  eta: 0.03
+  x_range_m:
+  - 4.0
+  - 7.95
+  n: 2001
+  Md: 5.5
+  thresholds:
+    tol_maxabs: 0.01
+    tol_halfamp: 0.005
+    tol_pos: 0.01
+    provisional: true
+  notes:
+  - 'x 範囲: evaluate.settle.x_range_m'
+- kind: exit_flow_angle
+  name: exit_flow_angle
+  nodes_file: res_nodes_{step}.h5
+  eta_range:
+  - 0.05
+  - 0.7
+  thresholds:
+    tol: 0.01
+    provisional: true
+excluded:
+- kind: residual
+  name: residual
+  reason: '残差を止める判定から外した (2026-10-16 ユーザ決定「floatにしようか。残さは監視から外そう」、plan §4.4・§5.1 #8):
+    float のビルドでは目的の量・流量は FP64 とほぼ同じなのに残差 (ρ) の振幅が約 0.585 桁 (FP64 は約 0.02 桁) で、残差の条件が通らず止まらなかった
+    (card plan §6 V8)。発散は residual_finite (非有限の見張り、判定の条件ではない) で見る'
+- kind: wall_heat_nodes
+  name: wall_heat_nodes
+  reason: '壁の熱流 (節点ごと) を止める判定から外した (2026-10-16 ユーザ決定「設計を早く進めるのが第一だから、floatで良い」、plan
+    §4.4・§5.1 #8): float のビルドでは case/71 の x 0.367 m・r 0.161 m の壁の節点の熱量が窓の中で ±12 %
+    往復し (FP64 では収まる)、節点ごとの許容の 171 倍で止まらなかった (v3 の再生、B ~/m55_p5/v3_replay/)。冷却壁の第一層が極端に薄く
+    (半径の 3.7e−7)、float では壁の法線の温度の勾配が丸めで揺れる見立て (未確認)。局所の壁の熱流を使う場面は FP64 で確かめる'
+preconditions:
+- quantity: mass_balance
+  requires: 'solverConfig output.boundaryMassflux: 1'
+  satisfied: true
+- quantity: exit_core_mach・line_mach・exit_flow_angle
+  requires: solverConfig output.nodeProbeFile (節点の表; probe_node_ids)
+  satisfied: true
+notes:
+- 'grid.start_step は本段の forge の起動 (step 0)。segment は判定区間の識別 (設計チェーンでは本段の開始の通知 MAIN_STAGE_STARTED
+  を指す; main_stage_segment、plan §5.1 #6)。None = 未記録'
+- '閾値は暫定 (provisional: true; plan §6 V3 で決める)'
+- 残差を止める判定から外す (2026-10-16 ユーザ決定; plan §4.4)。壁の熱流 (節点ごと) も外す (同、float の局所の揺れ)。判定は流量の収支
+  + 目的の量 (区間 1 万 step・保持なしは v2 と同じ)。残差は非有限の見張り (residual_finite) だけで、非有限なら DIVERGED
+- 停止規則 v2 の最初の判定は量によらず開始 + 2 × 10,000 + 間隔 (間隔 2,000 なら 22,000; v2 と同じ)。判定の部品だけを当てる
+  (check_settled.py --end-step・--scan) と、残差の直前の区間が要らないので開始 + 10,000 + 間隔から判定できる

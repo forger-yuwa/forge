@@ -10,7 +10,7 @@
   - `procedures/solver-settings.md` (本段の監視用の出力と協調停止)
 - **related_plans**:
   - **親**: [`tooling-design-problem-campaign-recipe.md`](tooling-design-problem-campaign-recipe.md) (problem / campaign / recipe、`resolve_evaluation` → `execution_plan.json`、3 値判定 `accepted / rejected / incomplete`、campaign 実行器 + ledger。この plan はその §5 ステップ 5 と、要求カードからの入口の実装。語彙はそちらに合わせる)
-  - `plans/active/tooling-settle-convergence-and-monitor.md`: 判定・停止規則 v2・受け渡しの関門 #7。この plan の前提。
+  - `plans/accepted/tooling-settle-convergence-and-monitor.md`: 判定・停止規則 v2・受け渡しの関門 #7。この plan の前提。
   - `plans/active/tooling-nozzle-card-local-mesh.md`: case/71 の要求カード・手組みの格子・3 係数の壁。
   - `tooling-generator-defaults-and-launch-gate` (作業ツリー `forge-gate`): 推奨設定の機械可読の正本と、起動前の関門。統合する。
   - 推力ノズル (`tooling-nozzle-bell-two-mode`・`tooling-nozzle-dual-bell`)、SERN (`tooling-nozzle-sern-chain`): 後の機種。それぞれのセッションの担当。
@@ -221,6 +221,7 @@
 | 8 | 判断役の口・`local` の backend・問いの組 (§4.4) | 合格: §6 V3 | O |
 | 9 | 要求カードの出所・CLI・skill・AGENTS.md (§4.7・§4.8) | 合格: 「値はあるが根拠が無い」カードで止まる、§6 V4 の準備 | O |
 | 10 | 格子の係数の一般化 (後) | 格子の感度の A/B つき | F |
+| 11 | **収束の判定 (停止規則 v2・プリセット `wt_nozzle_v3`) の別の寸法のノズルでの確認** (2026-10-16 に plan `tooling-settle-convergence-and-monitor` の完了条件から移した; ユーザ決定「後続の plan へ移す」) | 寸法が大きく違うノズル (小さいノズル) を 1 本、新しい出力を有効にして停止規則 v2 で回し、オンラインと再生の判定の一致・停止の時の出力の揃い・停止の後の区間 (V3(c) と同じ形の自由継続の再生) を確かめる。プリセットの閾値は暫定のまま使い、結果を見て較正しない。合格の形は settle plan §6 V3(b)・V3(c)・V4 に倣う | F |
 
 ## 6. 検証 (事前登録は各項目の実装の前に確定する)
 

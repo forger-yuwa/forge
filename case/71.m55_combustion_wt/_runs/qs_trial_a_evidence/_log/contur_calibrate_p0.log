@@ -1,0 +1,16 @@
+run: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0
+δ_E: 停止規則 v2 の抽出 (STOP_RULE_STATE.json の delta_E、step 42060) — /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/stop_rule_v2/delta_E_42060/delta_r_next.csv
+今の係数: c₀ 1.0・c₁ 0.0 /m・δ₀ 0.0 m (pass 0)
+新しい係数: c₀ 0.6879276441586154・c₁ 0.021489879641868756 /m・δ₀ -0.00031472178952660714 m
+今の壁の誤差 |δ_in − δ_E|: 最大 7.8791 mm @ x 7.101 m、x ≥ 3 m 7.8791 mm、スロート +0.3451・出口 +7.4406 mm
+較正後の射影 (この NS の δ_E に対して): 最大 0.6365 mm @ x 0.893 m、x ≥ 3 m 0.2778 mm、スロート +9.98e-11・出口 -6.94e-15 mm
+δ_in の照合 (格子 − 関数, x ≥ 0): 最大 8.26e-05 mm
+カードの overrides の断片:
+# contur_calibrate (plans/active/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a): run_0003_ns_p0 (r_t 0.10490286531519752 m) の δ_E に合わせた 3 係数
+# δ = (c₀ + c₁·x_m)·δ_CONTUR + δ₀ (x_m は設計スロートからの実寸 [m])。新しい r_t でも同じ係数を CONTUR に当てる
+overrides:
+  deltastar_initializer.model: contur
+  deltastar_initializer.delta_scale: 0.6879276441586154
+  deltastar_initializer.delta_scale_slope_per_m: 0.021489879641868756
+  deltastar_initializer.delta_offset_m: -0.00031472178952660714
+書いた: /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/contur_calibrate/CONTUR_CALIBRATION.json、/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/contur_calibrate/contur_overrides.yaml

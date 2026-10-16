@@ -1,0 +1,12 @@
+[2026-10-16T02:04:50+00:00] git dfad026762ebd7a346e66cd31e501e7936733bd1 forge 12033eb378155f64172303ef7a024369845ee58395dd6e9a891af7600bfe2953 prepare run_0017_ns_float_free130 (stop-rule off, nsteps 130000, precision float)
+[2026-10-16T02:11:15+00:00] (B の自動停止で準備が中断、起こし直して再起動)
+[2026-10-16T02:11:15+00:00] git dfad026762ebd7a346e66cd31e501e7936733bd1 forge 12033eb378155f64172303ef7a024369845ee58395dd6e9a891af7600bfe2953 prepare run_0017_ns_float_free130 (stop-rule off, nsteps 130000, precision float)
+VERDICT: PASS (AR<= 5000, skew<= 0.90)
+solverConfig.yaml 差: ['time.last.nStepOuter']
+solverConfig_prestage.yaml 差: ['time.last.nStepOuter']
+bcondConfig.yaml 差: []
+settle_criteria.yaml 差: ['source.inputs_sha256.solverConfig.yaml', 'source.written']
+設定の比較: OK
+[2026-10-16T02:12:23+00:00] run run_0017_ns_float_free130
+[2026-10-16T02:49:24+00:00] run run_0017_ns_float_free130 終了 rc 0
+[2026-10-16T02:49:24+00:00] ALL DONE

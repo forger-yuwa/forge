@@ -85,14 +85,15 @@ df -h ~ | tail -n 1
 
 ```bash
 cd ~
-git clone -b feature/card-local-mesh https://github.com/forger-yuwa/forge.git forge
+git clone -b main https://github.com/forger-yuwa/forge.git forge
 cd ~/forge
 git submodule update --init --recursive
 git config core.hooksPath solver_density_cuda/tools/git-hooks
 git log --oneline -1
 ```
 
-- ブランチは今 `feature/card-local-mesh`。main に入ったら (人が知らせる) `-b main` にする。置き場所は `~/forge` を前提に書いてある (違う場所なら人に聞く)。
+- ブランチは `main` (2026-10-16 に PR #11 で入った)。人に別のブランチを言われたときだけ `-b` を変える。置き場所は `~/forge` を前提に書いてある (違う場所なら人に聞く)。
+- 既に clone してあるなら、作り直さずに `cd ~/forge && git checkout main && git pull --ff-only` (人に言われたとき)。ビルド・Python 環境はそのまま使える (C++・CUDA の変更が入ったと言われたら §0.3 をやり直す)。
 - **成功の印**: `git log` が 1 行出る。`solver_density_cuda/third_party/HighFive/include/highfive/highfive.hpp` がある。
 
 ### 0.3 ビルド (float)
@@ -468,6 +469,7 @@ sha256sum $CASE/$EU/res_12000.h5
 
 - **成功の印**: `forge exit=0`・`EXIT_CODE=0`、`VERDICT: PASS`、非有限の数 0、`M_axis_exit` が M_exit に近い
   (case/71 は 5.50021、`dM_max_rel_Md` 0.00057)。`res_12000.h5` が NS の Euler の参照になる (§5 が sha256 を自動で取る)。
+- **README**: `$EU` の行の「主要結果」に出口の軸の M・`dM_max_rel_Md`・非有限の数・時間を書き、「状態」を `ref` にする (次の NS の Euler の参照)。
 - `CONVERGENCE_VERDICT.txt` の `NOT CONVERGED (stalled/plateau)` は出てよい (case/71 の Euler も残差は 1.5〜2.5 桁で横ばい。M6 の Euler と同じ型)。
 - **止まったら人に見せるもの**: `tail -n 40 $CASE/_log/euler_$T.log`、`tail -n 5 $CASE/$EU/forge_run.log`、上の Python の出力。
   `too many resources requested for launch` が出たら `FORGE_CUDA_BLOCKSIZE` が 128 になっているかを確かめて人に聞く。
@@ -512,6 +514,7 @@ PYC
 - **人に知らせる**: 本段の ms/step と見込み。case/71 は本段 46,202 step で止まった (上限 200,000)。p0・p1 (・p2) の NS が 2〜3 本と Euler が 2〜3 本要る。
   見込みが長すぎると人が判断したら、この先の進め方を人が決める。
 - **止まったら人に見せるもの**: `tail -n 40 $CASE/_log/ns_timing.log`、`tail -n 5 $CASE/run_0002_ns_timing/forge_run.log`。
+- **README**: `run_0002_ns_timing` の行に ms/step と見込みを書く。
 - この run は時間を測るだけ。README の状態は「破棄予定」。消すのは人に言われたとき。
 
 ### 5.2 本番を裏で起動する
@@ -569,6 +572,7 @@ PYC
 - **成功の印**: `EXIT_CODE=0`、停止規則 `v2 REACHED`・δ_E の抽出 `ok`、受け渡しの関門「進む」、`delta_r_next.csv: True`、
   収束の判定 `TOOL: check_settled.py …` / `VERDICT: SETTLED …`、非有限の数 0、報告の図が 9 枚と pptx が 1 つ (pptx は `.venv-pptx` があるとき)。
   case/71 run_0014_chain_v2 (AWS g5.xlarge・FP64) はこの形で、本段 46,171 step・24.8 ms/step で止まった。
+- **README**: `$NS` の行の「主要結果」に停止規則 (REACHED と本段の停止の step)・関門・収束の判定 (`SETTLED` と判定の区間 = 停止の step を切り下げた 2,000 の倍数から 1 万 step 前まで)・非有限の数・時間を書き、「状態」を `ref` にする。
 - **止まったら人に見せるもの**: `EXIT_CODE=3` (関門で止めた) や停止規則が `CENSORED` (上限まで止まらなかった)・`FAILED` のとき、上の出力と
   `tail -n 60 $CASE/_log/ns_$T.log`。上書きのオプション (`--allow-*`) は人の指示が無ければ使わない。
 
@@ -589,6 +593,7 @@ cat $CASE/$NS/contur_calibrate/contur_overrides.yaml
 - **人に知らせる**: 新しい係数と、今の壁と較正後の射影の誤差の要約 (ログの「誤差」の行)。
   参考: case/71 の 3 係数は c₀ 0.678・c₁ 0.0210 /m・δ₀ −0.306 mm (2 係数の壁の NS から)、2 係数は c 0.852・δ₀ −0.322 mm (CONTUR の式のままの NS から)。
   c₀ が 0.3〜1.5 の外、|δ₀| が 2 mm を超えるなら、次へ進まずに人に見せる。
+- **README**: p0 の NS の行に 3 係数を書き足す。
 - **止まったら人に見せるもの**: `cat $CASE/_log/contur_calibrate_$T.log`。
 
 ## 7. 係数をカードに入れて §2〜§5 をやり直す (p1)
@@ -666,6 +671,7 @@ cat $CASE/_log/wt_qualify_$T.log
 | 0 | `accepted` | 成果物があるときだけ出る。§10 |
 | 1 | 入力の不備 | 人に聞く |
 
+- **README**: `$NS` の行に判定 (`accepted`・`escalate` など)・V5b・V5c の値を書き足す。
 - **人に見せるもの (どの終了コードでも)**: `cat $CASE/_log/wt_qualify_$T.log` の全部 (V5b・V5c の値と許容、壁解像、較正し直しの規則の (a)〜(e))。
 - 較正し直しの規則の (c) の閾値 (`--recal-min-reduction`、既定 0.5) は plan に数値の無い暫定の値。変えるのは人。
 - case/71 は 3 係数の壁で V5b (出口コア M 5.50284、+0.052 %)・V5c (片振幅 0.057 %) が旧の公差 (±0.05 %・0.05 %) で FAIL、規則の (c) に当たらず `escalate` だった
@@ -694,6 +700,7 @@ cat $CASE/_log/wt_qualify_final_$T.log
 
 - **成功の印**: `VERDICT: PASS`・`EXIT_CODE=0`、`deliverables/` に `README.md`・`MANIFEST.json`・`DIMENSIONS.json`・`cad/`・`mesh/`・`fluent/`・`excel/` がある、
   寸法の関門 `PASS`。最後の `wt_qualify` は、流れの判定が合格なら `EXIT_CODE=0` (`accepted`)。§8 で人に返した run なら `3` のままでよい (人の判断で作った成果物)。
+- **README**: `$NS` の行に成果物の結果 (`VERDICT`・寸法の関門・`thermal_use`) と最後の判定を書き足す。
 - **止まったら人に見せるもの**: `tail -n 40 $CASE/_log/deliverables_$T.log`。CAD (STEP) が失敗したら `FREECADCMD` のファイルがあるかを確かめて人に見せる。
 
 ## 10. 結果の見方

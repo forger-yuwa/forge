@@ -1,4 +1,4 @@
-r"""収束の判定の基準 `settle_criteria.yaml` のプリセット (plan `plans/active/tooling-settle-convergence-and-monitor.md` §4.2・§5.1 #2〜#3・#5d)。
+r"""収束の判定の基準 `settle_criteria.yaml` のプリセット (plan `plans/accepted/tooling-settle-convergence-and-monitor.md` §4.2・§5.1 #2〜#3・#5d)。
 
 問題 YAML の `evaluate.settle` (`preset` + 足し引き・閾値の上書き) を、準備のときに run の設定 (prepare_info・solverConfig・
 bcondConfig) で解決して `settle_criteria.yaml` の中身にする。判定は `solver_density_cuda/tools/settle.py` (`check_settled.py`)。
@@ -309,10 +309,15 @@ def resolve(problem_cfg_evaluate_settle: dict, prepare_info: dict, solver_cfg: d
     excluded = []
     if P.get("residual") == "watch":
         # v3: 残差は止める判定から外し、非有限の見張りだけ (plan §4.4、§5.1 #8)。外したことと理由を excluded に書く
+        # 区間の毎 step の行・重複なし・逆行なし・必要な列がそろうことも要る (欠けは判定不能; result 段レビュー 2 回目 M2、plan §5.1 #10)。
+        # 必要な列は forge の残差の列の規則 (乱流の列を含む) で書く。列名を決められない run (凝縮など) は書かず、settle の既定の
+        # 保存量の 4 列で見張る (見張りの役目は発散を捉えることで、非有限は保存量の列にも出る; 2026-10-16 主セッションの判断)
         q_res = {"kind": st.KIND_RESIDUAL_FINITE, "name": "residual_finite", "file": "residual_history.csv", "thresholds": {},
-                 "notes": ["残差の非有限の見張り (判定の条件ではない): 区間の残差の行に非有限があれば DIVERGED",
-                           ("見張る列は残差の履歴の全数値列 (" + (f"v2 なら判定に使う列 {req}、非活動を許す列 {inactive}" if res_cols_err is None
-                                                                  else f"判定の列は決められない: {res_cols_err}") + ")")]}
+                 "notes": ["残差の非有限の見張り (判定の条件ではない): 区間の残差の行に非有限があれば DIVERGED、行・列の欠けは判定不能",
+                           ("見張る列は残差の履歴の全数値列。必要な列 (欠けたら判定不能) は " + (f"{req} (forge の残差の列の規則)" if res_cols_err is None
+                            else f"settle の既定の保存量の 4 列 (列名を決められない: {res_cols_err})"))]}
+        if res_cols_err is None:
+            q_res["required"] = list(req)
         excluded.append({"kind": st.KIND_RESIDUAL, "name": "residual", "reason": P["residual_excluded_reason"]})
     else:
         q_res = {"kind": "residual", "name": "residual", "file": "residual_history.csv", "required": req, "inactive_ok": inactive,

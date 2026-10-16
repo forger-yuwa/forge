@@ -17,6 +17,16 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   各量に verdict・使った値・不合格の理由の分類 (閾値の超過 / データ不足 / 未設定 / 非有限) を書く。全体は AND
   (DIVERGED > INDETERMINATE > NOT_SETTLED > SETTLED)。判定不能は合格にしない。
 - 結果は `<run>/SETTLE_VERDICT.json` (基準の中身と sha256・起動の識別・格子・判定区間・終端・使ったファイルの一覧と sha256・各量)。
+  これは**最新の判定** (呼ぶたびに上書きする)。停止規則 v2 の停止の時の再評価は、停止規則が変更されない専用ファイル
+  `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に書き、受け渡しの関門・成果物はそちらと照合する (plan §5.1 #16、result 段レビュー
+  3 回目 M1: 以前は停止の時の記録が SETTLE_VERDICT.json だけにあり、この道具で判定し直すと照合が失敗した)。この道具は
+  判定の結果を `stop_rule_v2/` の下に書かない (`--out` で指すと引数の誤り、終了コード 3)。
+  **古い形の run の移行** (§5.1 #16、result 段レビュー 4 回目 M1): 専用ファイルの無い古い形の run (STOP_RULE_STATE.json の
+  reeval に stop_file が無い) では停止の時の原本が SETTLE_VERDICT.json だけにある。この道具は SETTLE_VERDICT.json を上書きする
+  **直前に**、その sha256 が reeval の sha256 と一致すれば原本をそのまま専用ファイル (新しい形と同じ名前
+  `stop_rule_v2/SETTLE_VERDICT_stop_<reeval の end_step>.json`) へ写す (STOP_RULE_STATE は書き換えない; 読む側は reeval の sha256 で
+  原本と確かめる)。写せない (書き込みの失敗・同じ名前に違う中身がある) ときは原本を失わないよう SETTLE_VERDICT.json を上書きしない
+  (判定と終了コードはそのまま; その旨を出す)。`--no-write`・別の `--out` は上書きしないので移行もしない。
   閾値に `provisional: true` があれば VERDICT の行に「閾値は暫定 (plan §6 V3 で決める)」と出す。
 
 使い方:
@@ -27,7 +37,9 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   **本段の起動との照合は既定** (plan §4.9 の 2、§5.1 #7c で既定にした — result 段レビュー M1: 引数なしの通常のコマンドが照合を省いていた)。
           `settle.select_judge` が道具を選び、本段の記録 (MAIN_STAGE_STARTED) のある run は記録・今の設定・最後の起動・基準の sha256 と
           照合する。食い違い・記録の欠け (起動の記録が無い、記録が無く前の段とも確かめられない) があれば判定せず INDETERMINATE
-          (SETTLE_VERDICT.json も書かない)。前の段と確かめられた run (check_convergence.py の対象) も INDETERMINATE。手で組んだ run
+          (SETTLE_VERDICT.json も書かない)。**基準が無効 (`mode invalid`: 誤り・評価対象が未設定・grid.segment の stage が main でない)
+          のときも mode によらず判定せず INDETERMINATE** (§5.1 #9、result 段レビュー 2 回目 M1: 以前は stage を書き換えた基準で判定して
+          SETTLED を返した)。前の段と確かめられた run (check_convergence.py の対象) も INDETERMINATE。手で組んだ run
           (基準が本段の開始の記録を指さず、記録も無い) と基準の無い run はそのまま判定する (後者は「評価対象が未設定」)。
   --bind: 互換のために残す (既定と同じ)。run_case.sh・停止規則の後処理・成果物が付けて呼ぶ。
   --no-bind: 照合を外して判定する (調査用)。外したことを VERDICT の行と結果の JSON (`binding.skipped`) に書く。
@@ -42,13 +54,77 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import settle  # noqa: E402
+
+# 停止規則 v2 の名前 (design/forge_design/evaluate/stop_rule.py と同じ; この道具は design のパッケージを読まないので写して持つ。
+# 一致は design/tests/run_settle_migration_tests.py の (g) で確かめる)
+STOP_RULE_V2_DIR = "stop_rule_v2"                        # = stop_rule.V2_DIR (停止の時の再評価の専用ファイルの置き場)
+STOP_RULE_STATE = "STOP_RULE_STATE.json"                 # = stop_rule.STATE
+STOP_VERDICT_NAME = "SETTLE_VERDICT_stop_{step}.json"    # = stop_rule.V2_STOP_VERDICT
+
+
+def _sha256(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _migrate_legacy_stop_verdict(run: Path) -> tuple:
+    """古い形の run (STOP_RULE_STATE.json の method v2・reeval に stop_file が無い) の停止の時の原本 SETTLE_VERDICT.json を、上書きの
+    前に専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<reeval の end_step>.json` へ写す (§5.1 #16、result 段レビュー 4 回目 M1;
+    規則は docstring)。STOP_RULE_STATE.json は書き換えない (読む側 `stop_rule.stop_verdict_record` は reeval の sha256 で原本と確かめる)。
+    戻り (上書きしてよいか, 出す文 か None)。上書きしてはいけないのは、SETTLE_VERDICT.json が原本なのに写せなかったときだけ
+    (書き込みの失敗・同じ名前に違う中身がある)。原本でない (既に上書きされた・新しい形・停止規則の記録が無い) ときは移行せず上書きしてよい。"""
+    p_state = run / STOP_RULE_STATE
+    if not p_state.is_file():
+        return True, None
+    try:
+        st = json.loads(p_state.read_text())
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return True, f"注意: {STOP_RULE_STATE} を読めない ({e}) — 停止の時の記録の移行を判断できない (移行しない)"
+    ve = st.get("reeval") if isinstance(st, dict) and st.get("method") == "v2" else None
+    if not isinstance(ve, dict) or not ve or ve.get("error") or "stop_file" in ve:
+        return True, None                                 # 停止規則 v2 の記録が無い・再評価の失敗・新しい形 (専用ファイルは停止規則が書いた)
+    want, es = ve.get("sha256"), ve.get("end_step")
+    p_v = run / settle.VERDICT_FILE
+    if not isinstance(want, str) or not want or isinstance(es, bool) or not isinstance(es, int) or not p_v.is_file():
+        return True, None
+    if _sha256(p_v) != want:
+        return True, (f"注意: 古い形の run で {settle.VERDICT_FILE} は停止の時の原本でない (sha256 が {STOP_RULE_STATE} の記録と違う; "
+                      "既に上書きされた) — 移行しない")
+    rel = f"{STOP_RULE_V2_DIR}/{STOP_VERDICT_NAME.format(step=es)}"
+    dst = run / rel
+    if dst.exists():
+        if dst.is_file() and _sha256(dst) == want:
+            return True, None                             # 移行済み (同じ原本)
+        return False, (f"停止の時の原本を移せない: {rel} が既にあり中身が原本 ({settle.VERDICT_FILE}、{STOP_RULE_STATE} の記録の sha256) と"
+                       f"違う — 原本を失わないよう {settle.VERDICT_FILE} を上書きしない")
+    tmp = dst.with_name(dst.name + ".tmp")
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(p_v, tmp)
+        if _sha256(tmp) != want:
+            raise OSError("写した中身の sha256 が原本と違う")
+        os.replace(tmp, dst)
+    except OSError as e:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False, f"停止の時の原本を {rel} へ移せない ({e}) — 原本を失わないよう {settle.VERDICT_FILE} を上書きしない"
+    return True, (f"移行: 古い形の run の停止の時の再評価 ({settle.VERDICT_FILE}、sha256 {want[:16]}…) を上書きの前に {rel} へ写した "
+                  f"({STOP_RULE_STATE} は変えない)")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -88,6 +164,26 @@ def _print(res: dict) -> None:
             print(f"  前提が満たされていない: {p['quantity']} — {p['requires']}")
 
 
+def _rejection(run: Path, sel: dict) -> tuple[str, str | None]:
+    """判定に進まない選択 (mode invalid か照合の問題) の VERDICT の括弧の文言と、添える案内 (無ければ None)。
+    invalid の中身は基準を読み直して分ける: 誤り → 「基準のファイルの誤り」(判定の経路の文言と同じ)、評価対象が未設定 → 置き場所と
+    量の種類の一覧 (`settle.load_criteria` の message; §4.2 の契約)、それ以外 (grid.segment の stage が main でない等) → 「基準が本段の
+    判定に使えない」。"""
+    if sel["mode"] == "main":
+        return "本段の起動との照合の不一致", None
+    if sel["mode"] == "unconfirmed":
+        return "本段の開始の記録の欠け", None
+    if sel["mode"] != "invalid":
+        return f"照合の問題 (mode {sel['mode']})", None
+    try:
+        lc = settle.load_criteria(run)
+    except settle.CriteriaError as e:
+        return "基準のファイルの誤り", f"ERROR: 基準のファイルの誤り ({run / settle.CRITERIA_FILE}): {e}"
+    if lc["status"] != "ok":
+        return "評価対象が未設定", lc["message"]
+    return "基準が本段の判定に使えない", None
+
+
 def main(argv=None) -> int:
     ap = _Parser(description=__doc__.split("\n\n")[0])
     ap.add_argument("run_dir")
@@ -103,6 +199,9 @@ def main(argv=None) -> int:
     m.add_argument("--no-bind", action="store_true", help="照合を外して判定する (調査用; 外したことを VERDICT と結果に書く)")
     a = ap.parse_args(argv)
     run = Path(a.run_dir)
+    if a.out is not None and Path(a.out).resolve().is_relative_to((run / STOP_RULE_V2_DIR).resolve()):
+        # 停止の時の再評価の専用ファイル (stop_rule_v2/SETTLE_VERDICT_stop_<step>.json) は停止規則だけが書く (plan §5.1 #16)
+        ap.error(f"--out {a.out} は停止規則 v2 の置き場 {run / STOP_RULE_V2_DIR} の下 (停止の時の再評価の記録は停止規則だけが書く)")
     if a.select:
         sel = settle.select_judge(run)
         print(sel["tool"])
@@ -127,11 +226,16 @@ def main(argv=None) -> int:
             print(f"この起動は {settle.TOOL_NEW} の対象でない: {sel['why']} (判定は {sel['tool']})")
             print("VERDICT: INDETERMINATE (本段の起動でない)")
             return settle.EXIT_CODE["INDETERMINATE"]
-        elif sel["mode"] in ("main", "unconfirmed") and sel["problems"]:
-            what = "本段の起動との照合の不一致" if sel["mode"] == "main" else "本段の開始の記録の欠け"
-            print(f"{what} ({sel['why']}; 判定しない):")
+        elif sel["mode"] == "invalid" or sel["problems"]:
+            # 基準が無効 (mode invalid) か照合に問題があれば、mode によらず判定に進まない (result 段レビュー 2 回目 M1、plan §5.1 #9:
+            # 以前は main・unconfirmed だけを拒否し、基準の grid.segment.stage を main 以外に書き換えた run (invalid; 基準の sha256 と
+            # 本段の記録の照合も通らない経路) を判定して SETTLED・終了コード 0 を返していた)
+            what, msg = _rejection(run, sel)
+            print(f"{what} ({sel['why']} [mode {sel['mode']}]; 判定しない):")
             for p in sel["problems"]:
                 print(f"  {p}")
+            if msg:
+                print(msg)
             print(f"VERDICT: INDETERMINATE ({what})")
             return settle.EXIT_CODE["INDETERMINATE"]
         elif sel["mode"] == "main":
@@ -156,8 +260,16 @@ def main(argv=None) -> int:
     if sc is not None:
         print(f"最初に SETTLED になった step (--scan {a.scan}): {sc['first_settled']}")
     if not a.no_write:
-        p = settle.write_verdict(run, res, data, a.out)
-        print(f"結果: {p}")
+        # 古い形の run は上書きの直前に停止の時の原本を専用ファイルへ移す (§5.1 #16、result 段レビュー 4 回目 M1)
+        target = Path(a.out) if a.out else run / settle.VERDICT_FILE
+        ok, msg = (_migrate_legacy_stop_verdict(run) if target.resolve() == (run / settle.VERDICT_FILE).resolve() else (True, None))
+        if msg:
+            print(msg)
+        if ok:
+            p = settle.write_verdict(run, res, data, a.out)
+            print(f"結果: {p}")
+        else:
+            print(f"結果: 書かない ({target}; 停止の時の原本を残す)")
     if a.json:
         print(json.dumps(settle._jsonable(res), ensure_ascii=False, indent=1))
     print(settle.verdict_line(res) + (" (本段の起動との照合を外した: --no-bind)" if a.no_bind else ""))

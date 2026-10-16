@@ -1,0 +1,14 @@
+date        : 2026-10-16T00:37:54+00:00
+forge_bin   : /home/ubuntu/qs_trial/forge/solver_density_cuda/.build-native/relwithdebinfo/forge
+forge_mtime : 2026-10-16T00:15:06+00:00
+forge_sha256: a94d4b4314bfb2a4e953c5d085280c658066fcedbc57dd87313f37eafd820542
+git_head    : a36a87ff117739788a76c4c79e38977782bccb5c
+git_dirty   : 4 件
+host        : ip-172-31-14-139
+env         : FORGE_CUDA_BLOCKSIZE=128
+env         : FORGE_BIN=/home/ubuntu/qs_trial/forge/solver_density_cuda/.build-native/relwithdebinfo/forge
+cfg         : lineImplicit=1 (要求値)
+cfg         : lowMachPrecond=0 (要求値)
+cfg         : wallTreatmentSST=0 (要求値)
+'slauWallNormalChi' effective: 1 (auto: node+nodeWallDirichlet+SLAU)  (wall-adjacent faces: mass-flux chi from face-normal Mach)
+'scalarGradient' effective: lsq (default)

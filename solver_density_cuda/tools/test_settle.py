@@ -23,6 +23,13 @@ V2 の負例はすべて SETTLED にしないこと、各負例で理由の分�
 照合の不一致 (設定・基準の sha256・記録の fnv の欠け、**起動の記録の欠け・最後の起動の不一致**) は check_settled.py のまま判定不能
 (旧の道具へ落とさない)、記録が無い run は stage_manifest.json で前の段と確かめたときだけ旧の道具、`check_settled.py` は既定で照合
 (`--no-bind` は VERDICT と結果に書く)、`--select`・`--bind` (result 段レビュー M1)。
+**result 段レビュー 2 回目** (§5.1 #9・#10): 基準が無効 (mode invalid; stage を main 以外に差し替え・評価対象が未設定) と照合の不一致
+(基準の sha256) は CLI でも判定しない (S11b〜S11f)、v3 の非有限の見張りは区間の毎 step の行 (欠け・重複・逆行なし) と必要な列を要る
+(F1〜F10)。負例は修正前 (`PRE_REVIEW2_COMMIT` の settle.py・check_settled.py を git から読む) が SETTLED だったこと (検出力) も確かめる
+(読めなければその検査は NG)。
+**result 段レビュー 3 回目 M1** (§5.1 #16): 停止規則 v2 の停止の時の再評価の専用ファイル (`stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`)
+は停止規則だけが書く — `check_settled.py --out` で `stop_rule_v2/` の下を指すと引数の誤り (V1b)。CLI の後の照合の連続操作は
+`design/tests/run_settle_migration_tests.py` (f) と `design/tests/run_settle_realdata_tests.py` (#16)。
 """
 from __future__ import annotations
 
@@ -609,6 +616,27 @@ def test_verdict_file():
     q = {x["name"]: x for x in d["quantities"]}
     chk("V1 各量に verdict・使った値・理由の分類", all({"verdict", "values", "reasons", "categories", "checks"} <= set(x) for x in q.values()))
     chk("V1 壁の面積の取り方を記録", "A_i" in q["wall_heat_nodes"]["values"]["walls"][0]["area_method"])
+    # 停止規則 v2 の停止の時の再評価の専用ファイル (stop_rule_v2/SETTLE_VERDICT_stop_<step>.json) は停止規則だけが書く (plan §5.1 #16、
+    # result 段レビュー 3 回目 M1): --out で stop_rule_v2/ の下を指すと引数の誤り (INDETERMINATE・終了コード 3)、何も書かない
+    (run / "stop_rule_v2").mkdir()
+    stop_f = run / "stop_rule_v2" / "SETTLE_VERDICT_stop_80001.json"
+    stop_f.write_text("{}\n")
+    before = p.read_bytes()
+    for target in (stop_f, run / "stop_rule_v2" / "other.json"):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            try:
+                rc = check_settled.main([str(run), "--out", str(target)])
+            except SystemExit as e:
+                rc = e.code
+        last = (buf.getvalue().strip().splitlines() or [""])[-1]
+        chk(f"V1b --out {target.relative_to(run)} (停止規則 v2 の置き場の下) → 引数の誤り・終了コード 3、専用ファイルも SETTLE_VERDICT.json も書かない",
+            rc == 3 and last == "VERDICT: INDETERMINATE (引数の誤り)" and stop_f.read_text() == "{}\n"
+            and not (run / "stop_rule_v2" / "other.json").exists() and p.read_bytes() == before, f"rc {rc} {last}")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = check_settled.main([str(run), "--out", str(run / "SETTLE_VERDICT_copy.json")])
+    chk("V1b --out を run の直下の別の名前にするのは今どおり書く (終了コード 0)", rc == 0 and (run / "SETTLE_VERDICT_copy.json").is_file())
 
 
 def test_select_bind():
@@ -754,6 +782,40 @@ def test_select_bind():
     (r / settle.CRITERIA_FILE).write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
     s = settle.select_judge(r)
     chk("S11 grid.segment の stage が main でない → invalid (本段の基準だけを扱う)", s["mode"] == "invalid" and s["tool"] == settle.TOOL_NEW)
+    # --- result 段レビュー 2 回目 M1 (§5.1 #9): invalid と照合の問題は mode によらず CLI でも判定しない ---
+    rc, out = cli(r)        # 引数なし (通常のコマンド; SETTLE_VERDICT.json を書く経路)
+    chk("S11b 本段の記録のある run の基準の 1 項目を差し替え (grid.segment.stage main → S1) → CLI は判定せず "
+        "INDETERMINATE (基準が本段の判定に使えない)・終了コード 3・SETTLE_VERDICT.json を書かない",
+        rc == 3 and out.splitlines()[-1] == "VERDICT: INDETERMINATE (基準が本段の判定に使えない)" and "判定しない" in out
+        and "grid.segment.stage 'S1'" in out and not (r / settle.VERDICT_FILE).exists(), out[-240:])
+    rc, out = cli(r, "--no-bind", "--no-write")
+    chk("S11c 同じ run で --no-bind を明示 → 今どおり照合を外して判定する (既存の振る舞い; VERDICT の行に外したことを書く)",
+        rc == 0 and "VERDICT: SETTLED" in out and "照合を外した" in out.splitlines()[-1], out.splitlines()[-1])
+    old_cli, why = _load_at(PRE_REVIEW2_COMMIT, "solver_density_cuda/tools/check_settled.py", f"check_settled_pre_review2_{PRE_REVIEW2_COMMIT}")
+    if old_cli is None:
+        chk(f"S11d 修正前 ({PRE_REVIEW2_COMMIT}) の check_settled.py を読めた (読めなければ検出力は判定不能 — 合格にしない)", False, why)
+    else:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc_old = old_cli.main([str(r), "--no-write"])
+        chk("S11d 検出力: 修正前の check_settled.py は S11b の run で SETTLED・終了コード 0 だった (レビューの再現)",
+            rc_old == 0 and "VERDICT: SETTLED" in buf.getvalue(), buf.getvalue().splitlines()[-1] if buf.getvalue() else "")
+    r = mk("sel_crit_sha_cli")
+    with open(r / settle.CRITERIA_FILE, "a") as f:
+        f.write("# 準備の後に書き換えた\n")
+    rc, out = cli(r)
+    chk("S11e 基準の sha256 が本段の記録と違う → CLI は判定せず INDETERMINATE (照合の不一致)・終了コード 3・SETTLE_VERDICT.json を書かない",
+        rc == 3 and out.splitlines()[-1] == "VERDICT: INDETERMINATE (本段の起動との照合の不一致)" and "settle_criteria.sha256" in out
+        and not (r / settle.VERDICT_FILE).exists(), out[-240:])
+    r = mk("sel_unset_cli")
+    c = yaml.safe_load((r / settle.CRITERIA_FILE).read_text())
+    c["quantities"] = c["quantities"][:2]         # 目的の量が無い (評価対象が未設定)
+    (r / settle.CRITERIA_FILE).write_text(yaml.safe_dump(c, allow_unicode=True, sort_keys=False))
+    s = settle.select_judge(r)
+    rc, out = cli(r)
+    chk("S11f 評価対象が未設定 (invalid) → 判定せず INDETERMINATE (評価対象が未設定)・終了コード 3、置き場所と量の種類の一覧を出す",
+        s["mode"] == "invalid" and rc == 3 and out.splitlines()[-1] == "VERDICT: INDETERMINATE (評価対象が未設定)"
+        and "置き場所" in out and "wall_heat_nodes" in out, out[-240:])
 
 
 def test_mass_denominator():
@@ -1196,8 +1258,14 @@ def test_v3():
     chk("V3g 残差も見張りも無い基準 → INDETERMINATE (評価対象が未設定; 発散を見張れない)・終了コード 3",
         lc["status"] == "unset" and "residual_finite" in lc["reason"] and rc == 3 and "評価対象が未設定" in out, lc.get("reason", "")[:160])
     bad = []
+    # 期待の変更 (§5.1 #10、result 段レビュー 2 回目 M2): 以前は「知らないキー required」を負例にしていた。#10 で residual_finite は
+    # 必要な列 `required` を受け付けるようにしたので、知らないキーの負例は inactive_ok (residual_finite には無い) に替え、required の形の
+    # 誤り (空・rms_dq_*・rms_ で始まらない) を負例に足す。
     for label, mut in (("2 つ", lambda c: c["quantities"].append({"kind": "residual_finite", "name": "rf2", "thresholds": {}})),
-                       ("知らないキー required", lambda c: c["quantities"][0].update(required=["rms_ro"])),
+                       ("知らないキー inactive_ok", lambda c: c["quantities"][0].update(inactive_ok=["rms_roUz"])),
+                       ("required が空", lambda c: c["quantities"][0].update(required=[])),
+                       ("required に rms_dq_", lambda c: c["quantities"][0].update(required=["rms_ro", "rms_dq_ro"])),
+                       ("required に rms_ でない名前", lambda c: c["quantities"][0].update(required=["ro"])),
                        ("閾値のキー slope_dec", lambda c: c["quantities"][0].update(thresholds={"slope_dec": 0.1})),
                        ("thresholds が無い", lambda c: c["quantities"][0].pop("thresholds"))):
         c = v3_criteria()
@@ -1208,7 +1276,7 @@ def test_v3():
             bad.append(label)
         except settle.CriteriaError:
             pass
-    chk("V3h residual_finite の誤用 (2 つ・知らないキー・閾値のキー・thresholds が無い) は CriteriaError", not bad, str(bad))
+    chk("V3h residual_finite の誤用 (2 つ・知らないキー・required の形の誤り・閾値のキー・thresholds が無い) は CriteriaError", not bad, str(bad))
     c = v3_criteria()
     c["quantities"][0]["thresholds"] = {"provisional": True}
     rewrite_criteria(run, c)
@@ -1220,6 +1288,125 @@ def test_v3():
     chk("V3i 判定の部品 (--scan) は v3 の形で区間 C だけを使うので 12,000 から SETTLED (直前の区間は残差の上昇の検査だけが使う)、"
         "停止規則・再生の最初の判定は量によらず開始 + 2W + 間隔 = 22,000 のまま (v2 と同じ; 早めるかは plan の判断)",
         sc["first_settled"] == 12000 and fj == 22000, f"scan {sc['first_settled']} first_judgeable {fj}")
+
+
+PRE_REVIEW2_COMMIT = "b64dbfdd"    # result 段レビュー 2 回目 (§5.1 #9・#10) の修正の前 (負例が修正前に落ちないこと = 検出力の確かめ)
+
+
+def _load_at(commit: str, relpath: str, modname: str):
+    """commit の relpath を git から読んでモジュールにする (読めなければ None と理由)。check_settled.py は同じディレクトリの settle を
+    import するので、今の settle (sys.modules) と組になる (#9 の修正は check_settled.py の分岐だけなので、修正前の分岐を確かめられる)。"""
+    import importlib.util
+    import subprocess
+    try:
+        src = subprocess.run(["git", "-C", str(HERE), "show", f"{commit}:{relpath}"], capture_output=True, text=True, check=True).stdout
+    except Exception as e:  # noqa: BLE001
+        return None, f"git show {commit}:{relpath} が読めない ({type(e).__name__})"
+    p = TMP / f"{modname}.py"
+    p.write_text(src)
+    spec = importlib.util.spec_from_file_location(modname, p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m, None
+
+
+def _rewrite_residual(run, header: list, rows: list):
+    """残差の履歴を書き直す (rows は step,inner,phase,値… の行の文字列のリスト)。"""
+    with open(run / "residual_history.csv", "w") as f:
+        f.write(",".join(header) + "\n")
+        for r in rows:
+            f.write(r + "\n")
+
+
+def _outer_end_rows(run):
+    lines = (run / "residual_history.csv").read_text().splitlines()
+    return lines[0].split(","), [ln for ln in lines[1:] if ln.split(",")[2] == "outer_end"]
+
+
+def test_v3_watch_coverage():
+    """result 段レビュー 2 回目 M2 (plan §5.1 #10): v3 の非有限の見張り (residual_finite) は、在る数値だけを見て最終行があれば合格に
+    していた。閾値は戻さず、区間の行の被覆 (毎 step の行が重複なく全部・逆行なし) と必要な列を必須にした。負例ごとに修正前
+    (PRE_REVIEW2_COMMIT の settle.py) が SETTLED だったこと (検出力) も確かめる。"""
+    print("=== v3 の見張りの被覆と必要な列 (result 段レビュー 2 回目 M2、§5.1 #10) ===")
+    old, why = _load_at(PRE_REVIEW2_COMMIT, "solver_density_cuda/tools/settle.py", f"settle_pre_review2_{PRE_REVIEW2_COMMIT}")
+    if old is None:
+        chk(f"F0 修正前 ({PRE_REVIEW2_COMMIT}) の settle.py を読めた (読めなければ検出力は判定不能 — 合格にしない)", False, why)
+
+    def both(run):
+        new = settle.judge(run)
+        prev = old.judge(run) if old is not None else None
+        return new, qres(new, "residual_finite"), (prev["verdict"] if prev is not None else None)
+
+    # 対照 (正例): forge と同じ形 (毎 step の行・全列) は SETTLED
+    run = braw("w10_ok", criteria=v3_criteria())
+    res, q, _ = both(run)
+    chk("F1 対照: 毎 step の行・全列 → SETTLED (見張りの必要な列は既定の 4 列、出所を記録)", res["verdict"] == "SETTLED"
+        and q["verdict"] == "SETTLED" and q["values"]["required"] == list(settle.RESIDUAL_FINITE_DEFAULT_REQUIRED)
+        and q["values"]["required_source"].startswith("既定"), str(q["reasons"])[:200])
+    hdr, rows = _outer_end_rows(run)
+    # ① 残差を最終 1 行だけ (codex の再現)
+    r1 = braw("w11_lastrow_only", criteria=v3_criteria())
+    _rewrite_residual(r1, hdr, rows[-1:])
+    res, q, pv = both(r1)
+    rc, out = run_cli(r1)
+    chk("F2 ① 残差が最終 1 行だけ → 見張りは判定不能 (区間の行の欠け)・全体 INDETERMINATE・CLI 終了コード 3",
+        q["verdict"] == "INDETERMINATE" and cats(q) == {settle.CAT_DATA} and any("行欠ける" in r["text"] for r in q["reasons"])
+        and res["verdict"] == "INDETERMINATE" and rc == 3, str(q["reasons"])[:200])
+    chk("F2 検出力: 修正前は ① で SETTLED", pv == "SETTLED", str(pv))
+    # ② rms_ro の列だけ (行は全部)
+    r2 = braw("w12_ro_only", criteria=v3_criteria())
+    i_ro = hdr.index("rms_ro")
+    _rewrite_residual(r2, ["step", "inner", "phase", "rms_ro"], [",".join(ln.split(",")[:3] + [ln.split(",")[i_ro]]) for ln in rows])
+    res, q, pv = both(r2)
+    chk("F3 ② 残差の列が rms_ro だけ → 見張りは判定不能 (必要な列の欠け: rms_roUx・rms_roUy・rms_roe)",
+        q["verdict"] == "INDETERMINATE" and any("必要な残差の列が無い" in r["text"] and "rms_roUx" in r["text"] for r in q["reasons"])
+        and res["verdict"] == "INDETERMINATE", str(q["reasons"])[:200])
+    chk("F3 検出力: 修正前は ② で SETTLED", pv == "SETTLED", str(pv))
+    # ③ 残差の列が 1 つも無い step,inner,phase の 1 行
+    r3 = braw("w13_no_cols", criteria=v3_criteria())
+    _rewrite_residual(r3, ["step", "inner", "phase"], [",".join(rows[-1].split(",")[:3])])
+    res, q, pv = both(r3)
+    chk("F4 ③ 残差の列の無い step,inner,phase の 1 行 → 見張りは判定不能 (行の欠けと列の欠けの両方)",
+        q["verdict"] == "INDETERMINATE" and any("行欠ける" in r["text"] for r in q["reasons"])
+        and any("必要な残差の列が無い" in r["text"] for r in q["reasons"]), str(q["reasons"])[:200])
+    chk("F4 検出力: 修正前は ③ で SETTLED", pv == "SETTLED", str(pv))
+    # 区間の途中の 1 行の欠け・重複・逆行 (最終行はある)
+    r4 = braw("w14_gap", criteria=v3_criteria(), skip_resid_rows=(15000,))
+    res, q, pv = both(r4)
+    chk("F5 区間の途中の 1 行 (15,000) の欠け → 判定不能 (欠けた step を理由に)", q["verdict"] == "INDETERMINATE"
+        and any("1 行欠ける" in r["text"] and "15000" in r["text"] for r in q["reasons"]), str(q["reasons"])[:200])
+    chk("F5 検出力: 修正前は途中の欠けで SETTLED", pv == "SETTLED", str(pv))
+    r5 = braw("w15_dup", criteria=v3_criteria(), dup_resid_rows=(15000,))
+    res, q, pv = both(r5)
+    chk("F6 行の重複 (15,000 を 2 回) → 判定不能", q["verdict"] == "INDETERMINATE" and any("重複" in r["text"] for r in q["reasons"]),
+        str(q["reasons"])[:200])
+    chk("F6 検出力: 修正前は重複で SETTLED", pv == "SETTLED", str(pv))
+    r6 = braw("w16_nonmono", criteria=v3_criteria())
+    i = next(k for k, ln in enumerate(rows) if ln.startswith("15000,"))
+    swapped = rows[:i] + [rows[i + 1], rows[i]] + rows[i + 2:]
+    _rewrite_residual(r6, hdr, swapped)
+    res, q, pv = both(r6)
+    chk("F7 行の逆行 (15,001 の後に 15,000) → 判定不能", q["verdict"] == "INDETERMINATE" and any("単調でない" in r["text"] for r in q["reasons"]),
+        str(q["reasons"])[:200])
+    chk("F7 検出力: 修正前は逆行で SETTLED", pv == "SETTLED", str(pv))
+    # 基準の required (乱流の列を書いたとき): 列が欠ければ判定不能、全部あれば SETTLED
+    c = v3_criteria()
+    c["quantities"][0]["required"] = ["rms_ro", "rms_roUx", "rms_roUy", "rms_roe", "rms_roK", "rms_roOmega"]
+    r7 = braw("w17_rans_missing", criteria=c, resid_cols=[k for k in RES_COLS if k != "rms_roK"])
+    q = qres(settle.judge(r7), "residual_finite")
+    chk("F8 基準の required に rms_roK・rms_roOmega (RANS) を書き、履歴に rms_roK が無い → 判定不能 (列の欠け)",
+        q["verdict"] == "INDETERMINATE" and any("rms_roK" in r["text"] for r in q["reasons"])
+        and q["values"]["required_source"] == "基準の required", str(q["reasons"])[:200])
+    r8 = braw("w18_rans_ok", criteria=c)
+    q = qres(settle.judge(r8), "residual_finite")
+    chk("F9 同じ基準で全列がある → SETTLED", q["verdict"] == "SETTLED" and q["values"]["required"] == c["quantities"][0]["required"],
+        str(q["reasons"])[:200])
+    # 非有限は今どおり DIVERGED (欠けがあっても DIVERGED を優先)
+    r9 = braw("w19_nan_gap", criteria=v3_criteria(), skip_resid_rows=(15000,),
+              resid_fn=lambda s: {k: (float("nan") if s == 18000 else x) for k, x in RES_BASE.items()})
+    res, q, _ = both(r9)
+    chk("F10 非有限 (18,000) と途中の欠け (15,000) → DIVERGED (非有限が優先、今どおり)・CLI 終了コード 2",
+        q["verdict"] == "DIVERGED" and res["verdict"] == "DIVERGED" and run_cli(r9)[0] == 2, str(q["reasons"])[:200])
 
 
 def test_v1_v2_identity_pre8():
@@ -1264,6 +1451,7 @@ def main():
     test_select_bind()
     test_mass_denominator()
     test_v3()
+    test_v3_watch_coverage()
     test_v1_v2_identity_pre8()
     test_raw_residual()
     test_wall_range()

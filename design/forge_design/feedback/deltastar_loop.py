@@ -40,8 +40,9 @@ r"""排除厚さの固定点反復ドライバ (固定 Euler 基準・コア整�
 
 **関門の新方式** (2026-10-16、plan tooling-settle-convergence-and-monitor §4.9 の 1・2、codex diagnose settle-migration-7 を全件採用):
 run に `settle_criteria.yaml` があれば (分岐は基準のファイルの有無だけ; 判定不能・照合の不一致で旧方式へ落とさない) `_handoff_gate_v2`:
-停止規則 v2 の `STOP_RULE_STATE.json` が REACHED、停止の step の再評価 (`SETTLE_VERDICT.json`) の全体が SETTLED (残差・流量の収支・目的の量)、
-状態・再評価・STOPPED_AT・停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の基準の sha256・
+停止規則 v2 の `STOP_RULE_STATE.json` が REACHED、停止の step の再評価 (停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`;
+`SETTLE_VERDICT.json` は通常の CLI が上書きする最新の判定なので読まない、§5.1 #16) の全体が SETTLED (残差・流量の収支・目的の量)、
+状態・再評価・再評価が使った入力の中身 (§5.1 #16、result 段レビュー 4 回目 M1)・STOPPED_AT・停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の基準の sha256・
 見張りの記録の照合、δ_E は停止規則が止めた step で抽出した `stop_rule_v2/delta_E_<step>/` を契約 (状態 ok・step・場と表の sha256・
 抽出の設定・Euler の参照・ω) を確かめて使う (抽出し直さない; 帯の感度は記録だけ)。(d) y₁⁺・(f) 参照と ω・(g) 被覆・(h) 次の壁は今のまま。
 合格したら表を旧方式と同じ名前で run の直下に写す (`delta_r_next.csv` ほか)。HANDOFF_GATE.json の `method` (v1 / v2) にどちらを使ったかを書く。
@@ -1112,7 +1113,7 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
 
 # --- 受け渡しの関門の新方式 (settle_criteria.yaml のある run; plan tooling-settle-convergence-and-monitor §4.9 の 1・2、
 #     codex diagnose 2026-10-16 settle-migration-7 の M1・M2・M5) ---------------------------------------------------------------------
-HANDOFF_V2_PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §4.9 の 1・2 (§4.8 の 2、codex diagnose 2026-10-16 "
+HANDOFF_V2_PLAN = ("plans/accepted/tooling-settle-convergence-and-monitor.md §4.9 の 1・2 (§4.8 の 2、codex diagnose 2026-10-16 "
                    "settle-migration-7: 照合・δ_E の契約・分岐の規則)")
 _V2_TABLE_FILES = ("delta_r_next.csv", "delta_r_equiv.csv", "delta_r_equiv_diag.json", "delta_r_extract_summary.json", "delta_r_edge.csv")
 _V2_SENS_FILES = ("band_sensitivity.json", "band_sensitivity.csv")
@@ -1120,7 +1121,7 @@ _V2_NEED_FILES = ("delta_r_next.csv", "delta_r_equiv_diag.json", "delta_r_extrac
 
 
 def _settle_group(qs: list, kinds, label: str) -> dict:
-    """再評価 (SETTLE_VERDICT.json) の量のうち kind が kinds のものの判定。全部 SETTLED → kind PASS。
+    """再評価 (停止の時の記録) の量のうち kind が kinds のものの判定。全部 SETTLED → kind PASS。
     不合格の分類: DIVERGED (どれかが DIVERGED) / UNDETERMINED (どれかが INDETERMINATE か、理由に閾値の超過以外がある・量が無い) /
     NOT_SETTLED (閾値の超過だけ = measured; 上書きの対象)。"""
     sel = [q for q in qs if isinstance(q, dict) and q.get("kind") in kinds]
@@ -1149,10 +1150,13 @@ def _settle_group(qs: list, kinds, label: str) -> dict:
 
 
 def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
-    """照合 (§4.9 の 1、codex M1): STOP_RULE_STATE・SETTLE_VERDICT (停止の step の再評価)・STOPPED_AT・停止の step・本段の起動
-    (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の settle_criteria.yaml の sha256・stop_rule.json が
-    互いに一致すること。どれかが照合できない・食い違えば problems (受け渡しの関門は上書きでも通さない)。
-    戻り: {pass, problems, items, verdict (SETTLE_VERDICT.json の中身か None), stop_step, criteria_sha256}。"""
+    """照合 (§4.9 の 1、codex M1): STOP_RULE_STATE・停止の step の再評価 (停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<k>.json`;
+    専用ファイルの無い古い run は通常の CLI が移行した専用ファイルか移行していない原本 SETTLE_VERDICT.json、`stop_rule.stop_verdict_record`、
+    §5.1 #16)・再評価が使った入力のファイルの中身 (記録の files の sha256 と今の run のファイル; result 段レビュー 4 回目 M1)・STOPPED_AT・
+    停止の step・本段の起動 (MAIN_STAGE_STARTED の main_config の sha256・fnv と最後の forge の起動)・今の settle_criteria.yaml の sha256・
+    stop_rule.json が互いに一致すること。どれかが照合できない・食い違えば problems (受け渡しの関門は上書きでも通さない)。
+    戻り: {pass, problems, items, verdict (停止の時の再評価の中身か None), verdict_file (読んだファイルの run からの相対), stop_step,
+    criteria_sha256}。"""
     from ..evaluate import stop_rule as SR
     probs, items = [], {}
     sel = S.select_judge(run_dir)
@@ -1172,7 +1176,7 @@ def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
             crit_sha = lc.get("sha256")
         except S.CriteriaError as e:
             probs.append(f"{S.CRITERIA_FILE} の誤り: {e}")
-    out = {"pass": False, "problems": probs, "items": items, "verdict": None, "stop_step": None, "criteria_sha256": crit_sha}
+    out = {"pass": False, "problems": probs, "items": items, "verdict": None, "verdict_file": None, "stop_step": None, "criteria_sha256": crit_sha}
     if not isinstance(st, dict):
         probs.append(f"{SR.STATE} が無い (停止規則 v2 の記録が要る)")
         return out
@@ -1226,30 +1230,40 @@ def _v2_binding(run_dir: Path, st: dict | None, S) -> dict:
     rec_sha = _sha256(rp) if rp.is_file() else None
     if rec_sha is None or rec_sha != st.get("record_sha256"):
         probs.append(f"{SR.RECORD} (sha256 {str(rec_sha)[:16]}…) が {SR.STATE} の記録 ({str(st.get('record_sha256'))[:16]}…) と違う・無い")
-    # 停止の step の再評価 SETTLE_VERDICT.json
+    # 停止の step の再評価: 停止の時の専用ファイル stop_rule_v2/SETTLE_VERDICT_stop_<k>.json (§5.1 #16、result 段レビュー 3 回目 M1)。
+    # SETTLE_VERDICT.json は最新の判定 (通常の CLI が上書きする) なので、停止の時の照合には読まない。専用ファイルの無い古い run は
+    # 通常の CLI が上書きの前に移した専用ファイル、まだ移していなければ停止の時のままの SETTLE_VERDICT.json (`stop_rule.stop_verdict_record`)。
+    # 原本が失われていれば照合不能 (result 段レビュー 4 回目 M1: 以前は上書き後の判定を要約の一致で代わりの記録にし、今の入力から
+    # 作り直した判定と比べたので、入力を変えて通常の CLI を回すだけで照合が通った)
     ve = st.get("reeval") or {}
-    vp = run_dir / S.VERDICT_FILE
-    try:
-        v = json.loads(vp.read_text())
-        if not isinstance(v, dict):
-            raise ValueError("JSON の対応表でない")
-    except (OSError, ValueError) as e:
-        probs.append(f"{S.VERDICT_FILE} を読めない ({e})")
-        return {**out, "pass": False}
-    out["verdict"] = v
-    dig = SR.quantities_digest(v)
-    items["reeval"] = {"file": S.VERDICT_FILE, "end_step": v.get("end_step"), "verdict": v.get("verdict"), "digest": dig,
-                       "state": {kk: ve.get(kk) for kk in ("end_step", "verdict", "digest", "sha256")},
-                       "file_sha256": _sha256(vp), "file_sha256_matches_state": _sha256(vp) == ve.get("sha256")}
+    svr = SR.stop_verdict_record(run_dir, ve)
+    vname = svr["file"] or S.VERDICT_FILE
+    items["reeval"] = {"form": svr["form"], "file": svr["file"], "exact": svr["exact"], "record": svr["why"],
+                       "state": {kk: ve.get(kk) for kk in ("end_step", "verdict", "digest", "sha256", "stop_file", "stop_file_sha256")}}
     if ve.get("error") or not ve:
         probs.append(f"{SR.STATE} に再評価の記録が無い ({ve.get('error') if ve else '無い'})")
+    v = svr["record"]
+    if v is None:
+        probs.append(f"停止の時の再評価の記録を照合に使えない: {svr['why']}")
+        return {**out, "pass": False}
+    out["verdict"] = v
+    out["verdict_file"] = vname
+    dig = SR.quantities_digest(v)
+    items["reeval"].update(end_step=v.get("end_step"), verdict=v.get("verdict"), digest=dig)
     if v.get("end_step") != k or ve.get("end_step") != k:
-        probs.append(f"再評価の終端 ({S.VERDICT_FILE} {v.get('end_step')!r}・{SR.STATE} {ve.get('end_step')!r}) が停止の step {k} と違う")
+        probs.append(f"再評価の終端 ({vname} {v.get('end_step')!r}・{SR.STATE} {ve.get('end_step')!r}) が停止の step {k} と違う")
     if (v.get("criteria") or {}).get("sha256") != crit_sha:
-        probs.append(f"{S.VERDICT_FILE} の基準の sha256 が今の {S.CRITERIA_FILE} と違う")
-    if dig != ve.get("digest") or v.get("verdict") != ve.get("verdict"):
-        probs.append(f"{S.VERDICT_FILE} の判定 ({v.get('verdict')}、量の sha256 {dig[:16]}…) が {SR.STATE} の再評価 "
+        probs.append(f"{vname} の基準の sha256 が今の {S.CRITERIA_FILE} と違う")
+    if not svr["exact"] or dig != ve.get("digest") or v.get("verdict") != ve.get("verdict"):
+        probs.append(f"{vname} の判定 ({v.get('verdict')}、量の sha256 {dig[:16]}…) が {SR.STATE} の再評価 "
                      f"({ve.get('verdict')}、{str(ve.get('digest'))[:16]}…) と違う")
+    # 再評価が使った入力 (流量・節点・壁の h5・残差・STOPPED_AT・基準) が今の run のファイルと同じ中身か (result 段レビュー 4 回目 M1:
+    # 停止の時の記録の中身だけを照合し、停止の後に入力を書き換えても受け渡しの照合が通った; 成果物の照合 `match_reeval` と同じ部品)
+    inp = SR.recorded_input_problems(run_dir, v)
+    items["reeval"]["inputs"] = {"n_files": len(v.get("files") or []) if isinstance(v.get("files"), list) else 0,
+                                 "problems": inp[:10], "n_problems": len(inp)}
+    if inp:
+        probs.append(f"{vname} の再評価が使った入力が今の run と違う (停止の後に書き換えられた・無い): " + "; ".join(inp)[:400])
     vsa = v.get("stopped_at")
     if st.get("status") == "CENSORED":
         if vsa is not None:
@@ -1368,9 +1382,9 @@ def _v2_delta_e(run_dir: Path, st: dict | None, rec_sr: dict | None, k, run_eref
     return out
 
 
-def _v2_convergence_text(k, v: dict | None, groups: dict, crit_sha) -> str:
-    """HANDOFF_CONVERGENCE.txt (新方式): 停止の step の再評価 (SETTLE_VERDICT.json) の量ごとの結果。"""
-    lines = [f"=== 受け渡しの関門 (新方式): 停止の step {k} の再評価 SETTLE_VERDICT.json (settle.judge、基準 sha256 {str(crit_sha)[:16]}…) ==="]
+def _v2_convergence_text(k, v: dict | None, groups: dict, crit_sha, vfile=None) -> str:
+    """HANDOFF_CONVERGENCE.txt (新方式): 停止の step の再評価 (停止の時の専用ファイル vfile; §5.1 #16) の量ごとの結果。"""
+    lines = [f"=== 受け渡しの関門 (新方式): 停止の step {k} の再評価 {vfile or '(記録なし)'} (settle.judge、基準 sha256 {str(crit_sha)[:16]}…) ==="]
     if v is None:
         lines.append("再評価を読めない")
         return "\n".join(lines) + "\n"
@@ -1389,7 +1403,7 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
     """受け渡しの関門の新方式 (`handoff_gate` から、settle_criteria.yaml のある run; plan tooling-settle-convergence-and-monitor §4.9 の 1)。
     (a) STOP_RULE_STATE.json (method v2) が REACHED。CENSORED・NOT_USED は allow_not_reached で通す (今どおり理由つき)、FAILED・MISSING は通さない。
     照合 (`_v2_binding`): 状態・再評価・STOPPED_AT・停止の step・本段の起動・今の基準・見張りの記録の一致。**上書きでも通さない**。
-    (b)(c) 停止の step の再評価 (SETTLE_VERDICT.json) の**全体が SETTLED**: (b) 残差 (residual)・(c) 流量の収支 (mass_balance)・目的の量
+    (b)(c) 停止の step の再評価 (停止の時の専用ファイル; `_v2_binding`) の**全体が SETTLED**: (b) 残差 (residual)・(c) 流量の収支 (mass_balance)・目的の量
     (出口コア M・線・流れ角・壁の熱流)。閾値の超過だけの NOT_SETTLED は (b) allow_unconverged・(c) と目的の量 allow_unsettled で通す
     (今の上書きの対応: 収束の判定 / 落ち着きの条件)。DIVERGED・判定不能は通さない。基準に残差が無く非有限の見張り (residual_finite) が
     ある run (wt_nozzle_v3; plan §4.4・§5.1 #8) は (b) を対象外 (止めない) にし、見張り (b′) の DIVERGED・判定不能は上書きでも通さない。
@@ -1447,7 +1461,7 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
         if not g_watch["pass"]:
             blocked.append(f"(b′) 残差の非有限の見張り {g_watch['kind']}: {g_watch.get('why')} (上書きでも通さない)")
     cv_kind = {"PASS": "PASS", "NOT_SETTLED": "NOT_CONVERGED"}.get(g_res["kind"], g_res["kind"])
-    cv = {"tool": f"{S.VERDICT_FILE} (停止の step の再評価、settle.judge; 新方式)", "kind": cv_kind, "rc": None,
+    cv = {"tool": f"{bind.get('verdict_file') or S.VERDICT_FILE} (停止の step の再評価、settle.judge; 新方式)", "kind": cv_kind, "rc": None,
           "verdict": [f"OVERALL: {overall}", f"残差: {g_res['kind']}"] + ([f"残差の非有限の見張り: {g_watch['kind']}"] if g_watch else []),
           "end_step": (v or {}).get("end_step"),
           "criteria_sha256": bind["criteria_sha256"]}
@@ -1552,7 +1566,8 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
                     made.append(f)
             ext["made"] = made
     rec = {"version": 4, "method": "v2",
-           "method_note": ("新方式 (settle_criteria.yaml のある run): 停止規則 v2 の REACHED・停止の step の再評価 (SETTLE_VERDICT.json) の全体・"
+           "method_note": ("新方式 (settle_criteria.yaml のある run): 停止規則 v2 の REACHED・停止の step の再評価 (停止の時の専用ファイル "
+                           "stop_rule_v2/SETTLE_VERDICT_stop_<step>.json; 古い run は通常の CLI が移した専用ファイルか停止の時のままの SETTLE_VERDICT.json) の全体・"
                            "本段の起動との照合・停止規則の δ_E の抽出 (抽出し直さない)"),
            "plan": HANDOFF_V2_PLAN, "run": str(run_dir), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
            "proceed": not blocked, "blocked_by": blocked, "warnings": warnings,
@@ -1572,7 +1587,7 @@ def _handoff_gate_v2(run_dir: Path, *, problem, euler_ref, omega, why_nr, why_uc
     if write:
         (run_dir / HANDOFF_CONVERGENCE).write_text(_v2_convergence_text(k, v, {"residual": g_res, **({"residual_watch": g_watch} if g_watch else {}),
                                                                                 "mass": g_mass, "targets": g_tgt},
-                                                                        bind["criteria_sha256"]))
+                                                                        bind["criteria_sha256"], bind.get("verdict_file")))
         (run_dir / HANDOFF_WALL_RESOLUTION).write_text(wr["output"])
         _write_json_atomic(run_dir / HANDOFF_GATE, rec)
     return rec

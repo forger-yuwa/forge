@@ -1,0 +1,292 @@
+{
+ "format": "forge.wt_qualify/v1",
+ "plan": "plans/active/tooling-nozzle-card-local-mesh.md §5.1 #6b・§4.3・§6 V5; plans/active/tooling-design-orchestrator.md §4.2",
+ "created": "2026-10-16T01:27:44+00:00",
+ "git_head": "eabbab9730ae4c83ac9920d18381ca030f4e97d7",
+ "run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1",
+ "inputs": {
+  "card": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/card_p1.yaml",
+  "card_sha256": "cefb2b98c57499bead8c56103a735f7caf39e99fe137fd583833c3d08d98adf8",
+  "problem": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/problem_p1.yaml",
+  "problem_sha256": "636d8de897a1b9656ed4198c45746b34a371878f764ff3dc30ed713ef45a1efc",
+  "prev_run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0",
+  "Md": 5.5,
+  "Md_source": "カードの M_exit"
+ },
+ "field": {
+  "step": 30088,
+  "res": "res_30088.h5",
+  "source": "STOP_RULE_STATE.json の stop_step (status REACHED)"
+ },
+ "tolerances": {
+  "exit_core_M_tol_rel": {
+   "value": 0.0005,
+   "source": "plan §6 V5b (5.5 ± 0.05 %、M6 の生産のゲートと同じ幅)"
+  },
+  "line_tol_maxabs_pct": {
+   "value": 0.1,
+   "source": "plan §6 V5c (最大絶対偏差 ≤ 0.1 %)"
+  },
+  "line_tol_halfamp_pct": {
+   "value": 0.05,
+   "source": "plan §6 V5c (片振幅 ≤ 0.05 %)"
+  },
+  "line_eta": {
+   "value": 0.03,
+   "source": "run の settle_criteria.yaml の line_mach"
+  },
+  "line_x_range_m": {
+   "value": [
+    3.736998151679548,
+    7.494752236480422
+   ],
+   "source": "run の settle_criteria.yaml の line_mach"
+  },
+  "line_n": {
+   "value": 2001,
+   "source": "run の settle_criteria.yaml"
+  }
+ },
+ "result": "back_to_correction",
+ "next": "escalate",
+ "missing": [],
+ "corrections": [
+  {
+   "kind": "wall_shape",
+   "by": [
+    "V5b",
+    "V5c"
+   ],
+   "procedure": "plan §4.3 の較正し直し (contur_calibrate)"
+  }
+ ],
+ "checks": {
+  "flow": {
+   "method": "v2",
+   "stop_status": "REACHED",
+   "stop_step": 30088,
+   "reeval_verdict": "SETTLED",
+   "status": "PASS",
+   "why": null
+  },
+  "V5b": {
+   "verdict": "FAIL",
+   "M": 5.50359551145531,
+   "dev_pct": 0.06537293555108903,
+   "Md": 5.5,
+   "tol_rel": 0.0005,
+   "range": [
+    5.49725,
+    5.50275
+   ],
+   "eta_range": [
+    0.05,
+    0.7
+   ],
+   "definition": "最後の列の η ∈ [0.05, 0.7] の節点の M の平均 (stop_rule.recorded_quantities = nozzle_report.metrics の exit_core.M_mean)"
+  },
+  "V5c": {
+   "eta": 0.03,
+   "x_range_m": [
+    3.736998151679548,
+    7.494752236480422
+   ],
+   "n": 2001,
+   "Md": 5.5,
+   "tol_maxabs_pct": 0.1,
+   "tol_halfamp_pct": 0.05,
+   "definition": "max|100(M/M_d − 1)|・100(max M − min M)/(2 M_d)、線は nozzle_report.eta_line (v5c_series.py と同じ)",
+   "scope": "近軸の線 (η) の一様性であって試験部全体の一様性ではない (plan §6 V5c)",
+   "axis_weight_max": 4.440892098500626e-16,
+   "axis_weight_limit": 1e-06,
+   "maxabs_pct": 0.06463570261965312,
+   "halfamp_pct": 0.060950352981358306,
+   "mean_pct": -0.011956787119968606,
+   "x_m_at_maxabs": 7.494752236480422,
+   "x_m_at_min": 4.456608058918915,
+   "x_m_at_max": 7.494752236480422,
+   "checks": {
+    "maxabs": true,
+    "halfamp": false
+   },
+   "verdict": "FAIL",
+   "compare": {
+    "eta0.1": {
+     "maxabs_pct": 0.06663181707955435,
+     "halfamp_pct": 0.05926022342606691,
+     "mean_pct": -0.011480238922323218
+    },
+    "eta0": {
+     "maxabs_pct": 0.069759045333051,
+     "halfamp_pct": 0.06581903131106515,
+     "mean_pct": -0.017137909101622457
+    }
+   },
+   "matches_settle_line": true
+  },
+  "wall_resolution": {
+   "verdict": "PASS",
+   "verdict_line": "VERDICT: PASS (壁解像)",
+   "returncode": 0,
+   "groups": [
+    "wall"
+   ],
+   "cmd": "/home/ubuntu/qs_trial/forge/solver_density_cuda/tools/check_wall_resolution.py /home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1 --step 30088 --groups wall --weight area",
+   "tool": "solver_density_cuda/tools/check_wall_resolution.py",
+   "target": 1.0,
+   "over_area_pct": 0.0,
+   "over_area_allow_pct": 2.0
+  },
+  "deliverables": {
+   "dir": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/deliverables",
+   "required_parts": [
+    "cad",
+    "mesh",
+    "fluent",
+    "wall_compare",
+    "excel",
+    "dimensions"
+   ],
+   "status": "ABSENT",
+   "dimensions": {
+    "status": "ABSENT"
+   },
+   "why": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/deliverables が無い (成果物を作っていない)"
+  }
+ },
+ "recalibration_rule": {
+  "apply": false,
+  "conditions": {
+   "a_both_judged": {
+    "ok": true,
+    "v5b": "FAIL",
+    "v5c": "FAIL"
+   },
+   "b_prev_update_reduced_error": {
+    "ok": true,
+    "prev_max_abs_mm": 7.879080894668926,
+    "current_max_abs_mm": 0.582242972949113,
+    "prev_run": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0",
+    "prev_delta_E": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0003_ns_p0/stop_rule_v2/delta_E_42060/delta_r_next.csv",
+    "prev_x_m_at_max": 7.101044707471903
+   },
+   "c_further_reducible": {
+    "ok": false,
+    "current_max_abs_mm": 0.582242972949113,
+    "projected_max_abs_mm": 0.5917244179058732,
+    "reduction": -0.016284344160884867,
+    "min_reduction": 0.5,
+    "current_max_abs_x_ge_3m_mm": 0.501657081436603,
+    "projected_max_abs_x_ge_3m_mm": 0.3062952997969562,
+    "note": "min_reduction は plan に数値が無い暫定の値 (--recal-min-reduction)"
+   },
+   "d_count": {
+    "ok": true,
+    "recalibrations_done": 0,
+    "max_recalibrations": 1
+   },
+   "e_flow_verified": {
+    "ok": true,
+    "flow": "PASS"
+   }
+  },
+  "why_not": [
+   "c_further_reducible: {\"current_max_abs_mm\": 0.582242972949113, \"projected_max_abs_mm\": 0.5917244179058732, \"reduction\": -0.016284344160884867, \"min_reduction\": 0.5, \"current_max_abs_x_ge_3m_mm\": 0.501657081436603, \"projected_max_abs_x_ge_3m_mm\": 0.3062952997969562, \"note\": \"min_reduction は plan に数値が無い暫定の値 (--recal-min-reduction)\"}"
+  ],
+  "rule": "plan §4.3 の末尾 (codex diagnose 2026-10-15 m55-three-coef M2): V5b・V5c の両方を判定・前の更新で誤差が縮んだ・同じ 3 係数でさらに減らせる・1 回まで (+ 計算の成立を確かめた)"
+ },
+ "recalibration": {
+  "coefficients": {
+   "c0": 0.693071595887488,
+   "c1_per_m": 0.020220581980627116,
+   "d0_m": -0.0003187411464852933
+  },
+  "overrides": {
+   "deltastar_initializer.model": "contur",
+   "deltastar_initializer.delta_scale": 0.693071595887488,
+   "deltastar_initializer.delta_scale_slope_per_m": 0.020220581980627116,
+   "deltastar_initializer.delta_offset_m": -0.0003187411464852933
+  },
+  "overrides_yaml": "# contur_calibrate (plans/active/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a): run_0005_ns_p1 (r_t 0.10524766333341617 m) の δ_E に合わせた 3 係数\n# δ = (c₀ + c₁·x_m)·δ_CONTUR + δ₀ (x_m は設計スロートからの実寸 [m])。新しい r_t でも同じ係数を CONTUR に当てる\noverrides:\n  deltastar_initializer.model: contur\n  deltastar_initializer.delta_scale: 0.693071595887488\n  deltastar_initializer.delta_scale_slope_per_m: 0.020220581980627116\n  deltastar_initializer.delta_offset_m: -0.0003187411464852933\n",
+  "errors": {
+   "current_wall": {
+    "max_abs_mm": 0.582242972949113,
+    "x_m_at_max": 0.8624500235091376,
+    "signed_at_max_mm": 0.582242972949113,
+    "max_abs_x_ge_3m_mm": 0.501657081436603,
+    "throat_mm": 0.003518359488183577,
+    "exit_mm": 0.219732170670478,
+    "rms_dx_mm": 0.28109559368347636,
+    "sign": "δ − δ_E (正 = 入れた δ が NS より厚い)",
+    "x_far_m": 3.0
+   },
+   "projected_after_calibration": {
+    "max_abs_mm": 0.5917244179058732,
+    "x_m_at_max": 0.8755632839496238,
+    "signed_at_max_mm": 0.5917244179058732,
+    "max_abs_x_ge_3m_mm": 0.3062952997969562,
+    "throat_mm": 4.967412729458699e-11,
+    "exit_mm": 0.0,
+    "rms_dx_mm": 0.2667343816190726,
+    "sign": "δ − δ_E (正 = 入れた δ が NS より厚い)",
+    "x_far_m": 3.0
+   },
+   "note": "「較正後の射影」はこの NS の δ_E に対する誤差 (新しい壁の NS の誤差ではない)"
+  },
+  "delta_E": {
+   "path": "/home/ubuntu/qs_trial/forge/case/90.qs_trial_a/run_0005_ns_p1/stop_rule_v2/delta_E_30088/delta_r_next.csv",
+   "sha256": "70054bf12b4d33914ca3b796eb2e317d1f5c435cf7648ac97ea77639ca78905b",
+   "source": "停止規則 v2 の抽出 (STOP_RULE_STATE.json の delta_E、step 30088)",
+   "state": {
+    "status": "REACHED",
+    "method": "v2",
+    "stop_step": 30088,
+    "delta_E_step": 30088,
+    "delta_E_res_sha256": "b5e638d91198af18c2dafb9dccccfa84ec74aa82109a7c187fc019afea4ff6bf"
+   }
+  }
+ },
+ "iteration": {
+  "iteration": 2,
+  "max_iterations": 3,
+  "evaluated": true
+ },
+ "show": {
+  "V5b_exit_core_M": 5.50359551145531,
+  "V5b_range": [
+   5.49725,
+   5.50275
+  ],
+  "V5c_maxabs_pct": 0.06463570261965312,
+  "V5c_halfamp_pct": 0.060950352981358306,
+  "V5c_tol": [
+   0.1,
+   0.05
+  ],
+  "V5c_eta": 0.03,
+  "V5c_compare": {
+   "eta0.1": {
+    "maxabs_pct": 0.06663181707955435,
+    "halfamp_pct": 0.05926022342606691,
+    "mean_pct": -0.011480238922323218
+   },
+   "eta0": {
+    "maxabs_pct": 0.069759045333051,
+    "halfamp_pct": 0.06581903131106515,
+    "mean_pct": -0.017137909101622457
+   }
+  },
+  "wall_resolution": "VERDICT: PASS (壁解像)",
+  "flow": "PASS",
+  "delta_error_current_mm": 0.582242972949113,
+  "delta_error_projected_mm": 0.5917244179058732,
+  "delta_error_reduction": -0.016284344160884867,
+  "delta_error_prev_mm": 7.879080894668926,
+  "recalibrated_coefficients": {
+   "c0": 0.693071595887488,
+   "c1_per_m": 0.020220581980627116,
+   "d0_m": -0.0003187411464852933
+  }
+ },
+ "warnings": []
+}

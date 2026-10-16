@@ -1,0 +1,146 @@
+{
+ "plan": "plans/active/tooling-settle-convergence-and-monitor.md §6 V3(b)・V4",
+ "prepared": "2026-10-16T02:12:23+00:00",
+ "git_head": "dfad026762ebd7a346e66cd31e501e7936733bd1",
+ "problem": "/home/ubuntu/forge-cardmesh-r17/case/71.m55_combustion_wt/problem_m55_p5_settle_v2.yaml",
+ "problem_sha256": "4467632f2f8841528d9801e9a55b098c057e3d5abc280b3ed1223d5fbdd8a369",
+ "initializer": {
+  "model": "contur_momentum_integral",
+  "closure": "contur",
+  "a_crocco": 1.0,
+  "cf_scale": 1.0,
+  "n_scale": 1.0,
+  "thermal_bc": {
+   "mode": "prescribed_temperature",
+   "Tw": 350.0
+  },
+  "theta0_m": 0.0008389013097957646,
+  "theta0_source": "flat-plate virtual length 0.5 m (Re_x 4.55e+06)",
+  "x_virtual_m": 0.5,
+  "rt_m": 0.1002434996788185,
+  "Pt": 3500000.0,
+  "Tt": 1250.0,
+  "gas": "semiperfect",
+  "smooth": {
+   "kind": "quintic_pspline",
+   "n_cp": 59,
+   "knot_spacing": 2.0,
+   "lam": 1.0,
+   "penalty_order": 3,
+   "resid_rel_rms": 0.019172629337776654,
+   "resid_abs_max": 0.0003341894719885042,
+   "resid_rel_p95": 0.02794657707499249
+  },
+  "delta_r_throat": -0.0024278710054872325,
+  "delta_r_exit": 0.41356168086549006,
+  "delta_scale": 0.6779482479245829,
+  "delta_offset_m": -0.0003057205936466481,
+  "delta_scale_slope_per_m": 0.021036335310539667,
+  "two_coef": {
+   "delta_scale": 0.6779482479245829,
+   "delta_offset_m": -0.0003057205936466481,
+   "scale_m": 0.1002434996788185,
+   "delta_scale_slope_per_m": 0.021036335310539667,
+   "delta_r_throat_contur": 0.0009173376495953715,
+   "delta_r_exit_contur": 0.49230457089602847,
+   "plan": "plans/active/tooling-nozzle-card-local-mesh.md §4.3"
+  }
+ },
+ "ic_from": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0008_ns_b0",
+ "euler_ref": {
+  "run": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0009_euler",
+  "res": "res_12000.h5",
+  "sha256": "2b2d02ce107be870ac0fb03c1df1cef8a8f005ff7d0d634e667119a778431fa1"
+ },
+ "nozzle_h5_sha256": "3fca2f06d7c13710a080a53eefc2dc83e6f5d82b7ac0fec2cf2e7738175d786f",
+ "solverConfig_sha256": "303e4c74760410b8ac29caf12732597a59ad1d1e3de9aa6fe83876da848bf121",
+ "solverConfig_generated_sha256": "303e4c74760410b8ac29caf12732597a59ad1d1e3de9aa6fe83876da848bf121",
+ "bcondConfig_sha256": "c57448a4ac4fa954c30bff377a3065df7eadb9fb0d1f8f2876c87358177cd6c5",
+ "config_changes": {},
+ "implicit_conditions": {
+  "timeIntegration": 11,
+  "blockDPLUR": 1,
+  "lowMachPrecond": 0,
+  "implicitSolvePrecision": null,
+  "thermoFloat": null
+ },
+ "b0": {
+  "lineImplicit": 1,
+  "lineDtDirectional": 1,
+  "lineDtDirectionalCap": 50.0,
+  "implicitThermalJacobian": 5,
+  "implicitRelax": 0.7,
+  "cfl": 4.0,
+  "cfl_pseudo": 4.0
+ },
+ "prestage_changes": {},
+ "prestage_sha256": "a46631deddf672e20862dbe2fe600d629a5a21a5bb0532304f34668a32aa3c1b",
+ "stop_rule": {
+  "use": false,
+  "nsteps": 130000
+ },
+ "stop_rule_mode": "off",
+ "settle_criteria_sha256": "4e64a00a23156dceda7a45f890365509129be6772ae299654de3092b4959502a",
+ "precision": "float",
+ "env_required": {
+  "FORGE_TRANSPORT_TABLE": null,
+  "FORGE_DIAG_FACE_H_DOUBLE": null,
+  "FORGE_CUDA_BLOCKSIZE": "128"
+ },
+ "forge_bin": "/home/ubuntu/forge-cardmesh-float/solver_density_cuda/build/forge",
+ "forge_sha256": "12033eb378155f64172303ef7a024369845ee58395dd6e9a891af7600bfe2953",
+ "prepare": {
+  "throat_physical": {
+   "x": -0.0023044282653365447,
+   "r": 0.9975712795231609,
+   "kappa": 0.20257612650707846,
+   "dstar_throat_correlation": 0.013255950910760306,
+   "delta_r_throat_applied": -0.0024287204768390636
+  },
+  "dstar_source": "integral_bl:contur_momentum_integral thermal_bc={'mode': 'prescribed_temperature', 'Tw': 350.0} (radial)",
+  "initializer": {
+   "model": "contur_momentum_integral",
+   "closure": "contur",
+   "a_crocco": 1.0,
+   "cf_scale": 1.0,
+   "n_scale": 1.0,
+   "thermal_bc": {
+    "mode": "prescribed_temperature",
+    "Tw": 350.0
+   },
+   "theta0_m": 0.0008389013097957646,
+   "theta0_source": "flat-plate virtual length 0.5 m (Re_x 4.55e+06)",
+   "x_virtual_m": 0.5,
+   "rt_m": 0.1002434996788185,
+   "Pt": 3500000.0,
+   "Tt": 1250.0,
+   "gas": "semiperfect",
+   "smooth": {
+    "kind": "quintic_pspline",
+    "n_cp": 59,
+    "knot_spacing": 2.0,
+    "lam": 1.0,
+    "penalty_order": 3,
+    "resid_rel_rms": 0.019172629337776654,
+    "resid_abs_max": 0.0003341894719885042,
+    "resid_rel_p95": 0.02794657707499249
+   },
+   "delta_r_throat": -0.0024278710054872325,
+   "delta_r_exit": 0.41356168086549006,
+   "delta_scale": 0.6779482479245829,
+   "delta_offset_m": -0.0003057205936466481,
+   "delta_scale_slope_per_m": 0.021036335310539667,
+   "two_coef": {
+    "delta_scale": 0.6779482479245829,
+    "delta_offset_m": -0.0003057205936466481,
+    "scale_m": 0.1002434996788185,
+    "delta_scale_slope_per_m": 0.021036335310539667,
+    "delta_r_throat_contur": 0.0009173376495953715,
+    "delta_r_exit_contur": 0.49230457089602847,
+    "plan": "plans/active/tooling-nozzle-card-local-mesh.md §4.3"
+   }
+  },
+  "nStepOuter": 130000,
+  "cfl_main": 4.0
+ }
+}

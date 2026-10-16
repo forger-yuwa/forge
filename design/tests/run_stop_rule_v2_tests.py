@@ -18,7 +18,9 @@ res_nodes_i.h5 → 流量の行 i の順に書き (流量の行が完成の印)�
       - REACHED (M1 の正例): 格子 2,000・窓 20,000・保持 38,000 で 42,000 から SETTLED → 80,000 で保持を満たして STOP_REQUEST →
         **非出力の step 80,001 で止まる** → STOPPED_AT の検査 → 80,001 で再評価 SETTLED → REACHED。δ_E の抽出 (偽物) は 80,001 で 1 回。
         オンラインの格子点ごとの判定が終了後の再生 (`settle.judge(run, s)`) と同じ (verdict と量の sha256)、止めた step の再評価
-        (SETTLE_VERDICT.json) が `check_settled.py --end-step 80001` と同じ (終了コード 0)。
+        (SETTLE_VERDICT.json) が `check_settled.py --end-step 80001` と同じ (終了コード 0)。再評価は停止の時の専用ファイル
+        `stop_rule_v2/SETTLE_VERDICT_stop_80001.json` にも同じバイトで書き、状態に相対パスと sha256 (§5.1 #16)、通常の CLI で
+        SETTLE_VERDICT.json を上書きしても専用ファイルは変わらず照合は一致。CENSORED も上限の step の専用ファイル。
       - 保持の既定 (基準のファイルに hold が無い → 40,000): 82,000 で要求、82,001 で REACHED。
       - 保持 0・区間 1 万・残差 series raw (wt_nozzle_v2 の形; §5.1 #5d): 出口 M が 16,000 から跳ぶので 22,000・24,000 は NOT_SETTLED、
         最初に SETTLED になる 26,000 で要求 → 26,001 で REACHED。オンラインの判定と再生・check_settled・settle_virtual_stop の
@@ -537,6 +539,14 @@ def test_watcher():
         check("REACHED: check_settled.py --end-step 80001 の判定が見張りの再評価と同じ (終了コード 0・verdict・量の sha256)",
               crc == 0 and cj is not None and cj["verdict"] == "SETTLED" and SR.quantities_digest(cj) == SR.quantities_digest(sv),
               f"rc {crc}")
+        # 停止の時の再評価の専用ファイル (§5.1 #16、result 段レビュー 3 回目 M1): 見張りが stop_rule_v2/ の下に書き、状態の記録に相対パスと
+        # sha256、中身は SETTLE_VERDICT.json と同じバイト。通常の CLI (既定で SETTLE_VERDICT.json に書く) で判定し直しても専用ファイルは
+        # 変わらず、照合 (match_reeval) は専用ファイルで一致する
+        stop_rel = SR.stop_verdict_relpath(80001)
+        check("REACHED: 停止の時の再評価の専用ファイル stop_rule_v2/SETTLE_VERDICT_stop_80001.json (状態に相対パスと sha256、"
+              "SETTLE_VERDICT.json と同じバイト)",
+              ve.get("stop_file") == stop_rel and (rd / stop_rel).is_file() and ve.get("stop_file_sha256") == SR._sha256(rd / stop_rel)
+              and (rd / stop_rel).read_bytes() == (rd / ST.VERDICT_FILE).read_bytes(), json.dumps(ve, ensure_ascii=False)[:300])
         check("REACHED: δ_E の抽出は止めた step 80,001 の全場から 1 回だけ (Euler の参照つき)",
               [c_["step"] for c_ in DELTA_CALLS] == [80001] and st["delta_E"]["status"] == "ok" and st["delta_E"]["step"] == 80001,
               str(DELTA_CALLS))
@@ -549,6 +559,15 @@ def test_watcher():
               "SETTLE_VERDICT.json は見張りが後から書いた再評価",
               cvt.startswith("TOOL: check_settled.py") and "VERDICT: SETTLED" in cvt and "CONVERGENCE_EXIT: 0" in cvt
               and st["reeval"]["sha256"] == SR._sha256(rd / ST.VERDICT_FILE), cvt[:160])
+        # (上の検査の後に) 通常の CLI で判定し直す — SETTLE_VERDICT.json は上書きされる
+        stop_bytes = (rd / stop_rel).read_bytes()
+        p_cli = subprocess.run([sys.executable, str(ROOT / "solver_density_cuda" / "tools" / "check_settled.py"), rd.name],
+                               cwd=rd.parent, capture_output=True, text=True)
+        m = SR.match_reeval(rd, cli_replay(rd, 80001)[1], ve)
+        check("REACHED: 通常の CLI (相対のパス・既定で書く; 終了コード 0) の後も専用ファイルは変わらず、SETTLE_VERDICT.json は上書きされ、"
+              "停止の時の記録との照合は一致 (記録の形 stop_file)",
+              p_cli.returncode == 0 and (rd / stop_rel).read_bytes() == stop_bytes and SR._sha256(rd / ST.VERDICT_FILE) != ve["sha256"]
+              and m["matches"] is True and m["form"] == "stop_file", f"rc {p_cli.returncode} {m['problems'][:2]}")
         check("REACHED: solverConfig と stage_manifest の本段の nStepOuter = 上限 100,000",
               RA._cfg_value((rd / "solverConfig.yaml").read_text(), "nStepOuter") == 100000)
 
@@ -630,6 +649,9 @@ def test_watcher():
               and not (rd / SR.STOP_REQUEST).exists() and st["request_step"] is None, f"{st and (st['status'], st.get('reason'))}")
         check("CENSORED: δ_E は上限の step 60,000 の全場から 1 回、再評価は 60,000 で SETTLED (記録)",
               [c_["step"] for c_ in DELTA_CALLS] == [60000] and st["reeval"]["end_step"] == 60000 and st["reeval"]["verdict"] == "SETTLED")
+        check("CENSORED: 再評価は上限の step の専用ファイル stop_rule_v2/SETTLE_VERDICT_stop_60000.json にも書く (§5.1 #16)",
+              st["reeval"].get("stop_file") == SR.stop_verdict_relpath(60000)
+              and st["reeval"].get("stop_file_sha256") == SR._sha256(rd / SR.stop_verdict_relpath(60000)), str(st["reeval"].get("stop_file")))
 
         # --- 保持が上限の格子点ちょうどで満たされる → 要求を置かず CENSORED (§5.1 #5c (A)) ---
         DELTA_CALLS.clear()

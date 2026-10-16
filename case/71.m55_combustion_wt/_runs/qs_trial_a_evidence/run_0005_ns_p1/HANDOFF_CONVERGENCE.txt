@@ -1,0 +1,11 @@
+=== 受け渡しの関門 (新方式): 停止の step 30088 の再評価 SETTLE_VERDICT.json (settle.judge、基準 sha256 ea0be33aa5d5c699…) ===
+OVERALL: SETTLED (終端 30000、停止の観測 30088、end_step 30088)
+  [SETTLED] residual_finite (residual_finite)
+  [SETTLED] mass_balance (mass_balance)
+  [SETTLED] exit_core_mach (exit_core_mach)
+  [SETTLED] line_mach (line_mach)
+  [SETTLED] exit_flow_angle (exit_flow_angle)
+(b) 残差: NOT_APPLICABLE — 基準に残差の量が無い (残差を止める判定から外したプリセット、例 wt_nozzle_v3) — 対象外
+(b′) 残差の非有限の見張り: PASS
+(c) 流量の収支: PASS
+目的の量: PASS

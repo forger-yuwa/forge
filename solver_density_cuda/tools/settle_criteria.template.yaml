@@ -1,6 +1,6 @@
 # settle_criteria.yaml のひな形 (手で組む run 用)。run ディレクトリに settle_criteria.yaml の名前で写し、値を run に合わせる。
 # 判定の道具: python3 solver_density_cuda/tools/check_settled.py <run_dir>  (判定の中身と各量の定義は settle.py の docstring)
-# 仕様の正本: plans/active/tooling-settle-convergence-and-monitor.md §4.2・§4.3・§4.8
+# 仕様の正本: plans/accepted/tooling-settle-convergence-and-monitor.md §4.2・§4.3・§4.8
 # 設計チェーンの run は問題 YAML の evaluate.settle (例 {preset: wt_nozzle_v1}) を準備のときに
 # design/forge_design/evaluate/settle_presets.py が解決してこの形で書く (手で書かない)。
 #
@@ -11,6 +11,8 @@
 #   - 残差を止める判定から外すとき (プリセット wt_nozzle_v3; plan §4.4・§5.1 #8) は residual の代わりに残差の非有限の見張り
 #     `- {kind: residual_finite, file: residual_history.csv, thresholds: {}}` を書き、excluded に residual と理由を書く
 #     (見張りは判定の条件でなく、区間の残差の行に非有限があれば DIVERGED。residual も residual_finite も無ければ評価対象が未設定)。
+#     見張りは区間の毎 step の行・重複なし・逆行なし・必要な列も要る (欠けは判定不能)。必要な列は `required: [rms_ro, …]` で書く
+#     (乱流なら rms_roK・rms_roOmega も)。書かなければ既定の保存量の 4 列 (rms_ro・rms_roUx・rms_roUy・rms_roe)。
 #   - 量を外すときは quantities から消して excluded に理由を書く (黙って外さない)。
 
 schema: forge.settle_criteria/v1
