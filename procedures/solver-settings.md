@@ -510,7 +510,7 @@ output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
 どれも**出力だけ**で数値 (流束・勾配・リミッタ・境界条件・陰解法・ソース) には触らない。キーを書かなければ従来と同じ出力
 (協調停止と随時の書き出しは常に有効だが、要求のファイルが無ければ毎 step `stat` を 2 回するだけ)。設計は
 [plans/active/tooling-nozzle-card-local-mesh.md](../plans/active/tooling-nozzle-card-local-mesh.md) §4.4 1′・§5.1 #4a と
-[plans/active/tooling-settle-convergence-and-monitor.md](../plans/active/tooling-settle-convergence-and-monitor.md) §4.1 の 6 (随時の書き出し)。
+[plans/accepted/tooling-settle-convergence-and-monitor.md](../plans/accepted/tooling-settle-convergence-and-monitor.md) §4.1 の 6 (随時の書き出し)。
 
 ```yaml
 time:

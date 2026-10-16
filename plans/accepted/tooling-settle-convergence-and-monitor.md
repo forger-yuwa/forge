@@ -3,14 +3,14 @@
 ## メタ
 
 - **area**: `tooling` (判定の道具・停止規則・生成器の既定) と `architecture` (forge の出力の追加; 数値には触らない)
-- **status**: `draft` (2026-10-15 起票)
+- **status**: `done` (2026-10-15 起票、2026-10-16 accepted — §8 の限定した完了の範囲 (case/71 の条件と手順書の試走 A); 小さいノズルの確認は `tooling-design-orchestrator` §5.1 #11)
 - **related_docs**:
   - [`procedures/solver-settings.md`](../../procedures/solver-settings.md) の output の節 (新しい出力のキー)
   - [`AGENTS.md`](../../AGENTS.md) の「収束確認」(移行の後に書き換える対象)
   - `methods/design/overview.md` の停止規則・壁の熱流の節 (`iface_Qf_eff`)
 - **related_plans**:
-  - [`tooling-nozzle-card-local-mesh.md`](tooling-nozzle-card-local-mesh.md) — 起点 (§4.4 と §5.1 #3q・#3r・#3v・#3x・#3y・#4a・#4b をこの plan へ移した)。M5.5 の壁の設計はあちらに残る
-  - [`tooling-convergence-and-wall-resolution-gates.md`](tooling-convergence-and-wall-resolution-gates.md) — 今の `check_convergence.py` と判定区間 (stage_manifest) の正本。この plan はその後継の判定を作り、区間の管理を引き継ぐ
+  - [`tooling-nozzle-card-local-mesh.md`](../active/tooling-nozzle-card-local-mesh.md) — 起点 (§4.4 と §5.1 #3q・#3r・#3v・#3x・#3y・#4a・#4b をこの plan へ移した)。M5.5 の壁の設計はあちらに残る
+  - [`tooling-convergence-and-wall-resolution-gates.md`](../active/tooling-convergence-and-wall-resolution-gates.md) — 今の `check_convergence.py` と判定区間 (stage_manifest) の正本。この plan はその後継の判定を作り、区間の管理を引き継ぐ
   - `tooling-generator-defaults-and-launch-gate.md` (作業ツリー `forge-gate`) — 生成器の既定の全体。ここでは要求カードの雛形の NS の本段・出力・判定の既定だけを扱い、あちらの段取りと整合させる
 - **created**: `2026-10-15`
 - **owner**: `M6ノズルの設計` セッション (作業ツリー `forge-cardmesh` / `feature/card-local-mesh`)
@@ -156,6 +156,7 @@
 | 15 | **別の条件のノズルでの確認** (#8 から分けた) | case/71 以外の入口条件・寸法のノズルで v3 の停止規則が止まり、関門と判定が通るか。**部分的な実績 (2026-10-16)**: 手順書の試走 A (AWS B `~/qs_trial/forge/case/90.qs_trial_a/`、float、試走のカード A) の p0・p1 の NS が v3 で REACHED (本段 42,060・30,088 step)、関門「進む」、SETTLED、非有限 0 (`procedures/design-chain-quickstart.md` の付録)。小さいノズル (寸法が大きく違う) は未 **2026-10-16 ユーザ決定「後続の plan へ移す」**: 小さいノズルの確認は `tooling-design-orchestrator` §5.1 #11 へ移した (この plan の完了条件に入れない、§8) | O |
 | 16 | **result 段レビュー 3 回目 (NO-GO) の M1: 通常の再判定が停止の時の記録を上書きし照合を壊す** | `check_settled.py` が既定で `SETTLE_VERDICT.json` を上書きし、`stop_rule`・`deltastar_loop` は停止の時の量のハッシュの完全一致を要るので、移した run を通常の CLI で判定し直すと成果物が「未評価」・受け渡しの照合が失敗 (V4・V6 の写しで再現)。停止の時の再評価を変更されない専用のファイルに保存して STOP_RULE_STATE に相対パスと sha256 を書き、関門・成果物はそれを見る。通常の CLI は今どおり `SETTLE_VERDICT.json`。古い run は sha256 が記録と一致するときだけ今のファイルを停止の時の記録として読み、違えば許容つきの照合へ。回帰試験: 「通常の CLI → 成果物 → 受け渡し」の連続操作 (相対パス・移した run、新旧の形) **済み (2026-10-16、implementer)**: 停止の時の再評価を `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` (`stop_rule.write_stop_verdict`) にも書き、STOP_RULE_STATE の reeval に `stop_file`・`stop_file_sha256`。関門・成果物は `stop_verdict_record` で専用ファイルを照合 (無い・書き換えは未評価)。古い run は `SETTLE_VERDICT.json` の sha256 が記録と一致すればそれ、上書きされていれば要約の一致と今の判定との許容つきの照合 (弱い点: 停止の時の量の値と入力の sha256 は STOP_RULE_STATE に無いので、結び付きは要約だけ)。`check_settled.py --out` で `stop_rule_v2/` の下は終了コード 3。V4・V6 の写しで通常の CLI の後に成果物が未評価 → PASS、受け渡しの照合が失敗 → 通る (修正前 8cf2a284 では再現)。試験 migration (f) 110 件・realdata 50 件・stop_rule_v2・test_settle V1b。手順は `procedures/calculation-workflow.md` に 1 文 **未完了に戻した (2026-10-16、result 段レビュー 4 回目 M1)**: 古い形の `overwritten` の経路は、入力を変えた後に通常の CLI で判定し直すと変えた入力どうしで照合が通る (run_0011 の写しで流量 CSV を変えて再現)。`overwritten` を廃止し、通常の CLI が上書きする前に原本 (sha256 が記録と一致) を専用ファイルへ移す。原本が失われていれば照合不能で拒否 (implementer) **済み (2026-10-16、implementer、4 回目 M1 の修正)**: 古い形は `check_settled.py` が `SETTLE_VERDICT.json` を上書きする直前に、sha256 が reeval の記録と一致する原本を `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` へ写す (STOP_RULE_STATE は変えない; 移せなければ上書きしない)。`overwritten` の形を廃止し、原本が無ければ照合不能。受け渡しの照合 (`_v2_binding`) にも再評価が使った入力ファイルの sha256 の照合を足した (成果物の `match_reeval` と同じ部品; §4.9 の 1 の照合の契約の範囲 — 主セッションが採用)。V4・V6 の写しで、入力を変えて通常の CLI を回すと成果物・受け渡しとも通っていた (61fc3d59) のが両方とも拒否に変わった。試験 migration 117・realdata 60 | O |
 | 17 | **同 m1: 完了条件の範囲** | §8 は「V1〜V5 がすべて合格」、V3(b)・V4 は小さいノズルの run も求めるが、回したのは case/71 (と手順書の試走 A) だけ。小さいノズルの確認 (#15) を完了条件に残すか、後続の plan へ移して §8 に今回の完了の範囲を書くかを決める (ユーザに聞く) **決定 (2026-10-16、ユーザ)**: 後続の plan へ移す。§8 に完了の範囲を書いた。判断: ユーザ決定 (主セッションの推奨と同じ) | F |
+| 18 | ~~**result 段レビュー 5 回目 M1: #10 より前の v3 の停止の時の記録を成果物が拒否**~~ (2026-10-16 済み) | 試走 A の p0・p1 の停止の時の記録は residual_finite の values に `required`・`required_source` が無く (#10 の前)、成果物の照合がキーの完全一致で「未評価」にした。`stop_rule._normalize_legacy_residual_finite`: 記録に 2 つとも無い旧形式の residual_finite で、再計算の `required_source` が既定・`required` が既定の 4 列のときだけ、比べる前に再計算からその 2 つを外す (キーの欠けを一律には無視しない; 原本のハッシュの照合と被覆の検査は維持)。試験 `run_settle_realdata_tests.py` の試走 A 2 run: 正常 → PASS、流量の CSV を変える → 未評価、修正前 (b283aa48) は未評価 (検出力)、新形式には効かない (70/70) | O |
 
 ## 6. 検証 (事前登録 2026-10-15)
 
@@ -214,6 +215,7 @@
 | result | 2026-10-16 | [2026-10-16-tooling-settle-convergence-and-monitor-result-2.md](../../notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-2.md) | **未成立 (incomplete)**、NO-GO、C0/M3/m1 (前回の照合・出力・流量の指摘への対応と V4・V6 の SETTLED の再現は確認された; 証拠不足: v3 の再生の記録・float の run・停止の時の境界の出力) | 全件**採用** (どれも再現の手順つきの欠陥): M1 → §5.1 #9、M2 → #10、M3 → #11、m1 → #12、証拠不足 → #13。直した後に result 段をやり直す |
 | result | 2026-10-16 | [2026-10-16-tooling-settle-convergence-and-monitor-result-3.md](../../notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-3.md) | **未成立 (incomplete)**、NO-GO、C0/M1/m2 (2 回目の M1〜M3 の修正、V4・V6 の SETTLED、V3(c) の保存記録は確認された; 証拠不足: nozzle.h5・run_0017 の最後の場) | 全件**採用**: M1 → §5.1 #16、m1 (完了の範囲) → #17 (ユーザに聞く)、m2 (README の容量・float の行) → 直した、証拠不足 → #13 に追加して直した |
 | result | 2026-10-16 | [2026-10-16-tooling-settle-convergence-and-monitor-result-4.md](../../notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-4.md) | **未成立 (incomplete)**、NO-GO、C0/M1/m0 (前回の証拠不足は解消、V3(c) の A を独立に再現、V4・V6 も確認; 証拠不足: 試走 A の一次記録) | 全件**採用**: M1 (古い形の上書きの経路が入力の変更の後の照合も通す) → #16 を未完了に戻し、`overwritten` の形を廃止して上書きの前に原本を専用ファイルへ移す (implementer)、証拠不足 → 試走 A の一次記録を `case/71…/_runs/qs_trial_a_evidence/` に写した (#13) |
+| result | 2026-10-16 | [2026-10-16-tooling-settle-convergence-and-monitor-result-5.md](../../notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-5.md) | **GO-with-changes**, C0/M1/m1 (4 回目の M1 の修正と試走 A の一次記録を確認、V3(b)・V3(c)・V4・V6・試走 A の SETTLED を独立に確認) | 全件**採用**して直した: M1 (#10 より前の v3 の記録が成果物で「未評価」) → §5.1 #18、m1 (試走 A の run 索引) → case/90 の README を埋め、手順書の各段に README を書く指示を足した。直した後に accepted へ |
 | diagnose | 2026-10-16 | [2026-10-16-settle-float-long-span-diagnose.md](../../notes/reviews/2026-10-16-settle-float-long-span-diagnose.md) (ブリーフ [briefs/2026-10-16-settle-float-long-span.md](../../notes/reviews/briefs/2026-10-16-settle-float-long-span.md)) | 事前登録に実行の条件を補い、run_0017 を途中 restart なし・停止規則なし・本段 130,000 step で 1 本回す。Major 3・Minor 1 | 全件**採用**: #14 を省いて閉じない、`--span 80000 --ts-max 50000 --criteria --out` と float のバイナリ・設定・初期場の照合を事前登録 (§6 V3(c))、合格の確定は #10 の後、restart で延ばさない理由は「同じ連続の軌道を検証するため」 |
 
 ## 7. 影響範囲
@@ -228,6 +230,7 @@ V1〜V5 がすべて合格、§5.1 #7 の移行 (呼び出し側が共通の部�
 
 ## 9. 変更ログ
 
+- `2026-10-16` — result 段レビュー 5 回目 GO-with-changes (C0/M1/m1) を全件採用して直した (#18、試走 A の run 索引、手順書の README の指示)。§8 の限定した完了の範囲で status done・accepted へ移した。
 - `2026-10-16` — result 段レビュー 4 回目 (NO-GO、M1・証拠不足) を全件採用: 古い形の run の原本の移行と `overwritten` の廃止、受け渡しの照合に入力の sha256 (#16)、試走 A の一次記録を写した (#13)。
 - `2026-10-16` — result 段レビュー 2 回目 (NO-GO) の M1〜M3 を修正 (#9〜#11)、証拠を写した (#13)、plan を v3 に揃えた (#12)。V3(c) (float の長い区間、run_0017) は A。3 回目 (NO-GO、M1・m2) を全件採用: 停止の時の記録の不変化 (#16)、完了の範囲はユーザ決定で小さいノズルを後続の plan へ (§8・#17)、README の訂正。
 - `2026-10-16` — ユーザ決定 (float で良い) を受け、`wt_nozzle_v3` から壁の熱流 (節点ごと) も外した (float の局所の揺れ)、雛形の `ns_output` に `interfaceDiag: 1`。

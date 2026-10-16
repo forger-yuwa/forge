@@ -66,6 +66,9 @@ RUNS = {"V4 run_0011_ns_v2": CASE / "run_0011_ns_v2", "V6 run_0014_chain_v2": CA
 PRE_REVIEW2_COMMIT = "b64dbfdd"      # result 段レビュー 2 回目の修正の前 (検出力の確かめ)
 PRE_M1_COMMIT = "8cf2a284"           # result 段レビュー 3 回目 M1 (§5.1 #16) の修正の前 (検出力の確かめ)
 PRE_M1B_COMMIT = "61fc3d59"          # result 段レビュー 4 回目 M1 (§5.1 #16 の続き) の修正の前 (検出力の確かめ)
+PRE_M5_COMMIT = "b283aa48"           # result 段レビュー 5 回目 M1 (旧形式の residual_finite の正規化) の修正の前 (検出力の確かめ)
+# 手順書の試走 A (#10 より前に書いた v3 の停止の時の記録; residual_finite の values に required・required_source が無い)。手元の写し
+TRIAL = {"試走 A p0 run_0003_ns_p0": ROOT / "case/90.qs_trial_a/run_0003_ns_p0", "試走 A p1 run_0005_ns_p1": ROOT / "case/90.qs_trial_a/run_0005_ns_p1"}
 SYS_PY = Path("/usr/bin/python3")    # design/.venv-opt と numpy の版が違う (1.26 と 2.x; 再計算の丸めが違う)
 TMP = Path(tempfile.mkdtemp(prefix="settle_realdata_"))
 FAIL = 0
@@ -229,6 +232,37 @@ def with_stop_rule(mod, fn):
         return fn()
     finally:
         sys.modules[key], EV.stop_rule = saved_m, saved_a
+
+
+def test_legacy_v3(label: str, src: Path, old_sr):
+    """(5 回目 M1) #10 より前の v3 の記録 (residual_finite の values に required・required_source が無い) を、成果物の収束が
+    旧形式に限った正規化で照合できる (PASS)・入力を変えると拒否 (未評価)・修正前 (PRE_M5_COMMIT) の stop_rule では未評価 (検出力)。"""
+    r = copy_run(src, f"{src.name}_legacy_v3")
+    ve = SR.read_state(r)["reeval"]
+    rec_q = json.loads((r / ST.VERDICT_FILE).read_text())["quantities"]
+    rf = [q for q in rec_q if q.get("kind") == ST.KIND_RESIDUAL_FINITE]
+    check(f"(5 回目 M1) {label}: 停止の時の記録は旧形式 (residual_finite の values に required・required_source が無い、v3)",
+          len(rf) == 1 and not any(k in rf[0].get("values", {}) for k in SR.LEGACY_RF_KEYS), str([list(q.get("values", {})) for q in rf])[:200])
+    c_rel, c_abs = thermal_both(r)
+    check(f"(5 回目 M1) {label}: 成果物の収束 (相対・絶対) → PASS (旧形式の residual_finite だけ正規化して停止の時の記録と一致)",
+          all(c["result"] == "PASS" and c["stop_rule_reeval"].get("matches") is True for c in (c_rel, c_abs)),
+          f"{str(c_rel.get('reason'))[:200]}")
+    if old_sr is not None:
+        c_old = with_stop_rule(old_sr, lambda: WT.thermal_use(r.resolve())["convergence"])
+        check(f"(5 回目 M1) {label}: 検出力 — 修正前 ({PRE_M5_COMMIT}) の stop_rule では同じ写しで収束「未評価」(レビューの再現: キーが違う)",
+              c_old["result"] == "未評価" and "キーが違う" in str((c_old.get("stop_rule_reeval") or {}).get("problems") or c_old.get("reason")),
+              str(c_old.get("reason"))[:200])
+    r2 = copy_run(src, f"{src.name}_legacy_v3_input")
+    bump_massflux(r2)
+    c2_rel, c2_abs = thermal_both(r2)
+    check(f"(5 回目 M1) {label}: 流量の CSV を各 +1 kg/s → 成果物の収束は未評価 (相対・絶対; 入力の sha256 が停止の時と違う)",
+          all(c["result"] == "未評価" and "boundary_massflux.csv の中身 (sha256) が記録と違う" in (c.get("reason") or "") for c in (c2_rel, c2_abs)),
+          str(c2_rel.get("reason"))[:200])
+    # 正規化は旧形式に限る: 記録に required が有る (新形式) のに再計算と値が違えば今どおり食い違い
+    a = [{"kind": ST.KIND_RESIDUAL_FINITE, "values": {"required": ["rms_ro"], "required_source": "既定 (…)"}}]
+    b = [{"kind": ST.KIND_RESIDUAL_FINITE, "values": {"required": ["rms_ro", "rms_roK"]}}]
+    check(f"(5 回目 M1) {label}: 正規化は旧形式 (2 つとも無い記録) に限る — 記録に required が有れば今どおり比べる",
+          bool(SR.quantities_mismatch(a, b)), str(SR.quantities_mismatch(a, b))[:160])
 
 
 def test_rejudge_chain(label: str, src: Path, old: dict | None, old_b: dict | None):
@@ -479,6 +513,19 @@ def main() -> int:
             SKIPPED.append(f"(#11) {label}: {SYS_PY} が無い (別の numpy の照合)")
         # ---------------------------------------------------------------- #16
         test_rejudge_chain(label, src, old_m1, old_m1b)
+    # ---------------------------------------------------------------- 5 回目 M1 (試走 A の旧形式の v3 の記録)
+    try:
+        old_sr5 = load_at(PRE_M5_COMMIT, "design/forge_design/evaluate/stop_rule.py", "forge_design.evaluate._stop_rule_pre_m5",
+                          package="forge_design.evaluate")
+    except Exception as e:  # noqa: BLE001
+        old_sr5 = None
+        check(f"修正前 ({PRE_M5_COMMIT}) の stop_rule を git から読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
+    for label, src in TRIAL.items():
+        if not (src / ST.CRITERIA_FILE).is_file() or not (src / SR.STATE).is_file():
+            SKIPPED.append(f"{label} ({src.relative_to(ROOT)} が無い)")
+            continue
+        print(f"== {label} ({src.relative_to(ROOT)})", flush=True)
+        test_legacy_v3(label, src, old_sr5)
     if SKIPPED:
         print("飛ばした項目: " + "; ".join(SKIPPED), flush=True)
     print(f"\n{NCHK - FAIL}/{NCHK} ok — {'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (一時ディレクトリ {TMP})", flush=True)

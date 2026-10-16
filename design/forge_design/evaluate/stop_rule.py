@@ -1063,7 +1063,7 @@ def window_summary(rows: list, step: int, window: int = WINDOW) -> dict:
 # plan tooling-settle-convergence-and-monitor §4.4・§4.8 の 1・§6 V4 (§5.1 #5、2026-10-16)。概要は docstring の「停止規則 v2」。
 # forge 側の契約 (STOP_REQUEST → STOPPED_AT、終了コード 0/3、起動時の残りで終了コード 1) は procedures/solver-settings.md の
 # 「本段の監視用の出力と協調停止」と solver_density_cuda/output/monitorOutputs.cpp。
-V2_PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §4.4・§4.8 の 1・§6 V4 (§5.1 #5、2026-10-16: settle_criteria.yaml の run は "
+V2_PLAN = ("plans/accepted/tooling-settle-convergence-and-monitor.md §4.4・§4.8 の 1・§6 V4 (§5.1 #5、2026-10-16: settle_criteria.yaml の run は "
            "3 条件の保持 → 協調停止 → 止めた step で再評価 → δ_E を 1 回)")
 V2_STATES = ("REACHED", "CENSORED", "FAILED")
 V2_DIR = "stop_rule_v2"                    # v2 の見張りの作業の置き場 (δ_E の抽出の出力・オンラインの読み込みの写し)
@@ -1337,10 +1337,37 @@ REEVAL_ATOL = 1e-12
 _REEVAL_SKIP_KEYS = ("file", "detail", "text")
 
 
-def quantities_mismatch(a, b, *, rtol: float = REEVAL_RTOL, atol: float = REEVAL_ATOL, where: str = "quantities") -> list:
-    """判定の結果の量 a (再計算) と b (記録) の食い違いの一覧 (空 = 同じ判定)。規則は上の注記。"""
+# 残差の非有限の見張り (residual_finite) の values に 2026-10-16 (plan tooling-settle-convergence-and-monitor §5.1 #10) から足した診断のキー。
+# それより前に書いた記録には無い (手順書の試走 A の p0・p1 など)。基準に required が無い run の再計算では、この 2 つは
+# settle の既定の列とその出所を書くだけなので、記録に 2 つとも無い**旧形式の residual_finite に限って**比べる前に外す
+# (result 段レビュー 5 回目 M1)。キーの欠けを一律には無視しない: 他の量・他のキー・required_source が既定でない再計算は今どおり比べる
+LEGACY_RF_KEYS = ("required", "required_source")
+
+
+def _normalize_legacy_residual_finite(a, b):
+    """a (再計算) と b (記録) の量の並びで、記録が旧形式の residual_finite (values に LEGACY_RF_KEYS が 2 つとも無い) で、
+    再計算の required_source が settle の既定の列 (基準に required が無い) のときだけ、再計算の values からその 2 つを外した写しを返す。"""
+    if not (isinstance(a, list) and isinstance(b, list) and len(a) == len(b)):
+        return a
     S = _settle()
-    return _mismatch(S._jsonable(a), S._jsonable(b), rtol, atol, where)
+    out = []
+    for qa, qb in zip(a, b):
+        va = qa.get("values") if isinstance(qa, dict) else None
+        vb = qb.get("values") if isinstance(qb, dict) else None
+        if (isinstance(va, dict) and isinstance(vb, dict) and qa.get("kind") == qb.get("kind") == S.KIND_RESIDUAL_FINITE
+                and not any(k in vb for k in LEGACY_RF_KEYS)
+                and str(va.get("required_source", "")).startswith("既定")
+                and list(va.get("required") or []) == list(S.RESIDUAL_FINITE_DEFAULT_REQUIRED)):
+            qa = {**qa, "values": {k: v for k, v in va.items() if k not in LEGACY_RF_KEYS}}
+        out.append(qa)
+    return out
+
+
+def quantities_mismatch(a, b, *, rtol: float = REEVAL_RTOL, atol: float = REEVAL_ATOL, where: str = "quantities") -> list:
+    """判定の結果の量 a (再計算) と b (記録) の食い違いの一覧 (空 = 同じ判定)。規則は上の注記と LEGACY_RF_KEYS の注記。"""
+    S = _settle()
+    ja, jb = S._jsonable(a), S._jsonable(b)
+    return _mismatch(_normalize_legacy_residual_finite(ja, jb), jb, rtol, atol, where)
 
 
 def _mismatch(a, b, rtol, atol, where) -> list:

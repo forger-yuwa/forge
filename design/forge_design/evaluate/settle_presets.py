@@ -1,4 +1,4 @@
-r"""収束の判定の基準 `settle_criteria.yaml` のプリセット (plan `plans/active/tooling-settle-convergence-and-monitor.md` §4.2・§5.1 #2〜#3・#5d)。
+r"""収束の判定の基準 `settle_criteria.yaml` のプリセット (plan `plans/accepted/tooling-settle-convergence-and-monitor.md` §4.2・§5.1 #2〜#3・#5d)。
 
 問題 YAML の `evaluate.settle` (`preset` + 足し引き・閾値の上書き) を、準備のときに run の設定 (prepare_info・solverConfig・
 bcondConfig) で解決して `settle_criteria.yaml` の中身にする。判定は `solver_density_cuda/tools/settle.py` (`check_settled.py`)。

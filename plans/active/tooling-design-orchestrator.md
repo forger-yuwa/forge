@@ -10,7 +10,7 @@
   - `procedures/solver-settings.md` (本段の監視用の出力と協調停止)
 - **related_plans**:
   - **親**: [`tooling-design-problem-campaign-recipe.md`](tooling-design-problem-campaign-recipe.md) (problem / campaign / recipe、`resolve_evaluation` → `execution_plan.json`、3 値判定 `accepted / rejected / incomplete`、campaign 実行器 + ledger。この plan はその §5 ステップ 5 と、要求カードからの入口の実装。語彙はそちらに合わせる)
-  - `plans/active/tooling-settle-convergence-and-monitor.md`: 判定・停止規則 v2・受け渡しの関門 #7。この plan の前提。
+  - `plans/accepted/tooling-settle-convergence-and-monitor.md`: 判定・停止規則 v2・受け渡しの関門 #7。この plan の前提。
   - `plans/active/tooling-nozzle-card-local-mesh.md`: case/71 の要求カード・手組みの格子・3 係数の壁。
   - `tooling-generator-defaults-and-launch-gate` (作業ツリー `forge-gate`): 推奨設定の機械可読の正本と、起動前の関門。統合する。
   - 推力ノズル (`tooling-nozzle-bell-two-mode`・`tooling-nozzle-dual-bell`)、SERN (`tooling-nozzle-sern-chain`): 後の機種。それぞれのセッションの担当。

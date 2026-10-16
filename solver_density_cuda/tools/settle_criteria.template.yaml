@@ -1,6 +1,6 @@
 # settle_criteria.yaml のひな形 (手で組む run 用)。run ディレクトリに settle_criteria.yaml の名前で写し、値を run に合わせる。
 # 判定の道具: python3 solver_density_cuda/tools/check_settled.py <run_dir>  (判定の中身と各量の定義は settle.py の docstring)
-# 仕様の正本: plans/active/tooling-settle-convergence-and-monitor.md §4.2・§4.3・§4.8
+# 仕様の正本: plans/accepted/tooling-settle-convergence-and-monitor.md §4.2・§4.3・§4.8
 # 設計チェーンの run は問題 YAML の evaluate.settle (例 {preset: wt_nozzle_v1}) を準備のときに
 # design/forge_design/evaluate/settle_presets.py が解決してこの形で書く (手で書かない)。
 #

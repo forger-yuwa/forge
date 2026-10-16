@@ -1,7 +1,7 @@
 # 出力の処理が書き換える host の写しと、その読み手の網羅 (settle plan §5.1 #1d)
 
 - **日付**: 2026-10-16
-- **plan**: [`plans/active/tooling-settle-convergence-and-monitor.md`](../../plans/active/tooling-settle-convergence-and-monitor.md) §5.1 #1c・#1d、§6 V1 の改訂 (f′)・(g′)
+- **plan**: [`plans/accepted/tooling-settle-convergence-and-monitor.md`](../../plans/accepted/tooling-settle-convergence-and-monitor.md) §5.1 #1c・#1d、§6 V1 の改訂 (f′)・(g′)
 - **発端**: codex diagnose [`2026-10-16-settle-run0012-result-diagnose-settle-run0012-result.md`](../reviews/2026-10-16-settle-run0012-result-diagnose-settle-run0012-result.md) の Major 4 (#1c の「全配列の差 0」は不合格のまま残し、契約 = 次の数値更新が読む状態の不変の合否は、変わった host の配列ごとに読み手を網羅して決める)
 - **コード**: `feature/card-local-mesh` 199ceb18 + 診断 `namespace oid` の追記 (下の §2、既定 off)。float のビルド `.build-native/card4a/forge` (sha256 2e4687c8…)、FP64 のビルド (同じソースで `flowFormat.hpp` の typedef を double、scratchpad、sha256 c2536a2a…)
 

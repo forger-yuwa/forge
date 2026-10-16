@@ -76,7 +76,7 @@
 **収束確認 (必須・NaN チェックとは別)**: 「NaN が無い」=「収束した」ではない。結果を使う/報告する前に、各保存量の残差が**実際に下がりきっているか**を必ず確認すること。
 
 - **判定は手作業の目視ではなく `solver_density_cuda/tools/check_convergence.py <run_dir> ...` を実行して行う** (本ルールの実体化ツール)。全残差列の低下桁数・トレンド・NaN を判定し `PASS / NOT CONVERGED / DIVERGED` を返す。**「収束した」「一致した」と報告する応答には、このツールの VERDICT を根拠として必ず貼ること** (これを怠り `rms_ro` だけで「収束」と誤報告した事例があるため、ツール経由を必須とする)。未収束なら「未収束」と明記し、未収束のトランジェント同士の場の比較を「一致」と表現しない。(`settle_criteria.yaml` のある run の本段は次項)
-- **判定の正本は 2 つ** (2026-10-16、[plans/active/tooling-settle-convergence-and-monitor.md](plans/active/tooling-settle-convergence-and-monitor.md) §4.9 の 2)。
+- **判定の正本は 2 つ** (2026-10-16、[plans/accepted/tooling-settle-convergence-and-monitor.md](plans/accepted/tooling-settle-convergence-and-monitor.md) §4.9 の 2)。
   run に判定の基準 `settle_criteria.yaml` があり、その本段 (設計チェーンでは本段の開始の記録 `MAIN_STAGE_STARTED` と今の起動・設定・基準の
   sha256 を照合) か、手で組んだ run (基準が本段の記録を指さない) なら、正本は `solver_density_cuda/tools/check_settled.py <run_dir>`
   (基準のファイルに書いた量の AND を区間で判定、`SETTLED / NOT_SETTLED / DIVERGED / INDETERMINATE`、結果は `SETTLE_VERDICT.json`。

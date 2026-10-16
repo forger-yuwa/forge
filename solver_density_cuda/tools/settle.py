@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 r"""収束の判定の共通の部品 — 「残差が準定常・流量の収支が取れる・目的の量が準定常」の AND
-(plan `plans/active/tooling-settle-convergence-and-monitor.md` §4.2・§4.3・§4.8 の 1 と 4、§5.1 #2〜#4)。
+(plan `plans/accepted/tooling-settle-convergence-and-monitor.md` §4.2・§4.3・§4.8 の 1 と 4、§5.1 #2〜#4)。
 
 道具 `check_settled.py` (CLI) と停止規則 v2 (§5.1 #5) が同じこの部品を使う。設計チェーンには依存しない
 (プリセットの解決は `design/forge_design/evaluate/settle_presets.py`)。

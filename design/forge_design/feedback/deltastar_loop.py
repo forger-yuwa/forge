@@ -1113,7 +1113,7 @@ def handoff_gate(run_dir, *, problem=None, euler_ref=None, omega: float | None =
 
 # --- 受け渡しの関門の新方式 (settle_criteria.yaml のある run; plan tooling-settle-convergence-and-monitor §4.9 の 1・2、
 #     codex diagnose 2026-10-16 settle-migration-7 の M1・M2・M5) ---------------------------------------------------------------------
-HANDOFF_V2_PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §4.9 の 1・2 (§4.8 の 2、codex diagnose 2026-10-16 "
+HANDOFF_V2_PLAN = ("plans/accepted/tooling-settle-convergence-and-monitor.md §4.9 の 1・2 (§4.8 の 2、codex diagnose 2026-10-16 "
                    "settle-migration-7: 照合・δ_E の契約・分岐の規則)")
 _V2_TABLE_FILES = ("delta_r_next.csv", "delta_r_equiv.csv", "delta_r_equiv_diag.json", "delta_r_extract_summary.json", "delta_r_edge.csv")
 _V2_SENS_FILES = ("band_sensitivity.json", "band_sensitivity.csv")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""仮想の停止の後の同じ軌道の検証 — 停止規則 v2 が止めたはずの格子点 t_s から span の間、目的の量が t_s の値から許容の内に
 留まり、各格子点の判定が SETTLED のままかを、停止規則なしで回した run で確かめる
-(plan `plans/active/tooling-settle-convergence-and-monitor.md` §6「V3(b)・V4 の実施」の (1) `run_0012_ns_free`・(1′)・(1″)
+(plan `plans/accepted/tooling-settle-convergence-and-monitor.md` §6「V3(b)・V4 の実施」の (1) `run_0012_ns_free`・(1′)・(1″)
 (`wt_nozzle_v2` の再生は `--criteria`); codex diagnose `notes/reviews/2026-10-16-settle-v3b-v4-preregistration-diagnose-settle-v3b-v4.md`
 の Major 1)。保持 0 (`wt_nozzle_v2`) では停止候補 t_s は最初に SETTLED になった格子点 (hold_step が保持 0 で即到達)。
 
@@ -92,7 +92,7 @@ sys.path.insert(0, str(HERE))
 import settle  # noqa: E402
 
 SCHEMA = "forge.settle_virtual_stop/v1"
-PLAN = ("plans/active/tooling-settle-convergence-and-monitor.md §6「V3(b)・V4 の実施」(1) run_0012_ns_free "
+PLAN = ("plans/accepted/tooling-settle-convergence-and-monitor.md §6「V3(b)・V4 の実施」(1) run_0012_ns_free "
         "(codex diagnose 2026-10-16-settle-v3b-v4-preregistration の Major 1)")
 OUT_DIR = "settle_virtual_stop"
 SPAN_DEFAULT = 80_000
