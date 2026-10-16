@@ -56,10 +56,11 @@ info = {"scale_m": 0.1, "x_E": 40.0, "physical_wall": {"domain": [-10.0, 80.0]},
 with tempfile.TemporaryDirectory() as td:
     run = Path(td)
     t = WQ.resolve_tolerances(run, info, None, None, {})
-    check("(1) 既定: 線 η 0.03・x = (x_E + 2, x_F − 1) r_t × S = [4.2, 7.9] m・2001 点、V5b 5e−4、V5c 0.1・0.05",
+    # V5b・V5c の片振幅の公差は 2026-10-16 のユーザ決定で 0.05 % → 0.1 % (plan tooling-nozzle-card-local-mesh §6 V5b)
+    check("(1) 既定: 線 η 0.03・x = (x_E + 2, x_F − 1) r_t × S = [4.2, 7.9] m・2001 点、V5b 1e−3、V5c 0.1・0.1",
           t["line_eta"]["value"] == 0.03 and np.allclose(t["line_x_range_m"]["value"], [4.2, 7.9]) and t["line_n"]["value"] == 2001
-          and t["exit_core_M_tol_rel"]["value"] == 5e-4 and t["line_tol_maxabs_pct"]["value"] == 0.1
-          and t["line_tol_halfamp_pct"]["value"] == 0.05 and all("既定" in t[k]["source"] or "plan §6" in t[k]["source"] for k in WQ.QUAL_KEYS),
+          and t["exit_core_M_tol_rel"]["value"] == 1e-3 and t["line_tol_maxabs_pct"]["value"] == 0.1
+          and t["line_tol_halfamp_pct"]["value"] == 0.1 and all("既定" in t[k]["source"] or "plan §6" in t[k]["source"] for k in WQ.QUAL_KEYS),
           f"{t['line_x_range_m']}")
     (run / "settle_criteria.yaml").write_text(yaml.safe_dump({"quantities": [
         {"kind": "line_mach", "eta": 0.04, "x_range_m": [4.0, 7.95], "n": 1001, "Md": MD}]}))
@@ -284,10 +285,13 @@ print("== (7) case/71 run_0010・run_0011")
 C71 = ROOT / "case/71.m55_combustion_wt"
 R08 = C71 / "_runs/run_0008_ns_b0"
 CARD = C71 / "card_m55_3coef.yaml"
+# 2026-10-15 の判定 (V5b ±0.05 %・V5c 片振幅 0.05 % で FAIL → escalate) の再現なので、旧の公差を明示する。2026-10-16 のユーザ決定で
+# 既定は 0.1 % になった (plan tooling-nozzle-card-local-mesh §6 V5b)。新しい既定での判定は下の「(7′)」で見る
+OLD_TOLS = {"exit_core_M_tol_rel": 5e-4, "line_tol_halfamp_pct": 0.05}
 cases = [("run_0010", C71 / "run_0010_ns_b0", {"delta_next": C71 / "_runs/run_0010_ns_b0/judge/extract/delta_r_next.csv.gz",
-                                                "cli_tols": {"line_x_range_m": [4.0, 7.95]}}, 5.502841, "UNVERIFIED"),
+                                                "cli_tols": {"line_x_range_m": [4.0, 7.95], **OLD_TOLS}}, 5.502841, "UNVERIFIED"),
          ("run_0011", Path(os.environ.get("FORGE_CASE71_RUN_0011", C71 / "run_0011_ns_v2")),
-          {"problem": C71 / "problem_m55_p5_settle_v2.yaml"}, 5.502842, "PASS")]
+          {"problem": C71 / "problem_m55_p5_settle_v2.yaml", "cli_tols": dict(OLD_TOLS)}, 5.502842, "PASS")]
 for nm, run, kw, M_want, flow_want in cases:
     need = [run / "prepare_info.json", run / "nozzle.h5", run / "bcondConfig.yaml", R08 / "prepare_info.json"]
     if not all(p.is_file() for p in need) or not any(run.glob("res_*.h5")):
@@ -321,11 +325,22 @@ for nm, run, kw, M_want, flow_want in cases:
         err = io.StringIO()
         with redirect_stdout(io.StringIO()), redirect_stderr(err):
             rc = WQ.main([str(run), "--card", str(CARD), "--problem", str(C71 / "problem_m55_p5_settle_v2.yaml"), "--prev-run", str(R08),
-                          "--prev-delta-next", str(R08 / "judge/extract/delta_r_next.csv.gz"), "--no-write"])
-        check("(7) run_0011: CLI の終了コード 3 (escalate)", rc == 3, err.getvalue()[-200:])
+                          "--prev-delta-next", str(R08 / "judge/extract/delta_r_next.csv.gz"), "--no-write",
+                          "--exit-tol-rel", "5e-4", "--line-tol-halfamp", "0.05"])
+        check("(7) run_0011: CLI の終了コード 3 (escalate、旧の公差)", rc == 3, err.getvalue()[-200:])
     else:
         check("(7) run_0010: 寸法の関門・成果物 PASS (手元の deliverables)", c["deliverables"]["status"] == "PASS"
               and c["deliverables"]["dimensions"]["status"] == "PASS", f"{c['deliverables'].get('problems')}")
+    # (7′) 新しい既定 (V5b ±0.1 %・V5c 片振幅 0.1 %; 2026-10-16 ユーザ決定) では同じ run の V5b・V5c が PASS
+    tols_new = {k: v for k, v in (kw.get("cli_tols") or {}).items() if k not in OLD_TOLS}
+    with tempfile.TemporaryDirectory() as td:
+        rec2 = WQ.qualify(run, CARD, kw.get("problem"), prev_run=R08, prev_delta_next=R08 / "judge/extract/delta_r_next.csv.gz",
+                          delta_next=kw.get("delta_next"), cli_tols=tols_new or None, wall_txt=Path(td) / "wr.txt")
+    c2 = rec2["checks"]
+    check(f"(7′) {nm}: 新しい既定の公差 (±0.1 %・片振幅 0.1 %) では V5b・V5c とも PASS (値は旧の判定と同じ)",
+          c2["V5b"]["verdict"] == "PASS" and c2["V5c"]["verdict"] == "PASS" and c2["V5b"]["M"] == c["V5b"]["M"]
+          and c2["V5c"]["halfamp_pct"] == c["V5c"]["halfamp_pct"] and rec2["tolerances"]["exit_core_M_tol_rel"]["value"] == 1e-3
+          and rec2["tolerances"]["line_tol_halfamp_pct"]["value"] == 0.1, f"判定 {rec2['result']} / {rec2['next']}")
 
 for s in SKIPPED:
     print("skip " + s)

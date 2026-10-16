@@ -13,10 +13,10 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
 判定の中身 (定義は既存の部品と同じ):
   - 場: `--step` → 停止規則の状態 (`STOP_RULE_STATE.json`) の stop_step の全場 → 最後の全場 `res_<N>.h5` (res_0 を除く)。
   - V5b 出口コア M: 最後の列の η ∈ [0.05, 0.7] の節点の M の平均 (`stop_rule.recorded_quantities` = `nozzle_report.metrics` の
-    exit_core.M_mean)。許容 |M/M_d − 1| ≤ tol (既定 5e−4 = ±0.05 %、plan §6 V5b)。
+    exit_core.M_mean)。許容 |M/M_d − 1| ≤ tol (既定 1e−3 = ±0.1 %、plan §6 V5b; 2026-10-16 ユーザ決定、前は 5e−4)。
   - V5c 近軸の線の一様性: 線 η (既定 0.03) の M を `nozzle_report.eta_line` で x 窓に n 点 (既定 2001) 取り、
     最大偏差 max|100(M/M_d − 1)| と片振幅 100(max M − min M)/(2 M_d) (`settle.line_quantities` = `v5c_series.py` の式)。
-    許容 0.1 %・0.05 % (plan §6 V5c)。η 0.1 と軸 (η 0) は比較用に併記 (判定に使わない)。補間に軸の節点が重み > 1e−6 で入る
+    許容 0.1 %・0.1 % (plan §6 V5c; 片振幅は 2026-10-16 ユーザ決定、前は 0.05 %)。η 0.1 と軸 (η 0) は比較用に併記 (判定に使わない)。補間に軸の節点が重み > 1e−6 で入る
     (第 1 層の η が線より上) か、窓が格子の外・非有限なら判定不能 (plan §6 V5c、codex M3)。
     **この量は「近軸の線 (η) の一様性」であって試験部全体の一様性ではない** (plan §6 V5c)。
   - 壁解像: `check_wall_resolution.py <run> --step <場の step> --groups <bcond の wall* 全部> --weight area` の VERDICT
@@ -80,9 +80,9 @@ TOOLS = REPO / "solver_density_cuda" / "tools"
 EXIT_ETA_RANGE = (0.05, 0.7)            # 出口コアの η (stop_rule.recorded_quantities・settle の exit_eta_range と同じ)
 COMPARE_ETAS = (0.1, 0.0)               # 比較用に併記する線 (判定に使わない; plan §6 V5c)
 DEFAULT_TOLS = {                        # plan §6 V5b・V5c (ユーザ了承 2026-10-15「よい」)
-    "exit_core_M_tol_rel": (5.0e-4, "plan §6 V5b (5.5 ± 0.05 %、M6 の生産のゲートと同じ幅)"),
+    "exit_core_M_tol_rel": (1.0e-3, "plan §6 V5b (5.5 ± 0.1 %; 2026-10-16 ユーザ決定、前は ± 0.05 %)"),
     "line_tol_maxabs_pct": (0.1, "plan §6 V5c (最大絶対偏差 ≤ 0.1 %)"),
-    "line_tol_halfamp_pct": (0.05, "plan §6 V5c (片振幅 ≤ 0.05 %)"),
+    "line_tol_halfamp_pct": (0.1, "plan §6 V5c (片振幅 ≤ 0.1 %; 2026-10-16 ユーザ決定、前は 0.05 %)"),
 }
 QUAL_KEYS = ("exit_core_M_tol_rel", "line_eta", "line_x_range_m", "line_tol_maxabs_pct", "line_tol_halfamp_pct")
 DEFAULT_PRESET = "wt_nozzle_v3"         # 雛形 axismach_final_v1 の evaluate.settle の既定 (2026-10-16 から v3; 線の定義は v2 と同じ)
@@ -637,11 +637,11 @@ def main(argv=None) -> int:
     ap.add_argument("--max-recalibrations", type=int, default=MAX_RECALIBRATIONS, help=f"較正し直しの上限 (既定 {MAX_RECALIBRATIONS}、plan §4.3)")
     ap.add_argument("--recal-min-reduction", type=float, default=RECAL_MIN_REDUCTION,
                     help=f"規則 (c): 較正し直しの射影で最大誤差が減る割合の下限 (既定 {RECAL_MIN_REDUCTION}、plan に数値が無い暫定の値)")
-    ap.add_argument("--exit-tol-rel", type=float, default=None, help="V5b の許容 |M/M_d − 1| (既定 5e-4)")
+    ap.add_argument("--exit-tol-rel", type=float, default=None, help="V5b の許容 |M/M_d − 1| (既定 1e-3)")
     ap.add_argument("--line-eta", type=float, default=None, help="V5c の線の r/r_w (既定 0.03)")
     ap.add_argument("--line-x-range-m", type=float, nargs=2, default=None, metavar=("X0", "X1"), help="V5c の x 窓 [m] (設計スロートから)")
     ap.add_argument("--line-tol-maxabs", type=float, default=None, help="V5c の最大偏差の許容 [%%] (既定 0.1)")
-    ap.add_argument("--line-tol-halfamp", type=float, default=None, help="V5c の片振幅の許容 [%%] (既定 0.05)")
+    ap.add_argument("--line-tol-halfamp", type=float, default=None, help="V5c の片振幅の許容 [%%] (既定 0.1)")
     ap.add_argument("--out-dir", default=None, help=f"出力の置き場 (既定 <run>/{OUT_DIRNAME})")
     ap.add_argument("--no-write", action="store_true", help="ファイルを書かない (壁解像の出力も残さない)")
     ap.add_argument("--json", action="store_true", help="記録の JSON を標準出力に出す")
