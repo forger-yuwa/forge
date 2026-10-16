@@ -45,10 +45,10 @@ flowchart TD
 | 0 | 準備 (clone・ビルド・Python 環境・FreeCAD) | ビルドに nvcc | float のビルド 2 分 46 秒 (手元 RTX 3060・4 並列)、Python 環境 1 分 |
 | 2 | `wt_card` (M_knot の自動を含む) | なし | 1〜5 分 (手元 12 コア; 長さ合わせの自動調整があると数分; §2 の表) |
 | 3 | 格子 (`hand_mesh.py`) | なし (変換器は CPU で動く) | build 24 s・check 40 s (手元) |
-| 4 | Euler (前の段 6,000 step + 本段 12,000 step) | 使う | 準備 20 s (手元)。計算は AWS g5.xlarge (A10G)・FP64 で 227 s (case/71 run_0001_euler) |
-| 5 | NS (前の段 6,000 step + 本段は停止規則まで、上限 200,000 step) | 使う | 準備 26 s (手元)。計算は AWS g5.xlarge・FP64 で前の段を含め約 23 分 (case/71 run_0011_ns_v2: 本段 46,202 step で停止)。この PC の値は §5.1 で測る |
+| 4 | Euler (前の段 6,000 step + 本段 12,000 step) | 使う | 準備 20 s (手元)。計算は AWS g5.xlarge (A10G)・float で約 2 分 (試走 A)、FP64 で 227 s (case/71 run_0001_euler) |
+| 5 | NS (前の段 6,000 step + 本段は停止規則まで、上限 200,000 step) | 使う | 準備 26 s (手元)。計算は AWS g5.xlarge・float で前の段を含め 10〜13 分 (試走 A: 本段 42,060・30,088 step で停止、15.3 ms/step; FP64 は case/71 run_0011_ns_v2 で約 23 分)。この PC の値は §5.1 で測る |
 | 6・8 | `contur_calibrate`・`wt_qualify` | なし | 数秒 (試走: 0.5 s・2.6 s) |
-| 9 | 成果物 (`deliverables`) | なし (FreeCAD) | 未計測 |
+| 9 | 成果物 (`deliverables`) | なし (FreeCAD) | 約 2 分 (AWS g5.xlarge の試走、付録) |
 
 GPU の段 (4・5) の時間は GPU で大きく変わる (既定は float のビルド、§0.4)。§5.1 の試しの値で見積もり直し、人に伝える。
 
@@ -738,3 +738,25 @@ GitHub から素の clone (`feature/card-local-mesh`、1de17d21) を作業用の
   plan §5.1 #6d で `contur_calibrate`・`wt_qualify` が `-5.0e-05` の形で書くように直したので、§7.2 は行をそのまま写して確かめるだけにした。
 - M_knot の選択の中の長さ合わせの停止を `wt_card` が自動で調整するようにした (plan §5.1 #6d、§2)。
 - ビルドの既定を float にした (2026-10-16 ユーザ決定; FP64 は §0.4 の任意の手順)。判定は残差を監視せず発散の見張りだけ (§5)。
+
+### GPU の段までの通しの試走 (2026-10-16、AWS B)
+
+AWS g5.xlarge (A10G、compute capability 8.6、CUDA 13.2、gcc 13.3、4 コア・メモリ 16 GB) を他の PC に見立て、HOME を空のディレクトリ
+(`/home/ubuntu/qs_trial`) に替えて素の clone からこの手順書のコマンドを打った。case は `90.qs_trial_a` (試走の名前)、カードは試走 A。
+B の clone は a36a87ff で始め、p1 の §2 の前に eabbab97 (終端の特性線の補間)、§9 のやり直しの前に 77aa8abf (成果物の float の対応) に `git pull` した。
+
+| 段 | 結果 | 時間 |
+| --- | --- | --- |
+| §0 準備 | 通った。ビルドの台本が CUDA 13 の `include/cccl` を自分で足した (a36a87ff)。apt の段は共有の機械なので打たなかった (gcc-12 以外は入っていた) | ビルド 4 分 52 秒 (4 並列)、Python 環境 1 分 15 秒、FreeCAD 30 秒 |
+| §1・§2 (p0) | 通った。M_knot 2.65、寸法 PASS。このときは補間の前のコードで、網を 4800 に上げて選び直した | 5 分 43 秒 |
+| §3 (p0) | NS 411,240 点・Euler 433,590 点、品質 PASS、AR 緩和 違反 0 | 2 分 |
+| §4 (p0) | 出口の軸の M 5.50017、`dM_max_rel_Md` 0.0006、非有限 0 | 121 s (本段 5.55 ms/step) |
+| §5.1 | 本段 15.4 ms/step、見込み 0.2〜0.9 時間 | 1.6 分 |
+| §5.2〜§5.4 (p0) | 停止規則 v2 REACHED (本段 42,060 step)、関門「進む」、SETTLED、非有限 0、図 9 枚と pptx | 13 分 |
+| §6 | c₀ 0.688・c₁ 0.0215 /m・δ₀ −0.31 mm (case/71 は 0.678・0.0210・−0.306 mm)。今の壁の誤差 最大 7.88 mm → 較正後の射影 0.64 mm | 数秒 |
+| §7 (p1) | `wt_card` は補間の後のコードで自動調整なし、M_knot 2.70 (r_t 0.10490 → 0.10525 m で隣の値に移った)、寸法 PASS。格子・Euler (出口の軸の M 5.50039) も通った | `wt_card` 2 分 9 秒、格子 2 分、Euler 116 s |
+| §5 (p1) | 停止規則 v2 REACHED (本段 30,088 step)、関門「進む」、SETTLED、非有限 0 | 10 分 |
+| §8 | `back_to_correction`・`escalate` (終了コード 3)。V5b 出口コア M 5.503596 (+0.065 %、許容 ±0.05 %) FAIL、V5c 片振幅 0.0610 % (許容 0.05 %) FAIL・最大偏差 0.0646 % PASS、壁解像 PASS、較正し直しの規則の (c) に当たらない (case/71 と同じ型) | 数秒 |
+| §9 | 1 回目は `VERDICT: FAIL` (excel: float の壁ダンプの座標が倍精度の節点と 2.4e−7 m ずれて 1 対 1 に対応づけられない、mesh: 変換器の終了時の既知の `GPUassert` を失敗と数えた)。道具を直して (77aa8abf) やり直し、`VERDICT: PASS`、寸法の関門 PASS、`thermal_use` PASS | 約 2 分 (CAD 60 s・格子 25 s・Fluent 11 s・Excel 9 s・寸法 10 s) |
+
+準備を除いて、カードから成果物まで実時間で約 1 時間 (p0・p1 の NS が 23 分)。§8 の判定が人に返す型なので、受け入れるか・公差を決めるかは人が決める。
