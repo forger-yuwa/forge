@@ -38,6 +38,13 @@ forge_launches.jsonl・solverConfig.yaml) は runner_axismach と forge と同�
       別の場所のパスで渡しても、記録の浮動小数を全部 1 ulp ずらしても一致 (修正前 = PRE_REVIEW2_COMMIT の wall_tables は「未評価」; 検出力)、
       各検査の合否・量の verdict・許容を超える値・全体の verdict・入力の中身が違えば不一致 (未評価)、記録のファイルの一覧が無い・記録が無い
       旧い形は例外にせず理由つきの未評価。照合の部品の単体 (所在のパス・表示の文は比べない、絶対の床 1e−12 の扱い)。
+  (f) result 段レビュー 3 回目 M1 (§5.1 #16): 停止の時の再評価は専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`
+      (`stop_rule.write_stop_verdict`; 合成の run も同じ関数で書く。`legacy=True` は専用ファイルの無い古い形)。通常の CLI
+      (`check_settled.py`、相対のパス・既定で SETTLE_VERDICT.json を上書き) で判定し直した後も、成果物の収束 (相対・絶対のパス) が
+      PASS、受け渡しの照合 (`_v2_binding`) が通り、関門が進む — 新しい形 (専用ファイル) と古い形 (SETTLE_VERDICT.json が上書きされて
+      いれば要約の一致する代わりの記録 + 今の判定との許容つきの照合) の両方。負例: 古い形で別の終端で上書き・上書き後に値を許容を
+      超えて変えた、新しい形で専用ファイルを書き換えた → 未評価・照合の失敗・関門は上書きでも止める。CLI の --out で専用ファイルを指すと
+      引数の誤り。修正前 (PRE_M1_COMMIT の stop_rule・deltastar_loop・wall_tables) は古い形で CLI の後に「未評価」・照合の失敗 (検出力)。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_settle_migration_tests.py
 所要: 約 1 分 (本物の δ_E の抽出 3 回)。出力は一時ディレクトリ (全部合格なら消す)。
@@ -227,9 +234,10 @@ def write_data(rd: Path, k: int, *, resid_fn=None, mdot_fn=None, skip_nodes=()):
 
 
 def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta_from: Path | None = None,
-          residual="judge") -> Path:
+          residual="judge", legacy=False) -> Path:
     """新方式の run。REACHED: 上限 100,000・要求の格子点 26,000・協調停止 26,001 (STOPPED_AT)。CENSORED: 上限 = 停止の step 26,000
-    (STOPPED_AT なし)。delta_from: 同じ場の別の run の δ_E の抽出を写す (場は同じなので抽出も同じ; 試験の時間を縮める)。"""
+    (STOPPED_AT なし)。delta_from: 同じ場の別の run の δ_E の抽出を写す (場は同じなので抽出も同じ; 試験の時間を縮める)。
+    legacy: 停止の時の再評価の専用ファイルの無い古い形 (2026-10-16 の V4・V6 の形; `finish_v2` の legacy)。"""
     rd = TMP / name
     rd.mkdir()
     k, cap = steps_of(kind)
@@ -239,7 +247,7 @@ def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_n
     (rd / "prepare_info.json").write_text(json.dumps(info))
     (rd / "solverConfig.yaml").write_text(CFG_TEXT % cap)
     return finish_v2(rd, kind=kind, resid_fn=resid_fn, mdot_fn=mdot_fn, skip_nodes=skip_nodes,
-                     delta=("from", delta_from) if delta_from is not None else ("extract", info), residual=residual)
+                     delta=("from", delta_from) if delta_from is not None else ("extract", info), residual=residual, legacy=legacy)
 
 
 def steps_of(kind):
@@ -247,10 +255,12 @@ def steps_of(kind):
     return (26001, 100000) if kind == "REACHED" else (26000, 26000)
 
 
-def finish_v2(rd: Path, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta=None, residual="judge") -> Path:
+def finish_v2(rd: Path, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nodes=(), delta=None, residual="judge", legacy=False) -> Path:
     """run (場・solverConfig.yaml は置いてある) に停止規則 v2 の記録一式を書く: 基準・起動の記録・本段の開始の記録・forge の出力の形の
-    データ・STOPPED_AT・停止の step の再評価 (SETTLE_VERDICT.json)・stop_rule.json・STOP_RULE_STATE.json。
-    delta: ("extract", prepare_info) = 本物の抽出、("from", run) = 同じ場の別の run の抽出を写す、None = δ_E の記録なし (関門には使えない)。"""
+    データ・STOPPED_AT・停止の step の再評価 (停止の時の専用ファイル stop_rule_v2/SETTLE_VERDICT_stop_<k>.json と SETTLE_VERDICT.json;
+    `stop_rule.write_stop_verdict`、§5.1 #16)・stop_rule.json・STOP_RULE_STATE.json。
+    delta: ("extract", prepare_info) = 本物の抽出、("from", run) = 同じ場の別の run の抽出を写す、None = δ_E の記録なし (関門には使えない)。
+    legacy: 専用ファイルの無い古い形 (§5.1 #16 より前の見張りと同じ: SETTLE_VERDICT.json だけに書き、reeval に stop_file が無い)。"""
     k, cap = steps_of(kind)
     (rd / ST.CRITERIA_FILE).write_text(yaml.safe_dump(criteria(residual=residual), allow_unicode=True, sort_keys=False))
     with open(rd / "forge_launches.jsonl", "w") as f:                  # 前の段 (S1) の起動 → 本段の起動
@@ -263,12 +273,15 @@ def finish_v2(rd: Path, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_nod
                  + tuple(f_ for f_ in (f"res_{k}.h5", f"res_nodes_{k}.h5") if (rd / f_).exists())]
         (rd / SR.STOPPED_AT).write_text(json.dumps({"status": "ok", "step": k, "residual_step": k - 1, "request": "{}",
                                                     "nStepOuter": cap, "files": files}, indent=2) + "\n")
-    # 停止の step の再評価 (watch_main_stage_v2 と同じ: 新しい RunData・end_step = 停止の step → SETTLE_VERDICT.json)
+    # 停止の step の再評価 (watch_main_stage_v2 と同じ: 新しい RunData・end_step = 停止の step → 専用ファイルと SETTLE_VERDICT.json)
     lc = ST.load_criteria(rd)
     data = ST.RunData(rd, lc["criteria"])
     r = ST.judge(rd, k, data=data, loaded=lc)
-    pv = ST.write_verdict(rd, r, data)
-    reeval = {**SR.judge_summary(r), "end_source": r.get("end_source"), "file": ST.VERDICT_FILE, "sha256": SR._sha256(pv)}
+    if legacy:
+        pv = ST.write_verdict(rd, r, data)
+        reeval = {**SR.judge_summary(r), "end_source": r.get("end_source"), "file": ST.VERDICT_FILE, "sha256": SR._sha256(pv)}
+    else:
+        reeval = SR.write_stop_verdict(rd, k, r, data)
     od = rd / SR.V2_DIR / f"delta_E_{k}"
     sr_info = None
     if delta is None:
@@ -387,9 +400,14 @@ def test_gate(pin, eu):
           g["delta_e_source"]["kind"] == "stop_rule_v2_stop_snapshot" and g["delta_e_source"]["stop_step"] == k
           and g["delta_e_source"]["dir"] == f"{SR.V2_DIR}/delta_E_{k}" and g["warnings"] == [], f"{g['warnings']}")
     summ = json.loads((A / "delta_r_extract_summary.json").read_text())
-    check("A: 抽出の要約に落ち着きの印 (settled true・δ_E の作り方) を写す、収束の判定の記録は SETTLE_VERDICT.json の残差",
+    # 収束の判定の記録は停止の時の専用ファイル (§5.1 #16、result 段レビュー 3 回目 M1; 以前は SETTLE_VERDICT.json — 通常の CLI が
+    # 上書きする最新の判定なので、停止の時の照合に使わなくなった)
+    stop_rel = SR.stop_verdict_relpath(k)
+    check(f"A: 抽出の要約に落ち着きの印 (settled true・δ_E の作り方) を写す、収束の判定の記録は停止の時の専用ファイル {stop_rel} の残差",
           summ["settled"] is True and summ["delta_e_source"]["kind"] == "stop_rule_v2_stop_snapshot" and g["convergence"]["kind"] == "PASS"
-          and "SETTLE_VERDICT.json" in g["convergence"]["tool"] and "OVERALL: SETTLED" in (A / DL.HANDOFF_CONVERGENCE).read_text())
+          and g["convergence"]["tool"].startswith(stop_rel + " ") and c["binding"]["items"]["reeval"]["form"] == "stop_file"
+          and stop_rel in (A / DL.HANDOFF_CONVERGENCE).read_text() and "OVERALL: SETTLED" in (A / DL.HANDOFF_CONVERGENCE).read_text(),
+          g["convergence"]["tool"])
 
     # _after_ns (run_pass0_integral・run_from_table・run_pass の後段) も同じ表から
     A2 = clone(A, "A_after_ns")
@@ -432,10 +450,20 @@ def test_gate(pin, eu):
         (rd / "forge_launches.jsonl").unlink()
 
     def mut_rejudged(rd):
-        # 後で check_settled.py --end-step 26000 を回して SETTLE_VERDICT.json を書き換えた (停止の step の再評価でない)
+        # 停止の時の専用ファイルを終端 26,000 の判定で書き換えた (停止の step の再評価でない)。§5.1 #16 より前はこの負例を
+        # SETTLE_VERDICT.json の書き換えで作っていたが、SETTLE_VERDICT.json は通常の CLI が上書きする最新の判定になり、停止の時の照合に
+        # 使わない (書き換えても関門は進む — 正例は (f) の試験) ので、専用ファイルを書き換える
         lc = ST.load_criteria(rd)
         d = ST.RunData(rd, lc["criteria"])
-        ST.write_verdict(rd, ST.judge(rd, 26000, data=d, loaded=lc), d)
+        ST.write_verdict(rd, ST.judge(rd, 26000, data=d, loaded=lc), d, rd / SR.stop_verdict_relpath(26001))
+
+    def mut_rejudged_bound(rd):
+        # 同じ書き換えで、状態の記録 (要約・専用ファイルの sha256) も書き換えに合わせた: 停止の step との終端の照合だけで止まる
+        lc = ST.load_criteria(rd)
+        d = ST.RunData(rd, lc["criteria"])
+        r = ST.judge(rd, 26000, data=d, loaded=lc)
+        p_ = ST.write_verdict(rd, r, d, rd / SR.stop_verdict_relpath(26001))
+        rewrite_records(rd, lambda rec: rec["reeval"].update(**SR.judge_summary(r), stop_file_sha256=SR._sha256(p_)))
 
     def mut_extract_settings(rd):
         rewrite_records(rd, lambda rec: rec["delta_E"]["extract"].update(band_select=repr("adaptive")))
@@ -448,7 +476,9 @@ def test_gate(pin, eu):
              ("STOPPED_AT の step の不一致", mut_stopped_at, "照合"),
              ("δ_E の status が ok でない (状態・見張りの記録とも)", mut_delta_status, "δ_E"),
              ("起動の記録 forge_launches.jsonl が無い (照合できない)", mut_no_launch, "照合"),
-             ("SETTLE_VERDICT.json が停止の step の再評価でない (終端 26,000 で書き直された)", mut_rejudged, "照合"),
+             ("停止の時の専用ファイルが停止の step の再評価でない (終端 26,000 で書き直された; sha256 が状態の記録と違う)", mut_rejudged, "照合"),
+             ("停止の時の専用ファイルが停止の step の再評価でない (終端 26,000; 状態の記録も合わせた → 終端の照合)", mut_rejudged_bound,
+              "再評価の終端"),
              ("δ_E の抽出の設定が受け渡しの固定の条件と違う (帯 adaptive)", mut_extract_settings, "δ_E"),
              ("最後の forge の起動が本段でない (本段の後に別の設定で起動)", mut_launch_other, "照合")]
     for i, (lab, mut, key) in enumerate(cases):
@@ -850,17 +880,24 @@ PRE_REVIEW2_COMMIT = "b64dbfdd"     # result 段レビュー 2 回目 M3 (§5.1 
 
 
 def _rebind_verdict(rd: Path, mutate):
-    """停止規則の再評価の記録 SETTLE_VERDICT.json を mutate(v) で書き換え、STOP_RULE_STATE の reeval (digest・sha256・verdict) を合わせる
-    (別の機械・別の所在で書いた記録の形; 記録どうしは結び付いたまま)。"""
-    p = rd / ST.VERDICT_FILE
+    """停止規則の停止の時の再評価の記録 (専用ファイル stop_rule_v2/SETTLE_VERDICT_stop_<k>.json; 古い形の run は SETTLE_VERDICT.json) を
+    mutate(v) で書き換え、STOP_RULE_STATE の reeval (digest・sha256・stop_file_sha256・verdict) を合わせる (別の機械・別の所在で書いた
+    記録の形; 記録どうしは結び付いたまま)。専用ファイルのある run は、停止規則と同じく同じバイトを SETTLE_VERDICT.json にも書く。"""
+    rel = (SR.read_state(rd)["reeval"] or {}).get("stop_file")
+    p = rd / (rel or ST.VERDICT_FILE)
     v = json.loads(p.read_text())
     mutate(v)
-    p.write_text(json.dumps(v, ensure_ascii=False, indent=1) + "\n")
-    dig, sha = SR.quantities_digest(v), SR._sha256(p)
-    rewrite_records(rd, lambda rec: rec["reeval"].update(digest=dig, sha256=sha, verdict=v["verdict"]))
+    txt = json.dumps(v, ensure_ascii=False, indent=1) + "\n"
+    p.write_text(txt)
+    if rel:
+        (rd / ST.VERDICT_FILE).write_text(txt)
+    upd = {"digest": SR.quantities_digest(v), "sha256": SR._sha256(rd / ST.VERDICT_FILE), "verdict": v["verdict"]}
+    if rel:
+        upd["stop_file_sha256"] = SR._sha256(p)
+    rewrite_records(rd, lambda rec: rec["reeval"].update(**upd))
 
 
-def test_reeval_match(V: Path):
+def test_reeval_match(V: Path, VL: Path):
     """result 段レビュー 2 回目 M3 (plan §5.1 #11): 成果物の収束 (`wall_tables._settled_convergence`) が停止規則 v2 の再評価の記録と
     今の判定を照合するとき、所在のパス (相対・絶対・別の場所) と演算の丸め (1 ulp) では一致、各検査の合否・量の verdict・許容を超える値・
     入力の中身が違えば不一致 (未評価)。修正前 (PRE_REVIEW2_COMMIT の wall_tables; 量の辞書全体の sha256 の完全一致) が所在と丸めで
@@ -976,10 +1013,23 @@ def test_reeval_match(V: Path):
     c = conv(Vf)
     check("記録に使ったファイルの一覧が無い (旧い記録の形) → 例外にせず理由つきの未評価", c["result"] == "未評価"
           and "files" in (c.get("reason") or ""), str(c.get("reason"))[:300])
+    # 停止の時の記録が無い: 新しい形は専用ファイル、古い形は SETTLE_VERDICT.json (§5.1 #16 より前は SETTLE_VERDICT.json を消す負例だけ
+    # だった — 新しい形では SETTLE_VERDICT.json は最新の判定で、消しても停止の時の照合は専用ファイルで成り立つ)
     Vv = clone(V, "wt_v2_noverdict")
-    (Vv / ST.VERDICT_FILE).unlink()
+    stop_rel = SR.read_state(Vv)["reeval"]["stop_file"]
+    (Vv / stop_rel).unlink()
     c = conv(Vv)
-    check("再評価の記録 SETTLE_VERDICT.json が無い → 例外にせず理由つきの未評価", c["result"] == "未評価"
+    check("停止の時の再評価の専用ファイルが無い → 例外にせず理由つきの未評価 (SETTLE_VERDICT.json へ落とさない)", c["result"] == "未評価"
+          and stop_rel in (c.get("reason") or "") and (Vv / ST.VERDICT_FILE).is_file(), str(c.get("reason"))[:300])
+    Vv2 = clone(V, "wt_v2_noverdict_latest")
+    (Vv2 / ST.VERDICT_FILE).unlink()
+    c = conv(Vv2)
+    check("最新の判定 SETTLE_VERDICT.json が無くても停止の時の専用ファイルと照合できる → 収束 PASS", c["result"] == "PASS"
+          and c["stop_rule_reeval"]["compare"]["form"] == "stop_file", str(c.get("reason"))[:300])
+    Vl = clone(VL, "wt_v2_legacy_noverdict")
+    (Vl / ST.VERDICT_FILE).unlink()
+    c = conv(Vl)
+    check("古い形の run (専用ファイルなし) で再評価の記録 SETTLE_VERDICT.json が無い → 例外にせず理由つきの未評価", c["result"] == "未評価"
           and ST.VERDICT_FILE in (c.get("reason") or ""), str(c.get("reason"))[:300])
 
 
@@ -1059,7 +1109,10 @@ def test_readers():
     c = WT.thermal_use(Vr)["convergence"]
     check("thermal_use: 停止規則 v2 の再評価 (STOP_RULE_STATE の digest) と今の判定が食い違う → 未評価",
           c["result"] == "未評価" and c["stop_rule_reeval"]["matches"] is False and "食い違う" in (c.get("reason") or ""), str(c.get("reason")))
-    test_reeval_match(V)
+    VL = TMP / "wt_v2_legacy"                       # 停止の時の専用ファイルの無い古い形 (§5.1 #16 より前の見張りの形)
+    RWT.make_synth(VL, steps=wsteps, tw=1e-5, residual=False)
+    finish_v2(VL, kind="REACHED", delta=None, legacy=True)
+    test_reeval_match(V, VL)
     Vn = TMP / "wt_v2_rising"
     RWT.make_synth(Vn, steps=wsteps, tw=1e-5, residual=False)
     finish_v2(Vn, kind="REACHED", resid_fn=lambda s: 1e-4 * 10.0 ** (s / 20000.0), delta=None)
@@ -1112,6 +1165,170 @@ def test_readers():
           json.loads(p.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny" and "check_settled.py" in r and "--select" in r, r[:200])
 
 
+
+# ====================================================================================== (f) 通常の CLI で判定し直した後の照合 (§5.1 #16)
+PRE_M1_COMMIT = "8cf2a284"          # result 段レビュー 3 回目 M1 (§5.1 #16) の修正の前 (検出力の確かめに使う)
+
+
+def _cli_rejudge(rd: Path, *args):
+    """通常の CLI (check_settled.py; 既定で SETTLE_VERDICT.json に書く) を run の親から相対のパスで回す。戻り (終了コード, 最後の行)。"""
+    import io
+    from contextlib import redirect_stdout
+    import check_settled
+    cwd = os.getcwd()
+    buf = io.StringIO()
+    try:
+        os.chdir(rd.parent)
+        with redirect_stdout(buf):
+            try:
+                rc = check_settled.main([rd.name, *args])
+            except SystemExit as e:
+                rc = e.code
+    finally:
+        os.chdir(cwd)
+    return rc, (buf.getvalue().strip().splitlines() or [""])[-1]
+
+
+def _with_stop_rule(mod, fn):
+    """`from ..evaluate import stop_rule` を mod (修正前の stop_rule) に差し替えて fn() を呼ぶ (検出力の確かめ; 呼んだ後に戻す)。"""
+    import forge_design.evaluate as EV
+    key = "forge_design.evaluate.stop_rule"
+    saved_m, saved_a = sys.modules[key], EV.stop_rule
+    sys.modules[key], EV.stop_rule = mod, mod
+    try:
+        return fn()
+    finally:
+        sys.modules[key], EV.stop_rule = saved_m, saved_a
+
+
+def test_cli_rejudge(pin, A: Path):
+    """result 段レビュー 3 回目 M1 (plan §5.1 #16): 通常の CLI (`check_settled.py`、既定で SETTLE_VERDICT.json を上書き) で判定し直した
+    後も、成果物の収束 (`wall_tables.thermal_use`、相対・絶対のパス) と受け渡しの照合 (`_v2_binding`・関門) が停止の時の記録と照合でき、
+    「未評価」・照合の失敗にならないこと。新しい形 (停止の時の専用ファイルあり) と古い形 (専用ファイルなし、§5.1 #16 より前の見張りの形)
+    の両方。負例: 古い形で別の終端で上書き・上書き後に許容を超えて値が違う、新しい形で専用ファイルを書き換えた、CLI の --out で専用
+    ファイルを指す。修正前 (PRE_M1_COMMIT の stop_rule・deltastar_loop・wall_tables) は古い形で CLI の後に照合が失敗したこと (検出力)。"""
+    print("== (f) 通常の CLI で判定し直す → 成果物の照合 → 受け渡しの照合 (result 段レビュー 3 回目 M1、§5.1 #16)", flush=True)
+    sys.path.insert(0, str(DESIGN / "tests"))
+    import run_wall_tables_tests as RWT
+    from forge_design.export import wall_tables as WT
+    wsteps = (18000, 20000, 22000, 24000, 26000, 26001)
+    k = 26001
+    stop_rel = SR.stop_verdict_relpath(k)
+
+    def wall_run(name, legacy):
+        """壁のダンプのある run (成果物の収束) に、停止の場 res_26001.h5 (照合は sha256 だけを見る) と停止規則 v2 の記録一式。"""
+        rd = TMP / name
+        RWT.make_synth(rd, steps=wsteps, tw=1e-5, residual=False)
+        with h5py.File(rd / f"res_{k}.h5", "w") as f:
+            f["/VALUE/ro"] = np.ones(4)
+        return finish_v2(rd, kind="REACHED", delta=None, legacy=legacy)
+
+    def unpublish(rd):
+        for f in ("delta_r_next.csv", DL.HANDOFF_GATE, "fixed_point.json", "delta_r_extract_summary.json", "delta_r_equiv.csv",
+                  "delta_r_equiv_diag.json", "delta_r_edge.csv"):
+            (rd / f).unlink(missing_ok=True)
+        return rd
+
+    def thermal(rd, mod=WT):
+        cwd = os.getcwd()
+        try:
+            os.chdir(rd.parent)
+            c_rel = mod.thermal_use(Path(rd.name))["convergence"]
+        finally:
+            os.chdir(cwd)
+        return c_rel, mod.thermal_use(rd.resolve())["convergence"]
+
+    def conv_ok(c, form):
+        return (c["result"] == "PASS" and c["stop_rule_reeval"].get("matches") is True
+                and (c["stop_rule_reeval"].get("compare") or {}).get("form") == form)
+
+    W_new, W_old = wall_run("cli_wt_new", False), wall_run("cli_wt_legacy", True)
+    A_old = build("cli_A_legacy", pin, legacy=True, delta_from=A)
+    for label, Wr, Ar, form in (("新しい形 (停止の時の専用ファイルあり)", W_new, A, "stop_file"),
+                                ("古い形 (専用ファイルなし; V4・V6 の形)", W_old, A_old, "overwritten")):
+        # 成果物と受け渡しの照合 (同じ run)
+        rd = clone(Wr, f"cli_chain_{form}")
+        st = SR.read_state(rd)
+        ve = st["reeval"]
+        stop_bytes = (rd / stop_rel).read_bytes() if form == "stop_file" else None
+        c_rel, c_abs = thermal(rd)
+        b = DL._v2_binding(rd, st, ST)
+        check(f"(f) {label}: CLI の前 — 成果物の収束 PASS・受け渡しの照合が通る",
+              c_rel["result"] == c_abs["result"] == "PASS" and b["pass"], f"{c_rel.get('reason')} / {b['problems'][:2]}")
+        rc, last = _cli_rejudge(rd)
+        check(f"(f) {label}: 通常の CLI (相対のパス・既定で書く) → SETTLED・終了コード 0、SETTLE_VERDICT.json は停止の時と違うバイトに上書き"
+              + ("、停止の時の専用ファイルは変わらない" if form == "stop_file" else ""),
+              rc == 0 and last.startswith("VERDICT: SETTLED") and SR._sha256(rd / ST.VERDICT_FILE) != ve["sha256"]
+              and (stop_bytes is None or (rd / stop_rel).read_bytes() == stop_bytes), f"rc {rc} {last}")
+        c_rel, c_abs = thermal(rd)
+        check(f"(f) {label}: CLI の後の成果物の収束 (相対・絶対のパス) → 停止規則の再評価と一致・PASS (記録の形 {form})、「未評価」にならない",
+              conv_ok(c_rel, form) and conv_ok(c_abs, form), f"{c_rel.get('reason')} / {c_abs.get('reason')}")
+        b = DL._v2_binding(rd, SR.read_state(rd), ST)
+        check(f"(f) {label}: CLI の後の受け渡しの照合 (_v2_binding) も通る (記録の形 {form}"
+              + ("、今の判定と許容つきで照合" if form == "overwritten" else "") + ")",
+              b["pass"] and b["items"]["reeval"]["form"] == form and b["verdict_file"] == (stop_rel if form == "stop_file" else ST.VERDICT_FILE)
+              and (form == "stop_file" or b["items"]["reeval"]["rejudge_match"]["matches"] is True), str(b["problems"][:3]))
+        # 受け渡しの関門 (δ_E のある run)
+        ag = unpublish(clone(Ar, f"cli_gate_{form}"))
+        rc, last = _cli_rejudge(ag)
+        g = gate(ag, pin)
+        check(f"(f) {label}: CLI の後の受け渡しの関門 → 進む (上書きなし・settled true)、run の直下に delta_r_next.csv を公開",
+              rc == 0 and g["proceed"] and g["settled"] is True and g["override"]["applied"] == []
+              and g["checks"]["binding"]["items"]["reeval"]["form"] == form and (ag / "delta_r_next.csv").is_file(),
+              "; ".join(g["blocked_by"])[:300])
+
+    # --- 負例 ---
+    def first_check_value(rd, scale):
+        p_ = rd / ST.VERDICT_FILE
+        v = json.loads(p_.read_text())
+        c_ = next(q for q in v["quantities"] if q["kind"] == "exit_core_mach")["checks"][0]
+        c_["value"] = c_["value"] * scale + 1e-9
+        p_.write_text(json.dumps(v, ensure_ascii=False, indent=1) + "\n")
+
+    negs = (("古い形: 通常の CLI を別の終端 (--end-step 26000) で回して上書き → 要約が停止の時と違う", "legacy", ("--end-step", "26000"), None,
+             "要約が停止の時の記録と違う"),
+            ("古い形: 上書き後の判定の値を許容を超えて変えた (要約は同じ; 相対 1e−6) → 今の判定と食い違う", "legacy", (),
+             lambda rd: first_check_value(rd, 1 + 1e-6), "食い違う"),
+            ("新しい形: 停止の時の専用ファイルを停止の後に書き換えた (sha256 が状態の記録と違う)", "new", (),
+             lambda rd: (rd / stop_rel).write_text((rd / stop_rel).read_text().replace('"verdict": "SETTLED"', '"verdict": "SETTLED" ', 1)),
+             "停止の後に書き換えられた"))
+    for lab, form, args, mut, key in negs:
+        rd = clone(W_old if form == "legacy" else W_new, f"cli_neg_wt_{len(lab)}_{form}")
+        ag = unpublish(clone(A_old if form == "legacy" else A, f"cli_neg_gate_{len(lab)}_{form}"))
+        for r_ in (rd, ag):
+            _cli_rejudge(r_, *args)
+            if mut is not None:
+                mut(r_)
+        c_rel, _ = thermal(rd)
+        b = DL._v2_binding(rd, SR.read_state(rd), ST)
+        g = gate(ag, pin, **ALL_OV)
+        check(f"(f) 負例 {lab} → 成果物の収束は未評価、受け渡しの照合は失敗、関門は上書き 3 つでも止める (理由に「{key}」)",
+              c_rel["result"] == "未評価" and key in (c_rel.get("reason") or "") and not b["pass"] and any(key in p_ for p_ in b["problems"])
+              and not g["proceed"] and blocked_by(g, "照合") and not_published(ag),
+              f"{c_rel.get('reason')} / {b['problems'][:2]} / {g['blocked_by'][:1]}")
+    rd = clone(W_new, "cli_out_guard")
+    before = (rd / stop_rel).read_bytes()
+    rc, last = _cli_rejudge(rd, "--out", str(Path(rd.name) / stop_rel))
+    check("(f) CLI の --out で停止の時の専用ファイルを指す → 引数の誤り (INDETERMINATE・終了コード 3)、専用ファイルは変わらない",
+          rc == 3 and last == "VERDICT: INDETERMINATE (引数の誤り)" and (rd / stop_rel).read_bytes() == before, f"rc {rc} {last}")
+
+    # --- 検出力: 修正前 (PRE_M1_COMMIT) は古い形で CLI の後に照合が失敗した ---
+    try:
+        sr_old = _load_ref("design/forge_design/evaluate/stop_rule.py", "forge_design.evaluate._stop_rule_pre_m1", commit=PRE_M1_COMMIT)
+        dl_old = _load_ref("design/forge_design/feedback/deltastar_loop.py", "forge_design.feedback._deltastar_loop_pre_m1", commit=PRE_M1_COMMIT)
+        wt_old = _load_ref("design/forge_design/export/wall_tables.py", "forge_design.export._wall_tables_pre_m1", commit=PRE_M1_COMMIT)
+    except Exception as e:  # noqa: BLE001
+        check(f"(f) 修正前 ({PRE_M1_COMMIT}) のモジュールを git から読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
+        return
+    rd = clone(W_old, "cli_detect")
+    pre = _with_stop_rule(sr_old, lambda: (thermal(rd, wt_old)[0], dl_old._v2_binding(rd, sr_old.read_state(rd), ST)))
+    _cli_rejudge(rd)
+    post = _with_stop_rule(sr_old, lambda: (thermal(rd, wt_old)[0], dl_old._v2_binding(rd, sr_old.read_state(rd), ST)))
+    check("(f) 検出力: 修正前は古い形の run で、CLI の前は成果物の収束 PASS・受け渡しの照合が通り、通常の CLI の後は成果物の収束「未評価」・"
+          "受け渡しの照合が失敗 (レビューの再現)",
+          pre[0]["result"] == "PASS" and pre[1]["pass"] and post[0]["result"] == "未評価" and not post[1]["pass"],
+          f"前 {pre[0]['result']}・{pre[1]['pass']} / 後 {post[0]['result']}・{post[1]['problems'][:1]}")
+
 def main() -> int:
     print(f"出力: {TMP}", flush=True)
     eu, pin = make_euler()
@@ -1121,6 +1338,7 @@ def main() -> int:
     rc_main, rc_legacy = test_run_case(A)
     test_hook(rc_main, rc_legacy)
     test_readers()
+    test_cli_rejudge(pin, A)
     print(f"\n{NCHK - FAIL}/{NCHK} ok — {'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (一時ディレクトリ {TMP})", flush=True)
     if FAIL == 0:
         shutil.rmtree(TMP, ignore_errors=True)

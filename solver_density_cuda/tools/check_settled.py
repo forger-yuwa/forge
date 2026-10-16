@@ -17,6 +17,10 @@ r"""収束の判定の道具 — 「残差が準定常・流量の収支が取�
   各量に verdict・使った値・不合格の理由の分類 (閾値の超過 / データ不足 / 未設定 / 非有限) を書く。全体は AND
   (DIVERGED > INDETERMINATE > NOT_SETTLED > SETTLED)。判定不能は合格にしない。
 - 結果は `<run>/SETTLE_VERDICT.json` (基準の中身と sha256・起動の識別・格子・判定区間・終端・使ったファイルの一覧と sha256・各量)。
+  これは**最新の判定** (呼ぶたびに上書きする)。停止規則 v2 の停止の時の再評価は、停止規則が変更されない専用ファイル
+  `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に書き、受け渡しの関門・成果物はそちらと照合する (plan §5.1 #16、result 段レビュー
+  3 回目 M1: 以前は停止の時の記録が SETTLE_VERDICT.json だけにあり、この道具で判定し直すと照合が失敗した)。この道具は
+  `stop_rule_v2/` の下に書かない (`--out` で指すと引数の誤り、終了コード 3)。
   閾値に `provisional: true` があれば VERDICT の行に「閾値は暫定 (plan §6 V3 で決める)」と出す。
 
 使い方:
@@ -51,6 +55,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import settle  # noqa: E402
+
+STOP_RULE_V2_DIR = "stop_rule_v2"   # 停止規則 v2 の置き場 (= design/forge_design/evaluate/stop_rule.py の V2_DIR; 停止の時の再評価の専用ファイル)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -125,6 +131,9 @@ def main(argv=None) -> int:
     m.add_argument("--no-bind", action="store_true", help="照合を外して判定する (調査用; 外したことを VERDICT と結果に書く)")
     a = ap.parse_args(argv)
     run = Path(a.run_dir)
+    if a.out is not None and Path(a.out).resolve().is_relative_to((run / STOP_RULE_V2_DIR).resolve()):
+        # 停止の時の再評価の専用ファイル (stop_rule_v2/SETTLE_VERDICT_stop_<step>.json) は停止規則だけが書く (plan §5.1 #16)
+        ap.error(f"--out {a.out} は停止規則 v2 の置き場 {run / STOP_RULE_V2_DIR} の下 (停止の時の再評価の記録は停止規則だけが書く)")
     if a.select:
         sel = settle.select_judge(run)
         print(sel["tool"])

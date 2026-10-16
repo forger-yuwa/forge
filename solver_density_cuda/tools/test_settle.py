@@ -27,6 +27,9 @@ V2 の負例はすべて SETTLED にしないこと、各負例で理由の分�
 (基準の sha256) は CLI でも判定しない (S11b〜S11f)、v3 の非有限の見張りは区間の毎 step の行 (欠け・重複・逆行なし) と必要な列を要る
 (F1〜F10)。負例は修正前 (`PRE_REVIEW2_COMMIT` の settle.py・check_settled.py を git から読む) が SETTLED だったこと (検出力) も確かめる
 (読めなければその検査は NG)。
+**result 段レビュー 3 回目 M1** (§5.1 #16): 停止規則 v2 の停止の時の再評価の専用ファイル (`stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`)
+は停止規則だけが書く — `check_settled.py --out` で `stop_rule_v2/` の下を指すと引数の誤り (V1b)。CLI の後の照合の連続操作は
+`design/tests/run_settle_migration_tests.py` (f) と `design/tests/run_settle_realdata_tests.py` (#16)。
 """
 from __future__ import annotations
 
@@ -613,6 +616,27 @@ def test_verdict_file():
     q = {x["name"]: x for x in d["quantities"]}
     chk("V1 各量に verdict・使った値・理由の分類", all({"verdict", "values", "reasons", "categories", "checks"} <= set(x) for x in q.values()))
     chk("V1 壁の面積の取り方を記録", "A_i" in q["wall_heat_nodes"]["values"]["walls"][0]["area_method"])
+    # 停止規則 v2 の停止の時の再評価の専用ファイル (stop_rule_v2/SETTLE_VERDICT_stop_<step>.json) は停止規則だけが書く (plan §5.1 #16、
+    # result 段レビュー 3 回目 M1): --out で stop_rule_v2/ の下を指すと引数の誤り (INDETERMINATE・終了コード 3)、何も書かない
+    (run / "stop_rule_v2").mkdir()
+    stop_f = run / "stop_rule_v2" / "SETTLE_VERDICT_stop_80001.json"
+    stop_f.write_text("{}\n")
+    before = p.read_bytes()
+    for target in (stop_f, run / "stop_rule_v2" / "other.json"):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            try:
+                rc = check_settled.main([str(run), "--out", str(target)])
+            except SystemExit as e:
+                rc = e.code
+        last = (buf.getvalue().strip().splitlines() or [""])[-1]
+        chk(f"V1b --out {target.relative_to(run)} (停止規則 v2 の置き場の下) → 引数の誤り・終了コード 3、専用ファイルも SETTLE_VERDICT.json も書かない",
+            rc == 3 and last == "VERDICT: INDETERMINATE (引数の誤り)" and stop_f.read_text() == "{}\n"
+            and not (run / "stop_rule_v2" / "other.json").exists() and p.read_bytes() == before, f"rc {rc} {last}")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = check_settled.main([str(run), "--out", str(run / "SETTLE_VERDICT_copy.json")])
+    chk("V1b --out を run の直下の別の名前にするのは今どおり書く (終了コード 0)", rc == 0 and (run / "SETTLE_VERDICT_copy.json").is_file())
 
 
 def test_select_bind():

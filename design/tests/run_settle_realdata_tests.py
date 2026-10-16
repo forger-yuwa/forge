@@ -15,6 +15,13 @@ run は一時ディレクトリへ写して使う (h5・xmf は symlink、それ
        (見張りが判定不能)。修正前の settle.py はどれも SETTLED だった (検出力)。
   (#11) 成果物の収束 (`wall_tables.thermal_use`) が、同じ run を相対・絶対のパスで渡しても、別の numpy (system python3 があれば) で
        判定しても、停止規則 v2 の再評価と一致して PASS (修正前は「未評価」; 検出力)。
+  (#16) result 段レビュー 3 回目 M1 (notes/reviews/2026-10-16-tooling-settle-convergence-and-monitor-result-3.md の 1): 写しで
+       「通常の CLI (`check_settled.py`、相対のパス・既定で SETTLE_VERDICT.json を上書き) → 成果物の収束 (`thermal_use`、相対・絶対の
+       パス) → 受け渡しの照合 (`deltastar_loop._v2_binding`)」を続けて回し、成果物が「未評価」にならず照合も通る。古い形 (写しのまま;
+       停止の時の専用ファイルが無い V4・V6 の形 → SETTLE_VERDICT.json が上書きされたら要約の一致する代わりの記録 + 今の判定との許容つきの
+       照合) と新しい形 (写しの SETTLE_VERDICT.json を停止の時の専用ファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` に置き、
+       状態の記録に相対パスと sha256 を足した — 修正後の見張りが書く形) の両方。新しい形で専用ファイルを書き換えると未評価・照合の失敗。
+       修正前 (PRE_M1_COMMIT の stop_rule・deltastar_loop・wall_tables) は古い形で CLI の後に「未評価」・照合の失敗 (レビューの再現; 検出力)。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_settle_realdata_tests.py
 所要: 約 1 分。
@@ -44,12 +51,14 @@ os.environ.setdefault("FORGE_NO_DESIGN_REPORT", "1")
 from forge_design.evaluate import settle_presets as SP  # noqa: E402
 from forge_design.evaluate import stop_rule as SR  # noqa: E402
 from forge_design.export import wall_tables as WT  # noqa: E402
+from forge_design.feedback import deltastar_loop as DL  # noqa: E402
 import check_settled  # noqa: E402
 
 ST = SR._settle()
 CASE = ROOT / "case" / "71.m55_combustion_wt"
 RUNS = {"V4 run_0011_ns_v2": CASE / "run_0011_ns_v2", "V6 run_0014_chain_v2": CASE / "run_0014_chain_v2"}
 PRE_REVIEW2_COMMIT = "b64dbfdd"      # result 段レビュー 2 回目の修正の前 (検出力の確かめ)
+PRE_M1_COMMIT = "8cf2a284"           # result 段レビュー 3 回目 M1 (§5.1 #16) の修正の前 (検出力の確かめ)
 SYS_PY = Path("/usr/bin/python3")    # design/.venv-opt と numpy の版が違う (1.26 と 2.x; 再計算の丸めが違う)
 TMP = Path(tempfile.mkdtemp(prefix="settle_realdata_"))
 FAIL = 0
@@ -132,6 +141,113 @@ def v3_criteria(run: Path) -> Path:
     return p
 
 
+def rejudge_cli(run: Path):
+    """通常の CLI (check_settled.py; 既定で SETTLE_VERDICT.json に書く) を run の親から相対のパスで回す。戻り (終了コード, 最後の行)。"""
+    cwd = os.getcwd()
+    try:
+        os.chdir(run.parent)
+        rc, _, last = cli(check_settled, Path(run.name))
+    finally:
+        os.chdir(cwd)
+    return rc, last
+
+
+def thermal_both(run: Path, mod=None):
+    """成果物の収束 (`thermal_use`) を相対のパス・絶対のパスで。戻り (相対の収束, 絶対の収束)。"""
+    mod = mod or WT
+    cwd = os.getcwd()
+    try:
+        os.chdir(run.parent)
+        c_rel = mod.thermal_use(Path(run.name))["convergence"]
+    finally:
+        os.chdir(cwd)
+    return c_rel, mod.thermal_use(run.resolve())["convergence"]
+
+
+def to_new_form(run: Path) -> str:
+    """写しを修正後の見張りが書く形にする: 停止の時のままの SETTLE_VERDICT.json を停止の時の専用ファイルに置き、stop_rule.json と
+    STOP_RULE_STATE.json の reeval に相対パスと sha256 を足す (STOP_RULE_STATE の stop_rule.json の sha256 も合わせる)。戻り 相対パス。"""
+    st = SR.read_state(run)
+    ve = st["reeval"]
+    assert SR._sha256(run / ST.VERDICT_FILE) == ve["sha256"], "SETTLE_VERDICT.json が停止の時のままでない"
+    rel = SR.stop_verdict_relpath(ve["end_step"])
+    (run / rel).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(run / ST.VERDICT_FILE, run / rel)
+    add = {"stop_file": rel, "stop_file_sha256": SR._sha256(run / rel)}
+    rec = json.loads((run / SR.RECORD).read_text())
+    rec["reeval"].update(add)
+    SR.save_record(run, rec)
+    st["reeval"].update(add)
+    st["record_sha256"] = SR._sha256(run / SR.RECORD)
+    SR.write_state(run, st)
+    return rel
+
+
+def with_stop_rule(mod, fn):
+    """`from ..evaluate import stop_rule` を mod (修正前の stop_rule) に差し替えて fn() を呼ぶ (検出力の確かめ; 呼んだ後に戻す)。"""
+    import forge_design.evaluate as EV
+    key = "forge_design.evaluate.stop_rule"
+    saved_m, saved_a = sys.modules[key], EV.stop_rule
+    sys.modules[key], EV.stop_rule = mod, mod
+    try:
+        return fn()
+    finally:
+        sys.modules[key], EV.stop_rule = saved_m, saved_a
+
+
+def test_rejudge_chain(label: str, src: Path, old: dict | None):
+    """(#16) 通常の CLI → 成果物の収束 → 受け渡しの照合 (古い形・新しい形・検出力)。old は修正前のモジュール {sr, dl, wt} (読めなければ None)。"""
+    tag = src.name
+
+    def conv_ok(c, form):
+        return (c["result"] == "PASS" and c["stop_rule_reeval"].get("matches") is True
+                and (c["stop_rule_reeval"].get("compare") or {}).get("form") == form)
+
+    for form in ("overwritten", "stop_file"):
+        what = "古い形 (写しのまま; 専用ファイルなし)" if form == "overwritten" else "新しい形 (停止の時の専用ファイルあり)"
+        r = copy_run(src, f"{tag}_m1_{form}")
+        rel = to_new_form(r) if form == "stop_file" else None
+        stop_bytes = (r / rel).read_bytes() if rel else None
+        ve = SR.read_state(r)["reeval"]
+        rc, last = rejudge_cli(r)
+        check(f"(#16) {label} {what}: 通常の CLI (相対のパス・既定で書く) → SETTLED・終了コード 0、SETTLE_VERDICT.json は停止の時と違うバイト"
+              + ("、専用ファイルは変わらない" if rel else ""),
+              rc == 0 and last.startswith("VERDICT: SETTLED") and SR._sha256(r / ST.VERDICT_FILE) != ve["sha256"]
+              and (rel is None or (r / rel).read_bytes() == stop_bytes), f"rc {rc} {last}")
+        c_rel, c_abs = thermal_both(r)
+        check(f"(#16) {label} {what}: CLI の後の成果物の収束 (相対・絶対のパス) → 停止規則 v2 の再評価と一致・PASS (記録の形 {form})",
+              conv_ok(c_rel, form) and conv_ok(c_abs, form), f"{str(c_rel.get('reason'))[:200]} / {str(c_abs.get('reason'))[:200]}")
+        cwd = os.getcwd()
+        try:
+            os.chdir(r.parent)
+            b_rel = DL._v2_binding(Path(r.name), SR.read_state(r), ST)
+        finally:
+            os.chdir(cwd)
+        b = DL._v2_binding(r.resolve(), SR.read_state(r), ST)
+        check(f"(#16) {label} {what}: CLI の後の受け渡しの照合 (_v2_binding、相対・絶対のパス) が通る (記録の形 {form})",
+              all(x["pass"] and x["items"]["reeval"]["form"] == form
+                  and (form == "stop_file" or x["items"]["reeval"]["rejudge_match"]["matches"] is True) for x in (b_rel, b)),
+              str((b_rel["problems"] + b["problems"])[:3])[:300])
+        if rel:
+            (r / rel).write_text((r / rel).read_text().replace('"verdict": "SETTLED"', '"verdict": "SETTLED" ', 1))
+            c_rel, _ = thermal_both(r)
+            b = DL._v2_binding(r, SR.read_state(r), ST)
+            check(f"(#16) {label} {what}: 専用ファイルを停止の後に書き換えた → 成果物の収束は未評価・受け渡しの照合は失敗",
+                  c_rel["result"] == "未評価" and "停止の後に書き換えられた" in (c_rel.get("reason") or "") and not b["pass"],
+                  f"{str(c_rel.get('reason'))[:200]} / {b['problems'][:1]}")
+    if old is None:
+        return
+    r = copy_run(src, f"{tag}_m1_detect")
+    sr_o, dl_o, wt_o = old["sr"], old["dl"], old["wt"]
+    pre = with_stop_rule(sr_o, lambda: (thermal_both(r, wt_o)[0], dl_o._v2_binding(r, sr_o.read_state(r), ST)))
+    rc, last = rejudge_cli(r)
+    post = with_stop_rule(sr_o, lambda: (thermal_both(r, wt_o)[0], dl_o._v2_binding(r, sr_o.read_state(r), ST)))
+    check(f"(#16) {label}: 検出力 — 修正前は CLI の前は成果物の収束 PASS・照合が通り、通常の CLI (終了コード {rc}) の後は成果物の収束"
+          "「未評価」・受け渡しの照合が失敗 (レビューの再現)",
+          rc == 0 and pre[0]["result"] == "PASS" and pre[1]["pass"] and post[0]["result"] == "未評価" and not post[1]["pass"],
+          f"前 {pre[0]['result']}・{pre[1]['pass']} / 後 {post[0]['result']}・{str(post[1]['problems'][:1])[:200]}")
+
+
 def main() -> int:
     print(f"出力: {TMP}", flush=True)
     try:
@@ -144,6 +260,18 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         old_cli = old_settle = old_wt = None
         check(f"修正前 ({PRE_REVIEW2_COMMIT}) のモジュールを git から読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
+    try:
+        old_m1 = {"sr": load_at(PRE_M1_COMMIT, "design/forge_design/evaluate/stop_rule.py", "forge_design.evaluate._stop_rule_pre_m1",
+                                package="forge_design.evaluate"),
+                  "dl": load_at(PRE_M1_COMMIT, "design/forge_design/feedback/deltastar_loop.py", "forge_design.feedback._deltastar_loop_pre_m1",
+                                package="forge_design.feedback"),
+                  "wt": load_at(PRE_M1_COMMIT, "design/forge_design/export/wall_tables.py", "forge_design.export._wall_tables_pre_m1",
+                                package="forge_design.export")}
+        for k_ in ("REPO", "TOOLS"):          # 道具 (check_settled.py) は今の作業ツリーのもの (比べるのは照合の中身だけ)
+            setattr(old_m1["wt"], k_, getattr(WT, k_))
+    except Exception as e:  # noqa: BLE001
+        old_m1 = None
+        check(f"修正前 ({PRE_M1_COMMIT}) のモジュールを git から読めた (読めなければ検出力は判定不能 — 合格にしない)", False, str(e))
     for label, src in RUNS.items():
         if not (src / ST.CRITERIA_FILE).is_file() or not (src / SR.STATE).is_file():
             SKIPPED.append(f"{label} ({src.relative_to(ROOT)} が無い)")
@@ -233,6 +361,8 @@ def main() -> int:
                   str(c.get("reason"))[:300])
         else:
             SKIPPED.append(f"(#11) {label}: {SYS_PY} が無い (別の numpy の照合)")
+        # ---------------------------------------------------------------- #16
+        test_rejudge_chain(label, src, old_m1)
     if SKIPPED:
         print("飛ばした項目: " + "; ".join(SKIPPED), flush=True)
     print(f"\n{NCHK - FAIL}/{NCHK} ok — {'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'} (一時ディレクトリ {TMP})", flush=True)
