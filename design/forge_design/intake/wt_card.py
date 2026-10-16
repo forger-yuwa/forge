@@ -1904,7 +1904,9 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     NS・Euler の節点数と上限は YAML のコメント・標準出力・card_log の `nodes` に出す (plan tooling-nozzle-mesh-size-guard §4.2)。
 
     自動調整 (どれも `_card.auto_adjust`・card_log・YAML のコメントに記録し、調整したら r_t の反復から全部やり直す):
-    - **from_length が止まる** (STALL_TEXT): まず `n_axis_inv` を 2 倍にする。それでも止まれば、内部許容差 `geometry.L_total_tol` を
+    - **from_length が止まる** (STALL_TEXT): 雛形の生産の組 (wall_mode cplus × exit_mode characteristic) は自動調整せずに例外で止める
+      (終端 C⁺ の補間で長さ合わせが収束するので、未収束は想定外; plan tooling-nozzle-card-local-mesh §4.5・§6 V9、2026-10-16)。ほかの組は
+      まず `n_axis_inv` を 2 倍にする。それでも止まれば、内部許容差 `geometry.L_total_tol` を
       L_TOTAL_TOL_RELAXED (0.05 r_t) に緩め、`n_axis_inv` は雛形の値に戻す (`L_total_tol_relaxed: {from, to, reason}`)。**カードの公差は
       変えない** — 寸法の合否は設計壁から測る検査 (ここ) と成果物の出荷ゲート (STEP・メッシュ) がカードの公差で決める。0.05 r_t でも
       止まれば例外 (形状が成立しない; codex 諮問 2026-10-13)。
@@ -1972,16 +1974,27 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
     def cur(key, rt):
         return make(rt)["geometry"].get(key)
 
+    # cplus × characteristic (雛形の生産の組) は終端 C⁺ を x_E を挟む 2 本の補間で取るので x_F(L_c) が連続で、長さ合わせは雛形の網・
+    # カードの公差のまま収束する (plan tooling-nozzle-card-local-mesh §4.5・§6 V9)。未収束は想定外なので、網の倍化・許容差の緩和を
+    # せずに止める (codex diagnose 2026-10-16: r_t ごとに戻しても、その r_t でカードの公差より緩い結果を許す)
+    stall_stops = (str(base_geom.get("wall_mode", "streamline")) == "cplus"
+                   and str(base_geom.get("exit_mode", "characteristic")) == "characteristic")
+
     def on_stall(ex, rt, calls, info=None):
-        """from_length の停止の自動調整 (1 回目 n_axis_inv を 2 倍 → 2 回目 L_total_tol を L_TOTAL_TOL_RELAXED に緩め n_axis_inv を雛形に
-        戻す → 3 回目は例外)。設計チェーン (chain_logged・outer_step) と M_knot の選択 (mk_stall、§5.1 #6d) が同じ状態 (auto・
-        auto_adjust・relaxed) を進める。info: 理由の文 (無ければ calls の逆 MOC の記録から作る)。"""
+        """from_length の停止の扱い。cplus × characteristic (`stall_stops`) は自動調整せずに例外 (止める)。ほかの組は自動調整
+        (1 回目 n_axis_inv を 2 倍 → 2 回目 L_total_tol を L_TOTAL_TOL_RELAXED に緩め n_axis_inv を雛形に戻す → 3 回目は例外)。
+        設計チェーン (chain_logged・outer_step) と M_knot の選択 (mk_stall、§5.1 #6d) が同じ状態 (auto・auto_adjust・relaxed) を進める。
+        info: 理由の文 (無ければ calls の逆 MOC の記録から作る)。"""
         nonlocal relaxed
         if info is None:
             L_tgt = float(make(rt)["dv"]["L_total"]["value"])
             best = min((abs(c["x_F"] - L_tgt) for c in calls if np.isfinite(c["x_F"])), default=float("nan"))
             tol_now = float(cur("L_total_tol", rt))
             info = f"{STALL_TEXT}: 最良の |x_F − L_total| {best:.3g} r_t > L_total_tol {tol_now:.3g} r_t (r_t {rt!r} m)"
+        if stall_stops:
+            raise ValueError(f"{info}。wall_mode cplus × exit_mode characteristic は終端 C⁺ の補間で長さ合わせが雛形の網・カードの公差のまま"
+                             "収束するはずで、未収束は想定外 — 網の倍化・許容差の緩和はしない (plan tooling-nozzle-card-local-mesh §4.5)。"
+                             "このログを人に見せる") from ex
         if "n_axis_inv" not in auto and relaxed is None:
             n0 = int(base_geom["n_axis_inv"])
             auto["n_axis_inv"] = 2 * n0
@@ -2180,7 +2193,8 @@ def build_problem(card_path, out_yaml, sizing: str = "auto", max_outer: int = 10
         try:
             on_stall(ex, rt, [], info=info)
         except ValueError:
-            rec["stall"]["action"] = "自動調整を使い切った (n_axis_inv の倍化と L_total_tol の緩和の後も未収束) — 例外"
+            rec["stall"]["action"] = ("cplus × characteristic: 自動調整なしで止めた (plan tooling-nozzle-card-local-mesh §4.5) — 例外" if stall_stops
+                                      else "自動調整を使い切った (n_axis_inv の倍化と L_total_tol の緩和の後も未収束) — 例外")
             mk["runs"].append(_plain(rec))
             raise
         rec["stall"]["action"] = [{k: a[k] for k in ("key", "from", "to")} for a in auto_adjust[n_aa:]]

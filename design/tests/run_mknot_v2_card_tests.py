@@ -12,21 +12,33 @@ V2:
   (a) 最初と最終の r_t で選び直す (物理スロート径): 最初の r_t (径/2) と固定点の後の r_t で 1 回ずつ、一致して終了
   (b) M_K が変われば固定点をやり直す: 2 回目のやり直しで一致して成功 / 3 回目が要るなら例外 (YAML を書かない)
   (c) M_K の往復 (2.10 → 2.20 → 2.10): 同じ実効の入力の選択を使い回し、やり直しの上限で例外
-  (d) 自動調整のそれぞれで評価を捨てて最初からやり直す: n_axis_inv の倍化・L_total_tol の緩和 (固定点の from_length の停止)、
-      x_end_margin の変更 (固定点の場の不足、最終の壁の判定の後の張り付き)
+  (d) 固定点の from_length の停止: 雛形の生産の組 (wall_mode cplus × exit_mode characteristic) では n_axis_inv の倍化・L_total_tol の
+      緩和をせずに最初の停止で ValueError (YAML・card_log を書かない)。2026-10-16 に終端 C⁺ を x_E を挟む 2 本の補間にしてから、長さ合わせは
+      雛形の網・カードの公差のまま収束するので、未収束は想定外として止める (plan tooling-nozzle-card-local-mesh §4.5・§6 V9。それまでは
+      倍化・緩和で選び直して通ることを見ていた)。
+      x_end_margin の自動調整は今までどおり評価を捨てて最初からやり直す (固定点の場の不足、最終の壁の判定の後の張り付き)
   (e) 最終の 3 点の評価・YAML・card_log の入力 (r_t・n_axis_inv・L_total_tol・x_end_margin・M_K) が対応する (全部の正例で)
   (f) 合成の時計: 選び直しによる固定点のやり直しに既知の時間 (1000 s × 回数) を与え、M_knot_rule.elapsed_s にその全量が入る
       (選択の時間と合わせて一致)、カード全体の時間も並べて記録
   ほか: 設計スロート径 (固定点なし: 最初の選択がそのまま最終)、本物の r_t の固定点で 1 回 (--slow でなくても回す、約 1 分)、
   記録 (粗い掃引の全行・谷ごとの確認の行・選択の理由・N_s・L_s・N_p、YAML の要約の行 ≤ 4 kB、mknot_card_log_check、Euler の写し)、
   並列の数 (mknot_workers: 上限 4・CPU 数・0.7 × MemAvailable / ピーク、FORGE_MKNOT_WORKERS、取れなければ 1、算出 0 は評価の前に例外)。
-選択の中の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh §5.1 #6d; plan tooling-nozzle-mknot-fast §4.1 の拡張):
-  (6d-a) 谷 1 つで中心が生産の網で未収束 → n_axis_inv を倍にして粗い掃引から選び直して選べる、(6d-b) 谷 2 つで片方だけ未収束 → 発火する
-  (今までは黙って他方)、(6d-c) 制約による不成立だけ → 発火しない、(6d-d) 粗い網が全点で未収束 → 発火する、(6d-e) 倍化でも止まり緩和で
-  通る (on_stall と同じ順)、(6d-f) 使い切ったら例外。
+選択の中の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh §5.1 #6d・#6e・§4.5; plan tooling-nozzle-mknot-fast §4.1 の拡張):
+  検出は今までどおり (生産の網に長さ合わせの未収束の行が 1 つでもある / 粗い網が全点で未収束 → 発火、制約による不成立 → 発火しない)。
+  発火したときの扱いは、2026-10-16 の終端 C⁺ の補間 (§4.5) から雛形の生産の組 cplus × characteristic では網の倍化・L_total_tol の緩和を
+  外し、最初の停止で ValueError (STALL_TEXT と「網の倍化・許容差の緩和はしない」、YAML・card_log を書かない、その選択の記録の stall.action
+  は「cplus × characteristic: 自動調整なしで止めた」)。カードの雛形 (examples/m5_air_demo.yaml) はこの組なので、倍化・緩和で選び直して
+  通ることを見ていた試験は、最初の停止で止まることの試験に書き換えた:
+  (6d-a) 谷 1 つで中心が生産の網で未収束 → 止まる、(6d-b) 谷 2 つで片方だけ未収束 → 黙って他方を選ばずに止まる、(6d-c) 制約による
+  不成立だけ → 発火しない (変更なし)、(6d-d) 粗い網が全点で未収束 → 止まる、(6d-e) 倍化では止まり緩和なら通る未収束でも緩和に進まず
+  止まる、(6d-f) 倍化・緩和の後も未収束でも最初の停止で止まる (旧: 3 回目で例外)。
+  (6d-g) ほかの組 (wall_mode flux) は従来の自動調整 (倍化 → 緩和 → 例外、on_stall と同じ順)。残すのは例外で終わるこの 1 系統だけ —
+  倍化・緩和の後に選んで出力する系統は、選んだ点の本物の評価 evaluate_mknot が cplus の網の levels を読む (mknot_select.py:268) ので
+  flux・streamline では KeyError で不成立になり、最後の設計チェーンまで届かない (2026-10-16 の手元の確認)。
 
 実行 (作業ツリーの直下で): /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_mknot_v2_card_tests.py
-所要: 約 3〜5 分 (手元、1 プロセス; FORGE_MKNOT_WORKERS=1 を立てて回す)。
+所要: 約 30 s (2026-10-16 の手元、1 プロセス; FORGE_MKNOT_WORKERS=1 を立てて回す。倍化・緩和で選び直して通る試験を止まる試験に
+書き換える前は 3〜5 分)。
 """
 import contextlib
 import copy
@@ -51,6 +63,7 @@ from forge_design.intake import wt_card as W  # noqa: E402
 FAIL = 0
 REAL_EVAL = MS.evaluate_mknot
 REAL_CHAIN_FIELD = W._chain_field
+REAL_PLAIN = W._plain
 M5_CARD = DESIGN / "forge_design" / "intake" / "examples" / "m5_air_demo.yaml"
 BASE = yaml.safe_load(M5_CARD.read_text())
 YAML_LINE_MAX = 4096
@@ -105,9 +118,31 @@ class Harness:
         self.sel: list = []
         self.solves: list = []
         self.n_field = 0
+        # 長さ合わせの停止の試験 (§5.1 #6d・§4.5) 用: build_problem の標準出力の行、選択の停止の記録 (mk_stall が card_log の
+        # M_knot_rule.selections[] に入れる dict; 例外で止まると card_log は書かれないので、記録を _plain に通す所で拾う)、
+        # 作業ディレクトリに書かれた出力 (問題 YAML・card_log; 例外のときに書いていないことの確認)
+        self.logs: list = []
+        self.stall_recs: list = []
+        self.written: list | None = None
+        self._plain_depth = 0
 
     def now(self):
         return self.clock
+
+    def log(self, *a, **k):
+        self.logs.append(" ".join(str(x) for x in a))
+
+    def plain(self, v):
+        """W._plain の差し替え: 値は本物のまま返し、一番外の呼び出しで stall.action を持つ記録 (選択の停止) を拾う (_plain は再帰で
+        自分を呼ぶので、内側の呼び出しでは拾わない — 記録の一覧をまとめて通しても重ねない)。"""
+        self._plain_depth += 1
+        try:
+            r = REAL_PLAIN(v)
+        finally:
+            self._plain_depth -= 1
+        if self._plain_depth == 0 and isinstance(r, dict) and isinstance(r.get("stall"), dict) and "action" in r["stall"]:
+            self.stall_recs.append(r)
+        return r
 
     def c_of(self, i):
         return self.centers[min(i, len(self.centers) - 1)]
@@ -203,11 +238,13 @@ def run(h, card_dict, name):
         out = Path(td) / f"problem_{name}.yaml"
         solve = h.solve if h.fake_solve else DL.solve_rt_throat
         with patched(MS, make_eval_fn=h.make_eval_fn), patched(DL, solve_rt_throat=solve), \
-                patched(W, _clock=h.now, _chain_field=h.chain_field):
+                patched(W, _clock=h.now, _chain_field=h.chain_field, _plain=h.plain):
             try:
-                logd = W.build_problem(cp, out, log=lambda *a, **k: None)
+                logd = W.build_problem(cp, out, log=h.log)
             except Exception as ex:          # noqa: BLE001 (例外の試験)
+                h.written = sorted(p.name for p in Path(td).iterdir() if p.name.startswith(out.name))
                 return None, None, None, f"{type(ex).__name__}: {ex}", time.time() - t0
+            h.written = sorted(p.name for p in Path(td).iterdir() if p.name.startswith(out.name))
             text = out.read_text()
             chk = W.mknot_card_log_check(out)
             # Euler の写し: この雛形 (explore) では書かれないので、物理壁のキーの行を 1 行足した YAML から write_euler_companion で作って比べる
@@ -255,6 +292,35 @@ def verify_output(tag, h, logd, text, chk):
           and summary_line(text) is not None and len(summary_line(text).encode()) <= YAML_LINE_MAX and summ["rule"] == MS.RULE_NAME_V2,
           f"{M} / {full['chosen']} / {summ['chosen']} 照合 {chk.get('ok')} 行 {len((summary_line(text) or '').encode())} byte")
     return raw, full, summ
+
+
+STOP_TEXT = "網の倍化・許容差の緩和はしない"                 # on_stall の止める例外の文 (cplus × characteristic)
+STOP_ACTION = "cplus × characteristic: 自動調整なしで止めた"  # mk_stall が選択の記録の stall.action に入れる文
+# 自動調整したら必ず出る標準出力の行: on_stall の「n_axis_inv を … にしてやり直す」「内部許容差 L_total_tol を … に緩めてやり直す」、
+# mk_stall の「… にして粗い掃引から選び直す」、mk_start の「それまでの評価 (… 回の選択) を捨てて最初の r_t から選び直す」
+ADJUST_LOG = ("n_axis_inv を", "L_total_tol を", "粗い掃引から選び直す", "それまでの評価")
+
+
+def stop_check(tag, h, err, sel, n_solve, in_select):
+    """cplus × characteristic の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh §4.5): 最初の停止で ValueError (STALL_TEXT と
+    「網の倍化・許容差の緩和はしない」)、YAML・card_log を書かない、自動調整が無い。auto_adjust は例外で card_log・YAML に出ないので、
+    (1) 調整したら必ず出る標準出力の行 (ADJUST_LOG) が無い、(2) 選択 (N_s, N_p, L_p) が sel のとおりで、固定点が n_solve 回とも雛形の網
+    600・カードの公差 0.04 r_t のまま、で見る。in_select: 選択の中の停止なら、停止の記録 (h.stall_recs) が 1 つで stall.action が
+    STOP_ACTION で始まる (固定点の停止なら記録は無い)。戻り: その記録の stall (無ければ None)。"""
+    adj = [m for m in h.logs if any(s in m for s in ADJUST_LOG)]
+    got_sel = [(s["N_s"], s["N_p"], s["L_p"]) for s in h.sel]
+    got_solve = [(x["n_axis_inv"], x["L_total_tol"]) for x in h.solves]
+    recs = h.stall_recs
+    act = recs[-1]["stall"]["action"] if recs else None
+    ok_rec = (len(recs) == 1 and isinstance(act, str) and act.startswith(STOP_ACTION)) if in_select else recs == []
+    check(f"{tag}: 最初の停止で ValueError (STALL_TEXT・「{STOP_TEXT}」)、YAML・card_log を書かない、自動調整の行が無い、"
+          f"選択 {sel}・固定点 {n_solve} 回 (網 600・L_total_tol 0.04 のまま)"
+          + (f"、選択の記録の stall.action が「{STOP_ACTION}」" if in_select else "、選択の停止の記録は無い"),
+          err is not None and err.startswith("ValueError") and W.STALL_TEXT in err and STOP_TEXT in err and h.written == []
+          and not adj and got_sel == sel and got_solve == [(600, 0.04)] * n_solve and ok_rec,
+          f"選択 {got_sel} 固定点 {got_solve} 書いた {h.written} 調整の行 {[m[:80] for m in adj[:2]]} action {act!r} "
+          f"{(err or '')[:200]}")
+    return recs[-1]["stall"] if recs else None
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -389,37 +455,23 @@ check("(c) 2.10 → 2.20 → 2.10: 3 回目の固定点の後の r_t は 1 回�
       err is not None and "2 回やり直しても一致しない" in err and len(h.sel) == 3 and [x["M_K"] for x in h.solves] == [2.1, 2.1, 2.2, 2.2, 2.1, 2.1]
       and h.solves[-1]["r_in"] == rstar(2.10), f"選択 {len(h.sel)} 回 {(err or '')[:160]}")
 
-print("== (d) 自動調整で評価を捨てて最初からやり直す")
+print("== (d) 固定点の from_length の停止: cplus × characteristic は自動調整せずに止める (plan tooling-nozzle-card-local-mesh §4.5)")
+# 2026-10-16 まで: 1 回目の停止で n_axis_inv 600 → 1200 (評価を捨てて最初の r_t から選び直し、1200 で通る)、2 回目の停止 (stall_on {1, 2})
+# で L_total_tol 0.04 → 0.05 r_t と n_axis_inv を 600 に戻して通る、を見ていた。終端 C⁺ の補間 (§4.5) から雛形の生産の組
+# (cplus × characteristic、このカード) では未収束は想定外として網の倍化・許容差の緩和をせずに止めるので、どちらも最初の停止で ValueError
+# (停止の差し込みは同じ)。選択は最初の r_t の 1 回、固定点は止まった 1 回だけ
 h = Harness([2.10], stall_on={1})
 logd, text, chk, err, dt = run(h, CARD_PHYS, "d_naxis")
-if err is None:
-    raw, full, summ = verify_output("(d) n_axis_inv", h, logd, text, chk)
-    fs = full["first_selection"]
-    check("(d) n_axis_inv の倍化: 最初の固定点の from_length の停止 → n_axis_inv 600 → 1200、評価を捨てて最初の r_t から選び直し "
-          "(粗い網 300・生産の網 1200 で全部を評価し直す)",
-          raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1 and len(full["discarded"]) == 1
-          and "geometry.n_axis_inv 600 → 1200" in full["discarded"][0]["reason"]
-          and [x["discarded"] for x in full["selections"]] == [True, False, False]
-          and [(s["N_s"], s["N_p"], s["r_t"]) for s in h.sel] == [(150, 600, 0.025), (300, 1200, 0.025), (300, 1200, rstar(2.10))]
-          and h.sel[1]["n_eval"] == h.sel[0]["n_eval"] and fs is not None and all(r["n_axis"] == 300 for r in fs["coarse_table"])
-          and full["first_r_t_m"] == 0.025 and h.solves[1]["n_axis_inv"] == 1200,
-          f"選択 {[(s['N_s'], s['N_p'], s['r_t']) for s in h.sel]} 捨てた {full['discarded']}")
-else:
-    check("(d) n_axis_inv の倍化: build_problem が通る", False, err[:300])
-print(f"   (d n_axis_inv) {dt:.0f} s")
+stop_check("(d) 固定点の 1 回目の停止 (旧: n_axis_inv の倍化で通る)", h, err, [(150, 600, 0.04)], 1, in_select=False)
+check("(d) 固定点の 1 回目の停止: 止めた理由は固定点の停止 (選択の停止ではない)、選択は最初の r_t 0.025 の 1 回",
+      err is not None and "M_knot の選択" not in err and [s["r_t"] for s in h.sel] == [0.025], (err or "")[:160])
+print(f"   (d 固定点の停止) {dt:.0f} s")
 h = Harness([2.10], stall_on={1, 2})
 logd, text, chk, err, dt = run(h, CARD_PHYS, "d_ltol")
-if err is None:
-    raw, full, summ = verify_output("(d) L_total_tol", h, logd, text, chk)
-    check("(d) L_total_tol の緩和: 2 回目の停止で 0.04 → 0.05 r_t (n_axis_inv は 600 に戻す)、そのたびに評価を捨てて選び直す",
-          raw["geometry"]["L_total_tol"] == 0.05 and raw["geometry"]["n_axis_inv"] == 600 and full["n_restart"] == 2
-          and raw["_card"]["L_total_tol_relaxed"] is not None and "geometry.L_total_tol" in full["discarded"][1]["reason"]
-          and [(s["N_p"], s["L_p"]) for s in h.sel] == [(600, 0.04), (1200, 0.04), (600, 0.05), (600, 0.05)]
-          and [x["discarded"] for x in full["selections"]] == [True, True, False, False] and full["L_p"] == 0.05,
-          f"選択 {[(s['N_p'], s['L_p']) for s in h.sel]} 捨てた {[d['reason'][:60] for d in full['discarded']]}")
-else:
-    check("(d) L_total_tol の緩和: build_problem が通る", False, err[:300])
-print(f"   (d L_total_tol) {dt:.0f} s")
+stop_check("(d) 固定点で 2 回続けて止まる差し込み (旧: 2 回目で L_total_tol の緩和で通る) — 2 回目の固定点まで行かない", h, err,
+           [(150, 600, 0.04)], 1, in_select=False)
+print(f"   (d 固定点の 2 回の停止) {dt:.0f} s")
+print("== (d) x_end_margin の自動調整で評価を捨てて最初からやり直す")
 h = Harness([2.10], short_on={1})
 logd, text, chk, err, dt = run(h, CARD_PHYS_LOOSE, "d_short")
 if err is None:
@@ -473,54 +525,34 @@ else:
     check("本物の固定点: build_problem が通る", False, err[:300])
 print(f"   (本物の固定点) {dt:.0f} s")
 
-print("== §5.1 #6d 選択の中の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh; plan tooling-nozzle-mknot-fast §4.1 の拡張)")
-
-
-def stall_of(full, i):
-    x = full["selections"][i]
-    return x.get("stall")
-
+print("== §5.1 #6d 選択の中の長さ合わせの停止 (plan tooling-nozzle-card-local-mesh §4.5; plan tooling-nozzle-mknot-fast §4.1 の拡張)")
+# 2026-10-16 まで (6d-a)・(6d-b)・(6d-d)・(6d-e) は網の倍化 (・緩和) で粗い掃引から選び直して通ること、(6d-f) は倍化・緩和の後の 3 回目で
+# 例外を見ていた。終端 C⁺ の補間 (§4.5) から雛形の生産の組 (cplus × characteristic、このカード) は倍化・緩和を外したので、未収束の
+# 差し込み (unconv・coarse_unconv) は同じまま、最初の停止で止まること (stop_check) と、止めた選択の記録 (stall) の中身を見る。記録は
+# 例外で card_log が書かれないので、mk_stall が記録を _plain に通す所で拾う (Harness.plain)。従来の自動調整は (6d-g) で flux の組に残す
 
 h = Harness([2.10], unconv=lambda i, M, N, L: N == 600 and abs(M - 2.10) < 1e-9)
 logd, text, chk, err, dt = run(h, CARD_PHYS, "s_a")
-if err is None:
-    raw, full, summ = verify_output("(6d-a) 谷 1 つの中心が未収束", h, logd, text, chk)
-    st = stall_of(full, 0)
-    aa = raw["_card"]["auto_adjust"]
-    check("(6d-a) 谷 1 つで中心が生産の網 600 で未収束 → 選べない例外を捕まえて n_axis_inv 600 → 1200 (on_stall と同じ)、評価を捨てて "
-          "粗い掃引 (300) から選び直して 2.10 を選ぶ。記録: 最初の選択の stall (生産の網・600・M_K 2.1・谷 2.10)・調整・捨てた印",
-          raw["geometry"]["M_knot"] == 2.1 and raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1
-          and [(a["key"], a["from"], a["to"]) for a in aa] == [("geometry.n_axis_inv", 600, 1200)]
-          and "M_knot の選択" in aa[0]["reason"] and "生産の網 n_axis_inv 600" in aa[0]["reason"]
-          and [(sv["N_s"], sv["N_p"], sv["r_t"]) for sv in h.sel] == [(150, 600, 0.025), (300, 1200, 0.025), (300, 1200, rstar(2.10))]
-          and h.sel[1]["n_eval"] == h.sel[0]["n_eval"]
-          and st is not None and st["grid"] == "prod" and st["n_axis_inv"] == 600 and [r["M_K"] for r in st["rows"]] == [2.1]
-          and st["valleys"] == [{"start": 2.1, "final": None, "discard_reason": st["valleys"][0]["discard_reason"], "unconverged": [2.1]}]
-          and st["selected_unused"] is None and st["action"] == [{"key": "geometry.n_axis_inv", "from": 600, "to": 1200}]
-          and [x["discarded"] for x in full["selections"]] == [True, False, False] and full["selections"][0]["chosen"] is None
-          and "geometry.n_axis_inv 600 → 1200" in full["discarded"][0]["reason"]
-          and summ["selections"][0]["stall"]["grid"] == "prod" and summ["selections"][0]["stall"]["M_K"] == [2.1],
-          f"選択 {[(sv['N_s'], sv['N_p'], sv['r_t']) for sv in h.sel]} 調整 {[(a['key'], a['from'], a['to']) for a in aa]} stall {st}")
-    check("(6d-a) YAML のコメントと標準出力の要約の行に停止と調整が出る",
-          "長さ合わせの未収束 (生産の網 n_axis_inv 600" in text and "geometry.n_axis_inv 600 → 1200" in text, "")
-else:
-    check("(6d-a) build_problem が通る", False, err[:400])
+st = stop_check("(6d-a) 谷 1 つで中心が生産の網 600 で未収束 (旧: n_axis_inv 1200 で選び直して 2.10)", h, err, [(150, 600, 0.04)], 0,
+                in_select=True)
+check("(6d-a) 止めた選択の記録: 生産の網・600・M_K 2.1・谷 2.10 の確認で未収束 2.1・選べた値なし (選べない例外)、例外の文に選択の段と網と "
+      "M_K が出る",
+      st is not None and st["grid"] == "prod" and st["n_axis_inv"] == 600 and [r["M_K"] for r in st["rows"]] == [2.1]
+      and st["valleys"] == [{"start": 2.1, "final": None, "discard_reason": st["valleys"][0]["discard_reason"], "unconverged": [2.1]}]
+      and st["selected_unused"] is None and st["outcome"].startswith("選べない")
+      and "M_knot の選択 (最初の r_t) の生産の網 n_axis_inv 600" in (err or "") and "M_K 2.1" in (err or ""),
+      f"stall {st and {k: st[k] for k in ('grid', 'n_axis_inv', 'valleys', 'selected_unused')}}")
 print(f"   (6d-a) {dt:.0f} s")
 
 h = Harness([2.10], extra=(3.00, 30.0), unconv=lambda i, M, N, L: N == 600 and abs(M - 2.10) < 1e-9)
 logd, text, chk, err, dt = run(h, CARD_PHYS, "s_b")
-if err is None:
-    raw, full, summ = verify_output("(6d-b) 谷 2 つで片方だけ未収束", h, logd, text, chk)
-    st = stall_of(full, 0)
-    check("(6d-b) 谷 2 つ (2.10・3.00) で 2.10 の中心だけ生産の網 600 で未収束: 今までは 2.10 を捨てて 3.00 を黙って選んでいた → 選べた値 3.00 を"
-          "使わずに n_axis_inv 1200 で粗い掃引から選び直し、2 つの谷を同じ網で比べて 2.10 を選ぶ",
-          raw["geometry"]["M_knot"] == 2.1 and raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1
-          and st is not None and st["grid"] == "prod" and st["selected_unused"] == 3.0 and [r["M_K"] for r in st["rows"]] == [2.1]
-          and [v["unconverged"] for v in st["valleys"]] == [[2.1], []] and full["selections"][0]["chosen"] is None
-          and full["n_valleys"] == 2 and full["n_valleys_final"] == 2,
-          f"出力 {raw['geometry']['M_knot']} n_axis_inv {raw['geometry']['n_axis_inv']} stall {st and {k: st[k] for k in ('selected_unused', 'valleys')}}")
-else:
-    check("(6d-b) build_problem が通る", False, err[:400])
+st = stop_check("(6d-b) 谷 2 つ (2.10・3.00) で 2.10 の中心だけ生産の網 600 で未収束 (旧: 1200 で選び直して 2.10)", h, err,
+                [(150, 600, 0.04)], 0, in_select=True)
+check("(6d-b) 黙って他方を選ばない: 選択は 3.00 を選べたが使わずに止める (記録の selected_unused 3.0・例外の文「選べた値 3.0 は使わない」)、"
+      "未収束は谷 2.10 だけ、3.00 で固定点を回さない",
+      st is not None and st["grid"] == "prod" and st["selected_unused"] == 3.0 and [r["M_K"] for r in st["rows"]] == [2.1]
+      and [v["unconverged"] for v in st["valleys"]] == [[2.1], []] and "選べた値 3.0 は使わない" in (err or "") and h.solves == [],
+      f"stall {st and {k: st[k] for k in ('selected_unused', 'valleys')}} 固定点 {len(h.solves)}")
 print(f"   (6d-b) {dt:.0f} s")
 
 h = Harness([2.10], bad=lambda i, M, N: abs(M - 2.10) < 1e-9)
@@ -539,42 +571,48 @@ check("(6d-c) 谷 2 つで片方が制約で不成立: 調整しない (長さ�
 
 h = Harness([2.10], coarse_unconv=lambda i, M, N: N == 150)
 logd, text, chk, err, dt = run(h, CARD_PHYS, "s_d")
-if err is None:
-    raw, full, summ = verify_output("(6d-d) 粗い網が全点で未収束", h, logd, text, chk)
-    st = stall_of(full, 0)
-    check("(6d-d) 粗い網 150 が全点で未収束 → n_axis_inv 600 → 1200 (粗い網 300) で選び直す",
-          raw["geometry"]["n_axis_inv"] == 1200 and full["n_restart"] == 1 and st is not None and st["grid"] == "coarse"
-          and st["n_axis_inv"] == 150 and st["L_total_tol"] == 0.1 and len(st["rows"]) == full["selection"]["grid"][2]
-          and [(sv["N_s"], sv["N_p"]) for sv in h.sel] == [(150, 600), (300, 1200), (300, 1200)],
-          f"選択 {[(sv['N_s'], sv['N_p']) for sv in h.sel]} stall {st and st['grid']}")
-else:
-    check("(6d-d) build_problem が通る", False, err[:400])
+st = stop_check("(6d-d) 粗い網 150 が全点で未収束 (旧: n_axis_inv 1200 (粗い網 300) で選び直して通る)", h, err, [(150, 600, 0.04)], 0,
+                in_select=True)
+check("(6d-d) 止めた選択の記録: 粗い網・150・L_total_tol 0.1・行は粗い掃引の全点 (= 合成の評価の数、生産の網の評価なし)",
+      st is not None and st["grid"] == "coarse" and st["n_axis_inv"] == 150 and st["L_total_tol"] == 0.1
+      and len(st["rows"]) == h.sel[0]["n_eval"] > 0 and "粗い網 n_axis_inv 150" in (err or ""),
+      f"stall {st and (st['grid'], st['n_axis_inv'], st['L_total_tol'], len(st['rows']))} 評価 {h.sel[0]['n_eval'] if h.sel else None}")
 print(f"   (6d-d) {dt:.0f} s")
 
 h = Harness([2.10], unconv=lambda i, M, N, L: L < 0.05 - 1e-12 and abs(M - 2.10) < 1e-9)
 logd, text, chk, err, dt = run(h, CARD_PHYS, "s_e")
-if err is None:
-    raw, full, summ = verify_output("(6d-e) 倍化でも止まり緩和で通る", h, logd, text, chk)
-    aa = raw["_card"]["auto_adjust"]
-    check("(6d-e) 600 でも 1200 でも未収束、L_total_tol 0.05 で通る: on_stall と同じ順 (n_axis_inv 600 → 1200 → L_total_tol 0.04 → 0.05 と "
-          "n_axis_inv を雛形 600 に戻す)、そのたびに粗い掃引から選び直す",
-          raw["geometry"]["L_total_tol"] == 0.05 and raw["geometry"]["n_axis_inv"] == 600 and full["n_restart"] == 2
-          and [(a["key"], a["from"], a["to"]) for a in aa] == [("geometry.n_axis_inv", 600, 1200), ("geometry.L_total_tol", 0.04, 0.05),
-                                                                ("geometry.n_axis_inv", 1200, 600)]
-          and raw["_card"]["L_total_tol_relaxed"] is not None
-          and [(sv["N_p"], sv["L_p"]) for sv in h.sel] == [(600, 0.04), (1200, 0.04), (600, 0.05), (600, 0.05)]
-          and [x.get("stall") is not None for x in full["selections"]] == [True, True, False, False],
-          f"選択 {[(sv['N_p'], sv['L_p']) for sv in h.sel]} 調整 {[(a['key'], a['from'], a['to']) for a in aa]}")
-else:
-    check("(6d-e) build_problem が通る", False, err[:400])
+stop_check("(6d-e) 600 でも 1200 でも未収束・L_total_tol 0.05 なら通る差し込み (旧: 倍化 → 緩和で 0.05 で通る) — 緩和に進まない", h, err,
+           [(150, 600, 0.04)], 0, in_select=True)
 print(f"   (6d-e) {dt:.0f} s")
 
 h = Harness([2.10], unconv=lambda i, M, N, L: abs(M - 2.10) < 1e-9)
 logd, text, chk, err, dt = run(h, CARD_PHYS, "s_f")
-check("(6d-f) 倍化・緩和の後も未収束: on_stall と同じく 3 回目で例外 (ValueError、YAML を書かない)、選択は 3 回 (600・1200・600 (0.05))",
+stop_check("(6d-f) 倍化・緩和の後も未収束の差し込み (旧: 600・1200・600 (0.05) の 3 回目で例外)", h, err, [(150, 600, 0.04)], 0,
+           in_select=True)
+check("(6d-f) 止めた例外は緩和を使い切った例外ではない (「内部許容差を 0.05 r_t に緩めても」を含まない)",
+      err is not None and "内部許容差を 0.05 r_t に緩めても" not in err and "M_knot の選択" in err, (err or "")[:160])
+
+print("== (6d-g) ほかの組 (wall_mode flux) は従来の自動調整のまま (倍化 → 緩和 → 例外、on_stall と同じ順)")
+# 旧 (6d-f) の系統をこの組で残す (stall_stops でない組の on_stall・mk_stall の経路の試験)。倍化・緩和の後に選んで出力する系統 (旧 (6d-a)・
+# (6d-e)・(d) の倍化・緩和) は残せない: 選んだ点の本物の評価 evaluate_mknot が cplus の網の levels を読む (mknot_select.py:268) ので flux・
+# streamline では KeyError で不成立になる (2026-10-16 の手元の確認)。この系統は中心が毎回未収束で、本物の評価・設計チェーンを回さない
+CARD_FLUX = card("m5_v2_flux", overrides={"geometry.n_axis_inv": 600, "geometry.wall_mode": "flux"})
+h = Harness([2.10], unconv=lambda i, M, N, L: abs(M - 2.10) < 1e-9)
+logd, text, chk, err, dt = run(h, CARD_FLUX, "s_g")
+acts = [r["stall"]["action"] for r in h.stall_recs]
+check("(6d-g) wall_mode flux で倍化・緩和の後も未収束: 600 → 1200 (倍化) → L_total_tol 0.04 → 0.05 と 600 に戻す (緩和) → 3 回目で例外 "
+      "(ValueError、「内部許容差を 0.05 r_t に緩めても」、止める例外の文は無い、YAML を書かない)。選択の記録の stall.action は調整の組 2 つと"
+      "「自動調整を使い切った」、標準出力に調整の行",
       err is not None and err.startswith("ValueError") and "内部許容差を 0.05 r_t に緩めても" in err and "M_knot の選択" in err
-      and [(sv["N_p"], sv["L_p"]) for sv in h.sel] == [(600, 0.04), (1200, 0.04), (600, 0.05)] and h.solves == [],
-      f"選択 {[(sv['N_p'], sv['L_p']) for sv in h.sel]} {(err or '')[:160]}")
+      and STOP_TEXT not in err and h.written == []
+      and [(sv["N_p"], sv["L_p"]) for sv in h.sel] == [(600, 0.04), (1200, 0.04), (600, 0.05)] and h.solves == []
+      and len(acts) == 3 and acts[:2] == [[{"key": "geometry.n_axis_inv", "from": 600, "to": 1200}],
+                                          [{"key": "geometry.L_total_tol", "from": 0.04, "to": 0.05},
+                                           {"key": "geometry.n_axis_inv", "from": 1200, "to": 600}]]
+      and isinstance(acts[2], str) and acts[2].startswith("自動調整を使い切った")
+      and any("n_axis_inv を 600 → 1200" in m for m in h.logs) and any("L_total_tol を" in m for m in h.logs),
+      f"選択 {[(sv['N_p'], sv['L_p']) for sv in h.sel]} action {acts} {(err or '')[:160]}")
+print(f"   (6d-g) {dt:.0f} s")
 
 print(f"\n{'ALL OK' if FAIL == 0 else f'{FAIL} FAIL'}")
 sys.exit(1 if FAIL else 0)

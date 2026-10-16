@@ -56,8 +56,8 @@ GPU の段 (4・5) の時間は GPU で大きく変わる (既定は float の�
 
 ### 0.1 必要なもの
 
-- Linux (Ubuntu 22.04・24.04 か WSL2 の Ubuntu)、NVIDIA の GPU とドライバ (`nvidia-smi` が動く)、CUDA toolkit 12.x (`nvcc`; 手元は 12.0)。
-  CUDA 13.x は thrust・cub の置き場が変わっていて追加の設定が要る ([`cloud-aws-gpu.md`](cloud-aws-gpu.md)「移設で必ず踏む 4 点」の 2)。13.x なら人に聞く。
+- Linux (Ubuntu 22.04・24.04 か WSL2 の Ubuntu)、NVIDIA の GPU とドライバ (`nvidia-smi` が動く)、CUDA toolkit 12.x か 13.x (`nvcc`; 手元は 12.0、AWS の試走は 13.2)。
+  CUDA 13.x は thrust・cub の置き場 (`include/cccl`) が変わっているが、§0.3 のビルドの台本が自分で足す (ログに `CUDA 13: add …/include/cccl` と出る)。
 - 空きディスク 20 GB 以上 (Euler 1 本で全場 13 枚・約 1.3 GB、NS 1 本で約 1 GB、ビルド 2 本で約 1 GB、FreeCAD 約 2 GB)。
 - apt のパッケージ (管理者の権限が要る。無ければ人に頼む):
 
@@ -65,6 +65,9 @@ GPU の段 (4・5) の時間は GPU で大きく変わる (既定は float の�
 sudo apt-get update
 sudo apt-get install -y git curl cmake ninja-build gcc-12 g++-12 libyaml-cpp-dev libhdf5-dev libmetis-dev libboost-dev python3-venv
 ```
+
+- ビルドの台本は `gcc-12` があればそれを、無ければシステムの `gcc` を使う。CUDA 12.x は gcc 13 以降を受けないので `gcc-12` が要る。
+  CUDA 13.x ならシステムの gcc (Ubuntu 24.04 は 13.3) でよい (AWS の試走で確かめた)。
 
 確認:
 
@@ -355,29 +358,26 @@ grep -E '^EXIT_CODE|^real|^寸法|^→|M_knot: 自動|M_knot の所要|^[A-Za-z_
 - **成功の印**: `EXIT_CODE=0`、`M_knot: 自動 … → geometry.M_knot X`、`寸法 (設計壁から): PASS`、`→ …/problem_p0_card.yaml` と `→ …/problem_p0_card_euler.yaml`。
 - 次の警告は出てよい (§3 の格子で置き換える): 「実際の格子 (ni 3000) の AR の最大 … が ar_max 5000 を超える」、
   「wall_first_frac_throat … < 1e-06 — float32 の座標では …」、「雛形のブレンド … に決め直した」。
-- **長さ合わせの自動調整** (plan `tooling-nozzle-card-local-mesh` §5.1 #6d): M_knot の選択の中で長さ合わせ (`from_length`) が許容に届かないと、
-  `wt_card` が自分で `n_axis_inv` を 2400 → 4800 にし、それでも届かなければ内部の許容差を 0.05 r_t に緩めて (`n_axis_inv` は 2400 に戻す)、
-  粗い掃引から選び直す。ログに「長さ合わせが未収束 … にして粗い掃引から選び直す」、結果に「自動調整: geometry.n_axis_inv 2400 → 4800」などが
-  出る。これは止まった印ではない。4800 の網は 1 評価に約 4.3 GB のメモリを使う (手元で実測) ので、メモリの小さい PC では並列が 1 になり、
-  M_knot に数分掛かる。
+- **長さ合わせ**: 出口の位置を決める特性線を、x_E を挟む 2 本の補間で取る (plan `tooling-nozzle-card-local-mesh` §4.5、2026-10-16)。
+  長さ合わせ (`from_length`) は網 2400・カードの公差のまま収束する。網を細かくしたり許容差を緩めたりする自動の調整は無い。
 - **止まったら人に見せるもの**: 上の確認の出力 (例外の行を含む) と `tail -n 40 $CASE/_log/wt_card_$T.log` (M_knot の掃引の表)。特に次は人の判断が要る:
-  - `寸法 (設計壁から): FAIL` (`EXIT_CODE=2`)。内部の許容差を緩めた (結果に「L_total_tol … → 0.05」) ときに、設計の長さがカードの公差を
-    外れることがある (下の表の試走 B)。カードの公差を変えるか、そのまま進めるかは人が決める。
-  - `ValueError: … 内部許容差を 0.05 r_t に緩めても … 形状が成立しない` (自動調整を使い切った)。
+  - `ValueError: from_length の固定点反復が改善しなくなって止まった … 網の倍化・許容差の緩和はしない` (長さ合わせの未収束。想定外なので、
+    カードの値を変えずに人に見せる)。
+  - `寸法 (設計壁から): FAIL` (`EXIT_CODE=2`)。カードの公差を変えるか、そのまま進めるかは人が決める。
   - `MknotSelectionError: M_knot を選べない …` (制約による不成立: 成立点が無い・候補が無い・谷の中心が制約で落ちる)。
   - `μ = … > 20`、`R < 0.5` などのカードの値の不整合。
   - `MemoryError`・`Killed` (メモリ不足)。環境変数 `FORGE_MKNOT_WORKERS=1` で M_knot の評価の並列を 1 にできる (遅くなる)。付けて打ち直してよいかを人に聞く。
 
-| カード (2026-10-16、手元 12 コア・メモリ 12 GB、#6d の後) | 結果 | 時間 |
+| カード (2026-10-16、手元 12 コア・メモリ 12 GB、終端の特性線の補間の後) | 結果 | 時間 |
 | --- | --- | --- |
-| case/71 の `card_m55.yaml` (変えない) | M_knot 2.80 (AWS・#6d の前と同じ)、調整なし、寸法 PASS (拡大部の長さ +0.044 mm) | 48 s (M_knot 35 s、並列 4) |
-| 試走 A: case/71 から全圧 −10 %・全温 −5 %・物理スロート径 +5 %・拡大部の長さ −5 % | 生産の網 2400 で 2.60〜2.70 が残差 0.0172 r_t (許容 0.00476) → `n_axis_inv` 4800 で M_knot 2.65、寸法 PASS (−0.477 mm) | 3 分 50 秒 (M_knot 181 s) |
-| 試走 B: A の拡大部の長さを 8.0 m に戻す | 2400 で残差 0.00548 r_t、4800 でも 0.0125 r_t → 許容差を 0.05 r_t に緩め `n_axis_inv` 2400 で M_knot 2.70。**寸法 FAIL** (拡大部の長さ −1.366 mm > 公差 1 mm、`EXIT_CODE=2`) | 2 分 37 秒 (M_knot 138 s) |
-| 試走 C: 全圧 −10 %・全温 −5 % だけ (寸法は case/71 のまま) | 最初の r_t では 2400 で 2.85 を選べたが、解いた r_t での選び直しで粗い網 600 の全点が残差 0.102 r_t > 0.1 r_t → `n_axis_inv` 4800 で最初から選び直して M_knot 2.85、寸法 PASS (+0.381 mm) | 4 分 47 秒 (M_knot 206 s) |
-| (#6d の前) 試走 A・B・C | 3 枚とも `MknotSelectionError` で止まった (選択の中に自動調整が無かった) | 22〜49 s で停止 |
+| case/71 の `card_m55.yaml` (変えない) | M_knot 2.80、調整なし、寸法 PASS (拡大部の長さ +0.00012 mm) | 59 s |
+| 試走 A: case/71 から全圧 −10 %・全温 −5 %・物理スロート径 +5 %・拡大部の長さ −5 % | M_knot 2.65、調整なし、寸法 PASS (−0.00012 mm) | 57 s |
+| 試走 B: A の拡大部の長さを 8.0 m に戻す | M_knot 2.70、調整なし、寸法 PASS (−0.00015 mm) | 57 s |
+| 試走 C: 全圧 −10 %・全温 −5 % だけ (寸法は case/71 のまま) | M_knot 2.85、調整なし、寸法 PASS (−0.00005 mm) | 58 s |
+| (補間の前、#6d の自動調整あり) 試走 A・B・C | 網 4800 への切り替え・許容差の緩和が起き、B は寸法 FAIL (−1.366 mm) | 2 分 37 秒〜4 分 47 秒 |
 | threadpoolctl の無い環境で A | 粗い掃引 (86 点) が 3 分で終わらず止めた (入れた後は 14 s) | — |
 
-長さ合わせの残差は、どの停止でも M_K に依らず同じ値だった (原因は未確定)。
+AWS g5.xlarge (4 コア) での試走 A は、補間の前のコードで 5 分 43 秒 (網 4800 に切り替わった)。記録は plan `tooling-nozzle-card-local-mesh` §6 V9。
 
 ## 3. 格子 (`hand_mesh.py`)
 
@@ -536,6 +536,8 @@ tail -n 1 $CASE/$NS/forge_run.log | cut -c1-200
 grep -ciE '\bnan\b|\binf\b' $CASE/$NS/forge_run.log
 ```
 
+- 起動の直後 (1〜2 分、格子の変換と準備の間) は `forge_run.log` がまだ無く、`tail`・`grep` が `No such file or directory` を出す。これは止まった印ではない。
+  数分後に打ち直す。5 分たっても無ければ `tail -n 40 $CASE/_log/ns_$T.log` を人に見せる。
 - 最後の数が 0 でない (残差に nan・inf が出た) なら人に見せる。`DIVERGED` の行がログに出たときも同じ。
 - 本段の `eta` は上限 200,000 step までの時間で、停止規則で止まればそれより早く終わる。
 

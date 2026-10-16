@@ -394,6 +394,11 @@ if sys.argv[4] == "1":
         p.geometry["moc_axis_limit"], p.geometry["moc_corrector"] = "legacy", "fixed2"
         # 出口の切り方は 2026-10-13 (plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c) に意図して変えた。今の切り方の表を
         # 別に取り、ビット同一の比べ方は実装前の規則 (wall[:, 0] <= x_F) に戻して行う
+        # 終端 C⁺ の選び方も 2026-10-16 (plan tooling-nozzle-card-local-mesh §4.5・#6e) に「x_E に最も近い節点の 1 本」から
+        # 「x_E を挟む 2 本の補間」に意図して変えた (x_F が網の間隔 1 つ未満だけ動く)。ここは実装前とのビット同一を見るので、
+        # 新しい側も最寄りの 1 本に戻す (補間そのものは run_terminal_bracket_tests.py が見る)
+        import numpy as _np
+        MI._terminal_bracket = lambda ax, xE: [(int(_np.argmin(_np.abs(ax - xE))), 1.0)]
         d_cut = design_chain(p)
         out.update(wall_inv_cut=d_cut["wall_inv"], x_F=float(d_cut["exit"]["x_F"]),
                    x_F_appended=bool(d_cut["exit"]["x_F_appended"]))
