@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""search の無い campaign (`forge_design.campaign.campaign`) の試験 (plan tooling-design-orchestrator §5.1 #4c)。正例 1・負例 7。
+"""search の無い campaign (`forge_design.campaign.campaign`) の試験 (plan tooling-design-orchestrator §5.1 #4c)。正例 1・負例 8。
 
 実行: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_campaign_schema_tests.py
 """
@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory() as tdn:
     td = Path(tdn)
     (td / "card_approval.json").write_text('{"x": 1}')
     sha = hashlib.sha256((td / "card_approval.json").read_bytes()).hexdigest()
-    good = {"format": CP.FORMAT, "name": "m55_trial", "approval": {"file": "card_approval.json", "sha256": sha},
+    good = {"format": CP.FORMAT, "name": "m55_trial", "role": "fixed", "approval": {"file": "card_approval.json", "sha256": sha},
             "recipe": {"name": "axismach.wt_card_chain", "version": "v1"}, "case_dir": ".", "ledger": "_ledger"}
     (td / "campaign.yaml").write_text(yaml.safe_dump(good))
     c = CP.load(td / "campaign.yaml")
@@ -48,7 +48,8 @@ with tempfile.TemporaryDirectory() as tdn:
             ("知らない recipe", {"recipe": {"name": "axismach.other", "version": "v1"}}, "知らない recipe"),
             ("知らない版", {"recipe": {"name": "axismach.wt_card_chain", "version": "v9"}}, "知らない recipe"),
             ("承認の記録の sha256 の不一致", {"approval": {"file": "card_approval.json", "sha256": "0" * 64}}, "sha256 が campaign の値と違う"),
-            ("必須のキーの欠け (ledger)", None, "キー ['ledger'] が無い")):
+            ("必須のキーの欠け (ledger)", None, "キー ['ledger'] が無い"),
+            ("知らない役割", {"role": "admin"}, "role は")):
         doc = dict(good)
         if edit is None:
             doc.pop("ledger")

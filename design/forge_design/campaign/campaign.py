@@ -5,7 +5,8 @@ tooling-design-problem-campaign-recipe の限定の実装 #6a)。
 「evaluation 1 つ = 承認した依頼 1 つ」で対応する。探索 (`search`)・複数の評価は親 plan の #6b (探索の需要が出てから) なので拒否する。
 
     format: forge.campaign/v1
-    name: m55_trial                         # 依頼の名前
+    name: m55_trial                         # 依頼の名前 (表示だけ; 識別は台帳の campaign の ID)
+    role: fixed                             # fixed (決まった流れだけ・直さない) / fixer (止まった後に §4.4 の範囲で直してよい)
     approval: {file: card_approval.json, sha256: <64 桁>}   # 承認の記録 (case のディレクトリからの相対パス可)
     recipe: {name: axismach.wt_card_chain, version: v1}
     case_dir: .                             # case のディレクトリ (campaign.yaml の所在からの相対パス可)
@@ -22,7 +23,8 @@ from pathlib import Path
 import yaml
 
 FORMAT = "forge.campaign/v1"
-REQUIRED = ("format", "name", "approval", "recipe", "case_dir", "ledger")
+REQUIRED = ("format", "name", "role", "approval", "recipe", "case_dir", "ledger")
+ROLES = ("fixed", "fixer")      # fixed = 知識の少ないモデル (決まった流れだけ)、fixer = 賢い AI (止まった後に直してよい); 台帳を作った後は変えられない
 OPTIONAL = ("description",)
 KNOWN_RECIPES = {"axismach.wt_card_chain": ("v1",)}
 DEFERRED = {"search": "探索は未対応 (親 plan tooling-design-problem-campaign-recipe §5.1 #6b、探索の需要が出てから)",
@@ -52,6 +54,8 @@ def validate(doc, base_dir=None) -> dict:
         errs.append(f"format は {FORMAT!r} (受け取った値: {doc.get('format')!r})")
     if "name" in doc and not (isinstance(doc["name"], str) and doc["name"].strip()):
         errs.append("name は空でない文字列")
+    if "role" in doc and doc["role"] not in ROLES:
+        errs.append(f"role は {list(ROLES)} のどれか (受け取った値: {doc['role']!r})")
     rc = doc.get("recipe")
     if "recipe" in doc:
         if not (isinstance(rc, dict) and set(rc) == {"name", "version"}):
