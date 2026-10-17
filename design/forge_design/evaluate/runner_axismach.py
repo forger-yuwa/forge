@@ -927,7 +927,7 @@ def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coord
             "hashes": _mesh_hashes(run_dir, coords, quads, bedges)}
 
 
-def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None) -> dict:
+def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, implicit_relax=None, ic_file=None, ic_sha256=None) -> dict:
     """**Euler (slip 壁) の run** を準備する。格子は `mesh_euler`、壁は `euler_reference_wall`:
 
     - `geometry.physical_upstream` が無い (今と同じ): 設計壁 (geometry の r_inlet・L_U・L_pipe の直管と縮流部 + MOC の設計壁)。
@@ -1028,9 +1028,10 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
                         h_ref_T=float(p.evaluate.get('thermo_href_temp', 298.15)),
                         species_Y=_tp_species_Y(p))
     _stamp_ic_species(p, run_dir)          # 新規初期場の化学種属性 (ic_from ならこの後 interp_field が継承/消去を決める)
-    if ic_from is not None:
-        src = sorted(Path(ic_from).glob("res_[0-9]*.h5"),
-                     key=lambda f: int("".join(c for c in f.stem if c.isdigit())))[-1]
+    if ic_file is not None and ic_from is None:
+        ic_from = Path(str(ic_file)).expanduser().resolve().parent
+    src, ic_rec = select_ic(ic_from, ic_file, ic_sha256)
+    if src is not None:
         subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
                         str(src), str(run_dir / "nozzle.h5")],
                        env=_ENV, check=True, capture_output=True, text=True)
@@ -1050,7 +1051,7 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
             "qa": {k: v for k, v in d["qa"].items() if k != "violations"},
             "exit": d["exit"],
             "mdot_ratio_moc": d["mdot_ratio_moc"], "cd_series": d["cd_series"],
-            "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None,
+            "nStepOuter": n, "scale_m": scale, "ic_from": str(ic_from) if ic_from else None, "ic_snapshot": ic_rec,
             "mesh": mesh_rec, "environment": environment_record()}
     if euler_wall is not None:
         # H の上流を付けた設計壁 (§5.1 #36e の案 A): 壁ファイル (書いて読み直し、復元した壁が今の壁と一致することを確かめる) と記録。
@@ -1650,6 +1651,42 @@ def limiter_ref_from_run(run, base_dir=None) -> tuple:
 #     `limiter_ref: auto` か明示で通る)
 #   - 元の run の solverConfig.yaml が本段の設定であることは MAIN_STAGE_STARTED (無ければ stage_manifest の最後の段が main) で確かめる。
 #     S1・S2 で落ちた run (どちらも本段を示さない) は ValueError、段の記録の無い旧い run は「本段の確認なし」と記録して solverConfig.yaml を使う
+_IC_FILE_RE = re.compile(r"res_(\d+)\.h5")
+
+
+def select_ic(ic_from=None, ic_file=None, ic_sha256=None) -> tuple:
+    """初期場の場のファイルを決める (plan tooling-design-orchestrator §4.1.1 の 1、§5.1 #4a)。`ic_file` (固定したファイル) があればそれ、
+    無ければ `ic_from` (ディレクトリ) の最大番号の `res_<N>.h5` (開発用: 後から場が増えると入力が変わる)。`ic_sha256` (計画で固定した値) を
+    渡せば照合し、違えば ValueError。戻り (ファイル, 記録 {path, step, sha256, how}); どちらも無ければ (None, None)。"""
+    import hashlib
+    if ic_file is None and ic_from is None:
+        if ic_sha256 is not None:
+            raise ValueError("ic_sha256 を渡したが初期場 (ic_file・ic_from) が無い")
+        return None, None
+    if ic_file is not None:
+        f = Path(str(ic_file)).expanduser()
+        if not f.is_file() or not _IC_FILE_RE.fullmatch(f.name):
+            raise ValueError(f"ic_file {f} が無いか res_<N>.h5 の形でない")
+        if ic_from is not None and Path(str(ic_from)).expanduser().resolve() != f.resolve().parent:
+            raise ValueError(f"ic_from {ic_from} と ic_file {f} の run が違う")
+        how = "ic_file (固定したファイル)"
+    else:
+        cands = sorted((x for x in Path(str(ic_from)).expanduser().glob("res_*.h5") if _IC_FILE_RE.fullmatch(x.name)),
+                       key=lambda x: int(_IC_FILE_RE.fullmatch(x.name).group(1)))
+        if not cands:
+            raise ValueError(f"ic_from {ic_from} に res_<N>.h5 が無い")
+        f = cands[-1]
+        how = "ic_from の最大番号 (開発用; 固定していない)"
+    h = hashlib.sha256()
+    with open(f, "rb") as fh:
+        for b in iter(lambda: fh.read(1 << 20), b""):
+            h.update(b)
+    sha = h.hexdigest()
+    if ic_sha256 is not None and sha != ic_sha256:
+        raise ValueError(f"初期場 {f.name} の sha256 {sha[:16]}… が計画の値 {str(ic_sha256)[:16]}… と違う (計画を確定した後に場が変わった)")
+    return f, {"path": str(f.resolve()), "step": int(_IC_FILE_RE.fullmatch(f.name).group(1)), "sha256": sha, "how": how}
+
+
 _IC_CHAIN_KIND = {"axismach_ns": "ns", "axismach": "euler"}   # prepare_info.json の chain → 種類 (prepare_ns / prepare)
 
 
@@ -2240,8 +2277,12 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
                omega: float | None = None, prev_run=None, initializer=None,
                cfl_main: float | None = None, implicit_relax: float | None = None,
-               stop_rule: bool | None = None) -> dict:
+               stop_rule: bool | None = None, ic_file=None, ic_sha256=None) -> dict:
     r"""**物理壁 (inviscid + δ*) の RANS run** を準備する (A12)。
+
+    - **`ic_file`・`ic_sha256`** (plan tooling-design-orchestrator §4.1.1 の 1、§5.1 #4a): 初期場を**ファイル**で固定する (実行役が使う)。
+      `ic_from` を省けばそのファイルの run を `ic_from` とする (リミッタの基準値の継承などに使う)。`ic_sha256` は計画の値との照合。
+      準備の記録の `ic_snapshot` に使ったファイルのパス・step・sha256 を書く (`ic_from` だけのときも選んだファイルを書く)。
 
     plan: plans/active/tooling-nozzle-axismach-viscous-deltastar.md。
 
@@ -2336,6 +2377,8 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     # (limiter_ref の省略 = 初期場の元の NS run から継承・無ければ自動、from_run の記録の読み・検査もここ; plan
     # tooling-settle-convergence-and-monitor §4.6・§5.1 #6b)
     ml_src = {}
+    if ic_file is not None and ic_from is None:
+        ic_from = Path(str(ic_file)).expanduser().resolve().parent    # 固定したファイルの run (継承などに使う; plan tooling-design-orchestrator §5.1 #4a)
     main_line = _main_line_spec(p, cfl_main, implicit_relax, source_out=ml_src, ic_from=ic_from)
     main_line_mode = _main_line_mode(p)
     # 本段の監視用の出力と判定の基準 (plan tooling-settle-convergence-and-monitor §4.5・§5.1 #6): キーとプリセットの名前、
@@ -2520,9 +2563,10 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                         h_ref_T=float(p.evaluate.get('thermo_href_temp', 298.15)),
                         species_Y=_tp_species_Y(p))
     _stamp_ic_species(p, run_dir)          # 新規初期場の化学種属性 (ic_from ならこの後 interp_field が継承/消去を決める)
-    if ic_from is not None:
-        src = sorted(Path(ic_from).glob("res_[0-9]*.h5"),
-                     key=lambda f: int("".join(c for c in f.stem if c.isdigit())))[-1]
+    if ic_file is not None and ic_from is None:
+        ic_from = Path(str(ic_file)).expanduser().resolve().parent
+    src, ic_rec = select_ic(ic_from, ic_file, ic_sha256)
+    if src is not None:
         subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
                         str(src), str(run_dir / "nozzle.h5")],
                        env=_ENV, check=True, capture_output=True, text=True)
@@ -2570,7 +2614,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
             "nStepOuter": n, "nStepOuter_source": n_src, "cfl_main": cfl_main, "implicit_relax": implicit_relax, "scale_m": scale,
             "stop_rule": sr_settings,       # 停止規則 (plan tooling-nozzle-cooled-wall-ns-settling §4.6): 使うか・上限・閾値・使わない理由
             "wall_thermal": wt_rec,         # 分布なら Tw_profile と正本 2 つの sha256 (files) も
-            "ic_from": str(ic_from) if ic_from else None,
+            "ic_from": str(ic_from) if ic_from else None, "ic_snapshot": ic_rec,
             "mesh": {**mesh_rec, "axis_gap_frac": mp.axis_gap_frac}}
     if transport is not None:
         # 来歴: 種ごとの輸送物性の指定 (solverConfig の physProp.transport と同じ; 解決結果はソルバの resolved_species 記録)
