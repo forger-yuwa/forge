@@ -1,0 +1,252 @@
+{
+ "exec_run": "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/v1a/run_exec",
+ "v6_run": "case/71.m55_combustion_wt/run_0014_chain_v2",
+ "items": {
+  "1_stage_configs": {
+   "ok": true,
+   "exec": [
+    [
+     "S1_soft",
+     "2973d3515ea8d24"
+    ],
+    [
+     "S2_mid",
+     "11f3819c32cbca4"
+    ],
+    [
+     "main",
+     "ded0e7c96b979498"
+    ]
+   ],
+   "v6": [
+    [
+     "S1_soft",
+     "2973d3515ea8d24"
+    ],
+    [
+     "S2_mid",
+     "11f3819c32cbca4"
+    ],
+    [
+     "main",
+     "ded0e7c96b979498"
+    ]
+   ]
+  },
+  "2_bcond": {
+   "ok": true,
+   "exec": "c57448a4ac4fa954c30bff377a3065df7eadb9fb0d1f8f2876c87358177cd6c5",
+   "v6": "c57448a4ac4fa954c30bff377a3065df7eadb9fb0d1f8f2876c87358177cd6c5"
+  },
+  "3_prestage": {
+   "ok": true,
+   "exec": "718a37a035d6b23f17c7806f0e3d7a24eec7fbb4c9db5e870206d34929837b81",
+   "v6": "718a37a035d6b23f17c7806f0e3d7a24eec7fbb4c9db5e870206d34929837b81"
+  },
+  "4_settle_criteria": {
+   "ok": false,
+   "diffs": [
+    "source.generator_sha256",
+    "source.written"
+   ],
+   "allowed": [
+    "source.generator_sha256"
+   ]
+  },
+  "5_settle_nodes": {
+   "ok": false,
+   "n": 3830
+  },
+  "6_mesh": {
+   "ok": false,
+   "h5_exec": {
+    "coord_sha256": "673399e6b20e77bd0c9b4d1564d93a8a0ca100225aa5843075e3660894674132",
+    "coord_dtype": "float64",
+    "topology_sha256": "df45a7db6219d67e0a97eed90580a2baa09815e64f80661c737ecf1cb4fb6078",
+    "topology_datasets": [
+     "MESH/CONNE",
+     "VIZMESH/CONNE",
+     "CELLS/STRUCT",
+     "PLANES/STRUCT",
+     "CELLS/regionId",
+     "BCONDS/1/iBPlanes",
+     "BCONDS/1/iCells",
+     "BCONDS/1/iPlanes",
+     "BCONDS/1/vizBfaceNodes",
+     "BCONDS/1/vizBfaceSizes",
+     "BCONDS/2/iBPlanes",
+     "BCONDS/2/iCells",
+     "BCONDS/2/iPlanes",
+     "BCONDS/2/vizBfaceNodes",
+     "BCONDS/2/vizBfaceSizes",
+     "BCONDS/3/iBPlanes",
+     "BCONDS/3/iCells",
+     "BCONDS/3/iPlanes",
+     "BCONDS/3/vizBfaceNodes",
+     "BCONDS/3/vizBfaceSizes",
+     "BCONDS/4/iBPlanes",
+     "BCONDS/4/iCells",
+     "BCONDS/4/iPlanes",
+     "BCONDS/4/vizBfaceNodes",
+     "BCONDS/4/vizBfaceSizes"
+    ]
+   },
+   "h5_v6": {
+    "coord_sha256": "60d6b989f1ef41c5c7771c17c9737721cd9964073ea325d7210742e39e14fb3b",
+    "coord_dtype": "float64",
+    "topology_sha256": "df45a7db6219d67e0a97eed90580a2baa09815e64f80661c737ecf1cb4fb6078",
+    "topology_datasets": [
+     "MESH/CONNE",
+     "VIZMESH/CONNE",
+     "CELLS/STRUCT",
+     "PLANES/STRUCT",
+     "CELLS/regionId",
+     "BCONDS/1/iBPlanes",
+     "BCONDS/1/iCells",
+     "BCONDS/1/iPlanes",
+     "BCONDS/1/vizBfaceNodes",
+     "BCONDS/1/vizBfaceSizes",
+     "BCONDS/2/iBPlanes",
+     "BCONDS/2/iCells",
+     "BCONDS/2/iPlanes",
+     "BCONDS/2/vizBfaceNodes",
+     "BCONDS/2/vizBfaceSizes",
+     "BCONDS/3/iBPlanes",
+     "BCONDS/3/iCells",
+     "BCONDS/3/iPlanes",
+     "BCONDS/3/vizBfaceNodes",
+     "BCONDS/3/vizBfaceSizes",
+     "BCONDS/4/iBPlanes",
+     "BCONDS/4/iCells",
+     "BCONDS/4/iPlanes",
+     "BCONDS/4/vizBfaceNodes",
+     "BCONDS/4/vizBfaceSizes"
+    ]
+   },
+   "msh_exec": "a94ff9ff238227b50ba7f75383d69a76494accd28b6eee48a9d1c0ae699c6afb",
+   "msh_v6": "f5e8f73661f60f3d490e96f8cffdf69cb865819d2f973da6bcdd6258dd6d13b6"
+  },
+  "7_prepare_info": {
+   "ok": false,
+   "diffs": {
+    "initializer": [
+     "initializer.delta_r_exit",
+     "initializer.delta_r_throat",
+     "initializer.smooth.resid_abs_max",
+     "initializer.smooth.resid_rel_p95",
+     "initializer.smooth.resid_rel_rms",
+     "initializer.two_coef.delta_r_exit_contur",
+     "initializer.two_coef.delta_r_throat_contur",
+     "initializer.two_coef.plan"
+    ],
+    "x_E": [
+     "x_E"
+    ],
+    "physical_wall": [
+     "physical_wall.domain",
+     "physical_wall.domain_m",
+     "physical_wall.fit.build_seconds",
+     "physical_wall.fit.delta_r_table_range",
+     "physical_wall.fit.domain",
+     "physical_wall.fit.insertion.delta_r_cut_at",
+     "physical_wall.fit.joint_jumps.0.jump_d3",
+     "physical_wall.fit.joint_jumps.1.jump_d0",
+     "physical_wall.fit.joint_jumps.1.jump_d1",
+     "physical_wall.fit.joint_jumps.1.jump_d2",
+     "physical_wall.fit.joint_jumps.1.jump_d3",
+     "physical_wall.fit.joint_jumps.1.left_vs_source_d0",
+     "physical_wall.fit.joint_jumps.1.left_vs_source_d1",
+     "physical_wall.fit.joint_jumps.1.left_vs_source_d2",
+     "physical_wall.fit.joint_jumps.1.right_vs_source_d0",
+     "physical_wall.fit.joint_jumps.1.right_vs_source_d1",
+     "physical_wall.fit.joint_jumps.1.right_vs_source_d2",
+     "physical_wall.fit.knot_removal.1.errors_rt",
+     "physical_wall.fit.knot_removal.1.max_rt",
+     "physical_wall.fit.max_err.d0",
+     "physical_wall.fit.max_err.d1",
+     "physical_wall.fit.max_err.d2",
+     "physical_wall.fit.max_err.d3",
+     "physical_wall.fit.min_knot_gap_rt",
+     "physical_wall.fit.segments.1.max_d0",
+     "physical_wall.fit.segments.1.max_d1",
+     "physical_wall.fit.segments.1.max_d2",
+     "physical_wall.fit.segments.1.max_d3",
+     "physical_wall.fit.segments.1.x_at_max_d0",
+     "physical_wall.fit.segments.2.max_d0",
+     "physical_wall.fit.segments.2.max_d1",
+     "physical_wall.fit.segments.2.max_d2",
+     "physical_wall.fit.segments.2.max_d3",
+     "physical_wall.fit.segments.2.range",
+     "physical_wall.fit.segments.2.x_at_max_d0",
+     "physical_wall.fit.segments.2.x_at_max_d1",
+     "physical_wall.fit.segments.2.x_at_max_d3",
+     "physical_wall.fit.throat.kappa",
+     "physical_wall.fit.throat.r",
+     "physical_wall.fit.throat.x",
+     "physical_wall.fit.throat_diff.kappa",
+     "physical_wall.fit.throat_diff.r",
+     "physical_wall.fit.throat_diff.x",
+     "physical_wall.fit.throat_source.kappa",
+     "physical_wall.fit.throat_source.r",
+     "physical_wall.fit.throat_source.x",
+     "physical_wall.fit.x_min_knot_gap",
+     "physical_wall.physical_wall.c",
+     "physical_wall.physical_wall.domain",
+     "physical_wall.physical_wall.knot_removal.1.errors_rt",
+     "physical_wall.physical_wall.knot_removal.1.max_rt",
+     "physical_wall.physical_wall.max_err_vs_legacy.d0",
+     "physical_wall.physical_wall.max_err_vs_legacy.d1",
+     "physical_wall.physical_wall.max_err_vs_legacy.d2",
+     "physical_wall.physical_wall.max_err_vs_legacy.d3",
+     "physical_wall.physical_wall.min_knot_gap_rt",
+     "physical_wall.physical_wall.t",
+     "physical_wall.physical_wall.throat.kappa",
+     "physical_wall.physical_wall.throat.r",
+     "physical_wall.physical_wall.throat.x",
+     "physical_wall.physical_wall.upstream_gate.max_abs_d2_change_vs_H",
+     "physical_wall.physical_wall.upstream_gate.max_seam_jump",
+     "physical_wall.physical_wall.upstream_gate.min_r1_after",
+     "physical_wall.physical_wall.upstream_gate.throat.kappa",
+     "physical_wall.physical_wall.upstream_gate.throat.r",
+     "physical_wall.physical_wall.upstream_gate.throat.x",
+     "physical_wall.physical_wall.upstream_gate.x_at_max_d2_change",
+     "physical_wall.physical_wall.upstream_poly.coef",
+     "physical_wall.physical_wall.upstream_poly.end_conditions.x_0"
+    ],
+    "stop_rule": [
+     "stop_rule.explicit",
+     "stop_rule.requested_source"
+    ]
+   },
+   "limiter_ref_diffs": {},
+   "note": "パス・時刻・ファイル名・run 名・sha256 の欄は正規化で除く"
+  },
+  "8_ic": {
+   "ok": true,
+   "exec_ic_snapshot": {
+    "path": "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/v1a/run_0008_ns_b0/res_90000.h5",
+    "step": 90000,
+    "sha256": "c64a73f18c19d1460dac7a8e949d201f87266758e731f178240c11c801b9986e",
+    "how": "ic_file (固定したファイル)"
+   },
+   "v6_ic_from": "/home/ubuntu/forge-cardmesh/case/71.m55_combustion_wt/run_0008_ns_b0"
+  },
+  "9_binary": {
+   "ok": true,
+   "exec_forge_bin": {
+    "path": "/home/sano/work/forge-cardmesh/solver_density_cuda/.build-native/card4a/forge",
+    "sha256": "bf5e6538d328ca330beb05aed36cfc46c5eb81f614d1e4161fbc6b97c967f6fd"
+   },
+   "exec_converter": {
+    "path": "/home/sano/work/forge-cardmesh/solver_density_cuda/.build-native/card4a/convertGmshToForge",
+    "sha256": "2f8fa06c26183953e38e1ffa1f02c6fe4ec6aa69f7f60b2e5026f58e4b52f091"
+   },
+   "v6_provenance": [
+    "forge_bin   : /home/ubuntu/forge-cardmesh-fp64/solver_density_cuda/build/forge",
+    "forge_sha256: 8a5f3daddbdf56047dfde5a1ea1bbb569565c6b3abb628973265fd175147f16c"
+   ],
+   "note": "値の一致は求めない (手元と AWS B の FP64 のビルドは別; 事前登録の (9))"
+  }
+ },
+ "verdict": "FAIL"
+}

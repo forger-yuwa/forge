@@ -1,0 +1,25 @@
+{
+ "mode": "noise",
+ "run1": "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/v1a/run_B1",
+ "run2": "/tmp/claude-1000/-home-sano-work-forge/e254baf2-8857-4243-99d2-53804f553ad9/scratchpad/v1a/run_B2",
+ "n_keys": 1706,
+ "volatile": [
+  "prepare_info:physical_wall.fit.build_seconds",
+  "prepare_info:settle.sha256",
+  "settle_criteria:source.written"
+ ],
+ "values": {
+  "prepare_info:physical_wall.fit.build_seconds": [
+   0.42322276101913303,
+   0.4525898669962771
+  ],
+  "prepare_info:settle.sha256": [
+   "d7ef6968704fff77fc08fd25c7d36164642d35a02eae15926eb5390fe19ad608",
+   "6b184d62d01f7137ae861ee8f818fc7d8a238f6e8d50d1f4436aa53c9eb8fea7"
+  ],
+  "settle_criteria:source.written": [
+   "2026-10-17T12:51:34+00:00",
+   "2026-10-17T12:52:02+00:00"
+  ]
+ }
+}
