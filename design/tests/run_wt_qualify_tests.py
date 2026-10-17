@@ -5,15 +5,16 @@
      settle_criteria.yaml → 既定 (preset wt_nozzle_v2 の線・plan §6 V5b・V5c))。知らないキーは ValueError。
  (2) V5b・V5c を合成の構造格子の場で: 線形の M で最大偏差・片振幅・出口コア M が式どおり、合否、軸の節点の重み > 1e−6・窓が格子の外は
      判定不能、比較の線 (η 0.1・軸) を併記。
- (3) 計算の成立 (停止規則の状態): v2 の REACHED + SETTLED → PASS、CENSORED・再評価が SETTLED でない・v2 の基準があるのに状態が無い → FAIL、
-     状態が無い旧い run → UNVERIFIED、v1 の REACHED → PASS。
+ (3) 計算の成立 (停止規則の状態): v2 は停止の時の判定と結び付いた (stop_binding を差し替え) ときだけ REACHED + SETTLED → PASS、
+     CENSORED・再評価が SETTLED でない → FAIL。結び付かない・状態のファイルだけ (本物の照合)・v2 の基準があるのに状態が無い → INDETERMINATE
+     (§5.1 #7a の続き、codex result 2 回目 M1)。状態が無い旧い run → UNVERIFIED、v1 の REACHED → PASS。bound_lines・monitored_line。
  (4) 成果物と寸法の関門: そろって PASS、ファイルの改変・部品の欠け・寸法の FAIL・別のカード → FAIL、無ければ ABSENT、無くてよい部品の指定。
  (5) 結果と次の手 (`decide`): accepted・成果物待ち (make_deliverables)・計算の成立を確かめていない・判定不能・反復の上限 (rejected)・
      壁の形だけの補正 (規則で recalibrate / escalate)・壁解像や寸法を含む補正 (escalate、規則は評価しない)。
  (6) 較正し直しの規則 (合成の run): (a)〜(e) をそろえて recalibrate、1 つずつ欠くと escalate (前の run が無い・前の更新で誤差が増えた・
      さらに減らせない・回数・計算の成立)。
- (8) 線の定常の保証 (plan §5.1 #7a、codex result 2026-10-17 M1): 監視の線との違い (η・x 窓・点数)・line_mach が無い・停止の step と違う
-     → 保証の欠け。欠けたときは本段の全場の系列 (load_field を差し替えた合成の場) を check_quasisteady で判定し、STEADY なら合否に進み、
+ (8) 線の定常の保証 (plan §5.1 #7a、codex result 2026-10-17 M1): 監視の線との違い (η・x 窓・点数)・line_mach が無い・停止の step と違う・
+     停止の時の判定と結び付かない・監視の線が停止の時に SETTLED でない (2 回目 M1) → 保証の欠け。欠けたときは本段の全場の系列 (load_field を差し替えた合成の場) を check_quasisteady で判定し、STEADY なら合否に進み、
      動いている・4 枚未満・本段の開始の記録が無い・評価の場で終わらない → 判定不能。壁解像の照合 (§5.1 #7b、M2): 偽のツールの出力で、
      EVALUATED 行が無い・要求した壁の欠け・要求した step でない・bcond と違う physID・要求していない壁・停止の step でない → 判定不能。
 実データ (手元にあるとき):
@@ -25,6 +26,9 @@
  (9) case/71 run_0014_chain_v2 の写し (h5 は symlink、元の run には書かない; FORGE_CASE71_RUN_0014 で場所を変えられる): 正しい呼び方は
      今どおり accepted・壁解像 PASS (wall/3@46171)。line_eta 0.06 は incomplete (修正前は accepted)。check_wall_resolution の
      `--step 46170 --groups wall,missing_wall` 等は判定不能・終了コード 2 (修正前は step 46171 の wall だけで PASS・0)。
+     2 回目 M1: メモリ上で基準の読み取り値だけ η 0.06・基準のファイルを書き換えた写し (η・流量の閾値)・停止の時の判定の記録の無い写し
+     → incomplete (修正前は accepted)。2 回目 M2: bcond に一度もダンプの無い壁を足した写しで --groups 無し → 判定不能・2 (修正前は PASS・0)。
+     試走 A (case/90 run_0003_ns_p0・run_0005_ns_p1、読むだけ) の計算の成立は停止の時の判定と結び付いて PASS。
 使い方: design/.venv-opt/bin/python design/tests/run_wt_qualify_tests.py  (終了コード 0 全合格 / 1 不合格 / 2 実データを飛ばした)
 """
 import hashlib
@@ -154,22 +158,56 @@ print("== (3) 計算の成立")
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)
 
-    def flow(name, state=None, v2=False):
+    def flow(name, state=None, v2=False, bind=None):
+        """bind: None = 本物の照合 (deltastar_loop._v2_binding)、dict = stop_binding の戻りに差し替える。"""
         d = td / name
         d.mkdir()
         if state is not None:
             (d / "STOP_RULE_STATE.json").write_text(json.dumps(state))
         if v2:
             (d / "settle_criteria.yaml").write_text("quantities: []\n")
-        return WQ.flow_check(d)["status"]
+        orig = WQ.stop_binding
+        if bind is not None:
+            WQ.stop_binding = lambda run_dir: bind
+        try:
+            return WQ.flow_check(d)
+        finally:
+            WQ.stop_binding = orig
 
-    check("(3) v2 の REACHED + 再評価 SETTLED → PASS", flow("a", {"method": "v2", "status": "REACHED", "reeval": {"verdict": "SETTLED"}}, True) == "PASS")
-    check("(3) v2 の CENSORED → FAIL", flow("b", {"method": "v2", "status": "CENSORED", "reeval": {"verdict": "SETTLED"}}, True) == "FAIL")
-    check("(3) v2 の再評価が SETTLED でない → FAIL", flow("c", {"method": "v2", "status": "REACHED", "reeval": {"verdict": "NOT_SETTLED"}}, True) == "FAIL")
-    check("(3) v2 の基準があるのに状態が無い → FAIL", flow("d", None, True) == "FAIL")
-    check("(3) 状態が無い旧い run → UNVERIFIED", flow("e") == "UNVERIFIED")
-    check("(3) v1 の REACHED → PASS・CENSORED → FAIL", flow("f", {"version": 1, "status": "REACHED"}) == "PASS"
-          and flow("g", {"version": 1, "status": "CENSORED"}) == "FAIL")
+    # 停止の時の判定に結び付いた (stop_binding の pass) ときだけ状態と再評価で PASS・FAIL を決める (plan §5.1 #7a の続き、
+    # 2026-10-17 codex result 2 回目 M1)。以前は状態のファイルの REACHED・SETTLED だけで PASS だった (下の「照合の記録の無い状態」)
+    line_c = {"kind": "line_mach", "name": "line_mach", "eta": 0.03, "x_range_m": [4.0, 7.95], "n": 2001, "Md": MD}
+    vb = {"verdict": "SETTLED", "criteria": {"content": {"quantities": [line_c]}}, "quantities": [{"name": "line_mach", "verdict": "SETTLED"}]}
+    B = {"pass": True, "problems": [], "verdict": vb, "verdict_file": "SETTLE_VERDICT.json", "stop_step": 46000, "criteria_sha256": "x"}
+    r = flow("a", {"method": "v2", "status": "REACHED", "stop_step": 46000, "reeval": {"verdict": "SETTLED"}}, True, bind=B)
+    check("(3) v2 の REACHED + 結び付いた再評価 SETTLED → PASS、監視の線は停止の時の判定の基準の中身から (SETTLED)",
+          r["status"] == "PASS" and r["binding"]["pass"] and r["monitored_lines"] == [{**{k: line_c[k] for k in ("name", "eta", "x_range_m", "n", "Md")},
+                                                                                   "verdict": "SETTLED"}], f"{r}")
+    check("(3) v2 の CENSORED (結び付いた) → FAIL",
+          flow("b", {"method": "v2", "status": "CENSORED", "reeval": {"verdict": "SETTLED"}}, True, bind=B)["status"] == "FAIL")
+    check("(3) v2 の結び付いた再評価が SETTLED でない → FAIL",
+          flow("c", {"method": "v2", "status": "REACHED", "reeval": {"verdict": "SETTLED"}}, True,
+               bind={**B, "verdict": {**vb, "verdict": "NOT_SETTLED"}})["status"] == "FAIL")
+    r = flow("c2", {"method": "v2", "status": "REACHED", "reeval": {"verdict": "SETTLED"}}, True,
+             bind={**B, "pass": False, "problems": ["基準の sha256 が違う"], "verdict": None})
+    check("(3) v2 の REACHED・SETTLED でも停止の時の判定と結び付かない → INDETERMINATE (監視の線なし)",
+          r["status"] == "INDETERMINATE" and r["monitored_lines"] == [] and "基準の sha256" in r["why"], r.get("why"))
+    r = flow("c3", {"method": "v2", "status": "REACHED", "stop_step": 46000, "reeval": {"verdict": "SETTLED"}}, True)
+    check("(3) 状態のファイルだけ (停止の時の判定の記録・起動の記録が無い) → 本物の照合で INDETERMINATE (修正前は PASS)",
+          r["status"] == "INDETERMINATE" and not r["binding"]["pass"] and r["binding"]["n_problems"] > 0, r.get("why", "")[:200])
+    # 2026-10-17 から、記録 (STOP_RULE_STATE.json) が無い v2 の run は FAIL でなく INDETERMINATE (確かめられない; 結果は同じ incomplete)
+    check("(3) v2 の基準があるのに状態が無い → INDETERMINATE (前は FAIL; 結果はどちらも incomplete)", flow("d", None, True)["status"] == "INDETERMINATE")
+    check("(3) 状態が無い旧い run → UNVERIFIED", flow("e")["status"] == "UNVERIFIED")
+    check("(3) v1 の REACHED → PASS・CENSORED → FAIL", flow("f", {"version": 1, "status": "REACHED"})["status"] == "PASS"
+          and flow("g", {"version": 1, "status": "CENSORED"})["status"] == "FAIL")
+    lines = WQ.bound_lines({"criteria": {"content": {"quantities": [line_c, {**line_c, "name": "line2", "eta": 0.06}, {"kind": "exit_core_mach", "name": "e"}]}},
+                            "quantities": [{"name": "line_mach", "verdict": "SETTLED"}]})
+    check("(3) bound_lines: line_mach を全部、量の verdict つき (判定に無い量は None)",
+          [ln["name"] for ln in lines] == ["line_mach", "line2"] and lines[0]["verdict"] == "SETTLED" and lines[1]["verdict"] is None)
+    check("(3) monitored_line: 評価の線と同じ線を選ぶ (無ければ最初の線、線が無ければ None)",
+          WQ.monitored_line({"monitored_lines": lines}, {"eta": 0.06, "x_range_m": [4.0, 7.95], "n": 2001})["name"] == "line2"
+          and WQ.monitored_line({"monitored_lines": lines}, {"eta": 0.05, "x_range_m": [4.0, 7.95], "n": 2001})["name"] == "line_mach"
+          and WQ.monitored_line({}, {"eta": 0.03}) is None)
 
 # ------------------------------------------------------------------ (4) 成果物と寸法の関門
 print("== (4) 成果物と寸法の関門")
@@ -241,6 +279,9 @@ check("(5) 成果物が無く計算の成立も UNVERIFIED → incomplete / esca
 check("(5) すべて合格でも計算の成立が UNVERIFIED → incomplete / escalate (accepted にしない)", dec(fU, P, P, P, dP) == ("incomplete", "escalate"))
 check("(5) V5c 判定不能 → incomplete / escalate", dec(fP, P, I, P, dP) == ("incomplete", "escalate"))
 check("(5) 計算の成立 FAIL → incomplete / escalate (公差が FAIL でも)", dec(fF, Fa, Fa, P, dP) == ("incomplete", "escalate"))
+check("(5) 計算の成立 INDETERMINATE (停止の時の判定と結び付かない) → incomplete / escalate (すべて合格でも・公差が FAIL でも)",
+      dec({"status": "INDETERMINATE", "why": "b"}, P, P, P, dP) == ("incomplete", "escalate")
+      and dec({"status": "INDETERMINATE", "why": "b"}, Fa, P, P, dA, rule_fn=rule(True)) == ("incomplete", "escalate"))
 calls.clear()
 check("(5) 壁の形 (V5b) だけ FAIL・規則に当たる → back_to_correction / recalibrate", dec(fP, Fa, P, P, dA, rule_fn=rule(True))
       == ("back_to_correction", "recalibrate") and calls == [True])
@@ -375,12 +416,19 @@ print("== (8) 線の定常の保証 (§5.1 #7a)・壁解像の照合 (§5.1 #7b)
 from forge_design.report import nozzle_report as NR  # noqa: E402
 
 v0 = WQ.v5c_line(field(), MD, 0.03, [4.0, 7.95], 2001, 0.1, 0.1)
-SL = {"eta": 0.03, "x_range_m": [4.0, 7.95], "n": 2001, "Md": MD}
-fld0, flow0 = {"step": 46000, "res": "res_46000.h5"}, {"status": "PASS", "stop_step": 46000}
-check("(8) 監視の線・停止の step と同じ → 保証の欠けなし", WQ.line_monitor_gaps(v0, SL, fld0, flow0) == [])
+# 監視の線 SL は停止の時の判定に結び付いた基準の line_mach (flow_check の monitored_lines; 量の verdict つき)、flow0 は結び付いた計算の成立
+# (2026-10-17 codex result 2 回目 M1 から、結び付き (binding.pass) と量の SETTLED も保証の条件)
+SL = {"name": "line_mach", "eta": 0.03, "x_range_m": [4.0, 7.95], "n": 2001, "Md": MD, "verdict": "SETTLED"}
+fld0, flow0 = {"step": 46000, "res": "res_46000.h5"}, {"status": "PASS", "stop_step": 46000, "binding": {"pass": True, "problems": []}}
+check("(8) 結び付いた監視の線・停止の step と同じ → 保証の欠けなし", WQ.line_monitor_gaps(v0, SL, fld0, flow0) == [])
 for nm, sl_, fl_, fw_ in (("η が違う", {**SL, "eta": 0.06}, fld0, flow0), ("x 窓が違う", {**SL, "x_range_m": [4.0, 7.9]}, fld0, flow0),
                           ("点数が違う", {**SL, "n": 1001}, fld0, flow0), ("監視の line_mach が無い", None, fld0, flow0),
-                          ("停止の step と違う", SL, fld0, {**flow0, "stop_step": 46171}), ("停止の step の記録が無い", SL, fld0, {"status": "UNVERIFIED"})):
+                          ("停止の step と違う", SL, fld0, {**flow0, "stop_step": 46171}),
+                          ("停止の step の記録が無い", SL, fld0, {"status": "PASS", "binding": {"pass": True}}),
+                          ("停止の時の判定と結び付かない (線は同じ)", SL, fld0, {**flow0, "binding": {"pass": False, "problems": ["基準の sha256 が違う"]}}),
+                          ("照合の記録が無い (線は同じ)", SL, fld0, {"status": "PASS", "stop_step": 46000}),
+                          ("監視の線が停止の時に SETTLED でない", {**SL, "verdict": "NOT_SETTLED"}, fld0, flow0),
+                          ("監視の線の量が停止の時の判定に無い", {**SL, "verdict": None}, fld0, flow0)):
     g = WQ.line_monitor_gaps(v0, sl_, fl_, fw_)
     check(f"(8) {nm} → 保証の欠け 1 件", len(g) == 1, f"{g}")
 
@@ -502,9 +550,10 @@ if not all(p.is_file() for p in need):
 else:
     import shutil
     import subprocess
-    with tempfile.TemporaryDirectory() as td:
-        run = Path(td) / R14.name           # 写し (h5・xmf は symlink; run_settle_realdata_tests.copy_run と同じ) — 元の run には書かない
-        run.mkdir()
+    def copy14(dst):
+        """run_0014 の写し (h5・xmf は symlink; run_settle_realdata_tests.copy_run と同じ) — 元の run には書かない。"""
+        run = Path(dst) / R14.name
+        run.mkdir(parents=True)
         for f in R14.iterdir():
             if f.is_dir():
                 continue
@@ -512,6 +561,10 @@ else:
                 (run / f.name).symlink_to(f.resolve())
             else:
                 shutil.copy2(f, run / f.name)
+        return run
+
+    with tempfile.TemporaryDirectory() as td:
+        run = copy14(td)
         common = dict(deliverables=R14 / "deliverables", wall_txt=Path(td) / "wr.txt", series_dir=Path(td))
         rec = WQ.qualify(run, CARD, PROB14, **common)
         c = rec["checks"]
@@ -520,6 +573,78 @@ else:
               and c["wall_resolution"]["verdict"] == "PASS" and c["wall_resolution"]["evaluated"] == [{"name": "wall", "physID": 3, "step": 46171}]
               and round(c["V5c"]["maxabs_pct"], 6) == 0.062305 and round(c["V5c"]["halfamp_pct"], 6) == 0.057285,
               f"{rec['result']} / {rec['missing']}")
+        check("(9) 正しい呼び方: 計算の成立は停止の時の判定 (SETTLE_VERDICT.json) と結び付いて PASS、監視の線は停止の時の基準の η 0.03 (SETTLED)",
+              c["flow"]["status"] == "PASS" and c["flow"]["binding"]["pass"] and c["flow"]["binding"]["verdict_file"] == "SETTLE_VERDICT.json"
+              and c["V5c"]["steadiness"]["monitored_line"]["eta"] == 0.03 and c["V5c"]["steadiness"]["monitored_line"]["verdict"] == "SETTLED",
+              f"{c['flow'].get('binding')}")
+        # 2026-10-17 codex result 2 回目 M1 の再現: 基準のファイルの読み取り値だけを η 0.06 に変える (メモリ上)。修正前は今の
+        # settle_criteria.yaml の読み取り値と評価の線を比べたので、古い停止の記録のまま accepted になった
+        orig = WQ._settle_line_from_criteria
+        WQ._settle_line_from_criteria = lambda rd: {**orig(rd), "eta": 0.06}
+        try:
+            rec = WQ.qualify(run, CARD, PROB14, **common)
+        finally:
+            WQ._settle_line_from_criteria = orig
+        c = rec["checks"]
+        check("(9) 2 回目 M1 の再現 (メモリ上で基準の読み取り値だけ η 0.06) → 評価の線 η 0.06 は停止の時の監視の線 η 0.03 と違う → V5c 判定不能・"
+              "incomplete (修正前は accepted)",
+              rec["result"] == "incomplete" and c["V5c"]["eta"] == 0.06 and c["V5c"]["verdict"] == "INDETERMINATE"
+              and any("η 0.03" in g for g in c["V5c"]["steadiness"]["monitor_gaps"]) and c["flow"]["status"] == "PASS",
+              f"{rec['result']} / {c['V5c'].get('why', '')[:200]}")
+    # 基準のファイルを書き換えた写し (η・ほかの値)・停止の時の記録の無い写し: 停止の時の判定と結び付かない → 計算の成立 INDETERMINATE・
+    # V5c は監視で保証されず全場 1 枚で系列も作れない → incomplete (修正前はどれも accepted)
+    import re as _re
+    for nm, edit in (("基準のファイルの line_mach の η を 0.06 に書き換えた写し",
+                      lambda r: (r / "settle_criteria.yaml").write_text(_re.sub(r"^  eta: 0\.03$", "  eta: 0.06", (r / "settle_criteria.yaml").read_text(),
+                                                                                count=1, flags=_re.M))),
+                     ("基準のファイルの流量の収支の閾値 mean_abs を 0.0005 → 0.001 に書き換えた写し (基準としては正しい)",
+                      lambda r: (r / "settle_criteria.yaml").write_text((r / "settle_criteria.yaml").read_text().replace("    mean_abs: 0.0005\n",
+                                                                                                                      "    mean_abs: 0.001\n", 1))),
+                     ("停止の時の判定の記録 (SETTLE_VERDICT.json) の無い写し", lambda r: (r / "SETTLE_VERDICT.json").unlink())):
+        with tempfile.TemporaryDirectory() as td:
+            run = copy14(td)
+            before = sha(run / "settle_criteria.yaml")
+            edit(run)
+            changed = (not (run / "SETTLE_VERDICT.json").exists()) or sha(run / "settle_criteria.yaml") != before
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=R14 / "deliverables", wall_txt=Path(td) / "wr.txt", series_dir=Path(td))
+            c = rec["checks"]
+            check(f"(9) 2 回目 M1: {nm} → 計算の成立 INDETERMINATE・V5c 判定不能・incomplete・escalate (修正前は accepted)",
+                  changed and rec["result"] == "incomplete" and rec["next"] == "escalate" and c["flow"]["status"] == "INDETERMINATE"
+                  and not c["flow"]["binding"]["pass"] and c["V5c"]["verdict"] == "INDETERMINATE"
+                  and any("結び付かない" in g for g in c["V5c"]["steadiness"]["monitor_gaps"])
+                  # 基準を書き換えた写しは基準の sha256 の食い違いで止まる (基準の誤りで止まったのではない)
+                  and ("SETTLE_VERDICT" in nm or any("sha256" in p_ and "settle_criteria" in p_ for p_ in c["flow"]["binding"]["problems"])),
+                  f"{rec['result']} / {c['flow'].get('why', '')[:160]}")
+    # 2 回目 M2 の再現: bcondConfig に壁を足した写し (ダンプが一度も無い)。--groups を省く経路 (受け渡しの関門
+    # deltastar_loop.wall_resolution_verdict) は、修正前は存在するダンプ (wall/3) だけで PASS・終了コード 0 だった
+    from forge_design.feedback import deltastar_loop as DL  # noqa: E402
+    with tempfile.TemporaryDirectory() as td:
+        run = copy14(td)
+        (run / "bcondConfig.yaml").write_text((run / "bcondConfig.yaml").read_text()
+                                              + "missing_wall: {physID: 5, kind: wall_adiabatic, outputHDFflg: 1, ints: , floats: {Ux: 0.0, Uy: 0.0, Uz: 0.0}}\n")
+        cwr = str(WQ.TOOLS / "check_wall_resolution.py")
+        for args in (["--step", "46171"], []):
+            r = subprocess.run([sys.executable, cwr, str(run), *args, "--weight", "area"], capture_output=True, text=True)
+            check(f"(9) 2 回目 M2: bcond に一度もダンプの無い壁 missing_wall、--groups 無し {' '.join(args) or '(--step 無し)'} → 判定不能・終了コード 2 "
+                  "(修正前は wall/3 だけで PASS・0)",
+                  r.returncode == 2 and "VERDICT: INDETERMINATE" in r.stdout and "missing_wall" in r.stdout and "一度も無い" in r.stdout
+                  and "EVALUATED" not in r.stdout, r.stdout.strip().splitlines()[-1])
+        w = DL.wall_resolution_verdict(run, 46171)
+        check("(9) 2 回目 M2: 受け渡しの関門の局所 y₁⁺ (deltastar_loop.wall_resolution_verdict) も UNDETERMINED (修正前は PASS)",
+              w["kind"] == "UNDETERMINED" and w["rc"] == 2, f"{w['kind']} {w['verdict']}")
+    # 試走 A の写し (case/90; 読むだけ): 停止の時の結び付きは今どおり通る
+    for rn in ("run_0003_ns_p0", "run_0005_ns_p1"):
+        ra = ROOT / "case/90.qs_trial_a" / rn
+        if not (ra / "STOP_RULE_STATE.json").is_file():
+            SKIPPED.append(f"(9) 試走 A {rn} ({ra} に run が無い)")
+            continue
+        f_ = WQ.flow_check(ra)
+        check(f"(9) 試走 A {rn}: 計算の成立 PASS (停止の時の判定・基準・入力と結び付く)、監視の線 η 0.03 (SETTLED)",
+              f_["status"] == "PASS" and f_["binding"]["pass"] and [(ln["eta"], ln["verdict"]) for ln in f_["monitored_lines"]] == [(0.03, "SETTLED")],
+              f"{f_['status']} {f_['binding'].get('problems')}")
+    with tempfile.TemporaryDirectory() as td:
+        run = copy14(td)
+        common = dict(deliverables=R14 / "deliverables", wall_txt=Path(td) / "wr.txt", series_dir=Path(td))
         rec = WQ.qualify(run, CARD, PROB14, cli_tols={"line_eta": 0.06}, **common)
         c = rec["checks"]
         check("(9) M1 の再現: line_eta 0.06 (監視していない線) → V5c 判定不能 (全場 1 枚で系列を作れない)・incomplete・escalate "

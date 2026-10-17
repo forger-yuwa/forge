@@ -19,6 +19,8 @@
 | `check_wall_resolution` (2026-10-17 追加) | `--step` の壁ダンプが無い壁がある | 最新の出力に代えて `PASS`, exit 0 |
 | 〃 | `--groups` に存在しない壁の名前 | 飛ばして `PASS`, exit 0 |
 | 〃 | メッシュの BCONDS に無い physID の壁ダンプ | Traceback, exit 1 (呼び出し側の FAIL) |
+| 〃 (2026-10-17 2 回目) | `--groups` 無しで bcondConfig の壁のダンプが一度も無い | 存在するダンプだけで `PASS`, exit 0 |
+| 〃 | `--groups` 無しで bcondConfig を読めない | 警告してダンプだけで `PASS`, exit 0 |
 """
 import csv
 import os
@@ -304,6 +306,52 @@ def main():
     rc, out, v = cwr("--groups", "wall_c")
     chk("メッシュに無い physID の壁ダンプ -> 判定不能・終了コード 2 (Traceback にしない)",
         rc == 2 and "INDETERMINATE" in v and "Traceback" not in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("bcondConfig.yaml が無い run (--groups 無し) -> 今どおりダンプから数え、そのことを出力に書く",
+        rc == 2 and "bcondConfig.yaml が無い -> ある壁ダンプから数える" in out, "rc=%d" % rc)   # wall_c (physID 7) で判定不能のまま
+
+    print("=== check_wall_resolution: --groups 無しで bcondConfig の壁のダンプがそろわない ===")
+    # 2026-10-17 codex result 2 回目 M2 (plan tooling-nozzle-card-local-mesh §5.1 #7b の続き): --groups を省くと存在するダンプから
+    # 対象を数えたので、bcondConfig の no-slip 壁でダンプが一度も無い壁を見落として PASS・終了コード 0 だった (受け渡しの関門
+    # deltastar_loop.wall_resolution_verdict はこの経路)。いまは bcondConfig の kind wall* を全部必須にする
+    d0 = d                                       # 同じメッシュ・設定で別の run (ダンプは作り直す)
+    d = tempfile.mkdtemp()
+    for f_ in ("m.h5", "solverConfig.yaml"):
+        shutil.copy2(os.path.join(d0, f_), d)
+    shutil.rmtree(d0, ignore_errors=True)
+    for s_ in (100, 200):
+        dump("wall_a", 1, s_, coords[[0]])
+    dump("wall_b", 2, 100, coords[[2]])          # wall_b は step 100 だけ
+    bc = ("wall_a: {physID: 1, kind: wall_isothermal, outputHDFflg: 1}\n"
+          "wall_b: {physID: 2, kind: wall_adiabatic, outputHDFflg: 1}\n"
+          "outlet: {physID: 9, kind: outlet_statPress, outputHDFflg: 1}\n")
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write(bc)
+    rc, out, v = cwr("--step", "200")
+    chk("bcond あり・--groups 無し: 存在する壁 wall_b の指定 step 200 が欠ける -> 判定不能 (100 に代えない)",
+        rc == 2 and "INDETERMINATE" in v and "wall_b" in v and "EVALUATED" not in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("bcond あり・--groups 無し: 全部の壁に step 100 -> PASS、対象は bcond の壁全部と出力に書く",
+        rc == 0 and "EVALUATED: wall_a/1@100, wall_b/2@100" in out and "kind wall*) 全部 = wall_a/1, wall_b/2" in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr()
+    chk("bcond あり・--groups 無し・--step 無し: 壁ごとの最新 (wall_a 200・wall_b 100) で PASS (今どおり)",
+        rc == 0 and "EVALUATED: wall_a/1@200, wall_b/2@100" in out, "rc=%d %s" % (rc, v))
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write(bc + "wall_c: {physID: 3, kind: wall_isothermal, outputHDFflg: 1}\n")   # ダンプが一度も無い壁
+    rc, out, v = cwr()
+    chk("bcond の壁 wall_c のダンプが一度も無い・--step 無し -> 判定不能・終了コード 2 (修正前は wall_a・wall_b だけで PASS・0)",
+        rc == 2 and "INDETERMINATE" in v and "wall_c" in v and "一度も無い" in v and "EVALUATED" not in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("bcond の壁 wall_c のダンプが一度も無い・--step 100 -> 判定不能・終了コード 2 (修正前は PASS・0)",
+        rc == 2 and "INDETERMINATE" in v and "wall_c" in v, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100", "--groups", "wall_a,wall_b")
+    chk("--groups を明示すれば bcond の他の壁は要らない (今どおり PASS; 呼び出し側が壁を選ぶ)",
+        rc == 0 and "EVALUATED: wall_a/1@100, wall_b/2@100" in out, "rc=%d %s" % (rc, v))
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write("wall_a: {physID: [1, 2\n")                 # 読めない YAML
+    rc, out, v = cwr("--step", "100")
+    chk("bcondConfig.yaml を読めない・--groups 無し -> 必須の壁を作れず判定不能 (前は警告してダンプだけで PASS)",
+        rc == 2 and "INDETERMINATE" in v and "必須の壁の集合を作れない" in v, "rc=%d %s" % (rc, v))
     shutil.rmtree(d, ignore_errors=True)
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))

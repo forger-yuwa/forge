@@ -19,15 +19,22 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
     許容 0.1 %・0.1 % (plan §6 V5c; 片振幅は 2026-10-16 ユーザ決定、前は 0.05 %)。η 0.1 と軸 (η 0) は比較用に併記 (判定に使わない)。補間に軸の節点が重み > 1e−6 で入る
     (第 1 層の η が線より上) か、窓が格子の外・非有限なら判定不能 (plan §6 V5c、codex M3)。
     **この量は「近軸の線 (η) の一様性」であって試験部全体の一様性ではない** (plan §6 V5c)。
-    線の定常の保証 (plan §5.1 #7a、2026-10-17 codex result M1): 評価の線 (η・x 窓・点数) が run の settle_criteria.yaml の監視の
-    line_mach と違う・line_mach が基準に無い・評価の場の step が停止の step と違う、のどれかなら判定不能 (→ incomplete)。ただし
-    本段の全場 (MAIN_STAGE_STARTED の start_step < N ≤ 評価の場の step) の系列の最大偏差・片振幅を `check_quasisteady.py --series-csv`
-    が両方 STEADY と判定したときだけ合否に進める (VERDICT・系列の CSV を記録)。全場が 4 枚未満なら判定不能。
+    線の定常の保証 (plan §5.1 #7a、2026-10-17 codex result M1): 評価の線 (η・x 窓・点数) が停止規則の監視の line_mach と違う・
+    line_mach が基準に無い・評価の場の step が停止の step と違う、のどれかなら判定不能 (→ incomplete)。**監視の線は停止の時の判定の
+    記録 (下の「計算の成立」の結び付き) の基準の中身から取り、その量が SETTLED であることも要る**。停止の時の判定・基準・入力が今の run と
+    結び付かない (照合できない・記録が無い) ときは監視による保証にしない (2026-10-17 codex result 2 回目 M1: 今の settle_criteria.yaml の
+    読み取り値だけを η 0.06 に変えると、古い停止の記録のまま accepted になった)。保証が無い線は、本段の全場 (MAIN_STAGE_STARTED の
+    start_step < N ≤ 評価の場の step) の系列の最大偏差・片振幅を `check_quasisteady.py --series-csv` が両方 STEADY と判定したときだけ
+    合否に進める (VERDICT・系列の CSV を記録)。全場が 4 枚未満なら判定不能。
   - 壁解像: `check_wall_resolution.py <run> --step <場の step> --groups <bcond の wall* 全部> --weight area` の VERDICT
     (y₁⁺ > 1 の面積 ≤ 2 %、plan §6 V4)。ツールが評価した壁と step (EVALUATED 行) が bcond の全部の壁・場の step・停止の step と
     一致しなければ判定不能 (plan §5.1 #7b)。
-  - 計算の成立: `settle_criteria.yaml` のある run は停止規則 v2 の REACHED と停止の step の再評価 SETTLED、旧方式は
-    `STOP_RULE_STATE.json` の REACHED。状態が無い run (記録の写し等) は UNVERIFIED (accepted にも自動の較正し直しにもしない)。
+  - 計算の成立: `settle_criteria.yaml` のある run は停止規則 v2 の REACHED と停止の step の再評価 SETTLED。**その前に停止の時の
+    判定・基準・入力が今の run と結び付くこと** (受け渡しの関門と同じ照合 `deltastar_loop._v2_binding`: 状態・停止の時の判定の専用
+    ファイル (古い run は停止の時のままの SETTLE_VERDICT.json)・基準の sha256・本段の起動の記録・再評価が使った入力の sha256・
+    STOPPED_AT・停止の場)。結び付かない・状態や停止の時の判定の記録が無いときは INDETERMINATE (→ incomplete; plan §5.1 #7a の続き、
+    2026-10-17 codex result 2 回目 M1)。旧方式は `STOP_RULE_STATE.json` の REACHED。状態が無い旧い run (記録の写し等) は UNVERIFIED
+    (accepted にも自動の較正し直しにもしない)。
   - 寸法の関門と成果物: `<run>/deliverables/` の `DIMENSIONS.json` (verdict PASS、カードを渡したらその sha256 と一致) と `MANIFEST.json`
     (verdict PASS・失敗/飛ばした部品なし・必要な部品 `deliverables.PARTS` がそろい・列挙したファイルの sha256 が一致)。無ければ ABSENT。
 
@@ -212,24 +219,76 @@ def select_field(run_dir, step: int | None = None) -> dict:
     return {"step": steps[-1], "res": f"res_{steps[-1]}.h5", "source": f"最後の全場 ({why})"}
 
 
+def stop_binding(run_dir) -> dict:
+    """停止の時の判定・基準・入力と今の run の結び付き (plan §5.1 #7a の続き、2026-10-17 codex result 2 回目 M1)。受け渡しの関門の照合
+    `deltastar_loop._v2_binding` をそのまま使う (状態・停止の時の判定の専用ファイル・基準の sha256・本段の起動・再評価の入力の sha256・
+    STOPPED_AT・停止の場・見張りの記録)。照合が例外で止まったときも結び付かないとする (合格にしない)。
+    戻り: _v2_binding の戻り {pass, problems, verdict (停止の時の判定の中身), verdict_file, stop_step, criteria_sha256, ...}。"""
+    from ..evaluate import stop_rule as SR
+    from . import deltastar_loop as DL
+    run_dir = Path(run_dir)
+    try:
+        return DL._v2_binding(run_dir, SR.read_state(run_dir), SR._settle())
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        return {"pass": False, "problems": [f"照合が例外で止まった ({type(e).__name__}: {e})"], "verdict": None, "verdict_file": None,
+                "stop_step": None, "criteria_sha256": None}
+
+
+def bound_lines(verdict: dict | None) -> list[dict]:
+    """停止の時の判定 (結び付いた記録) の基準の中身 (criteria.content) の line_mach と、その量の停止の時の verdict。
+    今の settle_criteria.yaml を読み直した値は使わない (読み取りだけを変えても監視の線にならない; codex result 2 回目 M1)。"""
+    if not isinstance(verdict, dict):
+        return []
+    content = (verdict.get("criteria") or {}).get("content") or {}
+    by_name = {str(q.get("name")): q for q in verdict.get("quantities") or [] if isinstance(q, dict)}
+    out = []
+    for q in content.get("quantities") or []:
+        if not (isinstance(q, dict) and q.get("kind") == "line_mach"):
+            continue
+        try:
+            line = {"name": str(q.get("name")), "eta": float(q["eta"]), "x_range_m": [float(q["x_range_m"][0]), float(q["x_range_m"][1])],
+                    "n": int(q.get("n", 2001)), "Md": q.get("Md")}
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        line["verdict"] = (by_name.get(line["name"]) or {}).get("verdict")
+        out.append(line)
+    return out
+
+
 def flow_check(run_dir) -> dict:
-    """計算の成立: PASS / FAIL / UNVERIFIED (判定は停止規則の記録だけを読む; 収束・関門の判定は judge_run・受け渡しの関門の役目)。"""
+    """計算の成立: PASS / FAIL / INDETERMINATE / UNVERIFIED (判定は停止規則の記録だけを読む; 収束・関門の判定は judge_run・受け渡しの関門の役目)。
+    v2 は停止の時の判定・基準・入力が今の run と結び付いた (`stop_binding`) ときだけ PASS・FAIL を決め、結び付かなければ INDETERMINATE。
+    結び付いたときは停止の時の判定の監視の線 (`bound_lines`) を monitored_lines に入れる (V5c の線の保証が使う)。"""
     from ..evaluate import stop_rule as SR
     run_dir = Path(run_dir)
     st_path = run_dir / SR.STATE
     v2 = (run_dir / "settle_criteria.yaml").is_file()
     if not st_path.is_file():
         if v2:
-            return {"status": "FAIL", "method": "v2", "why": f"settle_criteria.yaml のある run に {SR.STATE} が無い (本段が終わっていない・記録が失われた)"}
+            # 2026-10-17 (codex result 2 回目 M1) から、記録が無い v2 の run は FAIL でなく INDETERMINATE (確かめられない; 結果は同じ incomplete)
+            return {"status": "INDETERMINATE", "method": "v2", "monitored_lines": [],
+                    "why": f"settle_criteria.yaml のある run に {SR.STATE} が無い (本段が終わっていない・記録が失われた; 停止の時の判定を照合できない)"}
         return {"status": "UNVERIFIED", "method": None, "why": f"{SR.STATE} が無い (記録の写し・停止規則を使わない run) — 計算の成立を確かめられない"}
     s = json.loads(st_path.read_text())
     rec = {"method": s.get("method", "v1" if s.get("version") == 1 else None), "stop_status": s.get("status"), "stop_step": s.get("stop_step")}
     if v2 or s.get("method") == "v2":
         rv = (s.get("reeval") or {}).get("verdict")
         rec["reeval_verdict"] = rv
-        ok = s.get("status") == "REACHED" and rv == "SETTLED"
+        b = stop_binding(run_dir)
+        rec["binding"] = {"pass": bool(b.get("pass")), "problems": list(b.get("problems") or [])[:10], "n_problems": len(b.get("problems") or []),
+                          "verdict_file": b.get("verdict_file"), "stop_step": b.get("stop_step"), "criteria_sha256": b.get("criteria_sha256"),
+                          "tool": "design/forge_design/feedback/deltastar_loop.py _v2_binding (受け渡しの関門と同じ照合)"}
+        if not rec["binding"]["pass"]:
+            rec.update(status="INDETERMINATE", monitored_lines=[],
+                       why=(f"停止の時の判定・基準・入力が今の run と結び付かない (状態 {s.get('status')}・再評価 {rv} を確かめられない): "
+                            + "; ".join(rec["binding"]["problems"])[:1200]))
+            return rec
+        bv = (b.get("verdict") or {}).get("verdict")
+        rec["bound_verdict"] = bv
+        rec["monitored_lines"] = bound_lines(b.get("verdict"))
+        ok = s.get("status") == "REACHED" and bv == "SETTLED"
         rec.update(status="PASS" if ok else "FAIL",
-                   why=None if ok else f"停止規則 v2 の状態 {s.get('status')}・停止の step の再評価 {rv} (REACHED・SETTLED が要る)")
+                   why=None if ok else f"停止規則 v2 の状態 {s.get('status')}・停止の step の再評価 {bv} (REACHED・SETTLED が要る)")
         return rec
     ok = s.get("status") == "REACHED"
     rec.update(status="PASS" if ok else "FAIL", why=None if ok else f"停止規則の状態 {s.get('status')} (REACHED が要る)")
@@ -304,19 +363,40 @@ def v5c_line(F: dict, Md: float, eta: float, x_range_m, n: int, tol_maxabs: floa
 
 
 # ------------------------------------------------------------------ V5c の線の定常の保証 (§5.1 #7a)
+def monitored_line(flow: dict, v5c: dict) -> dict | None:
+    """停止の時の判定に結び付いた監視の線 (flow の monitored_lines) のうち、評価の線 (η・x 窓・点数) と同じもの。無ければ最初の線
+    (違いを書くため)、線が無ければ None。"""
+    lines = flow.get("monitored_lines") or []
+    for ln in lines:
+        if "eta" in v5c and _same_line(ln, v5c):
+            return ln
+    return lines[0] if lines else None
+
+
+def _same_line(a: dict, b: dict) -> bool:
+    return (abs(float(a["eta"]) - float(b["eta"])) <= 1e-12
+            and all(abs(float(x) - float(y)) <= 1e-9 for x, y in zip(a["x_range_m"], b["x_range_m"]))
+            and int(a["n"]) == int(b["n"]))
+
+
 def line_monitor_gaps(v5c: dict, settle_line: dict | None, fld: dict, flow: dict) -> list[str]:
-    """V5c の線と場が停止規則の監視で保証されていない理由 (空 = 保証される: 監視の line_mach と同じ線 (η・x 窓・点数) で、
-    場が停止の step)。2026-10-17 codex result M1: 違っても警告だけで accepted にできた (run_0014 に line_eta 0.06)。"""
+    """V5c の線と場が停止規則の監視で保証されていない理由 (空 = 保証される: 停止の時の判定・基準・入力が今の run と結び付き
+    (flow の binding)、その判定の監視の line_mach (settle_line = `monitored_line`; 今のファイルを読み直した値ではない) と同じ線
+    (η・x 窓・点数) で、その量が停止の時に SETTLED、場が停止の step)。2026-10-17 codex result M1: 違っても警告だけで accepted に
+    できた (run_0014 に line_eta 0.06)。同 2 回目 M1: 停止の時の基準と結び付けず、今の settle_criteria.yaml の読み取り値と比べていた。"""
     why = []
+    bnd = flow.get("binding")
+    if not (isinstance(bnd, dict) and bnd.get("pass") is True):
+        why.append("停止の時の判定・基準・入力が今の run と結び付かない (" + ("; ".join(bnd.get("problems") or [])[:400]
+                                                                   if isinstance(bnd, dict) else "照合の記録が無い") + ")")
     if settle_line is None:
-        why.append("監視の量 line_mach が run の settle_criteria.yaml に無い (停止規則が線を監視していない)")
+        why.append("監視の量 line_mach が停止の時の判定の基準に無い (停止規則が線を監視していない・結び付いた判定が無い)")
     elif "eta" in v5c:
-        same_eta = abs(float(settle_line["eta"]) - float(v5c["eta"])) <= 1e-12
-        same_x = all(abs(float(a) - float(b)) <= 1e-9 for a, b in zip(settle_line["x_range_m"], v5c["x_range_m"]))
-        same_n = int(settle_line["n"]) == int(v5c["n"])
-        if not (same_eta and same_x and same_n):
+        if not _same_line(settle_line, v5c):
             why.append(f"評価の線 (η {v5c['eta']}, x {v5c['x_range_m']} m, {v5c['n']} 点) が監視の line_mach (η {settle_line['eta']}, "
                        f"x {settle_line['x_range_m']} m, {settle_line['n']} 点) と違う")
+        elif settle_line.get("verdict") != "SETTLED":
+            why.append(f"停止の時の判定で監視の線 {settle_line.get('name')} が SETTLED でない ({settle_line.get('verdict')!r})")
     stop = flow.get("stop_step")
     if not isinstance(stop, int):
         why.append("停止の step の記録が無い (STOP_RULE_STATE.json の stop_step)")
@@ -399,14 +479,16 @@ def line_series_steadiness(run_dir, fld: dict, v5c: dict, Md: float, out_dir=Non
 
 
 def line_guarantee(v5c: dict, settle_line: dict | None, fld: dict, flow: dict, run_dir, Md: float, series_dir=None) -> dict:
-    """V5c の線の定常の保証 (§5.1 #7a; v5c をその場で書き換えて返す): 監視の線と違う・監視の量が無い・停止の step でない、のどれかなら
-    判定不能 (線だけの合否は line_verdict に残す)。ただし本段の全場の系列で check_quasisteady が STEADY を返したときだけ合否に進める
-    (その VERDICT と系列のファイルを v5c["steadiness"] に記録)。v5c が既に判定不能 (窓・軸の重み・非有限) なら何もしない。"""
+    """V5c の線の定常の保証 (§5.1 #7a; v5c をその場で書き換えて返す): 停止の時の判定と結び付かない・監視の線と違う・監視の量が無い・
+    その量が停止の時に SETTLED でない・停止の step でない、のどれかなら判定不能 (線だけの合否は line_verdict に残す)。ただし本段の
+    全場の系列で check_quasisteady が STEADY を返したときだけ合否に進める (その VERDICT と系列のファイルを v5c["steadiness"] に記録)。
+    settle_line は停止の時の判定に結び付いた監視の線 (`monitored_line`)。v5c が既に判定不能 (窓・軸の重み・非有限) なら何もしない。"""
     if v5c.get("verdict") not in ("PASS", "FAIL"):
         return v5c
     gaps = line_monitor_gaps(v5c, settle_line, fld, flow)
     if not gaps:
-        v5c["steadiness"] = {"basis": "停止規則の監視 (settle_criteria.yaml の line_mach と同じ線、停止の step の場)"}
+        v5c["steadiness"] = {"basis": "停止規則の監視 (停止の時の判定に結び付いた基準の line_mach と同じ線・その量が SETTLED、停止の step の場)",
+                             "monitored_line": settle_line, "verdict_file": (flow.get("binding") or {}).get("verdict_file")}
         return v5c
     qs = line_series_steadiness(run_dir, fld, v5c, Md, series_dir)
     v5c["steadiness"] = {"basis": "本段の全場の系列の check_quasisteady (監視で保証されない)", "monitor_gaps": gaps, "series": qs}
@@ -594,7 +676,7 @@ def recalibration_rule(run_dir, v5b: dict, v5c: dict, flow: dict, *, delta_next=
 # ------------------------------------------------------------------ 判定
 def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=None, max_iterations=None, rule_fn=None) -> dict:
     """各判定から結果と次の手を決める (ファイルを読まない純粋な部分; 規則の評価だけ rule_fn() を呼ぶ)。
-    順: 判定不能・計算の成立の FAIL → incomplete (escalate)。公差・壁解像・寸法の FAIL → 反復の上限なら rejected、でなければ
+    順: 判定不能・計算の成立の FAIL・INDETERMINATE (停止の時の判定と結び付かない) → incomplete (escalate)。公差・壁解像・寸法の FAIL → 反復の上限なら rejected、でなければ
     back_to_correction (壁の形だけなら較正し直しの規則 → recalibrate / escalate、壁解像・寸法を含めば escalate)。すべて合格で成果物が
     無い・不完全、または計算の成立が UNVERIFIED → incomplete (成果物だけが無く成立を確かめていれば make_deliverables)。残りは accepted。
     戻り: {result, next, missing, corrections, rule, iteration}。"""
@@ -602,8 +684,8 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
     for nm, c in (("V5b", v5b), ("V5c", v5c), ("wall_resolution", wr)):
         if c.get("verdict") not in ("PASS", "FAIL"):
             missing.append(f"{nm} が判定不能 ({c.get('why') or c.get('verdict_line') or c.get('verdict')})")
-    if flow.get("status") == "FAIL":
-        missing.append(f"計算の成立: {flow.get('why')}")
+    if flow.get("status") in ("FAIL", "INDETERMINATE"):     # INDETERMINATE: 停止の時の判定と結び付かない (§5.1 #7a の続き)
+        missing.append(f"計算の成立 ({flow.get('status')}): {flow.get('why')}")
     if v5b.get("verdict") == "FAIL" or v5c.get("verdict") == "FAIL":
         corrections.append({"kind": "wall_shape", "by": [n for n, c in (("V5b", v5b), ("V5c", v5c)) if c.get("verdict") == "FAIL"],
                             "procedure": "plan §4.3 の較正し直し (contur_calibrate)"})
@@ -689,7 +771,9 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
                          "線の定常は停止規則の判定で保証されていない")
     if isinstance(flow.get("stop_step"), int) and flow["stop_step"] != fld["step"]:
         warns.append(f"判定した場 (step {fld['step']}) が停止規則の止めた場 (step {flow['stop_step']}) でない")
-    line_guarantee(v5c, sl, fld, flow, run_dir, Md, series_dir)
+    # 線の保証は停止の時の判定に結び付いた監視の線で見る (今の settle_criteria.yaml の読み取り値 sl は出所と警告にだけ使う;
+    # 2026-10-17 codex result 2 回目 M1)
+    line_guarantee(v5c, monitored_line(flow, v5c), fld, flow, run_dir, Md, series_dir)
     wr = wall_resolution(run_dir, fld["step"], wall_txt, stop_step=flow.get("stop_step"))
     dl = deliverables_check(run_dir, deliverables, card, optional_parts)
     checks = {"flow": flow, "V5b": v5b, "V5c": v5c, "wall_resolution": wr, "deliverables": dl}

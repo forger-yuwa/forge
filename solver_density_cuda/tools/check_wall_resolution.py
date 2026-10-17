@@ -244,7 +244,8 @@ def main():
     ap.add_argument("run")
     ap.add_argument("--mesh", default=None, help="既定は <run>/mesh.h5")
     ap.add_argument("--step", type=int, default=None, help="既定は最後の壁ダンプ")
-    ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は壁ダンプ全部)")
+    ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は bcondConfig の no-slip 壁 (kind wall*) 全部で、"
+                                                   "どれかの壁のダンプが無ければ判定不能。bcondConfig が無い run は壁ダンプ全部)")
     ap.add_argument("--target", type=float, default=1.0, help="低 Re の局所 y1+ 目標 (既定 1)")
     ap.add_argument("--over-frac", type=float, default=2.0,
                     help="目標超過を許す割合 [%%] (既定 2、数え方は --weight)。**判定はここで行う**: "
@@ -264,7 +265,7 @@ def main():
                          "冷却壁のメッシュ設計 (局所の第一層厚を y1+ の分布から決める) に使う。判定は変えない")
     ap.add_argument("--bcond", default=None,
                     help="壁名・境界の kind を引く bcondConfig.yaml (既定は run の中)。--geometry-only では壁名に、ダンプの判定では "
-                         "--groups が無いとき kind が wall* でない境界のダンプを対象外にするのに使う")
+                         "--groups が無いとき kind が wall* でない境界のダンプを対象外にし、kind wall* の壁を全部必須にするのに使う")
     a = ap.parse_args()
 
     cfg = None
@@ -306,27 +307,47 @@ def main():
     want = set(x.strip() for x in a.groups.split(",")) if a.groups else None
     # 既定 (--groups 無し) では bcondConfig.yaml で kind が wall* でない境界のダンプ (出口の outputHDFflg: 1 など) を対象外にする。
     # 壁でない面には twall が無いので、以前は「判定不能」になって受け渡しの関門を止めていた (2026-10-15 case/71 run_0003_ns_cont)。
-    # bcond を読めない・名前が bcond に無いときは従来どおり評価する (判定を弱めない)。
+    # 名前が bcond に無いダンプは従来どおり評価する (判定を弱めない)。bcond を読めないときは、以前はダンプを全部評価したが、
+    # 2026-10-17 から必須の壁の集合 (下) を作れないので判定不能にする。
     not_wall = {}
+    # --groups を省いたときに**評価が必須の壁** [(名前, physID)] = bcondConfig.yaml の no-slip 壁 (kind wall*; --geometry-only・
+    # wt_qualify・nozzle_report と同じ定義)。2026-10-17 codex result 2 回目 M2 (plan tooling-nozzle-card-local-mesh §5.1 #7b の続き):
+    # 以前は存在するダンプから対象を数えたので、一度もダンプの無い壁を見落として PASS にした (受け渡しの関門
+    # deltastar_loop.wall_resolution_verdict はこの経路)。None = bcondConfig が無い (今どおりダンプから数える)。
+    required = None
+    bcond_err = None
     if want is None:
         bp = a.bcond or os.path.join(a.run, "bcondConfig.yaml")
         if os.path.exists(bp):
             try:
                 import yaml
+                req = []
                 for nm, d in (yaml.safe_load(open(bp)) or {}).items():
                     if isinstance(d, dict) and "kind" in d and not str(d["kind"]).startswith("wall"):
                         not_wall[(str(nm), int(d["physID"]))] = str(d["kind"])
+                    elif isinstance(d, dict) and str(d.get("kind", "")).startswith("wall"):
+                        req.append((str(nm), int(d["physID"])))
+                required = req
             except Exception as e:                  # noqa: BLE001
-                print("  WARNING: bcondConfig.yaml を読めない (%s) -> ダンプは全部評価する" % e)
+                # 必須の壁の集合を作れないので判定不能にする (ダンプだけで数えると欠けた壁を見落とす; 判定を弱めない)
+                bcond_err = "%s を読めない (%s)" % (bp, e)
                 not_wall = {}
 
     print("=== %s  (wallTreatmentSST=%d) ===" % (a.run, wt))
+    if want is None:
+        if required is not None:
+            print("  対象の壁: bcondConfig の no-slip 壁 (kind wall*) 全部 = %s (全部の壁にダンプが要る)"
+                  % (", ".join("%s/%d" % r for r in required) or "無し"))
+        elif bcond_err is None:
+            print("  対象の壁: bcondConfig.yaml が無い -> ある壁ダンプから数える (一度もダンプの無い壁は検出できない)")
     # **対象の壁と step を評価の前にそろえる** (2026-10-17 codex result M2、plan tooling-nozzle-card-local-mesh §5.1 #7b)。
     # 以前は --step の出力が無い壁を黙って最新の出力に代え、--groups の存在しない名前も飛ばしていたので、
     # `--step 46170 --groups wall,missing_wall` が step 46171 の wall だけで PASS・終了コード 0 になった (case/71 run_0014)。
     # いまは (1) --groups の名前ごとに壁ダンプがあること (bcondConfig に同じ名前があればその physID のダンプ)、
     # (2) ダンプの physID がメッシュの BCONDS にあること、(3) --step を指定したら**全部の対象の壁**にその step のダンプが
     # あること、を先に検査し、欠けがあれば判定不能 (終了コード 2) で止める。--step を指定しないときは従来どおり壁ごとの最新。
+    # (4) --groups を省いたら bcondConfig の no-slip 壁 (上の required) の全部にダンプがあること (2026-10-17 codex result 2 回目 M2;
+    # --step を指定すれば (3) でその step も要る)。
     bcond_pid = {}
     bp = a.bcond or os.path.join(a.run, "bcondConfig.yaml")
     if want is not None and os.path.exists(bp):
@@ -346,6 +367,13 @@ def main():
                 missing.append("%s (壁ダンプ res_%s_<physID>_<step>.h5 が無い)" % (nm, nm))
             elif nm in bcond_pid and bcond_pid[nm] not in pids:
                 missing.append("%s (bcondConfig の physID %d のダンプが無い; ダンプの physID %s)" % (nm, bcond_pid[nm], pids))
+    if bcond_err is not None:
+        missing.append("評価が必須の壁の集合を作れない: %s" % bcond_err)
+    for (nm, pid) in (required or []):
+        if (nm, pid) not in found:
+            pids = sorted(p for (n, p) in found if n == nm)
+            missing.append("%s (bcondConfig の no-slip 壁 physID %d の壁ダンプ res_%s_%d_<step>.h5 が一度も無い%s)"
+                           % (nm, pid, nm, pid, ("; ダンプの physID %s" % pids) if pids else ""))
     targets = []
     for (name, pid) in sorted(found):
         if want is not None and name not in want:
