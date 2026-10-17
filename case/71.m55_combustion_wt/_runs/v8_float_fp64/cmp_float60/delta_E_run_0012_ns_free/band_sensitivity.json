@@ -1,0 +1,21 @@
+{
+ "factor": 1.25,
+ "use_domain_rt": [
+  0.0,
+  79.80968739613573
+ ],
+ "A_reproduces_delta_E_max_abs_rt": 0.0,
+ "n_cols": 4810,
+ "n_use": 3156,
+ "n_nonfinite_B_use": 0,
+ "n_hard_fail_use": 0,
+ "smoothing": {
+  "lam": 1.0,
+  "knot_spacing": 2.0,
+  "positive": false
+ },
+ "max_abs_B_minus_A_rt": 0.0016370712304940999,
+ "max_abs_B_minus_A_mm": 0.1641057493682383,
+ "x_rt_at": 22.488152042848842,
+ "x_m_at": 2.2542910620845396
+}
