@@ -144,6 +144,37 @@
   - 例: `prepare_ns` は `ic_from` のディレクトリの最大番号の場を選ぶ (`runner_axismach.py:2511`)。計画を確定した後に参照の run の出力が増えても、入力が変わらないようにする (負例の試験)。
 - 承認した要求と判定条件 (§4.7) は、別の台帳を作らず、この campaign と `execution_plan.json` に結び付ける。
 
+#### 4.1.1 親 plan の契約のうち今回作るもの (§5.1 #4 の設計、2026-10-17 codex 諮問で修正)
+
+最初の案 (準備の前に入力の一覧を書く・走った後に段の列を照合する) は、codex (diagnose) の諮問
+([記録](../../notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md)) で次のように直した。
+理由: 今の `run_staged_ns` は起動の時に `solverConfig.yaml` を読み直し、本段の `nStepOuter` を停止規則の上限に書き換える (`runner_axismach.py:2946`・`:3002`)。
+準備の前の入力の一覧だけでは、実際に起動した設定と計画が結び付かない。段の記録の `key` (18 キー) は軸対称・輸送などを含まず、全段の照合の証拠にならない。
+
+**計画の 3 段 (1 つの run に 1 つの `execution_plan.json`、段の記録は上書きしない)**:
+
+1. **準備の前 (入力の固定)**: カード・問題 YAML・承認の記録の sha256、格子の msh の sha256、初期場の**ファイル** (パス・step・sha256)、Euler の参照の場、δ の表、
+   forge の実行ファイルと変換器の sha256、数値に効く環境変数。**初期場の元の run から継承する値** (`limiter_ref_inherit_from_ic` のリミッタの基準値、
+   `runner_axismach.py:1777`) はここで解決して計画に書き、runner には明示の値として渡す (準備の中で元の run を読み直さない)。
+   初期場の適合性 (元の run の輸送種の配置・エネルギー基準 `thermoHrefTemp`・形状と格子の識別) を検査し、合わなければ止める。
+2. **準備の後・起動の前 (実効の計画の確定)**: 準備が作った `solverConfig.yaml` (と `PRESTAGE_CONFIG`) から `ns_stage_configs` (forge を回さずに全段の実効の設定を返す、
+   `runner_axismach.py:2676`) で**全段の起動直前の設定の全文**を求め、本段の `nStepOuter` は停止規則の上限を入れた形で確定する。境界条件・停止規則の基準・
+   節点の表・準備の後の初期場 (元の snapshot とは別の生成物として識別) の sha256 も書く。段の列と、段の間で許す設定の差 (CFL・空間の次数・内反復・step 数・
+   出力の間隔・B0 のパス・本段の出力のパス) は**版付きの recipe** (`axismach.wt_card_chain/v1`) が持つ。物理 (入口・壁・軸対称・熱力学・輸送・乱流) の段の間の差は許さない
+   (今の NS の段の生成は物理を保って次数・CFL を変える、`runner_axismach.py:2668`)。
+3. **実行と照合**: `run_staged_ns` は確定した計画を受け取り、各段の起動の直前に、起動しようとする設定の sha256 が計画と同じかを確かめ、違えば起動しない。
+   終わった後、段の記録・起動の記録 (forge の sha256)・準備の記録 (格子・初期場) が計画と同じかを確かめる。承認との照合 (#3) は別に残す。
+   起動の後に、走った設定を計画に書き足して「一致」とすることはしない。数値の設定を直すのは、試行の計画を確定する前だけ (確定の後の記録の無い変更は許さない)。
+
+- **search の無い campaign** (`campaign.yaml`、`forge.campaign/v1`): 名前・承認の記録 (パスと sha256)・recipe の名前と版・case のディレクトリ・台帳の置き場所。
+  親 plan の search の無い campaign (`evaluations` を持つ形) とは「evaluation 1 つ = 承認した依頼 1 つ」で対応させる。未対応の `search`・知らない recipe・知らないキーは拒否する。
+- **親 plan との分担** (Minor の採用): 親 plan §5.1 #6・#7 を、今回の限定の実装 (#6a・#7a: 上の 3 段と search の無い campaign、未知のキーの拒否、入力の参照、全段の照合) と、
+  探索の需要が出てからの分 (#6b・#7b: 探索のスキーマ、adapter の `variables()`・`recipes()`・`feasible_range()`、副作用の無い `resolve_evaluation`) に分ける。
+  親 plan §4.3 に、今回の限定の実装では準備を先に行い、生成した入力から各段の計画を確定する例外と、その照合の条件を書く。
+- **判別の A/B** (実装の後、GPU・forge なし; 起動を記録するダミーの forge): 計画を確定した後、A は変更なし、B は `S1_soft` の設定の CFL だけを計画の値から変える。
+  A は通り、B は起動の回数 0 で止まれば、計画と起動が結び付いている。A も止まれば試験の不成立。
+- §6 V1a は、この修正だけでは終わらない (基準・節点の表・`RECIPE.json` などの比較と、旧の台本の検査から実行役の関門への対応表が要る; #6 で)。
+
 ### 4.2 判定: 要求の一致・解析の成立・要求の達成を分ける
 
 判定は次の 3 つに分ける (codex 2026-10-17)。
@@ -404,7 +435,9 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | 2b | ~~判定専用の環境~~ (2026-10-17 実装・試験 ALL PASS) (§4.7.1 (5)) | 固定した commit の checkout とハッシュつきの依存の一覧の venv、外部の Python・FreeCAD・Gmsh・変換器の実体の記録と照合、環境変数を引き継がない起動、import の元と未追跡・ignored のファイルの検査。合格: 正例 同じ環境で判定できる。負例 同じ HEAD・追跡ファイルでも外部の Python・import の元が違う、探索先に `.py` が足された、で判定の前に止まる **結果 (2026-10-17)**: `design/forge_design/feedback/gate_env.py` (承認の commit の sparse checkout `design`・`solver_density_cuda/tools`・`solver_density_cuda/data` 約 8 MB、判定の Python の指紋 (実体・prefix・配布物ごとの RECORD の sha256・editable)、外部の道具 (gmsh 用の Python・FreeCAD・変換器) の実体と sha256、隔離のモードと許した環境変数だけでの起動、`wt_qualify --approval` は印・import の元・checkout の HEAD を確かめる)。承認の記録の `gate` は sha256 で守る。試験 `design/tests/run_gate_env_tests.py` ALL PASS: 正例 3 (check・probe・judge が門を通り場の読み込みで止まる)、負例 8 (別の Python・印なし・import の元が外・探索先の .py・道具の中身・作業ツリーから直接・gate の書き換え・未 commit の preview)。最初の judge は物性の DB が checkout に無くて止まった (試験の条件が甘く通っていた) → data を足し、条件を「場が無いことで止まる」に締めた | O |
 | 2c | ~~中間の判定の再検査~~ (2026-10-17 実装・試験 ALL PASS) (§4.7.1 (6)) | 合否に使う中間の判定の列挙と、固定した環境での実行し直し (または結び付けの確認)、必須のファイルの一覧を固定した版のコードから。正式な入口では `iteration`・`max_iterations` を必須に。合格: 正例 `run_0014_chain_v2` が accepted のまま。負例 総合 PASS と個別の FAIL・欠落の矛盾 (例 `cad.pass=false`)、必須のファイルが列挙から消える、で accepted を出さない **結果 (2026-10-17)**: (1) 両方のモード: `deliverables_check` が必須の部品の `pass` (cad・mesh・fluent; `deliverables.PASS_REQUIRED`)、MANIFEST の総合と部品・寸法の矛盾、必須のファイル (`deliverables.REQUIRED_FILES`、MANIFEST の列挙と別) を見る。(2) 承認のモード: 停止の判定 (`check_settled --end-step <停止> --no-write`) と計算の格子の品質 (承認で固定した AR・skew) を判定専用の環境で回し直す (`approval_rechecks`)。成果物は MANIFEST の `gate` (判定専用の環境で書き出した印; `gate_env deliverables`) が承認と合うものだけを使う。壁解像・V5b・V5c・線の定常は元から判定の側で計算している。試験: `run_wt_qualify_tests.py` ok 184 件・FAIL 0 (4c の負例 7: cad.pass=false・mesh の pass なし・必須のファイルの欠け・gate なし/違う)、`run_approval_rechecks_tests.py` (run_0014: 正例・停止 20000・AR 10・停止なし)、`run_gate_deliverables_tests.py` (run_0014 の写しから判定専用の環境で成果物一式が PASS・gate が承認と合う・判定の側が PASS)。実物の run_0014 は承認なしの経路で accepted のまま。**残り**: 起動の関門 (`launch_gate`) は forge-gate との統合 (#5) の後。承認のモードで accepted まで通る正例は、承認の後に作った run が要る (§6 V1b・V4 (a)) | O |
 | 3 | ~~要求の一致の照合~~ (2026-10-17 実装・試験 ALL PASS; 起動の前の呼び出しは #6) (§4.2) | 承認した要求 ↔ 実効の設定・境界条件・物性と分布のファイル。導出の関係 (組成の換算・物理と設計の `r_throat`・壁温の分布) を扱う。起動の前と出口の 2 回。合格: case/71 `run_0014_chain_v2` と試走 A (`case/90.qs_trial_a`) で一致、入口の Tt・壁温・組成・軸対称の別をずらした負例で止まる **結果 (2026-10-17)**: `approval.check_run_physics` (本段の solverConfig・bcondConfig・準備の記録 ↔ 承認と照合済みの問題 YAML): 入口の Pt・Tt・組成 (輸送種の配置の質量分率; `cfd_initial_line` の規則を使い回す)・熱力学 (thermalMethod・species・thermoHrefTemp)・種ごとの輸送と粘性のモデル・NS の乱流 (承認の時点の `runner_wt._config_sst_node` の雛形の値を承認に固定)・軸対称・壁 (一様の等温・分布 (準備の記録)・断熱)・出口の静圧。`check_run` に入れ、`wt_qualify --approval` が問題 YAML を渡す。試験: `run_approval_tests.py` (試走 A の正例、物理の変更 14 種で MISMATCH、数値の設定 (CFL・リミッタ) だけの変更は通る)、`run_approval_rechecks_tests.py` (case/71 run_0014 の正例 2 例目、停止規則の基準 wt_nozzle_v2 も一致)。**正式な入口の通しの正例** (`run_gate_deliverables_tests.py` (P4)): run_0014 の写しで、判定専用の環境で成果物を作り `wt_qualify --approval` が accepted (出口コア M 5.502842、V5c 0.0623 %・0.0573 %、保存済みの判定と同じ)。途中で FreeCAD の中の Python が checkout に `__pycache__` を書いて判定が止まったので、照合の前に `__pycache__` だけを消すようにした (3d840047)。入口の分布 (`inletProfile`) の run は照合の対象外で止める (今の風洞ノズルは一様入口) | O |
-| 4 | 親 plan の未実装の契約 (§4.1 の前提) | search の無い最小の campaign・入力の参照の解決 (snapshot・格子・物性・バイナリの固定)・`execution_plan.json`・設定の照合。合格: 計画を確定した後に参照の run の出力が増えても入力が変わらない負例・照合の不一致で止まる負例 | O |
+| 4a | 初期場の固定・継承する値の解決・適合性 (§4.1.1 の 1) | `prepare`・`prepare_ns` に初期場のファイルの引数、準備の記録にパス・step・sha256。継承するリミッタの基準値を計画の時点で解決して明示で渡す。初期場の適合性 (輸送種の配置・エネルギー基準・形状と格子の識別) の検査。合格: 計画を確定した後に参照の run に新しい場を足しても使う入力が変わらない (負例)、適合しない初期場で止まる | O |
+| 4b | 実効の計画の確定と、計画からの実行・照合 (§4.1.1 の 2・3) | `execution_plan.json` (準備の前・準備の後の確定、上書きしない)、版付きの recipe の段の列と許す差、`run_staged_ns` が計画を受け取り起動の直前に照合、終わった後の照合。合格: 判別の A/B (B は起動 0 回)、段の間の物理の差・計画に無い段で止まる、run_0014 の段の設定から計画を作り直すと一致 (GPU なし) | O |
+| 4c | search の無い campaign と親 plan の分担 (§4.1.1) | `forge.campaign/v1` (search なし、未知のキー・search・知らない recipe の拒否)。親 plan §5.1 #6・#7 を #6a/#6b・#7a/#7b に分け、§4.3 に例外を書く。合格: 正例 1・負例 3 以上 | O |
 | 5 | forge-gate と feature/card-local-mesh の統合、`judge_run` の v2 対応、qualification (§4.2) | 合格: run_0011 で RUN_VERDICT が SETTLE_VERDICT と整合、`SETTLED` でも壁解像 FAIL なら総合 FAIL、公差未達でも整定している例・必須の CAD の欠けの例の試験 | O |
 | 6 | 実行の入口・試行ごとの実行担当・予算・新しい出力先・台帳・再開・停止の記録・case の run 一覧の同期 (§4.3・§4.5・§4.8) | 合格: §6 V1a、障害の注入の試験 (起動の直後・結果の公開の直後の強制終了、同時の `--resume`、**CLI が死んでも予算の監視が続く、実行担当が死んだ後に forge だけが残らない、既存の runner を再び呼び出さずに再接続または新しい試行に引き継ぐ**)、予算の実行中の超過で止まる、再開で二重に起動しない、既存の出力先に書かない、停止の記録の欄がそろう、case の README の run 一覧にその campaign の行が出て他の行が残る | O |
 | 7 | idle 自動停止と実行器の準備の隙間 (§4.5) | GPU の通しの検証の前提。決め方を諮る | F |
@@ -473,6 +506,7 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | plan | 2026-10-17 | [2026-10-17-tooling-design-orchestrator-plan-2.md](../../notes/reviews/2026-10-17-tooling-design-orchestrator-plan-2.md) | GO-with-changes, C0/M4/m1 | 全件**採用** (採否は下の diagnose で諮った): M1 実行担当の障害 → 試行ごとの実行担当 + 停止の責任を外の service に (§4.5、#15・#6)。M2 格子の節点数の承認の流用 → 依頼ごとの承認済みの上限と承認元、Euler・NS とも照合 (§4.6・§4.7、#8、V2c)。M3 V1b の期待 → `accepted` + 成果物、「補正へ戻す」は試走 A の `run_0003_ns_p0` に固定 (§6 V1b)。M4 完了条件 → V4 (a) 決定的な recipe の通しを必須に (§6・§8)。m5 case の run 一覧の同期 (§4.8、#6) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-plan2-disposition-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-plan2-disposition-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-plan2-disposition.md](../../notes/reviews/briefs/2026-10-17-orchestrator-plan2-disposition.md)) | 5 件とも採用、M1 は反映が未完了 | 全件**採用**: M1 停止の責任を実行担当の外 (試行ごとの systemd の service、`ExitType=main`・`KillMode=control-group`・停止期限・`Restart=no`) に置き、全子孫の終了を確かめるまで新しい試行と予算の解放をしない、service が使えなければ起動を止める、GPU なしの `SIGKILL` の A/B を実装の先頭に (§4.5・§5・#15)。M2 「そのまま包む」→ 数値の処理を再利用し承認と上限の部分を置き換え、Euler・NS とも照合 (§4.6)。M3 fixture を試走 A の `run_0003_ns_p0` に固定、期待は `back_to_correction` (次の手は較正の規則しだい) (§6 V1b)。M4 未較正のカードと入力の参照を固定 (§6 V4 (a))。m5 破棄のときも同期・再開で台帳から修復・case ごとのロック (§4.8) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-approval-design-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-approval-design-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-approval-design.md](../../notes/reviews/briefs/2026-10-17-orchestrator-approval-design.md)) | 方向は採用、§4.7.1 は修正してから実装 (Major 4・Minor 2) | 全件**採用** (主セッションが根拠の行 `wt_qualify.py:203`・`:773`・`:898`・`deliverables.py:48`・手順書 §7.2 を確かめた): 承認の対象を生成した後の実効の条件 (評価の点数・定常性の条件・物性・実行の方針を含む) で決める、**カード全体の sha256 の一致を試行の入力の必須条件にする案は却下に従う** → 承認の原本と試行の入力を分ける、判定専用の環境 (外部の道具の実体・環境変数を引き継がない・import の元・未追跡のファイル)、`pip freeze` は補助の記録だけ、合否に使う中間の判定を全部再検査、`sources` の正規化と既定の照合、preview と write を分ける (§4.7.1、§5.1 #2a〜#2c、§6 V3) |
+| diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-minimal-campaign-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-minimal-campaign.md](../../notes/reviews/briefs/2026-10-17-orchestrator-minimal-campaign.md)) | C0/M3/m1 | 全件**採用** (主セッションが根拠の行 `runner_axismach.py:2946`・`:3002`・`:2676`・`:2523`・`:1777` を確かめた): **(b)・(d) の元の案は却下に従う** → 準備の前の固定・準備の後の確定・計画からの実行と前後の照合の 3 段、版付きの recipe が段の列と許す差を持つ、段の記録の key を全設定の証拠にしない (§4.1.1、#4b)。(c) は採用し、継承する値の解決と初期場の適合性を足す (#4a)。親 plan の #6・#7 を限定の実装と探索待ちに分ける (#4c) |
 
 ## 7. 影響範囲
 
@@ -491,6 +525,7 @@ V1a・V1b・V2a・V2b・V2c・V3・V4 (a)。V4 (a) は既知の正常のカー�
 
 ## 9. 変更ログ
 
+- `2026-10-17` — §5.1 #4 の設計 (§4.1.1) を codex (diagnose) に諮り、全件採用して書き直した: 計画の 3 段 (準備の前の固定・準備の後の確定・計画からの実行と照合)、継承する値の解決と初期場の適合性、親 plan の #6・#7 の分割。#4 を #4a・#4b・#4c に分けた。
 - `2026-10-17` — §5.1 #3 を実装: run の本段の物理の設定と承認の照合 (`approval.check_run_physics`)。正式な入口の通しの正例 (判定専用の環境で成果物 → `wt_qualify --approval` → accepted) を case/71 run_0014 の写しで確かめた。FreeCAD が checkout に書く `__pycache__` を照合の前に消す (3d840047)。
 - `2026-10-17` — §5.1 #2c を実装: 成果物の部品の `pass`・総合との矛盾・必須のファイル (両方のモード)、承認のモードで停止の判定と格子の品質の回し直し、成果物の gate の照合、`gate_env deliverables`。判定専用の環境で run_0014 の写しから成果物一式を作れた (FreeCAD・gmsh・変換器は承認のときの記録だけ)。#2 (#2a〜#2c) はこれで終わり。
 - `2026-10-17` — §5.1 #2b を実装: 判定専用の環境 (`forge_design/feedback/gate_env.py`)。試験 `design/tests/run_gate_env_tests.py` ALL PASS (正例 3・負例 8)。最初の版は sparse checkout に物性の DB (`solver_density_cuda/data`) が無く、試験の条件が甘くて通っていたのを直した (c4f69474)。

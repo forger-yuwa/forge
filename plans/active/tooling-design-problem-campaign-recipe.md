@@ -98,6 +98,11 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 - 成果物の参照は run ディレクトリ名でなく **candidate・形状 ID・メッシュ・輸送種配置・エネルギー基準・特定 snapshot と内容ハッシュ**で持ち、不一致を拒否する
   (現状の `ic_from` は run ディレクトリの最大番号 `res_*.h5` を拾い、継続計算後は別の場を読む: `runner_axismach.py:805`)。
 - 段ごとの実効設定と履歴は既存 `StageManifest` (`stage_manifest.json`) に保存し、**全段**を計画と照合する (最終 solverConfig だけを見ない)。
+- **今回の限定の実装の例外** (2026-10-17、子 plan [`tooling-design-orchestrator`](tooling-design-orchestrator.md) §4.1.1、codex 諮問
+  `notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md`): 副作用の無い `resolve_evaluation` はまだ作らない (runner の分解が要る)。代わりに、
+  準備の前に入力 (初期場のファイル・継承する値を含む) を固定し、**準備を先に行い、準備が生成した入力から各段の計画を確定**する (`ns_stage_configs` で全段の起動直前の設定の全文)。
+  実行は確定した計画だけを使い、各段の起動の直前に起動しようとする設定が計画と同じかを確かめ、違えば起動しない。走った後に計画を書き足して一致とはしない。
+  副作用の無い解決は、探索の需要が出たとき (#7b) に作る。
 
 ### 4.4 VERDICT の扱い
 
@@ -178,8 +183,8 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 | 3 | 熱力学の修正 | §4.6: TP の R を組成から・NS ω 床の T を EOS 整合で復元、γ/cp の参照定数化・fallback 禁止・未使用 `gamma` 引数整理。合格: 熱力学整合性の単体試験 (va3 で R 285.2704、IC 場で逆算 T と `res` の T の差 ≤0.01 K)、CPG / semiperfect / `frozen_tp` の読込試験。NS への影響は旧 run 比の変化量を記録 (不変を合格条件にしない) | O |
 | 4 | 評価量の抽出関数 | §4.7: 軸 M 目標差・軸 M 出口・出口質量流束平均 M/T・ṁ を 1 モジュールに定義 (版付き)。runner の `collect` と case の系列スクリプトをこれに置換。合格: `run_0509` で両旧定義との差を記録し、新定義で `check_quasisteady --series-csv` を再判定 | O |
 | 5 | ~~`run_staged` の段間引き継ぎ修正~~ | 完了 2026-09-27 (種 DB plan #3b で実施): `run_staged`/`run_staged_ns` の段間を restart_field (ビット一致、species ハッシュの継承つき) に。配管 run `case/44.vitiated_air_wt/run_0520_species_attrs_runner`。旧 runner 経路の run との本段の差は未計測 (丸め程度の見込み) | O |
-| 6 | スキーマ骨格と検証 | `forge.problem/v1` / `forge.campaign/v1`。problem の min/max 拒否、未知キー拒否、recipe ごとの `mesh` 節。合格: 単体テスト (正例 2・負例 5 以上) | O |
-| 7 | axismach adapter 契約 + `resolve_evaluation` | §4.2/§4.3 (入力の 3 分類、pass ごとの計画確定、snapshot ハッシュ参照、全段照合)。合格は §6 V1 | O |
+| 6 | スキーマ骨格と検証 (2026-10-17 に #6a・#6b に分けた: #6a = search の無い `forge.campaign/v1` と未知のキー・search・知らない recipe の拒否 (子 plan `tooling-design-orchestrator` §5.1 #4c で実装)、#6b = 探索のスキーマ・problem の min/max 拒否などの残り (探索の需要が出てから)) | `forge.problem/v1` / `forge.campaign/v1`。problem の min/max 拒否、未知キー拒否、recipe ごとの `mesh` 節。合格: 単体テスト (正例 2・負例 5 以上) | O |
+| 7 | axismach adapter 契約 + `resolve_evaluation` (2026-10-17 に #7a・#7b に分けた: #7a = 入力の参照の固定・準備の後の計画の確定・全段の照合 (子 plan §5.1 #4a・#4b で実装、上の §4.3 の例外)、#7b = adapter の 3 関数・副作用の無い `resolve_evaluation` (探索の需要が出てから)) | §4.2/§4.3 (入力の 3 分類、pass ごとの計画確定、snapshot ハッシュ参照、全段照合)。合格は §6 V1 | O |
 | 8 | recipe 2 本と campaign 実行器 | §4.4 の 3 値判定・勝者なし・補正後の再評価と最終順位、§4.8 のメッシュ/y₁⁺ ゲート。合格は §6 V2 | O |
 | 9 | length-dv plan の記述訂正 | `plans/accepted/tooling-nozzle-axismach-length-dv.md` §2 の「ドライバは汎用」に訂正注記 | O |
 | 10 | ベル・SERN の adapter 化 | axismach で V1/V2 が通った後。方針は別 plan で | F |
@@ -238,6 +243,7 @@ forge_design を「ユーザと対話しながら、機種 (風洞 axismach / �
 
 ## 9. 変更ログ
 
+- `2026-10-17` — §4.3 に今回の限定の実装の例外 (準備を先に行い、生成した入力から各段の計画を確定) を書き、§5.1 #6・#7 を限定の実装 (#6a・#7a、子 plan `tooling-design-orchestrator` §5.1 #4a〜#4c) と探索待ち (#6b・#7b) に分けた (codex 諮問 `notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md`)。
 - `2026-10-16` — §5 ステップ 5 (campaign 実行器・ledger) と要求カードからの入口の実装を子の plan `tooling-design-orchestrator.md` に切り出した (語彙はこの plan に合わせる、汎用 DAG は作らない)。
 
 - `2026-10-05` — ユーザ要求 (M6 設計の再現・別マッハ・寸法決め打ち/パレート) を受け、codex (diagnose) に諮って C2 方式を recipe `axismach.contur_c2/v1` として §4.9 に追加。実装順は旧基準の保存 → 評価量統一 → 熱力学 → 最小契約 → C2 → 壁表現 → 寸法固定/探索 (§5.1 #13–#15)。
