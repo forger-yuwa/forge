@@ -541,6 +541,22 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
     (9) バイナリ・変換器: 実行役が sha256 を計画に書く。値の一致は求めない (run_0014 は AWS B の FP64 のビルド、手元は別のビルド; 手元で回す V1a の制約)。
   - 合格: (1)〜(7) で許した正規化以外の差 0、(8)・(9) は記録の有無。旧の台本 (`p5_ns.py`・`p5_all.sh`・`p6_chain.sh`) の検査と実行役の関門の対応表で未対応 0。
     登録した負例 (#2〜#6 の試験) の通過 0。
+- **V1a の結果 (2026-10-17)**: **FAIL** (事前登録の文言どおり)。(1) 全段の設定・(2) 境界条件・(3) 前の段の設定・(8) 初期場の固定・(9) 記録は一致・あり。
+  (4) 停止の基準は `source.written` (書いた時刻; 事前登録の正規化に書き漏らした) が違い、(5) 節点の表 (3,830 行 vs 3,831 行)・(6) 格子 (座標と msh が違う、トポロジは一致)・
+  (7) 初期壁の数値 (x_E 40.633257 vs 40.630797) が違う。記録 `case/71.m55_combustion_wt/_runs/v1a_executor/`。codex (diagnose) に諮った
+  (`notes/reviews/2026-10-17-orchestrator-v1a-fail-diagnose.md`): FAIL は残し、呼び出し経路の差を別の検証 V1a′ で切り分ける。比較の台本 `compare.py` は部分文字列で除外していて
+  緩い (計測時間・配置のパスを除いた、停止規則を事前登録より広く比べた) ことも指摘された (記録として残し、V1a′ では使わない)。
+- **V1a′ の事前登録 (2026-10-17、結果を見る前; codex 諮問 v1a-fail の判別の A/B)**:
+  - 因子は呼び出し経路だけ。A = 旧の台本 `p6_chain.sh` と同じ呼び方 (`run_pass0_integral(prob, eref, run, ic_from=<run_0008 の写しのディレクトリ>, stop_rule=True, prepare_only=True)`)、
+    B = 実行役の CLI (`deltastar_loop --init-integral --ic-file … --ic-sha256 … --prepare-only`)。同じコード (commit)・Python と依存・変換器・数値に効く環境変数・問題 YAML・
+    Euler の参照・初期場 (写しのディレクトリには res_90000.h5 だけ置き、A が選ぶ最大番号の場が sha256 c64a73f1… であることを確かめる)。各 1 回準備 (forge 0 step)。
+  - **揺らぎの欄** (A と B を比べる前に決める): B を 2 回 (B1・B2) 準備し、B1 と B2 で違うキー (完全なキーパス) を記録する。A と B1 の比較では、この欄だけを除く。
+  - **比べるもの**: 全段の起動直前の設定 (`staged_ns_launch_configs` の全文)、`bcondConfig.yaml`・`solverConfig_prestage.yaml`・`solverConfig.yaml` (継承したリミッタの基準値を含む全キー)、
+    `settle_criteria.yaml` (全キー)、`settle_nodes.txt` (コメントの行を除く)、`nozzle.h5` の座標・トポロジと**補間した後の初期場** (VALUE の全データセットの値)、`nozzle.msh`、
+    `prepare_info.json` の全キー。
+  - **別に記すもの** (経路の違いそのもの; 合否に入れない): `prepare_info` の `stop_rule.explicit`・`stop_rule.requested_source` (A は明示、B は既定)、`ic_snapshot.how`・`ic_from`。
+  - **合格**: 比べるもので、揺らぎの欄と別に記すもの以外の差 0 → この入力について呼び出し経路の差を除外する (V1a とは別の検証として記録)。差が残れば、版の差だけの説明を棄却し、
+    最初に差が出た生成の段を調べる。**解釈の限定**: A = B でも、V6 との差の唯一の原因が #6e とは確定しない (環境・変換器も違う)。A を「V6 の再現」と呼ばない。
 - **V1b (GPU 1 pass、記録)**: 次の種類が V6 と同じであること。
   - REACHED・関門の pass・`delta_E.status ok`・成果物の実在・非有限 0。
   - qualification の判定は `accepted` (V6 の `case/71.m55_combustion_wt/run_0014_chain_v2/` は 3 係数で補正した壁で、保存した `WT_QUALIFICATION.json` は accepted:

@@ -11,6 +11,7 @@
   (R7) qualify が escalate など → 止まる、最後の試行が合格しなかった → 止まる
   (R8) 前の段が作った入力 (card_p1) が変わる → 止まる。変更の要求 (note: 新しい sha256 と理由) があれば通る
   (R9) NS の段の定義: k ≥ 1 は前の NS の最後の場を初期場に、Euler の参照を固定、run の名前は次の空き番号
+  (I1) 初期壁の係数の照合 (試走 A の NS p1; 係数を 1 % 変えたカードで違いを出す)
   (M1) README の同期: 表の後ろに印つきの行、ほかの行は残る、2 回目は印の間だけ置き換える
 
 実行: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_recipe_tests.py
@@ -113,6 +114,20 @@ with tempfile.TemporaryDirectory() as tdn:
     check("(R9) ns_p1: 前の NS の最後の場を初期場に、Euler の参照を固定、run の名前は次の空き番号",
           r["step"] == "ns_p1" and sd["ic_file"]["path"].endswith("res_42060.h5") and sd["euler_ref"]["res"].endswith("res_12000.h5")
           and Path(r["run_dir"]).name == "run_0008_ns_p1" and r["gpu"] is True, f"{r['run_dir']}")
+
+    print("== 初期壁の係数の照合 (旧の台本 p5_ns.py の検査)")
+    QA = Path(__file__).resolve().parents[2] / "case" / "90.qs_trial_a"
+    if (QA / "run_0005_ns_p1" / "prepare_info.json").is_file() and (QA / "card_p1.yaml").is_file():
+        ok1 = WC.initializer_mismatch(QA / "card_p1.yaml", QA / "run_0005_ns_p1" / "prepare_info.json")
+        bad_card = case / "card_bad_coef.yaml"
+        import yaml as _y
+        dd = _y.safe_load((QA / "card_p1.yaml").read_text())
+        dd["overrides"]["deltastar_initializer.delta_scale"] = float(dd["overrides"]["deltastar_initializer.delta_scale"]) * 1.01
+        bad_card.write_text(_y.safe_dump(dd, sort_keys=False, allow_unicode=True))
+        bad1 = WC.initializer_mismatch(bad_card, QA / "run_0005_ns_p1" / "prepare_info.json")
+        check("(I1) 試走 A の NS p1: カードの 3 係数が準備の記録にある、係数を 1 % 変えたカードでは違いを出す", ok1 == [] and len(bad1) == 1 and bad1[0].startswith("delta_scale"), f"{ok1} / {bad1}")
+    else:
+        print("飛ばした (I1): 試走 A が無い")
 
     print("== README の同期")
     (case / "README.md").write_text("# case\n\n概要\n\n## 計算 run 一覧\n\n| `run_*` | 目的 | 結果 | 状態 |\n| --- | --- | --- | --- |\n"

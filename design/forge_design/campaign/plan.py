@@ -80,7 +80,8 @@ def fnv1a64(text: str) -> str:
 
 # ---------------------------------------------------------------------------------------------------- 1. 準備の前
 
-def fixed_inputs(*, card, problem, approval, mesh_msh=None, ic=None, euler_ref=None, delta_table=None, forge_bin=None, converter=None) -> dict:
+def fixed_inputs(*, card, problem, approval, mesh_msh=None, ic=None, euler_ref=None, delta_table=None, forge_bin=None, converter=None,
+                 expected_initializer=None) -> dict:
     """準備の前に固定する入力 (パスと sha256)。ic は `campaign.ic.resolve_ic` の戻り (初期場のファイル・継承する値・元の run の記録)。"""
     def ent(p):
         return None if p is None else {"path": str(Path(p).resolve()), "sha256": sha256_file(p)}
@@ -88,7 +89,8 @@ def fixed_inputs(*, card, problem, approval, mesh_msh=None, ic=None, euler_ref=N
     conv = converter or os.environ.get("FORGE_CONVERTER")
     out = {"card": ent(card), "problem": ent(problem), "approval": ent(approval), "mesh_msh": ent(mesh_msh), "ic": ic,
            "euler_ref": ent(euler_ref), "delta_table": ent(delta_table), "forge_bin": ent(fb), "converter": ent(conv),
-           "env": {k: os.environ.get(k) for k in NUMERIC_ENV}, "fixed_at": _dt.datetime.now().isoformat(timespec="seconds")}
+           "env": {k: os.environ.get(k) for k in NUMERIC_ENV}, "fixed_at": _dt.datetime.now().isoformat(timespec="seconds"),
+           "expected_initializer": dict(expected_initializer or {})}
     miss = [k for k in ("card", "problem", "approval", "forge_bin") if out[k] is None or out[k]["sha256"] is None]
     if miss:
         raise ValueError(f"計画の入力が無い・読めない {miss}")
@@ -96,6 +98,26 @@ def fixed_inputs(*, card, problem, approval, mesh_msh=None, ic=None, euler_ref=N
 
 
 # ---------------------------------------------------------------------------------------------------- 2. 準備の後・起動の前
+
+def initializer_problems(expected: dict, ini: dict) -> list:
+    """準備の記録の initializer に、計画で期待した初期壁の係数 (カードの `deltastar_initializer.*`) が入っているか。型 (数値)・有限・値
+    (相対 1e-12) を確かめる。違い・欠け・非有限の列 (旧の台本 p5_ns.py の準備の時の検査; codex 2026-10-17 で NaN を通していた比較式を直した)。"""
+    import math
+    probs = []
+    for k, v in (expected or {}).items():
+        got = (ini or {}).get(k)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            if got != v:
+                probs.append(f"{k}: 準備の記録 {got!r} ≠ 期待 {v!r}")
+            continue
+        if isinstance(got, bool) or not isinstance(got, (int, float)):
+            probs.append(f"{k}: 準備の記録に数値が無い ({got!r})")
+        elif not (math.isfinite(float(got)) and math.isfinite(float(v))):
+            probs.append(f"{k}: 有限でない (準備の記録 {got!r}、期待 {v!r})")
+        elif abs(float(got) - float(v)) > 1e-12 * max(1.0, abs(float(v))):
+            probs.append(f"{k}: 準備の記録 {got!r} ≠ 期待 {v!r}")
+    return probs
+
 
 def _diff_paths(a_text: str, b_text: str) -> list:
     from ..evaluate import runner_axismach as RA
@@ -143,6 +165,7 @@ def confirm(run_dir, inputs: dict, *, stages: str = "full", attempt_id: str | No
     snap = (ic.get("snapshot") or {})
     if snap and (info.get("ic_snapshot") or {}).get("sha256") != snap.get("sha256"):
         probs.append(f"準備の記録の初期場 {info.get('ic_snapshot')} が計画の初期場 {snap} と違う")
+    probs += [f"初期壁の係数: {x}" for x in initializer_problems(inputs.get("expected_initializer"), info.get("initializer"))]
     msh = (inputs.get("mesh_msh") or {}).get("sha256")
     rec_msh = ((info.get("mesh") or {}).get("hashes") or {}).get("msh_sha256")
     if msh and rec_msh != msh:

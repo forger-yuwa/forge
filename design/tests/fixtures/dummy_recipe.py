@@ -26,6 +26,11 @@ class DummyRecipe:
                     "owned_paths": [run] if run else [], "estimate": s.get("estimate") or {}, "cwd": campaign["case_dir"]}
         return None
 
+    def run_env(self):
+        """走らせる環境の固定の試験用 (FORGE_DUMMY_ENV の値; 無ければ固定しない)。"""
+        v = os.environ.get("FORGE_DUMMY_ENV")
+        return {} if v is None else {"FORGE_DUMMY_ENV": {"value": v, "sha256": None}}
+
     def interpret(self, spec, attempt, status):
         return {"ok": status.get("state") == "finished", "detail": f"段 {spec['step']}: {status.get('state')}"}
 

@@ -14,6 +14,7 @@
   (N2) 計画をもう一度確定する → 上書きしない
   (N3) 前の段の物理 (乱流の dilatationCorrection) が本段と違う → 確定しない
   (N4) 計画の後に境界条件を変える → 起動 0 回で止まる
+  (P3)/(N7) 初期壁の係数 (カードの deltastar_initializer.*) を計画の確定で照合: 合えば確定、値の違い・NaN・欠けは確定しない
   (N6) 計画の確定の後に停止規則の基準を変える → 起動 0 回で止まる (旧の台本の「準備の後に変わっていない」の検査)
   (N5) 走った後の照合: 段の記録が計画と違う (S1 だけで止まった run) → MISMATCH。計画どおりの段の記録・起動の記録なら OK
 
@@ -181,6 +182,25 @@ try:
         res6 = str(e)[:200]
     check("(N6) 計画の確定の後に停止規則の基準を変える → 起動 0 回で止まる (旧の台本 p5_ns.py の検査)", launches() - n0 == 0
           and "settle_criteria.yaml が計画の確定の後に変わった" in res6, res6)
+    from forge_design.campaign.recipes.wt_card_chain import card_initializer
+    exp = card_initializer(C71 / "card_m55_3coef.yaml")
+    r7 = copy_run("N7ok")
+    try:
+        EP.confirm(r7, {**inputs_for(r7), "expected_initializer": exp})
+        ok7 = True
+    except ValueError as e:
+        ok7 = str(e)[:200]
+    check("(P3) カードの初期壁の係数が準備の記録にある → 計画を確定する", ok7 is True and len(exp) >= 3, f"{exp} {ok7}")
+    for nm, ed in (("値を 1 % 変える", lambda d: {**d, "delta_scale": float(d["delta_scale"]) * 1.01}),
+                   ("NaN", lambda d: {**d, "delta_scale": float("nan")}),
+                   ("準備の記録に無い係数", lambda d: {**d, "delta_unknown": 1.0})):
+        rn = copy_run(f"N7_{abs(hash(nm)) % 100000}")
+        try:
+            EP.confirm(rn, {**inputs_for(rn), "expected_initializer": ed(exp)})
+            okn, why = False, "確定した"
+        except ValueError as e:
+            okn, why = "初期壁の係数" in str(e) and not (rn / EP.PLAN_FILE).exists(), str(e)[:160]
+        check(f"(N7) 初期壁の係数: {nm} → 計画を確定しない (起動しない)", okn, why)
     v = EP.verify_after(ra)
     check("(N5) S1 だけで止まった run の走った後の照合 → MISMATCH (段の記録が計画と違う)", v["status"] == "MISMATCH"
           and any("段の記録" in p for p in v["problems"]), str(v["problems"])[:200])

@@ -14,6 +14,7 @@ systemd の user service の試行で回す (試験の recipe: design/tests/fixt
   (T10) 停止の途中の再開 → 待ってから取り込む
   (T11) 空きの容量が下限より小さい → 起動の前に止まる (試行を記録しない)
   (T12) 出力先の run が既にある → 起動の前に止まる
+  (T13) 走らせる環境が台帳を作ったときと違う → 再開で人に返す (旧の台本の FORGE_BIN の sha256 の固定に当たる)
 
 実行: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_driver_tests.py
 所要: 約 2〜3 分。systemd の user service が要る (無ければ飛ばす)。
@@ -251,6 +252,18 @@ try:
     r = drv(c, extra=("--min-free-bytes", "1e18"))
     check("(T11) 空きの容量が下限より小さい → 起動の前に止まる (試行を記録しない)",
           out_status(r).get("status") == "stopped" and "空きの容量" in out_status(r).get("why", "") and not ledger(c)["attempts"])
+
+    c = make_case("t13", [step("s1", "sleep 1"), step("s2", "sleep 1")])
+    os.environ["FORGE_DUMMY_ENV"] = "build-A"
+    r1 = drv(c, crash="after_ingest")
+    os.environ["FORGE_DUMMY_ENV"] = "build-B"
+    r2 = drv(c)
+    os.environ["FORGE_DUMMY_ENV"] = "build-A"
+    r3 = drv(c)
+    os.environ.pop("FORGE_DUMMY_ENV")
+    check("(T13) 走らせる環境 (forge の実行ファイルなど) が台帳を作ったときと違う → 再開で人に返す、同じなら続く",
+          r1.returncode == 99 and out_status(r2).get("status") == "human" and "走らせる環境" in out_status(r2).get("why", "")
+          and out_status(r3).get("status") == "done" and count(c, "s2") == 1, f"{out_status(r2)} / {out_status(r3)}")
 
     c = make_case("t12", [step("s1", "sleep 1")])
     (c / "run_s1").mkdir()

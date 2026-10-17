@@ -254,6 +254,21 @@ def _card_with_coefficients(src_card, coef_yaml, approval_path, out):
     Path(out).write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True))
 
 
+def card_initializer(card_path) -> dict:
+    """カードの overrides の `deltastar_initializer.*` (model を除く較正の係数) → {係数の名前: 値}。"""
+    return {k.split(".", 1)[1]: v for k, v in (yaml.safe_load(Path(card_path).read_text()).get("overrides") or {}).items()
+            if str(k).startswith("deltastar_initializer.") and k != "deltastar_initializer.model"}
+
+
+def initializer_mismatch(card_path, prepare_info_path) -> list:
+    """カードの較正の係数が準備の記録の initializer に入っているか (型・有限・値; `plan.initializer_problems`)。"""
+    from ..plan import initializer_problems
+    pi = Path(prepare_info_path)
+    if not pi.is_file():
+        return ["prepare_info.json が無い"]
+    return initializer_problems(card_initializer(card_path), json.loads(pi.read_text()).get("initializer") or {})
+
+
 def exec_step(sd: dict) -> dict:
     py = sys.executable
     case = Path(sd["case_dir"])
@@ -302,7 +317,9 @@ def exec_step(sd: dict) -> dict:
             ic = IC.resolve_ic(sd["ic_file"]["path"], sd["problem"], for_ns=True)
             if ic["snapshot"]["sha256"] != sd["ic_file"]["sha256"]:
                 raise ValueError("初期場の sha256 が前の段の記録と違う")
-        pin = EP.fixed_inputs(card=sd["card"], problem=sd["problem"], approval=sd["approval"], ic=ic, euler_ref=sd["euler_ref"]["res"])
+        # 初期壁の係数は計画の確定 (準備の後・起動の前) で照合する (合わなければ forge を起動しない; codex 2026-10-17 v1a-fail)
+        pin = EP.fixed_inputs(card=sd["card"], problem=sd["problem"], approval=sd["approval"], ic=ic, euler_ref=sd["euler_ref"]["res"],
+                              expected_initializer=card_initializer(sd["card"]))
         pin_f = Path(sd["out"]).parent / "plan_inputs.json"
         pin_f.write_text(json.dumps(pin, ensure_ascii=False, default=str))
         er = sd["euler_ref"]
@@ -320,10 +337,7 @@ def exec_step(sd: dict) -> dict:
         bad = {k: v for k, v in (_nonfinite(last) if last else {}).items() if v}
         vp = EP.verify_after(rd) if (rd / EP.PLAN_FILE).is_file() else {"status": "計画なし"}
         # 初期壁の係数: カードの overrides の deltastar_initializer.* が準備の記録の initializer に入っている (旧の台本 p5_ns.py の検査; §5.1 #6d)
-        ini = (json.loads((rd / "prepare_info.json").read_text()).get("initializer") or {}) if (rd / "prepare_info.json").is_file() else {}
-        want = {k.split(".", 1)[1]: v for k, v in (yaml.safe_load(Path(sd["card"]).read_text()).get("overrides") or {}).items()
-                if str(k).startswith("deltastar_initializer.") and k != "deltastar_initializer.model"}
-        ini_bad = [k for k, v in want.items() if k not in ini or (isinstance(v, (int, float)) and abs(float(ini[k]) - float(v)) > 1e-12 * max(1.0, abs(float(v))))]
+        ini_bad = initializer_mismatch(sd["card"], rd / "prepare_info.json")
         ok = (r.returncode == 0 and sr.get("status") == "REACHED" and hg.get("proceed") is True and sv.get("verdict") == "SETTLED"
               and not bad and vp["status"] == "OK" and not ini_bad)
         res.update(ok=ok, detail=f"deltastar_loop rc {r.returncode}・停止規則 {sr.get('status')}・受け渡しの関門 進む {hg.get('proceed')}・"
