@@ -287,6 +287,22 @@ def fake_extract_delta_e(run_dir, step, euler_ref, out_dir, sens_factor=SR.YB_SE
             "band_sensitivity": {"factor": float(sens_factor), "max_abs_B_minus_A_mm": 0.0, "x_m_at": 0.0}}
 
 
+def gate_mesh(h, wall_kind):
+    """投入の関門 (run_case.sh → launch_gate.py、plan tooling-generator-defaults-and-launch-gate §5.1 #10) がメッシュの品質
+    (check_mesh_quality.py --bcond) を見るので、node 変換と同じ置き方の primal の接続 (/VIZMESH/CONNE) と壁 (physID 3 = 上辺) の面を書く
+    (座標だけの h5 は検査できない入力として止まる; design/tests/run_stop_rule_tests.py の write_mesh と同じ形)。"""
+    nid = lambda i, j: i * NJ + j                                                       # noqa: E731
+    quads = [[nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)] for i in range(NI - 1) for j in range(NJ - 1)]
+    wall = [(nid(i, NJ - 1), nid(i + 1, NJ - 1)) for i in range(NI - 1)]
+    h["MESH/CONNE"] = np.array([x for n in range(NI * NJ) for x in (1, n)], dtype=np.int64)
+    h["VIZMESH/CONNE"] = np.array([x for q in quads for x in [5] + q], dtype=np.int64)
+    h["VIZMESH"].attrs["nVizCells"] = np.int64(len(quads))
+    b = h.create_group("BCONDS/3")
+    b["vizBfaceNodes"] = np.array([n for e in wall for n in e], dtype=np.int64)
+    b["vizBfaceSizes"] = np.full(len(wall), 2, dtype=np.int64)
+    b.attrs["bcondKind"] = wall_kind
+
+
 def make_run(name: str, scenario: dict, *, hold: int | None = 38000, cap: int = 100000, crit: dict | None = None,
              cfg_updates: dict | None = None, cfg_text: str | None = None, nodes: list | None = None) -> Path:
     """偽の forge 用の v2 の run (prepare_ns の出力の形: prepare_info.json の stop_rule・solverConfig・settle_criteria.yaml・節点の表)。"""
@@ -296,6 +312,7 @@ def make_run(name: str, scenario: dict, *, hold: int | None = 38000, cap: int = 
     np.save(rd / "fake_coord.npy", C)
     with h5py.File(rd / "nozzle.h5", "w") as h:
         h["MESH/COORD"] = C.ravel()
+        gate_mesh(h, "slip")
     c = crit if crit is not None else criteria(hold)
     first = c["grid"]["start_step"] + 2 * c["window"]["W"] + c["grid"]["out_step_interval"]
     (rd / "fake_scenario.json").write_text(json.dumps({"first_judgeable": first, **scenario}))

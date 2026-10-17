@@ -190,9 +190,11 @@ def prepare(problem_path, run_dir, nsteps=None, op=None) -> dict:
 
 
 def run_staged(run_dir, stages="full", soft_steps=2000, soft_cfl=0.5, soft_conv=0,
-               warm_lam_steps=0, warm_lam_cfl=0.2, mid_steps=0):
+               warm_lam_steps=0, warm_lam_cfl=0.2, mid_steps=0, problem=None):
+    """runner_sern.run_staged (段の宣言の機種は sern3d; plan tooling-generator-defaults-and-launch-gate §5.1 #11)。"""
     return R2.run_staged(run_dir, stages, soft_steps, soft_cfl=soft_cfl, soft_conv=soft_conv,
-                         warm_lam_steps=warm_lam_steps, warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps)
+                         warm_lam_steps=warm_lam_steps, warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps,
+                         recipe={"family": "sern3d", "problem": problem, "generator": "runner_sern3d.run_staged"})
 
 
 def warm_from_same_mesh(run_dir, res_h5, keep_turb: bool = True) -> None:
@@ -331,14 +333,20 @@ def forces3d(run_dir, step, p_a, F_ideal_per_m, half_W, H, x_ref=0.0, y_ref=0.0,
     return out
 
 
+def _force_hist3d(p, run_dir, info) -> list:
+    """3D の力係数の履歴 (collect と判定の系列 `runner_sern.write_force_series` が共有する)。"""
+    run_dir = Path(run_dir)
+    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]; xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
+    steps = sorted({int(f.stem.split("_")[-1]) for f in run_dir.glob("res_ramp_*_[0-9]*.h5")})
+    return [forces3d(run_dir, s, en["P"], info["F_ideal_N_per_m"], info["half_W_m"], H, float(xr) * H, float(yr) * H,
+                     ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell"),
+                     half_W_vehicle=info.get("half_W_vehicle_m")) for s in steps]
+
+
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
     p = load_problem(problem_path); run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
-    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]; xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
-    steps = sorted({int(f.stem.split("_")[-1]) for f in run_dir.glob("res_ramp_*_[0-9]*.h5")})
-    hist = [forces3d(run_dir, s, en["P"], info["F_ideal_N_per_m"], info["half_W_m"], H, float(xr) * H, float(yr) * H,
-                     ex["ro"] * ex["u"] ** 2 * H, ex["P"], twall_on_fluid=(info["discretization"] == "cell"),
-                     half_W_vehicle=info.get("half_W_vehicle_m")) for s in steps]
+    hist = _force_hist3d(p, run_dir, info)
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
@@ -373,7 +381,7 @@ def main(argv=None):
     rc = run_staged(a.run_dir, a.stages, int(o.get("soft_steps", a.soft_steps)),
                     soft_cfl=float(o.get("soft_cfl", 0.5)), soft_conv=int(o.get("soft_conv", 0)),
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
-                    mid_steps=int(o.get("mid_steps", 0)))
+                    mid_steps=int(o.get("mid_steps", 0)), problem=a.problem)
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
     print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
     g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}"); return rc

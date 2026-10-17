@@ -3,6 +3,8 @@
 
 重点は **節を取り違えないこと**: `time.last.control` を消すつもりで `time.deltaT.control` を消すと、
 必須キーが消えて起動しなくなる。フロー形・ブロック形・コメント付きの各形を見る。
+`time.last.time` の削除と `physProp.isAxisymmetric` → `mesh.isAxisymmetric` の移送 (plan tooling-generator-defaults-and-launch-gate
+§5.1 #25) も同じ形で見る。
 """
 import importlib.util, os, sys, yaml
 
@@ -139,6 +141,62 @@ got = yaml.safe_load(out)
 check(got.get('detectNaNInterval') is None and 'detectNaNInterval' not in got['time']['deltaT'],
       f'a null top-level key still wins; no duplicate is created: {got}')
 check(out.count('detectNaNInterval') == 1, 'no duplicate top-level key is appended')
+
+# --- time.last.time と physProp.isAxisymmetric (plan tooling-generator-defaults-and-launch-gate §5.1 #25) ---
+LASTTIME = """time:
+  last:
+    control: 0 # 0:nStep , 1:time base
+    nStepOuter: 10000
+    time: 1.00 # [second]
+  deltaT:
+    control: 1
+    cfl: 2.0
+"""
+got, out, drops, move = roundtrip(LASTTIME)
+check(got['time'] == {'last': {'nStepOuter': 10000}, 'deltaT': {'control': 1, 'cfl': 2.0}},
+      f'block: time.last.time and time.last.control removed, time.deltaT.control kept: {got}')
+check('[second]' not in out and 'deltaT:' in out, 'the comment of time.last.time goes with its line')
+got, out, drops, move = roundtrip('time:\n  last: {nStepOuter: 10000, time: 1.00}\n  deltaT: {control: 1, cfl: 2.0}\n')
+check(got['time'] == {'last': {'nStepOuter': 10000}, 'deltaT': {'control': 1, 'cfl': 2.0}}, f'flow: time.last.time removed: {got}')
+out, status = m.migrate_one('time:\n  last: {nStepOuter: 10, time: 1.0}\n')
+out2, status2 = m.migrate_one(out)
+check(status == 'ok' and status2 == 'clean', f'time.last.time removal is a plain drop and idempotent: {status} / {status2}')
+
+AXB = """mesh:
+  meshFileName: "a.h5"
+  discretization: "node"   # node
+physProp:
+  isAxisymmetric: 1   # 旧キー
+  thermalMethod: 0
+time:
+  last: {nStepOuter: 10}
+"""
+out, status = m.migrate_one(AXB)
+got = yaml.safe_load(out)
+check(status == 'moved' and got['mesh'] == {'meshFileName': 'a.h5', 'discretization': 'node', 'isAxisymmetric': 1}
+      and got['physProp'] == {'thermalMethod': 0}, f'block: physProp.isAxisymmetric moves to mesh with its value: {status} {got}')
+check(out.count('isAxisymmetric') == 1 and '  isAxisymmetric: 1\nphysProp:' in out, f'inserted once, at the end of the mesh block:\n{out}')
+AXF = 'mesh: {meshFileName: "a.h5", discretization: "node"}\nphysProp: {thermalMethod: 0, isAxisymmetric: 1, cp: 1004.5}\n'
+out, status = m.migrate_one(AXF)
+got = yaml.safe_load(out)
+check(status == 'moved' and got == {'mesh': {'meshFileName': 'a.h5', 'discretization': 'node', 'isAxisymmetric': 1},
+                                    'physProp': {'thermalMethod': 0, 'cp': 1004.5}}, f'flow: moved: {got}')
+out, status = m.migrate_one('mesh: {meshFileName: "a.h5", isAxisymmetric: 0}\nphysProp: {isAxisymmetric: 1, thermalMethod: 0}\n')
+got = yaml.safe_load(out)
+check(status == 'ok' and got == {'mesh': {'meshFileName': 'a.h5', 'isAxisymmetric': 0}, 'physProp': {'thermalMethod': 0}},
+      f'mesh side present: only the old key goes (the effective value stays mesh 0): {status} {got}')
+out, status = m.migrate_one('mesh: {meshFileName: "a.h5"}\nphysProp: {isAxisymmetric: , thermalMethod: 0}\n')
+check(out is None and status.startswith('skip:') and '空' in status, f'an empty old key is reported, not moved: {status}')
+out, status = m.migrate_one('mesh: {meshFileName: "a.h5", isAxisymmetric: }\nphysProp: {isAxisymmetric: 1}\n')
+check(out is None and status.startswith('skip:'), f'an empty mesh key is reported: {status}')
+out, status = m.migrate_one('physProp: {isAxisymmetric: 1, thermalMethod: 0}\n')
+check(out is None and status.startswith('skip:') and 'mesh 節' in status, f'no mesh section: reported: {status}')
+out, status = m.migrate_one(AXB)
+out2, status2 = m.migrate_one(out)
+check(status2 == 'clean' and out2 is None, f'the axisymmetric move is idempotent: {status2}')
+hp = m.handled_paths()
+check(hp.get('time.last.time') == '消す' and 'mesh.isAxisymmetric' in hp.get('physProp.isAxisymmetric', ''),
+      f'handled_paths lists the new keys: {hp}')
 
 print('ALL PASS' if fails == 0 else f'FAILED ({fails})')
 sys.exit(1 if fails else 0)

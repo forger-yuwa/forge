@@ -193,8 +193,10 @@ def conditions(run, F):
         fl = b.get("floats") or {}
         val = ", ".join(f"{k} {v:g}" if isinstance(v, (int, float)) else f"{k} {v}" for k, v in fl.items()) or "—"
         bcrows.append([str(b.get("physID")), name, str(b.get("kind")), val])
+    # 軸対称は solver と同じ優先順 (mesh.isAxisymmetric、無ければ旧 physProp.isAxisymmetric; solverConfig.cpp:945・:953)
+    axi = mesh.get("isAxisymmetric") if mesh.get("isAxisymmetric") is not None else pp.get("isAxisymmetric")
     num = [
-        ["離散化", f"{mesh.get('discretization', '?')} 中心、軸対称 {'あり' if mesh.get('isAxisymmetric') else 'なし'}"],
+        ["離散化", f"{mesh.get('discretization', '?')} 中心、軸対称 {'あり' if int(axi or 0) == 1 else 'なし'}"],
         ["対流スキーム", f"{cfg.get('solver', '?')}、convMethod {sp.get('convMethod')} (2 次)、limiter {sp.get('limiter')}" + (f"、limiterScaled {sp['limiterScaled']}" if 'limiterScaled' in sp else "")],
         ["時間積分", f"定常 (擬似時間)、timeIntegration {tm.get('timeIntegration')}、blockDPLUR {dT.get('blockDPLUR')}、CFL {dT.get('cfl')}、implicitRelax {dT.get('implicitRelax', '—')}"],
         ["step 数", f"{tm.get('last', {}).get('nStepOuter')} (出力間隔 {tm.get('outStepInterval')})"],
@@ -318,8 +320,9 @@ def metrics(run, F, euler=None):
 
 
 # ------------------------------------------------------------------ 量別の準定常 VERDICT (--verdicts)
-# check_quasisteady.py の VERDICT と同じ綴りだけを受ける (それ以外は打ち間違いとして拒否する)
-QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING", "NONFINITE")
+# check_quasisteady.py の VERDICT と同じ綴りだけを受ける (それ以外は打ち間違いとして拒否する)。INDETERMINATE (判定不能: step の重複・逆行、
+# 評価量ゼロなど; 2026-10-15 plan tooling-convergence-and-wall-resolution-gates §4.6-3 で check_quasisteady・judge_run が返す) も載せられる
+QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING", "NONFINITE", "INDETERMINATE")
 # 報告が知っている量のキー。評価量の表の行に対応するのは主の線 r/r_w = 0.03 の 4 つ (wave・overshoot・slope・range) と
 # exit_core_M・mdot_ratio・condensation (build_pptx.QS_ROW_KEY)。r/r_w = 0.1 の 4 つは比較用 (2026-10-16 までの主の線) で、
 # 渡されれば表の末尾に別行で載る。これ以外のキーも表の末尾に別行で載せる

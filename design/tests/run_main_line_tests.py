@@ -13,6 +13,12 @@
     本段の起動の前に出て、本段の設定・初期の場・前の段の設定の sha256 が実際のファイルと一致する。
 (e) 不正な main_line・cfl_main との併記・main_line.relax と違う implicit_relax・ramp との組み合わせ・前の段の元の設定と本段の不整合は ValueError。
 design_chain・メッシュ・変換器・forge は使わない (設定を作る関数と段の導出を関数の単位で試す)。
+
+#11 (2026-10-15、plan tooling-generator-defaults-and-launch-gate §5.1 #11) から `_ns_configs` は機種のプロファイルに合う設定に
+明示すべきキーを旧い実効値で足す (前の段の元の設定と本段の設定を別々に; B0 は足す前の設定に当てる)。そこで (a) の run_0752 との
+差には足したキー (相手は書いていない、値は旧い実効値) が加わり、文字列の比較は足した断片を除いて行う。(b)・(e) の S1・S2 には
+B0 だけのキーのうち「切った値」(lineImplicit・lineDtDirectional・implicitThermalJacobian = 0、`RA._MAIN_LINE_OFF`) と
+implicitRelax 1.0 (緩和なし = 省略と同じ実効値) が明示で入る。B0 の当て方の単体 (e') は足す前の設定で試す。
 """
 import hashlib
 import json
@@ -98,12 +104,32 @@ def with_ml(ml=None, drop_cfl=True, **ev):
     return edit
 
 
+RECS = {}                       # tag → _ns_configs が足した明示すべきキー {family, prestage, main} (#11)
+
+
 def configs(p, tag, cfl_main=None, implicit_relax=None, ml=None):
     rd = TMP / f"rd_{tag}"
     rd.mkdir()
     n = int(p.evaluate.get("nStepOuter", 48000))
     out_int = int(p.evaluate.get("outStepInterval", max(n // 6, 1)))
-    return RA._ns_configs(p, rd, n, out_int, cfl_main, implicit_relax, ml)
+    rec = RECS.setdefault(tag, {})
+    return RA._ns_configs(p, rd, n, out_int, cfl_main, implicit_relax, ml, record=rec)
+
+
+def strip_explicit(text, added):
+    """#11 で足した明示すべきキーの断片 (flow 形式の `, key: 値`) を除く (足す前の設定)。断片が 1 か所に決まらなければ AssertionError。"""
+    from forge_design.evaluate.config_builder import _token
+    for k, v in (added or {}).items():
+        frag = f", {k.split('.')[-1]}: {_token(v)}"
+        assert text.count(frag) == 1, (k, frag)
+        text = text.replace(frag, "", 1)
+    return text
+
+
+def b0_left(cfg):
+    """B0 だけのキーのうち残っているもの (#11 の明示すべきキーとして「切った値」で書いたもの `_MAIN_LINE_OFF` は数えない)。"""
+    return [".".join(pth) for pth in B0_ONLY if get(cfg, pth) is not RA._CFG_MISSING
+            and not (pth in RA._MAIN_LINE_OFF and get(cfg, pth) == RA._MAIN_LINE_OFF[pth])]
 
 
 def get(text, path):
@@ -125,20 +151,26 @@ else:
           and ml["limiter_ref"] == {"limiterRoRef": 0.8739869154, "limiterPRef": 387491.0573, "limiterARef": 359.7712185}
           and len(ml["extra_fields"]) == 12, ml)
     base, main = configs(p_ml, "ml", ml=ml)
+    added_main = RECS["ml"]["main"]
     ref = REF_0752
     diff = RA._cfg_diff_paths(RA._cfg_load(ref), RA._cfg_load(main))
-    allowed = {("time", "last", "nStepOuter"), ("time", "outStepInterval"), ("time", "deltaT", "lineDtDirectionalCap"),
-               ("mesh", "axisSegmentRWeight")}
-    check("(a) run_0752 との差は nStepOuter・outStepInterval・lineDtDirectionalCap・mesh.axisSegmentRWeight だけ",
-          set(diff) <= allowed, {".".join(k): v for k, v in diff.items() if k not in allowed})
-    check("(a) その 4 つの値 (相手 170000・2500・1.0・1 / こちら 12000・1000・50.0・無し = 既定 1)",
+    added_paths = {tuple(k.split(".")) for k in added_main}
+    allowed = {("time", "last", "nStepOuter"), ("time", "outStepInterval"), ("time", "deltaT", "lineDtDirectionalCap")} | added_paths
+    check("(a) run_0752 との差は nStepOuter・outStepInterval・lineDtDirectionalCap と #11 で足した明示すべきキーだけ",
+          set(diff) <= allowed and "mesh.axisSegmentRWeight" in added_main, {".".join(k): v for k, v in diff.items() if k not in allowed})
+    check("(a) その 3 つの値 (相手 170000・2500・1.0 / こちら 12000・1000・50.0)、足したキーは相手が書いていないか同じ値 "
+          "(axisSegmentRWeight は相手も 1 を明示)",
           diff.get(("time", "last", "nStepOuter")) == (170000, 12000) and diff.get(("time", "outStepInterval")) == (2500, 1000)
           and diff.get(("time", "deltaT", "lineDtDirectionalCap")) == (1.0, 50.0)
-          and diff.get(("mesh", "axisSegmentRWeight"), (None, None))[0] == 1
-          and diff.get(("mesh", "axisSegmentRWeight"), (None, None))[1] is RA._CFG_MISSING, diff)
-    norm = (main.replace("nStepOuter: 12000", "nStepOuter: 170000").replace("outStepInterval: 1000", "outStepInterval: 2500")
+          and ("mesh", "axisSegmentRWeight") not in diff
+          and all(diff.get(pth, (RA._CFG_MISSING, v))[0] is RA._CFG_MISSING and diff.get(pth, (None, v))[1] == v
+                  for pth, v in ((tuple(k.split(".")), v) for k, v in added_main.items()) if pth != ("mesh", "axisSegmentRWeight")),
+          diff)
+    norm = (strip_explicit(main, added_main).replace("nStepOuter: 12000", "nStepOuter: 170000")
+            .replace("outStepInterval: 1000", "outStepInterval: 2500")
             .replace("lineDtDirectionalCap: 50.0", "lineDtDirectionalCap: 1.0").replace("mesh: {", "mesh: {axisSegmentRWeight: 1, ", 1))
-    check("(a) 4 つを揃えると run_0752 と文字列でも一致 (キーの順・値の書き方が cold_cfl.py prep と同じ)", norm == ref)
+    check("(a) 足したキーを除いて 3 つを揃え axisSegmentRWeight を先頭に書くと run_0752 と文字列でも一致 "
+          "(キーの順・値の書き方が cold_cfl.py prep と同じ)", norm == ref)
     # 前の段の元の設定 = main_line の無い元の YAML の本段の設定 (cfl_main 1.0 は既定と同じなので外しても同じ)
     p_orig = load_problem(TW300)
     base0, main0 = configs(p_orig, "orig")
@@ -151,15 +183,15 @@ else:
     pre0, main0_f, _ = RA.ns_stage_configs(main0, "full")
     check("(b) 段は S1_soft・S2_mid・本段", [t for t, *_ in pre] == ["S1_soft", "S2_mid"] and main_f == main)
     for (tag, cfg, nsteps, want), (_, cfg0, _, _) in zip(pre, pre0):
-        left = [".".join(pth) for pth in B0_ONLY if get(cfg, pth) is not RA._CFG_MISSING]
-        check(f"(b) {tag}: ライン陰解法・上限・ITJ・リミッタの基準値・extraFields が無い", not left, left)
+        left = b0_left(cfg)
+        check(f"(b) {tag}: ライン陰解法・上限・ITJ・リミッタの基準値・extraFields が無い (#11 の切った値 0 は除く)", not left, left)
         check(f"(b) {tag}: main_line の無い元の YAML の {tag} と文字列で一致 (cfl・次数・nStepInner・implicitRelax 無し)",
               cfg == cfg0)
         check(f"(b) {tag}: cfl {want['cfl']}・convMethod 0・nStepInner 10・3000 step",
               get(cfg, ("time", "deltaT", "cfl")) == want["cfl"] == get(cfg, ("time", "deltaT", "cfl_pseudo"))
               and get(cfg, ("space", "convMethod")) == 0 and get(cfg, ("time", "nStepInner")) == 10
               and get(cfg, ("time", "last", "nStepOuter")) == 3000 == nsteps
-              and get(cfg, ("time", "deltaT", "implicitRelax")) is RA._CFG_MISSING)
+              and get(cfg, ("time", "deltaT", "implicitRelax")) == 1.0)    # #11: 明示すべきキー (緩和なし = 省略と同じ実効値)
     pre_bad, *_ = RA.ns_stage_configs(main, "full")
     check("(b) 対照: 前の段の元の設定を渡さないと S1 に B0 が残る (codex の指摘の再現)",
           get(pre_bad[0][1], ("time", "deltaT", "lineImplicit")) == 1
@@ -257,9 +289,8 @@ else:
         check(f"(e) {name}: 受け付け、前の段の元の設定に implicitRelax 0.7", get(b_r, ("time", "deltaT", "implicitRelax")) == 0.7)
         check(f"(e) {name}: 本段の設定は relax を併記しないときと文字列一致", m_r == main, None if m_r == main else "差あり")
         pre_r, _, _ = RA.ns_stage_configs(m_r, "full", cfg_pre=b_r)
-        check(f"(e) {name}: S1・S2 も implicitRelax 0.7 (B0 だけのキーは無い)",
-              all(get(c, ("time", "deltaT", "implicitRelax")) == 0.7 and not [pth for pth in B0_ONLY if get(c, pth) is not RA._CFG_MISSING]
-                  for _, c, _, _ in pre_r))
+        check(f"(e) {name}: S1・S2 も implicitRelax 0.7 (B0 だけのキーは無い; #11 の切った値 0 は除く)",
+              all(get(c, ("time", "deltaT", "implicitRelax")) == 0.7 and not b0_left(c) for _, c, _, _ in pre_r))
     for i, (name, mod) in enumerate((("line: only", {"line": "only"}), ("未知のキー isp", {"isp": 1}), ("itj 4 (ビット 1 無し)", {"itj": 4}),
                       ("itj true", {"itj": True}), ("itj 8", {"itj": 8}), ("relax 1.5", {"relax": 1.5}), ("cap 0", {"cap": 0}),
                       ("cfl 文字列", {"cfl": "4"}), ("limiter_ref に a が無い", {"limiter_ref": {"ro": 1.0, "p": 1.0}}),
@@ -271,12 +302,13 @@ else:
     # 基準値を書かない (forge が本段の開始の場で決めて limiter_ref.json に書く)。それ以外は同じ
     src_auto = {}
     ml_auto = RA._main_line_spec(problem("e_nolr", with_ml({k: v for k, v in ML.items() if k != "limiter_ref"})), source_out=src_auto)
-    m_auto = RA._apply_main_line(base, ml_auto)
+    # B0 の当て方の単体は足す前の設定で (#11: 明示すべきキーを足す前の設定に当てる; 下の (e') と同じ)
+    m_auto = RA._apply_main_line(strip_explicit(base, RECS["ml"]["prestage"]), ml_auto)
     check("(e) limiter_ref の省略は自動 (limiter_ref {}・由来 auto; 戻りのキーは今までと同じ)", ml_auto["limiter_ref"] == {}
           and src_auto["limiter_ref"]["mode"] == "auto" and set(ml_auto) == set(ml))
     check("(e) 自動の本段の設定: 基準値のキーが無く、明示の本段との差は基準値 3 つだけ",
           all(get(m_auto, ("space", k)) is RA._CFG_MISSING for k in ("limiterRoRef", "limiterPRef", "limiterARef", "limiterRefLength"))
-          and set(RA._cfg_diff_paths(RA._cfg_load(m_auto), RA._cfg_load(main)))
+          and set(RA._cfg_diff_paths(RA._cfg_load(m_auto), RA._cfg_load(strip_explicit(main, added_main))))
           == {("space", k) for k in ("limiterRoRef", "limiterPRef", "limiterARef")})
     rejects("(e) lowMachPrecond 2 の設定に B0", lambda: RA._apply_main_line(base.replace("lowMachPrecond: 0", "lowMachPrecond: 2"), ml),
             "lowMachPrecond")
@@ -284,9 +316,11 @@ else:
     rejects("(e) 前の段の元の設定がある run の stages ramp", lambda: RA.ns_stage_configs(main, "ramp", cfg_pre=base), "ramp")
     rejects("(e) 前の段の元の設定と本段の差が B0 以外 (convMethod)",
             lambda: RA.ns_stage_configs(main.replace("convMethod: 1", "convMethod: 2"), "full", cfg_pre=base), "convMethod")
-    m2 = RA._apply_main_line(base, {**ml, "extra_fields": None})
+    # B0 の当て方の単体は足す前の設定で (#11: `_ns_configs` は B0 を足す前の設定に当ててから明示すべきキーを足す)
+    m2 = RA._apply_main_line(strip_explicit(base, RECS["ml"]["prestage"]), {**ml, "extra_fields": None})
     check("(e') extra_fields 無しなら output を書かない (他は同じ)",
-          get(m2, ("output",)) is RA._CFG_MISSING and RA._cfg_diff_paths(RA._cfg_load(m2), RA._cfg_load(main)).keys() == {("output",)})
+          get(m2, ("output",)) is RA._CFG_MISSING
+          and RA._cfg_diff_paths(RA._cfg_load(m2), RA._cfg_load(strip_explicit(main, added_main))).keys() == {("output",)})
     pr = RA.ns_stage_configs(main.replace("nStepOuter: 12000", "nStepOuter: 200000"), "full", cfg_pre=base)
     check("(e') 本段の長さ (nStepOuter) を後で変えても前の段は同じ", [c for _, c, *_ in pr[0]] == [c for _, c, *_ in pre])
 

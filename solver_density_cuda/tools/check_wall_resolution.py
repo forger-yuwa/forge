@@ -31,6 +31,17 @@ usage:
   python3 solver_density_cuda/tools/check_wall_resolution.py <mesh.h5> --geometry-only \
       [--bcond bcondConfig.yaml]
 
+群と時刻 (2026-10-15、plan tooling-nozzle-isothermal-wall-chain §5.1 #36q、codex diagnose 同日 Major 3):
+
+- `--groups` を渡したら、**指定した群が全部**壁ダンプに見つからなければ判定不能 (rc 2)。以前は見つかった群だけを
+  評価したので、合格する壁 1 つを残して別の壁の出力が欠けても PASS になった。
+- `--step` を渡したら、**その step の壁ダンプが無い群は判定不能** (rc 2)。以前は最新の step に黙って戻ったので、
+  停止の step の出力が欠けても別の時刻の値で PASS になった。`--step` を省いたときは従来どおり群ごとの最新。
+- `--groups` を省くと bcondConfig.yaml の no-slip 壁 (kind wall*) が全部対象で、**どれかの壁にダンプが一度も無ければ判定不能**
+  (2026-10-17)。kind が wall* でない境界の出力 (出口の `outputHDFflg: 1` など) は対象外。bcondConfig を読めなければ判定不能、
+  bcondConfig が無い run だけは従来どおり壁ダンプを全部拾う。
+- 超過の数え方 `--weight` の既定は `point` (点数の割合) のまま。面積で判定したい呼び出し側は `--weight area` を明示する。
+
 `--geometry-only` は $y_1$ だけを出す ($y_1^+$ は $\tau_w$ が要るので出さない)。
 **入力値 (`first_wall_frac` など) は保証にならない**: 分布関数が公比上限で打ち切る・両側 tanh が
 要求どおり刻まないなどで、生成された格子の第一層厚は入力とずれる。既存 run の $y_1^+$ と
@@ -70,6 +81,17 @@ def mu_of(T, cfg):
     if vm == 1:
         return MU0 * (T / T0_SUTH) ** 1.5 * (T0_SUTH + S_SUTH) / (T + S_SUTH)
     return None            # 多成分 (Chapman-Enskog/Wilke) は組成が要る -> 判定不能
+
+
+def run_axisymmetric(cfg):
+    """run の config が軸対称か (面積の重みに 2πr を掛けるか)。solver と同じ優先順 (`mesh.isAxisymmetric`、無ければ旧
+    `physProp.isAxisymmetric`) で読む (`check_solver_config.effective_axisymmetric`; 2026-10-15 までは mesh だけを見て、
+    旧キーだけの軸対称の run を平面として重みを作っていた)。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import check_solver_config as csc
+    return csc.effective_axisymmetric(cfg or {}) == 1
 
 
 def face_centroids(xyz, conne):
@@ -243,9 +265,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("run")
     ap.add_argument("--mesh", default=None, help="既定は <run>/mesh.h5")
-    ap.add_argument("--step", type=int, default=None, help="既定は最後の壁ダンプ")
+    ap.add_argument("--step", type=int, default=None,
+                    help="既定は群ごとの最後の壁ダンプ。指定したら、対象の壁の全部にその step の壁ダンプが要る (無ければ判定不能; "
+                         "最新の step に戻らない、2026-10-15・10-17)")
     ap.add_argument("--groups", default=None, help="壁群名をカンマ区切り (既定は bcondConfig の no-slip 壁 (kind wall*) 全部で、"
-                                                   "どれかの壁のダンプが無ければ判定不能。bcondConfig が無い run は壁ダンプ全部)")
+                                                   "どれかの壁のダンプが無ければ判定不能。bcondConfig が無い run は壁ダンプ全部)。"
+                                                   "指定した群が 1 つでも見つからなければ判定不能 (2026-10-15)")
     ap.add_argument("--target", type=float, default=1.0, help="低 Re の局所 y1+ 目標 (既定 1)")
     ap.add_argument("--over-frac", type=float, default=2.0,
                     help="目標超過を許す割合 [%%] (既定 2、数え方は --weight)。**判定はここで行う**: "
@@ -290,7 +315,7 @@ def main():
         print("mesh h5 が無い (config の mesh.meshFileName も見た): %s" % (mesh or a.run))
         return 2
     wt = int(((cfg or {}).get("turbulence", {}) or {}).get("wallTreatmentSST", 0))
-    axisym = bool(int(((cfg or {}).get("mesh", {}) or {}).get("isAxisymmetric", 0) or 0))
+    axisym = run_axisymmetric(cfg)
 
     if a.geometry_only:
         return geometry_only(mesh, a)
@@ -304,7 +329,7 @@ def main():
             found.setdefault((m.group(1), int(m.group(2))), []).append((int(m.group(3)), d))
     if not found:
         print("壁面ダンプ res_<群>_<physID>_<step>.h5 が無い: %s" % a.run); return 2
-    want = set(x.strip() for x in a.groups.split(",")) if a.groups else None
+    want = set(x.strip() for x in a.groups.split(",") if x.strip()) if a.groups else None
     # 既定 (--groups 無し) では bcondConfig.yaml で kind が wall* でない境界のダンプ (出口の outputHDFflg: 1 など) を対象外にする。
     # 壁でない面には twall が無いので、以前は「判定不能」になって受け渡しの関門を止めていた (2026-10-15 case/71 run_0003_ns_cont)。
     # 名前が bcond に無いダンプは従来どおり評価する (判定を弱めない)。bcond を読めないときは、以前はダンプを全部評価したが、
@@ -546,10 +571,10 @@ def main():
         else:
             evaluated.append((name, pid, step))
 
-    if not any_eval:
-        print("\nVERDICT: INDETERMINATE (評価できた壁が無い)"); return 2
     if fails:
         print("\nVERDICT: INDETERMINATE (判定不能: %s)" % ", ".join(fails)); return 2
+    if not any_eval:
+        print("\nVERDICT: INDETERMINATE (評価できた壁が無い)"); return 2
     # 評価した壁と step (呼び出し側が要求した壁・step と照合するための行; 書式 名前/physID@step; 2026-10-17 §5.1 #7b)
     print("\nEVALUATED: %s" % ", ".join("%s/%d@%d" % e for e in evaluated))
     if wt == 0:

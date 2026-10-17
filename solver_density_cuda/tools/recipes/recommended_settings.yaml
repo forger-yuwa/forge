@@ -1,0 +1,2117 @@
+# 機種と段ごとの推奨設定 (プロファイル) — 値の正本
+#
+# plan tooling-generator-defaults-and-launch-gate §4.0・§4.1・§5.1 #6。読み込み・照合・宣言・文書の生成は
+# `solver_density_cuda/tools/recipe_settings.py`。`procedures/recommended-settings.md` の機種ごとの表はこのファイルから生成する
+# (`recipe_settings.py --doc --write procedures/recommended-settings.md`)。
+#
+# - 共通プロファイル (common_*): recommended-settings.md §1・§1.1・§1.2・§2 (機種に依らない共通部分と、機種の決まっていない
+#   手書きの run の既定)。
+# - 機種ごとのプロファイル (生成区間): 段取り 1 では「今の生成器が実際に書く設定」の書き写し。代表の問題で生成器を回して作る
+#   (`recipes/regen_profiles.py`、手で値を写さない)。§1 との差は `differs_from_recommended` (受入の状態は「未」)。
+#   機種の生産レシピへ揃えるのは段取り 2 (plan §5.1 #12)、§1 へ寄せるのは段取り 3 (§6.4・#15)。
+#
+# キーは完全修飾パス (`time.deltaT.cfl_pseudo`)。各段の `fixed` は違えば FAIL、`advisory` は範囲 ([lo, hi] / {in: [...]} / any)
+# の外で WARN、`forbid` は書けば FAIL。どれにも無いキーは `problem_keys` か `ignore` でなければ FAIL (逸脱を宣言すれば通す)。
+# 各段の `explicit` は明示すべきキー (plan §5.1 #16、下の `explicit_keys`): 照合は `fixed` と同じ。
+# **`fixed`・`explicit` の省略は FAIL** (solver の既定との一致で代用しない。省略を試すなら `key=~` + 理由の逸脱)。
+# 継承は 1 本の鎖 (`inherits`)。鎖の中で同じ段・同じキーに違う値を与えたら読み込み時に例外。
+#
+# 版 2 (2026-10-15): 省略の FAIL と `explicit` (#16) を入れた。版 1 (2026-10-14) は省略を solver の既定と同じなら通していた。
+version: 2
+recommended_doc: procedures/recommended-settings.md
+
+# 問題 YAML の物理条件・入出力のキー。プロファイルでは照合しない (プロファイルが fixed に書いたときだけ照合する)
+problem_keys:
+  - {key: gpu, why: 実行環境}
+  - {key: initial, why: 初期場は入力の h5 が与える}
+  - {key: detectNaNInterval, why: 診断の間隔}
+  - {key: mesh.meshFileName, why: 入力ファイル}
+  - {key: mesh.valueFileName, why: 入力ファイル}
+  - {key: mesh.wallDistExtraPhysIDs, why: 格子の条件 (変換時の wall_dist; 変換の記録は plan §4.3 の 2)}
+  - {key: physProp.cp, why: 気体の物性}
+  - {key: physProp.gamma, why: 気体の物性}
+  - {key: physProp.visc, why: 気体の物性 (局所 dt と陰解法の剛性の見積り)。Euler の機種は fixed 0.0}
+  - {key: physProp.thermCond, why: 気体の物性。Euler の機種は fixed 0.0}
+  - {key: physProp.prandtlLam, why: 気体の物性}
+  - {key: physProp.species, why: 気体の組成 (lump 記法)}
+  - {key: physProp.speciesDBFile, why: 気体の組成}
+  - {key: physProp.thermoHrefTemp, why: 気体のエンタルピーの基準 (TP は 298.15 が必須、§3)}
+  - {key: physProp.transport, why: 気体の輸送物性}
+  - {key: physProp.tracer, why: 気体の組成}
+  - {key: physProp.pMin, why: EOS の床 (作動圧に合わせる)}
+  - {key: physProp.roMin, why: EOS の床}
+  - {key: physProp.tMin, why: EOS の床}
+  - {key: time.last.nStepOuter, why: 本段の長さ (前段の長さはプロファイルの fixed)}
+  - {key: time.outStepInterval, why: 出力の間隔}
+  - {key: time.outStepStart, why: 出力の開始}
+  - {key: space.pRef, why: 動作静圧 (決め方は未決; plan §4.6)}
+  - {key: space.limiterRefLength, why: リミッタの基準値 (問題の代表量)}
+  - {key: space.limiterRoRef, why: リミッタの基準値}
+  - {key: space.limiterPRef, why: リミッタの基準値}
+  - {key: space.limiterARef, why: リミッタの基準値}
+  - {key: turbulence.kInit, why: 乱流の初期値}
+  - {key: turbulence.omegaInit, why: 乱流の初期値}
+  - {key: output.extraFields, why: 出力する量 (場は不変)}
+  - {key: condensation, why: 凝縮の模型 (問題の物理)}
+
+# 明示すべきキーの基準 (plan §4.3 の 4 (a)・§5.1 #16、2026-10-15)。
+#
+# プロファイルが値に依存するのに書き写しの出力 (生成器の config) が省略しているキーは、`fixed` に入らず照合の外にあった
+# (`regen_profiles.py` は出力済みのキーしか拾わない)。省略の値は実行するバイナリの既定で決まる。そこで次のキーを、
+# 各機種・段の config に「書いていない」かつ `when` が成り立つとき、その段の `explicit` に旧い実効値で載せる
+# (`regen_profiles.py` が作る。#11 で生成器に書かせるときの「足してよいキーと旧い実効値」の例外表)。
+# #11 (2026-10-15) から生成器が段の config にこれらのキーを旧い実効値で書く (`design/forge_design/evaluate/config_builder.py`)
+# ので、機種のプロファイルではキーが `fixed` に入り `explicit` は空 (値は #16 の `explicit` と同じ。例外表の写しは
+# design/tests/fixtures/generator_launch_before_11.json)。生成器がまた省略を始めると `explicit` に表れる。
+#
+# 載せるキーの基準 (basis): 問題 YAML のキー (`problem_keys`) でも変換時に効くキー (下の除外) でもなく、省略が起動時の例外になる
+# 必須キーでもなく、次のどれかに当たるもの。
+#   §1・§2      recommended-settings.md §1・§2 (共通プロファイル `common_node_*`) が値を決めている (fixed か advisory の {in: [...]})
+#   生成器      設計チェーンの生成器のどれかが書いている (= 生成器どうしで書く・書かないが割れている)
+#   既定の変更  ソルバの既定が日付つきで決まった・変わったと文書にある (recommended-settings.md §1・§1.0a・§2・§9、solver-settings.md)
+# `when` は段の config に当てる条件 (全部が成り立てば載せる。値 / 列 = どれか、`null` = 書いていない / {not: [...]} / {gt: x} /
+# {min: x})。文脈は config の完全修飾パス、`applies.X` (derive_applies。壁の種類は bcond から)、`species_count` (化学種の数)。
+# `value` は旧い実効値 = 書き写し (2026-10-14、commit 5637d090。solver_density_cuda/input/ は 79feaefb まで不変) に使ったソルバの既定。
+# `source` は出所で、書き写しの台本と単体試験が今のソースで確かめる (`inventory` = config_key_inventory.py が抜いた既定値の文字列、
+# `file` + `text` = inventory が抜けない既定・条件つきの既定を決めるソースの文字列 (`also` で別のファイルも)、`at` = ファイル:行 (表示用))。
+# 合わなければ台本が止まる (ソルバの既定が書き写しの後に変わった: 旧い実効値を黙って更新しない)。
+#
+# 載せないキー (理由):
+#   問題 YAML のキー (`problem_keys`: `pRef`・`prandtlLam`・`pMin`・limiter の基準値・kInit/omegaInit など)
+#       — 問題の条件。生成器の上書きは #11 で理由つきの逸脱に変換する (plan §4.3 の 4b)
+#   変換時に効くキー (`discretization`・`nodeInletCornerWall`・`wallDistExtraPhysIDs`・`axisCentroidShift`・`renumber`・`isAxisymmetric`)
+#       — 変換の来歴と照合する (#7・#7b)。#7b (3) で「変換時の省略と run の既定値の明記は不一致」とした
+#   必須キー (`solver`・`convMethod`・`limiter`・`timeIntegration`・`unsteady`・`dualTime`・`cfl`・`cfl_pseudo`・`control`・
+#       `turbulence.model`・`thermalMethod`・`viscMethod`) — 省略は起動時の例外
+#   出力だけのキー (`output.level`・`output.extraFields`) — 場を変えない
+#   `physProp.ljSource` (§9 の既定の変更) — LJ を読むのは輸送物性の model `kinetic` だけ (speciesTransportDB.cpp:360-377)。
+#       今の生成器は TP の NS で全成分に cea / custom を書くので値に依存しない
+#   上の基準のどれにも当たらない opt-in のキー (`hoopAreaFromClosure`・`slauContactFloor`・`reconT`・`heatCorrSU2`・
+#       `nodeIsothermalEnergyBC`・`thermCondMethod` など) — 書いた config は「プロファイルに無いキー」で FAIL するので
+#       config からは入らないが、既定が変わるとバイナリで値が変わる (残り。plan §5.1 #16 の実装の報告)
+explicit_keys:
+  time.deltaT.implicitRelax:
+    why: 定常の陰解法の緩和 (§1 は 0.7、省略は 1.0 = 緩和なし)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {time.timeIntegration: 11, time.dualTime: 0}
+        value: 1.0
+        source: {inventory: '1.0', at: solverConfig.cpp:370}
+  time.deltaT.lowMachPrecond:
+    why: 低マッハ前処理 (流束と擬似時間の両方を変える)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:479}
+  time.deltaT.blockDPLUR:
+    why: 陰解法の型 (block / scalar DPLUR)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {time.timeIntegration: 11}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:391}
+  time.nStepInner:
+    why: 陰解法の内部反復の回数
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {time.timeIntegration: 11}
+        value: 1
+        source: {inventory: '1', at: solverConfig.cpp:531}
+  time.deltaT.detectNaN:
+    why: NaN の検出で止めるか (§1 は常時 1)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:460}
+  time.deltaT.lineImplicit:
+    why: 線陰解法 (axis-Mach の B0 の本段が書く)
+    basis: [生成器]
+    cases:
+      - when: {time.timeIntegration: 11, time.deltaT.blockDPLUR: 1}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:372}
+  time.deltaT.lineDtDirectional:
+    why: 線方向の擬似時間刻み (axis-Mach の B0 の本段が書く)
+    basis: [生成器]
+    cases:
+      - when: {time.timeIntegration: 11, time.deltaT.blockDPLUR: 1}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:389}
+  time.deltaT.lineDtDirectionalCap:
+    why: 線方向の擬似時間刻みの上限 (lineDtDirectional が 0 でないときだけ効く)
+    basis: [生成器]
+    cases:
+      - when: {time.deltaT.lineDtDirectional: {not: [0, null]}}
+        value: 0.0
+        source: {inventory: '0.0', at: solverConfig.cpp:390}
+  time.deltaT.implicitThermalJacobian:
+    why: エネルギー行の熱伝導のヤコビアン (粘性のときだけ。axis-Mach の B0 の本段が書く)
+    basis: [生成器]
+    cases:
+      - when: {time.timeIntegration: 11, time.deltaT.blockDPLUR: 1, physProp.viscMethod: {not: [0]}}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:453}
+  space.limiterScaled:
+    why: リミッタの評価点と無次元化 (既定 1 は 2026-09-20 から。切り替えで SERN の目的量が +0.54 %)
+    basis: [§1・§2, 生成器, 既定の変更]
+    cases:
+      - when: {mesh.discretization: node, space.limiter: {not: [0]}}
+        value: 1
+        source: {inventory: '1', at: solverConfig.cpp:692}
+  space.venkatK:
+    why: Venkatakrishnan の K (既定は limiterScaled で変わる)
+    basis: [§1・§2, 生成器, 既定の変更]
+    cases:
+      - when: {mesh.discretization: node, space.limiter: 2, space.limiterScaled: [1, null]}
+        value: 0.05
+        source: {inventory: '(this->limiterScaled == 1) ? 0.05 : 1.0', at: solverConfig.cpp:706}
+  mesh.scalarGradient:
+    why: k/ω・化学種の勾配 (node の省略は 2026-09-27 から lsq、それ以前は gg)
+    basis: [既定の変更]
+    cases:
+      - when: {mesh.discretization: node, applies.physics: ns_sst}
+        value: lsq
+        source: {file: solver_density_cuda/input/solverConfig.cpp, text: 'this->scalarGradient = (this->discretization == "node") ? "lsq" : "gg";', at: solverConfig.cpp:255-256}
+      - when: {mesh.discretization: node, species_count: {min: 2}}
+        value: lsq
+        source: {file: solver_density_cuda/input/solverConfig.cpp, text: 'this->scalarGradient = (this->discretization == "node") ? "lsq" : "gg";', at: solverConfig.cpp:255-256}
+  space.slauWallNormalChi:
+    why: 壁隣接面の SLAU の χ (省略は auto。2026-09-26 から node ∧ nodeWallDirichlet 1 ∧ SLAU で 1、それ以前は 0。作用するのは wall・wall_isothermal の節点だけ)
+    basis: [既定の変更]
+    cases:
+      - when: {mesh.discretization: node, solver: [SLAU, SLAU2], applies.wall: [isothermal, noslip_adiabatic], mesh.nodeWallDirichlet: [1, null]}
+        value: 1
+        source: {file: solver_density_cuda/input/solverConfig.cpp, text: 'this->slauWallNormalChi = 1; this->slauWallNormalChiReason = "auto: node+nodeWallDirichlet+" + this->solver;', at: solverConfig.cpp:731-740}
+      - when: {mesh.discretization: node, solver: [SLAU, SLAU2], applies.wall: [isothermal, noslip_adiabatic], mesh.nodeWallDirichlet: {not: [1, null]}}
+        value: 0
+        source: {file: solver_density_cuda/input/solverConfig.cpp, text: 'this->slauWallNormalChi = 0; this->slauWallNormalChiReason = "auto: nodeWallDirichlet="', at: solverConfig.cpp:731-740}
+  mesh.nodeWallDirichlet:
+    why: node の壁の速度の Dirichlet (wall・wall_isothermal の節点だけに作用する)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {mesh.discretization: node, applies.wall: [isothermal, noslip_adiabatic]}
+        value: 1
+        source: {file: solver_density_cuda/input/solverConfig.hpp, text: 'int nodeWallDirichlet = 1;', at: solverConfig.hpp:472}
+  mesh.axisymMethod:
+    why: 軸対称の定式化
+    basis: [§1・§2]
+    cases:
+      - when: {applies.axisymmetric: true, physProp.axisymMethod: [null]}
+        value: 0
+        source: {file: solver_density_cuda/input/solverConfig.hpp, text: 'int axisymMethod = 0;', at: solverConfig.hpp:432}
+  mesh.axisSegmentRWeight:
+    why: 軸対称の r 重みを双対面の区間ごとに掛ける (既定 1 は 2026-10-10 から。node・axisymMethod 0・axisRFloor 0 のときだけ効く)
+    basis: [既定の変更]
+    cases:
+      - when: {mesh.discretization: node, applies.axisymmetric: true, mesh.axisymMethod: [0, null], physProp.axisymMethod: [null], mesh.axisRFloor: [0, null]}
+        value: 1
+        source: {file: solver_density_cuda/input/solverConfig.hpp, text: 'int axisSegmentRWeight = 1;', at: solverConfig.hpp:454}
+  physProp.thermoFloat:
+    why: TP の温度反転 (既定 1 は 2026-09-12 から。thermoHrefTemp が無いと 0 に落ちる)
+    basis: [§1・§2, 既定の変更]
+    cases:
+      - when: {physProp.thermalMethod: 2, physProp.thermoHrefTemp: {gt: 0}}
+        value: 1
+        source:
+          file: solver_density_cuda/input/solverConfig.hpp
+          text: 'int thermoFloat = 1;'
+          also: [{file: solver_density_cuda/input/solverConfig.cpp, text: 'if (this->thermoFloat != 0 && this->thermalMethod == 2 && !(this->thermoHrefTemp > 0.0)) {'}]
+          at: solverConfig.hpp:627・solverConfig.cpp:1094-1101
+  turbulence.turbulentPrandtl:
+    why: 乱流プラントル数 (§2 は 0.9、省略は 0.85)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 0.85
+        source: {inventory: '0.85', at: solverConfig.cpp:920}
+  turbulence.scalarDiffusion:
+    why: k/ω の拡散
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 1
+        source: {inventory: '1', at: solverConfig.cpp:842}
+  turbulence.dilatationCorrection:
+    why: SST の膨張補正 (ノズルの境界層の厚さを変える)
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 2
+        source: {inventory: '2', at: solverConfig.cpp:843}
+  turbulence.katoLaunder:
+    why: Kato–Launder の生成項の修正
+    basis: [§1・§2, 生成器]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:851}
+  turbulence.wallTreatmentSST:
+    why: SST の壁の扱い (既定 0 は 2026-09-20 から)
+    basis: [§1・§2, 生成器, 既定の変更]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:875}
+  turbulence.sstNodeWallKPin:
+    why: node の壁の k の固定 (既定 1 は 2026-09-08 から)
+    basis: [既定の変更]
+    cases:
+      - when: {applies.physics: ns_sst, mesh.discretization: node}
+        value: 1
+        source: {inventory: '1', at: solverConfig.cpp:852}
+  turbulence.sstOmegaProdFromPk:
+    why: ω の生成を P_k から作る (既定 1 は 2026-09-08 から)
+    basis: [既定の変更]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 1
+        source: {inventory: '1', at: solverConfig.cpp:853}
+  turbulence.sstSigmaBlend:
+    why: SST の σ の混合 (既定 1 は 2026-09-08 から)
+    basis: [既定の変更]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 1
+        source: {inventory: '1', at: solverConfig.cpp:854}
+  turbulence.sstEnergyIncludesK:
+    why: 全エネルギーに k を含めるか (既定 0 を 2026-09-08 に確定)
+    basis: [既定の変更]
+    cases:
+      - when: {applies.physics: ns_sst}
+        value: 0
+        source: {inventory: '0', at: solverConfig.cpp:857}
+
+profiles:
+  steady_base:
+    abstract: true
+    description: 定常 (擬似時間) の全プロファイルの親。禁止キーと、定常では効かないキー。
+    source: {doc: procedures/recommended-settings.md, section: "§1・§9 (bndFirstOrder は AGENTS.md)", date: "2026-10-14"}
+    forbid:
+      mesh.bndFirstOrder: 使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md)
+    ignore:
+      time.deltaT.dt: 定常 (unsteady 0) では効かない (plan §3.2)
+      time.deltaT.dt_min: 定常 (unsteady 0) では効かない (plan §3.2)
+      time.deltaT.dt_max: 定常 (unsteady 0) では効かない (plan §3.2)
+    all_stages:
+      fixed:
+        time.unsteady: 0
+        time.dualTime: 0
+
+  common_node_steady:
+    inherits: steady_base
+    abstract: true
+    description: recommended-settings.md §1 (共通の基本設定)・§1.2 (段階起動) の node 定常。物理ごとの子 (common_node_ns_sst・common_node_euler) から使う。
+    applies: {discretization: node, time: steady}
+    source: {doc: procedures/recommended-settings.md, section: "§1・§1.2", date: "2026-09-08 (§1)・2026-09-07 (§1.2)・2026-09-12 (nStepInner 4)"}
+    all_stages:
+      fixed:
+        solver: SLAU
+        mesh.discretization: node
+        time.timeIntegration: 11
+        time.deltaT.control: 1
+        time.deltaT.blockDPLUR: 1
+        time.deltaT.detectNaN: 1
+        time.deltaT.implicitRelax: 0.7
+      advisory:
+        time.deltaT.cfl: any                    # 表示用 (cfl_pseudo と同じ値を入れる; §1)
+        time.deltaT.lowMachPrecond: {in: [0]}   # 低マッハ (§6) は 2
+        space.limiterScaled: {in: [1]}          # 既定 1 (§1、2026-09-20)
+        space.venkatK: {in: [0.05]}             # 既定 0.05 (§1)
+        output.level: {in: [1, 2]}              # 既定 1、勾配・診断が要る run だけ 2 (§1)
+        physProp.thermalMethod: {in: [0, 2]}    # CPG 0 / TP 2 (§3)
+        physProp.thermoFloat: {in: [1]}         # TP の温度反転の既定 (§1、2026-09-12)
+        mesh.isAxisymmetric: any                # 次元は問題の条件 (軸対称は §5)
+        mesh.axisCentroidShift: any
+        mesh.axisymMethod: {in: [0]}            # 既定 0 (§5)
+    stages:
+      soft:
+        fixed: {space.convMethod: 0, space.limiter: 0, time.deltaT.cfl_pseudo: 0.5, time.last.nStepOuter: 2000}
+      mid:
+        fixed: {space.convMethod: 0, space.limiter: 0, time.deltaT.cfl_pseudo: 1.0, time.last.nStepOuter: 2000}
+      main:
+        fixed: {space.convMethod: 1, space.limiter: 2, time.nStepInner: 4}
+        advisory: {time.last.nStepOuter: [8000, 12000]}
+
+  common_node_ns_sst:
+    inherits: common_node_steady
+    machine: 機種の決まっていない手書きの node NS (SST・低 Re 壁) の定常 run
+    description: recommended-settings.md §1・§1.1・§1.2・§2。本段の cfl_pseudo は目安 4〜6 (advisory)。
+    applies: {physics: ns_sst}
+    source: {doc: procedures/recommended-settings.md, section: "§1・§1.1・§1.2・§2", date: "2026-09-08 (§1・§2)・2026-09-07 (§1.1・§1.2)"}
+    all_stages:
+      fixed:
+        mesh.nodeWallDirichlet: 1
+        mesh.nodeInletCornerWall: 1
+        turbulence.model: sst
+        turbulence.scalarDiffusion: 1
+        turbulence.dilatationCorrection: 2
+        turbulence.katoLaunder: 1
+        turbulence.wallTreatmentSST: 0
+        turbulence.turbulentPrandtl: 0.9
+      advisory:
+        physProp.viscMethod: {in: [1, 2]}       # Sutherland (CPG) / 種ごとの輸送物性 (TP)
+        physProp.thermCondMethod: any
+    stages:
+      soft:
+        fixed: {time.nStepInner: 10}
+      mid:
+        fixed: {time.nStepInner: 10}
+      main:
+        advisory: {time.deltaT.cfl_pseudo: [4, 6]}
+
+  common_node_euler:
+    inherits: common_node_steady
+    machine: 機種の決まっていない手書きの node Euler (slip 壁) の定常 run
+    description: >-
+      recommended-settings.md §1 (cfl_pseudo の目安は Euler 設計評価 4)・§1.1 (Euler の壁は slip)。viscMethod 0 は定数粘性なので
+      visc・thermCond も 0。§1 は soft・mid の nStepInner を node NS (10) にしか決めていないので任意。
+    applies: {physics: euler}
+    source: {doc: procedures/recommended-settings.md, section: "§1・§1.1・§1.2", date: "2026-09-08 (§1)・2026-09-07 (§1.1・§1.2)"}
+    all_stages:
+      fixed:
+        physProp.viscMethod: 0
+        physProp.visc: 0.0
+        physProp.thermCond: 0.0
+        turbulence.model: none
+      advisory:
+        mesh.nodeWallDirichlet: any             # slip 壁では効かない (wall / wall_isothermal の節点にだけ作用する)
+        mesh.nodeInletCornerWall: any
+    stages:
+      soft:
+        advisory: {time.nStepInner: any}
+      mid:
+        advisory: {time.nStepInner: any}
+      main:
+        advisory: {time.deltaT.cfl_pseudo: [4, 4]}
+
+  # >>> BEGIN GENERATED: recipes/regen_profiles.py (手で編集しない) >>>
+  bell_cpg_ns_sst:
+    inherits: steady_base
+    machine: ③ベル CPG (node SST・断熱壁、opt/driver の CPG 評価)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: ns_sst
+      gas: cpg
+      wall: noslip_adiabatic
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner._solver_config + opt/driver の soft (別ディレクトリ)
+      problem: case/40.nozzle_design_tool/problem_bell_top.yaml
+      call: opt.driver.Campaign.evaluate (prepare・forge・collect を差し替え)
+    recommended_ref: common_node_ns_sst
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 0
+          physProp.viscMethod: 1
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 0
+          physProp.viscMethod: 1
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+    differs_from_recommended:
+    - key: mesh.nodeInletCornerWall
+      stages:
+      - soft
+      - main
+      recommended: '1'
+      this: 書かない (solver 既定 不明)
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      recommended: '2000'
+      this: '3000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - soft
+      recommended: '10'
+      this: '5'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+    - key: turbulence.turbulentPrandtl
+      stages:
+      - soft
+      - main
+      recommended: '0.9'
+      this: '0.85'
+      acceptance: 未
+  bell_tp_ns_sst:
+    inherits: steady_base
+    machine: ③ベル TP (凍結組成の lump、node SST・低 Re・断熱壁)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: ns_sst
+      gas: tp
+      wall: noslip_adiabatic
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner._solver_config_tp (TP_STAGES)
+      problem: case/68.bell_two_mode/problem_bell_tp_m_ns_l100_corr.yaml
+      call: runner.run_staged_tp (prepare・forge を差し替え)
+    recommended_ref: common_node_ns_sst
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeInletCornerWall: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          output.level: 1
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 0
+          space.slauWallNormalChi: 1
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+      mid:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeInletCornerWall: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          output.level: 1
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 0
+          space.slauWallNormalChi: 1
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 1.0
+          time.deltaT.cfl_pseudo: 1.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeInletCornerWall: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          output.level: 1
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 4
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+    differs_from_recommended: []
+  bell_tp_euler:
+    inherits: steady_base
+    machine: ③ベル TP Euler (slip 壁、(M) 特性曲線モードの評価)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: euler
+      gas: tp
+      wall: slip
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: 'runner._solver_config_tp (TP_STAGES、evaluate.model: euler)'
+      problem: case/68.bell_two_mode/problem_bell_tp_m_euler_l100.yaml
+      call: runner.run_staged_tp (prepare・forge を差し替え)
+    recommended_ref: common_node_euler
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          output.level: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 0
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      mid:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          output.level: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 0
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 1.0
+          time.deltaT.cfl_pseudo: 1.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          output.level: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 4
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+    differs_from_recommended: []
+  wt_modef_euler_cell:
+    inherits: steady_base
+    machine: ① 風洞 モード F (Euler、cell)
+    applies:
+      dimension: 2d_axisym
+      discretization: cell
+      axisymmetric: true
+      physics: euler
+      gas: cpg
+      wall: slip
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner_wt._config_euler (cell 固定) + run_staged の文字列置換
+      problem: case/41.wind_tunnel_design/problem_m4.yaml
+      call: runner_wt.main (prepare・forge を差し替え)
+    recommended_ref: common_node_euler
+    stages:
+      soft:
+        fixed:
+          mesh.axisymMethod: 0
+          mesh.discretization: cell
+          mesh.isAxisymmetric: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 0
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      main:
+        fixed:
+          mesh.axisymMethod: 0
+          mesh.discretization: cell
+          mesh.isAxisymmetric: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 0
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+    differs_from_recommended:
+    - key: mesh.discretization
+      stages:
+      - soft
+      - main
+      recommended: node
+      this: cell
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      recommended: '2000'
+      this: '3000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+  wt_feedback_euler_node:
+    inherits: steady_base
+    machine: ① 風洞 B10 の帰還 (feedback/euler_loop、Euler node、段階起動なし)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: euler
+      gas: cpg
+      wall: slip
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner_wt._config_euler_node (euler_loop の cold のパス)
+      problem: case/41.wind_tunnel_design/problem_m4_b10.yaml
+      call: euler_loop の `_cfg(n, n // 4)` (n = 24000)
+    recommended_ref: common_node_euler
+    stages:
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 0
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+    differs_from_recommended:
+    - key: time.deltaT.implicitRelax
+      stages:
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+  axismach_euler_tp:
+    inherits: steady_base
+    machine: ① 風洞 axis-Mach Euler (TP、slip 壁)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: euler
+      gas: tp
+      wall: slip
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner_wt._config_euler_node → runner_axismach._apply_gas_to_config + run_staged (_cfg_set)
+      problem: case/45.isobutane_m6_d155/problem_d155_euler_pin_G1_recal_mono.yaml
+      call: runner_axismach.main (prepare・forge を差し替え)
+    recommended_ref: common_node_euler
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.scalarGradient: lsq
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      mid:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.scalarGradient: lsq
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 1.0
+          time.deltaT.cfl_pseudo: 1.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.scalarGradient: lsq
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 2.0
+          time.deltaT.cfl_pseudo: 2.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+    differs_from_recommended:
+    - key: space.convMethod
+      stages:
+      - mid
+      recommended: '0'
+      this: '1'
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      - mid
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - main
+      recommended: 4 (目安)
+      this: '2.0'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      - mid
+      recommended: '2000'
+      this: '3000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+  axismach_ns_sst_tp:
+    inherits: steady_base
+    machine: ① 風洞 axis-Mach NS (TP、SST 低 Re、等温壁、main_line なし)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: ns_sst
+      gas: tp
+      wall: isothermal
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner_wt._config_sst_node → _apply_gas_to_config(viscous) + ns_stage_configs
+      problem: case/45.isobutane_m6_d155/problem_d155_ns_prod_coldmesh_tw300.yaml
+      call: runner_axismach._ns_configs → run_staged_ns(stages=full) (forge を差し替え)
+    recommended_ref: common_node_ns_sst
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+      mid:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 1.0
+          time.deltaT.cfl_pseudo: 1.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 1.0
+          time.deltaT.cfl_pseudo: 1.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+    differs_from_recommended:
+    - key: mesh.nodeInletCornerWall
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '1'
+      this: 書かない (solver 既定 不明)
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      - mid
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - main
+      recommended: 4〜6 (目安)
+      this: '1.0'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      - mid
+      recommended: '2000'
+      this: '3000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+  axismach_ns_sst_tp_b0:
+    inherits: steady_base
+    machine: ① 風洞 axis-Mach NS (TP、SST 低 Re、等温壁、本段に main_line の B0)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: ns_sst
+      gas: tp
+      wall: isothermal
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner_wt._config_sst_node → _apply_gas_to_config(viscous) → _apply_main_line + ns_stage_configs (PRESTAGE_CONFIG)
+      problem: case/45.isobutane_m6_d155/problem_d155_ns_prod_coldmesh_tw370_cgref_h_b0.yaml
+      call: runner_axismach._ns_configs → run_staged_ns(stages=full) (forge を差し替え)
+    recommended_ref: common_node_ns_sst
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+      mid:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 1.0
+          time.deltaT.cfl_pseudo: 1.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 10
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          output.level: 1
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 0.7
+          time.deltaT.implicitThermalJacobian: 5
+          time.deltaT.lineDtDirectional: 1
+          time.deltaT.lineDtDirectionalCap: 50.0
+          time.deltaT.lineImplicit: 1
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.9
+          turbulence.wallTreatmentSST: 0
+    differs_from_recommended:
+    - key: mesh.nodeInletCornerWall
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '1'
+      this: 書かない (solver 既定 不明)
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      - mid
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      - mid
+      recommended: '2000'
+      this: '3000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+  walldriven_euler_cpg:
+    inherits: steady_base
+    machine: ① 風洞 wall-driven (Euler、node)
+    applies:
+      dimension: 2d_axisym
+      discretization: node
+      axisymmetric: true
+      physics: euler
+      gas: cpg
+      wall: slip
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: runner_wt._config_euler_node + run_staged の文字列置換
+      problem: case/41.wind_tunnel_design/problem_m4_walldriven.yaml
+      call: runner_walldriven.main (prepare・forge を差し替え)
+    recommended_ref: common_node_euler
+    stages:
+      soft:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 0
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 3000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      main:
+        fixed:
+          mesh.axisCentroidShift: 1
+          mesh.axisSegmentRWeight: 1
+          mesh.axisymMethod: 0
+          mesh.discretization: node
+          mesh.isAxisymmetric: 1
+          physProp.thermCond: 0.0
+          physProp.thermalMethod: 0
+          physProp.visc: 0.0
+          physProp.viscMethod: 0
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 4.0
+          time.deltaT.cfl_pseudo: 4.0
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+    differs_from_recommended:
+    - key: space.limiter
+      stages:
+      - soft
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      recommended: '2000'
+      this: '3000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+  sern2d_finite_base_frozen_tp_sst:
+    inherits: steady_base
+    machine: ⑤ SERN 2D 有限ベース (frozen TP、node SST、等温壁、既定の作動点)
+    applies:
+      dimension: 2d_planar
+      discretization: node
+      axisymmetric: false
+      physics: ns_sst
+      gas: tp
+      wall: isothermal
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: 'runner_sern._solver_config + run_staged の正規表現・文字列置換 (問題の opt: の梯子)'
+      problem: case/46.sern_design/problem_moo_frozen_tp_cycle3op.yaml
+      call: runner_sern.main (prepare・forge・restart を差し替え)
+    recommended_ref: common_node_ns_sst
+    stages:
+      warm_lam:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.1
+          time.deltaT.cfl_pseudo: 0.1
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 4000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      soft:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.1
+          time.deltaT.cfl_pseudo: 0.1
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 4000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+      mid:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.1
+          time.deltaT.cfl_pseudo: 0.1
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 4000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+      main:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.5
+          time.deltaT.cfl_pseudo: 0.5
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+    differs_from_recommended:
+    - key: mesh.nodeInletCornerWall
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '1'
+      this: 書かない (solver 既定 不明)
+      acceptance: 未
+    - key: space.convMethod
+      stages:
+      - mid
+      recommended: '0'
+      this: '1'
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      - mid
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - soft
+      recommended: '0.5'
+      this: '0.1'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - mid
+      recommended: '1.0'
+      this: '0.1'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - main
+      recommended: 4〜6 (目安)
+      this: '0.5'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.last.nStepOuter
+      stages:
+      - soft
+      - mid
+      recommended: '2000'
+      this: '4000'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - soft
+      - mid
+      recommended: '10'
+      this: '5'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+    - key: turbulence.turbulentPrandtl
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '0.9'
+      this: '0.85'
+      acceptance: 未
+  sern3d_frozen_tp_sst:
+    inherits: steady_base
+    machine: ⑤ SERN 3D (frozen TP、node SST、等温壁、既定の作動点)
+    applies:
+      dimension: 3d
+      discretization: node
+      axisymmetric: false
+      physics: ns_sst
+      gas: tp
+      wall: isothermal
+      mesh: structured
+      time: steady
+    source:
+      plan: plans/active/tooling-generator-defaults-and-launch-gate.md
+      section: '§4.0 段取り 1 (今の生成器の書き写し)・§5.1 #6'
+      date: '2026-10-14'
+    transcribed_from:
+      generator: 'runner_sern._solver_config + run_staged の正規表現・文字列置換 (問題の opt: の梯子)'
+      problem: case/46.sern_design/problem_3d_prod_m6on_g2.yaml
+      call: runner_sern3d.main (prepare・forge・restart を差し替え)
+    recommended_ref: common_node_ns_sst
+    stages:
+      warm_lam:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.2
+          time.deltaT.cfl_pseudo: 0.2
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.model: none
+      soft:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 0
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.2
+          time.deltaT.cfl_pseudo: 0.2
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+      mid:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.2
+          time.deltaT.cfl_pseudo: 0.2
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.last.nStepOuter: 2000
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+      main:
+        fixed:
+          mesh.discretization: node
+          mesh.isAxisymmetric: 0
+          mesh.nodeWallDirichlet: 1
+          mesh.scalarGradient: lsq
+          physProp.thermalMethod: 2
+          physProp.thermoFloat: 1
+          physProp.viscMethod: 2
+          solver: SLAU
+          space.convMethod: 1
+          space.limiter: 2
+          space.limiterScaled: 1
+          space.slauWallNormalChi: 1
+          space.venkatK: 0.05
+          time.deltaT.blockDPLUR: 1
+          time.deltaT.cfl: 0.25
+          time.deltaT.cfl_pseudo: 0.25
+          time.deltaT.control: 1
+          time.deltaT.detectNaN: 1
+          time.deltaT.implicitRelax: 1.0
+          time.deltaT.implicitThermalJacobian: 0
+          time.deltaT.lineDtDirectional: 0
+          time.deltaT.lineImplicit: 0
+          time.deltaT.lowMachPrecond: 0
+          time.dualTime: 0
+          time.nStepInner: 5
+          time.timeIntegration: 11
+          time.unsteady: 0
+          turbulence.dilatationCorrection: 2
+          turbulence.katoLaunder: 1
+          turbulence.model: sst
+          turbulence.scalarDiffusion: 1
+          turbulence.sstEnergyIncludesK: 0
+          turbulence.sstNodeWallKPin: 1
+          turbulence.sstOmegaProdFromPk: 1
+          turbulence.sstSigmaBlend: 1
+          turbulence.turbulentPrandtl: 0.85
+          turbulence.wallTreatmentSST: 0
+    differs_from_recommended:
+    - key: mesh.nodeInletCornerWall
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '1'
+      this: 書かない (solver 既定 不明)
+      acceptance: 未
+    - key: space.convMethod
+      stages:
+      - mid
+      recommended: '0'
+      this: '1'
+      acceptance: 未
+    - key: space.limiter
+      stages:
+      - soft
+      - mid
+      recommended: '0'
+      this: '2'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - soft
+      recommended: '0.5'
+      this: '0.2'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - mid
+      recommended: '1.0'
+      this: '0.2'
+      acceptance: 未
+    - key: time.deltaT.cfl_pseudo
+      stages:
+      - main
+      recommended: 4〜6 (目安)
+      this: '0.25'
+      acceptance: 未
+    - key: time.deltaT.implicitRelax
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '0.7'
+      this: '1.0'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - soft
+      - mid
+      recommended: '10'
+      this: '5'
+      acceptance: 未
+    - key: time.nStepInner
+      stages:
+      - main
+      recommended: '4'
+      this: '5'
+      acceptance: 未
+    - key: turbulence.turbulentPrandtl
+      stages:
+      - soft
+      - mid
+      - main
+      recommended: '0.9'
+      this: '0.85'
+      acceptance: 未
+  # <<< END GENERATED <<<

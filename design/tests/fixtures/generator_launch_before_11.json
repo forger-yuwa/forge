@@ -1,0 +1,581 @@
+{
+ "what": "plan tooling-generator-defaults-and-launch-gate §5.1 #11 のバイト同一の比較の基準 (置き換えの前)",
+ "configs": {
+  "commit": "ab9767fe",
+  "how": "solver_density_cuda/tools/recipes/regen_profiles.py の build_profiles (偽の forge で各生成器の全段の起動列を取る; 代表の問題は recipes/fixtures の写し)",
+  "taken": "2026-10-15"
+ },
+ "exception_table": {
+  "commit": "238d2706",
+  "file": "solver_density_cuda/tools/recipes/recommended_settings.yaml",
+  "sha256": "1bdcf40fee6fa30920dd9d88c581b7716f26a47604232bbe17e9e711ddf9d6e3",
+  "what": "各機種・段の explicit (#16 の明示すべきキーと旧い実効値) = #11 で生成器が足してよいキーの例外表"
+ },
+ "machines": {
+  "bell_cpg_ns_sst": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 1,\n           visc: 1.8e-5, thermCond: 0.0257, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 1,\n           visc: 1.8e-5, thermCond: 0.0257, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 12000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 4.0, cfl_pseudo: 4.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 4000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85,
+     "turbulence.wallTreatmentSST": 0
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85,
+     "turbulence.wallTreatmentSST": 0
+    }
+   }
+  },
+  "bell_tp_ns_sst": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 0.00010675, thermCond: 0.56993, prandtlLam: 0.72,\n           cp: 3784.1848025341405, gamma: 1.1941771282112188,\n           species: [{name: \"EXH\", lump: {\"H\": 0.0310808756764973, \"H2\": 0.2479890080439678, \"H2O\": 0.6729873080507679, \"O\": 0.0028539885840456643, \"OH\": 0.042113831544673824, \"O2\": 0.0029749881000476}, basis: mole}], thermoHrefTemp: 298.15,\n           transport: {\"H\": \"cea\", \"H2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"O\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1.0e-5, cfl: 0.5, cfl_pseudo: 0.5, implicitRelax: 0.7,\n           dt_min: 1.0e-8, dt_max: 1.0, blockDPLUR: 1, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 0}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 18000.0}\noutput: {level: 1, extraFields: [dUxdx, dUxdy, dUydx, dUydy, axisym_divU]}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 0.00010675, thermCond: 0.56993, prandtlLam: 0.72,\n           cp: 3784.1848025341405, gamma: 1.1941771282112188,\n           species: [{name: \"EXH\", lump: {\"H\": 0.0310808756764973, \"H2\": 0.2479890080439678, \"H2O\": 0.6729873080507679, \"O\": 0.0028539885840456643, \"OH\": 0.042113831544673824, \"O2\": 0.0029749881000476}, basis: mole}], thermoHrefTemp: 298.15,\n           transport: {\"H\": \"cea\", \"H2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"O\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1.0e-5, cfl: 1.0, cfl_pseudo: 1.0, implicitRelax: 0.7,\n           dt_min: 1.0e-8, dt_max: 1.0, blockDPLUR: 1, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 0}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 18000.0}\noutput: {level: 1, extraFields: [dUxdx, dUxdy, dUydx, dUydy, axisym_divU]}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, nodeInletCornerWall: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 0.00010675, thermCond: 0.56993, prandtlLam: 0.72,\n           cp: 3784.1848025341405, gamma: 1.1941771282112188,\n           species: [{name: \"EXH\", lump: {\"H\": 0.0310808756764973, \"H2\": 0.2479890080439678, \"H2O\": 0.6729873080507679, \"O\": 0.0028539885840456643, \"OH\": 0.042113831544673824, \"O2\": 0.0029749881000476}, basis: mole}], thermoHrefTemp: 298.15,\n           transport: {\"H\": \"cea\", \"H2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"O\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 60000}\n  deltaT: {control: 1, dt: 1.0e-5, cfl: 4.0, cfl_pseudo: 4.0, implicitRelax: 0.7,\n           dt_min: 1.0e-8, dt_max: 1.0, blockDPLUR: 1, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 4\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9, kInit: 1.0, omegaInit: 18000.0}\noutput: {level: 1, extraFields: [dUxdx, dUxdy, dUydx, dUydy, axisym_divU]}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "time.deltaT.lowMachPrecond": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    },
+    "mid": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "time.deltaT.lowMachPrecond": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "time.deltaT.lowMachPrecond": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    }
+   }
+  },
+  "bell_tp_euler": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 0, visc: 0.0, thermCond: 0.0,\n           cp: 3784.1848025341405, gamma: 1.1941771282112188,\n           species: [{name: \"EXH\", lump: {\"H\": 0.0310808756764973, \"H2\": 0.2479890080439678, \"H2O\": 0.6729873080507679, \"O\": 0.0028539885840456643, \"OH\": 0.042113831544673824, \"O2\": 0.0029749881000476}, basis: mole}], thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1.0e-5, cfl: 0.5, cfl_pseudo: 0.5, implicitRelax: 0.7,\n           dt_min: 1.0e-8, dt_max: 1.0, blockDPLUR: 1, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 0}\nturbulence: {model: \"none\"}\noutput: {level: 1, extraFields: [dUxdx, dUxdy, dUydx, dUydy, axisym_divU]}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 0, visc: 0.0, thermCond: 0.0,\n           cp: 3784.1848025341405, gamma: 1.1941771282112188,\n           species: [{name: \"EXH\", lump: {\"H\": 0.0310808756764973, \"H2\": 0.2479890080439678, \"H2O\": 0.6729873080507679, \"O\": 0.0028539885840456643, \"OH\": 0.042113831544673824, \"O2\": 0.0029749881000476}, basis: mole}], thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1.0e-5, cfl: 1.0, cfl_pseudo: 1.0, implicitRelax: 0.7,\n           dt_min: 1.0e-8, dt_max: 1.0, blockDPLUR: 1, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 0}\nturbulence: {model: \"none\"}\noutput: {level: 1, extraFields: [dUxdx, dUxdy, dUydx, dUydy, axisym_divU]}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 0, visc: 0.0, thermCond: 0.0,\n           cp: 3784.1848025341405, gamma: 1.1941771282112188,\n           species: [{name: \"EXH\", lump: {\"H\": 0.0310808756764973, \"H2\": 0.2479890080439678, \"H2O\": 0.6729873080507679, \"O\": 0.0028539885840456643, \"OH\": 0.042113831544673824, \"O2\": 0.0029749881000476}, basis: mole}], thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 30000}\n  deltaT: {control: 1, dt: 1.0e-5, cfl: 4.0, cfl_pseudo: 4.0, implicitRelax: 0.7,\n           dt_min: 1.0e-8, dt_max: 1.0, blockDPLUR: 1, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 1500\n  timeIntegration: 11\n  nStepInner: 4\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\noutput: {level: 1, extraFields: [dUxdx, dUxdy, dUydx, dUydy, axisym_divU]}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "physProp.thermoFloat": 1,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "time.deltaT.lowMachPrecond": 0
+    },
+    "mid": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "physProp.thermoFloat": 1,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "time.deltaT.lowMachPrecond": 0
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "time.deltaT.lowMachPrecond": 0
+    }
+   }
+  },
+  "wt_modef_euler_cell": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"cell\", isAxisymmetric: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"cell\", isAxisymmetric: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 12000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 4.0, cfl_pseudo: 4.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 4000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisymMethod": 0,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    },
+    "main": {
+     "mesh.axisymMethod": 0,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    }
+   }
+  },
+  "wt_feedback_euler_node": {
+   "stages": [
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 24000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 4.0, cfl_pseudo: 4.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 6000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    }
+   }
+  },
+  "axismach_euler_tp": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"], thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"], thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 1.0, cfl_pseudo: 1.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"], thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 12000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 2.0, cfl_pseudo: 2.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 1000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    },
+    "mid": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    }
+   }
+  },
+  "axismach_ns_sst_tp": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2,\n           visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"],\n           transport: {\"CO2\": \"cea\", \"O2\": \"cea\", \"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\"}, thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2,\n           visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"],\n           transport: {\"CO2\": \"cea\", \"O2\": \"cea\", \"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\"}, thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 1.0, cfl_pseudo: 1.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2,\n           visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"],\n           transport: {\"CO2\": \"cea\", \"O2\": \"cea\", \"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\"}, thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 60000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 1.0, cfl_pseudo: 1.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 1000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    },
+    "mid": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    }
+   }
+  },
+  "axismach_ns_sst_tp_b0": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2,\n           visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"],\n           transport: {\"CO2\": \"cea\", \"O2\": \"cea\", \"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\"}, thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2,\n           visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"],\n           transport: {\"CO2\": \"cea\", \"O2\": \"cea\", \"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\"}, thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 1.0, cfl_pseudo: 1.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 10\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, nodeWallDirichlet: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2,\n           visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1360.0, gamma: 1.27354,\n           species: [{name: \"MIXDRY\", lump: {\"CO2\": 0.12550903682310086, \"O2\": 0.022645262404230745, \"N2\": 0.8518457007726683}, basis: mole}, \"H2O\"],\n           transport: {\"CO2\": \"cea\", \"O2\": \"cea\", \"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\"}, thermoHrefTemp: 298.15}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 200000}\n  deltaT: {lineDtDirectionalCap: 50.0, implicitThermalJacobian: 5, lineImplicit: 1, lineDtDirectional: 1, control: 1, dt: 1e-8, cfl: 4.0, cfl_pseudo: 4.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, implicitRelax: 0.7, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2500\n  timeIntegration: 11\n  nStepInner: 5\nspace: {limiterRoRef: 0.8739869154, limiterPRef: 387491.0573, limiterARef: 359.7712185, convMethod: 1, limiter: 2}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0, turbulentPrandtl: 0.9}\ninitial: \"uniform_p101325_u10\"\noutput: {level: 1, extraFields: [res_ro, res_roUx, res_roUy, res_roe, res_roK, res_roOmega, omg_prod, omg_dest, omg_cross, omg_trans, omg_axisym, dt_local]}\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    },
+    "mid": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.limiterScaled": 1,
+     "space.slauWallNormalChi": 1,
+     "space.venkatK": 0.05,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1
+    }
+   }
+  },
+  "walldriven_euler_cpg": {
+   "stages": [
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 3000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 3000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 1, axisCentroidShift: 1, meshFileName: \"nozzle.h5\", valueFileName: \"nozzle.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 0, viscMethod: 0,\n           visc: 0.0, thermCond: 0.0, cp: 1004.5, gamma: 1.4}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 16000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 4.0, cfl_pseudo: 4.0,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 4000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "soft": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    },
+    "main": {
+     "mesh.axisSegmentRWeight": 1,
+     "mesh.axisymMethod": 0,
+     "space.limiterScaled": 1,
+     "space.venkatK": 0.05,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    }
+   }
+  },
+  "sern2d_finite_base_frozen_tp_sst": {
+   "stages": [
+    [
+     "warm_lam",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 4000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.1, cfl_pseudo: 0.1,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 4000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 4000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.1, cfl_pseudo: 0.1,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 4000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 4000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.1, cfl_pseudo: 0.1,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 4000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 12000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.5, cfl_pseudo: 0.5,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 500\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "warm_lam": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    },
+    "soft": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85
+    },
+    "mid": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85
+    },
+    "main": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85
+    }
+   }
+  },
+  "sern3d_frozen_tp_sst": {
+   "stages": [
+    [
+     "warm_lam",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.2, cfl_pseudo: 0.2,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"none\"}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "soft",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.2, cfl_pseudo: 0.2,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 0, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "mid",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 2000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.2, cfl_pseudo: 0.2,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 2000\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}\ninitial: \"uniform_p101325_u10\"\n"
+    ],
+    [
+     "main",
+     "mesh: {discretization: \"node\", isAxisymmetric: 0, nodeWallDirichlet: 1, meshFileName: \"sern.h5\", valueFileName: \"sern.h5\"}\ngpu: 1\nsolver: \"SLAU\"\nphysProp: {thermalMethod: 2, viscMethod: 2, visc: 1.8e-5, thermCond: 0.0257, prandtlLam: 0.72, cp: 1718.5, gamma: 1.247, pMin: 20.0, species: [{name: \"EXH\", lump: {\"N2\": 0.6389063890638906, \"H2O\": 0.3269532695326953, \"H2\": 0.012510125101251011, \"AR\": 0.007670076700767007, \"OH\": 0.0060400604006040064, \"O2\": 0.003980039800398003, \"NO\": 0.0020600206002060026, \"H\": 0.0012500125001250015, \"O\": 0.0003700037000370004, \"CO2\": 0.00021000210002100023, \"CO\": 5.000050000500005e-05}, basis: mole}, {name: \"AMB\", lump: {\"N2\": 0.781121203633308, \"O2\": 0.20953543275579212, \"AR\": 0.009343363610899925}, basis: mole}], thermoHrefTemp: 298.15, transport: {\"N2\": \"cea\", \"H2O\": \"custom:h2o_iapws_cea_v1\", \"H2\": \"cea\", \"AR\": \"cea\", \"OH\": \"cea\", \"O2\": \"cea\", \"NO\": \"cea\", \"H\": \"cea\", \"O\": \"cea\", \"CO2\": \"cea\", \"CO\": \"cea\"}}\ntime:\n  unsteady: 0\n  dualTime: 0\n  last: {nStepOuter: 4000}\n  deltaT: {control: 1, dt: 1e-8, cfl: 0.25, cfl_pseudo: 0.25,\n           dt_min: 1e-9, dt_max: 0.001, blockDPLUR: 1, lowMachPrecond: 0, detectNaN: 1}\n  outStepStart: 0\n  outStepInterval: 500\n  timeIntegration: 11\n  nStepInner: 5\nspace: {convMethod: 1, limiter: 2, pRef: 2851.0, limiterScaled: 1, venkatK: 0.05}\nturbulence: {model: \"sst\", scalarDiffusion: 1, dilatationCorrection: 2, katoLaunder: 1, wallTreatmentSST: 0}\ninitial: \"uniform_p101325_u10\"\n"
+    ]
+   ],
+   "explicit": {
+    "warm_lam": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0
+    },
+    "soft": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85
+    },
+    "mid": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85
+    },
+    "main": {
+     "mesh.scalarGradient": "lsq",
+     "physProp.thermoFloat": 1,
+     "space.slauWallNormalChi": 1,
+     "time.deltaT.implicitRelax": 1.0,
+     "time.deltaT.implicitThermalJacobian": 0,
+     "time.deltaT.lineDtDirectional": 0,
+     "time.deltaT.lineImplicit": 0,
+     "turbulence.sstEnergyIncludesK": 0,
+     "turbulence.sstNodeWallKPin": 1,
+     "turbulence.sstOmegaProdFromPk": 1,
+     "turbulence.sstSigmaBlend": 1,
+     "turbulence.turbulentPrandtl": 0.85
+    }
+   }
+  }
+ }
+}

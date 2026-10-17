@@ -125,6 +125,19 @@ def write_field(rd: Path, X, R, Q, steps, scale=S_SC, perturb=None):
     ni, nj = X.shape
     with h5py.File(rd / "nozzle.h5", "w") as f:
         f["/MESH/COORD"] = np.c_[X.ravel() * scale, R.ravel() * scale, np.zeros(ni * nj)].ravel()
+        # 投入の関門 (run_case.sh → launch_gate.py、plan tooling-generator-defaults-and-launch-gate §5.1 #10) がメッシュの品質
+        # (check_mesh_quality.py --bcond) を見るので、node 変換と同じ置き方の primal の接続と壁 (physID 3 = 上辺) の面も書く
+        # (座標だけの h5 は検査できない入力として止まる; run_stop_rule_tests.py の write_mesh と同じ形)
+        nid = lambda i, j: i * nj + j                                                   # noqa: E731
+        quads = [[nid(i, j), nid(i + 1, j), nid(i + 1, j + 1), nid(i, j + 1)] for i in range(ni - 1) for j in range(nj - 1)]
+        wall = [(nid(i, nj - 1), nid(i + 1, nj - 1)) for i in range(ni - 1)]
+        f["MESH/CONNE"] = np.array([x for n in range(ni * nj) for x in (1, n)], dtype=np.int64)
+        f["VIZMESH/CONNE"] = np.array([x for q in quads for x in [5] + q], dtype=np.int64)
+        f["VIZMESH"].attrs["nVizCells"] = np.int64(len(quads))
+        b = f.create_group("BCONDS/3")
+        b["vizBfaceNodes"] = np.array([n for e in wall for n in e], dtype=np.int64)
+        b["vizBfaceSizes"] = np.full(len(wall), 2, dtype=np.int64)
+        b.attrs["bcondKind"] = "wall_isothermal"
     for st in steps:
         k = 1.0 if perturb is None else perturb(st)
         with h5py.File(rd / f"res_{st}.h5", "w") as f:
@@ -187,7 +200,12 @@ def criteria(segment=True, residual="judge"):
             "preconditions": []}
 
 
-CFG_TEXT = "time: {last: {nStepOuter: %d}, outStepInterval: 2000}\noutput: {boundaryMassflux: 1, nodeProbeFile: settle_nodes.txt}\n"
+# mesh・bcondConfig.yaml は投入の関門 (run_case.sh → launch_gate.py) が読む (meshFileName が無い・bcond が無い run は検査できない入力として止まる)
+CFG_TEXT = ('mesh: {discretization: "node", isAxisymmetric: 1, meshFileName: "nozzle.h5", valueFileName: "nozzle.h5"}\n'
+            "time: {last: {nStepOuter: %d}, outStepInterval: 2000}\noutput: {boundaryMassflux: 1, nodeProbeFile: settle_nodes.txt}\n")
+BCOND_TEXT = ("inlet:  {physID: 1, kind: inlet_Pressure, outputHDFflg: 0, ints: , floats: {Pt: 3500000.0, Tt: 1250.0}}\n"
+              "outlet: {physID: 2, kind: outlet_statPress, outputHDFflg: 1, ints: , floats: {Ps: 2770.0}}\n"
+              "wall:   {physID: 3, kind: wall_isothermal, outputHDFflg: 1, ints: , floats: {Tw: 370.0}}\n")
 
 
 def write_launch(rd: Path, cfg_text: str | None = None):
@@ -250,6 +268,7 @@ def build(name: str, pin, *, kind="REACHED", resid_fn=None, mdot_fn=None, skip_n
     info = ns_info(pin)
     (rd / "prepare_info.json").write_text(json.dumps(info))
     (rd / "solverConfig.yaml").write_text(CFG_TEXT % cap)
+    (rd / "bcondConfig.yaml").write_text(BCOND_TEXT)
     return finish_v2(rd, kind=kind, resid_fn=resid_fn, mdot_fn=mdot_fn, skip_nodes=skip_nodes,
                      delta=("from", delta_from) if delta_from is not None else ("extract", info), residual=residual, legacy=legacy)
 
@@ -810,48 +829,51 @@ def test_run_case(A):
 
 # ====================================================================================== (d) Stop フック
 def test_hook(rc_main: Path, rc_legacy: Path):
-    print("== (d) Stop フック (hook_convergence_gate.py)", flush=True)
+    """Stop フックは 2026-10-18 の forge-gate の取り込みから RUN_VERDICT.json (judge_run.py) の有無・鮮度・確定を見る
+    (plan tooling-convergence-and-wall-resolution-gates §4.6-5; 以前の CONVERGENCE_VERDICT.txt の有無と時刻の検査は置き換わった)。
+    ここでは run_case.sh が書いた基準のある run・基準の無い run の判定でフックが止めないこと、判定の無い run・判定の後に入力が
+    変わった run で止めることを見る (FAIL・判定不能のまま終えるのは許す設計; 詳しい場合分けは tests/unit/test_judge_run.py)。"""
+    print("== (d) Stop フック (hook_convergence_gate.py、RUN_VERDICT.json)", flush=True)
     root = TMP / "hookroot"
-    (root / "solver_density_cuda" / "tools").mkdir(parents=True)
-    for f in ("hook_convergence_gate.py", "forge_gate_claims.py"):
-        shutil.copy2(TOOLS / f, root / "solver_density_cuda" / "tools" / f)
     case = root / "case" / "99.hooktest"
-    now = time.time()
+    case.mkdir(parents=True)
 
-    def mk(name, verdict_src: Path | None, verdict_age: float | None):
+    def mk(name, src: Path | None):
         d = case / name
-        d.mkdir(parents=True)
-        (d / "residual_history.csv").write_text("step,inner,phase,rms_ro\n0,-1,outer_end,1e-4\n")
-        os.utime(d / "residual_history.csv", (now - 600, now - 600))
-        if verdict_src is not None:
-            shutil.copy2(verdict_src, d / "CONVERGENCE_VERDICT.txt")
-            os.utime(d / "CONVERGENCE_VERDICT.txt", (now - verdict_age, now - verdict_age))
+        if src is not None:
+            shutil.copytree(src, d, symlinks=True)       # copy2: 判定の入力の識別 (sha256・h5 の mtime) を保つ
+        else:
+            d.mkdir()
+            (d / "residual_history.csv").write_text("step,inner,phase,rms_ro\n0,-1,outer_end,1e-4\n")
+        old = time.time() - 600                          # 実行中 (更新から 120 s 未満) として飛ばされないように
+        os.utime(d / "residual_history.csv", (old, old))
         return d
 
     def hook():
-        p = subprocess.run([sys.executable, str(root / "solver_density_cuda" / "tools" / "hook_convergence_gate.py")], input="{}",
-                           capture_output=True, text=True, timeout=60)
+        env = {**os.environ, "FORGE_GATE_ROOT": str(root), "HOME": str(TMP / "hookhome")}
+        p = subprocess.run([sys.executable, str(TOOLS / "hook_convergence_gate.py")], input="{}", capture_output=True, text=True,
+                           timeout=120, env=env)
         return json.loads(p.stdout.strip() or "{}")
 
-    mk("run_0001_settled", rc_main / "CONVERGENCE_VERDICT.txt", 300)
-    mk("run_0002_convergence", rc_legacy / "CONVERGENCE_VERDICT.txt", 300)
+    mk("run_0001_settled", rc_main)
+    mk("run_0002_convergence", rc_legacy)
     out = hook()
-    check("check_settled.py・check_convergence.py の両方の形式の CONVERGENCE_VERDICT.txt (residual より新しい) で block しない",
-          out == {} and "TOOL: check_settled.py" in (rc_main / "CONVERGENCE_VERDICT.txt").read_text()
-          and "TOOL: check_convergence.py" in (rc_legacy / "CONVERGENCE_VERDICT.txt").read_text(), str(out)[:200])
-    mk("run_0003_none", None, None)
+    check("run_case.sh が判定を書いた run (基準あり・基準なし) では block しない (判定の総合が FAIL・判定不能でも終えてよい)",
+          out == {} and (rc_main / "RUN_VERDICT.json").is_file() and (rc_legacy / "RUN_VERDICT.json").is_file(), str(out)[:300])
+    mk("run_0003_none", None)
     out = hook()
-    check("CONVERGENCE_VERDICT.txt が無い run があれば今どおり block (その run だけを挙げる)",
-          out.get("decision") == "block" and "run_0003_none" in out.get("reason", "") and "run_0001" not in out.get("reason", ""),
-          str(out)[:200])
-    check("block の案内文: 道具の選択 (check_settled.py --select・--bind / check_convergence.py) と「通過は収束の合格ではない」",
-          "check_settled.py --select" in out.get("reason", "") and "--bind" in out.get("reason", "")
-          and "収束の合格ではない" in out.get("reason", ""))
+    check("RUN_VERDICT.json が無い run があれば block (その run だけを挙げる)、案内は judge_run.py",
+          out.get("decision") == "block" and "run_0003_none" in out.get("reason", "") and "run_0001" not in out.get("reason", "")
+          and "judge_run.py" in out.get("reason", ""), str(out)[:300])
     shutil.rmtree(case / "run_0003_none")
-    mk("run_0004_old", rc_main / "CONVERGENCE_VERDICT.txt", 900)
+    d = mk("run_0004_stale", rc_main)
+    with open(d / "residual_history.csv", "a") as f:
+        f.write("# 判定の後に書き足した\n")
+    old = time.time() - 600
+    os.utime(d / "residual_history.csv", (old, old))
     out = hook()
-    check("CONVERGENCE_VERDICT.txt が residual より古い → 今どおり block", out.get("decision") == "block" and "run_0004_old" in out.get("reason", ""),
-          str(out)[:200])
+    check("判定の後に残差の履歴が変わった run → block (STALE)", out.get("decision") == "block" and "run_0004_stale" in out.get("reason", ""),
+          str(out)[:300])
 
 
 # ====================================================================================== (e) #7b 残りの読み手

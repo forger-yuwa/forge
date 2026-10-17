@@ -60,6 +60,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from ..evaluate import config_builder as CB
+from ..evaluate import judge
 from ..evaluate import runner
 from ..geometry.wall import NozzleWall
 from ..probdef import load_problem
@@ -475,24 +477,38 @@ class Campaign:
             n_stage = 3000
             runner.prepare(prob, stage, nsteps=n_stage, warm_from=warm)
             cfg = (stage / "solverConfig.yaml").read_text()
-            cfg = cfg.replace("cfl: 4.0, cfl_pseudo: 4.0", "cfl: 0.5, cfl_pseudo: 0.5")
-            cfg = cfg.replace("convMethod: 1", "convMethod: 0")
-            # 収束場を必ずダンプさせる (outStepInterval > n_stage だと res_0 しか
-            # 出ず、本段が seed 直投入相当になって発散する — smoke で実測したバグ)
-            import re
-            cfg = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_stage}", cfg)
-            (stage / "solverConfig.yaml").write_text(cfg)
-            runner.run_forge(stage)
+            # cfl 0.5・1 次。収束場を必ずダンプさせる (outStepInterval > n_stage だと res_0 しか
+            # 出ず、本段が seed 直投入相当になって発散する — smoke で実測したバグ)。値は YAML 上の位置で書き換える
+            # (2026-10-15、plan tooling-generator-defaults-and-launch-gate §5.1 #11; 旧: 文字列置換・正規表現、書く文字列は同じ)
+            cfg = CB.set_scalars(cfg, {"time.deltaT.cfl": "0.5", "time.deltaT.cfl_pseudo": "0.5", "space.convMethod": "0",
+                                       "time.outStepInterval": str(n_stage)})
+            # 明示すべきキーを足して書き、段の宣言 RECIPE.json を書く (機種 bell_cpg の soft; config_builder)
+            CB.launch_stage(stage, cfg, (stage / "bcondConfig.yaml").read_text(), "soft", "bell_cpg", problem=prob,
+                            generator="opt.driver.Campaign.evaluate (CPG の soft)")
+            # soft 段の run (別の run dir) の総合の判定を起動の後に確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2)
+            with judge.Staged(stage, "opt.driver.Campaign.evaluate (CPG の soft)"):
+                runner.run_forge(stage)
             sres = sorted(stage.glob("res_[0-9]*.h5"),
                           key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
             if (not sres
                     or int("".join(c for c in sres[-1].stem if c.isdigit())) < n_stage
                     or self._diverged(stage, {"eta_cf": 0.9})):
                 raise RuntimeError("soft 段が発散または最終場未出力")
-            # 本段 (12000 step, 全域 2 次 + cfl4)
-            runner.prepare(prob, run_dir, warm_from=sres[-1])
-            runner.run_forge(run_dir)
-            out = runner.collect(prob, run_dir)
+            # 本段 (12000 step, 全域 2 次 + cfl4)。soft 段の変換済みの格子を写して使い、soft の最終場を段終了ゲート +
+            # restart_field.py で初期場にする (2026-10-15 まで同じ幾何から格子を作り直して interp_field.py; plan
+            # tooling-generator-defaults-and-launch-gate §5.1 #19)。ゲート落ちは soft 段の失敗として扱う (RETRYABLE)
+            try:
+                runner.continue_cpg(prob, stage, run_dir)
+            except RuntimeError as e:
+                if "段終了ゲート" in str(e):
+                    raise RuntimeError(f"soft 段の最終場が段終了ゲートで不合格: {e}") from None
+                raise
+            CB.launch_stage(run_dir, (run_dir / "solverConfig.yaml").read_text(), (run_dir / "bcondConfig.yaml").read_text(),
+                            "main", "bell_cpg", problem=prob, generator="opt.driver.Campaign.evaluate (CPG の本段)")
+            # 本段の run の総合の判定は出力の整理 (collect) の後に 1 度だけ確定する (仕様は continue_cpg が書いた)
+            with judge.Staged(run_dir, "opt.driver.Campaign.evaluate (CPG の本段)"):
+                runner.run_forge(run_dir)
+                out = runner.collect(prob, run_dir)
             verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text()
             qs = self._quasisteady(run_dir)
             eta = out.get("eta_cf")

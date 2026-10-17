@@ -233,8 +233,11 @@ def main():
         import yaml
         with open(sc_path) as fp:
             sc = yaml.safe_load(fp)
-        axi = any(str(v.get("isAxisymmetric", 0)) == "1"
-                  for v in sc.values() if isinstance(v, dict))
+        # solver と同じ優先順 (mesh.isAxisymmetric、無ければ旧 physProp.isAxisymmetric)。以前はどの節でも 1 なら軸対称と
+        # 読んでいて、mesh 0・physProp 1 (実効は平面) を軸対称にしていた
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import check_solver_config as csc
+        axi = csc.effective_axisymmetric(sc or {}) == 1
         if axi:
             print("  (d) Green-Gauss: 軸対称 run (planar 幾何が h5 に無い) のため N/A")
             if wall_dist is not None:

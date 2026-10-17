@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # forge を run ディレクトリで実行し、終了後に必ず収束の判定 (check_convergence.py、settle_criteria.yaml のある run の本段は
 # check_settled.py; 選択の規則は下の後処理) を走らせて VERDICT を CONVERGENCE_VERDICT.txt に残す + 残差プロットを生成する。
+# その後に judge_run.py が全項目の判定を RUN_VERDICT.{json,txt} に書く (段階起動の run では段の記録だけ)。
 #
 # 使い方:  run_case.sh [run_dir]        (省略時は $PWD)
 #   バックグラウンド長時間 run も:  nohup run_case.sh <run_dir> &
@@ -51,6 +52,15 @@ FORGE_EXE="${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}"
   done
 } > RUN_PROVENANCE.txt
 
+# --- 投入の関門 (plan tooling-generator-defaults-and-launch-gate §4.3): 宣言・設定・メッシュの来歴と品質・バイナリを照合し、
+# 0 でなければ forge を起動しない。照合の中身は launch_gate.py (LAUNCH_GATE.txt、RUN_PROVENANCE.txt に 1 行)。
+python3 "$ROOT/solver_density_cuda/tools/launch_gate.py" "$PWD" --forge-bin "$FORGE_EXE"
+gate_rc=$?
+if [ "$gate_rc" -ne 0 ]; then
+    echo "[run_case] launch gate exit=$gate_rc -> forge を起動しない (LAUNCH_GATE.txt)"
+    exit "$gate_rc"
+fi
+
 # FORGE_BIN で別ビルドの forge を指定できる (A/B 回帰で旧バイナリを回す用途。既定は build/forge)
 "${FORGE_BIN:-$ROOT/solver_density_cuda/build/forge}" > forge_run.log 2>&1
 rc=$?
@@ -58,6 +68,9 @@ echo "[run_case] forge exit=$rc"
 # 実効設定 (起動エコー) を RUN_PROVENANCE にも写す (plan convection-slau-wall-normal-chi-default §4.2)
 grep -h "^'slauWallNormalChi' effective" forge_run.log >> RUN_PROVENANCE.txt 2>/dev/null || true
 grep -h "^'scalarGradient' effective" forge_run.log >> RUN_PROVENANCE.txt 2>/dev/null || true
+# 起動のエコーと config の要求値の照合 (plan tooling-generator-defaults-and-launch-gate §5.1 #29): 不一致・確認不能を
+# LAUNCH_ECHO.txt に WARN で残す (起動の後なので止めない)
+python3 "$ROOT/solver_density_cuda/tools/launch_gate.py" "$PWD" --post-launch --forge-bin "$FORGE_EXE" || true
 
 echo "[run_case] convergence check ->"
 # 判定の終了コードを **握りつぶさず記録する**。段階起動では段ごとに未収束でも先へ進むのが正しいので
@@ -94,6 +107,11 @@ echo "CONVERGENCE_EXIT: $conv_rc" >> CONVERGENCE_VERDICT.txt
 cat CONVERGENCE_VERDICT.txt
 python3 "$ROOT/solver_density_cuda/tools/plot_implicit_residuals.py" \
     --input residual_history.csv --output residual_history.png > /dev/null 2>&1 || true
+# 計算の後の判定を 1 本に (plan tooling-convergence-and-wall-resolution-gates §4.6): RUN_VERDICT.{json,txt}。
+# 上の CONVERGENCE_VERDICT.txt は収束の副判定として残す。段階起動の run (stage_manifest.json がある・FORGE_JUDGE_DEFER=1) では
+# 段の結果だけを記録し (state deferred)、総合は親が確定する。判定の終了コードは run_case の終了コードに入れない (solver が基本)。
+python3 "$ROOT/solver_density_cuda/tools/judge_run.py" . --from-run-case --solver-rc "$rc"
+echo "[run_case] judge exit=$? (RUN_VERDICT.txt)"
 if [ "${FORGE_STRICT_CONVERGENCE:-0}" != "0" ] && [ "$rc" -eq 0 ] && [ "$conv_rc" -ne 0 ]; then
     echo "[run_case] FORGE_STRICT_CONVERGENCE=1 かつ収束判定が非ゼロ ($conv_rc) -> 失敗として返す"
     exit "$conv_rc"

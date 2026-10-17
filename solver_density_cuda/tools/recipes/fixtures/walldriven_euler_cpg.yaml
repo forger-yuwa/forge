@@ -1,0 +1,39 @@
+# ① 軸対称風洞 — wall-driven チェーン W3 (Md=4, R_t=5 既定)
+# plan: plans/active/tooling-nozzle-walldriven-chain.md。
+# 円弧・逆 MOC target を持たない: 壁 = 直管 + U→T quintic + T→D 4次 + θ_D 円錐延長。
+# R_t=5 は W0 判別実験 (run_0039: 円弧起因支配、振幅比 0.49) の帰結。
+# theta_D は W5 で M_e(θ_D) root find の dv になる — W3 は初期値 12° の疎通確認。
+name: wt_m4_walldriven
+type: wind_tunnel_axisym_walldriven
+gas: {gamma: 1.4, cp: 1004.5}
+
+spec:
+  Pt: 1.0e6          # 入口全圧 [Pa]
+  Tt: 800.0          # 入口全温 [K]
+  p_ambient: 1000.0  # 出口背圧 [Pa] (超音速流出 — 実質未使用)
+  r_throat: 0.010    # スロート半径 [m]
+  M_design: 4.0      # 設計マッハ (W5 の root find 目標。W3 では未使用)
+
+dv:
+  theta_D:  {value: 12.0, min: 5.0, max: 25.0}   # 最大壁角 [deg] (W5 の主 dv)
+  R_t:      {value: 5.0,  min: 2.0, max: 8.0}    # スロート曲率半径 / rt
+  L_D_frac: {value: 0.9,  min: 0.3, max: 1.0}    # L_D / (3 R_t tanθ_D) — 1.0 で変曲限界
+
+geometry:
+  r_inlet: 2.5
+  L_U: 3.5           # μ = L_U²/(R_t Δr) = 1.63 ≤ 20 (単調収縮条件内)
+  L_pipe: 0.5
+  L_ext_factor: 4.0  # 円錐延長 = factor × r_D (D 発 C⁻ の軸着地を覆う。run 後に実測検証)
+  # 終端は円錐のまま (L_turn/L_cyl 既定 0)。段階起動 (runner_walldriven.run_staged)
+  # だけで cold 単段発散 (run_0040/0041) を回避できると run_0043 で確定済み — 戻し
+  # テーパは不要 (WallDrivenCFDWall docstring 参照)。
+
+mesh:
+  ni: 321
+  nj: 65
+  wall_first_frac: 5.0e-3
+  throat_refine: 3.0
+
+evaluate:
+  nStepOuter: 16000
+  outStepInterval: 4000

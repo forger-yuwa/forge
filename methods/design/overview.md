@@ -47,6 +47,31 @@ v2 Euler 帰還 [凍結特性線マップ] → v3 NS トレース) で決まる�
 | `opt` | サロゲート MOO ループ (**実装済み**): `ehvi` (2目的 EHVI 閉形式・MC照合済) / `doe` (LHS) / `surrogate` (SMT KRG) / `moo` (NSGA-II+EHVI infill) / `driver` (バッチ評価: 2段起動・VERDICT/物理ゲート・warm seed) / `polish` (チャンク継続+ηドリフトゲート)。実行は `design/.venv-opt` |
 | `menu` | 特殊解析メニュー (凝縮・高度スイープ — Phase 3〜) |
 
+### 解析設定の出所 (機種の推奨設定 = プロファイル、2026-10-14)
+
+生成器 (`evaluate/runner*.py`) の solverConfig は、機種と段ごとの推奨設定 (プロファイル。値の正本は
+`solver_density_cuda/tools/recipes/recommended_settings.yaml`、表は `procedures/recommended-settings.md` 付録 A) から組む方針
+(plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-generator-defaults-and-launch-gate.md) §4.0〜§4.2)。
+**段取り 1 (今) は書き写しの照合と宣言**で、生成器の数値は変えていない: 各生成器が今書く設定を `recipes/regen_profiles.py` が
+代表の問題 (固定の写し `recipes/fixtures/`、plan §5.1 #17) で全段の起動列を偽の forge で作って書き写し、
+`design/tests/run_recipe_profiles_tests.py` が書き写しと生成器の出力の一致を確かめる。
+2026-10-15 (plan §5.1 #11) から生成器は段の config を書くときに `evaluate/config_builder.py` を通す: (1) 機種のプロファイルに合えば
+**明示すべきキー** (値に依存するのに省略していたキー、plan §5.1 #16) を旧い実効値で足す (文字の挿入だけ。値は変わらない:
+`design/tests/run_generator_recipe_tests.py` が置き換えの前とのバイト同一 (例外 = 足したキー) を確かめる)、(2) 書いた後に段の宣言
+`RECIPE.json` (と段の写し `RECIPE_<tag>.json`) を書く。問題 YAML (と `--cfl` などの引数) が明示した数値の上書きは、出所 (問題 YAML の
+パスとキー) つきの理由のある逸脱に変換する。**代表 11 機種・30 段**の config が自分のプロファイルに PASS することを
+`run_generator_recipe_tests.py` で確かめた。**全経路ではない** (plan §5.1 #27): 宣言を結線していない経路 (`runner.main` の単段、
+opt/polish の CPG)、宣言を書かない段 (axis-Mach NS の `ramp`、SERN の `warm_adapt`)、プロファイルの無い機種・構成 (風洞 NS v1、
+`euler_loop` の cell、CPG の axis-Mach、断熱壁の axis-Mach NS) は宣言を書かない (`RECIPE_<tag>.FAILED.json` に理由を残す段もある)。
+生成器の値を変えたらプロファイルも書き直す (`regen_profiles.py --write`、差は plan に書く)。
+手で作る run は `recipe_settings.py declare <run> --profile P --stage S` で宣言できる。投入の関門 `launch_gate.py` (`run_case.sh` が
+forge の前に呼ぶ、#10) は実装済み: 宣言した run は宣言のプロファイル・段・逸脱と、変換の成果物から取った次元・格子の種類 (#28) で照合し、
+FAIL なら起動しない。強制の開始は棚卸しの完了の後 (plan §4.7) で、それまでは宣言の無い run・来歴の記録の無いメッシュを WARN で起動する
+(禁止キー・宣言した run の照合の FAIL・メッシュの FAIL は今も止める)。forge の終了の後は起動のエコーと要求値を照合し `LAUNCH_ECHO.txt`
+に残す (#29、WARN のみ)。
+**段取り 1 の完了と計画全体の完了は別**: 段取り 1 の残りは #26 (case/45 の台本の互換の統合) と result 段の再レビュー。生産レシピへの
+既定の揃え (段取り 2、#12)・§1 に寄せる受入 (段取り 3、#15)・強制の開始は後続。
+
 ## 問題定義 YAML
 
 1 案件 = 1 YAML。全パラメータは 3 区分で宣言する:
@@ -1257,6 +1282,14 @@ NS run の条件を変えたときは、δ_E の評価に**同条件の Euler re
 **入力 YAML の重複キー**: solverConfig・bcondConfig・species_meta と、`run_staged`/`run_staged_ns` の段 config 検査は `solver_density_cuda/tools/yaml_strict.py` で読み、全階層 (flow・block 形式) の重複キーを拒否する (PyYAML は後勝ち・solver の yaml-cpp は先勝ちなので、PyYAML で読んだ値は solver の実効設定と違いうる)。 **merge key (`<<`) も全階層で拒否する** (yaml-cpp は merge を展開しないので、PyYAML で展開した値と solver の実効値が食い違う)。**使用禁止・廃止キー** (`mesh.bndFirstOrder`、`procedures/recommended-settings.md` §9 の削除キー・node 廃止キー・旧乱流キー) を持つ参照 run は作成前に拒否し、旧既定・非推奨の値 (sst の旧既定、`wallTreatmentSST: 1` など) は警告する。
 
 `run_staged` (Euler) も `run_staged_ns` と同じく、各段 (soft・mid) の restart 前に段終了ゲート (`stage_gate`) をかけ、段ごとの `residual_history_<tag>.csv` (tag = soft / mid / main) と `stage_manifest.json` を残す。段の CFL・step 数は変えていない。
+
+**他の runner の段の記録 (2026-10-14、plan [tooling-generator-defaults-and-launch-gate](../../plans/active/tooling-generator-defaults-and-launch-gate.md) §5.1 #9)**:
+`runner_wt.run_staged` (① モード F)・`runner_walldriven.run_staged` も段 (`soft`・`main`) ごとに `stage_manifest.json` と
+`residual_history_<tag>.csv` を残し、段間は段終了ゲート + `restart_field.py` (`runner_wt._staged_handoff`。それまでは同一メッシュに
+`interp_field.py` を使っていた)。`runner_sern.run_staged` (2D・3D・`opt/driver_sern`) は段 (`warm_adapt`・`warm_cfl<c>`・`soft_cfl<c>`・
+`mid_cfl<c>`・`main`) ごとに manifest と `residual_<tag>.csv` を残す (段間は `restart_by_index` のままで、段終了ゲートは無い)。
+段の config の文字列は変えていない。起動の全経路の表は
+[`notes/investigations/2026-10-14-launch-path-inventory.md`](../../notes/investigations/2026-10-14-launch-path-inventory.md)。
 
 
 **外部ファイル参照 (2026-10-06)**: ファイル名を取る設定キーは完全修飾パスで検査する (拡張子では判定しない)。`mesh.meshFileName`/`valueFileName` は `nozzle.h5` だけ、`physProp.speciesDBFile` は run 内の実在する `species_db_external.yaml` か空だけを通し、`physProp.chemistry.mechanismFile`・`conjugate:` ブロック (暗黙に `conjugate_state_<id>.h5` を読む)・bcond の `inletProfile`/`wallProfile`・その他ファイル参照に見えるキーは値によらず作成前に拒否する (v1 対象外)。

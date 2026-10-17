@@ -1,0 +1,56 @@
+# ① 軸対称風洞ノズル (モード F) — B8: 設計=B6 グローバル / 評価=B7 分割帳簿 (Md=4)
+# problem_m4_cfdanchor.yaml との差分: throat_anchor_run を B6 壁の場
+# (run_0018/pass_08) に更新 — 旧アンカー (run_0017 = Sauer 壁の波だらけの場) は
+# 評価参照として不適で B7 の物理後退を隠した (plan §9.2 B8)
+name: wt_m4_b10
+type: wind_tunnel_axisym
+gas: {gamma: 1.4, cp: 1004.5}
+
+spec:
+  Pt: 1.0e6          # 入口全圧 [Pa]
+  Tt: 800.0          # 入口全温 [K]
+  p_ambient: 1000.0  # 出口背圧 [Pa] (超音速流出 — 実質未使用)
+  r_throat: 0.010    # スロート半径 [m]
+  M_design: 4.0      # 設計マッハ (D_e は従属)
+
+dv:
+  L_ax:   {value: 14.0, min: 10.0, max: 20.0}   # 目標 Bézier の軸スパン / rt
+  mc_cp1: {value: 2.0,  min: 1.3,  max: 3.0}    # 自由 CP (単調)
+  mc_cp2: {value: 2.9,  min: 1.6,  max: 3.6}
+  mc_cp3: {value: 3.6,  min: 2.0,  max: 3.95}
+
+geometry:
+  R: 2.0             # スロート円弧 (Ru=Rd 単一 — モード F)
+  blend_len: 0.0     # 曲率ブレンド無効 (撤回済み — plan §9.1)
+  r_inlet: 2.5
+  L_pipe: 0.5
+  L_contract: 3.0
+  phi_u_deg: 25.0
+  n_axis_inv: 500    # 逆マーチの軸解像度
+  n_start: 41
+  centerline_start_order: 2   # 目標 Bézier を M,M',M'' まで CFD アンカーに整合
+  # アンカー抽出元 (凍結)。run_0017 pass_08 最終場 (PASS アンカー系列の最新)
+  throat_anchor_run: "case/41.wind_tunnel_design/run_0018_cfd_anchor/pass_08"
+  # === B10: target と自由 dv の起点を x_reach_CFD にする (plan §9.2 B10) ===
+  # node 基準 run (run_0036_node_local4x, 最細格子) から一度取得して固定。
+  # J=(0.2465,1.0153) 発の CFD C⁻ が軸へ着地する位置。
+  x_reach_cfd: 1.7042
+  # 同点での上流片側局所回帰による [M, M', M'']。node で 3 stencil が
+  # M'' +0.169/+0.188/+0.218 に収束 (cell は -1.33/+0.51/-5.59 で測定不能だった)。
+  x_reach_anchor: [1.94576, 0.28960, 0.19000]
+  # B10 手順6: 帰還ループの初期壁は**仮壁** (= run_0027_c3 が 12 パスで到達した壁)。
+  # 新 target から逆設計し直した壁で始めると既存の改良を捨てる (実測 170 µm 差)。
+  initial_wall_csv: "case/41.wind_tunnel_design/run_0031_baseline_cold/wall_provisional.csv"
+
+
+mesh:
+  # B10: 帰還ループも node で回す (cell は軸 M の高次微分が雑音支配)
+  discretization: node
+  ni: 321
+  nj: 65
+  wall_first_frac: 5.0e-3
+  throat_refine: 3.0
+
+evaluate:
+  nStepOuter: 12000
+  outStepInterval: 4000

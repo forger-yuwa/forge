@@ -42,6 +42,8 @@
 
 `solverConfig.yaml` の `convMethod`・`limiter` などの数値設定を変更・確認するときは、必ず `procedures/solver-settings.md` を参照すること。設定値の意味を記憶や推測で判断しないこと。**新規 config を組む・既存 config を点検するときは [`procedures/recommended-settings.md`](procedures/recommended-settings.md) (現行レシピの正本、日付付き) を先に読み、§9 の旧設定・廃止キーを混入させない** (Claude は skill `forge-config`)。
 
+**投入の関門と宣言 (2026-10-15、移行期)**: `run_case.sh` は forge の起動の前に `solver_density_cuda/tools/launch_gate.py` を回し (`LAUNCH_GATE.txt`)、FAIL なら起動しない。run は推奨のプロファイルに対して宣言する: `recipe_settings.py declare <run> --profile P --stage S` (設計チェーンの生成器は自分で書く)、プロファイルから外す値は `--deviate key=value --reason "<1 行>"`、推奨に従わない試し計算は `--experiment --reason "<1 行>"`。**強制の開始 (plan [tooling-generator-defaults-and-launch-gate](plans/active/tooling-generator-defaults-and-launch-gate.md) §4.7 の棚卸しの完了) までは、宣言の無い run・来歴の記録の無いメッシュは WARN で起動する**が、禁止キー・宣言した run の照合の FAIL (値・省略・適用条件)・メッシュの来歴の不一致と品質の FAIL は今も止まる。forge の終了の後は起動のエコーと要求値の照合が `LAUNCH_ECHO.txt` に残る (WARN のみ)。旧キーは `migrate_solver_config.py` で直す。同一メッシュの `restart_field.py` は格子の同一性を確かめてから書く: 格子を持たない res だけを写したときは `--src-mesh <変換済みの入力 h5>`、座標の精度だけを上げて変換し直した格子へは `--allow-coord-upcast`。詳細は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md) の「投入の関門」・「メッシュ変更後の restart」と [`procedures/recommended-settings.md`](procedures/recommended-settings.md) §0.1。
+
 **`mesh.bndFirstOrder` は使用禁止**。新規 config に書かないこと。既存 run から複製するときも必ず落とすこと。このフラグは (1) 対流再構成だけでなく `viscousFlux` が読む速度勾配も 0 にするため**粘性応力を破壊**し、(2) `bnode_flag` が「いずれかの bcond の CV」なので疑似 2D (1 セル厚) メッシュでは spanwise 境界が全ノードを覆い**全域に効いてしまう**。したがって安定化しても交絡した副作用であり、切り分けにも対策にも使えない。詳細と削除計画は [`procedures/solver-settings.md`](procedures/solver-settings.md) の該当節と [`plans/active/architecture-bndfirstorder-removal.md`](plans/active/architecture-bndfirstorder-removal.md) を参照。
 
 **新規計算の投入時、および計算が発散 (NaN / 残差爆発) したときは、まず [`procedures/divergence-and-startup.md`](procedures/divergence-and-startup.md) を参照し、そのチェックリストと段階起動手順に従うこと。** 発散の大半は物理やメッシュでなく投入設定 (初期値が入口流れと不整合 / 超音速向け BC を亜音速に使用・出口逆流 Pt/Tt 未設定 / 初手から 2 次移流・乱流・no-slip / 非直交での free-stream 桁落ち) が原因であり、易しい条件で収束させてから引き継ぎ計算で段階的に上げるのが基本。
@@ -75,6 +77,7 @@
 
 **収束確認 (必須・NaN チェックとは別)**: 「NaN が無い」=「収束した」ではない。結果を使う/報告する前に、各保存量の残差が**実際に下がりきっているか**を必ず確認すること。
 
+- **計算の後の判定の正本は `RUN_VERDICT.txt`** (2026-10-15): `run_case.sh` が forge の後に `judge_run.py` を自動で回し (設計チェーンの段階起動は親が全段の後に 1 度だけ確定、手で段階起動した run は最後に `judge_run.py <run_dir>`)、収束 (判定区間つき)・準定常・非有限・物理性 (静圧 ≤ 全圧を含む)・停止規則・壁解像を 1 つにまとめる。**「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合 (`OVERALL`) と各判定の行を貼る**。FAIL・INDETERMINATE はそのまま報告してよい (Stop フックは判定が無い・古い・未確定の run だけを止める)。手書きの run で準定常の量を判定させるには `judge.yaml` を case か run に置く (書き方は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md)「計算の後の判定」)。下の `check_convergence.py` の VERDICT は収束の副判定として残る。
 - **判定は手作業の目視ではなく `solver_density_cuda/tools/check_convergence.py <run_dir> ...` を実行して行う** (本ルールの実体化ツール)。全残差列の低下桁数・トレンド・NaN を判定し `PASS / NOT CONVERGED / DIVERGED` を返す。**「収束した」「一致した」と報告する応答には、このツールの VERDICT を根拠として必ず貼ること** (これを怠り `rms_ro` だけで「収束」と誤報告した事例があるため、ツール経由を必須とする)。未収束なら「未収束」と明記し、未収束のトランジェント同士の場の比較を「一致」と表現しない。(`settle_criteria.yaml` のある run の本段は次項)
 - **判定の正本は 2 つ** (2026-10-16、[plans/accepted/tooling-settle-convergence-and-monitor.md](plans/accepted/tooling-settle-convergence-and-monitor.md) §4.9 の 2)。
   run に判定の基準 `settle_criteria.yaml` があり、その本段 (設計チェーンでは本段の開始の記録 `MAIN_STAGE_STARTED` と今の起動・設定・基準の
@@ -290,7 +293,7 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
 上位の判断役は高価・低速なので**判断の場面だけ**に使い、実装・run・後処理は下位モデルに寄せる。
 分担の軸は「難しさ」ではなく**「誤りをツールで判定できるか」**である。収束・準定常・メッシュ品質・plan 構造は
 判定ツールがあるので下位モデルに任せてよい。**ただしフックが保証するのは「判定を実行した痕跡があること」までで、
-判定の中身・対象量・判定区間が揃っているかは保証しない** (Stop フックは `CONVERGENCE_VERDICT.txt` の有無と時刻だけを見る。
+判定の中身・対象量・判定区間が揃っているかは保証しない** (Stop フックは `RUN_VERDICT.json` があるか・今の入力に対応するか・段階起動で確定したかだけを見る (2026-10-15)。
 更新後 120 秒未満・180 分超の run は対象外)。**必要な VERDICT が揃ったことの確認は主セッション (親) の責任**である。
 ツールでも拾えないのは**もっともらしいが誤った真因**と
 **設計判断**で、これを誤ると GPU 時間と日数を失う (トークン代より高い)。過去の撤回 (抽出アーチファクトを物理と誤認、

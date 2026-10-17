@@ -16,7 +16,6 @@ time:
   last: 
     control: 0 # 0:nStep , 1:time base
     nStepOuter: 10000
-    time: 1.00 # [second]
   deltaT:  
     control: 0 # 0:use dt , 1:use cfl
     dt: 0.02

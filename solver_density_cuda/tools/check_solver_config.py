@@ -7,13 +7,18 @@
     同じ物理時刻の解が nSub 依存になる; §6 dual-time 節)
   - dual-time の `cfl_pseudo` が小さすぎる / `nSubIterDualTime` が少なすぎる (必要な nSub は cfl_pseudo で決まる)
   - 受動スカラの 2 次面移流 (`speciesFaceReconstruction` ≥ 2) が `convMethod 0` で不活性
-  - FCT (`passiveFct 1`) が作動しない組み合わせ (SLAU 以外 / SFR < 2 / dual-time でない)
+  - FCT を明示 (`passiveFct: 1`) したのに作動しない組み合わせ (SLAU 以外 / SFR < 2 / dual-time でない)。省略 (既定 1) は
+    「作動する構成なら使う」既定なので、定常・RK の通常の config で作動しないのは正しい動作として警告しない
   - 凝縮 dual-time で `passiveScalarScheme 0` (モーメントに BDF 物理時間項が付かない)
   - `speciesFaceReconstruction` ≥ 2 と `speciesImplicitCoupling 0` の組 (定常で発散)
   - 二相拡散 (`condTwoPhaseDiffusion`) の実効状態 (tools/twophase_state.py; plan condensation-two-phase-default §4-2):
     指定 ON (明示 1、既定 ON 後は省略も) で未対応 (c) (dual-time 凝縮 NS 等) は FAIL (ソルバが起動を止める)、
     構造的に適用できない (b) は WARN、既定 ON 後の明示 0 (包絡内) は WARN (旧作用素)。dual-time + Euler は通す
   - solver が読まないキー・**誤った節に書かれたキー** (WARN) と、起動時に拒否されるキー (FAIL)
+  - 旧キー `physProp.isAxisymmetric` (WARN。solver は deprecated として読み、`mesh.isAxisymmetric` があればそちらが優先:
+    `solverConfig.cpp:945`・`:953`)。軸対称の実効値は `effective_axisymmetric` (ほかのツールも同じ関数で読む)
+  - `migrate_solver_config.py` が直せるキー (`time.last.time`・旧 `physProp.isAxisymmetric`・段階移行キー) の WARN・FAIL には
+    そのツールの案内を付ける (`migrate_hint`; 投入の関門の文言にもそのまま写る)
 
 使い方: check_solver_config.py RUN_DIR|solverConfig.yaml [...]   (VERDICT PASS/WARN/FAIL, exit 0/0/1)
 WARN は「意図的ならよい」もの、FAIL は「まず直すべき」もの。
@@ -42,6 +47,21 @@ def load_bcond(cfg_path):
         return None
 
 
+def effective_axisymmetric(y):
+    """軸対称の実効値 (0/1 の整数)。solver と同じ優先順: `mesh.isAxisymmetric` を書いていればそれ、無ければ旧
+    `physProp.isAxisymmetric` (deprecated の読み)、どちらも無ければ 0 (`solverConfig.cpp:945`・`:953`、
+    `mesh_provenance.requested_conversion` と同じ)。値が `~` (空) のキーは書いていない扱い (solver は空の値を int に変換できず
+    起動時に止まる。ここでは判定のツールを止めないために読み飛ばす)。整数に読めなければ ValueError。
+    軸対称を config から判定するツール (recipe_settings・check_wall_resolution・check_lsq_gradient) はこれを使う
+    (2026-10-15、plan tooling-generator-defaults-and-launch-gate §5.1 #21: mesh だけを見て旧キーの軸対称を平面と読んでいた)。"""
+    for sec in ('mesh', 'physProp'):
+        d = y.get(sec) if isinstance(y, dict) else None
+        if isinstance(d, dict) and d.get('isAxisymmetric') is not None:
+            v = d['isAxisymmetric']
+            return int(v.strip().strip('"\'')) if isinstance(v, str) else int(v)
+    return 0
+
+
 _TPS = None
 
 
@@ -57,6 +77,28 @@ def _twophase_state():
     return _TPS
 
 
+_MIG = None
+
+
+def migrate_hint(path):
+    """`migrate_solver_config.py` が直せるキー (`handled_paths`: 段階移行キー・`time.last.time`・旧 `physProp.isAxisymmetric` など) なら
+    WARN・FAIL の文言に足す案内 (それ以外は '')。plan tooling-generator-defaults-and-launch-gate §5.1 #17a (1)・#25。"""
+    global _MIG
+    if _MIG is None:
+        try:
+            import importlib.util
+            here = os.path.dirname(os.path.abspath(__file__))
+            spec = importlib.util.spec_from_file_location('migrate_solver_config', os.path.join(here, 'migrate_solver_config.py'))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _MIG = mod.handled_paths()
+        except Exception:
+            _MIG = {}
+    act = _MIG.get(path)
+    return (f'。`python3 solver_density_cuda/tools/migrate_solver_config.py <run の dir か solverConfig.yaml>` で直せる ({act})'
+            if act else '')
+
+
 _SPEC = None
 
 
@@ -64,7 +106,10 @@ def _spec():
     """solverConfig が受理する**完全修飾パス**の一覧を config_key_inventory から借りる。
 
     戻り (values, sections, rejected): `values` は値を読むパス、`sections` は節、`rejected` は
-    起動時に落とすパス (削除済みキー・改名済みキー)。抽出に失敗したら None を返し、検査を飛ばす。"""
+    起動時に落とすパス (削除済みキー・改名済みキー)。抽出に失敗したら None を返し、検査を飛ばす。
+    節は solverConfig.cpp の変数の束縛 (`auto cj = config["conjugate"];`) から導く (2026-10-14。手書きの
+    対応表では `conjugate.mode`・`conjugate.gate` を取りこぼしていた。plan tooling-generator-defaults-and-launch-gate #4)。
+    静的に一覧へ入れられない書き方は `config_key_inventory.extract_keys_with_report` が報告し、試験が数を固定する。"""
     global _SPEC
     if _SPEC is not None:
         return _SPEC
@@ -108,15 +153,16 @@ def unknown_keys(y):
             ks = str(k)
             p = '.'.join(path + [ks])
             if p in rejected:
-                fails.append((p, 'solver が起動時に拒否するキー (削除済み・改名済み)。recommended-settings.md §9.1 の移行先を見ること'))
+                fails.append((p, 'solver が起動時に拒否するキー (削除済み・改名済み)。recommended-settings.md §9.1 の移行先を見ること'
+                                 + migrate_hint(p)))
             elif p in values:
                 continue                     # 値キー: 中身 (リスト・マップ) には立ち入らない
             elif p in sections:
                 walk(v, path + [ks])
             elif ks in by_leaf:
-                warns.append((p, '節の位置が違う (黙って無視される)。正しくは ' + ' / '.join(sorted(by_leaf[ks]))))
+                warns.append((p, '節の位置が違う (黙って無視される)。正しくは ' + ' / '.join(sorted(by_leaf[ks])) + migrate_hint(p)))
             else:
-                warns.append((p, 'solverConfig が読まないキー (綴り違い・旧キー・別ブランチのキー)。黙って無視される'))
+                warns.append((p, 'solverConfig が読まないキー (綴り違い・旧キー・別ブランチのキー)。黙って無視される' + migrate_hint(p)))
 
     walk(y, [])
     return fails, warns
@@ -140,6 +186,7 @@ def check(y, bcond=None):
     relax = dT.get('implicitRelax')
     sfr = int(dT.get('speciesFaceReconstruction', 0) or 0)
     scheme = int(dT.get('passiveScalarScheme', 1) or 0)
+    fct_written = 'passiveFct' in dT
     fct = int(dT.get('passiveFct', 1) or 0)
     conv = sp.get('convMethod')
     coupling = dT.get('speciesImplicitCoupling')
@@ -150,6 +197,20 @@ def check(y, bcond=None):
 
     if mesh.get('bndFirstOrder') is not None:
         fails.append(('mesh.bndFirstOrder', '使用禁止 (粘性応力を壊し、疑似 2D では全域に効く; AGENTS.md)'))
+
+    # 旧キー physProp.isAxisymmetric: solver は受理する (deprecated の読み、recommended-settings §9 の「opt-in のまま残置」) ので
+    # FAIL にしない。mesh 側が優先なので、両方を書くと physProp 側は効かない (solverConfig.cpp:945・:953)
+    if isinstance(pp, dict) and pp.get('isAxisymmetric') is not None:
+        if mesh.get('isAxisymmetric') is not None:
+            same_v = str(mesh['isAxisymmetric']).strip() == str(pp['isAxisymmetric']).strip()
+            warns.append(('physProp.isAxisymmetric',
+                          f'旧キー (deprecated)。mesh.isAxisymmetric {mesh["isAxisymmetric"]} が優先され、この値 {pp["isAxisymmetric"]} は効かない'
+                          + ('' if same_v else ' (値が食い違う: 実効は mesh 側)') + '。physProp 側を消す'
+                          + migrate_hint('physProp.isAxisymmetric')))
+        else:
+            warns.append(('physProp.isAxisymmetric',
+                          f'旧キー (deprecated)。solver は読む (実効 {pp["isAxisymmetric"]}) が、mesh.isAxisymmetric に移すこと'
+                          + migrate_hint('physProp.isAxisymmetric')))
 
     if dual:
         if relax is not None and float(relax) < 1.0:
@@ -173,7 +234,10 @@ def check(y, bcond=None):
             warns.append(('time.deltaT.speciesImplicitCoupling',
                           'S3 と coupling 0 の組は定常で組成せん断層から発散する (solver-settings.md)'))
 
-    if scheme == 1 and fct == 1:
+    # 明示した有効化 (passiveFct: 1) が作動しないときだけ警告する。省略 (既定 1) を「1 を書いた」と同じに扱うと、
+    # FCT と無関係な定常・RK の config にも毎回 WARN が出ていた (2026-10-15 codex diagnose 案 5、
+    # plan tooling-generator-defaults-and-launch-gate §5.1 #10)
+    if fct_written and scheme == 1 and fct == 1:
         why = []
         if solver not in ('SLAU', 'SLAU2'):
             why.append(f'solver {solver or "未指定"} (SLAU 系でない)')

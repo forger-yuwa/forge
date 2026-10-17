@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +32,7 @@ from ..meshing.mesh2d import Mesh2DParams, generate_axisym_mesh, write_msh41_2d
 from ..probdef import load_problem
 from .. import evaluate
 from ..evaluate.ic import paste_isentropic_ic
+from ..evaluate import judge as J
 from ..evaluate.runner import FORGE_BUILD, FORGE_TOOLS, PROBE_STUB, _ENV, run_forge
 from ..evaluate import runner_wt
 
@@ -168,8 +170,8 @@ def _chunk_dirs(rd: Path) -> list:
 def _snaps_of(rd: Path) -> list:
     """全チャンクを通しの step に直したスナップショット列 [(step, res, mesh)]。
 
-    各チャンクの res_0 は直前チャンク最終場の貼り直し (同一メッシュ最近傍 = 恒等)
-    なので通し step は「オフセット + チャンク内 step」。判定側は dstep>0 の対のみ
+    各チャンクの res_0 は直前チャンク最終場の貼り直し (同一メッシュの index コピー = ビット一致; 2026-10-15 まで
+    最近傍補間) なので通し step は「オフセット + チャンク内 step」。判定側は dstep>0 の対のみ
     使うため res_0 の重複は無害。"""
     out, off = [], 0
     for d in _chunk_dirs(rd):
@@ -178,6 +180,38 @@ def _snaps_of(rd: Path) -> list:
         if res:
             off += _steps_of(res[-1])
     return out
+
+
+def start_cont_chunk(rd: Path, j: int, last_res: Path, cfg_chunk: str) -> Path:
+    """継続チャンク `rd/cont_<j>` を準備する (forge は起動しない; 呼び出し側が宣言を書いて起動する)。パスの格子 (`rd/nozzle.h5`;
+    メッシュは全チャンク同一) と bcond・probe を写し、config を書き、直前のチャンクの最終場 `last_res` を段終了ゲート
+    (必要保存量・有限・ρ>0; res を作ったチャンクの config で) に通してから `restart_field.py` (保存量の index コピー、ビット一致の検査、
+    `wall_dist` は宛先のまま) で初期場に写す (`runner_wt._staged_handoff`)。ゲート・`restart_field.py` に落ちたら RuntimeError
+    (チャンクを起動しない)。2026-10-15 まで同じ格子へ `interp_field.py` (cross-mesh 用、原始量から保存量を組み直す) を使っていた
+    (AGENTS.md「メッシュ変更後の restart」の規則違反; plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19)。戻り: チャンクの dir。"""
+    import shutil
+    cd = rd / f"cont_{j}"
+    cd.mkdir(exist_ok=True)
+    shutil.copy(rd / "nozzle.h5", cd / "nozzle.h5")  # メッシュは全チャンク同一
+    (cd / "solverConfig.yaml").write_text(cfg_chunk)
+    for cf in ("bcondConfig.yaml", "probe.yaml"):
+        shutil.copy(rd / cf, cd / cf)
+    last_res = Path(last_res)
+    runner_wt._staged_handoff(cd, last_res, (last_res.parent / "solverConfig.yaml").read_text(), last_res.parent.name, "nozzle.h5")
+    return cd
+
+
+def pass_config(p, n: int, use_node: bool | None = None) -> tuple:
+    """パス (と継続チャンク) の solverConfig: node は `runner_wt._config_euler_node`、cell は `_config_euler` (n step、出力 n/4)。
+    機種のプロファイル (wt_feedback = node) に合えば明示すべきキーを旧い実効値で足す (plan tooling-generator-defaults-and-launch-gate
+    §5.1 #11、`config_builder.finish_config`; cell は書き写したプロファイルが無いので変えない)。戻り (config, 仕上げの記録)。
+    書き写しの台本 (recipes/regen_profiles.py) も使う。"""
+    from ..evaluate import config_builder as CB
+    if use_node is None:
+        use_node = str(p.mesh.get("discretization", "node")).lower() == "node"
+    oi = max(n // 4, 1)
+    cfg = runner_wt._config_euler_node(p, n, oi, 4.0, 1) if use_node else runner_wt._config_euler(p, n, oi, 4.0, 1)
+    return CB.finish_config(cfg, runner_wt._bcond(p, euler=True), "wt_feedback", tag="main")
 
 
 def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
@@ -222,8 +256,11 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
     x_reach_mode = d.get("x_reach_mode", "moc")
     # node/cell は problem YAML の `mesh.discretization` で選ぶ (既定 node — B10)
     use_node = str(p.mesh.get("discretization", "node")).lower() == "node"
-    _cfg = ((lambda n_, oi: runner_wt._config_euler_node(p, n_, oi, 4.0, 1)) if use_node
-            else (lambda n_, oi: runner_wt._config_euler(p, n_, oi, 4.0, 1)))
+    from ..evaluate import config_builder as CB
+
+    def _declare(d, fin):
+        """パス・継続チャンクの段の宣言 RECIPE.json (forge の起動の直前; plan tooling-generator-defaults-and-launch-gate §5.1 #11)。"""
+        CB.declare_stage(d, "main", "wt_feedback", finished=fin, problem=problem_path, generator="feedback.euler_loop.run_loop")
 
     def make_ax2w(cm):
         r"""軸→壁の逆引き。`np.interp` は範囲外を端値へ**黙ってクランプ**するため、
@@ -308,8 +345,8 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
             # 射影ドリフト 12k=0.0079 → 24k=0.0036)。
             # pass ≥2 (warm): CHUNK ずつの適応継続なのでここは 1 チャンク分。
             n = CHUNK if warm else max(nsteps or 24000, 12000)
-            (rd / "solverConfig.yaml").write_text(
-                _cfg(n, max(n // 4, 1)))
+            cfg_pass, fin_pass = pass_config(p, n, use_node)
+            (rd / "solverConfig.yaml").write_text(cfg_pass)
             (rd / "bcondConfig.yaml").write_text(runner_wt._bcond(p, euler=True))
             (rd / "probe.yaml").write_text(PROBE_STUB)
             subprocess.run([str(FORGE_BUILD / "convertGmshToForge"), "nozzle.msh", "nozzle.h5"],
@@ -324,33 +361,37 @@ def run_loop(problem_path, work_dir, n_pass: int = 8, omega: float = 0.4,
                 paste_isentropic_ic(rd / "nozzle.h5", wall, scale,
                                     float(p.spec["Pt"]), float(p.spec["Tt"]),
                                     p.gamma, p.cp)
-            run_forge(rd)
+            _declare(rd, fin_pass)
+            # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は起動の前に、総合は起動の後に 1 度だけ
+            J.write_spec(rd, J.spec_snapshot("feedback.euler_loop.run_loop (パス)"))
+            with J.Staged(rd, "feedback.euler_loop.run_loop (パス)"):
+                run_forge(rd)
             # === 適応停止: 軸 M 判定が合格 (STEADY / OSCILLATING+平均精度) に
             # なるまで CHUNK 継続 === cold パスにも適用する (正式 PASS は第 1
             # チャンクの過渡で判定するので継続しても壊れない — conv/eff 分離)。
             # DRIFTING (系統移動) と OSCILLATING で平均がまだ粗い場合に継続 —
             # 後者は追いサンプルで平均の標準誤差が締まる。
             from ..evaluate.health import axis_M_series_steady, axis_ok
-            import shutil
             for j in range(1, MAX_WARM_CHUNKS):
                 ax = axis_M_series_steady(
                     rd, scale, (x0 + 0.3) * scale, (x_eval_end - 0.2) * scale,
                     snaps=_snaps_of(rd))
                 if axis_ok(ax):
                     break
-                cd = rd / f"cont_{j}"
-                cd.mkdir(exist_ok=True)
                 last = _snaps_of(rd)[-1]   # 直近チャンクの最終場 (継続 IC)
-                shutil.copy(rd / "nozzle.h5", cd / "nozzle.h5")  # メッシュは全チャンク同一
                 # 継続チャンクは常に CHUNK step (cold 第 1 チャンクが長くても)
-                (cd / "solverConfig.yaml").write_text(
-                    _cfg(CHUNK, max(CHUNK // 4, 1)))
-                for cf in ("bcondConfig.yaml", "probe.yaml"):
-                    shutil.copy(rd / cf, cd / cf)
-                subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                                str(last[1]), str(cd / "nozzle.h5")],
-                               env=_ENV, check=True, capture_output=True, text=True)
-                run_forge(cd)
+                cfg_chunk, fin_chunk = pass_config(p, CHUNK, use_node)
+                # 同じ格子の継続: 段終了ゲート + restart_field.py (旧: interp_field.py; plan §5.1 #19)
+                cd = start_cont_chunk(rd, j, last[1], cfg_chunk)
+                _declare(cd, fin_chunk)
+                # 継続チャンクは直前のチャンクと同じ数値設定なら収束をその床から判定する (`--from-floor`)
+                prev_d = Path(last[1]).parent
+                same = J.same_numerics((prev_d / "solverConfig.yaml").read_text(), (cd / "solverConfig.yaml").read_text(),
+                                       (prev_d / "bcondConfig.yaml").read_text(), (cd / "bcondConfig.yaml").read_text())
+                J.write_spec(cd, J.spec_snapshot("feedback.euler_loop.run_loop (継続チャンク)",
+                                                 from_floor=(os.path.relpath(prev_d, cd) if same else None)))
+                with J.Staged(cd, "feedback.euler_loop.run_loop (継続チャンク)"):
+                    run_forge(cd)
         eff = _chunk_dirs(rd)[-1]   # 最終チャンク = 評価に使う場
         res = sorted(eff.glob("res_[0-9]*.h5"), key=_steps_of)
         prev_res = res[-1]

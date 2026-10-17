@@ -574,8 +574,12 @@ def _attach_deltas(rows: list, got: dict) -> int:
 
 # ------------------------------------------------------------------ 判定
 def judge_rows(rows: list, k: int | None = None, *, window=WINDOW, min_points=MIN_POINTS, r_mean_max=R_MEAN_MAX, r_amp_max=R_AMP_MAX,
-               theta_drift_max=THETA_DRIFT_MAX, theta_amp_max=THETA_AMP_MAX, x_fracs=X_FRACS) -> dict:
-    """rows[k] (step 昇順、本段の出力、step > 0) の時点の判定と内訳。ok なら停止の条件を満たす。"""
+               theta_drift_max=THETA_DRIFT_MAX, theta_amp_max=THETA_AMP_MAX, x_fracs=X_FRACS, relative_keys=()) -> dict:
+    """rows[k] (step 昇順、本段の出力、step > 0) の時点の判定と内訳。ok なら停止の条件を満たす。
+    relative_keys: θ_r の断面のほかに、θ_r と同じ式・閾値 (D ≤ theta_drift_max・振幅/|平均| ≤ theta_amp_max) で判定する行のキー
+    (結果は out["relative"]、ok に含める)。停止規則 (見張り・first_stop) は渡さない (空 = 判定は今のまま)。計算の後の判定
+    (`judge_run.py` の criterion stop_rule) が出口コア M をこの関数で判定するために足した (定義を二重に持たない;
+    plan tooling-convergence-and-wall-resolution-gates §5.1 #12b (2)・#14a (2))。"""
     k = len(rows) - 1 if k is None else int(k)
     s_end = rows[k]["step"]
     win = [r for r in rows[:k + 1] if r["step"] >= s_end - window]
@@ -597,20 +601,25 @@ def judge_rows(rows: list, k: int | None = None, *, window=WINDOW, min_points=MI
     out["r_mean"] = float(rv.mean()); out["r_amp"] = float((rv.max() - rv.min()) / 2.0)
     out["r_ok"] = bool(np.isfinite(rv).all() and abs(out["r_mean"]) <= r_mean_max and out["r_amp"] <= r_amp_max)
     ds = float(s[second].mean() - s[first].mean())
-    th = {}
-    for f in x_fracs:
-        key = theta_key(f)
+
+    def _relative(key):
+        # θ_r の式 (前半・後半の平均の差を 2 万 step あたりに換算した D と、振幅 / |平均|)
         v = np.array([w.get(key, np.nan) for w in win], float)
         mean = float(v.mean())
         d_raw = float(abs(v[second].mean() - v[first].mean()) / abs(mean)) if mean else float("nan")
         amp = float((v.max() - v.min()) / 2.0 / abs(mean)) if mean else float("nan")
         D = d_raw * window / ds
-        th[key] = {"mean": mean, "D": D, "D_raw": d_raw, "amp": amp,
-                   "ok": bool(np.isfinite(v).all() and D <= theta_drift_max and amp <= theta_amp_max)}
+        return {"mean": mean, "D": D, "D_raw": d_raw, "amp": amp,
+                "ok": bool(np.isfinite(v).all() and D <= theta_drift_max and amp <= theta_amp_max)}
+    th = {theta_key(f): _relative(theta_key(f)) for f in x_fracs}
     out["theta"] = th; out["half_step_gap"] = ds
-    out["ok"] = bool(out["r_ok"] and all(t["ok"] for t in th.values()))
+    rel = {key: _relative(key) for key in relative_keys}
+    if relative_keys:
+        out["relative"] = rel
+    out["ok"] = bool(out["r_ok"] and all(t["ok"] for t in th.values()) and all(t["ok"] for t in rel.values()))
     if not out["ok"]:
-        bad = (["r"] if not out["r_ok"] else []) + [k_ for k_, t in th.items() if not t["ok"]]
+        bad = ((["r"] if not out["r_ok"] else []) + [k_ for k_, t in th.items() if not t["ok"]]
+               + [k_ for k_, t in rel.items() if not t["ok"]])
         out["why"] = "条件を満たさない: " + ", ".join(bad)
     return out
 
@@ -734,7 +743,8 @@ def postprocess(run_dir) -> dict:
     residual_history.png)。道具の選択は run_case.sh と同じ規則 (`settle.select_judge`; plan tooling-settle-convergence-and-monitor §4.9 の 2):
     settle_criteria.yaml の無い run と前の段と確かめられた run は check_convergence.py、それ以外は check_settled.py --bind (照合の
     不一致・起動の記録の欠けは INDETERMINATE; §5.1 #7c)
-    (基準のある run は選択に失敗しても旧の道具へ落とさない; VERDICT の行が無ければ INDETERMINATE・終了コード 3 を足す)。"""
+    (基準のある run は選択に失敗しても旧の道具へ落とさない; VERDICT の行が無ければ INDETERMINATE・終了コード 3 を足す)。
+    計算の後の判定 (judge_run.py) はここでは回さない: 本段の総合は run_staged_ns が停止の状態の記録の後に `judge.finalize` で確定する。"""
     from .runner import FORGE_TOOLS, _ENV
     run_dir = Path(run_dir)
     tool, why = "check_convergence.py", "settle_criteria.yaml が無い"
@@ -896,8 +906,11 @@ def watch_main_stage(run_dir, sr: dict, *, poll_s: float = 10.0, settle_s: float
     recorder = DeltaRecorder(run_dir, euler_ref_spec(sr.get("euler_ref")), ex, uc["x"], 2 * int(th["window"]))
     save_record(run_dir, rec)
     t_launch = time.time()
+    # FORGE_JUDGE_DEFER=1: run_case.sh の judge_run.py は本段の結果だけを記録し、総合の判定は run_staged_ns が停止の状態の記録の後に
+    # 確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2・§5.1 #12)
+    from .judge import defer_env
     with open(run_dir / "run_case_stdout.log", "w") as log:
-        proc = subprocess.Popen([str(FORGE_TOOLS / "run_case.sh"), str(run_dir)], env=_ENV, stdout=log, stderr=subprocess.STDOUT,
+        proc = subprocess.Popen([str(FORGE_TOOLS / "run_case.sh"), str(run_dir)], env=defer_env(_ENV), stdout=log, stderr=subprocess.STDOUT,
                                 start_new_session=True)
     rec["run_case_pid"] = proc.pid
     stop = None                      # {"status", "step", ...}: 見張りが止めると決めた出力

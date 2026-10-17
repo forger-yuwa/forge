@@ -727,33 +727,37 @@ def _require_datasets(h5, names, what: str) -> None:
         raise ValueError(f"{what}: 元の VALUE に {missing} が無い")
 
 
-def restart_by_index(res_h5, mesh_h5) -> None:
+def restart_by_index(res_h5, mesh_h5, cfg_next: str | None = None) -> None:
     """同一メッシュの stage 間移植: VALUE を index でコピーする (座標最近傍の `interp_field.py` は使わない)。
     理由 (2026-09-04, case/46 run_0009): スリットカウルの上下壁ノードは座標が一致し、最近傍補間が双子を同じ元
-    ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。"""
+    ノードに写す → 排気側の壁ノードが外部流の圧力を持ち 2 次で発散した (interp_field の全 134 station で誤写像を確認)。
+
+    2026-10-15 から (plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19): 段終了ゲート + `restart_field.py`
+    (`runner_wt._staged_handoff`、風洞・walldriven・axis-Mach と同じ)。前の実装は欠けた量・節点数の合わない量を黙って飛ばし、
+    非有限・負の密度を見なかった。res を作った段の config は res の隣の solverConfig.yaml (`_launch_stage` が書いたもの)。
+    cfg_next (次の段の config) を渡すと、次の段で足す量 (層流暖機 → SST の roK・roOmega) の初期値を前の段のゲートと分けて検査する。
+    段終了ゲート・初期値の検査に落ちたら RuntimeError (次段を起動しない)。`restart_field.py` の拒否 (格子の同一性・化学種の照合) は
+    従来どおり ValueError。化学種の署名の照合 (`check_species_compatible`) は従来どおり先に行う。
+    `restart_field.py` は宛先 /VALUE にある量だけを写す (化学種・トレーサは初期場 `write_ic_arrays` が作る)。宛先に無い必要保存量は
+    検査で止める (前の実装は roY・roXi を宛先に作っていた)。"""
+    from .runner_wt import _staged_handoff
     check_species_compatible(Path(res_h5).parent, Path(mesh_h5).parent, "restart_by_index")
-    sig = _species_signature(Path(mesh_h5).parent)
-    # 化学種の属性 (§4.3): SRC の記録を検証し、宛先を --resolve-species で解決して一致なら継承 (不一致は書き込み前に停止)
-    fsp = _forge_species()
+    cfg_prev = (Path(res_h5).parent / "solverConfig.yaml").read_text()
+    tag = Path(res_h5).name
+    mp = Path(res_h5).parent / "stage_manifest.json"
+    if mp.exists():
+        try:
+            st = json.loads(mp.read_text()).get("stages") or []
+            tag = f"{st[-1]['tag']} ({tag})" if st else tag
+        except (ValueError, KeyError, TypeError):
+            pass
+    env = dict(os.environ, LD_LIBRARY_PATH=_ENV["LD_LIBRARY_PATH"])   # 呼んだ時点の環境 (前の実装は同じプロセスの中で写していた)
     try:
-        species_plan = fsp.plan_inherit(res_h5, Path(mesh_h5).parent, tool="restart_by_index")
-    except fsp.SpeciesCheckError as e:
-        raise ValueError(f"restart_by_index: {e}") from None
-    fsp.write_species_attrs(mesh_h5, None)
-    with h5py.File(res_h5, "r") as src, h5py.File(mesh_h5, "r+") as dst:
-        n = len(dst["VALUE/ro"])
-        if sig is not None:
-            _require_datasets(src, ["ro", "roUx", "roUy", "roUz", "roe"] + [f"roY{i}" for i in range(len(sig["species"]))] + (["roXi"] if sig["tracer"] else []), "restart_by_index")
-        keys = ["ro", "roUx", "roUy", "roUz", "roe", "roK", "roOmega"]        # 状態量のみ (wall_dist は触らない)
-        keys += sorted(k for k in src["VALUE"] if re.fullmatch(r"roY\d+", k)) + ["roXi"]   # 化学種・トレーサも引き継ぐ (旧: 7 変数のみで ΣY が壊れた; codex M4)
-        for k in keys:
-            if k in src["VALUE"] and len(src["VALUE"][k]) == n:
-                if k not in dst["VALUE"]:
-                    if k.startswith("roY") or k == "roXi":
-                        dst["VALUE"].create_dataset(k, data=np.asarray(src["VALUE"][k][:], dtype=np.float32))
-                    continue
-                dst["VALUE"][k][:] = src["VALUE"][k][:]
-        fsp.commit_inherit(dst, species_plan)
+        _staged_handoff(Path(mesh_h5).parent, Path(res_h5), cfg_prev, tag, Path(mesh_h5).name, cfg_next=cfg_next, env=env)
+    except RuntimeError as e:
+        if str(e).startswith("restart_field.py が失敗"):
+            raise ValueError(f"restart_by_index: {e}") from None
+        raise
 
 
 def warm_from_run(dst_run_dir, src_run_dir) -> dict:
@@ -859,7 +863,11 @@ def warm_from_run(dst_run_dir, src_run_dir) -> dict:
 
 
 def run_forge(run_dir) -> int:
-    r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=_ENV, capture_output=True, text=True)
+    """run_case.sh 経由で forge を起動する。`FORGE_JUDGE_DEFER=1` を渡すので run_case.sh の judge_run.py は段の結果だけを記録し、
+    総合の判定は `run_staged` が全段の後に確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2・§5.1 #12)。"""
+    from .judge import defer_env
+    r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())], env=defer_env(_ENV), capture_output=True,
+                       text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
     return r.returncode
 
@@ -877,10 +885,79 @@ def _archive_stage(run_dir, tag: str) -> None:
             pass
 
 
+def _stage_manifest(run_dir, append: bool = False):
+    """段の記録 `stage_manifest.json` (`solver_density_cuda/tools/stage_manifest.py` の StageManifest)。append=True で既存の記録の
+    段に足す (前の呼び出しの段が残っている run で本段だけを回す `stages="main"`・`"none"`)。2026-10-14 から (plan
+    tooling-generator-defaults-and-launch-gate §4.5・§5.1 #9: SERN は段の記録を書いておらず `check_convergence.py --segment` が使えなかった)。"""
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from stage_manifest import StageManifest
+    sm = StageManifest(run_dir)
+    mp = Path(run_dir) / "stage_manifest.json"
+    if append and mp.exists():
+        sm.stages = [dict(st) for st in json.loads(mp.read_text())["stages"]]
+    return sm
+
+
+def _sern_recipe(run_dir, recipe: dict | None) -> dict:
+    """段の宣言の文脈 (plan tooling-generator-defaults-and-launch-gate §5.1 #11): {family, problem, generator, note, args}。
+    family の既定は prepare_info.json の dim (3 なら sern3d、それ以外 sern2d)、problem の既定は prepare_info.json の problem。"""
+    rcp = dict(recipe or {})
+    if "family" not in rcp or "problem" not in rcp:
+        try:
+            info = json.loads((Path(run_dir) / "prepare_info.json").read_text())
+        except (OSError, ValueError):
+            info = {}
+        rcp.setdefault("family", "sern3d" if int(info.get("dim", 2) or 2) == 3 else "sern2d")
+        rcp.setdefault("problem", info.get("problem"))
+    rcp.setdefault("generator", "runner_sern.run_staged")
+    return rcp
+
+
+def _launch_stage(run_dir, sm, cfg: str, tag: str, recipe: dict | None = None) -> int:
+    """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し、段の履歴を `residual_<tag>.csv` に退避
+    (`_archive_stage`) して段を `stage_manifest.json` に足す (失敗した段も診断用に残す)。同じ tag が既にあれば `_2`, `_3` … を付ける
+    (CFL の梯子が同じ値を繰り返しても履歴を上書きしない)。
+    config は書く前に明示すべきキーを旧い実効値で足し (機種のプロファイルに合うときだけ)、書いた後に段の宣言 RECIPE.json を書く
+    (plan tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder`; recipe は `_sern_recipe`)。manifest には書いた config。"""
+    from . import config_builder as CB
+    run_dir = Path(run_dir)
+    used = {st["tag"] for st in sm.stages}
+    base, k = tag, 2
+    while tag in used:
+        tag, k = f"{base}_{k}", k + 1
+    rcp = _sern_recipe(run_dir, recipe)
+    bc = run_dir / "bcondConfig.yaml"
+    bc_text = bc.read_text() if bc.exists() else ""
+    cfg = CB.launch_stage(run_dir, cfg, bc_text, tag, rcp["family"], problem=rcp.get("problem"), args=rcp.get("args"),
+                          generator=rcp.get("generator"), note=rcp.get("note"))
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で退避しない
+    rc = run_forge(run_dir)
+    _archive_stage(run_dir, tag)
+    sm.add(tag, cfg, bc_text, history=f"residual_{tag}.csv")
+    sm.write()
+    return rc
+
+
+def _ladder_cfg(cfg: str, cfl=None, steps=None, conv=None) -> str:
+    """段の梯子の config: cfl・cfl_pseudo、nStepOuter・outStepInterval、convMethod を YAML 上の位置で書き換える
+    (`config_builder.set_scalars`; 2026-10-15 まで正規表現・文字列置換。トークンは従来と同じ書き方 `f"{値}"` なので書く文字列も同じ。
+    plan tooling-generator-defaults-and-launch-gate §5.1 #11)。"""
+    from . import config_builder as CB
+    up = {}
+    if cfl is not None:
+        up.update({"time.deltaT.cfl": f"{cfl}", "time.deltaT.cfl_pseudo": f"{cfl}"})
+    if steps is not None:
+        up.update({"time.last.nStepOuter": f"{steps}", "time.outStepInterval": f"{steps}"})
+    if conv is not None:
+        up["space.convMethod"] = f"{conv}"
+    return CB.set_scalars(cfg, up) if up else cfg
+
+
 def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
                warm_lam_ramp=None, soft_ramp=None,
-               warm_src=None, warm_adapt_steps: int = 500) -> int:
+               warm_src=None, warm_adapt_steps: int = 500, recipe: dict | None = None) -> int:
     """soft_cfl / soft_conv: soft 段の CFL と convMethod (既定 0.5 / 1 次)。3D SST の後縁 3 重点など、1 次でも
     立ち上がりが厳しいケースで下げる。
 
@@ -894,32 +971,92 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
 
     warm_src: **別作動点の収束 run ディレクトリ**。与えると層流暖機と soft を飛ばし、`warm_from_run` で
     熱力学整合リマップ → **適応段** (1 次, soft CFL, warm_adapt_steps) → mid → 本段 とする。
-    NPR が大きく違う作動点間 (m6_on 35.4 ↔ m4_off 2.8) では使わないこと (§5.1-1c)。"""
+    NPR が大きく違う作動点間 (m6_on 35.4 ↔ m4_off 2.8) では使わないこと (§5.1-1c)。
+
+    段の記録 (2026-10-14、plan tooling-generator-defaults-and-launch-gate §5.1 #9): 各段 (適応段 warm_adapt・層流暖機 warm_cfl*・
+    soft_cfl*・mid_cfl*・本段 main) の実効設定を `stage_manifest.json` に、残差履歴を `residual_<tag>.csv` に残す (`_launch_stage`)。
+    段の config の文字列は従来と同じ。段間の引き継ぎ (`restart_by_index`) は 2026-10-15 から段終了ゲート + `restart_field.py`
+    (plan §5.1 #19; 次の段の config を渡し、層流暖機 → SST で足す roK・roOmega の初期値を分けて検査する)。
+    2026-10-15 (plan §5.1 #11): 段の値 (cfl・段の長さ・次数) は YAML 上の位置で書き換え (`_ladder_cfg`; 層流暖機の turbulence の
+    置き換えだけはキーを消すので正規表現のまま)、各段は明示すべきキーを足して宣言を書く (`_launch_stage`)。recipe
+    {family, problem, generator, note, args}: 宣言の文脈 (`_sern_recipe`; args は driver_sern の緩レシピなど引数による段の値)。
+
+    計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12、2026-10-15): 最初の起動の前に判定の仕様
+    `JUDGE_SPEC.json` (`judge.spec_sern`: sern_gates の量) を書き、全部の段 (stages=main・none の本段を含む) を FORGE_JUDGE_DEFER=1 で起動して
+    (`run_forge`)、段の記録の後に系列 force_history.csv を書いて (`write_force_series`) 総合の判定を 1 度だけ確定する (`judge.Staged`;
+    段の途中の例外でも起動していれば確定する)。"""
+    from . import judge as J
+    run_dir = Path(run_dir)
+    rcp = _sern_recipe(run_dir, recipe)
+    cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
+        else (run_dir / "solverConfig.yaml").read_text()
+    J.write_spec(run_dir, J.spec_sern(rcp["generator"], viscous=_sern_viscous(run_dir, cfg_main)))
+    with J.Staged(run_dir, rcp["generator"], series=lambda: write_force_series(run_dir, rcp.get("problem"))):
+        return _run_staged(run_dir, stages, soft_steps=soft_steps, soft_cfl=soft_cfl, soft_conv=soft_conv, warm_lam_steps=warm_lam_steps,
+                           warm_lam_cfl=warm_lam_cfl, mid_steps=mid_steps, warm_lam_ramp=warm_lam_ramp, soft_ramp=soft_ramp,
+                           warm_src=warm_src, warm_adapt_steps=warm_adapt_steps, recipe=recipe)
+
+
+def _sern_viscous(run_dir, cfg_main: str) -> bool:
+    """目的量の選び方 (sern_gates.objective_key: 壁の摩擦の出力があれば C_T_with_shear) を実行の前に決める: 実効の粘性と no-slip 壁
+    (`judge_run.wall_resolution_applies`) が非粘性と決まるときだけ False (C_T)。決められないときは粘性側 (C_T_with_shear が無ければ判定不能)。"""
+    from .judge import _judge_mod
+    JR = _judge_mod()
+    import yaml_strict
+    try:
+        bc = yaml_strict.load((Path(run_dir) / "bcondConfig.yaml").read_text())
+        cfg = yaml_strict.load(cfg_main)
+    except Exception:  # noqa: BLE001
+        return True
+    return JR.wall_resolution_applies(cfg, bc)[0] is not False
+
+
+def write_force_series(run_dir, problem) -> Path:
+    """判定の系列 force_history.csv (`judge.spec_sern`) を確定の時点に書く: collect と同じ力の計算 (2D `_force_hist`、3D
+    `runner_sern3d._force_hist3d`) → `write_force_history_csv`。力の出力が無ければ ValueError (判定はその量を判定不能にする)。"""
+    if not problem:
+        raise ValueError("問題 YAML が分からない (recipe・prepare_info.json の problem)")
+    run_dir = Path(run_dir)
+    p = load_problem(problem)
+    info = json.loads((run_dir / "prepare_info.json").read_text())
+    if int(info.get("dim", 2) or 2) == 3:
+        from .runner_sern3d import _force_hist3d
+        hist = _force_hist3d(p, run_dir, info)
+    else:
+        hist = _force_hist(p, run_dir, info)
+    if not hist:
+        raise ValueError("力の出力 (壁の境界の res_<名前>_<id>_<step>.h5) が無い")
+    return write_force_history_csv(run_dir / "force_history.csv", hist)
+
+
+def _run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: float = 0.5, soft_conv: int = 0,
+                warm_lam_steps: int = 0, warm_lam_cfl: float = 0.2, mid_steps: int = 0,
+                warm_lam_ramp=None, soft_ramp=None,
+                warm_src=None, warm_adapt_steps: int = 500, recipe: dict | None = None) -> int:
+    """`run_staged` の段の実行 (本体; 判定の仕様と確定は `run_staged`)。"""
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig_main.yaml").read_text() if (run_dir / "solverConfig_main.yaml").exists() \
         else (run_dir / "solverConfig.yaml").read_text()
     if stages == "main":  # soft 段の res_*.h5 が残っている状態から本段だけ回す
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, cfg_next=cfg_main)
         for f in run_dir.glob("res_*"):
             f.unlink()
-        (run_dir / "solverConfig.yaml").write_text(cfg_main)
-        return run_forge(run_dir)
+        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), cfg_main, "main", recipe)
     if stages == "none":
-        return run_forge(run_dir)
+        # 本段だけ (solverConfig.yaml をそのまま回す; 段の値は書き換えない。明示すべきキーは足す)
+        return _launch_stage(run_dir, _stage_manifest(run_dir, append=True), (run_dir / "solverConfig.yaml").read_text(), "main",
+                             recipe)
+    sm = _stage_manifest(run_dir)
     if warm_src is not None:      # 別作動点からの warm start: 暖機と soft を飛ばし、適応段だけ入れる
         info_warm = warm_from_run(run_dir, warm_src)
         (run_dir / "WARM_START.json").write_text(json.dumps(info_warm, indent=1))
-        ad = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {soft_cfl}, cfl_pseudo: {soft_cfl}", cfg_main)
-        ad = ad.replace("convMethod: 1", f"convMethod: {soft_conv}")
-        ad = re.sub(r"nStepOuter: \d+", f"nStepOuter: {warm_adapt_steps}", ad)
-        ad = re.sub(r"outStepInterval: \d+", f"outStepInterval: {warm_adapt_steps}", ad)
-        (run_dir / "solverConfig.yaml").write_text(ad)
-        rc = run_forge(run_dir)
+        ad = _ladder_cfg(cfg_main, cfl=soft_cfl, conv=soft_conv, steps=warm_adapt_steps)
+        rc = _launch_stage(run_dir, sm, ad, "warm_adapt", recipe)
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("warm start の適応段が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, cfg_next=cfg_main)
         for f in run_dir.glob("res_*"):
             f.unlink()
         warm_lam_steps = 0      # 以降は mid → 本段
@@ -927,77 +1064,76 @@ def run_staged(run_dir, stages: str = "full", soft_steps: int = 3000, soft_cfl: 
         lam0 = re.sub(r'turbulence: \{model: "sst"[^}]*\}', 'turbulence: {model: "none"}', cfg_main)
         if 'model: "none"' not in lam0:
             raise RuntimeError("層流暖機: turbulence 行の置換に失敗 (solverConfig の書式が変わった)")
-        lam0 = lam0.replace("convMethod: 1", "convMethod: 0")
+        lam0 = _ladder_cfg(lam0, conv=0)
         # **CFL ramp** (2026-09-19 ユーザ提案): 暖機は固定 CFL だと 0.1 が上限だが、場が育つにつれ上げられる。
         # ソルバ側に ramp が無いので runner が forge を複数回起動して段階昇圧する
         # (風洞チェーン `runner_axismach.run_staged_ns(stages="ramp")` と同じ方式)。
         # `warm_lam_ramp` が空なら従来どおり `warm_lam_cfl` 固定の 1 段。
         legs = [(float(c), int(warm_lam_steps / max(len(warm_lam_ramp), 1))) for c in warm_lam_ramp] \
             if warm_lam_ramp else [(float(warm_lam_cfl), int(warm_lam_steps))]
-        for c, n_leg in legs:
-            lam = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", lam0)
-            lam = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", lam)
-            lam = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", lam)
-            (run_dir / "solverConfig.yaml").write_text(lam)
-            rc = run_forge(run_dir)
+        for _li, (c, n_leg) in enumerate(legs):
+            lam = _ladder_cfg(lam0, cfl=c, steps=n_leg)
+            rc = _launch_stage(run_dir, sm, lam, f"warm_cfl{c:g}", recipe)
             res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
             if rc != 0 or not res:
                 raise RuntimeError(f"層流暖機段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
-            _archive_stage(run_dir, f"warm_cfl{c:g}")
-            restart_by_index(res[-1], run_dir / MESH)
+            # 最後の暖機の次は SST の段: 前の段 (層流) の必要保存量はゲート、足す roK・roOmega は初期値の検査 (§5.1 #19)
+            restart_by_index(res[-1], run_dir / MESH, cfg_next=(lam0 if _li < len(legs) - 1 else cfg_main))
             for f in run_dir.glob("res_*"):
                 f.unlink()
     if warm_src is not None:      # soft は適応段で代替済み → mid へ
-        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps)
+        return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, sm=sm, recipe=recipe)
     # soft 段も **CFL ramp** できる (`opt.soft_ramp`, 2026-09-19)。暖機で ramp が効いた (固定 0.5 は step 30 で
     # 発散するのに ramp なら 1.0 まで到達) のと同じ理屈。固定 soft_cfl 1.0 は設計によって
     # `rms_roY1` (排気∩外気のせん断層) が上昇するので、段階昇圧で通す。
     _soft_legs = [(float(c), max(int(soft_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
         if soft_ramp else [(float(soft_cfl), int(soft_steps))]
     for c, n_leg in _soft_legs:
-        soft = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-        soft = soft.replace("convMethod: 1", f"convMethod: {soft_conv}")
-        soft = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", soft)
-        soft = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", soft)
-        (run_dir / "solverConfig.yaml").write_text(soft)
-        rc = run_forge(run_dir)
+        soft = _ladder_cfg(cfg_main, cfl=c, conv=soft_conv, steps=n_leg)
+        rc = _launch_stage(run_dir, sm, soft, f"soft_cfl{c:g}", recipe)
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError(f"soft 段が失敗 (cfl {c}; res_nan_*.h5 / forge_run.log を見る)")
-        _archive_stage(run_dir, f"soft_cfl{c:g}")
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, cfg_next=cfg_main)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp)
+    return _run_mid_and_main(run_dir, cfg_main, soft_cfl, mid_steps, soft_ramp, sm=sm, recipe=recipe)
 
 
-def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None) -> int:
-    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。"""
+def _run_mid_and_main(run_dir, cfg_main: str, soft_cfl: float, mid_steps: int, soft_ramp=None, sm=None,
+                      recipe: dict | None = None) -> int:
+    """mid 段 (2 次 + soft CFL) → 本段。soft/暖機/warm start の後段として共用する。sm = 段の記録 (無ければ新しく作る)。
+    recipe は段の宣言の文脈 (run_staged と同じ)。"""
+    sm = sm if sm is not None else _stage_manifest(run_dir)
     if mid_steps > 0:      # mid 段: 2 次に上げるが CFL は soft のまま (次数と CFL を同時に上げない)
         legs = [(float(c), max(int(mid_steps / len(soft_ramp)), 1)) for c in soft_ramp] \
             if soft_ramp else [(float(soft_cfl), int(mid_steps))]
         for _ci, (c, n_leg) in enumerate(legs):
-            mid = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {c}, cfl_pseudo: {c}", cfg_main)
-            mid = re.sub(r"nStepOuter: \d+", f"nStepOuter: {n_leg}", mid)
-            mid = re.sub(r"outStepInterval: \d+", f"outStepInterval: {n_leg}", mid)
-            (run_dir / "solverConfig.yaml").write_text(mid)
-            rc = run_forge(run_dir)
-            _archive_stage(run_dir, f"mid_cfl{c:g}")
+            mid = _ladder_cfg(cfg_main, cfl=c, steps=n_leg)
+            rc = _launch_stage(run_dir, sm, mid, f"mid_cfl{c:g}", recipe)
             if _ci < len(legs) - 1:
                 _r = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(ch for ch in f.stem if ch.isdigit())))
                 if rc != 0 or not _r:
                     raise RuntimeError(f"mid 段が失敗 (cfl {c})")
-                restart_by_index(_r[-1], run_dir / MESH)
+                restart_by_index(_r[-1], run_dir / MESH, cfg_next=cfg_main)
                 for f in run_dir.glob("res_*"):
                     f.unlink()
         res = sorted(run_dir.glob("res_[0-9]*.h5"), key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
         if rc != 0 or not res:
             raise RuntimeError("mid 段 (2 次 + soft CFL) が失敗 (res_nan_*.h5 / forge_run.log を見る)")
-        restart_by_index(res[-1], run_dir / MESH)
+        restart_by_index(res[-1], run_dir / MESH, cfg_next=cfg_main)
         for f in run_dir.glob("res_*"):
             f.unlink()
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    return _launch_stage(run_dir, sm, cfg_main, "main", recipe)
+
+
+def _force_hist(p, run_dir, info) -> list:
+    """2D の力係数の履歴 (collect と判定の系列 `write_force_series` が共有する; 式は sern_forces.force_history)。"""
+    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]
+    xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
+    return force_history(run_dir, p_a=en["P"], F_ideal=info["F_ideal_N_per_m"], H=H, x_ref=float(xr) * H, y_ref=float(yr) * H,
+                         mdot_u_in=ex["ro"] * ex["u"] ** 2 * H, p_in=ex["P"],
+                         twall_on_fluid=(info.get("discretization", "cell") == "cell"))
 
 
 def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass: bool = False) -> dict:
@@ -1006,11 +1142,7 @@ def collect(problem_path, run_dir, out_dir=None, rc=None, require_residual_pass:
     p = load_problem(problem_path)
     run_dir = Path(run_dir); out_dir = Path(out_dir) if out_dir else run_dir; out_dir.mkdir(parents=True, exist_ok=True)
     info = json.loads((run_dir / "prepare_info.json").read_text())
-    st = info["states"]; ex, en = st["exhaust"], st["ext"]; H = info["H_m"]
-    xr, yr = p.spec.get("moment_ref", [0.0, 0.0])
-    hist = force_history(run_dir, p_a=en["P"], F_ideal=info["F_ideal_N_per_m"], H=H, x_ref=float(xr) * H, y_ref=float(yr) * H,
-                         mdot_u_in=ex["ro"] * ex["u"] ** 2 * H, p_in=ex["P"],
-                         twall_on_fluid=(info.get("discretization", "cell") == "cell"))
+    hist = _force_hist(p, run_dir, info)
     if rc is None:
         rc = forge_rc_from_log(run_dir)
     verdict = (run_dir / "CONVERGENCE_VERDICT.txt").read_text().strip().splitlines()[-2:] if (run_dir / "CONVERGENCE_VERDICT.txt").exists() else []
@@ -1068,7 +1200,8 @@ def main(argv=None):
                     warm_lam_steps=int(o.get("warm_lam_steps", 0)), warm_lam_cfl=float(o.get("warm_lam_cfl", 0.2)),
                     warm_lam_ramp=o.get("warm_lam_ramp"), soft_ramp=o.get("soft_ramp"),
                     mid_steps=int(o.get("mid_steps", 0)),
-                    warm_adapt_steps=int(o.get("warm_adapt_steps", 500)))
+                    warm_adapt_steps=int(o.get("warm_adapt_steps", 500)),
+                    recipe={"family": "sern2d", "problem": a.problem, "generator": "runner_sern.main"})
     out = collect(a.problem, a.run_dir, rc=rc, require_residual_pass=bool(o.get("require_residual_pass", False)))
     print(json.dumps({k: v for k, v in out.items() if k not in ("history", "gates")}, indent=1))
     g = out["gates"]; print(f"GATES: {g['verdict']} fail_class={g['fail_class']} objective={g['objective']} reasons={g['reasons']}")

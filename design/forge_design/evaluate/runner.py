@@ -684,6 +684,9 @@ def prepare(problem_path, run_dir, nsteps=None, warm_from=None, stage=None) -> d
             "scale_m": scale, "exit_1d": exit1d,
             "mesh": {"ni": mp.ni, "nj": mp.nj, "cells": int(quads.shape[0])}}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
+    # 計算の後の判定の仕様 (機種の既定: CPG は check_quasisteady の既定の量; plan tooling-convergence-and-wall-resolution-gates §4.6-1)
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_snapshot("runner.prepare (CPG)"))
     return info
 
 
@@ -933,6 +936,9 @@ def _prepare_tp(p: Problem, problem_path, run_dir: Path, wall, scale: float, mp,
             **({"bell_mode": bell_mode(p)} if bell_mode(p) else {}), **({"flow_model": "euler"} if euler else {}),
             **(extra_info or {}), "environment": _environment_record()}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    # 計算の後の判定の仕様 (機種の既定: tp_gates (ii) の列; plan tooling-convergence-and-wall-resolution-gates §4.6-1)
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_bell("runner.prepare (TP)"))
     return info
 
 
@@ -993,9 +999,12 @@ def _smooth_wall_entropy(h5path, gamma: float, cp: float, npass: int = 10, gas=N
 
 
 def run_forge(run_dir) -> int:
-    """run_case.sh 経由で forge を実行 (収束判定・残差 png も生成される)。"""
+    """run_case.sh 経由で forge を実行 (収束の副判定・残差 png も生成される)。`FORGE_JUDGE_DEFER=1` を渡すので run_case.sh の
+    `judge_run.py` は段の結果だけを記録する (`state: deferred`)。**総合の判定は呼んだ側が出力の整理の後に `judge.finalize` で一度だけ
+    確定する** (段階起動は `judge.Staged`; plan tooling-convergence-and-wall-resolution-gates §4.6-2・§5.1 #12)。"""
+    from . import judge as J
     r = subprocess.run([str(FORGE_TOOLS / "run_case.sh"), str(Path(run_dir).resolve())],
-                       env=_ENV, capture_output=True, text=True)
+                       env=J.defer_env(_ENV), capture_output=True, text=True)
     (Path(run_dir) / "run_case_stdout.log").write_text(r.stdout + r.stderr)
     return r.returncode
 
@@ -1036,12 +1045,15 @@ def tp_stage_plan(p: Problem, stages=None) -> list:
 def _tp_stage_run(p: Problem, run_dir: Path, sm, bc_text: str, tag: str, stage: str, n: int, out_int: int) -> Path:
     """1 段を回す: config を書き、forge を起動し、段の残差履歴を `residual_history_<tag>.csv` に写して manifest に足す。
     最終 res が step n まで届かない・forge が非 0・段終了ゲート (必要保存量が有限で ρ>0; runner_axismach.stage_gate) に
-    落ちたら RuntimeError (次段へ進まない)。戻り値は段の最終 res。"""
+    落ちたら RuntimeError (次段へ進まない)。戻り値は段の最終 res。
+    config は書く前に明示すべきキーを旧い実効値で足し、書いた後に段の宣言 RECIPE.json を書く (機種 bell_tp; plan
+    tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder`)。問題 YAML の上書き (cfl_main・stage_steps) は出所つきの逸脱。"""
     import shutil
 
+    from . import config_builder as CB
     from .runner_axismach import stage_gate
-    cfg = _solver_config_tp(p, n, out_int, stage)
-    (run_dir / "solverConfig.yaml").write_text(cfg)
+    cfg = CB.launch_stage(run_dir, _solver_config_tp(p, n, out_int, stage), bc_text, tag, "bell_tp", problem=p.path,
+                          generator="runner._tp_stage_run (run_staged_tp・continue_tp)")
     (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
     rc = run_forge(run_dir)
     hist = run_dir / "residual_history.csv"
@@ -1073,19 +1085,22 @@ def run_staged_tp(problem_path, run_dir, warm_from=None, stages=None) -> dict:
     plan = tp_stage_plan(p, stages)
     if warm_from is None and plan[0][1] != "soft":
         raise ValueError("TP の冷間 IC は soft 段で起動する (recommended-settings §1.2)")
+    from . import judge as J
     info = prepare(problem_path, run_dir, nsteps=plan[0][2], warm_from=warm_from, stage=plan[0][1])
     run_dir = Path(run_dir)
     bc_text = (run_dir / "bcondConfig.yaml").read_text()
     sm = _stage_manifest_cls()(run_dir)
-    for k, (tag, st, n, oi) in enumerate(plan):
-        last = _tp_stage_run(p, run_dir, sm, bc_text, tag, st, n, oi)
-        if k == len(plan) - 1:
-            break
-        _restart_same_mesh(last, run_dir / "nozzle.h5")          # 同一メッシュ: index コピー
-        for f in run_dir.glob("res_*"):
-            f.unlink()
-    info["stages"] = [{"tag": t, "stage": s, "nStepOuter": n, "outStepInterval": oi} for t, s, n, oi in plan]
-    (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+    # 総合の判定は全段の後に 1 度だけ (段の途中の例外でも起動していれば; 系列 thrust_history.csv は確定の時点に書く)
+    with J.Staged(run_dir, "runner.run_staged_tp", series=lambda: write_thrust_history_run(p, run_dir)):
+        for k, (tag, st, n, oi) in enumerate(plan):
+            last = _tp_stage_run(p, run_dir, sm, bc_text, tag, st, n, oi)
+            if k == len(plan) - 1:
+                break
+            _restart_same_mesh(last, run_dir / "nozzle.h5")          # 同一メッシュ: index コピー
+            for f in run_dir.glob("res_*"):
+                f.unlink()
+        info["stages"] = [{"tag": t, "stage": s, "nStepOuter": n, "outStepInterval": oi} for t, s, n, oi in plan]
+        (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
     return info
 
 
@@ -1144,7 +1159,60 @@ def continue_tp(problem_path, src_run, new_run, nsteps=None) -> dict:
     info = {**info_src, "run_dir": str(new_run), "continued_from": str(res[-1].resolve()),
             "stages": info_src.get("stages", []) + [{"tag": tag, "stage": "main", "nStepOuter": n, "outStepInterval": oi}]}
     (new_run / "prepare_info.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
-    _tp_stage_run(p, new_run, sm, bc_text, tag, "main", n, oi)
+    # 判定の仕様 (manifest に親の段を写したので収束は auto = 親の本段と連結した区間) と、本段の後の総合の判定の確定
+    from . import judge as J
+    J.write_spec(new_run, J.spec_bell("runner.continue_tp"))
+    with J.Staged(new_run, "runner.continue_tp", series=lambda: write_thrust_history_run(p, new_run)):
+        _tp_stage_run(p, new_run, sm, bc_text, tag, "main", n, oi)
+    return info
+
+
+# CPG の同一形状の継続で継続元の run から写すもの (変換済みの格子とその来歴の記録・入力・品質の記録)。res・ログ・VERDICT・config は写さない
+CPG_CONTINUE_COPY = ("nozzle.h5", "nozzle.h5.provenance.json", "nozzle.xmf", "nozzle.msh", "contour.csv", "bcondConfig.yaml",
+                     "probe.yaml", "MESH_QUALITY.txt")
+
+
+def continue_cpg(problem_path, src_run, new_run, nsteps=None) -> dict:
+    """CPG (`thruster_bell` の 1 段 config) の**同一形状の継続**: 継続元の run の**変換済みの格子をそのまま**新しい run に写し
+    (作り直さない)、継続元の最終 res を段終了ゲート (必要保存量・有限・ρ>0; 継続元の config で) に通してから `restart_field.py`
+    (保存量の index コピー・ビット一致の検査・`wall_dist` は宛先のまま) で初期場にする (`runner_wt._staged_handoff`)。config は
+    `prepare` の CPG と同じ `_solver_config(p, n, 出力の間隔)` (n 既定 `evaluate.nStepOuter` 12000、間隔 `evaluate.outStepInterval`
+    既定 n/3)。forge は起動しない。ゲート・`restart_field.py` に落ちたら RuntimeError (呼び出し側は起動しない)。
+    使う所: opt/driver の CPG の soft (`<tag>_stgA`) → 本段、opt/polish の CPG のチャンク継続。2026-10-15 まで両方とも
+    `prepare(warm_from=...)` で同じ幾何から格子を作り直し `interp_field.py` (cross-mesh 用、最近傍) で移していた
+    (plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19: 作り直した格子へ index コピーもしない)。node の `prepare` が
+    最近傍補間の後に掛けていた壁エントロピーの平滑化 (`_smooth_wall_entropy`) は補間の市松の除去なので、index コピーには掛けない。
+    戻り値は新しい run の prepare_info (継続元のものに run_dir・nsteps・continued_from を足す)。"""
+    import shutil
+
+    from .runner_wt import _staged_handoff
+    p = load_problem(problem_path)
+    if _is_tp(p):
+        raise ValueError("continue_cpg は CPG 経路専用 (TP は continue_tp)")
+    src_run, new_run = Path(src_run), Path(new_run)
+    res = _res_sorted(src_run)
+    if not res:
+        raise FileNotFoundError(f"{src_run}: 継続元の res_*.h5 が無い")
+    if not (src_run / "nozzle.h5").exists():
+        raise FileNotFoundError(f"{src_run}: 継続元の変換済みの格子 nozzle.h5 が無い")
+    n = nsteps or int(p.evaluate.get("nStepOuter", 12000))
+    oi = int(p.evaluate.get("outStepInterval", max(n // 3, 1)))
+    new_run.mkdir(parents=True, exist_ok=False)
+    for name in CPG_CONTINUE_COPY:
+        if (src_run / name).exists():
+            shutil.copy2(src_run / name, new_run / name)
+    (new_run / "solverConfig.yaml").write_text(_solver_config(p, n, oi))
+    _staged_handoff(new_run, res[-1], (src_run / "solverConfig.yaml").read_text(), src_run.name, "nozzle.h5")
+    ip = src_run / "prepare_info.json"
+    info = json.loads(ip.read_text()) if ip.exists() else {"problem": str(problem_path)}
+    info = {**info, "run_dir": str(new_run), "nsteps": n, "continued_from": str(res[-1].resolve())}
+    (new_run / "prepare_info.json").write_text(json.dumps(info, indent=1))
+    # 判定の仕様: 継続元と同じ数値設定 (stage_manifest の hard キー; opt/polish のチャンク) なら収束は継続元の床から
+    # (`--from-floor`)、違えば (opt/driver の soft → 本段) auto。起動と総合の判定の確定は呼び出し側 (run_forge → judge.finalize)
+    from . import judge as J
+    same = J.same_numerics((src_run / "solverConfig.yaml").read_text(), (new_run / "solverConfig.yaml").read_text(),
+                           (src_run / "bcondConfig.yaml").read_text(), (new_run / "bcondConfig.yaml").read_text())
+    J.write_spec(new_run, J.spec_snapshot("runner.continue_cpg", from_floor=(os.path.relpath(src_run, new_run) if same else None)))
     return info
 
 
@@ -1206,6 +1274,11 @@ def write_thrust_history(path, rows) -> Path:
         for o in rows:
             w.writerow([o["step"]] + [("" if o.get(c) is None else repr(float(o[c]))) for c in THRUST_HISTORY_COLS])
     return path
+
+
+def write_thrust_history_run(p: Problem, run_dir) -> Path:
+    """判定の系列 (`judge.spec_bell` の thrust_history.csv) を確定の時点に書く: collect と同じ `thrust_history_tp` → `write_thrust_history`。"""
+    return write_thrust_history(Path(run_dir) / "thrust_history.csv", thrust_history_tp(p, run_dir))
 
 
 def collect(problem_path, run_dir) -> dict:
@@ -1305,9 +1378,12 @@ def main(argv=None):
     print(json.dumps(info, indent=1))
     if a.prepare_only:
         return 0
-    rc = run_forge(a.run_dir)
-    out = collect(a.problem, a.run_dir)
-    print(json.dumps(out, indent=1))
+    # 1 段の run: 出力の整理 (collect が thrust_history.csv を書く) の後に総合の判定を確定する (関門で止まった起動は判定しない)
+    from . import judge as J
+    with J.Staged(a.run_dir, "runner.main"):
+        rc = run_forge(a.run_dir)
+        out = collect(a.problem, a.run_dir)
+        print(json.dumps(out, indent=1))
     return rc
 
 

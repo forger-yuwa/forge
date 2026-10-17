@@ -52,7 +52,6 @@ time:
   last:
     control: 0
     nStepOuter: ${NOUT}
-    time: 1.00
   deltaT:
     control: 1
     dt: 0.00001

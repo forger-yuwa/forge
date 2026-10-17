@@ -199,11 +199,13 @@ def _stamp_ic_species(p: Problem, run_dir) -> str | None:
                                        [float(layout.entries[s].MW) for s in species], _tp_species_Y(p))
 
 
-def _restart_same_mesh(res_h5, mesh_h5) -> None:
+def _restart_same_mesh(res_h5, mesh_h5, env=None) -> None:
     """同一メッシュの段間引き継ぎ: `restart_field.py` (保存量の index コピー、SRC とビット一致を検査; 化学種の属性を継承)。
-    `interp_field.py` (cross-mesh 用) は原始量から保存量を組み直すので同一メッシュには使わない (AGENTS.md「メッシュ変更後の restart」)。"""
+    `interp_field.py` (cross-mesh 用) は原始量から保存量を組み直すので同一メッシュには使わない (AGENTS.md「メッシュ変更後の restart」)。
+    env: 子プロセスの環境 (既定は import 時の `_ENV`)。呼んだ時点の環境 (その実行だけの `FORGE_ALLOW_UNVERIFIED_SPECIES=1` など) を
+    渡すときに使う (SERN の `restart_by_index` は 2026-10-15 まで同じプロセスの中で写していた)。"""
     r = subprocess.run([sys.executable, str(FORGE_TOOLS / "restart_field.py"), str(res_h5), str(mesh_h5)],
-                       env=_ENV, capture_output=True, text=True)
+                       env=_ENV if env is None else env, capture_output=True, text=True)
     with (Path(mesh_h5).parent / "restart_field.log").open("a") as f:
         f.write(r.stdout + r.stderr)
     if r.returncode != 0:
@@ -1008,16 +1010,12 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
     if q.returncode != 0:
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node 変換 (node config を書いてから変換 — 必須) + 等エントロピー IC
-    cfg_e = _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
     # Euler の本段の cfl: 引数 (--cfl) > evaluate.cfl_euler (要求カードの雛形; NS の本段が B0 で cfl_main を書かないので Euler の cfl を
     # 別に持つ、plan tooling-settle-convergence-and-monitor §4.5・codex m55-three-coef M4)。どちらも無ければ今までどおり設定は 4.0 のまま
     # (cfl_main は run_staged の呼び出し側が渡す)
     if cfl_main is None and p.evaluate.get("cfl_euler") is not None:
         cfl_main = euler_cfl(p)
-    if cfl_main is not None:
-        cfg_e = re.sub(r"cfl: [\d.]+, cfl_pseudo: [\d.]+", f"cfl: {float(cfl_main)}, cfl_pseudo: {float(cfl_main)}", cfg_e)
-    if implicit_relax is not None:
-        cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    cfg_e = _euler_config(p, run_dir, n, out_int, cfl_main, implicit_relax)
     (run_dir / "solverConfig.yaml").write_text(cfg_e)
     run_converter([str(converter_path()), "nozzle.msh", "nozzle.h5"], cwd=run_dir, env=_ENV)
     # IC を入れる前 (座標・接続は以後変わらない)。nj は実際の値 (axis_gap_frac では導出値になる)
@@ -1064,6 +1062,18 @@ def prepare(problem_path, run_dir, nsteps=None, ic_from=None, cfl_main=None, imp
         info["euler_wall"] = euler_wall
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1))
     return info
+
+
+def _euler_config(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None) -> str:
+    """Euler の本段の config (prepare が書く文字列): `_config_euler_node` → `_apply_gas_to_config` (TP の physProp) → 引数 cfl_main の
+    cfl・cfl_pseudo (YAML 上の位置で書き換え; 2026-10-15 まで正規表現。書く文字列は同じ) → 引数 implicit_relax の挿入
+    (`blockDPLUR: 1,` の直後; 位置を変えると文字列が変わるので文字列置換のまま)。書き写しの台本 (recipes/regen_profiles.py) も使う。"""
+    cfg_e = _apply_gas_to_config(_config_euler_node(p, n, out_int, 4.0, 1), p, run_dir)
+    if cfl_main is not None:
+        cfg_e = _cfg_set(cfg_e, {"cfl": float(cfl_main), "cfl_pseudo": float(cfl_main)})
+    if implicit_relax is not None:
+        cfg_e = cfg_e.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
+    return cfg_e
 
 
 # 段階起動の段 config の変更 (plan tooling-rerun-conditions §4.9、codex result 段 #2)。
@@ -1154,19 +1164,29 @@ def _cfg_check(cfg_text: str, want: dict, label: str) -> None:
 
 
 def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, stages: str = "full",
-               mesh_h5: str = "nozzle.h5") -> int:
+               mesh_h5: str = "nozzle.h5", recipe: dict | None = None) -> int:
     """soft 段 (1次+cfl0.5, 3000 step) → [mid 段 (2次+cfl1, 3000 step)] → 本段。
     walldriven W3 と同方式・段階起動必須。`cfl_main` で本段 CFL を上書き
     (semi-perfect TP は cfl4 で本段 step ~60 に爆発 — case/42 実測。TP は cfl≤2 が実績
     [[cutler-cpg-vs-tp-dplur-sst]])。`mid_stage=True` で 2 次化と CFL 上げを分離する。
     `run_staged_ns` と同じく、段ごとの実効設定を `stage_manifest.json` に記録し、段の残差履歴を
     `residual_history_<tag>.csv` に残す (tag = soft / mid / main)。段の最終 res の必要保存量が非有限・ρ≤0 なら
-    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9、codex result 段 3 回目 #3)。"""
+    次段へ進まず RuntimeError (段終了ゲート `stage_gate`; plan tooling-rerun-conditions §4.9、codex result 段 3 回目 #3)。
+    各段の config は書く前に明示すべきキーを旧い実効値で足し、書いた後に段の宣言 RECIPE.json を書く (機種 axismach_euler;
+    plan tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder`)。recipe {problem, args}: 問題 YAML の所在と引数による
+    上書き (`main` の `--cfl`・`--implicit-relax`) — 問題 YAML・引数の上書きを宣言の逸脱 (出所つき) に変換するのに使う。"""
     import shutil
+    from . import config_builder as CB
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
     bc_path = run_dir / "bcondConfig.yaml"
     bc_text = bc_path.read_text() if bc_path.exists() else ""
+    rcp = recipe or {}
+
+    def _launch_cfg(cfg, tag):
+        """段の config を仕上げて書き、宣言する (forge の起動の直前)。戻り: 書いた config。"""
+        return CB.launch_stage(run_dir, cfg, bc_text, tag, "axismach_euler", problem=rcp.get("problem"), args=rcp.get("args"),
+                               generator="runner_axismach.run_staged")
     if cfl_main is not None:
         cfg_main = _cfg_set(cfg_main, {"cfl": cfl_main, "cfl_pseudo": cfl_main})
     main_want = {k: _cfg_value(cfg_main, k) for k in ("convMethod", "cfl", "cfl_pseudo", "nStepOuter", "outStepInterval")}
@@ -1183,7 +1203,7 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
     def _stage(cfg, nsteps, label, want):
         cfg = _cfg_set(cfg, {"nStepOuter": nsteps, "outStepInterval": nsteps})
         _cfg_check(cfg, {**want, "nStepOuter": nsteps, "outStepInterval": nsteps}, label)
-        (run_dir / "solverConfig.yaml").write_text(cfg)
+        cfg = _launch_cfg(cfg, label)
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
         _record(cfg, label)
@@ -1199,17 +1219,22 @@ def run_staged(run_dir, cfl_main: float | None = None, mid_stage: bool = False, 
         for f in run_dir.glob("res_*"):
             f.unlink()
 
-    if stages != "none":
-        soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
-        _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
-        if mid_stage and stages == "full":
-            mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
-            _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
-    _cfg_check(cfg_main, main_want, "main")
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    (run_dir / "residual_history.csv").unlink(missing_ok=True)
-    rc = run_forge(run_dir)
-    _record(cfg_main, "main")
+    # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は最初の起動の前に書き、全部の段を
+    # FORGE_JUDGE_DEFER=1 で起動して (run_forge)、本段の記録の後に総合を 1 度だけ確定する (系列 judge_series.csv は確定の時点に書く)
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_axismach("runner_axismach.run_staged", euler=True))
+    with J.Staged(run_dir, "runner_axismach.run_staged", series=lambda: J.write_axismach_series(run_dir)):
+        if stages != "none":
+            soft = _first_order(_cfg_set(cfg_main, {"cfl": 0.5, "cfl_pseudo": 0.5}))   # 旧: `convMethod: 1` だけを 0 に置換
+            _stage(soft, 3000, "soft", {"convMethod": 0, "cfl": 0.5, "cfl_pseudo": 0.5})
+            if mid_stage and stages == "full":
+                mid = _cfg_set(cfg_main, {"cfl": 1.0, "cfl_pseudo": 1.0})
+                _stage(mid, 3000, "mid", {"convMethod": main_want["convMethod"], "cfl": 1.0, "cfl_pseudo": 1.0})
+        _cfg_check(cfg_main, main_want, "main")
+        cfg_main = _launch_cfg(cfg_main, "main")
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)
+        rc = run_forge(run_dir)
+        _record(cfg_main, "main")
     return rc
 
 
@@ -1287,8 +1312,15 @@ def main(argv=None) -> int:
     pp = load_problem(a.problem)
     import time as _t
     t0 = _t.time()
+    # 宣言の逸脱の出所 (plan tooling-generator-defaults-and-launch-gate §5.1 #11): 引数は問題 YAML より優先
+    args = {}
+    if a.cfl is not None:
+        args["main"] = {k: {"name": "--cfl", "value": a.cfl} for k in ("time.deltaT.cfl", "time.deltaT.cfl_pseudo")}
+    if a.implicit_relax is not None:
+        args["*"] = {"time.deltaT.implicitRelax": {"name": "--implicit-relax", "value": a.implicit_relax}}
     rc = run_staged(a.run_dir, cfl_main=(a.cfl if a.cfl is not None else euler_cfl(pp)),     # cfl_euler > cfl_main
-                    mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)), stages=a.stages)
+                    mid_stage=bool(pp.evaluate.get("mid_stage", pp.is_semiperfect)), stages=a.stages,
+                    recipe={"problem": a.problem, "args": args})
     print(f"forge exit={rc} (wall {_t.time() - t0:.0f} s, stages={a.stages})")
     print(json.dumps(collect(a.problem, a.run_dir), indent=1))
     return rc
@@ -1556,6 +1588,10 @@ _LIMITER_REF_OPT_KEYS = (("L", "limiterRefLength"),)          # 明示の数値�
 _MAIN_LINE_ONLY_PATHS = ({("time", "deltaT", k) for k in ("lineImplicit", "lineDtDirectional", "lineDtDirectionalCap",
                                                          "implicitThermalJacobian")}
                          | {("space", k) for _, k in _LIMITER_REF_KEYS + _LIMITER_REF_OPT_KEYS} | {("output",)})
+# B0 だけのキーのうち、前の段に「切った値」(省略と同じ実効値) で書いてよいもの: 明示すべきキー (plan
+# tooling-generator-defaults-and-launch-gate §5.1 #11・#16) として `_ns_configs` が前の段の元の設定に旧い実効値で足す
+_MAIN_LINE_OFF = {("time", "deltaT", "lineImplicit"): 0, ("time", "deltaT", "lineDtDirectional"): 0,
+                  ("time", "deltaT", "implicitThermalJacobian"): 0}
 # 前の段の元の設定と本段の設定の差として許すパス (B0 のパス + cfl・cfl_pseudo・implicitRelax)
 _MAIN_LINE_PATHS = (_MAIN_LINE_ONLY_PATHS
                     | {("time", "deltaT", k) for k in ("cfl", "cfl_pseudo", "implicitRelax")})
@@ -2005,19 +2041,32 @@ def _apply_main_line(cfg: str, ml: dict) -> str:
     return text
 
 
-def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None, main_line: dict | None = None):
+def _ns_configs(p: Problem, run_dir, n: int, out_int: int, cfl_main=None, implicit_relax=None, main_line: dict | None = None,
+                record: dict | None = None):
     """NS の (前の段の元の設定, 本段の設定) を返す。`main_line` (`_main_line_spec` の戻り値) が None なら 2 つは同じ文字列で、
     従来の prepare_ns の組み立てと同じ (`_config_sst_node` → `_apply_gas_to_config` → implicit_relax の挿入)。
-    `_apply_gas_to_config` は run_dir に species_meta.yaml などを書く (従来どおり 1 回だけ呼ぶ)。"""
+    `_apply_gas_to_config` は run_dir に species_meta.yaml などを書く (従来どおり 1 回だけ呼ぶ)。
+    最後に、機種のプロファイル (axismach_ns / B0 は axismach_ns_b0) に合えば明示すべきキーを旧い実効値で足す
+    (plan tooling-generator-defaults-and-launch-gate §5.1 #11、`config_builder.finish_config`; 前の段の元の設定と本段の設定を
+    別々に。B0 は足す前の設定に当てる)。S1・S2 (ns_stage_configs) と本段はこの 2 つから作るので、段の config と prepare_info の
+    ns_stage_configs の sha256 は足した後の文字列のもの。bcond は run_dir/bcondConfig.yaml (無ければ prepare_ns と同じ組み立て)。
+    record (dict) を渡すと足したキーを {family, prestage, main} で返す (prepare_ns が RECIPE_CONTEXT.json に写す)。"""
+    from . import config_builder as CB
     cfl_main = float(cfl_main if cfl_main is not None else p.evaluate.get("cfl_main", 1.0))
     implicit_relax = implicit_relax if implicit_relax is not None else p.evaluate.get("implicit_relax")
     cfg_ns = _apply_gas_to_config(_config_sst_node(p, n, out_int, cfl_main), p, run_dir, viscous=True)
     if implicit_relax is not None:
         # 陰解法の緩和 (cfl 6 + implicitRelax 0.7 が生産推奨: case/45 run_0018)。deltaT ブロックに挿入
         cfg_ns = cfg_ns.replace("blockDPLUR: 1,", f"blockDPLUR: 1, implicitRelax: {float(implicit_relax)},", 1)
-    if main_line is None:
-        return cfg_ns, cfg_ns
-    return cfg_ns, _apply_main_line(cfg_ns, main_line)
+    bc_p = Path(run_dir) / "bcondConfig.yaml"
+    bc = bc_p.read_text() if bc_p.exists() else _bcond_with_species(_bcond(p, euler=False, profile_ok=True), _tp_species_Y(p))
+    fam = "axismach_ns" if main_line is None else "axismach_ns_b0"
+    cfg_main = cfg_ns if main_line is None else _apply_main_line(cfg_ns, main_line)
+    cfg_ns_f, fin_pre = CB.finish_config(cfg_ns, bc, fam)
+    cfg_main_f, fin_main = (cfg_ns_f, fin_pre) if main_line is None else CB.finish_config(cfg_main, bc, fam)
+    if record is not None:
+        record.update(family=fam, prestage=fin_pre["explicit_added"], main=fin_main["explicit_added"])
+    return cfg_ns_f, cfg_main_f
 
 
 # --- 本段の監視用の出力と判定の基準 (`evaluate.ns_output`・`evaluate.settle`; plan tooling-settle-convergence-and-monitor §4.5・§5.1 #6) -----
@@ -2272,6 +2321,18 @@ def _stop_rule_settings(p: Problem, nsteps, euler_ref, stop_rule: bool | None) -
     return sr
 
 
+def write_recipe_context(run_dir, problem_path, args: dict, explicit: dict | None = None) -> Path:
+    """`RECIPE_CONTEXT.json` (plan tooling-generator-defaults-and-launch-gate §5.1 #11): run_staged_ns が段の宣言を書くときに読む、
+    問題 YAML の所在・prepare_ns の引数 (cfl_main・implicit_relax、None は書かない)・`_ns_configs` が足した明示すべきキー。
+    run_staged_ns は prepare_ns と別の呼び出し (case の台本・deltastar_loop) からも回るので、run に置く。"""
+    from . import config_builder as CB
+    p = CB.write_context(run_dir, "runner_axismach.prepare_ns", problem_path, args)
+    rec = json.loads(p.read_text())
+    rec["explicit_added"] = dict(explicit or {})
+    p.write_text(json.dumps(rec, indent=1, ensure_ascii=False))
+    return p
+
+
 def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
                dstar_csv=None, dstar_blend=(6.0, 9.0),
                delta_r_csv=None, offset: str = "normal", euler_ref=None,
@@ -2359,6 +2420,7 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
     p = load_problem(problem_path)
     if p.type != "wind_tunnel_axisym_axismach":
         raise ValueError("runner_axismach は wind_tunnel_axisym_axismach 専用")
+    recipe_args = {"cfl_main": cfl_main, "implicit_relax": implicit_relax}     # 引数そのもの (宣言の逸脱の出所; RECIPE_CONTEXT.json)
     # 物理壁の表現 (§4.4): 不正値と未対応の設計壁は run dir を作る前・設計チェーンの前に例外
     pw_repr = _physical_wall_repr(p.geometry)
     if pw_repr is not None and str(p.geometry.get("wall_repr", "interp")) != "joint":
@@ -2542,7 +2604,9 @@ def prepare_ns(problem_path, run_dir, nsteps=None, ic_from=None,
         raise RuntimeError(f"メッシュ品質 FAIL:\n{q.stdout}")
     # node/SST 変換 (config を先に書く — wall_dist は no-slip 壁で作られる)。main_line があっても変換・初期場の処理は B0 を
     # 当てる前の設定で行い、本段の設定 (cfg_main) への切り替えは最後に行う (§5.1 #30)
-    cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line)
+    explicit_rec = {}
+    cfg_ns, cfg_main = _ns_configs(p, run_dir, n, out_int, cfl_main, implicit_relax, main_line, record=explicit_rec)
+    write_recipe_context(run_dir, problem_path, recipe_args, explicit_rec)
     # 本段の監視用の出力 (plan tooling-settle-convergence-and-monitor §4.1・§4.5): 判定の基準 (evaluate.settle) を run の設定で一度解決して
     # 要る出力 (節点・流量・界面の診断) を決め、evaluate.ns_output と合わせて本段の設定だけに書く。前提を満たせない設定 (凝縮のモーメントの
     # 列・非定常・入口か出口の判別ができない境界など) は settle_presets.resolve の例外で止まる (黙って外さない; 外すのは evaluate.settle: false)
@@ -2702,6 +2766,59 @@ def stage_gate(res_h5, cfg_text: str) -> list:
     return probs
 
 
+# 次の段で足す量の初期値の下限 (量: (下限, 下限を含むか))。ω = 0 は ν_t = k/ω を発散させる
+_INIT_LOWER = {"roK": (0.0, True), "roOmega": (0.0, False)}
+
+
+def next_stage_init_problems(res_h5, mesh_h5, cfg_prev: str, cfg_next: str | None = None) -> tuple:
+    """同一メッシュの段間で、次の段が始まる初期場 (`restart_field.py` で写した後の宛先の /VALUE) を検査する
+    (plan tooling-generator-defaults-and-launch-gate §4.5・§5.1 #19)。段終了ゲート (`stage_gate`) は前の段の必要保存量を SRC で見る。
+    ここはそれと分けて:
+
+    1. 次の段の必要保存量がすべて宛先の /VALUE にある (`restart_field.py` は宛先にある量だけを写すので、無い量は次の段に渡らない)。
+    2. 次の段で足す量 (次の段の必要保存量 − 前の段の必要保存量。層流暖機 → SST の roK・roOmega) は前の段が解いていないので
+       段終了ゲートは見ない。`restart_field.py` と同じ規則で決まる値 (SRC にあれば SRC、無ければ宛先) が 1 次元で節点数が合い、
+       有限で、roK ≥ 0・roOmega > 0 か。
+
+    cfg_next が None なら次の段は前の段と同じ量を解く (足す量なし)。戻り (問題のリスト, {足す量: 'SRC' か '宛先'})。"""
+    import h5py
+    if str(FORGE_TOOLS) not in sys.path:
+        sys.path.insert(0, str(FORGE_TOOLS))
+    from rerun_conditions import required_conserved_from_cfg
+    req_prev = required_conserved_from_cfg(_cfg_load(cfg_prev))
+    req_next = req_prev if cfg_next is None else required_conserved_from_cfg(_cfg_load(cfg_next))
+    added = [k for k in req_next if k not in req_prev]
+    probs, src_of = [], {}
+    with h5py.File(res_h5, "r") as fs, h5py.File(mesh_h5, "r") as fd:
+        if "VALUE" not in fd:
+            return [f"宛先 {Path(mesh_h5).name} に /VALUE が無い"], src_of
+        sv = fs["VALUE"] if "VALUE" in fs else {}
+        dv = fd["VALUE"]
+        n = dv["ro"].shape[0] if "ro" in dv else None
+        for k in req_next:
+            if k not in dv:
+                probs.append(f"{k}: 宛先の初期場 {Path(mesh_h5).name} に無い (restart_field.py は宛先にある量だけを写す)")
+        for k in added:
+            if k not in dv:
+                continue
+            src_of[k] = "SRC" if k in sv else "宛先"
+            a = np.asarray(sv[k] if k in sv else dv[k])
+            what = f"{k} (次の段で足す量、{src_of[k]} の値)"
+            if a.ndim != 1 or (n is not None and a.shape[0] != n):
+                probs.append(f"{what}: 形 {a.shape} が節点数 {n} と合わない")
+                continue
+            bad = int(np.count_nonzero(~np.isfinite(a)))
+            if bad:
+                probs.append(f"{what}: 非有限 {bad}/{a.size} 点")
+                continue
+            if k in _INIT_LOWER:
+                lo, incl = _INIT_LOWER[k]
+                nb = int(np.count_nonzero(a < lo if incl else a <= lo))
+                if nb:
+                    probs.append(f"{what}: {'<' if incl else '≤'} {lo:g} が {nb} 点")
+    return probs, src_of
+
+
 def _stage_manifest_cls():
     if str(FORGE_TOOLS) not in sys.path:
         sys.path.insert(0, str(FORGE_TOOLS))
@@ -2747,12 +2864,14 @@ def ns_stage_configs(cfg_main: str, stages: str = "full", ramp=None, ramp_steps:
         _add(_ns_prestage(src, 1.0), 3000, "S2_mid", {"convMethod": 0, "cfl": 1.0, "cfl_pseudo": 1.0})
         if cfg_pre is not None:
             # S1・S2 にライン陰解法・上限・ITJ・リミッタの基準値・全場の間隔が無く、出力の指定は前の段の元の設定のまま
-            # (本段の extraFields・節点・流量・界面の診断が無い)
+            # (本段の extraFields・節点・流量・界面の診断が無い)。明示すべきキーとして B0 を切った値 0 で書いたもの `_MAIN_LINE_OFF` は
+            # 残ってよい (省略と同じ実効値; plan tooling-generator-defaults-and-launch-gate §5.1 #11・#16)
             out_pre = _cfg_path_get(_cfg_load(cfg_pre), ("output",))
             for tag, cfg, _, _ in pre:
                 doc = _cfg_load(cfg)
                 left = [".".join(pth) for pth in sorted(pth for pth in _MAIN_LINE_ONLY_PATHS | _NS_OUTPUT_PATHS if pth[0] != "output")
-                        if _cfg_path_get(doc, pth) is not _CFG_MISSING]       # output は下で前の段の元の設定と丸ごと比べる
+                        if _cfg_path_get(doc, pth) is not _CFG_MISSING       # output は下で前の段の元の設定と丸ごと比べる
+                        and not (pth in _MAIN_LINE_OFF and _cfg_path_get(doc, pth) == _MAIN_LINE_OFF[pth])]
                 if _cfg_path_get(doc, ("output",)) != out_pre:
                     left.append("output")
                 if left:
@@ -3030,9 +3149,22 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     else:
         # 停止規則: 明示の要求なのに使えなければここで例外 (S1 の前・forge を起動しない)。既定の要求で使えなければ sr_why に理由 (本段で UNAVAILABLE)
         sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
+    # 計算の後の判定の仕様 (§4.6-1; 本段で停止規則を使う run は θ_r も)。最初の起動の前に書く
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_axismach("runner_axismach.run_staged_ns", stop_rule=(sr if sr_use else None)))
     (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     (run_dir / SR.STATE).unlink(missing_ok=True)             # 前の呼び出しの停止の状態を今回の結果と取り違えない
     sm = _stage_manifest_cls()(run_dir)
+    from . import config_builder as CB
+    fam = "axismach_ns" if cfg_pre is None else "axismach_ns_b0"
+    added = (CB.load_context(run_dir).get("explicit_added") or {})
+
+    def _declare(tag, prestage):
+        """段の宣言 RECIPE.json (plan tooling-generator-defaults-and-launch-gate §5.1 #11)。config は prepare_ns (`_ns_configs`) が
+        明示すべきキーを足したものから作っているので、ここでは足さない (足すと ns_stage_configs・prepare_info の sha256 と違う)。
+        問題 YAML・prepare_ns の引数 (RECIPE_CONTEXT.json) の上書きは出所つきの逸脱にする。"""
+        CB.declare_stage(run_dir, tag, fam, generator="runner_axismach.run_staged_ns",
+                         finished={"explicit_added": added.get("prestage" if prestage else "main") or {}})
 
     def _check_wall_profile(tag):
         """壁温分布の正本の照合 (一様・断熱の run では load_run_profile が None を返すだけ)。"""
@@ -3055,6 +3187,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         if ep is not None:
             EP.assert_launch(ep, tag, cfg, bc_text)                  # 起動の直前に計画と照合 (§5.1 #4b)
         (run_dir / "solverConfig.yaml").write_text(cfg)
+        _declare(tag, prestage=(cfg_pre is not None and not tag.startswith("R")))
         sha = _sha256_file(run_dir / "solverConfig.yaml")
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
         rc = run_forge(run_dir)
@@ -3072,55 +3205,60 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
             f.unlink()
         return {"tag": tag, "nsteps": nsteps, "config_sha256": sha}
 
-    done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
-    if sr_use or sr_v2 is not None:
-        # 停止規則の上限を本段の nStepOuter に (manifest・通知の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
-        cfg_main = _cfg_set(cfg_main, {"nStepOuter": int(sr["cap"])})
-        main_want = {**main_want, "nStepOuter": int(sr["cap"])}
-    _check_wall_profile("main")
-    _cfg_check(cfg_main, main_want, "main")
-    if ep is not None:
-        EP.assert_launch(ep, "main", cfg_main, bc_text)              # 本段の起動の直前に計画と照合 (§5.1 #4b)
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    (run_dir / "residual_history.csv").unlink(missing_ok=True)
-    _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
-    state = None
-    if sr_v2 is not None:
-        # 停止規則 v2: 協調停止で止め、止めた step で再評価する (forge を kill しない; 非常時を除く)
-        w = SR.watch_main_stage_v2(run_dir, sr, _cfg_load(cfg_main), **(stop_rule_watch or {}))
-        rc, state = w["rc"], w["state"]
-        print(f"[stop_rule v2] 本段: {w['status']} (停止の step {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
-              f"{run_dir / SR.STATE}", flush=True)
-    elif sr_use:
-        w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
-        rc = w["rc"]
-        state = _stop_state_record(run_dir, w, sr)
-        print(f"[stop_rule] 本段: {w['status']} (止めた/最後の出力 {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
-              f"{run_dir / SR.STATE}", flush=True)
-    elif sr_why is not None:
-        # 既定の要求 (キー無しで準備) で使えない: 理由を記録し、本段は prepare の長さ (fallback_steps) で今までどおり回す (forge-f5 の版)
-        n_main = int(main_want["nStepOuter"])
-        urec = {"version": 1, "plan": SR.PLAN, "settings": sr, "status": "UNAVAILABLE", "reason": sr_why,
-                "action": f"停止規則を使わず本段を nStepOuter {n_main} で回す", "started": SR._now()}
-        SR.save_record(run_dir, urec)
-        print(f"[stop_rule] 使えない ({sr_why}) — 本段は {n_main} step", flush=True)
-        rc = run_forge(run_dir)
-        forge_rc = SR._forge_exit(run_dir)
-        urec.update(forge_rc=forge_rc, run_case_rc=int(rc), finished=SR._now())
-        SR.save_record(run_dir, urec)
-        state = {"method": "v1", "status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
-                 "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
-                 "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": urec["finished"]}
-    else:
-        rc = run_forge(run_dir)
-        if sr is not None and sr.get("requested"):
-            # prepare は要求したが引数 stop_rule=False で使わなかった: 打ち消したことを状態として残す (受け渡しの関門は NOT_USED と見る)
-            state = {"method": "v2" if SR.criteria_present(run_dir) else "v1",
-                     "status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
-                     "cap": None, "fallback_steps": int(sr["fallback_steps"])}
-    _record(cfg_main, "main")
-    if state is not None:
-        SR.write_state(run_dir, state)
+    # 全部の段 (S1・stages=none の本段を含む) を FORGE_JUDGE_DEFER=1 で起動し、本段の記録・停止の状態の記録 (見張りの
+    # stop_rule.postprocess を含む) の後に総合の判定を 1 度だけ確定する (plan tooling-convergence-and-wall-resolution-gates §4.6-2)
+    with J.Staged(run_dir, "runner_axismach.run_staged_ns", series=lambda: J.write_axismach_series(run_dir)) as judged:
+        done = [_stage(cfg, nsteps, tag, want) for tag, cfg, nsteps, want in pre]
+        if sr_use or sr_v2 is not None:
+            # 停止規則の上限を本段の nStepOuter に (manifest・通知の本段の記録も同じ値になる)。ramp の差し引きはしない (上限は本段の step 数)
+            cfg_main = _cfg_set(cfg_main, {"nStepOuter": int(sr["cap"])})
+            main_want = {**main_want, "nStepOuter": int(sr["cap"])}
+        _check_wall_profile("main")
+        _cfg_check(cfg_main, main_want, "main")
+        if ep is not None:
+            EP.assert_launch(ep, "main", cfg_main, bc_text)              # 本段の起動の直前に計画と照合 (§5.1 #4b)
+        (run_dir / "solverConfig.yaml").write_text(cfg_main)
+        _declare("main", prestage=False)
+        (run_dir / "residual_history.csv").unlink(missing_ok=True)
+        _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
+        state = None
+        if sr_v2 is not None:
+            # 停止規則 v2: 協調停止で止め、止めた step で再評価する (forge を kill しない; 非常時を除く)
+            w = SR.watch_main_stage_v2(run_dir, sr, _cfg_load(cfg_main), **(stop_rule_watch or {}))
+            rc, state = w["rc"], w["state"]
+            print(f"[stop_rule v2] 本段: {w['status']} (停止の step {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
+                  f"{run_dir / SR.STATE}", flush=True)
+        elif sr_use:
+            w = SR.watch_main_stage(run_dir, sr, **(stop_rule_watch or {}))
+            rc = w["rc"]
+            state = _stop_state_record(run_dir, w, sr)
+            print(f"[stop_rule] 本段: {w['status']} (止めた/最後の出力 {w['stop_step']}、forge rc {w['forge_rc']}、上限 {sr['cap']}) → "
+                  f"{run_dir / SR.STATE}", flush=True)
+        elif sr_why is not None:
+            # 既定の要求 (キー無しで準備) で使えない: 理由を記録し、本段は prepare の長さ (fallback_steps) で今までどおり回す (forge-f5 の版)
+            n_main = int(main_want["nStepOuter"])
+            urec = {"version": 1, "plan": SR.PLAN, "settings": sr, "status": "UNAVAILABLE", "reason": sr_why,
+                    "action": f"停止規則を使わず本段を nStepOuter {n_main} で回す", "started": SR._now()}
+            SR.save_record(run_dir, urec)
+            print(f"[stop_rule] 使えない ({sr_why}) — 本段は {n_main} step", flush=True)
+            rc = run_forge(run_dir)
+            forge_rc = SR._forge_exit(run_dir)
+            urec.update(forge_rc=forge_rc, run_case_rc=int(rc), finished=SR._now())
+            SR.save_record(run_dir, urec)
+            state = {"method": "v1", "status": "UNAVAILABLE", "reason": sr_why, "rc": int(rc), "forge_rc": forge_rc, "stop_step": None, "cap": None,
+                     "fallback_steps": int(sr["fallback_steps"]), "hold_steps": int(sr.get("hold_steps") or 0),
+                     "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": urec["finished"]}
+        else:
+            rc = run_forge(run_dir)
+            if sr is not None and sr.get("requested"):
+                # prepare は要求したが引数 stop_rule=False で使わなかった: 打ち消したことを状態として残す (受け渡しの関門は NOT_USED と見る)
+                state = {"method": "v2" if SR.criteria_present(run_dir) else "v1",
+                         "status": "NOT_USED", "reason": "引数 stop_rule=False (prepare は要求した)", "rc": int(rc), "stop_step": None,
+                         "cap": None, "fallback_steps": int(sr["fallback_steps"])}
+        _record(cfg_main, "main")
+        if state is not None:
+            SR.write_state(run_dir, state)
+        judged.solver_rc = (state or {}).get("forge_rc")       # 本段の forge の終了コード (停止規則・UNAVAILABLE の記録; 無ければ判定が決める)
     return StagedRC(rc, state)
 
 

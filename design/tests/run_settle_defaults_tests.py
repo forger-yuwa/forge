@@ -61,6 +61,13 @@ B0_ONLY = [("time", "deltaT", k) for k in ("lineImplicit", "lineDtDirectional", 
 OUT_ONLY = [("time", "fieldOutStepInterval"), ("output",)]
 
 
+def present(cfg, paths):
+    """paths のうち cfg に書いてあるもの。#11 の明示すべきキーとして B0 を「切った値」で書いたもの (`_MAIN_LINE_OFF`; 省略と同じ実効値)
+    は数えない (plan tooling-generator-defaults-and-launch-gate §5.1 #11・#16、run_main_line_tests.py の b0_left と同じ)。"""
+    return [p for p in paths if get(cfg, p) is not RA._CFG_MISSING
+            and not (p in RA._MAIN_LINE_OFF and get(cfg, p) == RA._MAIN_LINE_OFF[p])]
+
+
 def check(name, cond, detail=""):
     global FAIL
     print(("ok  " if cond else "FAIL") + " " + name + (f"  [{detail}]" if detail and not cond else ""))
@@ -142,7 +149,8 @@ else:
     n_n, oi_n, _ = RA._ns_steps(p_new)
     check("(b) NS の本段の長さは同じ 60000・出力の間隔は 1000 → 2000 (ns_output)", n_o == n_n == 60000 and oi_o == 1000 and oi_n == 2000)
     base_o, main_o = RA._ns_configs(p_old, rd("old"), n_o, oi_o)
-    base_n, main_b0 = RA._ns_configs(p_new, rd("new"), n_n, oi_n, main_line=ml)
+    rec_n = {}                     # _ns_configs が足した明示すべきキー {family, prestage, main} (plan generator-defaults §5.1 #11)
+    base_n, main_b0 = RA._ns_configs(p_new, rd("new"), n_n, oi_n, main_line=ml, record=rec_n)
     es, srec = RA._settle_spec(p_new)
     no = RA._ns_output_spec(p_new)
     bc_new = RA._bcond_set_output(RA._bcond_with_species(RA._bcond(p_new, euler=False, profile_ok=True), RA._tp_species_Y(p_new)),
@@ -165,7 +173,7 @@ else:
           get(main_n, ("time", "outStepInterval")) == 2000 and get(main_n, ("time", "fieldOutStepInterval")) == 20000
           and get(main_n, ("output",)) == {"boundaryMassflux": 1, "nodeProbeFile": RA.SETTLE_NODES_FILE, "interfaceDiag": 1},
           get(main_n, ("output",)))
-    left = [".".join(p) for p in B0_ONLY + OUT_ONLY if get(base_n, p) is not RA._CFG_MISSING]
+    left = [".".join(p) for p in present(base_n, B0_ONLY + OUT_ONLY)]
     check("(b) 前の段の元の設定 (solverConfig_prestage.yaml) に B0・本段の出力のキーが無い", not left, left)
     check("(b) 前の段の元の設定と旧い問題の設定の差は出力の間隔だけ (1000 → 2000)",
           set(RA._cfg_diff_paths(RA._cfg_load(base_o), RA._cfg_load(base_n))) == {("time", "outStepInterval")})
@@ -218,7 +226,7 @@ else:
     main_p = RA._apply_ns_outputs(main_p, RA._ns_output_spec(p_pt), needs)
     pre_p, _, _ = RA.ns_stage_configs(main_p, "full", cfg_pre=base_p)
     check("(d) point の本段: B0 のキー無し・cfl 1.0・出力のキーあり、S1・S2 は旧い問題と一致",
-          not [p for p in B0_ONLY if get(main_p, p) is not RA._CFG_MISSING] and get(main_p, ("time", "deltaT", "cfl")) == 1.0
+          not present(main_p, B0_ONLY) and get(main_p, ("time", "deltaT", "cfl")) == 1.0
           and get(main_p, ("time", "fieldOutStepInterval")) == 20000 and [c for _, c, *_ in pre_p] == [c for _, c, *_ in pre_o])
 
     def bad_ml(raw):
@@ -326,6 +334,17 @@ def src_run(tag, cfg_text, computed=True, fnv=None, auto=True):
     return d
 
 
+def strip_explicit(text, added):
+    """#11 で足した明示すべきキーの断片 (flow 形式の `, key: 値`) を除く (足す前の設定; run_main_line_tests.py の同名の関数と同じ)。
+    B0 の当て方 (`_apply_main_line`) の単体は足す前の設定で見る (`_ns_configs` は B0 を足す前の設定に当ててから明示すべきキーを足す)。"""
+    from forge_design.evaluate.config_builder import _token
+    for k, v in (added or {}).items():
+        frag = f", {k.split('.')[-1]}: {_token(v)}"
+        assert text.count(frag) == 1, (k, frag)
+        text = text.replace(frag, "", 1)
+    return text
+
+
 if not P3.is_file():
     SKIPPED.append("(f) (problem_m55_p3.yaml が無い)")
 else:
@@ -343,16 +362,17 @@ else:
         return ed
     src_f = {}
     ml_f = RA._main_line_spec(problem("from_run", P3, ml_from(srcA)), source_out=src_f)
-    main_f = RA._apply_main_line(base_n, ml_f)
+    main_f = RA._apply_main_line(strip_explicit(base_n, rec_n["prestage"]), ml_f)
     check("(f) 継承した本段の設定を読み直すと 4 つの値がビットで同じ (repr → YAML → float の往復)",
           {k: get(main_f, ("space", k)) for k in VALS} == VALS and src_f["limiter_ref"]["mode"] == "from_run"
           and src_f["limiter_ref"]["values"] == VALS)
     check("(f) 継承の本段と自動の本段の差は基準値 4 つだけ",
-          set(RA._cfg_diff_paths(RA._cfg_load(main_f), RA._cfg_load(main_b0))) == {("space", k) for k in VALS})
+          set(RA._cfg_diff_paths(RA._cfg_load(main_f), RA._cfg_load(strip_explicit(main_b0, rec_n["main"])))) == {("space", k) for k in VALS})
     # 区間の鍵: 自動の段 (srcA の記録) と継承の段 (固定の同じ値) は同じ区間 (forge の記録を写す形; 詳しくは tools の試験)
     runM = rd("manifest")
     sm = SM.StageManifest(runM)
-    for tag, c, au in (("main_auto", main_b0, True), ("main_inherit", main_f, False)):
+    # 両方とも明示すべきキーを足す前の設定で比べる (main_f は足す前の前の段の設定に B0 を当てたもの)
+    for tag, c, au in (("main_auto", strip_explicit(main_b0, rec_n["main"]), True), ("main_inherit", main_f, False)):
         shutil.copy(src_run(f"src_{tag}", c, auto=au) / "limiter_ref.json", runM / "limiter_ref.json")
         sm.add(tag, c, bc_new if P3.is_file() else "")
     check("(f) 区間の鍵: 自動の段とその値を継承した段は 1 区間 (forge の記録の値が同じ)", len(SM.segments({"stages": sm.stages})) == 1)
@@ -373,7 +393,7 @@ else:
     ml_l = RA._main_line_spec(problem("ml_L", P3, ml_L))
     check("(f) 明示の {ro, p, a, L} は limiterRefLength も固定", ml_l["limiter_ref"] == {"limiterRoRef": 0.58, "limiterPRef": 186000.0,
                                                                                  "limiterARef": 341.0, "limiterRefLength": 9.0}
-          and get(RA._apply_main_line(base_n, ml_l), ("space", "limiterRefLength")) == 9.0)
+          and get(RA._apply_main_line(strip_explicit(base_n, rec_n["prestage"]), ml_l), ("space", "limiterRefLength")) == 9.0)
 
     def ml_bad(raw):
         new_eval(raw)

@@ -66,12 +66,25 @@ run_0004_roe_baseline
 3. 必要なら新しい `run_*` 内の `solverConfig.yaml` などを調整する。
 4. `mesh/` に入り、Gmsh で `.geo` から `.msh` を生成する。
 5. 生成した `.msh` を新しい `run_*` ディレクトリへコピーする。
-6. その新しい `run_*` ディレクトリで `convertGmshToForge` を実行し、HDF5 に変換する。
+6. その新しい `run_*` ディレクトリで `convertGmshToForge` を実行し、HDF5 に変換する。**変換は `mesh_provenance.py convert` 経由で行い**、
+   変換時の実効条件の記録 `<h5>.provenance.json` を残す (下の「変換時の条件の記録」)。
 7. 実行する `forge` バイナリが最新ソースで再ビルドされているか確認する (下記「実行前のバイナリ鮮度チェック」)。
 8. 同じ新しい `run_*` ディレクトリで `forge` を実行する。
 9. 実行後、その新しい `run_*` ディレクトリで `residual_history.csv` から `residual_history.png` を生成する。
 
 重要なのは、`solverConfig.yaml` がある新しい `run_*` ディレクトリを起点に変換と実行を行うことです。
+
+> **変換時の条件の記録 (2026-10-15、plan `tooling-generator-defaults-and-launch-gate` §4.3 の 2・§5.1 #7)**: `mesh.discretization`・
+> `nodeInletCornerWall`・`axisCentroidShift`・`renumber`・`isAxisymmetric`・`wallDistExtraPhysIDs` と境界の種類 (壁・入口の分類) は
+> **変換の結果を決め、格子に焼き込まれる** (`nodeInletCornerWall` などは forge の起動時の値が効かないので、run の config と食い違っても気づかずに回る)。`python3 solver_density_cuda/tools/mesh_provenance.py convert case.msh case.h5`
+> (変換器は `--converter`・`FORGE_CONVERTER`・`FORGE_BIN` のビルド・`build/` の順に探す) は変換器を回し、変換時の config の要求値・
+> 全境界の種類と physID・変換器と `.msh` の sha256・成果物の不変部分 (座標・接続・幾何・境界の所属・`wall_dist`) のハッシュを
+> `case.h5.provenance.json` に書く。`mesh_provenance.py check <run_dir>` は run の `solverConfig.yaml`・`bcondConfig.yaml` とこの記録を
+> 照合する (記録なし・別メッシュの記録・変換時と違う要求値 (省略は省略とだけ一致)・壁の分類の変更は FAIL)。restart
+> (`restart_field.py`・初期場の貼り付け) は `/VALUE` だけを変えるので記録は有効なまま。run を複製するときは h5 と一緒に記録も写す。
+> 格子を **symlink** で置いた run は、記録をメッシュの**実体** (realpath) の隣で探す (記録は写さなくてよい。実体を差し替えれば
+> 不変部分のハッシュの照合で FAIL)。品質の結果 `<h5>.quality.json` も実体の隣を読み、測り直した結果は run の中にだけ書く。
+> 投入の関門 (`launch_gate.py`、下の「投入の関門」) が `run_case.sh` の起動の前にこの照合を呼ぶ。
 
 > **変換器の幾何の精度 (2026-10-10、plan `architecture-float-state-double-geometry` §4.6)**: `convertGmshToForge` は
 > どのビルド (float / FP64) でも、座標・面ベクトル・面積・面重心・体積・CV 重心・壁距離を double で計算し、
@@ -120,8 +133,8 @@ gmsh -3 input.geo -o case.msh -format msh4
 # 生成メッシュを run ディレクトリへコピー
 cp case.msh ../run_0004_slau_implicit_check/
 
-# <case>/run_0004_slau_implicit_check で実行
-convertGmshToForge case.msh case.h5
+# <case>/run_0004_slau_implicit_check で実行 (変換して case.h5.provenance.json も書く)
+python3 /home/sano/work/forge/solver_density_cuda/tools/mesh_provenance.py convert case.msh case.h5
 # forge 実行前に build/forge が stale でないか確認 (「実行前のバイナリ鮮度チェック」参照)
 forge
 python3 /home/sano/work/forge/solver_density_cuda/tools/plot_implicit_residuals.py \
@@ -349,13 +362,103 @@ python3 solver_density_cuda/tools/fluent_h5_to_forge.py convert mesh.cas.h5 mesh
 
 ## forge は run_case.sh 経由で実行する (収束チェック強制)
 
-forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run_case.sh <run_dir>`** 経由で実行する。ラッパーが実行後に必ず `check_convergence.py` を走らせ、VERDICT を `<run_dir>/CONVERGENCE_VERDICT.txt` に残し残差プロットも生成する。長時間 run は `nohup solver_density_cuda/tools/run_case.sh <run_dir> &`。
+forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run_case.sh <run_dir>`** 経由で実行する。ラッパーが実行後に必ず `check_convergence.py` を走らせ、VERDICT を `<run_dir>/CONVERGENCE_VERDICT.txt` に残し残差プロットも生成する。その後に `judge_run.py` が全項目の判定を `<run_dir>/RUN_VERDICT.txt` に書く (下の「計算の後の判定」)。長時間 run は `nohup solver_density_cuda/tools/run_case.sh <run_dir> &`。
 
 **判定の道具の選択 (2026-10-16、[plans/accepted/tooling-settle-convergence-and-monitor.md](../plans/accepted/tooling-settle-convergence-and-monitor.md) §4.9 の 2)**: run に判定の基準 `settle_criteria.yaml` (設計チェーンの NS は準備で書く、手で組む run はひな形 `solver_density_cuda/tools/settle_criteria.template.yaml`) があれば、ラッパーは本段の記録のある run と手で組んだ run を **`check_settled.py <run_dir>`** (基準に書いた量の AND、結果は `SETTLE_VERDICT.json` (最新の判定; 停止規則 v2 が止めた時の判定は変えない別のファイル `stop_rule_v2/SETTLE_VERDICT_stop_<step>.json` にあり、受け渡しの関門と成果物はそちらと照合する。専用のファイルの無い古い run は、`check_settled.py` が上書きの前に停止の時の原本をそこへ移す (原本が失われていれば照合不能)。run を写すときは `stop_rule_v2/` も写す)。雛形の既定 `wt_nozzle_v3` は流量の収支と目的の量の準定常で、残差は非有限の見張りだけ (2026-10-16 ユーザ決定、同 plan §4.4・§5.1 #8)) で、基準の無い run と前の段と確かめられた run (本段の開始の記録 `MAIN_STAGE_STARTED` が無く、`stage_manifest.json` に本段の段が無い) を今どおり `check_convergence.py` で判定し、`CONVERGENCE_VERDICT.txt` の 1 行目 (`TOOL: ...`) に使った道具と理由を書く。選択の規則は `python3 solver_density_cuda/tools/check_settled.py --select <run_dir>` で確かめられる。`check_settled.py` は**既定で** (2026-10-16、同 plan §5.1 #7c; `--bind` は互換のために残す同じ意味) 本段の記録 (`main_config` の sha256・fnv)・最後の forge の起動 (`forge_launches.jsonl`)・基準の sha256 を照合し、食い違い・起動の記録の欠け・最後の起動が本段の記録と違う・記録が無く前の段とも確かめられない、のどれでも判定せず `INDETERMINATE` (終了コード 3) を返す (旧の道具へ切り替えない)。照合を外す `--no-bind` (調査用) は外したことを VERDICT の行と結果に書く。**基準のある run が判定不能・照合の不一致になっても `check_convergence.py` へ落として合格にしない**。新方式で監視した量はその VERDICT、監視していない派生量は従来どおり `check_quasisteady.py` で確かめる。
 
 **収束場からの restart (交差 restart・cfl/緩和の入れ替え) の判定は `check_convergence.py --from-floor <参照 run>`** を使う。既定判定は「ピークからの低下桁数 ≥3」なので、収束場から再開した run は init=fin=床で必ず `NOT CONVERGED (stalled/plateau)` になる (2026-09-17 case/16 run_0478–0480 で実害)。`--from-floor REF_RUN` (別名 `--reference-floor`) は参照 run の末尾床 (`--tail` 20 % の平均) を列ごとに取り、対象 run の**全期間ピークと末尾平均がともに床の `--floor-factor` 倍 (既定 1.5) 以内**なら `PASS (within 1.5x of reference floor …)`、超えれば `NOT CONVERGED (residual left the reference floor)`、NaN は `DIVERGED` を返し、列ごとの床比 (末尾/床, ピーク/床) を印字する。参照 run 自体は通常判定で PASS していること (床が収束床であること) が前提。`run_case.sh` は既定判定しか走らせないので、restart run では手動で回して VERDICT を README に貼る。
 
 `.claude/settings.json` のフックでこれを強制する: **PreToolUse** が直接 `build/forge` 実行を deny、**Stop** が「最近 forge を回したのに収束チェックしていない run」があるとターン終了を block する (実行方法に依らずファイル状態で検査)。これにより「衝撃波位置の安定や `rms_ro` 単独で収束と判断する」近道を構造的に防ぐ。**収束/一致を主張する応答では VERDICT 行を引用する**。Stop フックは `CONVERGENCE_VERDICT.txt` の有無と時刻だけを見る (どちらの道具の形式でも同じ) — **フックの通過は判定の記録があることの確認で、収束の合格ではない**。
+
+### 投入の関門 (`launch_gate.py`、2026-10-15)
+
+`run_case.sh` は forge を起動する直前に `solver_density_cuda/tools/launch_gate.py <run_dir>` を呼び、**FAIL なら forge を起動しない**
+(plan `tooling-generator-defaults-and-launch-gate` §4.3・§5.1 #10)。結果は `<run_dir>/LAUNCH_GATE.txt` (VERDICT・モード・宣言・
+プロファイルとその内容のハッシュ・段・逸脱・FAIL/WARN・メッシュの不変部分のハッシュ・品質・バイナリの sha256) に残り、
+`RUN_PROVENANCE.txt` に 1 行写る。起動の前に確かめるだけなら `launch_gate.py <run_dir> --dry-run`。
+
+- **何を見るか**: (1) 設定 — 宣言 (`RECIPE.json`) があれば、宣言したプロファイル・段・逸脱と照合する (`recipe_settings.py` と同じ規則:
+  `fixed`・明示すべきキーの値と省略、禁止キー、プロファイルに無いキー、未知・誤った節のキー)。宣言の有無によらず、
+  `check_solver_config.py` の FAIL (起動時に拒否されるキー・`bndFirstOrder`・dual-time の緩和など) と YAML の重複キー・merge key は
+  FAIL。宣言の無い run の未知・誤った節のキーは、宣言の欠落と同じく WARN の期間は WARN。宣言したプロファイルの**適用条件**
+  (次元 `2d_planar`・`2d_axisym`・`3d`、格子の種類 `structured`・`unstructured`、格子の node/cell) は変換の成果物 (来歴の記録、無ければ
+  h5 の primal のセルの型) から取って照合し、外れても取れなくても FAIL (plan §5.1 #28)。(2) メッシュの実効条件 — `mesh_provenance.py check` (上の「変換時の条件の記録」)。
+  (3) メッシュの品質 — `check_mesh_quality.py <h5> --bcond bcondConfig.yaml --ar-max 5000` (AR 1000 を超えるセルは壁法線の構造層で
+  条件を確かめたものだけ 5000 まで。`bcondConfig.yaml` の無い run は止まる)。(4) バイナリの sha256 (このリポジトリの `build/forge` で
+  ないバイナリは WARN で記録するだけで止めない)。読めない・検査できない入力は FAIL。
+- **宣言**: 推奨のプロファイルに従う run は `python3 solver_density_cuda/tools/recipe_settings.py declare <run_dir> --profile P --stage S`
+  (一覧は `recipe_settings.py list`、値は [`recommended-settings.md`](recommended-settings.md) 付録 A)。照合が通ったときだけ
+  `RECIPE.json` (config の sha256 つき) を書く。**宣言の後に config を書き換えたら宣言し直す** (sha256 が違うと関門は FAIL)。
+- **逸脱**: プロファイルと違う値は `--deviate key=value --reason "<1 行>"` (根拠 `--basis` は任意)。キーを書かないこと自体を試すときは
+  `--deviate key=~ --reason "..."` (実効値は「未確定」と記録)。禁止キー (`bndFirstOrder` など) は逸脱にできない。
+- **実験の宣言**: 推奨に従わない試し計算は `recipe_settings.py declare <run_dir> --experiment --reason "<1 行>"` (外れたキーは自動で
+  記録する。禁止キー・check_solver_config の FAIL・未知のキー・重複キーは実験でも FAIL)。
+- **WARN の期間**: 強制の開始 (plan §4.7: 起動の経路の棚卸しの完了と、各経路の宣言の方法・段間の負例の試験が揃うこと) までは、
+  **宣言の無い run・来歴の記録の無いメッシュは WARN で起動する** (設計チェーンの生成器は段ごとに宣言を書く: plan §5.1 #11、
+  2026-10-15。書き写したプロファイルの無い機種・段と、出所の分からない違いのある段は宣言を書かず `RECIPE_<tag>.FAILED.json` に理由を残す)。
+  禁止キー・メッシュの FAIL・宣言があるのに照合が FAIL・検査できない入力は今も止まる。
+- **`FORGE_LAUNCH_GATE`**: `warn` は `fixed`・明示すべきキーの不一致・省略だけを WARN に落とす (禁止キー・宣言の欠落 (強制時)・
+  メッシュの FAIL・検査できない入力は落とさない)。`enforce` はその場で強制のモードにする (先行して確かめるため)。ほかの値は FAIL。
+- **旧キー**: `time.last.time`・旧 `physProp.isAxisymmetric` などの WARN・FAIL は `python3 solver_density_cuda/tools/migrate_solver_config.py
+  [--dry-run] <solverConfig.yaml>` で直せる (関門の文言が案内する。直したら宣言し直す)。
+- **起動の後** (plan §5.1 #29): forge の終了の後に `launch_gate.py <run_dir> --post-launch` が `forge_run.log` の起動のエコー
+  (`'scalarGradient' effective`・`'slauWallNormalChi' effective`・`detectNaNInterval`・二相拡散・`qAccumulatorFP64` の行) と config の
+  要求値を比べ、`LAUNCH_ECHO.txt` と `RUN_PROVENANCE.txt` の 1 行に残す。不一致 (実行したバイナリが要求値を採用していない)・確認不能
+  (出るはずのエコーが無い) は WARN で、run は止めない。forge がエコーしない量は「確認不能」の一覧に載る。別ビルド (`FORGE_BIN`) の
+  A/B では `LAUNCH_ECHO.txt` を見てから比べる。
+
+### 計算の後の判定 (`judge_run.py`、2026-10-15)
+
+`run_case.sh` は forge の後 (`CONVERGENCE_VERDICT.txt`・残差のプロットの後) に `solver_density_cuda/tools/judge_run.py . --from-run-case
+--solver-rc <forge の終了コード>` を呼び、**判定を 1 本にまとめて** `<run_dir>/RUN_VERDICT.txt` (先頭の 1 行が総合) と
+`RUN_VERDICT.json` (各判定の原文・道具と入力の識別・実行の識別子) に書く (plan `tooling-convergence-and-wall-resolution-gates` §4.6・
+§5.1 #12)。手で回すときも引数は run だけ: `python3 solver_density_cuda/tools/judge_run.py <run_dir>`。項目の詳細・真理値表は
+`judge_run.py` の docstring が正本。
+
+- **項目**: `solver` (終了コード)・`nonfinite` (残差の全履歴 + 最終の場の非有限; 途中の全場は `--full-audit`)・`physical`
+  (`ro`・`P`・`T` > 0 と静圧 ≤ 全圧: `total_quantities.py` で `VALUE/h0` から全圧を作り、`P > P0·(1 + 1e-5)` の点があれば FAIL;
+  `h0` が無い・物性が読めなければ判定不能)・`convergence` (`check_convergence.py`; manifest があれば `--segment`、無ければ単段と確かめられたときだけ
+  履歴全体)・`stop_rule` (`STOP_RULE_STATE.json` の状態をそのまま)・`quasisteady` (**仕様の量だけ**)・`wall_resolution` (粘性
+  (`viscMethod 0` の定数粘性も) と no-slip 壁があれば、全 no-slip 壁の最後の step の出力で `check_wall_resolution.py --weight area`)。
+  各項目は PASS / FAIL / INDETERMINATE (判定不能) / NOT_APPLICABLE。
+- **総合**: どれかが FAIL → FAIL (判定不能が併存しても既知の FAIL を隠さない)、FAIL が無く判定不能がある → INDETERMINATE、
+  残りに PASS → PASS。**判定不能は合格ではない**。終了コードは PASS 0 / FAIL 1 / INDETERMINATE (と全部適用外) 2 / 判定器の例外 3 /
+  段の記録だけ 4。`run_case.sh` の終了コードは今までどおり solver の終了コード (`FORGE_STRICT_CONVERGENCE=1` の意味も変えない)。
+  `CONVERGENCE_VERDICT.txt` は収束の副判定 (履歴全体) として残る。関門で forge を起動しなかったときは判定しない。
+- **判定の仕様**: 準定常で見る量・収束の扱い (継続の run の `from_floor`・非定常の `not_applicable`)・壁解像の閾値は、run の
+  `JUDGE_SPEC.json` (設計チェーンの生成器が実行の前に機種の既定を書く: `design/forge_design/evaluate/judge.py` の `spec_*`) か、手書きの run なら `judge.yaml` (run か case に置く)
+  に書く。**どちらも無ければ準定常は「対象未設定」= INDETERMINATE** (黙って省かない)。報告する派生量が無い run は
+  `quasisteady: {not_applicable: <理由>}` と書く。例 (平板の Cf を報告する run の `judge.yaml`):
+
+  ```yaml
+  convergence: {mode: auto}            # auto | segment | whole | from_floor (reference: <参照 run>) | not_applicable (reason: ...)
+  quasisteady:
+    quantities:
+      - name: cf_momentum
+        definition: 運動量積分の Cf / Cf_KS (x = 0.6 m)
+        unit: "-"
+        region: 平板 x ∈ [0.1, 0.95] m
+        extractor: {kind: snapshot, quantity: cf_momentum, cf_x: 0.6}   # か {kind: csv_column, file: ..., column: ...}
+        window: {tail_frac: 0.4, min_points: 6}                         # 点数・末尾窓の step 幅 (min_tail_span) の不足は判定不能
+  wall_resolution: {applies: true, reason: 低 Re SST の平板}          # 実効の粘性・BC と食い違えば判定不能
+  ```
+
+  0 を横切る量 (質量の収支など) は `criterion: absolute` と `thresholds: {abs_mean: …, abs_amp: …}` (末尾窓の |平均| と振幅) で書く。
+  未知のキー・型の誤り・重複キーは仕様の誤りで、仕様に依る項目はすべて判定不能になる (綴り違いが黙って既定に落ちない)。
+  run の開始より後に書いた `judge.yaml` は `written_after_start` が記録される。
+- **段階起動の run**: run に `stage_manifest.json` があるか、親が `FORGE_JUDGE_DEFER=1` を渡したとき、`run_case.sh` の呼び出しは
+  判定を確定せず段の結果 (solver・残差の履歴と最新の場の非有限・物理性・副判定) を `RUN_VERDICT.json` の `stages` に足す
+  (`state: deferred`)。総合は親 (runner) が段の記録・停止の記録を確定した後に `judge_run.py <run_dir>` で一度だけ確定する。
+  設計チェーンの runner は全部の段で `FORGE_JUDGE_DEFER=1` を渡し、`judge.Staged` / `judge.finalize` で確定する (段の途中の例外でも
+  起動していれば確定)。**手で段階起動した run は最後に `judge_run.py <run_dir>` を回す** (回さないと Stop フックが止める)。
+- **古い判定**: `judge_run.py <run_dir> --check-fresh` が、判定の後に入力 (config・残差の履歴・manifest・停止の記録・仕様・
+  系列の CSV・出力の一覧) が変わったかを返す (0 対応 / 1 変わった / 2 判定が無い)。
+- **壁の出力**: 壁解像が適用になる run (粘性 + no-slip 壁、または仕様の `wall_resolution.applies`) で no-slip 壁の `outputHDFflg` が
+  1 でなければ、投入の関門 (`launch_gate.py`) が forge を起動しない (終わってからでは壁解像を判定できず計算し直しになる)。
+- **Stop フック**: `hook_convergence_gate.py` は、このセッションが回した case の最近の run について、判定が無い・古い
+  (`--check-fresh` が STALE)・段階起動で確定していない (親が生きていない) ものがあればターンの終了を止める。**FAIL・判定不能を
+  正しく報告して終えるのは止めない**。
+- **報告**: 「収束した」「定常」と書く応答には `RUN_VERDICT.txt` の総合の行と各項目の行を貼る (AGENTS.md「収束確認」)。
 
 ## メッシュ変更後の restart (cross-mesh interpolation)
 
@@ -376,6 +479,14 @@ python3 solver_density_cuda/tools/interp_field.py <past_run>/res_NNNN.h5 <new_ru
   **`interp_field.py` は同一メッシュに使わない** — cross-mesh 用で原始量から保存量を組み直すため、
   `roUx = ρ·Ux` の丸めで元の保存量に戻らない (2026-09-23, case/56 で `roUy` が最大 1.6 % ずれた)。
   `case/*/restart_field.py` の古い実装も原始量から組み直すので使わないこと。
+  - **同一メッシュの検査** (2026-10-15): 書き込みの前に、SRC と DST の格子が座標 (格納の型のまま)・接続・CV の順・
+    境界の所属・幾何で同一であることを確かめ、確かめられなければ何も書かずに停止する。res は格子を持たないので、
+    **res の隣の `solverConfig.yaml` の `mesh.meshFileName`** をその場の格子とし、res の座標 (res の型で)・接続と照合する。
+    res だけを別の場所へ写したときは **`--src-mesh <その run の格子>`** を付ける (無ければ停止)。
+    同じ `.msh` を変換し直した格子 (例: float32 → 倍精度の変換器) は座標の型・値が違うので既定では別の格子として拒否される。
+    座標の精度だけを上げた変換し直しなら **`--allow-coord-upcast`** で通せる (接続・境界の所属・その他が同一で、新しい座標を古い型に
+    丸めると完全一致するときだけ。VERDICT と投入の関門の記録に「座標の精度の引き上げ」を残す。引き継いだ run は restart の跳ねを見る)。
+    それ以外は元の変換済み格子を使い続けるか、格子が違うものとして `interp_field.py` を使う。
 - 節点の並びが同じで壁だけ µm 動いたメッシュへの初期値は、skill `forge-aws-run` §3 の検査付き番号写像 (`case/45.isobutane_m6_d155/ic_index_map.py`) を使う。
 
 ## メッシュ品質チェック (計算前・必須)
@@ -394,10 +505,9 @@ python3 solver_density_cuda/tools/check_mesh_quality.py <run_dir>/mesh.h5
 - 近壁を細分化 (wall-resolved, 第一セル数μm) すると AR が増えやすい。**接線方向セルを細かくしすぎず、AR が 1000 を超えないよう第一セル厚と接線長のバランスを取る**。
 - **AR 緩和 (2026-09-12 ユーザ決定)**: 壁法線に沿った構造格子の境界層層 (スキュー無し) に限り **AR ≤ 5000** まで可。`check_mesh_quality.py mesh.h5 --ar-max 5000` で判定し (設計チェーンは問題 YAML `mesh.ar_max: 5000`)、README/台帳に「AR 緩和 (≤5000)」と明記する。冷却壁 (T_w 300 K) は同じ第一セルで y⁺ が ×5〜6 に上がり、AR ≤ 1000 のままではスロート y⁺≈1 が取れない (case/44: ni 2 万級が要る) ことが動機。裏付けは plan `tooling-nozzle-isothermal-wall-chain` §8-3 の A/B (AR 846 vs 4140)。
 - 「メッシュできた」「収束した」と報告する応答には、本ツールの品質 VERDICT も根拠として併記する。
-- なお `check_mesh_quality.py` は **primal (cell) 変換の h5 専用**で、median-dual (node) 変換した
-  h5 を渡すと `CONNE が NumberOfElements より短い` で落ちる (ツール側の制約)。node メッシュの
-  品質ゲートは、**同じ `.msh` を `discretization: "cell"` で変換した h5** に対して実行する
-  (primal 形状は同一なので AR/skew の判定として妥当)。
+- median-dual (node) 変換の h5 もそのまま渡す: `/VIZMESH/CONNE` (primal セル) があればそれを測る (冒頭の注記、
+  `check_mesh_quality.py` の出力の `source: /VIZMESH/CONNE ...` の行で確かめられる)。**cell で変換し直す必要はない**
+  (2026-09-08 までの「primal (cell) 変換の h5 専用」の制約は解消済み。投入の関門 `launch_gate.py` も node の h5 をそのまま測る)。
 
 ## node モードのメッシュは平面 2D で作る (2D 問題・必須)
 

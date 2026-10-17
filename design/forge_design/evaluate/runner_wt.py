@@ -396,35 +396,97 @@ def prepare(problem_path, run_dir, euler: bool = True, nsteps=None,
     return info
 
 
+def _staged_launch(run_dir: Path, sm, bc_text: str, cfg: str, tag: str, launch=None, recipe: dict | None = None) -> int:
+    """1 段を起動する: config を書き、前段の残差履歴を消してから forge を回し (`launch`、既定はこのモジュールの run_forge =
+    `FORGE_JUDGE_DEFER=1`; 総合の判定は呼び出し側が全段の後に `judge.Staged` で確定する)、
+    段の履歴を `residual_history_<tag>.csv` に写して `stage_manifest.json` に段を足す (失敗した段も診断用に残す;
+    runner_axismach.run_staged と同じ記録の仕方)。walldriven の段階起動も使う (plan tooling-generator-defaults-and-launch-gate
+    §4.5・§5.1 #9)。
+    recipe {family, problem, generator} (plan §5.1 #11): config を書く前に明示すべきキーを旧い実効値で足し (機種のプロファイルに
+    合うときだけ; `config_builder.finish_config`)、書いた後に段の宣言 RECIPE.json を書く (`config_builder.declare_stage`)。
+    family が無ければ従来どおり config をそのまま書く。manifest には書いた config を記録する。"""
+    import shutil
+    from . import config_builder as CB
+    rcp = recipe or {}
+    cfg = CB.launch_stage(run_dir, cfg, bc_text, tag, rcp.get("family"), problem=rcp.get("problem"),
+                          generator=rcp.get("generator"))
+    (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
+    rc = (launch or run_forge)(run_dir)
+    hist = run_dir / "residual_history.csv"
+    if hist.exists():
+        shutil.copy(hist, run_dir / f"residual_history_{tag}.csv")
+    sm.add(tag, cfg, bc_text, history=f"residual_history_{tag}.csv")
+    sm.write()
+    return rc
+
+
+def _staged_handoff(run_dir: Path, res_h5: Path, cfg: str, tag: str, mesh_h5: str = "nozzle.h5", cfg_next: str | None = None,
+                    env=None) -> None:
+    """同一メッシュの段間の引き継ぎ: 段終了ゲート (必要保存量が揃い、有限で ρ>0; runner_axismach.stage_gate) を通った最終場だけを
+    `restart_field.py` (保存量の index コピー・ビット一致の検査・`wall_dist` は宛先のまま・化学種の属性の継承) で初期場に写す。
+    ゲートに落ちたら RuntimeError で次段を起動しない。2026-10-14 まで `interp_field.py` (cross-mesh 用、原始量から保存量を組み直す)
+    を使っていた (AGENTS.md「メッシュ変更後の restart」の規則違反; plan tooling-generator-defaults-and-launch-gate §4.5)。
+    cfg は res を作った段の config。cfg_next (次の段の config; 2026-10-15、plan §5.1 #19) があれば、次の段の必要保存量が宛先にあることと、
+    次の段で足す量 (層流暖機 → SST の roK・roOmega) の初期値を前の段のゲートと分けて検査する (`runner_axismach.next_stage_init_problems`;
+    None は前の段と同じ量)。どちらかに落ちたら書き込まずに RuntimeError。env は `restart_field.py` の子プロセスの環境。"""
+    from .runner_axismach import _restart_same_mesh, next_stage_init_problems, stage_gate
+    probs = stage_gate(res_h5, cfg)
+    if probs:
+        raise RuntimeError(f"段 {tag} の最終場 {Path(res_h5).name} が段終了ゲートで不合格 — 次段へ進まない:\n    "
+                           + "\n    ".join(probs))
+    probs, src_of = next_stage_init_problems(res_h5, run_dir / mesh_h5, cfg, cfg_next)
+    if probs:
+        raise RuntimeError(f"段 {tag} の次の段の初期場 {mesh_h5} が段間の引き継ぎの検査で不合格 — 次段へ進まない:\n    "
+                           + "\n    ".join(probs))
+    if env is None:
+        _restart_same_mesh(res_h5, run_dir / mesh_h5)       # 包み・差し替え (res, mesh) の 2 引数の形のまま呼ぶ
+    else:
+        _restart_same_mesh(res_h5, run_dir / mesh_h5, env=env)
+    if src_of:
+        with (run_dir / "restart_field.log").open("a") as f:
+            f.write(f"[handoff] 段 {tag} → 次の段で足す量の初期値: "
+                    + ", ".join(f"{k} ({'前の段の res の値を写した' if s == 'SRC' else '宛先の初期場のまま'})" for k, s in src_of.items())
+                    + "\n")
+
+
 def run_staged(problem_path, run_dir, nsteps=None) -> None:
     """soft 段 (1次+cfl0.5, 3000 step) → 本段 — bell と同じ 2 段起動を config
     書換えで同一 run dir 内実行 (soft 完走後に本 config へ戻し restart なしで
-    冷間から回すのでなく、soft の最終場を IC に採用する)。"""
+    冷間から回すのでなく、soft の最終場を IC に採用する)。
+    段間は段終了ゲート + `restart_field.py` (`_staged_handoff`)。段ごとの実効設定を `stage_manifest.json` に、
+    段の残差履歴を `residual_history_<tag>.csv` (tag = soft / main) に残す (2026-10-14、plan
+    tooling-generator-defaults-and-launch-gate §5.1 #9)。段の config の文字列は従来と同じ。
+    2026-10-15 (plan §5.1 #11): soft 段の値は YAML 上の位置で書き換え (`config_builder.set_scalars` = `yaml_strict.replace_scalars`;
+    旧: 文字列置換・正規表現。prepare が書く本段からの文字列は同じ)、各段は明示すべきキーを足して宣言を書く (機種 wt_modef =
+    モード F の Euler cell。NS v1 の node SST は書き写したプロファイルが無いので config は変えず宣言もしない)。"""
+    from . import config_builder as CB
+    from .runner_axismach import _stage_manifest_cls
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
-    cfg_soft = cfg_main.replace("cfl: 4.0, cfl_pseudo: 4.0", "cfl: 0.5, cfl_pseudo: 0.5")
-    cfg_soft = cfg_soft.replace("convMethod: 1", "convMethod: 0")
-    # node y+~1 SST の確定レシピ ([[node-yp1-dual-geometry-float32-fix]]):
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
+    sm = _stage_manifest_cls()(run_dir)
+    recipe = {"family": "wt_modef", "problem": problem_path, "generator": "runner_wt.run_staged"}
+    # soft 段: cfl 0.5・1 次・3000 step。node y+~1 SST の確定レシピ ([[node-yp1-dual-geometry-float32-fix]]):
     # soft 段は nStepInner 10 (壁 ω ~1e10 の剛性対策。cfl4 直投入は step ~69 で
     # roOmega NaN — run_0028 初回で再確認)
-    cfg_soft = cfg_soft.replace("nStepInner: 5", "nStepInner: 10")
-    import re
-    cfg_soft = re.sub(r"nStepOuter: \d+", "nStepOuter: 3000", cfg_soft)
-    cfg_soft = re.sub(r"outStepInterval: \d+", "outStepInterval: 3000", cfg_soft)
-    (run_dir / "solverConfig.yaml").write_text(cfg_soft)
-    run_forge(run_dir)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"),
-                 key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-    if not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
-        raise RuntimeError("soft 段が失敗")
-    # soft 最終場を nozzle.h5 の IC に移植 (同一メッシュ → interp は index 一致)
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                    str(res[-1]), str(run_dir / "nozzle.h5")],
-                   env=_ENV, check=True, capture_output=True, text=True)
-    for f in run_dir.glob("res_*"):
-        f.unlink()
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    run_forge(run_dir)
+    cfg_soft = CB.set_scalars(cfg_main, {"time.deltaT.cfl": "0.5", "time.deltaT.cfl_pseudo": "0.5", "space.convMethod": "0",
+                                         "time.nStepInner": "10", "time.last.nStepOuter": "3000",
+                                         "time.outStepInterval": "3000"})
+    # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は最初の起動の前に、総合は本段の後に 1 度だけ
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_snapshot("runner_wt.run_staged"))
+    with J.Staged(run_dir, "runner_wt.run_staged"):
+        _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", recipe=recipe)
+        res = sorted(run_dir.glob("res_[0-9]*.h5"),
+                     key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+        if not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
+            raise RuntimeError("soft 段が失敗")
+        # soft 最終場を nozzle.h5 の IC に移植 (同一メッシュ: 段終了ゲート + restart_field.py の index コピー)
+        _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+        _staged_launch(run_dir, sm, bc_text, cfg_main, "main", recipe=recipe)
 
 
 def collect(problem_path, run_dir) -> dict:

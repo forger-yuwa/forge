@@ -104,34 +104,45 @@ def prepare(problem_path, run_dir, nsteps=None) -> dict:
     return info
 
 
-def run_staged(run_dir) -> int:
+def run_staged(run_dir, problem_path=None) -> int:
     """soft 段 (1 次 + cfl0.5, 3000 step) → 本段 (runner_wt.run_staged と同方式)。
 
     cold 単段 (conv1+cfl4 直投入) は run_0040/0041 で step ~9 発散 (D 発膨張波の
     軸反射が壁へ戻る位置で準 1D IC との不整合過渡が最大になる)。**段階起動だけで
     十分** (run_0043: 円錐のみ・戻しテーパなしでも段階起動なら NaN なし完走)。
     divergence-and-startup の標準手順 (易しい条件で立ち上げ→引き継ぎ) に従う。
+
+    段間は段終了ゲート + `restart_field.py` (`runner_wt._staged_handoff`; 2026-10-14 まで `interp_field.py`)。段ごとの実効設定を
+    `stage_manifest.json` に、段の残差履歴を `residual_history_<tag>.csv` (tag = soft / main) に残す (plan
+    tooling-generator-defaults-and-launch-gate §5.1 #9)。段の config の文字列は従来と同じ。
+    2026-10-15 (plan §5.1 #11): soft 段の値は YAML 上の位置で書き換え (`config_builder.set_scalars`; 旧: 文字列置換・正規表現、
+    本段からの文字列は同じ)、各段は明示すべきキーを足して宣言を書く (機種 walldriven、`problem_path` は逸脱の出所の記録用)。
     """
-    import re
+    from . import config_builder as CB
+    from .runner_axismach import _stage_manifest_cls
+    from .runner_wt import _staged_handoff, _staged_launch
     run_dir = Path(run_dir)
     cfg_main = (run_dir / "solverConfig.yaml").read_text()
-    cfg_soft = cfg_main.replace("cfl: 4.0, cfl_pseudo: 4.0", "cfl: 0.5, cfl_pseudo: 0.5")
-    cfg_soft = cfg_soft.replace("convMethod: 1", "convMethod: 0")
-    cfg_soft = re.sub(r"nStepOuter: \d+", "nStepOuter: 3000", cfg_soft)
-    cfg_soft = re.sub(r"outStepInterval: \d+", "outStepInterval: 3000", cfg_soft)
-    (run_dir / "solverConfig.yaml").write_text(cfg_soft)
-    rc = run_forge(run_dir)
-    res = sorted(run_dir.glob("res_[0-9]*.h5"),
-                 key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
-    if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
-        raise RuntimeError("soft 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
-    subprocess.run([sys.executable, str(FORGE_TOOLS / "interp_field.py"),
-                    str(res[-1]), str(run_dir / "nozzle.h5")],
-                   env=_ENV, check=True, capture_output=True, text=True)
-    for f in run_dir.glob("res_*"):
-        f.unlink()
-    (run_dir / "solverConfig.yaml").write_text(cfg_main)
-    return run_forge(run_dir)
+    bc_path = run_dir / "bcondConfig.yaml"
+    bc_text = bc_path.read_text() if bc_path.exists() else ""
+    sm = _stage_manifest_cls()(run_dir)
+    recipe = {"family": "walldriven", "problem": problem_path, "generator": "runner_walldriven.run_staged"}
+    cfg_soft = CB.set_scalars(cfg_main, {"time.deltaT.cfl": "0.5", "time.deltaT.cfl_pseudo": "0.5", "space.convMethod": "0",
+                                         "time.last.nStepOuter": "3000", "time.outStepInterval": "3000"})
+    # 計算の後の判定 (plan tooling-convergence-and-wall-resolution-gates §4.6・§5.1 #12): 仕様は最初の起動の前に、総合は本段の後に 1 度だけ
+    from . import judge as J
+    J.write_spec(run_dir, J.spec_snapshot("runner_walldriven.run_staged"))
+    with J.Staged(run_dir, "runner_walldriven.run_staged"):
+        rc = _staged_launch(run_dir, sm, bc_text, cfg_soft, "soft", launch=run_forge, recipe=recipe)
+        res = sorted(run_dir.glob("res_[0-9]*.h5"),
+                     key=lambda f: int("".join(c for c in f.stem if c.isdigit())))
+        if rc != 0 or not res or int("".join(c for c in res[-1].stem if c.isdigit())) < 3000:
+            raise RuntimeError("soft 段が失敗 (発散切り分けは res_nan_*.h5 を見る)")
+        _staged_handoff(run_dir, res[-1], cfg_soft, "soft")
+        for f in run_dir.glob("res_*"):
+            f.unlink()
+        rc = _staged_launch(run_dir, sm, bc_text, cfg_main, "main", launch=run_forge, recipe=recipe)
+    return rc
 
 
 def main(argv=None) -> int:
@@ -146,7 +157,7 @@ def main(argv=None) -> int:
     print(json.dumps(info, indent=1))
     if a.prepare_only:
         return 0
-    rc = run_staged(a.run_dir)
+    rc = run_staged(a.run_dir, problem_path=a.problem)
     print(f"forge exit={rc}")
     return rc
 
