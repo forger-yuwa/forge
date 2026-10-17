@@ -28,10 +28,14 @@ def _wall_res_text(wr) -> str:
         parts.append(f"{name}: 最大 {w['y1p_max']:.2f}{loc}・平均 {w['y1p_mean']:.2f}・p99 {w['y1p_p99']:.2f}")
     return "、".join(parts)
 
-# 評価量の表の行 → --verdicts のキー (nozzle_report.QS_KEYS と同じ。判定するのは r/r_w = 0.1 の線)
-QS_ROW_KEY = {"wave_pct": "wave_eta0.1", "overshoot_pct": "overshoot_eta0.1", "slope_pct": "slope_eta0.1",
-              "range_pct": "range_eta0.1", "exit_core": "exit_core_M", "mdot": "mdot_ratio", "condensation": "condensation"}
+# 試験部の線: 主の列は r/r_w = 0.03 (判定 V5c の線と同じ高さ = NS 格子の第 1 層; 2026-10-16 ユーザ決定、
+# plan tooling-nozzle-card-local-mesh §6 V5c・§5.1 #5c)。軸 (r = 0) と r/r_w = 0.1 は比較の列 (nozzle_report.REPORT_ETAS)
+MAIN_LINE, COMPARE_LINES = "eta0.03", ("eta0.0", "eta0.1")
+# 評価量の表の行 → --verdicts のキー (nozzle_report.QS_KEYS の主の線の項目。r/r_w = 0.1 の項目は渡されれば表の末尾に別行)
+QS_ROW_KEY = {"wave_pct": "wave_eta0.03", "overshoot_pct": "overshoot_eta0.03", "slope_pct": "slope_eta0.03",
+              "range_pct": "range_eta0.03", "exit_core": "exit_core_M", "mdot": "mdot_ratio", "condensation": "condensation"}
 QS_NONE = "VERDICT 未指定"
+OLD_REPORT = "— (report.json に r/r_w = 0.03 が無い: nozzle_report を再実行)"
 
 
 def _qs_cells(qs, key, tail=None):
@@ -146,13 +150,14 @@ def main(report_dir):
     bg = s.background.fill; bg.solid(); bg.fore_color.rgb = NAVY
     text(s, 0.7, 1.0, W - 1.4, 1.0, "ノズル設計 結果報告", size=40, bold=True, color=WHITE)
     text(s, 0.7, 1.9, W - 1.4, 0.6, f"{case} / {run_name}", size=18, color=RGBColor(0xC9, 0xD6, 0xDF))
-    e01 = met["eta0.1"]; ec = met["exit_core"]
+    eM = met.get(MAIN_LINE); ec = met["exit_core"]     # eM = None: η 0.03 の無い古い report.json
     qs = rep.get("quasisteady_verdicts")
-    wv = ((qs or {}).get("items") or {}).get("wave_eta0.1")
+    wv = ((qs or {}).get("items") or {}).get(QS_ROW_KEY["wave_pct"])
     stat(s, 0.7, 3.2, f"{ec['M_mean']:.4f}", f"出口コアの M (設計 {met['Md']}; r/r_w 0.05〜0.7 の平均)")
-    stat(s, 3.8, 3.2, f"{e01['wave_pct']:.3f} %",
-         "試験部の Mach 波 (r/r_w=0.1、局所の山谷)" + (f" — {wv['verdict']}" if wv else f" — {QS_NONE}"))
-    stat(s, 6.9, 3.2, f"{e01['overshoot_pct']:+.3f} %", f"オーバーシュート (M/M_d−1 の最大、x={e01['x_overshoot']:.0f})")
+    stat(s, 3.8, 3.2, f"{eM['wave_pct']:.3f} %" if eM else "—",
+         "試験部の Mach 波 (r/r_w=0.03、局所の山谷)" + (f" — {wv['verdict']}" if wv else f" — {QS_NONE}"))
+    stat(s, 6.9, 3.2, f"{eM['overshoot_pct']:+.3f} %" if eM else "—",
+         f"オーバーシュート (r/r_w=0.03 の M/M_d−1 の最大、x={eM['x_overshoot']:.0f})" if eM else "オーバーシュート " + OLD_REPORT)
     cd = met.get("condensation")
     stat(s, 10.0, 3.2, f"{met['wall_shape']['exit_radius_m']:.4f} m" if not cd else f"x = {cd['onset_x_axis']:.1f}" if cd.get("onset_x_axis") else "—",
          "出口半径 (物理壁)" if not cd else "凝縮の始まり (軸、g > 1e-4)")
@@ -176,38 +181,46 @@ def main(report_dir):
     s = new("判定ゲート", "合格したものだけでなく、不合格・未収束もそのまま載せる")
     gates = [["判定", "結果"]] + cond["gates"] + [
         ["準定常 VERDICT (量別、check_quasisteady.py)", _qs_summary(qs)],
-        ["準定常 (末尾 5 枚の変動)", f"オーバーシュート {met['tail5_range']['overshoot_pct']:.4f} %、Mach 波 {met['tail5_range']['wave_pct']:.4f} %、出口コア M {met['tail5_range']['exit_core_M']:.5f}"],
+        [f"準定常 (末尾 5 枚の変動、r/r_w = {met['tail5_range'].get('eta', 0.1):g})",   # eta の無い古い report.json は 0.1 の線
+         f"オーバーシュート {met['tail5_range']['overshoot_pct']:.4f} %、Mach 波 {met['tail5_range']['wave_pct']:.4f} %、出口コア M {met['tail5_range']['exit_core_M']:.5f}"],
         ["壁解像 y₁⁺ (check_wall_resolution.py、全 no-slip 壁)", _wall_res_text(met.get("wall_resolution"))]]
     table(s, gates, 0.5, 1.4, W - 1.0, [3.6, W - 1.0 - 3.6], size=11, row_h=0.6)
 
     # 6 評価量 (表) — 量別の準定常 VERDICT・判定区間・備考 (未達のまま進めた決定など) を同じ行に載せる
-    t5 = met["tail5_range"]
-    tails = {"wave_pct": f"末尾 {t5['n']} 枚の幅 {t5['wave_pct']:.4f} %pt", "overshoot_pct": f"末尾 {t5['n']} 枚の幅 {t5['overshoot_pct']:.4f} %pt",
+    t5 = met["tail5_range"]; t5_eta = f"r/r_w = {t5.get('eta', 0.1):g}"     # eta の無い古い report.json は 0.1 の線
+    tails = {"wave_pct": f"末尾 {t5['n']} 枚の幅 ({t5_eta}) {t5['wave_pct']:.4f} %pt",
+             "overshoot_pct": f"末尾 {t5['n']} 枚の幅 ({t5_eta}) {t5['overshoot_pct']:.4f} %pt",
              "exit_core": f"末尾 {t5['n']} 枚の幅 {t5['exit_core_M']:.5f}"}
-    s = new("評価量 — 試験部の一様性", "軸 M は形状の生成器。見るのは Mach 波・オーバーシュート・傾き (r/r_w=0.1 が軸ノードの癖を避けた線)。"
-            "VERDICT は r/r_w=0.1 の量の準定常判定",
-            notes=f"試験部 = x ∈ [{met['eta0.1']['test_window'][0]:.1f}, {met['eta0.1']['test_window'][1]:.1f}] r_t。"
+    tw = (eM or met["eta0.1"])["test_window"]
+    s = new("評価量 — 試験部の一様性", "主の列 r/r_w = 0.03 = 判定 (V5c) の線の高さ (NS 格子の第 1 層)、軸・r/r_w = 0.1 は比較。"
+            "VERDICT は r/r_w = 0.03 の量の準定常判定。軸 M は形状の生成器",
+            notes=f"試験部 = x ∈ [{tw[0]:.1f}, {tw[1]:.1f}] r_t。"
                   f"VERDICT の出典: {(qs or {}).get('source') or '未指定'}")
-    rows = [["量", "r = 0 (軸)", "r/r_w = 0.1", "VERDICT", "判定区間", "備考"]]
+    rows = [["量", "r/r_w = 0.03 (判定の線の高さ)", "r = 0 (軸、比較)", "r/r_w = 0.1 (比較)", "VERDICT (r/r_w = 0.03)", "判定区間", "備考"]]
     for k, lab in (("wave_pct", "Mach 波 (100(M/M_d−1) の 10 r_t 平滑からの残差の最大) [%]"), ("overshoot_pct", "オーバーシュート M/M_d−1 の最大 [%]"),
                    ("slope_pct", "試験部の傾き (1 次近似の両端差) [%]"), ("range_pct", "試験部の最大−最小 [%]")):
-        rows.append([lab, f"{met['eta0.0'][k]:+.4f}", f"{met['eta0.1'][k]:+.4f}"] + _qs_cells(qs, QS_ROW_KEY[k], tails.get(k)))
-    rows.append(["出口コア M (平均 / 最小〜最大)", f"{ec['M_mean']:.5f}", f"{ec['M_min']:.5f}〜{ec['M_max']:.5f}"]
+        rows.append([lab, f"{eM[k]:+.4f}" if eM else "—"] + [f"{met[c][k]:+.4f}" for c in COMPARE_LINES]
+                    + _qs_cells(qs, QS_ROW_KEY[k], tails.get(k)))
+    rows.append(["出口コア M (平均 / 最小〜最大)", f"{ec['M_mean']:.5f}", f"{ec['M_min']:.5f}〜{ec['M_max']:.5f}", ""]
                 + _qs_cells(qs, QS_ROW_KEY["exit_core"], tails["exit_core"]))
     if "mdot_ratio_vs_euler" in met:
         v = met["mdot_ratio_vs_euler"]
-        rows.append(["流量比 ṁ_NS / ṁ_Euler", f"{v:.6f}" if isinstance(v, float) else str(v), ""] + _qs_cells(qs, QS_ROW_KEY["mdot"]))
+        rows.append(["流量比 ṁ_NS / ṁ_Euler", f"{v:.6f}" if isinstance(v, float) else str(v), "", ""] + _qs_cells(qs, QS_ROW_KEY["mdot"]))
     if cd:
         rows.append(["凝縮: 始まり (軸) / 出口 g (軸・コア平均)", f"x = {cd['onset_x_axis']}" if cd.get("onset_x_axis") else "—",
-                     f"{cd['exit_g_axis']:.4f} / {cd['exit_g_core_mean']:.4f}"] + _qs_cells(qs, QS_ROW_KEY["condensation"]))
-    # 表の行に対応しない量 (δ_E/δ_C・凝縮の個別量など) も落とさず別行で載せる
+                     f"{cd['exit_g_axis']:.4f} / {cd['exit_g_core_mean']:.4f}", ""] + _qs_cells(qs, QS_ROW_KEY["condensation"]))
+    # 表の行に対応しない量 (r/r_w = 0.1 の項目・δ_E/δ_C・凝縮の個別量など) も落とさず別行で載せる
     for k in ((qs or {}).get("items") or {}):
         if k not in QS_ROW_KEY.values():
-            rows.append([k, "", ""] + _qs_cells(qs, k))
-    table(s, rows, 0.5, 1.5, W - 1.0, [3.3, 1.1, 1.5, 1.6, 1.4, W - 1.0 - 8.9], size=10, row_h=0.4)
+            rows.append([k, "", "", ""] + _qs_cells(qs, k))
+    table(s, rows, 0.5, 1.5, W - 1.0, [3.0, 1.35, 1.05, 1.05, 1.45, 1.25, W - 1.0 - 9.15], size=10, row_h=0.4)
+    # 判定 (V5c) の所在の注 (報告の評価量は判定の量と定義が違う; 合否は wt_qualify の出力)
+    lj = (met.get("line_judge") or {}).get("text") or ("判定 (V5c) の線は r/r_w = 0.03。合否は wt_qualify の出力 (WT_QUALIFICATION.json の V5c) を見る。"
+                                                        "報告の評価量は別の定義 " + OLD_REPORT)
+    text(s, 0.5, 6.75, W - 1.0, 0.6, "注: " + lj, size=10, color=MUTED)
 
     # 6′ 評価量 (図)
-    s = new("評価量 — 試験部の M/M_d − 1", "r = 0 (実線) と r/r_w = 0.1 (破線)、黒は Euler 参照 (設計壁)",
+    s = new("評価量 — 試験部の M/M_d − 1", "実線 r/r_w = 0.03 (判定の線の高さ)、点線 r = 0 (軸)、破線 r/r_w = 0.1 (比較)、黒は Euler 参照 (設計壁)",
             notes=f"図: {figs['axis_dev']} ({src})")
     picture(s, rd / figs["axis_dev"], 0.5, 1.4, W - 1.0, 5.9)
 
@@ -221,7 +234,8 @@ def main(report_dir):
         s = new(t, sub, notes=f"図: {f} ({src})。カラーマップは全量 turbo")
         picture(s, rd / f, 0.5, 1.4, W - 1.0, 5.9)
 
-    for key, t, sub in (("axis", "軸に沿った分布", "M・静圧・静温・密度・動圧 0.5ρv²・0.5v²・全圧 (凝縮ありは g・過冷却度・S)。実線 r=0、破線 r/r_w=0.1"),
+    for key, t, sub in (("axis", "軸に沿った分布", "M・静圧・静温・密度・動圧 0.5ρv²・0.5v²・全圧 (凝縮ありは g・過冷却度・S)。"
+                                                     "実線 r/r_w=0.03 (判定の線の高さ)、点線 r=0、破線 r/r_w=0.1"),
                         ("exit", "出口断面の分布", "同じ量を半径方向に。流れ角 atan(v/u) を追加"),
                         ("wall", "壁面の分布", "壁圧・壁温・C_f・y₁⁺ 近似 (図示のみ。y₁⁺ の判定値は判定ゲート表 = check_wall_resolution.py)"),
                         ("wall_shape", "壁の形と微分", "左: r・r′・r″ (点線 = 設計壁)、右: 設計壁との差 (境界層の補正分)")):
