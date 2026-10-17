@@ -1,0 +1,51 @@
+== (K) 安価な負例と正例 (対応表)
+ok   (K) 負例 根拠の無いユーザ欄: run_approval_tests.py の「(N1) 出所の無いユーザ欄で止まる」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 出所の未知のパス: run_approval_tests.py の「(N2) 出所の未知のパスで止まる」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 既定との不一致: run_approval_tests.py の「(N3) recipe_default なのに既定と違う値で止まる」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 予算の欠落: run_approval_tests.py の「(N4) 予算の欠落で止まる」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 requirements_without_gate の削除: run_approval_tests.py の「(N6) requirements_without_gate の削除で MISMATCH」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 CLI での公差の上書き: run_approval_tests.py の「(N7) CLI の公差 (承認と同じ値 0.001) も拒否」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 CLI での必須の成果物の上書き: run_approval_tests.py の「(N7) --optional-parts を拒否」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 外部の Python の違い: run_gate_env_tests.py の「(N1) 判定の Python が違う」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 import の元の違い: run_gate_env_tests.py の「(N3) 印はあるが import の元」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 総合 PASS と個別の FAIL の矛盾: run_wt_qualify_tests.py の「(4c) MANIFEST の verdict PASS・failed_parts [] のまま cad.pass=false」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 予算の実行中の超過: run_driver_tests.py の「(T7) 予算の超過」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 再開による二重の起動 (起動の後に落ちた): run_driver_tests.py の「(T3) 起動の後・印の前に落ちる」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 再開による二重の起動 (二つ目の driver): run_driver_tests.py の「(T6) 二つ目の driver」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 既存の出力先への書き込み: run_driver_tests.py の「(T12) 出力先の run が既にある」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 負例 GPU の段の見積もりの欠け (13a で足した): run_campaign_schema_tests.py の「(N) GPU の段の見積もりの欠け (estimates なし) → 拒否」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 正例 承認したカード: run_approval_tests.py の「(P1) preview に問題が無く write で承認の記録ができる」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 正例 承認の原本の照合: run_approval_tests.py の「(P2) 承認の原本の check が OK」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 正例 係数だけを変えた試行の入力: run_approval_tests.py の「(P3) 較正の係数だけを変えた試行の入力の check が OK」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 正例 係数だけを変えた試行のカード (格子の上限の照合): run_mesh_limits_tests.py の「正例: 較正の係数だけを変えた試行のカードは承認の照合 OK」が実行されて ok  [該当 1 行、試験の終了コード 0]
+ok   (K) 対応表の試験がどれも終了コード 0 (飛ばした・FAIL が無い)  [{'run_approval_tests.py': 0, 'run_campaign_schema_tests.py': 0, 'run_driver_tests.py': 0, 'run_gate_env_tests.py': 0, 'run_mesh_limits_tests.py': 0, 'run_wt_qualify_tests.py': 0}]
+== N1: M5.5 の燃焼ガス風洞ノズルを作ってほしい。条件は case/71 と同じ (全圧 3.5 MPa・全温 1250 K・物理スロート径 200 mm・入口の半径 300 mm・拡大部 8 m・壁 350 K)。
+ok   N1 承認の前の問題 YAML を生成 (wt_card)
+ok   N1 承認の preview に問題が無く承認の記録を書ける
+ok   N1 承認の後に生成し直した問題 YAML が approval.check OK
+ok   N1 hand_mesh.py build --approval → check で NS・Euler の品質 PASS  [build rc 0  / check 0 {'ns': 'VERDICT: PASS (AR<= 5000, skew<= 0.90)', 'euler': 'VERDICT: PASS (AR<= 1000, skew<= 0.90)'}]
+== N2: 手順書の試走 A と同じノズル (case/90 の card_p0) を作ってほしい。
+ok   N2 承認の前の問題 YAML を生成 (wt_card)
+ok   N2 承認の preview に問題が無く承認の記録を書ける
+ok   N2 承認の後に生成し直した問題 YAML が approval.check OK
+FAIL N2 hand_mesh.py build --approval → check で NS・Euler の品質 PASS  [build rc 1 412000 (明示: 承認の記録 card_approval.json (sha256 e1efd0b7f066a5f0…、試験の仮の承認 (run_v3_requests_tests)) の カードの mesh_limits.max_nodes_ns) を超える — 格子を作らずに止めた。上限を超える格子はユーザの了承を取ってから ユーザの了承を取ってカードの mesh_limits を直し、承認の記録を作り直して --approval で渡す (了承なしに書かない)。超えないようにするなら ni・nj・axis_gap_frac (・要求カードなら第 1 層と ar_max) を見直す
+ / check None {}]
+== N3: M5 の空気の風洞ノズル (case/70 のデモの条件) の格子まで作ってほしい。
+ok   N3 承認の前の問題 YAML を生成 (wt_card)
+ok   N3 承認の preview に問題が無く承認の記録を書ける
+ok   N3 承認の後に生成し直した問題 YAML が approval.check OK
+[paste_isentropic_ic] species: initial field stamped with species_hash 9e9d3fe38b73cbbe (record resolved_species_9e9d3fe38b73cbbe.yaml; datum 298.15 K, species ['MIX'])
+[prepare_ns] 本段 60000 step (既定 60000)。evaluate.nStepOuter 12000 は Euler だけが読む (2026-10-14 から)
+[paste_isentropic_ic] species: initial field stamped with species_hash ac91d7f1ae2a14b0 (record resolved_species_ac91d7f1ae2a14b0.yaml; datum 298.15 K, species ['MIX'])
+ok   N3 mesh_stage.check_template で NS・Euler の品質 PASS (格子の部品の成功)  [{'ns': 'VERDICT: PASS (AR<= 5000, skew<= 0.90)', 'euler': 'VERDICT: PASS (AR<= 1000, skew<= 0.90)'}]
+== S1: 試走 A のノズルを出口コアのマッハ数 ±0.1 %・線の偏差 0.1 % で仕上げてほしい (1 回目の NS の結果で判定)。
+ok   S1 iteration 1/3 → back_to_correction (原因 ['V5b', 'V5c'] の FAIL)  [back_to_correction V5b FAIL M 5.519563192807343 V5c FAIL 0.4042978427990507 解析の成立 PASS []]
+ok   S1 iteration 3/3 → rejected  [rejected V5b FAIL M 5.519563192807343 V5c FAIL 0.4042978427990507 解析の成立 PASS []]
+== S2: N1 と同じ依頼だが、壁温の出所 (誰が決めたか) が分からない。
+ok   S2 sources.wall を除く → preview に wall の出所の欠け、write しない (理由は問題 YAML の欠けでない)  [['wall.thermal: 出所が無い (sources に user か recipe_default を書く)', 'wall.Tw: 出所が無い (sources に user か recipe_default を書く)']]
+== S3: N1 と同じ依頼で、GPU は 0.6 分 (0.01 時間) しか使えない。
+ok   S3 前提: 予算 0.01 GPU 時間の承認
+ok   S3 予算 0.01 GPU 時間・Euler の見積もり 4/60 → Euler の前に予算で止まる (試行を足さない・起動 0 回・格子の試行と止まった記録は残る)  [{'status': 'stopped', 'why': "見積もり {'gpu_hours': 0.0666667, 'disk_gb': 0.5} が残りの予算 {'gpu_hours': 0.01, 'disk_gb': 50.0} を超える (['gpu_hours']) — 次の段を始めない"} 試行 ['0001-mesh_p0'] stops 1]
+ok   S3 GPU の段の見積もりが無い campaign は読み込みで止まる  [campaign: estimates に GPU の段 ['euler', 'ns'] の見積もり {gpu_hours, disk_gb, basis} が無い (依頼と実行のホストに合わせて書く; 無いと予算の起動の前の検査が止めない、plan §4.5.1)]
+
+1 FAIL
