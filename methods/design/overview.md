@@ -1389,6 +1389,7 @@ AI が変えてはいけない「ユーザが決めた欄」と「判定の条�
   `--approval` なしの使い方 (開発・手順書の試走) は今のまま。
 - **判定専用の環境** (`forge_design/feedback/gate_env.py`、`python -m forge_design.feedback.gate_env judge --approval card_approval.json -- <wt_qualify の引数>`): 承認の commit の sparse checkout (`design`・`solver_density_cuda/tools`・`solver_density_cuda/data`、`~/.cache/forge-gates/<commit>`) と、承認のときに記録した 判定の Python (実体・prefix・配布物ごとの RECORD の sha256) と外部の道具 (gmsh 用の Python・FreeCAD・変換器の実体と sha256) で、隔離のモード・許した環境変数だけで `wt_qualify` を回す。checkout の HEAD・追跡ファイルの変更・探索先の未追跡/ignored のファイル・環境の指紋が違えば判定しない。`wt_qualify --approval` は、この環境の印・import の元・checkout の HEAD を確かめ、外で回されたら止める。
 - **中間の判定の再検査**: 成果物は、必須の部品の `pass` (cad・mesh・fluent)・MANIFEST の総合と部品・寸法の矛盾・必須のファイル (`deliverables.REQUIRED_FILES`、MANIFEST の列挙と別) で見る (承認の有無によらない)。承認のモードでは、停止の判定 (`check_settled --end-step <停止> --no-write`) と計算の格子の品質 (承認で固定した AR・skew) を判定専用の環境で回し直し、成果物は判定専用の環境で書き出したもの (`gate_env deliverables`、MANIFEST の `gate` が承認と合う) だけを使う。
+- **run の物理の照合** (`approval.check_run_physics`、`check --run` と `wt_qualify --approval` が使う): 本段の solverConfig・bcondConfig・準備の記録を、承認と照合済みの問題 YAML の期待値と比べる。入口の Pt・Tt・組成 (輸送種の配置の質量分率)・熱力学・種ごとの輸送と粘性のモデル・NS の乱流 (承認の時点の雛形の値)・軸対称・壁の熱条件・出口の静圧。数値の設定 (CFL・リミッタ・段階起動) は照合しない (AI が直してよい範囲)。入口の分布の run は対象外で止める。
 - 承認の記録は真正性を証明しない (sha256 と `user_ref` は「指定した承認の記録との整合」だけを示す)。
 - 試験: `design/tests/run_approval_tests.py` (固定の入力 `design/tests/fixtures/approval_trial_a/`)、`design/tests/run_gate_env_tests.py`・`run_gate_deliverables_tests.py` (HEAD を承認の commit に使うので commit した後に回す)、`run_approval_rechecks_tests.py`。
 
