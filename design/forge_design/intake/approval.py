@@ -456,26 +456,102 @@ def load_approval(path) -> dict:
     return ap
 
 
+def _card_binding(ap: dict, approval_path, card_path, raw: dict) -> tuple[str, list]:
+    """カードが承認の原本か、承認の記録を指す試行の入力か → (kind original / trial, 問題の列)。"""
+    probs = []
+    if sha256_file(card_path) == ap["card"]["sha256"]:
+        return "original", probs
+    ref = raw.get("approval") if isinstance(raw, dict) else None
+    if not isinstance(ref, dict):
+        probs.append("承認の原本と違うカードに approval (承認の記録への参照) が無い — 試行の入力は {file, sha256} で承認の記録を指す")
+    elif ref.get("sha256") != sha256_file(approval_path):
+        probs.append(f"カードの approval.sha256 {str(ref.get('sha256'))[:16]}… が承認の記録 {Path(approval_path).name} の sha256 と違う")
+    return "trial", probs
+
+
+MESH_LIMIT_BLOCKS = (("mesh", "max_nodes_ns"), ("mesh_euler", "max_nodes_euler"))
+
+
+def mesh_limit_problems(limits: dict, prob: dict) -> list:
+    """問題 YAML の `mesh`・`mesh_euler` の実効の節点数の上限 (`runner_axismach.node_budget`; 明示が無ければ既定) が承認の上限
+    (`protected.mesh_limits`) 以下か (plan tooling-design-orchestrator §4.6、§5.1 #8)。超える・上限の書き方が誤り → 問題の列。"""
+    from ..evaluate import runner_axismach as RA
+    probs = []
+    for blk, key in MESH_LIMIT_BLOCKS:
+        lim = (limits or {}).get(key)
+        try:
+            b = RA.node_budget((prob or {}).get(blk) or {}, blk)
+        except ValueError as e:
+            probs.append(f"問題 YAML の {blk} の節点数の上限の書き方が誤り ({e})")
+            continue
+        if not isinstance(lim, int) or isinstance(lim, bool):
+            probs.append(f"承認の mesh_limits.{key} が無い・整数でない ({lim!r})")
+        elif b["max_nodes"] > lim:
+            probs.append(f"問題 YAML の {blk} の節点数の上限 {b['max_nodes']} ({'既定' if b['max_nodes_source'] == 'default' else '明示: ' + str(b['max_nodes_reason'])[:80]}) "
+                         f"が承認の mesh_limits.{key} {lim} を超える — 上限を広げるならカードの mesh_limits を直してユーザの承認を取り直す")
+    return probs
+
+
+CARD_ONLY_SECTIONS = ("requirements", "run_policy", "mesh_limits", "budget", "requirements_without_gate")
+
+
+def card_condition_problems(ap: dict, card: dict) -> list:
+    """カードだけで決まる保護の条件 (CARD_ONLY_SECTIONS と、カードに書いた qualification の値) が承認の値と同じか → 違いの列
+    (plan tooling-design-orchestrator §4.6「照合の場所と順」の 1; 2026-10-18 codex 諮問 mesh-limits の Major 1: 承認の参照だけでは
+    同じ依頼の試行と保証できない)。問題 YAML に依る節 (物理・評価、qualification の既定) は見ない (問題 YAML を作る前に使うため)。"""
+    prot = protected_conditions(card, None)
+    ap_prot = ap.get("protected") or {}
+    probs = [f"{d} が承認の値と違う" for sec in CARD_ONLY_SECTIONS for d in diff_paths(ap_prot.get(sec), prot.get(sec), sec)]
+    for k, v in (card.get("qualification") or {}).items():
+        if _canon(v) != _canon((ap_prot.get("qualification") or {}).get(k)):
+            probs.append(f"qualification.{k} {v!r} が承認の値 {(ap_prot.get('qualification') or {}).get(k)!r} と違う")
+    return probs
+
+
+def check_card(approval_path, card_path) -> dict:
+    """問題 YAML を作る前のカードの照合 (承認の原本か承認の記録を指す試行の入力か・カードだけで決まる保護の条件)。
+    recipe の問題の段 (`wt_card` の前) と格子の段 (`hand_mesh.py build` の前) が、最初の全格子の生成の前に使う。
+    戻り {status: OK / MISMATCH, kind, problems}。"""
+    ap = load_approval(approval_path)
+    raw, card, _prob = _load(card_path, None)
+    kind, probs = _card_binding(ap, approval_path, card_path, raw)
+    probs += card_condition_problems(ap, card)
+    return {"status": "OK" if not probs else "MISMATCH", "kind": kind, "problems": probs,
+            "card_sha256": sha256_file(card_path), "approval_sha256": sha256_file(approval_path)}
+
+
+def mesh_limits_for_card(approval_path, card_path) -> dict:
+    """承認の記録から節点数の上限を取る (plan tooling-design-orchestrator §4.6、§5.1 #8)。承認の記録を検査して読み、カードが承認の原本か
+    承認の記録を指す試行の入力かと、カードだけで決まる保護の条件 (mesh_limits を含む) が承認の値と同じかを確かめる (違えば例外)。
+    戻り {max_nodes_ns, max_nodes_euler, approval_file, approval_sha256, user_ref, card_sha256, kind}。結び付かなければ ApprovalError。"""
+    ap = load_approval(approval_path)
+    raw, card, _prob = _load(card_path, None)
+    kind, probs = _card_binding(ap, approval_path, card_path, raw)
+    probs += card_condition_problems(ap, card)
+    lim = (ap.get("protected") or {}).get("mesh_limits") or {}
+    for _blk, key in MESH_LIMIT_BLOCKS:
+        v = lim.get(key)
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+            probs.append(f"承認の mesh_limits.{key} が正の整数でない ({v!r})")
+    if probs:
+        raise ApprovalError(f"承認の記録 {Path(approval_path).name} からカード {Path(card_path).name} の節点数の上限を取れない: " + "; ".join(probs))
+    return {"max_nodes_ns": int(lim["max_nodes_ns"]), "max_nodes_euler": int(lim["max_nodes_euler"]),
+            "approval_file": str(Path(approval_path).resolve()), "approval_sha256": sha256_file(approval_path),
+            "user_ref": ap.get("user_ref"), "card_sha256": sha256_file(card_path), "kind": kind}
+
+
 def check(approval_path, card_path, problem_path) -> dict:
-    """カード (承認の原本か、承認の記録を参照する試行の入力) と問題 YAML が承認の値と一致するか。
-    戻り: {status: OK / MISMATCH, kind: original / trial, diffs, problems}。"""
+    """カード (承認の原本か、承認の記録を参照する試行の入力) と問題 YAML が承認の値と一致するか。問題 YAML の節点数の上限が承認の
+    mesh_limits 以下かも見る (§5.1 #8)。戻り: {status: OK / MISMATCH, kind: original / trial, diffs, problems}。"""
     ap = load_approval(approval_path)
     raw, card, prob = _load(card_path, problem_path)
-    probs = []
     sha = sha256_file(card_path)
-    if sha == ap["card"]["sha256"]:
-        kind = "original"
-    else:
-        kind = "trial"
-        ref = raw.get("approval")
-        if not isinstance(ref, dict):
-            probs.append("承認の原本と違うカードに approval (承認の記録への参照) が無い — 試行の入力は {file, sha256} で承認の記録を指す")
-        elif ref.get("sha256") != sha256_file(approval_path):
-            probs.append(f"カードの approval.sha256 {str(ref.get('sha256'))[:16]}… が承認の記録 {Path(approval_path).name} の sha256 と違う")
+    kind, probs = _card_binding(ap, approval_path, card_path, raw)
     if prob is not None:
         probs += problem_matches_card(card, prob)
         if prob.get("qualification"):
             probs.append(f"問題 YAML に qualification がある ({prob['qualification']!r}) — 判定の条件は承認の記録だけ")
+        probs += mesh_limit_problems((ap.get("protected") or {}).get("mesh_limits") or {}, prob)
     prot = protected_conditions(card, prob)
     diffs = diff_paths(ap["protected"], prot)
     return {"status": "OK" if not diffs and not probs else "MISMATCH", "kind": kind, "card_sha256": sha,
@@ -632,6 +708,14 @@ def check_run(approval, run_dir, problem_path=None) -> dict:
     if problem_path is not None:
         ph = check_run_physics(ap, run_dir, problem_path)
         probs += [f"物理: {x}" for x in ph["problems"]]
+        # 節点数の上限 (plan tooling-design-orchestrator §4.6「照合の場所と順」の 3、§5.1 #8): 問題 YAML の上限と、run の実際の格子の節点数
+        lim = (ap["protected"].get("mesh_limits") or {})
+        probs += [f"格子: {x}" for x in mesh_limit_problems(lim, yaml.safe_load(Path(problem_path).read_text()))]
+        n_run = (info.get("mesh") or {}).get("n_nodes")
+        if not isinstance(n_run, int) or isinstance(n_run, bool):
+            probs.append("格子: prepare_info.json の mesh.n_nodes が無い (run の格子の節点数を承認の上限と照合できない)")
+        elif n_run > int(lim.get("max_nodes_ns") or 0):
+            probs.append(f"格子: run の格子の節点数 {n_run} が承認の mesh_limits.max_nodes_ns {lim.get('max_nodes_ns')} を超える")
     ex_a = sorted(x.get("name") for x in crit.get("excluded") or [])
     ex_e = sorted(x.get("name") for x in exp.get("excluded") or [])
     if ex_a != ex_e:

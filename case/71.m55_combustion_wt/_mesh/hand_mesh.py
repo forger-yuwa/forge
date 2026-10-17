@@ -14,7 +14,9 @@ build: カードから作った問題 YAML (problem_m55_card.yaml) の mesh・me
   4. `x_density_table`: 目標の間隔 h(x) = min(AR_MARGIN·ar_max·y1,表·cosθ_w, h_cap(x)) (物理壁; h_cap は雛形の分布
      (throat_refine 4・throat_width 3) で ni 2000 にしたときの各位置の間隔) の逆数の上包絡。AR (壁際のセルの max 辺 / min 辺) と
      dx ≤ h_cap を満たす最小の ni を二分法で求め、10 の倍数に切り上げる。throat_refine 1・wall_normal_layer [0.02, 0.8]・msh_digits 17。
-  5. mesh_euler の ni は NS と同じ (雛形の規則)。max_nodes・max_nodes_reason を両方に書く。
+  5. mesh_euler の ni は NS と同じ (雛形の規則)。max_nodes・max_nodes_reason を両方に書く: --approval (承認の記録) があればカードの
+     承認済みの mesh_limits の値と承認元 (数えた節点数が超えれば問題 YAML を書かずに止める)、無ければ入力の問題 YAML の上限のまま
+     (超えれば止める; 自動で広げない。plan tooling-design-orchestrator §4.6・§5.1 #8、2026-10-18 から)。
   5b. --axis-cap-frac c を渡したとき (#3b、ユーザ 2026-10-15「上限3%」): NS の径方向を mesh2d の axis_cap_frac (nj 固定版: 各断面で壁の
      第一セルから比 q_i の等比、間隔 / r_w が c に達したら軸まで一様) にし、nj は全断面で `mesh2d._radial_fracs_capfixed` の隣接比の
      最大 ≤ --radial-ratio-max (既定 1.2) になる最小の値。流れ方向・第一層の表・mesh_euler (nj を含む) は変えない。
@@ -198,6 +200,13 @@ def interp_f(t, x):
 
 def build(a):
     t0 = time.time()
+    # 承認の照合は最初の全格子の生成 (下の estimate_mesh) の前 (plan tooling-design-orchestrator §4.6「照合の場所と順」の 1; 2026-10-18 codex
+    # 諮問 mesh-limits の Major 1): カードが承認の原本か承認の記録を指す試行の入力か、カードだけで決まる保護の条件が承認と同じかを確かめて、
+    # 節点数の上限 (mesh_limits) を取る。結び付かなければここで止まる (何も作らない)
+    lim = None
+    if a.approval:
+        from forge_design.intake import approval as AP
+        lim = AP.mesh_limits_for_card(a.approval, a.card)
     card = W.load_card(a.card)
     import yaml
     prob_dict = yaml.safe_load(open(a.problem))
@@ -211,7 +220,9 @@ def build(a):
     log(f"r_t {rt!r} m  設計壁 [{wd.x_in:.6f}, {wd.x_e:.6f}]  物理壁 [{wp.x_in:.6f}, {wp.x_e:.6f}]  x_U {x_U:.6f}  ar_max {ar_max:g} (AR 上限 {ARM:g})"
         f"  初期化 {init_rec}")
     # ---- 1. 式の写しの照合 (estimate_mesh の断面と同じ 8001 点で)
-    est = W.estimate_mesh(card, prob_dict, chain=d)
+    # 断面の値 (sections) だけを使うので全格子は作らない (full_grid=False; plan tooling-design-orchestrator §5.1 #8、2026-10-18 codex 諮問 v2c-fail:
+    # 上限を超える依頼でも、上限の照合の前に入力の雛形の全格子を作っていた)
+    est = W.estimate_mesh(card, prob_dict, chain=d, full_grid=False)
     sec = est.pop("sections")
     y_chk, _ = y1req_design(sec["x_rt"], wd, card, rt)
     m = np.isfinite(sec["y1_m"]) & (sec["y1_m"] > 0)
@@ -349,16 +360,22 @@ def build(a):
         log(f"径方向: axis_cap_frac {cap}・比 ≤ {qlim} → nj {nj} (比の最大 {q_all:.5f}; nj {nj - 1} では {q_prev:.5f}; 最も薄い第一セル "
             f"{fr_st.min():.4e} @ x {radial_rec['x_first_frac_min']:.3f})  節点 {n_nodes:,} (雛形の nj {radial_rec['nj_template']})")
     # ---- 5. 置き換えた問題 YAML
-    rad_txt = ("" if radial_rec is None else
-               f"; 径方向は axis_cap_frac {radial_rec['axis_cap_frac']:g}・比 ≤ {radial_rec['radial_ratio_max']:g} (ユーザ 2026-10-15)")
-    reason_ns = (f"ユーザ決定「a」2026-10-15: M5.5 の場所ごとの第一層 (M6 の比で補正) で約 {n_nodes:,} 点 (ni {ni} × nj {nj}; "
-                 f"plan tooling-nozzle-card-local-mesh {a.plan_item}{rad_txt})")
-    reason_eu = "ユーザ決定「a」2026-10-15: Euler の ni は雛形の規則で NS と同じ (約 {n_eu:,} 点、ni {ni} × nj {nj_e})"
-    max_ns = int(math.ceil(n_nodes / 1000.0) * 1000)
     me = dict(prob_dict["mesh_euler"])
-    nj_e = int(me.get("nj", RA.MESH_EULER_DEFAULTS["nj"]))
-    n_eu = ni * nj_e
-    max_eu = int(math.ceil(n_eu / 1000.0) * 1000)
+    # ---- 節点数の上限 (plan tooling-design-orchestrator §4.6・§5.1 #8): 書く上限は、承認 (--approval) があればカードの承認済みの mesh_limits と
+    # 承認元、無ければ入力の問題 YAML の上限のまま (明示が無ければ既定 30 万)。実効の節点数 (axis_gap_frac・axis_cap_frac の導出の nj を含む) は
+    # 下で、書く予定の YAML の節から共通の check_node_budget で数え、超えれば問題 YAML を書かない。以前は数えた点数から上限を自動で広げ、
+    # 固定の文「ユーザ決定「a」2026-10-15」を書いていた (別の依頼でも過去の承認の文で上限を通せた)
+    if lim is not None:
+        src = (f"承認の記録 {Path(lim['approval_file']).name} (sha256 {lim['approval_sha256'][:16]}…、{lim['user_ref']}) の "
+               "カードの mesh_limits.{key}")
+        max_ns, max_eu = lim["max_nodes_ns"], lim["max_nodes_euler"]
+        reason_ns = src.format(key="max_nodes_ns")
+        reason_eu = src.format(key="max_nodes_euler")
+    else:
+        b_ns, b_eu = RA.node_budget(prob_dict.get("mesh") or {}, "mesh"), RA.node_budget(me, "mesh_euler")
+        max_ns, max_eu = b_ns["max_nodes"], b_eu["max_nodes"]
+        reason_ns = b_ns["max_nodes_reason"] or "既定 (runner_axismach.MAX_NODES_2D)"
+        reason_eu = b_eu["max_nodes_reason"] or "既定 (runner_axismach.MAX_NODES_2D)"
     src = Path(a.problem).read_text()
     lines = src.splitlines(keepends=True)
 
@@ -395,14 +412,14 @@ def build(a):
         "  throat_width: 1.0\n"
         f"  ar_max: {int(ar_max)}\n"
         f"  max_nodes: {max_ns}\n"
-        f"  max_nodes_reason: \"{reason_ns}\"\n"))
+        f"  max_nodes_reason: {json.dumps(reason_ns, ensure_ascii=False)}\n"))
     me_new = {k: v for k, v in me.items() if k not in ("ni", "max_nodes", "max_nodes_reason")}
     eu_lines = ["mesh_euler:\n",
                 "  # ni は NS (mesh) と同じ (雛形の規則; plan tooling-nozzle-mesh-size-guard §4.1)。_mesh/hand_mesh.py build が書く\n",
                 f"  ni: {ni}\n"]
     for k, v in me_new.items():
         eu_lines.append(f"  {k}: {v}\n")
-    eu_lines += [f"  max_nodes: {max_eu}\n", f"  max_nodes_reason: \"{reason_eu.format(n_eu=n_eu, ni=ni, nj_e=nj_e)}\"\n"]
+    eu_lines += [f"  max_nodes: {max_eu}\n", f"  max_nodes_reason: {json.dumps(reason_eu, ensure_ascii=False)}\n"]
     i0, i1 = block_span("mesh")
     lines[i0:i1] = [mesh_txt]
     j0, j1 = block_span("mesh_euler")
@@ -413,11 +430,23 @@ def build(a):
            "# card_m55.yaml の overrides mesh.ni 3000 は生成のためだけ) の mesh・mesh_euler を _mesh/hand_mesh.py build で置き換えたもの (手で編集しない)。\n"
            "# 他のキー・_card の記録 (mesh_estimate を含む) は生成器の出力のまま (_card.mesh_estimate は旧い見積もりで、この格子ではない)。\n")
     out = Path(a.out_yaml)
-    out.write_text(hdr + "".join(lines))
-    p2 = load_problem(out)
-    mp2 = RA.mesh_params(p2, 1.0, ni=561, nj=97, wall_first_frac=4.5e-5)
-    nodes_ns = RA.check_node_budget(mp2, p2.mesh, "mesh")
-    nodes_eu = RA.check_node_budget(RA.mesh_params_euler(p2, 1.0), RA.mesh_euler_block(p2), "mesh_euler")
+    # 一時のファイルに書いて実効の節点数を数え (格子の配列は作らない; mesh2d.node_count)、上限の内なら置き換える (codex 諮問 mesh-limits の
+    # Major 2: 指定の ni × nj では Euler の axis_gap_frac の導出の点数を取り逃がす)。超えれば問題 YAML を書かずに止める
+    tmp_out = out.with_name(out.stem + ".tmp" + out.suffix)
+    tmp_out.write_text(hdr + "".join(lines))
+    try:
+        p2 = load_problem(tmp_out)
+        mp2 = RA.mesh_params(p2, 1.0, ni=561, nj=97, wall_first_frac=4.5e-5)
+        hint = ("ユーザの了承を取ってカードの mesh_limits を直し、承認の記録を作り直して --approval で渡す" if lim is not None else
+                "ユーザの了承を取ってカードの mesh_limits に書き、承認の記録を --approval で渡す (自動で広げない)")
+        nodes_ns = RA.check_node_budget(mp2, p2.mesh, "mesh", allow_hint=hint)
+        nodes_eu = RA.check_node_budget(RA.mesh_params_euler(p2, 1.0), RA.mesh_euler_block(p2), "mesh_euler", allow_hint=hint)
+    except ValueError as ex:
+        tmp_out.unlink(missing_ok=True)
+        raise RuntimeError(f"節点数が上限を超える — 問題 YAML ({out}) を書かずに止めた: {ex}") from ex
+    import os
+    os.replace(tmp_out, out)
+    limits_rec = None if lim is None else {**lim, "nodes_ns": nodes_ns["n_nodes"], "nodes_euler": nodes_eu["n_nodes"]}
     # 読み直した表が作った表と同じ
     t_ft = np.asarray(p2.mesh["wall_first_frac_table"], float)
     t_dt = np.asarray(p2.mesh["x_density_table"], float)
@@ -454,7 +483,7 @@ def build(a):
                              "h_AR_min": float(h_AR.min()), "x_h_AR_min": float(xg[np.argmin(h_AR)])},
            "ni_min": ni_min, "ni": ni, "ni_ideal": ni_ideal, "nj": nj, "nodes": n_nodes, "wall_ar_max_stations": float(ar.max()),
            "dx_min": float(dxs.min()), "dx_max": float(dxs.max()), "dx_ratio_max": float(max(qd[kq], 1 / qd[kq])),
-           "x_dx_ratio_max": float(xs[kq + 1]), "nodes_check": {"mesh": nodes_ns, "mesh_euler": nodes_eu},
+           "x_dx_ratio_max": float(xs[kq + 1]), "nodes_check": {"mesh": nodes_ns, "mesh_euler": nodes_eu}, "node_limits": limits_rec,
            "mesh_keys_changed": changed, "y_sc_build_m": B["y_sc"], "y_sc_2pt_m": R.y1_cap_raw, "time_s": time.time() - t0}
     Path(a.record).write_text(json.dumps(W._json_safe(rec), ensure_ascii=False, indent=1))
     # 断面ごとの値 (作る刻みの 10 点おき)
@@ -634,6 +663,9 @@ def main():
                     help="NS の径方向を mesh2d の axis_cap_frac にする (#3b、ユーザ 2026-10-15「上限3%」は 0.03)。nj は --radial-ratio-max で決める")
     ap.add_argument("--radial-ratio-max", type=float, default=1.2, help="--axis-cap-frac の nj を決める全断面の隣接比の上限")
     ap.add_argument("--plan-item", default="§5.1 #3a", help="YAML の注記と記録に書く plan の項目 (#3a の再現は既定のまま)")
+    ap.add_argument("--approval", default=None,
+                    help="build: 承認の記録 card_approval.json。節点数の上限をカードの承認済みの mesh_limits と照合して書く (plan "
+                         "tooling-design-orchestrator §4.6・§5.1 #8)。無ければ入力の問題 YAML の上限 (既定 30 万) を超えたら止める")
     ap.add_argument("--sanity", type=float, default=None,
                     help="見積もり (plan §3 の (C)) の再現の確認: 全区間の係数をこの値、半径は設計壁で ni だけを出す (YAML は書かない)")
     a = ap.parse_args()

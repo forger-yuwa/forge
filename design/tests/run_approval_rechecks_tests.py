@@ -67,7 +67,7 @@ if CARD.is_file() and PROB.is_file():
         d = yaml.safe_load(CARD.read_text())
         src = {k: {"kind": "user", "ref": "case/71"} for k in ("gas", "conditions", "M_exit", "throat", "inlet", "divergent_length_m", "wall",
                                                              "tolerances", "p_ambient", "budget")}
-        d.update(format=W.CARD_FORMAT_V2, budget={"gpu_hours": 4.0, "disk_gb": 50.0}, sources=src)
+        d.update(format=W.CARD_FORMAT_V2, budget={"gpu_hours": 4.0, "disk_gb": 50.0}, mesh_limits={"max_nodes_ns": 443000, "max_nodes_euler": 467000}, sources={**src, "mesh_limits": {"kind": "user", "ref": "case/71 のユーザ決定「a」2026-10-15 (手組みの格子の節点数)"}})  # §5.1 #8
         card = td / "card.yaml"
         card.write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True))
         pv = AP.preview(card, PROB, repo_dir=repo, judge_env=False)

@@ -13,7 +13,8 @@
   試行のディレクトリに `result.json` ({step, ok, branch, detail, verdicts, outputs {パス: sha256}, inputs}) を書く。
 - `next_step` は台帳の取り込み済みの試行の `result.json` から位置を決める (driver が落ちても結果のファイルから決まる)。前の段が作った入力は
   使う直前に sha256 を照合し、違えば止まる (変更の要求 `note` に新しい sha256 と理由があれば通す; fixer の役割で直したとき)。
-- 格子の段は case/71 の台本 `hand_mesh.py` (`--axis-cap-frac 0.03`、手順書 §3)。一般化は plan §5.1 #10。
+- 格子の段は case/71 の台本 `hand_mesh.py` (`--axis-cap-frac 0.03`、手順書 §3)。節点数の上限は承認の記録 (`--approval`、カードの
+  mesh_limits; plan §4.6・§5.1 #8)。一般化は plan §5.1 #10。
 """
 from __future__ import annotations
 
@@ -234,13 +235,34 @@ def _last_res(run_dir) -> Path | None:
 
 
 def _approval_check(sd, card, problem) -> dict:
-    from ..intake import approval as AP
+    from ...intake import approval as AP
     return AP.check(sd["approval"], card, problem)
+
+
+def _card_precheck(sd) -> dict:
+    """最初の全格子の生成の前のカードの照合 (承認の原本か試行の入力か・カードだけで決まる保護の条件; plan tooling-design-orchestrator §4.6
+    「照合の場所と順」の 1)。問題の段は wt_card (estimate_mesh が全格子を作る) の前、格子の段は hand_mesh.py build の前に呼ぶ。"""
+    from ...intake import approval as AP
+    try:
+        return AP.check_card(sd["approval"], sd["card"])
+    except (AP.ApprovalError, OSError, ValueError) as e:
+        return {"status": "MISMATCH", "problems": [f"承認の記録を読めない ({e})"]}
+
+
+def _limits_precheck(sd, problem) -> list:
+    """準備の直前の節点数の上限の照合 (§4.6「照合の場所と順」の 3): 実際に使う問題 YAML の mesh・mesh_euler の上限 ≤ 承認の mesh_limits。
+    入力の sha256 の変更を note で受け入れても、ここは省かない。問題の列 (空なら OK)。"""
+    from ...intake import approval as AP
+    try:
+        lim = (AP.load_approval(sd["approval"]).get("protected") or {}).get("mesh_limits") or {}
+        return AP.mesh_limit_problems(lim, yaml.safe_load(Path(problem).read_text()))
+    except (AP.ApprovalError, OSError, ValueError) as e:
+        return [f"承認の記録・問題 YAML を読めない ({e})"]
 
 
 def _card_with_coefficients(src_card, coef_yaml, approval_path, out):
     """係数の断片 (contur_overrides.yaml、`deltastar_initializer.*` の行) をカードの overrides に入れ、承認の記録への参照を足す (手順書 §7.2)。"""
-    from ..intake import approval as AP
+    from ...intake import approval as AP
     d = yaml.safe_load(Path(src_card).read_text())
     coef = yaml.safe_load(Path(coef_yaml).read_text()) or {}
     ov = dict(d.get("overrides") or {})
@@ -279,6 +301,10 @@ def exec_step(sd: dict) -> dict:
     gate = [py, "-m", "forge_design.feedback.gate_env"]
     if kind == "problem":
         out = sd["problem_card"]
+        pre = _card_precheck(sd)
+        if pre["status"] != "OK":
+            res.update(detail=f"カードが承認と結び付かない — wt_card を回さない: {'; '.join(pre['problems'])[:400]}")
+            return res
         r = _run([py, "-m", "forge_design.intake.wt_card", sd["card"], "--out", out], "wt_card", design, sd)
         ck = _approval_check(sd, sd["card"], out) if r.returncode == 0 else {"status": "未"}
         res.update(ok=r.returncode == 0 and ck["status"] == "OK", detail=f"wt_card rc {r.returncode}・承認の照合 {ck['status']} {ck.get('diffs', [])[:3]}")
@@ -286,19 +312,31 @@ def exec_step(sd: dict) -> dict:
     elif kind == "mesh":
         script = repo / MESH_SCRIPT_REL
         md = case / f"_mesh_p{sd['k']}"
+        pre = _card_precheck(sd)
+        if pre["status"] != "OK":
+            res.update(detail=f"カードが承認と結び付かない — hand_mesh を回さない: {'; '.join(pre['problems'])[:400]}")
+            return res
         md.mkdir(parents=True, exist_ok=True)
         r1 = _run([py, script, "build", "--design", design, "--card", sd["card"], "--problem", sd["problem_card"], "--out-yaml", sd["problem"],
-                   "--record", md / "build_record.json", "--plan-item", "orchestrator recipe v1", "--axis-cap-frac", str(AXIS_CAP_FRAC)],
+                   "--record", md / "build_record.json", "--plan-item", "orchestrator recipe v1", "--axis-cap-frac", str(AXIS_CAP_FRAC),
+                   "--approval", sd["approval"]],                  # 節点数の上限は承認の mesh_limits (plan §4.6・§5.1 #8)
                   "hand_mesh_build", design, sd)
         r2 = _run([py, script, "check", "--design", design, "--card", sd["card"], "--problem", sd["problem"], "--record", md / "check_record.json",
                    "--run-dir", md / "check"], "hand_mesh_check", design, sd) if r1.returncode == 0 else None
         npass = 0 if r2 is None else len(re.findall(r"^VERDICT: PASS", r2.stdout, flags=re.M))
         ck = _approval_check(sd, sd["card"], sd["problem"]) if r2 is not None and r2.returncode == 0 else {"status": "未"}
+        if ck["status"] == "OK" and Path(sd["problem_euler"]).is_file():
+            ce = _approval_check(sd, sd["card"], sd["problem_euler"])          # Euler の写しも (上限は mesh_euler)
+            ck = ce if ce["status"] != "OK" else ck
         res.update(ok=r1.returncode == 0 and r2 is not None and r2.returncode == 0 and npass >= 2 and ck["status"] == "OK",
                    detail=f"hand_mesh build rc {r1.returncode}・check rc {None if r2 is None else r2.returncode}・VERDICT PASS {npass}・承認の照合 {ck['status']}")
         res["outputs"] = {p: sha256(p) for p in (sd["problem"], sd["problem_euler"]) if Path(p).is_file()}
     elif kind == "euler":
         rd = Path(sd["run_dir"])
+        lp = _limits_precheck(sd, sd["problem_euler"])
+        if lp:
+            res.update(detail=f"使う問題 YAML の節点数の上限が承認と合わない — 準備しない: {'; '.join(lp)[:400]}")
+            return res
         r = _run([py, "-m", "forge_design.evaluate.runner_axismach", sd["problem_euler"], rd], "euler", design, sd)
         last = _last_res(rd)
         mq = (rd / "MESH_QUALITY.txt").read_text().splitlines()[-1] if (rd / "MESH_QUALITY.txt").is_file() else ""
@@ -309,9 +347,13 @@ def exec_step(sd: dict) -> dict:
             res["euler_ref"] = {"run": str(rd), "res": str(last), "sha256": sha256(last)}
             res["outputs"] = {str(last): res["euler_ref"]["sha256"]}
     elif kind == "ns":
-        from ..campaign import ic as IC
-        from ..campaign import plan as EP
+        from .. import ic as IC
+        from .. import plan as EP
         rd = Path(sd["run_dir"])
+        lp = _limits_precheck(sd, sd["problem"])
+        if lp:
+            res.update(detail=f"使う問題 YAML の節点数の上限が承認と合わない — 準備しない: {'; '.join(lp)[:400]}")
+            return res
         ic = None
         if sd.get("ic_file"):
             ic = IC.resolve_ic(sd["ic_file"]["path"], sd["problem"], for_ns=True)

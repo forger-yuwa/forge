@@ -79,13 +79,15 @@ SOURCES = {"gas": {"kind": "user", "ref": "依頼の原文の組成"}, "conditio
            "M_exit": {"kind": "user", "ref": "依頼の原文"}, "throat": {"kind": "user", "ref": "依頼の原文"},
            "inlet": {"kind": "user", "ref": "依頼の原文"}, "divergent_length_m": {"kind": "user", "ref": "依頼の原文"},
            "wall": {"kind": "user", "ref": "依頼の原文の壁温"}, "p_ambient": {"kind": "recipe_default"},
-           "tolerances": {"kind": "recipe_default"}, "budget": {"kind": "user", "ref": "見積もりの承認 (GPU 4 h・50 GB)"}}
+           "tolerances": {"kind": "recipe_default"}, "budget": {"kind": "user", "ref": "見積もりの承認 (GPU 4 h・50 GB)"},
+           "mesh_limits": {"kind": "user", "ref": "試走 A の手組みの格子の節点数 (試験の仮の承認)"}}
 
 
 def v2(card_name, **edit) -> dict:
     d = yaml.safe_load((FIX / card_name).read_text())
     d["format"] = W.CARD_FORMAT_V2
     d["budget"] = {"gpu_hours": 4.0, "disk_gb": 50.0}
+    d["mesh_limits"] = {"max_nodes_ns": 412000, "max_nodes_euler": 434000}      # 問題 YAML の手組みの格子の上限 (plan tooling-design-orchestrator §5.1 #8)
     d["sources"] = copy.deepcopy(SOURCES)
     for k, v in edit.items():
         if v is None:

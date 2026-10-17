@@ -79,7 +79,7 @@ head = git("rev-parse", "HEAD").stdout.strip()
 co = td / "gates" / head
 try:
     d = yaml.safe_load((FIX / "card_p0.yaml").read_text())
-    d.update(format=W.CARD_FORMAT_V2, budget={"gpu_hours": 4.0, "disk_gb": 50.0}, sources=SOURCES)
+    d.update(format=W.CARD_FORMAT_V2, budget={"gpu_hours": 4.0, "disk_gb": 50.0}, mesh_limits={"max_nodes_ns": 412000, "max_nodes_euler": 434000}, sources={**SOURCES, "mesh_limits": {"kind": "user", "ref": "試走 A の手組みの格子の節点数 (試験の仮の承認)"}})  # §5.1 #8
     card = td / "card.yaml"
     card.write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True))
     prob = td / "problem.yaml"

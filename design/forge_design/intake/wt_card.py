@@ -121,6 +121,8 @@ SOURCE_KINDS = ("user", "recipe_default", "derived", "proposal")
 REQ_NO_GATE_KEYS = ("name", "method", "tolerance", "evidence", "judge")
 # overrides で上書きできる節と、カードの値から決まるので上書きできないキー (カードの該当キーを直す)
 _OVERRIDE_SECTIONS = ("gas", "geometry", "mesh", "mesh_euler", "evaluate", "deltastar_initializer")
+# 版 2 のカードが overrides で書けない節点数の上限 (mesh_limits に書く; plan tooling-design-orchestrator §5.1 #8)
+MESH_LIMIT_OVERRIDES = ("mesh.max_nodes", "mesh.max_nodes_reason", "mesh_euler.max_nodes", "mesh_euler.max_nodes_reason")
 _OVERRIDE_FORBIDDEN = ("gas.model", "gas.species", "gas.composition_basis",
                        "geometry.r_inlet", "geometry.L_U", "geometry.L_pipe", "geometry.Lc_mode", "geometry.L_total_tol")
 # mesh のうち estimate_mesh が埋めるキー (overrides で与えたらそちらを使う)
@@ -433,6 +435,11 @@ def validate_card(card, card_dir=None) -> dict:
         out["M_knot_mode"] = "fixed"
     if v2:
         _validate_v2(errs, card, out)
+        # 節点数の上限は mesh_limits だけに書く (承認の対象; plan tooling-design-orchestrator §4.6「照合の場所と順」の 4、§5.1 #8)。
+        # overrides の max_nodes・max_nodes_reason は理由の文が自由なので、過去の承認の文で上限を広げられた
+        bad = sorted(k for k in out.get("overrides") or {} if k in MESH_LIMIT_OVERRIDES)
+        if bad:
+            errs.append(f"版 2 のカードは overrides {bad} で節点数の上限を書けない (上限は mesh_limits に書き、ユーザの承認を取る)")
     if errs:
         raise ValueError("要求カード: " + "; ".join(errs))
     return out
@@ -752,6 +759,13 @@ def card_to_problem(card, r_t_m: float, M_knot: float | None = None) -> dict:
         old = _set_path(prob, path, copy.deepcopy(val))
         ov_log.append({"key": path, "before": (None if old is _MISSING else old), "before_missing": old is _MISSING,
                        "value": val})
+    # 版 2 のカードの mesh_limits を問題 YAML の上限に写す (estimate_mesh の全格子の前; plan tooling-design-orchestrator §4.6 の 4)。
+    # 書いた値は承認の対象 (approval.check が問題 YAML の上限 ≤ 承認の mesh_limits を照合する)
+    for blk, key in (("mesh", "max_nodes_ns"), ("mesh_euler", "max_nodes_euler")):
+        lim = (card.get("mesh_limits") or {}).get(key)
+        if lim is not None:
+            prob[blk]["max_nodes"] = int(lim)
+            prob[blk]["max_nodes_reason"] = f"カードの mesh_limits.{key} (承認の対象; plan tooling-design-orchestrator §4.6)"
     # 検査 (§4.1 3.)。R は overrides 後の値
     g = prob["geometry"]
     R = float(g["R"])
@@ -911,8 +925,10 @@ def _ar_mesh_params(ni: int, mesh: dict, frac: float, frac_t):
 
 def _card_allow_hint(block: str) -> str:
     """要求カードで節点数の上限を許す書き方 (plan tooling-nozzle-mesh-size-guard §4.2)。{n_nodes} は check_node_budget が実効の節点数に置き換える。"""
+    key = "max_nodes_ns" if block == "mesh" else "max_nodes_euler"
     return (f"カードの overrides に {block}.max_nodes と {block}.max_nodes_reason を組で書く "
-            f"(例 overrides: {{{block}.max_nodes: {{n_nodes}}, {block}.max_nodes_reason: \"…\"}})")
+            f"(例 overrides: {{{block}.max_nodes: {{n_nodes}}, {block}.max_nodes_reason: \"…\"}}; 版 2 のカードは overrides に書けず "
+            f"mesh_limits.{key} に書いてユーザの承認を取る)")
 
 
 def _mesh_ar_full(wall, ni: int, mesh: dict, frac: float, frac_t) -> dict:
@@ -951,7 +967,7 @@ def _y1plus_at_stations(wall, ni: int, mesh: dict, frac: float, frac_t, x_dense,
     return float(y1p[k]), float(xs[k])
 
 
-def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
+def estimate_mesh(card, problem_dict: dict, chain: dict | None = None, full_grid: bool = True) -> dict:
     r"""壁解像の第 1 層と ni の**初期見積もり** (§4.1 4.)。合格の根拠ではない — NS 後に `check_wall_resolution.py` の VERDICT で
     判定し、不合格なら細分する (手順書 §2 ⑥)。
 
@@ -976,7 +992,9 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
     - **節点数の上限** (plan tooling-nozzle-mesh-size-guard §4.2): 全格子 (`_mesh_ar_full`) を作る前に、同じ Mesh2DParams の実効の節点数
       (`mesh2d.node_count`) を `runner_axismach.check_node_budget` で判定し、上限 (既定 30 万、`mesh.max_nodes` と理由で許可) を超えたら
       全格子を作らずに ValueError。戻り値の `nodes` に節点数と上限。
-    chain: `design_chain` の結果 (無ければ problem_dict から作る)。"""
+    chain: `design_chain` の結果 (無ければ problem_dict から作る)。
+    full_grid=False: 全格子 (`_mesh_ar_full`) を作らない (AR の測定と ni の繰り上げをしない; `mesh_check` は {measured: False}。
+    断面の値だけを使う `hand_mesh.py build` 用、plan tooling-design-orchestrator §5.1 #8)。既定 True は今までどおり。"""
     card = validate_card(card) if "tolerances_default" not in card else card
     if chain is None:
         chain = _design_chain_of(problem_dict)
@@ -1090,14 +1108,19 @@ def estimate_mesh(card, problem_dict: dict, chain: dict | None = None) -> dict:
             raise ValueError(f"要求カード → 問題 (estimate_mesh、NS の格子 ni {ni_} は {src}): {ex}") from ex
 
     nodes = guard_nodes(ni)
-    full = _mesh_ar_full(wall, ni, mesh_c, frac, frac_t)
-    n_bump = 0
-    while full["ar_max"] > ar_max and ni < NI_CAP and ni_fixed is None and n_bump < 50:
-        ni = min(NI_CAP, ni + 10)
-        nodes = guard_nodes(ni)
+    if not full_grid:
+        # 全格子を作らない (`hand_mesh.py build` が断面の値だけを使うとき; plan tooling-design-orchestrator §5.1 #8、2026-10-18 codex 諮問
+        # v2c-fail)。全格子の AR の測定と ni の繰り上げはしないので、mesh_check は「未測定」と明示する (推定や 0 で埋めない)
+        full = {"measured": False, "reason": "full_grid=False (全格子を作らない; AR の測定と ni の繰り上げをしていない)"}
+    else:
         full = _mesh_ar_full(wall, ni, mesh_c, frac, frac_t)
-        n_bump += 1
-    if full["ar_max"] > ar_max:
+        n_bump = 0
+        while full["ar_max"] > ar_max and ni < NI_CAP and ni_fixed is None and n_bump < 50:
+            ni = min(NI_CAP, ni + 10)
+            nodes = guard_nodes(ni)
+            full = _mesh_ar_full(wall, ni, mesh_c, frac, frac_t)
+            n_bump += 1
+    if full_grid and full["ar_max"] > ar_max:
         warnings.append(f"格子: 実際の格子 (ni {ni}) の AR の最大 {full['ar_max']:.0f} が ar_max {ar_max:g} を超える "
                         f"(x = {full['x_at_max']:.3f} r_t)")
     yp, xp = _y1plus_at_stations(wall, ni, mesh_c, frac, frac_t, x, frac_req)

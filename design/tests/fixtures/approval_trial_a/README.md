@@ -7,4 +7,5 @@
 - `problem_p0.yaml`・`problem_p1.yaml`: それぞれのカードから生成した問題 YAML (AWS B の `~/qs_trial/forge/case/90.qs_trial_a/` から写した)。
   違いは較正の係数と r_t から決まる値だけ。
 - `run_0003_ns_p0/`: NS p0 の run の停止規則の基準 (`settle_criteria.yaml`)・`solverConfig.yaml`・`bcondConfig.yaml` と、
-  `prepare_info.json` のうち基準の解決に使う欄 (Md・scale_m・x_E・physical_wall.domain・mesh の ni と nj)。場のファイルは含めない。
+  `prepare_info.json` のうち基準の解決に使う欄 (Md・scale_m・x_E・physical_wall.domain・mesh の ni と nj) と、格子の節点数 `mesh.n_nodes`
+  (承認の上限との照合に使う; 2026-10-18、plan tooling-design-orchestrator §5.1 #8)。場のファイルは含めない。

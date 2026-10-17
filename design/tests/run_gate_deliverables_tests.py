@@ -73,7 +73,8 @@ os.environ[GE.GATE_ROOT_ENV] = str(td / "gates")
 head = git("rev-parse", "HEAD").stdout.strip()
 try:
     d = yaml.safe_load(CARD.read_text())
-    d.update(format=W.CARD_FORMAT_V2, budget={"gpu_hours": 4.0, "disk_gb": 50.0}, sources=SOURCES)
+    # 節点数の上限は承認の mesh_limits (plan tooling-design-orchestrator §5.1 #8; 問題 YAML の上限がこれを超えると承認の照合で止まる)
+    d.update(format=W.CARD_FORMAT_V2, budget={"gpu_hours": 4.0, "disk_gb": 50.0}, mesh_limits={"max_nodes_ns": 443000, "max_nodes_euler": 467000}, sources={**SOURCES, "mesh_limits": {"kind": "user", "ref": "case/71 のユーザ決定「a」2026-10-15 (手組みの格子の節点数)"}})
     card = td / "card.yaml"
     card.write_text(yaml.safe_dump(d, sort_keys=False, allow_unicode=True))
     prob = td / "problem.yaml"

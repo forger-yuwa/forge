@@ -79,6 +79,8 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 - 上限は 2D で **30 万点** (Euler・NS 共通)。超えると生成器・prepare が格子を作る前に止まる。超える格子が要るなら**ユーザの了承を取ってから** `overrides: {mesh.max_nodes: N,
   mesh.max_nodes_reason: "…", mesh_euler.max_nodes: N, mesh_euler.max_nodes_reason: "…"}` を書く。NS の ni は壁際の AR (≤ 0.97 × 5000) から決まり、第 1 層が薄い (Re が高い)
   と上限 6000 まで増える — まず第 1 層・`ar_max`・`throat_refine` を見直す。
+  版 2 のカード (`forge.wt_card/v2`、承認の入口; plan `tooling-design-orchestrator` §4.6) は `overrides` の上限を書けない: 上限は `mesh_limits:
+  {max_nodes_ns: N, max_nodes_euler: N}` に書き、ユーザの承認 (承認の記録) を取る。生成器・`hand_mesh.py build --approval`・recipe は承認の上限で止まる。
 - Euler の ni は NS と同じ (減らすと Euler の解が動く: case/70 で ni 600 の出口 M +3.8e-4、plan `tooling-nozzle-mesh-size-guard` §4.1)。明示の `mesh_euler.ni` は保持される。
 
 ## まず使うツール (新しく書かない; AGENTS.md「既存ツールの再利用を最優先」)
