@@ -217,6 +217,29 @@
 
 - 関門 (`handoff_gate_v2`)・`judge_run` は計算の成立と受け渡しを扱う。公差は別の判定にする。CENSORED の扱い (延長 1 回 / 人に返す) はレシピが持つ。
 
+**解析の成立の読み方** (2026-10-18 codex 諮問 [judge-v2](../../notes/reviews/2026-10-18-orchestrator-judge-v2-diagnose-judge-v2.md) を全件採用; `judge_run` 側の
+正本は plan `tooling-convergence-and-wall-resolution-gates` §4.6 の 8):
+
+- `judge_run` は、`settle.select_judge` が `check_settled.py` を選ぶ run (停止規則 v2 の run など) の `convergence` を `check_settled` (本段の起動との照合つき・書き込みなし)
+  で判定する。原判定・道具・判定区間・停止の step を残す。この PASS は「設定した量・区間で SETTLED」の意味で、残差の低下は意味しない。
+  基準の無い run と前の段と確かめた run は今どおり `check_convergence`。
+- 停止規則 v2 の run は、停止の時の再評価と今の入力・起動・終端・量の数値の照合 (`stop_rule.match_reeval`)、停止の状態・`STOPPED_AT` の照合を通す。
+  再評価の記録の無い v2 の終わった run も照合から外さない (判定不能)。照合が通らなければ判定不能にする。ただし判定し直しの FAIL (NOT_SETTLED・DIVERGED) は
+  FAIL のまま残し、照合の不能を併記する (既知の FAIL を隠さない)。
+- 準定常 (`quasisteady`) は同じ 1 回の `check_settled` の結果を共有する (criterion `settle`)。数値の判定を共有しても、仕様の量 (生成器が
+  `settle_criteria.yaml` から書く) と基準の量の名前・種類・基準の sha256 の照合は省かない。欠け・余りは判定不能。
+- 停止規則 v2 の状態 `FAILED` は FAIL (途中の記録は確定として扱わない)。
+- 鮮度の入力は、判定とその入力の一覧を作る共通の処理 (書き込みと分ける) から取る。鮮度の確認では今のファイルを計算し直す (前に無かったファイルが
+  現れても検出する)。古い形の run では、選んだ `SETTLE_VERDICT.json` も入力。
+- 風洞ノズルの判定 (`wt_qualify`) は `judge_run` の全体を別の出力先で回し直す (承認のモードでは判定専用の環境で)。run の中の `RUN_VERDICT.json` は使わない
+  (作業側のコードの自己申告であり、`check_fresh` の FRESH は承認した判定器で評価した証拠にならない)。項目の扱い:
+  - `solver`・`nonfinite`・`physical`・`convergence`・`stop_rule`・`quasisteady` が全部 PASS で、`wall_resolution` だけが FAIL → `back_to_correction`
+    (`mesh_first_layer`)。解析の総合は FAIL のまま。失敗の原因から次の処置を選ぶのは許す (合格への迂回ではない)。上の判定表の
+    「要求の一致と解析の成立が通ったときだけ評価する」の例外はこれだけ。
+  - 上の 6 項目のどれかが PASS でない (FAIL・判定不能・適用外・項目が無い) → `incomplete`。対象の NS では適用外を許さない。
+  - `accepted` は壁解像を含めて全部の検査が合格のときだけ。`wt_qualify` が自分で回す壁解像と `judge_run` の壁解像は step・全壁・閾値をそろえ、
+    食い違えば `incomplete` (無視しない)。
+
 **判定器の無い要求** (新しい機種・新しい解析領域):
 
 - 必須の要求ごとに「評価方法・公差・証拠・判定の担当」を事前に決めてユーザの承認を得る (§4.7 のユーザ欄に入れる)。
@@ -505,7 +528,9 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | 4a | ~~初期場の固定・継承する値の解決・適合性~~ (2026-10-17 実装・試験 ALL PASS) (§4.1.1 の 1) | `prepare`・`prepare_ns` に初期場のファイルの引数、準備の記録にパス・step・sha256。継承するリミッタの基準値を計画の時点で解決して明示で渡す。初期場の適合性 (輸送種の配置・エネルギー基準・形状と格子の識別) の検査。合格: 計画を確定した後に参照の run に新しい場を足しても使う入力が変わらない (負例)、適合しない初期場で止まる **結果 (2026-10-17)**: `runner_axismach.select_ic` (固定したファイル `ic_file` と計画の sha256 `ic_sha256` の照合、`ic_from` だけのときも選んだファイルを記録)、`prepare`・`prepare_ns` の引数 `ic_file`・`ic_sha256` と準備の記録の `ic_snapshot` (パス・step・sha256)、`design/forge_design/campaign/ic.py` の `resolve_ic` (元の run の種類・継承するリミッタの基準値を明示の値 {ro, p, a, L} に・適合性: 熱力学のモデル・エネルギー基準・輸送種の配置 (`physProp.species`、まとめた種の中身まで)・設計マッハ数)。試験 `design/tests/run_campaign_ic_tests.py` ALL PASS (試走 A: 解決した基準値が run_0005 が実際に使った値と同じ、新しい場を足しても固定したファイルは変わらない、中身が変われば止まる、適合しない 3 種で止まる)。準備の記録の NS 側は `species` を持たないので、配置は元の run の solverConfig から読む。既存の試験 (リミッタの継承・格子の上限・停止規則・本段の B0・ほか 9 本) は通る。`run_wall_temperature_tests` の 4 件の FAIL は変更前の runner でも同じ (手元の変換器の置き場所と固定の入力の化学種の属性; 今回の変更と無関係) | O |
 | 4b | ~~実効の計画の確定と、計画からの実行・照合~~ (2026-10-17 実装・試験 ALL PASS) (§4.1.1 の 2・3) | `execution_plan.json` (準備の前・準備の後の確定、上書きしない)、版付きの recipe の段の列と許す差、`run_staged_ns` が計画を受け取り起動の直前に照合、終わった後の照合。合格: 判別の A/B (B は起動 0 回)、段の間の物理の差・計画に無い段で止まる、run_0014 の段の設定から計画を作り直すと一致 (GPU なし) **結果 (2026-10-17)**: `design/forge_design/campaign/plan.py` (`fixed_inputs`・`confirm`・`load_confirmed`・`assert_launch_set`・`assert_launch`・`verify_after`、recipe `axismach.wt_card_chain/v1` の段の列と許す差・禁止する差 (physProp・turbulence・mesh))、`runner_axismach.staged_ns_launch_configs` (run_staged_ns と同じ関数で全段の起動直前の設定、本段は停止規則の上限)、`run_staged_ns(plan=…)` (最初の段の前に全段と境界条件、各段の起動の直前にその段を照合)。確定した計画は sha256 で守り、上書きしない。試験 `design/tests/run_execution_plan_tests.py` ALL PASS (run_0014 の写し、ダミーの forge): **計画の 3 段の設定の FNV が run_0014 の実際の段の記録と一致**、判別の A/B (A 起動 1 回・B (S1 の CFL だけ 0.5 → 0.6) 起動 0 回)、計画の書き換え・二重の確定・前の段の乱流の差・計画の後の境界条件の変更で止まる、走った後の照合。既存の試験 (停止規則 v1・v2・整定・本段の B0・実データの整定 70・リミッタの継承) は通る | O |
 | 4c | ~~search の無い campaign と親 plan の分担~~ (2026-10-17 実装・試験 ALL PASS) (§4.1.1) | `forge.campaign/v1` (search なし、未知のキー・search・知らない recipe の拒否)。親 plan §5.1 #6・#7 を #6a/#6b・#7a/#7b に分け、§4.3 に例外を書く。合格: 正例 1・負例 3 以上 **結果 (2026-10-17)**: `design/forge_design/campaign/campaign.py` (`forge.campaign/v1`: 名前・承認の記録 (sha256 の照合)・recipe `axismach.wt_card_chain/v1`・case・台帳。`search`・`evaluations`・`qualification`・知らないキー・知らない recipe と版を拒否)。試験 `design/tests/run_campaign_schema_tests.py` ALL PASS (正例 1・負例 7)。親 plan の §4.3 の例外と #6・#7 の分割は d912df91 で書いた | O |
-| 5 | forge-gate と feature/card-local-mesh の統合、`judge_run` の v2 対応、qualification (§4.2) | 合格: run_0011 で RUN_VERDICT が SETTLE_VERDICT と整合、`SETTLED` でも壁解像 FAIL なら総合 FAIL、公差未達でも整定している例・必須の CAD の欠けの例の試験 | O |
+| 5a | ~~forge-gate と feature/card-local-mesh の統合~~ (2026-10-18、b678772d) | `origin/feature/generator-defaults-launch-gate` を取り込んだ。衝突の解き方と試験の合わせ込みは commit の本文。**結果**: forge 側の単体試験 (`test_judge_run`・`test_launch_gate`・`test_mesh_provenance` ほか) と `test_gate_bad_input.py` は ALL PASS。design の試験も ALL PASS。既存の失敗 4 本 (`run_sern_moc_tests`・`run_wall_tables_tests`・`run_wall_temperature_tests` の 4 件・`run_sern_gates_tests`) はマージ前の HEAD でも同じ形で落ちる。`run_h370_prelaunch_tests` の 3 件も同じ。残り: `judge_run` は、`run_case.sh` が `check_settled` で判定する run の `convergence` を `check_convergence` で判定する (合成の run で再現: SETTLED でも `RUN_VERDICT` は convergence FAIL)。v2 の状態 `FAILED` も知らない (→ #5b) | O |
+| 5b | `judge_run` の停止規則 v2 対応 (§4.2「解析の成立の読み方」、judge plan §4.6 の 8) | 触る: `judge_run.py`、`settle.py` (判定と入力の一覧の共通処理、書き込みと分ける)、`check_settled.py`、`judge.py` (`spec_axismach` の v2 = criterion `settle`)、`runner_axismach.run_staged_ns`。合格: §6 J の A/B。run_0011・run_0014 の写しで convergence・stop_rule・quasisteady が PASS (後付けの仕様を使った移行試験と明記し、生成器が起動前に仕様を書く試験と分ける)。`FAILED` → FAIL。仕様の量の欠け・余り → 判定不能。再評価の記録の無い v2 の run → 判定不能。判定し直しの FAIL と照合の不能の併存 → FAIL。既存の試験 (`test_judge_run`・`run_judge_finalize_tests`・`run_stop_rule*`・`run_settle_migration_tests`) は合格のまま | O |
+| 5c | `wt_qualify` の解析の成立に `judge_run` の回し直し (§4.2「解析の成立の読み方」) | `judge_run` に別の出力先を足し、`wt_qualify` の両方のモードから回す (承認のモードは判定専用の環境)。合格: 正例 run_0014 の写しは accepted のまま。SETTLED でも壁解像 FAIL → 総合 FAIL・`back_to_correction` (`mesh_first_layer`)。公差未達でも整定 → `back_to_correction` (試走 A `run_0003_ns_p0`)。必須の CAD の欠け → `incomplete`。quasisteady の判定不能 → `incomplete`。2 つの壁解像の食い違い → `incomplete` | O |
 | 6a | ~~台帳・停止の記録・予算の勘定~~ (2026-10-17 実装・試験 ALL PASS) (§4.5.1) | 台帳 (flock を生きている間持つ・一時ファイル → rename・campaign の ID・試行の記録・取り込みの一度だけ)、停止の記録 (§4.3 の欄)、予算の予約・消費・精算 (GPU 時間は起動ごとの時刻、ディスクは重ならない所有の範囲)。campaign に `role` を足す。合格: 二つ目の書き手が取れない、取り込みを 2 回しても精算は 1 回、終わりの時刻の無い区間を 0 にしない、二重に数えない、同じ名前の別の campaign で ID が違う **結果 (2026-10-17)**: `design/forge_design/campaign/ledger.py` (flock を持ち続ける唯一の書き手・一時ファイル → fsync → rename・campaign の ID (UUID)・起動の前の試行の記録・試行 ID ごとに一度だけの取り込みと精算・変更の要求のファイル)、`budget.py` (起動ごとの GPU 時間・終わりの時刻の無い起動は根拠の時刻まで・重ならない所有の範囲のディスク・予約の検査)、`stop.py` (停止の記録の欄・上書きしない・driver の補いは根拠が無ければ unknown)、campaign に `role` (fixed / fixer)。試験 `design/tests/run_ledger_tests.py` ALL PASS (13 件)、`run_campaign_schema_tests.py` ALL PASS (負例 8) | O |
 | 6b | ~~試行の service・予算の監視・最小の driver と復旧~~ (2026-10-17 実装・試験 ALL PASS) (§4.5.1) | 合格 (ダミーの forge、GPU なし): 起動の要求と台帳の記録の間の障害、driver のいない間の試行の完了、取り込み・精算の途中の障害、二重の `--resume`、停止の途中の再開、CLI が死んでも監視が続く、実行担当が死んだ後に forge だけが残らない、予算の超過で先に記録してから止まる、ログの置き場所の容量不足、既存の出力先に書かない **結果 (2026-10-17)**: `design/forge_design/campaign/step.py` (試行の実行担当: 段の処理を子として回し、予算を監視し、超えたら先に停止の記録を書いてから子のグループを止める)、`driver.py` (最小の driver: 台帳の記録 → systemd の user service の起動 → 起動の印 → 待ち → 一度だけの取り込み、再開の照合、起動の前の検査 (空き容量・出力先・予算)、試験用の障害の仕掛け `FORGE_DRIVER_CRASH_AT`)。試験 `design/tests/run_driver_tests.py` ALL PASS (13 件、実際の user service とダミーの段): T1 ふつう、T2 記録の後に落ちる、T3 起動の後に落ちる、T4 driver のいない間の完了、T5 取り込みの前・後に落ちる、T6 二重の driver、T7 予算の超過 (先に記録、2.6 s で止まる、子が残らない)、T8 driver が死んでも予算の監視が続く、T9 実行担当の SIGKILL (子が残らない、driver が unknown で補う、GPU 時間を 0 にしない)、T10 停止の途中の再開、T11 空き容量、T12 既存の出力先。試験の後に試行の unit は残っていない。実行中のディスクの容量不足 (書き込みの失敗) は試していない | O |
 | 6c | ~~recipe の段と分岐・CLI・README の同期・変更の要求~~ (2026-10-17 実装・試験 ALL PASS; GPU の段の本物の実行は V1b・V4) (§4.5.1) | 合格: 判別の A/B (codex: 同じ run の写しで成果物あり → accepted で終わる、成果物なし → `make_deliverables` で成果物の段へ進む; 止まれば第 1 仮説の支持)、p0 の後の最初の較正が較正し直しの回数に入らない、上限で止まる、README の行が出てほかの行が残る、`fixed` で生成した入力の sha256 が使う直前に違えば止まる **結果 (2026-10-17)**: `design/forge_design/campaign/recipes/wt_card_chain.py` (段の列と分岐、各段の処理 `exec` が結果のファイル `result.json` を書き、`next_step` は結果のファイルから位置を決める、前の段が作った入力の sha256 を使う直前に照合 (変更の要求 note があれば通す)、NS の段は Euler の参照と初期場を固定し `deltastar_loop --plan-inputs` で実行の計画を確定)、`deltastar_loop` の `--ic-file`・`--ic-sha256`・`--plan-inputs`、driver の走らせる環境の固定 (初回に写し、再開で照合)・解釈の記録・README の同期 (`campaign/readme.py`)、`campaign/cli.py` (`run` (systemd・Linger の検査、役割 fixed は承認の commit の checkout から)・`status`・`note`)。試験: `run_recipe_tests.py` ALL PASS (分岐 15 件・README 2 件)、`run_recipe_gate_tests.py` ALL PASS (**判別の A/B: 成果物の無い run の判定は make_deliverables で成果物の段へ進み、判定専用の環境で成果物を作った後の最後の判定は accepted で終わる**、MANIFEST の gate は承認の commit)、`run_cli_tests.py` ALL PASS (この PC は Linger=no なので run は止まる)。判定専用の checkout に recipe の格子の台本の場所 (`case/71…/_mesh`) を足した (12.8 MB)。**残り**: 格子・Euler・NS・較正の段の本物の実行 (GPU) は §6 V1b・V4 (#7 の後)、役割 fixed の通し・run の起動の service での driver は GPU の通しで確かめる | O |
@@ -573,6 +598,14 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
     case/71 の 1 回目の壁は未整定・ディスク満杯・延長も CENSORED (case/71 README) なので、公差未達の正例に使わない。同じ参照に相反する期待の結果を置かない。
   - 段の間の引き継ぎと完了の記録。
   - 数値の差は表にして記録する。数値の許容は、同じホスト・同じ入力の反復 2 本で床を取るまで事前登録しない。
+- **J (§5.1 #5b の判別の A/B、事前登録 2026-10-18、実装の前; codex 諮問 judge-v2 の提案)**: 同じ合格の fixture の独立な写し 2 つで、forge を回さずに
+  `judge_run.py` を各 1 回回す。fixture は `case/71.m55_combustion_wt/run_0014_chain_v2/` の写し (h5 は symlink、他のファイルは複製)。
+  判定の仕様 `JUDGE_SPEC.json` は #5b の生成器の関数 (`spec_axismach` の v2) で写しに後から書く (移行試験; 生成器が起動前に書く試験とは別)。
+  - A: 変更なし。期待: `convergence` PASS (SETTLED)・`stop_rule` PASS (REACHED)・`quasisteady` PASS。
+  - B: `boundary_massflux.csv` の先頭のコメント行の 1 文字を変える (数値の行は変えない)。期待: `check_settled` の数値と SETTLED は A と同じ。
+    停止の時の再評価との照合 (`match_reeval`) は入力の sha256 の不一致で通らず、`convergence` は INDETERMINATE (総合は PASS にならない)。
+  - 解釈: A が PASS にならなければ陽性対照の不成立 (試験の不成立)。B が PASS なら欠陥が残っている (諮問の第 1 仮説の支持)。
+    `solver`・`nonfinite`・`physical`・`wall_resolution` は写しの実際の値で決まり、この A/B の判別には使わない (両方で同じであることだけ確かめる)。
 - **V2a**: 手組みの格子を包んだ段が、case/71 の節点の座標と一致する。
 - **V2b**: 雛形の格子で、別のカード (case/70 M5 の空気) が品質の関門を通る。
 - **V2c (節点数の上限の負例)**: 別のカード + 過去の承認の文 (case/71 の「ユーザ決定『a』2026-10-15」) で上限を広げようとすると、格子を作る前に止まる。承認した上限を超える作り直しも止まる。case/71 のカードと承認では V2a と同じ格子ができる。
@@ -611,6 +644,7 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-minimal-campaign-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-minimal-campaign.md](../../notes/reviews/briefs/2026-10-17-orchestrator-minimal-campaign.md)) | C0/M3/m1 | 全件**採用** (主セッションが根拠の行 `runner_axismach.py:2946`・`:3002`・`:2676`・`:2523`・`:1777` を確かめた): **(b)・(d) の元の案は却下に従う** → 準備の前の固定・準備の後の確定・計画からの実行と前後の照合の 3 段、版付きの recipe が段の列と許す差を持つ、段の記録の key を全設定の証拠にしない (§4.1.1、#4b)。(c) は採用し、継承する値の解決と初期場の適合性を足す (#4a)。親 plan の #6・#7 を限定の実装と探索待ちに分ける (#4c) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-executor-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-executor-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-executor.md](../../notes/reviews/briefs/2026-10-17-orchestrator-executor.md)) | C0/M5/m1 | 全件**採用** (主セッションが根拠の行 手順書 §6・§8 の表 (667 行)・`gate_env.py:326` を確かめた): M1 recipe の分岐を手順書に合わせる (`make_deliverables` → 成果物、p0 の後の最初の較正は判定と別)、M2 driver の復旧 (先に記録してから起動・取り込みは一度・ロックを持ち続ける・二重の再開・ID)、M3 予算で止めるときは先に記録、M4 予算の測る範囲 (重ならない所有の範囲・終わりの無い区間を 0 にしない)、**M5 作り直して比べる `fixed` の照合は却下に従う** → 承認の commit の checkout から回して生成器を固定し、生成した入力の sha256 を使う直前に照合、m1 ログと変更の要求。固定の倍率 (1.5 倍) で止める案は入れない。手元の GPU で V4 (a) を前倒ししない (§4.5.1、§5.1 #6a〜#6d) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-v1a-fail-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-v1a-fail-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-v1a-fail.md](../../notes/reviews/briefs/2026-10-17-orchestrator-v1a-fail.md)) | V1a の FAIL の扱い (Major 3・Minor 1) | 全件**採用**: V1a は FAIL のまま、呼び出し経路の A/B (V1a′) を完全なキーパスで事前登録して別の検証にする (PASS)、`compare.py` は緩いので V1a′ で使わない、初期壁の係数の検査を NS の後から計画の確定へ移し型・有限・値を照合 (NaN を通していた)、「トポロジも違う」の誤りを訂正 (§6 V1a・V1a′、§5.1 #6d) |
+| diagnose (codex) | 2026-10-18 | [2026-10-18-orchestrator-judge-v2-diagnose-judge-v2.md](../../notes/reviews/2026-10-18-orchestrator-judge-v2-diagnose-judge-v2.md) (ブリーフ [briefs/2026-10-18-orchestrator-judge-v2.md](../../notes/reviews/briefs/2026-10-18-orchestrator-judge-v2.md)) | 修正して採用 (Major 4: 停止の時の照合は `match_reeval`、鮮度の入力一覧の取り方、wt_qualify は固定版の judge_run を回し直す、準定常の仕様の照合を省かない; FAILED の欠落) | 全件**採用**: §4.2「解析の成立の読み方」、§5.1 #5 を #5a〜#5c に分けた、§6 J (判別の A/B) を事前登録、judge plan §4.6 の 8 |
 
 ## 7. 影響範囲
 
@@ -629,6 +663,7 @@ V1a・V1b・V2a・V2b・V2c・V3・V4 (a)。V4 (a) は既知の正常のカー�
 
 ## 9. 変更ログ
 
+- `2026-10-18` — §5.1 #5a: forge-gate (`feature/generator-defaults-launch-gate`) を取り込んだ (b678772d; 衝突の解き方と試験の合わせ込みは commit の本文)。`judge_run` の停止規則 v2 対応の設計を codex (diagnose) に諮り、全件採用して §4.2「解析の成立の読み方」を足し、#5 を #5a〜#5c に分け、§6 J を事前登録した。
 - `2026-10-17` — §5.1 #6d: V1a (V6 との比較) は FAIL を記録、codex 諮問で V1a′ (同じ今のコードで旧の呼び方と CLI) を事前登録して PASS。旧の台本の検査と関門の対応表 (未対応 0)。見つけた穴 2 つを関門にした (準備の後のファイルの変更・初期壁の係数)。
 - `2026-10-17` — §5.1 #6c を実装: recipe `axismach.wt_card_chain/v1` (`campaign/recipes/wt_card_chain.py`)、CLI、README の同期、走らせる環境の固定、`deltastar_loop` の計画のつなぎ。判別の A/B (成果物なし → 成果物の段へ、成果物の後 → accepted で終わる) を本物の判定で確かめた。
 - `2026-10-17` — §5.1 #6b を実装: 試行の実行担当 (`campaign/step.py`) と最小の driver (`campaign/driver.py`)。障害の試験 `run_driver_tests.py` ALL PASS (13 件、実際の user service)。
