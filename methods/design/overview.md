@@ -1387,8 +1387,9 @@ AI が変えてはいけない「ユーザが決めた欄」と「判定の条�
 - **判定の正式な入口** (`wt_qualify --approval card_approval.json`): 公差・窓・点数・無くてもよい成果物・反復と較正し直しの上限は承認の値だけを使い、
   CLI の指定は値が同じでも拒否する (`--iteration` は必須)。run の基準が承認の評価の条件と違えば `incomplete`、判定器の無い要求があれば accepted にしない。
   `--approval` なしの使い方 (開発・手順書の試走) は今のまま。
-- 承認の記録は真正性を証明しない (sha256 と `user_ref` は「指定した承認の記録との整合」だけを示す)。判定専用の環境 (plan §5.1 #2b) と中間の判定の再検査 (#2c) は未実装。
-- 試験: `design/tests/run_approval_tests.py` (固定の入力 `design/tests/fixtures/approval_trial_a/`)。
+- **判定専用の環境** (`forge_design/feedback/gate_env.py`、`python -m forge_design.feedback.gate_env judge --approval card_approval.json -- <wt_qualify の引数>`): 承認の commit の sparse checkout (`design`・`solver_density_cuda/tools`・`solver_density_cuda/data`、`~/.cache/forge-gates/<commit>`) と、承認のときに記録した 判定の Python (実体・prefix・配布物ごとの RECORD の sha256) と外部の道具 (gmsh 用の Python・FreeCAD・変換器の実体と sha256) で、隔離のモード・許した環境変数だけで `wt_qualify` を回す。checkout の HEAD・追跡ファイルの変更・探索先の未追跡/ignored のファイル・環境の指紋が違えば判定しない。`wt_qualify --approval` は、この環境の印・import の元・checkout の HEAD を確かめ、外で回されたら止める。
+- 承認の記録は真正性を証明しない (sha256 と `user_ref` は「指定した承認の記録との整合」だけを示す)。中間の判定の再検査 (plan §5.1 #2c) は未実装。
+- 試験: `design/tests/run_approval_tests.py` (固定の入力 `design/tests/fixtures/approval_trial_a/`)、`design/tests/run_gate_env_tests.py` (HEAD を承認の commit に使うので commit した後に回す)。
 
 ### 成果物一式
 
