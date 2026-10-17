@@ -130,6 +130,11 @@ try:
     check("(N4) checkout のコードの探索先に .py を足す → check が止める", raises(lambda: GE.check(apath), "未追跡"))
     stray.unlink()
     check("(N4) 消すと通る", GE.check(apath)["status"] == "OK")
+    pc = co / "design" / "forge_design" / "export" / "__pycache__"
+    pc.mkdir(exist_ok=True)
+    (pc / "x.cpython-311.pyc").write_bytes(b"\0")
+    check("(N4) __pycache__ のバイトコード (外部の道具が書く) は照合の前に消して通る",
+          GE.check(apath)["status"] == "OK" and not pc.exists())
     tool = td / "fake_converter"
     tool.write_text("a")
     snap = GE.snapshot(tools={"FORGE_CONVERTER": str(tool)})

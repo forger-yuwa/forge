@@ -206,6 +206,13 @@ def ensure_checkout(commit: str, repo=None) -> Path:
             r = _git(where, *args)
             if r.returncode != 0:
                 raise GateEnvError(f"checkout を作れない ({commit}; git {args[0]}): {r.stderr.strip()[:400]}")
+    # 外部の道具 (FreeCAD の中の Python など) は PYTHONDONTWRITEBYTECODE を守らず checkout にバイトコードを書くことがある
+    # (2026-10-17 実測: export/__pycache__/freecad_wall_step_job.cpython-311.pyc)。__pycache__ のバイトコードは元の .py と合うときだけ
+    # 使われ、元の .py は追跡ファイル (下の検査で変更なし) なので、照合の前に __pycache__ だけを消す。ほかの未追跡のファイルは止める
+    for d in CODE_DIRS:
+        for pc in (dst / d).rglob("__pycache__"):
+            if pc.is_dir():
+                shutil.rmtree(pc)
     probs = checkout_problems(dst, commit)
     if probs:
         raise GateEnvError("判定の checkout が使えない: " + "; ".join(probs))
