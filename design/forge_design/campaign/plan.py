@@ -178,10 +178,22 @@ def load_confirmed(path) -> dict:
     return doc
 
 
-def assert_launch_set(doc: dict, planned: list, bc_text: str) -> None:
-    """起動しようとする全段 [(tag, 設定)] と境界条件が計画と同じか。違えば ValueError (forge を 1 回も起動しない)。"""
+# 最初の段の前に、計画の確定の後に変わっていないことを確かめるファイル (旧の台本 p5_ns.py の「準備の後に変わっていない」の検査; §5.1 #6d)。
+# nozzle.h5 は段の間の restart で書き換わるので最初の段の前だけ
+PRELAUNCH_FILES = ("settle_criteria.yaml", "settle_nodes.txt", "nozzle.h5", "prepare_info.json", "species_meta.yaml")
+
+
+def assert_launch_set(doc: dict, planned: list, bc_text: str, run_dir=None) -> None:
+    """起動しようとする全段 [(tag, 設定)] と境界条件が計画と同じか、run_dir を渡せば計画の確定の後に変わってはいけないファイル
+    (停止規則の基準・節点の表・格子と初期場・準備の記録) が同じか。違えば ValueError (forge を 1 回も起動しない)。"""
     st = doc["confirmed"]["stages"]
     probs = []
+    if run_dir is not None:
+        for f in PRELAUNCH_FILES:
+            want = (doc["confirmed"].get("files_sha256") or {}).get(f)
+            got = sha256_file(Path(run_dir) / f)
+            if want != got:
+                probs.append(f"{f} が計画の確定の後に変わった (sha256 {str(got)[:12]} ≠ 計画 {str(want)[:12]})")
     if [t for t, _ in planned] != [s["tag"] for s in st]:
         probs.append(f"段の列 {[t for t, _ in planned]} が計画の {[s['tag'] for s in st]} と違う")
     for (t, c), s in zip(planned, st):

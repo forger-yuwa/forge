@@ -528,6 +528,19 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
     - 前の段の成果物は V6 のものを固定して使う。
   - **来歴の照合**: 参照先の内容とハッシュの結び付けを別に検査する。
   - あわせて、台本 (`p5_ns.py`・`p5_all.sh`) が行っていた検査がすべて実行器の関門として存在し、負例で止まること。
+- **V1a の事前登録 (2026-10-17、§5.1 #6d、結果を見る前)**:
+  - 対象: case/71 の 1 pass = V6 (`case/71.m55_combustion_wt/run_0014_chain_v2/`、台本 `_runs/run_0014_chain_v2/p6_chain.sh`) と同じ入力
+    (`problem_m55_p5_settle_v2.yaml`、Euler の参照 `run_0009_euler/res_12000.h5` sha256 2b2d02ce…、初期場 `run_0008_ns_b0/res_90000.h5` sha256 c64a73f1… (AWS B から写した))。
+  - 実行役の側: recipe の NS の段と同じ CLI (`deltastar_loop --init-integral --ic-file … --ic-sha256 … --euler-ref … --euler-ref-sha256 …`) を
+    `--prepare-only` で一時の run に準備し、`campaign.plan.confirm` で実行の計画を確定する (forge は起動しない、手元)。
+  - 比べるものと許す正規化: (1) 全段の起動直前の設定: 計画の 3 段の FNV = run_0014 の `stage_manifest.json` の `cfg_fnv` (正規化なし)。
+    (2) `bcondConfig.yaml`・(3) `solverConfig_prestage.yaml`: バイト一致。(4) `settle_criteria.yaml`: 中身が一致、ただし `source.generator_sha256` (生成器のコードの版) は除く。
+    (5) `settle_nodes.txt`: コメントの行を除いて一致。(6) 格子: `nozzle.h5` の座標とトポロジのハッシュ・`nozzle.msh` の sha256 が一致。
+    (7) 準備の記録の主な欄 (`initializer`・`Md`・`x_E`・`scale_m`・`physical_wall`・`stop_rule` の cap・`main_line`・継承したリミッタの基準値) が一致 (パス・時刻を除く)。
+    (8) 初期場: 実行役は `ic_snapshot` (res_90000.h5 の sha256) を固定して記録する。run_0014 は `ic_from` (同じディレクトリの最大番号の場)。
+    (9) バイナリ・変換器: 実行役が sha256 を計画に書く。値の一致は求めない (run_0014 は AWS B の FP64 のビルド、手元は別のビルド; 手元で回す V1a の制約)。
+  - 合格: (1)〜(7) で許した正規化以外の差 0、(8)・(9) は記録の有無。旧の台本 (`p5_ns.py`・`p5_all.sh`・`p6_chain.sh`) の検査と実行役の関門の対応表で未対応 0。
+    登録した負例 (#2〜#6 の試験) の通過 0。
 - **V1b (GPU 1 pass、記録)**: 次の種類が V6 と同じであること。
   - REACHED・関門の pass・`delta_E.status ok`・成果物の実在・非有限 0。
   - qualification の判定は `accepted` (V6 の `case/71.m55_combustion_wt/run_0014_chain_v2/` は 3 係数で補正した壁で、保存した `WT_QUALIFICATION.json` は accepted:

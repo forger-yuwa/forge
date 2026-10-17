@@ -14,6 +14,7 @@
   (N2) 計画をもう一度確定する → 上書きしない
   (N3) 前の段の物理 (乱流の dilatationCorrection) が本段と違う → 確定しない
   (N4) 計画の後に境界条件を変える → 起動 0 回で止まる
+  (N6) 計画の確定の後に停止規則の基準を変える → 起動 0 回で止まる (旧の台本の「準備の後に変わっていない」の検査)
   (N5) 走った後の照合: 段の記録が計画と違う (S1 だけで止まった run) → MISMATCH。計画どおりの段の記録・起動の記録なら OK
 
 実行: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_execution_plan_tests.py
@@ -169,6 +170,17 @@ try:
     except (RuntimeError, ValueError) as e:
         res4 = str(e)[:200]
     check("(N4) 計画の後に境界条件 (壁温) を変える → 起動 0 回で止まる", launches() - n0 == 0 and "境界条件" in res4, res4)
+    rc6 = copy_run("N6")
+    EP.confirm(rc6, inputs_for(rc6))
+    (rc6 / "settle_criteria.yaml").write_text((rc6 / "settle_criteria.yaml").read_text() + "\n# 書き足し\n")
+    n0 = launches()
+    try:
+        RA.run_staged_ns(rc6, plan=rc6)
+        res6 = "完走"
+    except (RuntimeError, ValueError) as e:
+        res6 = str(e)[:200]
+    check("(N6) 計画の確定の後に停止規則の基準を変える → 起動 0 回で止まる (旧の台本 p5_ns.py の検査)", launches() - n0 == 0
+          and "settle_criteria.yaml が計画の確定の後に変わった" in res6, res6)
     v = EP.verify_after(ra)
     check("(N5) S1 だけで止まった run の走った後の照合 → MISMATCH (段の記録が計画と違う)", v["status"] == "MISMATCH"
           and any("段の記録" in p for p in v["problems"]), str(v["problems"])[:200])

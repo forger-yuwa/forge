@@ -319,10 +319,15 @@ def exec_step(sd: dict) -> dict:
         last = _last_res(rd)
         bad = {k: v for k, v in (_nonfinite(last) if last else {}).items() if v}
         vp = EP.verify_after(rd) if (rd / EP.PLAN_FILE).is_file() else {"status": "計画なし"}
+        # 初期壁の係数: カードの overrides の deltastar_initializer.* が準備の記録の initializer に入っている (旧の台本 p5_ns.py の検査; §5.1 #6d)
+        ini = (json.loads((rd / "prepare_info.json").read_text()).get("initializer") or {}) if (rd / "prepare_info.json").is_file() else {}
+        want = {k.split(".", 1)[1]: v for k, v in (yaml.safe_load(Path(sd["card"]).read_text()).get("overrides") or {}).items()
+                if str(k).startswith("deltastar_initializer.") and k != "deltastar_initializer.model"}
+        ini_bad = [k for k, v in want.items() if k not in ini or (isinstance(v, (int, float)) and abs(float(ini[k]) - float(v)) > 1e-12 * max(1.0, abs(float(v))))]
         ok = (r.returncode == 0 and sr.get("status") == "REACHED" and hg.get("proceed") is True and sv.get("verdict") == "SETTLED"
-              and not bad and vp["status"] == "OK")
+              and not bad and vp["status"] == "OK" and not ini_bad)
         res.update(ok=ok, detail=f"deltastar_loop rc {r.returncode}・停止規則 {sr.get('status')}・受け渡しの関門 進む {hg.get('proceed')}・"
-                                f"整定 {sv.get('verdict')}・非有限 {bad or 0}・計画の照合 {vp['status']}")
+                                f"整定 {sv.get('verdict')}・非有限 {bad or 0}・計画の照合 {vp['status']}・初期壁の係数の欠け・違い {ini_bad or 0}")
         res["run_dir"] = str(rd)
         if last is not None:
             res["final_field"] = {"path": str(last), "sha256": sha256(last)}

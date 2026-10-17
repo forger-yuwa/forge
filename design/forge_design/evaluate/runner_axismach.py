@@ -3024,7 +3024,7 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
             raise ValueError(f"{run_dir}: 計画つきの起動は停止規則 v2 の run だけ")
         ep = EP.load_confirmed(plan)
         planned = [(t, c) for t, c, _, _ in pre] + [("main", _cfg_set(cfg_main, {"nStepOuter": int(sr_v2["cap"])}))]
-        EP.assert_launch_set(ep, planned, bc_text)
+        EP.assert_launch_set(ep, planned, bc_text, run_dir=run_dir)
     if sr_v2 is not None:
         sr, sr_use, sr_why = sr_v2, False, None
     else:
