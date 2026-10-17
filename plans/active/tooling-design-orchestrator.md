@@ -302,6 +302,73 @@
   - 既存の記録は sha で参照し、中身を複製しない。
 - **idle 自動停止との関係**: 実行器の準備の隙間が「forge なし」と数えられる。GPU の通しの検証の前に決める (§5.1 #7)。
 
+#### 4.5.1 実行役の作り (§5.1 #6 の設計、2026-10-17 codex 諮問で修正)
+
+codex (diagnose) の諮問 ([記録](../../notes/reviews/2026-10-17-orchestrator-executor-diagnose.md)、C0/M5/m1) で、最初の案の recipe の分岐・driver の復旧・
+予算の停止の順序と測る範囲・`fixed` の照合を直した。
+
+**2 層の service**:
+
+- **driver** (campaign 1 つに 1 つ、systemd の user service): 台帳の**唯一の書き手**。生きている間ずっと台帳のロック (`<ledger>/ledger.lock` の flock) を持ち、
+  更新は一時ファイル → rename。二つ目の `--resume` はロックを取れないので、今の driver を止めずに状態を返す。
+- **試行** (段の試行 1 つに 1 つ、別の user service、§5.1 #15 の契約): 実行担当が段の処理と予算の監視を持ち、自分の状態 (`attempts/<試行 ID>/status.json`) と
+  停止の記録 (`STOP_REASON.json`) とログだけを書く。driver とは別の unit なので、driver が死んでも試行は続く。
+- **識別**: campaign の ID (初めて起動したときに driver が作る UUID、台帳に保存) と試行 ID で unit 名・出力先を決める。campaign の名前は表示だけに使う
+  (同じ名前の別の case の campaign と衝突させない)。
+- **起動の順序** (一度だけの処理): (1) 試行 ID・unit 名・run の出力先・予算の予約を台帳に書く → (2) service を起動する → (3) 終わった試行の結果を、試行 ID ごとに
+  **一度だけ**取り込んで精算する (取り込み済みの印を台帳に書く)。run の番号の割り当ては、case の README の更新と同じ case のロックの下で行う。
+- **再開** (`--resume`、driver を起動し直す): 台帳の各試行を状態で照合する。unit が動いている → 待つ。止まっていて試行の状態が終わり → 取り込む。起動の途中・停止の途中 →
+  期限つきで待つ。unit の照会に失敗した・unit が無くて完了の証拠も無い → 人に返す。同じ試行の段の処理は呼び直さない (新しい試行・新しい run)。
+- **ログ**: driver の起動ごと・試行ごとに別のファイルに書き、上書きしない。journal だけを復旧の根拠にしない。
+- **変更の要求**: CLI (`note` など) は要求のファイルを置くだけで、driver が入力の sha256 と理由と一緒に台帳に取り込む (台帳の書き手を 1 つに保つ)。
+- 事前検査: systemd の user service が使えること・`Linger=yes`。満たさなければ起動しない。
+
+**recipe `axismach.wt_card_chain/v1` の段と分岐** (今の手順書 §2〜§9 と同じ; codex Major 1 で直した):
+
+| 段 | 処理 (今の道具) | 次の段 |
+| --- | --- | --- |
+| `problem_p{k}` | `wt_card`、`approval check` (k ≥ 1 は試行の入力) | 終了 0・寸法 PASS・照合 OK → `mesh_p{k}` |
+| `mesh_p{k}` | 格子の段 (§4.6; 今は case/71 の `hand_mesh.py build/check`) | `VERDICT: PASS` (NS・Euler) → `euler_p{k}` |
+| `euler_p{k}` | `runner_axismach` (Euler) を新しい run で | forge 終了 0・`VERDICT: PASS`・非有限 0 → `ns_p{k}` |
+| `ns_p{k}` | `deltastar_loop --init-integral` (Euler の参照・初期場を固定、§4.1.1 の計画を確定して `run_staged_ns(plan=…)`) | 停止規則 v2 REACHED・受け渡しの関門 進む・`check_settled` SETTLED・非有限 0 → k = 0 は `calibrate_p0`、k ≥ 1 は `qualify_p{k}` |
+| `calibrate_p0` | **最初の較正** (`contur_calibrate`、手順書 §6) → 係数だけを変えた試行の入力 `card_p1` | 終了 0・`approval check` OK → `problem_p1` (較正し直しの回数に数えない) |
+| `qualify_p{k}` (k ≥ 1) | `gate_env judge` (承認のモード) | `incomplete`・`make_deliverables` → `deliverables`。`back_to_correction`・`recalibrate` → `recalibrate_p{k}`。`accepted` (成果物が既にある) → 終わり。ほか (`escalate`・`rejected`・ほかの `incomplete`) → 止まる |
+| `recalibrate_p{k}` | 判定の記録の係数 (`wt_qualify/contur_overrides.yaml`) → `card_p{k+1}` | 照合 OK → `problem_p{k+1}` (較正し直しの回数 +1; 上限は承認の `run_policy`) |
+| `deliverables` | `gate_env deliverables` → `gate_env judge` (最後の判定) | `accepted` → 終わり。ほか → 止まる |
+
+- 反復の上限は承認の `run_policy.max_iterations` (pass の数)、較正し直しの上限は `max_recalibrations`。上限で止まる。
+- 成果物の前で止まるのを避けるために、必須の成果物を任意にしない。
+- case の README の「計算 run 一覧」に、その campaign の行を印の間に台帳から作って書く (ほかの行は残す、case のロック)。
+
+**予算** (承認の記録の `budget`; 一律の上限は置かない (ユーザ決定)):
+
+- **GPU 時間**: GPU の段の forge の起動ごとの経過時間 (GPU 1 台) を、起動の時刻と終わりの時刻で台帳に残す (前の段の起動・時間を測る run・失敗した試行も数える)。
+  実行担当が死んで終わりの時刻が無い区間は 0 にしない (止まったと分かった時刻か出力の最後の更新の時刻までで数え、根拠を書く)。AWS のインスタンスの稼働時間とは別の指標。
+- **ディスク**: この依頼が新たに占めた出力 (campaign が作った run・台帳・生成したカード・問題 YAML・格子など、台帳に登録した**重ならない範囲**) の大きさ。
+  後の段が同じ run に成果物を足しても二重に数えない。数分おきの監視は超過の検出で、厳密な上限ではない (最大の出力の大きさ・監視の間隔・止めるまでの遅れぶんの余裕と、
+  停止の記録を書く空きを先に確保する)。
+- **予約**: 起動の前に、その段の見積もり (`design-intake` §8 の見積もりを台帳に写したもの) が残りの予算の内かを確かめ、残り全部をその試行の上限として予約する。
+  見積もりとの差は記録して警告に使う (固定の倍率で止めることはしない)。承認の総額を超えると見込まれるときは次の段を始めずに返す。
+- **予算で止める順序** (codex Major 3): 予算に届いたこと・測った値・停止の要求を**先に**原子的に記録し、その後で試行を止める。停止の要求と「全子孫の終了の確認」を分け、
+  driver が終了を確かめてから精算する。実行担当が `SIGKILL` で記録を書けなかったときは、再開した driver が根拠つきで補い、原因が確かめられなければ「不明」とする。
+
+**役割** (campaign に固定、`--resume` で変えない):
+
+- `fixed` (知識の少ないモデル): 段の処理 (生成器・台本) は**承認の commit の checkout** (§4.7.1 (5) の判定専用の環境と同じ checkout) から回し、生成器の版・依存する台本・
+  外部の入力を固定する。一度生成した入力の sha256 と生成元 (commit・台本の sha256) を台帳に書き、使う直前に照合する。作り直して比べる照合は §6 V1a の検証に残す。
+  止まったら停止の記録を残して終わり、人に見せる。強制は #14 まで運用の検査であって権限の強制ではない。
+- `fixer` (賢い AI): 段の処理は作業ツリーから回してよい。止まった後に AI が §4.4 の範囲で直し、変更の要求 (入力の sha256 と理由) を出して `--resume` で新しい試行から回す。
+  保護する条件・判定・予算は #2・#3・#4 の照合が守る (判定は判定専用の環境)。
+
+**#6 の分け方と順** (codex: #6a → #6b → #6c → #6d、最小の driver と復旧は #6b に前倒し):
+
+- #6a: 台帳 (ロック・原子的な更新・campaign の ID・試行の記録・取り込みの一度だけ)・停止の記録・予算の勘定 (GPU なし)。
+- #6b: 試行の service・予算の監視・最小の driver と復旧 (ダミーの forge で障害の試験)。
+- #6c: recipe の段と分岐・CLI・README の同期・変更の要求。
+- #6d: §6 V1a (case/71 の 1 pass の決定的な入力を V6 の run と比べる、旧の台本の検査と関門の対応表)。
+- GPU を使う通し (§6 V1b・V4 (a)) は #7 の後 (手元の GPU で前倒ししない)。#6 を先に作ったことを、未完の #5 (forge-gate の関門)・#8 (格子の上限の照合) を省いて
+  通しを合格にする理由にしない。
+
 ### 4.6 格子の段
 
 - 契約: 「問題 YAML の mesh 節 (表を含む) + 変換後の格子の不変部分のハッシュ + 品質の VERDICT + **依頼ごとの承認済みの節点数の上限と承認元**」。
@@ -439,7 +506,10 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | 4b | ~~実効の計画の確定と、計画からの実行・照合~~ (2026-10-17 実装・試験 ALL PASS) (§4.1.1 の 2・3) | `execution_plan.json` (準備の前・準備の後の確定、上書きしない)、版付きの recipe の段の列と許す差、`run_staged_ns` が計画を受け取り起動の直前に照合、終わった後の照合。合格: 判別の A/B (B は起動 0 回)、段の間の物理の差・計画に無い段で止まる、run_0014 の段の設定から計画を作り直すと一致 (GPU なし) **結果 (2026-10-17)**: `design/forge_design/campaign/plan.py` (`fixed_inputs`・`confirm`・`load_confirmed`・`assert_launch_set`・`assert_launch`・`verify_after`、recipe `axismach.wt_card_chain/v1` の段の列と許す差・禁止する差 (physProp・turbulence・mesh))、`runner_axismach.staged_ns_launch_configs` (run_staged_ns と同じ関数で全段の起動直前の設定、本段は停止規則の上限)、`run_staged_ns(plan=…)` (最初の段の前に全段と境界条件、各段の起動の直前にその段を照合)。確定した計画は sha256 で守り、上書きしない。試験 `design/tests/run_execution_plan_tests.py` ALL PASS (run_0014 の写し、ダミーの forge): **計画の 3 段の設定の FNV が run_0014 の実際の段の記録と一致**、判別の A/B (A 起動 1 回・B (S1 の CFL だけ 0.5 → 0.6) 起動 0 回)、計画の書き換え・二重の確定・前の段の乱流の差・計画の後の境界条件の変更で止まる、走った後の照合。既存の試験 (停止規則 v1・v2・整定・本段の B0・実データの整定 70・リミッタの継承) は通る | O |
 | 4c | ~~search の無い campaign と親 plan の分担~~ (2026-10-17 実装・試験 ALL PASS) (§4.1.1) | `forge.campaign/v1` (search なし、未知のキー・search・知らない recipe の拒否)。親 plan §5.1 #6・#7 を #6a/#6b・#7a/#7b に分け、§4.3 に例外を書く。合格: 正例 1・負例 3 以上 **結果 (2026-10-17)**: `design/forge_design/campaign/campaign.py` (`forge.campaign/v1`: 名前・承認の記録 (sha256 の照合)・recipe `axismach.wt_card_chain/v1`・case・台帳。`search`・`evaluations`・`qualification`・知らないキー・知らない recipe と版を拒否)。試験 `design/tests/run_campaign_schema_tests.py` ALL PASS (正例 1・負例 7)。親 plan の §4.3 の例外と #6・#7 の分割は d912df91 で書いた | O |
 | 5 | forge-gate と feature/card-local-mesh の統合、`judge_run` の v2 対応、qualification (§4.2) | 合格: run_0011 で RUN_VERDICT が SETTLE_VERDICT と整合、`SETTLED` でも壁解像 FAIL なら総合 FAIL、公差未達でも整定している例・必須の CAD の欠けの例の試験 | O |
-| 6 | 実行の入口・試行ごとの実行担当・予算・新しい出力先・台帳・再開・停止の記録・case の run 一覧の同期 (§4.3・§4.5・§4.8) | 合格: §6 V1a、障害の注入の試験 (起動の直後・結果の公開の直後の強制終了、同時の `--resume`、**CLI が死んでも予算の監視が続く、実行担当が死んだ後に forge だけが残らない、既存の runner を再び呼び出さずに再接続または新しい試行に引き継ぐ**)、予算の実行中の超過で止まる、再開で二重に起動しない、既存の出力先に書かない、停止の記録の欄がそろう、case の README の run 一覧にその campaign の行が出て他の行が残る | O |
+| 6a | 台帳・停止の記録・予算の勘定 (§4.5.1) | 台帳 (flock を生きている間持つ・一時ファイル → rename・campaign の ID・試行の記録・取り込みの一度だけ)、停止の記録 (§4.3 の欄)、予算の予約・消費・精算 (GPU 時間は起動ごとの時刻、ディスクは重ならない所有の範囲)。campaign に `role` を足す。合格: 二つ目の書き手が取れない、取り込みを 2 回しても精算は 1 回、終わりの時刻の無い区間を 0 にしない、二重に数えない、同じ名前の別の campaign で ID が違う | O |
+| 6b | 試行の service・予算の監視・最小の driver と復旧 (§4.5.1) | 合格 (ダミーの forge、GPU なし): 起動の要求と台帳の記録の間の障害、driver のいない間の試行の完了、取り込み・精算の途中の障害、二重の `--resume`、停止の途中の再開、CLI が死んでも監視が続く、実行担当が死んだ後に forge だけが残らない、予算の超過で先に記録してから止まる、ログの置き場所の容量不足、既存の出力先に書かない | O |
+| 6c | recipe の段と分岐・CLI・README の同期・変更の要求 (§4.5.1) | 合格: 判別の A/B (codex: 同じ run の写しで成果物あり → accepted で終わる、成果物なし → `make_deliverables` で成果物の段へ進む; 止まれば第 1 仮説の支持)、p0 の後の最初の較正が較正し直しの回数に入らない、上限で止まる、README の行が出てほかの行が残る、`fixed` で生成した入力の sha256 が使う直前に違えば止まる | O |
+| 6d | §6 V1a (§4.5.1) | case/71 の 1 pass の決定的な入力 (設定・境界条件・基準・節点の表・初期場・バイナリ・変換器・数値に効く環境変数) を V6 の run と比べる (許した正規化以外の差 0)、旧の台本 (`p5_ns.py`・`p5_all.sh`) の検査と実行役の関門の対応表 (未対応 0)、登録した負例の通過 0 | O |
 | 7 | idle 自動停止と実行器の準備の隙間 (§4.5) | GPU の通しの検証の前提。決め方を諮る | F |
 | 8 | 格子の段の契約と 2 つの実装、節点数の上限の承認 (§4.6) | `hand_mesh.py` の固定の承認の文と自動の上限の拡大を、カードの承認済みの上限との照合に置き換える (#10 を待たない)。合格: §6 V2a・V2b・V2c | O |
 | 9 | CLI・`--role`・道具の `--help`・skill・手順書・AGENTS.md (§4.4・§4.8) | 手順書 16〜17 行と 277 行、`design-intake` §6・§7、skill `nozzle-design` の書き分け。AGENTS.md の条件 4 の書き分けは settle → gate → この plan の順で、調整板に予告してから | O |
@@ -507,6 +577,7 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-plan2-disposition-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-plan2-disposition-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-plan2-disposition.md](../../notes/reviews/briefs/2026-10-17-orchestrator-plan2-disposition.md)) | 5 件とも採用、M1 は反映が未完了 | 全件**採用**: M1 停止の責任を実行担当の外 (試行ごとの systemd の service、`ExitType=main`・`KillMode=control-group`・停止期限・`Restart=no`) に置き、全子孫の終了を確かめるまで新しい試行と予算の解放をしない、service が使えなければ起動を止める、GPU なしの `SIGKILL` の A/B を実装の先頭に (§4.5・§5・#15)。M2 「そのまま包む」→ 数値の処理を再利用し承認と上限の部分を置き換え、Euler・NS とも照合 (§4.6)。M3 fixture を試走 A の `run_0003_ns_p0` に固定、期待は `back_to_correction` (次の手は較正の規則しだい) (§6 V1b)。M4 未較正のカードと入力の参照を固定 (§6 V4 (a))。m5 破棄のときも同期・再開で台帳から修復・case ごとのロック (§4.8) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-approval-design-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-approval-design-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-approval-design.md](../../notes/reviews/briefs/2026-10-17-orchestrator-approval-design.md)) | 方向は採用、§4.7.1 は修正してから実装 (Major 4・Minor 2) | 全件**採用** (主セッションが根拠の行 `wt_qualify.py:203`・`:773`・`:898`・`deliverables.py:48`・手順書 §7.2 を確かめた): 承認の対象を生成した後の実効の条件 (評価の点数・定常性の条件・物性・実行の方針を含む) で決める、**カード全体の sha256 の一致を試行の入力の必須条件にする案は却下に従う** → 承認の原本と試行の入力を分ける、判定専用の環境 (外部の道具の実体・環境変数を引き継がない・import の元・未追跡のファイル)、`pip freeze` は補助の記録だけ、合否に使う中間の判定を全部再検査、`sources` の正規化と既定の照合、preview と write を分ける (§4.7.1、§5.1 #2a〜#2c、§6 V3) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-minimal-campaign-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-minimal-campaign.md](../../notes/reviews/briefs/2026-10-17-orchestrator-minimal-campaign.md)) | C0/M3/m1 | 全件**採用** (主セッションが根拠の行 `runner_axismach.py:2946`・`:3002`・`:2676`・`:2523`・`:1777` を確かめた): **(b)・(d) の元の案は却下に従う** → 準備の前の固定・準備の後の確定・計画からの実行と前後の照合の 3 段、版付きの recipe が段の列と許す差を持つ、段の記録の key を全設定の証拠にしない (§4.1.1、#4b)。(c) は採用し、継承する値の解決と初期場の適合性を足す (#4a)。親 plan の #6・#7 を限定の実装と探索待ちに分ける (#4c) |
+| diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-executor-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-executor-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-executor.md](../../notes/reviews/briefs/2026-10-17-orchestrator-executor.md)) | C0/M5/m1 | 全件**採用** (主セッションが根拠の行 手順書 §6・§8 の表 (667 行)・`gate_env.py:326` を確かめた): M1 recipe の分岐を手順書に合わせる (`make_deliverables` → 成果物、p0 の後の最初の較正は判定と別)、M2 driver の復旧 (先に記録してから起動・取り込みは一度・ロックを持ち続ける・二重の再開・ID)、M3 予算で止めるときは先に記録、M4 予算の測る範囲 (重ならない所有の範囲・終わりの無い区間を 0 にしない)、**M5 作り直して比べる `fixed` の照合は却下に従う** → 承認の commit の checkout から回して生成器を固定し、生成した入力の sha256 を使う直前に照合、m1 ログと変更の要求。固定の倍率 (1.5 倍) で止める案は入れない。手元の GPU で V4 (a) を前倒ししない (§4.5.1、§5.1 #6a〜#6d) |
 
 ## 7. 影響範囲
 
@@ -525,6 +596,7 @@ V1a・V1b・V2a・V2b・V2c・V3・V4 (a)。V4 (a) は既知の正常のカー�
 
 ## 9. 変更ログ
 
+- `2026-10-17` — §5.1 #6 の設計 (§4.5.1) を codex (diagnose) に諮り、全件採用して書き直した: recipe の分岐を手順書に合わせる (成果物の前で止めない)、driver の復旧、予算の停止の順序と測る範囲、`fixed` は承認の commit から回す。#6 を #6a〜#6d に分けた。
 - `2026-10-17` — §5.1 #4c を実装: search の無い campaign (`campaign/campaign.py`)。試験 `run_campaign_schema_tests.py` ALL PASS。#4 (#4a〜#4c) はこれで終わり。
 - `2026-10-17` — §5.1 #4b を実装: 実行の計画 (`campaign/plan.py`) と `run_staged_ns(plan=…)`。run_0014 の写しで、確定した計画の段の設定が実際の段の記録と一致、判別の A/B (B は起動 0 回) を確かめた。試験 `run_execution_plan_tests.py` ALL PASS。
 - `2026-10-17` — §5.1 #4a を実装: 初期場をファイルで固定 (`select_ic`・`ic_file`・`ic_sha256`・準備の記録の `ic_snapshot`)、計画の時点の解決 (`campaign/ic.py` の `resolve_ic`: 継承するリミッタの基準値の明示化・適合性)。試験 `run_campaign_ic_tests.py` ALL PASS。
