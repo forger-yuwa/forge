@@ -41,6 +41,19 @@ from forge_design.intake import wt_card as W  # noqa: E402
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "approval_trial_a"
 FAIL = 0
+CLEAN_REPO = None      # 判定器の版の記録に使う、きれいな一時の git リポジトリ (この試験は作業ツリーの状態に依らない; 判定専用の環境は run_gate_env_tests.py)
+
+
+def clean_repo(td: Path) -> Path:
+    import subprocess
+    r = td / "clean_repo"
+    r.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(r), *args], check=True)
+    (r / "x.txt").write_text("x")
+    subprocess.run(["git", "-C", str(r), "add", "x.txt"], check=True)
+    subprocess.run(["git", "-C", str(r), "commit", "-q", "-m", "x"], check=True)
+    return r
 
 
 def check(name, cond, info=""):
@@ -102,7 +115,7 @@ def prob(name="problem_p0.yaml", **edit):
 def approve(td: Path, card_doc, prob_doc=None, tag="a") -> tuple[Path, Path, Path]:
     c = put(td, f"card_{tag}.yaml", card_doc)
     p = put(td, f"problem_{tag}.yaml", prob_doc if prob_doc is not None else prob())
-    pv = AP.preview(c, p)
+    pv = AP.preview(c, p, repo_dir=CLEAN_REPO, judge_env=False)
     pvp = td / f"preview_{tag}.json"
     pvp.write_text(json.dumps(pv, ensure_ascii=False))
     if pv["problems"]:
@@ -115,7 +128,7 @@ def approve(td: Path, card_doc, prob_doc=None, tag="a") -> tuple[Path, Path, Pat
 def preview_problems(td: Path, card_doc, prob_doc=None, tag="n") -> list:
     c = put(td, f"card_{tag}.yaml", card_doc)
     p = put(td, f"problem_{tag}.yaml", prob_doc if prob_doc is not None else prob())
-    return AP.preview(c, p)["problems"]
+    return AP.preview(c, p, repo_dir=CLEAN_REPO, judge_env=False)["problems"]
 
 
 def trial(td: Path, ap: Path, name="card_p1.yaml", tag="t", **edit) -> Path:
@@ -141,6 +154,7 @@ def copy_run(td: Path, tag: str, regenerate: bool = True) -> Path:
 
 with tempfile.TemporaryDirectory() as tdn:
     td = Path(tdn)
+    CLEAN_REPO = clean_repo(td)
     print("== 正例")
     c0, p0, ap0 = approve(td, v2("card_p0.yaml"))
     apd = json.loads(ap0.read_text())
@@ -244,7 +258,7 @@ with tempfile.TemporaryDirectory() as tdn:
 
     print("== 負例 (write)")
     check("(N14) 承認の記録は上書きしない", raises(lambda: AP.write(td / "preview_a.json", USER_REF, ap0), "既にある"))
-    bad = AP.preview(put(td, "card_n14.yaml", v2("card_p0.yaml", budget=None)), p0)
+    bad = AP.preview(put(td, "card_n14.yaml", v2("card_p0.yaml", budget=None)), p0, repo_dir=CLEAN_REPO, judge_env=False)
     (td / "preview_n14.json").write_text(json.dumps(bad, ensure_ascii=False))
     check("(N14) 問題のある preview は write しない", raises(lambda: AP.write(td / "preview_n14.json", USER_REF, td / "ap_n14.json"), "承認できない"))
     pv = json.loads((td / "preview_a.json").read_text())

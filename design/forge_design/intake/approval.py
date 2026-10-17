@@ -318,8 +318,9 @@ def _load(card_path, problem_path):
 
 # ---------------------------------------------------------------------------------------------------- preview・write・check
 
-def preview(card_path, problem_path, repo_dir=None) -> dict:
-    """承認の前に見せる表。problems が空でなければ write できない。"""
+def preview(card_path, problem_path, repo_dir=None, judge_env: bool = True, judge_python=None) -> dict:
+    """承認の前に見せる表。problems が空でなければ write できない。judge_env: 判定専用の環境 (判定の Python・外部の道具) を記録する
+    (plan §4.7.1 (5); 既定は今の Python)。作業ツリーの追跡ファイルに変更があれば問題にする (承認の commit を固定するため)。"""
     raw, card, prob = _load(card_path, problem_path)
     probs = []
     if card["format"] != W.CARD_FORMAT_V2:
@@ -341,12 +342,25 @@ def preview(card_path, problem_path, repo_dir=None) -> dict:
         probs.append("budget (GPU 時間・ディスクの承認値) が無い — 正式な入口で必須 (design-intake §8 の見積もり)")
     prot = protected_conditions(card, prob)
     repo = Path(repo_dir) if repo_dir else Path(__file__).resolve().parents[3]
+    gate = _git_state(repo)
+    if gate.get("tracked_clean") is not True:
+        probs.append("判定器の版: 作業ツリーの追跡ファイルに変更がある — commit してから preview する (承認の commit を固定するため)")
+    if judge_env:
+        from ..feedback import gate_env as GE
+        try:
+            gate["env"] = GE.snapshot(judge_python)
+        except GE.GateEnvError as e:
+            probs.append(f"判定専用の環境を記録できない ({e})")
+            gate["env"] = None
+        else:
+            if gate["env"]["python"].get("editable_dists"):
+                probs.append(f"判定の Python に editable の配布物がある {gate['env']['python']['editable_dists']}")
     return {"format": PREVIEW_FORMAT, "plan": PLAN, "created": _dt.datetime.now().isoformat(timespec="seconds"),
             "card": {"path": str(card_path), "name": card["name"], "format": card["format"], "sha256": sha256_file(card_path),
                      "text": Path(card_path).read_text()},
             "problem": None if problem_path is None else {"path": str(problem_path), "sha256": sha256_file(problem_path)},
             "protected": prot, "protected_sha256": sha256_json(prot), "sources": table, "problems": probs,
-            "gate": _git_state(repo)}
+            "gate": gate, "gate_sha256": sha256_json(gate)}
 
 
 def preview_table(pv: dict) -> list[str]:
@@ -393,11 +407,11 @@ def write(preview_path, user_ref: str, out_path) -> dict:
         raise ApprovalError(f"{preview_path} は preview でない (format {pv.get('format')!r})")
     if pv["problems"]:
         raise ApprovalError("preview に問題がある — 承認できない: " + "; ".join(pv["problems"]))
-    if sha256_json(pv["protected"]) != pv["protected_sha256"]:
-        raise ApprovalError("preview の protected と protected_sha256 が合わない (preview を書き換えた?)")
+    if sha256_json(pv["protected"]) != pv["protected_sha256"] or sha256_json(pv["gate"]) != pv.get("gate_sha256"):
+        raise ApprovalError("preview の protected・gate と sha256 が合わない (preview を書き換えた?)")
     rec = {"format": FORMAT, "plan": PLAN, "approved": _dt.datetime.now().isoformat(timespec="seconds"), "user_ref": user_ref,
            "preview_sha256": sha256_file(preview_path), "card": pv["card"], "problem": pv["problem"], "protected": pv["protected"],
-           "protected_sha256": pv["protected_sha256"], "sources": pv["sources"], "gate": pv["gate"],
+           "protected_sha256": pv["protected_sha256"], "sources": pv["sources"], "gate": pv["gate"], "gate_sha256": pv["gate_sha256"],
            "note": "承認の記録は真正性を証明しない (指定した承認の記録との整合だけを示す; plan §4.7.1 (4))"}
     out_path.write_text(json.dumps(rec, indent=1, ensure_ascii=False))
     return rec
@@ -407,8 +421,8 @@ def load_approval(path) -> dict:
     ap = json.loads(Path(path).read_text())
     if ap.get("format") != FORMAT:
         raise ApprovalError(f"{path} は承認の記録でない (format {ap.get('format')!r})")
-    if sha256_json(ap["protected"]) != ap.get("protected_sha256"):
-        raise ApprovalError(f"{path} の protected と protected_sha256 が合わない (承認の記録を書き換えた?)")
+    if sha256_json(ap["protected"]) != ap.get("protected_sha256") or sha256_json(ap.get("gate")) != ap.get("gate_sha256"):
+        raise ApprovalError(f"{path} の protected・gate と sha256 が合わない (承認の記録を書き換えた?)")
     return ap
 
 

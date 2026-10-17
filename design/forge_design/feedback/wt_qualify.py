@@ -967,11 +967,13 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
         rt = ((prob_doc.get("spec") or {}).get("r_throat")) if isinstance(prob_doc, dict) else None
         if rt is not None and abs(float(rt) / float(info["scale_m"]) - 1.0) > 1e-12:
             warns.append(f"問題 YAML の spec.r_throat {rt!r} が run の scale_m {info['scale_m']!r} と違う (別の設計の問題 YAML?)")
-    apr = None
+    apr, gate_run = None, None
     if approval is not None:
         # 正式な入口 (plan tooling-design-orchestrator §4.7.1): 判定の条件は承認の記録の値だけ。CLI・問題 YAML の相違は拒否する
         apr, max_iterations, max_recalibrations, optional_parts = approval_mode(
             approval, card, problem, cli_tols or {}, optional_parts, iteration, max_iterations, max_recalibrations)
+        from . import gate_env as GE
+        gate_run = GE.assert_in_gate_env(apr)     # 判定専用の環境 (plan §4.7.1 (5)) で回っているか
         tol = approved_tolerances(run_dir, info, apr, approval)
     else:
         if max_recalibrations is None:
@@ -1018,7 +1020,8 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
         rc = AP.check_run(apr, run_dir)
         rwg = (apr["protected"].get("requirements_without_gate") or [])
         apr_rec = {"path": str(Path(approval).resolve()), "sha256": AP.sha256_file(approval), "protected_sha256": apr["protected_sha256"],
-                   "gate": apr.get("gate"), "user_ref": apr.get("user_ref"), "run_check": rc,
+                   "gate": {k: v for k, v in (apr.get("gate") or {}).items() if k != "env"}, "gate_run": gate_run,
+                   "user_ref": apr.get("user_ref"), "run_check": rc,
                    "requirements_without_gate": [r.get("name") for r in rwg]}
         if rc["status"] != "OK":
             # その run は承認した問題の評価になっていない (plan §4.2 要求の一致) → 結果によらず incomplete
