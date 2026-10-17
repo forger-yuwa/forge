@@ -18,9 +18,9 @@ r"""計算の後の判定を 1 本にまとめる (plan tooling-convergence-and-
 | `solver` | forge の終了コード (`--solver-rc`、無ければ前の判定の記録 (同じ `forge_run.log`)、無ければ `forge_run.log` の正常終了の行 `Time = … s (wall`)。0 は PASS、停止規則の見張りが止めた (143/137 かつ `STOP_RULE_STATE.json` が REACHED/DIVERGED) は PASS (正常な監視の停止)、他の非 0 は FAIL | 終了コードが分からない |
 | `nonfinite` | 残差の全履歴 (`residual_history.csv` と manifest の段の履歴の全行・全 `rms_*` 列) と最終の場 `res_<N>.h5` の `VALUE/*` の非有限。`--full-audit` で全 `res_<N>.h5` と境界の出力も。run の開始より後の `res_nan_*.h5` は FAIL | 履歴・最終の場が無い・読めない・`rms_*` 列が無い |
 | `physical` | 最終の場の `ro`>0・`P`>0・`T`>0 (`P`・`T` はあれば) と**静圧 ≤ 全圧** (`total_quantities.total_state`: `VALUE/h0` から全温・全圧; `P > P0·(1 + PT_REL_TOL)` の点が 1 つでもあれば FAIL、P・T が有限で正なのに全圧が非有限の点も FAIL) | 最終の場・`ro` が無い・静圧 ≤ 全圧を確かめられない (`h0` が無い・`thermalMethod` が未対応・物性 (`cp`・`gamma`・種の記録) が読めない) |
-| `convergence` | `check_convergence.py` (仕様の mode: auto は manifest があれば `--segment`、無ければ**単段と確かめられたとき**だけ履歴全体)。PASS は終了 0、列の DIVERGED・RISING・STALLED・still converging・ABOVE FLOOR は FAIL | 判定不能の行・参照の拒否・単段と確かめられない・非定常で仕様が無い |
-| `stop_rule` | `STOP_RULE_STATE.json` (無ければ `stop_rule.json`) の状態を**そのまま** (`raw`) 記録。REACHED→PASS、CENSORED・DIVERGED・EXEC_ERROR→FAIL、UNAVAILABLE・NOT_USED→NOT_APPLICABLE | DATA_ERROR・MISSING (prepare_info.json が要求したのに状態が無い)・RUNNING・記録が読めない |
-| `quasisteady` | 仕様の量だけ (criterion relative = `check_quasisteady.classify_series`、absolute = 末尾窓の \|平均\|・振幅、stop_rule = 停止規則の `judge_rows` そのもの)。要求した量と評価した量の完全一致を照合。必須の量の FAIL (NONFINITE・DRIFTING・TRANSIENT-UNSETTLED・OFFSET・受け入れない OSCILLATING) は FAIL。stop_rule の量は停止規則の到達と並べた照合を `stop_rule_cross` に記録 | 仕様が無い (対象未設定)・系列・列・量が無い・step の重複・逆行・点数や窓の不足・抽出が適用不能・stop_rule で `stop_rule.json` の settings が無い |
+| `convergence` | 道具は `run_case.sh` と同じ選択 (`settle.select_judge`)。基準 `settle_criteria.yaml` の無い run・前の段と確かめた run は `check_convergence.py` (仕様の mode: auto は manifest があれば `--segment`、無ければ**単段と確かめられたとき**だけ履歴全体; PASS は終了 0、列の DIVERGED・RISING・STALLED・still converging・ABOVE FLOOR は FAIL)。`check_settled.py` を選ぶ run (停止規則 v2 の本段など; §4.6 の 8) は同じ判定を書き込みなしで 1 回: SETTLED→PASS (設定した量・区間で整定; 残差の低下は意味しない)、NOT_SETTLED・DIVERGED→FAIL。停止規則 v2 の終わった run は停止の時の再評価と照合 (`deltastar_loop._v2_binding`・`stop_rule.match_reeval`) し、通らなければ判定不能 (判定し直しの FAIL は FAIL のまま併記) | 判定不能の行・参照の拒否・単段と確かめられない・非定常で仕様が無い。check_settled: 照合の不一致・記録の欠け・基準の誤り・停止の時の再評価と照合できない (再評価の記録が無いも) |
+| `stop_rule` | `STOP_RULE_STATE.json` (無ければ `stop_rule.json`) の状態を**そのまま** (`raw`) 記録。REACHED→PASS、CENSORED・DIVERGED・EXEC_ERROR・FAILED (停止規則 v2)→FAIL、UNAVAILABLE・NOT_USED→NOT_APPLICABLE | DATA_ERROR・MISSING (prepare_info.json が要求したのに状態が無い)・RUNNING・記録が読めない・終わった状態の途中の記録 |
+| `quasisteady` | 仕様の量だけ (criterion relative = `check_quasisteady.classify_series`、absolute = 末尾窓の \|平均\|・振幅、stop_rule = 停止規則の `judge_rows` そのもの、settle = convergence と同じ 1 回の `check_settled` の各量 (§4.6 の 8; 仕様の量と基準の量の名前・種類・基準の sha256 を照合し、欠け・余り・違いは判定不能))。要求した量と評価した量の完全一致を照合。必須の量の FAIL (NONFINITE・DRIFTING・TRANSIENT-UNSETTLED・OFFSET・受け入れない OSCILLATING) は FAIL。stop_rule の量は停止規則の到達と並べた照合を `stop_rule_cross` に記録 | 仕様が無い (対象未設定)・系列・列・量が無い・step の重複・逆行・点数や窓の不足・抽出が適用不能・stop_rule で `stop_rule.json` の settings が無い |
 | `wall_resolution` | 実効の粘性と境界条件で適用を決め (`wall_resolution_applies`: 定数粘性 `viscMethod 0` も粘性)、全 no-slip 壁 (kind wall*) の最後の step の出力で `check_wall_resolution.py --step N --groups <全壁> --weight area` | 壁の出力が欠ける・要る量が無い・ツールの行が全壁・step N で揃わない・仕様の applies が実効と違う |
 
 **総合 (真理値表)**: 必須の項目のどれかが FAIL → FAIL (判定不能が併存しても**既知の FAIL を隠さない**); FAIL が無く INDETERMINATE が
@@ -146,20 +146,30 @@ EXIT_DEFERRED = 4
 CHECK_ORDER = ("solver", "nonfinite", "physical", "convergence", "stop_rule", "quasisteady", "wall_resolution")
 DEFER_CHECKS = ("solver", "nonfinite", "physical")
 TOOLS = ("judge_run.py", "check_convergence.py", "check_quasisteady.py", "check_wall_resolution.py", "stage_manifest.py",
-         "total_quantities.py")
-# 停止規則の状態 (design/forge_design/evaluate/stop_rule.py の STATES + NOT_USED、ここで足した MISSING・RUNNING) → 項目の状態
+         "total_quantities.py", "check_settled.py", "settle.py")
+# 停止規則の状態 (design/forge_design/evaluate/stop_rule.py の STATES・V2_STATES + NOT_USED、ここで足した MISSING・RUNNING) → 項目の状態。
+# FAILED は停止規則 v2 の終了の状態 (2026-10-18、plan tooling-design-orchestrator §4.2「解析の成立の読み方」; 以前は「既知でない」で判定不能)
 STOP_STATUS = {"REACHED": "PASS", "CENSORED": "FAIL", "DIVERGED": "FAIL", "EXEC_ERROR": "FAIL", "DATA_ERROR": "INDETERMINATE",
-               "UNAVAILABLE": "NOT_APPLICABLE", "NOT_USED": "NOT_APPLICABLE", "MISSING": "INDETERMINATE", "RUNNING": "INDETERMINATE"}
+               "UNAVAILABLE": "NOT_APPLICABLE", "NOT_USED": "NOT_APPLICABLE", "MISSING": "INDETERMINATE", "RUNNING": "INDETERMINATE",
+               "FAILED": "FAIL"}
+STOP_FINAL_ONLY = ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR", "UNAVAILABLE", "FAILED")   # 途中の記録では確定しない
+STOP_V2_FINAL = ("REACHED", "CENSORED", "FAILED")       # 停止規則 v2 の終わった状態 (停止の時の再評価と照合する)
 MONITOR_STOP_RC = (143, 137, -15, -9)          # SIGTERM / SIGKILL (run_case.sh は 128+sig、Python の subprocess は −sig)
 QS_SNAPSHOT = ("shock", "asym", "machmax", "pmax", "theta", "cf_retheta", "cf_momentum")
 QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING")      # accept に書けるもの (absolute の OFFSET は書けない)
-QS_CRITERIA = ("relative", "absolute", "stop_rule")
+QS_CRITERIA = ("relative", "absolute", "stop_rule", "settle")
 # criterion stop_rule (plan §5.1 #14a (2)): 停止規則の判定の関数 `stop_rule.judge_rows` そのものを呼ぶ (定義を二重に持たない)。
 # 量の役: r = 質量の収支 (|窓の平均|・振幅)、theta = θ_r の断面 (列名 = settings の x_fracs の theta_key)、relative = θ_r と同じ式・閾値の別の量
 STOP_RULE_ROLES = ("r", "theta", "relative")
+# criterion settle (2026-10-18、§4.6 の 8): settle_criteria.yaml の量の判定を、convergence と同じ 1 回の check_settled の結果から写す
+# (2 回目の計算をしない)。仕様の量と基準の量の名前・種類・基準の sha256 は照合する (数値の共有と仕様の完全性の検査は別)
+SETTLE_STATUS = {"SETTLED": "PASS", "NOT_SETTLED": "FAIL", "DIVERGED": "FAIL", "INDETERMINATE": "INDETERMINATE"}
 STOP_RULE_PY = os.path.join(ROOT, "design", "forge_design", "evaluate", "stop_rule.py")
 STOP_RULE_MOD = "forge_design.evaluate.stop_rule"
-EXTRA_TOOLS = {"design/forge_design/evaluate/stop_rule.py": STOP_RULE_PY}      # 道具の sha256 に入れる (tools の外)
+DELTASTAR_LOOP_PY = os.path.join(ROOT, "design", "forge_design", "feedback", "deltastar_loop.py")
+DELTASTAR_LOOP_MOD = "forge_design.feedback.deltastar_loop"
+EXTRA_TOOLS = {"design/forge_design/evaluate/stop_rule.py": STOP_RULE_PY,      # 道具の sha256 に入れる (tools の外)
+               "design/forge_design/feedback/deltastar_loop.py": DELTASTAR_LOOP_PY}
 # 静圧 ≤ 全圧の許容 (P > P0·(1 + PT_REL_TOL) を違反とする)。float32 の出力 (h0・T・P) の丸めで、よどみ点の近くの P/P0 − 1 は
 # 正になる (2026-10-15 実測、最終の場: case/57・case/56 の 25 run で最大 6.4e-7 (CPG 5.2e-7〜6.4e-7、TP 1.6e-7〜2.7e-7)、
 # case/45 run_0138_rerun_fullpath_blk4 (イソブタン TP) 1.0e-6; 倍精度の case/57 run_0016_t3a_lm_double は 1.1e-15)。許容はその約 10 倍
@@ -381,7 +391,7 @@ def normalize_spec(raw, from_json):
     if q is None:
         out["quasisteady"] = None
     else:
-        _only(q, ("not_applicable", "quantities"), "quasisteady")
+        _only(q, ("not_applicable", "quantities", "settle_criteria"), "quasisteady")
         if ("not_applicable" in q) == ("quantities" in q):
             raise SpecError("quasisteady は not_applicable (理由) と quantities のどちらか一方")
         if "not_applicable" in q:
@@ -400,7 +410,7 @@ def normalize_spec(raw, from_json):
                     raise SpecError("%s.name %r が重複" % (w, nm))
                 names.add(nm)
                 ex = it.get("extractor")
-                _only(ex, ("kind", "file", "column", "step_column", "quantity", "cf_x", "cf_ytop", "wall_law", "mesh"),
+                _only(ex, ("kind", "file", "column", "step_column", "quantity", "cf_x", "cf_ytop", "wall_law", "mesh", "settle_kind"),
                       w + ".extractor")
                 kind = ex.get("kind")
                 if kind == "csv_column":
@@ -419,8 +429,13 @@ def normalize_spec(raw, from_json):
                     exn = {"kind": kind, "quantity": qn, "cf_x": _need(ex, "cf_x", float, w + ".extractor", 0.6),
                            "cf_ytop": _need(ex, "cf_ytop", float, w + ".extractor", None), "wall_law": law,
                            "mesh": _need(ex, "mesh", str, w + ".extractor", None)}
+                elif kind == "settle":
+                    # settle_criteria.yaml の量 (§4.6 の 8): 名前と種類で基準の量に結び付ける (数値は convergence と同じ 1 回の判定から)
+                    _only(ex, ("kind", "quantity", "settle_kind"), w + ".extractor")
+                    exn = {"kind": kind, "quantity": _need(ex, "quantity", str, w + ".extractor", required=True),
+                           "settle_kind": _need(ex, "settle_kind", str, w + ".extractor", required=True)}
                 else:
-                    raise SpecError("%s.extractor.kind %r は csv_column / snapshot" % (w, kind))
+                    raise SpecError("%s.extractor.kind %r は csv_column / snapshot / settle" % (w, kind))
                 sg = it.get("segment") or {}
                 _only(sg, ("step_min", "step_max"), w + ".segment")
                 wn = it.get("window") or {}
@@ -428,6 +443,8 @@ def normalize_spec(raw, from_json):
                 crit = it.get("criterion", "relative")
                 if crit not in QS_CRITERIA:
                     raise SpecError("%s.criterion %r は %s のどれか" % (w, crit, list(QS_CRITERIA)))
+                if (crit == "settle") != (kind == "settle"):
+                    raise SpecError("%s: criterion settle と extractor.kind settle は組で使う (criterion %r・kind %r)" % (w, crit, kind))
                 th = it.get("thresholds") or {}
                 role = it.get("stop_rule_role")
                 if crit != "stop_rule" and role is not None:
@@ -440,6 +457,11 @@ def normalize_spec(raw, from_json):
                     _only(th, ("abs_mean", "abs_amp"), w + ".thresholds")
                     thn = {"abs_mean": _need(th, "abs_mean", float, w + ".thresholds", required=True),
                            "abs_amp": _need(th, "abs_amp", float, w + ".thresholds", required=True)}
+                elif crit == "settle":
+                    # 閾値・窓・区間は settle_criteria.yaml のもの (仕様に書くと読み手が仕様の値で判定したと誤解するので誤り)
+                    if th or wn or (it.get("segment") or {}):
+                        raise SpecError("%s: criterion settle では thresholds・window・segment を書かない (settle_criteria.yaml の値で判定)" % w)
+                    thn = {}
                 else:
                     # 閾値・窓は run の stop_rule.json の settings (停止規則の見張りが使った値) から読む。仕様に書くと読み手が
                     # 仕様の値で判定したと誤解するので誤りにする
@@ -451,11 +473,14 @@ def normalize_spec(raw, from_json):
                     thn = {}
                 if any(v <= 0.0 for v in thn.values()):
                     raise SpecError("%s.thresholds は正の数 (%r)" % (w, thn))
-                acc = it.get("accept", ["STEADY"])
-                if not isinstance(acc, list) or not acc or any(a not in QS_VERDICTS for a in acc):
+                acc = it.get("accept", ["SETTLED"] if crit == "settle" else ["STEADY"])
+                if crit == "settle":
+                    if acc != ["SETTLED"]:
+                        raise SpecError("%s.accept は criterion settle では [SETTLED] だけ (%r)" % (w, acc))
+                elif not isinstance(acc, list) or not acc or any(a not in QS_VERDICTS for a in acc):
                     raise SpecError("%s.accept は %s の空でないリスト (%r)" % (w, list(QS_VERDICTS), acc))
-                if crit == "stop_rule":
-                    if acc != ["STEADY"]:
+                if crit in ("stop_rule", "settle"):
+                    if crit == "stop_rule" and acc != ["STEADY"]:
                         raise SpecError("%s.accept は criterion stop_rule では [STEADY] だけ (PASS の意味を停止規則の条件と揃える; %r)"
                                         % (w, acc))
                     win = None
@@ -477,6 +502,15 @@ def normalize_spec(raw, from_json):
                     item["stop_rule_role"] = role
                 items.append(item)
             out["quasisteady"] = {"quantities": items}
+            sc = q.get("settle_criteria")
+            if any(it["criterion"] == "settle" for it in items):
+                # criterion settle の量の基準 (§4.6 の 8): 仕様を書いた時点の settle_criteria.yaml の sha256。判定のときの基準と照合する
+                _only(sc, ("file", "sha256"), "quasisteady.settle_criteria")
+                out["quasisteady"]["settle_criteria"] = {
+                    "file": _need(sc or {}, "file", str, "quasisteady.settle_criteria", required=True),
+                    "sha256": _need(sc or {}, "sha256", str, "quasisteady.settle_criteria", required=True)}
+            elif sc is not None:
+                raise SpecError("quasisteady.settle_criteria は criterion settle の量があるときだけ")
     wr = raw.get("wall_resolution")
     if wr is None:
         out["wall_resolution"] = None
@@ -887,6 +921,88 @@ def check_convergence(run, spec, cfg):
                   rc=r.returncode, output=out, **base, **info)
 
 
+def select_settle_judge(run):
+    """`run_case.sh` と同じ道具の選択 (`settle.select_judge` = `check_settled.py --select`)。check_settled.py を選ぶ run (基準
+    `settle_criteria.yaml` のある本段・手で組んだ run・基準が無効・記録の欠け) は選択の dict、check_convergence.py を選ぶ run (基準の無い run・
+    前の段と確かめた run) は None。選択が例外なら {"error": ...} (基準のある run を旧の道具へ落とさない)。"""
+    import settle as ST
+    if not os.path.lexists(os.path.join(run, ST.CRITERIA_FILE)):
+        return None
+    try:
+        sel = ST.select_judge(run)
+    except Exception as e:                                                        # noqa: BLE001
+        return {"error": "道具の選択 (settle.select_judge) の例外 (%s: %s)" % (type(e).__name__, str(e)[:200])}
+    return sel if sel.get("tool") == ST.TOOL_NEW else None
+
+
+def deltastar_loop_module():
+    """停止の時の再評価の照合 (`_v2_binding`) を持つ `design/forge_design/feedback/deltastar_loop.py` (この作業ツリーのもの)。"""
+    return design_module(DELTASTAR_LOOP_MOD, DELTASTAR_LOOP_PY)
+
+
+def evaluate_settled(run, sel, stop):
+    """停止規則 v2 の run などの `convergence` (§4.6 の 8; plan tooling-design-orchestrator §4.2「解析の成立の読み方」)。
+    `check_settled.py` と同じ判定 (道具の選択の照合 → `settle.judge`) を書き込みなしで 1 回行う。PASS は「設定した量・区間で SETTLED」で、
+    残差の低下は意味しない。停止規則 v2 の終わった run (STOP_RULE_STATE.json の method v2・状態 REACHED / CENSORED / FAILED) は、
+    停止の時の再評価との照合 (`deltastar_loop._v2_binding`: 状態・STOPPED_AT・停止の場・見張りの記録・再評価の記録と入力・起動;
+    `stop_rule.match_reeval`: 判定し直しの結果と記録の数値) を通す。照合が通らなければ判定不能。ただし判定し直しの FAIL は FAIL のまま
+    照合の不能を併記する (既知の FAIL を隠さない)。
+    戻り {check: convergence の項目, result: settle.judge の結果か None, files: 入力の一覧 (鮮度の入力; settle.input_files)}。"""
+    import settle as ST
+    import check_settled as CS
+    run = os.path.abspath(run)
+    base = {"tool": "check_settled.py", "interval": "settle_criteria.yaml の判定区間 (窓 W・格子; 下の window_steps)"}
+    if sel.get("error"):
+        return {"check": _check("INDETERMINATE", "[settled] %s" % sel["error"], **base), "result": None, "files": []}
+    base.update(mode=sel.get("mode"), select_why=sel.get("why"))
+    if sel.get("mode") == "invalid" or sel.get("problems"):
+        from pathlib import Path
+        what, msg = CS.rejection(Path(run), sel)
+        return {"check": _check("INDETERMINATE", "[settled] %s (%s [mode %s]; 判定しない)" % (what, sel.get("why"), sel.get("mode")),
+                                problems=list(sel.get("problems") or []), note=msg, **base), "result": None, "files": []}
+    try:
+        loaded = ST.load_criteria(run)
+        data = ST.RunData(run, loaded["criteria"]) if loaded["status"] == "ok" else None
+        res = ST.judge(run, None, data=data, loaded=loaded)
+        files = ST.input_files(run, data)
+    except ST.CriteriaError as e:
+        return {"check": _check("INDETERMINATE", "[settled] 基準のファイルの誤り: %s" % e, **base), "result": None, "files": []}
+    raw = res.get("verdict")
+    st = SETTLE_STATUS.get(raw, "INDETERMINATE")
+    info = {"verdict": raw, "verdict_line": ST.verdict_line(res), "end_step": res.get("end_step"), "end_source": res.get("end_source"),
+            "terminal_step": res.get("terminal_step"), "stop_step": res.get("stop_step"), "window_steps": res.get("window_steps"),
+            "criteria_sha256": (res.get("criteria") or {}).get("sha256"),
+            "by_quantity": {q["name"]: q["verdict"] for q in res.get("quantities") or []}}
+    why = "[settled] %s" % info["verdict_line"]
+    match = None
+    rec = stop.get("record") if isinstance(stop, dict) else None
+    if isinstance(rec, dict) and rec.get("method") == "v2" and stop.get("raw") in STOP_V2_FINAL:
+        if not stop.get("final"):
+            probs = ["停止規則 v2 の終了の状態 (STOP_RULE_STATE.json) がまだ無い (%s)" % stop.get("source")]
+        else:
+            try:
+                DL = deltastar_loop_module()
+                SRm = stop_rule_module()
+                from pathlib import Path
+                b = DL._v2_binding(Path(run), rec, ST)
+                m = SRm.match_reeval(run, res, rec.get("reeval") or {})
+                probs = list(b.get("problems") or []) + [p for p in (m.get("problems") or []) if p not in (b.get("problems") or [])]
+                match = {"record_file": m.get("record_file"), "form": m.get("form")}
+            except Exception as e:                                                # noqa: BLE001
+                probs = ["停止の時の再評価の照合の例外 (%s: %s)" % (type(e).__name__, str(e)[:200])]
+        match = {**(match or {}), "pass": not probs, "problems": probs[:20], "n_problems": len(probs)}
+        if probs:
+            txt = "; ".join(probs)[:400]
+            if st == "FAIL":
+                why += " (停止の時の再評価との照合も通らない: %s)" % txt
+            else:
+                st = "INDETERMINATE"
+                why = "[settled] 停止の時の再評価と照合できない (判定し直しは %s): %s" % (raw, txt)
+    elif isinstance(rec, dict) and rec.get("method") == "v2" and stop.get("raw") not in ("NOT_USED",):
+        match = {"pass": None, "note": "停止規則 v2 の状態 %r: 停止の時の再評価の照合はしない (終わった状態でない)" % stop.get("raw")}
+    return {"check": _check(st, why, stop_match=match, **base, **info), "result": res, "files": files}
+
+
 def read_stop_state(run):
     """停止規則の状態を**そのまま** → {raw, source, final, record}。"""
     p = os.path.join(run, "STOP_RULE_STATE.json")
@@ -921,9 +1037,10 @@ def check_stop_rule(stop):
     if raw not in STOP_STATUS:
         return _check("INDETERMINATE", "停止規則の状態 %r は既知でない (%s)" % (raw, stop["source"]), **stop)
     st = STOP_STATUS[raw]
-    if raw in ("REACHED", "CENSORED", "DIVERGED", "EXEC_ERROR", "DATA_ERROR", "UNAVAILABLE") and not stop.get("final"):
+    if raw in STOP_FINAL_ONLY and not stop.get("final"):
         st = "INDETERMINATE"                     # 見張りの途中の記録 (STOP_RULE_STATE.json がまだ無い) では確定しない
-    return _check(st, "%s (%s)" % (raw, stop["source"]), **stop)
+    method = (stop.get("record") or {}).get("method") if isinstance(stop.get("record"), dict) else None
+    return _check(st, "%s%s (%s)" % (raw, " [停止規則 v2]" if method == "v2" else "", stop["source"]), **stop)
 
 
 def _series_csv(run, ex):
@@ -970,10 +1087,10 @@ def classify_absolute(steps, vals, tail_frac, abs_mean, abs_amp):
     return "STEADY", detail, (m, a)
 
 
-def stop_rule_module():
-    """停止規則の判定の関数を持つ `design/forge_design/evaluate/stop_rule.py` (この作業ツリーのもの) を読む。既に読まれていればそれを使い、
-    この作業ツリーの STOP_RULE_PY でなければ ImportError (別の作業ツリーの judge_rows で判定しない)。"""
-    mod = sys.modules.get(STOP_RULE_MOD)
+def design_module(name, path):
+    """design の `name` (この作業ツリーの `path`) を読む。既に読まれていればそれを使い、この作業ツリーのファイルでなければ ImportError
+    (別の作業ツリーの判定の関数で判定しない)。"""
+    mod = sys.modules.get(name)
     if mod is None:
         design = os.path.join(ROOT, "design")
         added = design not in sys.path
@@ -981,13 +1098,18 @@ def stop_rule_module():
             sys.path.insert(0, design)
         try:
             import importlib
-            mod = importlib.import_module(STOP_RULE_MOD)
+            mod = importlib.import_module(name)
         finally:
             if added and design in sys.path:
                 sys.path.remove(design)
-    if os.path.realpath(getattr(mod, "__file__", "") or "") != os.path.realpath(STOP_RULE_PY):
-        raise ImportError("読んだ %s が %s でない (%s)" % (STOP_RULE_MOD, _rel(STOP_RULE_PY), getattr(mod, "__file__", None)))
+    if os.path.realpath(getattr(mod, "__file__", "") or "") != os.path.realpath(path):
+        raise ImportError("読んだ %s が %s でない (%s)" % (name, _rel(path), getattr(mod, "__file__", None)))
     return mod
+
+
+def stop_rule_module():
+    """停止規則の判定の関数を持つ `design/forge_design/evaluate/stop_rule.py` (この作業ツリーのもの)。"""
+    return design_module(STOP_RULE_MOD, STOP_RULE_PY)
 
 
 def stop_rule_settings(run):
@@ -1096,7 +1218,60 @@ def stop_rule_cross(items, results, stop, SR, th):
     return out
 
 
-def check_quasisteady(run, spec_info, stop=None):
+def _settle_item_checks(items, settled, q_spec):
+    """criterion settle の量の判定 (§4.6 の 8): convergence と同じ 1 回の check_settled の結果 (`evaluate_settled` の戻り) から写す。
+    仕様の量と基準の量の名前・種類の完全一致と、仕様を書いた時点の基準の sha256 = 判定の基準の sha256 を確かめる (欠け・余り・違いは
+    判定不能)。戻り ({名前: 項目}, 余りの問題の列)。"""
+    out, extra_probs = {}, []
+    sitems = [it for it in items if it["criterion"] == "settle"]
+    if not sitems:
+        return out, extra_probs
+    why_all = None
+    res = (settled or {}).get("result")
+    conv = (settled or {}).get("check") or {}
+    if settled is None:
+        why_all = "criterion settle の量だが、この run の判定の道具は check_settled.py でない (基準の無い run・前の段と確かめた run)"
+    elif res is None:
+        why_all = "check_settled の判定が無い (convergence の項目: %s)" % str(conv.get("reason"))[:300]
+    else:
+        want = (q_spec.get("settle_criteria") or {}).get("sha256")
+        got = (res.get("criteria") or {}).get("sha256")
+        if want is None or want != got:
+            why_all = ("仕様を書いた時点の基準の sha256 %s… が判定の基準 %s… と違う (仕様の後に settle_criteria.yaml が変わった)"
+                       % (str(want)[:16], str(got)[:16]))
+        elif conv.get("status") == "INDETERMINATE":
+            why_all = "convergence (同じ check_settled の判定) が判定不能: %s" % str(conv.get("reason"))[:300]
+    by_name = {q.get("name"): q for q in (res or {}).get("quantities") or []}
+    for it in sitems:
+        nm = it["name"]
+        ex = it["extractor"]
+        r = {"required": it["required"], "definition": it["definition"], "unit": it["unit"], "region": it["region"],
+             "extractor": ex, "accept": it["accept"], "criterion": "settle"}
+        if why_all:
+            out[nm] = _check("INDETERMINATE", why_all, **r)
+            continue
+        q = by_name.get(ex["quantity"])
+        if q is None:
+            out[nm] = _check("INDETERMINATE", "基準 (check_settled の結果) に量 %r が無い (仕様の量の欠け)" % ex["quantity"], **r)
+            continue
+        if q.get("kind") != ex["settle_kind"]:
+            out[nm] = _check("INDETERMINATE", "量 %r の種類が仕様 %r と基準 %r で違う" % (ex["quantity"], ex["settle_kind"], q.get("kind")), **r)
+            continue
+        v = q.get("verdict")
+        reasons = ["[%s] %s" % (x.get("label"), x.get("text")) for x in (q.get("reasons") or [])[:3]]
+        r.update(verdict=v, settle_kind=q.get("kind"), input=q.get("input"), reasons=reasons)
+        st = SETTLE_STATUS.get(v, "INDETERMINATE")
+        out[nm] = _check(st, "%s (check_settled の量 %s%s)" % (v, ex["quantity"], ("; " + "; ".join(reasons)) if reasons and st != "PASS" else ""),
+                         **r)
+    if res is not None and not why_all:
+        named = {it["extractor"]["quantity"] for it in sitems}
+        left = sorted(n for n in by_name if n not in named)
+        if left:
+            extra_probs.append("基準の量 %s が仕様に無い (仕様の量の余り・欠け; 仕様を作り直す)" % left)
+    return out, extra_probs
+
+
+def check_quasisteady(run, spec_info, stop=None, settled=None):
     spec = spec_info.get("spec")
     if spec_info.get("error"):
         return _check("INDETERMINATE", spec_info["error"])
@@ -1116,6 +1291,8 @@ def check_quasisteady(run, spec_info, stop=None):
     snap_groups = {}
     for it in items:
         ex = it["extractor"]
+        if ex["kind"] == "settle":
+            continue                             # 下の _settle_item_checks (系列を読まない)
         if ex["kind"] == "csv_column":
             s, v, err = _series_csv(run, ex)
             series[it["name"]] = (s, v, err)
@@ -1141,8 +1318,12 @@ def check_quasisteady(run, spec_info, stop=None):
                 series[it["name"]] = (None, None, "抽出が適用不能 (%s: 例 上下対称でないメッシュの asym)" % w)
             else:
                 series[it["name"]] = ([float(s_) for s_ in steps], ser[w], None)
+    settle_results, settle_extra = _settle_item_checks(items, settled, q)
+    results.update(settle_results)
     for it in items:
         nm = it["name"]
+        if it["criterion"] == "settle":
+            continue
         s, v, err = series.get(nm, (None, None, "評価していない"))
         r = {"required": it["required"], "definition": it["definition"], "unit": it["unit"], "region": it["region"],
              "extractor": it["extractor"], "accept": it["accept"]}
@@ -1225,8 +1406,8 @@ def check_quasisteady(run, spec_info, stop=None):
                       quantities=results)
     req = {n: r for n, r in results.items() if r["required"]}
     adv = {n: r for n, r in results.items() if not r["required"]}
-    st = _combine([r["status"] for r in req.values()]) if req else "NOT_APPLICABLE"
-    bad = ["%s %s (%s)" % (n, r["status"], r["reason"][:200]) for n, r in req.items() if r["status"] != "PASS"]
+    st = _combine([r["status"] for r in req.values()] + (["INDETERMINATE"] if settle_extra else [])) if req else "NOT_APPLICABLE"
+    bad = ["%s %s (%s)" % (n, r["status"], r["reason"][:200]) for n, r in req.items() if r["status"] != "PASS"] + settle_extra
     why = ("必須の量 %d 個すべて受け入れ" % len(req)) if st == "PASS" else ("; ".join(bad) if bad else "必須の量が無い")
     if adv:
         why += " (参考の量: %s)" % ", ".join("%s %s" % (n, r["status"]) for n, r in adv.items())
@@ -1338,14 +1519,40 @@ def tool_hashes():
     return out
 
 
-def collect_inputs(run, spec_info=None):
-    """判定が依る入力の識別 {相対名: digest か None (無い)}。鮮度の照合 (--check-fresh) はこれを比べる。"""
+SETTLE_INPUT_KEY = "settle_input:"             # 鮮度の入力のうち check_settled の判定が読んだファイル (今の中身で計算し直す)
+SETTLE_FIXED_INPUTS = ("settle_criteria.yaml", "STOPPED_AT", "MAIN_STAGE_STARTED", "boundary_massflux.csv", "settle_nodes.txt")
+
+
+def settle_input_paths(run, settled):
+    """check_settled の判定が読んだファイル (`settle.input_files`) と、停止の時の再評価の記録のファイル (古い形では選んだ
+    SETTLE_VERDICT.json) の run からの相対パス (§4.6 の 8、codex 諮問 judge-v2 の (5))。run の外のファイルは絶対パスのまま。"""
+    run = os.path.abspath(run)
+    out = set()
+    for f in (settled or {}).get("files") or []:
+        p = os.path.abspath(str(f.get("path"))) if isinstance(f, dict) and f.get("path") else None
+        if p:
+            out.add(os.path.relpath(p, run) if p.startswith(run + os.sep) else p)
+    m = (((settled or {}).get("check") or {}).get("stop_match") or {})
+    if m.get("record_file"):
+        out.add(str(m["record_file"]))
+    return sorted(out)
+
+
+def collect_inputs(run, spec_info=None, settle_paths=()):
+    """判定が依る入力の識別 {相対名: digest か None (無い)}。鮮度の照合 (--check-fresh) はこれを比べる。
+    settle_paths: check_settled の判定が読んだファイル (`settle_input_paths`; キーは `settle_input:<パス>`)。鮮度の照合は前の判定の
+    キーから同じパスを今の中身で計算し直す (保存した sha256 を使い回さない)。基準 settle_criteria.yaml のある run は、停止規則 v2 の
+    判定が読む固定の名前 (SETTLE_FIXED_INPUTS) も無い・有るを含めて入力にする (後から現れたファイルも検出する)。"""
     run = os.path.abspath(run)
     if spec_info is None:
         spec_info = load_spec(run)
     names = ["solverConfig.yaml", "bcondConfig.yaml", "residual_history.csv", "stage_manifest.json", "forge_launches.jsonl",
              "STOP_RULE_STATE.json", "stop_rule.json", "prepare_info.json", "forge_run.log", SPEC_JSON, SPEC_YAML]
+    if os.path.lexists(os.path.join(run, SETTLE_FIXED_INPUTS[0])):
+        names += [nm for nm in SETTLE_FIXED_INPUTS if nm not in names]
     out = {nm: _digest(os.path.join(run, nm)) for nm in names}
+    for sp in settle_paths or ():
+        out[SETTLE_INPUT_KEY + sp] = _digest(sp if os.path.isabs(sp) else os.path.join(run, sp))
     out["../" + SPEC_YAML] = _digest(os.path.join(os.path.dirname(run), SPEC_YAML))
     try:
         for st in json.load(open(os.path.join(run, "stage_manifest.json"))).get("stages") or []:
@@ -1490,18 +1697,24 @@ def judge(run, args):
     checks = {"solver": solver,
               "nonfinite": check_nonfinite(run, full_audit=args.full_audit),
               "physical": check_physical(run)}
-    if spec_info.get("error"):
+    # 道具の選択は run_case.sh と同じ (settle.select_judge; §4.6 の 8): check_settled.py を選ぶ run は 1 回の判定を convergence と
+    # quasisteady (criterion settle) で共有する。それ以外は今どおり check_convergence (仕様の convergence.mode で)
+    sel = select_settle_judge(run)
+    settled = evaluate_settled(run, sel, stop) if sel is not None else None
+    if settled is not None:
+        checks["convergence"] = settled["check"]
+    elif spec_info.get("error"):
         checks["convergence"] = _check("INDETERMINATE", spec_info["error"])
     else:
         checks["convergence"] = check_convergence(run, spec, cfg)
     checks["stop_rule"] = check_stop_rule(stop)
-    checks["quasisteady"] = check_quasisteady(run, spec_info, stop)
+    checks["quasisteady"] = check_quasisteady(run, spec_info, stop, settled=settled)
     checks["wall_resolution"] = check_wall_resolution(run, cfg, cfg_err, bcond, bcond_err, spec_info)
     st, why = overall_of(checks)
     v = _base_record(run, args, "final")
     v.update(overall=st, overall_reason=why, exit_code=EXIT_OF[st], execution=execution_info(run, solver), checks=checks,
              spec={k: spec_info.get(k) for k in ("source", "path", "sha256", "written_after_start", "error", "spec")},
-             tools=tool_hashes(), inputs=collect_inputs(run, spec_info))
+             tools=tool_hashes(), inputs=collect_inputs(run, spec_info, settle_input_paths(run, settled)))
     if (prior or {}).get("stages"):
         # 段階起動の段の記録 (state deferred のときに run_case.sh が足したもの) は参考として引き継ぐ。総合への入れ方は親の確定 (後半) で決める
         v["stages"] = prior["stages"]
@@ -1513,8 +1726,8 @@ def check_fresh(run):
     prior = _load_prior(run)
     if not prior or "inputs" not in prior:
         return 2, "NO VERDICT: %s が無いか読めない (%s)" % (VERDICT_JSON, run)
-    now = collect_inputs(run)
     old = prior["inputs"]
+    now = collect_inputs(run, settle_paths=[k[len(SETTLE_INPUT_KEY):] for k in old if k.startswith(SETTLE_INPUT_KEY)])
     changed = sorted(k for k in set(now) | set(old) if now.get(k) != old.get(k))
     tools_now = tool_hashes()
     tool_changed = sorted(k for k in tools_now if (prior.get("tools") or {}).get(k) != tools_now[k])

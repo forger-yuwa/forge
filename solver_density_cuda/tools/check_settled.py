@@ -184,6 +184,11 @@ def _rejection(run: Path, sel: dict) -> tuple[str, str | None]:
     return "基準が本段の判定に使えない", None
 
 
+def rejection(run: Path, sel: dict) -> tuple[str, str | None]:
+    """`_rejection` の公開の名前 (judge_run.py が同じ文言で判定不能を書く; plan tooling-convergence-and-wall-resolution-gates §4.6 の 8)。"""
+    return _rejection(Path(run), sel)
+
+
 def main(argv=None) -> int:
     ap = _Parser(description=__doc__.split("\n\n")[0])
     ap.add_argument("run_dir")

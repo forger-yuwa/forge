@@ -3151,7 +3151,12 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         sr, sr_use, sr_why = _stop_rule_for_main(run_dir, stop_rule)
     # 計算の後の判定の仕様 (§4.6-1; 本段で停止規則を使う run は θ_r も)。最初の起動の前に書く
     from . import judge as J
-    J.write_spec(run_dir, J.spec_axismach("runner_axismach.run_staged_ns", stop_rule=(sr if sr_use else None)))
+    if SR.criteria_present(run_dir):
+        # 基準 settle_criteria.yaml のある run (停止規則 v2・NOT_USED を含む): judge_run は run_case.sh と同じく check_settled で判定するので、
+        # 準定常の量も基準の量を criterion settle で (plan tooling-convergence-and-wall-resolution-gates §4.6 の 8、2026-10-18)
+        J.write_spec(run_dir, J.spec_axismach_settle("runner_axismach.run_staged_ns", run_dir))
+    else:
+        J.write_spec(run_dir, J.spec_axismach("runner_axismach.run_staged_ns", stop_rule=(sr if sr_use else None)))
     (run_dir / MAIN_STAGE_STARTED).unlink(missing_ok=True)   # 前の呼び出しの通知で見張りを早く起動させない
     (run_dir / SR.STATE).unlink(missing_ok=True)             # 前の呼び出しの停止の状態を今回の結果と取り違えない
     sm = _stage_manifest_cls()(run_dir)

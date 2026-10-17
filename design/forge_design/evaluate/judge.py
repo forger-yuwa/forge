@@ -17,6 +17,7 @@ SERN のゲート・ベルの tp_gates) は各ゲートに残す (`judge_run.py`
 | 機種 (spec の source) | 量 (系列の出所) | 閾値 |
 | --- | --- | --- |
 | axis-Mach NS (`spec_axismach_ns`) | 出口コア M・質量の収支 r・θ_r (停止規則を使う run だけ) (`judge_series.csv`: 停止規則の記録の行、無ければ本段の res から同じ式) | 停止規則を使う run: M・r・θ_r は criterion stop_rule (停止規則の `judge_rows` そのもの、窓・閾値は run の `stop_rule.json` の settings; §5.1 #14a (2))。使わない run: M は check_quasisteady の既定、r は停止規則の既定の絶対の閾値 (|平均|・振幅) |
+| axis-Mach NS、停止規則 v2 (`settle_criteria.yaml` のある run; `spec_axismach_settle`) | 基準の量の全部 (残差・流量の収支・出口コア M・線の M・流れ角・壁の熱流など、基準のとおり) | criterion settle: convergence (`check_settled`) と同じ 1 回の判定の各量の verdict (閾値・窓・区間は基準のもの; plan tooling-design-orchestrator §4.2「解析の成立の読み方」、judge plan §4.6 の 8)。仕様は名前・種類と基準の sha256 を持ち、判定のときに照合する |
 | axis-Mach Euler (`spec_axismach_euler`) | 出口コア M・r (本段の res から) | 同上。本段の出力が 4 枚に届かなければ準定常は INDETERMINATE (窓の不足) |
 | SERN 2D・3D (`spec_sern`) | 目的量 (粘性: C_T_with_shear、非粘性: C_T)・C_T・C_L・C_M (`force_history.csv`; sern_gates の定義) | sern_forces の steadiness (tail 0.4・drift 0.02・osc 0.05) |
 | ベル TP (`spec_bell`) | 推力系 4 列・ṁ (`thrust_history.csv`; tp_gates (ii) の列) | tp_gates (ii) の drift・osc (推力系 1.5e-4、ṁ 1e-3) |
@@ -217,6 +218,33 @@ def spec_axismach(generator: str, *, stop_rule: dict | None = None, euler: bool 
         notes.append("θ_r は量に入れない: 本段で停止規則を使わない (帯の位置 y_b を決める Euler 参照が無い) run")
     return {"judge_spec_version": 1, "source": f"generator:{generator}", "convergence": _conv(from_floor),
             "quasisteady": {"quantities": qs}, "notes": notes}
+
+
+def spec_axismach_settle(generator: str, run_dir) -> dict:
+    """停止規則 v2 の axis-Mach NS (run に `settle_criteria.yaml` がある) の仕様 (judge plan §4.6 の 8; 2026-10-18 codex 諮問 judge-v2)。
+    準定常の量は基準の量の全部を criterion settle で書く: 数値は judge_run の convergence と同じ 1 回の `check_settled` の判定から写し、
+    名前・種類と基準の sha256 を仕様に持って判定のときに照合する (欠け・余り・基準の書き換えは判定不能)。出口コア M・r の
+    `judge_series.csv` の量は書かない (定義・窓・閾値が基準と別の判定を二重に持たない)。基準が読めなければ ValueError (起動しない)。"""
+    from . import stop_rule as SR
+    S = SR._settle()
+    lc = S.load_criteria(run_dir)                       # 誤りは CriteriaError
+    if lc["status"] != "ok":
+        raise ValueError(f"{run_dir}: {S.CRITERIA_FILE} の評価対象が未設定 ({lc.get('reason')}) — 判定の仕様を書けない")
+    crit = lc["criteria"]
+    qs = []
+    for q in crit["quantities"]:
+        qs.append({"name": q["name"], "definition": f"settle_criteria.yaml の量 {q['name']} (種類 {q['kind']}; 判定は check_settled、"
+                                                    "閾値・窓は基準のもの)",
+                   "unit": "-", "region": "settle_criteria.yaml のとおり",
+                   "extractor": {"kind": "settle", "quantity": q["name"], "settle_kind": q["kind"]},
+                   "criterion": "settle", "accept": ["SETTLED"], "required": True})
+    notes = [f"停止規則 v2 の run: convergence は check_settled (judge_run が run_case.sh と同じ道具の選択で決める; PASS = 設定した量・区間で "
+             f"SETTLED、残差の低下は意味しない)。準定常は同じ判定の量 {[q['name'] for q in crit['quantities']]} を criterion settle で写す",
+             "停止の時の再評価 (stop_rule_v2/SETTLE_VERDICT_stop_<k>.json) と今の入力・起動・終端・量の数値を照合し、通らなければ判定不能"]
+    if crit.get("excluded"):
+        notes.append("基準が判定から外した量: " + "; ".join(f"{e.get('kind')} ({e.get('reason')})" for e in crit["excluded"]))
+    return {"judge_spec_version": 1, "source": f"generator:{generator}", "convergence": {"mode": "auto"},
+            "quasisteady": {"quantities": qs, "settle_criteria": {"file": S.CRITERIA_FILE, "sha256": lc["sha256"]}}, "notes": notes}
 
 
 def spec_sern(generator: str, viscous: bool, from_floor=None) -> dict:

@@ -421,6 +421,11 @@ forge を直接 `build/forge` で起動せず、**`solver_density_cuda/tools/run
   履歴全体)・`stop_rule` (`STOP_RULE_STATE.json` の状態をそのまま)・`quasisteady` (**仕様の量だけ**)・`wall_resolution` (粘性
   (`viscMethod 0` の定数粘性も) と no-slip 壁があれば、全 no-slip 壁の最後の step の出力で `check_wall_resolution.py --weight area`)。
   各項目は PASS / FAIL / INDETERMINATE (判定不能) / NOT_APPLICABLE。
+- **基準 `settle_criteria.yaml` のある run** (停止規則 v2 の本段など; 2026-10-18、plan `tooling-convergence-and-wall-resolution-gates` §4.6 の 8):
+  道具は上のラッパーと同じ選択で、`convergence` は `check_settled` (書き込みなし) の判定 (PASS = 基準の量・区間で SETTLED。残差の低下は
+  意味しない)。停止規則 v2 の終わった run は停止の時の再評価 (`stop_rule_v2/SETTLE_VERDICT_stop_<step>.json`) と今の入力・起動・数値を照合し、
+  通らなければ判定不能 (判定し直しの FAIL は FAIL のまま)。`quasisteady` は同じ判定の量を仕様の criterion `settle` で写す (仕様の量と基準の量の
+  照合あり)。設計チェーンの生成器は `judge.spec_axismach_settle` で仕様を書く。停止規則 v2 の状態 `FAILED` は FAIL。
 - **総合**: どれかが FAIL → FAIL (判定不能が併存しても既知の FAIL を隠さない)、FAIL が無く判定不能がある → INDETERMINATE、
   残りに PASS → PASS。**判定不能は合格ではない**。終了コードは PASS 0 / FAIL 1 / INDETERMINATE (と全部適用外) 2 / 判定器の例外 3 /
   段の記録だけ 4。`run_case.sh` の終了コードは今までどおり solver の終了コード (`FORGE_STRICT_CONVERGENCE=1` の意味も変えない)。

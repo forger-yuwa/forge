@@ -1898,15 +1898,23 @@ def files_record(data: RunData | None, extra=()) -> list:
     return out
 
 
-def write_verdict(run_dir, result: dict, data: RunData | None = None, out: str | os.PathLike | None = None) -> Path:
-    """結果を SETTLE_VERDICT.json に書く (一時ファイル → rename)。使ったファイルの一覧 (大きさ・sha256) を足す。"""
+def input_files(run_dir, data: RunData | None = None) -> list:
+    """判定が読んだファイルの一覧 (path・大きさ・sha256): RunData が使ったファイルと基準・STOPPED_AT。`write_verdict` (SETTLE_VERDICT の
+    files) と `judge_run.py` (鮮度の入力; 書き込みなしで判定するので、書き込みと分けた; plan tooling-design-orchestrator §4.2「解析の
+    成立の読み方」、2026-10-18 codex 諮問 judge-v2 の (5)) が同じこの一覧を使う。"""
     run = Path(run_dir)
-    p = Path(out) if out else run / VERDICT_FILE
-    res = dict(result)
     extra = [run / CRITERIA_FILE] if (run / CRITERIA_FILE).exists() else []
     if (run / "STOPPED_AT").exists():
         extra.append(run / "STOPPED_AT")
-    res["files"] = files_record(data, extra)
+    return files_record(data, extra)
+
+
+def write_verdict(run_dir, result: dict, data: RunData | None = None, out: str | os.PathLike | None = None) -> Path:
+    """結果を SETTLE_VERDICT.json に書く (一時ファイル → rename)。使ったファイルの一覧 (大きさ・sha256; `input_files`) を足す。"""
+    run = Path(run_dir)
+    p = Path(out) if out else run / VERDICT_FILE
+    res = dict(result)
+    res["files"] = input_files(run, data)
     tmp = p.with_name(p.name + ".tmp")
     tmp.write_text(json.dumps(_jsonable(res), ensure_ascii=False, indent=1) + "\n")
     os.replace(tmp, p)
