@@ -264,7 +264,7 @@ NS の後に `check_wall_resolution.py` (壁ごと・面積の重み・停止の
 
 - [x] 格子 (`hand_mesh.py`) の品質と第一層 (§6 V2・V3 の M5.5 系の分): case/71 (#3a) と手順書の試走 A (`procedures/design-chain-quickstart.md` 付録) で品質 PASS・AR 緩和の違反 0・第一層 ≤ c·y₁,req・見積もりの y₁⁺ ≤ 0.8
 - [x] V4 (NS の後の壁解像) を記録: case/71 run_0014・試走 A の p0・p1 で PASS
-- [x] V5 (M5.5 の設計の判定、公差 0.1 %): case/71 run_0014 accepted、試走 A の p1 accepted
+- [x] V5 (M5.5 の設計の判定、公差 0.1 %): case/71 run_0014 accepted、試走 A の p1 accepted — 2026-10-17 に生成元の記録つきの成果物で両方とも判定し直して accepted・生成元 MATCH (`case/71…/run_0014_chain_v2/wt_qualify_provenance/`、試走 A は `_runs/qs_trial_a_evidence/run_0005_ns_p1/wt_qualify_provenance/`)
 - [x] V6〜V9 (陰解法の比較・3 係数・float と FP64・長さ合わせの補間) の判定を記録
 - [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録
 - [ ] `status: done`、§9 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` を同期
