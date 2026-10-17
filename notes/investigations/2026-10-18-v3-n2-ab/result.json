@@ -1,0 +1,62 @@
+{
+ "A_commit": "a36a87ff",
+ "B_commit": "b1a02511",
+ "verdict": "コードの版の変更で差を説明できる (A は旧の値、B は今の値を再現; #6e 単独への帰属は保留)",
+ "rep_A": true,
+ "rep_B": true,
+ "differs": [
+  "design_wall",
+  "n_axis_inv",
+  "ni",
+  "ni_min",
+  "nodes_euler",
+  "nodes_ns",
+  "nodes_record",
+  "physical_wall",
+  "r_throat",
+  "wall_first_frac_table",
+  "x_density_table"
+ ],
+ "A": {
+  "r_throat": 0.10490286547916376,
+  "M_knot": 2.65,
+  "n_axis_inv": 4800,
+  "physical_wall": [
+   -9.53262806914101,
+   72.44342826154433
+  ],
+  "design_wall": [
+   -9.53262806914101,
+   72.44342826154433
+  ],
+  "ni_min": 4470,
+  "ni": 4470,
+  "nj": 92,
+  "nodes_record": 411240,
+  "nodes_ns": 411240,
+  "nodes_euler": 433590
+ },
+ "B": {
+  "r_throat": 0.10490283359806168,
+  "M_knot": 2.65,
+  "n_axis_inv": 2400,
+  "physical_wall": [
+   -9.532630966209451,
+   72.44799423988837
+  ],
+  "design_wall": [
+   -9.532630966209451,
+   72.44799423988837
+  ],
+  "ni_min": 4471,
+  "ni": 4480,
+  "nj": 92,
+  "nodes_record": 412160,
+  "nodes_ns": 412160,
+  "nodes_euler": 434560
+ },
+ "tables_equal": {
+  "wall_first_frac_table": false,
+  "x_density_table": false
+ }
+}

@@ -437,8 +437,9 @@ def build(a):
     try:
         p2 = load_problem(tmp_out)
         mp2 = RA.mesh_params(p2, 1.0, ni=561, nj=97, wall_first_frac=4.5e-5)
-        hint = ("ユーザの了承を取ってカードの mesh_limits を直し、承認の記録を作り直して --approval で渡す" if lim is not None else
-                "ユーザの了承を取ってカードの mesh_limits に書き、承認の記録を --approval で渡す (自動で広げない)")
+        # 了承を求める文は check_node_budget の定型の側にある (ここは直す対象と手順だけ; 重ねない)
+        hint = ("カードの mesh_limits を直し、承認の記録を作り直して --approval で渡す" if lim is not None else
+                "カードの mesh_limits に書き、承認の記録を --approval で渡す (自動で広げない)")
         nodes_ns = RA.check_node_budget(mp2, p2.mesh, "mesh", allow_hint=hint)
         nodes_eu = RA.check_node_budget(RA.mesh_params_euler(p2, 1.0), RA.mesh_euler_block(p2), "mesh_euler", allow_hint=hint)
     except ValueError as ex:
