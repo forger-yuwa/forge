@@ -18,6 +18,9 @@
   (N15) 承認の版より古い生成器の停止規則の基準 (実物の run_0003; residual_finite.required が無い) は check_run が MISMATCH
   判別 A/B (codex 2026-10-17)
   (i)  承認値 0.001 に CLI 0.1 → 拒否 (承認なしの今の経路は 0.1 を採用する、を併記)
+  run の物理の照合 (§5.1 #3): (R0) 試走 A の本段の設定が承認と一致 (正例)、(R1〜R14) 入口の全温・全圧・組成・分布、壁温・断熱壁、
+  出口の静圧、軸対称、H2O の輸送、粘性のモデル、熱力学の基準温度、壁関数・圧縮性補正・エネルギーの k を変えると MISMATCH、
+  (R+) 数値の設定 (CFL・リミッタ) だけの変更は止めない
   (ii) line_n 2001 を承認し、run の基準 (今のコードで作り直した) の line_mach.n だけを A 2001 / B 2 → A は OK、B は MISMATCH
        (A も止まれば試験の不成立)
 
@@ -296,6 +299,50 @@ with tempfile.TemporaryDirectory() as tdn:
           f"A {ra['status']}, B {rb['status']} {rb['diffs'][:3]}")
     if ra["status"] != "OK":
         print("     試験の不成立: A も止まった")
+
+    print("== run の物理の照合 (§5.1 #3)")
+
+    def phys_with(tag, edit):
+        r_ = copy_run(td, tag)
+        for fname, fn in edit.items():
+            doc = yaml.safe_load((r_ / fname).read_text())
+            fn(doc)
+            (r_ / fname).write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+        return AP.check_run_physics(AP.load_approval(ap0), r_, p0)
+
+    ph = AP.check_run_physics(AP.load_approval(ap0), run_a, p0)
+    check("(R0) 正例: 試走 A の NS p0 の本段の設定が承認の物理と一致", ph["status"] == "OK", str(ph["problems"])[:300])
+    check("(R0) 照合した項目 (入口 Pt・Tt・組成・熱力学・輸送・乱流・軸対称・壁・出口)",
+          {"inlet.Pt", "inlet.Tt", "physProp.transport", "turbulence", "mesh.isAxisymmetric", "wall", "outlet.Ps"} <= set(ph["checked"]),
+          str(ph["checked"]))
+    neg = {
+        "入口の全温 1200 K": {"bcondConfig.yaml": lambda d: d["inlet"]["floats"].update(Tt=1200.0)},
+        "入口の全圧 3.2 MPa": {"bcondConfig.yaml": lambda d: d["inlet"]["floats"].update(Pt=3.2e6)},
+        "入口の組成 (H2O 0.09)": {"bcondConfig.yaml": lambda d: d["inlet"]["floats"].update(Y0=0.91, Y1=0.09)},
+        "入口の分布 (inletProfile)": {"bcondConfig.yaml": lambda d: d["inlet"].update(ints={"inletProfile": 1})},
+        "壁温 400 K": {"bcondConfig.yaml": lambda d: d["wall"]["floats"].update(Ts=400.0)},
+        "断熱壁": {"bcondConfig.yaml": lambda d: d["wall"].update(kind="wall", floats=None)},
+        "出口の静圧": {"bcondConfig.yaml": lambda d: d["outlet"]["floats"].update(Ps=3000.0)},
+        "平面 (isAxisymmetric 0)": {"solverConfig.yaml": lambda d: d["mesh"].update(isAxisymmetric=0)},
+        "H2O の輸送 cea": {"solverConfig.yaml": lambda d: d["physProp"]["transport"].update(H2O="cea")},
+        "粘性のモデル (viscMethod 1)": {"solverConfig.yaml": lambda d: d["physProp"].update(viscMethod=1)},
+        "熱力学 (thermoHrefTemp 0)": {"solverConfig.yaml": lambda d: d["physProp"].update(thermoHrefTemp=0.0)},
+        "壁関数 (wallTreatmentSST 1)": {"solverConfig.yaml": lambda d: d["turbulence"].update(wallTreatmentSST=1)},
+        "圧縮性補正 (dilatationCorrection 0)": {"solverConfig.yaml": lambda d: d["turbulence"].update(dilatationCorrection=0)},
+        "エネルギーに k (sstEnergyIncludesK 1)": {"solverConfig.yaml": lambda d: d["turbulence"].update(sstEnergyIncludesK=1)},
+    }
+    for i, (nm, ed) in enumerate(neg.items()):
+        ph = phys_with(f"R{i + 1}", ed)
+        check(f"(R{i + 1}) {nm} → MISMATCH", ph["status"] == "MISMATCH", str(ph["problems"])[:200])
+    r_num = copy_run(td, "Rnum")
+    cfg = yaml.safe_load((r_num / "solverConfig.yaml").read_text())
+    cfg["time"]["deltaT"].update(cfl=2.0, cfl_pseudo=2.0)
+    cfg["space"]["limiter"] = 1
+    (r_num / "solverConfig.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
+    ph = AP.check_run_physics(AP.load_approval(ap0), r_num, p0)
+    check("(R+) 数値の設定 (CFL・リミッタ) だけを変えた run は止めない (AI が直してよい範囲)", ph["status"] == "OK", str(ph["problems"])[:200])
+    rr = AP.check_run(ap0, run_a, p0)
+    check("(R+) check_run (停止規則の基準 + 物理) が正例で OK", rr["status"] == "OK", str(rr["problems"] + rr["diffs"])[:200])
 
 print(f"\n{'ALL PASS' if FAIL == 0 else f'{FAIL} FAIL'}")
 sys.exit(1 if FAIL else 0)

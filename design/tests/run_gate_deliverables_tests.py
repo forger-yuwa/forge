@@ -13,9 +13,11 @@ FreeCAD・変換器) だけで部品がそろうか、MANIFEST に承認と合�
   (P2) MANIFEST の gate が承認の記録 (gate の sha256・承認の記録の sha256・承認の commit) と合う
   (P3) deliverables_check (gate つき) が PASS
   (N1) 同じ成果物を gate の違う承認 (別の記録) で見ると INDETERMINATE
+  (P4) 正式な入口の通し: 判定専用の環境の wt_qualify --approval が accepted (停止の判定・格子の品質を回し直し、成果物の gate・run の
+       停止規則の基準と物理を承認と照合、公差は承認の値)。run_0014 はプリセット wt_nozzle_v2 で、v2 の中身は今も同じ
 
 実行: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_gate_deliverables_tests.py
-所要: 約 2〜3 分 (FreeCAD・gmsh)。run・道具が無ければ飛ばす (rc 0 と「飛ばした」)。
+所要: 約 3〜5 分 (FreeCAD・gmsh・停止の判定の回し直し)。run・道具が無ければ飛ばす (rc 0 と「飛ばした」)。
 """
 import json
 import os
@@ -115,6 +117,24 @@ try:
     check("(P3) deliverables_check (gate つき) が PASS", r["status"] == "PASS", f"{r.get('why') or r.get('problems')}")
     r = Q.deliverables_check(run, out, card, field=fld, problem_path=prob, gate={**G, "gate_sha256": "0" * 64})
     check("(N1) gate の違う承認で見ると INDETERMINATE", r["status"] == "INDETERMINATE", r.get("why"))
+    # (P4) 正式な入口の通し: 判定専用の環境で wt_qualify --approval (停止の判定・格子の品質の回し直し、成果物の gate、run の物理と基準の照合)
+    jd = td / "judge"
+    q = subprocess.run([sys.executable, "-m", "forge_design.feedback.gate_env", "judge", "--approval", str(apath), "--",
+                        str(run), "--card", str(card), "--problem", str(prob), "--deliverables", str(out), "--iteration", "1",
+                        "--out-dir", str(jd)], capture_output=True, text=True, cwd=str(HERE.parent))
+    rec = json.loads((jd / Q.OUT_JSON).read_text()) if (jd / Q.OUT_JSON).is_file() else {}
+    ap_rec = rec.get("approval") or {}
+    check("(P4) 判定専用の環境の wt_qualify --approval が accepted (rc 0)",
+          q.returncode == 0 and rec.get("result") == "accepted" and rec.get("next") == "done",
+          f"rc {q.returncode}, {rec.get('result')}/{rec.get('next')}, missing {rec.get('missing')} {q.stderr.strip()[-300:]}")
+    check("(P4) 記録に承認・回し直し・run の照合がそろう (停止の判定 SETTLED・格子の品質 PASS・基準と物理 OK・公差は承認の値)",
+          (ap_rec.get("rechecks") or {}).get("problems") == [] and "SETTLED" in str((ap_rec.get("rechecks") or {}).get("settle"))
+          and (ap_rec.get("run_check") or {}).get("status") == "OK" and ap_rec.get("gate_run", {}).get("commit") == head
+          and all(str(v.get("source", "")).startswith("承認の記録") for k, v in rec.get("tolerances", {}).items()
+                  if k in ("exit_core_M_tol_rel", "line_eta", "line_n", "line_tol_maxabs_pct", "line_tol_halfamp_pct", "line_x_range_m")),
+          str({k: ap_rec.get(k) for k in ("run_check", "rechecks")})[:400])
+    print(f"     出口コア M {rec.get('show', {}).get('V5b_exit_core_M')}、V5c 最大の偏差 {rec.get('show', {}).get('V5c_maxabs_pct')} %・"
+          f"片振幅 {rec.get('show', {}).get('V5c_halfamp_pct')} %")
 finally:
     co = td / "gates" / head
     if co.exists():

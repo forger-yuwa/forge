@@ -1079,7 +1079,7 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
     apr_rec = None
     if apr is not None:
         from ..intake import approval as AP
-        rc = AP.check_run(apr, run_dir)
+        rc = AP.check_run(apr, run_dir, problem)
         rwg = (apr["protected"].get("requirements_without_gate") or [])
         apr_rec = {"path": str(Path(approval).resolve()), "sha256": AP.sha256_file(approval), "protected_sha256": apr["protected_sha256"],
                    "gate": {k: v for k, v in (apr.get("gate") or {}).items() if k != "env"}, "gate_run": gate_run,
@@ -1087,7 +1087,7 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
                    "requirements_without_gate": [r.get("name") for r in rwg]}
         if rc["status"] != "OK":
             # その run は承認した問題の評価になっていない (plan §4.2 要求の一致) → 結果によらず incomplete
-            missing = list(missing) + [f"run の停止規則の基準が承認の評価の条件と違う ({'; '.join(rc['problems'] + rc['diffs'])[:400]})"]
+            missing = list(missing) + [f"run の設定 (停止規則の基準・物理) が承認と違う ({'; '.join(rc['problems'] + rc['diffs'])[:400]})"]
             result, nxt = "incomplete", "escalate"
         apr_rec["rechecks"] = rechecks
         if rechecks and rechecks["problems"]:

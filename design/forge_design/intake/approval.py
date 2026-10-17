@@ -258,6 +258,22 @@ def resolved_settle(prob: dict | None) -> dict | None:
             "quantities_remove": list(es.get("quantities_remove") or []), "quantities_add": copy.deepcopy(es.get("quantities_add") or [])}
 
 
+# NS の物理モデルのうち承認で固定するキー (runner_wt._config_sst_node の雛形から取る; plan §4.7.1 (1)・§5.1 #3)
+NS_TURBULENCE_KEYS = ("model", "scalarDiffusion", "dilatationCorrection", "katoLaunder", "wallTreatmentSST", "turbulentPrandtl",
+                      "sstEnergyIncludesK", "sstEnergyWallFunction", "sstTawCoupling")
+
+
+def ns_physics_template() -> dict:
+    """設計チェーンの NS の物理モデル (乱流・軸対称) を雛形から取る。承認の時点の版の値を固定し、run の設定と照合する。"""
+    from types import SimpleNamespace
+    from ..evaluate.runner_wt import _config_sst_node
+    cfg = yaml.safe_load(_config_sst_node(SimpleNamespace(cp=1000.0, gamma=1.4), 1000, 100, 1.0))
+    t = cfg.get("turbulence") or {}
+    return {"turbulence": {k: t[k] for k in NS_TURBULENCE_KEYS if k in t},
+            "isAxisymmetric": int((cfg.get("mesh") or {}).get("isAxisymmetric", 0) or 0),
+            "source": "runner_wt._config_sst_node の雛形"}
+
+
 MESH_AR_MAX_DEFAULT = 1000.0      # AGENTS.md「メッシュ品質チェック」の既定 (壁法線の構造の境界層は 5000 まで; 問題 YAML の mesh.ar_max)
 MESH_SKEW_MAX = 0.9
 
@@ -285,7 +301,8 @@ def protected_conditions(card: dict, prob: dict | None) -> dict:
         phys = {"type": prob.get("type"), "gas_model": g.get("model"), "gas_transport": g.get("transport"),
                 "gas_species": g.get("species"), "gas_composition_basis": g.get("composition_basis"),
                 "wall_thermal": (prob.get("spec") or {}).get("wall_thermal"),
-                "evaluate": {k: ev[k] for k in PHYS_EVALUATE_KEYS if k in ev}}
+                "evaluate": {k: ev[k] for k in PHYS_EVALUATE_KEYS if k in ev},
+                "ns": ns_physics_template()}
     out = {"requirements": req,
            "qualification": _resolved_policy(card, prob, "qualification"),
            "run_policy": _resolved_policy(card, prob, "run_policy"),
@@ -470,7 +487,106 @@ def _norm_quantity(q: dict) -> dict:
     return {k: q[k] for k in keep if k in q}
 
 
-def check_run(approval, run_dir) -> dict:
+def _rel_ne(a, b, tol=1e-9) -> bool:
+    return a is None or b is None or abs(float(a) - float(b)) > tol * max(1.0, abs(float(b)))
+
+
+def check_run_physics(apr: dict, run_dir, problem_path) -> dict:
+    """run の本段の設定 (solverConfig・bcondConfig・準備の記録) が承認した物理と一致するか (plan §4.2 の要求の一致、§5.1 #3)。
+    単純な文字列の比較でなく、書き手と同じ規則の期待値と比べる (入口の組成は輸送種の配置の質量分率、`cfd_initial_line` の照合を使う)。
+    問題 YAML (承認と照合済み) から期待値を作る。戻り: {status: OK / MISMATCH, problems, checked}。"""
+    from ..feedback import cfd_initial_line as CI
+    from ..probdef import load_problem
+    run_dir = Path(run_dir)
+    probs, checked = [], []
+    p = load_problem(problem_path)
+    phys = apr["protected"].get("physics") or {}
+    req = apr["protected"].get("requirements") or {}
+    try:
+        cfg = yaml.safe_load((run_dir / "solverConfig.yaml").read_text()) or {}
+        bc = yaml.safe_load((run_dir / "bcondConfig.yaml").read_text()) or {}
+    except OSError as e:
+        return {"status": "MISMATCH", "problems": [f"run の設定を読めない ({e})"], "checked": []}
+    # (1) 入口の Pt・Tt・組成と熱力学 (thermalMethod・species・thermoHrefTemp)
+    try:
+        eff = CI._read_effective_thermo(run_dir)
+    except ValueError as e:
+        probs.append(f"入口: {e}")
+        eff = None
+    if eff is not None:
+        ce = []
+        CI._check_effective_thermo(eff, None, None, CI.expected_inlet_thermo(p), ce, checked)
+        probs += ce
+    # cfd_initial_line の文面 (凍結源 = 照合される run、使う側 = 期待値の問題) をこの文脈の言葉にする
+    probs = [x.replace("CFD ピン: ", "").replace("凍結源の", "run の").replace("使う側の", "承認した問題の") for x in probs]
+    pp = cfg.get("physProp") or {}
+    tp = pp.get("thermalMethod") == 2
+    # (2) 輸送 (種ごとの輸送の割り当てと粘性のモデル)
+    tr = phys.get("gas_transport")
+    if tp and tr:
+        if _canon(pp.get("transport")) != _canon(tr):
+            probs.append(f"physProp.transport {pp.get('transport')!r} が承認の輸送 {tr!r} と違う")
+        if pp.get("viscMethod") != 2:
+            probs.append(f"physProp.viscMethod {pp.get('viscMethod')!r} が 2 (種ごとの輸送) でない")
+        checked += ["physProp.transport", "physProp.viscMethod"]
+    # (3) 乱流モデル・軸対称 (承認の時点の雛形の値)
+    ns = phys.get("ns") or {}
+    tb = cfg.get("turbulence") or {}
+    for k in sorted(set(NS_TURBULENCE_KEYS) & (set(tb) | set(ns.get("turbulence") or {}))):
+        if _canon(tb.get(k)) != _canon((ns.get("turbulence") or {}).get(k)):
+            probs.append(f"turbulence.{k} {tb.get(k)!r} が承認の {(ns.get('turbulence') or {}).get(k)!r} と違う")
+    checked.append("turbulence")
+    ax = int(((cfg.get("mesh") or {}).get("isAxisymmetric", 0)) or 0)
+    if "isAxisymmetric" in ns and ax != ns["isAxisymmetric"]:
+        probs.append(f"mesh.isAxisymmetric {ax} が承認の {ns['isAxisymmetric']} と違う")
+    checked.append("mesh.isAxisymmetric")
+    # (4) 壁の熱条件
+    walls = {k: v for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("wall")}
+    w = req.get("wall") or {}
+    wt = p.wall_thermal
+    if len(walls) != 1:
+        probs.append(f"壁の境界がちょうど 1 つでない ({sorted(walls)}) — 壁の熱条件を照合できない")
+    else:
+        name, wb = next(iter(walls.items()))
+        kind, fl, ints = wb.get("kind"), wb.get("floats") or {}, wb.get("ints") or {}
+        prof = isinstance(ints, dict) and int(ints.get("wallProfile", 0) or 0) == 1
+        if w.get("thermal") == "adiabatic":
+            if kind != "wall":
+                probs.append(f"壁 {name} の kind {kind!r} が断熱壁 (wall) でない")
+        elif kind != "wall_isothermal":
+            probs.append(f"壁 {name} の kind {kind!r} が等温壁 (wall_isothermal) でない")
+        elif "Tw_profile" in (wt or {}):
+            from ..wall_temperature import load_run_profile
+            if not prof:
+                probs.append(f"壁 {name} に wallProfile: 1 が無い (承認は壁温の分布)")
+            else:
+                try:
+                    load_run_profile(run_dir)
+                    info = json.loads((run_dir / "prepare_info.json").read_text())
+                    if _canon((info.get("wall_thermal") or {}).get("Tw_profile")) != _canon(wt.get("Tw_profile")):
+                        probs.append("準備の記録の壁温の分布が問題 YAML (承認と照合済み) の分布と違う")
+                except (ValueError, OSError) as e:
+                    probs.append(f"壁温の分布の照合: {e}")
+        else:
+            if prof:
+                probs.append(f"壁 {name} に wallProfile: 1 がある (承認は一様の壁温)")
+            if _rel_ne(fl.get("Ts"), w.get("Tw")):
+                probs.append(f"壁 {name} の Ts {fl.get('Ts')!r} が承認の壁温 {w.get('Tw')!r} と違う")
+        checked.append("wall")
+    # (5) 出口の静圧 (問題 YAML の spec.p_ambient; 背圧 design はカードから生成器が決めた値)
+    outs = {k: v for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("outlet")}
+    pa = (p.spec or {}).get("p_ambient")
+    if len(outs) != 1:
+        probs.append(f"出口の境界がちょうど 1 つでない ({sorted(outs)})")
+    else:
+        oname, ob = next(iter(outs.items()))
+        if _rel_ne((ob.get("floats") or {}).get("Ps"), pa):
+            probs.append(f"出口 {oname} の Ps {(ob.get('floats') or {}).get('Ps')!r} が問題 YAML の spec.p_ambient {pa!r} と違う")
+        checked.append("outlet.Ps")
+    return {"status": "OK" if not probs else "MISMATCH", "problems": probs, "checked": checked}
+
+
+def check_run(approval, run_dir, problem_path=None) -> dict:
     """run の停止規則の基準 (settle_criteria.yaml) が承認した評価の条件から作られたか (plan §4.7.1 (1)、§5.1 #2a の判別 A/B (ii))。
     承認した evaluate.settle を今のコードで run の設定に解決し直した基準と、run の基準を比べる。プリセットの中身が承認の後に変わったら
     preset_sha256 の不一致で止まる。戻り: {status: OK / MISMATCH, diffs, problems}。"""
@@ -513,6 +629,9 @@ def check_run(approval, run_dir) -> dict:
             diffs.append(f"quantities.{nm}: 承認の条件に無い")
         else:
             diffs += [f"quantities.{nm}.{d}" for d in diff_paths(_canon(qe[nm]), _canon(qa[nm]))]
+    if problem_path is not None:
+        ph = check_run_physics(ap, run_dir, problem_path)
+        probs += [f"物理: {x}" for x in ph["problems"]]
     ex_a = sorted(x.get("name") for x in crit.get("excluded") or [])
     ex_e = sorted(x.get("name") for x in exp.get("excluded") or [])
     if ex_a != ex_e:
@@ -543,7 +662,7 @@ def main(argv=None) -> int:
     c.add_argument("--approval", required=True)
     c.add_argument("--card", required=True)
     c.add_argument("--problem", required=True)
-    c.add_argument("--run", default=None, help="run のディレクトリ (settle_criteria.yaml を承認の評価の条件と照合)")
+    c.add_argument("--run", default=None, help="run のディレクトリ (停止規則の基準・本段の物理の設定を承認と照合)")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "preview":
@@ -561,7 +680,7 @@ def main(argv=None) -> int:
             return 0
         r = check(a.approval, a.card, a.problem)
         if a.run:
-            rr = check_run(a.approval, a.run)
+            rr = check_run(a.approval, a.run, a.problem)
             r["run"] = rr
             if rr["status"] != "OK":
                 r["status"] = "MISMATCH"
