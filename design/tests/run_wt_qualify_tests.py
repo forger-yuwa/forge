@@ -275,8 +275,16 @@ with tempfile.TemporaryDirectory() as td:
     shutil.copy2(run / "nozzle.msh", od / "mesh" / "nozzle.msh")
     dim = {"format": "forge.dimension_gate/v1", "verdict": "PASS", "items": {"L_div": {"pass": True}}, "card": "card.yaml", "card_sha256": sha(card)}
     (od / "DIMENSIONS.json").write_text(json.dumps(dim))
-    man = {"run": str(run), "verdict": "PASS", "failed_parts": [], "parts": {p: {"ok": True} for p in PARTS}, "skipped": {}, "errors": {},
-           "files_sha256": {"DIMENSIONS.json": sha(od / "DIMENSIONS.json"), "cad/wall.step": sha(od / "cad" / "wall.step"),
+    # 2026-10-17 から (plan tooling-design-orchestrator §5.1 #2c): 必須のファイル (DV.REQUIRED_FILES) と部品の検査の総合 pass (DV.PASS_REQUIRED) を見る
+    for _fs in DV.REQUIRED_FILES.values():
+        for _f in _fs:
+            if not (od / _f).exists():
+                (od / _f).parent.mkdir(parents=True, exist_ok=True)
+                (od / _f).write_text(f"合成の {_f}")
+    man = {"run": str(run), "verdict": "PASS", "failed_parts": [],
+           "parts": {p: {"ok": True, **({"pass": True} if p in DV.PASS_REQUIRED else {})} for p in PARTS}, "skipped": {}, "errors": {},
+           "files_sha256": {**{_f: sha(od / _f) for _fs in DV.REQUIRED_FILES.values() for _f in _fs},
+                            "DIMENSIONS.json": sha(od / "DIMENSIONS.json"), "cad/wall.step": sha(od / "cad" / "wall.step"),
                             "mesh/nozzle.msh": sha(od / "mesh" / "nozzle.msh")},
            "provenance": DV.provenance_record(run, 100, ["res_wall_3_100.h5"], card, prob)}
     man["parts"]["mesh"].update(msh41="mesh/nozzle.msh", msh41_sha256=sha(od / "mesh" / "nozzle.msh"),
@@ -326,8 +334,47 @@ with tempfile.TemporaryDirectory() as td:
     dim["verdict"] = "PASS"
     (od / "DIMENSIONS.json").write_text(json.dumps(dim))
     man["files_sha256"]["DIMENSIONS.json"] = sha(od / "DIMENSIONS.json")
-    man["parts"]["fluent"] = {"ok": True}
+    man["parts"]["fluent"] = {"ok": True, "pass": True}
     man["skipped"] = {}
+    (od / "MANIFEST.json").write_text(json.dumps(man))
+    # ---- (4c) 部品の検査の総合と必須のファイル (plan tooling-design-orchestrator §4.7.1 (6)、§5.1 #2c; codex 2026-10-17 の関数単体の確認の再現) ----
+    r = dchk()
+    check("(4c) 正例: 部品の pass・必須のファイルがそろって PASS", r["status"] == "PASS", f"{r.get('problems')}")
+    man_c = json.loads(json.dumps(man))
+    man_c["parts"]["cad"]["pass"] = False
+    (od / "MANIFEST.json").write_text(json.dumps(man_c))
+    r = dchk()
+    check("(4c) MANIFEST の verdict PASS・failed_parts [] のまま cad.pass=false → FAIL (修正前は PASS)",
+          r["status"] == "FAIL" and any("cad" in p and "pass" in p for p in r["problems"]) and any("矛盾" in p for p in r["problems"]),
+          f"{r.get('problems')}")
+    man_c = json.loads(json.dumps(man))
+    man_c["parts"]["mesh"].pop("pass")
+    (od / "MANIFEST.json").write_text(json.dumps(man_c))
+    r = dchk()
+    check("(4c) mesh の pass が無い (作り直しの照合をしていない) → FAIL", r["status"] == "FAIL" and any("mesh" in p and "pass" in p for p in r["problems"]),
+          f"{r.get('problems')}")
+    man_c = json.loads(json.dumps(man))
+    man_c["files_sha256"].pop("excel/nozzle_tables.xlsx")
+    (od / "MANIFEST.json").write_text(json.dumps(man_c))
+    (od / "excel" / "nozzle_tables.xlsx").rename(od / "excel" / "nozzle_tables.xlsx.bak")
+    r = dchk()
+    check("(4c) 必須のファイルを列挙と実体の両方から消す → FAIL (修正前は列挙に無いので見なかった)",
+          r["status"] == "FAIL" and any("excel/nozzle_tables.xlsx" in p for p in r["problems"]), f"{r.get('problems')}")
+    (od / "excel" / "nozzle_tables.xlsx.bak").rename(od / "excel" / "nozzle_tables.xlsx")
+    (od / "MANIFEST.json").write_text(json.dumps(man))
+    G = {"gate_sha256": "a" * 64, "approval_sha256": "b" * 64}
+    r = dchk(gate=G)
+    check("(4c) 正式な入口: MANIFEST に gate が無い (判定専用の環境の外で作った) → INDETERMINATE・寸法も INDETERMINATE",
+          r["status"] == "INDETERMINATE" and r["dimensions"]["status"] == "INDETERMINATE" and "判定専用の環境で作っていない" in r["why"], r.get("why"))
+    (od / "MANIFEST.json").write_text(json.dumps({**man, "gate": {"commit": "c" * 40, **G}}))
+    r = dchk(gate=G)
+    check("(4c) 正式な入口: MANIFEST の gate が承認と合う → PASS", r["status"] == "PASS" and not r["gate"]["problems"], f"{r.get('gate')}")
+    (od / "MANIFEST.json").write_text(json.dumps({**man, "gate": {"commit": "c" * 40, **G, "gate_sha256": "d" * 64}}))
+    r = dchk(gate=G)
+    check("(4c) 正式な入口: MANIFEST の gate の環境が承認と違う → INDETERMINATE", r["status"] == "INDETERMINATE", r.get("why"))
+    (od / "MANIFEST.json").write_text(json.dumps(man_c))
+    r = dchk(optional_parts=("excel",))
+    check("(4c) その部品 (excel) を無くてよい部品にすれば、列挙に無いままでも PASS", r["status"] == "PASS", f"{r.get('problems')}")
     (od / "MANIFEST.json").write_text(json.dumps(man))
 
     # ---- (4p) 生成元の照合 (plan §5.1 #6b の続き、2026-10-17 codex result 3 回目 Major) ----

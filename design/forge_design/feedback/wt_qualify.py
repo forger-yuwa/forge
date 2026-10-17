@@ -749,11 +749,11 @@ def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, pro
     return rec
 
 
-def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(), field=None, problem_path=None) -> dict:
+def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(), field=None, problem_path=None, gate=None) -> dict:
     """成果物 (MANIFEST.json) と寸法の関門 (DIMENSIONS.json)。status: PASS / FAIL / INDETERMINATE / ABSENT。
     field (評価の場 {step, ...})・problem_path (評価に渡した問題 YAML) は生成元の照合 (`provenance_check`) に使う。照合が MATCH で
     なければ成果物と寸法の関門を INDETERMINATE にする (2026-10-17 codex result 3 回目 Major)。"""
-    from ..export.deliverables import PARTS
+    from ..export.deliverables import PARTS, PASS_REQUIRED, REQUIRED_FILES
     run_dir = Path(run_dir)
     od = Path(deliv_dir) if deliv_dir is not None else run_dir / "deliverables"
     rec = {"dir": str(od), "required_parts": [p for p in PARTS if p not in optional_parts]}
@@ -786,9 +786,24 @@ def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(
     if man.get("failed_parts"):
         probs.append(f"失敗した部品 {man.get('failed_parts')}")
     parts = man.get("parts") or {}
-    miss = [p for p in rec["required_parts"] if p not in parts or (isinstance(parts.get(p), dict) and parts[p].get("ok") is False)]
+    miss = [p for p in rec["required_parts"] if not isinstance(parts.get(p), dict) or parts[p].get("ok") is not True]
     if miss:
         probs.append(f"必要な部品が欠けた・失敗した {miss} (skipped {man.get('skipped')}, errors {list((man.get('errors') or {}).keys())})")
+    # 部品の検査の総合と MANIFEST の総合の矛盾 (plan tooling-design-orchestrator §4.7.1 (6); codex 2026-10-17: cad.pass=false でも PASS だった)
+    nopass = [p for p in rec["required_parts"] if p in PASS_REQUIRED and isinstance(parts.get(p), dict) and parts[p].get("pass") is not True]
+    failed = [p for p, v in parts.items() if isinstance(v, dict) and (v.get("ok") is False or v.get("pass") is False)]
+    if nopass:
+        probs.append(f"部品の検査の総合 (pass) が true でない {[(p, parts[p].get('pass')) for p in nopass]} (MANIFEST の verdict {man.get('verdict')!r})")
+    if failed and man.get("verdict") == "PASS":
+        probs.append(f"MANIFEST の verdict PASS と部品の不合格 {failed} が矛盾する")
+    if dv != "PASS" and man.get("verdict") == "PASS":
+        probs.append(f"MANIFEST の verdict PASS と寸法の関門 {dv!r} が矛盾する")
+    # 必須のファイルは MANIFEST の列挙 (自己申告) でなく、この版のコードの一覧 (REQUIRED_FILES) で見る
+    fl = man.get("files_sha256") or {}
+    req_missing = [f for p in rec["required_parts"] for f in REQUIRED_FILES.get(p, ()) if f not in fl or not (od / f).is_file()]
+    if req_missing:
+        probs.append(f"必須のファイルが無い・MANIFEST の列挙に無い {req_missing[:10]}" + (f" ほか {len(req_missing) - 10}" if len(req_missing) > 10 else ""))
+    rec["required_files"] = {p: list(REQUIRED_FILES.get(p, ())) for p in rec["required_parts"]}
     bad_files = []
     for rel, sha in (man.get("files_sha256") or {}).items():
         p = od / rel
@@ -819,7 +834,49 @@ def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(
                                  why=f"成果物の生成元{what} — この寸法の関門はこの run の判定にしない")
         rec.update(status="INDETERMINATE", status_before_provenance=rec["status"],
                    why=f"成果物の生成元{what} ({pv['status']}): " + "; ".join(pv["problems"])[:800] + f" — {PROV_FIX}")
+    if gate is not None:
+        # 正式な入口 (plan tooling-design-orchestrator §4.7.1 (6)): 成果物の部品の検査は、判定専用の環境で作ったもの (MANIFEST の gate が
+        # 承認の記録と合う) だけを信じる。合わなければ部品の自己申告を判定に使わない
+        g = man.get("gate") or {}
+        gp = [f"{k} {str(g.get(k))[:16]}… ≠ 承認 {str(v)[:16]}…" for k, v in gate.items() if g.get(k) != v]
+        rec["gate"] = {"manifest": g, "expected": gate, "problems": gp}
+        if gp and rec["status"] != "ABSENT":
+            rec["dimensions"].update(status="INDETERMINATE", why="成果物を判定専用の環境で作っていない")
+            rec.update(status="INDETERMINATE", status_before_gate=rec["status"],
+                       why="成果物を判定専用の環境で作っていない (MANIFEST の gate: " + "; ".join(gp) +
+                           ") — python -m forge_design.feedback.gate_env deliverables --approval … で作り直す")
     return rec
+
+
+def approval_rechecks(run_dir, flow: dict, apr: dict) -> dict:
+    """正式な入口で、run の側で作られた判定 (停止の判定・計算の格子の品質) を判定専用の環境で回し直す (plan tooling-design-orchestrator
+    §4.7.1 (6))。run は作業側のコードで回るので、その判定の記録 (SETTLE_VERDICT・MESH_QUALITY) の自己申告を使わない。"""
+    out, probs = {}, []
+    stop = flow.get("stop_step")
+    if isinstance(stop, int) and not isinstance(stop, bool):
+        cmd = [sys.executable, str(TOOLS / "check_settled.py"), str(run_dir), "--end-step", str(stop), "--no-write"]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        vl = next((ln for ln in reversed(r.stdout.splitlines()) if ln.startswith("VERDICT:")), None)
+        out["settle"] = {"cmd": " ".join(cmd[1:]), "rc": r.returncode, "verdict_line": vl}
+        if not (vl or "").startswith("VERDICT: SETTLED"):
+            probs.append(f"停止の判定を固定した版で回し直すと SETTLED でない ({vl or r.stderr.strip()[-200:]}; 停止の step {stop})")
+    else:
+        probs.append("停止の step が無い (停止の判定を固定した版で回し直せない)")
+    mq = (apr["protected"].get("evaluation") or {}).get("mesh_quality")
+    h5 = Path(run_dir) / "nozzle.h5"
+    if not mq:
+        probs.append("承認の記録にメッシュ品質の閾値が無い")
+    elif not h5.is_file():
+        probs.append(f"計算の格子 {h5.name} が無い (品質を回し直せない)")
+    else:
+        cmd = [sys.executable, str(TOOLS / "check_mesh_quality.py"), str(h5), "--ar-max", f"{mq['ar_max']:g}", "--skew-max", f"{mq['skew_max']:g}"]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        vl = next((ln for ln in reversed(r.stdout.splitlines()) if ln.startswith("VERDICT:")), None)
+        out["mesh_quality"] = {"cmd": " ".join(cmd[1:]), "rc": r.returncode, "verdict_line": vl}
+        if not (vl or "").startswith("VERDICT: PASS"):
+            probs.append(f"計算の格子の品質を固定した版で回し直すと PASS でない ({vl or r.stderr.strip()[-200:]})")
+    out["problems"] = probs
+    return out
 
 
 # ------------------------------------------------------------------ 較正し直しの規則
@@ -985,6 +1042,7 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
         tol = resolve_tolerances(run_dir, info, card_doc, prob_doc, cli_tols or {})
     fld = select_field(run_dir, step)
     flow = flow_check(run_dir)
+    rechecks = approval_rechecks(run_dir, flow, apr) if apr is not None else None
     F = load_field(run_dir, fld["res"])
     v5b = v5b_exit_core(F, Md, float(tol["exit_core_M_tol_rel"]["value"]), float(info["x_E"]))
     if tol["line_x_range_m"]["value"] is None:
@@ -1005,7 +1063,11 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
     # 2026-10-17 codex result 2 回目 M1)
     line_guarantee(v5c, monitored_line(flow, v5c), fld, flow, run_dir, Md, series_dir)
     wr = wall_resolution(run_dir, fld["step"], wall_txt, stop_step=flow.get("stop_step"))
-    dl = deliverables_check(run_dir, deliverables, card, optional_parts, field=fld, problem_path=problem)
+    gate_bind = None
+    if apr is not None:
+        from ..intake import approval as _AP
+        gate_bind = {"gate_sha256": apr.get("gate_sha256"), "approval_sha256": _AP.sha256_file(approval)}
+    dl = deliverables_check(run_dir, deliverables, card, optional_parts, field=fld, problem_path=problem, gate=gate_bind)
     checks = {"flow": flow, "V5b": v5b, "V5c": v5c, "wall_resolution": wr, "deliverables": dl}
     dec = decide(flow, v5b, v5c, wr, dl, iteration=iteration, max_iterations=max_iterations,
                  rule_fn=lambda: recalibration_rule(run_dir, v5b, v5c, flow, delta_next=delta_next, prev_run=prev_run,
@@ -1026,6 +1088,10 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
         if rc["status"] != "OK":
             # その run は承認した問題の評価になっていない (plan §4.2 要求の一致) → 結果によらず incomplete
             missing = list(missing) + [f"run の停止規則の基準が承認の評価の条件と違う ({'; '.join(rc['problems'] + rc['diffs'])[:400]})"]
+            result, nxt = "incomplete", "escalate"
+        apr_rec["rechecks"] = rechecks
+        if rechecks and rechecks["problems"]:
+            missing = list(missing) + [f"固定した版での回し直し: {p}" for p in rechecks["problems"]]
             result, nxt = "incomplete", "escalate"
         if rwg:
             missing = list(missing) + [f"判定器の無い要求が未評価 {[r.get('name') for r in rwg]} (plan §4.2: 評価していない要求があれば "

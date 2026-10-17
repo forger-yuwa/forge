@@ -258,6 +258,19 @@ def resolved_settle(prob: dict | None) -> dict | None:
             "quantities_remove": list(es.get("quantities_remove") or []), "quantities_add": copy.deepcopy(es.get("quantities_add") or [])}
 
 
+MESH_AR_MAX_DEFAULT = 1000.0      # AGENTS.md「メッシュ品質チェック」の既定 (壁法線の構造の境界層は 5000 まで; 問題 YAML の mesh.ar_max)
+MESH_SKEW_MAX = 0.9
+
+
+def mesh_quality_spec(prob: dict | None) -> dict | None:
+    """計算の格子の品質の閾値 (判定器の閾値なので承認で固定する; plan §4.7.1 (6))。"""
+    if not isinstance(prob, dict):
+        return None
+    ar = (prob.get("mesh") or {}).get("ar_max")
+    return {"ar_max": float(ar) if ar is not None else MESH_AR_MAX_DEFAULT, "skew_max": MESH_SKEW_MAX,
+            "source": "問題 YAML の mesh.ar_max" if ar is not None else "AGENTS.md の既定 (AR ≤ 1000)"}
+
+
 def protected_conditions(card: dict, prob: dict | None) -> dict:
     """検査した後のカード (validate_card の戻り) と問題 YAML (dict) から保護する条件を作る。"""
     req = {k: copy.deepcopy(card.get(k)) for k in REQUIREMENT_SECTIONS}
@@ -280,7 +293,7 @@ def protected_conditions(card: dict, prob: dict | None) -> dict:
            "budget": copy.deepcopy(card.get("budget")),
            "requirements_without_gate": copy.deepcopy(card.get("requirements_without_gate") or []),
            "physics": phys,
-           "evaluation": {"settle": resolved_settle(prob)}}
+           "evaluation": {"settle": resolved_settle(prob), "mesh_quality": mesh_quality_spec(prob)}}
     return _canon(out)
 
 

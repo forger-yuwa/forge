@@ -8,7 +8,8 @@
   無いことを確かめる (Python は -B で回し、バイトコードを書かない)。
 - **Python の指紋** (`python_fingerprint`): 実行ファイルの実体と sha256、版、`sys.prefix`、配布物ごとの名前・版・RECORD の sha256・editable の有無。
   editable の配布物があれば止める (作業ツリーを参照しうる)。`pip freeze` は使わない (別の Python・外部の実行ファイルを捉えない)。
-- **外部の道具** (`TOOLS`): gmsh 用の Python (`FORGE_MESH_PY`、指紋)、FreeCAD (`FREECADCMD`、実体と sha256)、変換器 (`FORGE_CONVERTER`、実体と sha256)。
+- **外部の道具**: gmsh 用の Python (`FORGE_MESH_PY`、指紋)、Excel 用の Python (`FORGE_PPTX_PY`、指紋)、FreeCAD (`FREECADCMD`、実体と sha256)、
+  変換器 (`FORGE_CONVERTER`、実体と sha256)。
   判定のときは記録したパスをその環境変数に入れて渡す。
 - **起動**: 隔離のモードの Python (`-I -B`) に、checkout の `design` を sys.path の先頭に入れて `wt_qualify` を回す。環境変数は許すものだけを渡し、
   `FORGE_GATE_ENV=1`・`FORGE_GATE_CHECKOUT` を足す。`wt_qualify` は承認のモードでこの印と自分の import の元・checkout の HEAD を確かめる
@@ -17,6 +18,7 @@
 使い方:
   python -m forge_design.feedback.gate_env snapshot [--python PY]            承認のときに記録する環境 (JSON)
   python -m forge_design.feedback.gate_env judge --approval card_approval.json -- <wt_qualify の引数 (--approval は自動で足す)>
+  python -m forge_design.feedback.gate_env deliverables --approval card_approval.json -- <deliverables の引数>   成果物 (MANIFEST に gate)
   python -m forge_design.feedback.gate_env check --approval card_approval.json   環境の照合だけ (判定しない)
 終了コード: judge は wt_qualify の終了コード、環境の照合に失敗したら 1。
 """
@@ -38,6 +40,8 @@ CHECKOUT_PATHS = ("design", "solver_density_cuda/tools", "solver_density_cuda/da
 MARK_ENV, CHECKOUT_ENV = "FORGE_GATE_ENV", "FORGE_GATE_CHECKOUT"
 PASS_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ")   # 判定に渡してよい環境変数 (道具の選択は下の TOOLS で決める)
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"
+PY_TOOLS = ("FORGE_MESH_PY", "FORGE_PPTX_PY")      # 外部の Python (指紋を取る)
+APPROVAL_ENV = "FORGE_GATE_APPROVAL"              # 成果物の書き出しが MANIFEST の gate に書く承認の記録
 
 FINGERPRINT_PY = r'''
 import hashlib, importlib.metadata as m, json, os, sys
@@ -108,13 +112,13 @@ def current_tools() -> dict:
         conv = str(RA.converter_path())
     except Exception:  # noqa: BLE001 — 見つからなければ記録しない (判定のときに成果物の再検査が止まる)
         conv = None
-    return {"FORGE_MESH_PY": DV.GMSH_PYTHON, "FREECADCMD": WS.FREECADCMD, "FORGE_CONVERTER": conv}
+    return {"FORGE_MESH_PY": DV.GMSH_PYTHON, "FORGE_PPTX_PY": DV.PPTX_PYTHON, "FREECADCMD": WS.FREECADCMD, "FORGE_CONVERTER": conv}
 
 
 def tool_identity(env: str, path) -> dict | None:
     if path is None:
         return None
-    if env == "FORGE_MESH_PY":
+    if env in PY_TOOLS:
         ident = file_identity(path)
         if ident and ident.get("exists"):
             ident["fingerprint"] = python_fingerprint(path)
@@ -223,11 +227,12 @@ def sanitized_env(checkout: Path, tools: dict) -> dict:
 
 LAUNCH_PY = r'''
 import runpy, sys
-co = sys.argv[1]
+co, mod = sys.argv[1], sys.argv[2]
 sys.path.insert(0, co + "/design")
-sys.argv = [co + "/design/forge_design/feedback/wt_qualify.py"] + sys.argv[2:]
-runpy.run_module("forge_design.feedback.wt_qualify", run_name="__main__", alter_sys=True)
+sys.argv = [co + "/design/" + mod.replace(".", "/") + ".py"] + sys.argv[3:]
+runpy.run_module(mod, run_name="__main__", alter_sys=True)
 '''
+MODULES = {"judge": "forge_design.feedback.wt_qualify", "deliverables": "forge_design.export.deliverables"}
 
 
 def assert_in_gate_env(apr: dict) -> dict:
@@ -293,20 +298,29 @@ def probe(approval_path, python=None) -> dict:
     return {"status": "OK", **json.loads(q.stdout)}
 
 
-def judge(approval_path, wt_args: list, python=None) -> int:
+def run_in_gate(approval_path, kind: str, args: list, python=None) -> int:
+    """判定専用の環境で judge (wt_qualify --approval) か deliverables (成果物の書き出し、MANIFEST に gate を書く) を回す。"""
     r = check(approval_path, python)
     if r["status"] != "OK":
-        print("gate_env: 判定専用の環境が承認と違う — 判定しない:\n- " + "\n- ".join(r["problems"]), file=sys.stderr)
+        print("gate_env: 判定専用の環境が承認と違う — 回さない:\n- " + "\n- ".join(r["problems"]), file=sys.stderr)
         return 1
     from ..intake import approval as AP
     apr = AP.load_approval(approval_path)
     co = Path(r["checkout"])
     env = sanitized_env(co, apr["gate"]["env"].get("tools") or {})
-    args = [str(x) for x in wt_args]
+    ap_abs = str(Path(approval_path).resolve())
+    env[APPROVAL_ENV] = ap_abs
+    args = [str(x) for x in args]
     if "--approval" in args:
-        raise GateEnvError("wt_qualify の引数に --approval を書かない (gate_env が足す)")
-    cmd = [r["python"], "-I", "-B", "-c", LAUNCH_PY, str(co), *args, "--approval", str(Path(approval_path).resolve())]
+        raise GateEnvError("引数に --approval を書かない (gate_env が足す)")
+    cmd = [r["python"], "-I", "-B", "-c", LAUNCH_PY, str(co), MODULES[kind], *args]
+    if kind == "judge":
+        cmd += ["--approval", ap_abs]
     return subprocess.run(cmd, env=env, cwd=str(co)).returncode
+
+
+def judge(approval_path, wt_args: list, python=None) -> int:
+    return run_in_gate(approval_path, "judge", wt_args, python)
 
 
 def main(argv=None) -> int:
@@ -322,6 +336,9 @@ def main(argv=None) -> int:
     j = sub.add_parser("judge", help="判定専用の環境で wt_qualify --approval を回す")
     j.add_argument("--approval", required=True)
     j.add_argument("wt_args", nargs=argparse.REMAINDER, help="-- の後に wt_qualify の引数")
+    dl = sub.add_parser("deliverables", help="判定専用の環境で成果物を書き出す (MANIFEST に gate を書く; 正式な入口の判定はこれだけを使う)")
+    dl.add_argument("--approval", required=True)
+    dl.add_argument("wt_args", nargs=argparse.REMAINDER, help="-- の後に forge_design.export.deliverables の引数")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "snapshot":
@@ -337,7 +354,7 @@ def main(argv=None) -> int:
             print(json.dumps(r, indent=1, ensure_ascii=False))
             return 0 if r["status"] == "OK" else 1
         wa = a.wt_args[1:] if a.wt_args[:1] == ["--"] else a.wt_args
-        return judge(a.approval, wa)
+        return run_in_gate(a.approval, a.cmd, wa)
     except GateEnvError as e:
         print(f"gate_env: 止めた — {e}", file=sys.stderr)
         return 1

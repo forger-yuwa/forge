@@ -61,6 +61,17 @@ def _tool_python(env: str, venv: str) -> str:
 GMSH_PYTHON = _tool_python("FORGE_MESH_PY", ".venv-mesh")   # gmsh・meshio・h5py・numpy
 PPTX_PYTHON = _tool_python("FORGE_PPTX_PY", ".venv-pptx")   # python-pptx・xlsxwriter
 PARTS = ("cad", "mesh", "fluent", "wall_compare", "excel", "dimensions")
+# 部品ごとに必ず書くファイル (wt_qualify が MANIFEST の列挙と別に照合する; plan tooling-design-orchestrator §4.7.1 (6)、§5.1 #2c)
+REQUIRED_FILES = {
+    "cad": ("cad/wall_physical.step", "cad/wall_surface.step", "cad/wall_surface.stl"),
+    "mesh": ("mesh/nozzle.msh", "mesh/mesh_structure.json"),
+    "fluent": ("fluent/nozzle_2d_axi.msh", "fluent/boundary_conditions.md"),
+    "wall_compare": ("wall_compare/wall_design_vs_physical_mm.csv", "wall_compare/wall_design_vs_physical.json"),
+    "excel": ("excel/nozzle_tables.xlsx", "excel/wall_shape_mm.csv", "excel/conditions.csv"),
+    "dimensions": ("DIMENSIONS.json",),
+}
+# 部品の検査の総合 (`pass`) を必ず持つ部品 (part_cad・part_mesh・part_fluent が決める; mesh は STEP が無いと作り直しの照合ができず pass を持たない)
+PASS_REQUIRED = ("cad", "mesh", "fluent")
 
 
 def _sha(p: Path) -> str:
@@ -700,6 +711,20 @@ def _conditions(run: Path) -> dict:
     return out
 
 
+def _gate_record() -> dict | None:
+    """判定専用の環境 (plan tooling-design-orchestrator §4.7.1 (5)・(6)) で作ったときの印: 承認の commit・承認の記録の sha256・gate の sha256。
+    wt_qualify --approval は、この印が承認の記録と合う成果物だけを判定に使う。環境の外で作ったら None。"""
+    if os.environ.get("FORGE_GATE_ENV") != "1":
+        return None
+    co, ap = os.environ.get("FORGE_GATE_CHECKOUT"), os.environ.get("FORGE_GATE_APPROVAL")
+    head = subprocess.run(["git", "-C", str(co), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() if co else None
+    rec = {"checkout": co, "commit": head, "approval": ap}
+    if ap and Path(ap).is_file():
+        rec["approval_sha256"] = _sha(Path(ap))
+        rec["gate_sha256"] = json.loads(Path(ap).read_text()).get("gate_sha256")
+    return rec
+
+
 def part_dimensions(run: Path, out: Path, card_path) -> dict:
     import yaml
     from . import dimension_gate as dg
@@ -881,7 +906,7 @@ def export(run_dir, out_dir=None, card=None, step=None, skip=(), freecadcmd=None
         commit = None
     man = {"format": "forge.deliverables/v1", "run": str(run), "created": time.strftime("%Y-%m-%d %H:%M:%S"),
            "git_commit": commit, "verdict": verdict, "failed_parts": part_fail, "parts": log.parts,
-           "skipped": log.skipped, "errors": log.errors, "files_sha256": files}
+           "skipped": log.skipped, "errors": log.errors, "files_sha256": files, "gate": _gate_record()}
     if wtp is not None:                                       # 壁温分布の run だけ (一様・断熱の MANIFEST のキーは変えない)
         f = wtp["files"]
         man["wall_temperature_profile"] = {
