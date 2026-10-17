@@ -14,6 +14,12 @@
      書き出しの後に run の壁・全場・設定が変わった・評価の場の step が違う・停止の step が違う → MISMATCH、評価の場・カード・問題 YAML を
      渡さない・生成元の場の記録が無い・壁ダンプの記録が空・書式が違う → UNCHECKABLE。どれも成果物と寸法の関門 INDETERMINATE
      (寸法 FAIL の成果物でも寸法の補正にしない → incomplete・escalate)。別の置き場所への写し (名前も違う・中身は同じ) は MATCH・PASS。
+ (4m) 配る msh と計算の格子の元の msh の照合 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major): 準備の記録 (prepare_info.json の
+     mesh.hashes.msh_sha256) を基準に、今の run の nozzle.msh・配る mesh/nozzle.msh (実ファイル・MANIFEST の 2 つの記録)・生成元の記録
+     (v2 の msh・prepare_msh) がそろって一致 → MATCH。MANIFEST の msh_sha256_matches が false・v2 の msh.matches_prepare が false・run の msh を
+     替えた・内部の配点だけ違う msh から書き出した (一致の印は true のまま)・準備の記録の msh の sha256 が変わった → MISMATCH、印が null・
+     準備の記録に msh の sha256 が無い・prepare_info.json が無い・run の nozzle.msh が無い・v2 なのに msh の項目が無い → UNCHECKABLE。
+     書式 v1 (msh の項目が無い古い形) は MANIFEST の parts.mesh.msh41_sha256・files_sha256 で照合し、それも無ければ UNCHECKABLE。
  (5) 結果と次の手 (`decide`): accepted・成果物待ち (make_deliverables)・計算の成立を確かめていない・判定不能・反復の上限 (rejected)・
      壁の形だけの補正 (規則で recalibrate / escalate)・壁解像や寸法を含む補正 (escalate、規則は評価しない)。
  (6) 較正し直しの規則 (合成の run): (a)〜(e) をそろえて recalibrate、1 つずつ欠くと escalate (前の run が無い・前の更新で誤差が増えた・
@@ -38,6 +44,10 @@
      その写しを別の置き場所に置いても accepted。run_0010 の成果物 (古い成果物) を渡す → incomplete・終了コード 4 (修正前は accepted・0)、
      run_0010 の成果物に新しい道具の生成元の記録を足した写し → MISMATCH (壁・格子・設定・場の step・停止の step)、作り直す前の
      run_0014 の成果物 (`_deliverables_pre_provenance/`) → ABSENT、記録の格子の sha256 を 1 つ変えた写し → MISMATCH (どれも incomplete)。
+     4 回目 Major (2026-10-17、§5.1 #6c2 の再オープン): run_0014 の今の成果物 (書式 v1) と、生成元の記録を書式 v2 に差し替えた写しは
+     accepted・MATCH。MANIFEST の msh_sha256_matches を false にした写し、run の nozzle.msh を壁・境界は同じで内部の節点だけ最大 1.918 mm
+     動かした msh に替えた写し (成果物は元のまま / 書き出しもその msh で行った v1・v2)、準備の記録の msh の sha256 を消した写し → incomplete
+     (修正前 af3c6081 はどれも accepted・MATCH)。
 使い方: design/.venv-opt/bin/python design/tests/run_wt_qualify_tests.py  (終了コード 0 全合格 / 1 不合格 / 2 実データを飛ばした)
 """
 import hashlib
@@ -236,18 +246,42 @@ with tempfile.TemporaryDirectory() as td:
     (run / "wall_repr.json").write_text('{"physical_wall_repr": "single_bspline"}')
     (run / "solverConfig.yaml").write_text('mesh: {meshFileName: "nozzle.h5"}\n')
     (run / "bcondConfig.yaml").write_text("wall: {physID: 3, kind: wall_isothermal}\n")
-    for nm_ in ("nozzle.h5", "res_100.h5", "res_wall_3_100.h5", "res_200.h5", "res_wall_3_200.h5"):
+    for nm_ in ("res_100.h5", "res_wall_3_100.h5", "res_200.h5", "res_wall_3_200.h5"):
         (run / nm_).write_bytes(nm_.encode() * 10)
+    # 計算の格子は座標と接続を持つ小さい h5 (2026-10-17: 準備の記録の coord・topology の sha256 と今の h5 を照合するため; `_h5_binding`)
+    import h5py as _h5
+    def write_mesh_h5(path, shift=0.0):
+        with _h5.File(path, "w") as f_:
+            f_["MESH/COORD"] = np.array([0.0, 0.0, 0.0, 1.0 + shift, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+            f_["MESH/CONNE"] = np.array([5, 0, 1, 2, 3], dtype=np.int64)
+            f_["BCONDS/3/iCells"] = np.array([0, 1], dtype=np.int64)
+    write_mesh_h5(run / "nozzle.h5")
+    from forge_design.evaluate.runner_axismach import h5_mesh_hashes as _h5h
     (run / "STOP_RULE_STATE.json").write_text(json.dumps({"method": "v2", "status": "REACHED", "stop_step": 100}))
+    # 2026-10-17 から (§5.1 #6c2 の再オープン、codex result 4 回目 Major): 配る msh と計算の格子の元の msh の照合に、run の nozzle.msh と
+    # 準備の記録 (prepare_info.json の mesh.hashes.msh_sha256) が要る (無ければ照合できない)。成果物にも配る msh (mesh/nozzle.msh) を置く
+    MSH0 = "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n(合成の msh: 壁と内部の節点)\n"
+    MSH1 = "$MeshFormat\n4.1 0 8\n$EndMeshFormat\n(合成の msh: 壁は同じで内部の配点だけ違う)\n"
+    (run / "nozzle.msh").write_text(MSH0)
+    _hh = _h5h(run / "nozzle.h5")
+    PINFO = {"scale_m": 0.1, "mesh": {"ni": 3, "nj": 2, "hashes": {"msh_sha256": sha(run / "nozzle.msh"),
+                                                                  "coord_sha256": _hh["coord_sha256"], "topology_sha256": _hh["topology_sha256"]}}}
+    (run / "prepare_info.json").write_text(json.dumps(PINFO))
     FLD = {"step": 100, "res": "res_100.h5"}
     od = run / "deliverables"
     (od / "cad").mkdir(parents=True)
     (od / "cad" / "wall.step").write_text("STEP")
+    (od / "mesh").mkdir()
+    shutil.copy2(run / "nozzle.msh", od / "mesh" / "nozzle.msh")
     dim = {"format": "forge.dimension_gate/v1", "verdict": "PASS", "items": {"L_div": {"pass": True}}, "card": "card.yaml", "card_sha256": sha(card)}
     (od / "DIMENSIONS.json").write_text(json.dumps(dim))
     man = {"run": str(run), "verdict": "PASS", "failed_parts": [], "parts": {p: {"ok": True} for p in PARTS}, "skipped": {}, "errors": {},
-           "files_sha256": {"DIMENSIONS.json": sha(od / "DIMENSIONS.json"), "cad/wall.step": sha(od / "cad" / "wall.step")},
+           "files_sha256": {"DIMENSIONS.json": sha(od / "DIMENSIONS.json"), "cad/wall.step": sha(od / "cad" / "wall.step"),
+                            "mesh/nozzle.msh": sha(od / "mesh" / "nozzle.msh")},
            "provenance": DV.provenance_record(run, 100, ["res_wall_3_100.h5"], card, prob)}
+    man["parts"]["mesh"].update(msh41="mesh/nozzle.msh", msh41_sha256=sha(od / "mesh" / "nozzle.msh"),
+                                structure_rule_params={"source": {"file": "prepare_info.json", "msh_sha256_recorded": sha(run / "nozzle.msh"),
+                                                                  "msh_sha256_matches": True}})
     (od / "MANIFEST.json").write_text(json.dumps(man))
 
     def dchk(card_=card, field=FLD, prob_=prob, **kw):
@@ -365,6 +399,124 @@ with tempfile.TemporaryDirectory() as td:
     r = WQ.deliverables_check(run_c, od_c, card, field=FLD, problem_path=prob)
     check("(4p) run と成果物を別の置き場所に写した (名前も違う・中身は同じ) → 生成元 MATCH・PASS、名前の違いは警告だけ",
           r["status"] == "PASS" and r["provenance"]["status"] == "MATCH" and any("名前が違う" in w for w in r["warnings"]), r.get("problems"))
+
+    # ---- (4m) 配る msh と計算の格子の元の msh の照合 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major) ----
+    # 修正前は生成元の格子 (h5) だけを照合し、run の nozzle.msh・配る mesh/nozzle.msh・準備の記録の msh の sha256・書き出しのときの
+    # 一致の印を見なかったので、下の負例はどれも PASS だった
+    def pr_(r):
+        return r["provenance"]["problems"]
+
+    r = dchk()
+    mb = r["provenance"]["compared"]["msh"]
+    check("(4m) 正例: 準備の記録の msh・今の run の nozzle.msh・配る msh (実ファイル・MANIFEST の 2 つの記録)・生成元の記録 (v2 の msh・prepare_msh) "
+          "が一致・一致の印 2 つが true → MATCH・PASS",
+          r["status"] == "PASS" and r["provenance"]["status"] == "MATCH" and mb["reference"] == sha(run / "nozzle.msh") and len(mb["items"]) == 6
+          and set(mb["items"].values()) == {sha(run / "nozzle.msh")} and list(mb["flags"].values()) == [True, True], json.dumps(mb, ensure_ascii=False)[:300])
+    for nm_, val, status in (("false", False, "MISMATCH"), ("null (書き出しのときに準備の記録に msh の sha256 が無かった)", None, "UNCHECKABLE")):
+        m2 = _copy.deepcopy(man)
+        m2["parts"]["mesh"]["structure_rule_params"]["source"]["msh_sha256_matches"] = val
+        with_man(m2)
+        r = dchk()
+        check(f"(4m) MANIFEST の msh_sha256_matches が {nm_} (ファイルの sha256 は一致のまま) → {status}・INDETERMINATE (修正前は PASS)",
+              bad(r, status) and len(pr_(r)) == 1 and "msh_sha256_matches" in pr_(r)[0], pr_(r))
+    m2 = _copy.deepcopy(man)
+    m2["provenance"]["msh"]["matches_prepare"] = False
+    with_man(m2)
+    r = dchk()
+    check("(4m) 生成元の記録 (v2) の msh.matches_prepare が false → MISMATCH", bad(r, "MISMATCH") and len(pr_(r)) == 1
+          and "matches_prepare" in pr_(r)[0], pr_(r))
+    with_man(man)
+    (run / "nozzle.msh").write_text(MSH1)
+    r = dchk()
+    (run / "nozzle.msh").write_text(MSH0)
+    check("(4m) 書き出しの後に run の nozzle.msh を内部の配点だけ違う msh に替えた → MISMATCH (違いは今の run の msh だけ)・INDETERMINATE (修正前は PASS)",
+          bad(r, "MISMATCH") and len(pr_(r)) == 1 and "今の run の nozzle.msh" in pr_(r)[0], pr_(r))
+    # 格子を作り直して h5 を更新し忘れた (レビューの筋書き): 内部の配点だけ違う msh から書き出した成果物 (h5・準備の記録は元のまま)。
+    # 一致の印まで true にしても sha256 で止まる
+    (run / "nozzle.msh").write_text(MSH1)
+    (od / "mesh" / "nozzle.msh").write_text(MSH1)
+    s1 = sha(run / "nozzle.msh")
+    m2 = _copy.deepcopy(man)
+    m2["files_sha256"]["mesh/nozzle.msh"] = s1
+    m2["parts"]["mesh"]["msh41_sha256"] = s1
+    m2["provenance"]["msh"].update(sha256=s1, matches_prepare=True)
+    with_man(m2)
+    r = dchk()
+    (run / "nozzle.msh").write_text(MSH0)
+    (od / "mesh" / "nozzle.msh").write_text(MSH0)
+    with_man(man)
+    check("(4m) 内部の配点だけ違う msh から書き出した成果物 (計算の h5 と準備の記録は元のまま、一致の印も true) → MISMATCH (run・生成元の記録・"
+          "MANIFEST の 2 つ・配る実ファイルの 5 つ)・INDETERMINATE (ファイルの照合は PASS のまま; 修正前は PASS)",
+          bad(r, "MISMATCH") and r["status_before_provenance"] == "PASS" and len(pr_(r)) == 5
+          and all("計算の格子 (nozzle.h5) の元の msh" in p_ for p_ in pr_(r)), pr_(r))
+    for nm_, edit in (("準備の記録に mesh.hashes.msh_sha256 が無い", lambda: (run / "prepare_info.json").write_text(
+                          json.dumps({**PINFO, "mesh": {**PINFO["mesh"], "hashes": {}}}))),
+                      ("prepare_info.json が無い", lambda: (run / "prepare_info.json").unlink())):
+        edit()
+        r = dchk()
+        (run / "prepare_info.json").write_text(json.dumps(PINFO))
+        check(f"(4m) {nm_} (計算の格子の元の msh が分からない) → UNCHECKABLE・INDETERMINATE (修正前は PASS)",
+              bad(r, "UNCHECKABLE") and any("準備の記録に msh の sha256 が無い" in p_ for p_ in pr_(r)), pr_(r))
+    (run / "prepare_info.json").write_text(json.dumps({**PINFO, "mesh": {**PINFO["mesh"], "hashes": {**PINFO["mesh"]["hashes"], "msh_sha256": "1" * 64}}}))
+    r = dchk()
+    (run / "prepare_info.json").write_text(json.dumps(PINFO))
+    check("(4m) 書き出しの後に準備の記録の msh の sha256 が変わった (h5 の元の msh が別) → MISMATCH (msh の 6 つすべて)",
+          bad(r, "MISMATCH") and len(pr_(r)) == 6, pr_(r))
+    (run / "nozzle.msh").unlink()
+    r = dchk()
+    (run / "nozzle.msh").write_text(MSH0)
+    check("(4m) run の nozzle.msh が無い → UNCHECKABLE", bad(r, "UNCHECKABLE") and len(pr_(r)) == 1 and "今の run の nozzle.msh が無い" in pr_(r)[0], pr_(r))
+    # 2026-10-17 の追加の照合 (`_h5_binding`): 準備の後に h5 だけを別の格子から作り直すと、msh・準備の記録の msh・生成元の記録 (h5 の sha256
+    # を新しい h5 に合わせた) がそろったまま通っていた。準備の記録の coord・topology の sha256 と今の h5 を照合する
+    write_mesh_h5(run / "nozzle.h5", shift=0.25)
+    m2 = _copy.deepcopy(man)
+    m2["provenance"]["mesh"]["sha256"] = sha(run / "nozzle.h5")
+    with_man(m2)
+    r = dchk()
+    write_mesh_h5(run / "nozzle.h5")
+    with_man(man)
+    check("(4m) 準備の後に h5 だけ別の格子から作り直した (生成元の記録の h5 の sha256 も新しい h5 に合わせた) → MISMATCH (座標だけ)・INDETERMINATE",
+          bad(r, "MISMATCH") and len(pr_(r)) == 1 and "座標が準備の記録と違う" in pr_(r)[0], pr_(r))
+    (run / "prepare_info.json").write_text(json.dumps({**PINFO, "mesh": {**PINFO["mesh"], "hashes": {"msh_sha256": PINFO["mesh"]["hashes"]["msh_sha256"]}}}))
+    r = dchk()
+    (run / "prepare_info.json").write_text(json.dumps(PINFO))
+    check("(4m) 準備の記録に計算の格子の座標・接続の sha256 が無い → UNCHECKABLE", bad(r, "UNCHECKABLE") and len(pr_(r)) == 1
+          and "coord_sha256" in pr_(r)[0], pr_(r))
+    r = dchk()
+    check("(4m) 元に戻すと MATCH (h5 の照合の後)", r["provenance"]["status"] == "MATCH", pr_(r))
+    m2 = _copy.deepcopy(man)
+    del m2["provenance"]["msh"], m2["provenance"]["prepare_msh"]
+    with_man(m2)
+    r = dchk()
+    check("(4m) 書式 v2 なのに生成元の記録に msh・prepare_msh が無い → UNCHECKABLE", bad(r, "UNCHECKABLE")
+          and any("生成元の記録の msh" in p_ and "無い" in p_ for p_ in pr_(r)), pr_(r))
+    # 書式 v1 (msh の項目が無い古い形): run の nozzle.msh・準備の記録・MANIFEST の既存の記録 (parts.mesh.msh41_sha256・files_sha256) で照合
+    m1 = _copy.deepcopy(man)
+    m1["provenance"]["format"] = DV.PROVENANCE_FORMAT_V1
+    del m1["provenance"]["msh"], m1["provenance"]["prepare_msh"]
+    with_man(m1)
+    r = dchk()
+    check("(4m) 書式 v1: MANIFEST の parts.mesh.msh41_sha256・files_sha256・配る実ファイル・run の msh が準備の記録と一致 → MATCH・PASS",
+          r["status"] == "PASS" and r["provenance"]["status"] == "MATCH" and len(r["provenance"]["compared"]["msh"]["items"]) == 4, pr_(r))
+    (od / "mesh" / "nozzle.msh").write_text(MSH1)
+    m1b = _copy.deepcopy(m1)
+    m1b["files_sha256"]["mesh/nozzle.msh"] = m1b["parts"]["mesh"]["msh41_sha256"] = sha(od / "mesh" / "nozzle.msh")
+    with_man(m1b)
+    r = dchk()
+    (od / "mesh" / "nozzle.msh").write_text(MSH0)
+    check("(4m) 書式 v1: 配る msh (記録 2 つと実ファイル) が内部の配点だけ違う msh → MISMATCH (3 つ)", bad(r, "MISMATCH") and len(pr_(r)) == 3, pr_(r))
+    m1c = _copy.deepcopy(m1)
+    del m1c["files_sha256"]["mesh/nozzle.msh"], m1c["parts"]["mesh"]["msh41_sha256"]
+    (od / "mesh" / "nozzle.msh").unlink()
+    with_man(m1c)
+    r = dchk()
+    (od / "mesh" / "nozzle.msh").write_text(MSH0)
+    with_man(man)
+    check("(4m) 書式 v1 で書き出しのときの msh の記録が無い (parts.mesh.msh41_sha256・files_sha256 の mesh/nozzle.msh・配る msh が無い) → UNCHECKABLE",
+          bad(r, "UNCHECKABLE") and any("書き出しのときの msh の記録が無い" in p_ for p_ in pr_(r)), pr_(r))
+    r = dchk()
+    check("(4m) 元に戻すと MATCH・PASS", r["status"] == "PASS" and r["provenance"]["status"] == "MATCH", pr_(r))
+
     # 寸法の関門が FAIL の成果物でも、生成元が一致しなければ寸法の補正 (back_to_correction) に回さない
     dim["verdict"] = "FAIL"
     (od / "DIMENSIONS.json").write_text(json.dumps(dim))
@@ -810,12 +962,15 @@ else:
     OLD14 = R14 / "_deliverables_pre_provenance"
     NEW14 = R14 / "deliverables"
 
-    def link_deliv(src, dst, edit=None):
-        """成果物の写し (ファイルは symlink、MANIFEST.json だけ実体で edit で書き換える)。元の成果物には書かない。"""
+    def link_deliv(src, dst, edit=None, replace=None):
+        """成果物の写し (ファイルは symlink、MANIFEST.json だけ実体で edit で書き換える)。元の成果物には書かない。
+        replace (相対パス → ファイル) はそのファイルを別のファイルへの symlink にする (4 回目 Major の負例)。"""
+        replace = replace or {}
         for f in sorted(Path(src).rglob("*")):
             if not f.is_file():
                 continue
-            t = Path(dst) / f.relative_to(src)
+            rel = str(f.relative_to(src))
+            t = Path(dst) / rel
             t.parent.mkdir(parents=True, exist_ok=True)
             if f.name == "MANIFEST.json":
                 m = json.loads(f.read_text())
@@ -823,8 +978,38 @@ else:
                     edit(m)
                 t.write_text(json.dumps(m, ensure_ascii=False))
             else:
-                t.symlink_to(f.resolve())
+                t.symlink_to(Path(replace.get(rel, f)).resolve())
         return Path(dst)
+
+    def perturb_inner_msh(src, dst, amp=2.5e-3):
+        """壁・軸・入口・出口の節点と接続は同じで、内部の節点の半径だけを r → r + amp·r_w(x)·sin(π r / r_w(x)) で動かした msh4.1 を
+        dst に書く (4 回目 Major の負例; レビューは径方向の配点を変えて内部節点が最大 1.918 mm 動く msh を作った)。amp < 1/π なら列の中の
+        順序を保つ。戻り値: 最大の移動量・壁の最大の移動量 [m]・接続と境界辺が同じか (読み直して確かめる)。"""
+        from forge_design.export import mesh_structure as MS
+        import numpy as np_
+        coords, quads, bedges, _ = MS.read_msh41_mesh2d(src)
+        bnd = np_.unique(np_.concatenate([np_.asarray(e).ravel() for e in bedges.values()]))
+        wall = np_.unique(np_.asarray(bedges["wall"]).ravel())
+        o = np_.argsort(coords[wall, 0])
+        rwx = np_.interp(coords[:, 0], coords[wall, 0][o], coords[wall, 1][o])
+        dr = amp * rwx * np_.sin(np_.pi * np_.clip(coords[:, 1] / rwx, 0.0, 1.0))
+        dr[bnd] = 0.0
+        lines = Path(src).read_text().split("\n")
+        i = lines.index("$Nodes")
+        if int(lines[i + 1].split()[0]) != 1:
+            raise ValueError("節点ブロックが 1 つの msh だけ")
+        nt = int(lines[i + 2].split()[3])
+        tags = [int(v) - 1 for v in lines[i + 3:i + 3 + nt]]
+        c0 = i + 3 + nt
+        for k, t in enumerate(tags):
+            if dr[t] != 0.0:
+                xx, yy, zz = lines[c0 + k].split()
+                lines[c0 + k] = f"{xx} {float(float(yy) + dr[t])!r} {zz}"
+        Path(dst).write_text("\n".join(lines))
+        c2, q2, b2, _ = MS.read_msh41_mesh2d(dst)
+        d = np_.abs(c2 - coords).max(axis=1)
+        return {"max_shift_m": float(d.max()), "wall_max_shift_m": float(d[wall].max()), "boundary_max_shift_m": float(d[bnd].max()),
+                "same_connectivity": bool((q2 == quads).all() and all((b2[k] == bedges[k]).all() for k in bedges))}
 
     pv14 = json.loads((NEW14 / "MANIFEST.json").read_text()).get("provenance")
     if pv14 is None or not (R10 / "deliverables" / "MANIFEST.json").is_file() or not (OLD14 / "MANIFEST.json").is_file():
@@ -875,6 +1060,81 @@ else:
             check("(9) 3 回目 Major: run_0014 の成果物の写しで記録の格子の sha256 を 1 つ変えた → MISMATCH (違いは格子だけ)・incomplete",
                   rec["result"] == "incomplete" and pr["status"] == "MISMATCH" and len(pr["problems"]) == 1 and "格子" in pr["problems"][0],
                   pr["problems"])
+
+            # ---- 4 回目 Major (2026-10-17 codex result、§5.1 #6c2 の再オープン): 配る msh と計算の格子 (h5) の元の msh の照合 ----
+            # 修正前 (af3c6081) は下の負例がどれも accepted・生成元 MATCH だった (記録していた格子は h5 だけで、run の nozzle.msh・
+            # 配る mesh/nozzle.msh・準備の記録の msh の sha256・書き出しのときの一致の印を見なかった)
+            S14 = json.loads((R14 / "prepare_info.json").read_text())["mesh"]["hashes"]["msh_sha256"]
+
+            def msh_(rec):
+                d_ = rec["checks"]["deliverables"]
+                return d_["provenance"], d_["provenance"].get("compared", {}).get("msh", {})
+
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=NEW14, **common)
+            pr, mb = msh_(rec)
+            check("(9) 4 回目 Major の正例 (今の成果物 = 書式 v1): 準備の記録の msh = run の nozzle.msh = 配る msh (MANIFEST の記録 2 つ・実ファイル)・"
+                  "一致の印 true → 生成元 MATCH・accepted (v1 は既存の記録で照合)",
+                  rec["result"] == "accepted" and pr["status"] == "MATCH" and mb["provenance_format"] == DV.PROVENANCE_FORMAT_V1
+                  and mb["reference"] == S14 and len(mb["items"]) == 4 and set(mb["items"].values()) == {S14} and list(mb["flags"].values()) == [True],
+                  json.dumps(mb, ensure_ascii=False)[:300])
+            prov14 = DV.provenance_record(R14, 46171, ["res_wall_3_46171.h5"], CARD, PROB14,
+                                          field_source="試験: 今の道具 (書式 v2) で run_0014 から作ったときと同じ記録")
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=link_deliv(NEW14, td / "d14v2", lambda m: m.update(provenance=prov14)), **common)
+            pr, mb = msh_(rec)
+            check("(9) 4 回目 Major の正例 (生成元の記録を書式 v2 に差し替え): msh の 6 つが準備の記録と一致・一致の印 2 つ true → MATCH・accepted",
+                  rec["result"] == "accepted" and pr["status"] == "MATCH" and prov14["msh"]["matches_prepare"] is True
+                  and mb["provenance_format"] == DV.PROVENANCE_FORMAT and len(mb["items"]) == 6 and set(mb["items"].values()) == {S14}
+                  and list(mb["flags"].values()) == [True, True], json.dumps(mb, ensure_ascii=False)[:300])
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=link_deliv(
+                NEW14, td / "dm1", lambda m: m["parts"]["mesh"]["structure_rule_params"]["source"].update(msh_sha256_matches=False)), **common)
+            pr, _ = msh_(rec)
+            check("(9) 4 回目 Major の再現 1: run_0014 の成果物の写しで MANIFEST の msh_sha256_matches を false → MISMATCH (その印だけ)・incomplete・"
+                  "escalate (修正前は accepted・MATCH)",
+                  rec["result"] == "incomplete" and rec["next"] == "escalate" and pr["status"] == "MISMATCH" and len(pr["problems"]) == 1
+                  and "msh_sha256_matches = false" in pr["problems"][0], pr["problems"])
+            inner = td / "nozzle_inner.msh"
+            info = perturb_inner_msh(R14 / "nozzle.msh", inner)
+            check("(9) 4 回目 Major の負例の msh: 壁・軸・入口・出口の節点と接続は同じで、内部の節点だけ最大 1.918 mm 動く (レビューの 1.918 mm と同じ)",
+                  info["boundary_max_shift_m"] == 0.0 and info["same_connectivity"] and round(info["max_shift_m"] * 1e3, 3) == 1.918, info)
+            run2 = copy14(td / "r2")
+            (run2 / "nozzle.msh").unlink()
+            shutil.copy2(inner, run2 / "nozzle.msh")
+            rec = WQ.qualify(run2, CARD, PROB14, deliverables=NEW14, **common)
+            pr, _ = msh_(rec)
+            check("(9) 4 回目 Major の再現 2: run の nozzle.msh を内部の配点だけ違う msh に替えた写し (成果物は元のまま) → MISMATCH (今の run の "
+                  "msh だけ)・incomplete (修正前は accepted)",
+                  rec["result"] == "incomplete" and pr["status"] == "MISMATCH" and len(pr["problems"]) == 1
+                  and "今の run の nozzle.msh" in pr["problems"][0], pr["problems"])
+            si = sha(inner)
+
+            def from_inner(m):
+                # その msh から書き出した成果物の写し (計算の h5・準備の記録は元のまま)。MANIFEST の一致の印は true のまま (sha256 で止まる)
+                m["parts"]["mesh"]["msh41_sha256"] = si
+                m["files_sha256"]["mesh/nozzle.msh"] = si
+            rec = WQ.qualify(run2, CARD, PROB14, deliverables=link_deliv(NEW14, td / "dm2", from_inner, {"mesh/nozzle.msh": inner}), **common)
+            pr, _ = msh_(rec)
+            check("(9) 4 回目 Major の再現 2b: さらに書き出しもその msh で行った写し (配る msh・MANIFEST の記録を合わせ、一致の印は true のまま; v1) → "
+                  "MISMATCH (run・MANIFEST の 2 つ・配る実ファイルの 4 つ)・incomplete (成果物のファイルの照合は PASS のまま; 修正前は accepted)",
+                  rec["result"] == "incomplete" and pr["status"] == "MISMATCH" and len(pr["problems"]) == 4
+                  and rec["checks"]["deliverables"]["status_before_provenance"] == "PASS", pr["problems"])
+            prov_i = DV.provenance_record(run2, 46171, ["res_wall_3_46171.h5"], CARD, PROB14, field_source="試験: 内部の配点だけ違う msh の run から")
+            rec = WQ.qualify(run2, CARD, PROB14, deliverables=link_deliv(NEW14, td / "dm2v2", lambda m: (from_inner(m), m.update(provenance=prov_i)),
+                                                                         {"mesh/nozzle.msh": inner}), **common)
+            pr, _ = msh_(rec)
+            check("(9) 4 回目 Major の再現 2c: 2b を今の道具 (書式 v2) で書き出した記録 (msh.matches_prepare false) → MISMATCH (msh の 5 つ + 一致の印)・"
+                  "incomplete",
+                  rec["result"] == "incomplete" and pr["status"] == "MISMATCH" and prov_i["msh"]["matches_prepare"] is False and len(pr["problems"]) == 6
+                  and any("matches_prepare = false" in p_ for p_ in pr["problems"]), pr["problems"])
+            run3 = copy14(td / "r3")
+            pi3 = json.loads((run3 / "prepare_info.json").read_text())
+            del pi3["mesh"]["hashes"]["msh_sha256"]
+            (run3 / "prepare_info.json").write_text(json.dumps(pi3, indent=1, ensure_ascii=False))
+            rec = WQ.qualify(run3, CARD, PROB14, deliverables=NEW14, **common)
+            pr, _ = msh_(rec)
+            check("(9) 4 回目 Major の再現 3: 準備の記録の msh の sha256 が無い写し → UNCHECKABLE (計算の格子の元の msh が分からない)・incomplete "
+                  "(修正前は accepted)",
+                  rec["result"] == "incomplete" and pr["status"] == "UNCHECKABLE" and len(pr["problems"]) == 1
+                  and "準備の記録に msh の sha256 が無い" in pr["problems"][0], pr["problems"])
 
 for s in SKIPPED:
     print("skip " + s)

@@ -15,6 +15,10 @@ Major: 別の run の成果物を `wt_qualify` に渡すと accepted になっ�
 `mesh.meshFileName`、無ければ `nozzle.h5`)・設定 (`solverConfig.yaml`・`bcondConfig.yaml`) の sha256、場 (CFD 壁面量表に使った step の
 `res_<step>.h5` と壁ダンプの sha256)、停止規則の状態 (`STOP_RULE_STATE.json` の method・status・stop_step)、カードと問題 YAML の sha256。
 `wt_qualify` はこれを評価の対象と内容で照合する (同じ定義の `run_identity`・`field_identity`・`stop_identity` を使う)。
+書式 v2 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major: 配る msh・Fluent・寸法の関門の入力は run の `nozzle.msh` なのに、
+記録していた格子は計算の `nozzle.h5` だけで両者を結ぶ検査が無かった) で、run の `nozzle.msh` (`msh`: ファイルと sha256、準備の記録と
+一致したかの印 `matches_prepare`) と準備の記録の msh の sha256 (`prepare_msh`: `prepare_info.json` の `mesh.hashes.msh_sha256`; h5 は準備の
+ときにこの msh から変換された) を足した。`wt_qualify` は配る msh と計算の格子の元の msh がこの記録で一致することを要る。
 
 入力が欠けた成果物は飛ばして理由を MANIFEST に書く (黙って欠けさせない)。寸法ゲートが FAIL なら MANIFEST の `verdict` を FAIL にし、
 README の冒頭に書く (書き出しは止めない — 何が外れたかを見せるため)。壁温分布の run は、run の正本 (`wall_temperature_profile.json`・
@@ -68,9 +72,15 @@ def _jsonable(o):
 
 
 # ------------------------------------------------------------------ 生成元の記録 (MANIFEST.json の provenance)
-PROVENANCE_FORMAT = "forge.deliverables.provenance/v1"
+# v2 (2026-10-17 codex result 4 回目 Major): msh と準備の記録の msh の sha256 を足した。v1 (msh の項目が無い) も wt_qualify は読む
+# (msh の照合は MANIFEST の parts.mesh.msh41_sha256 などの既存の記録で行う)
+PROVENANCE_FORMAT = "forge.deliverables.provenance/v2"
+PROVENANCE_FORMAT_V1 = "forge.deliverables.provenance/v1"
 PROVENANCE_CONFIGS = ("solverConfig.yaml", "bcondConfig.yaml")
 WALL_FILE = "wall_repr.json"
+MSH_FILE = "nozzle.msh"                        # 配る msh・Fluent・寸法の関門の入力 (part_mesh・part_fluent・part_dimensions)
+PREPARE_FILE = "prepare_info.json"
+PREPARE_MSH_KEY = ("mesh", "hashes", "msh_sha256")   # 準備のときに h5 を変換した msh の sha256 (runner_axismach._mesh_hashes)
 
 
 def _sha_file(p: Path) -> str | None:
@@ -96,13 +106,34 @@ def _mesh_file(run: Path) -> Path:
     return Path(run) / (str(name) if name else "nozzle.h5")
 
 
+def prepare_msh_identity(run) -> dict:
+    """準備の記録 (`prepare_info.json` の `mesh.hashes.msh_sha256`) の msh の sha256。計算の格子 (h5) は準備のときにこの msh から
+    変換された。読めない・キーが無ければ sha256 None と理由 (照合できない)。"""
+    p = Path(run) / PREPARE_FILE
+    rec = {"file": PREPARE_FILE, "key": ".".join(PREPARE_MSH_KEY), "sha256": None}
+    try:
+        v = json.loads(p.read_text())
+        for k in PREPARE_MSH_KEY:
+            v = v[k]
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        rec["why"] = f"{PREPARE_FILE} の {rec['key']} を読めない ({type(e).__name__}: {e})"
+        return rec
+    if not isinstance(v, str) or not v:
+        rec["why"] = f"{PREPARE_FILE} の {rec['key']} が文字列でない ({v!r})"
+        return rec
+    rec["sha256"] = v
+    return rec
+
+
 def run_identity(run) -> dict:
-    """run の壁・格子・設定の内容 (sha256; 置き場所・run の名前は入れない)。成果物の生成元の記録と `wt_qualify` の照合が同じ定義を使う。
-    無いファイルは sha256 None (照合できない)。"""
+    """run の壁・格子・msh・設定の内容 (sha256; 置き場所・run の名前は入れない) と準備の記録の msh の sha256。成果物の生成元の記録と
+    `wt_qualify` の照合が同じ定義を使う。無いファイルは sha256 None (照合できない)。"""
     run = Path(run)
     m = _mesh_file(run)
     return {"wall": {"file": WALL_FILE, "sha256": _sha_file(run / WALL_FILE)},
             "mesh": {"file": m.name, "sha256": _sha_file(m)},
+            "msh": {"file": MSH_FILE, "sha256": _sha_file(run / MSH_FILE)},
+            "prepare_msh": prepare_msh_identity(run),
             "config": {n: _sha_file(run / n) for n in PROVENANCE_CONFIGS}}
 
 
@@ -132,8 +163,11 @@ def provenance_record(run, field_step=None, wall_dumps=(), card=None, problem=No
     run = Path(run)
     rec = {"format": PROVENANCE_FORMAT,
            "how": ("成果物を作った run の入力の sha256。wt_qualify が評価の対象 (評価の場の step と sha256、壁・格子・設定、カード・"
-                   "問題 YAML) と内容で照合する (置き場所・run の名前は見ない; plan tooling-nozzle-card-local-mesh §5.1 #6b)"),
+                   "問題 YAML) と内容で照合する (置き場所・run の名前は見ない; plan tooling-nozzle-card-local-mesh §5.1 #6b)。"
+                   "msh (配る msh・Fluent・寸法の関門の入力) は準備の記録の msh (計算の格子 h5 の元) と一致することを要る (§5.1 #6c2)"),
            "run_name": run.name, **run_identity(run)}
+    ms_, pm_ = rec["msh"]["sha256"], rec["prepare_msh"]["sha256"]
+    rec["msh"]["matches_prepare"] = None if (ms_ is None or pm_ is None) else ms_ == pm_
     if field_step is None:
         rec["field"] = None
         rec["field_why"] = field_why or "成果物が場を使っていない"
@@ -799,9 +833,14 @@ def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
     pv = man.get("provenance") or {}
     if pv:
         fl = pv.get("field") or {}
-        L.append(f"- 生成元の記録: `MANIFEST.json` の `provenance` (壁・格子・設定・場 "
+        L.append(f"- 生成元の記録: `MANIFEST.json` の `provenance` (壁・格子・msh・設定・場 "
                  + (f"step {fl.get('step')} (`{fl.get('file')}`)" if fl else f"なし ({pv.get('field_why')})")
                  + "・カード・問題 YAML の sha256)。`wt_qualify` は評価の対象とこれを内容で照合する")
+        msr = pv.get("msh") or {}
+        if msr:
+            L.append(f"- msh (`{msr.get('file')}`) と計算の格子の元の msh (準備の記録 `prepare_info.json` の mesh.hashes.msh_sha256) の一致: "
+                     + {True: "一致", False: "**不一致** (この成果物は計算の格子と別の msh から作られた)",
+                        None: "照合できない (" + str((pv.get("prepare_msh") or {}).get("why") or "msh が無い") + ")"}[msr.get("matches_prepare")])
     L.append("")
     return "\n".join(L)
 

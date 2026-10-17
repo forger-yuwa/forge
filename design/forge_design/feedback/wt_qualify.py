@@ -43,6 +43,13 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
     照合する (`provenance_check`; 置き場所・run の名前は見ない — 別の置き場所への写しは中身が同じなら通す)。一致しない・生成元の記録が
     無い (古い成果物)・照合できない → 成果物 INDETERMINATE・寸法の関門も INDETERMINATE (その成果物の寸法はこの run の判定にしない)。
     結果は incomplete (次の手は既存の規則どおり escalate; 理由に作り直しを書く)。run の名前の不一致は警告のまま (合否は内容の照合で決める)。
+    **配る msh と計算の格子の元の msh の照合** (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major: 記録していた格子は h5 だけで、
+    配る msh・Fluent・寸法の関門の入力の run の `nozzle.msh` と結ぶ検査が無く、MANIFEST の `msh_sha256_matches` が false でも、
+    内部の配点だけ違う msh でも accepted だった): 準備の記録 (`prepare_info.json` の `mesh.hashes.msh_sha256`; h5 はこの msh から変換
+    された) を基準に、今の run の `nozzle.msh`・配る `mesh/nozzle.msh` (実ファイルと MANIFEST の記録)・生成元の記録 (v2 の `msh`・
+    `prepare_msh`; v1 は MANIFEST の `parts.mesh.msh41_sha256` などの既存の記録) の sha256 が一致することを要る (`_msh_binding`)。
+    書き出しのときの一致の印 (`msh_sha256_matches`・`matches_prepare`) が false なら不一致。不一致 → MISMATCH、準備の記録に msh の
+    sha256 が無い・run の `nozzle.msh` が無い・書き出しのときの msh の記録が無い → UNCHECKABLE (どちらも成果物 INDETERMINATE → incomplete)。
 
 公差・窓の出所 (どれを使ったかを記録の `tolerances.*.source` に書く; 上が優先):
   1. CLI (`--exit-tol-rel`・`--line-eta`・`--line-x-range-m X0 X1`・`--line-tol-maxabs`・`--line-tol-halfamp`)
@@ -572,11 +579,108 @@ def _cmp_sha(name: str, recorded, current, mism: list, unchk: list, compared: di
         mism.append(f"{name} の sha256 が違う (成果物の生成元 {str(recorded)[:16]}…、今の評価の対象 {str(current)[:16]}…)")
 
 
-def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, problem_path=None) -> dict:
+def _find_key(o, key: str, path: str = "") -> list:
+    """入れ子の dict・list の中の key の値を (場所, 値) で全部集める。"""
+    out = []
+    if isinstance(o, dict):
+        for k, v in o.items():
+            p = f"{path}.{k}" if path else str(k)
+            if k == key:
+                out.append((p, v))
+            out += _find_key(v, key, p)
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            out += _find_key(v, key, f"{path}[{i}]")
+    return out
+
+
+MSH_DELIVERED = "mesh/nozzle.msh"          # part_mesh が配る msh (書き出しのときの run の nozzle.msh の写し)
+
+
+def _msh_binding(man: dict, pv: dict, cur: dict, deliv_dir, mism: list, unchk: list, compared: dict) -> None:
+    """配る msh と計算の格子 (h5) の元の msh の照合 (plan §5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major: 記録していた格子は
+    h5 だけで、配る msh・Fluent・寸法の関門の入力 (run の nozzle.msh) と結ぶ検査が無かった)。
+    基準は今の準備の記録 (`prepare_info.json` の `mesh.hashes.msh_sha256`; h5 は準備のときにこの msh から変換された)。基準と一致を要るもの:
+    今の run の `nozzle.msh`、配る `mesh/nozzle.msh` の実ファイルと MANIFEST の記録 (`parts.mesh.msh41_sha256`・files_sha256; 記録か
+    ファイルがあれば)、書き出しのときの msh (v2: 生成元の記録の `msh`・`prepare_msh`。v1 (msh の項目が無い古い形) は MANIFEST の
+    `parts.mesh.msh41_sha256` か files_sha256 の `mesh/nozzle.msh` — どちらも無ければ書き出しのときの msh が分からず照合できない)。
+    書き出しのときの一致の印 (MANIFEST の `msh_sha256_matches`・v2 の `msh.matches_prepare`) が false なら不一致、true でなければ照合できない。
+    基準が無い・要るものが無い → unchk、違う → mism に理由を足す。"""
+    from ..export import deliverables as DV
+    pr = cur["prepare_msh"]
+    ref = pr["sha256"]
+    ref_name = f"計算の格子 ({cur['mesh']['file']}) の元の msh (準備の記録 {pr['file']} の {pr['key']})"
+    v2 = pv.get("format") == DV.PROVENANCE_FORMAT
+    parts = man.get("parts") if isinstance(man.get("parts"), dict) else {}
+    pm = parts.get("mesh") if isinstance(parts.get("mesh"), dict) else {}
+    fs = man.get("files_sha256") if isinstance(man.get("files_sha256"), dict) else {}
+    items = [(f"今の run の {DV.MSH_FILE}", cur["msh"]["sha256"])]
+    if v2:
+        items += [(f"生成元の記録の msh (書き出しのときの run の {DV.MSH_FILE}; 配る msh・Fluent・寸法の関門の入力)", (pv.get("msh") or {}).get("sha256")),
+                  (f"生成元の記録の準備の記録の msh (書き出しのときの {DV.PREPARE_FILE})", (pv.get("prepare_msh") or {}).get("sha256"))]
+    elif "msh41_sha256" not in pm and MSH_DELIVERED not in fs:
+        unchk.append("書き出しのときの msh の記録が無い (v1 の生成元の記録に msh の項目が無く、MANIFEST の parts.mesh.msh41_sha256・files_sha256 の "
+                     f"{MSH_DELIVERED} も無い; 照合できない)")
+    if "msh41_sha256" in pm:
+        items.append(("配る msh の記録 (MANIFEST の parts.mesh.msh41_sha256)", pm.get("msh41_sha256")))
+    if MSH_DELIVERED in fs:
+        items.append((f"配る msh の記録 (MANIFEST の files_sha256 の {MSH_DELIVERED})", fs.get(MSH_DELIVERED)))
+    dfile = None if deliv_dir is None else Path(deliv_dir) / MSH_DELIVERED
+    if dfile is not None and (dfile.is_file() or "msh41_sha256" in pm or MSH_DELIVERED in fs):
+        items.append((f"配る msh (成果物の {MSH_DELIVERED})", DV._sha_file(dfile)))
+    if ref is None:
+        unchk.append(f"準備の記録に msh の sha256 が無い ({pr.get('why')}; 計算の格子の元の msh が分からない — 照合できない)")
+    for nm, s in items:
+        if not isinstance(s, str) or not s:
+            unchk.append(f"{nm} が無い (照合できない)")
+        elif ref is not None and s != ref:
+            mism.append(f"{nm} の sha256 {s[:16]}… が{ref_name} {ref[:16]}… と違う")
+    flags = [(f"MANIFEST の parts.mesh.{p}", v) for p, v in _find_key(pm, "msh_sha256_matches")]
+    if v2:
+        flags.append(("生成元の記録の msh.matches_prepare", (pv.get("msh") or {}).get("matches_prepare")))
+    for nm, v in flags:
+        if v is False:
+            mism.append(f"書き出しのときに msh が準備の記録と違った ({nm} = false)")
+        elif v is not True:
+            unchk.append(f"書き出しのときの msh と準備の記録の一致の印が true でない ({nm} = {v!r}; 照合できない)")
+    compared["msh"] = {"reference": ref, "reference_source": ref_name, "items": {nm: s for nm, s in items},
+                       "flags": {nm: v for nm, v in flags}, "provenance_format": pv.get("format")}
+
+
+def _h5_binding(run_dir: Path, cur: dict, mism: list, unchk: list, compared: dict) -> None:
+    """計算の格子 (h5) が準備のときに msh から変換したものと同じかの照合 (2026-10-17、result 段レビュー 4 回目の後に implementer が見つけた穴:
+    準備の後に h5 だけを別の msh から変換し直すと、msh・準備の記録・生成元の記録 (h5 の sha256) がそろったまま通る)。
+    準備の記録 `prepare_info.json` の `mesh.hashes.coord_sha256`・`topology_sha256` (変換の直後の h5 の座標と接続) と、今の h5 から同じ式
+    (`runner_axismach.h5_mesh_hashes`) で計算し直した値が一致することを要る。記録が無い・h5 を読めない → 照合できない。"""
+    from ..evaluate.runner_axismach import h5_mesh_hashes
+    h5 = Path(run_dir) / cur["mesh"]["file"]
+    try:
+        hashes = (json.loads((Path(run_dir) / "prepare_info.json").read_text()).get("mesh") or {}).get("hashes") or {}
+    except Exception as e:  # noqa: BLE001
+        unchk.append(f"準備の記録 prepare_info.json を読めない ({e}; 計算の格子の座標・接続を照合できない)")
+        return
+    rc, rt = hashes.get("coord_sha256"), hashes.get("topology_sha256")
+    if not (isinstance(rc, str) and isinstance(rt, str)):
+        unchk.append("準備の記録に計算の格子の座標・接続の sha256 (mesh.hashes.coord_sha256・topology_sha256) が無い (照合できない)")
+        return
+    try:
+        now = h5_mesh_hashes(h5)
+    except Exception as e:  # noqa: BLE001
+        unchk.append(f"計算の格子 {h5.name} を読めない ({e}; 照合できない)")
+        return
+    compared["h5"] = {"coord": {"recorded": rc, "current": now["coord_sha256"]}, "topology": {"recorded": rt, "current": now["topology_sha256"]}}
+    if now["coord_sha256"] != rc:
+        mism.append(f"計算の格子 {h5.name} の座標が準備の記録と違う (変換の後に h5 が作り直された; {now['coord_sha256'][:16]}… と {rc[:16]}…)")
+    if now["topology_sha256"] != rt:
+        mism.append(f"計算の格子 {h5.name} の接続が準備の記録と違う ({now['topology_sha256'][:16]}… と {rt[:16]}…)")
+
+
+def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, problem_path=None, deliv_dir=None) -> dict:
     """成果物の生成元の記録 (MANIFEST.json の `provenance`) と今の評価の対象の照合 (plan §5.1 #6b の続き、2026-10-17 codex result
     3 回目 Major)。比べるのは内容 (sha256) と step だけ — 壁・格子・設定 (`deliverables.run_identity`)、評価の場 (`field` の step と
     `res_<step>.h5` の sha256、生成元が読んだ壁ダンプ)、停止の step (`deliverables.stop_identity`)、カード・問題 YAML (両方に無ければ
-    比べるものが無いので一致、片方だけなら照合できない)。
+    比べるものが無いので一致、片方だけなら照合できない)、配る msh と計算の格子の元の msh (`_msh_binding`; §5.1 #6c2 の再オープン、
+    4 回目 Major。deliv_dir は配る `mesh/nozzle.msh` の実ファイルを読むのに使う)。書式は v2 と v1 (msh の項目が無い古い形) を読む。
     status: MATCH / MISMATCH (どれかが違う) / ABSENT (生成元の記録が無い古い成果物) / UNCHECKABLE (照合できない)。"""
     from ..export import deliverables as DV
     run_dir = Path(run_dir)
@@ -585,8 +689,9 @@ def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, pro
     if not isinstance(pv, dict):
         rec.update(status="ABSENT", problems=["成果物に生成元の記録 (MANIFEST.json の provenance) が無い (古い成果物; 生成元の run・場を確かめられない)"])
         return rec
-    if pv.get("format") != DV.PROVENANCE_FORMAT:
-        rec.update(status="UNCHECKABLE", problems=[f"生成元の記録の書式 {pv.get('format')!r} が {DV.PROVENANCE_FORMAT} でない (照合できない)"])
+    if pv.get("format") not in (DV.PROVENANCE_FORMAT, DV.PROVENANCE_FORMAT_V1):
+        rec.update(status="UNCHECKABLE", problems=[f"生成元の記録の書式 {pv.get('format')!r} が {DV.PROVENANCE_FORMAT} か "
+                                                   f"{DV.PROVENANCE_FORMAT_V1} でない (照合できない)"])
         return rec
     mism, unchk, cmp_ = [], [], {}
     cur = DV.run_identity(run_dir)
@@ -594,6 +699,9 @@ def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, pro
     _cmp_sha(f"格子 ({cur['mesh']['file']})", (pv.get("mesh") or {}).get("sha256"), cur["mesh"]["sha256"], mism, unchk, cmp_)
     for n in DV.PROVENANCE_CONFIGS:
         _cmp_sha(f"設定 ({n})", (pv.get("config") or {}).get(n), cur["config"][n], mism, unchk, cmp_)
+    # 配る msh と計算の格子の元の msh (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major)
+    _msh_binding(man, pv, cur, deliv_dir, mism, unchk, cmp_)
+    _h5_binding(run_dir, cur, mism, unchk, cmp_)
     pf = pv.get("field")
     if not isinstance(field, dict) or not isinstance(field.get("step"), int):
         unchk.append("評価の場の step が渡されていない (照合できない)")
@@ -691,7 +799,7 @@ def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(
                          "n_files": len(man.get("files_sha256") or {})})
     # 生成元の照合 (2026-10-17 codex result 3 回目 Major): 一致しなければ、その成果物の中身 (ファイルの sha256・寸法の関門) が正しくても
     # この run の成果物・寸法の判定にしない (寸法の FAIL を補正 (寸法の解き直し) にも回さない)
-    pv = provenance_check(run_dir, man, field, card_path, problem_path)
+    pv = provenance_check(run_dir, man, field, card_path, problem_path, deliv_dir=od)
     rec["provenance"] = pv
     if pv["status"] != "MATCH":
         what = {"ABSENT": "の記録が無い (古い成果物)", "MISMATCH": "が今の評価の対象と一致しない",

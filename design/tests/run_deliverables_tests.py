@@ -39,6 +39,9 @@ FreeCAD・gmsh が要る (無ければ飛ばす)。作業は一時ディレク�
   壁ダンプの step、`res_<step>.h5` と壁ダンプ 2 本)・停止規則の状態・カード・問題 YAML の sha256 が実ファイルと一致して入り、壁
   (wall_repr.json が無い) は sha256 None。既存の記録 (CFD の表の step など) は残る。`--step` を渡すとその step、excel を飛ばすと場は
   None と理由。README の出典に生成元の行。run の中には何も書かない。
+  書式 v2 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major): run の nozzle.msh (ファイル・sha256・準備の記録との一致の印) と
+  準備の記録の msh の sha256 (prepare_info.json の mesh.hashes.msh_sha256)。msh・準備の記録が無い run は None (理由つき)、そろえば一致の印
+  true、run の msh を変えると false (書き出しは止めない; 合否は wt_qualify) と README の「不一致」。
 """
 import hashlib
 import json
@@ -576,6 +579,27 @@ def provenance_tests() -> None:
               and p2["card"] is None and p2["problem"] is None, p2.get("field_why"))
         after = {p.name: h(p) for p in syn.iterdir() if p.is_file()}
         check("(P) run の中には何も書かない (ファイルの一覧と sha256 が同じ)", before == after, sorted(set(after) ^ set(before)))
+        # 書式 v2 の msh の項目 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major): run の nozzle.msh (配る msh・Fluent・
+        # 寸法の関門の入力) と準備の記録の msh の sha256 (prepare_info.json の mesh.hashes.msh_sha256; h5 はこの msh から変換された)
+        check("(P) v2: msh も準備の記録も無い run → msh の sha256 None・一致の印 None・準備の記録は理由つきで None (照合できない側)",
+              pv.get("format") == "forge.deliverables.provenance/v2" and pv["msh"] == {"file": "nozzle.msh", "sha256": None, "matches_prepare": None}
+              and pv["prepare_msh"]["sha256"] is None and "読めない" in pv["prepare_msh"].get("why", ""),
+              json.dumps(pv.get("prepare_msh"), ensure_ascii=False))
+        syn2 = tmp / "run_syn2"
+        shutil.copytree(syn, syn2)
+        (syn2 / "nozzle.msh").write_text("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n(合成の msh)\n")
+        (syn2 / "prepare_info.json").write_text(json.dumps({"mesh": {"hashes": {"msh_sha256": h(syn2 / "nozzle.msh")}}}))
+        p3 = dl.export(syn2, tmp / "o3", card=card, skip=skip, problem=prob)["provenance"]
+        check("(P) v2: msh (ファイル・sha256) と準備の記録の msh の sha256 が実ファイルと一致・一致の印 true",
+              p3["msh"] == {"file": "nozzle.msh", "sha256": h(syn2 / "nozzle.msh"), "matches_prepare": True}
+              and p3["prepare_msh"] == {"file": "prepare_info.json", "key": "mesh.hashes.msh_sha256", "sha256": h(syn2 / "nozzle.msh")},
+              json.dumps({k: p3[k] for k in ("msh", "prepare_msh")}, ensure_ascii=False))
+        check("(P) v2: README に msh と計算の格子の元の msh の一致の行", "の一致: 一致" in (tmp / "o3" / "README.md").read_text())
+        (syn2 / "nozzle.msh").write_text("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n(内部の配点だけ違う合成の msh)\n")
+        p4 = dl.export(syn2, tmp / "o4", card=card, skip=skip, problem=prob)["provenance"]
+        check("(P) v2: run の nozzle.msh が準備の記録と違う → 一致の印 false (記録するだけで書き出しは止めない; 合否は wt_qualify)・README に不一致",
+              p4["msh"]["sha256"] == h(syn2 / "nozzle.msh") and p4["msh"]["matches_prepare"] is False
+              and p4["prepare_msh"]["sha256"] != p4["msh"]["sha256"] and "**不一致**" in (tmp / "o4" / "README.md").read_text())
 
 
 def main() -> int:

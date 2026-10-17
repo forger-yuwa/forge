@@ -873,18 +873,14 @@ _MESH_TOPOLOGY = ("MESH/CONNE", "VIZMESH/CONNE", "CELLS/STRUCT", "PLANES/STRUCT"
 _MESH_BCOND_TOPO = ("iBPlanes", "iCells", "iPlanes", "vizBfaceNodes", "vizBfaceSizes")
 
 
-def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
-    """変換後の nozzle.h5 の座標 (/MESH/COORD) と接続 (_MESH_TOPOLOGY + 境界の位相) の sha256、nozzle.msh の sha256、
-    生成器の出力 (coords float64・quads・境界辺; 変換器に依らない) の sha256。"""
+def h5_mesh_hashes(h5_path) -> dict:
+    """格子の h5 の座標 (/MESH/COORD) と接続 (_MESH_TOPOLOGY + 境界の位相) の sha256 (準備の記録 `prepare_info.json` の
+    `mesh.hashes.coord_sha256`・`topology_sha256` と同じ式; `wt_qualify` が計算の格子と準備の記録の照合に使う)。"""
     import hashlib
 
     import h5py
 
-    def _upd(h, name, a):
-        a = np.ascontiguousarray(a)
-        h.update(name.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
-
-    with h5py.File(run_dir / "nozzle.h5", "r") as f:
+    with h5py.File(h5_path, "r") as f:
         c = f["/MESH/COORD"][:]
         hc = hashlib.sha256()
         hc.update(str(c.dtype).encode() + str(c.shape).encode() + np.ascontiguousarray(c).tobytes())
@@ -894,14 +890,27 @@ def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
         for n in names:
             a = np.asarray(f[n])
             ht.update(n.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+    return {"coord_sha256": hc.hexdigest(), "coord_dtype": str(c.dtype), "topology_sha256": ht.hexdigest(), "topology_datasets": names}
+
+
+def _mesh_hashes(run_dir: Path, coords, quads, bedges) -> dict:
+    """変換後の nozzle.h5 の座標 (/MESH/COORD) と接続 (_MESH_TOPOLOGY + 境界の位相) の sha256、nozzle.msh の sha256、
+    生成器の出力 (coords float64・quads・境界辺; 変換器に依らない) の sha256。"""
+    import hashlib
+
+    def _upd(h, name, a):
+        a = np.ascontiguousarray(a)
+        h.update(name.encode() + str(a.dtype).encode() + str(a.shape).encode() + a.tobytes())
+
+    hh = h5_mesh_hashes(run_dir / "nozzle.h5")
     hg = hashlib.sha256()
     _upd(hg, "coords", np.asarray(coords, dtype=np.float64))
     _upd(hg, "quads", np.asarray(quads, dtype=np.int64))
     for g in ("inlet", "outlet", "wall", "axis"):
         _upd(hg, g, np.asarray(bedges[g], dtype=np.int64))
     hm = hashlib.sha256((run_dir / "nozzle.msh").read_bytes())
-    return {"coord_sha256": hc.hexdigest(), "coord_dtype": str(c.dtype), "topology_sha256": ht.hexdigest(),
-            "topology_datasets": names, "msh_sha256": hm.hexdigest(), "generator_sha256": hg.hexdigest()}
+    return {"coord_sha256": hh["coord_sha256"], "coord_dtype": hh["coord_dtype"], "topology_sha256": hh["topology_sha256"],
+            "topology_datasets": hh["topology_datasets"], "msh_sha256": hm.hexdigest(), "generator_sha256": hg.hexdigest()}
 
 
 def _mesh_record(p, mp: Mesh2DParams, source: str, nj: int, run_dir: Path, coords, quads, bedges, nodes: dict) -> dict:
