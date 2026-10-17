@@ -12,10 +12,19 @@
      壁の形だけの補正 (規則で recalibrate / escalate)・壁解像や寸法を含む補正 (escalate、規則は評価しない)。
  (6) 較正し直しの規則 (合成の run): (a)〜(e) をそろえて recalibrate、1 つずつ欠くと escalate (前の run が無い・前の更新で誤差が増えた・
      さらに減らせない・回数・計算の成立)。
+ (8) 線の定常の保証 (plan §5.1 #7a、codex result 2026-10-17 M1): 監視の線との違い (η・x 窓・点数)・line_mach が無い・停止の step と違う
+     → 保証の欠け。欠けたときは本段の全場の系列 (load_field を差し替えた合成の場) を check_quasisteady で判定し、STEADY なら合否に進み、
+     動いている・4 枚未満・本段の開始の記録が無い・評価の場で終わらない → 判定不能。壁解像の照合 (§5.1 #7b、M2): 偽のツールの出力で、
+     EVALUATED 行が無い・要求した壁の欠け・要求した step でない・bcond と違う physID・要求していない壁・停止の step でない → 判定不能。
 実データ (手元にあるとき):
- (7) case/71 run_0010・run_0011: V5b FAIL (出口コア M 5.502841 / 5.502842)・V5c FAIL (η 0.03 片振幅 0.0573 %、最大偏差 0.0623 % は許容内)・
-     壁解像 PASS、較正し直しの規則に当たらない (形の誤差の射影 0.624 → 0.612 mm、1.9 % しか減らない) → back_to_correction・escalate
-     (plan §4.3 の 2026-10-15 の判断どおり)。run_0011 は環境変数 FORGE_CASE71_RUN_0011 か case/71/run_0011_ns_v2 にあるとき。
+ (7) case/71 run_0010・run_0011: V5b FAIL (出口コア M 5.502841 / 5.502842)・線 η 0.03 の片振幅 0.0573 %、最大偏差 0.0623 % (許容内) で
+     線だけの合否 FAIL・壁解像 PASS、較正し直しの規則に当たらない (形の誤差の射影 0.624 → 0.612 mm、1.9 % しか減らない)
+     (plan §4.3 の 2026-10-15 の判断どおり)。run_0011 は監視の線・停止の step なので V5c FAIL → back_to_correction・escalate。run_0010 は
+     停止規則 v2 より前の run (線を監視していない・全場 1 枚) なので §5.1 #7a から V5c 判定不能 → incomplete・escalate (規則は直接評価して見る)。
+     run_0011 は環境変数 FORGE_CASE71_RUN_0011 か case/71/run_0011_ns_v2 にあるとき。
+ (9) case/71 run_0014_chain_v2 の写し (h5 は symlink、元の run には書かない; FORGE_CASE71_RUN_0014 で場所を変えられる): 正しい呼び方は
+     今どおり accepted・壁解像 PASS (wall/3@46171)。line_eta 0.06 は incomplete (修正前は accepted)。check_wall_resolution の
+     `--step 46170 --groups wall,missing_wall` 等は判定不能・終了コード 2 (修正前は step 46171 の wall だけで PASS・0)。
 使い方: design/.venv-opt/bin/python design/tests/run_wt_qualify_tests.py  (終了コード 0 全合格 / 1 不合格 / 2 実データを飛ばした)
 """
 import hashlib
@@ -302,17 +311,34 @@ for nm, run, kw, M_want, flow_want in cases:
                          delta_next=kw.get("delta_next"), cli_tols=kw.get("cli_tols"), wall_txt=Path(td) / "wr.txt")
     c = rec["checks"]
     check(f"(7) {nm}: V5b FAIL (出口コア M {M_want})", c["V5b"]["verdict"] == "FAIL" and round(c["V5b"]["M"], 6) == M_want, f"{c['V5b']['M']!r}")
-    check(f"(7) {nm}: V5c FAIL (η 0.03・x 4.0〜7.95 m: 片振幅 0.0573 %、最大偏差 0.0623 % は許容内)",
-          c["V5c"]["verdict"] == "FAIL" and round(c["V5c"]["halfamp_pct"], 4) == 0.0573 and round(c["V5c"]["maxabs_pct"], 4) == 0.0623
+    # run_0010 は停止規則 v2 より前の run (settle_criteria.yaml・STOP_RULE_STATE.json が無い) で、線 η 0.03 を監視しておらず全場も
+    # res_86000 の 1 枚だけ。§5.1 #7a (2026-10-17 codex result M1) から、監視されていない線は全場の系列の準定常 (check_quasisteady) が
+    # STEADY のときだけ合否に進むので、線の値と線だけの合否 (FAIL) は今までどおりで V5c は判定不能になる (期待値の変更の理由)
+    v5c_want = "FAIL" if nm == "run_0011" else "INDETERMINATE"
+    lv = c["V5c"].get("line_verdict", c["V5c"]["verdict"])
+    check(f"(7) {nm}: 線 η 0.03・x 4.0〜7.95 m の値 (片振幅 0.0573 %、最大偏差 0.0623 % は許容内) で線だけの合否 FAIL、V5c {v5c_want}",
+          c["V5c"]["verdict"] == v5c_want and lv == "FAIL" and round(c["V5c"]["halfamp_pct"], 4) == 0.0573 and round(c["V5c"]["maxabs_pct"], 4) == 0.0623
           and c["V5c"]["checks"]["maxabs"] and not c["V5c"]["checks"]["halfamp"] and c["V5c"]["x_range_m"] == [4.0, 7.95] and c["V5c"]["eta"] == 0.03,
-          f"{c['V5c'].get('maxabs_pct')} / {c['V5c'].get('halfamp_pct')}")
+          f"{c['V5c'].get('maxabs_pct')} / {c['V5c'].get('halfamp_pct')} / {c['V5c']['verdict']}")
+    if nm == "run_0010":
+        ser = c["V5c"]["steadiness"]["series"]
+        # 系列は作れない (この run の MAIN_STAGE_STARTED は start_step を持たない旧い形で区間を特定できない; 全場も res_86000 の 1 枚)
+        check("(7) run_0010: 判定不能の理由 = 監視の line_mach が無い・停止の step が無い・全場の系列を作れない → incomplete・escalate",
+              any("line_mach" in g for g in c["V5c"]["steadiness"]["monitor_gaps"]) and any("停止の step" in g for g in c["V5c"]["steadiness"]["monitor_gaps"])
+              and ser["status"] == "INDETERMINATE" and rec["result"] == "incomplete" and rec["next"] == "escalate"
+              and rec["recalibration_rule"] is None, f"{c['V5c'].get('why')}")
     check(f"(7) {nm}: η 0.1 は比較用に併記 (片振幅 0.076 %)", round(c["V5c"]["compare"]["eta0.1"]["halfamp_pct"], 3) == 0.076)
     check(f"(7) {nm}: 壁解像 PASS・計算の成立 {flow_want}", c["wall_resolution"]["verdict"] == "PASS" and c["flow"]["status"] == flow_want,
           f"{c['wall_resolution'].get('verdict_line')} / {c['flow']['status']}")
-    rr = rec["recalibration_rule"]
+    if nm == "run_0011":
+        rr = rec["recalibration_rule"]
+        check(f"(7) {nm}: back_to_correction・escalate (較正し直しの規則に当たらない; plan §4.3 の 2026-10-15 の判断)",
+              rec["result"] == "back_to_correction" and rec["next"] == "escalate" and not rr["apply"], f"{rec['result']} / {rec['next']}")
+    else:
+        # run_0010 は判定不能で規則まで進まないので、線だけの合否で規則を直接評価して (a)〜(c) の値を見る (2026-10-15 の判断の再現)
+        rr = WQ.recalibration_rule(run, c["V5b"], {"verdict": lv}, c["flow"], delta_next=kw.get("delta_next"), prev_run=R08,
+                                   prev_delta_next=R08 / "judge/extract/delta_r_next.csv.gz")
     cnd = rr["conditions"]
-    check(f"(7) {nm}: back_to_correction・escalate (較正し直しの規則に当たらない; plan §4.3 の 2026-10-15 の判断)",
-          rec["result"] == "back_to_correction" and rec["next"] == "escalate" and not rr["apply"], f"{rec['result']} / {rec['next']}")
     check(f"(7) {nm}: (a) 両方を判定・(b) 前の更新で誤差が縮んだ (2.14 → 0.62 mm) は満たし、(c) さらに減らせない (0.62 → 0.61 mm)",
           cnd["a_both_judged"]["ok"] and cnd["b_prev_update_reduced_error"]["ok"] and not cnd["c_further_reducible"]["ok"]
           and round(cnd["b_prev_update_reduced_error"]["prev_max_abs_mm"], 2) == 2.14
@@ -337,10 +363,185 @@ for nm, run, kw, M_want, flow_want in cases:
         rec2 = WQ.qualify(run, CARD, kw.get("problem"), prev_run=R08, prev_delta_next=R08 / "judge/extract/delta_r_next.csv.gz",
                           delta_next=kw.get("delta_next"), cli_tols=tols_new or None, wall_txt=Path(td) / "wr.txt")
     c2 = rec2["checks"]
-    check(f"(7′) {nm}: 新しい既定の公差 (±0.1 %・片振幅 0.1 %) では V5b・V5c とも PASS (値は旧の判定と同じ)",
-          c2["V5b"]["verdict"] == "PASS" and c2["V5c"]["verdict"] == "PASS" and c2["V5b"]["M"] == c["V5b"]["M"]
+    # run_0010 の V5c は上と同じ理由 (監視されていない線・全場 1 枚) で判定不能、線だけの合否が PASS (§5.1 #7a)
+    check(f"(7′) {nm}: 新しい既定の公差 (±0.1 %・片振幅 0.1 %) では V5b・V5c (run_0010 は線だけの合否) とも PASS (値は旧の判定と同じ)",
+          c2["V5b"]["verdict"] == "PASS" and c2["V5c"].get("line_verdict", c2["V5c"]["verdict"]) == "PASS"
+          and c2["V5c"]["verdict"] == ("PASS" if nm == "run_0011" else "INDETERMINATE") and c2["V5b"]["M"] == c["V5b"]["M"]
           and c2["V5c"]["halfamp_pct"] == c["V5c"]["halfamp_pct"] and rec2["tolerances"]["exit_core_M_tol_rel"]["value"] == 1e-3
           and rec2["tolerances"]["line_tol_halfamp_pct"]["value"] == 0.1, f"判定 {rec2['result']} / {rec2['next']}")
+
+# ------------------------------------------------------------------ (8) 線の定常の保証・壁解像の照合 (合成)
+print("== (8) 線の定常の保証 (§5.1 #7a)・壁解像の照合 (§5.1 #7b) (合成)")
+from forge_design.report import nozzle_report as NR  # noqa: E402
+
+v0 = WQ.v5c_line(field(), MD, 0.03, [4.0, 7.95], 2001, 0.1, 0.1)
+SL = {"eta": 0.03, "x_range_m": [4.0, 7.95], "n": 2001, "Md": MD}
+fld0, flow0 = {"step": 46000, "res": "res_46000.h5"}, {"status": "PASS", "stop_step": 46000}
+check("(8) 監視の線・停止の step と同じ → 保証の欠けなし", WQ.line_monitor_gaps(v0, SL, fld0, flow0) == [])
+for nm, sl_, fl_, fw_ in (("η が違う", {**SL, "eta": 0.06}, fld0, flow0), ("x 窓が違う", {**SL, "x_range_m": [4.0, 7.9]}, fld0, flow0),
+                          ("点数が違う", {**SL, "n": 1001}, fld0, flow0), ("監視の line_mach が無い", None, fld0, flow0),
+                          ("停止の step と違う", SL, fld0, {**flow0, "stop_step": 46171}), ("停止の step の記録が無い", SL, fld0, {"status": "UNVERIFIED"})):
+    g = WQ.line_monitor_gaps(v0, sl_, fl_, fw_)
+    check(f"(8) {nm} → 保証の欠け 1 件", len(g) == 1, f"{g}")
+
+
+def series_run(td, steps, *, start=0, stale=(), main_started=True):
+    """全場の名前だけの run (load_field は差し替える)。"""
+    d = Path(td)
+    d.mkdir(parents=True, exist_ok=True)
+    for s in steps:
+        (d / f"res_{s}.h5").write_bytes(b"")
+    if main_started:
+        (d / "MAIN_STAGE_STARTED").write_text(json.dumps({"start_step": start, "res_files_present": list(stale)}))
+    return d
+
+
+def with_fields(fn_of_step, f):
+    """nozzle_report.load_field を step → 合成の場に差し替えて f() を呼ぶ。"""
+    orig = NR.load_field
+    NR.load_field = lambda run_dir, res: fn_of_step(int(res[len("res_"):-len(".h5")]))
+    try:
+        return f()
+    finally:
+        NR.load_field = orig
+
+
+steps8 = [38000, 40000, 42000, 44000, 46000]
+with tempfile.TemporaryDirectory() as td:
+    # 定常: 全場が同じ → 系列 STEADY → 線だけの合否のまま (監視の線と違っても)
+    run = series_run(Path(td) / "steady", steps8)
+    v = WQ.v5c_line(field(), MD, 0.06, [4.0, 7.95], 2001, 0.1, 0.1)
+    with_fields(lambda s: field(), lambda: WQ.line_guarantee(v, SL, fld0, flow0, run, MD, series_dir=run))
+    ser = v["steadiness"]["series"]
+    check("(8) 監視されていない線 (η 0.06)・本段の全場 5 枚が定常 → check_quasisteady STEADY で合否 (PASS) に進む、系列の CSV と VERDICT を記録",
+          v["verdict"] == "PASS" and ser["status"] == "STEADY" and ser["verdicts"] == {"maxabs_pct": "STEADY", "halfamp_pct": "STEADY"}
+          and ser["steps"] == steps8 and Path(ser["csv"]).is_file() and ser["csv_sha256"] == sha(ser["csv"]) and ser["returncode"] == 0
+          and "line_verdict" not in v, f"{ser.get('verdicts')} {ser.get('why')}")
+    # 動いている: 傾きが step ごとに 20 % ずつ増える → DRIFTING → 判定不能 (線だけの合否 PASS は line_verdict に残る)
+    run = series_run(Path(td) / "drift", steps8)
+    v = WQ.v5c_line(field(), MD, 0.06, [4.0, 7.95], 2001, 0.1, 0.1)
+    with_fields(lambda s: field(b_pct_per_m=0.02 * (1.0 + 0.2 * (s - 38000) / 2000)),
+                lambda: WQ.line_guarantee(v, SL, fld0, flow0, run, MD))
+    ser = v["steadiness"]["series"]
+    check("(8) 監視されていない線の系列が動いている → check_quasisteady が STEADY でない → V5c 判定不能 (線だけの合否 PASS を残す)",
+          v["verdict"] == "INDETERMINATE" and v["line_verdict"] == "PASS" and ser["status"] == "NOT_STEADY" and ser["returncode"] != 0
+          and ser["csv"] is None and len(ser["values"]) == 5, f"{ser.get('verdicts')}")
+    # 全場が足りない (本段の開始より前の全場・開始の時に残っていた全場・評価の場より後の全場は数えない)
+    run = series_run(Path(td) / "few", [1000, 44000, 45000, 46000, 48000], start=2000, stale=["res_45000.h5"])
+    v = WQ.v5c_line(field(), MD, 0.06, [4.0, 7.95], 2001, 0.1, 0.1)
+    with_fields(lambda s: field(), lambda: WQ.line_guarantee(v, SL, fld0, flow0, run, MD))
+    ser = v["steadiness"]["series"]
+    check("(8) 本段の全場が 2 枚 (開始前・開始の時に残っていた・評価の場より後を除く) < 4 → 判定不能 (系列を作れない)",
+          v["verdict"] == "INDETERMINATE" and ser["status"] == "INDETERMINATE" and ser["steps"] == [44000, 46000], f"{ser.get('why')}")
+    run = series_run(Path(td) / "nostart", steps8, main_started=False)
+    v = WQ.v5c_line(field(), MD, 0.06, [4.0, 7.95], 2001, 0.1, 0.1)
+    with_fields(lambda s: field(), lambda: WQ.line_guarantee(v, SL, fld0, flow0, run, MD))
+    check("(8) 本段の開始の記録が無い → 系列の区間を特定できず判定不能", v["verdict"] == "INDETERMINATE"
+          and "MAIN_STAGE_STARTED" in v["steadiness"]["series"]["why"])
+    run = series_run(Path(td) / "noend", [38000, 40000, 42000, 44000])
+    v = WQ.v5c_line(field(), MD, 0.06, [4.0, 7.95], 2001, 0.1, 0.1)
+    with_fields(lambda s: field(), lambda: WQ.line_guarantee(v, SL, fld0, flow0, run, MD))
+    check("(8) 系列が評価の場の step で終わらない → 判定不能", v["verdict"] == "INDETERMINATE" and "終わらない" in v["steadiness"]["series"]["why"])
+    # 監視の線と同じで停止の step → 系列を作らず今どおり
+    run = series_run(Path(td) / "mon", [])
+    v = WQ.v5c_line(field(), MD, 0.03, [4.0, 7.95], 2001, 0.1, 0.1)
+    WQ.line_guarantee(v, SL, fld0, flow0, run, MD)
+    check("(8) 監視の線と同じ・停止の step → 今どおり (系列なし、保証の根拠は停止規則の監視)", v["verdict"] == "PASS" and "series" not in v["steadiness"])
+    # 停止の step と違う場 (線は同じ) も系列が要る
+    v = WQ.v5c_line(field(), MD, 0.03, [4.0, 7.95], 2001, 0.1, 0.1)
+    WQ.line_guarantee(v, SL, {"step": 44000}, flow0, run, MD)
+    check("(8) 評価の場の step が停止の step と違う (線は同じ) → 系列が作れず判定不能", v["verdict"] == "INDETERMINATE" and v["line_verdict"] == "PASS")
+
+# 壁解像の照合: ツールの出力を差し替えて (偽のツール) 呼び出し側の照合だけを見る
+with tempfile.TemporaryDirectory() as td:
+    td = Path(td)
+    run = td / "run_w"
+    run.mkdir()
+    (run / "bcondConfig.yaml").write_text("inlet: {physID: 1, kind: inlet_Pressure}\nwall: {physID: 3, kind: wall_isothermal}\n"
+                                          "wall2: {physID: 5, kind: wall_adiabatic}\naxis: {physID: 4, kind: axis}\n")
+    tools = td / "tools"
+    tools.mkdir()
+    orig_tools = WQ.TOOLS
+    WQ.TOOLS = tools
+
+    def fake_wr(out, rc=0, step=46171, stop=46171):
+        (tools / "check_wall_resolution.py").write_text(f"import sys\nprint({out!r})\nsys.exit({rc})\n")
+        return WQ.wall_resolution(run, step, None, stop_step=stop)
+
+    PASS_TXT = "最大 y1+ = 0.999 ; **目標 1 を超える面積割合 最大 0.0 % (許容 2 %)**\nVERDICT: PASS (壁解像)"
+    try:
+        r = fake_wr("  wall step 46171\n\nEVALUATED: wall/3@46171, wall2/5@46171\n" + PASS_TXT)
+        check("(8) 壁解像: 全部の壁 (bcond の wall*)・要求の step・停止の step で評価した PASS → PASS",
+              r["verdict"] == "PASS" and r["evaluated"] == [{"name": "wall", "physID": 3, "step": 46171}, {"name": "wall2", "physID": 5, "step": 46171}]
+              and r["groups"] == ["wall", "wall2"], r.get("why"))
+        for nm, out, kw in (("EVALUATED 行が無い (照合できない、旧いツールの出力)", PASS_TXT, {}),
+                            ("要求した壁 wall2 を評価していない", "EVALUATED: wall/3@46171\n" + PASS_TXT, {}),
+                            ("要求した step 46170 でない出力 (46171) を評価した (最新への代え)", "EVALUATED: wall/3@46171, wall2/5@46171\n" + PASS_TXT,
+                             {"step": 46170, "stop": None}),
+                            ("bcond と違う physID の出力を評価した", "EVALUATED: wall/9@46171, wall2/5@46171\n" + PASS_TXT, {}),
+                            ("要求していない壁を評価した", "EVALUATED: wall/3@46171, wall2/5@46171, extra/7@46171\n" + PASS_TXT, {}),
+                            ("評価した step 46000 が停止の step 46171 でない", "EVALUATED: wall/3@46000, wall2/5@46000\n" + PASS_TXT,
+                             {"step": 46000})):
+            r = fake_wr(out, **kw)
+            check(f"(8) 壁解像: ツールは PASS だが{nm} → 判定不能", r["verdict"] == "INDETERMINATE" and r["tool_verdict"] == "PASS", r.get("why"))
+        r = fake_wr("EVALUATED: wall/3@46171\n" + PASS_TXT.replace("PASS (壁解像)", "FAIL (目標超過)"), rc=1)
+        check("(8) 壁解像: ツールの FAIL でも壁がそろわなければ判定不能", r["verdict"] == "INDETERMINATE" and r["tool_verdict"] == "FAIL")
+        r = fake_wr("VERDICT: INDETERMINATE (判定不能: 対象の壁・step の出力がそろわない)", rc=2)
+        check("(8) 壁解像: ツールの判定不能はそのまま判定不能", r["verdict"] == "INDETERMINATE" and "tool_verdict" not in r)
+    finally:
+        WQ.TOOLS = orig_tools
+
+# ------------------------------------------------------------------ (9) 実データ run_0014 (codex result M1・M2 の再現)
+print("== (9) case/71 run_0014_chain_v2 (写しで; codex result 2026-10-17 の 1・2)")
+R14 = Path(os.environ.get("FORGE_CASE71_RUN_0014", C71 / "run_0014_chain_v2"))
+PROB14 = C71 / "problem_m55_p5_settle_v2.yaml"
+need = [R14 / "prepare_info.json", R14 / "nozzle.h5", R14 / "res_46171.h5", R14 / "res_wall_3_46171.h5", R14 / "res_wall_3_46000.h5",
+        R14 / "deliverables" / "MANIFEST.json", PROB14, CARD]
+if not all(p.is_file() for p in need):
+    SKIPPED.append(f"(9) run_0014 ({R14} に run か成果物が無い)")
+else:
+    import shutil
+    import subprocess
+    with tempfile.TemporaryDirectory() as td:
+        run = Path(td) / R14.name           # 写し (h5・xmf は symlink; run_settle_realdata_tests.copy_run と同じ) — 元の run には書かない
+        run.mkdir()
+        for f in R14.iterdir():
+            if f.is_dir():
+                continue
+            if f.suffix in (".h5", ".xmf"):
+                (run / f.name).symlink_to(f.resolve())
+            else:
+                shutil.copy2(f, run / f.name)
+        common = dict(deliverables=R14 / "deliverables", wall_txt=Path(td) / "wr.txt", series_dir=Path(td))
+        rec = WQ.qualify(run, CARD, PROB14, **common)
+        c = rec["checks"]
+        check("(9) 正しい呼び方 (停止の step 46171・監視の線 η 0.03) は今どおり accepted・V5c PASS (停止規則の監視)・壁解像 PASS (wall/3@46171)",
+              rec["result"] == "accepted" and c["V5c"]["verdict"] == "PASS" and "series" not in c["V5c"]["steadiness"]
+              and c["wall_resolution"]["verdict"] == "PASS" and c["wall_resolution"]["evaluated"] == [{"name": "wall", "physID": 3, "step": 46171}]
+              and round(c["V5c"]["maxabs_pct"], 6) == 0.062305 and round(c["V5c"]["halfamp_pct"], 6) == 0.057285,
+              f"{rec['result']} / {rec['missing']}")
+        rec = WQ.qualify(run, CARD, PROB14, cli_tols={"line_eta": 0.06}, **common)
+        c = rec["checks"]
+        check("(9) M1 の再現: line_eta 0.06 (監視していない線) → V5c 判定不能 (全場 1 枚で系列を作れない)・incomplete・escalate "
+              "(修正前は accepted; 線だけの合否 PASS・最大偏差 0.0619 %・片振幅 0.0615 %)",
+              rec["result"] == "incomplete" and rec["next"] == "escalate" and c["V5c"]["verdict"] == "INDETERMINATE" and c["V5c"]["line_verdict"] == "PASS"
+              and round(c["V5c"]["maxabs_pct"], 4) == 0.0619 and round(c["V5c"]["halfamp_pct"], 4) == 0.0615
+              and c["V5c"]["steadiness"]["series"]["steps"] == [46171], f"{rec['result']} / {c['V5c'].get('why')}")
+        # 停止の step と違う step の壁解像 (46000 は全場が無く vis_lam を引けないのでツール自身が判定不能になる; 照合は停止の step を
+        # 46000 と偽って、ツールの PASS (46171) を呼び出し側が拒むことで見る)
+        wr = WQ.wall_resolution(run, 46171, None, stop_step=46000)
+        check("(9) 壁解像: ツールは step 46171 で PASS だが停止の step (46000 と仮定) でない → 判定不能",
+              wr["verdict"] == "INDETERMINATE" and wr["tool_verdict"] == "PASS" and "停止の step" in wr["why"], wr.get("why"))
+        cwr = str(WQ.TOOLS / "check_wall_resolution.py")
+        for args, nm in ((["--step", "46170", "--groups", "wall,missing_wall"], "M2 の再現: 無い step・無い壁"),
+                         (["--step", "46170", "--groups", "wall"], "無い step (最新の 46171 に代えない)"),
+                         (["--step", "46171", "--groups", "wall,missing_wall"], "無い壁の名前")):
+            r = subprocess.run([sys.executable, cwr, str(run), *args, "--weight", "area"], capture_output=True, text=True)
+            check(f"(9) check_wall_resolution {' '.join(args)} ({nm}) → 判定不能・終了コード 2 (修正前は step 46171 の wall だけで PASS・0)",
+                  r.returncode == 2 and "VERDICT: INDETERMINATE" in r.stdout and "EVALUATED" not in r.stdout, r.stdout.strip().splitlines()[-1])
+        r = subprocess.run([sys.executable, cwr, str(run), "--step", "46171", "--groups", "wall", "--weight", "area"], capture_output=True, text=True)
+        check("(9) check_wall_resolution --step 46171 --groups wall → PASS・0・EVALUATED: wall/3@46171 (今どおり)",
+              r.returncode == 0 and "VERDICT: PASS" in r.stdout and "EVALUATED: wall/3@46171" in r.stdout, r.stdout.strip().splitlines()[-1])
 
 for s in SKIPPED:
     print("skip " + s)

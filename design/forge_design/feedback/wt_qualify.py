@@ -19,8 +19,13 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
     許容 0.1 %・0.1 % (plan §6 V5c; 片振幅は 2026-10-16 ユーザ決定、前は 0.05 %)。η 0.1 と軸 (η 0) は比較用に併記 (判定に使わない)。補間に軸の節点が重み > 1e−6 で入る
     (第 1 層の η が線より上) か、窓が格子の外・非有限なら判定不能 (plan §6 V5c、codex M3)。
     **この量は「近軸の線 (η) の一様性」であって試験部全体の一様性ではない** (plan §6 V5c)。
+    線の定常の保証 (plan §5.1 #7a、2026-10-17 codex result M1): 評価の線 (η・x 窓・点数) が run の settle_criteria.yaml の監視の
+    line_mach と違う・line_mach が基準に無い・評価の場の step が停止の step と違う、のどれかなら判定不能 (→ incomplete)。ただし
+    本段の全場 (MAIN_STAGE_STARTED の start_step < N ≤ 評価の場の step) の系列の最大偏差・片振幅を `check_quasisteady.py --series-csv`
+    が両方 STEADY と判定したときだけ合否に進める (VERDICT・系列の CSV を記録)。全場が 4 枚未満なら判定不能。
   - 壁解像: `check_wall_resolution.py <run> --step <場の step> --groups <bcond の wall* 全部> --weight area` の VERDICT
-    (y₁⁺ > 1 の面積 ≤ 2 %、plan §6 V4)。
+    (y₁⁺ > 1 の面積 ≤ 2 %、plan §6 V4)。ツールが評価した壁と step (EVALUATED 行) が bcond の全部の壁・場の step・停止の step と
+    一致しなければ判定不能 (plan §5.1 #7b)。
   - 計算の成立: `settle_criteria.yaml` のある run は停止規則 v2 の REACHED と停止の step の再評価 SETTLED、旧方式は
     `STOP_RULE_STATE.json` の REACHED。状態が無い run (記録の写し等) は UNVERIFIED (accepted にも自動の較正し直しにもしない)。
   - 寸法の関門と成果物: `<run>/deliverables/` の `DIMENSIONS.json` (verdict PASS、カードを渡したらその sha256 と一致) と `MANIFEST.json`
@@ -51,7 +56,7 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
       [--prev-run PREV_RUN] [--iteration K --max-iterations N] [--recalibrations-done R]
       [--delta-next CSV] [--prev-delta-next CSV] [--step S] [--deliverables DIR] [--out-dir DIR | --no-write] [--json]
 出力 (`--out-dir`、既定 `<run>/wt_qualify/`): `WT_QUALIFICATION.json`・`check_wall_resolution.txt`、recalibrate なら
-`contur_overrides.yaml` (新しい係数のカードの overrides の断片)。
+`contur_overrides.yaml` (新しい係数のカードの overrides の断片)、監視されていない V5c の線の系列を作ったら `v5c_line_series.csv`。
 終了コード: 0 accepted、2 back_to_correction で recalibrate、3 escalate (back_to_correction・rejected)、4 incomplete、1 入力の不備。
 """
 from __future__ import annotations
@@ -298,14 +303,131 @@ def v5c_line(F: dict, Md: float, eta: float, x_range_m, n: int, tol_maxabs: floa
     return rec
 
 
+# ------------------------------------------------------------------ V5c の線の定常の保証 (§5.1 #7a)
+def line_monitor_gaps(v5c: dict, settle_line: dict | None, fld: dict, flow: dict) -> list[str]:
+    """V5c の線と場が停止規則の監視で保証されていない理由 (空 = 保証される: 監視の line_mach と同じ線 (η・x 窓・点数) で、
+    場が停止の step)。2026-10-17 codex result M1: 違っても警告だけで accepted にできた (run_0014 に line_eta 0.06)。"""
+    why = []
+    if settle_line is None:
+        why.append("監視の量 line_mach が run の settle_criteria.yaml に無い (停止規則が線を監視していない)")
+    elif "eta" in v5c:
+        same_eta = abs(float(settle_line["eta"]) - float(v5c["eta"])) <= 1e-12
+        same_x = all(abs(float(a) - float(b)) <= 1e-9 for a, b in zip(settle_line["x_range_m"], v5c["x_range_m"]))
+        same_n = int(settle_line["n"]) == int(v5c["n"])
+        if not (same_eta and same_x and same_n):
+            why.append(f"評価の線 (η {v5c['eta']}, x {v5c['x_range_m']} m, {v5c['n']} 点) が監視の line_mach (η {settle_line['eta']}, "
+                       f"x {settle_line['x_range_m']} m, {settle_line['n']} 点) と違う")
+    stop = flow.get("stop_step")
+    if not isinstance(stop, int):
+        why.append("停止の step の記録が無い (STOP_RULE_STATE.json の stop_step)")
+    elif stop != int(fld["step"]):
+        why.append(f"評価の場の step {fld['step']} が停止の step {stop} と違う")
+    return why
+
+
+def main_stage_fields(run_dir, end_step: int) -> dict:
+    """本段の全場 res_<N>.h5 (本段の開始の記録 MAIN_STAGE_STARTED の start_step < N ≤ end_step、開始の時に残っていたファイルを除く)。
+    戻り: {steps, start_step, why (作れないとき)}。"""
+    run_dir = Path(run_dir)
+    p = run_dir / "MAIN_STAGE_STARTED"
+    if not p.is_file():
+        return {"steps": [], "why": "本段の開始の記録 MAIN_STAGE_STARTED が無い (系列の区間を特定できない)"}
+    try:
+        ms = json.loads(p.read_text())
+    except ValueError as e:
+        return {"steps": [], "why": f"MAIN_STAGE_STARTED を読めない ({e})"}
+    s0 = ms.get("start_step")
+    if not isinstance(s0, int):
+        return {"steps": [], "why": "MAIN_STAGE_STARTED に start_step が無い (系列の区間を特定できない)"}
+    stale = {Path(str(f)).name for f in (ms.get("res_files_present") or [])}
+    steps = [s for s in _res_steps(run_dir) if s0 < s <= int(end_step) and f"res_{s}.h5" not in stale]
+    return {"steps": steps, "start_step": s0}
+
+
+QS_COLS = ("maxabs_pct", "halfamp_pct")   # 系列で判定する量 = V5c が合否に使う 2 量
+QS_MIN_SNAPS = 4                          # check_quasisteady.py の --min-snaps の既定と同じ (明示して渡す)
+
+
+def line_series_steadiness(run_dir, fld: dict, v5c: dict, Md: float, out_dir=None) -> dict:
+    """監視されていない V5c の線について、本段の全場の時系列 (評価の場で終わる) の最大偏差・片振幅を
+    `check_quasisteady.py --series-csv` で判定する。status: STEADY / NOT_STEADY / INDETERMINATE (系列を作れない)。
+    系列の CSV は out_dir (無ければ一時ディレクトリで、値は記録に埋め込む) に書く。"""
+    import csv
+    import hashlib
+    import tempfile
+    from ..report.nozzle_report import load_field
+    run_dir = Path(run_dir)
+    rec = {"tool": "solver_density_cuda/tools/check_quasisteady.py --series-csv", "cols": list(QS_COLS), "min_snaps": QS_MIN_SNAPS}
+    ms = main_stage_fields(run_dir, int(fld["step"]))
+    rec["steps"] = ms["steps"]
+    if ms.get("why"):
+        rec.update(status="INDETERMINATE", why=ms["why"])
+        return rec
+    if not ms["steps"] or ms["steps"][-1] != int(fld["step"]):
+        rec.update(status="INDETERMINATE", why=f"本段の全場の系列が評価の場 (step {fld['step']}) で終わらない")
+        return rec
+    if len(ms["steps"]) < QS_MIN_SNAPS:
+        rec.update(status="INDETERMINATE", why=f"本段の全場が {len(ms['steps'])} 枚 (< {QS_MIN_SNAPS}) で系列を作れない "
+                                               f"(step {ms['start_step']} < N ≤ {fld['step']}: {ms['steps']})")
+        return rec
+    rows = []
+    for s in ms["steps"]:
+        r = v5c_line(load_field(run_dir, f"res_{s}.h5"), Md, float(v5c["eta"]), v5c["x_range_m"], int(v5c["n"]),
+                     float(v5c["tol_maxabs_pct"]), float(v5c["tol_halfamp_pct"]))
+        rows.append({"step": s, **{c: r.get(c, float("nan")) for c in QS_COLS}})
+    rec["values"] = rows
+    with tempfile.TemporaryDirectory() as td:
+        od = Path(out_dir) if out_dir is not None else Path(td)
+        csv_path = od / "v5c_line_series.csv"
+        with open(csv_path, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["step", *QS_COLS])
+            w.writeheader()
+            w.writerows(rows)
+        cmd = [sys.executable, str(TOOLS / "check_quasisteady.py"), "--series-csv", str(csv_path), "--series-cols", ",".join(QS_COLS),
+               "--min-snaps", str(QS_MIN_SNAPS)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        rec.update(csv=str(csv_path) if out_dir is not None else None, csv_sha256=hashlib.sha256(csv_path.read_bytes()).hexdigest(),
+                   cmd=" ".join(cmd[1:]), returncode=r.returncode, output=(r.stdout + r.stderr)[-3000:])
+    txt = r.stdout + r.stderr
+    verd = {c: (m.group(1) if (m := re.search(rf"^\s+{re.escape(c)}\s*:.*\s(\S+)\s*$", txt, re.M)) else None) for c in QS_COLS}
+    rec["verdicts"] = verd
+    ok = r.returncode == 0 and all(v == "STEADY" for v in verd.values())
+    rec["status"] = "STEADY" if ok else "NOT_STEADY"
+    if not ok:
+        rec["why"] = f"check_quasisteady の判定 {verd} (終了コード {r.returncode})"
+    return rec
+
+
+def line_guarantee(v5c: dict, settle_line: dict | None, fld: dict, flow: dict, run_dir, Md: float, series_dir=None) -> dict:
+    """V5c の線の定常の保証 (§5.1 #7a; v5c をその場で書き換えて返す): 監視の線と違う・監視の量が無い・停止の step でない、のどれかなら
+    判定不能 (線だけの合否は line_verdict に残す)。ただし本段の全場の系列で check_quasisteady が STEADY を返したときだけ合否に進める
+    (その VERDICT と系列のファイルを v5c["steadiness"] に記録)。v5c が既に判定不能 (窓・軸の重み・非有限) なら何もしない。"""
+    if v5c.get("verdict") not in ("PASS", "FAIL"):
+        return v5c
+    gaps = line_monitor_gaps(v5c, settle_line, fld, flow)
+    if not gaps:
+        v5c["steadiness"] = {"basis": "停止規則の監視 (settle_criteria.yaml の line_mach と同じ線、停止の step の場)"}
+        return v5c
+    qs = line_series_steadiness(run_dir, fld, v5c, Md, series_dir)
+    v5c["steadiness"] = {"basis": "本段の全場の系列の check_quasisteady (監視で保証されない)", "monitor_gaps": gaps, "series": qs}
+    if qs["status"] != "STEADY":
+        v5c["line_verdict"] = v5c["verdict"]
+        v5c.update(verdict="INDETERMINATE",
+                   why="線の定常を確かめていない: " + "; ".join(gaps) + f" — 全場の系列の準定常 {qs['status']} ({qs.get('why')})")
+    return v5c
+
+
 # ------------------------------------------------------------------ 壁解像・成果物
-def wall_resolution(run_dir, step: int, out_txt=None) -> dict:
-    """`check_wall_resolution.py --step --groups <wall*> --weight area` を回して VERDICT を読む。"""
+def wall_resolution(run_dir, step: int, out_txt=None, stop_step=None) -> dict:
+    """`check_wall_resolution.py --step --groups <wall*> --weight area` を回して VERDICT を読む。PASS・FAIL でも、ツールが評価した
+    壁と step (出力の EVALUATED 行) が要求した全部の壁 (bcond の名前・physID)・要求した step・停止の step (あれば) と一致しなければ
+    判定不能にする (2026-10-17 codex result M2: ツールが最新の出力に代えた・存在しない壁を飛ばした PASS を受理していた)。"""
     run_dir = Path(run_dir)
     bc = yaml.safe_load((run_dir / "bcondConfig.yaml").read_text()) or {}
     walls = [k for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("wall")]
     if not walls:
         return {"verdict": "INDETERMINATE", "why": "bcondConfig に no-slip 壁 (kind wall*) が無い"}
+    want_pid = {k: (int(bc[k]["physID"]) if bc[k].get("physID") is not None else None) for k in walls}
     cmd = [sys.executable, str(TOOLS / "check_wall_resolution.py"), str(run_dir), "--step", str(int(step)), "--groups", ",".join(walls),
            "--weight", "area"]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -320,6 +442,31 @@ def wall_resolution(run_dir, step: int, out_txt=None) -> dict:
     mm = re.search(r"目標 ([0-9.eE+-]+) を超える面積割合 最大 ([0-9.]+) % \(許容 ([0-9.eE+-]+) %\)", txt)
     if mm:
         out.update(target=float(mm.group(1)), over_area_pct=float(mm.group(2)), over_area_allow_pct=float(mm.group(3)))
+    if out["verdict"] in ("PASS", "FAIL"):
+        # 評価した壁と step の照合 (ツールの出力の EVALUATED 行; 書式 名前/physID@step)
+        ev = re.search(r"^EVALUATED: (.*)$", txt, re.M)
+        got = [(g.group(1), int(g.group(2)), int(g.group(3))) for g in re.finditer(r"([^\s,/]+)/(\d+)@(\d+)", ev.group(1))] if ev else []
+        out["evaluated"] = [{"name": n, "physID": p, "step": s} for n, p, s in got]
+        probs = []
+        if not got:
+            probs.append("ツールの出力に評価した壁と step (EVALUATED 行) が無い")
+        names = [n for n, _, _ in got]
+        miss = [w for w in walls if w not in names]
+        extra = sorted({n for n in names if n not in walls})
+        if miss:
+            probs.append(f"要求した壁 {miss} を評価していない")
+        if extra:
+            probs.append(f"要求していない壁 {extra} を評価した")
+        bad_pid = [f"{n} (physID {p}、bcond は {want_pid[n]})" for n, p, _ in got if n in want_pid and want_pid[n] is not None and p != want_pid[n]]
+        if bad_pid:
+            probs.append(f"bcond と違う physID の出力を評価した {bad_pid}")
+        bad_step = sorted({s for _, _, s in got if s != int(step)})
+        if bad_step:
+            probs.append(f"要求した step {int(step)} でない出力 (step {bad_step}) を評価した")
+        if isinstance(stop_step, int) and int(step) != stop_step:
+            probs.append(f"評価した step {int(step)} が停止の step {stop_step} でない (V4 の判定ではない)")
+        if probs:
+            out.update(tool_verdict=out["verdict"], verdict="INDETERMINATE", why="; ".join(probs))
     if out["verdict"] == "INDETERMINATE" and not m:
         out["tail"] = txt[-1500:]
     return out
@@ -502,8 +649,9 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
 def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None, prev_delta_next=None, step=None, deliverables=None,
             iteration=None, max_iterations=None, recalibrations_done: int = 0, max_recalibrations: int = MAX_RECALIBRATIONS,
             recal_min_reduction: float = RECAL_MIN_REDUCTION, optional_parts=(), cli_tols: dict | None = None,
-            x_far_m: float = CC.X_FAR_M, wall_txt=None) -> dict:
-    """1 本の NS run を判定して記録の dict を返す (ファイルは書かない; 壁解像の出力だけ wall_txt に書く)。"""
+            x_far_m: float = CC.X_FAR_M, wall_txt=None, series_dir=None) -> dict:
+    """1 本の NS run を判定して記録の dict を返す (ファイルは書かない; 壁解像の出力だけ wall_txt に、監視されていない V5c の線の
+    全場の系列だけ series_dir (無ければ一時ディレクトリ) に書く)。"""
     from ..report.nozzle_report import load_field
     run_dir = Path(run_dir).resolve()
     info = json.loads((run_dir / "prepare_info.json").read_text())
@@ -541,7 +689,8 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
                          "線の定常は停止規則の判定で保証されていない")
     if isinstance(flow.get("stop_step"), int) and flow["stop_step"] != fld["step"]:
         warns.append(f"判定した場 (step {fld['step']}) が停止規則の止めた場 (step {flow['stop_step']}) でない")
-    wr = wall_resolution(run_dir, fld["step"], wall_txt)
+    line_guarantee(v5c, sl, fld, flow, run_dir, Md, series_dir)
+    wr = wall_resolution(run_dir, fld["step"], wall_txt, stop_step=flow.get("stop_step"))
     dl = deliverables_check(run_dir, deliverables, card, optional_parts)
     checks = {"flow": flow, "V5b": v5b, "V5c": v5c, "wall_resolution": wr, "deliverables": dl}
     dec = decide(flow, v5b, v5c, wr, dl, iteration=iteration, max_iterations=max_iterations,
@@ -596,9 +745,16 @@ def summary_lines(rec: dict) -> list[str]:
                  f"片振幅 {v5c['halfamp_pct']:.4f} % (≤ {v5c['tol_halfamp_pct']}) → {v5c['verdict']}  [窓 {rec['tolerances']['line_x_range_m']['source']}]")
         for k, v in (v5c.get("compare") or {}).items():
             L.append(f"    比較 {k}: 最大偏差 {v['maxabs_pct']:.4f} %・片振幅 {v['halfamp_pct']:.4f} % (判定に使わない)")
+        stq = v5c.get("steadiness") or {}
+        if stq:
+            ser = stq.get("series") or {}
+            L.append(f"    線の定常: {stq['basis']}" + (f" → {ser.get('status')} (系列 {ser.get('csv') or ('一時ファイル' if ser.get('csv_sha256') else '作っていない')}; "
+                                                       f"{ser.get('verdicts') or ser.get('why')})" if ser else ""))
+        if v5c["verdict"] == "INDETERMINATE":
+            L.append(f"    判定不能の理由: {v5c.get('why')}" + (f" (線だけの合否 {v5c['line_verdict']})" if v5c.get("line_verdict") else ""))
     else:
         L.append(f"V5c → {v5c['verdict']} ({v5c.get('why')})")
-    L.append(f"壁解像 → {wr['verdict']} ({wr.get('verdict_line')})")
+    L.append(f"壁解像 → {wr['verdict']} ({wr.get('verdict_line')})" + (f" — 判定不能: {wr.get('why')}" if wr.get("tool_verdict") else ""))
     L.append(f"計算の成立 → {fl['status']}" + (f" ({fl.get('why')})" if fl.get("why") else ""))
     L.append(f"寸法の関門 → {dl.get('dimensions', {}).get('status')}・成果物 → {dl['status']}" + (f" ({dl.get('why')})" if dl.get("why") else ""))
     for m in rec["missing"]:
@@ -658,7 +814,7 @@ def main(argv=None) -> int:
                       recalibrations_done=a.recalibrations_done, max_recalibrations=a.max_recalibrations,
                       recal_min_reduction=a.recal_min_reduction,
                       optional_parts=tuple(s for s in a.optional_parts.split(",") if s), cli_tols=cli,
-                      wall_txt=None if od is None else od / "check_wall_resolution.txt")
+                      wall_txt=None if od is None else od / "check_wall_resolution.txt", series_dir=od)
     except (ValueError, OSError, KeyError) as e:
         if od is not None and od.is_dir() and not any(od.iterdir()):
             od.rmdir()
