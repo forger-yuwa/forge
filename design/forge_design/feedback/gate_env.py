@@ -3,8 +3,8 @@
 判定 (`wt_qualify --approval`) を、承認の記録に書いた版 (commit) の別の checkout と、承認のときに記録した Python・外部の道具で回す。
 作業側の作業ツリー・環境変数 (`PYTHONPATH`・`FORGE_*` の道具の選択) は判定に効かない。
 
-- **checkout**: `~/.cache/forge-gates/<commit>` に `git worktree add --detach` で作る (`design`・`solver_density_cuda/tools` だけの sparse checkout)。判定の前に、HEAD が承認の commit であること、
-  追跡しているファイルに変更が無いこと、コードの探索先 (`design/forge_design`・`solver_density_cuda/tools`) に未追跡・ignored のファイルが
+- **checkout**: `~/.cache/forge-gates/<commit>` に `git worktree add --detach` で作る (`design`・`solver_density_cuda/tools`・`solver_density_cuda/data` だけの sparse checkout)。判定の前に、HEAD が承認の commit であること、
+  追跡しているファイルに変更が無いこと、コードと物性の DB の置き場 (`design/forge_design`・`solver_density_cuda/tools`・`solver_density_cuda/data`) に未追跡・ignored のファイルが
   無いことを確かめる (Python は -B で回し、バイトコードを書かない)。
 - **Python の指紋** (`python_fingerprint`): 実行ファイルの実体と sha256、版、`sys.prefix`、配布物ごとの名前・版・RECORD の sha256・editable の有無。
   editable の配布物があれば止める (作業ツリーを参照しうる)。`pip freeze` は使わない (別の Python・外部の実行ファイルを捉えない)。
@@ -33,8 +33,8 @@ from pathlib import Path
 
 GATE_ROOT_ENV = "FORGE_GATE_ROOT"
 DEFAULT_GATE_ROOT = Path.home() / ".cache" / "forge-gates"
-CODE_DIRS = ("design/forge_design", "solver_density_cuda/tools")
-CHECKOUT_PATHS = ("design", "solver_density_cuda/tools")      # sparse checkout に入れる所
+CODE_DIRS = ("design/forge_design", "solver_density_cuda/tools", "solver_density_cuda/data")   # 未追跡・ignored のファイルを見る所
+CHECKOUT_PATHS = ("design", "solver_density_cuda/tools", "solver_density_cuda/data")   # sparse checkout に入れる所 (data は物性の DB)
 MARK_ENV, CHECKOUT_ENV = "FORGE_GATE_ENV", "FORGE_GATE_CHECKOUT"
 PASS_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ")   # 判定に渡してよい環境変数 (道具の選択は下の TOOLS で決める)
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"

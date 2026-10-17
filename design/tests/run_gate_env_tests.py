@@ -8,7 +8,8 @@
   正例
   (P1) 承認の記録 (判定の Python・外部の道具つき) の check が OK (sparse checkout を作る)
   (P2) probe: 判定専用の環境で forge_design の import の元が checkout の中、印の検査が通る
-  (P3) judge: wt_qualify --approval が判定専用の環境で門を通る (固定の入力には場が無いので、その先の場の読み込みで止まる — 門の誤りでないこと)
+  (P3) judge: wt_qualify --approval が判定専用の環境で門を通る (固定の入力には場が無いので、その先の場の読み込みで止まる —
+       門の誤りでも checkout の欠け (物性の DB など) でもないこと)
   負例
   (N1) 同じ HEAD・追跡ファイルでも、判定の Python が違う (/usr/bin/python3: prefix・配布物) → check が MISMATCH
   (N2) 印の無い環境 (この試験のプロセス) の assert_in_gate_env → 止める
@@ -94,8 +95,9 @@ try:
     r = GE.check(apath)
     check("(P1) check が OK (sparse checkout を作る)", r["status"] == "OK" and Path(r["checkout"]) == co, str(r["problems"])[:300])
     sz = sum(f.stat().st_size for f in co.rglob("*") if f.is_file() and ".git" not in f.parts)
-    check("(P1) checkout は design と solver_density_cuda/tools だけ (50 MB 未満)",
-          sz < 50e6 and (co / "design" / "forge_design").is_dir() and not (co / "case").exists(), f"{sz / 1e6:.1f} MB")
+    check("(P1) checkout は design・solver_density_cuda/tools・data だけ (50 MB 未満)",
+          sz < 50e6 and (co / "design" / "forge_design").is_dir() and (co / "solver_density_cuda" / "data" / "species").is_dir()
+          and not (co / "case").exists(), f"{sz / 1e6:.1f} MB")
     pr = GE.probe(apath)
     check("(P2) probe: import の元が checkout の中、印の検査が通る",
           pr["status"] == "OK" and pr["forge_design"].startswith(str(co)) and pr["assert"]["commit"] == head,
@@ -106,8 +108,9 @@ try:
                         str(run), "--card", str(card), "--problem", str(prob), "--iteration", "1", "--no-write"],
                        capture_output=True, text=True, cwd=str(HERE.parent))
     gate_words = ("判定専用の環境", "checkout", "import の元", "承認の記録と違う", "CLI の公差")
-    check("(P3) judge: 門を通り、その先 (場の読み込み) で止まる",
-          q.returncode != 0 and "止めた" in q.stderr and not any(w in q.stderr for w in gate_words),
+    check("(P3) judge: 門を通り、その先の場の読み込み (res_*.h5 が無い) で止まる",
+          q.returncode != 0 and "止めた" in q.stderr and not any(w in q.stderr for w in gate_words)
+          and "No such file" not in q.stderr and ("res_" in q.stderr or "全場" in q.stderr),
           q.stderr.strip()[-300:])
 
     print("== 負例")
