@@ -55,6 +55,9 @@ import numpy as np
 import yaml
 
 CARD_FORMAT = "forge.wt_card/v1"
+CARD_FORMAT_V2 = "forge.wt_card/v2"   # v1 + 承認の節 (qualification・budget・mesh_limits・run_policy・requirements_without_gate・sources・approval);
+                                      # plan tooling-design-orchestrator §4.7.1。足した節は問題 YAML の生成に使わない
+CARD_FORMATS = (CARD_FORMAT, CARD_FORMAT_V2)
 GENERATOR = "forge_design.intake.wt_card"
 RECIPE_DIR = Path(__file__).resolve().parent / "recipes"
 DEFAULT_RECIPE = "axismach_explore_v1"
@@ -110,6 +113,12 @@ MKNOT_EVAL_PEAK_SOURCE = ("2026-10-15 AWS B (g5.xlarge)、feature/mknot-fast f7e
 # カードのキー
 _TOP_REQUIRED = ("format", "name", "gas", "conditions", "M_exit", "throat", "inlet", "divergent_length_m", "wall")
 _TOP_OPTIONAL = ("p_ambient", "tolerances", "recipe", "overrides")
+# 版 2 だけが書ける節 (plan tooling-design-orchestrator §4.7.1 (3))
+_TOP_V2 = ("qualification", "budget", "mesh_limits", "run_policy", "requirements_without_gate", "sources", "approval")
+QUALIFICATION_KEYS = ("exit_core_M_tol_rel", "line_eta", "line_x_range_m", "line_n", "line_tol_maxabs_pct", "line_tol_halfamp_pct",
+                      "optional_parts")
+SOURCE_KINDS = ("user", "recipe_default", "derived", "proposal")
+REQ_NO_GATE_KEYS = ("name", "method", "tolerance", "evidence", "judge")
 # overrides で上書きできる節と、カードの値から決まるので上書きできないキー (カードの該当キーを直す)
 _OVERRIDE_SECTIONS = ("gas", "geometry", "mesh", "mesh_euler", "evaluate", "deltastar_initializer")
 _OVERRIDE_FORBIDDEN = ("gas.model", "gas.species", "gas.composition_basis",
@@ -284,12 +293,17 @@ def validate_card(card, card_dir=None) -> dict:
     errs: list = []
     if not isinstance(card, dict):
         raise ValueError(f"要求カード: 最上位は mapping (受け取った値: {type(card).__name__})")
-    _mapping(errs, "要求カード", card, _TOP_REQUIRED, _TOP_OPTIONAL)
-    out: dict = {}
     fmt = card.get("format")
-    if "format" in card and fmt != CARD_FORMAT:
-        errs.append(f"format は {CARD_FORMAT!r} (受け取った値: {fmt!r})")
-    out["format"] = CARD_FORMAT
+    v2 = fmt == CARD_FORMAT_V2
+    _mapping(errs, "要求カード", card, _TOP_REQUIRED, _TOP_OPTIONAL + (_TOP_V2 if v2 else ()))
+    if not v2:
+        v2_only = [k for k in _TOP_V2 if k in card]
+        if v2_only:
+            errs.append(f"{v2_only} は版 2 ({CARD_FORMAT_V2}) の節 (format を {CARD_FORMAT_V2!r} にする)")
+    out: dict = {}
+    if "format" in card and fmt not in CARD_FORMATS:
+        errs.append(f"format は {list(CARD_FORMATS)} のどれか (受け取った値: {fmt!r})")
+    out["format"] = fmt if fmt in CARD_FORMATS else CARD_FORMAT
     name = card.get("name")
     if "name" in card and (not isinstance(name, str) or not name.strip()):
         errs.append(f"name は空でない文字列 (受け取った値: {name!r})")
@@ -417,9 +431,112 @@ def validate_card(card, card_dir=None) -> dict:
         errs.append(f"overrides.geometry.M_knot は数値か {MKNOT_AUTO!r} (自動; 書かないのと同じ) (受け取った値: {mk!r})")
     else:
         out["M_knot_mode"] = "fixed"
+    if v2:
+        _validate_v2(errs, card, out)
     if errs:
         raise ValueError("要求カード: " + "; ".join(errs))
     return out
+
+
+def _validate_v2(errs: list, card: dict, out: dict) -> None:
+    """版 2 の節 (plan tooling-design-orchestrator §4.7.1 (3)) を検査して out に写す。書いていない節は out に入れない
+    (既定で埋めるのは承認の道具 `forge_design.intake.approval` で、既定の出所と一緒に記録する)。"""
+    from ..export.deliverables import PARTS
+    q = card.get("qualification")
+    if q is not None and _mapping(errs, "qualification", q, (), QUALIFICATION_KEYS):
+        qo = {}
+        for k in ("exit_core_M_tol_rel", "line_tol_maxabs_pct", "line_tol_halfamp_pct"):
+            if k in q:
+                qo[k] = _num(errs, f"qualification.{k}", q[k], gt=0.0)
+        if "line_eta" in q:
+            v = _num(errs, "qualification.line_eta", q["line_eta"], ge=0.0)
+            if v is not None and not v < 1.0:
+                errs.append(f"qualification.line_eta は 0 以上 1 未満 (受け取った値: {v!r})")
+            qo["line_eta"] = v
+        if "line_x_range_m" in q:
+            xr = q["line_x_range_m"]
+            if not (isinstance(xr, list) and len(xr) == 2):
+                errs.append(f"qualification.line_x_range_m は [x0, x1] (受け取った値: {xr!r})")
+            else:
+                a, b = _num(errs, "qualification.line_x_range_m[0]", xr[0]), _num(errs, "qualification.line_x_range_m[1]", xr[1])
+                if a is not None and b is not None and not a < b:
+                    errs.append(f"qualification.line_x_range_m は x0 < x1 (受け取った値: {xr!r})")
+                qo["line_x_range_m"] = [a, b]
+        if "line_n" in q:
+            n = q["line_n"]
+            if isinstance(n, bool) or not isinstance(n, int) or n < 2:
+                errs.append(f"qualification.line_n は 2 以上の整数 (受け取った値: {n!r})")
+            qo["line_n"] = n
+        if "optional_parts" in q:
+            op = q["optional_parts"]
+            if not (isinstance(op, list) and all(isinstance(x, str) for x in op)):
+                errs.append(f"qualification.optional_parts は文字列の列 (受け取った値: {op!r})")
+            else:
+                bad = [x for x in op if x not in PARTS]
+                if bad:
+                    errs.append(f"qualification.optional_parts の知らない部品 {bad} (部品: {list(PARTS)})")
+                qo["optional_parts"] = list(op)
+        out["qualification"] = qo
+    b = card.get("budget")
+    if b is not None and _mapping(errs, "budget", b, ("gpu_hours", "disk_gb")):
+        out["budget"] = {"gpu_hours": _num(errs, "budget.gpu_hours", b["gpu_hours"], gt=0.0),
+                         "disk_gb": _num(errs, "budget.disk_gb", b["disk_gb"], gt=0.0)}
+    ml = card.get("mesh_limits")
+    if ml is not None and _mapping(errs, "mesh_limits", ml, (), ("max_nodes_ns", "max_nodes_euler")):
+        mo = {}
+        for k, v in ml.items():
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                errs.append(f"mesh_limits.{k} は正の整数 (受け取った値: {v!r})")
+            mo[k] = v
+        out["mesh_limits"] = mo
+    rp = card.get("run_policy")
+    if rp is not None and _mapping(errs, "run_policy", rp, (), ("max_iterations", "max_recalibrations")):
+        ro = {}
+        for k, lo in (("max_iterations", 1), ("max_recalibrations", 0)):
+            if k in rp:
+                v = rp[k]
+                if isinstance(v, bool) or not isinstance(v, int) or v < lo:
+                    errs.append(f"run_policy.{k} は {lo} 以上の整数 (受け取った値: {v!r})")
+                ro[k] = v
+        out["run_policy"] = ro
+    rq = card.get("requirements_without_gate")
+    if rq is not None:
+        if not isinstance(rq, list):
+            errs.append(f"requirements_without_gate は列 (受け取った値: {rq!r})")
+        else:
+            lst = []
+            for i, it in enumerate(rq):
+                if _mapping(errs, f"requirements_without_gate[{i}]", it, REQ_NO_GATE_KEYS):
+                    if not (isinstance(it["name"], str) and it["name"].strip()):
+                        errs.append(f"requirements_without_gate[{i}].name は空でない文字列")
+                    lst.append(copy.deepcopy(it))
+            names = [x.get("name") for x in lst]
+            if len(set(names)) != len(names):
+                errs.append(f"requirements_without_gate の name が重なる ({names})")
+            out["requirements_without_gate"] = lst
+    src = card.get("sources")
+    if src is not None:
+        if not isinstance(src, dict):
+            errs.append(f"sources は mapping (受け取った値: {src!r})")
+        else:
+            so = {}
+            for path, ent in src.items():
+                if not isinstance(path, str) or not path or any(not p for p in path.split(".")):
+                    errs.append(f"sources のキー {path!r} は「節」か「節.キー」の形")
+                    continue
+                if not (isinstance(ent, dict) and set(ent) <= {"kind", "ref"} and ent.get("kind") in SOURCE_KINDS):
+                    errs.append(f"sources.{path} は {{kind: {'/'.join(SOURCE_KINDS)}, ref: 文字列}} (受け取った値: {ent!r})")
+                    continue
+                if ent["kind"] == "user" and not (isinstance(ent.get("ref"), str) and ent["ref"].strip()):
+                    errs.append(f"sources.{path}: kind user は ref (ユーザの発言・指示の記録) が要る")
+                    continue
+                so[path] = dict(ent)
+            out["sources"] = so
+    ap = card.get("approval")
+    if ap is not None and _mapping(errs, "approval", ap, ("file", "sha256")):
+        if not (isinstance(ap["file"], str) and ap["file"]) or not (isinstance(ap["sha256"], str) and len(ap["sha256"]) == 64):
+            errs.append(f"approval は {{file: 承認の記録のパス, sha256: 64 桁}} (受け取った値: {ap!r})")
+        out["approval"] = dict(ap)
 
 
 def load_card(path) -> dict:
@@ -676,7 +793,7 @@ def card_to_problem(card, r_t_m: float, M_knot: float | None = None) -> dict:
                              "geometry.M_knot: <数値>)")
     dr = R_in / rt - 1.0
     prob["_card"] = {
-        "format": CARD_FORMAT, "generator": GENERATOR, "name": str(card["name"]),
+        "format": card.get("format", CARD_FORMAT), "generator": GENERATOR, "name": str(card["name"]),
         "recipe": {"name": card["recipe"], "path": str(rec_path), "sha256": rec_sha},
         "r_t_m": rt, "throat": {"kind": kind, "diameter_m": D,
                                 "curvature_ratio_R": R, "curvature_radius_design_m": R * rt,
@@ -2471,8 +2588,10 @@ def write_euler_companion(out: Path):
 
 def _card_record(card: dict) -> dict:
     """`_card.card` に残すカードの中身 (既定値を埋めた形)。"""
-    return {k: copy.deepcopy(card[k]) for k in ("format", "name", "gas", "conditions", "M_exit", "throat", "inlet",
-                                                "divergent_length_m", "wall", "p_ambient", "tolerances", "recipe", "overrides")}
+    rec = {k: copy.deepcopy(card[k]) for k in ("format", "name", "gas", "conditions", "M_exit", "throat", "inlet",
+                                               "divergent_length_m", "wall", "p_ambient", "tolerances", "recipe", "overrides")}
+    rec.update({k: copy.deepcopy(card[k]) for k in _TOP_V2 if k in card})
+    return rec
 
 
 def _json_safe(v):

@@ -113,6 +113,8 @@ QUAL_KEYS = ("exit_core_M_tol_rel", "line_eta", "line_x_range_m", "line_tol_maxa
 DEFAULT_PRESET = "wt_nozzle_v3"         # 雛形 axismach_final_v1 の evaluate.settle の既定 (2026-10-16 から v3; 線の定義は v2 と同じ)
 RECAL_MIN_REDUCTION = 0.5               # 規則 (c) の暫定の値 (plan に数値が無い; 上の docstring)
 MAX_RECALIBRATIONS = 1                  # plan §4.3「1 回まで」
+MAX_ITERATIONS = 3                      # 手順書 design-chain-quickstart §8 の --max-iterations 3 (承認の既定; plan tooling-design-orchestrator §4.7.1)
+QUAL_KEYS_V2 = ("line_n", "optional_parts")   # 要求カードの版 2 の qualification だけが書けるキー (公差の解決とは別に読む)
 RESULTS = ("accepted", "back_to_correction", "rejected", "incomplete")
 EXIT_CODES = {"accepted": 0, "recalibrate": 2, "escalate": 3, "incomplete": 4}
 
@@ -138,12 +140,17 @@ def _qual_block(doc, where: str) -> dict:
         return {}
     if not isinstance(q, dict):
         raise ValueError(f"{where} の qualification が mapping でない ({q!r})")
-    bad = [k for k in q if k not in QUAL_KEYS]
+    allowed = QUAL_KEYS + (QUAL_KEYS_V2 if where == "カード" else ())
+    bad = [k for k in q if k not in allowed]
     if bad:
-        raise ValueError(f"{where} の qualification の未知のキー {bad} (書けるのは {list(QUAL_KEYS)})")
+        raise ValueError(f"{where} の qualification の未知のキー {bad} (書けるのは {list(allowed)})")
     out = {}
     for k, v in q.items():
-        if k == "line_x_range_m":
+        if k == "optional_parts":
+            out[k] = list(v)
+        elif k == "line_n":
+            out[k] = int(v)
+        elif k == "line_x_range_m":
             if not (isinstance(v, (list, tuple)) and len(v) == 2):
                 raise ValueError(f"{where} の qualification.line_x_range_m が [x0, x1] でない ({v!r})")
             out[k] = [float(v[0]), float(v[1])]
@@ -200,8 +207,11 @@ def resolve_tolerances(run_dir, info: dict, card: dict | None, problem: dict | N
     else:
         xr_def, src_def = None, "既定を作れない (prepare_info に x_E か physical_wall.domain が無い)"
     pick("line_x_range_m", xr_def, src_def, from_settle=xr_settle, from_criteria=None if sc is None else sc["x_range_m"])
-    out["line_n"] = {"value": int(line_def["n"]) if sc is None else int(sc["n"]),
-                     "source": "run の settle_criteria.yaml" if sc is not None else f"既定 (preset {DEFAULT_PRESET})"}
+    if "line_n" in cq:
+        out["line_n"] = {"value": int(cq["line_n"]), "source": "カードの qualification"}
+    else:
+        out["line_n"] = {"value": int(line_def["n"]) if sc is None else int(sc["n"]),
+                         "source": "run の settle_criteria.yaml" if sc is not None else f"既定 (preset {DEFAULT_PRESET})"}
     out["settle_line"] = sc
     return out
 
@@ -934,9 +944,9 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
 
 
 def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None, prev_delta_next=None, step=None, deliverables=None,
-            iteration=None, max_iterations=None, recalibrations_done: int = 0, max_recalibrations: int = MAX_RECALIBRATIONS,
+            iteration=None, max_iterations=None, recalibrations_done: int = 0, max_recalibrations: int | None = None,
             recal_min_reduction: float = RECAL_MIN_REDUCTION, optional_parts=(), cli_tols: dict | None = None,
-            x_far_m: float = CC.X_FAR_M, wall_txt=None, series_dir=None) -> dict:
+            x_far_m: float = CC.X_FAR_M, wall_txt=None, series_dir=None, approval=None) -> dict:
     """1 本の NS run を判定して記録の dict を返す (ファイルは書かない; 壁解像の出力だけ wall_txt に、監視されていない V5c の線の
     全場の系列だけ series_dir (無ければ一時ディレクトリ) に書く)。"""
     from ..report.nozzle_report import load_field
@@ -957,7 +967,20 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
         rt = ((prob_doc.get("spec") or {}).get("r_throat")) if isinstance(prob_doc, dict) else None
         if rt is not None and abs(float(rt) / float(info["scale_m"]) - 1.0) > 1e-12:
             warns.append(f"問題 YAML の spec.r_throat {rt!r} が run の scale_m {info['scale_m']!r} と違う (別の設計の問題 YAML?)")
-    tol = resolve_tolerances(run_dir, info, card_doc, prob_doc, cli_tols or {})
+    apr = None
+    if approval is not None:
+        # 正式な入口 (plan tooling-design-orchestrator §4.7.1): 判定の条件は承認の記録の値だけ。CLI・問題 YAML の相違は拒否する
+        apr, max_iterations, max_recalibrations, optional_parts = approval_mode(
+            approval, card, problem, cli_tols or {}, optional_parts, iteration, max_iterations, max_recalibrations)
+        tol = approved_tolerances(run_dir, info, apr, approval)
+    else:
+        if max_recalibrations is None:
+            max_recalibrations = MAX_RECALIBRATIONS
+        cq = _qual_block(card_doc, "カード")
+        if not optional_parts and cq.get("optional_parts"):
+            optional_parts = tuple(cq["optional_parts"])
+            warns.append(f"無くてもよい成果物はカードの qualification.optional_parts {list(optional_parts)} (CLI の指定なし)")
+        tol = resolve_tolerances(run_dir, info, card_doc, prob_doc, cli_tols or {})
     fld = select_field(run_dir, step)
     flow = flow_check(run_dir)
     F = load_field(run_dir, fld["res"])
@@ -989,6 +1012,23 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
                                                     x_far_m=x_far_m))
     result, nxt, missing, corrections, rule, iter_rec = (dec["result"], dec["next"], dec["missing"], dec["corrections"], dec["rule"],
                                                         dec["iteration"])
+    apr_rec = None
+    if apr is not None:
+        from ..intake import approval as AP
+        rc = AP.check_run(apr, run_dir)
+        rwg = (apr["protected"].get("requirements_without_gate") or [])
+        apr_rec = {"path": str(Path(approval).resolve()), "sha256": AP.sha256_file(approval), "protected_sha256": apr["protected_sha256"],
+                   "gate": apr.get("gate"), "user_ref": apr.get("user_ref"), "run_check": rc,
+                   "requirements_without_gate": [r.get("name") for r in rwg]}
+        if rc["status"] != "OK":
+            # その run は承認した問題の評価になっていない (plan §4.2 要求の一致) → 結果によらず incomplete
+            missing = list(missing) + [f"run の停止規則の基準が承認の評価の条件と違う ({'; '.join(rc['problems'] + rc['diffs'])[:400]})"]
+            result, nxt = "incomplete", "escalate"
+        if rwg:
+            missing = list(missing) + [f"判定器の無い要求が未評価 {[r.get('name') for r in rwg]} (plan §4.2: 評価していない要求があれば "
+                                       "accepted にしない)"]
+            if result == "accepted":
+                result, nxt = "incomplete", "escalate"
     if rule is not None and rule.get("calibration") is not None:
         dst = (rule["calibration"]["inputs"]["delta_E"].get("state") or {})
         if dst.get("delta_E_step") is not None and dst["delta_E_step"] != fld["step"]:
@@ -1018,7 +1058,58 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
             {"coefficients": rule["calibration"]["coefficients"], "overrides": rule["calibration"]["overrides"],
              "overrides_yaml": rule["calibration"]["overrides_yaml"], "errors": rule["calibration"]["errors"],
              "delta_E": rule["calibration"]["inputs"]["delta_E"]},
-            "iteration": iter_rec, "show": show, "warnings": warns}
+            "iteration": iter_rec, "show": show, "warnings": warns, "approval": apr_rec}
+
+
+def approval_mode(approval, card, problem, cli: dict, optional_parts, iteration, max_iterations, max_recalibrations):
+    """正式な入口の検査 (plan tooling-design-orchestrator §4.7.1 (1)・(2))。戻り: (承認の記録, 反復の上限, 較正し直しの上限, 無くてもよい部品)。
+    CLI の公差・窓・--optional-parts・反復の上限・較正し直しの上限は値が同じでも拒否 (入口を 1 つにする)。カード・問題 YAML が承認の値と
+    違えば拒否。--iteration (台帳の反復の番号) は必須。"""
+    from ..intake import approval as AP
+    if card is None or problem is None:
+        raise ValueError("--approval には --card と --problem が要る (承認の値と照合する)")
+    given = sorted(k for k, v in (cli or {}).items() if v is not None)
+    if given:
+        raise ValueError(f"--approval のときは CLI の公差・窓の指定を受け付けない ({given}; 値が同じでも。承認の記録の値を使う)")
+    if optional_parts:
+        raise ValueError("--approval のときは --optional-parts を受け付けない (承認の記録の qualification.optional_parts を使う)")
+    if max_iterations is not None or max_recalibrations is not None:
+        raise ValueError("--approval のときは --max-iterations・--max-recalibrations を受け付けない (承認の記録の run_policy を使う)")
+    if iteration is None:
+        raise ValueError("--approval のときは --iteration (台帳の反復の番号) が要る")
+    ck = AP.check(approval, card, problem)
+    if ck["status"] != "OK":
+        raise ValueError(f"カード・問題 YAML が承認の記録と違う ({ck['kind']}): " + "; ".join(ck["problems"] + ck["diffs"])[:800])
+    apr = AP.load_approval(approval)
+    rp = apr["protected"]["run_policy"]
+    q = apr["protected"]["qualification"]
+    return apr, int(rp["max_iterations"]), int(rp["max_recalibrations"]), tuple(q.get("optional_parts") or ())
+
+
+def approved_tolerances(run_dir, info: dict, apr: dict, approval_path) -> dict:
+    """公差・窓を承認の記録の値で決める (出所は承認の記録)。x の窓が規則 (プリセット) なら prepare_info から作る。"""
+    base = resolve_tolerances(run_dir, info, None, None, {})
+    q = apr["protected"]["qualification"]
+    src = f"承認の記録 ({Path(approval_path).name})"
+    out = dict(base)
+    for k in ("exit_core_M_tol_rel", "line_eta", "line_tol_maxabs_pct", "line_tol_halfamp_pct"):
+        out[k] = {"value": float(q[k]), "source": src}
+    out["line_n"] = {"value": int(q["line_n"]), "source": src}
+    xr = q.get("line_x_range_m")
+    if isinstance(xr, list):
+        out["line_x_range_m"] = {"value": [float(xr[0]), float(xr[1])], "source": src}
+    elif isinstance(xr, dict) and xr.get("rule") == "preset":
+        dom = (info.get("physical_wall") or {}).get("domain")
+        if info.get("x_E") is None or not (isinstance(dom, (list, tuple)) and len(dom) == 2):
+            out["line_x_range_m"] = {"value": None, "source": f"{src} の規則を作れない (prepare_info に x_E か physical_wall.domain が無い)"}
+        else:
+            S = float(info["scale_m"])
+            o0, o1 = xr["x_offsets_rt"]
+            out["line_x_range_m"] = {"value": [(float(info["x_E"]) + o0) * S, (float(dom[1]) + o1) * S],
+                                     "source": f"{src} の規則 (x_E + {o0:g}, x_F {o1:+g}) r_t × scale_m"}
+    else:
+        raise ValueError(f"承認の記録の qualification.line_x_range_m が読めない ({xr!r})")
+    return out
 
 
 def summary_lines(rec: dict) -> list[str]:
@@ -1080,7 +1171,10 @@ def main(argv=None) -> int:
     ap.add_argument("--iteration", type=int, default=None, help="この run の反復の番号 (1 = 最初の NS)")
     ap.add_argument("--max-iterations", type=int, default=None, help="反復の上限 (iteration ≥ これで rejected)")
     ap.add_argument("--recalibrations-done", type=int, default=0, help="済んだ較正し直しの回数 (既定 0)")
-    ap.add_argument("--max-recalibrations", type=int, default=MAX_RECALIBRATIONS, help=f"較正し直しの上限 (既定 {MAX_RECALIBRATIONS}、plan §4.3)")
+    ap.add_argument("--max-recalibrations", type=int, default=None, help=f"較正し直しの上限 (既定 {MAX_RECALIBRATIONS}、plan §4.3)")
+    ap.add_argument("--approval", default=None,
+                    help="承認の記録 (card_approval.json; 正式な入口)。公差・窓・必須成果物・反復と較正し直しの上限は承認の値だけを使い、"
+                         "CLI の指定は値が同じでも拒否する。--card・--problem・--iteration が要る (plan tooling-design-orchestrator §4.7.1)")
     ap.add_argument("--recal-min-reduction", type=float, default=RECAL_MIN_REDUCTION,
                     help=f"規則 (c): 較正し直しの射影で最大誤差が減る割合の下限 (既定 {RECAL_MIN_REDUCTION}、plan に数値が無い暫定の値)")
     ap.add_argument("--exit-tol-rel", type=float, default=None, help="V5b の許容 |M/M_d − 1| (既定 1e-3)")
@@ -1104,7 +1198,7 @@ def main(argv=None) -> int:
                       recalibrations_done=a.recalibrations_done, max_recalibrations=a.max_recalibrations,
                       recal_min_reduction=a.recal_min_reduction,
                       optional_parts=tuple(s for s in a.optional_parts.split(",") if s), cli_tols=cli,
-                      wall_txt=None if od is None else od / "check_wall_resolution.txt", series_dir=od)
+                      wall_txt=None if od is None else od / "check_wall_resolution.txt", series_dir=od, approval=a.approval)
     except (ValueError, OSError, KeyError) as e:
         if od is not None and od.is_dir() and not any(od.iterdir()):
             od.rmdir()

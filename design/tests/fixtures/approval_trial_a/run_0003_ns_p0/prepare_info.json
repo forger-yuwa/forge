@@ -1,0 +1,16 @@
+{
+ "Md": 5.5,
+ "scale_m": 0.10490286531519752,
+ "x_E": 33.73366536667332,
+ "mesh": {
+  "ni": 4470,
+  "nj": 92
+ },
+ "physical_wall": {
+  "domain": [
+   -9.532628084040786,
+   72.44342831478622
+  ]
+ },
+ "_fixture_note": "case/90.qs_trial_a/run_0003_ns_p0/prepare_info.json から停止規則の基準の解決に使う欄だけを抜いた (design/tests/run_approval_tests.py)"
+}

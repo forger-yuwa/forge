@@ -1367,6 +1367,29 @@ $c\,r_w$ を最大 25 % 超える (case/45、$c=0.03$)。軸から変形の及�
   実寸からずれる。生成器は「$r_t$ を解く → 長さを割り直す」を相対変化が許容値を下回るまで繰り返す
   (CFD 前の寸法。NS 後に $r_t$ を解き直したときも同じ割り直しを行う)。
 
+#### カードの版 2 と承認の記録 (2026-10-17、plan [`tooling-design-orchestrator`](../../plans/active/tooling-design-orchestrator.md) §4.7.1)
+
+AI が変えてはいけない「ユーザが決めた欄」と「判定の条件」を、承認の記録 (`card_approval.json`) に固定する。
+
+- **カードの版 2** (`forge.wt_card/v2`): v1 の欄に省略可の節を足す。`qualification` (V5b・V5c の公差、評価の線の η・x の窓・点数 `line_n`、
+  無くてもよい成果物 `optional_parts`)・`budget` (GPU 時間・ディスクの承認値)・`mesh_limits`・`run_policy` (反復と較正し直しの上限)・
+  `requirements_without_gate` (判定器の無い要求)・`sources` (欄の出所 `user` / `recipe_default` / `derived` / `proposal`)・`approval` (試行の入力から承認の記録への参照)。
+  生成器は v1 と v2 の両方を受け付け、足した節は問題 YAML の生成に使わない。
+- **保護する条件** (`forge_design/intake/approval.py` の `protected_conditions`): 承認の対象はカードの節でなく、生成した後の実効の条件で決める。
+  要求 (カードの入口条件・組成・形・壁温・公差)、判定の条件 (カード → 既定)、実行の方針、予算、物理モデル (問題 YAML のガスのモデル・輸送・組成・
+  壁の熱条件・物理に効く `evaluate` のキー)、評価 (停止規則のプリセットの中身の sha256・`evaluate.settle`・区間・閾値・評価の線)。
+- **出所の検査**: カードに書いたユーザ欄の葉は `user` (ref つき) か `recipe_default` (既定の提供元の値と一致) でなければ preview が止める。
+  既定で埋めた欄は提供元 (`wt_card.DEFAULT_TOLERANCES`・`wt_qualify.DEFAULT_TOLS`・停止規則のプリセット・`wt_qualify.MAX_ITERATIONS` など) と一緒に記録する。
+- **preview → write → check**: `python -m forge_design.intake.approval preview` が表を作ってファイルに固定し、ユーザが承認した後に `write` が同じ内容を
+  承認の記録にする (上書きしない)。`check` は、承認の原本のカード、または承認の記録を参照する試行の入力 (較正の係数を足した `card_p1.yaml` など) から
+  解決した保護する条件が承認の値と一致するかを見る。格子・較正の係数だけの変更は通り、保護する条件の変更は止まる。`check --run` は run の停止規則の基準
+  (`settle_criteria.yaml`) を、承認した `evaluate.settle` を今のコードで解決し直したものと比べる。
+- **判定の正式な入口** (`wt_qualify --approval card_approval.json`): 公差・窓・点数・無くてもよい成果物・反復と較正し直しの上限は承認の値だけを使い、
+  CLI の指定は値が同じでも拒否する (`--iteration` は必須)。run の基準が承認の評価の条件と違えば `incomplete`、判定器の無い要求があれば accepted にしない。
+  `--approval` なしの使い方 (開発・手順書の試走) は今のまま。
+- 承認の記録は真正性を証明しない (sha256 と `user_ref` は「指定した承認の記録との整合」だけを示す)。判定専用の環境 (plan §5.1 #2b) と中間の判定の再検査 (#2c) は未実装。
+- 試験: `design/tests/run_approval_tests.py` (固定の入力 `design/tests/fixtures/approval_trial_a/`)。
+
 ### 成果物一式
 
 最終 NS の run から 1 コマンドで書き出す (`<run>/deliverables/`)。
