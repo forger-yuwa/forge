@@ -136,17 +136,23 @@ def ref_x_of_table(prof: dict, scale: float, d: dict, geom: dict) -> np.ndarray:
     return np.asarray(out)
 
 
-def prepare_cli(design_dir: Path, problem: Path, run_dir: Path, env_extra=None, old_exit_cut: bool = False):
+def prepare_cli(design_dir: Path, problem: Path, run_dir: Path, env_extra=None, old_exit_cut: bool = False, old_terminal: bool = False):
     """`deltastar_loop --init-integral --prepare-only` (CFD 前の準備) を design_dir のコードで回す。戻り (rc, ログ)。
     `old_exit_cut`: 逆 MOC の出口の切り方を直す前 (plan tooling-nozzle-deltastar-band-root-zone §5.1 #4c) の規則 `wall[:, 0] <= x_F` に
-    戻して回す (変更前のコードとの比較で、意図して変えた切り方の差を除くため)。"""
+    戻して回す (変更前のコードとの比較で、意図して変えた切り方の差を除くため)。
+    `old_terminal`: cplus × characteristic の終端 C⁺ を補間する前 (plan tooling-nozzle-card-local-mesh §4.5、2026-10-16) の
+    「x_E に最も近い節点の 1 本」に戻して回す (同じく変更前のコードとの比較で、意図して変えた終端の差を除くため; 2026-10-17)。"""
     if run_dir.exists():
         shutil.rmtree(run_dir)
     env = dict(os.environ, FORGE_ROOT=str(REPO), FORGE_NO_DESIGN_REPORT="1", **(env_extra or {}))
     args = ["--problem", str(problem), "--euler-ref", "none", "--run-dir", str(run_dir), "--init-integral", "--prepare-only"]
-    if old_exit_cut:
-        code = ("import runpy, sys; from forge_design.geometry import moc_inverse as MI; "
-                "MI._cut_wall_at_exit = lambda w, xF: (w[w[:, 0] <= xF], {}); "
+    if old_exit_cut or old_terminal:
+        patches = ""
+        if old_exit_cut:
+            patches += "MI._cut_wall_at_exit = lambda w, xF: (w[w[:, 0] <= xF], {}); "
+        if old_terminal:
+            patches += "import numpy as _np; MI._terminal_bracket = lambda ax, xE: [(int(_np.argmin(_np.abs(ax - xE))), 1.0)]; "
+        code = ("import runpy, sys; from forge_design.geometry import moc_inverse as MI; " + patches +
                 f"sys.argv = ['deltastar_loop'] + {args!r}; "
                 "runpy.run_module('forge_design.feedback.deltastar_loop', run_name='__main__')")
         cmd = [PY, "-c", code]
@@ -636,6 +642,7 @@ def _cmp_bytes(f, path):
     return re.sub(rb"nStepOuter: \d+", b"nStepOuter: N", b) if f == "solverConfig.yaml" else b
 
 
+NUMPY_MOC = {"FORGE_MOC_KERNEL": "numpy"}
 for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断熱)", pf45)):
     if label.startswith("case/45") and not (C45_PIN_DIR / raw45["geometry"]["initial_line_run"]).exists():
         print(f"   {label}: CFD ピンの run が無いので prepare の比較を飛ばした")
@@ -645,7 +652,10 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     rc_o, log_o = prepare_cli(ref_root / "design", prob, r_old, env_extra=REF_ENV)      # 変換器は包んで回す (上の REF_CONV_SH)
     # 今のコードは出口の切り方を直す前の規則に戻して比べる (§5.1 #4c: c2b・case/45 生産は直す前の切り方が x_F の壁点を落としていた;
     # case/70 exit_cut_ab.py)。今の切り方の差は下で別に見る
-    rc_n, log_n = prepare_cli(DESIGN, prob, r_new, old_exit_cut=True)
+    # 終端 C⁺ も補間の前 (最寄りの 1 本) に戻す (2026-10-17; plan tooling-nozzle-card-local-mesh §4.5 — 全部の壁がビット単位で変わる意図した変化)
+    # 逆 MOC の単位過程は numpy の版で回す: 2026-10-15 (plan tooling-nozzle-mknot-fast §4.5) から既定の numba の版は numpy の版とビット同一でなく、
+    # 変更前 (REF_COMMIT) は numpy の版しか無い (run_moc_axis_limit_tests.py と同じ扱い; 2026-10-17 に全部の試験を回して見つけた)
+    rc_n, log_n = prepare_cli(DESIGN, prob, r_new, env_extra=NUMPY_MOC, old_exit_cut=True, old_terminal=True)
     if rc_o or rc_n:
         check(f"V4 {label}: prepare-only (変更前・今) が通る", False, (log_o if rc_o else log_n)[-300:])
         continue
@@ -686,7 +696,7 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     v4[label + " prepare"] = bool(not diff and pi_same and not extra)
     # 今の切り方 (§5.1 #4c): 違うのは壁の長さに依るファイルだけで、設計壁の終点が直す前より下流 (x_F) に動く
     r_cut = OUT / f"v4_{tag}_after_exitcut"
-    rc_c, log_c = prepare_cli(DESIGN, prob, r_cut)
+    rc_c, log_c = prepare_cli(DESIGN, prob, r_cut, env_extra=NUMPY_MOC, old_terminal=True)   # 切り方の差だけを見るため、終端 C⁺ は補間の前に戻す
     if rc_c:
         check(f"V4 {label}: 今の切り方の prepare-only が通る", False, log_c[-300:])
         continue
@@ -698,6 +708,19 @@ for label, prob in (("case/70 c2b (一様 350 K)", C70), ("case/45 生産 (断�
     check(f"V4 {label}: 今の切り方は壁の長さに依るファイルだけが違い、設計壁の終点が直す前より下流 (入口端は同じ)",
           set(diff_c) <= wall_dep and dom_c[0] == dom_o[0] and dom_c[1] > dom_o[1],
           f"違うファイル {diff_c}、終点 {dom_o[1]!r} → {dom_c[1]!r} (差 {dom_c[1] - dom_o[1]:.6e} r_t)")
+    # 今の終端 C⁺ (補間; plan tooling-nozzle-card-local-mesh §4.5): 切り方は今のまま、終端だけを今に戻した prepare と比べる。
+    # 長さ合わせの L_c が変わるので、違ってよいのは壁の長さ・形に依るファイルと軸の target の表だけ、入口端は同じ
+    r_term = OUT / f"v4_{tag}_after_terminal"
+    rc_t, log_t = prepare_cli(DESIGN, prob, r_term, env_extra=NUMPY_MOC)
+    if rc_t:
+        check(f"V4 {label}: 今の終端 C⁺ (補間) の prepare-only が通る", False, log_t[-300:])
+        continue
+    diff_t = [f for f in CMP_FILES if (r_cut / f).exists() != (r_term / f).exists()
+              or ((r_cut / f).exists() and _cmp_bytes(f, r_cut / f) != _cmp_bytes(f, r_term / f))]
+    dom_t = json.loads((r_term / "wall_repr.json").read_text())["domain"]
+    check(f"V4 {label}: 今の終端 C⁺ (補間) は壁の長さ・形に依るファイルと軸の target だけが違い、入口端は同じ",
+          set(diff_t) <= wall_dep | {"target_axis_M.csv"} and dom_t[0] == dom_c[0],
+          f"違うファイル {diff_t}、終点 {dom_c[1]!r} → {dom_t[1]!r} (差 {dom_t[1] - dom_c[1]:+.6e} r_t)")
 _conv = [json.loads(ln) for ln in REF_CONV_LOG.read_text().splitlines() if ln.strip()] if REF_CONV_LOG.exists() else []
 print(f"   変更前の側の変換器 (包み): {len(_conv)} 回、うち終了時の既知の GPU エラー (rc ≠ 0) を通した "
       f"{sum(1 for c_ in _conv if c_['rc'] != 0 and c_['exit'] == 0)} 回、失敗のまま {sum(1 for c_ in _conv if c_['exit'] != 0)} 回", flush=True)

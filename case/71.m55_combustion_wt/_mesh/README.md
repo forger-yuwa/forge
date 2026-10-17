@@ -1,6 +1,6 @@
 # case/71 の格子の見積もりと手組みの格子の記録
 
-plan [`tooling-nozzle-card-local-mesh`](../../../plans/active/tooling-nozzle-card-local-mesh.md) §3 の見積もりと §5.1 #3a の手組みの格子の再現の入力。
+plan [`tooling-nozzle-card-local-mesh`](../../../plans/accepted/tooling-nozzle-card-local-mesh.md) §3 の見積もりと §5.1 #3a の手組みの格子の再現の入力。
 codex plan 段レビュー ([記録](../../../notes/reviews/2026-10-15-tooling-nozzle-card-local-mesh-plan.md)) の「証拠不足」と M3 (比の分布の固定) への対応として commit した。
 
 ## 見積もり (2026-10-15、plan §3)

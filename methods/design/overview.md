@@ -245,7 +245,7 @@ $x_F$ は `x_end_margin` を 2.3→3.0 と変えても 0.08% しか動かない 
 が、margin が不足すると場が $F$ に届かず追跡が失敗するため**明示エラー**にする
 (旧方式はここで黙って「計算した壁の終端」を返していた)。
 
-**`wall_mode: cplus` の終端 C⁺ は $x_E$ を挟む 2 本の補間** (2026-10-16、plan [`tooling-nozzle-card-local-mesh`](../../plans/active/tooling-nozzle-card-local-mesh.md) §4.5・§6 V9):
+**`wall_mode: cplus` の終端 C⁺ は $x_E$ を挟む 2 本の補間** (2026-10-16、plan [`tooling-nozzle-card-local-mesh`](../../plans/accepted/tooling-nozzle-card-local-mesh.md) §4.5・§6 V9):
 cplus の閉包では $F$ を網の C⁺ と壁 (どちらも網由来の折れ線) の交点で取る。$x_E$ に**最も近い**軸の節点の 1 本を使うと、$x_E$ が節点の中点を
 またぐたびに $x_F(L_c)$ が網の間隔 1 つ分跳ぶのこぎり歯になり (歯の中の傾き 0.29)、長さ合わせ (`Lc_mode: from_length`) が許容に届かなかった。
 今は $x_E$ を挟む下流・上流の節点 $m_{hi}, m_{lo}$ の交点 $x_F(m_{hi}), x_F(m_{lo})$ を重み $w=(x_E-x_{lo})/(x_{hi}-x_{lo})$ で線形補間する

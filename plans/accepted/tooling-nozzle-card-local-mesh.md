@@ -3,14 +3,14 @@
 ## メタ
 
 - **area**: `tooling` (`design/forge_design/intake/wt_card.py` の `estimate_mesh`・雛形 `intake/recipes/axismach_*`、`meshing/mesh2d.py` は使うだけ)
-- **status**: `draft` (2026-10-15 起票)
+- **status**: `done` (2026-10-15 起票、2026-10-17 accepted — §8 の完了の範囲 (M5.5 系は `hand_mesh.py`、case/71 run_0014 と試走 A が accepted); 生成器への組み込みと係数の試行錯誤のループは `tooling-design-orchestrator` §5.1 #10)
 - **related_docs**:
   - [`methods/design/overview.md`](../../methods/design/overview.md) 「要求カード」「格子」の節
   - skill `nozzle-design`・`design-intake`
 - **related_plans**:
-  - [`tooling-generator-defaults-and-launch-gate.md`](tooling-generator-defaults-and-launch-gate.md) — 段取り 2 の「生成器の既定 = 最新の生産レシピ」と `mesh2d` の壁法線の近壁層の既定化 (§6.4)。この plan はカードの格子の作り方だけを先に揃える
-  - [`tooling-nozzle-isothermal-wall-chain.md`](tooling-nozzle-isothermal-wall-chain.md) §5.1 #36r — M6 の H の上流の第一層 (NS の壁量から表を作り直した例)
-  - [`tooling-nozzle-mknot-fast.md`](tooling-nozzle-mknot-fast.md) — この枝の元 (M_knot の新しい規則)
+  - [`tooling-generator-defaults-and-launch-gate.md`](../active/tooling-generator-defaults-and-launch-gate.md) — 段取り 2 の「生成器の既定 = 最新の生産レシピ」と `mesh2d` の壁法線の近壁層の既定化 (§6.4)。この plan はカードの格子の作り方だけを先に揃える
+  - [`tooling-nozzle-isothermal-wall-chain.md`](../active/tooling-nozzle-isothermal-wall-chain.md) §5.1 #36r — M6 の H の上流の第一層 (NS の壁量から表を作り直した例)
+  - [`tooling-nozzle-mknot-fast.md`](../accepted/tooling-nozzle-mknot-fast.md) — この枝の元 (M_knot の新しい規則)
 - **created**: `2026-10-15`
 - **owner**: `M6ノズルの設計` セッション (作業ツリー `forge-cardmesh` / `feature/card-local-mesh`、feature/mknot-fast 7713f84c から)
 
@@ -251,6 +251,7 @@ NS の後に `check_wall_resolution.py` (壁ごと・面積の重み・停止の
 | result | 2026-10-17 | [2026-10-17-tooling-nozzle-card-local-mesh-result-2.md](../../notes/reviews/2026-10-17-tooling-nozzle-card-local-mesh-result-2.md) | NO-GO, C0/M2/m1 (前回の負例の修正・V7 の訂正・V8 の証拠は確認、run_0014 accepted・試走 A の SETTLED を再現) | 全件**採用**: M1 (停止の時の判定と今の設定の照合が無い) → #7a を再オープン、M2 (`--groups` を省くとダンプの無い壁を見落とす) → #7b を再オープン (implementer)、m1 (methods の「軸の波を作らない」の断定) → 「壁の補正のなめらかさを保つ」と run_0014 の実測に直した |
 | result | 2026-10-17 | [2026-10-17-tooling-nozzle-card-local-mesh-result-3.md](../../notes/reviews/2026-10-17-tooling-nozzle-card-local-mesh-result-3.md) | NO-GO, C0/M1/m0 (前回の M1・M2・m1 の解消を確認、run_0014 accepted・試走 A の SETTLED・V8・V9 を再現) | **採用**: M1 (成果物の生成元が評価の対象の run・停止の step と結び付いていない; run_0014 の評価に run_0010 の成果物で accepted) → §5.1 #6c2 (implementer) |
 | result | 2026-10-17 | [2026-10-17-tooling-nozzle-card-local-mesh-result-4.md](../../notes/reviews/2026-10-17-tooling-nozzle-card-local-mesh-result-4.md) | NO-GO, C0/M1/m0 (前回の M1 の解消、run_0014 と試走 A の accepted・MATCH を確認) | **採用**: M1 (配る `nozzle.msh` と計算に使った `nozzle.h5` の対応が照合されない) → §5.1 #6c2 を再オープン (implementer) |
+| result | 2026-10-17 | [2026-10-17-tooling-nozzle-card-local-mesh-result-5.md](../../notes/reviews/2026-10-17-tooling-nozzle-card-local-mesh-result-5.md) | **GO-with-changes**, C0/M0/m1 (msh と h5 の照合の解消・run_0014 と試走 A の accepted・MATCH を確認) | **採用して直した**: m1 (`run_two_coef_initializer_tests.py` (4) が終端 C⁺ の補間の後の設計壁を昔の run の参照と比べて 0.00245 mm > 0.002 mm) → その run を作った時点の設計壁 (終端 C⁺ は最寄りの 1 本) で比べる (許容は緩めない)。あわせて design の試験 80 本を全部回し、同じ型の `run_wall_temperature_tests.py` V4 (変更前のコミットとのビット一致) を直した: 新しい側は終端 C⁺ を補間の前に戻し、逆 MOC は numpy の版 (PR #10 から既定の numba の版はビット同一でない; これは #6e と別の、10-15 からの落ち)、今の終端による差は別の項目で範囲を確かめる。残りの失敗 4 本は無関係 (`run_h370_prelaunch_tests` 3 件・`run_sern_moc_tests`・`run_sern_gates_tests` は変更前のコードでも同じ、`run_wall_tables_tests` は fixture が無い) → accepted |
 
 ## 7. 影響範囲
 
@@ -267,11 +268,12 @@ NS の後に `check_wall_resolution.py` (壁ごと・面積の重み・停止の
 - [x] V4 (NS の後の壁解像) を記録: case/71 run_0014・試走 A の p0・p1 で PASS
 - [x] V5 (M5.5 の設計の判定、公差 0.1 %): case/71 run_0014 accepted、試走 A の p1 accepted — 2026-10-17 に生成元の記録つきの成果物で両方とも判定し直して accepted・生成元 MATCH (`case/71…/run_0014_chain_v2/wt_qualify_provenance/`、試走 A は `_runs/qs_trial_a_evidence/run_0005_ns_p1/wt_qualify_provenance/`)
 - [x] V6〜V9 (陰解法の比較・3 係数・float と FP64・長さ合わせの補間) の判定を記録
-- [ ] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録
-- [ ] `status: done`、§9 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` を同期
+- [x] codex レビュー 2 回 (`plan` / `result`) を §6.1 に記録 (result は 5 回目で GO-with-changes、指摘は全件対応)
+- [x] `status: done`、§9 に変更ログ、`plans/accepted/` へ移動、`plans/README.md` を同期
 
 ## 9. 変更ログ
 
+- `2026-10-17` — result 段レビュー 3〜5 回目の指摘 (成果物の生成元・msh と h5 の対応・回帰試験の参照) を全件直し、design の試験 80 本を全部回して終端 C⁺ の変更で落ちた 2 本を直した。case/71 run_0014 と試走 A の p1 を最新の道具で判定し直して accepted (生成元 MATCH)。status done、accepted へ移した。
 - `2026-10-17` — result 段レビュー 2 回目 (NO-GO、M2・m1) を全件採用: #7a・#7b の再オープンの分を修正 (停止の時の判定との結び付き、bcond の必須の壁)、methods の断定を直した。
 - `2026-10-17` — result 段レビュー (NO-GO) を全件採用: #7a・#7b (判定の道具の誤受理の 2 経路) を修正、V7 の訂正、methods の現在仕様、V8 の一次記録。
 - `2026-10-17` — ユーザ決定「推奨でいい」「係数は普通試行錯誤して決めるよね」: 生成器への組み込み (§4.1) と係数の試行錯誤のループを `tooling-design-orchestrator` §5.1 #10 へ、#3v を同 #12 へ移した。§5.1 の状態を整理し (#5b)、§8 を完了の範囲で書き直した。報告の主の線を η 0.03 に (#5c)。case/71 の設計 (run_0014) は公差 0.1 % で accepted。

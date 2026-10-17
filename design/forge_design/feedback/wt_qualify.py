@@ -95,7 +95,7 @@ import yaml
 from . import contur_calibrate as CC
 
 FORMAT = "forge.wt_qualify/v1"
-PLAN = ("plans/active/tooling-nozzle-card-local-mesh.md §5.1 #6b・§4.3・§6 V5; "
+PLAN = ("plans/accepted/tooling-nozzle-card-local-mesh.md §5.1 #6b・§4.3・§6 V5; "
         "plans/active/tooling-design-orchestrator.md §4.2")
 OUT_DIRNAME = "wt_qualify"
 OUT_JSON = "WT_QUALIFICATION.json"

@@ -55,7 +55,7 @@ from pathlib import Path
 import numpy as np
 
 FORMAT = "forge.contur_calibration/v1"
-PLAN = "plans/active/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a"
+PLAN = "plans/accepted/tooling-nozzle-card-local-mesh.md §4.3・§5.1 #6a"
 OUT_DIRNAME = "contur_calibrate"
 OUT_JSON = "CONTUR_CALIBRATION.json"
 OUT_YAML = "contur_overrides.yaml"

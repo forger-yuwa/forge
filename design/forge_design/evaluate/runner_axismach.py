@@ -1422,7 +1422,7 @@ def integral_delta_r(p: Problem, d: dict, init_cfg: dict, scale: float | None = 
                                  **({"delta_scale_slope_per_m": c1} if c1 != 0.0 else {}),
                                  "delta_r_throat_contur": float(np.interp(0.0, res_init["x"], res_init["delta_r_contur"])),
                                  "delta_r_exit_contur": float(res_init["delta_r_contur"][-1]),
-                                 "plan": "plans/active/tooling-nozzle-card-local-mesh.md §4.3"}
+                                 "plan": "plans/accepted/tooling-nozzle-card-local-mesh.md §4.3"}
     return res_init, delta_r_x, init_info
 
 

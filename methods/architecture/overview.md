@@ -319,7 +319,7 @@ step     200 | t 5.0000e-05 dt 2.50e-07 maxCFL 0.07 | 4.06 ms/step elapsed 0.6 s
 `main.cpp` の `writeStepOutputs()` (各 step の末尾で 1 回) が、§8.1〜8.3 の出力に加えて `output/monitorOutputs.cpp` を呼ぶ。
 どれも出力だけで数値には触らず、キーが無ければ何も書かない。設定の意味と書式は
 [`procedures/solver-settings.md`](../../procedures/solver-settings.md)「output」、設計は
-[plans/active/tooling-nozzle-card-local-mesh.md](../../plans/active/tooling-nozzle-card-local-mesh.md) §4.4 1′。
+[plans/accepted/tooling-nozzle-card-local-mesh.md](../../plans/accepted/tooling-nozzle-card-local-mesh.md) §4.4 1′。
 
 - **全場の間隔** `time.fieldOutStepInterval` (省略時 = `outStepInterval`) は `outputH5_XDMF()` だけに効く。境界の h5・
   プローブ・節点の出力・質量流束は `outStepInterval` のまま。

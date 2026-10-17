@@ -1,6 +1,6 @@
 # case/71 の run の記録の写し (AWS A から回収、h5 は無い)
 
-2026-10-15、plan [`tooling-nozzle-card-local-mesh`](../../../plans/active/tooling-nozzle-card-local-mesh.md) §5.1 #3b。
+2026-10-15、plan [`tooling-nozzle-card-local-mesh`](../../../plans/accepted/tooling-nozzle-card-local-mesh.md) §5.1 #3b。
 codex 諮問 [`2026-10-15-m55-ns-unsettled-diagnose.md`](../../../notes/reviews/2026-10-15-m55-ns-unsettled-diagnose.md) の「証拠不足」(全残差履歴・
 stage_manifest・起動時の設定・停止規則の記録・終了状態・実効の設定・バイナリの精度・判定ツールの VERDICT・壁解像) に応えるための写し。
 本体は AWS A の `~/forge-cardmesh/case/71.m55_combustion_wt/run_0002_ns`・`run_0001_euler` (保存場 `res_*.h5`・格子 `nozzle.h5` はそちらだけ)。
