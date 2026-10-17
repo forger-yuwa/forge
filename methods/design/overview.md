@@ -245,6 +245,15 @@ $x_F$ は `x_end_margin` を 2.3→3.0 と変えても 0.08% しか動かない 
 が、margin が不足すると場が $F$ に届かず追跡が失敗するため**明示エラー**にする
 (旧方式はここで黙って「計算した壁の終端」を返していた)。
 
+**`wall_mode: cplus` の終端 C⁺ は $x_E$ を挟む 2 本の補間** (2026-10-16、plan [`tooling-nozzle-card-local-mesh`](../../plans/accepted/tooling-nozzle-card-local-mesh.md) §4.5・§6 V9):
+cplus の閉包では $F$ を網の C⁺ と壁 (どちらも網由来の折れ線) の交点で取る。$x_E$ に**最も近い**軸の節点の 1 本を使うと、$x_E$ が節点の中点を
+またぐたびに $x_F(L_c)$ が網の間隔 1 つ分跳ぶのこぎり歯になり (歯の中の傾き 0.29)、長さ合わせ (`Lc_mode: from_length`) が許容に届かなかった。
+今は $x_E$ を挟む下流・上流の節点 $m_{hi}, m_{lo}$ の交点 $x_F(m_{hi}), x_F(m_{lo})$ を重み $w=(x_E-x_{lo})/(x_{hi}-x_{lo})$ で線形補間する
+(`moc_inverse._terminal_bracket`・`_cplus_wall_cross`; $x_E$ が節点に乗れば 1 本の値、範囲の外・非有限は例外)。$x_F(L_c)$ は傾き 1.0000・直線からの残差 $10^{-6}\,r_t$ 程度、
+網 2400 と 4800 の差は $2	imes10^{-6}\,r_t$。同じ設計入力なら切る前の網と壁は変わらず、切る位置 (と解き直した $L_c$) だけが動く。
+`streamline`・`flux` の `terminal_exit` と `cplus` × `lip` は別の分岐で、変えていない。長さ合わせは雛形の網・カードの公差のまま収束するので、
+`wt_card` は cplus × characteristic で長さ合わせが止まっても網の倍化・許容差の緩和をせずに例外で止める。
+
 #### 全長を設計変数にする (`Lc_mode: from_length`, dv `L_total` — 2026-08-31)
 
 計画: [tooling-nozzle-axismach-length-dv.md](../../plans/accepted/tooling-nozzle-axismach-length-dv.md)。
@@ -816,6 +825,7 @@ $x<x_{lo}$ を相関×比で補完) は**スロート δ\* を NS 実効値の 3
 1. **初回 NS 用の壁**: 境界層積分法 (`feedback/deltastar_integral.py`, CONTUR = Sivells AEDC-TR-78-63 §5 の軸対称 von Kármán
    運動量積分 + べき乗則プロファイル + Spalding–Chi 摩擦) を入口から前進積分し $\delta^*_n(x)$ を得る。断熱壁 / 指定壁温 (定数・テーブル)
    を同一実装で扱う。**初期値生成専用**で、CFD との一致率は合否条件にしない。半径方向補正 $\delta_r = \delta^*_n/\cos	heta_w$。
+   **較正した CONTUR (M5.5 系の生産、2026-10-15〜16、plan `tooling-nozzle-card-local-mesh` §4.3)**: 壁の境界層の厚みを $\delta = (c_0 + c_1 x_m)\,\delta_{CONTUR} + \delta_0$ ($x_m$ は設計スロートからの実寸 [m]) で与える (`deltastar_initializer.delta_scale`・`delta_scale_slope_per_m`・`delta_offset_m`)。係数は 1 回目の NS の停止の場から抽出した $\delta_E$ に `feedback/contur_calibrate.py` が合わせる (スロートと出口で等式、$c_1$ は $x\ge0$ の $\Delta x$ 重みの最小二乗)。壁の補正のなめらかさを保つ (NS の生の $\delta^*$ を直接入れる経路は、case/71 の pass 1 で軸の M に片振幅 0.465 % の波を残した)。較正した壁での試験部の M の偏差は実測で示す: case/71 run_0014 (停止 46,171、η 0.03・x 4.0〜7.95 m) で最大偏差 0.062 %・片振幅 0.057 %。設計の合否は `feedback/wt_qualify.py` (出口コア M ±0.1 %・近軸の線 η 0.03 の最大偏差・片振幅 ≤ 0.1 %・壁解像・計算の成立・寸法の関門・成果物; 較正し直しは規則に当たるときだけ 1 回)。通しの手順は `procedures/design-chain-quickstart.md`。
 2. **NS 後の固定点反復**: 設計 Euler run (設計壁・反復中固定) と NS run を**同じ物理 $r$** で比べる
    (`metrics/deltastar.py::deltastar_from_core_matched_euler`, 断面ごとの純関数は `band_local_deficit`)。
    参照 $q_{ref}$ は**境界層のすぐ外側の帯** $y\in[y_b, 1.5y_b]$ で比 $q_{NS}/q_E$ を $y$ の 1 次でフィットし境界層域へ延長して作る。

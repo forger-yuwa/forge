@@ -1,0 +1,15 @@
+FP64  run_0012_ns_free       出口コア M 5.5028421  η0.03: 最大偏差 0.0623% 片振幅 0.0573% 平均 -0.0001%  η0.1: 0.0940/0.0762%  壁の総熱量 879072
+FP64  run_0013_ns_free260    出口コア M 5.5028421  η0.03: 最大偏差 0.0623% 片振幅 0.0573% 平均 -0.0001%  η0.1: 0.0940/0.0762%  壁の総熱量 879072
+float run_0015_ns_float_a    出口コア M 5.5028412  η0.03: 最大偏差 0.0618% 片振幅 0.0571% 平均 -0.0003%  η0.1: 0.0940/0.0762%  壁の総熱量 879055
+float run_0016_ns_float_b    出口コア M 5.5028388  η0.03: 最大偏差 0.0618% 片振幅 0.0570% 平均 -0.0003%  η0.1: 0.0942/0.0763%  壁の総熱量 879091
+δ_E の表の列: ('x_rt', 'delta_target', 'delta_in_prev', 'delta_E', 'held_delta_target__relaxed_wall_input_delta_E__unrelaxed_smoothed_extraction_omega05_quintic_Pspline_knot20_lam10_resid_rel_rms36693') 使う列: None
+
+差 (A − B):
+Traceback (most recent call last):
+  File "/home/ubuntu/m55_p5/cmp_float60.py", line 45, in <module>
+    xa, va = de_mm(a); xb, vb = de_mm(b)
+             ^^^^^^^^
+  File "/home/ubuntu/m55_p5/cmp_float60.py", line 35, in de_mm
+    return x, v * sc
+              ~~^~~~
+numpy._core._exceptions._UFuncNoLoopError: ufunc 'multiply' did not contain a loop with signature matching types (dtype([('x_rt', '<f8'), ('delta_target', '<f8'), ('delta_in_prev', '<f8'), ('delta_E', '<f8'), ('held_delta_target__relaxed_wall_input_delta_E__unrelaxed_smoothed_extraction_omega05_quintic_Pspline_knot20_lam10_resid_rel_rms36693', '<f8')]), dtype('float64')) -> None

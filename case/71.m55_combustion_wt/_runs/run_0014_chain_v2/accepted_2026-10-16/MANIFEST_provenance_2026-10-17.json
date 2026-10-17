@@ -1,0 +1,1247 @@
+{
+ "format": "forge.deliverables/v1",
+ "run": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2",
+ "created": "2026-10-17 14:13:06",
+ "git_commit": "4070277e",
+ "verdict": "PASS",
+ "failed_parts": [],
+ "parts": {
+  "cad": {
+   "ok": true,
+   "seconds": 44.55,
+   "step2d": "cad/wall_physical.step",
+   "transfer_pass": true,
+   "transfer_pos_max_mm": 5.775488738300232e-10,
+   "revolve_ok": true,
+   "chord_minus_curve": {
+    "status": "ok",
+    "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/nozzle.h5 の壁節点 (bcond physID ['3'], float32 [m])",
+    "n_wall_nodes": 4810,
+    "n_edges": 4809,
+    "sign": "弦 − 曲線 (正 = 弦が外 = 流路が広い側)",
+    "min_um": -0.7574390981495649,
+    "x_of_min_rt": -4.195581457374836,
+    "edge_dx_at_min_rt": 0.012357928261818252,
+    "max_um": 0.023966365460228033,
+    "x_of_max_rt": -1.6155535972645914,
+    "edge_dx_at_max_rt": 0.0025346267366797015,
+    "percentiles_um": {
+     "1": -0.4664690710054889,
+     "5": -0.1588255027736179,
+     "50": 0.0,
+     "95": 0.019756360148616897,
+     "99": 0.023622419758137014
+    },
+    "node_offset_um": {
+     "max_abs": 5.342046787796581e-10,
+     "note": "壁節点そのもの (float32) と曲線の差"
+    },
+    "by_region_um": {
+     "pipe+contraction [x_in, 0)": {
+      "min": -0.7574390981495649,
+      "max": 0.023966365460228033,
+      "edge_dx_max_rt": 0.021326958661559203
+     },
+     "throat [0, 1)": {
+      "min": -4.451705656497151e-11,
+      "max": 0.008324924672225393,
+      "edge_dx_max_rt": 0.002225699211395482
+     },
+     "expansion [1, x_e]": {
+      "min": -0.2442492268763352,
+      "max": 0.01288496481172623,
+      "edge_dx_max_rt": 0.05287964515995469
+     }
+    }
+   },
+   "surface_area_analytic_mm2": 31596055.755070806,
+   "domain_mm": [
+    -999.9999999999999,
+    8000.402372861136
+   ],
+   "surface": {
+    "ok": true,
+    "freecad_version": [
+     "1",
+     "1",
+     "1"
+    ],
+    "shape_type": "Shell",
+    "is_valid": true,
+    "area_mm2": 31522884.962059505,
+    "surface_type": "SurfaceOfRevolution",
+    "readback_faces": 1,
+    "readback_valid": true,
+    "readback_area_mm2": 31522884.962059505,
+    "readback_area_knot_split_mm2": 31596055.755180407,
+    "readback_bbox_mm": [
+     -1000.0,
+     -767.51876078629,
+     -767.51876078629,
+     8000.402372861001,
+     767.51876078629,
+     767.51876078629
+    ],
+    "stl_triangles": 822660,
+    "stl_points": 411651,
+    "stl_area_mm2": 31597792.0,
+    "stl_linear_deflection_mm": 0.05,
+    "stl_angular_deflection_rad": 0.05
+   },
+   "surface_gmsh": {
+    "gmsh": "4.15.2",
+    "step": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/cad/wall_surface.step",
+    "imported": [
+     [
+      2,
+      1
+     ]
+    ],
+    "n_surfaces": 1,
+    "n_curves": 3,
+    "n_volumes": 0,
+    "surface_types": [
+     "Surface of Revolution"
+    ],
+    "areas_mm2": [
+     31596055.755177654
+    ],
+    "area_mm2": 31596055.755177654,
+    "area_quadrature": [
+     {
+      "param_bounds": [
+       [
+        0.0,
+        -1000.0
+       ],
+       [
+        6.283185307179586,
+        8000.402372861001
+       ]
+      ],
+      "gauss_points_per_panel": 4,
+      "panels_u": 4,
+      "panels_v": 2048,
+      "rel_change_last": 5.595707227986162e-13,
+      "converged": true,
+      "tol": 1e-12,
+      "history": [
+       {
+        "nu": 4,
+        "nv": 256,
+        "area": 31596055.739799082,
+        "rel_change_u": 0.0,
+        "rel_change_v": 4.5030162894143454e-10
+       },
+       {
+        "nu": 4,
+        "nv": 512,
+        "area": 31596055.754026838,
+        "rel_change_u": 0.0,
+        "rel_change_v": 3.586322482988842e-11
+       },
+       {
+        "nu": 4,
+        "nv": 1024,
+        "area": 31596055.755159974,
+        "rel_change_u": 0.0,
+        "rel_change_v": 5.595707227986162e-13
+       }
+      ]
+     }
+    ],
+    "area_quadrature_converged": true,
+    "areas_occ_mass_mm2": [
+     31522884.962059505
+    ],
+    "area_occ_mass_mm2": 31522884.962059505,
+    "bbox_mm": [
+     -1000.0000001,
+     -767.51876088629,
+     -767.51876088629,
+     8000.402372961001,
+     767.51876088629,
+     767.51876088629
+    ],
+    "bbox_per_surface_mm": [
+     [
+      -1000.0000001,
+      -767.51876088629,
+      -767.51876088629,
+      8000.402372961001,
+      767.51876088629,
+      767.51876088629
+     ]
+    ],
+    "bbox_sampled_mm": [
+     -999.6948659495524,
+     -766.3753006231477,
+     -766.3753006231476,
+     8000.097238810586,
+     766.3753006231477,
+     766.3753006231477
+    ],
+    "note": "area_mm2 = 助変数空間の合成 Gauss 求積 (区間数を倍にして収束)。area_occ_mass_mm2 = OCC の getMass (1 枚の長い回転面では粗い、参考)。bbox_mm = occ.getBoundingBox の和集合 (許容差だけ広がりうる)"
+   },
+   "surface_area_rel_err": {
+    "freecad": 3.4688432860313e-12,
+    "gmsh": 3.3817124886968402e-12
+   },
+   "checks": {
+    "transfer_2d": true,
+    "revolve_2d": true,
+    "freecad_readback_valid": true,
+    "freecad_one_face": true,
+    "freecad_area": true,
+    "freecad_bbox_x": true,
+    "gmsh_readback": true,
+    "gmsh_quadrature_converged": true,
+    "gmsh_area": true,
+    "gmsh_bbox_x": true
+   },
+   "pass": true
+  },
+  "mesh": {
+   "ok": true,
+   "seconds": 18.19,
+   "msh41": "mesh/nozzle.msh",
+   "msh41_sha256": "f5e8f73661f60f3d490e96f8cffdf69cb865819d2f973da6bcdd6258dd6d13b6",
+   "msh22": {
+    "n_nodes": 442520,
+    "physical": {
+     "inlet": 1,
+     "outlet": 1,
+     "wall": 1,
+     "axis": 1,
+     "fluid": 2
+    }
+   },
+   "structure": "mesh/mesh_structure.json",
+   "structure_format": "forge.mesh_structure/v2",
+   "structure_node_rule": "wall_normal_blend_v1",
+   "structure_self_check": {
+    "max_dist_mm": 1.8225386545374702e-12,
+    "at_node": {
+     "i": 4078,
+     "j": 56
+    },
+    "max_dist_over_first_layer": 1.3375186077039215e-09,
+    "ratio_at_node": {
+     "i": 963,
+     "j": 86
+    },
+    "tol_mm": 1e-07,
+    "tol_over_first_layer": 0.001
+   },
+   "structure_rule_check": {
+    "status": "実施",
+    "max_dist_mm": 6.367477892554437e-12,
+    "at_node": {
+     "i": 4406,
+     "j": 22
+    },
+    "max_dist_over_first_layer": 7.337950668569351e-09,
+    "ratio_at_node": {
+     "i": 1869,
+     "j": 21
+    },
+    "beta_rule_minus_solved_max_abs": 6.040314818545056e-06,
+    "beta_at_node": {
+     "i": 281,
+     "j": 90
+    },
+    "tol_mm": 1e-07,
+    "tol_over_first_layer": 0.001,
+    "note": "mesh2d の規則の重み β(d) (rule_params) と wall_slope で置き直した節点と元の節点の距離。beta_rule_minus_solved は情報 (壁の節点と傾きの無い station (|r′| ≤ slope_zero_tol) を除く)"
+   },
+   "structure_wall_slope_source": {
+    "file": "wall_repr.json",
+    "sha256": "a0dcb872680adb68db34cbcf3f0978f1888668d56736fc8fa4c6a7375679d4ed",
+    "kind": "single_bspline",
+    "scale_m": 0.1002434996788185,
+    "how": "load_wall_file(run)['physical'].r(x, 1)、x = 壁の節点の x [m] / scale_m (r_t 単位)",
+    "n_clipped_to_domain": 0
+   },
+   "structure_rule_params": {
+    "wall_normal_layer": [
+     0.02,
+     0.8
+    ],
+    "wall_normal_end_stations": null,
+    "source": {
+     "file": "prepare_info.json",
+     "sha256": "93fbde47c8db4c026300c1ec88360cdf7ee223f0443ab3b19be9b3e32d06ecb1",
+     "key": "mesh.params",
+     "msh_sha256_recorded": "f5e8f73661f60f3d490e96f8cffdf69cb865819d2f973da6bcdd6258dd6d13b6",
+     "msh_sha256_matches": true
+    }
+   },
+   "rebuild": {
+    "format": "forge.mesh_rebuild_compare/v1",
+    "step": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/cad/wall_physical.step",
+    "structure": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/mesh_structure.json",
+    "outputs": {
+     "msh41": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step.msh",
+     "msh41_cad": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step_cad.msh",
+     "msh22": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step_v22.msh",
+     "cgns": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step.cgns"
+    },
+    "curve": {
+     "param_range": [
+      -1000.0,
+      8000.402372861
+     ],
+     "x_range_mm": [
+      -1000.0,
+      8000.402372861
+     ],
+     "max_abs_z_mm": 0.0,
+     "min_r_mm": 100.00006737928643,
+     "x_minus_u_max_abs_mm": 5.757101462222636e-10,
+     "n_sample": 20001,
+     "direction": "x 増加",
+     "x_u_identity_note": "x_minus_u_max_abs_mm は情報 (wall_step.py の曲線なら ~0、CAD で編集した曲線では大きくてよい)"
+    },
+    "stations": {
+     "ends": [
+      {
+       "side": "inlet",
+       "station": 0,
+       "use": "曲線の端",
+       "curve_end_minus_station_mm": 0.0
+      },
+      {
+       "side": "outlet",
+       "station": 4809,
+       "use": "曲線の端",
+       "curve_end_minus_station_mm": -1.3642420526593924e-10
+      }
+     ],
+     "max_solve_residual_mm": 3.637978807091713e-12,
+     "max_end_residual_mm": 1.3642420526593924e-10,
+     "n_iter": 1,
+     "trimmed": [],
+     "wall_u_range": [
+      -1000.0,
+      8000.402372861
+     ]
+    },
+    "orig": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/nozzle.msh",
+    "rebuilt": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step.msh",
+    "rebuilt_cad": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step_cad.msh",
+    "orig_sha256": "f5e8f73661f60f3d490e96f8cffdf69cb865819d2f973da6bcdd6258dd6d13b6",
+    "orig_sha256_matches_structure": null,
+    "n_nodes": {
+     "orig": 442520,
+     "rebuilt": 442520,
+     "tags_match": true
+    },
+    "a_quads": {
+     "n_orig": 437619,
+     "n_rebuilt": 437619,
+     "match": true
+    },
+    "b_distance": {
+     "max_dist_mm": 1.2690222360697103e-09,
+     "at_node": {
+      "i": 3644,
+      "j": 22,
+      "x_mm": 1840.6945590168002
+     },
+     "max_dist_over_first_layer": 2.33901116893155e-06,
+     "ratio_at_node": {
+      "i": 1669,
+      "j": 22,
+      "first_layer_mm": 3.76357412079642e-05
+     },
+     "max_wall_node_dist_mm": 7.37188088351104e-11,
+     "rms_dist_mm": 7.149212566078397e-11,
+     "first_layer_min_mm": 3.7212538302355824e-05,
+     "tol": {
+      "max_dist_mm": 1e-05,
+      "max_dist_over_first_layer": 0.01
+     }
+    },
+    "c_physical_groups": {
+     "groups": {
+      "axis": {
+       "orig": {
+        "dim": 1,
+        "tag": 4,
+        "n_elements": 4809
+       },
+       "rebuilt": {
+        "dim": 1,
+        "tag": 4,
+        "n_elements": 4809
+       },
+       "match": true,
+       "elements_identical": true
+      },
+      "fluid": {
+       "orig": {
+        "dim": 2,
+        "tag": 5,
+        "n_elements": 437619
+       },
+       "rebuilt": {
+        "dim": 2,
+        "tag": 5,
+        "n_elements": 437619
+       },
+       "match": true,
+       "elements_identical": true
+      },
+      "inlet": {
+       "orig": {
+        "dim": 1,
+        "tag": 1,
+        "n_elements": 91
+       },
+       "rebuilt": {
+        "dim": 1,
+        "tag": 1,
+        "n_elements": 91
+       },
+       "match": true,
+       "elements_identical": true
+      },
+      "outlet": {
+       "orig": {
+        "dim": 1,
+        "tag": 2,
+        "n_elements": 91
+       },
+       "rebuilt": {
+        "dim": 1,
+        "tag": 2,
+        "n_elements": 91
+       },
+       "match": true,
+       "elements_identical": true
+      },
+      "wall": {
+       "orig": {
+        "dim": 1,
+        "tag": 3,
+        "n_elements": 4809
+       },
+       "rebuilt": {
+        "dim": 1,
+        "tag": 3,
+        "n_elements": 4809
+       },
+       "match": true,
+       "elements_identical": true
+      }
+     },
+     "match": true
+    },
+    "info_group_elements_identical": true,
+    "d_forge_format": {
+     "path": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step.msh",
+     "n_node_blocks": 1,
+     "node_tags_in_file_order": true,
+     "element_tags_in_file_order": true,
+     "ok": true,
+     "note": "forge の変換器は節点のタグ行を読まずファイル内の順番を番号とみなす。節点ブロック 1 つ・番号がファイル順に 1..N でないと接続が壊れる"
+    },
+    "cad_msh": {
+     "n_nodes": {
+      "orig": 442520,
+      "rebuilt": 442520,
+      "tags_match": true
+     },
+     "a_quads": {
+      "n_orig": 437619,
+      "n_rebuilt": 437619,
+      "match": true
+     },
+     "b_distance": {
+      "max_dist_mm": 1.2688030735292929e-09,
+      "at_node": {
+       "i": 3644,
+       "j": 22,
+       "x_mm": 1840.6945590168002
+      },
+      "max_dist_over_first_layer": 2.33901116893155e-06,
+      "ratio_at_node": {
+       "i": 1669,
+       "j": 22,
+       "first_layer_mm": 3.76357412079642e-05
+      },
+      "max_wall_node_dist_mm": 7.371914323887741e-11,
+      "rms_dist_mm": 7.149235577949568e-11,
+      "first_layer_min_mm": 3.7212538302355824e-05,
+      "tol": {
+       "max_dist_mm": 1e-05,
+       "max_dist_over_first_layer": 0.01
+      }
+     },
+     "c_physical_groups": {
+      "groups": {
+       "axis": {
+        "orig": {
+         "dim": 1,
+         "tag": 4,
+         "n_elements": 4809
+        },
+        "rebuilt": {
+         "dim": 1,
+         "tag": 4,
+         "n_elements": 4809
+        },
+        "match": true,
+        "elements_identical": true
+       },
+       "fluid": {
+        "orig": {
+         "dim": 2,
+         "tag": 5,
+         "n_elements": 437619
+        },
+        "rebuilt": {
+         "dim": 2,
+         "tag": 5,
+         "n_elements": 437619
+        },
+        "match": true,
+        "elements_identical": true
+       },
+       "inlet": {
+        "orig": {
+         "dim": 1,
+         "tag": 1,
+         "n_elements": 91
+        },
+        "rebuilt": {
+         "dim": 1,
+         "tag": 1,
+         "n_elements": 91
+        },
+        "match": true,
+        "elements_identical": true
+       },
+       "outlet": {
+        "orig": {
+         "dim": 1,
+         "tag": 2,
+         "n_elements": 91
+        },
+        "rebuilt": {
+         "dim": 1,
+         "tag": 2,
+         "n_elements": 91
+        },
+        "match": true,
+        "elements_identical": true
+       },
+       "wall": {
+        "orig": {
+         "dim": 1,
+         "tag": 3,
+         "n_elements": 4809
+        },
+        "rebuilt": {
+         "dim": 1,
+         "tag": 3,
+         "n_elements": 4809
+        },
+        "match": true,
+        "elements_identical": true
+       }
+      },
+      "match": true
+     },
+     "info_group_elements_identical": true,
+     "info_forge_format": {
+      "path": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/mesh/rebuilt_from_step_cad.msh",
+      "n_node_blocks": 9,
+      "node_tags_in_file_order": false,
+      "element_tags_in_file_order": false,
+      "ok": false
+     }
+    },
+    "info_v22_readback": {
+     "numbering_kept": false,
+     "quad_corner_coords_identical": true,
+     "group_counts_match": true,
+     "note": "gmsh の msh2.2 は番号を振り直す (元と同じ番号は .msh と _cad.msh だけ)"
+    },
+    "criteria": "plan §6 V3: .msh と _cad.msh の両方で (a) 四角形の接続が全要素で一致、(b) 最大距離 ≤ 1e-5 mm かつ第 1 層厚比 ≤ 0.01、(c) 物理グループの名前・タグ・要素数が一致。加えて (d) .msh が forge の形",
+    "verdict": "PASS",
+    "fail_reasons": [],
+    "structure_format": "forge.mesh_structure/v2",
+    "node_rule": "wall_normal_blend_v1",
+    "end_columns": {
+     "inlet": {
+      "line_x_mm": -1000.0,
+      "max_abs_dx_mm": 0.0,
+      "at_j": 0,
+      "station_x_minus_line_mm": 0.0
+     },
+     "outlet": {
+      "line_x_mm": 8000.402372861,
+      "max_abs_dx_mm": 0.6935164579563207,
+      "at_j": 22,
+      "station_x_minus_line_mm": 1.3642420526593924e-10
+     },
+     "note": "入口・出口は OCC の直線 (x = line_x_mm) のまま。端の列の節点は規則どおりに置くので、端の断面の β·d·r′/√(1 + r′²) だけ直線から外れる (forge の wall_normal_end_stations で端を戻した格子は 0)"
+    },
+    "wall_slope": {
+     "source": "STEP の曲線の (dr/du)/(dx/du) を各 station の u_i で",
+     "step_minus_structure_max_abs": 1.7149920372716565e-11,
+     "at_station": 3443,
+     "range": [
+      -0.7218129085788172,
+      0.21898330470634964
+     ],
+     "note": "構造ファイルの wall_slope (元の格子の壁の傾き) は作り直しに使わない (差は情報)"
+    },
+    "first_layer_note": "b_distance の第 1 層厚は v1 と同じ半径の差 (壁法線の層では法線方向の厚さ × cos θ_w = 厚さより小さいので比の判定は厳しい側)"
+   },
+   "quality": {
+    "original": {
+     "verdict": "PASS",
+     "verdict_line": "VERDICT: PASS (AR<= 5000, skew<= 0.90)",
+     "ar_max": 5000.0,
+     "summary": [
+      "skewness     : max=0.421  p99=0.332  mean=0.023  >0.90: 0 (0.00%)",
+      "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+     ],
+     "converter": "/home/sano/work/forge-cardmesh/solver_density_cuda/.build-native/card4a/convertGmshToForge",
+     "config_source": "solverConfig_prestage.yaml",
+     "converter_rc": 0
+    },
+    "rebuilt": {
+     "verdict": "PASS",
+     "verdict_line": "VERDICT: PASS (AR<= 5000, skew<= 0.90)",
+     "ar_max": 5000.0,
+     "summary": [
+      "skewness     : max=0.421  p99=0.332  mean=0.023  >0.90: 0 (0.00%)",
+      "VERDICT: PASS (AR<= 5000, skew<= 0.90)"
+     ],
+     "converter": "/home/sano/work/forge-cardmesh/solver_density_cuda/.build-native/card4a/convertGmshToForge",
+     "config_source": "solverConfig_prestage.yaml",
+     "converter_rc": 0
+    }
+   },
+   "pass": true
+  },
+  "fluent": {
+   "ok": true,
+   "seconds": 7.27,
+   "msh": "fluent/nozzle_2d_axi.msh",
+   "check": {
+    "path": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/fluent/nozzle_2d_axi.msh",
+    "nodes": 442520,
+    "cells": 437619,
+    "zone_faces": {
+     "interior-fluid": 870338,
+     "wall": 4809,
+     "inlet": 91,
+     "outlet": 91,
+     "axis": 4809
+    },
+    "coord_max_rel": 0.0,
+    "orientation": {
+     "nodes": 442520,
+     "cells": 437619,
+     "faces": 880138,
+     "interior": {
+      "left": 870338,
+      "right": 0,
+      "zero": 0,
+      "c1_opposite": 870338
+     },
+     "boundary": {
+      "left": 9800,
+      "right": 0,
+      "zero": 0
+     },
+     "c0_missing": 0,
+     "left_fraction": 1.0
+    },
+    "cell_polygons_match": true,
+    "cell_area_min": 6.727586606080871e-12,
+    "n_cell_area_nonpos": 0,
+    "area_total": 5.001052855453361,
+    "area_total_ref": 5.001052855453361,
+    "area_total_rel": 0.0,
+    "boundary_faces": 9800,
+    "boundary_loop_len": 9800,
+    "boundary_single_loop": true,
+    "boundary_loop_area": 5.001052855453363,
+    "boundary_loop_area_rel": 3.551965737501125e-16,
+    "failures": [],
+    "ok": true
+   },
+   "cgns": {
+    "msh": {
+     "nodes": 442520,
+     "elements": {
+      "Line 2": 9800,
+      "Quadrilateral 4": 437619
+     },
+     "physical": [
+      [
+       1,
+       4,
+       "axis",
+       4809
+      ],
+      [
+       1,
+       1,
+       "inlet",
+       91
+      ],
+      [
+       1,
+       2,
+       "outlet",
+       91
+      ],
+      [
+       1,
+       3,
+       "wall",
+       4809
+      ],
+      [
+       2,
+       5,
+       "fluid",
+       437619
+      ]
+     ]
+    },
+    "cgns": {
+     "nodes": 442520,
+     "elements": {
+      "Line 2": 9800,
+      "Quadrilateral 4": 437619
+     },
+     "physical": [
+      [
+       1,
+       5,
+       "axis",
+       4809
+      ],
+      [
+       1,
+       2,
+       "inlet",
+       91
+      ],
+      [
+       1,
+       3,
+       "outlet",
+       91
+      ],
+      [
+       1,
+       4,
+       "wall",
+       4809
+      ],
+      [
+       2,
+       1,
+       "fluid",
+       437619
+      ]
+     ]
+    },
+    "match": true,
+    "tags_preserved": false,
+    "seconds": 1.0199828240438364,
+    "cgns_path": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/fluent/nozzle_2d_axi.cgns"
+   },
+   "bc_table": "fluent/boundary_conditions.md",
+   "bc_rows": 12,
+   "problem_yaml": "case/71.m55_combustion_wt/problem_m55_p5_settle_v2.yaml",
+   "pass": true,
+   "fluent_readback": "未確認 (手元に Fluent が無い。plan §5.1 #10 でユーザに確認を依頼)"
+  },
+  "wall_compare": {
+   "ok": true,
+   "seconds": 0.75,
+   "csv": "wall_compare/wall_design_vs_physical_mm.csv",
+   "json": "wall_compare/wall_design_vs_physical.json",
+   "figures": {
+    "full": "wall_compare/wall_design_vs_physical_full.png",
+    "dr": "wall_compare/wall_design_vs_physical_dr.png",
+    "throat": "wall_compare/wall_design_vs_physical_throat.png"
+   },
+   "n_rows": 12610,
+   "domain_mm": {
+    "design": [
+     -999.9999999999999,
+     8000.402372861136
+    ],
+    "physical": [
+     -999.9999999999999,
+     8000.402372861136
+    ]
+   },
+   "n_blank": {
+    "design": 0,
+    "physical": 0
+   },
+   "dr_throat_mm": -0.24340964429943313,
+   "dr_exit_mm": 41.45687022301138,
+   "dr_range_mm": {
+    "min": -0.25721559779553615,
+    "x_at_min": -57.4,
+    "max": 41.45687022301138,
+    "x_at_max": 8000.402372861136
+   },
+   "physical_throat_mm": {
+    "x": -0.23100395407612417,
+    "r": 100.00003623847854
+   },
+   "delta_record_check": {
+    "tol_mm": 1e-06,
+    "points": {
+     "throat": {
+      "x_mm": 0.0,
+      "dr_table_mm": -0.24340964429943313,
+      "record_equals_table_linear": true,
+      "table": {
+       "file": "delta_r_initial.csv",
+       "sha256": "48c314c63470c9741d1f58c27d33728e26be487df861c01c8535489732580b51",
+       "n": 1500
+      },
+      "how": "記録 initializer.delta_r_throat は積分の表の直線補間 np.interp(0, 表)。run の delta_r_initial.csv を壁と同じ 5 次補間 (runner_axismach.delta_r_from_table) で x = 0 に評価した値と比べる",
+      "record_mm": -0.24337828635877212,
+      "diff_vs_record_mm": -3.135794066100317e-05,
+      "reference_mm": -0.24340964429943118,
+      "diff_mm": -1.942890293094024e-15,
+      "pass": true
+     },
+     "exit": {
+      "x_mm": 8000.402372861136,
+      "dr_table_mm": 41.45687022301138,
+      "how": "記録 initializer.delta_r_exit (積分の表の最後の点の値。壁は表の点を通り、表より下流は端値) と直接比べる",
+      "record_mm": 41.456870223011386,
+      "diff_vs_record_mm": -7.105427357601002e-15,
+      "reference_mm": 41.456870223011386,
+      "diff_mm": -7.105427357601002e-15,
+      "pass": true
+     }
+    },
+    "prepare_info_sha256": "93fbde47c8db4c026300c1ec88360cdf7ee223f0443ab3b19be9b3e32d06ecb1",
+    "source": "initializer",
+    "status": "PASS",
+    "pass": true
+   },
+   "notes": [
+    "run run_0014_chain_v2: 原点 = 設計スロート (設計壁の x = 0)、x = 流れ方向 (回転軸)、r = 半径。単位 mm (角度は deg)。x の点は形状表 wall_shape_mm.csv と同じ (1 mm ごと + |x| ≤ 200.487 mm は 0.1 mm ごと)",
+    "r_design_mm: 設計壁 = Euler で回す壁 (境界層を無視した MOC の形; wall_repr.json の design_wall)",
+    "r_physical_mm: 物理壁 = 実際に作る壁 (設計壁 + 境界層の厚み; wall_repr.json の physical_wall = STEP と同じ曲線)",
+    "dr_mm = r_physical_mm − r_design_mm。angle_design_deg・angle_physical_deg = atan(dr/dx) (正 = 下流で広がる)",
+    "設計壁の区間: 直管 (半径 r_U 一定) [-1000, -500] mm・縮流部 (上流 Hermite) [-500, 0] mm・拡大部 (MOC の壁 S) [0, 8000.4] mm",
+    "物理壁の区間: 直管 (半径 r_U 一定) [-1000, -500] mm・縮流部 (多項式 Q: 上流端で直管、x = 0 で S + δ_r に値・1 階・2 階の微分が連続) [-500, 0] mm・拡大部 (設計壁 S + δ_r) [0, 8000.4] mm",
+    "Δr の意味 — x ≥ 0 (設計スロートから出口): Δr = δ_r = 境界層の補正 (物理壁 = 設計壁 S + δ_r)。冷却壁ではスロート付近で負になりうる",
+    "Δr の意味 — 縮流部 (x < 0): 物理壁は多項式 Q、設計壁は Hermite で別の曲線。Δr は境界層の厚みではなく 2 つの上流の形の違い (x = 0 で δ_r(0) に連続)",
+    "Δr の意味 — 直管: Δr = 物理壁の r_U − 設計壁の r_U (この壁では 0.0 mm)",
+    "物理壁は 5 次 B-spline 1 本 (STEP と同じ曲線)。区分の式 (直管・Q・S + δ_r) との差は値で最大 1.69e-12 mm",
+    "定義域: 設計壁 [-1000, 8000.4] mm・物理壁 [-1000, 8000.4] mm。片方の定義域の外の x はその壁の列と dr_mm を空欄にした (空欄: 設計壁 0 行・物理壁 0 行)",
+    "物理スロート (物理壁の最小径): x = -0.231004 mm・r = 100.000036 mm (設計スロートの r = 100.2435 mm)"
+   ],
+   "figure_font": "Noto Sans CJK JP (/home/sano/.fonts/NotoSansCJKjp-Regular.otf)",
+   "pass": true
+  },
+  "excel": {
+   "ok": true,
+   "seconds": 6.68,
+   "shape": {
+    "csv": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/excel/wall_shape_mm.csv",
+    "n_rows": 12610,
+    "columns": [
+     "x_mm",
+     "r_mm",
+     "wall_angle_deg",
+     "curvature_radius_mm",
+     "s_mm",
+     "perimeter_mm",
+     "lateral_area_cum_mm2"
+    ],
+    "source": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/wall_repr.json",
+    "physical_wall_repr": "single_bspline",
+    "scale_mm_per_rt": 100.2434996788185,
+    "units": "mm (角度は deg)",
+    "origin": "設計スロート (設計壁の x = 0)。x = 流れ方向 (回転軸)、r = 半径",
+    "domain_mm": [
+     -999.9999999999999,
+     8000.402372861136
+    ],
+    "spacing": {
+     "coarse_mm": 1.0,
+     "fine_mm": 0.1,
+     "fine_zone_mm": [
+      -200.486999357637,
+      200.486999357637
+     ],
+     "fine_zone_rule": "|x| ≤ max(50 mm, 2 r_t)"
+    },
+    "physical_throat_mm": {
+     "x": -0.23100395407612417,
+     "r": 100.00003623847854
+    },
+    "column_notes": {
+     "x_mm": "軸方向の位置 [mm]。原点 = 設計スロート",
+     "r_mm": "物理壁の半径 [mm] (wall_repr.json の物理壁 = STEP と同じ B-spline を評価)",
+     "wall_angle_deg": "壁の傾き atan(dr/dx) [deg]。正 = 下流で広がる",
+     "curvature_radius_mm": "符号つき曲率半径 1/κ [mm]、κ = r''/(1+r'^2)^1.5。正 = 流路側から見て凸。|κ| ≤ 1e-09 /mm は inf (直線)",
+     "s_mm": "入口端からの壁の弧長 [mm]",
+     "perimeter_mm": "周長 2πr [mm]",
+     "lateral_area_cum_mm2": "入口端からの累積側面積 ∫2πr ds [mm²]"
+    },
+    "integration": {
+     "method": "表の点の間を 16 分割した台形積分の累積",
+     "s_total_mm": 9100.289363331005,
+     "lateral_area_total_mm2": 31596055.752758227,
+     "s_err_est_mm": 2.900087565649301e-07,
+     "area_err_est_mm2": 0.0024232839544614158,
+     "area_err_est_rel": 7.66957740999008e-11,
+     "err_est_note": "16 分割と 8 分割の差 / 3 (Richardson)"
+    }
+   },
+   "cfd": {
+    "status": "valid",
+    "step": 46171,
+    "run_dir": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2",
+    "mesh": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/nozzle.h5",
+    "csv": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/excel/wall_cfd_nodes.csv",
+    "n_rows": 4810,
+    "columns": [
+     "x_m",
+     "r_m",
+     "s_m",
+     "ring_area_m2",
+     "A_node_m2",
+     "p_w_Pa",
+     "T_w_K",
+     "tau_w_Pa",
+     "q_into_wall_W_m2",
+     "Q_node_W",
+     "y1plus",
+     "wall_id"
+    ],
+    "heat_dataset": "iface_Qf_eff",
+    "q_column": "q_into_wall_W_m2",
+    "Q_column": "Q_node_W",
+    "allow_diagnostic": true,
+    "geometry": "軸対称 (isAxisymmetric 1, axisymMethod 0)",
+    "units": {
+     "x_m": "m",
+     "r_m": "m",
+     "s_m": "m",
+     "ring_area_m2": "m²",
+     "A_node_m2": "m²",
+     "p_w_Pa": "Pa",
+     "T_w_K": "K",
+     "tau_w_Pa": "Pa",
+     "q_into_wall_W_m2": "W/m²",
+     "Q_node_W": "W",
+     "y1plus": "-"
+    },
+    "definitions": {
+     "Q_node": "2π · iface_Qf_eff (全周の節点熱量、固体向き正)",
+     "q": "Q_node / A_node",
+     "A_node": "2π max(r_f, r_floor) |S_f| (壁の境界面の r 重み面積 = ソルバの面)",
+     "ring_area": "π (r_a + r_b) |ab| を両端に半分ずつ (折れ線の側面積の持ち分)",
+     "tau_w": "twall の折れ線の接線への射影 (流れ方向 +x を正)",
+     "sign": "q・Q は流体 → 壁が正",
+     "not_used": "iface_q_eff (main のソルバでは軸対称で r·q。ソルバの版で意味が変わる)"
+    },
+    "values_note": "状態が valid でない壁の q・Q は空欄 (正本が無効なとき診断値に置き換えない)",
+    "walls": {
+     "3": {
+      "name": "wall",
+      "kind": "wall_isothermal",
+      "file": "res_wall_3_46171.h5",
+      "n_nodes": 4810,
+      "heat": {
+       "dataset": "iface_Qf_eff",
+       "file": "res_wall_3_46171.h5",
+       "n": 4810,
+       "n_finite": 4810,
+       "status": "valid"
+      },
+      "x_range_m": [
+       -1.0,
+       8.000402372861137
+      ],
+      "x_monotone": true,
+      "polygon_lateral_area_m2": 31.59605229412516,
+      "ring_area_sum_m2": 31.59605229412516,
+      "A_node_sum_m2": 31.59605162840151,
+      "A_node_vs_ring_rel_max": 7.2459996708130055e-06,
+      "A_node_vs_ring_rel_median": 2.033884085427016e-07,
+      "Q_total_W": 5523374.011147542,
+      "Q_total_from_q_ring_W": 5523375.894942674,
+      "y1plus_note": "check_wall_resolution.py と同じ定義 (第 1 内部節点の壁法線距離・接線応力、粘性 = res_46171.h5 の vis_lam)",
+      "y1plus_mean": 0.47955764636603243,
+      "y1plus_max": 0.9987161753174326,
+      "end_nodes": [
+       {
+        "x_m": -1.0,
+        "q_W_m2": 5323548.578563016,
+        "q_neighbor_W_m2": 2843491.926801351,
+        "ratio_to_neighbor": 1.8721869854406392,
+        "minus_qwall_W_m2": 4951659.851857304
+       },
+       {
+        "x_m": 8.000402372861137,
+        "q_W_m2": 35846.392753703825,
+        "q_neighbor_W_m2": 35588.278283607164,
+        "ratio_to_neighbor": 1.0072527945308205,
+        "minus_qwall_W_m2": 34961.8076207337
+       }
+      ]
+     }
+    },
+    "status_json": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/excel/wall_cfd_nodes.status.json"
+   },
+   "thermal_use": {
+    "run_dir": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2",
+    "step": 46171,
+    "walls": {
+     "3": "wall"
+    },
+    "heat_status": "valid",
+    "heat_per_wall": {
+     "3": "valid"
+    },
+    "convergence": {
+     "tool": "check_settled.py --bind",
+     "selection": {
+      "tool": "check_settled.py",
+      "mode": "main",
+      "why": "本段の起動 (MAIN_STAGE_STARTED と照合)",
+      "problems": []
+     },
+     "cmd": "/home/sano/work/forge-cardmesh/solver_density_cuda/tools/check_settled.py /home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2 --bind --no-write --json --end-step 46171",
+     "exit": 0,
+     "judged": {
+      "end_step": 46171,
+      "terminal_step": 46000,
+      "stop_step": 46171,
+      "verdict": "SETTLED",
+      "criteria_sha256": "e7943caae1a42e88a9874cd38f7ab0b9dd0d3efe3cfbe6df44d9889e98868329",
+      "quantities": {
+       "residual": "SETTLED",
+       "mass_balance": "SETTLED",
+       "exit_core_mach": "SETTLED",
+       "line_mach": "SETTLED",
+       "exit_flow_angle": "SETTLED",
+       "wall_heat_nodes": "SETTLED"
+      }
+     },
+     "verdict_line": "VERDICT: SETTLED (閾値は暫定 (plan §6 V3 で決める)) [check_settled.py --bind、終端 46000・停止の観測 46171]",
+     "stop_rule_reeval": {
+      "end_step": 46171,
+      "verdict": "SETTLED",
+      "matches": true,
+      "state_status": "REACHED",
+      "compare": {
+       "matches": true,
+       "problems": [],
+       "n_problems": 0,
+       "record": "SETTLE_VERDICT.json が停止の時のまま (古い形の run でまだ移行していない; ファイルと量の sha256 が STOP_RULE_STATE.json の記録と一致)",
+       "form": "settle_verdict",
+       "record_file": "SETTLE_VERDICT.json",
+       "exact": true,
+       "rtol": 1e-09,
+       "atol": 1e-12
+      }
+     },
+     "result": "PASS"
+    },
+    "quasisteady": {
+     "tool": "check_quasisteady.py --series-csv",
+     "cmd": "check_quasisteady.py --series-csv <tmp>/wall_heat_series.csv --series-cols Q_total_W,<4810 節点の熱量>",
+     "exit": 0,
+     "n_bands": {
+      "3": 16
+     },
+     "not_steady": [],
+     "n_steps": 24,
+     "n_valid": 24,
+     "verdict_line": "=== /tmp/thermal_use_qs_cbfsukdc/wall_heat_series.csv  [24 rows, steps 2000..46171]  -> STEADY ===",
+     "detail_line": "Q_total_W       : tail mean=5.523e+06  drift=0.0%/tail  fluct=0.0%        STEADY",
+     "result": "PASS"
+    },
+    "wall_resolution": {
+     "tool": "check_wall_resolution.py",
+     "cmd": "/home/sano/work/forge-cardmesh/solver_density_cuda/tools/check_wall_resolution.py /home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2 --step 46171 --groups wall",
+     "exit": 0,
+     "verdict_line": "VERDICT: PASS (壁解像)",
+     "result": "PASS"
+    },
+    "verdict": "PASS",
+    "rule": "収束・熱量の準定常 (総熱量と壁の全節点の熱量; 最悪で判定)・壁解像の 3 つが PASS かつ熱量の状態 valid で PASS、不合格 (熱量 nonfinite を含む) があれば FAIL、他は未評価"
+   },
+   "cfd_integral": {
+    "sum_Q_W": 5523374.011147542,
+    "sum_abs_Q_W": 5523374.011147542,
+    "sum_q_ring_W": 5523375.894942674,
+    "rel_to_sum_abs_Q": 3.4105876736343615e-07,
+    "max_abs_ring_over_A_minus_1": 7.245947166722999e-06,
+    "tol": 0.0001,
+    "pass": true
+   },
+   "pass": true,
+   "xlsx": {
+    "written": true,
+    "skipped": false,
+    "sheets": [
+     "shape",
+     "cfd_wall",
+     "conditions",
+     "notes",
+     "wall_1d",
+     "wall_compare"
+    ],
+    "info": {
+     "shape": {
+      "columns": [
+       "x_mm",
+       "r_mm",
+       "wall_angle_deg",
+       "curvature_radius_mm",
+       "s_mm",
+       "perimeter_mm",
+       "lateral_area_cum_mm2"
+      ],
+      "n_rows": 12610
+     },
+     "cfd_wall": {
+      "columns": [
+       "x_m",
+       "r_m",
+       "s_m",
+       "ring_area_m2",
+       "A_node_m2",
+       "p_w_Pa",
+       "T_w_K",
+       "tau_w_Pa",
+       "q_into_wall_W_m2",
+       "Q_node_W",
+       "y1plus",
+       "wall_id"
+      ],
+      "n_rows": 4810
+     },
+     "wall_1d": {
+      "n_rows": 4810,
+      "q_column": "q_into_wall_W_m2"
+     },
+     "wall_compare": {
+      "columns": [
+       "x_mm",
+       "r_design_mm",
+       "r_physical_mm",
+       "dr_mm",
+       "angle_design_deg",
+       "angle_physical_deg"
+      ],
+      "n_rows": 12610,
+      "notes_column": 7,
+      "n_notes": 12
+     }
+    },
+    "xlsxwriter": "3.2.9",
+    "python": "/home/sano/work/forge-cardmesh/.venv-pptx/bin/python",
+    "xlsx": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/run_0014_chain_v2/deliverables/excel/nozzle_tables.xlsx"
+   },
+   "wall_compare_sheet": {
+    "sheet": "wall_compare",
+    "csv": "wall_compare/wall_design_vs_physical_mm.csv"
+   }
+  },
+  "dimensions": {
+   "ok": true,
+   "seconds": 8.29,
+   "verdict": "PASS",
+   "file": "DIMENSIONS.json"
+  }
+ },
+ "skipped": {},
+ "errors": {},
+ "files_sha256": {
+  "DIMENSIONS.json": "386b11da899b02e8852c50b714d854240707024b94369555b71e031b2a52218d",
+  "cad/wall_physical.step": "6800a1310b49de880d3ba45d38e1772b96af94ce1d51ffc1f5542f7f151c7e30",
+  "cad/wall_physical_step.json": "835c8e45949bfa081d8e9f6e8796971a3f71a39c5751aeaa4c51d5ea6d0e9d85",
+  "cad/wall_surface.step": "f9fa3df0485a29782a33ea18232841057c5dc0898be4aecc77235399c2734d8d",
+  "cad/wall_surface.stl": "04149a235d0f4e7c21ec52bc2d9f0bd16b7e861501f0a9dc686b0736a356b476",
+  "excel/conditions.csv": "fd63361c30f8c995973bb3143dbf3ceee79399e50edad4e275aa0afc1b7253f9",
+  "excel/nozzle_tables.xlsx": "cbaa044e95e52c60abfe32538fd779a67c61455f801c3de6e6f5f431e94fd83c",
+  "excel/wall_cfd_nodes.csv": "0552d7ecbf958f767bac7270bca20b7b4ea09752649cfa3aa20416975d234a83",
+  "excel/wall_cfd_nodes.status.json": "79f8afafeb267cd4dd3cf4c2bb0cc37e838ac30a1101d7969d80f812faea0499",
+  "excel/wall_shape_mm.csv": "fdb375c0b9110488dfc80a9f623da5a8abcc5104987037a7e619b0a8b601b5f4",
+  "fluent/boundary_conditions.md": "fbaacbbf8b809923991b345e6251ed0fa24b85c3dae939202b9fc69c3db40be3",
+  "fluent/nozzle_2d_axi.cgns": "3aa99add7577b22d41725b12dfdeeb44b4374bd75b80bcd34e17ea5f18e988ec",
+  "fluent/nozzle_2d_axi.msh": "5316daef98b50047b941a151a7212f14f158b76ac0040c97cc7553b39426b351",
+  "mesh/mesh_structure.json": "bb52f80d3ee7143f717c3dcfc212b768bb910a0d283b811e32c8ab6cfd2a18ae",
+  "mesh/nozzle.msh": "f5e8f73661f60f3d490e96f8cffdf69cb865819d2f973da6bcdd6258dd6d13b6",
+  "mesh/nozzle_v22.msh": "ad45495de9960c46e67e0b78ad524fad06fbffa5e0700ea4babaeae5e90d9f5c",
+  "mesh/rebuild_from_step.py": "a87e7b2ee287874785d843c5aeee40abf4554d8617615e350ffb45baafe2d909",
+  "mesh/rebuilt_from_step.cgns": "0f64844055e9e8cd08b8a5e110ceb8b68f66a6e1989bac7c9a74548b5fa5c9b4",
+  "mesh/rebuilt_from_step.msh": "04237a7073326d40e6510f89a1e927753c6f04da04a482d1a5c1503c47ee9d12",
+  "mesh/rebuilt_from_step_cad.msh": "2c2fe5fa2fb3e21a38f0c3d9ba200d1da23463930d31bbfcec600dfb5140fb32",
+  "mesh/rebuilt_from_step_compare.json": "d0d29a832a45f0371948ce1c7a90da9f82cb4bdffc13a8de5d02bd8c1050b360",
+  "mesh/rebuilt_from_step_v22.msh": "35c86123811db8e3a7ca47468c0d55e3bc49c1c394b7f46bcde65cfe4f15a691",
+  "wall_compare/wall_design_vs_physical.json": "fea8e727236ea416ddb3108bf27cfa66997a592cc41024fc5e98e36e19cea737",
+  "wall_compare/wall_design_vs_physical_dr.png": "591095c0fdf1214b3156a323e2235a6b2b2e087384582b120dd6e83854c7d4ab",
+  "wall_compare/wall_design_vs_physical_full.png": "f9afe8cdde2573745b8f1758a26cf6d037a6eccc3a42b8d29c78d101e95b301a",
+  "wall_compare/wall_design_vs_physical_mm.csv": "349737c61d86fafa06ec489d9f6fe558ece7bfdcd4e3b56a1cc723cfb0ebce73",
+  "wall_compare/wall_design_vs_physical_throat.png": "73353417193105589921aa006b535934a38b0070f1e4fd15559c1cfbb33cb7ad"
+ },
+ "provenance": {
+  "format": "forge.deliverables.provenance/v1",
+  "how": "成果物を作った run の入力の sha256。wt_qualify が評価の対象 (評価の場の step と sha256、壁・格子・設定、カード・問題 YAML) と内容で照合する (置き場所・run の名前は見ない; plan tooling-nozzle-card-local-mesh §5.1 #6b)",
+  "run_name": "run_0014_chain_v2",
+  "wall": {
+   "file": "wall_repr.json",
+   "sha256": "a0dcb872680adb68db34cbcf3f0978f1888668d56736fc8fa4c6a7375679d4ed"
+  },
+  "mesh": {
+   "file": "nozzle.h5",
+   "sha256": "6450d59c808b4c8e37c3934fdc6c89595cf2101ce44531687d6ab1b9e073cbc3"
+  },
+  "config": {
+   "solverConfig.yaml": "24e1074ffe3db9b9d766576a90eb65667d6f0542de649442a375ef93f945950e",
+   "bcondConfig.yaml": "c57448a4ac4fa954c30bff377a3065df7eadb9fb0d1f8f2876c87358177cd6c5"
+  },
+  "field": {
+   "step": 46171,
+   "file": "res_46171.h5",
+   "sha256": "29bc5f1d6d938a85103a416ff11b13a74d600d6b38fad690bdab99dd4fab9ccd",
+   "source": "excel の CFD 壁面量表 (wall_tables.cfd_wall_table) の step と壁ダンプ",
+   "wall_dumps": {
+    "res_wall_3_46171.h5": "5d182e0a4765bda41940e565656fac8bf684aee9a2a40d7cf4302bcbe352fa6f"
+   },
+   "is_stop_step": true
+  },
+  "stop_rule": {
+   "file": "STOP_RULE_STATE.json",
+   "method": "v2",
+   "status": "REACHED",
+   "stop_step": 46171
+  },
+  "card": {
+   "path": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/card_m55_3coef.yaml",
+   "sha256": "b20cd7ae263f1103e33978405dd5c179789f9c82dbde35349c87079e3c49787f"
+  },
+  "problem": {
+   "path": "/home/sano/work/forge-cardmesh/case/71.m55_combustion_wt/problem_m55_p5_settle_v2.yaml",
+   "sha256": "4467632f2f8841528d9801e9a55b098c057e3d5abc280b3ed1223d5fbdd8a369"
+  }
+ }
+}

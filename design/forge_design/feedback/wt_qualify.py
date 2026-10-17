@@ -19,12 +19,37 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
     許容 0.1 %・0.1 % (plan §6 V5c; 片振幅は 2026-10-16 ユーザ決定、前は 0.05 %)。η 0.1 と軸 (η 0) は比較用に併記 (判定に使わない)。補間に軸の節点が重み > 1e−6 で入る
     (第 1 層の η が線より上) か、窓が格子の外・非有限なら判定不能 (plan §6 V5c、codex M3)。
     **この量は「近軸の線 (η) の一様性」であって試験部全体の一様性ではない** (plan §6 V5c)。
+    線の定常の保証 (plan §5.1 #7a、2026-10-17 codex result M1): 評価の線 (η・x 窓・点数) が停止規則の監視の line_mach と違う・
+    line_mach が基準に無い・評価の場の step が停止の step と違う、のどれかなら判定不能 (→ incomplete)。**監視の線は停止の時の判定の
+    記録 (下の「計算の成立」の結び付き) の基準の中身から取り、その量が SETTLED であることも要る**。停止の時の判定・基準・入力が今の run と
+    結び付かない (照合できない・記録が無い) ときは監視による保証にしない (2026-10-17 codex result 2 回目 M1: 今の settle_criteria.yaml の
+    読み取り値だけを η 0.06 に変えると、古い停止の記録のまま accepted になった)。保証が無い線は、本段の全場 (MAIN_STAGE_STARTED の
+    start_step < N ≤ 評価の場の step) の系列の最大偏差・片振幅を `check_quasisteady.py --series-csv` が両方 STEADY と判定したときだけ
+    合否に進める (VERDICT・系列の CSV を記録)。全場が 4 枚未満なら判定不能。
   - 壁解像: `check_wall_resolution.py <run> --step <場の step> --groups <bcond の wall* 全部> --weight area` の VERDICT
-    (y₁⁺ > 1 の面積 ≤ 2 %、plan §6 V4)。
-  - 計算の成立: `settle_criteria.yaml` のある run は停止規則 v2 の REACHED と停止の step の再評価 SETTLED、旧方式は
-    `STOP_RULE_STATE.json` の REACHED。状態が無い run (記録の写し等) は UNVERIFIED (accepted にも自動の較正し直しにもしない)。
+    (y₁⁺ > 1 の面積 ≤ 2 %、plan §6 V4)。ツールが評価した壁と step (EVALUATED 行) が bcond の全部の壁・場の step・停止の step と
+    一致しなければ判定不能 (plan §5.1 #7b)。
+  - 計算の成立: `settle_criteria.yaml` のある run は停止規則 v2 の REACHED と停止の step の再評価 SETTLED。**その前に停止の時の
+    判定・基準・入力が今の run と結び付くこと** (受け渡しの関門と同じ照合 `deltastar_loop._v2_binding`: 状態・停止の時の判定の専用
+    ファイル (古い run は停止の時のままの SETTLE_VERDICT.json)・基準の sha256・本段の起動の記録・再評価が使った入力の sha256・
+    STOPPED_AT・停止の場)。結び付かない・状態や停止の時の判定の記録が無いときは INDETERMINATE (→ incomplete; plan §5.1 #7a の続き、
+    2026-10-17 codex result 2 回目 M1)。旧方式は `STOP_RULE_STATE.json` の REACHED。状態が無い旧い run (記録の写し等) は UNVERIFIED
+    (accepted にも自動の較正し直しにもしない)。
   - 寸法の関門と成果物: `<run>/deliverables/` の `DIMENSIONS.json` (verdict PASS、カードを渡したらその sha256 と一致) と `MANIFEST.json`
     (verdict PASS・失敗/飛ばした部品なし・必要な部品 `deliverables.PARTS` がそろい・列挙したファイルの sha256 が一致)。無ければ ABSENT。
+    **成果物の生成元の照合** (plan §5.1 #6b の続き、2026-10-17 codex result 3 回目 Major: run_0014 の評価に run_0010 の成果物を渡すと
+    accepted になった): MANIFEST.json の `provenance` (生成元の run の壁・格子・設定、場の step と sha256・壁ダンプ、停止の step、カード・
+    問題 YAML の sha256) を今の評価の対象 (評価の場の step と `res_<step>.h5`、run の壁・格子・設定、渡したカード・問題 YAML) と内容で
+    照合する (`provenance_check`; 置き場所・run の名前は見ない — 別の置き場所への写しは中身が同じなら通す)。一致しない・生成元の記録が
+    無い (古い成果物)・照合できない → 成果物 INDETERMINATE・寸法の関門も INDETERMINATE (その成果物の寸法はこの run の判定にしない)。
+    結果は incomplete (次の手は既存の規則どおり escalate; 理由に作り直しを書く)。run の名前の不一致は警告のまま (合否は内容の照合で決める)。
+    **配る msh と計算の格子の元の msh の照合** (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major: 記録していた格子は h5 だけで、
+    配る msh・Fluent・寸法の関門の入力の run の `nozzle.msh` と結ぶ検査が無く、MANIFEST の `msh_sha256_matches` が false でも、
+    内部の配点だけ違う msh でも accepted だった): 準備の記録 (`prepare_info.json` の `mesh.hashes.msh_sha256`; h5 はこの msh から変換
+    された) を基準に、今の run の `nozzle.msh`・配る `mesh/nozzle.msh` (実ファイルと MANIFEST の記録)・生成元の記録 (v2 の `msh`・
+    `prepare_msh`; v1 は MANIFEST の `parts.mesh.msh41_sha256` などの既存の記録) の sha256 が一致することを要る (`_msh_binding`)。
+    書き出しのときの一致の印 (`msh_sha256_matches`・`matches_prepare`) が false なら不一致。不一致 → MISMATCH、準備の記録に msh の
+    sha256 が無い・run の `nozzle.msh` が無い・書き出しのときの msh の記録が無い → UNCHECKABLE (どちらも成果物 INDETERMINATE → incomplete)。
 
 公差・窓の出所 (どれを使ったかを記録の `tolerances.*.source` に書く; 上が優先):
   1. CLI (`--exit-tol-rel`・`--line-eta`・`--line-x-range-m X0 X1`・`--line-tol-maxabs`・`--line-tol-halfamp`)
@@ -51,7 +76,7 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
       [--prev-run PREV_RUN] [--iteration K --max-iterations N] [--recalibrations-done R]
       [--delta-next CSV] [--prev-delta-next CSV] [--step S] [--deliverables DIR] [--out-dir DIR | --no-write] [--json]
 出力 (`--out-dir`、既定 `<run>/wt_qualify/`): `WT_QUALIFICATION.json`・`check_wall_resolution.txt`、recalibrate なら
-`contur_overrides.yaml` (新しい係数のカードの overrides の断片)。
+`contur_overrides.yaml` (新しい係数のカードの overrides の断片)、監視されていない V5c の線の系列を作ったら `v5c_line_series.csv`。
 終了コード: 0 accepted、2 back_to_correction で recalibrate、3 escalate (back_to_correction・rejected)、4 incomplete、1 入力の不備。
 """
 from __future__ import annotations
@@ -70,7 +95,7 @@ import yaml
 from . import contur_calibrate as CC
 
 FORMAT = "forge.wt_qualify/v1"
-PLAN = ("plans/active/tooling-nozzle-card-local-mesh.md §5.1 #6b・§4.3・§6 V5; "
+PLAN = ("plans/accepted/tooling-nozzle-card-local-mesh.md §5.1 #6b・§4.3・§6 V5; "
         "plans/active/tooling-design-orchestrator.md §4.2")
 OUT_DIRNAME = "wt_qualify"
 OUT_JSON = "WT_QUALIFICATION.json"
@@ -207,24 +232,76 @@ def select_field(run_dir, step: int | None = None) -> dict:
     return {"step": steps[-1], "res": f"res_{steps[-1]}.h5", "source": f"最後の全場 ({why})"}
 
 
+def stop_binding(run_dir) -> dict:
+    """停止の時の判定・基準・入力と今の run の結び付き (plan §5.1 #7a の続き、2026-10-17 codex result 2 回目 M1)。受け渡しの関門の照合
+    `deltastar_loop._v2_binding` をそのまま使う (状態・停止の時の判定の専用ファイル・基準の sha256・本段の起動・再評価の入力の sha256・
+    STOPPED_AT・停止の場・見張りの記録)。照合が例外で止まったときも結び付かないとする (合格にしない)。
+    戻り: _v2_binding の戻り {pass, problems, verdict (停止の時の判定の中身), verdict_file, stop_step, criteria_sha256, ...}。"""
+    from ..evaluate import stop_rule as SR
+    from . import deltastar_loop as DL
+    run_dir = Path(run_dir)
+    try:
+        return DL._v2_binding(run_dir, SR.read_state(run_dir), SR._settle())
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+        return {"pass": False, "problems": [f"照合が例外で止まった ({type(e).__name__}: {e})"], "verdict": None, "verdict_file": None,
+                "stop_step": None, "criteria_sha256": None}
+
+
+def bound_lines(verdict: dict | None) -> list[dict]:
+    """停止の時の判定 (結び付いた記録) の基準の中身 (criteria.content) の line_mach と、その量の停止の時の verdict。
+    今の settle_criteria.yaml を読み直した値は使わない (読み取りだけを変えても監視の線にならない; codex result 2 回目 M1)。"""
+    if not isinstance(verdict, dict):
+        return []
+    content = (verdict.get("criteria") or {}).get("content") or {}
+    by_name = {str(q.get("name")): q for q in verdict.get("quantities") or [] if isinstance(q, dict)}
+    out = []
+    for q in content.get("quantities") or []:
+        if not (isinstance(q, dict) and q.get("kind") == "line_mach"):
+            continue
+        try:
+            line = {"name": str(q.get("name")), "eta": float(q["eta"]), "x_range_m": [float(q["x_range_m"][0]), float(q["x_range_m"][1])],
+                    "n": int(q.get("n", 2001)), "Md": q.get("Md")}
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        line["verdict"] = (by_name.get(line["name"]) or {}).get("verdict")
+        out.append(line)
+    return out
+
+
 def flow_check(run_dir) -> dict:
-    """計算の成立: PASS / FAIL / UNVERIFIED (判定は停止規則の記録だけを読む; 収束・関門の判定は judge_run・受け渡しの関門の役目)。"""
+    """計算の成立: PASS / FAIL / INDETERMINATE / UNVERIFIED (判定は停止規則の記録だけを読む; 収束・関門の判定は judge_run・受け渡しの関門の役目)。
+    v2 は停止の時の判定・基準・入力が今の run と結び付いた (`stop_binding`) ときだけ PASS・FAIL を決め、結び付かなければ INDETERMINATE。
+    結び付いたときは停止の時の判定の監視の線 (`bound_lines`) を monitored_lines に入れる (V5c の線の保証が使う)。"""
     from ..evaluate import stop_rule as SR
     run_dir = Path(run_dir)
     st_path = run_dir / SR.STATE
     v2 = (run_dir / "settle_criteria.yaml").is_file()
     if not st_path.is_file():
         if v2:
-            return {"status": "FAIL", "method": "v2", "why": f"settle_criteria.yaml のある run に {SR.STATE} が無い (本段が終わっていない・記録が失われた)"}
+            # 2026-10-17 (codex result 2 回目 M1) から、記録が無い v2 の run は FAIL でなく INDETERMINATE (確かめられない; 結果は同じ incomplete)
+            return {"status": "INDETERMINATE", "method": "v2", "monitored_lines": [],
+                    "why": f"settle_criteria.yaml のある run に {SR.STATE} が無い (本段が終わっていない・記録が失われた; 停止の時の判定を照合できない)"}
         return {"status": "UNVERIFIED", "method": None, "why": f"{SR.STATE} が無い (記録の写し・停止規則を使わない run) — 計算の成立を確かめられない"}
     s = json.loads(st_path.read_text())
     rec = {"method": s.get("method", "v1" if s.get("version") == 1 else None), "stop_status": s.get("status"), "stop_step": s.get("stop_step")}
     if v2 or s.get("method") == "v2":
         rv = (s.get("reeval") or {}).get("verdict")
         rec["reeval_verdict"] = rv
-        ok = s.get("status") == "REACHED" and rv == "SETTLED"
+        b = stop_binding(run_dir)
+        rec["binding"] = {"pass": bool(b.get("pass")), "problems": list(b.get("problems") or [])[:10], "n_problems": len(b.get("problems") or []),
+                          "verdict_file": b.get("verdict_file"), "stop_step": b.get("stop_step"), "criteria_sha256": b.get("criteria_sha256"),
+                          "tool": "design/forge_design/feedback/deltastar_loop.py _v2_binding (受け渡しの関門と同じ照合)"}
+        if not rec["binding"]["pass"]:
+            rec.update(status="INDETERMINATE", monitored_lines=[],
+                       why=(f"停止の時の判定・基準・入力が今の run と結び付かない (状態 {s.get('status')}・再評価 {rv} を確かめられない): "
+                            + "; ".join(rec["binding"]["problems"])[:1200]))
+            return rec
+        bv = (b.get("verdict") or {}).get("verdict")
+        rec["bound_verdict"] = bv
+        rec["monitored_lines"] = bound_lines(b.get("verdict"))
+        ok = s.get("status") == "REACHED" and bv == "SETTLED"
         rec.update(status="PASS" if ok else "FAIL",
-                   why=None if ok else f"停止規則 v2 の状態 {s.get('status')}・停止の step の再評価 {rv} (REACHED・SETTLED が要る)")
+                   why=None if ok else f"停止規則 v2 の状態 {s.get('status')}・停止の step の再評価 {bv} (REACHED・SETTLED が要る)")
         return rec
     ok = s.get("status") == "REACHED"
     rec.update(status="PASS" if ok else "FAIL", why=None if ok else f"停止規則の状態 {s.get('status')} (REACHED が要る)")
@@ -298,14 +375,154 @@ def v5c_line(F: dict, Md: float, eta: float, x_range_m, n: int, tol_maxabs: floa
     return rec
 
 
+# ------------------------------------------------------------------ V5c の線の定常の保証 (§5.1 #7a)
+def monitored_line(flow: dict, v5c: dict) -> dict | None:
+    """停止の時の判定に結び付いた監視の線 (flow の monitored_lines) のうち、評価の線 (η・x 窓・点数) と同じもの。無ければ最初の線
+    (違いを書くため)、線が無ければ None。"""
+    lines = flow.get("monitored_lines") or []
+    for ln in lines:
+        if "eta" in v5c and _same_line(ln, v5c):
+            return ln
+    return lines[0] if lines else None
+
+
+def _same_line(a: dict, b: dict) -> bool:
+    return (abs(float(a["eta"]) - float(b["eta"])) <= 1e-12
+            and all(abs(float(x) - float(y)) <= 1e-9 for x, y in zip(a["x_range_m"], b["x_range_m"]))
+            and int(a["n"]) == int(b["n"]))
+
+
+def line_monitor_gaps(v5c: dict, settle_line: dict | None, fld: dict, flow: dict) -> list[str]:
+    """V5c の線と場が停止規則の監視で保証されていない理由 (空 = 保証される: 停止の時の判定・基準・入力が今の run と結び付き
+    (flow の binding)、その判定の監視の line_mach (settle_line = `monitored_line`; 今のファイルを読み直した値ではない) と同じ線
+    (η・x 窓・点数) で、その量が停止の時に SETTLED、場が停止の step)。2026-10-17 codex result M1: 違っても警告だけで accepted に
+    できた (run_0014 に line_eta 0.06)。同 2 回目 M1: 停止の時の基準と結び付けず、今の settle_criteria.yaml の読み取り値と比べていた。"""
+    why = []
+    bnd = flow.get("binding")
+    if not (isinstance(bnd, dict) and bnd.get("pass") is True):
+        why.append("停止の時の判定・基準・入力が今の run と結び付かない (" + ("; ".join(bnd.get("problems") or [])[:400]
+                                                                   if isinstance(bnd, dict) else "照合の記録が無い") + ")")
+    if settle_line is None:
+        why.append("監視の量 line_mach が停止の時の判定の基準に無い (停止規則が線を監視していない・結び付いた判定が無い)")
+    elif "eta" in v5c:
+        if not _same_line(settle_line, v5c):
+            why.append(f"評価の線 (η {v5c['eta']}, x {v5c['x_range_m']} m, {v5c['n']} 点) が監視の line_mach (η {settle_line['eta']}, "
+                       f"x {settle_line['x_range_m']} m, {settle_line['n']} 点) と違う")
+        elif settle_line.get("verdict") != "SETTLED":
+            why.append(f"停止の時の判定で監視の線 {settle_line.get('name')} が SETTLED でない ({settle_line.get('verdict')!r})")
+    stop = flow.get("stop_step")
+    if not isinstance(stop, int):
+        why.append("停止の step の記録が無い (STOP_RULE_STATE.json の stop_step)")
+    elif stop != int(fld["step"]):
+        why.append(f"評価の場の step {fld['step']} が停止の step {stop} と違う")
+    return why
+
+
+def main_stage_fields(run_dir, end_step: int) -> dict:
+    """本段の全場 res_<N>.h5 (本段の開始の記録 MAIN_STAGE_STARTED の start_step < N ≤ end_step、開始の時に残っていたファイルを除く)。
+    戻り: {steps, start_step, why (作れないとき)}。"""
+    run_dir = Path(run_dir)
+    p = run_dir / "MAIN_STAGE_STARTED"
+    if not p.is_file():
+        return {"steps": [], "why": "本段の開始の記録 MAIN_STAGE_STARTED が無い (系列の区間を特定できない)"}
+    try:
+        ms = json.loads(p.read_text())
+    except ValueError as e:
+        return {"steps": [], "why": f"MAIN_STAGE_STARTED を読めない ({e})"}
+    s0 = ms.get("start_step")
+    if not isinstance(s0, int):
+        return {"steps": [], "why": "MAIN_STAGE_STARTED に start_step が無い (系列の区間を特定できない)"}
+    stale = {Path(str(f)).name for f in (ms.get("res_files_present") or [])}
+    steps = [s for s in _res_steps(run_dir) if s0 < s <= int(end_step) and f"res_{s}.h5" not in stale]
+    return {"steps": steps, "start_step": s0}
+
+
+QS_COLS = ("maxabs_pct", "halfamp_pct")   # 系列で判定する量 = V5c が合否に使う 2 量
+QS_MIN_SNAPS = 4                          # check_quasisteady.py の --min-snaps の既定と同じ (明示して渡す)
+
+
+def line_series_steadiness(run_dir, fld: dict, v5c: dict, Md: float, out_dir=None) -> dict:
+    """監視されていない V5c の線について、本段の全場の時系列 (評価の場で終わる) の最大偏差・片振幅を
+    `check_quasisteady.py --series-csv` で判定する。status: STEADY / NOT_STEADY / INDETERMINATE (系列を作れない)。
+    系列の CSV は out_dir (無ければ一時ディレクトリで、値は記録に埋め込む) に書く。"""
+    import csv
+    import hashlib
+    import tempfile
+    from ..report.nozzle_report import load_field
+    run_dir = Path(run_dir)
+    rec = {"tool": "solver_density_cuda/tools/check_quasisteady.py --series-csv", "cols": list(QS_COLS), "min_snaps": QS_MIN_SNAPS}
+    ms = main_stage_fields(run_dir, int(fld["step"]))
+    rec["steps"] = ms["steps"]
+    if ms.get("why"):
+        rec.update(status="INDETERMINATE", why=ms["why"])
+        return rec
+    if not ms["steps"] or ms["steps"][-1] != int(fld["step"]):
+        rec.update(status="INDETERMINATE", why=f"本段の全場の系列が評価の場 (step {fld['step']}) で終わらない")
+        return rec
+    if len(ms["steps"]) < QS_MIN_SNAPS:
+        rec.update(status="INDETERMINATE", why=f"本段の全場が {len(ms['steps'])} 枚 (< {QS_MIN_SNAPS}) で系列を作れない "
+                                               f"(step {ms['start_step']} < N ≤ {fld['step']}: {ms['steps']})")
+        return rec
+    rows = []
+    for s in ms["steps"]:
+        r = v5c_line(load_field(run_dir, f"res_{s}.h5"), Md, float(v5c["eta"]), v5c["x_range_m"], int(v5c["n"]),
+                     float(v5c["tol_maxabs_pct"]), float(v5c["tol_halfamp_pct"]))
+        rows.append({"step": s, **{c: r.get(c, float("nan")) for c in QS_COLS}})
+    rec["values"] = rows
+    with tempfile.TemporaryDirectory() as td:
+        od = Path(out_dir) if out_dir is not None else Path(td)
+        csv_path = od / "v5c_line_series.csv"
+        with open(csv_path, "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["step", *QS_COLS])
+            w.writeheader()
+            w.writerows(rows)
+        cmd = [sys.executable, str(TOOLS / "check_quasisteady.py"), "--series-csv", str(csv_path), "--series-cols", ",".join(QS_COLS),
+               "--min-snaps", str(QS_MIN_SNAPS)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        rec.update(csv=str(csv_path) if out_dir is not None else None, csv_sha256=hashlib.sha256(csv_path.read_bytes()).hexdigest(),
+                   cmd=" ".join(cmd[1:]), returncode=r.returncode, output=(r.stdout + r.stderr)[-3000:])
+    txt = r.stdout + r.stderr
+    verd = {c: (m.group(1) if (m := re.search(rf"^\s+{re.escape(c)}\s*:.*\s(\S+)\s*$", txt, re.M)) else None) for c in QS_COLS}
+    rec["verdicts"] = verd
+    ok = r.returncode == 0 and all(v == "STEADY" for v in verd.values())
+    rec["status"] = "STEADY" if ok else "NOT_STEADY"
+    if not ok:
+        rec["why"] = f"check_quasisteady の判定 {verd} (終了コード {r.returncode})"
+    return rec
+
+
+def line_guarantee(v5c: dict, settle_line: dict | None, fld: dict, flow: dict, run_dir, Md: float, series_dir=None) -> dict:
+    """V5c の線の定常の保証 (§5.1 #7a; v5c をその場で書き換えて返す): 停止の時の判定と結び付かない・監視の線と違う・監視の量が無い・
+    その量が停止の時に SETTLED でない・停止の step でない、のどれかなら判定不能 (線だけの合否は line_verdict に残す)。ただし本段の
+    全場の系列で check_quasisteady が STEADY を返したときだけ合否に進める (その VERDICT と系列のファイルを v5c["steadiness"] に記録)。
+    settle_line は停止の時の判定に結び付いた監視の線 (`monitored_line`)。v5c が既に判定不能 (窓・軸の重み・非有限) なら何もしない。"""
+    if v5c.get("verdict") not in ("PASS", "FAIL"):
+        return v5c
+    gaps = line_monitor_gaps(v5c, settle_line, fld, flow)
+    if not gaps:
+        v5c["steadiness"] = {"basis": "停止規則の監視 (停止の時の判定に結び付いた基準の line_mach と同じ線・その量が SETTLED、停止の step の場)",
+                             "monitored_line": settle_line, "verdict_file": (flow.get("binding") or {}).get("verdict_file")}
+        return v5c
+    qs = line_series_steadiness(run_dir, fld, v5c, Md, series_dir)
+    v5c["steadiness"] = {"basis": "本段の全場の系列の check_quasisteady (監視で保証されない)", "monitor_gaps": gaps, "series": qs}
+    if qs["status"] != "STEADY":
+        v5c["line_verdict"] = v5c["verdict"]
+        v5c.update(verdict="INDETERMINATE",
+                   why="線の定常を確かめていない: " + "; ".join(gaps) + f" — 全場の系列の準定常 {qs['status']} ({qs.get('why')})")
+    return v5c
+
+
 # ------------------------------------------------------------------ 壁解像・成果物
-def wall_resolution(run_dir, step: int, out_txt=None) -> dict:
-    """`check_wall_resolution.py --step --groups <wall*> --weight area` を回して VERDICT を読む。"""
+def wall_resolution(run_dir, step: int, out_txt=None, stop_step=None) -> dict:
+    """`check_wall_resolution.py --step --groups <wall*> --weight area` を回して VERDICT を読む。PASS・FAIL でも、ツールが評価した
+    壁と step (出力の EVALUATED 行) が要求した全部の壁 (bcond の名前・physID)・要求した step・停止の step (あれば) と一致しなければ
+    判定不能にする (2026-10-17 codex result M2: ツールが最新の出力に代えた・存在しない壁を飛ばした PASS を受理していた)。"""
     run_dir = Path(run_dir)
     bc = yaml.safe_load((run_dir / "bcondConfig.yaml").read_text()) or {}
     walls = [k for k, v in bc.items() if isinstance(v, dict) and str(v.get("kind", "")).startswith("wall")]
     if not walls:
         return {"verdict": "INDETERMINATE", "why": "bcondConfig に no-slip 壁 (kind wall*) が無い"}
+    want_pid = {k: (int(bc[k]["physID"]) if bc[k].get("physID") is not None else None) for k in walls}
     cmd = [sys.executable, str(TOOLS / "check_wall_resolution.py"), str(run_dir), "--step", str(int(step)), "--groups", ",".join(walls),
            "--weight", "area"]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -320,13 +537,212 @@ def wall_resolution(run_dir, step: int, out_txt=None) -> dict:
     mm = re.search(r"目標 ([0-9.eE+-]+) を超える面積割合 最大 ([0-9.]+) % \(許容 ([0-9.eE+-]+) %\)", txt)
     if mm:
         out.update(target=float(mm.group(1)), over_area_pct=float(mm.group(2)), over_area_allow_pct=float(mm.group(3)))
+    if out["verdict"] in ("PASS", "FAIL"):
+        # 評価した壁と step の照合 (ツールの出力の EVALUATED 行; 書式 名前/physID@step)
+        ev = re.search(r"^EVALUATED: (.*)$", txt, re.M)
+        got = [(g.group(1), int(g.group(2)), int(g.group(3))) for g in re.finditer(r"([^\s,/]+)/(\d+)@(\d+)", ev.group(1))] if ev else []
+        out["evaluated"] = [{"name": n, "physID": p, "step": s} for n, p, s in got]
+        probs = []
+        if not got:
+            probs.append("ツールの出力に評価した壁と step (EVALUATED 行) が無い")
+        names = [n for n, _, _ in got]
+        miss = [w for w in walls if w not in names]
+        extra = sorted({n for n in names if n not in walls})
+        if miss:
+            probs.append(f"要求した壁 {miss} を評価していない")
+        if extra:
+            probs.append(f"要求していない壁 {extra} を評価した")
+        bad_pid = [f"{n} (physID {p}、bcond は {want_pid[n]})" for n, p, _ in got if n in want_pid and want_pid[n] is not None and p != want_pid[n]]
+        if bad_pid:
+            probs.append(f"bcond と違う physID の出力を評価した {bad_pid}")
+        bad_step = sorted({s for _, _, s in got if s != int(step)})
+        if bad_step:
+            probs.append(f"要求した step {int(step)} でない出力 (step {bad_step}) を評価した")
+        if isinstance(stop_step, int) and int(step) != stop_step:
+            probs.append(f"評価した step {int(step)} が停止の step {stop_step} でない (V4 の判定ではない)")
+        if probs:
+            out.update(tool_verdict=out["verdict"], verdict="INDETERMINATE", why="; ".join(probs))
     if out["verdict"] == "INDETERMINATE" and not m:
         out["tail"] = txt[-1500:]
     return out
 
 
-def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=()) -> dict:
-    """成果物 (MANIFEST.json) と寸法の関門 (DIMENSIONS.json)。status: PASS / FAIL / INDETERMINATE / ABSENT。"""
+PROV_FIX = "この run から成果物を作り直す (python -m forge_design.export.deliverables <run> --card <カード> --problem <問題 YAML>)"
+
+
+def _cmp_sha(name: str, recorded, current, mism: list, unchk: list, compared: dict) -> None:
+    """記録と今の sha256 を比べて、違えば mism、どちらかが無ければ unchk に理由を足す (compared に両方を残す)。"""
+    compared[name] = {"recorded": recorded, "current": current}
+    if recorded is None or current is None:
+        unchk.append(f"{name} の sha256 が" + ("生成元の記録" if recorded is None else "今の評価の対象") + "に無い (照合できない)")
+    elif recorded != current:
+        mism.append(f"{name} の sha256 が違う (成果物の生成元 {str(recorded)[:16]}…、今の評価の対象 {str(current)[:16]}…)")
+
+
+def _find_key(o, key: str, path: str = "") -> list:
+    """入れ子の dict・list の中の key の値を (場所, 値) で全部集める。"""
+    out = []
+    if isinstance(o, dict):
+        for k, v in o.items():
+            p = f"{path}.{k}" if path else str(k)
+            if k == key:
+                out.append((p, v))
+            out += _find_key(v, key, p)
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            out += _find_key(v, key, f"{path}[{i}]")
+    return out
+
+
+MSH_DELIVERED = "mesh/nozzle.msh"          # part_mesh が配る msh (書き出しのときの run の nozzle.msh の写し)
+
+
+def _msh_binding(man: dict, pv: dict, cur: dict, deliv_dir, mism: list, unchk: list, compared: dict) -> None:
+    """配る msh と計算の格子 (h5) の元の msh の照合 (plan §5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major: 記録していた格子は
+    h5 だけで、配る msh・Fluent・寸法の関門の入力 (run の nozzle.msh) と結ぶ検査が無かった)。
+    基準は今の準備の記録 (`prepare_info.json` の `mesh.hashes.msh_sha256`; h5 は準備のときにこの msh から変換された)。基準と一致を要るもの:
+    今の run の `nozzle.msh`、配る `mesh/nozzle.msh` の実ファイルと MANIFEST の記録 (`parts.mesh.msh41_sha256`・files_sha256; 記録か
+    ファイルがあれば)、書き出しのときの msh (v2: 生成元の記録の `msh`・`prepare_msh`。v1 (msh の項目が無い古い形) は MANIFEST の
+    `parts.mesh.msh41_sha256` か files_sha256 の `mesh/nozzle.msh` — どちらも無ければ書き出しのときの msh が分からず照合できない)。
+    書き出しのときの一致の印 (MANIFEST の `msh_sha256_matches`・v2 の `msh.matches_prepare`) が false なら不一致、true でなければ照合できない。
+    基準が無い・要るものが無い → unchk、違う → mism に理由を足す。"""
+    from ..export import deliverables as DV
+    pr = cur["prepare_msh"]
+    ref = pr["sha256"]
+    ref_name = f"計算の格子 ({cur['mesh']['file']}) の元の msh (準備の記録 {pr['file']} の {pr['key']})"
+    v2 = pv.get("format") == DV.PROVENANCE_FORMAT
+    parts = man.get("parts") if isinstance(man.get("parts"), dict) else {}
+    pm = parts.get("mesh") if isinstance(parts.get("mesh"), dict) else {}
+    fs = man.get("files_sha256") if isinstance(man.get("files_sha256"), dict) else {}
+    items = [(f"今の run の {DV.MSH_FILE}", cur["msh"]["sha256"])]
+    if v2:
+        items += [(f"生成元の記録の msh (書き出しのときの run の {DV.MSH_FILE}; 配る msh・Fluent・寸法の関門の入力)", (pv.get("msh") or {}).get("sha256")),
+                  (f"生成元の記録の準備の記録の msh (書き出しのときの {DV.PREPARE_FILE})", (pv.get("prepare_msh") or {}).get("sha256"))]
+    elif "msh41_sha256" not in pm and MSH_DELIVERED not in fs:
+        unchk.append("書き出しのときの msh の記録が無い (v1 の生成元の記録に msh の項目が無く、MANIFEST の parts.mesh.msh41_sha256・files_sha256 の "
+                     f"{MSH_DELIVERED} も無い; 照合できない)")
+    if "msh41_sha256" in pm:
+        items.append(("配る msh の記録 (MANIFEST の parts.mesh.msh41_sha256)", pm.get("msh41_sha256")))
+    if MSH_DELIVERED in fs:
+        items.append((f"配る msh の記録 (MANIFEST の files_sha256 の {MSH_DELIVERED})", fs.get(MSH_DELIVERED)))
+    dfile = None if deliv_dir is None else Path(deliv_dir) / MSH_DELIVERED
+    if dfile is not None and (dfile.is_file() or "msh41_sha256" in pm or MSH_DELIVERED in fs):
+        items.append((f"配る msh (成果物の {MSH_DELIVERED})", DV._sha_file(dfile)))
+    if ref is None:
+        unchk.append(f"準備の記録に msh の sha256 が無い ({pr.get('why')}; 計算の格子の元の msh が分からない — 照合できない)")
+    for nm, s in items:
+        if not isinstance(s, str) or not s:
+            unchk.append(f"{nm} が無い (照合できない)")
+        elif ref is not None and s != ref:
+            mism.append(f"{nm} の sha256 {s[:16]}… が{ref_name} {ref[:16]}… と違う")
+    flags = [(f"MANIFEST の parts.mesh.{p}", v) for p, v in _find_key(pm, "msh_sha256_matches")]
+    if v2:
+        flags.append(("生成元の記録の msh.matches_prepare", (pv.get("msh") or {}).get("matches_prepare")))
+    for nm, v in flags:
+        if v is False:
+            mism.append(f"書き出しのときに msh が準備の記録と違った ({nm} = false)")
+        elif v is not True:
+            unchk.append(f"書き出しのときの msh と準備の記録の一致の印が true でない ({nm} = {v!r}; 照合できない)")
+    compared["msh"] = {"reference": ref, "reference_source": ref_name, "items": {nm: s for nm, s in items},
+                       "flags": {nm: v for nm, v in flags}, "provenance_format": pv.get("format")}
+
+
+def _h5_binding(run_dir: Path, cur: dict, mism: list, unchk: list, compared: dict) -> None:
+    """計算の格子 (h5) が準備のときに msh から変換したものと同じかの照合 (2026-10-17、result 段レビュー 4 回目の後に implementer が見つけた穴:
+    準備の後に h5 だけを別の msh から変換し直すと、msh・準備の記録・生成元の記録 (h5 の sha256) がそろったまま通る)。
+    準備の記録 `prepare_info.json` の `mesh.hashes.coord_sha256`・`topology_sha256` (変換の直後の h5 の座標と接続) と、今の h5 から同じ式
+    (`runner_axismach.h5_mesh_hashes`) で計算し直した値が一致することを要る。記録が無い・h5 を読めない → 照合できない。"""
+    from ..evaluate.runner_axismach import h5_mesh_hashes
+    h5 = Path(run_dir) / cur["mesh"]["file"]
+    try:
+        hashes = (json.loads((Path(run_dir) / "prepare_info.json").read_text()).get("mesh") or {}).get("hashes") or {}
+    except Exception as e:  # noqa: BLE001
+        unchk.append(f"準備の記録 prepare_info.json を読めない ({e}; 計算の格子の座標・接続を照合できない)")
+        return
+    rc, rt = hashes.get("coord_sha256"), hashes.get("topology_sha256")
+    if not (isinstance(rc, str) and isinstance(rt, str)):
+        unchk.append("準備の記録に計算の格子の座標・接続の sha256 (mesh.hashes.coord_sha256・topology_sha256) が無い (照合できない)")
+        return
+    try:
+        now = h5_mesh_hashes(h5)
+    except Exception as e:  # noqa: BLE001
+        unchk.append(f"計算の格子 {h5.name} を読めない ({e}; 照合できない)")
+        return
+    compared["h5"] = {"coord": {"recorded": rc, "current": now["coord_sha256"]}, "topology": {"recorded": rt, "current": now["topology_sha256"]}}
+    if now["coord_sha256"] != rc:
+        mism.append(f"計算の格子 {h5.name} の座標が準備の記録と違う (変換の後に h5 が作り直された; {now['coord_sha256'][:16]}… と {rc[:16]}…)")
+    if now["topology_sha256"] != rt:
+        mism.append(f"計算の格子 {h5.name} の接続が準備の記録と違う ({now['topology_sha256'][:16]}… と {rt[:16]}…)")
+
+
+def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, problem_path=None, deliv_dir=None) -> dict:
+    """成果物の生成元の記録 (MANIFEST.json の `provenance`) と今の評価の対象の照合 (plan §5.1 #6b の続き、2026-10-17 codex result
+    3 回目 Major)。比べるのは内容 (sha256) と step だけ — 壁・格子・設定 (`deliverables.run_identity`)、評価の場 (`field` の step と
+    `res_<step>.h5` の sha256、生成元が読んだ壁ダンプ)、停止の step (`deliverables.stop_identity`)、カード・問題 YAML (両方に無ければ
+    比べるものが無いので一致、片方だけなら照合できない)、配る msh と計算の格子の元の msh (`_msh_binding`; §5.1 #6c2 の再オープン、
+    4 回目 Major。deliv_dir は配る `mesh/nozzle.msh` の実ファイルを読むのに使う)。書式は v2 と v1 (msh の項目が無い古い形) を読む。
+    status: MATCH / MISMATCH (どれかが違う) / ABSENT (生成元の記録が無い古い成果物) / UNCHECKABLE (照合できない)。"""
+    from ..export import deliverables as DV
+    run_dir = Path(run_dir)
+    pv = man.get("provenance") if isinstance(man, dict) else None
+    rec = {"tool": "design/forge_design/feedback/wt_qualify.py provenance_check (deliverables.run_identity・field_identity・stop_identity と同じ定義)"}
+    if not isinstance(pv, dict):
+        rec.update(status="ABSENT", problems=["成果物に生成元の記録 (MANIFEST.json の provenance) が無い (古い成果物; 生成元の run・場を確かめられない)"])
+        return rec
+    if pv.get("format") not in (DV.PROVENANCE_FORMAT, DV.PROVENANCE_FORMAT_V1):
+        rec.update(status="UNCHECKABLE", problems=[f"生成元の記録の書式 {pv.get('format')!r} が {DV.PROVENANCE_FORMAT} か "
+                                                   f"{DV.PROVENANCE_FORMAT_V1} でない (照合できない)"])
+        return rec
+    mism, unchk, cmp_ = [], [], {}
+    cur = DV.run_identity(run_dir)
+    _cmp_sha(f"壁 ({cur['wall']['file']})", (pv.get("wall") or {}).get("sha256"), cur["wall"]["sha256"], mism, unchk, cmp_)
+    _cmp_sha(f"格子 ({cur['mesh']['file']})", (pv.get("mesh") or {}).get("sha256"), cur["mesh"]["sha256"], mism, unchk, cmp_)
+    for n in DV.PROVENANCE_CONFIGS:
+        _cmp_sha(f"設定 ({n})", (pv.get("config") or {}).get(n), cur["config"][n], mism, unchk, cmp_)
+    # 配る msh と計算の格子の元の msh (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major)
+    _msh_binding(man, pv, cur, deliv_dir, mism, unchk, cmp_)
+    _h5_binding(run_dir, cur, mism, unchk, cmp_)
+    pf = pv.get("field")
+    if not isinstance(field, dict) or not isinstance(field.get("step"), int):
+        unchk.append("評価の場の step が渡されていない (照合できない)")
+    elif not isinstance(pf, dict) or not isinstance(pf.get("step"), int):
+        unchk.append(f"生成元の場の記録が無い ({pv.get('field_why') or '理由の記録なし'}; 照合できない)")
+    else:
+        cmp_["場の step"] = {"recorded": pf["step"], "current": int(field["step"])}
+        if pf["step"] != int(field["step"]):
+            mism.append(f"場の step が違う (成果物の生成元 {pf['step']}、評価の場 {int(field['step'])})")
+        else:
+            fi = DV.field_identity(run_dir, int(field["step"]))
+            _cmp_sha(f"場 ({fi['file']})", pf.get("sha256"), fi["sha256"], mism, unchk, cmp_)
+        wd = pf.get("wall_dumps")
+        if not isinstance(wd, dict) or not wd:
+            unchk.append("生成元が読んだ壁ダンプの記録が無い (照合できない)")
+        else:
+            for n, s in sorted(wd.items()):
+                _cmp_sha(f"壁ダンプ ({n})", s, DV._sha_file(run_dir / n), mism, unchk, cmp_)
+    ps = (pv.get("stop_rule") or {}).get("stop_step") if isinstance(pv.get("stop_rule"), dict) else None
+    cs = (DV.stop_identity(run_dir) or {}).get("stop_step")
+    cmp_["停止の step"] = {"recorded": ps, "current": cs}
+    if ps != cs:
+        mism.append(f"停止の step が違う (成果物の生成元 {ps}、今の run {cs})")
+    for nm, rp, p in (("カード", pv.get("card"), card_path), ("問題 YAML", pv.get("problem"), problem_path)):
+        rs = rp.get("sha256") if isinstance(rp, dict) else None
+        cs_ = None if p is None else DV._sha_file(Path(p))
+        if rp is None and p is None:
+            cmp_[nm] = {"recorded": None, "current": None, "note": "書き出し・評価のどちらにも渡していない"}
+            continue
+        _cmp_sha(nm, rs, cs_, mism, unchk, cmp_)
+    rec["compared"] = cmp_
+    rec["recorded_run_name"] = pv.get("run_name")
+    rec["status"] = "MISMATCH" if mism else "UNCHECKABLE" if unchk else "MATCH"
+    rec["problems"] = mism + unchk
+    return rec
+
+
+def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(), field=None, problem_path=None) -> dict:
+    """成果物 (MANIFEST.json) と寸法の関門 (DIMENSIONS.json)。status: PASS / FAIL / INDETERMINATE / ABSENT。
+    field (評価の場 {step, ...})・problem_path (評価に渡した問題 YAML) は生成元の照合 (`provenance_check`) に使う。照合が MATCH で
+    なければ成果物と寸法の関門を INDETERMINATE にする (2026-10-17 codex result 3 回目 Major)。"""
     from ..export.deliverables import PARTS
     run_dir = Path(run_dir)
     od = Path(deliv_dir) if deliv_dir is not None else run_dir / "deliverables"
@@ -376,10 +792,23 @@ def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(
         probs.append("MANIFEST.json に files_sha256 が無い")
     warns = []
     if man.get("run") and Path(str(man["run"])).name != run_dir.name:
+        # 名前は警告だけ (合否は下の生成元の照合 = 内容で決める; 別の置き場所への写しは名前が違っても中身が同じなら通す)
         warns.append(f"MANIFEST の run {man.get('run')} がこの run ({run_dir.name}) と名前が違う")
     rec.update(status="PASS" if not probs and not dprobs else "FAIL", problems=probs, warnings=warns,
                manifest={"verdict": man.get("verdict"), "created": man.get("created"), "git_commit": man.get("git_commit"),
                          "n_files": len(man.get("files_sha256") or {})})
+    # 生成元の照合 (2026-10-17 codex result 3 回目 Major): 一致しなければ、その成果物の中身 (ファイルの sha256・寸法の関門) が正しくても
+    # この run の成果物・寸法の判定にしない (寸法の FAIL を補正 (寸法の解き直し) にも回さない)
+    pv = provenance_check(run_dir, man, field, card_path, problem_path, deliv_dir=od)
+    rec["provenance"] = pv
+    if pv["status"] != "MATCH":
+        what = {"ABSENT": "の記録が無い (古い成果物)", "MISMATCH": "が今の評価の対象と一致しない",
+                "UNCHECKABLE": "を今の評価の対象と照合できない"}.get(pv["status"], f" {pv['status']}")
+        rec["problems"] = probs + [f"生成元: {p}" for p in pv["problems"]]
+        rec["dimensions"].update(status="INDETERMINATE", status_before_provenance=rec["dimensions"]["status"],
+                                 why=f"成果物の生成元{what} — この寸法の関門はこの run の判定にしない")
+        rec.update(status="INDETERMINATE", status_before_provenance=rec["status"],
+                   why=f"成果物の生成元{what} ({pv['status']}): " + "; ".join(pv["problems"])[:800] + f" — {PROV_FIX}")
     return rec
 
 
@@ -447,7 +876,7 @@ def recalibration_rule(run_dir, v5b: dict, v5c: dict, flow: dict, *, delta_next=
 # ------------------------------------------------------------------ 判定
 def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=None, max_iterations=None, rule_fn=None) -> dict:
     """各判定から結果と次の手を決める (ファイルを読まない純粋な部分; 規則の評価だけ rule_fn() を呼ぶ)。
-    順: 判定不能・計算の成立の FAIL → incomplete (escalate)。公差・壁解像・寸法の FAIL → 反復の上限なら rejected、でなければ
+    順: 判定不能・計算の成立の FAIL・INDETERMINATE (停止の時の判定と結び付かない) → incomplete (escalate)。公差・壁解像・寸法の FAIL → 反復の上限なら rejected、でなければ
     back_to_correction (壁の形だけなら較正し直しの規則 → recalibrate / escalate、壁解像・寸法を含めば escalate)。すべて合格で成果物が
     無い・不完全、または計算の成立が UNVERIFIED → incomplete (成果物だけが無く成立を確かめていれば make_deliverables)。残りは accepted。
     戻り: {result, next, missing, corrections, rule, iteration}。"""
@@ -455,8 +884,8 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
     for nm, c in (("V5b", v5b), ("V5c", v5c), ("wall_resolution", wr)):
         if c.get("verdict") not in ("PASS", "FAIL"):
             missing.append(f"{nm} が判定不能 ({c.get('why') or c.get('verdict_line') or c.get('verdict')})")
-    if flow.get("status") == "FAIL":
-        missing.append(f"計算の成立: {flow.get('why')}")
+    if flow.get("status") in ("FAIL", "INDETERMINATE"):     # INDETERMINATE: 停止の時の判定と結び付かない (§5.1 #7a の続き)
+        missing.append(f"計算の成立 ({flow.get('status')}): {flow.get('why')}")
     if v5b.get("verdict") == "FAIL" or v5c.get("verdict") == "FAIL":
         corrections.append({"kind": "wall_shape", "by": [n for n, c in (("V5b", v5b), ("V5c", v5c)) if c.get("verdict") == "FAIL"],
                             "procedure": "plan §4.3 の較正し直し (contur_calibrate)"})
@@ -486,6 +915,11 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
         if dl.get("status") == "ABSENT":
             missing.append("成果物 (deliverables) が無い — 流れの判定はすべて合格")
             nxt = "make_deliverables" if flow.get("status") == "PASS" else "escalate"
+        elif dl.get("status") == "INDETERMINATE" and dl.get("why"):
+            # 読めない・生成元が一致しない・記録が無い・照合できない (2026-10-17 codex result 3 回目 Major): 次の手は今までの規則
+            # (ABSENT 以外は escalate) のまま、理由 (why) に作り直しを書く
+            missing.append(f"成果物をこの run の判定に使えない ({dl['why']}; 寸法 {dim_status})")
+            nxt = "escalate"
         else:
             missing.append(f"成果物が不完全 ({dl.get('problems') or dl.get('why')}; 寸法 {dim_status})")
             nxt = "escalate"
@@ -502,8 +936,9 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
 def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None, prev_delta_next=None, step=None, deliverables=None,
             iteration=None, max_iterations=None, recalibrations_done: int = 0, max_recalibrations: int = MAX_RECALIBRATIONS,
             recal_min_reduction: float = RECAL_MIN_REDUCTION, optional_parts=(), cli_tols: dict | None = None,
-            x_far_m: float = CC.X_FAR_M, wall_txt=None) -> dict:
-    """1 本の NS run を判定して記録の dict を返す (ファイルは書かない; 壁解像の出力だけ wall_txt に書く)。"""
+            x_far_m: float = CC.X_FAR_M, wall_txt=None, series_dir=None) -> dict:
+    """1 本の NS run を判定して記録の dict を返す (ファイルは書かない; 壁解像の出力だけ wall_txt に、監視されていない V5c の線の
+    全場の系列だけ series_dir (無ければ一時ディレクトリ) に書く)。"""
     from ..report.nozzle_report import load_field
     run_dir = Path(run_dir).resolve()
     info = json.loads((run_dir / "prepare_info.json").read_text())
@@ -541,8 +976,11 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
                          "線の定常は停止規則の判定で保証されていない")
     if isinstance(flow.get("stop_step"), int) and flow["stop_step"] != fld["step"]:
         warns.append(f"判定した場 (step {fld['step']}) が停止規則の止めた場 (step {flow['stop_step']}) でない")
-    wr = wall_resolution(run_dir, fld["step"], wall_txt)
-    dl = deliverables_check(run_dir, deliverables, card, optional_parts)
+    # 線の保証は停止の時の判定に結び付いた監視の線で見る (今の settle_criteria.yaml の読み取り値 sl は出所と警告にだけ使う;
+    # 2026-10-17 codex result 2 回目 M1)
+    line_guarantee(v5c, monitored_line(flow, v5c), fld, flow, run_dir, Md, series_dir)
+    wr = wall_resolution(run_dir, fld["step"], wall_txt, stop_step=flow.get("stop_step"))
+    dl = deliverables_check(run_dir, deliverables, card, optional_parts, field=fld, problem_path=problem)
     checks = {"flow": flow, "V5b": v5b, "V5c": v5c, "wall_resolution": wr, "deliverables": dl}
     dec = decide(flow, v5b, v5c, wr, dl, iteration=iteration, max_iterations=max_iterations,
                  rule_fn=lambda: recalibration_rule(run_dir, v5b, v5c, flow, delta_next=delta_next, prev_run=prev_run,
@@ -596,11 +1034,19 @@ def summary_lines(rec: dict) -> list[str]:
                  f"片振幅 {v5c['halfamp_pct']:.4f} % (≤ {v5c['tol_halfamp_pct']}) → {v5c['verdict']}  [窓 {rec['tolerances']['line_x_range_m']['source']}]")
         for k, v in (v5c.get("compare") or {}).items():
             L.append(f"    比較 {k}: 最大偏差 {v['maxabs_pct']:.4f} %・片振幅 {v['halfamp_pct']:.4f} % (判定に使わない)")
+        stq = v5c.get("steadiness") or {}
+        if stq:
+            ser = stq.get("series") or {}
+            L.append(f"    線の定常: {stq['basis']}" + (f" → {ser.get('status')} (系列 {ser.get('csv') or ('一時ファイル' if ser.get('csv_sha256') else '作っていない')}; "
+                                                       f"{ser.get('verdicts') or ser.get('why')})" if ser else ""))
+        if v5c["verdict"] == "INDETERMINATE":
+            L.append(f"    判定不能の理由: {v5c.get('why')}" + (f" (線だけの合否 {v5c['line_verdict']})" if v5c.get("line_verdict") else ""))
     else:
         L.append(f"V5c → {v5c['verdict']} ({v5c.get('why')})")
-    L.append(f"壁解像 → {wr['verdict']} ({wr.get('verdict_line')})")
+    L.append(f"壁解像 → {wr['verdict']} ({wr.get('verdict_line')})" + (f" — 判定不能: {wr.get('why')}" if wr.get("tool_verdict") else ""))
     L.append(f"計算の成立 → {fl['status']}" + (f" ({fl.get('why')})" if fl.get("why") else ""))
-    L.append(f"寸法の関門 → {dl.get('dimensions', {}).get('status')}・成果物 → {dl['status']}" + (f" ({dl.get('why')})" if dl.get("why") else ""))
+    L.append(f"寸法の関門 → {dl.get('dimensions', {}).get('status')}・成果物 → {dl['status']}"
+             + (f"・生成元 → {dl['provenance']['status']}" if dl.get("provenance") else "") + (f" ({dl.get('why')})" if dl.get("why") else ""))
     for m in rec["missing"]:
         L.append(f"欠け: {m}")
     rr = rec.get("recalibration_rule")
@@ -658,7 +1104,7 @@ def main(argv=None) -> int:
                       recalibrations_done=a.recalibrations_done, max_recalibrations=a.max_recalibrations,
                       recal_min_reduction=a.recal_min_reduction,
                       optional_parts=tuple(s for s in a.optional_parts.split(",") if s), cli_tols=cli,
-                      wall_txt=None if od is None else od / "check_wall_resolution.txt")
+                      wall_txt=None if od is None else od / "check_wall_resolution.txt", series_dir=od)
     except (ValueError, OSError, KeyError) as e:
         if od is not None and od.is_dir() and not any(od.iterdir()):
             od.rmdir()

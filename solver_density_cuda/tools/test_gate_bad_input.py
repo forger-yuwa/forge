@@ -16,6 +16,11 @@
 | 〃 `classify_series` | step が全点 NaN・値は一定 | `STEADY` |
 | `check_mesh_quality` | 体積ゼロの四面体 | AR 1.732 / skew 0.500 = 通常合格 |
 | 〃 | 1001 セル中 1 セルが NaN 座標 | `SOFT-PASS`, exit 0 |
+| `check_wall_resolution` (2026-10-17 追加) | `--step` の壁ダンプが無い壁がある | 最新の出力に代えて `PASS`, exit 0 |
+| 〃 | `--groups` に存在しない壁の名前 | 飛ばして `PASS`, exit 0 |
+| 〃 | メッシュの BCONDS に無い physID の壁ダンプ | Traceback, exit 1 (呼び出し側の FAIL) |
+| 〃 (2026-10-17 2 回目) | `--groups` 無しで bcondConfig の壁のダンプが一度も無い | 存在するダンプだけで `PASS`, exit 0 |
+| 〃 | `--groups` 無しで bcondConfig を読めない | 警告してダンプだけで `PASS`, exit 0 |
 """
 import csv
 import os
@@ -246,6 +251,108 @@ def main():
     chk("単引用符でも層流と SST が別キー", sm.stage_key(sq_l, "") != sm.stage_key(sq_s, ""),
         "none=%s sst=%s" % (sm.stage_key(sq_l, "").get("turbulence.model"),
                             sm.stage_key(sq_s, "").get("turbulence.model")))
+
+    print("=== check_wall_resolution: 指定の step・壁の出力がそろわない ===")
+    # 2026-10-17 codex result M2 (plan tooling-nozzle-card-local-mesh §5.1 #7b): `--step` の出力が無い壁を最新の出力に代え、
+    # `--groups` の存在しない名前を飛ばして PASS・終了コード 0 にしていた (case/71 run_0014 で `--step 46170 --groups wall,missing_wall`
+    # が step 46171 の wall だけで PASS)。メッシュに無い physID のダンプは KeyError の Traceback で終了コード 1 (= 呼び出し側の FAIL) だった。
+    cwr_tool = os.path.join(HERE, "check_wall_resolution.py")
+    d = tempfile.mkdtemp()
+    # 壁 2 面 (wall_a = physID 1 の DOF 0、wall_b = physID 2 の DOF 2)、それぞれ法線方向 1e-5 m に第一内部点 (y1+ ≈ 0.54 < 1)
+    coords = np.array([[0, 0, 0], [0, 0, 1e-5], [1, 0, 0], [1, 0, 1e-5]], float)
+    with h5py.File(os.path.join(d, "m.h5"), "w") as f:
+        f.create_dataset("MESH/COORD", data=coords.ravel())
+        f.create_dataset("CELLS/centCoords", data=coords.ravel())
+        f.create_dataset("PLANES/STRUCT", data=np.array([3, 0, 0, 0, 2, 0, 1, 3, 0, 0, 0, 2, 2, 3], np.int32))
+        f.create_dataset("PLANES/surfVect", data=np.array([0, 0, -1.0, 0, 0, -1.0]))
+        f.create_dataset("PLANES/surfArea", data=np.ones(2))
+        for pid, dof, pl in ((1, 0, 0), (2, 2, 1)):
+            f.create_dataset("BCONDS/%d/iCells" % pid, data=np.array([dof], np.int32))
+            f.create_dataset("BCONDS/%d/iPlanes" % pid, data=np.array([pl], np.int32))
+    with open(os.path.join(d, "solverConfig.yaml"), "w") as f:
+        f.write("mesh: {meshFileName: m.h5}\nphysProp: {viscMethod: 1}\n")
+
+    def dump(name, pid, step, xyz):
+        with h5py.File(os.path.join(d, "res_%s_%d_%d.h5" % (name, pid, step)), "w") as f:
+            f.create_dataset("MESH/COORD", data=np.asarray(xyz, float).ravel())
+            for k, v in (("twall_x", 1.0), ("twall_y", 0.0), ("twall_z", 0.0), ("ro", 1.0), ("Ts", 300.0)):
+                f.create_dataset("VALUE/" + k, data=np.full(1, v))
+
+    def cwr(*args):
+        r = subprocess.run([sys.executable, cwr_tool, d] + list(args), capture_output=True, text=True)
+        out = r.stdout + r.stderr
+        last = [ln for ln in out.splitlines() if ln.startswith("VERDICT")] or out.strip().splitlines()[-1:]
+        return r.returncode, out, last[-1] if last else ""
+
+    for s in (100, 200):
+        dump("wall_a", 1, s, coords[[0]])
+    dump("wall_b", 2, 100, coords[[2]])          # wall_b は step 100 だけ
+    rc, out, v = cwr("--step", "200")
+    chk("--step 200 で wall_b の 200 が無い -> 判定不能 (100 に代えない)", rc == 2 and "INDETERMINATE" in v and "wall_b" in v, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "150", "--groups", "wall_a")
+    chk("--step 150 (どの壁にも無い step) -> 判定不能 (最新 200 に代えない)", rc == 2 and "INDETERMINATE" in v, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "200", "--groups", "wall_a,missing_wall")
+    chk("--groups に存在しない壁の名前 -> 判定不能", rc == 2 and "INDETERMINATE" in v and "missing_wall" in v, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "200", "--groups", "wall_a")
+    chk("--step 200 --groups wall_a (そろっている) -> 従来どおり PASS・評価した壁と step を出す",
+        rc == 0 and "VERDICT: PASS" in v and "EVALUATED: wall_a/1@200" in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("--step 100 (全部の壁にある) -> PASS、両方の壁を step 100 で評価",
+        rc == 0 and "EVALUATED: wall_a/1@100, wall_b/2@100" in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr()
+    chk("--step 無し -> 従来どおり壁ごとの最新 (wall_a 200・wall_b 100) で PASS",
+        rc == 0 and "EVALUATED: wall_a/1@200, wall_b/2@100" in out, "rc=%d %s" % (rc, v))
+    dump("wall_c", 7, 200, coords[[0]])          # physID 7 はメッシュの BCONDS に無い
+    rc, out, v = cwr("--groups", "wall_c")
+    chk("メッシュに無い physID の壁ダンプ -> 判定不能・終了コード 2 (Traceback にしない)",
+        rc == 2 and "INDETERMINATE" in v and "Traceback" not in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("bcondConfig.yaml が無い run (--groups 無し) -> 今どおりダンプから数え、そのことを出力に書く",
+        rc == 2 and "bcondConfig.yaml が無い -> ある壁ダンプから数える" in out, "rc=%d" % rc)   # wall_c (physID 7) で判定不能のまま
+
+    print("=== check_wall_resolution: --groups 無しで bcondConfig の壁のダンプがそろわない ===")
+    # 2026-10-17 codex result 2 回目 M2 (plan tooling-nozzle-card-local-mesh §5.1 #7b の続き): --groups を省くと存在するダンプから
+    # 対象を数えたので、bcondConfig の no-slip 壁でダンプが一度も無い壁を見落として PASS・終了コード 0 だった (受け渡しの関門
+    # deltastar_loop.wall_resolution_verdict はこの経路)。いまは bcondConfig の kind wall* を全部必須にする
+    d0 = d                                       # 同じメッシュ・設定で別の run (ダンプは作り直す)
+    d = tempfile.mkdtemp()
+    for f_ in ("m.h5", "solverConfig.yaml"):
+        shutil.copy2(os.path.join(d0, f_), d)
+    shutil.rmtree(d0, ignore_errors=True)
+    for s_ in (100, 200):
+        dump("wall_a", 1, s_, coords[[0]])
+    dump("wall_b", 2, 100, coords[[2]])          # wall_b は step 100 だけ
+    bc = ("wall_a: {physID: 1, kind: wall_isothermal, outputHDFflg: 1}\n"
+          "wall_b: {physID: 2, kind: wall_adiabatic, outputHDFflg: 1}\n"
+          "outlet: {physID: 9, kind: outlet_statPress, outputHDFflg: 1}\n")
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write(bc)
+    rc, out, v = cwr("--step", "200")
+    chk("bcond あり・--groups 無し: 存在する壁 wall_b の指定 step 200 が欠ける -> 判定不能 (100 に代えない)",
+        rc == 2 and "INDETERMINATE" in v and "wall_b" in v and "EVALUATED" not in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("bcond あり・--groups 無し: 全部の壁に step 100 -> PASS、対象は bcond の壁全部と出力に書く",
+        rc == 0 and "EVALUATED: wall_a/1@100, wall_b/2@100" in out and "kind wall*) 全部 = wall_a/1, wall_b/2" in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr()
+    chk("bcond あり・--groups 無し・--step 無し: 壁ごとの最新 (wall_a 200・wall_b 100) で PASS (今どおり)",
+        rc == 0 and "EVALUATED: wall_a/1@200, wall_b/2@100" in out, "rc=%d %s" % (rc, v))
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write(bc + "wall_c: {physID: 3, kind: wall_isothermal, outputHDFflg: 1}\n")   # ダンプが一度も無い壁
+    rc, out, v = cwr()
+    chk("bcond の壁 wall_c のダンプが一度も無い・--step 無し -> 判定不能・終了コード 2 (修正前は wall_a・wall_b だけで PASS・0)",
+        rc == 2 and "INDETERMINATE" in v and "wall_c" in v and "一度も無い" in v and "EVALUATED" not in out, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100")
+    chk("bcond の壁 wall_c のダンプが一度も無い・--step 100 -> 判定不能・終了コード 2 (修正前は PASS・0)",
+        rc == 2 and "INDETERMINATE" in v and "wall_c" in v, "rc=%d %s" % (rc, v))
+    rc, out, v = cwr("--step", "100", "--groups", "wall_a,wall_b")
+    chk("--groups を明示すれば bcond の他の壁は要らない (今どおり PASS; 呼び出し側が壁を選ぶ)",
+        rc == 0 and "EVALUATED: wall_a/1@100, wall_b/2@100" in out, "rc=%d %s" % (rc, v))
+    with open(os.path.join(d, "bcondConfig.yaml"), "w") as f:
+        f.write("wall_a: {physID: [1, 2\n")                 # 読めない YAML
+    rc, out, v = cwr("--step", "100")
+    chk("bcondConfig.yaml を読めない・--groups 無し -> 必須の壁を作れず判定不能 (前は警告してダンプだけで PASS)",
+        rc == 2 and "INDETERMINATE" in v and "必須の壁の集合を作れない" in v, "rc=%d %s" % (rc, v))
+    shutil.rmtree(d, ignore_errors=True)
 
     print("\nVERDICT: %s" % ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

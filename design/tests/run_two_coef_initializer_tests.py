@@ -5,7 +5,7 @@
     記録に係数と係数前のスロート・出口の値が残る。寸法の逆算の記録にも係数が出る。
 (3) 不正な値 (c ≤ 0・数でない) は ValueError。
 (4) case/71 の pass 0 の物理壁の δ (run_0003_ns_cont の delta_in_prev = 格子の NS の壁 − Euler の壁を測った値、手元に記録があるとき) と
-    (1) の既定が格子の測定の差 (≤ 0.002 mm) で一致する。
+    既定の CONTUR が格子の測定の差 (≤ 0.002 mm) で一致する。比べる設計壁はその run を作った時点のもの (終端 C⁺ は最寄りの 1 本; 2026-10-17)。
 使い方: design/.venv-opt/bin/python tests/run_two_coef_initializer_tests.py
 """
 import gzip
@@ -77,8 +77,23 @@ if ref.is_file():
     with gzip.open(ref, "rt") as fh:
         a = np.loadtxt(fh, delimiter=",", skiprows=1)
     m = (a[:, 0] >= 0.0)
-    e = np.max(np.abs(f0(a[m, 0]) - a[m, 2])) * S * 1e3
-    check("(4) 既定の CONTUR と pass 0 の物理壁の δ (run_0003_ns_cont の delta_in_prev、格子から測った値、x ≥ 0) が ≤ 0.002 mm で一致", e <= 2e-3, f"最大差 {e:.2e} mm")
+    # 過去の run と比べるので、その run を作った時点の設計壁を使う (2026-10-17、card plan result 段レビュー 5 回目 m1): run_0003_ns_cont は
+    # 終端 C⁺ を「x_E に最も近い節点の 1 本」で取った設計 (2026-10-16 の補間 = plan §4.5 の前)。今の MOC (補間) の壁では CONTUR の δ が
+    # 0.00245 mm 動き、許容 0.002 mm を超える (補間の意図した変化で、CONTUR の式・導関数の不具合ではない)。許容は緩めず、その時点の出口の
+    # 決め方に戻した設計で比べる (run_moc_axis_limit_tests.py の実装前とのビット一致の比べ方と同じ)
+    from forge_design.geometry import moc_inverse as _MI
+    _orig_br = _MI._terminal_bracket
+    _MI._terminal_bracket = lambda ax, xE: [(int(np.argmin(np.abs(ax - xE))), 1.0)]
+    try:
+        d_old = RA.design_chain(p)
+    finally:
+        _MI._terminal_bracket = _orig_br
+    _r_old, f_old, _i_old = RA.integral_delta_r(p, d_old, {"model": "contur"})
+    e = np.max(np.abs(f_old(a[m, 0]) - a[m, 2])) * S * 1e3
+    check("(4) 既定の CONTUR (run_0003_ns_cont を作った時点の設計壁 = 終端 C⁺ は最寄りの 1 本) と pass 0 の物理壁の δ "
+          "(run_0003_ns_cont の delta_in_prev、格子から測った値、x ≥ 0) が ≤ 0.002 mm で一致", e <= 2e-3, f"最大差 {e:.2e} mm")
+    e_now = np.max(np.abs(f0(a[m, 0]) - a[m, 2])) * S * 1e3
+    print(f"     参考: 今の MOC (終端 C⁺ の補間) の設計壁では最大差 {e_now:.2e} mm (判定に使わない)")
 else:
     print("[-- ] (4) pass 0 の記録が無い — 飛ばす")
 

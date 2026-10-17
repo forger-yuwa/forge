@@ -32,6 +32,8 @@ skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り
 | 寸法の許容差 | `tolerances: {length_m, diameter_m}` | 既定値は仮。ユーザの実用公差を聞いて書く (出荷ゲートの基準) |
 | knot のマッハ数 M_knot | 書かない (既定 = 自動) か `overrides: {geometry.M_knot: auto}`。固定するなら `overrides: {geometry.M_knot: 2.1}` | **既定は自動** (規則 `coarse_min_theta_v2`、2026-10-15、plan `tooling-nozzle-mknot-fast`): 粗い網 (600) で M_K = 0.05 刻みを掃き、両隣も成立する区間の谷を生産の網 (2400) で確かめて、最大壁角が最小の谷を選ぶ (同点は成立の境目から遠い方)。**M_knot の部分の所要は AWS (4 並列) で 1〜2 分** (case/70 で 81 s; 旧の規則は 45〜98 分)。手元は `FORGE_MKNOT_WORKERS=1` で数分。design の venv に numba (0.68.0、`--no-deps`) が要る。**パラスタの間は固定する**: 代表の 1 枚を自動で生成して `_card.M_knot_rule` の値を読み、振る間は `overrides: {geometry.M_knot: <その値>}` で固定、最後の候補だけ自動に戻して選び直す (長さ・R・M_d を大きく変えたら代表を取り直す)。記録は YAML の `_card.M_knot_rule` (要約) と card_log |
 
+**M5.5 系 (case/71 と寸法が近い燃焼ガスの風洞ノズル) の通しの手順は [`procedures/design-chain-quickstart.md`](../../../procedures/design-chain-quickstart.md)** (カード → `wt_card` → 格子 `case/71.m55_combustion_wt/_mesh/hand_mesh.py` → Euler → NS (停止規則 v2) → `contur_calibrate` → p1 → `wt_qualify` → 成果物; 他の PC で AI が打つ形)。格子は場所ごとの第一層 (係数 配管 1.0・縮流部 0.6・スロート 0.5・拡大部 0.49 は 1 周目の経験の値) と壁に直交する近壁層で、**合格の根拠は NS 後の `check_wall_resolution.py`** (外れたら外れた区間の係数を下げて作り直す; 自動のループは plan `tooling-design-orchestrator` §5.1 #10)。設計の合否は `wt_qualify` (V5b 出口コア M ±0.1 %・V5c η 0.03 の線 最大偏差・片振幅 ≤ 0.1 %; 2026-10-16 ユーザ決定)。
+
 流れ (正本は手順書 §1・§2。ここでは新しい入口と出口だけ):
 
 1. `cd design && /home/sano/work/forge/design/.venv-opt/bin/python -m forge_design.intake.wt_card CARD --out ../case/NN/problem_<tag>.yaml`

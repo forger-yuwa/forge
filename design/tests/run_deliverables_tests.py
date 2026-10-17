@@ -32,6 +32,16 @@ FreeCAD・gmsh が要る (無ければ飛ばす)。作業は一時ディレク�
   表の x = 0 の隣の値を変えると (記録が表の直線補間と合わない) FAIL。
 - (C6) 図 3 枚が PNG で日本語フォント (Noto Sans CJK JP) で書かれる。作図が失敗したら MANIFEST の errors に残り、xlsx にシートを足さない。
 - (a) の一括書き出しで wall_compare/ の CSV・図・JSON が MANIFEST に載り、xlsx にシート wall_compare (表と注記)、README に行がある。
+
+成果物の生成元の記録 `MANIFEST.json` の `provenance` (plan tooling-nozzle-card-local-mesh §5.1 #6b、2026-10-17 codex result 3 回目 Major):
+- (P) fixture なしで回る: 壁ダンプ 2 本・全場 2 枚・停止規則の状態を持つ合成の run (run_wall_tables_tests.make_synth) を、cad・mesh・
+  fluent・dimensions を飛ばして書き出す。provenance に格子 (solverConfig の meshFileName)・設定 2 つ・場 (CFD 壁面量表の step = 最後の
+  壁ダンプの step、`res_<step>.h5` と壁ダンプ 2 本)・停止規則の状態・カード・問題 YAML の sha256 が実ファイルと一致して入り、壁
+  (wall_repr.json が無い) は sha256 None。既存の記録 (CFD の表の step など) は残る。`--step` を渡すとその step、excel を飛ばすと場は
+  None と理由。README の出典に生成元の行。run の中には何も書かない。
+  書式 v2 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major): run の nozzle.msh (ファイル・sha256・準備の記録との一致の印) と
+  準備の記録の msh の sha256 (prepare_info.json の mesh.hashes.msh_sha256)。msh・準備の記録が無い run は None (理由つき)、そろえば一致の印
+  true、run の msh を変えると false (書き出しは止めない; 合否は wt_qualify) と README の「不一致」。
 """
 import hashlib
 import json
@@ -512,11 +522,92 @@ def wall_compare_tests() -> None:
             print(f"skip (C5): initializer + delta_r_initial.csv の run が無い ({C70_RUN}; FORGE_DELIV_C70_RUN で指定)")
 
 
+def provenance_tests() -> None:
+    """(P) 生成元の記録 (fixture なし; 合成の run)。"""
+    import h5py
+    import numpy as np
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import run_wall_tables_tests as RWT
+    from forge_design.evaluate import stop_rule as SR
+
+    def h(p):
+        return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+    with tempfile.TemporaryDirectory(prefix="deliv_prov_") as td:
+        tmp = Path(td)
+        syn = tmp / "run_syn"
+        RWT.make_synth(syn, steps=(100, 200), tw=1e-5, residual=True)
+        for st in (100, 200):                        # 全場 (vis_lam なし → 粘性は viscMethod の式; 中身は sha256 の照合にだけ使う)
+            with h5py.File(syn / f"res_{st}.h5", "w") as f:
+                f["VALUE/ro"] = np.full(4, float(st))
+        (syn / SR.STATE).write_text(json.dumps({"method": "v2", "status": "REACHED", "stop_step": 200}))
+        card, prob = tmp / "card.yaml", tmp / "problem.yaml"
+        card.write_text("M_exit: 5.5\n")
+        prob.write_text("spec: {r_throat: 0.1}\n")
+        before = {p.name: h(p) for p in syn.iterdir() if p.is_file()}
+        skip = ("cad", "mesh", "fluent", "dimensions")
+        man = dl.export(syn, tmp / "o", card=card, skip=skip, problem=prob)
+        pv = man.get("provenance") or {}
+        fl = pv.get("field") or {}
+        dumps = sorted(p.name for p in syn.glob("res_wall_*_200.h5"))
+        check("(P) provenance の書式・run の名前・格子 (solverConfig の meshFileName = mesh.h5)・設定 2 つの sha256 が実ファイルと一致",
+              pv.get("format") == dl.PROVENANCE_FORMAT and pv.get("run_name") == "run_syn"
+              and pv["mesh"] == {"file": "mesh.h5", "sha256": h(syn / "mesh.h5")}
+              and pv["config"] == {n: h(syn / n) for n in ("solverConfig.yaml", "bcondConfig.yaml")}, json.dumps(pv, default=str, ensure_ascii=False)[:200])
+        check("(P) 壁 (wall_repr.json が無い) は sha256 None (照合できない側に倒す)", pv["wall"] == {"file": "wall_repr.json", "sha256": None})
+        check("(P) 場: CFD 壁面量表の step (最後の壁ダンプ 200)・res_200.h5 と壁ダンプ 2 本の sha256・停止の step と一致の印",
+              fl.get("step") == 200 and fl.get("file") == "res_200.h5" and fl.get("sha256") == h(syn / "res_200.h5")
+              and fl.get("wall_dumps") == {n: h(syn / n) for n in dumps} and len(dumps) == 2 and fl.get("is_stop_step") is True
+              and man["parts"]["excel"]["cfd"]["step"] == 200, json.dumps(fl, default=str, ensure_ascii=False)[:200])
+        check("(P) 停止規則の状態 (method・status・stop_step)・カード・問題 YAML の sha256",
+              pv["stop_rule"] == {"file": SR.STATE, "method": "v2", "status": "REACHED", "stop_step": 200}
+              and pv["card"] == {"path": str(card.resolve()), "sha256": h(card)} and pv["problem"] == {"path": str(prob.resolve()), "sha256": h(prob)})
+        on_disk = json.loads((tmp / "o" / "MANIFEST.json").read_text())
+        check("(P) MANIFEST.json のファイルに同じ provenance・既存の記録 (files_sha256・parts・CFD の表の step) も残る",
+              on_disk.get("provenance") == pv and on_disk["files_sha256"] and on_disk["parts"]["excel"]["cfd"]["step"] == 200
+              and "MANIFEST.json" not in on_disk["files_sha256"])
+        check("(P) README の出典に生成元の行 (場 step 200)", "生成元の記録" in (tmp / "o" / "README.md").read_text()
+              and "step 200" in (tmp / "o" / "README.md").read_text())
+        man1 = dl.export(syn, tmp / "o1", card=card, step=100, skip=skip, problem=prob)
+        f1 = man1["provenance"]["field"]
+        check("(P) --step 100 → 場は step 100 (res_100.h5・壁ダンプの step 100)、停止の step ではない印",
+              f1["step"] == 100 and f1["sha256"] == h(syn / "res_100.h5") and sorted(f1["wall_dumps"]) == sorted(p.name for p in syn.glob("res_wall_*_100.h5"))
+              and f1["is_stop_step"] is False)
+        man2 = dl.export(syn, tmp / "o2", card=None, skip=skip + ("excel",))
+        p2 = man2["provenance"]
+        check("(P) excel を飛ばすと場は None と理由・カード・問題 YAML は None", p2["field"] is None and "CFD 壁面量表を作っていない" in p2["field_why"]
+              and p2["card"] is None and p2["problem"] is None, p2.get("field_why"))
+        after = {p.name: h(p) for p in syn.iterdir() if p.is_file()}
+        check("(P) run の中には何も書かない (ファイルの一覧と sha256 が同じ)", before == after, sorted(set(after) ^ set(before)))
+        # 書式 v2 の msh の項目 (§5.1 #6c2 の再オープン、2026-10-17 codex result 4 回目 Major): run の nozzle.msh (配る msh・Fluent・
+        # 寸法の関門の入力) と準備の記録の msh の sha256 (prepare_info.json の mesh.hashes.msh_sha256; h5 はこの msh から変換された)
+        check("(P) v2: msh も準備の記録も無い run → msh の sha256 None・一致の印 None・準備の記録は理由つきで None (照合できない側)",
+              pv.get("format") == "forge.deliverables.provenance/v2" and pv["msh"] == {"file": "nozzle.msh", "sha256": None, "matches_prepare": None}
+              and pv["prepare_msh"]["sha256"] is None and "読めない" in pv["prepare_msh"].get("why", ""),
+              json.dumps(pv.get("prepare_msh"), ensure_ascii=False))
+        syn2 = tmp / "run_syn2"
+        shutil.copytree(syn, syn2)
+        (syn2 / "nozzle.msh").write_text("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n(合成の msh)\n")
+        (syn2 / "prepare_info.json").write_text(json.dumps({"mesh": {"hashes": {"msh_sha256": h(syn2 / "nozzle.msh")}}}))
+        p3 = dl.export(syn2, tmp / "o3", card=card, skip=skip, problem=prob)["provenance"]
+        check("(P) v2: msh (ファイル・sha256) と準備の記録の msh の sha256 が実ファイルと一致・一致の印 true",
+              p3["msh"] == {"file": "nozzle.msh", "sha256": h(syn2 / "nozzle.msh"), "matches_prepare": True}
+              and p3["prepare_msh"] == {"file": "prepare_info.json", "key": "mesh.hashes.msh_sha256", "sha256": h(syn2 / "nozzle.msh")},
+              json.dumps({k: p3[k] for k in ("msh", "prepare_msh")}, ensure_ascii=False))
+        check("(P) v2: README に msh と計算の格子の元の msh の一致の行", "の一致: 一致" in (tmp / "o3" / "README.md").read_text())
+        (syn2 / "nozzle.msh").write_text("$MeshFormat\n4.1 0 8\n$EndMeshFormat\n(内部の配点だけ違う合成の msh)\n")
+        p4 = dl.export(syn2, tmp / "o4", card=card, skip=skip, problem=prob)["provenance"]
+        check("(P) v2: run の nozzle.msh が準備の記録と違う → 一致の印 false (記録するだけで書き出しは止めない; 合否は wt_qualify)・README に不一致",
+              p4["msh"]["sha256"] == h(syn2 / "nozzle.msh") and p4["msh"]["matches_prepare"] is False
+              and p4["prepare_msh"]["sha256"] != p4["msh"]["sha256"] and "**不一致**" in (tmp / "o4" / "README.md").read_text())
+
+
 def main() -> int:
     structure_tests()
     wn_fixture_tests()
     m55_junction_tests()
     wall_compare_tests()
+    provenance_tests()
     if not (FIX / "wall_repr.json").exists() or not (FIX / "nozzle.msh").exists():
         print(f"skip: fixture が無い ({FIX})。tests/make_deliverables_fixture.py で作る")
         print(f"FAIL 件数: {fails}")

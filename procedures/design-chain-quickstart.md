@@ -4,7 +4,7 @@ case/71 の M5.5 燃焼ガス風洞ノズル (`case/71.m55_combustion_wt`) の**
 要求カードから成果物 (STEP・メッシュ・Fluent・Excel・報告) まで作る手順。コマンドはそのまま打てる形で書く。
 
 - 読み手: この手順書のコマンドを打つ AI と、その AI に値を渡し判断する人。
-- 流れの出所: plan [`tooling-nozzle-card-local-mesh`](../plans/active/tooling-nozzle-card-local-mesh.md) §4.3・§5.1 #6a〜#6c (2026-10-16 ユーザ決定)。
+- 流れの出所: plan [`tooling-nozzle-card-local-mesh`](../plans/accepted/tooling-nozzle-card-local-mesh.md) §4.3・§5.1 #6a〜#6c (2026-10-16 ユーザ決定)。
   NS の 1 回目の壁は CONTUR の積分の式のまま (係数なし)。その NS の δ_E で 3 係数を較正 (`contur_calibrate`) → 新しい壁で Euler → NS 2 回目 →
   判定 (`wt_qualify`) → 成果物 → 判定。較正し直しは規則どおり 1 回まで。
 - 道具の詳しい説明は [`nozzle-design-workflow.md`](nozzle-design-workflow.md)・skill `nozzle-design` にある。この手順書はその中の 1 本の道筋だけを書く。

@@ -9,7 +9,7 @@
   - [`AGENTS.md`](../../AGENTS.md) の「収束確認」(移行の後に書き換える対象)
   - `methods/design/overview.md` の停止規則・壁の熱流の節 (`iface_Qf_eff`)
 - **related_plans**:
-  - [`tooling-nozzle-card-local-mesh.md`](../active/tooling-nozzle-card-local-mesh.md) — 起点 (§4.4 と §5.1 #3q・#3r・#3v・#3x・#3y・#4a・#4b をこの plan へ移した)。M5.5 の壁の設計はあちらに残る
+  - [`tooling-nozzle-card-local-mesh.md`](../accepted/tooling-nozzle-card-local-mesh.md) — 起点 (§4.4 と §5.1 #3q・#3r・#3v・#3x・#3y・#4a・#4b をこの plan へ移した)。M5.5 の壁の設計はあちらに残る
   - [`tooling-convergence-and-wall-resolution-gates.md`](../active/tooling-convergence-and-wall-resolution-gates.md) — 今の `check_convergence.py` と判定区間 (stage_manifest) の正本。この plan はその後継の判定を作り、区間の管理を引き継ぐ
   - `tooling-generator-defaults-and-launch-gate.md` (作業ツリー `forge-gate`) — 生成器の既定の全体。ここでは要求カードの雛形の NS の本段・出力・判定の既定だけを扱い、あちらの段取りと整合させる
 - **created**: `2026-10-15`

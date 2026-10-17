@@ -11,8 +11,13 @@ usage:
       [--verdicts VERDICTS.json]
 
 --verdicts: 量別の準定常 VERDICT (check_quasisteady.py の判定) と判定区間・備考 (未達のまま進めた決定など) を
-  {"wave_eta0.1": {"verdict": "DRIFTING", "window": "40000–60000", "note": "..."}, ...} で渡す。報告はこれを
+  {"wave_eta0.03": {"verdict": "DRIFTING", "window": "40000–60000", "note": "..."}, ...} で渡す。報告はこれを
   評価量の表にそのまま載せるだけで、自分では判定しない。無ければ表に「VERDICT 未指定」と出る。
+
+試験部の線: 主は r/r_w = 0.03 (判定 V5c の線と同じ高さ = 今の NS 格子の第 1 層; 2026-10-16 ユーザ決定、
+  plan tooling-nozzle-card-local-mesh §6 V5c・§5.1 #5c)。軸 (r = 0) と r/r_w = 0.1 (それまでの主の線) は比較用に併記する。
+  報告の評価量 (平滑からの残差・最大・傾き・幅) は判定 (wt_qualify の V5c: 最大偏差・片振幅) とは別の量で、合否は
+  wt_qualify の出力 (WT_QUALIFICATION.json) を見る。
 """
 from __future__ import annotations
 
@@ -232,13 +237,41 @@ def exit_core_line_mean(eta, M, lo=0.05, hi=0.7):
     return float(np.trapezoid(np.interp(e, eta, M), e) / (hi - lo))
 
 
+# 試験部の線の高さ r/r_w。主 (LINE_ETA) は判定 (V5c) の線と同じ高さ (今の NS の格子の第 1 層; 2026-10-16 ユーザ決定、
+# plan tooling-nozzle-card-local-mesh §6 V5c・§5.1 #5c)。軸 (0) と 0.1 (それまでの主の線) は比較用に併記する (codex M4)。
+# 評価量のキーは f"eta{η}" (eta0.03・eta0.0・eta0.1)
+LINE_ETA = 0.03
+COMPARE_ETAS = (0.0, 0.1)
+REPORT_ETAS = (LINE_ETA,) + COMPARE_ETAS
+
+
+def judge_line_note(run, F, x_E, x_F, test_window):
+    """判定 (V5c) の線の所在を注 1 行にする。報告は判定しない (合否は wt_qualify の WT_QUALIFICATION.json の V5c)。
+    線は run の settle_criteria.yaml の line_mach (監視と同じ線; 準備のときに解決した値) があればそれ、無ければ wt_qualify の
+    既定 (η 0.03、x = (x_E + 2, x_F − 1) r_t × scale_m、2001 点)。wt_qualify は CLI・カード・問題 YAML で上書きできるので「相当」。"""
+    S = float(F["S"])
+    rec = dict(eta=LINE_ETA, x_range_m=[(x_E + 2) * S, (x_F - 1) * S], n=2001,
+               source="wt_qualify の既定の窓 (x_E + 2, x_F − 1) r_t; 問題 YAML・カードの指定が優先")
+    p = Path(run) / "settle_criteria.yaml"
+    if p.is_file():
+        for q in (yaml.safe_load(p.read_text()) or {}).get("quantities") or []:
+            if isinstance(q, dict) and q.get("kind") == "line_mach":
+                rec.update(eta=float(q["eta"]), x_range_m=[float(q["x_range_m"][0]), float(q["x_range_m"][1])],
+                           n=int(q.get("n", 2001)), source="run の settle_criteria.yaml の line_mach = 監視の線")
+                break
+    rec["text"] = (f"判定 (V5c) の線は η {rec['eta']:g}・x {rec['x_range_m'][0]:.2f}〜{rec['x_range_m'][1]:.2f} m 相当 "
+                   f"({rec['n']} 点; {rec['source']})。合否は wt_qualify の出力 (WT_QUALIFICATION.json の V5c: 最大偏差・片振幅) を見る。"
+                   f"この表の量 (窓 x {test_window[0] * S:.2f}〜{test_window[1] * S:.2f} m) は定義が別")
+    return rec
+
+
 def metrics(run, F, euler=None):
     info = F["info"]; Md = float(info.get("Md", 6.0))
     xE = float(info.get("x_E", 40.0)); xF = float(F["X"][-1, 0])
     xq = np.linspace(float(F["X"][0, 0]), xF, 2401)
     out = dict(Md=Md, x_E=xE, x_F=xF)
     w_test = (xq >= xE + 2) & (xq <= xF - 1); w_ov = (xq >= xE - 15) & (xq <= xF)
-    for eta in (0.0, 0.1):
+    for eta in REPORT_ETAS:
         d = 100 * (eta_line(F, "M", eta, xq) / Md - 1)
         xx, v = xq[w_test], d[w_test]
         cf = np.polyfit(xx, v, 1)
@@ -246,6 +279,7 @@ def metrics(run, F, euler=None):
                                 x_overshoot=float(xq[w_ov][np.argmax(d[w_ov])]), slope_pct=float(cf[0] * (xx[-1] - xx[0])),
                                 range_pct=float(v.max() - v.min()), test_window=[float(xx[0]), float(xx[-1])],
                                 mean_pct=float(v.mean()))   # 試験部の窓の平均 (等間隔の xq の単純平均 = 線平均; plan tooling-nozzle-core-grid §4.5)
+    out["line_judge"] = judge_line_note(run, F, xE, xF, out[f"eta{LINE_ETA}"]["test_window"])
     eta_last = F["R"][-1] / F["R"][-1, -1]; core = (eta_last >= 0.05) & (eta_last <= 0.7)
     Mx = F["V"]["M"][-1][core]
     out["exit_core"] = dict(M_mean=float(Mx.mean()), M_min=float(Mx.min()), M_max=float(Mx.max()), eta_range=[0.05, 0.7],
@@ -270,23 +304,27 @@ def metrics(run, F, euler=None):
         out["condensation"] = dict(onset_x_axis=float(xq[on[0]]) if len(on) else None,
                                    exit_g_axis=float(g0[-1]), onset_threshold_g=1e-4, exit_g_core_mean=float(F["V"]["g_0"][-1][core].mean()),
                                    S_max=float(np.nanmax(F["V"]["condS_0"])) if "condS_0" in F["V"] else None)
-    # 準定常: 末尾 5 スナップショットの変動
+    # 準定常: 末尾 5 スナップショットの変動 (主の線 LINE_ETA; 2026-10-16 までは r/r_w = 0.1)
     ser = []
     for r in _res_files(run)[-5:]:
         G = load_field(run, r)
-        d = 100 * (eta_line(G, "M", 0.1, xq) / Md - 1)
+        d = 100 * (eta_line(G, "M", LINE_ETA, xq) / Md - 1)
         xx, v = xq[w_test], d[w_test]
         ser.append((d[w_ov].max(), np.abs(v - pspline(xx, v)).max(), G["V"]["M"][-1][core].mean()))
     a = np.array(ser)
-    out["tail5_range"] = dict(overshoot_pct=float(np.ptp(a[:, 0])), wave_pct=float(np.ptp(a[:, 1])), exit_core_M=float(np.ptp(a[:, 2])), n=len(ser))
+    out["tail5_range"] = dict(overshoot_pct=float(np.ptp(a[:, 0])), wave_pct=float(np.ptp(a[:, 1])), exit_core_M=float(np.ptp(a[:, 2])), n=len(ser),
+                              eta=LINE_ETA)
     return out
 
 
 # ------------------------------------------------------------------ 量別の準定常 VERDICT (--verdicts)
 # check_quasisteady.py の VERDICT と同じ綴りだけを受ける (それ以外は打ち間違いとして拒否する)
 QS_VERDICTS = ("STEADY", "OSCILLATING", "TRANSIENT-UNSETTLED", "DRIFTING", "NONFINITE")
-# 評価量の表の行に対応するキー (判定するのは r/r_w = 0.1 の線; r=0 は併記のみ)。これ以外のキーは表の末尾に別行で載せる
-QS_KEYS = ("wave_eta0.1", "overshoot_eta0.1", "slope_eta0.1", "range_eta0.1", "exit_core_M", "mdot_ratio", "condensation")
+# 報告が知っている量のキー。評価量の表の行に対応するのは主の線 r/r_w = 0.03 の 4 つ (wave・overshoot・slope・range) と
+# exit_core_M・mdot_ratio・condensation (build_pptx.QS_ROW_KEY)。r/r_w = 0.1 の 4 つは比較用 (2026-10-16 までの主の線) で、
+# 渡されれば表の末尾に別行で載る。これ以外のキーも表の末尾に別行で載せる
+QS_KEYS = ("wave_eta0.03", "overshoot_eta0.03", "slope_eta0.03", "range_eta0.03",
+           "wave_eta0.1", "overshoot_eta0.1", "slope_eta0.1", "range_eta0.1", "exit_core_M", "mdot_ratio", "condensation")
 
 
 def load_verdicts(path) -> dict:
@@ -386,13 +424,22 @@ def _line_quantities(V):
     return [x for x in q if x[0] in V]
 
 
+# 線の描き方: 主 (判定の線の高さ) は実線、軸は点線、0.1 は破線
+_LINE_STYLE = {LINE_ETA: ("-", 1.4), 0.0: (":", 1.1), 0.1: ("--", 1.0)}
+
+
+def _line_label(eta):
+    return f"r/r_w = {eta:g} (判定の線の高さ)" if eta == LINE_ETA else ("r = 0 (軸)" if eta == 0.0 else f"r/r_w = {eta:g}")
+
+
 def fig_axis_lines(F, Md, path, path_dev, euler=None):
     xq = np.linspace(float(F["X"][0, 0]), float(F["X"][-1, 0]), 2401)
     qs = _line_quantities(F["V"]); n = len(qs); nc = 2; nr = (n + 1) // 2
     fig, axs = plt.subplots(nr, nc, figsize=(13, 2.6 * nr), sharex=True)
     for ax, (k, lab, sc) in zip(axs.ravel(), qs):
-        for eta, ls in ((0.0, "-"), (0.1, "--")):
-            ax.plot(xq, sc * eta_line(F, k, eta, xq), ls=ls, lw=1.1, label=f"r/r_w = {eta}")
+        for eta in REPORT_ETAS:
+            ls, lw = _LINE_STYLE[eta]
+            ax.plot(xq, sc * eta_line(F, k, eta, xq), ls=ls, lw=lw, label=_line_label(eta))
         ax.set_ylabel(lab, fontsize=9)
         if k in ("P", "ro", "q_dyn"):
             ax.set_yscale("log")
@@ -403,18 +450,23 @@ def fig_axis_lines(F, Md, path, path_dev, euler=None):
     axs.ravel()[0].legend(fontsize=8, frameon=False)
     for ax in axs[-1]:
         ax.set_xlabel("x / r_t")
-    fig.suptitle("軸中心 (r = 0、実線) と r/r_w = 0.1 (破線) の分布。r/r_w = 0.1 は軸ノード固有の値の影響を避けた線", fontsize=10)
+    fig.suptitle(f"r/r_w = {LINE_ETA:g} (実線) = 判定 (V5c) の線の高さ (NS 格子の第 1 層)、軸 r = 0 (点線)・r/r_w = 0.1 (破線) は比較。"
+                 "軸ノードには固有の値の癖がある", fontsize=10)
     fig.tight_layout(); fig.savefig(path, dpi=130); plt.close(fig)
     # 試験部の M/M_d − 1 の拡大 (評価量の図)
     fig, ax = plt.subplots(figsize=(12, 4.2))
-    for eta, ls in ((0.0, "-"), (0.1, "--")):
-        ax.plot(xq, 100 * (eta_line(F, "M", eta, xq) / Md - 1), ls=ls, lw=1.2, label=f"NS r/r_w = {eta}")
+    for eta in REPORT_ETAS:
+        ls, lw = _LINE_STYLE[eta]
+        ax.plot(xq, 100 * (eta_line(F, "M", eta, xq) / Md - 1), ls=ls, lw=lw + 0.1, label=f"NS {_line_label(eta)}")
     if euler is not None:
-        for eta, ls in ((0.0, "-"), (0.1, "--")):
-            ax.plot(xq, 100 * (eta_line(euler, "M", eta, xq) / Md - 1), ls=ls, color="k", lw=0.9, alpha=0.6, label=f"Euler (設計壁) r/r_w = {eta}")
+        for eta in REPORT_ETAS:
+            ls, lw = _LINE_STYLE[eta]
+            ax.plot(xq, 100 * (eta_line(euler, "M", eta, xq) / Md - 1), ls=ls, color="k", lw=lw - 0.3, alpha=0.6,
+                    label=f"Euler (設計壁) {_line_label(eta)}")
     ax.axhline(0, color="0.6", lw=0.5); ax.set_ylim(-0.6, 0.6); ax.set_xlim(max(10, xq[0]), xq[-1])
     ax.set_xlabel("x / r_t"); ax.set_ylabel("M / M_d − 1 [%]"); ax.legend(fontsize=8, frameon=False, ncol=2)
-    ax.set_title("試験部の M の設計値からのずれ (Mach 波・オーバーシュート・傾きを見る図)", fontsize=10)
+    ax.set_title(f"試験部の M の設計値からのずれ (Mach 波・オーバーシュート・傾きを見る図; 実線 r/r_w = {LINE_ETA:g} = 判定の線の高さ、"
+                 "軸・0.1 は比較)", fontsize=10)
     fig.tight_layout(); fig.savefig(path_dev, dpi=130); plt.close(fig)
 
 

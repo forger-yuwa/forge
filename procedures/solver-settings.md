@@ -509,7 +509,7 @@ output: {level: 1, extraFields: [ducros, volume]}   # 省略時 level 1
 長い本段を「全場を出し続けず、境界・選んだ節点・流量で監視し、止める step の全場だけを確実に残す」ための出力。
 どれも**出力だけ**で数値 (流束・勾配・リミッタ・境界条件・陰解法・ソース) には触らない。キーを書かなければ従来と同じ出力
 (協調停止と随時の書き出しは常に有効だが、要求のファイルが無ければ毎 step `stat` を 2 回するだけ)。設計は
-[plans/active/tooling-nozzle-card-local-mesh.md](../plans/active/tooling-nozzle-card-local-mesh.md) §4.4 1′・§5.1 #4a と
+[plans/accepted/tooling-nozzle-card-local-mesh.md](../plans/accepted/tooling-nozzle-card-local-mesh.md) §4.4 1′・§5.1 #4a と
 [plans/accepted/tooling-settle-convergence-and-monitor.md](../plans/accepted/tooling-settle-convergence-and-monitor.md) §4.1 の 6 (随時の書き出し)。
 
 ```yaml

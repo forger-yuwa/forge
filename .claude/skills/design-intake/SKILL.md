@@ -59,6 +59,8 @@ ledger) であり、ループの中に対話を持ち込まない。
 
 ### 3b. 風洞ノズルを実寸で頼まれたとき (要求カード)
 
+M5.5 系 (case/71 と寸法が近い燃焼ガスの風洞ノズル) は通しの手順書 `procedures/design-chain-quickstart.md` に沿う (カードの欄の変えてよい・いけないの表は §1.2)。格子は手順書 §3 の `hand_mesh.py` で作り、合格の根拠は NS 後の壁解像 (`check_wall_resolution.py`)。寸法・機種が大きく違うときは係数を試行錯誤で決め直す (plan `tooling-design-orchestrator` §5.1 #10) ので、ユーザに伝えて了承を取る。
+
 全圧・全温・出口マッハ・スロート径・入口半径・入口長さ・出口長さ・壁温のように**実寸で**言われたら、YAML を手で書かず
 要求カード `forge.wt_card/v1` に写して生成器で YAML を作る (手順と言葉の対応表は skill [`nozzle-design`](../nozzle-design/SKILL.md)
 「実寸の要求から作る・成果物を出す」)。
