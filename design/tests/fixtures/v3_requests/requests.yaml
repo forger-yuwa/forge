@@ -1,0 +1,54 @@
+# §6 V3 の 13a の依頼の課題集 (plan tooling-design-orchestrator §6「V3 の 13a の事前登録」2026-10-18; codex 諮問 v3)。
+# 依頼の原文・期待する結果 (機械の側)・固定する条件。試験 design/tests/run_v3_requests_tests.py が読む。13b (モデルを回す側) も同じ原文を使う。
+format: forge.v3_requests/v1
+fixed:
+  python: design/.venv-opt (system の python3 は numpy の版が違う)
+  judge: このリポジトリの HEAD の作業ツリー (承認の preview の判定器の版は試験の一時のきれいな git に記録する)
+  inputs_sha256:
+    case/71.m55_combustion_wt/card_m55_3coef.yaml: b20cd7ae263f1103e33978405dd5c179789f9c82dbde35349c87079e3c49787f
+    case/90.qs_trial_a/card_p0.yaml: 23caf0b7a3707c54d20ce5e556829fe7d87696d9530b40187eed9ec48d41dc5c
+    case/90.qs_trial_a/problem_p0.yaml: 780c2408bf19b5f06d4552da9f9a6e7a357d9054fc19467c6889101d7e1c717f
+    case/90.qs_trial_a/run_0003_ns_p0/res_42060.h5: c552ebf2aa9e6cea96287524c131537c1346d38b30a26e081657523f6bc767af
+    case/70.m5_air_wt_demo/card_m5_air_demo.yaml: d9c853ffd03497d053727dd507b5ecfc884048aed094147f89dba56f2d70cf6c
+requests:
+  - id: N1
+    kind: normal
+    text: "M5.5 の燃焼ガス風洞ノズルを作ってほしい。条件は case/71 と同じ (全圧 3.5 MPa・全温 1250 K・物理スロート径 200 mm・入口の半径 300 mm・拡大部 8 m・壁 350 K)。"
+    card: {source: case/71.m55_combustion_wt/card_m55_3coef.yaml, version: 2, mesh_limits: {max_nodes_ns: 443000, max_nodes_euler: 467000},
+           mesh_limits_ref: "case/71 のユーザ決定「a」2026-10-15"}
+    machine: 承認 → hand_mesh.py build --approval → check
+    expect: {preview_problems: 0, regenerated_check: OK, ns_quality: PASS, euler_quality: PASS}
+  - id: N2
+    kind: normal
+    text: "手順書の試走 A と同じノズル (case/90 の card_p0) を作ってほしい。"
+    card: {source: case/90.qs_trial_a/card_p0.yaml, version: 2, mesh_limits: {max_nodes_ns: 412000, max_nodes_euler: 434000},
+           mesh_limits_ref: "試走 A の手組みの格子の節点数"}
+    machine: 承認 → hand_mesh.py build --approval → check
+    expect: {preview_problems: 0, regenerated_check: OK, ns_quality: PASS, euler_quality: PASS}
+  - id: N3
+    kind: normal
+    text: "M5 の空気の風洞ノズル (case/70 のデモの条件) の格子まで作ってほしい。"
+    card: {source: case/70.m5_air_wt_demo/card_m5_air_demo.yaml, version: 2}
+    machine: 承認 → mesh_stage.check_template (格子の部品の成功)
+    expect: {preview_problems: 0, regenerated_check: OK, ns_quality: PASS, euler_quality: PASS}
+  - id: S1
+    kind: stop
+    text: "試走 A のノズルを出口コアのマッハ数 ±0.1 %・線の偏差 0.1 % で仕上げてほしい (1 回目の NS の結果で判定)。"
+    machine: "旧データの非承認のモードによる公差の判定の部品試験: case/90 run_0003_ns_p0 の写しを wt_qualify (card_p0・problem_p0、既定の公差)"
+    tolerances: {exit_core_M_tol_rel: 1.0e-3, line_tol_maxabs_pct: 0.1, line_tol_halfamp_pct: 0.1}
+    expect:
+      - {iteration: 1, max_iterations: 3, result: back_to_correction, fail: [V5b, V5c]}
+      - {iteration: 3, max_iterations: 3, result: rejected}
+  - id: S2
+    kind: stop
+    text: "N1 と同じ依頼だが、壁温の出所 (誰が決めたか) が分からない。"
+    card: {from: N1, drop_source: wall}
+    machine: N1 の生成した問題 YAML で承認の preview
+    expect: {preview_problem_contains: "wall", write: refused}
+  - id: S3
+    kind: stop
+    text: "N1 と同じ依頼で、GPU は 0.6 分 (0.01 時間) しか使えない。"
+    card: {from: N1, budget: {gpu_hours: 0.01, disk_gb: 50.0}}
+    campaign_estimates: {euler: {gpu_hours: 0.0666667, disk_gb: 0.5}, ns: {gpu_hours: 2.0, disk_gb: 2.0}}
+    machine: 格子の段が済んだ台帳から driver の次の段 (Euler) を判定 (起動は到達の記録だけ)
+    expect: {status: stopped, reason_contains: "予算", euler_attempts_added: 0, start_reached: 0, prior_attempt_kept: true, stops_recorded: 1}

@@ -66,7 +66,7 @@ def make_case(name, steps, gpu_hours=1.0, disk_gb=10.0):
     (case / "campaign.yaml").write_text(yaml.safe_dump({"format": "forge.campaign/v1", "name": name, "role": "fixed",
                                                         "approval": {"file": "card_approval.json", "sha256": sha},
                                                         "recipe": {"name": "axismach.wt_card_chain", "version": "v1"},
-                                                        "case_dir": ".", "ledger": "_ledger"}))
+                                                        "case_dir": ".", "ledger": "_ledger", "estimates": {"euler": {"gpu_hours": 0.1, "disk_gb": 1.0, "basis": "試験"}, "ns": {"gpu_hours": 1.0, "disk_gb": 5.0, "basis": "試験"}}}))
     (case / "steps.json").write_text(json.dumps(steps))
     return case
 

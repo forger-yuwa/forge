@@ -99,15 +99,18 @@ class Ledger:
                         "created": _now(), "attempts": [], "ingested": [], "owned_paths": [], "requests": [], "notes": [],
                         "budget": {"approved": dict(approved_budget), "reserved": {"gpu_hours": 0.0, "disk_gb": 0.0},
                                    "consumed": {"gpu_hours": 0.0, "disk_gb": 0.0}, "launches": []},
-                        "drivers": []}
+                        "drivers": [],
+                        # 段の見積もり (plan §4.5.1「段の見積もりの契約」): 台帳を作るときに campaign から写して固定する (再開で違えば止まる)
+                        "estimates": dict(campaign.get("estimates") or {})}
         else:
             if self.doc.get("format") != FORMAT:
                 raise ValueError(f"{self.path} は台帳でない")
             diffs = [k for k, a, b in (("approval", self.doc["approval"]["sha256"], ap["sha256"]),
-                                       ("recipe", self.doc["recipe"], campaign["recipe"]), ("role", self.doc["role"], campaign["role"]))
+                                       ("recipe", self.doc["recipe"], campaign["recipe"]), ("role", self.doc["role"], campaign["role"]),
+                                       ("estimates", self.doc.get("estimates") or {}, campaign.get("estimates") or {}))
                      if a != b]
             if diffs:
-                raise ValueError(f"台帳と campaign が違う {diffs} (役割・承認・recipe は台帳を作った後に変えられない; 新しい campaign にする)")
+                raise ValueError(f"台帳と campaign が違う {diffs} (役割・承認・recipe・見積もりは台帳を作った後に変えられない; 新しい campaign にする)")
         self.doc["drivers"].append({"pid": os.getpid(), "started": _now()})
         self.save()
         return self.doc

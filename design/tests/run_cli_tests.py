@@ -43,7 +43,8 @@ with tempfile.TemporaryDirectory() as tdn:
     sha = hashlib.sha256((case / "card_approval.json").read_bytes()).hexdigest()
     (case / "campaign.yaml").write_text(yaml.safe_dump({"format": "forge.campaign/v1", "name": "t", "role": "fixer",
                                                         "approval": {"file": "card_approval.json", "sha256": sha},
-                                                        "recipe": {"name": "axismach.wt_card_chain", "version": "v1"}, "case_dir": ".", "ledger": "_ledger"}))
+                                                        "recipe": {"name": "axismach.wt_card_chain", "version": "v1"}, "case_dir": ".", "ledger": "_ledger",
+                                                        "estimates": {"euler": {"gpu_hours": 0.1, "disk_gb": 1.0, "basis": "試験"}, "ns": {"gpu_hours": 1.0, "disk_gb": 5.0, "basis": "試験"}}}))
     r = cli("status", case / "campaign.yaml")
     check("(C1) 台帳が無いときの status", r.returncode == 0 and "まだ無い" in r.stdout, r.stdout + r.stderr[-200:])
     (case / "problem_p1.yaml").write_text("x: 1\n")

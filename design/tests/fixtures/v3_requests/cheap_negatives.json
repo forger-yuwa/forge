@@ -1,0 +1,27 @@
+{
+ "format": "forge.v3_cheap_negatives/v1",
+ "note": "§6 V3 の安価な負例 (11 種) と 13a で足したもの・正例の対応表 (plan §6「V3 の 13a の事前登録」; codex 諮問 v3 Major 3)。check は試験の出力の行の名前の先頭。未実行・欠け・skip は合格にしない。",
+ "negatives": [
+  {"kind": "根拠の無いユーザ欄", "test": "run_approval_tests.py", "check": "(N1) 出所の無いユーザ欄で止まる", "reason": "出所が無い"},
+  {"kind": "出所の未知のパス", "test": "run_approval_tests.py", "check": "(N2) 出所の未知のパスで止まる", "reason": "未知のパス"},
+  {"kind": "既定との不一致", "test": "run_approval_tests.py", "check": "(N3) recipe_default なのに既定と違う値で止まる", "reason": "recipe_default だが値"},
+  {"kind": "予算の欠落", "test": "run_approval_tests.py", "check": "(N4) 予算の欠落で止まる", "reason": "budget 必須"},
+  {"kind": "requirements_without_gate の削除", "test": "run_approval_tests.py", "check": "(N6) requirements_without_gate の削除で MISMATCH", "reason": "MISMATCH"},
+  {"kind": "CLI での公差の上書き", "test": "run_approval_tests.py", "check": "(N7) CLI の公差 (承認と同じ値 0.001) も拒否", "reason": "CLI の公差"},
+  {"kind": "CLI での必須の成果物の上書き", "test": "run_approval_tests.py", "check": "(N7) --optional-parts を拒否", "reason": "optional-parts"},
+  {"kind": "外部の Python の違い", "test": "run_gate_env_tests.py", "check": "(N1) 判定の Python が違う", "reason": "MISMATCH"},
+  {"kind": "import の元の違い", "test": "run_gate_env_tests.py", "check": "(N3) 印はあるが import の元", "reason": "import の元"},
+  {"kind": "総合 PASS と個別の FAIL の矛盾", "test": "run_wt_qualify_tests.py", "check": "(4c) MANIFEST の verdict PASS・failed_parts [] のまま cad.pass=false", "reason": "FAIL"},
+  {"kind": "予算の実行中の超過", "test": "run_driver_tests.py", "check": "(T7) 予算の超過", "reason": "budget"},
+  {"kind": "再開による二重の起動 (起動の後に落ちた)", "test": "run_driver_tests.py", "check": "(T3) 起動の後・印の前に落ちる", "reason": "二つ目を起動しない"},
+  {"kind": "再開による二重の起動 (二つ目の driver)", "test": "run_driver_tests.py", "check": "(T6) 二つ目の driver", "reason": "busy"},
+  {"kind": "既存の出力先への書き込み", "test": "run_driver_tests.py", "check": "(T12) 出力先の run が既にある", "reason": "既にある"},
+  {"kind": "GPU の段の見積もりの欠け (13a で足した)", "test": "run_campaign_schema_tests.py", "check": "(N) GPU の段の見積もりの欠け (estimates なし) → 拒否", "reason": "GPU の段"}
+ ],
+ "positives": [
+  {"kind": "承認したカード", "test": "run_approval_tests.py", "check": "(P1) preview に問題が無く write で承認の記録ができる"},
+  {"kind": "承認の原本の照合", "test": "run_approval_tests.py", "check": "(P2) 承認の原本の check が OK"},
+  {"kind": "係数だけを変えた試行の入力", "test": "run_approval_tests.py", "check": "(P3) 較正の係数だけを変えた試行の入力の check が OK"},
+  {"kind": "係数だけを変えた試行のカード (格子の上限の照合)", "test": "run_mesh_limits_tests.py", "check": "正例: 較正の係数だけを変えた試行のカードは承認の照合 OK"}
+ ]
+}

@@ -200,7 +200,10 @@ class Recipe:
             return {"stop": bad}
         env = {k_: v["value"] for k_, v in (doc.get("run_env") or {}).items() if v.get("value")}
         return {"step": step, "command": [self.python, "-m", "forge_design.campaign.recipes.wt_card_chain", "exec", json.dumps(sd, ensure_ascii=False)],
-                "gpu": gpu, "run_dir": None if run_dir is None else str(run_dir), "owned_paths": owned, "estimate": {}, "cwd": str(self.design),
+                "gpu": gpu, "run_dir": None if run_dir is None else str(run_dir), "owned_paths": owned,
+                # 段の見積もり: 台帳に固定した campaign の estimates から (plan §4.5.1「段の見積もりの契約」; 無ければ空 = 予約の検査は止めない)
+                "estimate": {k_: float(v) for k_, v in ((doc.get("estimates") or {}).get(kind) or {}).items() if k_ in ("gpu_hours", "disk_gb")},
+                "cwd": str(self.design),
                 "env": {**env, "PYTHONPATH": str(self.design), "PYTHONDONTWRITEBYTECODE": "1"}}
 
     def interpret(self, spec, attempt, status) -> dict:
