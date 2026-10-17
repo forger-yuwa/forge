@@ -1,0 +1,1319 @@
+{
+ "host": "DESKTOP-S8N5ES6",
+ "time": "2026-10-17T19:21:21+0900",
+ "precheck": {
+  "systemd_run": "/usr/bin/systemd-run",
+  "systemctl": "/usr/bin/systemctl",
+  "systemd_version": 255,
+  "user_manager": "running",
+  "linger": "Linger=no",
+  "problems": [],
+  "warnings": [
+   "Linger=no: ログインのセッションが無くなると user service が止まる。長い run の前に loginctl enable-linger が要る"
+  ],
+  "status": "OK"
+ },
+ "A": {
+  "arm": "A",
+  "unit": "forge-attempt-ab-A-6d9c2aa8",
+  "dir": "/tmp/attempt_ab_A_kyovulrr",
+  "cmd": [
+   "systemd-run",
+   "--user",
+   "--quiet",
+   "--unit=forge-attempt-ab-A-6d9c2aa8",
+   "--collect",
+   "-p",
+   "ExitType=main",
+   "-p",
+   "KillMode=control-group",
+   "-p",
+   "TimeoutStopSec=5",
+   "-p",
+   "Restart=no",
+   "/usr/bin/python3",
+   "/tmp/attempt_ab_A_kyovulrr/executor.py",
+   "/tmp/attempt_ab_A_kyovulrr"
+  ],
+  "systemd_run_rc": 0,
+  "systemd_run_err": "",
+  "pids": {
+   "executor": 4028738,
+   "run_case": 4028739,
+   "forge": 4028740
+  },
+  "cgroup": {
+   "executor": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-A-6d9c2aa8.service",
+   "run_case": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-A-6d9c2aa8.service",
+   "forge": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-A-6d9c2aa8.service"
+  },
+  "in_unit": {
+   "executor": true,
+   "run_case": true,
+   "forge": true
+  },
+  "sessions_differ": true,
+  "samples": [
+   {
+    "t": 0.0,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.1,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.201,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.301,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.402,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.502,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.603,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.704,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.805,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.905,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.006,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.106,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.207,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.307,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.407,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.508,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.608,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.709,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.81,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.91,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.011,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.113,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.214,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.315,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.415,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.516,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.617,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.718,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.819,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.92,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.02,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.121,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.222,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.322,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.423,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.524,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.624,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.726,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.826,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.926,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.027,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.128,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.229,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.329,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.43,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.531,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.632,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.733,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.834,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.934,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.035,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.135,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.236,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.337,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.437,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.537,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.638,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.739,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.84,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.94,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.041,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.141,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.242,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.342,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.443,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.543,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.643,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.744,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.845,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.945,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.046,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.147,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.248,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.348,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.448,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.549,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.65,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.751,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.853,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.953,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.054,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.154,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.255,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.355,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.456,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.556,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.657,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.757,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.858,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.959,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.06,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.161,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.262,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.362,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.462,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.563,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.663,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.764,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.864,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.965,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 10.066,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   }
+  ],
+  "killed_t": null,
+  "verdict": "PASS",
+  "why": "10 秒・101 回の観測で 3 つとも生きていた",
+  "left_after_cleanup": {
+   "executor": false,
+   "run_case": false,
+   "forge": false
+  },
+  "n_samples": 101
+ },
+ "B": {
+  "arm": "B",
+  "unit": "forge-attempt-ab-B-bc3e4b40",
+  "dir": "/tmp/attempt_ab_B_pql35zl9",
+  "cmd": [
+   "systemd-run",
+   "--user",
+   "--quiet",
+   "--unit=forge-attempt-ab-B-bc3e4b40",
+   "--collect",
+   "-p",
+   "ExitType=main",
+   "-p",
+   "KillMode=control-group",
+   "-p",
+   "TimeoutStopSec=5",
+   "-p",
+   "Restart=no",
+   "/usr/bin/python3",
+   "/tmp/attempt_ab_B_pql35zl9/executor.py",
+   "/tmp/attempt_ab_B_pql35zl9"
+  ],
+  "systemd_run_rc": 0,
+  "systemd_run_err": "",
+  "pids": {
+   "executor": 4028865,
+   "run_case": 4028866,
+   "forge": 4028867
+  },
+  "cgroup": {
+   "executor": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-B-bc3e4b40.service",
+   "run_case": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-B-bc3e4b40.service",
+   "forge": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-B-bc3e4b40.service"
+  },
+  "in_unit": {
+   "executor": true,
+   "run_case": true,
+   "forge": true
+  },
+  "sessions_differ": true,
+  "samples": [
+   {
+    "t": 0.0,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.1,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.201,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.302,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.403,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.503,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.604,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.706,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.455,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.555,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.656,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.756,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.857,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.957,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.058,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.159,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.259,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.36,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.46,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.561,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.662,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.762,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.862,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.963,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.064,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.164,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.265,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.365,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.466,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.566,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.667,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.767,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.867,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.968,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.068,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.169,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.269,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.37,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.47,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.571,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.672,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.772,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.872,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.973,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.074,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.174,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.275,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.375,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.476,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.576,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.676,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.776,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.877,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.977,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.077,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.177,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.278,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.379,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.479,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.579,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.68,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.78,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.88,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.98,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.081,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.181,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.282,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.382,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.482,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.583,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.683,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.784,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.884,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.984,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.085,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.185,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.286,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.386,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.486,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.587,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.688,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.788,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.888,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.989,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.089,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.189,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.29,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.39,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.49,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.591,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.691,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.792,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.892,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.992,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 10.092,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   }
+  ],
+  "killed_t": 2.0580761432647705,
+  "all_gone_after_kill_s": 0.101,
+  "verdict": "PASS",
+  "why": "SIGKILL の 0.101 秒後に全子孫が消えた (期限 5 秒)",
+  "left_after_cleanup": {
+   "executor": false,
+   "run_case": false,
+   "forge": false
+  },
+  "n_samples": 95
+ },
+ "control": {
+  "arm": "control_no_service",
+  "dir": "/tmp/attempt_ab_control_acpi2j2r",
+  "pids": {
+   "executor": 4028957,
+   "run_case": 4028958,
+   "forge": 4028959
+  },
+  "killed_t": 1.0044283866882324,
+  "alive_at_end": {
+   "executor": false,
+   "run_case": true,
+   "forge": true
+  },
+  "result": "子孫が残った (service が無いと残ることを検出できる)",
+  "left_after_cleanup": {
+   "executor": false,
+   "run_case": false,
+   "forge": false
+  }
+ },
+ "verdict": "PASS"
+}

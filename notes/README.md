@@ -13,6 +13,7 @@
 
 | ノート | area | 概要 |
 | --- | --- | --- |
+| [2026-10-17-attempt-service-ab/](investigations/2026-10-17-attempt-service-ab/README.md) | `design / tooling` | 設計の実行役の試行ごとの systemd の service の実測 (2026-10-17): 実行担当への SIGKILL の後に全子孫が 0.10 秒で消える (手元・AWS B)、Linger=no では ssh を切ると service が止まる。plan [tooling-design-orchestrator](../plans/active/tooling-design-orchestrator.md) §4.5・§5.1 #15 |
 | [nozzle-flow-separation-validation-survey.md](investigations/nozzle-flow-separation-validation-survey.md) | `design / nozzle` | ノズル内剥離 (過膨張) の検証データ調査 (2026-10-11)。第一検証ケース候補 5 件 (DLR TIC test case 1A・NASA MSFC TIC/PAR・LaRC 2D-CD・SERN TM-86270・DLR P6.2 デュアルベル)、輪郭の公開度、先行 RANS のずれ方 (TC1A で標準 SST −9〜−17 %)、剥離の経験式。判断は親計画 [tooling-nozzle-design-tool](../plans/active/tooling-nozzle-design-tool.md) §5.1 #2 (未決) |
 | [2026-10-03-farfield-evidence/](investigations/2026-10-03-farfield-evidence/README.md) | `boundary` | farfield 限定受理の一次証拠 (147 run の索引: バイナリ・収束・ゲート・定常性・置換カウンタ、判定原本の写し)。plan [boundary-node-farfield-characteristic](../plans/accepted/boundary-node-farfield-characteristic.md) §5.1 #5a |
 | [2026-10-02-twophase-diffusion-kernel-design.md](investigations/2026-10-02-twophase-diffusion-kernel-design.md) | `condensation` | 二相拡散 (気相内の分子拡散 + 全相共通の乱流混合) のカーネル実装設計と上位諮問の材料。ホスト参照実装 `tests/unit/test_twophase_diffusion_harness.py` で plan §6 の単体条件は全件 PASS (3 セル判別 A +3.3 % / B 2.2e-9)。未確定: 補正項の面の z、相変化ソースと蒸気の増分、総水分の FCT、float32 の許容。判断は plan [condensation-two-phase-transport](../plans/active/condensation-two-phase-transport.md) §5.1 #4 (未諮問) |

@@ -1,0 +1,1355 @@
+{
+ "host": "ip-172-31-14-139",
+ "time": "2026-10-17T10:23:16+0000",
+ "precheck": {
+  "systemd_run": "/usr/bin/systemd-run",
+  "systemctl": "/usr/bin/systemctl",
+  "systemd_version": 255,
+  "user_manager": "running",
+  "linger": "Linger=no",
+  "problems": [],
+  "warnings": [
+   "Linger=no: ログインのセッションが無くなると user service が止まる。長い run の前に loginctl enable-linger が要る"
+  ],
+  "status": "OK"
+ },
+ "A": {
+  "arm": "A",
+  "unit": "forge-attempt-ab-A-bbdc37a4",
+  "dir": "/tmp/attempt_ab_A_01niqzqb",
+  "cmd": [
+   "systemd-run",
+   "--user",
+   "--quiet",
+   "--unit=forge-attempt-ab-A-bbdc37a4",
+   "--collect",
+   "-p",
+   "ExitType=main",
+   "-p",
+   "KillMode=control-group",
+   "-p",
+   "TimeoutStopSec=5",
+   "-p",
+   "Restart=no",
+   "/usr/bin/python3",
+   "/tmp/attempt_ab_A_01niqzqb/executor.py",
+   "/tmp/attempt_ab_A_01niqzqb"
+  ],
+  "systemd_run_rc": 0,
+  "systemd_run_err": "",
+  "pids": {
+   "executor": 1853,
+   "run_case": 1854,
+   "forge": 1855
+  },
+  "cgroup": {
+   "executor": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-A-bbdc37a4.service",
+   "run_case": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-A-bbdc37a4.service",
+   "forge": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-A-bbdc37a4.service"
+  },
+  "in_unit": {
+   "executor": true,
+   "run_case": true,
+   "forge": true
+  },
+  "sessions_differ": true,
+  "samples": [
+   {
+    "t": 0.0,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.1,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.201,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.301,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.401,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.502,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.602,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.702,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.802,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.903,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.003,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.103,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.204,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.304,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.404,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.505,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.605,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.705,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.806,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.906,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.006,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.107,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.207,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.307,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.408,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.508,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.608,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.709,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.809,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.909,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.01,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.11,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.21,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.311,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.411,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.511,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.612,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.712,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.812,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 3.913,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.013,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.113,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.214,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.314,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.414,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.515,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.615,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.715,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.816,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 4.916,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.016,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.117,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.217,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.317,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.418,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.518,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.618,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.719,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.819,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 5.919,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.02,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.12,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.22,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.321,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.421,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.521,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.622,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.722,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.822,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 6.923,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.023,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.123,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.224,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.324,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.424,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.525,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.625,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.726,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.826,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 7.926,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.027,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.127,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.227,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.328,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.428,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.528,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.629,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.729,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.829,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 8.93,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.03,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.13,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.231,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.331,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.431,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.532,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.632,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.732,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.833,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 9.933,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 10.033,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   }
+  ],
+  "killed_t": null,
+  "verdict": "PASS",
+  "why": "10 秒・101 回の観測で 3 つとも生きていた",
+  "left_after_cleanup": {
+   "executor": false,
+   "run_case": false,
+   "forge": false
+  },
+  "n_samples": 101
+ },
+ "B": {
+  "arm": "B",
+  "unit": "forge-attempt-ab-B-2dccc714",
+  "dir": "/tmp/attempt_ab_B_4zck1spz",
+  "cmd": [
+   "systemd-run",
+   "--user",
+   "--quiet",
+   "--unit=forge-attempt-ab-B-2dccc714",
+   "--collect",
+   "-p",
+   "ExitType=main",
+   "-p",
+   "KillMode=control-group",
+   "-p",
+   "TimeoutStopSec=5",
+   "-p",
+   "Restart=no",
+   "/usr/bin/python3",
+   "/tmp/attempt_ab_B_4zck1spz/executor.py",
+   "/tmp/attempt_ab_B_4zck1spz"
+  ],
+  "systemd_run_rc": 0,
+  "systemd_run_err": "",
+  "pids": {
+   "executor": 1860,
+   "run_case": 1861,
+   "forge": 1862
+  },
+  "cgroup": {
+   "executor": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-B-2dccc714.service",
+   "run_case": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-B-2dccc714.service",
+   "forge": "0::/user.slice/user-1000.slice/user@1000.service/app.slice/forge-attempt-ab-B-2dccc714.service"
+  },
+  "in_unit": {
+   "executor": true,
+   "run_case": true,
+   "forge": true
+  },
+  "sessions_differ": true,
+  "samples": [
+   {
+    "t": 0.0,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.1,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.201,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.301,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.401,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.502,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.602,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.702,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.803,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 0.903,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.003,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.104,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.204,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.304,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.405,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.505,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.605,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.706,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.806,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 1.906,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.007,
+    "executor": true,
+    "run_case": true,
+    "forge": true
+   },
+   {
+    "t": 2.107,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.207,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.307,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.408,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.508,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.608,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.708,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.809,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 2.909,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.009,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.109,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.209,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.31,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.41,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.51,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.61,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.711,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.811,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 3.911,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.011,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.111,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.212,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.312,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.412,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.512,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.612,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.713,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.813,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 4.913,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.013,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.114,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.214,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.314,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.414,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.514,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.615,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.715,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.815,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 5.915,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.016,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.116,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.216,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.316,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.416,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.517,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.617,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.717,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.817,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 6.918,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.018,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.118,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.218,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.318,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.419,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.519,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.619,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.719,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.82,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 7.92,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.02,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.12,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.22,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.321,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.421,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.521,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.621,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.721,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.822,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 8.922,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.022,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.122,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.223,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.323,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.423,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.523,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.623,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.724,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.824,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 9.924,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   },
+   {
+    "t": 10.024,
+    "executor": false,
+    "run_case": false,
+    "forge": false
+   }
+  ],
+  "killed_t": 2.006606340408325,
+  "all_gone_after_kill_s": 0.1,
+  "verdict": "PASS",
+  "why": "SIGKILL の 0.100 秒後に全子孫が消えた (期限 5 秒)",
+  "left_after_cleanup": {
+   "executor": false,
+   "run_case": false,
+   "forge": false
+  },
+  "n_samples": 101
+ },
+ "control": {
+  "arm": "control_no_service",
+  "dir": "/tmp/attempt_ab_control_ktdwpkvr",
+  "pids": {
+   "executor": 1866,
+   "run_case": 1867,
+   "forge": 1868
+  },
+  "killed_t": 1.0031018257141113,
+  "alive_at_end": {
+   "executor": false,
+   "run_case": true,
+   "forge": true
+  },
+  "result": "子孫が残った (service が無いと残ることを検出できる)",
+  "left_after_cleanup": {
+   "executor": false,
+   "run_case": false,
+   "forge": false
+  }
+ },
+ "verdict": "PASS"
+}

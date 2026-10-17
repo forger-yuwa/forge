@@ -255,6 +255,9 @@
     これで停止規則 v2 の `start_new_session=True` はそのまま使える。`nohup` での起動はやめる。
   - 停止期限の内に全子孫の終了を確かめられなければ、その試行の新しい試行を起動しない。確かめられるまで予算の予約を解放しない (精算は確認の後)。
   - 実装の最初に、対象の環境 (AWS・手元) で service の管理 (systemd の user service など) が使えるかを検査する。使えなければ `nohup` に黙って戻さず、起動を止める。
+  - **Linger が要る** (2026-10-17 実測、[記録](../../notes/investigations/2026-10-17-attempt-service-ab/README.md)): `Linger=no` (AWS B・手元の既定) では、ssh を切ると約 12 秒後に
+    systemd が user service を止めた。`Linger=yes` では 25 秒後も生きていた。実行役の事前検査は `Linger=yes` を要り、無ければ起動を止める。
+    インスタンスで `sudo loginctl enable-linger ubuntu` を 1 回行う (ユーザに確認してから; 試験の後は `Linger=no` に戻してある)。
   - 判別の A/B (GPU・forge なし; 実装の先頭、§5.1 #15): 同じ service の中で別のセッションのダミーの `run_case` とその子のダミーの forge を動かし、100 ms ごとに生存を観測する。
     A は介入なしで 10 秒、B は 2 秒の時点で実行担当だけを `SIGKILL`。停止期限は 5 秒に固定する。A が続き B の全子孫が期限の内に消えれば契約の成立、B が残れば不成立。
     A も止まったら試験の不成立。
@@ -344,7 +347,7 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | 1b | ~~codex の plan 段レビュー~~ (2026-10-16 済み) | GO-with-changes、C0/M5/m2、全件採用 (§6.1) | F |
 | 1c | ~~改訂の方向の諮問 (codex diagnose)~~ (2026-10-17 済み) | 判断: 2026-10-17・方向は採用、ただし出口の判定だけでは 4 つを守れない。承認した要求と判定条件の固定・予算と既存データの実行時の保護を足し、途中の修正はその範囲で AI に任せる (全件採用、§4 を書き直し、§6.1) | F |
 | 1d | ~~書き直した §4・§6 の codex の plan 段レビュー~~ (2026-10-17 済み) | 判断: 2026-10-17・GO-with-changes、C0/M4/m1。採否は codex (diagnose) に諮って全件採用、M1 は停止の責任を試行ごとの service に置く契約まで plan で決めた (§4.5・§6.1) | F |
-| 15 | 試行ごとの service の契約の事前検査と障害の判別の A/B (§4.5、GPU・forge なし; 実装の先頭) | 対象の環境 (AWS B・手元) で systemd の user service (`ExitType=main`・`KillMode=control-group`・`TimeoutStopSec`・`Restart=no`) が使えるかを調べ、§4.5 の A/B を回す。合格: A は 10 秒続き、B は実行担当の `SIGKILL` の後 5 秒の内に全子孫が消える。使えない環境は「起動を止める」とし、別の仕組みは諮ってから | O |
+| 15 | ~~試行ごとの service の契約の事前検査と障害の判別の A/B~~ (2026-10-17 済み、PASS) (§4.5、GPU・forge なし; 実装の先頭) | 対象の環境 (AWS B・手元) で systemd の user service (`ExitType=main`・`KillMode=control-group`・`TimeoutStopSec`・`Restart=no`) が使えるかを調べ、§4.5 の A/B を回す。合格: A は 10 秒続き、B は実行担当の `SIGKILL` の後 5 秒の内に全子孫が消える。使えない環境は「起動を止める」とし、別の仕組みは諮ってから。**結果 (2026-10-17)**: 手元 (WSL2)・AWS B とも systemd 255 で A PASS・B PASS (全子孫が 0.10 秒で消えた)、対照 (service なし) は子孫が残った。`Linger=no` では ssh を切ると service が止まる (§4.5)。台本 `design/tests/run_attempt_service_ab.py`、記録 `notes/investigations/2026-10-17-attempt-service-ab/` | O |
 | 2 | 承認した要求と判定条件の固定 (§4.0・§4.2・§4.7) | カードの書式の版を上げて `qualification` と予算の承認値を書けるようにする。出所と承認の版の結び付け。判定器の版を固定した別の checkout で判定する。正式な入口で CLI・問題 YAML の公差・窓・必須成果物の相違を拒否する。`DIMENSIONS.json` などの中間の判定の結び付けと再評価。判定器の無い要求は `incomplete`。合格: §6 V3 の安価な負例のうち、根拠の無いユーザ欄・CLI での公差・評価窓・必須成果物の変更・判定器なし、で止まる (codex の判別 A/B: 承認値 0.001 に CLI 0.1 → 拒否) | O |
 | 3 | 要求の一致の照合 (§4.2) | 承認した要求 ↔ 実効の設定・境界条件・物性と分布のファイル。導出の関係 (組成の換算・物理と設計の `r_throat`・壁温の分布) を扱う。起動の前と出口の 2 回。合格: case/71 `run_0014_chain_v2` と試走 A (`case/90.qs_trial_a`) で一致、入口の Tt・壁温・組成・軸対称の別をずらした負例で止まる | O |
 | 4 | 親 plan の未実装の契約 (§4.1 の前提) | search の無い最小の campaign・入力の参照の解決 (snapshot・格子・物性・バイナリの固定)・`execution_plan.json`・設定の照合。合格: 計画を確定した後に参照の run の出力が増えても入力が変わらない負例・照合の不一致で止まる負例 | O |
@@ -432,6 +435,7 @@ V1a・V1b・V2a・V2b・V2c・V3・V4 (a)。V4 (a) は既知の正常のカー�
 
 ## 9. 変更ログ
 
+- `2026-10-17` — §5.1 #15 を実施: 試行ごとの systemd の user service (`ExitType=main`・`KillMode=control-group`・`TimeoutStopSec=5`・`Restart=no`) で、実行担当への `SIGKILL` の後に全子孫が 0.10 秒で消えた (手元 WSL2・AWS B とも A PASS・B PASS、対照は子孫が残った)。`Linger=no` では ssh を切ると約 12 秒で service が止まるので、実行役の事前検査に `Linger=yes` を足した (§4.5)。台本 `design/tests/run_attempt_service_ab.py`、記録 `notes/investigations/2026-10-17-attempt-service-ab/`。
 - `2026-10-17` — codex の plan 段レビュー (2 回目、GO-with-changes、C0/M4/m1) を、codex (diagnose) に採否を諮って全件採用した (§6.1)。§4.5 に試行ごとの実行担当と、停止の責任を外の service に置く契約、§4.6 に依頼ごとの節点数の上限の承認、§4.8 に case の run 一覧の同期、§6 V1b の期待を `accepted` に直し「補正へ戻す」を試走 A の `run_0003_ns_p0` に固定、V2c を足し、V4 を (a) 決定的な通し (必須) と (b) モデルの測定に分けた。§5.1 に #15 (service の事前検査と障害の A/B、実装の先頭)。
 - `2026-10-17` — codex (diagnose) の諮問 ([記録](../../notes/reviews/2026-10-17-orchestrator-direction-diagnose.md)) を全件採用し、§1〜§8 を書き直した (前の案は commit 4039c301)。守りを「承認した要求と判定条件の固定」「予算と既存データの実行時の保護」「出口の判定」の 3 つにし、途中の修正はその範囲で AI に任せる (§4.0)。判定を要求の一致・解析の成立・要求の達成に分けた (§4.2)。判断役の口・問いの組・`local` の backend・`forge-design answer` は今は作らない (§4.9)。§4.4 に途中の修正の範囲と AGENTS.md の条件 4 の書き分けの文案、§4.5 に予算の予約・監視・精算、§6 V3 を依頼の課題集に置き換えた。§5.1 は #2〜#9 を新しい中身にし、#13 (V3)・#14 (規約から強制へ) を足した。#10〜#12 は番号を保ち別のマイルストーンとした。
 - `2026-10-17` — ユーザ決定: 設計方針の改訂案の方向で進める・予算は依頼ごとに見積もって承認する (§4 の冒頭)。本文の書き直しは codex 諮問の後。
