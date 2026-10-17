@@ -1393,6 +1393,15 @@ AI が変えてはいけない「ユーザが決めた欄」と「判定の条�
 - 承認の記録は真正性を証明しない (sha256 と `user_ref` は「指定した承認の記録との整合」だけを示す)。
 - 試験: `design/tests/run_approval_tests.py` (固定の入力 `design/tests/fixtures/approval_trial_a/`)、`design/tests/run_gate_env_tests.py`・`run_gate_deliverables_tests.py` (HEAD を承認の commit に使うので commit した後に回す)、`run_approval_rechecks_tests.py`。
 
+#### 実行の計画と campaign (2026-10-17、plan [`tooling-design-orchestrator`](../../plans/active/tooling-design-orchestrator.md) §4.1.1)
+
+実行役 (未実装、plan §5.1 #6) が使う部品。`design/forge_design/campaign/`。
+
+- **初期場の固定** (`ic.resolve_ic`、`runner_axismach.select_ic`): 初期場はファイル (パス・step・sha256) で固定し、`prepare`・`prepare_ns` に `ic_file`・`ic_sha256` で渡す。準備の記録の `ic_snapshot` に使ったファイルを書く (ディレクトリの `ic_from` だけのときも)。元の run から継承するリミッタの基準値は計画の時点で明示の値にする。元の run と今の問題の熱力学のモデル・エネルギー基準・輸送種の配置・設計マッハ数が違えば止める。
+- **実行の計画** (`plan`、`execution_plan.json`): 準備の前に入力を固定し、準備の後・起動の前に全段の起動直前の設定の全文を確定する (`runner_axismach.staged_ns_launch_configs`; 本段の nStepOuter は停止規則の上限)。recipe `axismach.wt_card_chain/v1` が段の列 (S1_soft・S2_mid・main) と段の間で許す差 (CFL・空間の次数・内反復・step 数・出力の間隔・B0 と本段の出力のキー) を持ち、物理 (physProp・turbulence・mesh) と境界条件の差は許さない。`run_staged_ns(plan=…)` は最初の段の前と各段の起動の直前に計画と照合し、違えば forge を起動しない。走った後は段の記録・起動の記録・準備の記録を照合する。
+- **campaign** (`campaign`、`forge.campaign/v1`): 承認した依頼 1 つを決まった recipe で回す最小の記述 (名前・承認の記録・recipe・case・台帳)。探索は親 plan の #6b。
+- 試験: `design/tests/run_campaign_ic_tests.py`・`run_execution_plan_tests.py`・`run_campaign_schema_tests.py`。
+
 ### 成果物一式
 
 最終 NS の run から 1 コマンドで書き出す (`<run>/deliverables/`)。
