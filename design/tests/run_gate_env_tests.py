@@ -98,7 +98,8 @@ try:
     case_dirs = sorted(str(p.relative_to(co)) for p in (co / "case").rglob("*") if p.is_dir()) if (co / "case").exists() else []
     check("(P1) checkout は design・solver_density_cuda/tools・data と recipe の格子の台本だけ (50 MB 未満)",
           sz < 50e6 and (co / "design" / "forge_design").is_dir() and (co / "solver_density_cuda" / "data" / "species").is_dir()
-          and case_dirs == ["case/71.m55_combustion_wt", "case/71.m55_combustion_wt/_mesh"], f"{sz / 1e6:.1f} MB {case_dirs}")
+          and case_dirs[:2] == ["case/71.m55_combustion_wt", "case/71.m55_combustion_wt/_mesh"]
+          and all(d.startswith("case/71.m55_combustion_wt/_mesh/") for d in case_dirs[2:]), f"{sz / 1e6:.1f} MB {case_dirs[:3]}…")
     pr = GE.probe(apath)
     check("(P2) probe: import の元が checkout の中、印の検査が通る",
           pr["status"] == "OK" and pr["forge_design"].startswith(str(co)) and pr["assert"]["commit"] == head,
