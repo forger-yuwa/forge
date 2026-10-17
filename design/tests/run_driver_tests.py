@@ -252,6 +252,9 @@ try:
     r = drv(c, extra=("--min-free-bytes", "1e18"))
     check("(T11) 空きの容量が下限より小さい → 起動の前に止まる (試行を記録しない)",
           out_status(r).get("status") == "stopped" and "空きの容量" in out_status(r).get("why", "") and not ledger(c)["attempts"])
+    sp = ledger(c).get("stops") or []
+    check("(T11) 止まった記録が台帳の stops に残る (集計の「人に返した回数」; plan §4.8)",
+          len(sp) == 1 and sp[0]["status"] == "stopped" and "空きの容量" in sp[0]["why"], str(sp)[:200])
 
     c = make_case("t13", [step("s1", "sleep 1"), step("s2", "sleep 1")])
     os.environ["FORGE_DUMMY_ENV"] = "build-A"

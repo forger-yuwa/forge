@@ -207,6 +207,21 @@ class Driver:
             self.L = Ledger(self.ledger_dir).acquire()
         except LedgerBusy as e:
             return {"status": "busy", "why": str(e), "ledger": read_ledger(self.ledger_dir)}
+        out = self._drive()
+        return out
+
+    def _record_stop(self, out: dict) -> dict:
+        """止まって人に返すとき (status stopped・human) の記録を台帳の stops に足す (集計の「人に返した回数」; plan §4.8)。"""
+        if out.get("status") in ("stopped", "human") and getattr(self.L, "doc", None) is not None:
+            try:
+                self.L.doc.setdefault("stops", []).append({"time": _now(), "status": out["status"], "why": str(out.get("why"))[:500],
+                                                          "attempt": out.get("attempt")})
+                self.L.save()
+            except Exception as e:                                    # noqa: BLE001 — 記録の失敗で止まり方を変えない
+                self._log(f"止まった記録を台帳に書けない: {e}")
+        return out
+
+    def _drive(self) -> dict:
         try:
             (self.ledger_dir / "logs").mkdir(parents=True, exist_ok=True)
             self.log = open(self.ledger_dir / "logs" / f"driver-{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}.log", "a")
@@ -215,10 +230,10 @@ class Driver:
             self.L.init(self.campaign, {"gpu_hours": float(bud.get("gpu_hours", 0.0)), "disk_gb": float(bud.get("disk_gb", 0.0))})
             h = self._check_run_env()
             if h:
-                return h
+                return self._record_stop(h)
             h = self.reconcile()
             if h:
-                return h
+                return self._record_stop(h)
             while True:
                 self.L.take_requests()
                 spec = self.recipe.next_step(self.L.doc, self.campaign)
@@ -227,15 +242,15 @@ class Driver:
                     return {"status": "done"}
                 if "stop" in spec:
                     self._log(f"止まる: {spec['stop']}")
-                    return {"status": "stopped", "why": spec["stop"]}
+                    return self._record_stop({"status": "stopped", "why": spec["stop"]})
                 free = shutil.disk_usage(self.ledger_dir).free
                 if free < self.min_free_bytes:
-                    return {"status": "stopped", "why": f"空きの容量 {free / 1e9:.2f} GB が下限 {self.min_free_bytes / 1e9:.2f} GB より小さい (ログ・記録を書けない)"}
+                    return self._record_stop({"status": "stopped", "why": f"空きの容量 {free / 1e9:.2f} GB が下限 {self.min_free_bytes / 1e9:.2f} GB より小さい (ログ・記録を書けない)"})
                 if spec.get("run_dir") and Path(spec["run_dir"]).exists():
-                    return {"status": "stopped", "why": f"出力先 {spec['run_dir']} が既にある (既存の出力先に書かない)"}
+                    return self._record_stop({"status": "stopped", "why": f"出力先 {spec['run_dir']} が既にある (既存の出力先に書かない)"})
                 chk = BG.check_start(self.L.doc["budget"], spec.get("estimate") or {})
                 if not chk["ok"]:
-                    return {"status": "stopped", "why": chk["why"]}
+                    return self._record_stop({"status": "stopped", "why": chk["why"]})
                 a = self.L.new_attempt(spec["step"], spec.get("run_dir"), BG.remaining(self.L.doc["budget"]),
                                        extra={"owned_paths": [str(p) for p in spec.get("owned_paths") or []], "estimate": spec.get("estimate")})
                 self._write_attempt_file(a, spec)
@@ -246,13 +261,13 @@ class Driver:
                 self._log(f"試行 {a['id']} を起動 ({a['unit']})")
                 us = self._wait_inactive(a)
                 if not us["query_ok"]:
-                    return {"status": "human", "why": f"試行 {a['id']} の待ちで照会に失敗"}
+                    return self._record_stop({"status": "human", "why": f"試行 {a['id']} の待ちで照会に失敗"})
                 st = self._ingest(a, spec)
                 res = self.recipe.interpret(spec, self.L.attempt(a["id"]), st)
                 self.L.mark(a["id"], interpretation=res)
                 self._sync_readme()
                 if not res.get("ok"):
-                    return {"status": "stopped", "why": res.get("detail"), "attempt": a["id"]}
+                    return self._record_stop({"status": "stopped", "why": res.get("detail"), "attempt": a["id"]})
         finally:
             if self.log:
                 self.log.close()

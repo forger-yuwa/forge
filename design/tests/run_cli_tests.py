@@ -4,6 +4,9 @@
   (C1) 台帳が無いときの status は「まだ無い」
   (C2) note は変更の要求のファイルを置く (台帳には書かない; 入力の sha256 と理由)
   (C3) run の起動の前の検査: この PC で Linger=no なら止める (Linger=yes なら飛ばす)
+  (C4) --role が campaign の role と違えば起動の前に止める (§4.0; 役割は起動のときに人が決める)
+  (C5) 台帳があるのに --resume なし・台帳が無いのに --resume → 止める (付け忘れで別の campaign を上書きしない)
+  (C6) status の集計: 試行の数 (状態ごと)・人に返した回数 (台帳の stops)・直した回数 (変更の要求 note)・予算
 
 実行: /home/sano/work/forge/design/.venv-opt/bin/python design/tests/run_cli_tests.py
 """
@@ -50,8 +53,29 @@ with tempfile.TemporaryDirectory() as tdn:
     check("(C2) note は変更の要求のファイルを置く (sha256 と理由)", r.returncode == 0 and len(reqs) == 1 and doc.get("reason") == "CFL を下げた"
           and doc.get("input_sha256") == hashlib.sha256(b"x: 1\n").hexdigest() and not (case / "_ledger" / "ledger.json").exists(), str(doc))
     lg = subprocess.run(["loginctl", "show-user", os.environ.get("USER", ""), "-p", "Linger"], capture_output=True, text=True).stdout.strip()
+    r = cli("run", case / "campaign.yaml", "--role", "fixed")
+    check("(C4) --role fixed が campaign の role fixer と違う → 起動の前に止める (終了 2)",
+          r.returncode == 2 and "campaign の role fixer と違う" in r.stderr and not (case / "_ledger" / "ledger.json").exists(), r.stderr[-200:])
+    r = cli("run", case / "campaign.yaml", "--role", "fixer", "--resume")
+    check("(C5) 台帳が無いのに --resume → 止める (終了 2)", r.returncode == 2 and "台帳" in r.stderr and "無い" in r.stderr, r.stderr[-200:])
+    led = {"format": "forge.ledger/v1", "campaign_id": "x", "name": "t", "role": "fixer", "recipe": {"name": "axismach.wt_card_chain", "version": "v1"},
+           "attempts": [{"id": "0001-mesh_p0", "state": "ingested"}, {"id": "0002-euler_p0", "state": "ingested"},
+                        {"id": "0003-ns_p0", "state": "launched"}],
+           "requests": [{"kind": "note", "reason": "CFL を下げた"}, {"kind": "note", "reason": "格子を細かく"}],
+           "stops": [{"time": "t", "status": "stopped", "why": "関門で止まった"}],
+           "budget": {"approved": {"gpu_hours": 1, "disk_gb": 1}, "consumed": {"gpu_hours": 0.25, "disk_gb": 0.5}}}
+    (case / "_ledger").mkdir(exist_ok=True)
+    (case / "_ledger" / "ledger.json").write_text(json.dumps(led))
+    r = cli("run", case / "campaign.yaml", "--role", "fixer")
+    check("(C5) 台帳があるのに --resume なし → 止める (終了 2)", r.returncode == 2 and "--resume" in r.stderr, r.stderr[-200:])
+    r = cli("status", case / "campaign.yaml", "--json")
+    sm = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else {}
+    check("(C6) status の集計: 試行 3 (ingested 2・launched 1)・人に返した 1・直した 2・消費した予算",
+          sm.get("attempts") == 3 and sm.get("attempts_by_state") == {"ingested": 2, "launched": 1} and sm.get("returned_to_human") == 1
+          and sm.get("fixes") == 2 and sm.get("budget_consumed") == {"gpu_hours": 0.25, "disk_gb": 0.5}, r.stdout[-300:] + r.stderr[-200:])
+    (case / "_ledger" / "ledger.json").unlink()
     if lg == "Linger=no":
-        r = cli("run", case / "campaign.yaml")
+        r = cli("run", case / "campaign.yaml", "--role", "fixer")
         check("(C3) Linger=no なら run は起動の前に止める", r.returncode == 2 and "Linger=no" in r.stderr and not (case / "_ledger" / "ledger.json").exists(),
               r.stderr[-200:])
     else:

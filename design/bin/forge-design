@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# 設計の実行役の入口 (plan tooling-design-orchestrator §4.8): forge_design.campaign.cli を design の Python で呼ぶ。
+#   forge-design run <campaign.yaml> --role fixed|fixer [--resume]   /   forge-design status <campaign.yaml>   /   forge-design note ...
+# Python は FORGE_DESIGN_PY (無ければ design/.venv-opt/bin/python、それも無ければ python3)。
+set -euo pipefail
+DESIGN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${FORGE_DESIGN_PY:-}"
+if [ -z "$PY" ]; then
+  if [ -x "$DESIGN/.venv-opt/bin/python" ]; then PY="$DESIGN/.venv-opt/bin/python"; else PY=python3; fi
+fi
+PYTHONPATH="$DESIGN${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m forge_design.campaign.cli "$@"

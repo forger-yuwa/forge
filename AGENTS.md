@@ -40,6 +40,8 @@
 
 計算の実行方法、ケース準備、メッシュ生成、メッシュ変換、`forge` の起動、Docker 経由の Gmsh/ParaView 利用について回答するときは、まず `procedures/calculation-workflow.md` を参照し、その手順に合わせて案内すること。計算手順の本文はこのファイルに重複記載しない。
 
+**レシピのある機種の設計の run** (2026-10-18、plan [`tooling-design-orchestrator`](plans/active/tooling-design-orchestrator.md) §4.8): レシピのある機種 (最初は風洞ノズル、recipe `axismach.wt_card_chain/v1`) を要求カードから設計する run は、実行役 `design/bin/forge-design run` 経由で回す (承認の記録・予算・台帳・判定専用の環境を通す; 規範は skill `forge-design`)。**適用の開始は plan §6 V4 (a) (決定的な recipe の通し) の合格の後**で、それまでは手順書 [`procedures/design-chain-quickstart.md`](procedures/design-chain-quickstart.md) の手の流れを使ってよい。レシピの無い機種・探索はこの規則の外。
+
 `solverConfig.yaml` の `convMethod`・`limiter` などの数値設定を変更・確認するときは、必ず `procedures/solver-settings.md` を参照すること。設定値の意味を記憶や推測で判断しないこと。**新規 config を組む・既存 config を点検するときは [`procedures/recommended-settings.md`](procedures/recommended-settings.md) (現行レシピの正本、日付付き) を先に読み、§9 の旧設定・廃止キーを混入させない** (Claude は skill `forge-config`)。
 
 **投入の関門と宣言 (2026-10-15、移行期)**: `run_case.sh` は forge の起動の前に `solver_density_cuda/tools/launch_gate.py` を回し (`LAUNCH_GATE.txt`)、FAIL なら起動しない。run は推奨のプロファイルに対して宣言する: `recipe_settings.py declare <run> --profile P --stage S` (設計チェーンの生成器は自分で書く)、プロファイルから外す値は `--deviate key=value --reason "<1 行>"`、推奨に従わない試し計算は `--experiment --reason "<1 行>"`。**強制の開始 (plan [tooling-generator-defaults-and-launch-gate](plans/active/tooling-generator-defaults-and-launch-gate.md) §4.7 の棚卸しの完了) までは、宣言の無い run・来歴の記録の無いメッシュは WARN で起動する**が、禁止キー・宣言した run の照合の FAIL (値・省略・適用条件)・メッシュの来歴の不一致と品質の FAIL は今も止まる。forge の終了の後は起動のエコーと要求値の照合が `LAUNCH_ECHO.txt` に残る (WARN のみ)。旧キーは `migrate_solver_config.py` で直す。同一メッシュの `restart_field.py` は格子の同一性を確かめてから書く: 格子を持たない res だけを写したときは `--src-mesh <変換済みの入力 h5>`、座標の精度だけを上げて変換し直した格子へは `--allow-coord-upcast`。詳細は [`procedures/calculation-workflow.md`](procedures/calculation-workflow.md) の「投入の関門」・「メッシュ変更後の restart」と [`procedures/recommended-settings.md`](procedures/recommended-settings.md) §0.1。
@@ -349,6 +351,10 @@ forge の理論的背景と実装解説は `methods/` 配下に機能単位 (物
    ここに入る (結果を見てから合格条件を作らない)。
 4. **plan §5.1・承認済みの手順に無い修正や再実行へ進む前**。思いついた修正を入れて回し直す前に諮る
    (「原因は○○」と plan・case README・応答に書く前、も同じ)。
+   **書き分け** (2026-10-18、plan [`tooling-design-orchestrator`](plans/active/tooling-design-orchestrator.md) §4.4): 承認済みの要求・判定条件・予算を保ち、
+   既存データを変更せず、新しい試行で行う設定調整・格子再生成・case 内の探索台本の変更は、条件 4 の事前諮問を不要とする (直したことは報告に、
+   何を試し何を直しどの判定で通ったかを判定の出力つきで書く)。正式なソルバ・判定器・共通ツールの変更、承認条件の変更、原因や結果解釈の確定には
+   従来の条件を適用する。条件 2・3・6・7 はそのまま (設計の候補が公差に届かず補正へ戻すのは通常の流れで、条件 3 の検証の FAIL ではない)。
 5. codex の Critical / Major の採否を決める。
 6. `solver_density_cuda/cuda_forge/` 配下で数値の振る舞い (流束・勾配・リミッタ・境界・陰解法・ソース項) を変える編集の前。
 7. **result 段の解釈を確定する前** (VERDICT が出そろい、codex の `--stage result` に回す前)。結果が予想どおりに見えるときも諮る

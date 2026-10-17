@@ -88,3 +88,21 @@
 | --- | --- | --- | --- |
 | NASA CEA2 | `.venv-cea/nasa_cea/FCEA2` (native) | ✅ | 平衡/凍結の理論参照。pi/p は 1 problem 16 個制限 |
 | SU2 | `procedures/su2-cross-check.md` | ✅ | 同一メッシュ・同一 BC の切り分け比較 |
+
+## 8. 設計の実行役 (要求カード → 承認 → recipe → 判定 → 成果物)
+
+plan [`tooling-design-orchestrator`](../plans/active/tooling-design-orchestrator.md)。規範は skill `forge-design`。各道具の `--help` と冒頭の説明に詳細。
+Python は `design/.venv-opt` (system の python3 は numpy の版が違い数値が動く)。
+
+| 道具 | 何をするか | 入力 → 出力 | 終了コード | 所要の目安 | 状態 |
+| --- | --- | --- | --- | --- | --- |
+| `design/bin/forge-design run` | 実行役の driver を user service で起動・再開 (`--role fixed\|fixer`、`--resume`) | campaign YAML (承認の記録・recipe・役割・台帳) → 台帳 `_ledger/`、試行の run、case README の run 一覧 | 0 起動・動いている / 1 起動できない・止まった / 2 照合で止めた | 起動は数秒、全体は段ごとに数分〜数時間 | 🔧 (GPU の通しは §6 V1b・V4 の後) |
+| `forge-design status` | 状態と集計 (試行の数・人に返した回数・直した回数・消費した予算) | campaign YAML → 標準出力 (`--json`) | 0 | 数秒 | ✅ |
+| `forge-design note` | 直した入力の変更の要求 (fixer) | campaign YAML・ファイル・理由 → `_ledger/requests/` | 0 | 数秒 | ✅ |
+| `python -m forge_design.intake.approval preview\|write\|check` | 承認の記録 (保護する条件・判定器の版) を作る・照合する | カード (版 2)・問題 YAML → `card_approval.json` | 0 OK / 1 違い・preview の問題 / 2 読めない・承認の記録の誤り | 数秒〜1 分 | ✅ |
+| `python -m forge_design.intake.wt_card` | 要求カード → 問題 YAML (版 2 は `mesh_limits` を上限に写す) | カード → 問題 YAML (+ Euler の写し) | 0 / 1 | 1〜3 分 (M_knot の選択) | ✅ |
+| `case/71.m55_combustion_wt/_mesh/hand_mesh.py build --approval` | 手組みの格子の問題 YAML (承認の節点数の上限の内だけ書く) | カード・承認・問題 YAML → 問題 YAML・記録 | 0 / 例外で非 0 (書かない) | 30 秒程度 | ✅ (case/71) |
+| `forge_design.campaign.mesh_stage.check_template` | 雛形の格子の段 (承認の照合 → `prepare`・`prepare_ns` を forge なしで) | 問題 YAML・承認・カード → `MESH_STAGE.json`、準備の run | 例外で止まる | 1〜3 分 | 🔧 (部品; recipe には未) |
+| `python -m forge_design.feedback.gate_env judge\|deliverables` | 判定専用の環境 (承認の commit の checkout・Python と道具の指紋) で判定・成果物 | 承認の記録・引数 → 判定・成果物 | 道具のまま | checkout の初回は数分 | ✅ |
+| `python -m forge_design.feedback.wt_qualify [--approval]` | 要求の達成の判定 (解析の成立は `judge_run` を回し直す、公差・壁解像・寸法・成果物) | run・カード・問題 YAML → `WT_QUALIFICATION.json` | 0 accepted / 2 recalibrate / 3 escalate / 4 incomplete / 1 入力の不備 | 数分 | ✅ |
+| `solver_density_cuda/tools/judge_run.py <run> [--out D --spec S]` | 計算の後の判定 (停止規則 v2 の run は `check_settled`) | run → `RUN_VERDICT.{json,txt}` | 0 PASS / 1 FAIL / 2 判定不能 / 3 例外 / 4 段の記録 | 数秒〜1 分 | ✅ |

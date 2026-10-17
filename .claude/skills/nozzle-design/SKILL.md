@@ -9,6 +9,8 @@ description: 軸対称風洞ノズル (wind_tunnel_axisym_axismach) の設計・
 skill [`design-intake`](../design-intake/SKILL.md) が担う (ここでは繰り返さない)。本 skill はその YAML ができた後の
 **axismach ノズルの作り方・回し方**だけを扱う。YAML が無い新規の依頼は、まず `design-intake` を通す。
 
+**要求カードから承認・recipe で回すとき** (`design/bin/forge-design run`、役割 fixed / fixer) の規範は skill [`forge-design`](../forge-design/SKILL.md)。
+
 **手順の正本は [`procedures/nozzle-design-workflow.md`](../../../procedures/nozzle-design-workflow.md)**。
 ここには AI が判断を誤りやすい点だけを置く。作業前に正本の該当節 (§1 新規設計 / §2 パラスタ〜凝縮 / §3 既存形状) を読む。
 
