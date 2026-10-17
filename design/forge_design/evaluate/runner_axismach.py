@@ -2948,8 +2948,28 @@ def _stop_state_record(run_dir: Path, w: dict, sr: dict) -> dict:
             "record": SR.RECORD, "record_sha256": _sha256_file(run_dir / SR.RECORD), "finished": rec.get("finished")}
 
 
+def staged_ns_launch_configs(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None) -> dict:
+    """`run_staged_ns` が起動する全段の設定 (起動直前の文字列) を、forge を回さずに返す (plan tooling-design-orchestrator §4.1.1 の 2、
+    §5.1 #4b; 実行役が準備の後・起動の前に計画を確定する)。`run_staged_ns` と同じ関数 (`ns_stage_configs`・`_stop_rule_v2_for_main`) で作り、
+    停止規則 v2 の run なら本段の nStepOuter は上限 cap。停止規則 v2 でない run は対象外 (ValueError; 実行役は v2 だけを使う)。
+    戻り {stages: [{tag, nsteps, config}], bcond: 境界条件の文字列, stop_rule: prepare_info の stop_rule}。"""
+    run_dir = Path(run_dir)
+    cfg_main = (run_dir / "solverConfig.yaml").read_text()
+    pre_path = run_dir / PRESTAGE_CONFIG
+    cfg_pre = pre_path.read_text() if pre_path.is_file() else None
+    bc_text = (run_dir / "bcondConfig.yaml").read_text() if (run_dir / "bcondConfig.yaml").exists() else ""
+    pre, cfg_main, main_want = ns_stage_configs(cfg_main, stages, ramp, ramp_steps, cfg_pre)
+    sr = _stop_rule_v2_for_main(run_dir, stop_rule, cfg_main)
+    if sr is None:
+        raise ValueError(f"{run_dir}: 停止規則 v2 の run でない (settle_criteria.yaml・prepare_info の stop_rule の要求) — 計画を確定しない")
+    cap = int(sr["cap"])
+    cfg_main = _cfg_set(cfg_main, {"nStepOuter": cap})
+    return {"stages": [{"tag": t, "nsteps": int(n), "config": c} for t, c, n, _ in pre] + [{"tag": "main", "nsteps": cap, "config": cfg_main}],
+            "bcond": bc_text, "stop_rule": sr}
+
+
 def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
-                  stop_rule_watch: dict | None = None) -> int:
+                  stop_rule_watch: dict | None = None, plan=None) -> int:
     """NS の起動。stages:
     - "full" (既定・run_0030 レシピ): soft (1次 cfl0.5 ni10, 3000 step) → mid (1次 cfl1, 3000) → 本段 (2次 cfl_main)。
     - "none": 本段だけ (収束済み NS 場からの warm start 用)。
@@ -2995,6 +3015,16 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     pre, cfg_main, main_want = ns_stage_configs(cfg_main, stages, ramp, ramp_steps, cfg_pre)
     # 停止規則 v2 (settle_criteria.yaml の run): 使えなければここで例外 (S1 の前・forge を起動しない)。無ければ旧方式
     sr_v2 = _stop_rule_v2_for_main(run_dir, stop_rule, cfg_main)
+    ep = None
+    if plan is not None:
+        # 確定した実行の計画 (plan tooling-design-orchestrator §4.1.1 の 3、§5.1 #4b): 起動しようとする全段の設定・境界条件が計画と同じか、
+        # 最初の段の前に全部確かめる (違えば forge を 1 回も起動しない)。各段の起動の直前にもう一度確かめる (_stage・本段)
+        from ..campaign import plan as EP
+        if sr_v2 is None:
+            raise ValueError(f"{run_dir}: 計画つきの起動は停止規則 v2 の run だけ")
+        ep = EP.load_confirmed(plan)
+        planned = [(t, c) for t, c, _, _ in pre] + [("main", _cfg_set(cfg_main, {"nStepOuter": int(sr_v2["cap"])}))]
+        EP.assert_launch_set(ep, planned, bc_text)
     if sr_v2 is not None:
         sr, sr_use, sr_why = sr_v2, False, None
     else:
@@ -3022,6 +3052,8 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
     def _stage(cfg, nsteps, tag, want):
         _check_wall_profile(tag)                                     # 壁温分布の正本 (前段の restart の後も) — config を書く前 (main の §4.2)
         _cfg_check(cfg, want, tag)                                   # 起動前に実効値を検査
+        if ep is not None:
+            EP.assert_launch(ep, tag, cfg, bc_text)                  # 起動の直前に計画と照合 (§5.1 #4b)
         (run_dir / "solverConfig.yaml").write_text(cfg)
         sha = _sha256_file(run_dir / "solverConfig.yaml")
         (run_dir / "residual_history.csv").unlink(missing_ok=True)   # 前段の履歴を別段の名前で写さない
@@ -3047,6 +3079,8 @@ def run_staged_ns(run_dir, stages: str = "full", ramp=None, ramp_steps: int = 10
         main_want = {**main_want, "nStepOuter": int(sr["cap"])}
     _check_wall_profile("main")
     _cfg_check(cfg_main, main_want, "main")
+    if ep is not None:
+        EP.assert_launch(ep, "main", cfg_main, bc_text)              # 本段の起動の直前に計画と照合 (§5.1 #4b)
     (run_dir / "solverConfig.yaml").write_text(cfg_main)
     (run_dir / "residual_history.csv").unlink(missing_ok=True)
     _write_main_stage_started(run_dir, cfg_main, stages, done, cfg_pre)
