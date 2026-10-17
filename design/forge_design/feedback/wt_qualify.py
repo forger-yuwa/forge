@@ -522,6 +522,82 @@ def line_guarantee(v5c: dict, settle_line: dict | None, fld: dict, flow: dict, r
     return v5c
 
 
+# ------------------------------------------------------------------ 解析の成立 (judge_run の回し直し)
+RV_REQUIRED = ("solver", "nonfinite", "physical", "convergence", "stop_rule", "quasisteady")
+
+
+def run_verdict(run_dir, judge_dir=None) -> dict:
+    """解析の成立 (plan tooling-design-orchestrator §4.2「解析の成立の読み方」、§5.1 #5c; 2026-10-18 codex 諮問 judge-v2 の (6))。
+    `judge_run.py` の全体を、判定の側で作った仕様 (`judge.spec_axismach_settle`; run の基準から) で、別の出力先 judge_dir に回し直す
+    (承認のモードでは wt_qualify 自身が判定専用の環境で回るので、そこの judge_run)。run の中の `RUN_VERDICT.json` は作業側のコードの
+    自己申告なので読まない。run の中に仕様 `JUDGE_SPEC.json` があれば、準定常の量 (名前・抽出・基準の sha256) が判定の側の仕様と
+    同じかも確かめる (違えば判定不能)。停止規則 v2 の run (`settle_criteria.yaml` がある) だけが対象 (古い run は NOT_APPLICABLE)。
+    戻り {status: PASS / WALL_ONLY_FAIL / INCOMPLETE / NOT_APPLICABLE, items (項目 → 状態), overall, wall_resolution, why, problems, file}。
+      PASS: 6 項目 (RV_REQUIRED) と壁解像が PASS。WALL_ONLY_FAIL: 6 項目が PASS で壁解像だけ FAIL (補正へ戻す; 解析の総合は FAIL のまま)。
+      INCOMPLETE: 6 項目のどれかが PASS でない (適用外も)・壁解像が判定不能・仕様の食い違い・判定が無い。"""
+    import tempfile
+    from ..evaluate import judge as J
+    run_dir = Path(run_dir).resolve()
+    if not (run_dir / "settle_criteria.yaml").exists():
+        return {"status": "NOT_APPLICABLE", "why": "settle_criteria.yaml の無い run (停止規則 v2 でない) — 判定の回し直しは v2 の run だけ"}
+    tmp = None
+    if judge_dir is None:
+        tmp = tempfile.TemporaryDirectory(prefix="wt_qualify_judge_")
+        judge_dir = Path(tmp.name)
+    judge_dir = Path(judge_dir)
+    judge_dir.mkdir(parents=True, exist_ok=True)
+    out = {"status": "INCOMPLETE", "items": {}, "overall": None, "wall_resolution": None, "problems": [], "file": None}
+    try:
+        try:
+            spec = J.spec_axismach_settle("wt_qualify (判定の側で作った仕様)", run_dir)
+        except Exception as e:                                       # noqa: BLE001
+            out["why"] = f"判定の仕様を作れない ({type(e).__name__}: {e})"
+            return out
+        sp = judge_dir / J.SPEC
+        sp.write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
+        own = run_dir / J.SPEC
+        if own.is_file():
+            try:
+                q_own = (json.loads(own.read_text()).get("quasisteady") or {})
+            except (OSError, ValueError) as e:
+                q_own = None
+                out["problems"].append(f"run の {J.SPEC} を読めない ({e})")
+            if q_own is not None:
+                key = lambda q: [(it.get("name"), json.dumps(it.get("extractor"), sort_keys=True), it.get("criterion"))  # noqa: E731
+                                 for it in (q.get("quantities") or [])]
+                if key(q_own) != key(spec["quasisteady"]) or q_own.get("settle_criteria") != spec["quasisteady"]["settle_criteria"]:
+                    out["problems"].append(f"run の {J.SPEC} の準定常の量が判定の側の仕様と違う (生成器の版か基準が違う)")
+        cmd = [sys.executable, str(TOOLS / "judge_run.py"), str(run_dir), "--out", str(judge_dir), "--spec", str(sp)]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        out.update(cmd=" ".join(cmd[1:]), rc=r.returncode)
+        vp = judge_dir / "RUN_VERDICT.json"
+        if not vp.is_file():
+            out["why"] = f"judge_run が判定を書かなかった (終了コード {r.returncode}; {(r.stderr or r.stdout).strip()[-300:]})"
+            return out
+        v = json.loads(vp.read_text())
+        out["file"] = str(vp) if tmp is None else None
+        items = {k: ((v.get("checks") or {}).get(k) or {}).get("status") for k in RV_REQUIRED + ("wall_resolution",)}
+        out.update(items=items, overall=v.get("overall"), wall_resolution=items["wall_resolution"],
+                   reasons={k: str(((v.get("checks") or {}).get(k) or {}).get("reason"))[:300] for k in items if items[k] != "PASS"})
+        if v.get("state") != "final":
+            out["problems"].append(f"judge_run の判定が確定していない (state {v.get('state')!r}; {v.get('overall_reason')})")
+        bad = [k for k in RV_REQUIRED if items[k] != "PASS"]
+        if bad:
+            out["problems"].append("解析の成立の項目が PASS でない: " + "; ".join(f"{k} {items[k]} ({out['reasons'].get(k)})" for k in bad))
+        if items["wall_resolution"] not in ("PASS", "FAIL"):
+            out["problems"].append(f"壁解像 (judge_run) が {items['wall_resolution']} ({out['reasons'].get('wall_resolution')})")
+        if out["problems"]:
+            out["why"] = "; ".join(out["problems"])[:600]
+        elif items["wall_resolution"] == "FAIL":
+            out.update(status="WALL_ONLY_FAIL", why="6 項目は PASS、壁解像だけ FAIL (解析の総合は FAIL; 補正へ戻す)")
+        else:
+            out.update(status="PASS", why="7 項目すべて PASS")
+        return out
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
+
+
 # ------------------------------------------------------------------ 壁解像・成果物
 def wall_resolution(run_dir, step: int, out_txt=None, stop_step=None) -> dict:
     """`check_wall_resolution.py --step --groups <wall*> --weight area` を回して VERDICT を読む。PASS・FAIL でも、ツールが評価した
@@ -941,13 +1017,23 @@ def recalibration_rule(run_dir, v5b: dict, v5c: dict, flow: dict, *, delta_next=
 
 
 # ------------------------------------------------------------------ 判定
-def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=None, max_iterations=None, rule_fn=None) -> dict:
+def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=None, max_iterations=None, rule_fn=None,
+           rv: dict | None = None) -> dict:
     """各判定から結果と次の手を決める (ファイルを読まない純粋な部分; 規則の評価だけ rule_fn() を呼ぶ)。
     順: 判定不能・計算の成立の FAIL・INDETERMINATE (停止の時の判定と結び付かない) → incomplete (escalate)。公差・壁解像・寸法の FAIL → 反復の上限なら rejected、でなければ
     back_to_correction (壁の形だけなら較正し直しの規則 → recalibrate / escalate、壁解像・寸法を含めば escalate)。すべて合格で成果物が
     無い・不完全、または計算の成立が UNVERIFIED → incomplete (成果物だけが無く成立を確かめていれば make_deliverables)。残りは accepted。
+    rv (`run_verdict`、judge_run の回し直し; plan tooling-design-orchestrator §4.2「解析の成立の読み方」): INCOMPLETE → incomplete。
+    WALL_ONLY_FAIL は壁解像の FAIL として補正 (mesh_first_layer) へ。judge_run の壁解像とこの判定の壁解像が食い違えば incomplete。
+    NOT_APPLICABLE (停止規則 v2 でない古い run) と None は今までどおり。
     戻り: {result, next, missing, corrections, rule, iteration}。"""
     corrections, missing = [], []
+    if rv is not None and rv.get("status") != "NOT_APPLICABLE":
+        if rv.get("status") not in ("PASS", "WALL_ONLY_FAIL"):
+            missing.append(f"解析の成立 (judge_run の回し直し {rv.get('status')}): {rv.get('why')}")
+        rw = rv.get("wall_resolution")
+        if rw in ("PASS", "FAIL") and wr.get("verdict") in ("PASS", "FAIL") and rw != wr.get("verdict"):
+            missing.append(f"壁解像の判定が食い違う (judge_run {rw}・この判定 {wr.get('verdict')}; step・壁・閾値をそろえて確かめる)")
     for nm, c in (("V5b", v5b), ("V5c", v5c), ("wall_resolution", wr)):
         if c.get("verdict") not in ("PASS", "FAIL"):
             missing.append(f"{nm} が判定不能 ({c.get('why') or c.get('verdict_line') or c.get('verdict')})")
@@ -1003,9 +1089,10 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
 def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None, prev_delta_next=None, step=None, deliverables=None,
             iteration=None, max_iterations=None, recalibrations_done: int = 0, max_recalibrations: int | None = None,
             recal_min_reduction: float = RECAL_MIN_REDUCTION, optional_parts=(), cli_tols: dict | None = None,
-            x_far_m: float = CC.X_FAR_M, wall_txt=None, series_dir=None, approval=None) -> dict:
+            x_far_m: float = CC.X_FAR_M, wall_txt=None, series_dir=None, approval=None, judge_dir=None) -> dict:
     """1 本の NS run を判定して記録の dict を返す (ファイルは書かない; 壁解像の出力だけ wall_txt に、監視されていない V5c の線の
-    全場の系列だけ series_dir (無ければ一時ディレクトリ) に書く)。"""
+    全場の系列だけ series_dir (無ければ一時ディレクトリ) に、judge_run の回し直し (`run_verdict`) の判定と仕様だけ judge_dir
+    (無ければ一時ディレクトリ) に書く)。"""
     from ..report.nozzle_report import load_field
     run_dir = Path(run_dir).resolve()
     info = json.loads((run_dir / "prepare_info.json").read_text())
@@ -1069,7 +1156,9 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
         gate_bind = {"gate_sha256": apr.get("gate_sha256"), "approval_sha256": _AP.sha256_file(approval)}
     dl = deliverables_check(run_dir, deliverables, card, optional_parts, field=fld, problem_path=problem, gate=gate_bind)
     checks = {"flow": flow, "V5b": v5b, "V5c": v5c, "wall_resolution": wr, "deliverables": dl}
-    dec = decide(flow, v5b, v5c, wr, dl, iteration=iteration, max_iterations=max_iterations,
+    rv = run_verdict(run_dir, judge_dir)
+    checks["run_verdict"] = rv
+    dec = decide(flow, v5b, v5c, wr, dl, iteration=iteration, max_iterations=max_iterations, rv=rv,
                  rule_fn=lambda: recalibration_rule(run_dir, v5b, v5c, flow, delta_next=delta_next, prev_run=prev_run,
                                                     prev_delta_next=prev_delta_next, recalibrations_done=recalibrations_done,
                                                     max_recalibrations=max_recalibrations, min_reduction=recal_min_reduction,
@@ -1105,7 +1194,8 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
     show = {"V5b_exit_core_M": v5b.get("M"), "V5b_range": v5b.get("range"),
             "V5c_maxabs_pct": v5c.get("maxabs_pct"), "V5c_halfamp_pct": v5c.get("halfamp_pct"),
             "V5c_tol": [v5c.get("tol_maxabs_pct"), v5c.get("tol_halfamp_pct")], "V5c_eta": v5c.get("eta"),
-            "V5c_compare": v5c.get("compare"), "wall_resolution": wr.get("verdict_line"), "flow": flow.get("status")}
+            "V5c_compare": v5c.get("compare"), "wall_resolution": wr.get("verdict_line"), "flow": flow.get("status"),
+            "run_verdict": rv.get("status")}
     if rule is not None:
         c = rule["conditions"]
         show.update(delta_error_current_mm=c["c_further_reducible"].get("current_max_abs_mm"),
@@ -1267,7 +1357,8 @@ def main(argv=None) -> int:
                       recalibrations_done=a.recalibrations_done, max_recalibrations=a.max_recalibrations,
                       recal_min_reduction=a.recal_min_reduction,
                       optional_parts=tuple(s for s in a.optional_parts.split(",") if s), cli_tols=cli,
-                      wall_txt=None if od is None else od / "check_wall_resolution.txt", series_dir=od, approval=a.approval)
+                      wall_txt=None if od is None else od / "check_wall_resolution.txt", series_dir=od, approval=a.approval,
+                      judge_dir=None if od is None else od / "judge_run")
     except (ValueError, OSError, KeyError) as e:
         if od is not None and od.is_dir() and not any(od.iterdir()):
             od.rmdir()

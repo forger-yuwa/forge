@@ -7,6 +7,8 @@ r"""計算の後の判定を 1 本にまとめる (plan tooling-convergence-and-
     python3 solver_density_cuda/tools/judge_run.py <run_dir>                # 判定して RUN_VERDICT.{json,txt} を書く
     python3 solver_density_cuda/tools/judge_run.py <run_dir> --full-audit   # 非有限の監査を全スナップショット・境界の出力にも
     python3 solver_density_cuda/tools/judge_run.py <run_dir> --check-fresh  # 判定が今の入力に対応するか (書かない)
+    python3 solver_density_cuda/tools/judge_run.py <run_dir> --out <dir> [--spec <仕様>]  # 判定の回し直し: run に書かず <dir> に
+                                                 # (前の判定を引き継がない・必ず確定する; wt_qualify が使う)
 
 既存の判定ツール (`check_convergence.py`・`check_quasisteady.py`・`check_wall_resolution.py`・停止規則の記録) の**共通の集約層**であり、
 数値の判定基準は各ツールのまま。設計の受理の条件 (deltastar_loop の受け渡しの関門・SERN のゲートなど) は各ゲートに残す。
@@ -530,10 +532,15 @@ def spec_candidates(run):
             ("judge.yaml (case)", os.path.join(os.path.dirname(run), SPEC_YAML))]
 
 
-def load_spec(run):
-    """{source, path, sha256, written_after_start, spec (normalize 済み) か None, error か None}。"""
-    for src, p in spec_candidates(run):
+def load_spec(run, spec_path=None):
+    """{source, path, sha256, written_after_start, spec (normalize 済み) か None, error か None}。
+    spec_path: 判定の側で作った仕様 (`--spec`; `--out` と組でだけ使う。run の中の仕様は読まない)。"""
+    cands = [("--spec (判定の側の仕様)", os.path.abspath(spec_path))] if spec_path else spec_candidates(run)
+    for src, p in cands:
         if not os.path.exists(p):
+            if spec_path:
+                return {"source": src, "path": p, "sha256": None, "written_after_start": False, "spec": None,
+                        "error": "仕様 %s が無い" % p}
             continue
         info = {"source": src, "path": _rel(p), "sha256": _sha256_file(p), "spec": None, "error": None}
         st = run_start_ns(run)
@@ -1660,13 +1667,16 @@ def deferred_reason(run, args):
 
 
 def judge(run, args):
-    """判定して RUN_VERDICT.{json,txt} を書く。戻り (終了コード, RUN_VERDICT.txt の本文)。"""
+    """判定して RUN_VERDICT.{json,txt} を書く。戻り (終了コード, RUN_VERDICT.txt の本文)。
+    `--out DIR` (判定の回し直し; plan tooling-design-orchestrator §4.2「解析の成立の読み方」の wt_qualify): RUN_VERDICT は DIR に書き、
+    run の中の前の判定 (作業側の自己申告) を引き継がず、段の記録にもしない (必ず確定する)。仕様は `--spec` があればそれ。"""
     run = os.path.abspath(run)
-    prior = _load_prior(run)
-    spec_info = load_spec(run)
+    out_dir = getattr(args, "out", None)
+    prior = None if out_dir else _load_prior(run)
+    spec_info = load_spec(run, getattr(args, "spec", None))
     stop = read_stop_state(run)
     solver = check_solver(run, args.solver_rc, prior, stop)
-    why_defer = deferred_reason(run, args)
+    why_defer = None if out_dir else deferred_reason(run, args)
     if why_defer:
         stage_checks = {"solver": solver, "nonfinite": check_nonfinite(run, residual_only_main=True), "physical": check_physical(run)}
         cv = os.path.join(run, "CONVERGENCE_VERDICT.txt")
@@ -1715,10 +1725,12 @@ def judge(run, args):
     v.update(overall=st, overall_reason=why, exit_code=EXIT_OF[st], execution=execution_info(run, solver), checks=checks,
              spec={k: spec_info.get(k) for k in ("source", "path", "sha256", "written_after_start", "error", "spec")},
              tools=tool_hashes(), inputs=collect_inputs(run, spec_info, settle_input_paths(run, settled)))
+    if out_dir:
+        v["out"] = os.path.abspath(out_dir)
     if (prior or {}).get("stages"):
         # 段階起動の段の記録 (state deferred のときに run_case.sh が足したもの) は参考として引き継ぐ。総合への入れ方は親の確定 (後半) で決める
         v["stages"] = prior["stages"]
-    return EXIT_OF[st], write_verdict(run, v)
+    return EXIT_OF[st], write_verdict(out_dir or run, v)
 
 
 def check_fresh(run):
@@ -1748,11 +1760,22 @@ def main(argv=None):
                     help="run_case.sh からの呼び出し: 段階起動の run (stage_manifest.json がある / FORGE_JUDGE_DEFER=1) は段の結果だけ記録")
     ap.add_argument("--defer", action="store_true", help="段の結果だけを記録する (state deferred、総合は確定しない)")
     ap.add_argument("--check-fresh", action="store_true", help="判定が今の入力に対応するかを見る (書かない)")
+    ap.add_argument("--out", default=None,
+                    help="RUN_VERDICT.{json,txt} を run でなくこのディレクトリに書く (判定の回し直し; run の前の判定を引き継がず、必ず確定する)")
+    ap.add_argument("--spec", default=None, help="run の仕様の代わりにこの仕様で判定する (--out と組でだけ)")
     args = ap.parse_args(argv)
     run = os.path.abspath(args.run)
     if not os.path.isdir(run):
         print("judge_run: run が無い: %s" % args.run, file=sys.stderr)
         return EXIT_ERROR
+    if args.spec and not args.out:
+        ap.error("--spec は --out と組でだけ使う (run の中の判定を別の仕様で書かない)")
+    if args.out:
+        if args.check_fresh or args.defer or args.from_run_case:
+            ap.error("--out は --check-fresh・--defer・--from-run-case と使えない")
+        if os.path.realpath(args.out) == os.path.realpath(run):
+            ap.error("--out が run 自身 (run の中の判定は --out 無しで書く)")
+        os.makedirs(args.out, exist_ok=True)
     if args.check_fresh:
         rc, msg = check_fresh(run)
         print(msg)
@@ -1769,7 +1792,7 @@ def main(argv=None):
             v.update(overall="INDETERMINATE", overall_reason="判定器の例外 (%s: %s)" % (type(e).__name__, str(e)[:300]),
                      state_note="判定器の例外", exit_code=EXIT_ERROR, checks={}, error=tb,
                      tools=tool_hashes())
-            sys.stdout.write(write_verdict(run, v))
+            sys.stdout.write(write_verdict(args.out or run, v))
         except Exception:                                                         # noqa: BLE001
             print("judge_run: RUN_VERDICT も書けなかった", file=sys.stderr)
         return EXIT_ERROR
