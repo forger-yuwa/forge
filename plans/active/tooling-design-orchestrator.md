@@ -372,6 +372,11 @@ codex (diagnose) の諮問 ([記録](../../notes/reviews/2026-10-17-orchestrator
   停止の記録を書く空きを先に確保する)。
 - **予約**: 起動の前に、その段の見積もり (`design-intake` §8 の見積もりを台帳に写したもの) が残りの予算の内かを確かめ、残り全部をその試行の上限として予約する。
   見積もりとの差は記録して警告に使う (固定の倍率で止めることはしない)。承認の総額を超えると見込まれるときは次の段を始めずに返す。
+- **段の見積もりの契約** (2026-10-18 codex 諮問 [v3](../../notes/reviews/2026-10-18-orchestrator-v3-diagnose-v3.md) の Major 4): recipe v1 は全部の段で見積もりが空だったので、
+  起動の前の予約の検査が何も止めなかった (予算が足りない依頼でも Euler の段を起動しようとする)。見積もりは**依頼と実行のホストに合わせて** campaign の
+  `estimates` (段の種類ごとの {gpu_hours, disk_gb} と根拠: 根拠の run・格子の規模・計算の条件・出力の条件・ホスト) に書き、driver が初回に台帳へ写して固定する
+  (再開で違えば止まる)。recipe は段の種類の見積もりをそこから渡す。GPU の段 (Euler・NS) に見積もりが無い campaign は読み込みで止める。ディスクは既存の分を除く増分。
+  case/71 の時間を別の条件へそのまま流用しない。
 - **予算で止める順序** (codex Major 3): 予算に届いたこと・測った値・停止の要求を**先に**原子的に記録し、その後で試行を止める。停止の要求と「全子孫の終了の確認」を分け、
   driver が終了を確かめてから精算する。実行担当が `SIGKILL` で記録を書けなかったときは、再開した driver が根拠つきで補い、原因が確かめられなければ「不明」とする。
 
@@ -552,7 +557,7 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | 7 | idle 自動停止と実行器の準備の隙間 (§4.5) | GPU の通しの検証の前提。決め方を諮る | F |
 | 8 | ~~格子の段の契約と 2 つの実装、節点数の上限の承認~~ (2026-10-18 実装・§6 V2a〜V2c PASS (2 回目)) (§4.6) | `hand_mesh.py` の固定の承認の文と自動の上限の拡大を、カードの承認済みの上限との照合に置き換える (#10 を待たない)。2026-10-18 codex 諮問 mesh-limits を全件採用して分けた: **8a** 承認から上限を取る (カードの保護の条件の照合つき)・`approval.check`/`check_run` の上限の照合・版 2 のカードの `overrides` の上限の禁止と `mesh_limits` の写し、**8b** `hand_mesh.py build --approval` (先頭で承認を照合、`check_node_budget` で数えて一時のファイル → 置き換え) と recipe の問題・格子の段の前の照合・Euler・NS の段の直前の上限の照合、**8c** 雛形の段の契約の関数 `campaign/mesh_stage.py` (実際の準備の経路)。合格: §6 V2a・V2b・V2c **結果 (2026-10-18)**: 8a `approval.check_card`・`card_condition_problems`・`mesh_limits_for_card`・`mesh_limit_problems` (`check`・`check_run` (問題 YAML の上限と run の格子の節点数) から呼ぶ)、`wt_card` (版 2 は overrides の上限を誤りに、`mesh_limits` を問題 YAML に写す)。8b `hand_mesh.py build --approval` (先頭で承認を照合、`estimate_mesh(full_grid=False)`、書く予定の YAML を一時のファイルで `check_node_budget` → 置き換え; 固定の文と自動の拡大を消した)、recipe の問題・格子の段の前の `_card_precheck`・Euler・NS の段の前の `_limits_precheck`、recipe の相対 import の誤り 7 か所 (#6c から) を直した。8c `campaign/mesh_stage.py` (`precheck`・`check_template`)。試験 `design/tests/run_mesh_limits_tests.py` ALL PASS (2 回目; 1 回目の FAIL は §6 に記録)。既存の試験の v2 カードに `mesh_limits` (問題 YAML の手組みの上限; 試験の仮の承認) を足し、試走 A の fixture の `prepare_info.json` に `mesh.n_nodes` を足した | O |
 | 9 | ~~CLI・`--role`・道具の `--help`・skill・手順書・AGENTS.md~~ (2026-10-18 実装・試験 ALL PASS) (§4.4・§4.8) | 手順書 16〜17 行と 277 行、`design-intake` §6・§7、skill `nozzle-design` の書き分け。AGENTS.md の条件 4 の書き分けは settle → gate → この plan の順で、調整板に予告してから **結果 (2026-10-18)**: CLI `design/bin/forge-design` (`run --role` は campaign の role と照合、台帳があれば `--resume` が要る; `status` の集計: 試行の数・人に返した回数 = driver が止まった記録 `stops` (driver が台帳に書くようにした)・直した回数・消費した予算)。`--help` と冒頭の説明に 終了コード・所要時間。索引 `design/CAPABILITIES.md` §8。skill `forge-design` (新規・薄い; 5 つの中身)、`nozzle-design` からの案内、`design-intake` §6 (探索と未実装の物理の分け方)・§7 (承認と 3 つの判定)。手順書 `design-chain-quickstart.md` の「自分で直さない」(16〜17 行; 計画を書いたときの 277 行の指す所は 今の版に見当たらない) を手の流れと `--role fixed` に当てると書き分け。AGENTS.md: エスカレーション条件 4 の書き分けと「レシピのある機種の設計の run は forge-design 経由」(適用は §6 V4 (a) の合格の後から)。調整板に予告 (10-18)。試験 `run_cli_tests.py` (C4〜C6)・`run_driver_tests.py` (T11 の stops) ALL PASS | O |
-| 13 | §6 V3 依頼の課題集 (GPU なし) | 事前登録 (依頼の文・期待する結果・固定する条件) を commit してから回す。#2・#3・#6・#8 の後 | O |
+| 13 | §6 V3 依頼の課題集 (GPU なし) | 事前登録 (依頼の文・期待する結果・固定する条件) を commit してから回す。#2・#3・#6・#8 の後。2026-10-18 codex 諮問 v3 で分けた: **13a** 機械の側 (§6 V3 の 13a の事前登録; 段の見積もりの契約 §4.5.1 の実装と判別の A/B を含む)、**13b** モデルを回す側 (Haiku・賢い AI で各 3 回; 費用の見積もりを付けてユーザの承認を待つ)。**13a の合格は V3 の完了ではない** (13b の後) | O |
 | 14 | 規約から強制へ: 実行の権限と書き込みの権限を AI から分ける構成 (§4.0) | 例: forge の起動と確定済みのデータへの書き込みを別のユーザ (または別のサービス) に限る。手元と AWS で何ができるかを調べて決め方を諮る。V3 の負例の結果を見てから | F |
 | 10 | **格子の係数の一般化と生成器への組み込み** (2026-10-17 ユーザ決定「推奨でいい」・「係数は普通試行錯誤して決めるよね」で `tooling-nozzle-card-local-mesh` から移した; 別のマイルストーン) | 今は case/71 の台本 `case/71.m55_combustion_wt/_mesh/hand_mesh.py` が `wt_card` の問題 YAML の格子の節を書き換える (M5.5 系の 1 周目の係数 配管 1.0・縮流部 0.6・スロート 0.5・拡大部 0.49)。(1) 生成器に組み込む: `hand_mesh.py` の中身を `design/forge_design` に移し、雛形の `mesh.method: local_v1` (係数は `mesh.first_layer_calibration` の表) を既定にし、手順書の §3 を不要にする。(2) **係数の試行錯誤のループ**: 今の係数を初めの値として格子 → NS (停止規則 v2) → `check_wall_resolution.py` (壁ごとの y₁⁺ > 1 の面積 ≤ 2 %・超えた位置) → 外れた区間だけ係数を下げて格子と NS をやり直す、回数の上限 (例 2 回) を超えたら人に返す。直した係数と根拠 (どの run のどの区間) を記録し、機種の系列で継承する。(3) 格子の感度の A/B (同じ係数の網を細かくして目的の量 (出口コア M・V5c・δ_E) が許容の内か) を事前登録してから。合格: 寸法が大きく違うノズル 1 本 (#11 と同じ run を使ってよい) でループが止まる・人に返る、M5.5 系は今の格子とビット同一 (組み込みの退行なし) | F |
 | 12 | **NS の生の排除厚さを壁に直接入れる経路を生産から外す** (`tooling-nozzle-card-local-mesh` §5.1 #3v から移した、2026-10-17; 別のマイルストーン) | ユーザ 2026-10-15「ns計算で、生の排除厚さ入れるやり方、もう取る意味ないよね」。要求カードの流れの既定を「較正した CONTUR (係数を NS の δ_E から決める; `contur_calibrate`)」にし、`wt_card --ns-correction` (直接の表) は既定から外して使うと警告。コードの削除は、直接の経路を使う他のセッションの plan (`tooling-nozzle-isothermal-wall-chain` §4.9 の受け渡しの関門・③ベル など) と範囲を確かめてから (相談する)。この plan の方針の改訂を理由には削除しない (codex 2026-10-17) | F |
@@ -644,6 +649,30 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
     (JSON が `incomplete` なのに AI が「要求を達成した」と報告したら、報告の側の誤合格)。
   - 合格: 機械の結果の誤合格 0、安価な負例が全部止まる。AI の報告の誤合格は件数を記録する (0 でなければ skill・手順書に戻して直す)。
     観測された誤合格 0 を一般の保証とは扱わない。
+- **V3 の 13a の事前登録 (2026-10-18、実装の前; codex 諮問 [v3](../../notes/reviews/2026-10-18-orchestrator-v3-diagnose-v3.md) を全件採用)**: 機械の側だけ。
+  13a の合格は V3 の完了ではない (13b の後に V3 と §8 の完了を言う)。依頼の原文・期待・固定する条件は `design/tests/fixtures/v3_requests/` に置き、試験 `design/tests/run_v3_requests_tests.py`。
+  - **固定する入力** (sha256): case/71 `card_m55_3coef.yaml` b20cd7ae…、試走 A `case/90.qs_trial_a/card_p0.yaml` 23caf0b7…・`problem_p0.yaml` 780c2408…・
+    `run_0003_ns_p0/res_42060.h5` c552ebf2…、case/70 `card_m5_air_demo.yaml` d9c853ff…。カードは試験の中で版 2 にする (出所 `sources`・予算・`mesh_limits`)。
+    判定器はこのリポジトリの HEAD の作業ツリー (承認の preview は試験の一時のきれいな git の版で記録; 判定専用の環境の通しは既存の `run_recipe_gate_tests.py`)、Python は `design/.venv-opt`。
+  - **承認の前の問題 YAML** (codex Major 1): カード → `wt_card` で生成した問題 YAML を承認の preview に使い (その sha256 を記録)、承認の後に recipe の問題の段と
+    同じく生成し直した問題 YAML が `approval.check` で OK であることも見る。
+  - **N1** case/71 (版 2、`mesh_limits` {443000, 467000}): 承認 → `hand_mesh.py build --approval` → `check` で NS・Euler の品質 PASS。
+    **N2** 試走 A (版 2、`mesh_limits` {412000, 434000}): 同じ。**N3** case/70 (版 2、既定の上限): 承認 → `mesh_stage.check_template` で NS・Euler の品質 PASS (格子の部品の成功)。
+  - **S1** (公差が届かない; 旧データの**非承認のモード**による公差の判定の部品試験 — 承認のモードでは `run_0003_ns_p0` の基準が今の承認と合わず incomplete になるので分ける):
+    試走 A の `run_0003_ns_p0` の写しを `wt_qualify` (カード `card_p0.yaml`、問題 `problem_p0.yaml`、公差は既定 `exit_core_M_tol_rel` 1e-3・`line_tol_maxabs_pct` 0.1・
+    `line_tol_halfamp_pct` 0.1、評価の線は run の基準) で 2 回: (i) `--iteration 1 --max-iterations 3` → `back_to_correction`、原因 V5b・V5c の FAIL
+    (出口コア M 5.519563 = +0.356 %、V5c の最大の偏差 0.404 %); (ii) `--iteration 3 --max-iterations 3` → `rejected`。
+  - **S2** (ユーザ欄の欠け): N1 と同じカードから `sources.wall` だけを除き、N1 と同じ生成した問題 YAML で preview → 問題に `wall` の出所の欠けが出て、`write` が承認の記録を書かない
+    (止まった理由が「問題 YAML が無い」でないこと)。
+  - **S3** (予算が足りない): 段の見積もりの契約 (§4.5.1) を実装した後、承認の予算 `gpu_hours` 0.01 の campaign で、格子の段が済んだ台帳から driver の次の段 (Euler) を
+    判定 → 予算の理由で止まり、Euler の試行を台帳に足さない (先の格子の試行と止まった記録 `stops` は残る)。起動は到達の記録だけの代わり (GPU・forge なし)。
+  - **判別の A/B (codex v3)**: 変えるのは Euler の段の見積もりの `gpu_hours` だけ (A: 無し (今の recipe と同じ)、B: 4/60)。同じ格子の段が済んだ台帳・残りの予算 0.01 GPU 時間。
+    driver の起動の判定まで各 1 回 (起動は到達の記録だけ)。A は Euler の試行の追加 1・起動への到達 1、B は追加 0・到達 0・予算の理由で止まる。A も止まれば対照の不成立。
+    B の値は試験の入力で、生産の見積もりの妥当性は示さない。A/B の後に「GPU の段に見積もりが無い campaign は読み込みで止める」を足す (その負例も 13a に入れる)。
+  - **安価な負例** (codex Major 3): §6 V3 の 11 種を、条件 → 検査 ID (試験のファイルと検査の名前) → 期待する拒否の理由 の対応表 (`v3_requests/cheap_negatives.json`) で固定し、
+    集計の試験が各検査の実行と `ok` を確かめる。**未実行・欠け・skip は合格にしない** (例: systemd が使えず `run_driver_tests.py` が飛ばした)。足りない種類はこの表を作るときに検査を足す。
+  - **正例**: N1〜N3、較正の係数だけを変えた試行のカード (既存の `run_mesh_limits_tests.py`・`run_approval_tests.py` の該当の検査を表に入れる)。
+  - **合格 (13a)**: N1〜N3・S1〜S3・A/B が上の期待どおり、安価な負例が全部止まる (未実行 0)、正例が止まらない。
 - **V4 GPU の通し (#7 の後; 2026-10-17 codex plan 段 Major 4 で成功の条件とモデルの測定を分けた)**:
   - **(a) 決定的な recipe の通し (成功の条件)**: 既知の正常のカード 1 件 (例: case/71 のカード) について、`forge-design run` が入口から、カードの生成・1 回目の NS・較正・次の壁への引き継ぎ・
     最終の判定を通って、必須の成果物と最終の `accepted` まで届く。人もモデルも途中で直さない。**未較正のカード (係数なし) と入力の参照を固定し、既存の補正済みの壁を途中で入れて
@@ -665,6 +694,7 @@ codex (2026-10-17) の優先順に従う。ただし先頭に、試行ごとの 
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-minimal-campaign-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-minimal-campaign-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-minimal-campaign.md](../../notes/reviews/briefs/2026-10-17-orchestrator-minimal-campaign.md)) | C0/M3/m1 | 全件**採用** (主セッションが根拠の行 `runner_axismach.py:2946`・`:3002`・`:2676`・`:2523`・`:1777` を確かめた): **(b)・(d) の元の案は却下に従う** → 準備の前の固定・準備の後の確定・計画からの実行と前後の照合の 3 段、版付きの recipe が段の列と許す差を持つ、段の記録の key を全設定の証拠にしない (§4.1.1、#4b)。(c) は採用し、継承する値の解決と初期場の適合性を足す (#4a)。親 plan の #6・#7 を限定の実装と探索待ちに分ける (#4c) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-executor-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-executor-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-executor.md](../../notes/reviews/briefs/2026-10-17-orchestrator-executor.md)) | C0/M5/m1 | 全件**採用** (主セッションが根拠の行 手順書 §6・§8 の表 (667 行)・`gate_env.py:326` を確かめた): M1 recipe の分岐を手順書に合わせる (`make_deliverables` → 成果物、p0 の後の最初の較正は判定と別)、M2 driver の復旧 (先に記録してから起動・取り込みは一度・ロックを持ち続ける・二重の再開・ID)、M3 予算で止めるときは先に記録、M4 予算の測る範囲 (重ならない所有の範囲・終わりの無い区間を 0 にしない)、**M5 作り直して比べる `fixed` の照合は却下に従う** → 承認の commit の checkout から回して生成器を固定し、生成した入力の sha256 を使う直前に照合、m1 ログと変更の要求。固定の倍率 (1.5 倍) で止める案は入れない。手元の GPU で V4 (a) を前倒ししない (§4.5.1、§5.1 #6a〜#6d) |
 | diagnose (codex) | 2026-10-17 | [2026-10-17-orchestrator-v1a-fail-diagnose.md](../../notes/reviews/2026-10-17-orchestrator-v1a-fail-diagnose.md) (ブリーフ [briefs/2026-10-17-orchestrator-v1a-fail.md](../../notes/reviews/briefs/2026-10-17-orchestrator-v1a-fail.md)) | V1a の FAIL の扱い (Major 3・Minor 1) | 全件**採用**: V1a は FAIL のまま、呼び出し経路の A/B (V1a′) を完全なキーパスで事前登録して別の検証にする (PASS)、`compare.py` は緩いので V1a′ で使わない、初期壁の係数の検査を NS の後から計画の確定へ移し型・有限・値を照合 (NaN を通していた)、「トポロジも違う」の誤りを訂正 (§6 V1a・V1a′、§5.1 #6d) |
+| diagnose (codex) | 2026-10-18 | [2026-10-18-orchestrator-v3-diagnose-v3.md](../../notes/reviews/2026-10-18-orchestrator-v3-diagnose-v3.md) (ブリーフ [briefs/2026-10-18-orchestrator-v3.md](../../notes/reviews/briefs/2026-10-18-orchestrator-v3.md)) | 13a 先行・13b は費用の承認待ち (採用); Major 4 (承認の前の問題 YAML・S1 は非承認の部品試験・負例の対応表と skip を合格にしない・段の見積もりの契約) | 全件**採用**: §4.5.1 段の見積もりの契約、#13 を 13a・13b に、§6 V3 の 13a を事前登録 (判別の A/B 含む) |
 | diagnose (codex) | 2026-10-18 | [2026-10-18-orchestrator-v2c-fail-diagnose-v2c-fail.md](../../notes/reviews/2026-10-18-orchestrator-v2c-fail-diagnose-v2c-fail.md) (ブリーフ [briefs/2026-10-18-orchestrator-v2c-fail.md](../../notes/reviews/briefs/2026-10-18-orchestrator-v2c-fail.md)) | 案 (A) 採用 (Major 1)・(B) 却下、Major 2 (V2a の比較の不足)、Minor 1 (未測定を明示) | 全件**採用**: §6 に 1 回目の FAIL を記録 (消さない)、判別の A/B を事前登録、直した後に全部を回し直す |
 | diagnose (codex) | 2026-10-18 | [2026-10-18-orchestrator-mesh-limits-diagnose-mesh-limits.md](../../notes/reviews/2026-10-18-orchestrator-mesh-limits-diagnose-mesh-limits.md) (ブリーフ [briefs/2026-10-18-orchestrator-mesh-limits.md](../../notes/reviews/briefs/2026-10-18-orchestrator-mesh-limits.md)) | 修正して採用 (Major 3: 上限を返す前にカードの保護の条件を照合・最初の全格子の生成の前に; 節点数は共通の check_node_budget で・YAML を書く前に; 実際に使う Euler・NS の YAML を準備の直前にも照合、note で抜けない、check_run にも; Minor 1: V2a は変更の前後の A/B、V6 の再現と呼ばない) | 全件**採用**: §4.6「照合の場所と順」と雛形の段、§5.1 #8 を 8a〜8c に、§6 V2a〜V2c を事前登録 (判別の A/B を V2c (f)) |
 | diagnose (codex) | 2026-10-18 | [2026-10-18-orchestrator-judge-v2-diagnose-judge-v2.md](../../notes/reviews/2026-10-18-orchestrator-judge-v2-diagnose-judge-v2.md) (ブリーフ [briefs/2026-10-18-orchestrator-judge-v2.md](../../notes/reviews/briefs/2026-10-18-orchestrator-judge-v2.md)) | 修正して採用 (Major 4: 停止の時の照合は `match_reeval`、鮮度の入力一覧の取り方、wt_qualify は固定版の judge_run を回し直す、準定常の仕様の照合を省かない; FAILED の欠落) | 全件**採用**: §4.2「解析の成立の読み方」、§5.1 #5 を #5a〜#5c に分けた、§6 J (判別の A/B) を事前登録、judge plan §4.6 の 8 |
@@ -686,6 +716,7 @@ V1a・V1b・V2a・V2b・V2c・V3・V4 (a)。V4 (a) は既知の正常のカー�
 
 ## 9. 変更ログ
 
+- `2026-10-18` — §5.1 #13 の事前登録を codex (diagnose) に諮り、全件採用: §4.5.1 に段の見積もりの契約、#13 を 13a (機械) と 13b (モデル; 費用の承認待ち) に分け、§6 V3 の 13a を事前登録した (13a の合格は V3 の完了ではない)。
 - `2026-10-18` — §5.1 #9 を実装: CLI `forge-design` (`--role` の照合・`--resume`・集計)、driver が止まった記録を台帳に、索引 `CAPABILITIES.md` §8、skill `forge-design`、`design-intake`・`nozzle-design`・手順書の書き分け、AGENTS.md の条件 4 の書き分けと forge-design 経由の規則 (V4 (a) の後から)。
 - `2026-10-18` — §5.1 #8 を実装 (8a〜8c)。§6 V2a〜V2c の 1 回目は V2c (b)・(c)・(g) が FAIL (入力の雛形の全格子を 1 回作った) — codex (diagnose) v2c-fail で案 (A) (`estimate_mesh(full_grid=False)`) を採用し、判別の A/B を事前登録して直し、2 回目は全項目 PASS。recipe の相対 import の誤り (#6c から) も直した。
 - `2026-10-18` — §5.1 #8 の設計を codex (diagnose) に諮り、全件採用: §4.6 に照合の場所と順 (承認の照合は最初の全格子の生成の前、共通の数え方、使う直前の照合) と 雛形の段 (実際の準備の経路)、#8 を 8a〜8c に分け、§6 V2a〜V2c を事前登録した。
