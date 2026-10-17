@@ -95,9 +95,10 @@ try:
     r = GE.check(apath)
     check("(P1) check が OK (sparse checkout を作る)", r["status"] == "OK" and Path(r["checkout"]) == co, str(r["problems"])[:300])
     sz = sum(f.stat().st_size for f in co.rglob("*") if f.is_file() and ".git" not in f.parts)
-    check("(P1) checkout は design・solver_density_cuda/tools・data だけ (50 MB 未満)",
+    case_dirs = sorted(str(p.relative_to(co)) for p in (co / "case").rglob("*") if p.is_dir()) if (co / "case").exists() else []
+    check("(P1) checkout は design・solver_density_cuda/tools・data と recipe の格子の台本だけ (50 MB 未満)",
           sz < 50e6 and (co / "design" / "forge_design").is_dir() and (co / "solver_density_cuda" / "data" / "species").is_dir()
-          and not (co / "case").exists(), f"{sz / 1e6:.1f} MB")
+          and case_dirs == ["case/71.m55_combustion_wt", "case/71.m55_combustion_wt/_mesh"], f"{sz / 1e6:.1f} MB {case_dirs}")
     pr = GE.probe(apath)
     check("(P2) probe: import の元が checkout の中、印の検査が通る",
           pr["status"] == "OK" and pr["forge_design"].startswith(str(co)) and pr["assert"]["commit"] == head,
