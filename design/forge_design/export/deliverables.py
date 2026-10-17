@@ -10,6 +10,12 @@ r"""風洞ノズルの成果物一式を最終 NS の run から書き出す (pl
 - `excel/`  形状表・CFD 壁面量表 (状態つき)・条件・`.xlsx` (壁温分布の run は壁温の表も)
 - `DIMENSIONS.json` 寸法の出荷ゲート (§4.2a)、`MANIFEST.json` (sha256・検査の数値・飛ばしたものと理由)、`README.md`
 
+`MANIFEST.json` の `provenance` は成果物の生成元の記録 (plan tooling-nozzle-card-local-mesh §5.1 #6b、2026-10-17 codex result 3 回目
+Major: 別の run の成果物を `wt_qualify` に渡すと accepted になった): 生成元の run の壁 (`wall_repr.json`)・格子 (solverConfig の
+`mesh.meshFileName`、無ければ `nozzle.h5`)・設定 (`solverConfig.yaml`・`bcondConfig.yaml`) の sha256、場 (CFD 壁面量表に使った step の
+`res_<step>.h5` と壁ダンプの sha256)、停止規則の状態 (`STOP_RULE_STATE.json` の method・status・stop_step)、カードと問題 YAML の sha256。
+`wt_qualify` はこれを評価の対象と内容で照合する (同じ定義の `run_identity`・`field_identity`・`stop_identity` を使う)。
+
 入力が欠けた成果物は飛ばして理由を MANIFEST に書く (黙って欠けさせない)。寸法ゲートが FAIL なら MANIFEST の `verdict` を FAIL にし、
 README の冒頭に書く (書き出しは止めない — 何が外れたかを見せるため)。壁温分布の run は、run の正本 (`wall_temperature_profile.json`・
 `wall_profile_<id>.csv`) が `prepare_info.json` の sha256 と合わなければ何も書かずに止める (plan tooling-nozzle-wall-temperature-profile §4.2)。
@@ -59,6 +65,102 @@ def _sha(p: Path) -> str:
 
 def _jsonable(o):
     return json.loads(json.dumps(o, default=lambda v: v.tolist() if isinstance(v, np.ndarray) else float(v)))
+
+
+# ------------------------------------------------------------------ 生成元の記録 (MANIFEST.json の provenance)
+PROVENANCE_FORMAT = "forge.deliverables.provenance/v1"
+PROVENANCE_CONFIGS = ("solverConfig.yaml", "bcondConfig.yaml")
+WALL_FILE = "wall_repr.json"
+
+
+def _sha_file(p: Path) -> str | None:
+    """1 MiB ずつ読む sha256 (格子・全場の h5 は 100〜200 MB)。ファイルが無ければ None (照合できない)。"""
+    p = Path(p)
+    if not p.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for b in iter(lambda: f.read(1 << 20), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _mesh_file(run: Path) -> Path:
+    """run の格子 h5: solverConfig.yaml の mesh.meshFileName (読めなければ nozzle.h5)。"""
+    import yaml
+    try:
+        m = (yaml.safe_load((Path(run) / "solverConfig.yaml").read_text()) or {}).get("mesh") or {}
+        name = m.get("meshFileName") if isinstance(m, dict) else None
+    except (OSError, ValueError, AttributeError, yaml.YAMLError):
+        name = None
+    return Path(run) / (str(name) if name else "nozzle.h5")
+
+
+def run_identity(run) -> dict:
+    """run の壁・格子・設定の内容 (sha256; 置き場所・run の名前は入れない)。成果物の生成元の記録と `wt_qualify` の照合が同じ定義を使う。
+    無いファイルは sha256 None (照合できない)。"""
+    run = Path(run)
+    m = _mesh_file(run)
+    return {"wall": {"file": WALL_FILE, "sha256": _sha_file(run / WALL_FILE)},
+            "mesh": {"file": m.name, "sha256": _sha_file(m)},
+            "config": {n: _sha_file(run / n) for n in PROVENANCE_CONFIGS}}
+
+
+def field_identity(run, step) -> dict:
+    """全場 `res_<step>.h5` の step と sha256 (無ければ None)。"""
+    p = Path(run) / f"res_{int(step)}.h5"
+    return {"step": int(step), "file": p.name, "sha256": _sha_file(p)}
+
+
+def stop_identity(run) -> dict | None:
+    """停止規則の状態 (`STOP_RULE_STATE.json`) の method・status・stop_step。ファイルが無ければ None、読めなければ error を入れる。"""
+    from ..evaluate import stop_rule as SR
+    p = Path(run) / SR.STATE
+    if not p.is_file():
+        return None
+    try:
+        s = json.loads(p.read_text())
+    except (OSError, ValueError) as e:
+        return {"file": SR.STATE, "error": f"読めない ({e})", "method": None, "status": None, "stop_step": None}
+    return {"file": SR.STATE, "method": s.get("method", "v1" if s.get("version") == 1 else None), "status": s.get("status"),
+            "stop_step": s.get("stop_step") if isinstance(s.get("stop_step"), int) else None}
+
+
+def provenance_record(run, field_step=None, wall_dumps=(), card=None, problem=None, field_source=None, field_why=None) -> dict:
+    """成果物の生成元の記録 (MANIFEST.json の `provenance`)。field_step は成果物が使った場の step (CFD 壁面量表の step;
+    無ければ None と field_why)、wall_dumps はその表が読んだ壁ダンプのファイル名。カード・問題 YAML は書き出しに渡したもの (無ければ None)。"""
+    run = Path(run)
+    rec = {"format": PROVENANCE_FORMAT,
+           "how": ("成果物を作った run の入力の sha256。wt_qualify が評価の対象 (評価の場の step と sha256、壁・格子・設定、カード・"
+                   "問題 YAML) と内容で照合する (置き場所・run の名前は見ない; plan tooling-nozzle-card-local-mesh §5.1 #6b)"),
+           "run_name": run.name, **run_identity(run)}
+    if field_step is None:
+        rec["field"] = None
+        rec["field_why"] = field_why or "成果物が場を使っていない"
+    else:
+        f = field_identity(run, field_step)
+        f["source"] = field_source
+        f["wall_dumps"] = {str(n): _sha_file(run / str(n)) for n in wall_dumps}
+        rec["field"] = f
+    rec["stop_rule"] = stop_identity(run)
+    if rec["field"] is not None and rec["stop_rule"] is not None:
+        rec["field"]["is_stop_step"] = rec["stop_rule"].get("stop_step") == rec["field"]["step"]
+    rec["card"] = None if card is None else {"path": str(Path(card).resolve()), "sha256": _sha_file(Path(card))}
+    rec["problem"] = None if problem is None else {"path": str(Path(problem).resolve()), "sha256": _sha_file(Path(problem))}
+    return rec
+
+
+def _export_provenance(run: Path, log, card, problem) -> dict:
+    """書き出しの記録 (log) から、成果物が使った場 (excel の CFD 壁面量表の step と壁ダンプ) を取り出して生成元の記録を作る。"""
+    ex = log.parts.get("excel") or {}
+    cfd = ex.get("cfd") if isinstance(ex, dict) else None
+    if isinstance(cfd, dict) and isinstance(cfd.get("step"), (int, np.integer)):
+        dumps = [w["file"] for w in (cfd.get("walls") or {}).values() if isinstance(w, dict) and w.get("file")]
+        return provenance_record(run, int(cfd["step"]), dumps, card, problem,
+                                 field_source="excel の CFD 壁面量表 (wall_tables.cfd_wall_table) の step と壁ダンプ")
+    why = ("CFD 壁面量表を作っていない (excel: "
+           + str(log.skipped.get("excel") or log.errors.get("excel") or (cfd if isinstance(cfd, str) else "記録なし")) + ")")
+    return provenance_record(run, None, (), card, problem, field_why=why)
 
 
 class _Log:
@@ -693,7 +795,14 @@ def _readme(run: Path, out: Path, man: dict, wtp: dict | None = None) -> str:
         L += ["## 飛ばしたもの", ""] + [f"- `{k}`: {v}" for k, v in man["skipped"].items()] + [""]
     if man["errors"]:
         L += ["## 失敗したもの", ""] + [f"- `{k}`: {v}" for k, v in man["errors"].items()] + [""]
-    L += ["## 出典", "", f"- run: `{run}`", f"- 作成: {man['created']}、forge_design の git commit `{man.get('git_commit')}`", ""]
+    L += ["## 出典", "", f"- run: `{run}`", f"- 作成: {man['created']}、forge_design の git commit `{man.get('git_commit')}`"]
+    pv = man.get("provenance") or {}
+    if pv:
+        fl = pv.get("field") or {}
+        L.append(f"- 生成元の記録: `MANIFEST.json` の `provenance` (壁・格子・設定・場 "
+                 + (f"step {fl.get('step')} (`{fl.get('file')}`)" if fl else f"なし ({pv.get('field_why')})")
+                 + "・カード・問題 YAML の sha256)。`wt_qualify` は評価の対象とこれを内容で照合する")
+    L.append("")
     return "\n".join(L)
 
 
@@ -742,6 +851,8 @@ def export(run_dir, out_dir=None, card=None, step=None, skip=(), freecadcmd=None
             "coord": wtp["rec"]["coord"],
             "fluent_profile": (log.parts.get("fluent") or {}).get("wall_temperature_profile")
             or f"作っていない ({log.skipped.get('fluent') or log.errors.get('fluent') or '理由不明'})"}
+    # 生成元の記録 (wt_qualify が評価の対象と内容で照合する; plan tooling-nozzle-card-local-mesh §5.1 #6b、codex result 3 回目 Major)
+    man["provenance"] = _export_provenance(run, log, card, problem)
     man = _jsonable(man)
     (out / "MANIFEST.json").write_text(json.dumps(man, indent=1, ensure_ascii=False))
     (out / "README.md").write_text(_readme(run, out, man, wtp))

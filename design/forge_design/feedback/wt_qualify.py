@@ -37,6 +37,12 @@ rejected → escalate、incomplete → make_deliverables (流れの判定はす�
     (accepted にも自動の較正し直しにもしない)。
   - 寸法の関門と成果物: `<run>/deliverables/` の `DIMENSIONS.json` (verdict PASS、カードを渡したらその sha256 と一致) と `MANIFEST.json`
     (verdict PASS・失敗/飛ばした部品なし・必要な部品 `deliverables.PARTS` がそろい・列挙したファイルの sha256 が一致)。無ければ ABSENT。
+    **成果物の生成元の照合** (plan §5.1 #6b の続き、2026-10-17 codex result 3 回目 Major: run_0014 の評価に run_0010 の成果物を渡すと
+    accepted になった): MANIFEST.json の `provenance` (生成元の run の壁・格子・設定、場の step と sha256・壁ダンプ、停止の step、カード・
+    問題 YAML の sha256) を今の評価の対象 (評価の場の step と `res_<step>.h5`、run の壁・格子・設定、渡したカード・問題 YAML) と内容で
+    照合する (`provenance_check`; 置き場所・run の名前は見ない — 別の置き場所への写しは中身が同じなら通す)。一致しない・生成元の記録が
+    無い (古い成果物)・照合できない → 成果物 INDETERMINATE・寸法の関門も INDETERMINATE (その成果物の寸法はこの run の判定にしない)。
+    結果は incomplete (次の手は既存の規則どおり escalate; 理由に作り直しを書く)。run の名前の不一致は警告のまま (合否は内容の照合で決める)。
 
 公差・窓の出所 (どれを使ったかを記録の `tolerances.*.source` に書く; 上が優先):
   1. CLI (`--exit-tol-rel`・`--line-eta`・`--line-x-range-m X0 X1`・`--line-tol-maxabs`・`--line-tol-halfamp`)
@@ -554,8 +560,81 @@ def wall_resolution(run_dir, step: int, out_txt=None, stop_step=None) -> dict:
     return out
 
 
-def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=()) -> dict:
-    """成果物 (MANIFEST.json) と寸法の関門 (DIMENSIONS.json)。status: PASS / FAIL / INDETERMINATE / ABSENT。"""
+PROV_FIX = "この run から成果物を作り直す (python -m forge_design.export.deliverables <run> --card <カード> --problem <問題 YAML>)"
+
+
+def _cmp_sha(name: str, recorded, current, mism: list, unchk: list, compared: dict) -> None:
+    """記録と今の sha256 を比べて、違えば mism、どちらかが無ければ unchk に理由を足す (compared に両方を残す)。"""
+    compared[name] = {"recorded": recorded, "current": current}
+    if recorded is None or current is None:
+        unchk.append(f"{name} の sha256 が" + ("生成元の記録" if recorded is None else "今の評価の対象") + "に無い (照合できない)")
+    elif recorded != current:
+        mism.append(f"{name} の sha256 が違う (成果物の生成元 {str(recorded)[:16]}…、今の評価の対象 {str(current)[:16]}…)")
+
+
+def provenance_check(run_dir, man: dict, field: dict | None, card_path=None, problem_path=None) -> dict:
+    """成果物の生成元の記録 (MANIFEST.json の `provenance`) と今の評価の対象の照合 (plan §5.1 #6b の続き、2026-10-17 codex result
+    3 回目 Major)。比べるのは内容 (sha256) と step だけ — 壁・格子・設定 (`deliverables.run_identity`)、評価の場 (`field` の step と
+    `res_<step>.h5` の sha256、生成元が読んだ壁ダンプ)、停止の step (`deliverables.stop_identity`)、カード・問題 YAML (両方に無ければ
+    比べるものが無いので一致、片方だけなら照合できない)。
+    status: MATCH / MISMATCH (どれかが違う) / ABSENT (生成元の記録が無い古い成果物) / UNCHECKABLE (照合できない)。"""
+    from ..export import deliverables as DV
+    run_dir = Path(run_dir)
+    pv = man.get("provenance") if isinstance(man, dict) else None
+    rec = {"tool": "design/forge_design/feedback/wt_qualify.py provenance_check (deliverables.run_identity・field_identity・stop_identity と同じ定義)"}
+    if not isinstance(pv, dict):
+        rec.update(status="ABSENT", problems=["成果物に生成元の記録 (MANIFEST.json の provenance) が無い (古い成果物; 生成元の run・場を確かめられない)"])
+        return rec
+    if pv.get("format") != DV.PROVENANCE_FORMAT:
+        rec.update(status="UNCHECKABLE", problems=[f"生成元の記録の書式 {pv.get('format')!r} が {DV.PROVENANCE_FORMAT} でない (照合できない)"])
+        return rec
+    mism, unchk, cmp_ = [], [], {}
+    cur = DV.run_identity(run_dir)
+    _cmp_sha(f"壁 ({cur['wall']['file']})", (pv.get("wall") or {}).get("sha256"), cur["wall"]["sha256"], mism, unchk, cmp_)
+    _cmp_sha(f"格子 ({cur['mesh']['file']})", (pv.get("mesh") or {}).get("sha256"), cur["mesh"]["sha256"], mism, unchk, cmp_)
+    for n in DV.PROVENANCE_CONFIGS:
+        _cmp_sha(f"設定 ({n})", (pv.get("config") or {}).get(n), cur["config"][n], mism, unchk, cmp_)
+    pf = pv.get("field")
+    if not isinstance(field, dict) or not isinstance(field.get("step"), int):
+        unchk.append("評価の場の step が渡されていない (照合できない)")
+    elif not isinstance(pf, dict) or not isinstance(pf.get("step"), int):
+        unchk.append(f"生成元の場の記録が無い ({pv.get('field_why') or '理由の記録なし'}; 照合できない)")
+    else:
+        cmp_["場の step"] = {"recorded": pf["step"], "current": int(field["step"])}
+        if pf["step"] != int(field["step"]):
+            mism.append(f"場の step が違う (成果物の生成元 {pf['step']}、評価の場 {int(field['step'])})")
+        else:
+            fi = DV.field_identity(run_dir, int(field["step"]))
+            _cmp_sha(f"場 ({fi['file']})", pf.get("sha256"), fi["sha256"], mism, unchk, cmp_)
+        wd = pf.get("wall_dumps")
+        if not isinstance(wd, dict) or not wd:
+            unchk.append("生成元が読んだ壁ダンプの記録が無い (照合できない)")
+        else:
+            for n, s in sorted(wd.items()):
+                _cmp_sha(f"壁ダンプ ({n})", s, DV._sha_file(run_dir / n), mism, unchk, cmp_)
+    ps = (pv.get("stop_rule") or {}).get("stop_step") if isinstance(pv.get("stop_rule"), dict) else None
+    cs = (DV.stop_identity(run_dir) or {}).get("stop_step")
+    cmp_["停止の step"] = {"recorded": ps, "current": cs}
+    if ps != cs:
+        mism.append(f"停止の step が違う (成果物の生成元 {ps}、今の run {cs})")
+    for nm, rp, p in (("カード", pv.get("card"), card_path), ("問題 YAML", pv.get("problem"), problem_path)):
+        rs = rp.get("sha256") if isinstance(rp, dict) else None
+        cs_ = None if p is None else DV._sha_file(Path(p))
+        if rp is None and p is None:
+            cmp_[nm] = {"recorded": None, "current": None, "note": "書き出し・評価のどちらにも渡していない"}
+            continue
+        _cmp_sha(nm, rs, cs_, mism, unchk, cmp_)
+    rec["compared"] = cmp_
+    rec["recorded_run_name"] = pv.get("run_name")
+    rec["status"] = "MISMATCH" if mism else "UNCHECKABLE" if unchk else "MATCH"
+    rec["problems"] = mism + unchk
+    return rec
+
+
+def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(), field=None, problem_path=None) -> dict:
+    """成果物 (MANIFEST.json) と寸法の関門 (DIMENSIONS.json)。status: PASS / FAIL / INDETERMINATE / ABSENT。
+    field (評価の場 {step, ...})・problem_path (評価に渡した問題 YAML) は生成元の照合 (`provenance_check`) に使う。照合が MATCH で
+    なければ成果物と寸法の関門を INDETERMINATE にする (2026-10-17 codex result 3 回目 Major)。"""
     from ..export.deliverables import PARTS
     run_dir = Path(run_dir)
     od = Path(deliv_dir) if deliv_dir is not None else run_dir / "deliverables"
@@ -605,10 +684,23 @@ def deliverables_check(run_dir, deliv_dir=None, card_path=None, optional_parts=(
         probs.append("MANIFEST.json に files_sha256 が無い")
     warns = []
     if man.get("run") and Path(str(man["run"])).name != run_dir.name:
+        # 名前は警告だけ (合否は下の生成元の照合 = 内容で決める; 別の置き場所への写しは名前が違っても中身が同じなら通す)
         warns.append(f"MANIFEST の run {man.get('run')} がこの run ({run_dir.name}) と名前が違う")
     rec.update(status="PASS" if not probs and not dprobs else "FAIL", problems=probs, warnings=warns,
                manifest={"verdict": man.get("verdict"), "created": man.get("created"), "git_commit": man.get("git_commit"),
                          "n_files": len(man.get("files_sha256") or {})})
+    # 生成元の照合 (2026-10-17 codex result 3 回目 Major): 一致しなければ、その成果物の中身 (ファイルの sha256・寸法の関門) が正しくても
+    # この run の成果物・寸法の判定にしない (寸法の FAIL を補正 (寸法の解き直し) にも回さない)
+    pv = provenance_check(run_dir, man, field, card_path, problem_path)
+    rec["provenance"] = pv
+    if pv["status"] != "MATCH":
+        what = {"ABSENT": "の記録が無い (古い成果物)", "MISMATCH": "が今の評価の対象と一致しない",
+                "UNCHECKABLE": "を今の評価の対象と照合できない"}.get(pv["status"], f" {pv['status']}")
+        rec["problems"] = probs + [f"生成元: {p}" for p in pv["problems"]]
+        rec["dimensions"].update(status="INDETERMINATE", status_before_provenance=rec["dimensions"]["status"],
+                                 why=f"成果物の生成元{what} — この寸法の関門はこの run の判定にしない")
+        rec.update(status="INDETERMINATE", status_before_provenance=rec["status"],
+                   why=f"成果物の生成元{what} ({pv['status']}): " + "; ".join(pv["problems"])[:800] + f" — {PROV_FIX}")
     return rec
 
 
@@ -715,6 +807,11 @@ def decide(flow: dict, v5b: dict, v5c: dict, wr: dict, dl: dict, *, iteration=No
         if dl.get("status") == "ABSENT":
             missing.append("成果物 (deliverables) が無い — 流れの判定はすべて合格")
             nxt = "make_deliverables" if flow.get("status") == "PASS" else "escalate"
+        elif dl.get("status") == "INDETERMINATE" and dl.get("why"):
+            # 読めない・生成元が一致しない・記録が無い・照合できない (2026-10-17 codex result 3 回目 Major): 次の手は今までの規則
+            # (ABSENT 以外は escalate) のまま、理由 (why) に作り直しを書く
+            missing.append(f"成果物をこの run の判定に使えない ({dl['why']}; 寸法 {dim_status})")
+            nxt = "escalate"
         else:
             missing.append(f"成果物が不完全 ({dl.get('problems') or dl.get('why')}; 寸法 {dim_status})")
             nxt = "escalate"
@@ -775,7 +872,7 @@ def qualify(run_dir, card=None, problem=None, *, prev_run=None, delta_next=None,
     # 2026-10-17 codex result 2 回目 M1)
     line_guarantee(v5c, monitored_line(flow, v5c), fld, flow, run_dir, Md, series_dir)
     wr = wall_resolution(run_dir, fld["step"], wall_txt, stop_step=flow.get("stop_step"))
-    dl = deliverables_check(run_dir, deliverables, card, optional_parts)
+    dl = deliverables_check(run_dir, deliverables, card, optional_parts, field=fld, problem_path=problem)
     checks = {"flow": flow, "V5b": v5b, "V5c": v5c, "wall_resolution": wr, "deliverables": dl}
     dec = decide(flow, v5b, v5c, wr, dl, iteration=iteration, max_iterations=max_iterations,
                  rule_fn=lambda: recalibration_rule(run_dir, v5b, v5c, flow, delta_next=delta_next, prev_run=prev_run,
@@ -840,7 +937,8 @@ def summary_lines(rec: dict) -> list[str]:
         L.append(f"V5c → {v5c['verdict']} ({v5c.get('why')})")
     L.append(f"壁解像 → {wr['verdict']} ({wr.get('verdict_line')})" + (f" — 判定不能: {wr.get('why')}" if wr.get("tool_verdict") else ""))
     L.append(f"計算の成立 → {fl['status']}" + (f" ({fl.get('why')})" if fl.get("why") else ""))
-    L.append(f"寸法の関門 → {dl.get('dimensions', {}).get('status')}・成果物 → {dl['status']}" + (f" ({dl.get('why')})" if dl.get("why") else ""))
+    L.append(f"寸法の関門 → {dl.get('dimensions', {}).get('status')}・成果物 → {dl['status']}"
+             + (f"・生成元 → {dl['provenance']['status']}" if dl.get("provenance") else "") + (f" ({dl.get('why')})" if dl.get("why") else ""))
     for m in rec["missing"]:
         L.append(f"欠け: {m}")
     rr = rec.get("recalibration_rule")

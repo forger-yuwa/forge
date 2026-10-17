@@ -9,6 +9,11 @@
      CENSORED・再評価が SETTLED でない → FAIL。結び付かない・状態のファイルだけ (本物の照合)・v2 の基準があるのに状態が無い → INDETERMINATE
      (§5.1 #7a の続き、codex result 2 回目 M1)。状態が無い旧い run → UNVERIFIED、v1 の REACHED → PASS。bound_lines・monitored_line。
  (4) 成果物と寸法の関門: そろって PASS、ファイルの改変・部品の欠け・寸法の FAIL・別のカード → FAIL、無ければ ABSENT、無くてよい部品の指定。
+ (4p) 成果物の生成元の照合 (plan §5.1 #6b の続き、2026-10-17 codex result 3 回目 Major): MANIFEST.json の provenance と今の評価の対象を
+     内容で照合。記録が無い (古い成果物) → ABSENT、記録の sha256 を 1 つ変えた写し (壁・格子・設定 2 つ・場・壁ダンプ・カード・問題 YAML)・
+     書き出しの後に run の壁・全場・設定が変わった・評価の場の step が違う・停止の step が違う → MISMATCH、評価の場・カード・問題 YAML を
+     渡さない・生成元の場の記録が無い・壁ダンプの記録が空・書式が違う → UNCHECKABLE。どれも成果物と寸法の関門 INDETERMINATE
+     (寸法 FAIL の成果物でも寸法の補正にしない → incomplete・escalate)。別の置き場所への写し (名前も違う・中身は同じ) は MATCH・PASS。
  (5) 結果と次の手 (`decide`): accepted・成果物待ち (make_deliverables)・計算の成立を確かめていない・判定不能・反復の上限 (rejected)・
      壁の形だけの補正 (規則で recalibrate / escalate)・壁解像や寸法を含む補正 (escalate、規則は評価しない)。
  (6) 較正し直しの規則 (合成の run): (a)〜(e) をそろえて recalibrate、1 つずつ欠くと escalate (前の run が無い・前の更新で誤差が増えた・
@@ -29,6 +34,10 @@
      2 回目 M1: メモリ上で基準の読み取り値だけ η 0.06・基準のファイルを書き換えた写し (η・流量の閾値)・停止の時の判定の記録の無い写し
      → incomplete (修正前は accepted)。2 回目 M2: bcond に一度もダンプの無い壁を足した写しで --groups 無し → 判定不能・2 (修正前は PASS・0)。
      試走 A (case/90 run_0003_ns_p0・run_0005_ns_p1、読むだけ) の計算の成立は停止の時の判定と結び付いて PASS。
+     3 回目 Major (2026-10-17): run_0014 を自分の成果物 (生成元の記録つき; 2026-10-17 に作り直した `deliverables/`) で評価 → accepted、
+     その写しを別の置き場所に置いても accepted。run_0010 の成果物 (古い成果物) を渡す → incomplete・終了コード 4 (修正前は accepted・0)、
+     run_0010 の成果物に新しい道具の生成元の記録を足した写し → MISMATCH (壁・格子・設定・場の step・停止の step)、作り直す前の
+     run_0014 の成果物 (`_deliverables_pre_provenance/`) → ABSENT、記録の格子の sha256 を 1 つ変えた写し → MISMATCH (どれも incomplete)。
 使い方: design/.venv-opt/bin/python design/tests/run_wt_qualify_tests.py  (終了コード 0 全合格 / 1 不合格 / 2 実データを飛ばした)
 """
 import hashlib
@@ -212,44 +221,162 @@ with tempfile.TemporaryDirectory() as td:
 # ------------------------------------------------------------------ (4) 成果物と寸法の関門
 print("== (4) 成果物と寸法の関門")
 with tempfile.TemporaryDirectory() as td:
+    import shutil
     td = Path(td)
     run = td / "run_x"
     run.mkdir()
     card = td / "card.yaml"
     card.write_text("M_exit: 5.5\n")
+    prob = td / "problem.yaml"
+    prob.write_text("spec: {r_throat: 0.1}\n")
     check("(4) 成果物が無い → ABSENT", WQ.deliverables_check(run, None, card)["status"] == "ABSENT")
+    from forge_design.export import deliverables as DV
     from forge_design.export.deliverables import PARTS
+    # 生成元の照合 (2026-10-17 codex result 3 回目 Major) に使う run の中身 (壁・格子・設定・全場・壁ダンプ・停止規則の状態; 中身は sha256 だけ見る)
+    (run / "wall_repr.json").write_text('{"physical_wall_repr": "single_bspline"}')
+    (run / "solverConfig.yaml").write_text('mesh: {meshFileName: "nozzle.h5"}\n')
+    (run / "bcondConfig.yaml").write_text("wall: {physID: 3, kind: wall_isothermal}\n")
+    for nm_ in ("nozzle.h5", "res_100.h5", "res_wall_3_100.h5", "res_200.h5", "res_wall_3_200.h5"):
+        (run / nm_).write_bytes(nm_.encode() * 10)
+    (run / "STOP_RULE_STATE.json").write_text(json.dumps({"method": "v2", "status": "REACHED", "stop_step": 100}))
+    FLD = {"step": 100, "res": "res_100.h5"}
     od = run / "deliverables"
     (od / "cad").mkdir(parents=True)
     (od / "cad" / "wall.step").write_text("STEP")
     dim = {"format": "forge.dimension_gate/v1", "verdict": "PASS", "items": {"L_div": {"pass": True}}, "card": "card.yaml", "card_sha256": sha(card)}
     (od / "DIMENSIONS.json").write_text(json.dumps(dim))
     man = {"run": str(run), "verdict": "PASS", "failed_parts": [], "parts": {p: {"ok": True} for p in PARTS}, "skipped": {}, "errors": {},
-           "files_sha256": {"DIMENSIONS.json": sha(od / "DIMENSIONS.json"), "cad/wall.step": sha(od / "cad" / "wall.step")}}
+           "files_sha256": {"DIMENSIONS.json": sha(od / "DIMENSIONS.json"), "cad/wall.step": sha(od / "cad" / "wall.step")},
+           "provenance": DV.provenance_record(run, 100, ["res_wall_3_100.h5"], card, prob)}
     (od / "MANIFEST.json").write_text(json.dumps(man))
-    r = WQ.deliverables_check(run, None, card)
-    check("(4) そろって PASS (寸法の関門 PASS・カードの sha256 一致)", r["status"] == "PASS" and r["dimensions"]["status"] == "PASS", f"{r.get('problems')}")
+
+    def dchk(card_=card, field=FLD, prob_=prob, **kw):
+        return WQ.deliverables_check(run, None, card_, field=field, problem_path=prob_, **kw)
+
+    r = dchk()
+    check("(4) そろって PASS (寸法の関門 PASS・カードの sha256 一致・生成元 MATCH)", r["status"] == "PASS" and r["dimensions"]["status"] == "PASS"
+          and r["provenance"]["status"] == "MATCH", f"{r.get('problems')}")
     other = td / "other.yaml"
     other.write_text("M_exit: 6.0\n")
-    r = WQ.deliverables_check(run, None, other)
-    check("(4) 寸法の関門が別のカードで判定された → 寸法 FAIL", r["dimensions"]["status"] == "FAIL", f"{r['dimensions']['problems']}")
+    # 寸法の関門のカードの照合 (DIMENSIONS.json の card_sha256) は生成元の照合と別に残る: 生成元の記録のカードが other の成果物
+    # (書き出しには other を渡したのに DIMENSIONS.json は card で判定された) を other で評価すると、生成元は一致・寸法は FAIL
+    man_o = dict(man, provenance=DV.provenance_record(run, 100, ["res_wall_3_100.h5"], other, prob))
+    (od / "MANIFEST.json").write_text(json.dumps(man_o))
+    r = dchk(card_=other)
+    check("(4) 寸法の関門が別のカードで判定された (生成元は一致) → 寸法 FAIL", r["dimensions"]["status"] == "FAIL"
+          and r["provenance"]["status"] == "MATCH", f"{r['dimensions']['problems']}")
+    (od / "MANIFEST.json").write_text(json.dumps(man))
+    # 2026-10-17 から: 生成元 (card) と違うカード (other) で評価すると生成元の照合で止まり、寸法は INDETERMINATE (前は寸法 FAIL →
+    # 寸法の解き直しの補正に回った; 別のカードで作った成果物の寸法はこの評価の判定にしない)
+    r = dchk(card_=other)
+    check("(4) 生成元のカードと違うカードで評価 → 生成元 MISMATCH・成果物と寸法の関門 INDETERMINATE (寸法の FAIL にしない)",
+          r["status"] == "INDETERMINATE" and r["dimensions"]["status"] == "INDETERMINATE" and r["provenance"]["status"] == "MISMATCH"
+          and r["dimensions"]["status_before_provenance"] == "FAIL" and any("カード" in p for p in r["provenance"]["problems"]), r.get("why"))
     (od / "cad" / "wall.step").write_text("STEP changed")
-    r = WQ.deliverables_check(run, None, card)
+    r = dchk()
     check("(4) 列挙したファイルが改変された → FAIL", r["status"] == "FAIL" and any("sha256" in p for p in r["problems"]), f"{r['problems']}")
     (od / "cad" / "wall.step").write_text("STEP")
     man["parts"].pop("fluent")
     man["skipped"] = {"fluent": "--skip で指定"}
     (od / "MANIFEST.json").write_text(json.dumps(man))
-    r = WQ.deliverables_check(run, None, card)
+    r = dchk()
     check("(4) 必要な部品が欠けた → FAIL", r["status"] == "FAIL" and any("fluent" in p for p in r["problems"]))
-    r = WQ.deliverables_check(run, None, card, optional_parts=("fluent",))
+    r = dchk(optional_parts=("fluent",))
     check("(4) 無くてよい部品に指定すれば PASS", r["status"] == "PASS", f"{r.get('problems')}")
     dim["verdict"] = "FAIL"
     (od / "DIMENSIONS.json").write_text(json.dumps(dim))
     man["files_sha256"]["DIMENSIONS.json"] = sha(od / "DIMENSIONS.json")
     (od / "MANIFEST.json").write_text(json.dumps(man))
-    r = WQ.deliverables_check(run, None, card, optional_parts=("fluent",))
+    r = dchk(optional_parts=("fluent",))
     check("(4) 寸法の関門の FAIL → 寸法 FAIL", r["dimensions"]["status"] == "FAIL")
+    dim["verdict"] = "PASS"
+    (od / "DIMENSIONS.json").write_text(json.dumps(dim))
+    man["files_sha256"]["DIMENSIONS.json"] = sha(od / "DIMENSIONS.json")
+    man["parts"]["fluent"] = {"ok": True}
+    man["skipped"] = {}
+    (od / "MANIFEST.json").write_text(json.dumps(man))
+
+    # ---- (4p) 生成元の照合 (plan §5.1 #6b の続き、2026-10-17 codex result 3 回目 Major) ----
+    import copy as _copy
+
+    def with_man(m):
+        (od / "MANIFEST.json").write_text(json.dumps(m))
+
+    def bad(r, status):
+        return r["status"] == "INDETERMINATE" and r["dimensions"]["status"] == "INDETERMINATE" and r["provenance"]["status"] == status
+
+    with_man({k: v for k, v in man.items() if k != "provenance"})
+    r = dchk()
+    check("(4p) 生成元の記録の無い古い成果物 → 生成元 ABSENT・成果物と寸法 INDETERMINATE・理由に作り直し", bad(r, "ABSENT")
+          and "作り直す" in r["why"] and r["status_before_provenance"] == "PASS", r.get("why"))
+    for nm_, path_ in (("壁 (wall_repr.json)", ("wall", "sha256")), ("格子 (nozzle.h5)", ("mesh", "sha256")),
+                       ("設定 (solverConfig.yaml)", ("config", "solverConfig.yaml")), ("設定 (bcondConfig.yaml)", ("config", "bcondConfig.yaml")),
+                       ("場 (res_100.h5)", ("field", "sha256")), ("壁ダンプ", ("field", "wall_dumps", "res_wall_3_100.h5")),
+                       ("カード", ("card", "sha256")), ("問題 YAML", ("problem", "sha256"))):
+        m2 = _copy.deepcopy(man)
+        d_ = m2["provenance"]
+        for k in path_[:-1]:
+            d_ = d_[k]
+        d_[path_[-1]] = "0" * 64
+        with_man(m2)
+        r = dchk()
+        check(f"(4p) 記録の {nm_} の sha256 を 1 つ変えた写し → 生成元 MISMATCH・INDETERMINATE", bad(r, "MISMATCH")
+              and len(r["provenance"]["problems"]) == 1 and nm_.split(" ")[0] in r["provenance"]["problems"][0], r["provenance"]["problems"])
+    with_man(man)
+    for nm_, fn in (("壁 (wall_repr.json)", "wall_repr.json"), ("全場 res_100.h5", "res_100.h5"), ("設定 bcondConfig.yaml", "bcondConfig.yaml")):
+        keep = (run / fn).read_bytes()
+        (run / fn).write_bytes(keep + b"\n")
+        r = dchk()
+        (run / fn).write_bytes(keep)
+        check(f"(4p) 書き出しの後に run の {nm_} が変わった → MISMATCH", bad(r, "MISMATCH"), r["provenance"]["problems"])
+    r = dchk(field={"step": 200, "res": "res_200.h5"})
+    check("(4p) 評価の場の step (200) が生成元 (100) と違う → MISMATCH", bad(r, "MISMATCH")
+          and any("場の step" in p for p in r["provenance"]["problems"]), r["provenance"]["problems"])
+    keep = (run / "STOP_RULE_STATE.json").read_text()
+    (run / "STOP_RULE_STATE.json").write_text(json.dumps({"method": "v2", "status": "REACHED", "stop_step": 200}))
+    r = dchk()
+    (run / "STOP_RULE_STATE.json").write_text(keep)
+    check("(4p) 今の run の停止の step (200) が生成元の記録 (100) と違う → MISMATCH", bad(r, "MISMATCH")
+          and any("停止の step" in p for p in r["provenance"]["problems"]), r["provenance"]["problems"])
+    for nm_, kw in (("評価の場を渡さない", {"field": None}), ("評価にカードを渡さない (生成元はカードあり)", {"card_": None}),
+                    ("評価に問題 YAML を渡さない (生成元はあり)", {"prob_": None})):
+        r = dchk(**kw)
+        check(f"(4p) {nm_} → 照合できない (UNCHECKABLE)・INDETERMINATE", bad(r, "UNCHECKABLE"), r["provenance"]["problems"])
+    for nm_, edit in (("生成元の場の記録が無い (CFD 壁面量表を作っていない)", lambda m: m["provenance"].update(field=None, field_why="試験")),
+                      ("生成元の壁ダンプの記録が空", lambda m: m["provenance"]["field"].update(wall_dumps={})),
+                      ("生成元の記録の書式が違う", lambda m: m["provenance"].update(format="forge.deliverables.provenance/v0"))):
+        m2 = _copy.deepcopy(man)
+        edit(m2)
+        with_man(m2)
+        r = dchk()
+        check(f"(4p) {nm_} → UNCHECKABLE・INDETERMINATE", bad(r, "UNCHECKABLE"), r["provenance"]["problems"])
+    m2 = _copy.deepcopy(man)
+    m2["provenance"].update(card=None, problem=None)
+    with_man(m2)
+    r = dchk(card_=None, prob_=None)
+    check("(4p) カード・問題 YAML を書き出しにも評価にも渡していない → その 2 つは比べるものが無い (ほかは一致で MATCH)",
+          r["provenance"]["status"] == "MATCH" and r["provenance"]["compared"]["カード"]["recorded"] is None, r["provenance"]["problems"])
+    with_man(man)
+    # 別の置き場所への写し (run の名前も置き場所も違う・中身は同じ) は内容で一致 → PASS (名前の違いは警告だけ)
+    run_c = td / "elsewhere" / "run_copy"
+    shutil.copytree(run, run_c)
+    od_c = td / "deliv_copy"
+    shutil.copytree(od, od_c)
+    r = WQ.deliverables_check(run_c, od_c, card, field=FLD, problem_path=prob)
+    check("(4p) run と成果物を別の置き場所に写した (名前も違う・中身は同じ) → 生成元 MATCH・PASS、名前の違いは警告だけ",
+          r["status"] == "PASS" and r["provenance"]["status"] == "MATCH" and any("名前が違う" in w for w in r["warnings"]), r.get("problems"))
+    # 寸法の関門が FAIL の成果物でも、生成元が一致しなければ寸法の補正 (back_to_correction) に回さない
+    dim["verdict"] = "FAIL"
+    (od / "DIMENSIONS.json").write_text(json.dumps(dim))
+    m2 = _copy.deepcopy(man)
+    m2["files_sha256"]["DIMENSIONS.json"] = sha(od / "DIMENSIONS.json")
+    m2["provenance"]["mesh"]["sha256"] = "0" * 64
+    with_man(m2)
+    r = dchk()
+    d_ = WQ.decide({"status": "PASS"}, {"verdict": "PASS"}, {"verdict": "PASS"}, {"verdict": "PASS"}, r)
+    check("(4p) 寸法 FAIL の成果物でも生成元が一致しなければ寸法 INDETERMINATE → decide は incomplete・escalate (寸法の補正にしない)",
+          bad(r, "MISMATCH") and r["dimensions"]["status_before_provenance"] == "FAIL" and (d_["result"], d_["next"]) == ("incomplete", "escalate")
+          and not d_["corrections"] and any("作り直す" in m_ for m_ in d_["missing"]), f"{d_['result']} {d_['next']} {d_['corrections']}")
 
 # ------------------------------------------------------------------ (5) 結果と次の手
 print("== (5) 結果と次の手 (decide)")
@@ -296,6 +423,9 @@ calls.clear()
 check("(5) 壁解像 FAIL を含む補正 → back_to_correction / escalate (規則は評価しない)",
       dec(fP, Fa, P, Fa, dA, rule_fn=rule(True)) == ("back_to_correction", "escalate") and calls == [])
 check("(5) 寸法の関門 FAIL → back_to_correction / escalate", dec(fP, P, P, P, dDF, rule_fn=rule(True)) == ("back_to_correction", "escalate"))
+dI = {"status": "INDETERMINATE", "why": "成果物の生成元が今の評価の対象と一致しない — 作り直す", "dimensions": {"status": "INDETERMINATE"}}
+check("(5) 成果物の生成元が一致しない (成果物・寸法 INDETERMINATE; 2026-10-17 codex result 3 回目 Major) → incomplete / escalate "
+      "(ABSENT 以外は escalate の既存の規則)", dec(fP, P, P, P, dI, rule_fn=rule(True)) == ("incomplete", "escalate"))
 r = WQ.decide(fP, P, P, P, dA)
 check("(5) 反復の上限を渡さなければ「判定していない」と記録", r["iteration"]["evaluated"] is False and "判定していない" in r["iteration"]["note"])
 
@@ -396,8 +526,12 @@ for nm, run, kw, M_want, flow_want in cases:
                           "--exit-tol-rel", "5e-4", "--line-tol-halfamp", "0.05"])
         check("(7) run_0011: CLI の終了コード 3 (escalate、旧の公差)", rc == 3, err.getvalue()[-200:])
     else:
-        check("(7) run_0010: 寸法の関門・成果物 PASS (手元の deliverables)", c["deliverables"]["status"] == "PASS"
-              and c["deliverables"]["dimensions"]["status"] == "PASS", f"{c['deliverables'].get('problems')}")
+        # 2026-10-17 から (codex result 3 回目 Major): 手元の run_0010 の成果物は生成元の記録 (MANIFEST.json の provenance) を書く前の
+        # 古い成果物なので、生成元 ABSENT → 成果物・寸法の関門は INDETERMINATE (前は PASS)。成果物の中身の照合と寸法の関門は今どおり PASS
+        dv_ = c["deliverables"]
+        check("(7) run_0010: 手元の deliverables は生成元の記録の無い古い成果物 → 成果物・寸法の関門 INDETERMINATE (中身の照合・寸法は PASS)",
+              dv_["status"] == "INDETERMINATE" and dv_["provenance"]["status"] == "ABSENT" and dv_["status_before_provenance"] == "PASS"
+              and dv_["dimensions"]["status"] == "INDETERMINATE" and dv_["dimensions"]["status_before_provenance"] == "PASS", f"{dv_.get('problems')}")
     # (7′) 新しい既定 (V5b ±0.1 %・V5c 片振幅 0.1 %; 2026-10-16 ユーザ決定) では同じ run の V5b・V5c が PASS
     tols_new = {k: v for k, v in (kw.get("cli_tols") or {}).items() if k not in OLD_TOLS}
     with tempfile.TemporaryDirectory() as td:
@@ -571,7 +705,8 @@ else:
         check("(9) 正しい呼び方 (停止の step 46171・監視の線 η 0.03) は今どおり accepted・V5c PASS (停止規則の監視)・壁解像 PASS (wall/3@46171)",
               rec["result"] == "accepted" and c["V5c"]["verdict"] == "PASS" and "series" not in c["V5c"]["steadiness"]
               and c["wall_resolution"]["verdict"] == "PASS" and c["wall_resolution"]["evaluated"] == [{"name": "wall", "physID": 3, "step": 46171}]
-              and round(c["V5c"]["maxabs_pct"], 6) == 0.062305 and round(c["V5c"]["halfamp_pct"], 6) == 0.057285,
+              and round(c["V5c"]["maxabs_pct"], 6) == 0.062305 and round(c["V5c"]["halfamp_pct"], 6) == 0.057285
+              and c["deliverables"]["provenance"]["status"] == "MATCH",
               f"{rec['result']} / {rec['missing']}")
         check("(9) 正しい呼び方: 計算の成立は停止の時の判定 (SETTLE_VERDICT.json) と結び付いて PASS、監視の線は停止の時の基準の η 0.03 (SETTLED)",
               c["flow"]["status"] == "PASS" and c["flow"]["binding"]["pass"] and c["flow"]["binding"]["verdict_file"] == "SETTLE_VERDICT.json"
@@ -667,6 +802,79 @@ else:
         r = subprocess.run([sys.executable, cwr, str(run), "--step", "46171", "--groups", "wall", "--weight", "area"], capture_output=True, text=True)
         check("(9) check_wall_resolution --step 46171 --groups wall → PASS・0・EVALUATED: wall/3@46171 (今どおり)",
               r.returncode == 0 and "VERDICT: PASS" in r.stdout and "EVALUATED: wall/3@46171" in r.stdout, r.stdout.strip().splitlines()[-1])
+    # ---- 3 回目 Major (2026-10-17 codex result): 成果物の生成元と評価の対象の照合 ----
+    # 修正前は MANIFEST の中のファイルの sha256 だけを見て、生成元 (run・壁・格子・場) を見なかったので、run_0014 の評価に run_0010 の
+    # 成果物 (生成元 run_0010・step 86000・CFD の表は status diagnostic) を渡すと accepted・成果物 PASS だった
+    from forge_design.export import deliverables as DV  # noqa: E402
+    R10 = C71 / "run_0010_ns_b0"
+    OLD14 = R14 / "_deliverables_pre_provenance"
+    NEW14 = R14 / "deliverables"
+
+    def link_deliv(src, dst, edit=None):
+        """成果物の写し (ファイルは symlink、MANIFEST.json だけ実体で edit で書き換える)。元の成果物には書かない。"""
+        for f in sorted(Path(src).rglob("*")):
+            if not f.is_file():
+                continue
+            t = Path(dst) / f.relative_to(src)
+            t.parent.mkdir(parents=True, exist_ok=True)
+            if f.name == "MANIFEST.json":
+                m = json.loads(f.read_text())
+                if edit is not None:
+                    edit(m)
+                t.write_text(json.dumps(m, ensure_ascii=False))
+            else:
+                t.symlink_to(f.resolve())
+        return Path(dst)
+
+    pv14 = json.loads((NEW14 / "MANIFEST.json").read_text()).get("provenance")
+    if pv14 is None or not (R10 / "deliverables" / "MANIFEST.json").is_file() or not (OLD14 / "MANIFEST.json").is_file():
+        SKIPPED.append(f"(9) 3 回目 Major: 生成元の記録つきの成果物 ({NEW14})・run_0010 の成果物・作り直す前の成果物 ({OLD14}) のどれかが無い")
+    else:
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            run = copy14(td / "r")
+            common = dict(wall_txt=td / "wr.txt", series_dir=td)
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=NEW14, **common)
+            dv_ = rec["checks"]["deliverables"]
+            check("(9) 3 回目 Major の正例: run_0014 を自分の成果物 (生成元の記録つき) で評価 → 生成元 MATCH・成果物 PASS・accepted",
+                  rec["result"] == "accepted" and dv_["status"] == "PASS" and dv_["provenance"]["status"] == "MATCH"
+                  and pv14["field"]["step"] == 46171 and pv14["field"]["is_stop_step"] is True, f"{rec['result']} / {dv_.get('why')}")
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=link_deliv(NEW14, td / "elsewhere" / "deliv"), **common)
+            check("(9) 3 回目 Major: 成果物を別の置き場所に写した (中身は同じ) → 生成元 MATCH・accepted",
+                  rec["result"] == "accepted" and rec["checks"]["deliverables"]["provenance"]["status"] == "MATCH", rec["result"])
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                rc = WQ.main([str(run), "--card", str(CARD), "--problem", str(PROB14), "--deliverables", str(R10 / "deliverables"), "--no-write"])
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=R10 / "deliverables", **common)
+            c = rec["checks"]
+            check("(9) 3 回目 Major の再現: run_0014 (停止 46171) の評価に run_0010 の成果物 (生成元の記録が無い古い成果物) → 生成元 ABSENT・"
+                  "成果物と寸法 INDETERMINATE・incomplete・escalate・CLI の終了コード 4 (修正前は accepted・0)",
+                  rec["result"] == "incomplete" and rec["next"] == "escalate" and rc == 4 and c["deliverables"]["status"] == "INDETERMINATE"
+                  and c["deliverables"]["provenance"]["status"] == "ABSENT" and c["deliverables"]["dimensions"]["status"] == "INDETERMINATE"
+                  and c["flow"]["status"] == "PASS" and c["V5b"]["verdict"] == "PASS" and c["V5c"]["verdict"] == "PASS"
+                  and c["wall_resolution"]["verdict"] == "PASS" and any("作り直す" in m_ for m_ in rec["missing"]),
+                  f"{rec['result']} / {rec['next']} / rc {rc}")
+            prov10 = DV.provenance_record(R10, 86000, ["res_wall_3_86000.h5"], CARD, PROB14,
+                                          field_source="試験: 新しい道具で run_0010 から作ったときと同じ記録")
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=link_deliv(R10 / "deliverables", td / "d10",
+                                                                        lambda m: m.update(provenance=prov10)), **common)
+            pr = rec["checks"]["deliverables"]["provenance"]
+            want = ("壁 (wall_repr.json)", "格子 (nozzle.h5)", "設定 (solverConfig.yaml)", "設定 (bcondConfig.yaml)", "場の step", "停止の step")
+            check("(9) 3 回目 Major: run_0010 の成果物に新しい道具の生成元の記録 (run_0010・step 86000) を足した写し → 壁・格子・設定 2 つ・"
+                  "場の step・停止の step が違う (MISMATCH)・incomplete (カード・問題 YAML は同じ)",
+                  rec["result"] == "incomplete" and pr["status"] == "MISMATCH" and all(any(w in p_ for p_ in pr["problems"]) for w in want)
+                  and not any(p_.startswith(("カード", "問題 YAML")) for p_ in pr["problems"]), pr["problems"])
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=OLD14, **common)
+            check("(9) 3 回目 Major: run_0014 自身の作り直す前の成果物 (_deliverables_pre_provenance、生成元の記録が無い) → ABSENT・incomplete "
+                  "(修正前は accepted)",
+                  rec["result"] == "incomplete" and rec["checks"]["deliverables"]["provenance"]["status"] == "ABSENT"
+                  and rec["checks"]["deliverables"]["status_before_provenance"] == "PASS", rec["result"])
+            rec = WQ.qualify(run, CARD, PROB14, deliverables=link_deliv(NEW14, td / "d14x",
+                                                                        lambda m: m["provenance"]["mesh"].update(sha256="0" * 64)), **common)
+            pr = rec["checks"]["deliverables"]["provenance"]
+            check("(9) 3 回目 Major: run_0014 の成果物の写しで記録の格子の sha256 を 1 つ変えた → MISMATCH (違いは格子だけ)・incomplete",
+                  rec["result"] == "incomplete" and pr["status"] == "MISMATCH" and len(pr["problems"]) == 1 and "格子" in pr["problems"][0],
+                  pr["problems"])
 
 for s in SKIPPED:
     print("skip " + s)
