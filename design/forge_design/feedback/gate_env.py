@@ -35,8 +35,10 @@ from pathlib import Path
 
 GATE_ROOT_ENV = "FORGE_GATE_ROOT"
 DEFAULT_GATE_ROOT = Path.home() / ".cache" / "forge-gates"
-CODE_DIRS = ("design/forge_design", "solver_density_cuda/tools", "solver_density_cuda/data")   # 未追跡・ignored のファイルを見る所
-CHECKOUT_PATHS = ("design", "solver_density_cuda/tools", "solver_density_cuda/data")   # sparse checkout に入れる所 (data は物性の DB)
+CODE_DIRS = ("design/forge_design", "solver_density_cuda/tools", "solver_density_cuda/data",
+             "case/71.m55_combustion_wt/_mesh")    # 未追跡・ignored のファイルを見る所
+CHECKOUT_PATHS = ("design", "solver_density_cuda/tools", "solver_density_cuda/data",   # sparse checkout に入れる所 (data は物性の DB)
+                  "case/71.m55_combustion_wt/_mesh")      # recipe axismach.wt_card_chain/v1 の格子の台本 (役割 fixed が承認の commit から回す)
 MARK_ENV, CHECKOUT_ENV = "FORGE_GATE_ENV", "FORGE_GATE_CHECKOUT"
 PASS_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ")   # 判定に渡してよい環境変数 (道具の選択は下の TOOLS で決める)
 SAFE_PATH = "/usr/local/bin:/usr/bin:/bin"

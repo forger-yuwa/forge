@@ -170,6 +170,30 @@ class Driver:
                 return {"status": "human", "why": f"試行 {a['id']} の unit も状態も無い (記録 {a['state']}) — 完了の証拠が無い"}
         return None
 
+    def _check_run_env(self) -> dict | None:
+        """走らせる環境 (forge の実行ファイル・変換器など; recipe の run_env) を初回に台帳へ写し、再開では同じかを確かめる。"""
+        fn = getattr(self.recipe, "run_env", None)
+        if fn is None:
+            return None
+        now = fn()
+        rec = self.L.doc.get("run_env")
+        if rec is None:
+            self.L.doc["run_env"] = now
+            self.L.save()
+            return None
+        diff = [k for k in set(rec) | set(now) if (rec.get(k) or {}).get("value") != (now.get(k) or {}).get("value")
+                or (rec.get(k) or {}).get("sha256") != (now.get(k) or {}).get("sha256")]
+        if diff:
+            return {"status": "human", "why": f"走らせる環境が台帳を作ったときと違う {sorted(diff)} (同じ環境で再開する)"}
+        return None
+
+    def _sync_readme(self) -> None:
+        try:
+            from .readme import sync_runs
+            sync_runs(Path(self.campaign["case_dir"]), self.L.doc)
+        except Exception as e:  # noqa: BLE001 — README の同期の失敗は記録して続ける (run の判定には効かない)
+            self._log(f"README の同期に失敗: {type(e).__name__}: {e}")
+
     def _log(self, msg: str):
         line = f"{_now()} {msg}"
         print(line, flush=True)
@@ -189,6 +213,9 @@ class Driver:
             apr = json.loads(Path(self.campaign["approval"]["file"]).read_text())
             bud = (apr.get("protected") or {}).get("budget") or {}
             self.L.init(self.campaign, {"gpu_hours": float(bud.get("gpu_hours", 0.0)), "disk_gb": float(bud.get("disk_gb", 0.0))})
+            h = self._check_run_env()
+            if h:
+                return h
             h = self.reconcile()
             if h:
                 return h
@@ -222,12 +249,23 @@ class Driver:
                     return {"status": "human", "why": f"試行 {a['id']} の待ちで照会に失敗"}
                 st = self._ingest(a, spec)
                 res = self.recipe.interpret(spec, self.L.attempt(a["id"]), st)
+                self.L.mark(a["id"], interpretation=res)
+                self._sync_readme()
                 if not res.get("ok"):
                     return {"status": "stopped", "why": res.get("detail"), "attempt": a["id"]}
         finally:
             if self.log:
                 self.log.close()
             self.L.release()
+
+
+def recipe_for(campaign: dict, repo_dir):
+    """campaign の recipe の名前と版から recipe の物を作る (repo_dir: 段の処理を回す checkout の root)。"""
+    rc = campaign["recipe"]
+    if (rc["name"], rc["version"]) == ("axismach.wt_card_chain", "v1"):
+        from .recipes.wt_card_chain import Recipe
+        return Recipe(repo_dir=repo_dir)
+    raise ValueError(f"知らない recipe {rc}")
 
 
 def load_recipe_file(path):
@@ -247,10 +285,8 @@ def main(argv=None) -> int:
     ap.add_argument("--min-free-bytes", type=float, default=200e6)
     ap.add_argument("--stop-timeout", type=int, default=30, help="試行を止めるときの期限 [s] (SIGTERM の後 SIGKILL まで・unit の停止期限)")
     a = ap.parse_args(argv)
-    if a.recipe_file is None:
-        print("driver: campaign の recipe からの解決は #6c (今は --recipe-file だけ)", file=sys.stderr)
-        return 2
-    d = Driver(a.campaign, load_recipe_file(a.recipe_file), systemd=not a.no_systemd, poll_s=a.poll, step_poll_s=a.step_poll,
+    recipe = load_recipe_file(a.recipe_file) if a.recipe_file else recipe_for(CP.load(a.campaign), DESIGN_DIR.parent)
+    d = Driver(a.campaign, recipe, systemd=not a.no_systemd, poll_s=a.poll, step_poll_s=a.step_poll,
                min_free_bytes=a.min_free_bytes, stop_timeout_s=a.stop_timeout)
     r = d.run()
     print(json.dumps({k: v for k, v in r.items() if k != "ledger"}, ensure_ascii=False))

@@ -386,9 +386,9 @@ def preview(card_path, problem_path, repo_dir=None, judge_env: bool = True, judg
             if gate["env"]["python"].get("editable_dists"):
                 probs.append(f"判定の Python に editable の配布物がある {gate['env']['python']['editable_dists']}")
     return {"format": PREVIEW_FORMAT, "plan": PLAN, "created": _dt.datetime.now().isoformat(timespec="seconds"),
-            "card": {"path": str(card_path), "name": card["name"], "format": card["format"], "sha256": sha256_file(card_path),
+            "card": {"path": str(Path(card_path).resolve()), "name": card["name"], "format": card["format"], "sha256": sha256_file(card_path),
                      "text": Path(card_path).read_text()},
-            "problem": None if problem_path is None else {"path": str(problem_path), "sha256": sha256_file(problem_path)},
+            "problem": None if problem_path is None else {"path": str(Path(problem_path).resolve()), "sha256": sha256_file(problem_path)},
             "protected": prot, "protected_sha256": sha256_json(prot), "sources": table, "problems": probs,
             "gate": gate, "gate_sha256": sha256_json(gate)}
 

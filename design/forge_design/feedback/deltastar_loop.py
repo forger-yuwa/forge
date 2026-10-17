@@ -1709,7 +1709,7 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
                        nsteps=None, omega: float = 0.5, cfl_main=None, implicit_relax=None,
                        stages: str = "full", ramp=None, ramp_steps: int = 1000, stop_rule: bool | None = None,
                        allow_not_reached: str | None = None, allow_unconverged: str | None = None,
-                       allow_unsettled: str | None = None) -> dict:
+                       allow_unsettled: str | None = None, ic_file=None, ic_sha256=None, plan_inputs=None) -> dict:
     """pass 0: 積分法 (CONTUR) 初期壁で NS を立て、終了後に受け渡しの関門 (`_after_ns`) を通れば抽出して次 pass 用 delta_r_next.csv まで作る。
     initializer=None なら problem YAML の `deltastar_initializer` (無ければ断熱 contur)。上書きの理由 (`override_reason`) は NS の前に検査する。"""
     from ..evaluate.runner_axismach import prepare_ns, run_staged_ns, collect
@@ -1718,7 +1718,8 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     # thermal_bc は prepare_ns 側で spec.wall_thermal から決める (ここでは model のみ)
     init = initializer if initializer is not None else resolve_integral_initializer(problem)
     info = prepare_ns(problem, run_dir, nsteps=nsteps, ic_from=ic_from, initializer=init,
-                      euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax, stop_rule=stop_rule)
+                      euler_ref=euler_ref, omega=omega, cfl_main=cfl_main, implicit_relax=implicit_relax, stop_rule=stop_rule,
+                      ic_file=ic_file, ic_sha256=ic_sha256)
     info["stages"] = {"stages": stages, "ramp": (list(ramp) if ramp else None), "ramp_steps": ramp_steps}
     (run_dir / "prepare_info.json").write_text(json.dumps(info, indent=1, default=str))
     print(json.dumps({k: info[k] for k in ("throat_physical", "dstar_source", "initializer", "mesh", "nStepOuter", "cfl_main")},
@@ -1726,14 +1727,25 @@ def run_pass0_integral(problem, euler_ref, run_dir, ic_from, initializer=None, p
     print(Path(run_dir, "MESH_QUALITY.txt").read_text().splitlines()[-1], flush=True)
     if prepare_only:
         return info
+    plan = None
+    if plan_inputs is not None:
+        # 実行の計画 (plan tooling-design-orchestrator §4.1.1・§5.1 #4b): 準備の後・起動の前に全段の設定を確定し、計画だけから起動する
+        from ..campaign import plan as EP
+        pin = plan_inputs if isinstance(plan_inputs, dict) else json.loads(Path(plan_inputs).read_text())
+        EP.confirm(run_dir, pin, stages=stages)
+        plan = run_dir
     import time as _t
     t0 = _t.time()
-    rc = run_staged_ns(run_dir, stages=stages, ramp=ramp, ramp_steps=ramp_steps)
+    rc = run_staged_ns(run_dir, stages=stages, ramp=ramp, ramp_steps=ramp_steps, plan=plan)
     print(f"forge rc {rc}  (NS wall time {_t.time() - t0:.0f} s, stages={stages}; 停止の状態 {stop_state(run_dir)['status']})", flush=True)
     m = collect(problem, run_dir)
     m["ns_wall_time_s"] = _t.time() - t0
     (run_dir / "metrics.json").write_text(json.dumps(m, indent=1))
     print(json.dumps(m, indent=1), flush=True)
+    if plan is not None:
+        from ..campaign import plan as EP
+        v = EP.verify_after(run_dir)
+        print(f"実行の計画の照合 (走った後): {v['status']} {v['problems']}", flush=True)
     return _after_ns(run_dir, euler_ref, omega, m, "extract(new)", allow_not_reached, allow_unconverged, problem=problem,
                      allow_unsettled=allow_unsettled)
 
@@ -1818,6 +1830,10 @@ def main(argv=None) -> int:
     ap.add_argument("--run-dir", required=True)
     ap.add_argument("--omega", type=float, default=0.5)
     ap.add_argument("--ic-from", default=None)
+    ap.add_argument("--ic-file", default=None, help="初期場のファイル (res_<N>.h5) を固定する (--init-integral; 実行役が使う; plan tooling-design-orchestrator §5.1 #4a)")
+    ap.add_argument("--ic-sha256", default=None, help="--ic-file の sha256 (計画の値と照合)")
+    ap.add_argument("--plan-inputs", default=None, help="準備の前に固定した入力の JSON (campaign.plan.fixed_inputs)。準備の後に実行の計画を確定し、"
+                                                       "計画だけから起動する (--init-integral; plan tooling-design-orchestrator §5.1 #4b)")
     ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--prepare-only", action="store_true")
     ap.add_argument("--extract-only", action="store_true",
@@ -1902,7 +1918,7 @@ def main(argv=None) -> int:
         res = run_pass0_integral(a.problem, a.euler_ref, a.run_dir, a.ic_from, initializer=init,
                                  prepare_only=a.prepare_only, nsteps=a.steps, omega=a.omega, cfl_main=a.cfl,
                                  implicit_relax=a.implicit_relax, stages=a.stages, ramp=ramp, ramp_steps=a.ramp_steps,
-                                 stop_rule=sr_arg, **gate_kw)
+                                 stop_rule=sr_arg, ic_file=a.ic_file, ic_sha256=a.ic_sha256, plan_inputs=a.plan_inputs, **gate_kw)
         return _gate_rc(res)
     if not a.prev:
         ap.error("--prev が必要 (--init-integral でなければ)")
